@@ -10,7 +10,9 @@ compiles is the kernel the timing plan launches for every cell of its slice.
 
 from __future__ import annotations
 
+import dataclasses
 import json
+import math
 
 import pytest
 
@@ -221,3 +223,115 @@ def test_sweep_kernel_is_the_timed_kernel(arch, d):
                 plan = attn_bwd_plan(req, arch, policy=ra.config_policy(x.config()))
                 assert plan.specs["main"] == want
                 assert plan.runtime["g_split"] == x.r.get("g_split", 1)
+
+
+# --------------------------------------------------------------------------- hints
+def test_request_hints_default_to_the_device():
+    """The arm passes the device's CU count and the target's XCD count unless
+    the configuration sets them; ``None`` keeps a hint absent; the
+    ``DEVICE_NUM_CUS`` sentinel needs a readable count."""
+    seen = []
+
+    def read(i):
+        seen.append(i)
+        return 256
+
+    assert ra.request_hints({}, "gfx950", 3, read) == {"num_cus": 256, "num_xcds": 8}
+    assert seen == [3]
+    assert ra.request_hints({}, "gfx942", 0, lambda i: 304) == {
+        "num_cus": 304,
+        "num_xcds": 8,
+    }
+    # an unreadable count leaves the request as before; no XCD entry off CDNA
+    assert ra.request_hints({}, "gfx1151", 0, lambda i: None) == {}
+    rt = {"num_cus": 17, "num_xcds": 2, "g_split": 2}
+    assert ra.request_hints(rt, "gfx950", 0, read) == {"num_cus": 17, "num_xcds": 2}
+    off = {"num_cus": None, "num_xcds": None}
+    assert ra.request_hints(off, "gfx950", 0, read) == {}
+    dev = {"num_cus": ra.DEVICE_NUM_CUS}
+    assert ra.request_hints(dev, "gfx950", 0, read)["num_cus"] == 256
+    with pytest.raises(ra.Unsupported, match="num_cus"):
+        ra.request_hints(dev, "gfx950", 0, lambda i: None)
+    assert dict(ra.DEVICE_NUM_XCDS) == dict(sw.SWEEP_NUM_XCDS)
+    # the hints are request fields, never tuning values of the policy
+    pol = ra.config_policy(ra.RockeConfig("x", {}, {**rt, "lb_order": "mirror"}))
+    assert pol.tuning(None, "gfx950", "general", ()) == {
+        "g_split": 2,
+        "lb_order": "mirror",
+    }
+
+
+def test_sweep_candidates_carry_the_device_cu_count():
+    """Every stage R candidate of a masked slice reaches the plan with the
+    device's CU count (mirror candidates pin the sentinel, the others take
+    the arm's default) and the sweep's XCD count."""
+    sl = sw.primary_slice("gfx950", "general", 128)
+    rel = sw.Release.parse("all", "production")
+    vals = sw._runtime_values(sl, sw.representative_cells(sl), rel)
+    assert any(v.get("lb_order") == "mirror" for v in vals)
+    for v in vals:
+        cfg = ra.RockeConfig.from_dict(ra.RockeConfig("c", {}, v).to_dict())
+        h = ra.request_hints(cfg.runtime, sl.arch, 0, lambda i: 256)
+        assert h["num_cus"] == 256
+        assert h["num_xcds"] == v.get("num_xcds", sw.SWEEP_NUM_XCDS[sl.arch])
+
+
+# The gfx950 bshd quick-check cells and the arm-B knobs of the backward
+# timing campaign (DMA ring, vectorised stats with FMA), each at its g_split.
+QUICK_CHECK_BSHD = {
+    "d128_h64_kv8_b2_q4096_k4096_causal_tl_bf16_bshd": 1,
+    "d128_h32_kv32_b4_q2048_k2048_none_bf16_bshd": 1,
+    "d128_h32_kv8_b2_q1024_k4096_causal_br_bf16_bshd": 1,
+    "d128_h32_kv8_b8_q512_k512_causal_tl_bf16_bshd": 1,
+    "d128_h32_kv8_b1_q8192_k8192_causal_tl_bf16_bshd": 4,
+}
+ARM_B_KNOBS = {
+    "acc_in_lds": False, "agpr_alloc": None, "atom_g02": "16x16x32",
+    "atom_g13": "16x16x16", "atom_g4": "16x16x32", "block_k4": 32, "block_m": 32,
+    "block_n": 128, "edge_tiles": False, "global_path": "dma", "head_pack": False,
+    "kt_source": "lds", "kv_residency": "reg", "pt_route": "relabel",
+    "ring_depth": 2, "s_in_agpr": False, "sched": "none",
+    "scheduler_strategy": None, "setprio": False, "transpose_source": "tr_read",
+    "warp_grid_g02": (1, 8), "warp_grid_g13": (8, 1), "warp_grid_g4": (2, 4),
+    "waves": 8, "waves_per_eu": 1, "ws_layout": "head_major", "stats_vec": 4,
+    "stats_fma": True,
+}  # fmt: skip
+GFX950_NUM_CUS = 256  # the CU count the gfx950 timing device reports
+
+
+def test_mirror_plans_on_the_gfx950_quick_check_cells():
+    """With the device hints the arm passes, mirror pairing plans on every
+    masked bshd quick-check cell (at the cell's g_split, or at g_split = 2
+    where the g_split = 1 grid runs in one wave on the device), as the twin of
+    the natural-order plan; the unmasked cell is refused for its mask. With
+    no hints (the configuration opts out) the plan refuses pairing as before."""
+    cells = {c.id: c for c in bb.census_cells(bb.load_census())}
+    hints = ra.request_hints({}, "gfx950", 0, lambda i: GFX950_NUM_CUS)
+    for cid, gs in QUICK_CHECK_BSHD.items():
+        cell = cells[cid]
+        req = ra.request_for_cell(cell, _tensors(cell), scale=ra.scale_of(cell))
+        hinted = dataclasses.replace(req, **hints)
+        for g in (gs, 2):
+            mirror = ra.RockeConfig(
+                "m", ARM_B_KNOBS, {"g_split": g, "lb_order": "mirror"}
+            )
+            natural = ra.RockeConfig("n", ARM_B_KNOBS, {"g_split": g})
+            if cell.mask == "none":
+                with pytest.raises(ValueError, match="mask"):
+                    attn_bwd_plan(hinted, "gfx950", policy=ra.config_policy(mirror))
+                break
+            nat = attn_bwd_plan(hinted, "gfx950", policy=ra.config_policy(natural))
+            main = nat.launches[1]
+            one_wave = main.grid[0] * main.grid[1] * main.grid[2] <= GFX950_NUM_CUS
+            if one_wave:
+                assert g == 1, cid
+                with pytest.raises(ValueError, match="overfills"):
+                    attn_bwd_plan(hinted, "gfx950", policy=ra.config_policy(mirror))
+                continue
+            p = attn_bwd_plan(hinted, "gfx950", policy=ra.config_policy(mirror))
+            assert p.runtime["lb_order"] == "mirror" and p.runtime["pair"] == 1
+            spec = p.specs["main"]
+            assert dataclasses.replace(spec, lb_mirror=False) == nat.specs["main"]
+            assert p.launches[1].grid[0] == math.ceil(main.grid[0] / 2)
+            with pytest.raises(ValueError, match="num_cus"):
+                attn_bwd_plan(req, "gfx950", policy=ra.config_policy(mirror))

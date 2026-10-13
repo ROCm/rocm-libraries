@@ -47,10 +47,13 @@ from kernels.common.attention_bwd_unified_plan import (
 )
 from kernels.common.attention_dense_bwd_plan import attn_dense_bwd_plan
 
+from . import gfx950_tuning
 from .dense_tuning import DENSE_BWD_TUNED
 
 __all__ = [
+    "ARCH_TUNING",
     "BWD_ROUTES",
+    "arch_tuned_policy",
     "attention_bwd_route",
     "dense_policy",
     "plan_attention_bwd",
@@ -59,6 +62,27 @@ __all__ = [
 ]
 
 BWD_ROUTES = ("general", "dense")
+# Per-arch tuned tables of the general family (GENERAL_TUNED_TABLE,
+# GENERAL_PERF_STATUS) and of the dense family (DENSE_TUNED, joined into
+# DENSE_BWD_TUNED): {arch: module}.
+ARCH_TUNING = {gfx950_tuning.ARCH: gfx950_tuning}
+
+
+def arch_tuned_policy(base: AttnBwdPolicy) -> AttnBwdPolicy:
+    """``base`` with the per-arch general tuned tables (:data:`ARCH_TUNING`)
+    joined into its ``tuned_table`` and ``perf_status`` (a base entry of the
+    same key wins). Empty per-arch tables leave ``base`` as it is."""
+    table, status = {}, {}
+    for mod in ARCH_TUNING.values():
+        table.update(mod.GENERAL_TUNED_TABLE)
+        status.update(mod.GENERAL_PERF_STATUS)
+    if not table and not status:
+        return base
+    return dataclasses.replace(
+        base,
+        tuned_table={**table, **dict(base.tuned_table)},
+        perf_status={**status, **dict(base.perf_status)},
+    )
 
 
 def dense_policy(
@@ -86,8 +110,9 @@ def dense_policy(
 
 
 def routed_policy() -> AttnBwdPolicy:
-    """The shipped policy with the shipped tuned dense table."""
-    return dense_policy(shipped_policy())
+    """The shipped policy with the per-arch general tuned tables and the
+    shipped tuned dense table."""
+    return dense_policy(arch_tuned_policy(shipped_policy()))
 
 
 def attention_bwd_route(

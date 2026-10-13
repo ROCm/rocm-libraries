@@ -17,6 +17,10 @@ One spec, :class:`AttnBwdAuxSpec`, drives four builders:
 * ``build_attn_bwd_convert``: ``DST = cast(mult * WS)`` at arbitrary element
   strides.  Batched rows ``[len, S_max)`` are written as exact zeros; THD rows
   outside the segment are not touched.
+* ``build_attn_bwd_reduce`` (``dkv_sink = "slices"``): the convert of the sum
+  of ``n_slices`` workspace slices ``s_stride`` floats apart, added in slice
+  order (deterministic); the dK / dV slices need no zero fill, so the kv-zero
+  role of prep is off with it.
 * ``build_attn_bwd_page_zero`` / ``build_attn_bwd_page_convert``
   (``kv_target = "paged"``): walk ``j < ceil(len_kv / page)`` logical blocks
   of every sequence, read ``block_table[s][j]`` once per CTA, and zero /
@@ -51,7 +55,7 @@ Kernel arguments follow the ``rocke.attn_bwd.v3`` (prep, convert) and
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from rocke.core.arch import ArchTarget
 from rocke.core.ir import BF16, F16, F32, I32, I64, IRBuilder, KernelDef, PtrType, Value
@@ -89,11 +93,12 @@ __all__ = [
     "build_attn_bwd_page_convert",
     "build_attn_bwd_page_zero",
     "build_attn_bwd_prep",
+    "build_attn_bwd_reduce",
 ]
 
 ATTN_BWD_ABI = "rocke.attn_bwd.v3"
 ATTN_BWD_UNIFIED_ABI = "rocke.attn_bwd_unified.v1"
-AUX_STAGES = ("prep", "convert", "page_zero", "page_convert")
+AUX_STAGES = ("prep", "convert", "page_zero", "page_convert", "reduce")
 
 _HEAD_SIZES = (32, 64, 128)
 _DTYPES = {"fp16": F16, "bf16": BF16}
@@ -124,6 +129,8 @@ class AttnBwdAuxSpec:
     # prep (THD, contiguous kv): also emit the work-list role (runtime
     # use_worklist); False emits none of it
     worklist: bool = False
+    # user-tensor access width (elements) of a stage_vec = 1 kernel (1, 2, 4)
+    narrow_vec: int = 1
     name: str = "rocke_attn_bwd"
 
     def __post_init__(self) -> None:
@@ -149,13 +156,17 @@ class AttnBwdAuxSpec:
             raise ValueError(
                 "worklist=True needs seq_mode='thd' and kv_target='contiguous'"
             )
+        if self.narrow_vec not in (1, 2, 4) or (
+            self.narrow_vec != 1 and self.stage_vec != 1
+        ):
+            raise ValueError("narrow_vec must be 1, 2 or 4 (not 1: stage_vec = 1 only)")
 
     def kernel_name(self, stage: str) -> str:
         """Kernel symbol; every non-default compile-time field salts the name."""
         if stage not in AUX_STAGES:
             raise ValueError(f"stage must be one of {AUX_STAGES}")
         parts = [self.name, stage, self.dtype, f"d{self.head_size}"]
-        if stage in ("prep", "convert"):
+        if stage in ("prep", "convert", "reduce"):
             parts.append(self.seq_mode)
         if self.stage_vec != 8:
             parts.append(f"sv{self.stage_vec}")
@@ -169,6 +180,8 @@ class AttnBwdAuxSpec:
             parts.append(f"v{self.convert_vec}")
         if self.worklist:
             parts.append("wl")
+        if self.narrow_vec != 1:
+            parts.append(f"nv{self.narrow_vec}")
         return "_".join(parts)
 
 
@@ -273,6 +286,10 @@ _CONVERT_I32 = (
     "H", "d_t", "S_max", "has_len", "len_stride", "off64",
     "tok_mult", "tok_div", "ws_rows", "ws_seg",
 )  # fmt: skip
+# The slice reduce: the convert's arguments plus the slice stride (floats,
+# i64) and the slice count.
+_REDUCE_I64 = _CONVERT_I64 + ("s_stride",)
+_REDUCE_I32 = _CONVERT_I32 + ("n_slices",)
 _PAGE_ZERO_PTRS = ("SEQ_LENS_KV", "BLOCK_TABLE", "WS_PDK", "WS_PDV")
 _PAGE_I32 = ("h_kv", "num_seqs", "max_blocks_per_seq", "bt_stride", "page", "page_rows")
 _PAGE_CONVERT_PTRS = ("SRC", "SEQ_LENS_KV", "BLOCK_TABLE", "DST")
@@ -281,6 +298,7 @@ _PAGE_CONVERT_I32 = _PAGE_I32 + ("d_blk", "d_tok", "d_h")
 _READONLY = {
     "prep": {"O", "dO", "LSE", "SEQ_Q", "SEQ_KV", "OFF_Q", "OFF_KV"},
     "convert": {"SRC", "SEQ", "OFF"},
+    "reduce": {"SRC", "SEQ", "OFF"},
     "page_zero": {"SEQ_LENS_KV", "BLOCK_TABLE"},
     "page_convert": {"SRC", "SEQ_LENS_KV", "BLOCK_TABLE"},
 }
@@ -298,6 +316,8 @@ def attn_bwd_aux_params(
         lists = (_PREP_PTRS, _PREP_I64, (), _PREP_I32)
     elif stage == "convert":
         lists = (_CONVERT_PTRS, _CONVERT_I64, ("mult",), _CONVERT_I32)
+    elif stage == "reduce":
+        lists = (_CONVERT_PTRS, _REDUCE_I64, ("mult",), _REDUCE_I32)
     elif stage == "page_zero":
         lists = (_PAGE_ZERO_PTRS, (), (), _PAGE_I32)
     elif stage == "page_convert":
@@ -433,7 +453,13 @@ def _prep_q_role(b, spec, a, ln: _Lanes, h, z, io) -> None:
         def tensor(ptr, prefix, dtype):
             strides = (a[f"{prefix}_b"], a[f"{prefix}_h"], a[f"{prefix}_t"])
             return StridedTensorAddr(
-                b, ptr, dtype=dtype, strides=strides, seq=seq, stage_vec=spec.stage_vec
+                b,
+                ptr,
+                dtype=dtype,
+                strides=strides,
+                seq=seq,
+                stage_vec=spec.stage_vec,
+                narrow_vec=spec.narrow_vec,
             ).slab(h, ln.tile_row0)
 
         o = tensor(a["O"], "o", io).load_vec(ln.r, ln.col0)
@@ -632,13 +658,29 @@ def _ws_vec8(b, slab, rr, col0, n: int = 8) -> list:
 
 def build_attn_bwd_convert(spec: AttnBwdAuxSpec, *, arch: str) -> KernelDef:
     """fp32 workspace times ``mult`` to the output dtype at arbitrary strides."""
+    return _build_convert(spec, arch, "convert")
+
+
+def build_attn_bwd_reduce(spec: AttnBwdAuxSpec, *, arch: str) -> KernelDef:
+    """The convert of ``n_slices`` fp32 workspace slices (``dkv_sink =
+    "slices"``): ``DST = cast(mult * (s_0 + s_1 + ... + s_{n-1}))``.
+
+    Slice ``i`` starts ``i * s_stride`` floats after ``SRC`` and is laid out
+    like the convert's workspace. The sum runs in slice order, one fp32 add
+    chain per element, so the result does not depend on which CTA wrote a
+    slice first (deterministic). Rows and the zero rule are the convert's.
+    """
+    return _build_convert(spec, arch, "reduce")
+
+
+def _build_convert(spec: AttnBwdAuxSpec, arch: str, stage: str) -> KernelDef:
     _check_arch(arch)
     if spec.worklist:
         raise ValueError("worklist=True applies to the prep kernel only")
     rows = attn_bwd_aux_rows_per_cta(spec, arch=arch)
-    b = IRBuilder(spec.kernel_name("convert"))
+    b = IRBuilder(spec.kernel_name(stage))
     b.fence_barriers = BWD_BARRIER_FENCE
-    a = _declare(b, "convert", spec)
+    a = _declare(b, stage, spec)
     io = _DTYPES[spec.dtype]
     ln = _Lanes(b, spec, rows)
     h = b.block_id_y()
@@ -647,22 +689,44 @@ def build_attn_bwd_convert(spec: AttnBwdAuxSpec, *, arch: str) -> KernelDef:
         b, spec, z, s_max=a["S_max"], seq_ptr=a["SEQ"], off_ptr=a["OFF"], a=a,
         mult="tok_mult", div="tok_div",
     )  # fmt: skip
-    slab = WorkspaceAddr(
-        b, a["SRC"], ws_rows=a["ws_rows"], width=spec.head_size, row0=seq.ws_row0,
-        layout=spec.ws_layout,
-        n_heads=a["H"] if spec.ws_layout == "token_major" else None,
-    ).slab(h, ln.tile_row0)  # fmt: skip
+
+    def ws_slab(src):
+        return WorkspaceAddr(
+            b, src, ws_rows=a["ws_rows"], width=spec.head_size, row0=seq.ws_row0,
+            layout=spec.ws_layout,
+            n_heads=a["H"] if spec.ws_layout == "token_major" else None,
+        ).slab(h, ln.tile_row0)  # fmt: skip
+
+    slab = ws_slab(a["SRC"])
     dst = StridedTensorAddr(
         b, a["DST"], dtype=io, strides=(a["d_b"], a["d_h"], a["d_t"]), seq=seq,
-        stage_vec=spec.stage_vec,
+        stage_vec=spec.stage_vec, narrow_vec=spec.narrow_vec,
     ).slab(h, ln.tile_row0, clamp=False)  # fmt: skip
     mult = a["mult"]
     zero = b.const_f32(0.0)
 
     vec = spec.convert_vec
 
-    def write_row(valid):
+    def read_sum():
         vals = _ws_vec8(b, slab, ln.row, ln.col0, vec)
+        if stage == "convert":
+            return vals
+        # slices 1 .. n - 1 added in order onto slice 0: slice i is slice 0's
+        # slab moved by i * s_stride floats (same rows, same bounds)
+        stride = b.mul(a["s_stride"], b.const_i64(4))
+        one = b.const_i32(1)
+        loop = b.scf_for_iter(
+            one, a["n_slices"], one,
+            [(f"rsum{i}", v) for i, v in enumerate(vals)], iv_name="rslice",
+        )  # fmt: skip
+        with loop as (it, cur):
+            ptr = b.global_ptr_add(slab.ptr, b.mul(b.zext(it, I64), stride))
+            part = _ws_vec8(b, replace(slab, ptr=ptr), ln.row, ln.col0, vec)
+            b.scf_yield(*[b.fadd(x, y) for x, y in zip(cur, part)])
+        return list(loop.results)
+
+    def write_row(valid):
+        vals = read_sum()
         vals = [b.fmul(mult, v) for v in vals]
         if valid is not None:
             vals = [b.select(valid, v, zero) for v in vals]

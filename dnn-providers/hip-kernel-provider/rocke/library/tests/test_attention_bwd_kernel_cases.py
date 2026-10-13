@@ -14,6 +14,7 @@ and within the LDS budget) on every (arch, case) the device test runs, and
 differ from their twin in the LDS layout only.
 """
 
+import ast
 import dataclasses
 import json
 
@@ -178,6 +179,91 @@ def test_custom_cells_the_validator_refuses_skip(monkeypatch):
         case_plan(case, arch="gfx950", config=CUSTOM_CONFIG, overrides=refused)
 
 
+# Device test modules whose tests run under each selected configuration (a
+# ``config`` parameter, the ``custom`` configuration included).
+_CONFIG_DEVICE_MODULES = (
+    "test_attention_bwd_fwd_chain.py",
+    "test_attention_bwd_mutations.py",
+    "test_attention_bwd_numeric.py",
+    "test_attention_bwd_sched_numeric.py",
+    "test_attention_bwd_split_numeric.py",
+    "test_attention_bwd_valu_numeric.py",
+)
+_LAUNCHES = {"run_case", "case_plan", "plan_case"}
+# calls that plan the variant first and skip a refused one
+_PLAN_FIRST = {"skip_unless_planned", "_require_legal", "_split_run"}
+
+
+def _call_name(node):
+    f = node.func
+    return f.id if isinstance(f, ast.Name) else getattr(f, "attr", None)
+
+
+def _unplanned_variant_launches(tree):
+    """``[(test, line)]`` of the launches with ``overrides`` under the test's
+    ``config`` parameter that no plan-first call precedes (in the test's own
+    body; a ``plan_case`` in a ``try`` whose handler skips counts as one)."""
+    out = []
+    for fn in ast.walk(tree):
+        if not (isinstance(fn, ast.FunctionDef) and fn.name.startswith("test_")):
+            continue
+        if "config" not in {a.arg for a in fn.args.args}:
+            continue
+        guards = []
+        for node in ast.walk(fn):
+            if isinstance(node, ast.Call) and _call_name(node) in _PLAN_FIRST:
+                guards.append(node.lineno)
+            if isinstance(node, ast.Try) and any(
+                isinstance(n, ast.Call) and _call_name(n) == "skip"
+                for h in node.handlers
+                for n in ast.walk(h)
+            ):
+                guards += [n.lineno for s in node.body for n in ast.walk(s)
+                           if isinstance(n, ast.Call)]  # fmt: skip
+        for node in ast.walk(fn):
+            if not (isinstance(node, ast.Call) and _call_name(node) in _LAUNCHES):
+                continue
+            kw = {k.arg: k.value for k in node.keywords}
+            ov, cfg = kw.get("overrides"), kw.get("config")
+            if ov is None or (isinstance(ov, ast.Constant) and ov.value is None):
+                continue
+            if not (isinstance(cfg, ast.Name) and cfg.id == "config"):
+                continue  # a named shipped configuration: a refusal raises
+            if not any(g <= node.lineno for g in guards):
+                out.append((fn.name, node.lineno))
+    return out
+
+
+def test_variant_launches_under_the_selected_configuration_plan_first():
+    """Every variant a device test launches on top of its selected
+    configuration is planned first (``skip_unless_planned``): a variant the
+    configuration cannot take, notably on a ``custom`` cell that plans, skips
+    with the validator's reason instead of failing the run. Launches under a
+    named shipped configuration are left out (a refusal there raises)."""
+    import pathlib
+
+    here = pathlib.Path(__file__).parent
+    bad = {}
+    for name in _CONFIG_DEVICE_MODULES:
+        tree = ast.parse((here / name).read_text(encoding="utf-8"))
+        found = _unplanned_variant_launches(tree)
+        if found:
+            bad[name] = found
+    assert not bad, bad
+    # the check sees an unguarded launch
+    probe = ast.parse(
+        "def test_x(case_id, config):\n"
+        "    run_case(c, arch=A, config=config, overrides={'edge_tiles': True})\n"
+    )
+    assert _unplanned_variant_launches(probe) == [("test_x", 2)]
+    probe = ast.parse(
+        "def test_x(case_id, config):\n"
+        "    skip_unless_planned(c, arch=A, config=config, overrides=ov)\n"
+        "    run_case(c, arch=A, config=config, overrides=ov)\n"
+    )
+    assert _unplanned_variant_launches(probe) == []
+
+
 # --------------------------------------------------------------------------- knob smoke sets
 def _smoke_case(case_id):
     from .sdpa.bwd_cases import get_bwd_case
@@ -245,6 +331,10 @@ def test_knob_smoke_sets_cover_the_unverified_values():
         "slice_db_g3",
     }
     assert has(lambda k: k.get("agpr_route") == "asm_g13" and k.get("s_in_agpr"))
+    # the wide G1 / G3 atom (K-permuted transpose read) at d64 and d128
+    wide = has(lambda k: k.get("atom_g13") == "16x16x32")
+    assert {KNOB_SMOKE_SETS[n][1] for n in wide} == {(64,), (128,)}
+    assert set(wide) <= by_arch["gfx950"] and not set(wide) & by_arch["gfx942"]
 
 
 @pytest.mark.parametrize("arch", ["gfx942", "gfx950", "gfx1151", "gfx1201"])
@@ -275,6 +365,7 @@ def test_compose_twin_sets_plan_on_every_case(arch):
     test runs on ``arch`` (validator and LDS budget) and carry their knobs; the
     set differs from its twin in the composed lever."""
     from kernels.common.attention_bwd import lds_plan
+    from kernels.common.attention_bwd_plan import DQ_KNOBS
 
     params = compose_twin_params(arch)
     if arch in ("gfx942", "gfx950"):
@@ -292,7 +383,9 @@ def test_compose_twin_sets_plan_on_every_case(arch):
             plan = attn_bwd_plan(request_from_case(case), arch, policy=pol)
             spec = plan.specs["main"]
             for k, v in kn.items():
-                assert getattr(spec, k) == v, (arch, name, cid, k)
+                # a dQ kernel knob is a field of the dQ kernel's spec
+                own, f = (plan.specs["dq"], k[3:]) if k in DQ_KNOBS else (spec, k)
+                assert getattr(own, f) == v, (arch, name, cid, k)
             assert lds_plan(spec, arch).fits, (arch, name, cid)
             specs.append(spec)
         a, b = specs
@@ -393,10 +486,17 @@ ALL_REFUSED_VARIANTS = {
 }  # fmt: skip
 
 
-def _plans(case, arch, config, overrides=None, request=None):
-    from ._attention_bwd_harness import plan_case
+def _plans(case, arch, config, overrides=None, request=None, thd=None):
+    """The plan the device test launches (a THD storage form through the
+    harness's ``case_plan``), or ``None`` when the validator refuses it."""
+    from ._attention_bwd_harness import case_plan, plan_case
 
     try:
+        if thd is not None:
+            return case_plan(
+                case, arch=arch, config=config, overrides=overrides,
+                request=request, thd=thd,
+            )[0]  # fmt: skip
         return plan_case(
             case, arch=arch, config=config, overrides=overrides, request=request
         )
@@ -410,15 +510,57 @@ def _variant_cells(arch):
     with the overrides each test plans (a reservation or chunk the test picks
     at run time is picked here the same way)."""
     from kernels.common._attention_bwd_body import DEFAULT_STAGE_ORDER, STAGE_ORDERS
+    from kernels.common.attention_bwd_plan import SCALE_PLACEMENTS
 
+    from . import test_attention_bwd_mutations as M
     from . import test_attention_bwd_numeric as N
+    from . import test_attention_bwd_valu_numeric as V
+    from .sdpa.bwd_kernel_cases import (
+        HK_NE_HV_TABLE_CASES,
+        NARROW_TWIN_CASES,
+        THD_HK_NE_HV_CASES,
+    )
 
     cfgs = [c for c in CONFIGS if c != CUSTOM_CONFIG and config_knobs(c, arch)
             is not None]  # fmt: skip
     out: dict = {}
 
-    def add(key, case, cfg, ov=None, req=None):
-        out.setdefault(key, []).append((case, cfg, ov, req))
+    def add(key, case, cfg, ov=None, req=None, thd=None):
+        out.setdefault(key, []).append((case, cfg, ov, req, thd))
+
+    # the single-variant tests (each plans its variant first and skips a
+    # refused cell)
+    for cfg in cfgs:
+        for cid in HK_NE_HV_TABLE_CASES + THD_HK_NE_HV_CASES:
+            add(("select_guard", "select"), N._case(cid), cfg,
+                {"dkv_atomic_guard": "select"})  # fmt: skip
+        for cid, ov in N.RUN_TO_RUN:
+            add(("run_to_run", cid), N._case(cid), cfg, dict(ov))
+        for cid in N.VARIANT_CASES:
+            for placement in SCALE_PLACEMENTS:
+                for static in (placement, "runtime"):
+                    ov = {"scale_placement": placement, "static_scale": static}
+                    add(("static_scale", f"{placement}/{static}"), N._case(cid),
+                        cfg, ov)  # fmt: skip
+        for cid in N.SLAB_HOIST_CASES:
+            for form, storage in N.SLAB_HOIST_FORMS.items():
+                add(("slab_hoist", form), N._thd_case(cid), cfg,
+                    {"dkv_slab_hoist": True}, None, storage or N.ThdStorage())  # fmt: skip
+        for cid in NARROW_TWIN_CASES:
+            case = N._case(cid)
+            narrow = _plans(case, arch, cfg, request={"tensor_alignment": 8})
+            if narrow is None:
+                continue
+            spec = narrow.specs["main"]
+            knobs = {f.name: getattr(spec, f.name) for f in dataclasses.fields(spec)
+                     if f.name not in N._REQUEST_FIELDS}  # fmt: skip
+            add(("narrow_twin", "wide"), case, cfg, knobs)
+        for cid in M.INTERIOR_DEAD_CASES:
+            add(("dead_row", "interior_edge"), M.get_bwd_case(cid), cfg,
+                {"edge_tiles": True})  # fmt: skip
+        for cid in V.FAINT_CASES:
+            for mode in ("exact", "fast"):
+                add(("fast_exp2", mode), V._case(cid), cfg, {"bwd_exp2": mode})
 
     for cid in N.VARIANT_CASES:
         case = N._case(cid)
@@ -439,6 +581,33 @@ def _variant_cells(arch):
                         ov = dict(agpr_alloc=a, agpr_route="asm_g13", s_in_agpr=sia)
                         ov.update(asm_cluster=cluster, sched="none", setprio=False)
                         add(("asm", f"s{int(sia)}_{cluster}"), case, cfg, ov)
+            # the asm operand-load hoist variants (test_asm_g13_variants_agree)
+            for name, nop, cluster, sia in N._asm_variants():
+                if name not in N._ASM_EXTRA:
+                    continue
+                for a in ((128, 128), (192, 192), (256, 256)):
+                    ov = dict(agpr_alloc=a, agpr_route="asm_g13", s_in_agpr=sia)
+                    ov.update(asm_cluster=cluster, sched="none", setprio=False)
+                    ov.update(asm_tail_nop=nop, **N._ASM_EXTRA[name])
+                    add(("asm_hoist", name), case, cfg, ov)
+            # the wide G1 / G3 atom (gfx950; test_wide_g13_atom_agrees)
+            if arch == "gfx950":
+                plain = _plans(case, arch, cfg)
+                if plain is None:
+                    continue
+                wide = {"atom_g13": "16x16x32"}
+                if plain.specs["main"].block_m < 32:
+                    wide["block_m"] = 32
+                for name, knobs in N.WIDE_G13_VARIANTS.items():
+                    knobs = dict(knobs)
+                    if not knobs.pop("asm", False):
+                        add(("wide", name), case, cfg, {**wide, **knobs})
+                        continue
+                    for a in ((128, 128), (192, 192), (256, 256)):
+                        ov = dict(agpr_alloc=a, agpr_route="asm_g13", s_in_agpr=False)
+                        ov.update(asm_cluster="k_step", sched="none", setprio=False)
+                        ov.update(asm_tail_nop=None, **wide, **knobs)
+                        add(("wide", name), case, cfg, ov)
     for cid in N.STAGE_ORDER_CASES:
         case = N._order_case(cid)
         for cfg in cfgs:
@@ -469,13 +638,16 @@ def _variant_cells(arch):
 def test_every_device_variant_keeps_a_planned_cell(arch):
     """A refusal (a coupling or a recorded resource refusal) never takes a
     variant of the device numerics off a CDNA target unnoticed: every runtime
-    variant, asm route, merge variant, stage order, G4 slicing value (with
-    and without edge tiles) and the edge tiles themselves plan on at least one
+    variant, asm route (and its operand-load hoist variants), wide G1 / G3
+    atom variant (gfx950), merge variant, stage order, G4 slicing value (with
+    and without edge tiles), the edge tiles themselves and the variant of each
+    single-variant test (the select guard, run to run, static scale, slab
+    hoist, narrow twin, interior dead rows, fast exp2) plan on at least one
     of their cases in a shipped configuration, except the variants that
     ALL_REFUSED_VARIANTS names with their rule (every cell of which is
     refused)."""
     for key, cells in sorted(_variant_cells(arch).items()):
-        planned = [c for c in cells if _plans(c[0], arch, c[1], c[2], c[3])]
+        planned = [c for c in cells if _plans(c[0], arch, c[1], c[2], c[3], c[4])]
         if (arch, *key) in ALL_REFUSED_VARIANTS:
             assert not planned, (arch, key, "now plans: drop it from the list")
             continue

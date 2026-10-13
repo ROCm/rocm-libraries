@@ -79,8 +79,9 @@ def test_only_head_size_is_required_and_defaults_are_the_shipped_values():
     assert set(DQ_TUNING_FIELDS) == {
         "waves", "block_m", "block_n", "atom_g02", "atom_g4", "transpose_source",
         "head_loop", "stats_prescale", "edge_tiles", "kv_pad", "kv_prefetch",
-        "waves_per_eu", "agpr_alloc", "scheduler_strategy",
+        "waves_per_eu", "agpr_alloc", "scheduler_strategy", "sched",
     }  # fmt: skip
+    assert s.sched == "none"
 
 
 @pytest.mark.parametrize(
@@ -107,6 +108,7 @@ def test_only_head_size_is_required_and_defaults_are_the_shipped_values():
         dict(head_size=64, waves_per_eu=3),
         dict(head_size=64, agpr_alloc=(64, 64)),
         dict(head_size=64, scheduler_strategy="not-a-strategy"),
+        dict(head_size=64, sched="stage_table_atomics"),
         dict(head_size=64, xcd_remap=1),
         dict(head_size=64, name="bad name"),
     ],
@@ -843,8 +845,8 @@ ILP_CRASH_ROWS = (
 )  # fmt: skip
 
 
-# dQ specs of device-test cells that spill to scratch on the production
-# compiler: (arch, non-default resolved fields) and the failing rule.
+# dQ specs of device-test cells that spill to scratch on (or crash) the
+# production compiler: (arch, non-default resolved fields) and the failing rule.
 DQ_SPILL_ROWS = (
     (("gfx942", (('agpr_alloc', (0, 0)), ('atom_g02', '16x16x16'), ('atom_g4', '16x16x16'), ('block_m', 32), ('block_n', 128), ('dtype', 'bf16'), ('head_size', 64), ('scheduler_strategy', 'iterative-maxocc'), ('transpose_source', 'lds_plain'), ('waves', 2), ('waves_per_eu', 2))), "scratch+vgpr_spill"),
     (("gfx942", (('agpr_alloc', (0, 0)), ('atom_g02', '16x16x16'), ('atom_g4', '16x16x16'), ('block_m', 32), ('block_n', 128), ('dtype', 'bf16'), ('head_size', 128), ('scheduler_strategy', 'iterative-maxocc'), ('seq_mode', 'thd'), ('transpose_source', 'lds_plain'), ('waves', 2), ('waves_per_eu', 2))), "scratch+vgpr_spill"),
@@ -862,6 +864,18 @@ DQ_SPILL_ROWS = (
     (("gfx950", (('agpr_alloc', (0, 0)), ('atom_g02', '16x16x32'), ('atom_g4', '16x16x16'), ('block_m', 32), ('block_n', 128), ('head_size', 128), ('scheduler_strategy', 'iterative-maxocc'), ('transpose_source', 'lds_plain'), ('waves', 2), ('waves_per_eu', 2))), "scratch+vgpr_spill"),
     (("gfx950", (('agpr_alloc', (0, 0)), ('atom_g02', '16x16x32'), ('atom_g4', '16x16x16'), ('block_m', 32), ('block_n', 128), ('head_size', 128), ('mask_class', 'none'), ('scheduler_strategy', 'iterative-maxocc'), ('transpose_source', 'lds_plain'), ('waves', 2), ('waves_per_eu', 2))), "scratch+vgpr_spill"),
     (("gfx950", (('agpr_alloc', (0, 0)), ('atom_g02', '16x16x32'), ('atom_g4', '16x16x16'), ('block_m', 32), ('block_n', 128), ('dtype', 'bf16'), ('head_size', 128), ('scheduler_strategy', 'iterative-maxocc'), ('transpose_source', 'lds_plain'), ('waves', 2), ('waves_per_eu', 2))), "scratch+vgpr_spill"),
+    (("gfx942", (('agpr_alloc', (0, 0)), ('atom_g02', '16x16x16'), ('atom_g4', '16x16x16'), ('block_m', 32), ('block_n', 128), ('head_size', 128), ('scheduler_strategy', 'iterative-maxocc'), ('seq_mode', 'thd'), ('transpose_source', 'lds_plain'), ('waves', 2), ('waves_per_eu', 2))), "scratch+vgpr_spill"),
+    (("gfx950", (('agpr_alloc', (0, 0)), ('atom_g02', '16x16x32'), ('atom_g4', '16x16x16'), ('block_m', 32), ('block_n', 128), ('head_size', 128), ('scheduler_strategy', 'iterative-maxocc'), ('seq_mode', 'thd'), ('transpose_source', 'lds_plain'), ('waves', 2), ('waves_per_eu', 2))), "scratch+vgpr_spill"),
+    (("gfx950", (('agpr_alloc', (0, 0)), ('atom_g02', '16x16x32'), ('atom_g4', '16x16x16'), ('block_m', 128), ('block_n', 32), ('head_size', 128), ('kv_pad', 8), ('scheduler_strategy', 'iterative-ilp'), ('transpose_source', 'lds_plain'), ('waves', 8))), "compiler crash (comgr segfault)"),
+    (("gfx950", (('agpr_alloc', (0, 0)), ('atom_g02', '16x16x32'), ('atom_g4', '16x16x32'), ('block_m', 128), ('block_n', 32), ('head_size', 128), ('kv_pad', 8), ('scheduler_strategy', 'iterative-ilp'), ('transpose_source', 'lds_plain'), ('waves', 8))), "compiler crash (comgr segfault)"),
+    (("gfx950", (('agpr_alloc', (0, 0)), ('atom_g02', '16x16x32'), ('atom_g4', '16x16x16'), ('block_m', 128), ('block_n', 32), ('head_size', 128), ('kv_pad', 8), ('scheduler_strategy', 'iterative-ilp'), ('seq_mode', 'thd'), ('transpose_source', 'lds_plain'), ('waves', 8))), "compiler crash (comgr segfault)"),
+    (("gfx950", (('agpr_alloc', (0, 0)), ('atom_g02', '16x16x32'), ('atom_g4', '16x16x32'), ('block_m', 128), ('block_n', 32), ('head_size', 128), ('kv_pad', 8), ('scheduler_strategy', 'iterative-ilp'), ('seq_mode', 'thd'), ('transpose_source', 'lds_plain'), ('waves', 8))), "compiler crash (comgr segfault)"),
+    (("gfx950", (('agpr_alloc', (0, 0)), ('atom_g02', '16x16x32'), ('atom_g4', '16x16x16'), ('block_m', 64), ('block_n', 64), ('head_size', 64), ('scheduler_strategy', 'iterative-ilp'), ('transpose_source', 'lds_plain'), ('waves', 4))), "compiler crash (comgr segfault)"),
+    (("gfx950", (('agpr_alloc', (0, 0)), ('atom_g02', '16x16x32'), ('atom_g4', '16x16x32'), ('block_m', 64), ('block_n', 64), ('head_size', 64), ('scheduler_strategy', 'iterative-ilp'), ('transpose_source', 'lds_plain'), ('waves', 4))), "compiler crash (comgr segfault)"),
+    (("gfx950", (('agpr_alloc', (0, 0)), ('atom_g02', '16x16x32'), ('atom_g4', '16x16x16'), ('block_m', 64), ('block_n', 128), ('head_size', 128), ('transpose_source', 'tr_read'), ('waves', 4))), "scratch+vgpr_spill"),
+    (("gfx950", (('agpr_alloc', (0, 0)), ('atom_g02', '16x16x32'), ('atom_g4', '16x16x16'), ('block_m', 64), ('block_n', 128), ('dtype', 'bf16'), ('head_size', 128), ('mask_class', 'none'), ('seq_mode', 'thd'), ('stage_vec', 1), ('transpose_source', 'tr_read'), ('waves', 4))), "scratch+vgpr_spill"),
+    (("gfx942", (('agpr_alloc', (0, 0)), ('atom_g02', '16x16x16'), ('atom_g4', '16x16x16'), ('block_m', 64), ('block_n', 128), ('head_size', 64), ('transpose_source', 'lds_plain'), ('waves', 4))), "scratch+vgpr_spill"),
+    (("gfx942", (('agpr_alloc', (0, 0)), ('atom_g02', '16x16x16'), ('atom_g4', '16x16x16'), ('block_m', 64), ('block_n', 128), ('dtype', 'bf16'), ('head_size', 64), ('mask_class', 'none'), ('seq_mode', 'thd'), ('stage_vec', 1), ('transpose_source', 'lds_plain'), ('waves', 4))), "scratch+vgpr_spill"),
 )  # fmt: skip
 
 
@@ -924,7 +938,6 @@ def test_zero_scratch_no_spills_and_no_key_loop_agpr_copies(arch, var):
     accumulator in AGPRs, so the VALU reads S^T / dP^T back) is held to every
     rule but the copy rule. The validator's refused rows are not built."""
     pytest.importorskip("rocke.runtime.comgr")
-    pytest.importorskip("torch")  # torch first: the production comgr
     from rocke.helpers.compile import compile_kernel
 
     from ._attention_bwd_resources import (
@@ -934,8 +947,10 @@ def test_zero_scratch_no_spills_and_no_key_loop_agpr_copies(arch, var):
         current_flavor,
         evaluate_resource_gate,
         find_objdump,
+        pin_production_comgr,
     )
 
+    pin_production_comgr()  # torch's bundled comgr, by path; torch not imported
     if find_objdump() is None:
         pytest.skip("llvm-objdump not found (needed for the key-loop AGPR copy rule)")
     flavor, comgr = current_flavor(), comgr_version()

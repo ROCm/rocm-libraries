@@ -33,6 +33,27 @@ if str(_PYROOT) not in sys.path:
     sys.path.insert(0, str(_PYROOT))
 
 
+def pytest_configure(config):
+    """Pin the production comgr (the torch wheel's bundled library) by path
+    for this session and its child processes, without importing torch
+    (``kernels/common/attention_bwd_comgr.py``), and give comgr's code-object
+    cache a directory of this session's own (removed at exit). An explicit ``ROCKE_COMGR_LIB`` /
+    ``AMD_COMGR_CACHE_DIR`` wins; ``ROCKE_BWD_NO_COMGR_PIN=1`` opts out.
+
+    An import failure of the ``kernels`` package is reported, not raised: the
+    tests that need the package fail on it themselves, the others still run
+    (the same rule as ``_restore_attention_arch_state`` below)."""
+    try:
+        from kernels.common.attention_bwd_comgr import ensure_production_comgr
+    except Exception as exc:  # noqa: BLE001 - see the docstring
+        config.issue_config_time_warning(
+            pytest.PytestConfigWarning(f"production comgr not pinned: {exc!r}"),
+            stacklevel=2,
+        )
+        return
+    ensure_production_comgr()
+
+
 def pytest_collection_modifyitems(config, items):
     """``ROCKE_TEST_SHARD=i[,j...]/n``: keep the items of those shards (see
     ``tests/run_device_shards.py``; unset: every item)."""

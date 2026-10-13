@@ -38,6 +38,16 @@ nor the HIP runtime.
 Cache (``--cache``): default ``$ROCKE_BWD_HSACO_CACHE``, else a new temporary
 directory removed at the end. ``--no-prebuild`` skips the pre-build (the shards
 still share the cache and fill it lazily).
+
+Processes: one pre-build pytest process (its dry-run and compile pools reuse
+each worker for many tests and kernels), then one pytest process per shard
+for all of that shard's tests; no process is started per kernel. Under
+``PYTHONDONTWRITEBYTECODE`` (a job that keeps its source tree clean) every
+one of them would compile all its Python sources again, so the children get a
+shared bytecode directory instead (``PYTHONPYCACHEPREFIX``, a temporary
+directory outside the source tree, removed at the end): the pre-build writes
+it, the pools and shards read it. ``--no-pycache`` keeps the environment as
+it is; an existing ``PYTHONPYCACHEPREFIX`` is kept.
 """
 
 from __future__ import annotations
@@ -155,8 +165,12 @@ def build_env(
     shard: str,
     device: str | None,
     prebuild: bool,
+    pycache: str | None = None,
 ) -> dict:
     env = dict(base)
+    if pycache is not None:  # shared bytecode instead of none (module doc)
+        env.pop("PYTHONDONTWRITEBYTECODE", None)
+        env["PYTHONPYCACHEPREFIX"] = pycache
     env[CACHE_ENV] = cache
     env.pop(SHARD_ENV, None)
     env.pop(BWD_SHARD_ENV, None)
@@ -171,6 +185,17 @@ def build_env(
     return env
 
 
+def shared_pycache(env: Mapping[str, str], *, disabled: bool = False) -> str | None:
+    """A new temporary bytecode directory for the children when the
+    environment forbids writing bytecode and names no prefix (module doc),
+    else None (the environment is kept)."""
+    if disabled or env.get("PYTHONPYCACHEPREFIX", "").strip():
+        return None
+    if not env.get("PYTHONDONTWRITEBYTECODE", "").strip():
+        return None
+    return tempfile.mkdtemp(prefix="rocke-pyc-")
+
+
 def make_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--devices", default="auto")
@@ -182,6 +207,11 @@ def make_parser() -> argparse.ArgumentParser:
     )
     ap.add_argument("--cache", default=None)
     ap.add_argument("--no-prebuild", action="store_true")
+    ap.add_argument(
+        "--no-pycache",
+        action="store_true",
+        help="no shared bytecode directory under PYTHONDONTWRITEBYTECODE",
+    )
     ap.add_argument("--log-dir", default=None)
     ap.add_argument("pytest_args", nargs=argparse.REMAINDER)
     return ap
@@ -207,6 +237,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     Path(cache).mkdir(parents=True, exist_ok=True)
     log_dir = Path(args.log_dir or tempfile.mkdtemp(prefix="rocke-shard-logs-"))
     log_dir.mkdir(parents=True, exist_ok=True)
+    pycache = shared_pycache(os.environ, disabled=args.no_pycache)
     pytest = [sys.executable, "-m", "pytest"]
     total = args.total_shards
     rc_all = 0
@@ -223,6 +254,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 shard=union,
                 device=plan[0][1],
                 prebuild=True,
+                pycache=pycache,
             )
             log = log_dir / "prebuild.log"
             with open(log, "w", encoding="utf-8") as fh:
@@ -248,6 +280,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 shard=f"{idx}/{total}",
                 device=dev,
                 prebuild=False,
+                pycache=pycache,
             )
             log = log_dir / f"shard-{idx}-of-{total}.log"
             fh = open(log, "w", encoding="utf-8")
@@ -278,6 +311,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     finally:
         if own_cache:
             shutil.rmtree(cache, ignore_errors=True)
+        if pycache is not None:
+            shutil.rmtree(pycache, ignore_errors=True)
 
 
 if __name__ == "__main__":

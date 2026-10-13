@@ -47,6 +47,9 @@ from kernels.common.attention_bwd import (
     BWD_ARCHS,
     BWD_DTYPES,
     BWD_HEAD_SIZES,
+    DKV_SINK_NOT_BUILT,
+    DKV_SINKS,
+    SPLIT_DQ_ARCHS,
     AttnBwdSpec,
     attn_bwd_arch_facts,
     attn_bwd_default_geometry,
@@ -77,6 +80,7 @@ __all__ = [
     "Verdict",
     "attn_bwd_declaration",
     "attn_bwd_feature_groups",
+    "attn_bwd_narrow_width",
     "attn_bwd_perf_class",
     "attn_bwd_plan",
     "attn_bwd_route",
@@ -137,11 +141,14 @@ DEFERRAL_REGISTER = (
     {
         "req": "Tier S (deterministic backward)",
         "reason_code": "DETERMINISTIC",
-        "decision": "declined: out of scope within Tier S",
+        "decision": "declined by the shipped policy: out of scope within Tier S",
         "rationale": "deterministic backward is out of scope within Tier S "
-        "(section 1)",
+        "(section 1); the atomic-free backward (split dQ with direct or "
+        "slice dK / dV) exists on gfx942 / gfx950 as an opt-in policy "
+        "(AttnBwdPolicy.deterministic)",
         "consequence": "a deterministic backward request falls back to CK / "
-        "AOTriton; dQ of this provider is nondeterministic in the last bits",
+        "AOTriton under the shipped policy; dQ of this provider's default "
+        "plan is nondeterministic in the last bits",
     },
 )
 
@@ -493,6 +500,11 @@ class AttnBwdPolicy:
     * ``not_validated_archs``: backward targets without a hardware validation
       run, declined ``ARCH_NOT_VALIDATED`` (the shipped set is empty: every
       target in ``DECLARED_ARCHS`` has one).
+    * ``deterministic``: serve ``deterministic`` requests (else declined
+      ``DETERMINISTIC``) on the split-dQ targets with the atomic-free
+      backward: the plan sets ``dq_mode = "split"`` and, where dK / dV are
+      in atomic mode, ``dkv_sink = "slices"`` (over any tuned value). Off in
+      the shipped policy.
     """
 
     declared_groups: frozenset = SHIPPED_DECLARED_GROUPS
@@ -503,6 +515,7 @@ class AttnBwdPolicy:
     tuning: Callable[..., Mapping[str, Any]] = _no_tuning
     not_validated_archs: frozenset = frozenset(NOT_VALIDATED_ARCHS)
     tuned_table: Mapping = field(default_factory=dict)
+    deterministic: bool = False
 
     def status_of(self, arch: str, route: str, perf_class: tuple) -> str:
         if arch in RDNA_ARCHS:
@@ -539,6 +552,7 @@ def shipped_policy() -> AttnBwdPolicy:
             getattr(mod, "NOT_VALIDATED_ARCHS", NOT_VALIDATED_ARCHS)
         ),
         tuned_table=dict(getattr(mod, "GENERAL_TUNED_TABLE", {})),
+        deterministic=bool(getattr(mod, "SERVE_DETERMINISTIC", False)),
     )
 
 
@@ -557,6 +571,28 @@ def _align(x: int) -> int:
 
 def _dkv_atomic(req: AttnBwdRequest, g_split: int = 1) -> bool:
     return req.h_k != req.h_v or g_split > 1
+
+
+def _dkv_slices(
+    req: AttnBwdRequest, g_split: int, dkv_sink: str = "atomic"
+) -> tuple[int, int]:
+    """``(n_k, n_v)``: fp32 dK / dV workspace slices per kv head (1, 1 for the
+    atomic sink). A CTA owns ``G / g_split`` query heads of one K head and one
+    V head, so ``(h_q / h_k) / (G / g_split)`` CTAs share each K head (one
+    slice each), likewise for V."""
+    _check_dkv_sink(dkv_sink)
+    if dkv_sink != "slices" or not _dkv_atomic(req, g_split):
+        return 1, 1
+    group = _group(req, True)
+    if not group or g_split < 1 or group % g_split:
+        raise ValueError(f"g_split={g_split} must divide the head group {group}")
+    per = group // g_split
+    return (req.h_q // req.h_k) // per, (req.h_q // req.h_v) // per
+
+
+def _check_dkv_sink(dkv_sink: str) -> None:
+    if dkv_sink not in DKV_SINKS:
+        raise ValueError(f"dkv_sink={dkv_sink!r} not in {DKV_SINKS}")
 
 
 def _group(req: AttnBwdRequest, atomic: bool) -> int:
@@ -695,6 +731,18 @@ def attn_bwd_stage_vec(req: AttnBwdRequest) -> int:
         if any(s % 8 for s in _used_strides(req, n)):
             return 1
     return 8
+
+
+def attn_bwd_narrow_width(req: AttnBwdRequest) -> int:
+    """Widest user-tensor access (elements: 4, 2 or 1) a ``stage_vec = 1``
+    request allows: every used B/H/S stride a multiple of it and every base
+    aligned to its byte size (the ``narrow_vec`` cap's ceiling)."""
+    for w in (4, 2):
+        if req.tensor_alignment < 2 * w:
+            continue
+        if all(s % w == 0 for n in _TENSORS for s in _used_strides(req, n)):
+            return w
+    return 1
 
 
 def _rows_per_cta(arch: str, d: int) -> int:
@@ -916,7 +964,11 @@ def _decline(code: str, detail: str) -> Verdict:
     return Verdict(False, code, detail)
 
 
-def _feature_decline(req: AttnBwdRequest) -> Optional[Verdict]:
+def _feature_decline(
+    req: AttnBwdRequest, *, deterministic_ok: bool = False
+) -> Optional[Verdict]:
+    """First out-of-scope feature of ``req``; ``deterministic_ok`` admits a
+    deterministic request (the policy serves it atomic-free)."""
     checks = (
         ("DROPOUT", req.dropout != 0.0, f"dropout={req.dropout}"),
         (
@@ -932,7 +984,11 @@ def _feature_decline(req: AttnBwdRequest) -> Optional[Verdict]:
             "paged KV is served only by the rocKE-native unified entry",
         ),
         ("FP8", req.fp8, "fp8 tensors requested"),
-        ("DETERMINISTIC", req.deterministic, "deterministic backward requested"),
+        (
+            "DETERMINISTIC",
+            req.deterministic and not deterministic_ok,
+            "deterministic backward requested",
+        ),
         (
             "UNSUPPORTED_FEATURE",
             bool(req.other_features),
@@ -1201,7 +1257,9 @@ def attn_bwd_support(
         return _decline("ARCH_UNSUPPORTED", f"{arch} is not a backward target")
     if arch in policy.not_validated_archs:
         return _decline("ARCH_NOT_VALIDATED", f"{arch} has no hardware validation run")
-    v = _feature_decline(req)
+    v = _feature_decline(
+        req, deterministic_ok=policy.deterministic and arch in SPLIT_DQ_ARCHS
+    )
     if v is not None:
         return v
     if req.scale_is_device_tensor:
@@ -1308,6 +1366,7 @@ def attn_bwd_workspace_layout(
     dq_mode: str = "atomic",
     worklist: bool = False,
     block_n: int = 16,
+    dkv_sink: str = "atomic",
 ) -> dict:
     """``{name: (byte offset, bytes)}`` of every workspace sub-buffer, packed.
 
@@ -1316,9 +1375,15 @@ def attn_bwd_workspace_layout(
         WS_DQ    A(4 * rows_q * h_q * D)        dq_mode == "atomic" only
         WS_LSE2  A(4 * rows_q * h_q)
         WS_DSUM  A(4 * rows_q * h_q)
-        WS_DK    A(4 * rows_kv * h_k * D)       h_k != h_v or g_split > 1
-        WS_DV    A(4 * rows_kv * h_v * D)       same condition
+        WS_DK    A(4 * rows_kv * h_k * D * n_k) h_k != h_v or g_split > 1
+        WS_DV    A(4 * rows_kv * h_v * D * n_v) same condition
         WORKLIST A(8 * (1 + B * ceil(S_kv / kN0)))   work list only (i32 words)
+
+    ``n_k = n_v = 1`` with the atomic sink; with ``dkv_sink = "slices"`` they
+    are the slice counts ``n_k = (h_q / h_k) / (G / g_split)`` and ``n_v =
+    (h_q / h_v) / (G / g_split)`` (one slice per CTA sharing a kv head; ``G``
+    the atomic head group), so each array is ``4 * rows_kv * D * (h_q / (G /
+    g_split))`` bytes.
 
     ``rows_q, rows_kv`` are ``B * S`` (fixed and padded: the tensor dims) or,
     for THD, the caller's ``max_total_q`` / ``max_total_kv`` when both are
@@ -1341,8 +1406,9 @@ def attn_bwd_workspace_layout(
     sizes.append(("WS_LSE2", 4 * rows_q * req.h_q))
     sizes.append(("WS_DSUM", 4 * rows_q * req.h_q))
     if _dkv_atomic(req, g_split):
-        sizes.append(("WS_DK", 4 * rows_kv * req.h_k * d))
-        sizes.append(("WS_DV", 4 * rows_kv * req.h_v * d))
+        n_k, n_v = _dkv_slices(req, g_split, dkv_sink)
+        sizes.append(("WS_DK", 4 * rows_kv * req.h_k * d * n_k))
+        sizes.append(("WS_DV", 4 * rows_kv * req.h_v * d * n_v))
     if worklist:
         words = worklist_words(req.b, _ceil_div(req.s_kv, block_n))
         sizes.append(("WORKLIST", 4 * words))
@@ -1360,10 +1426,16 @@ def attn_bwd_workspace_bytes(
     dq_mode: str = "atomic",
     worklist: bool = False,
     block_n: int = 16,
+    dkv_sink: str = "atomic",
 ) -> int:
     """Total caller workspace in bytes (sum of the 256-byte aligned sub-buffers)."""
     layout = attn_bwd_workspace_layout(
-        req, g_split=g_split, dq_mode=dq_mode, worklist=worklist, block_n=block_n
+        req,
+        g_split=g_split,
+        dq_mode=dq_mode,
+        worklist=worklist,
+        block_n=block_n,
+        dkv_sink=dkv_sink,
     )
     return sum(_align(n) for _, n in layout.values())
 
@@ -1403,6 +1475,21 @@ class AttnBwdPlan:
     workspace_bytes: int
     workspace_layout: Mapping[str, tuple[int, int]]
     tuning_key: tuple = ()  # attn_bwd_tuning_key of the request
+
+    @property
+    def atomic_free(self) -> bool:
+        """No launch of the plan issues a data atomic: dQ from the split dQ
+        kernel, and dK / dV direct or through workspace slices. Every output
+        is then a fixed-order fp32 sum, bit for bit the same run to run."""
+        main = self.specs["main"]
+        if main.dq_mode != "split":
+            return False
+        return main.dkv_mode == "direct" or main.dkv_sink == "slices"
+
+    @property
+    def deterministic(self) -> bool:
+        """Bitwise reproducible run to run (see :attr:`atomic_free`)."""
+        return self.atomic_free
 
 
 def _check_worklist(req: AttnBwdRequest, lb_name: str, n_kv_tiles: int) -> None:
@@ -1514,7 +1601,33 @@ def attn_bwd_plan(
     group = _group(req, atomic_kv)
     if g_split < 1 or group % g_split:
         raise ValueError(f"g_split={g_split} must divide the head group {group}")
+    if req.deterministic:
+        # the atomic-free backward (the predicate admitted the request under
+        # policy.deterministic): split dQ, and slice dK / dV in atomic mode.
+        # The determinism request wins over a tuned value (a tuned table keys
+        # on performance classes, not on the flag), so the plan never fails
+        # on a request the predicate admitted.
+        tuned["dq_mode"] = "split"
+        if atomic_kv:
+            tuned["dkv_sink"] = "slices"
+    if atomic_kv:
+        sink = tuned.get("dkv_sink", "atomic")
+        _check_dkv_sink(sink)
+        if sink in DKV_SINK_NOT_BUILT:
+            raise ValueError(
+                f"dkv_sink={sink!r} is not built: {DKV_SINK_NOT_BUILT[sink]}"
+            )
     stage_vec = attn_bwd_stage_vec(req)
+    if "narrow_vec" in tuned:
+        # a cap: the narrow class takes the widest access its strides and
+        # bases allow up to it (the wide class has no narrow access at all)
+        cap = tuned.pop("narrow_vec")
+        if cap not in (1, 2, 4):
+            raise ValueError(f"narrow_vec={cap!r} not in (1, 2, 4)")
+        if stage_vec == 1:
+            width = min(int(cap), attn_bwd_narrow_width(req))
+            if width != 1:
+                tuned["narrow_vec"] = width
     mask_kind = _mask_kind(req)
     seq_mode = "thd" if req.is_thd else "batched"
     dma_note = None
@@ -1566,9 +1679,18 @@ def attn_bwd_plan(
     if pair:
         if mask_kind == "none":
             raise ValueError("mirror pairing needs a causal or window mask")
-        if req.num_cus is None or gx * units * g_split * req.b < req.num_cus:
+        # The pairing decode visits every kv tile once for any grid (num_cus
+        # never reaches the kernel), so this is a no-gain guard, not a
+        # correctness rule. The CTA that pairs the heaviest kv tile does at
+        # least that tile's work, the longest unpaired CTA: when the unpaired
+        # grid runs in one wave (at most num_cus CTAs) pairing cannot shorten
+        # it. A larger unpaired
+        # grid runs in waves with a ragged tail, which pairing evens out even
+        # when the paired grid itself is under num_cus.
+        if req.num_cus is None or n_kv_tiles * units * g_split * req.b <= req.num_cus:
             raise ValueError(
-                "mirror pairing needs num_cus and a paired grid that fills it"
+                "mirror pairing needs num_cus and an unpaired grid that overfills "
+                "it (more than num_cus CTAs)"
             )
         if not MIRROR_PAIRING_BUILT:
             raise ValueError(
@@ -1647,7 +1769,12 @@ def attn_bwd_plan(
                 dataclasses.replace(dq_spec, xcd_remap=True), arch
             )
 
+    # slices: each CTA stores its fp32 dK / dV partial to its own workspace
+    # slice (no atomics, no zero fill); reduce launches replace the converts
+    slices = atomic_kv and spec.dkv_sink == "slices"
     ws_kw = dict(g_split=g_split, dq_mode=spec.dq_mode)
+    if slices:
+        ws_kw["dkv_sink"] = "slices"
     if use_worklist:
         ws_kw.update(worklist=True, block_n=kn)
     layout = attn_bwd_workspace_layout(req, **ws_kw)
@@ -1759,7 +1886,7 @@ def attn_bwd_plan(
             "ws_rows_q": rows_q,
             "ws_rows_kv": rows_kv if atomic_kv else 0,
             "ws_seg": ws_seg,
-            "zero_kv": int(atomic_kv),
+            "zero_kv": int(atomic_kv and not slices),
             "zero_dq": int(spec.dq_mode == "atomic"),
             "use_worklist": int(use_worklist),
             "n_batch": req.b,
@@ -1815,7 +1942,7 @@ def attn_bwd_plan(
                 h_k=req.h_k,
                 h_v=req.h_v,
                 batch=req.b,
-                zero_kv=atomic_kv,
+                zero_kv=atomic_kv and not slices,
             ),
             aux_block,
             _freeze(prep_scalars),
@@ -1831,7 +1958,8 @@ def attn_bwd_plan(
         ),
     ]
 
-    def convert(src, dst, heads, s_max, tens, m, side):
+    def convert(src, dst, heads, s_max, tens, m, side, n_slices=0):
+        """A convert launch, or with ``n_slices`` a slice reduce."""
         sb, sh, ss = st(tens)
         scal = {
             "mult": m,
@@ -1852,9 +1980,14 @@ def attn_bwd_plan(
             "SEQ": ("seq_len_q" if side == "q" else "seq_len_kv") if has_len else None,
             "OFF": ("offsets_q" if side == "q" else "offsets_kv") if thd else None,
         }
+        stage = "reduce" if n_slices else "convert"
+        if n_slices:
+            # slice i of kv head h starts i * rows * H * D floats after slice 0
+            scal["s_stride"] = scal["ws_rows"] * heads * req.d_qk
+            scal["n_slices"] = n_slices
         return LaunchStep(
-            "convert",
-            conv_spec.kernel_name("convert"),
+            stage,
+            conv_spec.kernel_name(stage),
             attn_bwd_convert_grid(
                 conv_spec, arch=arch, s_max=s_max, heads=heads, batch=req.b
             ),
@@ -1927,10 +2060,11 @@ def attn_bwd_plan(
             convert("WS_DQ", "dq", req.h_q, req.s_q, "dq", mults["conv_dq"], "q")
         )
     if atomic_kv:
+        n_k, n_v = _dkv_slices(req, g_split, sink) if slices else (0, 0)
         launches.append(
-            convert("WS_DK", "dk", req.h_k, req.s_kv, "dk", mults["conv_dk"], "kv")
+            convert("WS_DK", "dk", req.h_k, req.s_kv, "dk", mults["conv_dk"], "kv", n_k)
         )
-        launches.append(convert("WS_DV", "dv", req.h_v, req.s_kv, "dv", 1.0, "kv"))
+        launches.append(convert("WS_DV", "dv", req.h_v, req.s_kv, "dv", 1.0, "kv", n_v))
     for step in launches:
         names = [n for n, _ in attn_bwd_params(step.stage)]
         got = list(step.pointers) + list(step.scalars)
@@ -1961,6 +2095,10 @@ def attn_bwd_plan(
     if dma_note is not None:
         # a tuned global_path = "dma" ran on the register path; the reason
         runtime["dma_downgrade"] = dma_note
+    if slices:
+        # the reduce is the convert spec's kernel of stage "reduce"
+        runtime["dkv_sink"] = "slices"
+        specs["reduce"] = conv_spec
     return AttnBwdPlan(
         arch=arch,
         route=route,
@@ -2078,17 +2216,28 @@ def attn_bwd_declaration(arch: str, *, policy: Optional[AttnBwdPolicy] = None) -
                 "WS_DQ A(4*rows_q*h_q*D) if dq atomic",
                 "WS_LSE2 A(4*rows_q*h_q)",
                 "WS_DSUM A(4*rows_q*h_q)",
-                "WS_DK A(4*rows_kv*h_k*D) if h_k != h_v or g_split > 1",
-                "WS_DV A(4*rows_kv*h_v*D) if h_k != h_v or g_split > 1",
+                "WS_DK A(4*rows_kv*h_k*D*n_k) if h_k != h_v or g_split > 1",
+                "WS_DV A(4*rows_kv*h_v*D*n_v) if h_k != h_v or g_split > 1",
                 "WORKLIST A(8*(1 + B*ceil(S_kv/kN0))) if work list (THD)",
             ],
+            "slices": "n_k = n_v = 1 with dkv_sink='atomic' (the default); with "
+            "dkv_sink='slices' n_k = (h_q/h_k)/(G/g_split) and n_v = "
+            "(h_q/h_v)/(G/g_split), G = gcd(h_q/h_k, h_q/h_v)",
         },
         "determinism": {
             "dq": "nondeterministic in the last bits (fp32 atomics) with "
             "dq_mode='atomic' (the default); deterministic (one fixed-order "
             "register sum, no atomics) with dq_mode='split'",
             "dk_dv": "deterministic in direct mode (h_k == h_v, g_split == 1); "
-            "nondeterministic in the last bits in atomic mode",
+            "in atomic mode nondeterministic in the last bits with "
+            "dkv_sink='atomic' (the default), deterministic with "
+            "dkv_sink='slices' (per-CTA fp32 slices, plain stores, summed in "
+            "slice order by the reduce kernel; no atomics)",
+            "atomic_free": "dq_mode='split' with direct dK / dV or "
+            "dkv_sink='slices': no data atomic in any launch, every output "
+            "bit for bit reproducible (AttnBwdPlan.deterministic); a "
+            "deterministic request is served this way only under "
+            "AttnBwdPolicy.deterministic, on " + ", ".join(SPLIT_DQ_ARCHS),
         },
         "perf_policy": {
             "unverified": "waived" if policy.waive_unverified else "declined",

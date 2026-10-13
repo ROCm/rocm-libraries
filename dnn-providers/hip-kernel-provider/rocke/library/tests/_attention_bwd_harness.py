@@ -34,7 +34,6 @@ import ctypes
 import dataclasses
 from dataclasses import dataclass
 from types import MappingProxyType
-from unittest import mock
 
 import numpy as np
 
@@ -285,9 +284,23 @@ def _alignment(base_elems: int) -> int:
 NARROW_VIEWS = ("bhsd", "bshd")
 
 
-def _narrow_strides(view: str, b: int, h: int, s: int, d: int) -> tuple:
+def _narrow_strides(view: str, b: int, h: int, s: int, d: int, unit: int = 1) -> tuple:
     """``(B, H, S, 1)`` element strides of ``view``: odd S and B strides and
-    an H stride that is not a multiple of 8."""
+    an H stride that is not a multiple of 8; with ``unit`` (2 or 4) every
+    stride a multiple of ``unit`` and none of them of 8 (the wider accesses
+    of ``narrow_vec``)."""
+    if unit != 1:
+        if unit not in (2, 4) or d % 8:
+            raise ValueError(f"unit={unit} needs 2 or 4 and D a multiple of 8")
+        if view == "bhsd":
+            ss = d + unit
+            sh = s * ss + unit
+            return (h * sh + unit, sh, ss, 1)
+        if view == "bshd":
+            sh = d + unit
+            ss = h * sh + unit
+            return (s * ss + unit, sh, ss, 1)
+        raise ValueError(f"unknown narrow view {view!r}")
     if view == "bhsd":
         ss = d + 3
         sh = s * ss + (1 if (s * ss + 1) % 8 else 3)
@@ -301,7 +314,7 @@ def _narrow_strides(view: str, b: int, h: int, s: int, d: int) -> tuple:
     return (sb, sh, ss, 1)
 
 
-def narrow_inputs(case, view: str, base_offset: int):
+def narrow_inputs(case, view: str, base_offset: int, *, unit: int = 1):
     """``((inputs, reference), request fields)`` of a batched case re-laid out
     for narrow access.
 
@@ -309,6 +322,9 @@ def narrow_inputs(case, view: str, base_offset: int):
     and the strides of :func:`_narrow_strides` (per-tensor heads and sequence
     length); the stride gaps of the inputs hold NaN, so a read outside the
     views poisons the result. The oracle is unchanged (same logical values).
+    ``unit`` (2 or 4) makes every stride a multiple of it (none of 8), for the
+    ``narrow_vec`` access widths; pair it with a ``base_offset`` of ``unit``
+    elements (a ``2 * unit``-byte aligned base).
     """
     if case.length_mode == "ragged" or case.layout == "packed_qkv":
         raise ValueError("narrow_inputs re-lays batched, unpacked cases only")
@@ -322,7 +338,7 @@ def narrow_inputs(case, view: str, base_offset: int):
         src = inp.descs[role]
         base = of.get(role, role)
         dims = (case.b, heads[base], seqs[base], case.d)
-        st = _narrow_strides(view, *dims)
+        st = _narrow_strides(view, *dims, unit=unit)
         span = 1 + sum((n - 1) * x for n, x in zip(dims, st))
         dsc = dataclasses.replace(
             src, buffer=role, offset=base_offset, dims=dims, strides=st
@@ -435,6 +451,8 @@ def main_built_with(**body_kw):
     body switches such as ``sentinel=False``); a private kernel cache is used
     so the switched kernel never shares a cache entry with the shipped one
     (on disk it is keyed by its ``cache_variant``)."""
+    from unittest import mock  # here, not at import: it pulls in asyncio
+
     from kernels.common import attention_bwd, attention_bwd_run
 
     def build(spec, *, arch):
@@ -572,7 +590,8 @@ def run_case(
             rt.memcpy_d2h(_u8(ws), dev["__ws"], ws.nbytes)
             after_prep(ws, plan)
             rt.memcpy_h2d(dev["__ws"], _u8(ws), ws.nbytes)
-            run_attn_bwd(_only(plan, ("main", "dq", "convert")), **kw)
+            stages = ("main", "dq", "convert", "reduce", "dense", "dense_dq")
+            run_attn_bwd(_only(plan, stages), **kw)
         rt.sync()
         for name, a in host.items():
             rt.memcpy_d2h(_u8(a), dev[name], a.nbytes)

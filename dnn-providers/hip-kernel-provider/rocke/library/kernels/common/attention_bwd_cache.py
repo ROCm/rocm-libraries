@@ -13,8 +13,9 @@ one layer is read by every other one: the key is the same everywhere.
   the LLVM IR flavor of the lowering (``ROCKE_LLVM_FLAVOR`` or the autodetected
   one), the ``libamd_comgr`` rocKE resolves (path, ROCm vintage and a content
   digest of the library file) and the environment switches that change the
-  emitted IR (``ROCKE_DEBUG_LOC``). It never imports torch: the comgr named is
-  the one the next compile in this process would load.
+  emitted IR (``ROCKE_DEBUG_LOC``). It never imports torch: it pins the
+  production comgr (``attention_bwd_comgr``) and names the one the next
+  compile in this process would load.
 * :func:`backward_source_hash` is a content hash of every Python source the
   backward kernels can depend on under the Python lowering backend: the whole
   ``rocke`` package and every module under ``library/kernels``. Line endings
@@ -68,18 +69,20 @@ __all__ = [
     "CompileCache",
     "Toolchain",
     "backward_source_hash",
+    "comgr_digests",
     "emission_env",
     "entry_key",
     "env_cache",
     "env_cache_stats",
     "patched_emission",
     "process_source_hash",
+    "seed_comgr_digests",
     "source_files",
     "spec_identity",
     "toolchain_identity",
 ]
 
-STAGES = ("main", "prep", "convert", "dq", "dense")
+STAGES = ("main", "prep", "convert", "dq", "reduce", "dense", "dense_dq")
 CACHE_SCHEMA = "rocke_bwd_compile_cache/v1"
 # Directory of the opt-in cache of the run glue (unset: no disk cache).
 HSACO_CACHE_ENV = "ROCKE_BWD_HSACO_CACHE"
@@ -109,6 +112,20 @@ def _comgr_sha(path: str) -> str:
     if key not in _FILE_SHA:
         _FILE_SHA[key] = _sha256_file(path, 12)
     return _FILE_SHA[key]
+
+
+def comgr_digests() -> dict[tuple, str]:
+    """This process's comgr digest memo (to seed a worker process with)."""
+    return dict(_FILE_SHA)
+
+
+def seed_comgr_digests(memo: Mapping[tuple, str]) -> None:
+    """Take another process's digests: the key holds the path, size and
+    mtime, so a file changed since is digested again. Saves every pool
+    worker re-reading the comgr library (a large file on a network home)."""
+    for key, sha in memo.items():
+        if isinstance(key, tuple) and len(key) == 3 and isinstance(sha, str):
+            _FILE_SHA.setdefault(key, sha)
 
 
 def emission_env() -> str:
@@ -150,11 +167,15 @@ class Toolchain:
 def toolchain_identity() -> Toolchain:
     """Flavor, comgr and emission switches the next compile here would use.
 
-    Never imports torch: rocKE prefers a torch-bundled comgr only when torch is
-    already in the process, so the identity follows whatever the process has
-    imported so far (a caller that wants the torch-bundled comgr imports torch
-    first). The library digest is memoised per file version.
+    Never imports torch. It first pins the production comgr (torch's bundled
+    library, found without importing torch; see
+    :func:`kernels.common.attention_bwd_comgr.ensure_production_comgr`), so a
+    torch-free process names the same library, vintage and digest as one that
+    imported torch. The library digest is memoised per file version.
     """
+    from kernels.common.attention_bwd_comgr import ensure_production_comgr
+
+    ensure_production_comgr()
     flavor = os.environ.get("ROCKE_LLVM_FLAVOR")
     if not flavor:
         try:

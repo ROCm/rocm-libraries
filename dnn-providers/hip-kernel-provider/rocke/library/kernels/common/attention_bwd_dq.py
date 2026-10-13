@@ -90,6 +90,7 @@ from kernels.common._attention_bwd_dqbody import (
 from kernels.common._attention_bwd_frag import LdsView, ir_type
 from kernels.common._attention_bwd_gemm import lane_and_wave
 from kernels.common._attention_bwd_refusals import spec_digest
+from kernels.common._attention_bwd_sched import DQ_SCHEDS
 from kernels.common._attention_bwd_worklist import xcd_remap_id
 from kernels.common.attention_bwd import (
     BWD_BARRIER_FENCE,
@@ -113,6 +114,8 @@ __all__ = [
     "DQ_HEAD_LOOPS",
     "DQ_KV_PADS",
     "DQ_PROBLEM_FIELDS",
+    "DQ_SCHEDS",
+    "DQ_SCHED_SPILLING",
     "DQ_STATIC_SCALES",
     "DQ_TRANSPOSE_SOURCES",
     "DQ_TUNING_FIELDS",
@@ -142,8 +145,12 @@ DQ_SPILLING_COMBOS = frozenset({("gfx950", 128, 4, 64, 64, True, "group", True)}
 # segfault in the "iterative-ilp" scheduler, found by compiling every
 # problem shape (dtype x head size x layout x mask x stage_vec x {plain, edge
 # tiles, group head loop, K / V prefetch}) at the default dQ tile and the
-# 8-wave 128 x 32 tile; and the dQ geometries that spill to scratch on the
-# production compiler in the device-test cells (2-wave 32 x 128 tiles); keyed
+# 8-wave 128 x 32 tile; the dQ geometries that spill to scratch on the
+# production compiler in the device-test cells (2-wave 32 x 128 tiles); and the
+# dQ specs of custom-configuration device cells that crash the compiler or
+# spill (split dQ knob variants, the THD LSE-stride cell); the 4-wave
+# 64 x 128 tile at d128 on gfx950 and at d64 on gfx942 on the dQ schedule
+# suite's gate rows (the default key step spills there); keyed
 # like RESOURCE_REFUSED: (arch, digest of the non-default resolved fields) ->
 # the failure and the row it was found on.
 DQ_RESOURCE_REFUSED = MappingProxyType(
@@ -165,6 +172,7 @@ DQ_RESOURCE_REFUSED = MappingProxyType(
         ("gfx942", "3265515ecd91cd2a"): "compiler crash (comgr segfault): dqilp|fp16|d128|thd|none|sv8|prefetch|default",
         ("gfx942", "344d64165933427d"): "scratch+vgpr_spill+sgpr_spill: custom numeric::test_table_case[bwd_dtype_bf16_d128_causal_tl-custom]",
         ("gfx942", "36523b3bfc86b46f"): "compiler crash (comgr segfault): dqilp|bf16|d128|thd|none|sv8|prefetch|default",
+        ("gfx942", "3fce661e7f9933ec"): "scratch+vgpr_spill: dq_sched twin gfx942 d64 fp16 batched band sv8 n128",
         ("gfx942", "43be8c1495bca6bc"): "compiler crash (comgr segfault): dqilp|fp16|d64|thd|none|sv8|edge|default",
         ("gfx942", "44f6d242e09a9caf"): "compiler crash (comgr segfault): dqilp|bf16|d128|batched|none|sv1|prefetch|default",
         ("gfx942", "4944e81a2fa35cf2"): "compiler crash (comgr segfault): dqilp|bf16|d64|batched|band|sv1|plain|default",
@@ -187,6 +195,7 @@ DQ_RESOURCE_REFUSED = MappingProxyType(
         ("gfx942", "948a9dd4918b3232"): "compiler crash (comgr segfault): dqilp|fp16|d64|thd|band|sv1|edge|default",
         ("gfx942", "9fac47fbe0871a7d"): "compiler crash (comgr segfault): dqilp|bf16|d128|batched|band|sv1|prefetch|default",
         ("gfx942", "a0b4d52649a29165"): "compiler crash (comgr segfault): dqilp|fp16|d128|batched|none|sv8|prefetch|default",
+        ("gfx942", "a7596dcf902264d6"): "scratch+vgpr_spill: plain cell c16-gfx942::bwd_decode_ragged_kv_lens",
         ("gfx942", "b612fdf3332339d4"): "compiler crash (comgr segfault): dqilp|fp16|d64|thd|band|sv1|group|default",
         ("gfx942", "b622ec77d7cb8712"): "compiler crash (comgr segfault): dqilp|bf16|d64|thd|band|sv1|plain|default",
         ("gfx942", "bb0f0749f2373e3a"): "compiler crash (comgr segfault): dqilp|bf16|d64|thd|none|sv1|edge|default",
@@ -197,6 +206,7 @@ DQ_RESOURCE_REFUSED = MappingProxyType(
         ("gfx942", "ca468cab59d5334f"): "compiler crash (comgr segfault): dqilp|fp16|d64|thd|band|sv8|group|default",
         ("gfx942", "d231a785ca9a7c10"): "scratch+vgpr_spill: custom numeric::test_table_case[bwd_dtype_fp16_d128_mha-custom]",
         ("gfx942", "d309ba59fca486d9"): "compiler crash (comgr segfault): dqilp|bf16|d64|thd|band|sv1|edge|default",
+        ("gfx942", "d44134ed00ca60b2"): "scratch+vgpr_spill: dq_sched twin gfx942 d64 bf16 thd none sv1 n128",
         ("gfx942", "d52e65d33d65cfc0"): "compiler crash (comgr segfault): dqilp|fp16|d64|batched|none|sv1|edge|default",
         ("gfx942", "d69c90b5bf9ea89f"): "scratch+vgpr_spill: custom numeric::test_head_packing[bwd_kern_pack_sq3_g2_win_bf16_d64-custom]",
         ("gfx942", "d72209bd582b3585"): "compiler crash (comgr segfault): dqilp|fp16|d64|batched|band|sv8|group|default",
@@ -209,11 +219,13 @@ DQ_RESOURCE_REFUSED = MappingProxyType(
         ("gfx942", "fc12a8d59e57cddc"): "scratch+vgpr_spill: custom numeric::test_table_case[bwd_kern_base_bshd_fp16_d64-custom]",
         ("gfx950", "01c42a03998508a6"): "compiler crash (comgr segfault): dqilp|bf16|d128|batched|none|sv1|prefetch|s3",
         ("gfx950", "03fbfad4d4c39188"): "compiler crash (comgr segfault): dqilp|bf16|d128|batched|none|sv8|prefetch|default",
+        ("gfx950", "0afb4aa0d7b83ff9"): "compiler crash (comgr segfault): launch c26-gfx950::split_numeric::test_split_dq_knobs[bwd_seqlen_33x72_br-lds_plain-custom]",
         ("gfx950", "108dca04d2a354cd"): "compiler crash (comgr segfault): dqilp|bf16|d128|batched|none|sv1|group|s3",
         ("gfx950", "110eb12f69f6eb8f"): "compiler crash (comgr segfault): dqilp|bf16|d128|batched|none|sv8|group|s3",
         ("gfx950", "155777e0a307c68f"): "compiler crash (comgr segfault): dqilp|bf16|d128|thd|none|sv1|edge|s3",
         ("gfx950", "1e5d66f1cce2e109"): "compiler crash (comgr segfault): dqilp|bf16|d128|batched|band|sv8|plain|default",
         ("gfx950", "1f4524852843370b"): "compiler crash (comgr segfault): dqilp|bf16|d128|thd|band|sv1|edge|s3",
+        ("gfx950", "22da194becf8f6f4"): "compiler crash (comgr segfault): launch c15-gfx950::split_numeric::test_split_dq_knobs[bwd_gqa_gqa4_causal_tl-atom4_32-custom]",
         ("gfx950", "263edf5dfe075ebc"): "compiler crash (comgr segfault): dqilp|bf16|d128|thd|band|sv8|plain|default",
         ("gfx950", "2ac01b45a2160dd0"): "compiler crash (comgr segfault): dqilp|bf16|d128|batched|band|sv8|edge|s3",
         ("gfx950", "2dc2a412891bcf11"): "compiler crash (comgr segfault): dqilp|bf16|d128|thd|none|sv8|plain|default",
@@ -231,6 +243,7 @@ DQ_RESOURCE_REFUSED = MappingProxyType(
         ("gfx950", "44b7f3c61344fb8b"): "compiler crash (comgr segfault): dqilp|bf16|d128|batched|band|sv1|edge|s3",
         ("gfx950", "479789b4d9b5b54c"): "compiler crash (comgr segfault): dqilp|bf16|d128|batched|band|sv8|group|default",
         ("gfx950", "47a21eed1bb142bb"): "compiler crash (comgr segfault): dqilp|bf16|d64|batched|band|sv1|prefetch|default",
+        ("gfx950", "483637ec672bbc6f"): "compiler crash (comgr segfault): launch c15-gfx950::split_numeric::test_split_dq_knobs[bwd_gqa_gqa4_causal_tl-lds_plain-custom]",
         ("gfx950", "49819c3f95922c6a"): "compiler crash (comgr segfault): dqilp|bf16|d128|batched|none|sv1|edge|s3",
         ("gfx950", "50fa8fd6a834226d"): "compiler crash (comgr segfault): dqilp|bf16|d128|thd|band|sv1|prefetch|default",
         ("gfx950", "51d91e996dd892d7"): "compiler crash (comgr segfault): dqilp|bf16|d64|thd|band|sv8|prefetch|default",
@@ -249,6 +262,7 @@ DQ_RESOURCE_REFUSED = MappingProxyType(
         ("gfx950", "7d9b60af19f30b95"): "compiler crash (comgr segfault): dqilp|bf16|d128|thd|band|sv8|edge|default",
         ("gfx950", "8551cb4dbdecfbcd"): "compiler crash (comgr segfault): dqilp|bf16|d128|thd|none|sv1|group|s3",
         ("gfx950", "856f1b2296e76d76"): "compiler crash (comgr segfault): dqilp|bf16|d64|thd|band|sv1|prefetch|default",
+        ("gfx950", "864f90b79a6a4f7f"): "compiler crash (comgr segfault): launch c26-gfx950::split_numeric::test_split_dq_knobs[bwd_seqlen_33x72_br-atom4_32-custom]",
         ("gfx950", "876a3fd2e6603175"): "compiler crash (comgr segfault): dqilp|bf16|d128|batched|none|sv8|group|default",
         ("gfx950", "89cd1bee1bb678cc"): "compiler crash (comgr segfault): dqilp|bf16|d128|thd|none|sv1|prefetch|s3",
         ("gfx950", "95664a235eb32769"): "compiler crash (comgr segfault): dqilp|bf16|d128|thd|none|sv1|plain|default",
@@ -261,18 +275,23 @@ DQ_RESOURCE_REFUSED = MappingProxyType(
         ("gfx950", "b1ce95e1e9249633"): "compiler crash (comgr segfault): dqilp|bf16|d128|thd|none|sv8|group|default",
         ("gfx950", "b3a9c8b5f5c5cc59"): "scratch+vgpr_spill: custom numeric::test_table_case[bwd_dtype_bf16_d128_causal_tl-custom]",
         ("gfx950", "b66b8b6977353620"): "compiler crash (comgr segfault): dqilp|bf16|d128|batched|band|sv1|plain|default",
+        ("gfx950", "b7af7a797c52c484"): "compiler crash (comgr segfault): launch c15-gfx950::split_numeric::test_split_dq_knobs[bwd_ragged_gqa4_br-atom4_32-custom]",
         ("gfx950", "bfc5bf6503095835"): "compiler crash (comgr segfault): dqilp|bf16|d128|thd|band|sv1|group|s3",
         ("gfx950", "c2207cca8e9aa5f8"): "compiler crash (comgr segfault): dqilp|bf16|d128|batched|band|sv8|plain|s3",
         ("gfx950", "c3a9f8ca70834612"): "compiler crash (comgr segfault): dqilp|bf16|d128|thd|band|sv8|group|default",
         ("gfx950", "cf56b0770814cab2"): "compiler crash (comgr segfault): dqilp|bf16|d128|batched|none|sv1|group|default",
         ("gfx950", "d174246c75cc60bf"): "compiler crash (comgr segfault): dqilp|bf16|d128|batched|band|sv1|prefetch|default",
         ("gfx950", "d2d8449c60b4b33c"): "scratch+vgpr_spill: custom numeric::test_table_case[bwd_dtype_fp16_d128_mha-custom]",
+        ("gfx950", "d6ca19d4769a06e3"): "compiler crash (comgr segfault): launch c15-gfx950::split_numeric::test_split_dq_knobs[bwd_ragged_gqa4_br-lds_plain-custom]",
         ("gfx950", "d786664a42031043"): "compiler crash (comgr segfault): dqilp|bf16|d128|batched|band|sv1|edge|default",
         ("gfx950", "de0d1e5eadf511a5"): "compiler crash (comgr segfault): dqilp|bf16|d64|batched|band|sv8|prefetch|default",
         ("gfx950", "df18afee1cd6c8ee"): "compiler crash (comgr segfault): dqilp|bf16|d128|batched|none|sv1|plain|s3",
         ("gfx950", "e47b2fc6ec53f578"): "compiler crash (comgr segfault): dqilp|bf16|d128|thd|band|sv1|prefetch|s3",
+        ("gfx950", "e49dd005b5c33098"): "scratch+vgpr_spill: plain cell c16-gfx950::bwd_decode_ragged_kv_lens",
         ("gfx950", "ed107b218a9db0fa"): "compiler crash (comgr segfault): dqilp|bf16|d128|thd|band|sv1|plain|default",
         ("gfx950", "ed9712be375b17af"): "compiler crash (comgr segfault): dqilp|bf16|d128|thd|none|sv1|edge|default",
+        ("gfx950", "eeb2c0138cbba2a4"): "scratch+vgpr_spill: dq_sched twin gfx950 d128 bf16 thd none sv1 n128",
+        ("gfx950", "ef82c632482c44d8"): "scratch+vgpr_spill: dq_sched twin gfx950 d128 fp16 batched band sv8 n128",
         ("gfx950", "f847c71670b84533"): "compiler crash (comgr segfault): dqilp|bf16|d128|batched|band|sv1|plain|s3",
         ("gfx950", "f9b435da0516d3c8"): "scratch+vgpr_spill: custom numeric::test_table_case[bwd_kern_base_bshd_bf16_d128-custom]",
         ("gfx950", "fa3170445cb28d65"): "scratch+vgpr_spill: custom numeric::test_head_packing[bwd_kern_pack_thd_sq1_g8_tl_bf16_d128-custom]",
@@ -282,6 +301,14 @@ DQ_RESOURCE_REFUSED = MappingProxyType(
         ("gfx950", "fe85d82b98c66a58"): "compiler crash (comgr segfault): dqilp|bf16|d128|batched|band|sv8|edge|default",
     }
 )  # fmt: skip
+# Schedule values (``sched``) the production compiler spills to scratch at a
+# tile where the default key step does not (resource gate, both measured
+# dtype / sequence / access variants): (arch, head_size, waves, block_m,
+# block_n, kv_prefetch, head_loop, edge_tiles, kv_pad, transpose_source,
+# sched). The validator refuses exactly these.
+DQ_SCHED_SPILLING = frozenset(
+    {("gfx942", 128, 4, 64, 64, True, "single", False, 0, "lds_plain", "iglp0")}
+)
 # Row pad (bytes) of the K and V tiles in LDS (a bank-spreading lever).
 DQ_KV_PADS = (0, 8, 16, 32)
 DQ_AGPR_ALLOC_BACKEND = "backend"
@@ -297,6 +324,7 @@ DQ_PROBLEM_FIELDS = (
     "mask_class",
     "ws_layout",
     "static_scale",
+    "narrow_vec",
     "name",
 )
 _REG_ALLOWANCE_FIXED = 24
@@ -355,7 +383,11 @@ class AttnBwdDqSpec:
     ``stats_prescale``, ``edge_tiles``, ``kv_pad``, ``kv_prefetch`` (the next
     key tile's global loads issued into registers before a step's matrix
     work; same values), ``waves_per_eu``, ``agpr_alloc``,
-    ``scheduler_strategy``; ``xcd_remap`` is set by the plan.
+    ``scheduler_strategy``, ``sched`` (the key step's schedule value,
+    :data:`DQ_SCHEDS`: an ``iglp_opt``, the stage fences, the stage table
+    with or without the wave priority; hints only, same values); ``xcd_remap``
+    is set by the plan, and ``narrow_vec`` (the ``stage_vec = 1`` access
+    width) follows the main spec.
     """
 
     head_size: int
@@ -379,8 +411,13 @@ class AttnBwdDqSpec:
     waves_per_eu: Optional[int] = None
     agpr_alloc: Optional[tuple[int, int] | str] = None  # see DQ_AGPR_ALLOCS
     scheduler_strategy: Optional[str] = None
+    # the key step's schedule value (DQ_SCHEDS; "none" emits no hint)
+    sched: str = "none"
     # True: the CTA decode reads the runtime xcd_n / xcd_chunk kernargs.
     xcd_remap: bool = False
+    # user-tensor access width (elements) under stage_vec = 1 (from the main
+    # spec; the plan narrows it to what the request allows)
+    narrow_vec: int = 1
     name: str = "rocke_attn_bwd"
 
     def __post_init__(self) -> None:
@@ -393,6 +430,10 @@ class AttnBwdDqSpec:
         _check_in("static_scale", self.static_scale, DQ_STATIC_SCALES)
         _check_in("head_loop", self.head_loop, DQ_HEAD_LOOPS)
         _check_in("kv_pad", self.kv_pad, DQ_KV_PADS)
+        _check_in("sched", self.sched, DQ_SCHEDS)
+        _check_in("narrow_vec", self.narrow_vec, (1, 2, 4))
+        if self.narrow_vec != 1 and self.stage_vec != 1:
+            raise ValueError("narrow_vec applies to stage_vec = 1 only")
         opt = {
             "waves": (1, 2, 4, 8),
             "block_m": DQ_BLOCK_M_VALUES,
@@ -728,6 +769,13 @@ def validate_attn_bwd_dq_spec(spec: AttnBwdDqSpec, arch: str) -> AttnBwdDqSpec:
             f"resource gate: this resolved dQ spec fails on {arch} ({refused}; "
             "DQ_RESOURCE_REFUSED)"
         )
+    key = combo + (s.kv_pad, s.transpose_source, s.sched)
+    if key in DQ_SCHED_SPILLING:
+        raise ValueError(
+            f"sched={s.sched!r} at d{d} (waves={w}, block_m={km}, block_n={kn}, "
+            f"kv_prefetch={s.kv_prefetch}) on {arch} spills VGPRs to scratch on the "
+            "production compiler (DQ_SCHED_SPILLING; the default key step does not)"
+        )
     return s
 
 
@@ -858,6 +906,7 @@ def _emit_dq(spec: AttnBwdDqSpec, arch: str, *, sentinel: bool = True):
         return StridedTensorAddr(
             b, a[name], dtype=io, seq=seq, stage_vec=s.stage_vec,
             strides=(a[f"{prefix}_b"], a[f"{prefix}_h"], a[f"{prefix}_t"]),
+            narrow_vec=s.narrow_vec,
         )  # fmt: skip
 
     q_addr = tensor("Q", "q", seq_q)

@@ -502,7 +502,7 @@ def test_the_bench_takes_the_shared_cache_variable(monkeypatch, tmp_path):
     assert bench.make_parser().parse_args([]).compile_cache is None
 
 
-def test_pool_workers_take_the_callers_torch_state(monkeypatch):
+def test_pool_workers_take_the_callers_comgr_digests(monkeypatch):
     seen = {}
 
     class _Pool:
@@ -510,10 +510,23 @@ def test_pool_workers_take_the_callers_torch_state(monkeypatch):
             seen.update(k)
 
     monkeypatch.setattr(bc.cf, "ProcessPoolExecutor", _Pool)
-    bc._process_pool(2, False)
-    assert seen["initargs"] == (False,) and seen["initializer"] is bc._worker_init
+    monkeypatch.setattr(ac, "_FILE_SHA", {("lib", 1, 2): "abc"})
     bc._process_pool(2)
-    assert seen["initargs"] == (True,)
+    assert seen["initializer"] is bc._worker_init
+    assert seen["initargs"] == ({("lib", 1, 2): "abc"},)
+
+
+def test_seeded_comgr_digest_is_keyed_by_the_file_version(monkeypatch, tmp_path):
+    lib = tmp_path / "libamd_comgr.so"
+    lib.write_bytes(b"one")
+    st = lib.stat()
+    monkeypatch.setattr(ac, "_FILE_SHA", {})
+    ac.seed_comgr_digests({(str(lib), st.st_size, st.st_mtime_ns): "seeded"})
+    assert ac._comgr_sha(str(lib)) == "seeded"  # no read of the file
+    lib.write_bytes(b"other content")  # another size: digested again
+    assert ac._comgr_sha(str(lib)) == ac._sha256_file(lib, 12) != "seeded"
+    ac.seed_comgr_digests({"bad": "x", ("a", 1, 2): 3})  # malformed: ignored
+    assert "bad" not in ac._FILE_SHA and ("a", 1, 2) not in ac._FILE_SHA
 
 
 # --------------------------------------------------------------------------- pre-build
@@ -730,6 +743,32 @@ def test_devices_and_shard_env():
     assert rds.PREBUILD_ENV not in env
     args = rds.make_parser().parse_args(["--shards", "4", "--first-shard", "4"])
     assert rds.shard_plan(args, ["0"]) == [(4, "0"), (5, "0"), (6, "0"), (7, "0")]
+
+
+def test_children_share_bytecode_when_the_job_forbids_writing_it():
+    """Under PYTHONDONTWRITEBYTECODE the children get one bytecode directory
+    outside the tree (not a recompile of every source per process); an
+    explicit prefix, an unset variable or --no-pycache keep the environment."""
+    no_pyc = {"PYTHONDONTWRITEBYTECODE": "1"}
+    d = rds.shared_pycache(no_pyc)
+    try:
+        assert d is not None and Path(d).is_dir()
+        env = rds.build_env(
+            no_pyc, cache="c", shard_env=rds.SHARD_ENV, shard="", device=None,
+            prebuild=True, pycache=d,
+        )  # fmt: skip
+        assert env["PYTHONPYCACHEPREFIX"] == d
+        assert "PYTHONDONTWRITEBYTECODE" not in env
+    finally:
+        Path(d).rmdir()
+    assert rds.shared_pycache(no_pyc, disabled=True) is None
+    assert rds.shared_pycache({}) is None
+    assert rds.shared_pycache({**no_pyc, "PYTHONPYCACHEPREFIX": "p"}) is None
+    env = rds.build_env(
+        no_pyc, cache="c", shard_env=rds.SHARD_ENV, shard="", device=None,
+        prebuild=False,
+    )  # fmt: skip
+    assert env["PYTHONDONTWRITEBYTECODE"] == "1" and "PYTHONPYCACHEPREFIX" not in env
 
 
 def test_the_runner_runs_shards_side_by_side(tmp_path, capsys):

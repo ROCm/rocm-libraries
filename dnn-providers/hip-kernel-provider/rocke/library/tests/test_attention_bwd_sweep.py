@@ -662,6 +662,15 @@ def test_cli_count_prints_counts_only(capsys):
     assert (
         sw.main(["--count", "--arch", "gfx942", "--family", "dense", "--d", "64"]) == 0
     )
+    line = capsys.readouterr().out.strip()
+    assert line.startswith(
+        "count arch=gfx942 family=dense d=64 status=seeded_from_general"
+    )
+    assert line.endswith("stages=runtime,confirm")
+    assert (
+        sw.main(["--count", "--arch", "gfx942", "--family", "unified", "--d", "64"])
+        == 0
+    )
     assert capsys.readouterr().out.strip().endswith("status=no_validator")
 
 
@@ -861,3 +870,288 @@ def test_declaration_twins_compile_once_and_keep_the_declaration():
     assert sw.effective_key(t) == sw.effective_key(f)
     reps, dup = sw.dedupe([f, t])
     assert [r.key() for r in reps] == [t.key()] and dup == {f.key(): t.key()}
+
+
+# --------------------------------------------------------------------------- dense family
+ALL = sw.Release(sw.ALL_RELEASED)
+
+
+def _dsl(arch="gfx950", d=128):
+    return sw.primary_slice(arch, "dense", d)
+
+
+def _general_seeds(arch="gfx950", d=128):
+    """Two general runtime-stage survivors: the default tile on the register
+    ring, and the same with a head split."""
+    gsl = _sl(arch, d)
+    k = dict(sw.default_knobs(gsl), ring_depth=2)
+    return [
+        sw.Candidate.make(gsl, k, {"g_split": 1, "lb_order": "natural"}),
+        sw.Candidate.make(gsl, k, {"g_split": 2, "lb_order": "reverse"}),
+    ]
+
+
+def test_dense_is_sweepable_and_seeds_from_the_general_survivors():
+    assert "dense" in sw.SWEEPABLE_FAMILIES
+    sl = _dsl()
+    seeds = _general_seeds()
+    mirror = seeds[0].with_runtime(lb_order="mirror", num_cus=sw.DEVICE_NUM_CUS)
+    prior = {"general:runtime": seeds + [mirror]}
+    cands = sw.stage_candidates("runtime", sl, rel=ALL, prior=prior)
+    assert cands and all(c.slice == sl for c in cands)
+    assert all(c.r["route"] == "dense" and "head_pack" not in c.k for c in cands)
+    # the mirror seed has no dense counterpart
+    assert not any(c.r.get("lb_order") == "mirror" for c in cands)
+    # the body knobs and runtime values are the seeds'
+    body = {k: v for k, v in seeds[0].k.items() if k != "head_pack"}
+    for c in cands:
+        assert {k: c.k[k] for k in body if k not in sw.DENSE_RUNTIME_AXES} == {
+            k: v for k, v in body.items() if k not in sw.DENSE_RUNTIME_AXES
+        }
+        assert c.r["g_split"] in (1, 2)
+    # every dense-only knob value appears; persistent points carry the CU hint
+    for name in ("oob", "epilogue", "edge_tiles", "ws_layout", "persistent"):
+        vals = {c.k.get(name) for c in cands}
+        assert len(vals) >= 2, name
+    assert {c.k.get("persist_decode") for c in cands} >= {"kv_tile_major", "hkv_major"}
+    assert all(
+        c.r.get("num_cus") == sw.DEVICE_NUM_CUS for c in cands if c.k.get("persistent")
+    )
+    # the dense grid remap rides on xcd_chunk (non-persistent points only)
+    xcd = [c for c in cands if c.r.get("xcd_chunk")]
+    assert xcd and all(not c.k.get("persistent") and c.r["num_xcds"] for c in xcd)
+    # other stages of a dense slice have no candidates (no body funnel)
+    assert sw.stage_candidates("geometry", sl, rel=BUILT, prior=prior) == []
+    # before the general runtime stage: its pre-runtime top x runtime values
+    pre = sw.stage_candidates(
+        "runtime", sl, rel=BUILT, prior={"general:codegen": [seeds[0]]},
+        cells=sw.representative_cells(_sl()),
+    )  # fmt: skip
+    assert len({c.r.get("g_split") for c in pre}) > 1
+
+
+def test_dense_legality_keys_and_refusals():
+    sl = _dsl()
+    seed = _general_seeds()[0]
+    d = sw.Candidate.make(sl, seed.k, {**seed.r, "route": "dense"})
+    assert sw.legality(d).ok
+    # a dense candidate is keyed apart from its general twin and by its
+    # dense-only knobs
+    assert d.key() != seed.key()
+    assert sw.effective_key(d) != sw.effective_key(seed)
+    clamp = d.with_knobs(oob="clamp")
+    assert sw.legality(clamp).ok
+    assert sw.effective_key(clamp) != sw.effective_key(d)
+    # not built on the dense shell: the mirror pass (split dQ is built)
+    assert sw.legality(d.with_runtime(lb_order="mirror")).rule == "not_built"
+    assert sw.legality(d.with_knobs(dq_mode="split")).ok
+    # head_pack = False rides along and is dropped from the plan's knobs
+    assert "head_pack" not in d.tuning_knobs()
+    # dense-only knob couplings come from the dense spec
+    bad = d.with_knobs(persist_decode="hkv_major")
+    assert not sw.legality(bad).ok
+    assert sw.legality(d.with_knobs(oob="none")).rule == "catalog"
+    # the general family keeps its keys (no dense field leaks into them)
+    assert sw.Candidate.make(_sl("gfx950"), seed.k, seed.r).key() == seed.key()
+
+
+def test_dense_cells_skip_head_packed_and_thd_cells():
+    from benchmarks.common import attention_bwd_bench as bb
+
+    sl = _dsl("gfx950", 128)
+    cells = sw.cohort_cells(sl)
+    got = sw.dense_cells(sl, cells, 64)
+    assert got and len(got) < len(cells)
+    assert not any(c.is_thd or sw.head_packed(c, 64) for c in got)
+    one = bb.Cell("x", 128, 32, 8, 4, 1, 4096, "causal_tl", "bf16", "bshd")
+    assert sw.head_packed(one, 64) and not sw.dense_cells(sl, [one], 64)
+    mha = bb.Cell("y", 128, 8, 8, 4, 1, 4096, "causal_tl", "bf16", "bshd")
+    assert not sw.head_packed(mha, 64)
+
+
+def test_dense_plan_of_a_candidate_on_a_cell():
+    sl = _dsl("gfx950", 128)
+    seed = _general_seeds()[1]  # g_split = 2
+    d = sw.Candidate.make(sl, seed.k, {**seed.r, "route": "dense"})
+    cell = sw.dense_cells(sl, sw.representative_cells(sl), 128)[0]
+    plan = sw.dense_plan(d, cell)
+    assert plan.route == "dense" and plan.specs["dense"].dkv_mode == "atomic"
+    pers = d.with_knobs(persistent=True).with_runtime(num_cus=sw.DEVICE_NUM_CUS)
+    assert sw.dense_plan(pers, cell).specs["dense"].persistent
+    v = sw.dense_tuned_value(pers)
+    assert v["persistent"] and v["g_split"] == 2 and "route" not in v
+    assert "num_cus" not in v and "head_pack" not in v
+
+
+def _consts(tmp_path):
+    p = tmp_path / "gc.json"
+    p.write_text(json.dumps({"BAND_K": 2.0, "TIE_EPS": 0.01, "RERUN_MAX": 1,
+                             "NOISY_SPREAD": 0.1, "ATTEMPTS_NOISY": 9,
+                             "CLIFF_BAND": 0.2}))  # fmt: skip
+    return p
+
+
+def _arm(t, spread=0.0):
+    return {"status": "ok", "median_ms": t, "spread": spread,
+            "attempt_medians_ms": [t] * 5}  # fmt: skip
+
+
+def test_dense_vs_general_is_a_paired_two_way_verdict(tmp_path):
+    from benchmarks.common import attention_bwd_bench as bb
+
+    consts = bb.load_gate_constants(_consts(tmp_path))
+    s = {
+        "arms": {"rocke|d": _arm(0.9), "rocke|g": _arm(1.0)},
+        "aa_control": "ok",
+        "aa_controls": {"rocke|d": "ok", "rocke|g": "ok"},
+    }
+    r = sw.dense_vs_general(s, "d", "g", consts, gated=True)
+    assert r["win"] and r["verdict"] == "pass" and r["reverse"] == "fail"
+    assert r["aa"] == "ok" and r["gated"]
+    # the A/A of both arms: one arm's twin does not bound the other's noise
+    for per, want in (
+        ({"rocke|d": "fail", "rocke|g": "ok"}, "fail"),
+        ({"rocke|d": "ok", "rocke|g": "incomplete"}, "incomplete"),
+        ({"rocke|g": "ok"}, None),  # the dense arm had no twin
+    ):
+        got = sw.dense_vs_general({**s, "aa_controls": per}, "d", "g", consts,
+                                  gated=True)  # fmt: skip
+        assert got["aa"] == want, per
+    old = {k: v for k, v in s.items() if k != "aa_controls"}  # one twin only
+    assert sw.dense_vs_general(old, "d", "g", consts, gated=True)["aa"] is None
+    tie = {"arms": {"rocke|d": _arm(1.0), "rocke|g": _arm(1.0)}}
+    assert not sw.dense_vs_general(tie, "d", "g", consts, gated=True)["win"]
+    slow = {"arms": {"rocke|d": _arm(1.1), "rocke|g": _arm(1.0)}}
+    assert sw.dense_vs_general(slow, "d", "g", consts, gated=True)["verdict"] == "fail"
+    gone = {"arms": {"rocke|g": _arm(1.0)}}
+    assert (
+        sw.dense_vs_general(gone, "d", "g", consts, gated=True)["verdict"] == "untimed"
+    )
+    assert (
+        sw.dense_vs_general(s, "d", "g", None, gated=True)["verdict"] == "no_constants"
+    )
+
+
+class _Seen(list):
+    """The stages compiled (and ``aa``: the --aa-control all flag of every
+    bench call)."""
+
+
+def _dense_bench(monkeypatch, dense_ms, aa="ok"):
+    """Stub compiler and timing harness: every dense arm at ``dense_ms``, every
+    general arm at 1.0, the A/A control ``aa``."""
+    from benchmarks.common import attention_bwd_bench as bb
+    from benchmarks.common import attention_bwd_compile as bc
+
+    seen = _Seen()
+    seen_aa = []
+
+    def fake_batch(items, **kw):
+        seen.extend(st for st, _ in items)
+        return [_Res(True) for _ in items]
+
+    def fake_bench(argv):
+        out = Path(argv[argv.index("--out-dir") + 1])
+        cfgs = json.loads(Path(argv[argv.index("--rocke-configs") + 1]).read_text())
+        all_twins = "--aa-control" in argv and (
+            argv[argv.index("--aa-control") + 1] == "all"
+        )
+        seen_aa.append(all_twins)
+        for cid in argv[argv.index("--ids") + 1].split(","):
+            arms = {"default|native": _arm(2.0)}
+            for c in cfgs["configs"]:
+                dense = c["runtime"].get("route") == "dense"
+                arms[f"rocke|{c['label']}"] = _arm(dense_ms if dense else 1.0)
+            labels = [c["label"] for c in cfgs["configs"]]
+            per = {f"rocke|{x}": aa for x in (labels if all_twins else labels[:1])}
+            bb.append_jsonl(out / "cells.jsonl", {
+                "id": cid, "complete": True, "bar_arm": "default|native", "arms": arms,
+                "aa_control": aa, "aa_controls": per,
+                "verdicts": {f"rocke|{c['label']}": "pass" for c in cfgs["configs"]},
+            })  # fmt: skip
+        bb.append_jsonl(out / "env.jsonl", {"host": "n"})
+        return 0
+
+    monkeypatch.setattr(bc, "compile_batch", fake_batch)
+    monkeypatch.setattr(bb, "main", fake_bench)
+    seen.aa = seen_aa  # the --aa-control all flag of every bench call
+    return seen
+
+
+def _dense_driver(tmp_path):
+    d = _driver(tmp_path)
+    d.o = sw.Options(out=tmp_path, arch="gfx950", release=BUILT, gate="x:y",
+                     gate_constants=str(_consts(tmp_path)))  # fmt: skip
+    return d
+
+
+def _seed_general(tmp_path, arch="gfx950", d=128):
+    gsl = _sl(arch, d)
+    seeds = _general_seeds(arch, d)
+    _write(tmp_path, gsl, "runtime", [_timed(c, 0.5 + i, "runtime")
+                                      for i, c in enumerate(seeds)])  # fmt: skip
+    return seeds
+
+
+def test_dense_runtime_stage_compiles_dense_kernels_per_cell(tmp_path, monkeypatch):
+    sl = _dsl()
+    _seed_general(tmp_path)
+    seen = _dense_bench(monkeypatch, 0.8)
+    drv = _dense_driver(tmp_path)
+    assert drv.run_stage(sl, "geometry") == {"skipped": "dense_seeds_from_general"}
+    counts = drv.run_stage(sl, "runtime")
+    assert counts["timed"] > 0 and set(seen) == {"dense"}
+    recs = [r for r in sw.read_records(tmp_path, sl, "runtime").values()
+            if r["status"] == "timed"]  # fmt: skip
+    cells = sw.dense_cells(sl, sw.representative_cells(sl), 128)
+    assert recs and all(len(r["kernel"]) <= len(cells) for r in recs)
+    assert all(r["runtime"]["route"] == "dense" for r in recs)
+
+
+@pytest.mark.parametrize(
+    "dense_ms,aa,gated,want",
+    [(0.8, "ok", True, True), (1.0, "ok", True, False), (0.8, "fail", True, False),
+     (0.8, "ok", False, False)],
+)  # fmt: skip
+def test_dense_confirm_and_table_entries(tmp_path, monkeypatch, dense_ms, aa,
+                                         gated, want):  # fmt: skip
+    """confirm times the best dense candidate against the general winner
+    (general first, one group); a key enters the table only on a paired win
+    on every cell with a clean A/A and the gate on."""
+    sl = _dsl()
+    seeds = _seed_general(tmp_path)
+    best = sw.Candidate.make(sl, seeds[0].k, {**seeds[0].r, "route": "dense"})
+    _write(tmp_path, sl, "runtime", [_timed(best, 0.4, "runtime")])
+    cands = sw.stage_candidates("confirm", sl, rel=BUILT, prior=_dense_driver(
+        tmp_path).prior(sl))  # fmt: skip
+    assert [c.slice.family for c in cands] == ["general", "dense"]
+    assert cands[0] == seeds[0] and cands[1] == best
+    seen = _dense_bench(monkeypatch, dense_ms, aa)
+    drv = _dense_driver(tmp_path)
+    if not gated:
+        drv.o = replace_opts(drv.o, gate=None)
+    drv.run_stage(sl, "confirm")
+    assert seen.aa and all(seen.aa)  # confirm: a twin of every arm
+    recs = sw.read_records(tmp_path, sl, "confirm")
+    dense = [r for r in recs.values() if r["slice"]["family"] == "dense"]
+    assert dense and all("vs_general" in r for r in dense)
+    entries = sw.dense_table_entries(tmp_path, sl)
+    if not want:
+        assert entries == []
+        return
+    assert entries and all(e["arch"] == "gfx950" for e in entries)
+    for e in entries:
+        assert e["knobs"]["ring_depth"] == 2 and "route" not in e["knobs"]
+        assert len(e["key"]) == 9
+    # CLI: the entries are written outside the source tree
+    dest = tmp_path / "table.json"
+    argv = ["--arch", "gfx950", "--family", "dense", "--d", "128", "--out-dir",
+            str(tmp_path), "--emit-dense-table", str(dest)]  # fmt: skip
+    assert sw.main(argv) == 0
+    assert json.loads(dest.read_text())["entries"] == json.loads(json.dumps(entries))
+
+
+def replace_opts(o, **kw):
+    import dataclasses
+
+    return dataclasses.replace(o, **kw)

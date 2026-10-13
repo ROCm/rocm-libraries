@@ -12,6 +12,17 @@ the general family's (planned by
 ``g_split``, ``ws_layout``, scale placement and aux knobs); only the main
 launch is replaced by the dense kernel (``rocke.attn_dense_bwd.v1``).
 
+Under ``dq_mode = "split"`` (a dense spec field) the plan is ``prep -> dense
+main -> dense dQ [-> convert(dK), convert(dV)]``: the general plan in split
+mode supplies prep without the dQ zero fill, the workspace without ``WS_DQ``
+and the dQ kernel's multipliers (the dQ convert's multiplier folded into
+``dq_mult``); its dQ launch is replaced by the dense dQ kernel
+(:mod:`kernels.common.attention_dense_bwd_dq`, ``rocke.attn_dense_bwd_dq.v1``,
+stage ``"dense_dq"``) on grid ``(ceil(s_q / R), h_q / H, B)``. The dQ
+kernel's tuning values are the general plan's ``DQ_KNOBS`` (``dq_<field>``,
+``dq_xcd_chunk``), from the hook or, with a given ``spec``, in ``runtime``;
+they are refused without split.
+
 :func:`dense_bwd_spec_for` builds the per-arch dense spec of a request:
 problem fields from the request, the mask from its band, ``ragged`` when a
 length is not a tile multiple, knobs from the tuning hook (``route =
@@ -20,6 +31,11 @@ shared body's knobs (merged into ``body_knobs``), the runtime plan values of
 the general family (``g_split``, ``lb_order``, ``xcd_chunk``,
 ``scale_placement``; ``use_worklist`` must be False), the aux values, and
 ``num_persistent`` (persistent grids; default ``num_cus`` of the request).
+``head_pack = False`` is accepted (and dropped: the dense body never packs
+heads); ``head_pack = True`` is refused as not built (short-query GQA
+requests stay on the general route). A hook configuration with ``g_split >
+1`` gets ``dkv_mode = "atomic"`` unless it sets ``dkv_mode`` itself, as in
+the general plan.
 As in the general plan, the body knobs ``static_scale`` (from
 ``scale_placement``, unless pinned to ``"runtime"``) and ``lb_interleave``
 (from ``lb_order = "interleave"``) and the dense ``xcd_remap`` (from a non-zero
@@ -38,7 +54,9 @@ import math
 from typing import Any, Mapping, Optional
 
 from kernels.common.attention_bwd_plan import (
+    _GRID_YZ_MAX,
     AUX_KNOBS,
+    DQ_KNOBS,
     FEATURE_GROUPS,
     LB_ORDERS,
     RUNTIME_KNOBS,
@@ -58,6 +76,13 @@ from kernels.common.attention_bwd_plan import (
     shipped_policy,
 )
 from kernels.common.attention_bwd import attn_bwd_arch_facts, static_unit_mults
+from kernels.common.attention_bwd_dq import dq_static_unit_mults
+from kernels.common.attention_dense_bwd_dq import (
+    AttentionDenseBwdDqSpec,
+    attn_dense_bwd_dq_grid,
+    attn_dense_bwd_dq_params,
+    validate_attn_dense_bwd_dq_spec,
+)
 from kernels.common.attention_dense_bwd_spec import (
     DENSE_BODY_KNOBS,
     AttentionDenseBwdSpec,
@@ -120,6 +145,19 @@ def _mask_fields(req: AttnBwdRequest) -> dict:
     )
 
 
+def _check_head_pack(value) -> None:
+    """``head_pack`` in a dense knob set: ``False`` is what the dense body
+    does (it is dropped); ``True`` is refused (not built: the dense shell
+    stages one query head per q step and has no packed dQ sink or
+    ``pack_heads`` kernarg; short-query GQA requests stay on the general
+    route, whose plan packs them)."""
+    if value is not False:
+        raise ValueError(
+            f"head_pack={value!r} is not built on the dense route (one query "
+            "head per q step); short-query GQA requests stay on the general route"
+        )
+
+
 def dense_bwd_spec_for(
     req: AttnBwdRequest, arch: str, knobs: Optional[Mapping[str, Any]] = None
 ) -> AttentionDenseBwdSpec:
@@ -137,6 +175,9 @@ def dense_bwd_spec_for(
     for k in list(knobs):
         if k in DENSE_BODY_KNOBS:
             body[k] = knobs.pop(k)
+    for src in (knobs, body):
+        if "head_pack" in src:
+            _check_head_pack(src.pop("head_pack"))
     unknown = set(knobs) - set(_DENSE_SPEC_KNOBS)
     if unknown:
         raise ValueError(f"unknown dense knobs {sorted(unknown)}")
@@ -176,8 +217,8 @@ def attn_dense_bwd_plan(
 
     ``spec``: a dense spec to use instead of the tuning hook's (it must serve
     the request); ``runtime``: runtime and aux values (``RUNTIME_KNOBS``,
-    ``AUX_KNOBS``, ``num_persistent``) used with ``spec`` (or on top of the
-    hook's). Raises ``ValueError`` when the predicate declines, the request
+    ``AUX_KNOBS``, ``num_persistent``, and the dQ kernel's ``DQ_KNOBS`` of a
+    split spec) used with ``spec`` (or on top of the hook's). Raises ``ValueError`` when the predicate declines, the request
     is not dense-eligible, or a value is illegal.
     """
     policy = shipped_policy() if policy is None else policy
@@ -197,6 +238,9 @@ def attn_dense_bwd_plan(
     runtime_in = {k: tuned.pop(k) for k in RUNTIME_KNOBS if k in tuned}
     aux_in = {k: tuned.pop(k) for k in AUX_KNOBS if k in tuned}
     dense_rt = {k: tuned.pop(k) for k in DENSE_RUNTIME_KNOBS if k in tuned}
+    # the dense dQ kernel's values (dq_mode = "split" only), as in the general
+    # plan; with a given spec they ride in ``runtime``
+    dq_in = {k: tuned.pop(k) for k in DQ_KNOBS if k in tuned}
     placement = runtime_in.get("scale_placement", "fold_ds")
     if placement not in SCALE_PLACEMENTS:
         raise ValueError(f"scale_placement={placement!r} not in {SCALE_PLACEMENTS}")
@@ -217,6 +261,10 @@ def attn_dense_bwd_plan(
         if lb_name == "interleave":
             body_in["lb_interleave"] = True
         tuned["body_knobs"] = tuple(sorted(body_in.items()))
+        # dK / dV are atomic exactly when the head group is split (the
+        # general plan's rule), so one knob set serves both routes
+        if int(runtime_in.get("g_split", 1)) > 1:
+            tuned.setdefault("dkv_mode", "atomic")
         spec = dense_bwd_spec_for(req, arch, tuned)
     elif tuned:
         raise ValueError(f"spec given: knobs {sorted(tuned)} are not runtime values")
@@ -283,6 +331,41 @@ def attn_dense_bwd_plan(
             raise ValueError("a persistent dense plan needs num_persistent or num_cus")
     elif dense_rt.get("num_persistent"):
         raise ValueError("num_persistent needs a spec with persistent=True")
+    split = spec.dq_mode == "split"
+    if dq_in and not split:
+        raise ValueError(f"dQ kernel knobs {sorted(dq_in)} need dq_mode='split'")
+    dq_spec = dq_grid = None
+    dq_xcd_n = dq_xcd_chunk = 0
+    if split:
+        # The dense dQ kernel: the general dQ kernel's tuning values on this
+        # problem (its scale placement follows the main kernel's).
+        dq_tuning = {k[3:]: v for k, v in dq_in.items() if k != "dq_xcd_chunk"}
+        dq_spec = AttentionDenseBwdDqSpec.of(spec, body.dq_spec(**dq_tuning))
+        resolved = validate_attn_dense_bwd_dq_spec(dq_spec, arch)
+        dq_spec = dataclasses.replace(dq_spec, dq=resolved)
+        dq_grid = attn_dense_bwd_dq_grid(dq_spec, arch, batch=req.b)
+        if dq_grid[1] > _GRID_YZ_MAX or dq_grid[0] >= 2**31:
+            raise ValueError(f"GRID_LIMIT: dQ grid {dq_grid}")
+        chunk_in = dq_in.get("dq_xcd_chunk", 0)
+        if req.num_xcds:
+            gxd = dq_grid[0]
+            chunk_in = {"gx": gxd, "2gx": 2 * gxd, "4gx": 4 * gxd}.get(
+                chunk_in, chunk_in
+            )
+            dq_xcd_chunk = int(chunk_in) or 0
+            if dq_xcd_chunk and dq_xcd_chunk not in (gxd, 2 * gxd, 4 * gxd, 64):
+                raise ValueError(
+                    f"dq_xcd_chunk={dq_xcd_chunk} not in (gx, 2*gx, 4*gx, 64)"
+                )
+            dq_xcd_n = int(req.num_xcds) if dq_xcd_chunk else 0
+        elif chunk_in:
+            raise ValueError("dq_xcd_chunk needs num_xcds")
+        if dq_xcd_n and not dq_spec.dq.xcd_remap:
+            # only a kernel built with the remap reads xcd_n / xcd_chunk
+            dq_spec = dataclasses.replace(
+                dq_spec, dq=dataclasses.replace(dq_spec.dq, xcd_remap=True)
+            )
+            validate_attn_dense_bwd_dq_spec(dq_spec, arch)
 
     # The general plan supplies prep, the converts, the workspace and the
     # multipliers (its own main launch is replaced). The predicate verdict
@@ -293,6 +376,11 @@ def attn_dense_bwd_plan(
     inner_knobs["g_split"] = g_split
     if "scale_placement" in runtime_in:
         inner_knobs["scale_placement"] = runtime_in["scale_placement"]
+    if split:
+        # prep without the dQ zero fill, no WS_DQ, no dQ convert; the general
+        # dQ launch supplies the dQ kernel's multipliers (the convert's folded
+        # into dq_mult) and is replaced by the dense one
+        inner_knobs["dq_mode"] = "split"
 
     def inner_tuning(_req, _arch, _route, _pclass):
         return dict(inner_knobs)
@@ -352,9 +440,46 @@ def attn_dense_bwd_plan(
     names = [n for n, _ in attn_dense_bwd_params(spec)]
     if sorted(list(dense.pointers) + list(dense.scalars)) != sorted(names):
         raise AssertionError("dense kernargs out of sync with the ABI")
-    launches = tuple(dense if s.stage == "main" else s for s in general.launches)
-    specs = {k: v for k, v in general.specs.items() if k != "main"}
+    swap = {"main": dense}
+    if split:
+        gdq = next(s for s in general.launches if s.stage == "dq")
+        dq_scalars = {k: gdq.scalars[k] for k in ("scale_log2", "ds_mult", "dq_mult")}
+        if any(
+            dq_scalars[n] != 1.0 for n in dq_static_unit_mults(dq_spec.dq.static_scale)
+        ):
+            raise AssertionError("a multiplier the dQ kernel does not apply is not 1.0")
+        dq_scalars.update(batch=req.b, xcd_n=dq_xcd_n, xcd_chunk=dq_xcd_chunk)
+        dq_ptrs = {
+            "Q": "q",
+            "K": "k",
+            "V": "v",
+            "dO": "do",
+            "dQ": "dq",
+            "WS_LSE2": "WS_LSE2",
+            "WS_DSUM": "WS_DSUM",
+        }
+        swap["dq"] = LaunchStep(
+            "dense_dq",
+            dq_spec.kernel_name(),
+            dq_grid,
+            dq_spec.dq.waves * facts.wave_size,
+            _freeze(dq_scalars),
+            _freeze(dq_ptrs),
+        )
+        got = sorted(list(dq_ptrs) + list(dq_scalars))
+        if got != sorted(n for n, _ in attn_dense_bwd_dq_params(dq_spec)):
+            raise AssertionError("dense dQ kernargs out of sync with the ABI")
+        dq_convert = any(
+            s.stage == "convert" and s.pointers["SRC"] == "WS_DQ"
+            for s in general.launches
+        )
+        if "WS_DQ" in layout or dq_convert:
+            raise AssertionError("a split dense plan with a dQ workspace or convert")
+    launches = tuple(swap.get(s.stage, s) for s in general.launches)
+    specs = {k: v for k, v in general.specs.items() if k not in ("main", "dq")}
     specs["dense"] = spec
+    if split:
+        specs["dense_dq"] = dq_spec
     rt = dict(general.runtime)
     rt.update(
         lb_order=lb_name,
@@ -363,6 +488,8 @@ def attn_dense_bwd_plan(
         pack_heads=0,
         num_persistent=num_persistent,
     )
+    if split:
+        rt.update(dq_xcd_n=dq_xcd_n, dq_xcd_chunk=dq_xcd_chunk)
     return dataclasses.replace(
         general,
         route="dense",

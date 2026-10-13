@@ -18,7 +18,13 @@ knobs}`` with the dense key of
 :func:`kernels.common.attention_bwd_plan._dense_key`. A request routes to the
 dense family only when its exact key is in this table (and passed its gate);
 the table is empty until a key's performance gate passes, so routing is
-unchanged by the registry alone.
+unchanged by the registry alone. It joins the per-arch tables
+(:mod:`.gfx950_tuning`: ``DENSE_TUNED``).
+
+``dq_mode = "split"`` is built on the dense route: the dense main kernel
+computes dK / dV only and the dense split dQ kernel
+(:mod:`kernels.common.attention_dense_bwd_dq`) takes the general dQ kernel's
+values (:func:`dense_dq_axes`, the plan's ``DQ_KNOBS``).
 """
 
 from __future__ import annotations
@@ -33,12 +39,14 @@ from kernels.common.attention_dense_bwd_spec import (
     DENSE_OOB_MODES,
     DENSE_PERSIST_DECODES,
     AttentionDenseBwdSpec,
+    _shell_not_built,
     dense_bwd_not_built,
     validate_attn_dense_bwd_spec,
 )
 from kernels.common.attention_bwd import WS_LAYOUTS, _not_built
-from kernels.common.attention_bwd_plan import AUX_KNOBS, RUNTIME_KNOBS
+from kernels.common.attention_bwd_plan import AUX_KNOBS, DQ_KNOBS, RUNTIME_KNOBS
 
+from . import gfx950_tuning
 from .tuning_common import BWD_KNOB_AXES, KIND_RUNTIME, KnobAxis, backward_axis
 
 __all__ = [
@@ -46,6 +54,7 @@ __all__ = [
     "DENSE_BWD_TUNED",
     "dense_axis",
     "dense_body_axes",
+    "dense_dq_axes",
     "dense_runtime_axes",
     "dense_spec_legality",
     "dense_tuning_axes",
@@ -56,6 +65,12 @@ _BODY_VARIANTS = {"gfx942": ("general", "xt"), "gfx950": ("general", "trload")}
 
 def _persistent_only(value, knobs: Mapping[str, Any]) -> bool:
     return value == "kv_tile_major" or bool(knobs.get("persistent"))
+
+
+def _req_dq_mode(value, knobs: Mapping[str, Any]) -> bool:
+    # the dense main kernel is the shared body: the general family's split
+    # couplings (looked up at call time, so a coupling change there holds here)
+    return backward_axis("dq_mode").applies(value, knobs)
 
 
 DENSE_BWD_KNOB_AXES: tuple[KnobAxis, ...] = (
@@ -110,8 +125,12 @@ DENSE_BWD_KNOB_AXES: tuple[KnobAxis, ...] = (
         ("atomic", "split"),
         family=8,
         stage="structure",
-        numerics="n/a",
-        not_built=("split",),
+        numerics="reorders_fp",
+        not_built=backward_axis("dq_mode").not_built,
+        requires=_req_dq_mode,
+        note="'split': the dense main kernel computes dK / dV only and the dense "
+        "Q-parallel dQ kernel dQ (the general dQ kernel's dq_* values); the "
+        "split main kernel's couplings are the general family's",
     ),
     KnobAxis(
         "num_persistent",
@@ -129,9 +148,13 @@ _BY_NAME = {ax.name: ax for ax in DENSE_BWD_KNOB_AXES}
 _SHARED_RUNTIME = tuple(k for k in RUNTIME_KNOBS if k != "use_worklist") + tuple(
     AUX_KNOBS
 )
+# The split dQ kernel's values (dq_mode = "split"): the general family's dQ
+# axes, taken by the dense dQ kernel (its spec carries them).
+_SHARED_DQ = tuple(DQ_KNOBS)
 
-# The tuned dense table (empty until a dense key passes its performance gate).
-DENSE_BWD_TUNED: Mapping[tuple, Mapping[str, Any]] = {}
+# The tuned dense table: the per-arch tables (dispatch.attention_bwd.<arch>
+# _tuning; empty until a dense key passes its performance gate).
+DENSE_BWD_TUNED: Mapping[tuple, Mapping[str, Any]] = {**gfx950_tuning.DENSE_TUNED}
 
 
 def dense_axis(name: str) -> KnobAxis:
@@ -139,7 +162,7 @@ def dense_axis(name: str) -> KnobAxis:
     body knob or of a shared runtime / aux value."""
     if name in _BY_NAME:
         return _BY_NAME[name]
-    if name in DENSE_BODY_KNOBS or name in _SHARED_RUNTIME:
+    if name in DENSE_BODY_KNOBS or name in _SHARED_RUNTIME or name in _SHARED_DQ:
         return backward_axis(name)
     raise KeyError(f"no dense backward knob {name!r}")
 
@@ -155,11 +178,18 @@ def dense_runtime_axes() -> tuple[KnobAxis, ...]:
     return tuple(backward_axis(n) for n in _SHARED_RUNTIME)
 
 
+def dense_dq_axes() -> tuple[KnobAxis, ...]:
+    """General dQ-kernel axes the dense split dQ kernel takes (``dq_*``;
+    ``dq_mode = "split"`` only)."""
+    return tuple(backward_axis(n) for n in _SHARED_DQ)
+
+
 def dense_tuning_axes(arch: str, level: str = "production") -> tuple[KnobAxis, ...]:
-    """Dense-only axes plus the body and shared runtime axes, each with values
-    on ``arch``."""
+    """Dense-only axes plus the body, shared runtime and dQ-kernel axes, each
+    with values on ``arch``."""
     out = []
-    for ax in DENSE_BWD_KNOB_AXES + dense_body_axes() + dense_runtime_axes():
+    axes = DENSE_BWD_KNOB_AXES + dense_body_axes() + dense_runtime_axes()
+    for ax in axes + dense_dq_axes():
         if ax.level == "full" and level != "full":
             continue
         if ax.values(arch, level):
@@ -173,7 +203,7 @@ def dense_spec_legality(spec: AttentionDenseBwdSpec, arch: str) -> str:
         body = validate_attn_dense_bwd_spec(spec, arch)
     except ValueError:
         return "illegal"
-    if dense_bwd_not_built(spec) or _not_built(body):
+    if dense_bwd_not_built(spec) or _not_built(body) or _shell_not_built(body):
         return "not_built"
     return "legal"
 

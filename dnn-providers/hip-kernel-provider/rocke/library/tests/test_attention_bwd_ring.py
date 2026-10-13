@@ -195,14 +195,21 @@ class _Race(AssertionError):
 
 
 def simulate(depth, trips, waves, rows, cols, n_a, *, waits=None, phantom=True,
-             drain=True):  # fmt: skip
+             drain=True, atomics_at="end"):  # fmt: skip
     """Replay the DMA ring of one q loop wave by wave (in-order completion).
+
+    ``atomics_at``: where a step issues its ``n_a`` dQ atomics: ``"end"``
+    (its own, in stage D after the dS barrier) or ``"top"`` (the deferred
+    batch of ``stage_table_atomics``: the previous step's, zeros on the
+    first step, in stage A right after the step's copy and its wait).
 
     Raises :class:`_Race` when a step would read a tile that has not landed
     in some wave at the barrier that publishes it, a copy is issued into a
     slot that is still being read, a slot holds the wrong tile when read, or
     a copy is still in flight after the loop.
     """
+    if atomics_at not in ("end", "top"):
+        raise ValueError(f"atomics_at={atomics_at!r}")
     batch = DmaBatch(rows, cols, waves)
     waits = waits or dma_wait_counts(depth, batch.min_per_wave, n_a)
     sched = ring_slot_schedule(depth, "dma")
@@ -259,13 +266,16 @@ def simulate(depth, trips, waves, rows, cols, n_a, *, waits=None, phantom=True,
                 t = i + ahead
                 if t < trips or phantom:
                     issue(t if t < trips else i, t % depth)
+            if atomics_at == "top":
+                queue.extend([("atomic",)] * n_a)  # stage A
             slot = i % depth
             if slot_tile.get(slot, (None,))[0] != i:
                 raise _Race(f"slot {slot} holds {slot_tile.get(slot)}, step {i}")
             reading.add(slot)
             barrier()  # mid (dS) barrier
             reading.add(slot)  # G1 / G3 read Q^T / dO^T after it
-            queue.extend([("atomic",)] * n_a)
+            if atomics_at == "end":
+                queue.extend([("atomic",)] * n_a)
             if depth > 1:
                 wait(waits.step_end)
                 nxt = i + 1 if i + 1 < trips else None

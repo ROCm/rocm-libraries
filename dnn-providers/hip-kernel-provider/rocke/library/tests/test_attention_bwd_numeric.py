@@ -115,8 +115,14 @@ canary, exact-zero batched padding rows).
   three-barrier twin (skipped under a schedule-value configuration, which
   runs on the synchronous body only);
 * ``test_asm_g13_variants_agree``: the inline-asm G1 / G3 route at both
-  cluster granularities, and with ``s_in_agpr`` G0 / G2 as asm clusters too:
-  passes, bit for bit (dK / dV in direct mode, dQ with one kv tile);
+  cluster granularities, and with ``s_in_agpr`` G0 / G2 as asm clusters too,
+  and with ``asm_load_hoist`` (both granularities, G3 first, G4 between G1
+  and G3): passes, bit for bit (dK / dV in direct mode, dQ with one kv tile);
+* ``test_wide_g13_atom_agrees`` (gfx950): the 16x16x32 G1 / G3 atom (its
+  K-permuted B through the configuration's reader, the stacked transpose read
+  on ``tr_read``) passes the oracle; with edge tiles, on the asm route and
+  with the asm operand hoist it is bit for bit the wide run (dK / dV in
+  direct mode, dQ with one kv tile);
 * ``test_g4_slicing_agrees``: every G4 dS key-slicing value at two and four
   slices, with and without edge tiles: passes, bit for bit against the step
   kernel (dK / dV in direct mode, dQ with one kv tile).
@@ -343,9 +349,9 @@ def test_hk_ne_hv(case_id, config):
     assert plan.specs["main"].dkv_mode == "atomic"
     # dQ: the workspace convert, or the split dQ kernel (dq_mode = "split")
     dq_stage = "dq" if plan.specs["main"].dq_mode == "split" else "convert"
-    assert [s.stage for s in plan.launches] == ["prep", "main", dq_stage] + [
-        "convert"
-    ] * 2
+    # dK / dV: two converts, or two slice reduces (dkv_sink = "slices")
+    kv = "reduce" if plan.runtime.get("dkv_sink") == "slices" else "convert"
+    assert [s.stage for s in plan.launches] == ["prep", "main", dq_stage] + [kv] * 2
     main = plan.launches[1]
     assert main.pointers["dK"] is None and main.pointers["dV"] is None
     assert {"WS_DK", "WS_DV"} <= set(plan.workspace_layout)
@@ -358,6 +364,7 @@ def test_hk_ne_hv_select_guard(case_id, config):
     "select"``): rows past ``len_kv`` add ``+0.0``, in THD into the rows of
     the next sequence, which must stay exact."""
     case = _case(case_id)
+    _require_legal(case, config, {"dkv_atomic_guard": "select"})
     run = run_case(
         case, arch=ARCH, config=config, overrides={"dkv_atomic_guard": "select"}
     )
@@ -389,6 +396,7 @@ def _run_to_run_params():
 @pytest.mark.parametrize("case_id,overrides,config", _run_to_run_params())
 def test_atomic_run_to_run(case_id, overrides, config):
     case = _case(case_id)
+    _require_legal(case, config, overrides)
     first = run_case(case, arch=ARCH, config=config, overrides=overrides)
     assert first.plan.specs["main"].dkv_mode == "atomic"
     _passes(first)
@@ -512,6 +520,21 @@ RUNTIME_VARIANTS = {
     "xcd8_gx": ({"xcd_chunk": "gx"}, {"num_xcds": 8}, True),
     "xcd2_gx": ({"xcd_chunk": "gx"}, {"num_xcds": 2}, True),
     "xcd8_64": ({"xcd_chunk": 64}, {"num_xcds": 8}, True),
+    # dK / dV through per-CTA workspace slices and a fixed-order reduce (no
+    # atomics): inert in direct mode (bit for bit there), the oracle decides
+    # in atomic mode; with g_split the GQA group is split over CTAs
+    "slices": ({"dkv_sink": "slices"}, None, True),
+    "slices_g2": ({"dkv_sink": "slices", "g_split": 2}, None, False),
+    "slices_pair": (
+        {"dkv_sink": "slices", "dkv_epilogue": "lds_staged_pair"},
+        None,
+        True,
+    ),
+    "slices_direct": ({"dkv_sink": "slices", "dkv_epilogue": "direct"}, None, True),
+    "slices_vec4": ({"dkv_sink": "slices", "dkv_store_vec": 4}, None, True),
+    "slices_vec1": ({"dkv_sink": "slices", "dkv_store_vec": 1}, None, True),
+    # no data atomics at all: split dQ with slice dK / dV
+    "atomic_free": ({"dkv_sink": "slices", "dq_mode": "split"}, None, False),
 }
 
 
@@ -526,8 +549,13 @@ def _variant_params():
         case = _case(cid)
         group = math.gcd(case.h_q // case.h_k, case.h_q // case.h_v)
         for name in RUNTIME_VARIANTS:
-            if name == "g_split2" and group % 2:
-                continue
+            if group % RUNTIME_VARIANTS[name][0].get("g_split", 1):
+                continue  # the plan refuses a split that does not divide G
+            if RUNTIME_VARIANTS[name][0].get("dq_mode") == "split" and ARCH not in (
+                "gfx942",
+                "gfx950",
+            ):
+                continue  # the split dQ kernel is built for gfx942 / gfx950
             if name == "noalias_all" and case.h_k == case.h_v:
                 continue  # 'all' is legal in atomic mode only (h_k != h_v here)
             if name == "agpr128" and ARCH not in ("gfx942", "gfx950"):
@@ -629,16 +657,36 @@ def test_runtime_variants_agree(case_id, variant, config):
 # below it is refused by the validator, so its cases skip).
 ASM_NOPS_ENV = "ROCKE_BWD_ASM_NOPS"
 
+# Spec knobs a variant adds on top of the asm route: the operand-load hoist
+# (the second G1 / G3 GEMM's LDS reads above the first one's asm cluster) at
+# both granularities, under two other stage orders (G3 first; G4 between G1
+# and G3) and with G0 / G2 as asm clusters too.
+_ASM_EXTRA = {
+    "asm_k_step_hoist": {"asm_load_hoist": True},
+    "asm_gemm_hoist": {"asm_load_hoist": True},
+    "asm_hoist_g3g1g4": {"asm_load_hoist": True, "stage_order": "g3g1g4"},
+    "asm_hoist_g1g4g3": {"asm_load_hoist": True, "stage_order": "g1g4g3"},
+    "asm_s_gemm_hoist": {"asm_load_hoist": True},
+}
+
 
 def _asm_variants():
     """``(name, asm_tail_nop, asm_cluster, s_in_agpr)``: the asm G1 / G3
-    clusters, and with ``s_in_agpr`` G0 / G2 as asm clusters too."""
+    clusters, and with ``s_in_agpr`` G0 / G2 as asm clusters too; the
+    operand-load hoist variants (``_ASM_EXTRA``)."""
     out = []
     for sia, tag in ((False, "asm"), (True, "asm_s")):
         out += [
             (f"{tag}_k_step", None, "k_step", sia),
             (f"{tag}_gemm", None, "gemm", sia),
         ]
+    out += [
+        ("asm_k_step_hoist", None, "k_step", False),
+        ("asm_gemm_hoist", None, "gemm", False),
+        ("asm_hoist_g3g1g4", None, "k_step", False),
+        ("asm_hoist_g1g4g3", None, "gemm", False),
+        ("asm_s_gemm_hoist", None, "gemm", True),
+    ]
     raw = os.environ.get(ASM_NOPS_ENV, "")
     for nop in sorted({int(x) for x in raw.split(",") if x.strip()}):
         for sia, tag in ((False, "asm"), (True, "asm_s")):
@@ -665,11 +713,11 @@ def _asm_params():
     ]
 
 
-def _asm_overrides(case, config, nop, cluster, s_in_agpr=False) -> dict:
+def _asm_overrides(case, config, nop, cluster, s_in_agpr=False, extra=None) -> dict:
     """The asm route on top of ``config``: the configuration's reservation (or
-    the smallest legal one), no stage table / iglp, the cluster knobs and
-    ``s_in_agpr``. A configuration where no reservation is legal is skipped,
-    with the reason."""
+    the smallest legal one), no stage table / iglp, the cluster knobs,
+    ``s_in_agpr`` and ``extra`` spec knobs. A configuration where no
+    reservation is legal is skipped, with the reason."""
     from kernels.common.attention_bwd import validate_attn_bwd_spec
 
     spec = plan_case(case, arch=ARCH, config=config).specs["main"]
@@ -680,6 +728,7 @@ def _asm_overrides(case, config, nop, cluster, s_in_agpr=False) -> dict:
     for a in allocs:
         ov = dict(agpr_alloc=a, agpr_route="asm_g13", sched="none", setprio=False)
         ov.update(asm_tail_nop=nop, asm_cluster=cluster, s_in_agpr=s_in_agpr)
+        ov.update(extra or {})
         try:
             validate_attn_bwd_spec(dataclasses.replace(spec, **ov), ARCH)
         except ValueError:
@@ -692,7 +741,8 @@ def _asm_overrides(case, config, nop, cluster, s_in_agpr=False) -> dict:
 def test_asm_g13_variants_agree(case_id, variant, nop, cluster, s_in_agpr, config):
     """asm_g13 G1 / G3 (one cluster per K step or per GEMM, any requested
     ``asm_tail_nop``; with ``s_in_agpr`` G0 / G2 as zero-accumulator asm
-    clusters too) pass, and in direct mode give dK / dV bit for bit equal to
+    clusters too; with or without the operand-load hoist, in three stage
+    orders) pass, and in direct mode give dK / dV bit for bit equal to
     the plain run: the asm issues the same MFMAs in the same K order. dQ is bit
     for bit too where every query head has one kv-tile CTA (one atomic per
     dQ workspace element)."""
@@ -703,11 +753,14 @@ def test_asm_g13_variants_agree(case_id, variant, nop, cluster, s_in_agpr, confi
         _passes(base)
         _RUNS[key] = (base.plan.specs["main"], base.dq, base.dk, base.dv)
     spec0, dq, dk, dv = _RUNS[key]
-    overrides = _asm_overrides(case, config, nop, cluster, s_in_agpr)
+    extra = _ASM_EXTRA.get(variant, {})
+    overrides = _asm_overrides(case, config, nop, cluster, s_in_agpr, extra)
     _require_legal(case, config, overrides)
     run = run_case(case, arch=ARCH, config=config, overrides=overrides)
     spec = run.plan.specs["main"]
     assert spec.agpr_route == "asm_g13" and spec.s_in_agpr is s_in_agpr
+    for k, v in extra.items():
+        assert getattr(spec, k) == v, (k, getattr(spec, k))
     # the resolved spec spells a no-op value as the default
     assert spec.asm_cluster in (cluster, "k_step")
     assert spec.asm_tail_nop in (nop, None)
@@ -730,6 +783,86 @@ def _one_kv_tile(run) -> bool:
         and main.grid[0] == 1
         and run.plan.runtime["g_split"] == 1
     )
+
+
+# The 16x16x32 G1 / G3 atom (gfx950, block_m >= 32; a configuration with a
+# 16-row tile runs it at block_m = 32 where that is legal): on the transpose
+# read its B operand is the K-permuted stacked read. The wide MFMA sums its K
+# in another fp32 order, so the oracle decides against the 16x16x16 runs; edge
+# tiles, the asm route and the asm route with the operand hoist issue the same
+# MFMAs on the same atom: dK / dV bit for bit equal to the wide run (direct),
+# dQ too with one kv tile.
+WIDE_G13_VARIANTS = {
+    "wide": {},
+    "wide_edge": {"edge_tiles": True},
+    "wide_asm": {"asm": True},
+    "wide_asm_hoist": {"asm": True, "asm_load_hoist": True},
+}
+
+
+def _wide_params():
+    if ARCH != "gfx950":
+        skip = pytest.mark.skip(reason=f"the 16x16x32 atom is gfx950-only; {ARCH}")
+        return [pytest.param(None, None, None, id="no-gfx950", marks=skip)]
+    i, n = (int(x) for x in os.environ.get("ROCKE_BWD_SHARD", "0/1").split("/"))
+    return [
+        pytest.param(cid, name, cfg, id=f"{cid}-{name}-{cfg}")
+        for cid in VARIANT_CASES
+        if shard_of(cid, n) == i
+        for name in WIDE_G13_VARIANTS
+        for cfg in selected_configs(ARCH)
+    ]
+
+
+def _wide_overrides(case, config) -> dict:
+    """``atom_g13 = 16x16x32`` on top of ``config`` (block_m 32 where the
+    configuration's tile has 16 rows)."""
+    spec = plan_case(case, arch=ARCH, config=config).specs["main"]
+    ov = {"atom_g13": "16x16x32"}
+    if spec.block_m < 32:
+        ov["block_m"] = 32
+    return ov
+
+
+@pytest.mark.parametrize("case_id,variant,config", _wide_params())
+def test_wide_g13_atom_agrees(case_id, variant, config):
+    """The 16x16x32 G1 / G3 atom passes the oracle; its edge-tile, asm and
+    asm + operand-hoist variants are bit for bit the wide run (dK / dV in
+    direct mode, dQ with one kv tile)."""
+    case = _case(case_id)
+    wide = _wide_overrides(case, config)
+    # skipped with the validator's rule where the configuration cannot take it
+    _require_legal(case, config, wide)
+    key = (case_id, config, "wide_g13")
+    if key not in _RUNS:
+        base = run_case(case, arch=ARCH, config=config, overrides=wide)
+        spec = base.plan.specs["main"]
+        assert spec.atom_g13 == "16x16x32"
+        assert spec.pt_route == "relabel"
+        _passes(base)
+        _RUNS[key] = (spec, base.dq, base.dk, base.dv)
+    spec0, dq, dk, dv = _RUNS[key]
+    knobs = dict(WIDE_G13_VARIANTS[variant])
+    if not knobs:
+        return
+    if knobs.pop("asm", False):
+        overrides = _asm_overrides(
+            case, config, None, "k_step", False, {**wide, **knobs}
+        )
+    else:
+        overrides = {**wide, **knobs}
+    _require_legal(case, config, overrides)
+    run = run_case(case, arch=ARCH, config=config, overrides=overrides)
+    spec = run.plan.specs["main"]
+    for k, v in overrides.items():
+        assert getattr(spec, k) == v, (k, getattr(spec, k), v)
+    _passes(run)
+    if spec0.dkv_mode == "direct":
+        assert spec.dkv_mode == "direct"
+        assert np.array_equal(run.dk, dk), f"dK differs across {variant}"
+        assert np.array_equal(run.dv, dv), f"dV differs across {variant}"
+    if _one_kv_tile(run):
+        assert np.array_equal(run.dq, dq), f"dQ differs across {variant}"
 
 
 # G4 dS key slicing (g4_slicing): every value at kK4 = kN0 / 2 (two slices,
@@ -883,6 +1016,11 @@ def test_static_scale_matches_the_runtime_multipliers(case_id, config):
     from kernels.common.attention_bwd_plan import SCALE_PLACEMENTS
 
     case = _case(case_id)
+    for placement in SCALE_PLACEMENTS:
+        for static in (placement, "runtime"):
+            _require_legal(
+                case, config, {"scale_placement": placement, "static_scale": static}
+            )
     for placement in SCALE_PLACEMENTS:
         runs = {}
         for static in (placement, "runtime"):
@@ -1105,8 +1243,12 @@ _TWIN_RUNS: dict = {}
 def test_compose_twin_sets(set_name, case_id):
     """A lever composed with a structure it was built apart from
     (``COMPOSE_TWIN_SETS``): the set and its twin without the lever both pass
-    the oracle with every knob in the launched spec, and give dK / dV bit for
-    bit equal in direct mode (the lever changes no dK / dV matrix-op chain)."""
+    the oracle with every knob in the launched spec (a ``dq_*`` knob in the
+    dQ kernel's), and give dK / dV bit for bit equal in direct mode (the
+    lever changes no dK / dV matrix-op chain) and, when both run split dQ, dQ
+    bit for bit equal (its fixed-order register sum)."""
+    from kernels.common.attention_bwd_plan import DQ_KNOBS
+
     if set_name is None:
         pytest.skip("no composition set on this arch")
     case = _case(case_id)
@@ -1118,9 +1260,11 @@ def test_compose_twin_sets(set_name, case_id):
             runs.append(_TWIN_RUNS[key])
             continue
         run = run_case(case, arch=ARCH, config="default", overrides=dict(kn))
-        spec = run.plan.specs["main"]
         for k, v in kn.items():
-            assert getattr(spec, k) == v, (k, getattr(spec, k), v)
+            spec, f = run.plan.specs["main"], k
+            if k in DQ_KNOBS:
+                spec, f = run.plan.specs["dq"], k[3:]
+            assert getattr(spec, f) == v, (k, getattr(spec, f), v)
         _passes(run)
         runs.append(run)
         if kn is twin:
@@ -1130,6 +1274,8 @@ def test_compose_twin_sets(set_name, case_id):
     if a.plan.specs["main"].dkv_mode == "direct":
         assert np.array_equal(a.dk, b.dk), f"dK differs under {set_name}"
         assert np.array_equal(a.dv, b.dv), f"dV differs under {set_name}"
+    if a.plan.specs["main"].dq_mode == b.plan.specs["main"].dq_mode == "split":
+        assert np.array_equal(a.dq, b.dq), f"dQ differs under {set_name}"
 
 
 # ---------------------------------------------------------------------------
@@ -1378,7 +1524,14 @@ def test_dkv_slab_hoist_agrees(case_id, form, config):
     moves, not their values."""
     storage = SLAB_HOIST_FORMS[form]
     case = _thd_case(case_id)
-    base = run_case(case, arch=ARCH, config=config, thd=storage)
+    # both values set explicitly: a configuration that hoists already (a
+    # custom one) is compared with its twin without the hoist
+    for hoist in (False, True):
+        _require_legal(case, config, {"dkv_slab_hoist": hoist}, thd=storage)
+    base = run_case(
+        case, arch=ARCH, config=config, thd=storage,
+        overrides={"dkv_slab_hoist": False},
+    )  # fmt: skip
     _passes(base)
     spec = base.plan.specs["main"]
     assert spec.seq_mode == "thd" and not spec.dkv_slab_hoist
@@ -1633,7 +1786,10 @@ def test_max_total_guard(case_id, bound, config):
     case = _case(case_id)
     lq, lk = case.lens()
     bound_q = sum(lq[:-1]) + lq[-1] // 2
-    atomic = case.h_k != case.h_v
+    # atomic dK / dV: h_k != h_v, or a configuration's head split
+    atomic = plan_case(case, arch=ARCH, config=config).specs["main"].dkv_mode == (
+        "atomic"
+    )
     bound_kv = sum(lk[:-1]) + lk[-1] // 2 if atomic else sum(lk)
     storage = ThdStorage(max_total_q=bound_q, max_total_kv=bound_kv)
     run = run_case(case, arch=ARCH, config=config, thd=storage)
@@ -1764,17 +1920,22 @@ def test_narrow_twin_agrees(case_id, config):
     case = _case(case_id)
     narrow = run_case(case, arch=ARCH, config=config, request={"tensor_alignment": 8})
     spec = narrow.plan.specs["main"]
-    assert spec.stage_vec == 1 and spec.dkv_mode == "direct"
+    assert spec.stage_vec == 1
+    if spec.dkv_mode != "direct" and spec.dkv_sink != "slices":
+        # (a configuration's head split): fp32 atomics fix no summation order
+        pytest.skip("atomic dK / dV with the atomic sink are not bit-reproducible")
     _passes(narrow)
     knobs = {
         f.name: getattr(spec, f.name)
         for f in dataclasses.fields(spec)
         if f.name not in _REQUEST_FIELDS
     }
+    _require_legal(case, config, knobs)
     wide = run_case(case, arch=ARCH, config=config, overrides=knobs)
     wspec = wide.plan.specs["main"]
     assert wspec.stage_vec == 8
-    assert dataclasses.replace(wspec, stage_vec=1) == spec
+    # (the narrow access width exists in the narrow class only)
+    assert dataclasses.replace(wspec, stage_vec=1, narrow_vec=spec.narrow_vec) == spec
     _passes(wide)
     assert np.array_equal(narrow.dk, wide.dk), "dK differs across stage_vec"
     assert np.array_equal(narrow.dv, wide.dv), "dV differs across stage_vec"

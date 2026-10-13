@@ -359,6 +359,9 @@ class RowSlab:
     base_row: Value  # i32 row the pointer points at
     last: Value | None  # i32 clamp bound (None: rows are not clamped)
     stage_vec: int
+    # elements per access when stage_vec = 1 (2 or 4: every stride and the
+    # base allow that width; 1: one element at a time)
+    narrow: int = 1
 
     def local_row(self, row: Value) -> Value:
         """i32 row offset from the slab base (clamped when the slab clamps)."""
@@ -403,6 +406,22 @@ class RowSlab:
             for p in parts[1:]:
                 out = b.vec_concat(out, p)
             return out
+        w = self.narrow
+        if self.stage_vec != 8 and w > 1 and n % w == 0 and esize == 2:
+            parts = [
+                b.global_load_vN(
+                    self.ptr,
+                    idx if k == 0 else b.add(idx, b.const_i32(k)),
+                    self.dtype,
+                    w,
+                    align=2 * w,
+                )
+                for k in range(0, n, w)
+            ]
+            out = parts[0]
+            for p in parts[1:]:
+                out = b.vec_concat(out, p)
+            return out
         elems = [
             b.global_load(
                 self.ptr,
@@ -427,6 +446,22 @@ class RowSlab:
         esize = _elem_bytes(self.dtype)
         if self.stage_vec == 8 and n in (8, 4, 2) and esize == 2:
             b.global_store_vN(self.ptr, idx, value, n, align=2 * n)
+            return
+        w = self.narrow
+        if self.stage_vec != 8 and w > 1 and n % w == 0 and esize == 2:
+            for k in range(0, n, w):
+                part = value
+                if n != w:
+                    part = b.vec_pack(
+                        [b.vec_extract(value, k + i) for i in range(w)], self.dtype
+                    )
+                b.global_store_vN(
+                    self.ptr,
+                    idx if k == 0 else b.add(idx, b.const_i32(k)),
+                    part,
+                    w,
+                    align=2 * w,
+                )
             return
         for i in range(n):
             b.global_store(
@@ -456,9 +491,13 @@ class StridedTensorAddr:
         strides: tuple[IntOrValue, IntOrValue, IntOrValue],
         seq: SeqInfo,
         stage_vec: int = 8,
+        narrow_vec: int = 1,
     ) -> None:
         if stage_vec not in (8, 1):
             raise ValueError(f"stage_vec must be 8 or 1 (got {stage_vec})")
+        if narrow_vec not in (1, 2, 4) or (narrow_vec != 1 and stage_vec != 1):
+            raise ValueError(f"narrow_vec={narrow_vec} needs stage_vec = 1")
+        self.narrow_vec = narrow_vec
         if dtype not in (F16, BF16, F32):
             raise ValueError(f"unsupported tensor dtype {dtype.name}")
         if len(strides) != 3:
@@ -521,6 +560,46 @@ class StridedTensorAddr:
             base_row=base_row,
             last=self.seq.last if clamp else None,
             stage_vec=self.stage_vec,
+            narrow=self.narrow_vec,
+        )
+
+    def offset_bytes(self, h: IntOrValue, row0: IntOrValue = 0) -> Value:
+        """The i64 byte offset :meth:`slab` adds to the base pointer for head
+        ``h`` and (unclamped) row ``row0``."""
+        b = self.b
+        _s_b, s_h, s_t = self.strides
+        off = self._seq_base
+        if not (isinstance(h, int) and h == 0):
+            term = _scaled64(b, _i64(b, h), s_h)
+            off = term if off is None else b.add(off, term)
+        if not (isinstance(row0, int) and row0 == 0):
+            term = _scaled64(b, _i64(b, _i32(b, row0)), s_t)
+            off = term if off is None else b.add(off, term)
+        if off is None:
+            return b.const_i64(0)
+        return b.mul(off, b.const_i64(self._esize))
+
+    def stride_bytes(self, which: str) -> Value:
+        """The i64 byte stride of one head (``"h"``) or one row (``"t"``)."""
+        _s_b, s_h, s_t = self.strides
+        st = {"h": s_h, "t": s_t}[which]
+        return _scaled64(self.b, _i64(self.b, st), self._esize)
+
+    def slab_at(self, off: Value, row0: Value, *, clamp: bool = True) -> RowSlab:
+        """The slab whose pointer is the base plus the i64 byte offset ``off``
+        (:meth:`offset_bytes` of a head and of ``row0``, possibly carried
+        across steps) at base row ``row0``. Equal to :meth:`slab` ``(h, row0,
+        clamp=clamp)`` when ``row0 <= last`` (the clamp of the base row is then
+        an identity), which holds for every q tile a q loop visits."""
+        return RowSlab(
+            b=self.b,
+            ptr=self.b.global_ptr_add(self._base, off),
+            dtype=self.dtype,
+            t_stride=self.strides[2],
+            base_row=_i32(self.b, row0),
+            last=self.seq.last if clamp else None,
+            stage_vec=self.stage_vec,
+            narrow=self.narrow_vec,
         )
 
 
@@ -637,6 +716,38 @@ class WsSlab:
         for x, v in items:
             idx = base if isinstance(x, int) and x == 0 else b.add(base, _i32(b, x))
             b.global_atomic_add_f32(self.ptr, idx, b.select(cond, v, zero))
+
+    def store_row(
+        self, r: Value, items: list[tuple[IntOrValue, Value]], ok: Value | None = None
+    ) -> None:
+        """fp32 stores of ``(x, v)`` pairs into row ``r``, predicated.
+
+        The plain-store twin of :meth:`atomic_add_row`: one branch per row
+        (inside the workspace, and ``ok`` when given), an unclamped row base
+        shared by the row's stores.
+        """
+        b = self.b
+        cond = self.row_ok(r) if ok is None else b.land(self.row_ok(r), ok)
+        with b.scf_if(cond):
+            base = _scaled32(b, r, self.row_stride)
+            for x, v in items:
+                idx = base if isinstance(x, int) and x == 0 else b.add(base, _i32(b, x))
+                b.global_store(self.ptr, idx, v, align=4)
+
+    def store_vec_in_row(self, r: Value, x: IntOrValue, v: Value) -> None:
+        """Store ``<n x f32>`` (``n`` in {1, 2, 4, 8}) at ``(r, x)`` with an
+        unclamped index: the caller predicates on :meth:`row_ok`. ``x`` is a
+        multiple of ``n``; every workspace row starts 16-byte aligned."""
+        b = self.b
+        n = v.type.count
+        base = _scaled32(b, r, self.row_stride)
+        idx = base if isinstance(x, int) and x == 0 else b.add(base, _i32(b, x))
+        if n == 1:
+            b.global_store(self.ptr, idx, b.vec_extract(v, 0), align=4)
+            return
+        if n not in (2, 4, 8):
+            raise ValueError(f"workspace row stores take 1, 2, 4 or 8 floats, not {n}")
+        b.global_store_vN(self.ptr, idx, v, n, align=min(4 * n, 16))
 
     def store(self, r: Value, x: IntOrValue, v: Value) -> None:
         """Store at a clamped address; the caller predicates on ``row_ok``."""

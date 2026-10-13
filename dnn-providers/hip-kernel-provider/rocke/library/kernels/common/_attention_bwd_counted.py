@@ -40,6 +40,12 @@ early     ``n``        ``0`` (the next step's loads)       ``n``
 late      ``n``        ``n``                               ``n``
 ========  ===========  ==================================  =================
 
+With ``sched = "stage_table_atomics"`` (early issue only) the step's ``n``
+atomics are the previous step's deferred batch, issued in stage A after the
+next-step loads, so ``B`` is ``n`` as well; the late issue would load after
+them and is refused (``_attention_bwd_sched.COUNTED_LATE_DEFERRED``). The
+other schedule values leave the atomics in G4 and the table as it is.
+
 On the first trip of a loop no load is in flight at the entry (the prologue's
 ``vmcnt(0)``), so every count holds there too; on every trip the next-step
 loads have retired by the step-end barrier, so nothing loaded is pending

@@ -257,7 +257,8 @@ AGPR_ASM_TAIL_NOP = MappingProxyType({16: 15, 32: 15})
 _XDL_PASSES = MappingProxyType({16: 4, 32: 4})
 
 # Wait states the ISA requires after a VALU write of a VGPR before an MFMA
-# reads it (any source); an inline-asm MFMA hides this from the backend too.
+# reads it (any source); an inline-asm MFMA hides this from the backend too,
+# so every cluster of the asm route opens with them (``s_nop 1``).
 ASM_MFMA_VALU_LEAD_WAIT_STATES = 2
 
 

@@ -33,6 +33,10 @@ Checks:
   output equals the model; for the fragment maps it equals the catalog operand
   coordinates. The random table also infers the source lane and element of
   every output slot independently of the model.
+* The stacked plan of the K-permuted 16x16x32 B (two 16x16x16 B reads at K
+  offsets 0 and 16, ``tr16_read_plan``): its addresses through the model
+  (CPU) and on the device, and the backward's loader on that map (device),
+  deliver the permuted coordinates.
 """
 
 from __future__ import annotations
@@ -45,7 +49,13 @@ import pytest
 from rocke.core.ir import BF16, F16, I32, IRBuilder, PtrType
 
 from kernels.common._attention_bwd_caps import bwd_atoms
-from kernels.common._attention_bwd_frag import operand_coords
+from kernels.common._attention_bwd_frag import (
+    kperm_b_coords,
+    operand_coords,
+    plan_c_to_a,
+    tr16_plan_address,
+    tr16_read_plan,
+)
 
 ROWS = 64
 COLS = 64
@@ -123,6 +133,36 @@ def random_table(seed: int) -> np.ndarray:
     return t
 
 
+def stacked_table(k0: int, mn0: int) -> np.ndarray:
+    """Address map of the stacked plan (the K-permuted 16x16x32 B): stride 4
+    per 16-lane group, reads at K offsets 0 and 16 (:func:`tr16_plan_address`)."""
+    plan = tr16_read_plan(kperm_coords("fp16"))
+    t = np.zeros((WAVE, READS, 2), np.int32)
+    for lane in range(WAVE):
+        for r in range(READS):
+            k, mn = tr16_plan_address(lane, r, plan)
+            t[lane, r] = (k0 + k, mn0 + mn)
+    return t
+
+
+def kperm_coords(dtype: str):
+    """The K-permuted B coordinates of a 16x16x32 consumer of a 16x16x16 C."""
+    ops = {op.k: op for op in bwd_atoms("gfx950", dtype)}
+    plan = plan_c_to_a(ops[16], ops[32])
+    return kperm_b_coords(plan, ops[16], ops[32])
+
+
+def coords_codes(fc, k0: int, mn0: int) -> np.ndarray:
+    """Codes a lane must hold for operand coordinates ``fc`` of a K-outer tile."""
+    return np.array(
+        [
+            [code(k0 + k, mn0 + mn) for mn, k in fc.int_coords(lane)]
+            for lane in range(WAVE)
+        ],
+        np.int64,
+    )
+
+
 def catalog_codes(op, role: str, k0: int, mn0: int) -> np.ndarray:
     """Codes a lane must hold for ``op``'s ``role`` operand of a K-outer tile."""
     fc = operand_coords(op, role)
@@ -179,6 +219,16 @@ def test_fragment_map_through_model_gives_catalog_coords(atom, role):
     table = frag_table(kpl, k0, mn0)
     got = model(table)[:, :kpl]
     np.testing.assert_array_equal(got, catalog_codes(op, role, k0, mn0))
+
+
+@pytest.mark.parametrize("dtype", DTYPES)
+def test_stacked_map_through_model_gives_the_kperm_coords(dtype):
+    """The stacked plan's addresses through the model deliver the K-permuted
+    B coordinates; the catalog 16x16x32 addresses do not."""
+    k0, mn0 = 8, 20
+    want = coords_codes(kperm_coords(dtype), k0, mn0)
+    assert np.array_equal(model(stacked_table(k0, mn0)), want)
+    assert not np.array_equal(model(frag_table(8, k0, mn0)), want)
 
 
 def test_lane_uniform_address_is_not_a_transposed_tile():
@@ -360,17 +410,35 @@ def test_device_lane_uniform_address_follows_the_model(dtype):
     assert {decode(c)[0] for c in got[:, :4].ravel()} == {0}
 
 
+@_on_gfx950
+@pytest.mark.gpu
+@pytest.mark.parametrize("dtype", DTYPES)
+def test_device_stacked_addresses_give_the_kperm_coords(dtype):
+    """The stacked plan's per-lane addresses (K offsets 0 and 16) deliver the
+    K-permuted 16x16x32 B coordinates on the device."""
+    k0, mn0 = 8, 20
+    table = stacked_table(k0, mn0)
+    got = run_probe(dtype, table)
+    want_model = model(table)
+    assert np.array_equal(got, want_model), _first_mismatch(got, want_model)
+    want = coords_codes(kperm_coords(dtype), k0, mn0)
+    assert np.array_equal(got, want), _first_mismatch(got, want)
+
+
 # ---------------------------------------------------------------------------
 # the operand loader of the backward body (re-pointed probe)
 # ---------------------------------------------------------------------------
 
 
-def make_loader_probe(dtype: str, op, role: str, *, k0: int, mn0: int):
-    """One wave loads one fragment with ``load_frag_lds_tr16`` from a flat view."""
+def make_loader_probe(dtype: str, op, role: str, *, k0: int, mn0: int, coords=None):
+    """One wave loads one fragment with ``load_frag_lds_tr16`` from a flat view
+    (``coords``: operand coordinates other than the catalog ones of ``op``'s
+    ``role``, e.g. the K-permuted B)."""
     from kernels.common._attention_bwd_frag import LdsView, load_frag_lds_tr16
 
     elem = _elem(dtype)
-    b = IRBuilder(f"bwd_tr16_loader_probe_{dtype}_k{op.k}_{role}")
+    tag = role if coords is None else "kperm"
+    b = IRBuilder(f"bwd_tr16_loader_probe_{dtype}_k{op.k}_{tag}")
     psrc = b.param("SRC", PtrType(elem, "global"), readonly=True)
     pout = b.param("OUT", PtrType(elem, "global"))
     b.kernel.attrs["max_workgroup_size"] = WAVE
@@ -386,7 +454,7 @@ def make_loader_probe(dtype: str, op, role: str, *, k0: int, mn0: int):
             b, b.div(idx, b.const_i32(COLS)), b.mod(idx, b.const_i32(COLS)), v, vec
         )
     b.sync()
-    fc = operand_coords(op, role)
+    fc = operand_coords(op, role) if coords is None else coords
     frag = load_frag_lds_tr16(
         b, fc, view, tid, dtype=dtype, arch="gfx950", mn0=mn0, k0=k0
     )
@@ -412,23 +480,12 @@ def test_loader_probe_compiles_to_b64_reads(atom, role):
     assert "tr16.b128" not in ir
 
 
-@_on_gfx950
-@pytest.mark.gpu
-@pytest.mark.parametrize("role", ["a", "b"])
-@pytest.mark.parametrize("atom", _atoms(), ids=_atom_id)
-def test_device_loader_gives_catalog_coords(atom, role):
+def _run_loader(kernel, kpl: int) -> np.ndarray:
+    """Compile and launch a loader probe; the device codes ``[lane][kpl]``."""
     from rocke.helpers.compile import compile_kernel
     from rocke.runtime.hip_module import Runtime
 
-    dtype, op = atom
-    k0, mn0 = 8, 20
-    kpl = op.b_frag_len if role == "b" else op.a_frag_len
-    art = compile_kernel(
-        make_loader_probe(dtype, op, role, k0=k0, mn0=mn0),
-        arch="gfx950",
-        capture_ir_text=False,
-        backend="python",
-    )
+    art = compile_kernel(kernel, arch="gfx950", capture_ir_text=False, backend="python")
     rt = Runtime()
     mod = rt.load_module(art.hsaco)
     fn = mod.get_function(art.kernel_name)
@@ -449,6 +506,42 @@ def test_device_loader_gives_catalog_coords(atom, role):
     for p in dev:
         rt.free(p)
     mod.unload()
-    got = out.reshape(WAVE, kpl).astype(np.int64)
+    return out.reshape(WAVE, kpl).astype(np.int64)
+
+
+@_on_gfx950
+@pytest.mark.gpu
+@pytest.mark.parametrize("role", ["a", "b"])
+@pytest.mark.parametrize("atom", _atoms(), ids=_atom_id)
+def test_device_loader_gives_catalog_coords(atom, role):
+    dtype, op = atom
+    k0, mn0 = 8, 20
+    kpl = op.b_frag_len if role == "b" else op.a_frag_len
+    got = _run_loader(make_loader_probe(dtype, op, role, k0=k0, mn0=mn0), kpl)
     want = catalog_codes(op, role, k0, mn0)
+    assert np.array_equal(got, want), _first_mismatch(got, want)
+
+
+@pytest.mark.parametrize("dtype", DTYPES)
+def test_kperm_loader_probe_compiles_to_two_b64_reads(dtype):
+    from rocke.core.lower_llvm import _lower_kernel_to_llvm_python as lower
+
+    op = [o for o in bwd_atoms("gfx950", dtype) if o.k == 32][0]
+    kernel = make_loader_probe(dtype, op, "b", k0=8, mn0=20, coords=kperm_coords(dtype))
+    ir = lower(kernel, arch="gfx950")
+    assert ir.count("call <4 x i16> @llvm.amdgcn.ds.read.tr16.b64(") == 2
+    assert "tr16.b128" not in ir
+
+
+@_on_gfx950
+@pytest.mark.gpu
+@pytest.mark.parametrize("dtype", DTYPES)
+def test_device_loader_gives_the_kperm_coords(dtype):
+    """The backward's loader on the K-permuted 16x16x32 B (the stacked plan)
+    delivers the permuted coordinates on every lane and slot."""
+    op = [o for o in bwd_atoms("gfx950", dtype) if o.k == 32][0]
+    k0, mn0 = 8, 20
+    fc = kperm_coords(dtype)
+    got = _run_loader(make_loader_probe(dtype, op, "b", k0=k0, mn0=mn0, coords=fc), 8)
+    want = coords_codes(fc, k0, mn0)
     assert np.array_equal(got, want), _first_mismatch(got, want)

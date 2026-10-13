@@ -56,6 +56,11 @@ class ComgrError(RuntimeError):
     pass
 
 
+class ComgrProcessDied(ComgrError):
+    """The process compiling one module (``fresh_process=True``) died before
+    it reported a result or an error: a toolchain crash, not a compile error."""
+
+
 def _load_lib() -> ctypes.CDLL:
     # Pair the loader with ``hip_module._load_lib`` so the two halves of
     # the process always share a single HIP/comgr runtime instance. See
@@ -449,18 +454,96 @@ def _extract_first(data_set: _DataSet, kind: int) -> bytes:
     return out
 
 
+def _build_in_fresh_process(
+    ir_text: str, *, isa: str, options: List[str]
+) -> Tuple[bytes, ComgrTimings]:
+    """Compile one module in a new Python process that compiles nothing else.
+
+    The child (:mod:`rocke.runtime._comgr_fresh_process`) loads the comgr
+    library this process resolved (passed as ``ROCKE_COMGR_LIB``, so a
+    torch-bundled library is kept even though the child does not import torch),
+    imports this rocke package (its root is put first on ``PYTHONPATH``) and
+    runs with comgr's own on-disk cache off (``AMD_COMGR_CACHE=0``).
+    Raises :class:`ComgrError` with the child's message for a compile error and
+    :class:`ComgrProcessDied` when the child dies.
+    """
+    import json
+    import subprocess
+    import tempfile
+
+    # The parent's own checks first: the same library, the same flavor gate.
+    lib = _resolve_lib()
+    _assert_ir_flavor_matches_lib(ir_text)
+    env = dict(os.environ)
+    lib_path = getattr(lib, "_name", None) or resolved_lib_path()
+    if lib_path:
+        env["ROCKE_COMGR_LIB"] = lib_path
+    # The child compiles the module itself: comgr's on-disk cache could hand
+    # back an object some other process compiled with another history.
+    env["AMD_COMGR_CACHE"] = "0"
+    pkg_root = os.path.dirname(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    )
+    env["PYTHONPATH"] = os.pathsep.join(
+        p for p in (pkg_root, env.get("PYTHONPATH", "")) if p
+    )
+    with tempfile.TemporaryDirectory(prefix="rocke-comgr-") as tmp:
+        out_path = os.path.join(tmp, "out.bin")
+        header = {"isa": isa, "options": list(options), "out": out_path}
+        proc = subprocess.run(
+            [sys.executable, "-m", "rocke.runtime._comgr_fresh_process"],
+            input=json.dumps(header).encode("utf-8") + b"\n" + ir_text.encode("utf-8"),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=env,
+        )
+        tail = proc.stderr.decode("utf-8", "replace")[-2000:]
+        if proc.returncode == 2:  # the child's ComgrError, message on stderr
+            raise ComgrError(tail.strip())
+        if proc.returncode == 1:  # an exception other than ComgrError
+            raise ComgrError(f"the fresh compile process failed: {tail.strip()}")
+        if proc.returncode != 0 or not os.path.exists(out_path):
+            raise ComgrProcessDied(
+                f"the fresh compile process died (exit status {proc.returncode})"
+                + (f": {tail.strip()}" if tail.strip() else "")
+            )
+        with open(out_path, "rb") as fh:
+            meta = json.loads(fh.readline())
+            hsaco = fh.read()
+    if len(hsaco) != meta["size"]:
+        raise ComgrProcessDied(
+            f"the fresh compile process wrote {len(hsaco)} of {meta['size']} bytes"
+        )
+    timings = ComgrTimings(meta["bc"], meta["relocatable"], meta["executable"])
+    return hsaco, timings
+
+
 def build_hsaco_from_llvm_ir(
     ir_text: str,
     *,
     isa: str = "amdgcn-amd-amdhsa--gfx950",
     options: Optional[List[str]] = None,
+    fresh_process: bool = False,
 ) -> Tuple[bytes, ComgrTimings]:
     """Compile LLVM IR text to a loadable HSACO blob, all in-process.
 
     Returns the (hsaco_bytes, timings) tuple. `hsaco_bytes` can be passed
     directly to `hipModuleLoadData`.
+
+    ``fresh_process=True`` compiles the module in a new process instead, as
+    the only compile of that process (:func:`_build_in_fresh_process`). Use it
+    for IR whose code generation would otherwise depend on what this process
+    compiled before. The known case is ``llvm.amdgcn.iglp.opt(i32 1)``: LLVM's
+    AMDGPU single-wave small-GEMM IGroupLP strategy keeps its DS-write counts
+    in file-scope statics that it adds to and never resets, so the schedule of
+    a module depends on every earlier ``iglp_opt(1)`` compile in the process.
+    A process that compiles one module gives the code the strategy is written
+    for (its own assertion expects those counts to be zero) and the same code
+    object every time. The default keeps the in-process compile.
     """
     options = list(options or ["-O3"])
+    if fresh_process:
+        return _build_in_fresh_process(ir_text, isa=isa, options=options)
 
     # Fail fast + clean on an IR-flavor / comgr-vintage mismatch rather than
     # letting comgr SIGABRT in codegen (see _assert_ir_flavor_matches_lib).

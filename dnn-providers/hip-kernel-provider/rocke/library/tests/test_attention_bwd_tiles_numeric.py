@@ -184,7 +184,6 @@ def _occ_params():
 def test_occupancy_hint_is_met(set_name, d, dtype):
     if set_name is None:
         pytest.skip("no occupancy set in this shard")
-    pytest.importorskip("torch")  # torch first: its bundled (production) comgr
     from rocke.helpers.compile import compile_kernel
 
     from kernels.common.attention_bwd import (
@@ -200,9 +199,11 @@ def test_occupancy_hint_is_met(set_name, d, dtype):
         comgr_version,
         current_flavor,
         occupancy_waves_per_simd,
+        pin_production_comgr,
         read_code_object_resources,
     )
 
+    pin_production_comgr()  # torch's bundled comgr, by path; torch not imported
     flavor, comgr = current_flavor(), comgr_version()
     if flavor != GATE_FLAVOR or not comgr_is_production(comgr):
         pytest.skip(f"needs {GATE_FLAVOR} and the production comgr ({flavor}, {comgr})")

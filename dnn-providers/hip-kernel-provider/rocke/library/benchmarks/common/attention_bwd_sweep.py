@@ -35,6 +35,11 @@
   fresh-process attempts, every configuration correctness-gated (pruning set,
   timed shape) in the timing process. ``confirm`` runs the final top 2 on the
   family cohort (every census cell of the slice's head size).
+* **Dense family.** A dense slice runs only ``runtime`` and ``confirm``: its
+  candidates are the general slice's survivors on the dense route, crossed
+  with the dense-only knobs; ``confirm`` judges the best one against the
+  general winner per cell, and ``--emit-dense-table`` writes the dense keys
+  it wins (see the "dense family" section).
 * **Counts** (``--count``) and the job plan (``--count --plan``) per primary
   slice, from the validator, with the wall-budget inputs read by name from a
   private constants file (values never printed).
@@ -106,8 +111,10 @@ SWEEP_NUM_XCDS = MappingProxyType({"gfx942": 8, "gfx950": 8})
 # The num_cus hint of a mirror-pairing candidate: the arm replaces it with the
 # CU count of the device it runs on (attention_bwd_rocke_arm.DEVICE_NUM_CUS).
 DEVICE_NUM_CUS = "device"
-# Families whose spec validator and builder exist in this tree.
-SWEEPABLE_FAMILIES = ("general",)
+# Families whose spec validator and builder exist in this tree. The dense
+# family does not run the body funnel: its candidates take the body knobs of
+# the general funnel's survivors (see "dense family" below).
+SWEEPABLE_FAMILIES = ("general", "dense")
 FAMILY_ARCHS = {
     "general": ("gfx942", "gfx950", "gfx1151", "gfx1201"),
     "dense": ("gfx942", "gfx950"),
@@ -457,7 +464,11 @@ class Candidate:
         return Candidate.make(sl, self.k, self.r)
 
     def spec(self) -> AttnBwdSpec:
-        """The unresolved spec (the dK / dV mode follows the runtime head split)."""
+        """The unresolved spec (the dK / dV mode follows the runtime head split).
+
+        Dense candidates: the shared body's spec (the dense-only knobs left
+        out, no head packing, the grid remap a dense field)."""
+        dense = self.slice.family == "dense"
         cls = self.slice.spec_class()
         if int(self.r.get("g_split", 1)) > 1:
             cls["dkv_mode"] = "atomic"
@@ -469,12 +480,15 @@ class Candidate:
             cls["lb_interleave"] = True
         if self.r.get("lb_order") == "mirror":
             cls["lb_mirror"] = True
-        if self.r.get("xcd_chunk") and self.r.get("num_xcds"):
+        if self.r.get("xcd_chunk") and self.r.get("num_xcds") and not dense:
             cls["xcd_remap"] = True
         if self.r.get("use_worklist"):
             cls["worklist"] = True
         # the dQ kernel's knobs (dq_mode = "split") are not main spec fields
         main = {k: v for k, v in self.k.items() if k not in DQ_KNOBS}
+        if dense:
+            main = {k: v for k, v in main.items() if k not in DENSE_ONLY_KNOBS}
+            main["head_pack"] = False
         return AttnBwdSpec(**cls, **main)
 
     def dq_knobs(self) -> dict:
@@ -510,7 +524,7 @@ class Candidate:
         switch packing off for every short-query request of the class.
         """
         k = self.k
-        if self.slice.kind != "head_pack":
+        if self.slice.kind != "head_pack" or self.slice.family == "dense":
             k.pop("head_pack", None)
         return k
 
@@ -596,6 +610,10 @@ def _legality(sl: SliceKey, knobs: tuple, runtime: tuple) -> Legality:
     s = v.resolved
     if v.not_built:
         return Legality(False, "not_built", "; ".join(v.not_built)[:300], s)
+    if sl.family == "dense":
+        bad = _dense_problem(c, s)
+        if bad is not None:
+            return Legality(False, bad[0], bad[1][:300], s)
     dq = None
     dq_knobs = c.dq_knobs()
     if s.dq_mode == "split":
@@ -650,6 +668,11 @@ def effective_key(c: Candidate) -> str:
             fields.pop(knob)
     fields = {f: v for f, v in fields.items() if v != declared[f].default}
     blob = repr(sorted(fields.items())) + json.dumps(dict(c.runtime), sort_keys=True)
+    if c.slice.family == "dense":
+        # the dense-only knobs are not body fields
+        blob += "|dense:" + repr(
+            sorted((k, v) for k, v in c.knobs if k in DENSE_ONLY_KNOBS)
+        )
     if lg.dq is not None:
         # split dQ: the dQ kernel is part of the configuration (its name salts
         # every resolved field)
@@ -1145,8 +1168,8 @@ def pad_buffers(c: Candidate) -> list[str]:
         return []
     plan = lds_plan(lg.resolved, c.slice.arch)
     present = {b.name for b in plan.buffers if b.layout.startswith("rowmajor:")}
-    if lg.resolved.dkv_mode == "atomic":
-        present.discard("dkv_out")
+    if lg.resolved.dkv_mode == "atomic" and lg.resolved.dkv_sink != "slices":
+        present.discard("dkv_out")  # (the slice sink stages through it)
     return [n for n in PAD_BUFFERS if n in present]
 
 
@@ -1265,8 +1288,9 @@ def _runtime_values(sl: SliceKey, cells: Sequence, rel: Release) -> list[dict]:
     ):
         p = {"g_split": gs, "lb_order": lb, "scale_placement": sp}
         if lb == "mirror":
-            # the plan pairs only a grid that fills the device: the arm reads
-            # the CU count of the device it runs on (a request hint)
+            # the plan pairs only a grid that overfills the device: the arm
+            # reads the CU count of the device it runs on (a request hint;
+            # the arm also passes it by default, this pins it)
             p["num_cus"] = DEVICE_NUM_CUS
         out.append(p)
     # THD slices: the work list on each natural-order point (it fixes the CTA
@@ -1309,6 +1333,50 @@ def _runtime_values(sl: SliceKey, cells: Sequence, rel: Release) -> list[dict]:
     return wide
 
 
+def _sink_values(sl: SliceKey, rel: Release) -> list:
+    """Stage R values of the atomic-mode dK / dV sink (built, non-default),
+    crossed with the points whose dK / dV are atomic."""
+    if not rel.has("dkv_sink"):
+        return []
+    axis = backward_axis("dkv_sink")
+    return [
+        v
+        for v in rel.values(sl, "dkv_sink", axis.default)
+        if v != axis.default and v not in axis.not_built
+    ]
+
+
+# Codegen levers that act on the slice sink's epilogue only (its staging, store
+# width and bounds); stage R moves each on the slice-sink points of a
+# candidate.
+SLICE_LEVERS = ("dkv_epilogue", "dkv_store_vec", "ws_bounds", "dkv_cell_vec")
+
+
+def sink_points(c: Candidate, rel: Release) -> list[dict]:
+    """Knob sets of the non-default dK / dV sinks on top of candidate ``c``:
+    each sink alone, then each :data:`SLICE_LEVERS` value that applies there,
+    one at a time (``dkv_cell_vec`` with the per-slot epilogue it needs)."""
+    sl = c.slice
+    out = []
+    for s in _sink_values(sl, rel):
+        base = {**sl.spec_class(), **c.k, "dkv_mode": "atomic", "dkv_sink": s}
+        out.append({"dkv_sink": s})
+        for name in SLICE_LEVERS:
+            if not rel.has(name):
+                continue
+            axis = backward_axis(name)
+            cur = base.get(name, axis.default)
+            for v in rel.values(sl, name, axis.default):
+                if v == cur:
+                    continue
+                extra = {name: v}
+                if name == "dkv_cell_vec" and base.get("dkv_epilogue") != "direct":
+                    extra["dkv_epilogue"] = "direct"
+                if axis.applies(v, {**base, **extra}):
+                    out.append({"dkv_sink": s, **extra})
+    return out
+
+
 def _dq_xcd_values(sl: SliceKey, rel: Release) -> list[dict]:
     """Stage R values of the split dQ kernel's XCD chunk (non-default ones,
     each with the request's XCD count as a device hint)."""
@@ -1335,6 +1403,8 @@ def stage_candidates(
     ``prior`` maps a stage word to its ranked candidates (best first).
     """
     prior = prior or {}
+    if sl.family == "dense":
+        return dense_stage_candidates(stage, sl, rel=rel, prior=prior, cells=cells)
     if stage == "geometry":
         return geometry_stage(sl, rel).candidates
     if stage == "structure":
@@ -1394,6 +1464,18 @@ def stage_candidates(
         )[: KEEP["alternate"]]
         vals = _runtime_values(sl, cells, rel)
         out = [c.with_runtime(**v) for c in top for v in vals]
+        # the atomic-mode dK / dV sink (a codegen knob) and the levers that
+        # act on the slice sink only, also on every point a head split makes
+        # atomic: on a direct slice the codegen stage cannot enumerate them
+        # (inert there)
+        out += [
+            c.with_knobs(**p).with_runtime(**v)
+            for c in top
+            if c.k.get("dkv_sink", "atomic") == "atomic"
+            for p in sink_points(c, rel)
+            for v in vals
+            if sl.dkv_mode == "atomic" or int(v.get("g_split", 1)) > 1
+        ]
         # split-dQ candidates: the dQ kernel's XCD chunk, one value at a time
         dq_xcd = _dq_xcd_values(sl, rel)
         out += [
@@ -1406,6 +1488,453 @@ def stage_candidates(
     if stage == "confirm":
         return list(prior.get("runtime", ())[: KEEP["runtime"]])
     raise ValueError(f"unknown stage {stage!r}")
+
+
+# --------------------------------------------------------------------------- dense family
+# The dense route (``runtime["route"] = "dense"``) runs the shared body with
+# compile-time shapes. Its body knobs are not swept again: the dense slice of
+# (arch, d) seeds its candidates from the general slice's survivors (the top
+# of the general runtime stage, with their runtime values), crosses them with
+# the dense-only knobs in the ``runtime`` stage (they do not change the body),
+# and ``confirm`` times its best candidate against the general winner on the
+# dense cohort (dense-eligible census cells of the head size, short-query GQA
+# cells excluded: the general plan packs their heads, which the dense route
+# does not build). A dense key enters ``DENSE_BWD_TUNED`` only from
+# :func:`dense_table_entries` (a paired win over the general winner on every
+# cell of the key, a clean A/A control, the pruning-set gate passed).
+DENSE_STAGES = ("runtime", "confirm")
+# Dense spec fields that are not fields of the general family's spec.
+DENSE_ONLY_KNOBS = ("oob", "epilogue", "persistent", "persist_decode")
+# Dense-only knobs the runtime stage enumerates (the registry's dense axes
+# that are compile-time, built and not plan-owned; edge_tiles, ws_layout and
+# dq_mode are dense spec fields there). dq_mode moves a seed between atomic
+# dQ and split dQ (the dense dQ kernel): a split point drops to atomic without
+# its dQ-kernel values, an atomic point goes split with the dQ defaults, and a
+# split point also tries the dQ kernel's edge / interior key loops (with
+# compile-time lengths the dense dQ kernel drops the runs proved empty).
+DENSE_RUNTIME_AXES = (
+    "oob",
+    "edge_tiles",
+    "epilogue",
+    "ws_layout",
+    "persistent",
+    "persist_decode",
+    "dq_mode",
+)
+DENSE_SEEDS = KEEP["alternate"]  # general survivors seeding the dense stage
+# The dense grid remap is the plan's (xcd_chunk with the request's XCDs).
+_DENSE_ROUTE = "dense"
+_PROBE_LEN = 4096
+_CPU_NUM_CUS = 64
+
+
+@cache
+def _dense_axes() -> dict:
+    from dispatch.attention_bwd.dense_tuning import DENSE_BWD_KNOB_AXES
+
+    return {a.name: a for a in DENSE_BWD_KNOB_AXES if a.name in DENSE_RUNTIME_AXES}
+
+
+def _dense_problem(c: "Candidate", body) -> tuple[str, str] | None:
+    """``(rule, detail)`` when a dense candidate cannot be built for any
+    shape of its slice (beyond the body's own legality), else ``None``."""
+    from kernels.common.attention_dense_bwd_plan import dense_bwd_spec_class
+    from kernels.common.attention_dense_bwd_spec import _shell_not_built
+
+    missing = _shell_not_built(body)
+    if missing:
+        return "not_built", "; ".join(missing)
+    if c.r.get("use_worklist"):
+        return "coupling", "the work list is a general-family role"
+    if c.r.get("route") != _DENSE_ROUTE:
+        return "coupling", "a dense candidate plans the dense route"
+    sl = c.slice
+    fields = {
+        k: c.k[k]
+        for k in DENSE_RUNTIME_AXES
+        if k in c.k and k not in ("edge_tiles", "ws_layout")
+    }
+    try:
+        dense_bwd_spec_class(sl.arch)(
+            seqlen_q=_PROBE_LEN, seqlen_kv=_PROBE_LEN, num_query_heads=8,
+            num_kv_heads=2, head_size=sl.head_size, dtype=sl.dtype,
+            causal=sl.mask_class == "band", ragged=True,
+            edge_tiles=c.k.get("edge_tiles", True),
+            ws_layout=c.k.get("ws_layout", "head_major"), **fields,
+        )  # fmt: skip
+    except ValueError as ex:
+        return rule_token(str(ex)), str(ex)
+    return None
+
+
+def dense_points(c: "Candidate", rel: Release) -> list[dict]:
+    """Dense-only knob points around candidate ``c`` (its current values
+    first): one knob moved at a time at ``production``, crossed at ``full``
+    (``persist_decode`` only with ``persistent``). Values the registry marks
+    not built are never enumerated."""
+    axes = _dense_axes()
+    cur = {n: c.k.get(n, ax.default) for n, ax in axes.items()}
+
+    def vals(n):
+        ax = axes[n]
+        if ax.family not in rel.families:
+            return [cur[n]]
+        return [v for v in ax.values(c.slice.arch, rel.level) if v not in ax.not_built]
+
+    def ok(p):
+        # the couplings read the seed's body knobs too (dq_mode: the split
+        # main kernel's)
+        k = {**c.k, **p}
+        return all(axes[n].applies(p[n], k) for n in axes)
+
+    if rel.level == "full":
+        names = list(axes)
+        out = []
+        for combo in itertools.product(*(vals(n) for n in names)):
+            p = dict(zip(names, combo))
+            if ok(p):
+                out.append(p)
+        return out
+    out = [dict(cur)]
+    for n in axes:
+        for v in vals(n):
+            if v == cur[n]:
+                continue
+            p = {**cur, n: v}
+            if n == "persistent" and v:
+                p["persist_decode"] = axes["persist_decode"].default
+            if ok(p) and p not in out:
+                out.append(p)
+    if cur.get("persistent") is not True:
+        # persist_decode moves together with persistent = True
+        for v in vals("persist_decode"):
+            p = {**cur, "persistent": True, "persist_decode": v}
+            if v != axes["persist_decode"].default and ok(p) and p not in out:
+                out.append(p)
+    return out
+
+
+def _dense_dq_points(c: "Candidate", rel: Release) -> list["Candidate"]:
+    """The candidates of :func:`dense_points` around ``c`` (its own point
+    first), with the dQ-kernel values following ``dq_mode``: an atomic point
+    carries none (a split seed's are dropped), a split point keeps the seed's
+    (or the defaults), and the split point that differs from the seed in
+    ``dq_mode`` alone (or not at all) also tries ``dq_edge_tiles = True``."""
+    pts = dense_points(c, rel)
+    seed = pts[0] if pts else {}
+    out = []
+    for p in pts:
+        x = c.with_knobs(**p)
+        if x.k.get("dq_mode", "atomic") != "split":
+            if any(k in DQ_KNOBS for k in x.k):
+                keep = {k: v for k, v in x.k.items() if k not in DQ_KNOBS}
+                x = Candidate.make(x.slice, keep, x.r)
+            out.append(x)
+            continue
+        out.append(x)
+        alone = all(p[n] == seed.get(n) for n in p if n != "dq_mode")
+        if alone and not x.k.get("dq_edge_tiles", False):
+            out.append(x.with_knobs(dq_edge_tiles=True))
+    return list(dict.fromkeys(out))
+
+
+def _dense_xcd_values(sl: SliceKey, rel: Release) -> list[dict]:
+    """Non-zero XCD chunks of the registry (built values), each with the
+    request's XCD count as a device hint (the dense ``xcd_remap`` axis)."""
+    if not rel.has("xcd_chunk") or sl.arch not in SWEEP_NUM_XCDS:
+        return []
+    hint = {"num_xcds": SWEEP_NUM_XCDS[sl.arch]}
+    return [{"xcd_chunk": v, **hint} for v in _runtime_built(sl, rel, "xcd_chunk") if v]
+
+
+def general_slice_of(sl: SliceKey) -> SliceKey:
+    """The general slice whose survivors seed dense slice ``sl``."""
+    return replace(sl, family="general")
+
+
+def _dense_seed(sl: SliceKey, g: "Candidate") -> "Candidate | None":
+    """General survivor ``g`` as a dense candidate of ``sl`` (``None`` when
+    its runtime values have no dense counterpart: mirror pairing, the work
+    list)."""
+    r = dict(g.r)
+    if r.get("lb_order") == "mirror" or r.get("use_worklist"):
+        return None
+    r.pop("num_cus", None)  # only mirror pairing reads the CU hint
+    r["route"] = _DENSE_ROUTE
+    knobs = {k: v for k, v in g.k.items() if k != "head_pack"}
+    return Candidate.make(sl, knobs, r)
+
+
+def dense_stage_candidates(
+    stage: str,
+    sl: SliceKey,
+    *,
+    rel: Release,
+    prior: Mapping[str, Sequence["Candidate"]],
+    cells: Sequence = (),
+) -> list["Candidate"]:
+    """Candidates of a dense slice's stage (see the section comment).
+
+    ``prior`` holds the dense slice's own ranked stages and, under
+    ``general:<stage>``, the general slice's. ``runtime``: the top
+    :data:`DENSE_SEEDS` general runtime-stage survivors (or, before that
+    stage ran, the general pre-runtime top crossed with the runtime values),
+    each crossed with :func:`dense_points`. ``confirm``: the general winner
+    first (the A/A twin), then the best dense candidate.
+    """
+    if stage == "runtime":
+        seeds = list(prior.get("general:runtime", ())[:DENSE_SEEDS])
+        if not seeds:
+            top = (
+                prior.get("general:alternate_schedule")
+                or prior.get("general:alternate")
+                or prior.get("general:swizzle")
+                or prior.get("general:codegen")
+                or prior.get("general:schedule")
+                or ()
+            )[:DENSE_SEEDS]
+            vals = _runtime_values(general_slice_of(sl), cells, rel)
+            seeds = [g.with_runtime(**v) for g in top for v in vals]
+        xcd = _dense_xcd_values(sl, rel)
+        out = []
+        for g in seeds:
+            d = _dense_seed(sl, g)
+            if d is None:
+                continue
+            for i, x in enumerate(_dense_dq_points(d, rel)):
+                p = {n: x.k.get(n, ax.default) for n, ax in _dense_axes().items()}
+                if p.get("persistent"):
+                    # a persistent grid is sized from the device's CU count
+                    out.append(x.with_runtime(num_cus=DEVICE_NUM_CUS))
+                    continue
+                out.append(x)
+                # the dense grid remap (xcd_remap, derived by the plan from
+                # xcd_chunk and the request's XCD count) on the non-persistent
+                # grid: around the seed's point (production) or every point
+                if not d.r.get("xcd_chunk") and (i == 0 or rel.level == "full"):
+                    out += [x.with_runtime(**v) for v in xcd]
+        return list(dict.fromkeys(out))
+    if stage == "confirm":
+        gen = list(prior.get("general:runtime", ())[:1])
+        top = list(prior.get("runtime", ())[:1])
+        return gen + top if gen and top else []
+    return []
+
+
+class _StandIn:
+    """Shape / stride / pointer stand-in for a device tensor (CPU planning
+    of a census cell; logical ``[B, H, S, D]`` with the cell's layout)."""
+
+    def __init__(self, shape, strides) -> None:
+        self.shape, self._st = shape, strides
+        self.dtype = "torch.bfloat16"
+
+    def stride(self, i=None):
+        return self._st if i is None else self._st[i]
+
+    def data_ptr(self) -> int:
+        return 1 << 20
+
+
+def cell_request(cell):
+    """The request of a dense-layout census cell, planned without a device
+    (contiguous tensors in the cell's layout, 256-byte aligned)."""
+    from benchmarks.common.attention_bwd_rocke_arm import request_for_cell, scale_of
+
+    if cell.is_thd:
+        raise ValueError("a THD cell has no dense-layout request")
+    t = {}
+    for n in ("q", "k", "v", "o", "do", "dq", "dk", "dv"):
+        q_side = n in ("q", "o", "do", "dq")
+        h = cell.hq if q_side else (cell.hkv if n in ("k", "dk") else cell.h_v)
+        s, d = (cell.sq if q_side else cell.skv), cell.d
+        st = (
+            (h * s * d, s * d, d, 1)
+            if cell.layout == "bhsd"
+            else (s * h * d, d, h * d, 1)
+        )
+        t[n] = _StandIn((cell.b, h, s, d), st)
+    return request_for_cell(cell, t, scale=scale_of(cell))
+
+
+def head_packed(cell, block_m: int) -> bool:
+    """Whether the general plan packs the query heads of ``cell`` (a GQA
+    group whose ``G * s_q`` rows fit one q tile): such cells stay general."""
+    group = cell.hq // cell.hkv if cell.hkv else 1
+    return group > 1 and cell.sq * group <= block_m
+
+
+def dense_cells(sl: SliceKey, cells: Sequence, block_m: int) -> list:
+    """The cells of ``cells`` the dense route may take for slice ``sl``:
+    dense-eligible on its arch and not head-packed by the general plan."""
+    from kernels.common.attention_bwd_plan import dense_bwd_eligibility
+
+    out = []
+    for c in cells:
+        if c.is_thd or head_packed(c, block_m):
+            continue
+        try:
+            req = cell_request(c)
+        except ValueError:
+            continue
+        if dense_bwd_eligibility(req, sl.arch)[0]:
+            out.append(c)
+    return out
+
+
+def _max_block_m(cands: Sequence["Candidate"]) -> int:
+    """The largest resolved ``block_m`` of the legal candidates (0: none)."""
+    out = 0
+    for c in cands:
+        r = legality(c).resolved
+        if r is not None:
+            out = max(out, int(r.block_m))
+    return out
+
+
+def dense_plan(c: "Candidate", cell):
+    """The dense plan of candidate ``c`` on ``cell`` (CPU; ``ValueError``
+    when the dense route refuses it)."""
+    from benchmarks.common.attention_bwd_rocke_arm import REQUEST_HINTS, config_policy
+    from kernels.common.attention_dense_bwd_plan import attn_dense_bwd_plan
+
+    cfg = c.config()
+    req = cell_request(cell)
+    hints = {k: cfg.runtime[k] for k in REQUEST_HINTS if k in cfg.runtime}
+    if hints.get("num_cus") == DEVICE_NUM_CUS:
+        # the device's CU count is a kernarg (num_persistent): any positive
+        # count plans the same kernel
+        hints["num_cus"] = _CPU_NUM_CUS
+    if hints:
+        req = replace(req, **hints)
+    runtime = {k: v for k, v in cfg.runtime.items() if k != "route"}
+    pol = config_policy(type(cfg)(cfg.label, cfg.knobs, runtime))
+    return attn_dense_bwd_plan(req, c.slice.arch, policy=pol)
+
+
+def dense_vs_general(
+    summary: Mapping,
+    dense_key: str,
+    general_key: str,
+    constants: Mapping | None,
+    *,
+    gated: bool,
+) -> dict:
+    """Paired verdict of a dense candidate against the general winner on one
+    confirm cell (both timed in the same attempts). ``win``: the dense arm
+    passes against the general one and the general arm fails against the
+    dense one (faster beyond the noise band); ``aa``: the A/A controls of both
+    arms (the confirm stage times a twin of every arm, ``--aa-control all``:
+    the two arms differ in kernel and runtime values, so one arm's twin does
+    not bound the other's noise); ``ok`` only when both twins are clean;
+    ``gated``: the timing ran with the pruning-set gate."""
+    from benchmarks.common import attention_bwd_bench as bb
+
+    arms = summary.get("arms", {})
+    d = arms.get(bb.rocke_arm_name(dense_key), {})
+    g = arms.get(bb.rocke_arm_name(general_key), {})
+    out = {
+        "general_key": general_key,
+        "aa": _pair_aa(summary, dense_key, general_key),
+        "gated": bool(gated),
+        "win": False,
+        "verdict": None,
+    }
+    if constants is None:
+        out["verdict"] = "no_constants"
+        return out
+    if d.get("status") != "ok" or g.get("status") != "ok":
+        out["verdict"] = "untimed"
+        return out
+    a, b = d["attempt_medians_ms"], g["attempt_medians_ms"]
+    if min(len(a), len(b)) < bb.MIN_KEPT_ATTEMPTS:
+        out["verdict"] = "incomplete"
+        return out
+    done = int(summary.get("reruns_done", 0))
+    fwd = bb.paired_verdict(a, b, constants, reruns_done=done)
+    rev = bb.paired_verdict(b, a, constants, reruns_done=done)
+    out.update(
+        verdict=fwd,
+        reverse=rev,
+        ratio=statistics.median(a) / statistics.median(b),
+        win=fwd == "pass" and rev == "fail",
+    )
+    return out
+
+
+def _pair_aa(summary: Mapping, *keys: str) -> str | None:
+    """The A/A verdict of the arms ``keys`` (each needs its own twin):
+    ``fail`` / ``incomplete`` / ``None`` (a twin missing) / ``ok``."""
+    from benchmarks.common import attention_bwd_bench as bb
+
+    per = summary.get("aa_controls")
+    if per is None:
+        return None  # no per-arm twins (an older record): not judged
+    got = [per.get(bb.rocke_arm_name(k)) for k in keys]
+    if "fail" in got:
+        return "fail"
+    if "incomplete" in got:
+        return "incomplete"
+    if None in got:
+        return None
+    return "ok"
+
+
+def dense_tuned_value(c: "Candidate") -> dict:
+    """The ``DENSE_BWD_TUNED`` value of dense candidate ``c``: its knobs and
+    runtime values (request hints and the route switch left out)."""
+    from benchmarks.common.attention_bwd_rocke_arm import REQUEST_HINTS
+
+    out = dict(c.tuning_knobs())
+    out.update(
+        {k: v for k, v in c.r.items() if k != "route" and k not in REQUEST_HINTS}
+    )
+    return {k: list(v) if isinstance(v, tuple) else v for k, v in out.items()}
+
+
+def dense_table_entries(out: Path, sl: SliceKey) -> list[dict]:
+    """``DENSE_BWD_TUNED`` entries of dense slice ``sl`` from its confirm
+    records: ``[{"arch", "key", "knobs", "cells"}]`` for every dense key
+    whose every confirm cell (one dense candidate) has a paired win of the
+    dense candidate over the general winner (:func:`dense_vs_general`), a
+    clean A/A control (``aa = "ok"``), a timing run under the pruning-set
+    gate (``gated``) and a timed dense arm (status ``timed``: it passed the
+    gate and the timed-shape check in its timing process)."""
+    from kernels.common.attention_bwd_plan import _dense_key
+
+    recs = read_records(out, sl, "confirm")
+    by_key: dict[tuple, list] = {}
+    cells = {c.id: c for c in _census_cells()}
+    for key, r in recs.items():
+        if r.get("slice", {}).get("family") != "dense" or "|" not in key:
+            continue
+        cell = cells.get(key.partition("|")[2])
+        if cell is None:
+            continue
+        dk = (sl.arch, _dense_key(cell_request(cell)))
+        by_key.setdefault(dk, []).append(r)
+    entries = []
+    for dk, rs in sorted(by_key.items(), key=lambda kv: repr(kv[0])):
+        cands = {r["key"].partition("|")[0] for r in rs}
+        ok = len(cands) == 1 and all(
+            r.get("status") == "timed"
+            and (r.get("vs_general") or {}).get("gated") is True
+            and (r.get("vs_general") or {}).get("win") is True
+            and (r.get("vs_general") or {}).get("aa") == "ok"
+            for r in rs
+        )
+        if not ok:
+            continue
+        c = Candidate.from_record(rs[0])
+        entries.append(
+            {
+                "arch": dk[0],
+                "key": json.loads(json.dumps(dk[1])),
+                "knobs": dense_tuned_value(c),
+                "cells": sorted(r["key"].partition("|")[2] for r in rs),
+            }
+        )
+    return entries
 
 
 # --------------------------------------------------------------------------- counts
@@ -1807,6 +2336,13 @@ class Driver:
         for st in STAGE_WORDS + ("alternate_schedule",):
             if st in KEEP:
                 out[st] = ranked(self.o.out, sl, st, None)
+        if sl.family == "dense":
+            # the general slice's survivors seed the dense candidates
+            gsl = general_slice_of(sl)
+            for st in STAGE_WORDS + ("alternate_schedule",):
+                if st in KEEP:
+                    out[f"general:{st}"] = ranked(self.o.out, gsl, st, None)
+            return out
         if sl.kind != "primary":
             prim = replace(
                 sl,
@@ -1827,11 +2363,17 @@ class Driver:
 
     # -- stage ------------------------------------------------------------------
     def run_stage(self, sl: SliceKey, stage: str) -> dict:
+        if sl.family == "dense" and stage not in DENSE_STAGES:
+            return {"skipped": "dense_seeds_from_general"}
         cells = cohort_cells(sl) if stage == "confirm" else representative_cells(sl)
         prior = self.prior(sl)
         cands = stage_candidates(
             stage, sl, rel=self.o.release, prior=prior, cells=cells
         )
+        if sl.family == "dense":
+            # the cells the dense route may take (no head-packed cell under
+            # any candidate's tile)
+            cells = dense_cells(sl, cells, _max_block_m(cands))
         path = shard_path(self.o.out, sl, stage, self.o.shard)
         done = read_records(self.o.out, sl, stage)
         counts = {
@@ -1891,14 +2433,135 @@ class Driver:
                 append_jsonl(path, {**base, **c.record(), "status": "enumerated"})
             counts["enumerated"] = len(todo)
             return counts
+        dense = [c for c in todo if c.slice.family == "dense"]
+        todo = [c for c in todo if c.slice.family != "dense"]
         survivors = self._compile_and_prune(sl, stage, todo, path, base, counts)
+        if dense:
+            survivors += self._compile_and_prune_dense(dense, cells, path, base, counts)
         if survivors:
             self._time(sl, stage, survivors, cells, path, base, counts)
         return counts
 
+    def _compile_and_prune_dense(self, todo, cells, path, base, counts) -> list:
+        """Dense candidates: one dense kernel per (candidate, cell) (the
+        shape is compiled in), each through the resource gate with the
+        candidate's resolved body spec. A candidate no cell can plan is
+        ``unsupported``; any kernel that fails to compile or prunes fails it."""
+        from benchmarks.common.attention_bwd_compile import compile_batch
+
+        items, owner, refused = [], [], {}
+        for j, c in enumerate(todo):
+            refused[j] = []
+            for cell in cells:
+                try:
+                    p = dense_plan(c, cell)
+                except ValueError as ex:
+                    refused[j].append(f"{cell.id}: {ex}"[:200])
+                    continue
+                items.append(("dense", p.specs["dense"]))
+                owner.append(j)
+                if "dense_dq" in p.specs:
+                    # split dQ: the cell's dense dQ kernel compiles and is
+                    # gated too
+                    items.append(("dense_dq", p.specs["dense_dq"]))
+                    owner.append(j)
+        deadline = self.t0 + self.o.deadline_s
+        iso = {
+            i for i, j in enumerate(owner) if crash_isolated(legality(todo[j]).resolved)
+        }
+        if self.o.compile_mode == "process":
+            iso = set()
+        res: list = [None] * len(items)
+        for idx, mode in (
+            ([i for i in range(len(items)) if i not in iso], self.o.compile_mode),
+            (sorted(iso), "process"),
+        ):
+            if not idx:
+                continue
+            got = compile_batch(
+                [items[i] for i in idx], arch=todo[0].slice.arch, cache=self.cache(),
+                workers=self.o.cpus, mode=mode, deadline=deadline,
+            )  # fmt: skip
+            for i, r in zip(idx, got):
+                res[i] = r
+        gate = self.gate()
+        survivors = []
+        for j, c in enumerate(todo):
+            lg = legality(c)
+            mine = [res[i] for i, o in enumerate(owner) if o == j]
+            kinds = [items[i] for i, o in enumerate(owner) if o == j]
+            stages = [st for st, _ in kinds]
+            rec = {
+                **base,
+                **c.record(),
+                "resolved": repr(lg.resolved),
+                "estimate": {"arch_vgpr": lg.arch_vgpr, "agpr": lg.agpr, "lds": lg.lds},
+                "refused_cells": refused[j],
+            }
+            if any(r.error == "deadline" for r in mine):
+                counts["deadline"] += 1
+                continue  # resumed by a later run of this shard
+            if not mine:
+                rec.update(status="unsupported", detail="; ".join(refused[j])[:300])
+                counts["unsupported"] += 1
+                append_jsonl(path, rec)
+                continue
+            bad = next((i for i, r in enumerate(mine) if not r.ok), None)
+            if bad is not None:
+                prefix = "dq_" if stages[bad] == "dense_dq" else ""
+                rec.update(status=prefix + mine[bad].error, detail=mine[bad].detail)
+                bad = mine[bad]
+                counts["not_built" if bad.error == "not_built" else "compile_fail"] += 1
+                append_jsonl(path, rec)
+                continue
+            rec.update(
+                kernel=[r.entry.kernel_name for r in mine],
+                hsaco_sha=[r.entry.hsaco_sha for r in mine],
+                cached=all(r.cached for r in mine),
+            )
+            failed = False
+            if gate is not None and hasattr(gate, "static_prune"):
+                rec["resources"] = []
+                for (st, spec), r in zip(kinds, mine):
+                    # a dense dQ kernel: the dQ rules on its resolved dQ spec
+                    dq = st == "dense_dq"
+                    prefix = "dq_" if dq else ""
+                    if dq and not hasattr(gate, "static_prune_dq"):
+                        continue
+                    try:
+                        if dq:
+                            rule, one = gate.static_prune_dq(
+                                c.slice.arch, spec.dq, r.entry.hsaco
+                            )
+                        else:
+                            rule, one = gate.static_prune(
+                                c.slice.arch, lg.resolved, r.entry.hsaco
+                            )
+                    except Exception as ex:  # noqa: BLE001 - never time unchecked code
+                        rec.update(
+                            status=f"{prefix}resource_gate_error:{type(ex).__name__}",
+                            detail=str(ex)[:300],
+                        )
+                        counts["compile_fail"] += 1
+                        failed = True
+                        break
+                    rec["resources"].append(one)
+                    if rule:
+                        rec["status"] = f"pruned:{prefix}{rule}"
+                        counts["pruned"] += 1
+                        failed = True
+                        break
+            if failed:
+                append_jsonl(path, rec)
+                continue
+            survivors.append((c, rec))
+        return survivors
+
     def _compile_and_prune(self, sl, stage, todo, path, base, counts) -> list:
         from benchmarks.common.attention_bwd_compile import compile_batch
 
+        if not todo:
+            return []
         items = [("main", legality(c).resolved) for c in todo]
         # split candidates: their dQ kernel compiles and is gated too
         dq_at = {}
@@ -2021,6 +2684,13 @@ class Driver:
         ref_dir = self._ref_dir(sl, stage)
         tdir = ref_dir.parent
         per = max(1, self.o.arms_per_attempt)
+        consts = None
+        if sl.family == "dense" and stage == "confirm":
+            # the dense candidate is judged against the general winner timed
+            # in the same attempts (one group)
+            per = max(per, len(survivors))
+            if self.o.gate_constants:
+                consts = bb.load_gate_constants(self.o.gate_constants)
         for gi in range(0, len(survivors), per):
             group = survivors[gi : gi + per]
             left = self.remaining()
@@ -2061,6 +2731,10 @@ class Driver:
             ):
                 if val:
                     argv += [flag, val]
+            if stage == "confirm":
+                # every finalist with its own A/A twin: the arms differ in
+                # kernel and runtime values (dense_vs_general, the table rule)
+                argv += ["--aa-control", "all"]
             bb.main(argv)
             summaries = bb.latest_summaries(gdir / "cells.jsonl")
             env = _last_env(gdir / "env.jsonl")
@@ -2068,6 +2742,9 @@ class Driver:
                 got = [summaries[x.id] for x in cells if x.id in summaries]
                 if stage == "confirm":
                     # one record per (finalist, cohort cell): the cell verdict
+                    general = next(
+                        (g for g, _ in group if g.slice.family == "general"), None
+                    )
                     for s_ in got:
                         sc = score_from_summaries(c.key(), [s_])
                         cell_rec = {**rec, **sc, "env": env, "cell_ids": [s_["id"]]}
@@ -2076,6 +2753,11 @@ class Driver:
                             "timed" if sc["score"] is not None else sc["worst"]
                         )
                         cell_rec["verdict"] = sc["cells"][s_["id"]]["verdict"]
+                        if c.slice.family == "dense" and general is not None:
+                            cell_rec["vs_general"] = dense_vs_general(
+                                s_, c.key(), general.key(), consts,
+                                gated=bool(self.o.gate),
+                            )  # fmt: skip
                         append_jsonl(path, cell_rec)
                     if len(got) < len(cells):
                         counts["deadline"] += 1
@@ -2144,6 +2826,18 @@ def _print_counts(
                 "status=no_validator"
             )
             continue
+        if sl.family == "dense":
+            # seeded from the general survivors: the dense-only points per seed
+            seed = _dense_seed(
+                sl, Candidate.make(general_slice_of(sl), default_knobs(sl))
+            )
+            _stdout(
+                f"count arch={sl.arch} family=dense d={sl.head_size} "
+                f"status=seeded_from_general seeds={DENSE_SEEDS} "
+                f"dense_points={len(dense_points(seed, rel))} "
+                f"stages={','.join(DENSE_STAGES)}"
+            )
+            continue
         sc = count_slice(sl, rel)
         line = _count_line(sc)
         if plan_consts is not None:
@@ -2155,11 +2849,18 @@ def _print_counts(
                 continue
             n_cells = len(representative_cells(sl))
             rt_vals = _runtime_values(sl, representative_cells(sl), rel)
-            n_rt = KEEP["alternate"] * len(rt_vals)
-            # a head split makes dK / dV atomic: one more kernel per split value
-            n_rt_compile = KEEP["alternate"] * len(
-                {v["g_split"] for v in rt_vals if v.get("g_split", 1) > 1}
-            )
+            # a head split makes dK / dV atomic: one more kernel per split
+            # value; each slice-sink point is one more kernel too (g_split is
+            # a kernarg, so one per point whatever the split), timed on every
+            # atomic runtime point
+            atomic_pts = [
+                v for v in rt_vals if sl.dkv_mode == "atomic" or v.get("g_split", 1) > 1
+            ]
+            rep = Candidate.make(sl, default_knobs(sl))
+            n_sink = len(sink_points(rep, rel)) if atomic_pts else 0
+            n_rt = KEEP["alternate"] * (len(rt_vals) + n_sink * len(atomic_pts))
+            splits = {v["g_split"] for v in rt_vals if v.get("g_split", 1) > 1}
+            n_rt_compile = KEEP["alternate"] * (len(splits) + n_sink)
 
             def stage_jobs(survival: float) -> dict:
                 jobs = {}
@@ -2241,6 +2942,14 @@ def make_parser() -> argparse.ArgumentParser:
     ap.add_argument("--deadline-s", type=float, default=1e9)
     ap.add_argument("--expect-flavor", default=None)
     ap.add_argument("--expect-comgr", default=None)
+    ap.add_argument(
+        "--emit-dense-table",
+        default=None,
+        metavar="PATH",
+        help="write the DENSE_BWD_TUNED entries the dense confirm records earn "
+        "(paired win over the general winner, clean A/A, gated) to PATH (JSON, "
+        "outside the source tree); needs --out-dir",
+    )
     return ap
 
 
@@ -2272,6 +2981,22 @@ def main(argv: Sequence[str] | None = None) -> int:
             attempts=args.attempts,
             arms_per_attempt=args.arms_per_attempt,
         )
+        return 0
+    if args.emit_dense_table:
+        if not args.out_dir:
+            raise SystemExit("--emit-dense-table needs --out-dir")
+        out = _guard_out(args.out_dir)
+        dest = _guard_out(args.emit_dense_table)
+        entries = []
+        for sl in slices:
+            if sl.family == "dense":
+                entries += dense_table_entries(out, sl)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(
+            json.dumps({"entries": entries}, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        _stdout(f"dense_table entries={len(entries)}")
         return 0
     if not args.stage:
         make_parser().print_help()

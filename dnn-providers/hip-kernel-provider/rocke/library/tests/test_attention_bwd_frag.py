@@ -10,6 +10,10 @@
   logical K. Synthetic mismatches raise.
 * No 128-bit transpose read anywhere in the backward (IR of the emitted helpers
   and a source scan of every backward module).
+* Transpose-read plans: every catalog operand takes the catalog plan (the
+  legacy model); the K-permuted B of a 16x16x32 consumer takes the stacked
+  plan (two 16x16x16 B reads 16 K rows apart); near misses are refused; the
+  loader's emitted addresses are the proved plan's, lane for lane.
 """
 
 from __future__ import annotations
@@ -310,22 +314,136 @@ def test_tr16_refuses_maps_it_does_not_deliver():
     assert plan.needs_k_perm
     with pytest.raises(ValueError, match="does not deliver"):
         F.check_tr16_coords(F.kperm_b_coords(plan, c_op, k32))
+    # the catalog predicate refuses it; the plan chooser takes the stacked plan
+    assert F.tr16_read_plan(F.kperm_b_coords(plan, c_op, k32)).kind == "stacked"
     wmma = bwd_atoms("gfx1151", "fp16")[0]
     with pytest.raises(ValueError, match="wave64"):
         F.check_tr16_coords(F.operand_coords(wmma, "b"))
+    with pytest.raises(ValueError, match="wave64"):
+        F.tr16_read_plan(F.operand_coords(wmma, "b"))
 
 
-def _tr16_kernel(arch, dtype, op, role, *, mn0=4, k0=8):
+@pytest.mark.parametrize("role", ["a", "b"])
+@pytest.mark.parametrize("dtype,op", _gfx950_atoms())
+def test_tr16_plan_catalog_equals_legacy_model(dtype, op, role):
+    """Every catalog operand takes the catalog plan, which is the legacy
+    ``kpl`` model address for address."""
+    fc = F.operand_coords(op, role)
+    plan = F.tr16_read_plan(fc)
+    kpl = F.check_tr16_coords(fc)
+    assert plan.kind == "catalog" and plan.g_stride == fc.frag_len == kpl
+    assert plan.k_offsets == tuple(4 * t for t in range(kpl // 4))
+    for lane in range(64):
+        assert F.tr16_plan_coords(lane, plan) == F.tr16_model_coords(lane, kpl)
+        assert F.tr16_plan_coords(lane, plan) == fc.int_coords(lane)
+        for t in range(kpl // 4):
+            assert F.tr16_plan_address(lane, t, plan) == F.tr16_lane_address(
+                lane, t, kpl
+            )
+
+
+def _kperm_b(dtype, producer_k):
+    ops = {op.k: op for op in bwd_atoms("gfx950", dtype)}
+    c_op, k32 = ops[producer_k], ops[32]
+    plan = F.plan_c_to_a(c_op, k32)
+    assert plan.needs_k_perm
+    return plan, F.kperm_b_coords(plan, c_op, k32), ops
+
+
+@pytest.mark.parametrize("producer_k", [16, 32])
+@pytest.mark.parametrize("dtype", DTYPES)
+def test_tr16_stacked_plan_delivers_kperm_b(dtype, producer_k):
+    """The K-permuted B of a 16x16x32 consumer (producer C of either atom) is
+    delivered by the stacked plan: stride 4, reads at K 0 and 16, on every
+    lane and slot; the permutation does not depend on the producer atom."""
+    plan, coords, _ = _kperm_b(dtype, producer_k)
+    tp = F.tr16_read_plan(coords)
+    assert (tp.kind, tp.g_stride, tp.k_offsets) == ("stacked", 4, (0, 16))
+    for lane in range(64):
+        assert F.tr16_plan_coords(lane, tp) == coords.int_coords(lane)
+    other, _, _ = _kperm_b(dtype, 48 - producer_k)
+    assert other.k_perm == plan.k_perm
+
+
+@pytest.mark.parametrize("dtype", DTYPES)
+def test_stacked_fragment_is_two_catalog_b16_fragments(dtype):
+    """Slots 4t..4t+3 of the K-permuted B are the catalog 16x16x16 B fragment
+    shifted by 16 t along K, on every lane."""
+    _, coords, ops = _kperm_b(dtype, 16)
+    b16 = F.operand_coords(ops[16], "b")
+    for lane in range(64):
+        got = coords.int_coords(lane)
+        cat = b16.int_coords(lane)
+        for t in range(2):
+            assert got[4 * t : 4 * t + 4] == tuple((mn, k + 16 * t) for mn, k in cat)
+
+
+@dataclasses.dataclass(frozen=True)
+class _TableCoords(F.FragCoords):
+    """Coordinates given as a per-lane table (any map, affine or not)."""
+
+    table: tuple = ()
+
+    def int_coords(self, lane: int):
+        return self.table[lane]
+
+
+def test_tr16_plan_refuses_near_misses(monkeypatch):
+    """A K-permuted map with two slots of one lane swapped, the permuted map
+    without the ``kperm`` flag, stacked plans with swapped offsets or the
+    catalog stride, and wave32 coordinates are all refused."""
+    _, coords, _ = _kperm_b("fp16", 16)
+    per = tuple(coords.int_coords(lane) for lane in range(64))
+    assert F.tr16_read_plan(coords).kind == "stacked"
+    # (a) lane 3: slots 0 and 1 swapped
+    lane3 = list(per[3])
+    lane3[0], lane3[1] = lane3[1], lane3[0]
+    swapped = per[:3] + (tuple(lane3),) + per[4:]
+    fake = _TableCoords(
+        role="b", frag_len=8, wave_size=64, deltas=coords.deltas,
+        base=coords.base, kperm=True, table=swapped,
+    )  # fmt: skip
+    with pytest.raises(ValueError, match="does not deliver"):
+        F.tr16_read_plan(fake)
+    assert F.tr16_read_plan(dataclasses.replace(fake, table=per)).kind == "stacked"
+    # (d) the permuted map without the flag: the stacked branch requires it
+    with pytest.raises(ValueError, match="does not deliver"):
+        F.tr16_read_plan(dataclasses.replace(coords, kperm=False))
+    # (b) swapped offsets, (c) the catalog stride: the proof fails
+    for wrong in (
+        F.Tr16ReadPlan("stacked", 4, (16, 0)),
+        F.Tr16ReadPlan("stacked", 8, (0, 16)),
+        F.Tr16ReadPlan("catalog", 8, (0, 4)),
+    ):
+        assert not F._tr16_plan_proved(wrong, per), wrong
+    for mutant in (
+        F.Tr16ReadPlan("stacked", 8, (0, 16)),
+        F.Tr16ReadPlan("stacked", 4, (16, 0)),
+        F.Tr16ReadPlan("stacked", 4, (0, 8)),
+    ):
+        monkeypatch.setattr(F, "_STACKED_PLAN", mutant)
+        with pytest.raises(ValueError, match="does not deliver"):
+            F.tr16_read_plan(coords)
+    monkeypatch.undo()
+    # (e) wave32
+    with pytest.raises(ValueError, match="wave64"):
+        F.tr16_read_plan(dataclasses.replace(coords, wave_size=32))
+    with pytest.raises(ValueError, match="kind"):
+        F.Tr16ReadPlan("diagonal", 4, (0,))
+
+
+def _tr16_kernel(arch, dtype, op, role, *, mn0=4, k0=8, coords=None):
     elem = F.ir_type(dtype)
-    b = IRBuilder(f"tr16_loader_{arch}_{dtype}_k{op.k}_{role}")
+    tag = "kperm" if coords is not None else role
+    b = IRBuilder(f"tr16_loader_{arch}_{dtype}_k{op.k}_{tag}")
     out = b.param("OUT", PtrType(elem, "global"))
     b.kernel.attrs["max_workgroup_size"] = 64
     lane = b.thread_id_x()
     smem = b.smem_alloc(elem, (64 * 64 + 256,), "flat")
     view = F.LdsView(smem, 128, 64, 64)
     frag = F.load_frag_lds_tr16(
-        b, F.operand_coords(op, role), view, lane, dtype=dtype, arch=arch,
-        mn0=mn0, k0=k0,
+        b, coords or F.operand_coords(op, role), view, lane, dtype=dtype,
+        arch=arch, mn0=mn0, k0=k0,
     )  # fmt: skip
     for s in range(frag.type.count):
         idx = b.add(b.mul(lane, b.const_i32(8)), b.const_i32(s))
@@ -341,6 +459,58 @@ def test_tr16_loader_emits_only_b64_reads(dtype, op):
         n = op.a_frag_len if role == "a" else op.b_frag_len
         assert ir.count("call <4 x i16> @llvm.amdgcn.ds.read.tr16.b64(") == n // 4
         assert "tr16.b128" not in ir
+    if op.k == 32:  # the K-permuted B: two 64-bit reads, never a b128
+        _, coords, _ = _kperm_b(dtype, 16)
+        kernel = _tr16_kernel("gfx950", dtype, op, "b", coords=coords)
+        ir = lower(kernel, arch="gfx950")
+        assert ir.count("call <4 x i16> @llvm.amdgcn.ds.read.tr16.b64(") == 2
+        assert "tr16.b128" not in ir and "alloca" not in ir
+
+
+class _AddrBuilder(F.IntLaneBuilder):
+    """Integer builder that records the flat index of every transpose read."""
+
+    def __init__(self):
+        self.reads = []
+
+    def ds_read_tr16_b64(self, smem, idx, *, dtype):
+        self.reads.append(idx)
+        return idx
+
+
+def _emitted_read_indices(coords, *, k0, mn0, monkeypatch):
+    monkeypatch.setattr(F, "_assemble", lambda b, chunks, elem: list(chunks))
+    view = F.LdsView(None, 128, 64, 64)
+    out = []
+    for lane in range(64):
+        b = _AddrBuilder()
+        F.load_frag_lds_tr16(
+            b, coords, view, lane, dtype="fp16", arch="gfx950", mn0=mn0, k0=k0
+        )
+        out.append(tuple(b.reads))
+    return out
+
+
+@pytest.mark.parametrize("which", ["a16", "b16", "a32", "b32", "kperm"])
+def test_tr16_loader_addresses_are_the_proved_plan(which, monkeypatch):
+    """The loader's emitted per-lane address program, evaluated on integers
+    for every lane, is the address of the plan the proof accepted (catalog
+    or stacked), read for read."""
+    ops = {op.k: op for op in bwd_atoms("gfx950", "fp16")}
+    if which == "kperm":
+        _, coords, _ = _kperm_b("fp16", 16)
+    else:
+        coords = F.operand_coords(ops[int(which[1:])], which[0])
+    plan = F.tr16_read_plan(coords)
+    assert plan.kind == ("stacked" if which == "kperm" else "catalog")
+    k0, mn0 = 8, 4
+    got = _emitted_read_indices(coords, k0=k0, mn0=mn0, monkeypatch=monkeypatch)
+    for lane in range(64):
+        want = []
+        for t in range(len(plan.k_offsets)):
+            k, mn = F.tr16_plan_address(lane, t, plan)
+            want.append(128 + (k0 + k) * 64 + mn0 + mn)
+        assert got[lane] == tuple(want), lane
 
 
 @pytest.mark.parametrize("arch", ["gfx942", "gfx1151", "gfx1201"])

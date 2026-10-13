@@ -198,6 +198,12 @@ def _faint_params():
 def test_fast_exp2_flushes_only_below_2_pow_neg_126(case_id, config):
     case = _case(case_id)
     rows = _faint_rows(case)
+    # a mode the configuration cannot take (a recorded resource refusal)
+    # skips with the validator's reason
+    for mode in ("exact", "fast"):
+        skip_unless_planned(
+            case, arch=ARCH, config=config, overrides={"bwd_exp2": mode}
+        )
     runs = {}
     for mode in ("exact", "fast"):
         runs[mode] = run_case(

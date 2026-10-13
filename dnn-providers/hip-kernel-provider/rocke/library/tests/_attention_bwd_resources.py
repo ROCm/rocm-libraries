@@ -45,10 +45,10 @@ from typing import Any
 
 GATE_FLAVOR = "llvm22"
 # The production comgr: the ROCm vintage of the library that compiled the gate's
-# kernels must be this one (torch's bundled comgr on the cluster). The flavor
-# alone does not say it: a preset ``ROCKE_LLVM_FLAVOR=llvm22`` also reports
-# llvm22 when a process that never imported torch loaded a newer system comgr,
-# whose register allocation differs.
+# kernels must be this one (torch's bundled comgr on the cluster, pinned by path
+# without importing torch: :func:`pin_production_comgr`). The flavor alone does
+# not say it: a preset ``ROCKE_LLVM_FLAVOR=llvm22`` also reports llvm22 when a
+# process loaded a newer system comgr, whose register allocation differs.
 GATE_COMGR_ROCM = "7.2"
 
 # Per-arch register and LDS budgets used by the gate. The CDNA register file is
@@ -705,6 +705,16 @@ def disassemble(hsaco: bytes, *, arch: str) -> str:
     if find_objdump() is None:
         raise FileNotFoundError("llvm-objdump not found (set LLVM_OBJDUMP)")
     return _probe_isa_inspect().disassemble_hsaco(bytes(hsaco), mcpu=arch)
+
+
+def pin_production_comgr() -> str | None:
+    """Make the next compile in this process use the production comgr
+    (torch's bundled library, pinned by path) without importing torch; the
+    library conftest already did it for the session. Returns the pinned path
+    (None: nothing to pin, the gate then reads whichever comgr loads)."""
+    from kernels.common.attention_bwd_comgr import ensure_production_comgr
+
+    return ensure_production_comgr()
 
 
 def comgr_version() -> str | None:

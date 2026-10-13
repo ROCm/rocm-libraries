@@ -28,7 +28,7 @@ import struct
 import numpy as np
 from rocke.core.ir import F32, IRBuilder, PtrType
 
-from kernels.common._attention_bwd_frag import ir_type
+from kernels.common._attention_bwd_frag import LdsView, ir_type
 from kernels.common._attention_bwd_gemm import (
     BlockGemm,
     LdsOperand,
@@ -43,7 +43,8 @@ from kernels.common._attention_bwd_gemm import (
 
 
 def _stage(b, src, smem, shape, tid, threads, elem):
-    """Copy a row-major ``shape`` tile from global ``src`` into ``smem``."""
+    """Copy a row-major ``shape`` tile from global ``src`` into ``smem`` (a 2-D
+    allocation or an :class:`LdsView` of a flat one)."""
     rows, cols = shape
     total, vec = rows * cols, 8
     if cols % vec:
@@ -56,7 +57,10 @@ def _stage(b, src, smem, shape, tid, threads, elem):
             v = b.global_load_vN(src, idx, elem, vec)
             r = b.div(idx, b.const_i32(cols))
             c = b.mod(idx, b.const_i32(cols))
-            b.smem_store_vN(smem, [r, c], v, vec)
+            if isinstance(smem, LdsView):
+                smem.store(b, r, c, v, vec)
+            else:
+                b.smem_store_vN(smem, [r, c], v, vec)
 
         if (it + 1) * step <= total:
             body()
@@ -185,9 +189,20 @@ def make_gemm_probe(
 
 
 def make_chain_probe(
-    arch, dtype, *, k_m0, k_n0, d, waves, atom_k0=16, atom_k1=16, do_storage="k_outer"
-):
-    """Return ``(kernel, g0, g1, plan)`` of the relabel chain probe."""
+    arch, dtype, *, k_m0, k_n0, d, waves, atom_k0=16, atom_k1=16, do_storage="k_outer",
+    do_reader="plain",
+):  # fmt: skip
+    """Return ``(kernel, g0, g1, plan)`` of the relabel chain probe.
+
+    ``do_reader = "tr16"`` (gfx950, ``do_storage = "k_outer"``) stages ``dO``
+    into a flat LDS view and reads its fragments with the 64-bit transpose
+    read: the catalog plan, or the stacked plan of the K-permuted map of a
+    16x16x32 consumer (the backward's G1 / G3 B path).
+    """
+    if do_reader not in ("plain", "tr16"):
+        raise ValueError(f"do_reader must be 'plain' or 'tr16', got {do_reader!r}")
+    if do_reader == "tr16" and do_storage != "k_outer":
+        raise ValueError("the transpose read reads a K-outer dO tile")
     g0 = BlockGemm(arch, dtype, k_m0, k_n0, d, (1, waves), atom_k0)
     g1 = BlockGemm(arch, dtype, k_n0, d, k_m0, (waves, 1), atom_k1)
     elem = ir_type(dtype)
@@ -195,6 +210,8 @@ def make_chain_probe(
         f"bwd_chain_probe_{arch}_{dtype}_m{k_m0}_n{k_n0}_d{d}_w{waves}"
         f"_k{atom_k0}k{atom_k1}_{do_storage[2]}"
     )
+    if do_reader != "plain":
+        name += f"_{do_reader}"
     b = IRBuilder(name)
     pq = b.param("Q", PtrType(elem, "global"), readonly=True)
     pk = b.param("K", PtrType(elem, "global"), readonly=True)
@@ -206,7 +223,11 @@ def make_chain_probe(
     sq = b.smem_alloc(elem, (k_m0, d), "sq")
     sk = b.smem_alloc(elem, (k_n0, d), "sk")
     sdo_shape = _storage_shape(do_storage, d, k_m0)
-    sdo = b.smem_alloc(elem, sdo_shape, "sdo")
+    if do_reader == "tr16":
+        flat = b.smem_alloc(elem, (sdo_shape[0] * sdo_shape[1],), "sdo")
+        sdo = LdsView(flat, 0, sdo_shape[1], sdo_shape[0])
+    else:
+        sdo = b.smem_alloc(elem, sdo_shape, "sdo")
     _stage(b, pq, sq, (k_m0, d), tid, g0.threads, elem)
     _stage(b, pk, sk, (k_n0, d), tid, g0.threads, elem)
     _stage(b, pdo, sdo, sdo_shape, tid, g0.threads, elem)
@@ -223,7 +244,7 @@ def make_chain_probe(
         b,
         g1.zero_acc(b),
         a1,
-        LdsOperand(sdo, do_storage, coords=coords),
+        LdsOperand(sdo, do_storage, coords=coords, reader=do_reader),
         lane=lane,
         origin=o1,
     )

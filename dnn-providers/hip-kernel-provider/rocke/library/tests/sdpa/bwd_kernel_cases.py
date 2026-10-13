@@ -896,7 +896,10 @@ def custom_rules(raw: str | None = None) -> tuple[tuple[dict, dict], ...] | None
     whose ``head_size`` and ``stage_vec`` are optional (absent: any value).
     ``knobs`` holds spec knobs (lists become tuples), runtime plan knobs, the
     aux kernels' tuning values (``AUX_KNOBS``) and, with ``dq_mode =
-    "split"``, the dQ kernel's (``DQ_KNOBS``).
+    "split"``, the dQ kernel's (``DQ_KNOBS``). A ``g_split`` value is a cap:
+    each request runs ``gcd(g_split, G)`` with ``G = gcd(h_q / h_k, h_q /
+    h_v)`` (so MHA cases keep ``g_split = 1``); a test's own ``overrides``
+    are applied after it.
     ``None`` when the text is unset or empty; malformed text raises
     ``ValueError``.
     """
@@ -974,6 +977,15 @@ KNOB_SMOKE_SETS = {
     # mixed G0/G2 and G4 atom pairs (gfx950: the only arch with two atoms)
     "atom_g02_narrow": (("gfx950",), None, dict(atom_g02="16x16x16"), False),
     "atom_g4_narrow": (("gfx950",), None, dict(atom_g4="16x16x16"), False),
+    # the wide G1 / G3 atom (K-permuted B through the stacked transpose read;
+    # block_m >= 32: the d64 start point, a 32-row d128 tile)
+    "atom_g13_wide": (("gfx950",), (64,), dict(atom_g13="16x16x32"), False),
+    "atom_g13_wide_d128": (
+        ("gfx950",),
+        (128,),
+        dict(atom_g13="16x16x32", block_m=32),
+        False,
+    ),
     # occupancy hints 2 and 3 (the small-tile region runs 3 and 4 on both
     # CDNA targets: test_attention_bwd_tiles_numeric)
     "waves_per_eu_2": (_CDNA, None, dict(waves_per_eu=2), True),
@@ -1128,15 +1140,41 @@ def layout_twin_params(arch: str) -> list[tuple[str, str]]:
 # without their AGPR reservation too: the structure with a (128, 128)
 # reservation and the VGPR route fails the resource gate on every device case,
 # AGPR copies in the hot loop, and is refused). Both pass the oracle with
-# every knob in the launched spec, and dK / dV are bit for bit equal in direct
-# mode: none of these levers changes a dK / dV matrix-op chain (the VALU
-# levers are in both). Device test: test_compose_twin_sets of the device
+# every knob in the launched spec (a ``dq_*`` knob in the dQ kernel's), and
+# dK / dV are bit for bit equal in direct mode: none of these levers changes
+# a dK / dV matrix-op chain (the VALU levers are in both); under split dQ in
+# both, dQ is bit for bit equal too (one fixed-order register sum, which no
+# schedule value changes). Device test: test_compose_twin_sets of the device
 # numerics; the CPU test plans every (set, arch, case) the device runs.
 _VALU = dict(bwd_exp2="fast", stats_fma=True, stats_vec=4)
 _ASM_SAGPR = dict(agpr_alloc=(128, 128), agpr_route="asm_g13", s_in_agpr=True)
 _SMALL = {k: v for k, v in region_knobs("rep16x16_w4").items() if v is not None}
 _SPLIT = dict(dq_mode="split")
 _XT = dict(transpose_source="xt_lds")
+_DMA1 = dict(global_path="dma", ring_depth=1)
+_DMA2 = dict(global_path="dma", ring_depth=2)
+_DMA3 = dict(global_path="dma", ring_depth=3)
+_RING2 = dict(ring_depth=2)
+_RING3 = dict(ring_depth=3)
+_MERGE = dict(barrier_merge="on", ring_depth=2)
+_COUNTED = dict(loop_sync="counted")
+# schedule values composed with each ring: (name tag, knobs); the stage
+# tables on every ring, fences_only and iglp1 on the DMA and register rings
+# of depth 2
+_RING_SCHEDS = (
+    ("st", dict(sched="stage_table")),
+    ("stap", dict(sched="stage_table_atomics", setprio=True)),
+    ("fen", dict(sched="fences_only")),
+    ("ig1", dict(sched="iglp1")),
+)
+# (the split-dQ main kernel has no dQ atomics to defer: the plain table with
+# and without the priority raise)
+_SPLIT_SCHEDS = (
+    ("st", dict(sched="stage_table")),
+    ("stp", dict(sched="stage_table", setprio=True)),
+    ("fen", dict(sched="fences_only")),
+    ("ig1", dict(sched="iglp1")),
+)
 COMPOSE_TWIN_SETS = {
     # the split-dQ main kernel (no G4)
     "split_ring2": (_CDNA, None, dict(_SPLIT, ring_depth=2), _SPLIT),
@@ -1178,8 +1216,49 @@ COMPOSE_TWIN_SETS = {
     # the schedule values and the G4 key slicing
     "sta_valu": (_CDNA, None, dict(sched="stage_table_atomics", **_VALU), _VALU),
     "small_iglp": (_CDNA, None, dict(_SMALL, sched="iglp1"), _SMALL),
+    # the schedule values on the rings and the counted waits (the twin is the
+    # same ring without a schedule value)
+    **{
+        f"{ring}_{tag}": (archs, None, dict(rk, **sk), rk)
+        for ring, archs, rk in (
+            ("dma1", ("gfx950",), _DMA1), ("dma2", ("gfx950",), _DMA2),
+            ("dma3", ("gfx950",), _DMA3), ("ring2", _CDNA, _RING2),
+            ("ring3", ("gfx950",), _RING3), ("merge", _CDNA, _MERGE),
+            ("mergelate", _CDNA, dict(_MERGE, ring_issue="late")),
+            ("counted", _CDNA, _COUNTED),
+            ("countedlate", _CDNA, dict(_COUNTED, counted_issue="late")),
+        )
+        for tag, sk in _RING_SCHEDS
+        if not (ring == "countedlate" and sk["sched"] == "stage_table_atomics")
+        and (tag in ("st", "stap") or ring in ("dma2", "ring2"))
+    },
     "g4slice_valu": (
         _CDNA, None, dict(g4_slicing="slice_db", block_k4=32, **_VALU), _VALU
+    ),
+    # the schedule values on the split-dQ main kernel's bodies (no G4: its
+    # stages A..C; stage_table_atomics is refused there), the twin the same
+    # split body without a schedule value: the stage tables on every body,
+    # fences_only and iglp1 on the synchronous body and the depth-2 rings
+    **{
+        f"split_{body}_{tag}": (archs, None, dict(_SPLIT, **bk, **sk),
+                                dict(_SPLIT, **bk))
+        for body, archs, bk in (
+            ("sync", _CDNA, {}), ("ring2", _CDNA, _RING2),
+            ("ring3", ("gfx950",), _RING3), ("dma1", ("gfx950",), _DMA1),
+            ("dma2", ("gfx950",), _DMA2), ("dma3", ("gfx950",), _DMA3),
+        )
+        for tag, sk in _SPLIT_SCHEDS
+        if tag in ("st", "stp") or body in ("sync", "ring2", "dma2")
+    },
+    # the dQ kernel's stage table on top of the main kernel's (dQ bit for bit)
+    "split_st_dqst": (
+        _CDNA, None, dict(_SPLIT, sched="stage_table", dq_sched="stage_table"),
+        _SPLIT,
+    ),
+    "split_dma2_st_dqstp": (
+        ("gfx950",), None,
+        dict(_SPLIT, **_DMA2, sched="stage_table", dq_sched="stage_table_setprio"),
+        dict(_SPLIT, **_DMA2),
     ),
 }  # fmt: skip
 
@@ -1268,6 +1347,13 @@ COMPOSE_REFUSED = {
     ('merge_asm_sagpr', 'gfx950', 'bwd_seqlen_33x72_br'): "set: agpr_copy_traffic",
     ('ring2_asm_sagpr', 'gfx950', 'bwd_kern_hkv_842_tl_fp16_d64'): "set: agpr_copy_traffic",
     ('ring2_asm_sagpr', 'gfx950', 'bwd_seqlen_33x72_br'): "set: agpr_copy_traffic",
+    ('split_dma2_ig1', 'gfx950', 'bwd_seqlen_33x72_br'): "set: sgpr_spill, twin: sgpr_spill",
+    # the split twin without a schedule value (DMA R = 2, d64) spills SGPRs on
+    # its own: refused exactly (RESOURCE_REFUSED, rows splitsched)
+    ('split_dma2_fen', 'gfx950', 'bwd_seqlen_33x72_br'): "twin: sgpr_spill",
+    ('split_dma2_st', 'gfx950', 'bwd_seqlen_33x72_br'): "twin: sgpr_spill",
+    ('split_dma2_st_dqstp', 'gfx950', 'bwd_seqlen_33x72_br'): "twin: sgpr_spill",
+    ('split_dma2_stp', 'gfx950', 'bwd_seqlen_33x72_br'): "twin: sgpr_spill",
 }  # fmt: skip
 
 
@@ -1337,6 +1423,12 @@ def config_policy(
 
         def tuning(req, arch_, route, perf_class):
             knobs = custom_knobs_for(rules, req.d_qk, attn_bwd_stage_vec(req))
+            if "g_split" in knobs:
+                # a rule's head split is a cap: the largest split dividing
+                # both the rule's value and the request's atomic head group
+                # (an MHA case runs g_split = 1), so one rule serves the suite
+                group = math.gcd(req.h_q // req.h_k, req.h_q // req.h_v)
+                knobs["g_split"] = math.gcd(int(knobs["g_split"]), group)
             knobs.update(overrides or {})
             return knobs
 
@@ -1449,6 +1541,8 @@ NARROW_TWIN_CASES = ("bwd_seqlen_33x72_br", "bwd_gqa_gqa4_causal_tl")
 # Odd tails of the pruning set (query or key lengths that are not tile
 # multiples, up to one past a power of two).
 PRUNE_TAILS = (17, 33, 100, 1025)
+# The grouped-query ratio of the pruning set's GQA cases (h_q / h_k).
+_PRUNE_GROUP = 4
 
 
 def _prune_mask(kind, mask_class):
@@ -1480,7 +1574,12 @@ def perf_prune_cases(
     4 throughout, one MHA case, ``h_k != h_v`` when ``dkv_mode`` is atomic, and
     a THD set with a zero-length last sequence when ``seq_mode`` is ``thd``.
     ``g_split``: cases whose head group it does not divide are left out (the
-    plan would refuse them).
+    plan would refuse them). A head split that does not divide the set's
+    grouped-query ratio of 4 (8, or 5 for a head group of 5) gets the
+    grouped-query cases with a head group of ``g_split`` instead (``h_q =
+    h_k * g_split``; their ids carry ``_hq<h_q>``), so every legal ``g_split``
+    value (a divisor of a head group of the census) has a pruning set; the
+    cases of ``g_split`` 1, 2 and 4 are unchanged.
     """
     if seq_mode not in ("batched", "thd") or dkv_mode not in ("direct", "atomic"):
         raise ValueError(f"unknown class {seq_mode!r} / {dkv_mode!r}")
@@ -1514,6 +1613,17 @@ def perf_prune_cases(
         rows.append(("hkv_842_br", 8, 4, 2, (72, 72), (t100, t100), "br"))
     elif g_split != 1:
         raise ValueError("g_split > 1 makes dK / dV atomic (dkv_mode='atomic')")
+    if g_split > 1 and _PRUNE_GROUP % g_split:
+        # a head split the grouped-query ratio does not take: those cases with
+        # a head group of g_split (h_k == h_v, so G = h_q / h_k)
+        rows = [
+            (
+                (n, hk * g_split, hk, hv, ql, kl, m)
+                if hk == hv and hq // hk == _PRUNE_GROUP
+                else (n, hq, hk, hv, ql, kl, m)
+            )
+            for n, hq, hk, hv, ql, kl, m in rows
+        ]
     out = []
     for name, hq, hk, hv, ql, kl, kind in rows:
         atomic = hk != hv or g_split > 1
@@ -1522,9 +1632,10 @@ def perf_prune_cases(
         group = math.gcd(hq // hk, hq // hv) if atomic else hq // hk
         if group % g_split:
             continue  # the plan refuses a head split that does not divide G
+        rescaled = "" if hq // hk in (_PRUNE_GROUP, 1) or hk != hv else f"_hq{hq}"
         cid = (
-            f"kern_prune_{name}_{dtype}_d{head_size}_{mask_class}_{seq_mode}_"
-            f"{dkv_mode}"
+            f"kern_prune_{name}{rescaled}_{dtype}_d{head_size}_{mask_class}_"
+            f"{seq_mode}_{dkv_mode}"
         )
         kw = dict(
             reqs=(2, 9),

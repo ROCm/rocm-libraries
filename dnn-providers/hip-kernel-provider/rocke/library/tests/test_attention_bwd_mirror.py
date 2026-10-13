@@ -6,7 +6,8 @@ CPU / IR tests:
 
 * the plan builds the pairing: it sets the spec switch ``lb_mirror``, the
   runtime ``pair = 1`` and the grid ``ceil(n_kv_tiles / 2)``, and still
-  refuses an unmasked request and a paired grid that does not fill the device;
+  refuses an unmasked request and an unpaired grid that does not overfill the
+  device (more CTAs than ``num_cus``);
   the switch is a salted bool and is the only spec change;
 * a ``lb_mirror`` kernel reads the ``pair`` kernarg, runs the second kv tile
   inside one CTA-uniform branch on ``n_pass == 2`` that starts with a full
@@ -92,6 +93,33 @@ def test_mirror_refusals():
     small = _req(causal=True, b=1, h_q=1, h_k=1, h_v=1, s_q=256, s_kv=256)
     with pytest.raises(ValueError, match="fills"):
         attn_bwd_plan(dataclasses.replace(small, num_cus=1024), "gfx942", policy=pol)
+
+
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+def test_mirror_fill_guard_is_the_unpaired_grid(arch):
+    """Pairing is refused exactly when the unpaired grid runs in one wave
+    (at most ``num_cus`` CTAs) and accepted above it, also where the paired
+    grid itself is under ``num_cus`` (a multi-wave unpaired grid)."""
+    pol = _policy(lb_order="mirror")
+    for kw in (
+        dict(b=8, h_q=32, h_k=8, h_v=8, s_q=512, s_kv=512),
+        dict(b=2, h_q=8, h_k=8, h_v=8, s_q=1536, s_kv=1536),  # odd tile count
+        dict(b=1, h_q=4, h_k=4, h_v=4, s_q=1024, s_kv=4096, causal_bottom_right=True),
+    ):
+        mask = {} if "causal_bottom_right" in kw else {"causal": True}
+        req = _req(**{**kw, **mask})
+        plan = attn_bwd_plan(dataclasses.replace(req, num_cus=1), arch, policy=pol)
+        main = plan.launches[1]
+        n = main.scalars["n_kv_tiles"]
+        rest = main.grid[1] * main.grid[2]
+        unpaired, paired = n * rest, main.grid[0] * rest
+        assert main.grid[0] == math.ceil(n / 2) and paired < unpaired
+        for cus in (unpaired, unpaired + 1, 4 * unpaired):
+            with pytest.raises(ValueError, match="overfills"):
+                attn_bwd_plan(dataclasses.replace(req, num_cus=cus), arch, policy=pol)
+        for cus in (unpaired - 1, paired + 1, paired, 1):
+            p = attn_bwd_plan(dataclasses.replace(req, num_cus=cus), arch, policy=pol)
+            assert p.launches == plan.launches and p.specs == plan.specs
 
 
 def test_lb_mirror_is_a_salted_bool():
@@ -278,15 +306,16 @@ def test_mirror_resource_gate(row):
     """The resource gate (production comgr) passes for the paired kernel and
     its one-tile twin: no failure and no crossed SGPR watch level."""
     pytest.importorskip("rocke.runtime.comgr")
-    pytest.importorskip("torch")
     from rocke.helpers.compile import compile_kernel
 
     from ._attention_bwd_resources import (
         disassemble,
         evaluate_resource_gate,
         find_objdump,
+        pin_production_comgr,
     )
 
+    pin_production_comgr()  # torch's bundled comgr, by path; torch not imported
     if find_objdump() is None:
         pytest.skip("llvm-objdump not found")
     arch, cfg, d, var = row

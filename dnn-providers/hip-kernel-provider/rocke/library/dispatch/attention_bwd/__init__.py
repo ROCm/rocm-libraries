@@ -9,6 +9,9 @@
   families from it.
 * :mod:`.dense_tuning`: the dense family's own knobs (the shared body's
   knobs are the general axes) and the tuned dense table.
+* :mod:`.gfx950_tuning`: the gfx950 tuned tables (general and dense; empty
+  until a key's winner passes the sweep's confirm stage) and the checks that
+  turn the sweep's emitted entries into table entries.
 * :mod:`.routing`: the route of an accepted request (dense when its dense key
   is in the tuned pack, else general) and the plan of exactly one family;
   a rocKE unified (paged KV) request has its own entry,

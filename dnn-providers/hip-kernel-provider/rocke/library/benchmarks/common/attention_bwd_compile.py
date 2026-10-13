@@ -10,15 +10,17 @@ backward tests' session pre-build:
   :mod:`kernels.common.attention_bwd_cache`, so the run glue
   (``attn_bwd_kernels`` with ``ROCKE_BWD_HSACO_CACHE``) reads the entries
   written here and the other way round; it is re-exported here.
-* :func:`toolchain_identity` names the toolchain a process actually uses. By
-  default it imports torch first, so the torch-bundled comgr is the one
-  resolved (as in every timed process); ``import_torch=False`` takes the
-  identity of a torch-free process (the backward tests).
+* :func:`toolchain_identity` names the toolchain a process actually uses. It
+  never imports torch: it pins the torch-bundled comgr (the one every timed
+  process resolves) by path, see ``kernels.common.attention_bwd_comgr``, so
+  a compile process and a timed process name the same comgr.
 * :func:`compile_batch` compiles many specs with a thread or a process pool
   (``mode``), writes them to the cache and returns per-spec results with an
   error token (``not_built`` for a value whose emission is not built,
-  ``compile_crash`` for an item whose compiling process dies (process mode
-  only; a crash in thread or serial mode ends the caller's process),
+  ``compile_crash`` for an item whose compiling process dies (process mode,
+  or any mode for a kernel that compiles in a fresh process of its own; a
+  crash of an in-process compile in thread or serial mode ends the caller's
+  process),
   ``compile:<ExceptionName>`` otherwise).
 * :func:`plan_entries` gives every kernel of a plan from the cache, compiling
   the missing ones or (``compile_missing=False``, the timing attempts) failing
@@ -58,21 +60,14 @@ CACHE_MISS = "cache_miss"
 
 
 # --------------------------------------------------------------------------- identity
-def toolchain_identity(*, import_torch: bool = True) -> Toolchain:
-    """Flavor and comgr this process uses (imports torch first by default).
+def toolchain_identity() -> Toolchain:
+    """Flavor and comgr this process uses; never imports torch.
 
-    rocKE prefers the torch-bundled ``libamd_comgr`` only when torch is
-    already in the process; every timed process imports torch, so the identity
-    of a compile process must be taken the same way. ``import_torch=False``
-    leaves the process as it is (the identity of a torch-free test process).
+    Every timed process imports torch, and rocKE then resolves the
+    torch-bundled ``libamd_comgr``. A compile process takes the same library
+    without importing torch: the identity pins it by path first
+    (:func:`kernels.common.attention_bwd_cache.toolchain_identity`).
     """
-    if import_torch:
-        try:
-            from rocke.runtime.comgr import prefer_bundled_lib
-
-            prefer_bundled_lib()
-        except Exception:  # noqa: BLE001 - no torch: the system comgr is used
-            pass
     return _cache.toolchain_identity()
 
 
@@ -90,12 +85,21 @@ def _builder(stage: str) -> Callable:
         from kernels.common.attention_bwd_run import _build_dense
 
         return _build_dense
+    if stage == "dense_dq":  # the dense family's split dQ kernel
+        from kernels.common.attention_bwd_run import _build_dense_dq
+
+        return _build_dense_dq
     from kernels.common.attention_bwd_aux import (
         build_attn_bwd_convert,
         build_attn_bwd_prep,
+        build_attn_bwd_reduce,
     )
 
-    return {"prep": build_attn_bwd_prep, "convert": build_attn_bwd_convert}[stage]
+    return {
+        "prep": build_attn_bwd_prep,
+        "convert": build_attn_bwd_convert,
+        "reduce": build_attn_bwd_reduce,
+    }[stage]
 
 
 def not_built_reasons(stage: str, spec: Any) -> list[str]:
@@ -133,9 +137,13 @@ def compile_one(stage: str, spec: Any, arch: str) -> tuple[str, bytes, float]:
 _WORKER_TOOLCHAIN: Toolchain | None = None
 
 
-def _worker_init(import_torch: bool = True) -> None:
+def _worker_init(comgr_digests: Mapping | None = None) -> None:
+    """Pool worker start-up: the caller's comgr digests (keyed by path, size
+    and mtime, so a changed file is hashed again), then this process's own
+    identity, which a result is tagged with and checked against the cache's."""
     global _WORKER_TOOLCHAIN
-    _WORKER_TOOLCHAIN = toolchain_identity(import_torch=import_torch)
+    _cache.seed_comgr_digests(comgr_digests or {})
+    _WORKER_TOOLCHAIN = toolchain_identity()
 
 
 def _identity_tag(tc: Toolchain) -> dict:
@@ -150,12 +158,18 @@ def _compile_task(
     ``tc`` is the caller's identity for in-process (serial / thread) compiles;
     a pool worker uses the identity it took at start-up.
     """
+    from rocke.runtime.comgr import ComgrProcessDied
+
     tc = tc or _WORKER_TOOLCHAIN or toolchain_identity()
     tag = _identity_tag(tc)
     try:
         name, blob, secs = compile_one(stage, spec, arch)
     except NotImplementedError as ex:
         return {"error": "not_built", "detail": str(ex)[:300], **tag}
+    except ComgrProcessDied as ex:
+        # a kernel compiled in a fresh process (helpers.compile) whose process
+        # died: the same toolchain crash a dying pool worker reports
+        return {"error": COMPILE_CRASH, "detail": str(ex)[:300], **tag}
     except Exception as ex:  # noqa: BLE001 - recorded per spec
         return {
             "error": f"compile:{type(ex).__name__}",
@@ -170,14 +184,16 @@ def _compile_task(
 COMPILE_CRASH = "compile_crash"
 
 
-def _process_pool(workers: int, import_torch: bool = True) -> cf.ProcessPoolExecutor:
+def _process_pool(workers: int) -> cf.ProcessPoolExecutor:
+    """Spawned workers, each reused for many compiles (one interpreter per
+    worker, not per kernel)."""
     import multiprocessing as mp
 
     return cf.ProcessPoolExecutor(
         max_workers=workers,
         mp_context=mp.get_context("spawn"),
         initializer=_worker_init,
-        initargs=(import_torch,),
+        initargs=(_cache.comgr_digests(),),
     )
 
 
@@ -204,14 +220,13 @@ def compile_batch(
     workers: int = 16,
     mode: str = "thread",
     deadline: float | None = None,
-    import_torch: bool = True,
 ) -> list[CompileResult]:
     """Compile ``(stage, resolved spec)`` items through ``cache``.
 
     ``mode`` is ``"thread"`` (one process; comgr compiles outside the GIL),
-    ``"process"`` (spawned workers; each worker imports torch unless
-    ``import_torch`` is false, and a result whose flavor, comgr or emission
-    switches differ from the cache's is rejected as ``toolchain_mismatch``; an
+    ``"process"`` (spawned workers, none of which imports torch; a result
+    whose flavor, comgr or emission switches differ from the cache's is
+    rejected as ``toolchain_mismatch``; an
     item whose worker dies is retried alone in a fresh worker and comes back
     ``compile_crash`` if that one dies too) or ``"serial"``.
     Cache hits are not recompiled; duplicate items compile once. No new
@@ -315,13 +330,13 @@ def compile_batch(
         suspects: list[int] = []
         width = max(1, min(workers, len(queue)))  # no idle worker spawns
         while queue:
-            with _process_pool(width, import_torch) as pool:
+            with _process_pool(width) as pool:
                 suspects += drain(pool, queue, width, ())
         for i in suspects:
             if expired():
                 results[i] = CompileResult(*items[i], None, "deadline")
                 continue
-            with _process_pool(1, import_torch) as pool:
+            with _process_pool(1) as pool:
                 if drain(pool, [i], 1, ()):
                     results[i] = CompileResult(
                         *items[i],

@@ -34,7 +34,8 @@ A by-file map of the `rocke` package. Symbols listed are the primary contents (p
 |-------------------------------|--------------------------------------------------------------------------------------------------------|
 | `runtime/runtime_coexistence.py` | `_candidate_lib_paths`, `_rocm_root_libdirs`, `_torch_bundled_lib`, ... . Which ROCm runtime we bind to, and whose (torch-bundled vs system). Shared by `comgr` + `hip_module`. |
 | `runtime/_ctypes_bind.py` | `_LazyFn`. Lazy ctypes function binder shared by `comgr` + `hip_module`. |
-| `runtime/comgr.py` | `build_hsaco_from_llvm_ir(ir_text, isa=..., options=...) -> (bytes, ComgrTimings)`. Ctypes over `libamd_comgr`. |
+| `runtime/comgr.py` | `build_hsaco_from_llvm_ir(ir_text, isa=..., options=..., fresh_process=False) -> (bytes, ComgrTimings)`. Ctypes over `libamd_comgr`; `fresh_process=True` compiles in a new process that compiles nothing else (`ComgrProcessDied` if it dies). |
+| `runtime/_comgr_fresh_process.py` | `main()`. The child process of `fresh_process=True`: compiles one module and exits. |
 | `runtime/hip_module.py` | `Runtime`, `Module`, `Event`, `HipError`. Ctypes over `libamdhip64`. Per-stream pending-args queue. |
 | `runtime/packing.py` | `pack_args`, `pack_args_kernelparams`, `_as_ptr`. Torch-agnostic AMDGPU kernarg packing. |
 | `runtime/torch_interop.py` | `resolve_stream`, `empty_workspace`, `launch_torch_kernel`, `TorchLaunchSummary`. Torch-tensor launch glue. |

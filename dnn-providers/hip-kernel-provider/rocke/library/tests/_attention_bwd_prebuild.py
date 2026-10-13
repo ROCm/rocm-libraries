@@ -15,9 +15,10 @@ collection (``conftest.pytest_collection_finish``) this
    pytest process keeps its module state);
 2. compiles every distinct (stage, spec, arch) once with
    ``benchmarks.common.attention_bwd_compile.compile_batch`` in a process
-   pool, into the cache, with the toolchain identity of this process (pool
-   workers import torch only when this process has, and a worker whose
-   toolchain differs is rejected, never written);
+   pool (each worker reused for many kernels, none importing torch), into
+   the cache, with the toolchain identity of this process (the production
+   comgr pinned by path; a worker whose toolchain differs is rejected, never
+   written);
 3. records a manifest (``<cache>/prebuild/<digest>.json``: the entry keys
    the selection needs, under a digest of the node ids, device arch, test /
    kernel / ``rocke`` sources, ``ROCKE_*`` / ``HIPDNN_*`` environment and
@@ -389,7 +390,6 @@ def prebuild(
                 cache=cache,
                 workers=workers,
                 mode=mode,
-                import_torch="torch" in sys.modules,
             ):
                 if r.ok:
                     counts["cached" if r.cached else "compiled"] += 1
@@ -406,6 +406,10 @@ def prebuild(
 _MANIFEST_ENV_SKIP = frozenset(
     (PREBUILD_ENV, WORKERS_ENV, WAIT_ENV, "ROCKE_BWD_HSACO_CACHE")
 )
+# A file-naming variable whose file content the toolchain already digests
+# (``Toolchain.comgr``): the name enters the digest, the large library is not
+# read a second time.
+_MANIFEST_ENV_NAME_ONLY = frozenset(("ROCKE_COMGR_LIB",))
 
 
 def manifest_digest(items: Sequence[Any], tasks: Sequence[DryRunTask], cache) -> str:
@@ -448,7 +452,7 @@ def manifest_digest(items: Sequence[Any], tasks: Sequence[DryRunTask], cache) ->
             continue
         v = os.environ[k]
         put("env", k, v)
-        if v and os.path.isfile(v):
+        if v and k not in _MANIFEST_ENV_NAME_ONLY and os.path.isfile(v):
             put(Path(v).read_bytes())
     return h.hexdigest()[:32]
 

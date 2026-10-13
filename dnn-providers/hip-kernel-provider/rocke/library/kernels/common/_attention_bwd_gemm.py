@@ -26,14 +26,19 @@ indexing, so no scratch.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from functools import cached_property
 
 from rocke.core.arch.target import MmaOp
 from rocke.core.ir import IRBuilder, Value
 
-from ._attention_bwd_caps import bwd_arch_caps, check_waves, select_bwd_atom
+from ._attention_bwd_caps import (
+    ASM_MFMA_VALU_LEAD_WAIT_STATES,
+    bwd_arch_caps,
+    check_waves,
+    select_bwd_atom,
+)
 from ._attention_bwd_frag import (
     FragCoords,
     RelabelPlan,
@@ -95,6 +100,7 @@ def mma_agpr_asm(
     *,
     tail_nop: int | None = None,
     agpr_base: int | None = None,
+    lead_wait: int = ASM_MFMA_VALU_LEAD_WAIT_STATES,
 ) -> list[list[Value]]:
     """One K step of a block GEMM as a single inline-asm MFMA cluster.
 
@@ -104,11 +110,13 @@ def mma_agpr_asm(
     i32 vector of the same width). The cluster ends with ``s_nop tail_nop``
     (default :data:`AGPR_ASM_TAIL_NOP` of the atom): the asm hides the MFMAs
     from the backend's hazard recognizer, so the cluster itself covers its
-    result latency and its source read window.
+    result latency and its source read window. ``lead_wait`` as in
+    :func:`mma_agpr_asm_steps`.
     """
     return mma_agpr_asm_steps(
-        g, b, acc, [(a_ks, b_ks)], tail_nop=tail_nop, agpr_base=agpr_base
-    )
+        g, b, acc, [(a_ks, b_ks)], tail_nop=tail_nop, agpr_base=agpr_base,
+        lead_wait=lead_wait,
+    )  # fmt: skip
 
 
 def mma_agpr_asm_steps(
@@ -119,6 +127,7 @@ def mma_agpr_asm_steps(
     *,
     tail_nop: int | None = None,
     agpr_base: int | None = None,
+    lead_wait: int = ASM_MFMA_VALU_LEAD_WAIT_STATES,
 ) -> list[list[Value]]:
     """Several K steps of a block GEMM as one inline-asm MFMA cluster.
 
@@ -127,10 +136,17 @@ def mma_agpr_asm_steps(
     two MFMAs on the same accumulator are ``frags_m * frags_n - 1`` MFMAs
     apart; with a single fragment they would be adjacent, and ``s_nop
     tail_nop`` separates the K steps. The cluster ends with ``s_nop tail_nop``
-    as in :func:`mma_agpr_asm`, which is this function with one step, and
-    starts with ``s_nop ASM_MFMA_VALU_LEAD_WAIT_STATES - 1`` (a VALU write of
-    a source VGPR right before the block is invisible to the backend's hazard
-    recognizer).
+    as in :func:`mma_agpr_asm`, which is this function with one step.
+
+    ``lead_wait`` (0 to 16; default the ISA's
+    ``ASM_MFMA_VALU_LEAD_WAIT_STATES``) opens the cluster with ``s_nop
+    lead_wait - 1``, so its first MFMA issues at least that many wait states
+    after the instruction before the block: the backend does not see the
+    MFMAs inside the asm, so it does not separate a VALU write of a source
+    register (an A / B fragment, or a register copy the allocator puts in
+    front of the block) from the MFMA that reads it. ``0`` emits no lead
+    (the control of the hazard audit; the backward body always passes the
+    ISA's value).
 
     ``acc = None`` starts from zero accumulators: the first K step reads the
     inline constant ``0`` as srcC (as the intrinsic of a zero accumulator
@@ -149,7 +165,6 @@ def mma_agpr_asm_steps(
 
     from kernels.common._attention_bwd_caps import (
         AGPR_ASM_TAIL_NOP,
-        ASM_MFMA_VALU_LEAD_WAIT_STATES,
         mfma_asm_mnemonic,
     )
 
@@ -159,6 +174,12 @@ def mma_agpr_asm_steps(
     nop = AGPR_ASM_TAIL_NOP[g.atom_k] if tail_nop is None else int(tail_nop)
     if not 0 <= nop <= 15:
         raise ValueError(f"s_nop count {nop} outside [0, 15]")
+    if (
+        isinstance(lead_wait, bool)
+        or not isinstance(lead_wait, int)
+        or not 0 <= lead_wait <= 16
+    ):
+        raise ValueError(f"lead wait states {lead_wait!r} outside [0, 16]")
     words = g.atom_k // 8  # 16-bit elements per lane / 2 per dword: K=16 -> 2
     src_ty = VectorType(I32, words)
     outs = [(fm, fn) for fm in range(g.frags_m) for fn in range(g.frags_n)]
@@ -170,7 +191,7 @@ def mma_agpr_asm_steps(
     # The backend does not see the asm's source reads, so a VALU write of a
     # source VGPR may be scheduled right before the block: the leading s_nop
     # gives the ISA's VALU-write-to-MFMA-read wait states.
-    lines = [f"s_nop {ASM_MFMA_VALU_LEAD_WAIT_STATES - 1}"]
+    lines = [f"s_nop {lead_wait - 1}"] if lead_wait else []
     for ks, (a_ks, b_ks) in enumerate(steps):
         if len(a_ks) != g.frags_m or len(b_ks) != g.frags_n:
             raise ValueError("K step operands do not match the block geometry")
@@ -385,6 +406,28 @@ class BlockGemm:
             [per_k[ks][fn] for ks in range(self.k_steps)] for fn in range(self.frags_n)
         ]
 
+    def load_operands(
+        self,
+        b: IRBuilder,
+        a: Frags | LdsOperand,
+        bop: Frags | LdsOperand,
+        *,
+        lane: Value | None = None,
+        origin: tuple[Value, Value] | None = None,
+    ) -> tuple[list[list[Value]], list[list[Value]]]:
+        """Both operands of :meth:`mma` in register form ``([fm][ks], [fn][ks])``.
+
+        An :class:`LdsOperand` is read here, K step by K step, A fragments
+        before B fragments, which is the order :meth:`mma` reads them in; a
+        register operand is passed through. Feeding the result to :meth:`mma`
+        issues the same MMAs on the same values with no LDS read left in it
+        (the operand-load hoist of the asm route).
+        """
+        steps = self.load_k_slice(b, a, bop, 0, self.k, lane=lane, origin=origin)
+        a_regs = [[a_ks[fm] for a_ks, _ in steps] for fm in range(self.frags_m)]
+        b_regs = [[b_ks[fn] for _, b_ks in steps] for fn in range(self.frags_n)]
+        return a_regs, b_regs
+
     def mma(
         self,
         b: IRBuilder,
@@ -398,6 +441,8 @@ class BlockGemm:
         asm_tail_nop: int | None = None,
         asm_cluster: str = "k_step",
         asm_agpr_base: int | None = None,
+        asm_lead_wait: int | None = None,
+        pre_issue: Callable[[], None] | None = None,
     ) -> list[list[Value]]:
         """Issue ``frags_m * frags_n * k_steps`` MMAs; returns the new accumulators.
 
@@ -418,6 +463,16 @@ class BlockGemm:
         reads srcC 0, so no zero is written to the AGPR accumulators.
         ``asm_agpr_base`` pins the accumulators to the physical AGPRs from that
         index on (every cluster of the call; :func:`mma_agpr_asm_steps`).
+        ``asm_lead_wait`` opens every cluster with that many wait states
+        (:func:`mma_agpr_asm_steps`; ``None``: the ISA's
+        ``ASM_MFMA_VALU_LEAD_WAIT_STATES``, so a VALU write of a source
+        register right before the block, which the backend cannot see as an
+        MFMA hazard, is covered). These are legal on the asm route only.
+
+        ``pre_issue`` (any route) is called once, after the operands of the
+        first issue are read and before its first MMA or asm cluster is
+        emitted: code it emits sits between them (another GEMM's operand
+        reads, hoisted above this GEMM's cluster). ``None`` emits nothing.
         """
         if route not in ("intrinsic", "agpr_asm"):
             raise ValueError(f"unknown MMA route {route!r}")
@@ -427,10 +482,14 @@ class BlockGemm:
             asm_tail_nop is not None
             or asm_cluster != "k_step"
             or asm_agpr_base is not None
+            or asm_lead_wait is not None
         ):
             raise ValueError(
-                "asm_tail_nop / asm_cluster / asm_agpr_base need route='agpr_asm'"
+                "asm_tail_nop / asm_cluster / asm_agpr_base / asm_lead_wait need "
+                "route='agpr_asm'"
             )
+        if asm_lead_wait is None:
+            asm_lead_wait = ASM_MFMA_VALU_LEAD_WAIT_STATES
         if asm_agpr_base is not None:
             _check_agpr_base(self, asm_agpr_base)
         if acc is None:
@@ -441,25 +500,34 @@ class BlockGemm:
             if len(acc) != self.frags_m or any(len(r) != self.frags_n for r in acc):
                 raise ValueError("accumulator shape does not match the block geometry")
         self._check_operands(a, bop, lane, origin)
+        pending = [pre_issue] if pre_issue is not None else []
+
+        def issue_point() -> None:
+            while pending:
+                pending.pop()()
+
         steps = []
         for ks in range(self.k_steps):
             a_ks, b_ks = self._step_operands(b, a, bop, lane, origin, ks)
             if route == "agpr_asm" and asm_cluster == "gemm":
                 steps.append((a_ks, b_ks))
                 continue
+            issue_point()
             if route == "agpr_asm":
                 acc = mma_agpr_asm(
                     self, b, acc, a_ks, b_ks, tail_nop=asm_tail_nop,
-                    agpr_base=asm_agpr_base,
+                    agpr_base=asm_agpr_base, lead_wait=asm_lead_wait,
                 )  # fmt: skip
                 continue
             for fm in range(self.frags_m):
                 for fn in range(self.frags_n):
                     acc[fm][fn] = b.mma(self.op, a_ks[fm], b_ks[fn], acc[fm][fn])
         if steps:
+            issue_point()
             acc = mma_agpr_asm_steps(
-                self, b, acc, steps, tail_nop=asm_tail_nop, agpr_base=asm_agpr_base
-            )
+                self, b, acc, steps, tail_nop=asm_tail_nop, agpr_base=asm_agpr_base,
+                lead_wait=asm_lead_wait,
+            )  # fmt: skip
         return acc
 
     def _check_operands(self, a, bop, lane, origin) -> None:
@@ -721,7 +789,12 @@ def relabel_acc_to_a(
 
 
 def kperm_b_operand_coords(plan: RelabelPlan, producer: BlockGemm, consumer: BlockGemm):
-    """B coordinates matching ``plan``'s K permutation (identity plans: catalog)."""
+    """B coordinates matching ``plan``'s K permutation (identity plans: catalog).
+
+    A K-permuted map is read either by plain element reads (``reader =
+    "plain"``) or by the transpose read's stacked plan (``reader = "tr16"``,
+    :func:`._attention_bwd_frag.tr16_read_plan`).
+    """
     if not plan.needs_k_perm:
         return operand_coords(consumer.op, "b")
     return kperm_b_coords(plan, producer.op, consumer.op)

@@ -53,7 +53,9 @@ from ._attention_bwd_harness import (
     dead_row_inputs,
     dead_rows,
     main_built_with,
+    plan_case,
     run_case,
+    skip_unless_planned,
     ungated_dsum_hook,
 )
 from .sdpa.bwd_cases import compare_bwd, get_bwd_case
@@ -176,6 +178,9 @@ def test_interior_tiles_keep_the_dead_row_select(case_id, config):
     equal to the oracle without them. Dropping the interior select makes dS
     ``0 * (dP - NaN)``, NaN in dK."""
     case = get_bwd_case(case_id)
+    # the edge-tile variant the configuration cannot take (a recorded
+    # resource refusal) skips with the validator's reason
+    skip_unless_planned(case, arch=ARCH, config=config, overrides={"edge_tiles": True})
     rows = dead_rows(case)
     inputs = dead_row_inputs(case, rows, [-np.inf], np.nan)
     run = run_case(
@@ -204,6 +209,11 @@ def test_missing_group_sum_is_detected(case_id, config):
     case = get_bwd_case(case_id)
     assert case.h_q > case.h_k == case.h_v
     _check(run_case(case, arch=ARCH, config=config), expect_ok=True)
+
+    if plan_case(case, arch=ARCH, config=config).specs["main"].dkv_mode != "direct":
+        # a configuration with a head split (g_split > 1) makes dK / dV
+        # atomic: the in-CTA group sum this control removes is direct mode's
+        pytest.skip("the configuration plans atomic dK / dV for this case")
 
     def ungrouped(plan):
         assert plan.specs["main"].dkv_mode == "direct"
@@ -274,6 +284,17 @@ def test_skipped_kv_zero_is_detected(config):
 
     def no_kv_zero(plan):
         assert plan.specs["main"].dkv_mode == "atomic"
+        if plan.runtime.get("dkv_sink") == "slices":
+            # the slices need no zero fill (prep's kv role is off): the
+            # matching control drops the last dV slice from its reduce
+            assert plan.launches[0].scalars["zero_kv"] == 0
+            red = [s for s in plan.launches if s.stage == "reduce"]
+            n = red[-1].scalars["n_slices"]
+            if n < 2:
+                pytest.skip("one dV slice: no slice to drop")
+            return _replace_launch(
+                plan, "reduce", index=len(red) - 1, scalars={"n_slices": n - 1}
+            )
         assert plan.launches[0].scalars["zero_kv"] == 1
         return _replace_launch(plan, "prep", scalars={"zero_kv": 0})
 
@@ -288,7 +309,11 @@ def test_skipped_dv_convert_is_detected(config):
 
     def no_dv_convert(plan):
         # converts: dQ (atomic dQ only), dK, dV; the dV convert is the last
+        # (with dkv_sink = "slices" the dK / dV ones are slice reduces)
         stages = [s.stage for s in plan.launches]
+        if plan.runtime.get("dkv_sink") == "slices":
+            assert stages.count("reduce") == 2
+            return _replace_launch(plan, "reduce", index=1, drop=True)
         n = 2 if "dq" in stages else 3
         assert stages.count("convert") == n
         return _replace_launch(plan, "convert", index=n - 1, drop=True)
@@ -390,5 +415,9 @@ def test_g4_slice_offset_mutations_are_detected(case_id, mutation, monkeypatch):
 
     broken = {"local_step": local_step, "next_slice": next_slice}[mutation]
     monkeypatch.setattr(gemm.BlockGemm, "load_k_slice", broken)
+    # the mutated kernel has the shipped spec and sources: keep it off the
+    # on-disk code-object cache (ROCKE_BWD_HSACO_CACHE), which would hand back
+    # the shipped kernel
+    monkeypatch.delenv("ROCKE_BWD_HSACO_CACHE", raising=False)
     run = run_case(case, arch=ARCH, config="default", overrides=ov, cache={})
     _check(run, expect_ok=False)

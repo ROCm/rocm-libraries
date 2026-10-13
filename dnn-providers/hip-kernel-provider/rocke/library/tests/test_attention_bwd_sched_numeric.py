@@ -37,9 +37,20 @@ import os
 import numpy as np
 import pytest
 
-from ._attention_bwd_harness import ARCH, DEVICE_ARCHS, plan_case, run_case
+from ._attention_bwd_harness import (
+    ARCH,
+    DEVICE_ARCHS,
+    plan_case,
+    run_case,
+    skip_unless_planned,
+)
 from .sdpa.bwd_cases import _mkb, compare_bwd, validate_bwd_case
-from .sdpa.bwd_kernel_cases import HEAD_PACK_CASES, selected_configs, shard_of
+from .sdpa.bwd_kernel_cases import (
+    CUSTOM_CONFIG,
+    HEAD_PACK_CASES,
+    selected_configs,
+    shard_of,
+)
 from .sdpa.cases import _mask
 
 pytestmark = [
@@ -385,7 +396,23 @@ def _case(cid):
 def test_mirror_pairing_agrees(case_id, variant, config):
     case = _case(case_id)
     extra, req = MIRROR_VARIANTS[variant]
-    if variant in _MIRROR_COMPOSE:
+    # the twin keeps the natural CTA order explicitly (a configuration may
+    # pair itself: a custom one)
+    twin = {"lb_order": "natural", **extra}
+    if twin.get("xcd_chunk") == "gx":
+        # the remap chunk is the paired grid x
+        twin.pop("xcd_chunk")
+    if config == CUSTOM_CONFIG:
+        # MIRROR_REFUSED records the shipped configurations: under the custom
+        # configuration a twin or a paired cell its validator refuses (a
+        # coupling or a recorded resource refusal) skips with the reason
+        kw = dict(arch=ARCH, config=config)
+        skip_unless_planned(case, overrides=twin, **kw)
+        skip_unless_planned(
+            case, overrides={"lb_order": "mirror", **extra},
+            request={"num_cus": 1, **req}, **kw,
+        )  # fmt: skip
+    elif variant in _MIRROR_COMPOSE:
         # a lever the configuration's main kernel cannot take is skipped with
         # the validator's reason
         try:
@@ -398,11 +425,7 @@ def test_mirror_pairing_agrees(case_id, variant, config):
             if "RESOURCE_REFUSED" in str(exc):  # refusals are MIRROR_REFUSED only
                 pytest.fail(f"refused but not in MIRROR_REFUSED: {exc}")
             pytest.skip(f"{extra} with mirror pairing not legal on {config}: {exc}")
-    twin = dict(extra)
-    if twin.get("xcd_chunk") == "gx":
-        # the remap chunk is the paired grid x
-        twin.pop("xcd_chunk")
-    base = _plain(case, config, twin or None)
+    base = _plain(case, config, twin)
     overrides = {"lb_order": "mirror", **extra}
     request = {"num_cus": 1, **req}
     if overrides.get("xcd_chunk") == "gx":
@@ -485,8 +508,19 @@ def test_counted_waits_agree(case_id, variant, config):
     from kernels.common.attention_bwd import validate_attn_bwd_spec
 
     case = _case(case_id)
-    kw = COUNTED_VARIANTS[variant]
+    # the issue point and the full twin's synchronisation set explicitly: a
+    # configuration may count its waits itself (a custom one)
+    kw = {"counted_issue": "early", **COUNTED_VARIANTS[variant]}
     full_kw = {k: v for k, v in kw.items() if k != "counted_issue"}
+    full_kw["loop_sync"] = "full"
+    if config == CUSTOM_CONFIG:
+        # COUNTED_REFUSED records the shipped configurations: under the custom
+        # configuration a full twin or a counted cell its validator refuses
+        # skips with the reason
+        skip_unless_planned(case, arch=ARCH, config=config, overrides=full_kw)
+        skip_unless_planned(
+            case, arch=ARCH, config=config, overrides={"loop_sync": "counted", **kw}
+        )
     spec = plan_case(case, arch=ARCH, config=config, overrides=full_kw).specs["main"]
     spec_kw = {k: v for k, v in kw.items() if k != "g_split"}
     try:
@@ -494,16 +528,17 @@ def test_counted_waits_agree(case_id, variant, config):
             dataclasses.replace(spec, loop_sync="counted", **spec_kw), ARCH
         )
     except ValueError as exc:
-        if "RESOURCE_REFUSED" in str(exc):  # refusals are COUNTED_REFUSED only
+        if "RESOURCE_REFUSED" in str(exc) and config != CUSTOM_CONFIG:
+            # in a shipped configuration the refusals are COUNTED_REFUSED only
             pytest.fail(f"refused but not in COUNTED_REFUSED: {exc}")
         pytest.skip(f"counted {kw} not legal on {spec.kernel_name('main')}: {exc}")
-    base = _plain(case, config, full_kw or None)
+    base = _plain(case, config, full_kw)
     run = run_case(
         case, arch=ARCH, config=config, overrides={"loop_sync": "counted", **kw}
     )
     s = run.plan.specs["main"]
     assert s.loop_sync == "counted"
-    assert s.counted_issue == kw.get("counted_issue", "early")
+    assert s.counted_issue == kw["counted_issue"]
     _passes(run)
     if s.dkv_mode == "direct":
         assert np.array_equal(run.dk, base.dk), "dK differs under counted waits"

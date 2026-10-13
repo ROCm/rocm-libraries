@@ -78,6 +78,15 @@ REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
     "kernels.common.attention_bwd.AttnBwdSpec": ("head_size",),
     "kernels.common.attention_bwd_aux.AttnBwdAuxSpec": ("head_size",),
     "kernels.common.attention_bwd_dq.AttnBwdDqSpec": ("head_size",),
+    # Dense backward split dQ kernel: the dense problem shape (batch is a
+    # runtime kernarg); its dQ tuning rides in the defaulted ``dq`` field.
+    "kernels.common.attention_dense_bwd_dq.AttentionDenseBwdDqSpec": (
+        "head_size",
+        "num_kv_heads",
+        "num_query_heads",
+        "seqlen_kv",
+        "seqlen_q",
+    ),
     "kernels.common.attention_bwd_unified.AttnBwdUnifiedSpec": ("head_size",),
     "kernels.common.attention_unified.UnifiedAttention2DSpec": ("problem",),
     "kernels.common.attention_unified.UnifiedAttention3DSpec": ("problem",),

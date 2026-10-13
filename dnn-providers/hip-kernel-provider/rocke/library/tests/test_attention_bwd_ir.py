@@ -18,6 +18,9 @@ atomic variant; every one of these variants again with ragged THD
 sequences (``seq_mode = "thd"``); and the barrier-flavour / step-order
 instances (``loop_sync = "lds_only"``, ``step_order = "head_outer"`` with one
 q loop or with a head-group loop around the edge / interior / edge loops).
+On gfx950 the 16x16x32 G1 / G3 atom (``atom_g13``, K-permuted G1 / G3 B) is
+checked on plain, edge-tile, head-packed, atomic, narrow and THD variants for
+lowering, structure, LDS barriers, matrix-op counts and the transpose read.
 
 * lowering at every LLVM flavor; kernel signature equal to the
   ``rocke.attn_bwd.v3`` main list, no ``noalias``, inputs ``readonly``;
@@ -59,7 +62,8 @@ q loop or with a head-group loop around the edge / interior / edge loops).
   operands with ``ds_read_tr16_b64``;
 * stage order (``stage_order``, every value, on the plain, head-packed,
   edge-tile, atomic and narrow THD variants and with the LDS P / dS route,
-  MFMA LDS accumulators and the ``agpr_fence`` / ``asm_g13`` routes): the
+  MFMA LDS accumulators, the ``agpr_fence`` / ``asm_g13`` routes, ``asm_g13``
+  with ``asm_load_hoist`` and, on gfx950, the 16x16x32 G1 / G3 atom): the
   matrix ops issue as G0, G2, then G1 / G3 / G4 in the declared order with the
   model's counts (each chain traced to its carried dK / dV, its LDS image or
   a fresh zero), the dQ atomics follow the first G4 op and precede the next
@@ -89,6 +93,7 @@ from kernels.common._attention_bwd_body import (
 from kernels.common.attention_bwd import (
     INERT_KNOBS,
     AttnBwdSpec,
+    _not_built,
     attn_bwd_arch_facts,
     attn_bwd_params,
     build_attn_bwd_main,
@@ -203,6 +208,14 @@ KNOB_VALUES = {
 }
 _KNOB_BASES = ("band", "band_pack", "band_edge", "thd_band_atomic", "sv1_band",
                "thd_sv1_none_atomic_pack")  # fmt: skip
+# The 16x16x32 G1 / G3 atom (gfx950; K-permuted G1 / G3 B, on the transpose
+# read the stacked read plan): ``"<variant>@wide"`` instances, block_m 32 where
+# the configuration's tile has 16 rows. It changes the G1 / G3 matrix-op count
+# (half the 16x16x16 twin's), so these are not staging-knob instances.
+WIDE_SUFFIX = "@wide"
+_WIDE_BASES = ("none", "band", "band_pack", "none_edge", "band_edge",
+               "band_atomic_pack", "thd_band_pack", "thd_none_atomic", "sv1_band",
+               "sv1_band_atomic_pack", "thd_sv1_band")  # fmt: skip
 # Layout-lever instances whose production-comgr compile spills arch VGPRs:
 # the validator refuses them (``LAYOUT_SPILLING_COMBOS``), so the IR suite does
 # not enumerate them; test_validator_refuses_exactly_the_spilling_layouts pins
@@ -231,6 +244,12 @@ def _ids(row):
 
 
 def spec_of(arch, cfg, d, dt, var="none") -> AttnBwdSpec:
+    if var.endswith(WIDE_SUFFIX):
+        # "<variant>@wide": the 16x16x32 G1 / G3 atom (see WIDE_INSTANCES)
+        spec = spec_of(arch, cfg, d, dt, var[: -len(WIDE_SUFFIX)])
+        tile = validate_attn_bwd_spec(spec, arch)
+        extra = {} if tile.block_m >= 32 else {"block_m": 32}
+        return dataclasses.replace(spec, atom_g13="16x16x32", **extra)
     if "|" in var:
         # "base|knobs|order": a stage-order instance (see ORDER_ROWS)
         base, knobs, order = var.split("|")
@@ -289,6 +308,26 @@ KNOB_INSTANCES = [
     for knob in KNOB_VALUES
     for row in [(arch, "default", d, "fp16", f"{base}+{knob}")]
     if _legal(*row)
+]
+
+
+def _built(arch, cfg, d, dt, var) -> bool:
+    try:
+        r = validate_attn_bwd_spec(spec_of(arch, cfg, d, dt, var), arch)
+    except ValueError:
+        return False
+    return not _not_built(r)
+
+
+# Every gfx950 configuration where the wide G1 / G3 atom is legal and built.
+WIDE_INSTANCES = [
+    row
+    for cfg in _configs("gfx950")
+    for d in HEADS
+    for dt in DTYPES
+    for base in _WIDE_BASES
+    for row in [("gfx950", cfg, d, dt, f"{base}{WIDE_SUFFIX}")]
+    if _built(*row)
 ]
 
 
@@ -382,7 +421,7 @@ def _derived(kernel, names):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("row", INSTANCES + KNOB_INSTANCES, ids=_ids)
+@pytest.mark.parametrize("row", INSTANCES + KNOB_INSTANCES + WIDE_INSTANCES, ids=_ids)
 def test_instance_builds_and_lowers(row):
     ir = ir_of(*row)
     assert "alloca" not in ir and "addrspace(5)" not in ir
@@ -554,7 +593,7 @@ def test_illegal_geometry_raises_before_ir():
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("row", INSTANCES + KNOB_INSTANCES, ids=_ids)
+@pytest.mark.parametrize("row", INSTANCES + KNOB_INSTANCES + WIDE_INSTANCES, ids=_ids)
 def test_structure(row):
     kernel = kernel_of(*row)
     r = resolved_of(*row)
@@ -992,7 +1031,7 @@ def lds_hazards(kernel, tags):
     return found
 
 
-@pytest.mark.parametrize("row", INSTANCES + KNOB_INSTANCES, ids=_ids)
+@pytest.mark.parametrize("row", INSTANCES + KNOB_INSTANCES + WIDE_INSTANCES, ids=_ids)
 def test_lds_barriers_separate_cross_wave_accesses(row):
     kernel, tags = traced_kernel(*row)
     assert not lds_hazards(kernel, tags)[:4]
@@ -1010,7 +1049,7 @@ def test_lds_barriers_separate_cross_wave_accesses(row):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("row", INSTANCES + KNOB_INSTANCES, ids=_ids)
+@pytest.mark.parametrize("row", INSTANCES + KNOB_INSTANCES + WIDE_INSTANCES, ids=_ids)
 def test_mma_and_atomic_counts_per_step(row):
     arch = row[0]
     r = resolved_of(*row)
@@ -1254,7 +1293,7 @@ def test_stage_vec_1_defaults_to_the_narrow_tiles():
                 assert (r.block_m, r.block_n, r.waves) == (16, 16, 1)
 
 
-@pytest.mark.parametrize("row", INSTANCES + KNOB_INSTANCES, ids=_ids)
+@pytest.mark.parametrize("row", INSTANCES + KNOB_INSTANCES + WIDE_INSTANCES, ids=_ids)
 def test_no_wide_transpose_read(row):
     ir = ir_of(*row)
     assert "tr16.b128" not in ir
@@ -1473,13 +1512,14 @@ def test_new_values_change_the_ir_and_defaults_do_not(arch):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("var", list(VARIANTS) + [f"+{k}" for k in KNOB_VALUES])
+@pytest.mark.parametrize(
+    "var", list(VARIANTS) + [f"+{k}" for k in KNOB_VALUES] + [WIDE_SUFFIX]
+)
 @pytest.mark.parametrize("arch", ARCHS)
 def test_zero_scratch_no_spills_and_lds_equal_to_the_plan(arch, var):
+    if var == WIDE_SUFFIX and arch != "gfx950":
+        pytest.skip("the 16x16x32 G1 / G3 atom is gfx950-only")
     pytest.importorskip("rocke.runtime.comgr")
-    # torch first: rocKE then compiles with torch's bundled comgr, the production
-    # one; without it a node's newer system comgr is loaded (the gate refuses it)
-    pytest.importorskip("torch")
     from rocke.helpers.compile import compile_kernel
 
     from ._attention_bwd_resources import (
@@ -1489,8 +1529,12 @@ def test_zero_scratch_no_spills_and_lds_equal_to_the_plan(arch, var):
         current_flavor,
         evaluate_resource_gate,
         find_objdump,
+        pin_production_comgr,
     )
 
+    # torch's bundled comgr, the production one, pinned by path (torch is not
+    # imported); unpinned, a node's system comgr loads (the gate refuses it)
+    pin_production_comgr()
     if find_objdump() is None:
         pytest.skip("llvm-objdump not found (needed for the q-loop AGPR copy rule)")
     # A verdict counts on the production flavor and comgr only (the predicate
@@ -1507,6 +1551,9 @@ def test_zero_scratch_no_spills_and_lds_equal_to_the_plan(arch, var):
     failures = []
     if var.startswith("+"):  # a staging knob over the variants it is tested on
         rows = [x for x in KNOB_INSTANCES if x[0] == arch and x[-1].endswith(var)]
+    elif var == WIDE_SUFFIX:  # every wide G1 / G3 instance of the IR suite
+        rows = [x for x in WIDE_INSTANCES if x[0] == arch]
+        assert rows
     else:
         rows = [x for x in INSTANCES if x[0] == arch and x[-1] == var]
     for row in rows:
@@ -1580,7 +1627,19 @@ ORDER_KNOBS = {
     "acclds": dict(acc_in_lds=True, agpr_alloc=(0, 0)),
     "fence": dict(agpr_alloc=(128, 128), agpr_route="agpr_fence"),
     "asm": dict(agpr_alloc=(128, 128), agpr_route="asm_g13"),
+    # the asm route with the second G1 / G3 GEMM's LDS operand reads hoisted
+    # above the first one's asm cluster
+    "asmhoist": dict(agpr_alloc=(128, 128), agpr_route="asm_g13", asm_load_hoist=True),
+    # gfx950: the 16x16x32 G1 / G3 atom (K-permuted B), on the intrinsic and
+    # on the hoisted asm route
+    "wide": dict(atom_g13="16x16x32", block_m=32),
+    "wideasmhoist": dict(
+        atom_g13="16x16x32", block_m=32, agpr_alloc=(128, 128), agpr_route="asm_g13",
+        asm_load_hoist=True,
+    ),  # fmt: skip
 }
+# Order knobs legal on gfx950 only (the 16x16x32 atom).
+ORDER_KNOBS_GFX950 = {"wide", "wideasmhoist"}
 ORDER_BASES = ("band", "none_pack", "band_edge", "band_atomic_pack", "thd_sv1_none")
 
 
@@ -1627,9 +1686,13 @@ def test_order_rows_cover_every_value_and_knob_point():
         assert {r[4].rsplit("|", 1)[1] for r in rows} == set(STAGE_ORDERS)
         knobs = {r[4].split("|")[1] for r in rows}
         mfma = attn_bwd_arch_facts(arch).matrix_path == "mfma"
-        # every hand-off, accumulator and G1 / G3 route this arch can build
+        # every hand-off, accumulator, G1 / G3 route and atom this arch can
+        # build
         rdna = {"", "ptlds", "xt", "xtptlds"}
-        assert knobs == (set(ORDER_KNOBS) if mfma else rdna), (arch, knobs)
+        want = set(ORDER_KNOBS) if mfma else rdna
+        if arch != "gfx950":
+            want -= ORDER_KNOBS_GFX950
+        assert knobs == want, (arch, knobs)
 
 
 def _matrix_ops(ops):
@@ -2179,7 +2242,6 @@ def test_new_levers_pass_the_resource_gate(arch, spec):
     slicing (VGPR form), the S / dP reads only for asm_g13 with s_in_agpr,
     whose G0 / G2 / G1 / G3 MFMAs write AGPRs and G4's write VGPRs."""
     pytest.importorskip("rocke.runtime.comgr")
-    pytest.importorskip("torch")  # torch's bundled comgr is the production one
     from rocke.helpers.compile import compile_kernel
 
     from ._attention_bwd_resources import (
@@ -2189,8 +2251,10 @@ def test_new_levers_pass_the_resource_gate(arch, spec):
         current_flavor,
         evaluate_resource_gate,
         find_objdump,
+        pin_production_comgr,
     )
 
+    pin_production_comgr()  # torch's bundled comgr, by path; torch not imported
     if find_objdump() is None:
         pytest.skip("llvm-objdump not found (needed for the q-loop AGPR copy rule)")
     flavor, comgr = current_flavor(), comgr_version()

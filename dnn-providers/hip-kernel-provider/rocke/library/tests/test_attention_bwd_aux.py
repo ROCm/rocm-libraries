@@ -41,6 +41,13 @@ CONVERT = (
     "Q:SRC Q:DST Q:SEQ Q:OFF q:d_b q:d_h f:mult i:H i:d_t i:S_max i:has_len "
     "i:len_stride i:off64 i:tok_mult i:tok_div i:ws_rows i:ws_seg"
 )
+# the slice reduce (dkv_sink = "slices"): the convert's list plus the slice
+# stride (i64) and count (i32)
+REDUCE = (
+    "Q:SRC Q:DST Q:SEQ Q:OFF q:d_b q:d_h q:s_stride f:mult i:H i:d_t i:S_max "
+    "i:has_len i:len_stride i:off64 i:tok_mult i:tok_div i:ws_rows i:ws_seg "
+    "i:n_slices"
+)
 PAGE_ZERO = (
     "Q:SEQ_LENS_KV Q:BLOCK_TABLE Q:WS_PDK Q:WS_PDV i:h_kv i:num_seqs "
     "i:max_blocks_per_seq i:bt_stride i:page i:page_rows"
@@ -54,18 +61,21 @@ ABI = {
     "convert": CONVERT,
     "page_zero": PAGE_ZERO,
     "page_convert": PAGE_CONVERT,
+    "reduce": REDUCE,
 }
 BUILDERS = {
     "prep": X.build_attn_bwd_prep,
     "convert": X.build_attn_bwd_convert,
     "page_zero": X.build_attn_bwd_page_zero,
     "page_convert": X.build_attn_bwd_page_convert,
+    "reduce": X.build_attn_bwd_reduce,
 }
 INPUTS = {
     "prep": {"O", "dO", "LSE", "SEQ_Q", "SEQ_KV", "OFF_Q", "OFF_KV"},
     "convert": {"SRC", "SEQ", "OFF"},
     "page_zero": {"SEQ_LENS_KV", "BLOCK_TABLE"},
     "page_convert": {"SRC", "SEQ_LENS_KV", "BLOCK_TABLE"},
+    "reduce": {"SRC", "SEQ", "OFF"},
 }
 
 
@@ -124,7 +134,7 @@ def test_prep_and_convert_lists_agree_with_the_main_module():
         pytest.skip("general family module not in this tree")
     assert main_mod.ATTN_BWD_ABI == X.ATTN_BWD_ABI
     spec = X.AttnBwdAuxSpec(head_size=64)
-    for stage in ("prep", "convert"):
+    for stage in ("prep", "convert", "reduce"):
         assert tuple(main_mod.attn_bwd_params(stage)) == X.attn_bwd_aux_params(
             stage, spec
         )
@@ -305,6 +315,7 @@ def test_workspace_base_is_an_i64_rebase(stage, layout):
     ws = {
         "prep": ("WS_LSE2", "WS_DSUM", "WS_DQ", "WS_DK", "WS_DV"),
         "convert": ("SRC",),
+        "reduce": ("SRC",),
         "page_zero": ("WS_PDK", "WS_PDV"),
         "page_convert": ("SRC",),
     }[stage]
@@ -383,9 +394,9 @@ def test_shipped_aux_instances_have_zero_scratch_and_spills(arch):
 
     from kernels.common.attention_bwd import attn_bwd_arch_facts
 
-    from ._attention_bwd_resources import evaluate_resource_gate
+    from ._attention_bwd_resources import evaluate_resource_gate, pin_production_comgr
 
-    pytest.importorskip("torch")  # torch's bundled comgr is the production one
+    pin_production_comgr()  # torch's bundled comgr, by path; torch not imported
     facts = attn_bwd_arch_facts(arch)
     failures = []
     for stage, D, dt, sm, sv, lay in itertools.product(
@@ -522,9 +533,9 @@ def test_aux_tuning_instances_have_zero_scratch_and_spills(arch):
 
     from kernels.common.attention_bwd import attn_bwd_arch_facts
 
-    from ._attention_bwd_resources import evaluate_resource_gate
+    from ._attention_bwd_resources import evaluate_resource_gate, pin_production_comgr
 
-    pytest.importorskip("torch")  # torch's bundled comgr is the production one
+    pin_production_comgr()  # torch's bundled comgr, by path; torch not imported
     facts = attn_bwd_arch_facts(arch)
     failures = []
     cases = [("convert", v, x) for v in X.CONVERT_VECS for x in (1, 2, 4)]
@@ -683,9 +694,9 @@ def test_worklist_prep_instances_have_zero_scratch_and_spills(arch, D):
 
     from kernels.common.attention_bwd import attn_bwd_arch_facts
 
-    from ._attention_bwd_resources import evaluate_resource_gate
+    from ._attention_bwd_resources import evaluate_resource_gate, pin_production_comgr
 
-    pytest.importorskip("torch")  # torch's bundled comgr is the production one
+    pin_production_comgr()  # torch's bundled comgr, by path; torch not imported
     facts = attn_bwd_arch_facts(arch)
     failures = []
     for dt, sv, lay, x in itertools.product(

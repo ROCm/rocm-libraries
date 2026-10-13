@@ -48,7 +48,10 @@ flight (``R = 3``) before anything else writes the aliased LDS phases.
 Wait model (DMA path, :func:`dma_wait_counts`): VM_CNT completes in issue
 order and counts loads, stores and no-return atomics. At the end of step ``i``
 the operations a wave issued after its part of tile ``i + 1`` are at least
-the q step's dQ atomics (``n_a`` per lane, branch-free) and, for ``R = 3``,
+the q step's dQ atomics (``n_a`` per lane, branch-free; under
+``stage_table_atomics`` the previous step's, issued in stage A after the
+copy: as many, zeros on the first step, :meth:`QRing.check_step`) and, for
+``R = 3``,
 its part of tile ``i + 2`` (at least ``n_qd`` instructions, the smallest
 per-wave share of a batch); the immediate is their sum (``R = 2``: ``n_a``),
 clamped to the 6-bit counter. An under-count only waits longer; an
@@ -353,6 +356,22 @@ class QRing:
             self.lane_src = dma_lane_source(b, self.layout, 0, lane)
         else:
             self.batch = self.waits = None
+
+    def check_step(self, table) -> None:
+        """The step's count model (a ``StageTable``) keeps the DMA wait
+        immediates sound: a wave issues at least ``n_atomics`` VMEM
+        operations after its copy and before the step's wait (the step's own
+        dQ atomics in D, or under ``stage_table_atomics`` the previous
+        step's in A: as many, zeros on the first step). Raises
+        ``ValueError`` otherwise."""
+        if self.path != "dma" or self.depth == 1:
+            return  # R = 1 waits vmcnt(0); the register ring's waits are the compiler's
+        after = table.vm_after_prefetch()
+        if after < self.n_atomics:
+            raise ValueError(
+                f"the step issues {after} VMEM operations after its DMA copy; the "
+                f"ring's wait immediates assume at least {self.n_atomics}"
+            )
 
     # ----- slots ----------------------------------------------------------
     def slot_of(self, b: IRBuilder, it: Value, offset: int) -> Value | None:
@@ -670,9 +689,16 @@ class PrefetchStep:
     def barrier(self, b: IRBuilder) -> None:
         b.sync_lds_only()
 
-    def begin(self, b: IRBuilder, step, h, q0, packed):
-        """Issue the prefetch; return ``(v_q, v_do, stats, stats_src)``."""
+    def begin(self, b: IRBuilder, step, h, q0, packed, *, defer_loads: bool = False):
+        """Issue the prefetch; return ``(v_q, v_do, stats, stats_src)``.
+
+        ``defer_loads`` (register ring under a stage table): issue no load
+        and no fence here; the step calls :meth:`issue_loads` in its stage A,
+        where the stage table's groups spread the loads over G0's MFMAs.
+        """
         ring = self.ring
+        if defer_loads and ring.path == "dma":
+            raise ValueError("the DMA copy is issued at the step top")
         read = ring.slot_of(b, self.it, ring.schedule["read"])
         v_q, v_do = ring.views(b, read)
         if ring.path == "dma":
@@ -689,10 +715,18 @@ class PrefetchStep:
         # later step) are the only global loads of the step, so the
         # compiler's one wait for them sits at their slot stores, after this
         # step's dQ atomics (in-order VM_CNT: the atomics stay in flight).
-        # The fence keeps the scheduler from sinking them toward the stores.
-        self._regs = ring.load_regs(b, self.ahead)
-        b.sched_barrier(0)
+        # The fence keeps the scheduler from sinking them toward the stores
+        # (under a stage table the fence after stage A does).
+        if not defer_loads:
+            self.issue_loads(b)
+            b.sched_barrier(0)
         return v_q, v_do, None, ring.lds_stats(b, read, self.here)
+
+    def issue_loads(self, b: IRBuilder) -> None:
+        """The register ring's global loads of the prefetched tile."""
+        if self.ring.path == "dma" or self._regs:
+            raise ValueError("the register prefetch is issued once per step")
+        self._regs = self.ring.load_regs(b, self.ahead)
 
     def end(self, b: IRBuilder) -> None:
         ring = self.ring

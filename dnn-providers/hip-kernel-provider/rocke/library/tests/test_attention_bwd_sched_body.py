@@ -497,10 +497,12 @@ def test_llvm_hint_calls_equal_the_model(arch, pair):
 
 def _compile(kernel, arch):
     pytest.importorskip("rocke.runtime.comgr")
-    pytest.importorskip("torch")  # torch's comgr: the production one
     from rocke.helpers.compile import compile_kernel
 
+    from ._attention_bwd_resources import pin_production_comgr
+
     assert kernel is not None, "an illegal instance is skipped before it compiles"
+    pin_production_comgr()  # torch's bundled comgr, by path; torch not imported
     try:
         return compile_kernel(
             kernel, arch=arch, capture_ir_text=False, backend="python"
@@ -559,7 +561,6 @@ def test_resource_gate_per_value(point, pair, var):
     head size and gate variant of every arch."""
     arch, cfg, d = point
     pytest.importorskip("rocke.runtime.comgr")
-    pytest.importorskip("torch")
     from ._attention_bwd_resources import (
         GATE_FLAVOR,
         comgr_is_production,
@@ -567,7 +568,10 @@ def test_resource_gate_per_value(point, pair, var):
         current_flavor,
         evaluate_resource_gate,
         find_objdump,
+        pin_production_comgr,
     )
+
+    pin_production_comgr()  # torch's bundled comgr, by path; torch not imported
 
     spec, k = _kernel(arch, cfg, d, var, "", *pair)
     if spec is None:

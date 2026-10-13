@@ -36,6 +36,12 @@ key tiles their band reaches:
   len_q`` get values, batched rows ``[len_q, S_q_max)`` exact zeros, THD rows
   outside the sequence are not touched.
 
+Scheduling (``dq_sched``, the spec's ``sched``;
+:class:`._attention_bwd_sched.DqStageTable`): a key step runs as stages A
+(G0'), B (G2' and the softmax gradient) and C (G4'); the values add an
+``iglp_opt``, the stage fences, the per-stage ``sched_group_barrier`` groups
+and priorities. They are hints only: no op moves, dQ is the default's.
+
 dQ is accumulated in fp32 registers in a fixed key order and rounded once:
 the result is deterministic (bit for bit repeatable), with no workspace and
 no atomics. A dQ row depends on its own dS row only, so a row that is never
@@ -92,6 +98,7 @@ from ._attention_bwd_gemm import (
     kperm_b_operand_coords,
     relabel_acc_to_a,
 )
+from ._attention_bwd_sched import DQ_SCHEDS, DqStageTable
 
 __all__ = [
     "DQ_TRANSPOSE_READERS",
@@ -263,6 +270,11 @@ class BwdDqGeometry:
     atom_g02: int
     atom_g4: int
     transpose_source: str
+    # the key step's schedule value and the knobs its stage table reads
+    sched: str = "none"
+    kv_pad: int = 0
+    kv_prefetch: bool = False
+    stage_vec: int = 8
 
     @classmethod
     def from_spec(cls, spec, arch: str) -> BwdDqGeometry:
@@ -279,9 +291,18 @@ class BwdDqGeometry:
             atom_g02=_atom_k(spec.atom_g02),
             atom_g4=_atom_k(spec.atom_g4),
             transpose_source=spec.transpose_source,
+            sched=getattr(spec, "sched", "none"),
+            kv_pad=int(getattr(spec, "kv_pad", 0)),
+            kv_prefetch=bool(getattr(spec, "kv_prefetch", False)),
+            stage_vec=int(getattr(spec, "stage_vec", 8)),
         )
         geom.check()
         return geom
+
+    def stage_table(self) -> DqStageTable:
+        """The key step's stage table (``dq_sched``; the hooks of
+        :meth:`BwdDqStep.run_kv_step`)."""
+        return DqStageTable.from_geometry(self)
 
     @cached_property
     def g0t(self) -> BlockGemm:
@@ -327,6 +348,8 @@ class BwdDqGeometry:
                 f"transpose_source={self.transpose_source!r} has no reader in the "
                 f"split dQ kernel (built: {tuple(DQ_TRANSPOSE_READERS)})"
             )
+        if self.sched not in DQ_SCHEDS:
+            raise ValueError(f"dq sched {self.sched!r} not in {DQ_SCHEDS}")
         for g in (self.g0t, self.g4t):
             facts = atom_facts(g.op)
             if not (facts.a_contig and facts.b_contig and facts.affine):
@@ -409,6 +432,7 @@ class BwdDqStep:
         self.o4 = geom.g4t.wave_origin(b, wave)
         self.qt_regs = self.dot_regs = None
         self.cols: dict = {}
+        self.sched = geom.stage_table()  # the key step's hints (dq_sched)
 
     # ----- stage 0 -------------------------------------------------------
     def stage_q(
@@ -555,32 +579,48 @@ class BwdDqStep:
         a second barrier (rows are clamped to the sequence, so the prefetch
         past the last tile reads valid rows and is never used). Same values
         as the plain step, two barriers per step either way.
+
+        Schedule (``geom.sched``, :class:`._attention_bwd_sched.DqStageTable`):
+        the step runs as stages A (G0'), B (G2' and the softmax gradient) and
+        C (G4'); ``iglp*`` put one ``iglp_opt`` ahead of A, the fenced values
+        a ``sched_barrier(0)`` after A and B, the stage tables their groups
+        (and priorities). Stage A opens before the prefetch loads (so they
+        sit in A's scheduling region); no op moves, so every value is the
+        default's.
         """
         g = self.geom
         g0t, g4t = g.g0t, g.g4t
         d, n0 = g.head_size, g.k_n0
         lane = self.lane
-        if prefetch:
-            k_next = b.add(k0, b.const_i32(n0))
-            pend_k = self._tile_loads(b, k_slab, k_next, vec)
-            pend_v = self._tile_loads(b, v_slab, k_next, vec)
-        else:
+        sched = self.sched
+        if not prefetch:
             kw = dict(rows=n0, cols=d, tid=self.tid, threads=g.threads, vec=vec)
             copy_rows_to_lds(b, k_slab, self.lds.k, row0=k0, **kw)
             copy_rows_to_lds(b, v_slab, self.lds.v, row0=k0, **kw)
             b.sync()
+        sched.emit_loop_head(b)
+        sched.emit_stage_begin(b, "A")
+        if prefetch:
+            k_next = b.add(k0, b.const_i32(n0))
+            pend_k = self._tile_loads(b, k_slab, k_next, vec)
+            pend_v = self._tile_loads(b, v_slab, k_next, vec)
         s_acc = g0t.mma(
             b, g0t.zero_acc(b), LdsOperand(self.lds.k), self.qt_regs, lane=lane,
             origin=self.o0,
         )  # fmt: skip
+        sched.emit_stage_end(b, "A")
+        sched.emit_stage_begin(b, "B")
         dp_acc = g0t.mma(
             b, g0t.zero_acc(b), LdsOperand(self.lds.v), self.dot_regs, lane=lane,
             origin=self.o0,
         )  # fmt: skip
         ds = self._softmax_grad_t(b, s_acc, dp_acc, k0, edge=edge)
         a_ds, _ = relabel_acc_to_a(b, g0t, g4t, ds, lane)
+        sched.emit_stage_end(b, "B")
+        sched.emit_stage_begin(b, "C")
         kt = LdsOperand(self.lds.k, "k_outer", coords=g.b4_coords, reader=g.reader)
         dq = g4t.mma(b, dq, a_ds, kt, lane=lane, origin=self.o4)
+        sched.emit_stage_end(b, "C")
         b.sync()  # K / V reads complete before the next step's copies
         if prefetch:
             self._tile_stores(b, self.lds.k, pend_k, vec)

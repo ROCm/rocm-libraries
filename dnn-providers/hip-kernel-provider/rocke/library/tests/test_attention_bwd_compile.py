@@ -81,7 +81,8 @@ def test_entry_key_covers_spec_arch_flavor_comgr_and_sources():
     ]  # fmt: skip
     assert len({k, *other}) == 1 + len(other)
     with pytest.raises(ValueError):
-        bc.spec_identity("reduce", s)  # not a stage ("dq" is: split dQ)
+        # not a stage ("dq" is: split dQ; "reduce" is: the dK / dV slice sink)
+        bc.spec_identity("page_zero", s)
 
 
 # --------------------------------------------------------------------------- cache
@@ -184,6 +185,24 @@ def test_batch_deadline_and_toolchain_mismatch(tmp_path, fake_compile, monkeypat
         bc.compile_batch([], arch="gfx942", cache=c, mode="fork")
 
 
+# Dense-family knob values registered as not built (dense_bwd_not_built and
+# the general-shell body levers, _shell_not_built): the compile path refuses
+# them before building or touching a toolchain.
+_DENSE_NOT_BUILT = (
+    {"body_variant": "trload"},
+    {"dkv_mode": "atomic", "body_knobs": (("dkv_sink", "slices"),)},
+)
+
+
+def _dense_not_built(**kw):
+    from kernels.gfx950.attention_dense_bwd import Gfx950AttentionDenseBwdSpec
+
+    return Gfx950AttentionDenseBwdSpec(
+        seqlen_q=256, seqlen_kv=256, num_query_heads=8, num_kv_heads=2,
+        head_size=128, **kw,
+    )  # fmt: skip
+
+
 class _DiesInTheWorker:
     """An item whose unpickling ends the worker process (a stand-in for a
     toolchain crash such as a comgr segfault)."""
@@ -202,18 +221,13 @@ def test_a_dying_worker_is_charged_to_its_item_only(tmp_path):
     it comes back ``compile_crash`` (re-run alone), every other item of the
     batch still gets its own result."""
     c = bc.CompileCache(tmp_path, toolchain=TC, source_hash="h")
-    # not built (refused before any toolchain is touched): tr_read with the
-    # K-permuted 16x16x32 G1 / G3 B operand on gfx950
-    kperm = dict(head_size=64, dtype="bf16", transpose_source="tr_read")
-    nb = [
-        validate_attn_bwd_spec(
-            AttnBwdSpec(atom_g13="16x16x32", **kperm, **kw), "gfx950"
-        )
-        for kw in ({}, {"edge_tiles": True})
-    ]
+    # not built (refused before any toolchain is touched): the dense family's
+    # registered-not-built values on gfx950 (the per-arch transpose-load body,
+    # the slice sink of the general shell)
+    nb = [_dense_not_built(**kw) for kw in _DENSE_NOT_BUILT]
     # one worker: the items queued behind the crash die with the pool and
     # are re-run alone (each must come back with its own result)
-    items = [("main", _DiesInTheWorker()), ("main", nb[0]), ("main", nb[1])]
+    items = [("main", _DiesInTheWorker()), ("dense", nb[0]), ("dense", nb[1])]
     for workers in (1, 2):
         res = bc.compile_batch(
             items, arch="gfx950", cache=c, workers=workers, mode="process"
@@ -222,8 +236,41 @@ def test_a_dying_worker_is_charged_to_its_item_only(tmp_path):
         assert not any(r.ok for r in res)
 
 
-def test_not_built_is_detected_before_building():
-    # tr_read with the K-permuted 16x16x32 G1 / G3 B operand (gfx950)
+def test_a_dying_fresh_compile_process_is_a_compile_crash(tmp_path, monkeypatch):
+    """A kernel that compiles in a fresh process of its own (iglp_opt(1)) and
+    whose process dies comes back ``compile_crash`` in every mode, like a
+    dying pool worker; a compile error stays ``compile:ComgrError``."""
+    from rocke.runtime.comgr import ComgrError, ComgrProcessDied
+
+    def compile_one(stage, spec, arch):
+        raise (ComgrError if spec.ws_layout == "token_major" else ComgrProcessDied)("x")
+
+    monkeypatch.setattr(bc, "compile_one", compile_one)
+    items = [("main", _spec()), ("main", _spec(ws_layout="token_major"))]
+    for mode in ("serial", "thread"):
+        c = bc.CompileCache(tmp_path / mode, toolchain=TC, source_hash="h")
+        res = bc.compile_batch(items, arch="gfx950", cache=c, workers=2, mode=mode)
+        assert [r.error for r in res] == [bc.COMPILE_CRASH, "compile:ComgrError"]
+
+
+def test_not_built_is_detected_before_building(monkeypatch):
+    # the dense family's registered-not-built values (gfx950)
+    for kw in _DENSE_NOT_BUILT:
+        d = _dense_not_built(**kw)
+        assert bc.not_built_reasons("dense", d)
+        with pytest.raises(NotImplementedError):
+            bc.compile_one("dense", d, "gfx950")
+    # the main kernel's registered-not-built value (the arrival-counter dK / dV
+    # sink) is refused before building
+    lc = validate_attn_bwd_spec(
+        AttnBwdSpec(head_size=64, dkv_mode="atomic", dkv_sink="last_cta"), "gfx942"
+    )
+    assert bc.not_built_reasons("main", lc) == ["dkv_sink='last_cta'"]
+    with pytest.raises(NotImplementedError, match="last_cta"):
+        bc.compile_one("main", lc, "gfx942")
+    # every other main-kernel value is built (tr_read with the K-permuted
+    # 16x16x32 G1 / G3 B operand included): a finding of the emission check
+    # is refused before building
     s = validate_attn_bwd_spec(
         AttnBwdSpec(
             head_size=64, dtype="bf16", transpose_source="tr_read",
@@ -231,8 +278,12 @@ def test_not_built_is_detected_before_building():
         ),
         "gfx950",
     )  # fmt: skip
-    assert bc.not_built_reasons("main", s)
-    with pytest.raises(NotImplementedError):
+    assert bc.not_built_reasons("main", s) == []
+    import kernels.common.attention_bwd as ab
+
+    monkeypatch.setattr(ab, "_not_built", lambda spec: ["an unbuilt emission"])
+    assert bc.not_built_reasons("main", s) == ["an unbuilt emission"]
+    with pytest.raises(NotImplementedError, match="an unbuilt emission"):
         bc.compile_one("main", s, "gfx950")
     assert bc.not_built_reasons("prep", s) == []
 
@@ -240,7 +291,7 @@ def test_not_built_is_detected_before_building():
 # --------------------------------------------------------------------------- real compile
 def _can_compile():
     try:
-        tc = bc.toolchain_identity(import_torch=False)
+        tc = bc.toolchain_identity()
     except Exception:  # noqa: BLE001
         return False
     return tc.comgr_path is not None
@@ -248,7 +299,7 @@ def _can_compile():
 
 @pytest.mark.skipif(not _can_compile(), reason="no comgr library found")
 def test_real_main_kernel_compiles_and_is_cached(tmp_path):
-    tc = bc.toolchain_identity(import_torch=False)
+    tc = bc.toolchain_identity()
     c = bc.CompileCache(tmp_path, toolchain=tc, source_hash=bc.backward_source_hash())
     s = _spec()
     res = bc.compile_batch([("main", s)], arch="gfx942", cache=c, mode="serial")
@@ -262,7 +313,7 @@ def test_real_main_kernel_compiles_and_is_cached(tmp_path):
 @pytest.mark.skipif(not _can_compile(), reason="no comgr library found")
 def test_thread_pool_compiles_the_serial_code_objects(tmp_path):
     """Threaded in-process compiles give byte-identical code objects."""
-    tc = bc.toolchain_identity(import_torch=False)
+    tc = bc.toolchain_identity()
     src = bc.backward_source_hash()
     specs = [
         ("main", _spec()),
@@ -283,3 +334,45 @@ def test_thread_pool_compiles_the_serial_code_objects(tmp_path):
     assert all(r.ok for r in a + b), [r.detail for r in a + b if not r.ok]
     assert [r.entry.hsaco for r in a] == [r.entry.hsaco for r in b]
     assert len({r.entry.hsaco_sha for r in a}) == len(specs)
+
+
+@pytest.mark.skipif(not _can_compile(), reason="no comgr library found")
+def test_iglp1_code_objects_do_not_depend_on_what_the_process_compiled_before():
+    """LLVM's ``iglp_opt(1)`` strategy keeps counts across the compiles of a
+    process: with the production comgr, the probe kernel below compiled in a
+    process after the other one gets another code object (SGPR spills) than
+    in a process that compiles it alone. The backward compile puts every
+    ``iglp_opt(1)`` kernel in a fresh process, so its code object is the
+    alone one whatever this process compiled before."""
+    import dataclasses
+
+    from rocke.core.lower_llvm import lower_kernel_to_llvm
+    from rocke.helpers.compile import _comgr_options_for_kernel
+    from rocke.runtime.comgr import build_hsaco_from_llvm_ir
+
+    from kernels.common.attention_bwd import build_attn_bwd_main
+
+    arch, isa = "gfx950", "amdgcn-amd-amdhsa--gfx950"
+
+    def spec(dkv_mode, **kw):
+        base = AttnBwdSpec(
+            head_size=64, dtype="fp16", dkv_mode=dkv_mode, mask_class="band"
+        )
+        base = validate_attn_bwd_spec(base, arch)
+        kw.update(sched="iglp1", edge_tiles=True)
+        return validate_attn_bwd_spec(dataclasses.replace(base, **kw), arch)
+
+    def lowered(s):
+        k = build_attn_bwd_main(s, arch=arch)
+        return lower_kernel_to_llvm(k, arch=arch), _comgr_options_for_kernel(k)
+
+    probe = spec("atomic", stage_order="g4g1g3")
+    ll, opts = lowered(probe)
+    alone, _ = build_hsaco_from_llvm_ir(ll, isa=isa, options=opts, fresh_process=True)
+    # in-process iglp_opt(1) compiles move the strategy's counts here: another
+    # kernel, then the probe itself (the history of the observed failure)
+    for s in (spec("direct", head_pack=True, stage_order="g3g4g1"), probe):
+        ll, opts = lowered(s)
+        build_hsaco_from_llvm_ir(ll, isa=isa, options=opts)
+    _name, blob, _secs = bc.compile_one("main", probe, arch)
+    assert blob == alone

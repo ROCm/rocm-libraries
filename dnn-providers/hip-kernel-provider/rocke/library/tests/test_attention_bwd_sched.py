@@ -26,6 +26,7 @@ disassembly) and skip otherwise.
 
 from __future__ import annotations
 
+import dataclasses
 import glob
 import itertools
 import os
@@ -39,6 +40,7 @@ from pathlib import Path
 
 import pytest
 from rocke.core.ir import F16, F32, IRBuilder, PtrType
+from rocke.helpers.compile import COMGR_FRESH_PROCESS_ATTR
 from rocke.helpers.schedule import DS_READ, DS_WRITE, MFMA, VMEM_READ, VMEM_WRITE
 
 from kernels.common._attention_bwd_lds import default_xt_writer
@@ -264,8 +266,9 @@ CONFIG_IDS = [c[0] for c in CONFIGS]
 
 
 def _table(kw: dict) -> StageTable:
-    """The ring model: the synthetic step emits the ring pipeline's work."""
-    return StageTable(**{"pipeline": "ring", **kw})
+    """The reference (CK) model: the synthetic step emits the reference
+    pipeline's work."""
+    return StageTable(**{"pipeline": "ck", **kw})
 
 
 # ---------------------------------------------------------------------------
@@ -932,6 +935,39 @@ def test_sched_variants_emit_the_modelled_ops(sched):
     fences = [op for op in b.kernel.body.ops if op.name == "tile.sched_barrier"]
     assert all(op.attrs["mask"] == 0 for op in fences)
     assert "tile.sched_barrier" not in after_d
+    # iglp_opt(1) (only) marks the kernel to compile in a fresh process
+    assert b.kernel.attrs.get(COMGR_FRESH_PROCESS_ATTR, False) is (sched == "iglp1")
+
+
+def test_the_fresh_process_mark_leaves_the_llvm_ir_unchanged():
+    """A whole iglp1 main kernel carries the mark; its LLVM IR is the same
+    with the mark removed (no lowerer reads it), and a kernel of another
+    schedule does not carry it."""
+    from rocke.core.lower_llvm import lower_kernel_to_llvm
+
+    from kernels.common.attention_bwd import (
+        AttnBwdSpec,
+        build_attn_bwd_main,
+        validate_attn_bwd_spec,
+    )
+
+    for arch in ("gfx942", "gfx950"):
+        s = validate_attn_bwd_spec(
+            AttnBwdSpec(head_size=64, dtype="fp16", sched="iglp1", edge_tiles=True),
+            arch,
+        )
+        k = build_attn_bwd_main(s, arch=arch)
+        assert k.attrs.get(COMGR_FRESH_PROCESS_ATTR) is True
+        ll = lower_kernel_to_llvm(k, arch=arch)
+        del k.attrs[COMGR_FRESH_PROCESS_ATTR]
+        assert lower_kernel_to_llvm(k, arch=arch) == ll
+        assert "llvm.amdgcn.iglp.opt(i32 1)" in ll
+        for sched in ("iglp0", "none"):
+            other = build_attn_bwd_main(
+                validate_attn_bwd_spec(AttnBwdSpec(head_size=64, sched=sched), arch),
+                arch=arch,
+            )
+            assert COMGR_FRESH_PROCESS_ATTR not in other.attrs
 
 
 def test_atomics_variant_moves_dq_atomics_into_stage_a():
@@ -953,7 +989,7 @@ def test_atomics_variant_moves_dq_atomics_into_stage_a():
 def test_last_step_drops_next_tile_work():
     t = StageTable(
         arch="gfx942", head_size=128, k_m0=16, k_n0=128, k_k4=32, waves=4,
-        pipeline="ring",
+        pipeline="ck",
     )  # fmt: skip
     last = {s.stage: s for s in t.stages(prefetch=False)}
     full = {s.stage: s for s in t.stages()}
@@ -1045,7 +1081,7 @@ def test_kv_residency_and_acc_in_lds_add_their_lds_traffic(arch):
         "waves": w,
         "kt_source": "lds",
         "transpose_source": "wmma_lds" if arch.startswith("gfx1") else "xt_lds",
-        "pipeline": "ring",
+        "pipeline": "ck",
     }
     variants = {
         (kv, al): _counts(StageTable(kv_residency=kv, acc_in_lds=al, **base))
@@ -1245,8 +1281,21 @@ def test_from_geometry_picks_the_pipeline():
 
     assert StageTable.from_geometry(_G(), "gfx942").pipeline == "sync"
     assert StageTable.from_geometry(_G(ring_depth=2), "gfx942").pipeline == "ring"
+    assert StageTable.from_geometry(_G(ring_depth=3), "gfx950").pipeline == "ring"
+    dma = dataclasses.make_dataclass(
+        "_D", [("global_path", str, "dma")], bases=(_G,), frozen=True
+    )
+    assert StageTable.from_geometry(dma(), "gfx950").pipeline == "ring"
+    merged = dataclasses.make_dataclass(
+        "_M", [("barrier_merge", str, "on")], bases=(_G,), frozen=True
+    )
+    assert StageTable.from_geometry(merged(ring_depth=2), "gfx942").pipeline == "merged"
     with pytest.raises(ValueError, match="pipeline"):
         StageTable(**_SYNC, waves=4, pipeline="pipelined")
+    with pytest.raises(ValueError, match="does not model"):
+        StageTable(**_SYNC, waves=4, pipeline="ring")  # (vgpr, 1) is synchronous
+    with pytest.raises(ValueError, match="does not model"):
+        StageTable(**_SYNC, waves=4, ring_depth=2)  # a ring is not "sync"
     with pytest.raises(ValueError, match="does not divide the waves"):
         StageTable(**_SYNC, waves=4, grid_g02=(3, 1))
 

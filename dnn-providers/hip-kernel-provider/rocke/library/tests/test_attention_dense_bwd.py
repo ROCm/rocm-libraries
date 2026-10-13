@@ -280,19 +280,104 @@ def test_per_arch_bodies_are_registered_not_built(arch, variant):
 
 
 def test_not_built_body_knob_raises():
-    with pytest.raises(NotImplementedError):
-        build942(_spec(body_knobs={"ring_depth": 2}), arch="gfx942")
+    # the mirror pass (a second kv tile per CTA) is the general shell's only
+    with pytest.raises(NotImplementedError, match="lb_mirror"):
+        build942(_spec(body_knobs={"lb_mirror": True}), arch="gfx942")
+
+
+def _ring_values(arch):
+    """Every built (global_path, ring_depth) of ``arch`` but the synchronous
+    staging, on the default tile."""
+    out = []
+    for path in ("vgpr", "dma"):
+        for depth in (1, 2, 3):
+            if (path, depth) == ("vgpr", 1):
+                continue
+            try:
+                validate_attn_dense_bwd_spec(
+                    _spec(arch, body_knobs={"global_path": path, "ring_depth": depth}),
+                    arch,
+                )
+            except ValueError:
+                continue
+            out.append((path, depth))
+    return out
+
+
+def test_ring_values_per_arch():
+    assert _ring_values("gfx942") == [("vgpr", 2)]
+    assert _ring_values("gfx950") == [
+        ("vgpr", 2), ("vgpr", 3), ("dma", 1), ("dma", 2), ("dma", 3),
+    ]  # fmt: skip
 
 
 @pytest.mark.parametrize("arch", ARCHS)
-def test_split_dq_is_registered_not_built(arch):
-    """``dq_mode = "split"`` is a legal general-family value (its dQ kernel is
-    built there), but the dense shell has no split launch: registered, not
-    built, refused before building."""
+@pytest.mark.parametrize("oob", ["buffer_oob", "clamp"])
+@pytest.mark.parametrize("ragged", [False, True])
+def test_prefetch_ring_is_built_on_the_dense_shell(arch, oob, ragged):
+    """The Q / dO prefetch ring (register and DMA paths, every depth of the
+    arch) builds on the dense shell under both OOB modes; under buffer_oob
+    Q and dO leave the buffer resources (their global-pointer view) while K
+    and V keep theirs."""
+    from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
+
+    shape = dict(seqlen_q=200, seqlen_kv=200, ragged=True) if ragged else {}
+    plain = _BUILD[arch](_spec(arch, oob=oob, **shape), arch=arch)
+    n_plain = _count_ops(plain, "tile.buffer_rsrc")
+    for path, depth in _ring_values(arch):
+        knobs = {"global_path": path, "ring_depth": depth}
+        spec = _spec(arch, oob=oob, body_knobs=knobs, **shape)
+        assert dense_bwd_not_built_reasons(spec) == []
+        k = _BUILD[arch](spec, arch=arch)
+        ir = _lower_kernel_to_llvm_python(k, arch=arch, llvm_flavor="llvm22")
+        assert ("global.load.lds" in ir or "global_load_lds" in ir) == (path == "dma")
+        n = _count_ops(k, "tile.buffer_rsrc")
+        if oob == "clamp":
+            assert n == 0
+        else:
+            assert 0 < n < n_plain, (path, depth, n, n_plain)
+
+
+def _count_ops(kernel, name):
+    def walk(ops):
+        for op in ops:
+            yield op
+            for r in op.regions:
+                yield from walk(r.ops)
+
+    return sum(1 for op in walk(kernel.body.ops) if op.name == name)
+
+
+@pytest.mark.parametrize("arch", ARCHS)
+def test_merged_ring_needs_no_prefetch_ring(arch, monkeypatch):
+    """barrier_merge = "on" stages its own 2-slot ring in the tile step: the
+    dense shell builds no prefetch ring for it (the general shell's rule),
+    and every other staging but (vgpr, 1) builds one."""
+    from kernels.common import _attention_dense_bwd_shell as shell
+
+    built = []
+    real = shell.QRing
+
+    def spy(*a, **kw):
+        built.append(1)
+        return real(*a, **kw)
+
+    monkeypatch.setattr(shell, "QRing", spy)
+    _BUILD[arch](_spec(arch, body_knobs={"barrier_merge": "on"}), arch=arch)
+    _BUILD[arch](_spec(arch), arch=arch)
+    assert built == []
+    _BUILD[arch](_spec(arch, body_knobs={"ring_depth": 2}), arch=arch)
+    assert built == [1]
+
+
+@pytest.mark.parametrize("arch", ARCHS)
+def test_split_dq_is_built(arch):
+    """``dq_mode = "split"`` is built on the dense shell (the main kernel
+    computes dK / dV only; ``test_attention_dense_bwd_split.py`` covers the
+    kernel, its dQ kernel and the plan)."""
     spec = _spec(arch, dq_mode="split")
-    assert "dq_mode='split'" in dense_bwd_not_built_reasons(spec)
-    with pytest.raises(NotImplementedError, match="dq_mode"):
-        _BUILD[arch](spec, arch=arch)
+    assert dense_bwd_not_built_reasons(spec) == []
+    assert _BUILD[arch](spec, arch=arch).name == spec.kernel_name()
 
 
 # ---------------------------------------------------------------------------
@@ -527,8 +612,49 @@ def test_run_and_compile_hooks_serve_the_dense_stage(arch):
     spec = dataclasses.replace(plan.specs["dense"], body_variant=variant)
     assert bc.not_built_reasons("dense", spec)
     # a body knob value that is not built is a not-built dense spec too
+    spec = dataclasses.replace(plan.specs["dense"], body_knobs={"lb_mirror": True})
+    assert any("lb_mirror" in r for r in bc.not_built_reasons("dense", spec))
+    # the prefetch ring is built
     spec = dataclasses.replace(plan.specs["dense"], body_knobs={"ring_depth": 2})
-    assert any("ring_depth" in r for r in bc.not_built_reasons("dense", spec))
+    assert bc.not_built_reasons("dense", spec) == []
+
+
+@pytest.mark.parametrize("arch", ARCHS)
+def test_hook_g_split_makes_dkv_atomic(arch):
+    """A hook configuration with g_split > 1 gets atomic dK / dV (the general
+    plan's rule); an explicit direct mode with a split is refused."""
+    req = _req(causal=True)
+    pol = config_policy("default", arch, overrides={"g_split": 2})
+    plan = attn_dense_bwd_plan(req, arch, policy=pol)
+    assert plan.specs["dense"].dkv_mode == "atomic"
+    assert plan.launches[1].scalars["g_split"] == 2
+    assert [s.stage for s in plan.launches].count("convert") == 3
+    plan = attn_dense_bwd_plan(req, arch, policy=_policy(arch))
+    assert plan.specs["dense"].dkv_mode == "direct"
+    pol = config_policy("default", arch, overrides={"g_split": 2, "dkv_mode": "direct"})
+    with pytest.raises(ValueError, match="atomic"):
+        attn_dense_bwd_plan(req, arch, policy=pol)
+
+
+@pytest.mark.parametrize("arch", ARCHS)
+def test_head_pack_is_dropped_or_refused(arch):
+    """head_pack = False (the general knob set's value) is what the dense
+    body does; head_pack = True is not built on the dense route."""
+    req = _req(causal=True)
+    base = dense_bwd_spec_for(req, arch)
+    for knobs in ({"head_pack": False}, {"body_knobs": {"head_pack": False}}):
+        assert dense_bwd_spec_for(req, arch, knobs) == base
+    plan = attn_dense_bwd_plan(
+        req, arch, policy=config_policy("default", arch, {"head_pack": False})
+    )
+    assert plan.specs["dense"] == base
+    for knobs in ({"head_pack": True}, {"body_knobs": {"head_pack": True}}):
+        with pytest.raises(ValueError, match="head_pack=True is not built"):
+            dense_bwd_spec_for(req, arch, knobs)
+    with pytest.raises(ValueError, match="head_pack=True is not built"):
+        attn_dense_bwd_plan(
+            req, arch, policy=config_policy("default", arch, {"head_pack": True})
+        )
 
 
 @pytest.mark.parametrize("arch", ARCHS)

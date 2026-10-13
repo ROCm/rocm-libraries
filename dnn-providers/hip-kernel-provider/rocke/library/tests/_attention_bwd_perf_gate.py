@@ -27,13 +27,34 @@ tests. Protocol:
   kernel (used by the sweep before timing).
 * ``static_prune_dq(arch, dq_spec, hsaco) -> (token | None, record)``: the
   same rules on the split dQ kernel of a ``dq_mode = "split"`` candidate.
+
+Dense plans (``plan.route == "dense"``, a ``"dense"`` stage spec instead of
+``"main"``): the dense kernel bakes the problem shape, so no pruning case
+runs the timed dense code object itself (the timed shape is checked in the
+timing process against the reference). The pruning set is the batched set
+of the dense spec's class (head size, dtype, band or none, dK / dV mode,
+``g_split``), keeping the cases the dense route serves on the plan's arch;
+each runs on the dense route with the configuration's knobs (its own dense
+kernel per shape), and must resolve a dense spec equal to the timed one in
+every field but the problem shape, and under split dQ a dense dQ spec equal
+to the timed one alike (``gate_kernel_mismatch`` otherwise).
+Coverage asks that every other timed kernel (prep, converts) is exercised and
+that at least one case ran the timed dense configuration. ``prepare`` also
+compiles those per-shape dense kernels once per job into a code-object cache
+beside the oracles (``<cache_dir>/gate-hsaco``, unless
+``ROCKE_BWD_HSACO_CACHE`` names one), so a timing attempt only loads them.
 """
 
 from __future__ import annotations
 
+import contextlib
+import dataclasses
 import os
 import pickle
 from pathlib import Path
+from unittest import mock
+
+from benchmarks.common.attention_bwd_rocke_arm import REQUEST_HINTS
 
 from ._attention_bwd_harness import (
     _REF_CACHE,
@@ -43,27 +64,165 @@ from ._attention_bwd_harness import (
     run_case,
 )
 from .sdpa.bwd_cases import compare_bwd
-from .sdpa.bwd_kernel_cases import perf_prune_cases
+from .sdpa.bwd_kernel_cases import perf_prune_cases, request_from_case
 
 # Narrow-access re-layout of the pruning cases for stage_vec = 1 classes:
 # every tensor base 1 element (2 bytes) off a 16-byte boundary.
 _NARROW_VIEW = "bshd"
 _NARROW_BASE = 1
+# Request hints of a configuration's runtime values (the rocKE arm's
+# REQUEST_HINTS) and the dense route switch: never tuning values.
+_HINTS = ("num_xcds", "num_cus")
+_ROUTE = "route"
+_HSACO_ENV = "ROCKE_BWD_HSACO_CACHE"
+# Launch stages of the shape-baked dense kernels (main, split dQ).
+_DENSE_STAGES = ("dense", "dense_dq")
+# Dense spec fields that follow the problem shape (the rest is the
+# configuration a pruning case must reproduce).
+_DENSE_PROBLEM = frozenset(
+    {
+        "seqlen_q",
+        "seqlen_kv",
+        "num_query_heads",
+        "num_kv_heads",
+        "head_size",
+        "batch",
+        "causal",
+        "causal_bottom_right",
+        "dtype",
+        "layout",
+        "sliding_window",
+        "window_left",
+        "window_right",
+        "ragged",
+        "name",
+    }
+)
+
+
+def is_dense(plan) -> bool:
+    """Whether ``plan`` runs the dense main kernel (``"dense"`` stage)."""
+    return "main" not in plan.specs and "dense" in plan.specs
+
+
+def dense_identity(spec) -> tuple:
+    """The configuration part of a dense spec (every non-problem field)."""
+    return (type(spec).__name__,) + tuple(
+        (f.name, getattr(spec, f.name))
+        for f in dataclasses.fields(spec)
+        if f.name not in _DENSE_PROBLEM
+    )
+
+
+def dense_dq_identity(spec) -> tuple | None:
+    """The configuration part of a dense split dQ spec (``None``: no split):
+    every field but the problem shape (its dQ tuning values whole)."""
+    if spec is None:
+        return None
+    return dense_identity(spec)
 
 
 def cases_for(plan, runtime=None) -> tuple:
-    """The pruning cases of ``plan``'s main-kernel class."""
-    spec = plan.specs["main"]
+    """The pruning cases of ``plan``'s main-kernel class (dense plans: the
+    cases of the dense spec's class the dense route serves on its arch)."""
     g_split = int(dict(runtime or {}).get("g_split", 1))
-    return perf_prune_cases(
+    if not is_dense(plan):
+        spec = plan.specs["main"]
+        return perf_prune_cases(
+            head_size=spec.head_size,
+            dtype=spec.dtype,
+            mask_class=spec.mask_class,
+            seq_mode=spec.seq_mode,
+            dkv_mode=spec.dkv_mode,
+            stage_vec=spec.stage_vec,
+            g_split=g_split,
+        )
+    from kernels.common.attention_bwd_plan import dense_bwd_eligibility
+
+    spec = plan.specs["dense"]
+    cases = perf_prune_cases(
         head_size=spec.head_size,
         dtype=spec.dtype,
-        mask_class=spec.mask_class,
-        seq_mode=spec.seq_mode,
+        mask_class="band" if spec.masked else "none",
+        seq_mode="batched",
         dkv_mode=spec.dkv_mode,
-        stage_vec=spec.stage_vec,
+        stage_vec=8,
         g_split=g_split,
     )
+    return tuple(
+        c for c in cases if dense_bwd_eligibility(request_from_case(c), plan.arch)[0]
+    )
+
+
+def _split_runtime(cfg) -> tuple[dict, dict]:
+    """``(tuning values, request hints)`` of a configuration (knobs and its
+    runtime values; the route switch dropped)."""
+    runtime = dict(getattr(cfg, "runtime", None) or {})
+    hints = {k: runtime.pop(k) for k in _HINTS if k in runtime}
+    runtime.pop(_ROUTE, None)
+    return {**dict(getattr(cfg, "knobs", None) or {}), **runtime}, hints
+
+
+def _device_hints(hints: dict) -> dict:
+    if hints.get("num_cus") == "device":  # the rocKE arm's DEVICE_NUM_CUS
+        from rocke.runtime.hip_module import get_device_num_cus
+
+        hints = dict(hints, num_cus=int(get_device_num_cus(0)))
+    return hints
+
+
+def dense_case_plan(arch, cfg, case):
+    """The dense plan of pruning case ``case`` under configuration ``cfg``."""
+    from kernels.common.attention_bwd_plan import AttnBwdPolicy, FEATURE_GROUPS
+    from kernels.common.attention_dense_bwd_plan import attn_dense_bwd_plan
+
+    values, hints = _split_runtime(cfg)
+    req = request_from_case(case)
+    if hints:
+        req = dataclasses.replace(req, **_device_hints(hints))
+
+    def tuning(_req, _arch, _route, _pclass):
+        return dict(values)
+
+    policy = AttnBwdPolicy(
+        declared_groups=frozenset(FEATURE_GROUPS),
+        waive_unverified=True,
+        tuning=tuning,
+    )
+    return attn_dense_bwd_plan(req, arch, policy=policy)
+
+
+@contextlib.contextmanager
+def _gate_code_objects(cache_dir):
+    """The on-disk code-object cache of the dense pruning kernels: the
+    caller's ``ROCKE_BWD_HSACO_CACHE``, else ``<cache_dir>/gate-hsaco``."""
+    if os.environ.get(_HSACO_ENV, "").strip() or cache_dir is None:
+        yield
+        return
+    root = Path(cache_dir) / "gate-hsaco"
+    root.mkdir(parents=True, exist_ok=True)
+    with mock.patch.dict(os.environ, {_HSACO_ENV: str(root)}):
+        yield
+
+
+def case_request(plan) -> dict:
+    """Request hints a pruning case needs to resolve ``plan``'s kernels.
+
+    A configuration's ``num_cus`` / ``num_xcds`` describe the timed device,
+    not a pruning case. The XCD remap is rebuilt from the timed plan's XCD
+    counts (main and split dQ). Mirror pairing takes ``num_cus = 1``: its
+    fill guard is a no-gain rule (the paired decode visits every kv tile once
+    for any grid), and the small pruning grids would never pass it, so the
+    gate exercises the timed paired kernel as the device tests do.
+    """
+    rt = plan.runtime
+    out = {}
+    xcds = int(rt.get("xcd_n") or 0) or int(rt.get("dq_xcd_n") or 0)
+    if xcds:
+        out["num_xcds"] = xcds
+    if rt.get("pair"):
+        out["num_cus"] = 1
+    return out
 
 
 def _oracle_path(cache_dir, case) -> Path:
@@ -74,7 +233,10 @@ class PruneGate:
     """The pruning-set gate (see the module docstring)."""
 
     def prepare(self, configs_and_plans, cache_dir) -> int:
-        """Store the oracle of every needed pruning case; returns the count."""
+        """Store the oracle of every needed pruning case; returns the count.
+
+        Dense plans: their per-shape pruning kernels are compiled here too
+        (once per job, see the module docstring)."""
         n = 0
         for cfg, plan in configs_and_plans:
             for case in cases_for(plan, getattr(cfg, "runtime", None)):
@@ -87,7 +249,24 @@ class PruneGate:
                     pickle.dump(reference(case), fh, protocol=pickle.HIGHEST_PROTOCOL)
                 os.replace(tmp, path)
                 n += 1
+        for cfg, plan in configs_and_plans:
+            if is_dense(plan):
+                self._compile_dense(plan.arch, cfg, plan, cache_dir)
         return n
+
+    @staticmethod
+    def _compile_dense(arch, cfg, plan, cache_dir) -> None:
+        """Compile (or find) every dense pruning kernel of ``cfg``; a case the
+        dense plan refuses is left to :meth:`check`, which reports it."""
+        from kernels.common.attention_bwd_run import attn_bwd_kernels
+
+        with _gate_code_objects(cache_dir):
+            for case in cases_for(plan, getattr(cfg, "runtime", None)):
+                try:
+                    p = dense_case_plan(arch, cfg, case)
+                except ValueError:
+                    continue
+                attn_bwd_kernels(p, cache={})
 
     @staticmethod
     def _load(case, cache_dir) -> None:
@@ -99,8 +278,15 @@ class PruneGate:
                 _REF_CACHE[case.id] = pickle.load(fh)
 
     def check(self, arch, cfg, plan, run_cache, cache_dir) -> list:
+        if is_dense(plan):
+            with _gate_code_objects(cache_dir):
+                return self._check_dense(arch, cfg, plan, run_cache, cache_dir)
         runtime = dict(getattr(cfg, "runtime", None) or {})
+        # device hints are request fields, not knobs (see case_request)
+        for k in REQUEST_HINTS:
+            runtime.pop(k, None)
         overrides = {**dict(getattr(cfg, "knobs", None) or {}), **runtime}
+        hints = case_request(plan)
         cases = cases_for(plan, runtime)
         if not cases:
             return ["prune: empty pruning set"]
@@ -110,14 +296,15 @@ class PruneGate:
         probs = []
         for case in cases:
             self._load(case, cache_dir)
-            kw = {}
+            kw = {"request": dict(hints)} if hints else {}
             if plan.specs["main"].stage_vec == 1:
                 if case.length_mode == "ragged":
                     kw["thd"] = ThdStorage(base_offset=_NARROW_BASE)
                 else:
-                    kw["inputs"], kw["request"] = narrow_inputs(
+                    kw["inputs"], narrow = narrow_inputs(
                         case, _NARROW_VIEW, _NARROW_BASE
                     )
+                    kw["request"] = {**narrow, **hints}
             try:
                 run = run_case(
                     case,
@@ -140,6 +327,51 @@ class PruneGate:
             if found:
                 probs.append(f"{case.id}: {found[0]}"[:300])
         missing = sorted(timed - exercised)
+        if missing and not probs:
+            probs.append("gate_coverage: " + ",".join(missing))
+        return probs
+
+    def _check_dense(self, arch, cfg, plan, run_cache, cache_dir) -> list:
+        """:meth:`check` of a dense plan (see the module docstring)."""
+        cases = cases_for(plan, getattr(cfg, "runtime", None))
+        if not cases:
+            return ["prune: empty pruning set"]
+        want = dense_identity(plan.specs["dense"])
+        want_dq = dense_dq_identity(plan.specs.get("dense_dq"))
+        # the dense kernels bake the shape (main, and the split dQ kernel)
+        shaped = {s.kernel for s in plan.launches if s.stage in _DENSE_STAGES}
+        timed = {s.kernel for s in plan.launches} - shaped
+        exercised, ran_dense = set(), False
+        probs = []
+        for case in cases:
+            self._load(case, cache_dir)
+            try:
+                p = dense_case_plan(arch, cfg, case)
+                run = run_case(
+                    case,
+                    arch=arch,
+                    config="default",
+                    cache=run_cache,
+                    mutate_plan=lambda _general, p=p: p,
+                )
+            except Exception as ex:  # noqa: BLE001 - a gate failure, not a crash
+                probs.append(f"{case.id}: error {type(ex).__name__}: {ex}"[:300])
+                continue
+            spec = run.plan.specs.get("dense")
+            dq = dense_dq_identity(run.plan.specs.get("dense_dq"))
+            if spec is None or dense_identity(spec) != want or dq != want_dq:
+                probs.append(f"{case.id}: gate_kernel_mismatch")
+                continue
+            ran_dense = True
+            exercised |= {s.kernel for s in run.plan.launches}
+            found = compare_bwd(case, run.dq, run.dk, run.dv, run.ref) + list(
+                run.integrity
+            )
+            if found:
+                probs.append(f"{case.id}: {found[0]}"[:300])
+        missing = sorted(timed - exercised)
+        if not ran_dense:
+            missing.append("dense")
         if missing and not probs:
             probs.append("gate_coverage: " + ",".join(missing))
         return probs

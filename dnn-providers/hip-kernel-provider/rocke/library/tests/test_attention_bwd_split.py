@@ -277,7 +277,6 @@ def test_split_main_resource_gate(arch, var):
     production flavor and comgr (rule 6 with the split register plan: no dQ
     partial in the AGPR-copy budget)."""
     pytest.importorskip("rocke.runtime.comgr")
-    pytest.importorskip("torch")  # torch first: the production comgr
     from rocke.helpers.compile import compile_kernel
 
     from kernels.common.attention_bwd import attn_bwd_arch_facts
@@ -289,8 +288,10 @@ def test_split_main_resource_gate(arch, var):
         current_flavor,
         evaluate_resource_gate,
         find_objdump,
+        pin_production_comgr,
     )
 
+    pin_production_comgr()  # torch's bundled comgr, by path; torch not imported
     if find_objdump() is None:
         pytest.skip("llvm-objdump not found (needed for the q-loop AGPR copy rule)")
     flavor, comgr = current_flavor(), comgr_version()

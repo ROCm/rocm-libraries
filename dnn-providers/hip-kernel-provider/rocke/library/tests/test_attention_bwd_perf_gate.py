@@ -12,6 +12,7 @@ the shipped configuration passes, and a corrupted run is rejected.
 from __future__ import annotations
 
 import dataclasses
+import math
 
 import pytest
 
@@ -111,6 +112,65 @@ def test_sweep_runtime_configs_keep_the_kernel():
         assert p.specs["main"] == plan_spec
 
 
+def _census_splits() -> list[int]:
+    """Every legal ``g_split`` of the census: the divisors of its head groups
+    (the sweep's runtime stage enumerates exactly these)."""
+    groups = {c.hq // c.hkv for c in bb.census_cells(bb.load_census())}
+    return sorted({g for grp in groups for g in range(1, grp + 1) if grp % g == 0})
+
+
+def test_census_head_splits_include_the_ones_beyond_the_gqa_ratio():
+    # 5 and 8 do not divide the pruning set's grouped-query ratio of 4: they
+    # need the rescaled cases (a split of 8 once had an empty pruning set)
+    assert {5, 8} <= set(_census_splits())
+
+
+@pytest.mark.parametrize("g_split", _census_splits())
+@pytest.mark.parametrize("seq_mode", ["batched", "thd"])
+@pytest.mark.parametrize("mask_class", ["band", "none"])
+def test_every_legal_head_split_has_a_pruning_set(g_split, seq_mode, mask_class):
+    """A non-empty pruning set for every legal ``g_split`` (the GQA cases of
+    the set rescaled to a head group of ``g_split`` where 4 does not take it),
+    every case a head group the split divides, unique ids, the tails kept;
+    the sets of ``g_split`` 1, 2 and 4 carry no rescaled case."""
+    dkv = "atomic" if g_split > 1 else "direct"
+    cases = perf_prune_cases(
+        head_size=128, dtype="bf16", mask_class=mask_class, seq_mode=seq_mode,
+        dkv_mode=dkv, g_split=g_split,
+    )  # fmt: skip
+    assert cases, g_split
+    assert len({c.id for c in cases}) == len(cases)
+    lens = {n for c in cases for n in (c.lens()[0] + c.lens()[1])}
+    assert set(PRUNE_TAILS) <= lens
+    for c in cases:
+        group = math.gcd(c.h_q // c.h_k, c.h_q // c.h_v)  # G of the plan
+        assert group % g_split == 0, (c.id, g_split)
+    rescaled = [c for c in cases if "_hq" in c.id]
+    assert bool(rescaled) == (4 % g_split != 0)
+
+
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+@pytest.mark.parametrize("g_split", [s for s in _census_splits() if s > 1])
+def test_head_split_pruning_cases_run_the_timed_main_kernel(arch, g_split):
+    """``cases_for`` of a head-split configuration (the gate's own call) is
+    non-empty for every legal split, and every case plans the timed main
+    kernel (the class: atomic dK / dV of the split)."""
+    sl = sw.primary_slice(arch, "general", 128)
+    c = sw.geometry_stage(sl, sw.Release(frozenset({1}))).candidates[0]
+    x = c.with_runtime(g_split=g_split)
+    plan_spec = sw.legality(x).resolved
+    fake = type("P", (), {"specs": {"main": plan_spec}})()
+    cases = pg.cases_for(fake, x.r)
+    assert cases, g_split
+    for case in cases:
+        p = attn_bwd_plan(
+            request_from_case(case), arch,
+            policy=config_policy("default", arch, {**x.k, **x.r}),
+        )  # fmt: skip
+        assert p.specs["main"] == plan_spec, case.id
+        assert p.runtime["g_split"] == g_split, case.id
+
+
 # --------------------------------------------------------------------------- failure paths
 class _Run:
     def __init__(self, plan, case, bump=0.0, integrity=()):
@@ -162,6 +222,62 @@ def test_gate_failure_paths(monkeypatch, tmp_path):
     )
 
 
+@pytest.mark.parametrize(
+    "runtime",
+    [
+        {"g_split": 1, "lb_order": "mirror"},
+        {"g_split": 2, "lb_order": "mirror", "num_cus": ra.DEVICE_NUM_CUS},
+        {"g_split": 1, "xcd_chunk": "gx", "num_xcds": 8},
+        {"g_split": 1, "lb_order": "mirror", "xcd_chunk": "gx"},
+    ],
+    ids=["mirror", "mirror_sentinel_g2", "xcd", "mirror_xcd"],
+)
+def test_gate_plans_device_hinted_configs(runtime, monkeypatch, tmp_path):
+    """A configuration timed with device hints (mirror pairing, the XCD remap)
+    passes the gate's planning: the hints never reach the policy as knobs,
+    every pruning case resolves the timed main kernel (pairing at
+    ``num_cus = 1``, the remap at the timed XCD count), and a configuration
+    without such levers plans its pruning cases with no hints, as before."""
+    from types import SimpleNamespace
+
+    from . import _attention_bwd_harness as h
+    from .test_attention_bwd_rocke_arm import ARM_B_KNOBS, GFX950_NUM_CUS
+
+    cells = {c.id: c for c in bb.census_cells(bb.load_census())}
+    cell = cells["d128_h32_kv8_b2_q1024_k4096_causal_br_bf16_bshd"]
+    req = ra.request_for_cell(cell, _tensors(cell), scale=ra.scale_of(cell))
+    seen = []
+
+    def run_case(case, *, arch, config, overrides, cache, request=None, **kw):
+        seen.append((dict(overrides), request))
+        p = h.plan_case(
+            case, arch=arch, config=config, overrides=overrides, request=request
+        )
+        return SimpleNamespace(plan=p, dq=None, dk=None, dv=None, ref=None,
+                               integrity=[])  # fmt: skip
+
+    monkeypatch.setattr(pg, "run_case", run_case)
+    monkeypatch.setattr(pg, "compare_bwd", lambda *a: [])
+    for rt in (runtime, {"g_split": runtime["g_split"]}):
+        seen.clear()
+        cfg = ra.RockeConfig("c", ARM_B_KNOBS, rt)
+        hints = ra.request_hints(cfg.runtime, "gfx950", 0, lambda i: GFX950_NUM_CUS)
+        plan = attn_bwd_plan(
+            dataclasses.replace(req, **hints), "gfx950", policy=ra.config_policy(cfg)
+        )
+        assert pg.gate.check("gfx950", cfg, plan, {}, tmp_path) == []
+        assert seen and len(seen) == len(pg.cases_for(plan, rt))
+        want = {}
+        if plan.runtime["xcd_n"]:
+            want["num_xcds"] = 8
+        if plan.runtime["pair"]:
+            want["num_cus"] = 1
+        assert bool(want) == (rt is runtime)
+        for overrides, request in seen:
+            assert not set(overrides) & set(ra.REQUEST_HINTS)
+            assert (request or {}) == want
+
+
 def test_prepare_stores_the_oracles(tmp_path):
     plan = _cfg_plan()
     gate = pg.PruneGate()
@@ -169,6 +285,179 @@ def test_prepare_stores_the_oracles(tmp_path):
     assert n == len(pg.cases_for(plan))
     assert gate.prepare([(ra.SHIPPED, plan)], tmp_path) == 0
     assert len(list(tmp_path.glob("prune-*.pkl"))) == n
+
+
+# --------------------------------------------------------------------------- dense plans
+# The best gfx950 general configuration on the dense route (DMA ring, stats
+# levers) and the register ring on gfx942.
+_DENSE_KNOBS = {
+    "gfx950": {
+        "atom_g02": "16x16x32", "atom_g13": "16x16x16", "atom_g4": "16x16x32",
+        "block_k4": 32, "block_m": 32, "block_n": 128, "pt_route": "relabel",
+        "transpose_source": "tr_read", "warp_grid_g02": (1, 8),
+        "warp_grid_g13": (8, 1), "warp_grid_g4": (2, 4), "waves": 8,
+        "waves_per_eu": 1, "stats_vec": 4, "stats_fma": True,
+        "global_path": "dma", "ring_depth": 2, "head_pack": False,
+        "edge_tiles": False,
+    },
+    "gfx942": {"ring_depth": 2, "head_pack": False},
+}  # fmt: skip
+
+
+# split dQ on the dense route (the dense dQ kernel bakes the shape too)
+_SPLIT = {"dq_mode": "split", "dq_edge_tiles": True}
+
+
+def _dense_cfg(arch, g_split=1, split=False):
+    rt = {"route": "dense", "g_split": g_split}
+    knobs = dict(_DENSE_KNOBS[arch], **(_SPLIT if split else {}))
+    return ra.RockeConfig("dense", knobs, rt)
+
+
+def _dense_cfg_plan(arch, g_split=1, split=False):
+    """A dense plan of the d128 slice's first representative cell."""
+    sl = sw.primary_slice(arch, "dense", 128)
+    cell = sw.dense_cells(sl, sw.representative_cells(sl), 128)[0]
+    cfg = _dense_cfg(arch, g_split, split)
+    c = sw.Candidate.make(sl, dict(cfg.knobs), dict(cfg.runtime))
+    return cfg, sw.dense_plan(c, cell)
+
+
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+@pytest.mark.parametrize("g_split", [1, 2])
+@pytest.mark.parametrize("split", [False, True])
+def test_dense_pruning_cases_rerun_the_timed_configuration(arch, g_split, split):
+    """Dense plans: the pruning set is the dense spec's batched class, every
+    case is dense-eligible and plans a dense spec (and, under split dQ, a
+    dense dQ spec) equal to the timed one in every non-problem field, and the
+    cases exercise every aux kernel the timed plan launches."""
+    cfg, plan = _dense_cfg_plan(arch, g_split, split)
+    assert pg.is_dense(plan)
+    assert ("dense_dq" in plan.specs) == split
+    cases = pg.cases_for(plan, cfg.runtime)
+    assert len(cases) >= 4
+    assert all(c.length_mode != "ragged" and c.d == 128 for c in cases)
+    spec = plan.specs["dense"]
+    assert (spec.dkv_mode == "atomic") == (g_split > 1)
+    want = pg.dense_identity(spec)
+    want_dq = pg.dense_dq_identity(plan.specs.get("dense_dq"))
+    assert (want_dq is None) == (not split)
+    seen = set()
+    for case in cases:
+        p = pg.dense_case_plan(arch, cfg, case)
+        assert pg.dense_identity(p.specs["dense"]) == want, case.id
+        assert pg.dense_dq_identity(p.specs.get("dense_dq")) == want_dq, case.id
+        seen |= {s.kernel for s in p.launches}
+    aux = {s.kernel for s in plan.launches if s.stage not in ("dense", "dense_dq")}
+    assert aux <= seen
+    # the general class of the same knobs is not the dense one (no KeyError)
+    assert pg.cases_for(_cfg_plan(arch)) != ()
+
+
+def test_dense_gate_failure_paths(monkeypatch, tmp_path):
+    cfg, plan = _dense_cfg_plan("gfx950")
+    cases = pg.cases_for(plan, cfg.runtime)
+    gate = pg.PruneGate()
+
+    def runner(bump=0.0, integrity=(), other=False, general=False):
+        def run_case(case, *, arch, config, cache, mutate_plan=None, **kw):
+            assert config == "default" and mutate_plan is not None
+            p = mutate_plan(None)
+            if other:
+                spec = dataclasses.replace(p.specs["dense"], epilogue="direct")
+                p = dataclasses.replace(p, specs={**p.specs, "dense": spec})
+            if general:
+                p = _plan(case, arch, "default")
+            return _Run(p, case, bump, integrity)
+
+        return run_case
+
+    monkeypatch.setattr(pg, "run_case", runner())
+    assert gate.check("gfx950", cfg, plan, {}, tmp_path) == []
+    monkeypatch.setattr(pg, "run_case", runner(bump=1.0))
+    probs = gate.check("gfx950", cfg, plan, {}, tmp_path)
+    assert len(probs) == len(cases) and all("dq" in p for p in probs)
+    monkeypatch.setattr(pg, "run_case", runner(integrity=["dk: tail canary"]))
+    assert gate.check("gfx950", cfg, plan, {}, tmp_path)
+    monkeypatch.setattr(pg, "run_case", runner(other=True))
+    probs = gate.check("gfx950", cfg, plan, {}, tmp_path)
+    assert probs and all(p.endswith("gate_kernel_mismatch") for p in probs)
+    monkeypatch.setattr(pg, "run_case", runner(general=True))
+    probs = gate.check("gfx950", cfg, plan, {}, tmp_path)
+    assert probs and all(p.endswith("gate_kernel_mismatch") for p in probs)
+    # a timed aux kernel no case exercised fails the coverage check
+    monkeypatch.setattr(pg, "run_case", runner())
+    extra = dataclasses.replace(plan.launches[0], kernel=plan.launches[0].kernel + "_x")
+    p2 = dataclasses.replace(plan, launches=plan.launches + (extra,))
+    assert gate.check("gfx950", cfg, p2, {}, tmp_path)[0].startswith("gate_coverage")
+    # a configuration the dense route refuses on the pruning shapes is a
+    # gate failure, not a crash
+    bad = ra.RockeConfig("x", {**cfg.knobs, "head_pack": True}, cfg.runtime)
+    probs = gate.check("gfx950", bad, plan, {}, tmp_path)
+    assert len(probs) == len(cases) and all("head_pack" in p for p in probs)
+
+
+def test_dense_split_gate_checks_the_dense_dq_spec(monkeypatch, tmp_path):
+    """Split dQ: a pruning case that resolves another dense dQ spec than the
+    timed one (or none) is a kernel mismatch; the timed dense dQ kernel
+    (shape-baked) is not an aux kernel the coverage check asks for."""
+    cfg, plan = _dense_cfg_plan("gfx950", split=True)
+    gate = pg.PruneGate()
+
+    def runner(mutate=None):
+        def run_case(case, *, arch, config, cache, mutate_plan=None, **kw):
+            p = mutate_plan(None)
+            if mutate is not None:
+                p = mutate(p)
+            return _Run(p, case, 0.0, ())
+
+        return run_case
+
+    monkeypatch.setattr(pg, "run_case", runner())
+    assert gate.check("gfx950", cfg, plan, {}, tmp_path) == []
+
+    def other_dq(p):
+        dq = p.specs["dense_dq"]
+        dq = dataclasses.replace(dq, dq=dataclasses.replace(dq.dq, kv_prefetch=True))
+        return dataclasses.replace(p, specs={**p.specs, "dense_dq": dq})
+
+    def no_dq(p):
+        return dataclasses.replace(
+            p, specs={k: v for k, v in p.specs.items() if k != "dense_dq"}
+        )
+
+    for mutate in (other_dq, no_dq):
+        monkeypatch.setattr(pg, "run_case", runner(mutate))
+        probs = gate.check("gfx950", cfg, plan, {}, tmp_path)
+        assert probs and all(p.endswith("gate_kernel_mismatch") for p in probs)
+
+
+def test_dense_prepare_compiles_the_pruning_kernels(monkeypatch, tmp_path):
+    """prepare stores the oracles and compiles every dense pruning kernel
+    into the job's gate code-object cache (unless one is configured)."""
+    import os
+
+    from kernels.common import attention_bwd_run
+
+    cfg, plan = _dense_cfg_plan("gfx942")
+    seen = []
+
+    def fake(p, *, cache=None):
+        seen.append((p.specs["dense"].kernel_name(), os.environ.get(pg._HSACO_ENV)))
+        return {}
+
+    monkeypatch.setattr(attention_bwd_run, "attn_bwd_kernels", fake)
+    monkeypatch.delenv(pg._HSACO_ENV, raising=False)
+    n = pg.PruneGate().prepare([(cfg, plan)], tmp_path)
+    cases = pg.cases_for(plan, cfg.runtime)
+    assert n == len(cases)
+    assert len(seen) == len(cases)
+    assert {e for _, e in seen} == {str(tmp_path / "gate-hsaco")}
+    assert pg._HSACO_ENV not in os.environ
+    seen.clear()
+    monkeypatch.setenv(pg._HSACO_ENV, str(tmp_path / "shared"))
+    pg.PruneGate().prepare([(cfg, plan)], tmp_path)
+    assert {e for _, e in seen} == {str(tmp_path / "shared")}
 
 
 # --------------------------------------------------------------------------- device
@@ -202,3 +491,38 @@ def test_gate_on_device_passes_the_shipped_config_and_rejects_a_bad_kernel(
 
     monkeypatch.setattr(pg, "run_case", bad)
     assert gate.check(ARCH, ra.SHIPPED, plan, cache, tmp_path)
+
+
+@pytest.mark.gpu
+@pytest.mark.skipif(
+    ARCH not in ("gfx942", "gfx950"), reason=f"no dense backward device ({ARCH})"
+)
+@pytest.mark.parametrize("g_split", [1, 2])
+@pytest.mark.parametrize("split", [False, True])
+def test_dense_gate_on_device_passes_the_ring_config_and_rejects_a_bad_kernel(
+    tmp_path, monkeypatch, g_split, split
+):
+    from . import _attention_bwd_harness as h
+
+    monkeypatch.delenv(pg._HSACO_ENV, raising=False)
+    cfg, plan = _dense_cfg_plan(ARCH, g_split, split)
+    gate = pg.PruneGate()
+    gate.prepare([(cfg, plan)], tmp_path)
+    assert list((tmp_path / "gate-hsaco").iterdir())  # the kernels were cached
+    cache: dict = {}
+    assert gate.check(ARCH, cfg, plan, cache, tmp_path) == []
+    # negative controls: the dense kernel (or, under split, the dense dQ
+    # kernel) launched with a wrong scale kernarg
+    real = h.run_case
+    for stage in ("dense", "dense_dq") if split else ("dense",):
+
+        def bad(case, mutate_plan=None, stage=stage, **kw):
+            def mutate(p):
+                return h._replace_launch(
+                    mutate_plan(p), stage, scalars={"ds_mult": 0.5}
+                )
+
+            return real(case, mutate_plan=mutate, **kw)
+
+        monkeypatch.setattr(pg, "run_case", bad)
+        assert gate.check(ARCH, cfg, plan, cache, tmp_path), stage

@@ -729,6 +729,38 @@ def test_aa_control_flags_a_copy_that_differs():
     assert bb.aa_control(broken, k) == "incomplete"
 
 
+def test_aa_controls_judge_every_twin():
+    """``--aa-control all``: a twin per configuration, a verdict per arm, and
+    the cell's control fails when any twin fails (incomplete before ok)."""
+    k = {"BAND_K": 2.0, "TIE_EPS": 0.005, "RERUN_MAX": 2}
+    same = [1.0, 1.01, 0.99, 1.0, 1.02]
+    slow = [1.3, 1.31, 1.29, 1.3, 1.32]
+    s = _summary_with(same, same)
+    s["arms"]["rocke|y"] = {"status": "ok", "attempt_medians_ms": same}
+    s["arms"]["rocke|y#aa"] = {"status": "ok", "attempt_medians_ms": slow}
+    assert bb.aa_controls(s, k) == {"rocke|x": "ok", "rocke|y": "fail"}
+    assert bb.aa_control(s, k) == "fail"
+    s["arms"]["rocke|y#aa"] = {"status": "error"}
+    assert bb.aa_controls(s, k)["rocke|y"] == "incomplete"
+    assert bb.aa_control(s, k) == "incomplete"
+    s["arms"]["rocke|y#aa"] = {"status": "ok", "attempt_medians_ms": same}
+    assert bb.aa_control(s, k) == "ok"
+
+
+def test_rocke_arms_add_the_twins():
+    cfgs = [type("C", (), {"label": n})() for n in ("x", "y")]
+    arms, by = bb.rocke_arms(cfgs, "on")
+    assert arms == ["rocke|x", "rocke|y", "rocke|x#aa"]
+    assert by["rocke|x#aa"] is cfgs[0]
+    arms, by = bb.rocke_arms(cfgs, "all")
+    assert arms == ["rocke|x", "rocke|y", "rocke|x#aa", "rocke|y#aa"]
+    assert by["rocke|y#aa"] is cfgs[1]
+    assert bb.rocke_arms(cfgs, "off")[0] == ["rocke|x", "rocke|y"]
+    assert bb.rocke_arms([], "all") == ([], {})
+    with pytest.raises(ValueError):
+        bb.rocke_arms(cfgs, "both")
+
+
 def test_aa_arm_never_gets_a_verdict_and_flags_the_token():
     assert bb.is_aa_arm("rocke|x#aa") and not bb.is_aa_arm("rocke|x")
     s = {"verdict": "pass", "flagged": True}
@@ -761,3 +793,4 @@ def test_parser_has_the_aa_control_flag_and_forwards_it():
     args = bb.make_parser().parse_args([])
     assert args.aa_control == "on"
     assert bb.make_parser().parse_args(["--aa-control", "off"]).aa_control == "off"
+    assert bb.make_parser().parse_args(["--aa-control", "all"]).aa_control == "all"

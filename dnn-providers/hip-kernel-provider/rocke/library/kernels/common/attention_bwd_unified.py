@@ -159,6 +159,14 @@ _SHELL_KNOBS = {
     "ptr_noalias": False,
     "dkv_slab_hoist": False,
     "lb_mirror": False,
+    # its own epilogues, stats view and addressing (the paged shell): the slice
+    # sink, the buffer-bounded stats, the per-slot quad epilogue, the access
+    # width cap and the carried slab offsets are the general shell's
+    "dkv_sink": "atomic",
+    "ws_bounds": "clamp",
+    "dkv_cell_vec": 1,
+    "narrow_vec": 1,
+    "slab_carry": False,
 }
 # The tile / residency / path / schedule / codegen knobs shared with the
 # general family (field names of AttnBwdUnifiedSpec).

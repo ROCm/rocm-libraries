@@ -7,7 +7,8 @@ overrides plus runtime plan values, labelled. For a census cell it
 
 1. builds the capability request from the very tensors the competitor arms
    use (Q, K, V, dO), with O (cast to the I/O dtype) and the natural-log LSE
-   of the fixed fp32 reference forward of the cell;
+   of the fixed fp32 reference forward of the cell, and the device hints
+   ``num_cus`` / ``num_xcds`` (:func:`request_hints`);
 2. plans it with a policy that declares every functional group, waives the
    (not yet measured) performance status and returns the configuration's
    knobs through the tuning hook, so the plan resolves exactly the spec that
@@ -32,6 +33,7 @@ import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any
 
 CANARY_ELEMS = 256  # gradient elements after every output buffer
@@ -45,18 +47,45 @@ SPEC_FIXED_FIELDS = ("head_size", "dtype", "seq_mode", "dkv_mode", "stage_vec")
 # (``xcd_chunk``) need the request's XCD count.
 REQUEST_HINTS = ("num_xcds", "num_cus")
 # A ``num_cus`` hint of this value is the CU count of the device the arm runs
-# on (mirror pairing pairs only a grid that fills the device).
+# on (mirror pairing needs a grid that overfills the device).
 DEVICE_NUM_CUS = "device"
+# XCDs per device as the runtime exposes a CDNA target (whole-device
+# partition; rocke.helpers.grid NUM_XCDS_*): the default ``num_xcds`` hint.
+DEVICE_NUM_XCDS = MappingProxyType({"gfx942": 8, "gfx950": 8})
 
 
-def _device_num_cus(device) -> int:
-    """CU count of a torch device (``Unsupported`` when it cannot be read)."""
+def _read_num_cus(device_index: int) -> int | None:
     from rocke.runtime.hip_module import get_device_num_cus
 
-    n = get_device_num_cus(int(device.index or 0))
-    if not n:
-        raise Unsupported("the device CU count (num_cus hint) is not readable")
-    return int(n)
+    return get_device_num_cus(int(device_index))
+
+
+def request_hints(
+    runtime: Mapping[str, Any], arch: str, device_index: int = 0, read_num_cus=None
+) -> dict:
+    """Device hints of an arm's request (``AttnBwdRequest`` fields).
+
+    A configuration's own ``num_cus`` / ``num_xcds`` win; ``num_cus =
+    DEVICE_NUM_CUS`` is the device's CU count and fails (``Unsupported``) when
+    it cannot be read. Without a value the arm passes the device's CU count
+    (when readable) and the XCD count of ``arch`` (:data:`DEVICE_NUM_XCDS`),
+    so mirror pairing and the XCD remap plan as on the device. ``None`` keeps
+    a hint absent. Neither hint changes a plan that does not ask for pairing,
+    the remap or a persistent grid.
+    """
+    read = _read_num_cus if read_num_cus is None else read_num_cus
+    hints = {k: runtime[k] for k in REQUEST_HINTS if k in runtime}
+    if hints.get("num_cus") == DEVICE_NUM_CUS:
+        n = read(device_index)
+        if not n:
+            raise Unsupported("the device CU count (num_cus hint) is not readable")
+        hints["num_cus"] = int(n)
+    elif "num_cus" not in hints:
+        n = read(device_index)
+        hints["num_cus"] = int(n) if n else None
+    if "num_xcds" not in hints:
+        hints["num_xcds"] = DEVICE_NUM_XCDS.get(arch)
+    return {k: v for k, v in hints.items() if v is not None}
 
 
 class Unsupported(Exception):
@@ -282,9 +311,7 @@ class RockeArm:
             tensors["seq_len_q"] = torch.tensor(lq, dtype=torch.int32, device=q.device)
             tensors["seq_len_kv"] = torch.tensor(lk, dtype=torch.int32, device=q.device)
         req = request_for_cell(cell, tensors, scale=problem.scale)
-        hints = {k: config.runtime[k] for k in REQUEST_HINTS if k in config.runtime}
-        if hints.get("num_cus") == DEVICE_NUM_CUS:
-            hints["num_cus"] = _device_num_cus(q.device)
+        hints = request_hints(config.runtime, arch, int(q.device.index or 0))
         if hints:
             req = replace(req, **hints)
         # runtime "route": "dense" plans the dense family (its knobs in
@@ -371,6 +398,8 @@ class RockeArm:
             "workspace_bytes": self.plan.workspace_bytes,
             # performance class + kv-tile and grid-fill buckets of the request
             "tuning_key": list(self.plan.tuning_key),
+            # device hints the request carried (num_cus / num_xcds)
+            "request_hints": {k: getattr(self.request, k) for k in REQUEST_HINTS},
         }
 
     def run(self):

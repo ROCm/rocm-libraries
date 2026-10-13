@@ -46,8 +46,11 @@ offsets); :func:`load_frag_lds` accepts it in place of a 2-D allocation.
 :func:`load_frag_lds_tr16` reads a K-outer operand with the gfx950
 ``ds_read_tr16_b64`` (64-bit form only): each lane passes its own address
 (:func:`tr16_lane_address`), and the delivered coordinates
-(:func:`tr16_model_coords`) are proved equal to the catalog operand map at
-build time.
+(:func:`tr16_model_coords`) are proved equal to the operand map at build
+time. :func:`tr16_read_plan` picks the address plan: the catalog plan of the
+atom, or, for a K-permuted B operand of a 16x16x32 consumer, the *stacked*
+plan (two catalog 16x16x16 B reads at K offsets 0 and 16), which delivers
+exactly the permuted map (:class:`Tr16ReadPlan`).
 """
 
 from __future__ import annotations
@@ -69,6 +72,8 @@ __all__ = [
     "RelabelPlan",
     "XorLdsView",
     "atom_facts",
+    "c_quad_transposable",
+    "c_row_runs",
     "check_tr16_coords",
     "emit_c_to_a",
     "eval_layout",
@@ -80,8 +85,12 @@ __all__ = [
     "plan_c_to_a",
     "simulate_relabel",
     "slab_offset",
+    "Tr16ReadPlan",
     "tr16_lane_address",
     "tr16_model_coords",
+    "tr16_plan_address",
+    "tr16_plan_coords",
+    "tr16_read_plan",
 ]
 
 
@@ -178,6 +187,40 @@ class AtomFacts:
     affine: bool  # every role: slot coord = slot-0 coord + lane-independent delta
     c_is_aT: bool  # one C tile is the A fragment of the transposed product
     ab_same_k: bool  # A and B carry the same K index in every lane and slot
+
+
+def c_row_runs(op: MmaOp, run: int = 4) -> bool:
+    """Whether every lane's C slots are runs of ``run`` consecutive rows of
+    one column (slot ``s``: row ``r0 + s``, the same column), with the
+    fragment a whole number of runs: the per-row stats of a run are one
+    ``run``-float vector (the MFMA 16 x 16 C layouts, the gfx12 WMMA one)."""
+    if op.c_frag_len % run:
+        return False
+    for lane_coords in _eval(op, "c"):
+        r0, c0 = lane_coords[0]
+        if any(c != (r0 + s, c0) for s, c in enumerate(lane_coords)):
+            return False
+    return True
+
+
+def c_quad_transposable(op: MmaOp) -> bool:
+    """Whether a 4 x 4 transpose inside each lane quad turns the C fragment
+    into rows: every lane holds 4 consecutive rows of one column (``c_row_runs``
+    with a 4-slot fragment), and the 4 lanes of a quad share those rows and
+    hold 4 consecutive columns starting at a multiple of 4. After the
+    transpose lane ``j`` of the quad holds row ``r0 + j`` at the quad's 4
+    columns."""
+    if op.c_frag_len != 4 or not c_row_runs(op, 4) or op.wave_size % 4:
+        return False
+    ev = _eval(op, "c")
+    for q in range(0, op.wave_size, 4):
+        r0, c0 = ev[q][0]
+        if c0 % 4:
+            return False
+        for j in range(4):
+            if ev[q + j][0] != (r0, c0 + j):
+                return False
+    return True
 
 
 def _contig(op: MmaOp, role: str) -> bool:
@@ -1064,6 +1107,98 @@ def check_tr16_coords(coords: FragCoords) -> int:
     return kpl
 
 
+@dataclass(frozen=True)
+class Tr16ReadPlan:
+    """Per-lane address plan of the ``ds_read_tr16_b64`` reads of a fragment.
+
+    Read ``t`` of lane ``l`` addresses K row ``g_stride * (l // 16) +
+    (l % 16) // 4 + k_offsets[t]`` and column ``4 * (l % 4)`` of a K-outer
+    tile (:func:`tr16_plan_address`). ``"catalog"``: ``g_stride`` is the
+    fragment length and ``k_offsets`` is ``(0, 4)`` cut to the read count
+    (the catalog 16x16x16 / 16x16x32 maps, :func:`tr16_lane_address`).
+    ``"stacked"``: ``g_stride = 4`` and ``k_offsets = (0, 16)``: two catalog
+    16x16x16 B reads, 16 K rows apart, which is the K-permuted B operand of a
+    16x16x32 consumer of a relabelled accumulator (:func:`kperm_b_coords`).
+    """
+
+    kind: str
+    g_stride: int
+    k_offsets: tuple[int, ...]
+
+    def __post_init__(self) -> None:
+        if self.kind not in ("catalog", "stacked"):
+            raise ValueError(f"unknown transpose-read plan kind {self.kind!r}")
+        if self.g_stride < 1 or not self.k_offsets:
+            raise ValueError(f"illegal transpose-read plan {self}")
+
+
+def _catalog_plan(frag_len: int) -> Tr16ReadPlan:
+    return Tr16ReadPlan("catalog", frag_len, (0, 4)[: frag_len // 4])
+
+
+_STACKED_PLAN = Tr16ReadPlan("stacked", 4, (0, 16))
+
+
+def tr16_plan_address(lane: int, t: int, plan: Tr16ReadPlan) -> tuple[int, int]:
+    """``(k, mn)`` offset that lane ``lane`` supplies for read ``t`` of ``plan``."""
+    return (
+        plan.g_stride * (lane // 16) + (lane % 16) // 4 + plan.k_offsets[t],
+        (lane % 4) * 4,
+    )
+
+
+def tr16_plan_coords(lane: int, plan: Tr16ReadPlan) -> tuple[tuple[int, int], ...]:
+    """``(mn, k)`` the reads of ``plan`` deliver to ``lane`` (hardware model of
+    :func:`tr16_model_coords` with the plan's per-lane addresses)."""
+    g, j = divmod(lane, 16)
+    out = []
+    for t in range(len(plan.k_offsets)):
+        for r in range(4):
+            k, mn = tr16_plan_address(16 * g + 4 * r + j // 4, t, plan)
+            out.append((mn + j % 4, k))
+    return tuple(out)
+
+
+@cache
+def _tr16_plan_proved(plan: Tr16ReadPlan, per_lane: tuple) -> bool:
+    return all(
+        tr16_plan_coords(lane, plan) == per_lane[lane] for lane in range(len(per_lane))
+    )
+
+
+def tr16_read_plan(coords: FragCoords) -> Tr16ReadPlan:
+    """The transpose-read plan that delivers ``coords``, proved on every lane.
+
+    The catalog plan of the fragment length is tried first; a K-permuted
+    16x16x32 B map (``coords.kperm``) may take the stacked plan, whose K
+    offsets are read off lane 0 and must be ``(0, 16)``. Raises
+    :class:`ValueError` (as :func:`check_tr16_coords`) for a wave size other
+    than 64, a fragment that is not 4 or 8 elements, or a map neither plan
+    delivers on every lane and slot.
+    """
+    n = coords.frag_len
+    if coords.wave_size != 64 or n not in (4, 8):
+        raise ValueError(
+            f"ds_read_tr16_b64 needs a wave64 fragment of 4 or 8 elements "
+            f"(got {n} on wave{coords.wave_size})"
+        )
+    per_lane = tuple(coords.int_coords(lane) for lane in range(coords.wave_size))
+    plan = _catalog_plan(n)
+    if _tr16_plan_proved(plan, per_lane):
+        return plan
+    if coords.kperm and n == 8:
+        offsets = tuple(per_lane[0][4 * t][1] for t in range(n // 4))
+        if offsets == _STACKED_PLAN.k_offsets and _tr16_plan_proved(
+            _STACKED_PLAN, per_lane
+        ):
+            return _STACKED_PLAN
+    raise ValueError(
+        "the ds_read_tr16_b64 lane map does not deliver this operand's "
+        "coordinates (neither the catalog nor the stacked K-permuted plan); "
+        "use the plain K-outer reader"
+    )
+
+
 def load_frag_lds_tr16(
     b: IRBuilder,
     coords: FragCoords,
@@ -1080,17 +1215,18 @@ def load_frag_lds_tr16(
     The tile is stored ``smem[k][mn]`` (mn contiguous). One 64-bit transpose
     read per 4 K values (K = 32 fragments take two reads, concatenated in slot
     order); the 128-bit form is never used. Every lane passes its *own*
-    address (:func:`tr16_lane_address`). Raises :class:`ValueError` before any
-    IR is emitted when ``arch`` has no 64-bit transpose read, the fragment map
-    is not the one the read delivers, or a lane's 8-byte read could be
-    misaligned.
+    address (:func:`tr16_plan_address` of the plan :func:`tr16_read_plan`
+    proves for ``coords``: the catalog plan, or the stacked plan of a
+    K-permuted B operand). Raises :class:`ValueError` before any IR is emitted
+    when ``arch`` has no 64-bit transpose read, no plan delivers the fragment
+    map, or a lane's 8-byte read could be misaligned.
     """
     from ._attention_bwd_caps import check_transpose_read
 
     check_transpose_read(arch, 64)
     if not isinstance(smem, LdsView):
         raise ValueError("the transpose-read loader needs an LdsView")
-    kpl = check_tr16_coords(coords)
+    plan = tr16_read_plan(coords)
     if smem.scale != 1 or smem.base % 4 or smem.pitch % 4:
         raise ValueError("transpose reads need a 16-bit view with origin and pitch % 4")
     if isinstance(mn0, int) and mn0 % 4:
@@ -1099,14 +1235,14 @@ def load_frag_lds_tr16(
     c16 = b.const_i32(16)
     g = b.div(lane, c16)
     j = b.mod(lane, c16)
-    row_l = b.add(b.mul(g, b.const_i32(kpl)), b.div(j, b.const_i32(4)))
+    row_l = b.add(b.mul(g, b.const_i32(plan.g_stride)), b.div(j, b.const_i32(4)))
     col_l = b.mul(b.mod(j, b.const_i32(4)), b.const_i32(4))
     if not (isinstance(k0, int) and k0 == 0):
         row_l = b.add(row_l, _c(b, k0))
     if not (isinstance(mn0, int) and mn0 == 0):
         col_l = b.add(col_l, _c(b, mn0))
     reads = []
-    for t in range(kpl // 4):
-        row = b.add(row_l, b.const_i32(4 * t)) if t else row_l
+    for off in plan.k_offsets:
+        row = b.add(row_l, b.const_i32(off)) if off else row_l
         reads.append(smem.tr16_load(b, row, col_l, dtype=elem))
     return _assemble(b, reads, elem)

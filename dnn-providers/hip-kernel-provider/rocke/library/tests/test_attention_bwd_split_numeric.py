@@ -23,8 +23,9 @@ untouched THD storage):
   interior key tiles, the K / V register prefetch, a K / V row pad, another
   wave count, block size or key
   tile, the plain transpose read, the occupancy and register-allocation
-  hints, the XCD remap and the one-binary ``static_scale = "runtime"``
-  kernel; ``stats_prescale = False``, the narrow G0' atom, the K-permuted
+  hints, the XCD remap, the one-binary ``static_scale = "runtime"`` kernel
+  and the key step's schedule values (``dq_sched``: hints only);
+  ``stats_prescale = False``, the narrow G0' atom, the K-permuted
   G4' atom and the scale placements round differently (oracle only);
 * ``test_split_dead_row_select_is_load_bearing``: with a NaN ``Dsum`` on
   dead rows (prep's gate bypassed), the dQ kernel without the ``lse2 <
@@ -97,7 +98,9 @@ def _shard() -> tuple[int, int]:
 def _check_split_plan(plan) -> None:
     stages = [s.stage for s in plan.launches]
     assert stages[:3] == ["prep", "main", "dq"], stages
-    assert stages[3:] == ["convert"] * (len(stages) - 3)
+    # the dK / dV converts are slice reduces under dkv_sink = "slices"
+    kv = "reduce" if plan.runtime.get("dkv_sink") == "slices" else "convert"
+    assert stages[3:] == [kv] * (len(stages) - 3)
     assert len(stages) == (5 if plan.specs["main"].dkv_mode == "atomic" else 3)
     assert "WS_DQ" not in plan.workspace_layout
     prep, main, dq = plan.launches[:3]
@@ -145,7 +148,11 @@ def test_split_table_case(case, config):
     split = _split_run(case, config)
     if split.plan.specs["main"].dkv_mode != "direct":
         return
-    atomic = run_case(case, arch=ARCH, config=config)
+    # atomic dQ set explicitly: a configuration may split dQ itself (a custom
+    # one); a twin it cannot take skips with the validator's reason
+    atomic_ov = {"dq_mode": "atomic"}
+    skip_unless_planned(case, arch=ARCH, config=config, overrides=atomic_ov)
+    atomic = run_case(case, arch=ARCH, config=config, overrides=atomic_ov)
     assert atomic.plan.specs["main"].dq_mode == "atomic"
     _passes(atomic)
     assert np.array_equal(split.dk, atomic.dk), "dK differs from the atomic-dQ run"
@@ -227,6 +234,25 @@ DQ_KNOB_VARIANTS = {
     "xcd8_gx": ({"dq_xcd_chunk": "gx"}, {"num_xcds": 8}, None, True),
     "xcd8_64": ({"dq_xcd_chunk": 64}, {"num_xcds": 8}, None, True),
     "static_runtime": ({"static_scale": "runtime"}, None, None, True),
+    # the key step's schedule values (hints only: the same MMA chains)
+    "dq_iglp0": ({"dq_sched": "iglp0"}, None, None, True),
+    "dq_iglp1": ({"dq_sched": "iglp1"}, None, None, True),
+    "dq_fences": ({"dq_sched": "fences_only"}, None, None, True),
+    "dq_st": ({"dq_sched": "stage_table"}, None, None, True),
+    "dq_stp": ({"dq_sched": "stage_table_setprio"}, None, None, True),
+    "dq_st_prefetch": (
+        {"dq_sched": "stage_table", "dq_kv_prefetch": True},
+        None,
+        None,
+        True,
+    ),
+    "dq_stp_group_edge": (
+        {"dq_sched": "stage_table_setprio", "dq_head_loop": "group",
+         "dq_edge_tiles": True},
+        None,
+        None,
+        True,
+    ),  # fmt: skip
     "no_prescale": ({"dq_stats_prescale": False}, None, None, False),
     "atom02_16": ({"dq_atom_g02": "16x16x16"}, None, ("gfx950",), False),
     "atom4_32": (

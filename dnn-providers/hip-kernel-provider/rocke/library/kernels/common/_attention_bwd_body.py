@@ -49,7 +49,13 @@ G1, G3 and G4 issue in the order of ``stage_order`` (default ``"g1g3g4"``;
 for example ``"g4g1g3"`` issues G4 and its atomics right after dS is
 published, so they overlap the G1 / G3 matrix ops). Each accumulator's MMA
 chain is unchanged by the order, so dK, dV and every dQ partial are bit for
-bit those of the default order.
+bit those of the default order. Under the inline-asm G1 / G3 route
+(``agpr_route = "asm_g13"``) with ``asm_load_hoist`` the LDS operands of the
+second of G1 / G3 are read before the first one's asm cluster (the asm block
+is a scheduling barrier for memory operations, so the backend cannot do it);
+the MMAs and their operands are unchanged. Every asm cluster opens with the
+ISA's VALU-to-MFMA lead wait states (``BlockGemm.mma``), which the backend
+cannot insert for an MFMA it does not see.
 
 Barriers per q step: three by default (Q / dO staged, dS visible before G4,
 step end). ``barrier_merge = "on"`` (relabel route, ``ring_depth = 2``) keeps
@@ -65,7 +71,13 @@ tables add ``sched_group_barrier`` groups per stage, and
 ``stage_table_atomics`` defers each step's dQ atomics to stage A of the next
 step (the partial is loop-carried; :meth:`BwdTileStep.flush_dq` issues the
 last one after the loops). Only placement changes: every value is the
-default's.
+default's. With a ring (the prefetch ring of ``_attention_bwd_ring`` or the
+merged barrier) the fenced stats come from the ring's slot and a stage table
+issues the register rings' prefetch loads in stage A; the DMA copy stays at
+the step top and its waits keep their immediates (the deferred atomics are
+as many VMEM operations after the copy as the step's own). The split-dQ main
+kernel (no G4) runs stages A, B and C, C closing the step (no fence after
+it); ``stage_table_atomics`` is refused there (no atomics to defer).
 
 Edge and interior steps: an edge step applies the mask policy's per-cell keep
 through per-row key limits (one compare per cell; the dead-row term
@@ -102,8 +114,9 @@ the IR does; barriers separate the phases.
 Build-time facts: every atom's A / B / C lane maps are evaluated for every
 lane and slot and must be contiguous along K and affine; the relabel route is
 proved per atom pair; the transpose read is proved against the catalog
-operand map. An illegal geometry raises :class:`ValueError` before any IR is
-emitted.
+operand map, or, for the K-permuted G1 / G3 B of a 16x16x32 consumer, against
+the stacked K-permuted plan (two 16x16x16 B reads 16 K rows apart). An
+illegal geometry raises :class:`ValueError` before any IR is emitted.
 
 Hazard structure (checked by the IR tests): the q-loop trip count is
 ``readfirstlane``'d, the empty-band exit (trip count 0) is decided before any
@@ -117,7 +130,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from functools import cached_property
 
-from rocke.core.ir import F32, IRBuilder, Value, VectorType
+from rocke.core.ir import F32, I32, IRBuilder, Value, VectorType
 
 from ._attention_bwd_addr import (
     PackedRows,
@@ -144,6 +157,7 @@ from ._attention_bwd_frag import (
     check_tr16_coords,
     ir_type,
     operand_coords,
+    tr16_read_plan,
 )
 from ._attention_bwd_gemm import (
     BlockGemm,
@@ -154,7 +168,13 @@ from ._attention_bwd_gemm import (
 )
 from ._attention_bwd_lds import DKV_EPILOGUES, LdsPlan, default_xt_writer
 from ._attention_bwd_sched import _G4_SLICINGS as _SCHED_G4_SLICINGS
-from ._attention_bwd_sched import FENCED_SCHEDS, STAGE_TABLE_SCHEDS, StageTable
+from ._attention_bwd_sched import (
+    COUNTED_LATE_DEFERRED,
+    FENCED_SCHEDS,
+    SPLIT_DEFERRED,
+    STAGE_TABLE_SCHEDS,
+    StageTable,
+)
 from ._attention_bwd_sinks import DqSink, DqSlot, PendingDq
 from ._attention_bwd_valu import (
     batched_stats_rows,
@@ -309,6 +329,7 @@ class BwdTileGeometry:
     stage_vec: int = 8
     asm_tail_nop: int | None = None
     asm_cluster: str = "k_step"
+    asm_load_hoist: bool = False
     stage_order: str = DEFAULT_STAGE_ORDER
     loop_sync: str = "full"
     dkv_epilogue: str = "lds_staged"
@@ -371,6 +392,7 @@ class BwdTileGeometry:
             stage_vec=spec.stage_vec,
             asm_tail_nop=getattr(spec, "asm_tail_nop", None),
             asm_cluster=getattr(spec, "asm_cluster", "k_step"),
+            asm_load_hoist=bool(getattr(spec, "asm_load_hoist", False)),
             stage_order=getattr(spec, "stage_order", DEFAULT_STAGE_ORDER),
             loop_sync=getattr(spec, "loop_sync", "full"),
             dkv_epilogue=epilogue,
@@ -490,10 +512,17 @@ class BwdTileGeometry:
                     f"{g.op.op_id}: lane maps are not K-contiguous and affine "
                     f"({facts}); this geometry cannot be built on {self.arch}"
                 )
-        _ = self.relabel_plan  # proves the relabel (raises when illegal)
+        plan = self.relabel_plan  # proves the relabel (raises when illegal)
+        if plan is not None and plan.needs_k_perm and not self.b13_coords.kperm:
+            raise ValueError(
+                "the relabel permutes the G1 / G3 K order; their B operand must "
+                "be loaded with the same permutation"
+            )
         if self.reader == "tr16":
             check_transpose_read(self.arch, 64)
-            check_tr16_coords(self.b13_coords)
+            # the G1 / G3 B may be K-permuted (16x16x32 consumer of the
+            # relabel): the stacked plan; every other operand is a catalog map
+            tr16_read_plan(self.b13_coords)
             check_tr16_coords(operand_coords(self.g4.op, "b"))
             if self.pt_route == "lds":
                 check_tr16_coords(operand_coords(self.g1.op, "a"))
@@ -513,6 +542,10 @@ class BwdTileGeometry:
             raise ValueError("acc_in_lds has no dK / dV staging buffer to pair")
         if self.dq_issue not in ("block", "fragment", "fragment_regs"):
             raise ValueError(f"dq_issue={self.dq_issue!r} is not built in this body")
+        if self.asm_load_hoist and (self.agpr_route != "asm_g13" or self.acc_in_lds):
+            raise ValueError(
+                "asm_load_hoist needs the asm_g13 route with register accumulators"
+            )
         if self.bf16_cast != "generic" and self.dtype != "bf16":
             raise ValueError(f"bf16_cast={self.bf16_cast!r} needs dtype='bf16'")
         if self.stats_vec != 1:
@@ -538,27 +571,17 @@ class BwdTileGeometry:
 
     def _check_sched(self) -> None:
         """A schedule value (``sched`` other than ``none``, ``setprio``) runs
-        on the synchronous body: its stage table models that body's per-stage
-        operations (Q / dO staged into one buffer each step, three barriers,
-        G4 and its dQ atomics in the step). The ring / prefetch bodies and the
-        split-dQ main kernel (no G4) are not modelled."""
+        on the bodies its stage table models: the synchronous step, the Q /
+        dO prefetch ring (register or DMA path), the merged-barrier ring and
+        the counted waits (``StageTable.pipeline``), with G4 and its dQ
+        atomics in the step or, for the split-dQ main kernel (no G4), as the
+        stages A..C. ``stage_table_atomics`` defers the dQ atomics: the
+        split-dQ main kernel has none (``SPLIT_DEFERRED``); the counted late
+        issue is refused by :meth:`_check_counted`."""
         if self.sched == "none" and not self.setprio:
             return
-        if (
-            self.barrier_merge != "off"
-            or self.ring_depth != 1
-            or self.global_path != "vgpr"
-        ):
-            raise ValueError(
-                f"sched={self.sched!r} / setprio={self.setprio!r} needs the "
-                "synchronous body: barrier_merge='off', ring_depth=1 and "
-                "global_path='vgpr'"
-            )
-        if self.dq_mode != "atomic":
-            raise ValueError(
-                f"sched={self.sched!r} / setprio={self.setprio!r} needs "
-                "dq_mode='atomic' (the stage table models G4 and its dQ atomics)"
-            )
+        if self.dq_mode != "atomic" and self.sched == "stage_table_atomics":
+            raise ValueError(SPLIT_DEFERRED)
 
     @property
     def counted_atomics(self) -> int:
@@ -584,8 +607,8 @@ class BwdTileGeometry:
                 "loop_sync='counted' owns the next-step loads: it needs "
                 "global_path='vgpr' and ring_depth=1"
             )
-        if self.sched != "none" or self.setprio:
-            raise ValueError("loop_sync='counted' needs sched='none' (no stage table)")
+        if self.sched == "stage_table_atomics" and self.counted_issue == "late":
+            raise ValueError(COUNTED_LATE_DEFERRED)
         if (self.qdo_stage, self.stats_load) != ("split", "at_use"):
             raise ValueError(
                 "loop_sync='counted' owns the Q / dO and stats issue order: it needs "
@@ -634,6 +657,32 @@ class BwdTileGeometry:
 # ---------------------------------------------------------------------------
 # LDS realisation: one flat allocation, views at the planner's offsets
 # ---------------------------------------------------------------------------
+
+
+def quad_transpose4(b: IRBuilder, vals: Sequence[Value], lane: Value) -> list[Value]:
+    """4 x 4 transpose of fp32 values inside each lane quad.
+
+    Lane ``j`` (``lane mod 4``) holds ``a_j[0..3]``; it returns ``b_j[i] =
+    a_i[j]``. Two exchange stages over the quad (partners ``j ^ 1``, then
+    ``j ^ 2``, each one DPP ``quad_perm`` per slot pair): in stage ``m`` a lane
+    keeps slot ``i`` when bit ``m`` of ``i`` equals bit ``m`` of ``j`` and
+    takes its partner's slot ``i ^ (1 << m)`` otherwise. Pure data movement
+    (bitcasts, selects, lane permutes): the values are bit for bit kept.
+    """
+    if len(vals) != 4:
+        raise ValueError("quad_transpose4 takes 4 values per lane")
+    x = [b.bitcast(v, I32) for v in vals]
+    j = b.mod(lane, b.const_i32(4))
+    zero = b.const_i32(0)
+    for bit, perm, pairs in ((1, [1, 0, 3, 2], ((0, 1), (2, 3))),
+                             (2, [2, 3, 0, 1], ((0, 2), (1, 3)))):  # fmt: skip
+        hi = b.cmp_ne(b.land(j, b.const_i32(bit)), zero)
+        for lo_s, hi_s in pairs:
+            # a lane with the bit set sends its low slot, else its high slot
+            send = b.select(hi, x[lo_s], x[hi_s])
+            recv = b.quad_perm(send, perm)
+            x[lo_s], x[hi_s] = b.select(hi, recv, x[lo_s]), b.select(hi, x[hi_s], recv)
+    return [b.bitcast(v, F32) for v in x]
 
 
 def _pad_elems(desc: str, elem_bytes: int) -> int:
@@ -964,21 +1013,54 @@ class StatsView:
     """
 
     def __init__(
-        self, lse2: WorkspaceAddr, dsum: WorkspaceAddr, n_heads: Value | None = None
+        self,
+        lse2: WorkspaceAddr,
+        dsum: WorkspaceAddr,
+        n_heads: Value | None = None,
+        *,
+        bounds: str = "clamp",
+        span: int = 0,
     ) -> None:
         if lse2.width != 1 or dsum.width != 1:
             raise ValueError("lse2 / Dsum workspaces are one fp32 per row")
+        if bounds not in ("clamp", "buffer"):
+            raise ValueError(f"stats bounds={bounds!r} not in ('clamp', 'buffer')")
+        if bounds != "clamp" and span < 1:
+            raise ValueError("buffer-bounded stats need the q-step span (kM0)")
         self.lse2 = lse2
         self.dsum = dsum
         self.n_heads = n_heads  # query heads of the arrays (stats_vec > 1 only)
+        self.bounds = bounds  # ws_bounds of the scalar row loads (rows)
+        self.span = span
 
     def rows(
         self, b: IRBuilder, h: Value, q0: Value, rows: Sequence[Value]
     ) -> list[tuple[Value, Value]]:
-        """``(lse2, Dsum)`` of q-step rows ``rows`` (offsets from ``q0``)."""
+        """``(lse2, Dsum)`` of q-step rows ``rows`` (offsets from ``q0``).
+
+        Default: one clamped scalar load per row. With ``bounds = "buffer"``
+        (``ws_bounds``) each row is one buffer load without the address clamp:
+        the descriptor of a slab covers its valid rows (at most ``span``, the
+        step reads rows ``[0, kM0)``), a row past the range reads 0, and every
+        row then takes the default's ``row_ok`` select, so the values are bit
+        for bit the default's.
+        """
         sl = self.lse2.slab(h, q0)
         sd = self.dsum.slab(h, q0)
-        return [(sl.load(r, 0, _INF), sd.load(r, 0, 0.0)) for r in rows]
+        if self.bounds == "clamp":
+            return [(sl.load(r, 0, _INF), sd.load(r, 0, 0.0)) for r in rows]
+        out = []
+        for slab, neutral in ((sl, _INF), (sd, 0.0)):
+            n = b.smin(slab.rows_left, b.const_i32(self.span))
+            rsrc = b.buffer_rsrc(slab.ptr, b.mul(n, b.const_i32(4)))
+            zero = b.const_i32(0)
+            fill = b.const_f32(neutral)
+            vals = []
+            for r in rows:
+                x = b.buffer_load(rsrc, b.mul(r, b.const_i32(4)), zero, F32)
+                vals.append(b.select(slab.row_ok(r), x, fill))
+            out.append(vals)
+        return list(zip(out[0], out[1]))
 
     def batched_rows(
         self, b: IRBuilder, h: Value, q0: Value, rows: Sequence[Value], *, width: int
@@ -1509,9 +1591,13 @@ class BwdTileStep:
         atomics are issued in stage A of this step; this step's partial is
         not handed to the sink but returned as ``(acc, PendingDq)`` for the
         next step (the caller flushes the last one with :meth:`flush_dq`).
-        A schedule value other than ``none`` (and ``setprio``) runs on the
-        synchronous body only (no ``ring``, ``prefetch`` or ``staged``; the
-        validator refuses the other compositions).
+        With a ring (``ring`` or ``prefetch``) the fenced stats come from the
+        ring's slot, and a stage table issues the register rings' prefetch
+        loads (``prefetch`` on the register path, ``ring`` with
+        ``ring_issue = "early"``) in stage A instead of ahead of the step
+        (the count model's :meth:`StageTable.ring_prefetch`). A schedule
+        value does not run with the counted waits (``staged``; the validator
+        refuses that composition).
         """
         g = self.geom
         g0, g1 = g.g0, g.g1
@@ -1524,18 +1610,23 @@ class BwdTileStep:
         counted = g.loop_sync == "counted"
         stats = ring_loads = stats_src = nxt_staged = None
         barrier = self._loop_barrier
-        if g.sched != "none" and (ring is not None or prefetch is not None or counted):
-            raise ValueError("a schedule value runs on the synchronous body only")
+        if g.sched == "stage_table_atomics" and counted and g.counted_issue == "late":
+            raise ValueError(COUNTED_LATE_DEFERRED)
+        # A stage table issues the register rings' prefetch loads in stage A
+        # (grouped with G0's MFMAs) instead of ahead of the step.
+        loads_in_a = self.sched.ring_prefetch().get("where") == "A"
         if ring is not None:
             cur = self._ring_views(b, ring.slot)
             nxt = self._ring_views(b, b.sub(b.const_i32(1), ring.slot))
             v_q, v_do, v_ds = cur["q"], cur["do"], cur["ds"]
-            if g.ring_issue == "early":
+            if g.ring_issue == "early" and not loads_in_a:
                 # the next step's global loads ahead of G0..G3 (and of this
                 # step's dQ atomics, so their wait never covers those)
                 ring_loads = self._ring_loads(b, ring.nxt, nxt)
         elif prefetch is not None:
-            v_q, v_do, stats, stats_src = prefetch.begin(b, self, h, q0, packed)
+            v_q, v_do, stats, stats_src = prefetch.begin(
+                b, self, h, q0, packed, defer_loads=loads_in_a
+            )
             v_ds = self.v_ds
             barrier = prefetch.barrier
         elif counted:
@@ -1595,6 +1686,13 @@ class BwdTileStep:
         # with s_in_agpr both are AGPR-form asm clusters (S / dP in AGPRs, the
         # first K step reading srcC 0); otherwise intrinsics from zero.
         self.sched.emit_stage_begin(b, "A")
+        if loads_in_a:
+            # the ring's prefetch loads (the next tile's Q / dO and stats)
+            # ahead of this step's dQ atomics, spread over G0's MFMAs
+            if ring is not None:
+                ring_loads = self._ring_loads(b, ring.nxt, nxt)
+            else:
+                prefetch.issue_loads(b)
         k_b = self.k_regs if self.k_regs is not None else LdsOperand(self.v_k)
         if self._g02_asm:
             s_acc = g0.mma(
@@ -1607,9 +1705,12 @@ class BwdTileStep:
                 b, g0.zero_acc(b), LdsOperand(v_q), k_b, lane=lane, origin=self.o0
             )
         if fenced:
-            if stats is None:
+            if stats is None and ring is not None:
+                stats = self._ring_stats(b, cur)  # the merged ring's slot
+            elif stats is None:
+                # the workspace, or the prefetch ring's stats slot
                 stats = self._load_stats(
-                    b, h, q0, None if packed is None else packed.rows
+                    b, h, q0, None if packed is None else packed.rows, stats_src
                 )
             read_ahead(order[0])
             if pending is not None:
@@ -1629,7 +1730,7 @@ class BwdTileStep:
             )
 
         # P and dS per C slot (selects, never multiplies).
-        if ring is not None:
+        if ring is not None and stats is None:
             stats = self._ring_stats(b, cur)
         p_f32, ds_f32 = self._softmax_grad(
             b, s_acc, dp_acc, h, q0, k0, edge=edge,
@@ -1659,27 +1760,52 @@ class BwdTileStep:
         # G2 and the hand-off), C the second, D the third.
         out = {}
         record = [] if pending is not None else None
+        # asm_load_hoist: the LDS operands of the G1 / G3 GEMM issued second
+        # are read once the first GEMM's first-step operands are read, before
+        # its asm cluster (an asm block is a scheduling barrier for memory
+        # operations); the second GEMM then issues from those registers (same
+        # MMAs on the same values). Every tile it reads is published before
+        # the first G1 / G3 unit (Q / dO before G0 / G2; the Q^T / dO^T images
+        # and the LDS P^T / dS^T by the barrier ahead of the first unit).
+        operands = {"g1": [a_p, b_dot], "g3": [a_ds, b_qt]}
+        pre_issue = {}
+        if g.asm_load_hoist:
+            lead_unit, hoisted_unit = (u for u in order if u != "g4")
+
+            def hoist(name: str = hoisted_unit) -> None:
+                a_op, b_op = operands[name]
+                operands[name] = list(
+                    g1.load_operands(
+                        b, a_op, ahead.get(name, b_op), lane=lane, origin=self.o1
+                    )
+                )
+
+            pre_issue[lead_unit] = hoist
 
         def g1_dv() -> None:
-            bop = ahead.get("g1", b_dot)
+            a_op, b_op = operands["g1"]
+            bop = ahead.get("g1", b_op)
             if g.acc_in_lds:
-                self._update_lds_acc(b, self.v_dv_acc, a_p, bop)
+                self._update_lds_acc(b, self.v_dv_acc, a_op, bop)
                 out["dv"] = None
             else:
                 out["dv"] = g1.mma(
-                    b, [list(r) for r in acc.dv], a_p, bop, lane=lane,
+                    b, [list(r) for r in acc.dv], a_op, bop, lane=lane,
                     origin=self.o1, route=self._g13_route, **self._g13_asm,
+                    pre_issue=pre_issue.get("g1"),
                 )  # fmt: skip
 
         def g3_dk() -> None:
-            bop = ahead.get("g3", b_qt)
+            a_op, b_op = operands["g3"]
+            bop = ahead.get("g3", b_op)
             if g.acc_in_lds:
-                self._update_lds_acc(b, self.v_dk_acc, a_ds, bop)
+                self._update_lds_acc(b, self.v_dk_acc, a_op, bop)
                 out["dk"] = None
             else:
                 out["dk"] = g1.mma(
-                    b, [list(r) for r in acc.dk], a_ds, bop, lane=lane,
+                    b, [list(r) for r in acc.dk], a_op, bop, lane=lane,
                     origin=self.o1, route=self._g13_route, **self._g13_asm,
+                    pre_issue=pre_issue.get("g3"),
                 )  # fmt: skip
 
         units = {
@@ -1730,13 +1856,15 @@ class BwdTileStep:
         carry = nxt_staged if counted else None
         if record is not None:
             rows = None if packed is None else packed.rows
-            carry = PendingDq(
+            pend = PendingDq(
                 values=tuple(record),
                 q0=q0 if rows is None else rows.row0,
                 h=h if rows is None else rows.head0,
                 n_heads=None if rows is None else rows.n_heads,
                 rows_per_head=None if rows is None else rows.rows_per_head,
             )
+            # (the counted step carries both: (next staged, pending dQ))
+            carry = pend if carry is None else (carry, pend)
         if g.acc_in_lds:
             return acc if carry is None else (acc, carry)
         dk, dv = out["dk"], out["dv"]
@@ -1821,6 +1949,8 @@ class BwdTileStep:
             )  # fmt: skip
         self.sink.begin_head(b, pending.h)
         self.sink.consume(b, slots, rows, pending.h, clamp=True)
+        if self.waits is not None:  # (the counted waits count them in A)
+            self.waits.atomics(len(slots))
 
     @property
     def _ds_reader(self) -> str:
@@ -2333,6 +2463,113 @@ class BwdTileStep:
             return out.load(b, r, c, dtype=self.elem, n=vec)
 
         return read_out
+
+    def dkv_quad_rows(
+        self, b: IRBuilder, which: str, acc: DkDvAcc, mult: Value | None
+    ) -> list[tuple[Value, Value, list[Value]]]:
+        """dK / dV (``mult`` applied, fp32) as ``(row, col0, [4 values])``:
+        one entry per accumulator fragment, the lane's 4 consecutive columns
+        ``col0 .. col0 + 3`` of one row after a 4 x 4 transpose inside each
+        lane quad (``c_quad_transposable`` of the G1 atom: before it lane
+        ``j`` of a quad holds rows ``r0 .. r0 + 3`` of column ``c0 + j``;
+        after it, row ``r0 + j`` of columns ``c0 .. c0 + 3``). Pure data
+        movement: the same fp32 values reach the same elements."""
+        g1 = self.geom.g1
+        if which not in ("dk", "dv"):
+            raise ValueError(f"which={which!r} must be 'dk' or 'dv'")
+        if self.geom.acc_in_lds:
+            raise ValueError("dkv_quad_rows needs register accumulators")
+        frags = acc.dk if which == "dk" else acc.dv
+        j = b.mod(self.lane, b.const_i32(4))
+        out = []
+        for fm in range(g1.frags_m):
+            for fn in range(g1.frags_n):
+                frag = frags[fm][fn]
+                vals = [b.vec_extract(frag, s) for s in range(4)]
+                if mult is not None:
+                    vals = [b.fmul(mult, v) for v in vals]
+                (r0, c), *_ = self._acc_lds_coords(b, fm, fn)
+                out.append(
+                    (b.add(r0, j), b.sub(c, j), quad_transpose4(b, vals, self.lane))
+                )
+        return out
+
+    def dkv_f32_image(self, which: str) -> LdsView:
+        """The fp32 LDS image of dK (``"dk"``) or dV (``"dv"``) under
+        ``acc_in_lds`` (``kN0 x D``); a reader of other lanes' cells needs a
+        barrier after the q loop first."""
+        if not self.geom.acc_in_lds:
+            raise ValueError("dkv_f32_image needs LDS accumulators")
+        if which not in ("dk", "dv"):
+            raise ValueError(f"which={which!r} must be 'dk' or 'dv'")
+        return self.v_dk_acc if which == "dk" else self.v_dv_acc
+
+    def dkv_f32_part(
+        self,
+        b: IRBuilder,
+        which: str,
+        acc: DkDvAcc,
+        mult: Value | None,
+        *,
+        half: int,
+        slot: int = 0,
+    ) -> LdsView:
+        """Stage one column half of the fp32 dK / dV through ``dkv_out``.
+
+        The register accumulators of columns ``[half * D/2, (half + 1) *
+        D/2)``, times ``mult`` (fp32, not rounded), are written to epilogue
+        buffer ``slot`` viewed as an fp32 ``kN0 x D/2`` image (the I/O-dtype
+        buffer holds exactly half the columns in fp32; a row pad is kept).
+        Returns that view; its columns are relative to the half. The caller
+        places the barriers: after staging (before any read) and after its
+        reads (before the buffer is written again). A fragment covers 16
+        aligned columns and ``D/2`` is a multiple of 16, so each fragment lies
+        in one half: with the ``(W, 1)`` G1 grid the half of fragment ``fn``
+        is static, otherwise each fragment is staged under a branch on its
+        column.
+        """
+        g = self.geom
+        if g.acc_in_lds:
+            raise ValueError("LDS accumulators are read in place (dkv_f32_image)")
+        if which not in ("dk", "dv") or half not in (0, 1):
+            raise ValueError(f"which={which!r} / half={half!r}")
+        hw = g.head_size // 2
+        buf = self.lds.plan.buffer("dkv_out", slot)
+        if buf.offset % 16 or buf.nbytes % (4 * g.k_n0):
+            raise ValueError("dkv_out cannot hold an fp32 half image")
+        pitch = buf.nbytes // (4 * g.k_n0)  # fp32 elements per row
+        if pitch < hw:
+            raise ValueError("dkv_out rows are narrower than half a row in fp32")
+        view = LdsView(self.lds.smem, buf.offset // 2, pitch, g.k_n0, 2)
+        g1 = g.g1
+        if hw % g1.op.n:
+            raise ValueError("D/2 must be a multiple of the G1 atom N")
+        frags = acc.dk if which == "dk" else acc.dv
+        static = g.grid_g1[1] == 1
+        shift = b.const_i32(hw) if half else None
+        for fm in range(g1.frags_m):
+            for fn in range(g1.frags_n):
+                if static and (fn * g1.op.n) // hw != half:
+                    continue
+                frag = frags[fm][fn]
+                vals = [b.vec_extract(frag, i) for i in range(g1.op.c_frag_len)]
+                if mult is not None:
+                    vals = [b.fmul(mult, v) for v in vals]
+                coords = self._acc_lds_coords(b, fm, fn)
+
+                def put(coords=coords, vals=vals) -> None:
+                    for (r, c), v in zip(coords, vals):
+                        view.store(b, r, c if shift is None else b.sub(c, shift), v, 1)
+
+                if static:
+                    put()
+                    continue
+                c0 = coords[0][1]
+                h = b.const_i32(hw)
+                inside = b.cmp_lt(c0, h) if half == 0 else b.cmp_ge(c0, h)
+                with b.scf_if(inside):
+                    put()
+        return view
 
     def dkv_cells(
         self, b: IRBuilder, which: str, acc: DkDvAcc, mult: Value | None

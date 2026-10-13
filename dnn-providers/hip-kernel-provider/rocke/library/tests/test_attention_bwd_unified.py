@@ -458,12 +458,16 @@ def test_zero_scratch_no_spills_and_lds_equal_to_the_plan(row):
     no scratch, no spills, register budgets, LDS equal to the phase plan, no
     AGPR copies in the q loop beyond the model."""
     pytest.importorskip("rocke.runtime.comgr")
-    # torch first: rocKE then compiles with torch's bundled (production) comgr
-    pytest.importorskip("torch")
     from rocke.helpers.compile import compile_kernel
 
-    from ._attention_bwd_resources import evaluate_resource_gate, find_objdump
+    from ._attention_bwd_resources import (
+        evaluate_resource_gate,
+        find_objdump,
+        pin_production_comgr,
+    )
 
+    # torch's bundled (production) comgr, pinned by path; torch not imported
+    pin_production_comgr()
     if find_objdump() is None:
         pytest.skip("llvm-objdump not found (needed for the q-loop AGPR copy rule)")
     arch = row[0]

@@ -41,7 +41,9 @@ dO and the dQ workspace on its query head in 64 bits. In atomic mode
 (``dkv_mode = "atomic"``: ``h_k != h_v``, or a runtime ``g_split > 1``) a
 CTA owns ``G / g_split`` query heads of a unit of ``G = gcd(h_q / h_k, h_q /
 h_v)`` heads, which share one K head and one V head, and adds its fp32 dK / dV
-into the ``WS_DK`` / ``WS_DV`` workspace with atomics (two converts follow).
+into the ``WS_DK`` / ``WS_DV`` workspace with atomics (two converts follow);
+with ``dkv_sink = "slices"`` it stores them into its own workspace slice
+instead (no atomics) and two reduce launches sum the slices in a fixed order.
 The CTA decode (:mod:`kernels.common._attention_bwd_worklist`) applies the
 runtime load-balance order (natural, reverse, or interleave under the
 ``lb_interleave`` decode): one kv tile per CTA, or, in a kernel built with
@@ -169,6 +171,7 @@ from kernels.common._attention_bwd_ring import QRing, PrefetchStep, PrefetchTile
 from kernels.common._attention_bwd_sched import (
     FENCED_SCHEDS,
     SCHEDS,
+    SPLIT_DEFERRED,
     STAGE_TABLE_SCHEDS,
 )
 from kernels.common._attention_bwd_sinks import (
@@ -206,6 +209,11 @@ __all__ = [
     "DECLARATION_ONLY",
     "DKV_ATOMIC_GUARDS",
     "DKV_EPILOGUES",
+    "DKV_SINKS",
+    "DKV_SINK_NOT_BUILT",
+    "DKV_CELL_VECS",
+    "NARROW_VECS",
+    "WS_BOUNDS",
     "DKV_STORE_VECS",
     "G4_SLICINGS",
     "INERT_KNOBS",
@@ -271,6 +279,37 @@ DKV_STORE_VECS = (8, 4, 2, 1)
 # atomics ("branch"), or every atomic issued with +0.0 for a row outside the
 # sequence or the workspace ("select", branch-free; identical sums).
 DKV_ATOMIC_GUARDS = ("branch", "select")
+# Sink of the fp32 dK / dV partials in atomic mode (``dkv_mode = "atomic"``):
+# "atomic" adds every accumulator element into the zero-filled WS_DK / WS_DV
+# workspace with fp32 atomics (two converts follow); "slices" stores each
+# CTA's partial with plain stores into its own workspace slice (no atomics,
+# no zero fill) and the reduce kernel sums the slices of every kv head in a
+# fixed order (deterministic); "last_cta" (per-tile arrival counters, the last
+# CTA reduces) is registered but not built (DKV_SINK_NOT_BUILT). Inert in
+# direct mode.
+DKV_SINKS = ("atomic", "slices", "last_cta")
+DKV_SINK_NOT_BUILT = MappingProxyType(
+    {
+        "last_cta": "the arrival-counter sink needs agent-scope release / "
+        "acquire fences around a workgroup barrier that orders memory: the IR "
+        "has no fence op, global_atomic_add carries no sync scope, and "
+        "tile.sync lowers to s_waitcnt + s_barrier without workgroup fences, so "
+        "the slice stores of the other waves are not ordered before the "
+        "counter increment, nor the last CTA's slice loads after it",
+    }
+)
+# Bounds of the main kernel's workspace accesses: address clamps and per-row
+# branches ("clamp"), or a buffer descriptor whose range ends at the last
+# valid row ("buffer": out-of-range loads read 0 before the same neutral
+# select, out-of-range stores are dropped); head-major workspace only.
+WS_BOUNDS = ("clamp", "buffer")
+# Elements per store of the per-slot dK / dV epilogue (dkv_epilogue =
+# "direct"): 1, or 4 after an in-quad 4 x 4 transpose (C layouts where a quad
+# holds 4 consecutive columns of 4 consecutive rows).
+DKV_CELL_VECS = (1, 4)
+# User-tensor access width (elements) of a stage_vec = 1 instance; the plan
+# narrows it to what the request's strides and base alignment allow.
+NARROW_VECS = (1, 2, 4)
 # The stage-table count model (``_attention_bwd_sched``) places G1 + G2 in
 # stage B, G3 in C and G4 with the dS slices in D, i.e. the default order.
 _STAGE_ORDER_SCHED_RULE = (
@@ -346,14 +385,13 @@ _G4_SLICING_SYNC_BODY = (
     "ring_depth=1, barrier_merge='off', loop_sync != 'counted'), dq_mode='atomic', "
     "sched='none' without setprio, and kt_source='reg' under xt_lds"
 )
-# A schedule value (and setprio) is built on the synchronous body: its stage
-# table models one VGPR-staged Q / dO buffer, three barriers per step and G4
-# with its dQ atomics inside the step.
-_SCHED_SYNC_BODY = (
-    "sched={!r} / setprio={!r} needs the synchronous body: global_path='vgpr', "
-    "ring_depth=1, barrier_merge='off' and dq_mode='atomic' (the stage table "
-    "models neither the Q / dO ring nor the split-dQ main kernel without G4)"
-)
+# A schedule value (and setprio) is built on the synchronous body, the Q / dO
+# prefetch ring (register or DMA path), the merged-barrier ring and the counted
+# waits: its stage table models each of them (``StageTable.pipeline``), with G4
+# and its dQ atomics inside the step, and the split-dQ main kernel (no G4: the
+# stages A..C, on the synchronous body and the prefetch rings, the only bodies
+# split dQ runs on). ``stage_table_atomics`` defers the dQ atomics, which the
+# split-dQ main kernel does not issue: refused there (``SPLIT_DEFERRED``).
 # ``None`` is the policy value (resolved by :func:`_policy_agpr_alloc`);
 # ``"backend"`` asks for no reservation and leaves the accumulator placement to
 # the backend (the emission of a policy result of ``None``) even where the
@@ -372,7 +410,9 @@ AGPR_ROUTES_BUILT = (None, "vgpr_form", "agpr_fence", "asm_g13")
 # Granularity of the inline-asm G1 / G3 MFMA blocks under ``asm_g13``: one asm
 # block per atom-K step ("k_step") or one per GEMM call covering every K step
 # ("gemm"). ``asm_tail_nop`` (None = AGPR_ASM_TAIL_NOP of the atom) is the
-# s_nop count that ends each block; both are legal with ``asm_g13`` only.
+# s_nop count that ends each block; both are legal with ``asm_g13`` only, as
+# is ``asm_load_hoist`` (the second G1 / G3 GEMM's LDS operand reads issued
+# before the first one's asm cluster).
 ASM_CLUSTERS = ("k_step", "gemm")
 ASM_TAIL_NOP_MAX = 15
 # Issue order and thread distribution of the per-step Q / dO staging copies.
@@ -497,10 +537,14 @@ def _atomic_epilogue_inert(spec, arch: str) -> bool:
     ``"lds_staged"`` (the default) still reserves the epilogue buffer and
     ``"direct"`` drops it, which shrinks the allocation only where the
     epilogue phase is the largest phase. ``"lds_staged_pair"`` plans like the
-    default in atomic mode.
+    default in atomic mode. With ``dkv_sink = "slices"`` the epilogue stages
+    the fp32 partials through the buffer, so the knob picks the code, except
+    with LDS accumulators (their fp32 images are read directly).
     """
     if spec.dkv_mode != "atomic":
         return False
+    if spec.dkv_sink == "slices":
+        return bool(spec.acc_in_lds)
     default = dataclasses.replace(spec, dkv_epilogue="lds_staged")
     return lds_plan(spec, arch).total_bytes == lds_plan(default, arch).total_bytes
 
@@ -522,9 +566,53 @@ def _lds_order_inert(spec, arch: str) -> bool:
 # ``(resolved spec, arch) -> bool``: True where the spec's own value of the
 # knob is inert. Atomic dK / dV leave the CTA as fp32 atomics from the
 # accumulators, so the store width does not exist there and the epilogue
-# choice only sizes the allocation; direct dK / dV have no atomic row guard;
-# without resident buffers both placement orders put every buffer at the
-# same offset; a swizzle entry that changes no planned buffer changes nothing.
+# choice only sizes the allocation (with the slice sink both apply: the fp32
+# partials are staged and stored as rows of dkv_store_vec floats, except
+# from the per-slot "direct" epilogue); direct dK / dV have no atomic row
+# guard and no sink, nor does the slice sink have a row guard; without
+# resident buffers both placement orders put every buffer at the same offset;
+# a swizzle entry that changes no planned buffer changes nothing.
+def _slice_sink(spec) -> bool:
+    return spec.dkv_mode == "atomic" and spec.dkv_sink == "slices"
+
+
+def _scalar_ws_stats(spec) -> bool:
+    """The step reads its lse2 / Dsum rows with the scalar workspace loads of
+    :meth:`StatsView.rows` (the synchronous step, the register and merged
+    rings' row loads): one stats row per load (``stats_vec = 1``), unpacked
+    steps (a packed step rebases each row on its own head), not the counted
+    waits (their staged loads, :meth:`StatsView.raw`) nor the DMA ring (its
+    copies read the stats slab)."""
+    return (
+        spec.stats_vec == 1
+        and not spec.head_pack
+        and spec.loop_sync != "counted"
+        and spec.global_path != "dma"
+    )
+
+
+def _ws_bounds_inert(spec, arch) -> bool:
+    """The buffer bounds reach the scalar workspace stats loads and the slice
+    sink's stores; elsewhere nothing changes."""
+    return not (_scalar_ws_stats(spec) or _slice_sink(spec))
+
+
+def _dkv_cell_vec_inert(spec, arch) -> bool:
+    """The per-slot epilogue exists with register accumulators under
+    ``dkv_epilogue = "direct"``, in direct mode or with the slice sink."""
+    if spec.dkv_epilogue != "direct" or spec.acc_in_lds:
+        return True
+    return spec.dkv_mode == "atomic" and not _slice_sink(spec)
+
+
+def _dkv_store_vec_inert(spec, arch) -> bool:
+    if spec.dkv_mode != "atomic":
+        return False
+    if spec.dkv_sink != "slices":
+        return True
+    return spec.dkv_epilogue == "direct" and not spec.acc_in_lds
+
+
 def _dq_issue_inert(spec, arch) -> bool:
     """``dq_issue`` emits the block IR: LDS accumulators always issue per
     fragment, and ``"fragment"`` over a single G4 fragment per wave is the
@@ -561,8 +649,19 @@ def _lds_swizzle_inert(spec, arch) -> bool:
 INERT_KNOBS = MappingProxyType(
     {
         "dkv_epilogue": _atomic_epilogue_inert,
-        "dkv_store_vec": lambda spec, arch: spec.dkv_mode == "atomic",
-        "dkv_atomic_guard": lambda spec, arch: spec.dkv_mode == "direct",
+        "dkv_store_vec": _dkv_store_vec_inert,
+        "dkv_atomic_guard": lambda spec, arch: (
+            spec.dkv_mode == "direct" or spec.dkv_sink != "atomic"
+        ),
+        "dkv_sink": lambda spec, arch: spec.dkv_mode == "direct",
+        # head-packed steps load each row's stats from its own head (scalar)
+        # and stage Q / dO per row (no slab)
+        "stats_vec": lambda spec, arch: bool(spec.head_pack),
+        # ... and the grouped head_outer loops (edge tiles) keep their slabs
+        "slab_carry": lambda spec, arch: bool(spec.head_pack)
+        or (spec.step_order == "head_outer" and bool(spec.edge_tiles)),
+        "ws_bounds": _ws_bounds_inert,
+        "dkv_cell_vec": _dkv_cell_vec_inert,
         "lds_order": _lds_order_inert,
         "lds_swizzle": _lds_swizzle_inert,
         "dq_issue": _dq_issue_inert,
@@ -813,6 +912,11 @@ class AttnBwdSpec:
     agpr_route: Optional[str] = None  # see AGPR_ROUTES; None = "attr"
     asm_tail_nop: Optional[int] = None  # 0..15; None = AGPR_ASM_TAIL_NOP
     asm_cluster: str = "k_step"  # see ASM_CLUSTERS
+    # asm_g13: read the LDS operands of the G1 / G3 GEMM issued second (G3 in
+    # the default stage order) before the first one's asm cluster, so their
+    # LDS latency overlaps its MFMAs (an asm block is a scheduling barrier for
+    # memory operations). Same MFMAs on the same values; more live registers.
+    asm_load_hoist: bool = False
     scheduler_strategy: Optional[str] = None  # codegen scheduler strategy
     # Warp grids (rows, cols) of G0/G2 (S, dP) and G1/G3 (dV, dK). None resolves
     # to (1, W) / (W, 1); (2, W/2), the transposed grids and the replicated
@@ -833,6 +937,7 @@ class AttnBwdSpec:
     dkv_epilogue: str = "lds_staged"
     dkv_store_vec: int = 8  # see DKV_STORE_VECS
     dkv_atomic_guard: str = "branch"  # atomic dK / dV; see DKV_ATOMIC_GUARDS
+    dkv_sink: str = "atomic"  # atomic dK / dV; see DKV_SINKS
     lds_order: str = "resident_low"  # see LDS_ORDERS
     qdo_stage: str = "split"  # see QDO_STAGES
     stats_load: str = "at_use"  # see STATS_LOADS
@@ -883,6 +988,23 @@ class AttnBwdSpec:
     # role writes, heaviest first); False emits no work-list IR. The plan
     # sets it with use_worklist.
     worklist: bool = False
+    # Memory-access width / bounds levers (each default emits the shipped IR;
+    # every value moves the same bytes, so outputs are bit for bit equal):
+    # ws_bounds = "buffer" bounds the main kernel's scalar workspace stats
+    # loads and the slice sink's stores by a buffer descriptor instead of
+    # address clamps / per-row branches; dkv_cell_vec = 4 transposes each
+    # 4 x 4 accumulator block inside a lane quad so the per-slot "direct" dK /
+    # dV epilogue stores 4 consecutive columns per lane; narrow_vec
+    # (stage_vec = 1 only) is the user-tensor access width in elements when
+    # every stride and base allows it; slab_carry advances the Q / dO slab
+    # offsets per q step by precomputed i64 deltas instead of recomputing them
+    # from the head and row (the synchronous step; not in head-packed steps
+    # nor in the grouped head_outer loops). See WS_BOUNDS, DKV_CELL_VECS,
+    # NARROW_VECS.
+    ws_bounds: str = "clamp"
+    dkv_cell_vec: int = 1
+    narrow_vec: int = 1
+    slab_carry: bool = False
     name: str = "rocke_attn_bwd"
 
     def __post_init__(self) -> None:
@@ -912,6 +1034,17 @@ class AttnBwdSpec:
         _check_in("dkv_epilogue", self.dkv_epilogue, DKV_EPILOGUES)
         _check_in("dkv_store_vec", self.dkv_store_vec, DKV_STORE_VECS)
         _check_in("dkv_atomic_guard", self.dkv_atomic_guard, DKV_ATOMIC_GUARDS)
+        _check_in("dkv_sink", self.dkv_sink, DKV_SINKS)
+        _check_in("ws_bounds", self.ws_bounds, WS_BOUNDS)
+        _check_in("dkv_cell_vec", self.dkv_cell_vec, DKV_CELL_VECS)
+        _check_in("narrow_vec", self.narrow_vec, NARROW_VECS)
+        if self.narrow_vec != 1 and self.stage_vec != 1:
+            raise ValueError("narrow_vec applies to stage_vec = 1 instances only")
+        if self.ws_bounds != "clamp" and self.ws_layout != "head_major":
+            raise ValueError(
+                "ws_bounds needs the head-major workspace (token-major rows of one "
+                "head are H floats apart)"
+            )
         _check_in("lds_order", self.lds_order, LDS_ORDERS)
         if (
             self.dkv_mode == "direct"
@@ -1007,6 +1140,8 @@ class AttnBwdSpec:
             "lb_mirror",
             "stats_fma",
             "worklist",
+            "asm_load_hoist",
+            "slab_carry",
         ):
             if not isinstance(getattr(self, fname), bool):
                 raise ValueError(
@@ -1109,6 +1244,10 @@ class AttnBwdSpec:
                     f"asm_cluster={self.asm_cluster!r} is legal with "
                     "agpr_route='asm_g13' only"
                 )
+            if self.asm_load_hoist:
+                raise ValueError(
+                    "asm_load_hoist is legal with agpr_route='asm_g13' only"
+                )
         if (
             self.atom_g13 == "16x16x32"
             and self.block_m is not None
@@ -1204,6 +1343,7 @@ class AttnBwdSpec:
             ws_layout=self.ws_layout,
             rows_per_cta=rows_per_cta,
             convert_vec=convert_vec,
+            narrow_vec=self.narrow_vec,
             name=self.name,
             worklist=stage == "prep" and self.worklist,
         )
@@ -1229,6 +1369,7 @@ class AttnBwdSpec:
             mask_class=self.mask_class,
             ws_layout=self.ws_layout,
             static_scale=dq_static_scale(self.static_scale),
+            narrow_vec=self.narrow_vec,
             name=self.name,
             **knobs,
         )
@@ -1430,9 +1571,15 @@ def _planned_epilogue(spec: AttnBwdSpec) -> str:
     """The epilogue the LDS plan provides for (see :data:`INERT_KNOBS`).
 
     Atomic dK / dV use no staging buffer: the pair is planned like the
-    default (one reserved buffer), ``"direct"`` reserves none.
+    default (one reserved buffer), ``"direct"`` reserves none. The slice
+    sink stages its fp32 partials (one column half per buffer), so it gets
+    the epilogue it names.
     """
-    if spec.dkv_mode == "atomic" and spec.dkv_epilogue == "lds_staged_pair":
+    if (
+        spec.dkv_mode == "atomic"
+        and spec.dkv_sink != "slices"
+        and spec.dkv_epilogue == "lds_staged_pair"
+    ):
         return "lds_staged"
     return spec.dkv_epilogue
 
@@ -1589,8 +1736,11 @@ def _barrier_merge_on(spec) -> bool:
 def check_counted_sync(spec, arch: str) -> None:
     """Couplings of ``loop_sync = "counted"`` on a resolved spec.
 
-    CDNA only; the register staging path without a ring or stage table, with
-    the default staging and stats issue order (counted owns the issue order);
+    CDNA only; the register staging path without a ring (a schedule value is
+    legal: its stage table models the counted step, the next-step loads keep
+    their own fences; ``stage_table_atomics`` needs ``counted_issue =
+    "early"``), with the default staging and stats issue order (counted owns
+    the issue order);
     at most ``COUNTED_VMCNT_MAX`` dQ atomics per wave and q step (the vmcnt
     field); not with ``barrier_merge``, whose ring issues the next step's
     loads into a second LDS slot ahead of a single barrier before G4 (a
@@ -1749,6 +1899,32 @@ def validate_attn_bwd_spec(
                 raise ValueError(
                     f"lds_swizzle {buf}={val}: DMA buffers read by tr_read need 'xor'"
                 )
+    if s.dkv_cell_vec != 1:
+        from kernels.common._attention_bwd_frag import c_quad_transposable
+
+        if not c_quad_transposable(BwdTileGeometry.from_spec(s, arch).g1.op):
+            raise ValueError(
+                f"dkv_cell_vec={s.dkv_cell_vec} needs a G1 / G3 C layout whose "
+                f"lane quads hold 4 consecutive columns of 4 rows (not on {arch})"
+            )
+    if s.slab_carry:
+        if s.q_rotate:
+            raise ValueError(
+                "slab_carry excludes q_rotate (a rotated range wraps to its start: "
+                "no constant per-step delta)"
+            )
+        if s.global_path == "dma" or s.ring_depth > 1:
+            raise ValueError(
+                "slab_carry is built for the synchronous step: the prefetch ring "
+                "forms the slabs of the steps ahead from their (q tile, head) "
+                "index (not built with a ring)"
+            )
+        if s.loop_sync == "counted":
+            raise ValueError(
+                "slab_carry is built for the synchronous step: the counted waits "
+                "load the next step from its index (not built with "
+                "loop_sync='counted')"
+            )
     if s.acc_in_lds and s.dkv_mode == "direct" and s.dkv_epilogue != "lds_staged":
         raise ValueError(
             f"dkv_epilogue={s.dkv_epilogue!r} needs register accumulators; with "
@@ -1808,10 +1984,8 @@ def validate_attn_bwd_spec(
         raise ValueError("setprio is legal only inside a stage table")
     if s.stage_order != DEFAULT_STAGE_ORDER and s.sched in STAGE_TABLE_SCHEDS:
         raise ValueError(_STAGE_ORDER_SCHED_RULE.format(s.stage_order, s.sched))
-    if (s.sched != "none" or s.setprio) and (
-        staged or s.barrier_merge != "off" or s.dq_mode != "atomic"
-    ):
-        raise ValueError(_SCHED_SYNC_BODY.format(s.sched, s.setprio))
+    if s.sched == "stage_table_atomics" and s.dq_mode != "atomic":
+        raise ValueError(SPLIT_DEFERRED)
     if s.transpose_source == "xt_lds":
         if staged or s.barrier_merge != "off" or s.loop_sync == "counted":
             raise ValueError(_XT_SYNC_BODY)
@@ -1998,6 +2172,10 @@ _CONVERT_F32 = ("mult",)
 _CONVERT_I32 = (
     "H d_t S_max has_len len_stride off64 tok_mult tok_div ws_rows ws_seg"
 ).split()
+# The slice reduce (dkv_sink = "slices"): the convert's arguments plus the
+# element stride between two slices (i64) and the slice count (i32).
+_REDUCE_I64 = (*_CONVERT_I64, "s_stride")
+_REDUCE_I32 = (*_CONVERT_I32, "n_slices")
 _DQ_PTRS = "Q K V dO dQ WS_LSE2 WS_DSUM SEQ_Q SEQ_KV OFF_Q OFF_KV".split()
 _DQ_I64 = "q_b q_h k_b k_h v_b v_h do_b do_h dq_b dq_h".split()
 _DQ_F32 = ("scale_log2", "ds_mult", "dq_mult")
@@ -2011,6 +2189,7 @@ _ABI_LISTS = {
     "main": (_MAIN_PTRS, _MAIN_I64, _MAIN_F32, _MAIN_I32),
     "prep": (_PREP_PTRS, _PREP_I64, (), _PREP_I32),
     "convert": (_CONVERT_PTRS, _CONVERT_I64, _CONVERT_F32, _CONVERT_I32),
+    "reduce": (_CONVERT_PTRS, _REDUCE_I64, _CONVERT_F32, _REDUCE_I32),
     "dq": (_DQ_PTRS, _DQ_I64, _DQ_F32, _DQ_I32),
 }
 
@@ -2075,14 +2254,10 @@ _MIN_WG_ATTR = 64
 def _not_built(spec: AttnBwdSpec) -> list[str]:
     """Resolved knob values whose emission is not part of the body yet."""
     out = []
-    if (
-        spec.transpose_source == "tr_read"
-        and spec.pt_route == "relabel"
-        and spec.atom_g13 == "16x16x32"
-    ):
-        out.append("tr_read with a K-permuted G1/G3 B operand")
     if spec.agpr_route not in AGPR_ROUTES_BUILT:
         out.append(f"agpr_route={spec.agpr_route!r}")
+    if spec.dkv_mode == "atomic" and spec.dkv_sink in DKV_SINK_NOT_BUILT:
+        out.append(f"dkv_sink={spec.dkv_sink!r}")
     return out
 
 
@@ -2389,6 +2564,7 @@ def _cta_setup(
         return StridedTensorAddr(
             b, a[name], dtype=io, seq=seq, stage_vec=s.stage_vec,
             strides=(a[f"{prefix}_b"], a[f"{prefix}_h"], a[f"{prefix}_t"]),
+            narrow_vec=s.narrow_vec,
         )  # fmt: skip
 
     q_addr = tensor("Q", "q", seq_q)
@@ -2406,6 +2582,7 @@ def _cta_setup(
     stats = StatsView(
         ws("WS_LSE2", 1), ws("WS_DSUM", 1),
         n_heads=a["h_q"] if s.stats_vec != 1 else None,
+        bounds=s.ws_bounds, span=km,
     )  # fmt: skip
     if s.dq_mode == "split":
         # dQ comes from the Q-parallel dQ kernel: no G4, no dS tile, no WS_DQ
@@ -2449,6 +2626,7 @@ def _cta_setup(
             b, geom, lds, tid=tid, lane=lane, wave=wave, stats=stats,
             n_atomics=n_atomics if s.dq_mode == "atomic" else 0,
         )  # fmt: skip
+        ring.check_step(step.sched)  # the stage placement keeps the DMA waits
     tile_kw = dict(
         hk=hk, hv=hv, h0=h0, n_h=n_h, seq_q=seq_q, seq_kv=seq_kv, q_addr=q_addr,
         do_addr=do_addr, k_addr=k_addr, v_addr=v_addr, io=io, tid=tid, ring=ring,
@@ -2586,6 +2764,22 @@ def _kv_tile(
             return b.add(h0, first), first
         return b.add(h0, gi), None
 
+    # slab_carry (the synchronous step; the validator refuses it with a ring or
+    # the counted waits, whose steps form the slabs of the steps ahead from
+    # their index): the Q / dO slab offsets are loop-carried i64 values
+    # advanced by per-CTA deltas (one head, one q tile of kM0 rows), so a step
+    # adds one i64 instead of forming head * s_h + q0 * s_t (two i64
+    # multiplies per tensor). Every visited q tile has q0 <= len_q - 1, so the
+    # clamp of the slab's base row is an identity and the addresses are the
+    # default's. Not in head-packed steps (no slab) nor in the grouped
+    # head_outer loops: their head is loop-invariant inside the range loops
+    # already (one row product per step is left), and the carried offsets and
+    # deltas there cost SGPRs the edge loops do not have.
+    carry = s.slab_carry and not s.head_pack and not grouped
+    if carry:
+        head_d = [x.stride_bytes("h") for x in (q_addr, do_addr)]
+        row_d = [b.mul(b.const_i64(km), x.stride_bytes("t")) for x in (q_addr, do_addr)]
+
     def q_steps(
         acc, qt0, trip, *, edge, name, end, wrap_at=None, group=None, pend=None
     ):
@@ -2611,8 +2805,10 @@ def _kv_tile(
         if s.q_rotate:
             qt0 = b.add(start0, b.mod(kt, b.smax(b.sub(end, start0), one)))
 
-        def advance(qt, gi):
-            """The (q tile, head group) index after ``(qt, gi)``."""
+        def advance(qt, gi, *, with_wrap=False):
+            """The (q tile, head group) index after ``(qt, gi)``; with
+            ``with_wrap`` also the predicate of the inner index wrapping
+            (``(index, wrap)``, ungrouped loops only)."""
             if group is not None:
                 qt_next = b.add(qt, one)
                 if s.q_rotate:
@@ -2626,7 +2822,7 @@ def _kv_tile(
                 if s.q_rotate:
                     qt_next = b.select(b.cmp_ge(qt_next, end), start0, qt_next)
                 gi_next = b.select(wrap, zero, nxt)
-                return (qt_next, gi_next)
+                return ((qt_next, gi_next), wrap) if with_wrap else (qt_next, gi_next)
             # next (q tile, head group): q tiles inner, wrapping at hi
             lo, hi = wrap_at
             nxt = b.add(qt, one)
@@ -2635,7 +2831,8 @@ def _kv_tile(
             if s.q_rotate:
                 # the group is done when its q tiles are back at the start
                 wrap = b.cmp_eq(qt_next, qt0)
-            return (qt_next, b.add(gi, b.select(wrap, one, zero)))
+            idx = (qt_next, b.add(gi, b.select(wrap, one, zero)))
+            return (idx, wrap) if with_wrap else idx
 
         def inputs(qt, gi, *, slabs=True):
             """Where step (q tile ``qt``, head group ``gi``) reads; ``slabs =
@@ -2720,6 +2917,27 @@ def _kv_tile(
             # carried loads before the back-edge.
             b.s_waitcnt(vmcnt=0)
             iter_args += [(f"bwd_{name}pf{i}", v) for i, v in enumerate(guard.results)]
+        n_carry = 0
+        if carry:
+            # the first step's Q / dO slab offsets, then the per-CTA deltas
+            # of a step: a head (heads inner), a q tile (q tiles inner) or, at
+            # a wrap, the jump back
+            h_first = head_of(gi0)[0]
+            row_first = b.mul(qt0, b.const_i32(km))
+            iter_args += [
+                (f"bwd_{name}o{t}", addr.offset_bytes(h_first, row_first))
+                for t, addr in (("q", q_addr), ("d", do_addr))
+            ]
+            n_carry = 2
+            if wrap_at is None:
+                back = b.sext(b.sub(n_grp, one), I64)
+                wrap_d = [b.sub(row_d[t], b.mul(back, head_d[t])) for t in (0, 1)]
+                step_d = head_d
+            else:
+                lo, hi = wrap_at
+                back = b.sext(b.sub(b.sub(hi, lo), one), I64)
+                wrap_d = [b.sub(head_d[t], b.mul(back, row_d[t])) for t in (0, 1)]
+                step_d = row_d
         n_pend = 0 if pend is None else len(pend.flat())
         if pend is not None:
             iter_args += list(zip(pend.names(f"bwd_{name}"), pend.flat()))
@@ -2730,10 +2948,26 @@ def _kv_tile(
         with loop as (_it, cur):
             qt = cur[n_acc]
             gi = group[0] if group is not None else cur[n_acc + 1]
-            nxt_idx = advance(qt, gi)
-            here = inputs(qt, gi, slabs=not counted)
+            carry_yields = ()
+            if carry:
+                nxt_idx, wrap = advance(qt, gi, with_wrap=True)
+            else:
+                nxt_idx = advance(qt, gi)
+            here = inputs(qt, gi, slabs=not (counted or carry))
             h = here.h
-            body_end = len(cur) - n_pend  # the deferred dQ partial is last
+            # the deferred dQ partial is last, the carried slab offsets before it
+            body_end = len(cur) - n_pend - n_carry
+            if carry:
+                offs = cur[body_end : body_end + n_carry]
+                clamp = edge or s.interior_clamp
+                here = QStepInputs(
+                    q0=here.q0, h=h, q_slab=q_addr.slab_at(offs[0], here.q0, clamp=clamp),
+                    do_slab=do_addr.slab_at(offs[1], here.q0, clamp=clamp), packed=None,
+                )  # fmt: skip
+                carry_yields = tuple(
+                    b.add(o, b.select(wrap, wrap_d[t], step_d[t]))
+                    for t, o in enumerate(offs)
+                )
             if group is None and pend is None:
                 # (the deferred sink rebases at each flush: its head is carried)
                 step.sink.begin_head(b, h)
@@ -2752,8 +2986,13 @@ def _kv_tile(
                 out, nxt_staged = step.run_q_step(
                     b, acc_of(cur), None, None, qt, h, k0, edge=edge,
                     packed=here.packed, staged=staged, next_loads=next_loads,
+                    pending=None if pend is None else pend.from_flat(cur[body_end:]),
                 )  # fmt: skip
-                b.scf_yield(*out.flat(), *nxt_idx, *nxt_staged.flat())
+                pend_yields = ()
+                if pend is not None:  # stage_table_atomics: (staged, pending)
+                    nxt_staged, nxt_pend = nxt_staged
+                    pend_yields = nxt_pend.flat()
+                b.scf_yield(*out.flat(), *nxt_idx, *nxt_staged.flat(), *pend_yields)
             else:
                 merged = None
                 if merge:
@@ -2791,7 +3030,9 @@ def _kv_tile(
                 if pend is not None:
                     out, nxt_pend = out
                     pend_yields = nxt_pend.flat()
-                b.scf_yield(*out.flat(), *nxt_idx, *pf_yields, *pend_yields)
+                b.scf_yield(
+                    *out.flat(), *nxt_idx, *pf_yields, *carry_yields, *pend_yields
+                )
         if ring is not None:
             ring.drain(b)
         results = list(loop.results)
@@ -2842,6 +3083,11 @@ def _kv_tile(
     acc = step.finish(b, acc)
     if epilogue is not None:
         epilogue(b, step, acc, k0=k0, live=live)
+    elif s.dkv_mode == "atomic" and s.dkv_sink == "slices":
+        _slices_epilogue(
+            b, s, a, step, acc, hk=hk, hv=hv, h0=h0, n_h=n_h, k0=k0, seq_kv=seq_kv,
+            live=live, tid=tid,
+        )  # fmt: skip
     elif s.dkv_mode == "atomic":
         _atomic_epilogue(
             b, s, a, step, acc, hk=hk, hv=hv, k0=k0, seq_kv=seq_kv, live=live
@@ -2890,6 +3136,228 @@ def _atomic_epilogue(b, s, a, step, acc, *, hk, hv, k0, seq_kv, live) -> None:
                     slab.atomic_add_row(row, items, in_seq)
 
 
+def _slice_slab(b, s, a, which, *, head, h0, n_h, k0, seq_kv):
+    """Workspace slab of this CTA's fp32 ``which`` (``"dk"`` / ``"dv"``) slice
+    of kv head ``head`` from tile row ``k0``.
+
+    ``WS_DK`` holds ``gk / n_h`` slices of ``ws_rows_kv * h_k * D`` floats
+    (``WS_DV``: ``gv / n_h`` of ``ws_rows_kv * h_v * D``), each laid out like
+    the atomic workspace. The CTAs of one K head own its ``gk`` query heads
+    ``n_h`` at a time, so this CTA's slice is ``(h0 mod gk) / n_h``: every
+    slice row of a live tile is written by exactly one CTA.
+    """
+    D = s.head_size
+    ptr, n_heads, g = {
+        "dk": ("WS_DK", a["h_k"], a["gk"]),
+        "dv": ("WS_DV", a["h_v"], a["gv"]),
+    }[which]
+    sl = b.div(b.mod(h0, g), n_h)
+    elems = b.mul(
+        b.mul(b.zext(a["ws_rows_kv"], I64), b.zext(n_heads, I64)), b.const_i64(D)
+    )
+    base = b.global_ptr_add(
+        a[ptr], b.mul(b.mul(b.zext(sl, I64), elems), b.const_i64(4))
+    )
+    tok_major = s.ws_layout == "token_major"
+    return WorkspaceAddr(
+        b, base, ws_rows=a["ws_rows_kv"], width=D, row0=seq_kv.ws_row0,
+        layout=s.ws_layout, n_heads=n_heads if tok_major else None,
+    ).slab(head, k0)  # fmt: skip
+
+
+def _slices_epilogue(
+    b, s, a, step, acc, *, hk, hv, h0, n_h, k0, seq_kv, live, tid
+) -> None:
+    """fp32 dK / dV of the key tile stored into this CTA's workspace slices.
+
+    Inside ``scf_if(live)`` (a tile past ``len_kv`` stores nothing; its rows
+    are never read as values). No atomics: each slice row is written by one
+    CTA, with plain stores of rows ``k < len_kv`` inside the workspace (the
+    rows the atomic epilogue adds), dK times ``dk_mult`` as there; the
+    reduce kernel sums the slices in a fixed order. ``dkv_epilogue`` picks the
+    path: ``"lds_staged"`` stages each column half of the fp32 tile through
+    the ``dkv_out`` buffer (two halves per tensor, each behind a barrier) and
+    stores rows of ``dkv_store_vec`` floats; ``"lds_staged_pair"`` stages both
+    halves in two buffers behind one barrier; ``"direct"`` stores every
+    accumulator element from its register (no LDS), or with ``dkv_cell_vec =
+    4`` one 16-byte row piece per fragment after an in-quad transpose. LDS
+    accumulators are read from their fp32 images after one barrier, whatever
+    the epilogue. ``ws_bounds = "buffer"`` stores through a buffer descriptor
+    that ends at the tile's last valid row instead of per-row branches.
+    """
+    D = s.head_size
+    hw = D // 2
+    outputs = (("dk", hk, a["dk_mult"]), ("dv", hv, None))
+
+    def target(which, head):
+        # formed right before the tensor's stores: one slab (and descriptor)
+        # live at a time
+        slab = _slice_slab(
+            b, s, a, which, head=head, h0=h0, n_h=n_h, k0=k0, seq_kv=seq_kv
+        )
+        return _SliceTarget(b, s, slab, k0=k0, seq_kv=seq_kv)
+
+    with b.scf_if(live):
+        if s.acc_in_lds:
+            b.sync()  # the images' cells were last updated by other lanes
+            for which, head, mult in outputs:
+                view = step.dkv_f32_image(which)
+                _store_slice_rows(
+                    b, s, step, target(which, head), view, cols=D, col0=0,
+                    mult=mult, tid=tid,
+                )  # fmt: skip
+            return
+        if s.dkv_epilogue == "direct":
+            for which, head, mult in outputs:
+                dst = target(which, head)
+                if s.dkv_cell_vec == 4:
+                    for row, col0, vals in step.dkv_quad_rows(b, which, acc, mult):
+                        dst.store_vec(row, col0, b.vec_pack(vals, F32))
+                    continue
+                for row, items in step.dkv_row_slots(b, which, acc):
+                    if mult is not None:
+                        items = [(c, b.fmul(v, mult)) for c, v in items]
+                    dst.store_row(row, items)
+            return
+        pair = s.dkv_epilogue == "lds_staged_pair"
+        for which, head, mult in outputs:
+            dst = target(which, head)
+            if pair:
+                views = [
+                    step.dkv_f32_part(b, which, acc, mult, half=h, slot=h)
+                    for h in (0, 1)
+                ]
+                b.sync()
+                for h, view in enumerate(views):
+                    _store_slice_rows(
+                        b, s, step, dst, view, cols=hw, col0=h * hw, tid=tid
+                    )
+                b.sync()  # reads done before the buffers are written again
+                continue
+            for h in (0, 1):
+                view = step.dkv_f32_part(b, which, acc, mult, half=h)
+                b.sync()
+                _store_slice_rows(b, s, step, dst, view, cols=hw, col0=h * hw, tid=tid)
+                b.sync()  # reads done before the buffer is written again
+
+
+class _SliceTarget:
+    """One slice slab of the tile and its bounds form.
+
+    ``ws_bounds = "clamp"``: a store is predicated on its row being inside the
+    workspace and the sequence (one branch per row or chunk). ``"buffer"``:
+    every store goes through a buffer descriptor whose range ends at the
+    tile's last valid row, ``min(len_kv - k0, rows_left, kN0)`` rows of ``D``
+    floats (head-major rows are ``D`` floats apart; the validator requires the
+    head-major workspace), so the stores of rows past it are dropped by the
+    hardware and no branch is emitted. Either way exactly the rows ``k <
+    len_kv`` inside the workspace are written, with the same values.
+    """
+
+    def __init__(self, b, s, slab, *, k0, seq_kv) -> None:
+        self.b, self.slab = b, slab
+        self.k0, self.length = k0, seq_kv.length
+        self.buffer = s.ws_bounds == "buffer"
+        self.D = s.head_size
+        if self.buffer:
+            if slab.row_stride != self.D:
+                raise ValueError("buffer-bounded slices need the head-major workspace")
+            n = b.smin(b.sub(seq_kv.length, k0), slab.rows_left)
+            n = b.smax(b.smin(n, b.const_i32(s.block_n)), b.const_i32(0))
+            self.rsrc = b.buffer_rsrc(slab.ptr, b.mul(n, b.const_i32(4 * self.D)))
+
+    def ok(self, r):
+        b = self.b
+        return b.land(self.slab.row_ok(r), b.cmp_lt(b.add(self.k0, r), self.length))
+
+    def _offset(self, r, c):
+        """Byte offset of ``(r, c)`` from the slab base (head-major rows)."""
+        b = self.b
+        idx = b.mul(r, b.const_i32(self.D))
+        if isinstance(c, int):
+            if c:
+                idx = b.add(idx, b.const_i32(c))
+        else:
+            idx = b.add(idx, c)
+        return b.mul(idx, b.const_i32(4))
+
+    def _buffer_store(self, r, c, v) -> None:
+        b = self.b
+        n = v.type.count
+        zero = b.const_i32(0)
+        off = self._offset(r, c)
+        if n == 1:
+            b.buffer_store_f32(self.rsrc, off, zero, b.vec_extract(v, 0))
+            return
+        for k in range(0, n, 4):
+            part = v
+            if n > 4:
+                part = b.vec_pack([b.vec_extract(v, k + i) for i in range(4)], F32)
+            o = off if k == 0 else b.add(off, b.const_i32(4 * k))
+            b.buffer_store_vN_f32(self.rsrc, o, zero, part, min(n, 4))
+
+    def store_vec(self, r, c, v) -> None:
+        """``<n x f32>`` at row ``r``, column ``c`` of the slice tile."""
+        b = self.b
+        if self.buffer:
+            self._buffer_store(r, c, v)
+            return
+        with b.scf_if(self.ok(r)):
+            self.slab.store_vec_in_row(r, c, v)
+
+    def store_row(self, r, items) -> None:
+        """fp32 ``(column, value)`` pairs of row ``r``."""
+        b = self.b
+        if not self.buffer:
+            self.slab.store_row(r, items, b.cmp_lt(b.add(self.k0, r), self.length))
+            return
+        zero = b.const_i32(0)
+        for c, v in items:
+            b.buffer_store_f32(self.rsrc, self._offset(r, c), zero, v)
+
+
+def _store_slice_rows(b, s, step, dst, view, *, cols, col0, tid, mult=None) -> None:
+    """The ``kN0 x cols`` fp32 ``view`` to slice columns ``col0 ..`` as rows
+    of ``dkv_store_vec`` floats, chunks dealt to the CTA's threads and stored
+    by ``dst`` (a :class:`_SliceTarget`) where the row is inside the sequence
+    and the workspace. ``mult`` (when given) multiplies each value after the
+    read. A chunk index past the tile (the last round of a tile that the
+    threads do not divide) is skipped in both bounds forms."""
+    kn, vec = s.block_n, s.dkv_store_vec
+    if cols % vec:
+        raise ValueError(f"dkv_store_vec={vec} does not divide {cols} columns")
+    threads = step.geom.threads
+    per_row = cols // vec
+    total = kn * per_row
+    for it in range(-(-total // threads)):
+        chunk = tid if it == 0 else b.add(tid, b.const_i32(it * threads))
+        r = b.div(chunk, b.const_i32(per_row))
+        c = b.mul(b.mod(chunk, b.const_i32(per_row)), b.const_i32(vec))
+        cc = c if col0 == 0 else b.add(c, b.const_i32(col0))
+        tail = (it + 1) * threads > total
+
+        def read(r=r, c=c):
+            v = view.load(b, r, c, dtype=F32, n=vec)
+            if mult is not None:
+                v = b.vec_pack(
+                    [b.fmul(mult, b.vec_extract(v, i)) for i in range(vec)], F32
+                )
+            return v
+
+        if dst.buffer:
+            if tail:
+                with b.scf_if(b.cmp_lt(chunk, b.const_i32(total))):
+                    dst.store_vec(r, cc, read())
+            else:
+                dst.store_vec(r, cc, read())
+            continue
+        ok = dst.ok(r)
+        if tail:
+            ok = b.land(ok, b.cmp_lt(chunk, b.const_i32(total)))
+        with b.scf_if(ok):
+            dst.slab.store_vec_in_row(r, cc, read())
+
+
 def _dkv_slab(b, s, a, which, *, hk, k0, seq_kv, io):
     """The ``which`` (``"dk"`` / ``"dv"``) output slab of kv head ``hk`` from
     row ``k0`` (rows unclamped)."""
@@ -2897,6 +3365,7 @@ def _dkv_slab(b, s, a, which, *, hk, k0, seq_kv, io):
         b, a[{"dk": "dK", "dv": "dV"}[which]], dtype=io, seq=seq_kv,
         stage_vec=s.stage_vec,
         strides=(a[f"{which}_b"], a[f"{which}_h"], a[f"{which}_t"]),
+        narrow_vec=s.narrow_vec,
     ).slab(hk, k0, clamp=False)  # fmt: skip
 
 
@@ -2924,6 +3393,11 @@ def _direct_epilogue(
         # every accumulator slot stored from its register: no LDS, no barrier
         for which, ptr, prefix, mult in outputs:
             slab = out_slab(ptr, prefix)
+            if s.dkv_cell_vec == 4:
+                # an in-quad transpose first: 4 consecutive columns per store
+                quads = step.dkv_quad_rows(b, which, acc, mult)
+                _store_dkv_quads(b, s, a, slab, quads, k0=k0, seq_kv=seq_kv, io=io)
+                continue
             cells = step.dkv_cells(b, which, acc, mult)
             _store_dkv_cells(b, s, a, slab, cells, k0=k0, seq_kv=seq_kv, io=io)
         return
@@ -2983,6 +3457,22 @@ def _store_dkv_cells(b, s, a, slab, cells, *, k0, seq_kv, io) -> None:
         with b.scf_if(store):
             for col, v in items:
                 slab.store(k, col, b.select(row_live, v, zero))
+
+
+def _store_dkv_quads(b, s, a, slab, quads, *, k0, seq_kv, io) -> None:
+    """Each lane's ``(row, col0, [4 fp32])`` pieces (:meth:`BwdTileStep.
+    dkv_quad_rows`) rounded once to the I/O dtype and stored as 4 consecutive
+    elements, predicated per row as :func:`_store_dkv_cells` (the same values
+    to the same elements; one store per fragment instead of four)."""
+    zero = b.zero_vec(io, 4)
+    for row, col0, vals in quads:
+        k = b.add(k0, row)
+        store, row_live = dkv_store_rule(
+            b, k, seq_kv.length, seq_mode=s.seq_mode, s_kv_max=a["S_kv_max"]
+        )
+        with b.scf_if(store):
+            v = b.vec_cast_f32_to(b.vec_pack(vals, F32), io)
+            slab.store_vec(k, col0, b.select(row_live, v, zero))
 
 
 def build_attn_bwd_main(spec: AttnBwdSpec, *, arch: str):

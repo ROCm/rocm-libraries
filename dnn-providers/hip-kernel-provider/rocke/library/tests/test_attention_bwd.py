@@ -29,6 +29,7 @@ from kernels.common.attention_bwd import (
     LOOP_SYNCS,
     NOT_YET_EFFECTIVE_KNOBS,
     STEP_ORDERS,
+    _not_built,
     agpr_copy_budget,
     AttnBwdSpec,
     attn_bwd_arch_facts,
@@ -107,6 +108,7 @@ def test_every_catalog_knob_is_a_field():
         "s_in_agpr",
         "asm_tail_nop",
         "asm_cluster",
+        "asm_load_hoist",
         "scheduler_strategy",
         "warp_grid_g02",
         "warp_grid_g13",
@@ -612,6 +614,174 @@ def test_asm_cluster_gemm_issues_one_cluster_per_gemm(arch, nop):
         want = AGPR_ASM_TAIL_NOP[16] if nop is None else nop
         assert ir1.count(f"s_nop {want}") == n1
         assert ir0.count(f"s_nop {want}") == n0
+
+
+def _issue_tokens(ir: str) -> str:
+    """Program-order tokens of the IR: ``C`` an asm MFMA cluster, ``L`` an LDS
+    read (an addrspace(3) load or a 64-bit transpose read)."""
+    out = []
+    for line in ir.splitlines():
+        if " call " in line and "asm sideeffect" in line and "v_mfma_f32" in line:
+            out.append("C")
+        elif (" load " in line and "addrspace(3)" in line) or (
+            " call " in line and "ds.read.tr16.b64(" in line
+        ):
+            out.append("L")
+    return "".join(out)
+
+
+def test_asm_load_hoist_knob_values_and_couplings():
+    base = AttnBwdSpec(**_ASM)
+    assert base.asm_load_hoist is False
+    on = AttnBwdSpec(**_ASM, asm_load_hoist=True)
+    assert on.kernel_name() != base.kernel_name()
+    assert AttnBwdSpec(**_ASM, asm_load_hoist=False).kernel_name() == (
+        base.kernel_name()
+    )
+    for bad in (1, "yes", None):
+        with pytest.raises(ValueError, match="asm_load_hoist must be a bool"):
+            AttnBwdSpec(**_ASM, asm_load_hoist=bad)
+    for route in (None, "vgpr_form", "agpr_fence"):
+        with pytest.raises(ValueError, match="asm_load_hoist is legal"):
+            AttnBwdSpec(**dict(_ASM, agpr_route=route), asm_load_hoist=True)
+    with pytest.raises(ValueError, match="asm_load_hoist is legal"):
+        AttnBwdSpec(head_size=64, asm_load_hoist=True)
+
+
+@pytest.mark.parametrize("order", ["g1g3g4", "g3g1g4", "g1g4g3", "g4g3g1"])
+@pytest.mark.parametrize("cluster", ["k_step", "gemm"])
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+def test_asm_load_hoist_moves_the_second_gemm_reads(arch, cluster, order):
+    """``asm_load_hoist``: every LDS read of the G1 / G3 GEMM issued second
+    moves above the first one's first asm cluster; the clusters, the reads and
+    every intrinsic MFMA are the same (count and text), so the kernel is the
+    unhoisted one with those reads issued earlier."""
+    import re
+
+    from kernels.common._attention_bwd_body import BwdTileGeometry
+
+    ref_spec = _asm_tile(arch, asm_cluster=cluster, stage_order=order)
+    hoist_spec = dataclasses.replace(ref_spec, asm_load_hoist=True)
+    g = BwdTileGeometry.from_spec(validate_attn_bwd_spec(hoist_spec, arch), arch)
+    assert g.asm_load_hoist and g.g1.k_steps == 2
+    ref, hoist = _ir_without_name(ref_spec, arch), _ir_without_name(hoist_spec, arch)
+    assert ref != hoist
+    t0, t1 = _issue_tokens(ref), _issue_tokens(hoist)
+    assert sorted(t0) == sorted(t1)  # the same clusters and LDS reads
+    call = r"call <4 x float> @llvm\.amdgcn\.mfma"
+    assert len(re.findall(call, ref)) == len(re.findall(call, hoist))
+    asm = re.compile(r'asm sideeffect "([^"]*v_mfma[^"]*)"')
+    assert sorted(asm.findall(ref)) == sorted(asm.findall(hoist))
+    # every cluster opens with the lead wait (s_nop 1, a newline, a tab)
+    assert all(t.startswith("s_nop 1\\0A\\09") for t in asm.findall(hoist))
+    # B reads of one G1 / G3 GEMM per q step (A is the register relabel)
+    per_frag = g.g1.op.b_frag_len // 4 if g.reader == "tr16" else g.g1.op.b_frag_len
+    second = g.g1.frags_n * g.g1.k_steps * per_frag
+    n_cl = 2 * (g.g1.k_steps if cluster == "k_step" else 1)  # G1 + G3 clusters
+
+    def bodies(t):
+        """Per q-step body (``n_cl`` clusters): the reads right before its
+        first cluster and the reads between its first and last cluster."""
+        out, pos = [], 0
+        while True:
+            first = t.find("C", pos)
+            if first < 0:
+                return out
+            k = first
+            while k > 0 and t[k - 1] == "L":
+                k -= 1
+            count, end = 0, first
+            while count < n_cl:
+                end = t.index("C", end)
+                count += 1
+                end += 1
+            inside = t[first:end].count("L")
+            out.append((first - k, inside))
+            pos = end
+
+    b0, b1 = bodies(t0), bodies(t1)
+    assert len(b0) == len(b1) > 0
+    g4_between = order.index("g4") == 2  # G4 (and its reads) between G1 and G3
+    for (pre0, in0), (pre1, in1) in zip(b0, b1):
+        # the run before the first cluster grows by exactly the second
+        # GEMM's reads, and none of them is left inside the clusters' span
+        assert pre1 == pre0 + second
+        assert in1 == in0 - second
+        if not g4_between:
+            first_rest = (g.g1.k_steps - 1) * g.g1.frags_n * per_frag
+            assert in1 == (first_rest if cluster == "k_step" else 0)
+
+
+def _wide_g13(d, dtype, **kw):
+    """gfx950 start point with the 16x16x32 G1 / G3 atom (kM0 = 32 at d128)."""
+    tile = {} if d != 128 else dict(block_m=32)
+    return AttnBwdSpec(head_size=d, dtype=dtype, atom_g13="16x16x32", **tile, **kw)
+
+
+@pytest.mark.parametrize("dtype", ["bf16", "fp16"])
+@pytest.mark.parametrize("d", [32, 64, 128])
+def test_wide_g13_atom_on_the_transpose_read(d, dtype):
+    """gfx950 ``atom_g13 = 16x16x32`` on the transpose read with the register
+    relabel: legal and built; G1 / G3 issue half the MFMAs of the 16x16x16
+    twin (all 16x16x32), the transpose-read count is the twin's, no b128 read,
+    no alloca; the default atom is unchanged."""
+    import re
+
+    from kernels.common._attention_bwd_body import BwdTileGeometry
+
+    wide = validate_attn_bwd_spec(_wide_g13(d, dtype), "gfx950")
+    twin = dataclasses.replace(wide, atom_g13="16x16x16")
+    assert (wide.transpose_source, wide.pt_route) == ("tr_read", "relabel")
+    assert not _not_built(wide) and not _not_built(twin)
+    assert attn_bwd_default_geometry("gfx950", d, dtype)["atom_g13"] == "16x16x16"
+    g = BwdTileGeometry.from_spec(wide, "gfx950")
+    assert g.b13_coords.kperm and g.relabel_plan.needs_k_perm
+    ir_w, ir_t = _ir_without_name(wide, "gfx950"), _ir_without_name(twin, "gfx950")
+    x16 = r"call <4 x float> @llvm\.amdgcn\.mfma\.f32\.16x16x16"
+    x32 = r"call <4 x float> @llvm\.amdgcn\.mfma\.f32\.16x16x32"
+    n16 = [len(re.findall(x16, s)) for s in (ir_t, ir_w)]
+    n32 = [len(re.findall(x32, s)) for s in (ir_t, ir_w)]
+    assert n16[1] == 0 or wide.atom_g02 == "16x16x16" or wide.atom_g4 == "16x16x16"
+    moved = n16[0] - n16[1]  # the twin's G1 / G3 MFMAs
+    assert moved > 0 and n32[1] - n32[0] == moved // 2
+    tr = "call <4 x i16> @llvm.amdgcn.ds.read.tr16.b64("
+    assert ir_w.count(tr) == ir_t.count(tr) > 0
+    assert "tr16.b128" not in ir_w and "alloca" not in ir_w
+
+
+def test_wide_g13_geometry_needs_the_permuted_b(monkeypatch):
+    """The geometry check pairs the K-permuted relabel with the K-permuted
+    G1 / G3 B: catalog B coordinates are refused before any IR."""
+    from kernels.common import _attention_bwd_body as body
+
+    wide = validate_attn_bwd_spec(_wide_g13(64, "bf16"), "gfx950")
+    body.BwdTileGeometry.from_spec(wide, "gfx950")
+    from kernels.common._attention_bwd_frag import operand_coords
+
+    monkeypatch.setattr(
+        body, "kperm_b_operand_coords", lambda plan, g0, g1: operand_coords(g1.op, "b")
+    )
+    with pytest.raises(ValueError, match="same permutation"):
+        body.BwdTileGeometry.from_spec(wide, "gfx950")
+    with pytest.raises(ValueError, match="block_m >= 32"):
+        AttnBwdSpec(head_size=64, atom_g13="16x16x32", block_m=16)
+
+
+@pytest.mark.parametrize("hoist", [False, True])
+def test_wide_g13_atom_on_the_asm_route(hoist):
+    """The 16x16x32 G1 / G3 atom with the K-permuted transpose read under
+    ``asm_g13`` (one K step: the gemm cluster resolves to k_step), with and
+    without the operand hoist: every G1 / G3 MFMA is a 16x16x32 asm MFMA."""
+    import re
+
+    spec = _wide_g13(64, "bf16", agpr_alloc=(128, 128), agpr_route="asm_g13")
+    spec = dataclasses.replace(spec, asm_load_hoist=hoist, sched="none")
+    r = validate_attn_bwd_spec(spec, "gfx950")
+    assert not _not_built(r)
+    ir = _ir_without_name(spec, "gfx950")
+    assert len(re.findall(r"v_mfma_f32_16x16x32_bf16 \$", ir)) > 0
+    assert "v_mfma_f32_16x16x16_bf16 $" not in ir
+    assert "alloca" not in ir
 
 
 def test_mfma_asm_mnemonic_table():
@@ -1408,17 +1578,22 @@ def test_params_reject_unknown_stage():
 # ---------------------------------------------------------------------------
 
 
-def test_builder_signature_and_unbuilt_knobs():
+def test_builder_signature_and_unbuilt_knobs(monkeypatch):
+    import kernels.common.attention_bwd as ab
+
     sig = inspect.signature(build_attn_bwd_main)
     assert list(sig.parameters) == ["spec", "arch"]
     assert sig.parameters["arch"].kind is inspect.Parameter.KEYWORD_ONLY
-    # knob values whose emission is not built yet raise before any IR
-    # (tr_read with the K-permuted 16x16x32 G1 / G3 B operand, gfx950)
-    for kw in (dict(transpose_source="tr_read", atom_g13="16x16x32"),):
+    # a finding of the emission check (_not_built) raises before any IR
+    wide = AttnBwdSpec(head_size=64, transpose_source="tr_read", atom_g13="16x16x32")
+    with monkeypatch.context() as mp:
+        mp.setattr(ab, "_not_built", lambda spec: ["an unbuilt emission"])
         with pytest.raises(NotImplementedError, match="not built for"):
-            build_attn_bwd_main(AttnBwdSpec(head_size=64, **kw), arch="gfx950")
+            build_attn_bwd_main(wide, arch="gfx950")
     # masks, edge tiles, head packing, atomic dK / dV, THD sequences, the
-    # token-major workspace, the XT transposes and the xor swizzle are built
+    # token-major workspace, the XT transposes, the xor swizzle and the
+    # K-permuted 16x16x32 G1 / G3 B on the transpose read are built
+    build_attn_bwd_main(wide, arch="gfx950")
     for kw in (
         dict(transpose_source="xt_lds"),
         dict(transpose_source="xt_lds", lds_swizzle="qt=xor,dot=pad8,q=xor"),

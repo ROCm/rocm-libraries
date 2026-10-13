@@ -48,7 +48,11 @@ Dense-only knobs (compile-time fields, defaults first):
   order;
 * ``xcd_remap``: the runtime chiplet remap of the CTA index (kernargs
   ``xcd_n``, ``xcd_chunk``; ``xcd_n = 0`` is the identity);
-* ``dq_mode``: ``"atomic"`` (``"split"`` needs the split dQ kernel, not built);
+* ``dq_mode``: ``"atomic"`` (G4 in the main kernel, fp32 dQ atomics, a dQ
+  convert) or ``"split"`` (the main kernel computes dK / dV only; dQ comes
+  from the dense Q-parallel dQ kernel of
+  :mod:`kernels.common.attention_dense_bwd_dq`, on the targets of
+  ``SPLIT_DQ_ARCHS``);
 * ``body_variant`` (per-arch subclasses): ``"general"`` (the shared body), or
   the per-arch bodies registered but not built yet.
 
@@ -418,8 +422,6 @@ def dense_bwd_not_built(spec: AttentionDenseBwdSpec) -> list[str]:
     variant = getattr(spec, "body_variant", "general")
     if variant != "general":
         out.append(f"body_variant={variant!r}")
-    if spec.dq_mode != "atomic":
-        out.append(f"dq_mode={spec.dq_mode!r}")
     return out
 
 
@@ -459,20 +461,35 @@ def validate_attn_dense_bwd_spec(spec: AttentionDenseBwdSpec, arch: str) -> Attn
     return body
 
 
+# Body levers the dense shell does not build (their defaults only): the slice
+# sink (its slice slabs, reduce launches and workspace terms are the general
+# plan's and shell's), the buffer-bounded workspace stats (the dense shell
+# forms its own stats view), the per-slot quad epilogue, the user-tensor
+# access width cap and the carried Q / dO slab offsets (the dense addressing
+# is its own).
+_DENSE_SHELL_DEFAULTS = (
+    ("dkv_sink", "atomic"),
+    ("ws_bounds", "clamp"),
+    ("dkv_cell_vec", 1),
+    ("narrow_vec", 1),
+    ("slab_carry", False),
+)
+
+
 def _shell_not_built(body: AttnBwdSpec) -> list[str]:
     """Resolved body values that need the general main-kernel shell, which the
-    dense shell does not reproduce: the Q / dO prefetch ring (``ring_depth >
-    1`` without the barrier merge, or the DMA path) built by the general shell
-    and handed to the shared kv-tile body, and the mirror pass
-    (``lb_mirror``)."""
+    dense shell does not reproduce: the mirror pass (``lb_mirror``, a second
+    kv tile per CTA) and the levers of ``_DENSE_SHELL_DEFAULTS``. The Q / dO
+    prefetch ring (register or DMA path, every depth) is built by the dense
+    shell as by the general one."""
     out = []
-    if body.global_path != "vgpr":
-        out.append(f"global_path={body.global_path!r} (dense shell)")
-    if body.ring_depth != 1 and getattr(body, "barrier_merge", "off") != "on":
-        out.append(f"ring_depth={body.ring_depth} (dense shell)")
     if getattr(body, "lb_mirror", False):
         # the paired second kv-tile pass is part of the general shell
         out.append("lb_mirror=True (dense shell)")
+    for name, default in _DENSE_SHELL_DEFAULTS:
+        value = getattr(body, name, default)
+        if value != default:
+            out.append(f"{name}={value!r} (dense shell)")
     return out
 
 

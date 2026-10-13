@@ -1327,6 +1327,23 @@ def is_aa_arm(name: str) -> bool:
     return name.endswith(AA_SUFFIX)
 
 
+def rocke_arms(configs: Sequence, aa_mode: str = "on") -> tuple[list, dict]:
+    """``(arm names, {arm: configuration})`` of the rocKE configurations and
+    their same-kernel controls: each control is the same configuration, built
+    and timed as its own arm; the first configuration's (``"on"``), one per
+    configuration (``"all"``) or none (``"off"``)."""
+    arms = [rocke_arm_name(c.label) for c in configs]
+    by_label = {rocke_arm_name(c.label): c for c in configs}
+    if aa_mode not in ("on", "off", "all"):
+        raise ValueError(f"aa_control={aa_mode!r} not in ('on', 'off', 'all')")
+    if configs and aa_mode != "off":
+        for cfg in configs if aa_mode == "all" else configs[:1]:
+            aa = rocke_arm_name(cfg.label) + AA_SUFFIX
+            arms.append(aa)
+            by_label[aa] = cfg
+    return arms, by_label
+
+
 def balanced_orders(n: int) -> list[list[int]]:
     """Arm orders of a balanced (Williams) Latin square on ``n`` arms.
 
@@ -1540,12 +1557,7 @@ def run_attempt(
     configs = _rocke_configs(args)
     cache = _compile_cache(args)
     gate = load_gate(args.gate)
-    arms = [rocke_arm_name(c.label) for c in configs]
-    by_label = {rocke_arm_name(c.label): c for c in configs}
-    if configs and getattr(args, "aa_control", "on") == "on":
-        aa = rocke_arm_name(configs[0].label) + AA_SUFFIX
-        arms.append(aa)  # same configuration, built and timed as its own arm
-        by_label[aa] = configs[0]
+    arms, by_label = rocke_arms(configs, getattr(args, "aa_control", "on"))
     if rocke_factory is not None:
         arms.append("rocke|-")
     arms += competitor_arms(cell, args)
@@ -1874,35 +1886,59 @@ def summarize_cell(
         }
         if len(out["verdicts"]) == 1:
             out["verdict"] = next(iter(out["verdicts"].values()))
+        per_arm = aa_controls(out, constants, reruns_done)
         aa = aa_control(out, constants, reruns_done)
         if aa is not None:
             out["aa_control"] = aa
+            out["aa_controls"] = per_arm
             out["flagged"] = aa == "fail"
+    return out
+
+
+def aa_controls(
+    summary: Mapping, constants: Mapping, reruns_done: int = 0
+) -> dict[str, str]:
+    """Per rocKE arm with a same-kernel twin (``--aa-control``): ``fail`` when
+    either copy is judged slower than the other, ``incomplete`` when a copy
+    has too few kept attempts, ``ok`` otherwise."""
+    out = {}
+    for name, e in summary["arms"].items():
+        if not is_aa_arm(name):
+            continue
+        base_name = name[: -len(AA_SUFFIX)]
+        base = summary["arms"].get(base_name, {})
+        if e.get("status") != "ok" or base.get("status") != "ok":
+            out[base_name] = "incomplete"
+            continue
+        a, b = e["attempt_medians_ms"], base["attempt_medians_ms"]
+        if min(len(a), len(b)) < MIN_KEPT_ATTEMPTS:
+            out[base_name] = "incomplete"
+            continue
+        both = (
+            paired_verdict(a, b, constants, reruns_done=reruns_done),
+            paired_verdict(b, a, constants, reruns_done=reruns_done),
+        )
+        out[base_name] = "fail" if "fail" in both else "ok"
     return out
 
 
 def aa_control(
     summary: Mapping, constants: Mapping, reruns_done: int = 0
 ) -> str | None:
-    """Verdict of the same-kernel control: ``fail`` when either copy of the
-    configuration is judged slower than the other (the job's verdicts are then
-    flagged), ``incomplete`` when a copy has too few kept attempts, ``ok``
-    otherwise; ``None`` without a control arm."""
-    for name, e in summary["arms"].items():
-        if not is_aa_arm(name):
-            continue
-        base = summary["arms"].get(name[: -len(AA_SUFFIX)], {})
-        if e.get("status") != "ok" or base.get("status") != "ok":
-            return "incomplete"
-        a, b = e["attempt_medians_ms"], base["attempt_medians_ms"]
-        if min(len(a), len(b)) < MIN_KEPT_ATTEMPTS:
-            return "incomplete"
-        both = (
-            paired_verdict(a, b, constants, reruns_done=reruns_done),
-            paired_verdict(b, a, constants, reruns_done=reruns_done),
-        )
-        return "fail" if "fail" in both else "ok"
-    return None
+    """Verdict of the same-kernel controls of a cell: ``fail`` when a copy of
+    a configuration is judged slower than the other (the job's verdicts are
+    then flagged), ``incomplete`` when a copy has too few kept attempts (and
+    none fails), ``ok`` otherwise; ``None`` without a control arm. One twin
+    under ``--aa-control on``, one per configuration under ``all``
+    (:func:`aa_controls` has the verdict of each)."""
+    per = aa_controls(summary, constants, reruns_done)
+    if not per:
+        return None
+    if "fail" in per.values():
+        return "fail"
+    if "incomplete" in per.values():
+        return "incomplete"
+    return "ok"
 
 
 def order_imbalance(attempts: Sequence[dict]) -> int:
@@ -2090,10 +2126,12 @@ def make_parser() -> argparse.ArgumentParser:
     )
     ap.add_argument(
         "--aa-control",
-        choices=("on", "off"),
+        choices=("on", "off", "all"),
         default="on",
-        help="time a second copy of the first rocKE configuration as a "
-        "same-kernel control; a cell whose copies differ is flagged",
+        help="time a second copy of the first rocKE configuration ('on') or of "
+        "every rocKE configuration ('all': each arm with its own noise control, "
+        "e.g. arms with different runtime values) as a same-kernel control; a "
+        "cell whose copies differ is flagged",
     )
     ap.add_argument("--fp64-min-scores", type=int, default=FP64_SAMPLE_MIN_SCORES)
     ap.add_argument("--ref-dir", default=None, help=argparse.SUPPRESS)

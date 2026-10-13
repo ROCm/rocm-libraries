@@ -154,12 +154,65 @@ def _broken(plan):
     return dataclasses.replace(plan, slot_src=plan.slot_src[1:] + plan.slot_src[:1][:n])
 
 
+def _readers():
+    return ("plain", "tr16") if _ARCH == "gfx950" else ("plain",)
+
+
+@pytest.mark.parametrize("reader", _readers())
 @pytest.mark.parametrize("k1", _atom_ks())
-def test_broken_relabel_is_detected(monkeypatch, k1):
+def test_broken_relabel_is_detected(monkeypatch, k1, reader):
     real = G.plan_c_to_a
     monkeypatch.setattr(G, "plan_c_to_a", lambda c, a: _broken(real(c, a)))
     s, s_ref, dv, dv_ref = run_chain_probe(
-        _ARCH, "fp16", k_m0=32, k_n0=64, d=64, waves=4, atom_k0=16, atom_k1=k1
-    )
+        _ARCH, "fp16", k_m0=32, k_n0=64, d=64, waves=4, atom_k0=16, atom_k1=k1,
+        do_reader=reader,
+    )  # fmt: skip
     np.testing.assert_allclose(s, s_ref, **TOL)
     assert not np.allclose(dv, dv_ref, **TOL), "a broken relabel went unnoticed"
+
+
+_on_gfx950 = pytest.mark.skipif(
+    _ARCH != "gfx950", reason=f"the transpose read is gfx950-only; device is {_ARCH}"
+)
+
+
+@_on_gfx950
+@pytest.mark.parametrize(
+    "case", _chain_cases(), ids=lambda c: "m{}n{}d{}w{}k{}k{}".format(*c)
+)
+@pytest.mark.parametrize("dtype", DTYPES)
+def test_relabel_chain_through_the_transpose_read(dtype, case):
+    """The chain with ``dO`` read by ``ds_read_tr16_b64``: the catalog plan for
+    a 16x16x16 consumer, the stacked plan for the K-permuted B of a 16x16x32
+    consumer (the backward's G1 / G3 path on the transpose read)."""
+    k_m0, k_n0, d, w, k0, k1 = case
+    s, s_ref, dv, dv_ref = run_chain_probe(
+        _ARCH, dtype, k_m0=k_m0, k_n0=k_n0, d=d, waves=w, atom_k0=k0, atom_k1=k1,
+        do_storage="k_outer", do_reader="tr16",
+    )  # fmt: skip
+    np.testing.assert_allclose(s, s_ref, **TOL)
+    np.testing.assert_allclose(dv, dv_ref, **TOL)
+
+
+@_on_gfx950
+@pytest.mark.parametrize("offsets", [(16, 0), (0, 8), (0, 4)])
+def test_wrong_stacked_offsets_are_detected_on_the_device(monkeypatch, offsets):
+    """Negative control of the stacked plan: an emitter whose second read
+    lands at another K offset (the proof bypassed) gives a wrong dV."""
+    from kernels.common import _attention_bwd_frag as F
+
+    real = F.tr16_read_plan
+
+    def wrong(coords):
+        plan = real(coords)
+        if plan.kind != "stacked":
+            return plan
+        return dataclasses.replace(plan, k_offsets=offsets)
+
+    monkeypatch.setattr(F, "tr16_read_plan", wrong)
+    s, s_ref, dv, dv_ref = run_chain_probe(
+        _ARCH, "fp16", k_m0=32, k_n0=64, d=64, waves=4, atom_k0=16, atom_k1=32,
+        do_storage="k_outer", do_reader="tr16",
+    )  # fmt: skip
+    np.testing.assert_allclose(s, s_ref, **TOL)
+    assert not np.allclose(dv, dv_ref, **TOL), "a wrong stacked read went unnoticed"

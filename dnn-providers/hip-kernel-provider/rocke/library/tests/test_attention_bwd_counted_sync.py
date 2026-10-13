@@ -210,14 +210,16 @@ def test_values_defaults_and_couplings():
         (dict(ring_depth=2), "ring_depth"),
         (dict(qdo_stage="loads_first"), "qdo_stage"),
         (dict(stats_load="step_top"), "stats_load"),
-        (dict(sched="stage_table"), "sched"),
+        (dict(sched="stage_table_atomics", counted_issue="late"), "early"),
         (dict(step_order="head_outer", edge_tiles=True), "grouped head-outer"),
     ):
         for arch in MFMA_ARCHS:
             with pytest.raises(ValueError, match=match):
                 validate_attn_bwd_spec(dataclasses.replace(c, **kw), arch)
-    # the flat head-outer loop and edge tiles alone stay legal
-    for kw in (dict(step_order="head_outer"), dict(edge_tiles=True)):
+    # the flat head-outer loop, edge tiles alone and the schedule values (the
+    # deferred atomics with the early issue) stay legal
+    for kw in (dict(step_order="head_outer"), dict(edge_tiles=True),
+               dict(sched="stage_table"), dict(sched="stage_table_atomics")):  # fmt: skip
         for arch in MFMA_ARCHS:
             validate_attn_bwd_spec(dataclasses.replace(c, **kw), arch)
     with pytest.raises(ValueError, match="global_path"):
@@ -261,7 +263,7 @@ def test_registry_axes():
     assert ls.applies("counted", {})
     assert not ls.applies("counted", {"ring_depth": 2})
     assert not ls.applies("counted", {"qdo_stage": "joint"})
-    assert not ls.applies("counted", {"sched": "stage_table"})
+    assert ls.applies("counted", {"sched": "stage_table"})
     assert not ls.applies("counted", {"barrier_merge": "on"})
     assert not ls.applies("counted", {"step_order": "head_outer", "edge_tiles": True})
     assert ls.applies("counted", {"step_order": "head_outer"})
@@ -269,6 +271,8 @@ def test_registry_axes():
     assert ci.choices == COUNTED_ISSUES and ci.family == 5
     assert ci.values("gfx1151") == ("early",)
     assert ci.applies("late", {"loop_sync": "counted"})
+    sta = {"loop_sync": "counted", "sched": "stage_table_atomics"}
+    assert ci.applies("early", sta) and not ci.applies("late", sta)
     assert not ci.applies("late", {"loop_sync": "full"})
     for name in ("qdo_stage", "stats_load"):
         ax = backward_axis(name)
@@ -549,11 +553,11 @@ def test_mirror_edge_rows_are_refused():
 
 def _compile(kernel, arch):
     pytest.importorskip("rocke.runtime.comgr")
-    pytest.importorskip("torch")  # torch's comgr: the production one
     from rocke.helpers.compile import compile_kernel
 
-    from ._attention_bwd_resources import find_objdump
+    from ._attention_bwd_resources import find_objdump, pin_production_comgr
 
+    pin_production_comgr()  # torch's bundled comgr, by path; torch not imported
     if find_objdump() is None:
         pytest.skip("llvm-objdump not found")
     try:

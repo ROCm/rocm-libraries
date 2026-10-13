@@ -15,6 +15,13 @@ stats view, the per-kv-tile driver and the dK / dV epilogues of
   or past the sequence end reads as zero (hardware range check) instead of
   being clamped, and the remaining voffset is a small i32 (checked at build
   time). ``oob = "clamp"`` clamps rows exactly like the general family.
+  The Q / dO prefetch ring loads Q and dO through a global pointer (its DMA
+  copies take a pointer and an i32 offset; its register loads select between
+  the Q and dO pointers), so under ``buffer_oob`` those two tensors get the
+  global-pointer view of :class:`DenseFixedAddr` (no row clamp in a
+  non-ragged kernel, where no q row passes the sequence end; a ragged kernel
+  clamps them as ``oob = "clamp"`` does); K and V keep their buffer
+  resources.
 * :class:`DiagonalBand` / :class:`DenseNoMask`: the mask policies of the
   general family over compile-time lengths and band bounds (every compare
   folds to constants), plus a compile-time classification over every kv tile:
@@ -24,6 +31,13 @@ stats view, the per-kv-tile driver and the dK / dV epilogues of
   interior loop is not emitted (``static_runs``, read by the per-kv-tile
   driver). Otherwise the edge / interior split of each kv tile is the
   general family's formula over constants.
+* the Q / dO prefetch ring of the general shell
+  (:class:`~kernels.common._attention_bwd_ring.QRing`: the register or DMA
+  path at depth 2 or 3, and the DMA path at depth 1), built per kv tile from
+  the same body geometry, LDS plan, stats view and dQ atomic count and handed
+  to the shared per-kv-tile driver. The merged-barrier 2-slot ring
+  (``barrier_merge = "on"``) stages inside the tile step, as in the general
+  family.
 * the CTA decode: one kv tile per CTA on the ``(n_kv_tiles, h_k * g_split,
   B)`` grid (with the runtime chiplet remap under ``xcd_remap``), or a
   persistent grid of ``num_persistent`` CTAs striding over the work items in
@@ -37,6 +51,12 @@ stats view, the per-kv-tile driver and the dK / dV epilogues of
 The body knobs ``static_scale`` (multipliers that are 1.0 under the compiled
 scale placement are not applied) and ``ptr_noalias`` (over the dense pointer
 list) follow the general family's rules.
+
+``dq_mode = "split"``: the main kernel computes dK / dV only (a ``NullSink``:
+no G4, no dS tile, no dQ atomics, no ``WS_DQ`` access; the kernarg stays in
+the ABI), as the general shell does; the prefetch ring's DMA wait then counts
+no dQ atomics. dQ comes from the dense split dQ kernel
+(:mod:`kernels.common.attention_dense_bwd_dq`).
 
 Batched rows of dK / dV past the sequence (ragged kernels) are never stored
 (the direct epilogue's store rule with ``S_kv_max = seqlen_kv``), and q rows
@@ -74,7 +94,8 @@ from kernels.common._attention_bwd_body import (
 )
 from kernels.common._attention_bwd_frag import ir_type
 from kernels.common._attention_bwd_gemm import lane_and_wave
-from kernels.common._attention_bwd_sinks import AtomicWorkspaceSink
+from kernels.common._attention_bwd_ring import QRing
+from kernels.common._attention_bwd_sinks import AtomicWorkspaceSink, NullSink
 from kernels.common._attention_bwd_worklist import (
     decode_cta,
     head_range,
@@ -85,6 +106,7 @@ from kernels.common.attention_bwd import (
     BWD_BARRIER_FENCE,
     SPLIT_AGPR_ROUTES,
     _kv_tile,
+    _merged_ring,
     attn_bwd_arch_facts,
     lds_plan,
     static_unit_mults,
@@ -178,6 +200,13 @@ class DenseFixedAddr:
     :class:`BufferRowSlab` (``oob = "buffer_oob"``) or the general family's
     clamped :class:`~kernels.common._attention_bwd_addr.RowSlab`
     (``oob = "clamp"``).
+
+    ``global_view = True`` (Q and dO of a kernel with the prefetch ring,
+    under ``buffer_oob``): ``slab`` returns a
+    :class:`~kernels.common._attention_bwd_addr.RowSlab` over the head's
+    global pointer instead of a buffer resource. Its rows are clamped only in
+    a ``ragged`` kernel (exactly as ``oob = "clamp"``); in a non-ragged one
+    every q tile lies inside the sequence.
     """
 
     def __init__(
@@ -191,19 +220,24 @@ class DenseFixedAddr:
         seqlen: int,
         head_size: int,
         oob: str,
+        global_view: bool = False,
+        ragged: bool = True,
     ) -> None:
         self.b = b
         self.dtype = dtype
         self.strides = tuple(int(s) for s in strides)
         self.oob = oob
         sb, _sh, st = self.strides
-        if oob == "clamp":
+        if oob not in ("buffer_oob", "clamp"):
+            raise ValueError(f"oob={oob!r} not in ('buffer_oob', 'clamp')")
+        # The global-pointer view of a buffer_oob tensor clamps only where a
+        # row can pass the sequence end (a ragged kernel).
+        self._clamp = oob == "clamp" or ragged
+        if oob == "clamp" or global_view:
             self._strided = StridedTensorAddr(
                 b, ptr, dtype=dtype, strides=self.strides, seq=seq, stage_vec=8
             )
             return
-        if oob != "buffer_oob":
-            raise ValueError(f"oob={oob!r} not in ('buffer_oob', 'clamp')")
         self._strided = None
         off = b.mul(_i64(b, seq.batch), b.const_i64(sb * _ELEM_BYTES))
         self._batch_ptr = b.global_ptr_add(ptr, off)
@@ -211,7 +245,7 @@ class DenseFixedAddr:
 
     def slab(self, h, row0=0, *, clamp: bool = True):
         if self._strided is not None:
-            return self._strided.slab(h, row0, clamp=clamp)
+            return self._strided.slab(h, row0, clamp=clamp and self._clamp)
         b = self.b
         _sb, sh, st = self.strides
         ptr = self._batch_ptr
@@ -376,6 +410,12 @@ def emit_dense_bwd_main(spec: AttentionDenseBwdSpec, arch: str, *, sentinel=True
     group = h_q // h_k
     n_kv_tiles = math.ceil(s_kv / kn)
     atomic = spec.dkv_mode == "atomic"
+    split = spec.dq_mode == "split"
+    # The Q / dO prefetch ring, by the general shell's rule (_cta_setup):
+    # every staging but the synchronous (vgpr, 1) one, unless the merged-
+    # barrier 2-slot ring stages the q steps instead.
+    staged = (body.global_path, body.ring_depth) != ("vgpr", 1)
+    ringed = staged and not _merged_ring(body)
 
     b = IRBuilder(spec.kernel_name())
     # the general family's barrier fence (the same tile step, staging and
@@ -450,14 +490,16 @@ def emit_dense_bwd_main(spec: AttentionDenseBwdSpec, arch: str, *, sentinel=True
             gv=c(group), g_split=g_split,
         )  # fmt: skip
 
-        def tensor(name, role, seq, seqlen):
+        def tensor(name, role, seq, seqlen, *, global_view=False):
             return DenseFixedAddr(
                 b, a[name], dtype=io, strides=spec.strides(role), seq=seq,
                 seqlen=seqlen, head_size=spec.head_size, oob=spec.oob,
+                global_view=global_view, ragged=spec.ragged,
             )  # fmt: skip
 
-        q_addr = tensor("Q", "q", seq_q, s_q)
-        do_addr = tensor("dO", "do", seq_q, s_q)
+        # the prefetch ring reads Q / dO through global pointers
+        q_addr = tensor("Q", "q", seq_q, s_q, global_view=ringed)
+        do_addr = tensor("dO", "do", seq_q, s_q, global_view=ringed)
         k_addr = tensor("K", "k", seq_kv, s_kv)
         v_addr = tensor("V", "v", seq_kv, s_kv)
         nh = c(h_q) if spec.ws_layout == "token_major" else None
@@ -475,19 +517,34 @@ def emit_dense_bwd_main(spec: AttentionDenseBwdSpec, arch: str, *, sentinel=True
             ws("WS_LSE2", 1), ws("WS_DSUM", 1),
             n_heads=c(h_q) if body.stats_vec != 1 else None,
         )  # fmt: skip
-        sink = AtomicWorkspaceSink(
-            b, ws("WS_DQ", spec.head_size), seq=seq_q, scale=a["dq_mult"]
-        )
+        if split:
+            # dQ comes from the dense Q-parallel dQ kernel: no G4, no dS tile,
+            # no WS_DQ access (the kernarg stays in the ABI, unused)
+            sink = NullSink()
+        else:
+            sink = AtomicWorkspaceSink(
+                b, ws("WS_DQ", spec.head_size), seq=seq_q, scale=a["dq_mult"]
+            )
         step = BwdTileStep(
             b, geom, mask=mask, stats=stats, dq_sink=sink, lds=lds, tid=tid,
             lane=lane, wave=wave, scale_log2=a["scale_log2"], ds_mult=a["ds_mult"],
             sentinel=sentinel,
         )  # fmt: skip
+        ring = None
+        if ringed:
+            # The general shell's ring on the same geometry, LDS plan and
+            # stats view; the DMA wait counts the step's dQ atomics (none
+            # under split dQ, whose main kernel emits no G4).
+            n_atomics = km * spec.head_size // (geom.waves * geom.wave_size)
+            ring = QRing(
+                b, geom, lds, tid=tid, lane=lane, wave=wave, stats=stats,
+                n_atomics=0 if split else n_atomics,
+            )  # fmt: skip
         _kv_tile(
             b, body, shared, step, mask, kt=work.first_kt, hk=heads.hk, hv=heads.hv,
             h0=heads.h0, n_h=heads.n_heads, seq_q=seq_q, seq_kv=seq_kv,
             q_addr=q_addr, do_addr=do_addr, k_addr=k_addr, v_addr=v_addr, io=io,
-            tid=tid,
+            tid=tid, ring=ring,
         )  # fmt: skip
 
     def split_linear(lin, *, unit_major_last: bool):

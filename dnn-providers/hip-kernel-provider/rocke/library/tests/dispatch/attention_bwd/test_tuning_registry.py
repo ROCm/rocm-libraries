@@ -147,11 +147,13 @@ def test_numerics_classes():
         "dq_stats_prescale",
         "bwd_exp2",
         "stats_fma",
+        "dkv_sink",
     }
     # the schedule, epilogue, LDS layout and aux knobs are bit for bit
     added = {
         "asm_tail_nop",
         "asm_cluster",
+        "asm_load_hoist",
         "stage_order",
         "loop_sync",
         "qdo_stage",
@@ -179,6 +181,11 @@ def test_numerics_classes():
         "g4_slicing",
         "block_k4",
         "s_in_agpr",
+        "stats_vec",
+        "ws_bounds",
+        "dkv_cell_vec",
+        "narrow_vec",
+        "slab_carry",
     }
     assert added <= by_class["bitwise"]
     assert {"waves", "block_m", "atom_g13", "pt_route"} <= by_class["tile"]
@@ -213,17 +220,22 @@ _CONTEXTS = {
     "agpr_route": ({}, _ROUTE, {"agpr_alloc": (192, 192)}),
     "asm_tail_nop": (_ASM, {**_ASM, "agpr_alloc": (192, 192)}),
     "asm_cluster": (_ASM, {**_ASM, "agpr_alloc": (192, 192)}),
+    "asm_load_hoist": (_ASM, {**_ASM, "agpr_alloc": (192, 192)}),
     "s_in_agpr": ({}, _ROUTE, {"agpr_alloc": "backend"}),
     "warp_grid_g02": ({}, {"pt_route": "lds"}, _SMALL_TILE),
     "warp_grid_g13": ({}, {"pt_route": "lds"}, _SMALL_TILE),
     "acc_in_lds": ({}, {"agpr_alloc": (0, 0)}),
     "dkv_atomic_guard": ({}, {"dkv_mode": "atomic"}),
     "setprio": ({"sched": "stage_table"}, {"sched": "stage_table_atomics"}),
+    "dkv_sink": ({}, {"dkv_mode": "atomic"}),
+    "dkv_cell_vec": ({"dkv_epilogue": "direct"},),
+    "narrow_vec": ({"stage_vec": 1},),
     "ptr_noalias": ({}, {"dkv_mode": "atomic"}),
     "counted_issue": ({"loop_sync": "counted"},),
     "worklist": ({"seq_mode": "thd"},),  # the THD work-list decode
-    # the K-permuted G1 / G3 operand is not built for the transpose read
-    "atom_g13": ({}, {"transpose_source": "lds_plain"}, {"pt_route": "lds"}),
+    # 16x16x32 needs block_m >= 32 (the default d32 / d64 gfx950 tiles; the
+    # K-permuted G1 / G3 B is read by the stacked transpose-read plan)
+    "atom_g13": ({}, {"block_m": 32}),
     "ring_issue": ({"barrier_merge": "on"},),
 }
 
@@ -259,6 +271,7 @@ def _refused_everywhere(name, value) -> bool:
     ctxs = {
         "setprio": {"sched": "stage_table"},
         "global_path": {"transpose_source": "tr_read"},
+        "dkv_sink": {"dkv_mode": "atomic"},  # inert (so built) in direct mode
     }
     knobs = {**ctxs.get(name, {}), **_value_knobs(name, value)}
     try:
@@ -294,6 +307,8 @@ def test_not_built_values_are_the_emission_checks():
                 spec = dataclasses.replace(base, lds_swizzle=f"q={v}")
             elif a.name == "setprio":
                 spec = dataclasses.replace(base, sched="stage_table", setprio=v)
+            elif a.name == "dkv_sink":
+                spec = dataclasses.replace(base, dkv_mode="atomic", dkv_sink=v)
             else:
                 spec = dataclasses.replace(base, **{a.name: v})
             assert _not_built(spec), (a.name, v)
@@ -310,7 +325,7 @@ def test_runtime_values_are_built_or_refused_by_the_plan(name):
         if name == "xcd_chunk":
             continue  # needs num_xcds; see test_xcd_chunk_builds_the_remap
         if (name, value) == ("lb_order", "mirror"):
-            # pairing needs a band and a paired grid that fills num_cus; the
+            # pairing needs a band and a grid that overfills num_cus; the
             # plan compiles the lb_mirror twin of the default main kernel
             plan = _plan({name: value}, causal=True, num_cus=4)
             assert plan.runtime[name] == value and plan.runtime["pair"] == 1
@@ -405,17 +420,23 @@ def test_g4_slicing_and_block_k4_axes():
     ).ok
 
 
-def test_legality_helper_is_the_validator_plus_the_emission_check():
+def test_legality_helper_is_the_validator_plus_the_emission_check(monkeypatch):
     for arch in BWD_ARCHS:
         spec = AttnBwdSpec(head_size=128, dtype="bf16")
         v = tc.backward_spec_legality(spec, arch)
         assert v.ok and v.status == "legal"
         assert v.resolved == validate_attn_bwd_spec(spec, arch)
-    # tr_read with the K-permuted 16x16x32 G1 / G3 B operand (gfx950)
-    nb = tc.backward_spec_legality(
-        {"transpose_source": "tr_read", "atom_g13": "16x16x32"}, "gfx950", head_size=64
-    )
-    assert nb.status == "not_built" and nb.not_built
+    # tr_read with the K-permuted 16x16x32 G1 / G3 B operand (gfx950): built
+    # (the stacked transpose-read plan)
+    wide = {"transpose_source": "tr_read", "atom_g13": "16x16x32"}
+    v = tc.backward_spec_legality(wide, "gfx950", head_size=64)
+    assert v.ok and v.status == "legal" and not v.not_built, v.error
+    # a finding of the emission check makes a validated spec "not_built"
+    monkeypatch.setattr(tc, "_not_built", lambda spec: ["an unbuilt emission"])
+    nb = tc.backward_spec_legality(wide, "gfx950", head_size=64)
+    assert nb.status == "not_built" and nb.not_built == ("an unbuilt emission",)
+    assert not nb.ok
+    monkeypatch.undo()
     for arch in BWD_ARCHS:  # the XT transposes and the xor swizzle are built
         for knobs in ({"transpose_source": "xt_lds"}, {"lds_swizzle": "q=xor"}):
             # (d128: the one-wave gfx1151 d64 tile spills with the XT images,
@@ -570,6 +591,8 @@ def test_stages_enumerate_the_new_knobs():
     asm = [p for p in h if p.get("agpr_route") == "asm_g13"]
     assert _values(asm, "asm_cluster", "k_step") == {"k_step", "gemm"}
     assert all("asm_cluster" not in p for p in h if p.get("agpr_route") != "asm_g13")
+    assert _values(asm, "asm_load_hoist", False) == {False, True}
+    assert all("asm_load_hoist" not in p for p in h if p.get("agpr_route") != "asm_g13")
     # the ISA floor (7 on gfx950) and the production picks, asm route only
     assert _values(asm, "asm_tail_nop", None) == {None, 7, 8, 11}
     assert all("asm_tail_nop" not in p for p in h if p.get("agpr_route") != "asm_g13")
@@ -785,3 +808,52 @@ def test_effective_key_merges_inert_and_canonical_values():
     )
     # a distinct value is a distinct kernel
     assert sw.effective_key(c.with_knobs(loop_sync="lds_only")) != (sw.effective_key(c))
+
+
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+def test_split_dq_schedule_couplings_agree_with_the_validator(arch, monkeypatch):
+    """``sched`` / ``setprio`` x ``dq_mode`` on every body split dQ can take
+    (synchronous, LDS-only barriers, register and DMA rings) and the two it
+    cannot (merged barrier, counted waits): the registry's couplings, in both
+    orders of the walk, enumerate exactly what the validator's rules accept
+    (only ``stage_table_atomics`` is refused with split dQ on a split body; the
+    couplings do not model the recorded resource refusals, which the test
+    bypasses); the dQ kernel's ``dq_sched`` applies on split points only."""
+    from kernels.common import attention_bwd as AB
+
+    monkeypatch.setattr(AB, "resource_refusal", lambda spec, arch: None)
+    bodies = [
+        {},
+        {"loop_sync": "lds_only"},
+        {"ring_depth": 2},
+        {"barrier_merge": "on", "ring_depth": 2},
+        {"loop_sync": "counted"},
+    ]
+    if arch == "gfx950":
+        bodies += [{"ring_depth": 3}, {"global_path": "dma", "ring_depth": 1},
+                   {"global_path": "dma", "ring_depth": 2}]  # fmt: skip
+    sched, prio = tc.backward_axis("sched"), tc.backward_axis("setprio")
+    mode = tc.backward_axis("dq_mode")
+    seen = set()
+    for body in bodies:
+        for s in sched.values(arch):
+            for p in (False, True):
+                if p and s not in ("stage_table", "stage_table_atomics"):
+                    continue
+                kw = dict(body, sched=s, setprio=p, dq_mode="split")
+                legal = tc.backward_spec_legality(kw, arch, head_size=64).ok
+                walk_a = mode.applies("split", {**body, "sched": s, "setprio": p})
+                walk_b = sched.applies(s, {**body, "dq_mode": "split"}) and (
+                    not p or prio.applies(True, kw)
+                )
+                if mode.applies("split", body):  # a body split dQ runs on
+                    assert walk_a == walk_b == legal, (body, s, p, legal)
+                    seen.add((s, legal))
+                else:
+                    assert not legal, (body, s, p)
+    assert ("stage_table", True) in seen and ("stage_table_atomics", False) in seen
+    assert ("stage_table_atomics", True) not in seen
+    dq = tc.backward_axis("dq_sched")
+    assert dq.kind == tc.KIND_DQ and dq.default == "none"
+    for v in dq.choices[1:]:
+        assert dq.applies(v, {"dq_mode": "split"}) and not dq.applies(v, {})

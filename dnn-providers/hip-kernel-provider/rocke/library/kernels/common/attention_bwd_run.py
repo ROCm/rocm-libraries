@@ -8,7 +8,10 @@ stream: ``prep -> main -> convert(dQ) [-> convert(dK), convert(dV)]``, or
 under ``dq_mode = "split"`` ``prep -> main -> dq [-> convert(dK),
 convert(dV)]``, in the plan's launch order, with every kernel argument packed
 in the ``rocke.attn_bwd.v3`` order (a dense-route plan's main launch, stage
-``"dense"``, in the ``rocke.attn_dense_bwd.v1`` order).
+``"dense"``, in the ``rocke.attn_dense_bwd.v1`` order, and its split dQ
+launch, stage ``"dense_dq"``, in the ``rocke.attn_dense_bwd_dq.v1`` order).
+With ``dkv_sink = "slices"`` the dK / dV converts are slice reduces (stage
+``reduce``).
 
 The caller owns every buffer. The workspace is supplied by the caller and
 sized by ``plan.workspace_bytes`` (256-byte aligned base); the run function
@@ -35,6 +38,7 @@ from kernels.common.attention_bwd import attn_bwd_params, build_attn_bwd_main
 from kernels.common.attention_bwd_aux import (
     build_attn_bwd_convert,
     build_attn_bwd_prep,
+    build_attn_bwd_reduce,
 )
 from kernels.common.attention_bwd_dq import build_attn_bwd_dq
 
@@ -56,8 +60,19 @@ def _build_dense(spec, *, arch):
     return mod.build_attention_dense_bwd(spec, arch=arch)
 
 
+def _build_dense_dq(spec, *, arch):
+    """The dense family's split dQ kernel (imported lazily)."""
+    from kernels.common.attention_dense_bwd_dq import build_attention_dense_bwd_dq
+
+    return build_attention_dense_bwd_dq(spec, arch=arch)
+
+
 def _stage_params(stage: str):
-    """Ordered kernargs of a launch stage (the dense main kernel has its own ABI)."""
+    """Ordered kernargs of a launch stage (the dense kernels have their own ABIs)."""
+    if stage == "dense_dq":
+        from kernels.common.attention_dense_bwd_dq import attn_dense_bwd_dq_params
+
+        return attn_dense_bwd_dq_params()
     if stage == "dense":
         from kernels.common.attention_dense_bwd_spec import attn_dense_bwd_params
 
@@ -69,8 +84,10 @@ _BUILDERS = {
     "main": build_attn_bwd_main,
     "prep": build_attn_bwd_prep,
     "convert": build_attn_bwd_convert,
+    "reduce": build_attn_bwd_reduce,
     "dq": build_attn_bwd_dq,
     "dense": _build_dense,
+    "dense_dq": _build_dense_dq,
 }
 # The shipped builders. A caller that swaps a builder in ``_BUILDERS`` builds
 # another kernel from the same spec: its code objects go through the disk

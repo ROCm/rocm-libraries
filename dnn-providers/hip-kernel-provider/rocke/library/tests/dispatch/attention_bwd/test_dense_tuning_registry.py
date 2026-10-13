@@ -82,6 +82,88 @@ def test_every_built_value_is_legal_and_not_built_values_refused(arch):
 
 
 @pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+def test_every_built_staging_value_is_legal_on_the_dense_shell(arch):
+    """The Q / dO staging axes (global_path, ring_depth) of the shared body:
+    every built value of the arch is a legal dense spec (the prefetch ring
+    is built on the dense shell); the mirror pass is not built there."""
+    cls = _SPEC[arch]
+    n = 0
+    for path in dense_axis("global_path").values(arch, "full"):
+        for depth in dense_axis("ring_depth").values(arch, "full"):
+            knobs = {"global_path": path, "ring_depth": depth}
+            try:
+                spec = cls(**_BASE, body_knobs=knobs)
+                verdict = dense_spec_legality(spec, arch)
+            except ValueError:
+                continue
+            if verdict == "illegal":
+                continue
+            assert verdict == "legal", (path, depth)
+            n += 1
+    assert n == {"gfx942": 2, "gfx950": 6}[arch]
+    mirror = cls(**_BASE, body_knobs={"lb_mirror": True})
+    assert dense_spec_legality(mirror, arch) == "not_built"
+
+
+def _tuned_entry_plans(table):
+    """Plan every ``DENSE_BWD_TUNED`` entry on a census cell of its key."""
+    from benchmarks.common import attention_bwd_bench as bb
+    from benchmarks.common import attention_bwd_rocke_arm as ra
+    from benchmarks.common import attention_bwd_sweep as sw
+    from kernels.common.attention_bwd_plan import AttnBwdPolicy, FEATURE_GROUPS
+    from kernels.common.attention_bwd_plan import _dense_key, attn_bwd_route
+    from kernels.common.attention_dense_bwd_plan import attn_dense_bwd_plan
+
+    cells = [c for c in bb.census_cells(bb.load_census()) if not c.is_thd]
+    by_key = {}
+    for c in cells:
+        try:
+            by_key.setdefault(_dense_key(sw.cell_request(c)), c)
+        except ValueError:
+            continue
+    out = []
+    for (arch, key), knobs in table.items():
+        cell = by_key[key]
+        req = sw.cell_request(cell)
+        rt = {k: v for k, v in knobs.items() if k not in ra.REQUEST_HINTS}
+
+        def tuning(_r, _a, _route, _p, rt=rt):
+            return dict(rt)
+
+        pol = AttnBwdPolicy(
+            declared_groups=frozenset(FEATURE_GROUPS), waive_unverified=True,
+            tuning=tuning, dense_pack=frozenset({(arch, key)}),
+        )  # fmt: skip
+        assert attn_bwd_route(req, arch, policy=pol)[0] == "dense"
+        out.append(attn_dense_bwd_plan(req, arch, policy=pol))
+    return out
+
+
+def test_tuned_entries_plan_on_their_keys():
+    """Every shipped DENSE_BWD_TUNED entry plans on its key (empty today);
+    the check itself is exercised on an entry the sweep would emit."""
+    from benchmarks.common import attention_bwd_sweep as sw
+    from kernels.common.attention_bwd_plan import _dense_key
+
+    assert _tuned_entry_plans(DENSE_BWD_TUNED) == []
+    sl = sw.primary_slice("gfx950", "dense", 128)
+    gsl = sw.primary_slice("gfx950", "general", 128)
+    knobs = dict(sw.default_knobs(gsl), global_path="dma", ring_depth=2)
+    c = sw.Candidate.make(sl, knobs, {"g_split": 2, "route": "dense"})
+    cell = sw.dense_cells(sl, sw.representative_cells(sl), 128)[0]
+    key = _dense_key(sw.cell_request(cell))
+    value = {
+        k: tuple(v) if isinstance(v, list) else v
+        for k, v in sw.dense_tuned_value(c).items()
+    }
+    (plan,) = _tuned_entry_plans({("gfx950", key): value})
+    spec = plan.specs["dense"]
+    assert spec.dkv_mode == "atomic"
+    body = spec.body_spec().resolved("gfx950")
+    assert (body.global_path, body.ring_depth) == ("dma", 2)
+
+
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
 def test_arch_values_of_the_body_variant(arch):
     vals = dense_axis("body_variant").values(arch)
     assert vals[0] == "general" and len(vals) == 2

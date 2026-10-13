@@ -25,7 +25,8 @@ The evidence, in three layers:
   VALU with ``v_accvgpr_read``): every asm MFMA result is read no earlier than
   the table allows, and no VALU write of an asm MFMA source lands inside the
   ISA's lead window, which each cluster's leading ``s_nop`` covers
-  (compile-only);
+  (compile-only); with srcC included, this holds in every stage order and
+  under the operand-load hoist (``asm_load_hoist``);
 * the zero-accumulator cluster form of G0 / G2 (srcC ``0`` on the first K
   step) is bitwise the intrinsic GEMM at every legal count (device).
 
@@ -157,7 +158,7 @@ def _uses(ops):
     return set().union(set(), *(_regs(o) for o in ops))
 
 
-def audit_mfma_hazards(text, arch, atom_k):
+def audit_mfma_hazards(text, arch, atom_k, *, srcc=False):
     """ISA audit of the AGPR-destination MFMAs of a disassembly.
 
     Returns ``(violations, checked)``. For each MFMA writing AGPRs: walking
@@ -166,7 +167,8 @@ def audit_mfma_hazards(text, arch, atom_k):
     :func:`mfma_result_wait_states` later (a label or branch before that bound
     counts as a violation: the audit does not follow control flow); walking
     back, no VALU write of a source VGPR may lie within
-    ``ASM_MFMA_VALU_LEAD_WAIT_STATES``.
+    ``ASM_MFMA_VALU_LEAD_WAIT_STATES`` (``srcc=True``: of the srcC registers
+    too, for example an allocator copy into a tied accumulator).
     """
     need = mfma_result_wait_states(arch, atom_k)
     ins = _instrs(text)
@@ -175,7 +177,7 @@ def audit_mfma_hazards(text, arch, atom_k):
         if not mn.startswith("v_mfma") or not ops[0].startswith("a"):
             continue
         checked += 1
-        dst, srcs = _regs(ops[0]), _uses(ops[1:3])
+        dst, srcs = _regs(ops[0]), _uses(ops[1:4] if srcc else ops[1:3])
         w, j = 0, i - 1
         while j >= 0 and w < ASM_MFMA_VALU_LEAD_WAIT_STATES:
             pm, pops, label = ins[j]
@@ -359,6 +361,65 @@ def test_audit_flags_an_early_read_and_a_lead_write():
     assert audit_mfma_hazards(lead_ok, "gfx942", 16)[0] == []
     branch = "\n".join([mf, "s_cbranch_scc1 0", "s_nop 15"])
     assert len(audit_mfma_hazards(branch, "gfx942", 16)[0]) == 1
+    # srcC: an AGPR write right before the MFMA counts only with srcc=True
+    acc = "\n".join(["v_accvgpr_write_b32 a1, v9", mf, "s_nop 15"])
+    assert audit_mfma_hazards(acc, "gfx942", 16)[0] == []
+    assert len(audit_mfma_hazards(acc, "gfx942", 16, srcc=True)[0]) == 1
+    acc_ok = "\n".join(["v_accvgpr_write_b32 a1, v9", "s_nop 1", mf, "s_nop 15"])
+    assert audit_mfma_hazards(acc_ok, "gfx942", 16, srcc=True)[0] == []
+
+
+_HOIST_TILES = {
+    # the one-wave 16 x 16 correctness tile and the representative W4 tiles
+    "w1": dict(
+        waves=1, block_m=16, block_n=16, block_k4=16, warp_grid_g4=(1, 1),
+        atom_g02="16x16x16", atom_g13="16x16x16", atom_g4="16x16x16",
+        kv_residency="lds", kt_source="lds", transpose_source="lds_plain",
+        pt_route="relabel",
+    ),
+    "w4": dict(waves=4, block_m=32, block_n=128, kt_source="lds", block_k4=32,
+               warp_grid_g4=(1, 4), kv_residency="reg", atom_g13="16x16x16"),
+}  # fmt: skip
+
+
+@pytest.mark.parametrize("hoist", [False, True])
+@pytest.mark.parametrize("order", ["g1g3g4", "g1g4g3", "g3g4g1"])
+@pytest.mark.parametrize("asm_cluster", ["k_step", "gemm"])
+@pytest.mark.parametrize("tile", list(_HOIST_TILES))
+@pytest.mark.parametrize("arch", _MFMA_ARCHES)
+def test_asm_g13_kernel_opens_every_cluster_with_the_lead_wait(
+    arch, tile, asm_cluster, order, hoist
+):
+    """A VALU write of an asm MFMA source (a fragment packed, or a register
+    the allocator copies, right before a cluster; ``asm_load_hoist`` keeps
+    operands live across clusters and G4) needs the ISA lead wait states, which
+    the backend cannot insert for an MFMA inside the asm: every cluster opens
+    with them, and the audit (srcC included) finds no VALU write in any asm
+    MFMA's lead window and no early result read, in every stage order."""
+    from kernels.common.attention_bwd import (
+        AttnBwdSpec,
+        build_attn_bwd_main,
+        validate_attn_bwd_spec,
+    )
+
+    kw = dict(head_size=64, dtype="fp16", agpr_alloc=(128, 128), agpr_route="asm_g13")
+    kw.update(asm_cluster=asm_cluster, stage_order=order, asm_load_hoist=hoist)
+    spec = validate_attn_bwd_spec(AttnBwdSpec(**kw, **_HOIST_TILES[tile]), arch)
+    text = _compile_isa(build_attn_bwd_main(spec, arch=arch), arch)
+    lead = f"s_nop {ASM_MFMA_VALU_LEAD_WAIT_STATES - 1}"
+    ins = [x for x in _instrs(text) if not x[2]]
+    firsts = [
+        i
+        for i, (mn, ops, _) in enumerate(ins)
+        if mn.startswith("v_mfma") and ops[0].startswith("a")
+        and not (ins[i - 1][0].startswith("v_mfma") and ins[i - 1][1][0].startswith("a"))
+    ]  # fmt: skip
+    assert firsts
+    for i in firsts:  # the cluster's own opening s_nop sits right before it
+        assert (ins[i - 1][0], ins[i - 1][1][0]) == tuple(lead.split()), ins[i - 1]
+    bad, checked = audit_mfma_hazards(text, arch, 16, srcc=True)
+    assert checked > 0
+    assert not bad, bad[:8]
 
 
 # --------------------------------------------------------------------------- device

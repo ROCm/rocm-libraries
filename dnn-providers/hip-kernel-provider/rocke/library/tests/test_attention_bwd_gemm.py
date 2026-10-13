@@ -218,6 +218,29 @@ def test_relabel_chain_ir(arch, k1, do_storage, flavor):
     assert plan.needs_k_perm is (k1 == 32)
 
 
+@pytest.mark.parametrize("flavor", FLAVORS)
+@pytest.mark.parametrize("k1", [16, 32])
+def test_relabel_chain_ir_through_the_transpose_read(k1, flavor):
+    """gfx950 chain with dO read by ``ds_read_tr16_b64``: the catalog plan
+    (16x16x16 consumer) or the stacked K-permuted plan (16x16x32): the same
+    transpose-read count either way, MFMA count as the model, no b128 read."""
+    kernel, g0, g1, plan = make_chain_probe(
+        "gfx950", "fp16", k_m0=32, k_n0=64, d=64, waves=4, atom_k0=16, atom_k1=k1,
+        do_storage="k_outer", do_reader="tr16",
+    )  # fmt: skip
+    ir, n_mma = _lower_count(kernel, "gfx950", flavor)
+    assert n_mma == g0.mma_per_wave + g1.mma_per_wave
+    tr = ir.count("call <4 x i16> @llvm.amdgcn.ds.read.tr16.b64(")
+    assert tr == g1.frags_n * g1.k_steps * (k1 // 16) > 0  # = frags_n * kM0 / 16
+    assert not _TR_B128.search(ir) and "alloca" not in ir
+    assert plan.needs_k_perm is (k1 == 32)
+    with pytest.raises(ValueError, match="K-outer"):
+        make_chain_probe(
+            "gfx950", "fp16", k_m0=32, k_n0=64, d=64, waves=4, do_storage="k_inner",
+            do_reader="tr16",
+        )  # fmt: skip
+
+
 def test_lane_and_wave_reads_first_lane():
     b = IRBuilder("bwd_gemm_lane")
     lane_and_wave(b, 64)
@@ -382,6 +405,103 @@ def test_asm_cluster_knobs_need_the_asm_route():
         g.mma(b, None, LdsOperand(s), LdsOperand(s))
     with pytest.raises(ValueError, match="route='agpr_asm'"):
         g.mma(b, acc, LdsOperand(s), LdsOperand(s), asm_agpr_base=0)
+    with pytest.raises(ValueError, match="route='agpr_asm'"):
+        g.mma(b, acc, LdsOperand(s), LdsOperand(s), asm_lead_wait=2)
+
+
+def _lds_gemm(arch, *, m=64, n=64, k=32, grid=(4, 1), atom_k=16, name="g"):
+    g = BlockGemm(arch, "bf16", m, n, k, grid, atom_k)
+    b = IRBuilder(f"bwd_gemm_{name}_{arch}")
+    _, lane, wave = lane_and_wave(b, g.wave_size)
+    sa = b.smem_alloc(F16, (m, k), "sa")
+    sb = b.smem_alloc(F16, (n, k), "sb")
+    return g, b, lane, g.wave_origin(b, wave), LdsOperand(sa), LdsOperand(sb)
+
+
+@pytest.mark.parametrize("zero", [False, True], ids=["tied", "zero"])
+@pytest.mark.parametrize("cluster", ["k_step", "gemm"])
+@pytest.mark.parametrize("arch, m, n, atom_k", _ASM_SHAPES)
+def test_asm_lead_wait_opens_every_cluster(arch, m, n, atom_k, cluster, zero):
+    """``asm_lead_wait = w`` puts ``s_nop w - 1`` in front of every cluster
+    and changes nothing else; ``None`` (the default) is the ISA's lead wait
+    (2: ``s_nop 1``, the text of the default route); ``0`` emits no lead."""
+    texts = {}
+    for lead in (0, 1, 2, None):
+        g, b, lane, origin, sa, sb = _lds_gemm(
+            arch, m=m, n=n, k=2 * atom_k, atom_k=atom_k, name=f"lead{lead}"
+        )
+        acc = None if zero else g.zero_acc(b)
+        g.mma(
+            b, acc, sa, sb, lane=lane, origin=origin, route="agpr_asm",
+            asm_cluster=cluster, asm_lead_wait=lead,
+        )  # fmt: skip
+        texts[lead] = [_asm_lines(op) for op in _asm_ops(b.kernel)]
+    assert texts[0] and len(texts[0]) == len(texts[1]) == len(texts[2])
+    assert texts[None] == texts[2]
+    for base, one, two in zip(texts[0], texts[1], texts[2]):
+        assert base[0].startswith("v_mfma")
+        assert one == ["s_nop 0"] + base and two == _LEAD + base
+    g, b, lane, origin, sa, sb = _lds_gemm(arch, m=m, n=n, atom_k=atom_k)
+    from kernels.common._attention_bwd_gemm import mma_agpr_asm_steps
+
+    for bad in (-1, 17, True, 1.0):
+        with pytest.raises(ValueError, match="lead wait"):
+            mma_agpr_asm_steps(g, b, g.zero_acc(b), [([], [])], lead_wait=bad)
+
+
+@pytest.mark.parametrize("route", ["intrinsic", "agpr_asm"])
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+def test_preloaded_operands_issue_the_same_mmas(arch, route):
+    """``load_operands`` reads A and B per K step in the order ``mma`` reads
+    them; ``mma`` on the returned registers issues the same MMAs on the same
+    values with no LDS read; ``pre_issue`` runs once, after the first step's
+    reads and before the first MMA / cluster."""
+
+    def loads(b):
+        return [o for o in b.kernel.body.ops if o.name.startswith(_LOADS)]
+
+    def mmas(b):
+        name = "tile.mma" if route == "intrinsic" else "tile.inline_asm"
+        return [o for o in b.kernel.body.ops if o.name == name]
+
+    g, b0, lane, origin, sa, sb = _lds_gemm(arch, name="direct")
+    g.mma(b0, g.zero_acc(b0), sa, sb, lane=lane, origin=origin, route=route)
+    g, b1, lane, origin, sa, sb = _lds_gemm(arch, name="pre")
+    a_regs, b_regs = g.load_operands(b1, sa, sb, lane=lane, origin=origin)
+    n_loads = len(loads(b1))
+    assert n_loads == len(loads(b0)) > 0
+    assert [len(x) for x in a_regs] == [g.k_steps] * g.frags_m
+    assert [len(x) for x in b_regs] == [g.k_steps] * g.frags_n
+    g.mma(b1, g.zero_acc(b1), a_regs, b_regs, route=route)
+    assert len(loads(b1)) == n_loads  # nothing read again
+    assert len(mmas(b1)) == len(mmas(b0)) > 0
+    # the same load ops, in the same order, as the direct call
+    assert [o.name for o in loads(b1)] == [o.name for o in loads(b0)]
+    # the hook: once, between the first step's reads and the first issue
+    # (a k_step cluster or the first intrinsic MMA)
+    g, b2, lane, origin, sa, sb = _lds_gemm(arch, name="hook")
+    seen = []
+
+    def hook():
+        seen.append((len(loads(b2)), len(mmas(b2))))
+
+    g.mma(b2, g.zero_acc(b2), sa, sb, lane=lane, origin=origin, route=route,
+          pre_issue=hook)  # fmt: skip
+    per_step = len(loads(b0)) // g.k_steps
+    assert g.k_steps > 1
+    assert len(seen) == 1 and seen[0] == (per_step, 0)
+    # gemm granularity: the hook runs after every step's reads, before the
+    # one cluster
+    if route == "agpr_asm":
+        g, b3, lane, origin, sa, sb = _lds_gemm(arch, name="hookg")
+        seen.clear()
+
+        def hook3():
+            seen.append((len(loads(b3)), len(mmas(b3))))
+
+        g.mma(b3, g.zero_acc(b3), sa, sb, lane=lane, origin=origin, route=route,
+              asm_cluster="gemm", pre_issue=hook3)  # fmt: skip
+        assert seen == [(len(loads(b0)), 0)]
 
 
 @pytest.mark.parametrize("cluster", ["k_step", "gemm"])
