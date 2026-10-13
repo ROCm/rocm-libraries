@@ -99,6 +99,16 @@ if(NOT DEFINED ROCKE_INSTALL_PROVIDER_CTEST_SUBDIR)
       "Provider installed CTest subdir to append rocKE tests to, e.g. hip_kernel_provider")
 endif()
 
+set(_ROCKE_GPU_REFERENCES_DEFAULT OFF)
+# Provider artifacts include all published references. The rocm-libraries
+# superbuild does not fetch these test bundles.
+if(ROCKE_INSTALL_PROVIDER_CTEST_SUBDIR AND NOT ROCM_LIBS_SUPERBUILD)
+  set(_ROCKE_GPU_REFERENCES_DEFAULT ON)
+endif()
+option(ROCKE_INSTALL_TEST_GPU_REFERENCES
+       "Install enrolled GPU test references and register their GPU tests"
+       ${_ROCKE_GPU_REFERENCES_DEFAULT})
+
 # Where rocKE's installed CTest metadata and standalone Python smoke script land:
 #  * Provider mode: append CTest entries to the provider's installed
 #    bin/<subdir>/CTestTestfile.cmake. Provider-mode C++ smoke binaries use the
@@ -153,6 +163,9 @@ file(GLOB_RECURSE ROCKE_CORE_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_D
 list(FILTER ROCKE_CORE_SOURCES EXCLUDE REGEX "/cpp/bindings/")
 
 add_library(rocke_core STATIC ${ROCKE_CORE_SOURCES})
+set(THREADS_PREFER_PTHREAD_FLAG ON)
+find_package(Threads REQUIRED)
+target_link_libraries(rocke_core PUBLIC ${CMAKE_DL_LIBS} Threads::Threads)
 target_include_directories(rocke_core PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/cpp/include>
   $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
@@ -233,6 +246,13 @@ install(EXPORT ckcTargets
         FILE ckcTargets.cmake
         NAMESPACE ckc::
         DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/ckc)
+include(CMakePackageConfigHelpers)
+configure_package_config_file(
+  "${CMAKE_CURRENT_SOURCE_DIR}/cmake/ckcConfig.cmake.in"
+  "${CMAKE_CURRENT_BINARY_DIR}/ckcConfig.cmake"
+  INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/ckc)
+install(FILES "${CMAKE_CURRENT_BINARY_DIR}/ckcConfig.cmake"
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/ckc)
 
 if(ROCKE_INSTALL_PYTHON_PACKAGE)
   # In provider mode, co-locate the rocke package under the test subdir
@@ -305,13 +325,18 @@ if(ROCKE_INSTALL_TESTS)
                 PATTERN "__pycache__" EXCLUDE
                 REGEX "\\.pyc$" EXCLUDE)
       endforeach()
-      # Install library test tree so rocke_library_conv_pytest can collect tests.
+      # Only published bundles participate in installation and CTest enrollment.
+      include(cmake/InstallGpuReferences.cmake)
+
+      # Install the library test tree for the library pytest entries below.
       # cmake-lint: disable=E1122
       install(DIRECTORY "${_ROCKE_LIBRARY_DIR}/tests"
               DESTINATION "${ROCKE_TEST_INSTALL_DIR}/tests/library"
               PATTERN "__pycache__" EXCLUDE
               REGEX "\\.pyc$" EXCLUDE
               PATTERN "*.c" EXCLUDE
+              PATTERN "reference_bundles" EXCLUDE
+              PATTERN "check_torch_reference.py" EXCLUDE
               PATTERN "run_all.py" EXCLUDE)
     else()
       message(WARNING
@@ -327,8 +352,18 @@ if(ROCKE_INSTALL_TESTS)
     # Install the full pytest suite for installed/artifact test execution.
     # Excludes: C/C++ parity emitters (compiled against rocke_core at build time),
     # the differential harness (needs compiler + source), the WaveScope sidecar
-    # tests (load tools from the adjacent dsl_docs source tree), and run_all.py
-    # (dev runner).
+    # and LDS analyzer tests (load tools from the adjacent dsl_docs source tree),
+    # and the arch-domain artifact gate (imports tools/gen_arch_domain.py, which
+    # is not installed -- and an unresolvable import is a collection error that
+    # aborts the whole installed pytest session, not one skipped test).
+    # Include run_all.py: installed runner unit tests import it as a dependency.
+    # Linux detector fixtures link a stdin wrapper against the production archive.
+    # Keep it with the pytest assets so TheRock's test artifact captures it even
+    # though the library artifact excludes lib/*.a.
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+      install(FILES "$<TARGET_FILE:rocke_core>"
+              DESTINATION "${ROCKE_TEST_INSTALL_DIR}/tests")
+    endif()
     # cmake-lint: disable=E1122
     block()
       install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/tests/"
@@ -338,10 +373,20 @@ if(ROCKE_INSTALL_TESTS)
               PATTERN "*.c" EXCLUDE
               PATTERN "*.cpp" EXCLUDE
               PATTERN "differential" EXCLUDE
+              PATTERN "test_engine_linkage.py" EXCLUDE
               PATTERN "test_wavescope_sidecar.py" EXCLUDE
-              PATTERN "run_all.py" EXCLUDE)
+              PATTERN "test_lds_analyzer.py" EXCLUDE
+              PATTERN "test_arch_domain_artifact.py" EXCLUDE
+              # Configures source CMake modules; not an installed runtime test.
+              PATTERN "test_gpu_references.py" EXCLUDE)
 
     endblock()
+
+    # This GPU test lives alongside its benchmark helpers in the Python package.
+    # Stage it under tests/ so rocke_pytest collects it in both install layouts.
+    install(FILES
+            "${CMAKE_CURRENT_SOURCE_DIR}/python/rocke/benchmark/gemm/tests/test_fp16_rcr_multigpu.py"
+            DESTINATION "${ROCKE_TEST_INSTALL_DIR}/tests/benchmark")
   endif()
 
   set(_ROCKE_INSTALLED_CTEST_ENTRIES "")
@@ -375,11 +420,11 @@ if(ROCKE_INSTALL_TESTS)
       # resolves without the source-tree sys.path shims. The library tests have
       # their own CTest entry below and must not be collected twice.
       string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-             "add_test(rocke_pytest python -m pytest \"${ROCKE_TEST_CTEST_REL}tests\" --ignore \"${ROCKE_TEST_CTEST_REL}tests/library\" -v --timeout=60)\n")
+             "add_test(rocke_pytest python -m pytest \"${ROCKE_TEST_CTEST_REL}tests\" --ignore \"${ROCKE_TEST_CTEST_REL}tests/library\" -v -rs --timeout=60)\n")
       string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
              "set_tests_properties(rocke_pytest PROPERTIES\n"
              "  LABELS \"ckc\\;python\\;quick\"\n"
-             "  ENVIRONMENT \"PYTHONPATH=.\"\n"
+             "  ENVIRONMENT \"PYTHONPATH=.;ROCKE_REPLAY_CLI=${ROCKE_TEST_CTEST_REL}tests/portable_ir/rocke_portable_ir_replay_cli${CMAKE_EXECUTABLE_SUFFIX}\"\n"
              "  TIMEOUT 300)\n")
     endif()
 
@@ -405,35 +450,74 @@ if(ROCKE_INSTALL_TESTS)
     # CTest remains the hard backstop for collection, cumulative runtime, and
     # failures outside an individual test item.
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-           "add_test(rocke_library_conv_pytest python -m pytest${_ROCKE_LIBRARY_CONV_TESTS} -v --timeout=30)\n")
+           "add_test(rocke_library_conv_pytest python -m pytest${_ROCKE_LIBRARY_CONV_TESTS} -v -rs --timeout=30)\n")
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "set_tests_properties(rocke_library_conv_pytest PROPERTIES\n"
            "  LABELS \"ckc\\;python\\;conv\\;host\\;quick\"\n"
            "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
+            "  TIMEOUT 180)\n")
+
+    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+           "add_test(rocke_reference_common_pytest python -m pytest \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_reference_common.py\" -v -rs --timeout=30)\n")
+    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+           "set_tests_properties(rocke_reference_common_pytest PROPERTIES\n"
+           "  LABELS \"ckc\\;python\\;host\\;quick\"\n"
+           "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
            "  TIMEOUT 180)\n")
 
-    # Library conv GPU numeric suites. These used to live under
-    # tests/instances/ and were collected by rocke_pytest above; moving them to
-    # the library tree took them out of its --ignore=tests/library scope, so
-    # they need their own entry or they run nowhere. They self-skip when
-    # get_device_arch(0) finds no device or torch is absent, so a host-only
-    # runner still passes -- the gpu label is for runners that want to select
-    # or exclude them explicitly.
-    set(_ROCKE_LIBRARY_CONV_GPU_TEST_RELPATHS
+    foreach(_operation sdpa conv)
+      string(TOUPPER "${_operation}" _operation_upper)
+      string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+             "add_test(rocke_${_operation}_reference_unit_pytest python -m pytest \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_${_operation}_reference_contract.py\" -v -rs --timeout=30)\n")
+      string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+             "set_tests_properties(rocke_${_operation}_reference_unit_pytest PROPERTIES\n"
+             "  LABELS \"ckc\\;python\\;${_operation}\\;host\\;quick\"\n"
+             "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
+             "  TIMEOUT 180)\n")
+
+      # Each installed architecture retains its own GPU CTest result.
+      foreach(_arch IN LISTS _ROCKE_${_operation_upper}_INSTALLED_ARCHITECTURES)
+        string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+               "add_test(rocke_${_operation}_gpu_${_arch}_pytest python -m pytest \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_${_operation}_pinned_reference.py\" --rocke-reference-operation ${_operation} --rocke-reference-arch ${_arch} -v -rs)\n")
+        string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+               "set_tests_properties(rocke_${_operation}_gpu_${_arch}_pytest PROPERTIES\n"
+               "  LABELS \"ckc\\;python\\;${_operation}\\;gpu\\;quick\"\n"
+               "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
+               "  SKIP_RETURN_CODE 77\n"
+               "  TIMEOUT 300)\n")
+      endforeach()
+    endforeach()
+
+    # Library GPU numeric suites: convolution, attention, KDA, and GDN.
+    # Select files rather than the "gpu" pytest marker because several runtime
+    # tests lack that marker. Their dependency and architecture checks report
+    # skips when the required torch installation or GPU is unavailable.
+    set(_ROCKE_LIBRARY_GPU_TEST_RELPATHS
         "tests/library/tests/test_conv_fwd_correctness.py"
         "tests/library/tests/test_conv_wgrad_correctness.py"
         "tests/library/tests/test_conv_dgrad_correctness.py"
-        "tests/library/tests/test_direct_conv_correctness.py")
-    set(_ROCKE_LIBRARY_CONV_GPU_TESTS "")
-    foreach(_rocke_conv_gpu_test ${_ROCKE_LIBRARY_CONV_GPU_TEST_RELPATHS})
-      string(APPEND _ROCKE_LIBRARY_CONV_GPU_TESTS
-             " \"${ROCKE_TEST_CTEST_REL}${_rocke_conv_gpu_test}\"")
+        "tests/library/tests/test_direct_conv_correctness.py"
+        "tests/library/tests/test_attention_dense_gfx942_numeric.py"
+        "tests/library/tests/test_attention_dense_gfx950_numeric.py"
+        "tests/library/tests/test_attn_bf16_d128_ring.py"
+        "tests/library/tests/test_dtype_dispatch.py"
+        "tests/library/tests/test_extended_parity_attention.py"
+        "tests/library/tests/test_gdn_decode_gfx950_numeric.py"
+        "tests/library/tests/test_gfx1250_attention.py"
+        "tests/library/tests/test_gfx942_gqa_head_fold_numeric.py"
+        "tests/library/tests/test_kda_chunkwise_gfx942_numeric.py"
+        "tests/library/tests/test_kda_chunkwise_gfx950_numeric.py"
+        "tests/library/tests/test_kda_gdn_gfx950_numeric.py")
+    set(_ROCKE_LIBRARY_GPU_TESTS "")
+    foreach(_rocke_gpu_test ${_ROCKE_LIBRARY_GPU_TEST_RELPATHS})
+      string(APPEND _ROCKE_LIBRARY_GPU_TESTS
+             " \"${ROCKE_TEST_CTEST_REL}${_rocke_gpu_test}\"")
     endforeach()
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-           "add_test(rocke_library_conv_gpu_pytest python -m pytest${_ROCKE_LIBRARY_CONV_GPU_TESTS} -v)\n")
+           "add_test(rocke_library_gpu_pytest python -m pytest${_ROCKE_LIBRARY_GPU_TESTS} -v -rs)\n")
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-           "set_tests_properties(rocke_library_conv_gpu_pytest PROPERTIES\n"
-           "  LABELS \"ckc\\;python\\;conv\\;gpu\"\n"
+           "set_tests_properties(rocke_library_gpu_pytest PROPERTIES\n"
+           "  LABELS \"ckc\\;python\\;gpu\"\n"
            "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
            "  TIMEOUT 1800)\n")
   endif()

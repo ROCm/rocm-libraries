@@ -4,6 +4,7 @@
 #include "TestPluginCommon.hpp"
 #include "TestPluginEngineIdMap.hpp"
 
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/knob_value_generated.h>
 #include <hipdnn_plugin_sdk/KnobFactory.hpp>
 
@@ -37,6 +38,20 @@ constexpr size_t WORKSPACE_LARGE_COMPILED_SIZE = 8192;
 // measured time. 4 MiB clears the timer resolution on all supported GPUs with
 // margin.
 constexpr size_t TIMING_SCRATCH_SIZE = size_t{4} * 1024 * 1024;
+
+// The host-sync engine deliberately trips the stall watchdog. Only recovery tests
+// enable it, before handle creation discovers and caches the engine list.
+bool hostSyncEngineEnabled()
+{
+    return !hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_AUTOTUNE_HOST_SYNC_ENGINE").empty();
+}
+
+/// 7 with the host-syncing engine enabled, 6 without. Every engine-list entry point must
+/// agree with this, or a caller indexes an engine the count did not advertise.
+uint32_t totalEngines()
+{
+    return hostSyncEngineEnabled() ? 7U : 6U;
+}
 
 struct AutotunePluginHandle final : HipdnnEnginePluginHandle
 {
@@ -109,12 +124,12 @@ public:
 
     uint32_t getNumEngines() const override
     {
-        return 6;
+        return totalEngines();
     }
 
     uint32_t getNumApplicableEngines() const override
     {
-        return 6;
+        return totalEngines();
     }
 
     static hipdnnPluginStatus_t
@@ -130,9 +145,9 @@ public:
             }
             hipdnn_plugin_sdk::throwIfNull(numEngines);
 
-            constexpr uint32_t TOTAL_ENGINES = 6;
+            const uint32_t engineCount = totalEngines();
             // When maxEngines=0, return total count for discovery; otherwise return actual count
-            *numEngines = (maxEngines == 0) ? TOTAL_ENGINES : std::min(maxEngines, TOTAL_ENGINES);
+            *numEngines = (maxEngines == 0) ? engineCount : std::min(maxEngines, engineCount);
 
             if(maxEngines >= 1)
             {
@@ -160,6 +175,11 @@ public:
             {
                 engineIds[5] = hipdnn_tests::plugin_constants::engineId<
                     AutotunePluginEngineWorkspaceGrows>();
+            }
+            if(maxEngines >= 7 && engineCount >= 7)
+            {
+                engineIds[6]
+                    = hipdnn_tests::plugin_constants::engineId<AutotunePluginEngineHostSyncs>();
             }
 
             LOG_API_SUCCESS(apiName, "numEngines=" << *numEngines);
@@ -187,9 +207,9 @@ public:
             }
             hipdnn_plugin_sdk::throwIfNull(numEngines);
 
-            constexpr uint32_t TOTAL_ENGINES = 6;
+            const uint32_t engineCount = totalEngines();
             // When maxEngines=0, return total count for discovery; otherwise return actual count
-            *numEngines = (maxEngines == 0) ? TOTAL_ENGINES : std::min(maxEngines, TOTAL_ENGINES);
+            *numEngines = (maxEngines == 0) ? engineCount : std::min(maxEngines, engineCount);
 
             if(maxEngines >= 1)
             {
@@ -217,6 +237,11 @@ public:
             {
                 engineIds[5] = hipdnn_tests::plugin_constants::engineId<
                     AutotunePluginEngineWorkspaceGrows>();
+            }
+            if(maxEngines >= 7 && engineCount >= 7)
+            {
+                engineIds[6]
+                    = hipdnn_tests::plugin_constants::engineId<AutotunePluginEngineHostSyncs>();
             }
 
             LOG_API_SUCCESS(apiName, "numEngines=" << *numEngines);
@@ -330,6 +355,32 @@ public:
         if(timingStatus != HIPDNN_PLUGIN_STATUS_SUCCESS)
         {
             return timingStatus;
+        }
+
+        // AutotunePluginEngineHostSyncs: blocks the host on the plugin's own stream
+        // from inside the timed region, exactly like a plugin whose execute() calls
+        // hipStreamSynchronize. When the autotune stall gate has armed that stream,
+        // this synchronize cannot return until release() or the watchdog writes the
+        // signal, reproducing the self-inflicted deadlock the watchdog exists to break.
+        if(executionContext != nullptr)
+        {
+            const auto* ctx = static_cast<HipdnnEnginePluginExecutionContext*>(executionContext);
+            if(ctx->engineId
+               == hipdnn_tests::plugin_constants::engineId<AutotunePluginEngineHostSyncs>())
+            {
+                auto* pluginHandle = static_cast<AutotunePluginHandle*>(handle);
+                const auto syncStatus = hipStreamSynchronize(pluginHandle->stream);
+                if(syncStatus != hipSuccess)
+                {
+                    return hipdnn_plugin_sdk::tryCatch([&]() {
+                        throw hipdnn_plugin_sdk::HipdnnPluginException(
+                            HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                            std::string(
+                                "AutotunePluginEngineHostSyncs: hipStreamSynchronize failed: ")
+                                + hipGetErrorString(syncStatus));
+                    });
+                }
+            }
         }
 
         return TestPluginBase::enginePluginExecuteOpGraph(

@@ -106,7 +106,7 @@ def test_merge_rejects_missing_hipblaslt_path(tmp_path: Path) -> None:
 
 def test_merge_invokes_tensile_merge_library(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     hip = tmp_path / "hip"
-    (hip / "tensilelite/Tensile/bin").mkdir(parents=True)
+    (hip / "tensilelite/tensilelite/bin").mkdir(parents=True)
     called = {}
 
     def _fake_run(cmd):
@@ -134,7 +134,7 @@ def test_create_rejects_empty_library_dir(tmp_path: Path) -> None:
 
 def test_create_invokes_tensile_create_library(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     hip = tmp_path / "hip"
-    (hip / "tensilelite/Tensile/bin").mkdir(parents=True)
+    (hip / "tensilelite/tensilelite/bin").mkdir(parents=True)
     libs = tmp_path / "libs"
     libs.mkdir()
     _write_library_yaml(libs, "x.yaml")
@@ -197,6 +197,8 @@ def test_from_dataframe_happy_path(tmp_path: Path) -> None:
                 "c_type": "f16_r",
                 "d_type": "f16_r",
                 "compute_type": "f32_r",
+                "scaleA": 1,
+                "scaleB": 1,
             }
         ]
     )
@@ -258,6 +260,8 @@ def test_from_dataframe_reuses_solution_for_multiple_sizes(tmp_path: Path) -> No
                 "c_type": "f16_r",
                 "d_type": "f16_r",
                 "compute_type": "f32_r",
+                "scaleA": 1,
+                "scaleB": 1,
             },
             {
                 "lib": "a.yaml",
@@ -272,6 +276,8 @@ def test_from_dataframe_reuses_solution_for_multiple_sizes(tmp_path: Path) -> No
                 "c_type": "f16_r",
                 "d_type": "f16_r",
                 "compute_type": "f32_r",
+                "scaleA": 1,
+                "scaleB": 1,
             },
         ]
     )
@@ -334,6 +340,8 @@ def test_from_full_dataframe_reuses_tuned_solution_for_multiple_sizes(tmp_path: 
                 "c_type": "f16_r",
                 "d_type": "f16_r",
                 "compute_type": "f32_r",
+                "scaleA": 1,
+                "scaleB": 1,
                 "winner": "tuned",
                 "solutionIdx_reference": 0,
             },
@@ -350,6 +358,8 @@ def test_from_full_dataframe_reuses_tuned_solution_for_multiple_sizes(tmp_path: 
                 "c_type": "f16_r",
                 "d_type": "f16_r",
                 "compute_type": "f32_r",
+                "scaleA": 1,
+                "scaleB": 1,
                 "winner": "tuned",
                 "solutionIdx_reference": 0,
             },

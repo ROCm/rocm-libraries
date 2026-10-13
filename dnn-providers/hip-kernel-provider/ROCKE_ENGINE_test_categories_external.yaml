@@ -17,7 +17,7 @@
 # TheRock CI's per-tier test_hipkernelprovider.py invocation runs these
 # suites.
 #
-# These tests are fast (<5s total combined) and carry no Full*/Standard*/
+# These tests carry no Full*/Standard*/
 # Comprehensive* variant, so every tier runs the same coverage -- matching
 # HIP_MLOPS_ENGINE_test_categories.yaml's convention for suites without
 # tiered coverage yet.
@@ -25,6 +25,7 @@ test_categories:
   quick:
     description: "rocKE pre-registered smoke/golden/unit checks (C++ + Python)"
     test_patterns:
+      - "rocke_optimization_barrier"
       - "rocke_arch_target_identity"
       - "rocke_ir_serialize_roundtrip"
       - "rocke_mma_frag_ssot"
@@ -32,6 +33,13 @@ test_categories:
       - "rocke_python_import_smoke"
       - "rocke_golden_static"
       - "rocke_library_conv_pytest"
+      - "rocke_pytest"
+      - "rocke_library_gpu_pytest"
+      - "rocke_reference_common_pytest"
+      - "rocke_sdpa_reference_unit_pytest"
+      - "rocke_sdpa_gpu_gfx942_pytest"
+      - "rocke_conv_reference_unit_pytest"
+      - "rocke_conv_gpu_gfx942_pytest"
     labels:
       - "quick"
       - "pre-commit"
@@ -40,6 +48,7 @@ test_categories:
   ffm-quick:
     description: "Fast-feedback mechanism (FFM) rocKE smoke/golden/unit checks"
     test_patterns:
+      - "rocke_optimization_barrier"
       - "rocke_arch_target_identity"
       - "rocke_ir_serialize_roundtrip"
       - "rocke_mma_frag_ssot"
@@ -47,5 +56,12 @@ test_categories:
       - "rocke_python_import_smoke"
       - "rocke_golden_static"
       - "rocke_library_conv_pytest"
+      - "rocke_pytest"
+      - "rocke_library_gpu_pytest"
+      - "rocke_reference_common_pytest"
+      - "rocke_sdpa_reference_unit_pytest"
+      - "rocke_sdpa_gpu_gfx942_pytest"
+      - "rocke_conv_reference_unit_pytest"
+      - "rocke_conv_gpu_gfx942_pytest"
     labels:
       - "ffm-full"

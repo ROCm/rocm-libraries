@@ -1280,14 +1280,33 @@ template <typename Ti, typename To, typename Tc>
 bool useHipBLASLt(const RocblasContractionProblem<Ti, To, Tc>& prob)
 {
 #ifdef BUILD_WITH_HIPBLASLT
-    if constexpr(sizeof(Ti) != 2 && !std::is_same<Ti, double>::value)
+    if(!prob.handle->isHipBLASLtForcedOn())
     {
-        if(!prob.handle->isHipBLASLtForcedOn())
+        int arch = rocblas_internal_get_arch(prob.handle);
+
+        // gfx950: hipBLASLt is used for fp16/bf16/fp64/int8
+        // TODO remove after all types are supported
+        if constexpr(sizeof(Ti) != 2 && !std::is_same<Ti, double>::value
+                     && !std::is_same<Ti, int8_t>::value)
         {
-            // gfx950: hipBLASLt is used only for fp16/bf16/fp64
-            // TODO remove after all types are supported
-            if(rocblas_internal_get_arch(prob.handle) == 950)
+            if(arch == 950)
                 return false;
+        }
+
+        // gfx942: hipBLASLt is used for fp64 on all gfx942 devices, and for fp16/bf16
+        // only on MI300X (304 CUs); MI300A (228 CUs) stays on Tensile for fp16/bf16.
+        // TODO remove after all types are supported
+        if(arch == 942)
+        {
+            if constexpr(sizeof(Ti) == 2)
+            {
+                if(prob.handle->device_properties.multiProcessorCount != 304)
+                    return false;
+            }
+            else if constexpr(!std::is_same<Ti, double>::value)
+            {
+                return false;
+            }
         }
     }
 

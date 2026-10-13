@@ -20,11 +20,11 @@ Prerequisites
 
 On Linux, :doc:`ROCm <rocm:install/rocm>` must be installed before hipThreads is built.
 
-hipThreads has the following prerequisites on Linux and Microsoft Windows:
+hipThreads has the following prerequisites on Linux and Windows:
 
 * `CMake <https://cmake.org/>`_ version 3.21 or higher
 * `hipcc <https://rocm.docs.amd.com/projects/HIPCC/en/latest/index.html>`_
-* ROCm 7.12 or later, which provides HIP and libhipcxx
+* HIP and libhipcxx from an installed ROCm
 * A build tool such as ``make`` or `Ninja <https://ninja-build.org/>`_
 
 hipThreads has these additional prerequisites on Windows:
@@ -48,7 +48,11 @@ Use sparse checkout when cloning the hipThreads project:
   git sparse-checkout init --cone
   git sparse-checkout set projects/hipthreads
 
-Then use ``git checkout`` to check out the branch you need.
+Then use ``git checkout`` to check out the branch you need. For example, to check out the develop branch:
+
+.. code-block:: bash
+
+   git checkout develop
 
 The develop branch is intended for users who want to preview new features or contribute to the hipThreads code base.
 

@@ -96,6 +96,28 @@ def _spec(idx: int):
             ),
             "gfx950",
         )
+    if idx == 7:
+        # ws_replicas=1: the fold is elided entirely and the body collapses to
+        # a single load.  A distinct emission path from the default.
+        return (
+            WgradReduceSpec(
+                problem=_make_problem(64, 576),
+                dtype_d="fp16",
+                ws_replicas=1,
+            ),
+            "gfx950",
+        )
+    if idx == 8:
+        # A non-default replica count, so the factor is proven to reach the
+        # emitted body rather than only the kernel name.
+        return (
+            WgradReduceSpec(
+                problem=_make_problem(32, 72),
+                dtype_d="bf16",
+                ws_replicas=4,
+            ),
+            "gfx950",
+        )
     raise SystemExit(f"unknown config index {idx}")
 
 
