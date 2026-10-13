@@ -411,6 +411,18 @@ class StreamK(TileProcessingStrategy):
                 _DepthU = kernel[key]
                 if kernel.get("UseSubtileImpl"):
                     _DepthU = (_DepthU * 32)
+                # Dual-period MXFP8: _DepthUMXS* counts the full 256-K scale
+                # epoch, but a StreamK iteration is one data-DU (DepthU), and
+                # the mainloop advances the scale SRD once per epoch (every
+                # ScaleReuse data iterations).  So the per-StreamK-iteration
+                # scale K-stride is the epoch divided by ScaleReuse; using the
+                # full epoch over-advances the scale SRD by ScaleReuse and
+                # desyncs scales from data on K-split tiles.
+                if kernel.get("_DualPeriodMXFP8"):
+                    scaleReuse = kernel.get(
+                        "_ScaleReuse%s" % ("A" if tc == "MXSA" else "B"), 1)
+                    if scaleReuse:
+                        _DepthU = _DepthU // scaleReuse
                 return _DepthU
             return kernel["DepthU"]
         if kernel["ProblemType"]["Sparse"]:
