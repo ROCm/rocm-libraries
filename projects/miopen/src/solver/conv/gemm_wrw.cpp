@@ -219,6 +219,8 @@ bool GemmWrw1x1_stride1::IsApplicable(const ExecutionContext& context,
                                       const ProblemDescription& problem) const
 {
 #if MIOPEN_USE_GEMM
+    if(gemm::IsSmallBatchNhwcBackwardExcluded(context.GetStream().GetDeviceName(), problem))
+        return false;
     if(!GemmWrwBase::IsApplicable(context, problem))
         return false;
 
@@ -533,6 +535,8 @@ bool GemmWrwUniversal::IsApplicable(const ExecutionContext& context,
                                     const ProblemDescription& problem) const
 {
 #if MIOPEN_USE_GEMM
+    if(gemm::IsSmallBatchNhwcBackwardExcluded(context.GetStream().GetDeviceName(), problem))
+        return false;
     if(miopen::conv::IsWrwPointOutputStrideEqFilter(problem))
     {
         if(!problem.AllTensorsDimsFitIntoInt())

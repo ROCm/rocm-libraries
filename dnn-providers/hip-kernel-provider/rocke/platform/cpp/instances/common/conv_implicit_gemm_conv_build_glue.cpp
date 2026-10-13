@@ -110,6 +110,21 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
     ctx->ov = overrides;
     ctx->p = &spec->problem; /* p = spec.problem */
 
+    /* Group merging (Gm). The kernargs describe the TRUE problem -- the host
+     * packs them from the tensors, which do not merge -- so every merged extent
+     * the tile covers is derived in-kernel from the build-time degree. Merging
+     * is depthwise-only, so the merged per-group channel run is exactly Gm and
+     * folds to the constant c_gm; only the reduction extent (K_gemm*Gm) stays a
+     * runtime product. At group_merge 1 none of it is emitted. */
+    rocke_implicit_gemm_conv_spec_merged_problem(spec, &ctx->merged_problem);
+    ctx->p_load = &ctx->merged_problem;
+    ctx->group_merge = (spec->group_merge > 1) ? spec->group_merge : 1;
+    ctx->group_merge_log2 = 0;
+    for(int _gm = ctx->group_merge; _gm > 1; _gm >>= 1)
+        ctx->group_merge_log2++;
+    ctx->merged = ctx->group_merge > 1;
+    ctx->grouped = ctx->p->groups > 1 || ctx->merged;
+
     /* ---- spec.validate() ---- (line 787) */
     if(!rocke_implicit_gemm_conv_spec_validate(spec, reason, sizeof(reason)))
     {
@@ -123,6 +138,18 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
     {
         rocke_i_set_err(
             b, ROCKE_ERR_VALUE, "invalid conv_igemm spec for %s: %s", ctx->arch, reason);
+        return false;
+    }
+    /* The merged A/B addressing lives in the split address form; the
+     * descriptor-DAG path a caller-supplied (n, ho, wo) decode forces has no
+     * slot for the merged channel decode or the diagonal mask. (3-D, the other
+     * descriptor-DAG path, is rejected by rocke_conv_fwd_group_merge_available.) */
+    if(ctx->merged && overrides != NULL && overrides->a_mhw_index_fn != NULL)
+    {
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        "group_merge is not implemented with an a_mhw_index_fn override: "
+                        "it needs the 2-D split address form");
         return false;
     }
     /* Forward-conv-only: reject default epilogue when vec_c > 1 (auto-derived from kpg).
@@ -141,7 +168,15 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
         }
         else
         {
-            int _K = rocke_conv_problem_kpg(&spec->problem);
+            /* Read the *merged* problem: under group_merge the store runs over
+             * kpg*Gm consecutive output channels, so a depthwise spec that looks
+             * scalar here (kpg == 1) really stores Gm-wide. Using spec->problem
+             * would make this rule never fire on exactly the specs merging
+             * exists for, and the validator would then disagree with the emitter
+             * about which epilogue is legal. Identical at group_merge 1. */
+            rocke_conv_problem_t _merged;
+            rocke_implicit_gemm_conv_spec_merged_problem(spec, &_merged);
+            int _K = rocke_conv_problem_kpg(&_merged);
             bool _is_fp32_d = (spec->dtype_d && strcmp(spec->dtype_d, "fp32") == 0);
             if(_is_fp32_d)
                 _eff_vec_c = (_K % 4 == 0) ? 4 : (_K % 2 == 0) ? 2 : 1;
@@ -405,8 +440,25 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
     /* ---- common geometry constants ---- (843-845) */
     ctx->c0 = rocke_b_const_i32(b, 0);
     ctx->c_block_k = rocke_b_const_i32(b, ctx->block_k);
-    /* AOT: c_K_gemm is now the runtime param p_K_gemm (was const_i32(p.K_gemm)) */
-    ctx->c_K_gemm = ctx->p_K_gemm;
+    if(ctx->merged)
+    {
+        /* Gm and its power-of-two split constants, materialised once, exactly
+         * where Python's `if merged:` block emits them. Gm is a power of two
+         * (enforced by the gate), so splitting the merged reduction index into
+         * its (filter position, merged group) parts is a shift and a mask. */
+        ctx->c_gm = rocke_b_const_i32(b, ctx->group_merge);
+        ctx->c_gm_mask = rocke_b_const_i32(b, ctx->group_merge - 1);
+        ctx->c_gm_shift = rocke_b_const_i32(b, ctx->group_merge_log2);
+        /* Merged: [Z*]Y*X*Gm. The kernargs describe the TRUE problem, so the
+         * merged reduction is scaled in-kernel by the build-time degree. */
+        ctx->c_K_gemm = rocke_b_mul(b, ctx->p_K_gemm, ctx->c_gm);
+    }
+    else
+    {
+        ctx->c_gm = ctx->c_gm_mask = ctx->c_gm_shift = NULL;
+        /* AOT: c_K_gemm is the runtime param p_K_gemm (was const_i32(p.K_gemm)) */
+        ctx->c_K_gemm = ctx->p_K_gemm;
+    }
 
     /* ---- per-CTA tile origins (chiplet-swizzle aware) ---- (858-879) */
     if(spec->chiplet_swizzle)
@@ -441,19 +493,24 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
 
     /* ---- grouped conv: group index + absolute output-filter base ---- (818-831)
      * Python:
-     *   grouped = p.groups > 1
+     *   grouped = p.groups > 1 or merged
      *   if grouped:
      *       group_idx = b.block_id_z()
      *       k_out_group_base = b.mul(group_idx, b.const_i32(p.kpg))
      *   else: group_idx = None; k_out_group_base = None
-     * Both are NULL for groups == 1 (byte-identical ungrouped path). */
-    if(ctx->p->groups > 1)
+     * Both are NULL for groups == 1 (byte-identical ungrouped path).
+     *
+     * Merged: "group" is the merged group (gridDim.z runs 0..groups/Gm) and
+     * the path stays engaged even at Gm == groups -- see ctx->grouped. */
+    if(ctx->grouped)
     {
         /* Python: group_idx = b.block_id_z(); k_out_group_base = b.mul(group_idx, b.const_i32(kpg))
          * Bind subexpressions in Python's left-to-right order to pin SSA ids. */
         ctx->group_idx = rocke_b_block_id_z(b);
-        /* AOT: use runtime p_kpg param (was const_i32(p.kpg)) */
-        ctx->k_out_group_base = rocke_b_mul(b, ctx->group_idx, ctx->p_kpg);
+        /* AOT: the runtime p_kpg param (was const_i32(p.kpg)). Merged: the
+         * merged kpg, which is Gm exactly (depthwise only), so c_gm. */
+        ctx->k_out_group_base
+            = rocke_b_mul(b, ctx->group_idx, ctx->merged ? ctx->c_gm : ctx->p_kpg);
     }
     else
     {
@@ -550,7 +607,10 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
 
     /* ---- global -> LDS coalesced copy plan ---- (924-925) */
     ctx->threads = rocke_implicit_gemm_conv_spec_block_size(spec);
+    /* Python _sync_load_vecs defaults: A from the merged channel run, B forced
+     * scalar under merge. Equal to each other at group_merge 1. */
     ctx->load_vec = rocke_conv_default_load_vec(spec);
+    ctx->load_vec_b = rocke_conv_default_load_vec_b(spec);
 
     /* ---- coordinate-transform descriptors ---- (935-936).
      * Pointwise fast path: Y=X=1, stride=1, pad=0 -> descriptors are NULL and
@@ -560,7 +620,12 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
         ctx->is_pointwise = rocke_conv_problem_is_pointwise(ctx->p);
         ctx->c_wgK_pw = 0; /* forward conv: unused */
         ctx->c_wgN_pw = 0; /* forward conv: unused */
-        ctx->b_descriptor_fn = NULL; /* forward conv: use default rocke_conv_b_descriptor */
+        /* forward conv: default rocke_conv_b_descriptor, unless merging, which
+         * needs the k_gemm split and the diagonal mask. Merge rejects both
+         * async_dma and pointwise, so in practice only the sync non-pointwise
+         * leg sees the override -- but installing it here rather than at one
+         * call site means both loader legs pick it up if either gate relaxes. */
+        ctx->b_descriptor_fn = (ctx->group_merge > 1) ? rocke_conv_b_descriptor_merged : NULL;
         if(ctx->is_pointwise)
         {
             ctx->c_M_pw = rocke_conv_problem_m(ctx->p);
@@ -667,7 +732,7 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
          * (load-wave-relative thread index is load_tid = tid - block_size). */
         int load_threads = spec->num_load_waves * spec->wave_size;
         int load_vec_a = spec->has_vector_size_a ? spec->vector_size_a : ctx->load_vec;
-        int load_vec_b = spec->has_vector_size_b ? spec->vector_size_b : ctx->load_vec;
+        int load_vec_b = spec->has_vector_size_b ? spec->vector_size_b : ctx->load_vec_b;
         rocke_status_t sa = rocke_coalesced_tile_loader_from_tile(
             ctx->block_m, ctx->block_k, load_threads, load_vec_a, true, &ctx->a_wavelet_loader);
         rocke_status_t sb = rocke_coalesced_tile_loader_from_tile(
@@ -709,7 +774,7 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
          *   load_vec_a = spec.vector_size_a if not None else _auto_load_vec
          *   load_vec_b = spec.vector_size_b if not None else _auto_load_vec */
         int load_vec_a = spec->has_vector_size_a ? spec->vector_size_a : ctx->load_vec;
-        int load_vec_b = spec->has_vector_size_b ? spec->vector_size_b : ctx->load_vec;
+        int load_vec_b = spec->has_vector_size_b ? spec->vector_size_b : ctx->load_vec_b;
         rocke_status_t sa = rocke_coalesced_tile_loader_from_tile(
             ctx->block_m, ctx->block_k, ctx->threads, load_vec_a, true, &ctx->a_sync_loader);
         rocke_status_t sb = rocke_coalesced_tile_loader_from_tile(
@@ -733,8 +798,11 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
         ctx->split_neg_pW = rocke_b_sub(b, ctx->c0, ctx->p_pW);
         ctx->split_ystep = rocke_b_mul(b, ctx->p_dH, ctx->p_A_stride_hi);
         ctx->split_xstep = rocke_b_mul(b, ctx->p_dW, ctx->p_A_stride_wi);
+        /* Merged: the A channel slab is the merged group's, Gm channels wide. */
         ctx->split_group_base
-            = ctx->group_idx != NULL ? rocke_b_mul(b, ctx->group_idx, ctx->p_cpg) : NULL;
+            = ctx->group_idx != NULL
+                  ? rocke_b_mul(b, ctx->group_idx, ctx->merged ? ctx->c_gm : ctx->p_cpg)
+                  : NULL;
     }
 
     /* ---- schedule policy + prologue ---- (1029-1032) */
@@ -816,10 +884,12 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv(rocke_ir_builder_t* b,
         /* Grouped conv: the per-warp N coord is within-group (n < kpg);
          * recover the absolute NHWK filter k_out = g*kpg + n.
          * Python binds block_id_z() before the multiply, so pin the order. */
-        if(ctx.p->groups > 1)
+        if(ctx.grouped)
         {
+            /* Merged: g is the merged group and the merged kpg is Gm, so the
+             * same expression yields k_out = merged_group*Gm + g_n. */
             rocke_value_t* bid_z = rocke_b_block_id_z(b);
-            ctx.d_k_out_group_base = rocke_b_mul(b, bid_z, ctx.p_kpg);
+            ctx.d_k_out_group_base = rocke_b_mul(b, bid_z, ctx.merged ? ctx.c_gm : ctx.p_kpg);
         }
         else
         {
