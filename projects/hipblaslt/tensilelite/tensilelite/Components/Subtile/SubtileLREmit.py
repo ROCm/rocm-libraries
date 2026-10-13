@@ -274,7 +274,11 @@ def _applyWavePartitionLROffset(module, writer, kernel, tileInfo):
     writer.sgprPool.checkIn(tmpSgpr)
     return
 
-  if tileInfo.loadRatioGR >= 2.0:
+  # Non-dual-period kernels keep the original behavior: a GR load ratio >= 2.0
+  # skips the wave-partition LR offset.  The dual-period MXFP8 kernel reuses one
+  # 256-K scale epoch across ScaleReuse data iterations (load ratio >= 2.0) and
+  # DOES need the offset, so it is exempt from the early return.
+  if tileInfo.loadRatioGR >= 2.0 and not kernel.get("_DualPeriodMXFP8"):
     return
 
   wavesize = kernel["WavefrontSize"]
@@ -287,7 +291,7 @@ def _applyWavePartitionLROffset(module, writer, kernel, tileInfo):
   partitionOffset = tileInfo.mmaTileShape[0] * tileInfo.localSubtileGrid[0]
   numRowsPerWave = wavesize // (subIterKBytes // loadWidth)
 
-  if tileInfo.loadRatioGR == 1.0:
+  if tileInfo.loadRatioGR >= 1.0:
     mWaves = kernel["MIWaveGroup"][0]
     if tc == 'A':
       module.add(VAndB32(dst=vgpr(waveId), src0=hex(mWaves - 1), src1=vgpr(waveId), comment="%s: waveId %% %d"%(tc, mWaves)))

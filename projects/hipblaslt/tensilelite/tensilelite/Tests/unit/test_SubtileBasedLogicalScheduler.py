@@ -254,7 +254,10 @@ def create_kernel_fp8(MT0, MT1, waveGroup, depthU=128):
     }
 
 
-def make_cfg_fp8(MT0, MT1, waveGroup, depthU=128, pgr=2):
+def make_cfg_fp8(MT0, MT1, waveGroup, depthU=128, pgr=2,
+                 partSizeM=0, partSizeN=0, plr=-1,
+                 doubleBufferTensors=(), prefetchNextPartition=False,
+                 partitionOrder="m-major"):
     """Build plain FP8 config (AB_B8, matrixInstK=128, no scale tensors).
 
     GR granularity matches production: mn=subtileShape[0]=1, k=subtileShape[1]=1.
@@ -271,7 +274,13 @@ def make_cfg_fp8(MT0, MT1, waveGroup, depthU=128, pgr=2):
         lrB=ReadGranularity(mn=1, k=1),
         grA=ReadGranularity(mn=tiA.subtileShape[0], k=tiA.subtileShape[1]),
         grB=ReadGranularity(mn=tiB.subtileShape[0], k=tiB.subtileShape[1]),
+        partitionSizeM=partSizeM,
+        partitionSizeN=partSizeN,
         pgr=pgr,
+        plr=plr,
+        doubleBufferTensors=doubleBufferTensors,
+        prefetchNextPartition=prefetchNextPartition,
+        partitionOrder=partitionOrder,
     )
 
 
@@ -452,6 +461,155 @@ def _preop_inc_tensors(placement, kind):
 # ══════════════════════════════════════════════════════════════
 # Step 1: Place LRs
 # ══════════════════════════════════════════════════════════════
+
+class TestPartitionDirectedPLR:
+
+    @staticmethod
+    def _make_cfg():
+        return make_cfg_fp8(
+            256, 256, [2, 2],
+            partSizeM=4, partSizeN=4,
+            plr=0,
+            doubleBufferTensors=('A', 'B'),
+            prefetchNextPartition=True,
+            partitionOrder="n-major",
+        )
+
+    def test_flydsl_2x2_ranges_and_lr_targets(self):
+        cfg = self._make_cfg()
+        sched = LogicalScheduler(cfg)
+        partitions = sched.place_LRs()
+
+        assert cfg.numPartitionsM == 2
+        assert cfg.numPartitionsN == 2
+        assert [sched._partition_tile_range(pi) for pi in range(4)] == [
+            {'A': (0, 4), 'B': (0, 4)},  # c00
+            {'A': (0, 4), 'B': (4, 8)},  # c01
+            {'A': (4, 8), 'B': (0, 4)},  # c10
+            {'A': (4, 8), 'B': (4, 8)},  # c11
+        ]
+
+        # Resident-range tracking reuses A across c00/c01 and B across
+        # c00/c10.  Only genuinely missing operands are prefetched.
+        got = []
+        for pi, slots in enumerate(partitions):
+            for lr in slots[0].lrs:
+                got.append((pi, lr.tensor, lr.mtIteration,
+                            lr.targetPartition,
+                            lr.tiles.tileId_start, lr.tiles.tileId_end))
+        assert got == [
+            (0, 'B', 0, 1, 4, 8),       # c00 -> c01
+            (1, 'A', 0, 2, 4, 8),       # c01 -> c10
+            (3, 'A', 1, 0, 0, 4),       # c11 -> next-K c00
+            (3, 'B', 1, 0, 0, 4),
+        ]
+
+    def test_flydsl_2x2_vgpr_coloring(self):
+        cfg = self._make_cfg()
+        sched = LogicalScheduler(cfg)
+        sched.place_LRs()
+        sched.assign_vgpr_tiles()
+
+        assert sched.tile_peaks['A'] == 8
+        assert sched.tile_peaks['B'] == 8
+
+        def ids(pi, tensor):
+            maps = sched._partitions[pi][0].mfma.vgpr_tile_maps[tensor][0]
+            return set(maps.values())
+
+        # A follows M partition; B follows N partition.
+        assert ids(0, 'A') == ids(1, 'A') == set(range(0, 4))
+        assert ids(2, 'A') == ids(3, 'A') == set(range(4, 8))
+        assert ids(0, 'B') == ids(2, 'B') == set(range(0, 4))
+        assert ids(1, 'B') == ids(3, 'B') == set(range(4, 8))
+
+    @pytest.mark.parametrize(
+        "part_m,part_n,expected_grid",
+        [(4, 8, (2, 1)), (8, 4, (1, 2)), (4, 4, (2, 2))],
+    )
+    def test_partition_prefetch_supports_m_n_and_2d_grids(
+            self, part_m, part_n, expected_grid):
+        cfg = make_cfg_fp8(
+            256, 256, [2, 2],
+            partSizeM=part_m, partSizeN=part_n,
+            plr=0,
+            doubleBufferTensors=('A', 'B'),
+            prefetchNextPartition=True,
+            partitionOrder="n-major",
+        )
+        sched = LogicalScheduler(cfg)
+        sched.build()
+        assert (cfg.numPartitionsM, cfg.numPartitionsN) == expected_grid
+        assert cfg.numPartitions == expected_grid[0] * expected_grid[1]
+
+
+class TestDualPeriodMXFP8NextPartition:
+    """Stage (a): the next-partition scheduler accepts MX scales via the
+    dual-period MXFP8 path (data DU128 decoupled from a 256-K scale epoch).
+
+    The scale epoch spans scaleReuse data iterations, so numSubIterK / numUnroll
+    must be derived from the DATA tensors only: a scale gr.k > 1 must NOT expand
+    the data K axis (which would otherwise force numSubIterK=2 and trip the
+    prefetchNextPartition `numSubIterK==1` guard).
+    """
+
+    @staticmethod
+    def _make_cfg(scaleReuse=2, grSA_k=2):
+        # 8-wave MT256x256: MIWT 8x4, MIWG 2x4 -> 8 M-tiles, 4 N-tiles.
+        return SchedulerConfig(
+            numMFMATilesM=8,
+            numMFMATilesN=4,
+            numSubIterK=1,
+            lrA=ReadGranularity(mn=1, k=1),
+            lrB=ReadGranularity(mn=1, k=1),
+            grA=ReadGranularity(mn=1, k=1),
+            grB=ReadGranularity(mn=1, k=1),
+            lrSA=ReadGranularity(mn=2, k=1),
+            lrSB=ReadGranularity(mn=2, k=1),
+            # scale gr.k>1 would expand the data K axis without the data-only
+            # derivation; this is the regression guard.
+            grSA=ReadGranularity(mn=2, k=grSA_k),
+            grSB=ReadGranularity(mn=2, k=grSA_k),
+            partitionSizeM=4,
+            partitionSizeN=2,
+            pgr=2,
+            plr=0,
+            doubleBufferTensors=('A', 'B'),
+            prefetchNextPartition=True,
+            partitionOrder="n-major",
+            scaleReuse=scaleReuse,
+        )
+
+    def test_config_accepts_scales_and_keeps_numsubiterk_1(self):
+        cfg = self._make_cfg()
+        assert cfg.hasScale is True
+        assert cfg.dualPeriodScale is True
+        # Data-only derivation: scale gr.k=2 did NOT expand the data K axis.
+        assert cfg.numSubIterK == 1
+        assert cfg.numUnroll.get('A', 1) == 1
+        assert cfg.numUnroll.get('B', 1) == 1
+        # 4x2 partitioning over 8x4 tiles -> 2x2 grid, N-major c00->c01->c10->c11.
+        assert (cfg.numPartitionsM, cfg.numPartitionsN) == (2, 2)
+        assert cfg.numPartitions == 4
+
+    def test_builds_and_places_scale_lrs(self):
+        cfg = self._make_cfg()
+        sched = LogicalScheduler(cfg)
+        sched.build()  # must not raise
+        # Scale LRs are placed somewhere in the schedule.
+        scale_lr_tensors = set()
+        for slots in sched._partitions:
+            for slot in slots:
+                for lr in slot.lrs:
+                    if lr.tensor in ('SA', 'SB'):
+                        scale_lr_tensors.add(lr.tensor)
+        assert {'SA', 'SB'} <= scale_lr_tensors
+
+    def test_scale_reuse_1_stays_single_period(self):
+        # scaleReuse=1 is the legacy single-period behavior (not dual-period).
+        cfg = self._make_cfg(scaleReuse=1, grSA_k=1)
+        assert cfg.dualPeriodScale is False
+
 
 class TestPlaceLRs:
 

@@ -444,17 +444,22 @@ def _grComputeRowPartition(module, kernel, writer, tileInfo, waveId, rowOffset):
   partitionOffset = tileInfo.mmaTileShape[0]*tileInfo.localSubtileGrid[0]
   module.add(SMovB32(dst=sgpr(tmpSgpr), src=partitionOffset, comment="%s: row offset"%tc))
 
-  if tileInfo.loadRatioGR == 1.0:
-    module.add(VAndB32(dst=vgpr(localRow), src0=hex(1), src1=vgpr(waveId), comment="%s: waveId %% 2"%tc))
-    module.add(VLShiftRightB32(dst=vgpr(partitionRow), shiftHex=hex(1), src=vgpr(waveId), comment="%s: waveId / 2"%tc))
-  elif tileInfo.loadRatioGR == 0.5:
-    module.add(VMovB32(dst=vgpr(localRow), src=0, comment="%s"%tc))
-    module.add(VMovB32(dst=vgpr(partitionRow), src=vgpr(waveId), comment="%s"%tc))
-  elif tileInfo.loadRatioGR == 2.0:
-    module.add(VMovB32(dst=vgpr(localRow), src=vgpr(waveId), comment="%s"%tc))
-    module.add(VMovB32(dst=vgpr(partitionRow), src=0, comment="%s"%tc))
-  else:
+  wavesPerPartition = int(2 * tileInfo.loadRatioGR)
+  if tileInfo.loadRatioGR not in (0.5, 1.0, 2.0):
     raise NotImplementedError("Unsupported loadRatioGR for wave partition: %s"%str(tileInfo.loadRatioGR))
+  # loadRatioGR determines how many waves cooperate inside one free-dimension
+  # partition: 0.5 -> 1, 1.0 -> 2, 2.0 -> 4.  Express the old three special
+  # cases as a single quotient/remainder mapping so eight-wave asymmetric
+  # groups do not send the upper waves past the end of LDS.
+  if wavesPerPartition == 1:
+    module.add(VMovB32(dst=vgpr(localRow), src=0, comment="%s: one wave per partition"%tc))
+    module.add(VMovB32(dst=vgpr(partitionRow), src=vgpr(waveId), comment="%s: partition = waveId"%tc))
+  else:
+    shift = wavesPerPartition.bit_length() - 1
+    module.add(VAndB32(dst=vgpr(localRow), src0=hex(wavesPerPartition - 1), src1=vgpr(waveId),
+                      comment="%s: waveId %% %u"%(tc, wavesPerPartition)))
+    module.add(VLShiftRightB32(dst=vgpr(partitionRow), shiftHex=hex(shift), src=vgpr(waveId),
+                              comment="%s: waveId / %u"%(tc, wavesPerPartition)))
 
   module.add(VLShiftLeftB32(dst=vgpr(localRow), shiftHex=hex(numRowsPerWave.bit_length()-1), src=vgpr(localRow), comment="%s: local row offset"%tc))
   module.add(VMulLOU32(dst=vgpr(partitionRow), src0=sgpr(tmpSgpr), src1=vgpr(partitionRow), comment="%s: wave row offset"%tc))
@@ -553,17 +558,18 @@ def _grComputeRowPartition_legacy(module, kernel, writer, tileInfo, waveId, rowO
   partitionRow = tmpVgpr+1
   partitionOffset = tileInfo.mmaTileShape[0]*tileInfo.localSubtileGrid[0]
   module.add(SMovB32(dst=sgpr(tmpSgpr), src=partitionOffset, comment="%s: row offset"%tc))
-  if tileInfo.loadRatioGR == 1.0:
-    module.add(VAndB32(dst=vgpr(localRow), src0=hex(1), src1=vgpr(waveId), comment="%s: waveId %% 2"%tc))
-    module.add(VLShiftRightB32(dst=vgpr(partitionRow), shiftHex=hex(1), src=vgpr(waveId), comment="%s: waveId / 2"%tc))
-  elif tileInfo.loadRatioGR == 0.5:
-    module.add(VMovB32(dst=vgpr(localRow), src=0, comment="%s"%tc))
-    module.add(VMovB32(dst=vgpr(partitionRow), src=vgpr(waveId), comment="%s"%tc))
-  elif tileInfo.loadRatioGR == 2.0:
-    module.add(VMovB32(dst=vgpr(localRow), src=vgpr(waveId), comment="%s"%tc))
-    module.add(VMovB32(dst=vgpr(partitionRow), src=0, comment="%s"%tc))
-  else:
+  wavesPerPartition = int(2 * tileInfo.loadRatioGR)
+  if tileInfo.loadRatioGR not in (0.5, 1.0, 2.0):
     raise NotImplementedError("Unsupported loadRatioGR for wave partition: %s"%str(tileInfo.loadRatioGR))
+  if wavesPerPartition == 1:
+    module.add(VMovB32(dst=vgpr(localRow), src=0, comment="%s: one wave per partition"%tc))
+    module.add(VMovB32(dst=vgpr(partitionRow), src=vgpr(waveId), comment="%s: partition = waveId"%tc))
+  else:
+    shift = wavesPerPartition.bit_length() - 1
+    module.add(VAndB32(dst=vgpr(localRow), src0=hex(wavesPerPartition - 1), src1=vgpr(waveId),
+                      comment="%s: waveId %% %u"%(tc, wavesPerPartition)))
+    module.add(VLShiftRightB32(dst=vgpr(partitionRow), shiftHex=hex(shift), src=vgpr(waveId),
+                              comment="%s: waveId / %u"%(tc, wavesPerPartition)))
   module.add(VLShiftLeftB32(dst=vgpr(localRow), shiftHex=hex(numRowsPerWave.bit_length()-1), src=vgpr(localRow), comment="%s: local row offset"%tc))
   module.add(VMulLOU32(dst=vgpr(partitionRow), src0=sgpr(tmpSgpr), src1=vgpr(partitionRow), comment="%s: wave row offset"%tc))
   module.add(VAddU32(dst=vgpr(rowOffset), src0=vgpr(localRow), src1=vgpr(partitionRow), comment="%s: row offset"%tc))
