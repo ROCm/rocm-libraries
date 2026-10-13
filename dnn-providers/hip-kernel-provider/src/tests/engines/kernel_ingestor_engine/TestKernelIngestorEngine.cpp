@@ -12,6 +12,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <typeinfo>
 #include <utility>
 #include <vector>
 
@@ -30,6 +31,7 @@
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_plugin_sdk/BehaviorNote.h>
 #include <hipdnn_plugin_sdk/GlobalKnobDefines.hpp>
+#include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 #include <hipdnn_plugin_sdk/ingestor/GenericPlan.hpp>
 #include <hipdnn_plugin_sdk/ingestor/IKernelDispatchHandler.hpp>
@@ -526,10 +528,14 @@ TEST(TestKernelIngestorEngine, ReportsTheSerializationNoteOnlyOnSaveableEngines)
     }
 }
 
-// The SDK default save and restore return nothing. A handler's own save and restore reject
-// these probe inputs before any GPU work, so they throw.
+// The SDK defaults return nullopt and nullptr without throwing, so only a throw is
+// evidence of an override. A handler's own save down-casts the prepared dispatch, which
+// rejects a foreign one with std::bad_cast; its own restore runs the shared restore checks,
+// which refuse an empty saved plan with HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE. Both reject
+// before any GPU work.
 TEST(TestKernelIngestorEngine, EveryHandlerOfANotedEngineSavesAndRestores)
 {
+    using hipdnn_plugin_sdk::HipdnnPluginException;
     using hipdnn_plugin_sdk::ingestor::DispatchRegistry;
     using hipdnn_plugin_sdk::ingestor::PreparedDispatch;
     using hipdnn_plugin_sdk::ingestor::SavedKernelCode;
@@ -556,9 +562,9 @@ TEST(TestKernelIngestorEngine, EveryHandlerOfANotedEngineSavesAndRestores)
             try
             {
                 const PreparedDispatch foreign{};
-                saves = handler->saveLaunchInputs(foreign).has_value();
+                static_cast<void>(handler->saveLaunchInputs(foreign));
             }
-            catch(const std::exception&)
+            catch(const std::bad_cast&)
             {
                 saves = true;
             }
@@ -567,11 +573,13 @@ TEST(TestKernelIngestorEngine, EveryHandlerOfANotedEngineSavesAndRestores)
             bool restores = false;
             try
             {
-                restores
-                    = handler->restoreLaunch(SavedLaunchInputs{}, SavedKernelCode{}, 0) != nullptr;
+                static_cast<void>(
+                    handler->restoreLaunch(SavedLaunchInputs{}, SavedKernelCode{}, 0));
             }
-            catch(const std::exception&)
+            catch(const HipdnnPluginException& refusal)
             {
+                EXPECT_EQ(refusal.getStatus(), HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE)
+                    << dispatch->dispatchSymbol << ": " << refusal.getMessage();
                 restores = true;
             }
             EXPECT_TRUE(restores) << dispatch->dispatchSymbol << " does not restore a launch";
