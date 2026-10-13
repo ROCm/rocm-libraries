@@ -89,7 +89,7 @@ gfx950. That is CK's *shipping packed* path.
 
 CK's scalar fallback truncates instead. It is deliberately not the parity
 target: an RNE split is strictly the more accurate of the two, and the emulation
-as a whole is already more accurate than real TF32.
+as a whole is already more accurate than real TF32 applied to raw fp32 operands.
 
 ## Synthetic ops in the C engine
 

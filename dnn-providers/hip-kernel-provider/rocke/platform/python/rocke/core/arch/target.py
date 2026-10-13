@@ -153,9 +153,11 @@ class MmaEmulationRecipe(str, Enum):
     # operand carries into a bf16 "big" part and a bf16 "small" remainder,
     # threading one fp32 accumulator. All 32 payload bits are used -- unlike a
     # native XF32 instruction, nothing is dropped from the operand -- so the
-    # result is at least as accurate as the native atom. The small*small cross
-    # term is dropped: it is the same order as the split's own representation
-    # error, so computing it buys nothing.
+    # result tracks the exact product of the payload: more accurate than the
+    # native atom on raw fp32 operands, and within 2^-18 (relative, per product)
+    # of it on operands already rounded to TF32 precision. The small*small
+    # cross term is dropped: it is the same order as the split's own
+    # representation error, so computing it buys nothing.
     BF16X3 = "bf16x3"
 
     def __str__(self) -> str:

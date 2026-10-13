@@ -82,13 +82,18 @@ boundary example is an operand `0x3f801001` multiplied by 1.0:
 | BF16x3 emulation | `0x3f801000` — the payload to within one fp32 ulp |
 
 All three are correct for what each is. The contract the emulated atom promises is
-therefore *at least as accurate as the native atom on the same operands; not
-bit-reproducible against it across targets*. The device harness pins the first half
-with operands that carry bits below the native mantissa.
+therefore *to track the exact product of the payloads it is given, to within the split's
+own error; not bit-reproducible against the native atom across targets*. Which of the
+two is closer to that exact product depends on the operands:
 
-One more consequence is worth stating: for operands already prepared to TF32 precision
-the native atom is exact, while BF16x3 omits the `small*small` term, whose magnitude is
-bounded by `2^-18` of the product. That is far below TF32's own `2^-11`, and not zero.
+- on raw fp32 payloads the emulation is the more accurate, because the native atom
+  truncates each operand to 10 mantissa bits first;
+- on payloads already prepared to TF32 precision the native atom is exact, while BF16x3
+  omits the `small*small` term, whose magnitude is bounded by `2^-18` of the product —
+  far below TF32's own `2^-11`, and not zero.
+
+The device harness pins the raw-payload half with operands that carry bits below the
+native mantissa.
 
 ### The verifier reads the catalog
 

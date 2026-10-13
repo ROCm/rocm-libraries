@@ -192,9 +192,13 @@ An emulated atom has exactly the native atoms' ABI:
   rejected with the expected types named.
 - **No payload bit is dropped.** A native XF32 instruction ignores the low 13 bits of
   each operand; the emulation reinterprets the whole 32-bit payload as fp32 and splits
-  it. It is therefore at least as accurate as the native atom on the same operands, and
-  the two are not bit-reproducible against each other across targets. The device gate
-  pins this with operands that carry bits below the native mantissa.
+  it. It therefore tracks the exact product of the payloads it is given. On raw fp32
+  payloads that is more accurate than the native atom, which truncates them first; on
+  payloads already prepared to TF32 precision the native atom is exact and the emulation
+  stays within `2^-18` (relative, per product) of it, the bound on the omitted
+  `small*small` term. The two are not bit-reproducible against each other across
+  targets. The device gate pins the first half with operands that carry bits below the
+  native mantissa.
 
 ### 3.2 Catalog rows
 
