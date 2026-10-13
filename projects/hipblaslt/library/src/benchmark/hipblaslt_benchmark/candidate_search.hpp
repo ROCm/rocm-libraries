@@ -219,9 +219,9 @@ namespace hipblaslt_bench
                 return result;
             }
 
-            const bool failedBefore = detail::aborted(should_abort);
-            const bool prepared     = detail::call_hook(prepare, sol);
-            if(!failedBefore && detail::aborted(should_abort))
+            const bool failed_before = detail::aborted(should_abort);
+            const bool prepared      = detail::call_hook(prepare, sol);
+            if(!failed_before && detail::aborted(should_abort))
             {
                 result.aborted = true;
                 return result;

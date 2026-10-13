@@ -4386,9 +4386,10 @@ namespace
             if(beta != 0.0)
             {
                 // With C and D aliased, every launch overwrites the input for
-                // the next launch. The default 2,000 launches reuse at most 128
-                // blocks, so a nonzero beta compounds C repeatedly and quickly
-                // measures Inf/NaN rather than the caller's problem. Resetting C
+                // the next launch. The cold and the timed launches each cycle
+                // through the same rotation blocks, so a nonzero beta compounds
+                // C repeatedly and quickly measures Inf/NaN rather than the
+                // caller's problem. Resetting C
                 // inside the one event span would time the copies, so decline
                 // this case until the timing loop can provide an untimed reset
                 // before every reuse.
