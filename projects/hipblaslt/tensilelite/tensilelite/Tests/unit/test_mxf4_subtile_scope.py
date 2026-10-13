@@ -155,6 +155,35 @@ def test_block_scheduling_requires_plsin():
     assert plsinBlockSchedTile(noPlsin) is False
 
 
+@pytest.mark.parametrize("layout,transA,transB", [
+    ("TN", True,  False),   # the only layout any of this was built on
+    ("NN", False, False),
+    ("NT", False, True),
+    ("TT", True,  True),
+])
+def test_tile_scope_requires_tn(layout, transA, transB):
+    """The tile predicates carry the TN restriction, not just the emit sites.
+
+    ``assignPostLoopStoreInNll`` resolves ``PostLoopStoreInNll`` from the data
+    types, the ISA and the register budget -- it never looks at the layout. So
+    the layout restriction has to arrive through the tile predicates, or a
+    non-TN fp4/bf16 subtile kernel resolves PLSIN True, builds the block
+    schedule, the four-deep tail and absolute row addressing, and then finds
+    every store-side site keyed on ``isMxf4SubtilePath`` switched off. The
+    kernel name would not even record it: ``Naming`` drops
+    ``PostLoopStoreInNll`` from the required set when the path gate is False.
+
+    Nothing in the shipped library is non-TN fp4 -- every F4 solution is
+    ``Cijk_Alik_Bljk_*`` -- but ``Solution.assignDerivedParameters`` accepts
+    fp4 with TLU=1, so this is one tuning config away.
+    """
+    kernel = kern(transA=transA, transB=transB)
+    inScope = layout == "TN"
+    assert isMxf4SubtilePath(kernel) is inScope
+    assert plsinEarlyStoreTile(kernel) is inScope
+    assert plsinBlockSchedTile(kernel) is inScope
+
+
 def test_tile_scope_requires_the_type_scope():
     """No tile is in scope once the operand types are out of it."""
     outOfScope = kern(dtD=FP32)
@@ -174,13 +203,19 @@ def test_block_scheduling_stays_inside_the_mxf4_path():
     ``plsinEarlyStoreTile``, say, or widening the tile bound past it -- would
     start building the block schedule for kernels none of this was measured on,
     and the first sign of it would be a library diff rather than a failing test.
+
+    The product sweeps the layout too. It did not, and that is how the tile
+    predicates came to be missing the TN restriction that ``isMxf4SubtilePath``
+    carries: every case here was TN, so the containment held vacuously on the
+    one axis where it did not hold at all.
     """
     tiles = (64, 128, 192, 256, 320)
-    for dtA, dtB, dtD, subtile, mt0, mt1, plsin in itertools.product(
+    for dtA, dtB, dtD, subtile, mt0, mt1, plsin, (tA, tB) in itertools.product(
             (FP4, BF16), (FP4, BF16), (BF16, FP32, FP16), (True, False),
-            tiles, tiles, (True, False)):
+            tiles, tiles, (True, False),
+            ((True, False), (False, False), (False, True), (True, True))):
         kernel = kern(dtA=dtA, dtB=dtB, dtD=dtD, subtile=subtile,
-                      mt0=mt0, mt1=mt1, plsin=plsin)
+                      mt0=mt0, mt1=mt1, plsin=plsin, transA=tA, transB=tB)
         early = plsinEarlyStoreTile(kernel)
         blockSched = plsinBlockSchedTile(kernel)
         if early:

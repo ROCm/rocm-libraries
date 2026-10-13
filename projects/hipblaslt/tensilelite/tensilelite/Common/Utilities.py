@@ -63,7 +63,14 @@ def isSubtileMultiDU(kernel) -> bool:
 def plsinEarlyStoreTile(kernel) -> bool:
     """Whether this tile's fused arm may carry early-store work at all.
 
-    A property of the tile alone. Today its only caller is plsinBlockSchedTile,
+    The tile bound on top of the scope gate. It runs through isMxf4SubtilePath
+    rather than restating UseSubtileImpl and the types, so the TN restriction
+    reaches the tile predicates too: PostLoopStoreInNll itself does not test
+    the layout, so without this an NN/NT/TT fp4/bf16 subtile kernel would build
+    the block schedule while every emit site keyed on isMxf4SubtilePath stayed
+    off.
+
+    Today its only caller is plsinBlockSchedTile,
     which narrows it further to the MT256x256 equality, so this bound decides
     nothing by itself; it is kept separate because the two carry different
     arguments. The equality there is a scope limit -- MT256x256 is the only
@@ -79,9 +86,7 @@ def plsinEarlyStoreTile(kernel) -> bool:
     still being read; lending keeps every terminal MFMA in-loop instead, which
     is the weave rather than the early store.
     """
-    if not kernel.get("UseSubtileImpl"):
-        return False
-    if not plsinSubtileTypes(kernel):
+    if not isMxf4SubtilePath(kernel):
         return False
     return kernel["MacroTile0"] <= 256 and kernel["MacroTile1"] <= 256
 
