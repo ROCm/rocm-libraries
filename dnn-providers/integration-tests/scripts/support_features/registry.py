@@ -2,11 +2,10 @@
 # SPDX-License-Identifier: MIT
 """API node type -> the op module that catalogs its features.
 
-Every member of the schema's ``NodeAttributes`` union is in exactly one of
-``OPS`` (catalogued) or ``PENDING`` (not yet). ``test_support_features.py``
-checks both against ``graph.fbs``, so a node type added to the API cannot go
-uncounted: it fails the test until it is listed here. ``PENDING`` shrinks by
-one entry per op commit and goes away when it is empty.
+Every member of the schema's ``NodeAttributes`` union is in ``OPS``.
+``test_support_features.py`` checks it against ``graph.fbs``, so a node type
+added to the API cannot go uncounted: it fails the test until its catalog is
+listed here.
 """
 
 from __future__ import annotations
@@ -74,20 +73,14 @@ OPS: dict[str, ModuleType] = {
     )
 }
 
-# Node types with no catalog yet. Their graphs are counted, but no feature %
-# is reported for them.
-PENDING: frozenset[str] = frozenset()
 
+def op_module(node_type: str) -> ModuleType:
+    """The op module for ``node_type``.
 
-def op_module(node_type: str) -> ModuleType | None:
-    """The op module for ``node_type``; None while it is pending.
-
-    A node type in neither list is not in the API this registry was written
+    A node type not listed is not in the API this registry was written
     against, so guessing would be wrong either way: it raises.
     """
     module = OPS.get(node_type)
     if module is not None:
         return module
-    if node_type in PENDING:
-        return None
     raise FeatureError(f"unknown node type {node_type!r} (not in the API registry)")

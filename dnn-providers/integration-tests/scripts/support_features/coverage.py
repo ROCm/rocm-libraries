@@ -68,9 +68,6 @@ class OpCoverage:
 @dataclass
 class Coverage:
     ops: dict[str, OpCoverage]
-    # Graphs per pending node type, catalogued or not, so a pending op still
-    # shows how much the bundles hold of it.
-    pending_graphs: Counter
     # Every arch any unit claims, so an op with no claims on one shows 0%.
     archs: list[str]
 
@@ -88,11 +85,10 @@ def tensors_by_uid(graph: dict) -> dict:
 
 
 def unit_features(unit: ClaimUnit, errors: list[str] | None) -> dict[str, set[str]]:
-    """Node type -> features the unit's graph exercises, per catalogued op.
+    """Node type -> features the unit's graph exercises, per op.
 
-    Pending node types map to an empty set, so the caller can still count
-    their graphs. A node the catalog cannot place is reported, and its op is
-    left out for this unit.
+    A node the catalog cannot place is reported, and its op is left out for
+    this unit.
     """
     nodes_by_type: dict[str, list[dict]] = defaultdict(list)
     for node in unit.graph.get("nodes") or []:
@@ -104,9 +100,6 @@ def unit_features(unit: ClaimUnit, errors: list[str] | None) -> dict[str, set[st
     for node_type, nodes in nodes_by_type.items():
         try:
             module = registry.op_module(node_type)
-            if module is None:
-                found[node_type] = set()
-                continue
             features: set[str] = set()
             for node in nodes:
                 features |= module.extract(node, tensors)
@@ -132,24 +125,21 @@ def compute_coverage(
         node_type: OpCoverage(node_type, tuple(f.id for f in module.FEATURES))
         for node_type, module in registry.OPS.items()
     }
-    pending: Counter = Counter({node_type: 0 for node_type in registry.PENDING})
     archs: set[str] = set()
 
     for unit in units:
         unit_archs = {arch for pairs in unit.claims.values() for arch, _ in pairs}
         archs |= unit_archs
         for node_type, features in unit_features(unit, errors).items():
-            op = ops.get(node_type)
-            if op is None:
-                pending[node_type] += 1
-                continue
+            # unit_features returns only registered types, all keys of ops.
+            op = ops[node_type]
             op.graphs += 1
             op.tested.update(features)
             for arch in unit_archs:
                 op.claimed_graphs[arch] += 1
                 op.claimed[arch].update(features)
 
-    return Coverage(ops=ops, pending_graphs=pending, archs=sorted(archs))
+    return Coverage(ops=ops, archs=sorted(archs))
 
 
 # --------------------------------------------------------------------------
@@ -185,17 +175,6 @@ def render_markdown(coverage: Coverage) -> str:
             + " | ".join(cells)
             + " |"
         )
-
-    if coverage.pending_graphs:
-        lines += [
-            "",
-            "Not yet catalogued (graphs in the bundles): "
-            + ", ".join(
-                f"{node_type} ({count})"
-                for node_type, count in sorted(coverage.pending_graphs.items())
-            )
-            + ".",
-        ]
 
     for node_type in sorted(coverage.ops):
         op = coverage.ops[node_type]

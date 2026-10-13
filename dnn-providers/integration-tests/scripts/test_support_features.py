@@ -131,20 +131,12 @@ def catalog_problems(module, schema_fields: set[str]) -> list[str]:
 
 
 class TestRegistry:
-    def test_every_api_node_type_is_catalogued_or_pending(self) -> None:
-        assert set(registry.OPS) | registry.PENDING == union_members("NodeAttributes")
-
-    def test_no_node_type_is_both(self) -> None:
-        assert not set(registry.OPS) & registry.PENDING
+    def test_every_api_node_type_is_catalogued(self) -> None:
+        assert set(registry.OPS) == union_members("NodeAttributes")
 
     def test_op_modules_are_keyed_by_their_own_node_type(self) -> None:
         for node_type, module in registry.OPS.items():
             assert module.NODE_TYPE == node_type
-
-    def test_pending_type_has_no_module(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        # Its own PENDING, so the test outlives the real list emptying.
-        monkeypatch.setattr(registry, "PENDING", frozenset({"LaterAttributes"}))
-        assert registry.op_module("LaterAttributes") is None
 
     def test_unknown_type_raises(self) -> None:
         with pytest.raises(FeatureError, match="NotAnOpAttributes"):
@@ -218,7 +210,7 @@ class TestCatalogProblems:
 # --------------------------------------------------------------------------
 
 FAKE_TYPE = "SdpaAttributes"
-PENDING_TYPE = "CustomOpAttributes"
+OTHER_TYPE = "CustomOpAttributes"
 
 
 def _fake_extract(node: dict, tensors_by_uid: dict) -> set[str]:
@@ -243,12 +235,20 @@ FAKE_OP = SimpleNamespace(
     extract=_fake_extract,
 )
 
+# A second op, for graphs that fuse two or claim an arch for only one.
+OTHER_OP = SimpleNamespace(
+    NODE_TYPE=OTHER_TYPE,
+    SCHEMA_FILE="unused.fbs",
+    SCHEMA_TABLE="Unused",
+    FEATURES=(Feature("data:empty", ("data",)), Feature("data:present", ("data",))),
+    NOT_FEATURES={},
+    extract=_fake_extract,
+)
+
 
 @pytest.fixture()
 def fake_registry(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(registry, "OPS", {FAKE_TYPE: FAKE_OP})
-    # A fixed PENDING, not the real one, which shrinks with every op catalogued.
-    monkeypatch.setattr(registry, "PENDING", frozenset({PENDING_TYPE}))
+    monkeypatch.setattr(registry, "OPS", {FAKE_TYPE: FAKE_OP, OTHER_TYPE: OTHER_OP})
 
 
 def _write_json(path: Path, data: object) -> None:
@@ -322,12 +322,13 @@ class TestJoin:
         _bundle(
             tmp_path,
             "b",
-            [_node(PENDING_TYPE)],
+            [_node(OTHER_TYPE, features=["data:empty"])],
             claims={"E": {"gfx90a": ["linux"]}},
         )
         coverage, _ = _coverage(tmp_path)
         assert coverage.archs == ["gfx90a"]
         assert coverage.ops[FAKE_TYPE].claimed_count("gfx90a") == 0
+        assert coverage.ops[OTHER_TYPE].claimed_count("gfx90a") == 1
         assert "| SdpaAttributes | 1 | 1/4 (25%) | 0/4 (0%) |" in render_markdown(
             coverage
         )
@@ -346,16 +347,35 @@ class TestJoin:
         assert op.tested == {"dtype:fp16": 1, "mask:causal": 1}
 
     def test_fused_graph_counts_toward_each_op(self, tmp_path: Path) -> None:
-        _bundle(tmp_path, "a", [_node(features=["dtype:fp16"]), _node(PENDING_TYPE)])
-        coverage, _ = _coverage(tmp_path)
-        assert coverage.ops[FAKE_TYPE].graphs == 1
-        assert coverage.pending_graphs[PENDING_TYPE] == 1
+        _bundle(
+            tmp_path,
+            "a",
+            [
+                _node(features=["dtype:fp16"]),
+                _node(OTHER_TYPE, features=["data:present"]),
+            ],
+        )
+        coverage, errors = _coverage(tmp_path)
+        assert errors == []
+        assert coverage.ops[FAKE_TYPE].tested == {"dtype:fp16": 1}
+        assert coverage.ops[OTHER_TYPE].tested == {"data:present": 1}
 
-    def test_pending_types_are_listed_even_with_no_graphs(self, tmp_path: Path) -> None:
+    def test_op_with_no_graphs_still_has_a_row(self, tmp_path: Path) -> None:
         _bundle(tmp_path, "a", [_node(features=["dtype:fp16"])])
         coverage, _ = _coverage(tmp_path)
-        assert set(coverage.pending_graphs) == {PENDING_TYPE}
-        assert f"{PENDING_TYPE} (0)" in render_markdown(coverage)
+        assert coverage.ops[OTHER_TYPE].graphs == 0
+        assert "| CustomOpAttributes | 0 | 0/2 (0%) |" in render_markdown(coverage)
+
+    def test_error_in_one_op_leaves_the_other_counted(self, tmp_path: Path) -> None:
+        _bundle(
+            tmp_path,
+            "a",
+            [_node(features=["dtype:fp16"]), _node(OTHER_TYPE, boom="bad payload")],
+        )
+        coverage, errors = _coverage(tmp_path)
+        assert errors == ["SdpaFwd/a: CustomOpAttributes: bad payload"]
+        assert coverage.ops[FAKE_TYPE].graphs == 1
+        assert coverage.ops[OTHER_TYPE].graphs == 0
 
     def test_extract_error_is_reported_with_its_location(self, tmp_path: Path) -> None:
         _bundle(tmp_path, "a", [_node(boom="head dim 96 is not catalogued")])
@@ -6342,8 +6362,6 @@ class TestRealBundleTree:
         self, units: list[ClaimUnit]
     ) -> None:
         coverage = compute_coverage(units)
-        counted = sum(op.graphs for op in coverage.ops.values()) + sum(
-            coverage.pending_graphs.values()
-        )
+        counted = sum(op.graphs for op in coverage.ops.values())
         assert units
         assert counted >= len(units)
