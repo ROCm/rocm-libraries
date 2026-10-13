@@ -14,6 +14,20 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/smoke.cpp")
 endif()
 
 if(BUILD_TESTING)
+  add_executable(rocke_optimization_barrier core/test_optimization_barrier.cpp)
+  target_link_libraries(rocke_optimization_barrier PRIVATE rocke_core)
+  add_test(NAME rocke_optimization_barrier COMMAND rocke_optimization_barrier)
+  set_tests_properties(rocke_optimization_barrier
+                      PROPERTIES LABELS "ckc;unit;host")
+  rocke_cxx_test_installed_name(_rocke_installed_name
+                              rocke_optimization_barrier)
+  set_target_properties(rocke_optimization_barrier
+                        PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+  install(TARGETS rocke_optimization_barrier
+          RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+  set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+               rocke_optimization_barrier)
+
   add_executable(rocke_tf32 core/test_tf32.cpp)
   target_link_libraries(rocke_tf32 PRIVATE rocke_core)
   add_test(NAME rocke_tf32 COMMAND rocke_tf32)
@@ -110,6 +124,22 @@ if(BUILD_TESTING)
                  rocke_future_intrinsic_lowering)
   endif()
 
+  # temporal_hint (rocke_mem_opts_t) on global_load_vN/global_store_vN and the
+  # io helpers, through the C++ builders and HIP/LLVM lowerers.
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_nontemporal_hip.cpp")
+    add_executable(rocke_nontemporal_hip core/test_nontemporal_hip.cpp)
+    target_link_libraries(rocke_nontemporal_hip PRIVATE rocke_core)
+    add_test(NAME rocke_nontemporal_hip COMMAND rocke_nontemporal_hip)
+    set_tests_properties(rocke_nontemporal_hip PROPERTIES LABELS "ckc;unit;host")
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_nontemporal_hip)
+    set_target_properties(rocke_nontemporal_hip
+                          PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+    install(TARGETS rocke_nontemporal_hip
+            RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+    set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+                 rocke_nontemporal_hip)
+  endif()
+
   # Direct f32 tanh lowering and narrow-type rejection in the C++ engine.
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_tanh_lowering.cpp")
     add_executable(rocke_tanh_lowering core/test_tanh_lowering.cpp)
@@ -199,6 +229,9 @@ if(BUILD_TESTING)
     if(UNIX)
       target_link_libraries(rocke_portable_ir_replay_cli PRIVATE m)
     endif()
+    # Python recipe tests need the native VM in relocated test artifacts.
+    install(TARGETS rocke_portable_ir_replay_cli
+            RUNTIME DESTINATION "${ROCKE_TEST_INSTALL_DIR}/tests/portable_ir")
   endif()
 
   # --- instances layer --------------------------------------------------------
@@ -244,6 +277,47 @@ if(BUILD_TESTING)
             RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
     set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
                  rocke_moe_fused_mega_spec_guards)
+  endif()
+
+  # Host-side stream-K partition math: the launch grid it sizes is invisible to
+  # the byte-identity gate, so the C port is pinned to the Python reference
+  # vectors here (mirrors tests/instances/test_streamk_iter_partition.py).
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/instances/streamk_iter_partition.cpp")
+    add_executable(rocke_streamk_iter_partition instances/streamk_iter_partition.cpp)
+    target_link_libraries(rocke_streamk_iter_partition PRIVATE rocke_core)
+    if(UNIX)
+      target_link_libraries(rocke_streamk_iter_partition PRIVATE m)
+    endif()
+    add_test(NAME rocke_streamk_iter_partition COMMAND rocke_streamk_iter_partition)
+    set_tests_properties(rocke_streamk_iter_partition PROPERTIES LABELS "ckc;unit;host")
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_streamk_iter_partition)
+    set_target_properties(rocke_streamk_iter_partition
+                          PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+    install(TARGETS rocke_streamk_iter_partition
+            RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+    set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+                 rocke_streamk_iter_partition)
+  endif()
+
+  # Stream-K wgrad host helpers and validator gates (auto CTA pool per arch,
+  # grid, workspace layout, reject reasons): also invisible to the byte-identity
+  # gate, and the Python-vs-C pytest needs the pybind module CI does not build,
+  # so the C port is pinned to Python reference vectors here.
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/instances/wgrad_streamk_host.cpp")
+    add_executable(rocke_wgrad_streamk_host instances/wgrad_streamk_host.cpp)
+    target_link_libraries(rocke_wgrad_streamk_host PRIVATE rocke_core)
+    if(UNIX)
+      target_link_libraries(rocke_wgrad_streamk_host PRIVATE m)
+    endif()
+    add_test(NAME rocke_wgrad_streamk_host COMMAND rocke_wgrad_streamk_host)
+    set_tests_properties(rocke_wgrad_streamk_host PROPERTIES LABELS "ckc;unit;host")
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_wgrad_streamk_host)
+    set_target_properties(rocke_wgrad_streamk_host
+                          PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+    install(TARGETS rocke_wgrad_streamk_host
+            RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+    set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+                 rocke_wgrad_streamk_host)
   endif()
 
   # Apply YAML-driven quick/standard/comprehensive/full tier labels to the

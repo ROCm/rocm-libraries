@@ -117,8 +117,9 @@ answers or fetches a reference during verification.
 The same cases can be run through pytest:
 
 ```bash
-ROCKE_TEST_SDPA_REFERENCE_BUNDLE_GFX942=<qualified-bundle-directory> \
-  python -m pytest library/tests/test_sdpa_pinned_reference.py -v -rs
+python -m pytest library/tests/test_sdpa_pinned_reference.py \
+  --rocke-reference-operation sdpa --rocke-reference-arch gfx942 \
+  --rocke-reference-bundle <qualified-bundle-directory> -v -rs
 ```
 
 The GPU suite also checks three failure paths: perturbing the final current
@@ -131,7 +132,7 @@ Run the CPU contract checks with:
 
 ```bash
 python -m pytest library/tests/test_sdpa_reference_contract.py \
-  library/tests/test_reference_artifact.py -v
+  library/tests/test_reference_common.py -v
 ```
 
 These check analytic SDPA results, bf16 interpretation, preservation of the
@@ -142,75 +143,12 @@ GPU correctness results.
 
 ## Offline qualification and baseline promotion
 
-1. Export a specific committed rocm-libraries revision. The snapshot command
-   exports only the rocKE Python/library sources from Git, records their digests,
-   and leaves the working checkout unchanged:
-
-   ```bash
-   python library/tests/run_sdpa_reference.py snapshot \
-     --repository <rocm-libraries-checkout> \
-     --revision <full-commit-sha> \
-     --output <new-baseline-snapshot-directory>
-   ```
-
-2. On gfx942, qualify the exported sources against NumPy SDPA:
-
-   ```bash
-   python library/tests/run_sdpa_reference.py qualify --arch gfx942 \
-     --baseline <baseline-snapshot-directory> \
-     --output <new-bundle-directory> \
-     --repetitions 3
-   ```
-
-   Qualification exports the actual HSACO used by the old public launch entry,
-   its launch signature/grid, a frozen old Python runtime, a frozen replay
-   worker, input-generation metadata, and the per-case bounds and digests.
-   Neither input nor answer tensors are part of the final bundle. The manifest records source,
-   compiler, reference, and target identities. No kernel binaries belong in Git.
-
-3. Verify the completed bundle before promotion, using the proposed lock:
-
-   ```bash
-   python library/tests/run_sdpa_reference.py verify --arch gfx942 \
-     --bundle <new-bundle-directory> \
-     --lock <new-bundle-directory>/qualification-lock.json \
-     --current-root .
-   ```
-
-4. Review the qualification results and update
-   [`baseline_lock.json`](../library/tests/sdpa_reference/architectures/gfx942/baseline_lock.json)
-   with the reviewed `qualification-lock.json`. Ordinary CI uses the committed
-   lock; it cannot regenerate or bless its own baseline.
-
-5. Pack the reviewed bundle from the rocKE root:
-
-   ```bash
-   python library/tests/reference_common/artifact.py pack --operation sdpa \
-     --bundle <new-bundle-directory> \
-     --lock library/tests/sdpa_reference/architectures/gfx942/baseline_lock.json \
-     --archive library/tests/reference_bundles/sdpa/gfx942.tar.gz
-   ```
-
-   From the rocm-libraries root, update and publish the scoped DVC object:
-
-   ```bash
-   dvc add dnn-providers/hip-kernel-provider/rocke/library/tests/reference_bundles/sdpa/gfx942.tar.gz
-   dvc push dnn-providers/hip-kernel-provider/rocke/library/tests/reference_bundles/sdpa/gfx942.tar.gz.dvc
-   ```
-
-   Publishing requires write access to the repository's `storage` remote;
-   downloads support anonymous access. Have an authorized maintainer publish
-   before CI consumes a changed pointer. A locally cached object does not prove
-   remote availability: verify a fresh download. Review the pointer, trusted lock,
-   case changes, and qualification evidence together; commit the small pointer and
-   lock, not the archive. `dvc add` can stage metadata automatically in this repo.
-   Moving an unchanged pointer/archive within the operation layout does not require
-   uploading a new content-addressed object.
-
-Every replacement baseline is independently qualified against NumPy SDPA. Bounds
-are never transferred solely by comparing successive old versions. A current
-result can fail this sufficient comparison while improving accuracy; investigate
-such a failure against the independent reference before considering promotion.
+Follow [Adding or updating a pinned GPU reference](gpu-reference-workflow.md)
+for the authoritative snapshot, qualification, candidate verification, DVC
+publication, and installation procedure. Select operation `sdpa`; qualification
+uses the independent NumPy SDPA oracle and this guide's numerical contract.
+Adding cases or architectures requires qualification of the complete resulting
+cohort. The workflow also covers replacement baselines and publication enrollment.
 
 ## Installed hip-kernel-provider lane
 
@@ -222,8 +160,8 @@ The existing TheRock CI flow builds and tests the installed provider artifact:
    architecture-specific baseline lock, then installs the test harness and bundle.
    `ROCKE_INSTALL_TEST_GPU_REFERENCES` defaults on for provider artifact builds
    and off in the rocm-libraries superbuild (`ROCM_LIBS_SUPERBUILD`). Setting it
-   to OFF disables reference installation and GPU-test registration even when
-   a bundle-directory override is cached; host checks remain installed.
+   to OFF disables reference installation and GPU-test registration; host checks
+   remain installed.
 3. TheRock's `ml-libs/artifact-hipkernelprovider.toml` collects the harness into the
    generic test artifact. Its `**/engines/test_arch_content/**` rule collects the
    bundle installed at
@@ -241,15 +179,10 @@ The existing TheRock CI flow builds and tests the installed provider artifact:
 This uses the existing workflows; no additional workflow is required. CI verifies
 an already qualified baseline and cannot generate or approve its own replacement.
 
-With reference installation enabled, an extracted bundle can override DVC archive staging:
-
-```text
--DROCKE_TEST_SDPA_REFERENCE_INSTALL_SOURCE_gfx942=<qualified-bundle-directory>
-```
-
-For a candidate with a different reviewed lock, also pass
-`-DROCKE_TEST_SDPA_REFERENCE_INSTALL_LOCK_gfx942=<reviewed-lock>`. A lock override
-requires the extracted-source override. These controls do not publish the candidate.
+CMake installs only published archives validated against their committed locks.
+For an unpublished candidate, use the offline CLI's `verify` command with explicit
+`--bundle` and `--lock` paths. Once its archive, pointer, lock, and publication
+entry are ready, validate installation through the normal CMake path.
 
 Run the installed GPU entry with:
 
@@ -273,16 +206,21 @@ Normal provider CI uses the defaults. The settings are:
 
 | Setting | Type | Purpose |
 |---|---|---|
-| `ROCKE_INSTALL_TEST_GPU_REFERENCES` | CMake Boolean | Install all published GPU reference bundles; OFF ignores source and lock overrides |
-| `ROCKE_TEST_SDPA_REFERENCE_INSTALL_SOURCE_<arch>` | CMake path | Install an extracted local bundle instead of staging its standard DVC archive |
-| `ROCKE_TEST_SDPA_REFERENCE_INSTALL_LOCK_<arch>` | CMake path | Explicit reviewed lock for an extracted local install-source override |
-| `ROCKE_TEST_SDPA_REFERENCE_BUNDLE_<ARCH>` | Environment variable | Select the bundle pytest reads for one runtime environment |
-| `ROCKE_TEST_REQUIRE_SDPA_GPU` | Environment variable | Set to `1` by installed CTest to fail on missing required prerequisites |
+| `ROCKE_INSTALL_TEST_GPU_REFERENCES` | CMake Boolean | Install all published GPU reference bundles and enroll their GPU tests |
+| `--rocke-reference-operation`, `--rocke-reference-arch` | Pytest options | Select the operation and GPU architecture |
+| `--rocke-reference-bundle` | Pytest option | Select a bundle for the selected operation/architecture |
+| `--rocke-reference-lock` | Pytest option | Select an explicit candidate lock instead of the committed lock |
 
-CMake uses lowercase architecture suffixes such as `gfx942`; runtime overrides
-use uppercase suffixes such as `GFX942`. A CMake variable does not set the runtime
-environment variable. With no overrides, CMake packages the standard archives for
-all operation/architecture pairs in `reference_common/published_bundles.json`, and pytest finds the installed target bundle.
+Explicit operation/architecture selection makes the suite required, including
+failure on a missing bundle. CTest supplies these options. Architecture-lane
+selection still uses the detected GPU and CI's `AMDGPU_FAMILIES`/`AMDGPU_TARGETS`.
+Bundle and lock overrides require explicit operation and architecture options.
+A lock override also requires a bundle path. For candidate qualification and
+verification, follow the [reference workflow](gpu-reference-workflow.md).
+These options select what pytest reads; they do not change what CMake installs.
+CMake packages the standard archives for all operation/architecture pairs in
+`platform/cmake/PublishedGpuReferences.cmake`, and pytest finds the installed target
+bundle by default.
 There is no separate architecture-selection option or unqualified bundle alias.
 Other detected, unenrolled GPU architectures remain outside the required cohort.
 
@@ -360,4 +298,4 @@ Legacy Torch-dependent tests still skip in the supplied CI environment, as does
 an optional jsonschema check. Passing the selected CTests does not establish
 execution of those skipped numerical cohorts.
 
-Archive packaging uses the [shared artifact command](../TESTING.md#shared-gpu-reference-artifact-command).
+Archive packaging uses the [packing and publication workflow](gpu-reference-workflow.md#5-review-pack-and-publish-the-replacement).
