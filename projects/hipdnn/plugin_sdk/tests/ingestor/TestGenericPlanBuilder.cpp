@@ -1481,6 +1481,42 @@ TEST(TestIngestorGenericPlanBuilder, ACoveringRecordServesItsRankedFrontWithoutB
         << "the measured winner must beat the heuristic front";
 }
 
+/// The catalog key already holds the graph's verified content, so ordering from a record
+/// reuses it: a sort that finds a record reads graph bytes exactly as often as one catalog
+/// lookup does, not once more for a winner key of its own.
+TEST(TestIngestorGenericPlanBuilder, OrderingFromARecordReadsGraphBytesOnlyForTheCatalogKey)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ScopedConstantScore constantScore;
+    const auto manager = makeThreeKernelWorkspaceStateManager();
+    const auto bytesCalls = std::make_shared<std::atomic_uint>(0);
+    const CountingBytesGraph graph(bytesCalls);
+    const auto properties = testDeviceProperties();
+    const MatchContext context{graph, 0, properties};
+
+    const auto catalog = catalogFor(*manager, graph, properties);
+    ASSERT_EQ(catalog.size(), 3U);
+    WinnerRecord record;
+    for(const KernelDefinition* kernel : catalog)
+    {
+        record.push_back(rankedEntryFor(*kernel, 1.0 + static_cast<double>(record.size())));
+    }
+    manager->recordWinner(winnerKeyFor(graph, properties), record, WinnerWriteCause::FRESH_MISS);
+
+    bytesCalls->store(0);
+    static_cast<void>(manager->unsortedCatalog(context));
+    const unsigned catalogLookupReads = bytesCalls->load();
+    ASSERT_GT(catalogLookupReads, 0U);
+
+    bytesCalls->store(0);
+    const auto sorted = manager->sortedCatalog(context);
+
+    ASSERT_TRUE(sorted.orderedFromRecord) << "the record must have ordered this catalog";
+    EXPECT_EQ(bytesCalls->load(), catalogLookupReads)
+        << "ordering from a record must reuse the catalog key's graph content, not key the "
+           "graph again";
+}
+
 /// The catalog-sort coverage rule governs every `sortedCatalog` consumer, including
 /// `getCustomKnobs`, whose `choices.front()` becomes the knob's advertised default.
 /// Same rig as `TestWinnerCache.cpp`'s `ACoveringRecordOrdersTheCatalogWithoutTheHeuristic`:

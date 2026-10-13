@@ -335,7 +335,7 @@ public:
             return catalog;
         }
 
-        if(auto ordered = orderFromWinnerRecord(catalog.entries, context); ordered.has_value())
+        if(auto ordered = orderFromWinnerRecord(catalog.entries, context, key); ordered.has_value())
         {
             catalog.entries = std::move(*ordered);
             catalog.orderedFromRecord = true;
@@ -912,27 +912,27 @@ private:
     /// The measured order for @p context's graph and device, or nullopt when no record
     /// covers @p entries and the caller must rank as it always has.
     ///
+    /// @p catalogKey is the catalog key built from @p context. Its graph content is the
+    /// winner key's too, so reusing it spares a second verified copy and hash of the graph. A
+    /// graph with no key has no bytes to key a record on, and such graphs never match each
+    /// other either.
+    ///
     /// Full coverage is required: a partial record cannot order the rest, and
     /// interleaving measured with unmeasured entries would not be a valid order.
     std::optional<std::vector<const KernelDefinition*>>
         orderFromWinnerRecord(const std::vector<const KernelDefinition*>& entries,
-                              const MatchContext& context) const
+                              const MatchContext& context,
+                              const std::optional<CatalogKey>& catalogKey) const
     {
         // Cheap rejection first: mightHaveWinnerFor() accounts for an on-disk shard this
         // process has not read yet, unlike a bare winnerCacheSize() check.
-        if(entries.empty() || !mightHaveWinnerFor(context.deviceProperties.gcnArchName))
+        if(entries.empty() || !catalogKey.has_value()
+           || !mightHaveWinnerFor(context.deviceProperties.gcnArchName))
         {
             return std::nullopt;
         }
 
-        const WinnerKey key{
-            hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphContentKey{context.graph},
-            DeviceKey{context.deviceProperties}};
-        if(!key.graph.isUsable())
-        {
-            // No bytes to key on; such graphs never match each other either.
-            return std::nullopt;
-        }
+        const WinnerKey key{catalogKey->graph, DeviceKey{context.deviceProperties}};
 
         const auto record = winnerFor(key);
         if(!record.has_value())
