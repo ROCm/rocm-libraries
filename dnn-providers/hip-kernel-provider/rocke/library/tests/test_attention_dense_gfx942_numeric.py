@@ -1112,12 +1112,14 @@ def _tolerance(dtype):
     return 2e-2 if dtype == "fp16" else 4e-2
 
 
-def _lse_reference(q, k, v, scale, *, causal, window=0):
+def _lse_reference(q, k, v, scale, *, causal, window=0, sinks=None):
     """Independent FP32 O and natural-log LSE, including truly empty rows.
 
-    Scores use FP32 Q/K with the softmax scale applied in FP32.
+    Scores use FP32 Q/K with the softmax scale applied in FP32. ``sinks`` adds one
+    logit per query head with no value row, so a row with no key has the sink as
+    its LSE.
     """
-    sq, hq = q.shape[1:3]
+    batch, sq, hq = q.shape[:3]
     skv, hkv = k.shape[1:3]
     qh = q.transpose(1, 2).float()
     kh = k.transpose(1, 2).float().repeat_interleave(hq // hkv, dim=1)
@@ -1131,12 +1133,15 @@ def _lse_reference(q, k, v, scale, *, causal, window=0):
     if window:
         allowed &= ki > qi - window
     scores = scores.masked_fill(~allowed.view(1, 1, sq, skv), float("-inf"))
+    if sinks is not None:
+        sink_scores = sinks.float().view(1, hq, 1, 1).expand(batch, hq, sq, 1)
+        scores = torch.cat((scores, sink_scores), dim=-1)
     lse = torch.logsumexp(scores, dim=-1)
     has_mass = torch.isfinite(lse)
     safe_lse = torch.where(has_mass, lse, torch.zeros_like(lse))
     probabilities = torch.exp(scores - safe_lse.unsqueeze(-1))
     probabilities = torch.where(has_mass.unsqueeze(-1), probabilities, 0.0)
-    out = torch.matmul(probabilities, vh).transpose(1, 2)
+    out = torch.matmul(probabilities[..., :skv], vh).transpose(1, 2)
     return out, lse.unsqueeze(-1)
 
 
@@ -1304,8 +1309,12 @@ class TestDenseLseNumericGfx942:
     @pytest.mark.parametrize(
         "persistent", [False, True], ids=["ordinary", "persistent"]
     )
-    def test_empty_window_rows(self, dtype, persistent):
-        """Sq256/Skv64/window64: rows 63/126/127 see 64/1/0 keys (analytic LSE)."""
+    @pytest.mark.parametrize("with_sink", [False, True], ids=["no-sink", "sink"])
+    def test_empty_window_rows(self, dtype, persistent, with_sink):
+        """Sq256/Skv64/window64: rows 63/126/127 see 64/1/0 keys (analytic LSE).
+
+        With sinks a row with no key has the sink as its only mass, so its LSE is
+        the sink logit rather than -inf."""
         from dispatch.attention import AttentionRequest, tuning_spec_with_knobs
 
         spec = dataclasses.replace(
@@ -1322,6 +1331,7 @@ class TestDenseLseNumericGfx942:
                     mask_type=1,
                     dtype=dtype,
                     sliding_window=64,
+                    use_sinks=with_sink,
                 ),
                 "gfx942_dense",
                 {"persistent": bool(persistent)},
@@ -1336,7 +1346,14 @@ class TestDenseLseNumericGfx942:
         lse = torch.full(
             (1, 4, 256, 1), float("nan"), device=q.device, dtype=torch.float32
         )
-        run_attention_dense_torch(spec=spec, q=q, k=k, v=v, out=out, lse=lse, scale=0.5)
+        sinks = (
+            torch.tensor([-2.0, 0.0, 1.0, 2.0], device=q.device, dtype=tdt)
+            if with_sink
+            else None
+        )
+        run_attention_dense_torch(
+            spec=spec, q=q, k=k, v=v, out=out, lse=lse, scale=0.5, sinks=sinks
+        )
         torch.cuda.synchronize()
         rows = torch.arange(256, device=q.device)
         counts = (
@@ -1350,15 +1367,22 @@ class TestDenseLseNumericGfx942:
         assert counts[63].item() == 64
         assert counts[126].item() == 1
         assert counts[127].item() == 0
-        analytic_lse = counts.view(1, 1, 256, 1).expand(1, 4, 256, 1).log()
-        ref, lse_ref = _lse_reference(q, k, v, 0.5, causal=True, window=64)
+        mass = counts.view(1, 1, 256, 1).expand(1, 4, 256, 1)
+        if with_sink:
+            mass = mass + sinks.float().exp().view(1, 4, 1, 1)
+        analytic_lse = mass.log()
+        ref, lse_ref = _lse_reference(q, k, v, 0.5, causal=True, window=64, sinks=sinks)
         finite = torch.isfinite(analytic_lse)
         assert (lse[finite] - analytic_lse[finite]).abs().max().item() < 1e-5
         assert (lse_ref[finite] - analytic_lse[finite]).abs().max().item() < 1e-5
         assert torch.equal(torch.isneginf(lse), torch.isneginf(analytic_lse))
         assert (out.float() - ref).abs().max().item() < _tolerance(dtype)
         assert torch.equal(out[:, 127:], torch.zeros_like(out[:, 127:]))
-        assert torch.isneginf(lse[:, :, 127:]).all().item()
+        if with_sink:
+            expected = sinks.float().view(1, 4, 1, 1).expand(1, 4, 129, 1)
+            assert (lse[:, :, 127:] - expected).abs().max().item() < 1e-5
+        else:
+            assert torch.isneginf(lse[:, :, 127:]).all().item()
 
     @pytest.mark.parametrize(
         "failure",
