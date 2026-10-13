@@ -210,8 +210,10 @@ inline constexpr bool is_qr_tdm_padding_enabled_problem_v =
      (std::is_same_v<typename Problem::QDataType, half_t> &&
       std::is_same_v<typename Problem::KDataType, half_t> &&
       std::is_same_v<typename Problem::VDataType, half_t>)) &&
-    Problem::BlockFmhaShape::NumWarps == 4 &&
-    (Problem::BlockFmhaShape::kM0 == 64 || Problem::BlockFmhaShape::kM0 == 128) &&
+    ((Problem::BlockFmhaShape::NumWarps == 4 &&
+      (Problem::BlockFmhaShape::kM0 == 64 || Problem::BlockFmhaShape::kM0 == 128)) ||
+     (Problem::BlockFmhaShape::NumWarps == 2 && Problem::BlockFmhaShape::kM0 == 32) ||
+     (Problem::BlockFmhaShape::NumWarps == 1 && Problem::BlockFmhaShape::kM0 == 16)) &&
     Problem::BlockFmhaShape::kN0 == 64 && Problem::BlockFmhaShape::kK0 == 32 &&
     Problem::BlockFmhaShape::kK1 == 32 &&
     // Head dim must be stored in LDS without tile-length rounding (excludes the
@@ -230,8 +232,10 @@ inline constexpr bool is_qr_tdm_padding_enabled_problem_v =
     (Problem::BlockFmhaShape::kN1 * sizeof(typename Problem::VDataType)) % kQrTdmLdsAccessBytes ==
         0 &&
     Problem::BlockFmhaShape::IsVLayoutRowMajor &&
-    std::is_same_v<typename Problem::BlockFmhaShape::Gemm0BlockWarps, sequence<4, 1, 1>> &&
-    std::is_same_v<typename Problem::BlockFmhaShape::Gemm1BlockWarps, sequence<4, 1, 1>> &&
+    std::is_same_v<typename Problem::BlockFmhaShape::Gemm0BlockWarps,
+                   sequence<Problem::BlockFmhaShape::NumWarps, 1, 1>> &&
+    std::is_same_v<typename Problem::BlockFmhaShape::Gemm1BlockWarps,
+                   sequence<Problem::BlockFmhaShape::NumWarps, 1, 1>> &&
     std::is_same_v<typename Problem::BlockFmhaShape::Gemm0WarpTile, sequence<16, 16, 32>> &&
     std::is_same_v<typename Problem::BlockFmhaShape::Gemm1WarpTile, sequence<16, 16, 32>> &&
     numeric_traits<typename Problem::QDataType>::PackedSize == 1 &&
@@ -899,6 +903,12 @@ struct QrTdmLdsArenaLayout
 {
     using Shape = typename Problem::BlockFmhaShape;
 
+    // M16/M32/M64 decode tiles give each wave one 16-row M slice; only M128 has two.
+    static_assert(Shape::kM0 == 16 * Shape::Gemm0BlockWarps::at(number<0>{}) ||
+                  Shape::kM0 == 128);
+    static_assert(
+        std::is_same_v<typename Shape::Gemm0BlockWarps, typename Shape::Gemm1BlockWarps>);
+
     static constexpr bool kUseDoubleKVLdsBuffer = Problem::kUseDoubleKVLdsBuffer;
     static constexpr index_t kArenaAlignment    = 256;
     static constexpr index_t kRegionAlignment   = 256;
@@ -1054,7 +1064,9 @@ CK_TILE_HOST_DEVICE constexpr bool validate_qr_tdm_issue_geometry()
     static_assert(raw_box_dim.size() == 2);
     static_assert(Rows % NumWaves == 0);
 
-    bool valid = Problem::kBlockSize == 128 && NumWaves == 4 && raw_box_dim[number<0>{}] == Cols &&
+    bool valid = Problem::kBlockSize == NumWaves * get_warp_size() &&
+                 (NumWaves == 1 || NumWaves == 2 || NumWaves == 4) &&
+                 raw_box_dim[number<0>{}] == Cols &&
                  raw_box_dim[number<1>{}] == RowsPerWave &&
                  raw_box_dim[number<0>{}] * raw_box_dim[number<1>{}] * sizeof(DataType) ==
                      RowsPerWave * Cols * sizeof(DataType) &&

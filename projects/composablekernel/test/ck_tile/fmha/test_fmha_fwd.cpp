@@ -503,6 +503,155 @@ TEST_P(QrTdmNewHeadDim, DataTypeConfig)
     }
 }
 
+// Runs a d128 no-bias no-sink qr_tdm candidate and reports the selected kernel name.
+fwd_result run_qr_tdm_short_q(mode_enum mode,
+                              int nhead,
+                              int nhead_k,
+                              int seqlen_q,
+                              int seqlen_k,
+                              bool lse,
+                              std::string mask_str,
+                              int pack_gqa,
+                              std::string* selected_kernel)
+{
+    return fmha_fwd_run<DataTypeConfig>(
+        mode,
+        2, // batch
+        nhead,
+        nhead_k,
+        {seqlen_q},
+        {seqlen_k},
+        128,
+        128,
+        0,    // seqlen_knew
+        {-1}, // seqlen_qpads
+        {-1}, // seqlen_kpads
+        {},   // q_eff_lens_per_batch
+        {},   // kv_eff_lens_per_batch
+        0,    // rotary_dim
+        true, // i_perm
+        true, // o_perm
+        0,    // scale_s
+        0,    // logits_soft_cap
+        true, // is_v_rowmajor
+        lse,
+        0,     // page_block_size
+        false, // use_cache_batch_idx
+        "n",   // bias_str
+        0.0f,  // p_drop
+        0,     // drop_seed
+        0,     // drop_offset
+        false, // drop_prefs
+        mask_str,
+        qscale_str,
+        true, // is_rotary_interleaved
+        1,    // num_splits
+        init_method,
+        static_cast<uint32_t>(ck_tile::EnvValue(CK_TILE_ENV(CK_TILE_TEST_SEED))),
+        1, // do_validation
+        0, // init_sink_value
+        pack_gqa,
+        stream_config,
+        std::nullopt,
+        selected_kernel);
+}
+
+const char* expected_short_q_tile(int seqlen_q)
+{
+    return seqlen_q <= 16 ? "_b16x" : (seqlen_q <= 32 ? "_b32x" : "_b64x");
+}
+
+// Pack-GQA decode (seqlen_q=1, nhead_k=1) folds the g query heads into seqlen_q=g, so
+// the d128 dispatcher must pick the bm0=16 tile for g<=16, bm0=32 for g<=32 and bm0=64
+// above that.
+class QrTdmDecodeTile : public TestWithParam<std::tuple<bool, int, int>>
+{
+};
+
+INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaFwd,
+                         QrTdmDecodeTile,
+                         Combine(Bool(),                         // lse
+                                 Values(2, 16, 17, 24, 32, 33),  // g = nhead / nhead_k
+                                 Values(63, 129, 1000)));        // seqlen_k
+
+TEST_P(QrTdmDecodeTile, DataTypeConfig)
+{
+    if constexpr(ck_tile::is_any_of<DataTypeConfig, FmhaFwdFp16, FmhaFwdBf16>::value)
+    {
+        if(!ck_tile::is_gfx125_supported())
+            GTEST_SKIP() << "qr_tdm is only supported on gfx1250";
+
+        auto [lse, g, seqlen_k] = GetParam();
+
+        std::string selected_kernel;
+        auto result =
+            run_qr_tdm_short_q(mode_enum::batch, g, 1, 1, seqlen_k, lse, "0", 1, &selected_kernel);
+        ASSERT_EQ(result, fwd_result::success);
+        EXPECT_NE(selected_kernel.find("_qr_tdm_"), std::string::npos) << selected_kernel;
+        EXPECT_NE(selected_kernel.find(expected_short_q_tile(g)), std::string::npos)
+            << selected_kernel;
+    }
+}
+
+// Unpacked short-Q prefill takes the same bm0=16/32 tiles by seqlen_q.
+class QrTdmShortQTile : public TestWithParam<std::tuple<bool, int, int>>
+{
+};
+
+INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaFwd,
+                         QrTdmShortQTile,
+                         Combine(Bool(),                               // lse
+                                 Values(2, 8, 16, 17, 24, 32, 33),     // seqlen_q
+                                 Values(64, 512, 1000)));              // seqlen_k
+
+TEST_P(QrTdmShortQTile, DataTypeConfig)
+{
+    if constexpr(ck_tile::is_any_of<DataTypeConfig, FmhaFwdFp16, FmhaFwdBf16>::value)
+    {
+        if(!ck_tile::is_gfx125_supported())
+            GTEST_SKIP() << "qr_tdm is only supported on gfx1250";
+
+        auto [lse, seqlen_q, seqlen_k] = GetParam();
+
+        std::string selected_kernel;
+        auto result = run_qr_tdm_short_q(
+            mode_enum::batch, 8, 8, seqlen_q, seqlen_k, lse, "0", 0, &selected_kernel);
+        ASSERT_EQ(result, fwd_result::success);
+        EXPECT_NE(selected_kernel.find("_qr_tdm_"), std::string::npos) << selected_kernel;
+        EXPECT_NE(selected_kernel.find(expected_short_q_tile(seqlen_q)), std::string::npos)
+            << selected_kernel;
+    }
+}
+
+// The bm0=16/32 tiles are batch-mode no-mask only; masked or group-mode seqlen_q=16
+// must stay on bm0=64.
+class QrTdmShortQTileFallback : public TestWithParam<std::tuple<mode_enum, const char*>>
+{
+};
+
+INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaFwd,
+                         QrTdmShortQTileFallback,
+                         Values(std::tuple{mode_enum::batch, "1"},
+                                std::tuple{mode_enum::group, "0"},
+                                std::tuple{mode_enum::group, "1"}));
+
+TEST_P(QrTdmShortQTileFallback, DataTypeConfig)
+{
+    if constexpr(ck_tile::is_any_of<DataTypeConfig, FmhaFwdFp16, FmhaFwdBf16>::value)
+    {
+        if(!ck_tile::is_gfx125_supported())
+            GTEST_SKIP() << "qr_tdm is only supported on gfx1250";
+
+        auto [mode, mask_str] = GetParam();
+
+        std::string selected_kernel;
+        auto result =
+            run_qr_tdm_short_q(mode, 8, 8, 16, 512, def_lse, mask_str, 0, &selected_kernel);
+        CHECK_RESULT(result);
+        EXPECT_NE(selected_kernel.find("_b64x"), std::string::npos) << selected_kernel;
+    }
+}
+
 class General
     : public TestWithParam<std::tuple<std::tuple<int, int>,
                                       bool,

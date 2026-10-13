@@ -1578,7 +1578,9 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                               FmhaFwdTileSize(128,  64,  32,  64,  32,   64,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1)],
                 ( 96,  96) : [FmhaFwdTileSize( 64,  64,  32,  96,  32,   96,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1, _gfx125_qr_tdm_crossover_constraint(( 96,  96))),
                               FmhaFwdTileSize(128,  64,  32,  96,  32,   96,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1)],
-                (128, 128) : [FmhaFwdTileSize( 64,  64,  32, 128,  32,  128,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1, CppConstraint(m64_d128_constraint)),
+                (128, 128) : [FmhaFwdTileSize( 16,  64,  32, 128,  32,  128,  1, 1, 1,  1, 1, 1,  16, 16, 32,  16, 16, 32,  -1, CppConstraint("a.seqlen_q <= 16")),
+                              FmhaFwdTileSize( 32,  64,  32, 128,  32,  128,  2, 1, 1,  2, 1, 1,  16, 16, 32,  16, 16, 32,  -1, CppConstraint("a.seqlen_q <= 32")),
+                              FmhaFwdTileSize( 64,  64,  32, 128,  32,  128,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1, CppConstraint(m64_d128_constraint)),
                               FmhaFwdTileSize(128,  64,  32, 128,  32,  128,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1)],
                 (160, 160) : [FmhaFwdTileSize( 64,  64,  32, 160,  32,  160,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1, _gfx125_qr_tdm_crossover_constraint((160, 160))),
                               FmhaFwdTileSize(128,  64,  32, 160,  32,  160,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1)],
@@ -1617,7 +1619,24 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                 return k0_loops == 1
             return k0_loops >= 2
 
-        return [*super().get_rules(), check_gemm0_k]
+        def check_decode_tile(
+            problem_ctx: ProblemContext, kernel_ctx: KernelContext
+        ) -> bool:
+            # The 1-/2-wave bm0=16/32 tiles only serve batch-mode (pack-GQA) decode
+            # on qr_tdm; keep every other pipeline and feature on bm0>=64.
+            if kernel_ctx.tile.F_bm0 not in (16, 32):
+                return True
+            pipeline = kernel_ctx.pipeline
+            return (
+                pipeline.tag == "qr_tdm"
+                and problem_ctx.mode == "batch"
+                and pipeline.F_mask in ("no", "s_no")
+                and pipeline.F_bias == "no"
+                and pipeline.F_sink == "f"
+                and pipeline.F_skip == "f"
+            )
+
+        return [*super().get_rules(), check_gemm0_k, check_decode_tile]
 
     @classmethod
     def get_pipelines(

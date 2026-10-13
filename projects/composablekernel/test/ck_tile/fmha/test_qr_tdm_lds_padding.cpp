@@ -59,11 +59,15 @@ struct VTag
     [[maybe_unused]] static constexpr bool kTranspose     = true;
 };
 
+// Decode tiles keep one 16-row M slice per wave: M16 -> 1 wave, M32 -> 2 waves.
+template <ck_tile::index_t M>
+inline constexpr ck_tile::index_t kTestNumWarps = M < 64 ? M / 16 : 4;
+
 template <ck_tile::index_t M>
 using TestFmhaShape = ck_tile::TileFmhaShape<ck_tile::sequence<M, 64, 32, 128, 32, 128>,
-                                             ck_tile::sequence<4, 1, 1>,
+                                             ck_tile::sequence<kTestNumWarps<M>, 1, 1>,
                                              ck_tile::sequence<16, 16, 32>,
-                                             ck_tile::sequence<4, 1, 1>,
+                                             ck_tile::sequence<kTestNumWarps<M>, 1, 1>,
                                              ck_tile::sequence<16, 16, 32>,
                                              true>;
 
@@ -192,6 +196,12 @@ using SubQK64Problem =
                          TestShapeWithGeometry<TestFmhaShape<128>, 128, 64, 32, 32, 64>>;
 using VColumnMajorProblem =
     TestProblemWithShape<SelectionBaseProblem, TestShapeWithVLayout<TestFmhaShape<128>, false>>;
+using M16FourWarpProblem =
+    TestProblemWithShape<SelectionBaseProblem,
+                         TestShapeWithGeometry<TestFmhaShape<128>, 16, 64, 32, 32, 128>>;
+using M32FourWarpProblem =
+    TestProblemWithShape<SelectionBaseProblem,
+                         TestShapeWithGeometry<TestFmhaShape<128>, 32, 64, 32, 32, 128>>;
 
 static_assert(is_disabled_selection<ck_tile::detail::QrTdmPaddingSelection<MixedTypeProblem>>());
 static_assert(is_disabled_selection<ck_tile::detail::QrTdmPaddingSelection<FloatProblem>>());
@@ -212,6 +222,8 @@ static_assert(is_disabled_selection<ck_tile::detail::QrTdmPaddingSelection<K064P
 static_assert(is_disabled_selection<ck_tile::detail::QrTdmPaddingSelection<K164Problem>>());
 static_assert(is_disabled_selection<ck_tile::detail::QrTdmPaddingSelection<SubQK64Problem>>());
 static_assert(is_disabled_selection<ck_tile::detail::QrTdmPaddingSelection<VColumnMajorProblem>>());
+static_assert(is_disabled_selection<ck_tile::detail::QrTdmPaddingSelection<M16FourWarpProblem>>());
+static_assert(is_disabled_selection<ck_tile::detail::QrTdmPaddingSelection<M32FourWarpProblem>>());
 static_assert(
     is_disabled_selection<ck_tile::detail::QrTdmPaddingSelection<SelectionBaseProblem, false>>());
 
@@ -283,8 +295,10 @@ static_assert(!ck_tile::is_detected<PaddedQDescriptor, ck_tile::pk_fp4_t>::value
 template <typename DataType>
 constexpr bool validate_production_geometries()
 {
-    using PrefillProblem = TestFmhaProblem<DataType, 128, true>;
-    using DecodeProblem  = TestFmhaProblem<DataType, 64, false>;
+    using PrefillProblem  = TestFmhaProblem<DataType, 128, true>;
+    using DecodeProblem   = TestFmhaProblem<DataType, 64, false>;
+    using Decode16Problem = TestFmhaProblem<DataType, 16, true, true>;
+    using Decode32Problem = TestFmhaProblem<DataType, 32, true, true>;
 
     return ck_tile::detail::validate_qr_tdm_issue_geometry<QTag, PrefillProblem>() &&
            ck_tile::detail::validate_qr_tdm_issue_geometry<KTag, PrefillProblem, true>() &&
@@ -297,7 +311,19 @@ constexpr bool validate_production_geometries()
            ck_tile::detail::validate_qr_tdm_reader_segments<VTag, PrefillProblem>() &&
            ck_tile::detail::validate_qr_tdm_reader_segments<QTag, DecodeProblem>() &&
            ck_tile::detail::validate_qr_tdm_reader_segments<KTag, DecodeProblem>() &&
-           ck_tile::detail::validate_qr_tdm_reader_segments<VTag, DecodeProblem>();
+           ck_tile::detail::validate_qr_tdm_reader_segments<VTag, DecodeProblem>() &&
+           ck_tile::detail::validate_qr_tdm_issue_geometry<QTag, Decode16Problem>() &&
+           ck_tile::detail::validate_qr_tdm_issue_geometry<KTag, Decode16Problem, true>() &&
+           ck_tile::detail::validate_qr_tdm_issue_geometry<VTag, Decode16Problem>() &&
+           ck_tile::detail::validate_qr_tdm_reader_segments<QTag, Decode16Problem>() &&
+           ck_tile::detail::validate_qr_tdm_reader_segments<KTag, Decode16Problem>() &&
+           ck_tile::detail::validate_qr_tdm_reader_segments<VTag, Decode16Problem>() &&
+           ck_tile::detail::validate_qr_tdm_issue_geometry<QTag, Decode32Problem>() &&
+           ck_tile::detail::validate_qr_tdm_issue_geometry<KTag, Decode32Problem, true>() &&
+           ck_tile::detail::validate_qr_tdm_issue_geometry<VTag, Decode32Problem>() &&
+           ck_tile::detail::validate_qr_tdm_reader_segments<QTag, Decode32Problem>() &&
+           ck_tile::detail::validate_qr_tdm_reader_segments<KTag, Decode32Problem>() &&
+           ck_tile::detail::validate_qr_tdm_reader_segments<VTag, Decode32Problem>();
 }
 
 // Tags that pull the per-head-dim padding config from QrTdmPaddingSelection,
@@ -575,6 +601,15 @@ static_assert(validate_policy_coupling<ck_tile::half_t, 128, true>());
 static_assert(validate_policy_coupling<ck_tile::half_t, 128, false>());
 static_assert(validate_policy_coupling<ck_tile::half_t, 64, true>());
 static_assert(validate_policy_coupling<ck_tile::half_t, 64, false>());
+// M16/M32 decode tiles: 1/2 waves keep the d128 K/V padding and the 71680 B arena.
+static_assert(validate_policy_coupling<ck_tile::bf16_t, 16, true>());
+static_assert(validate_policy_coupling<ck_tile::bf16_t, 32, true>());
+static_assert(validate_policy_coupling<ck_tile::half_t, 16, true>());
+static_assert(validate_policy_coupling<ck_tile::half_t, 32, true>());
+static_assert(validate_policy_coupling<ck_tile::bf16_t, 16, true, true, false>());
+static_assert(validate_policy_coupling<ck_tile::bf16_t, 32, true, true, false>());
+static_assert(validate_policy_coupling<ck_tile::half_t, 16, true, true, false>());
+static_assert(validate_policy_coupling<ck_tile::half_t, 32, true, true, false>());
 // Explicit expected selections, independent of the production predicate.
 static_assert(validate_policy_coupling<ck_tile::bf16_t, 128, true, true, true>());
 static_assert(validate_policy_coupling<ck_tile::bf16_t, 64, true, true, false>());
@@ -896,10 +931,10 @@ bool run_qr_tdm_round_trip()
     return true;
 }
 
-template <typename DataType, ck_tile::index_t M>
+template <typename DataType, ck_tile::index_t M, bool UseDoubleKVLdsBuffer = (M > 64)>
 bool run_round_trip_matrix()
 {
-    using Problem = TestFmhaProblem<DataType, M, (M > 64)>;
+    using Problem = TestFmhaProblem<DataType, M, UseDoubleKVLdsBuffer>;
 
     return run_qr_tdm_round_trip<QTag, Problem, NoPad, NoPad, NoPad>() &&
            run_qr_tdm_round_trip<KTag, Problem, NoPad, NoPad, NoPad>() &&
@@ -929,6 +964,10 @@ TEST(QrTdmLdsPadding, DeviceRoundTrip)
     EXPECT_TRUE((run_round_trip_matrix<ck_tile::bf16_t, 64>()));
     EXPECT_TRUE((run_round_trip_matrix<ck_tile::half_t, 128>()));
     EXPECT_TRUE((run_round_trip_matrix<ck_tile::half_t, 64>()));
+    EXPECT_TRUE((run_round_trip_matrix<ck_tile::bf16_t, 16, true>()));
+    EXPECT_TRUE((run_round_trip_matrix<ck_tile::bf16_t, 32, true>()));
+    EXPECT_TRUE((run_round_trip_matrix<ck_tile::half_t, 16, true>()));
+    EXPECT_TRUE((run_round_trip_matrix<ck_tile::half_t, 32, true>()));
 }
 
 } // namespace
