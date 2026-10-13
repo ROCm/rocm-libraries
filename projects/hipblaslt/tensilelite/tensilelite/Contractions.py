@@ -82,17 +82,6 @@ def _predicate_from_document(cls, document):
     return predicate
 
 
-def _pack_default(obj):
-    # SolutionStructs.ProblemType stores its fields in a dict named state.
-    # Data types and other values expose that dict through a state method.
-    state_attr = getattr(obj, "state", None)
-    if isinstance(state_attr, dict):
-        return state_attr
-    if callable(state_attr):
-        return state_attr()
-    raise TypeError("Cannot pack {} into a solution state".format(type(obj).__name__))
-
-
 def _solution_record(d):
     """Build one solution's library record with tensilelite_write.solution_from_state."""
     try:
@@ -101,10 +90,7 @@ def _solution_record(d):
         printExit(
             "tensilelite.tensilelite_write is required to build a solution record ({})".format(exc)
         )
-    import msgpack
-    raw = msgpack.packb(d, default=_pack_default, use_bin_type=True)
-    packed = tensilelite_write.solution_from_state(raw)
-    return msgpack.unpackb(packed, raw=False, strict_map_key=False)
+    return tensilelite_write.solution_from_state(d)
 
 
 @state_key_ordering

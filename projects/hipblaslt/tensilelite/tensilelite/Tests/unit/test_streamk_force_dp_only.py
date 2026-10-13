@@ -99,7 +99,6 @@ def size_mapping_from_state(state):
     """Size mapping of one solution state, read back from solution_from_state."""
     import importlib.util
 
-    import msgpack
     import pytest
 
     if importlib.util.find_spec("tensilelite.tensilelite_write") is None:
@@ -109,10 +108,7 @@ def size_mapping_from_state(state):
 
     full = _small_solution_state()
     full.update(state)
-    raw = msgpack.packb(full, use_bin_type=True)
-    record = msgpack.unpackb(
-        tensilelite_write.solution_from_state(raw), raw=False, strict_map_key=False
-    )
+    record = tensilelite_write.solution_from_state(full)
     return SimpleNamespace(**record["sizeMapping"])
 
 

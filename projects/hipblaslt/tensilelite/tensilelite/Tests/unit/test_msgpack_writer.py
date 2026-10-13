@@ -185,8 +185,13 @@ def _small_solution_state():
     }
 
 
+def test_encode_round_trips_a_nested_library_map():
+    writer = _writer()
+    value = {"gfx950": {"softmax": {"H": [{"co_path": "extop.co", "io_type": "H", "m": 8}]}}}
+    assert writer.decode(writer.encode(value)) == value
+
+
 def test_solution_from_state_kernel_name():
     writer = _writer()
-    raw = msgpack.packb(_small_solution_state(), use_bin_type=True)
-    record = msgpack.unpackb(writer.solution_from_state(raw), raw=False, strict_map_key=False)
+    record = writer.solution_from_state(_small_solution_state())
     assert record["kernelName"] == "small_kernel"
