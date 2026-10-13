@@ -11823,7 +11823,11 @@ class KernelWriterAssembly(KernelWriter):
       # PrefetchGlobalRead>=2 + (oneBufferScheduling or tailLoop) case, generate local read wait for DirectToLds
       # Early exit + Tailloop case, barrier sync might not be executed when reaching Tailloop.
       # Need sync before running GR for Tailloop.
-      if kernel["PrefetchGlobalRead"]>=2 and (self.states.oneBufferScheduling or tail) and not skipWait:
+      # A persistent kernel issues the first prefetch of the next tile while slower waves can still be
+      # reading LDS in the previous tile's store (the bias and scaleAlpha vectors are staged there).
+      nextTilePrefetch = mode == 0 and isPersistent(kernel) and not self.isPrefetchAcrossPersistentEnabled(kernel)
+      if kernel["PrefetchGlobalRead"]>=2 and (self.states.oneBufferScheduling or tail or nextTilePrefetch) \
+         and not skipWait:
         # do not generate local read wait for PGR=2
         DtldsModule.addComment0("before DirectToLds load, ensure prior ds_reads have finished")
         DtldsModule.add(SWaitCnt(dscnt=0, comment=""))
