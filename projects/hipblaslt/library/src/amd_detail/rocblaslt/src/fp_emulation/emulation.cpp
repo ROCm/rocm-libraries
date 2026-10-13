@@ -117,9 +117,9 @@ namespace FixedPointEmulation
     struct PerfModelDeviceParams
     {
         double bw;
-        double int8;
-        double fp64;
-        double fp32;
+        double ai_fp64;
+        double ai_fp32;
+        double ai_int8;
     };
 
     /* Returns the perf-model parameters for the given HIP device, or nullopt if
@@ -127,10 +127,10 @@ namespace FixedPointEmulation
     static std::optional<PerfModelDeviceParams> get_perf_model_params(int device)
     {
         static const std::unordered_map<uint32_t, PerfModelDeviceParams> hw_params_by_pci_id = {
-            {0x75a0u, {6.08e12, 3.172e15, 6.824e13, 1.34e14}}, // gfx950-mi350x
-            {0x75b0u, {6.08e12, 3.172e15, 6.824e13, 1.34e14}}, // gfx950-mi350x
-            {0x75a3u, {6.82e12, 3.301e15, 7.726e13, 1.54e14}}, // gfx950-mi355x
-            {0x75b3u, {6.82e12, 3.301e15, 7.726e13, 1.54e14}}, // gfx950-mi355x
+            {0x75a0u, {6.08e12,    11.22,   22.04,   521.7}}, // gfx950-mi350x
+            {0x75b0u, {6.08e12,    11.22,   22.04,   521.7}}, // gfx950-mi350x
+            {0x75a3u, {6.82e12,    11.33,   22.58,   484.0}}, // gfx950-mi355x
+            {0x75b3u, {6.82e12,    11.33,   22.58,   484.0}}, // gfx950-mi355x
         };
         static std::optional<std::optional<PerfModelDeviceParams>> device_params_cache[64];
 
@@ -204,8 +204,8 @@ namespace FixedPointEmulation
 
         const bool   is_fp32        = (type_a == HIP_R_32F);
         const double c0             = hw.bw;
-        const double c1             = is_fp32 ? hw.fp32 : hw.fp64;
-        const double c2             = hw.int8;
+        const double c1             = hw.bw * (is_fp32 ? hw.ai_fp32 : hw.ai_fp64);
+        const double c2             = hw.bw * hw.ai_int8;
         const double bytes_per_elem = is_fp32 ? 4.0 : 8.0;
         const double s              = static_cast<double>(num_moduli);
         const double mn             = static_cast<double>(m) * static_cast<double>(n);
