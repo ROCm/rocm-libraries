@@ -737,7 +737,7 @@ def test_audit_cache_hits_misses_and_invalid_manifests(tmp_path: Path) -> None:
     cache.save()
     reloaded = AuditCache(tmp_path / "cache", logic, checks_key="dict_structure")
     assert reloaded.lookup(yaml_path)["path"] == str(yaml_path)
-    yaml_path.write_text("a: 2\n", encoding="utf-8")
+    yaml_path.write_text("changed: 2\n", encoding="utf-8")
     assert reloaded.lookup(yaml_path) is None
     missing = logic / "gone.yaml"
     reloaded._entries["gone.yaml"] = {"signature": {}, "result": {}}

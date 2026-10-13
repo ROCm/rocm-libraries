@@ -109,6 +109,49 @@ def _install_rocisa_stub_if_needed() -> None:
     sys.modules["rocisa"] = rocisa
 
 
+def _install_joblib_stub_if_needed() -> None:
+    """Install a minimal ``joblib`` stub when the package is not installed.
+
+    Importing TensileLite loads ``Common.Parallel``, which imports ``joblib``
+    at module scope. The audit never calls that parallel helper.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+
+    Raises:
+        No exceptions are raised.
+    """
+    try:
+        import joblib
+    except Exception:
+        joblib = None
+    if joblib is not None and hasattr(joblib, "Parallel") and hasattr(joblib, "delayed"):
+        return
+    stub = types.ModuleType("joblib")
+
+    def _delayed(function: Callable[..., Any]) -> Callable[..., Any]:
+        """Return a function unchanged, standing in for ``joblib.delayed``.
+
+        Args:
+            function: Callable that would be wrapped for delayed execution.
+
+        Returns:
+            *function* itself.
+
+        Raises:
+            No exceptions are raised.
+        """
+        return function
+
+    stub.Parallel = object
+    stub.delayed = _delayed
+    stub.__version__ = "0"
+    sys.modules["joblib"] = stub
+
+
 @lru_cache(maxsize=1)
 def _tensile_fill_tools() -> tuple[Callable[..., dict[str, Any]], dict[str, Any]]:
     """Load TensileLite's solution-default fill helpers.
@@ -123,6 +166,7 @@ def _tensile_fill_tools() -> tuple[Callable[..., dict[str, Any]], dict[str, Any]
         ImportError: If TensileLite cannot be imported after the rocisa stub.
     """
     _install_rocisa_stub_if_needed()
+    _install_joblib_stub_if_needed()
     root = str(_tensilelite_root())
     if root not in sys.path:
         sys.path.insert(0, root)
