@@ -64,6 +64,11 @@ namespace TensileLite
                          || m_printTensorAmaxD;
 
             m_enabled = m_elementsToValidate != 0 || m_printAny;
+            m_validateAfterEnqueues = args.count("validate-after-enqueues")
+                                      && args["validate-after-enqueues"].as<bool>();
+            if(m_validateAfterEnqueues && args.count("c-equal-d") && args["c-equal-d"].as<bool>())
+                throw std::runtime_error("validate-after-enqueues requires c-equal-d=false: "
+                                         "repeated launches must preserve the reference inputs.");
         }
 
         bool ReferenceValidator::needMoreBenchmarkRuns() const
@@ -220,6 +225,17 @@ namespace TensileLite
                                                  TimingEvents const&            stopEvents)
         {
             if(m_enabled && !m_validatedSolution)
+            {
+                validateSolution(inputs);
+                m_validatedSolution = true;
+            }
+        }
+
+        void ReferenceValidator::validateEnqueues(std::shared_ptr<ProblemInputs> inputs,
+                                                  TimingEvents const&            startEvents,
+                                                  TimingEvents const&            stopEvents)
+        {
+            if(m_enabled && m_validateAfterEnqueues)
             {
                 validateSolution(inputs);
                 m_validatedSolution = true;
