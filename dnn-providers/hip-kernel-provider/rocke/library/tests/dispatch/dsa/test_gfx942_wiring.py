@@ -72,24 +72,44 @@ class TestRouting(unittest.TestCase):
         self.assertEqual(res.grid, (1, 4, 1))  # (seqlen_q/16, seqlen_k/16, 1)
         self.assertEqual(res.block, (64, 1, 1))
 
-    def test_unaligned_falls_back_to_scalar(self):
-        # seqlen_q=8 is not a multiple of 16, so the MFMA candidate is filtered out.
+    def test_subtile_seqlen_q_selects_scalar(self):
+        # seqlen_q=8 is below one MFMA query tile (16), so the MFMA candidate is
+        # filtered out and decode-like sub-tile shapes stay on scalar (Option A).
         res = dispatch_lightning_indexer(_req(seqlen_q=8))
         self.assertEqual(res.candidate.name, "lightning_indexer_gfx942")
         self.assertEqual(res.candidate.algorithm, "scalar_v1")
         self.assertEqual(res.spec.body, "scalar")
         self.assertEqual(res.grid, (8, 1, 1))
 
+    def test_nonaligned_seqlen_k_selects_mfma(self):
+        # seqlen_q>=16 with a non-16-aligned seqlen_k now routes to MFMA (tail
+        # masking), where before it fell to scalar. Grid ceils the key axis.
+        res = dispatch_lightning_indexer(
+            _req(seqlen_q=16, seqlen_k=70, index_head_dim=128)
+        )
+        self.assertEqual(res.candidate.name, "lightning_indexer_gfx942_mfma")
+        self.assertEqual(res.spec.body, "mfma")
+        self.assertEqual(res.grid, (1, 5, 1))  # (ceil(16/16), ceil(70/16), 1)
+
     def test_signature_stable_across_bodies(self):
         for req in (_req(seqlen_q=16, index_head_dim=128), _req(seqlen_q=8)):
             res = dispatch_lightning_indexer(req)
             self.assertEqual(
                 [s["name"] for s in res.signature],
-                ["index_q", "index_k", "w", "scores", "q_pos_base"],
+                [
+                    "index_q",
+                    "index_k",
+                    "w",
+                    "scores",
+                    "q_pos_base",
+                    "seqlen_q",
+                    "seqlen_k",
+                ],
             )
 
     def test_sweep_space(self):
-        # aligned: both candidates admit; unaligned: only scalar.
+        # seqlen_q>=16 with 16-aligned index_head_dim: both candidates admit;
+        # sub-tile seqlen_q (< 16): only scalar.
         self.assertEqual(
             len(indexer_sweep_space(_req(seqlen_q=16, index_head_dim=128))), 2
         )

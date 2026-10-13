@@ -56,6 +56,10 @@ _TOL = 1e-3
         (16, 64, 32, 128, 64, 0, "mfma"),  # MFMA, GLM-shaped, 16-aligned
         (32, 128, 64, 128, 64, 0, "mfma"),  # MFMA, DeepSeek-shaped, multi-tile
         (16, 96, 8, 128, 64, 48, "mfma"),  # MFMA, nonzero causal offset
+        (1, 70, 4, 16, 64, 69, "scalar"),  # decode: seqlen_q=1, non-mult seqlen_k
+        (3, 200, 8, 128, 64, 0, "scalar"),  # scalar grid.y>1, tail key slice
+        (16, 70, 32, 128, 64, 0, "mfma"),  # MFMA key-tail (seqlen_k not 16-mult)
+        (24, 70, 32, 128, 64, 0, "mfma"),  # MFMA query+key tail (neither 16-mult)
     ],
 )
 def test_indexer_scores_match_oracle(Q, Sk, HI, D, block, q_pos_base, body):

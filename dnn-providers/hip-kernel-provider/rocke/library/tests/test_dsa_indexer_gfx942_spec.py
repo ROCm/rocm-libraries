@@ -121,6 +121,28 @@ class TestQPosBaseGuard(unittest.TestCase):
             self._validate(-1, seqlen_q=8)
 
 
+class TestRuntimeOffsetGuard(unittest.TestCase):
+    # seqlen_q/seqlen_k are runtime kernel args now, so the i32 offset bound is
+    # enforced at the manifest host entry against the actual launch shape.
+    def _validate(self, q, k, h, d):
+        from builders.common.dsa.manifest import _validate_offsets
+
+        _validate_offsets(q, k, h, d)
+
+    def test_rejects_index_key_overflow(self):
+        # seqlen_k*index_head_dim: 2**24 * 128 == 2**31 overflows i32.
+        with self.assertRaises(ValueError):
+            self._validate(1, 2**24, 4, 128)
+
+    def test_rejects_score_matrix_overflow(self):
+        # seqlen_q*seqlen_k >= 2**31.
+        with self.assertRaises(ValueError):
+            self._validate(2**16, 2**15, 4, 16)
+
+    def test_accepts_realistic_shape(self):
+        self._validate(1, 131072, 64, 128)  # long-context decode, fits i32
+
+
 class TestBudget(unittest.TestCase):
     def test_scalar_v1_uses_no_lds(self):
         self.assertEqual(_spec().lds_bytes(), 0)
@@ -139,9 +161,17 @@ class TestKernelName(unittest.TestCase):
         self.assertIn("HI32", name)
         self.assertIn("D128", name)
         self.assertIn("bf16", name)
-        self.assertIn("Q8", name)
-        self.assertIn("K64", name)
         self.assertIn("b256", name)
+        # seqlen_q / seqlen_k are runtime args, so they must NOT be in the name
+        # (one binary per (H_I, D_I, body) serves every sequence length).
+        self.assertNotIn("Q8", name)
+        self.assertNotIn("K64", name)
+
+    def test_seqlens_do_not_change_name(self):
+        # Two specs differing only in the sequence lengths share one kernel.
+        a = _spec(n_index_heads=32, index_head_dim=128, seqlen_q=8, seqlen_k=64)
+        b = _spec(n_index_heads=32, index_head_dim=128, seqlen_q=999, seqlen_k=7777)
+        self.assertEqual(a.kernel_name(), b.kernel_name())
 
 
 class TestBuildAndLower(unittest.TestCase):
@@ -156,8 +186,16 @@ class TestBuildAndLower(unittest.TestCase):
     def test_grid_and_signature(self):
         spec = _spec(seqlen_q=13)
         self.assertEqual(lightning_indexer_grid(spec), (13, 1, 1))
+        # Keys parallelize across grid.y = ceil(seqlen_k/block_size); block_size 64
+        # here, so seqlen_k=200 -> ceil(200/64) = 4.
+        self.assertEqual(
+            lightning_indexer_grid(_spec(seqlen_q=4, seqlen_k=200)), (4, 4, 1)
+        )
         names = [s["name"] for s in lightning_indexer_signature(spec)]
-        self.assertEqual(names, ["index_q", "index_k", "w", "scores", "q_pos_base"])
+        self.assertEqual(
+            names,
+            ["index_q", "index_k", "w", "scores", "q_pos_base", "seqlen_q", "seqlen_k"],
+        )
 
     def test_invalid_spec_raises(self):
         with self.assertRaises(ValueError):
@@ -188,10 +226,11 @@ class TestMfmaBody(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("block_size", why)
 
-    def test_requires_aligned_seqlen(self):
-        ok, why = is_valid_spec(self._mfma(seqlen_q=15), arch=_ARCH)
-        self.assertFalse(ok)
-        self.assertIn("multiples of 16", why)
+    def test_accepts_nonaligned_seqlen(self):
+        # The MFMA body tail-masks non-16-aligned seqlen_q / seqlen_k (ceil grid,
+        # clamped loads, predicated stores), so they are valid now.
+        ok, why = is_valid_spec(self._mfma(seqlen_q=24, seqlen_k=70), arch=_ARCH)
+        self.assertTrue(ok, why)
 
     def test_requires_aligned_dim(self):
         ok, why = is_valid_spec(self._mfma(index_head_dim=24), arch=_ARCH)
@@ -204,6 +243,10 @@ class TestMfmaBody(unittest.TestCase):
     def test_grid_is_query_by_key_tiles(self):
         # seqlen_q=32, seqlen_k=64 -> (32/16, 64/16, 1)
         self.assertEqual(lightning_indexer_grid(self._mfma(seqlen_q=32)), (2, 4, 1))
+        # non-aligned -> ceil: seqlen_q=24, seqlen_k=70 -> (ceil(24/16), ceil(70/16))
+        self.assertEqual(
+            lightning_indexer_grid(self._mfma(seqlen_q=24, seqlen_k=70)), (2, 5, 1)
+        )
 
     def test_builds_and_lowers(self):
         from rocke.core.lower_llvm import _lower_kernel_to_llvm_python

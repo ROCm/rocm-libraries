@@ -43,11 +43,11 @@ from rocke.dispatch.core import (
 )
 
 FAMILY = "lightning_indexer"
-# EXPERIMENTAL, not a frozen serving contract. seqlen_k is compile-time (a fresh
-# kernel per decode step as the cache grows) and there is no batch axis or block
-# table, so a paged serving stack cannot call this shape yet. The signature --
-# notably whether seqlen_k becomes a runtime argument -- may change before a
-# stable "/v1" is declared. The suffix says so on the wire.
+# EXPERIMENTAL, not a frozen serving contract. seqlen_q and seqlen_k are runtime
+# kernel arguments now (no per-decode-step recompile), but there is still no batch
+# axis or block table, so a paged serving stack cannot call this shape yet. The
+# signature may still change before a stable "/v1" is declared; the suffix says so
+# on the wire.
 DSA_INDEXER_ABI_VERSION = "rocke-lightning-indexer/v1-experimental"
 
 # The indexer scores every key it is given, so the request geometry is the
@@ -140,11 +140,14 @@ _SHARED_SHAPES = (
     ShapeRange("n_index_heads", min=1),
     ShapeRange("index_head_dim", min=1),
 )
-# The MFMA candidate needs 16-aligned tiles, so its capability prefilters
-# unaligned requests out -- they fall to the scalar candidate.
+# The MFMA body now tail-masks non-16-aligned seqlen_q / seqlen_k (ceil grid,
+# clamped loads, predicated stores), so only index_head_dim must be 16-aligned.
+# seqlen_q has a min of 16 on purpose: below one query tile the MFMA block is
+# mostly masked rows, so sub-tile shapes (notably seqlen_q=1 decode) stay on the
+# scalar candidate until the heads-on-M decode reformulation lands.
 _MFMA_SHAPES = (
-    ShapeRange("seqlen_q", min=16, multiple_of=16),
-    ShapeRange("seqlen_k", min=16, multiple_of=16),
+    ShapeRange("seqlen_q", min=16),
+    ShapeRange("seqlen_k", min=1),
     ShapeRange("n_index_heads", min=1),
     ShapeRange("index_head_dim", min=16, multiple_of=16),
 )

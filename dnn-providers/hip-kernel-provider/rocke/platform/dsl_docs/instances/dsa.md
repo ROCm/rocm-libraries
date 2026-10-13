@@ -115,17 +115,20 @@ change to the decomposition, not a hook swap.
  index_k: ptr<bf16, global>,   # [seqlen_k, D_I], shared across heads
  w:       ptr<f32,  global>,   # [seqlen_q, H_I] per-query per-head weights (signed)
  scores:  ptr<f32,  global>,   # [seqlen_q, seqlen_k] output score matrix
- q_pos_base: i32)              # causal base: pos(q) = q_pos_base + q
+ q_pos_base: i32,              # causal base: pos(q) = q_pos_base + q
+ seqlen_q:   i32,              # runtime query count (grid + tail bound)
+ seqlen_k:   i32)              # runtime key length (grid + stride + tail)
 ```
 
 Block `(block_size, 1, 1)` (256 scalar, 64 mfma). Grid is body-dependent (above).
+`seqlen_q` / `seqlen_k` are runtime arguments, so one binary per
+`(H_I, D_I, body)` serves every sequence length and decode does not recompile as
+the cache grows.
 
 **Experimental ABI** (`rocke-lightning-indexer/v1-experimental`): this is not yet
-a frozen serving contract. `seqlen_k` is compile-time (a fresh kernel per decode
-step as the cache grows) and there is no batch axis or block table, so a paged
-serving stack cannot call this shape yet. The signature -- notably whether
-`seqlen_k` becomes a runtime argument -- may change before a stable `/v1` is
-declared.
+a frozen serving contract. `seqlen_q` / `seqlen_k` are runtime now, but there is
+still no batch axis or block table, so a paged serving stack cannot call this
+shape yet. The signature may still change before a stable `/v1` is declared.
 
 ## Coverage
 
