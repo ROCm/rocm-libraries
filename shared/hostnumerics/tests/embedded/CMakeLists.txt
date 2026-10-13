@@ -7,13 +7,15 @@ project(HostNumericsEmbeddedTest LANGUAGES CXX)
 
 set(CMAKE_DISABLE_FIND_PACKAGE_Python TRUE)
 set(CMAKE_DISABLE_FIND_PACKAGE_nanobind TRUE)
+option(HOSTNUMERICS_ENABLE_FETCH "Allow test builds to fetch missing dependencies." ON)
 add_subdirectory(../.. hostnumerics)
-if(HOSTNUMERICS_BUILD_TESTING OR HOSTNUMERICS_BUILD_PYTHON)
+if(HOSTNUMERICS_BUILD_TESTING OR HOSTNUMERICS_BUILD_PYTHON OR TARGET GTest::gtest)
     message(FATAL_ERROR "Embedded HostNumerics should default to no tests or Python.")
 endif()
 
+include("${CMAKE_CURRENT_LIST_DIR}/../../cmake/HostNumericsTestDependencies.cmake")
 add_executable(hostnumerics-embedded-test ../version_test.cpp)
-target_link_libraries(hostnumerics-embedded-test PRIVATE roc::hostnumerics)
+target_link_libraries(hostnumerics-embedded-test PRIVATE roc::hostnumerics GTest::gtest_main)
 
 enable_testing()
 add_test(NAME hostnumerics-embedded-test COMMAND hostnumerics-embedded-test)

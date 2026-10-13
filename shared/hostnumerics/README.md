@@ -68,6 +68,8 @@ reference. Compare representative input-generation and reference-computation
 timings, as well as their effect on complete test and benchmark runs, before
 removing an old accelerated path.
 
+C++ tests use GoogleTest 1.12.1 or newer. Test builds fetch the pinned version when no installed package is available; set `HOSTNUMERICS_ENABLE_FETCH=OFF` to require an existing package. GoogleTest is not installed or exported with HostNumerics.
+
 ## Build and test
 
 The standalone build requires CMake 3.25.2 or newer, a C++20 compiler, and Ninja.
