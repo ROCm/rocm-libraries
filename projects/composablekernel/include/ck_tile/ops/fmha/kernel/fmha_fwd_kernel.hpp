@@ -1818,11 +1818,10 @@ struct FmhaFwdKernel
             // is contiguous inside its XCD segment.
             //
             // Dense only: masked grids keep their long-to-short tile order below.
-            // The 16-row tile only serves s_q <= 16, i.e. one m-tile per
-            // (batch, head) and no K/V to share, so it is left out at compile time;
-            // gridDim.y == 1 covers the same case at run time. Per-batch lengths
-            // keep the round-robin (see HasUniformWork).
-            if constexpr(!kHasMask && FmhaPipeline::kM0 > 16)
+            // A single m-tile per (batch, head) (gridDim.y == 1) has no K/V to
+            // share, and per-batch lengths keep the round-robin (see
+            // HasUniformWork).
+            if constexpr(!kHasMask)
             {
                 if(HasUniformWork(kargs) && gridDim.y > 1)
                 {

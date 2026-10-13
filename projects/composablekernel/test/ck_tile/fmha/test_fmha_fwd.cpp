@@ -411,6 +411,63 @@ TEST(TestCkTileFmhaFwd, QrTdmLdsArenaPrefill)
     }
 }
 
+// Batch-mode XCD remap of the block index: several m-tiles per (batch, head) on a
+// grid that is not a multiple of the XCD count (3 x 5 x 3 = 45 blocks at bm0=128,
+// 75 at bm0=64), so the remap of the bhsd and bshd tile indices is not the
+// identity. Per-batch effective lengths keep the round-robin order and return
+// early from the blocks past each batch's seqlen_q.
+class BatchXcdRemap
+    : public TestWithParam<std::tuple<bool, std::tuple<std::vector<int>, std::vector<int>>>>
+{
+};
+
+INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaFwd,
+                         BatchXcdRemap,
+                         Combine(Bool(),
+                                 Values(std::tuple{std::vector<int>{}, std::vector<int>{}},
+                                        std::tuple{std::vector<int>{300, 64, 1},
+                                                   std::vector<int>{300, 100, 7}})));
+
+TEST_P(BatchXcdRemap, DataTypeConfig)
+{
+    auto [perm, eff_lens]          = GetParam();
+    auto [q_eff_lens, kv_eff_lens] = eff_lens;
+
+    auto result = fmha_fwd_run<DataTypeConfig>(mode_enum::batch,
+                                               3,  // batch
+                                               5,  // nhead
+                                               -1, // nhead_k
+                                               {adjust_seqlen(300)},
+                                               {adjust_seqlen(300)},
+                                               adjust_hdim(128),
+                                               adjust_hdim(128),
+                                               0,    // seqlen_knew
+                                               {-1}, // seqlen_qpads
+                                               {-1}, // seqlen_kpads
+                                               q_eff_lens,
+                                               kv_eff_lens,
+                                               0,    // rotary_dim
+                                               perm, // i_perm
+                                               perm, // o_perm
+                                               0,    // scale_s
+                                               0,    // logits_soft_cap
+                                               def_is_v_rowmajor,
+                                               def_lse,
+                                               0,     // page_block_size
+                                               false, // use_cache_batch_idx
+                                               "n",   // bias_str
+                                               0.0f,  // p_drop
+                                               0,     // drop_seed
+                                               0,     // drop_offset
+                                               false, // drop_prefs
+                                               "0",   // mask_str
+                                               qscale_str,
+                                               true, // is_rotary_interleaved
+                                               1,    // num_splits
+                                               COMMON_ARGS);
+    CHECK_RESULT(result);
+}
+
 // gfx125x-only: qr_tdm correctness at the head dims this PR added but that the
 // generic General sweep does not cover -- (160,160) and (96,96). The generic
 // suite already exercises 32/64/128/192-128 through qr_tdm but never asserts
