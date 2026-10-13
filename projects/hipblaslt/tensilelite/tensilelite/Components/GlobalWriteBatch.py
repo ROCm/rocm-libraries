@@ -254,6 +254,7 @@ class GlobalWriteBatchWriter:
     # Absolute row addressing: the SrdD row advance is dropped and each store
     # names its own row through soffset. See _subtileStoreSoffset.
     self._subtileAbsRowAddr = parentWriter.states.subtileAbsRowAddr
+    self._alphaPerElement = {}            # elementIdx -> alpha multiply emitted just before that element's pack
     self._align8NMaskBlockIdxN = -1       # last blockIdxN for which N mask was computed
     # align8 exec mask scratch, allocated in paired-store Phase1 and freed in
     # Phase2. None outside that window, so an unpaired phase faults here rather
@@ -1088,7 +1089,7 @@ class GlobalWriteBatchWriter:
 
     ########################################
     # rC *= alpha
-    if not self.kernel["InterleaveAlpha"] and self.applyAlpha and self.parentWriter.alphaBeforeLoadC:
+    if self.kernel["InterleaveAlpha"] != 1 and self.applyAlpha and self.parentWriter.alphaBeforeLoadC:
       module.addComment1("rC *= alpha batchElements=%s"%self.batchElements)
       if self.codeMulAlpha is None:
         elementIdx = 0
@@ -1412,7 +1413,7 @@ class GlobalWriteBatchWriter:
                     addr0, addr1, soffset=0, offset=addrCalc.globalOffset,
                     comment="load D (atomic) bpm=%u vaw=%u"%(bpm,self.atomicW)))
 
-      if self.kernel["InterleaveAlpha"] and self.applyAlpha:
+      if self.kernel["InterleaveAlpha"] == 1 and self.applyAlpha:
         module.add(self._applyAlpha(self.kernel, self.gwvw, self.ss.elementSumIdx, elementIdx, self.tmpS01))
 
       if not self.kernel["BufferStore"]:
@@ -1569,7 +1570,7 @@ class GlobalWriteBatchWriter:
     # this point. Applying alpha here would multiply stale ValuC and then be clobbered
     # by the sunk read (dropping all alpha scaling, incl. folded scaleA*scaleB). Defer
     # it: _epilog applies alpha per-element right after the read (see _weaveReadForEpilogue).
-    if not self.kernel["InterleaveAlpha"] and self.applyAlpha and not self.parentWriter.alphaBeforeLoadC \
+    if self.kernel["InterleaveAlpha"] != 1 and self.applyAlpha and not self.parentWriter.alphaBeforeLoadC \
        and not getattr(self, "_weaveReadBeforeEpilogue", False):
       module.addComment1("rC *= alpha batchElements=%s"%self.batchElements)
       if self.codeMulAlpha is None:
@@ -1584,13 +1585,19 @@ class GlobalWriteBatchWriter:
             elementIdx += 1
       else:
           regsPerScalar = self.parentWriter.states.bpeCinternal // self.parentWriter.states.bpr # register per scalar
+          interleaveAlpha = self._interleaveAlphaWithPack()
           for elementIdx in range(len(self.batchElements)):
+            elementAlpha = Module("alphaElement")
             for vi in range(self.gwvw):
               rh = replaceHolder(self.codeMulAlpha.popFirstItem(), self.ss.elementSumIdx[elementIdx]*regsPerScalar + regsPerScalar*vi - self.parentWriter.states.c.startVgprValu)
               if (self.kernel["GlobalSplitU"] == 1) and (self.kernel["ProblemType"]["ComputeDataType"].isSingle() and self.kernel["ProblemType"]["DataType"].isInt8()):
                 srcRegName = rh.getParams()[2].getCompleteRegName()
-                module.add(VCvtI32toF32(dst=vgpr(srcRegName), src=vgpr(srcRegName), comment="Convert MI out reg to fp32"))
-              module.add(rh)
+                elementAlpha.add(VCvtI32toF32(dst=vgpr(srcRegName), src=vgpr(srcRegName), comment="Convert MI out reg to fp32"))
+              elementAlpha.add(rh)
+            if interleaveAlpha:
+              self._alphaPerElement[elementIdx] = elementAlpha
+            else:
+              module.add(elementAlpha)
 
   def _epilog(self, module: Module):
     # return registers to pool:
@@ -2033,7 +2040,7 @@ class GlobalWriteBatchWriter:
         module.add(VMovB32(vgpr(self.cvtVgprStruct.vgprBF8Min), "0xc7600000", comment="BF8 Min value -57344 as float32" ))
 
     storeCode = Module("GroupLoadStore")
-
+    needStoreWaitAlu = False
     vlcntTotalIssued = self.loadsBetaIssued + self.loadsEIssued + self.loadsGateIssued
     dscntTotalIssued = self.localLoadsBiasIssued + self.loadsScaleAVecIssued + self.loadsScaleBVecIssued + self.loadsScaleAlphaVecIssued
     waitCnter = [vlcntTotalIssued, dscntTotalIssued]
@@ -2112,6 +2119,9 @@ class GlobalWriteBatchWriter:
           if self._subtilePendingSrdDInc is not None:
             _ngTarget.add(self._subtilePendingSrdDInc)
             self._subtilePendingSrdDInc = None
+
+      if elementIdx in self._alphaPerElement:
+        module.add(self._alphaPerElement.pop(elementIdx))
 
       # apply in-bounds exec mask
       if self.edge and not self.kernel["BufferStore"]:
@@ -2529,7 +2539,10 @@ class GlobalWriteBatchWriter:
                           comment="Pack with neighbor"))
 
       if self.kernel["ExpertSchedulingMode"] > 0:
-        packModule.add(SWaitAlu(va_vdst=0, comment="wait for writes to complete"))
+        if self.kernel["GroupLoadStore"]:
+          needStoreWaitAlu = True
+        else:
+          packModule.add(SWaitAlu(va_vdst=0, comment="wait for writes to complete"))
 
       biasReductionModule = Module("biasReductionModule")
       if self.storeBiasD == 1:
@@ -2803,6 +2816,9 @@ class GlobalWriteBatchWriter:
                     and (mGuardSgpr is not None or nGuardSgpr is not None)
                     and (mGuardSgpr is None or validMWaveSgpr is not None)
                     and len(self.batchElements) > 0)
+    if needStoreWaitAlu:
+      # One wait ahead of the grouped stores replaces the per-element wait after each pack.
+      module.add(SWaitAlu(va_vdst=0, comment="wait for writes to complete"))
     if peelInterior:
       maxTt0 = max(e[1] for e in self.batchElements)
       maxBlockIdxN = max(e[0] for e in self.batchElements)
@@ -5204,6 +5220,16 @@ class GlobalWriteBatchWriter:
   def _storeSyncOpt(self, module: Module):
     module.add(SSleep(self.kernel["StoreSyncOpt"] - 1, "optimization: sync and wait"))
     module.add(SBarrier())
+
+  def _interleaveAlphaWithPack(self):
+    # InterleaveAlpha==2: defer each element's alpha multiply to just before its own
+    # conversion+pack (consumed in the store loop) instead of scaling all elements up
+    # front. The deferred multiply is emitted before the beta*C add, bias, activation
+    # and pack, so alpha still lands on the raw MI accumulator in every case. The main
+    # win is register lifetime: an up-front scale of all elements can overwrite a
+    # prior batch's store source registers while that store is still draining
+    # (e.g. fp8 + GroupLoadStore), and this spreads the VALU out instead.
+    return self.kernel["InterleaveAlpha"] == 2
 
   def _applyAlpha(self, kernel, gwvw, elementSumIdx, elementIdx, tmpS01, usePK=False):
     module = Module("applyAlpha")

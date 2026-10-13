@@ -940,6 +940,34 @@ class Solution(collections.abc.Mapping):
     if (not state["ProblemType"]["StridedBatched"]) and (state["ProblemType"]["OperationType"] != 'GEMM'):
       reject(state, printRejectionReason, "General Batched GEMM only support GEMM OperationType")
 
+    # The four configurations below fail codegen on every arch; they are rejected
+    # on gfx1250 only.
+    #
+    # StridedBatched=False duplicates the loadBatchedAddress labels (moduleWg is
+    # emitted twice), which StinkyTofu's CFG builder aborts on, and the
+    # KernelWriterConversion helper emits invalid HIP for Batch{C,D}. Runtime
+    # general-batch is still available via ArgType==3 on StridedBatched
+    # SupportUserArgs kernels. See AIHPBLAS-4369.
+    if (not state["ProblemType"]["StridedBatched"]) and tuple(state["ISA"])[:2] == (12, 5):
+      reject(state, printRejectionReason, "StridedBatched=False is not supported on gfx1250")
+
+    # Batched=False has no batch index, but computeLoadSrd still branches to the
+    # StridedBatchedGemmLoad labels that are only created for a batch index, and
+    # KernelWriterConversion still emits batchIdx = id2.
+    if (not state["ProblemType"].get("Batched", True)) and tuple(state["ISA"])[:2] == (12, 5):
+      reject(state, printRejectionReason, "Batched=False is not supported on gfx1250")
+
+    # The KernelWriterConversion / KernelWriterBetaOnly helpers hard-code
+    # stride0 == 1 and assert on UseInitialStridesCD. See AIHPBLAS-4390.
+    if state["ProblemType"].get("UseInitialStridesCD", False) and tuple(state["ISA"])[:2] == (12, 5):
+      reject(state, printRejectionReason, "UseInitialStridesCD=True is not supported on gfx1250")
+
+    # UseInitialStridesAB needs len(IndexAssignments) strides (e.g. 3) per A/B,
+    # but rocisa's kernarg loader has no 3-dword form and DeviceUserArguments
+    # holds only two strides per tensor.
+    if state["ProblemType"].get("UseInitialStridesAB", False) and tuple(state["ISA"])[:2] == (12, 5):
+      reject(state, printRejectionReason, "UseInitialStridesAB=True is not supported on gfx1250")
+
     ### ---> This is where we previously called matrixInstructionToMIParameters
 
     EnableMatrixInstruction = state["EnableMatrixInstruction"] if "EnableMatrixInstruction" in state else None
@@ -2701,7 +2729,7 @@ class Solution(collections.abc.Mapping):
          and state["_ScheduleIterAlg"] == 3:
         reject(state, printRejectionReason, "Complex WMMA de-interleave does not support ScheduleIterAlg=3")
         return
-      if state["InterleaveAlpha"]:
+      if state["InterleaveAlpha"] == 1:
         reject(state, printRejectionReason, "Matrix instruction doesn't support InterleaveAlpha")
         return
       if state["ProblemType"]["DataType"].isInt8():
@@ -3735,7 +3763,7 @@ class Solution(collections.abc.Mapping):
         "ScheduleGlobalRead": state["ScheduleGlobalRead"] == 1,
         "ScheduleLocalWrite": state["ScheduleLocalWrite"] == 1,
         "GlobalReadPerMfma": state["GlobalReadPerMfma"] == 1,
-        "InterleaveAlpha": not state["InterleaveAlpha"],
+        "InterleaveAlpha": state["InterleaveAlpha"] != 1,
         "DirectToLds": not state["DirectToLds"],
         "UseSgprForGRO": state["UseSgprForGRO"] == -1,
         "UseInstOffsetForGRO": not state["UseInstOffsetForGRO"],
