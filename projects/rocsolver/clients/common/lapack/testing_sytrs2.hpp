@@ -226,26 +226,6 @@ void sytrs2_initData(const rocblas_handle handle,
             cpu_sytrf(uplo, n, hA[b], lda, hIpiv_cpu[b], work.data(), lwork, &info);
             assert(info == 0);
 
-#ifdef NDEBUG
-#else
-            bool constexpr show_num_of_1x1_pivots = false;
-            if constexpr(show_num_of_1x1_pivots)
-            {
-                auto ipiv = hIpiv_cpu[b];
-                int num_1x1 = 0;
-                for(int i = 0; i < n; i++)
-                {
-                    if(ipiv[i] > 0)
-                    {
-                        num_1x1 += 1;
-                    }
-                }
-                int num_2x2 = (n - num_1x1) / 2;
-                std::cout << "b = " << b << " n = " << n << " num_1x1 = " << num_1x1
-                          << " num_2x2 = " << num_2x2 << "\n";
-            }
-#endif
-
             for(I i = 0; i < n; i++)
             {
                 hIpiv[b][i] = hIpiv_cpu[b][i];
