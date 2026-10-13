@@ -265,6 +265,12 @@ def _disableUnsupportedRuntimeStaggerU(state):
   # StaggerU path off too (KernelWriter already gates staggerUCode off for clusters).
   if state.get("ClusterDim", [1, 1]) != [1, 1]:
     _disableRuntimeStaggerU(state)
+  # Single-wave sparse TDM StreamK: one wave keeps separate A, B and metadata TDM
+  # descriptors, leaving no SGPRs for the stagger state (KernelWriter gates
+  # staggerUCode off for it too).
+  if state.get("enableTDMMetadata") and state["NumThreads"] <= state["WavefrontSize"] \
+     and isStreamK(state):
+    _disableRuntimeStaggerU(state)
   # ReuseAcrossPersistent holds A across every tile the persistent workgroup
   # visits, so the summation start has to be the same for all of them. Mappings 1
   # and 3 take it from wg1 and 4 moves it every tile, which leaves A at the fill

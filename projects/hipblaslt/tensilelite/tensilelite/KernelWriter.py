@@ -7422,11 +7422,15 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     # MX PAP on the canonical buffer-load path cannot afford the borrowed
     # stagger-state checkpoint. Current MX PAP configs use StaggerU=0 here.
     disableStaggerForMxPap = kernel["PrefetchAcrossPersistent"] and hasMx and not (usesTDM or usesDTL)
+    singleWaveSparseTdmStreamK = kernel["NumThreads"] <= kernel["WavefrontSize"] \
+      and kernel["enableTDMMetadata"] and isStreamK(kernel)
     # remove staggerU code for the following cases
     # - tailloopInNll (cannot support staggerU)
     # - StreamK + MX (not enough sgpr. gfx950 only for now)
     # - BufferLoad=0 (stagger uses SRD increment which only exists in buffer mode)
     # - MX PAP without TDM/DTL (not enough sgpr)
+    # - single-wave sparse TDM StreamK (not enough sgpr: one wave keeps separate
+    #   A, B and metadata TDM descriptors)
     # - workgroup cluster: staggerU offsets each WG's K start so WGs sharing the
     #   same B never request the same address at the same time, which defeats
     #   cross-WG multicast. Disable stagger so K phases stay aligned.
@@ -7436,6 +7440,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
        (isPersistent(kernel) and \
         hasMx and isgfx950) or \
        disableStaggerForMxPap or \
+       singleWaveSparseTdmStreamK or \
        kernel["UseSubtileImpl"] or \
        clusterEnabled(kernel["ClusterDim"]):
       self.states.staggerUCode = False
