@@ -3568,8 +3568,9 @@ static const rocke_mma_op_t k_mma_gfx1250[] = {
  *
  * Field order of rocke_arch_target_t:
  *   gfx, family, target_family, wave_size, lds_capacity_bytes, vmcnt_bits,
- *   mma{ops,num_ops},
- *   memory{has_async_lds,has_ds_read_tr,buffer_load_max_dwords,async_lds_max_dwords},
+ *   mma{ops,num_ops}, memory{has_async_lds,has_async_global_lds,has_ds_read_tr,has_tdm,
+ *   buffer_load_max_dwords,async_lds_max_dwords,has_scalar_data_prefetch,
+ *   has_global_prefetch,has_cluster_launch,has_multicast_load},
  *   limits{max_threads_per_block,vgprs,agprs,sgprs}
  */
 
@@ -3583,7 +3584,7 @@ static const rocke_arch_target_t k_target_gfx90a = {
     65536,
     4,
     {k_mma_gfx90a, K_NUM(k_mma_gfx90a)},
-    {false, false, 4, 0},
+    {false, false, false, false, 4, 0, false, false, false, false},
     {1024, 512, 256, 102},
 };
 
@@ -3595,7 +3596,7 @@ static const rocke_arch_target_t k_target_gfx942 = {
     65536,
     4,
     {k_mma_gfx942, K_NUM(k_mma_gfx942)},
-    {true, false, 4, 1},
+    {true, true, false, false, 4, 1, false, false, false, false},
     {1024, 512, 256, 102},
 };
 
@@ -3607,7 +3608,7 @@ static const rocke_arch_target_t k_target_gfx950 = {
     163840,
     6,
     {k_mma_gfx950, K_NUM(k_mma_gfx950)},
-    {true, true, 4, 4},
+    {true, true, true, false, 4, 4, false, false, false, false},
     {1024, 512, 256, 102},
 };
 
@@ -3619,7 +3620,7 @@ static const rocke_arch_target_t k_target_gfx1151 = {
     65536,
     6,
     {k_mma_gfx1151, K_NUM(k_mma_gfx1151)},
-    {false, false, 4, 0},
+    {false, false, false, false, 4, 0, false, false, false, false},
     {1024, 256, 0, 106},
 };
 
@@ -3631,7 +3632,7 @@ static const rocke_arch_target_t k_target_gfx1201 = {
     65536,
     6,
     {k_mma_gfx1201, K_NUM(k_mma_gfx1201)},
-    {false, false, 4, 0},
+    {false, false, false, false, 4, 0, false, false, false, false},
     {1024, 256, 0, 106},
 };
 
@@ -3643,7 +3644,7 @@ static const rocke_arch_target_t k_target_gfx1250 = {
     163840,
     6,
     {k_mma_gfx1250, K_NUM(k_mma_gfx1250)},
-    {false, false, 4, 0},
+    {false, true, false, true, 4, 0, true, true, true, true},
     {1024, 256, 0, 106},
 };
 
@@ -3655,7 +3656,7 @@ static const rocke_arch_target_t k_target_gfx11_generic = {
     65536,
     6,
     {k_mma_gfx11_generic, K_NUM(k_mma_gfx11_generic)},
-    {false, false, 4, 0},
+    {false, false, false, false, 4, 0, false, false, false, false},
     {1024, 256, 0, 106},
 };
 
