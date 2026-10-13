@@ -951,7 +951,7 @@ if(TENSILELITE_ENABLE_HOST)
         endif()
 
         rocm_package_add_rpm_dependencies(COMPONENT runtime
-            DEPENDS "${_tensilelite_runtime_package}")
+            DEPENDS "${_tensilelite_runtime_package} >= ${_tensilelite_package_version}")
 
         if(CPACK_DEBIAN_PACKAGE_DEPENDS)
             rocm_package_add_deb_dependencies(COMPONENT runtime

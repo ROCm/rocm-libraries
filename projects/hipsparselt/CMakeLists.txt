@@ -259,10 +259,38 @@ endif()
 
 if(_hipsparselt_requires_hipblaslt)
     if(BUILD_SHARED_LIBS)
-        rocm_package_add_dependencies(
-            COMPONENT runtime
-            DEPENDS tensilelite-host
-        )
+        rocm_get_patch_version(_tensilelite_patch_version)
+        if(tensilelite_VERSION)
+            set(_tensilelite_package_version "${tensilelite_VERSION}")
+        else()
+            set(_tensilelite_package_version "${TENSILELITE_PROJECT_VERSION}")
+        endif()
+        if(_tensilelite_patch_version)
+            string(APPEND _tensilelite_package_version ".${_tensilelite_patch_version}")
+        endif()
+
+        if(CPACK_RPM_PACKAGE_REQUIRES)
+            rocm_package_add_rpm_dependencies(COMPONENT runtime
+                DEPENDS "${CPACK_RPM_PACKAGE_REQUIRES}")
+        endif()
+        if(ROCM_DEP_ROCMCORE)
+            rocm_package_add_rpm_dependencies(COMPONENT runtime DEPENDS "rocm-core")
+        endif()
+        rocm_package_add_rpm_dependencies(COMPONENT runtime
+            DEPENDS "tensilelite-host >= ${_tensilelite_package_version}")
+
+        if(CPACK_DEBIAN_PACKAGE_DEPENDS)
+            rocm_package_add_deb_dependencies(COMPONENT runtime
+                DEPENDS "${CPACK_DEBIAN_PACKAGE_DEPENDS}")
+        endif()
+        if(ROCM_DEP_ROCMCORE)
+            rocm_package_add_deb_dependencies(COMPONENT runtime DEPENDS "rocm-core")
+        endif()
+        rocm_package_add_deb_dependencies(COMPONENT runtime
+            DEPENDS "tensilelite-host >= ${_tensilelite_package_version}")
+
+        unset(_tensilelite_package_version)
+        unset(_tensilelite_patch_version)
         rocm_package_add_deb_dependencies(
             COMPONENT devel
             DEPENDS hipblaslt-dev
