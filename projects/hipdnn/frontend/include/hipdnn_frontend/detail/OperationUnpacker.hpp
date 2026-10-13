@@ -19,6 +19,8 @@
 #include <hipdnn_frontend/node/ConvolutionFpropNode.hpp>
 #include <hipdnn_frontend/node/ConvolutionWgradNode.hpp>
 #include <hipdnn_frontend/node/CustomOpNode.hpp>
+#include <hipdnn_frontend/node/GdnNode.hpp>
+#include <hipdnn_frontend/node/KdaNode.hpp>
 #include <hipdnn_frontend/node/LayerNormNode.hpp>
 #include <hipdnn_frontend/node/LayernormBackwardNode.hpp>
 #include <hipdnn_frontend/node/MatmulNode.hpp>
@@ -121,6 +123,10 @@ namespace hipdnn_frontend::detail
         return {std::make_shared<graph::MoeGroupedMatmulBwdNode>(
                     graph::MoeGroupedMatmulBwdAttributes{}, graphAttrs),
                 {}};
+    case HIPDNN_OPERATION_TYPE_GDN_EXT:
+        return {std::make_shared<graph::GdnNode>(graph::GdnAttributes{}, graphAttrs), {}};
+    case HIPDNN_OPERATION_TYPE_KDA_EXT:
+        return {std::make_shared<graph::KdaNode>(graph::KdaAttributes{}, graphAttrs), {}};
     case HIPDNN_OPERATION_TYPE_MOE_GROUPED_MATMUL_EXT:
         return {std::make_shared<graph::MoeGroupedMatmulNode>(graph::MoeGroupedMatmulAttributes{},
                                                               graphAttrs),

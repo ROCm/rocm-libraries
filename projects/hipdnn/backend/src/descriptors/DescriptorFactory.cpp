@@ -17,8 +17,10 @@
 #include "EngineDescriptor.hpp"
 #include "EngineHeuristicDescriptor.hpp"
 #include "ExecutionPlanDescriptor.hpp"
+#include "GdnOperationDescriptor.hpp"
 #include "GraphDescriptor.hpp"
 #include "HipdnnException.hpp"
+#include "KdaOperationDescriptor.hpp"
 #include "KnobDescriptor.hpp"
 #include "KnobSettingDescriptor.hpp"
 #include "LayernormBackwardOperationDescriptor.hpp"
@@ -117,6 +119,12 @@ void DescriptorFactory::create(hipdnnBackendDescriptorType_t descriptorType,
         break;
     case HIPDNN_BACKEND_OPERATION_MOE_GROUPED_MATMUL_BWD_DESCRIPTOR:
         privateDesc = std::make_shared<MoeGroupedMatmulBwdOperationDescriptor>();
+        break;
+    case HIPDNN_BACKEND_OPERATION_GDN_DESCRIPTOR_EXT:
+        privateDesc = std::make_shared<GdnOperationDescriptor>();
+        break;
+    case HIPDNN_BACKEND_OPERATION_KDA_DESCRIPTOR_EXT:
+        privateDesc = std::make_shared<KdaOperationDescriptor>();
         break;
     case HIPDNN_BACKEND_OPERATION_RMSNORM_DESCRIPTOR_EXT:
         privateDesc = std::make_shared<RMSNormOperationDescriptor>();

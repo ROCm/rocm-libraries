@@ -117,6 +117,9 @@ typedef enum
     /** @brief MoE grouped matmul mode enumeration (hipdnnMoeGroupedMatmulMode_t) */
     HIPDNN_TYPE_MOE_GROUPED_MATMUL_MODE = 31,
 
+    /** @brief Linear-attention gate domain enumeration (hipdnnGateDomain_t) */
+    HIPDNN_TYPE_GATE_DOMAIN_EXT = 32,
+
     /**
      * @name Extension Types
      * hipDNN-specific extension types

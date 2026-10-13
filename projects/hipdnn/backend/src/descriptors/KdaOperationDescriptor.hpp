@@ -1,0 +1,139 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+#pragma once
+
+#include "BackendDescriptor.hpp"
+#include "IGraphOperation.hpp"
+#include "TensorDescriptor.hpp"
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/kda_attributes_generated.h>
+#include <unordered_map>
+
+namespace hipdnn_backend
+{
+
+class KdaOperationDescriptor : public HipdnnBackendDescriptorImpl<KdaOperationDescriptor>,
+                               public IGraphOperation
+{
+public:
+    void finalize() override;
+
+    void getAttribute(hipdnnBackendAttributeName_t attributeName,
+                      hipdnnBackendAttributeType_t attributeType,
+                      int64_t requestedElementCount,
+                      int64_t* elementCount,
+                      void* arrayOfElements) const override;
+
+    void setAttribute(hipdnnBackendAttributeName_t attributeName,
+                      hipdnnBackendAttributeType_t attributeType,
+                      int64_t elementCount,
+                      const void* arrayOfElements) override;
+
+    // Direct access to the underlying T struct for OperationGraphBuilder
+    const hipdnn_flatbuffers_sdk::data_objects::KdaAttributesT& getData() const
+    {
+        return _data;
+    }
+
+    // Access to tensor descriptor references for graph building
+    std::shared_ptr<TensorDescriptor> getQDesc() const
+    {
+        return _qDesc;
+    }
+    std::shared_ptr<TensorDescriptor> getKDesc() const
+    {
+        return _kDesc;
+    }
+    std::shared_ptr<TensorDescriptor> getVDesc() const
+    {
+        return _vDesc;
+    }
+    std::shared_ptr<TensorDescriptor> getGDesc() const
+    {
+        return _gDesc;
+    }
+    std::shared_ptr<TensorDescriptor> getBetaDesc() const
+    {
+        return _betaDesc;
+    }
+    std::shared_ptr<TensorDescriptor> getCuSeqlensDesc() const
+    {
+        return _cuSeqlensDesc;
+    }
+    std::shared_ptr<TensorDescriptor> getInitialStateDesc() const
+    {
+        return _initialStateDesc;
+    }
+    std::shared_ptr<TensorDescriptor> getALogDesc() const
+    {
+        return _aLogDesc;
+    }
+    std::shared_ptr<TensorDescriptor> getDtBiasDesc() const
+    {
+        return _dtBiasDesc;
+    }
+    std::shared_ptr<TensorDescriptor> getStateIndicesDesc() const
+    {
+        return _stateIndicesDesc;
+    }
+    std::shared_ptr<TensorDescriptor> getODesc() const
+    {
+        return _oDesc;
+    }
+    std::shared_ptr<TensorDescriptor> getFinalStateDesc() const
+    {
+        return _finalStateDesc;
+    }
+    std::shared_ptr<TensorDescriptor> getStateCheckpointsDesc() const
+    {
+        return _stateCheckpointsDesc;
+    }
+
+    // Get compute data type for the operation (used when building graph nodes)
+    hipdnn_flatbuffers_sdk::data_objects::DataType getComputeDataType() const
+    {
+        return _computeDataType;
+    }
+
+    // IGraphOperation interface
+    std::vector<std::shared_ptr<TensorDescriptor>> getTensorDescriptors() const override;
+    std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::NodeT> buildNode() const override;
+
+    // Creates a finalized KdaOperationDescriptor directly from a FlatBuffer NodeT.
+    // Casts nodeT.attributes to KdaAttributes internally, then directly assigns
+    // the data struct, looks up tensor descriptors from the tensor map, and calls finalize().
+    static std::shared_ptr<KdaOperationDescriptor>
+        fromNode(const hipdnn_flatbuffers_sdk::data_objects::NodeT& nodeT,
+                 const std::unordered_map<int64_t, std::shared_ptr<TensorDescriptor>>& tensorMap);
+
+    static hipdnnBackendDescriptorType_t getStaticType();
+
+    std::string toString() const override;
+
+private:
+    hipdnn_flatbuffers_sdk::data_objects::KdaAttributesT _data;
+
+    // Store tensor descriptor references for validation and graph building
+    std::shared_ptr<TensorDescriptor> _qDesc;
+    std::shared_ptr<TensorDescriptor> _kDesc;
+    std::shared_ptr<TensorDescriptor> _vDesc;
+    std::shared_ptr<TensorDescriptor> _gDesc;
+    std::shared_ptr<TensorDescriptor> _betaDesc;
+    std::shared_ptr<TensorDescriptor> _cuSeqlensDesc;
+    std::shared_ptr<TensorDescriptor> _initialStateDesc;
+    std::shared_ptr<TensorDescriptor> _aLogDesc;
+    std::shared_ptr<TensorDescriptor> _dtBiasDesc;
+    std::shared_ptr<TensorDescriptor> _stateIndicesDesc;
+    std::shared_ptr<TensorDescriptor> _oDesc;
+    std::shared_ptr<TensorDescriptor> _finalStateDesc;
+    std::shared_ptr<TensorDescriptor> _stateCheckpointsDesc;
+
+    // Compute data type for this operation (stored at node level in graph)
+    hipdnn_flatbuffers_sdk::data_objects::DataType _computeDataType
+        = hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET;
+
+    std::string _name;
+};
+
+} // namespace hipdnn_backend

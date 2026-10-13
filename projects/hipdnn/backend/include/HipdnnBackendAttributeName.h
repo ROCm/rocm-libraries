@@ -1407,6 +1407,169 @@ typedef enum
     /** @} */
 
     /**
+     * @name Gated DeltaNet (GDN) Operation Attributes (3900-3999)
+     * Attributes for HIPDNN_BACKEND_OPERATION_GDN_DESCRIPTOR_EXT
+     * @{
+     */
+
+    /** @brief Query tensor */
+    HIPDNN_ATTR_OPERATION_GDN_Q_DESC_EXT = 3900,
+
+    /** @brief Key tensor */
+    HIPDNN_ATTR_OPERATION_GDN_K_DESC_EXT = 3901,
+
+    /** @brief Value tensor */
+    HIPDNN_ATTR_OPERATION_GDN_V_DESC_EXT = 3902,
+
+    /** @brief Gate (decay) tensor */
+    HIPDNN_ATTR_OPERATION_GDN_G_DESC_EXT = 3903,
+
+    /** @brief Write-strength (beta) tensor */
+    HIPDNN_ATTR_OPERATION_GDN_BETA_DESC_EXT = 3904,
+
+    /** @brief Cumulative sequence-length tensor (optional; token-packed layout) */
+    HIPDNN_ATTR_OPERATION_GDN_CU_SEQLENS_DESC_EXT = 3905,
+
+    /** @brief Initial recurrent state tensor (optional) */
+    HIPDNN_ATTR_OPERATION_GDN_INITIAL_STATE_DESC_EXT = 3906,
+
+    /** @brief Safe-gate log-amplitude tensor (optional) */
+    HIPDNN_ATTR_OPERATION_GDN_A_LOG_DESC_EXT = 3907,
+
+    /** @brief Safe-gate bias tensor (optional) */
+    HIPDNN_ATTR_OPERATION_GDN_DT_BIAS_DESC_EXT = 3908,
+
+    /** @brief State pool row index tensor (optional) */
+    HIPDNN_ATTR_OPERATION_GDN_STATE_INDICES_DESC_EXT = 3909,
+
+    /** @brief Output tensor */
+    HIPDNN_ATTR_OPERATION_GDN_O_DESC_EXT = 3910,
+
+    /** @brief Final recurrent state tensor (optional) */
+    HIPDNN_ATTR_OPERATION_GDN_FINAL_STATE_DESC_EXT = 3911,
+
+    /** @brief Recurrent state checkpoint tensor (optional) */
+    HIPDNN_ATTR_OPERATION_GDN_STATE_CHECKPOINTS_DESC_EXT = 3912,
+
+    /** @brief Query scale (optional; absent means 1/sqrt(K)) */
+    HIPDNN_ATTR_OPERATION_GDN_SCALE_EXT = 3913,
+
+    /** @brief Emit the final recurrent state */
+    HIPDNN_ATTR_OPERATION_GDN_OUTPUT_FINAL_STATE_EXT = 3914,
+
+    /** @brief L2-normalize query and key rows */
+    HIPDNN_ATTR_OPERATION_GDN_USE_QK_L2NORM_EXT = 3915,
+
+    /** @brief Recurrent state checkpoint interval in tokens (0 disables) */
+    HIPDNN_ATTR_OPERATION_GDN_CHECKPOINT_EVERY_N_TOKENS_EXT = 3916,
+
+    /** @brief Apply sigmoid to beta in the kernel */
+    HIPDNN_ATTR_OPERATION_GDN_USE_BETA_SIGMOID_EXT = 3917,
+
+    /** @brief Scale the beta sigmoid by 2 */
+    HIPDNN_ATTR_OPERATION_GDN_ALLOW_NEG_EIGVAL_EXT = 3918,
+
+    /** @brief Interpret g as raw gate logits (safe-gate transform) */
+    HIPDNN_ATTR_OPERATION_GDN_SAFE_GATE_EXT = 3919,
+
+    /** @brief Encoding of g (hipdnnGateDomain_t) */
+    HIPDNN_ATTR_OPERATION_GDN_GATE_DOMAIN_EXT = 3920,
+
+    /** @brief Make results independent of batch composition */
+    HIPDNN_ATTR_OPERATION_GDN_BATCH_INVARIANT_EXT = 3921,
+
+    /** @brief Write the final state into the initial state buffer */
+    HIPDNN_ATTR_OPERATION_GDN_OVERWRITE_INITIAL_STATE_EXT = 3922,
+
+    /** @brief Compute data type */
+    HIPDNN_ATTR_OPERATION_GDN_COMP_TYPE_EXT = 3923,
+
+    /** @} */
+
+    /**
+     * @name Kimi Delta Attention (KDA) Operation Attributes (4000-4099)
+     * Attributes for HIPDNN_BACKEND_OPERATION_KDA_DESCRIPTOR_EXT
+     * @{
+     */
+
+    /** @brief Query tensor */
+    HIPDNN_ATTR_OPERATION_KDA_Q_DESC_EXT = 4000,
+
+    /** @brief Key tensor */
+    HIPDNN_ATTR_OPERATION_KDA_K_DESC_EXT = 4001,
+
+    /** @brief Value tensor */
+    HIPDNN_ATTR_OPERATION_KDA_V_DESC_EXT = 4002,
+
+    /** @brief Gate (decay) tensor */
+    HIPDNN_ATTR_OPERATION_KDA_G_DESC_EXT = 4003,
+
+    /** @brief Write-strength (beta) tensor */
+    HIPDNN_ATTR_OPERATION_KDA_BETA_DESC_EXT = 4004,
+
+    /** @brief Cumulative sequence-length tensor (optional; token-packed layout) */
+    HIPDNN_ATTR_OPERATION_KDA_CU_SEQLENS_DESC_EXT = 4005,
+
+    /** @brief Initial recurrent state tensor (optional) */
+    HIPDNN_ATTR_OPERATION_KDA_INITIAL_STATE_DESC_EXT = 4006,
+
+    /** @brief Safe-gate log-amplitude tensor (optional) */
+    HIPDNN_ATTR_OPERATION_KDA_A_LOG_DESC_EXT = 4007,
+
+    /** @brief Safe-gate bias tensor (optional) */
+    HIPDNN_ATTR_OPERATION_KDA_DT_BIAS_DESC_EXT = 4008,
+
+    /** @brief State pool row index tensor (optional) */
+    HIPDNN_ATTR_OPERATION_KDA_STATE_INDICES_DESC_EXT = 4009,
+
+    /** @brief Output tensor */
+    HIPDNN_ATTR_OPERATION_KDA_O_DESC_EXT = 4010,
+
+    /** @brief Final recurrent state tensor (optional) */
+    HIPDNN_ATTR_OPERATION_KDA_FINAL_STATE_DESC_EXT = 4011,
+
+    /** @brief Recurrent state checkpoint tensor (optional) */
+    HIPDNN_ATTR_OPERATION_KDA_STATE_CHECKPOINTS_DESC_EXT = 4012,
+
+    /** @brief Query scale (optional; absent means 1/sqrt(K)) */
+    HIPDNN_ATTR_OPERATION_KDA_SCALE_EXT = 4013,
+
+    /** @brief Emit the final recurrent state */
+    HIPDNN_ATTR_OPERATION_KDA_OUTPUT_FINAL_STATE_EXT = 4014,
+
+    /** @brief L2-normalize query and key rows */
+    HIPDNN_ATTR_OPERATION_KDA_USE_QK_L2NORM_EXT = 4015,
+
+    /** @brief Recurrent state checkpoint interval in tokens (0 disables) */
+    HIPDNN_ATTR_OPERATION_KDA_CHECKPOINT_EVERY_N_TOKENS_EXT = 4016,
+
+    /** @brief Apply sigmoid to beta in the kernel */
+    HIPDNN_ATTR_OPERATION_KDA_USE_BETA_SIGMOID_EXT = 4017,
+
+    /** @brief Scale the beta sigmoid by 2 */
+    HIPDNN_ATTR_OPERATION_KDA_ALLOW_NEG_EIGVAL_EXT = 4018,
+
+    /** @brief Interpret g as raw gate logits (safe-gate transform) */
+    HIPDNN_ATTR_OPERATION_KDA_SAFE_GATE_EXT = 4019,
+
+    /** @brief Encoding of g (hipdnnGateDomain_t) */
+    HIPDNN_ATTR_OPERATION_KDA_GATE_DOMAIN_EXT = 4020,
+
+    /** @brief Safe-gate lower bound in log space (optional) */
+    HIPDNN_ATTR_OPERATION_KDA_GATE_LOWER_BOUND_EXT = 4021,
+
+    /** @brief Make results independent of batch composition */
+    HIPDNN_ATTR_OPERATION_KDA_BATCH_INVARIANT_EXT = 4022,
+
+    /** @brief Write the final state into the initial state buffer */
+    HIPDNN_ATTR_OPERATION_KDA_OVERWRITE_INITIAL_STATE_EXT = 4023,
+
+    /** @brief Compute data type */
+    HIPDNN_ATTR_OPERATION_KDA_COMP_TYPE_EXT = 4024,
+
+    /** @} */
+
+    /**
      * @name Extension Attributes (60000+)
      * hipDNN-specific extension attributes
      * @{

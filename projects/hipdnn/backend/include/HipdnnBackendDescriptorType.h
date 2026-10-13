@@ -349,4 +349,20 @@ typedef enum
      */
     HIPDNN_BACKEND_OPERATION_MOE_GROUPED_MATMUL_BWD_DESCRIPTOR = 38,
 
+    /**
+     * @brief Gated DeltaNet (GDN) forward operation descriptor (extension)
+     *
+     * Linear attention with a gated delta-rule recurrent state and one decay per
+     * token and head. Mirrors the cudnn-frontend Python op graph.gdn.
+     */
+    HIPDNN_BACKEND_OPERATION_GDN_DESCRIPTOR_EXT = 39,
+
+    /**
+     * @brief Kimi Delta Attention (KDA) forward operation descriptor (extension)
+     *
+     * Linear attention with a gated delta-rule recurrent state and one decay per
+     * token, head and key channel. Mirrors the cudnn-frontend Python op graph.kda.
+     */
+    HIPDNN_BACKEND_OPERATION_KDA_DESCRIPTOR_EXT = 40,
+
 } hipdnnBackendDescriptorType_t;

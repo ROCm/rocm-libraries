@@ -941,4 +941,48 @@ void getMoeGroupedMatmulMode(hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMat
         *elementCount = 1;
     }
 }
+
+void setGateDomain(hipdnn_flatbuffers_sdk::data_objects::GateDomain& target,
+                   hipdnnBackendAttributeType_t attributeType,
+                   int64_t elementCount,
+                   const void* arrayOfElements,
+                   const char* errorPrefix)
+{
+    checkSetArgs(HIPDNN_TYPE_GATE_DOMAIN_EXT, attributeType, arrayOfElements, errorPrefix);
+    THROW_IF_FALSE(elementCount == 1,
+                   HIPDNN_STATUS_BAD_PARAM,
+                   std::string(errorPrefix) + ": elementCount is not 1");
+    hipdnnGateDomain_t tmp;
+    std::memcpy(&tmp, arrayOfElements, sizeof(tmp));
+    target = toSdkGateDomain(tmp);
+}
+
+void getGateDomain(hipdnn_flatbuffers_sdk::data_objects::GateDomain source,
+                   hipdnnBackendAttributeType_t attributeType,
+                   int64_t requestedElementCount,
+                   int64_t* elementCount,
+                   void* arrayOfElements,
+                   const char* errorPrefix)
+{
+    checkGetArgs(HIPDNN_TYPE_GATE_DOMAIN_EXT, attributeType, errorPrefix);
+
+    if(arrayOfElements == nullptr || requestedElementCount == 0)
+    {
+        THROW_IF_NULL(elementCount,
+                      HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
+                      std::string(errorPrefix) + ": elementCount is null");
+        *elementCount = 1;
+        return;
+    }
+
+    THROW_IF_FALSE(requestedElementCount >= 1,
+                   HIPDNN_STATUS_BAD_PARAM,
+                   std::string(errorPrefix) + ": requestedElementCount < 1");
+    auto tmp = fromSdkGateDomain(source);
+    std::memcpy(arrayOfElements, &tmp, sizeof(tmp));
+    if(elementCount != nullptr)
+    {
+        *elementCount = 1;
+    }
+}
 } // namespace hipdnn_backend

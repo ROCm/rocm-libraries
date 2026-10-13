@@ -696,6 +696,42 @@ void graphBindings(nb::module_& m)
                                std::shared_ptr<graph::TensorAttributes>,
                                graph::ReductionAttributes>(&graph::Graph::reduction))
         .def("moe_grouped_matmul", &graph::Graph::moe_grouped_matmul)
+        .def("gdn_ext",
+             [](graph::Graph& graph,
+                std::shared_ptr<graph::TensorAttributes> q,
+                std::shared_ptr<graph::TensorAttributes> k,
+                std::shared_ptr<graph::TensorAttributes> v,
+                std::shared_ptr<graph::TensorAttributes> g,
+                std::shared_ptr<graph::TensorAttributes> beta,
+                std::shared_ptr<graph::TensorAttributes> cuSeqlens,
+                graph::GdnAttributes attributes) {
+                 const auto outputs = graph.gdn_ext(std::move(q),
+                                                    std::move(k),
+                                                    std::move(v),
+                                                    std::move(g),
+                                                    std::move(beta),
+                                                    std::move(cuSeqlens),
+                                                    std::move(attributes));
+                 return nb::make_tuple(outputs[0], outputs[1], outputs[2]);
+             })
+        .def("kda_ext",
+             [](graph::Graph& graph,
+                std::shared_ptr<graph::TensorAttributes> q,
+                std::shared_ptr<graph::TensorAttributes> k,
+                std::shared_ptr<graph::TensorAttributes> v,
+                std::shared_ptr<graph::TensorAttributes> g,
+                std::shared_ptr<graph::TensorAttributes> beta,
+                std::shared_ptr<graph::TensorAttributes> cuSeqlens,
+                graph::KdaAttributes attributes) {
+                 const auto outputs = graph.kda_ext(std::move(q),
+                                                    std::move(k),
+                                                    std::move(v),
+                                                    std::move(g),
+                                                    std::move(beta),
+                                                    std::move(cuSeqlens),
+                                                    std::move(attributes));
+                 return nb::make_tuple(outputs[0], outputs[1], outputs[2]);
+             })
         .def("custom_op", &graph::Graph::custom_op)
 #ifdef HIPDNN_ENABLE_SDPA
         .def("sdpa",
