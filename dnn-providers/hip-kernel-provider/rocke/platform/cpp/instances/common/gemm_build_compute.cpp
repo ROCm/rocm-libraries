@@ -80,7 +80,8 @@ void rocke_gemm_emit_mfma_phase(rocke_gemm_build_ctx_t* ctx,
 
     if(ctx->is_wmma)
     {
-        rocke_gemm_emit_wmma_phase(ctx, A_src, B_src, iter_vars, num_iter_vars, out_accs);
+        rocke_gemm_emit_wmma_phase(
+            ctx, A_src, B_src, iter_vars, num_iter_vars, parity_imm, parity_v, out_accs);
         return;
     }
 

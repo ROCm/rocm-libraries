@@ -119,6 +119,28 @@ def main() -> int:
     p.add_argument("--pipeline", default="mem")
     p.add_argument("--epilogue", default="default")
     p.add_argument(
+        "--tdm",
+        action="store_true",
+        help="stage A/B with the gfx1250 tensor data mover instead of "
+        "direct-to-LDS (one descriptor per operand per K tile)",
+    )
+    p.add_argument(
+        "--tdm-depth",
+        type=int,
+        default=1,
+        choices=(1, 2, 3, 4),
+        help="TDM LDS buffers: 1 issues and waits per tile, 2 ping-pongs so "
+        "the next tile's transfer overlaps the current tile's WMMAs, and 3+ "
+        "runs a deeper ring with a partial wait",
+    )
+    p.add_argument(
+        "--lds-k-pad",
+        type=int,
+        default=0,
+        help="pad each A/B LDS row by this many elements (0 = unpadded). "
+        "Ignored by direct-to-LDS off gfx1250.",
+    )
+    p.add_argument(
         "--cshuffle-no-alias",
         action="store_true",
         help="give the cshuffle C tile its own LDS bytes (no A/B aliasing) and "
@@ -165,6 +187,9 @@ def main() -> int:
         pad_n=True,
         pad_k=True,
         cshuffle_no_alias=args.cshuffle_no_alias,
+        tdm=args.tdm,
+        tdm_depth=args.tdm_depth,
+        lds_k_pad=args.lds_k_pad,
     )
     data = DataSpec(
         dtype_a=args.dtype,

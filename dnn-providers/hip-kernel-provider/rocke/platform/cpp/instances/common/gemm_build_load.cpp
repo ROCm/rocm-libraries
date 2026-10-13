@@ -404,10 +404,12 @@ static void rocke_gemm_tdm_issue(rocke_gemm_build_ctx_t* ctx,
                                  rocke_value_t* ptr,
                                  rocke_value_t* row_off,
                                  int rows,
+                                 rocke_value_t* extent,
                                  rocke_value_t* lds_base,
                                  rocke_value_t* batch_off,
                                  rocke_value_t* k_off,
-                                 rocke_value_t* k_remaining)
+                                 rocke_value_t* k_remaining,
+                                 rocke_value_t* zero)
 {
     rocke_ir_builder_t* b = ctx->b;
     rocke_value_t* origin
@@ -419,7 +421,12 @@ static void rocke_gemm_tdm_issue(rocke_gemm_build_ctx_t* ctx,
     args.lds_addr = lds_base;
     args.elem_bytes = ctx->tdm_elem_bytes;
     args.tensor_dim0 = k_remaining;
-    args.tensor_dim1 = rocke_b_const_i32(b, rows);
+    /* The TENSOR's remaining extent from this tile's origin, not the tile
+     * height. The mover bounds its address generation on this, so a constant
+     * tile height describes a tensor ending `rows` past every origin -- wrong
+     * for every tile but the first. pad_m/pad_n are not consulted precisely
+     * because OOB is handled here, by clipping the extent. */
+    args.tensor_dim1 = rocke_b_smax(b, rocke_b_sub(b, extent, row_off), zero);
     args.tile_dim0 = ctx->block_k;
     args.tile_dim1 = rows;
     /* dim0_stride_value = K (runtime row pitch). Mirrors Python: dim0_stride=K. */
@@ -496,10 +503,12 @@ void rocke_gemm_emit_load_phase(rocke_gemm_build_ctx_t* ctx,
                                  ctx->A,
                                  ctx->block_m_off,
                                  ctx->block_m,
+                                 ctx->M,
                                  a_lds,
                                  ctx->batch_off_a,
                                  k_off,
-                                 k_remaining);
+                                 k_remaining,
+                                 zero);
             rocke_b_region_leave(b);
             rocke_value_t* one = rocke_b_const_i32(b, 1);
             rocke_if_t b_gate
@@ -509,10 +518,12 @@ void rocke_gemm_emit_load_phase(rocke_gemm_build_ctx_t* ctx,
                                  ctx->Bp,
                                  ctx->block_n_off,
                                  ctx->block_n,
+                                 ctx->N,
                                  b_lds,
                                  ctx->batch_off_b,
                                  k_off,
-                                 k_remaining);
+                                 k_remaining,
+                                 zero);
             rocke_b_region_leave(b);
         }
         else
@@ -521,18 +532,22 @@ void rocke_gemm_emit_load_phase(rocke_gemm_build_ctx_t* ctx,
                                  ctx->A,
                                  ctx->block_m_off,
                                  ctx->block_m,
+                                 ctx->M,
                                  a_lds,
                                  ctx->batch_off_a,
                                  k_off,
-                                 k_remaining);
+                                 k_remaining,
+                                 zero);
             rocke_gemm_tdm_issue(ctx,
                                  ctx->Bp,
                                  ctx->block_n_off,
                                  ctx->block_n,
+                                 ctx->N,
                                  b_lds,
                                  ctx->batch_off_b,
                                  k_off,
-                                 k_remaining);
+                                 k_remaining,
+                                 zero);
         }
         return;
     }
@@ -955,6 +970,8 @@ void rocke_gemm_emit_wmma_phase(rocke_gemm_build_ctx_t* ctx,
                                 rocke_value_t* B_src,
                                 rocke_value_t* const* iter_vars,
                                 int num_iter_vars,
+                                int parity_imm,
+                                rocke_value_t* parity_v,
                                 rocke_value_t** out_accs)
 {
     rocke_ir_builder_t* b = ctx->b;
@@ -978,6 +995,30 @@ void rocke_gemm_emit_wmma_phase(rocke_gemm_build_ctx_t* ctx,
     rocke_value_t* warp_n_off
         = rocke_b_mul(b, ctx->warp_n_idx, rocke_b_const_i32(b, ctx->mfmas_n * t->warp_tile_n));
 
+    /* The ring/ping-pong slot this K-tile was filled into. The load side already
+     * offsets its LDS destination by the parity; without the same shift here
+     * every WMMA reads slot 0 while the mover is filling another -- a read/write
+     * race, not a wrong-address bug. */
+    bool parity_is_value = parity_v != NULL;
+    rocke_value_t* a_par_row_v;
+    rocke_value_t* b_par_row_v;
+    int a_par_row_static;
+    int b_par_row_static;
+    if(ctx->prefetch && parity_is_value)
+    {
+        a_par_row_v = rocke_b_mul(b, parity_v, rocke_b_const_i32(b, ctx->block_m));
+        b_par_row_v = rocke_b_mul(b, parity_v, rocke_b_const_i32(b, ctx->block_n));
+        a_par_row_static = 0;
+        b_par_row_static = 0;
+    }
+    else
+    {
+        a_par_row_v = NULL;
+        b_par_row_v = NULL;
+        a_par_row_static = ctx->prefetch ? parity_imm * ctx->block_m : 0;
+        b_par_row_static = ctx->prefetch ? parity_imm * ctx->block_n : 0;
+    }
+
     /* new_accs = list(iter_vars) */
     for(int i = 0; i < ctx->num_accs; ++i)
         out_accs[i] = iter_vars[i];
@@ -991,15 +1032,19 @@ void rocke_gemm_emit_wmma_phase(rocke_gemm_build_ctx_t* ctx,
         rocke_value_t* k_tile_base = rocke_b_const_i32(b, kk * t->warp_tile_k);
         for(int mi = 0; mi < ctx->mfmas_m; ++mi)
         {
-            rocke_value_t* atom_row
-                = rocke_b_add(b, warp_m_off, rocke_b_const_i32(b, mi * t->warp_tile_m));
+            rocke_value_t* atom_row = rocke_b_add(
+                b, warp_m_off, rocke_b_const_i32(b, mi * t->warp_tile_m + a_par_row_static));
+            if(a_par_row_v != NULL)
+                atom_row = rocke_b_add(b, atom_row, a_par_row_v);
             a_rows[mi] = rocke_gemm_emit_frag_smem_load(
                 ctx, A_src, a_row_in_atom, a_k_in_atom, atom_row, k_tile_base, ctx->a_per_lane);
         }
         for(int ni = 0; ni < ctx->mfmas_n; ++ni)
         {
-            rocke_value_t* atom_row
-                = rocke_b_add(b, warp_n_off, rocke_b_const_i32(b, ni * t->warp_tile_n));
+            rocke_value_t* atom_row = rocke_b_add(
+                b, warp_n_off, rocke_b_const_i32(b, ni * t->warp_tile_n + b_par_row_static));
+            if(b_par_row_v != NULL)
+                atom_row = rocke_b_add(b, atom_row, b_par_row_v);
             b_cols[ni] = rocke_gemm_emit_frag_smem_load(
                 ctx, B_src, b_col_in_atom, b_k_in_atom, atom_row, k_tile_base, ctx->b_per_lane);
         }

@@ -1503,7 +1503,7 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
 
             k_remaining = b.smax(b.sub(K, k_off), zero)
 
-            def _issue(ptr, row_off, rows, lds_base, batch_off):
+            def _issue(ptr, row_off, rows, extent, lds_base, batch_off):
                 origin = b.add(batch_off, b.add(b.mul(row_off, K), k_off))
                 groups = build_tdm_descriptor_2d(
                     b,
@@ -1511,7 +1511,14 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                     lds_addr=lds_base,
                     elem_bytes=_tdm_elem_bytes,
                     tensor_dim0=k_remaining,
-                    tensor_dim1=b.const_i32(rows),
+                    # The TENSOR's remaining extent from this tile's origin, not
+                    # the tile height. The mover bounds its address generation on
+                    # this, so a constant tile height describes a tensor that ends
+                    # 64 rows past every origin -- wrong for every tile but the
+                    # first, and wrong everywhere rather than only at a ragged
+                    # edge. ``pad_m``/``pad_n`` are not consulted precisely
+                    # because OOB is handled here, by clipping the extent.
+                    tensor_dim1=b.smax(b.sub(extent, row_off), zero),
                     tile_dim0=block_k,
                     tile_dim1=rows,
                     dim0_stride=K,
@@ -1528,12 +1535,12 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
             # contents through the barrier in the drain.
             if _tdm_waves > 1:
                 with b.scf_if(b.cmp_eq(_tdm_wave_id, zero)):
-                    _issue(A, block_m_off, block_m, a_lds, batch_off_a)
+                    _issue(A, block_m_off, block_m, M, a_lds, batch_off_a)
                 with b.scf_if(b.cmp_eq(_tdm_wave_id, b.const_i32(1))):
-                    _issue(Bp, block_n_off, block_n, b_lds, batch_off_b)
+                    _issue(Bp, block_n_off, block_n, N, b_lds, batch_off_b)
             else:
-                _issue(A, block_m_off, block_m, a_lds, batch_off_a)
-                _issue(Bp, block_n_off, block_n, b_lds, batch_off_b)
+                _issue(A, block_m_off, block_m, M, a_lds, batch_off_a)
+                _issue(Bp, block_n_off, block_n, N, b_lds, batch_off_b)
             return
         if spec.trait.direct_to_lds:
             # For each pass, every lane copies one chunk of HALVES halves
@@ -1918,6 +1925,7 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         A_src: Value,
         B_src: Value,
         iter_vars: Sequence[Value],
+        lds_parity=0,
     ) -> List[Value]:
         """One K-tile of WMMA atoms, fully MMA-contract driven.
 
@@ -1938,12 +1946,33 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         b_k_in_atom, b_col_in_atom = b_map.coord(b, lane, 0)
         warp_m_off = b.mul(warp_m_idx, b.const_i32(mfmas_m * t.warp_tile_m))
         warp_n_off = b.mul(warp_n_idx, b.const_i32(mfmas_n * t.warp_tile_n))
+        # The ring/ping-pong slot this K-tile was filled into. The load side
+        # already offsets its LDS destination by the parity; without the same
+        # shift here every WMMA reads slot 0 while the mover is filling another,
+        # which is a read/write race rather than a wrong-address bug -- hence
+        # non-deterministic output that worsens with ring depth.
+        _parity_is_value = isinstance(lds_parity, Value)
+        if _prefetch and _parity_is_value:
+            a_par_row_v = b.mul(lds_parity, b.const_i32(block_m))
+            b_par_row_v = b.mul(lds_parity, b.const_i32(block_n))
+            a_par_row_static = 0
+            b_par_row_static = 0
+        else:
+            a_par_row_v = None
+            b_par_row_v = None
+            a_par_row_static = lds_parity * block_m if _prefetch else 0
+            b_par_row_static = lds_parity * block_n if _prefetch else 0
         new_accs: List[Value] = list(iter_vars)
         for kk in range(k_atoms):
             k_tile_base = b.const_i32(kk * t.warp_tile_k)
             a_rows = []
             for mi in range(mfmas_m):
-                atom_row = b.add(warp_m_off, b.const_i32(mi * t.warp_tile_m))
+                atom_row = b.add(
+                    warp_m_off,
+                    b.const_i32(mi * t.warp_tile_m + a_par_row_static),
+                )
+                if a_par_row_v is not None:
+                    atom_row = b.add(atom_row, a_par_row_v)
                 a_rows.append(
                     _emit_frag_smem_load(
                         A_src,
@@ -1956,7 +1985,12 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                 )
             b_cols = []
             for ni in range(mfmas_n):
-                atom_row = b.add(warp_n_off, b.const_i32(ni * t.warp_tile_n))
+                atom_row = b.add(
+                    warp_n_off,
+                    b.const_i32(ni * t.warp_tile_n + b_par_row_static),
+                )
+                if b_par_row_v is not None:
+                    atom_row = b.add(atom_row, b_par_row_v)
                 b_cols.append(
                     _emit_frag_smem_load(
                         B_src,
@@ -2019,7 +2053,7 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         runtime i32 Value.
         """
         if op.family == "wmma":
-            return _emit_wmma_phase(A_src, B_src, iter_vars)
+            return _emit_wmma_phase(A_src, B_src, iter_vars, lds_parity)
         _mp_is_val = isinstance(lds_parity, Value)
         if _prefetch or _db:
             if _mp_is_val:
