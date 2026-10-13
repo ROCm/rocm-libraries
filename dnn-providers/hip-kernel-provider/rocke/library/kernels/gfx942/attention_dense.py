@@ -733,7 +733,7 @@ def _tuning_name_tags(spec: "Gfx942AttentionDenseSpec") -> str:
     if cfvst != _default_use_cfvst(spec):
         parts.append("cfvst1" if cfvst else "cfvst0")
     swz = spec.resolved_use_v_swizzle()
-    if swz != (spec.resolved_use_cfvst() and _use_cfvst(spec.head_size, spec.dtype)):
+    if swz != spec.resolved_use_cfvst():
         parts.append("vswz1" if swz else "vswz0")
     e2f = spec.resolved_use_exp2_fast()
     if e2f != _use_exp2_fast(spec.head_size, spec.dtype, spec.persistent):
@@ -897,8 +897,11 @@ def _v_swizzle_width(block_n: int) -> int:
 
 
 def _use_v_swizzle(head_size: int, dtype: str) -> bool:
-    """Policy for the V^T bank-conflict swizzle: rides the :func:`_use_cfvst` gate,
-    since only the transposed-V (fp16-D128) store has a V_lds to swizzle."""
+    """Default V^T bank-conflict swizzle policy for FP16 D128.
+
+    Explicit BF16 D128 CFVST enables the swizzle through
+    Gfx942AttentionDenseSpec.resolved_use_v_swizzle().
+    """
     return _use_cfvst(head_size, dtype)
 
 
@@ -1198,7 +1201,7 @@ def supports_attention_dense(
             and not spec.causal_diag_split
         ):
             return False, (
-                "BF16 CFVST requires D128 standard causal attention "
+                "NOT_YET_IMPLEMENTED: BF16 CFVST requires D128 standard causal attention "
                 "without sliding_window or causal_diag_split"
             )
     # CFVST is supported for D128 (bf16 and fp16). D64 uses packed DMA rows
@@ -1230,7 +1233,7 @@ def supports_attention_dense(
         and not spec.causal_diag_split
     ):
         return False, (
-            "lds_num_buffers=2 requires bf16 D128 causal CFVST "
+            "NOT_YET_IMPLEMENTED: lds_num_buffers=2 requires bf16 D128 causal CFVST "
             "without sliding_window or causal_diag_split"
         )
     if spec.iglp_mode not in (0, 1):
