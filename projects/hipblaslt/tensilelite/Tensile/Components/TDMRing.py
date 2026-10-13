@@ -304,8 +304,9 @@ def tdmRingRejectReason(ks):
 
     Supported: PrefetchGlobalReadA/B of 1 or more each, 3 or more on at least one side, under
     ScheduleIterAlg 0, whose fences and waits the writer emits itself, with TDM A and B,
-    TDMFuse 0 or 1 and MX on both sides or neither; HalfPLR at StaggerU 0. None when
-    `ks` is not a deep ring.
+    TDMFuse 0 or 1 and MX on both sides or neither; HalfPLR at StaggerU 0; ClusterDim other
+    than [1, 1] on an equal ring of 2 or more waves without StreamK. None when `ks` is not a
+    deep ring.
     """
     if not tdmDeepRing(ks):
         return None
@@ -345,7 +346,17 @@ def tdmRingRejectReason(ks):
         if flags:
             yield ", ".join(flags)
         if any(dim != 1 for dim in (ks.get("ClusterDim") or [1, 1])):
-            yield "ClusterDim != [1, 1]"
+            # Multicast relies on StinkyTofu's cluster signal/wait before each TDM's WG barrier,
+            # one set per iteration on an equal ring. A divergent ring's split publish waits put
+            # the cluster wait ahead of its signal. Multicast with StreamK computes wrong results
+            # and one-wave multicast hangs on the plain PGR 1/2 kernels too.
+            if pgrA != pgrB:
+                yield ("ClusterDim=%s with PrefetchGlobalReadA != PrefetchGlobalReadB (the cluster "
+                       "wait lands ahead of its signal)" % list(ks["ClusterDim"]))
+            if ks.get("StreamK", 0):
+                yield "ClusterDim=%s with StreamK=%u" % (list(ks["ClusterDim"]), ks["StreamK"])
+            if ks.get("NumWaves", 1) == 1:
+                yield "ClusterDim=%s with NumWaves=1" % list(ks["ClusterDim"])
         if pt.get("Sparse"):
             yield "Sparse"
         # Solution resolves the auto -1 off on a ring before this check; only 1 is on.
