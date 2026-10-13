@@ -523,9 +523,18 @@ validParameters = { # we need to make sure this matches develop
     # For mid/small MT size case, we have chance to improve Global Read scheduling by putting more GRInc instructions
     # regardless of miLatencyLeft (overhead of GR inst is often more than the latency of GR inc inst)
     "MinGRIncPerMfma": [-1] + list(range(1,10)),
-    # Interleave alpha scale calculation with beta loads and address calcs - rather
-    # than as a separate block of instructions
-    "InterleaveAlpha": [0, 1],
+    # How the alpha scale (rC *= alpha) is placed in the global write:
+    # 0: as a separate block of instructions, up front before the stores (default).
+    # 1: interleaved with the beta loads and address calcs rather than as a separate
+    #    block. Not supported with matrix instructions.
+    # 2: deferred per element to just before that element's conversion+pack in the
+    #    store loop, instead of scaling all elements up front. Alpha still lands on the
+    #    raw accumulator (before beta*C, bias, activation and pack), so it is general
+    #    across dest types; it routes through the up-front path like 0. The win is
+    #    register lifetime - an up-front scale of every element can clobber a prior
+    #    batch's still-draining store source regs (e.g. fp8 + GroupLoadStore). See
+    #    GlobalWriteBatch._interleaveAlphaWithPack.
+    "InterleaveAlpha": [0, 1, 2],
     # Create a copy of NoLoadLoop which interleaves the stores with the final mac
     # calculation and may perform other optimizations
     # 0 = no interleave
