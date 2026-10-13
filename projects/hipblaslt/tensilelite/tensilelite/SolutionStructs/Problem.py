@@ -171,7 +171,7 @@ class ProblemSizeRange:
 
 class Problem:
   """ Problem sizes, strides, padding and other info"""
-  def __init__(self, sizes=None, stridesA=None, stridesB=None, stridesC=None, stridesD=None, stridesGate=None, count=None):
+  def __init__(self, sizes=None, stridesA=None, stridesB=None, stridesC=None, stridesD=None, stridesGate=None, count=None, world=None, a2aExtent=None):
     self.sizes = tuple(sizes) if sizes else None
     self.stridesA = tuple(stridesA) if stridesA else None
     self.stridesB = tuple(stridesB) if stridesB else None
@@ -180,19 +180,23 @@ class Problem:
     self.stridesGate = tuple(stridesGate) if stridesGate else None
 
     self.count = count
+    self.world = world
+    self.a2aExtent = a2aExtent
 
   def __str__(self):
-    rv= "{ sizes:" + str(list(self.sizes))
+    rv= "{ sizes: " + str(list(self.sizes))
     if self.stridesA:
-      rv += ", stridesA:" + str(list(self.stridesA))
+      rv += ", stridesA: " + str(list(self.stridesA))
     if self.stridesB:
-      rv += ", stridesB:" + str(list(self.stridesB))
+      rv += ", stridesB: " + str(list(self.stridesB))
     if self.stridesC:
-      rv += ", stridesC:" + str(list(self.stridesC))
+      rv += ", stridesC: " + str(list(self.stridesC))
     if self.stridesD:
-      rv += ", stridesD:" + str(list(self.stridesD))
+      rv += ", stridesD: " + str(list(self.stridesD))
     if self.stridesGate:
-      rv += ", stridesGate:" + str(list(self.stridesGate))
+      rv += ", stridesGate: " + str(list(self.stridesGate))
+    if self.world is not None:
+      rv += ", world: %d, a2aExtent: %d" % (self.world, self.a2aExtent)
     rv += " }"
     return rv
 
@@ -236,7 +240,7 @@ class ExactList(Problem):
 
 
 class ExactDict(Problem):
-  AllowedFields = [ 'count', 'sizes', 'stridesA', 'stridesB', 'stridesC', 'stridesD', 'stridesGate' ]
+  AllowedFields = [ 'count', 'sizes', 'stridesA', 'stridesB', 'stridesC', 'stridesD', 'stridesGate', 'world', 'a2aExtent' ]
 
   def __init__(self, e, problemType):
     Problem.__init__(self)
@@ -262,6 +266,21 @@ class ExactDict(Problem):
         raise RuntimeError ("specified size=%s does not have enough indices for problem (expected %d, got %d)" \
                 % (self.sizes, problemType["TotalIndices"], len(self.sizes)))
 
+    if problemType and problemType["FusedGemmA2A"]:
+      from ..Components.Signature import FUSED_A2A_MAX_RANKS
+      if self.world is None:
+        raise RuntimeError("FusedGemmA2A problem %s must set 'world'" % list(self.sizes))
+      if not 1 <= self.world <= FUSED_A2A_MAX_RANKS:
+        raise RuntimeError("world=%d must be in [1, %d]" % (self.world, FUSED_A2A_MAX_RANKS))
+      if self.a2aExtent is None:
+        self.a2aExtent = self.sizes[0]
+      if not 1 <= self.a2aExtent <= self.sizes[0]:
+        raise RuntimeError("a2aExtent=%d must be in [1, M=%d]" % (self.a2aExtent, self.sizes[0]))
+      if self.sizes[2] != 1:
+        raise RuntimeError("FusedGemmA2A problem %s has batch=%d; must be 1" % (list(self.sizes), self.sizes[2]))
+    elif self.world is not None or self.a2aExtent is not None:
+      raise RuntimeError("'world' and 'a2aExtent' apply only to FusedGemmA2A problems")
+
 
 ################################################################################
 # ProblemSizes
@@ -271,8 +290,11 @@ Adapter class for class `ProblemSizes`. It satisfies the implicit usage requirem
 of ClientWriter.writeClientConfig() by converting ExactLogic to list of `Problem` objects
 """
 class ProblemSizesMock:
-  def __init__(self, exactLogic):
-    self.problems = [Problem(problem) for problem, solution in exactLogic]
+  def __init__(self, exactLogic, fusedGemmA2A=False):
+    if fusedGemmA2A:
+      self.problems = [Problem(sizes[:-2], world=sizes[-2], a2aExtent=sizes[-1]) for sizes, solution in exactLogic]
+    else:
+      self.problems = [Problem(problem) for problem, solution in exactLogic]
 
 class ProblemSizesMockDummy:
   def __init__(self):
@@ -291,11 +313,15 @@ class ProblemSizes:
         for sizeTypeKey in dictionary:
           #print ("PROBLEM parsed:", sizeTypeKey, dictionary[sizeTypeKey])
           if sizeTypeKey == "Range":
+            if problemType["FusedGemmA2A"]:
+              raise RuntimeError("FusedGemmA2A problems must use Exact dicts, not Range")
             psr = ProblemSizeRange(problemType, dictionary[sizeTypeKey])
             self.ranges.append( psr )
           elif sizeTypeKey == "Exact":
             e= dictionary[sizeTypeKey]
             if isinstance(e,list):
+              if problemType["FusedGemmA2A"]:
+                raise RuntimeError("FusedGemmA2A problem %s must be an Exact dict with 'world'" % e)
               self.exacts.append(ExactList(e, problemType))
             elif isinstance(e,dict):
               self.exacts.append(ExactDict(e, problemType))
@@ -1076,6 +1102,21 @@ class ProblemType(Mapping):
         if (not self["Gradient"]):
           printWarning("ActivationNoGuard is set to False cause Gradient is off.")
           self["ActivationNoGuard"] = False
+
+    if self["FusedGemmA2A"]:
+      unsupported = [name for name, used in (
+          ("UseBias", self["UseBias"]),
+          ("UseE", self["UseE"]),
+          ("UseGateResidual", self["UseGateResidual"]),
+          ("UseScaleAB", self["UseScaleAB"]),
+          ("UseScaleCD", self["UseScaleCD"]),
+          ("UseScaleAlphaVec", self["UseScaleAlphaVec"]),
+          ("OutputAmaxD", self["OutputAmaxD"]),
+          ("Sparse", self["Sparse"]),
+          ("GroupedGemm", self["GroupedGemm"]),
+          ("Activation", self["ActivationType"] != 'none')) if used]
+      if unsupported:
+        raise Exception("FusedGemmA2A does not support %s" % ", ".join(unsupported))
 
   ################################################################################
    # Function checkIfSupportedGEMMType:

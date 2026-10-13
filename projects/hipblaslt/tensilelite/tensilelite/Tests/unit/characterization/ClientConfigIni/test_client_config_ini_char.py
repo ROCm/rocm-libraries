@@ -983,3 +983,18 @@ class TestClientLogLevelEnum:
         assert CW.ClientLogLevel(1).name == "Terse"
         assert CW.ClientLogLevel(2).name == "Verbose"
         assert CW.ClientLogLevel(3).name == "Debug"
+
+
+class TestWorldFilter:
+    def test_non_fused_ignores_filter(self, tmp_path, monkeypatch):
+        pt = _make_problem_type(_PLAIN_GEMM_PT_DICT)
+        content = _write_ini(tmp_path, monkeypatch, pt, _PLAIN_GEMM_PT_DICT,
+                             extra_gp={"WorldFilter": [2, 4]})
+        assert "world-filter" not in content
+
+    def test_one_line_per_world(self, tmp_path, monkeypatch):
+        ptDict = dict(_PLAIN_GEMM_PT_DICT, FusedGemmA2A=True)
+        pt = _make_problem_type(ptDict)
+        content = _write_ini(tmp_path, monkeypatch, pt, ptDict,
+                             extra_gp={"WorldFilter": [2, 4]})
+        assert "world-filter=2\nworld-filter=4\n" in content

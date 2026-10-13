@@ -81,5 +81,6 @@ def pytest_generate_tests(metafunc):
         return
     gpu_targets = metafunc.config.getoption("--gpu-targets", default=None)
     archs = findAvailableArchs(gpu_targets)
-    configs = findConfigs(availableArchs=archs)
+    configs = findConfigs(availableArchs=archs,
+                          splitWorlds=not metafunc.config.getoption("--build-only", default=False))
     metafunc.parametrize("config", configs)

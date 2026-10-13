@@ -626,7 +626,7 @@ class ProblemPredicate(Properties.Predicate):
             rv += [cls('SwizzleTensorB', value=state['ProblemType']['SwizzleTensorB'])]
 
         if state['ProblemType']['FusedGemmA2A']:
-            rv += [cls('FusedA2ATileDivisible', value=state['MacroTile0'])]
+            rv += [cls('FusedA2AShape', value=state['MacroTile0'])]
 
         if state.get('ReuseAcrossPersistent', 0):
             # A lives in VGPRs for the whole persistent loop, so the kernel is only

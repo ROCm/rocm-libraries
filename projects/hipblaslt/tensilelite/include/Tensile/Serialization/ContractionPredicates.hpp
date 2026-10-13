@@ -132,7 +132,7 @@ namespace TensileLite
                      Base::template Pair<Predicates::Contraction::SwizzleTensorA>(),
                      Base::template Pair<Predicates::Contraction::SwizzleTensorB>(),
                      Base::template Pair<Predicates::Contraction::FusedGemmA2A>(),
-                     Base::template Pair<Predicates::Contraction::FusedA2ATileDivisible>(),
+                     Base::template Pair<Predicates::Contraction::FusedA2AShape>(),
                      Base::template Pair<Predicates::Contraction::MXBlockA>(),
                      Base::template Pair<Predicates::Contraction::MXBlockB>(),
                      Base::template Pair<Predicates::Contraction::DataTypeMXSA>(),
@@ -582,8 +582,8 @@ namespace TensileLite
         };
 
         template <typename IO>
-        struct MappingTraits<Predicates::Contraction::FusedA2ATileDivisible, IO>
-            : public AutoMappingTraits<Predicates::Contraction::FusedA2ATileDivisible, IO>
+        struct MappingTraits<Predicates::Contraction::FusedA2AShape, IO>
+            : public AutoMappingTraits<Predicates::Contraction::FusedA2AShape, IO>
         {
         };
 

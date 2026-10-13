@@ -352,6 +352,9 @@ globalParameters["IcacheRotateCopies"] = 0
 #   Non-Linux: used directly as the raw extras count (no ELF parsing).
 globalParameters["IcacheRotateSize"] = 64
 
+# Fused GEMM+A2A: benchmark only the problems whose world is listed; [] runs all.
+globalParameters["WorldFilter"] = []
+
 globalParameters["BuildIdKind"] = "sha1"
 globalParameters["AsmDebug"] = (
     False  # Set to True to keep debug information for compiled code objects

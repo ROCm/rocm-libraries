@@ -302,6 +302,7 @@ class LogicAnalyzer:
     # merge problem sizes from size groups
     #self.numIndices = len(problemSizesList[0].numProblemSizes)
     self.numIndices = self.problemType["TotalIndices"] + problemType["NumIndicesLD"]
+    self.fusedGemmA2A = self.problemType.get("FusedGemmA2A", False)
     unifiedProblemSizes = []
     for i in range(0, self.numIndices):
       unifiedProblemSizes.append(set())
@@ -310,7 +311,10 @@ class LogicAnalyzer:
     for problemSizes in problemSizesList:
       # add exacts
       for problem in problemSizes.exacts:
-        self.exactProblemSizes.add(tuple(problem.sizes))
+        if self.fusedGemmA2A:
+          self.exactProblemSizes.add(tuple(problem.sizes) + (problem.world, problem.a2aExtent))
+        else:
+          self.exactProblemSizes.add(tuple(problem.sizes))
 
       # add ranges
       #print "ProblemSizes", problemSizes.sizes
@@ -437,6 +441,13 @@ class LogicAnalyzer:
       if rowIdx == 1:
         # get unit (gflops or gflops/cu) of benchmark data
         perfUnit = row[0]
+        if self.fusedGemmA2A:
+          header = [col.strip() for col in row]
+          missing = [name for name in ("World", "A2AExtent") if name not in header]
+          if missing:
+            printExit("\"%s\" has no %s column(s) required for FusedGemmA2A" % (dataFileName, ", ".join(missing)))
+          worldIdx = header.index("World")
+          extentIdx = header.index("A2AExtent")
         if perfUnit == "GFlops":
           self.perfMetric = "DeviceEfficiency"
         elif perfUnit == "GFlopsPerCU":
@@ -468,6 +479,9 @@ class LogicAnalyzer:
         problemSize = []
         for i in range(problemSizeStartIdx, totalSizeIdx):
           problemSize.append(int(row[i]))
+        if self.fusedGemmA2A:
+          problemSize.append(int(row[worldIdx]))
+          problemSize.append(int(row[extentIdx]))
         problemSize = tuple(problemSize)
         # Exact Problem Size
         if problemSize in self.exactProblemSizes:

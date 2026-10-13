@@ -102,12 +102,17 @@ def _writeSyntheticResultsCSV(resultsFileName, problemSizes, gfxName, numSolutio
 
     header = ["GFlops"]
     header += ["Size%d" % i for i in range(numIndices)]
+    hasWorld = bool(problems) and problems[0].world is not None
+    if hasWorld:
+        header += ["World", "A2AExtent"]
     header += ["Solution_%d" % i for i in range(numSolutions)]
 
     lines = [",".join(header)]
     for problem in problems:
         row = [gfxName]
         row += [str(int(s)) for s in problem.sizes]
+        if hasWorld:
+            row += [str(problem.world), str(problem.a2aExtent)]
         row += [repr(_CPU_ONLY_SYNTHETIC_GFLOPS)] * numSolutions
         lines.append(",".join(row))
 
