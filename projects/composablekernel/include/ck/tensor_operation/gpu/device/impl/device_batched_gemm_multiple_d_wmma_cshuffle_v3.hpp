@@ -317,8 +317,7 @@ struct DeviceBatchedGemmMultiD_Wmma_CShuffleV3
     {
         ActiveWorkgroupsPerCU()
         {
-            if(!ck::is_gfx11_supported() && !ck::is_gfx12_supported() &&
-               !ck::is_gfx117_supported())
+            if(!ck::is_gfx11_supported() && !ck::is_gfx12_supported() && !ck::is_gfx117_supported())
             {
                 return;
             }

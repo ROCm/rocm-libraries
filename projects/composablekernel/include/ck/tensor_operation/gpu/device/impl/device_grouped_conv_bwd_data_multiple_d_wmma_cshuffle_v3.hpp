@@ -212,8 +212,8 @@ __launch_bounds__(GridwiseGemm::MaxBlockSize, MinimumOccupancy)
     ignore = compute_ptr_offset_of_n;
     ignore = KBatch;
 
-#endif // End of if (!defined(__HIP_DEVICE_COMPILE__) || defined(__gfx11__) || defined(__gfx117__) ||
-       // defined(__gfx12__))
+#endif // End of if (!defined(__HIP_DEVICE_COMPILE__) || defined(__gfx11__) || defined(__gfx117__)
+       // || defined(__gfx12__))
 }
 
 } // namespace

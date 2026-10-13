@@ -40,7 +40,7 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, CK_MIN_BLOCK_PER_CU)
                                       const CDEElementwiseOperation cde_element_op)
 {
 #if(defined(__gfx906__) || defined(__gfx908__) || defined(__gfx90a__) || defined(__gfx101__) || \
-    defined(__gfx103__) || defined(__gfx11__) || defined(__gfx117__) || defined(__gfx94__) ||  \
+    defined(__gfx103__) || defined(__gfx11__) || defined(__gfx117__) || defined(__gfx94__) ||   \
     defined(__gfx12__))
     __shared__ char p_shared[GridwiseGemm::GetSharedMemoryNumberOfByte()];
 
