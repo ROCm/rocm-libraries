@@ -28,7 +28,7 @@
 
 #include "TensorDataManipulation.hpp"
 #include "allclose.hpp"
-#include "benchmark_timing.hpp"
+#include "candidate_search.hpp"
 #include "cblas_interface.hpp"
 #include "efficiency_monitor.hpp"
 #include "fast_check.hpp"
@@ -64,28 +64,6 @@
 #include <omp.h>
 #include <optional>
 #include <set>
-
-extern "C" __global__ void flush_icache()
-{
-    asm __volatile__("s_icache_inv \n\t"
-                     "s_nop 0 \n\t"
-                     "s_nop 0 \n\t"
-                     "s_nop 0 \n\t"
-                     "s_nop 0 \n\t"
-                     "s_nop 0 \n\t"
-                     "s_nop 0 \n\t"
-                     "s_nop 0 \n\t"
-                     "s_nop 0 \n\t"
-                     "s_nop 0 \n\t"
-                     "s_nop 0 \n\t"
-                     "s_nop 0 \n\t"
-                     "s_nop 0 \n\t"
-                     "s_nop 0 \n\t"
-                     "s_nop 0 \n\t"
-                     "s_nop 0 \n\t"
-                     "s_nop 0 \n\t" ::
-                         :);
-}
 
 // Convert element count to byte count, accounting for sub-byte packing.
 // FP4 (4-bit) packs 2 elements per byte; all other types use realDataTypeSize.
@@ -477,37 +455,6 @@ void swizzle_tensor_type(HipHostBuffer&       dst,
         return;
     default:
         hipblaslt_cerr << "Error type in swizzle_tensor_type()" << std::endl;
-    }
-}
-
-inline void pre_gpu_time(bool         use_gpu_timer,
-                         hipEvent_t&  event_gpu_time_start,
-                         double&      gpu_time_used,
-                         hipStream_t& stream)
-{
-    if(use_gpu_timer)
-        CHECK_HIP_ERROR(hipEventRecord(event_gpu_time_start, stream));
-    else
-        gpu_time_used = get_time_us_sync(stream);
-}
-inline void post_gpu_time(bool         use_gpu_timer,
-                          hipEvent_t&  event_gpu_time_start,
-                          hipEvent_t&  event_gpu_time_end,
-                          double&      gpu_time_used,
-                          hipStream_t& stream)
-{
-    if(use_gpu_timer)
-    {
-        CHECK_HIP_ERROR(hipEventRecord(event_gpu_time_end, stream));
-        CHECK_HIP_ERROR(hipEventSynchronize(event_gpu_time_end));
-        float gpu_time_ms;
-        CHECK_HIP_ERROR(
-            hipEventElapsedTime(&gpu_time_ms, event_gpu_time_start, event_gpu_time_end));
-        gpu_time_used = gpu_time_ms * 1000; // ms to us
-    }
-    else
-    {
-        gpu_time_used = get_time_us_sync(stream) - gpu_time_used;
     }
 }
 
@@ -6450,19 +6397,21 @@ void testing_matmul_with_bias(const Arguments& arg,
         // Get device information
         hipDeviceProp_t deviceProps;
         CHECK_HIP_ERROR(hipGetDeviceProperties(&deviceProps, 0));
-        int32_t gpu_block3 = deviceProps.multiProcessorCount * 60;
+        int32_t gpu_block3 = hipblaslt_bench::flush_icache_grid(deviceProps);
 
-        size_t      best_sol       = -1;
-        double      best_flops     = 0.0;
-        double      best_gpu_time  = std::numeric_limits<double>::max();
-        double      best_warm_time = std::numeric_limits<double>::max();
-        std::string best_s_name    = "";
-        std::string best_k_name    = "";
-        double      best_norm      = 0.0;
-        double      best_atol      = 0.0;
-        double      best_rtol      = 0.0;
-        double      best_max_ulp   = 0.0;
-        double      best_avg_ulp   = 0.0;
+        // What the Winner line reports about a candidate, recorded when it is measured.
+        struct CandidateReport
+        {
+            double      flops = 0.0;
+            std::string s_name;
+            std::string k_name;
+            double      norm    = 0.0;
+            double      atol    = 0.0;
+            double      rtol    = 0.0;
+            double      max_ulp = 0.0;
+            double      avg_ulp = 0.0;
+        };
+        std::vector<CandidateReport> reports(heuristicResult.size());
         int number_cold_calls
             = ((arg.unit_check || arg.norm_check || arg.allclose_check) && arg.cold_iters == 0)
                   ? 1
@@ -6505,7 +6454,6 @@ void testing_matmul_with_bias(const Arguments& arg,
             }
         }
 
-        hipblaslt_bench::TimingResult timing;
         // Stop the sample loop if a launch hits a gtest fatal failure.
         auto timingAbort = []() -> bool {
 #ifdef GOOGLE_TEST
@@ -6514,43 +6462,20 @@ void testing_matmul_with_bias(const Arguments& arg,
             return false;
 #endif
         };
-        hipblaslt_bench::TimingResult best_timing;
 
-        int    flush_iter      = 100000;
-        double flush_time_used = 0;
         if(arg.flush)
-        {
-            static std::unordered_map<std::string, double> flush_times_cache;
-            static std::mutex                              mtx;
-            std::lock_guard<std::mutex>                    lock(mtx);
-            std::string                                    device_uuid(deviceProps.uuid.bytes);
-            if(!flush_times_cache.count(device_uuid))
-            {
-                for(int i = 0; i < flush_iter; i++)
-                    hipLaunchKernelGGL(flush_icache, dim3(gpu_block3), dim3(64), 0, stream);
-                pre_gpu_time(arg.use_gpu_timer, event_gpu_time_start, flush_time_used, stream);
-                for(int i = 0; i < flush_iter; i++)
-                    hipLaunchKernelGGL(flush_icache, dim3(gpu_block3), dim3(64), 0, stream);
-                post_gpu_time(arg.use_gpu_timer,
-                              event_gpu_time_start,
-                              event_gpu_time_end,
-                              flush_time_used,
-                              stream);
-                flush_time_used /= flush_iter;
-                flush_times_cache[device_uuid] = flush_time_used;
-            }
-            else
-            {
-                flush_time_used = flush_times_cache[device_uuid];
-            }
-        }
-        timingCfg.flush_us = flush_time_used;
+            timingCfg.flush_us = hipblaslt_bench::flush_cost_us(
+                arg.use_gpu_timer, deviceProps, event_gpu_time_start, event_gpu_time_end, stream);
 
-        for(size_t sol = 0; sol < heuristicResult.size(); sol++)
-        {
-            // Reset per-solution so an aborted/empty measurement can't report the prior
-            // solution's stats (run_measurement leaves `out` untouched on early return).
-            timing = {};
+        hipblaslt_bench::SearchConfig searchCfg;
+        searchCfg.cold_calls      = number_cold_calls;
+        searchCfg.skip_slow_ratio = arg.skip_slow_solution_ratio;
+        searchCfg.flush_grid      = gpu_block3;
+
+        std::shared_ptr<EfficiencyMonitor> perf_monitor;
+
+        // Every path prepares a candidate with this first.
+        auto prepareCandidate = [&](size_t) {
             if((arg.unit_check || arg.norm_check || arg.allclose_check) && arg.c_equal_d)
             {
                 if(batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY) //For General Batch GEMM
@@ -6568,393 +6493,19 @@ void testing_matmul_with_bias(const Arguments& arg,
                     }
                 }
             }
-            if(!do_grouped_gemm)
-            {
-                auto perf_monitor = EfficiencyMonitor::create();
-                if(arg.use_ext && batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
-                {
-                    for(int32_t b = 0; b < block_count; b++)
-                    {
-                        gemmVec[b].setMaxWorkspaceBytes(workspace_size);
-                        CHECK_HIPBLASLT_ERROR(
-                            gemmVec[b].initialize(heuristicResult[sol].algo,
-                                                  tuningVec[heuristicTuningIndex[sol]],
-                                                  *dWorkspace));
-                    }
-                    if(arg.skip_slow_solution_ratio)
-                        pre_gpu_time(
-                            arg.use_gpu_timer, event_gpu_time_start, gpu_time_used, stream);
-                    for(int i = 0; i < number_cold_calls; i++)
-                    {
-                        CHECK_HIPBLASLT_ERROR(gemmVec[i % block_count].run(stream));
-                        if(i == 0 && (arg.unit_check || arg.norm_check || arg.allclose_check))
-                            copy_gemm_to_host(stream, gemm_count, hD_1, (*dDp));
-                    }
-                    if(arg.skip_slow_solution_ratio)
-                    {
-                        post_gpu_time(arg.use_gpu_timer,
-                                      event_gpu_time_start,
-                                      event_gpu_time_end,
-                                      gpu_time_used,
-                                      stream);
-                        best_warm_time
-                            = best_warm_time < gpu_time_used ? best_warm_time : gpu_time_used;
-                        if((gpu_time_used * arg.skip_slow_solution_ratio) > best_warm_time)
-                        {
-                            hipblaslt_cout
-                                << std::setprecision(2) << "Skip solution: " << sol
-                                << " (best warm-up = " << best_warm_time / number_cold_calls
-                                << " us , warm-up = " << gpu_time_used / number_cold_calls
-                                << " us, skip ratio = " << arg.skip_slow_solution_ratio << ")"
-                                << std::endl;
-                            continue;
-                        }
-                    }
-                    perf_monitor->start();
-                    hipblaslt_bench::run_measurement(
-                        [&](int64_t i) {
-                            int b = static_cast<int>(i % block_count);
-                            CHECK_HIPBLASLT_ERROR(gemmVec[b].run(stream));
-                            if(arg.flush)
-                                hipLaunchKernelGGL(
-                                    flush_icache, dim3(gpu_block3), dim3(64), 0, stream);
-                        },
-                        timingCfg,
-                        event_gpu_time_start,
-                        event_gpu_time_end,
-                        stream,
-                        timing,
-                        timingAbort);
-                }
-                else if(batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY) //For General Batch GEMM
-                {
-                    if(arg.skip_slow_solution_ratio)
-                        pre_gpu_time(
-                            arg.use_gpu_timer, event_gpu_time_start, gpu_time_used, stream);
-                    for(int i = 0; i < number_cold_calls; i++)
-                    {
-                        auto ptr_matmul = matmul[i % block_count][0];
-                        auto ptr_alpha  = arg.scaleAlpha_vector
-                                              ? (dScaleAlphaVec[0].as<char>())
-                                                   + (i % block_count) * size_scaleAlphaVec[0]
-                                              : alpha_in[0];
-                        // Added this logic to mimic the rocblas test quick_gemm_batched_bad_arg_f32_r_bad_arg_F
-                        // This rocblas test passes alpha, A and B as 0 but beta as non-zero with valid C and D
-                        // To mimic this behavior if --sizek is passed as 0 in hipblaslt-bench for --batch_mode 1, size_dA and size_dB
-                        // will be set to 0 since A is MxK and B is KxN. In this case, we pass the pointer array A and B for 
-                        // General batched GEMM as nullptr and introduced an explicit check for AddressA and AddressB != 0
-                        // in KernelWriterAssembly.py since the dereference of AddressA and AddressB for 
-                        // General Batched GEMM happens before the alphaNonZero check.                                              
-                        void *ptrA = (size_dA[0]) ? dda[i % block_count] : nullptr;
-                        void *ptrB = (size_dB[0]) ? ddb[i % block_count] : nullptr;
-                        EXPECT_HIPBLAS_STATUS(hipblasLtMatmul(handle,
-                                                              ptr_matmul,
-                                                              ptr_alpha,
-                                                              ptrA,
-                                                              matA[0],
-                                                              ptrB,
-                                                              matB[0],
-                                                              &(h_beta[0]),
-                                                              ddc[i % block_count],
-                                                              matC[0],
-                                                              ddd[i % block_count],
-                                                              matD[0],
-                                                              &heuristicResult[sol].algo,
-                                                              *dWorkspace,
-                                                              workspace_size,
-                                                              stream),
-                                              HIPBLAS_STATUS_SUCCESS);
-                        if(i == 0 && (arg.unit_check || arg.norm_check || arg.allclose_check))
-                            copy_gemm_to_host(stream, arg.batch_count, hD_1, (*dDp));
-                    }
-                    if(arg.skip_slow_solution_ratio)
-                    {
-                        post_gpu_time(arg.use_gpu_timer,
-                                      event_gpu_time_start,
-                                      event_gpu_time_end,
-                                      gpu_time_used,
-                                      stream);
-                        best_warm_time
-                            = best_warm_time < gpu_time_used ? best_warm_time : gpu_time_used;
-                        if((gpu_time_used * arg.skip_slow_solution_ratio) > best_warm_time)
-                        {
-                            hipblaslt_cout
-                                << std::setprecision(2) << "Skip solution: " << sol
-                                << " (best warm-up = " << best_warm_time / number_cold_calls
-                                << " us , warm-up = " << gpu_time_used / number_cold_calls
-                                << " us, skip ratio = " << arg.skip_slow_solution_ratio << ")"
-                                << std::endl;
-                            continue;
-                        }
-                    }
-                    perf_monitor->start();
-                    hipblaslt_bench::run_measurement(
-                        [&](int64_t i) {
-                            int  b          = static_cast<int>(i % block_count);
-                            auto ptr_matmul = matmul[b][0];
-                            auto ptr_alpha  = arg.scaleAlpha_vector
-                                                  ? (dScaleAlphaVec[0].as<char>())
-                                                        + b * size_scaleAlphaVec[0]
-                                                  : alpha_in[0];
-                            void* ptrA = (size_dA[0]) ? dda[b] : nullptr;
-                            void* ptrB = (size_dB[0]) ? ddb[b] : nullptr;
-                            EXPECT_HIPBLAS_STATUS(hipblasLtMatmul(handle,
-                                                                  ptr_matmul,
-                                                                  ptr_alpha,
-                                                                  ptrA,
-                                                                  matA[0],
-                                                                  ptrB,
-                                                                  matB[0],
-                                                                  &(h_beta[0]),
-                                                                  ddc[b],
-                                                                  matC[0],
-                                                                  ddd[b],
-                                                                  matD[0],
-                                                                  &heuristicResult[sol].algo,
-                                                                  *dWorkspace,
-                                                                  workspace_size,
-                                                                  stream),
-                                                  HIPBLAS_STATUS_SUCCESS);
-                            if(arg.flush)
-                                hipLaunchKernelGGL(
-                                    flush_icache, dim3(gpu_block3), dim3(64), 0, stream);
-                        },
-                        timingCfg,
-                        event_gpu_time_start,
-                        event_gpu_time_end,
-                        stream,
-                        timing,
-                        timingAbort);
-                }
-                else
-                {
-                    if(arg.skip_slow_solution_ratio)
-                        pre_gpu_time(
-                            arg.use_gpu_timer, event_gpu_time_start, gpu_time_used, stream);
-                    for(int i = 0; i < number_cold_calls; i++)
-                    {
-                        auto ptr_matmul = matmul[i % block_count][0];
-                        auto ptr_alpha  = arg.scaleAlpha_vector
-                                              ? (dScaleAlphaVec[0].as<char>())
-                                                   + (i % block_count) * size_scaleAlphaVec[0]
-                                              : alpha_in[0];
-
-                        EXPECT_HIPBLAS_STATUS(
-                            hipblasLtMatmul(
-                                handle,
-                                ptr_matmul,
-                                alpha_ptr,
-                                dA[0].as<char>()
-                                    + (i % block_count) * size_dA[0] * realDataTypeSize(TiA),
-                                matA[0],
-                                dB[0].as<char>()
-                                    + (i % block_count) * size_dB[0] * realDataTypeSize(TiB),
-                                matB[0],
-                                beta_ptr,
-                                dC[0].as<char>()
-                                    + (i % block_count) * size_C[0] * realDataTypeSize(To),
-                                matC[0],
-                                (*dDp)[0].as<char>()
-                                    + (i % block_count) * size_D[0] * realDataTypeSize(To),
-                                matD[0],
-                                &heuristicResult[sol].algo,
-                                *dWorkspace,
-                                workspace_size,
-                                stream),
-                            HIPBLAS_STATUS_SUCCESS);
-                        if(i == 0 && (arg.unit_check || arg.norm_check || arg.allclose_check))
-                            copy_gemm_to_host(stream, gemm_count, hD_1, (*dDp));
-                    }
-                    if(arg.skip_slow_solution_ratio)
-                    {
-                        post_gpu_time(arg.use_gpu_timer,
-                                      event_gpu_time_start,
-                                      event_gpu_time_end,
-                                      gpu_time_used,
-                                      stream);
-                        best_warm_time
-                            = best_warm_time < gpu_time_used ? best_warm_time : gpu_time_used;
-                        if((gpu_time_used * arg.skip_slow_solution_ratio) > best_warm_time)
-                        {
-                            hipblaslt_cout
-                                << std::setprecision(2) << "Skip solution: " << sol
-                                << " (best warm-up = " << best_warm_time / number_cold_calls
-                                << " us , warm-up = " << gpu_time_used / number_cold_calls
-                                << " us, skip ratio = " << arg.skip_slow_solution_ratio << ")"
-                                << std::endl;
-                            continue;
-                        }
-                    }
-                    perf_monitor->start();
-                    hipblaslt_bench::run_measurement(
-                        [&](int64_t i) {
-                            int  b          = static_cast<int>(i % block_count);
-                            auto ptr_matmul = matmul[b][0];
-                            auto ptr_alpha  = arg.scaleAlpha_vector
-                                                  ? (dScaleAlphaVec[0].as<char>())
-                                                        + b * size_scaleAlphaVec[0]
-                                                  : alpha_in[0];
-                            EXPECT_HIPBLAS_STATUS(
-                                hipblasLtMatmul(
-                                    handle,
-                                    ptr_matmul,
-                                    alpha_ptr,
-                                    dA[0].as<char>() + b * size_dA[0] * realDataTypeSize(TiA),
-                                    matA[0],
-                                    dB[0].as<char>() + b * size_dB[0] * realDataTypeSize(TiB),
-                                    matB[0],
-                                    beta_ptr,
-                                    dC[0].as<char>() + b * size_C[0] * realDataTypeSize(To),
-                                    matC[0],
-                                    (*dDp)[0].as<char>() + b * size_D[0] * realDataTypeSize(To),
-                                    matD[0],
-                                    &heuristicResult[sol].algo,
-                                    *dWorkspace,
-                                    workspace_size,
-                                    stream),
-                                HIPBLAS_STATUS_SUCCESS);
-                            if(arg.flush)
-                                hipLaunchKernelGGL(
-                                    flush_icache, dim3(gpu_block3), dim3(64), 0, stream);
-                        },
-                        timingCfg,
-                        event_gpu_time_start,
-                        event_gpu_time_end,
-                        stream,
-                        timing,
-                        timingAbort);
-                }
-                gpu_time_used = timing.median_us;
-                perf_monitor->stop();
-            }
-            else
-            {
-                auto perf_monitor = EfficiencyMonitor::create();
-                if(arg.use_user_args)
-                {
-                    std::vector<unsigned char*> d_userArgsVec(block_count);
-                    //grouped gemm
-                    for(int32_t b = 0; b < block_count; b++)
-                    {
-                        groupedGemmVec[b].setMaxWorkspaceBytes(workspace_size);
-                        CHECK_HIPBLASLT_ERROR(groupedGemmVec[b].initialize(
-                            heuristicResult[sol].algo,
-                            tuningVec[heuristicTuningIndex[sol]],
-                            ((unsigned char*)(*dWorkspace) + b * workspace_size)));
-                        groupedGemmVec[b].getDefaultValueForDeviceUserArguments(userArgs);
-                        d_userArgsVec[b] = (unsigned char*)d_userArgs
-                                           + b * gemm_count * sizeof(hipblaslt_ext::UserArguments);
-                        // Copy them to device memory
-                        CHECK_HIP_ERROR(hipMemcpy(d_userArgsVec[b],
-                                                  userArgs,
-                                                  gemm_count * sizeof(hipblaslt_ext::UserArguments),
-                                                  hipMemcpyHostToDevice));
-                    }
-                    if(arg.skip_slow_solution_ratio)
-                        pre_gpu_time(
-                            arg.use_gpu_timer, event_gpu_time_start, gpu_time_used, stream);
-                    for(int i = 0; i < number_cold_calls; i++)
-                    {
-                        CHECK_HIPBLASLT_ERROR(groupedGemmVec[i % block_count].run(
-                            d_userArgsVec[i % block_count], stream));
-                        if(i == 0 && (arg.unit_check || arg.norm_check || arg.allclose_check))
-                            copy_gemm_to_host(stream, gemm_count, hD_1, (*dDp));
-                    }
-                    if(arg.skip_slow_solution_ratio)
-                    {
-                        post_gpu_time(arg.use_gpu_timer,
-                                      event_gpu_time_start,
-                                      event_gpu_time_end,
-                                      gpu_time_used,
-                                      stream);
-                        best_warm_time
-                            = best_warm_time < gpu_time_used ? best_warm_time : gpu_time_used;
-                        if((gpu_time_used * arg.skip_slow_solution_ratio) > best_warm_time)
-                        {
-                            hipblaslt_cout
-                                << std::setprecision(2) << "Skip solution: " << sol
-                                << " (best warm-up = " << best_warm_time / number_cold_calls
-                                << " us , warm-up = " << gpu_time_used / number_cold_calls
-                                << " us, skip ratio = " << arg.skip_slow_solution_ratio << ")"
-                                << std::endl;
-                            continue;
-                        }
-                    }
-                    perf_monitor->start();
-                    hipblaslt_bench::run_measurement(
-                        [&](int64_t i) {
-                            int b = static_cast<int>(i % block_count);
-                            CHECK_HIPBLASLT_ERROR(
-                                groupedGemmVec[b].run(d_userArgsVec[b], stream));
-                        },
-                        timingCfg,
-                        event_gpu_time_start,
-                        event_gpu_time_end,
-                        stream,
-                        timing,
-                        timingAbort);
-                    gpu_time_used = timing.median_us;
-                    perf_monitor->stop();
-                }
-                else
-                {
-                    //grouped gemm
-                    for(int32_t b = 0; b < block_count; b++)
-                    {
-                        groupedGemmVec[b].setMaxWorkspaceBytes(workspace_size);
-                        CHECK_HIPBLASLT_ERROR(groupedGemmVec[b].initialize(
-                            heuristicResult[sol].algo,
-                            tuningVec[heuristicTuningIndex[sol]],
-                            ((unsigned char*)(*dWorkspace) + b * workspace_size),
-                            false,
-                            stream));
-                    }
-
-                    if(arg.skip_slow_solution_ratio)
-                        pre_gpu_time(
-                            arg.use_gpu_timer, event_gpu_time_start, gpu_time_used, stream);
-                    for(int i = 0; i < number_cold_calls; i++)
-                    {
-                        CHECK_HIPBLASLT_ERROR(groupedGemmVec[i % block_count].run(stream));
-                        if(i == 0 && (arg.unit_check || arg.norm_check || arg.allclose_check))
-                            copy_gemm_to_host(stream, gemm_count, hD_1, (*dDp));
-                    }
-                    if(arg.skip_slow_solution_ratio)
-                    {
-                        post_gpu_time(arg.use_gpu_timer,
-                                      event_gpu_time_start,
-                                      event_gpu_time_end,
-                                      gpu_time_used,
-                                      stream);
-                        best_warm_time
-                            = best_warm_time < gpu_time_used ? best_warm_time : gpu_time_used;
-                        if((gpu_time_used * arg.skip_slow_solution_ratio) > best_warm_time)
-                        {
-                            hipblaslt_cout
-                                << std::setprecision(2) << "Skip solution: " << sol
-                                << " (best warm-up = " << best_warm_time / number_cold_calls
-                                << " us , warm-up = " << gpu_time_used / number_cold_calls
-                                << " us, skip ratio = " << arg.skip_slow_solution_ratio << ")"
-                                << std::endl;
-                            continue;
-                        }
-                    }
-                    perf_monitor->start();
-                    hipblaslt_bench::run_measurement(
-                        [&](int64_t i) {
-                            int b = static_cast<int>(i % block_count);
-                            CHECK_HIPBLASLT_ERROR(groupedGemmVec[b].run(stream));
-                        },
-                        timingCfg,
-                        event_gpu_time_start,
-                        event_gpu_time_end,
-                        stream,
-                        timing,
-                        timingAbort);
-                    gpu_time_used = timing.median_us;
-                    perf_monitor->stop();
-                }
-            }
+            perf_monitor = EfficiencyMonitor::create();
+        };
+        auto skipped = [&](size_t sol, double warm_time, double best_warm_time) {
+            hipblaslt_cout << std::setprecision(2) << "Skip solution: " << sol
+                           << " (best warm-up = " << best_warm_time / number_cold_calls
+                           << " us , warm-up = " << warm_time / number_cold_calls
+                           << " us, skip ratio = " << arg.skip_slow_solution_ratio << ")"
+                           << std::endl;
+        };
+        auto measuring = [&](size_t) { perf_monitor->start(); };
+        auto measured  = [&](size_t sol, hipblaslt_bench::TimingResult& timing) {
+            gpu_time_used = timing.median_us;
+            perf_monitor->stop();
 
             double flops = 0;
             for(int gemmIdx = 0; gemmIdx < gemm_count; gemmIdx++)
@@ -7150,21 +6701,303 @@ void testing_matmul_with_bias(const Arguments& arg,
                     hipblaslt_avg_ulp,
                     timing);
             }
-            if(best_gpu_time > gpu_time_used)
+
+            reports[sol] = {flops,
+                            solutionName,
+                            kernelName,
+                            hipblaslt_error,
+                            hipblaslt_atol,
+                            hipblaslt_rtol,
+                            hipblaslt_max_ulp,
+                            hipblaslt_avg_ulp};
+        };
+
+        hipblaslt_bench::SearchResult search;
+        if(!do_grouped_gemm)
+        {
+            searchCfg.flush = arg.flush;
+            if(arg.use_ext && batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
             {
-                best_sol      = sol;
-                best_flops    = flops;
-                best_gpu_time = gpu_time_used;
-                best_s_name   = solutionName;
-                best_k_name   = kernelName;
-                best_norm     = hipblaslt_error;
-                best_atol     = hipblaslt_atol;
-                best_rtol     = hipblaslt_rtol;
-                best_max_ulp  = hipblaslt_max_ulp;
-                best_avg_ulp  = hipblaslt_avg_ulp;
-                best_timing   = timing;
+                search = hipblaslt_bench::search_candidates(
+                    heuristicResult.size(),
+                    searchCfg,
+                    timingCfg,
+                    event_gpu_time_start,
+                    event_gpu_time_end,
+                    stream,
+                    [&](size_t sol) {
+                        prepareCandidate(sol);
+                        for(int32_t b = 0; b < block_count; b++)
+                        {
+                            gemmVec[b].setMaxWorkspaceBytes(workspace_size);
+                            CHECK_HIPBLASLT_ERROR(
+                                gemmVec[b].initialize(heuristicResult[sol].algo,
+                                                      tuningVec[heuristicTuningIndex[sol]],
+                                                      *dWorkspace));
+                        }
+                    },
+                    [&](size_t, int32_t i) {
+                        CHECK_HIPBLASLT_ERROR(gemmVec[i % block_count].run(stream));
+                        if(i == 0 && (arg.unit_check || arg.norm_check || arg.allclose_check))
+                            copy_gemm_to_host(stream, gemm_count, hD_1, (*dDp));
+                    },
+                    [&](size_t, int64_t i) {
+                        int b = static_cast<int>(i % block_count);
+                        CHECK_HIPBLASLT_ERROR(gemmVec[b].run(stream));
+                    },
+                    skipped,
+                    measuring,
+                    measured,
+                    timingAbort);
+            }
+            else if(batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY) //For General Batch GEMM
+            {
+                search = hipblaslt_bench::search_candidates(
+                    heuristicResult.size(),
+                    searchCfg,
+                    timingCfg,
+                    event_gpu_time_start,
+                    event_gpu_time_end,
+                    stream,
+                    prepareCandidate,
+                    [&](size_t sol, int32_t i) {
+                        auto ptr_matmul = matmul[i % block_count][0];
+                        auto ptr_alpha  = arg.scaleAlpha_vector
+                                              ? (dScaleAlphaVec[0].as<char>())
+                                                   + (i % block_count) * size_scaleAlphaVec[0]
+                                              : alpha_in[0];
+                        // Added this logic to mimic the rocblas test quick_gemm_batched_bad_arg_f32_r_bad_arg_F
+                        // This rocblas test passes alpha, A and B as 0 but beta as non-zero with valid C and D
+                        // To mimic this behavior if --sizek is passed as 0 in hipblaslt-bench for --batch_mode 1, size_dA and size_dB
+                        // will be set to 0 since A is MxK and B is KxN. In this case, we pass the pointer array A and B for
+                        // General batched GEMM as nullptr and introduced an explicit check for AddressA and AddressB != 0
+                        // in KernelWriterAssembly.py since the dereference of AddressA and AddressB for
+                        // General Batched GEMM happens before the alphaNonZero check.
+                        void* ptrA = (size_dA[0]) ? dda[i % block_count] : nullptr;
+                        void* ptrB = (size_dB[0]) ? ddb[i % block_count] : nullptr;
+                        EXPECT_HIPBLAS_STATUS(hipblasLtMatmul(handle,
+                                                              ptr_matmul,
+                                                              ptr_alpha,
+                                                              ptrA,
+                                                              matA[0],
+                                                              ptrB,
+                                                              matB[0],
+                                                              &(h_beta[0]),
+                                                              ddc[i % block_count],
+                                                              matC[0],
+                                                              ddd[i % block_count],
+                                                              matD[0],
+                                                              &heuristicResult[sol].algo,
+                                                              *dWorkspace,
+                                                              workspace_size,
+                                                              stream),
+                                              HIPBLAS_STATUS_SUCCESS);
+                        if(i == 0 && (arg.unit_check || arg.norm_check || arg.allclose_check))
+                            copy_gemm_to_host(stream, arg.batch_count, hD_1, (*dDp));
+                    },
+                    [&](size_t sol, int64_t i) {
+                        int   b          = static_cast<int>(i % block_count);
+                        auto  ptr_matmul = matmul[b][0];
+                        auto  ptr_alpha  = arg.scaleAlpha_vector ? (dScaleAlphaVec[0].as<char>())
+                                                                     + b * size_scaleAlphaVec[0]
+                                                                 : alpha_in[0];
+                        void* ptrA       = (size_dA[0]) ? dda[b] : nullptr;
+                        void* ptrB       = (size_dB[0]) ? ddb[b] : nullptr;
+                        EXPECT_HIPBLAS_STATUS(hipblasLtMatmul(handle,
+                                                              ptr_matmul,
+                                                              ptr_alpha,
+                                                              ptrA,
+                                                              matA[0],
+                                                              ptrB,
+                                                              matB[0],
+                                                              &(h_beta[0]),
+                                                              ddc[b],
+                                                              matC[0],
+                                                              ddd[b],
+                                                              matD[0],
+                                                              &heuristicResult[sol].algo,
+                                                              *dWorkspace,
+                                                              workspace_size,
+                                                              stream),
+                                              HIPBLAS_STATUS_SUCCESS);
+                    },
+                    skipped,
+                    measuring,
+                    measured,
+                    timingAbort);
+            }
+            else
+            {
+                search = hipblaslt_bench::search_candidates(
+                    heuristicResult.size(),
+                    searchCfg,
+                    timingCfg,
+                    event_gpu_time_start,
+                    event_gpu_time_end,
+                    stream,
+                    prepareCandidate,
+                    [&](size_t sol, int32_t i) {
+                        auto ptr_matmul = matmul[i % block_count][0];
+                        auto ptr_alpha  = arg.scaleAlpha_vector
+                                              ? (dScaleAlphaVec[0].as<char>())
+                                                   + (i % block_count) * size_scaleAlphaVec[0]
+                                              : alpha_in[0];
+
+                        EXPECT_HIPBLAS_STATUS(
+                            hipblasLtMatmul(
+                                handle,
+                                ptr_matmul,
+                                alpha_ptr,
+                                dA[0].as<char>()
+                                    + (i % block_count) * size_dA[0] * realDataTypeSize(TiA),
+                                matA[0],
+                                dB[0].as<char>()
+                                    + (i % block_count) * size_dB[0] * realDataTypeSize(TiB),
+                                matB[0],
+                                beta_ptr,
+                                dC[0].as<char>()
+                                    + (i % block_count) * size_C[0] * realDataTypeSize(To),
+                                matC[0],
+                                (*dDp)[0].as<char>()
+                                    + (i % block_count) * size_D[0] * realDataTypeSize(To),
+                                matD[0],
+                                &heuristicResult[sol].algo,
+                                *dWorkspace,
+                                workspace_size,
+                                stream),
+                            HIPBLAS_STATUS_SUCCESS);
+                        if(i == 0 && (arg.unit_check || arg.norm_check || arg.allclose_check))
+                            copy_gemm_to_host(stream, gemm_count, hD_1, (*dDp));
+                    },
+                    [&](size_t sol, int64_t i) {
+                        int  b          = static_cast<int>(i % block_count);
+                        auto ptr_matmul = matmul[b][0];
+                        auto ptr_alpha  = arg.scaleAlpha_vector ? (dScaleAlphaVec[0].as<char>())
+                                                                     + b * size_scaleAlphaVec[0]
+                                                                : alpha_in[0];
+                        EXPECT_HIPBLAS_STATUS(
+                            hipblasLtMatmul(
+                                handle,
+                                ptr_matmul,
+                                alpha_ptr,
+                                dA[0].as<char>() + b * size_dA[0] * realDataTypeSize(TiA),
+                                matA[0],
+                                dB[0].as<char>() + b * size_dB[0] * realDataTypeSize(TiB),
+                                matB[0],
+                                beta_ptr,
+                                dC[0].as<char>() + b * size_C[0] * realDataTypeSize(To),
+                                matC[0],
+                                (*dDp)[0].as<char>() + b * size_D[0] * realDataTypeSize(To),
+                                matD[0],
+                                &heuristicResult[sol].algo,
+                                *dWorkspace,
+                                workspace_size,
+                                stream),
+                            HIPBLAS_STATUS_SUCCESS);
+                    },
+                    skipped,
+                    measuring,
+                    measured,
+                    timingAbort);
             }
         }
+        else
+        {
+            // Grouped GEMM launches are timed back to back, with no flush between them.
+            searchCfg.flush = false;
+            if(arg.use_user_args)
+            {
+                std::vector<unsigned char*> d_userArgsVec(block_count);
+                search = hipblaslt_bench::search_candidates(
+                    heuristicResult.size(),
+                    searchCfg,
+                    timingCfg,
+                    event_gpu_time_start,
+                    event_gpu_time_end,
+                    stream,
+                    [&](size_t sol) {
+                        prepareCandidate(sol);
+                        //grouped gemm
+                        for(int32_t b = 0; b < block_count; b++)
+                        {
+                            groupedGemmVec[b].setMaxWorkspaceBytes(workspace_size);
+                            CHECK_HIPBLASLT_ERROR(groupedGemmVec[b].initialize(
+                                heuristicResult[sol].algo,
+                                tuningVec[heuristicTuningIndex[sol]],
+                                ((unsigned char*)(*dWorkspace) + b * workspace_size)));
+                            groupedGemmVec[b].getDefaultValueForDeviceUserArguments(userArgs);
+                            d_userArgsVec[b]
+                                = (unsigned char*)d_userArgs
+                                  + b * gemm_count * sizeof(hipblaslt_ext::UserArguments);
+                            // Copy them to device memory
+                            CHECK_HIP_ERROR(
+                                hipMemcpy(d_userArgsVec[b],
+                                          userArgs,
+                                          gemm_count * sizeof(hipblaslt_ext::UserArguments),
+                                          hipMemcpyHostToDevice));
+                        }
+                    },
+                    [&](size_t, int32_t i) {
+                        CHECK_HIPBLASLT_ERROR(groupedGemmVec[i % block_count].run(
+                            d_userArgsVec[i % block_count], stream));
+                        if(i == 0 && (arg.unit_check || arg.norm_check || arg.allclose_check))
+                            copy_gemm_to_host(stream, gemm_count, hD_1, (*dDp));
+                    },
+                    [&](size_t, int64_t i) {
+                        int b = static_cast<int>(i % block_count);
+                        CHECK_HIPBLASLT_ERROR(groupedGemmVec[b].run(d_userArgsVec[b], stream));
+                    },
+                    skipped,
+                    measuring,
+                    measured,
+                    timingAbort);
+            }
+            else
+            {
+                search = hipblaslt_bench::search_candidates(
+                    heuristicResult.size(),
+                    searchCfg,
+                    timingCfg,
+                    event_gpu_time_start,
+                    event_gpu_time_end,
+                    stream,
+                    [&](size_t sol) {
+                        prepareCandidate(sol);
+                        //grouped gemm
+                        for(int32_t b = 0; b < block_count; b++)
+                        {
+                            groupedGemmVec[b].setMaxWorkspaceBytes(workspace_size);
+                            CHECK_HIPBLASLT_ERROR(groupedGemmVec[b].initialize(
+                                heuristicResult[sol].algo,
+                                tuningVec[heuristicTuningIndex[sol]],
+                                ((unsigned char*)(*dWorkspace) + b * workspace_size),
+                                false,
+                                stream));
+                        }
+                    },
+                    [&](size_t, int32_t i) {
+                        CHECK_HIPBLASLT_ERROR(groupedGemmVec[i % block_count].run(stream));
+                        if(i == 0 && (arg.unit_check || arg.norm_check || arg.allclose_check))
+                            copy_gemm_to_host(stream, gemm_count, hD_1, (*dDp));
+                    },
+                    [&](size_t, int64_t i) {
+                        int b = static_cast<int>(i % block_count);
+                        CHECK_HIPBLASLT_ERROR(groupedGemmVec[b].run(stream));
+                    },
+                    skipped,
+                    measuring,
+                    measured,
+                    timingAbort);
+            }
+        }
+        if(search.aborted)
+            return;
+
+        const size_t          best_sol = search.best;
+        const CandidateReport best
+            = best_sol < reports.size() ? reports[best_sol] : CandidateReport{};
+        const double best_gpu_time = best_sol < reports.size() ? search.best_timing.median_us
+                                                               : std::numeric_limits<double>::max();
 
         if(heuristicResult.size() > 1)
         {
@@ -7186,8 +7019,8 @@ void testing_matmul_with_bias(const Arguments& arg,
             // Same reason as the per-candidate loop above.
             if(arg.print_kernel_info || tuningEnv)
             {
-                solutionName = best_s_name;
-                kernelName   = best_k_name;
+                solutionName = best.s_name;
+                kernelName   = best.k_name;
             }
 
             hipblaslt_cout << "Winner: " << std::endl;
@@ -7204,15 +7037,15 @@ void testing_matmul_with_bias(const Arguments& arg,
                 (uint32_t)tuningVec[heuristicTuningIndex[best_sol]].getSplitK(),
                 (uint32_t)tuningVec[heuristicTuningIndex[best_sol]].getWgm(),
                 best_gpu_time,
-                best_flops,
+                best.flops,
                 gpu_mem_gbytes,
                 cpu_time_used,
-                best_norm,
-                best_atol,
-                best_rtol,
-                best_max_ulp,
-                best_avg_ulp,
-                best_timing);
+                best.norm,
+                best.atol,
+                best.rtol,
+                best.max_ulp,
+                best.avg_ulp,
+                search.best_timing);
         }
     }
 

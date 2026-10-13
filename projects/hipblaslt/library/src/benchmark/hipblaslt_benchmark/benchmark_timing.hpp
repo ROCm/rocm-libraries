@@ -5,9 +5,8 @@
 
 #include "benchmark_collective.hpp" // CollectiveAgreement, MaxOp, MinOp
 #include "benchmark_stats.hpp" // TimingConfig, TimingResult
-#include "hipblaslt_test.hpp" // CHECK_HIP_ERROR
-#include "utility.hpp" // get_time_us_sync
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <functional>
@@ -16,8 +15,28 @@
 #include <numeric>
 #include <vector>
 
+// A failed HIP call and the CPU timer go through these two hooks, which an includer
+// may define before including this header. Every expansion of the measurement code
+// in one binary must see the same definitions.
+//   HIPBLASLT_BENCHMARK_CHECK_HIP(expr): handles a HIP call that did not return
+//     hipSuccess. Used only in functions returning void. By default it returns.
+//   HIPBLASLT_BENCHMARK_TIME_US_SYNC(stream): synchronizes `stream`, then returns the
+//     wall time in microseconds. By default detail::time_us_sync below.
+#ifndef HIPBLASLT_BENCHMARK_CHECK_HIP
+#define HIPBLASLT_BENCHMARK_CHECK_HIP(expr) \
+    do                                      \
+    {                                       \
+        if((expr) != hipSuccess)            \
+            return;                         \
+    } while(0)
+#endif
+
+#ifndef HIPBLASLT_BENCHMARK_TIME_US_SYNC
+#define HIPBLASLT_BENCHMARK_TIME_US_SYNC(stream) ::hipblaslt_bench::detail::time_us_sync(stream)
+#endif
+
 // ============================================================================
-// Adaptive, distribution-based timing for the hipBLASLt benchmark clients.
+// Adaptive, distribution-based timing for hipBLASLt and its benchmark clients.
 //
 // A *sample* is one event span over `batch` back-to-back enqueues, yielding one
 // per-iteration throughput number. The batch is sized from a warmup so each sample
@@ -120,6 +139,17 @@ namespace hipblaslt_bench
             return should_abort && should_abort();
         }
 
+        // Whole microseconds, so a CPU-timed batch reads the same here as through the
+        // clients' get_time_us_sync.
+        inline double time_us_sync(hipStream_t stream)
+        {
+            static_cast<void>(hipStreamSynchronize(stream));
+            const auto now = std::chrono::steady_clock::now();
+            return static_cast<double>(
+                std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch())
+                    .count());
+        }
+
         // The HIP events and stream used to time a batch.
         struct event_context
         {
@@ -130,8 +160,8 @@ namespace hipblaslt_bench
 
         // Run `batch` back-to-back enqueues as one timed sample; returns elapsed
         // microseconds via `elapsed_us`. `global_index` advances per enqueue so rotating
-        // buffers keep cycling across samples. Void (not value-returning) so CHECK_HIP_ERROR,
-        // which can expand to `return;` under gtest, stays valid here.
+        // buffers keep cycling across samples. Void (not value-returning) so
+        // HIPBLASLT_BENCHMARK_CHECK_HIP, which can expand to `return;`, stays valid here.
         template <typename Launch>
         inline void time_batch(Launch&              launch,
                                int32_t              batch,
@@ -142,24 +172,24 @@ namespace hipblaslt_bench
         {
             double cpu_start = 0.0;
             if(use_gpu_timer)
-                CHECK_HIP_ERROR(hipEventRecord(events.start, events.stream));
+                HIPBLASLT_BENCHMARK_CHECK_HIP(hipEventRecord(events.start, events.stream));
             else
-                cpu_start = get_time_us_sync(events.stream);
+                cpu_start = HIPBLASLT_BENCHMARK_TIME_US_SYNC(events.stream);
 
             for(int32_t k = 0; k < batch; ++k)
                 launch(global_index++);
 
             if(use_gpu_timer)
             {
-                CHECK_HIP_ERROR(hipEventRecord(events.stop, events.stream));
-                CHECK_HIP_ERROR(hipEventSynchronize(events.stop));
+                HIPBLASLT_BENCHMARK_CHECK_HIP(hipEventRecord(events.stop, events.stream));
+                HIPBLASLT_BENCHMARK_CHECK_HIP(hipEventSynchronize(events.stop));
                 float ms = 0.0f;
-                CHECK_HIP_ERROR(hipEventElapsedTime(&ms, events.start, events.stop));
+                HIPBLASLT_BENCHMARK_CHECK_HIP(hipEventElapsedTime(&ms, events.start, events.stop));
                 elapsed_us = static_cast<double>(ms) * 1000.0;
             }
             else
             {
-                elapsed_us = get_time_us_sync(events.stream) - cpu_start;
+                elapsed_us = HIPBLASLT_BENCHMARK_TIME_US_SYNC(events.stream) - cpu_start;
             }
         }
 
@@ -289,12 +319,10 @@ namespace hipblaslt_bench
             return;
         }
 
-        // Reject invalid configs before touching the GPU.
-        if(const auto err = validate_adaptive_config(cfg); !err.empty())
-        {
-            hipblaslt_cerr << "hipblaslt adaptive timing: invalid config: " << err << "\n";
+        // Reject invalid configs before touching the GPU. Reporting one is the caller's
+        // job: validate_adaptive_config gives the reason.
+        if(!validate_adaptive_config(cfg).empty())
             return;
-        }
 
         // ---- Warmup: one cold probe seeds the batch size, then warm up in self-sized
         //      chunks until warmup_time, refining the per-iteration estimate. ----
@@ -364,14 +392,15 @@ namespace hipblaslt_bench
             total_us += batch_us;
             total_iters += batch;
             if(agreement.agree(detail::reached_target(cfg,
-                                                            samples,
-                                                            stats,
-                                                            iqr_history,
-                                                            total_iters,
-                                                            total_us,
-                                                            bounds,
-                                                            converged,
-                                                            stable), std::logical_and<>{}))
+                                                      samples,
+                                                      stats,
+                                                      iqr_history,
+                                                      total_iters,
+                                                      total_us,
+                                                      bounds,
+                                                      converged,
+                                                      stable),
+                               std::logical_and<>{}))
                 break;
         }
 
