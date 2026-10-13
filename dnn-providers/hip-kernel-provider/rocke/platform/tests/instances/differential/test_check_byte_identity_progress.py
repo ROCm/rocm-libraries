@@ -33,9 +33,9 @@ def test_differential_gate_streams_unbuffered_progress(monkeypatch, tmp_path):
 
     assert module.main() == 0
     gate_calls = [call for call in calls if str(module.RUN_DIFF) in call[0]]
-    assert len(gate_calls) == 1
-    command, kwargs = gate_calls[0]
-    assert command[:3] == [module.sys.executable, "-u", str(module.RUN_DIFF)]
-    assert "capture_output" not in kwargs
-    assert "stdout" not in kwargs
-    assert "stderr" not in kwargs
+    assert len(gate_calls) == 2
+    for command, kwargs in gate_calls:
+        assert command[:3] == [module.sys.executable, "-u", str(module.RUN_DIFF)]
+        assert "capture_output" not in kwargs
+        assert "stdout" not in kwargs
+        assert "stderr" not in kwargs
