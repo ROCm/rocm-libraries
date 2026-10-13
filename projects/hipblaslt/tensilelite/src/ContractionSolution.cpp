@@ -1737,13 +1737,13 @@ namespace TensileLite
 
 	// NOTE: an assumption here is A & B must be both MX data types or non-MX data types.
 	//       Mixing is not supported.
-        if(!problemType.useScaleAB.empty() || problemType.scaleBlockSizeA)
+        if(!problemType.useScaleAB.empty() || problem.scaleBlockSizeA())
         {
             args.template append<void const*>("scaleA", inputs.scaleA);
             args.template append<void const*>("scaleB", inputs.scaleB);
             // Asymmetric w4a16 zero-points. One user-facing pointer still: the
             // library derives this from scaleA + the scale-region size.
-            if(problemType.scaleZeroPointA)
+            if(problem.scaleZeroPointA())
                 args.template append<void const*>("scaleZeroA", inputs.scaleZeroA);
         }
         if(problemType.useScaleCD) //kernel input data
@@ -2782,7 +2782,10 @@ namespace TensileLite
             rv.args.append<int64_t>("batchOffsetB", inputs.batchOffsetB);
         }
 
-        if(!problemType.scaleBlockSizesA.empty()
+        if(std::any_of(customKernel.args.begin(), customKernel.args.end(),
+                       [](auto const& arg) {
+                           return arg.semantic == CustomArgSemantic::ScaleBlockSizeA;
+                       })
            && (customKernel.name.empty() || customKernel.generated))
             rv.args.append<uint32_t>("groupSize", problem.scaleBlockSizeA());
 

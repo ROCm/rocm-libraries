@@ -1146,7 +1146,7 @@ namespace TensileLite
             // UnsignedBias8 returns the raw nibble; its implicit
             // zero-point of 8 is applied by the caller alongside any per-group
             // zero-point, so that both land in one subtraction.
-            if(problem.int4UnsignedA())
+            if(problem.int4EncodingA() == ContractionProblemGemm::Int4Encoding::UnsignedBias8)
                 return static_cast<Accumulator>(ptr[packIdx].getNibble(elemIdx));
             return static_cast<Accumulator>(ptr[packIdx].getElement(elemIdx));
         }
@@ -2121,7 +2121,8 @@ namespace TensileLite
                               // UnsignedBias8 always subtracts something:
                               // their implicit zero-point of 8 when there is no
                               // zero-point tensor, or the stored z when there is.
-                              if(problem.int4UnsignedA())
+                              bool unsignedA = problem.int4EncodingA() == ContractionProblemGemm::Int4Encoding::UnsignedBias8;
+                              if(unsignedA)
                               {
                                 zAcc         = static_cast<Accumulator>(8);
                                 useZeroPoint = true;
@@ -2138,10 +2139,11 @@ namespace TensileLite
                                 // into the flattened nibble index the accessor
                                 // takes.
                                 size_t m       = aCoord[freeIndicesA[0].i];
-                                size_t kGroups = problem.scaleATensor().sizes()[0];
+                                size_t kGroups
+                                    = problem.tensor(ContractionProblemGemm::TENSOR::SCALEA).sizes()[0];
                                 size_t e = 8 * ((m / 8) * kGroups + kGroup) + (m & 7);
                                 zAcc = static_cast<Accumulator>(blockZeroPointElement(
-                                    inputs.scaleZeroA, e, problem.int4UnsignedA()));
+                                    inputs.scaleZeroA, e, unsignedA));
                               }
                             }
 
@@ -2219,17 +2221,18 @@ namespace TensileLite
                             // aRow * kGroups + k/G.
                             if(problem.scaleBlockSizeA() && inputs.scaleA)
                             {
+                                auto const& scaleA = problem.tensor(ContractionProblemGemm::TENSOR::SCALEA);
                                 size_t kGroup
                                     = (boundIndices[0].aMirror ? (boundSize[0] - i - 1) : i)
                                       / problem.scaleBlockSizeA();
                                 size_t scaleIdx
                                     = aCoord[freeIndicesA[0].i]
-                                          * problem.scaleATensor().sizes()[0]
+                                          * scaleA.sizes()[0]
                                       + kGroup;
                                 mxScale = multiply<float>(
                                     mxScale,
                                     blockScaleElementAsFloat(
-                                        problem.scaleTypeA(), inputs.scaleA, scaleIdx));
+                                        scaleA.dataType(), inputs.scaleA, scaleIdx));
                             }
                             value += multiply<Accumulator>(val, mxScale);
                         }

@@ -439,6 +439,11 @@ def test_problem_type_carries_block_scale_to_predicates(toolchain):
 
     assert pt.useScaleAB == ""
     assert pt.scaleBlockSizesA == (32,)
+    from Tensile.Common.Utilities import state
+    from Tensile.Contractions import Solution as CSolution
+    serialized = state(CSolution.FromSolutionStruct(
+        sol, False, False, False, toolchain[2], toolchain[1]).problemType)
+    assert not {"scaleBlockSizeA", "scaleBlockSizesA", "scaleZeroPointA", "int4EncodingA"} & serialized.keys()
     assert not hasattr(pt, "scaleTypeA")
     # A is int4 in memory but bf16 at the MAC.
     assert pt.aType.toName() == "Int4"
@@ -832,6 +837,9 @@ def test_runtime_group_catalog_generates_prefill(toolchain):
                 continue
             kernel, src = _emit_solution(toolchain, solution)
             assert kernel["ProblemType"]["ScaleBlockSizesA"] == [32, 64, 128]
+            args = kernel["CustomKernel"]["args"]
+            assert args[-1]["semantic"] == "ScaleBlockSizeA"
+            assert any(a["semantic"] == "AddressScaleZeroA" for a in args) == kernel["ProblemType"]["ScaleZeroPointA"]
             assert ".name:            groupSize" in src
             assert "v_wmma_f32_16x16x16" in src
             assert "s[sgprScaleAGShift]" in src

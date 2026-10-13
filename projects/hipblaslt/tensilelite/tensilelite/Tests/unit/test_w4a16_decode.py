@@ -6,9 +6,8 @@ from pathlib import Path
 import pytest
 import yaml
 from Tensile.Common.Utilities import state
-from Tensile.Contractions import ProblemPredicate
 from test_w4a16_block_dequant import toolchain, _emit, _emit_solution, FP16_UNSIGNED
-from test_w4a16_decode_codegen import solution as decode_solution
+from test_w4a16_decode_codegen import solution as decode_solution, _size_bounds
 
 pytestmark = pytest.mark.unit
 DIRECTORY = Path(__file__).parents[2] / "CustomKernels"
@@ -37,7 +36,7 @@ def generated_matrix(toolchain):
 @pytest.mark.parametrize("suffix", SCHEDULES)
 def test_decode_selection_bounds(toolchain, suffix):
     config = decode_solution(toolchain, decode=SCHEDULES[suffix], zeroPoint=True)
-    assert [state(p) for p in ProblemPredicate.W4A16DecodePredicates(config)] == [
+    assert _size_bounds(config) == [
         {"type": "SizeEqual", "index": 2, "value": 1},
         {"type": "SizeGreaterThan", "index": 3, "value": 0},
         {"type": "SizeEqual", "index": 1, "value": 1},
@@ -304,7 +303,7 @@ def test_small_n_decode_bounds_and_abi(toolchain, suffix):
     original, source = _emit_solution(toolchain, decode_solution(toolchain, decode=params))
     params[4] = 4
     small, small_source = _emit_solution(toolchain, decode_solution(toolchain, decode=params))
-    assert [state(p) for p in ProblemPredicate.W4A16DecodePredicates(small)] == [
+    assert _size_bounds(small) == [
         {"type": "SizeEqual", "index": 2, "value": 1},
         {"type": "SizeGreaterThan", "index": 3, "value": 0},
         {"type": "SizeGreaterThan", "index": 1, "value": 0},
@@ -318,12 +317,12 @@ def test_wide_decode_launch_geometry(toolchain):
     config, source = _emit_solution(toolchain, decode_solution(toolchain, decode=[2, 1, 4, 512, 1, True, True]))
     assert config["WorkGroup"] == [16, 1, 32]
     assert metadata(source)[".max_flat_workgroup_size"] == 512
-    assert {"type": "SizeEqual", "index": 1, "value": 1} in [state(p) for p in ProblemPredicate.W4A16DecodePredicates(config)]
+    assert {"type": "SizeEqual", "index": 1, "value": 1} in _size_bounds(config)
 
 
 @pytest.mark.parametrize("name", ["generated_prefill", "unrelated_kernel", ""])
 def test_decode_bounds_do_not_apply_to_other_kernels(name):
-    assert ProblemPredicate.W4A16DecodePredicates({"CustomKernelName": name}) == []
+    assert _size_bounds({"CustomKernelName": name}) == []
 
 
 def test_no_shipped_w4a16_custom_assembly_or_hip_source():

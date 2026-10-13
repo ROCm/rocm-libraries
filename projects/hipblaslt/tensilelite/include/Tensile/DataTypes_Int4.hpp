@@ -3,13 +3,9 @@
 
 #pragma once
 
-#include <tensilelitehost/export.h>
-
 #include <cstdint>
 #include <iostream>
 #include <string>
-
-#define TENSILE_USE_INT4
 
 namespace TensileLite
 {

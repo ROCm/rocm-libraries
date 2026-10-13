@@ -79,6 +79,14 @@ def configureSolution(state):
                  GlobalSplitU=1, GlobalSplitUAlgorithm="MultipleBuffer", StaggerU=0,
                  WorkGroupMapping=1, AssertSummationElementMultiple=256,
                  SourceSwap=False, ConvertAfterDS=False, CustomKernelName="")
+    state["AssertSizeEqual"] = {2: 1}
+    state["AssertSizeGreaterThan"] = {3: 0}
+    state["AssertSizeLessThan"] = {}
+    if config.maxN == 1:
+        state["AssertSizeEqual"][1] = 1
+    else:
+        state["AssertSizeGreaterThan"][1] = 0
+        state["AssertSizeLessThan"][1] = config.maxN + 1
     state["InternalSupportParams"].update(KernArgsVersion=3, UseUniversalArgs=True,
                                         SupportUserGSU=False, SupportCustomWGM=False,
                                         SupportCustomStaggerU=False)

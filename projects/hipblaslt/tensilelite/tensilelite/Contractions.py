@@ -74,8 +74,7 @@ class ProblemType:
                  'highPrecisionAccumulate', 'useInitialStridesAB', 'useInitialStridesCD', 'stridedBatched', 'groupedGemm',
                  'useGradient', 'activationType', 'activationArgLength', 'activationComputeDataType', 'activationNoGuard',
                  'sparse', 'f32XdlMathOp', 'supportDeviceUserArguments', 'outputAmaxD', 'swizzleTensorA', 'swizzleTensorB', 'metadataLayout',
-                 'mxBlockA', 'mxBlockB', 'mxTypeA', 'mxTypeB', 'mxScaleFormat', 'fusedGemmA2A',
-                 'scaleBlockSizesA', 'scaleZeroPointA', 'int4EncodingA']
+                 'mxBlockA', 'mxBlockB', 'mxTypeA', 'mxTypeB', 'mxScaleFormat', 'fusedGemmA2A']
     @classmethod
     def FromOriginalState(cls, d):
         indices = [None]*d['TotalIndices']
@@ -555,21 +554,6 @@ class ProblemPredicate(Properties.Predicate):
             raise RuntimeError("Unknown assertion key: {}".format(key))
 
     @classmethod
-    def W4A16DecodePredicates(cls, state):
-        if not state.get("W4A16Decode"):
-            return []
-        from .KernelWriterW4A16Decode import DecodeConfig
-        maxN = DecodeConfig.fromSolution(state).maxN
-        predicates = [cls("SizeEqual", index=2, value=1),
-                      cls("SizeGreaterThan", index=3, value=0)]
-        if maxN == 1:
-            predicates.append(cls("SizeEqual", index=1, value=1))
-        else:
-            predicates.extend([cls("SizeGreaterThan", index=1, value=0),
-                               cls("SizeLessThan", index=1, value=maxN + 1)])
-        return predicates
-
-    @classmethod
     def CompoundPredicates(cls, state, problemType):
         rv = []
 
@@ -713,7 +697,6 @@ class ProblemPredicate(Properties.Predicate):
     def FromOriginalState(cls, d, problemType, morePreds=[]):
         problemTypePreds = problemType.predicates(True, True, True)
         compoundPreds = cls.CompoundPredicates(d, problemType)
-        compoundPreds += cls.W4A16DecodePredicates(d)
         extraPreds = problemTypePreds + compoundPreds + morePreds
 
         predicates = [p for p in map(cls.FromOriginalKeyPair, d.items()) if p is not None] + extraPreds

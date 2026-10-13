@@ -10,6 +10,22 @@ from test_w4a16_block_dequant import toolchain, _solution, _emit_solution, FP16_
 pytestmark = pytest.mark.unit
 
 
+def _size_bounds(config):
+    from Tensile.Common.Utilities import state
+    from Tensile.Contractions import ASSERT_DIM_MAP_PREDICATES, ProblemPredicate
+
+    def leaves(predicate):
+        if predicate["type"] == "And":
+            return [leaf for child in predicate["value"] for leaf in leaves(child)]
+        return [predicate]
+
+    bounds = []
+    for key in ASSERT_DIM_MAP_PREDICATES:
+        if key.startswith("AssertSize") and config.get(key):
+            bounds.extend(leaves(state(ProblemPredicate.FromOriginalKeyPair((key, config[key])))))
+    return sorted(bounds, key=lambda p: ({2: 0, 3: 1, 1: 2}[p["index"]], p["type"]))
+
+
 def solution(toolchain, **overrides):
     pt = dict(FP16_UNSIGNED, ScaleBlockSizesA=[32, 64, 128])
     pt.update(overrides.pop("problemType", {}))
@@ -23,9 +39,6 @@ def solution(toolchain, **overrides):
                                     [4, 1, 4, 128, 4, False, False],
                                     [2, 1, 4, 512, 1, True, True]])
 def test_decode_generates_universal_abi(toolchain, zero_point, decode):
-    from Tensile.Common.Utilities import state
-    from Tensile.Contractions import ProblemPredicate
-
     sol = solution(toolchain, zeroPoint=zero_point, decode=decode)
     kernel, src = _emit_solution(toolchain, sol)
     metadata = yaml.safe_load(src.split(".amdgpu_metadata", 1)[1].split(".end_amdgpu_metadata", 1)[0])["amdhsa.kernels"][0]
@@ -41,7 +54,7 @@ def test_decode_generates_universal_abi(toolchain, zero_point, decode):
     assert "ds_bpermute_b32" in src
     assert "s_mov_b64 exec_lo" not in src
     assert "label_Fallback:" in src
-    predicates = [state(p) for p in ProblemPredicate.W4A16DecodePredicates(sol)]
+    predicates = _size_bounds(sol)
     assert {"type": "SizeEqual", "index": 2, "value": 1} in predicates
     bound = {"type": "SizeEqual", "index": 1, "value": 1} if decode[4] == 1 else {
         "type": "SizeLessThan", "index": 1, "value": 5}

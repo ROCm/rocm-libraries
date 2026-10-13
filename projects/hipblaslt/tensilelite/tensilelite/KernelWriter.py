@@ -61,7 +61,7 @@ from .Components.DecouplePGR import decouplePGRBlocks, decoupledSingleBuffered, 
 from .Components.DecouplePGR import tdmWaveIssueOrder, decoupledThickGateRelaxation, dcpThickGateFromTokenPasses, dcpThickGateUncoveredSites, dcpIsFillLabel, DCP_TENSORCNT_RE, DCP_THICK_GATE_TEXT, DCP_THICK_GATE_TOKENS
 from .Components.TDMFuse import tdmWavePartition
 from .SolutionStructs import Solution, isPackedIndex
-from .SolutionStructs.Problem import blockDequantItersPerGroupA, blockDequantPackedFp16A
+from .SolutionStructs.Problem import blockDequantItersPerGroupA, blockDequantPackedFp16A, usesBlockDequantZeroPointA
 from .SolutionStructs.Utilities import getMiInputType, isSubtileIterateMode
 from .AsmMemoryInstruction import MemoryInstruction
 from .Activation import ActivationModule
@@ -11793,6 +11793,8 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     if kernel["ProblemType"]["UseScaleAB"]:
       _reg("address", "AddressScaleA")
       _reg("address", "AddressScaleB")
+      if usesBlockDequantZeroPointA(kernel["ProblemType"]):
+        _reg("address", "AddressScaleZeroA")
     if kernel["ProblemType"]["UseScaleCD"]:
       _reg("address", "AddressScaleC")
       _reg("address", "AddressScaleD")
@@ -11853,6 +11855,9 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     if isPersistentDataParallel(kernel) and not kernel["ProblemType"]["GroupedGemm"]:
       for tensor in ("D", "C", "A", "B"):
         _reg("uint64", "BatchOffset" + tensor)
+
+    if len(kernel["ProblemType"]["ScaleBlockSizesA"]) > 1:
+      _reg("uint32", "ScaleBlockSizeA")
 
   def _getKernelSource(self, kernel: Solution):
     """
