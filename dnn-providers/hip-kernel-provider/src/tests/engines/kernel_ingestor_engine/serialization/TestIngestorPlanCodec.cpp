@@ -3,12 +3,14 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <variant>
 #include <vector>
 
@@ -40,6 +42,7 @@ using hipdnn_plugin_sdk::ingestor::KernelSourceKind;
 
 constexpr size_t HEADER_SIZE = INGESTOR_PLAN_HEADER_SIZE;
 constexpr size_t ALIGNMENT = INGESTOR_PLAN_BODY_ALIGNMENT;
+constexpr size_t SHA256_HEX_LENGTH = INGESTOR_PLAN_DIGEST_SIZE * 2;
 constexpr size_t FILE_IDENTIFIER_OFFSET = sizeof(flatbuffers::uoffset_t);
 constexpr std::array<uint8_t, 4> PLAN_IDENTIFIER = {0x48, 0x4B, 0x53, 0x50}; // HKSP
 constexpr std::array<uint8_t, 4> FOREIGN_IDENTIFIER = {0x58, 0x58, 0x58, 0x58}; // XXXX
@@ -379,6 +382,93 @@ TEST(TestIngestorPlanCodec, RejectsABodyWithAnotherFileIdentifier)
     std::memcpy(identifier, FOREIGN_IDENTIFIER.data(), FOREIGN_IDENTIFIER.size());
     reseal(payload);
     expectDecodeRefusal(payload, HIPDNN_PLUGIN_STATUS_INVALID_VALUE, "verifier");
+}
+
+// The checks that hold for every payload the reader returns, whatever a damaged body byte
+// changed. A length read out of a damaged body cannot exceed the body it came from.
+void expectSelfConsistentPayload(const IngestorPlanPayload& decoded, size_t bodySize)
+{
+    EXPECT_EQ(decoded.sha256.size(), SHA256_HEX_LENGTH);
+    EXPECT_TRUE(std::all_of(decoded.sha256.begin(), decoded.sha256.end(), [](char character) {
+        return (character >= '0' && character <= '9') || (character >= 'a' && character <= 'f');
+    })) << decoded.sha256;
+    EXPECT_TRUE(decoded.runtimePassByValueUids.empty());
+    EXPECT_LE(decoded.codeObject.size(), bodySize);
+    EXPECT_LE(decoded.symbol.size(), bodySize);
+    EXPECT_LE(decoded.target.size(), bodySize);
+    EXPECT_LE(decoded.dispatchSymbol.size(), bodySize);
+    EXPECT_LE(decoded.providerVersion.size(), bodySize);
+    EXPECT_LE(decoded.recordedSignature.size(), bodySize);
+    EXPECT_LE(decoded.launchValues.size(), bodySize);
+    for(const auto& value : decoded.launchValues)
+    {
+        EXPECT_FALSE(value.first.empty());
+        EXPECT_LE(value.first.size(), bodySize);
+    }
+}
+
+// Decodes a payload whose body carries damage under a matching digest. Two outcomes are
+// allowed: a load refusal, or a payload that is self-consistent. The refusal must carry a
+// load status and the message prefix of its category. Any other exception type leaves this
+// function and fails the test. Returns true when the reader refused.
+bool decodeRefusesOrReadsAConsistentPayload(const std::vector<uint8_t>& payload)
+{
+    try
+    {
+        expectSelfConsistentPayload(decode(payload), payload.size() - HEADER_SIZE);
+        return false;
+    }
+    catch(const HipdnnPluginException& error)
+    {
+        const std::string message = error.getMessage();
+        const bool incompatible = error.getStatus() == HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE;
+        EXPECT_TRUE(incompatible || error.getStatus() == HIPDNN_PLUGIN_STATUS_INVALID_VALUE)
+            << "status " << static_cast<int>(error.getStatus()) << ": " << message;
+        const std::string_view prefix
+            = incompatible ? INGESTOR_PLAN_INCOMPATIBLE_PREFIX : INGESTOR_PLAN_DAMAGED_PREFIX;
+        EXPECT_EQ(message.rfind(prefix, 0), 0U) << message;
+        return true;
+    }
+}
+
+// Every body byte in turn, flipped and sealed again, so the damage passes the digest and
+// reaches the verifier and the structure checks. A flip inside field data still decodes, and
+// a flip in an offset, a length or a vtable entry is refused.
+TEST(TestIngestorPlanCodec, RefusesOrReadsEveryResealedBodyByteFlip)
+{
+    // Covers every body byte. A larger stride samples the body instead.
+    constexpr size_t STRIDE = 1;
+    constexpr uint8_t FLIP_MASK = 0xFF;
+
+    const std::vector<uint8_t> encoded
+        = encodeIngestorPlan(makePayload(KernelSourceKind::EMBEDDED_SOURCE));
+    const size_t bodySize = encoded.size() - HEADER_SIZE;
+
+    size_t refusedCount = 0;
+    size_t readCount = 0;
+    for(size_t offset = 0; offset < bodySize; offset += STRIDE)
+    {
+        SCOPED_TRACE("body byte " + std::to_string(offset) + " of " + std::to_string(bodySize));
+        std::vector<uint8_t> damaged = encoded;
+        const size_t index = HEADER_SIZE + offset;
+        damaged[index] = static_cast<uint8_t>(damaged[index] ^ FLIP_MASK);
+        reseal(damaged);
+
+        // An exact-size heap copy lets ASAN see any read past the end of the payload.
+        const std::vector<uint8_t> probe(damaged.begin(), damaged.end());
+        if(decodeRefusesOrReadsAConsistentPayload(probe))
+        {
+            ++refusedCount;
+        }
+        else
+        {
+            ++readCount;
+        }
+    }
+
+    // The sweep reaches both outcomes, so neither branch of the check above is dead.
+    EXPECT_GT(refusedCount, 0U);
+    EXPECT_GT(readCount, 0U);
 }
 
 TEST(TestIngestorPlanCodec, RejectsAnOversizeBody)
