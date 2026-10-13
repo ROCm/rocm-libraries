@@ -15,14 +15,16 @@ All options must come **before** `--`; everything after it is the command to run
 
 ## Usage
 
-`hipblaslt-cotenant` and its kernel `hipblaslt-cotenant-kernel` install into
-`bin/` next to `hipblaslt-bench`:
+The hipblaslt clients build produces `hipblaslt-cotenant-kernel` and copies
+`hipblaslt-cotenant` beside it; both install into `bin/` next to `hipblaslt-bench`:
 
 - **Installed:** `hipblaslt-cotenant --cus 64 -- hipblaslt-bench ...` (on `PATH`).
 - **Build tree:** `<build>/clients/hipblaslt-cotenant --cus 64 -- ...`.
-- **Source checkout:** `clients/scripts/cotenant/hipblaslt-cotenant --cus 64 -- ...`
-  builds the kernel on first use into `~/.cache/hipblaslt/cotenant`. Point
-  `--binary` at a prebuilt kernel to skip that.
+
+The launcher uses the kernel beside it; pass `--binary PATH` to use another one.
+Like `hipblaslt-bench`, the kernel runs only on the build's `GPU_TARGETS`; on
+another GPU it exits before `READY` and the launcher reports that it did not
+become resident.
 
 `hipblaslt-bench` itself needs the ROCm runtime libraries on the loader path; if
 it fails to start with a `libomp.so` error, export
@@ -66,11 +68,9 @@ residency without polling driver internals or guessing a settle time.
 
 `hipblaslt-cotenant`:
 
-1. builds the kernel on first use (arch auto-detected via `rocminfo`, override
-   with `--arch`; compiler defaults to `hipcc`, override with `HIPCC=...`),
-2. launches `--cus` workgroups and waits for their `READY` marker,
-3. runs the command after `--` under that contention,
-4. kills the cotenant when the command exits or the script is interrupted.
+1. launches `--cus` workgroups and waits for their `READY` marker,
+2. runs the command after `--` under that contention,
+3. kills the cotenant when the command exits or the script is interrupted.
 
 Pass `--cus 0` to run the command with no cotenant at all — the uncontended
 baseline. Otherwise `--cus` must be at least 1 and at most the device CU count
