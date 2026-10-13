@@ -41,11 +41,14 @@
 
 //------------------------------------------------------------------------------
 // Hermitianize A, on host, copying conjugate of strictly lower triangle to
-// upper, or vice-versa.
+// upper, or vice-versa, and make diagonal real.
+// If uplo=full, nothing to do.
 // A is n-by-n.
 template <typename T, typename I, typename Th>
 void cpu_hermitianize(const rocblas_fill uplo, const I n, Th hA, const I lda)
 {
+    using std::real;
+
     if(uplo == rocblas_fill_lower)
     {
         for(I j = 0; j < n; ++j)
@@ -54,6 +57,7 @@ void cpu_hermitianize(const rocblas_fill uplo, const I n, Th hA, const I lda)
             {
                 hA[i + j * lda] = sconj(hA[j + i * lda]);
             }
+            hA[j + j * lda] = real(hA[j + j*lda]);
         }
     }
     else if(uplo == rocblas_fill_upper)
@@ -64,9 +68,10 @@ void cpu_hermitianize(const rocblas_fill uplo, const I n, Th hA, const I lda)
             {
                 hA[j + i * lda] = sconj(hA[i + j * lda]);
             }
+            hA[j + j * lda] = real(hA[j + j*lda]);
         }
     }
-    else
+    else if (uplo != rocblas_fill_full)
     {
         throw std::runtime_error("unknown uplo");
     }
