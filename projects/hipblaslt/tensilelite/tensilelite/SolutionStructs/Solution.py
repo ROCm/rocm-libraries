@@ -6735,11 +6735,21 @@ class Solution(collections.abc.Mapping):
         # max(GlobalAccumulation case, non-GlobalAccumulation)
         ldsNumElementsRemapC = max(ldsNumElementsRemapC, ldsNumElementsRemapC * (computeBytes / state["ProblemType"]["DestDataType"].numBytes()))
         ldsSize = ldsNumElementsRemapC * state["ProblemType"]["DestDataType"].numBytes()
+        # defaultRemap must also satisfy the per-wave LDS-row constraint checked
+        # explicitly below ((MacroTile0*MatrixInstN)//MIWaveGroup[0] >=
+        # SRVW*WavefrontSize), or it falls through to a hard reject later for
+        # small MacroTile0 (e.g. MT0=16 sparse/int8 MI16 kernels). Shrink it the
+        # same way the explicit srMaxVw path already does, instead of rejecting
+        # outright or disabling storeRemap when a smaller width would still work.
+        while defaultRemap > 1 and \
+            (state["MacroTile0"]*state["MatrixInstN"])//state["MIWaveGroup"][0] < defaultRemap*state["WavefrontSize"]:
+          defaultRemap //= 2
         if not math.log(state["MacroTile0"],2).is_integer() or \
             ldsSize > state["MaxLDS"] or \
             state["SourceSwap"] or \
             (state["GlobalSplitU"] > 1 or state["GlobalSplitU"] == -1) and (state["_GlobalAccumulation"] != 'MultipleBuffer') or \
-            state["MatrixInstBN"] > 1 and state["MatrixInstN"] == 4 :
+            state["MatrixInstBN"] > 1 and state["MatrixInstN"] == 4 or \
+            (state["MacroTile0"]*state["MatrixInstN"])//state["MIWaveGroup"][0] < defaultRemap*state["WavefrontSize"] :
           state["StoreRemapVectorWidth"] = 0
         else:
           state["StoreRemapVectorWidth"] = defaultRemap
