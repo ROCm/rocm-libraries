@@ -545,7 +545,7 @@ void rocke_gfx950_attention_tiled_3d_emit_async_infra(
     ctx->zero_soff = rocke_b_const_i32(B, 0);
 
     ctx->seq_pages = NULL;
-    ctx->lane_within_b = NULL;
+    memset(ctx->lane_within_b, 0, sizeof(ctx->lane_within_b));
     ctx->paged_kv_desc = NULL;
     /* seq_base = seq_idx * bt_stride_p (line 592) */
     if(ctx->strided_kv)
@@ -591,9 +591,52 @@ void rocke_gfx950_attention_tiled_3d_emit_async_infra(
         rocke_value_t* head_b
             = rocke_b_mul(B, ctx->kv_head_idx, rocke_b_const_i32(B, CFG.kv_stride_h_b));
         rocke_value_t* tok_head = rocke_b_add(B, tok_b, head_b);
-        rocke_value_t* dim_b = rocke_b_mul(B, lane_dim, rocke_b_const_i32(B, CFG.KV_BYTES));
-        ctx->lane_within_b = rocke_b_add(B, tok_head, dim_b);
+        if(CFG.KV_SWZ)
+        {
+            /* A call's LDS rows are ph + lane_tok (mod chunks per row), with ph =
+             * its first row; ph is a multiple of tokens_per_call and lane_tok <
+             * tokens_per_call, so the sum never wraps. The lane writing LDS
+             * chunk c fetches chunk c ^ row. */
+            /* n_ph = HD * HD / 4096 <= 16 (HD <= 256, as the PV carry arrays assume). */
+            const int n_ph = CFG.KV_CHUNKS_PER_ROW / CFG.tokens_per_call;
+            rocke_value_t* lane_chunk = rocke_b_div(B, lane_dim, rocke_b_const_i32(B, 8));
+            int ph_i;
+            for(ph_i = 0; ph_i < n_ph && ph_i < CFG.kv_calls_per_tile; ++ph_i)
+            {
+                rocke_value_t* row_ph
+                    = rocke_b_add(B, lane_tok, rocke_b_const_i32(B, ph_i * CFG.tokens_per_call));
+                rocke_value_t* src_chunk = rocke_b_xor(B, lane_chunk, row_ph);
+                rocke_value_t* src_b
+                    = rocke_b_mul(B, src_chunk, rocke_b_const_i32(B, 8 * CFG.KV_BYTES));
+                ctx->lane_within_b[ph_i] = rocke_b_add(B, tok_head, src_b);
+            }
+        }
+        else
+        {
+            rocke_value_t* dim_b = rocke_b_mul(B, lane_dim, rocke_b_const_i32(B, CFG.KV_BYTES));
+            ctx->lane_within_b[0] = rocke_b_add(B, tok_head, dim_b);
+        }
     }
+}
+
+rocke_value_t* rocke_gfx950_attention_tiled_3d_kv_col(
+    rocke_gfx950_attention_tiled_3d_build_ctx_t* ctx, rocke_value_t* row, rocke_value_t* col)
+{
+    rocke_value_t* col_chunk;
+    rocke_value_t* row_ph;
+    rocke_value_t* chunk;
+    rocke_value_t* chunk_col;
+    rocke_value_t* in_chunk;
+    if(!CFG.KV_SWZ)
+    {
+        return col;
+    }
+    col_chunk = rocke_b_div(B, col, rocke_b_const_i32(B, 8));
+    row_ph = rocke_b_mod(B, row, rocke_b_const_i32(B, CFG.KV_CHUNKS_PER_ROW));
+    chunk = rocke_b_xor(B, col_chunk, row_ph);
+    chunk_col = rocke_b_mul(B, chunk, rocke_b_const_i32(B, 8));
+    in_chunk = rocke_b_mod(B, col, rocke_b_const_i32(B, 8));
+    return rocke_b_add(B, chunk_col, in_chunk);
 }
 
 /* _tile_page_ids(kv_tile_idx): one guarded block-table load per page of the
@@ -639,8 +682,9 @@ static void rocke__issue_paged_tile(rocke_gfx950_attention_tiled_3d_build_ctx_t*
     {
         const int blk = call / CFG.calls_per_block;
         const int tok0 = (call % CFG.calls_per_block) * CFG.tokens_per_call;
-        rocke_value_t* voff
-            = rocke_b_add(B, ctx->lane_within_b, rocke_b_const_i32(B, tok0 * CFG.kv_stride_tok_b));
+        const int ph_i = CFG.KV_SWZ ? (call % (CFG.KV_CHUNKS_PER_ROW / CFG.tokens_per_call)) : 0;
+        rocke_value_t* voff = rocke_b_add(
+            B, ctx->lane_within_b[ph_i], rocke_b_const_i32(B, tok0 * CFG.kv_stride_tok_b));
         rocke_value_t* call_rsrc;
         rocke_value_t* soff;
         if(CFG.I64_KV_ADDR)

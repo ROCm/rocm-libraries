@@ -137,6 +137,7 @@ rocke_unified_attention_3d_tiled_spec_t rocke_unified_attention_3d_tiled_spec_de
     s.use_wide_kv_load = false;
     s.use_decode_grid = false;
     s.kv_cache_policy = "all";
+    s.use_kv_lds_swizzle = false;
     return s;
 }
 
@@ -165,6 +166,12 @@ bool rocke_unified_attention_3d_tiled_spec_validate(
     {
         rocke_i_set_err(
             b, ROCKE_ERR_VALUE, "gfx942 3D does not implement the kv_cache_policy knob");
+        return false;
+    }
+    if(s->use_kv_lds_swizzle)
+    {
+        rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "gfx942 3D does not implement the use_kv_lds_swizzle knob");
         return false;
     }
     return true;

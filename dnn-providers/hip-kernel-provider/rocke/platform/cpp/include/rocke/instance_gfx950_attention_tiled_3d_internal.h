@@ -141,6 +141,8 @@ typedef struct rocke_gfx950_attn_tiled_3d_config
     bool I64_KV_ADDR; /* spec.use_i64_kv_addr (64-bit paged-KV, caches > 2 GiB) */
     bool DECODE_GRID; /* spec.use_decode_grid (seq_idx = block_id_x, no search) */
     int KV_CACHE_BITS; /* cache_policy_from_name(spec.kv_cache_policy): the K/V copies */
+    bool KV_SWZ; /* spec.use_kv_lds_swizzle                              */
+    int KV_CHUNKS_PER_ROW; /* HD // 8: 16-byte chunks per K/V LDS row        */
     int KV_BYTES; /* 1 if KV_FP8 else 2                                   */
 
     /* wide-K loop trip counts (lines 293-298). */
@@ -316,7 +318,10 @@ typedef struct rocke_gfx950_attention_tiled_3d_build_ctx
     rocke_value_t* zero_soff; /* const_i32(0)                              */
     rocke_value_t* seq_base; /* seq_idx * bt_stride_p                     */
     rocke_value_t* seq_pages; /* cdiv(seq_len, BS): live pages (page-id guard)  */
-    rocke_value_t* lane_within_b; /* per-lane byte offset within a page (PAGE_IDS) */
+    /* Per-lane byte offset within a page (PAGE_IDS), indexed by the call's
+     * swizzle phase / tokens_per_call (only [0] without KV_SWZ). The phase
+     * count is HD * HD / 4096 <= 16 (HD <= 256). */
+    rocke_value_t* lane_within_b[16];
     rocke_value_t* first_page_ids[8]; /* tile_start's page ids (PAGE_IDS; N <= 8) */
     rocke_value_t*
         kv_block_bytes_c; /* const_i32(kv_stride_blk_b): 1-block buffer bound (i64 path) */
@@ -405,6 +410,11 @@ rocke_value_t* rocke_gfx950_attention_tiled_3d_mfma_16x16_c_row(
  * the ctx K/V handles + the K/V scale (fp8 path). */
 /* page_ids: the tile's N_BLOCKS_PER_TILE wave-uniform page ids (cfg.PAGE_IDS,
  * fp16/bf16), else NULL (fp8 sync loader). */
+/* _kv_col(row, col): LDS column of K/V element (row, col); its 16-byte chunk
+ * is permuted by the row under KV_SWZ (col itself otherwise). */
+rocke_value_t* rocke_gfx950_attention_tiled_3d_kv_col(
+    rocke_gfx950_attention_tiled_3d_build_ctx_t* ctx, rocke_value_t* row, rocke_value_t* col);
+
 /* _tile_page_ids(kv_tile_idx): the tile's page ids, one guarded block-table load
  * each, made wave-uniform; writes cfg.N_BLOCKS_PER_TILE values to out. */
 void rocke_gfx950_attention_tiled_3d_tile_page_ids(rocke_gfx950_attention_tiled_3d_build_ctx_t* ctx,

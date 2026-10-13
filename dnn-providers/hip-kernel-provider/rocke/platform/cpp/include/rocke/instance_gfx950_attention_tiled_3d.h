@@ -197,6 +197,9 @@ typedef struct rocke_unified_attention_3d_tiled_spec
     /* Cache policy of the async K/V copies ("all", "global", "stream", "nt";
      * rocke_cache_policy_from_name). gfx950 only; gfx942 accepts "all". */
     const char* kv_cache_policy; /* "all" */
+    /* K/V LDS rows store their 16-byte chunks XOR-permuted by the row (paged
+     * fp16/bf16 K/V only). gfx950 only; gfx942 accepts false. */
+    bool use_kv_lds_swizzle; /* False */
 } rocke_unified_attention_3d_tiled_spec_t;
 
 rocke_unified_attention_3d_tiled_spec_t rocke_unified_attention_3d_tiled_spec_default(void);

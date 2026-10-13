@@ -184,6 +184,12 @@ class UnifiedAttention3DTiledSpec:
     # (``_kv_cache_policy_3d``). The fp8 K/V loader is synchronous and keeps
     # "all".
     kv_cache_policy: str = "all"
+    # K/V LDS tiles store each row's 16-byte chunks XOR-permuted by the row
+    # (chunk q of row r at q ^ (r % (head_size // 8))), which spreads the QK
+    # and PV reads over the LDS banks. The DMA lanes fetch permuted source
+    # chunks, so the copies stay contiguous and need no padding. Paged
+    # fp16/bf16 K/V only.
+    use_kv_lds_swizzle: bool = False
 
     def __post_init__(self):
         if self.kv_layout not in ("paged", "strided"):
@@ -207,6 +213,10 @@ class UnifiedAttention3DTiledSpec:
             )
         if self.kv_cache_policy != "all" and self.kv_storage_dtype is not None:
             raise ValueError("kv_cache_policy applies to fp16/bf16 KV storage only")
+        if self.use_kv_lds_swizzle and (
+            self.kv_layout != "paged" or self.kv_storage_dtype is not None
+        ):
+            raise ValueError("use_kv_lds_swizzle needs paged fp16/bf16 KV")
         t = self.tile_size_override
         if t is not None:
             if t < self.block_size or t % self.block_size or t > 128:
@@ -284,6 +294,7 @@ class UnifiedAttention3DTiledSpec:
             "qqb" if self.use_qq_bias else "",
             "dg" if self.use_decode_grid else "",
             f"kvcp{self.kv_cache_policy}" if self.kv_cache_policy != "all" else "",
+            "kvswz" if self.use_kv_lds_swizzle else "",
             "stridedkv" if self.kv_layout == "strided" else "",
         )
 
@@ -393,6 +404,8 @@ def build_unified_attention_3d_tiled(
     # FP8 K/V cache: see ``UnifiedAttention2DTiledSpec.kv_storage_dtype``.
     KV_FP8 = spec.kv_storage_dtype == "fp8e4m3"
     KV_CACHE_BITS = cache_policy_from_name(spec.kv_cache_policy)
+    KV_SWZ = spec.use_kv_lds_swizzle
+    KV_CHUNKS_PER_ROW = HD // 8  # 16-byte chunks per K/V LDS row
     KV_BYTES = 1 if KV_FP8 else 2
     kv_io_dtype = FP8E4M3 if KV_FP8 else dtype
 
@@ -754,13 +767,41 @@ def build_unified_attention_3d_tiled(
         calls_per_block = BS // tokens_per_call
         lane_tok = b.div(lane_half_base, b.const_i32(HD))
         lane_dim = b.mod(lane_half_base, b.const_i32(HD))
-        lane_within_b = b.add(
-            b.add(
-                b.mul(lane_tok, b.const_i32(kv_stride_tok_b)),
-                b.mul(kv_head_idx, b.const_i32(kv_stride_h_b)),
-            ),
-            b.mul(lane_dim, b.const_i32(KV_BYTES)),
+        lane_tok_head = b.add(
+            b.mul(lane_tok, b.const_i32(kv_stride_tok_b)),
+            b.mul(kv_head_idx, b.const_i32(kv_stride_h_b)),
         )
+        # Per-lane byte offset within a page, keyed by the call's swizzle
+        # phase (always 0 without the swizzle).
+        lane_within_b = {}
+        if KV_SWZ:
+            # A call's LDS rows are ph + lane_tok (mod chunks per row), with
+            # ph = its first row; ph is a multiple of tokens_per_call and
+            # lane_tok < tokens_per_call, so the sum never wraps. The lane
+            # writing LDS chunk c fetches chunk c ^ row.
+            lane_chunk = b.div(lane_dim, b.const_i32(8))
+            for call in range(kv_calls_per_tile):
+                ph = (call * tokens_per_call) % KV_CHUNKS_PER_ROW
+                if ph in lane_within_b:
+                    continue
+                src_chunk = b.xor(lane_chunk, b.add(lane_tok, b.const_i32(ph)))
+                lane_within_b[ph] = b.add(
+                    lane_tok_head, b.mul(src_chunk, b.const_i32(8 * KV_BYTES))
+                )
+        else:
+            lane_within_b[0] = b.add(
+                lane_tok_head, b.mul(lane_dim, b.const_i32(KV_BYTES))
+            )
+
+    def _kv_col(row: Value, col: Value) -> Value:
+        # LDS column of K/V element (row, col): its 16-byte chunk is permuted
+        # by the row under the swizzle.
+        if not KV_SWZ:
+            return col
+        chunk = b.xor(
+            b.div(col, b.const_i32(8)), b.mod(row, b.const_i32(KV_CHUNKS_PER_ROW))
+        )
+        return b.add(b.mul(chunk, b.const_i32(8)), b.mod(col, b.const_i32(8)))
 
     def _tile_page_ids(kv_tile_idx: Value) -> list:
         # A tile starts below seq_len, so its first page is always live.
@@ -788,7 +829,8 @@ def build_unified_attention_3d_tiled(
         for call in range(kv_calls_per_tile):
             blk = call // calls_per_block
             tok0 = (call % calls_per_block) * tokens_per_call
-            voff = b.add(lane_within_b, b.const_i32(tok0 * kv_stride_tok_b))
+            ph = (call * tokens_per_call) % KV_CHUNKS_PER_ROW if KV_SWZ else 0
+            voff = b.add(lane_within_b[ph], b.const_i32(tok0 * kv_stride_tok_b))
             if I64_KV_ADDR:
                 base_i64 = b.mul(
                     b.zext(page_ids[blk], I64), b.const_i64(kv_stride_blk_b)
@@ -991,7 +1033,9 @@ def build_unified_attention_3d_tiled(
             for k in range(QK_K_ITERS):
                 kc_off = b.add(b.const_i32(k * 32), b.mul(lane_rg, b.const_i32(8)))
                 k_row = b.add(b.const_i32(n * 16), lane_col)
-                B_v = b.smem_load_vN(K_lds, cur_buf, k_row, kc_off, dtype=dtype, n=8)
+                B_v = b.smem_load_vN(
+                    K_lds, cur_buf, k_row, _kv_col(k_row, kc_off), dtype=dtype, n=8
+                )
                 acc_v = _mfma_16x16x32(b, dtype, B_v, A_kits[k], acc_v)
             S_n.append(acc_v)
 
@@ -1084,7 +1128,7 @@ def build_unified_attention_3d_tiled(
             for kb in range(QK_N_TILES):
                 row_lane = pv_tr_reader.row(b, k_offset=kb * 16, read=0)
                 A_v = b.ds_read_tr16_b64(
-                    V_lds, v_buf, row_lane, n_col_base, dtype=dtype
+                    V_lds, v_buf, row_lane, _kv_col(row_lane, n_col_base), dtype=dtype
                 )
                 B_p = b.vec_pack(
                     [b.cast_f32_to(p_regs[(kb, r)], dtype) for r in range(4)], dtype

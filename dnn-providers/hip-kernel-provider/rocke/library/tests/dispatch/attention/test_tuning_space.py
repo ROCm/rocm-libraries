@@ -153,8 +153,9 @@ class TestTuningSpace(unittest.TestCase):
             seqlen_q=1,
             seqlen_k=4096,
         )
-        # waves_per_eu (5) x kv_cache_policy ("stream" for decode, or "all").
-        self.assertEqual(len(specs), 10)
+        # waves_per_eu (5) x kv_cache_policy ("stream" for decode, or "all") x
+        # use_kv_lds_swizzle.
+        self.assertEqual(len(specs), 20)
 
     def test_tuning_ids_are_unique_and_hashed(self):
         _candidate, _req, specs = _specs_for(

@@ -201,6 +201,38 @@ _CONFIGS = {
         use_decode_grid=True,
         kv_cache_policy="stream",
     ),
+    12: dict(
+        # Single-sequence decode policy: T=64, 64 segments, swizzled K/V LDS.
+        head_size=128,
+        block_size=16,
+        num_query_heads=64,
+        num_kv_heads=8,
+        dtype="bf16",
+        num_segments=64,
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        kv_storage_dtype=None,
+        tile_size_override=64,
+        use_decode_grid=True,
+        kv_cache_policy="stream",
+        use_kv_lds_swizzle=True,
+    ),
+    13: dict(
+        # D256 swizzled K/V LDS with 64-bit paged-KV addressing, sinks, softcap.
+        head_size=256,
+        block_size=16,
+        num_query_heads=16,
+        num_kv_heads=2,
+        dtype="fp16",
+        num_segments=16,
+        use_sinks=True,
+        sliding_window=0,
+        has_softcap=True,
+        kv_storage_dtype=None,
+        use_i64_kv_addr=True,
+        use_kv_lds_swizzle=True,
+    ),
 }
 
 

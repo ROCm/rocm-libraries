@@ -205,6 +205,39 @@ static int make_spec(int idx, rocke_unified_attention_3d_tiled_spec_t* s)
         s->use_decode_grid = true;
         s->kv_cache_policy = "stream";
         break;
+    case 12:
+        /* Single-sequence decode policy: T=64, 64 segments, swizzled K/V LDS. */
+        s->head_size = 128;
+        s->block_size = 16;
+        s->num_query_heads = 64;
+        s->num_kv_heads = 8;
+        s->dtype = "bf16";
+        s->num_segments = 64;
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->kv_storage_dtype = NULL;
+        s->has_tile_size_override = true;
+        s->tile_size_override = 64;
+        s->use_decode_grid = true;
+        s->kv_cache_policy = "stream";
+        s->use_kv_lds_swizzle = true;
+        break;
+    case 13:
+        /* D256 swizzled K/V LDS with 64-bit paged-KV addressing, sinks, softcap. */
+        s->head_size = 256;
+        s->block_size = 16;
+        s->num_query_heads = 16;
+        s->num_kv_heads = 2;
+        s->dtype = "fp16";
+        s->num_segments = 16;
+        s->use_sinks = true;
+        s->sliding_window = 0;
+        s->has_softcap = true;
+        s->kv_storage_dtype = NULL;
+        s->use_i64_kv_addr = true;
+        s->use_kv_lds_swizzle = true;
+        break;
     default:
         return -1;
     }
