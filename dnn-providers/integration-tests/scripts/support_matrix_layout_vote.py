@@ -265,9 +265,6 @@ def render_by_engine(claims: Claims, percent: bool) -> list[str]:
         out += table(
             ["Op", "Total<br>graphs", *map(short_target_link, claims.targets)], rows
         )
-        unclaimed = [op for op in claims.ops if op not in claimed_ops]
-        if unclaimed:
-            out += [f"_No claims on any GPU:_ {', '.join(unclaimed)}", ""]
     return out
 
 

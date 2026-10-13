@@ -50,16 +50,12 @@ Generated from the committed support claims (10712 graphs).
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | **[SdpaFwd](#group-attention)** | 87 | ❌ | 🟡 13% | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
 
-_No claims on any GPU:_ Batchnorm, BatchnormBackward, BatchnormFwdInference, BatchnormInference, BatchnormInferenceAttributesVarianceExt, BatchnormInferenceAttributesVarianceExtPointwise, BatchnormInferencePointwise, BatchnormInferencePointwiseBatchnormBackward, BatchnormPointwise, BlockScaleDequantizeMatmul, ConvolutionBwd, ConvolutionFwd, ConvolutionFwdPointwise, ConvolutionWrw, Layernorm, LayernormBackward, Matmul, MatmulPointwise, Pointwise, PointwiseRMSNormBackward, RMSNorm, RMSNormBackward, RMSNormPointwise, Reduction, ResampleFwd, SdpaBackward, SdpaFwdRuntimeScale
-
 ### HIPBLASLT_ENGINE
 
 | Op | Total<br>graphs | [gfx90a](#gpu-gfx90a-linux)<br>L | [gfx942](#gpu-gfx942-linux)<br>L | [gfx950](#gpu-gfx950-linux)<br>L | [gfx1030](#gpu-gfx1030-windows)<br>W | [gfx1100](#gpu-gfx1100-linux)<br>L | [gfx1101](#gpu-gfx1101-linux)<br>L | [gfx1101](#gpu-gfx1101-windows)<br>W | [gfx1150](#gpu-gfx1150-linux)<br>L | [gfx1151](#gpu-gfx1151-linux)<br>L | [gfx1151](#gpu-gfx1151-windows)<br>W | [gfx1200](#gpu-gfx1200-linux)<br>L | [gfx1201](#gpu-gfx1201-linux)<br>L |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | **[Matmul](#group-matmul)** | 90 | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ | ❌ |
 | **[MatmulPointwise](#group-matmul)** | 243 | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ | ❌ |
-
-_No claims on any GPU:_ Batchnorm, BatchnormBackward, BatchnormFwdInference, BatchnormInference, BatchnormInferenceAttributesVarianceExt, BatchnormInferenceAttributesVarianceExtPointwise, BatchnormInferencePointwise, BatchnormInferencePointwiseBatchnormBackward, BatchnormPointwise, BlockScaleDequantizeMatmul, ConvolutionBwd, ConvolutionFwd, ConvolutionFwdPointwise, ConvolutionWrw, Layernorm, LayernormBackward, Pointwise, PointwiseRMSNormBackward, RMSNorm, RMSNormBackward, RMSNormPointwise, Reduction, ResampleFwd, SdpaBackward, SdpaFwd, SdpaFwdRuntimeScale
 
 ### HIP_MLOPS_ENGINE
 
@@ -82,8 +78,6 @@ _No claims on any GPU:_ Batchnorm, BatchnormBackward, BatchnormFwdInference, Bat
 | **[RMSNormPointwise](#group-rmsnorm)** | 2240 | 🟡 83% | 🟡 83% | 🟡 78% | ❌ | 🟡 78% | ❌ | 🟡 78% | 🟡 78% | 🟡 78% | 🟡 83% | 🟡 78% | ❌ |
 | **[ResampleFwd](#group-resample)** | 48 | ✅ | ✅ | ✅ | ❌ | ✅ | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ |
 
-_No claims on any GPU:_ BlockScaleDequantizeMatmul, ConvolutionBwd, ConvolutionFwd, ConvolutionFwdPointwise, ConvolutionWrw, Matmul, MatmulPointwise, Pointwise, Reduction, SdpaBackward, SdpaFwd, SdpaFwdRuntimeScale
-
 ### MIOPEN_ENGINE
 
 | Op | Total<br>graphs | [gfx90a](#gpu-gfx90a-linux)<br>L | [gfx942](#gpu-gfx942-linux)<br>L | [gfx950](#gpu-gfx950-linux)<br>L | [gfx1030](#gpu-gfx1030-windows)<br>W | [gfx1100](#gpu-gfx1100-linux)<br>L | [gfx1101](#gpu-gfx1101-linux)<br>L | [gfx1101](#gpu-gfx1101-windows)<br>W | [gfx1150](#gpu-gfx1150-linux)<br>L | [gfx1151](#gpu-gfx1151-linux)<br>L | [gfx1151](#gpu-gfx1151-windows)<br>W | [gfx1200](#gpu-gfx1200-linux)<br>L | [gfx1201](#gpu-gfx1201-linux)<br>L |
@@ -103,8 +97,6 @@ _No claims on any GPU:_ BlockScaleDequantizeMatmul, ConvolutionBwd, ConvolutionF
 | **[ConvolutionWrw](#group-convolution)** | 139 | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ | ❌ | ✅ | ✅ | ✅ | ❌ | ✅ |
 | **[Pointwise](#group-pointwise)** | 46 | 🟡 13% | 🟡 13% | 🟡 13% | 🟡 13% | ❌ | 🟡 13% | ❌ | 🟡 13% | 🟡 13% | 🟡 13% | ❌ | 🟡 13% |
 
-_No claims on any GPU:_ BlockScaleDequantizeMatmul, Layernorm, LayernormBackward, Matmul, MatmulPointwise, PointwiseRMSNormBackward, RMSNorm, RMSNormBackward, RMSNormPointwise, Reduction, ResampleFwd, SdpaBackward, SdpaFwd, SdpaFwdRuntimeScale
-
 ### MIOPEN_ENGINE_DETERMINISTIC
 
 | Op | Total<br>graphs | [gfx90a](#gpu-gfx90a-linux)<br>L | [gfx942](#gpu-gfx942-linux)<br>L | [gfx950](#gpu-gfx950-linux)<br>L | [gfx1030](#gpu-gfx1030-windows)<br>W | [gfx1100](#gpu-gfx1100-linux)<br>L | [gfx1101](#gpu-gfx1101-linux)<br>L | [gfx1101](#gpu-gfx1101-windows)<br>W | [gfx1150](#gpu-gfx1150-linux)<br>L | [gfx1151](#gpu-gfx1151-linux)<br>L | [gfx1151](#gpu-gfx1151-windows)<br>W | [gfx1200](#gpu-gfx1200-linux)<br>L | [gfx1201](#gpu-gfx1201-linux)<br>L |
@@ -114,15 +106,11 @@ _No claims on any GPU:_ BlockScaleDequantizeMatmul, Layernorm, LayernormBackward
 | **[ConvolutionFwdPointwise](#group-convolution)** | 1080 | ❌ | 🟡 80% | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | 🟡 55% | ❌ | ❌ |
 | **[ConvolutionWrw](#group-convolution)** | 139 | 🟡 78% | 🟡 78% | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ |
 
-_No claims on any GPU:_ Batchnorm, BatchnormBackward, BatchnormFwdInference, BatchnormInference, BatchnormInferenceAttributesVarianceExt, BatchnormInferenceAttributesVarianceExtPointwise, BatchnormInferencePointwise, BatchnormInferencePointwiseBatchnormBackward, BatchnormPointwise, BlockScaleDequantizeMatmul, Layernorm, LayernormBackward, Matmul, MatmulPointwise, Pointwise, PointwiseRMSNormBackward, RMSNorm, RMSNormBackward, RMSNormPointwise, Reduction, ResampleFwd, SdpaBackward, SdpaFwd, SdpaFwdRuntimeScale
-
 ### hipkernel:Gfx950AttentionDense
 
 | Op | Total<br>graphs | [gfx90a](#gpu-gfx90a-linux)<br>L | [gfx942](#gpu-gfx942-linux)<br>L | [gfx950](#gpu-gfx950-linux)<br>L | [gfx1030](#gpu-gfx1030-windows)<br>W | [gfx1100](#gpu-gfx1100-linux)<br>L | [gfx1101](#gpu-gfx1101-linux)<br>L | [gfx1101](#gpu-gfx1101-windows)<br>W | [gfx1150](#gpu-gfx1150-linux)<br>L | [gfx1151](#gpu-gfx1151-linux)<br>L | [gfx1151](#gpu-gfx1151-windows)<br>W | [gfx1200](#gpu-gfx1200-linux)<br>L | [gfx1201](#gpu-gfx1201-linux)<br>L |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | **[SdpaFwd](#group-attention)** | 87 | ❌ | ❌ | 🟡 51% | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-
-_No claims on any GPU:_ Batchnorm, BatchnormBackward, BatchnormFwdInference, BatchnormInference, BatchnormInferenceAttributesVarianceExt, BatchnormInferenceAttributesVarianceExtPointwise, BatchnormInferencePointwise, BatchnormInferencePointwiseBatchnormBackward, BatchnormPointwise, BlockScaleDequantizeMatmul, ConvolutionBwd, ConvolutionFwd, ConvolutionFwdPointwise, ConvolutionWrw, Layernorm, LayernormBackward, Matmul, MatmulPointwise, Pointwise, PointwiseRMSNormBackward, RMSNorm, RMSNormBackward, RMSNormPointwise, Reduction, ResampleFwd, SdpaBackward, SdpaFwdRuntimeScale
 
 ## Op groups
 
