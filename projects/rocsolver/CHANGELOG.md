@@ -7,7 +7,6 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 
 ### Added
 
-* Improved launch macro to detect invalid launch configuration.
 
 * Hessenberg reduction routines
     * GEHD2
@@ -26,6 +25,7 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 
 * Fixed a loss of accuracy in STEDC, and therefore in SYEVD and HEEVD, observed when the input
   matrix is scaled by a small number.
+* Improved kernel launches to detect invalid launch configuration.
 
 ### Known issues
 ### Upcoming changes

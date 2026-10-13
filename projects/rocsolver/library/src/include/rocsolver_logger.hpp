@@ -95,6 +95,33 @@ ROCSOLVER_BEGIN_NAMESPACE
 // explicitly check for valid grid and block in launch
 // configuration
 // ---------------------------------------------------------
+#ifdef NDEBUG
+
+#define ROCSOLVER_LAUNCH_KERNEL(name, grid_, block_, ...)                                           \
+    do                                                                                              \
+    {                                                                                               \
+        std::unique_ptr<rocsolver_logger::scope_guard<T>> _kernel_log_token;                        \
+        if(rocsolver_logger::is_logging_enabled() && rocsolver_logger::is_kernel_logging_enabled()) \
+        {                                                                                           \
+            rocsolver_logger::instance()->log_enter<T>(handle, nullptr, #name);                     \
+            _kernel_log_token = std::make_unique<rocsolver_logger::scope_guard<T>>(false, handle);  \
+        }                                                                                           \
+        auto const max_x_grid = 2147483647;                                                         \
+        auto const max_y_grid = 64 * 1024;                                                          \
+        auto const max_z_grid = 64 * 1024;                                                          \
+        bool const isvalid_grid = (1 <= grid_.x) && (grid_.x <= max_x_grid) && (1 <= grid_.y)       \
+            && (grid_.y <= max_y_grid) && (1 <= grid_.z) && (grid_.z <= max_z_grid);                \
+        bool const isvalid_block = (1 <= block_.x) && (block_.x <= 1024) && (1 <= block_.y)         \
+            && (block_.y <= 1024) && (1 <= block_.z) && (block_.z <= 1024)                          \
+            && ((block_.x * block_.y * block_.z) <= 1024);                                          \
+        bool const isvalid_config = (isvalid_grid && isvalid_block);                                \
+        if(!isvalid_config)                                                                         \
+        {                                                                                           \
+            THROW_IF_HIP_ERROR(hipErrorInvalidConfiguration);                                       \
+        }                                                                                           \
+        hipLaunchKernelGGL((name), grid_, block_, __VA_ARGS__);                                     \
+    } while(0)
+#else
 #define ROCSOLVER_LAUNCH_KERNEL(name, grid_, block_, ...)                                           \
     do                                                                                              \
     {                                                                                               \
@@ -125,6 +152,7 @@ ROCSOLVER_BEGIN_NAMESPACE
         }                                                                                           \
         hipLaunchKernelGGL((name), grid_, block_, __VA_ARGS__);                                     \
     } while(0)
+#endif
 
 /***************************************************************************
  * The rocsolver_log_entry struct records function data for trace and
