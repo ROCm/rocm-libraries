@@ -253,11 +253,19 @@ class TestSwapQKLowering(unittest.TestCase):
             build_wmma_fmha_swapqk(cfg, arch="gfx1151")
         from rocke.core.lower_llvm import lower_kernel_to_llvm
 
+        sized = _prod_cfg(num_persistent=960, persist_seqlen_q=2048, persist_batch=1)
         ll = lower_kernel_to_llvm(
-            build_wmma_fmha_swapqk(cfg, arch="gfx1151", seqlen_q=2048, batch=1),
-            arch="gfx1151",
+            build_wmma_fmha_swapqk(sized, arch="gfx1151"), arch="gfx1151"
         )
         self.assertIn("atomicrmw", ll)
+        # The baked-in size is part of the cache key, or a 2048-row binary gets
+        # served for a 4096-row launch.
+        self.assertNotEqual(
+            sized.kernel_name(),
+            _prod_cfg(
+                num_persistent=960, persist_seqlen_q=4096, persist_batch=1
+            ).kernel_name(),
+        )
 
     def test_gqa_fuse_lowers_and_keeps_the_head_decode_scalar(self):
         # workitem.id.x is a divergence source, so LLVM cannot prove tid/32 is

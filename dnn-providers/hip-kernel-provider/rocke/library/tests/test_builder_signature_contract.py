@@ -131,7 +131,10 @@ REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
         "seqlen_q",
     ),
     "kernels.common.sparse_attention.VsaSparseSpec": ("common", "seqlen_k", "seqlen_q"),
+    # Every paged-decode knob, problem shape included, carries a default.
+    "kernels.gfx1151.paged_decode_splitk.PagedDecodeCfg": (),
     "kernels.gfx1151.wmma_fmha_fwd.WmmaFmhaFwdSpec": ("head_size", "num_query_heads"),
+    "kernels.gfx1151.wmma_fmha_swapqk.SwapQKCfg": ("head_size", "num_query_heads"),
     "kernels.gfx1250.attention_tiled_2d.UnifiedAttention2DTiledSpec": (
         "block_size",
         "dtype",

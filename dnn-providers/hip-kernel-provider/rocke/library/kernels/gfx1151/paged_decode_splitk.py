@@ -346,35 +346,35 @@ def _declare_reduce_params(b: IRBuilder, cfg: PagedDecodeCfg) -> Dict[str, Value
 
 
 def build_paged_decode_splitk_segment(
-    cfg: PagedDecodeCfg, arch: str = "gfx1151"
+    spec: PagedDecodeCfg, arch: str = "gfx1151"
 ) -> KernelDef:
-    ok, why = is_valid_spec(cfg, arch)
+    ok, why = is_valid_spec(spec, arch)
     if not ok:
         raise ValueError(f"invalid paged_decode_splitk spec: {why}")
 
-    D = cfg.head_size
-    BS = cfg.kv_block_size
-    BN = cfg.block_n
-    HK = cfg.num_kv_heads
-    GF = cfg.heads_eff  # Q heads in this CTA
-    GFT = cfg.gqa_fuse  # Q heads per kv head (workspace / Q layout)
-    HG = cfg.head_groups
-    U = cfg.unroll
-    EPT = cfg.ept
-    X = cfg.x
-    NS = cfg.num_splits
-    DL = cfg.d_lanes
-    KSUB = cfg.key_subs
-    KPS = cfg.keys_per_sub
+    D = spec.head_size
+    BS = spec.kv_block_size
+    BN = spec.block_n
+    HK = spec.num_kv_heads
+    GF = spec.heads_eff  # Q heads in this CTA
+    GFT = spec.gqa_fuse  # Q heads per kv head (workspace / Q layout)
+    HG = spec.head_groups
+    U = spec.unroll
+    EPT = spec.ept
+    X = spec.x
+    NS = spec.num_splits
+    DL = spec.d_lanes
+    KSUB = spec.key_subs
+    KPS = spec.keys_per_sub
     dl_log2 = DL.bit_length() - 1
     bs_log2 = BS.bit_length() - 1
     ns_log2 = NS.bit_length() - 1
 
-    b = IRBuilder(cfg.kernel_name("seg"))
+    b = IRBuilder(spec.kernel_name("seg"))
     b.kernel.attrs["max_workgroup_size"] = WAVE
-    if cfg.waves_per_eu:
-        b.kernel.attrs["waves_per_eu"] = cfg.waves_per_eu
-    p = _declare_segment_params(b, cfg)
+    if spec.waves_per_eu:
+        b.kernel.attrs["waves_per_eu"] = spec.waves_per_eu
+    p = _declare_segment_params(b, spec)
 
     c0 = b.const_i32(0)
     c1 = b.const_i32(1)
@@ -485,7 +485,7 @@ def build_paged_decode_splitk_segment(
                     if off == 0
                     else b.add(q_row, b.add(d0, b.const_i32(off)))
                 ),
-                dtype=cfg.dtype,
+                dtype=spec.dtype,
                 n=w,
             )
             off += w
@@ -523,7 +523,7 @@ def build_paged_decode_splitk_segment(
                             cache_base,
                             b.add(k_lane_off, b.const_i32((tok0 + t) * X + off * BS)),
                         ),
-                        dtype=cfg.dtype,
+                        dtype=spec.dtype,
                         n=w,
                     )
                     off += w
@@ -570,7 +570,7 @@ def build_paged_decode_splitk_segment(
                     b,
                     p["VCache"],
                     b.add(cache_base, b.add(v_lane_off, b.const_i32(k * BS + tok0))),
-                    dtype=cfg.dtype,
+                    dtype=spec.dtype,
                     n=BN,
                 )
                 for k in range(EPT)
@@ -713,23 +713,23 @@ def build_paged_decode_splitk_segment(
 
 
 def build_paged_decode_splitk_reduce(
-    cfg: PagedDecodeCfg, arch: str = "gfx1151"
+    spec: PagedDecodeCfg, arch: str = "gfx1151"
 ) -> KernelDef:
-    ok, why = is_valid_spec(cfg, arch)
+    ok, why = is_valid_spec(spec, arch)
     if not ok:
         raise ValueError(f"invalid paged_decode_splitk spec: {why}")
 
-    D = cfg.head_size
-    HK = cfg.num_kv_heads
-    GF = cfg.gqa_fuse
-    # Not cfg.ept: the reduce has no key axis to trade lanes against, so it
+    D = spec.head_size
+    HK = spec.num_kv_heads
+    GF = spec.gqa_fuse
+    # Not spec.ept: the reduce has no key axis to trade lanes against, so it
     # always spreads D over the whole wave whatever d_lanes the segment used.
-    EPT = cfg.ept_reduce
-    NS = cfg.num_splits
+    EPT = spec.ept_reduce
+    NS = spec.num_splits
 
-    b = IRBuilder(cfg.kernel_name("reduce"))
+    b = IRBuilder(spec.kernel_name("reduce"))
     b.kernel.attrs["max_workgroup_size"] = WAVE
-    p = _declare_reduce_params(b, cfg)
+    p = _declare_reduce_params(b, spec)
 
     c0 = b.const_i32(0)
     c1 = b.const_i32(1)
@@ -761,7 +761,7 @@ def build_paged_decode_splitk_reduce(
         b.global_store_vN(
             p["O"],
             b.add(o_row, d0),
-            pack_f32_to(b, out, dtype=cfg.dtype),
+            pack_f32_to(b, out, dtype=spec.dtype),
             EPT,
             align=EPT * 2,
         )
@@ -769,7 +769,7 @@ def build_paged_decode_splitk_reduce(
     for g in range(GF):
         slot0 = b.add(base_unit, b.const_i32(g))
 
-        if cfg.reduce_unroll:
+        if spec.reduce_unroll:
             # Straight-line over the splits: every m, l and acc load is
             # independent, so all of them are in flight before the first
             # dependent exp2. The same guards as the loop form discard an

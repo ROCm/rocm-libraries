@@ -774,6 +774,14 @@ class SwapQKCfg:
     #                   slower at L=16K, which is the measurement that proves the
     #                   schedule's locality is what matters)
     persist_decode: str = "qb_major"
+    # persist_seqlen_q / persist_batch: the problem size, which num_persistent>0
+    # turns into a COMPILE-TIME constant -- the fixed 1-D grid has no way to
+    # recover the work-item count or the per-CTA drain bound at runtime. Ignored
+    # entirely when num_persistent == 0, which is why they live here rather than
+    # as build arguments: the builder contract is spec-plus-arch, and a field two
+    # builds disagree on has to be part of the cache key.
+    persist_seqlen_q: Optional[int] = None
+    persist_batch: int = 1
     # gqa_fuse (F): fold F query heads that share a kv head into ONE CTA, one
     # head per wave. The CTA's waves split two ways -- head_slot = wave%F picks
     # the query head, q_wave = wave/F picks the 16-row query block -- so
@@ -858,8 +866,13 @@ class SwapQKCfg:
             "qkdo" if self.qk_douter else "qkno",
             f"bg{self.bcast_group}" if self.bcast_group else "bgoff",
             "kdual" if self.k_dual else "ksingle",
+            # The persistent build bakes the problem size in, so two specs that
+            # differ only in persist_seqlen_q/persist_batch emit different code
+            # and must never share an artifact cache key. Non-persistent names
+            # stay byte-identical.
             (
                 f"pers{self.num_persistent}_{self.persist_decode}"
+                f"_sq{self.persist_seqlen_q}_b{self.persist_batch}"
                 if self.num_persistent
                 else "oneshot"
             ),
@@ -1098,16 +1111,10 @@ def _declare_params(b: IRBuilder, *, persistent: bool = False, v_paged: bool = F
     return P
 
 
-def build_wmma_fmha_swapqk(
-    cfg: SwapQKCfg,
-    arch: str = "gfx1151",
-    *,
-    seqlen_q: Optional[int] = None,
-    batch: int = 1,
-) -> KernelDef:
-    """``seqlen_q``/``batch`` are only needed when ``cfg.num_persistent > 0``: the
-    work-item count and the per-CTA drain bound are compile-time constants there."""
-    ok, why = is_valid_spec(cfg, arch)
+def build_wmma_fmha_swapqk(spec: SwapQKCfg, arch: str = "gfx1151") -> KernelDef:
+    seqlen_q = spec.persist_seqlen_q
+    batch = spec.persist_batch
+    ok, why = is_valid_spec(spec, arch)
     if not ok:
         raise ValueError(why)
     atom = WmmaAtom.f16_16x16x16()
@@ -1115,48 +1122,48 @@ def build_wmma_fmha_swapqk(
     c_map = atom.c_layout(arch)
     c_frag = atom.c_per_lane  # 8
     a_frag = atom.a_per_lane  # 16
-    n_dk = cfg.head_size // 16
-    hs = cfg.head_size
-    W = cfg.n_waves
+    n_dk = spec.head_size // 16
+    hs = spec.head_size
+    W = spec.n_waves
     dtype_ir = F16
-    PERS = cfg.num_persistent > 0  # needed before the params are declared
+    PERS = spec.num_persistent > 0  # needed before the params are declared
     if PERS:
-        if cfg.persist_decode not in ("qb_major", "batch_major"):
-            raise ValueError(f"bad persist_decode {cfg.persist_decode!r}")
-        if cfg.q_block > 1:
+        if spec.persist_decode not in ("qb_major", "batch_major"):
+            raise ValueError(f"bad persist_decode {spec.persist_decode!r}")
+        if spec.q_block > 1:
             raise ValueError(
                 "num_persistent is implemented on the MQ==1 path (the q_block>1 path "
                 "builds its own kernel and returns early); MQ=2 does not fit at D=128"
             )
-        if cfg.q_lds or cfg.kv_lds or cfg.k_lds:
+        if spec.q_lds or spec.kv_lds or spec.k_lds:
             raise ValueError(
                 "num_persistent is incompatible with q_lds/kv_lds/k_lds: those "
                 "allocate LDS inside what becomes the work-item loop"
             )
         if seqlen_q is None:
             raise ValueError(
-                "num_persistent>0 needs seqlen_q at build time (work-item count and "
-                "the per-CTA drain bound are baked in)"
+                "num_persistent>0 needs persist_seqlen_q on the spec (work-item "
+                "count and the per-CTA drain bound are baked in)"
             )
         if batch < 1:
-            raise ValueError(f"batch must be >= 1, got {batch}")
+            raise ValueError(f"persist_batch must be >= 1, got {batch}")
         _n_batch = batch
-        _num_tiles = swapqk_num_work_items(cfg, seqlen_q=seqlen_q, batch=batch)
+        _num_tiles = swapqk_num_work_items(spec, seqlen_q=seqlen_q, batch=batch)
         # worst-case per-CTA drain count; the in_range guard makes over-counting safe
-        _max_iters = (_num_tiles + cfg.num_persistent - 1) // cfg.num_persistent
+        _max_iters = (_num_tiles + spec.num_persistent - 1) // spec.num_persistent
 
-    b = IRBuilder(cfg.kernel_name())
-    b.kernel.attrs["max_workgroup_size"] = cfg.block_size
-    if cfg.waves_per_eu is not None:
-        b.kernel.attrs["waves_per_eu"] = cfg.waves_per_eu
-    p = _declare_params(b, persistent=PERS, v_paged=cfg.v_paged)
+    b = IRBuilder(spec.kernel_name())
+    b.kernel.attrs["max_workgroup_size"] = spec.block_size
+    if spec.waves_per_eu is not None:
+        b.kernel.attrs["waves_per_eu"] = spec.waves_per_eu
+    p = _declare_params(b, persistent=PERS, v_paged=spec.v_paged)
 
     c0 = b.const_i32(0)
     c16 = b.const_i32(16)
     c_wave = b.const_i32(wave)
     tid = b.thread_id_x()
     wave_id = b.div(tid, c_wave)
-    GF = cfg.gqa_fuse
+    GF = spec.gqa_fuse
     if GF > 1:
         # workitem.id.x is a divergence source in AMDGPUTTI::isSourceOfDivergence,
         # so LLVM cannot prove tid/32 is wave-uniform. Force both halves into
@@ -1185,7 +1192,7 @@ def build_wmma_fmha_swapqk(
         # output tile.
         Counter = p["Counter"]
         c_one = b.const_i32(1)
-        _multiwave = cfg.block_size > wave
+        _multiwave = spec.block_size > wave
         _brd = b.smem_alloc(I32, [1], name_hint="pers_brd") if _multiwave else None
 
         def _fetch_tile():
@@ -1218,9 +1225,9 @@ def build_wmma_fmha_swapqk(
         _pif = b.scf_if(b.cmp_lt(_tile, b.const_i32(_num_tiles)))
         _pif.__enter__()
 
-        c_nqb = b.const_i32(seqlen_q // cfg.q_rows_per_cta)
-        c_qh = b.const_i32(cfg.num_query_heads)
-        if cfg.persist_decode == "qb_major":
+        c_nqb = b.const_i32(seqlen_q // spec.q_rows_per_cta)
+        c_qh = b.const_i32(spec.num_query_heads)
+        if spec.persist_decode == "qb_major":
             # q_group fastest: a CTA draining adjacent ids stays on one
             # (head, batch) and reuses that head's K/V out of L2.
             q_group = b.mod(_tile, c_nqb)
@@ -1249,7 +1256,7 @@ def build_wmma_fmha_swapqk(
         def _pers_close():
             return None
 
-    qh, kvh = cfg.num_query_heads, cfg.kv_heads
+    qh, kvh = spec.num_query_heads, spec.kv_heads
     if GF > 1:
         # head = y*GF + slot with slot < GF <= ratio and ratio % GF == 0, so
         # head // ratio == y // (ratio // GF): block-uniform, no head_slot.
@@ -1263,7 +1270,7 @@ def build_wmma_fmha_swapqk(
 
     seqlen_q = p["seqlen_q"]
     seqlen_k = p["seqlen_k"]
-    if cfg.static_shape:
+    if spec.static_shape:
         # strides are pure functions of the (build-time) head config -> constants.
         # Layout [.., token, head, dim]: token stride = n_heads*D, head stride = D.
         sq, sqh = b.const_i32(qh * hs), b.const_i32(hs)
@@ -1297,89 +1304,89 @@ def build_wmma_fmha_swapqk(
         O, shape=(qh, hs, 1), dtype=dtype_ir, strides=(soh, 1, so)
     )
 
-    MQ = cfg.q_block  # query-blocking factor (16-row query tiles per wave)
-    if MQ > 1 and cfg.pipeline:
+    MQ = spec.q_block  # query-blocking factor (16-row query tiles per wave)
+    if MQ > 1 and spec.pipeline:
         raise ValueError("q_block>1 is incompatible with pipeline")
-    if cfg.v_transposed:
-        if not cfg.buffer_gather:
+    if spec.v_transposed:
+        if not spec.buffer_gather:
             raise ValueError("v_transposed requires buffer_gather")
-        if cfg.kv_lds:
+        if spec.kv_lds:
             raise ValueError("v_transposed is incompatible with kv_lds")
-        if cfg.v_kblock not in (0, 2, 4, 8):
-            raise ValueError(f"v_kblock must be 0, 2, 4 or 8 (got {cfg.v_kblock})")
-    elif cfg.v_kblock:
+        if spec.v_kblock not in (0, 2, 4, 8):
+            raise ValueError(f"v_kblock must be 0, 2, 4 or 8 (got {spec.v_kblock})")
+    elif spec.v_kblock:
         raise ValueError("v_kblock requires v_transposed")
-    if cfg.v_paged:
-        if not cfg.v_transposed:
+    if spec.v_paged:
+        if not spec.v_transposed:
             raise ValueError("v_paged requires v_transposed")
-        if not cfg.buffer_gather:
+        if not spec.buffer_gather:
             raise ValueError("v_paged requires buffer_gather")
-        if cfg.kv_lds:
+        if spec.kv_lds:
             raise ValueError("v_paged is incompatible with kv_lds")
-        if cfg.v_kblock:
+        if spec.v_kblock:
             raise ValueError("v_paged is incompatible with v_kblock")
-        if cfg.v_prefetch or cfg.prefetch_v:
+        if spec.v_prefetch or spec.prefetch_v:
             # the block-table lookup is a global load the gather DEPENDS on, so
             # its in-order vmcnt wait drains any V gather carried across it.
             raise ValueError("v_paged is incompatible with v_prefetch/prefetch_v")
-        if cfg.kv_block_size <= 0 or cfg.kv_block_size % 16:
+        if spec.kv_block_size <= 0 or spec.kv_block_size % 16:
             raise ValueError(
                 f"v_paged needs kv_block_size a positive multiple of 16 (got "
-                f"{cfg.kv_block_size}): a 16-key A-fragment must not straddle "
+                f"{spec.kv_block_size}): a 16-key A-fragment must not straddle "
                 f"two physical blocks"
             )
-        if cfg.block_n % cfg.kv_block_size and cfg.kv_block_size % cfg.block_n:
+        if spec.block_n % spec.kv_block_size and spec.kv_block_size % spec.block_n:
             raise ValueError(
-                f"v_paged needs block_n ({cfg.block_n}) and kv_block_size "
-                f"({cfg.kv_block_size}) to divide one another"
+                f"v_paged needs block_n ({spec.block_n}) and kv_block_size "
+                f"({spec.kv_block_size}) to divide one another"
             )
-    elif cfg.kv_block_size:
+    elif spec.kv_block_size:
         raise ValueError("kv_block_size requires v_paged")
-    if cfg.bcast_group < 0:
-        raise ValueError(f"bcast_group must be >= 0, got {cfg.bcast_group}")
-    if cfg.bcast_group and not cfg.dual_gather:
+    if spec.bcast_group < 0:
+        raise ValueError(f"bcast_group must be >= 0, got {spec.bcast_group}")
+    if spec.bcast_group and not spec.dual_gather:
         raise ValueError(
             "bcast_group reorders the dual_gather broadcast; it is a no-op "
             "without dual_gather"
         )
-    if cfg.k_dual:
-        if not cfg.qk_douter:
+    if spec.k_dual:
+        if not spec.qk_douter:
             raise ValueError("k_dual requires qk_douter (pairs kv in its d-outer loop)")
-        if (cfg.block_n // 16) % 2:
+        if (spec.block_n // 16) % 2:
             raise ValueError(
                 f"k_dual needs an even n_kv_sub (block_n>=32), got n_kv_sub="
-                f"{cfg.block_n // 16} at block_n={cfg.block_n}"
+                f"{spec.block_n // 16} at block_n={spec.block_n}"
             )
-        if cfg.kv_lds or cfg.k_lds:
+        if spec.kv_lds or spec.k_lds:
             raise ValueError("k_dual reads K from global; incompatible with k(v)_lds")
-    if cfg.k_lds:
-        if cfg.kv_lds:
+    if spec.k_lds:
+        if spec.kv_lds:
             raise ValueError("k_lds and kv_lds both stage K; pick one")
         if MQ > 1:
             raise ValueError("k_lds is implemented on the q_block==1 path")
-        if cfg.pipeline:
+        if spec.pipeline:
             raise ValueError(
                 "k_lds is incompatible with pipeline: the loader stages tile kt "
                 "while the pipelined QK consumes tile kt+1"
             )
-        if cfg.v_prefetch:
+        if spec.v_prefetch:
             raise ValueError(
                 "k_lds is incompatible with v_prefetch: the staging ds_write forces "
                 "an in-order vmcnt wait that would also drain the carried V gathers"
             )
-    if cfg.qk_douter and MQ > 1:
+    if spec.qk_douter and MQ > 1:
         raise ValueError(
             "qk_douter applies to the MQ==1 QK loop; the q_block>1 path has its "
             "own K-hoisting loop (would silently be a no-op)"
         )
-    if cfg.v_prefetch:
-        if cfg.v_prefetch < 0:
+    if spec.v_prefetch:
+        if spec.v_prefetch < 0:
             raise ValueError("v_prefetch must be >= 0")
-        if not cfg.dual_gather:
+        if not spec.dual_gather:
             raise ValueError("v_prefetch requires dual_gather (see prefetch_v)")
-        if cfg.pipeline:
+        if spec.pipeline:
             raise ValueError("v_prefetch is incompatible with pipeline")
-    q_rows_per_cta = b.const_i32(cfg.q_rows_per_cta)
+    q_rows_per_cta = b.const_i32(spec.q_rows_per_cta)
     cta_row0 = b.mul(q_group, q_rows_per_cta)
     # this wave owns MQ contiguous 16-row query tiles.
     # q_wave == wave_id unless gqa_fuse split the waves across heads.
@@ -1399,7 +1406,7 @@ def build_wmma_fmha_swapqk(
     q_token_base = q_token_base_g[0]
     qwin = qwin_g[0]
 
-    pingpong = cfg.sched_mode == "pingpong"
+    pingpong = spec.sched_mode == "pingpong"
 
     # ---- CK PermuteWarpGemmCToA: C-dist P (8 f16) -> operand fragment (16 f16). ----
     # query already sits on lane%16, so only kv needs the lane^16 reshuffle + 2x2
@@ -1426,7 +1433,7 @@ def build_wmma_fmha_swapqk(
     # o_f16 carries acc as <c_frag x f16>; otherwise <c_frag x f32> (zero_acc).
     iter_args = [("m", neg_inf), ("l", zero_f)]
     for d in range(n_dk):
-        acc0 = b.zero_vec(dtype_ir, c_frag) if cfg.o_f16 else atom.zero_acc(b)
+        acc0 = b.zero_vec(dtype_ir, c_frag) if spec.o_f16 else atom.zero_acc(b)
         iter_args.append((f"acc{d}", acc0))
 
     def unpack(state):
@@ -1437,11 +1444,11 @@ def build_wmma_fmha_swapqk(
         acc_raw = list(state[2 : 2 + n_dk])
         return m_i, l_i, acc_raw
 
-    block_n = cfg.block_n
+    block_n = spec.block_n
     n_kv_sub = block_n // 16  # 16-wide kv WMMA sub-tiles per K-loop iteration
     c_block_n = b.const_i32(block_n)
     loop_stop = b.div(seqlen_k, c_block_n)
-    if cfg.mask_mode == "causal":
+    if spec.mask_mode == "causal":
         # CTA owns q rows up to cta_row0 + q_rows_per_cta - 1; a kv block kt is
         # needed iff kt*block_n <= that. Round up + 1 (over-inclusion is masked).
         # The q_block (MQ) factor was missing here: at MQ>1 each wave owns MQ
@@ -1451,7 +1458,7 @@ def build_wmma_fmha_swapqk(
         # swapqk_causal_kv_stop() is the scalar mirror of this; keep them equal.
         causal_stop = b.add(
             b.div(
-                b.add(cta_row0, b.const_i32(cfg.q_rows_per_cta - 1)),
+                b.add(cta_row0, b.const_i32(spec.q_rows_per_cta - 1)),
                 c_block_n,
             ),
             b.const_i32(1),
@@ -1484,16 +1491,16 @@ def build_wmma_fmha_swapqk(
 
     # ---- buffer-descriptor gather (address in the memory unit, no VALU) ----
     c2 = b.const_i32(2)
-    if cfg.buffer_gather:
+    if spec.buffer_gather:
         v_rsrc = b.buffer_rsrc(V, b.const_i32(0x7FFFFFFF))
         sv2 = b.mul(sv, c2)  # bytes per kv step (loop-invariant)
         soff_list = [b.mul(b.const_i32(j), sv2) for j in range(a_frag)]  # hoisted
         kvh_off = b.mul(kv_head, svh)  # element base for this (kv) head, per-CTA
 
-    KB = cfg.v_kblock
-    if cfg.v_transposed:
+    KB = spec.v_kblock
+    if spec.v_transposed:
         c16b = b.const_i32(16)  # byte offset of the second dwordx4 (kv 8..15)
-    if cfg.v_transposed and not cfg.v_paged:
+    if spec.v_transposed and not spec.v_paged:
         # Both transposed forms put the head base at kv_head*(hs*S) and both are
         # addressed from k_base = batch*S + k_local (the [B,S,H,D] convention the
         # callers use), so the batch term needs scaling up by kvh*hs.
@@ -1572,7 +1579,7 @@ def build_wmma_fmha_swapqk(
         base (block + head + token), not the [B,S,H,D] token index the other
         branches take -- see ``paged_v_bases``.
         """
-        voff = b.mul(d_col, b.const_i32(cfg.kv_block_size * 2))
+        voff = b.mul(d_col, b.const_i32(spec.kv_block_size * 2))
         soff = b.mul(k_base, c2)
         halves = [
             b.buffer_load_vN_f16(v_rsrc, voff, soff, 4),  # kv 0..7
@@ -1585,15 +1592,15 @@ def build_wmma_fmha_swapqk(
         ]
         return b.vec_bitcast(b.vec_pack(words, I32), VectorType(dtype_ir, a_frag))
 
-    if cfg.v_paged:
+    if spec.v_paged:
         _load_v_wide = _load_col_paged
     elif KB:
         _load_v_wide = _load_col_blocked
     else:
         _load_v_wide = _load_col_transposed
 
-    if cfg.v_paged:
-        _BS = cfg.kv_block_size
+    if spec.v_paged:
+        _BS = spec.kv_block_size
         VBT = p["VBlockTable"]
         # Both CTA-uniform: the request's row in the [num_reqs, bt_stride] table,
         # and the total entry count that bounds an over-fetched lookup.
@@ -1681,7 +1688,7 @@ def build_wmma_fmha_swapqk(
         # k_base = batch_tok_k + k_block_base + ns*16 (uniform i32). Per-lane
         # voffset selects V[kv=0, d_col]; the buffer HW adds soffset = kv*stride_v.
         d_col = b.add(b.const_i32(d * 16), col)
-        if cfg.v_transposed:
+        if spec.v_transposed:
             return _load_v_wide(k_base, d_col)
         elem0 = b.add(b.add(kvh_off, b.mul(k_base, sv)), d_col)
         voff = b.mul(elem0, c2)  # bytes, per-lane
@@ -1700,13 +1707,13 @@ def build_wmma_fmha_swapqk(
     def _load_col(k_base, vwin, d_col):
         """Gather V[kv=0..15, d_col] (per-lane d_col) via buffer or flat path.
         kv_lds forces the flat path so it reads the shared-LDS window."""
-        if cfg.v_transposed:
+        if spec.v_transposed:
             return _load_v_wide(k_base, d_col)
-        if cfg.buffer_gather and not cfg.kv_lds:
+        if spec.buffer_gather and not spec.kv_lds:
             elem0 = b.add(b.add(kvh_off, b.mul(k_base, sv)), d_col)
             voff = b.mul(elem0, c2)
 
-            if cfg.d16hi:
+            if spec.d16hi:
                 # d16_hi buffer gather: buffer_load_d16_b16/_hi_b16 (inline asm)
                 # pack each strided pair DIRECTLY into a VGPR lo/hi, killing the
                 # ~64 v_mov_b16 the typed buffer_load_f16_d16 path emits. The asm
@@ -1755,7 +1762,7 @@ def build_wmma_fmha_swapqk(
         # its subtile-d selects, then its subtile-d+1 selects. group==1 reproduces
         # the per-dword interleave exactly, so bcast_group 0 and 1 must compile to
         # identical code -- that equality is the check that this is a pure reorder.
-        group = cfg.bcast_group if cfg.bcast_group else 1
+        group = spec.bcast_group if spec.bcast_group else 1
         for lo in range(0, n_i32, group):
             idx = range(lo, min(lo + group, n_i32))
             e = [b.vec_extract(li, i) for i in idx]
@@ -1781,12 +1788,12 @@ def build_wmma_fmha_swapqk(
             vals = nxt
         return vals[0]
 
-    ilp = max(1, cfg.qk_ilp)
+    ilp = max(1, spec.qk_ilp)
 
     # q_hoist: load + pre-scale Q once (loop-invariant). QK output is then already
     # scaled, so the softmax drops the per-slot scale-mul.
     q_hoisted = None
-    if cfg.q_hoist:
+    if spec.q_hoist:
         scale_f16 = b.cast_f32_to(scale_log2, F16)
         scale_vec = b.zero_vec(dtype_ir, a_frag)
         for i in range(a_frag):
@@ -1807,7 +1814,7 @@ def build_wmma_fmha_swapqk(
     # cross-wave block barrier (nothing to serialize the waves / fight pingpong).
     # MQ-aware: group g's 16 rows live at Q_lds[wave_id, g*16 : g*16+16].
     Q_lds = None
-    if cfg.q_lds:
+    if spec.q_lds:
         _QPAD = 8  # f16 bank-pad on the d-row (QK reads consecutive query rows)
         Q_lds = make_lds_view(
             b,
@@ -1847,7 +1854,7 @@ def build_wmma_fmha_swapqk(
     # ---- k_lds / kv_lds: cooperative K(/V) tile staging in shared LDS ----
     # k_lds stages K only and leaves V on the buffer gather; kv_lds (the older,
     # measured-dead-end prototype) also stages V and forces the flat V read.
-    _KLDS = cfg.k_lds or cfg.kv_lds
+    _KLDS = spec.k_lds or spec.kv_lds
     K_lds = V_lds = None
     if _KLDS:
         # Bank-pad the d row. Row stride (hs+8) f16 = 68 dwords at D128, and
@@ -1866,11 +1873,11 @@ def build_wmma_fmha_swapqk(
         # are exactly the strides we want.
         _kv_shape = (1, block_n, hs + _KVPAD)
         K_lds = make_lds_view(b, dtype=dtype_ir, shape=_kv_shape, name_hint="Ksh")
-        if cfg.kv_lds:
+        if spec.kv_lds:
             V_lds = make_lds_view(b, dtype=dtype_ir, shape=_kv_shape, name_hint="Vsh")
         # The whole CTA cooperates. n_waves*32 would undercount by gqa_fuse and let
         # the surplus threads stage rows past block_n, corrupting LDS.
-        _nthreads = cfg.block_size
+        _nthreads = spec.block_size
         _tot = block_n * hs
         if _tot % (_nthreads * 8) != 0:
             raise ValueError(
@@ -1902,7 +1909,7 @@ def build_wmma_fmha_swapqk(
             gtok = b.add(kbase_tok, row)
             k8 = K_view.load_vec(b, [kv_head, gtok, colc], n=8)
             K_lds.store_vec(b, [c0, row, colc], k8, 8)
-            if cfg.kv_lds:
+            if spec.kv_lds:
                 v8 = V_view.load_vec(b, [kv_head, gtok, colc], n=8)
                 V_lds.store_vec(b, [c0, row, colc], v8, 8)
         b.sync_lds_only()  # freshly-staged tile visible to all waves
@@ -1942,9 +1949,9 @@ def build_wmma_fmha_swapqk(
         return WmmaTensor(atom, "a", f0, arch), WmmaTensor(atom, "a", f1, arch)
 
     def _q_frag(d):
-        if cfg.q_hoist:
+        if spec.q_hoist:
             return q_hoisted[d]
-        if cfg.q_lds:
+        if spec.q_lds:
             return q_lds_read(d)
         return load_wmma_tile(
             b,
@@ -1954,7 +1961,7 @@ def build_wmma_fmha_swapqk(
             role="b",
             k_offset=d * 16,
             lead=[c0],
-            nontemporal=cfg.q_nt,
+            nontemporal=spec.q_nt,
         )
 
     def compute_qk(k_block_base):
@@ -1962,7 +1969,7 @@ def build_wmma_fmha_swapqk(
         if pingpong:
             b.s_setprio(1)
         subs = []
-        if cfg.qk_douter:
+        if spec.qk_douter:
             # d-outer / kv-inner: Q[d] is invariant in ns, so loading it in the
             # OUTER loop issues n_dk Q loads per K-tile instead of
             # n_kv_sub*n_dk. The n_kv_sub accumulator chains are mutually
@@ -1970,7 +1977,7 @@ def build_wmma_fmha_swapqk(
             # and no separate acc_ilp / tail reduction is needed.
             kwins = (
                 [None] * n_kv_sub
-                if _KLDS or cfg.k_dual
+                if _KLDS or spec.k_dual
                 else [
                     k_window(b.add(k_block_base, b.const_i32(ns * 16)))
                     for ns in range(n_kv_sub)
@@ -1979,7 +1986,7 @@ def build_wmma_fmha_swapqk(
             subs = [WmmaTensor.zero_acc(b, atom, arch=arch) for _ in range(n_kv_sub)]
             for d in range(n_dk):
                 q_tile = _q_frag(d)
-                if cfg.k_dual:
+                if spec.k_dual:
                     # one load per kv PAIR instead of one per sub-tile
                     for ns in range(0, n_kv_sub, 2):
                         k0, k1 = _k_frag_dual(k_block_base, ns, d)
@@ -2014,14 +2021,14 @@ def build_wmma_fmha_swapqk(
     # fragment loads are hoisted so all MQ groups share them -> KV DRAM amortized
     # MQ x. MQ==1 falls through to the tuned single-group code below untouched.
     if MQ > 1:
-        _exp2 = b.exp2_fast if cfg.fast_exp2 else b.exp2
+        _exp2 = b.exp2_fast if spec.fast_exp2 else b.exp2
         gs = 2 + n_dk  # iter-arg stride per group: m, l, n_dk O tiles
         qb_iter = []
         for g in range(MQ):
             qb_iter.append((f"qm{g}", neg_inf))
             qb_iter.append((f"ql{g}", zero_f))
             for d in range(n_dk):
-                o0 = b.zero_vec(dtype_ir, c_frag) if cfg.o_f16 else atom.zero_acc(b)
+                o0 = b.zero_vec(dtype_ir, c_frag) if spec.o_f16 else atom.zero_acc(b)
                 qb_iter.append((f"qo{g}_{d}", o0))
         kloop = b.scf_for_iter(
             b.const_i32(0), loop_stop, b.const_i32(1), iter_args=qb_iter, iv_name="kt"
@@ -2031,7 +2038,7 @@ def build_wmma_fmha_swapqk(
             l_i = [state[g * gs + 1] for g in range(MQ)]
             accs = [list(state[g * gs + 2 : g * gs + 2 + n_dk]) for g in range(MQ)]
             k_block_base = b.mul(kt, c_block_n)
-            if cfg.v_paged:
+            if spec.v_paged:
                 k_bases = paged_v_bases(k_block_base)
             else:
                 k_bases = [
@@ -2058,7 +2065,7 @@ def build_wmma_fmha_swapqk(
                         b, kwin, atom, lane, role="a", k_offset=d * 16, lead=[c0]
                     )
                     for g in range(MQ):
-                        if cfg.q_lds:
+                        if spec.q_lds:
                             q_tile = q_lds_read(d, g)
                         else:
                             q_tile = load_wmma_tile(
@@ -2069,7 +2076,7 @@ def build_wmma_fmha_swapqk(
                                 role="b",
                                 k_offset=d * 16,
                                 lead=[c0],
-                                nontemporal=cfg.q_nt,
+                                nontemporal=spec.q_nt,
                             )
                         acc[g][d % ilp] = wmma_mma(b, k_tile, q_tile, acc[g][d % ilp])
                 for g in range(MQ):
@@ -2095,12 +2102,12 @@ def build_wmma_fmha_swapqk(
                     for i in range(c_frag):
                         kv_rel, q_rel = subs[g][ns].coord(b, lane, i)
                         s_i = subs[g][ns].slot(b, i)
-                        if not cfg.q_lds:  # else scale pre-baked into the LDS Q
+                        if not spec.q_lds:  # else scale pre-baked into the LDS Q
                             s_i = b.fmul(s_i, scale_log2)
                         s_i = apply_attention_mask(
                             b,
                             s_i,
-                            mask_mode=cfg.mask_mode,
+                            mask_mode=spec.mask_mode,
                             k_idx=b.add(kv_base, kv_rel),
                             query_pos=b.add(q_pos_base_g[g], q_rel),
                             sliding_window=0,
@@ -2134,7 +2141,7 @@ def build_wmma_fmha_swapqk(
             if pingpong:
                 b.s_setprio(1)
             new_accs = [[None] * n_dk for _ in range(MQ)]
-            if cfg.o_f16:
+            if spec.o_f16:
                 # d-pair-outer: only the current d-pair is upgraded to f32 (per
                 # group); carried O stays f16 -> halves the live O register peak,
                 # which is what lets a higher MQ fit at D64/D128.
@@ -2196,7 +2203,7 @@ def build_wmma_fmha_swapqk(
             for g in range(MQ):
                 yields.append(m_new[g])
                 yields.append(l_new[g])
-                if cfg.o_f16:
+                if spec.o_f16:
                     yields.extend(new_accs[g])  # already raw f16 values
                 else:
                     yields.extend(a.value for a in new_accs[g])
@@ -2217,7 +2224,7 @@ def build_wmma_fmha_swapqk(
                     (1, 16, 16),
                     origin=(head, b.const_i32(d * 16), q_token_base_g[g]),
                 )
-                ov = b.vec_ext_to_f32(accs_g[d]) if cfg.o_f16 else accs_g[d]
+                ov = b.vec_ext_to_f32(accs_g[d]) if spec.o_f16 else accs_g[d]
                 store_wmma_tile(
                     b,
                     owin,
@@ -2227,12 +2234,12 @@ def build_wmma_fmha_swapqk(
                     lead=[c0],
                     align=2,
                     transform=_rescale,
-                    nontemporal=cfg.o_nt,
+                    nontemporal=spec.o_nt,
                 )
         b.ret()
         return b.kernel
 
-    if cfg.pipeline:
+    if spec.pipeline:
         # prologue: tile 0's QK, carried as iter-args (current-tile scores).
         for ns, sc in enumerate(compute_qk(c0)):
             iter_args.append((f"sc{ns}", sc.value))
@@ -2243,13 +2250,13 @@ def build_wmma_fmha_swapqk(
     with kloop as (kt, state):
         m_i, l_i, accs = unpack(state)
         k_block_base = b.mul(kt, c_block_n)
-        if cfg.iglp >= 0:
-            b.iglp_opt(cfg.iglp)
+        if spec.iglp >= 0:
+            b.iglp_opt(spec.iglp)
 
         # Issue this tile's block-table lookups FIRST, ahead of the coop K loads
         # and the QK, so the vmcnt wait their readfirstlane forces (deferred to
         # the first V gather, below) has that whole prologue to hide behind.
-        _paged_k_bases = paged_v_bases(k_block_base) if cfg.v_paged else None
+        _paged_k_bases = paged_v_bases(k_block_base) if spec.v_paged else None
 
         # k_lds/kv_lds: cooperatively stage this K-tile into shared LDS BEFORE the
         # QK reads it (the whole CTA then shares the one copy).
@@ -2260,7 +2267,7 @@ def build_wmma_fmha_swapqk(
         # scores and issue the NEXT tile's QK now (overlaps this tile's softmax/
         # P-transpose/PV, keeping the WMMA unit fed). Non-pipelined -> compute inline.
         next_subs = None
-        if cfg.pipeline:
+        if spec.pipeline:
             sub_scores = [
                 WmmaTensor(atom, "c", state[2 + n_dk + ns], arch)
                 for ns in range(n_kv_sub)
@@ -2276,7 +2283,7 @@ def build_wmma_fmha_swapqk(
         # ---- flattened PV step order + V gather dispatch (flat window | buffer SRD) ----
         # kv_lds sources V from the shared-LDS tile via the flat window path
         # (buffer_gather is a global-only lever, so it's bypassed here).
-        if cfg.kv_lds:
+        if spec.kv_lds:
             vwins = [v_window_lds(ns) for ns in range(n_kv_sub)]
         else:
             vwins = [
@@ -2285,7 +2292,7 @@ def build_wmma_fmha_swapqk(
             ]
         k_bases = (
             _paged_k_bases
-            if cfg.v_paged
+            if spec.v_paged
             else [
                 b.add(b.add(batch_tok_k, k_block_base), b.const_i32(ns * 16))
                 for ns in range(n_kv_sub)
@@ -2293,7 +2300,7 @@ def build_wmma_fmha_swapqk(
         )
 
         def do_gather(ns, d):
-            if cfg.buffer_gather and not cfg.kv_lds:
+            if spec.buffer_gather and not spec.kv_lds:
                 return gather_v_a_frag_buf(k_bases[ns], d)
             return gather_v_a_frag(vwins[ns], d)
 
@@ -2302,7 +2309,7 @@ def build_wmma_fmha_swapqk(
         # PREFETCH: issue the first V gather BEFORE the softmax so its strided
         # loads overlap the softmax VALU (memory<->VALU overlap).
         v_next = None
-        if cfg.prefetch_v:
+        if spec.prefetch_v:
             ns0, d0 = pv_steps[0]
             v_next = do_gather(ns0, d0)
 
@@ -2314,12 +2321,12 @@ def build_wmma_fmha_swapqk(
             for i in range(c_frag):
                 kv_rel, q_rel = sub_scores[ns].coord(b, lane, i)  # (row=kv, col=query)
                 s_i = sub_scores[ns].slot(b, i)
-                if not (cfg.q_hoist or cfg.q_lds):  # else scale pre-baked into Q
+                if not (spec.q_hoist or spec.q_lds):  # else scale pre-baked into Q
                     s_i = b.fmul(s_i, scale_log2)
                 s_i = apply_attention_mask(
                     b,
                     s_i,
-                    mask_mode=cfg.mask_mode,
+                    mask_mode=spec.mask_mode,
                     k_idx=b.add(kv_base, kv_rel),
                     query_pos=b.add(q_pos_base, q_rel),
                     sliding_window=0,
@@ -2333,7 +2340,7 @@ def build_wmma_fmha_swapqk(
         # lazy: if every lane's tile_max is within threshold of m_i, don't
         # re-anchor (m_new = m_i -> alpha = 1) and skip the O rescale below.
         skip_rescale = None
-        if cfg.lazy_rescale:
+        if spec.lazy_rescale:
             below = b.select(
                 b.fcmp(
                     "ole", b.fsub(tile_max, m_i), b.const_f32(_LAZY_RESCALE_THRESHOLD)
@@ -2345,7 +2352,7 @@ def build_wmma_fmha_swapqk(
             m_new = b.select(skip_rescale, m_i, b.fmax(m_i, tile_max))
         else:
             m_new = b.fmax(m_i, tile_max)
-        _exp2 = b.exp2_fast if cfg.fast_exp2 else b.exp2
+        _exp2 = b.exp2_fast if spec.fast_exp2 else b.exp2
         alpha = _exp2(b.fsub(m_i, m_new))
         ps_sub = [
             [_exp2(b.fsub(s_sub[ns][i], m_new)) for i in range(c_frag)]
@@ -2374,7 +2381,7 @@ def build_wmma_fmha_swapqk(
             which is the lever when the kernel is memory-latency bound rather
             than issue- or bandwidth-bound (see v_kblock).
             """
-            depth = min(max(1, cfg.v_prefetch), len(steps))
+            depth = min(max(1, spec.v_prefetch), len(steps))
             fifo = [
                 dual_gather_issue(k_bases[ns], vwins[ns], dp)
                 for ns, dp in steps[:depth]
@@ -2387,14 +2394,14 @@ def build_wmma_fmha_swapqk(
                 fd, fd1 = dual_gather_finish(raw)
                 consume(ns, dp, fd, fd1)
 
-        if cfg.o_f16:
+        if spec.o_f16:
             # f16-carry, d-pair-outer PV: upgrade one d-pair's f16 carry to f32,
             # fuse the alpha rescale, accumulate BOTH kv sub-tiles, truncate back
             # to f16. Only the current d-pair is f32 -> small O register peak.
             if pingpong:
                 b.s_setprio(1)
             new_acc_vals = [None] * n_dk
-            if cfg.v_prefetch and cfg.dual_gather:
+            if spec.v_prefetch and spec.dual_gather:
                 # d-pair outer, kv inner (same order as the loop below), so a
                 # d-pair's f32 upgrade stays live only across its own kv steps.
                 pair = {}
@@ -2458,7 +2465,7 @@ def build_wmma_fmha_swapqk(
         else:
             accs_wt = [WmmaTensor(atom, "c", v, arch) for v in accs]
             # rescale the O^T accumulators by alpha ONCE per block_n keys.
-            if cfg.lazy_rescale:
+            if spec.lazy_rescale:
                 # wave-uniform 0/1-trip loop: run the n_dk rescale muls only when
                 # the max re-anchored (skip_rescale False) -> 0-trip skips them.
                 n_res = b.select(skip_rescale, c0, b.const_i32(1))
@@ -2482,7 +2489,7 @@ def build_wmma_fmha_swapqk(
             # ---- PV: O^T += V @ P per kv sub-tile (register P-transpose, no LDS) ----
             if pingpong:
                 b.s_setprio(1)
-            if cfg.dual_gather and cfg.v_prefetch:
+            if spec.dual_gather and spec.v_prefetch:
 
                 def _consume_f32(ns, dp, fd, fd1):
                     new_accs[dp] = wmma_mma(
@@ -2499,7 +2506,7 @@ def build_wmma_fmha_swapqk(
                     [(ns, dp) for ns in range(n_kv_sub) for dp in range(0, n_dk, 2)],
                     _consume_f32,
                 )
-            elif cfg.dual_gather:
+            elif spec.dual_gather:
                 for ns in range(n_kv_sub):
                     for dp in range(0, n_dk, 2):
                         frag_d, frag_d1 = dual_gather(k_bases[ns], vwins[ns], dp)
@@ -2515,7 +2522,7 @@ def build_wmma_fmha_swapqk(
                             p_tiles[ns],
                             new_accs[dp + 1],
                         )
-            elif cfg.prefetch_v:
+            elif spec.prefetch_v:
                 for idx, (ns, d) in enumerate(pv_steps):
                     v_cur = v_next
                     if idx + 1 < len(pv_steps):
@@ -2537,7 +2544,7 @@ def build_wmma_fmha_swapqk(
             new_acc_vals = [a.value for a in new_accs]
 
         yields = [m_new, l_new, *new_acc_vals]
-        if cfg.pipeline:
+        if spec.pipeline:
             yields.extend(s.value for s in next_subs)
         b.scf_yield(*yields)
 
@@ -2558,7 +2565,7 @@ def build_wmma_fmha_swapqk(
         acc_wt = WmmaTensor(
             atom,
             "c",
-            b.vec_ext_to_f32(accs_f[d]) if cfg.o_f16 else accs_f[d],
+            b.vec_ext_to_f32(accs_f[d]) if spec.o_f16 else accs_f[d],
             arch,
         )
         store_wmma_tile(
@@ -2570,7 +2577,7 @@ def build_wmma_fmha_swapqk(
             lead=[c0],
             align=2,
             transform=_rescale,
-            nontemporal=cfg.o_nt,
+            nontemporal=spec.o_nt,
         )
     _pers_close()
     b.ret()
