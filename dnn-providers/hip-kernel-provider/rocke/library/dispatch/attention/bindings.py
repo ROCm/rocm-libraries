@@ -543,6 +543,26 @@ def _check_byte_extent_i32(tensor, name: str, element_bytes: int) -> None:
         )
 
 
+def _check_vector_aligned(tensor, name: str, align_bytes: int) -> None:
+    """Reject a 1-byte-element tensor whose rows can start off an
+    ``align_bytes`` boundary (data pointer or any outer stride)."""
+    shape = _shape(tensor, name)
+    stride = getattr(tensor, "stride", None)
+    if not callable(stride):
+        raise ValueError(f"{name} must expose strides")
+    if int(tensor.data_ptr()) % align_bytes:
+        raise ValueError(
+            f"{name} data pointer must be {align_bytes}-byte aligned for the "
+            "gfx1151 FP8 vector loads"
+        )
+    for axis in range(len(shape) - 1):
+        if int(shape[axis]) > 1 and int(stride(axis)) % align_bytes:
+            raise ValueError(
+                f"{name} stride({axis})={int(stride(axis))} bytes must be a "
+                f"multiple of {align_bytes} for the gfx1151 FP8 vector loads"
+            )
+
+
 def _check_last_dim_contiguous(tensor, name: str) -> None:
     shape = _shape(tensor, name)
     stride = getattr(tensor, "stride", None)
@@ -678,6 +698,14 @@ def _gfx1151_validate_and_collect(
         ("out", out, 2),
     ):
         _check_byte_extent_i32(tensor, name, element_bytes)
+    if kv_kind == "fp8":
+        # FP8 K is read as 16-byte vectors (one WMMA K fragment) and LDS-staged
+        # FP8 V as 8-byte vectors, both emitted with align == vector size.
+        # Every row address is base + sum(index * stride), so the base and all
+        # outer byte strides must be multiples of that width.
+        _check_vector_aligned(k, "k", 16)
+        if spec.v_lds_stage:
+            _check_vector_aligned(v, "v", 8)
 
     mask_type = AttentionMaskType(int(request.mask_type))
     windowed = (

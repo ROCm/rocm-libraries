@@ -307,6 +307,9 @@ tail bounds, both V-staging choices, and the score features above.
   binding (like the hipDNN pack) rejects any tensor whose addressed byte
   extent would not fit, rather than launching and silently wrapping or
   reading zeros past the descriptor.
+- **FP8 KV alignment.** FP8 K rows are read as 16-byte vectors and LDS-staged
+  FP8 V rows as 8-byte vectors. The binding rejects FP8 K (and staged V) whose
+  data pointer or any outer stride is not a multiple of that width.
 - **Sweep.** `sweep_space` offers distinct valid variants, baseline first,
   gated on the device compute-unit count (`num_cus`; zero uses the reference
   part) instead of a fixed query-group limit.
