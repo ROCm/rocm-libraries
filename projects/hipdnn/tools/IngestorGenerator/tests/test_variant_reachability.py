@@ -27,6 +27,7 @@ _TOOL = _TOOLS / "variant_reachability.py"
 sys.path.insert(0, str(_TOOLS))
 
 import variant_reachability  # noqa: E402
+from hkp_pack import provenance_sidecar  # noqa: E402
 from launch_surface import find_repo_root  # noqa: E402
 
 # One KMD, shared by every test: a `dtype` field compared by equality and a `block_n`
@@ -270,6 +271,61 @@ class TestTheSchemaIsReachedByReference:
         result = env.run(kdp, shapes)
         assert result.returncode == 2
         assert "engine" in result.stdout + result.stderr
+
+
+class TestAnInstalledTreeReadsTheProvenanceRoot:
+    """An installed packed tree keeps its marker beside the descriptors and its
+    sidecars apart from them, under `--provenance-root`."""
+
+    @staticmethod
+    def installed(env, tmp_path):
+        """A packed bundle with its sidecar moved under `provenance/`. The UKD is a
+        `kpack` one, refused read as authored, so only a packed read passes."""
+        variant = _variant("only", 64)
+        variant.update(
+            id="ukd-only",
+            kernel_source={
+                "kind": "kpack",
+                "library": "kpack/test.kpack",
+                "toc_key": "v0",
+                "symbol": "s0",
+                "sha256": "a" * 64,
+            },
+            provenance={"origin_kind": "rocke"},
+        )
+        kdp = env.write_bundle([variant])
+        doc = json.loads(kdp.read_text())
+        name, data = provenance_sidecar.detach(kdp.name, doc)
+        kdp.write_text(json.dumps(doc))
+        kdp.with_name(provenance_sidecar.PACKED_MARKER).write_bytes(b"")
+        provenance = tmp_path / "provenance"
+        provenance.mkdir()
+        (provenance / name).write_bytes(data)
+        return kdp, provenance
+
+    def test_an_installed_tree_reads_its_sidecars_from_the_provenance_root(
+        self, env, tmp_path
+    ):
+        kdp, provenance = self.installed(env, tmp_path)
+        shapes = env.write_shapes(_DIVISIBLE_SHAPES)
+        found = env.run(kdp, shapes, "--provenance-root", str(provenance))
+        missing = env.run(kdp, shapes)
+        assert found.returncode == 0, found.stdout + found.stderr
+        assert missing.returncode == 2, missing.stdout + missing.stderr
+        assert "no provenance sidecar" in missing.stderr
+
+    def test_a_provenance_root_for_an_unmarked_kdp_is_a_usage_error(
+        self, env, tmp_path
+    ):
+        """Its sidecar waits under the root, so reading the root as packed would pass."""
+        kdp, provenance = self.installed(env, tmp_path)
+        kdp.with_name(provenance_sidecar.PACKED_MARKER).unlink()
+        shapes = env.write_shapes(_DIVISIBLE_SHAPES)
+        result = env.run(kdp, shapes, "--provenance-root", str(provenance))
+        # An input error also exits 2, so argparse's usage line is what says which.
+        assert result.returncode == 2, result.stdout + result.stderr
+        assert "usage:" in result.stderr
+        assert "holds no hkp-packed.marker" in result.stderr
 
 
 class TestGfx950RealBundle:

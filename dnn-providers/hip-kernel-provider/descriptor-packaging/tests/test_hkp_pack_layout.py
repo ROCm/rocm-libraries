@@ -36,6 +36,7 @@ from hkp_pack.pipeline import (
     run_pipeline,
     shipped_engines,
 )
+from hkp_pack.provenance_sidecar import PACKED_MARKER
 from pack_helpers import (
     ARCH,
     EXAMPLE_ROOT,
@@ -46,6 +47,7 @@ from pack_helpers import (
     _read,
     _run,
     _silent,
+    read_shipped,
 )
 
 
@@ -593,7 +595,7 @@ def test_example_hip_tree_packs_end_to_end(tmp_path, hipcc, rocm_kpack_dir):
     kinds = {
         ukd["provenance"]["origin_kind"]
         for kdp in out.rglob("*.kdp.json")
-        for ukd in _read(kdp)["kernelDescriptors"]
+        for ukd in read_shipped(kdp)["kernelDescriptors"]
         if not isinstance(ukd, str)
     }
     assert kinds == {"hip"}
@@ -632,9 +634,9 @@ def test_provenance_records_the_hipcc_that_built_each_kernel(
     shipped = [
         ukd
         for kdp in out.rglob("*.kdp.json")
-        for ukd in _read(kdp)["kernelDescriptors"]
+        for ukd in read_shipped(kdp)["kernelDescriptors"]
         if not isinstance(ukd, str)
-    ] + [_read(p) for p in out.rglob("*.ukd.json")]
+    ] + [read_shipped(p) for p in out.rglob("*.ukd.json")]
     assert shipped
     for ukd in shipped:
         prov = ukd["provenance"]
@@ -1532,7 +1534,7 @@ def test_embedded_source_shard_holds_the_authored_descriptors(
     _pack_embedded(root, tmp_path, rocm_kpack_dir, [ARCH])
 
     shard = tmp_path / "out" / ARCH / "pointwise"
-    kdp = _read(shard / "solo.kdp.json")
+    kdp = read_shipped(shard / "solo.kdp.json")
     assert kdp["arch"] == [ARCH]
     inline = kdp["kernelDescriptors"][0]
     assert inline["arch"] == [ARCH]
@@ -1541,7 +1543,7 @@ def test_embedded_source_shard_holds_the_authored_descriptors(
     assert "provenance" not in inline["kernel_source"]
     assert kdp["kernelDescriptors"][1] == _STANDALONE_ID
 
-    standalone = _read(shard / _STANDALONE_FILE)
+    standalone = read_shipped(shard / _STANDALONE_FILE)
     assert standalone["arch"] == [ARCH]
     assert standalone["kernel_source"] == _STANDALONE_SOURCE
     assert standalone["provenance"] == _expected_provenance(
@@ -1574,7 +1576,7 @@ def test_inline_embedded_ukd_is_narrowed_to_the_shard_arch(
 
     _pack_embedded(root, tmp_path, rocm_kpack_dir, [ARCH])
 
-    emitted = _read(tmp_path / "out" / ARCH / "pointwise" / "solo.kdp.json")
+    emitted = read_shipped(tmp_path / "out" / ARCH / "pointwise" / "solo.kdp.json")
     assert emitted["arch"] == [ARCH]
     inline = emitted["kernelDescriptors"][0]
     assert inline["arch"] == [ARCH]
@@ -1711,11 +1713,33 @@ def test_mixed_hip_and_embedded_source_root_packs_in_one_invocation(
     assert hip_kdp["kernelDescriptors"][0]["kernel_source"]["kind"] == "kpack"
 
     embedded = out / "embedded" / "pointwise"
-    emb_kdp = _read(embedded / "solo.kdp.json")
+    emb_kdp = read_shipped(embedded / "solo.kdp.json")
     assert emb_kdp["kernelDescriptors"][0]["kernel_source"] == _EMBEDDED_SOURCE
     assert emb_kdp["kernelDescriptors"][0]["provenance"]["source_label"] == _LABEL
     assert _read(embedded / _STANDALONE_FILE)["kernel_source"] == _STANDALONE_SOURCE
     assert not (embedded / "kpack").exists()
+
+
+def test_every_directory_holding_a_packed_descriptor_holds_the_marker(
+    tmp_path, empty_arch_fixture, main_fixture, hipcc, rocm_kpack_dir
+):
+    """A reader takes a descriptor as packed only from the marker in its own
+    directory, so the compiled and the pass-through halves both need one, and
+    nothing else in the shard carries it."""
+    root = tmp_path / "root"
+    _nest(root, "hip/pointwise", main_fixture)
+    _make_embedded(_nest(root, "embedded/pointwise", empty_arch_fixture))
+
+    _run(root, tmp_path, hipcc, rocm_kpack_dir, [ARCH], source_label=_LABEL)
+
+    out = tmp_path / "out" / ARCH
+    holding = {
+        path.parent
+        for path in out.rglob("*.json")
+        if path.name.endswith((".kdp.json", ".ukd.json"))
+    }
+    assert {out / "hip" / "pointwise", out / "embedded" / "pointwise"} <= holding
+    assert {marker.parent for marker in out.rglob(PACKED_MARKER)} == holding
 
 
 def _embedded_copy(root, sub, fixture, suffix=""):
@@ -1755,7 +1779,8 @@ def test_a_field_the_packer_left_alone_is_not_reported_as_rewritten(
 
     _pack_embedded(root, tmp_path, rocm_kpack_dir, [ARCH])
 
-    inline = _read(tmp_path / "out" / ARCH / "solo.kdp.json")["kernelDescriptors"][0]
+    shipped = read_shipped(tmp_path / "out" / ARCH / "solo.kdp.json")
+    inline = shipped["kernelDescriptors"][0]
     assert inline["provenance"]["rewritten"] == []
 
 

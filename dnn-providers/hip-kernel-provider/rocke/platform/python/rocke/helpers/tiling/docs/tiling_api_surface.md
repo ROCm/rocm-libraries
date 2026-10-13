@@ -49,9 +49,10 @@ TileMma((16,16,16), a,b,c, target)          TileMma((64,64,32), a,b,c, target,
 | `InstrClass` / `derive_sched_group_counts(plan, ...)` | `sched_group_barrier` scheduling — class masks + per-trip counts | no (`InstrClass` int mask; verb IR-free) | scheduling cadence is a perf KNOB, off by default (§5d) |
 
 Free `make_*` factories over thin value objects (`TensorDesc`/`TensorWindow` in `descriptors.py`;
-`TileDesc`/`Fragment` in `fragments.py`); three verbs (`emit.py`); one driver (`mma/`). The
-factories are the public surface -- you never call a method on the descriptor to make a window
-(the descriptor is a pure memory layout; `ptr` binds at the verb, not on the descriptor).
+`TileDesc` in `fragments.py`) and one register carrier (`Fragment`); three verbs (`emit.py`); one
+driver (`mma/`). The factories are the public surface -- you never call a method on the descriptor
+to make a window (the descriptor is a pure memory layout; `ptr` binds at the verb, not on the
+descriptor).
 
 ---
 
@@ -251,6 +252,10 @@ a_frag = load_fragment(b, a_ptr, make_window(a_td, (m, k)), a_desc, lane)   # fr
 ```
 - dtype lives on the `Fragment` (D16); `store_fragment` casts fragment dtype -> desc dtype
   on the honest path only (identity, or f32->{f16,bf16}); anything else fails fast.
+- `tile_desc`/`dtype` are read-only; `value` is the one writable field (re-bound each K step:
+  `accumulator.value = b.mma(...)` for a single-atom tile -- wave shape == atom shape, one
+  `b.mma`; a multi-atom tile goes through `TileMma`). The write and read checks are documented on
+  `Fragment` (`fragments.py`).
 
 ### Override: fragments can be ANY dtype
 ```python

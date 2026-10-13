@@ -31,9 +31,17 @@ Other scores and source line numbers retain their stated historical basis.
 
 ## 1. The canonical dtype set
 
-The original basis snapshot listed ten scalar IR types. The table below also
-includes the subsequently added logical TF32 type. For the newer logical
-low-bit and scale types, see [dtype storage and packing](../architecture/dtype_storage_packing.md).
+**Current clarification (2026-10-07).** The original basis snapshot listed
+ten directly lowerable scalar representations. The table below also includes
+the subsequently added logical TF32 type with its I32 carrier. The registry
+recognizes `fp4e2m1`, `fp6e2m3`, `fp6e3m2`, `e8m0`, and `e5m3` as logical `Type`
+identities preserved by serialization; their packed-data paths use `i8` storage
+and integer carrier registers. See [dtype storage and packing](../architecture/dtype_storage_packing.md).
+Logical recognition does not provide generic scalar arithmetic or conversion.
+The optimization-barrier API admits the original ten representations; use an
+I32 carrier for TF32 and integer storage/carriers for packed formats.
+Other coverage scores and source line numbers retain their historical basis.
+
 The definitions in both engines are:
 
 - Python: `platform/python/rocke/core/ir.py:43-52`
@@ -59,9 +67,10 @@ LLVM mapping: `lower_llvm.py:1093-1129` (Python, `_llvm_type`) ↔
 storage and materialized through `llvm.amdgcn.cvt.*` intrinsics — there is no
 native `<8 x fp8>` LLVM type in the emitter.
 
-**Sub-byte / block formats in the original snapshot.** The basis tree treated
-`i4`, `fp4`, `fp6`, and the `e8m0` MX scale as packed encodings consumed by
-dedicated helpers/atoms. Those historical scores do not describe the newer
+**Packed formats use a separate storage representation.** FP4/FP6/BF6 and
+E8M0/E5M3 have logical `Type` identities; dedicated helpers/atoms consume their
+encoded bytes or packed integer carriers (see §4). The original basis treated
+these as packed encodings, so its historical scores do not describe the newer
 logical-type and storage APIs linked above.
 
 > CK-Tile gives these formats named logical types backed by a packed storage
@@ -72,8 +81,8 @@ logical-type and storage APIs linked above.
 > `e5m3.hpp:37`), and `tf32_t = tfloat32_t` (`tfloat32.hpp:68`) — each with a
 > `native_t<>` specialization mapping the logical type to its storage. This
 > separates the logical format named in an API from its storage representation.
-> rocKE's dedicated packed-format paths can provide support without a first-class
-> IR `Type`; C5 separately measures whether kernel families accept the format.
+> rocKE separates logical dtype identity from packed storage and carrier types;
+> C5 separately measures whether kernel families accept the format.
 
 **TF32 is a logical dtype with a 32-bit I32 carrier.** `tf32` and its `xf32`
 alias select two native gfx942 XF32 atoms independently of ordinary FP32

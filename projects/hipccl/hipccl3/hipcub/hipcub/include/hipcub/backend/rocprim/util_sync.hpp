@@ -1,5 +1,5 @@
 /******************************************************************************
- * Copyright (c) 2024, Advanced Micro Devices, Inc.  All rights reserved.
+ * Copyright (c) 2024-2026, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -41,7 +41,7 @@
         {                                                                                        \
             return _error;                                                                       \
         }                                                                                        \
-        if HIPCUB_IF_CONSTEXPR(HIPCUB_DETAIL_DEBUG_SYNC_VALUE)                                   \
+        if constexpr(HIPCUB_DETAIL_DEBUG_SYNC_VALUE)                                             \
         {                                                                                        \
             std::cout << name << "(" << size << ")";                                             \
             auto __error = hipStreamSynchronize(stream);                                         \

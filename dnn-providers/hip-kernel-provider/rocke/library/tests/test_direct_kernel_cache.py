@@ -44,16 +44,63 @@ _PADDING_GENERIC_FWD = {"direct_depthwise_col"}
 
 
 def test_forward_entries_only_use_same_padding(jobs):
-    """Forward kernels are wrong for any other padding, so none may be built."""
+    """Row-streaming forward kernels are wrong for any other padding, so none
+    may be built. The non-grouped kernel bounds its rows by the runtime output
+    extents; its dilated rows take the padding their workloads use."""
     fwd = [
         j.identity
         for j in jobs
         if j.identity.direction == "direct_fwd"
         and j.identity.algorithm not in _PADDING_GENERIC_FWD
+        and not (
+            j.identity.algorithm == "direct_nongrouped"
+            and j.identity.dilation_h * j.identity.dilation_w > 1
+        )
     ]
     assert fwd
     assert all(i.pad_h == (i.filter_h - 1) // 2 for i in fwd)
     assert all(i.filter_h % 2 == 1 for i in fwd)
+
+
+def test_only_the_nongrouped_kernel_is_dilated(jobs):
+    dilated = [
+        j.identity for j in jobs if j.identity.dilation_h * j.identity.dilation_w > 1
+    ]
+    assert dilated
+    assert {i.algorithm for i in dilated} == {"direct_nongrouped"}
+
+
+@pytest.mark.parametrize(
+    "pad, stride, dil_h, dil_w", [(1, 1, 3, 1), (4, 1, 1, 4), (2, 1, 2, 2)]
+)
+def test_dilated_problem_gets_only_its_dilation(cache, pad, stride, dil_h, dil_w):
+    """A dilated problem is served by the non-grouped binaries baked for its
+    dilation only, and an undilated one never by a dilated binary."""
+    problem = _problem(
+        N=8,
+        H=14,
+        W=14,
+        groups=1,
+        cpg=512,
+        kpg=512,
+        PAD=pad,
+        stride=stride,
+        dil_h=dil_h,
+        dil_w=dil_w,
+    )
+    plans, _ = dks.direct_plans(cache, problem, "fwd", _ARCH)
+    assert plans
+    assert {(p.identity.dilation_h, p.identity.dilation_w) for p in plans} == {
+        (dil_h, dil_w)
+    }
+    (step,) = plans[0].steps
+    assert step.conv_args.geom.Ho == problem.Ho and step.conv_args.geom.Wo == problem.Wo
+    plans, _ = dks.direct_plans(
+        cache, _problem(groups=1, cpg=512, kpg=512), "fwd", _ARCH
+    )
+    assert plans and all(
+        p.identity.dilation_h == p.identity.dilation_w == 1 for p in plans
+    )
 
 
 def test_padding_generic_forward_entries_cover_other_paddings(jobs):
@@ -95,7 +142,7 @@ def cache(tmp_path, jobs):
     """A cache holding every job with a placeholder binary."""
     c = KernelCache(tmp_path, _ARCH)
     for job in jobs:
-        c.put(job.identity, b"placeholder", {"kernel_name": job.identity.short_label()})
+        c.put(job.identity, b"placeholder", {"kernel_name": job.identity.label()})
     return c
 
 
@@ -145,6 +192,44 @@ def test_small_group_depthwise_offers_spatial(cache, groups, stride):
         assert step.block == (waves * plan.identity.wave_size, 1, 1)
         probe_w = waves * (plan.identity.wave_size // 8)
         assert step.grid[0] != -(-problem.Wo // probe_w)
+
+
+@pytest.mark.parametrize("stride", [1, 2])
+def test_large_depthwise_filters_get_the_tiled_kernel(cache, stride):
+    """Filters past the row-streaming grid (13x13 .. 31x31) are served by the
+    output-stationary kernel, launched with one block per output-row tile."""
+    problem = _problem(
+        N=2, H=28, W=28, groups=192, cpg=1, kpg=1, KH=31, KW=31, PAD=15, stride=stride
+    )
+    plans, _ = dks.direct_plans(cache, problem, "fwd", _ARCH)
+    assert plans and _variants(plans) == {"direct_depthwise_tiled"}
+    for plan in plans:
+        knobs = json.loads(plan.identity.knobs)
+        (step,) = plan.steps
+        assert step.grid == (
+            -(-problem.Wo // knobs["block_w"]),
+            -(-problem.groups // (64 * knobs["block_waves"])),
+            problem.N * -(-problem.Ho // knobs["block_h"]),
+        )
+
+
+def test_no_spilling_row_streaming_depthwise_is_built(jobs):
+    """A row-streaming depthwise kernel past the register file takes minutes
+    to build and loses to the tiled kernel, so the grid leaves it out."""
+    from kernels.common.conv_direct_grouped import (
+        DirectDepthwiseSpec,
+        depthwise_stream_register_reason,
+    )
+
+    stream = [j for j in jobs if j.identity.algorithm == "direct_depthwise"]
+    assert stream
+    for job in stream:
+        caps = dks.DirectCaps(**job.caps)
+        spec = DirectDepthwiseSpec(
+            problem=dks.probe_problem(caps, "fp16", "direct_depthwise"),
+            **job.spec_kwargs,
+        )
+        assert depthwise_stream_register_reason(spec) is None, job.identity.label()
 
 
 def _nongrouped(plans):
@@ -230,6 +315,7 @@ def test_depthwise_forward_offers_col_alongside_preload(cache):
         "direct_depthwise",
         "direct_depthwise_spatial",
         "direct_depthwise_col",
+        "direct_depthwise_tiled",
     }
     other = _problem(groups=64, cpg=1, kpg=1, KH=5, KW=5, PAD=0, stride=2)
     plans, _ = dks.direct_plans(cache, other, "fwd", _ARCH)
