@@ -7,7 +7,6 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 
 ### Added
 
-* Improved launch macro to detect invalid launch configuration.
 
 * Hessenberg reduction routines
     * GEHD2
@@ -18,6 +17,7 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 ### Changed
 ### Removed
 ### Optimized
+* Improved kernel launches to detect invalid launch configuration.
 
 * Improved performance of expert eigensolvers SYEVDX/HEEVDX, SYGVDX/HEGVDX
 
