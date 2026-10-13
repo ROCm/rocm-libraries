@@ -597,7 +597,7 @@ foreach(_hiptensor_family "quick|validation/quick" "standard|validation/standard
             # Resolve python3/nm from PATH at ctest time: the build-stage interpreter and the
             # build-tree llvm-nm do not exist when the packaged tests run on a separate machine.
             _hiptensor_emit_test("abi_exported_symbols ${_hiptensor_suffix}"
-                "python3 abi/check_exported_symbols.py ../../lib/libhiptensor.so")
+                "python3 abi/check_exported_symbols.py ../../${CMAKE_INSTALL_LIBDIR}/libhiptensor.so")
         endif()
     endif()
 

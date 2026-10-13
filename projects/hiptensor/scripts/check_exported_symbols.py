@@ -29,19 +29,21 @@ ALLOWLIST = [
     # extern "C" public API. Coarse prefix: admits any `hiptensor`-prefixed export, including
     # the test-only hiptensor*Reference helpers. Internal C++ (`_ZN9hiptensor...`) is still caught.
     re.compile(r"^hiptensor"),
-    # hiptensor::HiptensorOptions (shared singleton) + its LazySingleton plumbing
+    # hiptensor::HiptensorOptions (shared singleton) + its LazySingleton plumbing. The
+    # LazySingleton instance()/static/guard forms (_ZN / _ZZN / _ZGVZN) only emit out-of-line
+    # in low-inlining builds (e.g. Debug); matched here to stay in lockstep with hiptensor.map.
     re.compile(r"^_ZN9hiptensor16HiptensorOptions"),
-    re.compile(r"^_Z(Z|GVZ)N9hiptensor13LazySingletonINS_16HiptensorOptionsEE"),
+    re.compile(r"^_Z(N|ZN|GVZN)9hiptensor13LazySingletonINS_16HiptensorOptionsEE"),
     # hiptensor::Logger (shared singleton) + its LazySingleton plumbing
     re.compile(r"^_ZN9hiptensor6Logger"),
-    re.compile(r"^_Z(Z|GVZ)N9hiptensor13LazySingletonINS_6LoggerEE"),
-    # Standard ELF/runtime entries the loader and CRT provide
+    re.compile(r"^_Z(N|ZN|GVZN)9hiptensor13LazySingletonINS_6LoggerEE"),
+    # Standard ELF/CRT entries. The version script already demotes these to local, so normally
+    # none are exported; kept as an explicit safety net for a .so built without the script.
     re.compile(r"^_init$"),
     re.compile(r"^_fini$"),
     re.compile(r"^_edata$"),
     re.compile(r"^_end$"),
     re.compile(r"^__bss_start$"),
-    re.compile(r"^__"),
 ]
 
 # nm type codes for an externally exported defined symbol (global/weak; locals excluded).

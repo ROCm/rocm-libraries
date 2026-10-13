@@ -19,7 +19,10 @@
 # literal text "hiptensor", so a bare `hiptensor*;` would hide them and break the test link
 # (and, worse, split the singleton state). Keep this global set in lockstep with the allowlist
 # in scripts/check_exported_symbols.py. Verify stems against `nm -D` after a rebuild.
-HIPTENSOR_1.0 {
+#
+# The node is anonymous (no version name): this hides symbols without stamping a version tag on
+# the exports or recording a versioned dependency in consumers.
+{
   global:
     # extern "C" public API
     hiptensor*;

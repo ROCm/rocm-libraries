@@ -125,6 +125,9 @@ function(create_hiptensor_shared_library)
     if(NOT WIN32)
         target_link_options(hiptensor PRIVATE
             "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/hiptensor.map")
+        # Relink when the script changes (not tracked as a link input otherwise).
+        set_target_properties(hiptensor PROPERTIES
+            LINK_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/hiptensor.map")
     endif()
 
     # Add export definitions
