@@ -415,7 +415,8 @@ static const rocke_type_t*
                                          "fp32",
                                          t->warp_tile_m,
                                          t->warp_tile_n,
-                                         t->warp_tile_k);
+                                         t->warp_tile_k,
+                                         nullptr);
 }
 
 /* _ab_lds_plan(spec, arch) -> (ab_single, db, two_buf). Pure ints/bools. */
@@ -625,6 +626,32 @@ bool rocke_gemm_universal_is_valid_spec(const rocke_gemm_universal_spec_t* spec,
         if(spec->trait.chiplet_swizzle)
         {
             CK_GEMM_REJECT("WMMA path does not support chiplet_swizzle on %s", arch);
+        }
+    }
+
+    /* DirectToLDS: the emitter bakes a fixed per-lane chunk width into the
+     * kernel at build time, capped at the arch's own buffer_load_lds width
+     * (ArchTarget.async_lds_max_dwords). Asking for a wider one than the arch
+     * has is not a build-time error -- the AMDGPU backend aborts the whole
+     * process -- so an arch with too little width to satisfy tile_k, or none
+     * at all, must be rejected here. */
+    if(spec->trait.direct_to_lds)
+    {
+        int dtl_max_dwords = rocke_archtarget_async_lds_max_dwords(target);
+        int dtl_halves;
+        if(dtl_max_dwords < 1)
+        {
+            CK_GEMM_REJECT("direct_to_lds: %s has no DRAM->LDS DMA instruction", arch);
+        }
+        dtl_halves = (dtl_max_dwords > 4 ? 4 : dtl_max_dwords) * 2;
+        if((t->tile_k % dtl_halves) != 0)
+        {
+            CK_GEMM_REJECT("direct_to_lds requires tile_k %% %d == 0 (got %d) with "
+                           "%d dword(s)/lane on %s",
+                           dtl_halves,
+                           t->tile_k,
+                           dtl_max_dwords,
+                           arch);
         }
     }
 

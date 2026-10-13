@@ -10,6 +10,7 @@
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>

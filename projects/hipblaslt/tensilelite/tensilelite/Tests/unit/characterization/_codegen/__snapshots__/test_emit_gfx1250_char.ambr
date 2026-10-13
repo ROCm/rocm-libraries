@@ -1,0 +1,50 @@
+# serializer version: 1
+# name: test_gfx1250_emit_digests
+  list([
+    dict({
+      'file': 'BBS.yaml',
+      'kernels': list([
+        dict({
+          'basename': 'Cijk_Ailk_Bjlk_BBS_BH_Bias_A_UserArgs_MT16x16x328zQEtOQTJVXc1jo9kZaexjD55F_Iy8uwlstWwpBRIk4=',
+          'err': 0,
+        }),
+      ]),
+    }),
+    dict({
+      'file': 'F4_MX.yaml',
+      'kernels': list([
+        dict({
+          'basename': 'Cijk_Alik_Bljk_F4BS_MXAE8B32_MXBE8B32_BH_Bias_HAbOjuDNCQWLF9Xv1m6GBhB_M9VgqKwSC97gHsR-MOgos=',
+          'err': 0,
+        }),
+      ]),
+    }),
+    dict({
+      'file': 'F4_MX_DecouplePGR_TDMFuse.yaml',
+      'kernels': list([
+        dict({
+          'basename': 'Cijk_Alik_Bljk_F4BS_MXAE8B32_MXBE8B32_BH_Bias_HAiqqY0IE8H8MpViLhEw2ik6xH-unq39KBt54Zgq9fZGc=',
+          'err': 0,
+        }),
+      ]),
+    }),
+    dict({
+      'file': 'HHS.yaml',
+      'kernels': list([
+        dict({
+          'basename': 'Cijk_Ailk_Bjlk_HHS_BH_Bias_A_UserArgs_MT16x16x328zQEtOQTJVXc1jo9kZaexjD55F_Iy8uwlstWwpBRIk4=',
+          'err': 0,
+        }),
+      ]),
+    }),
+    dict({
+      'file': 'SB.yaml',
+      'kernels': list([
+        dict({
+          'basename': 'Cijk_Ailk_Bjlk_S_MX_B_Bias_SB_HA_S_SAB_SAV_UserAd13UFWh58CFCyjPF6nyORY9l97-xlxnORkOZn47XMsQ=',
+          'err': 0,
+        }),
+      ]),
+    }),
+  ])
+# ---

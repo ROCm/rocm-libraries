@@ -136,12 +136,17 @@ private:
 
         switch(node.attributes_type())
         {
+        case NodeAttrs::BatchnormAttributes:
+            return detail::GpuBatchnormFwdTrainSignatureKey(
+                node, tensorMap, node.compute_data_type());
         case NodeAttrs::ConvolutionFwdAttributes:
             return detail::GpuConvolutionFwdSignatureKey(node, tensorMap, node.compute_data_type());
         case NodeAttrs::LayernormAttributes:
             return detail::GpuLayernormFwdSignatureKey(node, tensorMap, node.compute_data_type());
         case NodeAttrs::LayernormBackwardAttributes:
             return detail::GpuLayernormBwdSignatureKey(node, tensorMap, node.compute_data_type());
+        case NodeAttrs::MatmulAttributes:
+            return detail::GpuMatmulSignatureKey(node, tensorMap, node.compute_data_type());
         case NodeAttrs::PointwiseAttributes:
             return detail::GpuPointwiseSignatureKey(node, tensorMap, node.compute_data_type());
         case NodeAttrs::ReductionAttributes:
@@ -150,18 +155,40 @@ private:
             return detail::GpuRMSNormFwdSignatureKey(node, tensorMap, node.compute_data_type());
         case NodeAttrs::RMSNormBackwardAttributes:
             return detail::GpuRMSNormBwdSignatureKey(node, tensorMap, node.compute_data_type());
-
+        case NodeAttrs::BatchnormInferenceAttributes:
+            return detail::GpuBatchnormFwdInfSignatureKey(
+                node, tensorMap, node.compute_data_type());
+        case NodeAttrs::BatchnormInferenceAttributesVarianceExt:
+            return detail::GpuBatchnormFwdInfVarianceSignatureKey(
+                node, tensorMap, node.compute_data_type());
         case NodeAttrs::SdpaAttributes:
+        {
+            // A ragged SDPA node (RFC-0014 packed layout) has a ragged_offset on a primary. Any
+            // ragged primary picks the ragged bucket, so a partly ragged node is rejected there
+            // instead of being run as dense.
+            const auto* sdpaAttributes = node.attributes_as_SdpaAttributes();
+            if(sdpaAttributes != nullptr)
+            {
+                for(const auto uid : {sdpaAttributes->q_tensor_uid(),
+                                      sdpaAttributes->k_tensor_uid(),
+                                      sdpaAttributes->v_tensor_uid(),
+                                      sdpaAttributes->o_tensor_uid()})
+                {
+                    const auto it = tensorMap.find(uid);
+                    if(it != tensorMap.end() && it->second != nullptr
+                       && it->second->ragged_offset_tensor_uid().has_value())
+                    {
+                        return detail::GpuSdpaRaggedFwdSignatureKey(node, tensorMap);
+                    }
+                }
+            }
             return detail::GpuSdpaFwdSignatureKey(node, tensorMap);
+        }
 
         // Node types with no GPU plan yet - throw descriptive error
-        case NodeAttrs::BatchnormInferenceAttributes:
-        case NodeAttrs::BatchnormInferenceAttributesVarianceExt:
         case NodeAttrs::BatchnormBackwardAttributes:
-        case NodeAttrs::BatchnormAttributes:
         case NodeAttrs::ConvolutionBwdAttributes:
         case NodeAttrs::ConvolutionWrwAttributes:
-        case NodeAttrs::MatmulAttributes:
         case NodeAttrs::SdpaBackwardAttributes:
         case NodeAttrs::BlockScaleDequantizeAttributes:
         case NodeAttrs::BlockScaleQuantizeAttributes:

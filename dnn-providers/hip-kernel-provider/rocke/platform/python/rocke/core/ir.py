@@ -24,10 +24,14 @@ Design constraints:
 
 from __future__ import annotations
 
+import enum
 import os
 import sys
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+
+from .arch import target as _arch
+from .dtypes import dtype_info
 
 # ----------------------------- Types --------------------------------------
 
@@ -48,8 +52,43 @@ I64 = Type("i64")
 BF16 = Type("bf16")
 F16 = Type("f16")
 F32 = Type("f32")
+TF32 = Type("tf32")
 FP8E4M3 = Type("fp8e4m3")
 BF8E5M2 = Type("bf8e5m2")
+FP4E2M1 = Type("fp4e2m1")
+FP6E2M3 = Type("fp6e2m3")
+FP6E3M2 = Type("fp6e3m2")
+E8M0 = Type("e8m0")
+E5M3 = Type("e5m3")
+
+
+def dtype_to_ir_type(dtype: str) -> Type:
+    """Resolve a logical type without claiming scalar operation support.
+
+    Packed memory is described separately; a low-bit type is never an I8 alias.
+    """
+    info = dtype_info(dtype)
+    types = {
+        "i1": I1,
+        "i8": I8,
+        "i16": I16,
+        "i32": I32,
+        "i64": I64,
+        "fp16": F16,
+        "bf16": BF16,
+        "fp32": F32,
+        "tf32": TF32,
+        "fp8e4m3": FP8E4M3,
+        "bf8e5m2": BF8E5M2,
+        "fp4e2m1": FP4E2M1,
+        "fp6e2m3": FP6E2M3,
+        "fp6e3m2": FP6E3M2,
+        "e8m0": E8M0,
+        "e5m3": E5M3,
+    }
+    if info.name not in types:
+        raise ValueError(f"no logical IR type for dtype {info.name!r}")
+    return types[info.name]
 
 
 # AMDGPU buffer-load AUX-byte cache-coherency hints. The AUX field of
@@ -61,6 +100,48 @@ CACHE_ALL = 0  # Cache at all levels (default).
 CACHE_GLOBAL = 1  # GLC set — skip L2; useful for one-shot loads.
 CACHE_STREAM = 2  # SLC set — streaming hint (don't evict useful lines).
 NON_TEMPORAL = 3  # GLC + SLC — bypass cache hierarchy entirely.
+# GLC / SLC are the gfx90a names; on gfx942 / gfx950 the same bit values
+# are SC0 (1) and NT (2).
+#
+# Not the same thing as ``TemporalHint.STREAMING`` on ``global_load_vN`` /
+# ``global_store_vN``. That hint emits LLVM ``!nontemporal`` and the backend
+# picks the bits per arch: on gfx942 / gfx950 it sets NT only, i.e. the bits
+# of CACHE_STREAM, NOT NON_TEMPORAL (which also sets SC0).
+
+
+class TemporalHint(enum.Enum):
+    """Temporal-locality intent for ``global_load_vN`` / ``global_store_vN``.
+
+    A semantic hint, not raw cache bits: the backend chooses the bits per
+    arch. Lowering accepts STREAMING only on :data:`STREAMING_ARCHS`.
+    C twin: ``rocke_temporal_hint_t`` in ``rocke/ir.h``.
+    """
+
+    DEFAULT = "default"  # the existing cache policy; IR unchanged
+    STREAMING = "streaming"  # read/written once; lowers to LLVM !nontemporal
+
+
+# Targets whose STREAMING lowering is validated (LLVM ``!nontemporal`` -> the
+# ``nt`` bit). Other admitted targets map ``!nontemporal`` to different cache
+# bits (gfx90a ``glc slc``, gfx1151 ``slc dlc``, gfx1201 ``th:TH_*_NT``) or
+# are unverified (gfx1250), so every lowerer rejects the hint there. Mirrored
+# in the C++ lowerers (``lower_llvm/mem.cpp``, ``lower_hip/lower_hip_mem.cpp``).
+STREAMING_ARCHS = ("gfx942", "gfx950")
+
+
+def require_streaming_arch(op_name: str, gfx: str) -> None:
+    """Reject a STREAMING op lowered for a target outside STREAMING_ARCHS."""
+    if gfx not in STREAMING_ARCHS:
+        raise ValueError(
+            f"{op_name}: temporal_hint STREAMING requires gfx942 or gfx950, got {gfx}"
+        )
+
+
+def _streaming(temporal_hint: TemporalHint) -> bool:
+    """True for STREAMING; any value that is not a TemporalHint is rejected."""
+    if not isinstance(temporal_hint, TemporalHint):
+        raise TypeError(f"temporal_hint must be a TemporalHint, got {temporal_hint!r}")
+    return temporal_hint is TemporalHint.STREAMING
 
 
 # ----- target-neutral MMA metadata ---------------------------------------
@@ -71,9 +152,8 @@ NON_TEMPORAL = 3  # GLC + SLC — bypass cache hierarchy entirely.
 # Both are read from the arch SSOT (``core/arch/target``): fragment lengths from
 # ``_MMA_FRAGMENT_INFO`` and the accumulator dtype from the JSON catalog. ir.py
 # keeps *no* private copy of that data — an ``MmaOp`` object supplies both fields
-# directly, and a bare op_id string is resolved through the lazy helpers below.
-# The arch package is imported lazily (inside the helpers) so ir.py stays
-# importable without eagerly loading the arch tree.
+# directly, and a bare op_id string is resolved through the helpers below.
+# The arch module loads its JSON catalog lazily when a lookup needs it.
 
 # op_id -> the ``result_name_hint`` the legacy ISA-named method used. This is
 # purely ir-side SSA naming (not arch data), kept here so the emitted value
@@ -85,8 +165,6 @@ _MMA_RESULT_HINT: Dict[str, str] = {
     "mfma_f32_16x16x96_fp6": "acc6",
     "mfma_f32_16x16x128_fp8": "acc128",
     "mfma_scale_f32_16x16x128_f8f6f4": "mxacc",
-    "wmma_scale_f32_16x16x128_fp8_fp8": "mxacc",
-    "wmma_scale16_f32_16x16x128_fp8_fp8": "mxacc",
 }
 
 
@@ -135,12 +213,10 @@ def _check_cachepolicy(op: str, value: int) -> int:
 def _mma_c_frag_len(op_id: str) -> int:
     """Accumulator fragment length for ``op_id`` from the arch SSOT.
 
-    Resolved through ``core/arch/target._MMA_FRAGMENT_INFO`` (imported lazily);
+    Resolved through ``core/arch/target._MMA_FRAGMENT_INFO``;
     ir.py holds no private copy. Unknown op_ids (frag length 0) raise, matching
     the strictness callers relied on.
     """
-    from rocke.core.arch import target as _arch
-
     frag_len = _arch._frag_info(op_id).c_frag_len
     if frag_len <= 0:
         raise ValueError(
@@ -154,11 +230,9 @@ def _mma_c_is_int(op_id: str) -> bool:
     """True when ``op_id`` accumulates in i32 (integer WMMA).
 
     Sourced from the arch catalog's accumulator dtype
-    (``core/arch/data/arch_specs.json`` via ``target._op_id_c_dtype``), imported
-    lazily. Op_ids absent from the catalog default to the f32 accumulator.
+    (``core/arch/data/arch_specs.json`` via ``target._op_id_c_dtype``).
+    Op_ids absent from the catalog default to the f32 accumulator.
     """
-    from rocke.core.arch import target as _arch
-
     return _arch._op_id_c_dtype().get(op_id) == "i32"
 
 
@@ -816,6 +890,14 @@ class IRBuilder:
         return self._op("math.rsqrt", [a], [a.type], result_name_hint="rsq").result
 
     def tanh(self, a: Value) -> Value:
+        """Return the f32 hyperbolic tangent of ``a``.
+
+        Narrow activation users must promote to f32 explicitly and cast the
+        result back. Keeping the core operation f32-only prevents an invalid
+        narrow intrinsic from reaching the AMDGPU lowerer.
+        """
+        if a.type != F32:
+            raise ValueError(f"math.tanh requires f32 operand, got {a.type.name}")
         return self._op("math.tanh", [a], [a.type], result_name_hint="tanh").result
 
     def land(self, a: Value, b: Value) -> Value:
@@ -881,6 +963,49 @@ class IRBuilder:
         if v.type.name not in ("f16", "bf16"):
             raise ValueError(f"cast_to_f32 unsupported from {v.type.name}")
         return self._op("arith.cast_to_f32", [v], [F32], result_name_hint="f32").result
+
+    def cvt_f32_to_tf32(self, v: Value) -> Value:
+        """Round f32 to TF32 precision (RNE), carried as i32 bits.
+
+        Finite encodings have 13 zero low bits. Infinities and signed zero are
+        preserved; NaNs are quieted and retain their upper payload bits.
+        Use bitcast(v, TF32) to request native XF32 truncation without rounding.
+        """
+        if v.type != F32:
+            raise ValueError("cvt_f32_to_tf32 expects f32 input")
+        bits = self.bitcast(v, I32)
+        magnitude_mask = self.const_i32(2147483647)
+        mag = self.land(bits, magnitude_mask)
+        sign_mask = self.const_i32(-2147483648)
+        sign = self.land(bits, sign_mask)
+        exponent_mask = self.const_i32(2139095040)
+        exp = self.land(mag, exponent_mask)
+        exponent_all_ones = self.const_i32(2139095040)
+        special = self.cmp_eq(exp, exponent_all_ones)
+        zero = self.const_i32(0)
+        safe = self.select(special, zero, mag)
+        discarded_bits = self.const_i32(13)
+        shift = self.lshr(safe, discarded_bits)
+        low_bit = self.const_i32(1)
+        odd = self.land(shift, low_bit)
+        rounding_bias = self.const_i32(4095)
+        bias = self.add(odd, rounding_bias)
+        rounded = self.add(safe, bias)
+        precision_mask = self.const_i32(-8192)
+        rounded = self.land(rounded, precision_mask)
+        rounded = self.lor(rounded, sign)
+        fraction_mask = self.const_i32(8388607)
+        frac = self.land(mag, fraction_mask)
+        zero_fraction = self.const_i32(0)
+        is_nan = self.cmp_ne(frac, zero_fraction)
+        quiet_bit = self.const_i32(4194304)
+        quiet = self.lor(bits, quiet_bit)
+        nan_precision_mask = self.const_i32(-8192)
+        quiet = self.land(quiet, nan_precision_mask)
+        nonfinite = self.select(is_nan, quiet, bits)
+        result = self.select(special, nonfinite, rounded)
+        result = self.bitcast(result, TF32)
+        return result
 
     def cast_f32_to(self, v: Value, target: Type) -> Value:
         if v.type.name != "f32":
@@ -1532,54 +1657,67 @@ class IRBuilder:
         n: int,
         *,
         align: Optional[int] = None,
+        temporal_hint: TemporalHint = TemporalHint.DEFAULT,
     ) -> Value:
         """Vectorised global load of N consecutive values.
 
-        Supports the full element-type catalog the LLVM lowering already
-        accepts: ``f16`` / ``bf16`` (N in {2, 4, 8}), ``f32`` / ``i32``
-        (N in {2, 4, 8}), ``i16`` (N in {2, 4, 8}), ``fp8e4m3`` /
-        ``bf8e5m2`` / ``i8`` (N in {2, 4, 8, 16}).
+        Supports f16/bf16/i16 (N in {2, 4, 6, 8, 16}), f32/i32/tf32
+        (N in {2, 3, 4, 8}), and fp8e4m3/bf8e5m2/i8 (N in {2, 4, 8, 12, 16}).
+        Loads exactly N elements. Instruction selection depends on target and
+        alignment; 96-bit payloads do not require a 96-bit scalar type.
 
-        Lowers to a single ``load <N x elem>`` from ``addrspace(1)``;
-        AMDGPU's backend coalesces these into a single VMEM transaction
-        (``global_load_dwordxN``) when the address is naturally aligned.
+        Default alignment is the payload size for power-of-two loads, and
+        element alignment for 12-byte loads. An explicit alignment is a caller
+        guarantee about the address after adding idx.
 
-        The per-element size is folded into the default alignment so the
-        common case (8 fp8 → 8-byte load, 4 f32 → 16-byte load) does
-        not need an explicit ``align=`` kwarg.
+        ``temporal_hint`` states the access's temporal-locality intent.
+        ``TemporalHint.STREAMING`` means the data is read once, so it should
+        not displace reused lines. Today it lowers to LLVM ``!nontemporal``
+        (HIP: ``__builtin_nontemporal_load``) and the AMDGPU backend chooses
+        the cache-policy bits per arch -- on gfx942 / gfx950 the ``nt`` bit
+        (the bits of ``CACHE_STREAM``, NOT ``NON_TEMPORAL``); lowering for
+        any target outside ``STREAMING_ARCHS`` raises ``ValueError``. ``DEFAULT``
+        keeps the existing policy and records nothing, so default loads are
+        unchanged. Any value that is not a ``TemporalHint`` raises
+        ``TypeError``.
         """
         if dtype.name in ("f16", "bf16", "i16"):
             elem_bytes = 2
             # n=16 (32-byte `global_load_dwordx8`) is needed for the RDNA WMMA
             # <16 x half> operand fragment; AMDGPU coalesces it when aligned.
-            if n not in (2, 4, 8, 16):
+            if n not in (2, 4, 6, 8, 16):
                 raise ValueError(f"unsupported vector width for global_load_vN: {n}")
-        elif dtype.name in ("f32", "i32"):
+        elif dtype.name in ("f32", "i32", "tf32"):
             elem_bytes = 4
-            if n not in (2, 4, 8):
+            if n not in (2, 3, 4, 8):
                 raise ValueError(
                     f"unsupported vector width for {dtype.name} global_load_vN: {n}"
                 )
         elif dtype.name in ("fp8e4m3", "bf8e5m2", "i8"):
             elem_bytes = 1
-            if n not in (2, 4, 8, 16):
+            if n not in (2, 4, 8, 12, 16):
                 raise ValueError(
                     f"unsupported vector width for {dtype.name} global_load_vN: {n}"
                 )
         else:
             raise ValueError(
-                "global_load_vN supports f16/bf16/i16/f32/i32/fp8e4m3/bf8e5m2/i8, "
+                "global_load_vN supports f16/bf16/i16/f32/i32/tf32/fp8e4m3/bf8e5m2/i8, "
                 f"got {dtype.name}"
             )
+        attrs = {
+            "elem_type": dtype.name,
+            "vec": n,
+            "align": int(
+                align or (elem_bytes if n * elem_bytes == 12 else n * elem_bytes)
+            ),
+        }
+        if _streaming(temporal_hint):
+            attrs["nontemporal"] = True
         return self._op(
             "memref.global_load_vN",
             [ptr, idx],
             [VectorType(dtype, n)],
-            attrs={
-                "elem_type": dtype.name,
-                "vec": n,
-                "align": int(align or (n * elem_bytes)),
-            },
+            attrs=attrs,
             result_name_hint=f"gv{n}",
         ).result
 
@@ -1751,7 +1889,7 @@ class IRBuilder:
         elem_bytes = (
             1
             if elem_name in ("i8", "fp8e4m3", "bf8e5m2")
-            else 4 if elem_name in ("f32", "i32") else 2
+            else 4 if elem_name in ("f32", "i32", "tf32") else 2
         )
         self._op(
             "tile.smem_store_vN",
@@ -1785,20 +1923,28 @@ class IRBuilder:
     def smem_load_vN(self, smem: Value, *indices, dtype: Type, n: int = 0) -> Value:
         """LDS load of ``<N x dtype>``. Supports 8-bit (fp8e4m3 / bf8e5m2 /
         i8), 16-bit (f16 / bf16) and 32-bit (f32 / i32) element types;
-        AMDGPU lowers vector LDS loads to ``ds_read_b{8, 16, 32, 64, 128}``
-        based on total payload size. The 8-bit variants must use ``n in {1,
-        2, 4, 8, 16}`` so the resulting payload still maps to a single
-        ``ds_read_b*`` instruction (n=16 → ds_read_b128).
+        loads exactly N elements. In addition to power-of-two widths, accepts
+        96-bit payloads (12 bytes, six halfwords, or three words), using element
+        alignment. The target and alignment determine instruction selection.
         """
-        if dtype.name not in ("f16", "bf16", "f32", "i32", "fp8e4m3", "bf8e5m2", "i8"):
+        if dtype.name not in (
+            "f16",
+            "bf16",
+            "f32",
+            "i32",
+            "tf32",
+            "fp8e4m3",
+            "bf8e5m2",
+            "i8",
+        ):
             raise ValueError(
-                "smem_load_vN supports f16 / bf16 / f32 / i32 / fp8e4m3 / "
+                "smem_load_vN supports f16 / bf16 / f32 / i32 / tf32 / fp8e4m3 / "
                 f"bf8e5m2 / i8, got {dtype.name}"
             )
         allowed_n = (
-            (1, 2, 4, 8, 16)
+            (1, 2, 4, 8, 12, 16)
             if dtype.name in ("fp8e4m3", "bf8e5m2", "i8")
-            else (1, 2, 4, 8)
+            else (1, 2, 4, 6, 8) if dtype.name in ("f16", "bf16") else (1, 2, 3, 4, 8)
         )
         if n not in allowed_n:
             raise ValueError(
@@ -1848,6 +1994,11 @@ class IRBuilder:
         (``a_scale``, ``b_scale``); ordinary atoms take exactly ``a, b, c``.
         """
         op_id = op.op_id if hasattr(op, "op_id") else str(op)
+        from .tf32 import tf32_mma_error
+
+        error = tf32_mma_error(op_id, [a, b, c, *extra])
+        if error:
+            raise ValueError(error)
         c_frag_len = (
             op.c_frag_len
             if hasattr(op, "c_frag_len") and op.c_frag_len
@@ -1859,7 +2010,11 @@ class IRBuilder:
         c_dtype = getattr(op, "c_dtype", None)
         is_int_acc = c_dtype == "i32" if c_dtype is not None else _mma_c_is_int(op_id)
         c_elem = I32 if is_int_acc else F32
-        hint = _MMA_RESULT_HINT.get(op_id, "acc")
+        hint = (
+            "mxacc"
+            if _arch._op_id_family().get(op_id) == "wmma_scaled"
+            else _MMA_RESULT_HINT.get(op_id, "acc")
+        )
         return self._op(
             "tile.mma",
             [a, b, c, *extra],
@@ -1962,38 +2117,6 @@ class IRBuilder:
     def wmma_gfx1250_f32_16x16x64_bf8_bf8(self, a: Value, b: Value, c: Value) -> Value:
         """gfx1250 (gfx1250) BF8 K=64 WMMA. Thin wrapper over :meth:`mma`."""
         return self.mma("wmma_gfx1250_f32_16x16x64_bf8_bf8", a, b, c)
-
-    def wmma_scale_f32_16x16x128_fp8_fp8(
-        self,
-        a: Value,
-        b: Value,
-        c: Value,
-        a_scale: Value,
-        b_scale: Value,
-    ) -> Value:
-        """gfx1250 native SCALE FP8 WMMA with packed E8M0 scale operands.
-
-        A and B are ``<16 x i32>`` fragments (64 FP8 bytes per lane), C is
-        ``<8 x f32>``, and each scale operand is one i32 packing four E8M0
-        bytes for the instruction's four K=32 scale blocks.
-        """
-        return self.mma("wmma_scale_f32_16x16x128_fp8_fp8", a, b, c, a_scale, b_scale)
-
-    def wmma_scale16_f32_16x16x128_fp8_fp8(
-        self,
-        a: Value,
-        b: Value,
-        c: Value,
-        a_scale: Value,
-        b_scale: Value,
-    ) -> Value:
-        """gfx1250 native SCALE16 FP8 WMMA with eight packed E8M0 scales.
-
-        The matrix and accumulator fragments match
-        :meth:`wmma_scale_f32_16x16x128_fp8_fp8`; each scale operand is i64
-        because SCALE16 carries eight K=16 E8M0 scale bytes.
-        """
-        return self.mma("wmma_scale16_f32_16x16x128_fp8_fp8", a, b, c, a_scale, b_scale)
 
     def mfma_f32_16x16x16_f16(self, a: Value, b: Value, c: Value) -> Value:
         return self.mma("mfma_f32_16x16x16_f16", a, b, c)
@@ -4169,14 +4292,22 @@ class IRBuilder:
         n: int,
         *,
         align: Optional[int] = None,
+        temporal_hint: TemporalHint = TemporalHint.DEFAULT,
     ) -> None:
         """Vectorised global store of N consecutive elements.
 
         Supports the full element-type catalog the LLVM lowering already
-        emits: ``f16`` / ``bf16`` / ``i16`` (2-byte), ``f32`` / ``i32``
+        emits: ``f16`` / ``bf16`` / ``i16`` (2-byte), ``f32`` / ``i32`` / ``tf32``
         (4-byte), ``i8`` / ``fp8e4m3`` / ``bf8e5m2`` (1-byte). Lowers to
-        a single ``store <N x elem>`` and AMDGPU coalesces into one
-        ``global_store_dwordxN`` transaction.
+        a single ``store <N x elem>`` with the supplied address alignment.
+        Payload width and address alignment are independent; target and
+        alignment determine whether the transfer uses one machine instruction.
+
+        ``temporal_hint`` as for ``global_load_vN``: ``TemporalHint.STREAMING``
+        means the data is written once; it lowers to LLVM ``!nontemporal``
+        (HIP: ``__builtin_nontemporal_store``) and the backend chooses the
+        bits per arch (gfx942 / gfx950: ``nt``; other targets are rejected at
+        lowering, see ``STREAMING_ARCHS``). ``DEFAULT`` records nothing.
         """
         if n not in (1, 2, 4, 8, 16):
             raise ValueError(f"global_store_vN n must be 1, 2, 4, 8, or 16 (got {n})")
@@ -4189,7 +4320,7 @@ class IRBuilder:
             elem_bytes = 2
             if n == 16:
                 raise ValueError(f"global_store_vN n=16 not supported for {elem_name}")
-        elif elem_name in ("f32", "i32"):
+        elif elem_name in ("f32", "i32", "tf32"):
             elem_bytes = 4
             if n == 16:
                 raise ValueError(f"global_store_vN n=16 not supported for {elem_name}")
@@ -4197,18 +4328,17 @@ class IRBuilder:
             elem_bytes = 1
         else:
             raise ValueError(
-                "global_store_vN supports f16/bf16/i16/f32/i32/i8/fp8e4m3/bf8e5m2, "
+                "global_store_vN supports f16/bf16/i16/f32/i32/tf32/i8/fp8e4m3/bf8e5m2, "
                 f"got {elem_name}"
             )
-        self._op(
-            "memref.global_store_vN",
-            [ptr, idx, value],
-            attrs={
-                "elem_type": elem_name,
-                "vec": n,
-                "align": int(align or (n * elem_bytes)),
-            },
-        )
+        attrs = {
+            "elem_type": elem_name,
+            "vec": n,
+            "align": int(align or (n * elem_bytes)),
+        }
+        if _streaming(temporal_hint):
+            attrs["nontemporal"] = True
+        self._op("memref.global_store_vN", [ptr, idx, value], attrs=attrs)
 
     # ----- atomics (for split-K) -----
 

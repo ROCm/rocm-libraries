@@ -271,6 +271,8 @@ def _make_spec(
             tile_n=tile_n,
             tile_k=tile_k,
             arch=arch,
+            groups=problem.groups,
+            block_size=warp_m * warp_n * target.wave_size,
         ).split_k
     spec = WgradConvSpec(
         problem=problem,
@@ -314,6 +316,10 @@ def _run_one(
     async_dma: bool = False,
     warp_tile_mn: "int | None" = None,
     tile_k: "int | None" = None,
+    group_merge: int = 1,
+    tile_m: "int | None" = None,
+    tile_n: "int | None" = None,
+    unroll_k: bool = False,
 ) -> Tuple[bool, str]:
     """Build, compile, launch, and verify one wgrad kernel.
 
@@ -322,7 +328,8 @@ def _run_one(
     import torch
 
     from rocke import compile_kernel
-    from rocke.helpers.manifest import conv_args_signature
+    from kernels.common.conv_args import ConvArgs
+    from kernels.common.conv_abi import conv_args_signature
     from kernels.common.conv_implicit_gemm_wgrad import (
         build_implicit_gemm_conv_wgrad,
         is_valid_wgrad_spec,
@@ -342,6 +349,19 @@ def _run_one(
         warp_tile_mn=warp_tile_mn,
         tile_k=tile_k,
     )
+    if spec is not None and (group_merge > 1 or tile_m or tile_n or unroll_k):
+        from dataclasses import replace as _dc_replace
+
+        _over = {}
+        if unroll_k:
+            _over["unroll_k"] = True
+        if tile_m:
+            _over["tile_m"] = tile_m
+        if tile_n:
+            _over["tile_n"] = tile_n
+        if group_merge > 1:
+            _over["group_merge"] = group_merge
+        spec = _dc_replace(spec, **_over)
     if spec is None:
         return True, f"skip (no atom): {_wtk}"
 
@@ -352,7 +372,9 @@ def _run_one(
     try:
         kernel = build_implicit_gemm_conv_wgrad(spec, arch=arch)
     except ValueError as e:
-        return True, f"skip (build error): {e}"
+        # The validator admitted this spec, so a build error is a bug, not a
+        # configuration the arch lacks -- fail rather than skip.
+        return False, f"build error for a spec the validator admitted: {e}"
 
     try:
         artifact = compile_kernel(kernel, arch=arch)
@@ -381,7 +403,12 @@ def _run_one(
     rt.memcpy_h2d(X_dev, _u8(X_t), X_t.nbytes)
     rt.memset(dW_dev, 0, dW_t.nbytes)  # split-K atomic-add needs a zeroed dW
 
-    sig = conv_args_signature(dtype)
+    sig = conv_args_signature(
+        dtype,
+        direction="wgrad",
+        is_3d=spec.problem.is_3d,
+        two_stage=bool(getattr(spec, "two_stage", False)),
+    )
     try:
         launcher = KernelLauncher(
             hsaco=artifact.hsaco,
@@ -397,20 +424,27 @@ def _run_one(
     # wgrad grid: x = ceil(N_wg / tile_n), y = ceil(M / tile_m),
     # z = groups * split_k (the group axis rides on z alongside split-K;
     # == split_k for groups=1).
-    gx = (spec.wg_N + spec.tile_n - 1) // spec.tile_n
-    gy = (spec.wg_M + spec.tile_m - 1) // spec.tile_m
-    gz = p.groups * spec.split_k
+    gx = (spec.grid_N + spec.tile_n - 1) // spec.tile_n
+    gy = (spec.grid_M + spec.tile_m - 1) // spec.tile_m
+    gz = spec.grid_groups * spec.split_k
     grid = (gx, gy, gz)
     block = (spec.block_size, 1, 1)
 
-    values = {
-        "A": dY_dev,
-        "B": X_dev,
-        "D": dW_dev,
-        "A_bytes": dY_t.nbytes,
-        "B_bytes": X_t.nbytes,
-        "D_bytes": dW_t.nbytes,
-    }
+    values = ConvArgs.from_problem(
+        spec.problem,
+        direction="wgrad",
+        tile_m=spec.tile_m,
+        tile_n=spec.tile_n,
+        tile_k=spec.tile_k,
+    ).to_launch_values(
+        int(dY_dev),
+        int(X_dev),
+        int(dW_dev),
+        dY_t.nbytes,
+        X_t.nbytes,
+        dW_t.nbytes,
+        split_k=max(1, spec.split_k),
+    )
     launcher(values, config=LaunchConfig(grid=grid, block=block, fence=True))
 
     dW_cpu = torch.empty_like(dW_t)
@@ -987,9 +1021,10 @@ class TestConvWgradVectorLoad(unittest.TestCase):
         )
 
     def test_gfx1250_grouped_wgrad_dual_engine(self):
-        # Grouped wgrad (grid-per-group, Gm=1) on gfx1250 (wave32 WMMA 16x16x32).
-        # Group merging is MFMA-only (is_valid_wgrad_spec rejects Gm>1 on WMMA), so
-        # this guards only the grouped Gm=1 WMMA path. Lower through the backend
+        # Grouped wgrad (grid-per-group) on gfx1250 (wave32 WMMA 16x16x32).
+        # Group merging is MFMA-only, so it cannot apply on wave32; this guards
+        # the grouped WMMA path as it ships, one conv group per workgroup.
+        # Lower through the backend
         # dispatcher so under ROCKE_BACKEND=both it also asserts Python == C++ on the
         # gfx1250 serialized-IR path. vec>1 shape (C=K=64, cpg=kpg=16), so it does
         # NOT hit the scalar tile.buffer_load gap -- no both-lane skip needed.
@@ -1228,6 +1263,7 @@ def _run_two_stage_ts(spec, arch, rt, dY_t, X_t):
     import torch
     from kernels.common.conv_implicit_gemm_wgrad_two_stage import (
         build_implicit_gemm_conv_wgrad_two_stage,
+        wgrad_stage1_launch_values,
     )
     from kernels.common.conv_wgrad_workspace_reduce import (
         WgradReduceSpec,
@@ -1262,34 +1298,37 @@ def _run_two_stage_ts(spec, arch, rt, dY_t, X_t):
             problem=spec.problem,
             dtype_d=spec.data.dtype_d,
             groups=p.groups,
+            # Must match Stage 1 or the fold covers the wrong slab count.
+            ws_replicas=spec.ws_replicas,
         )
         s2_grid = wgrad_reduce_grid(s2_spec)
         s2_block = (s2_spec.block_size, 1, 1)
 
         # Stage 1: z = groups * split_k (encodes group and slice index).
         s1_grid = (
-            (spec.wg_N + spec.tile_n - 1) // spec.tile_n,
-            (spec.wg_M + spec.tile_m - 1) // spec.tile_m,
-            p.groups * spec.split_k,
+            (spec.grid_N + spec.tile_n - 1) // spec.tile_n,
+            (spec.grid_M + spec.tile_m - 1) // spec.tile_m,
+            spec.grid_groups * spec.split_k,
         )
         s1_block = (spec.block_size, 1, 1)
 
-        s1_vals = {
-            "A": dY_dev,
-            "B": X_dev,
-            "D": dW_dev,
-            "A_bytes": dY_t.nbytes,
-            "B_bytes": X_t.nbytes,
-            "D_bytes": dW_t.nbytes,
-            "ws_ptr": ws_dev,
-            "ws_bytes": ws_nbytes,
-        }
+        # Stage 1 is an AOT wgrad kernel: the shape travels as kernargs.
+        s1_vals = wgrad_stage1_launch_values(
+            spec,
+            dY_ptr=int(dY_dev),
+            X_ptr=int(X_dev),
+            dW_ptr=int(dW_dev),
+            dY_bytes=dY_t.nbytes,
+            X_bytes=X_t.nbytes,
+            dW_bytes=dW_t.nbytes,
+            ws_ptr=int(ws_dev),
+            ws_bytes=ws_nbytes,
+        )
         s2_vals = {
             "ws_ptr": ws_dev,
             "dw_ptr": dW_dev,
             "wg_M": spec.wg_M,
             "wg_N": spec.wg_N,
-            "split_k": spec.split_k,
             "ws_bytes": ws_nbytes,
             "dw_bytes": dW_t.nbytes,
             "groups": p.groups,
@@ -1326,6 +1365,9 @@ def _check_two_stage(
     warp_tile_mn: "int | None" = None,
     tile_k: "int | None" = None,
     seed: int = 0,
+    group_merge: int = 1,
+    tile_m: "int | None" = None,
+    tile_n: "int | None" = None,
 ) -> "Tuple[bool, str]":
     """Build and run the two-stage wgrad pipeline; compare against CPU reference.
 
@@ -1367,6 +1409,12 @@ def _check_two_stage(
 
     # Promote to two-stage.
     ts_spec = _dc_replace(base_spec, two_stage=True)
+    if tile_m is not None:
+        ts_spec = _dc_replace(ts_spec, tile_m=tile_m)
+    if tile_n is not None:
+        ts_spec = _dc_replace(ts_spec, tile_n=tile_n)
+    if group_merge > 1:
+        ts_spec = _dc_replace(ts_spec, group_merge=group_merge)
     if ts_spec.split_k <= 1:
         return True, "split_k=1 after auto-resolve; two-stage needs split_k>1"
 
@@ -1390,6 +1438,36 @@ def _check_two_stage(
     max_abs = dW_ref.abs().max().item()
     if max_abs < 1e-6:
         return True, "reference near-zero; skipped numeric check"
+
+    # Coverage guards, checked before the tolerance so a dropped slab reports
+    # as "whole rows missing" rather than as a vague numeric failure.
+    #
+    # Rows catch an accumulator bound left at the per-group extent under group
+    # merging: every merged row above 0 then fails the test and its dW slab is
+    # never written. Columns catch the failure the row guard structurally
+    # cannot see -- a decompaction error that writes the correct output channel
+    # at the wrong (y, x, c) position, which is the new mode the block-diagonal
+    # predicate introduces.
+    nz_ref_row = dW_ref.reshape(p.K, -1).abs().sum(dim=1) > 0
+    nz_out_row = dW_ours.reshape(p.K, -1).abs().sum(dim=1) > 0
+    n_missing_rows = int((nz_ref_row & ~nz_out_row).sum())
+    if n_missing_rows:
+        return False, (
+            f"{n_missing_rows}/{p.K} dW output-channel rows are zero while the "
+            f"reference is non-zero (groups={groups}, group_merge={group_merge}, "
+            f"spk{ts_spec.split_k}) -- whole groups are not being written"
+        )
+    cpg = p.C // p.groups
+    n_cols = p.K * p.Y * p.X
+    nz_ref_col = dW_ref.reshape(n_cols, cpg).abs().sum(dim=1) > 0
+    nz_out_col = dW_ours.reshape(n_cols, cpg).abs().sum(dim=1) > 0
+    n_missing_cols = int((nz_ref_col & ~nz_out_col).sum())
+    if n_missing_cols:
+        return False, (
+            f"{n_missing_cols}/{n_cols} dW (k,y,x) positions are zero while the "
+            f"reference is non-zero (groups={groups}, group_merge={group_merge}) "
+            f"-- the merged column index decompacts to the wrong position"
+        )
 
     tol = 5e-2
     rel_err = (dW_ours - dW_ref).abs().max().item() / max_abs
@@ -1516,11 +1594,27 @@ class TestConvWgradTwoStage(unittest.TestCase):
                     self._check(shape, dtype, "mem", split_k=-1, seed=3)
 
     # ------------------------------------------------------------------
-    # Determinism guarantee
+    # Run-to-run stability (NOT a determinism guarantee)
     # ------------------------------------------------------------------
 
     def test_is_deterministic(self):
-        """Two consecutive runs on identical inputs produce bit-exact output."""
+        """Two consecutive runs on identical inputs produce bit-exact output.
+
+        This is an empirical stability check on the *two-stage* spec, not a
+        determinism guarantee for it. Stage 1 f32-atomic-adds a group's
+        K-slices into shared replica slabs, so the summation order is
+        scheduler-dependent and f32 addition is not associative -- Stage 2's
+        ordered fold over the replicas does not recover determinism for partial
+        sums that were already reordered.
+
+        This is not a loss of determinism for the family: a wgrad at
+        ``split_k <= 1`` is still bit-exact, and that is what
+        ``rocke_wgrad_conv_spec_is_deterministic`` reports true for. It reports
+        false for every ``split_k > 1`` spec, two-stage included, and that is
+        the answer a host should act on. What this test catches is a *change*
+        in behaviour for a fixed launch geometry, which is worth a signal even
+        though a failure here is not by itself a correctness bug.
+        """
         import torch
 
         spec = _make_two_stage_spec(self.ARCH)
@@ -1842,13 +1936,10 @@ class TestWgradValidatorAgreement(unittest.TestCase):
             self.fail(f"is_valid_wgrad_spec said valid but validate() raised: {raised}")
         return ok, why
 
-    def test_force_deterministic_accepted_by_both(self):
-        # force_deterministic is promoted to two_stage by the builder, so the
-        # workspace-store epilogue applies and 'default' is legal for 16-bit dW.
-        # validate() used to miss the promotion and demand cshuffle.
-        ok, why = self._agree(
-            self._spec(split_k=4, force_deterministic=True, epilogue="default")
-        )
+    def test_two_stage_accepted_by_both(self):
+        # two_stage uses the f32 scratch-atomic epilogue, so 'default' is legal
+        # for a 16-bit dW. validate() used to demand cshuffle here.
+        ok, why = self._agree(self._spec(split_k=4, two_stage=True, epilogue="default"))
         self.assertTrue(ok, why)
 
     def test_plain_atomic_still_requires_cshuffle(self):
@@ -1856,13 +1947,11 @@ class TestWgradValidatorAgreement(unittest.TestCase):
         ok, _ = self._agree(self._spec(split_k=4, epilogue="default"))
         self.assertFalse(ok, "split_k atomic + 16-bit dW + default must be rejected")
 
-    def test_force_deterministic_does_not_exempt_runtime_degree(self):
-        # split_k == 0 is the runtime-degree atomic encoding and can never be
-        # promoted to two-stage, so it still needs cshuffle.
-        ok, _ = self._agree(
-            self._spec(split_k=0, force_deterministic=True, epilogue="default")
-        )
-        self.assertFalse(ok, "split_k=0 is atomic regardless of force_deterministic")
+    def test_split_k_zero_rejected(self):
+        # The split degree is always a launch parameter; there is no separate
+        # "runtime degree" encoding, so 0 is not a valid spec value.
+        ok, _ = self._agree(self._spec(split_k=0, two_stage=True, epilogue="default"))
+        self.assertFalse(ok, "split_k=0 is not a valid wgrad spec value")
 
     def test_two_stage_with_split_k_1_rejected_by_predicate(self):
         # validate() and the C++ both reject this; the public predicate used to
@@ -2024,6 +2113,220 @@ class TestWgradKOuterLdsBudget(unittest.TestCase):
             f"validator should charge the K-outer shape ({k_outer_bytes}), "
             f"not the M-outer one ({m_outer_bytes}); got: {why}",
         )
+
+
+@unittest.skipIf(_skip_reason(), _skip_reason())
+class TestWgradDoubleBufferedSplitKTail(unittest.TestCase):
+    """async_dma / unroll_k at split_k > 1 with an odd tile count per slice.
+
+    Both double-buffered K-loops compute two tiles per step, so with an odd
+    count the last step's second tile lies past the slice end. Under split-K
+    that tile is the *next* slice's first, and only the k_zero_fill redirect
+    keeps it out of this slice's partial sum -- a bug there double-counts
+    one tile per slice and shows up only in dW, never in the parity gate.
+    """
+
+    # wg_K = N*Ho*Wo; tile_k = 64.
+    # 640 = 2 slices x 5 full tiles; 600 = 2 slices of 5 tiles, the last one
+    # partial (the zero tail inside the slice as well as past it).
+    _CASES = (
+        _Shape(
+            "odd5_N10H8W8C64K64", N=10, Hi=8, Wi=8, C=64, K=64, Y=3, X=3, pH=1, pW=1
+        ),
+        _Shape(
+            "odd5_part_N6H10W10C64K64",
+            N=6,
+            Hi=10,
+            Wi=10,
+            C=64,
+            K=64,
+            Y=3,
+            X=3,
+            pH=1,
+            pW=1,
+        ),
+    )
+
+    def _sweep(self, **knobs) -> None:
+        # Both loops are MFMA-only (WMMA wgrad rejects async_dma and
+        # unroll_k). On MFMA every case must build and run: a skip (an
+        # invalid spec) is a failure, not a quiet pass.
+        if not _IS_MFMA:
+            self.skipTest(f"{knobs} wgrad is MFMA-only; running on {GPU_ARCH}")
+        for shape in self._CASES:
+            for dtype in _DTYPES:
+                with self.subTest(shape=shape.id, dtype=dtype):
+                    ok, why = _run_one(
+                        GPU_ARCH,
+                        shape,
+                        dtype,
+                        "mem",
+                        _KOUTER_EPILOGUE,
+                        split_k=2,
+                        **knobs,
+                    )
+                    _assert_case_ran(self, ok, f"{shape.id} {dtype} {knobs}: {why}")
+
+    def test_async_dma_odd_slice(self):
+        self._sweep(async_dma=True, lds_k_outer=True)
+
+    def test_unroll_k_odd_slice(self):
+        self._sweep(unroll_k=True)
+
+
+def _assert_case_ran(test, ok: bool, why: str) -> None:
+    """Fail unless the case was actually built, launched and compared.
+
+    ``_run_one`` and ``_check_two_stage`` report an unbuildable spec as
+    ``(True, "skip (...)")`` so a sweep over many shapes can step past configs
+    an arch does not support. A test that only asserts ``ok`` therefore passes
+    when every one of its cases was skipped. That is not hypothetical: the
+    group-merge cases below silently skipped their whole ``group_merge > 1``
+    axis until this guard was added, because the shape defaulted to groups=1
+    and the gate rejected every merged spec.
+    """
+    test.assertTrue(ok, why)
+    test.assertFalse(why.startswith("skip"), f"case was skipped rather than run: {why}")
+
+
+@unittest.skipUnless(not _SKIP_REASON, _SKIP_REASON or "needs CDNA GPU + torch")
+class TestWgradGroupMergeNumerics(unittest.TestCase):
+    """GPU numerics for group merging, over the two-stage path.
+
+    ``_check_two_stage`` applies row- and column-coverage guards before the
+    tolerance check, so a dropped group slab or a mis-decompacted column
+    reports as such rather than as an opaque numeric failure.
+    """
+
+    # Depthwise: cpg == kpg == 1, so wg_N == Y*X and merged N == Y*X*Gm.
+    _DW = _Shape(
+        "3x3_dw_N2H12W12C64K64",
+        N=2,
+        Hi=12,
+        Wi=12,
+        C=64,
+        K=64,
+        Y=3,
+        X=3,
+        pH=1,
+        pW=1,
+        groups=64,
+    )
+
+    # The subject of these cases is group merging, not the LDS layout: the
+    # K-outer staging only rides along because it is the layout the merged
+    # dispatch prefers where it exists. It is gated to _KOUTER_ARCHES, so
+    # pinning it True would turn every case below into a skip on gfx942 --
+    # which _assert_case_ran correctly reports as a failure rather than a
+    # green. Follow the arch instead and keep the merge coverage running.
+    _KOUTER = GPU_ARCH in _KOUTER_ARCHES
+
+    def test_group_merge_without_two_stage(self):
+        # The primary path: split_k=1, so dW is written straight from the tile
+        # by the direct or CShuffle store. Both carry the block-diagonal mask
+        # in their addr_fn, so no workspace and no second kernel are involved.
+        for epilogue in ("default", "cshuffle"):
+            for gm in (1, 2, 4, 8):
+                with self.subTest(epilogue=epilogue, group_merge=gm):
+                    ok, why = _run_one(
+                        GPU_ARCH,
+                        self._DW,
+                        "bf16",
+                        "mem",
+                        epilogue,
+                        split_k=1,
+                        lds_k_outer=self._KOUTER,
+                        warp_tile_mn=16,
+                        tile_k=32,
+                        tile_m=32,
+                        tile_n=128,
+                        group_merge=gm,
+                    )
+                    _assert_case_ran(self, ok, why)
+
+    def test_group_merge_split_k_requires_two_stage(self):
+        # Merging and split-K compose, but a merged tile cannot use the
+        # packed-atomic split-K epilogue: it has no way to drop an off-diagonal
+        # group pair, so it would accumulate garbage into a live dW element.
+        from kernels.common.conv_implicit_gemm_wgrad import is_valid_wgrad_spec
+
+        spec, _p, _wtk = _make_spec(
+            GPU_ARCH, self._DW, "fp32", "mem", "default", 4, warp_tile_mn=16, tile_k=32
+        )
+        if spec is None:
+            self.skipTest("spec construction failed")
+        from dataclasses import replace as _dc_replace
+
+        spec = _dc_replace(
+            spec,
+            problem=_dc_replace(spec.problem, groups=64),
+            tile_m=32,
+            tile_n=128,
+            group_merge=8,
+            two_stage=False,
+        )
+        ok, why = is_valid_wgrad_spec(spec, arch=GPU_ARCH)
+        self.assertFalse(ok, "atomic split-K + group_merge must be rejected")
+        self.assertIn("two-stage", why)
+        # The two-stage form of the same degree is the supported combination.
+        ts = _dc_replace(spec, two_stage=True)
+        ok_ts, why_ts = is_valid_wgrad_spec(ts, arch=GPU_ARCH)
+        self.assertTrue(ok_ts, why_ts)
+
+    def test_group_merge_with_two_stage_split_k(self):
+        # The combination that matters: merging widens the loads, split-K keeps
+        # the grid full. Runs through the two-stage workspace epilogue, whose
+        # store predicate carries the diagonal mask.
+        for gm in (2, 4, 8):
+            for spk in (4, 8):
+                with self.subTest(group_merge=gm, split_k=spk):
+                    ok, why = _check_two_stage(
+                        self._DW,
+                        "bf16",
+                        "mem",
+                        groups=64,
+                        split_k=spk,
+                        group_merge=gm,
+                        tile_m=32,
+                        tile_n=128,
+                        warp_tile_mn=16,
+                        tile_k=32,
+                        seed=70 + gm,
+                    )
+                    self.assertTrue(ok, why)
+
+    def test_group_merge_equals_group_count(self):
+        # grid_groups == 1: the merged problem has a single group. Before the
+        # grouped path was forced on for merged specs this raised
+        # UnboundLocalError rather than building.
+        shape = _Shape(
+            "3x3_dw_N2H12W12C8K8",
+            N=2,
+            Hi=12,
+            Wi=12,
+            C=8,
+            K=8,
+            Y=3,
+            X=3,
+            pH=1,
+            pW=1,
+            groups=8,
+        )
+        ok, why = _run_one(
+            GPU_ARCH,
+            shape,
+            "bf16",
+            "mem",
+            "default",
+            split_k=1,
+            lds_k_outer=self._KOUTER,
+            warp_tile_mn=16,
+            tile_k=32,
+            tile_m=32,
+            tile_n=128,
+            group_merge=8,
+        )
+        _assert_case_ran(self, ok, why)
 
 
 if __name__ == "__main__":

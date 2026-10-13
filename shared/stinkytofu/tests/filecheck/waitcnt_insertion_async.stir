@@ -18,10 +18,22 @@
 # SA0 (index 0 of the depth-2 queue -> asynccnt = 2 - 0 - 1 = 1); refilling
 # buffer 1 waits for SA1 (asynccnt = 0).
 #
+# Each async store also carries an s_wait_tensorcnt: it reads the LDS buffer the
+# tensor_load_to_lds above it filled, which is a cross-pipeline RAW tracked by
+# tensorcnt. That counter drains at a barrier or when there is a single wave, and
+# GemmTileConfig::NumWaves defaults to 1, so this unconfigured .stir run is
+# single-wave and the wait is required. The tensorcnt FIFO holds [TL0, TL1], so
+# the buffer-0 store waits tlcnt = 1 and the buffer-1 store tlcnt = 0. None of it
+# touches the asynccnt values this test is about.
+#
 # CHECK-LABEL: @waitcnt_insertion_async_lds_war
 # CHECK: tensor_load_to_lds
 # CHECK-NEXT: tensor_load_to_lds
-# CHECK: global_store_async_from_lds_b64
+# CHECK-NEXT: s_wait_tensorcnt
+# CHECK-SAME: tlcnt = 1
+# CHECK-NEXT: global_store_async_from_lds_b64
+# CHECK-NEXT: s_wait_tensorcnt
+# CHECK-SAME: tlcnt = 0
 # CHECK-NEXT: global_store_async_from_lds_b64
 # CHECK-NEXT: s_wait_asynccnt
 # CHECK-SAME: asynccnt = 1

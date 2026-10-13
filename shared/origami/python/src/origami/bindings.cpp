@@ -177,6 +177,7 @@ NB_MODULE(origami, m) {
       .def_rw("gwvw_d", &origami::config_t::gwvw_d)
       .def_rw("vector_width_a", &origami::config_t::vector_width_a)
       .def_rw("vector_width_b", &origami::config_t::vector_width_b)
+      .def_rw("cluster_dim", &origami::config_t::cluster_dim)
       // Tensile-specific parameters accessed via variant backend
       .def("tensile",
            static_cast<origami::tensile_params_t& (origami::config_t::*)()>(
@@ -354,9 +355,9 @@ NB_MODULE(origami, m) {
   m.def("calculate_output_utilization",
         &origami::gemm::calculate_output_utilization,
         "Calculate the output utilization ratio");
-  m.def("round_elements_to_128B",
-        &origami::gemm::round_elements_to_128B,
-        "Round elements to 128B alignment");
+  m.def("round_elements_to_NB",
+        &origami::gemm::round_elements_to_NB,
+        "Round elements up to a multiple of transaction_bytes");
   m.def("predict_workgroup_mapping",
         &origami::gemm::predict_workgroup_mapping,
         "Fast WGM prediction based on last-XCD L2 cost minimization");
