@@ -4106,17 +4106,17 @@ PYBIND11_MODULE(rocke_engine, m)
     m.doc() = "pybind11 binding for the C++ rocke engine (universal GEMM "
               "family). Foundation of the ROCKE_BACKEND=cpp dual-backend path.";
 
-    /* ---- engine freshness / provenance stamp ----
-     * build_id() is a content hash of the engine sources this .so was built
-     * from; engine_version() is the human-readable version. Harnesses and the
-     * provider compare this against the build-id recorded with a set of
-     * prebuilt artifacts (emitters, manifests) to fail loud on a stale/mixed
-     * build instead of producing spurious mismatches. These are artifact
-     * stamps only; they never touch the emitted IR. */
+    /* ---- portable-IR bundle freshness / provenance stamp ----
+     * build_id() is a content hash of the native bundle inputs this .so was
+     * built from; engine_version() is the human-readable version. Harnesses and
+     * the provider compare this against the build-id recorded with a set of
+     * prebuilt artifacts (replay CLI, emitters, manifests) to fail loud on a
+     * stale/mixed build instead of producing spurious mismatches. These are
+     * artifact stamps only; they never touch the emitted IR. */
     m.def(
         "build_id",
         []() { return std::string(rocke_build_id()); },
-        "Content hash of the engine sources this module was built from. "
+        "Content hash of the portable-IR native bundle inputs. "
         "Compare against the build-id recorded with prebuilt artifacts to "
         "detect a stale/mixed build.");
     m.def(

@@ -1,6 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 """Logical TF32 contracts and strict native parity, independent of GPU access."""
+
 import os
 import re
 import subprocess
@@ -383,6 +384,7 @@ def tf32_recipe_replay_cli():
     return path
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("m", [16, 32])
 @pytest.mark.parametrize("mode", PREPARATIONS)
 def test_recipe_replay_preserves_ir(m, mode, tmp_path, tf32_recipe_replay_cli):

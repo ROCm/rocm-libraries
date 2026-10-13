@@ -17,9 +17,9 @@ rejects) is reported separately and does NOT count toward a family being
 least one buildable config and ALL its buildable configs match NON-EMPTY.
 
 Freshness / stale-build guard:
-  The .so and the standalone emitters MUST come from the same engine source
-  snapshot. When the emit dir was built it records the engine build-id it was
-  linked against in <EMIT>/BUILD_ID. Before comparing anything, this harness
+  The .so and the standalone emitters MUST come from the same portable-IR native
+  bundle snapshot. When the emit dir was built it records the bundle build-id it
+  was linked against in <EMIT>/BUILD_ID. Before comparing anything, this harness
   asserts rocke_engine.build_id() (from the loaded .so) equals that file. On a
   mismatch it FAILS LOUD with a clear "stale/mixed build" message rather than
   reporting a flood of spurious 'mismatched' configs (the exact trap that once
@@ -54,7 +54,7 @@ def _assert_build_id_match():
     if not os.path.exists(bid_path):
         print(
             f"WARNING: no {bid_path} -- cannot verify the emitters and the .so "
-            f"were built from the same engine source. .so build-id={so_id}. "
+            f"were built from the same native bundle. .so build-id={so_id}. "
             "Build the emitters with a driver that writes <EMIT>/BUILD_ID "
             "(see ci/tiers/tier2_differential.sh) to enable the stale-build guard.",
             file=sys.stderr,
