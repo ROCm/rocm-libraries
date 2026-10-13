@@ -5,6 +5,8 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include "compilation/KpackModuleCache.hpp"
+
 namespace hip_kernel_provider::kernel_ingestor_engine
 {
 
@@ -14,9 +16,10 @@ const std::vector<IngestorPack>& ingestorPacks()
     // in a way that matters before main().
     static const std::vector<IngestorPack> s_packs = {
         {"hipkernel:Pointwise", &registerPointwiseSymbols, &resetPointwiseModuleCache},
-        // No kpack archive: its kernels are embedded_source, so there is no module to
-        // drop and nothing for a reset to do.
-        {"hipkernel:ConvFwd", &registerConvFwdSymbols, nullptr},
+        {"hipkernel:ConvFwd", &registerConvFwdSymbols, &resetConvFwdModuleCache},
+        {GFX950_ATTENTION_DENSE_ENGINE_NAME,
+         &registerGfx950AttentionDenseSymbols,
+         &resetGfx950AttentionDenseModuleCache},
     };
     return s_packs;
 }
@@ -32,6 +35,7 @@ void resetIngestorModuleCachesForTesting()
             pack.resetModuleCache();
         }
     }
+    compilation::SharedKpackArchives::resetForTesting();
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine

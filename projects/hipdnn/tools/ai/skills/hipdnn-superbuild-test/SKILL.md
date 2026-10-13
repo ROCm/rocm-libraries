@@ -30,8 +30,15 @@ Infer options from the user request:
 
 2. Resolve paths:
    - Build directory: honor active workspace instructions first; otherwise use `<repo-root>/build`.
-   - Binary directory: `<build-dir>/bin`.
-   - Helper scripts: skills are host-level, not tied to a repo checkout — **default to the scripts bundled with the skill you were invoked from** (`<skill-directory>/scripts`), even when working inside a repo or worktree. Do NOT run the `<repo-root>/projects/hipdnn/tools/ai/skills/hipdnn-superbuild-test/scripts` copy just because a checkout is present: it can be a stale stub (on `develop`) or an unmerged in-progress version (on a feature branch). Use the source-checkout copy only when actively developing this skill itself to exercise your in-progress edits, or when the invoked skill has no bundled `scripts/` directory.
+   - Binary directory: `<build-dir>/bin`. `<binary-path>` below is the full path to a test
+     executable under it.
+   - `<installed-ctest-root>`: the CTest root of an *installed* tree, which for this
+     provider is `<install-prefix>/bin/hip_kernel_provider`, not the prefix itself.
+   - `<PY>`: for the corpus-sweep command below, the Python interpreter the active
+     workspace or repository instructions mandate, otherwise the active venv's
+     `python`. Resolve it once and substitute the full path.
+   - `<GEN>`: the IngestorGenerator root, `<repo-root>/projects/hipdnn/tools/IngestorGenerator`.
+   - Helper scripts: skills are host-level, not tied to a repo checkout — **default to the scripts bundled with the skill you were invoked from** (`<skill-directory>/scripts`), even when working inside a repo or worktree. Do NOT run the `<repo-root>/projects/hipdnn/tools/ai/skills/hipdnn-superbuild-test/scripts` copy just because a checkout is present: it can be a stale stub (on `develop`) or an unmerged in-progress version (on a feature branch). Use the source-checkout copy only when actively developing this skill itself to exercise your in-progress edits, when the invoked skill has no bundled `scripts/` directory, or for ingestor engine create/extend work, where the helper revision must match the checkout being built.
 
 3. Verify the superbuild exists:
    ```bash
@@ -43,7 +50,7 @@ Infer options from the user request:
    ```bash
    python3 <scripts>/windows_rocm_setup.py --repo-root <repo-root> [--rocm-path <path>]
    ```
-   Parse `ROCM_PATH=...` from stdout and set `ROCM_BIN=<rocm-path>/bin`. Skip this step on Linux unless the user supplied an override. On Windows, always pass the resolved `ROCM_BIN` to `cmake_run.py` (steps 6-8) via `--rocm-bin`: it is required both for the runtime PATH and for staging the wheel's `amd_comgr.dll` app-local (see Notes).
+   Parse `ROCM_PATH=...` from stdout and set `ROCM_BIN=<rocm-path>/bin`. Skip this step on Linux unless the user supplied an override. On Windows, always pass the resolved `ROCM_BIN` to `cmake_run.py` (steps 6-8) via `--rocm-bin`: it is required both for the runtime PATH and for staging the wheel's System32-shadowed DLLs app-local (see Notes).
 
 5. Discover CMake test targets:
    ```bash
@@ -51,6 +58,26 @@ Infer options from the user request:
    ```
    The helper prints `<component>:<target>` lines. It also handles the hip-kernel-provider path-qualified target naming. With `--scope external-integration` (or `all`) it also emits a `<component>:command:<cmdline>` line — the resolved cross-provider `hipdnn_integration_tests` invocation (with `--test-article`/`--test-engine`/`--test-config`) read from the generated `CTestTestfile.cmake`, with any baked-in `--gtest_filter` stripped so you can supply your own.
    If the helper reports that Ninja target discovery failed, treat that as an invalid or stale build directory and stop with the helper's diagnostic. If discovery succeeds but no targets match, report that the requested component or scope is not present in the existing superbuild.
+
+   For an ingestor engine the discovery component is **`hip-kernel`**, not
+   `hip-kernel-provider`. A helper's first provider-prefixed command need not be the
+   requested engine's registration; inspect the actual installed CTest entry before
+   executing it. Replace `<your-bundle-ctest-target>` with the name your own
+   registration creates. The gfx942 dense names here are illustrative, not targets to
+   copy: unless your build registers
+   `hip_kernel_provider_gfx942_attention_dense_gpu_ref_integration_tests`, copying it
+   verbatim fails the second command under `--no-tests=error`:
+   ```bash
+   ctest --test-dir <installed-ctest-root> -N -V \
+     -R '^<your-bundle-ctest-target>$'
+   ctest --test-dir <installed-ctest-root> --no-tests=error -V \
+     -R '^<your-bundle-ctest-target>$'
+   ```
+   Require your bundle's exact registration, its engine pin
+   (`hipkernel:Gfx942AttentionDense` in the illustration), current installed
+   executable/plugin/config paths and intended quick/standard cases. Missing
+   registration, wrong pin, zero selected cases, all-skipped support or failed numerical
+   comparisons fail this gate. A broad component PASS is not exact-engine evidence.
 
 6. Run tests through `cmake_run.py` when no gtest filter is requested:
    ```bash
@@ -86,7 +113,36 @@ Infer options from the user request:
 | `hip-kernel` | `hip_kernel_provider_tests` | `hip_kernel_provider_integration_tests` | `hip-kernel-provider-external-integration-check` when present |
 | `integration-tests` | `hipdnn_integration_tests_unit_tests` | `hipdnn_integration_tests`, `hipdnn_gpu_ref_tests` | — |
 
-The exact article/engine/config for the external suite is resolved at build time; get the ready-to-run command from `discover_test_targets.py --scope external-integration` (the `command:` line) rather than hardcoding paths.
+The exact article/engine/config for the external suite is resolved at build time. Use
+discovery for available commands, then inspect the specific CTest registration when
+proving a named engine; a generic `command:` line is not that proof.
+
+## Ingestor proof boundaries
+
+[The ingestor RUNBOOK](../hipdnn-ingestor-engine/RUNBOOK.md) is the sole ordered
+create/extend workflow and states how each gate is invoked. What matters here is what a
+pass does not establish: `device_probe.py` success, in either mode, is not dispatch.
+
+Native host proof executes actual typed provider registrations and descriptor loading,
+then checks the finalized emitted inventory. Use a fresh process, explicit
+`HIPDNN_TEST_EXPECTED_ARCH` from configured packaging architectures, the corresponding
+shard and a nonempty exact host-test selection. Missing or unknown architecture
+selection, wrong-arch data, absent/extra identities and wrong runtime source kind fail;
+packaged runtime source kind is KPACK. Source-text symbol matching and structural
+validation cannot certify native hooks, and host loading cannot prove device dispatch.
+
+Numerical acceptance needs a capable independent reference for the actual graph, and
+neither SDPA reference supports a sink UID. Record **BLOCKED** when no capable reference
+exists; a skip, automatic fallback exhaustion or unverified golden output cannot pass.
+
+The corpus sweep interface is `<PY> <GEN>/tools/sweep.py --config <absolute-YAML>` with
+`configs/sweep-isolation.sweep.yaml.example`. Correctness is separate from timing,
+engine attribution is exact, and resume is bound to current input content. `SWEEP_DONE`
+is validated completion; explicit `correctness.enabled: false` yields
+`SWEEP_TIMING_ONLY`, never final acceptance; unmet gates yield `SWEEP_INCOMPLETE`. After
+tuning or regeneration, repeat artifact/native/device/corpus gates against the final
+installation and complete the per-corpus runtime outcome join. Passing only unchanged
+baseline cases cannot establish that an extension's new variant served.
 
 ## Report
 
@@ -103,8 +159,9 @@ If a requested component has no matching target, say that it was not present in 
 
 ## Notes
 
-- `scripts/cmake_run.py`, `scripts/discover_test_targets.py`, `scripts/windows_rocm_setup.py`, and `scripts/comgr_stage.py` are bundled in this skill so linked and copied installs work independently.
+- `scripts/cmake_run.py`, `scripts/discover_test_targets.py`, `scripts/windows_rocm_setup.py`, and `scripts/stage_shadowed_dlls.py` are bundled in this skill so linked and copied installs work independently.
 - Windows DLL loading is handled by `cmake_run.py`, which sets PATH in Python's subprocess environment before launching CMake or test binaries.
-- Windows comgr staging: before launching any target or binary on Windows, `cmake_run.py` stages the wheel's `amd_comgr.dll` into `<build-dir>/bin` (via `comgr_stage.py`) so MIOpen's runtime JIT does not load the driver's stale `System32` comgr. This happens on every Windows run, not just for a specific kernel path; GCN-assembly Winograd solvers are the common failure (`[BuildAsm] comgr status = ERROR` / `unknown emulation: no-xnack`), but the version mismatch is not limited to them. This needs `--rocm-bin` to be passed. The copy is skipped when the staged comgr already matches the wheel's PE version, so it adds no cost on repeat runs. Disable with `--no-stage-comgr` if ever needed. To confirm which comgr loaded, run a test with `MIOPEN_LOG_LEVEL=7 MIOPEN_ENABLE_LOGGING=1` and grep for `COMgr v.` (a low version indicates the stale System32 copy; the wheel's is newer).
+- Windows shadowed-DLL staging: before launching any target or binary on Windows, `cmake_run.py` stages the wheel's `amd_comgr.dll` and HIP runtime `amdhip64_<N>.dll` into `<build-dir>/bin` (via `stage_shadowed_dlls.py`) so the process does not load the driver's stale `System32` copies. This happens on every Windows run, not just for a specific kernel path. Stale comgr breaks MIOpen's runtime JIT (GCN-assembly Winograd solvers are the common failure: `[BuildAsm] comgr status = ERROR` / `unknown emulation: no-xnack`); a stale HIP runtime makes the wheel's rocBLAS fault with `SEH exception with code 0xc0000005` in MIOpen's GEMM conv solvers (e.g. `GemmFwd1x1_0_1`), after which the run can hang. This needs `--rocm-bin` to be passed. A copy is skipped when the staged DLL already matches the wheel's (PE version, else content hash), so it adds no cost on repeat runs. Disable with `--no-stage-shadowed-dlls` if ever needed. To confirm which comgr loaded, run a test with `MIOPEN_LOG_LEVEL=7 MIOPEN_ENABLE_LOGGING=1` and grep for `COMgr v.` (a low version indicates the stale System32 copy; the wheel's is newer). The driver's System32 HIP runtime announces itself with a `HIP Library Path: C:\windows\SYSTEM32\amdhip64_<N>.dll` line at startup; the wheel's runtime prints no such line. MIOpen's `AmdRocmMetadataVersionDetect` HIP version is the build-time version and does not tell you which runtime loaded.
+- The build's `stage_shadowed_rocm_dlls` target (`projects/hipdnn/cmake/WindowsDllStaging.cmake` and `dnn-providers/cmake/WindowsDllStaging.cmake`) is the primary mechanism for app-local staging. `cmake_run.py`'s staging is kept on purpose rather than as a leftover: it covers build trees configured before that target existed, and a newly discovered System32-shadowed DLL can be added to `stage_shadowed_dlls.py` right away, ahead of the matching CMake change. When you add a DLL to one, add it to the other.
 - Integration tests require an AMD GPU. Unit scope is the default for CPU-only validation.
 - Prefer running test binaries through `cmake_run.py` (it wires PATH/ROCM_PATH for the loader); pass extra binary flags via `--extra-arg`/`-- <args>` rather than folding them into `--binary`.

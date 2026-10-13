@@ -64,6 +64,10 @@ positive_patterns: &positive_patterns
   - "*/GPU_Dropout*"
   - "*/GPU_MIOpenDriver*"
   - "*/GPU_HipGraphExist*"
+  # Unprefixed: these are plain TEST/TEST_F with no INSTANTIATE_TEST_SUITE_P,
+  # so they carry no "Prefix/" and the leading "*/" above would not match them.
+  - "GPU_StreamTracker_FP32*"
+  - "GPU_NaiveTimeout_FP32*"
   - "Standard/*" # include all standard tests by default
 
 
@@ -146,6 +150,7 @@ test_categories:
       - "Full/GPU_UnitTestConvSolverImplicitGemmGroupWrwXdlops_LargeStride_*"
       - "Full/GPU_UnitTestConvSolverImplicitGemm3DGroupWrwXdlops_LargeStride_*"
       - "Full/GPU_UnitTestConvSolverImplicitGemmGroupWrwXdlops_ElementCountOverflow_*"
+      - "Full/GPU_UnitTestConvSolverGemmFwdRestIntMaxOverflowFwd_I8*"
       # Large BN tests - full suite only
       - "Full/GPU_BNCKFWDTrainLarge2D_*"
       - "Full/GPU_BNOCLFWDTrainLarge2D_*"

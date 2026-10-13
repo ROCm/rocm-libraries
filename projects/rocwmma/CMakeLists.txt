@@ -188,10 +188,12 @@ endif()
 
 if(TARGET OpenMP::omp)
   set(ROCWMMA_OPENMP_LIBRARY OpenMP::omp)
+  set(ROCWMMA_OPENMP_DEPENDENCY openmp CONFIG PATHS "\"\${PACKAGE_PREFIX_DIR}/lib/llvm/lib/cmake/openmp\"")
   set(ROCWMMA_OPENMP_INSTALL_RPATH "\$ORIGIN/../llvm/${openmp_LIB_DIR}")
   set(ROCWMMA_OPENMP_BUILD_RPATH "${HIP_CLANG_ROOT}/${openmp_LIB_DIR}")
 else()
   set(ROCWMMA_OPENMP_LIBRARY OpenMP::OpenMP_CXX)
+  set(ROCWMMA_OPENMP_DEPENDENCY OpenMP MODULE COMPONENTS CXX)
   set(ROCWMMA_OPENMP_INSTALL_RPATH "\$ORIGIN/../llvm/lib")
   set(ROCWMMA_OPENMP_BUILD_RPATH "${HIP_CLANG_ROOT}/lib")
 endif()
@@ -249,6 +251,10 @@ set(CPACK_RPM_PACKAGE_LICENSE "MIT")
 rocm_export_targets(
   TARGETS roc::rocwmma
   NAMESPACE roc::
+  # Discover OpenMP before HIP, which can change PACKAGE_PREFIX_DIR in older CMake versions.
+  DEPENDS
+    PACKAGE ${ROCWMMA_OPENMP_DEPENDENCY}
+    PACKAGE hip
 )
 
 rocm_create_package(

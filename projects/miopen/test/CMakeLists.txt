@@ -248,48 +248,22 @@ endif()
 set(MIOPEN_GTEST_SUFFIX)
 set(MIOPEN_TEST_FLOAT_ARG)
 set(MIOPEN_TEST_FLOAT FALSE)
-set(MIOPEN_TEST_CONV_INT8_OUTPUT_TYPE_INT8)
-set(MIOPEN_TEST_CONV_INT8_OUTPUT_TYPE_INT32)
-set(MIOPEN_TEST_CONV_INT8_OUTPUT_TYPE_FLOAT)
 if(MIOPEN_TEST_HALF)
     set(MIOPEN_GTEST_SUFFIX FP16)
     set(MIOPEN_TEST_FLOAT_ARG --half)
-    set(MIOPENDRIVER_MODE_CONV convfp16)
-    set(MIOPENDRIVER_MODE_BN bnormfp16)
-    set(MIOPENDRIVER_MODE_POOL poolfp16)
-    set(MIOPENDRIVER_MODE_GEMM gemmfp16)
 elseif(MIOPEN_TEST_INT8)
     set(MIOPEN_GTEST_SUFFIX I8)
     set(MIOPEN_TEST_FLOAT_ARG --int8)
-    set(MIOPENDRIVER_MODE_CONV convint8)
-    set(MIOPENDRIVER_MODE_BN NOT_SUPPORTED)
-    set(MIOPENDRIVER_MODE_POOL NOT_SUPPORTED)
-    set(MIOPENDRIVER_MODE_GEMM NOT_SUPPORTED)
-    set(MIOPEN_TEST_CONV_INT8_OUTPUT_TYPE_INT8 --output_type int8)
-    set(MIOPEN_TEST_CONV_INT8_OUTPUT_TYPE_INT32 --output_type int32)
-    set(MIOPEN_TEST_CONV_INT8_OUTPUT_TYPE_FLOAT --output_type float)
 elseif(MIOPEN_TEST_BFLOAT16)
     set(MIOPEN_GTEST_SUFFIX BFP16)
     set(MIOPEN_TEST_FLOAT_ARG --bfloat16)
-    set(MIOPENDRIVER_MODE_CONV convbfp16)
-    set(MIOPENDRIVER_MODE_BN NOT_SUPPORTED)
-    set(MIOPENDRIVER_MODE_POOL NOT_SUPPORTED)
-    set(MIOPENDRIVER_MODE_GEMM NOT_SUPPORTED)
 elseif(MIOPEN_TEST_TF32)
     set(MIOPEN_GTEST_SUFFIX TF32)
     set(MIOPEN_TEST_FLOAT_ARG --float)  # TODO: not integrated in test_conv2d
-    set(MIOPENDRIVER_MODE_CONV conv)
-    set(MIOPENDRIVER_MODE_BN NOT_SUPPORTED)
-    set(MIOPENDRIVER_MODE_POOL NOT_SUPPORTED)
-    set(MIOPENDRIVER_MODE_GEMM NOT_SUPPORTED)
 else()
     set(MIOPEN_GTEST_SUFFIX FP32)
     set(MIOPEN_TEST_FLOAT_ARG --float)
     set(MIOPEN_TEST_FLOAT TRUE)
-    set(MIOPENDRIVER_MODE_CONV conv)
-    set(MIOPENDRIVER_MODE_BN bnorm)
-    set(MIOPENDRIVER_MODE_POOL pool)
-    set(MIOPENDRIVER_MODE_GEMM gemm)
 endif()
 
 message(STATUS "MIOPEN_GTEST_SUFFIX ${MIOPEN_GTEST_SUFFIX}")
@@ -311,11 +285,7 @@ if(MIOPEN_TEST_INT8)
               test_tensor_vec test_tensor_trans test_tensor_transform test_conv2d test_conv2d_find2)
 elseif(MIOPEN_TEST_BFLOAT16)
     set(SKIP_ALL_EXCEPT_TESTS
-              test_conv2d test_conv2d_find2 test_tensor_vec test_immed_conv2d
-              test_conv_extra test_conv_for_implicit_gemm test_miopen_conv
-              test_deepbench_conv test_conv_igemm_dynamic_xdlops_nhwc_wrw_bf16
-              test_conv_igemm_dynamic_xdlops_nhwc_fwd_bf16
-              test_conv_igemm_dynamic_xdlops_nhwc_bwd_bf16)
+              test_conv2d test_conv2d_find2 test_tensor_vec test_immed_conv2d)
 endif()
 
 if(MIOPEN_NO_GPU)
@@ -353,12 +323,6 @@ if(SKIP_ALL_EXCEPT_TESTS)
 endif()
 message(STATUS "SKIP_TESTS: ${SKIP_TESTS}")
 message(STATUS "SKIP_ALL_EXCEPT_TESTS: ${SKIP_ALL_EXCEPT_TESTS}")
-
-# List of tests that depend on the XNACK mode.
-# Options convention: Tests that depend on the XNACK mode should support the "--xnack" option.
-# If "--xnack 0" is specified (this is the default), then such tests should run in XNACK OFF mode.
-# If XNACK is enabled on the GPU, then the testing mode must be changed by the --xnack 1 option.
-set(XNACK_TESTS test_mdgraph)
 
 # Register a ctest entry for NAME, honoring skip lists and GDB/Windows modes.
 function(add_test_command NAME EXE)
@@ -413,10 +377,6 @@ function(add_test_executable TEST_NAME)
         endif()
     endif()
     set(TEST_COMMAND ${TEST_COMMAND} ${MIOPEN_TEST_FLAGS_ARGS})
-
-    if(MIOPEN_TEST_GPU_XNACK_ENABLED AND (${TEST_NAME} IN_LIST XNACK_TESTS))
-        set(TEST_COMMAND ${TEST_COMMAND} --xnack 1)
-    endif()
 
     if(WORKAROUND_ISSUE_936 AND (${TEST_NAME} MATCHES "test_conv2d" OR ${TEST_NAME} MATCHES "test_immed_conv2d") )
         set(TEST_COMMAND ${TEST_COMMAND} --tolerance 130) #increased by 1.625 times
@@ -486,7 +446,6 @@ set(LONG_TESTS
     test_immed_conv3d
     test_conv3d_extra
     test_conv_3d
-    test_conv_ck_igemm_fwd_v6r1_dlops_nchw
     )
 
 # Assign a ctest COST to a test so long-running tests are scheduled first.
@@ -730,8 +689,7 @@ function(add_custom_test NAME)
         AND (${NAME} MATCHES "test_conv_3d"
           OR ${NAME} MATCHES "test_conv_group"
           OR ${NAME} MATCHES "test_conv_extra"
-          OR ${NAME} MATCHES "test_conv_for_implicit_gemm"
-          OR ${NAME} MATCHES "test_conv_ck_igemm_fwd_v6r1_dlops_nchw"))
+          OR ${NAME} MATCHES "test_conv_for_implicit_gemm"))
         set_tests_properties(${NAME} PROPERTIES RUN_SERIAL On)
     endif()
 
@@ -775,10 +733,6 @@ set(TEST_CONV_VERBOSE_F ${MIOPEN_TEST_FLOAT_ARG} --verbose --disable-backward-da
 set(TEST_CONV_VERBOSE_B ${MIOPEN_TEST_FLOAT_ARG} --verbose --disable-forward --disable-backward-weights)
 set(TEST_CONV_VERBOSE_W ${MIOPEN_TEST_FLOAT_ARG} --verbose --disable-forward --disable-backward-data)
 
-set(IMPLICITGEMM_MLIR_ENV_F_XDLOPS ${IMPLICITGEMM_MLIR_ENV_BASE} MIOPEN_DEBUG_FIND_ONLY_SOLVER=ConvMlirIgemmFwdXdlops)
-set(IMPLICITGEMM_MLIR_ENV_B_XDLOPS ${IMPLICITGEMM_MLIR_ENV_BASE} MIOPEN_DEBUG_FIND_ONLY_SOLVER=ConvMlirIgemmBwdXdlops)
-set(IMPLICITGEMM_MLIR_ENV_W_XDLOPS ${IMPLICITGEMM_MLIR_ENV_BASE} MIOPEN_DEBUG_FIND_ONLY_SOLVER=ConvMlirIgemmWrWXdlops)
-
 set(IMPLICITGEMM_TESTING_ENV
  MIOPEN_DEBUG_CONV_WINOGRAD=0
  MIOPEN_DEBUG_CONV_FFT=0
@@ -791,70 +745,11 @@ if(MIOPEN_TEST_DEEPBENCH)
     add_custom_test(test_deepbench_rnn GFX94X_ENABLED GFX103X_ENABLED GFX110X_ENABLED GFX115X_ENABLED)
 endif()
 
-set(DYNAMIC_IMPLICITGEMM_COMMON
-    MIOPEN_FIND_MODE=normal)
-set(DYNAMIC_IMPLICITGEMM_XDLOPS_NHWC_FWD_ENVS
-    ${DYNAMIC_IMPLICITGEMM_COMMON}
-    MIOPEN_DEBUG_FIND_ONLY_SOLVER=ConvAsmImplicitGemmGTCDynamicFwdXdlopsNHWC)
-set(DYNAMIC_IMPLICITGEMM_XDLOPS_NHWC_BWD_ENVS
-    ${DYNAMIC_IMPLICITGEMM_COMMON}
-    MIOPEN_DEBUG_FIND_ONLY_SOLVER=ConvAsmImplicitGemmGTCDynamicBwdXdlopsNHWC)
-
-set(DYNAMIC_IMPLICITGEMM_DLOPS_NCHWC_FWD_ENVS
-    ${DYNAMIC_IMPLICITGEMM_COMMON}
-    MIOPEN_DEBUG_FIND_ONLY_SOLVER=ConvAsmImplicitGemmGTCDynamicFwdDlopsNCHWC)
-
-set(ARGS_NCHWC_NCHWC_FWD_FP16x4
-    --cmode convfp16
-    --disable-backward-data
-    --disable-backward-weights
-    --in_layout NCHW
-    --fil_layout NCHW
-    --out_layout NCHW
-    --tensor_vect 1
-    --vector_length 4)
-
-set(ARGS_NCHWC_NCHWC_FWD_FP16x8
-    --cmode convfp16
-    --disable-backward-data
-    --disable-backward-weights
-    --in_layout NCHW
-    --fil_layout NCHW
-    --out_layout NCHW
-    --tensor_vect 1
-    --vector_length 8)
-
-set(ARGS_NCHWC_CHWNC_FWD_FP16x4
-    --cmode convfp16
-    --disable-backward-data
-    --disable-backward-weights
-    --in_layout NCHW
-    --fil_layout CHWN
-    --out_layout NCHW
-    --tensor_vect 1
-    --vector_length 4)
-
-set(ARGS_NCHWC_CHWNC_FWD_FP16x8
-    --cmode convfp16
-    --disable-backward-data
-    --disable-backward-weights
-    --in_layout NCHW
-    --fil_layout CHWN
-    --out_layout NCHW
-    --tensor_vect 1
-    --vector_length 8)
-
 add_custom_test(test_regression_issue_2624 SKIP_UNLESS_ALL GFX900_DISABLED GFX906_DISABLED
     # Regression test for SWDEV-433714 (issue 2624)
     ENVIRONMENT ${IMPLICITGEMM_TESTING_ENV} MIOPEN_LOG_LEVEL=5
     COMMAND $<TARGET_FILE:test_conv2d> ${MIOPEN_TEST_FLOAT_ARG} --verbose --input 2 1 22 22 --weights 1 1 4 4 --pads_strides_dilations 1 2 4 4 3 2 --disable-backward-data --disable-backward-weights
 )
-
-# MIOPEN_DEBUG_CONV_CK_IGEMM_FWD_V6R1_DLOPS_NCHW is explicitly enabled due to the kernel is disabled by default via #2306
-set(CONV_CK_IGEMM_FWD_V6R1_DLOPS_NCHW_ENV
-    MIOPEN_FIND_MODE=normal
-    MIOPEN_DEBUG_FIND_ONLY_SOLVER=ConvCkIgemmFwdV6r1DlopsNchw
-    MIOPEN_DEBUG_CONV_CK_IGEMM_FWD_V6R1_DLOPS_NCHW=1)
 
 # NOTES ON WRITING TESTS FOR TUNABLE SOLVERS
 # * Enforce tuning (SEARCH_DB_UPDATE).

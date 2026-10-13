@@ -29,6 +29,7 @@
 #include "rocsparse_common.hpp"
 #include "rocsparse_control.hpp"
 #include "rocsparse_csrgemm_numeric_scal.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_utility.hpp"
 
 namespace rocsparse
@@ -57,14 +58,12 @@ namespace rocsparse
     ROCSPARSE_DEVICE_ILF void
         csrgemm_numeric_copy_scale_device(I size, T alpha, const T* in, T* out)
     {
-        I idx = hipBlockIdx_x * BLOCKSIZE + hipThreadIdx_x;
-
-        if(idx >= size)
+        for(int64_t idx = static_cast<int64_t>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x;
+            idx < size;
+            idx += static_cast<int64_t>(hipGridDim_x) * BLOCKSIZE)
         {
-            return;
+            out[idx] = alpha * in[idx];
         }
-
-        out[idx] = alpha * in[idx];
     }
 
     template <uint32_t BLOCKSIZE, typename I, typename T>
@@ -147,7 +146,8 @@ inline rocsparse_status rocsparse::csrgemm_numeric_scal_core(rocsparse_handle ha
 
         // Stream
 #define CSRGEMM_DIM 1024
-        dim3 csrgemm_numeric_blocks((nnz_D - 1) / CSRGEMM_DIM + 1);
+        dim3 csrgemm_numeric_blocks(rocsparse::get_grid_size_x(
+            handle, (static_cast<int64_t>(nnz_D) - 1) / CSRGEMM_DIM + 1, CSRGEMM_DIM));
         dim3 csrgemm_numeric_threads(CSRGEMM_DIM);
         // Scale the matrix
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(

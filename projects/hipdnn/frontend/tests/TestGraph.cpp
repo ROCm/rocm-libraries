@@ -24,8 +24,10 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstring>
 #include <functional>
+#include <limits>
 #include <optional>
 #include <set>
 #include <stdexcept>
@@ -8349,6 +8351,317 @@ TEST_F(TestGraph, BuildPlanAtIndexOutOfBounds)
     EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
 }
 
+// ---------------------------------------------------------------------------
+// execute_timed_ext tests
+// ---------------------------------------------------------------------------
+//
+// executeWithPlanTimed() (detail/GraphExecution.hpp) is exercised here through
+// Graph::execute_timed_ext(), which owns its own one-shot local profiling descriptor;
+// Graph::autotuneImpl() shares the same helper against a comparison-scoped descriptor
+// and its own restart-unstalled policy is covered separately (autotune tests /
+// integration tests).
+// injectValidCompiledPlan() installs a fake-but-"valid" active plan so these tests
+// exercise execute_timed_ext()'s own validation and profiling sequence without the
+// full engine-descriptor mock chain that a real build() would need.
+
+namespace
+{
+// Mocks the three getAttribute reads executeWithPlanTimed() performs after finalize:
+// ELAPSED_MS_EXT, STALL_USED_EXT, STALL_TIMED_OUT_EXT.
+void mockProfilingGetAttributes(
+    std::shared_ptr<::testing::NiceMock<Mock_hipdnn_backend>>& mockBackend,
+    float elapsedMs,
+    bool stallUsed,
+    bool timedOut)
+{
+    EXPECT_CALL(*mockBackend,
+                backendGetAttribute(
+                    _, HIPDNN_ATTR_PROFILING_ELAPSED_MS_EXT, HIPDNN_TYPE_FLOAT, 1, nullptr, _))
+        .WillOnce([elapsedMs](hipdnnBackendDescriptor_t,
+                              hipdnnBackendAttributeName_t,
+                              hipdnnBackendAttributeType_t,
+                              int64_t,
+                              int64_t*,
+                              void* out) {
+            *static_cast<float*>(out) = elapsedMs;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+    EXPECT_CALL(*mockBackend,
+                backendGetAttribute(
+                    _, HIPDNN_ATTR_PROFILING_STALL_USED_EXT, HIPDNN_TYPE_BOOLEAN, 1, nullptr, _))
+        .WillOnce([stallUsed](hipdnnBackendDescriptor_t,
+                              hipdnnBackendAttributeName_t,
+                              hipdnnBackendAttributeType_t,
+                              int64_t,
+                              int64_t*,
+                              void* out) {
+            *static_cast<bool*>(out) = stallUsed;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+    EXPECT_CALL(
+        *mockBackend,
+        backendGetAttribute(
+            _, HIPDNN_ATTR_PROFILING_STALL_TIMED_OUT_EXT, HIPDNN_TYPE_BOOLEAN, 1, nullptr, _))
+        .WillOnce([timedOut](hipdnnBackendDescriptor_t,
+                             hipdnnBackendAttributeName_t,
+                             hipdnnBackendAttributeType_t,
+                             int64_t,
+                             int64_t*,
+                             void* out) {
+            *static_cast<bool*>(out) = timedOut;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+}
+} // namespace
+
+TEST_F(TestGraph, TimedExecuteReportsDeviceOnlyWhenStallUsed)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    GraphTestUtils graph;
+    graph.injectValidCompiledPlan(/*engineId=*/1, /*workspaceSize=*/0, /*barred=*/false);
+
+    EXPECT_CALL(*_mockBackend, backendSetAttribute(_, _, _, _, _)).Times(::testing::AnyNumber());
+    {
+        // Both edges keep host submission outside the measured event span.
+        const ::testing::InSequence sequence;
+        EXPECT_CALL(
+            *_mockBackend,
+            backendSetAttribute(_, HIPDNN_ATTR_PROFILING_STALL_ARM_EXT, HIPDNN_TYPE_BOOLEAN, 1, _))
+            .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+        EXPECT_CALL(
+            *_mockBackend,
+            backendSetAttribute(_, HIPDNN_ATTR_PROFILING_START_EXT, HIPDNN_TYPE_BOOLEAN, 1, _))
+            .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+        EXPECT_CALL(*_mockBackend, backendExecute(_, _, _)).WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+        EXPECT_CALL(
+            *_mockBackend,
+            backendSetAttribute(_, HIPDNN_ATTR_PROFILING_STOP_EXT, HIPDNN_TYPE_BOOLEAN, 1, _))
+            .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+        EXPECT_CALL(*_mockBackend,
+                    backendSetAttribute(
+                        _, HIPDNN_ATTR_PROFILING_STALL_RELEASE_EXT, HIPDNN_TYPE_BOOLEAN, 1, _))
+            .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+    }
+    mockProfilingGetAttributes(
+        _mockBackend, /*elapsedMs=*/2.5f, /*stallUsed=*/true, /*timedOut=*/false);
+
+    const std::unordered_map<int64_t, void*> variantPack;
+    ExecutionTiming timing;
+    auto result = graph.execute_timed_ext(_handle, variantPack, nullptr, timing);
+
+    EXPECT_TRUE(result.is_good()) << result.get_message();
+    ASSERT_EQ(timing.quality, TimingQuality::DEVICE_ONLY);
+    ASSERT_TRUE(timing.elapsedMs.has_value());
+    EXPECT_FLOAT_EQ(*timing.elapsedMs, 2.5f);
+}
+
+TEST_F(TestGraph, TimedExecuteReportsUnstalledWhenStallDeclined)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    GraphTestUtils graph;
+    graph.injectValidCompiledPlan(1, 0, false);
+
+    EXPECT_CALL(*_mockBackend, backendExecute(_, _, _))
+        .Times(1)
+        .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+    mockProfilingGetAttributes(_mockBackend, 3.0f, /*stallUsed=*/false, /*timedOut=*/false);
+
+    const std::unordered_map<int64_t, void*> variantPack;
+    ExecutionTiming timing;
+    auto result = graph.execute_timed_ext(_handle, variantPack, nullptr, timing);
+
+    EXPECT_TRUE(result.is_good()) << result.get_message();
+    ASSERT_EQ(timing.quality, TimingQuality::UNSTALLED);
+    ASSERT_TRUE(timing.elapsedMs.has_value());
+    EXPECT_FLOAT_EQ(*timing.elapsedMs, 3.0f);
+}
+
+TEST_F(TestGraph, TimedExecuteAcceptsZeroElapsed)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    GraphTestUtils graph;
+    graph.injectValidCompiledPlan(1, 0, false);
+
+    EXPECT_CALL(*_mockBackend, backendExecute(_, _, _))
+        .Times(1)
+        .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+    mockProfilingGetAttributes(_mockBackend, 0.0f, /*stallUsed=*/true, /*timedOut=*/false);
+
+    const std::unordered_map<int64_t, void*> variantPack;
+    ExecutionTiming timing;
+    auto result = graph.execute_timed_ext(_handle, variantPack, nullptr, timing);
+
+    EXPECT_TRUE(result.is_good()) << result.get_message();
+    ASSERT_EQ(timing.quality, TimingQuality::DEVICE_ONLY);
+    ASSERT_TRUE(timing.elapsedMs.has_value());
+    EXPECT_FLOAT_EQ(*timing.elapsedMs, 0.0f);
+}
+
+TEST_F(TestGraph, TimedExecuteReportsInvalidOnNegativeElapsedWithExactlyOneExecution)
+{
+    // A finite negative elapsed time is a bad reading, not a backend failure: the call still
+    // succeeds, executes exactly once, and does not replay -- unlike autotuneImpl()'s
+    // ranked-loop retry policy (see TestAutotune's transient-negative-elapsed tests).
+    ::testing::FLAGS_gmock_verbose = "error";
+    GraphTestUtils graph;
+    graph.injectValidCompiledPlan(1, 0, false);
+
+    EXPECT_CALL(*_mockBackend, backendExecute(_, _, _))
+        .Times(1)
+        .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+    mockProfilingGetAttributes(_mockBackend, -1.0f, /*stallUsed=*/true, /*timedOut=*/false);
+
+    const std::unordered_map<int64_t, void*> variantPack;
+    ExecutionTiming timing;
+    auto result = graph.execute_timed_ext(_handle, variantPack, nullptr, timing);
+
+    EXPECT_TRUE(result.is_good()) << result.get_message();
+    EXPECT_EQ(timing.quality, TimingQuality::INVALID);
+    EXPECT_FALSE(timing.elapsedMs.has_value());
+    EXPECT_FALSE(timing.timedOut);
+}
+
+TEST_F(TestGraph, TimedExecuteRejectsNaNElapsed)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    GraphTestUtils graph;
+    graph.injectValidCompiledPlan(1, 0, false);
+
+    EXPECT_CALL(*_mockBackend, backendExecute(_, _, _))
+        .Times(1)
+        .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+    mockProfilingGetAttributes(_mockBackend,
+                               std::numeric_limits<float>::quiet_NaN(),
+                               /*stallUsed=*/true,
+                               /*timedOut=*/false);
+
+    const std::unordered_map<int64_t, void*> variantPack;
+    ExecutionTiming timing;
+    auto result = graph.execute_timed_ext(_handle, variantPack, nullptr, timing);
+
+    EXPECT_FALSE(result.is_good());
+    EXPECT_EQ(timing.quality, TimingQuality::INVALID);
+    EXPECT_FALSE(timing.elapsedMs.has_value());
+}
+
+TEST_F(TestGraph, TimedExecuteReportsInvalidOnWatchdogTimeoutWithExactlyOneExecution)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    GraphTestUtils graph;
+    graph.injectValidCompiledPlan(1, 0, false);
+
+    // Exactly one backendExecute: execute_timed_ext() discards a timed-out measurement
+    // rather than retrying or replaying it (unlike autotuneImpl()'s restart-unstalled
+    // sweep policy).
+    EXPECT_CALL(*_mockBackend, backendExecute(_, _, _))
+        .Times(1)
+        .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+    mockProfilingGetAttributes(_mockBackend, 999.0f, /*stallUsed=*/true, /*timedOut=*/true);
+
+    const std::unordered_map<int64_t, void*> variantPack;
+    ExecutionTiming timing;
+    auto result = graph.execute_timed_ext(_handle, variantPack, nullptr, timing);
+
+    // Execution completed; only the measurement is invalid.
+    EXPECT_TRUE(result.is_good()) << result.get_message();
+    EXPECT_EQ(timing.quality, TimingQuality::INVALID);
+    EXPECT_FALSE(timing.elapsedMs.has_value());
+}
+
+TEST_F(TestGraph, TimedExecuteLeavesTimingInvalidOnBackendExecuteFailure)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    GraphTestUtils graph;
+    graph.injectValidCompiledPlan(1, 0, false);
+
+    EXPECT_CALL(*_mockBackend, backendExecute(_, _, _))
+        .Times(1)
+        .WillOnce(Return(HIPDNN_STATUS_EXECUTION_FAILED));
+
+    const std::unordered_map<int64_t, void*> variantPack;
+    ExecutionTiming timing;
+    auto result = graph.execute_timed_ext(_handle, variantPack, nullptr, timing);
+
+    EXPECT_FALSE(result.is_good());
+    EXPECT_EQ(timing.quality, TimingQuality::INVALID);
+    EXPECT_FALSE(timing.elapsedMs.has_value());
+}
+
+TEST_F(TestGraph, TimedExecuteRejectsNoActivePlanAndResetsTiming)
+{
+    const GraphTestUtils graph; // no active plan installed
+    const std::unordered_map<int64_t, void*> variantPack;
+    // Pre-seed timing with a stale value to confirm it is reset before validation runs.
+    ExecutionTiming timing;
+    timing.elapsedMs = 99.0f;
+    timing.quality = TimingQuality::DEVICE_ONLY;
+
+    auto result = graph.execute_timed_ext(_handle, variantPack, nullptr, timing);
+
+    EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
+    EXPECT_EQ(timing.quality, TimingQuality::INVALID);
+    EXPECT_FALSE(timing.elapsedMs.has_value());
+}
+
+TEST_F(TestGraph, TimedExecuteRejectsBarredActivePlanWithoutExecuting)
+{
+    GraphTestUtils graph;
+    graph.injectValidCompiledPlan(1, 0, /*barred=*/true);
+
+    EXPECT_CALL(*_mockBackend, backendExecute(_, _, _)).Times(0);
+
+    const std::unordered_map<int64_t, void*> variantPack;
+    ExecutionTiming timing;
+    auto result = graph.execute_timed_ext(_handle, variantPack, nullptr, timing);
+
+    EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
+    EXPECT_NE(result.err_msg.find("barred"), std::string::npos) << result.err_msg;
+    EXPECT_EQ(timing.quality, TimingQuality::INVALID);
+    EXPECT_FALSE(timing.elapsedMs.has_value());
+}
+
+TEST_F(TestGraph, TimedExecuteTensorMapRejectsNullTensor)
+{
+    GraphTestUtils graph;
+    graph.injectValidCompiledPlan(1, 0, false);
+
+    EXPECT_CALL(*_mockBackend, backendExecute(_, _, _)).Times(0);
+
+    const std::unordered_map<std::shared_ptr<TensorAttributes>, void*> tensorLookup
+        = {{nullptr, reinterpret_cast<void*>(0x1)}};
+    ExecutionTiming timing;
+    auto result = graph.execute_timed_ext(_handle, tensorLookup, nullptr, timing);
+
+    EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
+    EXPECT_NE(result.err_msg.find("uid"), std::string::npos) << result.err_msg;
+    EXPECT_EQ(timing.quality, TimingQuality::INVALID);
+    EXPECT_FALSE(timing.elapsedMs.has_value());
+}
+
+TEST_F(TestGraph, TimedExecuteTensorMapPacksVariantPackAndReportsTiming)
+{
+    GraphTestUtils graph;
+    graph.injectValidCompiledPlan(1, 0, false);
+
+    auto tensor = std::make_shared<TensorAttributes>();
+    tensor->set_uid(7);
+
+    EXPECT_CALL(*_mockBackend, backendExecute(_, _, _))
+        .Times(1)
+        .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+    mockProfilingGetAttributes(_mockBackend, 1.5f, /*stallUsed=*/true, /*timedOut=*/false);
+
+    const std::unordered_map<std::shared_ptr<TensorAttributes>, void*> tensorLookup
+        = {{tensor, reinterpret_cast<void*>(0x1234)}};
+    ExecutionTiming timing;
+    auto result = graph.execute_timed_ext(_handle, tensorLookup, nullptr, timing);
+
+    EXPECT_TRUE(result.is_good()) << result.get_message();
+    EXPECT_EQ(timing.quality, TimingQuality::DEVICE_ONLY);
+    ASSERT_TRUE(timing.elapsedMs.has_value());
+    EXPECT_FLOAT_EQ(*timing.elapsedMs, 1.5f);
+}
+
 // --------------------------------------------------------------------------
 // deselect_workspace_greater_than tests
 // --------------------------------------------------------------------------
@@ -9642,6 +9955,123 @@ TEST_F(TestGraph, AutotuneAcceptsExtraUidsInVariantPack)
         EXPECT_EQ(result.err_msg.find("missing"), std::string::npos)
             << "Extra UIDs should not cause UID validation failure: " << result.err_msg;
     }
+}
+
+// Builds a batchnorm graph whose epsilon (UID 4) is supplied by the caller,
+// leaving UIDs 1-3 as the only pointer-backed operands.
+static void createBatchnormGraphWithEpsilon(Graph& graph,
+                                            const std::shared_ptr<TensorAttributes>& epsilon)
+{
+    graph.set_io_data_type(DataType::FLOAT)
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT);
+
+    const std::vector<int64_t> dims = {1, 2, 3, 4};
+    auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
+    const std::vector<int64_t> derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(dims);
+    auto derivedStrides = hipdnn_data_sdk::utilities::generateStrides(derivedDims);
+
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_uid(1).set_name("X").set_dim(dims).set_stride(strides).set_data_type(DataType::FLOAT);
+
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_uid(2).set_name("Scale").set_dim(derivedDims).set_stride(derivedStrides);
+
+    auto bias = std::make_shared<TensorAttributes>();
+    bias->set_uid(3).set_name("Bias").set_dim(derivedDims).set_stride(derivedStrides);
+
+    BatchnormAttributes attributes;
+    attributes.set_name("BatchnormNode");
+    attributes.set_epsilon(epsilon);
+    graph.batchnorm(x, scale, bias, attributes);
+}
+
+// UIDs 1-3 only; epsilon is deliberately absent.
+static const std::unordered_map<int64_t, void*> K_PACK_WITHOUT_EPSILON
+    = {{1, reinterpret_cast<void*>(0x1)},
+       {2, reinterpret_cast<void*>(0x2)},
+       {3, reinterpret_cast<void*>(0x3)}};
+
+// A compile-time constant is baked into the op-graph flatbuffer, so it has no
+// pointer to give and autotune() must accept the pack execute() accepts.
+TEST_F(TestGraph, AutotuneDoesNotRequireUidsForCompileTimeConstantScalars)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+
+    auto epsilon = std::make_shared<TensorAttributes>();
+    epsilon->set_uid(4).set_name("Epsilon").set_value(1e-5F);
+    createBatchnormGraphWithEpsilon(graph, epsilon);
+
+    auto buildResult = graph.build_operation_graph(_handle);
+    ASSERT_TRUE(buildResult.is_good()) << "build_operation_graph failed: " << buildResult.err_msg;
+    ASSERT_TRUE(epsilon->get_has_compile_time_constant());
+
+    graph.injectDummyPlanSpec();
+
+    const auto result = graph.autotune(_handle, K_PACK_WITHOUT_EPSILON, nullptr, int64_t{0});
+    if(result.is_bad())
+    {
+        EXPECT_EQ(result.err_msg.find("missing"), std::string::npos) << result.err_msg;
+    }
+}
+
+// The other value-carrying kind: runtime flag set *and* a value baked. Also
+// exempt, and the case get_has_compile_time_constant() does not cover.
+TEST_F(TestGraph, AutotuneDoesNotRequireUidsForRuntimeDefaultScalars)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+
+    // set_value() clears the runtime flag, so set the flag after it;
+    // set_as_runtime_parameter() would clear the value instead.
+    auto epsilon = std::make_shared<TensorAttributes>();
+    epsilon->set_uid(4).set_name("Epsilon").set_value(1e-5F).set_is_pass_by_value(true);
+    createBatchnormGraphWithEpsilon(graph, epsilon);
+
+    auto buildResult = graph.build_operation_graph(_handle);
+    ASSERT_TRUE(buildResult.is_good()) << "build_operation_graph failed: " << buildResult.err_msg;
+    ASSERT_TRUE(epsilon->get_pass_by_value().has_value());
+    ASSERT_FALSE(epsilon->get_has_compile_time_constant());
+
+    graph.injectDummyPlanSpec();
+
+    const auto result = graph.autotune(_handle, K_PACK_WITHOUT_EPSILON, nullptr, int64_t{0});
+    if(result.is_bad())
+    {
+        EXPECT_EQ(result.err_msg.find("missing"), std::string::npos) << result.err_msg;
+    }
+}
+
+// A runtime user-supplied scalar carries no value and is variantPack-delivered
+// as a host pointer, so it stays required. get_is_pass_by_value() is true for
+// this kind too, which is why it cannot be the exemption predicate.
+TEST_F(TestGraph, AutotuneStillRequiresUidsForRuntimeUserSuppliedScalars)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+
+    auto epsilon = std::make_shared<TensorAttributes>();
+    epsilon->set_uid(4)
+        .set_name("Epsilon")
+        .set_dim({1})
+        .set_stride({1})
+        .set_data_type(DataType::FLOAT)
+        .set_is_pass_by_value(true);
+    createBatchnormGraphWithEpsilon(graph, epsilon);
+
+    auto buildResult = graph.build_operation_graph(_handle);
+    ASSERT_TRUE(buildResult.is_good()) << "build_operation_graph failed: " << buildResult.err_msg;
+    ASSERT_TRUE(epsilon->get_is_pass_by_value());
+    ASSERT_FALSE(epsilon->get_has_compile_time_constant());
+    ASSERT_FALSE(epsilon->get_pass_by_value().has_value());
+
+    graph.injectDummyPlanSpec();
+
+    const auto result = graph.autotune(_handle, K_PACK_WITHOUT_EPSILON, nullptr, int64_t{0});
+    EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
+    EXPECT_NE(result.err_msg.find("missing"), std::string::npos) << result.err_msg;
+    EXPECT_NE(result.err_msg.find('4'), std::string::npos) << result.err_msg;
 }
 
 // ============================================================================
@@ -12268,6 +12698,112 @@ TEST_F(TestGraph, CompiledPlanAutotuneFailurePreservesActivePlanState)
     auto err = graph.serialize(data);
     EXPECT_TRUE(err.is_good()) << err.get_message();
     EXPECT_EQ(data, fakeContainerBytes);
+}
+
+// Regression test for the comparison-local stall fallback in Graph::autotuneImpl()
+// (Graph.hpp's sweepStalled loop + TimedRunLoop's restartUnstalled signal): a stall
+// watchdog timeout on the FIRST measurement of the FIRST candidate must break that
+// candidate's own remaining iterations, skip every other candidate for this pass, and
+// rerun every candidate unstalled exactly once -- not per-candidate, and not more than
+// once. A later, independent autotune() call must still be able to arm the stall gate:
+// there is no cross-call latch left over from the first call's timeout.
+TEST_F(TestGraph, AutotuneRestartsUnstalledOnceThenLaterCallCanStallAgain)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    GraphTestUtils graph;
+    createBasicBatchnormGraph(graph);
+    ASSERT_TRUE(graph.validate().is_good());
+    ASSERT_TRUE(graph.build_operation_graph(_handle).is_good());
+    graph.injectValidCompiledPlan(/*engineId=*/-2, /*workspaceSize=*/0, /*barred=*/false);
+    graph.injectValidCompiledPlan(/*engineId=*/-3, /*workspaceSize=*/0, /*barred=*/false);
+
+    int stallArmCount = 0;
+    bool armed = false;
+    bool timeoutReported = false;
+    ON_CALL(*_mockBackend, backendSetAttribute(_, _, _, _, _))
+        .WillByDefault([&](hipdnnBackendDescriptor_t,
+                           hipdnnBackendAttributeName_t attribute,
+                           hipdnnBackendAttributeType_t,
+                           int64_t,
+                           const void*) {
+            if(attribute == HIPDNN_ATTR_PROFILING_RESET_EXT)
+            {
+                armed = false;
+            }
+            else if(attribute == HIPDNN_ATTR_PROFILING_STALL_ARM_EXT)
+            {
+                armed = true;
+                ++stallArmCount;
+            }
+            return HIPDNN_STATUS_SUCCESS;
+        });
+    ON_CALL(
+        *_mockBackend,
+        backendGetAttribute(_, HIPDNN_ATTR_PROFILING_STALL_USED_EXT, HIPDNN_TYPE_BOOLEAN, 1, _, _))
+        .WillByDefault([&](hipdnnBackendDescriptor_t,
+                           hipdnnBackendAttributeName_t,
+                           hipdnnBackendAttributeType_t,
+                           int64_t,
+                           int64_t*,
+                           void* out) {
+            *static_cast<bool*>(out) = armed;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+    ON_CALL(*_mockBackend,
+            backendGetAttribute(
+                _, HIPDNN_ATTR_PROFILING_STALL_TIMED_OUT_EXT, HIPDNN_TYPE_BOOLEAN, 1, _, _))
+        .WillByDefault([&](hipdnnBackendDescriptor_t,
+                           hipdnnBackendAttributeName_t,
+                           hipdnnBackendAttributeType_t,
+                           int64_t,
+                           int64_t*,
+                           void* out) {
+            *static_cast<bool*>(out) = armed && !timeoutReported;
+            timeoutReported = timeoutReported || armed;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    AutotuneConfig config;
+    config.strategy = AutotuneStrategy::FIXED_AVERAGE;
+    config.timedIterations = 2;
+    config.warmupIterations = 0;
+
+    std::vector<AutotuneResult> results;
+    const std::unordered_map<int64_t, void*> variantPack = {{1, reinterpret_cast<void*>(0x1)},
+                                                            {2, reinterpret_cast<void*>(0x2)},
+                                                            {3, reinterpret_cast<void*>(0x3)},
+                                                            {4, reinterpret_cast<void*>(0x4)},
+                                                            {5, reinterpret_cast<void*>(0x5)}};
+    auto result = graph.autotune(_handle, variantPack, nullptr, config, {}, &results);
+    ASSERT_TRUE(result.is_good()) << result.get_message();
+    ASSERT_EQ(results.size(), 2u);
+
+    // Exactly one stalled attempt total: candidate -2's first iteration. Neither its
+    // second iteration nor candidate -3 (in the discarded first pass) nor the unstalled
+    // rerun ever arm again.
+    EXPECT_EQ(stallArmCount, 1);
+
+    // Every succeeded result came from the uniformly-unstalled rerun pass, never a mix.
+    for(const auto& r : results)
+    {
+        ASSERT_TRUE(r.succeeded) << r.engineName << ": " << r.errorMessage;
+        EXPECT_EQ(r.timingQuality, TimingQuality::UNSTALLED) << r.engineName;
+    }
+
+    // A later, independent autotune() call starts stalled again and this time every
+    // measurement reports the stall as used: no latch from the first call's timeout
+    // carried over.
+
+    std::vector<AutotuneResult> secondResults;
+    auto secondResult = graph.autotune(_handle, variantPack, nullptr, config, {}, &secondResults);
+    ASSERT_TRUE(secondResult.is_good()) << secondResult.get_message();
+    ASSERT_EQ(secondResults.size(), 2u);
+    EXPECT_EQ(stallArmCount, 1 + 2 * config.timedIterations);
+    for(const auto& r : secondResults)
+    {
+        ASSERT_TRUE(r.succeeded) << r.engineName << ": " << r.errorMessage;
+        EXPECT_EQ(r.timingQuality, TimingQuality::DEVICE_ONLY) << r.engineName;
+    }
 }
 
 TEST_F(TestGraph, PlanSpecAutotuneWinnerUpdatesSerializableActivePlan)

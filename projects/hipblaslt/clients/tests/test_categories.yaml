@@ -14,8 +14,14 @@
 #   so "*pre_checkin*" selects the tests whose category is pre_checkin.
 #
 #   Categories present in clients/tests/data today: smoke, quick, pre_checkin,
-#   nightly, HMM, plus known_bug (assigned dynamically, including per-GPU via
-#   known_bug_platforms). There are currently no multi_gpu tests.
+#   nightly, stress, HMM, sdc_hunt (on demand, deliberately in no tier; see
+#   clients/scripts/sdc_hunt), plus known_bug (assigned dynamically, including per-GPU via
+#   known_bug_platforms).
+#
+#   multi_gpu is the exception: it has no entries in data/, and its tests are
+#   plain gtest suites that carry the token in the suite name. It is deliberately
+#   not folded into the tiers below, all of which run on single-GPU runners where
+#   every multi_gpu test would skip while the run still reported green.
 #
 # These tiers are TheRock ctest presets; they are NOT a port of hipBLASLt's
 # rocJenkins job filters (those are wired differently).
@@ -80,6 +86,27 @@ test_categories:
       - "weekly"
       - "hmm"
 
+  stress:
+    description: "Size-threshold and address-overflow cases that need large device and host memory (32 GB+ per GPU for the largest); run on large-memory runners or weekly, not in every nightly"
+    test_patterns:
+      - "*stress*"
+    exclude:
+      - "*known_bug*"
+    labels:
+      - "stress"
+      - "weekly"
+      - "large_memory"
+
+  multi_gpu:
+    description: "Cross-device tests; needs two or more GPUs visible to one process"
+    test_patterns:
+      - "*multi_gpu*"
+    exclude:
+      - "*known_bug*"
+    labels:
+      - "multi_gpu"
+      - "multigpu"
+
 # GPU-specific exclusions can be added here when needed (see shared/ctest/README.md).
 # exclude_gpu:
 #   exclude_gpu_gfxXXXX:
@@ -93,4 +120,6 @@ execution_settings:
     quick: 600          # smoke can exceed 300s on some hosts
     standard: 3600      # 1 h
     comprehensive: 7200 # 2 h
+    stress: 14400       # 4 h
     full: 86400         # 24 h
+    multi_gpu: 600      # 10 min

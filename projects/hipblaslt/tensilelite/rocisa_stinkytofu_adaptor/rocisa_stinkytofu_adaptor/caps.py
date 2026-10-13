@@ -35,10 +35,23 @@ def normalize_isa_key(arch: Any) -> IsaKey:
         try:
             return _GFX_ALIASES[arch]
         except KeyError:
-            raise KeyError(
-                f"caps.normalize_isa_key: unknown gfx alias {arch!r}; "
-                f"known: {sorted(_GFX_ALIASES)}"
-            ) from None
+            pass
+        # Parse "gfxMAJMINPATCH" strings not in the alias table so that the
+        # native-fallback path can normalize them into a tuple.  E.g.
+        # "gfx803" → (8, 0, 3), "gfx90a" → (9, 0, 10).
+        import re
+        m = re.fullmatch(r"gfx([0-9a-fA-F]+)", arch)
+        if m:
+            digits = m.group(1)
+            if len(digits) >= 3:
+                major = int(digits[:-2], 16) if any(c.isalpha() for c in digits[:-2]) else int(digits[:-2])
+                minor = int(digits[-2], 16)
+                patch = int(digits[-1], 16)
+                return (major, minor, patch)
+        raise KeyError(
+            f"caps.normalize_isa_key: unknown gfx alias {arch!r}; "
+            f"known: {sorted(_GFX_ALIASES)}"
+        )
 
     if isinstance(arch, (tuple, list)) and len(arch) == 3:
         return (int(arch[0]), int(arch[1]), int(arch[2]))

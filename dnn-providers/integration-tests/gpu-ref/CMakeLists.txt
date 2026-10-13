@@ -32,12 +32,20 @@ add_library(
     hipdnn_gpu_ref STATIC
     src/GpuReferencePointwise.cpp
     src/GpuFpReferenceConvolution.cpp
+    src/GpuFpReferenceLayernorm.cpp
+    src/GpuFpReferenceMatmul.cpp
     src/GpuFpReferenceSdpa.cpp
+    src/GpuFpReferenceReduction.cpp
+    src/GpuFpReferenceResample.cpp
+    src/GpuFpReferenceSdpaRagged.cpp
     src/GpuFpReferenceRMSNorm.cpp
+    src/GpuFpReferenceBatchnorm.cpp
+    src/GpuFpReferenceRmsValidation.cpp
     src/GpuFpReferenceValidation.cpp
     src/GpuIntReferenceValidation.cpp
     src/GpuReferenceValidationFactory.cpp
     src/GpuRefKernelCompiler.cpp
+    src/GpuRefLaunch.cpp
     src/GpuRefValidatorHelpers.cpp
     ${CMAKE_CURRENT_BINARY_DIR}/kernels/GpuRefKernelSources.cpp
 )

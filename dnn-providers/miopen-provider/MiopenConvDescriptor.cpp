@@ -221,16 +221,25 @@ void MiopenConvDescriptor::createDescriptorInternal(
             "MiopenConvDescriptor: dilation values must be positive");
     }
 
+    // MIOpen has no 1D convolution API. Run a 1D convolution as a 2D convolution
+    // with a trailing size-1 spatial dimension. Zero padding, unit stride and unit
+    // dilation over that dimension leave the result unchanged.
+    const size_t miopenSpatialDimCount = miopen_utils::paddedConvSpatialDimCount(spatialDimCount);
+    padding.resize(miopenSpatialDimCount, 0);
+    stride.resize(miopenSpatialDimCount, 1);
+    dilation.resize(miopenSpatialDimCount, 1);
+
     THROW_ON_MIOPEN_FAILURE(miopenCreateConvolutionDescriptor(&_descriptor));
 
     try
     {
-        THROW_ON_MIOPEN_FAILURE(miopenInitConvolutionNdDescriptor(_descriptor,
-                                                                  static_cast<int>(spatialDimCount),
-                                                                  padding.data(),
-                                                                  stride.data(),
-                                                                  dilation.data(),
-                                                                  miopenConvolution));
+        THROW_ON_MIOPEN_FAILURE(
+            miopenInitConvolutionNdDescriptor(_descriptor,
+                                              static_cast<int>(miopenSpatialDimCount),
+                                              padding.data(),
+                                              stride.data(),
+                                              dilation.data(),
+                                              miopenConvolution));
         THROW_ON_MIOPEN_FAILURE(miopenSetConvolutionGroupCount(_descriptor, groupCount));
 
         if(deterministicEnabled)

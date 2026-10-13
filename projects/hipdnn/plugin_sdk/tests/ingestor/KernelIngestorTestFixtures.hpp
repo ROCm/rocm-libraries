@@ -32,6 +32,8 @@
 #include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
 #include <hipdnn_plugin_sdk/interfaces/IPlan.hpp>
 
+#include "flatbuffer_utilities/ContentCarryingTestGraph.hpp"
+
 /**
  * @file KernelIngestorTestFixtures.hpp
  * @brief Shared, `inline` fixtures for the ingestor's SDK-level tests.
@@ -39,6 +41,8 @@
 namespace hipdnn_plugin_sdk::ingestor::testing
 {
 
+using hipdnn_flatbuffers_sdk::flatbuffer_utilities::testing::GraphId;
+using hipdnn_flatbuffers_sdk::flatbuffer_utilities::testing::makeGraphId;
 constexpr const char* BLOCK_SIZE = "block_size";
 constexpr const char* DTYPE = "dtype";
 constexpr const char* GRAPH_MATCH_SYMBOL = "hipdnn.kernel_ingestor.test.graph_match";
@@ -137,15 +141,6 @@ private:
     std::unordered_map<int64_t, const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>
         _tensors;
 };
-
-inline GraphId makeGraphId(uint8_t seed)
-{
-    GraphId id{};
-    id.fill(seed);
-    id[6] = static_cast<uint8_t>((id[6] & 0x0fU) | 0x40U);
-    id[8] = static_cast<uint8_t>((id[8] & 0x3fU) | 0x80U);
-    return id;
-}
 
 inline GraphId makeNonV4GraphId(uint8_t seed)
 {
@@ -566,11 +561,12 @@ inline KernelSource makeEmbeddedSource(const std::string& sourceFile = "Test.cpp
 }
 
 /// Defaults spell the shape the descriptor packager emits.
-inline KernelSource makeKpackSource(const std::string& library
-                                    = "kpack/hip_kernel_provider_gfx942.kpack",
-                                    const std::string& tocKey = "test-toc-key",
-                                    const std::string& symbol = "TestKernel",
-                                    const std::string& sha256 = std::string(64, 'a'))
+inline KernelSource
+    makeKpackSource(const std::string& library = "kpack/hip_kernel_provider_gfx942.kpack",
+                    const std::string& tocKey = "test-toc-key",
+                    const std::string& symbol = "TestKernel",
+                    const std::string& sha256 = std::string(64, 'a'),
+                    const std::vector<KernelArgument>& signature = {{"global_buffer", 8, 0, ""}})
 {
     KernelSource source;
     source.kind = KernelSourceKind::KPACK;
@@ -578,6 +574,7 @@ inline KernelSource makeKpackSource(const std::string& library
     source.tocKey = tocKey;
     source.symbol = symbol;
     source.sha256 = sha256;
+    source.signature = signature;
     return source;
 }
 

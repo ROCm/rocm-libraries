@@ -239,7 +239,7 @@ from .io import (
     store_vec,
     vector_row_copy,
 )
-from .layouts import LdsLayout, TransposeLdsReader
+from .layouts import ConvKOuterFragmentReader, LdsLayout, TransposeLdsReader
 from .loads import (
     AsyncPingPongLoader,
     AsyncTileLoader,
@@ -318,6 +318,7 @@ from .preshuffle import (
     host_preshuffle_layout,
 )
 from .quant import (
+    LogicalQDType,
     QDType,
     QUANT_MAX_ABS,
     dequantize_scalar_to_f32,
@@ -345,13 +346,18 @@ from .scan import (
 )
 from .schedule import SchedulePolicy
 from .streamk import (
+    StreamKIterArgs,
+    StreamKIterPartition,
     StreamKPartition,
     StreamKReductionStrategy,
     compute_streamk_grid_size,
     emit_streamk_decode,
-    emit_streamk_partial_load_accumulate,
-    emit_streamk_partial_store,
+    emit_streamk_iter_range,
+    emit_streamk_sk_start_iter,
+    streamk_end_iter,
+    streamk_iter_partition,
     streamk_num_macro_tiles,
+    streamk_start_iter,
 )
 from .spec import (
     IOSpecRule,
@@ -388,7 +394,6 @@ from .tensor_view import (
 from .manifest import (
     MANIFEST_SCHEMA,
     attention_args_signature,
-    conv_args_signature,
     gemm_args_signature,
     make_attention_manifest,
     make_conv_manifest,
@@ -469,6 +474,7 @@ __all__ = [
     "super_tile_swizzle_dynamic",
     # Loads
     "LdsLayout",
+    "ConvKOuterFragmentReader",
     "TransposeLdsReader",
     "AsyncPingPongLoader",
     "AsyncTileLoader",
@@ -533,7 +539,6 @@ __all__ = [
     # Manifest
     "MANIFEST_SCHEMA",
     "attention_args_signature",
-    "conv_args_signature",
     "gemm_args_signature",
     "make_attention_manifest",
     "make_conv_manifest",
@@ -611,16 +616,22 @@ __all__ = [
     "load_sorted_topk_weight",
     "scatter_token_offset",
     # StreamK partitioner ( StreamK GEMM)
+    "StreamKIterArgs",
+    "StreamKIterPartition",
     "StreamKPartition",
     "StreamKReductionStrategy",
     "compute_streamk_grid_size",
     "emit_streamk_decode",
-    "emit_streamk_partial_load_accumulate",
-    "emit_streamk_partial_store",
+    "emit_streamk_iter_range",
+    "emit_streamk_sk_start_iter",
+    "streamk_end_iter",
+    "streamk_iter_partition",
+    "streamk_start_iter",
     "mfma_attention_bwd_dot_do_o_inner_body",
     "mfma_attention_bwd_dq_dk_dv_inner_body",
     "streamk_num_macro_tiles",
     # Quantisation (f32 <-> {i8, fp8e4m3, bf8e5m2})
+    "LogicalQDType",
     "QDType",
     "QUANT_MAX_ABS",
     "dequantize_scalar_to_f32",

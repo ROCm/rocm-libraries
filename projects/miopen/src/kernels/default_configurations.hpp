@@ -66,8 +66,14 @@
 #define MIO_BN_NODPP 0
 #endif
 
-#ifndef MIOPEN_USE_AMDGCN
-#define MIOPEN_USE_AMDGCN 1
+// The DPP row_bcast reductions (inline ASM) and the wave64 LDS sizing exist only on GFX9.
+// __GFX9__ is a device-side macro, so this is also 0 during the host compilation pass.
+#ifndef MIOPEN_USE_GFX9_DPP
+#if defined(__GFX9__)
+#define MIOPEN_USE_GFX9_DPP 1
+#else
+#define MIOPEN_USE_GFX9_DPP 0
+#endif
 #endif
 
 #ifndef MIOPEN_NRN_OP_ID
