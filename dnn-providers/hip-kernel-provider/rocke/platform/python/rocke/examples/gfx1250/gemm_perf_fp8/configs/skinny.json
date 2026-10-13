@@ -31,11 +31,11 @@
     "warp_n": [1, 2, 4, 8]
   },
   "trait_config": {
-    "pipelines": ["mem"],
+    "pipelines": ["mem", "wmma_v1"],
     "schedulers": ["intrawave"],
-    "epilogues": ["default"],
+    "epilogues": ["default", "cshuffle"],
     "waves_per_eu": [null, 1, 2, 4],
-    "lds_swizzle": [false, true],
+    "lds_swizzle": [false],
     "lds_k_pad": [0, 16, 48, 80, 112]
   },
   "selection": {
