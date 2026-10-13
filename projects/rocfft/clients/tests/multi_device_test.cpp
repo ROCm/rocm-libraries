@@ -74,7 +74,10 @@ enum SplitType
     // considered number of devices
     IMPLICIT_HIPFFT,
     // different I/O devices but no decomposition
-    DIFFERENT_IO_DEVICES
+    DIFFERENT_IO_DEVICES,
+    // split only the batch dimension, each output brick on the same device as the input
+    // brick of same batch range, listed in a shuffled order (out-of-place only)
+    BATCH_COLOCATED
 };
 
 std::vector<fft_params> param_generator_multi_gpu(const SplitType type)
@@ -206,6 +209,13 @@ std::vector<fft_params> param_generator_multi_gpu(const SplitType type)
                 while(start_global_dev_id_input == start_global_dev_id_output)
                     start_global_dev_id_output = dev_rng(gen);
                 break;
+            case BATCH_COLOCATED:
+                // in-place already covered by IMPLICIT_HIPFFT
+                if(p.nbatch < 2 || p.placement == fft_placement_inplace)
+                    continue;
+                input_grid[0] = output_grid[0]
+                    = std::min(p.nbatch, static_cast<size_t>(total_num_devices));
+                break;
             default:
                 throw std::invalid_argument("param_generator_multi_gpu: unkonwn split type");
             }
@@ -224,6 +234,8 @@ std::vector<fft_params> param_generator_multi_gpu(const SplitType type)
                 gpus_per_rank, input_grid, mp_ranks, start_global_dev_id_input);
             p_dist.distribute_field<fft_io::fft_io_out>(
                 gpus_per_rank, output_grid, mp_ranks, start_global_dev_id_output);
+            if(type == BATCH_COLOCATED)
+                std::shuffle(p_dist.ofields[0].bricks.begin(), p_dist.ofields[0].bricks.end(), gen);
 
             if(mp_ranks > 1)
             {
@@ -298,6 +310,12 @@ INSTANTIATE_TEST_SUITE_P(multi_gpu_different_io_devices,
                          ::testing::ValuesIn(param_generator_multi_gpu(DIFFERENT_IO_DEVICES)),
                          accuracy_test::TestName);
 
+// embarrassingly-parallel transforms: batch-only split, shuffled output bricks
+INSTANTIATE_TEST_SUITE_P(multi_gpu_batch_colocated,
+                         accuracy_test,
+                         ::testing::ValuesIn(param_generator_multi_gpu(BATCH_COLOCATED)),
+                         accuracy_test::TestName);
+
 TEST(multi_gpu_validate, catch_validation_errors)
 {
     if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
@@ -306,8 +324,13 @@ TEST(multi_gpu_validate, catch_validation_errors)
         GTEST_SKIP();
     }
 
-    const auto all_split_types
-        = {SLOW_INOUT, SLOW_IN, SLOW_OUT, SLOW_IN_FAST_OUT, PENCIL_3D, IMPLICIT_HIPFFT};
+    const auto all_split_types = {SLOW_INOUT,
+                                  SLOW_IN,
+                                  SLOW_OUT,
+                                  SLOW_IN_FAST_OUT,
+                                  PENCIL_3D,
+                                  IMPLICIT_HIPFFT,
+                                  BATCH_COLOCATED};
 
     for(auto type : all_split_types)
     {
@@ -429,6 +452,12 @@ static const auto multi_gpu_tokens = {
     "complex_forward_len_8_8_8_single_op_batch_1_ifield_brick_lower_0_0_0_0_upper_1_4_4_8_stride_128_32_8_1_dev_0_brick_lower_0_0_4_0_upper_1_4_8_8_stride_128_32_8_1_dev_1_brick_lower_0_4_0_0_upper_1_8_4_8_stride_128_32_8_1_dev_2_brick_lower_0_4_4_0_upper_1_8_8_8_stride_128_32_8_1_dev_3_ofield_brick_lower_0_0_0_0_upper_1_2_8_8_stride_128_64_8_1_dev_0_brick_lower_0_2_0_0_upper_1_4_8_8_stride_128_64_8_1_dev_1_brick_lower_0_4_0_0_upper_1_6_8_8_stride_128_64_8_1_dev_2_brick_lower_0_6_0_0_upper_1_8_8_8_stride_128_64_8_1_dev_3",
     // same, with JIT load/store callbacks
     "complex_forward_len_8_8_8_single_op_batch_1_ifield_brick_lower_0_0_0_0_upper_1_4_4_8_stride_128_32_8_1_dev_0_brick_lower_0_0_4_0_upper_1_4_8_8_stride_128_32_8_1_dev_1_brick_lower_0_4_0_0_upper_1_8_4_8_stride_128_32_8_1_dev_2_brick_lower_0_4_4_0_upper_1_8_8_8_stride_128_32_8_1_dev_3_ofield_brick_lower_0_0_0_0_upper_1_2_8_8_stride_128_64_8_1_dev_0_brick_lower_0_2_0_0_upper_1_4_8_8_stride_128_64_8_1_dev_1_brick_lower_0_4_0_0_upper_1_6_8_8_stride_128_64_8_1_dev_2_brick_lower_0_6_0_0_upper_1_8_8_8_stride_128_64_8_1_dev_3_JITCB",
+    // lone input and output bricks on the same, non-current device
+    "complex_forward_len_256_double_ip_batch_4_ifield_brick_lower_0_0_upper_4_256_stride_256_1_dev_1_ofield_brick_lower_0_0_upper_4_256_stride_256_1_dev_1",
+    "real_forward_len_256_256_single_op_batch_2_ifield_brick_lower_0_0_0_upper_2_256_256_stride_65536_256_1_dev_1_ofield_brick_lower_0_0_0_upper_2_256_129_stride_33024_129_1_dev_1_JITCB",
+    "real_inverse_len_256_double_op_batch_4_ifield_brick_lower_0_0_upper_4_129_stride_129_1_dev_1_ofield_brick_lower_0_0_upper_4_256_stride_256_1_dev_1",
+    // same, with a Bluestein length requiring work memory
+    "complex_forward_len_10007_single_op_batch_2_ifield_brick_lower_0_0_upper_2_10007_stride_10007_1_dev_1_ofield_brick_lower_0_0_upper_2_10007_stride_10007_1_dev_1",
     // clang-format on
 };
 
