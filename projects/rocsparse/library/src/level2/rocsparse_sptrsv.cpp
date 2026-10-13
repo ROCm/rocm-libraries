@@ -61,7 +61,9 @@ inline bool rocsparse::enum_utils::is_invalid(rocsparse_sptrsv_alg value)
     switch(value)
     {
     case rocsparse_sptrsv_alg_default:
+#if defined(ROCSPARSE_WITH_SPTRSV_TRANSPOSE_FREE)
     case rocsparse_sptrsv_alg_transpose_free:
+#endif
     {
         return false;
     }
@@ -456,6 +458,7 @@ catch(...)
 
 namespace rocsparse
 {
+#if defined(ROCSPARSE_WITH_SPTRSV_TRANSPOSE_FREE)
     // The cases that need the transpose: CSR and COO with (conjugate) transpose, CSC without.
     static bool is_transpose_free_path(rocsparse_sptrsv_alg alg,
                                        rocsparse_format     format,
@@ -466,6 +469,7 @@ namespace rocsparse
                     && operation != rocsparse_operation_none)
                    || (format == rocsparse_format_csc && operation == rocsparse_operation_none));
     }
+#endif
 
     static rocsparse_status sptrsv_buffer_size_default(rocsparse_handle            handle,
                                                        rocsparse_sptrsv_descr      sptrsv_descr,
@@ -484,6 +488,7 @@ namespace rocsparse
                                                size_t*                     buffer_size_in_bytes)
     {
         ROCSPARSE_ROUTINE_TRACE;
+#if defined(ROCSPARSE_WITH_SPTRSV_TRANSPOSE_FREE)
         if(rocsparse::is_transpose_free_path(
                sptrsv_descr->get_alg(), A->format, sptrsv_descr->get_operation())
            && A->rows > 0)
@@ -494,6 +499,7 @@ namespace rocsparse
                       : rocsparse::csrsv_transpose_free_solve_buffer_size(A, y->batch_count);
             return rocsparse_status_success;
         }
+#endif
         return rocsparse::sptrsv_buffer_size_default(
             handle, sptrsv_descr, A, x, y, sptrsv_stage, buffer_size_in_bytes);
     }
@@ -614,14 +620,16 @@ namespace rocsparse
     }
     // LCOV_EXCL_STOP
 
-    static rocsparse_csrsv_info create_sptrsv_csrsv_info(bool transpose_free)
+    static rocsparse_csrsv_info create_sptrsv_csrsv_info([[maybe_unused]] bool transpose_free)
     {
+#if defined(ROCSPARSE_WITH_SPTRSV_TRANSPOSE_FREE)
         if(transpose_free)
         {
             rocsparse_csrsv_info csrsv_info = new _rocsparse_csrsv_info();
             csrsv_info->set_transpose_free(true);
             return csrsv_info;
         }
+#endif
         return nullptr;
     }
 
@@ -735,7 +743,11 @@ namespace rocsparse
             sptrsv_descr->m_batch_count = dnvec_descr_y->batch_count;
 
             // The transpose-free analysis is never shared through the matrix info.
+#if defined(ROCSPARSE_WITH_SPTRSV_TRANSPOSE_FREE)
             const bool transpose_free = rocsparse::is_transpose_free_path(alg, format, operation);
+#else
+            const bool transpose_free = false;
+#endif
             const rocsparse_analysis_policy csrsv_policy
                 = transpose_free ? rocsparse_analysis_policy_force : analysis_policy;
 

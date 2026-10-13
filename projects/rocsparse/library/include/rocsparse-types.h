@@ -1074,8 +1074,10 @@ typedef enum rocsparse_singularity_
  */
 typedef enum rocsparse_sptrsv_alg_
 {
-    rocsparse_sptrsv_alg_default        = 0, /**< Default SpTRSV algorithm for the given format. */
+    rocsparse_sptrsv_alg_default = 0, /**< Default SpTRSV algorithm for the given format. */
+#if defined(ROCSPARSE_WITH_SPTRSV_TRANSPOSE_FREE)
     rocsparse_sptrsv_alg_transpose_free = 1 /**< Transpose-free SpTRSV algorithm. */
+#endif
 } rocsparse_sptrsv_alg;
 
 /*! \ingroup types_module

@@ -143,6 +143,7 @@ rocsparse_status rocsparse::csrsv_solve(rocsparse_handle            handle,
     }
     }
 
+#if defined(ROCSPARSE_WITH_SPTRSV_TRANSPOSE_FREE)
     if(csrsv_info->get_transpose_free() && trans != rocsparse_operation_none)
     {
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsv_solve_transpose_free(
@@ -157,6 +158,7 @@ rocsparse_status rocsparse::csrsv_solve(rocsparse_handle            handle,
             temp_buffer));
         return rocsparse_status_success;
     }
+#endif
 
     // Pointers to differentiate between transpose mode
     const void* local_row_data = A->const_row_data;

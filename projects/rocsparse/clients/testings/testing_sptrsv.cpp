@@ -756,6 +756,13 @@ void testing_sptrsv(const Arguments& arg)
     }
 #endif
 
+#ifndef ROCSPARSE_WITH_SPTRSV_TRANSPOSE_FREE
+    if(arg.sptrsv_alg != rocsparse_sptrsv_alg_default)
+    {
+        return;
+    }
+#endif
+
     const int64_t batch_count   = (arg.batch_count > 1) ? arg.batch_count : 1;
     const int64_t batch_count_A = (arg.batch_count_A > 0) ? arg.batch_count_A : batch_count;
     const int64_t batch_count_x = (arg.batch_count_B > 0) ? arg.batch_count_B : batch_count;
