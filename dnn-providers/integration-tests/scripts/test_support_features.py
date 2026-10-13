@@ -41,6 +41,7 @@ from support_features import (
     layernorm_backward,
     matmul,
     moe_grouped_matmul,
+    moe_grouped_matmul_bwd,
     pointwise,
     reduction,
     registry,
@@ -5894,6 +5895,275 @@ class TestMoeGroupedMatmulExtract:
         node, tensors = _moe()
         node.update(node.pop("inputs"))
         self._raises(node, tensors, "required port token_tensor_uid")
+
+
+# --------------------------------------------------------------------------
+# MoeGroupedMatmulBwdAttributes
+# --------------------------------------------------------------------------
+
+
+def _moe_bwd(
+    *,
+    experts: int = 2,
+    rows: int = 8,
+    k: int = 16,
+    n: int = 32,
+    dtype: str = "float",
+    doutput_dtype: str | None = None,
+    dweight_dtype: str | None = None,
+    dweight_layout: str = "col_major",
+    token_virtual: bool = False,
+    dweight_virtual: bool = False,
+) -> tuple[dict, dict]:
+    """A MoeGroupedMatmulBwdAttributes node: ``doutput`` on uid 1, ``token``
+    on 2, the offset on 3, ``dweight`` on 4. ``dweight`` has the strides
+    the frontend infers unless told. Ports as
+    utilities/json/MoeGroupedMatmulBwdAttributes.hpp writes them.
+    """
+
+    def tensor(uid: int, dims: list[int], dt: str, virtual: bool = False) -> dict:
+        return {
+            "uid": uid,
+            "dims": dims,
+            "strides": _matrix_strides(dims, "row_major"),
+            "data_type": dt,
+            "virtual": virtual,
+        }
+
+    dweight = tensor(4, [experts, k, n], dweight_dtype or dtype, dweight_virtual)
+    dweight["strides"] = _matrix_strides(dweight["dims"], dweight_layout)
+    tensors = {
+        1: tensor(1, [1, rows, n], doutput_dtype or dtype),
+        2: tensor(2, [1, rows, k], dtype, token_virtual),
+        3: tensor(3, [experts, 1, 1], "int32"),
+        4: dweight,
+    }
+    node = {
+        "type": "MoeGroupedMatmulBwdAttributes",
+        "inputs": {
+            "doutput_tensor_uid": 1,
+            "token_tensor_uid": 2,
+            "first_token_offset_tensor_uid": 3,
+        },
+        "outputs": {"dweight_tensor_uid": 4},
+    }
+    return node, tensors
+
+
+class TestMoeGroupedMatmulBwdExtract:
+    PLAIN = {"dtype:fp32", "dweight_layout:col_major"}
+
+    def _extract(self, **kwargs) -> set[str]:
+        return moe_grouped_matmul_bwd.extract(*_moe_bwd(**kwargs))
+
+    def _raises(self, node: dict, tensors: dict, match: str) -> None:
+        with pytest.raises(FeatureError, match=match):
+            moe_grouped_matmul_bwd.extract(node, tensors)
+
+    def test_builder_binds_every_schema_field(self) -> None:
+        node, _ = _moe_bwd()
+        assert set(batchnorm.bound(node)) == table_fields(
+            moe_grouped_matmul_bwd.SCHEMA_FILE, moe_grouped_matmul_bwd.SCHEMA_TABLE
+        )
+
+    def test_every_feature_is_reachable(self) -> None:
+        reached = self._extract()
+        for kwargs in (
+            {"dtype": "half", "dweight_dtype": "float", "dweight_layout": "row_major"},
+            {"dtype": "bfloat16"},
+        ):
+            reached |= self._extract(**kwargs)
+        assert reached == {f.id for f in moe_grouped_matmul_bwd.FEATURES}
+
+    def test_plain_graph(self) -> None:
+        assert self._extract() == self.PLAIN
+
+    @pytest.mark.parametrize(
+        "dtype, expected",
+        [("float", "dtype:fp32"), ("half", "dtype:fp16"), ("bfloat16", "dtype:bf16")],
+    )
+    def test_dtype(self, dtype: str, expected: str) -> None:
+        features = self._extract(dtype=dtype)
+        assert features == self.PLAIN - {"dtype:fp32"} | {expected}
+
+    @pytest.mark.parametrize(
+        "dtype, dweight_dtype",
+        [
+            ("half", "float"),
+            ("bfloat16", "float"),
+            ("float", "half"),
+            ("float", "bfloat16"),
+        ],
+    )
+    def test_mixed_output(self, dtype: str, dweight_dtype: str) -> None:
+        # The CPU reference's pairs: the other dtype fp32.
+        features = self._extract(dtype=dtype, dweight_dtype=dweight_dtype)
+        assert "precision:mixed_output" in features
+
+    @pytest.mark.parametrize("virtual", ["token_virtual", "dweight_virtual"])
+    def test_a_virtual_tensor_is_not_mixed(self, virtual: str) -> None:
+        features = self._extract(dtype="half", dweight_dtype="float", **{virtual: True})
+        assert features == self.PLAIN - {"dtype:fp32"} | {"dtype:fp16"}
+
+    @pytest.mark.parametrize("dweight_virtual", [False, True])
+    @pytest.mark.parametrize(
+        "dtype, dweight_dtype", [("half", "bfloat16"), ("bfloat16", "half")]
+    )
+    def test_a_dweight_pair_with_no_plan_raises(
+        self, dtype: str, dweight_dtype: str, dweight_virtual: bool
+    ) -> None:
+        # The signature key reads the dtype of a virtual dweight too.
+        node, tensors = _moe_bwd(
+            dtype=dtype, dweight_dtype=dweight_dtype, dweight_virtual=dweight_virtual
+        )
+        self._raises(node, tensors, "dweight_tensor_uid dtype .* has no plan")
+
+    @pytest.mark.parametrize(
+        "dtype, doutput_dtype", [("half", "float"), ("float", "half")]
+    )
+    def test_a_doutput_not_of_token_dtype_raises(
+        self, dtype: str, doutput_dtype: str
+    ) -> None:
+        node, tensors = _moe_bwd(dtype=dtype, doutput_dtype=doutput_dtype)
+        self._raises(node, tensors, "doutput_tensor_uid dtype .* is not that of")
+
+    @pytest.mark.parametrize(
+        "kwargs, port",
+        [
+            ({"dtype": "int8"}, "token_tensor_uid"),
+            ({"doutput_dtype": "double"}, "doutput_tensor_uid"),
+            ({"dweight_dtype": "int32"}, "dweight_tensor_uid"),
+        ],
+    )
+    def test_an_uncatalogued_dtype_raises(self, kwargs: dict, port: str) -> None:
+        node, tensors = _moe_bwd(**kwargs)
+        self._raises(node, tensors, f"{port} dtype .* is not catalogued")
+
+    @pytest.mark.parametrize(
+        "layout, expected",
+        [
+            ("row_major", "dweight_layout:row_major"),
+            ("col_major", "dweight_layout:col_major"),
+        ],
+    )
+    def test_dweight_layout(self, layout: str, expected: str) -> None:
+        features = self._extract(dweight_layout=layout)
+        assert features == {"dtype:fp32", expected}
+
+    def test_col_major_is_the_frontend_inferred_strides(self) -> None:
+        # MoeGroupedMatmulBwdNode: [K*N, 1, K] for [E, K, N].
+        _, tensors = _moe_bwd()
+        assert tensors[4]["strides"] == [16 * 32, 1, 16]
+
+    def test_a_dweight_with_no_unit_stride_has_no_layout(self) -> None:
+        # The CPU reference reads any strides: no layout, not an error.
+        node, tensors = _moe_bwd()
+        tensors[4]["strides"] = [1, 2 * 32, 2]
+        assert moe_grouped_matmul_bwd.extract(node, tensors) == {"dtype:fp32"}
+
+    @pytest.mark.parametrize(
+        "uid, port",
+        [
+            (1, "doutput_tensor_uid"),
+            (2, "token_tensor_uid"),
+            (3, "first_token_offset_tensor_uid"),
+            (4, "dweight_tensor_uid"),
+        ],
+    )
+    @pytest.mark.parametrize("dims", [[8, 16], [1, 1, 8, 16], [1, 0, 16], []])
+    def test_a_tensor_not_rank_3_raises(self, uid, port, dims) -> None:
+        node, tensors = _moe_bwd()
+        tensors[uid]["dims"] = dims
+        self._raises(node, tensors, f"{port} dims .*: not rank 3 with dims >= 1")
+
+    @pytest.mark.parametrize(
+        "uid, port",
+        [
+            (1, "doutput_tensor_uid"),
+            (2, "token_tensor_uid"),
+            (3, "first_token_offset_tensor_uid"),
+            (4, "dweight_tensor_uid"),
+        ],
+    )
+    @pytest.mark.parametrize("ragged_uid", [0, 7])
+    def test_a_ragged_tensor_raises(self, uid, port, ragged_uid: int) -> None:
+        # CHECK_NO_RAGGED_TENSORS; uid 0 is a ragged offset too.
+        node, tensors = _moe_bwd()
+        tensors[uid]["ragged_offset_tensor_uid"] = ragged_uid
+        self._raises(node, tensors, f"{port} is ragged")
+
+    def test_a_null_ragged_offset_is_not_ragged(self) -> None:
+        node, tensors = _moe_bwd()
+        tensors[2]["ragged_offset_tensor_uid"] = None
+        assert moe_grouped_matmul_bwd.extract(node, tensors) == self.PLAIN
+
+    def test_a_token_not_1_rows_k_raises(self) -> None:
+        node, tensors = _moe_bwd()
+        tensors[2]["dims"] = [2, 8, 16]
+        self._raises(node, tensors, r"token_tensor_uid dims .* are not \[1, rows, K\]")
+
+    @pytest.mark.parametrize("dims", [[2, 8, 32], [1, 7, 32], [1, 9, 32]])
+    def test_a_doutput_not_1_token_rows_raises(self, dims: list[int]) -> None:
+        node, tensors = _moe_bwd()
+        tensors[1]["dims"] = dims
+        self._raises(node, tensors, r"doutput_tensor_uid dims .* are not \[1, 8, N\]")
+
+    @pytest.mark.parametrize("dims", [[2, 2, 1], [2, 1, 2]])
+    def test_an_offset_not_e_1_1_raises(self, dims: list[int]) -> None:
+        node, tensors = _moe_bwd()
+        tensors[3]["dims"] = dims
+        self._raises(
+            node, tensors, r"first_token_offset_tensor_uid dims .* are not \[E, 1, 1\]"
+        )
+
+    @pytest.mark.parametrize("dtype", ["int64", "float", None])
+    def test_an_offset_not_int32_raises(self, dtype) -> None:
+        node, tensors = _moe_bwd()
+        tensors[3]["data_type"] = dtype
+        self._raises(
+            node, tensors, "first_token_offset_tensor_uid dtype .* is not int32"
+        )
+
+    @pytest.mark.parametrize(
+        "dims", [[1, 16, 32], [4, 16, 32], [2, 15, 32], [2, 16, 31], [2, 32, 16]]
+    )
+    def test_a_dweight_not_e_k_n_raises(self, dims: list[int]) -> None:
+        node, tensors = _moe_bwd()
+        tensors[4]["dims"] = dims
+        self._raises(node, tensors, r"dweight_tensor_uid dims .* are not \[2, 16, 32\]")
+
+    @pytest.mark.parametrize("experts", [1, 3, 4])
+    def test_any_expert_count(self, experts: int) -> None:
+        # The offset is E, not a multiple of it as for the forward.
+        assert self._extract(experts=experts) == self.PLAIN
+
+    def test_an_offset_of_a_multiple_of_experts_raises(self) -> None:
+        # The forward's batch: the backward has none.
+        node, tensors = _moe_bwd()
+        tensors[3]["dims"] = [4, 1, 1]
+        self._raises(node, tensors, r"dweight_tensor_uid dims .* are not \[4, 16, 32\]")
+
+    def test_uid_zero_is_a_binding(self) -> None:
+        node, tensors = _moe_bwd()
+        tensors[0] = {**tensors.pop(1), "uid": 0}
+        node["inputs"]["doutput_tensor_uid"] = 0
+        assert moe_grouped_matmul_bwd.extract(node, tensors) == self.PLAIN
+
+    @pytest.mark.parametrize("port", moe_grouped_matmul_bwd.REQUIRED)
+    @pytest.mark.parametrize("unbound", ["null", "missing"])
+    def test_unbound_required_port_raises(self, port: str, unbound: str) -> None:
+        node, tensors = _moe_bwd()
+        ports = node["outputs" if port == "dweight_tensor_uid" else "inputs"]
+        if unbound == "null":
+            ports[port] = None
+        else:
+            del ports[port]
+        self._raises(node, tensors, f"required port {port}")
+
+    def test_ports_at_the_top_of_the_node_are_not_read(self) -> None:
+        node, tensors = _moe_bwd()
+        node.update(node.pop("inputs"))
+        self._raises(node, tensors, "required port doutput_tensor_uid")
 
 
 # --------------------------------------------------------------------------
