@@ -608,12 +608,14 @@ class KernelCache:
     def _group_merge_fits(
         identity: KernelIdentity, problem: object, gm: int
     ) -> Tuple[bool, str]:
-        """Can a wgrad binary merging ``gm`` groups serve ``problem``?
+        """Can a binary merging ``gm`` groups serve ``problem``?
 
-        Mirrors the shape rules of ``wgrad_group_merge_available``: merging is
-        depthwise only, ``gm`` must divide the group count, and the merged
-        GEMM (``kpg*Gm`` x ``[Z*]Y*X*cpg*Gm``) must fit one tile -- the
+        Mirrors the shape rules of ``wgrad_group_merge_available`` /
+        ``fwd_group_merge_available``: merging is depthwise only, ``gm`` must
+        divide the group count, and the merged GEMM must fit one tile -- the
         filter extent is a runtime value, so it is checked here, per problem.
+        wgrad's merged GEMM is ``kpg*Gm`` x ``[Z*]Y*X*cpg*Gm``; fwd's only
+        merged free axis is GEMM-N, ``kpg*Gm``.
         """
         cpg = int(getattr(problem, "cpg", 0))
         kpg = int(getattr(problem, "kpg", 0))
@@ -622,6 +624,12 @@ class KernelCache:
             return False, "group-merged kernel needs depthwise (cpg=kpg=1)"
         if groups % gm:
             return False, f"group_merge {gm} does not divide groups {groups}"
+        if identity.direction == "fwd":
+            if kpg * gm > identity.tile_n:
+                return False, (
+                    f"merged GEMM-N {kpg * gm} exceeds tile_n {identity.tile_n}"
+                )
+            return True, "ok"
         spatial = int(getattr(problem, "Y", 1)) * int(getattr(problem, "X", 1))
         if bool(getattr(problem, "is_3d", False)):
             spatial *= int(getattr(problem, "Z", 1))
@@ -680,12 +688,18 @@ class KernelCache:
             extents = ((cpg, "cpg"), (cpg, "cpg"), (kpg, "kpg"))
         gm = max(1, int(identity.group_merge))
         if gm > 1:
-            # A group-merged wgrad kernel (depthwise only) loads dY and X along
-            # the Gm merged channels; dW stays per group.
             ok, why = self._group_merge_fits(identity, problem, gm)
             if not ok:
                 return False, why
-            extents = ((kpg * gm, "kpg*Gm"), (cpg * gm, "cpg*Gm"), (cpg, "cpg"))
+            if identity.direction == "fwd":
+                # A group-merged fwd kernel (depthwise only) loads X and stores
+                # Y along the Gm merged channels; W stays per group (its merged
+                # load is per-element masked).
+                extents = ((cpg * gm, "cpg*Gm"), (cpg, "cpg"), (kpg * gm, "kpg*Gm"))
+            else:
+                # A group-merged wgrad kernel (depthwise only) loads dY and X
+                # along the Gm merged channels; dW stays per group.
+                extents = ((kpg * gm, "kpg*Gm"), (cpg * gm, "cpg*Gm"), (cpg, "cpg"))
         for field, (extent, name) in zip(
             ("vector_size_a", "vector_size_b", "vector_size_c"), extents
         ):
@@ -826,12 +840,13 @@ class KernelCache:
         kpg = int(getattr(problem, "kpg", 0))
         tm, tn = max(1, identity.tile_m), max(1, identity.tile_n)
         if identity.direction == "fwd":
+            gm = max(1, identity.group_merge)
             gy = -(-int(getattr(problem, "M", 0)) // tm)
-            gx = -(-kpg // tn)
+            gx = -(-(kpg * gm) // tn)
             axes = (
                 ("y", gy, f"M={getattr(problem, 'M', 0)} tile_m={tm}"),
-                ("x", gx, f"kpg={kpg} tile_n={tn}"),
-                ("z", groups, f"groups={groups}"),
+                ("x", gx, f"kpg*Gm={kpg * gm} tile_n={tn}"),
+                ("z", groups // gm, f"groups/Gm={groups // gm}"),
             )
         elif identity.direction == "wgrad":
             gm = max(1, identity.group_merge)
