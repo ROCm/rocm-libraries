@@ -577,11 +577,11 @@ def _torch_elementwise_ref(torch, op: str, A, B):
     if op == "mul":
         return a * B.to(rd)
     if op == "max":
-        return torch.maximum(a, B.to(rd))
+        return torch.fmax(a, B.to(rd))
     if op == "min":
-        return torch.minimum(a, B.to(rd))
+        return torch.fmin(a, B.to(rd))
     if op == "relu":
-        return torch.relu(a)
+        return torch.fmax(a, torch.zeros_like(a))
     if op == "silu":
         return a * torch.sigmoid(a)
     if op == "neg":
@@ -1121,9 +1121,9 @@ def run_row_config(cfg: RowCfg, arch: str = "gfx950") -> NumericResult:
         if cfg.op == "sum":
             ref = x_ref.sum(dim=-1)
         elif cfg.op == "max":
-            ref = x_ref.max(dim=-1).values
+            ref = torch.fmax(x_ref, torch.full_like(x_ref, float("-inf"))).amax(dim=-1)
         elif cfg.op == "min":
-            ref = x_ref.min(dim=-1).values
+            ref = torch.fmin(x_ref, torch.full_like(x_ref, float("inf"))).amin(dim=-1)
         elif cfg.op == "mean":
             ref = x_ref.mean(dim=-1)
         else:  # pragma: no cover
