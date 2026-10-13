@@ -47,6 +47,7 @@ list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake
 
 option(HIPKERNELPROVIDER_ENABLE_TESTS "Build tests" ON)
 option(HIPKERNELPROVIDER_ENABLE_ROCKE "Build rocKE engine and smoke tests" OFF)
+option(HIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS "Fail configure, instead of warning, when a DVC-stored rocKE descriptor is not pulled" OFF)
 
 # Gates the generic kernel ingestor. The ingestor engine compiles its kernel
 # through the HIP kernel engine's compiler, so it only builds alongside that engine.
@@ -343,8 +344,10 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
 
     # Large rocKE bundle files (KDPs, kernel objects) are DVC outputs: a file with a
     # <file>.dvc pointer, or a folder with a <folder>.dvc pointer. With ENABLE_ROCKE ON,
-    # fail configure if one is missing or differs from its pointer (file size, or folder
-    # file count). Only the root this build packs from is checked.
+    # warn when one is missing or differs from its pointer (file size, or folder file
+    # count) so the shipped bundle is not silently left out; tests still configure and
+    # run. REQUIRE_DVC_DESCRIPTORS turns the warning into an error for release builds.
+    # Only the root this build packs from is checked.
     if(HIPKERNELPROVIDER_ENABLE_ROCKE)
         if(HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT)
             set(_rocke_root "${HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT}")
@@ -370,11 +373,16 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                 endif()
             endif()
             if(NOT _expected OR NOT _actual EQUAL _expected)
-                message(FATAL_ERROR
+                if(HIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS)
+                    set(_level FATAL_ERROR)
+                else()
+                    set(_level WARNING)
+                endif()
+                message(${_level}
                     "hip-kernel-provider: rocKE DVC output ${_output} is missing or "
                     "incomplete (found ${_actual}, expected ${_expected}; bytes for a "
-                    "file, file count for a folder).\n"
-                    "Run: dvc pull -r ingestor ${_pointer}")
+                    "file, file count for a folder). The shipped rocKE bundle will NOT "
+                    "be packed. Run: dvc pull -r ingestor ${_pointer}")
             endif()
         endforeach()
     endif()

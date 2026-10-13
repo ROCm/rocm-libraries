@@ -200,10 +200,10 @@ jobs:
           test "$count" -gt 0 || { echo "dvc pull produced no golden blobs" >&2; exit 1; }
           echo "Fetched $count golden tensor blob(s)"
 
-      # HIPKERNELPROVIDER_ENABLE_ROCKE=ON with the default production root: configure
-      # fails unless the DVC-stored rocKE descriptors (the KDPs) are on disk. Each
-      # pointer names the `ingestor` remote, so a bare pull resolves it. Must precede
-      # configure, which checks the files exist.
+      # HIPKERNELPROVIDER_ENABLE_ROCKE=ON with the default production root: pull the
+      # DVC-stored rocKE descriptors (the KDPs). Each pointer names the `ingestor`
+      # remote, so a bare pull resolves it. Configure sets REQUIRE_DVC_DESCRIPTORS=ON,
+      # so a missing file fails it instead of silently dropping the bundle.
       - name: Fetch rocKE descriptors
         run: |
           set -euo pipefail
@@ -226,6 +226,7 @@ jobs:
             -DGPU_TARGETS="$GPU_TARGET" \
             -DROCM_LIBS_ENABLE_ROOT_CTEST=ON \
             -DENABLE_CLANG_FORMAT=OFF \
+            -DHIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS=ON \
             -DHIPKERNELPROVIDER_ENABLE_ROCKE=ON \
             -DHIPDNN_ENABLE_CUDNN_COMPATIBILITY=ON \
             -DHIPDNN_ENABLE_KERNEL_INGESTOR=ON \

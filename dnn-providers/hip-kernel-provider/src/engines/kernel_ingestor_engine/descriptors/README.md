@@ -90,11 +90,13 @@ The small descriptors name each other by id, not by path, so moving a KDP needs 
 
 - **Fetch:** TheRock's `fetch_sources.py` pulls every `*.dvc` pointer. By hand:
   `dvc pull -r ingestor <path-to-pointer>.dvc`.
-- **`HIPKERNELPROVIDER_ENABLE_ROCKE=ON`:** configure fails if a DVC output is missing or
-  differs from its pointer (file size, or file count for a folder), and prints the
-  `dvc pull` command. It checks only the root
-  the build packs from, so a `HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT` override does not
-  need these files.
+- **`HIPKERNELPROVIDER_ENABLE_ROCKE=ON`:** if a DVC output is missing or differs from its
+  pointer (file size, or file count for a folder), configure prints a warning and the
+  shipped bundle is not packed. Builds and tests still run, so a build without a `dvc pull`
+  works, for example a shallow clone or an ASAN run. The warning prints the `dvc pull`
+  command. A build that sets `HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT` elsewhere is not
+  checked. Set `-DHIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS=ON` (default OFF) to make this
+  an error. Release builds should set it.
 - **`OFF`:** rocKE descriptors are not consumed. DVC is not needed.
 
 ### Adding or changing a large file
