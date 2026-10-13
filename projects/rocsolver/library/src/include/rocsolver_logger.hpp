@@ -130,8 +130,8 @@ ROCSOLVER_BEGIN_NAMESPACE
         bool const isvalid_config = (isvalid_grid && isvalid_block);                                 \
         if(!isvalid_config)                                                                          \
         {                                                                                            \
-            std::cerr << "Invalid launch configuration: " std::cerr << "grid( " << grid_.x << ", "   \
-                      << grid_.y << ", " << grid_.z << " )"                                          \
+            std::cerr << "Error: invalid launch configuration: " std::cerr << "grid( " << grid_.x    \
+                      << ", " << grid_.y << ", " << grid_.z << " )"                                  \
                       << "\n";                                                                       \
             std::cerr << "block( " << block_.x << ", " << block_.y << ", " << block_.z << " ) "      \
                       << "\n";                                                                       \
