@@ -312,6 +312,7 @@ inline void setRocisaToArchMap(GpuArch& registry) {
         {"VMaxI32", "v_max_i32"},
         {"VMed3I32", "v_med3_i32"},
         {"VMed3F32", "v_med3_f32"},
+        {"VMaximumMinimumF32", "v_maximumminimum_f32"},
         {"VMinF16", "v_min_f16"},
         {"VMinF32", "v_min_f32"},
         {"VMinF64", "v_min_f64"},
