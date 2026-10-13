@@ -18,7 +18,7 @@ import unittest
 
 import numpy as np
 
-from rocke.numeric.references import dense_attention_reference
+from rocke.numeric.references import _keep_mask, dense_attention_reference, keep
 
 
 def _independent_attention(Q, K, V, *, causal, scale=None):
@@ -113,6 +113,66 @@ class TestDenseAttentionReference(unittest.TestCase):
         self.assertEqual(ref16.dtype, np.float16)
         # The fp16 output is exactly the fp32 result cast down.
         self.assertTrue(np.array_equal(ref16, ref32.astype(np.float16)))
+
+
+def _hipdnn_is_masked(sq, skv, seq_q, seq_kv, left, right, top_left):
+    """Transliteration of hipDNN's ``CpuFpReferenceSdpa::isMasked`` (C++)."""
+    offset = 0 if top_left else seq_kv - seq_q
+    if right >= 0 and skv >= sq + 1 + offset + right:
+        return True
+    if left >= 0 and skv < sq + offset - left:
+        return True
+    return False
+
+
+class TestKeep(unittest.TestCase):
+    BOUNDS = (-1, 0, 1, 3)
+
+    def _grid(self):
+        for s_q in range(1, 9):
+            for s_kv in range(1, 9):
+                for diagonal in ("top_left", "bottom_right"):
+                    for left in self.BOUNDS:
+                        for right in self.BOUNDS:
+                            yield s_q, s_kv, diagonal, left, right
+
+    def test_matches_hipdnn_is_masked_exhaustively(self):
+        for s_q, s_kv, diagonal, left, right in self._grid():
+            for q in range(s_q):
+                for k in range(s_kv):
+                    want = not _hipdnn_is_masked(
+                        q, k, s_q, s_kv, left, right, diagonal == "top_left"
+                    )
+                    got = keep(q, k, s_q, s_kv, diagonal, left, right)
+                    self.assertEqual(
+                        got, want, (q, k, s_q, s_kv, diagonal, left, right)
+                    )
+
+    def test_mask_grid_agrees_with_keep(self):
+        for s_q, s_kv, diagonal, left, right in self._grid():
+            grid = _keep_mask(s_q, s_kv, diagonal, left, right)
+            want = np.array(
+                [
+                    [keep(q, k, s_q, s_kv, diagonal, left, right) for k in range(s_kv)]
+                    for q in range(s_q)
+                ]
+            )
+            np.testing.assert_array_equal(grid, want)
+
+    def test_known_shapes(self):
+        # Causal top-left keeps the lower triangle; bottom-right on a 2x4
+        # problem shifts the diagonal right by s_kv - s_q = 2.
+        tl = _keep_mask(3, 3, "top_left", -1, 0)
+        np.testing.assert_array_equal(tl, np.tril(np.ones((3, 3), dtype=bool)))
+        br = _keep_mask(2, 4, "bottom_right", -1, 0)
+        np.testing.assert_array_equal(br, [[1, 1, 1, 0], [1, 1, 1, 1]])
+        # left_bound = W keeps W + 1 keys: one more than rocKE's dist < W window.
+        window = _keep_mask(6, 6, "top_left", 2, 0)
+        self.assertEqual(window.sum(axis=1).max(), 3)
+
+    def test_rejects_unknown_diagonal(self):
+        with self.assertRaises(ValueError):
+            keep(0, 0, 1, 1, "center", -1, -1)
 
 
 if __name__ == "__main__":
