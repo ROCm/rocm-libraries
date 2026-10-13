@@ -1449,6 +1449,28 @@ namespace
         EXPECT_EQ(out.find("cache-miss"), std::string::npos) << out;
     }
 
+    // A matmul-only caller never makes the heuristic query that reports a mode
+    // set without a path, so its own call has to explain why nothing is tuned.
+    TEST_F(TuningTune_pre_checkin, NullAlgoWithoutPathReportsWhyNothingIsTuned)
+    {
+        if(!loggingEnvIsClean())
+            GTEST_SKIP() << "external logging environment redirects tuning output";
+
+        enterModeForLogging("tune", "");
+
+        std::string out;
+        {
+            CerrCapture capture;
+            int         launched = -1;
+            ASSERT_TRUE(runGemmWith(256, 256, 256, AlgoFrom::Null, -1, &launched));
+            out = capture.str();
+        }
+
+        EXPECT_NE(out.find("load=no-path"), std::string::npos) << out;
+        EXPECT_EQ(out.find("tuning-start"), std::string::npos) << out;
+        EXPECT_EQ(counters().attempts, 0u);
+    }
+
     // A skip records no winner, so the shape stays uncached and the whole attempt
     // runs again on the next matmul. Unbounded, that is a line per call.
     TEST_F(TuningTune_pre_checkin, RepeatedSkipReportsItsReasonOnce)

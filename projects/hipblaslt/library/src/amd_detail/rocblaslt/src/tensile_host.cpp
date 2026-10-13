@@ -5053,6 +5053,11 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
                            && prob.batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY;
         const bool tunes = keyed && tuning.writes() && !streamIsCapturing(prob.stream);
 
+        // A mode set without a path is otherwise reported by the heuristic
+        // query, which a matmul-only caller never makes.
+        if(tuning.mode() != TensileLite::TuningMode::Off && tuning.cachePath().empty())
+            TensileLite::announceTuningModeOnce(TensileLite::TuningLoadStatus::NoPath);
+
         // Built by whichever of replay and the tuner needs it first.
         std::optional<TensileLite::ProblemOverride> tuningKey;
 

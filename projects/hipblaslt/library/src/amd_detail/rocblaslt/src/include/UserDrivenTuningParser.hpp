@@ -273,11 +273,11 @@ namespace TensileLite
     void recordTuningLookup(const ProblemOverride& key, bool matched);
 
     /**
-     * True only the first time this key's entry at this index is rejected. The
+     * True only the first time this key's entry identity is rejected. The
      * heuristic lookup, the execution path and the recheck under the tuning lock
      * can all meet one stale row, and it is still one rejected entry.
      */
-    bool recordTuningInvalidation(const ProblemOverride& key, int solutionIndex);
+    bool recordTuningInvalidation(const ProblemOverride& key, const TunedEntry& entry);
 
     /**
      * Note that this process will not search this problem again, and ask

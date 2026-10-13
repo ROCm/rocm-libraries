@@ -224,7 +224,7 @@ namespace
             return true;
 
         auto& counters = TensileLite::TuningCounters::instance();
-        if(TensileLite::recordTuningInvalidation(key, entry.solutionIndex))
+        if(TensileLite::recordTuningInvalidation(key, entry))
             counters.invalidated++;
 
         // Replay meets a stale row on every call for its shape, so cache mode
@@ -250,6 +250,29 @@ namespace
         return false;
     }
 
+    void log_lookup(const char*                         func,
+                    const TensileLite::ProblemOverride& key,
+                    bool                                matched,
+                    int                                 index)
+    {
+        if(override_file_in_play())
+        {
+            if(matched)
+                log_info(func, "Find solution with index: " + std::to_string(index));
+            else
+                log_info(func, "No valid solution index found in override file.");
+        }
+        else if(TensileLite::shouldLogTuningKeyEvent(matched ? TensileLite::TuningKeyEvent::Hit
+                                                             : TensileLite::TuningKeyEvent::Miss,
+                                                     key))
+        {
+            if(matched)
+                log_info(func, "tuning-cache: cache-hit index=" + std::to_string(index));
+            else
+                log_info(func, "tuning-cache: cache-miss, no valid entry for this problem");
+        }
+    }
+
     /**
      * Count a lookup and report its result: in the override file's historical
      * wording with no tuning mode set, and once per key in cache mode, where
@@ -267,22 +290,7 @@ namespace
             counters.misses++;
         TensileLite::recordTuningLookup(key, matched);
 
-        if(override_file_in_play())
-        {
-            if(matched)
-                log_info(func, "Find solution with index: " + std::to_string(index));
-            else
-                log_info(func, "No valid solution index found in override file.");
-        }
-        else if(TensileLite::shouldLogTuningKeyEvent(matched ? TensileLite::TuningKeyEvent::Hit
-                                                             : TensileLite::TuningKeyEvent::Miss,
-                                                     key))
-        {
-            if(matched)
-                log_info(func, "tuning-cache: cache-hit index=" + std::to_string(index));
-            else
-                log_info(func, "tuning-cache: cache-miss, no valid entry for this problem");
-        }
+        log_lookup(func, key, matched, index);
     }
 
     /**
@@ -321,7 +329,10 @@ bool problem_override_from_file(rocblaslt_handle&                 handle,
             TensileLite::recordTuningLookup(RocblasltContractionProblem2ProblemOverride(problem),
                                             false);
 
-        log_info(__func__, "No valid entries found in override file.");
+        if(override_file_in_play())
+            log_info(__func__, "No valid entries found in override file.");
+        else
+            log_lookup(__func__, RocblasltContractionProblem2ProblemOverride(problem), false, -1);
     }
     else
     {
@@ -424,7 +435,10 @@ bool problem_override_from_file_cpp(
         TensileLite::TuningCounters::instance().misses++;
         TensileLite::recordTuningLookup(TensileDataGemm2ProblemOverride(gemmData), false);
 
-        log_info(__func__, "No valid entries found in override file.");
+        if(override_file_in_play())
+            log_info(__func__, "No valid entries found in override file.");
+        else
+            log_lookup(__func__, TensileDataGemm2ProblemOverride(gemmData), false, -1);
     }
     else
     {
@@ -692,6 +706,7 @@ int tuning_cache_replay(rocblaslt_handle                    handle,
     if(told < tally)
         TensileLite::recordTuningLookup(key, index >= 0);
 
+    log_lookup(__func__, key, index >= 0, index);
     return index;
 }
 
