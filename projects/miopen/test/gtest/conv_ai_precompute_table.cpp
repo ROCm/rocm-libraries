@@ -42,6 +42,7 @@
 #include <miopen/conv/heuristics/ai_candidate_selection.hpp>
 #include <miopen/db_path.hpp>
 #include <miopen/filesystem.hpp>
+#include <miopen/md5.hpp>
 
 #include "gtest_common.hpp" // ScopedEnvironment, MIOPEN_LIB_ENV_VAR
 
@@ -99,6 +100,7 @@ struct ParsedTable
 {
     bool ok               = false;
     std::uint32_t key_dim = 0, emb_dim = 0, num_rows = 0;
+    std::string enc_md5; // v2: embedded 32-char config-encoder md5 (empty for v1)
     std::vector<std::vector<float>> keys, embs; // fp32
 };
 
@@ -119,9 +121,16 @@ ParsedTable ParseTable(const std::string& path)
     g(nr);
     g(kdt);
     g(edt);
-    if(!is.good() || std::memcmp(magic, "MICE", 4) != 0 || ver != 1 || kdt != 0 || edt != 0 ||
-       kd == 0 || ed == 0)
+    if(!is.good() || std::memcmp(magic, "MICE", 4) != 0 || (ver != 1 && ver != 2) || kdt != 0 ||
+       edt != 0 || kd == 0 || ed == 0)
         return p;
+    if(ver == 2)
+    {
+        p.enc_md5.resize(32);
+        is.read(p.enc_md5.data(), 32);
+        if(!is.good())
+            return p;
+    }
     p.key_dim  = kd;
     p.emb_dim  = ed;
     p.num_rows = nr;
@@ -176,6 +185,21 @@ TEST_P(CPU_PrecomputeTable_NONE, FormatAndLookup)
     ASSERT_TRUE(pt.ok) << "malformed table or size mismatch: " << path;
     EXPECT_EQ(pt.emb_dim, 64u);
     EXPECT_GT(pt.num_rows, 0u);
+
+    // v2 drift guard: the table must be bound to the config encoder it was generated from. A
+    // retrained encoder without a regenerated table is caught here, and fails closed to the fdeep
+    // path at runtime (GetConfigEmbeddingTable rejects the table on an md5 mismatch).
+    ASSERT_EQ(pt.enc_md5.size(), 32u) << "table missing v2 encoder hash: " << path;
+    const auto enc_path =
+        (miopen::GetSystemDbPath() / (t.arch + "_" + t.solver + "_kernel_config_encoder.tn.model"))
+            .string();
+    ASSERT_TRUE(miopen::fs::exists(enc_path)) << "config encoder missing: " << enc_path;
+    std::ifstream enc(enc_path, std::ios::binary | std::ios::ate);
+    std::string enc_bytes(static_cast<std::size_t>(enc.tellg()), '\0');
+    enc.seekg(0, std::ios::beg);
+    enc.read(enc_bytes.data(), static_cast<std::streamsize>(enc_bytes.size()));
+    EXPECT_EQ(pt.enc_md5, miopen::md5(enc_bytes))
+        << "embedded encoder md5 does not match installed encoder: " << path;
 
     // Feed a handful of real keys from the file back through the loader; expect the exact stored
     // fp32 embedding (the keys are the raw EncodeKernelParams bytes, so this is a true lookup).

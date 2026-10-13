@@ -32,6 +32,7 @@
 //   4. Kernel tuning AI models (sequential prediction of kernel parameters)
 
 #include <miopen/conv/heuristics/ai_heuristics.hpp>
+#include <miopen/md5.hpp>
 #if MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK
 #include <miopen/conv/heuristics/lgbm_pick.hpp>
 #include <miopen/any_solver.hpp>
@@ -1796,6 +1797,17 @@ const ConfigEmbeddingTable& GetConfigEmbeddingTable(const std::string& arch,
         get(num_rows);
         get(key_dtype);
         get(emb_dtype);
+        // v2 appends a 32-char lowercase-hex md5 of the config-encoder model the table was
+        // generated from. A table whose embedded hash does not match the installed encoder is
+        // ignored (fail closed to the fdeep path) rather than dotting embeddings from a different
+        // training run. v1 (no hash) is still accepted for backward compatibility.
+        std::string table_enc_md5;
+        if(version == 2)
+        {
+            table_enc_md5.resize(32);
+            is.read(table_enc_md5.data(), 32);
+        }
+        const std::uint32_t header_bytes = (version == 2) ? 60u : 28u;
         // Only the format this build understands: fp32 keys and fp32 embeddings. Validate the
         // header against the actual file size before trusting num_rows, so a corrupt count cannot
         // drive a huge reserve/allocation.
@@ -1803,10 +1815,36 @@ const ConfigEmbeddingTable& GetConfigEmbeddingTable(const std::string& arch,
                                         static_cast<std::uint64_t>(emb_dim) * sizeof(float);
         is.seekg(0, std::ios::end);
         const std::uint64_t file_size = is ? static_cast<std::uint64_t>(is.tellg()) : 0;
-        is.seekg(28, std::ios::beg);
-        const bool header_ok = is.good() && std::memcmp(magic, "MICE", 4) == 0 && version == 1 &&
-                               key_dtype == 0 && emb_dtype == 0 && key_dim > 0 && emb_dim > 0 &&
-                               file_size == 28 + static_cast<std::uint64_t>(num_rows) * row_bytes;
+        is.seekg(header_bytes, std::ios::beg);
+        bool header_ok = is.good() && std::memcmp(magic, "MICE", 4) == 0 &&
+                         (version == 1 || version == 2) && key_dtype == 0 && emb_dtype == 0 &&
+                         key_dim > 0 && emb_dim > 0 &&
+                         file_size == header_bytes + static_cast<std::uint64_t>(num_rows) * row_bytes;
+        // Fail closed when a v2 table was built from a different config encoder than the one
+        // installed (model retrained but the table not regenerated).
+        if(header_ok && version == 2)
+        {
+            const auto enc_path =
+                (GetSystemDbPath() / (arch + "_" + solver + "_kernel_config_encoder.tn.model"))
+                    .string();
+            std::ifstream enc(enc_path, std::ios::binary | std::ios::ate);
+            std::string enc_bytes;
+            if(enc.good())
+            {
+                const std::streamoff enc_sz = enc.tellg();
+                enc_bytes.resize(static_cast<std::size_t>(enc_sz));
+                enc.seekg(0, std::ios::beg);
+                enc.read(enc_bytes.data(), static_cast<std::streamsize>(enc_sz));
+            }
+            if(enc_bytes.empty() || miopen::md5(enc_bytes) != table_enc_md5)
+            {
+                MIOPEN_LOG_W("Config embedding table "
+                             << path
+                             << " does not match the installed config encoder (md5 mismatch); "
+                                "ignoring table, using fdeep fallback");
+                header_ok = false;
+            }
+        }
         if(header_ok)
         {
             table.key_dim = key_dim;
