@@ -5,9 +5,11 @@
 
 #include <array>
 #include <cassert>
+#include <complex>
 #include <cstddef>
 #include <cstdint>
 #include <string_view>
+#include <type_traits>
 
 namespace roc::hostnumerics {
 enum class ScalarCategory : uint8_t {
@@ -171,5 +173,78 @@ inline constexpr const ScalarTypeInfo& scalarTypeInfo(ScalarType type) {
 inline constexpr std::string_view scalarTypeName(ScalarType type) {
     return scalarTypeInfo(type).name;
 }
+
+namespace detail {
+// Implementation of the native mapping, not a customization point.
+template <typename T>
+struct NativeScalarType;
+
+template <>
+struct NativeScalarType<bool> {
+    static constexpr ScalarType value = ScalarType::Boolean;
+};
+template <>
+struct NativeScalarType<uint8_t> {
+    static constexpr ScalarType value = ScalarType::UInt8;
+};
+template <>
+struct NativeScalarType<int8_t> {
+    static constexpr ScalarType value = ScalarType::Int8;
+};
+template <>
+struct NativeScalarType<uint16_t> {
+    static constexpr ScalarType value = ScalarType::UInt16;
+};
+template <>
+struct NativeScalarType<int16_t> {
+    static constexpr ScalarType value = ScalarType::Int16;
+};
+template <>
+struct NativeScalarType<uint32_t> {
+    static constexpr ScalarType value = ScalarType::UInt32;
+};
+template <>
+struct NativeScalarType<int32_t> {
+    static constexpr ScalarType value = ScalarType::Int32;
+};
+template <>
+struct NativeScalarType<uint64_t> {
+    static constexpr ScalarType value = ScalarType::UInt64;
+};
+template <>
+struct NativeScalarType<int64_t> {
+    static constexpr ScalarType value = ScalarType::Int64;
+};
+template <>
+struct NativeScalarType<float> {
+    static constexpr ScalarType value = ScalarType::Float32;
+};
+template <>
+struct NativeScalarType<double> {
+    static constexpr ScalarType value = ScalarType::Float64;
+};
+template <>
+struct NativeScalarType<std::complex<float>> {
+    static constexpr ScalarType value = ScalarType::ComplexFloat32;
+};
+template <>
+struct NativeScalarType<std::complex<double>> {
+    static constexpr ScalarType value = ScalarType::ComplexFloat64;
+};
+}  // namespace detail
+
+// Tests whether a C++ type has a native mapping, ignoring cv/ref qualifiers.
+// Integer mappings use the fixed-width aliases (int8_t through uint64_t), whose
+// underlying types vary by platform. Use int64_t rather than long or long long
+// for portable callers. An integer type is mapped only if it is the same type
+// as one of those aliases; plain char is not mapped.
+// C++23's optional <stdfloat> types, including float16_t and bfloat16_t, are not mapped.
+template <typename T>
+concept NativeScalar = requires { detail::NativeScalarType<std::remove_cvref_t<T>>::value; };
+
+// Unsupported types fail the NativeScalar constraint at compile time.
+template <NativeScalar T>
+inline constexpr ScalarType nativeScalarType =
+    detail::NativeScalarType<std::remove_cvref_t<T>>::value;
 
 }  // namespace roc::hostnumerics
