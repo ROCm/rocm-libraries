@@ -1,6 +1,7 @@
 # Copyright Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
+import argparse
 import os
 import stat
 import sys
@@ -219,6 +220,23 @@ class QuickLabelTest(unittest.TestCase):
             self.assertIn("Passed", log)
             self.assertEqual(result["cases"][0]["status"], "passed")
             self.assertEqual(result["returncode"], 0)
+
+
+class RocjitsuArgParseTest(unittest.TestCase):
+    def test_option_like_value_is_attached(self):
+        argv = ci_parity_runner.attach_option_values(
+            ["--rocjitsu-arg", "--cpu-thread-budget=1", "--out", "out.json"],
+            "--rocjitsu-arg",
+        )
+        self.assertEqual(
+            argv,
+            ["--rocjitsu-arg=--cpu-thread-budget=1", "--out", "out.json"],
+        )
+        parser = argparse.ArgumentParser()
+        parser.add_argument("--rocjitsu-arg", action="append", default=[])
+        parser.add_argument("--out")
+        args = parser.parse_args(argv)
+        self.assertEqual(args.rocjitsu_arg, ["--cpu-thread-budget=1"])
 
 
 if __name__ == "__main__":

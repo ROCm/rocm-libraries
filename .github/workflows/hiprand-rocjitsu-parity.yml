@@ -205,7 +205,7 @@ jobs:
             --out parity/emu.json
           )
           if [ -n "$ROCJITSU_ARG" ]; then
-            common+=(--rocjitsu-arg "$ROCJITSU_ARG")
+            common+=(--rocjitsu-arg="$ROCJITSU_ARG")
           fi
           echo "ctest label: $CTEST_LABEL"
           if [ -n "$GTEST_FILTER" ]; then

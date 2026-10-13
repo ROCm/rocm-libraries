@@ -450,6 +450,25 @@ def build_env(rocm_root: str) -> dict:
     return env
 
 
+def attach_option_values(argv: list[str], option: str) -> list[str]:
+    """Bind the following token to ``option``, even when that token starts with ``--``.
+
+    ``--rocjitsu-arg --cpu-thread-budget=1`` otherwise makes argparse treat
+    ``--cpu-thread-budget=1`` as a new option and exit before any test runs.
+    """
+    joined = []
+    index = 0
+    while index < len(argv):
+        token = argv[index]
+        if token == option and index + 1 < len(argv):
+            joined.append(f"{option}={argv[index + 1]}")
+            index += 2
+            continue
+        joined.append(token)
+        index += 1
+    return joined
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--rocjitsu", required=True)
@@ -474,10 +493,10 @@ def main() -> int:
         "--rocjitsu-arg",
         action="append",
         default=[],
-        help="Extra rocJITsu option, inserted before --config. Repeat for more than one.",
+        help="Extra rocJITsu option, inserted before --config. Repeat for more than one. A value may start with --.",
     )
     parser.add_argument("--out", required=True)
-    args = parser.parse_args()
+    args = parser.parse_args(attach_option_values(sys.argv[1:], "--rocjitsu-arg"))
 
     if not args.ctest_label and not args.binary:
         parser.error("pass --ctest-label or at least one --binary")
