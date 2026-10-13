@@ -26,8 +26,9 @@ target_sources(hip_kernel_provider_impl PRIVATE
 # hipDNN's flatc flags. Resolve flatc in hipDNN's order: flatbuffers::flatc, then flatc, then
 # the FLATBUFFERS_FLATC_EXECUTABLE variables, then a search beside the FlatBuffers package.
 # Imported targets are visible only in the directory that found the package, so an
-# installed FlatBuffers usually resolves through the search. If no flatc resolves, keep the
-# committed header.
+# installed FlatBuffers usually resolves through the search. With the option ON, a missing
+# flatc or flags file is a configure error rather than a silent fall-back to the committed
+# header, which would otherwise go stale against an edited schema.
 block()
     set(HKP_INGESTOR_PLAN_SCHEMA "${CMAKE_CURRENT_SOURCE_DIR}/serialization/ingestor_plan.fbs")
     set(HKP_INGESTOR_PLAN_HEADER
@@ -66,8 +67,35 @@ block()
         endif()
     endif()
 
-    if(HIPKERNELPROVIDER_GENERATE_SERIALIZE_HEADERS AND NOT _hkp_flatc_command STREQUAL ""
-       AND EXISTS "${HKP_FLATC_FLAGS_FILE}")
+    if(NOT HIPKERNELPROVIDER_GENERATE_SERIALIZE_HEADERS)
+        message(STATUS
+            "hip-kernel-provider: HIPKERNELPROVIDER_GENERATE_SERIALIZE_HEADERS is OFF, using the "
+            "committed ${HKP_INGESTOR_PLAN_HEADER} as-is. Edits to "
+            "${HKP_INGESTOR_PLAN_SCHEMA} will not reach the build."
+        )
+    else()
+        if(_hkp_flatc_command STREQUAL "")
+            message(FATAL_ERROR
+                "hip-kernel-provider: HIPKERNELPROVIDER_GENERATE_SERIALIZE_HEADERS is ON but the "
+                "FlatBuffers compiler (flatc) could not be found. Install flatc alongside the "
+                "FlatBuffers package or set FLATBUFFERS_FLATC_EXECUTABLE. Without it "
+                "${HKP_INGESTOR_PLAN_HEADER} cannot be regenerated and would go stale against "
+                "${HKP_INGESTOR_PLAN_SCHEMA}. Set the option OFF to build against the committed "
+                "header deliberately."
+            )
+        endif()
+        if(NOT EXISTS "${HKP_FLATC_FLAGS_FILE}")
+            message(FATAL_ERROR
+                "hip-kernel-provider: HIPKERNELPROVIDER_GENERATE_SERIALIZE_HEADERS is ON but the "
+                "flatc flags file ${HKP_FLATC_FLAGS_FILE} does not exist. It is the single source "
+                "of truth for the generation flags, so without it "
+                "${HKP_INGESTOR_PLAN_HEADER} cannot be regenerated and would go stale against "
+                "${HKP_INGESTOR_PLAN_SCHEMA}. Check ROCM_LIBRARIES_ROOT "
+                "(\"${ROCM_LIBRARIES_ROOT}\") points at the repository root, or set the option "
+                "OFF to build against the committed header deliberately."
+            )
+        endif()
+
         file(STRINGS "${HKP_FLATC_FLAGS_FILE}" _hkp_flatc_flag_lines)
         set(_hkp_flatc_flags "")
         foreach(_hkp_line IN LISTS _hkp_flatc_flag_lines)
