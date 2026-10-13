@@ -143,7 +143,7 @@ file(COPY "${CMAKE_CURRENT_SOURCE_DIR}/integration-test-bundles/"
      DESTINATION "${CMAKE_BINARY_DIR}/lib/integration-test-bundles")
 
 # Optional dnn-benchmarking workload graphs. workloads/*.tar.gz.dvc pin archives
-# from the dnn-benchmarking repo; `dvc pull` (run in this directory) fetches
+# from the dnn-benchmarking repo; `dvc pull -R workloads` (run in this directory) fetches
 # them. Each pulled archive is extracted as plain graph .json files under the
 # bundle root (outside quick/standard/full), where discovery registers them as graph-only tests named
 # dnn_benchmarking_<archive>_<subdir>_<graph>. An archive whose top-level

@@ -303,7 +303,7 @@ call moves: a failure report is always built on the host from the read-back valu
 
 ```bash
 cd dnn-providers/integration-tests
-dvc pull workloads      # fetch the archives (gitignored)
+dvc pull -R workloads   # fetch the archives (gitignored)
 cmake ...               # re-run configure; archives are extracted into the build tree
 ./bin/hipdnn_integration_tests --gtest_filter='dnn_benchmarking_*'
 ```
