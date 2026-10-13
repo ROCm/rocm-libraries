@@ -5434,21 +5434,18 @@ class LogicalScheduler:
         self._plsinRelaxDrainStoreWaits(woven)
         return woven, units[idx:]
 
-    def _weaveStagedDrainIntoPartition(self, partModule, units, label):
-        """Scatter partition p's drain through partition p+1's MFMAs.
+    def _weaveDrainAcrossMfmas(self, partModule, units, name, relaxWaits):
+        """Scatter a drain's store units one-per-gap through partModule's MFMAs.
 
-        Issuing the drain as one block after p (which is what the staged store did
-        on its own) leaves every accvgpr_read and cvt_pk exposed; spreading it one
-        store-unit per gap puts that VALU work in the MFMA issue shadows instead,
-        which is the interleave the reference kernel gets from its own block drain.
+        The shared body of the two stride-paced weaves below. A drain issued as one
+        block leaves every accvgpr_read and cvt_pk exposed; spread across the MFMAs
+        that same VALU work rides in their issue shadows, which is the interleave
+        the reference kernel gets from its own block drain.
 
-        The partition boundary does NOT make this unconditionally safe. Partition p
-        owning a disjoint set of D tiles would put its accumulators out of reach of
-        p+1, but the drain handed over here is not clipped to p's tiles: on
-        MT128x128x512 (MIWaveTile 4x4) it reads a0-a63 while p+1 accumulates into
-        a32-a63, so a third of the drain reads registers p+1 is still writing. The
-        same RAW/WAR bars the last-partition weave computes therefore apply across
-        partitions too, and a unit that never clears its bar stays in order.
+        Each unit is pinned behind the RAW/WAR bar _plsinDrainReadyBars computes
+        for it, and units that never clear their bar stay in order at the end.
+        Returns None, leaving the caller's module untouched, if the drain cannot be
+        placed at all.
         """
         from rocisa.code import Module
         from rocisa.instruction import MFMAInstruction, MXMFMAInstruction
@@ -5463,10 +5460,11 @@ class LogicalScheduler:
 
         # Pace against the MFMAs a unit may actually occupy: everything ahead of the
         # first unit's bar is still finalizing that unit's accumulators, so pacing
-        # against the full count spends the budget on gaps no unit can take.
+        # against the full count spends the budget on gaps no unit can take and
+        # strands the rest of the drain past the last MFMA.
         usable = sum(1 for i in mfmaPos if i > readyAfter[0])
         stride = max(1, usable // len(units))
-        woven = Module(f"{label}_stagedrain")
+        woven = Module(name)
         idx = 0
         sinceLast = 0
         for i, inst in enumerate(flat):
@@ -5484,8 +5482,22 @@ class LogicalScheduler:
                 woven.add(item)
         if not idx:
             return None
-        self._plsinRelaxDrainStoreWaits(woven)
+        if relaxWaits:
+            self._plsinRelaxDrainStoreWaits(woven)
         return woven
+
+    def _weaveStagedDrainIntoPartition(self, partModule, units, label):
+        """Scatter partition p's drain through partition p+1's MFMAs.
+
+        The partition boundary does NOT make this unconditionally safe. Partition p
+        owning a disjoint set of D tiles would put its accumulators out of reach of
+        p+1, but the drain handed over here is not clipped to p's tiles: on
+        MT128x128x512 (MIWaveTile 4x4) it reads a0-a63 while p+1 accumulates into
+        a32-a63, so a third of the drain reads registers p+1 is still writing. The
+        bars therefore apply across partitions just as they do within one.
+        """
+        return self._weaveDrainAcrossMfmas(partModule, units, f"{label}_stagedrain",
+                                           relaxWaits=True)
 
     def _weaveLastPartitionDrain(self, partModule, units, label, absRowAddr):
         """Scatter the LAST partition's drain through its own trailing MFMAs.
@@ -5502,66 +5514,24 @@ class LogicalScheduler:
         pinned behind the same bars the cross-partition weave uses; units that never
         clear their bar stay in order at the end.
         """
-        from rocisa.code import Module
-        from rocisa.instruction import MFMAInstruction, MXMFMAInstruction
-
         # Reordering the drain is only safe where a store's address does not depend
         # on how many stores ran before it. Elsewhere D is reached through the SrdD
         # cursor, which the row advances walk forward in issue order, so moving a
         # unit moves the rows it writes -- that was the miscompare this used to
-        # carry. Absolute row addressing removes the dependence, and it is scoped to
-        # block-scheduled tiles, so this follows the same scope.
-        # Still opt-in: absolute addressing, which this depends on, does not yet
-        # cover the bias store path -- see the note there.
-        if not self.config.blockSched:
+        # carry. Absolute row addressing removes that dependence and is scoped to
+        # block-scheduled tiles, so this follows the same scope; it also drops out
+        # for kernels whose co-stores keep their own cursor, which is why both are
+        # asked here rather than inferred from one another.
+        if not self.config.blockSched or not absRowAddr:
             return None
-        # Reordering the drain is only safe once the rows are absolute; that gate
-        # also drops out for kernels whose co-stores keep their own cursor, so
-        # asking it here keeps the two from drifting apart.
-        if not absRowAddr:
-            return None
-        flat = list(partModule.flatitems())
-        mfmaPos = [i for i, inst in enumerate(flat)
-                   if isinstance(inst, (MFMAInstruction, MXMFMAInstruction))]
-        if not units or not mfmaPos:
-            return None
-
-        readyAfter = self._plsinDrainReadyBars(flat, mfmaPos, units)
-        if readyAfter is None:
-            return None
-
-        woven = Module(f"{label}_lastdrain")
-        # Space the units over the MFMAs that can actually take one. Everything
-        # ahead of the first unit's bar is still finalizing that unit's own
-        # accumulators, so pacing against the full MFMA count spends most of the
-        # budget on gaps no unit is allowed to occupy and strands the rest of the
-        # drain past the last MFMA -- exactly the exposure this is undoing.
-        usable = sum(1 for i in mfmaPos if i > readyAfter[0])
-        stride = max(1, usable // len(units))
-        idx = 0
-        sinceLast = 0
-        for i, inst in enumerate(flat):
-            woven.add(inst)
-            if not isinstance(inst, (MFMAInstruction, MXMFMAInstruction)):
-                continue
-            sinceLast += 1
-            if idx < len(units) and sinceLast >= stride and readyAfter[idx] < i:
-                for item in units[idx]:
-                    woven.add(item)
-                idx += 1
-                sinceLast = 0
-        for unit in units[idx:]:
-            for item in unit:
-                woven.add(item)
-        if not idx:
-            return None
-        # No _plsinRelaxDrainStoreWaits here. It raises vscnt by the stores seen
-        # since the last global load, and this module has already been through it
-        # once for the previous partition's drain; a second pass adds that count on
-        # top of its own result and relaxes the partition's load waits past the
-        # loads they exist to cover. These stores therefore keep counting against
-        # the partition's vmcnt, which costs cover but cannot lose a load.
-        return woven
+        # relaxWaits is off: it raises vscnt by the stores seen since the last
+        # global load, and this module has already been through it once for the
+        # previous partition's drain. A second pass would add that count on top of
+        # its own result and relax the partition's load waits past the loads they
+        # exist to cover. These stores therefore keep counting against the
+        # partition's vmcnt, which costs cover but cannot lose a load.
+        return self._weaveDrainAcrossMfmas(partModule, units, f"{label}_lastdrain",
+                                           relaxWaits=False)
 
     def _weaveStoreInitIntoLoop(self, loopModule, units, label):
         """Step 4 store-init hoist: scatter the fused store's branch/memory-free SrdD
@@ -5660,116 +5630,85 @@ class LogicalScheduler:
         module.add(writer.emitFusedStoreGuard(kernel, plainLabel, longBranch=True))
         return module
 
-    def emitMainAndExitLoops(self, writer, kernel, tensorParametersA=None, tensorParametersB=None):
-        """Emit preloop + mainloop + NGLL + NLL exit paths (no tail).
+    def _buildFourDeepTailEntry(self, writer, kernel, nll_ft_3d):
+        """Build the four-deep tail body's entry wait, barrier and LR prime.
 
-        Owns all control flow (labels, branches, counter management) for the
-        main unrolled pipeline. For unroll_factor > 1, emits per-unroll copies
-        with correct vgpr tiles. Each mainloop exit jumps to its corresponding
-        NGLL→NLL pair. The tail loop is emitted separately by emitTailLoop()
-        so the orchestrator (Subtile.Kernel.mainLoop) can wrap it with the
-        runtime K%DU counter setup and skip branch.
+        Returned rather than emitted: it is that body's entry sequence, so it has
+        to sit behind the fused guard with the body it serves. The plain arm keeps
+        the baseline NGLL/NLL pair's own sync. Also installs the mid-body sync for
+        the in-flight half when the entry wait is split.
+        """
+        from rocisa.code import Module
+
+        # The four-deep body issues no global reads, so its own schedule
+        # sees nothing in flight and places no drain. What is in flight
+        # belongs to the mainloop: offsetPartition == numPartitions puts
+        # every load two macro tiles ahead, which is the half of LDS this
+        # body reads second -- and it reaches that half in partition 0,
+        # ahead of every wait it does have. The split pair never needed
+        # this, because the NGLL stood between the loads and the NLL that
+        # read them.
+        #
+        # The count is how many of those loads may stay in flight past the
+        # barrier, and _tailEntryInflightBound derives it.
+        from rocisa.instruction import SWaitCnt, SBarrier
+        self._tail_uid_sync_slot = self._tailUidSyncSlot(nll_ft_3d)
+        # Split entry: give the in-flight half its own wait and barrier at
+        # the first read that touches it, so the entry wait only has to
+        # cover the resident half. That turns the entry vmcnt(0) the
+        # profile charges 354 cycles per wave into a vmcnt(18) charged 28,
+        # and the second wait it pays for costs 73 -- tail vmcnt stall
+        # falls from 91.7k cycles to 42.4k. Throughput is unchanged
+        # (1.001x geomean over 11 shapes): the arm is MFMA-bound, so the
+        # recovered cycles land back on the critical path. A bounded wait
+        # is the correct shape for a half the barrier already covers.
+        splitWait = self._tail_uid_sync_slot is not None
+        entryVmcnt = (self._tailEntryResidentBound() if splitWait
+                      else self._tailEntryInflightBound())
+        # Collected rather than emitted: this is the four-deep body's entry
+        # sequence, so it belongs behind the fused guard with the body it
+        # serves. The plain arm keeps the baseline pair's own sync.
+        tailPrelude = Module("FourDeepTailEntry")
+        tailPrelude.add(SWaitCnt(vlcnt=entryVmcnt, dscnt=-1, vscnt=-1,
+                            comment="four-deep tail: retire the mainloop's"
+                                    " loads before reading what they wrote"))
+        tailPrelude.add(SBarrier(comment="four-deep tail entry"))
+        if self._tail_prime_emitted is not None:
+            # Under tailOwnTiles the body reallocates its tiles, so the
+            # operands its first MFMA expects are not the ones the mainloop
+            # left behind. Read them here, after the barrier that makes the
+            # mainloop's writes visible, so the body starts from LDS.
+            tailPrelude.addComment0("four-deep tail: prime LR pipeline")
+            tailPrelude.add(self._emitLoop(writer, kernel, "TAILPRIME",
+                                      [[self._tail_prime_emitted]],
+                                      schedule=False))
+        if splitWait:
+            _sync = Module("FourDeepTailUidSync")
+            _sync.add(SWaitCnt(vlcnt=0, dscnt=-1, vscnt=-1,
+                      comment="four-deep tail: retire the in-flight half"))
+            _sync.add(SBarrier(comment="four-deep tail: in-flight half visible"))
+            self._tail_uid_sync = {self._tail_uid_sync_slot: _sync}
+        return tailPrelude
+
+    def _emitPreloopPhase(self, writer, kernel, plsin, endLabel):
+        """Emit the preloop: prefetch global reads, initC, and the tail-only exit.
+
+        initC runs between the global-read issue and WaitGR so the zeroing MFMAs
+        overlap the loads in flight. Every path has to reach it:
+          PGR>=1, K>=DepthU : GR issue -> initC -> rest of preloop -> mainloop
+          PGR=0             : preloop is just initC -> mainloop
+          K<DepthU          : skip the prefetch GR to initC, then jump to tail
+
+        On the MXF4 subtile path that last route forces a split, since the LDS
+        read-address setup and the PLSIN guard fold are both deferred into the
+        global-read shadow and the tail still needs what they produce. Every other
+        kernel keeps the original single-path layout, down to the label name.
         """
         from rocisa.code import Module, Label
-        from rocisa.instruction import (SSubU32, SCmpEQU32, SCBranchSCC0,
-                                        SCBranchSCC1, SBranch, SLongBranchPositive)
+        from rocisa.instruction import SCmpEQU32, SCBranchSCC1, SBranch
         from rocisa.container import sgpr
 
-        # PostLoopStoreInNll bias/SAV bloats the FUSED NLL bodies so the exit-loop
-        # branches that jump across them (to SkipToEnd / ExitC{ui}) overflow the
-        # +-simm16 short-branch range. Emit those as 32-bit long branches, gated so
-        # every other kernel keeps the original short branches (byte-identical).
-        plsin = getattr(writer.states, "postLoopStoreInNll", False)
-
-        assert self._emitter is not None, \
-            "populate_instructions() must be called first"
-
-        module = Module("MainAndExitLoops")
-        uf = self.unroll_factor
-
-        # gfx1250 requires a loop-back/exit s_cbranch to be alone/first after an
-        # MFMA, so hoist the per-copy dec+compare above the body's last MFMA.
-        isGfx1250 = writer.states.archCaps.get("HasWmmaArbStallBit", False)
-
-        def make_subtile_pap_module(skip_barrier=False):
-            if (kernel.get("UseSubtileImpl")
-                and kernel.get("PrefetchAcrossPersistent")
-                and hasStaticAssignment(kernel)
-                and hasattr(writer, "prefetchAcrossPersistentSubtile")):
-                preloop_gr = Module("Subtile PAP first PRELOOP GR")
-                for em in self._preloop_emitted[0][0]:
-                    if em.opType != 'gr':
-                        break
-                    for inst in em.instructions:
-                        preloop_gr.add(copy.deepcopy(inst))
-                return writer.prefetchAcrossPersistentSubtile(
-                    kernel, tensorParametersA, tensorParametersB, preloop_gr,
-                    skipBarrier=skip_barrier)
-            return None
-
-        def inject_pap_after_nll_drain(emitted_3d):
-            emitted_3d = copy.deepcopy(emitted_3d)
-
-            def insert_after_drain(em_list):
-                wait_gr = next((em for em in em_list if em.opType == 'wait_gr'), None)
-                if wait_gr is None:
-                    return False
-
-                tail_id = wait_gr.moduleId
-                sync = next((em for em in em_list
-                             if em.opType == 'sync' and em.before == tail_id), None)
-                if sync is not None:
-                    tail_id = sync.moduleId
-
-                pap_module = make_subtile_pap_module(skip_barrier=(sync is not None))
-                if pap_module is None:
-                    return False
-
-                pap_id = max(em.moduleId for em in em_list) + 1
-                consumers = [em for em in em_list if em.before == tail_id]
-                em_list.append(EmittedModule(moduleId=pap_id,
-                                             instructions=[pap_module],
-                                             before=tail_id,
-                                             source=None))
-                # Place PAP between the final drain and the first NLL work that
-                # was waiting on that drain. The existing before-link graph is a
-                # chain, so this preserves scheduler ordering while moving PAP
-                # past the vlcnt(0) that would otherwise drain it immediately.
-                for consumer in consumers:
-                    consumer.before = pap_id
-                return True
-
-            for partition_emitted in emitted_3d:
-                for em_list in partition_emitted:
-                    if insert_after_drain(em_list):
-                        return emitted_3d
-
-            return emitted_3d
-
-        # ── accumulator init (initC) ──
-        # initC happens in preloop, between GR issue and WaitGR so the zeroing
-        # MFMAs overlap the in-flight global reads. Every path must reach initC (mirrors the non-Subtile flow):
-        #   PGR>=1, K>=DepthU : GR issue -> initC -> rest of preloop -> mainloop
-        #   PGR=0             : preloop is just initC -> mainloop
-        #   K<DepthU          : skip the prefetch GR to initC, then jump to tail
-        endLabel = Label("SkipToEnd", "")
-
-        # PostLoopStoreInNll Phase 3: pick the FUSED arm's exit target. A fused
-        # full-tile owner has already stored D and (when the bypass is safe) needs
-        # none of endSummation's runtime work, so branch it STRAIGHT to the post-loop
-        # store's SkipPostLoopStore join -- past endSummation AND the redundant dedup
-        # guard. Matched by label name (getLabelName is name-derived); KernelWriter
-        # emits the sole SkipPostLoopStore label after the post-loop store body. When
-        # the bypass is unsafe (bias-gradient write / SuppressNoLoadLoop wait / GSU
-        # AddressTD-Synchronizer loads) fall back to SkipToEnd so endSummation still
-        # runs and the dedup guard skips only the redundant store. Non-plsin callers
-        # pass None (byte-identical).
-        plsinFusedExitLabel = endLabel
-        if plsin and writer._plsinCanBypassEndSummation(kernel):
-            plsinFusedExitLabel = Label("SkipPostLoopStore", "")
-
-        # The preloop split below only runs on the MXF4 subtile path; everywhere
-        # else the original single-path layout is kept, down to the label name.
+        module = Module("Preloop")
         _mxf4 = isMxf4SubtilePath(kernel)
 
         skipGRLabel = Label("SkipPreloop" if _mxf4 else "SkipPreloopGR", "")
@@ -6046,14 +5985,26 @@ class LogicalScheduler:
 
         module.add(self._emitLoop(writer, kernel, "PRELOOP",
                                   preloop_emitted, schedule=False))
+        return module
 
-        # ── Mainloop ──
+    def _emitMainloopPhase(self, writer, kernel, plsin, isGfx1250, exitLabels):
+        """Emit the unrolled main loop: one body copy per unroll, each with its exit.
+
+        Copy ui exits to NGLL_C{ui} and the last copy falls through, so the caller
+        owns exitLabels -- the NGLL/NLL blocks it emits afterwards are the targets.
+        """
+        from rocisa.code import Module, Label
+        from rocisa.instruction import SSubU32, SCmpEQU32, SCBranchSCC0, SCBranchSCC1
+        from rocisa.container import sgpr
+
+        module = Module("Mainloop")
+        uf = self.unroll_factor
+
         module.addComment0("MAINLOOP")
         loopBegin = Label("LoopBeginL", "", alignment=16)
 
         exitValue = self.config.pgr
 
-        exitLabels = [Label(f"ExitC{ui}", "") for ui in range(uf - 1)]
         module.add(loopBegin)
         # Debug: emit `s_mov_b32 m0, LoopCounterL; s_ttracedata` at the start of
         # every mainloop iteration so SQTT / trace decoders can identify iterations
@@ -6095,6 +6046,115 @@ class LogicalScheduler:
                     labelName=loopBegin.getLabelName(),
                     comment="restart mainloop")
             _emitBodySetupBranch(module, loopBody, setupInsts, branch, hoist=isGfx1250)
+        return module
+
+    def emitMainAndExitLoops(self, writer, kernel, tensorParametersA=None, tensorParametersB=None):
+        """Emit preloop + mainloop + NGLL + NLL exit paths (no tail).
+
+        Owns all control flow (labels, branches, counter management) for the
+        main unrolled pipeline. For unroll_factor > 1, emits per-unroll copies
+        with correct vgpr tiles. Each mainloop exit jumps to its corresponding
+        NGLL→NLL pair. The tail loop is emitted separately by emitTailLoop()
+        so the orchestrator (Subtile.Kernel.mainLoop) can wrap it with the
+        runtime K%DU counter setup and skip branch.
+        """
+        from rocisa.code import Module, Label
+        from rocisa.instruction import (SSubU32, SCmpEQU32, SCBranchSCC0,
+                                        SCBranchSCC1, SBranch, SLongBranchPositive)
+        from rocisa.container import sgpr
+
+        # PostLoopStoreInNll bias/SAV bloats the FUSED NLL bodies so the exit-loop
+        # branches that jump across them (to SkipToEnd / ExitC{ui}) overflow the
+        # +-simm16 short-branch range. Emit those as 32-bit long branches, gated so
+        # every other kernel keeps the original short branches (byte-identical).
+        plsin = getattr(writer.states, "postLoopStoreInNll", False)
+
+        assert self._emitter is not None, \
+            "populate_instructions() must be called first"
+
+        module = Module("MainAndExitLoops")
+        uf = self.unroll_factor
+
+        # gfx1250 requires a loop-back/exit s_cbranch to be alone/first after an
+        # MFMA, so hoist the per-copy dec+compare above the body's last MFMA.
+        isGfx1250 = writer.states.archCaps.get("HasWmmaArbStallBit", False)
+
+        def make_subtile_pap_module(skip_barrier=False):
+            if (kernel.get("UseSubtileImpl")
+                and kernel.get("PrefetchAcrossPersistent")
+                and hasStaticAssignment(kernel)
+                and hasattr(writer, "prefetchAcrossPersistentSubtile")):
+                preloop_gr = Module("Subtile PAP first PRELOOP GR")
+                for em in self._preloop_emitted[0][0]:
+                    if em.opType != 'gr':
+                        break
+                    for inst in em.instructions:
+                        preloop_gr.add(copy.deepcopy(inst))
+                return writer.prefetchAcrossPersistentSubtile(
+                    kernel, tensorParametersA, tensorParametersB, preloop_gr,
+                    skipBarrier=skip_barrier)
+            return None
+
+        def inject_pap_after_nll_drain(emitted_3d):
+            emitted_3d = copy.deepcopy(emitted_3d)
+
+            def insert_after_drain(em_list):
+                wait_gr = next((em for em in em_list if em.opType == 'wait_gr'), None)
+                if wait_gr is None:
+                    return False
+
+                tail_id = wait_gr.moduleId
+                sync = next((em for em in em_list
+                             if em.opType == 'sync' and em.before == tail_id), None)
+                if sync is not None:
+                    tail_id = sync.moduleId
+
+                pap_module = make_subtile_pap_module(skip_barrier=(sync is not None))
+                if pap_module is None:
+                    return False
+
+                pap_id = max(em.moduleId for em in em_list) + 1
+                consumers = [em for em in em_list if em.before == tail_id]
+                em_list.append(EmittedModule(moduleId=pap_id,
+                                             instructions=[pap_module],
+                                             before=tail_id,
+                                             source=None))
+                # Place PAP between the final drain and the first NLL work that
+                # was waiting on that drain. The existing before-link graph is a
+                # chain, so this preserves scheduler ordering while moving PAP
+                # past the vlcnt(0) that would otherwise drain it immediately.
+                for consumer in consumers:
+                    consumer.before = pap_id
+                return True
+
+            for partition_emitted in emitted_3d:
+                for em_list in partition_emitted:
+                    if insert_after_drain(em_list):
+                        return emitted_3d
+
+            return emitted_3d
+
+        endLabel = Label("SkipToEnd", "")
+
+        # PostLoopStoreInNll Phase 3: pick the FUSED arm's exit target. A fused
+        # full-tile owner has already stored D and (when the bypass is safe) needs
+        # none of endSummation's runtime work, so branch it STRAIGHT to the post-loop
+        # store's SkipPostLoopStore join -- past endSummation AND the redundant dedup
+        # guard. Matched by label name (getLabelName is name-derived); KernelWriter
+        # emits the sole SkipPostLoopStore label after the post-loop store body. When
+        # the bypass is unsafe (bias-gradient write / SuppressNoLoadLoop wait / GSU
+        # AddressTD-Synchronizer loads) fall back to SkipToEnd so endSummation still
+        # runs and the dedup guard skips only the redundant store. Non-plsin callers
+        # pass None (byte-identical).
+        plsinFusedExitLabel = endLabel
+        if plsin and writer._plsinCanBypassEndSummation(kernel):
+            plsinFusedExitLabel = Label("SkipPostLoopStore", "")
+
+        module.add(self._emitPreloopPhase(writer, kernel, plsin, endLabel))
+
+        exitLabels = [Label(f"ExitC{ui}", "") for ui in range(uf - 1)]
+        module.add(self._emitMainloopPhase(writer, kernel, plsin,
+                                           isGfx1250, exitLabels))
 
         # ── NGLL + NLL exit paths ──
         hasNGLL = self.config.pgr >= 2
@@ -6157,54 +6217,7 @@ class LogicalScheduler:
         if nll_ft == 0:
             module.add(Label("SkipToNLL", ""))
         if spanNgll:
-            # The four-deep body issues no global reads, so its own schedule
-            # sees nothing in flight and places no drain. What is in flight
-            # belongs to the mainloop: offsetPartition == numPartitions puts
-            # every load two macro tiles ahead, which is the half of LDS this
-            # body reads second -- and it reaches that half in partition 0,
-            # ahead of every wait it does have. The split pair never needed
-            # this, because the NGLL stood between the loads and the NLL that
-            # read them.
-            #
-            # The count is how many of those loads may stay in flight past the
-            # barrier, and _tailEntryInflightBound derives it.
-            from rocisa.instruction import SWaitCnt, SBarrier
-            self._tail_uid_sync_slot = self._tailUidSyncSlot(nll_ft_3d)
-            # Split entry: give the in-flight half its own wait and barrier at
-            # the first read that touches it, so the entry wait only has to
-            # cover the resident half. That turns the entry vmcnt(0) the
-            # profile charges 354 cycles per wave into a vmcnt(18) charged 28,
-            # and the second wait it pays for costs 73 -- tail vmcnt stall
-            # falls from 91.7k cycles to 42.4k. Throughput is unchanged
-            # (1.001x geomean over 11 shapes): the arm is MFMA-bound, so the
-            # recovered cycles land back on the critical path. A bounded wait
-            # is the correct shape for a half the barrier already covers.
-            splitWait = self._tail_uid_sync_slot is not None
-            entryVmcnt = (self._tailEntryResidentBound() if splitWait
-                          else self._tailEntryInflightBound())
-            # Collected rather than emitted: this is the four-deep body's entry
-            # sequence, so it belongs behind the fused guard with the body it
-            # serves. The plain arm keeps the baseline pair's own sync.
-            tailPrelude = Module("FourDeepTailEntry")
-            tailPrelude.add(SWaitCnt(vlcnt=entryVmcnt, dscnt=-1, vscnt=-1,
-                                comment="four-deep tail: retire the mainloop's"
-                                        " loads before reading what they wrote"))
-            tailPrelude.add(SBarrier(comment="four-deep tail entry"))
-            if self._tail_prime_emitted is not None:
-                # Under tailOwnTiles the body reallocates its tiles, so the
-                # operands its first MFMA expects are not the ones the mainloop
-                # left behind. Read them here, after the barrier that makes the
-                # mainloop's writes visible, so the body starts from LDS.
-                tailPrelude.addComment0("four-deep tail: prime LR pipeline")
-                tailPrelude.add(self._emitLoop(writer, kernel, "TAILPRIME",
-                                          [[self._tail_prime_emitted]],
-                                          schedule=False))
-            if splitWait:
-                _sync = Module("FourDeepTailUidSync")
-                _sync.add(SWaitCnt(vlcnt=0, dscnt=-1, vscnt=-1,
-                          comment="four-deep tail: retire the in-flight half"))
-                _sync.add(SBarrier(comment="four-deep tail: in-flight half visible"))
-                self._tail_uid_sync = {self._tail_uid_sync_slot: _sync}
+            tailPrelude = self._buildFourDeepTailEntry(writer, kernel, nll_ft_3d)
         module.addComment0(f"NLL_C{last}")
         module.add(self._emitNllMaybeFused(writer, kernel, f"NLL_C{last}",
                                   inject_pap_after_nll_drain(nll_ft_3d),
