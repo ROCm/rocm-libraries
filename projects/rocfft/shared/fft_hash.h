@@ -29,6 +29,8 @@
 #include "../../../shared/rocfft_complex.h"
 
 #include <algorithm>
+#include <bit>
+#include <cstdint>
 #include <iostream>
 #include <memory>
 #include <string>
@@ -82,59 +84,59 @@ struct hash_output
     Tint buffer_imag;
 };
 
-static inline double get_weight(const size_t counter, const size_t max_counter)
+// Fixed, platform-independent 64-bit mix (splitmix64 finalizer).
+// Unlike std::hash, the result is defined here and does not depend on compiler,
+// standard library, or process.
+static inline uint64_t stable_hash(uint64_t z)
 {
-    return (static_cast<double>(counter) / static_cast<double>(max_counter));
+    z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9ULL;
+    z = (z ^ (z >> 27)) * 0x94d049bb133111ebULL;
+    return z ^ (z >> 31);
 }
 
-template <typename Tint>
-static inline void hash_value(Tint&              hash_value,
-                              const size_t       counter,
-                              const size_t       max_counter,
-                              const rocfft_fp16& input_value)
+// Raw IEEE-754 bit pattern of a value, widened to 64 bits.  Hashing the bits
+// (not a rounded product) makes every bit of the value count.
+static inline uint64_t raw_bits(rocfft_fp16 v)
 {
-    auto weight = get_weight(counter, max_counter);
-    hash_value += std::hash<float>{}(weight * input_value);
+    return std::bit_cast<uint16_t>(v);
 }
-template <typename Tint>
-static inline void hash_value(Tint&        hash_value,
-                              const size_t counter,
-                              const size_t max_counter,
-                              const float& input_value)
+static inline uint64_t raw_bits(float v)
 {
-    auto weight = get_weight(counter, max_counter);
-    hash_value += std::hash<float>{}(weight * input_value);
+    return std::bit_cast<uint32_t>(v);
 }
-template <typename Tint>
-static inline void hash_value(Tint&         hash_value,
-                              const size_t  counter,
-                              const size_t  max_counter,
-                              const double& input_value)
+static inline uint64_t raw_bits(double v)
 {
-    auto weight = get_weight(counter, max_counter);
-    hash_value  = std::hash<double>{}(weight * input_value) + hash_value;
+    return std::bit_cast<uint64_t>(v);
 }
 
-template <typename Tint>
-static inline size_t get_max_counter(const Tint& whole_length, const size_t nbatch)
+// Row-major index of an element within one batch.  Uses the logical lengths,
+// not the memory strides, so padding and layout do not change the hash.
+template <typename T1>
+static inline size_t logical_index(const T1& index, [[maybe_unused]] const T1& length)
 {
-    return static_cast<size_t>(count_iters(whole_length) * nbatch);
+    return index;
+}
+template <typename T1>
+static inline size_t logical_index(const std::tuple<T1, T1>& index,
+                                   const std::tuple<T1, T1>& length)
+{
+    return std::get<0>(index) * std::get<1>(length) + std::get<1>(index);
+}
+template <typename T1>
+static inline size_t logical_index(const std::tuple<T1, T1, T1>& index,
+                                   const std::tuple<T1, T1, T1>& length)
+{
+    return (std::get<0>(index) * std::get<1>(length) + std::get<1>(index)) * std::get<2>(length)
+           + std::get<2>(index);
 }
 
-template <typename T1>
-static inline T1 get_unit_value(const T1& val)
+// Mix a value's bits with its global logical position.  Per-element results
+// are summed, so the total does not depend on how threads split the buffer,
+// while swapped elements (transpose, batch swap) still change it.
+template <typename Tint, typename Tfloat>
+static inline void hash_value(Tint& hash, const size_t position, const Tfloat& value)
 {
-    return static_cast<T1>(1);
-}
-template <typename T1>
-static inline std::tuple<T1, T1> get_unit_value(const std::tuple<T1, T1>& val)
-{
-    return std::make_tuple(static_cast<T1>(1), static_cast<T1>(1));
-}
-template <typename T1>
-static inline std::tuple<T1, T1, T1> get_unit_value(const std::tuple<T1, T1, T1>& val)
-{
-    return std::make_tuple(static_cast<T1>(1), static_cast<T1>(1), static_cast<T1>(1));
+    hash += stable_hash(raw_bits(value) ^ stable_hash(static_cast<uint64_t>(position)));
 }
 
 template <typename T1>
@@ -153,18 +155,16 @@ static inline void compute_real_buffer_hash(const std::vector<hostbuf>& ibuffer,
                                             Tint2&                      hash_real,
                                             Tint2&                      hash_imag)
 {
-    auto unit_stride = get_unit_value(whole_stride);
-
-    size_t max_counter = get_max_counter<Tint1>(whole_length, nbatch);
-
-    auto   idata      = (Tfloat*)ibuffer[0].data();
-    size_t i_base     = 0;
-    auto   partitions = partition_rowmajor(whole_length);
+    auto         idata       = (Tfloat*)ibuffer[0].data();
+    size_t       i_base      = 0;
+    auto         partitions  = partition_rowmajor(whole_length);
+    const size_t batch_elems = count_iters(whole_length);
 
     std::vector<Tint2> partition_hash_real(partitions.size(), 0);
 
     for(unsigned int b = 0; b < nbatch; b++, i_base += idist)
     {
+        const size_t batch_base = b * batch_elems;
 #pragma omp parallel for num_threads(partitions.size())
         for(size_t part = 0; part < partitions.size(); ++part)
         {
@@ -172,10 +172,10 @@ static inline void compute_real_buffer_hash(const std::vector<hostbuf>& ibuffer,
             const auto length = partitions[part].second;
             do
             {
-                const auto i       = compute_index(index, whole_stride, i_base);
-                const auto counter = compute_index(index, unit_stride, i_base) + 1;
+                const auto   i        = compute_index(index, whole_stride, i_base);
+                const size_t position = batch_base + logical_index(index, whole_length);
 
-                hash_value<Tint2>(partition_hash_real[part], counter, max_counter, idata[i]);
+                hash_value<Tint2>(partition_hash_real[part], position, idata[i]);
             } while(increment_rowmajor(index, length));
         }
     }
@@ -193,20 +193,18 @@ static inline void compute_planar_buffer_hash(const std::vector<hostbuf>& ibuffe
                                               Tint2&                      hash_real,
                                               Tint2&                      hash_imag)
 {
-    auto unit_stride = get_unit_value(whole_stride);
-
-    size_t max_counter = get_max_counter<Tint1>(whole_length, nbatch);
-
-    auto   ireal      = (Tfloat*)ibuffer[0].data();
-    auto   iimag      = (Tfloat*)ibuffer[1].data();
-    size_t i_base     = 0;
-    auto   partitions = partition_rowmajor(whole_length);
+    auto         ireal       = (Tfloat*)ibuffer[0].data();
+    auto         iimag       = (Tfloat*)ibuffer[1].data();
+    size_t       i_base      = 0;
+    auto         partitions  = partition_rowmajor(whole_length);
+    const size_t batch_elems = count_iters(whole_length);
 
     std::vector<Tint2> partition_hash_real(partitions.size(), 0);
     std::vector<Tint2> partition_hash_imag(partitions.size(), 0);
 
     for(unsigned int b = 0; b < nbatch; b++, i_base += idist)
     {
+        const size_t batch_base = b * batch_elems;
 #pragma omp parallel for num_threads(partitions.size())
         for(size_t part = 0; part < partitions.size(); ++part)
         {
@@ -214,11 +212,11 @@ static inline void compute_planar_buffer_hash(const std::vector<hostbuf>& ibuffe
             const auto length = partitions[part].second;
             do
             {
-                const auto i       = compute_index(index, whole_stride, i_base);
-                const auto counter = compute_index(index, unit_stride, i_base) + 1;
+                const auto   i        = compute_index(index, whole_stride, i_base);
+                const size_t position = batch_base + logical_index(index, whole_length);
 
-                hash_value<Tint2>(partition_hash_real[part], counter, max_counter, ireal[i]);
-                hash_value<Tint2>(partition_hash_imag[part], counter, max_counter, iimag[i]);
+                hash_value<Tint2>(partition_hash_real[part], position, ireal[i]);
+                hash_value<Tint2>(partition_hash_imag[part], position, iimag[i]);
             } while(increment_rowmajor(index, length));
         }
     }
@@ -236,19 +234,17 @@ static inline void compute_interleaved_buffer_hash(const std::vector<hostbuf>& i
                                                    Tint2&                      hash_real,
                                                    Tint2&                      hash_imag)
 {
-    auto unit_stride = get_unit_value(whole_stride);
-
-    size_t max_counter = get_max_counter<Tint1>(whole_length, nbatch);
-
-    auto   idata      = (rocfft_complex<Tfloat>*)ibuffer[0].data();
-    size_t i_base     = 0;
-    auto   partitions = partition_rowmajor(whole_length);
+    auto         idata       = (rocfft_complex<Tfloat>*)ibuffer[0].data();
+    size_t       i_base      = 0;
+    auto         partitions  = partition_rowmajor(whole_length);
+    const size_t batch_elems = count_iters(whole_length);
 
     std::vector<Tint2> partition_hash_real(partitions.size(), 0);
     std::vector<Tint2> partition_hash_imag(partitions.size(), 0);
 
     for(unsigned int b = 0; b < nbatch; b++, i_base += idist)
     {
+        const size_t batch_base = b * batch_elems;
 #pragma omp parallel for num_threads(partitions.size())
         for(size_t part = 0; part < partitions.size(); ++part)
         {
@@ -256,11 +252,11 @@ static inline void compute_interleaved_buffer_hash(const std::vector<hostbuf>& i
             const auto length = partitions[part].second;
             do
             {
-                const auto i       = compute_index(index, whole_stride, i_base);
-                const auto counter = compute_index(index, unit_stride, i_base) + 1;
+                const auto   i        = compute_index(index, whole_stride, i_base);
+                const size_t position = batch_base + logical_index(index, whole_length);
 
-                hash_value<Tint2>(partition_hash_real[part], counter, max_counter, idata[i].real());
-                hash_value<Tint2>(partition_hash_imag[part], counter, max_counter, idata[i].imag());
+                hash_value<Tint2>(partition_hash_real[part], position, idata[i].real());
+                hash_value<Tint2>(partition_hash_imag[part], position, idata[i].imag());
             } while(increment_rowmajor(index, length));
         }
     }

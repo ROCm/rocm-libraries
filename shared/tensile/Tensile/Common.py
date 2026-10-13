@@ -49,6 +49,9 @@ IsaVersion = Tuple[int, int, int]
 def isGfx12(isaVersion: IsaVersion) -> bool:
   return isaVersion[0] == 12
 
+def isGfx117(isaVersion: IsaVersion) -> bool:
+  return isaVersion[:2] == (11, 7)
+
 class SemanticVersion(NamedTuple):
     major: int
     minor: int
@@ -253,7 +256,7 @@ globalParameters["SupportedISA"] = [(8,0,3),
                                     (9,4,2), (9,5,0),
                                     (10,1,0), (10,1,1), (10,1,2), (10,3,0), (10,3,1), (10,3,2), (10,3,3), (10,3,4), (10,3,5), (10,3,6),
                                     (11,0,0), (11,0,1), (11,0,2), (11,0,3),
-                                    (11,5,0), (11,5,1), (11,5,2), (11,5,3),
+                                    (11,5,0), (11,5,1), (11,5,2), (11,5,3), (11,7,0), (11,7,1),
                                     (12,0,0), (12,0,1), (12,5,0)] # assembly kernels writer supports these architectures
 
 globalParameters["KeepBuildTmp"] = True                           # Do not remove build artifacts during the build process or build_tmp after build completes
@@ -330,6 +333,7 @@ architectureMap = {
   'gfx1030':'navi21', 'gfx1031':'navi22', 'gfx1032':'navi23', 'gfx1033':'van gogh', 'gfx1034':'navi24', 'gfx1035':'rembrandt', 'gfx1036':'raphael',
   'gfx1100':'navi31', 'gfx1101':'navi32', 'gfx1102':'navi33', 'gfx1103':'gfx1103',
   'gfx1150':'strixpoint', 'gfx1151':'strixhalo', 'gfx1152':'gfx1152', 'gfx1153':'gfx1153',
+  'gfx1170':'gfx1170', 'gfx1171':'gfx1171',
   'gfx1200':'gfx1200',
   'gfx1201':'gfx1201',
   'gfx1250':'gfx1250',
@@ -2035,11 +2039,11 @@ def GetAsmCaps(isaVersion: IsaVersion, hipVersion: SemanticVersion, cachedAsmCap
     derivedAsmCaps["HasLshlOr"]             = tryAssembler(isaVersion, "v_lshl_or_b32 v47, v36, 0x2, v34")
     derivedAsmCaps["HasSMulHi"]             = tryAssembler(isaVersion, "s_mul_hi_u32 s47, s36, s34")
 
-    if isGfx12(isaVersion):
+    if isGfx12(isaVersion) or isGfx117(isaVersion):
       # Tensile only enables WMMA kernels with WavefrontSize=32. Probe the same
-      # gfx12 operand layout and wave mode that codegen uses; the wave64 form
-      # accepts different operands and would advertise support for a path that
-      # SolutionStructs rejects.
+      # gfx117/gfx12 operand layout and wave mode that codegen uses; the wave64
+      # form accepts different operands and would advertise support for a path
+      # that SolutionStructs rejects.
       derivedAsmCaps["HasWMMA"]             = tryAssembler(isaVersion, "v_wmma_f32_16x16x16_f16 v[0:7], v[8:11], v[12:15], v[0:7]", False, "-mno-wavefrontsize64")
     else:
       derivedAsmCaps["HasWMMA"]             = tryAssembler(isaVersion, "v_wmma_f32_16x16x16_f16 v[0:3], v[8:15], v[16:23], v[0:3]")
