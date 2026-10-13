@@ -1592,16 +1592,20 @@ def _build_mma_emulation(spec: Optional[dict]) -> Optional[MmaEmulation]:
     if unknown:
         raise ValueError(f"unknown MMA emulation keys: {sorted(unknown)}")
     try:
-        emulation = MmaEmulation(
-            recipe=spec["recipe"], physical_op_id=spec["physical_op_id"]
-        )
+        spelling, physical_op_id = spec["recipe"], spec["physical_op_id"]
     except KeyError as exc:
         raise ValueError(f"MMA emulation is missing required key {exc}") from None
+    # Only the enum lookup is "an unknown recipe". Parsing it on its own keeps the
+    # descriptor's other checks, such as an empty physical_op_id, reporting what
+    # they actually found instead of blaming a recipe that is perfectly valid.
+    try:
+        recipe = MmaEmulationRecipe(spelling)
     except ValueError:
         raise ValueError(
-            f"unknown MMA emulation recipe {spec['recipe']!r}; expected one of "
+            f"unknown MMA emulation recipe {spelling!r}; expected one of "
             f"{[str(r) for r in MmaEmulationRecipe]}"
         ) from None
+    emulation = MmaEmulation(recipe=recipe, physical_op_id=physical_op_id)
     # The physical atom must be frag-registered, or the emulated row would
     # silently inherit the zero-length fallback and produce wrong vector widths.
     if emulation.physical_op_id not in _MMA_FRAGMENT_INFO:

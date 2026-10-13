@@ -115,6 +115,16 @@ class TestEmulationDescriptor(unittest.TestCase):
         with pytest.raises(ValueError, match="missing required key"):
             _build_mma_op(_row(emulation={"recipe": "bf16x3"}))
 
+    def test_an_empty_physical_op_id_is_not_blamed_on_the_recipe(self):
+        """The recipe here is valid, so the message must not say it is unknown.
+
+        Loading a row reaches the descriptor's own check for an empty
+        physical_op_id. Reporting that as an unknown recipe sends whoever is
+        fixing the catalog to the one field that is correct."""
+        with pytest.raises(ValueError, match="requires a physical_op_id") as caught:
+            _build_mma_op(_row(emulation={"recipe": "bf16x3", "physical_op_id": ""}))
+        self.assertNotIn("unknown MMA emulation recipe", str(caught.value))
+
     def test_unknown_descriptor_keys_are_rejected(self):
         with pytest.raises(ValueError, match="unknown MMA emulation keys"):
             _build_mma_op(
