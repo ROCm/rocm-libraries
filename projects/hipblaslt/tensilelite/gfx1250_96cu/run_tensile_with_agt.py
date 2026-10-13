@@ -8,9 +8,10 @@ usage: run_tensile_with_agt.py <config.yaml> <gpus> <hipblaslt> <agt_internal> [
 
   config.yaml   Tensile config, e.g. mxf4_tn_maf.yaml in this directory
   gpus          HIP device indices to run on, all at the same time: 0 | 0,1 | 0-3 | all
-  hipblaslt     hipBLASLt source dir (projects/hipblaslt). Its tensilelite/Tensile/bin/Tensile builds the config, and
-                the tensilelite-client that `invoke build-client` puts in tensilelite/build_tmp runs it. Run this
-                script with the Python environment Tensile needs (rocisa etc.).
+  hipblaslt     hipBLASLt source dir (projects/hipblaslt). Its tensilelite/tensilelite/bin/Tensile (or
+                tensilelite/Tensile/bin/Tensile in trees from before the package moved to the lowercase namespace)
+                builds the config, and the tensilelite-client that `invoke build-client` puts in tensilelite/build_tmp
+                runs it. Run this script with the Python environment Tensile needs (rocisa etc.).
   agt_internal  AGT binary; it runs as root through `sudo -n`
 
 What it does:
@@ -25,7 +26,8 @@ What it does:
      right after the sync that closes its timed launches. If the shortest window is under --min-window, the batch
      is run again with num-enqueues-per-sync scaled up; the short batch is kept in the outputs but not in the table.
   5. Per GPU: time-us, PFLOPS and TB/s from the client and, from the AGT samples wholly inside the window after its
-     first 200 ms (while the power limit settles): the mean GFXCLK of the GPU's XCDs (Pre Deep Sleep Freq), their
+     first 200 ms (while the power limit settles; a window too short for any such sample uses all of its samples,
+     shown as 0 steady in the table): the mean GFXCLK of the GPU's XCDs (Pre Deep Sleep Freq), their
      target clock, the PPT_0 GFXCLK limit, package power, busy % of the GPU's XCDs and of the package's other XCDs,
      and the share of the window that every other GPU's window covered.
 
@@ -201,10 +203,19 @@ def other_gpu_users(ours, gpu_ids):
 
 # ---------------------------------------------------------------------------------------------------- build
 
+def tensile_package(tl):
+    """The Tensile package directory in tensilelite dir tl: tensilelite/ since the package moved to the lowercase
+    namespace (rocm-libraries #12150), Tensile/ before; None when tl has neither."""
+    for pkg in ("tensilelite", "Tensile"):
+        if os.path.isfile(os.path.join(tl, pkg, "bin", "Tensile")):
+            return pkg
+    return None
+
+
 def tree_fingerprint(tl):
     """Hash of the paths, sizes and mtimes of the Tensile and rocisa sources."""
     h = hashlib.sha256()
-    for sub in ("Tensile", "rocisa"):
+    for sub in (tensile_package(tl), "rocisa"):
         for dirpath, dirnames, filenames in os.walk(os.path.join(tl, sub)):
             dirnames[:] = sorted(d for d in dirnames if d not in ("__pycache__", "Tests", "build", ".git")
                                  and not d.endswith(".egg-info"))
@@ -224,8 +235,9 @@ def find_inis(build_dir):
 
 def tensile_build(config, tl, client, root, rebuild):
     """ClientParameters.ini of the config's Tensile --build-only output, building it when needed."""
-    key = hashlib.sha256(b"\0".join([open(config, "rb").read(), os.path.realpath(tl).encode(),
-                                     sys.executable.encode(), tree_fingerprint(tl).encode()])).hexdigest()[:12]
+    key = hashlib.sha256(b"\0".join([open(config, "rb").read(), os.path.realpath(tl).encode(), sys.executable.encode(),
+                                     os.environ.get("PYTHONPATH", "").encode(),   # e.g. a rocisa built elsewhere
+                                     tree_fingerprint(tl).encode()])).hexdigest()[:12]
     build_dir = os.path.join(root, "build", f"{os.path.splitext(os.path.basename(config))[0]}-{key}")
     log = f"{build_dir}.log"
     if os.path.exists(f"{build_dir}/build.done") and not rebuild:
@@ -235,11 +247,11 @@ def tensile_build(config, tl, client, root, rebuild):
             shutil.rmtree(build_dir)
         os.makedirs(build_dir)
         say(f"building with Tensile --build-only into {build_dir} (log {log})")
-        cmd = ["nice", "-n", "10", sys.executable, f"{tl}/Tensile/bin/Tensile", config, build_dir, "--build-only",
-               "--prebuilt-client", client]
+        cmd = ["nice", "-n", "10", sys.executable, os.path.join(tl, tensile_package(tl), "bin", "Tensile"), config,
+               build_dir, "--build-only", "--prebuilt-client", client]
         with open(log, "w") as f:
             rc = subprocess.run(cmd, stdin=subprocess.DEVNULL, stdout=f, stderr=subprocess.STDOUT).returncode
-        if rc != 0 or len(find_inis(build_dir)) != 1:
+        if rc != 0 or not find_inis(build_dir):
             fail(f"Tensile --build-only failed (rc {rc}); the end of {log}:\n{tail(log, 25)}")
         open(f"{build_dir}/build.done", "w").write(f"{now()}\n")
     inis = find_inis(build_dir)
@@ -725,17 +737,20 @@ def main():
     if not os.path.isfile(ctx.config):
         fail(f"no config {ctx.config}")
     hipblaslt = os.path.abspath(args.hipblaslt)
-    tl = os.path.join(hipblaslt, "tensilelite")
-    if not os.path.exists(f"{tl}/Tensile/bin/Tensile") and os.path.exists(f"{hipblaslt}/Tensile/bin/Tensile"):
-        tl = hipblaslt
-    if not os.path.exists(f"{tl}/Tensile/bin/Tensile"):
-        fail(f"no Tensile/bin/Tensile under {hipblaslt}")
+    # projects/hipblaslt, or its tensilelite dir
+    tl = next((d for d in (os.path.join(hipblaslt, "tensilelite"), hipblaslt) if tensile_package(d)), None)
+    if tl is None:
+        fail(f"no Tensile under {hipblaslt}: expected tensilelite/tensilelite/bin/Tensile, or "
+             f"tensilelite/Tensile/bin/Tensile in older trees")
     ctx.client = os.path.abspath(args.client or f"{tl}/build_tmp/tensilelite/client/tensilelite-client")
     if not os.access(ctx.client, os.X_OK):
         fail(f"no tensilelite-client at {ctx.client}: build it with `invoke build-client` in {tl}, or pass --client")
     agt = os.path.abspath(args.agt)
-    if not os.access(agt, os.X_OK):
-        fail(f"{agt} is not an executable")
+    if not (os.path.isfile(agt) and os.access(agt, os.X_OK)):
+        fail(f"{agt} is not an executable file (pass the agt_internal binary, not its directory)")
+    hidden = {k: os.environ[k] for k in VISIBILITY if k in os.environ}
+    if hidden:
+        say(f"note: ignoring {hidden}: the gpus argument picks GPUs by HIP index over all GPUs (KFD order)")
     if subprocess.run(["sudo", "-n", "true"], stdin=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode:
         fail("agt_internal runs through `sudo -n`, which asks for a password here")
     err = kfd_error()
@@ -792,7 +807,8 @@ def main():
     ctx.gate_timeout = args.ready_timeout + args.busy_wait + 120
     with open(os.path.join(ctx.rundir, "run_info.txt"), "w") as f:
         f.write(f"command: {' '.join(sys.argv)}\nhost: {ctx.host}\nconfig: {ctx.config} (sha256 "
-                f"{hashlib.sha256(open(ctx.config, 'rb').read()).hexdigest()})\nTensile: {tl}\nclient: {ctx.client}\n"
+                f"{hashlib.sha256(open(ctx.config, 'rb').read()).hexdigest()})\n"
+                f"Tensile: {os.path.join(tl, tensile_package(tl), 'bin', 'Tensile')}\nclient: {ctx.client}\n"
                 f"client ini: {ini}\nagt_internal: {agt}\n")
         for d in ctx.selected:
             f.write(f"GPU {d}: {ctx.gpus[d]} -> {ctx.lay[d]}\n")

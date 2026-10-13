@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 /*
- * LD_PRELOAD release gate for tensilelite-client, used by run_with_agt.py.
+ * LD_PRELOAD release gate for tensilelite-client, used by run_tensile_with_agt.py.
  *
  * The client's first kernel launch through hipExtModuleLaunchKernel, hipModuleLaunchKernel or hipDrvLaunchKernelEx
  * blocks until 'g' is read from AGTGATE_FIFO, so clients on several GPUs load and initialize on their own and then
