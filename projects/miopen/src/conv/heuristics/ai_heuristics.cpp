@@ -1844,7 +1844,7 @@ const ConfigEmbeddingTable& GetConfigEmbeddingTable(const std::string& arch,
     return tables.emplace(cache_key, std::move(table)).first->second;
 }
 
-std::optional<std::vector<std::vector<float>>>
+MIOPEN_INTERNALS_EXPORT std::optional<std::vector<std::vector<float>>>
 TryEncodeKernelConfigsFromTable(const std::vector<std::vector<float>>& encoded_candidates,
                                 const std::string& arch,
                                 const std::string& solver)
