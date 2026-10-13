@@ -473,6 +473,49 @@ def _spec(idx: int) -> UniversalGemmSpec:
             ),
             "gfx1250",
         )
+    if idx == 20:
+        # The config the LDS budget used to reject. A 256x256 C staging tile is
+        # 128 KiB; charged on top of a depth-2 TDM ring's A/B it overflowed the
+        # gfx1250 cap, so this geometry -- the champion of the fp8 square sweep
+        # -- was never admitted with cshuffle. The packer aliases C onto the A/B
+        # pool, so real usage is max(AB, C) and it fits. Here to keep the gate
+        # honest about that: the previous budget rejects this spec outright, and
+        # a rejection on one engine and not the other is an ASYMMETRIC drift.
+        return (
+            UniversalGemmSpec(
+                name="test_cshuffle_wmma_aliased_lds",
+                tile=TileSpec(
+                    tile_m=256,
+                    tile_n=256,
+                    tile_k=256,
+                    warp_m=4,
+                    warp_n=8,
+                    warp_k=1,
+                    warp_tile_m=16,
+                    warp_tile_n=16,
+                    warp_tile_k=64,
+                ),
+                trait=TraitSpec(
+                    pipeline="mem",
+                    scheduler="intrawave",
+                    epilogue="cshuffle",
+                    tdm=True,
+                    tdm_depth=2,
+                    lds_k_pad=48,
+                ),
+                data=DataSpec(
+                    dtype_a="fp8e4m3",
+                    dtype_b="fp8e4m3",
+                    dtype_c="bf16",
+                    dtype_acc="fp32",
+                    layout="RCR",
+                ),
+                wave_size=32,
+                block_size=1024,
+                batched=False,
+            ),
+            "gfx1250",
+        )
     raise SystemExit(f"unknown config index {idx}")
 
 

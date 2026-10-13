@@ -698,6 +698,16 @@ bool rocke_gemm_universal_is_valid_spec(const rocke_gemm_universal_spec_t* spec,
             "spec wave_size %d != %s wave_size %d", spec->wave_size, arch, target->wave_size);
     }
 
+    /* TDM emits tensor_load_to_lds / s_wait_tensorcnt, which exist only on
+     * targets carrying the mover. Gated here, *ahead* of the per-family checks,
+     * so an MFMA target cannot admit the knob and hand the lowerer an opcode it
+     * has no instruction for -- it previously sat inside the WMMA block, which
+     * MFMA targets never enter. */
+    if(spec->trait.tdm && !target->memory.has_tdm)
+    {
+        CK_GEMM_REJECT("tdm requires the Tensor Data Mover, which %s lacks", arch);
+    }
+
     /* WMMA coverage is narrower than CDNA's MFMA matrix: gfx11/gfx12 RDNA
      * supports the 16x16x16 atom and gfx1250 supports the gfx1250-class
      * 16x16x32 (f16/bf16) and 16x16x64 (fp8/bf8) atoms, all through the simple
@@ -733,6 +743,16 @@ bool rocke_gemm_universal_is_valid_spec(const rocke_gemm_universal_spec_t* spec,
                            spec->trait.pipeline,
                            arch);
         }
+        /* The cshuffle epilogue is admitted on gfx1250 only. The emitter is
+         * arch-neutral (its scatter is driven by the op's c_layout() map); what
+         * the other WMMA targets lack is coverage, not capability. Lift the arch
+         * test once gfx1151 / gfx1201 have gate configs of their own. */
+        if(strcmp(spec->trait.epilogue, "default") != 0 && !is_gfx1250)
+        {
+            CK_GEMM_REJECT("WMMA path supports the '%s' epilogue only on gfx1250, not %s",
+                           spec->trait.epilogue,
+                           arch);
+        }
         /* The Python loop walks (flag, label) in this fixed order and rejects on
          * the first set flag. */
         if(spec->trait.preshuffle_b)
@@ -755,11 +775,16 @@ bool rocke_gemm_universal_is_valid_spec(const rocke_gemm_universal_spec_t* spec,
         {
             CK_GEMM_REJECT("WMMA path does not support chiplet_swizzle on %s", arch);
         }
-        /* TDM emits tensor_load_to_lds / s_wait_tensorcnt, which exist only on
-         * gfx1250 (GFX12 tensor-DMA hardware). Gated on the arch capability bit. */
-        if(spec->trait.tdm && !target->memory.has_tdm)
+        /* lds_swizzle is rejected for the whole family, not only the load paths
+         * that structurally cannot express it. It XORs the LDS column on the
+         * store side, and the inverse is applied on the MFMA read path but not
+         * the WMMA one, so where it emits at all it writes one address and
+         * reads another: fast, plausible, numerically wrong. Under TDM it emits
+         * nothing instead. Bit-exact and worth ~+3% on CDNA MFMA, hence family
+         * scope rather than a global gate. */
+        if(spec->trait.lds_swizzle)
         {
-            CK_GEMM_REJECT("tdm requires the Tensor Data Mover, which %s lacks", arch);
+            CK_GEMM_REJECT("WMMA path does not support lds_swizzle on %s", arch);
         }
     }
 
@@ -829,7 +854,21 @@ bool rocke_gemm_universal_is_valid_spec(const rocke_gemm_universal_spec_t* spec,
         ab_bytes = ab_single * (ring ? ring : (ab_dbl ? 2 : 1));
     }
     c_bytes = (strcmp(spec->trait.epilogue, "cshuffle") == 0) ? (t->tile_m * t->tile_n * 2) : 0;
-    bytes_lds = ab_bytes + c_bytes;
+    /* The cshuffle C staging tile is aliased onto the A/B pool, so peak usage is
+     * max(AB, C) rather than AB + C: the smem-pool packer sorts allocations by
+     * live-interval start, so A lands at offset 0 and the C tile -- live only
+     * after the last A/B read -- reuses it. Charging the sum over-counted by a
+     * whole C tile and rejected specs the emitter builds and runs fine.
+     * cshuffle_no_alias (C marked exclusive) and persistent (the grid-stride
+     * tile loop makes A/B and C interfere) really are additive. */
+    if(c_bytes != 0 && !spec->trait.cshuffle_no_alias && !spec->trait.persistent)
+    {
+        bytes_lds = (ab_bytes > c_bytes) ? ab_bytes : c_bytes;
+    }
+    else
+    {
+        bytes_lds = ab_bytes + c_bytes;
+    }
     if(!rocke_archtarget_fits_lds(target, (long)bytes_lds))
     {
         CK_GEMM_REJECT("LDS budget %d > %d cap (AB=%d, C=%d) on %s",

@@ -415,6 +415,37 @@ static int make_spec(int idx, rocke_gemm_universal_spec_t* spec)
         spec->batched         = false;
         break;
     }
+    case 20: /* the geometry the old AB + C LDS budget wrongly rejected */
+        /* A 256x256 C staging tile is 128 KiB; charged on top of a depth-2 TDM
+         * ring's A/B it overflowed the gfx1250 cap, so this geometry -- the
+         * champion of the fp8 square sweep -- was never admitted with cshuffle.
+         * The packer aliases C onto the A/B pool, so real usage is max(AB, C)
+         * and it fits. Here to keep the gate honest about that. */
+        spec->name = "test_cshuffle_wmma_aliased_lds";
+        spec->tile = (rocke_gemm_tile_spec_t){.tile_m      = 256,
+                                              .tile_n      = 256,
+                                              .tile_k      = 256,
+                                              .warp_m      = 4,
+                                              .warp_n      = 8,
+                                              .warp_k      = 1,
+                                              .warp_tile_m = 16,
+                                              .warp_tile_n = 16,
+                                              .warp_tile_k = 64};
+        spec->trait.pipeline  = "mem";
+        spec->trait.scheduler = "intrawave";
+        spec->trait.epilogue  = "cshuffle";
+        spec->trait.tdm       = true;
+        spec->trait.tdm_depth = 2;
+        spec->trait.lds_k_pad = 48;
+        spec->data.dtype_a    = "fp8e4m3";
+        spec->data.dtype_b    = "fp8e4m3";
+        spec->data.dtype_c    = "bf16";
+        spec->data.dtype_acc  = "fp32";
+        spec->data.layout     = "RCR";
+        spec->wave_size       = 32;
+        spec->block_size      = 1024;
+        spec->batched         = false;
+        break;
     default:
         return -1;
     }
@@ -422,7 +453,7 @@ static int make_spec(int idx, rocke_gemm_universal_spec_t* spec)
     return 0;
 }
 
-/* Config 9 exercises gfx942; configs 11-19 gfx1250; the rest use the
+/* Config 9 exercises gfx942; configs 11-20 gfx1250; the rest use the
  * gfx950 baseline. */
 static const char* arch_for(int idx)
 {
@@ -430,7 +461,7 @@ static const char* arch_for(int idx)
     {
         return "gfx942";
     }
-    if(idx >= 11 && idx <= 19)
+    if(idx >= 11 && idx <= 20)
     {
         return "gfx1250";
     }

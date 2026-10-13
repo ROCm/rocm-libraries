@@ -125,6 +125,35 @@ class TestCshuffleWmma(unittest.TestCase):
                 ok, why = is_valid_spec(_spec(dtype=dtype, epilogue="cshuffle"), arch=ARCH)
                 self.assertTrue(ok, f"WMMA + cshuffle rejected: {why}")
 
+    def test_cshuffle_stays_gated_on_the_other_wmma_targets(self):
+        """Admitting it everywhere was a regression, caught by the gfx1151 suite.
+
+        The emitter is arch-neutral, so the gate is about *coverage*: the
+        parity configs and the on-silicon verification are gfx1250 only.
+        Removing the blanket 'default epilogue only' gate without replacing it
+        with this arch test shipped an epilogue nothing had ever run there.
+        """
+        from dataclasses import replace
+
+        from rocke.instances.common.gemm_universal import is_valid_spec
+
+        # gfx1151 / gfx1201 carry the 16x16x16 atom, not gfx1250's 16x16x32,
+        # so the spec has to match or it is rejected for the atom instead and
+        # the assertion proves nothing.
+        base = _spec(dtype="fp16", epilogue="default")
+        base = replace(
+            base,
+            tile=replace(base.tile, tile_k=32, warp_tile_k=16),
+        )
+        for arch in ("gfx1151", "gfx1201"):
+            with self.subTest(arch=arch):
+                ok, why = is_valid_spec(base, arch=arch)
+                self.assertTrue(ok, f"baseline spec invalid on {arch}: {why}")
+                shuf = replace(base, trait=replace(base.trait, epilogue="cshuffle"))
+                ok, why = is_valid_spec(shuf, arch=arch)
+                self.assertFalse(ok, f"cshuffle must stay gated on {arch}")
+                self.assertIn("epilogue", why)
+
     def test_cshuffle_widens_the_global_c_stores(self):
         """The point of the LDS round-trip: scalar global stores become vectors.
 

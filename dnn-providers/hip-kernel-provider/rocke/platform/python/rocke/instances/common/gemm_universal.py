@@ -628,13 +628,22 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
             f"spec wave_size {spec.wave_size} != {arch} wave_size {target.wave_size}"
         )
 
+    # TDM emits ``tensor_load_to_lds`` / ``s_wait_tensorcnt``, which exist only
+    # on targets carrying the mover. Gated here, *ahead* of the per-family
+    # checks, so an MFMA target cannot admit the knob and hand the lowerer an
+    # opcode it has no instruction for -- it previously sat inside the WMMA
+    # block, which MFMA targets never enter, so ``gfx950`` accepted ``tdm=True``
+    # and only failed later at lowering.
+    if spec.trait.tdm and not target.memory.has_tdm:
+        return False, f"tdm requires the Tensor Data Mover, which {arch} lacks"
+
     # WMMA coverage is intentionally narrower than the full CDNA MFMA matrix:
     # gfx11/gfx12 RDNA supports the 16x16x16 atom and gfx1250 supports the
     # gfx1250-class 16x16x32 (f16/bf16) and 16x16x64 (fp8/bf8) atoms, all
-    # through the simple ``mem`` pipeline + ``default`` epilogue. The richer
-    # pipelines (compv3 / compv4 scheduler interleave, cshuffle LDS-staged C,
-    # DTLA, preshuffle) encode MFMA-shaped assumptions and are gated off until
-    # ported. CDNA MFMA keeps the full matrix.
+    # through the simple ``mem`` / ``wmma_v1`` pipelines. The richer pipelines
+    # (compv3 / compv4 scheduler interleave), DTLA and preshuffle encode
+    # MFMA-shaped assumptions and are gated off until ported. CDNA MFMA keeps
+    # the full matrix.
     if family == "wmma":
         supported_atoms = {(16, 16, 16)}
         if arch == "gfx1250":
@@ -649,20 +658,39 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
                 f"WMMA path supports only the 'mem' or 'wmma_v1' pipeline "
                 f"(got {spec.trait.pipeline!r}) on {arch}"
             )
+        # The cshuffle epilogue is admitted on gfx1250 only. Its accumulator
+        # scatter is driven by the op's ``c_layout()`` map, so the emitter is
+        # already arch-neutral and nothing MFMA-shaped leaks in -- what the
+        # other WMMA targets lack is *coverage*, not capability: the parity
+        # configs and the on-silicon verification are gfx1250. Admitting it
+        # everywhere (as this gate briefly did) ships an epilogue nothing has
+        # ever run on gfx1151 / gfx1201. Lift the arch test once those targets
+        # have gate configs of their own.
+        if spec.trait.epilogue != "default" and arch != "gfx1250":
+            return False, (
+                f"WMMA path supports the {spec.trait.epilogue!r} epilogue "
+                f"only on gfx1250, not {arch}"
+            )
+        # ``lds_swizzle`` is rejected for the whole family, not only the load
+        # paths that structurally cannot express it. It XORs the LDS *column*
+        # on the store side, and the inverse permutation is applied on the MFMA
+        # read path (``emit_mfma_phase``) but not on the WMMA one
+        # (``_emit_wmma_phase`` has no ``_swz_col``). Where it emits at all it
+        # therefore writes one address and reads another: fast, plausible, and
+        # numerically wrong, so a sweep ranks it as a winner while it is
+        # incorrect. Under TDM it emits nothing instead, the mover owning the
+        # LDS write -- silently inert rather than silently wrong. Bit-exact and
+        # worth ~+3% on CDNA MFMA, hence family scope rather than a global gate.
         for flag, label in (
             (spec.trait.preshuffle_b, "preshuffle_b"),
             (spec.trait.direct_to_lds, "direct_to_lds"),
             (spec.trait.dtl_prefetch, "dtl_prefetch"),
             (spec.trait.active_tile_skip, "active_tile_skip"),
             (spec.trait.chiplet_swizzle, "chiplet_swizzle"),
+            (spec.trait.lds_swizzle, "lds_swizzle"),
         ):
             if flag:
                 return False, f"WMMA path does not support {label} on {arch}"
-        # TDM emits ``tensor_load_to_lds`` / ``s_wait_tensorcnt``, which exist only
-        # on gfx1250 (GFX12 tensor-DMA hardware). Gated on the arch capability bit
-        # so a spec with tdm=True is rejected for arches that lack the hardware.
-        if spec.trait.tdm and not target.memory.has_tdm:
-            return False, f"tdm requires the Tensor Data Mover, which {arch} lacks"
 
     if spec.trait.tdm:
         if spec.trait.direct_to_lds:
@@ -706,16 +734,30 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
             f"block_size {spec.block_size} != warp_m*warp_n*wave_size = {expected_bs}"
         )
 
-    # LDS budget. The cap is the target's per-WG LDS capacity (160 KiB on
-    # gfx950 / CDNA4, 64 KiB on gfx942 / CDNA3). Our current emitter does
-    # NOT alias AB and cshuffle staging (CK does; a separate optimisation
-    # we have not yet wired up), so the actual usage is additive:
+    # LDS budget. The cap is the target's per-WG LDS capacity (320 KiB on
+    # gfx1250, 160 KiB on gfx950 / CDNA4, 64 KiB on gfx942 / CDNA3).
     #   compv4 single AB:   tile_m*tile_k*2 + tile_n*tile_k*2
     #   compv4 double AB:   2 * single AB
     #   cshuffle staging:   tile_m*tile_n*2   (f16)
-    #   total:              double_buffer_AB + (cshuffle ? C : 0)
-    # When we land the AB/C aliasing in the cshuffle emitter, swap the
-    # `+` for a `max`.
+    #
+    # The cshuffle C staging tile is *aliased* onto the A/B pool, so peak usage
+    # is ``max(AB, C)`` rather than ``AB + C``. This is not an optimisation
+    # waiting to be wired up (an earlier version of this comment claimed it
+    # was): it falls out of the smem-pool packer in
+    # :mod:`rocke.core.lower_llvm` sorting allocations by live-interval start,
+    # so A lands at pool offset 0 and the C tile -- whose live range begins
+    # after the last A/B read -- reuses that same offset. Charging ``AB + C``
+    # here over-counted by a whole C tile and spuriously rejected specs the
+    # emitter builds and runs fine: a 256x256 C tile is 128 KiB, enough to push
+    # a tile that fits comfortably past every cap we have, which silently
+    # removed the deepest tiles from cshuffle sweeps.
+    #
+    # Two flags opt out, and both really are additive. ``cshuffle_no_alias``
+    # marks the C tile exclusive so the packer gives it its own byte range.
+    # ``persistent`` encloses both the K-loop and the epilogue in a grid-stride
+    # tile loop, and the packer treats every allocation used inside one
+    # ``scf.for`` as live for the whole loop, so A/B and C interfere.
+    #
     # AB is double-buffered (2x LDS) only when the emitter actually
     # ping-pongs two halves: ``dtl_prefetch`` (DTLA ping-pong) or the
     # compv4 software-pipelined double buffer, which the emitter enables
@@ -729,7 +771,10 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
     _ring = _tdm_ring_depth(spec.trait)
     ab_bytes = ab_single * (_ring if _ring else (2 if _ab_dbl else 1))
     c_bytes = t.tile_m * t.tile_n * 2 if spec.trait.epilogue == "cshuffle" else 0
-    bytes_lds = ab_bytes + c_bytes
+    if c_bytes and not (spec.trait.cshuffle_no_alias or spec.trait.persistent):
+        bytes_lds = max(ab_bytes, c_bytes)
+    else:
+        bytes_lds = ab_bytes + c_bytes
     if not target.fits_lds(bytes_lds):
         return False, (
             f"LDS budget {bytes_lds} > {target.lds_capacity_bytes} cap "
