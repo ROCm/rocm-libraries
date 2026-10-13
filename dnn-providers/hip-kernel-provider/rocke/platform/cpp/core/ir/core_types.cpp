@@ -668,7 +668,8 @@ static const char* const rocke_opcode_names[ROCKE_OP__COUNT] = {
     "scf.if",
     "scf.if_else",
     "scf.yield",
-    "cf.return"};
+    "cf.return",
+    "gpu.device_print"};
 
 const char* rocke_opcode_name(rocke_opcode_t op)
 {
@@ -914,7 +915,8 @@ static const bool rocke_opcode_pure[ROCKE_OP__COUNT] = {
     /* scf.if       */ false,
     /* scf.if_else  */ false,
     /* scf.yield    */ false,
-    /* cf.return    */ false};
+    /* cf.return    */ false,
+    /* gpu.device_print */ false};
 
 bool rocke_opcode_is_pure(rocke_opcode_t op)
 {

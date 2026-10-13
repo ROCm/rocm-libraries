@@ -71,7 +71,7 @@ from ..core.arch import (
     target_id_from_isa,
 )
 from ..core.codegen_policy import codegen_policy_for_kernel
-from ..core.ir import KernelDef
+from ..core.ir import KernelDef, Op, Region
 from ..core.ir_print import print_ir
 from ..core.lower_hip import lower_kernel_to_hip
 from ..core.lower_llvm import _lower_kernel_to_llvm_python
@@ -102,6 +102,20 @@ class KernelArtifact:
     @property
     def hsaco_bytes(self) -> int:
         return len(self.hsaco)
+
+
+def _kernel_requires_device_libraries(kernel: KernelDef) -> bool:
+    """Return whether the kernel uses an op lowered through ROCm device libraries."""
+
+    def region_requires_device_libraries(region: Region) -> bool:
+        return any(op_requires_device_libraries(op) for op in region.ops)
+
+    def op_requires_device_libraries(op: Op) -> bool:
+        return op.name == "gpu.device_print" or any(
+            region_requires_device_libraries(region) for region in op.regions
+        )
+
+    return region_requires_device_libraries(kernel.body)
 
 
 def compile_kernel(
@@ -158,7 +172,10 @@ def compile_kernel(
     )
     t2 = time.perf_counter()
     hsaco, comgr_t = build_hsaco_from_llvm_ir(
-        llvm_text, isa=isa, options=_comgr_options_for_kernel(kernel)
+        llvm_text,
+        isa=isa,
+        options=_comgr_options_for_kernel(kernel),
+        link_device_libraries=_kernel_requires_device_libraries(kernel),
     )
     t3 = time.perf_counter()
 

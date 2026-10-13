@@ -102,6 +102,13 @@ def _columns() -> list[tuple[str, Path]]:
 class ArchDomainArtifactStructureTest(unittest.TestCase):
     """Checks that need no toolchain, so they run on every host."""
 
+    def test_device_library_functions_are_outside_intrinsic_domain(self):
+        from rocke.core import lower_llvm as L
+
+        for flavor in ("llvm20", "llvm22", "llvm23"):
+            self.assertNotIn("ockl.printf.begin", G._decl_table(flavor))
+        self.assertIn("ockl.printf.begin", L._INTRINSIC_DECLS)
+
     def test_at_least_one_column_is_committed(self):
         self.assertTrue(_columns(), f"no arch-domain artifact under {_DATA}")
 

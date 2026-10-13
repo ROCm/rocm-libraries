@@ -14,6 +14,21 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/smoke.cpp")
 endif()
 
 if(BUILD_TESTING)
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/device_print.cpp")
+    add_executable(rocke_device_print core/device_print.cpp)
+    target_link_libraries(rocke_device_print PRIVATE rocke_core)
+    add_test(NAME rocke_device_print COMMAND rocke_device_print)
+    set_tests_properties(rocke_device_print
+                         PROPERTIES LABELS "ckc;unit;host")
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_device_print)
+    set_target_properties(rocke_device_print
+                          PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+    install(TARGETS rocke_device_print
+            RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+    set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+                 rocke_device_print)
+  endif()
+
   add_executable(rocke_optimization_barrier core/test_optimization_barrier.cpp)
   target_link_libraries(rocke_optimization_barrier PRIVATE rocke_core)
   add_test(NAME rocke_optimization_barrier COMMAND rocke_optimization_barrier)

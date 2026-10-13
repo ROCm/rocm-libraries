@@ -574,7 +574,11 @@ def _decl_table(flavor: str) -> dict[str, str]:
         decls.update(L._INTRINSIC_DECLS_LLVM22_OVERRIDES)
     elif flavor == L.LLVM_FLAVOR_LLVM23:
         decls.update(L._INTRINSIC_DECLS_LLVM23_OVERRIDES)
-    return decls
+    # OCKL and other device-library entry points are ordinary external functions.
+    # They require library linking, while this artifact measures compiler
+    # intrinsics with -nogpulib. Feeding them to the name oracle would record a
+    # false name_absent result rather than measure their library availability.
+    return {key: decl for key, decl in decls.items() if "@llvm." in decl}
 
 
 def _drift(committed: str, fresh: str) -> str | None:
