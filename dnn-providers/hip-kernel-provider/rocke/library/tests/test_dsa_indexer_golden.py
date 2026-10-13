@@ -159,8 +159,8 @@ def test_dsa_indexer_ir_matches_golden(arch: str):
             drift.append(
                 f"{cid}: {want} -> {got} ({recorded[cid]['bytes']} -> {nbytes} bytes)"
             )
-    assert not drift, (
-        f"{arch} indexer LLVM IR drift vs golden:\n  " + "\n  ".join(drift)
+    assert not drift, f"{arch} indexer LLVM IR drift vs golden:\n  " + "\n  ".join(
+        drift
     )
 
 

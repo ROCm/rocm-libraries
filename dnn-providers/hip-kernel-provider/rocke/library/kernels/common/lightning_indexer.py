@@ -298,7 +298,9 @@ def _emit_scalar_body(b, spec, index_q, index_k, w, scores, q_pos_base, seqlen_k
         _emit_score(b, scores, b.add(scores_row_base, s), out)
 
 
-def _emit_mfma_body(b, spec, index_q, index_k, w, scores, q_pos_base, seqlen_q, seqlen_k):
+def _emit_mfma_body(
+    b, spec, index_q, index_k, w, scores, q_pos_base, seqlen_q, seqlen_k
+):
     """MFMA (matrix-core) score body.
 
     Per head h, scores_h[16, 16] = Q_h[16, D_I] @ K[16, D_I]^T over the 16x16x16
@@ -455,7 +457,9 @@ def build_lightning_indexer(spec: IndexerSpec, arch: str = "gfx942") -> KernelDe
     seqlen_k = b.param("seqlen_k", I32)
 
     if spec.body == "mfma":
-        _emit_mfma_body(b, spec, index_q, index_k, w, scores, q_pos_base, seqlen_q, seqlen_k)
+        _emit_mfma_body(
+            b, spec, index_q, index_k, w, scores, q_pos_base, seqlen_q, seqlen_k
+        )
     else:
         _emit_scalar_body(b, spec, index_q, index_k, w, scores, q_pos_base, seqlen_k)
 
