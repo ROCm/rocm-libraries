@@ -179,9 +179,12 @@ def norm_features(affine: dict[str, dict], dims: list[int], count: int) -> set[s
     return features
 
 
-def check_stats(stats: dict[str, dict], dims: list[int], count: int) -> None:
-    """The statistics (port -> tensor) are ``x`` with 1 on the normalized dims."""
-    expected = dims[: len(dims) - count] + [1] * count
+def check_stats(
+    stats: dict[str, dict], dims: list[int], count: int, padded: bool = True
+) -> None:
+    """The statistics (port -> tensor) are ``x`` with 1 on the normalized dims
+    or, unless ``padded``, the dims before them only."""
+    expected = dims[: len(dims) - count] + ([1] * count if padded else [])
     for port, tensor in stats.items():
         if tensor["dims"] != expected:
             raise FeatureError(f"{port} dims {tensor['dims']} are not {expected}")
