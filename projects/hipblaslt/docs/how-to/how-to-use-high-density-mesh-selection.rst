@@ -12,14 +12,14 @@ hipBLASLt can select GEMM kernels from a High-Density Mesh (HDM) library, which
 is a dense, precomputed lookup table that maps problem sizes (M, N, batch count,
 K) to the best-performing kernel found by exhaustive benchmarking.
 
-Unlike prediction-based selection, which uses a model to estimate the best
-kernel, HDM selection returns the actual benchmark winner for each problem size
+Unlike prediction-based selections, which use a model to estimate the best
+kernel, HDM selection returns the actual benchmark winner for a close problem size
 in the table.
 
 .. note::
 
-   HDM kernel selection is faster than prediction-based selection and generally
-   results in superior performance for the problem sizes it covers.
+   HDM kernel selection is also faster than prediction-based selection and generally
+   results in superior performance for the GEMM types it covers.
 
 Enabling HDM selection
 ======================
@@ -32,10 +32,9 @@ your application:
    export TENSILE_USE_MESHBASED=1
 
 When enabled, hipBLASLt checks whether an HDM library exists for the current
-GEMM type. If a match is found in the mesh table, that kernel is used. If the
-problem size is not covered by the mesh, selection falls through to the next
-available library (for example, Origami prediction or the free-size fallback),
-so enabling the variable is always safe.
+GEMM type. If one exists, HDM is used for kernel selection. If not, selection
+falls through to the next available library (for example, Origami prediction or
+the free-size fallback), so enabling the variable is always safe.
 
 To disable HDM selection, unset the variable or set it to ``0``:
 
@@ -55,8 +54,8 @@ tag for each GEMM call:
    export TENSILE_USE_MESHBASED=1
    export TENSILE_DB=0x8006
 
-When HDM selection is active, the output includes ``[MatchingTag: MeshBased]``:
+When HDM selection is active, the output includes ``[MatchingTag: ContractionSolution::MatchingTag::MeshBased]``:
 
 .. code-block:: text
 
-   Running kernel: <kernel_name> [MatchingTag: MeshBased]
+   Running kernel: <kernel_name> [MatchingTag: ContractionSolution::MatchingTag::MeshBased]
