@@ -26,6 +26,7 @@ from support_features import (
     layernorm,
     layernorm_backward,
     pointwise,
+    rmsnorm,
     sdpa,
     sdpa_backward,
 )
@@ -47,6 +48,7 @@ OPS: dict[str, ModuleType] = {
         layernorm,
         layernorm_backward,
         pointwise,
+        rmsnorm,
         sdpa,
         sdpa_backward,
     )
@@ -62,7 +64,6 @@ PENDING = frozenset(
         "MatmulAttributes",
         "MoeGroupedMatmulAttributes",
         "MoeGroupedMatmulBwdAttributes",
-        "RMSNormAttributes",
         "RMSNormBackwardAttributes",
         "ReductionAttributes",
         "ResampleBwdAttributes",

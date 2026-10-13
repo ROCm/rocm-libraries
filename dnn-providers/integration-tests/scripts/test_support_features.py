@@ -38,6 +38,7 @@ from support_features import (
     layernorm_backward,
     pointwise,
     registry,
+    rmsnorm,
     sdpa,
     scalar_source,
     sdpa_backward,
@@ -2745,6 +2746,329 @@ class TestLayernormBackwardExtract:
     )
     def test_unbound_required_port_raises(self, side: str, port: str) -> None:
         node, tensors = _ln_bwd()
+        node[side][port] = None
+        self._raises(node, tensors, f"required port {port}")
+
+
+def _rms(
+    *,
+    dims: tuple[int, ...] = (2, 3, 4, 8),
+    scale: list[int] | None = None,
+    layout: str = "nchw",
+    y_layout: str | None = None,
+    dtype: str = "float",
+    y_dtype: str | None = None,
+    y_virtual: bool = False,
+    affine_dtype: str | None = None,
+    bias: bool = True,
+    phase: object = "TRAINING",
+    stats_dtype: str | None = None,
+    epsilon: str = "fixed",
+) -> tuple[dict, dict]:
+    """An RMSNormAttributes node.
+
+    ``x`` on uid 1, ``y`` on 2, scale and bias on 3 and 4, epsilon on 5,
+    ``inv_rms`` on 6. ``scale`` is the scale and bias shape (default: the
+    last dim of ``x``, 1 elsewhere); ``inv_rms`` is ``x`` with 1 where the
+    scale is not 1, as the provider derives it. Ports as
+    utilities/json/RMSNormAttributes.hpp writes them: an unbound optional
+    port, like an unset phase, is left out.
+    """
+    dims = list(dims)
+
+    def tensor(uid: int, shape: list[int], dt: str, lay: str = "nchw") -> dict:
+        return {
+            "uid": uid,
+            "dims": list(shape),
+            "strides": _layout_strides(list(shape), lay),
+            "data_type": dt,
+            "virtual": False,
+        }
+
+    scale = [1] * (len(dims) - 1) + dims[-1:] if scale is None else scale
+    inv_rms = [1 if s != 1 else d for s, d in zip(scale, dims)]
+    tensors = {
+        1: tensor(1, dims, dtype, layout),
+        2: tensor(2, dims, y_dtype or dtype, y_layout or layout),
+        3: tensor(3, scale, affine_dtype or dtype),
+        4: tensor(4, scale, affine_dtype or dtype),
+        5: _scalar(5, epsilon),
+        6: tensor(6, inv_rms, stats_dtype or dtype),
+    }
+    tensors[2]["virtual"] = y_virtual
+    node = {
+        "type": "RMSNormAttributes",
+        "inputs": {"x_tensor_uid": 1, "scale_tensor_uid": 3, "epsilon_tensor_uid": 5},
+        "outputs": {"y_tensor_uid": 2},
+        "forward_phase": phase,
+    }
+    if bias:
+        node["inputs"]["bias_tensor_uid"] = 4
+    if phase == "TRAINING":
+        node["outputs"]["inv_rms_tensor_uid"] = 6
+    return node, tensors
+
+
+class TestRMSNormExtract:
+    PLAIN = {
+        "dtype:fp32",
+        "dims:4",
+        "layout:nchw",
+        "norm:last_dim",
+        "bias:bound",
+        "phase:training",
+        "epsilon:fixed",
+    }
+
+    def _extract(self, **kwargs) -> set[str]:
+        return rmsnorm.extract(*_rms(**kwargs))
+
+    def _raises(self, node: dict, tensors: dict, match: str) -> None:
+        with pytest.raises(FeatureError, match=match):
+            rmsnorm.extract(node, tensors)
+
+    def test_builder_binds_every_schema_field(self) -> None:
+        node, _ = _rms()
+        written = set(batchnorm.bound(node)) | set(node) - {"type", "inputs", "outputs"}
+        assert written == table_fields(rmsnorm.SCHEMA_FILE, rmsnorm.SCHEMA_TABLE)
+
+    def test_every_feature_is_reachable(self) -> None:
+        reached = self._extract()
+        for kwargs in (
+            {"dims": (2, 8), "dtype": "half", "y_dtype": "float", "bias": False},
+            {"dims": (2, 3, 8), "dtype": "bfloat16", "phase": "INFERENCE"},
+            {"dtype": "half", "affine_dtype": "float", "stats_dtype": "float"},
+            {"dims": (2, 3, 4, 4, 8), "scale": [1, 1, 1, 4, 8], "layout": "nhwc"},
+            {"epsilon": "runtime"},
+        ):
+            reached |= self._extract(**kwargs)
+        assert reached == {feature.id for feature in rmsnorm.FEATURES}
+
+    def test_plain_graph(self) -> None:
+        assert self._extract() == self.PLAIN
+
+    @pytest.mark.parametrize(
+        "dtype, expected",
+        [("float", "dtype:fp32"), ("half", "dtype:fp16"), ("bfloat16", "dtype:bf16")],
+    )
+    def test_dtype(self, dtype: str, expected: str) -> None:
+        features = self._extract(dtype=dtype)
+        assert features == self.PLAIN - {"dtype:fp32"} | {expected}
+
+    @pytest.mark.parametrize(
+        "kwargs, expected",
+        [
+            ({"y_dtype": "float"}, {"precision:mixed_io"}),
+            ({"affine_dtype": "float"}, {"precision:mixed_affine"}),
+            ({"stats_dtype": "float"}, {"precision:mixed_stats"}),
+            ({"stats_dtype": "bfloat16"}, {"precision:mixed_stats"}),
+            # The bundles' mixed recipe: fp16 x, fp32 y, scale, bias and
+            # inv_rms; each role is counted.
+            (
+                {"y_dtype": "float", "affine_dtype": "float", "stats_dtype": "float"},
+                {
+                    "precision:mixed_io",
+                    "precision:mixed_affine",
+                    "precision:mixed_stats",
+                },
+            ),
+        ],
+    )
+    def test_each_precision_role_is_its_own_feature(
+        self, kwargs: dict, expected: set[str]
+    ) -> None:
+        features = self._extract(dtype="half", **kwargs)
+        assert features == self.PLAIN - {"dtype:fp32"} | {"dtype:fp16"} | expected
+
+    def test_a_virtual_y_is_not_mixed(self) -> None:
+        features = self._extract(dtype="half", y_dtype="float", y_virtual=True)
+        assert "precision:mixed_io" not in features
+
+    def test_inference_has_no_statistics_to_mix(self) -> None:
+        features = self._extract(dtype="half", stats_dtype="float", phase="INFERENCE")
+        assert "precision:mixed_stats" not in features
+
+    @pytest.mark.parametrize(
+        "dims, layouts",
+        [
+            ((2, 8), set()),
+            ((2, 3, 8), {"layout:nchw"}),
+            ((2, 3, 4, 8), {"layout:nchw"}),
+            ((2, 3, 4, 4, 8), {"layout:nchw"}),
+        ],
+    )
+    def test_dims(self, dims: tuple[int, ...], layouts: set[str]) -> None:
+        # Below rank 3, channels first and channels last are one order.
+        features = self._extract(dims=dims)
+        assert {f for f in features if f.startswith(("dims:", "layout:"))} == {
+            f"dims:{len(dims)}",
+            *layouts,
+        }
+
+    @pytest.mark.parametrize("dims", [(2, 3, 8), (2, 3, 4, 8), (2, 3, 4, 4, 8)])
+    def test_channels_last(self, dims: tuple[int, ...]) -> None:
+        assert "layout:nhwc" in self._extract(dims=dims, layout="nhwc")
+
+    @pytest.mark.parametrize("dims", [(8,), (2, 2, 2, 2, 2, 8)])
+    def test_rank_outside_two_to_five_raises(self, dims: tuple[int, ...]) -> None:
+        # The API's floor is 2.
+        self._raises(*_rms(dims=dims), f"rank {len(dims)} is not catalogued")
+
+    def test_layouts_that_disagree_raise(self) -> None:
+        self._raises(*_rms(y_layout="nhwc"), "layouts disagree")
+
+    def test_activation_shapes_that_differ_raise(self) -> None:
+        node, tensors = _rms()
+        tensors[2]["dims"] = [2, 3, 8, 4]
+        self._raises(node, tensors, "activation shapes differ")
+
+    @pytest.mark.parametrize(
+        "dims, scale, expected",
+        [
+            ((2, 3, 4, 8), [1, 1, 1, 8], "norm:last_dim"),
+            ((2, 3, 4, 8), [1, 1, 4, 8], "norm:multi_dim"),
+            ((2, 3, 4, 8), [1, 3, 4, 8], "norm:all_but_batch"),
+            ((2, 3, 4, 4, 8), [1, 1, 4, 4, 8], "norm:multi_dim"),
+            # Rank 2 has one dim to normalize: all but the batch.
+            ((2, 8), [1, 8], "norm:all_but_batch"),
+            # A batch of one: scale is x, but the batch dim is not normalized.
+            ((1, 3, 4, 8), [1, 3, 4, 8], "norm:all_but_batch"),
+            # x's 1 joins the trailing run: the API normalizes it too.
+            ((2, 3, 1, 8), [1, 3, 1, 8], "norm:all_but_batch"),
+            ((2, 3, 1, 8), [1, 1, 1, 8], "norm:multi_dim"),
+            # The per-channel scale fits when the spatial dims are 1.
+            ((2, 3, 1, 1), [1, 3, 1, 1], "norm:all_but_batch"),
+        ],
+    )
+    def test_norm(self, dims: tuple[int, ...], scale: list[int], expected: str) -> None:
+        features = self._extract(dims=dims, scale=scale)
+        assert {f for f in features if f.startswith("norm:")} == {expected}
+
+    @pytest.mark.parametrize(
+        "scale, match",
+        [
+            ([8], "not the rank of x"),
+            ([4, 8], "not the rank of x"),
+            ([1, 1, 1, 1, 8], "not the rank of x"),
+            ([2, 3, 4, 8], "not 1 then a trailing run"),  # per batch index
+            ([1, 3, 1, 1], "not 1 then a trailing run"),  # matches no trailing dim
+            ([1, 3, 1, 8], "not 1 then a trailing run"),  # a sandwich
+            ([1, 5, 4, 8], "not 1 then a trailing run"),  # a leading non-match
+            ([1, 1, 4, 1], "not 1 then a trailing run"),  # broadcast on the last
+        ],
+    )
+    def test_scale_not_a_normalized_shape_raises(
+        self, scale: list[int], match: str
+    ) -> None:
+        self._raises(*_rms(scale=scale), match)
+
+    def test_scale_and_bias_shapes_that_differ_raise(self) -> None:
+        node, tensors = _rms()
+        tensors[4]["dims"] = [1, 1, 4, 8]
+        self._raises(node, tensors, "affine shapes differ")
+
+    def test_no_bias(self) -> None:
+        features = self._extract(bias=False)
+        assert features == self.PLAIN - {"bias:bound"} | {"bias:none"}
+
+    def test_a_null_bias_is_no_bias(self) -> None:
+        node, tensors = _rms()
+        node["inputs"]["bias_tensor_uid"] = None
+        assert "bias:none" in rmsnorm.extract(node, tensors)
+
+    def test_bias_uid_zero_is_bound(self) -> None:
+        node, tensors = _rms()
+        tensors[0] = {**tensors.pop(4), "uid": 0}
+        node["inputs"]["bias_tensor_uid"] = 0
+        assert "bias:bound" in rmsnorm.extract(node, tensors)
+
+    def test_inference(self) -> None:
+        features = self._extract(phase="INFERENCE")
+        assert features == self.PLAIN - {"phase:training"} | {"phase:inference"}
+
+    @pytest.mark.parametrize(
+        "phase", ["NOT_SET", "training", "", 1, 2, None, True, ["TRAINING"]]
+    )
+    def test_uncatalogued_phase_raises(self, phase: object) -> None:
+        node, tensors = _rms()
+        node["forward_phase"] = phase
+        self._raises(node, tensors, "forward_phase .* is not catalogued")
+
+    def test_missing_phase_raises(self) -> None:
+        # The serializer leaves an unset (NOT_SET) phase out.
+        node, tensors = _rms()
+        del node["forward_phase"]
+        self._raises(node, tensors, "forward_phase None")
+
+    def test_training_without_inv_rms_raises(self) -> None:
+        node, tensors = _rms()
+        del node["outputs"]["inv_rms_tensor_uid"]
+        self._raises(node, tensors, "training does not bind inv_rms")
+
+    def test_inference_with_inv_rms_raises(self) -> None:
+        node, tensors = _rms(phase="INFERENCE")
+        node["outputs"]["inv_rms_tensor_uid"] = 6
+        self._raises(node, tensors, "inference binds inv_rms")
+
+    @pytest.mark.parametrize(
+        "inv_rms",
+        [
+            [2, 3, 4, 8],  # not reduced
+            [1, 1, 1, 1],  # reduced over every dim
+            [2, 3, 1, 8],  # reduced over the wrong dim
+            [2, 3, 4],  # the leading dims only
+        ],
+    )
+    def test_inv_rms_not_x_reduced_raises(self, inv_rms: list[int]) -> None:
+        node, tensors = _rms()
+        tensors[6]["dims"] = inv_rms
+        self._raises(node, tensors, r"dims .* are not \[2, 3, 4, 1\]")
+
+    def test_inv_rms_follows_the_normalized_dims(self) -> None:
+        # The builder derives inv_rms as the provider does; the module reads
+        # it from the scale's trailing run. The two agree.
+        features = self._extract(dims=(2, 3, 1, 8), scale=[1, 3, 1, 8])
+        assert "phase:training" in features
+
+    @pytest.mark.parametrize(
+        "uid, match",
+        [
+            (1, "x_tensor_uid dtype 'int8'"),
+            (2, "y_tensor_uid dtype 'int8'"),
+            (3, "scale_tensor_uid dtype 'int8'"),
+            (4, "bias_tensor_uid dtype 'int8'"),
+            (6, "inv_rms_tensor_uid dtype 'int8'"),
+        ],
+    )
+    def test_uncatalogued_dtype_raises(self, uid: int, match: str) -> None:
+        node, tensors = _rms()
+        tensors[uid]["data_type"] = "int8"
+        self._raises(node, tensors, match)
+
+    def test_an_affine_split_in_dtype_raises(self) -> None:
+        # The provider requires scale and bias to agree.
+        node, tensors = _rms()
+        tensors[4]["data_type"] = "half"
+        self._raises(node, tensors, "affine dtypes differ")
+
+    def test_runtime_epsilon(self) -> None:
+        features = self._extract(epsilon="runtime")
+        assert features == self.PLAIN - {"epsilon:fixed"} | {"epsilon:runtime"}
+
+    def test_epsilon_in_a_buffer_raises(self) -> None:
+        self._raises(*_rms(epsilon="buffer"), "epsilon_tensor_uid is neither")
+
+    @pytest.mark.parametrize(
+        "side, port",
+        [
+            ("inputs", "x_tensor_uid"),
+            ("inputs", "scale_tensor_uid"),
+            ("inputs", "epsilon_tensor_uid"),
+            ("outputs", "y_tensor_uid"),
+        ],
+    )
+    def test_unbound_required_port_raises(self, side: str, port: str) -> None:
+        node, tensors = _rms()
         node[side][port] = None
         self._raises(node, tensors, f"required port {port}")
 
