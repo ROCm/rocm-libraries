@@ -266,10 +266,10 @@ def _module_from_source(source):
 # predicates follow the naming convention, so name derivation alone reaches
 # fewer than half of all builders (measured: 14 of 30).
 #
-# The spec-shaped _spec variants (F5 fix): ``supports_tiled_2d``/``3d`` are
-# kwargs-only and unreachable from a spec instance.  ``supports_tiled_2d_spec``
-# and ``supports_tiled_3d_spec`` are positional-first wrappers added to each
-# arch kernel module that extract fields from the spec and delegate.
+# ``supports_tiled_2d``/``3d`` take keyword-only arguments, so a spec instance
+# cannot be passed to them. ``supports_tiled_2d_spec`` and ``supports_tiled_3d_spec``
+# are spec-first wrappers in each arch kernel module that read every predicate
+# parameter off the spec and delegate.
 _PREDICATE_ALIASES = {
     "build_unified_attention_2d_tiled": "supports_tiled_2d_spec",
     "build_gfx942_4warp_gqa": "supports_tiled_2d_spec",
@@ -300,14 +300,14 @@ def _check_support_predicate(module, builder, spec_obj, arch):
     builder itself, so an out-of-envelope spec reaches codegen unchecked and
     fails late (or worse, succeeds and ships something untested).
 
-    Only spec-shaped predicates can be called generically. The tiled family's
-    `supports_tiled_2d/3d` take their parameters individually as keyword-only
-    arguments with no spec object at all, so there is nothing to pass them from a
-    spec instance; those are skipped rather than guessed at. Coverage is
-    therefore partial by construction -- roughly 14 of 30 builders by name, and
-    the kwargs-only predicates stay out of reach absent an upstream signature
-    change. Partial and honest beats a fabricated mapping of spec fields onto
-    positional kwargs, which would silently validate the wrong thing.
+    Only spec-first predicates can be called generically. The tiled family's
+    `supports_tiled_2d/3d` take keyword-only arguments, so they are reached
+    through the `supports_tiled_*_spec` wrappers named in `_PREDICATE_ALIASES`,
+    which read every parameter off the spec. A keyword-only predicate with no such
+    wrapper is skipped rather than guessed at: mapping spec fields onto its
+    kwargs here would silently validate something other than what gets built.
+    Coverage is partial by construction -- a builder with no resolvable predicate
+    is unvalidated.
     """
     name, predicate = _resolve_support_predicate(module, builder)
     if predicate is None:

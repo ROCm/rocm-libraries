@@ -6564,10 +6564,13 @@ def supports_tiled_2d_spec(
 ) -> Tuple[bool, str]:
     """Spec-shaped wrapper for ``supports_tiled_2d`` (gfx942 variant).
 
-    ``supports_tiled_2d`` is kwargs-only and unreachable from a spec instance
-    (``hkp_pack``'s ``_check_support_predicate`` skips kwargs-only predicates).
-    This wrapper extracts the necessary fields and delegates, making the 2D
-    unified builder validatable at pack time.
+    ``supports_tiled_2d`` takes its parameters as keyword-only arguments, so
+    ``hkp_pack``'s ``_check_support_predicate`` cannot call it with a spec instance.
+    This wrapper reads every parameter the predicate has off the spec and
+    delegates, making the 2D unified builder validatable at pack time. The flags
+    below size the LDS estimate, so each one is forwarded: a spec is judged by
+    the layout it will be built with, not by the predicate's defaults.
+    ``use_d256_fast`` is not a spec field; the dispatcher derives it per request.
     """
     use_fp8 = spec.kv_storage_dtype is not None
     return supports_tiled_2d(
@@ -6584,4 +6587,11 @@ def supports_tiled_2d_spec(
         kv_storage_dtype=spec.kv_storage_dtype,
         tile_size=spec.tile_size,
         arch=arch,
+        use_mfma_32x32x8=spec.use_mfma_32x32x8,
+        use_transposed_qk_32x32=spec.use_transposed_qk_32x32,
+        use_k_single_buffer=spec.use_k_single_buffer,
+        use_conflict_free_v_store=spec.use_conflict_free_v_store,
+        use_k_sliced_ring=spec.use_k_sliced_ring,
+        ring_depth=spec.ring_depth,
+        k_slice_hd=spec.k_slice_hd,
     )
