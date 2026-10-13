@@ -256,9 +256,15 @@ rocblaslt_status rocblaslt_matmul_impl(const rocblaslt_handle       handle,
     //     return rocblaslt_status_invalid_size;
     // }
 
+    /* Clamp the workspace size for tensilelite kernels, which use 32-bit byte
+     * offsets and cannot address beyond 4 GiB.  The emulation path (above) uses
+     * standard 64-bit pointers and must not be constrained by this limit. */
+    const size_t native_workspace_bytes
+        = clampWorkspaceSize(__func__, workspaceSizeInBytes);
+    size_t clamped_ws = native_workspace_bytes;
     if(algo)
     {
-        workspaceSizeInBytes = std::min<size_t>(workspaceSizeInBytes, algo->max_workspace_bytes);
+        clamped_ws = std::min<size_t>(native_workspace_bytes, algo->max_workspace_bytes);
     }
 
     void*                  streamKFlags = nullptr;
@@ -326,7 +332,7 @@ rocblaslt_status rocblaslt_matmul_impl(const rocblaslt_handle       handle,
                                         epilogue,
                                         amaxD,
                                         workspace,
-                                        workspaceSizeInBytes,
+                                        clamped_ws,
                                         matmul_descr->act0,
                                         matmul_descr->act1,
                                         stream,
@@ -916,7 +922,6 @@ rocblaslt_status rocblaslt_matmul(rocblaslt_handle             handle,
         log_error(__func__, "invalid workspace pointer");
         return rocblaslt_status_invalid_pointer;
     }
-    workspaceSizeInBytes = clampWorkspaceSize(__func__, workspaceSizeInBytes);
 
     if(matC->type != matD->type)
     {

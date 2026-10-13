@@ -2208,7 +2208,7 @@ rocblaslt_status
                     pref->search_mode);
             break;
         case ROCBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES:
-            pref->max_workspace_bytes = clampWorkspaceSize(__func__, *(uint64_t*)data);
+            pref->max_workspace_bytes = *(uint64_t*)data;
             log_api(__func__,
                     "matmulPref",
                     pref,
@@ -2429,6 +2429,10 @@ rocblaslt_status
         log_error(__func__, "invalid requested count", requestedAlgoCount);
         return rocblaslt_status_invalid_value;
     }
+    /* Clamp the workspace limit for native kernel paths (which use 32-bit byte
+     * offsets) without affecting the unclamped pref->max_workspace_bytes that
+     * emulation callers (e.g. hipblasLtMatmulAlgoGetHeuristic) read directly. */
+    size_t native_max_ws = clampWorkspaceSize(__func__, pref->max_workspace_bytes);
     rocblaslt_status status = rocblaslt_status_success;
     try
     {
@@ -2455,7 +2459,7 @@ rocblaslt_status
             return rocblaslt_status_invalid_value;
         }
         auto prob = construct_rocblaslt_problem(
-            handle, matmul_desc, matA, matB, matC, matD, &alpha, &beta, pref->max_workspace_bytes);
+            handle, matmul_desc, matA, matB, matC, matD, &alpha, &beta, native_max_ws);
 
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
         if(auto gate = validate_fused_a2a(handle, prob); gate != rocblaslt_status_success)
@@ -2489,7 +2493,7 @@ rocblaslt_status
                                                           matmul_desc,
                                                           heuristicResultsArray,
                                                           override.file_path,
-                                                          pref->max_workspace_bytes);
+                                                          native_max_ws);
             if(override_success)
                 requestedAlgoCount--;
 
@@ -2504,7 +2508,7 @@ rocblaslt_status
                                       override_success ? &heuristicResultsArray[1]
                                                        : heuristicResultsArray,
                                       returnAlgoCount,
-                                      pref->max_workspace_bytes);
+                                      native_max_ws);
         }
 
         if(override_success)
@@ -2538,7 +2542,7 @@ rocblaslt_status
 
             std::vector<rocblaslt_matmul_heuristic_result> allSolutionsResults;
             if(rocblaslt_status_success
-               == getAllSolutions(prob, handle, allSolutionsResults, pref->max_workspace_bytes))
+               == getAllSolutions(prob, handle, allSolutionsResults, native_max_ws))
             {
                 status = rocblaslt_status_success;
                 int oriReturnAlgoCount = *returnAlgoCount;
@@ -2562,7 +2566,7 @@ rocblaslt_status
                     //append sol to heuristpicResultsArray
                     heuristicResult_copy(&heuristicResultsArray[*returnAlgoCount],
                                          &allSolutionsResults[i],
-                                         pref->max_workspace_bytes,
+                                         native_max_ws,
                                          required_workspace_size);
                     (*returnAlgoCount)++;
                 }
