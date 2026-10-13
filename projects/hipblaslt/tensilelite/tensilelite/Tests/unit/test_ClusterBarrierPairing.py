@@ -338,12 +338,15 @@ def test_the_pass_does_not_run_below_optlevel_3():
     assert len(_barriers(root)) == 1
 
 
-def test_the_pass_preserves_barriers_for_the_single_loop_pgr_bypass():
-    """The linear token walk cannot model a branch that skips the main loop."""
+def test_the_pass_preserves_the_single_loop_pgr_edge_barrier():
+    """The taken bypass edge owns synchronization that the linear walk cannot rebuild."""
     toPGR1 = Label("toPGR1", "")
-    authored = SBarrier(comment="writer barrier for the single-loop path")
+    edgeBarrier = SBarrier(comment="single-loop PGR bypass sync")
+    authored = SBarrier(comment="ordinary writer barrier")
     root = Module("kernelBody")
     loop = Module("main loop")
+    loop.add(_fill())
+    loop.add(edgeBarrier)
     loop.add(_branchTo(toPGR1, "single-loop bypass"))
     loop.add(_fill())
     loop.add(authored)
@@ -354,8 +357,10 @@ def test_the_pass_preserves_barriers_for_the_single_loop_pgr_bypass():
 
     _runPass(_waveParityKernel(), root)
 
-    assert [barrier for barrier in _barriers(root) if barrier is authored], \
-        "the pass rebuilt barriers despite the unmodelled toPGR1 control-flow join"
+    barriers = _barriers(root)
+    assert edgeBarrier in barriers, "the planner removed the path-local bypass barrier"
+    assert authored not in barriers, "an ordinary authored barrier was not rebuilt"
+    assert len(barriers) > 1, "the preserved edge barrier disabled normal planning"
 
 
 def test_the_pass_preserves_pgr1_tdm_synchronization():

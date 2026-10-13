@@ -8357,7 +8357,20 @@ class KernelWriterAssembly(KernelWriter):
               src1=hex(1), \
               comment="LoopCounter%s == 1 (PGR>=2, not Suppress: single-loop -> toPGR1)"%(loopChar) ))
           toPGR1 = Label.getFormatting(self.rapGetName("toPGR1"))
-          module.add(SCBranchSCC1(labelName=toPGR1, comment="PGR=2 but only 1 loop, toPGR1"))
+          if self._needsSingleLoopPGRSync(kernel):
+            continueLabel = Label(self.labels.getUniqueNamePrefix("AfterSingleLoopPGRSync"), "")
+            module.add(SCBranchSCC0(
+                labelName=continueLabel.getLabelName(),
+                comment="more than 1 loop, skip single-loop PGR synchronization"))
+            module.add(self._wait(
+                kernel, tPA, tPB, 0, -1, -1,
+                "wait for single-loop PGR TDM loads"))
+            module.add(self._syncThreads(
+                kernel, "single-loop PGR bypass sync", skipForceWaitcnt0=True))
+            module.add(SBranch(labelName=toPGR1, comment="single-loop PGR sync done, toPGR1"))
+            module.add(continueLabel)
+          else:
+            module.add(SCBranchSCC1(labelName=toPGR1, comment="PGR=2 but only 1 loop, toPGR1"))
         if kernel["PrefetchGlobalRead"] >= 3:
           # early exit 1 (2<=loopCounter<=PGR-1) to second NGLL (no need GR Inc)
           endCounter = kernel["PrefetchGlobalRead"]-1
