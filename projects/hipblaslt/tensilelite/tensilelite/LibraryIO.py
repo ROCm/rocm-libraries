@@ -311,7 +311,7 @@ def writeMsgPack(filename, data):
         if mapping is None:
             printExit("writeMsgPack writes a MasterSolutionLibrary or an "
                       "index-to-file mapping")
-        raw = writer.write_mapping(mapping)
+        raw = writer.write_mapping(msgpack.packb(dict(mapping)))
     compressed = zlib.compress(raw, 9)
     with open(filename + ".zlib", "wb") as f:
         f.write(compressed)

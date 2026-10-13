@@ -5,8 +5,12 @@
 
 #include <Tensile/msgpack/Writing.hpp>
 
+#include <msgpack.hpp>
+
 #include <cstdint>
+#include <map>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
 namespace nb = nanobind;
@@ -47,15 +51,33 @@ NB_MODULE(tensilelite_write, m)
 
     m.def(
         "write_mapping",
-        [](nb::list pairs) {
+        [](nb::bytes data) {
+            auto bytes = asVector(data);
+            auto handle
+                = msgpack::unpack(reinterpret_cast<char const*>(bytes.data()), bytes.size());
+            auto const& object = handle.get();
+            if(object.type != msgpack::type::MAP)
+                throw std::runtime_error("library mapping must be a msgpack map");
             std::map<int, std::string> mapping;
-            for(nb::handle item : pairs)
+            for(uint32_t i = 0; i < object.via.map.size; ++i)
             {
-                nb::tuple pair = nb::cast<nb::tuple>(item);
-                mapping.emplace(nb::cast<int>(pair[0]), nb::cast<std::string>(pair[1]));
+                auto const& key = object.via.map.ptr[i].key;
+                auto const& value = object.via.map.ptr[i].val;
+                int index = 0;
+                if(key.type == msgpack::type::POSITIVE_INTEGER)
+                    index = static_cast<int>(key.via.u64);
+                else if(key.type == msgpack::type::NEGATIVE_INTEGER)
+                    index = static_cast<int>(key.via.i64);
+                else if(key.type == msgpack::type::STR)
+                    index = std::stoi(std::string(key.via.str.ptr, key.via.str.size));
+                else
+                    throw std::runtime_error("library mapping key must be an index");
+                if(value.type != msgpack::type::STR)
+                    throw std::runtime_error("library mapping value must be a file prefix");
+                mapping.emplace(index, std::string(value.via.str.ptr, value.via.str.size));
             }
             return asBytes(TensileLite::MessagePackWriteLibraryMapping(mapping));
         },
-        nb::arg("index_name_pairs"),
+        nb::arg("msgpack_bytes"),
         "Return the lazy-library index-to-file-prefix table.");
 }
