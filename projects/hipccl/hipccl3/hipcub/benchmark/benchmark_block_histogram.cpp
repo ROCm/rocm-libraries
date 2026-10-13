@@ -67,7 +67,6 @@ struct histogram
 
             // Stop optimizer from collapsing loop
             values[0] ^= static_cast<T>(histogram[hipThreadIdx_x] & 1);
-            __syncthreads();
         }
 
 #pragma unroll
