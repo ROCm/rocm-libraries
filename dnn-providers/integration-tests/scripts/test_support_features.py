@@ -26,6 +26,7 @@ from support_features import (
     Feature,
     FeatureError,
     convolution,
+    convolution_bwd,
     convolution_fwd,
     pointwise,
     registry,
@@ -926,7 +927,7 @@ class TestPointwiseExtract:
 
 
 # --------------------------------------------------------------------------
-# Convolution (shared core) and ConvolutionFwdAttributes
+# Convolution (shared core) and the convolution ops
 # --------------------------------------------------------------------------
 
 
@@ -942,9 +943,26 @@ def _layout_strides(dims: list[int], layout: str) -> list[int]:
     return strides
 
 
-# Op module -> the shape role its serializer writes under "outputs"; the other
-# two go under "inputs" (utilities/json/Convolution*Attributes.hpp).
-_CONV_OUTPUT_ROLE = {convolution_fwd: "response"}
+# Op module -> its ports, and the shape role its serializer writes under
+# "outputs" (the other two go under "inputs";
+# utilities/json/Convolution*Attributes.hpp). Written out here rather than read
+# from module.PORTS, so _conv builds what the API binds, not what the module
+# believes: a module with two ports swapped then fails the binding tests.
+_CONV_BINDING = {
+    convolution_fwd: (
+        convolution.Ports(
+            "x_tensor_uid", "w_tensor_uid", "y_tensor_uid", "x_tensor_uid"
+        ),
+        "response",
+    ),
+    convolution_bwd: (
+        convolution.Ports(
+            "dx_tensor_uid", "w_tensor_uid", "dy_tensor_uid", "dy_tensor_uid"
+        ),
+        "activation",
+    ),
+}
+CONV_MODULES = tuple(_CONV_BINDING)
 
 
 def _conv(
@@ -985,8 +1003,7 @@ def _conv(
         }
         for uid, role in enumerate(dims, start=1)
     }
-    ports = module.PORTS
-    output = _CONV_OUTPUT_ROLE[module]
+    ports, output = _CONV_BINDING[module]
     inputs = {getattr(ports, r): uid for uid, r in enumerate(dims, 1) if r != output}
     zeros, ones = [0] * len(spatial), [1] * len(spatial)
     parameters = {
@@ -1046,6 +1063,72 @@ class TestConvolutionLayouts:
             convolution.tensor_layouts({"dims": [2, 4, 8, 8], "strides": strides})
 
 
+@pytest.mark.parametrize("module", CONV_MODULES, ids=lambda m: m.NODE_TYPE)
+class TestConvolutionOpBinding:
+    """Each conv op binds the shared core to its own three tensors.
+
+    The core's behavior is tested once, on ConvolutionFwdAttributes, below;
+    this checks what differs per op: which schema field plays which role.
+    """
+
+    PLAIN = {"dtype:fp32", "rank:2d", "layout:nchw", "mode:cross_correlation"}
+
+    def test_plain_graph(self, module) -> None:
+        assert module.extract(*_conv(module)) == self.PLAIN
+
+    def test_ports_are_the_schema_tensor_fields(self, module) -> None:
+        fields = table_fields(module.SCHEMA_FILE, module.SCHEMA_TABLE)
+        ports = module.PORTS
+        assert {ports.activation, ports.filter, ports.response} == {
+            f for f in fields if f.endswith("_tensor_uid")
+        }
+
+    def test_ports_bind_the_roles_the_api_does(self, module) -> None:
+        expected, output = _CONV_BINDING[module]
+        assert module.PORTS == expected
+        # The op's dtype is that of an input, not of what it computes.
+        assert expected.data != getattr(expected, output)
+
+    def test_parameters_are_the_schema_fields(self, module) -> None:
+        fields = table_fields(module.SCHEMA_FILE, module.SCHEMA_TABLE)
+        assert {f for f in fields if not f.endswith("_tensor_uid")} == {
+            *convolution.PARAMETERS,
+            "conv_mode",
+        }
+
+    def test_dtype_is_the_data_ports(self, module) -> None:
+        ports, _ = _CONV_BINDING[module]
+        data_role = next(
+            r for r in ports._fields[:3] if getattr(ports, r) == ports.data
+        )
+        others = {r: "half" for r in ports._fields[:3] if r != data_role}
+        assert "dtype:fp32" in module.extract(*_conv(module, dtypes=others))
+        assert "dtype:fp16" in module.extract(
+            *_conv(module, dtypes={data_role: "half"})
+        )
+
+    def test_groups_read_the_activation_and_filter(self, module) -> None:
+        # 4 activation channels, 2 per filter: 2 groups. Read off the response
+        # (2 channels) instead, it would be 1 group and no feature.
+        features = module.extract(*_conv(module, channels=4, filters=2, groups=2))
+        assert "groups:grouped" in features
+
+    def test_every_feature_is_reachable(self, module) -> None:
+        """No catalogued feature is one extract() can never return."""
+        reached = module.extract(*_conv(module))
+        for kwargs in (
+            {"spatial": (8,), "layout": "nhwc", "dtype": "half"},
+            {"spatial": (4, 8, 8), "dtype": "bfloat16", "groups": 2},
+            {"groups": 4, "dtypes": {"filter": "half"}},
+            {"stride": [2, 2], "dilation": [2, 2]},
+            {"pre_padding": [1, 1], "post_padding": [1, 1]},
+            {"pre_padding": [1, 1], "post_padding": [0, 0]},
+            {"conv_mode": "CONVOLUTION"},
+        ):
+            reached |= module.extract(*_conv(module, **kwargs))
+        assert reached == {feature.id for feature in module.FEATURES}
+
+
 class TestConvolutionFwdExtract:
     PLAIN = {"dtype:fp32", "rank:2d", "layout:nchw", "mode:cross_correlation"}
 
@@ -1054,14 +1137,6 @@ class TestConvolutionFwdExtract:
 
     def test_plain_graph(self) -> None:
         assert self._extract() == self.PLAIN
-
-    def test_ports_are_the_schema_tensor_fields(self) -> None:
-        fields = table_fields(convolution_fwd.SCHEMA_FILE, convolution_fwd.SCHEMA_TABLE)
-        ports = convolution_fwd.PORTS
-        assert {ports.activation, ports.filter, ports.response} == {
-            f for f in fields if f.endswith("_tensor_uid")
-        }
-        assert ports.data == ports.activation
 
     def test_every_schema_mode_is_catalogued(self) -> None:
         modes = _schema_enum("convolution_common.fbs", "ConvMode")
@@ -1211,22 +1286,6 @@ class TestConvolutionFwdExtract:
     def test_uncatalogued_rank_raises(self, spatial, n: int) -> None:
         with pytest.raises(FeatureError, match=f"{n} spatial dims"):
             self._extract(spatial=spatial)
-
-    def test_every_feature_is_reachable(self) -> None:
-        """No catalogued feature is one extract() can never return."""
-        reached = set()
-        for kwargs in (
-            {"spatial": (8,), "layout": "nhwc", "dtype": "half"},
-            {"spatial": (4, 8, 8), "dtype": "bfloat16", "groups": 2},
-            {"groups": 4, "dtypes": {"response": "half"}},
-            {"stride": [2, 2], "dilation": [2, 2]},
-            {"pre_padding": [1, 1], "post_padding": [1, 1]},
-            {"pre_padding": [1, 1], "post_padding": [0, 0]},
-            {"conv_mode": "CONVOLUTION"},
-        ):
-            reached |= self._extract(**kwargs)
-        reached |= self._extract()
-        assert reached == {feature.id for feature in convolution_fwd.FEATURES}
 
 
 # --------------------------------------------------------------------------

@@ -16,6 +16,7 @@ from types import ModuleType
 
 from support_features import (
     FeatureError,
+    convolution_bwd,
     convolution_fwd,
     pointwise,
     sdpa,
@@ -27,7 +28,8 @@ SCHEMA_DIR = REPO_ROOT / "projects" / "hipdnn" / "flatbuffers_sdk" / "schemas"
 
 # Catalogued op modules, keyed by their NODE_TYPE.
 OPS: dict[str, ModuleType] = {
-    m.NODE_TYPE: m for m in (convolution_fwd, pointwise, sdpa, sdpa_backward)
+    m.NODE_TYPE: m
+    for m in (convolution_bwd, convolution_fwd, pointwise, sdpa, sdpa_backward)
 }
 
 # Node types with no catalog yet. Their graphs are counted, but no feature %
@@ -40,7 +42,6 @@ PENDING = frozenset(
         "BatchnormInferenceAttributesVarianceExt",
         "BlockScaleDequantizeAttributes",
         "BlockScaleQuantizeAttributes",
-        "ConvolutionBwdAttributes",
         "ConvolutionWrwAttributes",
         "CustomOpAttributes",
         "LayernormAttributes",
