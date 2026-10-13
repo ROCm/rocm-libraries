@@ -123,10 +123,12 @@ _3D_AXES: Tuple[KnobAxis, ...] = (
 )
 # gfx950 3D also varies the K/V cache policy; its base value follows the problem
 # (``_kv_cache_policy_3d``: "stream" for all-decode batches, else "all"). The
-# K/V LDS swizzle needs paged fp16/bf16 K/V; other problems drop it.
+# K/V LDS swizzle and the wave page-id load need paged fp16/bf16 K/V; other
+# problems drop them.
 _GFX950_3D_AXES: Tuple[KnobAxis, ...] = _3D_AXES + (
     _values("kv_cache_policy", None, ("stream", "all")),
     _flag("use_kv_lds_swizzle"),
+    _flag("use_wave_page_id_load"),
 )
 
 # Dense-kernel spec fields the tuning space never varies. Problem fields come

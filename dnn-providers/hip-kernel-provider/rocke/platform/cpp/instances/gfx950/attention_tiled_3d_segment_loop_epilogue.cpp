@@ -142,7 +142,18 @@ void rocke_gfx950_attention_tiled_3d_emit_loop_init(
     rocke_gfx950_attention_tiled_3d_emit_async_infra(ctx);
 
     /* ---- first K load + cur_buf_init (lines 715-718) ---- */
-    if(cfg->PAGE_IDS)
+    if(cfg->WAVE_PAGE_ID_LOAD)
+    {
+        /* The wave holds a 64-page window of the segment's page table, one id
+         * per lane; a tile never straddles two windows. */
+        ctx->seg_first_page
+            = rocke_b_mul(b, ctx->tile_start, rocke_b_const_i32(b, cfg->N_BLOCKS_PER_TILE));
+        ctx->page_id_window0
+            = rocke_gfx950_attention_tiled_3d_load_page_id_window(ctx, rocke_b_const_i32(b, 0));
+        rocke_gfx950_attention_tiled_3d_window_tile_ids(
+            ctx, ctx->page_id_window0, ctx->tile_start, ctx->first_page_ids);
+    }
+    else if(cfg->PAGE_IDS)
     {
         rocke_gfx950_attention_tiled_3d_tile_page_ids(ctx, ctx->tile_start, ctx->first_page_ids);
     }
@@ -164,10 +175,12 @@ void rocke_gfx950_attention_tiled_3d_emit_softmax_loop(
     int n, k, reg;
 
     /* iter_args: m, l, acc0..accN-1, cur_buf
-     * (+ pid0..pid{NB-1}: the current tile's page ids when PAGE_IDS) */
+     * (+ pid0..pid{NB-1}: the current tile's page ids when PAGE_IDS)
+     * (+ pid_window: the page-id window when WAVE_PAGE_ID_LOAD) */
     int num_ml = 2;
     int num_pid = cfg->PAGE_IDS ? cfg->N_BLOCKS_PER_TILE : 0;
-    int num_iter = num_ml + cfg->PV_N_TILES + 1 + num_pid;
+    int num_win = cfg->WAVE_PAGE_ID_LOAD ? 1 : 0;
+    int num_iter = num_ml + cfg->PV_N_TILES + 1 + num_pid + num_win;
     rocke_iter_arg_t* iter_args
         = (rocke_iter_arg_t*)rocke_arena_alloc(&b->arena, (size_t)num_iter * sizeof(*iter_args));
     if(iter_args == NULL)
@@ -211,6 +224,12 @@ void rocke_gfx950_attention_tiled_3d_emit_softmax_loop(
             buf[4] = '\0';
             iter_args[ai].name = rocke_arena_strdup(&b->arena, buf);
             iter_args[ai].init = ctx->first_page_ids[n];
+            ai++;
+        }
+        if(num_win)
+        {
+            iter_args[ai].name = rocke_arena_strdup(&b->arena, "pid_window");
+            iter_args[ai].init = ctx->page_id_window0;
             ai++;
         }
     }
@@ -284,6 +303,8 @@ void rocke_gfx950_attention_tiled_3d_emit_softmax_loop(
         rocke_value_t* v_buf;
         rocke_value_t* cur_page_ids[8];
         rocke_value_t* nxt_page_ids[8];
+        rocke_value_t* window = NULL;
+        rocke_value_t* window_n = NULL;
         rocke_value_t* tile_off;
         rocke_value_t* next_tile_iv_raw;
         rocke_value_t* in_range_next;
@@ -338,10 +359,18 @@ void rocke_gfx950_attention_tiled_3d_emit_softmax_loop(
 
         rocke_b_s_waitcnt(b, 0, 0, -1);
         rocke_b_sync(b);
-        /* Fetch the next tile's page ids before this tile's V and the next K
-         * are issued, so their wait overlaps the QK below. */
-        if(cfg->PAGE_IDS)
+        /* Page ids of the next tile, for its K copies below. */
+        if(cfg->WAVE_PAGE_ID_LOAD)
         {
+            /* Read from the window in registers: no load in the loop. */
+            window = carry[3 + cfg->PV_N_TILES + num_pid];
+            rocke_gfx950_attention_tiled_3d_window_tile_ids(
+                ctx, window, safe_next_tile, nxt_page_ids);
+        }
+        else if(cfg->PAGE_IDS)
+        {
+            /* Loaded here, before this tile's V copies, so the load overlaps
+             * the QK below; the next K copies still wait for it. */
             rocke_gfx950_attention_tiled_3d_tile_page_ids(ctx, safe_next_tile, nxt_page_ids);
         }
 
@@ -370,6 +399,40 @@ void rocke_gfx950_attention_tiled_3d_emit_softmax_loop(
             ctx, kv_tile_iv, v_buf, cfg->PAGE_IDS ? cur_page_ids : NULL);
         rocke_gfx950_attention_tiled_3d_issue_k(
             ctx, safe_next_tile, nxt_buf, cfg->PAGE_IDS ? nxt_page_ids : NULL);
+        if(cfg->WAVE_PAGE_ID_LOAD)
+        {
+            /* Tile t + 2 starts a new window: load it now (after this tile's
+             * copies, so the explicit waits still cover V(t)); the loop-top
+             * wait completes it before the next iteration reads it. A
+             * wave-uniform 0/1-trip loop is an if with a result (scf_if has
+             * none): 0 trips keep the window, 1 trip loads the next one. It
+             * compiles to a scalar branch around the load. */
+            rocke_value_t* t2 = rocke_b_add(b, kv_tile_iv, rocke_b_const_i32(b, 2));
+            rocke_value_t* t2_blk
+                = rocke_b_mul(b, t2, rocke_b_const_i32(b, cfg->N_BLOCKS_PER_TILE));
+            rocke_value_t* rel2 = rocke_b_sub(b, t2_blk, ctx->seg_first_page);
+            rocke_value_t* rel2_lane = rocke_b_mod(b, rel2, rocke_b_const_i32(b, 64));
+            rocke_value_t* at_start = rocke_b_cmp_eq(b, rel2_lane, rocke_b_const_i32(b, 0));
+            rocke_value_t* t2_live = rocke_b_cmp_lt(b, t2, ctx->tile_end);
+            rocke_value_t* cross = rocke_b_land(b, at_start, t2_live);
+            rocke_value_t* lo = rocke_b_const_i32(b, 0);
+            rocke_value_t* one = rocke_b_const_i32(b, 1);
+            rocke_value_t* zero = rocke_b_const_i32(b, 0);
+            rocke_value_t* trips = rocke_b_select(b, cross, one, zero);
+            rocke_value_t* step = rocke_b_const_i32(b, 1);
+            rocke_iter_arg_t wargs[1];
+            rocke_for_t refill;
+            rocke_value_t* next_window;
+            wargs[0].name = rocke_arena_strdup(&b->arena, "pid_window_r");
+            wargs[0].init = window;
+            refill = rocke_b_scf_for_iter(
+                b, lo, trips, step, wargs, 1, "pid_window_load", false, true);
+            rocke_b_region_enter(b, refill.body);
+            next_window = rocke_gfx950_attention_tiled_3d_load_page_id_window(ctx, rel2);
+            rocke_b_scf_yield(b, &next_window, 1);
+            rocke_b_region_leave(b);
+            window_n = refill.op->results[0];
+        }
 
         /* ---------------- masked scores ---------------- */
         for(reg = 0; reg < 4; reg++)
@@ -537,6 +600,10 @@ void rocke_gfx950_attention_tiled_3d_emit_softmax_loop(
             for(n = 0; n < num_pid; n++)
             {
                 yields[yi++] = nxt_page_ids[n];
+            }
+            if(num_win)
+            {
+                yields[yi++] = window_n;
             }
             rocke_b_scf_yield(b, yields, yi);
         }

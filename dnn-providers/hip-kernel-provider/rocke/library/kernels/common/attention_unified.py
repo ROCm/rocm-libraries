@@ -2992,8 +2992,10 @@ def _num_segments(problem: UnifiedAttentionProblem, paged: bool = True) -> int:
         #
         # Measured carve-outs, each gated by its own gfx950 measurement -- never
         # assumed from gfx942, whose CU count, LDS, and reduce cost all differ:
-        #   - paged decode (``_gfx950_3d_decode_ctas_per_segment``): about 8
-        #     CTAs per CU, at most 64 segments and at least 4. When 64 segments
+        #   - paged decode (``_gfx950_3d_decode_ctas_per_segment``): about 4
+        #     CTAs per CU, at most 64 segments and at least 4. The kernel loads
+        #     its page ids per wave (``_gfx950_3d_wave_page_id_load``), so no
+        #     page-table load is left for more CTAs to hide. When 64 segments
         #     still leave fewer than 2 CTAs per CU, the kernel runs 64-token
         #     tiles (``_gfx950_3d_tile_size_override``) with 64 segments, 128
         #     from 64K KV tokens when under 1 CTA per CU.
@@ -3003,7 +3005,7 @@ def _num_segments(problem: UnifiedAttentionProblem, paged: bool = True) -> int:
             cus = problem.num_cus
             if ctas * 32 <= cus:
                 return 128 if problem.max_seqlen_k >= 65536 and ctas * 64 <= cus else 64
-            return max(4, min(64, 1 << (max(1, 8 * cus // ctas).bit_length() - 1)))
+            return max(4, min(64, 1 << (max(1, 4 * cus // ctas).bit_length() - 1)))
         pre_bump = _pre_bump_segments(problem)
         return min(segments, pre_bump)
     return segments
@@ -3137,6 +3139,15 @@ def _gfx950_3d_tile_size_override(
     if ctas is not None and ctas * 32 <= problem.num_cus:
         return 64
     return None
+
+
+def _gfx950_3d_wave_page_id_load(
+    problem: UnifiedAttentionProblem, *, arch: str | None = None
+) -> bool:
+    """gfx950 3D ``use_wave_page_id_load``: on for decode in the measured
+    scope of the split rule (``_gfx950_3d_decode_ctas_per_segment``), whose
+    segment counts assume it."""
+    return _gfx950_3d_decode_ctas_per_segment(problem, arch=arch) is not None
 
 
 def _gfx950_3d_kv_lds_swizzle(
@@ -3450,6 +3461,7 @@ def _tiled_3d_cache_key(problem: UnifiedAttentionProblem) -> Tuple:
         _kv_cache_policy_3d(problem),
         _gfx950_3d_tile_size_override(problem),
         _gfx950_3d_kv_lds_swizzle(problem),
+        _gfx950_3d_wave_page_id_load(problem),
     )
     if _resolve_attention_arch() == "gfx1250":
         sp = _tiled_3d_spec_from_problem(problem)

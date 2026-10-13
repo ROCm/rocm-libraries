@@ -211,6 +211,7 @@ rocke_unified_attention_3d_tiled_spec_t rocke_unified_attention_3d_tiled_spec_de
     s.use_decode_grid = false;
     s.kv_cache_policy = "all";
     s.use_kv_lds_swizzle = false;
+    s.use_wave_page_id_load = false;
     return s;
 }
 
@@ -263,6 +264,11 @@ bool rocke_gfx950_unified_attention_3d_tiled_spec_validate(
     if(s->use_kv_lds_swizzle && s->kv_storage_dtype != NULL)
     {
         rocke_i_set_err(b, ROCKE_ERR_VALUE, "use_kv_lds_swizzle needs paged fp16/bf16 KV");
+        return false;
+    }
+    if(s->use_wave_page_id_load && s->kv_storage_dtype != NULL)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "use_wave_page_id_load needs paged fp16/bf16 KV");
         return false;
     }
     if(s->has_tile_size_override)
@@ -379,7 +385,8 @@ int rocke_gfx950_unified_attention_3d_tiled_spec_kernel_name(
      *   "alibi" if use_alibi else "", "qqb" if use_qq_bias else "",
      *   "dg" if use_decode_grid else "",
      *   "kvcp<policy>" if kv_cache_policy != "all" else "",
-     *   "kvswz" if use_kv_lds_swizzle else "")
+     *   "kvswz" if use_kv_lds_swizzle else "",
+     *   "wpid" if use_wave_page_id_load else "")
      *
      * Positional parts list (NOT flags=...): empty parts are skipped by
      * kernel_name_join. We materialise each part and feed the non-empty ones in
@@ -464,6 +471,10 @@ int rocke_gfx950_unified_attention_3d_tiled_spec_kernel_name(
     if(s->use_kv_lds_swizzle)
     {
         parts[np++] = "kvswz";
+    }
+    if(s->use_wave_page_id_load)
+    {
+        parts[np++] = "wpid";
     }
 
     st = rocke_kernel_name_join("", parts, np, NULL, NULL, 0, buf, cap, &out_len);
@@ -709,6 +720,7 @@ bool rocke_gfx950_attn_tiled_3d_config_from_spec(
     out->I64_KV_ADDR = spec->use_i64_kv_addr;
     out->DECODE_GRID = spec->use_decode_grid;
     out->KV_SWZ = spec->use_kv_lds_swizzle;
+    out->WAVE_PAGE_ID_LOAD = spec->use_wave_page_id_load;
     {
         /* KV_CACHE_BITS = cache_policy_from_name(spec.kv_cache_policy) (validated). */
         rocke_cache_policy_t bits = ROCKE_CACHE_ALL;
@@ -1001,6 +1013,11 @@ static rocke_kernel_def_t* build_segment_gfx950(rocke_ir_builder_t* b,
         if(strided_kv && spec->use_kv_lds_swizzle)
         {
             rocke_i_set_err(b, ROCKE_ERR_VALUE, "use_kv_lds_swizzle needs paged fp16/bf16 KV");
+            return NULL;
+        }
+        if(strided_kv && spec->use_wave_page_id_load)
+        {
+            rocke_i_set_err(b, ROCKE_ERR_VALUE, "use_wave_page_id_load needs paged fp16/bf16 KV");
             return NULL;
         }
 

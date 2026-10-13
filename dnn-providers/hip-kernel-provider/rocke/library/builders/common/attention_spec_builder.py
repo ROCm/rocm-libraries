@@ -51,6 +51,7 @@ from kernels.common.attention_unified import (
     _gfx942_flash_wide_setting,
     _gfx950_3d_kv_lds_swizzle,
     _gfx950_3d_tile_size_override,
+    _gfx950_3d_wave_page_id_load,
     _kv_cache_policy_3d,
     _kv_storage_dtype,
     _num_segments,
@@ -410,6 +411,7 @@ def _spec_generic_3d(problem: UnifiedAttentionProblem):
             {
                 "kv_cache_policy": _kv_cache_policy_3d(problem),
                 "use_kv_lds_swizzle": _gfx950_3d_kv_lds_swizzle(problem),
+                "use_wave_page_id_load": _gfx950_3d_wave_page_id_load(problem),
             }
             if arch == "gfx950"
             else {}

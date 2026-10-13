@@ -303,6 +303,10 @@ class TestNumCusResolver(unittest.TestCase):
                 dict(nq=32, nk=4, D=64, kv=32768, batch=1),
             ]
             for c in cases:
+                if au._gfx950_3d_decode_ctas_per_segment(_prob(256, **c)) is not None:
+                    # Paged decode in the split rule's scope derives its segments
+                    # from num_cus by design (test_tiled_3d_decode_split.py).
+                    continue
                 s120 = au._num_segments(_prob(120, **c))
                 s256 = au._num_segments(_prob(256, **c))
                 assert s120 == s256, f"gfx950 over-split {c}: {s120} -> {s256}"
@@ -324,7 +328,10 @@ class TestNumCusResolver(unittest.TestCase):
         try:
             au._RESOLVED_ATTENTION_ARCH = None
             p.attr(au, "_resolve_attention_arch", lambda: "gfx950")
-            shape = dict(nq=8, nk=8, D=128, kv=8192, batch=1)  # num_2d=8 -> pre_bump 64
+            # num_2d=8 -> pre_bump 64. kv 2048 keeps the shape outside the decode
+            # split rule (_gfx950_3d_decode_ctas_per_segment), which replaces the
+            # clamp.
+            shape = dict(nq=8, nk=8, D=128, kv=2048, batch=1)
             ceiling = au._pre_bump_segments(_prob(120, clamp_arch="gfx950", **shape))
 
             # Default callers: clamped to the pre-bump ceiling regardless of the bump.

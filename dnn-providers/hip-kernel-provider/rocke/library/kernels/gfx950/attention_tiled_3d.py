@@ -190,6 +190,11 @@ class UnifiedAttention3DTiledSpec:
     # chunks, so the copies stay contiguous and need no padding. Paged
     # fp16/bf16 K/V only.
     use_kv_lds_swizzle: bool = False
+    # The wave loads the segment's page-table entries 64 at a time, one per
+    # lane, and each tile reads its page ids from those registers
+    # (v_readlane), so no page-table load sits on the KV loop's critical
+    # path. Paged fp16/bf16 K/V only.
+    use_wave_page_id_load: bool = False
 
     def __post_init__(self):
         if self.kv_layout not in ("paged", "strided"):
@@ -217,6 +222,10 @@ class UnifiedAttention3DTiledSpec:
             self.kv_layout != "paged" or self.kv_storage_dtype is not None
         ):
             raise ValueError("use_kv_lds_swizzle needs paged fp16/bf16 KV")
+        if self.use_wave_page_id_load and (
+            self.kv_layout != "paged" or self.kv_storage_dtype is not None
+        ):
+            raise ValueError("use_wave_page_id_load needs paged fp16/bf16 KV")
         t = self.tile_size_override
         if t is not None:
             if t < self.block_size or t % self.block_size or t > 128:
@@ -295,6 +304,7 @@ class UnifiedAttention3DTiledSpec:
             "dg" if self.use_decode_grid else "",
             f"kvcp{self.kv_cache_policy}" if self.kv_cache_policy != "all" else "",
             "kvswz" if self.use_kv_lds_swizzle else "",
+            "wpid" if self.use_wave_page_id_load else "",
             "stridedkv" if self.kv_layout == "strided" else "",
         )
 
@@ -741,6 +751,7 @@ def build_unified_attention_3d_tiled(
     # paged-KV descriptor; strided KV has no page table and keeps per-call
     # strided offsets.
     PAGE_IDS = not KV_FP8 and spec.kv_layout == "paged"
+    WAVE_PAGE_ID_LOAD = spec.use_wave_page_id_load
     if not PAGE_IDS:
         paged_kv_desc = TensorDescriptor.naive(
             "paged_kv_bytes",
@@ -754,7 +765,7 @@ def build_unified_attention_3d_tiled(
             unmerge("linear_half", into=("token", "dim"), dims=(T, HD)),
         )
     else:
-        if N_BLOCKS_PER_TILE > 1:
+        if N_BLOCKS_PER_TILE > 1 or WAVE_PAGE_ID_LOAD:
             # A sequence's last tile can reach past its last page; the table
             # entries there are not the sequence's (uninitialized, or the next
             # row). Those pages reuse the tile's first page id, always a live
@@ -961,7 +972,41 @@ def build_unified_attention_3d_tiled(
         else:
             _issue_paged_tile(value, value_rsrc, V_lds_addr, buf_idx, page_ids)
 
-    first_page_ids = _tile_page_ids(tile_start) if PAGE_IDS else None
+    first_page_ids = None
+    if WAVE_PAGE_ID_LOAD:
+        # The wave holds a 64-page window of the segment's page table, one id
+        # per lane; a tile never straddles two windows.
+        assert 64 % N_BLOCKS_PER_TILE == 0
+        seg_first_page = b.mul(tile_start, b.const_i32(N_BLOCKS_PER_TILE))
+
+        def _load_page_id_window(rel_page: Value) -> Value:
+            # Lane l: the id of the segment's page rel_page + l (0 past the
+            # sequence's last page: never used, see _window_tile_ids).
+            pg = b.add(b.add(seg_first_page, rel_page), tid)
+            return b.masked_global_load(
+                block_tables,
+                b.add(seq_base, pg),
+                b.cmp_lt(pg, seq_pages),
+                b.const_i32(0),
+                dtype=I32,
+                align=4,
+            )
+
+        def _window_tile_ids(window: Value, kv_tile_idx: Value) -> list:
+            first_blk = b.mul(kv_tile_idx, b.const_i32(N_BLOCKS_PER_TILE))
+            lane0 = b.mod(b.sub(first_blk, seg_first_page), b.const_i32(64))
+            id0 = b.readlane(window, lane0)
+            ids = [id0]
+            for j in range(1, N_BLOCKS_PER_TILE):
+                idj = b.readlane(window, b.add(lane0, b.const_i32(j)))
+                live = b.cmp_lt(b.add(first_blk, b.const_i32(j)), seq_pages)
+                ids.append(b.select(live, idj, id0))
+            return ids
+
+        window0 = _load_page_id_window(b.const_i32(0))
+        first_page_ids = _window_tile_ids(window0, tile_start)
+    elif PAGE_IDS:
+        first_page_ids = _tile_page_ids(tile_start)
     _issue_k(tile_start, b.const_i32(0), first_page_ids)
 
     cur_buf_init = b.const_i32(0)
@@ -969,6 +1014,8 @@ def build_unified_attention_3d_tiled(
     if PAGE_IDS:
         for j, pid in enumerate(first_page_ids):
             iter_args.append((f"pid{j}", pid))
+    if WAVE_PAGE_ID_LOAD:
+        iter_args.append(("pid_window", window0))
 
     # LICM hoist: per-row invariants that are constant across all KV tiles.
     # qp_r, qh_r, row_ok, and causal_lim depend only on CTA-level constants
@@ -1022,9 +1069,16 @@ def build_unified_attention_3d_tiled(
 
         b.s_waitcnt(vmcnt=0, lgkmcnt=0)
         b.sync()
-        # Fetch the next tile's page ids before this tile's V and the next K
-        # are issued, so their wait overlaps the QK below.
-        nxt_page_ids = _tile_page_ids(safe_next_tile) if PAGE_IDS else None
+        # Page ids of the next tile, for its K copies below.
+        nxt_page_ids = None
+        if WAVE_PAGE_ID_LOAD:
+            # Read from the window in registers: no load in the loop.
+            window = carry[3 + PV_N_TILES + N_BLOCKS_PER_TILE]
+            nxt_page_ids = _window_tile_ids(window, safe_next_tile)
+        elif PAGE_IDS:
+            # Loaded here, before this tile's V copies, so the load overlaps
+            # the QK below; the next K copies still wait for it.
+            nxt_page_ids = _tile_page_ids(safe_next_tile)
 
         # QK
         S_n = []
@@ -1041,6 +1095,29 @@ def build_unified_attention_3d_tiled(
 
         _issue_v(kv_tile_iv, v_buf, cur_page_ids)
         _issue_k(safe_next_tile, nxt_buf, nxt_page_ids)
+        if WAVE_PAGE_ID_LOAD:
+            # Tile t + 2 starts a new window: load it now (after this tile's
+            # copies, so the explicit waits still cover V(t)); the loop-top
+            # wait completes it before the next iteration reads it.
+            t2 = b.add(kv_tile_iv, b.const_i32(2))
+            rel2 = b.sub(b.mul(t2, b.const_i32(N_BLOCKS_PER_TILE)), seg_first_page)
+            cross = b.land(
+                b.cmp_eq(b.mod(rel2, b.const_i32(64)), b.const_i32(0)),
+                b.cmp_lt(t2, tile_end),
+            )
+            # A wave-uniform 0/1-trip loop is an if with a result (scf_if has
+            # none): 0 trips keep the window, 1 trip loads the next one. It
+            # compiles to a scalar branch around the load.
+            refill = b.scf_for_iter(
+                b.const_i32(0),
+                b.select(cross, b.const_i32(1), b.const_i32(0)),
+                b.const_i32(1),
+                [("pid_window_r", window)],
+                iv_name="pid_window_load",
+            )
+            with refill as (_iv, _w):
+                b.scf_yield(_load_page_id_window(rel2))
+            window_n = refill.results[0]
 
         # See attention_tiled_2d.py for the rationale on applying ALiBi /
         # QQ-bias before the select-with-(-inf) (equivalent to Triton's
@@ -1142,6 +1219,8 @@ def build_unified_attention_3d_tiled(
         yields.append(nxt_buf)
         if PAGE_IDS:
             yields.extend(nxt_page_ids)
+        if WAVE_PAGE_ID_LOAD:
+            yields.append(window_n)
         b.scf_yield(*yields)
 
     # ---------------- write segment workspace ----------------

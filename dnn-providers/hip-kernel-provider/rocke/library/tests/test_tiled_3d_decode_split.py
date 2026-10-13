@@ -3,9 +3,9 @@
 """gfx950 3D decode split rule: segment count and KV tile from CTAs per CU.
 
 Paged decode in the measured scope (``_gfx950_3d_decode_ctas_per_segment``)
-gets about 8 CTAs per CU with page-sized tiles, or 64-token tiles, 64 segments
-and swizzled K/V LDS when the device would stay underfilled; every other
-problem keeps the previous dispatch. CPU only: the GPU numerics of these specs
+loads its page ids per wave and gets about 4 CTAs per CU with page-sized tiles,
+or 64-token tiles, 64 segments and swizzled K/V LDS when the device would stay
+underfilled; every other problem keeps the previous dispatch. CPU only: the GPU numerics of these specs
 are covered by ``test_tiled_3d_kv_lds_swizzle.py``.
 """
 
@@ -73,17 +73,18 @@ def test_scope(kw, arch, in_scope):
         (1, 4, 65536, 256, 64, 128),
         (2, 4, 65536, 256, 64, 64),
         (8, 1, 16384, 256, 64, 64),
-        # About 8 CTAs per CU, capped at 64 segments, floored at 4.
+        # About 4 CTAs per CU, capped at 64 segments, floored at 4.
         (2, 8, 16384, 256, None, 64),
-        (16, 8, 8192, 256, None, 16),
-        (32, 4, 8192, 256, None, 16),
-        (64, 4, 4096, 256, None, 8),
+        (4, 8, 16384, 256, None, 32),
+        (16, 8, 8192, 256, None, 8),
+        (32, 4, 8192, 256, None, 8),
+        (64, 4, 4096, 256, None, 4),
         (128, 4, 8192, 256, None, 4),
         (256, 16, 8192, 256, None, 4),
         # The boundary follows the CU count.
         (1, 8, 16384, 128, None, 64),
         (1, 4, 16384, 128, 64, 64),
-        (1, 8, 16384, 120, None, 64),
+        (1, 8, 16384, 120, None, 32),
     ],
 )
 def test_split(gfx950, num_seqs, num_kv_heads, max_seqlen_k, num_cus, tile, segments):
@@ -101,18 +102,21 @@ def test_split(gfx950, num_seqs, num_kv_heads, max_seqlen_k, num_cus, tile, segm
     assert spec.tile_size_override == tile
     assert spec.num_segments == segments
     assert spec.use_kv_lds_swizzle is (tile is not None)
+    assert spec.use_wave_page_id_load
 
 
 def test_out_of_scope_keeps_the_previous_spec(gfx950):
     spec = bld._tiled_3d_spec_from_problem(_problem(max_seqlen_k=2048))
     assert spec.tile_size_override is None
     assert not spec.use_kv_lds_swizzle
+    assert not spec.use_wave_page_id_load
 
 
 def test_strided_decode_is_not_covered(gfx950, monkeypatch):
     problem = _problem()
     segment, reduce = au._strided_3d_specs_from_problem(problem, arch="gfx950")
     assert not segment.use_kv_lds_swizzle
+    assert not segment.use_wave_page_id_load
     assert segment.tile_size_override is None
     monkeypatch.setattr(au, "_gfx950_3d_decode_ctas_per_segment", lambda *a, **k: None)
     assert segment.num_segments == reduce.num_segments == au._num_segments(problem)
@@ -122,4 +126,4 @@ def test_cache_key_follows_the_rule(gfx950):
     assert au._tiled_3d_cache_key(_problem()) != au._tiled_3d_cache_key(
         _problem(max_seqlen_k=2048)
     )
-    assert au._tiled_3d_cache_key(_problem())[-2:] == (64, True)
+    assert au._tiled_3d_cache_key(_problem())[-3:] == (64, True, True)

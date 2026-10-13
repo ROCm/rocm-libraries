@@ -233,6 +233,42 @@ _CONFIGS = {
         use_i64_kv_addr=True,
         use_kv_lds_swizzle=True,
     ),
+    14: dict(
+        # Batched decode with the wave page-id load (64-page id window).
+        head_size=128,
+        block_size=16,
+        num_query_heads=64,
+        num_kv_heads=8,
+        dtype="bf16",
+        num_segments=8,
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        kv_storage_dtype=None,
+        use_decode_grid=True,
+        kv_cache_policy="stream",
+        use_wave_page_id_load=True,
+    ),
+    15: dict(
+        # 64-token tiles, swizzled K/V LDS, wave page-id load, 64-bit paged-KV
+        # addressing and sinks.
+        head_size=128,
+        block_size=16,
+        num_query_heads=32,
+        num_kv_heads=4,
+        dtype="fp16",
+        num_segments=64,
+        use_sinks=True,
+        sliding_window=0,
+        has_softcap=False,
+        kv_storage_dtype=None,
+        tile_size_override=64,
+        use_i64_kv_addr=True,
+        use_decode_grid=True,
+        kv_cache_policy="stream",
+        use_kv_lds_swizzle=True,
+        use_wave_page_id_load=True,
+    ),
 }
 
 

@@ -169,6 +169,10 @@ typedef struct rocke_unified_attention_3d_tiled_spec
     /* K/V LDS rows store their 16-byte chunks XOR-permuted by the row (paged
      * fp16/bf16 K/V only). gfx950 only; gfx942 accepts false. */
     bool use_kv_lds_swizzle; /* False */
+    /* The wave loads the segment's page ids 64 at a time, one per lane; tiles
+     * read theirs with v_readlane (paged fp16/bf16 K/V only). gfx950 only;
+     * gfx942 accepts false. */
+    bool use_wave_page_id_load; /* False */
 } rocke_unified_attention_3d_tiled_spec_t;
 
 /* Materialise every defaulted field. Required fields are zero/NULL-init; the

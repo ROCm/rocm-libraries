@@ -572,7 +572,7 @@ void rocke_gfx950_attention_tiled_3d_emit_async_infra(
         chain[1] = rocke_unmerge(B, "linear_half", into_td, 2, dims_td);
         ctx->paged_kv_desc = rocke_tensor_descriptor_transform(B, base, chain, 2);
     }
-    else if(CFG.N_BLOCKS_PER_TILE > 1)
+    else if(CFG.N_BLOCKS_PER_TILE > 1 || CFG.WAVE_PAGE_ID_LOAD)
     {
         /* A sequence's last tile can reach past its last page; the table entries
          * there are not the sequence's. Those pages reuse the tile's first page
@@ -637,6 +637,44 @@ rocke_value_t* rocke_gfx950_attention_tiled_3d_kv_col(
     chunk_col = rocke_b_mul(B, chunk, rocke_b_const_i32(B, 8));
     in_chunk = rocke_b_mod(B, col, rocke_b_const_i32(B, 8));
     return rocke_b_add(B, chunk_col, in_chunk);
+}
+
+/* _load_page_id_window(rel_page): lane l loads the id of the segment's page
+ * rel_page + l; past the sequence's last page it gets 0, never used (see
+ * _window_tile_ids). */
+rocke_value_t* rocke_gfx950_attention_tiled_3d_load_page_id_window(
+    rocke_gfx950_attention_tiled_3d_build_ctx_t* ctx, rocke_value_t* rel_page)
+{
+    rocke_value_t* first = rocke_b_add(B, ctx->seg_first_page, rel_page);
+    rocke_value_t* pg = rocke_b_add(B, first, ctx->tid);
+    rocke_value_t* idx = rocke_b_add(B, ctx->seq_base, pg);
+    rocke_value_t* live = rocke_b_cmp_lt(B, pg, ctx->seq_pages);
+    rocke_value_t* other = rocke_b_const_i32(B, 0);
+    return rocke_b_masked_global_load(B, ctx->block_tables, idx, live, other, rocke_i32(), 4);
+}
+
+/* _window_tile_ids(window, kv_tile_idx): the tile's page ids from the 64-page
+ * window (v_readlane); dead pages reuse the tile's first id, always live. */
+void rocke_gfx950_attention_tiled_3d_window_tile_ids(
+    rocke_gfx950_attention_tiled_3d_build_ctx_t* ctx,
+    rocke_value_t* window,
+    rocke_value_t* kv_tile_idx,
+    rocke_value_t** out)
+{
+    const int NB = CFG.N_BLOCKS_PER_TILE;
+    int j;
+    rocke_value_t* first_blk = rocke_b_mul(B, kv_tile_idx, rocke_b_const_i32(B, NB));
+    rocke_value_t* rel = rocke_b_sub(B, first_blk, ctx->seg_first_page);
+    rocke_value_t* lane0 = rocke_b_mod(B, rel, rocke_b_const_i32(B, 64));
+    out[0] = rocke_b_readlane(B, window, lane0);
+    for(j = 1; j < NB; ++j)
+    {
+        rocke_value_t* lane = rocke_b_add(B, lane0, rocke_b_const_i32(B, j));
+        rocke_value_t* idj = rocke_b_readlane(B, window, lane);
+        rocke_value_t* blk = rocke_b_add(B, first_blk, rocke_b_const_i32(B, j));
+        rocke_value_t* live = rocke_b_cmp_lt(B, blk, ctx->seq_pages);
+        out[j] = rocke_b_select(B, live, idj, out[0]);
+    }
 }
 
 /* _tile_page_ids(kv_tile_idx): one guarded block-table load per page of the
