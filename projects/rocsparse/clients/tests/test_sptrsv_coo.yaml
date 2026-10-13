@@ -279,3 +279,37 @@ Tests:
   matrix: [rocsparse_matrix_random]
   matrix_type: [rocsparse_matrix_type_general]
   graph_test: true
+
+- name: sptrsv_coo_transpose_free
+  category: pre_checkin
+  function: sptrsv_coo
+  indextype: *i32_i64
+  precision: *single_double_precisions_complex_real
+  M_N: *M_N_range_checkin
+  alpha_alphai: *alpha_range_checkin
+  transA: [rocsparse_operation_transpose, rocsparse_operation_conjugate_transpose]
+  diag: *all_rocsparse_diag_type
+  uplo: *all_rocsparse_fill_mode
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  apol: *all_rocsparse_analysis_policy
+  sptrsv_alg: [rocsparse_sptrsv_alg_transpose_free]
+  skip_reproducibility: true
+  matrix: [rocsparse_matrix_random]
+  matrix_type: [rocsparse_matrix_type_general]
+
+# Without transpose, the transpose-free algorithm falls back to the default one.
+- name: sptrsv_coo_transpose_free_fallback
+  category: pre_checkin
+  function: sptrsv_coo
+  indextype: *i32
+  precision: *double_only_precisions
+  M_N: *M_N_range_checkin
+  alpha_alphai: *alpha_range_checkin
+  transA: [rocsparse_operation_none]
+  diag: *all_rocsparse_diag_type
+  uplo: *all_rocsparse_fill_mode
+  baseA: [rocsparse_index_base_zero]
+  apol: *all_rocsparse_analysis_policy
+  sptrsv_alg: [rocsparse_sptrsv_alg_transpose_free]
+  matrix: [rocsparse_matrix_random]
+  matrix_type: [rocsparse_matrix_type_general]

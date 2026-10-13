@@ -279,3 +279,91 @@ Tests:
   matrix: [rocsparse_matrix_random]
   matrix_type: [rocsparse_matrix_type_general]
   graph_test: true
+
+- name: sptrsv_csr_transpose_free
+  category: pre_checkin
+  function: sptrsv_csr
+  indextype: *i32i32_i64i32_i64i64
+  precision: *single_double_precisions_complex_real
+  M_N: *M_N_range_checkin
+  alpha_alphai: *alpha_range_checkin
+  transA: [rocsparse_operation_transpose, rocsparse_operation_conjugate_transpose]
+  diag: *all_rocsparse_diag_type
+  uplo: *all_rocsparse_fill_mode
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  apol: *all_rocsparse_analysis_policy
+  sptrsv_alg: [rocsparse_sptrsv_alg_transpose_free]
+  skip_reproducibility: true
+  matrix: [rocsparse_matrix_random]
+  matrix_type: [rocsparse_matrix_type_general]
+
+- name: sptrsv_csr_transpose_free_file
+  category: pre_checkin
+  function: sptrsv_csr
+  indextype: *i32
+  precision: *single_double_precisions_complex
+  M: 1
+  N: 1
+  alpha_alphai: *alpha_range_checkin
+  transA: [rocsparse_operation_transpose, rocsparse_operation_conjugate_transpose]
+  diag: [rocsparse_diag_type_non_unit]
+  uplo: *all_rocsparse_fill_mode
+  baseA: [rocsparse_index_base_one]
+  sptrsv_alg: [rocsparse_sptrsv_alg_transpose_free]
+  skip_reproducibility: true
+  matrix: [rocsparse_matrix_file_rocalution]
+  matrix_type: [rocsparse_matrix_type_general]
+  filename: [nos5, mplate]
+
+# With a unit diagonal the solution overflows in single precision on these
+# matrices, and the overflow pattern depends on the summation order.
+- name: sptrsv_csr_transpose_free_file
+  category: pre_checkin
+  function: sptrsv_csr
+  indextype: *i32
+  precision: *double_only_precisions_complex
+  M: 1
+  N: 1
+  alpha_alphai: *alpha_range_checkin
+  transA: [rocsparse_operation_transpose, rocsparse_operation_conjugate_transpose]
+  diag: [rocsparse_diag_type_unit]
+  uplo: *all_rocsparse_fill_mode
+  baseA: [rocsparse_index_base_one]
+  sptrsv_alg: [rocsparse_sptrsv_alg_transpose_free]
+  skip_reproducibility: true
+  matrix: [rocsparse_matrix_file_rocalution]
+  matrix_type: [rocsparse_matrix_type_general]
+  filename: [nos5, mplate]
+
+- name: sptrsv_csr_transpose_free
+  category: nightly
+  function: sptrsv_csr
+  indextype: *i32i32_i64i32_i64i64
+  precision: *single_double_precisions_complex_real
+  M_N: *M_N_range_nightly
+  alpha_alphai: *alpha_range_nightly
+  transA: [rocsparse_operation_transpose, rocsparse_operation_conjugate_transpose]
+  diag: *all_rocsparse_diag_type
+  uplo: *all_rocsparse_fill_mode
+  baseA: [rocsparse_index_base_zero]
+  sptrsv_alg: [rocsparse_sptrsv_alg_transpose_free]
+  skip_reproducibility: true
+  matrix: [rocsparse_matrix_random]
+  matrix_type: [rocsparse_matrix_type_general]
+
+# Without transpose, the transpose-free algorithm falls back to the default one.
+- name: sptrsv_csr_transpose_free_fallback
+  category: pre_checkin
+  function: sptrsv_csr
+  indextype: *i32
+  precision: *double_only_precisions
+  M_N: *M_N_range_checkin
+  alpha_alphai: *alpha_range_checkin
+  transA: [rocsparse_operation_none]
+  diag: *all_rocsparse_diag_type
+  uplo: *all_rocsparse_fill_mode
+  baseA: [rocsparse_index_base_zero]
+  apol: *all_rocsparse_analysis_policy
+  sptrsv_alg: [rocsparse_sptrsv_alg_transpose_free]
+  matrix: [rocsparse_matrix_random]
+  matrix_type: [rocsparse_matrix_type_general]
