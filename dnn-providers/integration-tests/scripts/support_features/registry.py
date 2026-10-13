@@ -25,6 +25,7 @@ from support_features import (
     convolution_bwd,
     convolution_fwd,
     convolution_wrw,
+    custom_op,
     layernorm,
     layernorm_backward,
     matmul,
@@ -56,6 +57,7 @@ OPS: dict[str, ModuleType] = {
         convolution_bwd,
         convolution_fwd,
         convolution_wrw,
+        custom_op,
         layernorm,
         layernorm_backward,
         matmul,
@@ -74,11 +76,7 @@ OPS: dict[str, ModuleType] = {
 
 # Node types with no catalog yet. Their graphs are counted, but no feature %
 # is reported for them.
-PENDING = frozenset(
-    {
-        "CustomOpAttributes",
-    }
-)
+PENDING: frozenset[str] = frozenset()
 
 
 def op_module(node_type: str) -> ModuleType | None:

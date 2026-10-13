@@ -37,6 +37,7 @@ from support_features import (
     convolution_bwd,
     convolution_fwd,
     convolution_wrw,
+    custom_op,
     layernorm,
     layernorm_backward,
     matmul,
@@ -6164,6 +6165,161 @@ class TestMoeGroupedMatmulBwdExtract:
         node, tensors = _moe_bwd()
         node.update(node.pop("inputs"))
         self._raises(node, tensors, "required port doutput_tensor_uid")
+
+
+# --------------------------------------------------------------------------
+# CustomOpAttributes
+# --------------------------------------------------------------------------
+
+
+def _custom_op(
+    *,
+    inputs: tuple = (1, 2),
+    outputs: tuple = (3,),
+    data: tuple = (0xDE, 0xAD),
+    op_id: object = "test.op",
+) -> tuple[dict, dict]:
+    """A CustomOpAttributes node over tensors 0 to 4, its fields at the top
+    of the node as utilities/json/CustomOpAttributes.hpp writes them.
+    """
+    tensors = {
+        uid: {"uid": uid, "dims": [2, 3], "strides": [3, 1], "data_type": "float"}
+        for uid in range(5)
+    }
+    node = {
+        "type": "CustomOpAttributes",
+        "custom_op_id": op_id,
+        "input_tensor_uids": list(inputs),
+        "output_tensor_uids": list(outputs),
+        "data": list(data),
+    }
+    return node, tensors
+
+
+class TestCustomOpExtract:
+    PLAIN = {"inputs:multi", "outputs:one", "data:present"}
+
+    def _extract(self, **kwargs) -> set[str]:
+        return custom_op.extract(*_custom_op(**kwargs))
+
+    def _raises(self, node: dict, tensors: dict, match: str) -> None:
+        with pytest.raises(FeatureError, match=match):
+            custom_op.extract(node, tensors)
+
+    def test_builder_writes_every_schema_field(self) -> None:
+        node, _ = _custom_op()
+        assert set(node) - {"type"} == table_fields(
+            custom_op.SCHEMA_FILE, custom_op.SCHEMA_TABLE
+        )
+
+    def test_registry_maps_the_node_type_here(self) -> None:
+        assert registry.op_module("CustomOpAttributes") is custom_op
+
+    def test_every_feature_is_reachable(self) -> None:
+        reached = self._extract()
+        for kwargs in (
+            {"inputs": (), "outputs": (), "data": ()},
+            {"inputs": (1,), "outputs": (3, 4)},
+        ):
+            reached |= self._extract(**kwargs)
+        assert reached == {f.id for f in custom_op.FEATURES}
+
+    def test_plain(self) -> None:
+        assert self._extract() == self.PLAIN
+
+    @pytest.mark.parametrize(
+        "count, value", [(0, "none"), (1, "one"), (2, "multi"), (3, "multi")]
+    )
+    @pytest.mark.parametrize("port", ["inputs", "outputs"])
+    def test_arity(self, port: str, count: int, value: str) -> None:
+        # One port varies; the other stays at a count none of these share.
+        uids = tuple(range(1, count + 1))
+        other = "outputs" if port == "inputs" else "inputs"
+        features = self._extract(**{port: uids, other: (4,)})
+        assert f"{port}:{value}" in features
+        assert f"{other}:one" in features
+
+    def test_repeated_input_counts_each_time(self) -> None:
+        # x * x: one tensor, read twice, is two inputs.
+        assert "inputs:multi" in self._extract(inputs=(1, 1))
+
+    def test_uid_zero_is_a_tensor(self) -> None:
+        assert "inputs:one" in self._extract(inputs=(0,))
+        assert "outputs:one" in self._extract(outputs=(0,))
+
+    @pytest.mark.parametrize(
+        "data, value",
+        [((), "empty"), ((0,), "present"), ((255,), "present"), ((1, 2), "present")],
+    )
+    def test_data(self, data: tuple, value: str) -> None:
+        assert f"data:{value}" in self._extract(data=data)
+
+    def test_undotted_id_is_taken(self) -> None:
+        # The schema documents "<plugin>.<operation>"; nothing enforces it.
+        assert self._extract(op_id="rope") == self.PLAIN
+
+    @pytest.mark.parametrize("op_id", ["", None, 5, ["test.op"]])
+    def test_bad_custom_op_id_raises(self, op_id: object) -> None:
+        node, tensors = _custom_op(op_id=op_id)
+        self._raises(node, tensors, "custom_op_id .* is not a non-empty string")
+
+    def test_missing_custom_op_id_raises(self) -> None:
+        node, tensors = _custom_op()
+        del node["custom_op_id"]
+        self._raises(node, tensors, "custom_op_id None is not a non-empty string")
+
+    @pytest.mark.parametrize("port", [custom_op.INPUTS, custom_op.OUTPUTS])
+    @pytest.mark.parametrize("value", ["missing", None, 1, {"x": 1}, "12"])
+    def test_uid_list_that_is_not_a_list_raises(self, port: str, value: object) -> None:
+        node, tensors = _custom_op()
+        if value == "missing":
+            del node[port]
+        else:
+            node[port] = value
+        self._raises(node, tensors, f"{port} .* is not a list of uids")
+
+    @pytest.mark.parametrize("port", [custom_op.INPUTS, custom_op.OUTPUTS])
+    @pytest.mark.parametrize("uid", [True, 1.0, "1", None])
+    def test_uid_that_is_not_an_int_raises(self, port: str, uid: object) -> None:
+        # True and 1.0 would find tensor 1 if looked up.
+        node, tensors = _custom_op()
+        node[port] = [2, uid]
+        self._raises(node, tensors, f"{port} uid .* is not an int")
+
+    @pytest.mark.parametrize("port", [custom_op.INPUTS, custom_op.OUTPUTS])
+    @pytest.mark.parametrize("uid", [5, -1])
+    def test_uid_not_in_the_graph_raises(self, port: str, uid: int) -> None:
+        node, tensors = _custom_op()
+        node[port] = [2, uid]
+        self._raises(node, tensors, f"{port} uid {uid} is not a tensor of the graph")
+
+    @pytest.mark.parametrize("port", [custom_op.INPUTS, custom_op.OUTPUTS])
+    def test_uid_zero_not_in_the_graph_raises(self, port: str) -> None:
+        # Valid only as a binding; a graph without tensor 0 has no uid 0.
+        node, tensors = _custom_op()
+        del tensors[0]
+        node[port] = [0]
+        self._raises(node, tensors, f"{port} uid 0 is not a tensor of the graph")
+
+    def test_lists_under_inputs_and_outputs_are_not_read(self) -> None:
+        node, tensors = _custom_op()
+        node["inputs"] = {custom_op.INPUTS: node.pop(custom_op.INPUTS)}
+        self._raises(node, tensors, "input_tensor_uids None is not a list of uids")
+
+    # "" has no character to fail the byte check: only the list check rejects it.
+    @pytest.mark.parametrize("data", ["missing", None, "", "dead", 7, {"0": 1}])
+    def test_data_that_is_not_a_list_raises(self, data: object) -> None:
+        node, tensors = _custom_op()
+        if data == "missing":
+            del node["data"]
+        else:
+            node["data"] = data
+        self._raises(node, tensors, "data .* is not a list of bytes")
+
+    @pytest.mark.parametrize("byte", [256, -1, True, 1.0, "a", None])
+    def test_data_that_is_not_bytes_raises(self, byte: object) -> None:
+        node, tensors = _custom_op(data=(0, byte))
+        self._raises(node, tensors, "data .* is not a list of bytes")
 
 
 # --------------------------------------------------------------------------
