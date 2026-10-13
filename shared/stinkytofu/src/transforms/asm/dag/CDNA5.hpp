@@ -551,11 +551,6 @@ class CDNA5ReadyQueue : public ReadyQueue {
     bool hideBudgetPrescanEnabled() const {
         return getPassContext().getPassFeatureConfig().dagFeatures.enableWmmaHideBudgetPrescan;
     }
-    // MX128 (mxUnit==1) consumer/parent rules. MX16/MX32 leave this clear and keep
-    // the DS-priority / unfiltered parent-VALU schedule.
-    bool mxUnit1Scheduling() const {
-        return getPassContext().getPassFeatureConfig().dagFeatures.mxUnit1Scheduling;
-    }
     bool dsReadQueueFull() const {
         return dsReadInflight_.full();
     }
@@ -1798,9 +1793,6 @@ DAGNode* CDNA5ReadyQueue::pickOneFromWMMA(DAGNode* pick) {
 // Phase B unlock: issue a VALU that directly feeds the target WMMA when the
 // co-issue window (if any) allows and the node is RAW/hazard/dest-overlap free.
 DAGNode* CDNA5ReadyQueue::tryPickWmmaParentValu() const {
-    // Phase B parent-VALU unlock is mxUnit==1 only. MX16/MX32 keep the
-    // pre-3dd555 picker, which has no wmmaParentValuQueue.
-    if (!mxUnit1Scheduling()) return nullptr;
     if (wmmaParentValuQueue.empty()) return nullptr;
     if (!isValuPickable()) return nullptr;
     const DAGNode* target = selectTargetWmma();
@@ -1976,15 +1968,13 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
         break;
     }
     if (isValuPickable() || best == nullptr) {
-        // WMMA-parent VALUs: mxUnit==1 only unlocks the target WMMA. MX16/MX32
-        // keep every ready parent eligible. Not deferred behind the DS window
-        // cap — they outrank filler VALU within the same free tier.
-        if (mxUnit1Scheduling()) {
-            const DAGNode* parentTarget = selectTargetWmma();
-            if (DAGNode* t = pickFreeBest(wmmaParentValuQueue, nullptr, /*allowHiddenStall=*/false,
-                                          parentTarget)) {
-                if (!destOverlapsActiveWmmaSrc(t)) consider(t, kWmmaParentValu, 0);
-            }
+        // WMMA-parent VALUs: only parents of the target WMMA. Not deferred
+        // behind the DS window cap — they outrank filler VALU within the same
+        // free tier.
+        const DAGNode* parentTarget = selectTargetWmma();
+        if (DAGNode* t = pickFreeBest(wmmaParentValuQueue, nullptr, /*allowHiddenStall=*/false,
+                                      parentTarget)) {
+            if (!destOverlapsActiveWmmaSrc(t)) consider(t, kWmmaParentValu, 0);
         }
         if (DAGNode* t = pickFreeBest(valuQueue)) {
             if (!dsWindowOk && !destOverlapsActiveWmmaSrc(t) && fillerAllowed && keepsDsSlot(t, 0))
@@ -2133,7 +2123,7 @@ void CDNA5ReadyQueue::decidePromote() {
             isVectorALU(*hc.node->inst) && coIssueCyclePos_ < activeWmmaLatency_ &&
             computeValuAdvanceCycles(hc.node->inst->issueCycles) > hc.node->inst->issueCycles)
             continue;
-        if (mxUnit1Scheduling() && hc.kind == kWmmaParentValu) {
+        if (hc.kind == kWmmaParentValu) {
             DAGNode* target = selectTargetWmma();
             if (target && !parentFeedsWmma(hc.node, target)) continue;
         }
@@ -2629,30 +2619,29 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
     // load that unlocks the earliest still-pending WMMA so a later consumer's
     // load cannot occupy leftover DS-cap slots and drive s_wait_dscnt 2.
     DAGNode* pickedDS = nullptr;
-    if (!mxUnit1Scheduling()) {
-        // MX16/MX32: lowest dsReadPriority, no consumer focus and no preload hold.
-        for (DAGNode* n : localReadQueue)
-            if (!pickedDS || n->dsReadPriority < pickedDS->dsReadPriority) pickedDS = n;
-    } else {
-        bool pickedPending = false;
-        int pickedEarly = INT_MAX;
-        const bool holdIssuedOnlyPreload = wmmaIssueConfig.issuedCount > 0;
-        // Look ahead to a later consumer once every earlier consumer has no
-        // ds_load left to issue, in a steady loop and at a tail alike.
-        const int openConsumer = earliestUnissuedDsConsumer();
-        for (DAGNode* n : localReadQueue) {
-            if (holdIssuedOnlyPreload && dsFeedsIssuedOnlyWmma(n)) continue;
-            const int early = earliestPendingWmmaId(n);
-            if (early > openConsumer) continue;
-            const bool pending = early != INT_MAX;
-            if (!pickedDS || (pending && !pickedPending) ||
-                (pending == pickedPending &&
-                 (early < pickedEarly ||
-                  (early == pickedEarly && n->dsReadPriority < pickedDS->dsReadPriority)))) {
-                pickedDS = n;
-                pickedPending = pending;
-                pickedEarly = early;
-            }
+    bool pickedPending = false;
+    int pickedEarly = INT_MAX;
+    const bool holdIssuedOnlyPreload = wmmaIssueConfig.issuedCount > 0;
+    // Look ahead to a later consumer once every earlier consumer has no
+    // ds_load left to issue, in a steady loop and at a tail alike.
+    // Known cost: the gate also holds a ready later-consumer load while the
+    // earlier consumer's remaining load is not ready yet (e.g. WAR on its dest
+    // VGPRs). That load then issues right before its own WMMA with less latency
+    // cover, and it overrides LockDsReadOrder=false and per-token chaining in
+    // that case.
+    const int openConsumer = earliestUnissuedDsConsumer();
+    for (DAGNode* n : localReadQueue) {
+        if (holdIssuedOnlyPreload && dsFeedsIssuedOnlyWmma(n)) continue;
+        const int early = earliestPendingWmmaId(n);
+        if (early > openConsumer) continue;
+        const bool pending = early != INT_MAX;
+        if (!pickedDS || (pending && !pickedPending) ||
+            (pending == pickedPending &&
+             (early < pickedEarly ||
+              (early == pickedEarly && n->dsReadPriority < pickedDS->dsReadPriority)))) {
+            pickedDS = n;
+            pickedPending = pending;
+            pickedEarly = early;
         }
     }
 

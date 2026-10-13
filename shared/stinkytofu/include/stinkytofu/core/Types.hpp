@@ -193,10 +193,9 @@ struct PassFeatureConfig {
         /// Mirrors ModuleOptions::WarGateWmmas. WMMAs a ds_load waits before
         /// overwriting a vgpr a WMMA read (WmmaVgprSrcToDsWrite); <= 0 = derived.
         int warGateWmmas = 0;
-        /// Mirrors ModuleOptions::MxUnit1Scheduling. When set, CDNA5 keeps DS
-        /// loads and WMMA-parent VALU on the earliest pending WMMA (MX128 /
-        /// mxUnit==1). When clear, DS selection is lowest dsReadPriority and
-        /// parent VALUs have no Phase B unlock (MX16 / MX32).
+        /// Mirrors ModuleOptions::MxUnit1Scheduling. The DAG scheduler does not
+        /// read it: DS and WMMA-parent VALU stay on the earliest pending WMMA
+        /// for every kernel.
         bool mxUnit1Scheduling = false;
     };
 
