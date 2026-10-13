@@ -1565,13 +1565,7 @@ class GlobalWriteBatchWriter:
                                                    self.beta, self.edge, sumIdxGSUSYNC, addrCalc))
 
     # rC *= alpha
-    # Weave (PostLoopStoreInNll): when _weaveReadBeforeEpilogue is set the per-pair
-    # accvgpr_read is sunk into the store loop (_epilog) and populates ValuC AFTER
-    # this point. Applying alpha here would multiply stale ValuC and then be clobbered
-    # by the sunk read (dropping all alpha scaling, incl. folded scaleA*scaleB). Defer
-    # it: _epilog applies alpha per-element right after the read (see _weaveReadForEpilogue).
-    if self.kernel["InterleaveAlpha"] != 1 and self.applyAlpha and not self.parentWriter.alphaBeforeLoadC \
-       and not getattr(self, "_weaveReadBeforeEpilogue", False):
+    if self.kernel["InterleaveAlpha"] != 1 and self.applyAlpha and not self.parentWriter.alphaBeforeLoadC:
       module.addComment1("rC *= alpha batchElements=%s"%self.batchElements)
       if self.codeMulAlpha is None:
         elementIdx = 0
@@ -2185,14 +2179,6 @@ class GlobalWriteBatchWriter:
       # here; the store site skips its pop when _weaveReadBeforeEpilogue is set.
       if getattr(self, "_weaveReadBeforeEpilogue", False) and is16bitSubtile:
         self._weaveReadForEpilogue(module, elementIdx)
-        # The batch-level "rC *= alpha" block was skipped for this weave path (it would
-        # run before this read populates ValuC). Apply alpha here, per-element, on the
-        # freshly-read raw accumulator and BEFORE the rest of the epilogue (scaleVec/
-        # bias/beta) -- matching the non-weave order (read -> alpha -> epilogue).
-        if self.kernel["InterleaveAlpha"] != 1 and self.applyAlpha \
-           and not self.parentWriter.alphaBeforeLoadC and self.codeMulAlpha is None:
-          module.addComment1("rC *= alpha (weave per-element) elementIdx=%d" % elementIdx)
-          module.add(self._applyAlpha(self.kernel, self.gwvw, self.ss.elementSumIdx, elementIdx, self.tmpS01))
 
       scaleAVecModule = Module("ScaleAVecModule")
       scaleBVecModule = Module("ScaleBVecModule")
