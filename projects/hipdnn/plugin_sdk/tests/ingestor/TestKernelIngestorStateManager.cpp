@@ -3,10 +3,13 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <algorithm>
 #include <cstdint>
 #include <filesystem>
 #include <functional>
+#include <iterator>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -18,8 +21,7 @@
 #include <hipdnn_plugin_sdk/ingestor/KernelIngestorStateManager.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MakeEngine.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
-#include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
-
+#include <hipdnn_plugin_sdk/ingestor/NativeHooks.hpp>
 #include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 
 #include "KernelIngestorTestFixtures.hpp"
@@ -339,6 +341,62 @@ TEST(TestKernelIngestorStateManager, RejectsATupleSharedByAnArchIndependentAndAP
                  std::invalid_argument);
 }
 
+/// A ranking or a candidate page names a kernel by id, so two definitions a gfx942 device
+/// would both see cannot share one, even with distinct tuples.
+TEST(TestKernelIngestorStateManager, RejectsAKernelIdDeclaredTwiceUnderOverlappingArch)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto criterion = scopedGraphMatcher("test.graph_criterion", &acceptCriterion);
+
+    auto narrow = makePack({GRAPH_MATCHER_ID}, {"gfx942"});
+    narrow.kernels = {makeKernel(testId(0x96), "kernel_narrow", 64, "FLOAT")};
+    auto broad = makePack({GRAPH_MATCHER_ID}, {"gfx942", "gfx950"});
+    broad.id = testId(0x97);
+    broad.kernels = {makeKernel(testId(0x96), "kernel_broad", 256, "FLOAT")};
+
+    EXPECT_THROW(StateManager(makeSchema(),
+                              makeTestMatchers(),
+                              makeTestDispatches(),
+                              {narrow, broad},
+                              std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
+                              "test.graph"),
+                 std::invalid_argument);
+}
+
+/// Per-arch shards may reuse a kernel id: no device sees both definitions, and each device
+/// gets its own.
+TEST(TestKernelIngestorStateManager, AdmitsAKernelIdDeclaredOncePerDisjointArch)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto criterion = scopedGraphMatcher("test.graph_criterion", &acceptCriterion);
+
+    auto first = makePack({GRAPH_MATCHER_ID}, {"gfx90a"});
+    first.kernels = {makeKernel(testId(0x96), "kernel_gfx90a", 64, "FLOAT")};
+    auto second = makePack({GRAPH_MATCHER_ID}, {"gfx942"});
+    second.id = testId(0x97);
+    second.kernels = {makeKernel(testId(0x96), "kernel_gfx942", 256, "FLOAT")};
+
+    const StateManager manager(makeSchema(),
+                               makeTestMatchers(),
+                               makeTestDispatches(),
+                               {first, second},
+                               std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
+                               "test.graph");
+
+    const TestGraph graph(makeGraphId(25));
+    const auto blockSizeOn = [&](int deviceId, const char* deviceArch) {
+        auto properties = testDeviceProperties();
+        properties.gcnArchName = deviceArch;
+        const auto definitions
+            = manager.unsortedDefinitions(MatchContext{graph, deviceId, properties});
+        EXPECT_EQ(definitions.size(), 1u) << deviceArch;
+        return definitions.empty() ? int64_t{0}
+                                   : std::get<int64_t>(definitions.front().metadata.at(BLOCK_SIZE));
+    };
+    EXPECT_EQ(blockSizeOn(0, "gfx90a:sramecc+:xnack-"), 64);
+    EXPECT_EQ(blockSizeOn(1, "gfx942:sramecc+"), 256);
+}
+
 TEST(TestKernelIngestorStateManager, APackIsPrunedWhenAnyOfItsCriteriaFails)
 {
     // A pack passes only if every criterion it lists passes: the first admits it, the
@@ -410,6 +468,356 @@ TEST(TestKernelIngestorStateManager, EveryPackOfOneEngineSharesWhatTheGraphMatch
     EXPECT_EQ(counters().graphMatchCalls, 1);
     EXPECT_EQ(catalog.entries.size(), 4U);
     EXPECT_EQ(tryGetBoundInt(catalog.bound, "test.bound_token"), BOUND_TOKEN_VALUE);
+}
+
+/// What the last candidate filter call saw: each kernel's block size, in order, and the
+/// bound token.
+struct CandidateFilterCalls
+{
+    int calls = 0;
+    std::vector<int64_t> seen;
+    std::optional<int64_t> boundToken;
+};
+
+inline CandidateFilterCalls& candidateFilterCalls()
+{
+    static CandidateFilterCalls s_calls;
+    return s_calls;
+}
+
+/// Keeps only the kernels of the largest block size it is shown: a rule about the set,
+/// which no per-kernel matcher can state.
+std::vector<bool> keepLargestBlocks(const MatchContext& /*context*/,
+                                    const BoundTokens& bound,
+                                    const std::vector<const KernelDefinition*>& candidates)
+{
+    auto& calls = candidateFilterCalls();
+    ++calls.calls;
+    calls.seen.clear();
+    calls.boundToken = tryGetBoundInt(bound, "test.bound_token");
+    int64_t largest = 0;
+    for(const auto* kernel : candidates)
+    {
+        calls.seen.push_back(kernel->getIntMetadata(BLOCK_SIZE));
+        largest = std::max(largest, calls.seen.back());
+    }
+    std::vector<bool> keep;
+    for(const auto blockSize : calls.seen)
+    {
+        keep.push_back(blockSize == largest);
+    }
+    return keep;
+}
+
+std::vector<bool> answerWithNoFlags(const MatchContext& /*context*/,
+                                    const BoundTokens& /*bound*/,
+                                    const std::vector<const KernelDefinition*>& /*candidates*/)
+{
+    return {};
+}
+
+/// RAII: registers @p filter under @p symbol, the symbol of a kernel-scoped matcher.
+hipdnn_data_sdk::utilities::ScopedResource<const char*>
+    scopedCandidateFilter(const char* symbol, CandidateFilterFn filter)
+{
+    candidateFilterCalls() = {};
+    CandidateFilterRegistry::registerSymbol(symbol, filter);
+    return {symbol,
+            [](const char* registered) { CandidateFilterRegistry::unregisterSymbol(registered); }};
+}
+
+TEST(TestKernelIngestorStateManager, ACandidateFilterNarrowsWhatItsKernelMatcherAdmitted)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto filter = scopedCandidateFilter("test.kernel", &keepLargestBlocks);
+    const auto manager = makeStateManager();
+    const TestGraph graph(makeGraphId(0xC1));
+    const auto properties = testDeviceProperties();
+
+    const auto catalog = manager->unsortedCatalog(MatchContext{graph, 0, properties});
+
+    // The matcher admitted the two FLOAT kernels; the filter saw exactly those, in
+    // catalog order, with the graph match's tokens, and kept the larger.
+    EXPECT_EQ(counters().kernelCalls, 3);
+    EXPECT_EQ(candidateFilterCalls().calls, 1);
+    EXPECT_EQ(candidateFilterCalls().seen, (std::vector<int64_t>{64, 256}));
+    EXPECT_EQ(candidateFilterCalls().boundToken, BOUND_TOKEN_VALUE);
+    ASSERT_EQ(catalog.entries.size(), 1U);
+    EXPECT_EQ(catalog.entries.front().getIntMetadata(BLOCK_SIZE), 256);
+
+    // The narrowed catalog is what is cached and ranked.
+    EXPECT_EQ(manager->sortedDefinitions(MatchContext{graph, 0, properties}).size(), 1U);
+    EXPECT_EQ(candidateFilterCalls().calls, 1);
+}
+
+TEST(TestKernelIngestorStateManager, ACandidateFilterSeesEveryPackListingItsMatcherAtOnce)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto filter = scopedCandidateFilter("test.kernel", &keepLargestBlocks);
+
+    auto first = makePack({KERNEL_MATCHER_ID});
+    KernelDescriptorPack second = makePack({KERNEL_MATCHER_ID});
+    second.id = testId(0xC2);
+    second.kernels = {makeKernel(testId(0xC3), "second_pack_kernel", 512, "FLOAT")};
+    const StateManager manager(
+        makeSchema(),
+        std::vector<MatchDescriptor>{
+            {KERNEL_MATCHER_ID, "kernel scoped", MatchScope::KERNEL, "test.kernel"}},
+        makeTestDispatches(),
+        {first, second},
+        std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
+        "test.graph");
+
+    const TestGraph graph(makeGraphId(0xC4));
+    const auto properties = testDeviceProperties();
+    const auto catalog = manager.unsortedCatalog(MatchContext{graph, 0, properties});
+
+    // One call over both shards, so the widest kernel of the whole set wins.
+    EXPECT_EQ(candidateFilterCalls().calls, 1);
+    EXPECT_EQ(candidateFilterCalls().seen, (std::vector<int64_t>{64, 256, 512}));
+    ASSERT_EQ(catalog.entries.size(), 1U);
+    EXPECT_EQ(catalog.entries.front().packId, second.id);
+}
+
+TEST(TestKernelIngestorStateManager, AKernelMatcherWithoutACandidateFilterKeepsWhatItAdmitted)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    // Registered under another symbol, so no matcher of this engine names it.
+    const auto filter = scopedCandidateFilter("test.other_kernel", &keepLargestBlocks);
+    const auto manager = makeStateManager();
+    const TestGraph graph(makeGraphId(0xC5));
+    const auto properties = testDeviceProperties();
+
+    EXPECT_EQ(manager->unsortedDefinitions(MatchContext{graph, 0, properties}).size(), 2U);
+    EXPECT_EQ(candidateFilterCalls().calls, 0);
+}
+
+TEST(TestKernelIngestorStateManager, ACandidateFilterMustAnswerForEveryKernel)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto filter = scopedCandidateFilter("test.kernel", &answerWithNoFlags);
+    const auto manager = makeStateManager();
+    const TestGraph graph(makeGraphId(0xC6));
+    const auto properties = testDeviceProperties();
+
+    EXPECT_THROW(manager->unsortedDefinitions(MatchContext{graph, 0, properties}),
+                 std::runtime_error);
+}
+
+TEST(TestKernelIngestorStateManager, ACandidateFilterIsResolvedOnceWithTheSharedState)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    std::shared_ptr<const KernelIngestorSharedState<TestHandle>> state;
+    {
+        const auto filter = scopedCandidateFilter("test.kernel", &keepLargestBlocks);
+        state = makeStateManager()->sharedState();
+    }
+    const auto properties = testDeviceProperties();
+
+    // The filter is unregistered now. A manager over the shared state still applies the
+    // one resolved with it, like its matchers: both are part of the immutable state.
+    const StateManager first(state);
+    const TestGraph graph(makeGraphId(0xC7));
+    const auto catalog = first.unsortedCatalog(MatchContext{graph, 0, properties});
+    EXPECT_EQ(candidateFilterCalls().calls, 1);
+    ASSERT_EQ(catalog.entries.size(), 1U);
+    EXPECT_EQ(catalog.entries.front().getIntMetadata(BLOCK_SIZE), 256);
+
+    // One registered after the state was built is never consulted, by any manager over it.
+    const auto late = scopedCandidateFilter("test.kernel", &answerWithNoFlags);
+    const StateManager second(state);
+    const TestGraph other(makeGraphId(0xC8));
+    std::vector<KernelDefinition> definitions;
+    EXPECT_NO_THROW(definitions = second.unsortedDefinitions(MatchContext{other, 0, properties}));
+    EXPECT_EQ(definitions.size(), 1U);
+}
+
+/// A KernelPrepareFn's payload: the block size, decoded once.
+struct PreparedBlock
+{
+    int64_t blockSize;
+};
+
+int& prepareCalls()
+{
+    static int s_calls = 0;
+    return s_calls;
+}
+
+std::shared_ptr<const void> prepareBlock(const KernelDefinition& kernel)
+{
+    ++prepareCalls();
+    return std::make_shared<const PreparedBlock>(PreparedBlock{kernel.getIntMetadata(BLOCK_SIZE)});
+}
+
+std::shared_ptr<const void> prepareNothing(const KernelDefinition& /*kernel*/)
+{
+    return nullptr;
+}
+
+std::vector<int64_t>& preparedSeen()
+{
+    static std::vector<int64_t> s_seen;
+    return s_seen;
+}
+
+/// Admits FLOAT kernels, recording the prepared block size of each kernel it is shown.
+bool floatKernelsReadingPrepared(const MatchContext& context,
+                                 const BoundTokens& bound,
+                                 const KernelDefinition& kernel)
+{
+    if(kernel.preparedBy == &prepareBlock && kernel.prepared != nullptr)
+    {
+        preparedSeen().push_back(
+            static_cast<const PreparedBlock*>(kernel.prepared.get())->blockSize);
+    }
+    return acceptFloatKernels(context, bound, kernel);
+}
+
+/// RAII: registers @p prepare under @p symbol, the symbol of a kernel-scoped matcher.
+hipdnn_data_sdk::utilities::ScopedResource<const char*> scopedKernelPrepare(const char* symbol,
+                                                                            KernelPrepareFn prepare)
+{
+    prepareCalls() = 0;
+    preparedSeen().clear();
+    KernelPrepareRegistry::registerSymbol(symbol, prepare);
+    return {symbol,
+            [](const char* registered) { KernelPrepareRegistry::unregisterSymbol(registered); }};
+}
+
+TEST(TestKernelIngestorStateManager, AKernelPreparerRunsOncePerKernelWhenTheStateIsBuilt)
+{
+    const ScopedSymbols symbols(
+        "test.graph", acceptGraph, "test.kernel", floatKernelsReadingPrepared);
+    const auto prepare = scopedKernelPrepare("test.kernel", &prepareBlock);
+    const auto manager = makeStateManager();
+    const auto properties = testDeviceProperties();
+
+    // Every kernel of the pack listing the matcher, once, before any graph.
+    EXPECT_EQ(prepareCalls(), 3);
+    for(const auto& definition : manager->sharedState()->definitions().front())
+    {
+        EXPECT_EQ(definition.preparedBy, &prepareBlock);
+        ASSERT_NE(definition.prepared, nullptr);
+        EXPECT_EQ(static_cast<const PreparedBlock*>(definition.prepared.get())->blockSize,
+                  definition.getIntMetadata(BLOCK_SIZE));
+    }
+
+    // Matchers read the payload on every graph and every manager over the state; nothing
+    // is prepared again. Copies carry it too.
+    const TestGraph first(makeGraphId(0xD1));
+    const TestGraph second(makeGraphId(0xD2));
+    const StateManager other(manager->sharedState());
+    const auto copies = manager->unsortedDefinitions(MatchContext{first, 0, properties});
+    other.unsortedDefinitions(MatchContext{second, 0, properties});
+    EXPECT_EQ(prepareCalls(), 3);
+    EXPECT_EQ(preparedSeen(), (std::vector<int64_t>{64, 256, 64, 64, 256, 64}));
+    ASSERT_EQ(copies.size(), 2U);
+    for(const auto& copy : copies)
+    {
+        EXPECT_EQ(copy.preparedBy, &prepareBlock);
+        EXPECT_NE(copy.prepared, nullptr);
+    }
+}
+
+TEST(TestKernelIngestorStateManager, AKernelWithoutAPreparerCarriesNoPayload)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    // Registered under another symbol, so no matcher of this engine names it.
+    const auto prepare = scopedKernelPrepare("test.other_kernel", &prepareBlock);
+    const auto manager = makeStateManager();
+
+    EXPECT_EQ(prepareCalls(), 0);
+    for(const auto& definition : manager->sharedState()->definitions().front())
+    {
+        EXPECT_EQ(definition.prepared, nullptr);
+        EXPECT_EQ(definition.preparedBy, nullptr);
+    }
+}
+
+TEST(TestKernelIngestorStateManager, APackWhoseMatchersPrepareDifferentlyIsRejected)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto second = hipdnn_data_sdk::utilities::ScopedResource<const char*>(
+        "test.second_kernel",
+        [](const char* registered) { KernelMatcherRegistry::unregisterSymbol(registered); });
+    KernelMatcherRegistry::registerSymbol("test.second_kernel", &acceptFloatKernels);
+    const auto first = scopedKernelPrepare("test.kernel", &prepareBlock);
+    const auto other = scopedKernelPrepare("test.second_kernel", &prepareNothing);
+    const auto secondMatcherId = testId(0xD3);
+
+    // A kernel carries one payload, so two preparers on one pack cannot both apply.
+    EXPECT_THROW(
+        StateManager(makeSchema(),
+                     std::vector<MatchDescriptor>{
+                         {KERNEL_MATCHER_ID, "kernel scoped", MatchScope::KERNEL, "test.kernel"},
+                         {secondMatcherId,
+                          "second kernel scoped",
+                          MatchScope::KERNEL,
+                          "test.second_kernel"}},
+                     makeTestDispatches(),
+                     {makePack({KERNEL_MATCHER_ID, secondMatcherId})},
+                     std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
+                     "test.graph"),
+        std::invalid_argument);
+}
+
+TEST(TestKernelIngestorStateManager, ACatalogViewIsSharedAndPointsIntoTheSharedState)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto manager = makeStateManager();
+    const TestGraph graph(makeGraphId(0xD4));
+    const auto properties = testDeviceProperties();
+    const MatchContext context{graph, 0, properties};
+
+    const auto first = manager->catalogView(context);
+    EXPECT_EQ(manager->catalogView(context).get(), first.get());
+    ASSERT_EQ(first->entries.size(), 2U);
+    const auto& definitions = manager->sharedState()->definitions().front();
+    for(const auto* entry : first->entries)
+    {
+        EXPECT_TRUE(std::any_of(definitions.begin(),
+                                definitions.end(),
+                                [entry](const KernelDefinition& owned) { return &owned == entry; }))
+            << "a view entry is a copy, not the shared state's definition";
+    }
+
+    // Sorting publishes a new view and caches it in the unsorted one's place; the one a
+    // caller already holds is left as it was.
+    const auto sorted = manager->sortedCatalogView(context);
+    EXPECT_NE(sorted.get(), first.get());
+    EXPECT_TRUE(sorted->isSorted);
+    EXPECT_FALSE(first->isSorted);
+    EXPECT_EQ(manager->sortedCatalogView(context).get(), sorted.get());
+    EXPECT_EQ(manager->catalogView(context).get(), sorted.get());
+
+    // The copying accessors return the same catalog, in the same order.
+    const auto copy = manager->sortedCatalog(context);
+    ASSERT_EQ(copy.entries.size(), sorted->entries.size());
+    for(size_t i = 0; i < copy.entries.size(); ++i)
+    {
+        EXPECT_EQ(copy.entries[i].kernelId, sorted->entries[i]->kernelId);
+    }
+    EXPECT_TRUE(copy.isSorted);
+    EXPECT_EQ(counters().kernelCalls, 3);
+}
+
+TEST(TestKernelIngestorStateManager, ACatalogViewKeepsItsDefinitionsAlive)
+{
+    const TestGraph graph(makeGraphId(0xD5));
+    const auto properties = testDeviceProperties();
+    std::shared_ptr<const CatalogView> view;
+    {
+        const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+        view = makeStateManager()->catalogView(MatchContext{graph, 0, properties});
+    }
+
+    // The manager and every registration are gone; the view still reads its kernels.
+    ASSERT_EQ(view->entries.size(), 2U);
+    for(const auto* entry : view->entries)
+    {
+        EXPECT_EQ(entry->getStringMetadata(DTYPE), "FLOAT");
+    }
 }
 
 TEST(TestKernelIngestorStateManager, AGraphTheMatchDeclinesEmptiesTheCatalogWithoutCriteria)
@@ -519,11 +927,11 @@ TEST(TestKernelIngestorStateManager, NoDeviceYieldsAnEmptyCatalogEvenWhenMatcher
         manager->unsortedCatalog(MatchContext{graph, NO_DEVICE, properties}).entries.empty());
 }
 
-TEST(TestKernelIngestorStateManager, RematchesEveryCallWhenTheGraphHasNoIdentity)
+TEST(TestKernelIngestorStateManager, RematchesEveryCallWhenNothingIdentifiesTheGraph)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
     const auto manager = makeStateManager();
-    const TestGraph graph;
+    const TestGraphWithoutBytes graph;
     const auto properties = testDeviceProperties();
     const MatchContext context{graph, 0, properties};
 
@@ -533,6 +941,36 @@ TEST(TestKernelIngestorStateManager, RematchesEveryCallWhenTheGraphHasNoIdentity
     EXPECT_EQ(first.size(), 2U);
     EXPECT_EQ(second.size(), 2U);
     EXPECT_EQ(counters().graphMatchCalls, 2);
+}
+
+/// A graph with no id is keyed by its bytes, so repeated calls for it match once.
+TEST(TestKernelIngestorStateManager, CachesAGraphWithNoIdByItsBytes)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto manager = makeStateManager();
+    const TestGraph graph;
+    const auto properties = testDeviceProperties();
+    const MatchContext context{graph, 0, properties};
+
+    EXPECT_EQ(manager->unsortedDefinitions(context).size(), 2U);
+    EXPECT_EQ(manager->unsortedDefinitions(context).size(), 2U);
+    EXPECT_EQ(counters().graphMatchCalls, 1);
+}
+
+/// A corpus graph carries a content-derived (non-v4) id. Every plugin call for it, each over
+/// its own deserialized copy, must hit the one catalog rather than rematch every kernel.
+TEST(TestKernelIngestorStateManager, CachesAGraphWithANonV4IdAcrossCopies)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto manager = makeStateManager();
+    const TestGraph first(makeNonV4GraphId(0x81));
+    const TestGraph copy(makeNonV4GraphId(0x81));
+    const auto properties = testDeviceProperties();
+
+    ASSERT_TRUE(manager->sortedCatalog(MatchContext{first, 0, properties}).isSorted);
+    EXPECT_TRUE(manager->sortedCatalog(MatchContext{copy, 0, properties}).isSorted);
+    EXPECT_EQ(manager->unsortedDefinitions(MatchContext{copy, 0, properties}).size(), 2U);
+    EXPECT_EQ(counters().graphMatchCalls, 1);
 }
 
 TEST(TestKernelIngestorStateManager, ServesACachedRankingWithoutRematching)
@@ -555,8 +993,9 @@ TEST(TestKernelIngestorStateManager, DistinctGraphsCarryingANilUuidDoNotShareACa
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
     const auto manager = makeStateManager();
+    // The same nil id, different contents: a nil id must not alias them.
     const TestGraph first(makeNilGraphId());
-    const TestGraph second(makeNilGraphId());
+    const TestGraph second(makeNilGraphId(), hipdnn_data_sdk::utilities::Version{1, 2, 0});
     const auto properties = testDeviceProperties();
 
     const auto firstDefinitions = manager->unsortedDefinitions(MatchContext{first, 0, properties});
@@ -659,6 +1098,250 @@ TEST(TestKernelIngestorStateManager, KnobValuesComeFromTheCatalogInRankedOrder)
     ASSERT_EQ(values.size(), 2U);
     EXPECT_EQ(std::get<int64_t>(values[0]), 256);
     EXPECT_EQ(std::get<int64_t>(values[1]), 64);
+}
+
+TEST(TestKernelIngestorStateManager, KnobValuesOfAViewMatchThoseOfItsCopies)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto manager = makeStateManager();
+    const TestGraph graph(makeGraphId(0x9A));
+    const auto properties = testDeviceProperties();
+    const MatchContext context{graph, 0, properties};
+
+    for(const auto* field : {BLOCK_SIZE, DTYPE})
+    {
+        EXPECT_EQ(StateManager::knobValues(manager->sortedCatalogView(context)->entries, field),
+                  StateManager::knobValues(manager->sortedDefinitions(context), field))
+            << field;
+    }
+}
+
+/// The ordinal domain is sorted and duplicate-free, so an ordinal is a value's index in it.
+/// A value the domain does not carry has none, including one that sorts between two that it
+/// does carry.
+TEST(TestKernelIngestorStateManager, KnobOrdinalIndexesTheFieldsSortedDomain)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto manager = makeStateManager();
+
+    EXPECT_TRUE(manager->isOrdinalKnob(DTYPE));
+    EXPECT_FALSE(manager->isOrdinalKnob(BLOCK_SIZE));
+    EXPECT_EQ(manager->knobOrdinal(DTYPE, MetadataValue{std::string("FLOAT")}), 0);
+    EXPECT_EQ(manager->knobOrdinal(DTYPE, MetadataValue{std::string("HALF")}), 1);
+    EXPECT_EQ(manager->knobOrdinal(DTYPE, MetadataValue{std::string("GOOSE")}), std::nullopt);
+    EXPECT_EQ(manager->knobOrdinal(DTYPE, MetadataValue{std::string("ZZZ")}), std::nullopt);
+    EXPECT_EQ(manager->knobOrdinal(DTYPE, MetadataValue{std::string("A")}), std::nullopt);
+    // An integer addresses itself, in or out of any domain.
+    EXPECT_EQ(manager->knobOrdinal(BLOCK_SIZE, MetadataValue{int64_t{256}}), 256);
+    EXPECT_EQ(manager->knobOrdinal("no_such_field", MetadataValue{std::string("FLOAT")}),
+              std::nullopt);
+}
+
+TEST(TestKernelIngestorStateManager, KnobMatchesComparesAKernelsValueByOrdinal)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto manager = makeStateManager();
+    const auto half = makeTestKernel(testId(0x66), "kernel_64_half", 64, "HALF");
+    KernelDefinition kernel;
+    kernel.metadata = half.metadata;
+
+    EXPECT_TRUE(manager->knobMatches(kernel, DTYPE, 1));
+    EXPECT_FALSE(manager->knobMatches(kernel, DTYPE, 0));
+    EXPECT_TRUE(manager->knobMatches(kernel, BLOCK_SIZE, 64));
+    EXPECT_FALSE(manager->knobMatches(kernel, BLOCK_SIZE, 256));
+    EXPECT_FALSE(manager->knobMatches(kernel, "no_such_field", 0));
+}
+
+/// Throws on one candidate, so rankScored degrades the whole ranking to static order
+/// (RFC 0019 §5 step 8). That makes the candidate set a ranking was decided over observable.
+class DegradesOnAnUnscorableCandidate : public IKernelHeuristic
+{
+public:
+    /// Stands in for a dangling `$kernel.*` reference or an untrained feature.
+    static constexpr int64_t UNSCORABLE_BLOCK_SIZE = 999;
+
+    double score(const MatchContext& /*context*/,
+                 const BoundTokens& /*bound*/,
+                 const KernelDefinition& kernel) const override
+    {
+        const auto blockSize = kernel.getIntMetadata(BLOCK_SIZE);
+        if(blockSize == UNSCORABLE_BLOCK_SIZE)
+        {
+            throw std::runtime_error("no feature for block size 999");
+        }
+        return static_cast<double>(blockSize);
+    }
+
+    std::vector<ScoredKernel> calibratedRanking(const Catalog& catalog,
+                                                const MatchContext& context,
+                                                std::string& modelId) const override
+    {
+        modelId = "test-calibrated-model";
+        return rankScored(catalog, context);
+    }
+};
+
+/// Highest score, lowest priority: the model's pick, and never static order's.
+inline const DescriptorId FASTEST_ID = testId(0x7A);
+/// Lowest score, highest priority: static order's pick, and never the model's.
+inline const DescriptorId PREFERRED_ID = testId(0x7B);
+inline const DescriptorId UNSCORABLE_ID = testId(0x7C);
+
+std::unique_ptr<StateManager> makeCalibratedStateManager()
+{
+    KernelDescriptorPack pack;
+    pack.id = PACK_ID;
+    pack.name = "calibrated pack";
+    pack.engineId = ENGINE_ID;
+    pack.dispatchId = DISPATCH_ID;
+    // No matchers: every kernel reaches the catalog, and only the test narrows it.
+    pack.kernels = {makeKernel(FASTEST_ID, "fastest", 512, "FLOAT", /*priority=*/0),
+                    makeKernel(PREFERRED_ID, "preferred", 128, "FLOAT", /*priority=*/10),
+                    makeKernel(UNSCORABLE_ID,
+                               "unscorable",
+                               DegradesOnAnUnscorableCandidate::UNSCORABLE_BLOCK_SIZE,
+                               "FLOAT",
+                               /*priority=*/0)};
+
+    return std::make_unique<StateManager>(makeSchema(),
+                                          std::vector<MatchDescriptor>{},
+                                          makeTestDispatches(),
+                                          std::vector<KernelDescriptorPack>{std::move(pack)},
+                                          std::make_shared<DegradesOnAnUnscorableCandidate>(),
+                                          "test.graph");
+}
+
+/// Everything in @p ranking that names a kernel other than @p excluded, in order.
+std::vector<KernelDefinition> withoutKernel(const std::vector<KernelDefinition>& entries,
+                                            const DescriptorId& excluded)
+{
+    std::vector<KernelDefinition> kept;
+    std::copy_if(
+        entries.begin(),
+        entries.end(),
+        std::back_inserter(kept),
+        [&excluded](const KernelDefinition& kernel) { return kernel.kernelId != excluded; });
+    return kept;
+}
+
+/// RFC 0019 §9.2: a filtered request restricts the cached order rather than ranking its own
+/// subset. Static order puts `preferred` first; the model puts `fastest` first.
+TEST(TestKernelIngestorStateManager, ANarrowedCalibratedRankingRestrictsTheCachedFullOrder)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto manager = makeCalibratedStateManager();
+    const TestGraph graph(makeGraphId(0x7A));
+    const auto properties = testDeviceProperties();
+    const MatchContext context{graph, 0, properties};
+    const auto catalog = manager->unsortedCatalog(context);
+    ASSERT_EQ(catalog.entries.size(), 3U);
+
+    std::string modelId;
+    const auto wide = manager->calibratedRanking(catalog, catalog.entries, context, modelId);
+    const auto narrowed = manager->calibratedRanking(
+        catalog, withoutKernel(catalog.entries, UNSCORABLE_ID), context, modelId);
+
+    ASSERT_EQ(wide.size(), 3U);
+    ASSERT_EQ(narrowed.size(), 2U);
+    EXPECT_EQ(wide.front().kernelId, PREFERRED_ID)
+        << "one unscorable candidate degrades the whole ranking to static order";
+    EXPECT_EQ(narrowed.front().kernelId, PREFERRED_ID)
+        << "the narrowed request must read the cached full order, not rank its own subset";
+    EXPECT_EQ(narrowed.back().kernelId, FASTEST_ID);
+    EXPECT_DOUBLE_EQ(narrowed.front().score, 0.0)
+        << "the scores are the full catalog's too; a fresh subset ranking would score 128";
+}
+
+/// RFC 0019 §5 step 8: a cold pinned request also ranks the canonical candidate set, not its
+/// subset. Separate managers keep both requests on the cold path.
+TEST(TestKernelIngestorStateManager, AColdPinnedCalibratedRankingAgreesWithAnUnpinnedOne)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto pinnedOnly = makeCalibratedStateManager();
+    const auto unpinnedOnly = makeCalibratedStateManager();
+    const TestGraph graph(makeGraphId(0x7B));
+    const auto properties = testDeviceProperties();
+    const MatchContext context{graph, 0, properties};
+    const auto catalog = pinnedOnly->unsortedCatalog(context);
+    ASSERT_EQ(catalog.entries.size(), 3U);
+
+    std::string modelId;
+    const auto pinned = pinnedOnly->calibratedRanking(
+        catalog, withoutKernel(catalog.entries, UNSCORABLE_ID), context, modelId);
+    const auto unpinned
+        = unpinnedOnly->calibratedRanking(catalog, catalog.entries, context, modelId);
+
+    ASSERT_EQ(pinned.size(), 2U);
+    ASSERT_EQ(unpinned.size(), 3U);
+
+    std::vector<std::string> pinnedOrder;
+    pinnedOrder.reserve(pinned.size());
+    for(const auto& scored : pinned)
+    {
+        pinnedOrder.push_back(toString(scored.kernelId));
+    }
+    std::vector<std::string> survivingOrder;
+    for(const auto& scored : unpinned)
+    {
+        if(scored.kernelId != UNSCORABLE_ID)
+        {
+            survivingOrder.push_back(toString(scored.kernelId));
+        }
+    }
+
+    EXPECT_EQ(pinnedOrder, survivingOrder)
+        << "a pin may remove candidates; it may not reorder the ones that survive";
+    EXPECT_EQ(pinned.front().kernelId, PREFERRED_ID)
+        << "the candidate the scorer throws on is part of the basis either way, so both "
+           "rankings are static order";
+    EXPECT_DOUBLE_EQ(pinned.front().score, 0.0)
+        << "a subset ranking of its own would have scored `fastest` at 512";
+}
+
+/// Ranks by block size for a throughput request and by the inverse for a time request, so
+/// the two metrics pick different winners over the same catalog.
+class RanksByTheRequestedMetric : public IKernelHeuristic
+{
+public:
+    double score(const MatchContext& context,
+                 const BoundTokens& /*bound*/,
+                 const KernelDefinition& kernel) const override
+    {
+        const auto blockSize = static_cast<double>(kernel.getIntMetadata(BLOCK_SIZE));
+        return context.rankingMetric == "time" ? -blockSize : blockSize;
+    }
+};
+
+/// RFC 0019 §11.4: the sorted-catalog cache is keyed by metric, so the second request matches
+/// every key component but the metric.
+TEST(TestKernelIngestorStateManager, ASortedCatalogIsCachedPerRankingMetric)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    KernelDescriptorPack pack;
+    pack.id = PACK_ID;
+    pack.name = "metric pack";
+    pack.engineId = ENGINE_ID;
+    pack.dispatchId = DISPATCH_ID;
+    pack.kernels = {makeKernel(FASTEST_ID, "fastest", 512, "FLOAT", /*priority=*/0),
+                    makeKernel(PREFERRED_ID, "preferred", 128, "FLOAT", /*priority=*/0)};
+    const auto manager
+        = std::make_unique<StateManager>(makeSchema(),
+                                         std::vector<MatchDescriptor>{},
+                                         makeTestDispatches(),
+                                         std::vector<KernelDescriptorPack>{std::move(pack)},
+                                         std::make_shared<RanksByTheRequestedMetric>(),
+                                         "test.graph");
+    const TestGraph graph(makeGraphId(0x7D));
+    const auto properties = testDeviceProperties();
+
+    const auto tflops = manager->sortedDefinitions(MatchContext{graph, 0, properties, "tflops"});
+    const auto time = manager->sortedDefinitions(MatchContext{graph, 0, properties, "time"});
+
+    ASSERT_EQ(tflops.size(), 2U);
+    ASSERT_EQ(time.size(), 2U);
+    EXPECT_EQ(tflops.front().kernelId, FASTEST_ID);
+    EXPECT_EQ(time.front().kernelId, PREFERRED_ID)
+        << "the time request was served the order cached for tflops";
 }
 
 // A pack whose kernel matchers reject everything contributes nothing, so it must read
@@ -1141,12 +1824,113 @@ INSTANTIATE_TEST_SUITE_P(
 TEST(TestKernelIngestorStateManager, MakeEngineRejectsANullStateManager)
 {
     const StubDeviceResolver resolver;
+    DescriptorSet set;
+    set.engine = makeEngineWithKnobs({});
 
     EXPECT_THROW((makeEngine<StubHandle, StubSettings, StubContext>(
-                     makeEngineWithKnobs({}),
-                     std::unique_ptr<KernelIngestorStateManager<StubHandle>>{},
-                     resolver)),
+                     set, std::unique_ptr<KernelIngestorStateManager<StubHandle>>{}, resolver)),
                  std::invalid_argument);
+}
+
+/// An engine over a prebuilt state manager still carries the set's `predict_engine`
+/// bindings: a model the loader refused reports distrust, not a missing model.
+TEST(TestKernelIngestorStateManager, MakeEngineOverAPrebuiltStateManagerKeepsPredictionBindings)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::PredictionStatus;
+    const ScopedTestSymbols symbols;
+    const StubDeviceResolver resolver;
+    DescriptorSet set;
+    set.engine = makeEngineWithKnobs({BLOCK_SIZE});
+    set.unavailableEnginePredictionArches = {{"tflops", {"default"}}};
+
+    const auto engine
+        = makeEngine<StubHandle, StubSettings, StubContext>(set, makeStubStateManager(), resolver);
+
+    StubHandle handle;
+    const TestGraph graph(makeGraphId(0x6D));
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper config(nullptr, 0);
+    const auto prediction
+        = engine->getPrediction(handle, graph, config, HIPDNN_ENGINE_PREDICTION_ENGINE, true);
+    EXPECT_EQ(prediction.status, PredictionStatus::INVALID) << prediction.reason;
+    EXPECT_NE(prediction.reason.find("missing or incompatible"), std::string::npos)
+        << prediction.reason;
+}
+
+TEST(TestKernelIngestorStateManager, ManagersBuiltOverOneSharedStateShareItAndNotTheirCaches)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto first = makeStateManager();
+    const StateManager second(first->sharedState());
+
+    EXPECT_EQ(second.sharedState().get(), first->sharedState().get());
+    EXPECT_EQ(&second.metadataSchema(), &first->metadataSchema())
+        << "the second manager copied the schema rather than sharing it";
+
+    const TestGraph graph(makeGraphId(0x71));
+    const auto properties = testDeviceProperties();
+    const MatchContext context{graph, 0, properties};
+
+    const auto fromFirst = first->sortedDefinitions(context);
+    const auto fromSecond = second.sortedDefinitions(context);
+    ASSERT_EQ(fromFirst.size(), fromSecond.size());
+    for(size_t index = 0; index < fromFirst.size(); ++index)
+    {
+        EXPECT_EQ(fromFirst[index].kernelId, fromSecond[index].kernelId);
+    }
+
+    // Each manager matched the graph itself: the catalog cache is per manager, so a
+    // manager over a shared state starts as cold as one built from scratch.
+    EXPECT_EQ(counters().graphMatchCalls, 2);
+}
+
+TEST(TestKernelIngestorStateManager, AManagerOverASharedStateResolvesNothingAgain)
+{
+    std::shared_ptr<const KernelIngestorSharedState<TestHandle>> state;
+    {
+        const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+        state = makeStateManager()->sharedState();
+    }
+
+    // The graph_match and matcher symbols are unregistered now, so building the state
+    // again would throw; wrapping the existing one must not, and the state outlives the
+    // manager that built it.
+    ASSERT_NE(state.get(), nullptr);
+    EXPECT_NO_THROW({
+        const StateManager manager(state);
+        static_cast<void>(manager.metadataSchema());
+    });
+    EXPECT_EQ(state.use_count(), 1);
+}
+
+TEST(TestKernelIngestorStateManager, ANullSharedStateIsRejected)
+{
+    EXPECT_THROW(StateManager{std::shared_ptr<const KernelIngestorSharedState<TestHandle>>{}},
+                 std::invalid_argument);
+}
+
+TEST(TestKernelIngestorStateManager, MakeEngineOverASharedStateSharesItAcrossEngines)
+{
+    const ScopedTestSymbols symbols;
+    const StubDeviceResolver resolver;
+    const auto state = makeStubStateManager()->sharedState();
+    ASSERT_EQ(state.use_count(), 1);
+    DescriptorSet set;
+    set.engine = makeEngineWithKnobs({});
+
+    auto first = makeEngine<StubHandle, StubSettings, StubContext>(set, state, resolver);
+    auto second = makeEngine<StubHandle, StubSettings, StubContext>(set, state, resolver);
+    ASSERT_NE(first, nullptr);
+    ASSERT_NE(second, nullptr);
+    EXPECT_EQ(state.use_count(), 3);
+
+    first.reset();
+    second.reset();
+    EXPECT_EQ(state.use_count(), 1);
+
+    EXPECT_THROW(
+        (makeEngine<StubHandle, StubSettings, StubContext>(
+            set, std::shared_ptr<const KernelIngestorSharedState<StubHandle>>{}, resolver)),
+        std::invalid_argument);
 }
 
 } // namespace

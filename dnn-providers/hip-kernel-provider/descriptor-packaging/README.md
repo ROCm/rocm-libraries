@@ -346,8 +346,10 @@ export AMD_COMGR_CACHE_DIR=/tmp/comgr-cache   # RAM disk or local disk
 
 `HKP_PACK_JOBS` is read by a **direct child run** of `hkp_pack`. Inside the build it comes
 from the `PACK_JOBS <n>` argument of each `hkp_wire_pack_target()` call: the test roots
-pass `1`, or `2` for `integration`, and the production root passes none, so the packer uses
-its default. The reason is in the `hkp_wire_pack_target()` header in
+pass `1`, or `2` for `integration`, and the production root passes
+`HIPKERNELPROVIDER_PRODUCT_PACK_JOBS`. That cache variable is empty by default, which
+passes none, so the packer uses its default; set it to size the production pool for a
+large catalog on a wide host. The reason is in the `hkp_wire_pack_target()` header in
 `cmake/HkpPackaging.cmake`.
 
 ## Running the tests

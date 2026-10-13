@@ -76,7 +76,7 @@ def mint_ids(config: IngestorConfig) -> dict:
     ids["udd"] = str(uuid.uuid4())
     for pack_index, pack in enumerate(config.packs):
         ids[("pack", pack_index)] = str(uuid.uuid4())
-        if config.is_multi_pack:
+        if config.has_operation_matchers:
             ids[("operation_umd", pack_index)] = str(uuid.uuid4())
         for kernel_index, _kernel in enumerate(pack.kernels):
             ids[("kernel", pack_index, kernel_index)] = str(uuid.uuid4())
@@ -105,12 +105,15 @@ def build_kmd(config: IngestorConfig, ids: dict) -> dict:
 def build_uhd(config: IngestorConfig, ids: dict) -> dict | None:
     if not config.engine.has_heuristic:
         return None
+    # RFC 0019 §4.1: a non-static adapter must declare its objective. The loader drops a
+    # UHD carrying `kind`/`payload` keys.
     return {
         "version": "1.0",
         "id": ids["uhd"],
         "name": f"{config.engine.local_name} selector",
-        "kind": "native",
-        "payload": config.score_symbol,
+        "adapter": "native",
+        "objective": "max",
+        "native": {"symbol": config.score_symbol},
     }
 
 
@@ -127,7 +130,8 @@ def build_ued(config: IngestorConfig, ids: dict) -> dict:
         "metadata": ids["kmd"],
     }
     if config.engine.has_heuristic:
-        ued["heuristic"] = ids["uhd"]
+        # RFC 0019 §3.1: the loader rejects a bare top-level `heuristic` pointer.
+        ued["sort_kernel_catalog"] = {"default": ids["uhd"]}
     if config.engine.knobs:
         ued["knobs"] = list(config.engine.knobs)
     if config.engine.behavior_notes:
@@ -216,8 +220,9 @@ def _check_metadata_resolved(
     ``kernel_source.spec``.
 
     An absent knob takes the KMD ``default_value`` as its catalog key while the
-    binary was built from the builder dataclass's default. Mandatory fields are
-    left to the config loader.
+    binary was built from the builder dataclass's default, unless the KMD field
+    declares ``builder_default`` (the two defaults are the same value). Mandatory
+    fields are left to the config loader.
     """
     # A prebuilt hsaco object has no spec to pin a knob in; only metadata decides.
     prebuilt = kernel.kernel_source.kind == KERNEL_SOURCE_KIND_HSACO
@@ -237,10 +242,15 @@ def _check_metadata_resolved(
         )
 
     spec = kernel.kernel_source.spec or {}
+    # A `builder_default` field is declared to share its default with the
+    # builder's dataclass, so leaving it out of both layers decides it.
     undeclared = sorted(
         f.name
         for f in config.kmd_fields
-        if not f.is_mandatory and f.name not in metadata and spec.get(f.name) is None
+        if not f.is_mandatory
+        and not f.builder_default
+        and f.name not in metadata
+        and spec.get(f.name) is None
     )
     if undeclared:
         where = (
@@ -378,7 +388,7 @@ def build_operation_umd(
     """UMD policy: emitted only for genuine per-pack narrowing, i.e. only when
     the engine has more than one pack. A single-pack engine gets zero
     graph-scoped UMDs."""
-    if not config.is_multi_pack:
+    if not config.has_operation_matchers:
         return None
     return {
         "version": "1.0",
@@ -448,7 +458,7 @@ def build_kdp(
     """
     pack_index = _pack_index(config, pack)
     matchers = [ids["kernel_match"]]
-    if config.is_multi_pack:
+    if config.has_operation_matchers:
         matchers.insert(0, ids[("operation_umd", pack_index)])
     # Generation expressions targeting one engine may overlap, so a shared
     # tuple has four outcomes: disjoint arch coverage is not a duplicate;
@@ -698,7 +708,7 @@ class IngestorGenerator:
         files.append(f"{ddir}/kernel_dtype_matches_graph.umd.json")
         for pack in config.packs:
             files.append(f"{ddir}/{config.kdp_stem(pack)}.kdp.json")
-            if config.is_multi_pack:
+            if config.has_operation_matchers:
                 files.append(f"{ddir}/operation_is_{pack.discriminator}.umd.json")
         files.append(f"packs/{config.native_class_name}Native.cpp")
         files.append(f"tests/Test{config.engine.pascal_name}Packs.cpp")

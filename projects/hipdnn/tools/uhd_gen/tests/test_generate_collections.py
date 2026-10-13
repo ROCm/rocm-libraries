@@ -1,0 +1,707 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+"""Tests for `generate --collect-only` followed by `generate --dataset`.
+
+Merging keeps the newest measurement of each configuration on each shape, and refuses
+contributions that cannot form one model.
+"""
+import json
+from pathlib import Path
+
+import pytest
+
+pd = pytest.importorskip("pandas")
+from uhd_gen.provenance import snapshot_provenance
+from uhd_gen.tests.bench_stub import find_any_bench
+
+UED = "6d2b90f4-8c15-4a37-9e58-04b7c3fa1d62"
+KMD = "3f8a1c07-52d9-4e61-b0a4-9c7d61e2830f"
+GRAPHS = 16
+
+
+@pytest.fixture
+def world(tmp_path, monkeypatch):
+    """An L1 engine behind a fake bench with settable device, revision and speed."""
+    pytest.importorskip("lightgbm")
+    pytest.importorskip("flatbuffers")
+    # The fake bench reads HIP_VISIBLE_DEVICES as `--device`; one inherited from the
+    # environment would move every run off the default board.
+    monkeypatch.delenv("HIP_VISIBLE_DEVICES", raising=False)
+    tree = tmp_path / "descriptors"
+    tree.mkdir()
+    (tree / "engine.ued.json").write_text(
+        json.dumps(
+            {"version": "1.0", "id": UED, "name": "provider:engine7", "metadata": KMD}
+        ),
+        encoding="utf-8",
+    )
+    (tree / "metadata.kmd.json").write_text(
+        json.dumps({"version": "1.0", "id": KMD}), encoding="utf-8"
+    )
+    provenance = snapshot_provenance(tree)
+    graphs = tmp_path / "graphs"
+    graphs.mkdir()
+    for index in range(GRAPHS):
+        (graphs / f"{index}.json").write_text(
+            json.dumps({"id": f"graph-{index}", "size": index}), encoding="utf-8"
+        )
+    engine = {
+        "device": "board",
+        "revision": "provider-1",
+        "scale": 1.0,
+        "engine_name": "provider:engine7",
+        "calls": 0,
+    }
+
+    def bench(command, environment, log_dir, ordinal, commands):
+        engine["calls"] += 1
+        commands.append({"argv": command})
+        metric = command[command.index("--ranking-metric") + 1]
+        graph = json.loads(
+            Path(command[command.index("--graph") + 1]).read_text(encoding="utf-8")
+        )
+        average = (1.0 + graph["size"] / 10) * engine["scale"]
+        # `--device N` runs on board-N, as HIP_VISIBLE_DEVICES picks a GPU.
+        visible = environment.get("HIP_VISIBLE_DEVICES")
+        device = f"board-{visible}" if visible else engine["device"]
+        engine["scale"] *= engine.get("drift", 1.0)
+        return {
+            "engine_id": 7,
+            "engine_name": engine["engine_name"],
+            "graph_id": graph["id"],
+            "device_id": device,
+            "arch": "gfx942",
+            "metric": metric,
+            "binding": {
+                "engine": engine["engine_name"],
+                "role": "predict_engine",
+                "arch": "gfx942",
+                "metric": metric,
+                "selector_revision": engine["revision"],
+                "trained_against": {
+                    **provenance,
+                    "selector_revision": engine["revision"],
+                },
+                **(
+                    {"provider_build": engine["provider_build"]}
+                    if "provider_build" in engine
+                    else {}
+                ),
+            },
+            "features": {
+                "graph.flops": 2e9 * (graph["size"] + 1),
+                "device.cu_count": 120,
+            },
+            "avgTimeMs": average,
+            "robustMeanMs": average * 0.9,
+            "stddevMs": 0.01,
+            "iters": 30,
+            "is_valid": True,
+            "selection_mode": "immediate",
+            "timing_statistic": "robustMeanMs",
+        }
+
+    monkeypatch.setattr("uhd_gen.generate._run_json", bench)
+    find_any_bench(monkeypatch)
+    return {"tree": tree, "graphs": graphs, "engine": engine, "root": tmp_path}
+
+
+def _collect(world, name, collected_at=None, **engine):
+    from uhd_gen.__main__ import main
+
+    world["engine"].update(engine)
+    output = world["root"] / name
+    assert (
+        main(
+            [
+                "generate",
+                "--collect-only",
+                "--graphs",
+                str(world["graphs"]),
+                "--descriptor-tree",
+                str(world["tree"]),
+                "--engine-id",
+                "7",
+                "--role",
+                "predict_engine",
+                "--output-dir",
+                str(output),
+            ]
+        )
+        == 0
+    )
+    if collected_at:
+        # The merge orders by when a collection was taken; pin it rather than sleep.
+        manifest = json.loads(
+            (output / "collection_manifest.json").read_text(encoding="utf-8")
+        )
+        manifest["collected_at"] = collected_at
+        (output / "collection_manifest.json").write_text(
+            json.dumps(manifest), encoding="utf-8"
+        )
+    return output
+
+
+def _dataset(world, name, collections):
+    """The collections converted into one dataset, as `python -m uhd_gen.dataset add` does."""
+    from uhd_gen.dataset import store
+
+    directory = world["root"] / f"{name}.dataset"
+    for collection in collections:
+        store.add(directory, *store.from_collection(collection))
+    return directory
+
+
+def _train(world, name, evaluator, *, graphs=None, collections=(), extra=()):
+    from uhd_gen.__main__ import main
+
+    source = (
+        ["--graphs", str(graphs)]
+        if graphs
+        else ["--dataset", str(_dataset(world, name, collections))]
+    )
+    output = world["root"] / name
+    code = main(
+        [
+            "generate",
+            *source,
+            "--descriptor-tree",
+            str(world["tree"]),
+            "--engine-id",
+            "7",
+            "--role",
+            "predict_engine",
+            "--features",
+            "graph.flops",
+            "--num-boost-round",
+            "4",
+            "--early-stopping",
+            "2",
+            "--eval-fraction",
+            "0.25",
+            "--arch",
+            "gfx942",
+            "--no-promote",
+            "--feature-evaluator",
+            evaluator,
+            "--output-dir",
+            str(output),
+            *extra,
+        ]
+    )
+    return code, output
+
+
+def _labels(output):
+    return {
+        row["benchmark"]: row["avgTimeMs"]
+        for row in json.loads((output / "corpus.json").read_text(encoding="utf-8"))
+    }
+
+
+def test_collect_only_records_measurements_and_trains_nothing(world):
+    collection = _collect(world, "col")
+    manifest = json.loads(
+        (collection / "collection_manifest.json").read_text(encoding="utf-8")
+    )
+    assert manifest["schema"] == "uhd_gen.collection/1"
+    assert (manifest["graph_count"], manifest["row_counts"]) == (
+        GRAPHS,
+        {"tflops": GRAPHS},
+    )
+    assert (manifest["selector_revision"], manifest["devices"], manifest["arches"]) == (
+        "provider-1",
+        ["board"],
+        ["gfx942"],
+    )
+    assert (
+        len(json.loads((collection / "corpus.json").read_text(encoding="utf-8")))
+        == GRAPHS
+    )
+    assert (
+        not (collection / "model").exists()
+        and not (collection / "generation_manifest.json").exists()
+    )
+
+
+def test_a_recorded_collection_trains_what_the_one_shot_run_would(world, evaluator):
+    """Same measurements and seed give the same split and training set."""
+    one_shot = _train(world, "one_shot", evaluator, graphs=world["graphs"])
+    calls = world["engine"]["calls"]
+    collection = _collect(world, "col")
+    world["engine"]["calls"] = 0
+    from_collection = _train(world, "from_col", evaluator, collections=[collection])
+    assert one_shot[0] == from_collection[0] == 0
+    assert (
+        world["engine"]["calls"] == 0
+    ), "training from a collection measured something"
+    assert calls == GRAPHS
+    for name in ("train.json", "corpus.json"):
+        a = json.loads((one_shot[1] / name).read_text(encoding="utf-8"))
+        b = json.loads((from_collection[1] / name).read_text(encoding="utf-8"))
+        assert sorted(r["benchmark"] for r in a) == sorted(
+            r["benchmark"] for r in b
+        ), name
+    manifest = json.loads(
+        (from_collection[1] / "generation_manifest.json").read_text(encoding="utf-8")
+    )
+    assert [c["path"] for c in manifest["collections"]] == [str(collection)]
+    assert manifest["superseded_rows"] == 0
+
+
+def test_the_newest_measurement_of_a_graph_on_a_device_is_the_label(world, evaluator):
+    older = _collect(
+        world, "older", collected_at="2026-09-28T10:00:00+00:00", scale=1.0
+    )
+    newer = _collect(
+        world, "newer", collected_at="2026-09-30T10:00:00+00:00", scale=2.0
+    )
+    # Passed newest-first: collection time, not argument order, decides.
+    code, output = _train(world, "merged", evaluator, collections=[newer, older])
+    assert code == 0
+    labels, newest = _labels(output), _labels(newer)
+    assert labels == newest, "an older measurement survived the merge"
+    manifest = json.loads(
+        (output / "generation_manifest.json").read_text(encoding="utf-8")
+    )
+    assert manifest["superseded_rows"] == GRAPHS
+    assert [c["path"] for c in manifest["collections"]] == [str(older), str(newer)]
+
+
+def test_a_rebuilt_provider_measures_repeats_not_another_binding(world, evaluator):
+    """`binding.provider_build` names the loaded binary, not the selector contract."""
+    build = {"name": "provider", "version": "1.0+aaaaaaa", "api_version": "1"}
+    older = _collect(
+        world,
+        "older",
+        collected_at="2026-09-28T10:00:00+00:00",
+        provider_build=build,
+    )
+    newer = _collect(
+        world,
+        "newer",
+        collected_at="2026-09-30T10:00:00+00:00",
+        provider_build={**build, "version": "1.0+bbbbbbb"},
+        scale=2.0,
+    )
+    code, output = _train(world, "rebuilt", evaluator, collections=[older, newer])
+    assert code == 0
+    assert _labels(output) == _labels(newer)
+    manifest = json.loads(
+        (output / "generation_manifest.json").read_text(encoding="utf-8")
+    )
+    assert manifest["superseded_rows"] == GRAPHS
+
+
+def test_a_shape_measured_on_two_gpus_of_the_arch_is_trained_on_once(world, evaluator):
+    """Another GPU of the same arch measures the same problem: one label, the newest."""
+    older = _collect(
+        world,
+        "a",
+        collected_at="2026-09-28T10:00:00+00:00",
+        device="board-a",
+        scale=1.0,
+    )
+    newer = _collect(
+        world,
+        "b",
+        collected_at="2026-09-29T10:00:00+00:00",
+        device="board-b",
+        scale=2.0,
+    )
+    code, output = _train(world, "both", evaluator, collections=[older, newer])
+    assert code == 0
+    rows = json.loads((output / "corpus.json").read_text(encoding="utf-8"))
+    assert len(rows) == GRAPHS and {r["device"] for r in rows} == {"board-b"}
+    assert _labels(output) == _labels(newer)
+    manifest = json.loads(
+        (output / "generation_manifest.json").read_text(encoding="utf-8")
+    )
+    assert manifest["superseded_rows"] == GRAPHS
+
+
+def test_one_run_on_several_gpus_trains_on_each_shape_once(world, evaluator):
+    """Repeated `--device` measures each shape per GPU; the last GPU's is the label."""
+    world["engine"][
+        "drift"
+    ] = 1.01  # every measurement differs, so the label is traceable
+    code, output = _train(
+        world,
+        "two_gpus",
+        evaluator,
+        graphs=world["graphs"],
+        extra=["--device", "0", "--device", "1"],
+    )
+    assert code == 0 and world["engine"]["calls"] == 2 * GRAPHS
+    rows = json.loads((output / "corpus.json").read_text(encoding="utf-8"))
+    assert len(rows) == GRAPHS and {r["device"] for r in rows} == {"board-1"}
+    manifest = json.loads(
+        (output / "generation_manifest.json").read_text(encoding="utf-8")
+    )
+    assert manifest["superseded_rows"] == GRAPHS
+
+
+def test_distinct_configurations_on_one_shape_are_distinct_rows():
+    """Only a repeat of the same configuration on a shape is a duplicate."""
+    from uhd_gen.generate import one_measurement_per_shape
+
+    def row(graph, kernel, knobs, arch="gfx942"):
+        return {
+            "benchmark": graph,
+            "arch": arch,
+            "kernel": kernel,
+            "knob_settings": knobs,
+        }
+
+    measured = [
+        ("a", row("g", "k1", '{"tile": 64}')),
+        ("a", row("g", "k1", '{"tile": 128}')),
+        ("a", row("g", "k2", '{"tile": 64}')),
+        ("a", row("g", "k1", '{"tile": 64}', "gfx950")),
+        (
+            "b",
+            row("g", "k1", '{"tile": 64}'),
+        ),  # a repeat, on another GPU: supersedes a's
+        ("b", row("h", "k1", '{"tile": 64}')),
+    ]
+    kept, dropped = one_measurement_per_shape(measured)
+    assert dropped == 1
+    assert kept == [m[1] for m in measured[1:]]
+    # An L1 row names no configuration (the engine chose): its shape is its identity.
+    l1 = [
+        ("a", {"benchmark": "g", "arch": "gfx942"}),
+        ("b", {"benchmark": "g", "arch": "gfx942"}),
+    ]
+    assert one_measurement_per_shape(l1) == ([l1[1][1]], 1)
+
+    # A repeat under another binding is a revision change, never a silent supersede.
+    def bound(revision, build):
+        binding = {"selector_revision": revision, "provider_build": build}
+        return dict(l1[0][1], binding=json.dumps(binding))
+
+    with pytest.raises(ValueError, match="two engine bindings"):
+        one_measurement_per_shape([("a", bound("r1", "x")), ("b", bound("r2", "x"))])
+    rebuilt = [("a", bound("r1", "x")), ("b", bound("r1", "y"))]
+    assert one_measurement_per_shape(rebuilt) == ([rebuilt[1][1]], 1)
+
+
+@pytest.mark.parametrize(
+    "change, message",
+    [
+        ({"revision": "provider-2"}, "on selector_revision"),
+        ({"engine_name": "provider:engine8"}, "on engine_name"),
+    ],
+)
+def test_what_cannot_be_one_model_is_refused(world, change, message):
+    """A collection under another binding is refused when converted into the dataset."""
+    from uhd_gen.dataset import store
+
+    first = _collect(world, "first", device="board-a")
+    second = _collect(world, "second", device="board-b", **change)
+    dataset = world["root"] / "one.dataset"
+    store.add(dataset, *store.from_collection(first))
+    with pytest.raises(store.DatasetError, match=message):
+        store.add(dataset, *store.from_collection(second))
+    # Converting the same collection again is a no-op, not a second measurement.
+    assert store.add(dataset, *store.from_collection(first))["added"] is False
+
+
+def test_a_metric_the_collection_did_not_measure_is_refused(world, evaluator, caplog):
+    collection = _collect(world, "col")
+    code, _ = _train(
+        world, "time", evaluator, collections=[collection], extra=["--metric", "time"]
+    )
+    assert code == 1
+    assert "did not measure ['time']" in caplog.text
+
+
+def test_measurement_options_are_refused_without_a_measurement(
+    world, evaluator, caplog
+):
+    collection = _collect(world, "col")
+    code, _ = _train(
+        world, "knobbed", evaluator, collections=[collection], extra=["--device", "0"]
+    )
+    assert code == 1
+    assert "measures nothing" in caplog.text
+
+
+def test_rows_carry_the_regime_their_corpus_labelled_them_with(world, evaluator):
+    """hipdnn_corpus_gen's manifest.csv names each graph's population."""
+    import csv
+
+    with (world["graphs"] / "manifest.csv").open(
+        "w", newline="", encoding="utf-8"
+    ) as handle:
+        writer = csv.writer(handle)
+        writer.writerow(
+            ["benchmark", "name", "regime", "phase", "context", "source", "q.size"]
+        )
+        for index in range(GRAPHS):
+            phase = "decode" if index % 4 == 0 else "append"
+            writer.writerow(
+                [
+                    f"graph-{index}",
+                    f"g{index}",
+                    f"{phase}_short",
+                    phase,
+                    "short",
+                    "sweep",
+                    index,
+                ]
+            )
+    collection = _collect(world, "labelled")
+    rows = json.loads((collection / "corpus.json").read_text(encoding="utf-8"))
+    assert {
+        r["benchmark"]: (r["regime"], r["regime.phase"], r["regime.context"])
+        for r in rows
+    } == {
+        f"graph-{i}": (
+            "decode_short" if i % 4 == 0 else "append_short",
+            "decode" if i % 4 == 0 else "append",
+            "short",
+        )
+        for i in range(GRAPHS)
+    }
+    assert not any(
+        name.startswith("regime") for name in json.loads(rows[0]["features"])
+    ), "a label is an envelope column, never a model input"
+    code, output = _train(world, "from_labelled", evaluator, collections=[collection])
+    assert code == 0
+    assert {
+        r["regime"]
+        for r in json.loads((output / "corpus.json").read_text(encoding="utf-8"))
+    } == {"decode_short", "append_short"}
+
+
+def test_graphs_without_a_corpus_manifest_carry_no_regime(world):
+    collection = _collect(world, "unlabelled")
+    rows = json.loads((collection / "corpus.json").read_text(encoding="utf-8"))
+    assert not any("regime" in row for row in rows)
+
+
+def test_shards_partition_a_corpus_into_collections_that_train_as_one(world, evaluator):
+    """Shards measure every graph exactly once (e.g. one shard per GPU)."""
+    from uhd_gen.__main__ import main
+
+    shards = []
+    for index in range(3):
+        output = world["root"] / f"shard{index}"
+        assert (
+            main(
+                [
+                    "generate",
+                    "--collect-only",
+                    "--shard",
+                    f"{index}/3",
+                    "--graphs",
+                    str(world["graphs"]),
+                    "--descriptor-tree",
+                    str(world["tree"]),
+                    "--engine-id",
+                    "7",
+                    "--role",
+                    "predict_engine",
+                    "--output-dir",
+                    str(output),
+                ]
+            )
+            == 0
+        )
+        shards.append(output)
+    measured = [
+        {
+            r["benchmark"]
+            for r in json.loads((s / "corpus.json").read_text(encoding="utf-8"))
+        }
+        for s in shards
+    ]
+    assert sum(len(m) for m in measured) == GRAPHS and set().union(*measured) == {
+        f"graph-{i}" for i in range(GRAPHS)
+    }, "a partition: nothing twice, nothing missed"
+    assert [
+        json.loads((s / "collection_manifest.json").read_text())["shard"]
+        for s in shards
+    ] == ["0/3", "1/3", "2/3"]
+    code, output = _train(world, "sharded", evaluator, collections=shards)
+    assert code == 0
+    manifest = json.loads(
+        (output / "generation_manifest.json").read_text(encoding="utf-8")
+    )
+    assert manifest["superseded_rows"] == 0
+    assert (
+        len(json.loads((output / "corpus.json").read_text(encoding="utf-8"))) == GRAPHS
+    )
+
+
+@pytest.mark.parametrize(
+    "shard, message", [("3/3", "0 <= K < N"), ("x", "K/N"), ("1/0", "0 <= K < N")]
+)
+def test_a_malformed_shard_is_refused(world, caplog, shard, message):
+    from uhd_gen.__main__ import main
+
+    assert (
+        main(
+            [
+                "generate",
+                "--collect-only",
+                "--shard",
+                shard,
+                "--graphs",
+                str(world["graphs"]),
+                "--descriptor-tree",
+                str(world["tree"]),
+                "--engine-id",
+                "7",
+                "--role",
+                "predict_engine",
+                "--output-dir",
+                str(world["root"] / "bad"),
+            ]
+        )
+        == 1
+    )
+    assert message in caplog.text
+
+
+def test_a_closed_shape_space_trains_on_every_shape_and_reports_recall(
+    world, evaluator
+):
+    """`--recall` trains on every shape: a pack-bound engine sees no others."""
+    collection = _collect(world, "col")
+    held, _ = _train(world, "held", evaluator, collections=[collection])
+    assert held == 0
+    code, output = _train(
+        world, "recall", evaluator, collections=[collection], extra=["--recall"]
+    )
+    assert code == 0
+    trained = json.loads((output / "train.json").read_text(encoding="utf-8"))
+    corpus = json.loads((output / "corpus.json").read_text(encoding="utf-8"))
+    assert {r["benchmark"] for r in trained} == {r["benchmark"] for r in corpus}
+    held_out = json.loads(
+        (world["root"] / "held" / "train.json").read_text(encoding="utf-8")
+    )
+    assert len(held_out) < len(trained), "the default still holds a slice out"
+    manifest = json.loads(
+        (output / "generation_manifest.json").read_text(encoding="utf-8")
+    )
+    assert (manifest["evaluation"], manifest["eval_fraction"]) == ("recall", None)
+    report = json.loads(
+        (output / "model" / "eval_report.json").read_text(encoding="utf-8")
+    )
+    assert report["metrics"]["problems_scored"] == GRAPHS, "recall scores every shape"
+    # Scored on its own training shapes, so it never claims a held-out slice.
+    assert report["holdout_integrity"]["status"] == "recall"
+
+
+def test_a_named_evaluation_set_holds_out_exactly_its_graphs(world, evaluator):
+    """`--eval-benchmarks`: the held-out graphs are the ones a corpus fixed when it was made,
+    not a fraction drawn from whatever this run happens to train on -- so they stay held out,
+    and keep scoring, however the collections grow."""
+    first = _collect(
+        world, "a", collected_at="2026-01-01T00:00:00+00:00", device="board-0"
+    )
+    second = _collect(
+        world, "b", collected_at="2026-01-02T00:00:00+00:00", device="board-1"
+    )
+    named = ["graph-1", "graph-4", "graph-9", "graph-12"]
+    eval_set = world["root"] / "eval_slice.json"
+    eval_set.write_text(
+        json.dumps({"benchmarks": [*named, "graph-never-measured"]}), encoding="utf-8"
+    )
+    code, output = _train(
+        world,
+        "sliced",
+        evaluator,
+        collections=[first, second],
+        extra=["--eval-benchmarks", str(eval_set)],
+    )
+    assert code == 0
+    trained = {
+        r["benchmark"]
+        for r in json.loads((output / "train.json").read_text(encoding="utf-8"))
+    }
+    assert not trained & set(named)
+    assert trained == {f"graph-{i}" for i in range(GRAPHS)} - set(named)
+    manifest = json.loads(
+        (output / "generation_manifest.json").read_text(encoding="utf-8")
+    )
+    assert manifest["evaluation"] == "eval_set" and manifest["eval_fraction"] is None
+    assert (
+        manifest["eval_benchmarks"]["listed"],
+        manifest["eval_benchmarks"]["measured"],
+    ) == (5, 4)
+    # Every named graph measured is scored -- once, on the newest measurement of it, as
+    # training takes one measurement per shape -- and none trains, whichever board took it.
+    scored = manifest["models"][0]["eval_problem_keys"]
+    assert sorted(scored) == sorted([graph, "board-1"] for graph in named)
+
+
+@pytest.mark.parametrize(
+    "contents, extra, message",
+    [
+        (["graph-1"], ["--recall"], "--recall trains on every one"),
+        (["graph-absent"], [], "none of the 1 --eval-benchmarks graphs was measured"),
+        ([], [], "names no graph"),
+    ],
+)
+def test_an_evaluation_set_that_cannot_hold_anything_out_is_refused(
+    world, evaluator, caplog, contents, extra, message
+):
+    collection = _collect(world, "col")
+    eval_set = world["root"] / "eval.json"
+    eval_set.write_text(json.dumps(contents), encoding="utf-8")
+    code, _ = _train(
+        world,
+        "refused",
+        evaluator,
+        collections=[collection],
+        extra=["--eval-benchmarks", str(eval_set), *extra],
+    )
+    assert code != 0
+    assert message in caplog.text
+
+
+def test_a_run_can_train_on_some_contributions_of_a_dataset(world, evaluator):
+    from uhd_gen.__main__ import main
+
+    first = _collect(world, "first", collected_at="2026-01-01T00:00:00+00:00")
+    second = _collect(
+        world, "second", collected_at="2026-01-02T00:00:00+00:00", scale=2.0
+    )
+    dataset = _dataset(world, "both", [first, second])
+    common = [
+        "generate",
+        "--dataset",
+        str(dataset),
+        "--descriptor-tree",
+        str(world["tree"]),
+        "--engine-id",
+        "7",
+        "--role",
+        "predict_engine",
+        "--features",
+        "graph.flops",
+        "--num-boost-round",
+        "4",
+        "--early-stopping",
+        "2",
+        "--eval-fraction",
+        "0.25",
+        "--arch",
+        "gfx942",
+        "--no-promote",
+        "--feature-evaluator",
+        evaluator,
+    ]
+    output = world["root"] / "first-only"
+    assert main([*common, "--contribution", "first", "--output-dir", str(output)]) == 0
+    manifest = json.loads(
+        (output / "generation_manifest.json").read_text(encoding="utf-8")
+    )
+    assert [c["contribution_id"] for c in manifest["collections"]] == ["first"]
+    assert manifest["superseded_rows"] == 0, "the newer contribution was not read"
+    refused = world["root"] / "absent"
+    assert (
+        main([*common, "--contribution", "absent", "--output-dir", str(refused)]) == 1
+    )

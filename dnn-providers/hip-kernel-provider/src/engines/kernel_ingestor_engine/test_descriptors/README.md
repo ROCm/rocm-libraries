@@ -10,7 +10,7 @@ Every set is a top-level folder here, and every one is packed whole.
 |---|---|---|---|---|
 | `shared/` | `conv_fwd/` | `hip` | `unit/shared/`, `integration/shared/` | both binaries |
 | `unit/` | `pointwise/` | `embedded_source` | `unit/unit/` | the unit binary |
-| `integration/` | `pointwise/` | `hip` | `integration/integration/` | the integration binary |
+| `integration/` | `pointwise/`, `rocKE/gfx950_conv_fwd_aot_seed/` | `hip`, `packaged` (rocKE) | `integration/integration/` | the integration binary |
 | `archive_fixture/` | `pointwise/` | `hip` | `integration/archive_fixture/` | the integration binary |
 
 The packer runs five times over these four sets. `shared/` feeds both binaries, and each other
@@ -79,6 +79,28 @@ Each staged `embedded_source` descriptor holds a `provenance` block beside its
 `kernel_source` block. The block records the authored values. The `rewritten` field names the
 architecture stamp. Read the block to find the origin of a staged descriptor. The runtime
 does not read the block.
+
+## `integration/rocKE/gfx950_conv_fwd_aot_seed/`
+
+The descriptors for the engine `hipkernel:Gfx950ConvFwdAotSeed`: a small seed catalog of
+rocKE AOT forward-convolution instances, 12 implicit-GEMM and 4 direct depthwise per dtype,
+one KDP per dtype. The shipped engine `hipkernel:Gfx950ConvFwdAot` carries the full
+catalog, where one graph is served by thousands of instances. The integration binary pins
+every instance that serves a graph and checks it against the CPU reference, which only a
+catalog this small affords, so that suite runs against the seed.
+
+The seed declares its own engine because the integration binary loads the product root
+too, and one engine id in two roots would collide. Every symbol it names belongs to
+`hipkernel:Gfx950ConvFwdAot` (the generator config's `engine.native_symbols_from`), so the
+seed runs the shipped native code and registers nothing of its own. Its kernel ids are
+derived under a namespace of its own engine name, so an instance it shares with the
+product catalog does not carry the same kernel id twice.
+
+The folder sits under `rocKE/` so the rocKE family switch excludes it the way it excludes
+the production rocKE bundles. Do not edit these files by hand. Regenerate them with
+`tools/make_conv_aot_config.py --engine-name hipkernel:Gfx950ConvFwdAotSeed
+--sharding dtype` from `configs/gfx950_conv_fwd_aot_seed.instances.json`; see
+`docs/gfx950_conv_fwd/aot_instances.md`.
 
 ## `archive_fixture/`
 
