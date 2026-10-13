@@ -29,6 +29,7 @@
 #include "temporary_storage.hpp"
 
 #include _HIPCUB_STD_INCLUDE(__execution/env.h)
+#include _HIPCUB_LIBCXX_INCLUDE(__functional/call_or.h)
 #include _HIPCUB_LIBCXX_INCLUDE(__memory_resource/get_memory_resource.h)
 #include _HIPCUB_LIBCXX_INCLUDE(__stream/get_stream.h)
 #include _HIPCUB_LIBCXX_INCLUDE(__stream/stream_ref.h)
@@ -77,12 +78,12 @@ HIPCUB_RUNTIME_FUNCTION
 static hipError_t env_invoke(EnvT env, FuntionT&& func)
 {
     // Query properties from the environment
-    auto stream = _HIPCUB_STD_EXEC::__query_or(env,
-                                               _HIPCUB_LIBCXX::get_stream,
-                                               _HIPCUB_LIBCXX::stream_ref{hipStream_t{}});
-    auto mr     = _HIPCUB_STD_EXEC::__query_or(env,
-                                           _HIPCUB_LIBCXX::mr::__get_memory_resource,
-                                           detail::device_memory_resource{});
+    auto stream = _HIPCUB_LIBCXX::__call_or(_HIPCUB_LIBCXX::get_stream,
+                                            _HIPCUB_LIBCXX::stream_ref{hipStream_t{}},
+                                            env);
+    auto mr     = _HIPCUB_LIBCXX::__call_or(_HIPCUB_LIBCXX::mr::get_memory_resource,
+                                        detail::device_memory_resource{},
+                                        env);
 
     // Query and allocate temp storage
     void*  d_temp_storage     = nullptr;
