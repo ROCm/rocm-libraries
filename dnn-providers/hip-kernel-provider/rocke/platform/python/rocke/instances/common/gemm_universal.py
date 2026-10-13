@@ -649,11 +649,6 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
                 f"WMMA path supports only the 'mem' or 'wmma_v1' pipeline "
                 f"(got {spec.trait.pipeline!r}) on {arch}"
             )
-        if spec.trait.epilogue != "default":
-            return False, (
-                f"WMMA path supports only the 'default' epilogue "
-                f"(got {spec.trait.epilogue!r}) on {arch}"
-            )
         for flag, label in (
             (spec.trait.preshuffle_b, "preshuffle_b"),
             (spec.trait.direct_to_lds, "direct_to_lds"),
@@ -2523,7 +2518,7 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
             _emit_epilogue_cshuffle(
                 b,
                 spec,
-                A_smem,
+                op,
                 _for_results,
                 warp_m_idx,
                 warp_n_idx,
@@ -2570,6 +2565,47 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
 # ---------------------------------------------------------------------
 # Epilogues
 # ---------------------------------------------------------------------
+
+
+def _emit_wmma_acc_scatter(
+    b: IRBuilder,
+    spec: UniversalGemmSpec,
+    op,
+    lane: Value,
+    accs: Sequence[Value],
+    m_base_off: Value,
+    n_base_off: Value,
+    c_per_lane: int,
+    storage_dtype: Type,
+    per_cell,
+) -> None:
+    """WMMA sibling of :func:`_emit_mfma_acc_scatter`.
+
+    The wave32 accumulator distributes a warp tile across lanes differently
+    from MFMA, so each slot's ``(row, col)`` comes from the op's ``c_layout()``
+    map instead of lane math. Sharing the traversal keeps the default (global
+    store) and cshuffle (LDS staging) epilogues on one copy of it; the caller's
+    ``per_cell(c_m, c_n, acc_h, i)`` owns the write, and the base offsets say
+    whether the coordinates are block-absolute or warp-relative.
+    """
+    t = spec.tile
+    c_map = op.c_layout()
+    flat = 0
+    for mi in range(t.mfmas_per_warp_m):
+        atom_m = b.add(m_base_off, b.const_i32(mi * t.warp_tile_m))
+        for ni in range(t.mfmas_per_warp_n):
+            acc = accs[flat]
+            flat += 1
+            atom_n = b.add(n_base_off, b.const_i32(ni * t.warp_tile_n))
+            acc_h = b.vec_cast_f32_to(acc, storage_dtype)
+            for i in range(c_per_lane):
+                row_in_atom, col_in_atom = c_map.coord(b, lane, i)
+                per_cell(
+                    b.add(atom_m, row_in_atom),
+                    b.add(atom_n, col_in_atom),
+                    acc_h,
+                    i,
+                )
 
 
 def _emit_mfma_acc_scatter(
@@ -2918,7 +2954,7 @@ def _emit_epilogue_split_k(
 def _emit_epilogue_cshuffle(
     b: IRBuilder,
     spec: UniversalGemmSpec,
-    _smem_unused: Value,  # placeholder for future reuse
+    op,
     accs: Sequence[Value],
     warp_m_idx: Value,
     warp_n_idx: Value,
@@ -3021,23 +3057,42 @@ def _emit_epilogue_cshuffle(
         h = b.vec_extract(acc_h, i)
         b.smem_store_vN(Cs, [ld_m, ld_n], h, n=1)
 
-    # Same MFMA accumulator -> (row, col) layout as the default epilogue, but
-    # the base offsets are warp-relative (the block offset is applied at the
-    # wide global store in step 4) and each cell writes to the LDS staging
-    # tile instead of global. The shared scatter keeps the 16x16 / 32x32 row
-    # math + hoisting in one place.
-    _emit_mfma_acc_scatter(
-        b,
-        spec,
-        lane,
-        accs,
-        warp_m_off,
-        warp_n_off,
-        c_per_lane,
-        c_dtype,
-        _smem_cell,
-        n_base_first=True,
-    )
+    # Same accumulator -> (row, col) scatter the default epilogue uses, but the
+    # base offsets are warp-relative (the block offset is applied at the wide
+    # global store in step 4) and each cell writes the LDS staging tile instead
+    # of global. The shared scatter keeps the row math + hoisting in one place.
+    #
+    # Only this step is ISA-dependent; steps 3 and 4 read the staging tile
+    # row-major and are shared. That is where the win on WMMA comes from: the
+    # wave32 accumulator holds a lane's ``c_per_lane`` slots in one *column*
+    # (N elements apart in C), so a direct store costs one scalar store per
+    # slot, while the LDS round-trip recovers contiguous ``store_vec`` stores.
+    if op.family == "wmma":
+        _emit_wmma_acc_scatter(
+            b,
+            spec,
+            op,
+            lane,
+            accs,
+            warp_m_off,
+            warp_n_off,
+            c_per_lane,
+            c_dtype,
+            _smem_cell,
+        )
+    else:
+        _emit_mfma_acc_scatter(
+            b,
+            spec,
+            lane,
+            accs,
+            warp_m_off,
+            warp_n_off,
+            c_per_lane,
+            c_dtype,
+            _smem_cell,
+            n_base_first=True,
+        )
 
     # ---- step 3: barrier. ----
     b.sync()

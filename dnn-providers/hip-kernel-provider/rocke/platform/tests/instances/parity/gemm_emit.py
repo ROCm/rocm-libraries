@@ -422,7 +422,66 @@ def _spec(idx: int) -> UniversalGemmSpec:
             ),
             "gfx1250",
         )
+    if idx in _WMMA_CSHUFFLE_CONFIGS:
+        # gfx1250 WMMA cshuffle coverage. Every other cshuffle config in this
+        # family is MFMA, and the WMMA path rejected the epilogue outright
+        # until it was ported, so without these two the gate says nothing
+        # about the staging scatter or the C staging tile's dtype.
+        #
+        # The pair is chosen to split the two halves that can regress
+        # independently:
+        #   * fp8, unpadded -- A/B (8-bit) and C (16-bit) disagree, so it pins
+        #     the staging tile to the *C* dtype; unpadded keeps the wide
+        #     global store the epilogue exists to produce.
+        #   * bf16, padded -- A/B and C agree, and pad_n decomposes that wide
+        #     store back into guarded per-element stores, which is the other
+        #     branch of step 4.
+        name, dtype, pad = _WMMA_CSHUFFLE_CONFIGS[idx]
+        warp_tile_k = 64 if dtype.startswith(("fp8", "bf8")) else 32
+        return (
+            UniversalGemmSpec(
+                name=name,
+                tile=TileSpec(
+                    tile_m=64,
+                    tile_n=64,
+                    tile_k=warp_tile_k,
+                    warp_m=2,
+                    warp_n=2,
+                    warp_k=1,
+                    warp_tile_m=16,
+                    warp_tile_n=16,
+                    warp_tile_k=warp_tile_k,
+                ),
+                trait=TraitSpec(
+                    pipeline="mem",
+                    scheduler="intrawave",
+                    epilogue="cshuffle",
+                    pad_m=pad,
+                    pad_n=pad,
+                    pad_k=True,
+                ),
+                data=DataSpec(
+                    dtype_a=dtype,
+                    dtype_b=dtype,
+                    dtype_c="bf16" if dtype.startswith(("fp8", "bf8")) else dtype,
+                    dtype_acc="fp32",
+                    layout="RCR",
+                ),
+                wave_size=32,
+                block_size=128,
+                batched=False,
+            ),
+            "gfx1250",
+        )
     raise SystemExit(f"unknown config index {idx}")
+
+
+# idx -> (name, dtype_ab, pad_m/pad_n). Appended after the TDM block for the
+# same reason it was: a new index must not renumber the existing ones.
+_WMMA_CSHUFFLE_CONFIGS = {
+    18: ("test_cshuffle_wmma_fp8", "fp8e4m3", False),
+    19: ("test_cshuffle_wmma_bf16_pad", "bf16", True),
+}
 
 
 # idx -> (name, tdm_depth, epilogue, lds_k_pad, single_wave)

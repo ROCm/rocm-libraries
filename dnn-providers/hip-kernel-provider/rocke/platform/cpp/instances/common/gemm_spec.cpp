@@ -701,7 +701,7 @@ bool rocke_gemm_universal_is_valid_spec(const rocke_gemm_universal_spec_t* spec,
     /* WMMA coverage is narrower than CDNA's MFMA matrix: gfx11/gfx12 RDNA
      * supports the 16x16x16 atom and gfx1250 supports the gfx1250-class
      * 16x16x32 (f16/bf16) and 16x16x64 (fp8/bf8) atoms, all through the simple
-     * 'mem'/'wmma_v1' pipeline + 'default' epilogue. */
+     * 'mem'/'wmma_v1' pipeline. */
     if(strcmp(family, "wmma") == 0)
     {
         bool is_gfx1250 = strcmp(arch, "gfx1250") == 0;
@@ -731,12 +731,6 @@ bool rocke_gemm_universal_is_valid_spec(const rocke_gemm_universal_spec_t* spec,
             CK_GEMM_REJECT("WMMA path supports only the 'mem' or 'wmma_v1' pipeline "
                            "(got '%s') on %s",
                            spec->trait.pipeline,
-                           arch);
-        }
-        if(strcmp(spec->trait.epilogue, "default") != 0)
-        {
-            CK_GEMM_REJECT("WMMA path supports only the 'default' epilogue (got '%s') on %s",
-                           spec->trait.epilogue,
                            arch);
         }
         /* The Python loop walks (flag, label) in this fixed order and rejects on

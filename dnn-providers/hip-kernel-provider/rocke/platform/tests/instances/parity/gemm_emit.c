@@ -376,6 +376,45 @@ static int make_spec(int idx, rocke_gemm_universal_spec_t* spec)
         spec->batched = false;
         break;
     }
+    case 18: /* fp8 A/B -> bf16 C, unpadded: C staging dtype + the wide store */
+    case 19: /* bf16 throughout, padded: the guarded per-element store branch */
+    {
+        /* gfx1250 WMMA cshuffle. Every other cshuffle config here is MFMA,
+         * and the WMMA path rejected the epilogue until it was ported, so
+         * these are the only two that reach the staging scatter on wave32.
+         * The pair splits what can regress independently: 18 has A/B and C
+         * at different widths (so it pins the staging tile to the C dtype)
+         * and is unpadded (so step 4 emits the wide store the epilogue
+         * exists for); 19 agrees on dtype and pads, which is the other
+         * branch of step 4. */
+        bool is_fp8        = (idx == 18);
+        int  warp_tile_k   = is_fp8 ? 64 : 32;
+        spec->name         = is_fp8 ? "test_cshuffle_wmma_fp8" : "test_cshuffle_wmma_bf16_pad";
+        spec->tile         = (rocke_gemm_tile_spec_t){.tile_m      = 64,
+                                                      .tile_n      = 64,
+                                                      .tile_k      = warp_tile_k,
+                                                      .warp_m      = 2,
+                                                      .warp_n      = 2,
+                                                      .warp_k      = 1,
+                                                      .warp_tile_m = 16,
+                                                      .warp_tile_n = 16,
+                                                      .warp_tile_k = warp_tile_k};
+        spec->trait.pipeline  = "mem";
+        spec->trait.scheduler = "intrawave";
+        spec->trait.epilogue  = "cshuffle";
+        spec->trait.pad_m     = !is_fp8;
+        spec->trait.pad_n     = !is_fp8;
+        spec->trait.pad_k     = true;
+        spec->data.dtype_a    = is_fp8 ? "fp8e4m3" : "bf16";
+        spec->data.dtype_b    = is_fp8 ? "fp8e4m3" : "bf16";
+        spec->data.dtype_c    = "bf16";
+        spec->data.dtype_acc  = "fp32";
+        spec->data.layout     = "RCR";
+        spec->wave_size       = 32;
+        spec->block_size      = 128;
+        spec->batched         = false;
+        break;
+    }
     default:
         return -1;
     }
@@ -383,7 +422,7 @@ static int make_spec(int idx, rocke_gemm_universal_spec_t* spec)
     return 0;
 }
 
-/* Config 9 exercises gfx942; configs 11-17 gfx1250; the rest use the
+/* Config 9 exercises gfx942; configs 11-19 gfx1250; the rest use the
  * gfx950 baseline. */
 static const char* arch_for(int idx)
 {
@@ -391,7 +430,7 @@ static const char* arch_for(int idx)
     {
         return "gfx942";
     }
-    if(idx >= 11 && idx <= 17)
+    if(idx >= 11 && idx <= 19)
     {
         return "gfx1250";
     }

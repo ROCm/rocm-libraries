@@ -304,6 +304,68 @@ void rocke_gemm_emit_mfma_acc_scatter(rocke_ir_builder_t* b,
     }
 }
 
+
+/* =====================================================================
+ * _emit_wmma_acc_scatter
+ * ===================================================================== */
+
+void rocke_gemm_emit_wmma_acc_scatter(rocke_ir_builder_t* b,
+                                      const rocke_gemm_universal_spec_t* spec,
+                                      const rocke_mmaop_t* op,
+                                      rocke_value_t* lane,
+                                      rocke_value_t* const* accs,
+                                      int num_accs,
+                                      rocke_value_t* m_base_off,
+                                      rocke_value_t* n_base_off,
+                                      int c_per_lane,
+                                      const rocke_type_t* storage_dtype,
+                                      rocke_gemm_per_cell_fn per_cell,
+                                      void* user)
+{
+    const rocke_gemm_tile_spec_t* t = &spec->tile;
+    int mfmas_m = rocke_gemm_tile_mfmas_per_warp_m(t);
+    int mfmas_n = rocke_gemm_tile_mfmas_per_warp_n(t);
+    const rocke_layout_map_t* c_map;
+    int flat = 0;
+    int mi, ni, i;
+
+    (void)num_accs;
+    if(!rocke_ir_builder_ok(b))
+        return;
+
+    c_map = rocke_mmaop_c_layout(op, b);
+
+    for(mi = 0; mi < mfmas_m; ++mi)
+    {
+        rocke_value_t* atom_m = rocke_b_add(b, m_base_off, rocke_b_const_i32(b, mi * t->warp_tile_m));
+        for(ni = 0; ni < mfmas_n; ++ni)
+        {
+            rocke_value_t* acc = accs[flat];
+            rocke_value_t* atom_n;
+            rocke_value_t* acc_h;
+            flat += 1;
+            atom_n = rocke_b_add(b, n_base_off, rocke_b_const_i32(b, ni * t->warp_tile_n));
+            acc_h = rocke_b_vec_cast_f32_to(b, acc, storage_dtype);
+            for(i = 0; i < c_per_lane; ++i)
+            {
+                rocke_value_t* row_in_atom = NULL;
+                rocke_value_t* col_in_atom = NULL;
+                rocke_value_t* c_m;
+                rocke_value_t* c_n;
+                rocke_layout_map_coord(c_map, b, lane, i, &row_in_atom, &col_in_atom);
+                /* Sequenced through locals: C leaves argument evaluation order
+                 * unspecified, and Python builds the row add before the column
+                 * add. Passing the two rocke_b_add calls directly as arguments
+                 * lets the compiler emit them in the other order, which swaps
+                 * their SSA numbering and breaks byte-identity. */
+                c_m = rocke_b_add(b, atom_m, row_in_atom);
+                c_n = rocke_b_add(b, atom_n, col_in_atom);
+                per_cell(b, c_m, c_n, acc_h, i, user);
+            }
+        }
+    }
+}
+
 /* =====================================================================
  * _emit_epilogue_default
  * ===================================================================== */
@@ -687,7 +749,7 @@ void rocke_gemm_emit_epilogue_split_k(rocke_ir_builder_t* b,
 
 void rocke_gemm_emit_epilogue_cshuffle(rocke_ir_builder_t* b,
                                        const rocke_gemm_universal_spec_t* spec,
-                                       rocke_value_t* smem_unused,
+                                       const rocke_mmaop_t* op,
                                        rocke_value_t* const* accs,
                                        int num_accs,
                                        rocke_value_t* warp_m_idx,
@@ -723,7 +785,6 @@ void rocke_gemm_emit_epilogue_cshuffle(rocke_ir_builder_t* b,
     bool pad_m;
     bool pad_n;
 
-    (void)smem_unused;
     (void)a_per_lane;
     (void)b_per_lane;
     (void)num_accs;
@@ -772,18 +833,36 @@ void rocke_gemm_emit_epilogue_cshuffle(rocke_ir_builder_t* b,
 
     /* ---- step 1+2: warp accs -> LDS at the MFMA layout. ---- */
     smem_user.Cs = Cs;
-    rocke_gemm_emit_mfma_acc_scatter(b,
-                                     spec,
-                                     lane,
-                                     accs,
-                                     num_accs,
-                                     warp_m_off,
-                                     warp_n_off,
-                                     c_per_lane,
-                                     storage_dtype,
-                                     gemm_cshuffle_smem_cell,
-                                     &smem_user,
-                                     true);
+    if(op->family != NULL && strcmp(op->family, "wmma") == 0)
+    {
+        rocke_gemm_emit_wmma_acc_scatter(b,
+                                         spec,
+                                         op,
+                                         lane,
+                                         accs,
+                                         num_accs,
+                                         warp_m_off,
+                                         warp_n_off,
+                                         c_per_lane,
+                                         storage_dtype,
+                                         gemm_cshuffle_smem_cell,
+                                         &smem_user);
+    }
+    else
+    {
+        rocke_gemm_emit_mfma_acc_scatter(b,
+                                         spec,
+                                         lane,
+                                         accs,
+                                         num_accs,
+                                         warp_m_off,
+                                         warp_n_off,
+                                         c_per_lane,
+                                         storage_dtype,
+                                         gemm_cshuffle_smem_cell,
+                                         &smem_user,
+                                         true);
+    }
 
     /* ---- step 3: barrier. ---- */
     rocke_b_sync(b);
@@ -972,7 +1051,7 @@ void rocke_gemm_emit_epilogue(rocke_gemm_build_ctx_t* ctx)
     {
         rocke_gemm_emit_epilogue_cshuffle(b,
                                           spec,
-                                          ctx->A_smem,
+                                          ctx->op,
                                           ctx->for_results,
                                           ctx->num_for_results,
                                           ctx->warp_m_idx,
