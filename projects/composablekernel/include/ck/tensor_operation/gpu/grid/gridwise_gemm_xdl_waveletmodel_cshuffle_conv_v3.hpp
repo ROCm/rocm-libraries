@@ -640,27 +640,6 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
         }
     }
 
-    template <typename GridDesc>
-    __device__ static const auto TransformGridDescTdm(const GridDesc& desc)
-    {
-        if constexpr(UseTdmB)
-        {
-            const index_t desc_K0 = desc.GetLength(I0);
-            const index_t desc_K1 = desc.GetLength(I2);
-            const index_t desc_MN = desc.GetLength(I1);
-            return transform_tensor_descriptor(
-                desc,
-                make_tuple(make_merge_transform(make_tuple(desc_K0, desc_K1)),
-                           make_pass_through_transform(desc_MN)),
-                make_tuple(Sequence<0, 2>{}, Sequence<1>{}),
-                make_tuple(Sequence<1>{}, Sequence<0>{}));
-        }
-        else
-        {
-            return desc;
-        }
-    }
-
     // =========================================================================
     // Run: wave-specialized GEMM kernel
     // =========================================================================
@@ -902,12 +881,10 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
 
         const CElementwiseOperation c_element_op{};
 
-        const auto b_grid_desc_transfer = TransformGridDescTdm(b_grid_desc_bk0_n_bk1);
-
         const auto a_grid_buf = make_dynamic_buffer<AddressSpaceEnum::Global>(
             p_a_grid, a_grid_desc_ak0_m_ak1.GetElementSpaceSize());
         const auto b_grid_buf = make_dynamic_buffer<AddressSpaceEnum::Global>(
-            p_b_grid, b_grid_desc_transfer.GetElementSpaceSize());
+            p_b_grid, b_grid_desc_bk0_n_bk1.GetElementSpaceSize());
 
         // divide block work by [M, N]
         const auto block_2_ctile_map = Block2CTileMap{problem.M, problem.N, 4};
@@ -1020,13 +997,13 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
                         BBlockTransferThreadClusterArrangeOrder,
                         BDataType,
                         BDataType,
-                        decltype(b_grid_desc_transfer),
+                        decltype(b_grid_desc_bk0_n_bk1),
                         decltype(b_block_desc_transfer),
                         BBlockTransferSrcAccessOrder,
                         BBlockTransferSrcVectorDim,
                         2,
                         BBlockTransferSrcScalarPerVector,
-                        true>(b_grid_desc_transfer,
+                        true>(b_grid_desc_bk0_n_bk1,
                               make_multi_index(0, n_block_data_idx_on_grid, 0),
                               b_block_desc_transfer,
                               make_multi_index(0, 0, 0));
@@ -1038,11 +1015,11 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
                                                               Sequence<0, 1>,
                                                               BDataType,
                                                               BDataType,
-                                                              decltype(b_grid_desc_transfer),
+                                                              decltype(b_grid_desc_bk0_n_bk1),
                                                               decltype(b_block_desc_transfer),
                                                               KPerBlock * sizeof(BDataType),
                                                               16>(
-                        b_grid_desc_transfer,
+                        b_grid_desc_bk0_n_bk1,
                         make_multi_index(n_block_data_idx_on_grid, 0),
                         b_block_desc_transfer,
                         make_multi_index(0, 0));
@@ -1067,7 +1044,7 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
                 a_grid_buf,
                 a_block_bufs,
                 a_block_slice_copy_step,
-                b_grid_desc_transfer,
+                b_grid_desc_bk0_n_bk1,
                 b_block_desc_transfer,
                 b_blockwise_copy,
                 b_grid_buf,
