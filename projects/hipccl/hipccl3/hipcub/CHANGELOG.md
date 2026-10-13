@@ -56,6 +56,7 @@ Full documentation for hipCUB is available at [https://rocm.docs.amd.com/project
 * Deprecated `hipcub::PowerOfTwo`, use `hip::is_power_of_two(N)` instead.
 * Removed `WARP_SORT` template argument from `hipcub::BlockMergeSortStrategy`.
 * Removed the deprecated `hipcub::AliasTemporaries`.
+* Deprecated `hipcub::MergePathSearch`.
 
 ## hipCUB-5.0.0 for ROCm 10.2.0
  
