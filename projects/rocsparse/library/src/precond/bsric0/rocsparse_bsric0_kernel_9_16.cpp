@@ -43,7 +43,8 @@ namespace rocsparse
                                                  int32_t* __restrict__ block_done,
                                                  const J* __restrict__ block_map,
                                                  J*                   zero_pivot,
-                                                 rocsparse_index_base idx_base)
+                                                 rocsparse_index_base idx_base,
+                                                 J                    idx)
     {
         static constexpr uint32_t BSRDIM = 16;
         static constexpr uint32_t DIMX   = BLOCKSIZE / BSRDIM;
@@ -61,8 +62,14 @@ namespace rocsparse
         __shared__ T values[BSRDIM][BSRDIM + 1];
         __shared__ T local_values[BSRDIM][BSRDIM + 1];
 
+        // Keep the row map read in bounds.
+        if(idx >= mb)
+        {
+            return;
+        }
+
         // Current block row this wavefront is working on
-        J block_row = block_map[hipBlockIdx_x];
+        J block_row = block_map[idx];
 
         // Block diagonal entry point of the current block row
         I block_row_diag = bsr_diag_ind[block_row];
@@ -424,21 +431,33 @@ namespace rocsparse
                             int64_t              zero_pivot_stride,
                             rocsparse_index_base idx_base)
     {
+        //
+        // grid.x is clamped, so walk the contiguous chunk of rows grid_x_chunk gives
+        // this block. The block is a single wavefront, so the next row can reuse the
+        // shared arrays without a barrier.
+        //
+        int64_t first, last;
+        rocsparse::grid_x_chunk(mb, hipGridDim_x, hipBlockIdx_x, first, last);
+
         for(int64_t batch_index = hipBlockIdx_y; batch_index < batch_count;
             batch_index += hipGridDim_y)
         {
-            rocsparse::bsric0_device_9_16<MAX_NNZB>(
-                dir,
-                mb,
-                bsr_dim,
-                bsr_row_ptr,
-                bsr_col_ind,
-                rocsparse::load_pointer(bsr_val, batch_index, bsr_val_stride),
-                bsr_diag_ind,
-                rocsparse::load_pointer(done_array, batch_index, done_array_stride),
-                map,
-                rocsparse::load_pointer(zero_pivot, batch_index, zero_pivot_stride),
-                idx_base);
+            for(int64_t idx = first; idx < last; ++idx)
+            {
+                rocsparse::bsric0_device_9_16<MAX_NNZB>(
+                    dir,
+                    mb,
+                    bsr_dim,
+                    bsr_row_ptr,
+                    bsr_col_ind,
+                    rocsparse::load_pointer(bsr_val, batch_index, bsr_val_stride),
+                    bsr_diag_ind,
+                    rocsparse::load_pointer(done_array, batch_index, done_array_stride),
+                    map,
+                    rocsparse::load_pointer(zero_pivot, batch_index, zero_pivot_stride),
+                    idx_base,
+                    static_cast<J>(idx));
+            }
         }
     }
 
@@ -460,27 +479,27 @@ namespace rocsparse
         const int64_t A_batch_count = (A->batch_stride == 0) ? 1 : A->batch_count;
         auto          numeric_exact = bsric0_info->get_singularity_numeric_exact();
 
-        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-            (rocsparse::bsric0_kernel_9_16<MAX_NNZB>),
-            dim3(A->rows, rocsparse::get_grid_size_y(handle, A_batch_count)),
-            dim3(4, 16),
-            0,
-            handle->stream,
-            A->block_dir,
-            static_cast<J>(A->rows),
-            A_batch_count,
-            reinterpret_cast<const I*>(A->const_row_data),
-            reinterpret_cast<const J*>(A->const_col_data),
-            reinterpret_cast<T*>(A->val_data),
-            A->batch_stride,
-            reinterpret_cast<const I*>(trm_info->get_diag_ind()),
-            static_cast<J>(A->block_dim),
-            done_array,
-            done_array_stride,
-            reinterpret_cast<const J*>(trm_info->get_row_map()),
-            reinterpret_cast<J*>(numeric_exact->get_position()),
-            numeric_exact->get_stride(),
-            A->descr->base);
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::bsric0_kernel_9_16<MAX_NNZB>),
+                                           dim3(rocsparse::get_grid_size_x(handle, A->rows, 4),
+                                                rocsparse::get_grid_size_y(handle, A_batch_count)),
+                                           dim3(4, 16),
+                                           0,
+                                           handle->stream,
+                                           A->block_dir,
+                                           static_cast<J>(A->rows),
+                                           A_batch_count,
+                                           reinterpret_cast<const I*>(A->const_row_data),
+                                           reinterpret_cast<const J*>(A->const_col_data),
+                                           reinterpret_cast<T*>(A->val_data),
+                                           A->batch_stride,
+                                           reinterpret_cast<const I*>(trm_info->get_diag_ind()),
+                                           static_cast<J>(A->block_dim),
+                                           done_array,
+                                           done_array_stride,
+                                           reinterpret_cast<const J*>(trm_info->get_row_map()),
+                                           reinterpret_cast<J*>(numeric_exact->get_position()),
+                                           numeric_exact->get_stride(),
+                                           A->descr->base);
 
         return rocsparse_status_success;
     }
