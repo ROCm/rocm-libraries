@@ -3223,7 +3223,7 @@ void cpu_lacpy<float>(rocblas_fill uplo,
                                       rocblas_int ldb)
 {
     char uploC = rocblas2char_fill(uplo);
-    clacpy_(&uploC, &m, &n, A, &lda, B, &ldb);
+    slacpy_(&uploC, &m, &n, A, &lda, B, &ldb);
 }
 
 template <>
@@ -3236,7 +3236,7 @@ void cpu_lacpy<double>(rocblas_fill uplo,
                                       rocblas_int ldb)
 {
     char uploC = rocblas2char_fill(uplo);
-    clacpy_(&uploC, &m, &n, A, &lda, B, &ldb);
+    dlacpy_(&uploC, &m, &n, A, &lda, B, &ldb);
 }
 
 template <>
