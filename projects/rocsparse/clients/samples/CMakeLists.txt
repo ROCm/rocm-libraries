@@ -139,9 +139,6 @@ if(TARGET rocsparse)
       get_filename_component(EXAMPLE_TARGET ${EXAMPLE_SOURCE} NAME_WE)
       add_executable(${EXAMPLE_TARGET} ${EXAMPLE_SOURCE})
 
-      # Target compile options
-      target_compile_options(${EXAMPLE_TARGET} PRIVATE -Wno-unused-command-line-argument)
-
       # Include common client headers
       target_include_directories(${EXAMPLE_TARGET} PRIVATE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>)
       if (BUILD_CLIENTS_ONLY)
