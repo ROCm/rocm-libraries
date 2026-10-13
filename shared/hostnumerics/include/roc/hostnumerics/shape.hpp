@@ -6,7 +6,6 @@
 #include <cstddef>
 #include <initializer_list>
 #include <limits>
-#include <roc/hostnumerics/index_order.hpp>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -89,6 +88,10 @@ class Shape {
         return Shape(std::move(dimensions));
     }
 
+    // Orders are borrowed for the duration of the call and list dimensions from
+    // slowest to fastest. Identity [0, 1, ...] gives NumPy/C row-major order;
+    // reversed identity gives Fortran order. An empty span selects identity.
+    // Logical enumeration is independent of physical strides.
     // Converts coordinates to a logical linear index in the selected order.
     // Throws std::invalid_argument for a rank mismatch and std::out_of_range
     // for any coordinate outside the shape. Orders list dimensions from slowest to fastest; an
