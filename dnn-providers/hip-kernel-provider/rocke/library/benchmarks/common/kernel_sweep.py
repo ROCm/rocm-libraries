@@ -51,21 +51,35 @@ Per direction, on top of that:
   ``ws_replicas`` = 8). Plus group-merged depthwise kernels
   (``group_merge`` in 2..64, two-stage, load widths derived by the builder),
   served only to depthwise problems whose merged GEMM fits the tile.
+  Opt-in (``streamk_modes``; ``--compile-all --streamk``): stream-K
+  kernels, default epilogue only, ``split_k`` = 1, c = 1. At the widest
+  vector width W of the dtype (a = W; b in {W, 1}): one per launch mode
+  (``dp_sk``, ``persistent``) x reduction (``linear``, ``workspace`` with
+  ``ws_replicas`` = 8, and ``atomic`` where dW is fp32). Fully scalar
+  (a = b = 1), on tiles with tile_n >= 128 only: ``dp_sk`` x (``tree``,
+  ``workspace``), for large-filter depthwise layers. The CTA pool is a
+  kernarg, so it is not swept here.
 * **dgrad** -- vector widths: a in {1, 2, 4, 8} (dY along kpg), b = c in
   {1, 2, 4, 8} (W and dX along cpg); with the default epilogue c = 1 and b in
-  {1, 2, 4, 8}. stride and dilation are baked into the
-  tilde decomposition, so they are capabilities: stride in {1, 2} x dilation
-  in {1, 2}; up to 64 sub-GEMMs.
+  {1, 2, 4, 8}. One binary per configuration serves every stride and
+  dilation: the tilde decomposition is computed on the host and passed in
+  the sub-GEMM record buffer, up to 1024 sub-GEMMs (stride 32x32). Only the
+  tilde kernel is built -- stride 1 / dilation 1 runs it as one sub-GEMM,
+  as fast as the unit-stride kernel. The B tile takes the layout the JIT sweep
+  picks (``DgradConvSpec.default_lds_k_outer``): K-outer wherever the arch,
+  dtype, atom and pipeline allow it and the B load is wider than one element,
+  M-outer otherwise.
 
 Every direction builds the grouped kernel only: it serves groups == 1 as well
 (``CACHE_GROUPED``), so there is no separate ungrouped binary.
 
-Not swept (spec defaults): ``lds_k_outer`` (off, so wgrad ``async_dma``, which
-needs it, is never built), ``chiplet_swizzle``, ``lds_k_pad`` / ``lds_layout``,
-``waves_per_eu``, accumulator epilogues, ``cshuffle_no_alias``, the wgrad
-non-split (``split_k`` = 1) kernel, the pointwise fast path (1x1 problems run
-the general kernels) and 3-D convolution. The direct-conv cache sweeps its own
-grid: see :mod:`benchmarks.common.direct_kernel_sweep`.
+Not swept (spec defaults): fwd/wgrad ``lds_k_outer`` (off, so wgrad
+``async_dma``, which needs it, is never built), ``chiplet_swizzle``,
+``lds_k_pad`` / ``lds_layout``, ``waves_per_eu``, accumulator epilogues,
+``cshuffle_no_alias``, the wgrad non-split (``split_k`` = 1) kernel, the
+pointwise fast path (1x1 problems run the general kernels) and 3-D
+convolution. The direct-conv cache sweeps its own grid: see
+:mod:`benchmarks.common.direct_kernel_sweep`.
 """
 
 from __future__ import annotations
@@ -152,11 +166,20 @@ _AOT_ALIAS_PIPELINES: Dict[str, Tuple[str, ...]] = {
 # computes groups == 1 correctly too (group index 0, cpg == C), so the cache
 # builds the grouped one only and offers it to both; KernelCache keeps
 # honouring ungrouped entries of older caches for ungrouped problems only.
-# Implicit-GEMM dgrad folds the stride and dilation into its tilde
-# decomposition, so those need a binary per value.
+#
+# Implicit-GEMM dgrad reads its stride and dilation from the tilde sub-GEMM
+# records at run time; the only thing they change in the emitted code is the
+# unit-stride (stride 1, dilation 1) epilogue versus the tilde one. The cache
+# builds the tilde kernel only and records stride/dilation 0 (runtime), so one
+# binary serves every stride and dilation within max_sub_gemms. The unit-stride
+# kernel is not built: it measured no faster on stride-1 problems.
 CACHE_GROUPED: Tuple[bool, ...] = (True,)
-CACHE_DGRAD_STRIDES: Tuple[int, ...] = (1, 2)
-CACHE_DGRAD_DILATIONS: Tuple[int, ...] = (1, 2)
+# Sub-GEMM records an implicit-GEMM dgrad binary dispatches over (its tilde
+# decomposition has stride_h * stride_w of them at most): 32x32, so the
+# patch-embedding strides 14 and 16 of vision transformers fit. The CTA's
+# search runs only as many steps as a problem's records need, so the bound
+# costs the common stride-1 / stride-2 problems nothing.
+CACHE_DGRAD_MAX_SUB_GEMMS = 1024
 # wgrad group merging (WgradConvSpec.group_merge): Gm depthwise groups share
 # one workgroup. The degree is baked in and the binary serves depthwise
 # problems only (groups divisible by Gm, Y*X*Gm within the tile). Mirrors
@@ -175,6 +198,40 @@ CACHE_WGRAD_GROUP_MERGES: Tuple[int, ...] = (2, 4, 8, 16, 32, 64)
 # separately if you need it; the wgrad benchmark's JIT sweep still covers it.
 CACHE_WGRAD_SPLIT_KS: Tuple[int, ...] = (2,)
 
+# ---- wgrad stream-K axis (opt-in) -------------------------------------------
+# Stream-K (WgradConvSpec.streamk) bakes its launch mode and its partial-sum
+# reduction into the kernel; the CTA pool -- and with it the whole iteration
+# partition -- is a kernarg, so one binary per (mode, reduction) serves every
+# shape and pool. It is off unless a caller asks for it (--streamk): it adds
+# a default-epilogue kernel per (mode, reduction) to every wgrad geometry,
+# which more than doubles the wgrad grid. "atomic" accumulates into dW with
+# f32 atomics and the validator keeps it to fp32 dW only.
+#
+# Only a slice of the (mode, reduction) x vector-width grid is cached (see
+# _wgrad_streamk_builds). Stream-K pays off where the shape loads at the
+# widest vector width, so the requested variants are built there, minus
+# "tree" ("linear" is the other deterministic fixup). Narrower widths are left
+# to the split-K kernels, which are cached at every width and serve those
+# shapes as well -- except for one case: large-filter depthwise layers, whose
+# per-group reduction is long and whose GEMM is wide. They load scalar, and
+# stream-K wins there, so a scalar dp_sk slice is kept on the wide tiles.
+CACHE_WGRAD_STREAMK_MODES: Tuple[str, ...] = ("dp_sk", "persistent")
+CACHE_WGRAD_STREAMK_REDUCTIONS: Tuple[str, ...] = (
+    "linear",
+    "tree",
+    "workspace",
+    "atomic",
+)
+# Bytes per stream-K operand load at the widest vector width: 8 elements for
+# fp16/bf16, 4 for fp32.
+CACHE_WGRAD_STREAMK_LOAD_BYTES = 16
+# Reductions not cached at the widest vector widths.
+CACHE_WGRAD_STREAMK_WIDE_EXCLUDED_REDUCTIONS: Tuple[str, ...] = ("tree",)
+# The scalar (vector width 1) slice for large-filter depthwise layers.
+CACHE_WGRAD_STREAMK_SCALAR_MODES: Tuple[str, ...] = ("dp_sk",)
+CACHE_WGRAD_STREAMK_SCALAR_REDUCTIONS: Tuple[str, ...] = ("tree", "workspace")
+CACHE_WGRAD_STREAMK_SCALAR_MIN_TILE_N = 128
+
 # Private aliases for internal use -- the generators below refer to these.
 _TILE_MN = CACHE_TILE_MN
 _TILE_K = CACHE_TILE_K
@@ -186,8 +243,6 @@ _PIPELINES = CACHE_PIPELINES
 _EPILOGUES = CACHE_EPILOGUES
 _GROUPED = CACHE_GROUPED
 _WGRAD_GROUP_MERGES = CACHE_WGRAD_GROUP_MERGES
-_DGRAD_STRIDES = CACHE_DGRAD_STRIDES
-_DGRAD_DILATIONS = CACHE_DGRAD_DILATIONS
 _WGRAD_SPLIT_KS = CACHE_WGRAD_SPLIT_KS
 
 
@@ -285,11 +340,8 @@ def _layout_caps() -> List[dict]:
 
 
 def _dgrad_caps() -> List[dict]:
-    """dgrad's capability variants: grouped x stride x dilation."""
-    return [
-        dict(grouped=g, stride=s, dilation=d)
-        for s, d, g in itertools.product(_DGRAD_STRIDES, _DGRAD_DILATIONS, _GROUPED)
-    ]
+    """dgrad's capability variants: grouped, always the tilde kernel."""
+    return [dict(grouped=g, tilde=True) for g in _GROUPED]
 
 
 def _job_flavor(llvm_flavor: Optional[str]) -> str:
@@ -418,6 +470,56 @@ def _async_chunks(cfg: dict, dtypes, caps: dict, arch: str) -> dict:
     )
 
 
+def _wgrad_streamk_variants(
+    epilogue: str,
+    streamk_modes: Sequence[str],
+    streamk_reductions: Sequence[str],
+) -> List[Tuple[str, str]]:
+    """``(mode, reduction)`` stream-K variants built per wgrad geometry.
+
+    Stream-K runs its epilogue once per tile inside the stream-K tile loop and
+    only the default epilogue supports that, so cshuffle geometries get none.
+    """
+    if epilogue != "default":
+        return []
+    return list(itertools.product(streamk_modes, streamk_reductions))
+
+
+def _wgrad_streamk_builds(
+    epilogue: str,
+    tile_n: int,
+    dtype: str,
+    streamk_modes: Sequence[str],
+    streamk_reductions: Sequence[str],
+) -> List[Tuple[str, str, int, int]]:
+    """``(mode, reduction, vector_size_a, vector_size_b)`` built per geometry.
+
+    Of the requested variants: every one but the
+    ``CACHE_WGRAD_STREAMK_WIDE_EXCLUDED_REDUCTIONS`` at the widest width W of
+    the dtype on both operands, and at W on dY with a scalar X for the
+    narrow-channel layers (C = 3 stems) that cannot load X wide; plus the
+    ``CACHE_WGRAD_STREAMK_SCALAR_*`` slice, fully scalar, on tiles at least
+    ``CACHE_WGRAD_STREAMK_SCALAR_MIN_TILE_N`` wide. Every other combination
+    falls to the split-K kernels.
+    """
+    variants = _wgrad_streamk_variants(epilogue, streamk_modes, streamk_reductions)
+    w = CACHE_WGRAD_STREAMK_LOAD_BYTES // {"fp16": 2, "bf16": 2, "fp32": 4}[dtype]
+    builds = [
+        (mode, reduction, vec_a, vec_b)
+        for mode, reduction in variants
+        if reduction not in CACHE_WGRAD_STREAMK_WIDE_EXCLUDED_REDUCTIONS
+        for vec_a, vec_b in ((w, w), (w, 1))
+    ]
+    if tile_n >= CACHE_WGRAD_STREAMK_SCALAR_MIN_TILE_N:
+        builds += [
+            (mode, reduction, 1, 1)
+            for mode, reduction in variants
+            if mode in CACHE_WGRAD_STREAMK_SCALAR_MODES
+            and reduction in CACHE_WGRAD_STREAMK_SCALAR_REDUCTIONS
+        ]
+    return builds
+
+
 def _wgrad_jobs(
     arch,
     dtype,
@@ -428,6 +530,8 @@ def _wgrad_jobs(
     *,
     geometries: Optional[Sequence[tuple]] = None,
     llvm_flavor: Optional[str] = None,
+    streamk_modes: Sequence[str] = (),
+    streamk_reductions: Sequence[str] = CACHE_WGRAD_STREAMK_REDUCTIONS,
 ) -> Iterator[BuildJob]:
     from kernels.common.conv_implicit_gemm_wgrad import _DEFAULT_WS_REPLICAS
 
@@ -496,6 +600,52 @@ def _wgrad_jobs(
                     spec_kwargs=cfg,
                     caps=caps,
                 )
+        # Stream-K kernels (opt-in). Default epilogue only, so the store is
+        # scalar and B takes its own width; split_k stays 1 (stream-K owns the
+        # K partition). The workspace reduction reuses the two-stage scratch,
+        # so its replica count is pinned exactly as for two-stage.
+        for (mode, reduction, vec_a, vec_b), caps in itertools.product(
+            _wgrad_streamk_builds(
+                epilogue, tile_n, dtype, streamk_modes, streamk_reductions
+            ),
+            _layout_caps(),
+        ):
+            cfg = dict(
+                tile_m=tile_m,
+                tile_n=tile_n,
+                tile_k=tile_k,
+                warp_m=warp_m,
+                warp_n=warp_n,
+                warp_tile_m=wt,
+                warp_tile_n=wt,
+                warp_tile_k=atom.k,
+                pipeline=pipeline,
+                epilogue=epilogue,
+                wave_size=wave_size,
+                vector_size_a=vec_a,
+                vector_size_b=vec_b,
+                vector_size_c=1,
+                streamk=mode,
+                streamk_reduction=reduction,
+            )
+            if reduction == "workspace":
+                cfg["ws_replicas"] = _DEFAULT_WS_REPLICAS
+            yield BuildJob(
+                identity=KernelIdentity(
+                    arch=arch,
+                    direction="wgrad",
+                    algorithm="implicit_gemm",
+                    llvm_flavor=flavor,
+                    dtype_a=da,
+                    dtype_b=db,
+                    dtype_d=dd,
+                    grouped=caps["grouped"],
+                    **cfg,
+                ),
+                direction="wgrad",
+                spec_kwargs=cfg,
+                caps=caps,
+            )
         # Group-merged depthwise kernels. Merged split-K must take the
         # two-stage path (the packed atomic cannot drop off-diagonal pairs).
         # The vector widths are left to the builder: it derives them from the
@@ -554,6 +704,8 @@ def _dgrad_jobs(
     geometries: Optional[Sequence[tuple]] = None,
     llvm_flavor: Optional[str] = None,
 ) -> Iterator[BuildJob]:
+    from kernels.common.conv_implicit_gemm_dgrad import DgradConvSpec
+
     da, db, dd = _dtype_triple(dtype)
     flavor = _job_flavor(llvm_flavor)
     for (
@@ -571,18 +723,27 @@ def _dgrad_jobs(
     ):
         if not _aot_pipeline("dgrad", pipeline):
             continue
-        # dgrad folds the stride and dilation into its tilde decomposition,
-        # so those are capabilities here, not launch parameters.
+        # Stride and dilation are runtime (the tilde records); the identity
+        # records them as 0.
         # dgrad's B (W, KYXC) and D (dX) are both contiguous along cpg, so
         # they share one width; A (dY) runs along kpg. The default epilogue
         # stores scalar, so there D is 1 and B takes its own width.
         for vec_a, vec_bc, caps in itertools.product(_VECS, _VECS, _dgrad_caps()):
             vec_c = 1 if epilogue == "default" else vec_bc
-            grouped, stride, dilation = (
-                caps["grouped"],
-                caps["stride"],
-                caps["dilation"],
+            # The JIT sweep's B-tile layout. Its predicate keys on the parity
+            # of cpg, which is runtime here; the B load width stands in for
+            # it: a width > 1 only serves problems whose cpg it divides (an
+            # even channel run), and width 1 is the odd-cpg kernel, where
+            # K-outer has no scatter to remove.
+            lds_k_outer = DgradConvSpec.default_lds_k_outer(
+                arch=arch,
+                dtype_b=db,
+                warp_tile_n=wt,
+                cpg=vec_bc,
+                wave_size=wave_size,
+                pipeline=pipeline,
             )
+            grouped = caps["grouped"]
             cfg = dict(
                 tile_m=tile_m,
                 tile_n=tile_n,
@@ -598,6 +759,7 @@ def _dgrad_jobs(
                 vector_size_a=vec_a,
                 vector_size_b=vec_bc,
                 vector_size_c=vec_c,
+                lds_k_outer=lds_k_outer,
                 max_sub_gemms=max_sub_gemms,
             )
             yield BuildJob(
@@ -610,10 +772,6 @@ def _dgrad_jobs(
                     dtype_b=db,
                     dtype_d=dd,
                     grouped=grouped,
-                    stride_h=stride,
-                    stride_w=stride,
-                    dilation_h=dilation,
-                    dilation_w=dilation,
                     **cfg,
                 ),
                 direction="dgrad",
@@ -677,6 +835,14 @@ def job_for_identity(identity: KernelIdentity) -> BuildJob:
         atom,
     )
     want = identity.stable_hash()
+    streamk = (
+        {
+            "streamk_modes": (identity.streamk,),
+            "streamk_reductions": (identity.streamk_reduction,),
+        }
+        if identity.direction == "wgrad" and identity.streamk != "off"
+        else {}
+    )
     for job in _direction_jobs(
         identity.direction,
         identity.arch,
@@ -686,6 +852,7 @@ def job_for_identity(identity: KernelIdentity) -> BuildJob:
         identity.max_sub_gemms,
         geometries=[geometry],
         llvm_flavor=identity.llvm_flavor,
+        **streamk,
     ):
         if job.identity.stable_hash() == want:
             return job
@@ -745,6 +912,8 @@ def count_jobs(
     target,
     directions: Sequence[str],
     split_ks: Sequence[int] = CACHE_WGRAD_SPLIT_KS,
+    streamk_modes: Sequence[str] = (),
+    streamk_reductions: Sequence[str] = CACHE_WGRAD_STREAMK_REDUCTIONS,
 ) -> int:
     """Raw candidate count :func:`enumerate_jobs` walks, before dedup/validation.
 
@@ -766,6 +935,11 @@ def count_jobs(
         if "wgrad" in directions and _aot_pipeline("wgrad", pipeline):
             total += vecs * sum(len(_wgrad_two_stages(sk)) for sk in split_ks) * layouts
             total += merged
+            total += layouts * len(
+                _wgrad_streamk_builds(
+                    geo[7], geo[1], dtype, streamk_modes, streamk_reductions
+                )
+            )
         if "dgrad" in directions and _aot_pipeline("dgrad", pipeline):
             total += vecs * dgrad_caps
     return total
@@ -778,6 +952,9 @@ def _direction_jobs(
     target,
     split_ks: Sequence[int],
     max_sub_gemms: int,
+    *,
+    streamk_modes: Sequence[str] = (),
+    streamk_reductions: Sequence[str] = CACHE_WGRAD_STREAMK_REDUCTIONS,
     **kw,
 ) -> Iterator[BuildJob]:
     wave_size = target.wave_size
@@ -785,7 +962,17 @@ def _direction_jobs(
     if direction == "fwd":
         return _fwd_jobs(arch, dtype, wave_size, mma_family, target, **kw)
     if direction == "wgrad":
-        return _wgrad_jobs(arch, dtype, wave_size, mma_family, target, split_ks, **kw)
+        return _wgrad_jobs(
+            arch,
+            dtype,
+            wave_size,
+            mma_family,
+            target,
+            split_ks,
+            streamk_modes=streamk_modes,
+            streamk_reductions=streamk_reductions,
+            **kw,
+        )
     if direction == "dgrad":
         return _dgrad_jobs(
             arch, dtype, wave_size, mma_family, target, max_sub_gemms, **kw
@@ -809,6 +996,7 @@ def _enumerate_chunk(
     validate: bool,
     llvm_flavor: str,
     geometries: Sequence[tuple],
+    streamk: Tuple[Sequence[str], Sequence[str]] = ((), ()),
 ) -> Tuple[int, List[Tuple[str, BuildJob]]]:
     """Walk one direction over ``geometries``.
 
@@ -829,6 +1017,8 @@ def _enumerate_chunk(
         max_sub_gemms,
         geometries=geometries,
         llvm_flavor=llvm_flavor,
+        streamk_modes=streamk[0],
+        streamk_reductions=streamk[1],
     ):
         n_raw += 1
         key = job.identity.stable_hash()
@@ -849,9 +1039,18 @@ _WORKER_GEOMETRIES: Dict[Tuple[str, str], List[tuple]] = {}
 
 
 def _enumerate_worker(payload):
-    (direction, arch, dtype, split_ks, max_sub_gemms, validate, flavor, lo, hi) = (
-        payload
-    )
+    (
+        direction,
+        arch,
+        dtype,
+        split_ks,
+        max_sub_gemms,
+        validate,
+        flavor,
+        streamk,
+        lo,
+        hi,
+    ) = payload
     from rocke.core.arch import ArchTarget
 
     target = ArchTarget.from_gfx(arch)
@@ -868,6 +1067,7 @@ def _enumerate_worker(payload):
         validate,
         flavor,
         geos[lo:hi],
+        streamk,
     )
 
 
@@ -897,13 +1097,18 @@ def enumerate_jobs(
     target,
     directions: Sequence[str],
     split_ks: Sequence[int] = CACHE_WGRAD_SPLIT_KS,
-    max_sub_gemms: int = 64,
+    max_sub_gemms: int = CACHE_DGRAD_MAX_SUB_GEMMS,
     validate: bool = True,
     jobs: int = 1,
     log=None,
     log_every_s: float = 5.0,
+    streamk_modes: Sequence[str] = (),
+    streamk_reductions: Sequence[str] = CACHE_WGRAD_STREAMK_REDUCTIONS,
 ) -> List[BuildJob]:
     """All buildable jobs for the requested directions, deduped by identity.
+
+    ``streamk_modes`` (empty by default) adds the opt-in wgrad stream-K
+    kernels for those launch modes x ``streamk_reductions``.
 
     With ``validate=True`` (the default) each candidate is run through its
     direction's spec validator first, so the returned list is what will
@@ -931,8 +1136,18 @@ def enumerate_jobs(
         (len(geos) * i // n_chunks, len(geos) * (i + 1) // n_chunks)
         for i in range(n_chunks)
     ]
+    streamk = (tuple(streamk_modes), tuple(streamk_reductions))
     payloads = [
-        (direction, arch, dtype, tuple(split_ks), max_sub_gemms, validate, flavor)
+        (
+            direction,
+            arch,
+            dtype,
+            tuple(split_ks),
+            max_sub_gemms,
+            validate,
+            flavor,
+            streamk,
+        )
         + bound
         for direction in directions
         for bound in bounds
@@ -941,7 +1156,12 @@ def enumerate_jobs(
     total = 0
     if log is not None:
         total = count_jobs(
-            dtype=dtype, target=target, directions=directions, split_ks=split_ks
+            dtype=dtype,
+            target=target,
+            directions=directions,
+            split_ks=split_ks,
+            streamk_modes=streamk_modes,
+            streamk_reductions=streamk_reductions,
         )
         log(f"  {total} candidates to check with {jobs} process(es)")
 
@@ -981,6 +1201,7 @@ def enumerate_jobs(
                     validate,
                     flavor,
                     geos[lo:hi],
+                    streamk,
                 ),
             )
     else:
@@ -1051,7 +1272,9 @@ def _probe_problem(direction: str, caps: Optional[dict] = None):
 
     caps = caps or {}
     groups = 2 if caps.get("grouped") else 1
-    stride = int(caps.get("stride", 1))
+    # The tilde dgrad kernel is the strided one: any stride > 1 selects its
+    # code path, and the binary then serves every stride at run time.
+    stride = 2 if caps.get("tilde") else int(caps.get("stride", 1))
     dilation = int(caps.get("dilation", 1))
     # Keep the dilated filter inside the image so Ho/Wo stay positive.
     extent = 16 + 2 * (dilation - 1)
@@ -1273,8 +1496,13 @@ def compile_all(
     jobs: int = 1,
     limit: Optional[int] = None,
     log=print,
+    streamk_modes: Sequence[str] = (),
+    streamk_reductions: Sequence[str] = CACHE_WGRAD_STREAMK_REDUCTIONS,
 ) -> int:
     """Populate ``cache`` with every implicit-GEMM variant for ``arch``/``dtype``.
+
+    ``streamk_modes`` opts the wgrad stream-K kernels in (see
+    :data:`CACHE_WGRAD_STREAMK_MODES`).
 
     Compilation is embarrassingly parallel and dominated by LLVM, so it fans
     out over processes; ``jobs`` defaults to one but the caller normally passes
@@ -1294,6 +1522,8 @@ def compile_all(
             directions=directions,
             jobs=jobs,
             log=log,
+            streamk_modes=streamk_modes,
+            streamk_reductions=streamk_reductions,
         ),
         build=build_kernel,
         arch=arch,
@@ -1321,6 +1551,10 @@ _BREAKDOWN_AXES = (
         lambda i: ("two-stage" if i.two_stage else "atomic") if i.split_k > 1 else "no",
     ),
     ("group_merge", lambda i: i.group_merge),
+    (
+        "stream-K",
+        lambda i: f"{i.streamk}/{i.streamk_reduction}" if i.streamk != "off" else "no",
+    ),
     ("stride x dilation", lambda i: f"{i.stride_h}x{i.dilation_h}"),
     ("filter", lambda i: f"{i.filter_h}x{i.filter_w}"),
     ("pad", lambda i: i.pad_h),
