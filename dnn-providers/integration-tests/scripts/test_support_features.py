@@ -26,6 +26,7 @@ from support_features import (
     Feature,
     FeatureError,
     batchnorm,
+    batchnorm_backward,
     batchnorm_training,
     convolution,
     convolution_bwd,
@@ -1704,6 +1705,162 @@ class TestBatchnormTrainingExtract:
         node[side][port] = None
         with pytest.raises(FeatureError, match=f"required port {port}"):
             batchnorm_training.extract(node, tensors)
+
+
+def _bn_bwd(
+    *,
+    batch: int = 2,
+    spatial: tuple[int, ...] = (8, 8),
+    channels: int = 4,
+    layout: str = "nchw",
+    dtype: str = "float",
+    dy_dtype: str | None = None,
+    dy_virtual: bool = False,
+    saved_stats: bool = True,
+    peer_stats: int = 0,
+) -> tuple[dict, dict]:
+    """A BatchnormBackwardAttributes node.
+
+    ``dy`` on uid 1, ``x`` on 2, ``dx`` on 3, scale on 4, dscale and dbias on
+    5 and 6, the saved mean and inverse variance on 7 and 8, peer statistics
+    from 9. Ports as utilities/json/BatchnormBackwardAttributes.hpp writes
+    them, written out rather than read from the module.
+    """
+    dims = [batch, channels, *spatial]
+    per_channel = [1, channels, *(1 for _ in spatial)]
+    strides = _layout_strides(dims, layout)
+    tensors = {
+        uid: {
+            "uid": uid,
+            "dims": list(dims),
+            "strides": list(strides),
+            "data_type": dt,
+            "virtual": virtual,
+        }
+        for uid, dt, virtual in (
+            (1, dy_dtype or dtype, dy_virtual),
+            (2, dtype, False),
+            (3, dtype, False),
+        )
+    }
+    tensors |= {uid: _channel(uid, per_channel) for uid in range(4, 9 + peer_stats)}
+    inputs = {
+        "dy_tensor_uid": 1,
+        "x_tensor_uid": 2,
+        "mean_tensor_uid": 7 if saved_stats else None,
+        "inv_variance_tensor_uid": 8 if saved_stats else None,
+        "scale_tensor_uid": 4,
+        "peer_stats_tensor_uid": list(range(9, 9 + peer_stats)),
+    }
+    outputs = {"dx_tensor_uid": 3, "dscale_tensor_uid": 5, "dbias_tensor_uid": 6}
+    node = {"type": "BatchnormBackwardAttributes", "inputs": inputs, "outputs": outputs}
+    return node, tensors
+
+
+class TestBatchnormBackwardExtract:
+    PLAIN = {"dtype:fp32", "rank:2d", "layout:nchw", "saved_stats:on"}
+
+    def _extract(self, **kwargs) -> set[str]:
+        return batchnorm_backward.extract(*_bn_bwd(**kwargs))
+
+    def test_builder_binds_every_schema_field(self) -> None:
+        node, _ = _bn_bwd()
+        assert set(batchnorm.bound(node)) == table_fields(
+            batchnorm_backward.SCHEMA_FILE, batchnorm_backward.SCHEMA_TABLE
+        )
+
+    def test_every_feature_is_reachable(self) -> None:
+        reached = self._extract()
+        for kwargs in (
+            {"spatial": (), "dtype": "half", "dy_dtype": "float"},
+            {"spatial": (8,), "layout": "nhwc", "dtype": "bfloat16"},
+            {"spatial": (4, 8, 8), "peer_stats": 2},
+        ):
+            reached |= self._extract(**kwargs)
+        assert reached == {feature.id for feature in batchnorm_backward.FEATURES}
+
+    def test_plain_graph(self) -> None:
+        assert self._extract() == self.PLAIN
+
+    @pytest.mark.parametrize(
+        "spatial, expected",
+        [((), "rank:0d"), ((8,), "rank:1d"), ((4, 8, 8), "rank:3d")],
+    )
+    def test_rank(self, spatial, expected: str) -> None:
+        assert expected in self._extract(spatial=spatial)
+
+    def test_layout(self) -> None:
+        assert "layout:nhwc" in self._extract(layout="nhwc")
+
+    def test_dtype_is_x_not_a_virtual_dy(self) -> None:
+        # Fused pointwise backward -> batch norm backward: dy is the virtual
+        # fp32 gradient, the caller's tensors are fp16.
+        features = self._extract(dtype="half", dy_dtype="float", dy_virtual=True)
+        assert features == self.PLAIN - {"dtype:fp32"} | {"dtype:fp16"}
+
+    def test_a_non_virtual_dy_of_another_dtype_is_mixed(self) -> None:
+        features = self._extract(dtype="half", dy_dtype="float")
+        assert {"dtype:fp16", "precision:mixed"} <= features
+
+    def test_recomputed_stats(self) -> None:
+        assert self._extract(saved_stats=False) == self.PLAIN - {"saved_stats:on"}
+
+    @pytest.mark.parametrize("unbound", ["mean_tensor_uid", "inv_variance_tensor_uid"])
+    def test_partial_saved_stats_raise(self, unbound: str) -> None:
+        node, tensors = _bn_bwd()
+        node["inputs"][unbound] = None
+        with pytest.raises(FeatureError, match="without the rest"):
+            batchnorm_backward.extract(node, tensors)
+
+    def test_peer_stats(self) -> None:
+        assert "peer_stats:on" not in self._extract(peer_stats=0)
+        assert "peer_stats:on" in self._extract(peer_stats=1)
+
+    def test_one_value_per_channel_raises(self) -> None:
+        with pytest.raises(FeatureError, match="one value per channel"):
+            self._extract(batch=1, spatial=(1, 1))
+
+    def test_activation_shapes_that_differ_raise(self) -> None:
+        node, tensors = _bn_bwd()
+        tensors[3]["dims"] = [2, 4, 8, 4]
+        with pytest.raises(FeatureError, match="activation shapes differ"):
+            batchnorm_backward.extract(node, tensors)
+
+    @pytest.mark.parametrize("uid", [4, 5, 6, 7, 8])
+    @pytest.mark.parametrize(
+        "change, match",
+        [
+            # Per-activation, and the reduced-rank shape forward training
+            # takes: the backward API takes neither.
+            ({"dims": [1, 4, 8, 8]}, r"are not \[1, 4, 1, ...\]"),
+            ({"dims": [4, 1]}, r"are not \[1, 4, 1, ...\]"),
+            ({"data_type": "half"}, "dtype 'half' is not catalogued"),
+        ],
+    )
+    def test_per_channel_tensors_are_fp32_and_channel_only(
+        self, uid: int, change: dict, match: str
+    ) -> None:
+        node, tensors = _bn_bwd()
+        tensors[uid] |= change
+        with pytest.raises(FeatureError, match=match):
+            batchnorm_backward.extract(node, tensors)
+
+    @pytest.mark.parametrize(
+        "side, port",
+        [
+            ("inputs", "dy_tensor_uid"),
+            ("inputs", "x_tensor_uid"),
+            ("inputs", "scale_tensor_uid"),
+            ("outputs", "dx_tensor_uid"),
+            ("outputs", "dscale_tensor_uid"),
+            ("outputs", "dbias_tensor_uid"),
+        ],
+    )
+    def test_unbound_required_port_raises(self, side: str, port: str) -> None:
+        node, tensors = _bn_bwd()
+        node[side][port] = None
+        with pytest.raises(FeatureError, match=f"required port {port}"):
+            batchnorm_backward.extract(node, tensors)
 
 
 # --------------------------------------------------------------------------

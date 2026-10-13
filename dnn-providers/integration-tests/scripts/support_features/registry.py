@@ -16,6 +16,7 @@ from types import ModuleType
 
 from support_features import (
     FeatureError,
+    batchnorm_backward,
     batchnorm_training,
     convolution_bwd,
     convolution_fwd,
@@ -32,6 +33,7 @@ SCHEMA_DIR = REPO_ROOT / "projects" / "hipdnn" / "flatbuffers_sdk" / "schemas"
 OPS: dict[str, ModuleType] = {
     m.NODE_TYPE: m
     for m in (
+        batchnorm_backward,
         batchnorm_training,
         convolution_bwd,
         convolution_fwd,
@@ -46,7 +48,6 @@ OPS: dict[str, ModuleType] = {
 # is reported for them.
 PENDING = frozenset(
     {
-        "BatchnormBackwardAttributes",
         "BatchnormInferenceAttributes",
         "BatchnormInferenceAttributesVarianceExt",
         "BlockScaleDequantizeAttributes",
