@@ -200,6 +200,12 @@ from kernels.common.attention_dense_spec import (
 # C-output lane maps: IDENTICAL between the 32x32x8 (gfx942) and 32x32x16 (gfx950)
 # atoms (mfma_atom_catalog.md), so the softmax reductions + epilogue port verbatim.
 from kernels.gfx942.attention_tiled_2d import _mfma_32x32_c_row, _mfma_32x32_c_col
+from kernels.common._lse_store import (
+    dense_row_has_key,
+    lse_store,
+    validate_dense_lse,
+    zero_keyless_row,
+)
 
 LOG2E = 1.4426950408889634
 _DTYPE_IR = {"bf16": BF16, "fp16": F16}
@@ -445,9 +451,17 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
     #   every tile. Off by default: the peel is recorded negative (register
     #   pressure on the gfx942 tiled_2d kernel); kept to re-measure on dense.
     causal_diag_split: bool = field(default=False, kw_only=True)
+    # emit_lse: also write the natural-log softmax normalizer (LSE) as FP32
+    #   [B, Hq, Sq, 1] through a trailing ``lse_ptr`` kernel argument. Off by default;
+    #   off emits no new IR, so the shipped kernel and its goldens are unchanged.
+    emit_lse: bool = field(default=False, kw_only=True)
 
     def __post_init__(self) -> None:
         super().__post_init__()
+        if type(self.emit_lse) is not bool:
+            raise ValueError(
+                f"emit_lse must be a bool, got {type(self.emit_lse).__name__}"
+            )
         if self.causal_bottom_right:
             raise ValueError(
                 "gfx942 attention_dense: causal_bottom_right not yet supported"
@@ -711,6 +725,8 @@ def _tuning_name_tags(spec: "Gfx942AttentionDenseSpec") -> str:
         parts.append(f"fence{spec.pv_sched_fence_mask:x}")
     if spec.causal_diag_split:
         parts.append("dsplit")
+    if spec.emit_lse:
+        parts.append("lse")
     return "".join(f"_{p}" for p in parts)
 
 
@@ -1296,8 +1312,14 @@ def build_attention_dense(
     return _build_attention_dense_single_buffer(_as_gfx942_spec(spec))
 
 
-def _emit_o_store(b, o, q_row_byte, d_half, o_acc, rcp_l, dtype, d_tiles, width):
-    """O = acc / l, ``width`` contiguous head-dim elements per global store."""
+def _emit_o_store(
+    b, o, q_row_byte, d_half, o_acc, rcp_l, dtype, d_tiles, width, row_has_key=None
+):
+    """O = acc / l, ``width`` contiguous head-dim elements per global store.
+
+    ``row_has_key`` (LSE path only) zeroes rows that see no key; ``None`` emits the
+    unchanged store sequence.
+    """
     for dt in range(d_tiles):
         for g in range(4):
             for c in range(0, 4, width):
@@ -1309,9 +1331,10 @@ def _emit_o_store(b, o, q_row_byte, d_half, o_acc, rcp_l, dtype, d_tiles, width)
                     )
                     for kk in range(c, c + width)
                 ]
-                b.global_store_vN(
-                    o, addr, b.vec_pack(vals, dtype), width, align=2 * width
-                )
+                packed = b.vec_pack(vals, dtype)
+                if row_has_key is not None:
+                    packed = zero_keyless_row(b, packed, row_has_key, dtype, width)
+                b.global_store_vN(o, addr, packed, width, align=2 * width)
 
 
 def _build_attention_dense_single_buffer(
@@ -1402,6 +1425,14 @@ def _build_attention_dense_single_buffer(
     def _stride_k():
         return stride_k_p if spec.runtime_shape else b.const_i32(stride_k_tok)
 
+    if spec.emit_lse:
+        lse = b.param(
+            "lse_ptr",
+            PtrType(F32, "global"),
+            noalias=True,
+            writeonly=True,
+            align=4,
+        )
     qk_scale = b.fmul(scale, b.const_f32(LOG2E))
 
     tid = b.thread_id_x()
@@ -2056,7 +2087,11 @@ def _build_attention_dense_single_buffer(
         o_acc = list(res[2 : 2 + D_TILES])
 
         # Epilogue: O[query,dim] = (P@V)/l, from the transposed C[dim,query] accum.
-        rcp_l = b.rcp(l_i)
+        if spec.emit_lse:
+            positive_l = b.fcmp("ogt", l_i, b.const_f32(0.0))
+            rcp_l = b.rcp(b.select(positive_l, l_i, b.const_f32(1.0)))
+        else:
+            rcp_l = b.rcp(l_i)
         o_base = b.add(
             b.mul(
                 b.mul(bt, seqlen_q_p if spec.runtime_shape else b.const_i32(Sq)),
@@ -2067,8 +2102,42 @@ def _build_attention_dense_single_buffer(
         qtok = b.add(q_tok0, _mfma_32x32_c_col(b, lane, 0))
         q_row_byte = b.add(o_base, b.mul(qtok, _stride_q()))
         d_half = b.mul(lane_h, b.const_i32(4))
+        if spec.emit_lse:
+            row_has_key = dense_row_has_key(
+                b,
+                qtok,
+                seqlen_kv_p if spec.runtime_shape else b.const_i32(Skv),
+                causal=causal,
+                diagonal=0,
+                window=SW,
+            )
+            lse_index = b.add(
+                b.mul(
+                    b.add(
+                        b.mul(
+                            bt,
+                            hq_p if spec.runtime_shape else b.const_i32(Hq),
+                        ),
+                        hq,
+                    ),
+                    seqlen_q_p if spec.runtime_shape else b.const_i32(Sq),
+                ),
+                qtok,
+            )
+            # Both half-waves hold the same query row; one of them writes its LSE.
+            with b.scf_if(b.cmp_eq(lane_h, b.const_i32(0))):
+                lse_store(b, lse, lse_index, res[0], l_i, row_has_mass=row_has_key)
         _emit_o_store(
-            b, o, q_row_byte, d_half, o_acc, rcp_l, dtype, D_TILES, spec.o_store_width
+            b,
+            o,
+            q_row_byte,
+            d_half,
+            o_acc,
+            rcp_l,
+            dtype,
+            D_TILES,
+            spec.o_store_width,
+            row_has_key=row_has_key if spec.emit_lse else None,
         )
 
     # ---- grid dispatch: default (one CTA per work item) vs persistent (P4) ----
@@ -2232,6 +2301,8 @@ def attention_dense_signature(spec: AttentionDenseSpec):
     # library/tests/test_attention_builds.py.
     for field in _as_gfx942_spec(spec).runtime_kernarg_fields:
         sig = sig.scalar(field, "i32")
+    if _as_gfx942_spec(spec).emit_lse:
+        sig = sig.ptr("lse_ptr", "f32")
     return sig.build()
 
 
@@ -2299,6 +2370,7 @@ def run_attention_dense_torch(
     arch: str = "gfx942",
     cu_seqlens_q=None,
     cu_seqlens_kv=None,
+    lse=None,
 ):
     """High-level framework entry: compile (cached) + launch the gfx942 dense prefill
     kernel on torch tensors. ``q``/``out`` are ``[B, S, Hq, D]`` and ``k``/``v`` are
@@ -2317,7 +2389,13 @@ def run_attention_dense_torch(
 
     varlen / ragged are rejected by :func:`supports_attention_dense` on gfx942, so the
     ABI has no ``cu_seqlens`` args (:func:`attention_dense_signature`); passing
-    ``cu_seqlens_*`` is a caller error rather than a silently-ignored argument."""
+    ``cu_seqlens_*`` is a caller error rather than a silently-ignored argument.
+
+    ``spec.emit_lse=True`` requires a caller-owned contiguous FP32 ``lse`` tensor
+    [B, Hq, Sq, 1] on the same GPU, separate from every input and output. The kernel
+    writes the natural-log softmax normalizer while still returning ``out``. Rows
+    with no allowed key (a sliding window past the end of the keys) write O=0 and
+    LSE=-inf. Supplying ``lse`` with ``emit_lse=False`` is an error."""
     spec = _as_gfx942_spec(spec)
     ok, why = supports_attention_dense(spec, arch=arch)
     if not ok:
@@ -2327,6 +2405,7 @@ def run_attention_dense_torch(
             "cu_seqlens_* provided but gfx942 attention_dense is dense-only (varlen "
             "is rejected by supports_attention_dense); the ABI has no cu_seqlens args"
         )
+    validate_dense_lse(spec, q, k, v, out, lse)
     from rocke.helpers.compile import compile_kernel
     from rocke.runtime import KernelLauncher, LaunchConfig
 
@@ -2351,6 +2430,8 @@ def run_attention_dense_torch(
         _DENSE_LAUNCHER_CACHE[key] = launcher
     vals = {"q_ptr": q, "k_ptr": k, "v_ptr": v, "o_ptr": out, "scale": float(scale)}
     vals.update(attention_dense_runtime_args(spec))
+    if spec.emit_lse:
+        vals["lse_ptr"] = lse
     launcher(
         vals,
         config=LaunchConfig(
