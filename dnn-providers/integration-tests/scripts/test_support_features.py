@@ -36,6 +36,7 @@ from support_features import (
     convolution_wrw,
     layernorm,
     layernorm_backward,
+    matmul,
     pointwise,
     registry,
     rmsnorm,
@@ -3360,6 +3361,299 @@ class TestRMSNormBackwardExtract:
     )
     def test_unbound_required_port_raises(self, side: str, port: str) -> None:
         node, tensors = _rms_bwd()
+        node[side][port] = None
+        self._raises(node, tensors, f"required port {port}")
+
+
+# --------------------------------------------------------------------------
+# MatmulAttributes
+# --------------------------------------------------------------------------
+
+
+def _matrix_strides(dims: list[int], layout: str) -> list[int]:
+    """Packed strides for ``dims``, the last two dims in ``layout`` order."""
+    *batch, rows, cols = dims
+    inner = [cols, 1] if layout == "row_major" else [1, rows]
+    strides = []
+    step = rows * cols
+    for d in reversed(batch):
+        strides.insert(0, step)
+        step *= d
+    return strides + inner
+
+
+def _matmul(
+    *,
+    batch_a: tuple[int, ...] = (3,),
+    batch_b: tuple[int, ...] | None = None,
+    m: int = 16,
+    k: int = 32,
+    n: int = 128,
+    dtype: str = "float",
+    b_dtype: str | None = None,
+    c_dtype: str | None = None,
+    a_layout: str = "row_major",
+    b_layout: str = "row_major",
+    c_layout: str = "row_major",
+    a_virtual: bool = False,
+    b_virtual: bool = False,
+    c_virtual: bool = False,
+) -> tuple[dict, dict]:
+    """A MatmulAttributes node: ``a`` on uid 1, ``b`` on 2, ``c`` on 3.
+
+    ``c`` is what the frontend infers: the larger of each batch dim, then
+    ``M`` and ``N``. Ports as utilities/json/MatmulAttributes.hpp writes them.
+    """
+    batch_b = batch_a if batch_b is None else batch_b
+
+    def tensor(uid: int, dims: list[int], dt: str, lay: str, virtual: bool) -> dict:
+        return {
+            "uid": uid,
+            "dims": dims,
+            "strides": _matrix_strides(dims, lay),
+            "data_type": dt,
+            "virtual": virtual,
+        }
+
+    batch_c = [max(x, y) for x, y in zip(batch_a, batch_b)]
+    tensors = {
+        1: tensor(1, [*batch_a, m, k], dtype, a_layout, a_virtual),
+        2: tensor(2, [*batch_b, k, n], b_dtype or dtype, b_layout, b_virtual),
+        3: tensor(3, [*batch_c, m, n], c_dtype or dtype, c_layout, c_virtual),
+    }
+    node = {
+        "type": "MatmulAttributes",
+        "inputs": {"a_tensor_uid": 1, "b_tensor_uid": 2},
+        "outputs": {"c_tensor_uid": 3},
+    }
+    return node, tensors
+
+
+class TestMatmulExtract:
+    PLAIN = {
+        "dtype:fp32",
+        "batch:single",
+        "a_layout:row_major",
+        "b_layout:row_major",
+        "c_layout:row_major",
+    }
+
+    def _extract(self, **kwargs) -> set[str]:
+        return matmul.extract(*_matmul(**kwargs))
+
+    def _raises(self, node: dict, tensors: dict, match: str) -> None:
+        with pytest.raises(FeatureError, match=match):
+            matmul.extract(node, tensors)
+
+    def test_builder_binds_every_schema_field(self) -> None:
+        node, _ = _matmul()
+        written = set(batchnorm.bound(node)) | set(node) - {"type", "inputs", "outputs"}
+        assert written == table_fields(matmul.SCHEMA_FILE, matmul.SCHEMA_TABLE)
+
+    def test_every_feature_is_reachable(self) -> None:
+        reached = self._extract()
+        for kwargs in (
+            {"batch_a": (), "dtype": "half", "b_dtype": "float", "c_dtype": "float"},
+            {"batch_a": (1, 1), "batch_b": (2, 3), "dtype": "bfloat16"},
+            {"batch_a": (3,), "batch_b": (1,), "a_layout": "col_major"},
+            {"b_layout": "col_major", "c_layout": "col_major"},
+        ):
+            reached |= self._extract(**kwargs)
+        assert reached == {feature.id for feature in matmul.FEATURES}
+
+    def test_plain_graph(self) -> None:
+        assert self._extract() == self.PLAIN
+
+    @pytest.mark.parametrize(
+        "dtype, expected",
+        [("float", "dtype:fp32"), ("half", "dtype:fp16"), ("bfloat16", "dtype:bf16")],
+    )
+    def test_dtype(self, dtype: str, expected: str) -> None:
+        features = self._extract(dtype=dtype)
+        assert features == self.PLAIN - {"dtype:fp32"} | {expected}
+
+    @pytest.mark.parametrize(
+        "kwargs, expected",
+        [
+            ({"b_dtype": "float"}, {"precision:mixed_inputs"}),
+            ({"c_dtype": "float"}, {"precision:mixed_output"}),
+            (
+                {"b_dtype": "float", "c_dtype": "float"},
+                {"precision:mixed_inputs", "precision:mixed_output"},
+            ),
+            # b matches c, not a: still both.
+            (
+                {"b_dtype": "bfloat16", "c_dtype": "bfloat16"},
+                {"precision:mixed_inputs", "precision:mixed_output"},
+            ),
+        ],
+    )
+    def test_each_precision_role_is_its_own_feature(
+        self, kwargs: dict, expected: set[str]
+    ) -> None:
+        features = self._extract(dtype="half", **kwargs)
+        assert features == self.PLAIN - {"dtype:fp32"} | {"dtype:fp16"} | expected
+
+    @pytest.mark.parametrize(
+        "kwargs",
+        [
+            {"b_dtype": "float", "b_virtual": True},
+            {"b_dtype": "float", "a_virtual": True},
+            {"c_dtype": "float", "a_virtual": True},
+        ],
+    )
+    def test_a_virtual_tensor_is_not_mixed(self, kwargs: dict) -> None:
+        features = self._extract(dtype="half", **kwargs)
+        assert not {f for f in features if f.startswith("precision:")}
+
+    def test_a_virtual_c_is_not_mixed_and_has_no_layout(self) -> None:
+        # The fused recipe: fp16 a and b into a virtual fp32 c, then a bias.
+        features = self._extract(dtype="half", c_dtype="float", c_virtual=True)
+        assert features == self.PLAIN - {"dtype:fp32", "c_layout:row_major"} | {
+            "dtype:fp16"
+        }
+
+    def test_the_block_scale_recipe_is_not_mixed(self) -> None:
+        # Virtual fp32 a and b out of two dequantizes, a fp16 c.
+        features = self._extract(
+            c_dtype="half", a_virtual=True, b_virtual=True, b_layout="col_major"
+        )
+        assert features == self.PLAIN - {"b_layout:row_major"} | {"b_layout:col_major"}
+
+    @pytest.mark.parametrize(
+        "batch, expected",
+        [
+            ((), "batch:none"),
+            ((3,), "batch:single"),
+            ((1,), "batch:single"),
+            ((2, 3), "batch:multi"),
+            ((1, 1), "batch:multi"),
+            ((2, 1, 3), "batch:multi"),
+        ],
+    )
+    def test_batch(self, batch: tuple[int, ...], expected: str) -> None:
+        features = self._extract(batch_a=batch)
+        assert features == self.PLAIN - {"batch:single"} | {expected}
+
+    @pytest.mark.parametrize(
+        "batch_a, batch_b, expected",
+        [
+            ((3,), (3,), set()),
+            ((1,), (1,), set()),
+            ((2, 3), (2, 3), set()),
+            # The bundles' recipes.
+            ((1,), (3,), {"broadcast:a"}),
+            ((3,), (1,), {"broadcast:b"}),
+            ((1, 1), (2, 3), {"broadcast:a"}),
+            ((2, 3), (1, 1), {"broadcast:b"}),
+            # One dim each way; a dim that divides rather than is 1.
+            ((3, 1), (1, 3), {"broadcast:a", "broadcast:b"}),
+            ((2,), (4,), {"broadcast:a"}),
+            ((2, 3), (2, 1), {"broadcast:b"}),
+        ],
+    )
+    def test_broadcast(
+        self, batch_a: tuple[int, ...], batch_b: tuple[int, ...], expected: set[str]
+    ) -> None:
+        features = self._extract(batch_a=batch_a, batch_b=batch_b)
+        assert {f for f in features if f.startswith("broadcast:")} == expected
+
+    @pytest.mark.parametrize("port", ["a", "b", "c"])
+    @pytest.mark.parametrize("batch", [(), (3,), (2, 3)])
+    def test_col_major(self, port: str, batch: tuple[int, ...]) -> None:
+        features = self._extract(batch_a=batch, **{f"{port}_layout": "col_major"})
+        layouts = {f for f in features if f.startswith(f"{port}_layout:")}
+        assert layouts == {f"{port}_layout:col_major"}
+
+    def test_a_matrix_with_a_dim_of_one_is_row_major(self) -> None:
+        # Both last strides are 1; getTrans takes the last first.
+        node, tensors = _matmul(m=1, a_layout="col_major")
+        assert tensors[1]["strides"][-2:] == [1, 1]
+        assert "a_layout:row_major" in matmul.extract(node, tensors)
+
+    @pytest.mark.parametrize("uid", [1, 2, 3])
+    def test_no_unit_stride_raises(self, uid: int) -> None:
+        node, tensors = _matmul()
+        tensors[uid]["strides"][-1] = 2
+        tensors[uid]["strides"][-2] *= 2
+        self._raises(node, tensors, "no unit stride")
+
+    def test_the_layout_of_a_virtual_c_is_not_read(self) -> None:
+        node, tensors = _matmul(c_virtual=True)
+        tensors[3]["strides"][-1] = 2
+        tensors[3]["strides"][-2] *= 2
+        assert "c_layout:row_major" not in matmul.extract(node, tensors)
+
+    @pytest.mark.parametrize(
+        "a_dims, b_dims",
+        [
+            ([16], [16]),  # one rank, below 2
+            ([16], [16, 8]),
+            ([16, 32], [3, 32, 8]),
+            ([3, 16, 32], [32, 8]),
+        ],
+    )
+    def test_ranks_the_api_rejects_raise(self, a_dims: list, b_dims: list) -> None:
+        node, tensors = _matmul()
+        tensors[1]["dims"], tensors[2]["dims"] = a_dims, b_dims
+        self._raises(node, tensors, "not one rank")
+
+    def test_k_that_differs_raises(self) -> None:
+        node, tensors = _matmul()
+        tensors[2]["dims"] = [3, 16, 128]
+        self._raises(node, tensors, "K differs")
+
+    @pytest.mark.parametrize("batch_a, batch_b", [((2,), (3,)), ((2, 4), (2, 6))])
+    def test_batch_dims_that_do_not_divide_raise(
+        self, batch_a: tuple[int, ...], batch_b: tuple[int, ...]
+    ) -> None:
+        self._raises(*_matmul(batch_a=batch_a, batch_b=batch_b), "do not broadcast")
+
+    @pytest.mark.parametrize("uid", [1, 2])
+    def test_a_dim_below_one_raises(self, uid: int) -> None:
+        # Before the divisibility check, which would divide by it.
+        node, tensors = _matmul()
+        tensors[uid]["dims"][0] = 0
+        self._raises(node, tensors, "dim below 1")
+
+    @pytest.mark.parametrize(
+        "c_dims",
+        [
+            [16, 128],  # the rank of c
+            [1, 16, 128],  # a batch dim
+            [3, 32, 128],  # M
+            [3, 16, 32],  # N
+            [3, 128, 16],  # transposed
+        ],
+    )
+    def test_c_dims_the_api_would_not_infer_raise(self, c_dims: list) -> None:
+        node, tensors = _matmul()
+        tensors[3]["dims"] = c_dims
+        self._raises(node, tensors, "c_tensor_uid dims")
+
+    @pytest.mark.parametrize("uid", [1, 2, 3])
+    @pytest.mark.parametrize("dtype", ["fp8_e4m3", None])
+    def test_uncatalogued_dtype_raises(self, uid: int, dtype: str | None) -> None:
+        node, tensors = _matmul()
+        tensors[uid]["data_type"] = dtype
+        self._raises(node, tensors, "is not catalogued")
+
+    def test_uid_zero_is_a_binding(self) -> None:
+        node, tensors = _matmul()
+        tensors[0] = {**tensors.pop(1), "uid": 0}
+        node["inputs"]["a_tensor_uid"] = 0
+        assert matmul.extract(node, tensors) == self.PLAIN
+
+    @pytest.mark.parametrize(
+        "side, port",
+        [
+            ("inputs", "a_tensor_uid"),
+            ("inputs", "b_tensor_uid"),
+            ("outputs", "c_tensor_uid"),
+        ],
+    )
+    def test_unbound_required_port_raises(self, side: str, port: str) -> None:
+        node, tensors = _matmul()
         node[side][port] = None
         self._raises(node, tensors, f"required port {port}")
 
