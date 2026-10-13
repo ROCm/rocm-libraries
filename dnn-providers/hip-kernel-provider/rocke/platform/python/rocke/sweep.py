@@ -104,56 +104,65 @@ def _spec_hash(spec: UniversalGemmSpec, *, arch: str = "gfx950") -> str:
 # ---------------------------------------------------------------------
 
 
-def _extract_elf_meta(hsaco_path: Path) -> Dict[str, int]:
-    """Pull VGPR/SGPR/LDS bytes from the HSA kernel descriptor.
+# Note-key -> result-key. The HSA metadata note is msgpack, but
+# ``llvm-readelf --notes`` prints it as ``.key: value`` lines, which is enough
+# to read without taking a ``pyelftools`` dependency.
+_ELF_META_KEYS = {
+    ".vgpr_count:": "vgprs",
+    ".sgpr_count:": "sgprs",
+    ".agpr_count:": "agprs",
+    ".vgpr_spill_count:": "vgpr_spills",
+    ".sgpr_spill_count:": "sgpr_spills",
+    ".group_segment_fixed_size:": "lds_bytes",
+    ".private_segment_fixed_size:": "scratch_bytes",
+}
 
-    HSA-style code objects encode this in `.note` and `.rodata`; the
-    most portable way without depending on `pyelftools` is to call
-    `llvm-objdump` (installed alongside the ROCm toolchain) and grep
-    the result. We keep this best-effort: if the tool isn't present
-    the metadata stays empty (sweeping still proceeds).
+
+def _extract_elf_meta(hsaco_path: Path) -> Dict[str, int]:
+    """Pull VGPR/SGPR/LDS/spill counts from the HSA metadata note.
+
+    Read with ``llvm-readelf --notes`` rather than ``llvm-objdump``. The
+    previous implementation disassembled and scraped ``.amdhsa_*`` directives,
+    which needs ``--mcpu`` to match the object -- and it passed ``gfx950``
+    unconditionally, so every non-gfx950 sweep silently recorded an empty dict.
+    The note carries the same numbers and is arch-independent, which removes
+    the coupling rather than threading an arch argument through the callers.
+
+    Best-effort by contract: if the tool is missing or the object has no
+    metadata note, the result is empty and sweeping proceeds. Spill counts are
+    included because a kernel that fits its register budget by spilling is the
+    interesting case, and ``waves_per_eu`` tuning is unreadable without them.
     """
     import shutil
     import subprocess
 
-    od = shutil.which("llvm-objdump") or shutil.which("/opt/rocm/llvm/bin/llvm-objdump")
-    if not od:
+    exe = (
+        shutil.which("llvm-readelf")
+        or shutil.which("/opt/rocm/lib/llvm/bin/llvm-readelf")
+        or shutil.which("/opt/rocm/llvm/bin/llvm-readelf")
+    )
+    if not exe:
         return {}
     try:
         r = subprocess.run(
-            [
-                od,
-                "--disassemble-symbols=",
-                "--mcpu=gfx950",
-                "--triple=amdgcn-amd-amdhsa",
-                "-S",
-                str(hsaco_path),
-            ],
+            [exe, "--notes", str(hsaco_path)],
             capture_output=True,
             text=True,
             timeout=10,
         )
-        out = r.stdout + r.stderr
+        out = r.stdout
     except Exception:
         return {}
     meta: Dict[str, int] = {}
     for line in out.splitlines():
         line = line.strip()
-        if line.startswith(".amdhsa_next_free_vgpr"):
-            try:
-                meta["vgprs"] = int(line.split()[-1])
-            except ValueError:
-                pass
-        elif line.startswith(".amdhsa_next_free_sgpr"):
-            try:
-                meta["sgprs"] = int(line.split()[-1])
-            except ValueError:
-                pass
-        elif line.startswith(".amdhsa_group_segment_fixed_size"):
-            try:
-                meta["lds_bytes"] = int(line.split()[-1])
-            except ValueError:
-                pass
+        key = _ELF_META_KEYS.get(line.split(None, 1)[0] if line else "")
+        if key is None:
+            continue
+        try:
+            meta[key] = int(line.split()[-1])
+        except ValueError:
+            pass
     return meta
 
 
