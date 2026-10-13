@@ -28,7 +28,7 @@
 /.github/workflows/component-ci-stinkytofu.yml      @ROCm/rocm-math-lib-build-infra @ROCm/stinkytofu-reviewers
 /.github/workflows/component-ci-tensilelite-coverage.yml   @ROCm/rocm-math-lib-build-infra @ROCm/hipblaslt-reviewers
 
-# temporary wip, individual people
+# Individual contributors
 /.github/workflows/auto-retry-failed.yml            @ROCm/rocm-libraries-reviewers @tony-davis
 /.github/workflows/initial-setup.yml                @ROCm/rocm-libraries-reviewers @jayhawk-commits
 /.github/workflows/issue-import.yml                 @ROCm/rocm-libraries-reviewers @jayhawk-commits
