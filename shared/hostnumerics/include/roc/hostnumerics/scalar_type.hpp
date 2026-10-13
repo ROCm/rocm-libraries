@@ -8,8 +8,10 @@
 #include <complex>
 #include <cstddef>
 #include <cstdint>
+#include <stdexcept>
 #include <string_view>
 #include <type_traits>
+#include <utility>
 
 namespace roc::hostnumerics {
 enum class ScalarCategory : uint8_t {
@@ -247,4 +249,88 @@ template <NativeScalar T>
 inline constexpr ScalarType nativeScalarType =
     detail::NativeScalarType<std::remove_cvref_t<T>>::value;
 
+namespace detail {
+// Implementation tag, not a customization point. Storage holds the encoded bits,
+// which may differ from the native numerical type; packed encodings use void.
+template <ScalarType TypeValue, typename StorageType>
+struct ScalarTag {
+    typedef StorageType Storage;
+    static constexpr ScalarType type = TypeValue;
+    static constexpr uint16_t storageBits = scalarTypeInfo(TypeValue).storageBits;
+    static_assert(std::is_void_v<StorageType> == (storageBits % 8 != 0));
+};
+}  // namespace detail
+
+// Dispatch to visitor.template operator()<Tag>(args...), where Tag exposes type,
+// storageBits and Storage. Encodings sharing Storage still have distinct tags.
+// The visitor must accept every tag and return the same type for each, including
+// void or a reference. Visitor and arguments retain their value categories.
+// Count and unnamed enum values throw std::invalid_argument without invoking the
+// visitor. Dispatch once when preparing a typed operation for an element loop.
+template <typename Visitor, typename... Args>
+decltype(auto) visitScalarType(ScalarType type, Visitor&& visitor, Args&&... args) {
+    auto dispatch = [&]<ScalarType TypeValue, typename StorageType>() -> decltype(auto) {
+        return std::forward<Visitor>(visitor).template
+        operator()<detail::ScalarTag<TypeValue, StorageType>>(std::forward<Args>(args)...);
+    };
+    switch (type) {
+        case ScalarType::Boolean:
+            return dispatch.template operator()<ScalarType::Boolean, uint8_t>();
+        case ScalarType::Int4:
+            return dispatch.template operator()<ScalarType::Int4, void>();
+        case ScalarType::Int8:
+            return dispatch.template operator()<ScalarType::Int8, int8_t>();
+        case ScalarType::Int16:
+            return dispatch.template operator()<ScalarType::Int16, int16_t>();
+        case ScalarType::Int32:
+            return dispatch.template operator()<ScalarType::Int32, int32_t>();
+        case ScalarType::Int64:
+            return dispatch.template operator()<ScalarType::Int64, int64_t>();
+        case ScalarType::UInt8:
+            return dispatch.template operator()<ScalarType::UInt8, uint8_t>();
+        case ScalarType::UInt16:
+            return dispatch.template operator()<ScalarType::UInt16, uint16_t>();
+        case ScalarType::UInt32:
+            return dispatch.template operator()<ScalarType::UInt32, uint32_t>();
+        case ScalarType::UInt64:
+            return dispatch.template operator()<ScalarType::UInt64, uint64_t>();
+        case ScalarType::Float4E2M1:
+            return dispatch.template operator()<ScalarType::Float4E2M1, void>();
+        case ScalarType::Float6E2M3:
+            return dispatch.template operator()<ScalarType::Float6E2M3, void>();
+        case ScalarType::Float6E3M2:
+            return dispatch.template operator()<ScalarType::Float6E3M2, void>();
+        case ScalarType::Float8E4M3:
+            return dispatch.template operator()<ScalarType::Float8E4M3, uint8_t>();
+        case ScalarType::Float8E5M2:
+            return dispatch.template operator()<ScalarType::Float8E5M2, uint8_t>();
+        case ScalarType::Float8E4M3Fnuz:
+            return dispatch.template operator()<ScalarType::Float8E4M3Fnuz, uint8_t>();
+        case ScalarType::Float8E5M2Fnuz:
+            return dispatch.template operator()<ScalarType::Float8E5M2Fnuz, uint8_t>();
+        case ScalarType::E4M3:
+            return dispatch.template operator()<ScalarType::E4M3, uint8_t>();
+        case ScalarType::E5M3:
+            return dispatch.template operator()<ScalarType::E5M3, uint8_t>();
+        case ScalarType::E8M0:
+            return dispatch.template operator()<ScalarType::E8M0, uint8_t>();
+        case ScalarType::E8M0Zero:
+            return dispatch.template operator()<ScalarType::E8M0Zero, uint8_t>();
+        case ScalarType::Float16:
+            return dispatch.template operator()<ScalarType::Float16, uint16_t>();
+        case ScalarType::BFloat16:
+            return dispatch.template operator()<ScalarType::BFloat16, uint16_t>();
+        case ScalarType::Float32:
+            return dispatch.template operator()<ScalarType::Float32, float>();
+        case ScalarType::Float64:
+            return dispatch.template operator()<ScalarType::Float64, double>();
+        case ScalarType::ComplexFloat32:
+            return dispatch.template operator()<ScalarType::ComplexFloat32, std::complex<float>>();
+        case ScalarType::ComplexFloat64:
+            return dispatch.template operator()<ScalarType::ComplexFloat64, std::complex<double>>();
+        case ScalarType::Count:
+            break;
+    }
+    throw std::invalid_argument("Invalid ScalarType.");
+}
 }  // namespace roc::hostnumerics
