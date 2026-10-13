@@ -199,9 +199,9 @@ class ShaderModelV4_11 : public ShaderModel
 {
 public:
     ShaderModelV4_11(const WinoShaderArgsV2& shader_args,
-                    uint32_t cu_cnt,
-                    const ProblemDescription& problem,
-                    const PerfModelParams& perf_params)
+                     uint32_t cu_cnt,
+                     const ProblemDescription& problem,
+                     const PerfModelParams& perf_params)
         : ShaderModel(shader_args, cu_cnt, problem)
     {
         model_params = perf_params;
@@ -240,9 +240,8 @@ public:
         // clang-format on
     };
 
-    static KernelVersion DetermineKernelVersion(const std::string& dev_name,
-                                                const WinoShaderArgsV2& args,
-                                                bool is_fp16)
+    static KernelVersion
+    DetermineKernelVersion(const std::string& dev_name, const WinoShaderArgsV2& args, bool is_fp16)
     {
         if(StartsWith(dev_name, "gfx117"))
         {
@@ -431,7 +430,7 @@ ConvWinoRageRxSCommon<Winodata, Winofilter>::GetSolution(const ExecutionContext&
     const auto devName = ctx.GetStream().GetDeviceName();
     auto kernelVersion =
         ShaderModelFactory::DetermineKernelVersion(devName, args, problem.IsFp16());
-    auto shader_model  = ShaderModelFactory::Create(
+    auto shader_model = ShaderModelFactory::Create(
         devName, args, ctx.GetStream().GetMaxHardwareComputeUnits(), problem, kernelVersion);
     auto perfmodel_result = shader_model->ComputeWti(problem.IsFp32());
     auto nGroups          = perfmodel_result.n_groups;
@@ -495,7 +494,7 @@ ConvWinoRageRxSCommon<Winodata, Winofilter>::GetSolution(const ExecutionContext&
     }
     if(StartsWith(devName, "gfx117"))
     {
-	    kernelInfo.comp_options += std::string(" -mwavefrontsize64");
+        kernelInfo.comp_options += std::string(" -mwavefrontsize64");
         wgSize = 256U;
     }
 
