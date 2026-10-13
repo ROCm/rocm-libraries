@@ -27,6 +27,7 @@
 #include "rocsparse_handle.hpp"
 
 #include <cstdint>
+#include <type_traits>
 
 // Grid-extent clamps, one per axis. Each takes the handle and reads the limit
 // from the device, so a caller never writes a bound itself. Any kernel launched
@@ -82,6 +83,15 @@ namespace rocsparse
                                 : static_cast<int64_t>(4294967295LL);
     }
 
+    // Ceiling division count / block_size in 64-bit, written as
+    // (count - 1) / block_size + 1 so that it cannot overflow before the divide
+    // the way (count + block_size - 1) / block_size does for counts near the type
+    // maximum. Returns 0 when count <= 0 or block_size <= 0.
+    static constexpr int64_t ceil_div(int64_t count, int64_t block_size)
+    {
+        return (count > 0 && block_size > 0) ? ((count - 1) / block_size + 1) : 0;
+    }
+
     // Clamp a grid.x extent. block_size must be the blockDim.x the launch uses;
     // it is a runtime argument rather than a template parameter because several
     // callers choose it at runtime, for example the csrmv LRB path picks
@@ -108,5 +118,24 @@ namespace rocsparse
     {
         return rocsparse::clamp_grid_extent(
             count, static_cast<int64_t>(handle->properties.maxGridSize[2]));
+    }
+
+    // Launch with the grid.x extent get_grid_size_x returns, selecting the kernel
+    // variant at the call site. launch(std::true_type{}, grid) runs when the clamp
+    // binds and the kernel must grid-stride over count; launch(std::false_type{},
+    // grid) runs otherwise, so a kernel can keep a straight-line variant for the
+    // common case where every row gets its own block. The clamp binds as soon as
+    // count exceeds dispatch_limit_x(block_size), 16777215 blocks at 256 threads,
+    // which 32-bit indices reach as readily as 64-bit ones.
+    template <typename J, typename F>
+    static __forceinline__ rocsparse_status
+        dispatch_grid_stride_x(rocsparse_handle handle, J count, int64_t block_size, F&& launch)
+    {
+        const uint32_t grid = rocsparse::get_grid_size_x(handle, count, block_size);
+        if(grid < static_cast<int64_t>(count))
+        {
+            return launch(std::true_type{}, grid);
+        }
+        return launch(std::false_type{}, grid);
     }
 }

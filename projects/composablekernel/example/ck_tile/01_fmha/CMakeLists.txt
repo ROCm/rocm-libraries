@@ -9,6 +9,13 @@ if(NOT INST_TARGETS)
   return()
 endif()
 
+if(NOT WIN32 AND COMMAND check_cxx_compiler_flag)
+  set(CK_GFX12_ONLY_BUILD OFF)
+  if(GPU_TARGETS MATCHES "gfx12" AND NOT GPU_TARGETS MATCHES "gfx9|gfx10|gfx11")
+    set(CK_GFX12_ONLY_BUILD ON)
+  endif()
+endif()
+
 # validate user-specified fmha_fwd API list
 set(FMHA_FWD_KNOWN_APIS "fwd;fwd_splitkv;fwd_appendkv;pagedkv_prefill")
 set(FMHA_FWD_ENABLE_APIS "fwd" CACHE STRING
@@ -67,6 +74,7 @@ else()
 endif()
 
 string(REPLACE ";" "," FMHA_FWD_APIS "${FMHA_FWD_ENABLE_APIS}")
+include(${CMAKE_CURRENT_LIST_DIR}/cmake/fmha_fwd_source_flags.cmake)
 set(FMHA_FWD_CODE_GEN_COMMON_ARGS
   ${CMAKE_CURRENT_LIST_DIR}/generate.py
   --targets ${FMHA_TARGETS_ARG}
@@ -81,6 +89,14 @@ set(FMHA_BWD_CODE_GEN_COMMON_ARGS
   --optdim 32,64,96,128,256
   # --filter fmha_bwd_dot...@fmha_bwd_convert...@fmha_bwd...
 )
+set(FMHA_BWD_INSTANCE_FILTER "" CACHE STRING
+  "fnmatch filter for generated FMHA BWD kernels: dot_do_o@convert_dq@dq_dk_dv. Empty = all.")
+
+if(NOT FMHA_BWD_INSTANCE_FILTER STREQUAL "")
+  # must go into COMMON_ARGS so --list_blobs and --output_dir stay in agreement
+  list(APPEND FMHA_BWD_CODE_GEN_COMMON_ARGS --filter ${FMHA_BWD_INSTANCE_FILTER})
+  message(STATUS "CK Tile FMHA BWD instance filter: ${FMHA_BWD_INSTANCE_FILTER}")
+endif()
 
 # Reduce building time by disabling instances that are not currently used in the gtests
 # TODO: Consider to use a special receipt for testing only, or even two receipts: a small subset of
@@ -140,6 +156,17 @@ add_library(${FMHA_FWD_INSTANCES} OBJECT EXCLUDE_FROM_ALL)
 target_include_directories(${FMHA_FWD_INSTANCES} PRIVATE ${CMAKE_CURRENT_LIST_DIR})
 target_sources(${FMHA_FWD_INSTANCES} PRIVATE ${FMHA_FWD_GEN_BLOBS})
 set_source_files_properties(${FMHA_FWD_GEN_BLOBS} PROPERTIES LANGUAGE HIP)
+if("gfx1250" IN_LIST INST_TARGETS)
+  foreach(fwd_blob IN LISTS FMHA_FWD_GEN_BLOBS)
+    get_filename_component(fwd_blob_name "${fwd_blob}" NAME)
+    ck_tile_fmha_fwd_get_source_compile_options(
+      "${fwd_blob_name}" fwd_blob_compile_options)
+    if(fwd_blob_compile_options)
+      set_property(SOURCE "${fwd_blob}" APPEND PROPERTY COMPILE_OPTIONS
+        ${fwd_blob_compile_options})
+    endif()
+  endforeach()
+endif()
 set_property(TARGET ${FMHA_FWD_INSTANCES} PROPERTY HIP_ARCHITECTURES ${INST_TARGETS})
 
 message(DEBUG "adding instances ${FMHA_BWD_INSTANCES}")
@@ -159,9 +186,14 @@ set(FMHA_BWD_INTERFACE_COMPILE_OPTIONS)
 list(APPEND FMHA_FWD_PRIVATE_COMPILE_OPTIONS -Wno-undefined-func-template)
 list(APPEND FMHA_BWD_PRIVATE_COMPILE_OPTIONS -Wno-undefined-func-template)
 
-# Allow comparing floating points directly in order to check sentinel values
+# Allow comparing floating points directly in order to check sentinel values.
+# Also needed on the INTERFACE side: the example/test executables include the
+# same pipeline headers, and any pipeline whose sentinel check is instantiated
+# from their TU would otherwise trip -Werror,-Wfloat-equal.
 list(APPEND FMHA_FWD_PRIVATE_COMPILE_OPTIONS -Wno-float-equal)
 list(APPEND FMHA_BWD_PRIVATE_COMPILE_OPTIONS -Wno-float-equal)
+list(APPEND FMHA_FWD_INTERFACE_COMPILE_OPTIONS -Wno-float-equal)
+list(APPEND FMHA_BWD_INTERFACE_COMPILE_OPTIONS -Wno-float-equal)
 
 # NOTE: this is dangerous since will change the whole kernel to flush denormals
 #       WIP with compiler team for an exp2 intrinsic..., then remove this
@@ -175,6 +207,17 @@ else()
   list(APPEND FMHA_FWD_PRIVATE_COMPILE_OPTIONS -DCK_TILE_FMHA_FWD_FAST_EXP2=0)
 endif()
 list(APPEND FMHA_BWD_PRIVATE_COMPILE_OPTIONS -fgpu-flush-denormals-to-zero)
+
+# Post-RA scheduling is off library-wide (see the top-level CMakeLists). The
+# gfx12 backward kernel wants it on, so enable it here and only here -- no other
+# CK operation and no other architecture is affected.
+if(CK_GFX12_ONLY_BUILD)
+  check_cxx_compiler_flag("-mllvm -enable-post-misched=1" HAS_ENABLE_POST_MISCHED_ON)
+  if(HAS_ENABLE_POST_MISCHED_ON)
+    message(STATUS "gfx12-only build: enabling post-RA scheduling for FMHA bwd")
+    list(APPEND FMHA_BWD_PRIVATE_COMPILE_OPTIONS "SHELL: -mllvm -enable-post-misched=1")
+  endif()
+endif()
 
 # Per-kernel VGPR/SGPR/LDS/scratch/spill and occupancy remarks, on stderr at
 # compile time. Must hang off the instance targets: the generated blobs are

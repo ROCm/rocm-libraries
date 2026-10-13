@@ -9,9 +9,7 @@
 #include "hipdnn-gpu-ref/detail/GpuRefHelpers.hpp"
 #include "hipdnn-gpu-ref/detail/GpuRefHipError.hpp"
 #include "hipdnn-gpu-ref/detail/GpuRefKernelCompiler.hpp"
-
-namespace hipdnn_gpu_ref
-{
+#include <hipdnn-gpu-ref/detail/GpuRefLaunch.hpp>
 
 namespace
 {
@@ -19,48 +17,10 @@ namespace
 // Shared argument and stride structs — single definition used by both host and device (HipRTC).
 #include <GpuRefMatmulArgs.h> // NOLINT(misc-include-cleaner)
 
-void launchKernel(hipFunction_t function,
-                  int64_t mTiles,
-                  int64_t nTiles,
-                  int64_t tileSize,
-                  int64_t batches,
-                  void* argsPtr,
-                  size_t argsSize)
-{
-    const int64_t xlocalsize = tileSize;
-    const int64_t xgridsize = mTiles;
-    const int64_t ylocalsize = tileSize;
-    const int64_t ygridsize = nTiles;
-    const int64_t zlocalsize = 1;
-    const int64_t zgridsize = batches;
-
-    // Check the device limits for grid size
-    detail::assertValidGridSize(xgridsize, ygridsize, zgridsize);
-
-    // NOLINTNEXTLINE(modernize-avoid-c-arrays)
-    void* config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER,
-                      argsPtr,
-                      HIP_LAUNCH_PARAM_BUFFER_SIZE,
-                      &argsSize,
-                      HIP_LAUNCH_PARAM_END};
-
-    detail::throwOnHipError(hipModuleLaunchKernel(function,
-                                                  static_cast<unsigned int>(xgridsize),
-                                                  static_cast<unsigned int>(ygridsize),
-                                                  static_cast<unsigned int>(zgridsize),
-                                                  static_cast<unsigned int>(xlocalsize),
-                                                  static_cast<unsigned int>(ylocalsize),
-                                                  static_cast<unsigned int>(zlocalsize),
-                                                  0,
-                                                  nullptr,
-                                                  nullptr,
-                                                  config),
-                            "hipModuleLaunchKernel failed");
-
-    detail::throwOnHipError(hipDeviceSynchronize(), "hipDeviceSynchronize failed");
-}
-
 } // namespace
+
+namespace hipdnn_gpu_ref
+{
 
 void GpuFpReferenceMatmul::launchMatmul(const void* aPtr,
                                         const std::vector<int64_t>& aDims,
@@ -110,7 +70,8 @@ void GpuFpReferenceMatmul::launchMatmul(const void* aPtr,
         batches *= cDims[i];
     }
 
-    launchKernel(kernel.function(), mTiles, nTiles, tileSize, batches, &args, sizeof(args));
+    detail::launchKernel(
+        kernel.function(), {mTiles, nTiles, batches}, {tileSize, tileSize, 1}, &args, sizeof(args));
 }
 
 } // namespace hipdnn_gpu_ref

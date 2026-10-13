@@ -124,6 +124,7 @@ option(ROCSPARSE_ENABLE_SPMAT_SCALE "Build rocsparse_spmat_scale and its scalar 
 option(ROCSPARSE_ENABLE_SDDMM_BATCHED "Build batched SDDMM support for the CSR, CSC, COO, COO AoS, and ELL formats" ON)
 option(BUILD_WITH_ELL_TRSV "Enable ELL format support in rocsparse_spsv and rocsparse_sptrsv" ON)
 option(BUILD_WITH_DIAGONAL_SOLVE "Enable the diagonal solve in rocsparse_sptrsv and rocsparse_sptrsm" ON)
+option(BUILD_WITH_SPSORT "Build rocsparse_spsort and the rocsparse_spsort_descr auxiliary routines for the COO, CSR, and CSC formats" ON)
 
 # Clients utilize rocsparse fortran API and a fortran compiler
 if( NOT BUILD_FORTRAN_CLIENTS )
@@ -419,9 +420,12 @@ if(BUILD_CODE_COVERAGE)
     # Also fold in the standalone unit-test binaries so their host-side coverage
     # of librocsparse is counted. The %m module hash keeps profraw names distinct
     # per binary; they match the rocsparse-coverage_*.profraw merge glob below.
-    # Wrapped in || true so a unit-test failure cannot abort the coverage upload.
-    COMMAND sh -c "LLVM_PROFILE_FILE=./coverage-report/profraw/rocsparse-coverage_%m.profraw ./clients/staging/rocsparse-unit-test || true"
-    COMMAND sh -c "LLVM_PROFILE_FILE=./coverage-report/profraw/rocsparse-coverage_%m.profraw ./clients/staging/rocsparse-unit-test-device || true"
+    # make exports GTEST_FILTER into the recipe environment and gtest honors it,
+    # which previously selected 0 host tests and 6 device tests. These binaries
+    # are not categorized that way, so run each suite in full. || true keeps a
+    # unit-test failure from aborting the coverage upload.
+    COMMAND sh -c "env -u GTEST_FILTER LLVM_PROFILE_FILE=./coverage-report/profraw/rocsparse-coverage_%m.profraw ./clients/staging/rocsparse-unit-test --gtest_filter='*' || true"
+    COMMAND sh -c "env -u GTEST_FILTER LLVM_PROFILE_FILE=./coverage-report/profraw/rocsparse-coverage_%m.profraw ./clients/staging/rocsparse-unit-test-device --gtest_filter='*' || true"
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
     )
 
