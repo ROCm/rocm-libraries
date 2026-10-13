@@ -27,6 +27,7 @@ from support_features import (
     FeatureError,
     batchnorm,
     batchnorm_backward,
+    batchnorm_inference,
     batchnorm_training,
     convolution,
     convolution_bwd,
@@ -1861,6 +1862,160 @@ class TestBatchnormBackwardExtract:
         node[side][port] = None
         with pytest.raises(FeatureError, match=f"required port {port}"):
             batchnorm_backward.extract(node, tensors)
+
+
+def _bn_inf(
+    *,
+    batch: int = 2,
+    spatial: tuple[int, ...] = (8, 8),
+    channels: int = 4,
+    layout: str = "nchw",
+    dtype: str = "float",
+    y_dtype: str | None = None,
+    y_virtual: bool = False,
+) -> tuple[dict, dict]:
+    """A BatchnormInferenceAttributes node.
+
+    ``x`` on uid 1, ``y`` on 2, scale and bias on 3 and 4, the mean and
+    inverse variance on 5 and 6. Ports as
+    utilities/json/BatchnormInferenceAttributes.hpp writes them, written out
+    rather than read from the module.
+    """
+    dims = [batch, channels, *spatial]
+    strides = _layout_strides(dims, layout)
+    tensors = {
+        uid: {
+            "uid": uid,
+            "dims": list(dims),
+            "strides": list(strides),
+            "data_type": dt,
+            "virtual": virtual,
+        }
+        for uid, dt, virtual in ((1, dtype, False), (2, y_dtype or dtype, y_virtual))
+    }
+    per_channel = [1, channels, *(1 for _ in spatial)]
+    tensors |= {uid: _channel(uid, per_channel) for uid in range(3, 7)}
+    inputs = {
+        "x_tensor_uid": 1,
+        "scale_tensor_uid": 3,
+        "bias_tensor_uid": 4,
+        "mean_tensor_uid": 5,
+        "inv_variance_tensor_uid": 6,
+    }
+    node = {
+        "type": "BatchnormInferenceAttributes",
+        "inputs": inputs,
+        "outputs": {"y_tensor_uid": 2},
+    }
+    return node, tensors
+
+
+class TestBatchnormInferenceExtract:
+    PLAIN = {"dtype:fp32", "rank:2d", "layout:nchw"}
+
+    def _extract(self, **kwargs) -> set[str]:
+        return batchnorm_inference.extract(*_bn_inf(**kwargs))
+
+    def _raises(self, node: dict, tensors: dict, match: str) -> None:
+        with pytest.raises(FeatureError, match=match):
+            batchnorm_inference.extract(node, tensors)
+
+    def test_builder_binds_every_schema_field(self) -> None:
+        node, _ = _bn_inf()
+        assert set(batchnorm.bound(node)) == table_fields(
+            batchnorm_inference.SCHEMA_FILE, batchnorm_inference.SCHEMA_TABLE
+        )
+
+    def test_every_feature_is_reachable(self) -> None:
+        reached = self._extract()
+        for kwargs in (
+            {"spatial": (), "dtype": "half", "y_dtype": "float"},
+            {"spatial": (8,), "layout": "nhwc", "dtype": "bfloat16"},
+            {"spatial": (4, 8, 8)},
+        ):
+            reached |= self._extract(**kwargs)
+        assert reached == {feature.id for feature in batchnorm_inference.FEATURES}
+
+    def test_plain_graph(self) -> None:
+        assert self._extract() == self.PLAIN
+
+    @pytest.mark.parametrize(
+        "spatial, expected",
+        [((8,), "rank:1d"), ((8, 8), "rank:2d"), ((4, 8, 8), "rank:3d")],
+    )
+    @pytest.mark.parametrize("layout", convolution.LAYOUTS)
+    def test_rank_and_layout(self, spatial, expected: str, layout: str) -> None:
+        features = self._extract(spatial=spatial, layout=layout)
+        assert features == {"dtype:fp32", expected, f"layout:{layout}"}
+
+    def test_rank_0d_adds_no_layout(self) -> None:
+        assert self._extract(spatial=()) == {"dtype:fp32", "rank:0d"}
+
+    @pytest.mark.parametrize(
+        "dtype, expected",
+        [("float", "dtype:fp32"), ("half", "dtype:fp16"), ("bfloat16", "dtype:bf16")],
+    )
+    def test_dtype(self, dtype: str, expected: str) -> None:
+        features = self._extract(dtype=dtype)
+        assert features == self.PLAIN - {"dtype:fp32"} | {expected}
+
+    def test_a_virtual_y_is_not_mixed(self) -> None:
+        # Batch norm inference -> fused pointwise: y is the virtual fp32
+        # intermediate, the caller's x is fp16.
+        features = self._extract(dtype="half", y_dtype="float", y_virtual=True)
+        assert features == self.PLAIN - {"dtype:fp32"} | {"dtype:fp16"}
+
+    def test_a_non_virtual_y_of_another_dtype_is_mixed(self) -> None:
+        features = self._extract(dtype="half", y_dtype="float")
+        assert features == self.PLAIN - {"dtype:fp32"} | {
+            "dtype:fp16",
+            "precision:mixed",
+        }
+
+    def test_uncatalogued_dtype_raises(self) -> None:
+        self._raises(*_bn_inf(dtype="int8"), "x_tensor_uid dtype")
+
+    def test_one_value_per_channel_is_allowed(self) -> None:
+        # The statistics are given, not computed from the batch.
+        assert "rank:2d" in self._extract(batch=1, spatial=(1, 1))
+
+    def test_activation_shapes_that_differ_raise(self) -> None:
+        node, tensors = _bn_inf()
+        tensors[2]["dims"] = [2, 4, 8, 4]
+        self._raises(node, tensors, "activation shapes differ")
+
+    @pytest.mark.parametrize("uid", [3, 4, 5, 6])
+    @pytest.mark.parametrize(
+        "change, match",
+        [
+            ({"dims": [1, 4, 8, 8]}, r"are not \[1, 4, 1, ...\]"),
+            ({"dims": [4, 1]}, r"are not \[1, 4, 1, ...\]"),
+            ({"dims": [4]}, r"are not \[1, 4, 1, ...\]"),
+            ({"data_type": "half"}, "dtype 'half' is not catalogued"),
+        ],
+    )
+    def test_per_channel_tensors_are_fp32_and_channel_only(
+        self, uid: int, change: dict, match: str
+    ) -> None:
+        node, tensors = _bn_inf()
+        tensors[uid] |= change
+        self._raises(node, tensors, match)
+
+    @pytest.mark.parametrize(
+        "side, port",
+        [
+            ("inputs", "x_tensor_uid"),
+            ("inputs", "scale_tensor_uid"),
+            ("inputs", "bias_tensor_uid"),
+            ("inputs", "mean_tensor_uid"),
+            ("inputs", "inv_variance_tensor_uid"),
+            ("outputs", "y_tensor_uid"),
+        ],
+    )
+    def test_unbound_required_port_raises(self, side: str, port: str) -> None:
+        node, tensors = _bn_inf()
+        node[side][port] = None
+        self._raises(node, tensors, f"required port {port}")
 
 
 # --------------------------------------------------------------------------

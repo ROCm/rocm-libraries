@@ -17,6 +17,7 @@ from types import ModuleType
 from support_features import (
     FeatureError,
     batchnorm_backward,
+    batchnorm_inference,
     batchnorm_training,
     convolution_bwd,
     convolution_fwd,
@@ -34,6 +35,7 @@ OPS: dict[str, ModuleType] = {
     m.NODE_TYPE: m
     for m in (
         batchnorm_backward,
+        batchnorm_inference,
         batchnorm_training,
         convolution_bwd,
         convolution_fwd,
@@ -48,7 +50,6 @@ OPS: dict[str, ModuleType] = {
 # is reported for them.
 PENDING = frozenset(
     {
-        "BatchnormInferenceAttributes",
         "BatchnormInferenceAttributesVarianceExt",
         "BlockScaleDequantizeAttributes",
         "BlockScaleQuantizeAttributes",

@@ -40,8 +40,7 @@ FEATURES = (
     Feature("peer_stats:on", (PEER_STATS,), "statistics shared across devices"),
 )
 
-_PER_CHANNEL = "required and always [1, C, 1, ...] fp32: nothing to choose"
-NOT_FEATURES = {SCALE: _PER_CHANNEL, **{port: _PER_CHANNEL for port in GRADIENTS}}
+NOT_FEATURES = {port: batchnorm.REQUIRED_PER_CHANNEL for port in (SCALE, *GRADIENTS)}
 
 
 def extract(node: dict, tensors_by_uid: dict) -> set[str]:

@@ -38,6 +38,9 @@ DTYPES = convolution.DTYPES
 RANKS = {0: "rank:0d", **convolution.RANKS}
 CHANNEL_DTYPE = "fp32"
 
+# NOT_FEATURES reason for a per-channel port the API requires.
+REQUIRED_PER_CHANNEL = "required and always [1, C, 1, ...] fp32: nothing to choose"
+
 
 def catalog(data: str, io: tuple[str, ...]) -> tuple[Feature, ...]:
     return (
