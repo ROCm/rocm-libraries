@@ -312,8 +312,8 @@ Configure extracts each archive to `integration-test-bundles/dnn-benchmarking/<n
 in the build tree. Discovery registers every graph `.json` as a graph-only
 bundle test (outside the quick/standard/full tiers), verified against the
 reference executor. Nothing is committed to the bundle tree. Provider
-categories that match `*` (comprehensive, full) run these tests when the
-archives are present; `quick` and `standard` do not. To take newer workloads,
+categories that match `*` (the `full` category) run these tests when the
+archives are present; `quick`, `standard` and `comprehensive` do not. To take newer workloads,
 run `dvc update workloads/*.dvc` and commit the changed pointers.
 
 ### Validating golden data itself
