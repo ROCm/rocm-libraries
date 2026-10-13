@@ -1654,11 +1654,11 @@ TEST_F(DAGSchedulerPassTest, ParentTierDsLoadOrderFollowsDeadline_DisjointAccumu
     EXPECT_LT(positionOf(*bb, mxsP2), positionOf(*bb, aP2));
 }
 
-// dsReadPerWmma leftover slots will otherwise take later-consumer loads that are
-// also pending (B_X1+28 then B_X2+0/+4). Those occupy the LDS FIFO in front of
-// the next WMMA and WaitCntInsertion emits s_wait_dscnt 2. Rank by earliest
-// pending WMMA consumer, and outside a steady loop, once this window has issued
-// a load for that WMMA, do not spend leftover cap on a later consumer.
+// Later-consumer loads that are also pending (B_X2+0/+4) must not issue ahead
+// of an earlier consumer's load (B_X1+28): LDS returns in order, so the earlier
+// WMMA would wait them out. Rank by earliest pending WMMA consumer. Outside a
+// steady loop too, once the earlier WMMA has no ds_load left, leftover
+// dsReadPerWmma slots go to the later consumer in DS order.
 TEST_F(DAGSchedulerPassTest, EarliestPendingWmmaDsLoadBeatsLaterConsumerCapFill) {
     StinkyInstruction* wmma0 = createWmmaScaleF8(/*destStart=*/32, /*src0Start=*/50);
     ASSERT_NE(wmma0, nullptr);
@@ -1684,18 +1684,16 @@ TEST_F(DAGSchedulerPassTest, EarliestPendingWmmaDsLoadBeatsLaterConsumerCapFill)
            "loads that only compete on leftover dsReadPerWmma slots";
     EXPECT_LT(positionOf(*bb, dsEarly), positionOf(*bb, dsLate1));
     EXPECT_LT(positionOf(*bb, dsEarly), positionOf(*bb, wmma1));
-    EXPECT_LT(positionOf(*bb, wmma1), positionOf(*bb, dsLate0))
-        << "do not occupy leftover DS-cap slots with later-consumer loads before the "
-           "already-ready earlier WMMA issues";
-    EXPECT_LT(positionOf(*bb, wmma1), positionOf(*bb, dsLate1));
+    EXPECT_LT(positionOf(*bb, dsLate0), positionOf(*bb, wmma1))
+        << "once the earlier consumer's loads are issued, a later consumer's load "
+           "should use the current WMMA window outside a steady loop as well";
     EXPECT_LT(positionOf(*bb, wmma1), positionOf(*bb, wmma2));
 }
 
-// In a steady loop the consumer focus above must not block useful look-ahead.
-// Once the earlier WMMA has no ds_load left to issue, a load for a later,
-// disjoint accumulator tile should use the current WMMA's latency window
-// instead of landing immediately before its own consumer and producing
-// s_wait_dscnt 0.
+// The same look-ahead in a steady loop. Once the earlier WMMA has no ds_load
+// left to issue, a load for a later, disjoint accumulator tile should use the
+// current WMMA's latency window instead of landing immediately before its own
+// consumer and producing s_wait_dscnt 0.
 TEST_F(DAGSchedulerPassTest, SteadyLoopFutureWmmaDsLoadUsesCurrentWindow) {
     bb->addSuccessor(bb);
     StinkyInstruction* wmma0 = createWmmaScaleF8(/*destStart=*/32, /*src0Start=*/50);

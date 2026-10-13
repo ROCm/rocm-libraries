@@ -715,17 +715,14 @@ class CDNA5ReadyQueue : public ReadyQueue {
     // Kept separate from coIssueCyclePos_, the real hardware/hazard timeline.
     int dsSchedulingBudgetUsed_ = 0;
     // Unissued ds_loads per earliest in-region matrix consumer (DAG id), and that
-    // consumer per ds_load DAG id. Inside a steady loop a ds_load may issue only
-    // once every earlier consumer has none left: LDS returns in order,
-    // so a B_X2 load ahead of an outstanding B_X1+28 is waited out by X1's WMMA.
+    // consumer per ds_load DAG id. A ds_load may issue only once every earlier
+    // consumer has none left: LDS returns in order, so a B_X2 load ahead of an
+    // outstanding B_X1+28 is waited out by X1's WMMA.
     std::map<int, int> unissuedDsByConsumer_;
     std::vector<int> dsConsumerById_;
     int earliestUnissuedDsConsumer() const {
         return unissuedDsByConsumer_.empty() ? INT_MAX : unissuedDsByConsumer_.begin()->first;
     }
-    // Exact consumer focus used outside a steady-state loop, where there is no
-    // next-iteration latency to hide and younger DS work only pollutes FIFO.
-    int dsWindowFocusWmmaId_ = INT_MAX;
 
     // (A) RAW data-ready gate. Per reg index: remaining modeled latency until a
     // producer's result is safe to consume (e.g. ds_load LDS->VGPR, 56 cyc). Any
@@ -1293,8 +1290,6 @@ DAGNode* CDNA5ReadyQueue::popNonWmma(DAGNode* node, int pickKind) {
         ++dsIssuedThisRegion_;
         dsReadInflight_.pushWithThrottle(dsReadThrottleLatency());
         dsIssueCap_.push(dsIssueCapSpan());
-        const int wmmaId = earliestPendingWmmaId(node);
-        dsWindowFocusWmmaId_ = std::min(dsWindowFocusWmmaId_, wmmaId);
         if (node->id < dsConsumerById_.size()) {
             auto it = unissuedDsByConsumer_.find(dsConsumerById_[node->id]);
             if (it != unissuedDsByConsumer_.end() && --it->second == 0)
@@ -1789,7 +1784,6 @@ DAGNode* CDNA5ReadyQueue::pickOneFromWMMA(DAGNode* pick) {
             cumulativeWmmaHideBudget_ += hideBudget_.issueBudgetFor(node->inst);
         }
     }
-    dsWindowFocusWmmaId_ = INT_MAX;
 
     globalReadCounter = 0;
     // (A) RAW: stamp the WMMA's dest (accumulator) data-ready latency.
@@ -2643,21 +2637,13 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
         bool pickedPending = false;
         int pickedEarly = INT_MAX;
         const bool holdIssuedOnlyPreload = wmmaIssueConfig.issuedCount > 0;
-        // Steady-state loops may look ahead to a later consumer once every
-        // earlier consumer has no ds_load left to issue. At a tail, retain
-        // exact-consumer focus: there is no next iteration to prepare, and
-        // younger loads would only sit ahead of the current consumer in DS FIFO.
-        const Loop* loop = getLoop();
-        const bool inSteadyLoop = loop && currentBB_ && loop->contains(currentBB_);
+        // Look ahead to a later consumer once every earlier consumer has no
+        // ds_load left to issue, in a steady loop and at a tail alike.
         const int openConsumer = earliestUnissuedDsConsumer();
         for (DAGNode* n : localReadQueue) {
             if (holdIssuedOnlyPreload && dsFeedsIssuedOnlyWmma(n)) continue;
             const int early = earliestPendingWmmaId(n);
-            if (inSteadyLoop) {
-                if (early > openConsumer) continue;
-            } else if (dsWindowFocusWmmaId_ != INT_MAX && early > dsWindowFocusWmmaId_) {
-                continue;
-            }
+            if (early > openConsumer) continue;
             const bool pending = early != INT_MAX;
             if (!pickedDS || (pending && !pickedPending) ||
                 (pending == pickedPending &&
@@ -3186,7 +3172,6 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
     regionDag_ = &deps.dag;
     carryQueuedWar();
     wmmaIssuedCountThisRegion_ = 0;
-    dsWindowFocusWmmaId_ = INT_MAX;
     unissuedDsByConsumer_.clear();
     dsConsumerById_.assign(deps.dag.nodes.size(), INT_MAX);
     for (const DAGNode& n : deps.dag.nodes) {
