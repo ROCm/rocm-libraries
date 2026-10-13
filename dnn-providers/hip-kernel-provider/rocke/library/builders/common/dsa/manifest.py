@@ -57,6 +57,28 @@ def _validate_q_pos_base(q_pos_base: int, seqlen_q: int) -> None:
         )
 
 
+def _validate_offsets(
+    seqlen_q: int, seqlen_k: int, n_index_heads: int, index_head_dim: int
+) -> None:
+    """Reject a runtime shape whose largest element offset overflows i32.
+
+    seqlen_q / seqlen_k are runtime kernel arguments now, so the offset bound is a
+    launch-time concern, not a compile-time one: the score store index is
+    row_q*seqlen_k + k_col, the index-query base q*n_index_heads*index_head_dim,
+    and the index-key base s*index_head_dim, all computed in i32 on device.
+    """
+    q, k, h, d = int(seqlen_q), int(seqlen_k), int(n_index_heads), int(index_head_dim)
+    if q * k >= 2**31:
+        raise ValueError(f"seqlen_q*seqlen_k ({q * k}) overflows the i32 score offset")
+    if q * h * d >= 2**31:
+        raise ValueError(
+            f"seqlen_q*n_index_heads*index_head_dim ({q * h * d}) overflows the i32 "
+            f"index-query offset"
+        )
+    if k * d >= 2**31:
+        raise ValueError(f"seqlen_k*index_head_dim ({k * d}) overflows the i32 key offset")
+
+
 def _with_size_bytes(signature: Sequence[Mapping[str, Any]]) -> List[Dict[str, Any]]:
     out: List[Dict[str, Any]] = []
     for arg in signature:
@@ -134,6 +156,9 @@ def run_lightning_indexer_manifest_problem(
     q_pos_base = int(manifest.get("q_pos_base", 0))
     # Re-check against the runtime Q, which --shape may have overridden past the compiled seqlen_q.
     _validate_q_pos_base(q_pos_base, Q)
+    # seqlen_q/seqlen_k are runtime kernel args, so their i32 offset bounds are
+    # checked here against the actual launch shape (--shape may override the spec).
+    _validate_offsets(Q, Sk, HI, D_I)
     tol = float(manifest.get("verify_tol", _DEFAULT_TOL))
     signature = list(manifest["args_signature"])
     threads = int(manifest["threads_per_block"])
@@ -147,9 +172,13 @@ def run_lightning_indexer_manifest_problem(
     scores = np.zeros((Q, Sk), dtype=np.float32)
     ref = ref_indexer_scores(ins["index_q"], ins["index_k"], w, q_pos_base)
 
-    # The MFMA body launches one wave64 per (16-query, 16-key) output block; the
-    # scalar body one workgroup per query row. Must match lightning_indexer_grid.
-    grid = (Q // 16, Sk // 16, 1) if body == "mfma" else (Q, 1, 1)
+    # Must match kernels.common.lightning_indexer.lightning_indexer_grid: both
+    # bodies ceil over the key axis (mfma also ceils the query axis), so a
+    # non-16 / non-block-multiple seqlen gets a tail tile.
+    if body == "mfma":
+        grid = ((Q + 15) // 16, (Sk + 15) // 16, 1)
+    else:
+        grid = (Q, (Sk + threads - 1) // threads, 1)
     block = (threads, 1, 1)
     # Two flops per (q, key, head, dim): one multiply, one add in the dot.
     flop = 2.0 * Q * Sk * HI * D_I
@@ -175,6 +204,8 @@ def run_lightning_indexer_manifest_problem(
                 "w": w_dev,
                 "scores": s_dev,
                 "q_pos_base": q_pos_base,
+                "seqlen_q": Q,
+                "seqlen_k": Sk,
             },
         )
         return args, ptrs
