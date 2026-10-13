@@ -1,4 +1,4 @@
-# ADR 0033: Four goldens move when one solution parameter is added
+# ADR 0034: Four goldens move when one solution parameter is added
 
 Status:  Accepted
 Defect:  none — behavior is intended
