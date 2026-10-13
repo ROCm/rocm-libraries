@@ -17,7 +17,7 @@
 /.github/workflows/*hipdnn*.yml                     @ROCm/hipdnn-core
 /.github/requirements-hipdnn-superbuild-ci.txt      @ROCm/hipdnn-core
 /.github/workflows/*miopen*.yml                     @ROCm/miopen-reviewers
-/.github/workflows/*therock*.yml                    @ROCm/therock-infra-write
+/.github/workflows/*therock*.yml                    @ROCm/rocm-libraries-reviewers @ROCm/therock-infra-write @ROCm/rocm-math-lib-build-infra
 /.github/workflows/therock-rocjitsu-race-check-linux.yml   @ROCm/therock-infra-write @ROCm/hipblaslt-reviewers
 
 # Component CI ownership
