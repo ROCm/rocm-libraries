@@ -178,5 +178,9 @@ Limitations
 
 * Grouped GEMM is not served from the cache, and neither is a pointer-array batch called with
   ``algo=nullptr``.
+* Calls dispatched to rocRoller bypass direct cache replay when ``algo=nullptr``. This includes
+  calls using ``HIPBLASLT_USE_ROCROLLER=1`` and block-scaled calls selected for rocRoller by default.
+  Cache rows currently accept only nonnegative Tensile solution indexes; rocRoller uses negative
+  encoded indexes.
 * ``alpha``, ``beta`` and whether ``C`` and ``D`` alias are not part of the lookup key, so an entry
   can serve a caller whose values differ from those it was recorded with.
