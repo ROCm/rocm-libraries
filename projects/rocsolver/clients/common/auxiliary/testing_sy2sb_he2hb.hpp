@@ -314,8 +314,11 @@ void sy2sb_he2hb_getError(const rocblas_handle handle,
                               &dW[0][kd], lda));
 
     // W := W Q^H = (Q Aband) Q^H. Updates cols kd:n.
+    rocblas_operation trans = rocblas_is_complex<T>
+        ? rocblas_operation_conjugate_transpose
+        : rocblas_operation_transpose;
     CHECK_ROCBLAS_ERROR(rocsolver_ormxr_unmxr(
-        true, handle, rocblas_side_right, rocblas_operation_conjugate_transpose, // opts
+        true, handle, rocblas_side_right, trans, // opts
         n, n - kd, n - kd, // dims
         &dV[0][kd], lda, dTau[0], // Householder V vectors below bandwidth kd
         &dW[0][kd * lda], lda));
