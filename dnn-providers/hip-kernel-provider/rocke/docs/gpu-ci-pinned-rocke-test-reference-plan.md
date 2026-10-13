@@ -14,9 +14,13 @@ for exact shapes, source-test mappings, and missing coverage.
 SDPA has eight gfx942, seven gfx950, and eight standalone FP16 WMMA configurations
 each on gfx1151 and gfx1201. Convolution has sixteen qualified gfx942
 forward cases; the operation guides and DVC pointers record the current bundle
-identities. All three pairs are enrolled for default installation. Both operations share
+identities. All five pairs are enrolled for default installation. Both operations share
 tensor-free artifact handling, worker transport, and installation infrastructure.
-SDPA DVC delivery and architecture-specific packaging have been exercised in CI.
+SDPA DVC delivery and architecture-specific packaging were validated in CI for
+gfx942. The gfx950, gfx1151, and gfx1201 bundles passed GPU qualification, source
+verification, installed Python reference tests, and fresh-cache DVC download checks.
+Native provider execution and final TheRock artifact splitting remain unvalidated
+for those three targets.
 Further architectures, convolution gradients, KDA, and GDN remain future work.
 
 Offline qualification compares a pinned rocKE implementation with an independent
