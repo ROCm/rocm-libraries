@@ -21,7 +21,7 @@
 /.github/workflows/therock-rocjitsu-race-check-linux.yml   @ROCm/therock-infra-write @ROCm/hipblaslt-reviewers
 
 # Component CI ownership
-/.github/workflows/component-ci.yml                 @ROCm/rocm-math-lib-build-infra
+/.github/workflows/*component-ci*.yml                 @ROCm/rocm-math-lib-build-infra
 /.github/workflows/component-ci-geko.yml            @ROCm/rocm-math-lib-build-infra @ROCm/hipblaslt-reviewers
 /.github/workflows/component-ci-miopen.yml          @ROCm/rocm-math-lib-build-infra @ROCm/miopen-reviewers
 /.github/workflows/component-ci-rocisa.yml          @ROCm/rocm-math-lib-build-infra @ROCm/hipblaslt-reviewers
