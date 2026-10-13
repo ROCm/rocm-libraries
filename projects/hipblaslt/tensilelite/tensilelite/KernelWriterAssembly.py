@@ -3159,27 +3159,74 @@ class KernelWriterAssembly(KernelWriter):
 
       def calculateWG():
         #### calculate numWorkGroup ####
-        # Allocate 6 VGPRs for 64-bit FP operations (F64 uses even-aligned register pairs)
+        # F32 loses precision above 2^24 (16777216) due to 23-bit mantissa
+        # Generate runtime check: use F64 if SizesFree > 2^24, otherwise use F32
+        F32_PRECISION_LIMIT = 16777216  # 2^24
+
+        # Allocate registers for both F32 and F64 paths (6 VGPRs to support F64)
         # Layout: qReg[0:1] (F64 temp + result), dReg[2], divReg[3],
         #         rReg[4:5] (F64 temp + remainder)
         baseReg = self.vgprPool.checkOutAligned(6, 2, tag="calculateWG_baseReg")
         qReg = baseReg
         dReg = qReg + 2
         divReg = qReg + 3
-        rReg = qReg + 4  # qReg is even, so qReg+4 is also even (good for F64)
+        rReg = qReg + 4
 
-        moduleWg.add(VMovB32(dst=vgpr(divReg), src="MT0", comment="set MT0 into sgpr"))
-        moduleWg.add(VMovB32(dst=vgpr(dReg), src=sgpr("SizesFree+0"), comment="set Free0 size"))
-        moduleWg.add(vectorUInt32CeilDivideAndRemainder64(qReg=qReg, dReg=dReg, divReg=divReg, rReg=rReg))
-        if self.states.archCaps["TransOpWait"]:
-          moduleWg.add(SNop(waitState=0, comment="wait for F64 ops before reading NumWorkGroups0"))
-        moduleWg.add(VReadfirstlaneB32(dst=sgpr("NumWorkGroups0"), src=vgpr(qReg), comment="set back to numWorkGroup0"))
-        moduleWg.add(VMovB32(dst=vgpr(divReg), src="MT1", comment="set MT1 into sgpr"))
-        moduleWg.add(VMovB32(dst=vgpr(dReg), src=sgpr("SizesFree+1"), comment="set Free1 size"))
-        moduleWg.add(vectorUInt32CeilDivideAndRemainder64(qReg=qReg, dReg=dReg, divReg=divReg, rReg=rReg))
-        if self.states.archCaps["TransOpWait"]:
-          moduleWg.add(SNop(waitState=0, comment="wait for F64 ops before reading NumWorkGroups1"))
-        moduleWg.add(VReadfirstlaneB32(dst=sgpr("NumWorkGroups1"), src=vgpr(qReg), comment="set back to numWorkGroup1"))
+        # Allocate SGPR for precision limit comparison
+        with self.allocTmpSgpr(1, tag="calculateWG_precisionCheck") as tmpSgprRes:
+          tmpSgpr = tmpSgprRes.idx
+          # NumWorkGroups0 calculation
+          moduleWg.add(VMovB32(dst=vgpr(divReg), src="MT0", comment="set MT0 into sgpr"))
+          moduleWg.add(VMovB32(dst=vgpr(dReg), src=sgpr("SizesFree+0"), comment="set Free0 size"))
+
+          # Check if SizesFree+0 > 2^24 (requires F64 precision)
+          moduleWg.add(SMovB32(dst=sgpr(tmpSgpr), src=F32_PRECISION_LIMIT, comment="F32 precision limit (2^24)"))
+          moduleWg.add(SCmpGtU32(src0=sgpr("SizesFree+0"), src1=sgpr(tmpSgpr), comment="check if size > 2^24"))
+
+          # Use conditional branches for F32 vs F64 path
+          label_use_f64_dim0 = Label(self.labels.getNameInc("use_f64_dim0"), "")
+          label_done_dim0 = Label(self.labels.getNameInc("done_dim0"), "")
+
+          moduleWg.add(SCBranchSCC1(labelName=label_use_f64_dim0.getLabelName(), comment="branch if size > 2^24 (use F64)"))
+
+          # F32 path (size <= 2^24)
+          moduleWg.add(vectorUInt32CeilDivideAndRemainder(qReg=qReg, dReg=dReg, divReg=divReg, rReg=rReg, doRemainder=False))
+          moduleWg.add(SBranch(labelName=label_done_dim0.getLabelName(), comment="skip F64 path"))
+
+          # F64 path (size > 2^24)
+          moduleWg.add(label_use_f64_dim0)
+          moduleWg.add(vectorUInt32CeilDivideAndRemainder64(qReg=qReg, dReg=dReg, divReg=divReg, rReg=rReg))
+          if self.states.archCaps["TransOpWait"]:
+            moduleWg.add(SNop(waitState=0, comment="wait for F64 ops before reading NumWorkGroups0"))
+
+          moduleWg.add(label_done_dim0)
+          moduleWg.add(VReadfirstlaneB32(dst=sgpr("NumWorkGroups0"), src=vgpr(qReg), comment="set back to numWorkGroup0"))
+
+          # NumWorkGroups1 calculation
+          moduleWg.add(VMovB32(dst=vgpr(divReg), src="MT1", comment="set MT1 into sgpr"))
+          moduleWg.add(VMovB32(dst=vgpr(dReg), src=sgpr("SizesFree+1"), comment="set Free1 size"))
+
+          # Check if SizesFree+1 > 2^24 (requires F64 precision)
+          moduleWg.add(SCmpGtU32(src0=sgpr("SizesFree+1"), src1=sgpr(tmpSgpr), comment="check if size > 2^24"))
+
+          label_use_f64_dim1 = Label(self.labels.getNameInc("use_f64_dim1"), "")
+          label_done_dim1 = Label(self.labels.getNameInc("done_dim1"), "")
+
+          moduleWg.add(SCBranchSCC1(labelName=label_use_f64_dim1.getLabelName(), comment="branch if size > 2^24 (use F64)"))
+
+          # F32 path (size <= 2^24)
+          moduleWg.add(vectorUInt32CeilDivideAndRemainder(qReg=qReg, dReg=dReg, divReg=divReg, rReg=rReg, doRemainder=False))
+          moduleWg.add(SBranch(labelName=label_done_dim1.getLabelName(), comment="skip F64 path"))
+
+          # F64 path (size > 2^24)
+          moduleWg.add(label_use_f64_dim1)
+          moduleWg.add(vectorUInt32CeilDivideAndRemainder64(qReg=qReg, dReg=dReg, divReg=divReg, rReg=rReg))
+          if self.states.archCaps["TransOpWait"]:
+            moduleWg.add(SNop(waitState=0, comment="wait for F64 ops before reading NumWorkGroups1"))
+
+          moduleWg.add(label_done_dim1)
+          moduleWg.add(VReadfirstlaneB32(dst=sgpr("NumWorkGroups1"), src=vgpr(qReg), comment="set back to numWorkGroup1"))
+
         self.vgprPool.checkIn(baseReg)
 
       if self.states.numSgprPreload > 0:
