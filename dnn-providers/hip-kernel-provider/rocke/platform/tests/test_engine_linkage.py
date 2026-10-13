@@ -25,7 +25,7 @@ def load_driver(name, path):
 
 
 @pytest.mark.parametrize("platform", ["linux", "win32"])
-@pytest.mark.parametrize("consumer", ["online", "differential", "micro_parity"])
+@pytest.mark.parametrize("consumer", ["differential", "micro_parity"])
 def test_raw_archive_link_dependencies(monkeypatch, tmp_path, platform, consumer):
     def complete_compile(command, **_kwargs):
         if "-o" in command:
@@ -35,9 +35,7 @@ def test_raw_archive_link_dependencies(monkeypatch, tmp_path, platform, consumer
     run = Mock(side_effect=complete_compile)
     monkeypatch.setattr(subprocess, "run", run)
     monkeypatch.setattr(sys, "platform", platform)
-    if consumer == "online":
-        online.build_lib(str(tmp_path / "librocke.so"))
-    elif consumer == "differential":
+    if consumer == "differential":
         driver = load_driver(
             "link_test_run_diff",
             PLATFORM / "tests/instances/differential/run_diff.py",
@@ -77,6 +75,35 @@ def test_raw_archive_link_dependencies(monkeypatch, tmp_path, platform, consumer
             assert command.index(flag) > archive_index
         else:
             assert flag not in command
+
+
+@pytest.mark.parametrize(
+    ("platform", "library_name"),
+    [("linux", "librocke.so"), ("darwin", "librocke.dylib"), ("win32", "rocke.dll")],
+)
+def test_online_build_uses_the_cmake_shared_target(
+    monkeypatch, tmp_path, platform, library_name
+):
+    calls = []
+
+    def run(command, **_kwargs):
+        calls.append(command)
+        if "--build" in command:
+            stage = tmp_path / f".stage-{os.getpid()}"
+            (stage / library_name).touch()
+        return SimpleNamespace(returncode=0, stdout=b"", stderr="")
+
+    monkeypatch.setattr(online.subprocess, "run", run)
+    monkeypatch.setattr(online.sys, "platform", platform)
+    destination = tmp_path / library_name
+
+    assert online.build_lib(str(destination)) == str(destination)
+    assert destination.is_file()
+    build = next(command for command in calls if "--build" in command)
+    assert build[build.index("--target") + 1] == "rocke_shared"
+    configure = next(command for command in calls if "-S" in command)
+    assert "-DROCKE_BUILD_SHARED_ENGINE=ON" in configure
+    assert "-DBUILD_TESTING=ON" in configure
 
 
 def test_relocated_cmake_consumer_links_lowerer(tmp_path):

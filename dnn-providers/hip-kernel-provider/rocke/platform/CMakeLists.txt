@@ -162,65 +162,83 @@ set(ROCKE_PYTHON_INSTALL_DIR "${_ROCKE_DEFAULT_PYTHON_INSTALL_DIR}"
 file(GLOB_RECURSE ROCKE_CORE_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/cpp/*.cpp")
 list(FILTER ROCKE_CORE_SOURCES EXCLUDE REGEX "/cpp/bindings/")
 
-add_library(rocke_core STATIC ${ROCKE_CORE_SOURCES})
+# Compile the engine once, then reuse those objects in the static archive and
+# optional shared replay engine. Direct objects also let CMake discover and
+# export the flat C ABI when producing a Windows DLL.
+add_library(rocke_core_objects OBJECT ${ROCKE_CORE_SOURCES})
+add_library(rocke_core STATIC $<TARGET_OBJECTS:rocke_core_objects>)
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
+target_link_libraries(rocke_core_objects PRIVATE Threads::Threads)
 target_link_libraries(rocke_core PUBLIC ${CMAKE_DL_LIBS} Threads::Threads)
+target_include_directories(rocke_core_objects PRIVATE
+                           "${CMAKE_CURRENT_SOURCE_DIR}/cpp/include")
 target_include_directories(rocke_core PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/cpp/include>
   $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
 
-# --- Engine freshness / provenance stamp -------------------------------------
-# Compute a deterministic, git-independent content hash of the engine source
-# tree and inject it (plus a human version) ONLY into src/core/rocke_build_id.cpp via
-# compile definitions. Scoping the -D to that single TU keeps every other object
-# untouched: only rocke_build_id.o recompiles when the hash changes, and -- crucially
-# -- no lowering/emission TU ever sees these values, so the emitted LLVM-IR is
-# byte-identical. The build_id TU exposes rocke_build_id()/rocke_engine_version()
-# and is intentionally NOT referenced by any emission path; consumers (harnesses,
-# the language bindings, the provider) read it purely as an artifact stamp.
+# --- Portable-IR bundle freshness / provenance stamp -------------------------
+# Generate a deterministic, git-independent provenance header from the engine
+# and replay CLI sources plus their CMake build recipes. This common bundle ID is
+# a build dependency, not merely a configure-time value: an incremental edit
+# regenerates the stamp before rocke_build_id.o is rebuilt. No lowering/emission
+# TU includes it, so LLVM-IR stays byte-identical.
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/rocke_build_id.cmake")
-rocke_compute_build_id(ROCKE_BUILD_ID "${CMAKE_CURRENT_SOURCE_DIR}")
+rocke_compute_build_id(ROCKE_CONFIGURE_BUILD_ID "${CMAKE_CURRENT_SOURCE_DIR}")
 # Human-readable version. Bump the leading semver when the IR contract changes;
 # the date keeps successive builds from the same version distinguishable.
 string(TIMESTAMP ROCKE_BUILD_DATE "%Y%m%d" UTC)
 set(ROCKE_ENGINE_VERSION "1.0.0+${ROCKE_BUILD_DATE}")
-message(STATUS "rocke_core build-id: ${ROCKE_BUILD_ID}  version: ${ROCKE_ENGINE_VERSION}")
+message(STATUS
+        "portable-IR build-id: ${ROCKE_CONFIGURE_BUILD_ID}  version: ${ROCKE_ENGINE_VERSION}")
+set(ROCKE_BUILD_ID_HEADER
+    "${CMAKE_CURRENT_BINARY_DIR}/generated/rocke_build_id_values.h")
+# Run on every build so a newly added private header is covered even before a
+# reconfigure. copy_if_different keeps rocke_build_id.o untouched when the hash
+# is unchanged.
+add_custom_target(
+  rocke_build_id_header
+  COMMAND "${CMAKE_COMMAND}"
+          "-DROCKE_SOURCE_ROOT=${CMAKE_CURRENT_SOURCE_DIR}"
+          "-DROCKE_BUILD_ID_HEADER=${ROCKE_BUILD_ID_HEADER}"
+          "-DROCKE_ENGINE_VERSION=${ROCKE_ENGINE_VERSION}"
+          -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/generate_rocke_build_id.cmake"
+  BYPRODUCTS "${ROCKE_BUILD_ID_HEADER}"
+  COMMENT "Refreshing rocKE portable-IR bundle build-id"
+  VERBATIM)
+add_dependencies(rocke_core_objects rocke_build_id_header)
+target_include_directories(rocke_core_objects PRIVATE
+                           "${CMAKE_CURRENT_BINARY_DIR}/generated")
 set_source_files_properties(
   "${CMAKE_CURRENT_SOURCE_DIR}/cpp/core/rocke_build_id.cpp"
-  PROPERTIES COMPILE_DEFINITIONS
-  "ROCKE_BUILD_ID=${ROCKE_BUILD_ID};ROCKE_ENGINE_VERSION=${ROCKE_ENGINE_VERSION}")
-# Required so the .a can be linked into the shared rocke_provider plugin
-# (--whole-archive into a .so): some const data tables otherwise emit
-# R_X86_64_PC32 relocations the linker rejects for a PIC shared object.
-set_target_properties(rocke_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
+  PROPERTIES OBJECT_DEPENDS "${ROCKE_BUILD_ID_HEADER}")
+# These objects feed both static and shared libraries. PIC is required on ELF
+# hosts; enabling it uniformly keeps one object set portable across consumers.
+set_target_properties(rocke_core_objects PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 # --- Shared engine for the portable-IR replay path ---------------------------
 # The Python-side portable-IR tooling (rocke.portable_ir.src.online) reaches the
 # C++ importer, recipe VM and lowerer through ctypes, which needs a .so rather
 # than the archive. online.build_lib() can produce one on demand, but a CI gate
 # wants a named target it can build and point ROCKE_ONLINE_LIB at, with the link
-# flags living here rather than duplicated in workflow YAML.
-#
-# --whole-archive is required: nothing in the .so references the engine's
-# entry points, so without it the linker drops every object as unused and
-# produces a well-formed library with no symbols in it.
+# flags living here rather than duplicated in workflow YAML. Supplying the
+# object library directly retains every C ABI entry point without linker-specific
+# whole-archive flags. On Windows, it also gives CMake the .obj files needed to
+# generate the DLL export definition.
 option(ROCKE_BUILD_SHARED_ENGINE
        "Also link a shared librocke.so (needed by the portable-IR ctypes path)" OFF)
 if(ROCKE_BUILD_SHARED_ENGINE)
-  # A SHARED target needs a source of its own. It has to be one that is NOT
-  # already in rocke_core: reusing an engine TU would compile it here and pull
-  # it in again through --whole-archive, and the duplicate definition is a link
-  # error. A generated stub keeps the anchor out of the source tree.
-  set(_rocke_anchor "${CMAKE_CURRENT_BINARY_DIR}/rocke_shared_anchor.cpp")
-  file(WRITE "${_rocke_anchor}"
-       "// Generated by CMake. Anchors the rocke_shared target; the engine\n"
-       "// itself arrives via --whole-archive rocke_core.\n")
-  add_library(rocke_shared SHARED "${_rocke_anchor}")
+  add_library(rocke_shared SHARED $<TARGET_OBJECTS:rocke_core_objects>)
   set_target_properties(rocke_shared PROPERTIES OUTPUT_NAME rocke)
-  target_link_libraries(rocke_shared PRIVATE
-    -Wl,--whole-archive rocke_core -Wl,--no-whole-archive m)
-  install(TARGETS rocke_shared LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})
+  target_link_libraries(rocke_shared PRIVATE ${CMAKE_DL_LIBS} Threads::Threads)
+  if(MSVC)
+    set_target_properties(rocke_shared PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
+  elseif(UNIX)
+    target_link_libraries(rocke_shared PRIVATE m)
+  endif()
+  install(TARGETS rocke_shared
+          LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+          RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 endif()
 
 include(CTest)
@@ -420,11 +438,11 @@ if(ROCKE_INSTALL_TESTS)
       # resolves without the source-tree sys.path shims. The library tests have
       # their own CTest entry below and must not be collected twice.
       string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-             "add_test(rocke_pytest python -m pytest \"${ROCKE_TEST_CTEST_REL}tests\" --ignore \"${ROCKE_TEST_CTEST_REL}tests/library\" -v -rs --timeout=60)\n")
+             "add_test(rocke_pytest python -m pytest \"${ROCKE_TEST_CTEST_REL}tests\" --ignore \"${ROCKE_TEST_CTEST_REL}tests/library\" -m \"not integration\" -v -rs --timeout=60)\n")
       string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
              "set_tests_properties(rocke_pytest PROPERTIES\n"
              "  LABELS \"ckc\\;python\\;quick\"\n"
-             "  ENVIRONMENT \"PYTHONPATH=.;ROCKE_REPLAY_CLI=${ROCKE_TEST_CTEST_REL}tests/portable_ir/rocke_portable_ir_replay_cli${CMAKE_EXECUTABLE_SUFFIX}\"\n"
+             "  ENVIRONMENT \"PYTHONPATH=.\"\n"
              "  TIMEOUT 300)\n")
     endif()
 
