@@ -7,7 +7,6 @@ add_library(hipblaslt-clients-common STATIC)
 target_include_directories(hipblaslt-clients-common
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/common/include>
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/scripts/cotenant>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../tensilelite/include>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../tensilelite>
         $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/library/src/amd_detail/include>
@@ -194,6 +193,7 @@ if(NOT WIN32)
         "${CMAKE_CURRENT_SOURCE_DIR}/scripts/cotenant/hipblaslt-cotenant-kernel.hip"
         PROPERTIES LANGUAGE CXX)
     target_link_libraries(hipblaslt-cotenant-kernel PRIVATE hip::device)
+    target_include_directories(hipblaslt-cotenant-kernel PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/common/include")
     target_compile_features(hipblaslt-cotenant-kernel PRIVATE cxx_std_17)
 endif()
 

@@ -1,7 +1,7 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// Tests for the cotenant helper (scripts/cotenant/cotenant.hpp).
+// Tests for the cotenant helper (common/include/cotenant.hpp).
 //
 // The option-validation and LDS-sizing tests are host-only. The Scoped tests
 // need a GPU and skip without one. Linux only: the cotenant is not supported
