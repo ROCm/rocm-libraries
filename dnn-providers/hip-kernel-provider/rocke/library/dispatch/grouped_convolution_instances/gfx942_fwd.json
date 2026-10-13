@@ -1,0 +1,19 @@
+{
+  "comment": [
+    "Forward grouped-convolution instances registered for gfx942.",
+    "",
+    "One record per AOT instance, in priority order: when several instances can",
+    "run a request, the dispatcher picks the first one listed. A record spells",
+    "the instance's KernelIdentity fields that leave its family's baseline",
+    "(kernels/common/conv_kernel_label.py) or the defaults below; its name is the",
+    "identity's lossless label. Every instance is a shape-generic AOT binary.",
+    "",
+    "Edit with library/benchmarks/common/grouped_conv/instance_list.py (labels,",
+    "add, format); build and benchmark the instances with",
+    "library/benchmarks/common/grouped_conv/benchmark_grouped_conv.py."
+  ],
+  "arch": "gfx942",
+  "direction": "fwd",
+  "defaults": {"llvm_flavor": "llvm22", "wave_size": 64},
+  "instances": []
+}

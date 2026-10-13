@@ -368,7 +368,7 @@ DgradConvSpec.default_lds_k_outer(
 
 The dgrad deducer additionally takes `pipeline` and returns `False` for `pipeline == "wavelet"`: the wavelet loader does not implement the K-outer tile (the `validate()` gate rejects the pair), so the predicate keeps that combination off the sweep. A caller that omits the keyword gets the `"mem"` default and so never sees the exclusion — wavelet callers must pass their own pipeline.
 
-Both predicates are the single selection point for `library/dispatch/grouped_convolution.py` and the sweep driver `benchmark/benchmark_implicit_gemm_conv.py`, rather than each keeping its own copy: dispatch reaches wgrad's through `_wgrad_lds_k_outer` and dgrad's through `_dgrad_lds_k_outer`.
+Both predicates are the single selection point for the sweep driver `benchmark/benchmark_implicit_gemm_conv.py`, so no caller keeps its own copy. (The grouped-convolution dispatcher, `library/dispatch/grouped_convolution.py`, registers fixed lists of forward and dgrad AOT instances whose names already record `lds_k_outer`; it derives no layout itself.)
 
 The dgrad predicate is deliberately **asymmetric** — it keys on `dtype_b` / `warp_tile_n` only, never their A-side counterparts, because only B flips; copying wgrad's symmetric predicate would over-reject dgrad specs whose A side differs. It additionally carries `cpg`: the saving is proportional to the B load width, which collapses to 1 on an odd channel run. There `axis_b` is already `"col"`, there is no scatter to remove, and K-outer would be a small pure regression.
 
