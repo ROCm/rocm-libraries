@@ -207,19 +207,26 @@ jobs:
       # nightly schedule and on manual runs, and on a PR only when it changes
       # the pinned pointers, so a dnn-benchmarking bump is tested in the PR that
       # takes it.
-      - name: Fetch dnn-benchmarking workloads
+      - name: Select dnn-benchmarking workloads
+        id: workloads
         env:
           EVENT_NAME: ${{ github.event_name }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           set -euo pipefail
+          run=true
           if [ "$EVENT_NAME" = "pull_request" ]; then
             git fetch --no-tags --depth=1 --filter=blob:none origin "$BASE_SHA"
             if [ -z "$(git diff --name-only "$BASE_SHA" HEAD -- dnn-providers/integration-tests/workloads)" ]; then
-              echo "Workload pointers unchanged; skipping"
-              exit 0
+              run=false
             fi
           fi
+          echo "run=$run" >> "$GITHUB_OUTPUT"
+
+      - name: Fetch dnn-benchmarking workloads
+        if: steps.workloads.outputs.run == 'true'
+        run: |
+          set -euo pipefail
           dvc pull --recursive dnn-providers/integration-tests/workloads
           count=$(find dnn-providers/integration-tests/workloads -name '*.tar.gz' | wc -l)
           test "$count" -gt 0 || { echo "dvc pull produced no workload archives" >&2; exit 1; }
@@ -485,19 +492,26 @@ jobs:
           echo "Fetched $count golden tensor blob(s)"
 
       # Optional dnn-benchmarking workload graphs. See the Windows lane above.
-      - name: Fetch dnn-benchmarking workloads
+      - name: Select dnn-benchmarking workloads
+        id: workloads
         env:
           EVENT_NAME: ${{ github.event_name }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           set -euo pipefail
+          run=true
           if [ "$EVENT_NAME" = "pull_request" ]; then
             git fetch --no-tags --depth=1 --filter=blob:none origin "$BASE_SHA"
             if [ -z "$(git diff --name-only "$BASE_SHA" HEAD -- dnn-providers/integration-tests/workloads)" ]; then
-              echo "Workload pointers unchanged; skipping"
-              exit 0
+              run=false
             fi
           fi
+          echo "run=$run" >> "$GITHUB_OUTPUT"
+
+      - name: Fetch dnn-benchmarking workloads
+        if: steps.workloads.outputs.run == 'true'
+        run: |
+          set -euo pipefail
           LOGNAME=github-runner dvc pull --recursive dnn-providers/integration-tests/workloads
           count=$(find dnn-providers/integration-tests/workloads -name '*.tar.gz' | wc -l)
           test "$count" -gt 0 || { echo "dvc pull produced no workload archives" >&2; exit 1; }
