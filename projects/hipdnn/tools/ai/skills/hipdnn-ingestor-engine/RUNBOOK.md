@@ -19,7 +19,7 @@ INSTALL=/absolute/path/to/future-install
 SWEEP_ROOT=/existing/device-visible/writable/experiment-root
 GENERATED=/absolute/path/to/empty-generation-destination
 CONFIG=/absolute/path/to/generator-config.yaml
-PROFILE=/absolute/path/to/authoring.profile.yaml
+MANIFEST=/absolute/path/to/<slug>.engine.yaml   # rocKE registry-backed engines
 SHAPES=/absolute/path/to/request-shapes.json
 CORPUS_DIR=/absolute/path/to/graph-corpora
 ARCH=gfx942
@@ -31,7 +31,7 @@ as `--expect-engine` below. A gfx942 dense attention bundle would spell it
 `hipkernel:Gfx942AttentionDense`; the name is an illustration, not an engine to look for.
 
 Follow the **Setup** section of `$GEN/README.md`. Authoring and mining imports need the
-profile's rocKE library environment; production packaging uses its own selected
+rocKE library environment (`$PROVIDER/rocke/library`); production packaging uses its own selected
 compiler/wheel interpreter. Full artifact checking also needs `rocm_kpack` and its
 dependencies (`zstandard`, `msgpack`) importable from `$PY`; `--kpack-python-dir`
 supplies an import root, not missing dependencies.
@@ -80,7 +80,7 @@ allocation is pending but cannot discharge device proof.
 Record [graph-contract.md](graph-contract.md)'s topology/UID edges and field
 dispositions, then [rocke-mining.md](rocke-mining.md)'s applicability, specialization,
 layout, geometry/workspace and ABI evidence. Direct-load engines take these facts from
-HIP source without inventing a profile. Reuse unchanged extension contracts; reopen any
+HIP source without inventing an engine manifest. Reuse unchanged extension contracts; reopen any
 topology or feature the addition changes.
 
 Inventory owner-published results, owner benchmark shapes and external graphs per
@@ -116,18 +116,27 @@ counted. Reconcile each source's
 total, parsed, servable, covered and excluded counts; do not discard window/sink or
 independent operand dimensions to fit the request schema.
 
-For rocKE, resolve the provisional baseline through its actual dispatcher:
+For rocKE, the dispatcher registry is the source of the catalog. The engine manifest
+(`$MANIFEST`, `configs/<slug>.engine.yaml`) states only what the registry cannot know:
+engine identity, the KMD schema, how a record reads as metadata, the native symbols, the
+registry slice (`enumerate:` -- algorithm, pin, free fields, `max_kernels`) and
+`head_configs`, the models the engine supports. Choose `head_configs` from `$SHAPES`;
+that list is the one authored demand input. Then resolve the provisional baseline through
+the registry itself:
 
 ```bash
-"$PY" "$GEN/tools/dispatch_parity.py" --profile "$PROFILE" \
-  --shapes "$SHAPES" --out "$CONFIG" --report-knobs --report-gaps
-"$PY" "$GEN/tools/reconcile_applicability.py" \
-  --profile "$PROFILE" --shapes "$SHAPES"
+"$PY" "$GEN/tools/registry_enumerator.py" --manifest "$MANIFEST" --out "$CONFIG"
 ```
 
-The second command is **offline applicability**, not runtime coverage or numerics. Scope
-reference candidates to the kernel family/algorithm and required opt-in selector. API
-failures are operational errors, never unsupported-shape evidence.
+`registry_enumerator.py` is the only tool that imports rocKE. It currently enumerates the
+attention dense family (`enumerate.algorithm` names the registry candidate). A head
+configuration the registry declines or serves with no spec, a missing candidate and a
+count over `max_kernels` are errors naming the cause. That is **offline applicability
+against the registry**, not runtime coverage or numerics; it never reads a reference
+library, and an API failure is an operational error, never unsupported-shape evidence.
+For an engine that already ships, regenerate to scratch and compare to the shipped
+catalog with `$GEN/tools/catalog_diff.py` before changing anything (see the README's *Updating
+the captured catalog*).
 
 Present the feature/shape boundary, per-source coverage and exclusions, architecture,
 engine identity, knobs and provisional baseline for approval. A legal cross-product is
@@ -168,7 +177,7 @@ filesystem.
 Review the finalized inventory after deduplication. Resolve KDP → UED → KMD by UUID;
 tuple identity includes schema types/defaults and effective architecture overlap.
 Structural mode reports compiled agreement as `NOT CHECKED` and can exit 0 with unrun
-checks. `--profile` optionally selects the bundle and supplies vocabulary, never
+checks. `--profile "$MANIFEST"` optionally selects the bundle and supplies vocabulary, never
 compiler evidence. Full artifact checking belongs after packing.
 
 Implement [native-pack.md](native-pack.md)'s referenced hooks and behavioral tests.
@@ -300,10 +309,10 @@ roots all fail, and an unrelated same-basename file cannot satisfy it. Read the 
 count of located shippable files — an unfilled-placeholder exit and a could-not-locate
 exit are both `1`.
 
-If the profile declares a launch-surface audit, also run:
+If the manifest declares a `launch_surface:` block, also run:
 
 ```bash
-"$PY" "$GEN/tools/launch_surface.py" "$PROFILE" --check
+"$PY" "$GEN/tools/launch_surface.py" "$MANIFEST" --check
 ```
 
 **Gate:** a current-revision dry-run and render, final authored inventory, completed hooks
@@ -430,7 +439,7 @@ not today's imported producer:
 
 ```bash
 "$PY" "$GEN/tools/verify_variant_sets.py" --mode full --arch "$ARCH" \
-  --profile "$PROFILE" final "$FINAL_DESCRIPTOR_ROOT" \
+  --profile "$MANIFEST" final "$FINAL_DESCRIPTOR_ROOT" \
   --provenance-root final="$FINAL_PROVENANCE_ROOT"
 ```
 
@@ -629,12 +638,19 @@ accounting on `$ARCH`.
 
 ## 6. Tune the runnable baseline and rebuild the final selection
 
-For rocKE, propose bounded candidates with the actual profile:
+For rocKE, a knob arm is an experiment-owned copy of the manifest. Set its
+`enumerate.free_fields` to the knob under test (one knob for an isolation arm, two for a
+pairwise arm): the enumerator keeps the registry specs that differ from the candidate's
+own default **only** in those fields, so every other knob is held at parity. A varied
+knob must also be a `spec_fields` entry and, to be matchable, a `kmd_fields` /
+`metadata_fields` entry, or two arms collapse to one catalog key. Raise `max_kernels`
+deliberately for the arm. The enumerator takes the values the registry's sweep yields for
+a free field; it cannot restrict a knob to a subset of values yet, so narrow a measured
+arm by the head configurations it covers.
 
 ```bash
-"$PY" "$GEN/tools/knob_sweep.py" --profile "$PROFILE" --shapes "$SHAPES" --plan
-"$PY" "$GEN/tools/knob_sweep.py" --profile "$PROFILE" --shapes "$SHAPES" \
-  --isolate --out-dir "$ARM_CONFIG_ROOT"
+"$PY" "$GEN/tools/registry_enumerator.py" --manifest "$ARM_MANIFEST" \
+  --out "$ARM_CONFIG_ROOT/<arm>.yaml"
 ```
 
 Set `ARM_CONFIG_ROOT` to an experiment-owned directory. Generate, implement/splice,
@@ -655,22 +671,16 @@ must satisfy — session and arm ordering, warmup, rounds, cache isolation, sepa
 correctness, and the sweep's ownership of the benchmark's `--engine` and other
 phase-owned arguments. This page owns only the commands and their order.
 
-For rocKE, investigate measured survivors. Set `PAIRWISE_KNOBS` to comma-separated
-surviving knob names and `PAIRWISE_CONFIG_ROOT` to their config output directory, then
-generate, build and install the supported pairwise arms:
+For rocKE, investigate measured survivors: copy the manifest again with the surviving
+knobs together in `enumerate.free_fields`, enumerate to `$PAIRWISE_CONFIG_ROOT`, then
+generate, build and install the supported pairwise arms.
+
+Obtain selection approval from coverage, correctness and per-corpus measurements. For the
+rocKE shipping selection, record the approved `free_fields` and `head_configs` in
+`$MANIFEST` and enumerate the final config:
 
 ```bash
-"$PY" "$GEN/tools/knob_sweep.py" --profile "$PROFILE" --shapes "$SHAPES" \
-  --pairwise "$PAIRWISE_KNOBS" --out-dir "$PAIRWISE_CONFIG_ROOT"
-```
-
-Obtain selection approval from coverage, correctness and per-corpus measurements. For
-the rocKE shipping cross, `APPROVED_KNOBS_JSON` contains the approved JSON object of
-knob value lists, **not a filename**:
-
-```bash
-"$PY" "$GEN/tools/dispatch_parity.py" --profile "$PROFILE" --shapes "$SHAPES" \
-  --knobs "$APPROVED_KNOBS_JSON" --out "$FINAL_CONFIG"
+"$PY" "$GEN/tools/registry_enumerator.py" --manifest "$MANIFEST" --out "$FINAL_CONFIG"
 ```
 
 Repeat **stages 3–5** with the final config and a new empty generation destination.
@@ -694,17 +704,10 @@ then join within each corpus/phase before making its graph-name-to-reason JSON.
 join scope and every rejection rule. This is an explicit evidence review, not an
 automatic matcher-reason extractor.
 
-For rocKE, set `CORPUS_SHAPES` and `RUNTIME_DECLINES` to that corpus's requests and
-complete runtime-derived mapping, then reconcile:
-
-```bash
-"$PY" "$GEN/tools/reconcile_applicability.py" --profile "$PROFILE" \
-  --shapes "$CORPUS_SHAPES" --declines "$RUNTIME_DECLINES"
-```
-
-Without the complete join, label reconciliation **offline only**. Investigate
-reference-only supported rows and obtain explicit scope decisions for exclusions; escape
-flags cannot excuse broken reference APIs or unexplained gaps. Direct-load pointwise
+No tool reconciles declines against a reference library: the runtime ledger is the
+evidence. Without the complete join, label the accounting **incomplete**.
+Investigate every unexplained decline against the registry and the matcher, and obtain
+explicit scope decisions for exclusions. Direct-load pointwise
 instead uses its explicit one-element corpus, installed engine results and independent
 arithmetic/reference correctness, with `exclude_tensors: none`.
 

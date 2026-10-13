@@ -38,9 +38,9 @@ from hkp_pack import provenance_sidecar  # noqa: E402
 #: default names a gfx942 engine. The chosen profile and `_EXPECT_ENGINE` must name the
 #: same pack.
 _PROFILE_VARS = (
-    "HIPDNN_INGESTOR_PROFILE",
-    "HIPDNN_INGESTOR_PROFILE_GFX942",
-    "HIPDNN_INGESTOR_PROFILE_GFX950",
+    "HIPDNN_INGESTOR_MANIFEST",
+    "HIPDNN_INGESTOR_MANIFEST_GFX942",
+    "HIPDNN_INGESTOR_MANIFEST_GFX950",
 )
 
 #: The engine name the packed tree must expose, overridable because it identifies a

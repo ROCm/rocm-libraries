@@ -1,12 +1,12 @@
-# Source of truth for the shipped hipkernel:Gfx950AttentionDense catalog.
+# Packaged-dialect REFERENCE config for the generator's tests and for authors copying a
+# worked example. It is NOT the source of truth for the shipped
+# hipkernel:Gfx950AttentionDense catalog: that is the rocKE dispatcher registry, sliced by
+# configs/gfx950_attention_dense.engine.yaml through tools/registry_enumerator.py, and
+# checked against the shipped descriptors by tests/test_registry_regeneration.py. Editing
+# this file changes nothing that ships. It describes the same catalog (840 kernels) in the
+# `variants` form; do not hand-maintain a second copy of the engine's identity or tiles
+# here beyond what a test needs.
 #
-# The descriptors under
-# dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/descriptors/rocKE/gfx950_attention_dense/
-# and src/tests/engines/kernel_ingestor_engine/packs/TestGfx950AttentionDensePacks.cpp
-# are generated from this file. After editing it, regenerate from the
-# IngestorGenerator root and copy exactly those files into the provider:
-#     .venv/bin/python generate.py --config configs/gfx950_attention_dense.yaml \
-#         --output-dir <scratch> --force
 # The generated packs/Gfx950AttentionDenseNative.cpp and
 # tests/TestGfx950AttentionDenseMatchers.cpp are stubs; the provider's copies are
 # hand-maintained and must not be overwritten.

@@ -226,7 +226,7 @@ class TestTriState:
 
 #: The SAME four kernels as `SAMPLE`, with the policy-decided knob PRESENT AND None
 #: rather than omitted. Both spellings mean the kernel's policy decides at build time:
-#: a hand-authored spec omits the key, while `dispatch_parity.build_config` dumps the
+#: a hand-authored spec omits the key, while `registry_enumerator.build_config` dumps the
 #: builder's dataclass wholesale, so every declared-but-unset knob arrives as None.
 SAMPLE_NONE_SPELLING = _enumerated(
     [

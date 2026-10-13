@@ -118,8 +118,7 @@ empty population.
 
 Coverage, numerical correctness and performance answer different questions. Retain served,
 explicitly declined, execution-error, missing and ambiguous outcomes; a missing timing row
-is not a decline. Complete the final runtime outcome join before
-`reconcile_applicability.py --declines` -- see
+is not a decline. Complete the final runtime outcome join before reporting declines -- see
 [workloads.md](../../ai/skills/hipdnn-ingestor-engine/workloads.md) for the join and
 semantic identity contract. Offline reconciliation proves no dispatch.
 

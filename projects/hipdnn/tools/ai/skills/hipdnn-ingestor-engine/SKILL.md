@@ -48,7 +48,7 @@ without one, since an unrestricted one would ship the same bytes to every shard.
 Both dialects are packed and staged per architecture, and **neither registers a
 descriptor in CMake**: the authored subpath is the whole mechanism. Only
 `embedded_source` needs a kernel-source registration, and rocKE is always packaged.
-Direct-load engines need neither a fictitious rocKE profile nor a
+Direct-load engines need neither a fictitious rocKE engine manifest nor a
 compiled-specialization claim their path cannot supply.
 
 ## Completion and handoff
@@ -72,7 +72,7 @@ Completion requires:
 - Rebuilt/reinstalled artifacts after tuning or regeneration, then fresh final gates.
   Every final corpus input has an attributable runtime outcome and the complete join
   required by [workloads.md](workloads.md); missing, ambiguous or error outcomes block
-  runtime acceptance, and without that join reconciliation is offline only.
+  runtime acceptance, and without that join the accounting is incomplete.
 
 State what each observation proves and does not prove, including device, reference,
 graph and architecture limits. Generation, enumeration, proposed commands and queued

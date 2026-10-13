@@ -9,7 +9,7 @@ through ``kernel.getIntMetadata`` on both ``kernelMatches`` and
 ``attentionDenseGeometry``. Nothing else cross-references a mirror against the KMD.
 
 ``TestKmdFieldsCheck`` uses fresh minimal fixtures; the classes below drive the same
-check over a WHOLE profile from ``tests/fixtures/profiles/``, so every class runs on a
+check over a WHOLE profile from ``tests/fixtures/launch_surface/``, so every class runs on a
 bare checkout. Those fixtures are controlled INPUTS: a literal like
 ``set(unguarded) == {"kernargs", "spec_resolution"}`` describes the fixture, not the
 real pack.
@@ -17,11 +17,11 @@ real pack.
 An author auditing their own profile overrides the fixture per arch, one variable each
 because the two profiles are not interchangeable:
 
-    HIPDNN_INGESTOR_PROFILE_GFX942=/abs/path/to/gfx942.profile.yaml \\
-    HIPDNN_INGESTOR_PROFILE_GFX950=/abs/path/to/gfx950.profile.yaml \\
+    HIPDNN_INGESTOR_MANIFEST_GFX942=/abs/path/to/gfx942.engine.yaml \\
+    HIPDNN_INGESTOR_MANIFEST_GFX950=/abs/path/to/gfx950.engine.yaml \\
         .venv/bin/python -m pytest tests/test_launch_surface.py
 
-See ``tests/fixtures/profiles/README.md`` for the rest.
+See ``tests/fixtures/launch_surface/README.md`` for the rest.
 """
 
 from __future__ import annotations
@@ -42,12 +42,12 @@ import launch_surface  # noqa: E402
 
 _REPO_ROOT = launch_surface.find_repo_root(_TOOLS)
 
-_PROFILE_VAR_942 = "HIPDNN_INGESTOR_PROFILE_GFX942"
-_PROFILE_VAR_950 = "HIPDNN_INGESTOR_PROFILE_GFX950"
+_PROFILE_VAR_942 = "HIPDNN_INGESTOR_MANIFEST_GFX942"
+_PROFILE_VAR_950 = "HIPDNN_INGESTOR_MANIFEST_GFX950"
 
 #: The committed synthetic profiles these classes audit by default; see that
 #: directory's README for what each demonstrates.
-_FIXTURE_PROFILES = Path(__file__).resolve().parent / "fixtures" / "profiles"
+_FIXTURE_PROFILES = Path(__file__).resolve().parent / "fixtures" / "launch_surface"
 
 
 def _profile_path(var: str, fixture: str) -> Path:
@@ -67,8 +67,8 @@ def _profile_path(var: str, fixture: str) -> Path:
     return path
 
 
-_PROFILE_942 = _profile_path(_PROFILE_VAR_942, "gfx942.profile.yaml")
-_PROFILE_950 = _profile_path(_PROFILE_VAR_950, "gfx950.profile.yaml")
+_PROFILE_942 = _profile_path(_PROFILE_VAR_942, "gfx942.engine.yaml")
+_PROFILE_950 = _profile_path(_PROFILE_VAR_950, "gfx950.engine.yaml")
 
 
 def _profile(kmd_fields, surfaces) -> dict:
@@ -254,7 +254,7 @@ class TestAgainstTheGfx942Profile:
     """A whole gfx942-shaped profile must --check clean, modulo the surfaces it honestly
     declares unguarded.
 
-    By default `tests/fixtures/profiles/gfx942.profile.yaml`, whose `grid` and
+    By default `tests/fixtures/launch_surface/gfx942.engine.yaml`, whose `grid` and
     `applicability` surfaces split their shared mirror's two required metadata fields,
     so passing means the union-over-shared-mirror rule fired. The unguarded set is a
     literal keyed to that fixture.
@@ -573,6 +573,24 @@ class TestAgainstTheGfx950Profile:
         result = _run("--check", str(_PROFILE_950), "--allow-unguarded", cwd=_REPO_ROOT)
         assert result.returncode == 0, result.stdout
         assert "CHECK PASSED" in result.stdout
+
+
+class TestAgainstTheShippedDenseManifest:
+    """The shipped gfx950 dense engine's own declarations, not a fixture: its C++ mirrors,
+    guards and tests must all exist, and nothing may be left as an unguarded choice."""
+
+    _MANIFEST = (
+        Path(__file__).resolve().parents[1]
+        / "configs"
+        / "gfx950_attention_dense.engine.yaml"
+    )
+
+    def test_every_declared_surface_is_real_guarded_and_tested(self):
+        result = _run("--check", str(self._MANIFEST), cwd=_REPO_ROOT)
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "CHECK PASSED" in result.stdout
+        assert "surfaces declared  4" in result.stdout
+        assert "unguarded/untested  0" in result.stdout
 
 
 class TestRepoRootResolution:

@@ -30,8 +30,8 @@ class ReachabilityError(RuntimeError):
 
 
 def _load_profile(path: str) -> dict:
-    """JSON or YAML, like `dispatch_parity.py`'s loader -- one profile can serve
-    both tools without restating itself in two dialects."""
+    """JSON or YAML: an engine manifest can serve as the declarations file without
+    restating itself in two dialects."""
     text = Path(path).read_text()
     try:
         loaded = json.loads(text)
@@ -269,9 +269,13 @@ def main(argv=None) -> int:
         "--shapes",
         required=True,
         help="JSON list of request-field mappings, the same corpus format "
-        "dispatch_parity.py --shapes consumes.",
+        "mine_shapes.py emits.",
     )
-    parser.add_argument("--profile", help="JSON/YAML with field_map/divides/score.")
+    parser.add_argument(
+        "--profile",
+        help="Declarations file (JSON/YAML; an engine manifest works) with "
+        "field_map/divides/score.",
+    )
     parser.add_argument(
         "--divides",
         action="append",

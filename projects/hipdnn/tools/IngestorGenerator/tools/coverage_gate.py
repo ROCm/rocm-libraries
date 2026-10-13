@@ -12,7 +12,7 @@ answers none of them.
 This tool runs 1 and 2 and reports 3's requirement explicitly.
 
     coverage_gate.py --tree <descriptors> --mode full \\
-                     --profile <profile.yaml> \\
+                     --profile <engine manifest> \\
                      --validator <build>/bin/hipdnn_validate_descriptors \\
                      --expect-engine hipkernel:Gfx942AttentionDense
 
@@ -141,7 +141,10 @@ def main(argv=None) -> int:
         "Every descriptor directory under --tree must hold the packer's "
         "hkp-packed.marker.",
     )
-    parser.add_argument("--profile", help="Kernel profile for the static rung.")
+    parser.add_argument(
+        "--profile",
+        help="Engine manifest (configs/<slug>.engine.yaml) for the static rung.",
+    )
     parser.add_argument(
         "--validator",
         help="Path to hipdnn_validate_descriptors. Without it rung 2 is reported as "

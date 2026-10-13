@@ -5,8 +5,8 @@ worth reviewing in a descriptor PR. `variants` states the same thing as a
 shape list, named knob sets and a name template, which
 `codegen/config_loader.py` expands at load time.
 
-For sets already generated and shipped; new sets come out of
-`dispatch_parity.py` compact already. The round trip is not optional: this
+For sets already generated and shipped; `registry_enumerator.py` emits the enumerated
+form, which this tool compacts. The round trip is not optional: this
 tool re-expands what it wrote and refuses anything that does not reproduce the
 input kernel-for-kernel, key-for-key, in order.
 

@@ -414,7 +414,7 @@ def check(profile: dict, root: Path) -> tuple[list[str], list[str]]:
                 )
 
         # (1c) python_source's leading symbol, resolved against provider_root's
-        # rocke/library, the same base dispatch_parity.py imports modules from.
+        # rocke/library, the same base registry_enumerator.py imports the registry from.
         py_path = _path_part(surface["python_source"])
         py_symbol = _leading_symbol(surface["python_source"])
         if py_path and py_symbol:

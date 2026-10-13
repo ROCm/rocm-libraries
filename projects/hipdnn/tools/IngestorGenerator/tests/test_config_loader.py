@@ -1213,9 +1213,6 @@ class TestShippedExampleConfigsLoad:
     expands it into a generator config. It carries no `packs`, so selecting it by
     extension alone would feed the wrong schema into the generator loader; it is
     selected out here and checked through the loader that owns it.
-
-    No shipped catalog is profile-driven any more; the profile tools
-    (`dispatch_parity.py` and its dependents) are exercised by their own tests.
     """
 
     @staticmethod
@@ -1223,7 +1220,7 @@ class TestShippedExampleConfigsLoad:
         return sorted(
             path
             for path in configs_dir.glob("*.yaml")
-            if not path.name.endswith((".profile.yaml", ".engine.yaml"))
+            if not path.name.endswith(".engine.yaml")
         )
 
     def test_every_shipped_generator_config_loads(self, configs_dir):
@@ -1249,21 +1246,12 @@ class TestShippedExampleConfigsLoad:
             assert manifest["enumerate"]["max_kernels"] > 0, path
             assert manifest["provider_root"], path
 
-    def test_no_shipped_catalog_is_profile_driven(self, configs_dir):
-        """The registry is the source of truth, so a `*.profile.yaml` under `configs/`
-        would be a second one. Profiles live under tests/fixtures/profiles."""
-        assert not sorted(configs_dir.glob("*.profile.yaml"))
-
-    def test_a_dispatch_profile_is_not_a_generator_config(self):
-        """The control: if `load_config` ever accepted a profile, the split would be
+    def test_an_engine_manifest_is_not_a_generator_config(self, configs_dir):
+        """The control: if `load_config` ever accepted a manifest, the split would be
         silently unnecessary and the next reader would re-merge it."""
-        from pathlib import Path
-
-        profiles = sorted(
-            (Path(__file__).parent / "fixtures" / "profiles").glob("*.profile.yaml")
-        )
-        assert profiles
-        for path in profiles:
+        manifests = sorted(configs_dir.glob("*.engine.yaml"))
+        assert manifests
+        for path in manifests:
             with pytest.raises(ConfigError):
                 load_config(path)
 

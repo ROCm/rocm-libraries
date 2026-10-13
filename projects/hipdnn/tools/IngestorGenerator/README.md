@@ -287,24 +287,61 @@ it needs a validator binary this repo does not build by default: point
 `HIPDNN_VALIDATE_DESCRIPTORS` at your build's binary and run
 `.venv/bin/python -m pytest -m round_trip`.
 
+## Updating the captured catalog
+
+The descriptors under `src/engines/kernel_ingestor_engine/descriptors/rocKE/<slug>/` are
+the captured integration state. Nothing regenerates them at build time, so a change to the
+rocKE registry or to the engine manifest never reaches a shipped engine silently: it is a
+deliberate, reviewed update.
+
+1. Enumerate and generate into a scratch directory, never over the live tree (`--force`
+   clobbers shared objects):
+
+   ```bash
+   python tools/registry_enumerator.py --manifest configs/<slug>.engine.yaml --out $SCRATCH/config.yaml
+   python generate.py --config $SCRATCH/config.yaml --output-dir $SCRATCH/out --force
+   ```
+
+2. Compare to the shipped bundle. `catalog_diff.py` is UUID-blind with `--ignore-ids`,
+   because `generate.py` mints new ids on every run. Zero differences means there is
+   nothing to update; otherwise the report is the change under review (kernels added,
+   removed or re-specified, KMD fields):
+
+   ```bash
+   python tools/catalog_diff.py --ignore-ids --shipped $SHIPPED/<slug>.kdp.json \
+       --regenerated $SCRATCH/out/.../<slug>.kdp.json \
+       --shipped-kmd $SHIPPED/<slug>.kmd.json --regenerated-kmd $SCRATCH/out/.../<slug>.kmd.json
+   ```
+
+3. Splice the reviewed additions into the shipped bundle, preserving every shipped UUID,
+   and prove it with `--expect-ids`. Kernel names, metadata and ids are what ranking
+   heuristics are trained against, so a change that adds, removes or renames kernels is
+   also a retraining decision, not only a catalog edit.
+4. Raise the manifest's `max_kernels` only deliberately: every kernel is a comgr build.
+5. If `tests/test_registry_regeneration.py` fails on the pinned registry-only spec fields,
+   a registry default moved a knob the shipped KDP does not carry. Edit the literal
+   snapshot in the same review.
+
+Shipped `priority` is 0 for every kernel and the enumerator emits none: ranking is the
+engine's native `score()` alone, and the registry's default-first ordering never reaches
+the descriptors.
+
 ## The pipeline tools
 
-`generate.py` emits a bundle; the host tools below inspect distinct contracts. Profiles are
-optional analysis or authoring inputs, not compiler evidence, and full compiled agreement
+`generate.py` emits a bundle; the host tools below inspect distinct contracts. The engine
+manifest (`configs/<slug>.engine.yaml`) is the authoring input the rocKE tools read, not
+compiler evidence, and full compiled agreement
 reads the self-contained producing-build record, needing no rocKE on the verifying
 machine.
 
 | Tool | Answers | Invocation |
 |---|---|---|
-| `tools/verify_variant_sets.py` | Structural nesting/runtime tuple identity, sentinels and vocabulary; artifact-bound compiler agreement is the distinct, stronger mode | `verify_variant_sets.py --mode {full,structural} [--provenance-root LABEL=DIR]... [--arch A] [--profile P] [--kpack-python-dir D] LABEL ROOT...`. `--mode` is required and has no default: `structural` reports compiled specialization agreement as NOT CHECKED by name and still exits 0 on the rest; `full` fails on a missing, unsupported or mismatched producing-build record **and** on any check that could not run (`GATE FAILED (N check(s) NOT RUN: ...)`). `--profile` supplies the bundle to gate and the matcher vocabulary, which full mode requires over string fields no declaration spells out. `--provenance-root` names the sidecar tree mirroring that label's ROOT, needed for an installed tree, which ships no sidecars; an unknown LABEL or a malformed `LABEL=DIR` exits 2 |
-| `tools/variant_reachability.py` | Can any shape in the corpus actually select each variant, or is one dead weight? | `variant_reachability.py --kdp K --shapes S [--provenance-root DIR] [--profile P]`; `--provenance-root` mirrors the tree the KDP is read from, for an installed tree |
-| `tools/launch_surface.py` | Is every surface the C++ restates from the kernel's Python declared, guarded and tested? | `launch_surface.py PROFILE --check [--allow-unguarded]` |
+| `tools/verify_variant_sets.py` | Structural nesting/runtime tuple identity, sentinels and vocabulary; artifact-bound compiler agreement is the distinct, stronger mode | `verify_variant_sets.py --mode {full,structural} [--provenance-root LABEL=DIR]... [--arch A] [--profile MANIFEST] [--kpack-python-dir D] LABEL ROOT...`. `--mode` is required and has no default: `structural` reports compiled specialization agreement as NOT CHECKED by name and still exits 0 on the rest; `full` fails on a missing, unsupported or mismatched producing-build record **and** on any check that could not run (`GATE FAILED (N check(s) NOT RUN: ...)`). `--profile` takes the engine manifest and supplies the bundle to gate and the matcher vocabulary, which full mode requires over string fields no declaration spells out. `--provenance-root` names the sidecar tree mirroring that label's ROOT, needed for an installed tree, which ships no sidecars; an unknown LABEL or a malformed `LABEL=DIR` exits 2 |
+| `tools/variant_reachability.py` | Can any shape in the corpus actually select each variant, or is one dead weight? | `variant_reachability.py --kdp K --shapes S [--provenance-root DIR] [--profile DECLARATIONS]`; `--provenance-root` mirrors the tree the KDP is read from, for an installed tree |
+| `tools/launch_surface.py` | Is every surface the C++ restates from the kernel's Python declared, guarded and tested? | `launch_surface.py MANIFEST --check [--allow-unguarded]` (the engine manifest's `launch_surface:` block) |
 | `tools/coverage_gate.py` | Structural, loading and serving obligations, reported separately; an unmet required obligation cannot pass | `coverage_gate.py --tree T --mode {full,structural} [--provenance-root DIR] [--arch A] [--validator V] [--expect-engine E] [--min-served N]`; `--mode` is required and governs what rung 1 may claim. A missing `--validator` makes rung 2 `loads-not-run`, a failure rather than a skip; an offline result is not serving evidence. `--provenance-root` mirrors `--tree`, for an installed tree, and is forwarded to rung 1 |
-| `tools/knob_sweep.py` | Which knob arms are worth measuring, isolation first then pairwise. | `knob_sweep.py --profile P --shapes S [--plan]` |
 | `tools/registry_enumerator.py` | What kernels does the rocKE dispatcher registry say this engine ships? Expands an engine manifest (`configs/<slug>.engine.yaml`) into a generator config, one kernel per registry spec; the registry is the single source of truth for the catalog, the manifest states only engine identity, KMD schema, metadata mapping and the request slice | `registry_enumerator.py --manifest M --out C`, then `generate.py --config C` |
 | `tools/catalog_diff.py` | Is a regenerated catalog the shipped one? Order-blind, UUID-blind with `--ignore-ids`; compares the shipped spec fields by default, every spec field with `--strict-spec` | `catalog_diff.py --shipped K --regenerated K2 [--ignore-ids] [--strict-spec] [--shipped-kmd M --regenerated-kmd M2]` |
-| `tools/dispatch_parity.py` | Profile-driven resolution of shapes through a real dispatcher (the legacy catalog source; no shipped catalog uses it now, and the dense catalog comes from `registry_enumerator.py`) | see `--help` |
-| `tools/reconcile_applicability.py` | Does this engine decline anything the reference library serves? | `reconcile_applicability.py --profile P --shapes S [--declines D]` |
 | `tools/mine_shapes.py` | Build the shape corpus, refusing categoricals it does not recognise. | see `--help` |
 | `tools/field_audit.py` | Which schema fields are never named as an accessor call in the native sources? A lexical inventory bounding the unchecked set | `field_audit.py SCHEMA.fbs SOURCE...`; prints `UNCHECKED: <field>` per unreferenced field and exits 1. Exits 2 on a schema that parses to zero fields, so an unparsed schema cannot read as a clean audit |
 
@@ -389,7 +426,7 @@ There is no packaging `--profile`, CMake `PROFILES` or external root manifest.
 |---|---|
 | `configs/scale_add.yaml` | Single-pack engine, like the shipped `conv_fwd`: one pack, one operation, its `graph_match` both admits the node type and validates shape |
 | `configs/binary_ops.yaml` | Multi-pack engine, like the shipped `pointwise`: one pack per operation sharing one KMD/UED/UHD/UDD, each naming its own operation-scoped UMD via `discriminator` |
-| `configs/gfx950_attention_dense.yaml` | The shipped `hipkernel:Gfx950AttentionDense` catalog (840 packaged rocKE kernels, a builder lowered by `hkp_pack` at build time), generated entirely from `variants`; also the packaged-dialect reference config the tests load |
+| `configs/gfx950_attention_dense.yaml` | A packaged-dialect reference config (840 rocKE kernels in the `variants` form, a builder lowered by `hkp_pack` at build time) that the tests load. It is not the catalog's source of truth: the registry and the engine manifest below are |
 | `configs/gfx950_attention_dense.engine.yaml` | The engine manifest the shipped dense catalog is regenerated from: `registry_enumerator.py` walks the rocKE registry's `attention_dense_grid` candidate over the manifest's head configurations (840 kernels at `max_kernels`); `test_registry_enumerator.py` proves the result matches the shipped descriptors |
 | `configs/axes_example.yaml` | Pack-level `axes`: one `kernel_template` crossed with value lists, expanded at load time |
 | `configs/variants_example.yaml` | Pack-level `variants`: a shape list crossed per-shape with a named knob set (below) |
@@ -424,8 +461,8 @@ packs:
 `configs/variants_example.yaml` is the runnable version, exercising every key.
 
 **Why not `axes`.** `axes` crosses ONE `kernel_template`, and a dispatcher-derived set has
-none: `dispatch_parity.py` asks the library for a spec per shape, so every shape carries its
-own resolved values for the fields the dispatcher derives.
+none: `registry_enumerator.py` asks the registry for a spec per head configuration, so every
+entry carries its own resolved values for the fields the dispatcher derives.
 
 **It is not a grid.** Each shape names its own knob set; on the shipped sets most shapes
 carry four arms and 63 carry six.
@@ -442,8 +479,8 @@ mirror, the arm's `{tag}`, or `{ordinal}`. A shape sets its serial with `ordinal
 each arm shifts it with `ordinal_offset:`.
 
 Expansion runs at load time (`codegen/config_loader.py`), so `generate.py`, the emitters and
-the dedup pass see ordinary kernel dicts. `tools/dispatch_parity.py` emits this form
-directly; `tools/factorise_config.py` converts an enumerated config, re-expanding its own
+the dedup pass see ordinary kernel dicts. `tools/registry_enumerator.py` emits the enumerated form;
+`tools/factorise_config.py` converts an enumerated config, re-expanding its own
 output and refusing to write anything that does not reproduce the input kernel-for-kernel.
 
 ## Config surface
@@ -559,7 +596,7 @@ The floor covers `codegen/` alone. `tools/` and `generate.py` sit outside the co
 `source`: the tools are gated by the suites that drive each script as a subprocess
 (`tests/test_sweep_tools.py`, `tests/test_launch_surface.py`, `tests/test_coverage_gate.py`,
 `tests/test_verify_variant_sets.py`, `tests/test_device_probe.py`,
-`tests/test_dispatch_parity.py`), and the spawned CLI is traced only under
+`tests/test_registry_enumerator.py`), and the spawned CLI is traced only under
 `COVERAGE_PROCESS_START` plus a `coverage.process_startup()` `.pth`.
 
 The suite exercises descriptor identities, declaration carriage, semantic deduplication,

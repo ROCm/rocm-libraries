@@ -36,17 +36,14 @@ Counts and outcomes are bound to the identities in [RUNBOOK.md](RUNBOOK.md#8-han
 
 ## Applicability and reference contract
 
-rocKE profiles scope the candidate registry to the actual kernel family/algorithm and
-required opt-in selector. Reference candidates must implement
-`admits(request) -> (bool, str)`; **there is no `_supports` fallback**, and False
-requires a nonempty reason. Missing or noncallable APIs, bad signatures, exceptions,
-invalid returns and generic constructor/factory failures are operational errors:
-reconciliation exits 2, including under escape flags. They are not unsupported-shape
-evidence.
+An engine manifest's `enumerate:` block scopes the rocKE registry to the actual kernel
+family/algorithm and pin. A registry that declines a supported head configuration, or an
+API failure while enumerating, is an operational error (`registry_enumerator.py` exits 2),
+never unsupported-shape evidence.
 
-Reference-only support requires investigating variants, matcher semantics or the
-reference claim, plus an explicit scope decision for exclusions. Applicability does not
-prove numerical truth — use [graph-contract.md](graph-contract.md)'s reference
+A shape an engine declines that the registry or a reference library serves requires
+investigating variants, matcher semantics or the reference claim, plus an explicit scope
+decision for exclusions. Applicability does not prove numerical truth — use [graph-contract.md](graph-contract.md)'s reference
 capability rules. Direct-load engines use their own explicit corpus and reference.
 
 ## Installed measurement contract
@@ -121,10 +118,9 @@ Semantic deduplication must not discard original occurrences: the ledger carries
 per original occurrence even when several share a semantic key. Missing, ambiguous and
 error outcomes block runtime acceptance; they are not roundable to a decline.
 
-Only the complete join supports the per-corpus graph-name-to-reason JSON consumed by
-`reconcile_applicability.py --declines`. Do not mix same-named graphs across corpora or
+Only the complete join supports the per-corpus graph-name-to-reason JSON. Do not mix same-named graphs across corpora or
 present a sparse accepted mapping as complete runtime evidence. Without the join,
-reconciliation is **offline only**.
+the accounting is **incomplete**.
 
 ## Required reporting statistics
 

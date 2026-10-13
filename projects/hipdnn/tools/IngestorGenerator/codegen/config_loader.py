@@ -768,7 +768,7 @@ def _expand_one_arm(
             value = arm_metadata[field_name]
         # Not `field_name in spec`: a spec key present with value None means
         # the kernel's policy decides at build time, the same tri-state as
-        # omitting it (`dispatch_parity.build_config` dumps the builder's
+        # omitting it (`registry_enumerator.build_config` dumps the builder's
         # dataclass, so every unset policy knob arrives present-and-None).
         elif spec.get(field_name) is not None:
             value = spec[field_name]

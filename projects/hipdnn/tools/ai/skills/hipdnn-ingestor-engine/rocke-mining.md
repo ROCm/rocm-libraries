@@ -2,7 +2,7 @@
 
 Current builder/dispatcher source and library documentation outrank historical examples.
 For direct-load HIP, extract the same semantic/launch facts from HIP; do not invent a
-rocKE builder or profile. [RUNBOOK.md](RUNBOOK.md) owns execution.
+rocKE builder or engine manifest. [RUNBOOK.md](RUNBOOK.md) owns execution.
 
 ## Source evidence
 

@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 #
-# A SYNTHETIC authoring profile in the gfx942 shape, read by `test_launch_surface.py`
+# A SYNTHETIC engine manifest in the gfx942 shape, read by `test_launch_surface.py`
 # when no override is set: a controlled INPUT to `launch_surface.py --check`, not a
 # claim about any shipped engine's real launch surface. See README.md in this
 # directory.

@@ -605,7 +605,7 @@ def main(argv=None) -> int:
     )
     parser.add_argument(
         "--profile",
-        help="Per-kernel profile (JSON or YAML) declaring the bundle name to gate "
+        help="Engine manifest (JSON or YAML) declaring the bundle name to gate "
         "and the matcher's vocabulary for fields no descriptor declaration covers.",
     )
     parser.add_argument(
