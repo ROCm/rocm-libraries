@@ -47,14 +47,22 @@ def text(findings, current, fail_on: str) -> str:
         for f in sorted(better, key=lambda f: (f["check"], f["path"])):
             lines.append(f"  {f['check']} {f['path']}  {f['message']}")
     lines.append("")
+    cov = "with" if current["coverage_ran"] else "without"
     lines.append(
-        f"{len(current['files'])} files checked: {len(warn)} warnings, {len(better)} better."
+        f"{len(current['files'])} files checked {cov} coverage: "
+        f"{len(warn)} warnings, {len(better)} better."
     )
+    if current.get("harness_ok") is False:
+        lines.append(
+            "NOTE: the IR golden harness reported drift; coverage numbers are still valid."
+        )
     return "\n".join(lines)
 
 
 def junit(findings, current, fail_on: str) -> str:
     checks = sorted(CHECK_TITLE)
+    if not current["coverage_ran"]:
+        checks = [c for c in checks if not c.startswith("SLO2")]
     fail_set = {id(f) for f in failing(findings, fail_on)}
     cases = []
     n_fail = n_err = 0
@@ -136,10 +144,13 @@ def markdown(findings, current) -> str:
 def report_text(current, summary: dict) -> str:
     """Human summary for `report`: worst files against each target."""
     files = current["files"]
-    lines = [f"{len(files)} files measured.", ""]
+    with_cov = " (with coverage)" if current["coverage_ran"] else ""
+    lines = [f"{len(files)} files measured{with_cov}.", ""]
     lines.append("Files over each target today:")
     for metric, (limit, direction) in C.TARGETS.items():
-        if metric not in summary:
+        if metric not in summary or (
+            metric.startswith("cov") and not current["coverage_ran"]
+        ):
             continue
         op = "<=" if direction == "max" else ">="
         lines.append(f"  {metric:15} target {op} {limit:<6} over: {summary[metric]}")
@@ -157,6 +168,17 @@ def report_text(current, summary: dict) -> str:
                 else f"  with {r['overlap_with']}" if metric == "overlap_max" else ""
             )
             lines.append(f"  {r[metric]:>8}  {r['path']}{extra}")
+    if current["coverage_ran"]:
+        lines += ["", "Lowest IR coverage of function bodies (files with 200+ SLOC):"]
+        big = [
+            r
+            for r in files.values()
+            if r["sloc"] >= 200 and r.get("cov_body") is not None
+        ]
+        for r in sorted(big, key=lambda r: r["cov_body"])[:8]:
+            lines.append(
+                f"  {r['cov_body']:>6}%  (whole file {r['cov_file']}%)  {r['path']}"
+            )
     return "\n".join(lines)
 
 

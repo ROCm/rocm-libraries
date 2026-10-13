@@ -1,6 +1,7 @@
 {
  "files": {
   "library/kernels/__init__.py": {
+   "cov_body": 50.0,
    "hcr": null,
    "longest_fn": 11,
    "overlap_max": 0.0,
@@ -23,6 +24,7 @@
    "spec_bools_max": 0
   },
   "library/kernels/common/__init__.py": {
+   "cov_body": null,
    "hcr": null,
    "longest_fn": 0,
    "overlap_max": 0.0,
@@ -45,6 +47,7 @@
    "spec_bools_max": 0
   },
   "library/kernels/common/_attention_strided_kv.py": {
+   "cov_body": 0.0,
    "hcr": 0.0,
    "longest_fn": 21,
    "overlap_max": 0.0,
@@ -67,6 +70,7 @@
    "spec_bools_max": 0
   },
   "library/kernels/common/_conv_implicit_gemm_common.py": {
+   "cov_body": 42.9,
    "hcr": 0.3145,
    "longest_fn": 134,
    "overlap_max": 0.0,
@@ -89,6 +93,7 @@
    "spec_bools_max": 1
   },
   "library/kernels/common/_fmha_common.py": {
+   "cov_body": 0.0,
    "hcr": 0.2424,
    "longest_fn": 48,
    "overlap_max": 0.0,
@@ -111,6 +116,7 @@
    "spec_bools_max": 4
   },
   "library/kernels/common/_fmha_warp_body.py": {
+   "cov_body": 0.0,
    "hcr": 0.1304,
    "longest_fn": 341,
    "overlap_max": 0.0,
@@ -133,6 +139,7 @@
    "spec_bools_max": 0
   },
   "library/kernels/common/_lse_store.py": {
+   "cov_body": 21.6,
    "hcr": 0.0,
    "longest_fn": 114,
    "overlap_max": 0.0,
@@ -155,6 +162,7 @@
    "spec_bools_max": 0
   },
   "library/kernels/common/attention_arch.py": {
+   "cov_body": 63.6,
    "hcr": null,
    "longest_fn": 48,
    "overlap_max": 0.0,
@@ -177,6 +185,7 @@
    "spec_bools_max": 0
   },
   "library/kernels/common/attention_dense_spec.py": {
+   "cov_body": 63.2,
    "hcr": 1.0,
    "longest_fn": 139,
    "overlap_max": 0.0,
@@ -199,6 +208,7 @@
    "spec_bools_max": 9
   },
   "library/kernels/common/attention_kv_cache.py": {
+   "cov_body": 0.0,
    "hcr": null,
    "longest_fn": 29,
    "overlap_max": 0.0,
@@ -221,6 +231,7 @@
    "spec_bools_max": 0
   },
   "library/kernels/common/attention_unified.py": {
+   "cov_body": 8.8,
    "hcr": 0.1026,
    "longest_fn": 390,
    "overlap_max": 0.0,
@@ -243,6 +254,7 @@
    "spec_bools_max": 8
   },
   "library/kernels/common/conv_abi.py": {
+   "cov_body": 70.7,
    "hcr": null,
    "longest_fn": 82,
    "overlap_max": 0.0,
@@ -265,6 +277,7 @@
    "spec_bools_max": 0
   },
   "library/kernels/common/conv_args.py": {
+   "cov_body": 0.0,
    "hcr": 1.0,
    "longest_fn": 87,
    "overlap_max": 0.0,
@@ -287,6 +300,7 @@
    "spec_bools_max": 1
   },
   "library/kernels/common/conv_direct_grouped.py": {
+   "cov_body": 47.9,
    "hcr": 0.0478,
    "longest_fn": 931,
    "overlap_max": 0.0,
@@ -309,6 +323,7 @@
    "spec_bools_max": 5
   },
   "library/kernels/common/conv_direct_nongrouped.py": {
+   "cov_body": 78.0,
    "hcr": 0.0085,
    "longest_fn": 436,
    "overlap_max": 0.0,
@@ -331,6 +346,7 @@
    "spec_bools_max": 2
   },
   "library/kernels/common/conv_implicit_gemm.py": {
+   "cov_body": 73.1,
    "hcr": 0.2784,
    "longest_fn": 1222,
    "overlap_max": 0.36,
@@ -353,6 +369,7 @@
    "spec_bools_max": 5
   },
   "library/kernels/common/conv_implicit_gemm_dgrad.py": {
+   "cov_body": 54.6,
    "hcr": 0.1491,
    "longest_fn": 1012,
    "overlap_max": 0.316,
@@ -375,6 +392,7 @@
    "spec_bools_max": 6
   },
   "library/kernels/common/conv_implicit_gemm_wgrad.py": {
+   "cov_body": 61.9,
    "hcr": 0.1567,
    "longest_fn": 1344,
    "overlap_max": 0.36,
@@ -397,6 +415,7 @@
    "spec_bools_max": 6
   },
   "library/kernels/common/conv_implicit_gemm_wgrad_two_stage.py": {
+   "cov_body": 0.0,
    "hcr": 1.0,
    "longest_fn": 106,
    "overlap_max": 0.0,
@@ -419,6 +438,7 @@
    "spec_bools_max": 0
   },
   "library/kernels/common/conv_wgrad_workspace_reduce.py": {
+   "cov_body": 85.2,
    "hcr": 0.1087,
    "longest_fn": 108,
    "overlap_max": 0.0,
@@ -441,6 +461,7 @@
    "spec_bools_max": 0
   },
   "library/kernels/common/deep_fused_conv_pool.py": {
+   "cov_body": 45.8,
    "hcr": 0.0544,
    "longest_fn": 194,
    "overlap_max": 0.0,
@@ -463,6 +484,7 @@
    "spec_bools_max": 4
   },
   "library/kernels/common/fmha_appendkv.py": {
+   "cov_body": 0.0,
    "hcr": 0.2143,
    "longest_fn": 167,
    "overlap_max": 0.0,
@@ -485,6 +507,7 @@
    "spec_bools_max": 0
   },
   "library/kernels/common/fmha_arch.py": {
+   "cov_body": 0.0,
    "hcr": null,
    "longest_fn": 35,
    "overlap_max": 0.0,
@@ -507,6 +530,7 @@
    "spec_bools_max": 0
   },
   "library/kernels/common/fmha_bwd.py": {
+   "cov_body": 0.0,
    "hcr": 0.1857,
    "longest_fn": 197,
    "overlap_max": 0.0,
@@ -529,6 +553,7 @@
    "spec_bools_max": 1
   },
   "library/kernels/common/fmha_fwd_fp8.py": {
+   "cov_body": 0.0,
    "hcr": 0.2857,
    "longest_fn": 97,
    "overlap_max": 0.0,
@@ -551,6 +576,7 @@
    "spec_bools_max": 1
   },
   "library/kernels/common/fmha_head_grouping.py": {
+   "cov_body": 0.0,
    "hcr": 0.1053,
    "longest_fn": 89,
    "overlap_max": 0.0,
@@ -573,6 +599,7 @@
    "spec_bools_max": 0
   },
   "library/kernels/common/fmha_mfma.py": {
+   "cov_body": 0.0,
    "hcr": 0.1667,
    "longest_fn": 127,
    "overlap_max": 0.0,
@@ -595,6 +622,7 @@
    "spec_bools_max": 0
   },
   "library/kernels/common/fmha_paged_prefill.py": {
+   "cov_body": 0.0,
    "hcr": 0.0488,
    "longest_fn": 186,
    "overlap_max": 0.0,
@@ -617,6 +645,7 @@
    "spec_bools_max": 1
   },
   "library/kernels/common/fmha_splitkv_decode.py": {
+   "cov_body": 0.0,
    "hcr": 0.0719,
    "longest_fn": 199,
    "overlap_max": 0.0,
@@ -639,6 +668,7 @@
    "spec_bools_max": 2
   },
   "library/kernels/common/fmha_varlen.py": {
+   "cov_body": 0.0,
    "hcr": 0.0625,
    "longest_fn": 100,
    "overlap_max": 0.0,
@@ -661,6 +691,7 @@
    "spec_bools_max": 0
   },
   "library/kernels/common/img2col.py": {
+   "cov_body": 0.0,
    "hcr": 0.2586,
    "longest_fn": 188,
    "overlap_max": 0.0,
@@ -683,6 +714,7 @@
    "spec_bools_max": 0
   },
   "library/kernels/common/manifest_runner/__init__.py": {
+   "cov_body": null,
    "hcr": null,
    "longest_fn": 0,
    "overlap_max": 0.0,
@@ -705,6 +737,7 @@
    "spec_bools_max": 0
   },
   "library/kernels/common/manifest_runner/conv.py": {
+   "cov_body": 0.0,
    "hcr": null,
    "longest_fn": 235,
    "overlap_max": 0.0,
@@ -727,6 +760,7 @@
    "spec_bools_max": 0
   },
   "library/kernels/common/manifest_runner/gemm.py": {
+   "cov_body": 0.0,
    "hcr": null,
    "longest_fn": 61,
    "overlap_max": 0.0,
@@ -749,6 +783,7 @@
    "spec_bools_max": 0
   },
   "library/kernels/common/manifest_runner/matmul_nbits.py": {
+   "cov_body": 0.0,
    "hcr": null,
    "longest_fn": 87,
    "overlap_max": 0.0,
@@ -771,6 +806,7 @@
    "spec_bools_max": 0
   },
   "library/kernels/common/manifest_runner/simple_ops.py": {
+   "cov_body": 0.0,
    "hcr": null,
    "longest_fn": 217,
    "overlap_max": 0.986,
@@ -793,6 +829,7 @@
    "spec_bools_max": 0
   },
   "library/kernels/common/manifest_runner/utils.py": {
+   "cov_body": null,
    "hcr": null,
    "longest_fn": 0,
    "overlap_max": 0.0,
@@ -815,6 +852,7 @@
    "spec_bools_max": 0
   },
   "library/kernels/common/sage_attention.py": {
+   "cov_body": 0.0,
    "hcr": 0.1867,
    "longest_fn": 214,
    "overlap_max": 0.231,
@@ -837,6 +875,7 @@
    "spec_bools_max": 1
   },
   "library/kernels/common/sparse_attention.py": {
+   "cov_body": 0.0,
    "hcr": 0.1277,
    "longest_fn": 95,
    "overlap_max": 0.231,
@@ -859,6 +898,7 @@
    "spec_bools_max": 1
   },
   "library/kernels/gfx1151/__init__.py": {
+   "cov_body": null,
    "hcr": null,
    "longest_fn": 0,
    "overlap_max": 0.0,
@@ -881,6 +921,7 @@
    "spec_bools_max": 0
   },
   "library/kernels/gfx1151/deep_fused_conv_pool.py": {
+   "cov_body": 28.7,
    "hcr": 0.0054,
    "longest_fn": 402,
    "overlap_max": 0.0,
@@ -903,6 +944,7 @@
    "spec_bools_max": 20
   },
   "library/kernels/gfx1151/wmma_fmha_fwd.py": {
+   "cov_body": 0.0,
    "hcr": 0.0625,
    "longest_fn": 91,
    "overlap_max": 0.0,
@@ -925,6 +967,7 @@
    "spec_bools_max": 1
   },
   "library/kernels/gfx1201/__init__.py": {
+   "cov_body": null,
    "hcr": null,
    "longest_fn": 0,
    "overlap_max": 0.0,
@@ -947,6 +990,7 @@
    "spec_bools_max": 0
   },
   "library/kernels/gfx1201/deep_fused_conv_pool.py": {
+   "cov_body": 100.0,
    "hcr": null,
    "longest_fn": 12,
    "overlap_max": 0.0,
@@ -969,6 +1013,7 @@
    "spec_bools_max": 0
   },
   "library/kernels/gfx1250/__init__.py": {
+   "cov_body": null,
    "hcr": null,
    "longest_fn": 0,
    "overlap_max": 0.0,
@@ -991,6 +1036,7 @@
    "spec_bools_max": 0
   },
   "library/kernels/gfx1250/_wmma_attention_common.py": {
+   "cov_body": 0.0,
    "hcr": 0.0517,
    "longest_fn": 68,
    "overlap_max": 0.0,
@@ -1013,6 +1059,7 @@
    "spec_bools_max": 0
   },
   "library/kernels/gfx1250/attention_tiled_2d.py": {
+   "cov_body": 0.0,
    "hcr": 0.0152,
    "longest_fn": 371,
    "overlap_max": 0.633,
@@ -1035,6 +1082,7 @@
    "spec_bools_max": 5
   },
   "library/kernels/gfx1250/attention_tiled_3d.py": {
+   "cov_body": 0.0,
    "hcr": 0.0149,
    "longest_fn": 886,
    "overlap_max": 0.633,
@@ -1057,6 +1105,7 @@
    "spec_bools_max": 15
   },
   "library/kernels/gfx1250/wmma_attention_fwd.py": {
+   "cov_body": 0.0,
    "hcr": 0.0462,
    "longest_fn": 232,
    "overlap_max": 0.0,
@@ -1079,6 +1128,7 @@
    "spec_bools_max": 0
   },
   "library/kernels/gfx942/__init__.py": {
+   "cov_body": null,
    "hcr": null,
    "longest_fn": 0,
    "overlap_max": 0.0,
@@ -1101,6 +1151,7 @@
    "spec_bools_max": 0
   },
   "library/kernels/gfx942/attention_dense.py": {
+   "cov_body": 0.0,
    "hcr": 0.0166,
    "longest_fn": 903,
    "overlap_max": 0.169,
@@ -1123,6 +1174,7 @@
    "spec_bools_max": 3
   },
   "library/kernels/gfx942/attention_tiled_2d.py": {
+   "cov_body": 46.4,
    "hcr": 0.027,
    "longest_fn": 4386,
    "overlap_max": 0.815,
@@ -1145,6 +1197,7 @@
    "spec_bools_max": 36
   },
   "library/kernels/gfx942/attention_tiled_3d.py": {
+   "cov_body": 0.0,
    "hcr": 0.0744,
    "longest_fn": 764,
    "overlap_max": 0.825,
@@ -1167,6 +1220,7 @@
    "spec_bools_max": 7
   },
   "library/kernels/gfx942/kda_chunkwise.py": {
+   "cov_body": 82.1,
    "hcr": 0.019,
    "longest_fn": 494,
    "overlap_max": 0.931,
@@ -1189,6 +1243,7 @@
    "spec_bools_max": 4
   },
   "library/kernels/gfx950/__init__.py": {
+   "cov_body": null,
    "hcr": null,
    "longest_fn": 0,
    "overlap_max": 0.0,
@@ -1211,6 +1266,7 @@
    "spec_bools_max": 0
   },
   "library/kernels/gfx950/attention_dense.py": {
+   "cov_body": 85.0,
    "hcr": 0.0106,
    "longest_fn": 967,
    "overlap_max": 0.169,
@@ -1233,6 +1289,7 @@
    "spec_bools_max": 5
   },
   "library/kernels/gfx950/attention_tiled_2d.py": {
+   "cov_body": 57.6,
    "hcr": 0.0231,
    "longest_fn": 3577,
    "overlap_max": 0.815,
@@ -1255,6 +1312,7 @@
    "spec_bools_max": 29
   },
   "library/kernels/gfx950/attention_tiled_2d_fastkv_regp.py": {
+   "cov_body": 0.0,
    "hcr": null,
    "longest_fn": 46,
    "overlap_max": 0.0,
@@ -1277,6 +1335,7 @@
    "spec_bools_max": 0
   },
   "library/kernels/gfx950/attention_tiled_3d.py": {
+   "cov_body": 82.2,
    "hcr": 0.0745,
    "longest_fn": 776,
    "overlap_max": 0.825,
@@ -1299,6 +1358,7 @@
    "spec_bools_max": 7
   },
   "library/kernels/gfx950/deep_fused_conv_pool.py": {
+   "cov_body": 100.0,
    "hcr": null,
    "longest_fn": 12,
    "overlap_max": 0.0,
@@ -1321,6 +1381,7 @@
    "spec_bools_max": 0
   },
   "library/kernels/gfx950/gdn_decode.py": {
+   "cov_body": 0.0,
    "hcr": 0.1183,
    "longest_fn": 295,
    "overlap_max": 0.0,
@@ -1343,6 +1404,7 @@
    "spec_bools_max": 3
   },
   "library/kernels/gfx950/kda_chunkwise.py": {
+   "cov_body": 82.7,
    "hcr": 0.0216,
    "longest_fn": 469,
    "overlap_max": 0.931,
@@ -1365,6 +1427,7 @@
    "spec_bools_max": 5
   },
   "platform/python/rocke/instances/__init__.py": {
+   "cov_body": null,
    "hcr": null,
    "longest_fn": 0,
    "overlap_max": 0.0,
@@ -1387,6 +1450,7 @@
    "spec_bools_max": 0
   },
   "platform/python/rocke/instances/common/__init__.py": {
+   "cov_body": null,
    "hcr": null,
    "longest_fn": 0,
    "overlap_max": 0.0,
@@ -1409,6 +1473,7 @@
    "spec_bools_max": 0
   },
   "platform/python/rocke/instances/common/_matmul_nbits_common.py": {
+   "cov_body": 0.0,
    "hcr": 1.0,
    "longest_fn": 118,
    "overlap_max": 0.0,
@@ -1431,6 +1496,7 @@
    "spec_bools_max": 2
   },
   "platform/python/rocke/instances/common/_matmul_nbits_decode_gemv.py": {
+   "cov_body": 0.0,
    "hcr": 0.0192,
    "longest_fn": 64,
    "overlap_max": 0.0,
@@ -1453,6 +1519,7 @@
    "spec_bools_max": 0
   },
   "platform/python/rocke/instances/common/_matmul_nbits_large_n.py": {
+   "cov_body": 0.0,
    "hcr": 0.0119,
    "longest_fn": 129,
    "overlap_max": 0.0,
@@ -1475,6 +1542,7 @@
    "spec_bools_max": 1
   },
   "platform/python/rocke/instances/common/_matmul_nbits_large_n_opt.py": {
+   "cov_body": 0.0,
    "hcr": 0.0088,
    "longest_fn": 188,
    "overlap_max": 0.0,
@@ -1497,6 +1565,7 @@
    "spec_bools_max": 0
   },
   "platform/python/rocke/instances/common/_moe_fused_mega_lds.py": {
+   "cov_body": 0.0,
    "hcr": null,
    "longest_fn": 16,
    "overlap_max": 0.0,
@@ -1519,6 +1588,7 @@
    "spec_bools_max": 0
   },
   "platform/python/rocke/instances/common/add_rmsnorm2d_bf16.py": {
+   "cov_body": 0.0,
    "hcr": 0.3968,
    "longest_fn": 146,
    "overlap_max": 0.0,
@@ -1541,6 +1611,7 @@
    "spec_bools_max": 1
   },
   "platform/python/rocke/instances/common/add_rmsnorm2d_rdquant.py": {
+   "cov_body": 0.0,
    "hcr": 0.3605,
    "longest_fn": 231,
    "overlap_max": 0.39,
@@ -1563,6 +1634,7 @@
    "spec_bools_max": 2
   },
   "platform/python/rocke/instances/common/batched_contraction.py": {
+   "cov_body": 0.0,
    "hcr": 1.0,
    "longest_fn": 109,
    "overlap_max": 0.0,
@@ -1585,6 +1657,7 @@
    "spec_bools_max": 0
   },
   "platform/python/rocke/instances/common/batched_gemm.py": {
+   "cov_body": 0.0,
    "hcr": 1.0,
    "longest_fn": 52,
    "overlap_max": 0.0,
@@ -1607,6 +1680,7 @@
    "spec_bools_max": 0
   },
   "platform/python/rocke/instances/common/batched_transpose.py": {
+   "cov_body": 0.0,
    "hcr": 0.2791,
    "longest_fn": 100,
    "overlap_max": 0.0,
@@ -1629,6 +1703,7 @@
    "spec_bools_max": 0
   },
   "platform/python/rocke/instances/common/block_scale_gemm.py": {
+   "cov_body": 0.0,
    "hcr": 0.2581,
    "longest_fn": 212,
    "overlap_max": 0.34,
@@ -1651,6 +1726,7 @@
    "spec_bools_max": 2
   },
   "platform/python/rocke/instances/common/elementwise.py": {
+   "cov_body": 0.0,
    "hcr": 0.3375,
    "longest_fn": 125,
    "overlap_max": 0.0,
@@ -1673,6 +1749,7 @@
    "spec_bools_max": 0
   },
   "platform/python/rocke/instances/common/flatmm.py": {
+   "cov_body": 0.0,
    "hcr": 1.0,
    "longest_fn": 30,
    "overlap_max": 0.0,
@@ -1695,6 +1772,7 @@
    "spec_bools_max": 1
   },
   "platform/python/rocke/instances/common/fused_moe.py": {
+   "cov_body": 39.1,
    "hcr": 0.2347,
    "longest_fn": 125,
    "overlap_max": 0.188,
@@ -1717,6 +1795,7 @@
    "spec_bools_max": 1
   },
   "platform/python/rocke/instances/common/fused_moe_e2e.py": {
+   "cov_body": 0.0,
    "hcr": 1.0,
    "longest_fn": 504,
    "overlap_max": 0.0,
@@ -1739,6 +1818,7 @@
    "spec_bools_max": 0
   },
   "platform/python/rocke/instances/common/gemm_multi_abd.py": {
+   "cov_body": 0.0,
    "hcr": 1.0,
    "longest_fn": 47,
    "overlap_max": 0.0,
@@ -1761,6 +1841,7 @@
    "spec_bools_max": 0
   },
   "platform/python/rocke/instances/common/gemm_multi_d.py": {
+   "cov_body": 0.0,
    "hcr": 0.4138,
    "longest_fn": 76,
    "overlap_max": 0.0,
@@ -1783,6 +1864,7 @@
    "spec_bools_max": 0
   },
   "platform/python/rocke/instances/common/gemm_policy.py": {
+   "cov_body": 0.0,
    "hcr": null,
    "longest_fn": 10,
    "overlap_max": 0.0,
@@ -1805,6 +1887,7 @@
    "spec_bools_max": 1
   },
   "platform/python/rocke/instances/common/gemm_universal.py": {
+   "cov_body": 57.8,
    "hcr": 0.1013,
    "longest_fn": 1338,
    "overlap_max": 0.0,
@@ -1827,6 +1910,7 @@
    "spec_bools_max": 11
   },
   "platform/python/rocke/instances/common/gemm_wsp3.py": {
+   "cov_body": 0.0,
    "hcr": 0.0795,
    "longest_fn": 435,
    "overlap_max": 0.0,
@@ -1849,6 +1933,7 @@
    "spec_bools_max": 0
   },
   "platform/python/rocke/instances/common/grouped_gemm.py": {
+   "cov_body": 0.0,
    "hcr": 1.0,
    "longest_fn": 45,
    "overlap_max": 0.0,
@@ -1871,6 +1956,7 @@
    "spec_bools_max": 0
   },
   "platform/python/rocke/instances/common/layernorm2d.py": {
+   "cov_body": 0.0,
    "hcr": 0.459,
    "longest_fn": 187,
    "overlap_max": 0.0,
@@ -1893,6 +1979,7 @@
    "spec_bools_max": 1
   },
   "platform/python/rocke/instances/common/manifest_runner/__init__.py": {
+   "cov_body": null,
    "hcr": null,
    "longest_fn": 0,
    "overlap_max": 0.0,
@@ -1915,6 +2002,7 @@
    "spec_bools_max": 0
   },
   "platform/python/rocke/instances/common/manifest_runner/gemm.py": {
+   "cov_body": 0.0,
    "hcr": null,
    "longest_fn": 70,
    "overlap_max": 0.0,
@@ -1937,6 +2025,7 @@
    "spec_bools_max": 0
   },
   "platform/python/rocke/instances/common/manifest_runner/matmul_nbits.py": {
+   "cov_body": 0.0,
    "hcr": null,
    "longest_fn": 87,
    "overlap_max": 0.0,
@@ -1959,6 +2048,7 @@
    "spec_bools_max": 0
   },
   "platform/python/rocke/instances/common/manifest_runner/simple_ops.py": {
+   "cov_body": 0.0,
    "hcr": null,
    "longest_fn": 217,
    "overlap_max": 0.986,
@@ -1981,6 +2071,7 @@
    "spec_bools_max": 0
   },
   "platform/python/rocke/instances/common/manifest_runner/utils.py": {
+   "cov_body": null,
    "hcr": null,
    "longest_fn": 0,
    "overlap_max": 0.0,
@@ -2003,6 +2094,7 @@
    "spec_bools_max": 0
   },
   "platform/python/rocke/instances/common/matmul_nbits.py": {
+   "cov_body": 0.0,
    "hcr": null,
    "longest_fn": 30,
    "overlap_max": 0.0,
@@ -2025,6 +2117,7 @@
    "spec_bools_max": 0
   },
   "platform/python/rocke/instances/common/mfma_gemm.py": {
+   "cov_body": 0.0,
    "hcr": 0.3462,
    "longest_fn": 89,
    "overlap_max": 0.0,
@@ -2047,6 +2140,7 @@
    "spec_bools_max": 1
   },
   "platform/python/rocke/instances/common/moe_fused_mega.py": {
+   "cov_body": 0.0,
    "hcr": 0.1639,
    "longest_fn": 317,
    "overlap_max": 0.605,
@@ -2069,6 +2163,7 @@
    "spec_bools_max": 0
   },
   "platform/python/rocke/instances/common/moe_fused_mega_fp8.py": {
+   "cov_body": 0.0,
    "hcr": 0.0547,
    "longest_fn": 590,
    "overlap_max": 0.0,
@@ -2091,6 +2186,7 @@
    "spec_bools_max": 1
   },
   "platform/python/rocke/instances/common/moe_gemm_fused.py": {
+   "cov_body": 0.0,
    "hcr": 0.136,
    "longest_fn": 249,
    "overlap_max": 0.379,
@@ -2113,6 +2209,7 @@
    "spec_bools_max": 1
   },
   "platform/python/rocke/instances/common/moe_smoothquant.py": {
+   "cov_body": 0.0,
    "hcr": 0.3034,
    "longest_fn": 198,
    "overlap_max": 0.547,
@@ -2135,6 +2232,7 @@
    "spec_bools_max": 1
   },
   "platform/python/rocke/instances/common/moe_sorting.py": {
+   "cov_body": 43.8,
    "hcr": 0.1135,
    "longest_fn": 129,
    "overlap_max": 0.188,
@@ -2157,6 +2255,7 @@
    "spec_bools_max": 0
   },
   "platform/python/rocke/instances/common/mx_gemm.py": {
+   "cov_body": 0.0,
    "hcr": 0.2692,
    "longest_fn": 177,
    "overlap_max": 0.34,
@@ -2179,6 +2278,7 @@
    "spec_bools_max": 1
   },
   "platform/python/rocke/instances/common/permute_nd.py": {
+   "cov_body": 0.0,
    "hcr": 0.5,
    "longest_fn": 77,
    "overlap_max": 0.0,
@@ -2201,6 +2301,7 @@
    "spec_bools_max": 0
   },
   "platform/python/rocke/instances/common/pooling.py": {
+   "cov_body": 0.0,
    "hcr": 0.3492,
    "longest_fn": 199,
    "overlap_max": 0.0,
@@ -2223,6 +2324,7 @@
    "spec_bools_max": 1
   },
   "platform/python/rocke/instances/common/reduce.py": {
+   "cov_body": 0.0,
    "hcr": 0.4878,
    "longest_fn": 123,
    "overlap_max": 0.0,
@@ -2245,6 +2347,7 @@
    "spec_bools_max": 0
   },
   "platform/python/rocke/instances/common/rmsnorm2d.py": {
+   "cov_body": 0.0,
    "hcr": 0.4792,
    "longest_fn": 138,
    "overlap_max": 0.0,
@@ -2267,6 +2370,7 @@
    "spec_bools_max": 1
   },
   "platform/python/rocke/instances/common/smoothquant.py": {
+   "cov_body": 0.0,
    "hcr": 0.375,
    "longest_fn": 181,
    "overlap_max": 0.547,
@@ -2289,6 +2393,7 @@
    "spec_bools_max": 1
   },
   "platform/python/rocke/instances/common/streamk_gemm.py": {
+   "cov_body": 0.0,
    "hcr": 0.381,
    "longest_fn": 173,
    "overlap_max": 0.0,
@@ -2311,6 +2416,7 @@
    "spec_bools_max": 1
   },
   "platform/python/rocke/instances/common/topk_softmax.py": {
+   "cov_body": 0.0,
    "hcr": 0.1795,
    "longest_fn": 245,
    "overlap_max": 0.0,
@@ -2333,6 +2439,7 @@
    "spec_bools_max": 1
   },
   "platform/python/rocke/instances/common/transpose.py": {
+   "cov_body": 0.0,
    "hcr": 0.2903,
    "longest_fn": 116,
    "overlap_max": 0.0,
@@ -2355,6 +2462,7 @@
    "spec_bools_max": 0
   },
   "platform/python/rocke/instances/common/transpose_bc.py": {
+   "cov_body": 0.0,
    "hcr": 0.4889,
    "longest_fn": 153,
    "overlap_max": 0.0,
@@ -2377,6 +2485,7 @@
    "spec_bools_max": 1
   },
   "platform/python/rocke/instances/gfx1151/_wmma_common.py": {
+   "cov_body": 0.0,
    "hcr": null,
    "longest_fn": 10,
    "overlap_max": 0.0,
@@ -2399,6 +2508,7 @@
    "spec_bools_max": 0
   },
   "platform/python/rocke/instances/gfx1151/wmma_gemm.py": {
+   "cov_body": 0.0,
    "hcr": 0.0233,
    "longest_fn": 59,
    "overlap_max": 0.0,
@@ -2421,6 +2531,7 @@
    "spec_bools_max": 1
   },
   "platform/python/rocke/instances/gfx1151/wmma_gemm_int8.py": {
+   "cov_body": 0.0,
    "hcr": 0.0204,
    "longest_fn": 61,
    "overlap_max": 0.0,
@@ -2443,6 +2554,7 @@
    "spec_bools_max": 0
   },
   "platform/python/rocke/instances/gfx1151/wmma_gemm_iu8.py": {
+   "cov_body": 0.0,
    "hcr": 0.025,
    "longest_fn": 55,
    "overlap_max": 0.0,
@@ -2465,6 +2577,7 @@
    "spec_bools_max": 0
   },
   "platform/python/rocke/instances/gfx1151/wmma_gemm_iu8_dequant.py": {
+   "cov_body": 0.0,
    "hcr": 0.0217,
    "longest_fn": 64,
    "overlap_max": 0.0,
@@ -2487,6 +2600,7 @@
    "spec_bools_max": 0
   },
   "platform/python/rocke/instances/gfx1201/__init__.py": {
+   "cov_body": null,
    "hcr": null,
    "longest_fn": 0,
    "overlap_max": 0.0,
@@ -2509,6 +2623,7 @@
    "spec_bools_max": 0
   },
   "platform/python/rocke/instances/gfx1201/wmma_gemm.py": {
+   "cov_body": 0.0,
    "hcr": 0.0233,
    "longest_fn": 64,
    "overlap_max": 0.0,
@@ -2531,6 +2646,7 @@
    "spec_bools_max": 0
   },
   "platform/python/rocke/instances/gfx1250/__init__.py": {
+   "cov_body": null,
    "hcr": null,
    "longest_fn": 0,
    "overlap_max": 0.0,
@@ -2553,6 +2669,7 @@
    "spec_bools_max": 0
   },
   "platform/python/rocke/instances/gfx1250/block_scaled_gemm.py": {
+   "cov_body": 60.1,
    "hcr": 0.1017,
    "longest_fn": 230,
    "overlap_max": 0.0,
@@ -2575,6 +2692,7 @@
    "spec_bools_max": 1
   },
   "platform/python/rocke/instances/gfx1250/fused_moe_fp8.py": {
+   "cov_body": 0.0,
    "hcr": 1.0,
    "longest_fn": 214,
    "overlap_max": 0.0,
@@ -2597,6 +2715,7 @@
    "spec_bools_max": 0
   },
   "platform/python/rocke/instances/gfx1250/fused_moe_mega_wmma.py": {
+   "cov_body": 0.0,
    "hcr": 0.1803,
    "longest_fn": 351,
    "overlap_max": 0.605,
@@ -2619,6 +2738,7 @@
    "spec_bools_max": 1
   },
   "platform/python/rocke/instances/gfx1250/qwen3_kv_cache.py": {
+   "cov_body": 0.0,
    "hcr": 0.0698,
    "longest_fn": 89,
    "overlap_max": 0.0,
@@ -2641,6 +2761,7 @@
    "spec_bools_max": 1
   },
   "platform/python/rocke/instances/gfx1250/qwen3_qk_norm_rope.py": {
+   "cov_body": 0.0,
    "hcr": 0.0526,
    "longest_fn": 82,
    "overlap_max": 0.0,
@@ -2663,6 +2784,7 @@
    "spec_bools_max": 0
   },
   "platform/python/rocke/instances/gfx1250/qwen3_sampler.py": {
+   "cov_body": 0.0,
    "hcr": 0.1481,
    "longest_fn": 52,
    "overlap_max": 0.0,
@@ -2685,6 +2807,7 @@
    "spec_bools_max": 0
   },
   "platform/python/rocke/instances/gfx1250/qwen3_token_embedding.py": {
+   "cov_body": 0.0,
    "hcr": 0.1071,
    "longest_fn": 44,
    "overlap_max": 0.0,
@@ -2707,6 +2830,7 @@
    "spec_bools_max": 0
   },
   "platform/python/rocke/instances/gfx1250/wmma_gemm.py": {
+   "cov_body": 0.0,
    "hcr": 0.0217,
    "longest_fn": 63,
    "overlap_max": 0.0,
@@ -2729,6 +2853,7 @@
    "spec_bools_max": 0
   },
   "platform/python/rocke/instances/gfx942/__init__.py": {
+   "cov_body": null,
    "hcr": null,
    "longest_fn": 0,
    "overlap_max": 0.0,
@@ -2751,6 +2876,7 @@
    "spec_bools_max": 0
   },
   "platform/python/rocke/instances/gfx942/tf32_mma_probe.py": {
+   "cov_body": 0.0,
    "hcr": 0.02,
    "longest_fn": 92,
    "overlap_max": 0.0,
@@ -2773,6 +2899,7 @@
    "spec_bools_max": 0
   },
   "platform/python/rocke/instances/gfx950/__init__.py": {
+   "cov_body": null,
    "hcr": null,
    "longest_fn": 0,
    "overlap_max": 0.0,
@@ -2795,6 +2922,7 @@
    "spec_bools_max": 0
   },
   "platform/python/rocke/instances/gfx950/grouped_gemm.py": {
+   "cov_body": 52.7,
    "hcr": 0.0573,
    "longest_fn": 742,
    "overlap_max": 0.449,
@@ -2817,6 +2945,7 @@
    "spec_bools_max": 9
   },
   "platform/python/rocke/instances/gfx950/ragged_gemm.py": {
+   "cov_body": 0.0,
    "hcr": 0.0489,
    "longest_fn": 593,
    "overlap_max": 0.809,
@@ -2839,6 +2968,7 @@
    "spec_bools_max": 14
   },
   "platform/python/rocke/instances/gfx950/ragged_moe.py": {
+   "cov_body": 0.0,
    "hcr": 0.0408,
    "longest_fn": 741,
    "overlap_max": 0.809,
@@ -2862,6 +2992,7 @@
   }
  },
  "meta": {
+  "coverage": true,
   "files": 130,
   "tool_version": "0.1",
   "written": "2026-10-13"

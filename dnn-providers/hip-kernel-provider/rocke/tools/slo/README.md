@@ -1,21 +1,24 @@
 # rocKE SLO linter
 
-Measures how big, how low-level and how copy-pasted each rocKE kernel file is.
-No LLM, no network, no GPU. Python 3.10+ stdlib only.
+Measures how big, how low-level, how copy-pasted and how well IR-tested each rocKE kernel file is.
+No LLM, no network, no GPU. Python 3.10+ stdlib only; coverage.py only for `--coverage`.
 
 ## Run it
 
 ```
-python tools/slo/slo.py report   [--json FILE] [--scope DIR]
-python tools/slo/slo.py check    [--base REF] [--json|--junit|--markdown FILE] [--github]
-python tools/slo/slo.py baseline --update
+python tools/slo/slo.py report   [--coverage] [--json FILE] [--scope DIR]
+python tools/slo/slo.py check    [--coverage] [--base REF] [--json|--junit|--markdown FILE] [--github]
+python tools/slo/slo.py baseline --update [--coverage]
 ```
 
 - `report`: every number, no pass/fail. `--json -` writes the JSON to stdout.
   `--scope DIR` (repeatable, rocke-relative) measures other folders instead of the configured scope.
 - `check`: compares with `baseline.json`. Lists what got worse (warning) and what got better.
   `--base REF` limits it to files changed since `REF` and follows renames (needs git).
+  With `--coverage` too, it also checks that the IR harness runs the changed lines (SLO201).
 - `baseline --update`: saves today's numbers. Warns if any number is looser than before.
+- `--coverage`: runs the IR golden harness (`platform/tests/instances/rocke_ir_parity_harness.py`,
+  pure Python, no GPU) under coverage.py, once, and adds SLO201/SLO202. About 15 seconds.
 
 Warn only by default: `check` exits 0 even with warnings. `--fail-on increase` makes "worse"
 exit 1. Nothing else changes. CI snippets and the full contract: `CI.md`.
@@ -29,7 +32,7 @@ source tree or an installed copy. `--root` points it somewhere else.
 |---|---|
 | 0 | Ran fine. Warnings do not change this unless `--fail-on increase`. |
 | 1 | Something got worse, and `--fail-on increase` was given. |
-| 2 | The tool could not run: bad args, a file that does not parse, git missing when asked. |
+| 2 | The tool could not run: bad args, a file that does not parse, git or coverage.py missing when asked. |
 
 ## Checks
 
@@ -42,6 +45,8 @@ source tree or an installed copy. `--root` points it somewhere else.
 | SLO105 | Bool fields per frozen dataclass | 8 or less |
 | SLO106 | Copy-paste overlap with any other file | 40% or less |
 | SLO107 | Repeated low-level patterns (14 kinds, see `slo_patterns.py`) | may not rise |
+| SLO201 | IR harness runs the changed lines | 90% or more (`--base` + `--coverage`) |
+| SLO202 | IR harness runs the function bodies | 90% or more (`--coverage`) |
 
 Old files are compared to their own baseline numbers, not to the targets. A new file over a
 target is a warning. SLO104 is report only: it never fails, even with `--fail-on increase`.
@@ -63,6 +68,10 @@ there, not in the code.
   Lines under 14 characters and comment lines are ignored. Files under 200 SLOC are skipped.
   A second, advisory score (`overlap_norm`) replaces variable names first, so a copy with renamed
   variables still shows up.
+- **IR coverage**: only statements inside function bodies count (`cov_body`). `def` lines, class
+  bodies and constants run on import even when no kernel is built, so whole-file coverage
+  (`cov_file`, also reported) looks better than it is. Coverage says a line ran, not that its
+  output was checked; the IR golden hashes do that part.
 
 ## Scope
 
@@ -80,5 +89,6 @@ pytest tools/slo/tests
 - Compare, exit codes, every output format, and `--base` on a throwaway git repo.
 - Break it on purpose: on a copy of the real tree, add raw ops, grow the longest function and
   paste a file. Each must give the right check id, and `--fail-on increase` must exit 1.
+  With coverage: a new function the harness never builds must give SLO201 and SLO202.
 
 `library/tests/test_slo_ratchet.py` runs `check` against the committed baseline. It only warns.

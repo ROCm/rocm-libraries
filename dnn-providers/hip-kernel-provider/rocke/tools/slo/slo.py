@@ -1,20 +1,22 @@
 #!/usr/bin/env python3
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""rocKE SLO linter: measures kernel-file shape. No LLM, no network, no GPU.
+"""rocKE SLO linter: measures kernel-file shape and IR-harness coverage. No LLM, no network, no GPU.
 
-  slo.py report   [--json FILE] [--scope DIR]   every number, no pass/fail
-  slo.py check    [--base REF] [outputs]        what got worse than the baseline
-  slo.py baseline --update                      save today's numbers as the baseline
+  slo.py report   [--json FILE] [--scope DIR] [--coverage]   every number, no pass/fail
+  slo.py check    [--base REF] [--coverage] [outputs]        what got worse than the baseline
+  slo.py baseline --update [--coverage]                      save today's numbers as the baseline
 
 Exit codes (the CI contract):
   0  ran fine (default: warnings never fail)
   1  something got worse, and --fail-on increase was given
-  2  the tool itself could not run (bad args, unparsable file, git missing when asked)
+  2  the tool itself could not run (bad args, unparsable file, git or coverage missing when asked)
 
 Checks: SLO101 file SLOC, SLO102 longest function, SLO103 raw IR ops per 100 SLOC,
 SLO104 helper-call ratio, SLO105 bool fields per frozen spec, SLO106 copy-paste
-overlap, SLO107 repeated patterns. Limits and scope live in slo_config.py.
+overlap, SLO107 repeated patterns, SLO201 IR coverage of changed lines (needs --base
+and --coverage), SLO202 IR coverage of function bodies (--coverage). Limits and scope
+live in slo_config.py.
 """
 from __future__ import annotations
 
@@ -37,6 +39,15 @@ DEFAULT_ROOT = HERE.parents[1]  # rocke/tools/slo -> rocke
 DEFAULT_BASELINE = HERE / "baseline.json"
 
 
+def _coverage(root: Path, files, python, scope=None):
+    import slo_coverage
+
+    try:
+        return slo_coverage.run(root, files, python, scope)
+    except slo_coverage.CoverageUnavailable as e:
+        raise SystemExit(_die(str(e)))
+
+
 def _die(msg: str) -> int:
     print(f"slo: error: {msg}", file=sys.stderr)
     return 2
@@ -52,7 +63,8 @@ def _write(path: str | None, text: str) -> None:
 def cmd_report(a) -> int:
     root = a.root
     files = M.scope_files(root, a.scope)
-    current = MS.measure(root, files)
+    cov = _coverage(root, files, a.python, a.scope) if a.coverage else None
+    current = MS.measure(root, files, cov)
     summary = MS.over_target_summary(current)
     if a.json:
         doc = {
@@ -74,7 +86,7 @@ def cmd_report(a) -> int:
 
 def cmd_check(a) -> int:
     root = a.root
-    only = renamed = None
+    only = renamed = changed = None
     if a.base:
         import slo_git
 
@@ -82,9 +94,15 @@ def cmd_check(a) -> int:
             ch = slo_git.changes(root, a.base)
         except slo_git.GitError as e:
             return _die(f"--base {a.base}: {e}")
-        only = {p for p in ch["changed"] if M.in_scope(p) and (root / p).exists()}
-        renamed = ch["renamed"]
-    current = MS.measure(root)
+        changed = {
+            p: ls
+            for p, ls in ch["changed"].items()
+            if M.in_scope(p) and (root / p).exists()
+        }
+        only, renamed = set(changed), ch["renamed"]
+    files = M.scope_files(root)
+    cov = _coverage(root, files, a.python) if a.coverage else None
+    current = MS.measure(root, files, cov)
     baseline = K.load_baseline(a.baseline)
     if not baseline["files"]:
         print(
@@ -92,6 +110,8 @@ def cmd_check(a) -> int:
             file=sys.stderr,
         )
     findings = K.compare(current, baseline, only, renamed)
+    if cov and changed is not None:
+        findings += K.changed_line_findings(current, cov, changed)
     if a.base:  # keep the summary about the files the PR touched
         current = {
             **current,
@@ -121,7 +141,9 @@ def cmd_check(a) -> int:
 def cmd_baseline(a) -> int:
     if not a.update:
         return _die("baseline: pass --update to rewrite the baseline")
-    current = MS.measure(a.root)
+    files = M.scope_files(a.root)
+    cov = _coverage(a.root, files, a.python) if a.coverage else None
+    current = MS.measure(a.root, files, cov)
     if current["errors"]:
         for e in current["errors"]:
             print(f"ERROR {e['path']}:{e['line']} {e['message']}", file=sys.stderr)
@@ -135,10 +157,12 @@ def cmd_baseline(a) -> int:
     meta = {
         "tool_version": VERSION,
         "written": datetime.date.today().isoformat(),
+        "coverage": cov is not None,
         "files": len(current["files"]),
     }
     K.save_baseline(a.baseline, current, meta)
-    print(f"wrote {a.baseline}: {len(current['files'])} files")
+    with_cov = " with coverage" if cov else ""
+    print(f"wrote {a.baseline}: {len(current['files'])} files{with_cov}")
     if looser:
         print(f"WARNING: {len(looser)} numbers are now looser than the old baseline:")
         for f in looser[:20]:
@@ -158,6 +182,14 @@ def main(argv=None) -> int:
             default=DEFAULT_ROOT,
             help="rocke folder (default: two levels above this file)",
         )
+        sp.add_argument(
+            "--coverage",
+            action="store_true",
+            help="also run the IR harness under coverage.py (SLO201, SLO202)",
+        )
+        sp.add_argument(
+            "--python", help="interpreter for the harness run (default: this one)"
+        )
 
     r = sub.add_parser("report", help="print every number, no pass/fail")
     common(r)
@@ -175,7 +207,9 @@ def main(argv=None) -> int:
     common(c)
     c.add_argument("--baseline", type=Path, default=DEFAULT_BASELINE)
     c.add_argument(
-        "--base", metavar="REF", help="git ref; only check files changed since REF"
+        "--base",
+        metavar="REF",
+        help="git ref; only check files changed since REF, and enable SLO201",
     )
     c.add_argument(
         "--fail-on",

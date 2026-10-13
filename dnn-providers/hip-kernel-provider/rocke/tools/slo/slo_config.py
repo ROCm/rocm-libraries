@@ -23,7 +23,11 @@ TARGETS = {
     "raw_per_100": (15.0, "max"),  # SLO103
     "spec_bools_max": (8, "max"),  # SLO105
     "overlap_max": (0.40, "max"),  # SLO106
+    "cov_body": (90.0, "min"),  # SLO202 (only when --coverage ran)
 }
+
+# Changed lines the IR harness must run, in percent (SLO201, needs --base and --coverage).
+CHANGED_LINES_COVERAGE_MIN = 90.0
 
 # Variable names always treated as the IR builder, on top of names found by type.
 BUILDER_NAMES = ("b", "bb")
@@ -43,6 +47,7 @@ WORSE_IF = {
     "hcr": "down",
     "spec_bools_max": "up",
     "overlap_max": "up",
+    "cov_body": "down",
 }
 
 # Report-only metrics: shown as warnings, never fail, even with --fail-on increase.
@@ -54,4 +59,11 @@ TOLERANCE = {
     "raw_per_100": 0.0,
     "hcr": 0.0,
     "overlap_max": 0.0,
+    "cov_body": 0.0,
 }
+
+# IR harness used for the coverage checks (SLO201, SLO202). Paths are rocke-relative.
+HARNESS = "platform/tests/instances/rocke_ir_parity_harness.py"
+HARNESS_GOLDEN = "platform/tests/golden/rocke_representative_ir_sha256.json"
+HARNESS_FLAVOR = "llvm22"  # one flavor is enough: kernels run the same either way
+PYTHONPATH = ("library", "platform/python")

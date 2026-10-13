@@ -7,17 +7,12 @@
 """
 import ast
 import json
-import shutil
-import subprocess
 
 import pytest
-from conftest import ROCKE
+from conftest import copy_tree
 
 import slo
 import slo_measure as MS
-
-# Folders a copy needs: the measured code, the helpers, and the IR harness.
-COPY = ("library", "platform/python", "platform/tests")
 
 
 def test_committed_baseline_runs_on_the_tree(tmp_path):
@@ -29,21 +24,8 @@ def test_committed_baseline_runs_on_the_tree(tmp_path):
 @pytest.fixture(scope="module")
 def tree(tmp_path_factory):
     """A copy of the real tree in its own git repo, with a fresh baseline."""
-    top = tmp_path_factory.mktemp("mut")
-    root = top / "rocke"
-    for d in COPY:
-        shutil.copytree(
-            ROCKE / d, root / d, ignore=shutil.ignore_patterns("__pycache__")
-        )
-    for a in (
-        ["init", "-q", "-b", "main"],
-        ["config", "user.email", "t@t"],
-        ["config", "user.name", "t"],
-        ["add", "-A"],
-        ["commit", "-qm", "base"],
-    ):
-        subprocess.run(["git", "-C", str(top), *a], check=True, capture_output=True)
-    bl = top / "baseline.json"
+    root = copy_tree(tmp_path_factory.mktemp("mut"))
+    bl = root.parent / "baseline.json"
     assert (
         slo.main(["baseline", "--update", "--root", str(root), "--baseline", str(bl)])
         == 0

@@ -3,9 +3,9 @@
 """Compare measured numbers with the baseline and produce findings.
 
 A finding is a plain dict:
-  check   SLO1xx id
+  check   SLO1xx / SLO2xx id
   kind    "worse"        old file got worse than its baseline
-          "over_target"  new file is over a target
+          "over_target"  new file is over a target, or changed lines are not covered
           "better"       old file got better (progress, never a warning)
           "error"        the tool could not measure something (exit code 2)
   path, line, metric, old, new, target, message
@@ -25,6 +25,7 @@ CHECK_ID = {
     "hcr": "SLO104",
     "spec_bools_max": "SLO105",
     "overlap_max": "SLO106",
+    "cov_body": "SLO202",
 }
 CHECK_TITLE = {
     "SLO101": "File SLOC",
@@ -34,6 +35,8 @@ CHECK_TITLE = {
     "SLO105": "Bool fields per frozen spec",
     "SLO106": "Copy-paste overlap",
     "SLO107": "Repeated low-level patterns",
+    "SLO201": "IR coverage of changed lines",
+    "SLO202": "IR coverage of function bodies",
 }
 
 
@@ -152,3 +155,49 @@ def compare(
                         }
                     )
     return findings
+
+
+def changed_line_findings(
+    current: dict, coverage: dict, changed: dict[str, set[int]]
+) -> list[dict]:
+    """SLO201: changed statements the IR harness does not run."""
+    out = []
+    for rel, lines in sorted(changed.items()):
+        c = coverage["files"].get(rel)
+        if rel not in current["files"] or not c or not lines:
+            continue
+        stmts = set(c["statements"]) & lines
+        if not stmts:
+            continue
+        missed = sorted(stmts - set(c["executed"]))
+        pct = round(100 * (len(stmts) - len(missed)) / len(stmts), 1)
+        if pct < C.CHANGED_LINES_COVERAGE_MIN:
+            out.append(
+                {
+                    "check": "SLO201",
+                    "kind": "over_target",
+                    "path": rel,
+                    "line": missed[0],
+                    "metric": "changed_cov",
+                    "old": None,
+                    "new": pct,
+                    "target": C.CHANGED_LINES_COVERAGE_MIN,
+                    "enforce": True,
+                    "message": f"IR harness runs {pct}% of the {len(stmts)} changed statements "
+                    f"(target >= {C.CHANGED_LINES_COVERAGE_MIN}); not run: {_ranges(missed)}",
+                }
+            )
+    return out
+
+
+def _ranges(lines: list[int]) -> str:
+    out, start, prev = [], None, None
+    for n in lines + [None]:
+        if start is None:
+            start = prev = n
+        elif n is not None and n == prev + 1:
+            prev = n
+        else:
+            out.append(str(start) if start == prev else f"{start}-{prev}")
+            start = prev = n
+    return ", ".join(out)

@@ -1,5 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
+import shutil
+import subprocess
 import sys
 import textwrap
 from pathlib import Path
@@ -9,6 +11,28 @@ import pytest
 SLO = Path(__file__).resolve().parents[1]
 ROCKE = SLO.parents[1]
 sys.path.insert(0, str(SLO))
+
+
+# Folders a copy of the real tree needs: the measured code, the helpers, the IR harness.
+COPY = ("library", "platform/python", "platform/tests")
+
+
+def copy_tree(top: Path) -> Path:
+    """Copy the real rocke tree to top/rocke and commit it in a new git repo at top."""
+    root = top / "rocke"
+    for d in COPY:
+        shutil.copytree(
+            ROCKE / d, root / d, ignore=shutil.ignore_patterns("__pycache__")
+        )
+    for a in (
+        ["init", "-q", "-b", "main"],
+        ["config", "user.email", "t@t"],
+        ["config", "user.name", "t"],
+        ["add", "-A"],
+        ["commit", "-qm", "base"],
+    ):
+        subprocess.run(["git", "-C", str(top), *a], check=True, capture_output=True)
+    return root
 
 
 def src(text: str) -> str:

@@ -6,10 +6,13 @@ copy-paste snippets for when we turn it on.
 ## The contract
 
 - **Exit codes.** 0 = ran fine. 1 = something got worse, only with `--fail-on increase`.
-  2 = the tool itself broke (bad args, a file that does not parse, git missing when asked).
+  2 = the tool itself broke (bad args, a file that does not parse, git or coverage.py
+  missing when asked).
 - **Warn only by default.** `check` exits 0 even with warnings. Enforcement later is one
   flag, `--fail-on increase`, with no code change.
-- **Inputs are files, not services.** No network, no GPU, no build. Python 3.10+ stdlib only.
+- **Inputs are files, not services.** No network, no GPU, no build. Python 3.10+ stdlib only,
+  plus coverage.py for `--coverage`. Without `--coverage` the SLO2xx checks are skipped, and
+  JUnit leaves them out.
 - **Git is optional.** Without git, `check` compares every file to `baseline.json`. With
   `--base REF`, it judges only the files changed since `REF` and follows renames, so a
   moved file keeps its baseline.
@@ -57,6 +60,8 @@ Then add `rocke_slo_check` to the `quick` tier in
 ```
 
 `--base` needs the base branch fetched (`fetch-depth: 0`, or fetch `origin/develop`).
+Add `--coverage` (and `pip install coverage`) to also check that the IR harness runs the
+changed lines.
 
 ### Jenkins
 
@@ -76,7 +81,7 @@ The tool's own tests are separate: `pytest tools/slo/tests`.
 ## Updating the baseline
 
 ```
-python tools/slo/slo.py baseline --update
+python tools/slo/slo.py baseline --update --coverage
 ```
 
 Run it on the commit you want as the new starting point, and commit `baseline.json` in the
