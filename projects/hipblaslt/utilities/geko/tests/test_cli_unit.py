@@ -51,6 +51,27 @@ def test_parse_cli_args_search_default_keep_thr(tmp_path: Path) -> None:
     assert args.keep_thr == 0.1
 
 
+def test_parse_cli_args_search_space_subtile(tmp_path: Path) -> None:
+    workload = tmp_path / "wkld.yaml"
+    workload.write_text("[]\n")
+
+    args = cli.parse_cli_args(
+        [
+            "--tune",
+            "--workload-log",
+            str(workload),
+            "--devices",
+            "0",
+            "--arch",
+            "gfx950",
+            "--search-space",
+            "subtile",
+        ]
+    )
+
+    assert args.search_space == "subtile"
+
+
 def test_parse_cli_args_custom_lib_flags(tmp_path: Path) -> None:
     workload = tmp_path / "wkld.yaml"
     workload.write_text("[]\n")
@@ -214,7 +235,7 @@ def test_rows_from_gemm_config_yaml_uses_yaml_arch_for_mx_scale(tmp_path: Path) 
         sort_keys=False,
     )
 
-    rows = cli._rows_from_gemm_config_yaml(cfg, arch=None)
+    rows, _config_overrides = cli._rows_from_gemm_config_yaml(cfg, arch=None)
     assert rows[0]["scaleA"] == 1001
     assert rows[0]["scaleB"] == 1001
 
@@ -393,7 +414,7 @@ def test_dispatch_search_uses_generated_workload_from_list(
     monkeypatch.setattr(
         cli,
         "_rows_from_gemm_config_yaml",
-        lambda _path, _arch: [{"M": 16, "N": 16, "K": 16}],
+        lambda _path, _arch: ([{"M": 16, "N": 16, "K": 16}], {}),
     )
 
     captured = {}
