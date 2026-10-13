@@ -46,6 +46,29 @@ first element of each search list -- which made list *order* a hidden tuning
 parameter that no reader would guess.  Here the pin is its own config block,
 so it is stated rather than implied.
 
+A lever ratio is an attribution, not a speedup
+----------------------------------------------
+Every arm of the ``lever`` stage is timed on *one* geometry: the champion
+``final`` chose.  That champion was selected by ``tile``/``trait`` searching
+at the config's default traits, so it is the *default's* best tile, not each
+arm's.  An arm whose optimum lies elsewhere in the tile space is therefore
+measured somewhere it would never have chosen, and is understated -- by much
+more than the effect being measured, when the two prefer different tiles.
+
+So a lever ratio answers "holding geometry fixed, did this knob help".  That
+is the right question for attributing one change, and the wrong number to
+quote as a speedup.  For best-vs-best, run two full ``tile,trait,final``
+sweeps and compare their winners, pinning the trait under test in
+``screening_traits`` for one of them.  That pin reaches every candidate:
+``enumerate_trait_configs`` rebuilds each spec with ``replace(base.trait,
+...)``, overriding only the keys it iterates, so anything else set on the
+base survives into stage 2.
+
+The same asymmetry is why a directory named for an arm can mislead.  A config
+whose ``screening_traits`` omits the trait under test ran its whole search at
+the default; only the lever arm differed.  Check the stage's specs, not the
+directory name, before reading a historical result as that arm's.
+
 Exactness
 ---------
 Inputs are integers in -5..5, each exact in e4m3 (four significand bits).
@@ -68,9 +91,12 @@ from __future__ import annotations
 import argparse
 import csv
 import ctypes
+import datetime
 import json
 import math
 import os
+import shutil
+import socket
 import statistics
 import struct
 import subprocess
@@ -310,6 +336,120 @@ def required_padded_n(n: int, specs: Sequence[UniversalGemmSpec]) -> int:
     if not specs:
         return n
     return max(math.ceil(n / spec.tile.tile_n) * spec.tile.tile_n for spec in specs)
+
+
+# ---------------------------------------------------------------------------
+# Machine state
+#
+# Every retracted conclusion in this workload traced to one gap: the harness
+# recorded no machine state, so "was that run clean?" had to be reconstructed
+# afterwards from spot checks taken at unrelated times -- and twice the answer
+# came back different from what had already been written down. A timing row
+# without the state it was measured under is not evidence.
+#
+# What is worth recording is narrow. Contention is the confound that matters,
+# and the only reliable signal for it is the KFD process list: ``gpu_busy_percent``
+# does NOT work here -- a saturating GEMM moves it by about one point, so it
+# cannot distinguish an idle GPU from a loaded one.
+#
+# A faulted run also leaves its process alive holding VRAM; it does not exit.
+# The corpse makes the *next* run fault immediately, which reads as a fresh
+# failure. Seen three times, once for eight hours. A "before" snapshot naming
+# a stale sweep is the cheapest way to catch that at the time rather than
+# later.
+# ---------------------------------------------------------------------------
+
+
+def _kfd_processes() -> Tuple[List[Dict[str, Any]], str]:
+    """Processes currently holding the GPU, and where the answer came from.
+
+    ``rocm-smi --showpids`` first; ``/sys/class/kfd/kfd/proc`` when rocm-smi is
+    absent or unparseable. Returns ``([], "unavailable")`` rather than raising:
+    a missing GPU must not take down a host-only run.
+    """
+    smi = shutil.which("rocm-smi")
+    if smi:
+        try:
+            out = subprocess.run(
+                [smi, "--showpids"], capture_output=True, text=True, timeout=30
+            ).stdout
+            procs: List[Dict[str, Any]] = []
+            for line in out.splitlines():
+                parts = line.split()
+                # Rows are "<pid> <name> <gpus> <vram> <sdma> <cu>"; the header
+                # and the banner lines do not start with a bare integer.
+                if len(parts) >= 4 and parts[0].isdigit():
+                    procs.append(
+                        {
+                            "pid": int(parts[0]),
+                            "name": parts[1],
+                            "vram_bytes": int(parts[3]) if parts[3].isdigit() else None,
+                        }
+                    )
+            return procs, "rocm-smi"
+        except (OSError, subprocess.SubprocessError, ValueError):
+            pass
+    proc_dir = Path("/sys/class/kfd/kfd/proc")
+    if proc_dir.is_dir():
+        return (
+            [{"pid": int(p.name), "name": None, "vram_bytes": None}
+             for p in proc_dir.iterdir() if p.name.isdigit()],
+            "sysfs",
+        )
+    return [], "unavailable"
+
+
+def _is_ours(pid: int) -> bool:
+    """Whether ``pid`` belongs to this run (us, or a worker we forked)."""
+    if pid == os.getpid():
+        return True
+    try:
+        # field 6 of /proc/<pid>/stat is the session id; our forked workers
+        # share ours. comm can contain spaces, so split on the closing paren.
+        fields = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()
+        return int(fields[3]) == os.getsid(0)
+    except (OSError, IndexError, ValueError):
+        return False
+
+
+def machine_state(label: str) -> Dict[str, Any]:
+    """A snapshot to attach to a measurement, so it can be judged later."""
+    procs, source = _kfd_processes()
+    foreign = [p for p in procs if not _is_ours(p["pid"])]
+    return {
+        "label": label,
+        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "host": socket.gethostname(),
+        "kfd_source": source,
+        "kfd_processes": procs,
+        "kfd_count": len(procs),
+        "foreign_kfd_count": len(foreign),
+        # Only meaningful when the source actually answered. "unavailable"
+        # means unknown, which must not be recorded as clean.
+        "clean": (len(foreign) == 0) if source != "unavailable" else None,
+    }
+
+
+def warn_if_contended(state: Dict[str, Any]) -> None:
+    """Say so at the time. A warning after the fact is archaeology."""
+    if state.get("clean") is False:
+        others = ", ".join(
+            f"{p['pid']}({p['name']})" for p in state["kfd_processes"]
+            if not _is_ours(p["pid"])
+        )
+        print(
+            f"WARNING [{state['label']}]: {state['foreign_kfd_count']} foreign KFD "
+            f"process(es) on the GPU -- {others}. Timings from this run are not "
+            f"comparable. A stale 'fp8_gemm_sweep' here is a corpse from a "
+            f"previous faulted run; clear it before trusting anything.",
+            flush=True,
+        )
+    elif state.get("clean") is None:
+        print(
+            f"WARNING [{state['label']}]: could not read the KFD process list, so "
+            f"contention is unknown -- not the same as clean.",
+            flush=True,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -671,10 +811,19 @@ def build_and_benchmark(
     iters: int,
     attempts: int,
     with_reference: bool,
-) -> Tuple[List[BuildRecord], List[Dict[str, Any]], PreparedProblem]:
+    stage: str = "stage",
+) -> Tuple[
+    List[BuildRecord], List[Dict[str, Any]], PreparedProblem, List[Dict[str, Any]]
+]:
     records = build_all_instances(
         specs, cache_dir=cache_dir, arch=arch, isa=isa, parallel=workers
     )
+    # Taken after the builds and before the first launch, so it describes the
+    # GPU the measurements actually ran on rather than the one the process
+    # started against.
+    states: List[Dict[str, Any]] = [machine_state(f"{stage}:before")]
+    warn_if_contended(states[0])
+
     problem = PreparedProblem.create(shape, padded_n, with_reference=with_reference)
     results: List[Dict[str, Any]] = []
     for index, record in enumerate(records):
@@ -691,6 +840,14 @@ def build_and_benchmark(
             # Every later HIP call in this process returns the same latched
             # code, so continuing would manufacture identical bogus failures
             # for every remaining candidate. Stop with what is real.
+            #
+            # Snapshot here, not later: this is the only moment that can
+            # distinguish "the GPU was already dirty" from "we faulted it".
+            fault_state = machine_state(f"{stage}:at_fault")
+            fault_state["faulted_candidate"] = record.name
+            fault_state["faulted_index"] = index + 1
+            fault_state["candidates_total"] = len(records)
+            states.append(fault_state)
             print(
                 f"device fault at candidate {index + 1}/{len(records)} "
                 f"({record.name}); stopping this stage and keeping "
@@ -698,7 +855,11 @@ def build_and_benchmark(
                 flush=True,
             )
             break
-    return records, results, problem
+    # An "after" snapshot catches someone joining mid-run, which a "before"
+    # alone cannot: the run would look clean and the timings would not be.
+    states.append(machine_state(f"{stage}:after"))
+    warn_if_contended(states[-1])
+    return records, results, problem, states
 
 
 # ---------------------------------------------------------------------------
@@ -937,6 +1098,30 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def flush_machine_state(output_dir: Path, states: List[Dict[str, Any]]) -> None:
+    """Write ``machine_state.json`` now, not at the end of a successful run.
+
+    The snapshots exist to explain a run that went wrong, and a run that goes
+    wrong is exactly the one that does not reach the end of ``main``. A device
+    fault latches onto the HIP context, so the next allocation raises and the
+    process dies with the ``<stage>:at_fault`` snapshot still only in memory --
+    which is what happened the one time a sweep actually faulted: no
+    ``machine_state.json``, no ``summary.json``, and an absent file is
+    indistinguishable from "this run predates the feature".
+
+    Called after every stage and from ``main``'s ``finally``, so the file on
+    disk always reflects the snapshots taken so far. Best-effort by design: a
+    failure to write diagnostics must never replace the error being diagnosed.
+    """
+    try:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        (output_dir / "machine_state.json").write_text(
+            json.dumps(states, indent=2, sort_keys=True, default=str)
+        )
+    except Exception as exc:  # diagnostics must not mask the real failure
+        print(f"  WARNING: could not write machine_state.json: {exc}", flush=True)
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     args = build_parser().parse_args(argv)
     if args.worker_record:
@@ -963,6 +1148,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if overrides:
         print("overrides: " + "  ".join(overrides))
 
+    # Every snapshot taken during this run, in order. Attached to summary.json
+    # and written standalone, so a result can always be judged against the
+    # machine it was measured on rather than a spot check taken later.
+    machine_states: List[Dict[str, Any]] = [machine_state("run:start")]
+    warn_if_contended(machine_states[0])
+    # Flushed after every stage, not only at the end: a stage that faults takes
+    # the process down before ``main`` returns, and the snapshot explaining it
+    # is the one that would be lost. See ``flush_machine_state``.
+    flush_machine_state(output_dir, machine_states)
+
     summary: Dict[str, Any] = {
         "arch": arch,
         "dtype_ab": target["dtype_ab"],
@@ -981,7 +1176,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if "tile" in stages:
         print(f"tile   : {len(tile_specs)} candidates; "
               f"B rows {shape[1]}->{padded_n}", flush=True)
-        tile_records, tile_results, tile_problem = build_and_benchmark(
+        tile_records, tile_results, tile_problem, tile_states = build_and_benchmark(
             tile_specs,
             cache_dir=cache_dir,
             shape=shape,
@@ -993,7 +1188,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             iters=int(benchmark["iters"]),
             attempts=int(benchmark["attempts"]),
             with_reference=True,
+            stage="tile",
         )
+        machine_states.extend(tile_states)
+        flush_machine_state(output_dir, machine_states)
         try:
             record_map = _record_by_id(tile_records, arch=arch)
             for result in rank_results(tile_results)[
@@ -1026,7 +1224,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         trait_specs = enumerate_trait_configs(config, finalists)
         print(f"trait  : {len(trait_specs)} candidates "
               f"over {len(finalists)} geometries", flush=True)
-        trait_records, trait_results, trait_problem = build_and_benchmark(
+        trait_records, trait_results, trait_problem, trait_states = build_and_benchmark(
             trait_specs,
             cache_dir=cache_dir,
             shape=shape,
@@ -1039,7 +1237,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             attempts=int(benchmark["attempts"]),
             # Screening only: correctness is re-established in 'final'.
             with_reference=False,
+            stage="trait",
         )
+        machine_states.extend(trait_states)
+        flush_machine_state(output_dir, machine_states)
         trait_problem.close()
         _write_results(output_dir, "trait", trait_results)
         summary["trait"] = {"candidate_count": len(trait_results)}
@@ -1162,10 +1363,27 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             ]
         }
 
+    machine_states.append(machine_state("run:end"))
+    warn_if_contended(machine_states[-1])
+
+    # A run is only as trustworthy as its dirtiest snapshot. Recording the
+    # verdict next to the rows means a later reader does not have to re-derive
+    # it -- which is the step that went wrong before.
+    judged = [s for s in machine_states if s.get("clean") is not None]
+    summary["machine_states"] = machine_states
+    summary["machine_clean"] = all(s["clean"] for s in judged) if judged else None
+    flush_machine_state(output_dir, machine_states)
+
     (output_dir / "summary.json").write_text(
         json.dumps(summary, indent=2, sort_keys=True, default=str)
     )
     print(f"\nwrote {output_dir / 'summary.json'}")
+    print(f"wrote {output_dir / 'machine_state.json'}  "
+          f"({len(machine_states)} snapshots, clean={summary['machine_clean']})")
+    if summary["machine_clean"] is False:
+        print("  NOTE: the GPU was contended during this run. Treat the timings "
+              "as indicative only; re-run on an idle GPU before concluding "
+              "anything from them.")
     if "lever" in summary:
         print("\nlever A/B (ratio vs baseline; absolute timings in lever.csv):")
         for arm in summary["lever"]["arms"]:

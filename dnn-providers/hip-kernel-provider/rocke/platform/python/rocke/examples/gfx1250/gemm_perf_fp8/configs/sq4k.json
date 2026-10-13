@@ -51,12 +51,12 @@
   },
   "levers": {
     "baseline": {
-      "description": "Phase 0 emission: A/B load width pinned to the old 2-byte ladder, so a 1-byte operand gets <8 x i8>",
+      "description": "Phase 0 emission: A/B load width pinned to the old 2-byte ladder, so a 1-byte operand gets <8 x i8>. Timed on the default's champion tile, not its own, so the ratio understates it -- see 'A lever ratio is an attribution, not a speedup' in the harness docstring before quoting it.",
       "trait": { "ab_load_elem_bytes": 2 },
       "data": {}
     },
     "phase1_vec16": {
-      "description": "Width resolved from dtype_a: a 1-byte operand gets the full <16 x i8>",
+      "description": "Width resolved from dtype_a: a 1-byte operand gets the full <16 x i8>. This is the config default, so the search already ran under it; this arm is the reference the others divide by.",
       "trait": { "ab_load_elem_bytes": null },
       "data": {}
     }
