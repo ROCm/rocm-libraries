@@ -32,11 +32,98 @@
 #include "common/misc/generate.hpp"
 #include "common/misc/lapack_host_reference.hpp"
 #include "common/misc/norm.hpp"
+#include "common/misc/rocblas.hpp"
 #include "common/misc/rocsolver.hpp"
 #include "common/misc/rocsolver_arguments.hpp"
 #include "common/misc/rocsolver_test.hpp"
 #include "common/misc/rocsolver_timer.hpp"
 #include "rocblas_utility.hpp"
+
+//------------------------------------------------------------------------------
+// Hermitianize A, on host, copying conjugate of strictly lower triangle to
+// upper, or vice-versa.
+// A is n-by-n.
+template <typename T, typename I, typename Th>
+void cpu_hermitianize(const rocblas_fill uplo,
+                      const I n,
+                      Th hA,
+                      const I lda)
+{
+    if (uplo == rocblas_fill_lower)
+    {
+        for (I j = 0; j < n; ++j)
+        {
+            for (I i = 0; i < j; ++i) // strictly upper
+            {
+                hA[ i + j*lda ] = sconj( hA[ j + i*lda ] );
+            }
+        }
+    }
+    else if (uplo == rocblas_fill_upper)
+    {
+        for (I j = 0; j < n; ++j)
+        {
+            for (I i = 0; i < j; ++i) // strictly upper
+            {
+                hA[ j + i*lda ] = sconj( hA[ i + j*lda ] );
+            }
+        }
+    }
+    else
+    {
+        throw std::runtime_error( "unknown uplo" );
+    }
+}
+
+//------------------------------------------------------------------------------
+// Copy Aband => A, on host.
+// Aband is n-by-n, bandwidth kd; currently assumes lower band.
+// A is n-by-n.
+template <typename T, typename I, typename Th>
+void cpu_band2full(const rocblas_fill uplo,
+                   const I n,
+                   const I kd,
+                   Th hAband,
+                   const I ldab,
+                   Th hA,
+                   const I lda)
+{
+    if (uplo == rocblas_fill_lower)
+    {
+        // Set A = 0.
+        T zero = 0;
+        cpu_laset( 'f', n, n, zero, zero, hA, lda );
+
+        // Example with n = 5, kd = 2:
+        // Aband = [ 1  4  7 | a  c ]  =>  A = [ 1       |      ]
+        //         [ 2  5  8 | b  * ]          [ 2  4    |      ]
+        //         [ 3  6  9 | *  * ]          [ 3  5  7 |      ]
+        //           \_____/   \__/            [    6  8 | a    ]
+        //              R       T              [       9 | b  c ]
+        //
+        // Copy (kd + 1)-by-(n - kd) rectangle R, using lda + 1 to shift columns.
+        cpu_lacpy( rocblas_fill_full, kd + 1, n - kd, hAband, ldab, hA, lda + 1 );
+
+        // Copy kd-by-kd lower triangle T, using ldab - 1 to shift columns.
+        cpu_lacpy( rocblas_fill_lower, kd, kd,  // opts
+                   &hAband[ ldab*(n - kd) ], ldab - 1,  // src
+                   &hA[ (lda + 1)*(n - kd) ], lda ); // dst
+
+        // Hermitianize matrix A, copying conjugate of strictly lower to upper.
+        // todo: restrict to band.
+        for (I j = 0; j < n; ++j)
+        {
+            for (I i = 0; i < j; ++i) // strictly upper
+            {
+                hA[ i + j*lda ] = sconj( hA[ j + i*lda ] );
+            }
+        }
+    }
+    else
+    {
+        throw std::runtime_error( "upper not yet implemented" );
+    }
+}
 
 //------------------------------------------------------------------------------
 template <typename T, typename I>
@@ -170,82 +257,115 @@ void sy2sb_he2hb_getError(const rocblas_handle handle,
                           Th& hA,
                           Th& hAband,
                           Th& hTau,
-                          double* max_err)
+                          double max_errors[2])
 {
     using S = decltype(std::real(T{}));
+
+    T const one = 1;
+    T const neg_one = -1;
+    T const zero = 0;
+    I const idiag = kd - 1; // row of Aband storing diagonal
 
     hipStream_t stream;
     CHECK_ROCBLAS_ERROR(rocblas_get_stream(handle, &stream));
 
-    // lwork for LAPACK hetrd_he2hb
-    size_t lwork = n * kd + n * std::max<I>(kd, 128) + 2 * kd * kd;
-    std::vector<T> hwork(lwork);
+    size_t size_A = lda * n;
+    device_strided_batch_vector<T> dV(size_A, 1, size_A, 1); // Householder vectors
+    device_strided_batch_vector<T> dW(size_A, 1, size_A, 1); // work
+    CHECK_HIP_ERROR(dV.memcheck());
+    CHECK_HIP_ERROR(dW.memcheck());
+
+    // Scalar for lange output, shared by all checks below.
+    host_strided_batch_vector<S> hnorm(1, 1, 1, 1);
+    device_strided_batch_vector<S> dnorm(1, 1, 1, 1);
+    CHECK_HIP_ERROR(dnorm.memcheck());
 
     // input data initialization
-    sy2sb_he2hb_initData<true, true, T, I>(handle, uplo, n, dA, lda, hA);
+    sy2sb_he2hb_initData<true, true, T, I>(handle, uplo, n, dV, lda, hA);
 
     // execute computations
     // GPU lapack
     CHECK_ROCBLAS_ERROR(rocsolver_sy2sb_he2hb(handle, uplo, n, kd, nb, // opts
-                                              dA.data(), lda, // A
+                                              dV.data(), lda, // A input, V output
                                               dAband.data(), ldab, // Aband
                                               dTau.data())); // tau
-    CHECK_HIP_ERROR(hARes.transfer_from(dA));
+
+    //--------------------
+    // Check 0: Backward error: norm( Q*Aband*Q^H - A ) / (n * norm( A )), using 1-norm.
+
+    // Hermitianize A, since we have only rocsolver_lange, not lanhe.
+    cpu_hermitianize<T>( uplo, n, hA[0], lda );
+    CHECK_HIP_ERROR(dA.transfer_from(hA));
+
+    // W := full( Aband )
+    // Currently, he2hb always outputs lower band, regardless of uplo.
+    // todo: Conversion currently on CPU. Need GPU lacpy and hermitianize routines.
     CHECK_HIP_ERROR(hAbandRes.transfer_from(dAband));
-    CHECK_HIP_ERROR(hTauRes.transfer_from(dTau));
+    cpu_band2full<T>( rocblas_fill_lower, n, kd, &hAbandRes[0][idiag], ldab, hARes[0], lda );
+    CHECK_HIP_ERROR(dW.transfer_from(hARes));
 
-    // CPU lapack: always uses lower to match rocSolver he2hb output.
-    // If upper, copy to lower.
-    if(uplo == rocblas_fill_upper)
-    {
-        for(int j = 0; j < n; ++j)
-        {
-            for(int i = j + 1; i < n; ++i)
-            {
-                hA[0][i + j * lda] = sconj(hA[0][j + i * lda]);
-            }
-        }
-    }
-    cpu_sy2sb_he2hb(rocblas_fill_lower, n, kd, hA[0], lda, hAband[0], ldab, hTau[0], hwork.data(),
-                    lwork);
+    // W := Q W = Q Aband. Updates rows kd:n.
+    CHECK_ROCBLAS_ERROR(
+        rocsolver_ormxr_unmxr(
+            true, handle, rocblas_side_left, rocblas_operation_none, // opts
+            n - kd, n, n - kd, // dims
+            &dV[0][kd], lda, dTau[0], // Householder V vectors below bandwidth kd
+            &dW[0][kd], lda));
 
-    // error is ||hAband - hAbandRes|| / (n * ||hAband||)
-    // and ||hTau - hTauRes|| / (n * ||hTau||)
-    // using frobenius norm
-    // (THIS DOES NOT ACCOUNT FOR NUMERICAL REPRODUCIBILITY
-    // ISSUES. IT MIGHT BE REVISITED IN THE FUTURE)
+    // W := W Q^H = (Q Aband) Q^H. Updates cols kd:n.
+    CHECK_ROCBLAS_ERROR(
+        rocsolver_ormxr_unmxr(
+            true, handle, rocblas_side_right, rocblas_operation_conjugate_transpose, // opts
+            n, n - kd, n - kd, // dims
+            &dV[0][kd], lda, dTau[0], // Householder V vectors below bandwidth kd
+            &dW[0][kd*lda], lda));
 
-    S dummy_work;
-    S A_norm = cpu_lange('F', kd + 1, n, hAband[0], ldab, &dummy_work);
-    S tau_norm = cpu_lange('F', n - kd, 1, hTau[0], n - kd, &dummy_work);
+    // W -= A.
+    // todo: geadd or tzadd. Using axpy assumes dA and dW have the same lda.f
+    CHECK_ROCBLAS_ERROR(
+        rocblas_axpy( handle, lda*n, &neg_one, dA[0], I(1), dW[0], I(1) ));
 
-    // hAband -= hAbandRes (restricted to lower band structure).
-    // hAbandRes has "don't care" values outside the band structure.
-    I idiag = kd - 1;
-    for(int j = 0; j < n; ++j)
-    {
-        for(int k = 0; k < kd + 1 && k + j < n; ++k)
-        {
-            hAband[0][k + j * ldab] -= hAbandRes[0][k + idiag + j * ldab];
-        }
-    }
-    // hTau -= hTauRes
-    cpu_axpy(n - kd, T(-1.0), hTauRes[0], 1, hTau[0], 1);
+    // err = norm( W ) / (n * norm( A )
+    //     = norm( Q Aband Q^H - A ) / (n * norm( A ))
+    CHECK_ROCBLAS_ERROR(
+        rocsolver_lange( handle, rocsolver_norm_type_one, n, n, dA[0], lda, dnorm ));
+    CHECK_HIP_ERROR(hnorm.transfer_from(dnorm));
+    S Anorm = hnorm[0][0];
 
-    // todo: check orthogonality of Q and backward error.
-    double err;
-    *max_err = 0;
-    err = cpu_lange('F', kd + 1, n, hAband[0], ldab, &dummy_work);
-    err /= n;
-    if(A_norm != 0)
-        err /= A_norm;
-    *max_err = rocblas_max_nan(err, *max_err);
+    CHECK_ROCBLAS_ERROR(
+        rocsolver_lange( handle, rocsolver_norm_type_one, n, n, dW[0], lda, dnorm ));
+    CHECK_HIP_ERROR(hnorm.transfer_from(dnorm));
+    max_errors[0] = hnorm[0][0] / n;
+    if (Anorm != 0)
+        max_errors[0] /= Anorm;
 
-    err = cpu_lange('F', n - kd, 1, hTau[0], n - kd, &dummy_work);
-    err /= n;
-    if(tau_norm != 0)
-        err /= tau_norm;
-    *max_err = rocblas_max_nan(err, *max_err);
+    //--------------------
+    // Check 1: Orthogonality: norm( I - Q^H * Q ) / (n - kd), using 1-norm.
+    // Q is generated explicitly via ungqr from the GPU factored output.
+    // Q is (n - kd)-by-(n - kd), below bandwidth kd.
+
+    // Generate Q, overwriting V.
+    CHECK_ROCBLAS_ERROR(
+        rocsolver_orgxr_ungxr(
+            true, handle, n - kd, n - kd, n - kd, &dV[0][kd], lda, dTau[0] ));
+
+    // W = I.
+    CHECK_ROCBLAS_ERROR(
+        rocsolver_laset( handle, rocblas_fill_full, n - kd, n - kd, zero, one, dW[0], lda ));
+
+    // W = I - Q^H Q, with Q in V.
+    CHECK_ROCBLAS_ERROR(
+        rocblas_gemm(
+            handle, rocblas_operation_conjugate_transpose, rocblas_operation_none, // opts
+            n - kd, n - kd, n - kd, // dims
+            &neg_one, &dV[0][kd], lda, // Q^H
+            &dV[0][kd], lda, // Q
+            &one, dW[0], lda ));
+
+    CHECK_ROCBLAS_ERROR(
+        rocsolver_lange( handle, rocsolver_norm_type_one, n - kd, n - kd, dW[0], lda, dnorm ));
+    CHECK_HIP_ERROR(hnorm.transfer_from(dnorm));
+    max_errors[1] = hnorm[0][0] / (n - kd);
 }
 
 //------------------------------------------------------------------------------
@@ -380,7 +500,8 @@ void testing_sy2sb_he2hb(Arguments& argus)
     size_t size_A = lda * n;
     size_t size_Aband = ldab * n;
     size_t size_tau = std::max<I>(n - kd, 0);
-    double max_error = 0, gpu_time_used = 0, cpu_time_used = 0;
+    double max_errors[2] = { 0, 0 };
+    double gpu_time_used = 0, cpu_time_used = 0;
 
     size_t size_ARes = (argus.unit_check || argus.norm_check) ? size_A : 0;
     size_t size_AbandRes = (argus.unit_check || argus.norm_check) ? size_Aband : 0;
@@ -456,7 +577,7 @@ void testing_sy2sb_he2hb(Arguments& argus)
     if(argus.unit_check || argus.norm_check)
     {
         sy2sb_he2hb_getError<T, I>(handle, uplo, n, kd, nb, dA, lda, dAband, ldab, dTau, hARes,
-                                   hAbandRes, hTauRes, hA, hAband, hTau, &max_error);
+                                   hAbandRes, hTauRes, hA, hAband, hTau, max_errors);
     }
 
     // collect performance data
@@ -471,7 +592,10 @@ void testing_sy2sb_he2hb(Arguments& argus)
     // using 10*machine_precision as tolerance
     // max_errors is already normalized, e.g., by n.
     if(argus.unit_check)
-        ROCSOLVER_TEST_CHECK(T, max_error, 10);
+    {
+        ROCSOLVER_TEST_CHECK(T, max_errors[0], 10);
+        ROCSOLVER_TEST_CHECK(T, max_errors[1], 10);
+    }
 
     // output results for rocsolver-bench
     if(argus.timing)
@@ -484,8 +608,8 @@ void testing_sy2sb_he2hb(Arguments& argus)
             rocsolver_bench_header("Results:");
             if(argus.norm_check)
             {
-                rocsolver_bench_output("cpu_time_us", "gpu_time_us", "error");
-                rocsolver_bench_output(cpu_time_used, gpu_time_used, max_error);
+                rocsolver_bench_output("cpu_time_us", "gpu_time_us", "berror", "orthogonality");
+                rocsolver_bench_output(cpu_time_used, gpu_time_used, max_errors[0], max_errors[1]);
             }
             else
             {
@@ -497,7 +621,7 @@ void testing_sy2sb_he2hb(Arguments& argus)
         else
         {
             if(argus.norm_check)
-                rocsolver_bench_output(gpu_time_used, max_error);
+                rocsolver_bench_output(gpu_time_used, max_errors[0], max_errors[1]);
             else
                 rocsolver_bench_output(gpu_time_used);
         }
