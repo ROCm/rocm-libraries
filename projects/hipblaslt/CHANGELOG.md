@@ -48,6 +48,7 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 
 ### Resolved issues
 
+* Fixed a device-memory leak in `hipblasLtCreate` when host handle construction throws a C++ exception: the synchronizer and Stream-K flag buffers are now released before the exception is converted to a return status.
 * Fixed rocisa macro expansion ignoring conditions after `&&`, which could omit required final-loop LDS waits in gfx950 kernels using custom main-loop scheduling.
 * Fixed premature LDS reads when handwritten gfx950 BF16 and FP16 TN kernels skip the second global prefetch at `K=64`.
 * Fixed `hipblaslt-bench` using C's batch stride for D and computing its CPU reference with the wrong layout when C and D have different leading dimensions or batch strides.
