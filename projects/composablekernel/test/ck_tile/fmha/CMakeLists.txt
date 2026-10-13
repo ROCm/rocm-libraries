@@ -248,6 +248,8 @@ get_test_property(test_ck_tile_fmha_reference LABELS FMHA_REFERENCE_COMMON_LABEL
 set_tests_properties(test_ck_tile_fmha_reference PROPERTIES
     LABELS "${FMHA_REFERENCE_COMMON_LABELS};${TEST_NAME};CK_TILE_FMHA_TESTS")
 list(APPEND FMHA_QR_TDM_SCHED_TEST_TARGETS test_ck_tile_fmha_reference)
+# CI runs every test_ck_tile_fmha* ctest after building the ${TEST_NAME} target.
+add_dependencies(${TEST_NAME} test_ck_tile_fmha_reference)
 
 # Python integration test for the fmha_fwd codegen path.
 #
