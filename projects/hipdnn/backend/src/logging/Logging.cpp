@@ -130,8 +130,9 @@ BackendLogState& getBackendLogState()
 {
     // Thread-local shared_ptr ensures BackendLogState survives until all threads release references.
     // LIMITATION: Threads must not call this function for the first time during static destruction,
-    // as the mutex may already be destroyed. Ensure all logging threads have logged at least once
-    // before program exit handlers run.
+    // as the mutex may already be destroyed. Ensure every thread that logs has emitted at least
+    // one message before program exit handlers run. initialize() takes no reference on its
+    // lock-free fast path, so only a message that reaches backendLoggingCallback() does.
     static auto s_state = std::make_shared<BackendLogState>();
     thread_local auto s_tlRef = s_state; // Each thread holds a reference
     return *s_state;
