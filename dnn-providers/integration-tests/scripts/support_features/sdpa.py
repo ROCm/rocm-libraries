@@ -32,14 +32,14 @@ _FP8_SCALES = (
     "scale_s_tensor_uid",
     "scale_o_tensor_uid",
 )
-_MASK_FIELDS = (
+MASK_FIELDS = (
     "causal_mask",
     "causal_mask_bottom_right",
     "left_bound",
     "right_bound",
     "diagonal_alignment",
 )
-_QK = ("q_tensor_uid", "k_tensor_uid")
+QK_FIELDS = ("q_tensor_uid", "k_tensor_uid")
 
 DTYPES = ("bf16", "fp16", "fp8e4m3", "fp8e5m2")
 HEAD_DIMS = (64, 128, 192)
@@ -52,16 +52,16 @@ FEATURES = (
     Feature("dtype:fp8e4m3", ("q_tensor_uid",) + _FP8_SCALES),
     Feature("dtype:fp8e5m2", ("q_tensor_uid",) + _FP8_SCALES),
     *(Feature(f"head_dim:{d}", ("q_tensor_uid",)) for d in HEAD_DIMS),
-    Feature("heads:mha", _QK, "as many k/v heads as q heads"),
-    Feature("heads:gqa", _QK, "fewer k/v heads than q heads, more than one"),
-    Feature("heads:mqa", _QK, "one k/v head"),
+    Feature("heads:mha", QK_FIELDS, "as many k/v heads as q heads"),
+    Feature("heads:gqa", QK_FIELDS, "fewer k/v heads than q heads, more than one"),
+    Feature("heads:mqa", QK_FIELDS, "one k/v head"),
     *(Feature(f"layout:{name}", ("q_tensor_uid",)) for name in LAYOUTS.values()),
-    Feature("mask:none", _MASK_FIELDS),
-    Feature("mask:causal_top_left", _MASK_FIELDS),
-    Feature("mask:causal_bottom_right", _MASK_FIELDS),
-    Feature("mask:sliding_window", _MASK_FIELDS),
-    Feature("seq:q_eq_kv", _QK),
-    Feature("seq:q_ne_kv", _QK),
+    Feature("mask:none", MASK_FIELDS),
+    Feature("mask:causal_top_left", MASK_FIELDS),
+    Feature("mask:causal_bottom_right", MASK_FIELDS),
+    Feature("mask:sliding_window", MASK_FIELDS),
+    Feature("seq:q_eq_kv", QK_FIELDS),
+    Feature("seq:q_ne_kv", QK_FIELDS),
     Feature("seq:decode", ("q_tensor_uid",), "one query position"),
     Feature(
         "varlen:seq_lens",
@@ -103,8 +103,11 @@ NOT_FEATURES = {
 }
 
 
-def _mask(attrs: dict) -> str:
-    """The mask kind, resolved as ``getMaskType`` (SdpaPlanUtils.hpp) does."""
+def mask_kind(attrs: dict) -> str:
+    """The mask kind, resolved as ``getMaskType`` (SdpaPlanUtils.hpp) does.
+
+    Forward and backward engines both resolve it this way.
+    """
     causal = attrs.get("causal_mask")
     bottom_right = attrs.get("causal_mask_bottom_right")
     if causal and bottom_right:
@@ -128,14 +131,32 @@ def _mask(attrs: dict) -> str:
     return "mask:sliding_window"
 
 
-def extract(node: dict, tensors_by_uid: dict) -> set[str]:
-    attrs = node.get("attributes") or {}
+def ports(node: dict):
+    """``has(port)``: whether ``node`` binds ``port`` as an input or output."""
     inputs = node.get("inputs") or {}
     outputs = node.get("outputs") or {}
 
     def has(port: str) -> bool:
         return inputs.get(port) is not None or outputs.get(port) is not None
 
+    return has
+
+
+def core_features(
+    node: dict,
+    attrs: dict,
+    tensors_by_uid: dict,
+    *,
+    dtypes: tuple[str, ...],
+    decode: bool,
+) -> set[str]:
+    """The exclusive groups shared by forward and backward.
+
+    These are ``dtype``, ``head_dim``, ``heads``, ``layout``, ``mask``, ``seq``
+    and ``scale``. ``decode`` says whether a single query position counts as
+    ``seq:decode`` or as an ordinary ``q_eq_kv`` / ``q_ne_kv`` shape.
+    """
+    inputs = node.get("inputs") or {}
     q = tensors_by_uid[inputs["q_tensor_uid"]]
     k = tensors_by_uid[inputs["k_tensor_uid"]]
     if len(q["dims"]) != 4 or len(k["dims"]) != 4:
@@ -144,7 +165,7 @@ def extract(node: dict, tensors_by_uid: dict) -> set[str]:
     _, heads_kv, seq_kv, _ = k["dims"]
 
     dtype = dtype_label(q.get("data_type"))
-    if dtype not in DTYPES:
+    if dtype not in dtypes:
         raise FeatureError(f"q dtype {q.get('data_type')!r} is not catalogued")
     if head_dim not in HEAD_DIMS:
         raise FeatureError(f"head dim {head_dim} is not catalogued")
@@ -157,7 +178,7 @@ def extract(node: dict, tensors_by_uid: dict) -> set[str]:
         f"dtype:{dtype}",
         f"head_dim:{head_dim}",
         f"layout:{LAYOUTS[order]}",
-        _mask(attrs),
+        mask_kind(attrs),
     }
     if heads_q == heads_kv:
         features.add("heads:mha")
@@ -165,19 +186,28 @@ def extract(node: dict, tensors_by_uid: dict) -> set[str]:
         features.add("heads:mqa")
     else:
         features.add("heads:gqa")
-    if seq_q == 1:
+    if decode and seq_q == 1:
         features.add("seq:decode")
     elif seq_q == seq_kv:
         features.add("seq:q_eq_kv")
     else:
         features.add("seq:q_ne_kv")
 
-    if has("scale_tensor_uid"):
+    if ports(node)("scale_tensor_uid"):
         features.add("scale:runtime")
     elif attrs.get("attn_scale_value") is not None:
         features.add("scale:fixed")
     else:
         features.add("scale:default")
+    return features
+
+
+def extract(node: dict, tensors_by_uid: dict) -> set[str]:
+    # The forward serializer writes scalars under "attributes" (backward
+    # writes "parameters"; see utilities/json/Sdpa*Attributes.hpp).
+    attrs = node.get("attributes") or {}
+    has = ports(node)
+    features = core_features(node, attrs, tensors_by_uid, dtypes=DTYPES, decode=True)
 
     if (
         has("seq_len_q_tensor_uid")

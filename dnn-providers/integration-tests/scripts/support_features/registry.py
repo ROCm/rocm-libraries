@@ -14,13 +14,13 @@ from __future__ import annotations
 import pathlib
 from types import ModuleType
 
-from support_features import FeatureError, sdpa
+from support_features import FeatureError, sdpa, sdpa_backward
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[4]
 SCHEMA_DIR = REPO_ROOT / "projects" / "hipdnn" / "flatbuffers_sdk" / "schemas"
 
 # Catalogued op modules, keyed by their NODE_TYPE.
-OPS: dict[str, ModuleType] = {m.NODE_TYPE: m for m in (sdpa,)}
+OPS: dict[str, ModuleType] = {m.NODE_TYPE: m for m in (sdpa, sdpa_backward)}
 
 # Node types with no catalog yet. Their graphs are counted, but no feature %
 # is reported for them.
@@ -47,7 +47,6 @@ PENDING = frozenset(
         "ReductionAttributes",
         "ResampleBwdAttributes",
         "ResampleFwdAttributes",
-        "SdpaBackwardAttributes",
     }
 )
 

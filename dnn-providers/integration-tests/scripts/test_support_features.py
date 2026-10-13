@@ -22,7 +22,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from support_features import Feature, FeatureError, registry, sdpa
+from support_features import Feature, FeatureError, registry, sdpa, sdpa_backward
 from support_features.coverage import (
     DEFAULT_BUNDLES_DIR,
     compute_coverage,
@@ -604,6 +604,110 @@ class TestSdpaExtract:
         ):
             reached |= self._extract(**kwargs)
         assert reached == {feature.id for feature in sdpa.FEATURES}
+
+
+# --------------------------------------------------------------------------
+# SdpaBackwardAttributes
+# --------------------------------------------------------------------------
+
+
+def _sdpa_backward(**kwargs) -> tuple[dict, dict]:
+    """A backward SDPA node: the forward builder's, rewired.
+
+    Backward serializes its scalars under "parameters", not "attributes".
+    """
+    node, tensors = _sdpa(**kwargs)
+    node["type"] = "SdpaBackwardAttributes"
+    node["parameters"] = node.pop("attributes")
+    node["inputs"] |= {"o_tensor_uid": 3, "do_tensor_uid": 3, "stats_tensor_uid": 4}
+    del node["outputs"]["o_tensor_uid"]
+    node["outputs"] |= {"dq_tensor_uid": 5, "dk_tensor_uid": 6, "dv_tensor_uid": 7}
+    return node, tensors
+
+
+class TestSdpaBackwardExtract:
+    def _extract(self, **kwargs) -> set[str]:
+        return sdpa_backward.extract(*_sdpa_backward(**kwargs))
+
+    def _group(self, group: str, **kwargs) -> str:
+        (feature,) = {f for f in self._extract(**kwargs) if f.startswith(group + ":")}
+        return feature
+
+    def test_plain_graph(self) -> None:
+        assert self._extract() == {
+            "dtype:bf16",
+            "head_dim:128",
+            "heads:mha",
+            "layout:bhsd",
+            "mask:none",
+            "seq:q_eq_kv",
+            "scale:default",
+        }
+
+    def test_scalars_are_read_from_parameters(self) -> None:
+        node, tensors = _sdpa_backward(causal_mask=True, attn_scale_value=0.5)
+        assert {"mask:causal_top_left", "scale:fixed"} <= sdpa_backward.extract(
+            node, tensors
+        )
+        # The forward key carries nothing for backward.
+        node["attributes"] = node.pop("parameters")
+        assert {"mask:none", "scale:default"} <= sdpa_backward.extract(node, tensors)
+
+    @pytest.mark.parametrize(
+        "attrs, expected",
+        [
+            ({"right_bound": 0}, "mask:causal_top_left"),
+            (
+                {"right_bound": 0, "diagonal_alignment": "BOTTOM_RIGHT"},
+                "mask:causal_bottom_right",
+            ),
+            ({"left_bound": 64, "right_bound": 64}, "mask:sliding_window"),
+        ],
+    )
+    def test_mask(self, attrs: dict, expected: str) -> None:
+        assert self._group("mask", **attrs) == expected
+
+    @pytest.mark.parametrize(
+        "q_seq, expected", [(1, "seq:q_ne_kv"), (128, "seq:q_eq_kv")]
+    )
+    def test_one_query_position_is_not_decode(self, q_seq: int, expected: str) -> None:
+        assert self._group("seq", q_dims=(2, 8, q_seq, 128)) == expected
+
+    def test_fp8_raises(self) -> None:
+        with pytest.raises(FeatureError, match="dtype 'fp8_e4m3'"):
+            self._extract(dtype="fp8_e4m3")
+
+    def test_optional_ports(self) -> None:
+        features = self._extract(
+            inputs={"attn_mask_tensor_uid": 11, "dropout_mask_tensor_uid": 12},
+            outputs={"dbias_tensor_uid": 20},
+        )
+        assert {"bias:additive", "dropout:on", "out:dbias"} <= features
+
+    def test_null_ports_are_absent(self) -> None:
+        features = self._extract(outputs={"dbias_tensor_uid": None})
+        assert "out:dbias" not in features
+
+    def test_every_feature_is_reachable(self) -> None:
+        """No catalogued feature is one extract() can never return."""
+        reached = set()
+        for kwargs in (
+            {},
+            {"dtype": "half", "q_dims": (2, 8, 64, 64), "k_dims": (2, 1, 128, 64)},
+            {"q_dims": (2, 8, 128, 192), "k_dims": (2, 2, 128, 192)},
+            {"strides": _bshd_strides, "causal_mask": True},
+            {"causal_mask_bottom_right": True, "attn_scale_value": 0.5},
+            {"left_bound": 8, "right_bound": 8, "inputs": {"scale_tensor_uid": 9}},
+            {
+                "padding_mask": True,
+                "alibi_mask": True,
+                "dropout_probability": 0.1,
+                "inputs": {"attn_mask_tensor_uid": 11},
+                "outputs": {"dbias_tensor_uid": 20},
+            },
+        ):
+            reached |= self._extract(**kwargs)
+        assert reached == {feature.id for feature in sdpa_backward.FEATURES}
 
 
 # --------------------------------------------------------------------------
