@@ -14,14 +14,14 @@ A box is one op (row) × engine (column) on this target: claimed graphs out of a
 | Op | ASM_SDPA_ENGINE | HIPBLASLT_ENGINE | HIP_MLOPS_ENGINE | MIOPEN_ENGINE | MIOPEN_ENGINE_DETERMINISTIC | hipkernel:Gfx950AttentionDense |
 |----|----------|----------|----------|----------|----------|----------|
 | **Batchnorm** | — | — | — | 🟡 157/205 | — | — |
-| **BatchnormBackward** | — | — | — | 🟡 192/193 | — | — |
+| **BatchnormBackward** | — | — | — | ✅ 192/192 | — | — |
 | **BatchnormFwdInference** | — | — | — | ✅ 15/15 | — | — |
 | **BatchnormInference** | — | — | — | ✅ 108/108 | — | — |
 | **BatchnormInferenceAttributesVarianceExt** | — | — | — | ✅ 97/97 | — | — |
 | **BatchnormInferenceAttributesVarianceExtPointwise** | — | — | — | 🟡 145/169 | — | — |
 | **BatchnormInferencePointwise** | — | — | — | 🟡 144/168 | — | — |
 | **BatchnormInferencePointwiseBatchnormBackward** | — | — | — | ✅ 180/180 | — | — |
-| **BatchnormPointwise** | — | — | — | 🟡 432/601 | — | — |
+| **BatchnormPointwise** | — | — | — | 🟡 432/600 | — | — |
 | **BlockScaleDequantizeMatmul** | — | — | — | — | — | — |
 | **ConvolutionBwd** | — | — | — | ✅ 138/138 | — | — |
 | **ConvolutionFwd** | — | — | — | ✅ 138/138 | — | — |
@@ -47,14 +47,14 @@ A box is one op (row) × engine (column) on this target: claimed graphs out of a
 | Op | ASM_SDPA_ENGINE | HIPBLASLT_ENGINE | HIP_MLOPS_ENGINE | MIOPEN_ENGINE | MIOPEN_ENGINE_DETERMINISTIC | hipkernel:Gfx950AttentionDense |
 |----|----------|----------|----------|----------|----------|----------|
 | **Batchnorm** | — | — | 🟡 144/205 | — | — | — |
-| **BatchnormBackward** | — | — | 🟡 132/193 | — | — | — |
+| **BatchnormBackward** | — | — | 🟡 132/192 | — | — | — |
 | **BatchnormFwdInference** | — | — | ✅ 15/15 | — | — | — |
 | **BatchnormInference** | — | — | 🟡 72/108 | — | — | — |
 | **BatchnormInferenceAttributesVarianceExt** | — | — | 🟡 60/97 | — | — | — |
 | **BatchnormInferenceAttributesVarianceExtPointwise** | — | — | 🟡 84/169 | — | — | — |
 | **BatchnormInferencePointwise** | — | — | 🟡 84/168 | — | — | — |
 | **BatchnormInferencePointwiseBatchnormBackward** | — | — | ✅ 180/180 | — | — | — |
-| **BatchnormPointwise** | — | — | 🟡 348/601 | — | — | — |
+| **BatchnormPointwise** | — | — | 🟡 348/600 | — | — | — |
 | **BlockScaleDequantizeMatmul** | — | — | — | — | — | — |
 | **ConvolutionBwd** | — | — | — | — | — | — |
 | **ConvolutionFwd** | — | — | — | — | — | — |
@@ -80,14 +80,14 @@ A box is one op (row) × engine (column) on this target: claimed graphs out of a
 | Op | ASM_SDPA_ENGINE | HIPBLASLT_ENGINE | HIP_MLOPS_ENGINE | MIOPEN_ENGINE | MIOPEN_ENGINE_DETERMINISTIC | hipkernel:Gfx950AttentionDense |
 |----|----------|----------|----------|----------|----------|----------|
 | **Batchnorm** | — | — | — | 🟡 157/205 | — | — |
-| **BatchnormBackward** | — | — | — | 🟡 192/193 | — | — |
+| **BatchnormBackward** | — | — | — | ✅ 192/192 | — | — |
 | **BatchnormFwdInference** | — | — | — | ✅ 15/15 | — | — |
 | **BatchnormInference** | — | — | — | ✅ 108/108 | — | — |
 | **BatchnormInferenceAttributesVarianceExt** | — | — | — | ✅ 97/97 | — | — |
 | **BatchnormInferenceAttributesVarianceExtPointwise** | — | — | — | 🟡 145/169 | — | — |
 | **BatchnormInferencePointwise** | — | — | — | 🟡 144/168 | — | — |
 | **BatchnormInferencePointwiseBatchnormBackward** | — | — | — | ✅ 180/180 | — | — |
-| **BatchnormPointwise** | — | — | — | 🟡 432/601 | — | — |
+| **BatchnormPointwise** | — | — | — | 🟡 432/600 | — | — |
 | **BlockScaleDequantizeMatmul** | — | — | — | — | — | — |
 | **ConvolutionBwd** | — | — | — | ✅ 138/138 | — | — |
 | **ConvolutionFwd** | — | — | — | ✅ 138/138 | — | — |
@@ -113,14 +113,14 @@ A box is one op (row) × engine (column) on this target: claimed graphs out of a
 | Op | ASM_SDPA_ENGINE | HIPBLASLT_ENGINE | HIP_MLOPS_ENGINE | MIOPEN_ENGINE | MIOPEN_ENGINE_DETERMINISTIC | hipkernel:Gfx950AttentionDense |
 |----|----------|----------|----------|----------|----------|----------|
 | **Batchnorm** | — | — | 🟡 144/205 | — | — | — |
-| **BatchnormBackward** | — | — | 🟡 132/193 | — | — | — |
+| **BatchnormBackward** | — | — | 🟡 132/192 | — | — | — |
 | **BatchnormFwdInference** | — | — | ✅ 15/15 | — | — | — |
 | **BatchnormInference** | — | — | 🟡 72/108 | — | — | — |
 | **BatchnormInferenceAttributesVarianceExt** | — | — | 🟡 60/97 | — | — | — |
 | **BatchnormInferenceAttributesVarianceExtPointwise** | — | — | 🟡 84/169 | — | — | — |
 | **BatchnormInferencePointwise** | — | — | 🟡 84/168 | — | — | — |
 | **BatchnormInferencePointwiseBatchnormBackward** | — | — | ✅ 180/180 | — | — | — |
-| **BatchnormPointwise** | — | — | 🟡 348/601 | — | — | — |
+| **BatchnormPointwise** | — | — | 🟡 348/600 | — | — | — |
 | **BlockScaleDequantizeMatmul** | — | — | — | — | — | — |
 | **ConvolutionBwd** | — | — | — | — | — | — |
 | **ConvolutionFwd** | — | — | — | — | — | — |
@@ -146,14 +146,14 @@ A box is one op (row) × engine (column) on this target: claimed graphs out of a
 | Op | ASM_SDPA_ENGINE | HIPBLASLT_ENGINE | HIP_MLOPS_ENGINE | MIOPEN_ENGINE | MIOPEN_ENGINE_DETERMINISTIC | hipkernel:Gfx950AttentionDense |
 |----|----------|----------|----------|----------|----------|----------|
 | **Batchnorm** | — | — | 🟡 144/205 | 🟡 157/205 | — | — |
-| **BatchnormBackward** | — | — | 🟡 132/193 | 🟡 192/193 | — | — |
+| **BatchnormBackward** | — | — | 🟡 132/192 | ✅ 192/192 | — | — |
 | **BatchnormFwdInference** | — | — | ✅ 15/15 | ✅ 15/15 | — | — |
 | **BatchnormInference** | — | — | 🟡 72/108 | ✅ 108/108 | — | — |
 | **BatchnormInferenceAttributesVarianceExt** | — | — | 🟡 60/97 | ✅ 97/97 | — | — |
 | **BatchnormInferenceAttributesVarianceExtPointwise** | — | — | 🟡 84/169 | 🟡 145/169 | — | — |
 | **BatchnormInferencePointwise** | — | — | 🟡 84/168 | 🟡 144/168 | — | — |
 | **BatchnormInferencePointwiseBatchnormBackward** | — | — | ✅ 180/180 | ✅ 180/180 | — | — |
-| **BatchnormPointwise** | — | — | 🟡 348/601 | 🟡 432/601 | — | — |
+| **BatchnormPointwise** | — | — | 🟡 348/600 | 🟡 432/600 | — | — |
 | **BlockScaleDequantizeMatmul** | — | — | — | — | — | — |
 | **ConvolutionBwd** | — | — | — | ✅ 138/138 | — | — |
 | **ConvolutionFwd** | — | — | — | ✅ 138/138 | — | — |
@@ -179,14 +179,14 @@ A box is one op (row) × engine (column) on this target: claimed graphs out of a
 | Op | ASM_SDPA_ENGINE | HIPBLASLT_ENGINE | HIP_MLOPS_ENGINE | MIOPEN_ENGINE | MIOPEN_ENGINE_DETERMINISTIC | hipkernel:Gfx950AttentionDense |
 |----|----------|----------|----------|----------|----------|----------|
 | **Batchnorm** | — | — | 🟡 144/205 | 🟡 157/205 | — | — |
-| **BatchnormBackward** | — | — | 🟡 132/193 | 🟡 192/193 | — | — |
+| **BatchnormBackward** | — | — | 🟡 132/192 | ✅ 192/192 | — | — |
 | **BatchnormFwdInference** | — | — | ✅ 15/15 | ✅ 15/15 | — | — |
 | **BatchnormInference** | — | — | 🟡 72/108 | ✅ 108/108 | — | — |
 | **BatchnormInferenceAttributesVarianceExt** | — | — | 🟡 60/97 | ✅ 97/97 | — | — |
 | **BatchnormInferenceAttributesVarianceExtPointwise** | — | — | 🟡 84/169 | 🟡 145/169 | — | — |
 | **BatchnormInferencePointwise** | — | — | 🟡 84/168 | 🟡 144/168 | — | — |
 | **BatchnormInferencePointwiseBatchnormBackward** | — | — | ✅ 180/180 | ✅ 180/180 | — | — |
-| **BatchnormPointwise** | — | — | 🟡 348/601 | 🟡 432/601 | — | — |
+| **BatchnormPointwise** | — | — | 🟡 348/600 | 🟡 432/600 | — | — |
 | **BlockScaleDequantizeMatmul** | — | — | — | — | — | — |
 | **ConvolutionBwd** | — | — | — | ✅ 138/138 | — | — |
 | **ConvolutionFwd** | — | — | — | ✅ 138/138 | — | — |
@@ -212,14 +212,14 @@ A box is one op (row) × engine (column) on this target: claimed graphs out of a
 | Op | ASM_SDPA_ENGINE | HIPBLASLT_ENGINE | HIP_MLOPS_ENGINE | MIOPEN_ENGINE | MIOPEN_ENGINE_DETERMINISTIC | hipkernel:Gfx950AttentionDense |
 |----|----------|----------|----------|----------|----------|----------|
 | **Batchnorm** | — | — | 🟡 144/205 | 🟡 157/205 | — | — |
-| **BatchnormBackward** | — | — | 🟡 132/193 | 🟡 192/193 | — | — |
+| **BatchnormBackward** | — | — | 🟡 132/192 | ✅ 192/192 | — | — |
 | **BatchnormFwdInference** | — | — | ✅ 15/15 | ✅ 15/15 | — | — |
 | **BatchnormInference** | — | — | 🟡 72/108 | ✅ 108/108 | — | — |
 | **BatchnormInferenceAttributesVarianceExt** | — | — | 🟡 60/97 | ✅ 97/97 | — | — |
 | **BatchnormInferenceAttributesVarianceExtPointwise** | — | — | 🟡 84/169 | 🟡 145/169 | — | — |
 | **BatchnormInferencePointwise** | — | — | 🟡 84/168 | 🟡 144/168 | — | — |
 | **BatchnormInferencePointwiseBatchnormBackward** | — | — | ✅ 180/180 | ✅ 180/180 | — | — |
-| **BatchnormPointwise** | — | — | 🟡 348/601 | 🟡 432/601 | — | — |
+| **BatchnormPointwise** | — | — | 🟡 348/600 | 🟡 432/600 | — | — |
 | **BlockScaleDequantizeMatmul** | — | — | — | — | — | — |
 | **ConvolutionBwd** | — | — | — | ✅ 138/138 | ✅ 138/138 | — |
 | **ConvolutionFwd** | — | — | — | ✅ 138/138 | ✅ 138/138 | — |
@@ -245,14 +245,14 @@ A box is one op (row) × engine (column) on this target: claimed graphs out of a
 | Op | ASM_SDPA_ENGINE | HIPBLASLT_ENGINE | HIP_MLOPS_ENGINE | MIOPEN_ENGINE | MIOPEN_ENGINE_DETERMINISTIC | hipkernel:Gfx950AttentionDense |
 |----|----------|----------|----------|----------|----------|----------|
 | **Batchnorm** | — | — | 🟡 144/205 | — | — | — |
-| **BatchnormBackward** | — | — | 🟡 132/193 | — | — | — |
+| **BatchnormBackward** | — | — | 🟡 132/192 | — | — | — |
 | **BatchnormFwdInference** | — | — | ✅ 15/15 | — | — | — |
 | **BatchnormInference** | — | — | 🟡 72/108 | — | — | — |
 | **BatchnormInferenceAttributesVarianceExt** | — | — | 🟡 60/97 | — | — | — |
 | **BatchnormInferenceAttributesVarianceExtPointwise** | — | — | 🟡 84/169 | — | — | — |
 | **BatchnormInferencePointwise** | — | — | 🟡 84/168 | — | — | — |
 | **BatchnormInferencePointwiseBatchnormBackward** | — | — | ✅ 180/180 | — | — | — |
-| **BatchnormPointwise** | — | — | 🟡 348/601 | — | — | — |
+| **BatchnormPointwise** | — | — | 🟡 348/600 | — | — | — |
 | **BlockScaleDequantizeMatmul** | — | — | — | — | — | — |
 | **ConvolutionBwd** | — | — | — | — | — | — |
 | **ConvolutionFwd** | — | — | — | — | — | — |
@@ -278,14 +278,14 @@ A box is one op (row) × engine (column) on this target: claimed graphs out of a
 | Op | ASM_SDPA_ENGINE | HIPBLASLT_ENGINE | HIP_MLOPS_ENGINE | MIOPEN_ENGINE | MIOPEN_ENGINE_DETERMINISTIC | hipkernel:Gfx950AttentionDense |
 |----|----------|----------|----------|----------|----------|----------|
 | **Batchnorm** | — | — | — | 🟡 157/205 | — | — |
-| **BatchnormBackward** | — | — | — | 🟡 192/193 | — | — |
+| **BatchnormBackward** | — | — | — | ✅ 192/192 | — | — |
 | **BatchnormFwdInference** | — | — | — | ✅ 15/15 | — | — |
 | **BatchnormInference** | — | — | — | ✅ 108/108 | — | — |
 | **BatchnormInferenceAttributesVarianceExt** | — | — | — | ✅ 97/97 | — | — |
 | **BatchnormInferenceAttributesVarianceExtPointwise** | — | — | — | 🟡 145/169 | — | — |
 | **BatchnormInferencePointwise** | — | — | — | 🟡 144/168 | — | — |
 | **BatchnormInferencePointwiseBatchnormBackward** | — | — | — | ✅ 180/180 | — | — |
-| **BatchnormPointwise** | — | — | — | 🟡 432/601 | — | — |
+| **BatchnormPointwise** | — | — | — | 🟡 432/600 | — | — |
 | **BlockScaleDequantizeMatmul** | — | — | — | — | — | — |
 | **ConvolutionBwd** | — | — | — | ✅ 138/138 | — | — |
 | **ConvolutionFwd** | — | — | — | ✅ 138/138 | — | — |
@@ -311,14 +311,14 @@ A box is one op (row) × engine (column) on this target: claimed graphs out of a
 | Op | ASM_SDPA_ENGINE | HIPBLASLT_ENGINE | HIP_MLOPS_ENGINE | MIOPEN_ENGINE | MIOPEN_ENGINE_DETERMINISTIC | hipkernel:Gfx950AttentionDense |
 |----|----------|----------|----------|----------|----------|----------|
 | **Batchnorm** | — | — | 🟡 144/205 | 🟡 157/205 | — | — |
-| **BatchnormBackward** | — | — | 🟡 132/193 | 🟡 192/193 | — | — |
+| **BatchnormBackward** | — | — | 🟡 132/192 | ✅ 192/192 | — | — |
 | **BatchnormFwdInference** | — | — | ✅ 15/15 | ✅ 15/15 | — | — |
 | **BatchnormInference** | — | — | 🟡 72/108 | ✅ 108/108 | — | — |
 | **BatchnormInferenceAttributesVarianceExt** | — | — | 🟡 60/97 | ✅ 97/97 | — | — |
 | **BatchnormInferenceAttributesVarianceExtPointwise** | — | — | 🟡 84/169 | 🟡 145/169 | — | — |
 | **BatchnormInferencePointwise** | — | — | 🟡 84/168 | 🟡 144/168 | — | — |
 | **BatchnormInferencePointwiseBatchnormBackward** | — | — | ✅ 180/180 | ✅ 180/180 | — | — |
-| **BatchnormPointwise** | — | — | 🟡 348/601 | 🟡 432/601 | — | — |
+| **BatchnormPointwise** | — | — | 🟡 348/600 | 🟡 432/600 | — | — |
 | **BlockScaleDequantizeMatmul** | — | — | — | — | — | — |
 | **ConvolutionBwd** | — | — | — | ✅ 138/138 | 🟡 108/138 | — |
 | **ConvolutionFwd** | — | — | — | ✅ 138/138 | 🟡 108/138 | — |
@@ -344,14 +344,14 @@ A box is one op (row) × engine (column) on this target: claimed graphs out of a
 | Op | ASM_SDPA_ENGINE | HIPBLASLT_ENGINE | HIP_MLOPS_ENGINE | MIOPEN_ENGINE | MIOPEN_ENGINE_DETERMINISTIC | hipkernel:Gfx950AttentionDense |
 |----|----------|----------|----------|----------|----------|----------|
 | **Batchnorm** | — | — | 🟡 144/205 | 🟡 157/205 | — | — |
-| **BatchnormBackward** | — | — | 🟡 132/193 | 🟡 192/193 | — | — |
+| **BatchnormBackward** | — | — | 🟡 132/192 | ✅ 192/192 | — | — |
 | **BatchnormFwdInference** | — | — | ✅ 15/15 | ✅ 15/15 | — | — |
 | **BatchnormInference** | — | — | 🟡 72/108 | ✅ 108/108 | — | — |
 | **BatchnormInferenceAttributesVarianceExt** | — | — | 🟡 60/97 | ✅ 97/97 | — | — |
 | **BatchnormInferenceAttributesVarianceExtPointwise** | — | — | 🟡 84/169 | 🟡 145/169 | — | — |
 | **BatchnormInferencePointwise** | — | — | 🟡 84/168 | 🟡 144/168 | — | — |
 | **BatchnormInferencePointwiseBatchnormBackward** | — | — | ✅ 180/180 | ✅ 180/180 | — | — |
-| **BatchnormPointwise** | — | — | 🟡 348/601 | 🟡 432/601 | — | — |
+| **BatchnormPointwise** | — | — | 🟡 348/600 | 🟡 432/600 | — | — |
 | **BlockScaleDequantizeMatmul** | — | — | — | — | — | — |
 | **ConvolutionBwd** | — | — | — | ✅ 138/138 | 🟡 108/138 | — |
 | **ConvolutionFwd** | — | — | — | ✅ 138/138 | 🟡 108/138 | — |
@@ -377,14 +377,14 @@ A box is one op (row) × engine (column) on this target: claimed graphs out of a
 | Op | ASM_SDPA_ENGINE | HIPBLASLT_ENGINE | HIP_MLOPS_ENGINE | MIOPEN_ENGINE | MIOPEN_ENGINE_DETERMINISTIC | hipkernel:Gfx950AttentionDense |
 |----|----------|----------|----------|----------|----------|----------|
 | **Batchnorm** | — | — | 🟡 144/205 | 🟡 157/205 | — | — |
-| **BatchnormBackward** | — | — | 🟡 132/193 | 🟡 192/193 | — | — |
+| **BatchnormBackward** | — | — | 🟡 132/192 | ✅ 192/192 | — | — |
 | **BatchnormFwdInference** | — | — | ✅ 15/15 | ✅ 15/15 | — | — |
 | **BatchnormInference** | — | — | 🟡 72/108 | ✅ 108/108 | — | — |
 | **BatchnormInferenceAttributesVarianceExt** | — | — | 🟡 60/97 | ✅ 97/97 | — | — |
 | **BatchnormInferenceAttributesVarianceExtPointwise** | — | — | 🟡 84/169 | 🟡 145/169 | — | — |
 | **BatchnormInferencePointwise** | — | — | 🟡 84/168 | 🟡 144/168 | — | — |
 | **BatchnormInferencePointwiseBatchnormBackward** | — | — | ✅ 180/180 | ✅ 180/180 | — | — |
-| **BatchnormPointwise** | — | — | 🟡 348/601 | 🟡 432/601 | — | — |
+| **BatchnormPointwise** | — | — | 🟡 348/600 | 🟡 432/600 | — | — |
 | **BlockScaleDequantizeMatmul** | — | — | — | — | — | — |
 | **ConvolutionBwd** | — | — | — | ✅ 138/138 | — | — |
 | **ConvolutionFwd** | — | — | — | ✅ 138/138 | — | — |
