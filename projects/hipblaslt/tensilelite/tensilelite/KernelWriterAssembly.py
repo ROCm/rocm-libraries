@@ -20932,7 +20932,7 @@ class KernelWriterAssembly(KernelWriter):
   @staticmethod
   def papTdmSupportsIncrementalUpdate(kernel: Mapping) -> bool:
     """Whether a full-K tile leaves the descriptor invariants intact for PAP."""
-    return (isDataParallel(kernel) and tdmWaveSeparated(kernel)
+    return (isPersistentDataParallel(kernel) and tdmWaveSeparated(kernel)
             and kernel.get("TDMFuse", 0) == 0
             and not kernel.get("UseSubtileImpl")
             and not kernel.get("TDMSplit")

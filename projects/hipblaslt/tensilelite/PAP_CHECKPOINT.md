@@ -1,5 +1,35 @@
 # PAP implementation checkpoint
 
+## Port to current develop (2026-10-13)
+
+The two checkpoint commits are carried on `users/nhenders/pap-prefetch-plr`,
+based on develop `562a252cbabeda26223f64ce09134c46dcb99525`.
+The port follows the renamed `tensilelite/` package layout and current
+DataParallel policy and register-pool APIs. PAP's CPU interpreter is retained
+as the scoped `_pap_isa.py` test helper; upstream GPU control-flow tests remain.
+
+The current base's separate LDS storage for vector epilogues is preserved.
+Such epilogues retain ordinary PAP behavior and remain outside the optimized
+two-group gate. Epilogues that still overlap prefetched LDS remain rejected,
+and the current base's persistent `OutputAmaxD` rejection is unchanged.
+DataParallel multicast uses the existing grid and padded-tile overflow checks;
+unmerged StreamK spatial-multicast infrastructure is not a prerequisite.
+
+Fresh checks on the port pass 654 focused Python tests (9 skipped), four
+code-generation/assembly checks, 69 native barrier/wait-count tests, and
+72 focused host argument/launch-summary tests. The full host-test executable
+could not link several type-info/MLP symbols; the two relevant test sources
+were linked separately against the freshly built host library. Host checks
+explicitly put that library ahead of the installed ROCm copy at runtime.
+Local logs and results are under `build_tmp/pap-port-checks/`.
+The September 30 GPU correctness and performance results below describe the
+original checkpoint. GPU validation and performance on this updated base
+have not been rerun. The HalfPLR extension below remains unimplemented.
+Historical `triage/pap_optimization/` artifacts remain local to the original
+checkout and are not copied by cherry-picking these commits.
+
+## Original checkpoint (2026-09-30)
+
 Updated 2026-09-30. Two next-tile global-prefetch groups and retained first-PLR
 operands are implemented for the eligible classic gfx1250 DataParallel/StaticGrid
 PAP path, including persistent multicast. Final production kernels pass all 30

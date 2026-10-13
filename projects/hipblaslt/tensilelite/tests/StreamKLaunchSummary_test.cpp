@@ -1050,8 +1050,9 @@ TEST(PersistentLaunchSummaryTest, ClusterDataParallelInvocationsUseWholeClusterR
         auto launch = solution.resolvePersistentSettings(problem, device);
         const size_t blockCount = cluster.y == 1 ? 27 : cluster.y == 2 ? 18 : 9;
         const size_t clusterSize = cluster.x * cluster.y;
-        const size_t clusters = prefetch ? blockCount
-            : std::min(blockCount, std::max(size_t{1}, size_t(selected) / clusterSize));
+        const size_t clusters
+            = std::min(blockCount, std::max(size_t{1}, size_t(selected) / clusterSize));
+        EXPECT_FALSE(launch.clusterGridClamp);
         ASSERT_EQ(launch.grid, clusters * clusterSize);
         ASSERT_EQ(launch.totalTiles, 45u);
         ContractionInputs inputs;

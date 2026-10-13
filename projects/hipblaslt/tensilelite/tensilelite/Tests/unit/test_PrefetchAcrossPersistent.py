@@ -1843,7 +1843,7 @@ def test_pap_epilogue_lds_features_remain_valid_without_pap(_gp_gfx1250, gfx1250
 
 
 @pytest.mark.parametrize("problem", [
-    {}, {"UseScaleAB": "Scalar"}, {"OutputAmaxD": True},
+    {}, {"UseScaleAB": "Scalar"},
     {"UseBias": 1, "Gradient": True, "BiasSrc": "D"},
 ])
 def test_pap_epilogue_without_lds_overlap_remains_valid(_gp_gfx1250, gfx1250_iim,
@@ -1851,3 +1851,11 @@ def test_pap_epilogue_without_lds_overlap_remains_valid(_gp_gfx1250, gfx1250_iim
     sol, out = _derive(gfx1250_iim, assembler, capsys,
                        PrefetchAcrossPersistent=1, ProblemType=problem)
     assert sol.get("Valid"), out
+
+
+def test_pap_amax_keeps_upstream_persistent_rejection(_gp_gfx1250, gfx1250_iim,
+                                                     assembler, capsys):
+    sol, out = _derive(gfx1250_iim, assembler, capsys,
+                       PrefetchAcrossPersistent=1, ProblemType={"OutputAmaxD": True})
+    assert not sol.get("Valid")
+    assert "OutputAmaxD is unsupported" in out

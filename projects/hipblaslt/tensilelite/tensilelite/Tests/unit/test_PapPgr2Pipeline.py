@@ -8,7 +8,7 @@ from rocisa.code import Module
 from rocisa.container import MemTokenData, sgpr, vgpr
 from rocisa.instruction import SAddU32, SBarrier, SMovB32, SOrB32
 from rocisa.enum import RegisterType
-from Tensile.Common.RegisterPool import RegisterPool
+from rocisa.register import RegisterPool
 from Tensile.Component import Component
 from Tensile.Components.PersistentLoop import PersistentLoopOn
 from Tensile.Components.TileProcessingStrategy import DataParallel
