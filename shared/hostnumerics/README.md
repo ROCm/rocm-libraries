@@ -76,4 +76,4 @@ configuration, testing, installation, and CMake integration, and
 
 Scalar metadata and dispatch are documented in
 [`scalar_type.hpp`](include/roc/hostnumerics/scalar_type.hpp). The
-[scalar tests](tests/scalar_type_test.cpp) include a compiled usage example.
+[core tests](tests/core_test.cpp) include a compiled usage example.

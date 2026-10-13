@@ -13,12 +13,13 @@ endif()
 
 list(APPEND CMAKE_MODULE_PATH "${HOSTNUMERICS_SOURCE_DIR}/cmake")
 include(HostNumericsTestDependencies)
-add_executable(hostnumerics-package-test "${HOSTNUMERICS_SOURCE_DIR}/tests/version_test.cpp")
+add_executable(hostnumerics-package-test "${HOSTNUMERICS_SOURCE_DIR}/tests/core_test.cpp")
 target_link_libraries(hostnumerics-package-test PRIVATE roc::hostnumerics GTest::gtest_main)
 
 enable_testing()
-add_test(NAME hostnumerics-package-test COMMAND hostnumerics-package-test)
-
-add_executable(hostnumerics-shape-package-test ../shape_test.cpp)
-target_link_libraries(hostnumerics-shape-package-test PRIVATE roc::hostnumerics-core)
-add_test(NAME hostnumerics-shape-package-test COMMAND hostnumerics-shape-package-test)
+include(GoogleTest)
+gtest_discover_tests(
+    hostnumerics-package-test
+    DISCOVERY_MODE PRE_TEST
+    TEST_PREFIX "hostnumerics-package-test."
+)
