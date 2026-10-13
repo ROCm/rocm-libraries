@@ -69,22 +69,51 @@ def _traffic(llvm):
 
 
 class TestBlockScaledGemmPrefetch(unittest.TestCase):
+    def test_legacy_positional_prefetch_preserves_keyword_contract(self):
+        for path in ("wmma", "wmma_scale", "wmma_scale16"):
+            for prefetch in (False, True):
+                with self.subTest(path=path, prefetch=prefetch):
+                    expected = _spec(path, prefetch=prefetch)
+                    positional = BlockScaledGemmSpec(
+                        expected.name,
+                        expected.M,
+                        expected.N,
+                        expected.K,
+                        expected.dtype_a,
+                        expected.dtype_b,
+                        expected.dtype_c,
+                        expected.dtype_acc,
+                        expected.scale_dtype,
+                        expected.block_k,
+                        expected.layout,
+                        expected.matrix_path,
+                        expected.tile_m,
+                        expected.tile_n,
+                        expected.tile_k,
+                        prefetch,
+                    )
+                    self.assertEqual(positional, expected)
+                    self.assertIs(positional.prefetch, prefetch)
+                    self.assertIsNone(positional.scale_dtype_a)
+                    self.assertIsNone(positional.scale_dtype_b)
+                    self.assertEqual(_lower(positional), _lower(expected))
+
     def test_independent_scale_formats_compose_with_prefetch(self):
         for path in ("wmma_scale", "wmma_scale16"):
             with self.subTest(path=path):
                 off = _spec(
                     path,
                     prefetch=False,
-                    dtype_a="fp6",
+                    dtype_a="fp4",
                     dtype_b="bf8",
                     scale_dtype_a="e4m3",
-                    scale_dtype_b="e5m3",
+                    scale_dtype_b="e8m0",
                 )
                 on = replace(off, prefetch=True)
-                self.assertEqual(on.resolved_scale_dtypes(), ("e4m3", "e5m3"))
+                self.assertEqual(on.resolved_scale_dtypes(), ("e4m3", "e8m0"))
                 self.assertEqual(on.kernel_name(), off.kernel_name() + "_pf")
                 self.assertIn("sa_e4m3", on.kernel_name())
-                self.assertIn("sb_e5m3", on.kernel_name())
+                self.assertNotIn("sb_", on.kernel_name())
                 llvm = _lower(on)
                 self.assertEqual(_traffic(llvm), _traffic(_lower(off)))
                 self.assertEqual(
@@ -101,7 +130,7 @@ class TestBlockScaledGemmPrefetch(unittest.TestCase):
                 self.assertEqual(len(calls), 2)
                 for call in calls:
                     self.assertEqual(
-                        re.findall(r"i32 0, i32 (\d+), i(?:32|64) %", call), ["2", "1"]
+                        re.findall(r"i32 0, i32 (\d+), i(?:32|64) %", call), ["2", "0"]
                     )
 
     def test_default_is_off(self):

@@ -103,13 +103,13 @@ class BlockScaledGemmSpec:
     tile_m: int = 16
     tile_n: int = 16
     tile_k: int = 128
-    scale_dtype_a: str | None = None
-    scale_dtype_b: str | None = None
 
     # Data-prefetch hints (gfx1250, llvm23 only): one scalar prefetch of the
     # workgroup's A-scale rows and a per-lane ``global_prefetch`` of the next
     # K step's A/B rows. Results do not change; off keeps the default IR.
     prefetch: bool = False
+    scale_dtype_a: str | None = None
+    scale_dtype_b: str | None = None
 
     def resolved_scale_dtypes(self) -> tuple[str, str]:
         aliases = {"i8": "e8m0", "fp8e4m3": "e4m3"}
