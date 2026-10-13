@@ -23,5 +23,9 @@ def _spec(idx):
     )
 
 
+def main():
+    return run_emit(_spec, build_block_scaled_gemm)
+
+
 if __name__ == "__main__":
-    raise SystemExit(run_emit(_spec, build_block_scaled_gemm))
+    raise SystemExit(main())
