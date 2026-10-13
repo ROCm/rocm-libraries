@@ -162,9 +162,11 @@ static rocke_status_t rocke_h_op_tile_mma(rocke_h_lowerer_t* lw, const rocke_op_
         {
             return rocke_h_fail(lw,
                                 ROCKE_ERR_NOTIMPL,
-                                "tile.mma %s: an emulated atom (over %s) has no HIP lowering; "
+                                "tile.mma %s: an emulated atom (%s over %s) has no HIP lowering; "
                                 "lower it through the LLVM path",
                                 op_id,
+                                atom->emulation_recipe == ROCKE_MMA_EMULATION_BF16X3 ? "bf16x3"
+                                                                                     : "unknown",
                                 rocke_arch_mma_op_physical_op_id(atom));
         }
     }

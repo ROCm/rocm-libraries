@@ -20,7 +20,9 @@ from rocke.core.arch.target import (
     _build_mma_op,
     _build_target,
     _load_specs,
+    _op_id_emulated_tf32_operands,
     _prefer_native,
+    emulated_tf32_operand_lens,
 )
 
 # A real bf16 atom, so derived fragment metadata has something true to point at.
@@ -134,6 +136,38 @@ class TestEmulationDescriptor(unittest.TestCase):
                     ArchTarget.from_gfx("gfx942")
         finally:
             _build_target.cache_clear()
+
+    def test_verifier_lookup_refuses_a_physical_atom_with_no_fragments(self):
+        """The bare-op_id lookup reads raw rows, before any arch's catalog is built.
+
+        An unknown physical atom would otherwise come back as zero-length fragments
+        and the verifier would demand ``vec<tf32x0>``.
+        """
+        specs = copy.deepcopy(_load_specs())
+        specs["gfx950"]["mma"].append(
+            _row(
+                op_id="mfma_f32_16x16x64_xf32",
+                emulation={"recipe": "bf16x3", "physical_op_id": "mfma_nonexistent"},
+            )
+        )
+        _op_id_emulated_tf32_operands.cache_clear()
+        try:
+            with mock.patch("rocke.core.arch.target._load_specs", return_value=specs):
+                with pytest.raises(ValueError, match="no fragment metadata"):
+                    emulated_tf32_operand_lens("mfma_f32_16x16x64_xf32")
+        finally:
+            _op_id_emulated_tf32_operands.cache_clear()
+
+    def test_verifier_lookup_answers_only_for_emulated_tf32_atoms(self):
+        self.assertEqual(
+            emulated_tf32_operand_lens("mfma_f32_16x16x32_xf32"), (8, 8, 4)
+        )
+        self.assertEqual(
+            emulated_tf32_operand_lens("mfma_f32_32x32x16_xf32"), (8, 8, 16)
+        )
+        # Native atoms -- TF32 or not -- and unknown ids are not its business.
+        for op_id in ("mfma_f32_16x16x8_xf32", "mfma_f32_16x16x32_bf16", "nope"):
+            self.assertIsNone(emulated_tf32_operand_lens(op_id))
 
     def test_descriptor_requires_a_physical_op_id_string(self):
         with pytest.raises(ValueError, match="requires a physical_op_id"):

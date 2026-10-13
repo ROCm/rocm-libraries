@@ -1449,6 +1449,14 @@ def _op_id_emulated_tf32_operands() -> Dict[str, Tuple[int, int, int]]:
                 continue
             info = _frag_info(emulation["physical_op_id"])
             lens = (info.a_frag_len, info.b_frag_len, info.c_frag_len)
+            if not all(lens):
+                # _frag_info answers zeros for an op_id it does not know, and the
+                # verifier would then demand vec<tf32x0>. Refuse here, where the
+                # catalog row is still in view, rather than at a confusing use site.
+                raise ValueError(
+                    f"emulated atom {o['op_id']!r} expands into "
+                    f"{emulation['physical_op_id']!r}, which has no fragment metadata"
+                )
             prev = out.setdefault(o["op_id"], lens)  # first hit wins
             if prev != lens:
                 raise ValueError(

@@ -279,6 +279,26 @@ class TestOperandContract(unittest.TestCase):
             builder.mma(atom, a, a, c)
 
 
+class TestHipBackend(unittest.TestCase):
+    def test_hip_lowering_rejects_an_emulated_atom_by_name(self):
+        """The expansion exists only in the LLVM lowerer.
+
+        Without the explicit rejection the op reaches the generic dispatcher as
+        ``tile.<op_id>`` and fails as though HIP had merely missed a hardware atom,
+        which, with a name shaped like one, is what it would read as.
+        """
+        from rocke.core.lower_hip import lower_kernel_to_hip
+
+        for op_id, physical in _EMULATED.items():
+            with self.subTest(op_id=op_id):
+                with self.assertRaisesRegex(
+                    NotImplementedError,
+                    rf"tile\.mma {op_id}: an emulated atom \(bf16x3 over {physical}\) "
+                    r"has no HIP lowering",
+                ):
+                    lower_kernel_to_hip(_mma_kernel(op_id), arch=_ARCH)
+
+
 class TestBareOpIdForm(unittest.TestCase):
     def test_the_bare_op_id_builds_the_same_kernel_as_the_atom(self):
         """``IRBuilder.mma`` documents a bare-op_id form; emulated atoms take it.

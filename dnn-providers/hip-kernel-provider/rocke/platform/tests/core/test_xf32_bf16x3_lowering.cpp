@@ -22,6 +22,7 @@
 
 #include "rocke/ir.h"
 #include "rocke/ir_serialize.h"
+#include "rocke/lower_hip.h"
 #include "rocke/lower_llvm.h"
 
 /* One tile.mma on mfma_f32_16x16x32_xf32: vec<tf32x8> operands (an fp32 payload
@@ -341,6 +342,42 @@ static int test_operands_must_be_tf32_fragments(void)
     return failed;
 }
 
+/* The expansion exists only in the LLVM lowerer, so the HIP lowerer must reject an
+ * emulated atom rather than emit it. The status is all this entry point exposes --
+ * the message is raised inside and translated to a code at the boundary -- so what
+ * is pinned here is the rejection itself: an emulated op_id leaking into the
+ * native-TF32 path would come out as a bogus __builtin_amdgcn_<op_id> call and a
+ * successful lowering. The wording is pinned by the Python lowerer's twin test. */
+static int test_hip_rejects_emulated_atoms(void)
+{
+    int failed = 0;
+    const char* const irs[2] = {k_ir_16x16x32, k_ir_32x32x16};
+    for(int i = 0; i < 2; ++i)
+    {
+        rocke_ir_builder_t b;
+        if(rocke_ir_builder_init(&b, "xf32_bf16x3_hip") != ROCKE_OK)
+        {
+            failed = 1;
+            continue;
+        }
+        rocke_kernel_def_t* kernel = NULL;
+        CHECK(rocke_ir_parse(irs[i], &b, &kernel) == ROCKE_OK && kernel, "IR must parse");
+        if(kernel)
+        {
+            rocke_strbuf_t hip;
+            rocke_lower_hip_opts_t opts;
+            memset(&opts, 0, sizeof(opts));
+            opts.arch = "gfx950";
+            CHECK(rocke_strbuf_init(&hip, 0) == 0, "strbuf init");
+            CHECK(rocke_lower_kernel_to_hip(&b, kernel, &opts, &hip) == ROCKE_ERR_NOTIMPL,
+                  "an emulated atom must be rejected, not emitted");
+            rocke_strbuf_free(&hip);
+        }
+        rocke_ir_builder_free(&b);
+    }
+    return failed;
+}
+
 /* Native atoms are untouched -- the guard fires only for emulated ones. */
 static int test_native_atom_is_unchanged(void)
 {
@@ -380,6 +417,7 @@ int main(void)
     failed |= test_three_terms_in_order();
     failed |= test_no_emulated_atom_survives();
     failed |= test_operands_must_be_tf32_fragments();
+    failed |= test_hip_rejects_emulated_atoms();
     failed |= test_native_atom_is_unchanged();
     if(failed)
     {
