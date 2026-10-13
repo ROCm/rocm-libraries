@@ -106,8 +106,15 @@ def test_isGfx12():
     assert Common.isGfx12((12, 0, 0))
     assert Common.isGfx12((12, 0, 1))
     assert Common.isGfx12((12, 5, 0))
+    assert not Common.isGfx12((11, 7, 0))
     assert not Common.isGfx12((11, 0, 0))
     assert not Common.isGfx12((13, 0, 0))
+
+def test_isGfx117():
+    assert Common.isGfx117((11, 7, 0))
+    assert Common.isGfx117((11, 7, 1))
+    assert not Common.isGfx117((11, 5, 0))
+    assert not Common.isGfx117((12, 0, 0))
 
 def test_paths():
     workingPathName = os.path.join("working", "path")

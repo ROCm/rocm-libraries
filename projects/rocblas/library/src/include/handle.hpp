@@ -103,6 +103,8 @@ enum class Processor : int
     gfx1151 = 1151,
     gfx1152 = 1152,
     gfx1153 = 1153,
+    gfx1170 = 1170,
+    gfx1171 = 1171,
     gfx1200 = 1200,
     gfx1201 = 1201,
     gfx1250 = 1250
@@ -307,7 +309,7 @@ public:
     {
         int gfx_arch = getArch();
         if(gfx_arch == 1200 || gfx_arch == 1201 || gfx_arch == 1250 || gfx_arch == 950
-           || gfx_arch == 942)
+           || gfx_arch == 942 || gfx_arch == 1170 || gfx_arch == 1171)
         {
             return true;
         }
