@@ -48,7 +48,7 @@ listed separately in the inventory, not added to the eight workload rows.
 | gfx942 forced exp2 A/B | 2 | No A/B assertion | Skipped |
 | gfx942 paged D128 ring regression | 12 | No: different path | Skipped |
 | gfx942 paged GQA head-fold | 4 | No: different path | Skipped |
-| gfx950 dense attention | Historical inventory: 51 shapes in 50 configurations | Seven base causal configurations | gfx950 reference lane runs without Torch |
+| gfx950 dense attention | Historical inventory: 51 shapes in 50 configurations | Seven base causal configurations on gfx950 | Device-gated on gfx942; see gfx950 validation below |
 | gfx1250 WMMA attention | 2 | No | Device-gated; verifier uses NumPy/HIP |
 | Extended FMHA/Sage/sparse harness | 15 named cases | No | Outer test skips; per-case hardware guards also apply |
 | KDA/GDN prefill and decode | See separate matrix | No: recurrent operators | Torch/device-gated; KDA decode file is not selected |

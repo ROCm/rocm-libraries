@@ -116,11 +116,11 @@ the strategy's biggest holes live (see
   exercise end-to-end kernel wiring for real model shapes.
 - The pinned SDPA reference lane qualifies old rocKE
   against independent NumPy SDPA offline, then executes old and current rocKE
-  on gfx942 using a conservative triangle-inequality error budget. Required
-  executions fail when hardware or qualification is missing. The first cohort
+  on gfx942 or gfx950 using a conservative triangle-inequality error budget. Required
+  executions fail when hardware or qualification is missing. Each architecture cohort
   is enrolled in installed tests when a qualified bundle is supplied at build time.
   Provider builds enable `ROCKE_INSTALL_TEST_GPU_REFERENCES` by default. Run
-  `dvc pull dnn-providers/hip-kernel-provider/rocke/library/tests/reference_bundles/sdpa/gfx942.tar.gz.dvc`
+  `dvc pull --recursive dnn-providers/hip-kernel-provider/rocke/library/tests/reference_bundles`
   from the repository root before configuring. TheRock already performs this
   DVC download during source preparation. CMake extracts the archive, validates
   every payload hash against
@@ -169,7 +169,7 @@ the strategy's biggest holes live (see
   When reference installation is enabled, CMake installs each pair in
   `platform/cmake/PublishedGpuReferences.cmake`; TheRock splits the payloads by target.
   The operation's architecture registry describes supported qualification cohorts,
-  not publication status. SDPA/gfx942 and convolution/gfx942 are published. Adding another
+  not publication status. SDPA/gfx942, SDPA/gfx950, and convolution/gfx942 are published. Adding another
   published pair requires its adapter, independently qualified lock, retrievable
   bundle, and publication entry.
   Qualification accepts `--arch` and freezes the shared worker and architecture
@@ -656,13 +656,13 @@ provider test directory:
 
 ```bash
 python -c 'import importlib.util; assert importlib.util.find_spec("torch") is None'
-ctest -V -R '^rocke_(reference_common|sdpa_reference_unit|conv_reference_unit|sdpa_gpu_gfx942|conv_gpu_gfx942)_pytest$' --output-on-failure
+ctest -V -R '^rocke_(reference_common|sdpa_reference_unit|conv_reference_unit|sdpa_gpu_gfx942|sdpa_gpu_gfx950|conv_gpu_gfx942)_pytest$' --output-on-failure
 ```
 
 Inspect the selected tests: disabling reference installation omits the GPU
 entries, so a successful CTest command alone does not establish that both
-operations ran. Default publication supplies both gfx942 bundles. Fetch both
-DVC archives before configuring; missing published archives fail configuration.
+operations ran. Default publication supplies SDPA bundles for gfx942 and gfx950, plus the
+gfx942 convolution bundle. Fetch all three DVC archives before configuring; missing published archives fail configuration.
 See the [reference inventory](platform/tests/README.md#installed-pinned-reference-suites)
 for the expected entries and cases.
 

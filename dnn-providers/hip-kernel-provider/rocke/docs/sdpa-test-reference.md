@@ -71,7 +71,7 @@ The gfx950 bundle was qualified from committed baseline
 and COMGR with LLVM 23 on `gfx950:sramecc+:xnack-`. Three baseline executions
 per case reproduced identical output digests. FP16 baseline maximum absolute
 error bounds ranged from 0.000981060 to 0.001102120; BF16 bounds ranged from
-0.007636343 to 0.008060832 (upper endpoints rounded upward here). Exact bounds
+0.007636342 to 0.008060832 (upper endpoints rounded upward here). Exact bounds
 and compiler identity are in the authenticated manifest. No tolerance was widened.
 
 Torch-free source verification passed all seven comparisons and three failure
@@ -81,9 +81,9 @@ suites passed 82 and 26 tests respectively. This validates Python reference
 installation and execution, not native provider execution or final artifact splitting.
 
 The archive is `library/tests/reference_bundles/sdpa/gfx950.tar.gz`, with MD5
-`45ecc9f281ba2e1f29998f73929a41cf` and size 2,540,019 bytes. Upload and an
-empty-cache download check are required before merging the new pointer.
-Follow the [reference workflow](gpu-reference-workflow.md) for publication.
+`45ecc9f281ba2e1f29998f73929a41cf` and size 2,540,019 bytes. The archive was uploaded to DVC, downloaded into a new empty cache, and
+authenticated against the committed lock. Follow the
+[reference workflow](gpu-reference-workflow.md) for future updates.
 
 ## Accuracy contract
 
@@ -203,7 +203,8 @@ cohort. The workflow also covers replacement baselines and publication enrollmen
 The existing TheRock CI flow builds and tests the installed provider artifact:
 
 1. Source preparation fetches the DVC-tracked archive at
-   `library/tests/reference_bundles/sdpa/gfx942.tar.gz` before provider configuration.
+   `library/tests/reference_bundles/sdpa/<arch>.tar.gz` for each published SDPA
+   architecture before provider configuration.
 2. Provider CMake validates and extracts the archive against the committed
    architecture-specific baseline lock, then installs the test harness and bundle.
    `ROCKE_INSTALL_TEST_GPU_REFERENCES` defaults on for provider artifact builds
@@ -213,14 +214,14 @@ The existing TheRock CI flow builds and tests the installed provider artifact:
 3. TheRock's `ml-libs/artifact-hipkernelprovider.toml` collects the harness into the
    generic test artifact. Its `**/engines/test_arch_content/**` rule collects the
    bundle installed at
-   `bin/hip_kernel_provider/engines/test_arch_content/rocke/sdpa/gfx942/`;
-   architecture splitting places it in the gfx942 test artifact, outside the
+   `bin/hip_kernel_provider/engines/test_arch_content/rocke/sdpa/<arch>/`;
+   architecture splitting places it in the matching target test artifact, outside the
    release library payload.
 4. The test job assembles the generic and matching architecture artifacts and
    prepares the Python/runtime dependencies. The existing provider runner selects
-   CTest entries using the provider's category YAML. `rocke_sdpa_gpu_gfx942_pytest` runs
-   the same pytest file used locally: eight numerical cases and three negative
-   checks. `rocke_sdpa_reference_unit_pytest` runs the SDPA host contract checks;
+   CTest entries using the provider's category YAML. `rocke_sdpa_gpu_gfx942_pytest` and `rocke_sdpa_gpu_gfx950_pytest` run
+   the same pytest file used locally: eight and seven numerical cases respectively,
+   plus three negative checks on each architecture. `rocke_sdpa_reference_unit_pytest` runs the SDPA host contract checks;
    `rocke_reference_common_pytest` runs shared archive and worker-isolation checks.
    Both host entries run independently of GPU bundles.
 
@@ -236,16 +237,16 @@ Run the installed GPU entry with:
 
 ```bash
 ctest --test-dir <install-prefix>/bin/hip_kernel_provider \
-  -R '^rocke_sdpa_gpu_gfx942_pytest$' --output-on-failure
+  -R '^rocke_sdpa_gpu_gfx(942|950)_pytest$' --output-on-failure
 ```
 
 The GPU entry is installed when a qualified bundle is configured. In that required
 lane, a missing bundle, missing GPU, or failed qualification check is an error;
 unqualified GPU architectures remain outside this pilot and skip its cases.
 
-Further SDPA cohorts, runtime-shape reuse, sliding windows, and gfx950 need their
-own qualification and retained structural assertions. This eight-case pilot
-does not replace those tests or establish coverage for them.
+Further SDPA cohorts, runtime-shape reuse, sliding windows, and non-default
+scales need their own qualification and retained structural assertions. The
+eight gfx942 and seven gfx950 cases do not establish coverage for those paths.
 
 
 ## Configuration controls

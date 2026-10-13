@@ -11,12 +11,12 @@ and the [reference workflow](gpu-reference-workflow.md) for all authoring and pu
 and [GPU attention coverage](gpu-attention-test-coverage.md)
 for exact shapes, source-test mappings, and missing coverage.
 
-SDPA has eight gfx942 configurations. Convolution has sixteen qualified gfx942
+SDPA has eight gfx942 and seven gfx950 configurations. Convolution has sixteen qualified gfx942
 forward cases; the operation guides and DVC pointers record the current bundle
-identities. Both pairs are enrolled for default installation. Both operations share
+identities. All three pairs are enrolled for default installation. Both operations share
 tensor-free artifact handling, worker transport, and installation infrastructure.
 SDPA DVC delivery and architecture-specific packaging have been exercised in CI.
-Additional architectures, convolution gradients, KDA, and GDN remain future work.
+Further architectures, convolution gradients, KDA, and GDN remain future work.
 
 Offline qualification compares a pinned rocKE implementation with an independent
 reference. Ordinary CI executes its precompiled kernels to generate answers,
