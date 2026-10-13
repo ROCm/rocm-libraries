@@ -23,7 +23,6 @@
  * ************************************************************************ */
 
 #include "rocsparse_bsric0_kernel_9_16.hpp"
-#include "rocsparse_assert.hpp"
 #include "rocsparse_common.hpp"
 #include "rocsparse_grid.hpp"
 #include "rocsparse_utility.hpp"

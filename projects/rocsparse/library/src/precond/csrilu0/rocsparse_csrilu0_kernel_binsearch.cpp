@@ -23,7 +23,6 @@
  * ************************************************************************ */
 
 #include "rocsparse_csrilu0_kernel_binsearch.hpp"
-#include "rocsparse_assert.hpp"
 #include "rocsparse_common.hpp"
 #include "rocsparse_grid.hpp"
 #include "rocsparse_utility.hpp"

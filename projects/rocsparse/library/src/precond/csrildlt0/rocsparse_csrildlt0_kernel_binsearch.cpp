@@ -24,7 +24,6 @@
 
 #include "rocsparse_csrildlt0_kernel_binsearch.hpp"
 #include "rocsparse-complex-types.h"
-#include "rocsparse_assert.hpp"
 #include "rocsparse_common.hpp"
 #include "rocsparse_floating_data_t.hpp"
 #include "rocsparse_grid.hpp"
