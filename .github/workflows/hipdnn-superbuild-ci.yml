@@ -214,17 +214,17 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           set -euo pipefail
-          run=true
+          fetch=true
           if [ "$EVENT_NAME" = "pull_request" ]; then
             git fetch --no-tags --depth=1 --filter=blob:none origin "$BASE_SHA"
             if [ -z "$(git diff --name-only "$BASE_SHA" HEAD -- dnn-providers/integration-tests/workloads)" ]; then
-              run=false
+              fetch=false
             fi
           fi
-          echo "run=$run" >> "$GITHUB_OUTPUT"
+          echo "fetch=$fetch" >> "$GITHUB_OUTPUT"
 
       - name: Fetch dnn-benchmarking workloads
-        if: steps.workloads.outputs.run == 'true'
+        if: steps.workloads.outputs.fetch == 'true'
         run: |
           set -euo pipefail
           dvc pull --recursive dnn-providers/integration-tests/workloads
@@ -499,17 +499,17 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           set -euo pipefail
-          run=true
+          fetch=true
           if [ "$EVENT_NAME" = "pull_request" ]; then
             git fetch --no-tags --depth=1 --filter=blob:none origin "$BASE_SHA"
             if [ -z "$(git diff --name-only "$BASE_SHA" HEAD -- dnn-providers/integration-tests/workloads)" ]; then
-              run=false
+              fetch=false
             fi
           fi
-          echo "run=$run" >> "$GITHUB_OUTPUT"
+          echo "fetch=$fetch" >> "$GITHUB_OUTPUT"
 
       - name: Fetch dnn-benchmarking workloads
-        if: steps.workloads.outputs.run == 'true'
+        if: steps.workloads.outputs.fetch == 'true'
         run: |
           set -euo pipefail
           LOGNAME=github-runner dvc pull --recursive dnn-providers/integration-tests/workloads
