@@ -17,57 +17,55 @@
 #pragma once
 
 #include <thrust/detail/config.h>
-#include <thrust/sequence.h>
+
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/iterator/iterator_traits.h>
+#include <thrust/sequence.h>
+#include <thrust/system/detail/adl/sequence.h>
 #include <thrust/system/detail/generic/select_system.h>
 #include <thrust/system/detail/generic/sequence.h>
-#include <thrust/system/detail/adl/sequence.h>
 
 THRUST_NAMESPACE_BEGIN
 
-
 THRUST_EXEC_CHECK_DISABLE
-template<typename DerivedPolicy, typename ForwardIterator>
-THRUST_HOST_DEVICE
-  void sequence(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
-                ForwardIterator first,
-                ForwardIterator last)
+template <typename DerivedPolicy, typename ForwardIterator>
+THRUST_HOST_DEVICE void
+sequence(const thrust::detail::execution_policy_base<DerivedPolicy>& exec, ForwardIterator first, ForwardIterator last)
 {
   using thrust::system::detail::generic::sequence;
   return sequence(thrust::detail::derived_cast(thrust::detail::strip_const(exec)), first, last);
 } // end sequence()
 
-
 THRUST_EXEC_CHECK_DISABLE
-template<typename DerivedPolicy, typename ForwardIterator, typename T>
-THRUST_HOST_DEVICE
-  void sequence(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
-                ForwardIterator first,
-                ForwardIterator last,
-                T init)
+template <typename DerivedPolicy, typename ForwardIterator, typename T>
+THRUST_HOST_DEVICE void sequence(
+  const thrust::detail::execution_policy_base<DerivedPolicy>& exec, ForwardIterator first, ForwardIterator last, T init)
 {
   using thrust::system::detail::generic::sequence;
   return sequence(thrust::detail::derived_cast(thrust::detail::strip_const(exec)), first, last, init);
 } // end sequence()
 
-
 THRUST_EXEC_CHECK_DISABLE
-template<typename DerivedPolicy, typename ForwardIterator, typename T>
-THRUST_HOST_DEVICE
-  void sequence(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
-                ForwardIterator first,
-                ForwardIterator last,
-                T init,
-                T step)
+template <typename DerivedPolicy, typename ForwardIterator, typename T>
+THRUST_HOST_DEVICE void sequence(
+  const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
+  ForwardIterator first,
+  ForwardIterator last,
+  T init,
+  T step)
 {
   using thrust::system::detail::generic::sequence;
   return sequence(thrust::detail::derived_cast(thrust::detail::strip_const(exec)), first, last, init, step);
 } // end sequence()
 
-
-template<typename ForwardIterator>
-  void sequence(ForwardIterator first,
-                ForwardIterator last)
+template <typename ForwardIterator>
+void sequence(ForwardIterator first, ForwardIterator last)
 {
   using thrust::system::detail::generic::select_system;
 
@@ -78,11 +76,8 @@ template<typename ForwardIterator>
   return thrust::sequence(select_system(system), first, last);
 } // end sequence()
 
-
-template<typename ForwardIterator, typename T>
-  void sequence(ForwardIterator first,
-                ForwardIterator last,
-                T init)
+template <typename ForwardIterator, typename T>
+void sequence(ForwardIterator first, ForwardIterator last, T init)
 {
   using thrust::system::detail::generic::select_system;
 
@@ -93,12 +88,8 @@ template<typename ForwardIterator, typename T>
   return thrust::sequence(select_system(system), first, last, init);
 } // end sequence()
 
-
-template<typename ForwardIterator, typename T>
-  void sequence(ForwardIterator first,
-                ForwardIterator last,
-                T init,
-                T step)
+template <typename ForwardIterator, typename T>
+void sequence(ForwardIterator first, ForwardIterator last, T init, T step)
 {
   using thrust::system::detail::generic::select_system;
 
@@ -108,6 +99,5 @@ template<typename ForwardIterator, typename T>
 
   return thrust::sequence(select_system(system), first, last, init, step);
 } // end sequence()
-
 
 THRUST_NAMESPACE_END
