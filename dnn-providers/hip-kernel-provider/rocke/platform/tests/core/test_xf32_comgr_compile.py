@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""The BF16x3 expansion survives codegen for gfx950 (AICK-2208, step 8).
+"""The BF16x3 expansion survives codegen for gfx950 (XF32 plan, step 8).
 
 The lowering tests pin the emitted LLVM IR, which proves the recipe is written
 correctly but not that it is *codegen-able*: a vector ``fptrunc ... to bfloat``
@@ -37,7 +37,7 @@ import unittest
 
 from rocke.analysis.isa import _extract_mnemonic, _instruction_lines
 from rocke.core.arch import ArchTarget
-from rocke.core.ir import F32, IRBuilder, KernelDef, PtrType
+from rocke.core.ir import F32, TF32, IRBuilder, KernelDef, PtrType, VectorType
 from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
 
 _ARCH = "gfx950"
@@ -45,8 +45,8 @@ _ISA = f"amdgcn-amd-amdhsa--{_ARCH}"
 
 # Each emulated atom and the ISA mnemonic its physical atom must become.
 _EMULATED = {
-    "xf32_bf16x3_f32_16x16x32": "v_mfma_f32_16x16x32_bf16",
-    "xf32_bf16x3_f32_32x32x16": "v_mfma_f32_32x32x16_bf16",
+    "mfma_f32_16x16x32_xf32": "v_mfma_f32_16x16x32_bf16",
+    "mfma_f32_32x32x16_xf32": "v_mfma_f32_32x32x16_bf16",
 }
 
 
@@ -66,6 +66,9 @@ def _gate_kernel(op_id: str) -> KernelDef:
     idx = b.const_i32(0)
     a = b.global_load_vN(a_ptr, idx, F32, atom.a_frag_len)
     bv = b.global_load_vN(b_ptr, idx, F32, atom.b_frag_len)
+    # fp32 storage reinterpreted as the logical TF32 operand, as for a native atom.
+    a = b.bitcast(a, VectorType(TF32, atom.a_frag_len))
+    bv = b.bitcast(bv, VectorType(TF32, atom.b_frag_len))
     c = b.vector_splat(b.const_f32(0.0), atom.c_frag_len)
     d = b.mma(atom, a, bv, c)
     # Element-wise rather than one wide store: the 32x32 accumulator is 16

@@ -3,9 +3,9 @@
 # SPDX-License-Identifier: MIT
 #
 # tests/parity/xf32_bf16x3_mma_emit.py -- Python reference emitter for the
-# emulated XF32 MMA atoms, which each engine expands into BF16x3 at lowering.
+# emulated TF32 MMA atoms, which each engine expands into BF16x3 at lowering.
 #
-# No shipped kernel family selects an XF32 atom yet, so without this family the
+# No shipped kernel family selects an emulated atom yet, so without this family the
 # byte-identity gate never compares the two engines on the expansion at all.
 # The engine-parity case in tests/core/test_xf32_bf16x3_lowering.py needs the
 # rocke_engine pybind module; this pair needs only the archive, so run_diff.py
@@ -14,17 +14,20 @@
 # Both sides build through the bare op_id -- rocke_b_mma has no MmaOp form --
 # which also keeps each builder's logical-op_id fragment lookup under the gate.
 #
-# arch = gfx950 (the only target with XF32 rows), llvm_flavor = AUTO, matching
-# the C side.
-from rocke.core.ir import F32, IRBuilder, KernelDef, PtrType
+# Operands are logical TF32 vectors, like the native atoms': fp32 fragments loaded
+# as-is and wrapped with a bitcast, so no payload bit is rounded away.
+#
+# arch = gfx950 (the only target with emulated TF32 rows), llvm_flavor = AUTO,
+# matching the C side.
+from rocke.core.ir import F32, TF32, IRBuilder, KernelDef, PtrType, VectorType
 
 from _emit_common import run_emit
 
 # (logical op_id, A/B fragment length, accumulator fragment length). The lengths
 # are the physical bf16 atom's: the logical atom borrows its fragment.
 CONFIGS = [
-    ("xf32_bf16x3_f32_16x16x32", 8, 4),
-    ("xf32_bf16x3_f32_32x32x16", 8, 16),
+    ("mfma_f32_16x16x32_xf32", 8, 4),
+    ("mfma_f32_32x32x16_xf32", 8, 16),
 ]
 
 
@@ -56,6 +59,8 @@ def _build(spec, *, arch: str = "gfx950") -> KernelDef:
     ab_base = b.mul(tid, ab_stride)
     a = b.global_load_vN(a_ptr, ab_base, F32, ab_len)
     bv = b.global_load_vN(b_ptr, ab_base, F32, ab_len)
+    a = b.bitcast(a, VectorType(TF32, ab_len))
+    bv = b.bitcast(bv, VectorType(TF32, ab_len))
     zero = b.const_f32(0.0)
     c = b.vector_splat(zero, c_len)
     d = b.mma(op_id, a, bv, c)

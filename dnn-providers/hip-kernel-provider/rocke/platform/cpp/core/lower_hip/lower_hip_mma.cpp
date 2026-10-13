@@ -151,6 +151,23 @@ static rocke_status_t rocke_h_op_tile_mma(rocke_h_lowerer_t* lw, const rocke_op_
                       rocke_h_name(lw, op->operands[2]));
         return ROCKE_OK;
     }
+    {
+        /* The expansion exists only in the LLVM lowerer. Without this the op would
+         * reach the generic dispatcher below as tile.<op_id> and fail as though the
+         * HIP backend had merely forgotten a hardware atom. */
+        const rocke_arch_target_t* target = rocke_arch_target_from_gfx(lw->arch.gfx);
+        const rocke_mma_op_t* atom
+            = target ? rocke_mma_catalog_by_op_id(&target->mma, op_id) : NULL;
+        if(atom && !rocke_arch_mma_op_is_native(atom))
+        {
+            return rocke_h_fail(lw,
+                                ROCKE_ERR_NOTIMPL,
+                                "tile.mma %s: an emulated atom (over %s) has no HIP lowering; "
+                                "lower it through the LLVM path",
+                                op_id,
+                                rocke_arch_mma_op_physical_op_id(atom));
+        }
+    }
     /* Ordinary FP32 controls use catalog IDs that have no legacy opcode. */
     if(strcmp(op_id, "mfma_f32_16x16x4_f32") == 0 || strcmp(op_id, "mfma_f32_32x32x2_f32") == 0)
     {

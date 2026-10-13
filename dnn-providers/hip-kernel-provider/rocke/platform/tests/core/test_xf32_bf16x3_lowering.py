@@ -1,12 +1,14 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Lowering gate for the XF32 BF16x3 emulated MMA atoms (AICK-2208).
+"""Lowering gate for the emulated TF32 BF16x3 MMA atoms.
 
-An emulated ``tile.mma`` expands, before ISA dispatch, into a Dekker split of
-each fp32 operand plus three BF16 MMAs threading one fp32 accumulator. What is
-pinned here is everything a numerics reviewer would want to re-derive by hand:
+An emulated ``tile.mma`` takes logical TF32 operands, like a native XF32 atom, and
+expands before ISA dispatch into a Dekker split of the fp32 payload each carries
+plus three BF16 MMAs threading one fp32 accumulator. What is pinned here is
+everything a numerics reviewer would want to re-derive by hand:
 
+* the payload is viewed as fp32 by a bitcast -- never a rounding;
 * the split is ``big = rne_bf16(x)``, ``small = rne_bf16(x - fp32(big))``;
 * the three terms are ``small*big``, ``big*small``, ``big*big`` **in that
   order** -- fp32 accumulation is not associative, so the order is part of the
@@ -26,7 +28,7 @@ import unittest
 
 from rocke.core.arch import ArchTarget
 from rocke.core.backend import BackendError, _lower_via_cpp_engine
-from rocke.core.ir import IRBuilder, KernelDef
+from rocke.core.ir import F32, TF32, IRBuilder, KernelDef, VectorType
 from rocke.core.ir_serialize import serialize
 from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
 
@@ -38,8 +40,8 @@ _FLAVORS = ("llvm20", "llvm22", "llvm23")
 # the place a reviewer checks the catalog against, so deriving it from the
 # catalog would make the test agree with itself.
 _EMULATED = {
-    "xf32_bf16x3_f32_16x16x32": "mfma_f32_16x16x32_bf16",
-    "xf32_bf16x3_f32_32x32x16": "mfma_f32_32x32x16_bf16",
+    "mfma_f32_16x16x32_xf32": "mfma_f32_16x16x32_bf16",
+    "mfma_f32_32x32x16_xf32": "mfma_f32_32x32x16_bf16",
 }
 
 
@@ -55,6 +57,11 @@ def _mma_kernel(op_id: str, *, bare: bool = False) -> KernelDef:
     builder.kernel.attrs["max_workgroup_size"] = atom.wave_size
     a = builder.vector_splat(builder.const_f32(1.0), atom.a_frag_len)
     b = builder.vector_splat(builder.const_f32(2.0), atom.b_frag_len)
+    if not atom.is_native:
+        # An emulated atom takes the native atoms' ABI: fp32 payload bits wrapped
+        # as logical TF32, not an fp32 vector.
+        a = builder.bitcast(a, VectorType(TF32, atom.a_frag_len))
+        b = builder.bitcast(b, VectorType(TF32, atom.b_frag_len))
     c = builder.vector_splat(builder.const_f32(0.0), atom.c_frag_len)
     builder.mma(op_id if bare else atom, a, b, c)
     builder.ret()
@@ -91,10 +98,21 @@ class TestBf16x3Expansion(unittest.TestCase):
                         if f"%xf32_{side}_" in ln.split("=")[0]
                     ]
                     self.assertEqual(
-                        len(split), 4, f"operand {side}: expected a 4-line split"
+                        len(split),
+                        5,
+                        f"operand {side}: expected a cast and a 4-line split",
                     )
-                    big, big_f32, diff, small = split
+                    cast, big, big_f32, diff, small = split
+                    # The I32 carrier is viewed as fp32 by a bitcast -- the whole
+                    # difference from a native XF32 atom, which ignores the low 13
+                    # payload bits; here every one of them reaches the split.
+                    cast_n = cast.split(" =")[0]
+                    self.assertRegex(
+                        cast,
+                        rf"^{re.escape(cast_n)} = bitcast <{n} x i32> %\S+ to {re.escape(f32v)}$",
+                    )
                     src = big.split(f"fptrunc {f32v} ")[1].split(" to ")[0]
+                    self.assertEqual(src, cast_n)
                     big_n = big.split(" =")[0]
                     # big = rne_bf16(src)
                     self.assertEqual(big, f"{big_n} = fptrunc {f32v} {src} to {bf16v}")
@@ -200,6 +218,65 @@ class TestBf16x3Expansion(unittest.TestCase):
                     names[2].startswith("%xf32_acc."),
                     "the last term writes the tile.mma result the caller named",
                 )
+
+
+class TestOperandContract(unittest.TestCase):
+    """Emulated atoms share the native atoms' ABI: TF32 in, FP32 accumulator.
+
+    One kernel body can then reach either through a catalog query. An fp32 vector
+    is not a TF32 operand, and a TF32 vector of the wrong length is not this
+    atom's fragment; the verifier says which, naming the atom's own lengths.
+    """
+
+    def _build(self, op_id: str, a_type, b_type):
+        atom = ArchTarget.from_gfx(_ARCH).mma.by_op_id(op_id)
+        builder = IRBuilder("emulated_mma_bad_operands")
+        a = builder.vector_splat(builder.const_f32(1.0), a_type.count)
+        b = builder.vector_splat(builder.const_f32(1.0), b_type.count)
+        if a_type.elem is TF32:
+            a = builder.bitcast(a, a_type)
+        if b_type.elem is TF32:
+            b = builder.bitcast(b, b_type)
+        c = builder.vector_splat(builder.const_f32(0.0), atom.c_frag_len)
+        return builder, atom, a, b, c
+
+    def test_fp32_fragments_are_rejected(self):
+        for op_id in _EMULATED:
+            with self.subTest(op_id=op_id):
+                n = ArchTarget.from_gfx(_ARCH).mma.by_op_id(op_id).a_frag_len
+                builder, atom, a, b, c = self._build(
+                    op_id, VectorType(F32, n), VectorType(F32, n)
+                )
+                with self.assertRaisesRegex(
+                    ValueError,
+                    rf"{op_id} requires vec<tf32x{n}>, vec<tf32x{n}> and vec<f32x",
+                ):
+                    builder.mma(atom, a, b, c)
+
+    def test_wrong_length_tf32_fragments_are_rejected(self):
+        for op_id in _EMULATED:
+            with self.subTest(op_id=op_id):
+                n = ArchTarget.from_gfx(_ARCH).mma.by_op_id(op_id).a_frag_len
+                short = VectorType(TF32, n // 2)
+                builder, atom, a, b, c = self._build(op_id, short, short)
+                with self.assertRaisesRegex(
+                    ValueError,
+                    rf"{op_id} requires vec<tf32x{n}>, vec<tf32x{n}> and vec<f32x",
+                ):
+                    builder.mma(atom, a, b, c)
+
+    def test_ordinary_atoms_still_refuse_tf32_operands(self):
+        """The new branch is keyed on the catalog, so it cannot widen the old rule."""
+        physical = next(iter(_EMULATED.values()))
+        atom = ArchTarget.from_gfx(_ARCH).mma.by_op_id(physical)
+        builder = IRBuilder("native_mma_with_tf32")
+        a = builder.bitcast(
+            builder.vector_splat(builder.const_f32(1.0), atom.a_frag_len),
+            VectorType(TF32, atom.a_frag_len),
+        )
+        c = builder.vector_splat(builder.const_f32(0.0), atom.c_frag_len)
+        with self.assertRaisesRegex(ValueError, "TF32 operands require an XF32 MMA"):
+            builder.mma(atom, a, a, c)
 
 
 class TestBareOpIdForm(unittest.TestCase):

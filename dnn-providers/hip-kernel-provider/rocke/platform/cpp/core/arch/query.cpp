@@ -470,17 +470,6 @@ const char* rocke_arch_mma_op_id_c_dtype(const char* op_id)
     return NULL;
 }
 
-const char* rocke_arch_mma_op_d_dtype(const rocke_mma_op_t* op)
-{
-    /* Mirrors MmaOp.result_dtype: a NULL d_dtype means "same as c_dtype",
-     * which holds for every atom in the shipped catalog. */
-    if(!op)
-    {
-        return NULL;
-    }
-    return op->d_dtype ? op->d_dtype : op->c_dtype;
-}
-
 bool rocke_arch_mma_op_is_native(const rocke_mma_op_t* op)
 {
     /* Mirrors MmaOp.is_native. A NULL op is native by the same reasoning the
@@ -503,27 +492,40 @@ const char* rocke_arch_mma_op_physical_op_id(const rocke_mma_op_t* op)
     return op->emulation_physical_op_id;
 }
 
-const char* rocke_arch_mma_op_id_d_dtype(const char* op_id)
+bool rocke_arch_mma_op_id_emulated_operands(const char* op_id, int* a_len, int* b_len, int* c_len)
 {
     int i;
     if(!op_id)
     {
-        return NULL;
+        return false;
     }
-    /* The D twin of rocke_arch_mma_op_id_c_dtype, mirroring
-     * target._op_id_d_dtype()[op_id]: same first-hit-wins contract, and a row
-     * that leaves d_dtype NULL contributes its accumulator dtype. Op_ids absent
-     * from every catalog return NULL. */
+    /* Mirrors target._op_id_emulated_tf32_operands()[op_id]. Python derives the
+     * lengths from the physical atom; this static table restates them on the
+     * row, pinned equal by tests/core/test_mma_catalog_lookup.cpp, so reading
+     * the row is the same answer. */
     for(i = 0; i < rocke_ati_arch_registry_len; ++i)
     {
         const rocke_arch_target_t* t = rocke_ati_arch_registry[i].target;
         const rocke_mma_op_t* op = t ? rocke_mma_catalog_by_op_id(&t->mma, op_id) : NULL;
-        if(op)
+        if(op && !rocke_arch_mma_op_is_native(op) && op->a_dtype && op->b_dtype
+           && strcmp(op->a_dtype, "tf32") == 0 && strcmp(op->b_dtype, "tf32") == 0)
         {
-            return rocke_arch_mma_op_d_dtype(op);
+            if(a_len)
+            {
+                *a_len = op->a_frag_len;
+            }
+            if(b_len)
+            {
+                *b_len = op->b_frag_len;
+            }
+            if(c_len)
+            {
+                *c_len = op->c_frag_len;
+            }
+            return true;
         }
     }
-    return NULL;
+    return false;
 }
 
 const char* rocke_arch_mma_op_id_physical_op_id(const char* op_id)

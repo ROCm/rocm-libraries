@@ -427,11 +427,19 @@ static int test_emulated_rows_mirror_physical()
             CHECK(bare_physical != NULL && strcmp(bare_physical, physical_id) == 0);
             CHECK(rocke_arch_mma_c_frag_len(op->op_id) == physical->c_frag_len);
             CHECK(rocke_arch_mma_op_id_physical_op_id(physical_id) == NULL);
+            /* The verifier's query answers with the same fragments, from the row. */
+            int a_len = -1, b_len = -1, c_len = -1;
+            CHECK(rocke_arch_mma_op_id_emulated_operands(op->op_id, &a_len, &b_len, &c_len));
+            CHECK(a_len == physical->a_frag_len && b_len == physical->b_frag_len
+                  && c_len == physical->c_frag_len);
+            CHECK(!rocke_arch_mma_op_id_emulated_operands(physical_id, NULL, NULL, NULL));
             ++checked;
         }
     }
     CHECK(rocke_arch_mma_op_id_physical_op_id("not_a_real_op_id") == NULL);
     CHECK(rocke_arch_mma_op_id_physical_op_id(NULL) == NULL);
+    CHECK(!rocke_arch_mma_op_id_emulated_operands("not_a_real_op_id", NULL, NULL, NULL));
+    CHECK(!rocke_arch_mma_op_id_emulated_operands(NULL, NULL, NULL, NULL));
     printf("emulated rows: %d mirrored their physical atom\n", checked);
     return 0;
 }

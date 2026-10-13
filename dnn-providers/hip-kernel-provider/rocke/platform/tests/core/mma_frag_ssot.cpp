@@ -32,13 +32,17 @@ static int g_failures = 0;
         }                                                                     \
     } while(0)
 
-/* Emit rocke_b_mma(op_id) and assert the result is a vec<expect_elem x
- * expect_frag>. expect_int selects i32 vs f32 for the accumulator element. */
-static void check_atom(rocke_ir_builder_t* b, const char* op_id, int expect_frag, bool expect_int)
+/* Emit rocke_b_mma(op_id) on the given operands and assert the result is a
+ * vec<expect_elem x expect_frag>. expect_int selects i32 vs f32 for the
+ * accumulator element. */
+static void check_atom_on(rocke_ir_builder_t* b,
+                          const char* op_id,
+                          rocke_value_t* a,
+                          rocke_value_t* bb,
+                          rocke_value_t* c,
+                          int expect_frag,
+                          bool expect_int)
 {
-    rocke_value_t* a = rocke_b_const_i32(b, 0);
-    rocke_value_t* bb = rocke_b_const_i32(b, 0);
-    rocke_value_t* c = rocke_b_const_i32(b, 0);
     rocke_value_t* r = rocke_b_mma(b, op_id, a, bb, c, NULL, 0);
 
     CHECK(r != NULL, op_id);
@@ -58,6 +62,29 @@ static void check_atom(rocke_ir_builder_t* b, const char* op_id, int expect_frag
         rocke_scalar_kind_t want = expect_int ? ROCKE_SCALAR_I32 : ROCKE_SCALAR_F32;
         CHECK(r->type->elem->scalar == want, op_id);
     }
+}
+
+/* Placeholder scalar operands: this check is about the result's fragment, not the
+ * operands, which an ordinary atom's builder does not inspect. */
+static void check_atom(rocke_ir_builder_t* b, const char* op_id, int expect_frag, bool expect_int)
+{
+    rocke_value_t* a = rocke_b_const_i32(b, 0);
+    rocke_value_t* bb = rocke_b_const_i32(b, 0);
+    rocke_value_t* c = rocke_b_const_i32(b, 0);
+    check_atom_on(b, op_id, a, bb, c, expect_frag, expect_int);
+}
+
+/* An emulated TF32 atom is verified on the way in: its operands are vec<tf32xN>
+ * (an fp32 payload wrapped by a bitcast) and its accumulator a vec<f32xM>. N and M
+ * are the physical atom's fragment lengths, which the atom borrows. */
+static void check_emulated_atom(rocke_ir_builder_t* b, const char* op_id, int ab_len, int c_len)
+{
+    rocke_value_t* zero = rocke_b_const_f32(b, 0.0);
+    const rocke_type_t* tf32_vec = rocke_vector_type(b, rocke_tf32(), ab_len);
+    rocke_value_t* a = rocke_b_bitcast(b, rocke_b_vector_splat(b, zero, ab_len), tf32_vec);
+    rocke_value_t* bb = rocke_b_bitcast(b, rocke_b_vector_splat(b, zero, ab_len), tf32_vec);
+    rocke_value_t* c = rocke_b_vector_splat(b, zero, c_len);
+    check_atom_on(b, op_id, a, bb, c, c_len, false);
 }
 
 static void check_catalog_fragments(const rocke_mma_catalog_t* catalog, const char* op_id)
@@ -91,10 +118,10 @@ int main(void)
     /* Integer WMMA: 8-wide i32 accumulator. */
     check_atom(&b, "wmma_i32_16x16x16_iu8", 8, true);
     check_atom(&b, "wmma_i32_16x16x16_iu4", 8, true);
-    /* Emulated XF32 atoms have no frag-table row of their own; the logical op_id
+    /* Emulated TF32 atoms have no frag-table row of their own; the logical op_id
      * sizes through the bf16 atom it expands into, so rocke_b_mma can build it. */
-    check_atom(&b, "xf32_bf16x3_f32_16x16x32", 4, false);
-    check_atom(&b, "xf32_bf16x3_f32_32x32x16", 16, false);
+    check_emulated_atom(&b, "mfma_f32_16x16x32_xf32", 8, 4);
+    check_emulated_atom(&b, "mfma_f32_32x32x16_xf32", 8, 16);
 
     /* Keep the C catalog in parity with Python _MMA_FRAGMENT_INFO. The scaled
      * matrix operands are <16 x i32>, so fragment length is 16 elements, not

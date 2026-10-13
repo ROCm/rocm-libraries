@@ -149,14 +149,22 @@ class MmaScaleBlockK(IntEnum):
 class MmaEmulationRecipe(str, Enum):
     """How an emulated atom is expanded into physical matrix instructions."""
 
-    # Three BF16 MMAs over a Dekker-style split of each fp32 operand into a
-    # bf16 "big" part and a bf16 "small" remainder, threading one fp32
-    # accumulator. The small*small cross term is dropped: it is the same order
-    # as the split's own representation error, so computing it buys nothing.
+    # Three BF16 MMAs over a Dekker-style split of the fp32 payload each TF32
+    # operand carries into a bf16 "big" part and a bf16 "small" remainder,
+    # threading one fp32 accumulator. All 32 payload bits are used -- unlike a
+    # native XF32 instruction, nothing is dropped from the operand -- so the
+    # result is at least as accurate as the native atom. The small*small cross
+    # term is dropped: it is the same order as the split's own representation
+    # error, so computing it buys nothing.
     BF16X3 = "bf16x3"
 
     def __str__(self) -> str:
         return self.value
+
+    @property
+    def operand_dtype(self) -> str:
+        """The logical dtype of the A/B operands this recipe emulates."""
+        return "tf32"
 
 
 @dataclass(frozen=True)
@@ -213,12 +221,6 @@ class MmaOp:
     op_ids without verified layout maps still carry frag lengths but raise from
     the accessor until a map is added.
 
-    ``c_dtype`` is the **accumulator input**; :attr:`result_dtype` is what the
-    atom **produces**. Every atom the catalog ships today accumulates and
-    produces the same dtype, so ``d_dtype`` is ``None`` on all of them and
-    :attr:`result_dtype` falls back to ``c_dtype``. The two are named apart so
-    an atom whose D differs from its C needs no schema change to represent.
-
     ``emulation`` is ``None`` for an atom the hardware encodes directly. When
     set, the atom has no native encoding and the lowering expands it into
     repeated issues of ``emulation.physical_op_id``; the frag lengths and layout
@@ -234,11 +236,6 @@ class MmaOp:
     n: int
     k: int
     op_id: str
-    # The result dtype, when it differs from the accumulator. ``None`` means
-    # "same as c_dtype". It trails ``op_id`` rather than sitting next to
-    # ``c_dtype`` because a defaulted dataclass field may not precede a
-    # required one; read it through :attr:`result_dtype`, never directly.
-    d_dtype: Optional[str] = None
     a_frag_len: int = 0
     b_frag_len: int = 0
     c_frag_len: int = 0
@@ -292,11 +289,6 @@ class MmaOp:
     @property
     def shape(self) -> Tuple[int, int, int]:
         return (self.m, self.n, self.k)
-
-    @property
-    def result_dtype(self) -> str:
-        """The dtype this atom produces (D), defaulting to the accumulator (C)."""
-        return self.d_dtype or self.c_dtype
 
     @property
     def is_native(self) -> bool:
@@ -1158,6 +1150,15 @@ def _prefer_native(ops: List[MmaOp]) -> List[MmaOp]:
     Order is preserved, and a list with no emulated atoms is returned unchanged
     -- which is every query against the pre-XF32 catalog, so this cannot perturb
     existing selection.
+
+    The key is the full shape ``(m, n, k)``, so a native atom of a *different* K
+    does not shadow an emulated one -- and :meth:`MmaCatalog.select_largest_k`
+    then prefers the larger K, which is the emulated atom whenever its K is the
+    larger. That cannot happen today because no arch lists a native and an
+    emulated atom for the same ``(a, b, c, m, n)``: gfx942 has only native TF32
+    atoms and gfx950 only emulated ones, and
+    ``test_no_arch_mixes_native_and_emulated_tf32`` pins it. Re-key this on
+    ``(m, n)`` before an arch breaks that.
     """
     if all(op.is_native for op in ops):
         return ops
@@ -1426,33 +1427,47 @@ def _op_id_c_dtype() -> Dict[str, str]:
 
 
 @lru_cache(maxsize=1)
-def _op_id_d_dtype() -> Dict[str, str]:
-    """``op_id -> normalized result dtype``, the D twin of :func:`_op_id_c_dtype`.
+def _op_id_emulated_tf32_operands() -> Dict[str, Tuple[int, int, int]]:
+    """``op_id -> (a_frag_len, b_frag_len, c_frag_len)`` for each emulated TF32 atom.
 
-    A catalog row without an explicit ``"d"`` key contributes its accumulator
-    dtype, because C doubles as the result for every atom shipped today; the
-    key is only spelled when an atom's D differs from its C. Same first-hit and
-    raise-on-drift contract as the C lookup — an op_id names a specific atom, so
-    its result dtype must be invariant across the arches listing it. Mirrored by
-    ``rocke_arch_mma_op_id_d_dtype`` in ``query.cpp``.
+    The operand contract the verifier enforces for an atom the hardware does not
+    encode: A and B are ``vec<tf32xN>``, N being the fragment length the atom
+    borrows from the physical atom it expands into, and the accumulator is
+    ``vec<f32xM>``. Read from the catalog rather than restated, so a new emulated
+    row needs no verifier edit. Same first-hit and raise-on-drift contract as
+    :func:`_op_id_c_dtype` -- an op_id names a specific atom, so its fragments
+    must be invariant across the arches that list it. Mirrored by
+    ``rocke_arch_mma_op_id_emulated_operands`` in ``query.cpp``.
     """
-    out: Dict[str, str] = {}
+    out: Dict[str, Tuple[int, int, int]] = {}
     for row in _load_specs().values():
         for o in row["mma"]:
-            op_id = o["op_id"]
-            d = normalize_dtype(o.get("d", o["c"]))
-            prev = out.get(op_id)
-            if prev is None:
-                out[op_id] = d  # first hit wins
-            elif prev != d:
+            emulation = o.get("emulation")
+            if emulation is None:
+                continue
+            if (normalize_dtype(o["a"]), normalize_dtype(o["b"])) != ("tf32", "tf32"):
+                continue
+            info = _frag_info(emulation["physical_op_id"])
+            lens = (info.a_frag_len, info.b_frag_len, info.c_frag_len)
+            prev = out.setdefault(o["op_id"], lens)  # first hit wins
+            if prev != lens:
                 raise ValueError(
-                    f"arch SSOT drift in {_DATA_FILE.name}: op_id {op_id!r} has "
-                    f"inconsistent result dtype across arches ({prev!r} vs {d!r}). "
-                    f"An op_id names a specific atom, so its result dtype must be "
-                    f"invariant across the arches that list it; fix the catalog so "
-                    f"every row agrees."
+                    f"arch SSOT drift in {_DATA_FILE.name}: op_id {o['op_id']!r} "
+                    f"has inconsistent operand fragments across arches "
+                    f"({prev!r} vs {lens!r}). An op_id names a specific atom, so "
+                    f"its fragments must be invariant across the arches that list "
+                    f"it; fix the catalog so every row agrees."
                 )
     return out
+
+
+def emulated_tf32_operand_lens(op_id: str) -> Optional[Tuple[int, int, int]]:
+    """Operand fragment lengths ``(a, b, c)`` if ``op_id`` is an emulated TF32 atom.
+
+    ``None`` for every atom the hardware encodes, which is the answer for every
+    ordinary MMA, so the verifier's hot path is one dict miss.
+    """
+    return _op_id_emulated_tf32_operands().get(op_id)
 
 
 @lru_cache(maxsize=1)
@@ -1518,14 +1533,21 @@ def _build_mma_op(o: dict) -> MmaOp:
             return None
         return LayoutMap(role=role, frag_len=frag_len, wave_size=info.wave_size, fn=fn)
 
+    a_dtype, b_dtype = normalize_dtype(o["a"]), normalize_dtype(o["b"])
+    if emulation is not None and (
+        a_dtype != emulation.recipe.operand_dtype
+        or b_dtype != emulation.recipe.operand_dtype
+    ):
+        raise ValueError(
+            f"MMA emulation recipe {str(emulation.recipe)!r} emulates "
+            f"{emulation.recipe.operand_dtype} operands; row {op_id!r} has "
+            f"{a_dtype}/{b_dtype}"
+        )
     return MmaOp(
         family=o["family"],
-        a_dtype=normalize_dtype(o["a"]),
-        b_dtype=normalize_dtype(o["b"]),
+        a_dtype=a_dtype,
+        b_dtype=b_dtype,
         c_dtype=normalize_dtype(o["c"]),
-        # Absent "d" leaves d_dtype None, i.e. D == C. Spell "d" in the catalog
-        # only for an atom whose result dtype differs from its accumulator.
-        d_dtype=normalize_dtype(o["d"]) if "d" in o else None,
         m=o["m"],
         n=o["n"],
         k=o["k"],
@@ -1590,6 +1612,20 @@ def _build_target(gfx: str) -> ArchTarget:
         )
     row = specs[gfx]
     mma = MmaCatalog([_build_mma_op(o) for o in row["mma"]])
+    for op in mma.ops:
+        if op.emulation is None:
+            continue
+        # The physical atom is checked against _MMA_FRAGMENT_INFO at row load,
+        # which is global. Whether *this* arch can issue it is a per-arch
+        # question, and answering it wrongly makes the catalog claim support the
+        # compiler then rejects ("Cannot select") at codegen.
+        physical = mma.by_op_id(op.emulation.physical_op_id)
+        if physical is None or not physical.is_native:
+            raise ValueError(
+                f"{gfx}: emulated atom {op.op_id!r} expands into "
+                f"{op.emulation.physical_op_id!r}, which is not a natively "
+                f"encoded atom of {gfx}"
+            )
     mem = row["memory"]
     lim = row["limits"]
     has_mfma = any(op.family == "mma" for op in mma.ops)

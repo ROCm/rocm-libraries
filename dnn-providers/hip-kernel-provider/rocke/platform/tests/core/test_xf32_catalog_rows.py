@@ -1,6 +1,6 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""The two shipped gfx950 XF32 atoms.
+"""The two shipped gfx950 emulated TF32 atoms.
 
 These rows are the first users of the emulation descriptor. What matters about
 them is not that they exist but that they are *faithful*: the fragment they
@@ -15,8 +15,8 @@ import unittest
 from rocke.core.arch import ArchTarget, MmaEmulationRecipe, known_arches
 
 EMULATED = {
-    "xf32_bf16x3_f32_16x16x32": ("mfma_f32_16x16x32_bf16", (16, 16, 32)),
-    "xf32_bf16x3_f32_32x32x16": ("mfma_f32_32x32x16_bf16", (32, 32, 16)),
+    "mfma_f32_16x16x32_xf32": ("mfma_f32_16x16x32_bf16", (16, 16, 32)),
+    "mfma_f32_32x32x16_xf32": ("mfma_f32_32x32x16_bf16", (32, 32, 16)),
 }
 
 
@@ -70,40 +70,63 @@ class TestShippedRows(unittest.TestCase):
             with self.subTest(op_id=op_id):
                 op = ops[op_id]
                 self.assertEqual(op.c_dtype, "fp32")
-                # D is not spelled in the row: it equals the accumulator, and
-                # saying so explicitly would only create a second place to drift.
-                self.assertIsNone(op.d_dtype)
-                self.assertEqual(op.result_dtype, "fp32")
                 self.assertIsNone(op.a_scale_dtype)
                 self.assertIsNone(op.b_scale_dtype)
 
 
 class TestSelection(unittest.TestCase):
-    def test_xf32_queries_reach_both_rows_on_gfx950(self):
+    def test_tf32_queries_reach_both_rows_on_gfx950(self):
         got = ArchTarget.from_gfx("gfx950").mma.enumerate(
-            family="mma", a_dtype="xf32", b_dtype="xf32", c_dtype="fp32"
+            family="mma", a_dtype="tf32", b_dtype="tf32", c_dtype="fp32"
         )
         self.assertEqual({op.op_id for op in got}, set(EMULATED))
 
     def test_largest_k_picks_the_16x16_row(self):
         catalog = ArchTarget.from_gfx("gfx950").mma
-        shape = {"a_dtype": "xf32", "b_dtype": "xf32", "c_dtype": "fp32", "m": 16, "n": 16}
+        shape = {
+            "a_dtype": "tf32",
+            "b_dtype": "tf32",
+            "c_dtype": "fp32",
+            "m": 16,
+            "n": 16,
+        }
         self.assertTrue(catalog.has_shape(k=32, **shape))
         self.assertEqual(
-            catalog.select_largest_k(**shape).op_id, "xf32_bf16x3_f32_16x16x32"
+            catalog.select_largest_k(**shape).op_id, "mfma_f32_16x16x32_xf32"
         )
 
-    def test_no_other_arch_offers_xf32(self):
+    def test_tf32_atoms_are_native_on_gfx942_emulated_on_gfx950_and_absent_elsewhere(
+        self,
+    ):
         """Absence of a row is an explicit rejection -- there is no fallback."""
+        native_gfx942 = {"mfma_f32_16x16x8_xf32", "mfma_f32_32x32x4_xf32"}
         for gfx in known_arches():
-            if gfx == "gfx950":
-                continue
             with self.subTest(gfx=gfx):
-                self.assertFalse(
-                    ArchTarget.from_gfx(gfx).mma.enumerate(
-                        family="mma", a_dtype="xf32", b_dtype="xf32", c_dtype="fp32"
-                    )
+                got = ArchTarget.from_gfx(gfx).mma.enumerate(
+                    family="mma", a_dtype="tf32", b_dtype="tf32", c_dtype="fp32"
                 )
+                expected = {
+                    "gfx942": native_gfx942,
+                    "gfx950": set(EMULATED),
+                }.get(gfx, set())
+                self.assertEqual({op.op_id for op in got}, expected)
+
+    def test_no_arch_mixes_native_and_emulated_tf32(self):
+        """The selection rule's precondition, pinned where it will be noticed.
+
+        ``_prefer_native`` keys on the full shape, so a native atom of a different
+        K does not shadow an emulated one and ``select_largest_k`` would then pick
+        the larger-K emulated atom over the native instruction. Nothing mixes the
+        two today; whoever adds an arch that does has to re-key the rule first.
+        """
+        for gfx in known_arches():
+            by_mn = {}
+            for op in ArchTarget.from_gfx(gfx).mma.ops:
+                if op.a_dtype == "tf32":
+                    by_mn.setdefault((op.m, op.n), set()).add(op.is_native)
+            for mn, kinds in by_mn.items():
+                with self.subTest(gfx=gfx, mn=mn):
+                    self.assertEqual(len(kinds), 1, f"{gfx} mixes native and emulated")
 
     def test_fp32_selection_on_gfx950_is_untouched(self):
         """The rows must not leak into the native fp32 MFMA path."""

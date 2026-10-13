@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""What the BF16x3 recipe is worth numerically (AICK-2208, step 9).
+"""What the BF16x3 recipe is worth numerically (XF32 plan, step 9).
 
 Steps 5-8 prove the recipe is *emitted* and *codegen-able*. Neither says
 anything about what it computes. This pins the arithmetic itself, as a model

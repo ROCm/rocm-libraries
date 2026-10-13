@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""No pre-existing MMA selection moved when XF32 arrived (AICK-2208, step 7).
+"""No pre-existing MMA selection moved when XF32 arrived (XF32 plan, step 7).
 
 Adding rows to a catalog is only safe if the rows are unreachable from every
 query that predates them, and if the preference rule introduced alongside them

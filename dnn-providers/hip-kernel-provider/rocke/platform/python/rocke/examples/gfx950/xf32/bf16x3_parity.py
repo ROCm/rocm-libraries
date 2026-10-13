@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""On-device numeric gate for the XF32 / BF16x3 emulation (AICK-2208, step 9).
+"""On-device numeric gate for the emulated TF32 atoms (BF16x3).
 
 Runs one wave of each emulated gfx950 atom and answers two questions the host
 tests cannot:
@@ -26,7 +26,9 @@ trustworthy without a hand-derived MFMA lane map:
   same value. ``D = K * alpha * beta`` at every output position for *any*
   layout -- and ``alpha``/``beta`` are chosen with significand bits below
   bf16's reach, so the split is genuinely exercised rather than trivially
-  exact.
+  exact. They also carry bits below a native XF32 instruction's 10-bit
+  mantissa, which that instruction would drop: landing within tolerance of the
+  exact product is what pins the contract that the emulation drops none.
 
 Usage::
 
@@ -56,12 +58,12 @@ import sys
 
 import numpy as np
 from rocke.core.arch import ArchTarget
-from rocke.core.ir import BF16, F32, IRBuilder, KernelDef, PtrType
+from rocke.core.ir import BF16, F32, TF32, IRBuilder, KernelDef, PtrType, VectorType
 from rocke.core.lower_llvm import lower_kernel_to_llvm
 
 _ARCH = "gfx950"
 
-_EMULATED = ("xf32_bf16x3_f32_16x16x32", "xf32_bf16x3_f32_32x32x16")
+_EMULATED = ("mfma_f32_16x16x32_xf32", "mfma_f32_32x32x16_xf32")
 
 # Operands for the absolute check. Both round to 1.0 in bf16, so the leading
 # term of the split carries no information at all and the answer depends
@@ -104,7 +106,11 @@ def _store_accumulator(b: IRBuilder, d, out_ptr, tid, c_frag_len: int) -> None:
 
 
 def _emulated_kernel(atom) -> KernelDef:
-    """One emulated ``tile.mma`` over fp32 operands: the thing under test."""
+    """One emulated ``tile.mma`` over TF32 operands: the thing under test.
+
+    The fp32 operand buffers are loaded as-is and reinterpreted as the logical
+    TF32 type, exactly as they would be for a native XF32 atom.
+    """
     b = IRBuilder("xf32_emulated")
     b.kernel.attrs["max_workgroup_size"] = atom.wave_size
     a_ptr = b.param("a", PtrType(F32, "global"))
@@ -117,6 +123,8 @@ def _emulated_kernel(atom) -> KernelDef:
     bv = b.global_load_vN(
         b_ptr, _fragment_base(b, tid, atom.b_frag_len), F32, atom.b_frag_len
     )
+    a = b.bitcast(a, VectorType(TF32, atom.a_frag_len))
+    bv = b.bitcast(bv, VectorType(TF32, atom.b_frag_len))
     c = b.vector_splat(b.const_f32(0.0), atom.c_frag_len)
     _store_accumulator(b, b.mma(atom, a, bv, c), out_ptr, tid, atom.c_frag_len)
     b.ret()

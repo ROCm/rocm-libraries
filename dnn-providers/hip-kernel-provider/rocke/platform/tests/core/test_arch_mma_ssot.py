@@ -22,12 +22,9 @@ from rocke.core.arch import ArchTarget, MmaCatalog, MmaOp, MmaScaleBlockK, MmaSc
 from rocke.core.arch.wmma_scale import gfx1250_scaled_wmma
 
 from rocke.core.arch.target import (
-    _build_mma_op,
     _load_specs,
     _op_id_c_dtype,
-    _op_id_d_dtype,
     _op_id_family,
-    known_arches,
     normalize_dtype,
 )
 
@@ -69,51 +66,6 @@ class TestOpIdCDtype(unittest.TestCase):
                     _op_id_c_dtype()
         finally:
             _op_id_c_dtype.cache_clear()
-
-
-class TestOpIdDDtype(unittest.TestCase):
-    """D (result) is metadata independent of C (accumulator input).
-
-    Today the two coincide for every shipped atom, so these tests pin the
-    fallback rather than a difference: ``d_dtype`` stays unset in the catalog
-    and :attr:`MmaOp.result_dtype` reports the accumulator. The last two prove
-    the field is not merely decorative -- an atom whose D differs from its C is
-    representable, and drifts on it are caught like C's.
-    """
-
-    def test_shipped_atoms_produce_what_they_accumulate(self):
-        for gfx in known_arches():
-            for op in ArchTarget.from_gfx(gfx).mma.ops:
-                with self.subTest(arch=gfx, op_id=op.op_id):
-                    self.assertIsNone(op.d_dtype)
-                    self.assertEqual(op.result_dtype, op.c_dtype)
-
-    def test_bare_op_id_lookup_matches_c_on_shipped_catalog(self):
-        # Same corollary at the bare-op_id layer: no row spells "d", so every
-        # entry falls back to its accumulator and the two maps coincide.
-        self.assertEqual(_op_id_d_dtype(), _op_id_c_dtype())
-
-    def test_explicit_d_key_is_honored(self):
-        sample = next(o for row in _load_specs().values() for o in row["mma"])
-        other = "i32" if normalize_dtype(sample["c"]) != "i32" else "fp32"
-        op = _build_mma_op(dict(sample, d=other))
-        self.assertEqual((op.d_dtype, op.result_dtype), (other, other))
-        self.assertEqual(op.c_dtype, normalize_dtype(sample["c"]))
-
-    def test_raises_on_cross_arch_disagreement(self):
-        specs = _load_specs()
-        sample = next(o for row in specs.values() for o in row["mma"])
-        other = "i32" if normalize_dtype(sample["c"]) != "i32" else "fp32"
-        drifted = dict(specs)
-        drifted["_synthetic_drift"] = {"mma": [dict(sample, d=other)]}
-
-        _op_id_d_dtype.cache_clear()
-        try:
-            with mock.patch("rocke.core.arch.target._load_specs", return_value=drifted):
-                with self.assertRaises(ValueError):
-                    _op_id_d_dtype()
-        finally:
-            _op_id_d_dtype.cache_clear()
 
 
 def _contracts():

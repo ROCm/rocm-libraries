@@ -101,9 +101,30 @@ static const rocke_mma_op_t* _emulated_mma_atom(rocke_lower_t* L, const char* op
     return atom;
 }
 
+/* The fp32 view of a TF32 fragment: its I32 carrier bits, reinterpreted (Python
+ * _tf32_payload_as_f32). A bitcast and nothing else -- never a rounding -- so the
+ * split sees every payload bit the caller put there. That is the difference from
+ * a native XF32 instruction, which ignores the low 13 bits of each operand. */
+static const char*
+    _tf32_payload_as_f32(rocke_lower_t* L, const rocke_value_t* v, const char* hint, int n)
+{
+    char name_hint[32];
+    char i32v[24];
+    char f32v[24];
+    const char* cast;
+
+    snprintf(name_hint, sizeof(name_hint), "%s_f32", hint);
+    cast = rocke_ll_fresh(L, name_hint);
+    snprintf(i32v, sizeof(i32v), "<%d x i32>", n);
+    snprintf(f32v, sizeof(f32v), "<%d x float>", n);
+    rocke_ll_emitf(L, "  %s = bitcast %s %s to %s", cast, i32v, rocke_ll_operand(L, v), f32v);
+    return cast;
+}
+
 /* Dekker-style split of an fp32 fragment into two bf16 fragments (Python
- * _split_f32_to_bf16). ``big`` is v rounded to bf16; ``small`` is what that
- * rounding threw away, itself rounded to bf16.
+ * _split_f32_to_bf16). ``src`` names the fp32 vector of n elements. ``big`` is it
+ * rounded to bf16; ``small`` is what that rounding threw away, itself rounded to
+ * bf16.
  *
  * Both conversions are `fptrunc ... to bfloat`, which is round-to-nearest-even
  * -- LLVM has no other fp32->bf16 rounding -- and the AMDGPU backend selects the
@@ -111,7 +132,7 @@ static const rocke_mma_op_t* _emulated_mma_atom(rocke_lower_t* L, const char* op
  * packed path; CK's *scalar* fallback truncates instead and is deliberately not
  * the parity target. */
 static void _split_f32_to_bf16(rocke_lower_t* L,
-                               const rocke_value_t* v,
+                               const char* src,
                                const char* hint,
                                int n,
                                const rocke_type_t* bf16_vec,
@@ -121,7 +142,6 @@ static void _split_f32_to_bf16(rocke_lower_t* L,
     char f32v[24];
     char bf16v[24];
     char name_hint[32];
-    const char* src = rocke_ll_operand(L, v);
     const char* big;
     const char* big_f32;
     const char* diff;
@@ -157,10 +177,10 @@ static void _split_f32_to_bf16(rocke_lower_t* L,
 /* Expand an emulated tile.mma in place; return whether it was one. Mirrors
  * Python _expand_emulated_mma.
  *
- * BF16x3: split both fp32 operands, then issue three BF16 MMAs threading a
- * single fp32 accumulator. The small*small term is dropped -- its magnitude is
- * the same order as the split's own representation error, so computing it buys
- * nothing.
+ * BF16x3: reinterpret both TF32 operands as fp32, split them, then issue three
+ * BF16 MMAs threading a single fp32 accumulator. The small*small term is dropped
+ * -- its magnitude is the same order as the split's own representation error, so
+ * computing it buys nothing.
  *
  * The term ORDER is load-bearing. fp32 accumulation is not associative, so
  * issuing these three in any other order produces different result bits and
@@ -175,6 +195,8 @@ static bool _expand_emulated_mma(rocke_lower_t* L, const rocke_op_t* op, const c
     char bf16_vec_name[24];
     const rocke_value_t* acc;
     const char* physical;
+    const char* a_f32;
+    const char* b_f32;
     int n;
     int i;
 
@@ -202,26 +224,31 @@ static bool _expand_emulated_mma(rocke_lower_t* L, const rocke_op_t* op, const c
     for(i = 0; i < 2; ++i)
     {
         const rocke_value_t* v = (i == 0) ? a : b;
+        const char* role = (i == 0) ? "a" : "b";
+        const int frag_len = (i == 0) ? atom->a_frag_len : atom->b_frag_len;
         if(!v->type || v->type->kind != ROCKE_TYPE_VECTOR || !v->type->elem
-           || v->type->elem->scalar != ROCKE_SCALAR_F32)
+           || v->type->elem->scalar != ROCKE_SCALAR_TF32)
         {
             rocke_ll_fail(L,
                           ROCKE_ERR_VALUE,
-                          "tile.mma %s: BF16x3 emulation needs an fp32 vector for "
-                          "operand %s, got %s",
+                          "tile.mma %s: BF16x3 emulation needs a TF32 vector for "
+                          "operand %s, got %s; wrap fp32 payload bits with "
+                          "bitcast(v, TF32), or round them first with "
+                          "cvt_f32_to_tf32(v)",
                           atom->op_id,
-                          (i == 0) ? "a" : "b",
+                          role,
                           (v->type && v->type->name) ? v->type->name : "(none)");
         }
-    }
-    if(a->type->count != b->type->count)
-    {
-        rocke_ll_fail(L,
-                      ROCKE_ERR_VALUE,
-                      "tile.mma %s: operand fragments disagree (%d vs %d elements)",
-                      atom->op_id,
-                      a->type->count,
-                      b->type->count);
+        if(v->type->count != frag_len)
+        {
+            rocke_ll_fail(L,
+                          ROCKE_ERR_VALUE,
+                          "tile.mma %s: operand %s must be a vec<tf32x%d>, got %s",
+                          atom->op_id,
+                          role,
+                          frag_len,
+                          v->type->name);
+        }
     }
     n = a->type->count;
 
@@ -232,8 +259,10 @@ static bool _expand_emulated_mma(rocke_lower_t* L, const rocke_op_t* op, const c
     bf16_vec.elem = rocke_scalar_by_name("bf16");
     bf16_vec.count = n;
 
-    _split_f32_to_bf16(L, a, "xf32_a", n, &bf16_vec, &a_big, &a_small);
-    _split_f32_to_bf16(L, b, "xf32_b", n, &bf16_vec, &b_big, &b_small);
+    a_f32 = _tf32_payload_as_f32(L, a, "xf32_a", n);
+    _split_f32_to_bf16(L, a_f32, "xf32_a", n, &bf16_vec, &a_big, &a_small);
+    b_f32 = _tf32_payload_as_f32(L, b, "xf32_b", n);
+    _split_f32_to_bf16(L, b_f32, "xf32_b", n, &bf16_vec, &b_big, &b_small);
     if(!rocke_ll_live(L))
     {
         return true;

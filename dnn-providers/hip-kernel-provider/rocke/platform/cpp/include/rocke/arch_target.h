@@ -134,9 +134,7 @@ typedef struct rocke_mma_scale_filter
 
 /* A supported matrix-multiply-accumulate atom. Frozen, in static storage.
  * Mirrors MmaOp: family is "mma", "wmma", or "wmma_scaled"; matrix dtypes
- * are canonical catalog keys. C is the accumulator input; the produced result
- * is rocke_arch_mma_op_d_dtype(op), which falls back to c_dtype for the atoms
- * that accumulate and produce the same dtype (all of them, today).
+ * are canonical catalog keys. C describes both accumulator input and result.
  * op_id is an opaque backend handle; lowering reads metadata, not its spelling.
  * Layout pointers are NULL when no verified lane map is registered. */
 typedef struct rocke_mma_op
@@ -165,12 +163,6 @@ typedef struct rocke_mma_op
     int b_scale_frag_len;
     const rocke_layout_map_t* a_scale_layout; /* may be NULL */
     const rocke_layout_map_t* b_scale_layout; /* may be NULL */
-    /* Result dtype (D) when it differs from the accumulator (C); NULL means
-     * "same as c_dtype". Trails the scale fields rather than sitting beside
-     * c_dtype so the existing positional catalog initializers keep their
-     * meaning and zero-init it. Read via rocke_arch_mma_op_d_dtype, never
-     * directly. Appended ABI field: native consumers must rebuild. */
-    const char* d_dtype;
     /* Expansion descriptor for an atom with no native encoding. Both fields are
      * NULL/NONE on a natively-encoded atom, which is every atom that predates
      * XF32; zero-init therefore gives the right answer for all of them.
@@ -337,17 +329,6 @@ int rocke_arch_mma_c_frag_len(const char* op_id);
  * interned canonical key (e.g. ROCKE_DTYPE_I32 / "fp32"); do not free. */
 const char* rocke_arch_mma_op_id_c_dtype(const char* op_id);
 
-/* The dtype an atom produces (D), mirroring MmaOp.result_dtype: op->d_dtype
- * when set, else op->c_dtype. A NULL op returns NULL. Do not free. */
-const char* rocke_arch_mma_op_d_dtype(const rocke_mma_op_t* op);
-
-/* Normalised result dtype for op_id -- the D twin of
- * rocke_arch_mma_op_id_c_dtype, mirroring target._op_id_d_dtype()[op_id]. Same
- * first-hit-wins contract; a catalog row that leaves d_dtype NULL contributes
- * its accumulator dtype. Returns NULL for an op_id absent from every catalog.
- * The returned string is an interned canonical key; do not free. */
-const char* rocke_arch_mma_op_id_d_dtype(const char* op_id);
-
 /* True when the hardware encodes this atom directly, mirroring MmaOp.is_native.
  * A NULL op is reported native: callers that lost the row have no expansion to
  * perform. Prefer this over comparing emulation_recipe yourself. */
@@ -363,6 +344,14 @@ const char* rocke_arch_mma_op_physical_op_id(const rocke_mma_op_t* op);
  * op_id wins; natively-encoded rows contribute nothing. Returns NULL for an
  * op_id that no catalog emulates. Do not free. */
 const char* rocke_arch_mma_op_id_physical_op_id(const char* op_id);
+
+/* Operand fragment lengths of an emulated TF32 atom, mirroring
+ * target._op_id_emulated_tf32_operands()[op_id]: the first catalog row that
+ * emulates op_id with TF32 operands wins. Writes the A, B and accumulator
+ * fragment lengths through the (optional) out params and returns true; returns
+ * false, writing nothing, for every other op_id -- which is every ordinary atom,
+ * so the verifier's hot path is one failed lookup. */
+bool rocke_arch_mma_op_id_emulated_operands(const char* op_id, int* a_len, int* b_len, int* c_len);
 
 /* Target-independent family projection. Unknown/NULL IDs return NULL;
  * conflicting families for one ID raise ROCKE_ERR_VALUE. */

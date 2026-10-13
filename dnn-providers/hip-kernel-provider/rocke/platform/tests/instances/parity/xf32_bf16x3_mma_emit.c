@@ -1,7 +1,7 @@
 /* Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
  * SPDX-License-Identifier: MIT
  *
- * tests/parity/xf32_bf16x3_mma_emit.c -- C-side emitter for the emulated XF32
+ * tests/parity/xf32_bf16x3_mma_emit.c -- C-side emitter for the emulated TF32
  * MMA atoms. Builds each kernel identically to xf32_bf16x3_mma_emit.py so
  * run_diff.py can byte-compare the two engines' BF16x3 expansion with nothing
  * but the archive; see that file for why the family exists.
@@ -27,8 +27,8 @@ typedef struct xf32_config
 } xf32_config_t;
 
 static const xf32_config_t CONFIGS[] = {
-    {"xf32_bf16x3_f32_16x16x32", 8, 4},
-    {"xf32_bf16x3_f32_32x32x16", 8, 16},
+    {"mfma_f32_16x16x32_xf32", 8, 4},
+    {"mfma_f32_32x32x16_xf32", 8, 16},
 };
 
 static const int NUM_CONFIGS = (int)(sizeof(CONFIGS) / sizeof(CONFIGS[0]));
@@ -47,9 +47,12 @@ static void build(rocke_ir_builder_t* b, const xf32_config_t* cfg)
     rocke_value_t* ab_base = rocke_b_mul(b, tid, ab_stride);
     rocke_value_t* a = rocke_b_global_load_vN(b, a_ptr, ab_base, rocke_f32(), cfg->ab_len, 0);
     rocke_value_t* bv = rocke_b_global_load_vN(b, b_ptr, ab_base, rocke_f32(), cfg->ab_len, 0);
+    const rocke_type_t* tf32_vec = rocke_vector_type(b, rocke_tf32(), cfg->ab_len);
+    rocke_value_t* a_tf32 = rocke_b_bitcast(b, a, tf32_vec);
+    rocke_value_t* bv_tf32 = rocke_b_bitcast(b, bv, tf32_vec);
     rocke_value_t* zero = rocke_b_const_f32(b, 0.0);
     rocke_value_t* c = rocke_b_vector_splat(b, zero, cfg->c_len);
-    rocke_value_t* d = rocke_b_mma(b, cfg->op_id, a, bv, c, NULL, 0);
+    rocke_value_t* d = rocke_b_mma(b, cfg->op_id, a_tf32, bv_tf32, c, NULL, 0);
     rocke_value_t* c_stride = rocke_b_const_i32(b, cfg->c_len);
     rocke_value_t* c_base = rocke_b_mul(b, tid, c_stride);
     for(int slot = 0; slot < cfg->c_len; ++slot)

@@ -9,6 +9,7 @@ whenever one exists. These tests pin both, plus the load-time validation that
 keeps a malformed descriptor from reaching the lowering.
 """
 
+import copy
 import unittest
 from unittest import mock
 
@@ -17,6 +18,8 @@ from rocke.core.arch import ArchTarget, MmaEmulation, MmaEmulationRecipe, known_
 from rocke.core.arch.target import (
     _MMA_FRAGMENT_INFO,
     _build_mma_op,
+    _build_target,
+    _load_specs,
     _prefer_native,
 )
 
@@ -27,13 +30,13 @@ PHYSICAL = "mfma_f32_16x16x32_bf16"
 def _row(**over):
     row = {
         "family": "mma",
-        "a": "xf32",
-        "b": "xf32",
+        "a": "tf32",
+        "b": "tf32",
         "c": "fp32",
         "m": 16,
         "n": 16,
         "k": 32,
-        "op_id": "xf32_bf16x3_f32_16x16x32",
+        "op_id": "mfma_f32_16x16x32_xf32",
         "emulation": {"recipe": "bf16x3", "physical_op_id": PHYSICAL},
     }
     row.update(over)
@@ -79,7 +82,9 @@ class TestEmulationDescriptor(unittest.TestCase):
 
     def test_unknown_recipe_is_rejected_at_load(self):
         with pytest.raises(ValueError, match="unknown MMA emulation recipe"):
-            _build_mma_op(_row(emulation={"recipe": "fp8x4", "physical_op_id": PHYSICAL}))
+            _build_mma_op(
+                _row(emulation={"recipe": "fp8x4", "physical_op_id": PHYSICAL})
+            )
 
     def test_missing_physical_op_id_is_rejected(self):
         with pytest.raises(ValueError, match="missing required key"):
@@ -101,8 +106,34 @@ class TestEmulationDescriptor(unittest.TestCase):
         """Otherwise the row silently inherits zero-length fragments."""
         with pytest.raises(ValueError, match="not .*registered in _MMA_FRAGMENT_INFO"):
             _build_mma_op(
-                _row(emulation={"recipe": "bf16x3", "physical_op_id": "mfma_nonexistent"})
+                _row(
+                    emulation={"recipe": "bf16x3", "physical_op_id": "mfma_nonexistent"}
+                )
             )
+
+    def test_recipe_fixes_the_operand_dtype(self):
+        """BF16x3 emulates TF32; a row that says otherwise is not that atom."""
+        with pytest.raises(ValueError, match="emulates tf32 operands"):
+            _build_mma_op(_row(a="bf16", b="bf16"))
+
+    def test_physical_atom_must_be_native_on_the_same_arch(self):
+        """Per arch, not globally: a catalog may not claim support the target lacks.
+
+        gfx942 has no K-packed bf16 atom, so an emulated row over one would load
+        and then fail at codegen ("Cannot select"). The row-level check only asks
+        whether the physical atom has fragment metadata anywhere.
+        """
+        specs = copy.deepcopy(_load_specs())
+        specs["gfx942"]["mma"].append(_row())
+        _build_target.cache_clear()
+        try:
+            with mock.patch("rocke.core.arch.target._load_specs", return_value=specs):
+                with pytest.raises(
+                    ValueError, match="not a natively encoded atom of gfx942"
+                ):
+                    ArchTarget.from_gfx("gfx942")
+        finally:
+            _build_target.cache_clear()
 
     def test_descriptor_requires_a_physical_op_id_string(self):
         with pytest.raises(ValueError, match="requires a physical_op_id"):
@@ -113,9 +144,9 @@ class TestPreferNative(unittest.TestCase):
     """`_prefer_native` is the whole selection policy; test it directly."""
 
     def _emulated(self, k=32):
-        return _build_mma_op(_row(k=k, op_id=f"xf32_bf16x3_f32_16x16x{k}"))
+        return _build_mma_op(_row(k=k, op_id=f"mfma_f32_16x16x{k}_xf32"))
 
-    def _native(self, k=32, a="xf32"):
+    def _native(self, k=32, a="tf32"):
         return _build_mma_op(
             {
                 "family": "mma",
@@ -149,14 +180,12 @@ class TestPreferNative(unittest.TestCase):
 
 
 class TestShippedCatalogUnaffected(unittest.TestCase):
-    def test_emulation_is_confined_to_the_xf32_rows(self):
-        """Every atom that predates XF32 is still native, so selection held still."""
+    def test_emulation_is_confined_to_the_tf32_rows(self):
+        """Every atom that is not TF32 is still native, so selection held still."""
         for gfx in known_arches():
             for op in ArchTarget.from_gfx(gfx).mma.ops:
                 with self.subTest(gfx=gfx, op_id=op.op_id):
-                    if op.a_dtype == "xf32":
-                        self.assertIsNotNone(op.emulation)
-                    else:
+                    if op.a_dtype != "tf32":
                         self.assertTrue(op.is_native)
                         self.assertIsNone(op.emulation)
 
@@ -165,9 +194,9 @@ class TestShippedCatalogUnaffected(unittest.TestCase):
 
         Compares live enumerate() output against the same filter with the
         preference rule bypassed entirely. The emulated rows are reachable only
-        through an xf32 query, so no pre-existing query may move -- and the
-        xf32 queries must not move either, there being no native atom to shadow
-        them.
+        through a tf32 query, so no pre-existing query may move -- and the tf32
+        queries must not move either, no arch listing a native and an emulated
+        atom for one (m, n) for the rule to arbitrate.
         """
         for gfx in known_arches():
             catalog = ArchTarget.from_gfx(gfx).mma

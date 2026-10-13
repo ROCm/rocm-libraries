@@ -612,7 +612,16 @@ class _Lowerer:
                 f"__builtin_bit_cast(f32x2, {_name(b)}), {_name(c)}, 0, 0, 0);"
             )
             return
-        op_id = op.attrs["op_id"]
+        atom = self.arch.mma.by_op_id(op_id)
+        if atom is not None and not atom.is_native:
+            # The expansion exists only in the LLVM lowerer. Without this the op
+            # would reach the generic dispatcher below as ``tile.<op_id>`` and fail
+            # as though the HIP backend had merely forgotten a hardware atom.
+            raise NotImplementedError(
+                f"tile.mma {op_id}: an emulated atom ({atom.emulation.recipe} over "
+                f"{atom.emulation.physical_op_id}) has no HIP lowering; lower it "
+                f"through the LLVM path"
+            )
         legacy = Op(
             name=f"tile.{op_id}",
             operands=list(op.operands),

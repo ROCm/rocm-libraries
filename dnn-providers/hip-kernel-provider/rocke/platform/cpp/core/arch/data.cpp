@@ -1097,12 +1097,10 @@ int rocke_arch_mma_c_frag_len(const char* op_id)
  *   family, a_dtype, b_dtype, c_dtype, m, n, k, op_id,
  *   a_frag_len, b_frag_len, c_frag_len, wave_size, a_layout, b_layout, c_layout
  *
- * The trailing scale, d_dtype and emulation fields are left to zero-init below:
- * every atom here is unscaled unless it spells its scale metadata, every one
- * produces the dtype it accumulates (d_dtype NULL => D == C, see
- * rocke_arch_mma_op_d_dtype), and every one is natively encoded
- * (emulation_recipe NONE, see rocke_arch_mma_op_is_native). A row that is none
- * of those must spell its fields positionally through to the last one it needs
+ * The trailing scale and emulation fields are left to zero-init below: every
+ * atom here is unscaled unless it spells its scale metadata, and every one is
+ * natively encoded (emulation_recipe NONE, see rocke_arch_mma_op_is_native). A
+ * row that is neither must spell its fields positionally through to the last one it needs
  * -- C++ forbids mixing designated and positional initializers in one list.
  *
  * Low-bit spellings normalize to explicit exponent/mantissa catalog keys.
@@ -1604,26 +1602,27 @@ static const rocke_mma_op_t k_mma_gfx950[] = {
      NULL,
      NULL,
      NULL},
-    /* XF32 via BF16x3 emulation. No native encoding: each row issues three
-     * mfma_*_bf16 over a Dekker-style split of its fp32 operands. Frag lengths,
-     * wave size and layout maps are inherited verbatim from the physical atom --
-     * they are the *same* fragment, differing only in the element type handed to
-     * the instruction -- and tests/core/test_xf32_catalog_rows.py pins them equal
-     * to the bf16 rows above so the two cannot drift.
+    /* TF32 via BF16x3 emulation. No native encoding: each row issues three
+     * mfma_*_bf16 over a Dekker-style split of the fp32 payload of its TF32
+     * operands. Frag lengths, wave size and layout maps are inherited verbatim
+     * from the physical atom -- they are the *same* fragment, differing only in
+     * the element type handed to the instruction -- and
+     * tests/core/test_xf32_catalog_rows.py pins them equal to the bf16 rows
+     * above so the two cannot drift.
      *
      * These two rows must be spelled fully positionally, through
      * emulation_physical_op_id: C++ forbids mixing designated and positional
      * initializers in one braced-init-list, so reaching a trailing member means
-     * naming every member before it. The NULL/0/NONE run is the unscaled,
-     * D-same-as-C default that every other row gets from zero-init. */
+     * naming every member before it. The NULL/0/NONE run is the unscaled
+     * default that every other row gets from zero-init. */
     {"mma",
-     "xf32",
-     "xf32",
+     "tf32",
+     "tf32",
      "fp32",
      16,
      16,
      32,
-     "xf32_bf16x3_f32_16x16x32",
+     "mfma_f32_16x16x32_xf32",
      8,
      8,
      4,
@@ -1638,17 +1637,16 @@ static const rocke_mma_op_t k_mma_gfx950[] = {
      0,
      NULL,
      NULL,
-     NULL,
      ROCKE_MMA_EMULATION_BF16X3,
      "mfma_f32_16x16x32_bf16"},
     {"mma",
-     "xf32",
-     "xf32",
+     "tf32",
+     "tf32",
      "fp32",
      32,
      32,
      16,
-     "xf32_bf16x3_f32_32x32x16",
+     "mfma_f32_32x32x16_xf32",
      8,
      8,
      16,
@@ -1661,7 +1659,6 @@ static const rocke_mma_op_t k_mma_gfx950[] = {
      ROCKE_MMA_SCALE_NONE,
      0,
      0,
-     NULL,
      NULL,
      NULL,
      ROCKE_MMA_EMULATION_BF16X3,

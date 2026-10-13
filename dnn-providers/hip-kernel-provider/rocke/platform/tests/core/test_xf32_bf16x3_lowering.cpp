@@ -1,8 +1,8 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 /*
- * test_xf32_bf16x3_lowering.cpp -- C++ engine coverage for the XF32 BF16x3
- * emulated MMA atoms (AICK-2208).
+ * test_xf32_bf16x3_lowering.cpp -- C++ engine coverage for the emulated TF32
+ * BF16x3 MMA atoms.
  *
  * The Python-side twin is tests/core/test_xf32_bf16x3_lowering.py. This file
  * pins the recipe on the C engine's own output, by parsing serialized IR (the
@@ -24,8 +24,8 @@
 #include "rocke/ir_serialize.h"
 #include "rocke/lower_llvm.h"
 
-/* One tile.mma on xf32_bf16x3_f32_16x16x32: <8 x float> operands, <4 x float>
- * accumulator. */
+/* One tile.mma on mfma_f32_16x16x32_xf32: vec<tf32x8> operands (an fp32 payload
+ * wrapped by a bitcast), <4 x float> accumulator. */
 static const char* const k_ir_16x16x32
     = "ckdsl.ir v1\n"
       "kernel @emulated_mma_smoke {\n"
@@ -35,17 +35,19 @@ static const char* const k_ir_16x16x32
       "  region @entry {\n"
       "    %c1 : f32 = arith.constant (  ) { ity = s:\"f32\", value = f:1.0 }\n"
       "    %splat2 : vec<f32x8> = vector.splat ( %c1 ) { vec = i:8 }\n"
+      "    %tfa : vec<tf32x8> = arith.bitcast ( %splat2 ) { target = s:\"vec<tf32x8>\" }\n"
       "    %c3 : f32 = arith.constant (  ) { ity = s:\"f32\", value = f:2.0 }\n"
       "    %splat4 : vec<f32x8> = vector.splat ( %c3 ) { vec = i:8 }\n"
+      "    %tfb : vec<tf32x8> = arith.bitcast ( %splat4 ) { target = s:\"vec<tf32x8>\" }\n"
       "    %c5 : f32 = arith.constant (  ) { ity = s:\"f32\", value = f:0.0 }\n"
       "    %splat6 : vec<f32x4> = vector.splat ( %c5 ) { vec = i:4 }\n"
-      "    %acc7 : vec<f32x4> = tile.mma ( %splat2, %splat4, %splat6 ) "
-      "{ op_id = s:\"xf32_bf16x3_f32_16x16x32\" }\n"
+      "    %acc7 : vec<f32x4> = tile.mma ( %tfa, %tfb, %splat6 ) "
+      "{ op_id = s:\"mfma_f32_16x16x32_xf32\" }\n"
       "    cf.return (  )\n"
       "  }\n"
       "}\n";
 
-/* The 32x32x16 twin: same <8 x float> operands, <16 x float> accumulator. */
+/* The 32x32x16 twin: same vec<tf32x8> operands, <16 x float> accumulator. */
 static const char* const k_ir_32x32x16
     = "ckdsl.ir v1\n"
       "kernel @emulated_mma_smoke {\n"
@@ -55,12 +57,14 @@ static const char* const k_ir_32x32x16
       "  region @entry {\n"
       "    %c1 : f32 = arith.constant (  ) { ity = s:\"f32\", value = f:1.0 }\n"
       "    %splat2 : vec<f32x8> = vector.splat ( %c1 ) { vec = i:8 }\n"
+      "    %tfa : vec<tf32x8> = arith.bitcast ( %splat2 ) { target = s:\"vec<tf32x8>\" }\n"
       "    %c3 : f32 = arith.constant (  ) { ity = s:\"f32\", value = f:2.0 }\n"
       "    %splat4 : vec<f32x8> = vector.splat ( %c3 ) { vec = i:8 }\n"
+      "    %tfb : vec<tf32x8> = arith.bitcast ( %splat4 ) { target = s:\"vec<tf32x8>\" }\n"
       "    %c5 : f32 = arith.constant (  ) { ity = s:\"f32\", value = f:0.0 }\n"
       "    %splat6 : vec<f32x16> = vector.splat ( %c5 ) { vec = i:16 }\n"
-      "    %acc7 : vec<f32x16> = tile.mma ( %splat2, %splat4, %splat6 ) "
-      "{ op_id = s:\"xf32_bf16x3_f32_32x32x16\" }\n"
+      "    %acc7 : vec<f32x16> = tile.mma ( %tfa, %tfb, %splat6 ) "
+      "{ op_id = s:\"mfma_f32_32x32x16_xf32\" }\n"
       "    cf.return (  )\n"
       "  }\n"
       "}\n";
@@ -117,8 +121,9 @@ static int count(const char* haystack, const char* needle)
     return n;
 }
 
-/* Each operand is split into big / small by four lines: narrow, widen, subtract,
- * narrow the remainder. */
+/* Each operand is reinterpreted as fp32 -- a bitcast, never a rounding -- and then
+ * split into big / small by four lines: narrow, widen, subtract, narrow the
+ * remainder. */
 static int test_operands_are_split(void)
 {
     int failed = 0;
@@ -138,16 +143,21 @@ static int test_operands_are_split(void)
             continue;
         }
         char line[128];
-        /* a: big = rne_bf16(%splat2), then the error term. */
-        snprintf(line, sizeof(line), "fptrunc %s %%splat2 to %s", cases[i].f32v, cases[i].bf16v);
-        CHECK(strstr(ll, line) != NULL, "operand a is not narrowed to bf16");
-        snprintf(line, sizeof(line), "fsub %s %%splat2,", cases[i].f32v);
-        CHECK(strstr(ll, line) != NULL, "operand a's rounding error is not taken");
-        /* b: the same, from the other splat. */
-        snprintf(line, sizeof(line), "fptrunc %s %%splat4 to %s", cases[i].f32v, cases[i].bf16v);
-        CHECK(strstr(ll, line) != NULL, "operand b is not narrowed to bf16");
-        snprintf(line, sizeof(line), "fsub %s %%splat4,", cases[i].f32v);
-        CHECK(strstr(ll, line) != NULL, "operand b's rounding error is not taken");
+        /* The I32 carrier is viewed as fp32 once per operand, and by bitcast only. */
+        CHECK(strstr(ll, "= bitcast <8 x i32> %tfa to <8 x float>") != NULL,
+              "operand a's payload is not reinterpreted as fp32");
+        CHECK(strstr(ll, "= bitcast <8 x i32> %tfb to <8 x float>") != NULL,
+              "operand b's payload is not reinterpreted as fp32");
+        /* a: big = rne_bf16(payload), then the error term. */
+        CHECK(strstr(ll, "fptrunc <8 x float> %xf32_a_f32.") != NULL,
+              "operand a is not narrowed to bf16");
+        CHECK(strstr(ll, "fsub <8 x float> %xf32_a_f32.") != NULL,
+              "operand a's rounding error is not taken");
+        /* b: the same, from the other operand. */
+        CHECK(strstr(ll, "fptrunc <8 x float> %xf32_b_f32.") != NULL,
+              "operand b is not narrowed to bf16");
+        CHECK(strstr(ll, "fsub <8 x float> %xf32_b_f32.") != NULL,
+              "operand b's rounding error is not taken");
         /* Four narrowings and two widenings in total -- no more, no fewer. */
         snprintf(line, sizeof(line), " to %s", cases[i].bf16v);
         CHECK(count(ll, line) == 4, "expected exactly four fp32->bf16 narrowings");
@@ -234,7 +244,7 @@ static int test_no_emulated_atom_survives(void)
 {
     int failed = 0;
     const char* const irs[2] = {k_ir_16x16x32, k_ir_32x32x16};
-    const char* const op_ids[2] = {"xf32_bf16x3_f32_16x16x32", "xf32_bf16x3_f32_32x32x16"};
+    const char* const op_ids[2] = {"mfma_f32_16x16x32_xf32", "mfma_f32_32x32x16_xf32"};
     for(int i = 0; i < 2; ++i)
     {
         char* ll = lower(irs[i]);
@@ -245,6 +255,88 @@ static int test_no_emulated_atom_survives(void)
         }
         CHECK(strstr(ll, op_ids[i]) == NULL, "an emulated op_id leaked into the IR");
         free(ll);
+    }
+    return failed;
+}
+
+/* Lower serialized IR for gfx950 and return the engine's error text; caller
+ * frees. NULL when the IR unexpectedly lowers. */
+static char* lower_error(const char* ir_text)
+{
+    rocke_ir_builder_t b;
+    char* error_text = NULL;
+    if(rocke_ir_builder_init(&b, "xf32_bf16x3_lowering") != ROCKE_OK)
+    {
+        return NULL;
+    }
+    rocke_kernel_def_t* kernel = NULL;
+    if(rocke_ir_parse(ir_text, &b, &kernel) == ROCKE_OK && kernel)
+    {
+        char* out = NULL;
+        char err[ROCKE_ERR_MSG_CAP];
+        err[0] = '\0';
+        rocke_status_t st = rocke_lower_kernel_to_llvm_ex(
+            kernel, ROCKE_LLVM_FLAVOR_LLVM20, "gfx950", &out, err, sizeof(err));
+        if(st != ROCKE_OK)
+        {
+            error_text = strdup(err);
+        }
+        free(out);
+    }
+    rocke_ir_builder_free(&b);
+    return error_text;
+}
+
+/* The emulated atoms share the native atoms' ABI: logical TF32 operands carried
+ * as I32. An fp32 vector is not one, and a TF32 vector of the wrong length is
+ * not this atom's fragment -- both are rejected, and the message names what was
+ * expected. */
+static int test_operands_must_be_tf32_fragments(void)
+{
+    int failed = 0;
+    static const char* const k_fp32_operands
+        = "ckdsl.ir v1\n"
+          "kernel @emulated_mma_bad {\n"
+          "  attrs { max_workgroup_size = i:64 }\n"
+          "  params {\n"
+          "  }\n"
+          "  region @entry {\n"
+          "    %c1 : f32 = arith.constant (  ) { ity = s:\"f32\", value = f:1.0 }\n"
+          "    %splat2 : vec<f32x8> = vector.splat ( %c1 ) { vec = i:8 }\n"
+          "    %splat6 : vec<f32x4> = vector.splat ( %c1 ) { vec = i:4 }\n"
+          "    %acc7 : vec<f32x4> = tile.mma ( %splat2, %splat2, %splat6 ) "
+          "{ op_id = s:\"mfma_f32_16x16x32_xf32\" }\n"
+          "    cf.return (  )\n"
+          "  }\n"
+          "}\n";
+    static const char* const k_short_fragment
+        = "ckdsl.ir v1\n"
+          "kernel @emulated_mma_bad {\n"
+          "  attrs { max_workgroup_size = i:64 }\n"
+          "  params {\n"
+          "  }\n"
+          "  region @entry {\n"
+          "    %c1 : f32 = arith.constant (  ) { ity = s:\"f32\", value = f:1.0 }\n"
+          "    %splat2 : vec<f32x4> = vector.splat ( %c1 ) { vec = i:4 }\n"
+          "    %tfa : vec<tf32x4> = arith.bitcast ( %splat2 ) { target = s:\"vec<tf32x4>\" }\n"
+          "    %acc7 : vec<f32x4> = tile.mma ( %tfa, %tfa, %splat2 ) "
+          "{ op_id = s:\"mfma_f32_16x16x32_xf32\" }\n"
+          "    cf.return (  )\n"
+          "  }\n"
+          "}\n";
+    const char* const cases[2] = {k_fp32_operands, k_short_fragment};
+    for(int i = 0; i < 2; ++i)
+    {
+        char* err = lower_error(cases[i]);
+        CHECK(err != NULL, "a non-TF32 operand must be rejected");
+        if(err)
+        {
+            CHECK(strstr(err,
+                         "mfma_f32_16x16x32_xf32 requires vec<tf32x8>, vec<tf32x8> and vec<f32x4>")
+                      != NULL,
+                  err);
+            free(err);
+        }
     }
     return failed;
 }
@@ -287,6 +379,7 @@ int main(void)
     failed |= test_operands_are_split();
     failed |= test_three_terms_in_order();
     failed |= test_no_emulated_atom_survives();
+    failed |= test_operands_must_be_tf32_fragments();
     failed |= test_native_atom_is_unchanged();
     if(failed)
     {

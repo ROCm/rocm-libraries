@@ -97,8 +97,8 @@
         {"family": "mma", "a": "bf8",  "b": "bf8",  "c": "fp32", "m": 32, "n": 32, "k": 16,  "op_id": "mfma_f32_32x32x16_bf8"},
         {"family": "mma", "a": "fp4",  "b": "fp4",  "c": "fp32", "m": 16, "n": 16, "k": 128, "op_id": "mfma_f32_16x16x128_fp4"},
         {"family": "mma", "a": "fp6",  "b": "fp6",  "c": "fp32", "m": 16, "n": 16, "k": 96,  "op_id": "mfma_f32_16x16x96_fp6"},
-        {"family": "mma", "a": "xf32", "b": "xf32", "c": "fp32", "m": 16, "n": 16, "k": 32,  "op_id": "xf32_bf16x3_f32_16x16x32", "emulation": {"recipe": "bf16x3", "physical_op_id": "mfma_f32_16x16x32_bf16"}},
-        {"family": "mma", "a": "xf32", "b": "xf32", "c": "fp32", "m": 32, "n": 32, "k": 16,  "op_id": "xf32_bf16x3_f32_32x32x16", "emulation": {"recipe": "bf16x3", "physical_op_id": "mfma_f32_32x32x16_bf16"}}
+        {"family": "mma", "a": "tf32", "b": "tf32", "c": "fp32", "m": 16, "n": 16, "k": 32,  "op_id": "mfma_f32_16x16x32_xf32", "emulation": {"recipe": "bf16x3", "physical_op_id": "mfma_f32_16x16x32_bf16"}},
+        {"family": "mma", "a": "tf32", "b": "tf32", "c": "fp32", "m": 32, "n": 32, "k": 16,  "op_id": "mfma_f32_32x32x16_xf32", "emulation": {"recipe": "bf16x3", "physical_op_id": "mfma_f32_32x32x16_bf16"}}
       ]
     },
     "gfx1151": {
