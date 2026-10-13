@@ -346,13 +346,18 @@ from .scan import (
 )
 from .schedule import SchedulePolicy
 from .streamk import (
+    StreamKIterArgs,
+    StreamKIterPartition,
     StreamKPartition,
     StreamKReductionStrategy,
     compute_streamk_grid_size,
     emit_streamk_decode,
-    emit_streamk_partial_load_accumulate,
-    emit_streamk_partial_store,
+    emit_streamk_iter_range,
+    emit_streamk_sk_start_iter,
+    streamk_end_iter,
+    streamk_iter_partition,
     streamk_num_macro_tiles,
+    streamk_start_iter,
 )
 from .spec import (
     IOSpecRule,
@@ -611,12 +616,17 @@ __all__ = [
     "load_sorted_topk_weight",
     "scatter_token_offset",
     # StreamK partitioner ( StreamK GEMM)
+    "StreamKIterArgs",
+    "StreamKIterPartition",
     "StreamKPartition",
     "StreamKReductionStrategy",
     "compute_streamk_grid_size",
     "emit_streamk_decode",
-    "emit_streamk_partial_load_accumulate",
-    "emit_streamk_partial_store",
+    "emit_streamk_iter_range",
+    "emit_streamk_sk_start_iter",
+    "streamk_end_iter",
+    "streamk_iter_partition",
+    "streamk_start_iter",
     "mfma_attention_bwd_dot_do_o_inner_body",
     "mfma_attention_bwd_dq_dk_dv_inner_body",
     "streamk_num_macro_tiles",
