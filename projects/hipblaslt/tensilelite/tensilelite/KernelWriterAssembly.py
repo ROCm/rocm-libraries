@@ -15345,24 +15345,14 @@ class KernelWriterAssembly(KernelWriter):
     # paired-store both-blocks-valid test -- is dead. Skip the allocation entirely and
     # leave the guard state None so those sites emit nothing; _emitSubtileGuards (~20
     # SALU + a v_readfirstlane, per fused emission) is skipped in globalWriteElements.
-    fusedDefinedGuards = not self._plsinFusedNoGuards()
-    if fusedDefinedGuards:
-      # Use defineSgpr (not defineSgprIdx) so the checkout skips vars currently
-      # parked in freeSgprVarPool. On StreamK the workspace SRD (SrdWS) is parked
-      # here (reused as a main-loop temp) and defineSgprIdx would grab its
-      # registers, making the later post-loop removeSgprVarFromPool("SrdWS") fail
-      # ("not in Available state"). defineSgpr temporarily marks the parked vars
-      # in-use across the checkout, so the guard SGPRs land on genuinely-free
-      # registers. Also protects the just-lent LocalWriteBaseAddr/Swap SGPRs above.
-      module.add(self.defineSgpr("SubtileMGuard", 1))
-      module.add(self.defineSgpr("SubtileNGuard", 1))
-      self.states.subtileM32ValidBlocksSgpr = self.sgprs["SubtileMGuard"]
-      self.states.subtileN16ValidBlocksSgpr = self.sgprs["SubtileNGuard"]
-    else:
-      self.states.subtileM32ValidBlocksSgpr = None
-      self.states.subtileN16ValidBlocksSgpr = None
-      self.states.subtileTotalMOffsetSgpr   = None
-      self.states.subtileMBlockSize         = 0
+    # So the guards are never defined on this arm. If a partial-tile fused store
+    # ever returns they come back here -- and note that this point is inside the
+    # NLL, where StreamK has SrdWS parked and borrowed as a main-loop temp, so
+    # they would have to be taken through defineSgpr rather than defineSgprIdx.
+    self.states.subtileM32ValidBlocksSgpr = None
+    self.states.subtileN16ValidBlocksSgpr = None
+    self.states.subtileTotalMOffsetSgpr   = None
+    self.states.subtileMBlockSize         = 0
 
     # --- external D bpe: the GSU==1 store arm normally sets bpeCexternal to the
     # external (DestDataType) bpe. Our noGSUBranch=True call skips the gsuLimit>1
@@ -15699,9 +15689,6 @@ class KernelWriterAssembly(KernelWriter):
          _spool[_idx].status == RegisterPool.Status.InUse:
         module.add(self.undefineSgpr(_name))
       self.sgprs.pop(_name, None)
-    if fusedDefinedGuards:
-      module.add(self.undefineSgpr("SubtileNGuard"))
-      module.add(self.undefineSgpr("SubtileMGuard"))
     self.states.subtileMBlockSize          = savedMBlockSize
     self.states.subtileTotalMOffsetSgpr    = savedTotalMOffSgpr
     self.states.subtileN16ValidBlocksSgpr  = savedN16Sgpr
