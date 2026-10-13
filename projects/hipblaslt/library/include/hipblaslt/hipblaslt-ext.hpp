@@ -74,8 +74,8 @@ namespace hipblaslt_ext
          *  \brief This function sets the maximum workspace size.
          *
          *  @param[in]
-         *  workspaceBytes  Set the maximum workspace size in bytes. Above ``UINT32_MAX``
-         *  (4 GiB - 1), algoGetHeuristic returns HIPBLAS_STATUS_INVALID_VALUE.
+         *  workspaceBytes  Set the maximum workspace size in bytes. algoGetHeuristic clamps
+         *  values above ``UINT32_MAX`` (4 GiB - 1) to ``UINT32_MAX``.
          */
         HIPBLASLT_EXPORT void setMaxWorkspaceBytes(size_t workspaceBytes);
 
@@ -490,8 +490,8 @@ namespace hipblaslt_ext
          *  \brief This function sets the maximum workspace size.
          *
          *  @param[in]
-         *  workspaceBytes  Sets the maximum workspace size in bytes. Above ``UINT32_MAX``
-         *  (4 GiB - 1), initialize returns HIPBLAS_STATUS_INVALID_VALUE.
+         *  workspaceBytes  Sets the maximum workspace size in bytes. initialize clamps
+         *  values above ``UINT32_MAX`` (4 GiB - 1) to ``UINT32_MAX``.
          */
         HIPBLASLT_EXPORT void setMaxWorkspaceBytes(size_t workspaceBytes);
 

@@ -293,6 +293,12 @@ Selection pins a spec the same way for dense and unified:
   reason; nothing falls back. An id from
   another variant is rejected before the search.
 - `tuning_id="auto"` selects the candidate's base spec.
+- `emit_lse=True` asks for the optional FP32 LSE output (natural-log softmax
+  normalizer). It is the `lse` request feature; only the dense candidates declare
+  it, so an unpinned LSE request is refused instead of reaching a kernel without
+  the output. It is a dense output field (`DENSE_OUTPUT_FIELDS`), so sweeps
+  never vary it. The caller passes the buffer to `bind_torch` as `tensors["lse"]`;
+  the dense runner validates its shape, dtype, device, and overlap.
 
 A candidate resolves a request once: `support` and `select_spec` share a
 per-candidate cache, so a pin is not resolved twice.
