@@ -21,8 +21,7 @@ from Tensile.KernelWriterAssembly import KernelWriterAssembly
 from Tensile.Common.Utilities import (
     isMxf4SubtilePath,
     plsinBlockSchedTile,
-    plsinEarlyStoreTile,
-    plsinSubtileTypes,
+    plsinDataTypes,
 )
 
 pytestmark = pytest.mark.unit
@@ -107,37 +106,34 @@ def test_use_subtile_impl_alone_does_not_open_the_gate():
     [pytest.param(k, e, id=d) for d, k, e in _SCOPE_CASES],
 )
 def test_plsin_subtile_types_ignores_use_subtile_impl(kernel, expected):
-    """``plsinSubtileTypes`` is the type half of the gate on its own.
+    """``plsinDataTypes`` is the type half of the gate on its own.
 
     It must answer for the operand types alone, so that the only case where it
     disagrees with the full gate is the one where UseSubtileImpl is off.
     """
-    typesOnly = plsinSubtileTypes(kernel)
+    typesOnly = plsinDataTypes(kernel)
     if kernel["UseSubtileImpl"]:
         assert typesOnly is expected
     else:
         assert typesOnly is True
 
 
-@pytest.mark.parametrize("mt0,mt1,early,blockSched", [
-    (256, 256, True, True),      # the one geometry block scheduling is measured on
-    (128, 128, True, False),     # PLSIN-eligible, deliberately not block-scheduled
-    (192, 256, True, False),     # satisfies the <=256 bound; the equality excludes it
-    (256, 192, True, False),
-    (320, 256, False, False),    # >256: lends its K=0 operand registers to the store
-    (256, 320, False, False),
+@pytest.mark.parametrize("mt0,mt1,blockSched", [
+    (256, 256, True),      # the one geometry block scheduling is measured on
+    (128, 128, False),     # PLSIN-eligible, deliberately not block-scheduled
+    (192, 256, False),     # the equality excludes it; a <= bound would not
+    (256, 192, False),
+    (320, 256, False),     # >256: lends its K=0 operand registers to the store
+    (256, 320, False),
 ])
-def test_tile_scope(mt0, mt1, early, blockSched):
-    """The tile predicates, held apart from the type predicate.
+def test_tile_scope(mt0, mt1, blockSched):
+    """MT256x256 is an equality, not a bound.
 
-    ``plsinBlockSchedTile`` is an equality rather than a bound on purpose:
-    MT192x256 also passes ``plsinEarlyStoreTile`` and would otherwise be dragged
-    in untested. MT>256x256 is excluded even from early-store work because it
-    lends its K=0 operand registers to the store.
+    MT192x256 would pass any ``<= 256`` form and be dragged in untested, and
+    MT>256x256 could not take an early store at all -- it lends its K=0 operand
+    registers to the store, so one moved earlier would read them mid-flight.
     """
-    kernel = kern(mt0=mt0, mt1=mt1)
-    assert plsinEarlyStoreTile(kernel) is early
-    assert plsinBlockSchedTile(kernel) is blockSched
+    assert plsinBlockSchedTile(kern(mt0=mt0, mt1=mt1)) is blockSched
 
 
 def test_block_scheduling_requires_plsin():
@@ -151,7 +147,7 @@ def test_block_scheduling_requires_plsin():
     answers True.
     """
     noPlsin = kern(plsin=False)
-    assert plsinEarlyStoreTile(noPlsin) is True
+    assert isMxf4SubtilePath(noPlsin) is True
     assert plsinBlockSchedTile(noPlsin) is False
 
 
@@ -180,34 +176,34 @@ def test_tile_scope_requires_tn(layout, transA, transB):
     kernel = kern(transA=transA, transB=transB)
     inScope = layout == "TN"
     assert isMxf4SubtilePath(kernel) is inScope
-    assert plsinEarlyStoreTile(kernel) is inScope
     assert plsinBlockSchedTile(kernel) is inScope
 
 
 def test_tile_scope_requires_the_type_scope():
     """No tile is in scope once the operand types are out of it."""
     outOfScope = kern(dtD=FP32)
-    assert plsinEarlyStoreTile(outOfScope) is False
+    assert isMxf4SubtilePath(outOfScope) is False
     assert plsinBlockSchedTile(outOfScope) is False
 
 
 def test_block_scheduling_stays_inside_the_mxf4_path():
-    """Every tile predicate is a subset of the type/subtile gate.
+    """Block scheduling is a strict subset of the scope gate.
 
     The block-scheduled tail, its staged store and the finer store grid are all
     reached through ``plsinBlockSchedTile``, never through
     ``isMxf4SubtilePath`` directly, so no call site checks the containment. The
     barrier and wait-accounting changes are scoped the other way, on
     ``isMxf4SubtilePath`` itself, and the two only agree as long as the tile
-    predicates stay inside it. Loosening one -- dropping the type check from
-    ``plsinEarlyStoreTile``, say, or widening the tile bound past it -- would
-    start building the block schedule for kernels none of this was measured on,
-    and the first sign of it would be a library diff rather than a failing test.
+    predicates stay inside it. Loosening the tile predicate -- restating the
+    gate's terms instead of calling it, or widening the equality to a bound --
+    would start building the block schedule for kernels none of this was
+    measured on, and the first sign of it would be a library diff rather than a
+    failing test.
 
-    The product sweeps the layout too. It did not, and that is how the tile
-    predicates came to be missing the TN restriction that ``isMxf4SubtilePath``
-    carries: every case here was TN, so the containment held vacuously on the
-    one axis where it did not hold at all.
+    The product sweeps the layout too. It did not, and that is exactly how the
+    tile predicate came to be missing the TN restriction the gate carries:
+    every case here was TN, so the containment held vacuously on the one axis
+    where it did not hold at all.
     """
     tiles = (64, 128, 192, 256, 320)
     for dtA, dtB, dtD, subtile, mt0, mt1, plsin, (tA, tB) in itertools.product(
@@ -216,13 +212,8 @@ def test_block_scheduling_stays_inside_the_mxf4_path():
             ((True, False), (False, False), (False, True), (True, True))):
         kernel = kern(dtA=dtA, dtB=dtB, dtD=dtD, subtile=subtile,
                       mt0=mt0, mt1=mt1, plsin=plsin, transA=tA, transB=tB)
-        early = plsinEarlyStoreTile(kernel)
-        blockSched = plsinBlockSchedTile(kernel)
-        if early:
+        if plsinBlockSchedTile(kernel):
             assert isMxf4SubtilePath(kernel), \
-                f"early-store work escaped the MXF4 path: {kernel}"
-        if blockSched:
-            assert early and isMxf4SubtilePath(kernel), \
                 f"block scheduling escaped the MXF4 path: {kernel}"
 
 

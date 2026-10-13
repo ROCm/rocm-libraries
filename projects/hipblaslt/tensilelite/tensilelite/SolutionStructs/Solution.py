@@ -84,7 +84,7 @@ from .Utilities import TDM_PAD_INTERVAL_LIMIT, isSubtileIterateMode, reject, rou
 from .Validators.MXScaleFormat import validateMXScaleFormatCombination
 from .Validators.Subtile import (subtileStackForTLU1, subtileTLU1StackReason,
                                  validateSubtileGRKPartition)
-from ..Common.Utilities import isMxf4SubtilePath, plsinSubtileTypes
+from ..Common.Utilities import isMxf4SubtilePath, plsinDataTypes
 
 
 def _deriveAndValidateMXScaleLayoutAndTransport(state, asmCaps, archCaps, printRejectionReason):
@@ -2080,14 +2080,14 @@ class Solution(collections.abc.Mapping):
       # and is not available on the StreamK workspace (MultipleBuffer*)
       # accumulation paths.
       #
-      # The dest type is tested through plsinSubtileTypes rather than spelled out
+      # The dest type is tested through plsinDataTypes rather than spelled out
       # here, so this resolution cannot drift from the isMxf4SubtilePath gate that
       # decides whether the emit side actually builds anything. A half dest
       # satisfies the paired store but not that gate, and resolving PLSIN True for
       # it allocates sgprPostLoopFusedStore -- renumbering every later SGPR -- for
       # a feature the emit side then declines to build.
       pairedStoreAvailable = (
-        plsinSubtileTypes(state) and
+        plsinDataTypes(state) and
         state["ProblemType"]["HighPrecisionAccumulate"] and
         state["WavefrontSize"] != 32 and
         state["_GlobalAccumulation"] not in ("MultipleBufferSingleKernel", "MultipleBuffer")

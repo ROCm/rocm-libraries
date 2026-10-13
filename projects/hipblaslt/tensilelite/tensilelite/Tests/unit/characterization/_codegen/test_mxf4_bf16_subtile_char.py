@@ -13,7 +13,7 @@ Target: the ``isMxf4SubtilePath`` gate in ``Tensile/Common/Utilities.py`` and
 everything hanging off it -- the fused post-loop store (``PostLoopStoreInNll``),
 its guard hoisting, and the partitioned block schedule. None of it had unit-level
 coverage: the only other gfx950 MXF4 config in the tree is ``DestDataType: S``,
-so ``plsinSubtileTypes`` is False for it and the gate never opened.
+so ``plsinDataTypes`` is False for it and the gate never opened.
 
 The ``{basename, err}`` goldens hold no assembly, so they pin the solution-name
 hash and nothing about the store body. The tests here carry the rest, in two

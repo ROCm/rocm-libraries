@@ -7,7 +7,7 @@
 # is MXF4 in / bf16 out on UseSubtileImpl. Every optimization on this path hangs
 # off that predicate, and before this config nothing in the unit suite reached
 # it: the only other gfx950 MXF4 config (Tests/common/streamk/gfx950/
-# sk_mxf4gemm_pap.yaml) is DestDataType: S, so plsinSubtileTypes() is False for
+# sk_mxf4gemm_pap.yaml) is DestDataType: S, so plsinDataTypes() is False for
 # it and the whole feature surface emitted untested.
 #
 # The two problem groups are a matched pair and must stay that way:

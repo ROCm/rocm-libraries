@@ -82,7 +82,7 @@ def test_baseline_is_eligible():
 #
 # Two arms have no case of their own because nothing can reach them alone.
 # ``isFloat4`` asks for fp4 on A *or* B, while ``pairedStoreAvailable`` goes
-# through ``plsinSubtileTypes``, which asks for A *and* B -- so any input that
+# through ``plsinDataTypes``, which asks for A *and* B -- so any input that
 # fails ``isFloat4`` has already failed the paired-store arm. And the
 # ``PrefetchGlobalRead < 1`` term is repeated by the defensive re-check after
 # the gate, so removing either one still disables. Both are covered here only
@@ -152,7 +152,7 @@ def test_subsumed_arms():
 
     Neither can be reached by any input, so neither is load-bearing today. They
     are asserted rather than removed because the subsumption is a property of
-    their neighbours: if ``plsinSubtileTypes`` ever stopped requiring fp4 on
+    their neighbours: if ``plsinDataTypes`` ever stopped requiring fp4 on
     both operands, or the re-check after the gate were dropped, these would
     become the only thing disabling a config -- and that should be a decision,
     not a surprise.

@@ -60,46 +60,16 @@ def isSubtileMultiDU(kernel) -> bool:
     return kernel.get("_DepthUA", du) < du or kernel.get("_DepthUB", du) < du
 
 
-def plsinEarlyStoreTile(kernel) -> bool:
-    """Whether this tile's fused arm may carry early-store work at all.
+def plsinDataTypes(kernel) -> bool:
+    """MXF4 in, bf16 out -- the operand types the PLSIN store work was built for.
 
-    The tile bound on top of the scope gate. It runs through isMxf4SubtilePath
-    rather than restating UseSubtileImpl and the types, so the TN restriction
-    reaches the tile predicates too: PostLoopStoreInNll itself does not test
-    the layout, so without this an NN/NT/TT fp4/bf16 subtile kernel would build
-    the block schedule while every emit site keyed on isMxf4SubtilePath stayed
-    off.
+    The store reshaping reasons about a specific accumulator and pack layout,
+    and the register budget it spends exists only at this combination: a
+    bf16-input kernel of the same tile fills the VGPR file with accumulators,
+    so the same pack ring overflows it and the kernel cannot be assembled.
+    Tile scope does not separate the two -- both reach MT256x256.
 
-    Today its only caller is plsinBlockSchedTile,
-    which narrows it further to the MT256x256 equality, so this bound decides
-    nothing by itself; it is kept separate because the two carry different
-    arguments. The equality there is a scope limit -- MT256x256 is the only
-    geometry block scheduling has been measured on -- whereas the bound here is
-    a register-budget fact about the tile, and collapsing them would read as one
-    arbitrary constant instead of two reasons.
-
-    Note this is narrower than PLSIN itself: MT>256x256 still resolves
-    PostLoopStoreInNll True, through the largeTileLend arm of
-    assignPostLoopStoreInNll. What it cannot take is an *early* store. It lends
-    its K=0 operand registers to the store (it needs 284 VGPRs against a 256 cap
-    without them), so a store moved earlier would run while those registers are
-    still being read; lending keeps every terminal MFMA in-loop instead, which
-    is the weave rather than the early store.
-    """
-    if not isMxf4SubtilePath(kernel):
-        return False
-    return kernel["MacroTile0"] <= 256 and kernel["MacroTile1"] <= 256
-
-
-def plsinSubtileTypes(kernel) -> bool:
-    """Whether this kernel has the operand types the PLSIN store work was built for.
-
-    MXF4 in, bf16 out. The store reshaping reasons about a specific accumulator
-    and pack layout, and the register budget it spends is only available at this
-    combination: a bf16-input kernel of the same tile fills the VGPR file with
-    accumulators, so the same pack ring overflows it and the kernel cannot be
-    assembled. Tile scope alone does not separate the two, since both reach
-    MT256x256, so the types are checked as well.
+    Answerable at any point, including on a half-built solution dict.
     """
     pt = kernel["ProblemType"]
     return pt["DataTypeA"].isFloat4() and pt["DataTypeB"].isFloat4() \
@@ -107,52 +77,49 @@ def plsinSubtileTypes(kernel) -> bool:
 
 
 def isMxf4SubtilePath(kernel) -> bool:
-    """Single scope gate for the MXF4 subtile optimizations.
+    """Scope gate for the MXF4 subtile optimizations: TN, subtile, MXF4->bf16.
 
-    UseSubtileImpl alone is too wide: it is enabled on gfx1250 as well as
-    gfx950, and gfx950 MX merely *requires* it rather than being the only thing
-    that sets it. Gating on UseSubtileImpl would therefore change codegen for
-    non-MXF4 subtile kernels. Every optimization added here is scoped through
-    this predicate so kernels outside MXF4-in/bf16-out are generated exactly as
-    they are on develop.
+    UseSubtileImpl alone is too wide -- it is on for gfx1250 as well as gfx950,
+    and gfx950 MX only *requires* it rather than being its only source -- so
+    gating on it would move codegen for non-MXF4 subtile kernels. TN is the one
+    layout all of this was built on; NN/NT/TT reach the subtile path through a
+    separate strided-K pointer update that the SRD hold, the staged store and
+    the block schedule do not model, and they miscompare.
 
-    Restricted to TN (TransposeA, not TransposeB), the layout every optimization
-    here was built and measured on. The pre-loop SRD hold, the staged fused store
-    and the block schedule all reason about the TN global-read shape; on the
-    NN/NT/TT layouts, which reach the subtile path through a separate strided-K
-    pointer update, that reasoning does not hold and the results miscompare.
-
-    Tolerant of partially-built state: naming runs on dicts whose data types may
-    still be raw values rather than DataType objects, and treats anything it
-    cannot classify as "not MXF4", which is the conservative answer.
+    Asked during derivation, so it must not depend on PostLoopStoreInNll:
+    Solution.assignDerivedParameters calls it to pin MIInputPerThreadMXS*
+    roughly a thousand lines before assignPostLoopStoreInNll resolves that key,
+    and Naming asks it to decide whether the key belongs in the kernel name at
+    all. Tolerant of partially-built state for the same reason, and treats
+    anything it cannot classify as "not MXF4".
     """
     try:
         pt = kernel["ProblemType"]
         tn = bool(pt["TransposeA"]) and not bool(pt["TransposeB"])
-        return bool(kernel.get("UseSubtileImpl")) and tn and plsinSubtileTypes(kernel)
+        return bool(kernel.get("UseSubtileImpl")) and tn and plsinDataTypes(kernel)
     except (KeyError, TypeError, AttributeError):
         return False
 
 
 def plsinBlockSchedTile(kernel) -> bool:
-    """Whether block scheduling may be built for this tile.
+    """Whether block scheduling may be built for this kernel.
 
     Block scheduling is the partitioned K reduction, the staged fused store and
-    the NGLL/NLL merge taken together: the tile is cut into N blocks, each block
-    runs its whole K reduction and then stores while the next block's MFMAs are
-    already issuing.
+    the NGLL/NLL merge taken together: the tile is cut into blocks, and each
+    block stores while the next block's MFMAs are already issuing.
 
-    Scoped to MT256x256, the single geometry it has been measured on. Every
-    other tile keeps its shipped schedule, which is what lets this ride
-    alongside tiles that are being tuned separately. The scope is deliberately
-    an equality rather than a bound -- MT192x256 also satisfies
-    ``plsinEarlyStoreTile`` and would otherwise be dragged in untested.
+    MT256x256 is an equality, not a bound -- it is the only geometry this has
+    been measured on, and every other tile keeps its shipped schedule so this
+    can ride alongside tiles being tuned separately. Tiles above it could not
+    take an early store anyway: they lend their K=0 operand registers to it
+    (284 VGPRs against a 256 cap otherwise), so a store moved earlier would run
+    while those registers are still being read.
+
+    Only answerable once assignPostLoopStoreInNll has run.
     """
-    if not plsinEarlyStoreTile(kernel):
-        return False
-    if not kernel.get("PostLoopStoreInNll"):
-        return False
-    return kernel["MacroTile0"] == 256 and kernel["MacroTile1"] == 256
+    return (isMxf4SubtilePath(kernel)
+            and bool(kernel.get("PostLoopStoreInNll"))
+            and kernel["MacroTile0"] == 256 and kernel["MacroTile1"] == 256)
 
 
 # Global
