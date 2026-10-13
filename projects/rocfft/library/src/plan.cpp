@@ -4249,12 +4249,6 @@ try
     // Figure out which length axes to compute on input/output
     const auto& full_axes_on_input  = ifield.get_undistributed_length_dimensions();
     const auto& full_axes_on_output = ofield.get_undistributed_length_dimensions();
-    if(full_axes_on_input.size() == desc.rank() && full_axes_on_output.size() == desc.rank())
-    {
-        // Embarrassingly-parallel case very likely (check that batch ranges are identical brickwise...)
-        // TODO: embarrassingly parallel cases without gather/scatter/transpose if all batch ranges match, brickwise
-        return false;
-    }
     // Define the length axes to be computed on input and the axes to be computes on output
     // and find out which axes need an intermediary field (e.g., pencil decompositions on I/O)
     std::set<size_t> partial_axes, axes_computed_on_input, axes_computed_on_output;
