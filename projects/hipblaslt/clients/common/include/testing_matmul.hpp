@@ -2343,27 +2343,8 @@ void testing_matmul_with_bias(const Arguments& arg,
             else if(arg.scaleA == hipblaslt_scaling_format::Vector)
                 size_scaleAVec[i] = M[i];
             else if(isBlockScaling(arg.scaleA))
-            {
-                if(!mx_use_rocroller
-                   && arg.scaleA != hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT)
-                {
-                    // Account for padding in the swizzled MX layout
-                    size_t MXBlock_A   = blockSize(arg.scaleA);
-                    size_t dimk        = 128 / MXBlock_A;
-                    size_t scaleA_r    = A_row[i] / ((transA == HIPBLAS_OP_T) ? MXBlock_A : 1);
-                    size_t scaleA_c    = A_col[i] / ((transA == HIPBLAS_OP_T) ? 1 : MXBlock_A);
-                    bool   kAlongRowsA = (transA == HIPBLAS_OP_T);
-                    size_t kDim        = kAlongRowsA ? scaleA_r : scaleA_c;
-                    size_t mnDim       = kAlongRowsA ? scaleA_c : scaleA_r;
-                    size_t padDim      = kAlongRowsA ? kDim : mnDim;
-                    size_t paddedDim   = (padDim + dimk - 1) / dimk * dimk;
-                    size_scaleAVec[i]  = kAlongRowsA ? (mnDim * paddedDim) : (kDim * paddedDim);
-                }
-                else
-                {
-                    size_scaleAVec[i] = scaleBufferSize(A_row[i], A_col[i], arg.scaleA);
-                }
-            }
+                size_scaleAVec[i] = blockScaleBufferSize(
+                    A_row[i], A_col[i], arg.scaleA, transA == HIPBLAS_OP_T, mx_use_rocroller);
             else
                 size_scaleAVec[i] = 0;
             if(arg.scaleB == hipblaslt_scaling_format::Scalar)
@@ -2371,27 +2352,8 @@ void testing_matmul_with_bias(const Arguments& arg,
             else if(arg.scaleB == hipblaslt_scaling_format::Vector)
                 size_scaleBVec[i] = N[i];
             else if(isBlockScaling(arg.scaleB))
-            {
-                if(!mx_use_rocroller
-                   && arg.scaleB != hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT)
-                {
-                    // Account for padding in the swizzled MX layout
-                    size_t MXBlock_B   = blockSize(arg.scaleB);
-                    size_t dimk        = 128 / MXBlock_B;
-                    size_t scaleB_r    = B_row[i] / ((transB == HIPBLAS_OP_T) ? 1 : MXBlock_B);
-                    size_t scaleB_c    = B_col[i] / ((transB == HIPBLAS_OP_T) ? MXBlock_B : 1);
-                    bool   kAlongRowsB = (transB == HIPBLAS_OP_N);
-                    size_t kDim        = kAlongRowsB ? scaleB_r : scaleB_c;
-                    size_t mnDim       = kAlongRowsB ? scaleB_c : scaleB_r;
-                    size_t padDim      = kAlongRowsB ? kDim : mnDim;
-                    size_t paddedDim   = (padDim + dimk - 1) / dimk * dimk;
-                    size_scaleBVec[i]  = kAlongRowsB ? (mnDim * paddedDim) : (kDim * paddedDim);
-                }
-                else
-                {
-                    size_scaleBVec[i] = scaleBufferSize(B_row[i], B_col[i], arg.scaleB);
-                }
-            }
+                size_scaleBVec[i] = blockScaleBufferSize(
+                    B_row[i], B_col[i], arg.scaleB, transB == HIPBLAS_OP_N, mx_use_rocroller);
             else
                 size_scaleBVec[i] = 0;
         }
