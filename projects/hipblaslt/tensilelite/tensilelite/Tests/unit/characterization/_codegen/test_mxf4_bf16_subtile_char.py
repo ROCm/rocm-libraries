@@ -8,6 +8,8 @@ emit harness. The config has two problem groups that differ only in
 
   group 0  MXF4 -> bf16, in scope for ``isMxf4SubtilePath``
   group 1  MXF4 -> fp32, out of scope, otherwise identical
+  group 2  MXF4 -> bf16 carrying the shipped epilogue (bias, scaleAlphaVec,
+           scalar scaleAB, activation, user args), in scope
 
 Target: the ``isMxf4SubtilePath`` gate in ``Tensile/Common/Utilities.py`` and
 everything hanging off it -- the fused post-loop store (``PostLoopStoreInNll``),
@@ -68,6 +70,10 @@ _CONFIG = os.path.join(
 # parameters, different destination type.
 _IN_SCOPE = 0      # DestDataType: B  -> isMxf4SubtilePath() True
 _CONTROL = 1       # DestDataType: S  -> isMxf4SubtilePath() False
+# Same as group 0 but carrying the shipped epilogue, which is what gives the
+# fused store kernargs to load. Groups 0 and 1 have none, so numStoreSgprToLoad
+# is zero for them and the loader returns at its first guard.
+_EPILOGUE = 2      # DestDataType: B + bias/scaleAlphaVec/scaleAB
 
 # Emitted markers of the fused post-loop store. These are the comments and label
 # the PLSIN emit path writes; matching them keeps the test tied to the feature
@@ -127,6 +133,8 @@ _WAIT_GR_COUNTS = re.compile(r"A=(\d+) B=(\d+) SA=(\d+) SB=(\d+)")
 _PARTITION = re.compile(r"^/\* partition=(\d+) subIterK=\d+ \*/$")
 _MFMA_TILE = re.compile(r"MFMA C\[(\d+),(\d+)\]")
 _FUSED_GUARD = re.compile(r"/\* Fused-store guard:.*else -> (label_\w+) \*/")
+# A kernarg scalar load, with its request width in dwords (bare s_load_dword is 1).
+_EPILOGUE_LOAD = re.compile(r"\bs_load_dword(?:x(\d+))?\s+s\[?\d+.*sgprKernArgAddress")
 _PLAIN_NGLL = re.compile(r"^label_NGLL\w*_PlainNGLL:")
 _DONE_NGLL = re.compile(r"^label_NGLL\w*_PostInitNGLL:")
 
@@ -540,6 +548,101 @@ def test_fused_store_flag_is_hoisted_and_only_ever_narrowed():
         )
 
 
+def test_mxf4_bf16_subtile_epilogue_emits_assembly():
+    """The epilogue group generates kernels at all."""
+    results = _emit(_EPILOGUE)
+    assert len(results) == 2, f"expected 2 kernels, got {len(results)}"
+    for basename, src, err in results:
+        assert err == 0, f"{basename}: err={err}"
+        assert "gfx950" in src, f"{basename}: wrong arch in assembly"
+        assert "_Bias_" in basename, (
+            f"{basename}: the epilogue group must emit bias-carrying kernels; "
+            "without them the fused store has no kernargs to load"
+        )
+        assert "v_mfma" in src, f"{basename}: no MFMA in the emitted body"
+
+
+def test_fused_store_defers_the_runtime_epilogue_pointers():
+    """Bias and ScaleAlphaVec are resolved at runtime, not compile time.
+
+    A kernel compiled with those epilogues can still be *called* with null
+    pointers, so eligibility cannot be settled by the problem type alone. The
+    fused store folds a runtime test of each pointer into the same flag as the
+    compile-time terms, sending a call that actually passes one down the plain
+    arm. Groups 0 and 1 have no such pointers, so they must carry neither test
+    -- a guard that appeared there would be spending SALU on a constant.
+    """
+    epilogue = "\n".join(src for _b, src, _e in _emit(_EPILOGUE))
+    bare = "\n".join(src for _b, src, _e in _emit(_IN_SCOPE))
+
+    for what, marker in (
+        ("the bias pointer",
+         "/* PLSIN guard-hoist: runtime AddressBias -> PLAIN NLL */"),
+        ("the scale-alpha-vector pointer",
+         "/* PLSIN guard-hoist: runtime AddressScaleAlphaVec -> PLAIN NLL */"),
+    ):
+        assert marker in epilogue, (
+            f"{what} is not folded into the fused-store flag; a call passing it "
+            "would take the fused arm and skip the epilogue"
+        )
+        assert marker not in bare, (
+            f"{what} is guarded in a kernel that has no such pointer"
+        )
+
+
+def _fused_arm_kernarg_loads(results):
+    """Per kernel, the dword width of every kernarg load inside a fused arm."""
+    widths = {}
+    for basename, src, _err in results:
+        got = []
+        for arm in _fused_arms(src):
+            for line in arm:
+                load = _EPILOGUE_LOAD.search(line.split("//")[0])
+                if load:
+                    got.append(int(load.group(1) or 1))
+        widths[basename] = got
+    return widths
+
+
+def test_fused_epilogue_kernargs_load_in_small_chunks():
+    """The fused arm loads its epilogue kernargs in requests of at most 4 SGPRs.
+
+    The epilogue block is ~13 SGPRs contiguous. Requesting it in one piece needs
+    13 consecutive free SGPRs, which MT256x256 fp4 does not have -- it overflowed
+    at sgprs=105. Splitting it per slot (scaleAB / scaleCD / SAV / bias / E /
+    activation) caps the largest request at 4, which is what fits in the holes
+    the drain lends the store. Asserting the width is asserting that budget: an
+    s_load_dwordx8 here is the overflow coming back.
+    """
+    for basename, widths in _fused_arm_kernarg_loads(_emit(_EPILOGUE)).items():
+        assert widths, (
+            f"{basename}: the fused arm loads no kernargs at all, so this config "
+            "no longer reaches the loader it exists to cover"
+        )
+        assert max(widths) <= 4, (
+            f"{basename}: kernargs requested {max(widths)} SGPRs at once; the "
+            "per-slot split exists to keep that at 4 or fewer"
+        )
+
+
+def test_the_epilogue_loader_is_driven_by_the_epilogue():
+    """The fused arm loads kernargs only for what the problem actually carries.
+
+    Groups 0 and 2 differ only in the epilogue features, so comparing what their
+    fused arms load isolates the loader. The bare group still loads its batch
+    offset -- every fused store needs that -- so the control is that it loads
+    strictly less, not nothing. Emitting the epilogue block unconditionally would
+    spend the SGPRs on every PLSIN kernel in the library, which is the budget
+    this path was split up to protect.
+    """
+    bare = max(sum(w) for w in _fused_arm_kernarg_loads(_emit(_IN_SCOPE)).values())
+    rich = min(sum(w) for w in _fused_arm_kernarg_loads(_emit(_EPILOGUE)).values())
+    assert rich > bare, (
+        f"the epilogue group loads {rich} kernarg dwords in its fused arm and the "
+        f"bare group {bare}; the loader is not tracking the epilogue"
+    )
+
+
 def test_mxf4_bf16_subtile_golden(snapshot):
     """Order-invariant golden: pin {basename, err} for the in-scope kernels."""
     assert golden_digest(_emit(_IN_SCOPE)) == snapshot
@@ -553,3 +656,8 @@ def test_mxf4_fp32_control_golden(snapshot):
     failure mode that would renumber every non-MXF4 kernel in the library.
     """
     assert golden_digest(_emit(_CONTROL)) == snapshot
+
+
+def test_mxf4_bf16_subtile_epilogue_golden(snapshot):
+    """Order-invariant golden for the epilogue group."""
+    assert golden_digest(_emit(_EPILOGUE)) == snapshot

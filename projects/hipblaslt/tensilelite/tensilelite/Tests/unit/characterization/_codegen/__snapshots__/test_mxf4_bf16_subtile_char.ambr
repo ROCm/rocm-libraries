@@ -1,4 +1,16 @@
 # serializer version: 1
+# name: test_mxf4_bf16_subtile_epilogue_golden
+  list([
+    dict({
+      'basename': 'Cijk_Alik_Bljk_F4BS_MXAE8B32_MXBE8B32_BH_Bias_HAfQMcxFsB6XFvBypHbDxbmcz9RYMA6AJuzZ6WknL7d00=',
+      'err': 0,
+    }),
+    dict({
+      'basename': 'Cijk_Alik_Bljk_F4BS_MXAE8B32_MXBE8B32_BH_Bias_HAl7otjSRrd6ZowCYMVI42J3e08Jpa5WHYcDY5_ZcLwyU=',
+      'err': 0,
+    }),
+  ])
+# ---
 # name: test_mxf4_bf16_subtile_golden
   list([
     dict({
