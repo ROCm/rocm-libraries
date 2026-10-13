@@ -302,9 +302,11 @@ tail bounds, both V-staging choices, and the score features above.
 - **Dense strides.** Batch, token, and head strides for Q/K/V/O and LSE are
   runtime arguments. One launch handles compact, padded, or gapped BSHD/BHSD
   batches without host-side slicing.
-- **Offset overflow.** The kernel computes element offsets in I32. The binding
-  rejects any request whose largest element offset would not fit, rather than
-  launching and silently wrapping.
+- **Offset overflow.** The kernel computes element offsets in I32 and scales
+  them to I32 byte offsets against at most 2 GiB buffer descriptors. The
+  binding (like the hipDNN pack) rejects any tensor whose addressed byte
+  extent would not fit, rather than launching and silently wrapping or
+  reading zeros past the descriptor.
 - **Sweep.** `sweep_space` offers distinct valid variants, baseline first,
   gated on the device compute-unit count (`num_cus`; zero uses the reference
   part) instead of a fixed query-group limit.

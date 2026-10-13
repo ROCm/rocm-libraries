@@ -1,13 +1,13 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""I32 element-offset guard of the gfx1151 attention binding (host metadata only)."""
+"""I32 byte-extent guard of the gfx1151 attention binding (host metadata only)."""
 
 import unittest
 from types import SimpleNamespace
 
 from dispatch.attention import AttentionRequest
 from dispatch.attention.bindings import (
-    _check_max_element_offset_i32,
+    _check_byte_extent_i32,
     _gfx1151_validate_and_collect,
 )
 from kernels.gfx1151.wmma_fmha_fwd import WmmaFmhaFwdSpec
@@ -69,20 +69,28 @@ def _paged_case(pages):
 
 
 class TestGfx1151BindingI32Guard(unittest.TestCase):
-    def test_helper_accepts_up_to_the_i32_limit(self):
-        _check_max_element_offset_i32(_FakeTensor((1, 0x8000_0000)), "t")
+    def test_helper_accepts_up_to_the_i32_byte_limit(self):
+        _check_byte_extent_i32(_FakeTensor((1, 0x3FFF_FFFF)), "t", 2)
+        _check_byte_extent_i32(_FakeTensor((1, 0x7FFF_FFFF)), "t", 1)
 
-    def test_helper_rejects_one_past_the_i32_limit(self):
+    def test_helper_rejects_one_element_past_the_i32_byte_limit(self):
         with self.assertRaisesRegex(ValueError, "does not fit"):
-            _check_max_element_offset_i32(_FakeTensor((1, 0x8000_0001)), "t")
+            _check_byte_extent_i32(_FakeTensor((1, 0x4000_0000)), "t", 2)
+
+    def test_fp16_tensor_with_i32_element_offsets_is_rejected(self):
+        # 16 x 32K x 32 x 128 fp16: the highest element offset (2**31 - 1)
+        # fits I32 but the byte offset (~4 GiB) does not; the transposed-QK V
+        # gather would read past the 2 GiB descriptor and get zeros.
+        with self.assertRaisesRegex(ValueError, "v spans"):
+            _check_byte_extent_i32(_FakeTensor((16, 32768, 32, 128)), "v", 2)
 
     def test_helper_follows_strides_not_element_count(self):
         # Few elements, huge span: only the stride-aware bound catches this.
         with self.assertRaises(ValueError):
-            _check_max_element_offset_i32(_FakeTensor((2, 4), stride=(1 << 31, 1)), "t")
+            _check_byte_extent_i32(_FakeTensor((2, 4), stride=(1 << 30, 1)), "t", 2)
 
     def test_helper_ignores_empty_tensors(self):
-        _check_max_element_offset_i32(_FakeTensor((0, 1 << 40)), "t")
+        _check_byte_extent_i32(_FakeTensor((0, 1 << 40)), "t", 2)
 
     def test_small_paged_cache_is_accepted(self):
         request, spec, tensors = _paged_case(pages=8)
@@ -92,7 +100,7 @@ class TestGfx1151BindingI32Guard(unittest.TestCase):
     def test_oversized_kv_cache_is_rejected_before_launch(self):
         # 2**20 pages * 16 tokens * 4 heads * 64 dims = 2**32 elements.
         request, spec, tensors = _paged_case(pages=1 << 20)
-        with self.assertRaisesRegex(ValueError, "k spans element offset"):
+        with self.assertRaisesRegex(ValueError, "k spans .* bytes"):
             _gfx1151_validate_and_collect(request, spec, tensors)
 
 

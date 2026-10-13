@@ -518,11 +518,14 @@ def _fits_i32(value: Any, name: str) -> int:
     return value
 
 
-def _check_max_element_offset_i32(tensor, name: str) -> None:
-    """Reject tensors whose highest addressable element index exceeds I32.
+def _check_byte_extent_i32(tensor, name: str, element_bytes: int) -> None:
+    """Reject tensors whose addressed byte extent exceeds I32.
 
-    The kernel forms element offsets in I32 (``token * stride + head * stride``),
-    so a large KV cache would otherwise wrap silently.
+    The kernel forms element offsets in I32 (``token * stride + head * stride``)
+    and scales them to I32 byte offsets for buffer loads against a descriptor
+    of at most 2 GiB (the transposed-QK V gather multiplies by the element
+    size), so the bound is on bytes, not elements. Matches the native pack's
+    ``addressFitsI32``.
     """
     shape = _shape(tensor, name)
     stride = getattr(tensor, "stride", None)
@@ -531,10 +534,11 @@ def _check_max_element_offset_i32(tensor, name: str) -> None:
     if any(int(extent) <= 0 for extent in shape):
         return
     highest = sum((int(e) - 1) * int(stride(i)) for i, e in enumerate(shape))
-    if highest > 0x7FFF_FFFF:
+    extent = (highest + 1) * int(element_bytes)
+    if extent > 0x7FFF_FFFF:
         raise ValueError(
-            f"{name} spans element offset {highest}, which does not fit the "
-            "I32 offset arithmetic of the gfx1151 kernel; split the tensor "
+            f"{name} spans {extent} bytes, which does not fit the I32 "
+            "offset arithmetic of the gfx1151 kernel; split the tensor "
             "(e.g. per batch or per page range) before launching"
         )
 
@@ -666,8 +670,14 @@ def _gfx1151_validate_and_collect(
         if len(_shape(tensor, name)) != rank:
             raise ValueError(f"{name} must be rank-{rank} for {layout} layout")
     _check_gfx1151_device(tensors)
-    for name, tensor in (("q", q), ("k", k), ("v", v), ("out", out)):
-        _check_max_element_offset_i32(tensor, name)
+    kv_bytes = 1 if kv_kind == "fp8" else 2
+    for name, tensor, element_bytes in (
+        ("q", q, 2),
+        ("k", k, kv_bytes),
+        ("v", v, kv_bytes),
+        ("out", out, 2),
+    ):
+        _check_byte_extent_i32(tensor, name, element_bytes)
 
     mask_type = AttentionMaskType(int(request.mask_type))
     windowed = (
@@ -773,7 +783,7 @@ def _gfx1151_validate_and_collect(
                     )
                 lse_token_axis, lse_head_axis = token_axis, head_axis
             _check_gfx1151_storage(lse, "lse", 4)
-            _check_max_element_offset_i32(lse, "lse")
+            _check_byte_extent_i32(lse, "lse", 4)
             values.update(
                 {
                     "stride_lse_batch": _fits_i32(lse.stride(0), "stride_lse_batch"),
@@ -825,7 +835,7 @@ def _gfx1151_validate_and_collect(
                     f"[total_q,H,1], got {lse_shape}"
                 )
             _check_gfx1151_storage(lse, "lse", 4)
-            _check_max_element_offset_i32(lse, "lse")
+            _check_byte_extent_i32(lse, "lse", 4)
             values["stride_lse_token"] = _fits_i32(
                 lse.stride(lse_token_axis), "stride_lse_token"
             )
@@ -934,7 +944,7 @@ def _gfx1151_validate_and_collect(
         if len(bias_shape) != 2:
             raise ValueError(f"qq_bias must be rank-2 [rows, cols], got {bias_shape}")
         _check_last_dim_contiguous(qq_bias, "qq_bias")
-        _check_max_element_offset_i32(qq_bias, "qq_bias")
+        _check_byte_extent_i32(qq_bias, "qq_bias", 4)
         values["qq_bias_ptr"] = qq_bias
         values["qq_bias_rows"] = _fits_i32(bias_shape[0], "qq_bias_rows")
         values["qq_bias_cols"] = _fits_i32(bias_shape[1], "qq_bias_cols")
@@ -973,7 +983,7 @@ def _gfx1151_validate_and_collect(
             )
         if bias_shape[3] > 1 and int(attn_bias.stride(3)) != 1:
             raise ValueError("attn_bias innermost (key) dimension must be contiguous")
-        _check_max_element_offset_i32(attn_bias, "attn_bias")
+        _check_byte_extent_i32(attn_bias, "attn_bias", 4 if bias_kind == "fp32" else 2)
         values["attn_bias_ptr"] = attn_bias
         for key, axis in (
             ("bias_stride_b", 0),
