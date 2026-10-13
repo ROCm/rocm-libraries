@@ -70,9 +70,8 @@ from .sdpa.bwd_kernel_cases import perf_prune_cases, request_from_case
 # every tensor base 1 element (2 bytes) off a 16-byte boundary.
 _NARROW_VIEW = "bshd"
 _NARROW_BASE = 1
-# Request hints of a configuration's runtime values (the rocKE arm's
-# REQUEST_HINTS) and the dense route switch: never tuning values.
-_HINTS = ("num_xcds", "num_cus")
+# The dense route switch of a configuration's runtime values (like the
+# request hints, REQUEST_HINTS): never a tuning value.
 _ROUTE = "route"
 _HSACO_ENV = "ROCKE_BWD_HSACO_CACHE"
 # Launch stages of the shape-baked dense kernels (main, split dQ).
@@ -158,7 +157,7 @@ def _split_runtime(cfg) -> tuple[dict, dict]:
     """``(tuning values, request hints)`` of a configuration (knobs and its
     runtime values; the route switch dropped)."""
     runtime = dict(getattr(cfg, "runtime", None) or {})
-    hints = {k: runtime.pop(k) for k in _HINTS if k in runtime}
+    hints = {k: runtime.pop(k) for k in REQUEST_HINTS if k in runtime}
     runtime.pop(_ROUTE, None)
     return {**dict(getattr(cfg, "knobs", None) or {}), **runtime}, hints
 
@@ -171,12 +170,20 @@ def _device_hints(hints: dict) -> dict:
     return hints
 
 
-def dense_case_plan(arch, cfg, case):
-    """The dense plan of pruning case ``case`` under configuration ``cfg``."""
+def dense_case_plan(arch, cfg, case, plan=None):
+    """The dense plan of pruning case ``case`` under configuration ``cfg``.
+
+    With the timed ``plan`` the case takes the device hints that plan was
+    built with (:func:`case_request`: the XCD count of its remap, the grid
+    of a persistent kernel), whether the configuration names them or the
+    arm supplied them by default; without it, the configuration's own hints.
+    """
     from kernels.common.attention_bwd_plan import AttnBwdPolicy, FEATURE_GROUPS
     from kernels.common.attention_dense_bwd_plan import attn_dense_bwd_plan
 
     values, hints = _split_runtime(cfg)
+    if plan is not None:
+        hints = case_request(plan)
     req = request_from_case(case)
     if hints:
         req = dataclasses.replace(req, **_device_hints(hints))
@@ -209,11 +216,16 @@ def case_request(plan) -> dict:
     """Request hints a pruning case needs to resolve ``plan``'s kernels.
 
     A configuration's ``num_cus`` / ``num_xcds`` describe the timed device,
-    not a pruning case. The XCD remap is rebuilt from the timed plan's XCD
-    counts (main and split dQ). Mirror pairing takes ``num_cus = 1``: its
-    fill guard is a no-gain rule (the paired decode visits every kv tile once
-    for any grid), and the small pruning grids would never pass it, so the
-    gate exercises the timed paired kernel as the device tests do.
+    not a pruning case, and the arm fills either one in when the
+    configuration leaves it out; so the hints come from the timed plan, never
+    from the configuration. The XCD remap is rebuilt from the timed plan's
+    XCD counts (main and split dQ; ``xcd_chunk`` values ``gx`` / ``2gx`` /
+    ``4gx`` then resolve on the pruning grid). Mirror pairing takes
+    ``num_cus = 1``: its fill guard is a no-gain rule (the paired decode
+    visits every kv tile once for any grid), and the small pruning grids
+    would never pass it, so the gate exercises the timed paired kernel as the
+    device tests do. A persistent dense kernel takes ``num_cus`` = the timed
+    plan's persistent grid (the same CTA count, looping over a small grid).
     """
     rt = plan.runtime
     out = {}
@@ -222,6 +234,8 @@ def case_request(plan) -> dict:
         out["num_xcds"] = xcds
     if rt.get("pair"):
         out["num_cus"] = 1
+    elif int(rt.get("num_persistent") or 0):
+        out["num_cus"] = int(rt["num_persistent"])
     return out
 
 
@@ -263,7 +277,7 @@ class PruneGate:
         with _gate_code_objects(cache_dir):
             for case in cases_for(plan, getattr(cfg, "runtime", None)):
                 try:
-                    p = dense_case_plan(arch, cfg, case)
+                    p = dense_case_plan(arch, cfg, case, plan)
                 except ValueError:
                     continue
                 attn_bwd_kernels(p, cache={})
@@ -346,7 +360,7 @@ class PruneGate:
         for case in cases:
             self._load(case, cache_dir)
             try:
-                p = dense_case_plan(arch, cfg, case)
+                p = dense_case_plan(arch, cfg, case, plan)
                 run = run_case(
                     case,
                     arch=arch,

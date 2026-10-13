@@ -1543,6 +1543,12 @@ NARROW_TWIN_CASES = ("bwd_seqlen_33x72_br", "bwd_gqa_gqa4_causal_tl")
 PRUNE_TAILS = (17, 33, 100, 1025)
 # The grouped-query ratio of the pruning set's GQA cases (h_q / h_k).
 _PRUNE_GROUP = 4
+# Every head group (h_q / h_k) of the benchmark census: each one other than
+# the set's own ratio and MHA gets a grouped-query case of its own in every
+# class whose ``g_split`` divides it, so the runtime head-group arithmetic of a
+# group the census times (5 and 8 too) runs in the gate whatever the split.
+# test_attention_bwd_perf_gate pins this to the census.
+PRUNE_HEAD_GROUPS = (1, 4, 5, 8)
 
 
 def _prune_mask(kind, mask_class):
@@ -1573,13 +1579,15 @@ def perf_prune_cases(
     diagonal with fully masked rows (band classes), a grouped-query ratio of
     4 throughout, one MHA case, ``h_k != h_v`` when ``dkv_mode`` is atomic, and
     a THD set with a zero-length last sequence when ``seq_mode`` is ``thd``.
-    ``g_split``: cases whose head group it does not divide are left out (the
-    plan would refuse them). A head split that does not divide the set's
-    grouped-query ratio of 4 (8, or 5 for a head group of 5) gets the
-    grouped-query cases with a head group of ``g_split`` instead (``h_q =
-    h_k * g_split``; their ids carry ``_hq<h_q>``), so every legal ``g_split``
-    value (a divisor of a head group of the census) has a pruning set; the
-    cases of ``g_split`` 1, 2 and 4 are unchanged.
+    One grouped-query case per further head group of the census
+    (:data:`PRUNE_HEAD_GROUPS`, ids ``gqa<G>``), where ``g_split`` divides it.
+    ``g_split``: a grouped-query case whose head group ``G = gcd(h_q / h_k,
+    h_q / h_v)`` it does not divide runs with ``h_q = h_k * g_split`` instead
+    (a head group of exactly ``g_split``, ``h_k != h_v`` kept; ids carry
+    ``_hq<h_q>``), so every legal ``g_split`` value (a divisor of a head group
+    of the census: 5 and 8 too) has a full pruning set; MHA cases and the
+    ``gqa<G>`` cases it does not divide are left out (the plan would refuse
+    them). The sets of ``g_split`` 1 and 2 carry no rescaled case.
     """
     if seq_mode not in ("batched", "thd") or dkv_mode not in ("direct", "atomic"):
         raise ValueError(f"unknown class {seq_mode!r} / {dkv_mode!r}")
@@ -1597,6 +1605,11 @@ def perf_prune_cases(
     ]
     if band:
         rows.append(("window_dead", 8, 2, 2, (t100, t100), (40, 40), "window"))
+    # the census's other head groups (G = 5, 8): a bottom-right diagonal with
+    # s_q != s_kv and odd tails at h_k = 2
+    groups = [g for g in PRUNE_HEAD_GROUPS if g not in (1, _PRUNE_GROUP)]
+    rows += [(f"gqa{g}_br", 2 * g, 2, 2, (t33, 72), (t100, t100), "br") for g in groups]
+    census = {f"gqa{g}_br" for g in groups}
     if seq_mode == "thd":
         rows = [
             (n, hq, hk, hv, ql[:1] + (max(1, ql[0] // 2),), kl[:1] + (kl[0],), m)
@@ -1613,26 +1626,20 @@ def perf_prune_cases(
         rows.append(("hkv_842_br", 8, 4, 2, (72, 72), (t100, t100), "br"))
     elif g_split != 1:
         raise ValueError("g_split > 1 makes dK / dV atomic (dkv_mode='atomic')")
-    if g_split > 1 and _PRUNE_GROUP % g_split:
-        # a head split the grouped-query ratio does not take: those cases with
-        # a head group of g_split (h_k == h_v, so G = h_q / h_k)
-        rows = [
-            (
-                (n, hk * g_split, hk, hv, ql, kl, m)
-                if hk == hv and hq // hk == _PRUNE_GROUP
-                else (n, hq, hk, hv, ql, kl, m)
-            )
-            for n, hq, hk, hv, ql, kl, m in rows
-        ]
     out = []
     for name, hq, hk, hv, ql, kl, kind in rows:
         atomic = hk != hv or g_split > 1
         if atomic != (dkv_mode == "atomic"):
             continue  # another main kernel (the dK / dV mode is a kernel switch)
         group = math.gcd(hq // hk, hq // hv) if atomic else hq // hk
+        rescaled = ""
+        if group % g_split and hq != hk and name not in census:
+            # a head split this case's group does not take: the case with a
+            # head group of exactly g_split (h_v divides h_k: G = h_q / h_k)
+            hq, group = hk * g_split, g_split
+            rescaled = f"_hq{hq}"
         if group % g_split:
             continue  # the plan refuses a head split that does not divide G
-        rescaled = "" if hq // hk in (_PRUNE_GROUP, 1) or hk != hv else f"_hq{hq}"
         cid = (
             f"kern_prune_{name}{rescaled}_{dtype}_d{head_size}_{mask_class}_"
             f"{seq_mode}_{dkv_mode}"

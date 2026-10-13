@@ -1843,11 +1843,26 @@ control of both arms under the pruning-set gate.
 timed, the pruning cases of its main-kernel class (`perf_prune_cases`) with
 the configuration's runtime values; a case whose head group `G` the
 configuration's `g_split` does not divide is left out (the plan refuses it).
-The set's grouped-query cases have `G = 4`; for a split that does not divide
-4 (the census head groups 5 and 8 give `g_split` 5 and 8) they are rescaled to
-`G = g_split` (`h_q = h_k * g_split`, ids with `_hq<h_q>`), so every legal
-split has a non-empty pruning set; the sets of `g_split` 1, 2 and 4 are
-unchanged.
+The set's grouped-query cases have `G = 4`, plus one case per further head
+group of the census (`PRUNE_HEAD_GROUPS`: `gqa5_br`, `gqa8_br`) in every class
+whose `g_split` divides it, so a head group the census times (5 and 8 too)
+runs in the gate under each of its splits. A grouped-query case whose `G`
+(`gcd(h_q / h_k, h_q / h_v)`) the split does not divide is rescaled to
+`G = g_split` (`h_q = h_k * g_split`, `h_k != h_v` kept, ids with `_hq<h_q>`),
+so every legal split (a divisor of a census head group: 5 and 8 too) has a
+full pruning set with an `h_k != h_v` case; the sets of `g_split` 1 and 2
+carry no rescaled case.
+
+**Device hints in the gate.** A configuration's `num_cus` / `num_xcds`
+describe the timed device, and the rocKE arm fills either one in when the
+configuration leaves it out, so the pruning cases take their request hints
+from the timed plan (`case_request`), never from the configuration: the XCD
+count of the main and split dQ remaps (`xcd_chunk` values `gx` / `2gx` /
+`4gx` then resolve on each pruning grid), `num_cus = 1` for mirror pairing
+(its fill guard is a no-gain rule the small pruning grids never pass), and
+`num_cus` = the timed persistent grid for a persistent dense kernel. Both
+routes take them (the dense route re-plans each case with the timed plan's
+hints), and no hint ever reaches the policy as a knob.
 
 ### 9.3 Tuned tables and performance classes
 
