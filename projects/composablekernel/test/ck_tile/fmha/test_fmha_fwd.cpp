@@ -413,7 +413,7 @@ TEST(TestCkTileFmhaFwd, QrTdmLdsArenaPrefill)
 
 // max_seqlen_q <= 16 takes a tile that spends its warps on N instead of M, which
 // sends S through LDS on its way from gemm_0 to gemm_1. A distribution mismatch
-// there permutes P's columns within a row: the row sums -- and so the LSE -- stay
+// there permutes P's columns within a row: the row sums, and so the LSE, stay
 // right while O is wrong, so O is what these cases have to check. seqlen_k covers
 // a tile multiple and a padded tail; the masks cover the causal and windowed
 // paths.
