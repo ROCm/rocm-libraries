@@ -183,6 +183,33 @@ def test_runtime_group_predicate_accepts_only_declared_groups():
         ProblemType.FromOriginalState(OriginalProblemType(config, False))
 
 
+@pytest.mark.parametrize("m,k,tile_m", [
+    (4608, 3584, 128), (3584, 3584, 64),
+    (37888, 3584, 128), (3584, 18944, 64),
+])
+@pytest.mark.parametrize("n,tile_n", [(109, 112), (128, 128)])
+def test_symmetric_prefill_rounded_query_selects_narrow_tile(m, k, tile_m, n, tile_n):
+    from types import SimpleNamespace
+    from Tensile.SolutionLibrary import MatchingLibrary
+
+    path = DIRECTORY.parents[2] / (
+        "library/src/amd_detail/rocblaslt/src/Tensile/Logic/asm_full/gfx1151/Equality/"
+        "gfx1151_Cijk_Alik_Bljk_I4H_HHS_BH_SABBGU8_Q27B.yaml")
+    logic = yaml.safe_load(path.read_text())
+    solutions = {s["SolutionIndex"]: s for s in logic["Solutions"]}
+    library = MatchingLibrary.FromOriginalState(
+        {"indexOrder": logic["IndexOrder"], "distance": logic["LibraryType"],
+         "table": logic["ExactLogic"]},
+        {index: SimpleNamespace(index=index) for index in solutions})
+    # Callers round 84–118-token prompts to 128 for the heuristic query.
+    rows = [row for row in state(library)["table"] if row["key"] == [m, n, 1, k]]
+    assert len(rows) == 1
+    selected = solutions[rows[0]["index"]]
+    assert (selected["MacroTile0"], selected["MacroTile1"]) == (tile_m, tile_n)
+    assert not selected.get("W4A16Decode")
+    assert selected.get("CustomKernelName", "") == ""
+
+
 def test_runtime_group_lazy_library_shares_one_group_partition():
     from copy import deepcopy
     from types import SimpleNamespace
