@@ -2,7 +2,7 @@
 
 ## Port to current develop (2026-10-13)
 
-The two checkpoint commits are carried on `users/nhenders/pap-prefetch-plr`,
+The two checkpoint commits are carried on `users/nhenders/pap-pipeline-optimization`,
 based on develop `562a252cbabeda26223f64ce09134c46dcb99525`.
 The port follows the renamed `tensilelite/` package layout and current
 DataParallel policy and register-pool APIs. PAP's CPU interpreter is retained
