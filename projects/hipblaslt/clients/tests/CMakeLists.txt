@@ -3,6 +3,19 @@
 
 add_subdirectory(src)
 
+# ELF interposition is confined to a separate executable and requires a shared
+# library. The regular hipblaslt-test must not replace operator new or HIP calls.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND HIPBLASLT_BUILD_SHARED_LIBS)
+  add_executable(hipblaslt-test-handle-create src/handle_create_exception_test.cpp)
+  target_compile_features(hipblaslt-test-handle-create PRIVATE cxx_std_17)
+  target_link_libraries(hipblaslt-test-handle-create PRIVATE
+    roc::hipblaslt hip::host GTest::gtest GTest::gtest_main ${CMAKE_DL_LIBS})
+  set_target_properties(hipblaslt-test-handle-create PROPERTIES
+    ENABLE_EXPORTS ON
+    RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/clients")
+  rocm_install(TARGETS hipblaslt-test-handle-create COMPONENT tests)
+endif()
+
 set(HIPBLASLT_TEST_DATA "${CMAKE_CURRENT_BINARY_DIR}/../hipblaslt_gtest.data")
 
 add_custom_command(
@@ -55,6 +68,14 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml")
       "${PROJECT_BINARY_DIR}/staging"
       "${HIPBLASLT_CTEST_INSTALL_FILE}"
     )
+    if(TARGET hipblaslt-test-handle-create)
+      apply_test_category_labels(
+        hipblaslt-test-handle-create
+        "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml"
+        "${PROJECT_BINARY_DIR}/staging"
+        "${HIPBLASLT_CTEST_INSTALL_FILE}"
+      )
+    endif()
     # Install CTestTestfile.cmake to bin/hipblaslt/ for TheRock (relocatable tests; run ctest from that dir)
     install(
         FILES "${HIPBLASLT_CTEST_INSTALL_FILE}"
