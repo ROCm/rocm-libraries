@@ -336,9 +336,10 @@ static bool instVgprsOverlap(const StinkyInstruction& inst, bool useDest,
     return false;
 }
 
-// WMMA input families used to boost ds_loads. Order matches the default
-// remaining issue order A → B → MXSA → MXSB (not ISA src order).
-enum DsInputKind : unsigned { kDsA = 0, kDsB, kDsMxsa, kDsMxsb, kDsNumKinds };
+// WMMA input families used to boost ds_loads. Order is the base issue order
+// A → MXSA → MXSB → B (not ISA src order), shared with Tensile global reads
+// (MxScaleLayout.splatFirst).
+enum DsInputKind : unsigned { kDsA = 0, kDsMxsa, kDsMxsb, kDsB, kDsNumKinds };
 
 static int matrixInputKindOfVgprs(const StinkyInstruction& matrix,
                                   const std::unordered_set<uint32_t>& vgprs) {
@@ -442,10 +443,10 @@ static void scheduleRegionWithMovableSideEffects(
     // Pre-scan: assign dsReadPriority. Lower = pick first.
     // A ds_load read by a feedsWmma (wmmaParentValuQueue) VALU is issued first
     // among loads with the same deadline so splat v_perm can start without
-    // waiting dscnt 0. Remaining loads keep the
-    // existing DsReadOrder (default A→B→MXSA→MXSB). Within each tier the same
-    // affinity / srcReg sort as before is reused — that is what yields
-    // MXSA→A→B→MXSB vs MXSA→MXSB→A→B vs A→MXSA→B→MXSB from the parent set.
+    // waiting dscnt 0; the parent tier ranks kinds A→MXSA→MXSB→B. Remaining
+    // loads keep DsReadOrder: affinity, then program order, which Tensile
+    // emits as A→MXSA→MXSB→B. So splat-fed kinds go first and the rest keep the
+    // base order, as Tensile global reads do (MxScaleLayout.splatFirst).
     {
         using DsReadOrder = PassFeatureConfig::DsReadOrder;
         const auto dsOrder =
@@ -472,9 +473,9 @@ static void scheduleRegionWithMovableSideEffects(
         }
 
         PASS_DEBUG({
-            std::cerr << "[DAG schedule] kind sizes A/B/MXSA/MXSB=" << kindVgprs[kDsA].size() << "/"
-                      << kindVgprs[kDsB].size() << "/" << kindVgprs[kDsMxsa].size() << "/"
-                      << kindVgprs[kDsMxsb].size() << "\n";
+            std::cerr << "[DAG schedule] kind sizes A/MXSA/MXSB/B=" << kindVgprs[kDsA].size() << "/"
+                      << kindVgprs[kDsMxsa].size() << "/" << kindVgprs[kDsMxsb].size() << "/"
+                      << kindVgprs[kDsB].size() << "\n";
             for (unsigned i = 0; i < regionSize; ++i) {
                 if (!isMatrixInstruction(*dagNodes[i].inst)) continue;
                 std::cerr << "  matrix dagId=" << i << " mx=" << isMXWMMA(*dagNodes[i].inst)
@@ -629,7 +630,7 @@ static void scheduleRegionWithMovableSideEffects(
             if (dsReads.empty()) return;
 
             if (parentTier) {
-                // Parent-VALU inputs: A → B → MXSA → MXSB, then affinity / program order.
+                // Parent-VALU inputs: A → MXSA → MXSB → B, then affinity / program order.
                 std::sort(dsReads.begin(), dsReads.end(), [](const DsInfo& a, const DsInfo& b) {
                     if (a.kindRank != b.kindRank) return a.kindRank < b.kindRank;
                     if (a.affinity != b.affinity) return a.affinity < b.affinity;

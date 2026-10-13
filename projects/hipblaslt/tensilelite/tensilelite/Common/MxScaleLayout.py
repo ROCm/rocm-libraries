@@ -82,48 +82,52 @@ def mxTdmKRowPitch(size: int, mxTile: int) -> int:
     return max(1, int(size) // mxTile)
 
 
-def mxUnitsAre1(kernel: Mapping) -> bool:
-    """True when every present MX side has mxUnit == 1 (MX128).
+def wmmaReadsViaSplat(kernel: Mapping, tensorChar: str) -> bool:
+    """True when WMMA reads ``tensorChar`` through a splat v_perm.
 
-    mxUnit = MatrixInstK / MXBlockK. MX16, MX32, and non-MX stay false so
-    TDM tensor_load and GL2 prefetch keep the pre-MXS-first issue order.
+    Only an MX scale side with mxUnit (MatrixInstK / MXBlock) == 1 is splat
+    (KernelWriterAssembly._mxSplatInPlace / _mx2dSplatInPlace). A, B and
+    metadata feed WMMA directly.
     """
-    pt = kernel.get("ProblemType") or {}
+    if tensorChar not in ("MXSA", "MXSB"):
+        return False
+    block = (kernel.get("ProblemType") or {}).get("MXBlock%s" % tensorChar[3]) or 0
+    if isinstance(block, (list, tuple)):
+        block = block[-1] if block else 0
     try:
+        block = int(block)
         mi_k = int(kernel.get("MatrixInstK") or 0)
     except (TypeError, ValueError):
         return False
-    units = []
-    for side in ("A", "B"):
-        block = pt.get("MXBlock%s" % side) or 0
-        if isinstance(block, (list, tuple)):
-            block = block[-1] if block else 0
-        try:
-            block = int(block)
-        except (TypeError, ValueError):
-            return False
-        if block <= 0:
-            continue
-        if mi_k <= 0:
-            return False
-        units.append(mi_k // block)
-    return bool(units) and all(u == 1 for u in units)
+    return block > 0 and mi_k > 0 and mi_k // block == 1
+
+
+def splatFirst(kernel: Mapping, items, key=lambda x: x):
+    """Stable reorder: tensors WMMA reads through a splat v_perm come first.
+
+    ``items`` comes in the site's order for kernels without any splat, which
+    both groups keep: A → MXSA → MXSB → B for global reads and TDM loads (the
+    selected 1st/2nd tensor order where A/B are swapped), A → B → MXSA → MXSB
+    for GL2 prefetch and subtile preloop / PAP reads. ``key`` maps an item to
+    its tensorChar. StinkyDAGSchedulerPass orders ds_loads by the same rule.
+    """
+    items = list(items)
+    splat = [it for it in items if wmmaReadsViaSplat(kernel, key(it))]
+    return splat + [it for it in items if not wmmaReadsViaSplat(kernel, key(it))]
 
 
 def mxIssueTpList(kernel: Mapping, tPA: Mapping, tPB: Mapping, *, includeMetadata: bool = False):
-    """Tensor-parameter list for GL2 prefetch issue.
+    """Tensor-parameter list for GL2 prefetch issue, in splatFirst order.
 
-    mxUnit==1 issues MXSA, MXSB, then A, B. Otherwise A, B, then MXSA, MXSB.
     Metadata stays last when requested.
     """
     pt = kernel.get("ProblemType") or {}
-    ab = [tPA, tPB]
-    mx = []
+    tps = [tPA, tPB]
     if pt.get("MXBlockA") and "MX" in tPA:
-        mx.append(tPA["MX"])
+        tps.append(tPA["MX"])
     if pt.get("MXBlockB") and "MX" in tPB:
-        mx.append(tPB["MX"])
-    tps = (mx + ab) if mxUnitsAre1(kernel) else (ab + mx)
+        tps.append(tPB["MX"])
+    tps = splatFirst(kernel, tps, key=lambda tp: tp["tensorChar"])
     if includeMetadata and kernel.get("enableTDMMetadata"):
         tps.append(tPA["tpsMetadata"] if tPA.get("is_sparse") else tPB["tpsMetadata"])
     return tps
