@@ -37,16 +37,15 @@ void registerShapeBindings(nb::module_& module) {
             "axes"_a, "Select distinct dimensions in the given order.")
         .def(
             "linear_index",
-            [](const Shape& shape, const std::vector<size_t>& indices, IndexOrder order) {
-                return shape.linearIndex(indices, order);
-            },
-            "indices"_a, "order"_a = IndexOrder{})
+            [](const Shape& shape, const std::vector<size_t>& indices,
+               const std::vector<size_t>& order) { return shape.linearIndex(indices, order); },
+            "indices"_a, "order"_a = std::vector<size_t>{})
         .def(
             "coordinates",
-            [](const Shape& shape, size_t index, const IndexOrder& order) {
+            [](const Shape& shape, size_t index, const std::vector<size_t>& order) {
                 return shape.coordinates(index, order);
             },
-            "linear_index"_a, "order"_a = IndexOrder{})
+            "linear_index"_a, "order"_a = std::vector<size_t>{})
         .def(
             "__eq__", [](const Shape& left, const Shape& right) { return left == right; },
             nb::is_operator())

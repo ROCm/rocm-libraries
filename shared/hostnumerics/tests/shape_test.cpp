@@ -71,7 +71,8 @@ void checkShape() {
                                        "dimension 3 is outside [0, 3)");
 
     const std::array<size_t, 3> position{1, 0, 2};
-    for (const auto& order : {IndexOrder{2, 1, 0}, IndexOrder{0, 2, 1}, IndexOrder{}}) {
+    for (const auto& order :
+         {std::vector<size_t>{2, 1, 0}, std::vector<size_t>{0, 2, 1}, std::vector<size_t>{}}) {
         std::array<size_t, 3> coordinates{};
         shape.coordinates(17, order, coordinates);
         check(shape.linearIndex(coordinates, order) == 17 &&
@@ -82,10 +83,14 @@ void checkShape() {
             [&] { shape.coordinates(0, order, {}); },
             "coordinate output rank 0 does not match shape rank 3");
     }
-    for (const auto& order : {IndexOrder{0}, IndexOrder{0, 0, 2}, IndexOrder{0, 1, 3}}) {
+    for (const auto& order :
+         {std::vector<size_t>{0}, std::vector<size_t>{0, 0, 2}, std::vector<size_t>{0, 1, 3}}) {
         expectException<std::invalid_argument>([&] { (void)shape.linearIndex(position, order); });
         expectException<std::invalid_argument>([&] { (void)shape.coordinates(0, order); });
     }
+    const std::array<size_t, 3> reverseOrder{2, 1, 0};
+    check(shape.linearIndex(position, reverseOrder) == 13,
+          "A fixed array must be accepted directly as an order span.");
 }
 }  // namespace
 
