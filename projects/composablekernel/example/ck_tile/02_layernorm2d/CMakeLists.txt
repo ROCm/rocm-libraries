@@ -8,10 +8,20 @@ if(LAYERNORM2D_FWD_ENABLE_APIS  STREQUAL "all")
   set(LAYERNORM2D_FWD_ENABLE_APIS  ${LAYERNORM2D_FWD_KNOWN_APIS})
 endif()
 
+set(LAYERNORM2D_FWD_INSTANCE_FILTER "" CACHE STRING
+  "fnmatch filter for generated layernorm2d fwd kernels, e.g. layernorm2d_fwd_fp16_n256. Empty = all.")
+set(LAYERNORM2D_FWD_CODE_GEN_ARGS
+  --api ${LAYERNORM2D_FWD_ENABLE_APIS} --working_path ${CMAKE_CURRENT_BINARY_DIR})
+if(NOT LAYERNORM2D_FWD_INSTANCE_FILTER STREQUAL "")
+  # Use the same filter when listing and generating kernel sources.
+  list(APPEND LAYERNORM2D_FWD_CODE_GEN_ARGS --filter ${LAYERNORM2D_FWD_INSTANCE_FILTER})
+  message(STATUS "CK Tile layernorm2d fwd instance filter: ${LAYERNORM2D_FWD_INSTANCE_FILTER}")
+endif()
+
 # generate a list of kernels, but not actually emit files at config sta
 execute_process(
   COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/generate.py
-  --api ${LAYERNORM2D_FWD_ENABLE_APIS} --working_path ${CMAKE_CURRENT_BINARY_DIR} --list_blobs
+  ${LAYERNORM2D_FWD_CODE_GEN_ARGS} --list_blobs
   RESULT_VARIABLE ret
 )
 if(ret AND NOT ret EQUAL 0)
@@ -23,7 +33,7 @@ file(STRINGS ${CMAKE_CURRENT_BINARY_DIR}/layernorm2d_fwd_blobs.txt LAYERNORM2D_F
 add_custom_command(
   OUTPUT ${LAYERNORM2D_FWD_GEN_BLOBS}
   COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/generate.py
-  --api ${LAYERNORM2D_FWD_ENABLE_APIS} --working_path ${CMAKE_CURRENT_BINARY_DIR} --gen_blobs
+  ${LAYERNORM2D_FWD_CODE_GEN_ARGS} --gen_blobs
 )
 
 set(EXAMPLE_LAYERNORM2D_FWD "tile_example_layernorm2d_fwd")

@@ -6,6 +6,7 @@ Documentation for Composable Kernel available at [https://rocm.docs.amd.com/proj
 
 ### Added
 
+* Added optional instance filters for the CK Tile LayerNorm2D forward and quantized GEMM examples to reduce compilation for selected workloads.
 * Added support for building Composable Kernel for the target-agnostic SPIR-V target (`amdgcnspirv`), which is compiled to native code at run time.
 * Added grouped convolution forward, backward data, and backward weight instances for gfx1250.
 * Added a wavelet GEMM pipeline for convolution forward that specializes waves into separate load and math roles to reduce VALU contention.
