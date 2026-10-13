@@ -148,6 +148,7 @@ set(rocsparse_source
   src/level2/rocsparse_xcsrsv_analysis.cpp
   src/level2/rocsparse_csrsv_solve_kernels.cpp
   src/level2/rocsparse_csrsv_solve.cpp
+  src/level2/rocsparse_csrsv_transpose_free.cpp
   src/level2/rocsparse_xcsrsv_solve.cpp
   src/level2/rocsparse_csritsv.cpp
   src/level2/rocsparse_csritsv_info.cpp

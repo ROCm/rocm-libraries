@@ -456,6 +456,25 @@ catch(...)
 
 namespace rocsparse
 {
+    // The cases that need the transpose: CSR and COO with (conjugate) transpose, CSC without.
+    static bool is_transpose_free_path(rocsparse_sptrsv_alg alg,
+                                       rocsparse_format     format,
+                                       rocsparse_operation  operation)
+    {
+        return alg == rocsparse_sptrsv_alg_transpose_free
+               && (((format == rocsparse_format_csr || format == rocsparse_format_coo)
+                    && operation != rocsparse_operation_none)
+                   || (format == rocsparse_format_csc && operation == rocsparse_operation_none));
+    }
+
+    static rocsparse_status sptrsv_buffer_size_default(rocsparse_handle            handle,
+                                                       rocsparse_sptrsv_descr      sptrsv_descr,
+                                                       rocsparse_const_spmat_descr A,
+                                                       rocsparse_const_dnvec_descr x,
+                                                       rocsparse_const_dnvec_descr y,
+                                                       rocsparse_sptrsv_stage      sptrsv_stage,
+                                                       size_t* buffer_size_in_bytes);
+
     static rocsparse_status sptrsv_buffer_size(rocsparse_handle            handle,
                                                rocsparse_sptrsv_descr      sptrsv_descr,
                                                rocsparse_const_spmat_descr A,
@@ -463,6 +482,29 @@ namespace rocsparse
                                                rocsparse_const_dnvec_descr y,
                                                rocsparse_sptrsv_stage      sptrsv_stage,
                                                size_t*                     buffer_size_in_bytes)
+    {
+        ROCSPARSE_ROUTINE_TRACE;
+        if(rocsparse::is_transpose_free_path(
+               sptrsv_descr->get_alg(), A->format, sptrsv_descr->get_operation())
+           && A->rows > 0)
+        {
+            buffer_size_in_bytes[0]
+                = (sptrsv_stage == rocsparse_sptrsv_stage_analysis)
+                      ? rocsparse::csrsv_transpose_free_analysis_buffer_size()
+                      : rocsparse::csrsv_transpose_free_solve_buffer_size(A, y->batch_count);
+            return rocsparse_status_success;
+        }
+        return rocsparse::sptrsv_buffer_size_default(
+            handle, sptrsv_descr, A, x, y, sptrsv_stage, buffer_size_in_bytes);
+    }
+
+    static rocsparse_status sptrsv_buffer_size_default(rocsparse_handle            handle,
+                                                       rocsparse_sptrsv_descr      sptrsv_descr,
+                                                       rocsparse_const_spmat_descr A,
+                                                       rocsparse_const_dnvec_descr x,
+                                                       rocsparse_const_dnvec_descr y,
+                                                       rocsparse_sptrsv_stage      sptrsv_stage,
+                                                       size_t* buffer_size_in_bytes)
     {
         ROCSPARSE_ROUTINE_TRACE;
         const rocsparse_format    format    = A->format;
@@ -571,6 +613,17 @@ namespace rocsparse
         }
     }
     // LCOV_EXCL_STOP
+
+    static rocsparse_csrsv_info create_sptrsv_csrsv_info(bool transpose_free)
+    {
+        if(transpose_free)
+        {
+            rocsparse_csrsv_info csrsv_info = new _rocsparse_csrsv_info();
+            csrsv_info->set_transpose_free(true);
+            return csrsv_info;
+        }
+        return nullptr;
+    }
 
     static rocsparse_status convert_scalars(rocsparse_handle             handle,
                                             const rocsparse_sptrsv_descr descr,
@@ -681,12 +734,18 @@ namespace rocsparse
             sptrsv_descr->set_format(format);
             sptrsv_descr->m_batch_count = dnvec_descr_y->batch_count;
 
+            // The transpose-free analysis is never shared through the matrix info.
+            const bool transpose_free = rocsparse::is_transpose_free_path(alg, format, operation);
+            const rocsparse_analysis_policy csrsv_policy
+                = transpose_free ? rocsparse_analysis_policy_force : analysis_policy;
+
             switch(format)
             {
             case rocsparse_format_csr:
             {
-                rocsparse_csrsv_info csrsv_info{};
-                switch(analysis_policy)
+                rocsparse_csrsv_info                   csrsv_info{};
+                std::unique_ptr<_rocsparse_csrsv_info> csrsv_info_owner;
+                switch(csrsv_policy)
                 {
                 case rocsparse_analysis_policy_reuse:
                 {
@@ -696,7 +755,8 @@ namespace rocsparse
                 }
                 case rocsparse_analysis_policy_force:
                 {
-                    csrsv_info = nullptr;
+                    csrsv_info_owner.reset(rocsparse::create_sptrsv_csrsv_info(transpose_free));
+                    csrsv_info = csrsv_info_owner.get();
                     break;
                 }
                 }
@@ -704,12 +764,12 @@ namespace rocsparse
                 RETURN_IF_ROCSPARSE_ERROR((rocsparse::csrsv_analysis(handle,
                                                                      operation,
                                                                      A,
-                                                                     analysis_policy,
+                                                                     csrsv_policy,
                                                                      rocsparse_solve_policy_auto,
                                                                      &csrsv_info,
                                                                      buffer)));
                 sptrsv_descr->set_stage(rocsparse_sptrsv_stage_analysis);
-                switch(analysis_policy)
+                switch(csrsv_policy)
                 {
                 case rocsparse_analysis_policy_reuse:
                 {
@@ -717,6 +777,7 @@ namespace rocsparse
                 }
                 case rocsparse_analysis_policy_force:
                 {
+                    csrsv_info_owner.release();
                     sptrsv_descr->set_csrsv_info(csrsv_info);
                     break;
                 }
@@ -727,8 +788,9 @@ namespace rocsparse
 
             case rocsparse_format_coo:
             {
-                rocsparse_csrsv_info csrsv_info{};
-                switch(analysis_policy)
+                rocsparse_csrsv_info                   csrsv_info{};
+                std::unique_ptr<_rocsparse_csrsv_info> csrsv_info_owner;
+                switch(csrsv_policy)
                 {
                 case rocsparse_analysis_policy_reuse:
                 {
@@ -738,7 +800,8 @@ namespace rocsparse
                 }
                 case rocsparse_analysis_policy_force:
                 {
-                    csrsv_info = nullptr;
+                    csrsv_info_owner.reset(rocsparse::create_sptrsv_csrsv_info(transpose_free));
+                    csrsv_info = csrsv_info_owner.get();
                     break;
                 }
                 }
@@ -746,12 +809,12 @@ namespace rocsparse
                 RETURN_IF_ROCSPARSE_ERROR((rocsparse::coosv_analysis(handle,
                                                                      operation,
                                                                      A,
-                                                                     analysis_policy,
+                                                                     csrsv_policy,
                                                                      rocsparse_solve_policy_auto,
                                                                      &csrsv_info,
                                                                      buffer)));
 
-                switch(analysis_policy)
+                switch(csrsv_policy)
                 {
                 case rocsparse_analysis_policy_reuse:
                 {
@@ -759,6 +822,7 @@ namespace rocsparse
                 }
                 case rocsparse_analysis_policy_force:
                 {
+                    csrsv_info_owner.release();
                     sptrsv_descr->set_csrsv_info(csrsv_info);
                     break;
                 }
@@ -770,8 +834,9 @@ namespace rocsparse
             }
             case rocsparse_format_csc:
             {
-                rocsparse_csrsv_info csrsv_info{};
-                switch(analysis_policy)
+                rocsparse_csrsv_info                   csrsv_info{};
+                std::unique_ptr<_rocsparse_csrsv_info> csrsv_info_owner;
+                switch(csrsv_policy)
                 {
                 case rocsparse_analysis_policy_reuse:
                 {
@@ -781,7 +846,8 @@ namespace rocsparse
                 }
                 case rocsparse_analysis_policy_force:
                 {
-                    csrsv_info = nullptr;
+                    csrsv_info_owner.reset(rocsparse::create_sptrsv_csrsv_info(transpose_free));
+                    csrsv_info = csrsv_info_owner.get();
                     break;
                 }
                 }
@@ -789,12 +855,12 @@ namespace rocsparse
                 RETURN_IF_ROCSPARSE_ERROR((rocsparse::cscsv_analysis(handle,
                                                                      operation,
                                                                      A,
-                                                                     analysis_policy,
+                                                                     csrsv_policy,
                                                                      rocsparse_solve_policy_auto,
                                                                      &csrsv_info,
                                                                      buffer)));
                 sptrsv_descr->set_stage(rocsparse_sptrsv_stage_analysis);
-                switch(analysis_policy)
+                switch(csrsv_policy)
                 {
                 case rocsparse_analysis_policy_reuse:
                 {
@@ -802,6 +868,7 @@ namespace rocsparse
                 }
                 case rocsparse_analysis_policy_force:
                 {
+                    csrsv_info_owner.release();
                     sptrsv_descr->set_csrsv_info(csrsv_info);
                     break;
                 }
