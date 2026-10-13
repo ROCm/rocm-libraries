@@ -483,8 +483,7 @@ if(ROCKE_INSTALL_TESTS)
     # lane. The on-GPU numeric tests are enrolled in the GPU lane below.
     set(_ROCKE_LIBRARY_DSA_TEST_RELPATHS
         "tests/library/tests/test_dsa_indexer_gfx942_spec.py"
-        "tests/library/tests/test_dsa_indexer_gfx942_golden.py"
-        "tests/library/tests/test_dsa_indexer_gfx950_golden.py"
+        "tests/library/tests/test_dsa_indexer_golden.py"
         "tests/library/tests/dispatch/dsa/test_gfx942_wiring.py"
         "tests/library/tests/dispatch/dsa/test_gfx950_wiring.py")
     set(_ROCKE_LIBRARY_DSA_TESTS "")
@@ -610,8 +609,7 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_wmma_fmha_paged_guard.py"
         "tests/library/tests/test_wmma_fp8_decode_numeric.py"
         "tests/library/tests/dispatch/attention/test_gfx1151_attention_dispatch_numeric.py"
-        "tests/library/tests/test_dsa_indexer_gfx942_numeric.py"
-        "tests/library/tests/test_dsa_indexer_gfx950_numeric.py")
+        "tests/library/tests/test_dsa_indexer_numeric.py")
     set(_ROCKE_LIBRARY_GPU_TESTS "")
     foreach(_rocke_gpu_test ${_ROCKE_LIBRARY_GPU_TEST_RELPATHS})
       string(APPEND _ROCKE_LIBRARY_GPU_TESTS

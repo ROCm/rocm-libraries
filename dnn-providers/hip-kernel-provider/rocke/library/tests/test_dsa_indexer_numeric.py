@@ -1,10 +1,13 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""On-GPU numeric lane for the gfx950 lightning indexer (torch-free).
+"""On-GPU numeric lane for the lightning indexer (torch-free), gfx942 + gfx950.
 
-Same as the gfx942 numeric lane but compiled and launched for gfx950. Gated on an
-actual gfx950 device via a torch-free probe, so it skips cleanly on any other host.
+Compiles the kernel, launches it through the numpy ``run_manifest`` path, and
+checks the emitted scores against the CPU oracle in
+``builders.common.dsa.hostpack.ref_indexer_scores``. Parameterized over gfx942 and
+gfx950; each arch's cases skip unless that device is the one present (torch-free
+probe), so the file runs on either node and skips cleanly on any other host.
 """
 
 from __future__ import annotations
@@ -23,6 +26,27 @@ for _path in (str(_LIBRARY), str(_PLATFORM_PYTHON)):
     if _path not in sys.path:
         sys.path.insert(0, _path)
 
+pytestmark = pytest.mark.gpu
+
+# One multiply per bf16 pair plus per-head weights stay in f32; the score is a
+# ranking input, so a relaxed relative tolerance is the correct gate.
+_TOL = 1e-3
+_ARCHES = ("gfx942", "gfx950")
+
+# (seqlen_q, seqlen_k, n_index_heads, index_head_dim, block_size, q_pos_base, body)
+_SHAPES = [
+    (8, 64, 4, 16, 64, 0, "scalar"),  # small, decode-like base
+    (8, 128, 32, 128, 256, 0, "scalar"),  # GLM-shaped H_I=32, D_I=128
+    (4, 96, 8, 128, 128, 50, "scalar"),  # nonzero causal offset
+    (16, 64, 32, 128, 64, 0, "mfma"),  # MFMA, GLM-shaped, 16-aligned
+    (32, 128, 64, 128, 64, 0, "mfma"),  # MFMA, DeepSeek-shaped, multi-tile
+    (16, 96, 8, 128, 64, 48, "mfma"),  # MFMA, nonzero causal offset
+    (1, 70, 4, 16, 64, 69, "scalar"),  # decode: seqlen_q=1, non-mult seqlen_k
+    (3, 200, 8, 128, 64, 0, "scalar"),  # scalar grid.y>1, tail key slice
+    (16, 70, 32, 128, 64, 0, "mfma"),  # MFMA key-tail (seqlen_k not 16-mult)
+    (24, 70, 32, 128, 64, 0, "mfma"),  # MFMA query+key tail (neither 16-mult)
+]
+
 
 def _gpu_arch() -> str:
     try:
@@ -33,31 +57,12 @@ def _gpu_arch() -> str:
         return ""
 
 
-pytestmark = [
-    pytest.mark.gpu,
-    pytest.mark.skipif("gfx950" not in _gpu_arch(), reason="needs a gfx950 GPU"),
-]
+@pytest.mark.parametrize("arch", _ARCHES)
+@pytest.mark.parametrize("Q,Sk,HI,D,block,q_pos_base,body", _SHAPES)
+def test_indexer_scores_match_oracle(arch, Q, Sk, HI, D, block, q_pos_base, body):
+    if arch not in _gpu_arch():
+        pytest.skip(f"needs a {arch} GPU")
 
-_ARCH = "gfx950"
-_TOL = 1e-3
-
-
-@pytest.mark.parametrize(
-    "Q,Sk,HI,D,block,q_pos_base,body",
-    [
-        (8, 64, 4, 16, 64, 0, "scalar"),
-        (8, 128, 32, 128, 256, 0, "scalar"),
-        (4, 96, 8, 128, 128, 50, "scalar"),
-        (16, 64, 32, 128, 64, 0, "mfma"),
-        (32, 128, 64, 128, 64, 0, "mfma"),
-        (16, 96, 8, 128, 64, 48, "mfma"),
-        (1, 70, 4, 16, 64, 69, "scalar"),  # decode: seqlen_q=1, non-mult seqlen_k
-        (3, 200, 8, 128, 64, 0, "scalar"),  # scalar grid.y>1, tail key slice
-        (16, 70, 32, 128, 64, 0, "mfma"),  # MFMA key-tail (seqlen_k not 16-mult)
-        (24, 70, 32, 128, 64, 0, "mfma"),  # MFMA query+key tail (neither 16-mult)
-    ],
-)
-def test_indexer_scores_match_oracle(Q, Sk, HI, D, block, q_pos_base, body):
     from rocke.helpers.compile import compile_kernel
     from rocke.run_manifest import run_manifest
 
@@ -77,7 +82,7 @@ def test_indexer_scores_match_oracle(Q, Sk, HI, D, block, q_pos_base, body):
         body=body,
         tile=IndexerTileSpec(block_size=block),
     )
-    artifact = compile_kernel(build_lightning_indexer(spec, arch=_ARCH), arch=_ARCH)
+    artifact = compile_kernel(build_lightning_indexer(spec, arch=arch), arch=arch)
     assert artifact.hsaco_bytes > 0
 
     manifest = make_lightning_indexer_manifest(
@@ -98,7 +103,7 @@ def test_indexer_scores_match_oracle(Q, Sk, HI, D, block, q_pos_base, body):
         summary = run_manifest(man_path, hsaco_path, shape=None, verify=True)
 
     assert summary.bad_count == 0, (
-        f"{summary.bad_count}/{summary.total} scores exceed tol={_TOL} "
+        f"{arch}: {summary.bad_count}/{summary.total} scores exceed tol={_TOL} "
         f"(max_abs_diff={summary.max_abs_diff:.3e})"
     )
 
