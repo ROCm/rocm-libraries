@@ -1,0 +1,27 @@
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
+# rocm-libraries skip-CI patterns.
+# These extend the base patterns in TheRock's skip-ci-base.toml, which is
+# loaded first by load_skip_ci_patterns_for_external_repo().
+#
+# Referenced from .github/workflows/therock-multi-arch-ci.yml via the
+# `skip_ci_config` key of the `external_repo` input.
+
+version = 1
+
+[skip_ci]
+# Patterns that apply to all platforms
+common = [
+    ".github/workflows/*",
+
+    # The skip list itself: editing which paths are skippable does not need
+    # a full build/test run. Mirrors TheRock's own skip-ci-config.toml.
+    ".github/skip-ci-config.toml",
+]
+
+# Additional patterns for Linux-only skip (currently none)
+linux = []
+
+# Additional patterns for Windows-only skip (currently none)
+windows = []

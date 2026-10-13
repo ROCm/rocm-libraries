@@ -158,9 +158,9 @@ jobs:
       # event_name/pr_number/base_sha/head_sha let TheRock fetch this repo's
       # diff; projects_config maps that diff onto changed projects (replacing
       # the retired configure_external_repo_ci.py); skip_ci_config supplies the
-      # skip patterns. skip_ci_config is REQUIRED even though the file does not
-      # exist yet -- without the key TheRock falls back to its own skip config,
-      # which would skip CI for a therock-*.yml-only PR.
+      # skip patterns. skip_ci_config is REQUIRED -- without the key TheRock
+      # falls back to its own skip config, whose patterns reference
+      # TheRock-only paths that mean nothing in this repository.
       #
       # extra_cmake_options is appended to the cmake configure line of every
       # build stage, scoped to this repository's CI runs. TheRock keeps

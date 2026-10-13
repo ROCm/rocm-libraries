@@ -27,6 +27,8 @@ cmake_policy(VERSION 3.18...3.25)
 set(CMAKE_INSTALL_PREFIX "/opt/rocm" CACHE PATH "Install path prefix, prepended onto install directories")
 
 # rocPRIM project
+# NOTE (DO NOT MERGE): no-op comment added to exercise TheRock path-filter
+# scoping. Remove along with the rest of this test branch.
 project(rocprim LANGUAGES CXX)
 
 # Set CXX flags
