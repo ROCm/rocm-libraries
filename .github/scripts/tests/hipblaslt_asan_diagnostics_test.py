@@ -299,11 +299,14 @@ class DiagnosticsTest(unittest.TestCase):
                 if expected:
                     self.assertIn("must be a positive PID", result.stderr)
 
-    def test_real_debugger_captures_native_children_through_driver(self):
+    def require_debugger(self):
         if not shutil.which("gdb"):
             if os.getenv("HIPBLASLT_DIAGNOSTICS_CHECK_PTRACE") == "1":
                 self.fail("gdb is required for the GPU job's timeout diagnostics")
             self.skipTest("gdb is not installed")
+
+    def test_real_debugger_captures_native_children_through_driver(self):
+        self.require_debugger()
         driver, bin_dir, env = self.driver_fixture()
         for name in ("hipblaslt-test", "hipblaslt-test-tuning-store"):
             with self.subTest(binary=name):
@@ -336,7 +339,7 @@ class DiagnosticsTest(unittest.TestCase):
                     self.addCleanup(process.stdin.close)
                     self.addCleanup(process.wait)
                     self.addCleanup(process.kill)
-                    process.wait(timeout=45)
+                    process.wait(timeout=60)
                     log.seek(0)
                     console = log.read()
                 self.assertEqual(process.returncode, 124, console)
@@ -344,17 +347,125 @@ class DiagnosticsTest(unittest.TestCase):
                 targets = [p for p in processes if p.get("exe") == str(binary)]
                 self.assertEqual(len(targets), 1, console)
                 pid = targets[0]["pid"]
-                result = json.loads((output / "capture-results.json").read_text())[
-                    str(pid)
-                ]
-                self.assertEqual(result["returncode"], 0, console)
-                self.assertFalse(result["timed_out"], console)
-                trace = (output / f"backtrace-{pid}.log").read_text()
-                self.assertIn("#0", trace)
-                self.assertIn("read", trace)
-                self.assertIn("detached", trace.lower())
+                capture = json.loads((output / "capture-results.json").read_text())
+                self.assertEqual(len(capture["samples"]), 2, console)
+                for sample in capture["samples"]:
+                    result = sample["backtraces"][str(pid)]
+                    self.assertEqual(result["returncode"], 0, console)
+                    self.assertFalse(result["timed_out"], console)
+                    trace = (
+                        output / sample["directory"] / f"backtrace-{pid}.log"
+                    ).read_text()
+                    self.assertIn(f"=== Main thread LWP {pid} ===", trace)
+                    self.assertIn("#0", trace)
+                    self.assertIn("read", trace)
+                    self.assertIn("detached", trace.lower())
+                    self.assertNotIn("Diagnostic command failed", trace)
                 wait_for_exit(pid)
                 shutil.copy2(shutil.which("true"), binary)
+
+    def test_deep_main_stack_and_live_progress_between_samples(self):
+        self.require_debugger()
+        binary = self.root / "hipblaslt-test"
+        shutil.copy2(sys.executable, binary)
+        pulse = self.root / "pulse"
+        # Nested ctypes callbacks create real native frames without requiring
+        # a compiler in the GPU image. The deepest frame keeps making progress.
+        code = f"""
+import ctypes, pathlib, time
+libc = ctypes.CDLL(None)
+libc.prctl.argtypes = [ctypes.c_int] + [ctypes.c_ulong] * 4
+assert libc.prctl(0x59616d61, {os.getpid()}, 0, 0, 0) == 0
+pulse = pathlib.Path({str(pulse)!r})
+temporary = pulse.with_suffix('.tmp')
+def descend(depth):
+    if depth:
+        callback(depth - 1)
+    else:
+        count = 0
+        while True:
+            temporary.write_text(str(count))
+            temporary.replace(pulse)
+            count += 1
+            time.sleep(0.01)
+callback = ctypes.CFUNCTYPE(None, ctypes.c_int)(descend)
+callback(24)
+"""
+        process = subprocess.Popen([str(binary), "-c", code], start_new_session=True)
+        self.addCleanup(diagnostics.stop_process, process)
+        wait_for_file(pulse, process)
+        counts = []
+        real_probe = diagnostics.probe
+
+        def observe_probe(command, output, timeout, env=None):
+            result = real_probe(command, output, timeout, env)
+            if output.name.startswith("backtrace-"):
+                counts.append(int(pulse.read_text()))
+            return result
+
+        with patch.object(diagnostics, "probe", side_effect=observe_probe):
+            diagnostics.capture_timeout(self.root, process.pid, interval=0.2)
+        capture = json.loads((self.root / "capture-results.json").read_text())
+        self.assertEqual(len(capture["samples"]), 2, self.console.getvalue())
+        self.assertEqual(len(counts), 2)
+        self.assertGreater(counts[1], counts[0], "target must run between samples")
+        self.assertIsNone(process.poll(), "capture must leave the target running")
+        for sample in capture["samples"]:
+            trace = (
+                self.root / sample["directory"] / f"backtrace-{process.pid}.log"
+            ).read_text()
+            self.assertEqual(
+                sample["backtraces"][str(process.pid)]["returncode"], 0, trace
+            )
+            main = trace.split(f"=== Main thread LWP {process.pid} ===", 1)[1]
+            self.assertRegex(main, r"(?m)^#79\s")
+            self.assertRegex(main, r"(?m)^(rip|pc)\s+0x")
+            self.assertRegex(main, r"=>\s+0x")
+            self.assertNotIn("Diagnostic command failed", main)
+
+    def test_stalled_debugger_consumes_budget_without_second_attachment(self):
+        binary = self.root / "hipblaslt-test"
+        shutil.copy2(sys.executable, binary)
+        ready = self.root / "ready"
+        process = subprocess.Popen(
+            [
+                str(binary),
+                "-c",
+                f"import pathlib,time; pathlib.Path({str(ready)!r}).touch(); time.sleep(60)",
+            ],
+            start_new_session=True,
+        )
+        self.addCleanup(diagnostics.stop_process, process)
+        wait_for_file(ready, process)
+        invocations = self.root / "gdb-invocations"
+        debugger = self.executable(
+            "gdb", f"echo invoked >> {shlex.quote(str(invocations))}\nsleep 60\n"
+        )
+        started = time.monotonic()
+        with patch.object(diagnostics.shutil, "which", return_value=str(debugger)):
+            diagnostics.capture_timeout(self.root, process.pid, budget=0.2)
+        self.assertLess(time.monotonic() - started, 5)
+        capture = json.loads((self.root / "capture-results.json").read_text())
+        self.assertEqual(len(capture["samples"]), 1)
+        self.assertTrue(
+            capture["samples"][0]["backtraces"][str(process.pid)]["timed_out"]
+        )
+        self.assertIn("second_sample_skipped", capture)
+        self.assertEqual(invocations.read_text().splitlines(), ["invoked"])
+        self.assertIsNone(process.poll())
+
+    def test_second_sample_failure_preserves_first_and_kernel_log_attempt(self):
+        first = {"timestamp_utc": "example", "backtraces": {"123": {"returncode": 0}}}
+        with patch.object(
+            diagnostics, "capture_sample", side_effect=[first, OSError("second failed")]
+        ), patch.object(diagnostics.time, "sleep"), patch.object(
+            diagnostics, "probe", return_value={"returncode": 1}
+        ) as probe:
+            diagnostics.capture_timeout(self.root, 123)
+        capture = json.loads((self.root / "capture-results.json").read_text())
+        self.assertEqual(capture["samples"], [first])
+        self.assertIn("second failed", capture["second_sample_error"])
+        self.assertEqual(probe.call_args.args[0], ["dmesg", "--level=err,warn"])
 
 
 if __name__ == "__main__":

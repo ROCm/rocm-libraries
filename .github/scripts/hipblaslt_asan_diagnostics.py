@@ -193,7 +193,7 @@ def process_group_members(group):
 
 def process_snapshot(path):
     data = {"pid": int(path.name)}
-    for name in ("status", "wchan", "syscall", "maps"):
+    for name in ("stat", "status", "wchan", "syscall", "maps"):
         data[name] = read_file(path / name)
     try:
         data["exe"] = str((path / "exe").readlink())
@@ -232,13 +232,37 @@ def process_snapshot(path):
     return data
 
 
-def capture_timeout(output, group, budget=30):
-    deadline = time.monotonic() + budget
-    write_json(output / "host-timeout.json", host_snapshot())
+def debugger_commands(pid):
+    # Linux's thread-group leader has LWP == PID. GDB's selected thread and
+    # thread numbering need not identify that leader after an attachment.
+    return f"""set pagination off
+thread apply all bt 20
+python
+import gdb
+leader = next((t for t in gdb.selected_inferior().threads() if t.ptid[1] == {pid}), None)
+if leader is None:
+    raise gdb.GdbError("Main thread LWP {pid} is no longer present")
+leader.switch()
+gdb.write("=== Main thread LWP {pid} ===\\n")
+for command in ("bt 80", "info registers", "x/24i $pc"):
+    gdb.write("=== " + command + " ===\\n")
+    try:
+        gdb.execute(command)
+    except gdb.error as error:
+        gdb.write("Diagnostic command failed: " + str(error) + "\\n")
+end
+info sharedlibrary
+detach
+"""
+
+
+def capture_sample(output, group, debugger, deadline):
+    started = time.monotonic()
+    host = host_snapshot()
+    write_json(output / "host-timeout.json", host)
     processes = [process_snapshot(path) for path in process_group_members(group)]
     write_json(output / "processes.json", processes)
-    print(f"Live processes at timeout: {json.dumps(processes, indent=2)}", flush=True)
-    debugger = shutil.which("gdb")
+    print(f"Live processes at {output}: {json.dumps(processes, indent=2)}", flush=True)
     results = {}
     if not debugger:
         print(
@@ -260,6 +284,8 @@ def capture_timeout(output, group, budget=30):
                 results["budget"] = {"error": "backtrace capture budget exhausted"}
                 break
             pid = process["pid"]
+            commands = output / f"backtrace-{pid}.gdb"
+            commands.write_text(debugger_commands(pid))
             results[str(pid)] = probe(
                 [
                     debugger,
@@ -271,21 +297,60 @@ def capture_timeout(output, group, budget=30):
                     "set debuginfod enabled off",
                     "-p",
                     str(pid),
-                    "-ex",
-                    "set pagination off",
-                    "-ex",
-                    "thread apply all bt 20",
-                    "-ex",
-                    "info sharedlibrary",
-                    "-ex",
-                    "detach",
+                    "-x",
+                    str(commands),
                 ],
                 output / f"backtrace-{pid}.log",
                 min(15, remaining),
                 env,
             )
+    return {
+        "timestamp_utc": host["timestamp_utc"],
+        "elapsed_seconds": round(time.monotonic() - started, 3),
+        "backtraces": results,
+    }
+
+
+def capture_timeout(output, group, budget=40, interval=2):
+    started = time.monotonic()
+    deadline = started + budget
+    debugger = shutil.which("gdb")
+    first = capture_sample(output, group, debugger, deadline)
+    first["directory"] = "."
+    results = {"budget_seconds": budget, "samples": [first]}
+    # Keep the completed first capture if cancellation interrupts the repeat.
+    write_json(output / "capture-results.json", results)
+    # Each successful GDB command detaches before returning. Resume for this
+    # interval before attaching again; two snapshots of a stopped process would
+    # not tell us whether it is making progress.
+    if not any(
+        result.get("returncode") == 0 and not result.get("timed_out")
+        for result in first["backtraces"].values()
+    ):
+        results["second_sample_skipped"] = "no successful first debugger capture"
+    elif deadline - time.monotonic() <= interval:
+        results["second_sample_skipped"] = "capture budget exhausted"
+    else:
+        time.sleep(interval)
+        try:
+            second_output = output / "sample-2"
+            second_output.mkdir(exist_ok=True)
+            second = capture_sample(second_output, group, debugger, deadline)
+            second["directory"] = "sample-2"
+            second["resume_interval_seconds"] = interval
+            results["samples"].append(second)
+        except Exception as error:
+            results["second_sample_error"] = str(error)
+            print(f"Second timeout sample failed: {error}", flush=True)
     # Permission denial is useful evidence too; no privileged retry or reset.
-    results["dmesg"] = probe(["dmesg", "--level=err,warn"], output / "dmesg.log", 5)
+    remaining = deadline - time.monotonic()
+    if remaining > 0:
+        results["dmesg"] = probe(
+            ["dmesg", "--level=err,warn"], output / "dmesg.log", min(5, remaining)
+        )
+    else:
+        results["dmesg"] = {"error": "capture budget exhausted"}
+    results["elapsed_seconds"] = round(time.monotonic() - started, 3)
     write_json(output / "capture-results.json", results)
 
 
