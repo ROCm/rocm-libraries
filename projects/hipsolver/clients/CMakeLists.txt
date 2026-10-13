@@ -73,13 +73,15 @@ if(NOT DEFINED HIPSOLVER_HAVE_FORTRAN_BINDINGS)
   set(HIPSOLVER_HAVE_FORTRAN_BINDINGS FALSE)
   if(BUILD_FORTRAN_BINDINGS AND (BUILD_CLIENTS_TESTS OR BUILD_CLIENTS_BENCHMARKS))
     find_package(hipsolver-fortran QUIET CONFIG PATHS ${ROCM_PATH} /opt/rocm)
-    if(NOT TARGET roc::hipsolver_fortran)
-      message(FATAL_ERROR
+    if(TARGET roc::hipsolver_fortran)
+      set(HIPSOLVER_HAVE_FORTRAN_BINDINGS TRUE)
+    else()
+      message(STATUS
         "BUILD_FORTRAN_BINDINGS is ON but the hipSOLVER Fortran bindings were not "
-        "found. Point CMAKE_PREFIX_PATH at a prefix where they are installed for "
-        "${CMAKE_Fortran_COMPILER}, or configure with -DBUILD_FORTRAN_BINDINGS=OFF.")
+        "found for ${CMAKE_Fortran_COMPILER}; building the clients without the "
+        "Fortran tests. Point CMAKE_PREFIX_PATH at a prefix where they are installed "
+        "to include them.")
     endif()
-    set(HIPSOLVER_HAVE_FORTRAN_BINDINGS TRUE)
   endif()
 endif()
 
