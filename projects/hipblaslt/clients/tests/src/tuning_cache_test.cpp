@@ -1433,16 +1433,23 @@ namespace
         EXPECT_NE(output.find("load=no-path"), std::string::npos) << output;
     }
 
-    // The logger reads its environment once, so start a fresh process with info
-    // enabled and check both replay and empty-cache paths share the event latch.
+    // The logger reads its environment once, during the test binary's startup,
+    // so the fresh process inherits info logging from this one; it then checks
+    // both replay and empty-cache paths share the event latch.
     TEST(TuningCacheDiagnostics, pre_checkin_DirectAndEmptyLookupsLogOnceAtInfoLevel)
     {
+        std::vector<std::pair<std::string, std::optional<std::string>>> savedEnv;
+        for(const char* name : {"HIPBLASLT_LOG_LEVEL", "HIPBLASLT_LOG_MASK", "HIPBLASLT_LOG_FILE"})
+        {
+            const char* value = getenv(name);
+            savedEnv.emplace_back(name, value ? std::optional<std::string>(value) : std::nullopt);
+            unsetenv(name);
+        }
+        setenv("HIPBLASLT_LOG_LEVEL", "4", 1);
+
         GTEST_FLAG_SET(death_test_style, "threadsafe");
         EXPECT_EXIT(
             {
-                setenv("HIPBLASLT_LOG_LEVEL", "4", 1);
-                unsetenv("HIPBLASLT_LOG_MASK");
-                unsetenv("HIPBLASLT_LOG_FILE");
                 unsetenv("HIPBLASLT_TUNING_MODE");
                 unsetenv("HIPBLASLT_TUNING_CACHE_PATH");
                 unsetenv("HIPBLASLT_TUNING_OVERRIDE_FILE");
@@ -1492,5 +1499,13 @@ namespace
             },
             ::testing::ExitedWithCode(0),
             "tuning-cache: summary");
+
+        for(const auto& [name, value] : savedEnv)
+        {
+            if(value)
+                setenv(name.c_str(), value->c_str(), 1);
+            else
+                unsetenv(name.c_str());
+        }
     }
 } // namespace
