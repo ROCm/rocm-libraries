@@ -1,0 +1,124 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+# The HipKittens backend: a JIT build can compile HipKittens kernel templates
+# at run time. Included by the HIPBLASLT_ENABLE_JIT block of
+# library/src/amd_detail/CMakeLists.txt. The HipKittens headers the templates
+# include are run-time data: they are staged next to the built library and
+# installed with the runtime under hipblaslt/hipkittens/<commit>. Offline
+# builds set FETCHCONTENT_SOURCE_DIR_HIPKITTENS to an unpacked archive of the
+# pinned commit.
+option(HIPBLASLT_JIT_ENABLE_HIPKITTENS "Build the JIT HipKittens backend." ON)
+if(NOT HIPBLASLT_JIT_ENABLE_HIPKITTENS)
+    return()
+endif()
+if(HIPBLASLT_ENABLE_YAML)
+    message(WARNING "HIPBLASLT_JIT_ENABLE_HIPKITTENS: a build that reads YAML libraries has no "
+                    "JIT library; building without the HipKittens backend")
+    return()
+endif()
+
+set(_hk_gfx950 OFF)
+foreach(_hk_target IN LISTS GPU_TARGETS)
+    if(_hk_target MATCHES "^gfx950(:|$)")
+        set(_hk_gfx950 ON)
+    endif()
+endforeach()
+if(NOT _hk_gfx950)
+    message(WARNING "HIPBLASLT_JIT_ENABLE_HIPKITTENS: HipKittens has no kernel for "
+                    "GPU_TARGETS (${GPU_TARGETS}); building without the HipKittens backend")
+    return()
+endif()
+
+set(_hk_commit be1c91841b817c9690aa3af22ea771f8e3624bf4)
+set(_hk_archive_sha256 036c8d9e4af25b1f25335567c4bcf4cb5b7f02fac6aa383a028c361aaff18b08)
+set(_hk_abi 1)
+string(SUBSTRING "${_hk_commit}" 0 12 _hk_short)
+set(_hk_relative "hipblaslt/hipkittens/${_hk_short}")
+
+include(FetchContent)
+FetchContent_Declare(hipkittens
+    URL https://github.com/HazyResearch/HipKittens/archive/${_hk_commit}.tar.gz
+    URL_HASH SHA256=${_hk_archive_sha256}
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+    SOURCE_SUBDIR do-not-configure)
+FetchContent_MakeAvailable(hipkittens)
+
+# The headers the gfx950 kernels include.
+file(GLOB_RECURSE _hk_files RELATIVE "${hipkittens_SOURCE_DIR}"
+    "${hipkittens_SOURCE_DIR}/include/cdna4/*")
+list(APPEND _hk_files include/kittens.cuh include/pyutils/util.cuh)
+list(SORT _hk_files)
+
+# Stages the headers. The build writes manifest.msgpack beside them; that is
+# the record the runtime reads.
+set(_hk_stage "${CMAKE_CURRENT_BINARY_DIR}/hipkittens/${_hk_short}")
+set(_hk_list "${CMAKE_CURRENT_BINARY_DIR}/hipkittens-header-list.txt")
+file(WRITE "${_hk_list}"
+"commit ${_hk_commit}
+archive_sha256 ${_hk_archive_sha256}
+abi ${_hk_abi}
+")
+foreach(_hk_file IN LISTS _hk_files)
+    set(_hk_source "${hipkittens_SOURCE_DIR}/${_hk_file}")
+    file(SHA256 "${_hk_source}" _hk_hash)
+    file(SIZE "${_hk_source}" _hk_size)
+    get_filename_component(_hk_dir "${_hk_file}" DIRECTORY)
+    file(COPY "${_hk_source}" DESTINATION "${_hk_stage}/${_hk_dir}")
+    file(APPEND "${_hk_list}" "file ${_hk_file} ${_hk_size} ${_hk_hash}\n")
+endforeach()
+
+set(_hk_manifest "${_hk_stage}/manifest.msgpack")
+add_custom_target(hipblaslt-hipkittens-headers
+    COMMAND "${CMAKE_COMMAND}" -E copy_directory
+            "${_hk_stage}" "$<TARGET_FILE_DIR:hipblaslt>/${_hk_relative}"
+    DEPENDS "${_hk_manifest}"
+    VERBATIM)
+add_dependencies(hipblaslt hipblaslt-hipkittens-headers)
+
+if(WIN32)
+    set(_hk_install "${CMAKE_INSTALL_BINDIR}/${_hk_relative}")
+else()
+    set(_hk_install "${CMAKE_INSTALL_LIBDIR}/${_hk_relative}")
+endif()
+rocm_install(DIRECTORY "${_hk_stage}/" DESTINATION "${_hk_install}" COMPONENT runtime)
+rocm_install(FILES "${hipkittens_SOURCE_DIR}/LICENSE"
+    DESTINATION "${CMAKE_INSTALL_DOCDIR}/third-party/hipkittens"
+    COMPONENT runtime)
+
+# The compiled-in resources: the header record and the HIP template. The
+# kernels and their solutions are C++ in hipblaslt-jit-hipkittens.cpp.
+set(_hk_source "${PROJECT_SOURCE_DIR}/library/src/amd_detail")
+set(_hk_variant_dir "${_hk_source}/hipkittens")
+set(_hk_resources "${CMAKE_CURRENT_BINARY_DIR}/hipblaslt-jit-hipkittens-resources.cpp")
+add_executable(hipblaslt-hipkittens-write-resources "${_hk_variant_dir}/write_resources.cpp")
+target_compile_features(hipblaslt-hipkittens-write-resources PRIVATE cxx_std_17)
+target_link_libraries(hipblaslt-hipkittens-write-resources PRIVATE ${hipblaslt_msgpack_target})
+add_custom_command(
+    OUTPUT "${_hk_resources}" "${_hk_manifest}"
+    COMMAND $<TARGET_FILE:hipblaslt-hipkittens-write-resources>
+            --headers "${_hk_list}"
+            --manifest "${_hk_manifest}"
+            --source "${_hk_variant_dir}/gemm_tn_256x256x64_gfx950.hip"
+            --output "${_hk_resources}"
+    DEPENDS hipblaslt-hipkittens-write-resources
+            "${_hk_variant_dir}/gemm_tn_256x256x64_gfx950.hip"
+            "${_hk_list}"
+    COMMENT "Writing the JIT HipKittens resources"
+    VERBATIM)
+# hipblaslt is defined in another directory, which gets no rule for the output.
+add_custom_target(hipblaslt-hipkittens-resources DEPENDS "${_hk_resources}")
+add_dependencies(hipblaslt hipblaslt-hipkittens-resources)
+
+target_sources(hipblaslt PRIVATE
+    "${_hk_source}/hipblaslt-jit-hipkittens.cpp"
+    "${_hk_source}/hipblaslt-jit-hipkittens-backend.cpp"
+    "${_hk_resources}")
+set_source_files_properties("${_hk_resources}" TARGET_DIRECTORY hipblaslt
+    PROPERTIES INCLUDE_DIRECTORIES "${_hk_source}")
+target_compile_definitions(hipblaslt PRIVATE
+    HIPBLASLT_JIT_HIPKITTENS
+    HIPBLASLT_JIT_HIPKITTENS_DIR="${_hk_relative}"
+    HIPBLASLT_JIT_HIPKITTENS_FALLBACK="${CMAKE_INSTALL_FULL_LIBDIR}/${_hk_relative}")
+set(HIPBLASLT_JIT_BUILT_HIPKITTENS TRUE CACHE INTERNAL
+    "The HipKittens JIT backend is compiled into this build.")
