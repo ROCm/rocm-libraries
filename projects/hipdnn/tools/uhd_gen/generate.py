@@ -427,12 +427,13 @@ def dataset_contributions(
         key=lambda c: (c["collected_at"], c["contribution_id"]),
     )
     if only is not None:
-        unknown = sorted(set(only) - {c["contribution_id"] for c in chosen})
+        from .dataset.store import select
+
+        chosen, unknown = select(chosen, only)
         if unknown:
             raise ValueError(
                 f"{directory} holds no {'/'.join(purposes)} contribution {unknown}"
             )
-        chosen = [c for c in chosen if c["contribution_id"] in set(only)]
     if not chosen:
         raise ValueError(f"{directory} holds no {'/'.join(purposes)} contribution")
     return directory, chosen

@@ -705,3 +705,62 @@ def test_a_run_can_train_on_some_contributions_of_a_dataset(world, evaluator):
     assert (
         main([*common, "--contribution", "absent", "--output-dir", str(refused)]) == 1
     )
+
+
+def test_a_contribution_is_named_by_its_id_or_by_its_label(world, evaluator):
+    """A store that keys contributions by content id keeps the collection's name as its
+    label, and a run may name either."""
+    import pandas as pd
+
+    from uhd_gen.__main__ import main
+    from uhd_gen.dataset import store
+
+    first = _collect(world, "first", collected_at="2026-01-01T00:00:00+00:00")
+    second = _collect(
+        world, "second", collected_at="2026-01-02T00:00:00+00:00", scale=2.0
+    )
+    dataset = _dataset(world, "keyed", [first, second])
+    ids = {"first": "0123456789abcdef", "second": "fedcba9876543210"}
+    manifest_path = dataset / store.MANIFEST_FILE
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    for contribution in manifest["contributions"]:
+        contribution["label"] = contribution["contribution_id"]
+        contribution["contribution_id"] = ids[contribution["label"]]
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    data_path = dataset / "dataset.parquet"
+    data = pd.read_parquet(data_path)
+    data["contribution_id"] = data["contribution_id"].map(ids)
+    data.to_parquet(data_path, index=False)
+
+    common = [
+        "generate",
+        "--dataset",
+        str(dataset),
+        "--descriptor-tree",
+        str(world["tree"]),
+        "--engine-id",
+        "7",
+        "--role",
+        "predict_engine",
+        "--features",
+        "graph.flops",
+        "--num-boost-round",
+        "4",
+        "--early-stopping",
+        "2",
+        "--eval-fraction",
+        "0.25",
+        "--arch",
+        "gfx942",
+        "--no-promote",
+        "--feature-evaluator",
+        evaluator,
+    ]
+    for name in ("first", ids["first"]):
+        output = world["root"] / f"by-{name}"
+        assert main([*common, "--contribution", name, "--output-dir", str(output)]) == 0
+        trained = json.loads(
+            (output / "generation_manifest.json").read_text(encoding="utf-8")
+        )
+        assert [c["contribution_id"] for c in trained["collections"]] == [ids["first"]]
+        assert trained["superseded_rows"] == 0, "the other contribution was read"

@@ -74,6 +74,21 @@ def read_manifest(directory: pathlib.Path) -> dict[str, Any] | None:
     return manifest
 
 
+def select(
+    contributions: Iterable[dict[str, Any]], names: Iterable[str]
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """The contributions `names` designate, each name an id or a label, in their stored order,
+    and the names that designate none."""
+    names = set(names)
+    chosen = [
+        c
+        for c in contributions
+        if c["contribution_id"] in names or c.get("label") in names
+    ]
+    matched = {c["contribution_id"] for c in chosen} | {c.get("label") for c in chosen}
+    return chosen, sorted(names - matched)
+
+
 def _native(value: Any) -> Any:
     """A Parquet value as the JSON record it was converted from: a missing value is None."""
     if value is None or isinstance(value, (str, bytes, bool, list, dict)):
@@ -493,16 +508,16 @@ def export_rows(
     if manifest is None:
         raise DatasetError(f"{directory} holds no dataset")
     wanted = set(contributions or [])
-    chosen = {
-        c["contribution_id"]: c
-        for c in manifest["contributions"]
-        if (
-            c["contribution_id"] in wanted
-            if wanted
-            else c.get("purpose", "training") in set(purposes or PURPOSES)
-        )
-    }
-    missing = sorted(wanted - set(chosen))
+    if wanted:
+        named, missing = select(manifest["contributions"], wanted)
+    else:
+        named = [
+            c
+            for c in manifest["contributions"]
+            if c.get("purpose", "training") in set(purposes or PURPOSES)
+        ]
+        missing = []
+    chosen = {c["contribution_id"]: c for c in named}
     if missing:
         raise DatasetError(f"{directory} holds no contribution {missing}")
     rows = []
