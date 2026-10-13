@@ -5,9 +5,14 @@ rocBLAS documentation is available at
 
 ## rocBLAS 5.8.0 
 
+### Added
+
+* gfx1170 and gfx1171 enabled. Level 3 `gemm`, `gemm_ex`, and the functions that internally use GEMM default to the hipBLASLt backend on these architectures. `ROCBLAS_USE_HIPBLASLT` continues to force or disable the hipBLASLt backend.
+
 ### Changed
 
-* On gfx950, double-precision Level 3 `gemm`, `gemm_ex`, and the functions that internally use GEMM, and int8 `gemm_ex`, now default to the hipBLASLt backend. fp16 and bf16 on gfx950 already defaulted to hipBLASLt. Other types on gfx950, including single precision and complex types, still default to Tensile. `ROCBLAS_USE_HIPBLASLT` continues to force or disable the hipBLASLt backend.
+* On gfx950, hipBLASLt is now the default GEMM backend for every input type except real `f32_r`. Real single precision still defaults to Tensile. `ROCBLAS_USE_HIPBLASLT` continues to force or disable the hipBLASLt backend.
+* Batched GEMM now uses the same hipBLASLt selection as other GEMM while a stream is capturing. Previously, batched APIs were forced to the Tensile backend during stream capture.
 * On MI300A (gfx942 with 228 compute units), double-precision Level 3 `gemm`, `gemm_ex`, and the functions that internally use GEMM now default to the hipBLASLt backend. Other gfx942 devices, including MI300X, and every other data type on gfx942 still default to Tensile. `ROCBLAS_USE_HIPBLASLT` continues to force or disable the hipBLASLt backend.
 * On gfx1250, rocBLAS loads the Tensile library catalog that matches the device revision. Strict-revision silicon uses `library/gfx1250-strict` when that catalog is present in the build, and otherwise falls back to `library/gfx1250`.
 
