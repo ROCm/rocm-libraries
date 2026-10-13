@@ -111,7 +111,7 @@ namespace
     bool customKernelIsChecked(std::vector<CustomArgSemantic> const& semantics,
                                bool                                  generated = false)
     {
-        TestableSynchronizerValidator    validator(enabledArgs(), {});
+        TestableSynchronizerValidator    validator(enabledArgs());
         TensileLite::ContractionSolution solution;
         setCustomKernel(solution, semantics, generated);
         validator.preSolution(&solution);
@@ -124,7 +124,7 @@ namespace
 // into an execution one.
 TEST(SynchronizerValidatorReporting, ValidatorNeverDrivesARun)
 {
-    TestableSynchronizerValidator    validator(enabledArgs(), {});
+    TestableSynchronizerValidator    validator(enabledArgs());
     TensileLite::ContractionSolution solution;
     setSolution(solution, TileProcessingStrategy::StreamK, 0); // a consumer, so this is not the gate talking
 
@@ -137,7 +137,7 @@ TEST(SynchronizerValidatorReporting, ValidatorNeverDrivesARun)
 // Switched off, a consumer solution is still inert.
 TEST(SynchronizerValidatorReporting, DisabledValidatorChecksNothing)
 {
-    TestableSynchronizerValidator    validator(disabledArgs(), {});
+    TestableSynchronizerValidator    validator(disabledArgs());
     TensileLite::ContractionSolution solution;
     setSolution(solution, TileProcessingStrategy::StreamK, 0);
 
@@ -149,7 +149,7 @@ TEST(SynchronizerValidatorReporting, DisabledValidatorChecksNothing)
 // StreamK uses the buffer as its work-queue / fixup Flags.
 TEST(SynchronizerValidatorReporting, StreamKSolutionIsChecked)
 {
-    TestableSynchronizerValidator    validator(enabledArgs(), {});
+    TestableSynchronizerValidator    validator(enabledArgs());
     TensileLite::ContractionSolution solution;
     setSolution(solution, TileProcessingStrategy::StreamK, 0);
 
@@ -161,7 +161,7 @@ TEST(SynchronizerValidatorReporting, StreamKSolutionIsChecked)
 // gating on StreamK alone would silently drop gsu_mbsk.yaml's coverage.
 TEST(SynchronizerValidatorReporting, MbskSolutionIsChecked)
 {
-    TestableSynchronizerValidator    validator(enabledArgs(), {});
+    TestableSynchronizerValidator    validator(enabledArgs());
     TensileLite::ContractionSolution solution;
     setSolution(solution, TileProcessingStrategy::None, 3);
 
@@ -173,7 +173,7 @@ TEST(SynchronizerValidatorReporting, MbskSolutionIsChecked)
 // which the grouped user-args launch always passes, even for a static MB mode.
 TEST(SynchronizerValidatorReporting, AdaptiveGsuaSolutionIsChecked)
 {
-    TestableSynchronizerValidator    validator(enabledArgs(), {});
+    TestableSynchronizerValidator    validator(enabledArgs());
     TensileLite::ContractionSolution solution;
     setSolution(solution, TileProcessingStrategy::None, 2);
     solution.sizeMapping.adaptiveGemmGSUA = 1;
@@ -185,7 +185,7 @@ TEST(SynchronizerValidatorReporting, AdaptiveGsuaSolutionIsChecked)
 // Unknown solution means unknown answer; scan rather than skip.
 TEST(SynchronizerValidatorReporting, UnknownSolutionIsChecked)
 {
-    TestableSynchronizerValidator validator(enabledArgs(), {});
+    TestableSynchronizerValidator validator(enabledArgs());
 
     validator.preSolution(nullptr);
     EXPECT_TRUE(validator.mayUseSynchronizer());
@@ -195,7 +195,7 @@ TEST(SynchronizerValidatorReporting, UnknownSolutionIsChecked)
 // whenever outputAmaxD is set, independent of tile-processing strategy and globalAccumulation.
 TEST(SynchronizerValidatorReporting, AmaxDSolutionIsChecked)
 {
-    TestableSynchronizerValidator    validator(enabledArgs(), {});
+    TestableSynchronizerValidator    validator(enabledArgs());
     TensileLite::ContractionSolution solution;
     setSolution(solution, TileProcessingStrategy::None, 0);
     solution.problemType.outputAmaxD = true;
@@ -208,7 +208,7 @@ TEST(SynchronizerValidatorReporting, AmaxDSolutionIsChecked)
 // although they set no tile-processing strategy.
 TEST(SynchronizerValidatorReporting, CustomStreamKSolutionIsChecked)
 {
-    TestableSynchronizerValidator    validator(enabledArgs(), {});
+    TestableSynchronizerValidator    validator(enabledArgs());
     TensileLite::ContractionSolution solution;
     setSolution(solution, TileProcessingStrategy::None, 0);
     solution.customKernel.workspaceType = TensileLite::CustomWorkspaceType::StreamK;
@@ -220,7 +220,7 @@ TEST(SynchronizerValidatorReporting, CustomStreamKSolutionIsChecked)
 // Atomic StreamK reduces in place; the dispatcher never appends Flags for it.
 TEST(SynchronizerValidatorReporting, AtomicStreamKSolutionIsSkipped)
 {
-    TestableSynchronizerValidator    validator(enabledArgs(), {});
+    TestableSynchronizerValidator    validator(enabledArgs());
     TensileLite::ContractionSolution solution;
     setSolution(solution, TileProcessingStrategy::StreamK, 0, /*streamKAtomic=*/1);
 
@@ -232,7 +232,7 @@ TEST(SynchronizerValidatorReporting, AtomicStreamKSolutionIsSkipped)
 // argument, so the buffer the check reads is never passed.
 TEST(SynchronizerValidatorReporting, DataParallelSolutionIsSkipped)
 {
-    TestableSynchronizerValidator    validator(enabledArgs(), {});
+    TestableSynchronizerValidator    validator(enabledArgs());
     TensileLite::ContractionSolution solution;
     setSolution(solution, TileProcessingStrategy::DataParallel, 0);
 
@@ -244,7 +244,7 @@ TEST(SynchronizerValidatorReporting, DataParallelSolutionIsSkipped)
 // clean; skipping is what keeps the check free on those runs.
 TEST(SynchronizerValidatorReporting, NonConsumerSolutionIsSkipped)
 {
-    TestableSynchronizerValidator    validator(enabledArgs(), {});
+    TestableSynchronizerValidator    validator(enabledArgs());
     TensileLite::ContractionSolution solution;
     setSolution(solution, TileProcessingStrategy::None, 0);
 
@@ -278,7 +278,7 @@ TEST(SynchronizerValidatorReporting, CustomSynchronizerArgFollowsMbsk)
 {
     EXPECT_FALSE(customKernelIsChecked({CustomArgSemantic::Synchronizer}));
 
-    TestableSynchronizerValidator    validator(enabledArgs(), {});
+    TestableSynchronizerValidator    validator(enabledArgs());
     TensileLite::ContractionSolution solution;
     setCustomKernel(solution, {CustomArgSemantic::Synchronizer});
     solution.sizeMapping.globalAccumulation = 3;
@@ -312,7 +312,7 @@ TEST(SynchronizerValidatorReporting, GeneratedKernelArgsAreSkipped)
 
 TEST(SynchronizerValidatorReporting, CleanSolutionReportsNothing)
 {
-    TestableSynchronizerValidator validator(enabledArgs(), {});
+    TestableSynchronizerValidator validator(enabledArgs());
     auto                          reporter = std::make_shared<FakeResultReporter>();
     validator.setReporter(reporter);
 
@@ -325,7 +325,7 @@ TEST(SynchronizerValidatorReporting, CleanSolutionReportsNothing)
 
 TEST(SynchronizerValidatorReporting, DirtySolutionReportsFailureOnce)
 {
-    TestableSynchronizerValidator validator(enabledArgs(), {});
+    TestableSynchronizerValidator validator(enabledArgs());
     auto                          reporter = std::make_shared<FakeResultReporter>();
     validator.setReporter(reporter);
 
@@ -353,8 +353,8 @@ namespace
     class HostBufferValidator : public SynchronizerValidator
     {
     public:
-        explicit HostBufferValidator(std::vector<std::shared_ptr<DeviceContext>> devices)
-            : SynchronizerValidator(enabledArgs(), std::move(devices))
+        HostBufferValidator()
+            : SynchronizerValidator(enabledArgs())
         {
         }
         TransferFailure failure = TransferFailure::None;
@@ -401,13 +401,14 @@ TEST_P(SynchronizerValidatorLifecycle, FailureSurvivesReferenceVerdictAndNextSol
     inputs->Synchronizer = buffer.data();
     auto device                  = std::make_shared<DeviceContext>(0, true);
     device->inputArr             = {inputs};
-    auto validator               = std::make_shared<HostBufferValidator>(
-        std::vector<std::shared_ptr<DeviceContext>>{device});
+    std::vector<std::shared_ptr<DeviceContext>> devices{device};
+    auto                                        validator = std::make_shared<HostBufferValidator>();
     MetaRunListener listeners;
     // Match main: postSolution visits these in reverse order.
     listeners.addListener(validator);
     listeners.addListener(std::make_shared<PassingReferenceListener>());
     listeners.setReporter(reporter);
+    listeners.setDevices(&devices);
     TimingEvents events({}, 0, 0);
     listeners.preProblem(&problem);
     listeners.preSolution(nullptr);
@@ -458,8 +459,10 @@ TEST_P(SynchronizerValidatorFlagBlock, DirtyBlockFailsTheSolutionWithoutAWarmup)
     auto                  device = std::make_shared<DeviceContext>(0, true);
     device->commFlags            = flags.data();
     device->commFlagsBytes       = flags.size() * sizeof(uint32_t);
-    HostBufferValidator validator({device});
+    std::vector<std::shared_ptr<DeviceContext>> devices{device};
+    HostBufferValidator                         validator;
     validator.setReporter(reporter);
+    validator.setDevices(&devices);
     TensileLite::ContractionSolution solution;
     solution.problemType.fusedGemmA2A = true;
 
