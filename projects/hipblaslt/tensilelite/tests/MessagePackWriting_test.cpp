@@ -8,6 +8,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <filesystem>
@@ -607,44 +608,6 @@ namespace
         return problem;
     }
 
-    /// Rewrites a written eager library into the indexed layout, slicing the
-    /// blob out of MessagePackWriteSolutionData.
-    std::vector<uint8_t> toIndexed(Master const& lib, std::vector<uint8_t> const& eager)
-    {
-        auto handle = msgpack::unpack(reinterpret_cast<const char*>(eager.data()), eager.size());
-        std::unordered_map<std::string, msgpack::object> top;
-        Serialization::objectToMap(handle.get(), top);
-
-        std::vector<int64_t> table;
-        std::vector<uint8_t> blob;
-        for(auto const& entry : lib.solutions)
-        {
-            auto bytes = MessagePackWriteSolutionData(*entry.second);
-            table.push_back(entry.first);
-            table.push_back(static_cast<int64_t>(blob.size()));
-            table.push_back(static_cast<int64_t>(bytes.size()));
-            blob.insert(blob.end(), bytes.begin(), bytes.end());
-        }
-
-        msgpack::sbuffer                  out;
-        msgpack::packer<msgpack::sbuffer> packer(out);
-        packer.pack_map(5);
-        packer.pack(std::string("version"));
-        packer.pack(top.at("version"));
-        packer.pack(std::string("format_version"));
-        packer.pack(2);
-        packer.pack(std::string("solutions_index"));
-        packer.pack(table);
-        packer.pack(std::string("solutions_blob"));
-        packer.pack_bin(static_cast<uint32_t>(blob.size()));
-        packer.pack_bin_body(reinterpret_cast<const char*>(blob.data()),
-                             static_cast<uint32_t>(blob.size()));
-        packer.pack(std::string("library"));
-        packer.pack(top.at("library"));
-
-        auto data = reinterpret_cast<const uint8_t*>(out.data());
-        return std::vector<uint8_t>(data, data + out.size());
-    }
 } // namespace
 
 TEST(MessagePackWritingTest, FixtureRoundTripIsStable)
@@ -688,7 +651,7 @@ TEST(MessagePackWritingTest, IndexedLibraryWritesAsItsEagerForm)
         GTEST_SKIP() << "KernelsLite.dat is missing or does not load";
 
     auto eager   = MessagePackWriteLibraryData(*lib);
-    auto indexed = loadData(toIndexed(*lib, eager));
+    auto indexed = loadData(MessagePackWriteIndexedLibraryData(*lib));
     ASSERT_NE(indexed, nullptr) << "solution slices from the writer did not load as a blob";
     ASSERT_NE(indexed->blobCache, nullptr);
     EXPECT_EQ(indexed->blobCache->materializedCount(), 0u);
@@ -866,6 +829,106 @@ TEST(MessagePackWritingTest, MLPClassificationRoundTrips)
 }
 
 using MessagePackWritingLazyTest = TempDirTest;
+
+namespace
+{
+    std::vector<std::string> mapKeys(msgpack::object const& object)
+    {
+        std::vector<std::string> keys;
+        keys.reserve(object.via.map.size);
+        for(uint32_t i = 0; i < object.via.map.size; ++i)
+        {
+            std::string key;
+            object.via.map.ptr[i].key.convert(key);
+            keys.push_back(std::move(key));
+        }
+        return keys;
+    }
+
+    msgpack::object const& mapValue(msgpack::object const& object, std::string const& key)
+    {
+        for(uint32_t i = 0; i < object.via.map.size; ++i)
+        {
+            std::string found;
+            object.via.map.ptr[i].key.convert(found);
+            if(found == key)
+                return object.via.map.ptr[i].val;
+        }
+        ADD_FAILURE() << "missing key " << key;
+        return object.via.map.ptr[0].val;
+    }
+} // namespace
+
+TEST_F(MessagePackWritingLazyTest, IndexedDocumentKeepsFormatVersion2)
+{
+    auto lib = buildSelectionLibrary();
+    ASSERT_NE(lib, nullptr);
+
+    auto bytes  = MessagePackWriteIndexedLibraryData(*lib);
+    auto handle = msgpack::unpack(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+    auto const& doc = handle.get();
+    ASSERT_EQ(doc.type, msgpack::type::object_type::MAP);
+
+    EXPECT_EQ(mapKeys(doc),
+              (std::vector<std::string>{"format_version",
+                                        "version",
+                                        "solutions_index",
+                                        "solutions_blob",
+                                        "library"}));
+    EXPECT_EQ(mapValue(doc, "format_version").as<int>(), 2);
+
+    auto table = mapValue(doc, "solutions_index").as<std::vector<int64_t>>();
+    ASSERT_EQ(table.size() % 3, 0u);
+    ASSERT_EQ(table.size() / 3, lib->solutions.size());
+
+    auto const& blobObj = mapValue(doc, "solutions_blob");
+    ASSERT_EQ(blobObj.type, msgpack::type::object_type::BIN);
+    std::vector<uint8_t> blob(blobObj.via.bin.ptr, blobObj.via.bin.ptr + blobObj.via.bin.size);
+
+    std::vector<int64_t> indices;
+    size_t               cursor = 0;
+    for(size_t i = 0; i < table.size(); i += 3)
+    {
+        indices.push_back(table[i]);
+        auto offset = static_cast<size_t>(table[i + 1]);
+        auto length = static_cast<size_t>(table[i + 2]);
+        EXPECT_EQ(offset, cursor);
+        ASSERT_LE(offset + length, blob.size());
+        std::vector<uint8_t> slice(blob.begin() + static_cast<std::ptrdiff_t>(offset),
+                                   blob.begin() + static_cast<std::ptrdiff_t>(offset + length));
+        EXPECT_EQ(slice, MessagePackWriteSolutionData(*lib->solutions.at(static_cast<int>(table[i]))));
+        cursor += length;
+    }
+    EXPECT_EQ(cursor, blob.size());
+    EXPECT_TRUE(std::is_sorted(indices.begin(), indices.end()));
+
+    auto path = tmpDir / "library.dat";
+    writeFile(path, bytes);
+
+    auto loaded = std::dynamic_pointer_cast<Master>(
+        LoadLibraryFile<Gemm, ContractionSolution>(path.string()));
+    ASSERT_NE(loaded, nullptr);
+    ASSERT_NE(loaded->blobCache, nullptr);
+    EXPECT_EQ(loaded->version, "test");
+    EXPECT_TRUE(loaded->solutions.empty());
+    EXPECT_EQ(loaded->blobCache->size(), lib->solutions.size());
+    EXPECT_EQ(loaded->blobCache->materializedCount(), 0u);
+
+    auto solution = loaded->blobCache->get(12);
+    ASSERT_NE(solution, nullptr);
+    EXPECT_EQ(solution->index, 12);
+    EXPECT_EQ(loaded->blobCache->materializedCount(), 1u);
+
+    auto bare     = buildSelectionLibrary();
+    bare->version = "";
+    auto bareBytes
+        = MessagePackWriteIndexedLibraryData(*bare);
+    auto bareHandle
+        = msgpack::unpack(reinterpret_cast<const char*>(bareBytes.data()), bareBytes.size());
+    EXPECT_EQ(mapKeys(bareHandle.get()),
+              (std::vector<std::string>{
+                  "format_version", "solutions_index", "solutions_blob", "library"}));
+}
 
 TEST_F(MessagePackWritingLazyTest, PlaceholderMasterWithMapping)
 {

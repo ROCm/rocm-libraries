@@ -230,6 +230,18 @@ function(create_device_library)
         set(_installed_python_root "$<IF:$<PLATFORM_ID:Windows>,$<TARGET_FILE_DIR:roc::tensilelite-host>/../lib/hipblaslt,$<TARGET_FILE_DIR:roc::tensilelite-host>/hipblaslt>")
         list(APPEND _python_path_dirs "${_installed_python_root}")
         list(APPEND _runtime_lib_dirs "${_installed_python_root}/rocisa")
+        list(APPEND _runtime_lib_dirs "${_installed_python_root}/tensilelite")
+        list(APPEND _runtime_lib_dirs "$<TARGET_FILE_DIR:roc::tensilelite-host>")
+    endif()
+    if(TARGET tensilelite_write)
+        # Parent of the package directory that holds tensilelite_write.*.so,
+        # so `import tensilelite.tensilelite_write` resolves next to the
+        # TensileLite package already on PYTHONPATH.
+        list(APPEND _python_path_dirs "$<TARGET_FILE_DIR:tensilelite_write>/..")
+        list(APPEND _runtime_lib_dirs "$<TARGET_FILE_DIR:tensilelite_write>")
+    endif()
+    if(TARGET tensilelite-host)
+        list(APPEND _runtime_lib_dirs "$<TARGET_FILE_DIR:tensilelite-host>")
     endif()
     if(TARGET roc::origami)
         list(APPEND _runtime_lib_dirs "$<TARGET_FILE_DIR:roc::origami>")
@@ -319,6 +331,9 @@ function(create_device_library)
         list(APPEND _codegen_dependencies _rocisa)
     elseif(HIPBLASLT_PYTHON_DEPS)
         list(APPEND _codegen_dependencies ${HIPBLASLT_PYTHON_DEPS})
+    endif()
+    if(TARGET tensilelite_write)
+        list(APPEND _codegen_dependencies tensilelite_write)
     endif()
 
     # Both codegen steps glob their inputs at run time, so without an explicit

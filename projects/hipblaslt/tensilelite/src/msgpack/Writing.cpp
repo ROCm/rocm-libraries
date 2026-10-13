@@ -3,8 +3,12 @@
 
 #include <Tensile/msgpack/Writing.hpp>
 
+#include <Tensile/CachingLibrary.hpp>
 #include <Tensile/msgpack/MessagePack.hpp>
 
+#include <limits>
+#include <map>
+#include <mutex>
 #include <sstream>
 #include <stdexcept>
 
@@ -27,6 +31,95 @@ namespace TensileLite
             auto data = reinterpret_cast<const uint8_t*>(out.buffer.data());
             return std::vector<uint8_t>(data, data + out.buffer.size());
         }
+
+        MasterContractionLibrary& writableMaster(
+            SolutionLibrary<ContractionProblemGemm, ContractionSolution> const& library)
+        {
+            auto master = dynamic_cast<MasterContractionLibrary const*>(&library);
+            if(master == nullptr)
+                throw std::runtime_error(concatenate(
+                    "Only a MasterSolutionLibrary can be written as a library, not ",
+                    library.type()));
+
+            return const_cast<MasterContractionLibrary&>(*master);
+        }
+
+        // format_version written by MessagePackWriteIndexedLibraryData. Matches
+        // INDEXED_FORMAT_VERSION in tensilelite/LibraryIO.py and
+        // MasterSolutionLibrary's IndexedFormatVersion.
+        constexpr int IndexedFormatVersion = 2;
+
+        std::shared_ptr<MasterContractionLibrary>
+            loadMasterOrThrow(std::vector<uint8_t> const& data)
+        {
+            std::shared_ptr<MasterContractionLibrary> rv;
+
+            auto result = msgpack::unpack(reinterpret_cast<const char*>(data.data()), data.size());
+            LibraryIOContext<ContractionSolution> context{std::string(""), {}, nullptr};
+            Serialization::MessagePackInput      min(result.get(), &context);
+
+            Serialization::PointerMappingTraits<MasterContractionLibrary,
+                                                Serialization::MessagePackInput>::mapping(min, rv);
+
+            if(!min.error.empty() || !rv)
+            {
+                std::ostringstream msg;
+                msg << "Error loading msgpack data:" << std::endl;
+                for(auto const& err : min.error)
+                    msg << err << std::endl;
+                if(!rv && min.error.empty())
+                    msg << "MasterSolutionLibrary was empty." << std::endl;
+                throw std::runtime_error(msg.str());
+            }
+
+            return rv;
+        }
+
+        std::map<int, std::shared_ptr<ContractionSolution>>
+            solutionsForIndex(MasterContractionLibrary& lib)
+        {
+            std::map<int, std::shared_ptr<ContractionSolution>> written;
+            {
+                std::lock_guard<std::mutex> lock(lib.solutionsGuard);
+                written.insert(lib.solutions.begin(), lib.solutions.end());
+            }
+
+            if(lib.blobCache)
+            {
+                for(int index : lib.blobCache->indices())
+                {
+                    if(written.count(index))
+                        continue;
+
+                    auto solution = lib.blobCache->get(index);
+                    if(solution == nullptr)
+                        throw std::runtime_error(concatenate(
+                            "Solution ", index, " in solutions_blob does not parse."));
+                    written.emplace(index, std::move(solution));
+                }
+            }
+
+            return written;
+        }
+
+        std::vector<uint8_t> libraryTreeBytes(MasterContractionLibrary& lib)
+        {
+            using Inner = SolutionLibrary<ContractionProblemGemm, ContractionSolution>;
+            std::shared_ptr<Inner> inner;
+            auto cache = std::dynamic_pointer_cast<
+                CachingLibrary<ContractionProblemGemm, ContractionSolution>>(lib.library);
+            if(cache)
+                inner = cache->library();
+            else
+                inner = lib.library;
+
+            LibraryIOContext<ContractionSolution> context{std::string(""), {}, &lib.solutions};
+            context.blobCache = lib.blobCache;
+
+            Serialization::MessagePackOutput out(&context);
+            out.output(inner);
+            return finish(out);
+        }
     } // anonymous namespace
 
     // The traits take mutable references in both directions; writing reads
@@ -34,18 +127,79 @@ namespace TensileLite
     std::vector<uint8_t> MessagePackWriteLibraryData(
         SolutionLibrary<ContractionProblemGemm, ContractionSolution> const& library)
     {
-        auto master = dynamic_cast<MasterContractionLibrary const*>(&library);
-        if(master == nullptr)
-            throw std::runtime_error(concatenate(
-                "Only a MasterSolutionLibrary can be written as a library, not ", library.type()));
-
-        auto& lib = const_cast<MasterContractionLibrary&>(*master);
+        auto& lib = writableMaster(library);
 
         LibraryIOContext<ContractionSolution> context{std::string(""), {}, &lib.solutions};
 
         Serialization::MessagePackOutput out(&context);
         out.output(lib);
         return finish(out);
+    }
+
+    std::vector<uint8_t> MessagePackWriteIndexedLibraryData(
+        SolutionLibrary<ContractionProblemGemm, ContractionSolution> const& library)
+    {
+        auto& lib = writableMaster(library);
+
+        std::vector<int64_t> table;
+        std::vector<uint8_t> blob;
+        for(auto const& entry : solutionsForIndex(lib))
+        {
+            auto bytes = MessagePackWriteSolutionData(*entry.second);
+            if(blob.size() > static_cast<size_t>(std::numeric_limits<int64_t>::max())
+               || bytes.size() > static_cast<size_t>(std::numeric_limits<int64_t>::max()))
+                throw std::runtime_error("solutions_blob exceeds indexed format offsets");
+
+            table.push_back(entry.first);
+            table.push_back(static_cast<int64_t>(blob.size()));
+            table.push_back(static_cast<int64_t>(bytes.size()));
+            blob.insert(blob.end(), bytes.begin(), bytes.end());
+        }
+
+        if(blob.size() > std::numeric_limits<uint32_t>::max())
+            throw std::runtime_error("solutions_blob exceeds msgpack bin size");
+
+        auto libraryBytes = libraryTreeBytes(lib);
+
+        const bool hasVersion = !lib.version.empty();
+
+        msgpack::sbuffer                  buffer;
+        msgpack::packer<msgpack::sbuffer> packer(buffer);
+        packer.pack_map(hasVersion ? 5u : 4u);
+
+        packer.pack(std::string("format_version"));
+        packer.pack(IndexedFormatVersion);
+
+        if(hasVersion)
+        {
+            packer.pack(std::string("version"));
+            packer.pack(lib.version);
+        }
+
+        packer.pack(std::string("solutions_index"));
+        packer.pack(table);
+
+        packer.pack(std::string("solutions_blob"));
+        packer.pack_bin(static_cast<uint32_t>(blob.size()));
+        packer.pack_bin_body(reinterpret_cast<const char*>(blob.data()),
+                             static_cast<uint32_t>(blob.size()));
+
+        packer.pack(std::string("library"));
+        buffer.write(reinterpret_cast<const char*>(libraryBytes.data()), libraryBytes.size());
+
+        auto data = reinterpret_cast<const uint8_t*>(buffer.data());
+        return std::vector<uint8_t>(data, data + buffer.size());
+    }
+
+    std::vector<uint8_t> MessagePackWriteLibraryFromBytes(std::vector<uint8_t> const& data)
+    {
+        return MessagePackWriteLibraryData(*loadMasterOrThrow(data));
+    }
+
+    std::vector<uint8_t>
+        MessagePackWriteIndexedLibraryFromBytes(std::vector<uint8_t> const& data)
+    {
+        return MessagePackWriteIndexedLibraryData(*loadMasterOrThrow(data));
     }
 
     std::vector<uint8_t> MessagePackWriteSolutionData(ContractionSolution const& solution)

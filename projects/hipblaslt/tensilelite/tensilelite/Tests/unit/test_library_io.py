@@ -25,11 +25,31 @@
 """Unit tests for Tensile.LibraryIO.writeMsgPack."""
 
 import copy
+import functools
+import importlib.util
 import zlib
 import msgpack
 import pytest
 
 from Tensile.LibraryIO import write, writeMsgPack, writeMsgPackIndexed
+
+
+def python_msgpack_fallback(test):
+    """These checks assert the Python packer. A built tensilelite_write
+    extension takes that path for real MasterSolutionLibrary documents, which
+    this file's stand-in dicts are not. test_msgpack_writer.py covers it.
+    """
+
+    @functools.wraps(test)
+    def wrapped(*args, **kwargs):
+        if importlib.util.find_spec("tensilelite.tensilelite_write") is not None:
+            pytest.skip(
+                "tensilelite_write is built; this test covers the Python "
+                "MessagePack fallback"
+            )
+        return test(*args, **kwargs)
+
+    return wrapped
 
 
 def test_writeMsgPack_produces_zlib_file(tmp_path):
@@ -141,6 +161,7 @@ def _readIndexed(path):
                            raw=False, strict_map_key=False)
 
 
+@python_msgpack_fallback
 def test_writeMsgPackIndexed_produces_zlib_file(tmp_path):
     """Same artifact contract as writeMsgPack: .dat.zlib, no bare .dat."""
     dest = str(tmp_path / "library.dat")
@@ -151,6 +172,7 @@ def test_writeMsgPackIndexed_produces_zlib_file(tmp_path):
     assert not (tmp_path / "library.dat").exists()
 
 
+@python_msgpack_fallback
 def test_writeMsgPackIndexed_removes_stale_uncompressed(tmp_path):
     """A leftover uncompressed .dat must not shadow the new artifact."""
     dat = tmp_path / "library.dat"
@@ -162,6 +184,7 @@ def test_writeMsgPackIndexed_removes_stale_uncompressed(tmp_path):
     assert (tmp_path / "library.dat.zlib").exists()
 
 
+@python_msgpack_fallback
 def test_writeMsgPackIndexed_emits_expected_schema(tmp_path):
     """format_version 2 plus the index/blob pair, and no legacy solutions key."""
     dest = str(tmp_path / "library.dat")
@@ -175,6 +198,7 @@ def test_writeMsgPackIndexed_emits_expected_schema(tmp_path):
     assert len(indexed["solutions_index"]) % 3 == 0
 
 
+@python_msgpack_fallback
 def test_writeMsgPackIndexed_key_order_is_fixed(tmp_path):
     """Fixed key order keeps the artifact reproducible across runs."""
     dest = str(tmp_path / "library.dat")
@@ -189,6 +213,7 @@ def test_writeMsgPackIndexed_key_order_is_fixed(tmp_path):
                     "solutions_blob", "library"]
 
 
+@python_msgpack_fallback
 def test_writeMsgPackIndexed_roundtrips_every_solution(tmp_path):
     """Each slice decodes back to the solution the table says it holds."""
     dest = str(tmp_path / "library.dat")
@@ -210,6 +235,7 @@ def test_writeMsgPackIndexed_roundtrips_every_solution(tmp_path):
     assert rebuilt == {s["index"]: s for s in data["solutions"]}
 
 
+@python_msgpack_fallback
 def test_writeMsgPackIndexed_slices_tile_the_blob_exactly(tmp_path):
     """No gaps, overlaps, or trailing bytes -- a decoder can trust the table."""
     dest = str(tmp_path / "library.dat")
@@ -226,6 +252,7 @@ def test_writeMsgPackIndexed_slices_tile_the_blob_exactly(tmp_path):
     assert cursor == len(indexed["solutions_blob"])
 
 
+@python_msgpack_fallback
 def test_writeMsgPackIndexed_table_is_sorted_by_index(tmp_path):
     """Sorted output makes the artifact byte-reproducible regardless of the
     order state() happened to emit."""
@@ -238,6 +265,7 @@ def test_writeMsgPackIndexed_table_is_sorted_by_index(tmp_path):
     assert indices == sorted(indices)
 
 
+@python_msgpack_fallback
 def test_writeMsgPackIndexed_preserves_library_tree(tmp_path):
     """The decision tree is copied through untouched."""
     dest = str(tmp_path / "library.dat")
@@ -249,6 +277,7 @@ def test_writeMsgPackIndexed_preserves_library_tree(tmp_path):
     assert indexed["library"] == data["library"]
 
 
+@python_msgpack_fallback
 def test_writeMsgPackIndexed_omits_absent_version(tmp_path):
     """`version` is optional and must not be invented."""
     dest = str(tmp_path / "library.dat")
@@ -258,6 +287,7 @@ def test_writeMsgPackIndexed_omits_absent_version(tmp_path):
     assert "version" not in _readIndexed(tmp_path / "library.dat.zlib")
 
 
+@python_msgpack_fallback
 def test_writeMsgPackIndexed_does_not_mutate_caller_dict(tmp_path):
     """Run.py reuses the state dict, so splitting must not consume it."""
     dest = str(tmp_path / "library.dat")
@@ -279,6 +309,7 @@ def test_writeMsgPackIndexed_rejects_non_master_payload(tmp_path):
         writeMsgPackIndexed(dest, {0: "shard_a", 1: "shard_b"})
 
 
+@python_msgpack_fallback
 def test_write_dispatches_msgpack_indexed(tmp_path):
     """write() routes the new format name to the indexed writer."""
     base = str(tmp_path / "library")
@@ -289,6 +320,7 @@ def test_write_dispatches_msgpack_indexed(tmp_path):
     assert _readIndexed(tmp_path / "library.dat.zlib")["format_version"] == 2
 
 
+@python_msgpack_fallback
 def test_write_msgpack_stays_legacy(tmp_path):
     """The plain msgpack route must keep emitting the eager layout: mapping
     files and older runtimes depend on it."""

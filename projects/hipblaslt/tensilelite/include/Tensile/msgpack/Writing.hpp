@@ -17,12 +17,32 @@
 
 namespace TensileLite
 {
-    /// Encodes a library as the msgpack document MessagePackLoadLibraryData
-    /// and LoadLibraryFile read. `library` must be a MasterSolutionLibrary.
-    /// Indexed (format_version 2) libraries are written in the eager layout.
+    /// Encodes a library as the eager msgpack document MessagePackLoadLibraryData
+    /// and LoadLibraryFile read: optional `version`, a `solutions` array, and
+    /// `library`. `library` must be a MasterSolutionLibrary. An indexed
+    /// in-memory library is expanded into that eager layout.
     /// Throws std::runtime_error naming every node that cannot be written.
     TENSILELITEHOST_EXPORT std::vector<uint8_t> MessagePackWriteLibraryData(
         SolutionLibrary<ContractionProblemGemm, ContractionSolution> const& library);
+
+    /// Encodes a library as the indexed document (format_version 2) that
+    /// writeMsgPackIndexed stores: `format_version`, optional `version`,
+    /// `solutions_index` as a flat [index, offset, length, ...] array,
+    /// `solutions_blob` as the concatenation of each solution's bytes, and
+    /// `library`. Each solution's bytes come from MessagePackWriteSolutionData.
+    /// `library` must be a MasterSolutionLibrary.
+    TENSILELITEHOST_EXPORT std::vector<uint8_t> MessagePackWriteIndexedLibraryData(
+        SolutionLibrary<ContractionProblemGemm, ContractionSolution> const& library);
+
+    /// Loads `data` with the MessagePack library loader and writes it with
+    /// MessagePackWriteLibraryData.
+    TENSILELITEHOST_EXPORT std::vector<uint8_t>
+        MessagePackWriteLibraryFromBytes(std::vector<uint8_t> const& data);
+
+    /// Loads `data` with the MessagePack library loader and writes it with
+    /// MessagePackWriteIndexedLibraryData.
+    TENSILELITEHOST_EXPORT std::vector<uint8_t>
+        MessagePackWriteIndexedLibraryFromBytes(std::vector<uint8_t> const& data);
 
     /// Encodes one solution as a msgpack map: the form of an element of a
     /// library's `solutions` array and of a slice of an indexed library's

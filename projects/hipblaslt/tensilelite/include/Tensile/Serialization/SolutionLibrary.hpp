@@ -284,8 +284,14 @@ namespace TensileLite
                 // Absent (legacy) or 1 means the eager layout below. 2 is the
                 // indexed layout. Anything higher is a format this build does
                 // not know: fail rather than misread it as 2.
+                //
+                // Eager output omits format_version. MessagePackOutput writes
+                // every mapOptional key, and a 0 here would no longer match the
+                // on-disk eager documents. Indexed files are emitted by
+                // MessagePackWriteIndexedLibraryData, not this mapping.
                 int formatVersion = 0;
-                iot::mapOptional(io, "format_version", formatVersion);
+                if(!iot::outputting(io))
+                    iot::mapOptional(io, "format_version", formatVersion);
 
                 if(!iot::outputting(io) && formatVersion > IndexedFormatVersion)
                 {
@@ -304,8 +310,10 @@ namespace TensileLite
 
                 if(iot::outputting(io))
                 {
-                    // An indexed library is written in the eager layout, so
-                    // the solutions still in its blob are parsed here.
+                    // MessagePackWriteLibraryData expands an indexed library into
+                    // the eager solutions array, so the blob is parsed here.
+                    // Indexed files keep format_version 2 via
+                    // MessagePackWriteIndexedLibraryData.
                     SolutionMap<MySolution> written;
                     {
                         std::lock_guard<std::mutex> lock(lib.solutionsGuard);

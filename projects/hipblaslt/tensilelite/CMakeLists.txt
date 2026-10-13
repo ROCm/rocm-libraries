@@ -261,3 +261,11 @@ if(TENSILELITE_ENABLE_HOST)
 endif()
 
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/tensilelite_packaging.cmake")
+
+# TensileCreateLibrary imports this module to write MessagePack libraries.
+# Device-library builds need it even when the host library is not part of the
+# product (gemm-libs sets TENSILELITE_ENABLE_HOST=OFF) or was compiled for YAML.
+# A YAML host build that does not generate libraries does not compile msgpack.
+if(HIPBLASLT_ENABLE_DEVICE OR (TENSILELITE_ENABLE_HOST AND NOT HIPBLASLT_ENABLE_YAML))
+    add_subdirectory(write)
+endif()
