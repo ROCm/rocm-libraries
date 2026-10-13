@@ -230,6 +230,20 @@ def _build_implicit_only_args(args) -> list[str]:
         a += ["--split-k", str(args.split_k)]
     if args.split_k_prune is not None:
         a += ["--split-k-prune", str(args.split_k_prune)]
+    if args.streamk == "off" and (
+        args.streamk_reductions is not None or args.streamk_ctas != -1
+    ):
+        print(
+            "warning: --streamk-reductions / --streamk-ctas are ignored "
+            "without --streamk",
+            file=sys.stderr,
+        )
+    if args.streamk != "off":
+        a += ["--streamk", args.streamk]
+        if args.streamk_reductions is not None:
+            a += ["--streamk-reductions", args.streamk_reductions]
+        if args.streamk_ctas != -1:
+            a += ["--streamk-ctas", str(args.streamk_ctas)]
     return a
 
 
@@ -424,6 +438,35 @@ def main() -> int:
         help=(
             "prune split-K sweep when perf drops by PCT%% relative to the best so far. "
             "Only effective with --split-k 0. Forwarded to implicit-GEMM only."
+        ),
+    )
+    implicit_grp.add_argument(
+        "--streamk",
+        default="off",
+        choices=["off", "dp_sk", "persistent", "all"],
+        help=(
+            "wgrad stream-K leg (off, dp_sk, persistent or all launch modes). "
+            "Forwarded to implicit-GEMM only."
+        ),
+    )
+    implicit_grp.add_argument(
+        "--streamk-reductions",
+        default=None,
+        dest="streamk_reductions",
+        metavar="LIST",
+        help=(
+            "comma-separated stream-K reductions (linear,tree,workspace,atomic) "
+            "for --streamk. Forwarded to implicit-GEMM only."
+        ),
+    )
+    implicit_grp.add_argument(
+        "--streamk-ctas",
+        type=int,
+        default=-1,
+        dest="streamk_ctas",
+        metavar="N",
+        help=(
+            "stream-K CTA pool (-1 = arch default). Forwarded to implicit-GEMM only."
         ),
     )
 

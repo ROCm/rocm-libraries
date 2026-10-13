@@ -105,13 +105,14 @@ namespace rocsparse
                     &done_array[bsr_col], __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE))
                     ;
 
-                // Make sure dependencies are visible in global memory
-                __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "agent");
+                // Read the results of the dependencies only after their done flags
+                rocsparse::acquire_done_rows();
 
                 // Load updated BSR block into shared memory
                 sdata1[threadIdx.y][threadIdx.x]
                     = (threadIdx.x < block_dim && threadIdx.y < block_dim)
-                          ? bsr_val[BSR_IND(diag_j, threadIdx.x, threadIdx.y, dir)]
+                          ? rocsparse::load_done_row_data(
+                              &bsr_val[BSR_IND(diag_j, threadIdx.x, threadIdx.y, dir)])
                           : static_cast<T>(0);
 
                 // Make sure all writes to shared memory are visible
@@ -147,7 +148,8 @@ namespace rocsparse
                     __threadfence_block();
                 }
 
-                // Write row j back to global memory
+                // Write row j back to global memory. Dependent rows only read the diagonal and
+                // upper blocks of this row, so only those are exchanged with device scope accesses.
                 if(threadIdx.x < block_dim && threadIdx.y < block_dim)
                 {
                     bsr_val[BSR_IND(j, threadIdx.x, threadIdx.y, dir)]
@@ -182,7 +184,8 @@ namespace rocsparse
                         // Load BSR block from row k into shared memory
                         sdata1[threadIdx.y][threadIdx.x]
                             = (threadIdx.x < block_dim && threadIdx.y < block_dim)
-                                  ? bsr_val[BSR_IND(k, threadIdx.x, threadIdx.y, dir)]
+                                  ? rocsparse::load_done_row_data(
+                                      &bsr_val[BSR_IND(k, threadIdx.x, threadIdx.y, dir)])
                                   : static_cast<T>(0);
 
                         // Make sure all writes to shared memory are visible
@@ -196,7 +199,10 @@ namespace rocsparse
                                 sdata2[bk][threadIdx.x], sdata1[threadIdx.y][bk], sum);
                         }
 
-                        // Write back to global row m
+                        // Write back to global row m. Block m can be the diagonal or an upper
+                        // block, which dependent rows read. This plain store is safe only
+                        // because the diagonal and upper blocks are stored again below with
+                        // device scope before the done flag is set.
                         if(threadIdx.x < block_dim && threadIdx.y < block_dim)
                         {
                             // Do not pre-cache row m as we read/write only once
@@ -276,11 +282,13 @@ namespace rocsparse
 
                 __threadfence_block();
 
-                // Write diagonal BSR block back to global memory
+                // Write diagonal BSR block back to global memory. This device scope store also
+                // publishes the earlier plain updates of this block to dependent rows.
                 if(threadIdx.x < block_dim && threadIdx.y < block_dim)
                 {
-                    bsr_val[BSR_IND(row_diag, threadIdx.x, threadIdx.y, dir)]
-                        = sdata1[threadIdx.y][threadIdx.x];
+                    rocsparse::store_done_row_data(
+                        &bsr_val[BSR_IND(row_diag, threadIdx.x, threadIdx.y, dir)],
+                        sdata1[threadIdx.y][threadIdx.x]);
                 }
             }
 
@@ -309,11 +317,13 @@ namespace rocsparse
 
                 __threadfence_block();
 
-                // Write row j back to global memory
+                // Write row j back to global memory. This device scope store also publishes the
+                // earlier plain updates of this block to dependent rows.
                 if(threadIdx.x < block_dim && threadIdx.y < block_dim)
                 {
-                    bsr_val[BSR_IND(j, threadIdx.x, threadIdx.y, dir)]
-                        = sdata2[threadIdx.y][threadIdx.x];
+                    rocsparse::store_done_row_data(
+                        &bsr_val[BSR_IND(j, threadIdx.x, threadIdx.y, dir)],
+                        sdata2[threadIdx.y][threadIdx.x]);
                 }
             }
         }
@@ -326,7 +336,7 @@ namespace rocsparse
         if(threadIdx.x == 0 && threadIdx.y == 0)
         {
             // First lane writes "we are done" flag
-            rocsparse::atomic_store(&done_array[row], 1, __ATOMIC_RELEASE, __MEMORY_SCOPE_DEVICE);
+            rocsparse::set_done_flag(&done_array[row], 1);
 
             if(pivot)
             {
