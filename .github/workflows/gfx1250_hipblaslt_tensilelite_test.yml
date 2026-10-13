@@ -197,7 +197,11 @@ jobs:
           K_ARG=()
           [ -n "$TL_PYTEST_K" ] && K_ARG+=(-k "$TL_PYTEST_K")
           # Common GEMM tests run against the prebuilt client. Per-test cap 5400s (90 min).
-          TL_TARGET=gfx1250v0
+          TL_TARGET="$(TENSILE_ROCM_PATH="$ROCM" python -c 'from tensilelite.Tests.gpu_detection import get_available_archs; print(";".join(get_available_archs()))')"
+          case "$TL_TARGET" in
+            gfx1250|gfx1250-strict) ;;
+            *) echo "::error::Expected one gfx1250 architecture, got $TL_TARGET"; exit 1 ;;
+          esac
           # HIP device compiles through ccache.
           # Guarded: a missing ccache must never become a broken 'ccache <compiler>' call.
           if ! command -v ccache >/dev/null 2>&1; then
@@ -209,7 +213,7 @@ jobs:
             ccache -z >/dev/null 2>&1 || true
           fi
           pytest -p no:cacheprovider tensilelite/Tests/common \
-            -m "gfx1250 and not skip-gfx1250" "${K_ARG[@]}" --timeout=5400 -n 1 -v -rfxX \
+            -m "$TL_TARGET and not skip-$TL_TARGET" "${K_ARG[@]}" --timeout=5400 -n 1 -v -rfxX \
             --gpu-targets "$TL_TARGET" \
             --prebuilt-client="$ROCM/libexec/hipblaslt/tensilelite/tensilelite-client" \
             --global-parameters="LibraryFormat='msgpack'" \
