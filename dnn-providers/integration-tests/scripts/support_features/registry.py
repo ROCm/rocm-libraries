@@ -18,6 +18,7 @@ from support_features import (
     FeatureError,
     convolution_bwd,
     convolution_fwd,
+    convolution_wrw,
     pointwise,
     sdpa,
     sdpa_backward,
@@ -29,7 +30,14 @@ SCHEMA_DIR = REPO_ROOT / "projects" / "hipdnn" / "flatbuffers_sdk" / "schemas"
 # Catalogued op modules, keyed by their NODE_TYPE.
 OPS: dict[str, ModuleType] = {
     m.NODE_TYPE: m
-    for m in (convolution_bwd, convolution_fwd, pointwise, sdpa, sdpa_backward)
+    for m in (
+        convolution_bwd,
+        convolution_fwd,
+        convolution_wrw,
+        pointwise,
+        sdpa,
+        sdpa_backward,
+    )
 }
 
 # Node types with no catalog yet. Their graphs are counted, but no feature %
@@ -42,7 +50,6 @@ PENDING = frozenset(
         "BatchnormInferenceAttributesVarianceExt",
         "BlockScaleDequantizeAttributes",
         "BlockScaleQuantizeAttributes",
-        "ConvolutionWrwAttributes",
         "CustomOpAttributes",
         "LayernormAttributes",
         "LayernormBackwardAttributes",

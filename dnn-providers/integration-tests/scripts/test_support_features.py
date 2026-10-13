@@ -28,6 +28,7 @@ from support_features import (
     convolution,
     convolution_bwd,
     convolution_fwd,
+    convolution_wrw,
     pointwise,
     registry,
     sdpa,
@@ -960,6 +961,12 @@ _CONV_BINDING = {
             "dx_tensor_uid", "w_tensor_uid", "dy_tensor_uid", "dy_tensor_uid"
         ),
         "activation",
+    ),
+    convolution_wrw: (
+        convolution.Ports(
+            "x_tensor_uid", "dw_tensor_uid", "dy_tensor_uid", "x_tensor_uid"
+        ),
+        "filter",
     ),
 }
 CONV_MODULES = tuple(_CONV_BINDING)
