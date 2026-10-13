@@ -3,6 +3,9 @@
 
 #pragma once
 
+#include <Tensile/ContractionProblem_fwd.hpp>
+#include <Tensile/ContractionSolution_fwd.hpp>
+#include <Tensile/FusedA2AKernArg.hpp>
 #include <Tensile/Tensile_fwd.hpp>
 #include <Tensile/hip/HipSolutionAdapter.hpp>
 #include <Tensile/hip/HipUtils.hpp>
@@ -67,6 +70,9 @@ namespace TensileLite
             void release();
         };
 
+        constexpr size_t kCommChannels   = 2;
+        constexpr size_t kCommFlagsBytes = kCommChannels * FUSED_A2A_FLAG_BLOCK_BYTES;
+
         template <typename F>
         void forEachDevice(std::vector<std::shared_ptr<DeviceContext>> const& devices, F&& f)
         {
@@ -76,5 +82,20 @@ namespace TensileLite
                 f(*ctx);
             }
         }
+
+        // devices: the problem's ranks, rank r on devices[r]. Both are no-ops unless the
+        // problem is a fused GEMM+A2A.
+        void resetCommBuffers(ContractionProblem const&                          problem,
+                              std::vector<std::shared_ptr<DeviceContext>> const& devices);
+
+        // Copies devices[rank]'s inputs into scratch and adds the peers of the launch's slot
+        // and channel.
+        ProblemInputs const* rankInputs(ContractionInputs&                                 scratch,
+                                        ContractionProblem const&                          problem,
+                                        ContractionSolution const&                         solution,
+                                        Hardware const&                                    hardware,
+                                        std::vector<std::shared_ptr<DeviceContext>> const& devices,
+                                        size_t                                             rank,
+                                        size_t                                             launch);
     } // namespace Client
 } // namespace TensileLite

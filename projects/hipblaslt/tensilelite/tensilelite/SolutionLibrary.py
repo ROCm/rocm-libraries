@@ -90,7 +90,7 @@ class MatchingLibrary:
     StateKeys = [("type", "tag"), "properties", "table", "distance", "useKdTree"]
 
     @classmethod
-    def FromOriginalState(cls, d, solutions):
+    def FromOriginalState(cls, d, solutions, fusedGemmA2A=False):
         indices = d["indexOrder"]
         distance = d["distance"]
         origTable = d["table"]
@@ -117,6 +117,8 @@ class MatchingLibrary:
 
         properties = list([propertyKeys[i] for i in indices if i in propertyKeys])
         keyOrder = [i for i, j in enumerate(indices) if j in propertyKeys]
+        if fusedGemmA2A:
+            properties += [Properties.Property("World"), Properties.Property("FusedA2AExtent")]
 
         table = []
 
@@ -125,6 +127,8 @@ class MatchingLibrary:
                 index = row[1][0]
                 value = IndexSolutionLibrary(solutions[index])
                 key = list([row[0][i] for i in keyOrder])
+                if fusedGemmA2A:
+                    key += list(row[0][-2:])
                 if distance == "GridBased":
                     entry = {"key": key, "index": value}
                 else:
@@ -472,7 +476,7 @@ class MasterSolutionLibrary:
                 else:
                     predicate = Properties.Predicate(tag="GridBasedMatching") # to make different from TruePred
 
-                matchingLib = MatchingLibrary.FromOriginalState(d["Library"], solutions)
+                matchingLib = MatchingLibrary.FromOriginalState(d["Library"], solutions, problemType.fusedGemmA2A)
                 library = PredicateLibrary(tag="Problem")
                 library.rows.append({"predicate": predicate, "library": matchingLib})
             elif d["LibraryType"] == "FreeSize":
