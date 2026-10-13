@@ -167,6 +167,9 @@ try
                 launch(0);
 
         hipblaslt_bench::TimingResult result;
+        if(cfg.adaptive)
+            if(const auto err = hipblaslt_bench::validate_adaptive_config(cfg); !err.empty())
+                hipblaslt_cerr << "hipblaslt adaptive timing: invalid config: " << err << "\n";
         hipblaslt_bench::run_measurement(
             launch, cfg, nullptr, nullptr, res.stream, result, {}, agreement);
 
