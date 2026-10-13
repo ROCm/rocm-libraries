@@ -93,11 +93,14 @@ def allFiles(startDir):
     return files
 
 
-def fixSizeInconsistencies(sizes, fileType):
+def fixSizeInconsistencies(sizes, fileType, fusedGemmA2A=False):
     origNumSizes = len(sizes)
     sizesDict = dict()
     for size, index in sizes:
-        size = size[:-4] if len(size) >= 8 else size
+        if fusedGemmA2A and len(size) >= 10:
+            size = size[:-6] + size[-2:]
+        elif len(size) >= 8:
+            size = size[:-4]
         sizesDict[tuple(value for value in size)] = [size, index]
     newSizes = list()
     for value in sizesDict.values():
@@ -399,8 +402,9 @@ def mergeLogic(oriData: dict[str, Any], incData: dict[str, Any], forceMerge, noE
     verbose(origNumSizes, "sizes and", origNumSolutions, "solutions in base logic file")
     verbose(incNumSizes, "sizes and", incNumSolutions, "solutions in incremental logic file")
 
-    oriExactLogic, origNumSizes = fixSizeInconsistencies(oriExactLogic, "base")
-    incExactLogic, incNumSizes = fixSizeInconsistencies(incExactLogic, "incremental")
+    fusedGemmA2A = oriData.get("ProblemType", {}).get("FusedGemmA2A", False)
+    oriExactLogic, origNumSizes = fixSizeInconsistencies(oriExactLogic, "base", fusedGemmA2A)
+    incExactLogic, incNumSizes = fixSizeInconsistencies(incExactLogic, "incremental", fusedGemmA2A)
     oriData["ExactLogic"] = oriExactLogic
     incData["ExactLogic"] = incExactLogic
 

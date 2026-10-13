@@ -2913,8 +2913,7 @@ namespace TensileLite
             };
 
             // value is the solution's MacroTile0.
-            struct FusedA2ATileDivisible
-                : public Predicate_CRTP<FusedA2ATileDivisible, ContractionProblemGemm>
+            struct FusedA2AShape : public Predicate_CRTP<FusedA2AShape, ContractionProblemGemm>
             {
                 enum
                 {
@@ -2923,38 +2922,62 @@ namespace TensileLite
                 };
                 int64_t value;
 
-                FusedA2ATileDivisible() = default;
-                FusedA2ATileDivisible(int64_t value)
+                FusedA2AShape() = default;
+                FusedA2AShape(int64_t value)
                     : value(value)
                 {
                 }
 
                 static std::string Type()
                 {
-                    return "FusedA2ATileDivisible";
+                    return "FusedA2AShape";
                 }
 
-                bool divisible(ContractionProblemGemm const& problem) const
+                bool fits(ContractionProblemGemm const& problem) const
                 {
                     if(!problem.fusedGemmA2A())
                         return true;
-                    if(value <= 0 || problem.fusedA2AWorld() == 0)
-                        return false;
+                    const int64_t world = problem.world();
                     const int64_t am    = problem.fusedA2AExtent();
-                    const int64_t width = value * (int64_t)problem.fusedA2AWorld();
-                    return am % width == 0 && (int64_t)problem.freeSizeA(0) % value == 0;
+                    if(value <= 0 || world == 0 || am <= 0)
+                        return false;
+                    for(size_t i = 0; i < problem.batchIndices().size(); i++)
+                        if(problem.batchSize(i) != 1)
+                            return false;
+                    const int64_t m       = problem.freeSizeA(0);
+                    const auto&   d       = problem.d();
+                    const size_t  mStride = d.strides()[problem.freeIndices()[0].d];
+                    const size_t  ldd     = d.strides()[problem.freeIndices()[1].d];
+                    return am % (value * world) == 0 && m % value == 0 && am <= m
+                           && ((am / world) >> 3) < (1 << 14) && mStride == 1 && ldd % 8 == 0
+                           && (ldd >> 3) < (1 << 19);
                 }
 
                 bool operator()(ContractionProblemGemm const& problem) const override
                 {
-                    return divisible(problem);
+                    return fits(problem);
                 }
 
                 bool debugEval(ContractionProblemGemm const& problem,
                                std::ostream&                 stream) const override
                 {
-                    return debugEvalCmp(
-                        problem, stream, "prob", divisible(problem), "==", "sol", true);
+                    bool               rv = fits(problem);
+                    std::ostringstream details;
+                    if(problem.fusedGemmA2A())
+                    {
+                        const auto& d = problem.d();
+                        details << "world=" << problem.world() << " am=" << problem.fusedA2AExtent()
+                                << " m=" << problem.freeSizeA(0) << " MT0=" << value
+                                << " mStride=" << d.strides()[problem.freeIndices()[0].d]
+                                << " ldd=" << d.strides()[problem.freeIndices()[1].d];
+                        for(size_t i = 0; i < problem.batchIndices().size(); i++)
+                            details << " batch=" << problem.batchSize(i);
+                        details << " (need am % (MT0*world) == 0, m % MT0 == 0, am <= m,"
+                                   " (am/world)>>3 < 2^14, mStride == 1, ldd % 8 == 0,"
+                                   " ldd>>3 < 2^19, batch == 1)";
+                    }
+                    PredicateDebugger::printRow(stream, rv, this->type(), details.str());
+                    return rv;
                 }
             };
 

@@ -282,7 +282,7 @@ namespace
 
         auto problem = dummyProblem();
         problem.setFusedGemmA2A(true);
-        problem.setFusedA2AWorld(2);
+        problem.setWorld(2);
         problem.setFusedA2AExtent(256);
 
         FusedA2APeerFields peer0{};

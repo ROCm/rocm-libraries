@@ -34,7 +34,7 @@ namespace
 
     // Every world moves the same per-rank shard and keeps the same local tail, so
     // only M grows with the world. Both are whole tiles for either admitted
-    // MacroTile0, which makes FusedA2ATileDivisible hold for every world. At 2
+    // MacroTile0, which makes the FusedA2AShape predicate hold for every world. At 2
     // ranks this is the 4096 x 256 x 1024 problem with a 2048 extent.
     constexpr int64_t kFusedA2AShardFeatures = 1024;
     constexpr int64_t kFusedA2ALocalFeatures = 2048;

@@ -143,8 +143,9 @@ namespace
 
         std::unique_ptr<ReferenceValidator> start()
         {
-            auto validator = std::make_unique<ReferenceValidator>(
-                args, std::vector<std::shared_ptr<DeviceContext>>{device});
+            devices        = {device};
+            auto validator = std::make_unique<ReferenceValidator>(args);
+            validator->setDevices(&devices);
             validator->setReporter(reporter);
             validator->preProblem(problem);
             validator->preSolution(&solution);
@@ -172,6 +173,7 @@ namespace
         std::unique_ptr<ClientProblemFactory> factory;
         std::shared_ptr<DataInitialization>   dataInit;
         std::shared_ptr<DeviceContext>        device;
+        std::vector<std::shared_ptr<DeviceContext>> devices;
         ContractionProblem*                   problem = nullptr;
         ContractionSolution                   solution;
         std::shared_ptr<CapturingReporter>    reporter = std::make_shared<CapturingReporter>();

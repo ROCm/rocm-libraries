@@ -66,7 +66,12 @@ namespace TensileLite
             oss << value;
             std::string valueStr = oss.str();
 
-            if(key == ResultKey::Validation)
+            if(key == ResultKey::World)
+            {
+                m_fusedA2ACols = true;
+                m_output.setValueForKey(key, value);
+            }
+            else if(key == ResultKey::Validation)
             {
                 if(valueStr != "PASSED" && valueStr != "NO_CHECK")
                 {
@@ -174,6 +179,11 @@ namespace TensileLite
                 m_output.setHeaderForKey(ResultKey::LDC, "LDC");
                 m_output.setHeaderForKey(ResultKey::LDA, "LDA");
                 m_output.setHeaderForKey(ResultKey::LDB, "LDB");
+                if(m_fusedA2ACols)
+                {
+                    m_output.setHeaderForKey(ResultKey::World, "World");
+                    m_output.setHeaderForKey(ResultKey::FusedA2AExtent, "A2AExtent");
+                }
                 m_output.setHeaderForKey(ResultKey::TotalFlops, "TotalFlops");
                 m_output.setHeaderForKey(ResultKey::GbpsBW, "GbpsBW");
 
@@ -238,7 +248,9 @@ namespace TensileLite
                 if(key.compare(ResultKey::ProblemIndex) == 0
                    || key.find("Size") != std::string::npos || key.compare(ResultKey::LDD) == 0
                    || key.compare(ResultKey::LDC) == 0 || key.compare(ResultKey::LDA) == 0
-                   || key.compare(ResultKey::LDB) == 0 || key.compare(ResultKey::TotalFlops) == 0)
+                   || key.compare(ResultKey::LDB) == 0 || key.compare(ResultKey::TotalFlops) == 0
+                   || key.compare(ResultKey::World) == 0
+                   || key.compare(ResultKey::FusedA2AExtent) == 0)
                 {
                     // these data should be the same for same problem
                     assert(oldRowIter.second == newRow[key]);

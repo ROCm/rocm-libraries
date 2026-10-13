@@ -32,9 +32,9 @@
 #include "Reference.hpp"
 
 #include <Tensile/DataTypes.hpp>
-#include <Tensile/FusedA2AKernArg.hpp>
 #include <Tensile/hip/HipUtils.hpp>
 
+#include <algorithm>
 #include <cstddef>
 #include <iostream>
 #include <sstream>
@@ -43,9 +43,7 @@ namespace TensileLite
 {
     namespace Client
     {
-        ReferenceValidator::ReferenceValidator(po::variables_map const&                    args,
-                                               std::vector<std::shared_ptr<DeviceContext>> devices)
-            : m_devices(std::move(devices))
+        ReferenceValidator::ReferenceValidator(po::variables_map const& args)
         {
             m_elementsToValidate = args["num-elements-to-validate"].as<int>();
             m_printValids        = args["print-valids"].as<bool>();
@@ -124,7 +122,7 @@ namespace TensileLite
                 {
                     ScopedTimer timer("cpu_data_init");
                     m_referenceInputs.clear();
-                    forEachDevice(m_devices, [&](DeviceContext& ctx) {
+                    forEachDevice(*m_devices, [&](DeviceContext& ctx) {
                         m_referenceInputs.push_back(ctx.dataInit->prepareCPUInputs(problem));
                     });
                 }
@@ -158,9 +156,10 @@ namespace TensileLite
                 // inputs for this solution (solution-dependent HostPreSwizzle).
                 // Otherwise the preProblem reference is unchanged, so reuse it
                 // instead of paying a full dense reference GEMM per solution.
-                for(size_t d = 0; d < m_devices.size(); d++)
+                for(size_t d = 0; d < m_devices->size(); d++)
                 {
-                    if(!m_devices[d]->dataInit->referenceNeedsPerSolutionRecompute(*gemm, solution))
+                    if(!(*m_devices)[d]->dataInit->referenceNeedsPerSolutionRecompute(*gemm,
+                                                                                      solution))
                         continue;
                     ScopedTimer timer("cpu_reference_gemm_per_solution");
                     SolveCPU(m_problem, m_referenceInputs[d].get(), m_elementsToValidate);
@@ -247,7 +246,7 @@ namespace TensileLite
                                                   TimingEvents const&        stopEvents)
         {
             // Fused A2A validates here; others only when validate-after-enqueues is on.
-            if(m_enabled && (m_validateAfterEnqueues || m_devices.size() > 1))
+            if(m_enabled && (m_validateAfterEnqueues || m_devices->size() > 1))
             {
                 validateSlots(slots);
                 m_validatedSolution = true;
@@ -257,12 +256,12 @@ namespace TensileLite
 
         void ReferenceValidator::validateSlots(std::vector<size_t> const& slots)
         {
-            for(size_t d = 0; d < m_devices.size(); d++)
+            for(size_t d = 0; d < m_devices->size(); d++)
             {
-                ScopedDevice device(m_devices[d]->deviceId);
+                ScopedDevice device((*m_devices)[d]->deviceId);
                 for(size_t slot : slots)
                 {
-                    auto const& inputs = m_devices[d]->inputArr[slot];
+                    auto const& inputs = (*m_devices)[d]->inputArr[slot];
                     validateSolution(d, inputs);
                     if(m_fusedA2A && m_elementsToValidate != 0
                        && !recvMatches(d, dynamic_cast<ContractionInputs const&>(*inputs)))
@@ -277,7 +276,7 @@ namespace TensileLite
         bool ReferenceValidator::recvMatches(size_t dst, ContractionInputs const& inputs)
         {
             auto const&  problem  = dynamic_cast<ContractionProblemGemm const&>(*m_problem);
-            const size_t W        = m_devices.size();
+            const size_t W        = m_devices->size();
             const size_t N        = problem.freeSizeB(0);
             const size_t nShard   = (size_t)problem.fusedA2AExtent() / W;
             auto const&  dDesc    = problem.d();
@@ -288,7 +287,7 @@ namespace TensileLite
             // card src's golden, for every token.
             std::vector<BFloat16> host(W * N * nShard);
             HIP_CHECK_EXC(hipMemcpy(host.data(),
-                                    inputs.fusedA2APeers[dst][FUSED_A2A_SLOT_RECV_PTR],
+                                    inputs.a2aRecv,
                                     host.size() * sizeof(BFloat16),
                                     hipMemcpyDeviceToHost));
             size_t mismatches = 0;
@@ -932,7 +931,7 @@ namespace TensileLite
             size_t elementsBeforeData   = 0;
             size_t elementsAfterData    = 0;
 
-            BoundsCheckMode boundsCheck = m_devices[0]->dataInit->getCurBoundsCheck();
+            BoundsCheckMode boundsCheck = (*m_devices)[0]->dataInit->getCurBoundsCheck();
             // For NaN bounds checking, copy the full padded buffer from GPU for all tensors
             if(boundsCheck == BoundsCheckMode::NaN)
                 elementsToCopy = maxElement;

@@ -27,7 +27,7 @@ from . import LibraryIO
 from .Common.GlobalParameters import defaultInternalSupportParams, defaultSolution
 from .Common.Constants import HR
 from .CustomKernels import isCustomKernelConfig
-from .SolutionStructs.Problem import ProblemType
+from .SolutionStructs.Problem import ProblemSizesMock, ProblemType
 from .SolutionStructs.Problem import _defaultProblemType as defaultProblemType
 from .Common.GlobalParameters import globalParameters
 from .Common.Architectures import gfxToIsa, isaToGfx, steppingArchOf, tuningArchOf
@@ -641,7 +641,12 @@ def formProblemSize(
     # verbatim instead of recovering a single size from the exact logic.
     if problemSizes is not None:
         temp["ProblemSizes"] = [
-            {key: FlowList(value) for key, value in entry.items()}
+            {
+                key: {k: makeFlow(v) for k, v in value.items()}
+                if isinstance(value, dict)
+                else FlowList(value)
+                for key, value in entry.items()
+            }
             for entry in problemSizes
         ]
     # for origami exactLogic is not present so we need to create it
@@ -651,9 +656,24 @@ def formProblemSize(
         )
         temp["ProblemSizes"] = [{"Exact": FlowList([1, 1, 1, 1])}]
     else:
-        for size, mapping in exactLogic:
-            if mapping[0] == solutionIndex:
-                temp["ProblemSizes"] = [{"Exact": FlowList(size)}]
+        problems = ProblemSizesMock(
+            exactLogic, problemTypeStat.get("FusedGemmA2A", False)
+        ).problems
+        for problem, (_, mapping) in zip(problems, exactLogic):
+            if mapping[0] != solutionIndex:
+                continue
+            if problem.world is None:
+                temp["ProblemSizes"] = [{"Exact": FlowList(problem.sizes)}]
+            else:
+                temp["ProblemSizes"] = [
+                    {
+                        "Exact": {
+                            "sizes": FlowList(problem.sizes),
+                            "world": problem.world,
+                            "a2aExtent": problem.a2aExtent,
+                        }
+                    }
+                ]
         if "ProblemSizes" not in temp:
             tPrint(
                 1,
