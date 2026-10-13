@@ -20,19 +20,29 @@ TestParameters:
 
 GlobalParameters:
   MinimumRequiredVersion: 5.0.0
+  SleepPercent: 0
+  EnqueuesPerSync: 20
+  NumWarmups: 20
   NumElementsToValidate: -1
   ExitOnFails: 1
   PrintLevel: 3
   KernelTime: True
   PrintSolutionRejectionReason: True
   MaxWorkspaceSize: 13421772800
-  DataInitTypeA: 3
-  DataInitTypeB: 3
+  DataInitTypeA: 12
+  DataInitTypeB: 13
   DataInitTypeC: 0
+  DataInitTypeD: 12
   DataInitTypeAlpha: 1
   DataInitTypeMXSA: 3
   DataInitTypeMXSB: 3
   MXScaleFormat: 1
+  CSVExportWinner: true
+  CSVMergeSameProblemID: true
+  PreciseKernelTime: false
+  Device: 0
+  SkipSlowSolutionRatio: 0.0
+  RotatingBufferSize: 1024
 
 BenchmarkProblems:
 

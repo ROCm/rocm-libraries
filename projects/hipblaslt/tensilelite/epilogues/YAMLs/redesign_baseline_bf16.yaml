@@ -31,6 +31,7 @@ GlobalParameters:
   CSVMergeSameProblemID: true
   PreciseKernelTime: false
   Device: 0
+  SkipSlowSolutionRatio: 0.0
   KeepBuildTmp: true
   RotatingBufferSize: 1024
 
