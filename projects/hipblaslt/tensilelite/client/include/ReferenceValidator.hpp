@@ -91,9 +91,7 @@ namespace TensileLite
             }
             virtual void validateEnqueues(std::shared_ptr<ProblemInputs> inputs,
                                           TimingEvents const&            startEvents,
-                                          TimingEvents const&            stopEvents) override
-            {
-            }
+                                          TimingEvents const&            stopEvents) override;
 
             bool validate(ContractionProblemGemm const& problem,
                           ContractionInputs const&      reference,
@@ -124,6 +122,10 @@ namespace TensileLite
 
             virtual int error() const override;
 
+        protected:
+            // Allow lifecycle tests to observe validation without device transfers.
+            virtual bool validateSolution(std::shared_ptr<ProblemInputs> inputs);
+
         private:
             void allocateResultBuffer(size_t bytes);
 
@@ -137,9 +139,10 @@ namespace TensileLite
             size_t                   m_cpuResultBufferSize = 0;
             std::shared_ptr<uint8_t> m_cpuResultBuffer;
 
-            ContractionProblem* m_problem;
+            ContractionProblem* m_problem = nullptr;
 
             bool m_enabled;
+            bool m_validateAfterEnqueues = false;
 
             int  m_elementsToValidate;
             bool m_printValids;
@@ -163,8 +166,6 @@ namespace TensileLite
             bool   m_error             = false;
             bool   m_executedSolution  = false;
             size_t m_errorsReported    = 0;
-
-            bool validateSolution(std::shared_ptr<ProblemInputs> inputs);
         };
     } // namespace Client
 } // namespace TensileLite
