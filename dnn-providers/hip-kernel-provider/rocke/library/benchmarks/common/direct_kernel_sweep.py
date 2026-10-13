@@ -68,10 +68,12 @@ DOUBLE_BUFFER = (True, False)
 # wide land on 16 rather than 8.  Dropping 8 from the forward grid is therefore
 # free, while dropping 16 is not.  Dgrad has no second variant to fall back on,
 # so its tail keeps both 8 and 16 -- dropping either regresses small-spatial /
-# large-filter shapes, 8 the more severely of the two.  Neither tuple is
-# reducible further without giving up a shape's best config.
+# large-filter shapes, 8 the more severely of the two.  Dgrad also carries 7:
+# it tiles the 7- and 14-wide maps of the 7x7 depthwise stages without a
+# ragged edge, and on those it beats every power of two (14 never did).
+# Neither tuple is reducible further without giving up a shape's best config.
 DW_BLOCK_W_FWD = (4, 16)
-DW_BLOCK_W_DGRAD = (4, 8, 16)
+DW_BLOCK_W_DGRAD = (4, 7, 8, 16)
 DW_BLOCK_WAVES = (1, 2, 4)
 # Output-stationary depthwise forward. Widths and heights of 7 and 14 tile the
 # 7/14/28/56-wide feature maps of the common CNN stages without a ragged edge;
@@ -142,6 +144,13 @@ class DirectCaps:
 def _grouped_channels() -> Tuple[int, ...]:
     # The reference library covers cpg == kpg in {4, 8, 16, 32}.
     return (4, 8, 16, 32)
+
+
+# (cpg, kpg) of the dense (groups == 1) 3x3 convolutions whose dgrad the MFMA
+# direct pipeline serves. Implicit GEMM maps dX channels to its N tile, so a
+# narrow C (4, 24, 48) leaves most of every MFMA idle there, while the direct
+# kernel reduces over K instead: on these shapes it runs up to twice as fast.
+_DENSE_MFMA_DGRAD_CHANNELS = ((4, 320), (24, 24), (48, 192))
 
 
 _DEPTHWISE_FILTERS = (3, 5, 7, 9, 11)
@@ -276,11 +285,16 @@ DIRECT_CAPABILITIES: Dict[str, Tuple[str, Tuple[DirectCaps, ...]]] = {
     ),
     # Grouped dgrad, MFMA pipeline (weight transpose -> reorganize -> fprop).
     # Its last pass is a forward kernel on the transposed problem, so it
-    # inherits the forward limits: stride 1 and "same" padding.
+    # inherits the forward limits: stride 1 and "same" padding. Besides the
+    # grouped channel counts it carries the dense ones it wins on.
     "direct_grouped_dgrad_mfma": (
         "dgrad",
         tuple(
             DirectCaps(KH=3, PAD=1, stride=1, cpg=c, kpg=c) for c in _grouped_channels()
+        )
+        + tuple(
+            DirectCaps(KH=3, PAD=1, stride=1, cpg=c, kpg=k)
+            for c, k in _DENSE_MFMA_DGRAD_CHANNELS
         ),
     ),
 }
@@ -595,7 +609,8 @@ def probe_problem(
     cases in test_conv_abi.py assert it), so the probe only has to satisfy the
     spec validators: 64 groups divide every block_groups, 256 depthwise
     channels fill the widest depthwise block (the spatial depthwise kernel
-    takes fewer groups than a wave, so it gets 8), and 64x64 leaves every
+    takes fewer groups than a wave, so it gets 8; the dense MFMA dgrad channel
+    counts serve groups == 1, so they get 1), and 64x64 leaves every
     stride-2 output wider than the widest W tile. Runtime channel counts
     (``cpg == 0``, the non-grouped kernel) take one group of 256: a multiple of
     every channel chunk and of every channel tile.
@@ -620,6 +635,11 @@ def probe_problem(
         )
     if variant == "direct_depthwise_spatial":
         groups = 8
+    elif (caps.cpg, caps.kpg) in _DENSE_MFMA_DGRAD_CHANNELS:
+        # Dense channel counts serve groups == 1: one group per block. Wider
+        # blocks would only build kernels no problem with these counts can
+        # launch (and some of them fail to compile).
+        groups = 1
     else:
         groups = 256 if caps.cpg == 1 else 64
     return DirectConvProblem(

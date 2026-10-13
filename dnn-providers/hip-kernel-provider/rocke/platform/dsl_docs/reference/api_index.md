@@ -353,6 +353,11 @@ b.clamp_f32(v, lo, hi) # fmin(hi, fmax(lo, v)) -- folds to v_med3_f32
 b.global_atomic_add(ptr, idx, val, *, ordering="monotonic")
 b.lds_atomic_add(smem, [idx], val, *, ordering="monotonic")
 
+# : cross-workgroup synchronisation (stream-K fixup)
+b.fence(*, scope="agent", ordering="acq_rel") # memref.fence
+b.global_flag_store(ptr, idx, val_i32, *, scope="agent", ordering="release")
+b.global_flag_wait_eq(ptr, idx, expect_i32, *, scope="agent") # acquire spin
+
 # : bitwise integer helpers (also used by i4 unpack)
 b.xor(a, b) # arith.xor; same type on both operands
 b.shl(a, b) # arith.shl; logical left shift
