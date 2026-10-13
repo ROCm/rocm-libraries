@@ -77,6 +77,7 @@ from benchmarks.common.early_stop import (  # noqa: E402
     EarlyStop,
     add_early_stop_arg,
 )
+from benchmarks.common.kernel_sweep import _AOT_ALIAS_PIPELINES  # noqa: E402
 from benchmarks.common.kernel_sweep import (  # noqa: E402
     CACHE_EPILOGUES as _EPILOGUES,
     CACHE_PIPELINES as _PIPELINES,
@@ -84,6 +85,8 @@ from benchmarks.common.kernel_sweep import (  # noqa: E402
     CACHE_TILE_MN as _TILE_MN,
     CACHE_WARP_MN as _WARP_MN,
     CACHE_WARP_TILE_MN as _WARP_TILE_MN,
+    CACHE_WGRAD_STREAMK_MODES as _STREAMK_MODES,
+    CACHE_WGRAD_STREAMK_REDUCTIONS as _STREAMK_REDUCTIONS,
 )
 
 # gfx1250-only: wider CUs allow larger tiles and more warp concurrency.
@@ -148,6 +151,10 @@ class WgradCombo(NamedTuple):
     # 16-bit atomics and allocates no scratch), which is why the axis is only
     # expanded on the two-stage work list.
     ws_replicas: int = 0
+    # Stream-K launch mode ("dp_sk" / "persistent") and reduction. "off" on
+    # every other leg; the stream-K leg keeps split_k = 1 (stream-K owns K).
+    streamk: str = "off"
+    streamk_reduction: str = ""
 
 
 @dataclass
@@ -182,6 +189,10 @@ class Result:
     # argument as group_merge -- an --ws-replicas sweep prints one row per R
     # and they must be tellable apart.
     ws_replicas: int = 0
+    # Stream-K leg only: launch mode, reduction and the resolved CTA pool.
+    streamk: str = "off"
+    streamk_reduction: str = ""
+    streamk_ctas: int = 0
 
 
 # ---------------------------------------------------------------------------
@@ -928,6 +939,43 @@ def main() -> int:
     )
 
     parser.add_argument(
+        "--streamk",
+        default="off",
+        choices=["off", "dp_sk", "persistent", "all"],
+        dest="streamk",
+        help=(
+            "wgrad stream-K kernels (gfx942/gfx950): off (default) = none; "
+            "dp_sk / persistent = that launch mode; all = both. The JIT sweep "
+            "adds a stream-K leg (default epilogue, split_k=1) over the "
+            "--streamk-reductions; --compile-all adds the stream-K kernels to "
+            "the cache; --run-from-cache runs the cached ones that match."
+        ),
+    )
+    parser.add_argument(
+        "--streamk-reductions",
+        default=",".join(_STREAMK_REDUCTIONS),
+        dest="streamk_reductions",
+        metavar="LIST",
+        help=(
+            "comma-separated stream-K reductions to sweep with --streamk "
+            "(default: %(default)s). 'atomic' accumulates into dW with f32 "
+            "atomics, so it only applies when dW is fp32."
+        ),
+    )
+    parser.add_argument(
+        "--streamk-ctas",
+        type=int,
+        default=-1,
+        dest="streamk_ctas",
+        metavar="N",
+        help=(
+            "stream-K CTA pool, a launch parameter (default: -1 = the arch "
+            "default: one CTA per CU for linear/tree, several per CU for "
+            "workspace/atomic)."
+        ),
+    )
+
+    parser.add_argument(
         "--csv-top",
         type=int,
         default=5,
@@ -948,10 +996,12 @@ def main() -> int:
         dest="split_k_prune",
         metavar="PCT",
         help=(
-            "Only effective with --split-k 0 (sweep). "
+            "Only effective with --split-k 0 (sweep) or --run-from-cache. "
             "If a kernel's TFLOPS at a given split-K degree drops by at least PCT%% "
             "relative to its best split-K seen so far, skip all remaining split-K "
             "degrees for that tile/warp/pipeline/epilogue configuration. "
+            "With --run-from-cache a degree early-stopped after another was "
+            "measured prunes the rest too. "
             "Example: --split-k-prune 15 prunes when performance drops by >=15%%."
         ),
     )
@@ -1141,6 +1191,37 @@ def main() -> int:
     # and both exiting 0, which reads as a successful run that found nothing.
     if args.csv_top < 1:
         print(f"--csv-top must be >= 1 (got {args.csv_top})", file=sys.stderr)
+        return 2
+
+    if args.streamk == "off" and (
+        args.streamk_reductions != ",".join(_STREAMK_REDUCTIONS)
+        or args.streamk_ctas != -1
+    ):
+        print(
+            "warning: --streamk-reductions / --streamk-ctas are ignored "
+            "without --streamk",
+            file=sys.stderr,
+        )
+    args.streamk_modes = {
+        "off": (),
+        "all": _STREAMK_MODES,
+    }.get(args.streamk, (args.streamk,))
+    args.streamk_reductions = tuple(
+        r.strip() for r in args.streamk_reductions.split(",") if r.strip()
+    )
+    for r in args.streamk_reductions:
+        if r not in _STREAMK_REDUCTIONS:
+            print(
+                f"--streamk-reductions: unknown reduction {r!r} "
+                f"(expected some of {', '.join(_STREAMK_REDUCTIONS)})",
+                file=sys.stderr,
+            )
+            return 2
+    if args.streamk_ctas == 0 or args.streamk_ctas < -1:
+        print(
+            f"--streamk-ctas must be -1 (auto) or > 0 (got {args.streamk_ctas})",
+            file=sys.stderr,
+        )
         return 2
 
     if args.miopen_cmd is None and args.miopen_file is None and args.json_file is None:
@@ -1638,6 +1719,29 @@ def _build_wgrad_one(args_tuple):
         group_merge=group_merge,
         lds_k_outer=lds_k_outer,
         async_dma=async_dma,
+        # Per-combo, from the same policy the AOT cache generator uses.
+        # Stream-K never reaches the K loop prefetch_addr rewrites, so it is
+        # left off there.
+        prefetch_addr=combo.streamk == "off"
+        and WgradConvSpec.default_prefetch_addr(
+            arch=arch,
+            tile_m=tile_m,
+            tile_n=tile_n,
+            tile_k=tile_k,
+            lds_k_outer=lds_k_outer,
+            wave_size=target.wave_size,
+            async_dma=async_dma,
+        ),
+        # Stream-K leg: the launch mode and reduction pick the kernel; the CTA
+        # pool stays at -1 here (it is a kernarg, resolved at launch).
+        **(
+            {}
+            if combo.streamk == "off"
+            else {
+                "streamk": combo.streamk,
+                "streamk_reduction": combo.streamk_reduction,
+            }
+        ),
     )
     ok, _ = is_valid_wgrad_spec(spec, arch)
     if not ok:
@@ -1776,6 +1880,20 @@ def _build_wgrad_two_stage_one(args_tuple):
             wave_size=target.wave_size,
         ),
     )
+    # Same per-combo policy as the single-stage leg, so the two legs stay
+    # comparable.
+    spec = dc_replace(
+        spec,
+        prefetch_addr=WgradConvSpec.default_prefetch_addr(
+            arch=arch,
+            tile_m=tile_m,
+            tile_n=tile_n,
+            tile_k=tile_k,
+            lds_k_outer=spec.lds_k_outer,
+            wave_size=target.wave_size,
+            async_dma=async_dma,
+        ),
+    )
     ok, _ = is_valid_wgrad_spec(spec, arch)
     if not ok:
         return None
@@ -1905,6 +2023,10 @@ def _build_dgrad_one(args_tuple):
         # The default epilogue stores scalar; the validator rejects any wider
         # vector_size_c with it.
         vector_size_c=1 if epilogue == "default" else vec_c,
+        # Per-combo, from the same policy the AOT cache generator uses.
+        uniform_k_decode=DgradConvSpec.default_uniform_k_decode(
+            arch=arch, wave_size=target.wave_size, pipeline=pipeline
+        ),
     )
     ok, _ = is_valid_dgrad_spec(spec, arch)
     if not ok:
@@ -2672,7 +2794,7 @@ def _run_wgrad_sweep(
     work = [(combo, problem, dtype, arch) for combo in combos]
     pending = _build_ir_parallel(work, _build_and_compile_wgrad_one, jobs)
     # Re-sort: group by config (all combo dims except split_k), then split_k descending
-    # so _SPLIT_K_AUTO order (128, 64, ..., 1) is preserved for --split-k-prune.
+    # so the descending degree order is preserved for --split-k-prune.
     pending.sort(key=lambda r: (r[0][:9], -r[2]))
     n_skipped = len(combos) - len(pending)
     n_built = len(pending)
@@ -2715,6 +2837,53 @@ def _run_wgrad_sweep(
         n_built += len(pending_2s)
     else:
         pending_2s = []
+
+    # Stream-K leg (--streamk): one kernel per geometry x pipeline x launch
+    # mode x reduction. Stream-K runs the default epilogue on a plain K loop
+    # and owns the K partition, so there is no cshuffle, async or split-K
+    # axis here; the pipelines that alias another's code are skipped as in
+    # the AOT grid. The CTA pool is a kernarg (--streamk-ctas).
+    _sk_reductions = tuple(
+        r for r in args.streamk_reductions if r != "atomic" or dtype == "fp32"
+    )
+    pending_sk = []
+    if args.streamk_modes and arch not in ("gfx942", "gfx950"):
+        print(f"  --streamk: stream-K wgrad is gfx942/gfx950 only; skipped on {arch}.")
+    elif args.streamk_modes and _sk_reductions:
+        sk_combos = [
+            WgradCombo(
+                *_geom,
+                _pipeline,
+                "default",
+                False,
+                1,
+                streamk=_mode,
+                streamk_reduction=_red,
+            )
+            for _geom in itertools.product(
+                _TILE_MN, _TILE_MN, _TILE_K, _WARP_MN, _WARP_MN, _WARP_TILE_MN
+            )
+            if _geom[3] * _geom[5] <= _geom[0] and _geom[4] * _geom[5] <= _geom[1]
+            for _pipeline in _PIPELINES
+            if _pipeline not in _AOT_ALIAS_PIPELINES["wgrad"]
+            for _mode in args.streamk_modes
+            for _red in _sk_reductions
+        ]
+        if args.sample is not None:
+            sk_combos = _sample_combos(sk_combos, args.sample, args.seed + case_idx)
+        print(
+            f"  stream-K: building {len(sk_combos)} combos "
+            f"(modes {list(args.streamk_modes)} x reductions "
+            f"{list(_sk_reductions)}) ...",
+            flush=True,
+        )
+        pending_sk = _build_ir_parallel(
+            [(c, problem, dtype, arch) for c in sk_combos],
+            _build_and_compile_wgrad_one,
+            jobs,
+        )
+        n_skipped += len(sk_combos) - len(pending_sk)
+        n_built += len(pending_sk)
 
     # ---------------------------------------------------------------------------
     # Phase 3 – GPU run: load modules and time each kernel serially.
@@ -2989,7 +3158,6 @@ def _run_wgrad_sweep(
         )
         from kernels.common.conv_wgrad_workspace_reduce import (
             WgradReduceSpec,
-            wgrad_reduce_grid,
             wgrad_reduce_signature,
         )
 
@@ -3034,9 +3202,6 @@ def _run_wgrad_sweep(
                 # Must match Stage 1 or the fold covers the wrong slab count.
                 ws_replicas=spec.ws_replicas,
             )
-            s2_grid = wgrad_reduce_grid(s2_spec)
-            s2_block = (s2_spec.tile_m * s2_spec.tile_n, 1, 1)
-
             try:
                 s1_launcher = KernelLauncher(
                     hsaco=s1_art.hsaco,
@@ -3081,19 +3246,16 @@ def _run_wgrad_sweep(
                     ws_ptr=int(ws_dev),
                     ws_bytes=ws_nbytes,
                 )
-                s2_values = {
-                    "ws_ptr": ws_dev,
-                    "dw_ptr": dW_dev2,
-                    "wg_M": spec.wg_M,
-                    "wg_N": spec.wg_N,
-                    "ws_bytes": ws_nbytes,
-                    "dw_bytes": dW_t.nbytes,
-                    "groups": spec.problem.groups,
-                }
+                s2_values, s2_cfg = _stage2_launch(
+                    s2_spec,
+                    ws_ptr=ws_dev,
+                    ws_bytes=ws_nbytes,
+                    dw_ptr=dW_dev2,
+                    dw_bytes=dW_t.nbytes,
+                )
                 s1_cfg = LaunchConfig(
                     grid=s1_grid, block=(spec.block_size, 1, 1), stream=0
                 )
-                s2_cfg = LaunchConfig(grid=s2_grid, block=s2_block, stream=0)
 
                 def _launch_two_stage(
                     _s1=s1_launcher,
@@ -3198,6 +3360,133 @@ def _run_wgrad_sweep(
         rt2.free(X_dev2)
         rt2.free(dW_dev2)
 
+    # ---------------------------------------------------------------------------
+    # Phase 3c – stream-K GPU run. Each launch zeroes what its reduction
+    # accumulates into (dW for atomic, the scratch for workspace, the flag
+    # table for linear/tree) and the workspace reduction runs its Stage 2.
+    # ---------------------------------------------------------------------------
+    if pending_sk:
+        from dataclasses import replace as _dc_replace
+
+        from kernels.common.conv_implicit_gemm_wgrad import wgrad_streamk_signature
+
+        print(f"\nSweeping {len(pending_sk)} stream-K wgrad configs ...", flush=True)
+        rt3 = Runtime()
+        dY_dev3 = rt3.alloc(dY_t.nbytes)
+        X_dev3 = rt3.alloc(X_t.nbytes)
+        dW_dev3 = rt3.alloc(dW_t.nbytes)
+        rt3.memcpy_h2d(dY_dev3, _u8(dY_t), dY_t.nbytes)
+        rt3.memcpy_h2d(X_dev3, _u8(X_t), X_t.nbytes)
+        _sk_stage2: dict = {}
+        _sk_stopped = False
+        try:
+            for combo, spec, _, artifact in pending_sk:
+                spec = _dc_replace(spec, streamk_ctas=args.streamk_ctas)
+                _mode = _streamk_mode_label(spec.streamk, spec.streamk_reduction)
+                _cfg_str = (
+                    f"tile={spec.tile_m}x{spec.tile_n}x{spec.tile_k} "
+                    f"warp={spec.warp_m}x{spec.warp_n} "
+                    f"atom={spec.warp_tile_m}x{spec.warp_tile_n}x{spec.warp_tile_k} "
+                    f"{spec.pipeline}/{spec.epilogue:9s}"
+                )
+                try:
+                    launcher = KernelLauncher(
+                        hsaco=artifact.hsaco,
+                        kernel_name=artifact.kernel_name,
+                        signature=wgrad_streamk_signature(spec),
+                    )
+                    run, free_ws, pool = _streamk_launch(
+                        rt=rt3,
+                        launcher=launcher,
+                        spec=spec,
+                        problem=p,
+                        arch=arch,
+                        ptrs=(int(dY_dev3), int(X_dev3), int(dW_dev3)),
+                        sizes=(dY_t.nbytes, X_t.nbytes, dW_t.nbytes),
+                        stage2=_sk_stage2,
+                        KernelLauncher=KernelLauncher,
+                        LaunchConfig=LaunchConfig,
+                    )
+                except (HipError, ValueError) as e:
+                    n_skipped += 1
+                    print(f"[skip] stream-K {_cfg_str} {_mode}: {e}", flush=True)
+                    continue
+                try:
+                    kernel_passed = None
+                    if args.verify or args.dump_fail:
+                        _sk_stopped, kernel_passed = _verify_kernel(
+                            rt=rt3,
+                            launch_fn=run,
+                            out_dev=dW_dev3,
+                            out_t=dW_t,
+                            zero_init_out=True,
+                            ref_out=ref_out,
+                            kernel_name=artifact.kernel_name,
+                            dump_fail=args.dump_fail,
+                            extra_tensors={"dY": dY_t, "X": X_t},
+                            u8=_u8,
+                            arch=arch,
+                            compute_dtype=dtype,
+                        )
+                        if _sk_stopped:
+                            break
+                    ms = _stop.measure(
+                        run,
+                        warmup=args.warmup,
+                        iters=args.iters,
+                        stream=0,
+                        passed=kernel_passed,
+                    )
+                    if ms is None:
+                        _stop.report(f"{artifact.kernel_name} {_mode}")
+                        continue
+                    synchronize_and_release(0)
+                finally:
+                    free_ws()
+
+                cur_tflops = (flop / ms) * 1e-9
+                cur_gbps = (bytes_xfer / ms) * 1e-6
+                n_run += 1
+                _va, _vb, _vc = WgradConvSpec.default_vector_sizes(
+                    p.C, p.K, dtype, split_k=1
+                )
+                results.append(
+                    Result(
+                        kernel_name=artifact.kernel_name,
+                        tile_m=spec.tile_m,
+                        tile_n=spec.tile_n,
+                        tile_k=spec.tile_k,
+                        warp_m=spec.warp_m,
+                        warp_n=spec.warp_n,
+                        warp_tile_mn=spec.warp_tile_m,
+                        warp_tile_k=spec.warp_tile_k,
+                        pipeline=spec.pipeline,
+                        epilogue=spec.epilogue,
+                        split_k=1,
+                        ms=ms,
+                        tflops=cur_tflops,
+                        gbps=cur_gbps,
+                        vec_a=_va,
+                        vec_b=_vb,
+                        vec_c=_vc,
+                        passed=kernel_passed,
+                        streamk=spec.streamk,
+                        streamk_reduction=spec.streamk_reduction,
+                        streamk_ctas=pool,
+                    )
+                )
+                print(
+                    f"[{n_run:4d}] {_cfg_str} {_mode:<10s} ctas={pool:<5d} "
+                    f"{cur_tflops:6.1f} TFLOPS  {ms:.3f} ms",
+                    flush=True,
+                )
+        finally:
+            rt3.free(dY_dev3)
+            rt3.free(X_dev3)
+            rt3.free(dW_dev3)
+        if _sk_stopped:
+            return 1, []
+
     print(f"\nWgrad sweep done: {n_built} compiled, {n_skipped} skipped.", flush=True)
 
     if not results:
@@ -3217,6 +3506,8 @@ def _run_wgrad_sweep(
     print("-" * 92)
     for rank, r in enumerate(results[:top_n], 1):
         mode = f"spk{r.split_k}2s" if r.two_stage else f"spk{r.split_k}"
+        if r.streamk != "off":
+            mode = _streamk_mode_label(r.streamk, r.streamk_reduction)
         if r.group_merge > 1:
             mode += f" gm{r.group_merge}"
         if r.ws_replicas > 0:
@@ -3619,6 +3910,8 @@ def _cache_dispatch(args, arch, target, cases) -> int:
                     directions=directions or args.compile_directions,
                     jobs=max(1, int(args.jobs or 1)),
                     limit=args.limit,
+                    streamk_modes=args.streamk_modes,
+                    streamk_reductions=args.streamk_reductions,
                 ),
             )
         return rc
@@ -3650,7 +3943,6 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
     from rocke.runtime import synchronize_and_release
     from rocke.runtime.hip_module import HipError, Runtime
     from rocke.runtime.launcher import KernelLauncher, LaunchConfig
-    from benchmarks.common.kernel_sweep import _launch_values_for
 
     _TORCH_DT = {"fp16": torch.float16, "bf16": torch.bfloat16, "fp32": torch.float32}
 
@@ -3686,6 +3978,27 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                 )
                 continue
 
+            if (
+                direction == "wgrad"
+                and problem.cpg == problem.kpg == 1 < problem.groups
+            ):
+                # Depthwise: the non-split kernel leaves one workgroup per
+                # group and cannot fill the device, so -- as in the JIT
+                # sweep -- only split-K kernels are offered. Stream-K
+                # kernels (split_k = 1, but K partitioned over the CTA pool)
+                # stay.
+                candidates = [
+                    c for c in candidates if c[0].split_k > 1 or c[0].streamk != "off"
+                ]
+                if not candidates:
+                    print(
+                        f"Case {case_idx} {problem.short()} {case_dtype} wgrad: "
+                        f"no compatible kernel (depthwise runs split-K and "
+                        f"stream-K kernels only; the cache has none for this "
+                        f"shape)",
+                        flush=True,
+                    )
+                    continue
             if direction == "wgrad" and args.two_stage != "always":
                 # Same rule as the JIT sweep's --two-stage: by default the
                 # two-stage (scratch + reduce) kernels only run when C/groups
@@ -3705,6 +4018,27 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                             "see --two-stage"
                         )
                         + ")",
+                        flush=True,
+                    )
+                    continue
+            if direction == "wgrad":
+                # Stream-K kernels run only when asked for (--streamk), and
+                # only the requested modes/reductions, as in the JIT sweep.
+                n_before = len(candidates)
+                candidates = [
+                    c
+                    for c in candidates
+                    if c[0].streamk == "off"
+                    or (
+                        c[0].streamk in args.streamk_modes
+                        and c[0].streamk_reduction in args.streamk_reductions
+                    )
+                ]
+                if not candidates:
+                    print(
+                        f"Case {case_idx} {problem.short()} {case_dtype} wgrad: "
+                        f"no compatible kernel ({n_before} stream-K kernels "
+                        f"filtered out; see --streamk / --streamk-reductions)",
                         flush=True,
                     )
                     continue
@@ -3779,6 +4113,10 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
             n_failed = 0
 
             n_cand = len(candidates)
+            # Device scratch of the launch configs in flight (two-stage
+            # workspaces, dgrad sub-GEMM tables): one per (kernel, degree),
+            # so it is freed as the sweep goes rather than per case.
+            live_extras: list = []
             for cand_idx, (ident, hsaco_path, meta) in enumerate(candidates, 1):
                 kernel_name = meta.get("kernel_name")
                 if not kernel_name:
@@ -3798,6 +4136,31 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                     print(f"  [skip] {ident.label()}: {e}", flush=True)
                     continue
 
+                # A stream-K binary partitions K itself over a CTA pool (a
+                # kernarg) and has its own ABI, workspace and zeroing
+                # contract per reduction, so it gets its own launch setup and
+                # one launch; its workspace is released after the loop.
+                sk_bound = sk_free = None
+                if direction == "wgrad" and ident.streamk != "off":
+                    try:
+                        sk_run, sk_free, sk_label = _cached_streamk_run(
+                            args,
+                            problem,
+                            ident,
+                            rt,
+                            arch,
+                            launcher,
+                            (A_dev, B_dev, D_dev),
+                            (A_t.nbytes, B_t.nbytes, D_t.nbytes),
+                            stage2_kernels,
+                            KernelLauncher,
+                            LaunchConfig,
+                        )
+                    except ValueError as e:
+                        print(f"  [skip] {ident.label()}: {e}", flush=True)
+                        continue
+                    sk_bound = (sk_run, sk_label)
+
                 # A split-K wgrad binary is one kernel for every degree > 1
                 # (the degree is a kernarg), so it is timed at each degree it
                 # can use.
@@ -3813,97 +4176,81 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                 else:
                     degrees = (None,)
 
+                # --split-k-prune, as in the JIT sweep: degrees run from the
+                # largest down, and once this kernel is PCT% off its best
+                # degree (or early-stopped after one was measured) the
+                # smaller degrees are not tried. A degree that is
+                # early-stopped before any was measured does not prune: the
+                # largest splits can be the slowest (K slices of a tile or
+                # two, all contending on the output atomics) on a kernel
+                # whose best degree is several steps down.
+                kernel_best_ms = None
+                _prune_stop = False
                 for split_k in degrees:
-                    try:
-                        extras, grid = _extras_and_grid(
-                            direction, problem, ident, rt, case_dtype, split_k=split_k
-                        )
-                    except ValueError as e:
-                        print(f"  [skip] {ident.label()}: {e}", flush=True)
-                        continue
-                    values = _launch_values_for(
+                    if _prune_stop:
+                        break
+                    # Free the previous launch config's scratch before
+                    # allocating the next. Every path that gets here has
+                    # drained the device after its last launch: _verify_kernel
+                    # fences its launches and copies the output back,
+                    # time_launches drains whether it returns or raises (an
+                    # early-stopped kernel returns from it too), and both
+                    # exception handlers below drain before skipping a kernel.
+                    _free_extras(rt, live_extras)
+                    bound = sk_bound or _cached_bind(
                         direction,
                         problem,
                         ident,
+                        meta,
+                        rt,
+                        launcher,
+                        case_dtype,
+                        split_k,
                         (A_dev, B_dev, D_dev),
                         (A_t.nbytes, B_t.nbytes, D_t.nbytes),
-                        extras,
+                        arch,
+                        stage2_kernels,
+                        KernelLauncher,
+                        LaunchConfig,
+                        live_extras,
                     )
-                    cfg = LaunchConfig(
-                        grid=grid,
-                        block=(
-                            meta.get("block_size")
-                            or (ident.warp_m * ident.warp_n * ident.wave_size),
-                            1,
-                            1,
-                        ),
-                        stream=0,
-                    )
-                    run = launcher.bind(values, config=cfg)
-                    if direction == "wgrad" and ident.two_stage:
-                        # Two-stage is three steps and all of them are the
-                        # algorithm's cost: zero the scratch (Stage 1
-                        # accumulates), Stage 1, then the fold/cast into dW.
-                        from kernels.common.conv_wgrad_workspace_reduce import (
-                            wgrad_reduce_grid,
-                        )
-
-                        s2_launcher, s2_spec = _stage2_reduce(
-                            problem,
-                            ident.dtype_d,
-                            arch,
-                            stage2_kernels,
-                            KernelLauncher,
-                            _ws_replicas_of(ident),
-                        )
-                        s2_values = {
-                            "ws_ptr": extras["ws_ptr"],
-                            "dw_ptr": D_dev,
-                            "wg_M": s2_spec.wg_M,
-                            "wg_N": s2_spec.wg_N,
-                            "ws_bytes": extras["ws_bytes"],
-                            "dw_bytes": D_t.nbytes,
-                            "groups": problem.groups,
-                        }
-                        s2_cfg = LaunchConfig(
-                            grid=wgrad_reduce_grid(s2_spec),
-                            block=(s2_spec.block_size, 1, 1),
-                            stream=0,
-                        )
-
-                        def run(
-                            values=values,
-                            cfg=cfg,
-                            extras=extras,
-                            s2_launcher=s2_launcher,
-                            s2_values=s2_values,
-                            s2_cfg=s2_cfg,
-                        ):
-                            rt.memset(extras["ws_ptr"], 0, extras["ws_bytes"])
-                            launcher(values, config=cfg)
-                            s2_launcher(s2_values, config=s2_cfg)
-
-                    label = ident.label()
-                    if split_k is not None:
-                        label += f" @split_k={split_k}"
+                    if bound is None:
+                        continue
+                    run, label = bound
                     if ref_out is not None:
                         # The output is zeroed first: the atomic split-K
                         # epilogues accumulate into it. A kernel that fails is
-                        # reported and not timed, so it can never rank.
-                        stopped, passed = _verify_kernel(
-                            rt=rt,
-                            launch_fn=run,
-                            out_dev=D_dev,
-                            out_t=D_t,
-                            zero_init_out=True,
-                            ref_out=ref_out,
-                            kernel_name=label,
-                            dump_fail=args.dump_fail,
-                            u8=_u8,
-                            arch=arch,
-                            compute_dtype=case_dtype,
-                        )
+                        # reported and not timed, so it can never rank; so is
+                        # one whose launch fails.
+                        try:
+                            stopped, passed = _verify_kernel(
+                                rt=rt,
+                                launch_fn=run,
+                                out_dev=D_dev,
+                                out_t=D_t,
+                                zero_init_out=True,
+                                ref_out=ref_out,
+                                kernel_name=label,
+                                dump_fail=args.dump_fail,
+                                u8=_u8,
+                                arch=arch,
+                                compute_dtype=case_dtype,
+                            )
+                        except (HipError, RuntimeError) as e:
+                            print(f"  verify {label}: FAIL({e})", flush=True)
+                            # A launch that raised can leave work queued
+                            # before it (e.g. the two-stage scratch clear) in
+                            # flight on this config's scratch. A drain that
+                            # fails here ends the sweep: the device is in an
+                            # error state and the scratch cannot be freed.
+                            synchronize_and_release()
+                            stopped, passed = False, False
                         if stopped:
+                            _free_extras(rt, live_extras)
+                            if sk_free is not None:
+                                sk_free()
+                            for buf in (A_dev, B_dev, D_dev):
+                                rt.free(buf)
                             return 1
                         if not passed:
                             n_failed += 1
@@ -3918,10 +4265,28 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                         )
                     except (HipError, RuntimeError) as e:
                         print(f"  [skip] {ident.label()}: {e}", flush=True)
+                        # time_launches drained before raising, but it does
+                        # not raise a failed drain (the launch error is the
+                        # one it reports). Drain again so a failed drain ends
+                        # the sweep here rather than freeing this config's
+                        # scratch with launches possibly still using it.
+                        synchronize_and_release()
                         continue
                     if ms is None:
                         _stop.report(label)
+                        if args.split_k_prune is not None and (
+                            kernel_best_ms is not None
+                        ):
+                            break
                         continue
+                    if args.split_k_prune is not None and split_k is not None:
+                        # TFLOPS down PCT% from this kernel's best degree.
+                        if kernel_best_ms is not None and kernel_best_ms <= ms * (
+                            1.0 - args.split_k_prune / 100.0
+                        ):
+                            _prune_stop = True
+                        if kernel_best_ms is None or ms < kernel_best_ms:
+                            kernel_best_ms = ms
                     results.append(
                         (flop / (ms * 1e9), bytes_xfer / (ms * 1e6), ms, label)
                     )
@@ -3933,7 +4298,13 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                         flush=True,
                     )
 
+                if sk_free is not None:
+                    sk_free()
+
             synchronize_and_release()
+            _free_extras(rt, live_extras)
+            for buf in (A_dev, B_dev, D_dev):
+                rt.free(buf)
             if ref_out is not None:
                 print(
                     f"  verify: {n_failed} of the launched kernels failed",
@@ -3960,6 +4331,15 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
             print(f"\nBest: {tflops:.1f} TFLOPS — {label}  {ms:.3f} ms", flush=True)
 
     return overall_rc
+
+
+def _free_extras(rt, live_extras: list) -> None:
+    """Free the device buffers :func:`_extras_and_grid` allocated, and forget them."""
+    for extras in live_extras:
+        for key in ("ws_ptr", "sub_gemm_buf"):
+            if key in extras:
+                rt.free(extras[key])
+    live_extras.clear()
 
 
 def _widest_vector_sizes(candidates):
@@ -3991,6 +4371,8 @@ def _widest_vector_sizes(candidates):
             ident.split_k,
             ident.two_stage,
             ident.group_merge,
+            ident.streamk,
+            ident.streamk_reduction,
         )
 
     def rank(ident):
@@ -4007,7 +4389,14 @@ def _widest_vector_sizes(candidates):
     # kernels are dropped. Where nothing stores wider (two-stage wgrad is
     # default-only, or the problem's output run is odd) they stay.
     def store_kind(ident):
-        return (ident.direction, ident.split_k, ident.two_stage, ident.group_merge)
+        return (
+            ident.direction,
+            ident.split_k,
+            ident.two_stage,
+            ident.group_merge,
+            ident.streamk,
+            ident.streamk_reduction,
+        )
 
     widest_store = {}
     for ident, *_ in candidates:
@@ -4059,7 +4448,11 @@ def _signature_for_identity(ident, dtype):
 
     if ident.direction == "wgrad":
         return conv_args_signature(
-            dtype, direction="wgrad", is_3d=ident.is_3d, two_stage=ident.two_stage
+            dtype,
+            direction="wgrad",
+            is_3d=ident.is_3d,
+            two_stage=ident.two_stage,
+            streamk=ident.streamk_reduction if ident.streamk != "off" else None,
         )
     if ident.direction == "dgrad":
         return conv_args_signature(dtype, direction="dgrad", is_3d=ident.is_3d)
@@ -4112,6 +4505,189 @@ def _stage2_reduce(problem, dtype_d, arch, compiled, KernelLauncher, ws_replicas
     return compiled[key], spec
 
 
+def _stage2_launch(s2_spec, *, ws_ptr, ws_bytes, dw_ptr, dw_bytes):
+    """``(values, config)`` of the Stage 2 fold of ``s2_spec`` into dW.
+
+    Stage 2 (:class:`WgradReduceSpec`) folds the f32 scratch at ``ws_ptr``
+    into dW for both the two-stage split-K path and the stream-K
+    ``workspace`` reduction; every leg launches it through here.
+    """
+    from rocke.runtime.launcher import LaunchConfig
+    from kernels.common.conv_wgrad_workspace_reduce import wgrad_reduce_grid
+
+    values = {
+        "ws_ptr": ws_ptr,
+        "dw_ptr": dw_ptr,
+        "wg_M": s2_spec.wg_M,
+        "wg_N": s2_spec.wg_N,
+        "ws_bytes": ws_bytes,
+        "dw_bytes": dw_bytes,
+        "groups": s2_spec.groups,
+    }
+    config = LaunchConfig(
+        grid=wgrad_reduce_grid(s2_spec), block=(s2_spec.block_size, 1, 1), stream=0
+    )
+    return values, config
+
+
+def _streamk_launch(
+    *,
+    rt,
+    launcher,
+    spec,
+    problem,
+    arch: str,
+    ptrs,
+    sizes,
+    stage2: dict,
+    KernelLauncher,
+    LaunchConfig,
+):
+    """Set up one stream-K wgrad launch per the kernel's zeroing contract.
+
+    ``spec`` is the stream-K :class:`WgradConvSpec` (its ``streamk_ctas`` is
+    the CTA pool, -1 = the arch default); ``problem`` the launch shape;
+    ``ptrs`` / ``sizes`` the dY, X, dW buffers. Allocates the reduction's
+    workspace and returns ``(run, free, pool)``: ``run()`` zeroes what the
+    reduction accumulates into -- dW for ``atomic``, the f32 scratch for
+    ``workspace``, only the flag table for ``linear``/``tree`` -- launches the
+    kernel and, for ``workspace``, the Stage 2 reduce into dW; ``free()``
+    releases the workspace; ``pool`` is the resolved CTA pool.
+    """
+    from kernels.common.conv_implicit_gemm_wgrad import (
+        wgrad_streamk_grid,
+        wgrad_streamk_launch,
+        wgrad_streamk_launch_values,
+        wgrad_streamk_workspace_layout,
+        wgrad_streamk_workspace_nbytes,
+    )
+
+    reduction = spec.streamk_reduction
+    ws_bytes = wgrad_streamk_workspace_nbytes(spec, arch=arch, problem=problem)
+    flags_bytes, _ = wgrad_streamk_workspace_layout(spec, arch=arch, problem=problem)
+    grid = wgrad_streamk_grid(spec, arch=arch, problem=problem)
+    pool = wgrad_streamk_launch(spec, arch=arch).pool
+    # An all-data-parallel partition (no stream-K CTAs) needs no workspace,
+    # but the kernargs still carry the pointers, so a 4-byte stub stands in
+    # for the empty allocation.
+    ws = rt.alloc(max(ws_bytes, 4))
+    try:
+        extra = {}
+        if reduction == "workspace":
+            extra = {"ws_ptr": ws, "ws_bytes": ws_bytes}
+        elif reduction in ("linear", "tree"):
+            extra = {"sk_flags": ws, "sk_partials": int(ws) + flags_bytes}
+        values = wgrad_streamk_launch_values(
+            spec, *ptrs, *sizes, arch=arch, problem=problem, **extra
+        )
+        cfg = LaunchConfig(grid=grid, block=(spec.block_size, 1, 1), stream=0)
+        s2 = None
+        if reduction == "workspace":
+            s2_launcher, s2_spec = _stage2_reduce(
+                problem,
+                spec.data.dtype_d,
+                arch,
+                stage2,
+                KernelLauncher,
+                spec.ws_replicas,
+            )
+            s2 = (
+                s2_launcher,
+                *_stage2_launch(
+                    s2_spec,
+                    ws_ptr=ws,
+                    ws_bytes=ws_bytes,
+                    dw_ptr=ptrs[2],
+                    dw_bytes=sizes[2],
+                ),
+            )
+    except Exception:
+        rt.free(ws)
+        raise
+
+    def run():
+        if reduction == "atomic":
+            rt.memset(ptrs[2], 0, sizes[2])
+        elif reduction == "workspace":
+            rt.memset(ws, 0, ws_bytes)
+        elif flags_bytes:
+            rt.memset(ws, 0, flags_bytes)
+        launcher(values, config=cfg)
+        if s2 is not None:
+            s2[0](s2[1], config=s2[2])
+
+    def free():
+        rt.free(ws)
+
+    return run, free, pool
+
+
+def _streamk_mode_label(mode: str, reduction: str) -> str:
+    """Short ranked-table label of a stream-K kernel, e.g. ``skdp-tree``."""
+    m = {"dp_sk": "dp", "persistent": "pers"}.get(mode, mode)
+    r = {"linear": "lin", "workspace": "ws", "atomic": "atom"}.get(reduction, reduction)
+    return f"sk{m}-{r}"
+
+
+def _cached_streamk_run(
+    args,
+    problem,
+    ident,
+    rt,
+    arch,
+    launcher,
+    ptrs,
+    sizes,
+    stage2,
+    KernelLauncher,
+    LaunchConfig,
+):
+    """``(run, free, label)`` for a cached stream-K wgrad binary.
+
+    The launch helpers take a spec; this one describes the cached binary on
+    the launch shape. Nothing is built from it -- the partition, workspace and
+    kernargs depend only on the tile, the warp layout, the stream-K mode and
+    reduction, the scratch replicas and the launch shape.
+    """
+    from kernels.common._conv_implicit_gemm_common import ConvDataSpec
+    from kernels.common.conv_implicit_gemm_wgrad import WgradConvSpec
+
+    spec = WgradConvSpec(
+        problem=problem,
+        data=ConvDataSpec(
+            dtype_a=ident.dtype_a, dtype_b=ident.dtype_b, dtype_d=ident.dtype_d
+        ),
+        tile_m=ident.tile_m,
+        tile_n=ident.tile_n,
+        tile_k=ident.tile_k,
+        warp_m=ident.warp_m,
+        warp_n=ident.warp_n,
+        warp_tile_m=ident.warp_tile_m,
+        warp_tile_n=ident.warp_tile_n,
+        warp_tile_k=ident.warp_tile_k,
+        wave_size=ident.wave_size,
+        pipeline=ident.pipeline,
+        epilogue=ident.epilogue,
+        streamk=ident.streamk,
+        streamk_reduction=ident.streamk_reduction,
+        streamk_ctas=args.streamk_ctas,
+        ws_replicas=_ws_replicas_of(ident),
+    )
+    run, free, pool = _streamk_launch(
+        rt=rt,
+        launcher=launcher,
+        spec=spec,
+        problem=problem,
+        arch=arch,
+        ptrs=ptrs,
+        sizes=sizes,
+        stage2=stage2,
+        KernelLauncher=KernelLauncher,
+        LaunchConfig=LaunchConfig,
+    )
+    return run, free, f"{ident.label()} @streamk_ctas={pool}"
+
+
 def _split_k_degrees(problem, tile_m: int, tile_n: int, tile_k: int) -> tuple:
     """Split-K degrees to launch a wgrad split-K kernel with.
 
@@ -4141,6 +4717,89 @@ def _split_k_degrees(problem, tile_m: int, tile_n: int, tile_k: int) -> tuple:
 def _runtime_split_ks(problem, ident) -> tuple:
     """:func:`_split_k_degrees` for a cached split-K wgrad binary."""
     return _split_k_degrees(problem, ident.tile_m, ident.tile_n, ident.tile_k)
+
+
+def _cached_bind(
+    direction,
+    problem,
+    ident,
+    meta,
+    rt,
+    launcher,
+    case_dtype,
+    split_k,
+    ptrs,
+    sizes,
+    arch,
+    stage2_kernels,
+    KernelLauncher,
+    LaunchConfig,
+    live_extras: list,
+):
+    """``(run, label)`` of a cached (non-stream-K) binary at ``split_k``.
+
+    ``ptrs`` / ``sizes`` are the A, B, D buffers. The device scratch the
+    launch config allocates is appended to ``live_extras`` (freed by
+    :func:`_free_extras`). Returns None, after saying why, when the binary
+    cannot launch ``problem``.
+    """
+    from benchmarks.common.kernel_sweep import _launch_values_for
+
+    try:
+        extras, grid = _extras_and_grid(
+            direction, problem, ident, rt, case_dtype, split_k=split_k
+        )
+    except ValueError as e:
+        print(f"  [skip] {ident.label()}: {e}", flush=True)
+        return None
+    live_extras.append(extras)
+    values = _launch_values_for(direction, problem, ident, ptrs, sizes, extras)
+    cfg = LaunchConfig(
+        grid=grid,
+        block=(
+            meta.get("block_size") or (ident.warp_m * ident.warp_n * ident.wave_size),
+            1,
+            1,
+        ),
+        stream=0,
+    )
+    run = launcher.bind(values, config=cfg)
+    if direction == "wgrad" and ident.two_stage:
+        # Two-stage is three steps and all of them are the algorithm's cost:
+        # zero the scratch (Stage 1 accumulates), Stage 1, then the fold/cast
+        # into dW.
+        s2_launcher, s2_spec = _stage2_reduce(
+            problem,
+            ident.dtype_d,
+            arch,
+            stage2_kernels,
+            KernelLauncher,
+            _ws_replicas_of(ident),
+        )
+        s2_values, s2_cfg = _stage2_launch(
+            s2_spec,
+            ws_ptr=extras["ws_ptr"],
+            ws_bytes=extras["ws_bytes"],
+            dw_ptr=ptrs[2],
+            dw_bytes=sizes[2],
+        )
+
+        def run(
+            values=values,
+            cfg=cfg,
+            extras=extras,
+            s2_launcher=s2_launcher,
+            s2_values=s2_values,
+            s2_cfg=s2_cfg,
+        ):
+            rt.memset(extras["ws_ptr"], 0, extras["ws_bytes"])
+            launcher(values, config=cfg)
+            s2_launcher(s2_values, config=s2_cfg)
+
+    label = ident.label()
+    if split_k is not None:
+        label += f" @split_k={split_k}"
+    return run, label
 
 
 def _extras_and_grid(direction, problem, ident, rt, dtype, split_k=None):
@@ -4186,8 +4845,8 @@ def _extras_and_grid(direction, problem, ident, rt, dtype, split_k=None):
         sub_gemms = spec.compute_sub_gemms()
         if len(sub_gemms) > (ident.max_sub_gemms or 64):
             raise ValueError(
-                f"problem needs {len(sub_gemms)} tilde sub-GEMMs, kernel "
-                f"unrolled for {ident.max_sub_gemms}"
+                f"problem needs {len(sub_gemms)} tilde sub-GEMMs, kernel's "
+                f"record table supports {ident.max_sub_gemms} (max_sub_gemms)"
             )
         flat = np.array(
             pack_sub_gemm_buffer(sub_gemms, ident.tile_m, ident.tile_n),

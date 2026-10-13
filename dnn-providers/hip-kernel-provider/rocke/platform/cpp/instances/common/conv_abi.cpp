@@ -152,7 +152,28 @@ void fwd_arg_names(rocke_conv_arg_list_t* out, bool is_3d)
     grid(out);
 }
 
-void wgrad_arg_names(rocke_conv_arg_list_t* out, bool is_3d, bool two_stage)
+/* The stream-K launch block: the host-computed iteration partition. The
+ * kernel is shape- and pool-agnostic, so every value the partition derives
+ * from the launch shape and the CTA pool arrives here. Mirrors the Python
+ * _STREAMK_SCALARS, in order. */
+const char* const kStreamKScalars[] = {
+    "sk_iters_per_tile",
+    "sk_dp_tiles",
+    "sk_ctas",
+    "sk_iters_per_cta",
+    "sk_extra_iters",
+    "sk_pool",
+    "sk_tree_rounds",
+};
+const int kNumStreamKScalars = (int)(sizeof(kStreamKScalars) / sizeof(kStreamKScalars[0]));
+
+bool streamk_reduction_known(const char* red)
+{
+    return strcmp(red, "atomic") == 0 || strcmp(red, "workspace") == 0 || strcmp(red, "linear") == 0
+           || strcmp(red, "tree") == 0;
+}
+
+void wgrad_arg_names(rocke_conv_arg_list_t* out, bool is_3d, bool two_stage, const char* streamk)
 {
     leading(out, "dY", "X", "dW");
     dims(out, is_3d);
@@ -180,7 +201,7 @@ void wgrad_arg_names(rocke_conv_arg_list_t* out, bool is_3d, bool two_stage)
     magic_2d3d(out, "n_", is_3d, "Y", "X", "cpg");
     grid(out);
     /* ---- variant-specific extras ---- */
-    if(two_stage)
+    if(two_stage || (streamk != NULL && strcmp(streamk, "workspace") == 0))
     {
         push(out, "ws_ptr", ROCKE_CONV_ARG_F32_PTR);
         push_i32(out, "ws_bytes");
@@ -188,6 +209,16 @@ void wgrad_arg_names(rocke_conv_arg_list_t* out, bool is_3d, bool two_stage)
     /* The split-K slice width and degree, always. */
     push_i32(out, "ks");
     push_i32(out, "ks_count");
+    if(streamk != NULL)
+    {
+        if(strcmp(streamk, "linear") == 0 || strcmp(streamk, "tree") == 0)
+        {
+            push(out, "sk_flags", ROCKE_CONV_ARG_I32_PTR);
+            push(out, "sk_partials", ROCKE_CONV_ARG_F32_PTR);
+        }
+        for(int i = 0; i < kNumStreamKScalars; ++i)
+            push_i32(out, kStreamKScalars[i]);
+    }
 }
 
 void dgrad_arg_names(rocke_conv_arg_list_t* out, bool is_3d)
@@ -249,17 +280,33 @@ bool rocke_conv_arg_names(const char* direction,
                           bool two_stage,
                           rocke_conv_arg_list_t* out)
 {
+    return rocke_conv_arg_names_ex(direction, is_3d, two_stage, NULL, out);
+}
+
+bool rocke_conv_arg_names_ex(const char* direction,
+                             bool is_3d,
+                             bool two_stage,
+                             const char* streamk,
+                             rocke_conv_arg_list_t* out)
+{
     out->count = 0;
     if(direction == NULL)
         return false;
     /* two_stage belongs to wgrad's deterministic epilogue; accepting it
-     * elsewhere would describe a kernel the flag cannot build. */
+     * elsewhere would describe a kernel the flag cannot build. The same goes
+     * for streamk, which additionally partitions K itself and so cannot be
+     * combined with the two-stage split. */
     if(two_stage && strcmp(direction, "wgrad") != 0)
         return false;
+    if(streamk != NULL)
+    {
+        if(strcmp(direction, "wgrad") != 0 || !streamk_reduction_known(streamk) || two_stage)
+            return false;
+    }
     if(strcmp(direction, "fwd") == 0)
         fwd_arg_names(out, is_3d);
     else if(strcmp(direction, "wgrad") == 0)
-        wgrad_arg_names(out, is_3d, two_stage);
+        wgrad_arg_names(out, is_3d, two_stage, streamk);
     else if(strcmp(direction, "dgrad") == 0)
         dgrad_arg_names(out, is_3d);
     else

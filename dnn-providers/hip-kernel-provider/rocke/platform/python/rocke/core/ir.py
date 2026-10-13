@@ -144,6 +144,44 @@ def _streaming(temporal_hint: TemporalHint) -> bool:
     return temporal_hint is TemporalHint.STREAMING
 
 
+# LLVM ``syncscope`` values accepted by the cross-workgroup fence / flag ops.
+# ``system`` renders as the empty (default) scope.
+_FENCE_SCOPES = ("workgroup", "agent", "system")
+# Orderings each op accepts; the verifier checks serialized IR against these.
+_FENCE_ORDERINGS = ("acquire", "release", "acq_rel", "seq_cst")
+_FLAG_STORE_ORDERINGS = ("monotonic", "release", "seq_cst")
+
+
+def _is_flag_ptr(t: "Type") -> bool:
+    """True for the ``ptr<i32,global>`` a cross-workgroup flag op addresses.
+
+    Both lowerers hard-code an i32 element (LLVM GEPs ``i32``; HIP indexes
+    the pointer's own element type), so any other pointee would make the two
+    disagree on the flag's address and width.
+    """
+    return isinstance(t, PtrType) and t.space == "global" and t.pointee.name == "i32"
+
+
+def _check_flag_ptr(op_name: str, ptr: "Value") -> None:
+    if not _is_flag_ptr(ptr.type):
+        raise ValueError(f"{op_name} expects a global i32 pointer, got {ptr.type.name}")
+
+
+def _sync_attr(op: "Op", key: str, allowed: Sequence[str]) -> str:
+    """Scope / ordering attr of a fence or flag op, checked for the lowerers.
+
+    The lowerers can run on IR that never went through :func:`verify`, so a
+    missing or unknown value is rejected here instead of being defaulted or
+    rendered into invalid IR. The C++ engine raises the same messages.
+    """
+    value = op.attrs.get(key)
+    if not isinstance(value, str):
+        raise ValueError(f"{op.name}: {key} attribute missing or not a string")
+    if value not in allowed:
+        raise ValueError(f"{op.name}: unknown {key} '{value}'")
+    return value
+
+
 # ----- target-neutral MMA metadata ---------------------------------------
 #
 # ``IRBuilder.mma`` emits a single ``tile.mma`` op keyed by ``op_id``; the ISA
@@ -1543,6 +1581,82 @@ class IRBuilder:
             attrs={"elem_type": "f16", "vec": 2, "ordering": ordering},
             result_name_hint="atom_f16",
         ).result
+
+    # ----- cross-workgroup synchronisation (stream-K fixup) -----
+
+    def fence(self, *, scope: str = "agent", ordering: str = "acq_rel") -> None:
+        """Memory fence at ``scope`` (LLVM ``fence syncscope(...) <ordering>``).
+
+        A ``release`` fence orders every prior global store of the issuing
+        wave before any later flag store; an ``acquire`` fence orders a prior
+        flag load before every later global load. At ``agent`` scope on
+        multi-XCD CDNA parts the backend also writes back / invalidates the
+        per-XCD L2, which is what makes a producer's partial tile visible to
+        a consumer workgroup running on a different XCD.
+        """
+        if scope not in _FENCE_SCOPES:
+            raise ValueError(f"unknown fence scope {scope!r}")
+        if ordering not in _FENCE_ORDERINGS:
+            raise ValueError(f"unknown fence ordering {ordering!r}")
+        self._op("memref.fence", [], attrs={"scope": scope, "ordering": ordering})
+
+    def global_flag_store(
+        self,
+        ptr: Value,
+        idx: Value,
+        value: Value,
+        *,
+        scope: str = "agent",
+        ordering: str = "release",
+    ) -> None:
+        """Atomic i32 store of a cross-workgroup flag (``ptr[idx] = value``).
+
+        Lowers to ``store atomic i32 ... syncscope(scope) ordering``. Pair
+        with :meth:`global_flag_wait_eq` on the consumer side.
+        """
+        _check_flag_ptr("global_flag_store", ptr)
+        if value.type.name != "i32":
+            raise ValueError(
+                f"global_flag_store expects an i32 value, got {value.type.name}"
+            )
+        if scope not in _FENCE_SCOPES:
+            raise ValueError(f"unknown flag scope {scope!r}")
+        if ordering not in _FLAG_STORE_ORDERINGS:
+            raise ValueError(f"unknown flag store ordering {ordering!r}")
+        self._op(
+            "memref.global_flag_store",
+            [ptr, idx, value],
+            attrs={"scope": scope, "ordering": ordering},
+        )
+
+    def global_flag_wait_eq(
+        self,
+        ptr: Value,
+        idx: Value,
+        expect: Value,
+        *,
+        scope: str = "agent",
+    ) -> None:
+        """Spin until the i32 flag ``ptr[idx]`` equals ``expect``.
+
+        Lowers to a self-contained loop around an ``acquire`` atomic load at
+        ``scope``, so global loads issued after the wait observe every store
+        the producer released before setting the flag. The loop is the only
+        data-dependent trip count in the IR; it is a leaf op so structured
+        control flow stays ``scf.for`` / ``scf.if`` only.
+        """
+        _check_flag_ptr("global_flag_wait_eq", ptr)
+        if expect.type.name != "i32":
+            raise ValueError(
+                f"global_flag_wait_eq expects an i32 value, got {expect.type.name}"
+            )
+        if scope not in _FENCE_SCOPES:
+            raise ValueError(f"unknown flag scope {scope!r}")
+        self._op(
+            "memref.global_flag_wait_eq",
+            [ptr, idx, expect],
+            attrs={"scope": scope},
+        )
 
     def fp16_zero(self) -> Value:
         return self._op(

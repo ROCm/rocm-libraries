@@ -26,6 +26,7 @@
 #include "rocke/lower_hip.h"
 #include "rocke/lower_llvm.h"
 #include "rocke/strbuf.h"
+#include "rocke/verify.h"
 
 namespace
 {
@@ -607,6 +608,285 @@ void case_s_wqm()
         "wqm_i64", [](rocke_ir_builder_t* b) { rocke_b_s_wqm(b, rocke_b_const_i64(b, 0xF)); });
     EXPECT_IR(i64_ir, "declare i64 @llvm.amdgcn.s.wqm.i64.i64(i64)");
     EXPECT_IR(i64_ir, "call i64 @llvm.amdgcn.s.wqm.i64.i64(i64 15)");
+}
+
+/* ---- cross-workgroup fence / flag ops (stream-K fixup) ---- */
+void case_flag_ops()
+{
+    const std::string ir = lower_one("flagwt", [](rocke_ir_builder_t* b) {
+        rocke_value_t* f = global_ptr_param(b, "flags", rocke_i32());
+        rocke_b_global_flag_store(
+            b, f, rocke_b_const_i32(b, 3), rocke_b_const_i32(b, 1), NULL, NULL);
+        rocke_b_fence(b, "agent", "release");
+        rocke_b_global_flag_wait_eq(b, f, rocke_b_const_i32(b, 2), rocke_b_const_i32(b, 1), NULL);
+    });
+    EXPECT_IR(ir,
+              "  %gep.1 = getelementptr inbounds i32, ptr addrspace(1) %flags, i32 3\n"
+              "  store atomic i32 1, ptr addrspace(1) %gep.1 syncscope(\"agent\") release, "
+              "align 4\n"
+              "  fence syncscope(\"agent\") release\n"
+              "  %gep.2 = getelementptr inbounds i32, ptr addrspace(1) %flags, i32 2\n"
+              "  br label %flag.wait.1\n"
+              "flag.wait.1:\n"
+              "  %flag.3 = load atomic i32, ptr addrspace(1) %gep.2 syncscope(\"agent\") "
+              "acquire, align 4\n"
+              "  %flag.hit.4 = icmp eq i32 %flag.3, 1\n"
+              "  br i1 %flag.hit.4, label %flag.done.2, label %flag.wait.1\n"
+              "flag.done.2:\n");
+}
+
+void case_fence_system_scope()
+{
+    const std::string ir = lower_one(
+        "fencesys", [](rocke_ir_builder_t* b) { rocke_b_fence(b, "system", "acquire"); });
+    EXPECT_IR(ir, "  fence acquire\n");
+    EXPECT_NO_IR(ir, "syncscope");
+}
+
+void case_flag_ops_hip()
+{
+    const std::string hip = lower_one_hip(
+        "flaghip",
+        [](rocke_ir_builder_t* b) {
+            rocke_value_t* f = global_ptr_param(b, "flags", rocke_i32());
+            rocke_b_global_flag_store(
+                b, f, rocke_b_const_i32(b, 0), rocke_b_const_i32(b, 1), NULL, NULL);
+            rocke_b_fence(b, "agent", "acquire");
+            rocke_b_global_flag_wait_eq(
+                b, f, rocke_b_const_i32(b, 0), rocke_b_const_i32(b, 1), NULL);
+        },
+        "gfx950");
+    EXPECT_IR(hip, "__ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_AGENT);");
+    EXPECT_IR(hip, "__builtin_amdgcn_fence(__ATOMIC_ACQUIRE, \"agent\");");
+    EXPECT_IR(hip, "while (__hip_atomic_load(");
+}
+
+/* Raw op with a bad or missing scope/ordering, as serialized IR could carry
+ * past the builder's checks: both lowerers must reject it (ROCKE_ERR_VALUE),
+ * never pick a default or render it into invalid IR.  Every other attr is
+ * valid, so the rejection is attributable to `key`; value == nullptr drops
+ * the key.  Mirrors test_rocke.py test_flag_ops_lowerers_reject_bad_attrs. */
+void expect_flag_attr_rejected(rocke_opcode_t kind, const char* key, const char* value)
+{
+    rocke_ir_builder_t b;
+    rocke_ir_builder_init(&b, "flag_bad_attr");
+    rocke_value_t* operands[3];
+    int n = 0;
+    if(kind != ROCKE_OP_MEMREF_FENCE)
+    {
+        operands[n++] = global_ptr_param(&b, "flags", rocke_i32());
+        operands[n++] = rocke_b_const_i32(&b, 0);
+        operands[n++] = rocke_b_const_i32(&b, 1);
+    }
+    const char* scope = "agent";
+    const char* ordering = kind == ROCKE_OP_MEMREF_FENCE               ? "acq_rel"
+                           : kind == ROCKE_OP_MEMREF_GLOBAL_FLAG_STORE ? "release"
+                                                                       : nullptr;
+    if(!strcmp(key, "scope"))
+        scope = value;
+    else
+        ordering = value;
+    rocke_attr_map_t attrs;
+    rocke_attr_map_init(&attrs);
+    if(scope)
+        rocke_attr_set_str(&b, &attrs, "scope", scope);
+    if(ordering)
+        rocke_attr_set_str(&b, &attrs, "ordering", ordering);
+    rocke_b_op(&b, kind, operands, n, nullptr, 0, &attrs, nullptr, 0, nullptr, nullptr);
+    rocke_b_ret(&b);
+
+    rocke_strbuf_t out;
+    rocke_strbuf_init(&out, 256);
+    rocke_lower_hip_opts_t opts{};
+    opts.arch = "gfx950";
+    const rocke_status_t st
+        = rocke_lower_kernel_to_hip(&b, rocke_ir_builder_kernel(&b), &opts, &out);
+    if(st != ROCKE_ERR_VALUE)
+        fail("HIP lowering must reject a missing/unknown flag/fence scope or ordering", __LINE__);
+    rocke_strbuf_free(&out);
+
+    char* ll = nullptr;
+    char err[ROCKE_ERR_MSG_CAP];
+    err[0] = '\0';
+    const rocke_status_t lst = rocke_lower_kernel_to_llvm_ex(
+        rocke_ir_builder_kernel(&b), ROCKE_LLVM_FLAVOR_AUTO, "gfx950", &ll, err, sizeof(err));
+    if(lst != ROCKE_ERR_VALUE)
+        fail("LLVM lowering must reject a missing/unknown flag/fence scope or ordering", __LINE__);
+    char want[160];
+    if(value)
+        snprintf(want, sizeof(want), "unknown %s '%s'", key, value);
+    else
+        snprintf(want, sizeof(want), "%s attribute missing or not a string", key);
+    if(!strstr(err, want))
+    {
+        std::fprintf(stderr, "LLVM error '%s' lacks '%s'\n", err, want);
+        fail("LLVM lowering rejected a flag/fence attr with the wrong message", __LINE__);
+    }
+    std::free(ll);
+    rocke_ir_builder_free(&b);
+}
+
+/* A flag op on a non-i32 pointer: the LLVM lowerer would GEP i32 while HIP
+ * indexes the pointee, so the builder and the verifier both refuse it. */
+void case_flag_ops_reject_non_i32_ptr()
+{
+    for(int wait = 0; wait < 2; ++wait)
+    {
+        rocke_ir_builder_t b;
+        rocke_ir_builder_init(&b, "flag_f16_ptr");
+        const char* want = wait ? "global_flag_wait_eq expects a global i32 pointer, got "
+                                  "ptr<f16,global>"
+                                : "global_flag_store expects a global i32 pointer, got "
+                                  "ptr<f16,global>";
+        /* The builder raises (ckc::ValueError) or latches the status. */
+        std::string got;
+        try
+        {
+            rocke_value_t* f = global_ptr_param(&b, "flags", rocke_f16());
+            if(wait)
+                rocke_b_global_flag_wait_eq(
+                    &b, f, rocke_b_const_i32(&b, 0), rocke_b_const_i32(&b, 1), NULL);
+            else
+                rocke_b_global_flag_store(
+                    &b, f, rocke_b_const_i32(&b, 0), rocke_b_const_i32(&b, 1), NULL, NULL);
+            if(rocke_ir_builder_status(&b) == ROCKE_ERR_VALUE && rocke_ir_builder_error(&b))
+                got = rocke_ir_builder_error(&b);
+        }
+        catch(const std::exception& e)
+        {
+            got = e.what();
+        }
+        if(got != want)
+        {
+            std::fprintf(stderr, "builder error '%s', want '%s'\n", got.c_str(), want);
+            fail("flag-op builder must reject a non-i32 pointer", __LINE__);
+        }
+        rocke_ir_builder_free(&b);
+    }
+
+    rocke_ir_builder_t b;
+    rocke_ir_builder_init(&b, "flag_f16_ptr_verify");
+    rocke_value_t* operands[] = {global_ptr_param(&b, "flags", rocke_f16()),
+                                 rocke_b_const_i32(&b, 0),
+                                 rocke_b_const_i32(&b, 1)};
+    const rocke_opcode_t kinds[]
+        = {ROCKE_OP_MEMREF_GLOBAL_FLAG_STORE, ROCKE_OP_MEMREF_GLOBAL_FLAG_WAIT_EQ};
+    for(rocke_opcode_t kind : kinds)
+    {
+        rocke_attr_map_t attrs;
+        rocke_attr_map_init(&attrs);
+        rocke_attr_set_str(&b, &attrs, "scope", "agent");
+        if(kind == ROCKE_OP_MEMREF_GLOBAL_FLAG_STORE)
+            rocke_attr_set_str(&b, &attrs, "ordering", "release");
+        rocke_b_op(&b, kind, operands, 3, nullptr, 0, &attrs, nullptr, 0, nullptr, nullptr);
+    }
+    rocke_b_ret(&b);
+    rocke_diag_t* diags = nullptr;
+    size_t n = 0;
+    rocke_verify(rocke_ir_builder_kernel(&b), &diags, &n);
+    bool saw_store = false, saw_wait = false;
+    for(size_t i = 0; i < n; ++i)
+    {
+        const std::string m = diags[i].message ? diags[i].message : "";
+        saw_store |= m.find("memref.global_flag_store: expected a global i32 pointer, got "
+                            "ptr<f16,global>")
+                     != std::string::npos;
+        saw_wait |= m.find("memref.global_flag_wait_eq: expected a global i32 pointer, got "
+                           "ptr<f16,global>")
+                    != std::string::npos;
+    }
+    rocke_diags_free(diags, n);
+    if(!saw_store || !saw_wait)
+        fail("verifier must reject a flag op on a non-i32 pointer", __LINE__);
+    rocke_ir_builder_free(&b);
+}
+
+/* The verifier rejects what the builder would have refused (serialized IR),
+ * and the LLVM lowerer refuses a flag op it cannot unpack. */
+void case_flag_ops_verify_and_llvm_arity()
+{
+    rocke_ir_builder_t b;
+    rocke_ir_builder_init(&b, "flag_verify");
+    rocke_value_t* f = global_ptr_param(&b, "flags", rocke_i32());
+    rocke_value_t* two[] = {f, rocke_b_const_i32(&b, 0)};
+    rocke_attr_map_t fence_attrs;
+    rocke_attr_map_init(&fence_attrs);
+    rocke_attr_set_str(&b, &fence_attrs, "scope", "agent");
+    rocke_attr_set_str(&b, &fence_attrs, "ordering", "monotonic");
+    rocke_op_t* fence = rocke_b_op(&b,
+                                   ROCKE_OP_MEMREF_FENCE,
+                                   nullptr,
+                                   0,
+                                   nullptr,
+                                   0,
+                                   &fence_attrs,
+                                   nullptr,
+                                   0,
+                                   nullptr,
+                                   nullptr);
+    rocke_attr_map_t store_attrs;
+    rocke_attr_map_init(&store_attrs);
+    rocke_attr_set_str(&b, &store_attrs, "scope", "agent");
+    rocke_attr_set_str(&b, &store_attrs, "ordering", "release");
+    rocke_b_op(&b,
+               ROCKE_OP_MEMREF_GLOBAL_FLAG_STORE,
+               two,
+               2,
+               nullptr,
+               0,
+               &store_attrs,
+               nullptr,
+               0,
+               nullptr,
+               nullptr);
+    rocke_b_ret(&b);
+
+    rocke_diag_t* diags = nullptr;
+    size_t n = 0;
+    rocke_verify(rocke_ir_builder_kernel(&b), &diags, &n);
+    bool saw_ordering = false, saw_arity = false;
+    for(size_t i = 0; i < n; ++i)
+    {
+        const std::string m = diags[i].message ? diags[i].message : "";
+        saw_ordering |= m.find("memref.fence: unknown ordering 'monotonic'") != std::string::npos;
+        saw_arity |= m.find("memref.global_flag_store: expected 3 operands / 0 results, got 2 / 0")
+                     != std::string::npos;
+    }
+    rocke_diags_free(diags, n);
+    if(!saw_ordering)
+        fail("verifier must reject a fence ordering outside the builder's set", __LINE__);
+    if(!saw_arity)
+        fail("verifier must reject a two-operand flag store", __LINE__);
+
+    /* Make the fence valid so the LLVM rejection is the flag store's arity. */
+    rocke_attr_set_str(&b, &fence->attrs, "ordering", "acq_rel");
+    char* ll = nullptr;
+    char err[ROCKE_ERR_MSG_CAP];
+    err[0] = '\0';
+    const rocke_status_t st = rocke_lower_kernel_to_llvm_ex(
+        rocke_ir_builder_kernel(&b), ROCKE_LLVM_FLAVOR_AUTO, "gfx950", &ll, err, sizeof(err));
+    if(st != ROCKE_ERR_VALUE || !strstr(err, "memref.global_flag_store expects three operands"))
+        fail("LLVM lowering must reject a two-operand flag store", __LINE__);
+    std::free(ll);
+    rocke_ir_builder_free(&b);
+}
+
+void case_flag_ops_lowerers_reject_bad_attrs()
+{
+    expect_flag_attr_rejected(ROCKE_OP_MEMREF_FENCE, "ordering", "bogus");
+    expect_flag_attr_rejected(ROCKE_OP_MEMREF_FENCE, "scope", "bogus");
+    expect_flag_attr_rejected(ROCKE_OP_MEMREF_GLOBAL_FLAG_STORE, "ordering", "bogus");
+    expect_flag_attr_rejected(ROCKE_OP_MEMREF_GLOBAL_FLAG_STORE, "scope", "bogus");
+    expect_flag_attr_rejected(ROCKE_OP_MEMREF_GLOBAL_FLAG_WAIT_EQ, "scope", "bogus");
+    /* A load-only ordering is not a fence / store ordering. */
+    expect_flag_attr_rejected(ROCKE_OP_MEMREF_FENCE, "ordering", "monotonic");
+    expect_flag_attr_rejected(ROCKE_OP_MEMREF_GLOBAL_FLAG_STORE, "ordering", "acquire");
+    /* Missing attrs are rejected, not defaulted. */
+    expect_flag_attr_rejected(ROCKE_OP_MEMREF_FENCE, "ordering", nullptr);
+    expect_flag_attr_rejected(ROCKE_OP_MEMREF_FENCE, "scope", nullptr);
+    expect_flag_attr_rejected(ROCKE_OP_MEMREF_GLOBAL_FLAG_STORE, "ordering", nullptr);
+    expect_flag_attr_rejected(ROCKE_OP_MEMREF_GLOBAL_FLAG_STORE, "scope", nullptr);
+    expect_flag_attr_rejected(ROCKE_OP_MEMREF_GLOBAL_FLAG_WAIT_EQ, "scope", nullptr);
 }
 
 /* ---- av.load / av.store (agent-scope 128-bit vector mem) ---- */
@@ -2607,6 +2887,12 @@ const TestCase k_cases[] = {
     {"hip_zext_uses_unsigned_source_cast", case_hip_zext_uses_unsigned_source_cast},
     {"gfx1250_scaled_wmma", case_gfx1250_scaled_wmma},
     {"gfx1250_standalone_bridge", case_gfx1250_standalone_bridge},
+    {"flag_ops", case_flag_ops},
+    {"fence_system_scope", case_fence_system_scope},
+    {"flag_ops_hip", case_flag_ops_hip},
+    {"flag_ops_lowerers_reject_bad_attrs", case_flag_ops_lowerers_reject_bad_attrs},
+    {"flag_ops_verify_and_llvm_arity", case_flag_ops_verify_and_llvm_arity},
+    {"flag_ops_reject_non_i32_ptr", case_flag_ops_reject_non_i32_ptr},
     {"opcode_names_are_aligned", case_opcode_names_are_aligned},
 };
 

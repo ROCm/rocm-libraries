@@ -437,6 +437,12 @@ typedef enum rocke_opcode
     ROCKE_OP_SCF_YIELD,
     ROCKE_OP_CF_RETURN,
 
+    /* memref.* cross-workgroup synchronisation (stream-K fixup). Appended
+     * after the control-flow block so no existing opcode index shifts. */
+    ROCKE_OP_MEMREF_FENCE,
+    ROCKE_OP_MEMREF_GLOBAL_FLAG_STORE,
+    ROCKE_OP_MEMREF_GLOBAL_FLAG_WAIT_EQ,
+
     ROCKE_OP__COUNT
 } rocke_opcode_t;
 
@@ -844,6 +850,27 @@ rocke_value_t* rocke_b_cvt_f32_to_i8_sat(rocke_ir_builder_t* b, rocke_value_t* v
 rocke_value_t* rocke_b_cvt_pk_fp8_f32x4(rocke_ir_builder_t* b, rocke_value_t* v);
 rocke_value_t* rocke_b_cvt_pk_bf8_f32x4(rocke_ir_builder_t* b, rocke_value_t* v);
 rocke_value_t* rocke_b_cvt_pk_i8_f32x4(rocke_ir_builder_t* b, rocke_value_t* v);
+
+/* ----- cross-workgroup synchronisation (stream-K fixup) ----- */
+/* IRBuilder.fence: scope in {workgroup, agent, system}; ordering in
+ * {acquire, release, acq_rel, seq_cst}. NULL selects the Python defaults
+ * (agent / acq_rel). */
+void rocke_b_fence(rocke_ir_builder_t* b, const char* scope, const char* ordering);
+/* IRBuilder.global_flag_store: atomic i32 ptr[idx] = value. NULL scope /
+ * ordering select agent / release. */
+void rocke_b_global_flag_store(rocke_ir_builder_t* b,
+                               rocke_value_t* ptr,
+                               rocke_value_t* idx,
+                               rocke_value_t* value,
+                               const char* scope,
+                               const char* ordering);
+/* IRBuilder.global_flag_wait_eq: spin until ptr[idx] == expect (acquire).
+ * NULL scope selects agent. */
+void rocke_b_global_flag_wait_eq(rocke_ir_builder_t* b,
+                                 rocke_value_t* ptr,
+                                 rocke_value_t* idx,
+                                 rocke_value_t* expect,
+                                 const char* scope);
 
 /* ----- atomics ----- */
 rocke_value_t* rocke_b_global_atomic_add(rocke_ir_builder_t* b,
