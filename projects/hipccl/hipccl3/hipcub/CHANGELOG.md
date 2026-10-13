@@ -39,12 +39,13 @@ Full documentation for hipCUB is available at [https://rocm.docs.amd.com/project
 * Added `hipcub::DeviceTransform::TransformIf`, `hipcub::DeviceTransform::Generate` and `hipcub::DeviceTransform::Fill`.
 * Added env-based API for `hipcub::DeviceTransform::*`.
 * Feature parity with CCCL/CUB 3.2.0.
+* Feature parity with CCCL/CUB 3.2.1.
 
 ### Changed
 
 * Replaced `_CCCL_PRAGMA_UNROLL_FULL()` and `_CCCL_PRAGMA_NOUNROLL()` by `HIPCUB_PRAGMA_UNROLL_FULL()` and `HIPCUB_PRAGMA_NOUNROLL()`.
 * Replaced `_CCCL_SORT_MAYBE_UNROLL()` by `HIPCUB_SORT_MAYBE_UNROLL()`.
-* Changed `CCCL_MINIMUM_VERSION` to `3.2.0` to align with CUB.
+* Changed `CCCL_MINIMUM_VERSION` to `3.2.1` to align with CUB.
 * `::hipcub::extents` now points to `::hip::std::extents` from libhipcxx for rocPRIM's backend.
 * Removed deprecated `hipcub::DivideAndRoundUp` in favor of `hip::ceil_div`.
 * Fixed handling of invalid inputs ($\leq 0$) in `hipcub::GridEvenShare::DispatchInit()`, which now sets all relevant members to 0 when any of the inputs is invalid.
