@@ -23,6 +23,32 @@ from .contract import Case
 from reference_common.numeric import array_digest, decode, file_digest, write_json
 
 
+def replay_values(metadata: dict, buffers: dict, case: Case) -> dict:
+    """Bind frozen WMMA or legacy dense arguments without initializing HIP."""
+    abi = metadata.get("abi", "dense-v1")
+    if abi == "wmma-strided-v1":
+        from .architectures.wmma import replay_values as wmma_replay_values
+
+        values = wmma_replay_values(metadata, buffers)
+    elif abi == "dense-v1":
+        values = {
+            "q_ptr": buffers["q"],
+            "k_ptr": buffers["k"],
+            "v_ptr": buffers["v"],
+            "o_ptr": buffers["out"],
+            "scale": case.scale,
+        }
+        if metadata["runtime_shape"]:
+            values.update(
+                batch=case.batch,
+                seqlen_q=case.sequence_length,
+                seqlen_kv=case.sequence_length,
+            )
+    else:
+        raise ValueError(f"unsupported SDPA replay ABI: {abi}")
+    return values
+
+
 def run(request: dict, output: Path) -> None:
     """Execute a single declared case, poisoning every output before each run."""
     target = get_architecture(request["architecture"])
@@ -97,19 +123,7 @@ def run(request: dict, output: Path) -> None:
                 if request["mode"] == "source":
                     target.launch(spec, buffers, case.scale)
                 else:
-                    values = {
-                        "q_ptr": buffers["q"],
-                        "k_ptr": buffers["k"],
-                        "v_ptr": buffers["v"],
-                        "o_ptr": buffers["out"],
-                        "scale": case.scale,
-                    }
-                    if metadata["runtime_shape"]:
-                        values.update(
-                            batch=case.batch,
-                            seqlen_q=case.sequence_length,
-                            seqlen_kv=case.sequence_length,
-                        )
+                    values = replay_values(metadata, buffers, case)
                     launcher(
                         values,
                         config=LaunchConfig(

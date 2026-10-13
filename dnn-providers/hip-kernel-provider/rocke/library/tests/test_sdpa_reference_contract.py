@@ -246,10 +246,10 @@ def test_worker_prefers_selected_library_over_test_packages(tmp_path, monkeypatc
 
 
 def test_architecture_enrollment_and_locks():
-    assert ARCHITECTURES == ("gfx942", "gfx950")
+    assert ARCHITECTURES == ("gfx942", "gfx950", "gfx1151", "gfx1201")
     assert get_architecture("gfx942").CASES == CASES
     assert baseline_lock("gfx942").is_file()
-    for unsupported in ("gfx1151", "../gfx942"):
+    for unsupported in ("gfx1100", "gfx1250", "../gfx942"):
         with pytest.raises(ValueError, match="not enrolled"):
             get_architecture(unsupported)
 
@@ -363,3 +363,107 @@ def test_versioned_generator_preserves_stream_order_and_quantized_bits(dtype, di
     # Other generator instances must not change the freshly seeded corpus.
     np.random.default_rng(123).standard_normal(99)
     checked_inputs(case, digests)
+
+
+@pytest.mark.parametrize("architecture", ["gfx1151", "gfx1201"])
+@pytest.mark.parametrize("case_index", range(8))
+def test_wmma_reference_matches_production_kernel_abi(architecture, case_index):
+    import kernels
+    from sdpa_reference.architectures import wmma
+
+    target = get_architecture(architecture)
+    case = target.CASES[case_index]
+    root = Path(kernels.__file__).resolve().parent.parent
+    prepared = target.prepare(case, str(root))
+    kernel = wmma.build(prepared)
+    assert [(p.name, p.type.name) for p in kernel.params] == [
+        (arg["name"], arg["type"].replace(" ", "")) for arg in wmma.signature()
+    ]
+    assert wmma.grid(prepared) == (4, 4, 2)
+    assert prepared.spec.block_size == 32
+    assert prepared.spec.head_size == case.head_dim
+    assert prepared.spec.kv_heads == case.kv_heads
+    assert prepared.spec.mask_mode == ("causal" if case.causal else "none")
+    assert not prepared.spec.sliding_window
+    values = wmma.scalars(case, case.scale)
+    assert values["seqlen_q"] == values["seqlen_k"] == 64
+    for name, heads in (("q", 4), ("k", case.kv_heads), ("v", case.kv_heads), ("o", 4)):
+        assert values[f"stride_{name}_token"] == heads * case.head_dim
+        assert values[f"stride_{name}_head"] == case.head_dim
+    buffers = {name: object() for name in ("q", "k", "v", "out")}
+    bound = wmma.replay_values({"scalars": values}, buffers)
+    assert bound["Q"] is buffers["q"]
+    assert bound["K"] is buffers["k"]
+    assert bound["V"] is buffers["v"]
+    assert bound["O"] is buffers["out"]
+    assert {arg["name"] for arg in wmma.signature()} == set(bound)
+    with pytest.raises(RuntimeError, match="unlaunched"):
+        target.exported_kernel(prepared)
+
+
+def test_wmma_reference_cohort_and_rejections():
+    from dataclasses import replace
+    import kernels
+    from sdpa_reference.architectures import wmma
+
+    assert len(wmma.CASES) == len({case.id for case in wmma.CASES}) == 8
+    assert {(c.head_dim, c.kv_heads, c.causal) for c in wmma.CASES} == {
+        (d, kv, causal) for d in (64, 128) for kv in (1, 4) for causal in (False, True)
+    }
+    root = str(Path(kernels.__file__).resolve().parent.parent)
+    for architecture in ("gfx1151", "gfx1201"):
+        target = get_architecture(architecture)
+        for changed in (
+            replace(wmma.CASES[0], dtype="bf16"),
+            replace(wmma.CASES[0], persistent=True),
+        ):
+            with pytest.raises(ValueError, match="outside"):
+                target.prepare(changed, root)
+        with pytest.raises(RuntimeError, match="outside the selected library"):
+            target.prepare(wmma.CASES[0], str(Path(root) / "wrong-tree"))
+
+
+@pytest.mark.parametrize("architecture", ["gfx942", "gfx950"])
+@pytest.mark.parametrize("runtime_shape", [False, True])
+def test_legacy_dense_replay_arguments(architecture, runtime_shape):
+    from sdpa_reference.worker import replay_values
+
+    case = get_architecture(architecture).CASES[0]
+    buffers = {name: object() for name in ("q", "k", "v", "out")}
+    expected = dict(
+        q_ptr=buffers["q"],
+        k_ptr=buffers["k"],
+        v_ptr=buffers["v"],
+        o_ptr=buffers["out"],
+        scale=case.scale,
+    )
+    if runtime_shape:
+        expected.update(
+            batch=case.batch,
+            seqlen_q=case.sequence_length,
+            seqlen_kv=case.sequence_length,
+        )
+    assert replay_values({"runtime_shape": runtime_shape}, buffers, case) == expected
+    assert (
+        replay_values(
+            {"abi": "dense-v1", "runtime_shape": runtime_shape}, buffers, case
+        )
+        == expected
+    )
+
+
+def test_worker_wmma_replay_uses_frozen_scalars_and_rejects_unknown_abi():
+    from sdpa_reference.worker import replay_values
+    from sdpa_reference.architectures import wmma
+
+    case = wmma.CASES[0]
+    buffers = {name: object() for name in ("q", "k", "v", "out")}
+    frozen = wmma.scalars(case, case.scale / 2)
+    metadata = {"abi": wmma.ABI, "scalars": frozen}
+    result = replay_values(metadata, buffers, case)
+    assert result == dict(
+        frozen, Q=buffers["q"], K=buffers["k"], V=buffers["v"], O=buffers["out"]
+    )
+    assert metadata == {"abi": wmma.ABI, "scalars": frozen}
+    with pytest.raises(ValueError, match="unsupported SDPA replay ABI"):
+        replay_values({"abi": "unknown"}, buffers, case)

@@ -11,7 +11,8 @@ and the [reference workflow](gpu-reference-workflow.md) for all authoring and pu
 and [GPU attention coverage](gpu-attention-test-coverage.md)
 for exact shapes, source-test mappings, and missing coverage.
 
-SDPA has eight gfx942 and seven gfx950 configurations. Convolution has sixteen qualified gfx942
+SDPA has eight gfx942, seven gfx950, and eight standalone FP16 WMMA configurations
+each on gfx1151 and gfx1201. Convolution has sixteen qualified gfx942
 forward cases; the operation guides and DVC pointers record the current bundle
 identities. All three pairs are enrolled for default installation. Both operations share
 tensor-free artifact handling, worker transport, and installation infrastructure.
@@ -261,7 +262,7 @@ and `library/tests/conv_reference/`, with shared support in `reference_common/`:
 | Component | Responsibility |
 |---|---|
 | `contract.py` | Operation-specific cases, inputs, NumPy reference, and numerical policy |
-| `architectures/registry.json` | Supported qualification cohorts; gfx942/gfx950 for SDPA and gfx942 for convolution |
+| `architectures/registry.json` | Supported qualification cohorts; gfx942/gfx950/gfx1151/gfx1201 for SDPA and gfx942 for convolution |
 | `architectures/gfx942/` | Case cohort, production dispatch/launch adapter, exported-kernel metadata, and trusted lock once published |
 | `worker.py` | Operation-specific HIP execution and replay |
 | `../reference_common/session.py` / `runner.py` | Isolated baseline/current processes and worker reuse |
@@ -269,7 +270,7 @@ and `library/tests/conv_reference/`, with shared support in `reference_common/`:
 | `../reference_common/artifact.py` | Common archive command with explicit operation |
 | `../reference_common/numeric.py` / `source.py` | Storage, digests, conservative budgets, and committed snapshots |
 | `../reference_common/paths.py` | Relocatable source and installed bundle lookup |
-| `platform/cmake/PublishedGpuReferences.cmake` | Published operation/architecture pairs installed by default; SDPA/gfx942, SDPA/gfx950, and convolution/gfx942 |
+| `platform/cmake/PublishedGpuReferences.cmake` | Published operation/architecture pairs installed by default; SDPA/gfx942, SDPA/gfx950, SDPA/gfx1151, SDPA/gfx1201, and convolution/gfx942 |
 | Provider CMake and category YAML | Staging, test registration, and normal provider CI selection |
 
 Workers are reused across cases to reduce process startup and runtime setup.

@@ -169,10 +169,12 @@ environment without Torch; they do not invoke the offline CPU oracles.
 | `rocke_conv_reference_unit_pytest` | Convolution numerical contract and qualification guards | Host suite; independent of bundles |
 | `rocke_sdpa_gpu_gfx942_pytest` | Eight gfx942 numerical cases and three failure checks | When the SDPA bundle is installed |
 | `rocke_sdpa_gpu_gfx950_pytest` | Seven gfx950 numerical cases and three failure checks | When the gfx950 SDPA bundle is installed |
+| `rocke_sdpa_gpu_gfx1151_pytest` | Eight standalone FP16 WMMA cases and three failure checks | When the gfx1151 SDPA bundle is installed |
+| `rocke_sdpa_gpu_gfx1201_pytest` | Eight standalone FP16 WMMA cases and three failure checks | When the gfx1201 SDPA bundle is installed |
 | `rocke_conv_gpu_gfx942_pytest` | Sixteen gfx942 forward cases and three failure checks | When the convolution bundle is installed |
 
 `ROCKE_INSTALL_TEST_GPU_REFERENCES` controls installation of all published
-operation/architecture pairs. SDPA/gfx942, SDPA/gfx950, and convolution/gfx942 are enrolled
+operation/architecture pairs. SDPA/gfx942, SDPA/gfx950, SDPA/gfx1151, SDPA/gfx1201, and convolution/gfx942 are enrolled
 for installation by default in provider builds. Publication is listed in
 `platform/cmake/PublishedGpuReferences.cmake` relative to the rocKE root. CMake
 uses the standard archives and committed locks; verify replacement candidates

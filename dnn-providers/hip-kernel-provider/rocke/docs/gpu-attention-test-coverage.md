@@ -12,7 +12,7 @@ labelled separately and do not count as additional kernel or shape coverage.
 
 The full source inventory below is historical; newer gfx950 tests for scale
 variation, sliding windows, and output-store equality are not included in its
-counts. The new gfx950 pinned cohort is summarized separately below.
+counts. The gfx950 and standalone WMMA pinned cohorts are summarized separately below.
 
 Source inventory: commit `270fab13c2c`, reviewed 2026-10-02. The latest supplied
 gfx942 CI log executed on 2026-10-01: all eight reference cases and three negative
@@ -90,6 +90,18 @@ and installed verification without Torch. They do not establish coverage for
 non-default scales, windows, sinks, ragged/unequal lengths, paging, binary reuse,
 or narrow-store equality. The detailed historical inventory below retains those
 gaps; it is not a count of the current source's complete test matrix.
+
+## Standalone WMMA reference coverage
+
+Each of gfx1151 and gfx1201 has eight qualified FP16 cases: D64/D128 ×
+Hq4/Hkv4 or Hq4/Hkv1 × full/causal, with B2/Sq64/Sk64 and a nonpersistent
+`(4,4,2)` grid. All eight comparisons and three failure controls passed in source
+and installed Torch-free runs on each target, with no selected GPU skips.
+These use the standalone WMMA builders, not automatic unified attention dispatch.
+See the [SDPA guide](sdpa-test-reference.md#standalone-wmma-coverage) for
+qualification provenance, runtime requirements, and publication status.
+
+The historical source inventory below is unchanged by this new cohort.
 
 ## Concrete missing gfx942 coverage
 

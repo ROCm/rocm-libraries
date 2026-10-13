@@ -42,6 +42,8 @@ test_categories:
       - "rocke_sdpa_reference_unit_pytest"
       - "rocke_sdpa_gpu_gfx942_pytest"
       - "rocke_sdpa_gpu_gfx950_pytest"
+      - "rocke_sdpa_gpu_gfx1151_pytest"
+      - "rocke_sdpa_gpu_gfx1201_pytest"
       - "rocke_conv_reference_unit_pytest"
       - "rocke_conv_gpu_gfx942_pytest"
     labels:
@@ -69,6 +71,8 @@ test_categories:
       - "rocke_sdpa_reference_unit_pytest"
       - "rocke_sdpa_gpu_gfx942_pytest"
       - "rocke_sdpa_gpu_gfx950_pytest"
+      - "rocke_sdpa_gpu_gfx1151_pytest"
+      - "rocke_sdpa_gpu_gfx1201_pytest"
       - "rocke_conv_reference_unit_pytest"
       - "rocke_conv_gpu_gfx942_pytest"
     labels:
