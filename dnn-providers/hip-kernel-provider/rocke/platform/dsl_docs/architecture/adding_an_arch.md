@@ -118,8 +118,10 @@ are compared by the byte-identity gate, not by review alone.
 The gfx1250 scaled family uses one JSON declaration, `gfx1250_wmma_scaled_v1`,
 instead of individual rows. It expands independent A/B matrix types
 (`fp8`, `bf8`, `fp6`, `bf6`, `fp4`), independent A/B scale types
-(`e8m0`, `e5m3`, `e4m3`), and K-group sizes 32/16 into 450 ordinary
-`wmma_scaled` rows with shape 16×16×128 and fp32 accumulators. The loader
+(`e8m0`, `e5m3`, `e4m3`), and K-group sizes 32/16 into 86 ordinary
+`wmma_scaled` rows with shape 16×16×128 and fp32 accumulators. The
+[supported-combination filter](https://github.com/llvm/llvm-project/commit/7597c0c938b364306cbee21dd03835ff5b699c74)
+requires E8M0 for non-FP4 operands and matching scales for FP4 × FP4. The loader
 validates the complete declaration before expansion and rejects duplicate IDs.
 Version 1 fixes both these axes and their historical enumeration order; changing
 support requires an explicit loader/native generator update and regression
