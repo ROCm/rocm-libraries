@@ -5000,7 +5000,7 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
 
         // A mode set without a path is otherwise reported by the heuristic
         // query, which a matmul-only caller never makes.
-        if(tuning.mode() == TensileLite::TuningMode::Cache && tuning.cachePath().empty())
+        if(tuning.mode() != TensileLite::TuningMode::Off && tuning.cachePath().empty())
             TensileLite::announceTuningModeOnce(TensileLite::TuningLoadStatus::NoPath);
 
         // Built by whichever of replay and the tuner needs it first.
