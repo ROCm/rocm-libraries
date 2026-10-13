@@ -11,10 +11,10 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
 from ..contract import Case
+from ..architectures.common import validate_library_root
 
 ABI = "wmma-strided-v1"
 CASES = tuple(
@@ -37,14 +37,7 @@ class Prepared:
 
 def prepare(case: Case, library_root: str, architecture: str) -> Prepared:
     """Select the standalone WMMA path without importing another source tree."""
-    import kernels
-
-    if (
-        not Path(kernels.__file__)
-        .resolve()
-        .is_relative_to(Path(library_root).resolve())
-    ):
-        raise RuntimeError("worker imported kernels outside the selected library")
+    validate_library_root(library_root)
     if case not in CASES:
         raise ValueError("case is outside the qualified WMMA cohort")
     if architecture in ("gfx1151", "gfx1201"):

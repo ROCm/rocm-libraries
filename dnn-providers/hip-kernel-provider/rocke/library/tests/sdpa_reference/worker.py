@@ -27,7 +27,7 @@ def replay_values(metadata: dict, buffers: dict, case: Case) -> dict:
     """Bind frozen WMMA or legacy dense arguments without initializing HIP."""
     abi = metadata.get("abi", "dense-v1")
     if abi == "wmma-strided-v1":
-        from .architectures.wmma import replay_values as wmma_replay_values
+        from .implementations.wmma import replay_values as wmma_replay_values
 
         values = wmma_replay_values(metadata, buffers)
     elif abi == "dense-v1":

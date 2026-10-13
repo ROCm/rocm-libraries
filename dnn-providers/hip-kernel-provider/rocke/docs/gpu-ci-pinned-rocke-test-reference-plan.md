@@ -268,6 +268,8 @@ and `library/tests/conv_reference/`, with shared support in `reference_common/`:
 | `contract.py` | Operation-specific cases, inputs, NumPy reference, and numerical policy |
 | `architectures/registry.json` | Supported qualification cohorts; gfx942/gfx950/gfx1151/gfx1201 for SDPA and gfx942 for convolution |
 | `architectures/gfx942/` | Case cohort, production dispatch/launch adapter, exported-kernel metadata, and trusted lock once published |
+| `sdpa_reference/architectures/common.py` | Shared source-isolation checks and request construction for target adapters |
+| `sdpa_reference/implementations/dense.py` / `wmma.py` | Shared launch, export, and replay mechanics for kernel implementations; architecture adapters retain target-specific cohorts and candidate selection |
 | `worker.py` | Operation-specific HIP execution and replay |
 | `../reference_common/session.py` / `runner.py` | Isolated baseline/current processes and worker reuse |
 | `cli.py` | Snapshot, qualification, and verification commands |

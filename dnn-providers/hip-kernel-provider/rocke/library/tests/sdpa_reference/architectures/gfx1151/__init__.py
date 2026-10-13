@@ -3,7 +3,7 @@
 
 """gfx1151 standalone FP16 WMMA attention reference cohort."""
 
-from .. import wmma
+from ...implementations import wmma
 from ...contract import Case
 
 NAME = "gfx1151"

@@ -369,7 +369,7 @@ def test_versioned_generator_preserves_stream_order_and_quantized_bits(dtype, di
 @pytest.mark.parametrize("case_index", range(8))
 def test_wmma_reference_matches_production_kernel_abi(architecture, case_index):
     import kernels
-    from sdpa_reference.architectures import wmma
+    from sdpa_reference.implementations import wmma
 
     target = get_architecture(architecture)
     case = target.CASES[case_index]
@@ -404,7 +404,7 @@ def test_wmma_reference_matches_production_kernel_abi(architecture, case_index):
 def test_wmma_reference_cohort_and_rejections():
     from dataclasses import replace
     import kernels
-    from sdpa_reference.architectures import wmma
+    from sdpa_reference.implementations import wmma
 
     assert len(wmma.CASES) == len({case.id for case in wmma.CASES}) == 8
     assert {(c.head_dim, c.kv_heads, c.causal) for c in wmma.CASES} == {
@@ -454,7 +454,7 @@ def test_legacy_dense_replay_arguments(architecture, runtime_shape):
 
 def test_worker_wmma_replay_uses_frozen_scalars_and_rejects_unknown_abi():
     from sdpa_reference.worker import replay_values
-    from sdpa_reference.architectures import wmma
+    from sdpa_reference.implementations import wmma
 
     case = wmma.CASES[0]
     buffers = {name: object() for name in ("q", "k", "v", "out")}
@@ -467,3 +467,111 @@ def test_worker_wmma_replay_uses_frozen_scalars_and_rejects_unknown_abi():
     assert metadata == {"abi": wmma.ABI, "scalars": frozen}
     with pytest.raises(ValueError, match="unsupported SDPA replay ABI"):
         replay_values({"abi": "unknown"}, buffers, case)
+
+
+@pytest.mark.parametrize("architecture", ARCHITECTURES)
+def test_reference_adapter_rejects_wrong_source_tree(architecture):
+    import kernels
+
+    target = get_architecture(architecture)
+    wrong_root = Path(kernels.__file__).resolve().parent / "wrong-tree"
+    with pytest.raises(RuntimeError, match="outside the selected library"):
+        target.prepare(target.CASES[0], str(wrong_root))
+
+
+@pytest.mark.parametrize("architecture", ["gfx942", "gfx950"])
+def test_dense_request_preserves_tensor_and_mask_contract(architecture):
+    from sdpa_reference.architectures.common import attention_request
+
+    for case in get_architecture(architecture).CASES:
+        request = attention_request(case, architecture)
+        assert request.arch == architecture
+        assert request.batch == case.batch
+        assert request.nhead_q == case.query_heads
+        assert request.nhead_k == case.kv_heads
+        assert request.seqlen_q == request.seqlen_k == case.sequence_length
+        assert request.hdim_q == request.hdim_v == case.head_dim
+        assert request.dtype == case.dtype
+        assert request.mask_type == (1 if case.causal else 0)
+
+
+@pytest.mark.parametrize("architecture", ["gfx942", "gfx950"])
+def test_dense_export_uses_selected_production_launcher(architecture, monkeypatch):
+    import importlib
+    from types import SimpleNamespace
+
+    import kernels
+    from kernels.common.attention_dense_spec import attention_dense_cache_key
+
+    target = get_architecture(architecture)
+    module = importlib.import_module(f"kernels.{architecture}.attention_dense")
+    root = str(Path(kernels.__file__).resolve().parent.parent)
+    for case in target.CASES:
+        spec = target.prepare(case, root)
+        launcher = SimpleNamespace(
+            _hsaco=b"executed-code-object",
+            kernel_name="executed_kernel",
+            signature=module.attention_dense_signature(spec),
+        )
+        monkeypatch.setattr(
+            module,
+            "_DENSE_LAUNCHER_CACHE",
+            {attention_dense_cache_key(spec, arch=architecture): launcher},
+        )
+        code, metadata = target.exported_kernel(spec)
+        assert code is launcher._hsaco
+        assert metadata == {
+            "name": launcher.kernel_name,
+            "signature": launcher.signature,
+            "grid": module.attention_dense_grid(spec),
+            "block": module.attention_dense_block(spec),
+            "runtime_shape": spec.runtime_shape,
+        }
+
+
+def test_frozen_runner_imports_all_adapters_without_source_checkout(tmp_path):
+    import subprocess
+    import sys
+
+    from sdpa_reference.cli import _freeze_runner
+
+    runner = tmp_path / "runner"
+    _freeze_runner(runner)
+    assert not list(runner.rglob("baseline_lock.json"))
+    assert not list(runner.rglob("__pycache__"))
+    # Isolated mode ignores inherited PYTHONPATH and the source working directory.
+    # Only the frozen runner is added; production modules must remain lazy.
+    script = """
+import importlib
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1]).resolve()
+sys.path.insert(0, str(root))
+from sdpa_reference.architectures import ARCHITECTURES, get_architecture
+from sdpa_reference import worker
+
+assert ARCHITECTURES == tuple(sys.argv[2:])
+for architecture in ARCHITECTURES:
+    adapter = get_architecture(architecture)
+    assert adapter.CASES
+    assert callable(adapter.prepare)
+    assert callable(adapter.launch)
+    assert callable(adapter.exported_kernel)
+for name in ("dense", "wmma"):
+    importlib.import_module("sdpa_reference.implementations." + name)
+for name, module in tuple(sys.modules.items()):
+    if name.split(".")[0] in ("sdpa_reference", "reference_common"):
+        assert Path(module.__file__).resolve().is_relative_to(root), name
+assert "kernels" not in sys.modules
+assert "dispatch" not in sys.modules
+assert "torch" not in sys.modules
+"""
+    result = subprocess.run(
+        [sys.executable, "-I", "-B", "-c", script, str(runner), *ARCHITECTURES],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
