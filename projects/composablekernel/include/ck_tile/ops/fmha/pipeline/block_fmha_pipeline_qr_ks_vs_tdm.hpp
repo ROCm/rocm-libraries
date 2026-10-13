@@ -359,14 +359,14 @@ struct BlockFmhaPipelineQRKSVSTdm
 
     static constexpr const char* name = "qr_tdm";
 
-    // The progressive M128 traversal has the fragment shape required by the
-    // staged hand-off below. Element types and attention features do not alter
-    // those LDS fragment lifetimes.
     // The progressive K reload walks four N-subtiles per warp, so it needs the
     // gemm_0 warps all on M. Tiles that spend their warps on N (the short-query
     // tile) keep the plain whole-slice K reload.
     static constexpr bool kProgressiveDsLoadK = Problem::kProgressiveDsLoadK && kNWarp == 1;
 
+    // The progressive M128 traversal has the fragment shape required by the
+    // staged hand-off below. Element types and attention features do not alter
+    // those LDS fragment lifetimes.
     static constexpr bool kStagedKPairs =
         kProgressiveDsLoadK && kM0 == 128 && kQKHeaddim == 128 && kK0 == 32;
     static constexpr bool kUseIglpBulkScheduling = CK_TILE_FMHA_TDM_IGLP_BULK && !kStagedKPairs;

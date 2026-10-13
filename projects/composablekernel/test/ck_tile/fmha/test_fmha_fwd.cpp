@@ -413,22 +413,41 @@ TEST(TestCkTileFmhaFwd, QrTdmLdsArenaPrefill)
 
 // max_seqlen_q <= 16 takes a tile that spends its warps on N instead of M, which
 // sends S through LDS on its way from gemm_0 to gemm_1. A distribution mismatch
-// there permutes P's columns within a row, which leaves the row sums -- and so
-// the LSE -- correct while O is wrong, hence lse=true below.
-TEST(TestCkTileFmhaFwd, QrTdmShortQuery)
+// there permutes P's columns within a row: the row sums -- and so the LSE -- stay
+// right while O is wrong, so O is what these cases have to check. seqlen_k covers
+// a tile multiple and a padded tail; the masks cover the causal and windowed
+// paths.
+class QrTdmShortQuery : public TestWithParam<std::tuple<mode_enum, int, int, const char*>>
+{
+};
+
+INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaFwd,
+                         QrTdmShortQuery,
+                         // mode, seqlen_q, seqlen_k, mask
+                         Values(std::tuple{mode_enum::batch, 1, 509, "0"},
+                                std::tuple{mode_enum::batch, 8, 64, "0"},
+                                std::tuple{mode_enum::batch, 16, 509, "1"},
+                                std::tuple{mode_enum::batch, 8, 509, "2"},
+                                std::tuple{mode_enum::batch, 16, 64, "t:50,64"},
+                                std::tuple{mode_enum::group, 8, 509, "2"}));
+
+TEST_P(QrTdmShortQuery, DataTypeConfig)
 {
     if constexpr(ck_tile::is_any_of<DataTypeConfig, FmhaFwdFp16, FmhaFwdBf16>::value)
     {
         if(!ck_tile::is_gfx125_supported())
             GTEST_SKIP() << "qr_tdm is only supported on gfx1250";
 
+        auto [mode, seqlen_q, seqlen_k, mask_str] = GetParam();
+
         std::string selected_kernel;
-        auto result = fmha_fwd_run<DataTypeConfig>(mode_enum::batch,
-                                                   1,
-                                                   4,
+        // MHA: pack-GQA would fold the heads into seqlen_q and move the tile choice.
+        auto result = fmha_fwd_run<DataTypeConfig>(mode,
                                                    2,
-                                                   {8},
-                                                   {509},
+                                                   4,
+                                                   -1,
+                                                   {seqlen_q},
+                                                   {seqlen_k},
                                                    128,
                                                    128,
                                                    0,
@@ -442,7 +461,7 @@ TEST(TestCkTileFmhaFwd, QrTdmShortQuery)
                                                    0,
                                                    0,
                                                    true,
-                                                   false,
+                                                   true,
                                                    0,
                                                    false,
                                                    "n",
@@ -450,7 +469,7 @@ TEST(TestCkTileFmhaFwd, QrTdmShortQuery)
                                                    0,
                                                    0,
                                                    false,
-                                                   "0",
+                                                   mask_str,
                                                    qscale_str,
                                                    true,
                                                    1,
@@ -458,8 +477,10 @@ TEST(TestCkTileFmhaFwd, QrTdmShortQuery)
                                                    std::nullopt,
                                                    &selected_kernel);
         ASSERT_EQ(result, fwd_result::success);
-        EXPECT_NE(selected_kernel.find("_qr_tdm_"), std::string::npos);
-        EXPECT_NE(selected_kernel.find("b16x64"), std::string::npos);
+        EXPECT_NE(selected_kernel.find("_qr_tdm_"), std::string::npos) << selected_kernel;
+        // Group mode dispatches on the packed total q length (see QrTdmNewHeadDim).
+        if(mode == mode_enum::batch)
+            EXPECT_NE(selected_kernel.find("_b16x64"), std::string::npos) << selected_kernel;
     }
 }
 

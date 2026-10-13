@@ -1692,7 +1692,11 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
 
         # The sched rule stays last (its tests address it as get_rules()[-1]).
         rules.extend(
-            [check_gemm0_k, check_short_query_tile, check_qr_tdm_sched_codegen_compatibility]
+            [
+                check_gemm0_k,
+                check_short_query_tile,
+                check_qr_tdm_sched_codegen_compatibility,
+            ]
         )
         return rules
 

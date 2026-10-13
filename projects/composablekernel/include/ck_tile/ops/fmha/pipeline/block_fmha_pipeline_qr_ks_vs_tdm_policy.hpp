@@ -808,12 +808,10 @@ struct BlockFmhaPipelineQRKSVSTdmDefaultPolicy
     CK_TILE_HOST_DEVICE static constexpr auto MakeSRegTileDistribution()
     {
         // S comes back out of LDS to be softmaxed and then fed into gemm_1 as its A
-        // operand, so it has to land in exactly the layout gemm_1 expects. Building
-        // the encoding from the QK block gemm's warp config -- a different gemm than
-        // the PV one that consumes S -- permutes P's columns within a row: the row
-        // sum (and hence LSE) still comes out right, but O picks up a ~1% error
-        // because each key is paired with the wrong value row. Reuse the P
-        // distribution instead, which embeds the PV warp gemm's own A encoding.
+        // operand, so it takes P's distribution, which embeds the PV warp gemm's A
+        // encoding. An encoding built from the QK gemm's warp config would permute
+        // P's columns within a row once the warps sit on N: the row sums (and LSE)
+        // stay right while each key meets the wrong value row.
         return MakePRegTileDistribution<Problem>();
     }
 
@@ -851,8 +849,7 @@ struct BlockFmhaPipelineQRKSVSTdmDefaultPolicy
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr ck_tile::index_t GetSmemSize()
     {
-        // The arena layout owns the region offsets, alignment and aliasing; summing the
-        // region sizes here would drop the 256-byte region alignment.
+        // The arena layout owns the region offsets, alignment and aliasing.
         return LdsArenaLayout<Problem>::kArenaBytes;
     }
 };
