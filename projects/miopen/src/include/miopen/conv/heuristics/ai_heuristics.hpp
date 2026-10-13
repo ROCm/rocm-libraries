@@ -228,6 +228,9 @@ private:
 
     // Loaded data (const members like 2D pattern)
     std::vector<std::string> features;
+    // Ordered engineered-feature names from the metadata's "derived_features"; empty for models that
+    // predate named engineered features, which then use the fixed positional engineered block.
+    std::vector<std::string> derived_feature_names;
     size_t num_inputs;
     size_t num_outputs;
     size_t num_solvers;
@@ -246,6 +249,7 @@ private:
     // Helper functions for construction
     static std::optional<int> LoadSpatialDim(const std::string& arch);
     static std::optional<std::vector<std::string>> LoadFeatures(const std::string& arch);
+    static std::vector<std::string> LoadDerivedFeatures(const std::string& arch);
     static std::optional<size_t> LoadNumInputs(const std::string& arch);
     static std::optional<size_t> LoadNumCu(const std::string& arch);
     static std::optional<size_t> LoadNumOutputs(const std::string& arch);
@@ -300,6 +304,12 @@ public:
      * @note Call IsValid() first to ensure data is available
      */
     const std::vector<std::string>& GetFeatures() const { return features; }
+
+    /**
+     * @brief Ordered engineered-feature names from the metadata's "derived_features".
+     * @return Names in emission order; empty for older models (use the positional block then).
+     */
+    const std::vector<std::string>& GetDerivedFeatureNames() const { return derived_feature_names; }
 
     /**
      * @brief Get number of input features recorded in metadata ("num_inputs").

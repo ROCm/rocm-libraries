@@ -1265,26 +1265,41 @@ ExtractTunaNetNDFeatures(const conv::ProblemDescription& problem,
                           : problem.GetDirection() == conv::Direction::BackwardData
                               ? common::ConvDirection::BackwardData
                               : common::ConvDirection::BackwardWeights;
-    const auto derived =
-        (spatial_dim == 3)
-            ? common::EngineeredConvFeatures(N,
-                                             C_in,
-                                             C_out,
-                                             H_in,
-                                             W_in,
-                                             H_out,
-                                             W_out,
-                                             K_h,
-                                             K_w,
-                                             groups,
-                                             num_cu,
-                                             gemm_dir,
-                                             3,
-                                             D_in,
-                                             D_out,
-                                             K_d)
-            : common::EngineeredConvFeatures(
-                  N, C_in, C_out, H_in, W_in, H_out, W_out, K_h, K_w, groups, num_cu, gemm_dir);
+    const auto& derived_names = metadata.GetDerivedFeatureNames();
+    std::vector<float> derived;
+    if(!derived_names.empty())
+    {
+        // Named engineered features: emit what the model's metadata lists, in order (covers the
+        // optional divfeat features). raw in_channels (un-normalized) is needed for cpg_in.
+        derived = common::EngineeredConvFeaturesByName(N,
+                                                       C_in,
+                                                       C_out,
+                                                       H_in,
+                                                       W_in,
+                                                       H_out,
+                                                       W_out,
+                                                       K_h,
+                                                       K_w,
+                                                       groups,
+                                                       num_cu,
+                                                       gemm_dir,
+                                                       (spatial_dim == 3) ? 3 : 2,
+                                                       D_in,
+                                                       D_out,
+                                                       K_d,
+                                                       /*raw_in_channels=*/problem.GetInChannels(),
+                                                       problem.GetInDataType(),
+                                                       derived_names);
+    }
+    else
+    {
+        derived =
+            (spatial_dim == 3)
+                ? common::EngineeredConvFeatures(
+                      N, C_in, C_out, H_in, W_in, H_out, W_out, K_h, K_w, groups, num_cu, gemm_dir, 3, D_in, D_out, K_d)
+                : common::EngineeredConvFeatures(
+                      N, C_in, C_out, H_in, W_in, H_out, W_out, K_h, K_w, groups, num_cu, gemm_dir);
+    }
     features.insert(features.end(), derived.begin(), derived.end());
     return features;
 }

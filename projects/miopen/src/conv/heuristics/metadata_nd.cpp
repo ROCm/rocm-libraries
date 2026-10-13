@@ -95,6 +95,26 @@ std::optional<std::vector<std::string>> MetadataND::LoadFeatures(const std::stri
     }
 }
 
+// Ordered engineered-feature names. Optional: empty for models exported before named engineered
+// features (they keep the fixed positional engineered block), non-empty to opt into the named
+// path (which also carries any divfeat features the model lists).
+std::vector<std::string> MetadataND::LoadDerivedFeatures(const std::string& arch)
+{
+    auto json_opt = LoadJSONSafe(arch);
+    if(!json_opt)
+        return {};
+    try
+    {
+        if(json_opt->contains("derived_features"))
+            return json_opt->at("derived_features").get<std::vector<std::string>>();
+    }
+    catch(const std::exception& e)
+    {
+        MIOPEN_LOG_I2("Failed to load derived_features for " << arch << ": " << e.what());
+    }
+    return {};
+}
+
 std::optional<size_t> MetadataND::LoadNumInputs(const std::string& arch)
 {
     auto json_opt = LoadJSONSafe(arch);
@@ -373,6 +393,7 @@ MetadataND::MetadataND(const std::string& device, const int& dim)
     // All components loaded successfully, now we can safely move the data
     // We need to const_cast because the members are const
     features               = std::move(*features_opt);
+    derived_feature_names  = LoadDerivedFeatures(model_prefix);
     num_inputs             = *num_inputs_opt;
     num_outputs            = *num_outputs_opt;
     num_solvers            = *num_solvers_opt;
@@ -416,9 +437,11 @@ size_t MetadataND::GetEngineeredNumInputs() const
         if(!common::IsTunaNetCategoricalFeature(feature))
             ++count;
     }
-    // Derived from common::EngineeredConvFeatures (18 for 2D, 19 for 3D) rather than hardcoded,
-    // so this stays in lockstep if that feature block changes.
-    count += common::EngineeredConvFeatureCount(spatial_dim);
+    // Named engineered features (if the model lists them) drive the count; otherwise fall back to
+    // the positional block (18 for 2D, 19 for 3D), derived from common::EngineeredConvFeatures so it
+    // stays in lockstep if that block changes.
+    count += derived_feature_names.empty() ? common::EngineeredConvFeatureCount(spatial_dim)
+                                           : derived_feature_names.size();
     return count;
 }
 
