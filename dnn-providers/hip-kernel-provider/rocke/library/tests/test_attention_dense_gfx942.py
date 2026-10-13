@@ -329,6 +329,7 @@ _PRIVATE_PERTURBATIONS = {
     "pv_priority": (1, 3),
     "pv_sched_fence_mask": (0, 0x108),
     "causal_diag_split": (True,),
+    "emit_lse": (True, False),
 }
 
 _PERTURBATIONS = {**_SPEC_PERTURBATIONS, **_PRIVATE_PERTURBATIONS}
@@ -654,6 +655,37 @@ def test_kernel_name_drops_heads_on_the_runtime_shape_grid():
     assert len({_ir_body_sha(s) for s in specs}) == 1
 
 
+@pytest.mark.parametrize(
+    "make",
+    [
+        _spec,
+        lambda **kw: _persistent_spec(persist_decode="qb_major", **kw),
+        lambda **kw: _persistent_spec(persist_decode="hkv_major", **kw),
+    ],
+    ids=["ordinary", "persistent_qb", "persistent_hkv"],
+)
+def test_lse_ir_uses_runtime_sequence_and_head_counts(make):
+    """One LSE binary must serve different Sq/Hq values on every runtime path.
+
+    The LSE layout is [B,Hq,Sq,1], so a baked Hq or Sq in its flat output index
+    makes otherwise-shared binaries write the wrong row for another launch shape.
+    """
+    specs = [
+        make(
+            batch=batch,
+            seqlen_q=sq,
+            seqlen_kv=sq,
+            num_query_heads=hq,
+            num_kv_heads=hkv,
+            emit_lse=True,
+        )
+        for batch, sq, hq, hkv in ((1, 512, 8, 2), (2, 1024, 16, 4))
+    ]
+    assert all(s.runtime_shape for s in specs)
+    assert len({attention_dense_cache_key(s, arch="gfx942") for s in specs}) == 1
+    assert len({_ir_body_sha(s) for s in specs}) == 1
+
+
 def test_ir_body_probe_detects_a_baked_shape_on_the_gfx950_control():
     """Positive control for every "one body across shapes" assertion above.
 
@@ -936,7 +968,8 @@ def test_gfx942_auto_decode_cannot_leak_to_gqa_pair():
 #   use_exp2_fast: numerically safe in both directions here (both softmax args are
 #     always <= 0), so it is a perf A/B, not a correctness or tile-exactness
 #     hazard. Gating it would make the config unsweepable.
-_TUNING_FIELDS_WITHOUT_A_REJECTED_REGION = frozenset({"use_exp2_fast"})
+#   emit_lse: an optional extra output, legal on every config the body accepts.
+_TUNING_FIELDS_WITHOUT_A_REJECTED_REGION = frozenset({"use_exp2_fast", "emit_lse"})
 
 # Rows are kwargs for a single :class:`Gfx942AttentionDenseSpec` -- there is one spec
 # and one builder signature, so the shared and gfx942-private knobs go in the same
@@ -1015,6 +1048,9 @@ _CONTRACT_GRID = [
     dict(causal_diag_split=True),  # accepted
     dict(causal=False, causal_diag_split=True),  # REJECTED: causal only
     dict(sliding_window=64, causal_diag_split=True),  # REJECTED: no window
+    # --- private: emit_lse (no rejected region -- see the comment above) ---
+    dict(emit_lse=False),
+    dict(emit_lse=True, persistent=True, num_persistent=304),
 ]
 
 

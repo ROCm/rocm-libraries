@@ -96,7 +96,7 @@ using Fp32Builder = GpuSdpaRaggedFwdPlanBuilder<DataType::FLOAT,
                                                 DataType::FLOAT,
                                                 DataType::FLOAT>;
 
-// Wraps a borrowed packed host buffer as an RFC-0014 ragged tensor ([B, S, H, D], BSHD_SEQ_AXIS).
+// Wraps a borrowed packed host buffer as an RFC-0014 ragged tensor ([B, H, S, D], SDPA_SEQ_AXIS).
 ShallowRaggedTensor<float> wrapRagged(float* buf,
                                       const std::vector<int64_t>& dims,
                                       int64_t seqStride,
@@ -105,7 +105,7 @@ ShallowRaggedTensor<float> wrapRagged(float* buf,
     return {buf,
             dims,
             raggedStrides(dims),
-            BSHD_SEQ_AXIS,
+            SDPA_SEQ_AXIS,
             makeRaggedOffsetAux(cumTokens(lengths), seqStride)};
 }
 
@@ -279,18 +279,18 @@ flatbuffers::DetachedBuffer withShape(const void* graphBuffer,
 
 } // namespace
 
-// A primary or packed LSE in the pre-RFC [B, H, S, D] order (BSHD strides) is not ragged-legal
-// under RFC-0014, so the plan declines it instead of misreading heads as tokens.
-TEST(TestGpuSdpaRaggedFwdPlanBuilder, IsNotApplicableForHeadsBeforeSequenceLayout)
+// A primary or packed LSE in [B, S, H, D] order (contiguous strides) is not ragged-legal under
+// RFC-0014, so the plan declines it instead of misreading heads as tokens.
+TEST(TestGpuSdpaRaggedFwdPlanBuilder, IsNotApplicableForSequenceBeforeHeadsLayout)
 {
     const Bf16Builder bf16Builder;
-    // DIMS is [1, S = 8, H = 2, D = 16]; the same memory as [B, H, S, D] has strides
-    // [256, 16, 32, 1].
+    // DIMS is [1, H = 2, S = 8, D = 16]; the same memory as [B, S, H, D] has strides
+    // [256, 32, 16, 1].
     auto graphBuilder = makeRaggedGraph();
-    const auto qOld
-        = withShape(graphBuilder.GetBufferPointer(), Q_UID, {1, 2, 8, 16}, {256, 16, 32, 1});
-    auto qWrap
-        = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(qOld.data(), qOld.size());
+    const auto qSeqBeforeHeads
+        = withShape(graphBuilder.GetBufferPointer(), Q_UID, {1, 8, 2, 16}, {256, 32, 16, 1});
+    auto qWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(qSeqBeforeHeads.data(),
+                                                                            qSeqBeforeHeads.size());
     EXPECT_FALSE(bf16Builder.isApplicable(qWrap.getNode(0), qWrap.getTensorMap()));
 
     RaggedSdpaFwdGraphOptions options;
@@ -313,10 +313,10 @@ TEST(TestGpuSdpaRaggedFwdPlanBuilder, IsNotApplicableForHeadsBeforeSequenceLayou
     auto statsWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         statsGraph.GetBufferPointer(), statsGraph.GetSize());
     ASSERT_TRUE(bf16Builder.isApplicable(statsWrap.getNode(0), statsWrap.getTensorMap()));
-    const auto lseOld
-        = withShape(statsGraph.GetBufferPointer(), STATS_UID, {1, 2, 8, 1}, {16, 1, 2, 1});
-    auto lseWrap
-        = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(lseOld.data(), lseOld.size());
+    const auto lseSeqBeforeHeads
+        = withShape(statsGraph.GetBufferPointer(), STATS_UID, {1, 8, 2, 1}, {16, 2, 1, 1});
+    auto lseWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        lseSeqBeforeHeads.data(), lseSeqBeforeHeads.size());
     EXPECT_FALSE(bf16Builder.isApplicable(lseWrap.getNode(0), lseWrap.getTensorMap()));
 }
 
