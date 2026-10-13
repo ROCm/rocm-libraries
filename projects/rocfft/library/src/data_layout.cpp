@@ -299,14 +299,30 @@ bool data_layout_t::operator==(const data_layout_t& other) const
 
 bool data_layout_t::has_same_logical_range_as(const data_layout_t& other) const
 {
-    if(!is_dimensionally_consistent_with(other))
-        throw std::invalid_argument(
-            "This object is not dimensionally consistent with the argument of "
-            + ROCFFT_CURRENT_FUNCTION);
-    bool ret = true;
-    for(size_t dim = 0; ret && dim < get_full_rank(); dim++)
-        ret &= (*this)[dim].has_same_logical_range_as(other[dim]);
-    return ret;
+    return has_same_batch_range_as(other) && has_same_length_range_as(other);
+}
+
+bool data_layout_t::has_same_length_range_as(const data_layout_t& other) const
+{
+    if(get_len_rank() != other.get_len_rank())
+        throw std::invalid_argument("Inconsistent length ranks given to "
+                                    + ROCFFT_CURRENT_FUNCTION);
+    return std::equal(
+        len_axes.begin(),
+        len_axes.end(),
+        other.len_axes.begin(),
+        [](const axis_t& a, const axis_t& b) { return a.has_same_logical_range_as(b); });
+}
+
+bool data_layout_t::has_same_batch_range_as(const data_layout_t& other) const
+{
+    if(get_batch_rank() != other.get_batch_rank())
+        throw std::invalid_argument("Inconsistent batch ranks given to " + ROCFFT_CURRENT_FUNCTION);
+    return std::equal(
+        batch_axes.begin(),
+        batch_axes.end(),
+        other.batch_axes.begin(),
+        [](const axis_t& a, const axis_t& b) { return a.has_same_logical_range_as(b); });
 }
 
 data_layout_t data_layout_t::make_contiguous_intersection_of(const data_layout_t& first,
