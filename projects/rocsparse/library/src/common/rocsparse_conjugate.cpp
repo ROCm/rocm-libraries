@@ -82,14 +82,6 @@ namespace rocsparse
     {
         switch(datatype)
         {
-        case rocsparse_datatype_f32_r:
-        {
-            return conjugate_strided_batched_kernel_launch<float>;
-        }
-        case rocsparse_datatype_f64_r:
-        {
-            return conjugate_strided_batched_kernel_launch<double>;
-        }
         case rocsparse_datatype_f32_c:
         {
             return conjugate_strided_batched_kernel_launch<rocsparse_float_complex>;
@@ -114,14 +106,17 @@ rocsparse_status rocsparse::conjugate_strided_batched(rocsparse_handle   handle,
                                                       int64_t            array_inc,
                                                       int64_t            array_stride)
 {
-    auto launch_kernel = rocsparse::find_conjugate_strided_batched_kernel_launch(datatype);
-    if(launch_kernel == nullptr)
+    if(rocsparse::datatype_is_complex(datatype))
     {
-        RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value,
-                                               "find_conjugate_launch failed");
+        auto launch_kernel = rocsparse::find_conjugate_strided_batched_kernel_launch(datatype);
+        if(launch_kernel == nullptr)
+        {
+            RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value,
+                                                   "find_conjugate_launch failed");
+        }
+        RETURN_IF_ROCSPARSE_ERROR(
+            launch_kernel(handle, batch_count, length, array, array_inc, array_stride));
     }
-    RETURN_IF_ROCSPARSE_ERROR(
-        launch_kernel(handle, batch_count, length, array, array_inc, array_stride));
     return rocsparse_status_success;
 }
 
@@ -132,8 +127,11 @@ rocsparse_status rocsparse::conjugate_strided_batched(rocsparse_handle   handle,
                                                       void*              array,
                                                       int64_t            array_stride)
 {
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse::conjugate_strided_batched(
-        handle, batch_count, length, datatype, array, static_cast<int64_t>(1), array_stride));
+    if(rocsparse::datatype_is_complex(datatype))
+    {
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::conjugate_strided_batched(
+            handle, batch_count, length, datatype, array, static_cast<int64_t>(1), array_stride));
+    }
     return rocsparse_status_success;
 }
 
@@ -142,12 +140,15 @@ rocsparse_status rocsparse::conjugate(rocsparse_handle   handle,
                                       rocsparse_datatype datatype,
                                       void*              array)
 {
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse::conjugate_strided_batched(handle,
-                                                                   static_cast<int64_t>(1),
-                                                                   length,
-                                                                   datatype,
-                                                                   array,
-                                                                   static_cast<int64_t>(1),
-                                                                   static_cast<int64_t>(0)));
+    if(rocsparse::datatype_is_complex(datatype))
+    {
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::conjugate_strided_batched(handle,
+                                                                       static_cast<int64_t>(1),
+                                                                       length,
+                                                                       datatype,
+                                                                       array,
+                                                                       static_cast<int64_t>(1),
+                                                                       static_cast<int64_t>(0)));
+    }
     return rocsparse_status_success;
 }
