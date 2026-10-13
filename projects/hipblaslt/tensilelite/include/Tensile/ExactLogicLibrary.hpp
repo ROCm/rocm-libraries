@@ -35,6 +35,7 @@
 #include <Tensile/Debug.hpp>
 #include <Tensile/PredicateDebugger.hpp>
 #include <Tensile/Predicates.hpp>
+#include <Tensile/ProviderRows.hpp>
 #include <Tensile/SolutionLibrary.hpp>
 
 #include <tensilelitehost/export.h>
@@ -272,6 +273,7 @@ namespace TensileLite
                 (forceDynamic == 1) ||
                 (forceDynamic != 0 && problem.getParams().streamKTileSchedulingMode() != 0);
             const bool                 predictionLib = Debug::Instance().usePredictionLibrary() || effectiveDynamic;
+            const auto                 providers     = currentProviderRows();
 
             // false in case of early return;
             lastFindTopRetAll = false;
@@ -284,6 +286,10 @@ namespace TensileLite
                 if(predictionLib
                    && ((row.first.value->type() == "EqualityMatching")
                        || (row.first.value->type() == "RangeMatching")))
+                    continue;
+
+                if(providers != ProviderRows::All
+                   && skipsProviderRow(providers, row.first.value->type()))
                     continue;
 
                 if(row.first(problem, hardware))
