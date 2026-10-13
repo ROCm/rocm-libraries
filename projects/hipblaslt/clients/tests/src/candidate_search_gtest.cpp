@@ -158,3 +158,83 @@ TEST(CandidateSearch_pre_checkin, AFailureWhilePreparingEndsTheSearch)
     ASSERT_FALSE(host.log.empty());
     EXPECT_EQ(host.log.back(), entry("prepare", 1));
 }
+
+namespace
+{
+    // A search over host-only candidates whose prepare and measured hooks answer
+    // whether a candidate may run and may win, and which can be stopped.
+    struct FilteredSearch
+    {
+        std::vector<double>      launch_us;
+        std::vector<bool>        runnable;
+        std::vector<bool>        eligible;
+        std::function<bool()>    should_stop;
+        std::vector<std::string> log;
+
+        hipblaslt_bench::SearchResult run()
+        {
+            hipEvent_t  start  = nullptr;
+            hipEvent_t  stop   = nullptr;
+            hipStream_t stream = nullptr;
+            return hipblaslt_bench::search_candidates(
+                launch_us.size(),
+                hipblaslt_bench::SearchConfig{},
+                cpu_timing(2),
+                start,
+                stop,
+                stream,
+                [&](size_t sol) {
+                    log.push_back(entry("prepare", sol));
+                    return runnable.empty() || runnable[sol];
+                },
+                [&](size_t sol, int32_t) { log.push_back(entry("cold", sol)); },
+                [&](size_t sol, int64_t) { spin_us(launch_us[sol]); },
+                [&](size_t, double, double) {},
+                [&](size_t sol) { log.push_back(entry("measuring", sol)); },
+                [&](size_t sol, hipblaslt_bench::TimingResult&) {
+                    return eligible.empty() || eligible[sol];
+                },
+                {},
+                should_stop);
+        }
+    };
+} // namespace
+
+// A candidate whose preparation says it cannot run is neither launched nor timed.
+TEST(CandidateSearch_pre_checkin, PrepareCanSkipACandidate)
+{
+    FilteredSearch host;
+    host.launch_us = {300, 50, 200};
+    host.runnable  = {true, false, true};
+
+    const auto result = host.run();
+    EXPECT_EQ(result.best, 2u);
+    EXPECT_EQ(std::count(host.log.begin(), host.log.end(), entry("measuring", 1)), 0);
+}
+
+// A candidate measured but ruled out afterwards cannot win, however fast it was.
+TEST(CandidateSearch_pre_checkin, MeasuredCanRuleOutACandidate)
+{
+    FilteredSearch host;
+    host.launch_us = {300, 50, 200};
+    host.eligible  = {true, false, true};
+
+    const auto result = host.run();
+    EXPECT_EQ(result.best, 2u);
+    EXPECT_EQ(std::count(host.log.begin(), host.log.end(), entry("measuring", 1)), 1);
+}
+
+// should_stop is asked before each candidate; the search ends at the first yes and
+// reports so, keeping the best of the candidates it reached.
+TEST(CandidateSearch_pre_checkin, ShouldStopEndsTheSearchBetweenCandidates)
+{
+    FilteredSearch host;
+    host.launch_us   = {300, 200, 50};
+    size_t asked     = 0;
+    host.should_stop = [&] { return asked++ == 2; };
+
+    const auto result = host.run();
+    EXPECT_TRUE(result.stopped);
+    EXPECT_EQ(result.best, 1u);
+    EXPECT_EQ(std::count(host.log.begin(), host.log.end(), entry("prepare", 2)), 0);
+}

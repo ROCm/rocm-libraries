@@ -311,6 +311,8 @@ size_t tuningTensorSpanForTest(size_t elementSize,
 size_t tuningScratchPlanForTest(const RocblasltContractionProblem& prob,
                                 size_t                             rotatingBytes,
                                 size_t                             cap,
+                                int32_t                            coldIters,
+                                int32_t                            hotIters,
                                 uint64_t*                          values,
                                 size_t                             count);
 

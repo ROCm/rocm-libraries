@@ -3253,9 +3253,9 @@ extern "C" HIPBLASLT_EXPORT size_t hipblaslt_tuning_tensor_span_for_test(size_t 
 }
 
 // The scratch tuning would lay out to measure this matmul, with the rotating
-// budget and the cap given rather than read from the environment. The
-// descriptors are the public ones; the pointers are only compared, never
-// dereferenced. Writes up to count values, in this order:
+// budget, the cap and the cold and timed launch counts given rather than read
+// from the environment. The descriptors are the public ones; the pointers are
+// only compared, never dereferenced. Writes up to count values, in this order:
 //   0 usable, 1 rotation blocks, 2 total bytes
 //   3 A, 4 B, 5 C, 6 D, 7 in-place C, 8 E, 9 bias
 //       Each tensor's span in bytes, 0 when the layout has none.
@@ -3273,6 +3273,8 @@ extern "C" HIPBLASLT_EXPORT size_t hipblaslt_tuning_scratch_plan_for_test(void* 
                                                                           size_t    workspaceBytes,
                                                                           size_t    rotatingBytes,
                                                                           size_t    capBytes,
+                                                                          int32_t   coldIters,
+                                                                          int32_t   hotIters,
                                                                           uint64_t* values,
                                                                           size_t    count)
 {
@@ -3291,7 +3293,8 @@ extern "C" HIPBLASLT_EXPORT size_t hipblaslt_tuning_scratch_plan_for_test(void* 
     prob.B            = B;
     prob.C            = C;
     prob.D            = D;
-    return tuningScratchPlanForTest(prob, rotatingBytes, capBytes, values, count);
+    return tuningScratchPlanForTest(
+        prob, rotatingBytes, capBytes, coldIters, hotIters, values, count);
 }
 
 // The solution the calling thread's last hipblasLtMatmul launched, or -1,

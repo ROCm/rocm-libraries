@@ -12,7 +12,9 @@
 #include <limits>
 #include <mutex>
 #include <string>
+#include <type_traits>
 #include <unordered_map>
+#include <utility>
 
 // ============================================================================
 // Picking the fastest of several candidate solutions for one problem.
@@ -150,16 +152,40 @@ namespace hipblaslt_bench
 
         // Preparing a candidate failed fatally under gtest, which ends the search.
         bool aborted = false;
+
+        // should_stop ended the search before every candidate had been tried.
+        bool stopped = false;
     };
 
+    namespace detail
+    {
+        // A hook that returns nothing counts as having returned true.
+        template <typename Hook, typename... Args>
+        bool call_hook(Hook& hook, Args&&... args)
+        {
+            if constexpr(std::is_void_v<std::invoke_result_t<Hook&, Args...>>)
+            {
+                hook(std::forward<Args>(args)...);
+                return true;
+            }
+            else
+            {
+                return static_cast<bool>(hook(std::forward<Args>(args)...));
+            }
+        }
+    } // namespace detail
+
     // Searches `candidates` candidates, numbered from 0, and returns the winner.
-    //   prepare(sol)                       before anything else runs for sol
+    //   prepare(sol)                       before anything else runs for sol; returning
+    //                                      false skips sol
     //   cold(sol, i)                       one cold launch, i counting from 0
     //   launch(sol, i)                     one timed launch, i counting from 0
     //   skipped(sol, warm_us, best_warm_us) sol was dropped by the skip-slow screen
     //   measuring(sol)                     just before sol's timed phase
-    //   measured(sol, timing)              just after it
-    // should_abort is polled as run_measurement polls it.
+    //   measured(sol, timing)              just after it; returning false keeps sol from
+    //                                      winning
+    // should_abort is polled as run_measurement polls it. should_stop, when given, is
+    // asked before each candidate and ends the search by returning true.
     template <typename Prepare,
               typename Cold,
               typename Launch,
@@ -178,7 +204,8 @@ namespace hipblaslt_bench
                                    Skipped&&                    skipped,
                                    Measuring&&                  measuring,
                                    Measured&&                   measured,
-                                   const std::function<bool()>& should_abort = {})
+                                   const std::function<bool()>& should_abort = {},
+                                   const std::function<bool()>& should_stop  = {})
     {
         SearchResult result;
         double       best_gpu_time  = std::numeric_limits<double>::max();
@@ -186,13 +213,21 @@ namespace hipblaslt_bench
 
         for(size_t sol = 0; sol < candidates; sol++)
         {
+            if(should_stop && should_stop())
+            {
+                result.stopped = true;
+                return result;
+            }
+
             const bool failedBefore = detail::aborted(should_abort);
-            prepare(sol);
+            const bool prepared     = detail::call_hook(prepare, sol);
             if(!failedBefore && detail::aborted(should_abort))
             {
                 result.aborted = true;
                 return result;
             }
+            if(!prepared)
+                continue;
 
             double warm_time = 0;
             if(search.skip_slow_ratio)
@@ -228,9 +263,9 @@ namespace hipblaslt_bench
                 stream,
                 measurement,
                 should_abort);
-            measured(sol, measurement);
+            const bool eligible = detail::call_hook(measured, sol, measurement);
 
-            if(best_gpu_time > measurement.median_us)
+            if(eligible && best_gpu_time > measurement.median_us)
             {
                 best_gpu_time      = measurement.median_us;
                 result.best        = sol;
