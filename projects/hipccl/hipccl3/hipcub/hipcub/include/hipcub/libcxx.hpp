@@ -76,11 +76,11 @@
     #endif
 #endif
 // Otherwise, if the '::hip::std' namespace from 'libhipcxx' is available.
-#if !defined(_HIPCUB_HAS_DEVICE_SYSTEM_STD) && HIPCUB_HAS_INCLUDE(<hip/std/version>)
-    #include <hip/std/version>
+#if !defined(_HIPCUB_HAS_DEVICE_SYSTEM_STD) && HIPCUB_HAS_INCLUDE(<hip/std/__internal/version.h>)
+    #include <hip/std/__internal/version.h>
     #include <cuda/std/__internal/namespaces.h> // for _CCCL_[BEGIN,END]_NAMESPACE_CUDA_STD
     // If version matches and '_CUDA_VSTD' is available.
-    #if defined(_LIBCUDACXX_CUDA_API_VERSION) && (_LIBCUDACXX_CUDA_API_VERSION >= _HIPCUB_REQUIRED_LIBCXX_VERSION) && defined(_CUDA_VSTD)
+    #if defined(_LIBCUDACXX_CUDA_API_VERSION) && (_LIBCUDACXX_CUDA_API_VERSION >= _HIPCUB_REQUIRED_LIBCXX_VERSION)
         #define _HIPCUB_LIBCXX_INCLUDE(LIB) _HIPCUB_STRINGIFY(hip/LIB)
         #define _HIPCUB_STD_INCLUDE(LIB) _HIPCUB_STRINGIFY(hip/std/LIB)
         // In 'libhipcxx' the '::hip' namespace is synonymous with '::cuda'.
