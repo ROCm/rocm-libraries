@@ -9,24 +9,47 @@ whenever one exists. These tests pin both, plus the load-time validation that
 keeps a malformed descriptor from reaching the lowering.
 """
 
+import contextlib
 import copy
 import unittest
 from unittest import mock
 
 import pytest
 from rocke.core.arch import ArchTarget, MmaEmulation, MmaEmulationRecipe, known_arches
+from rocke.core.arch import target
 from rocke.core.arch.target import (
     _MMA_FRAGMENT_INFO,
     _build_mma_op,
-    _build_target,
     _load_specs,
-    _op_id_emulated_tf32_operands,
     _prefer_native,
     emulated_tf32_operand_lens,
 )
 
 # A real bf16 atom, so derived fragment metadata has something true to point at.
 PHYSICAL = "mfma_f32_16x16x32_bf16"
+
+
+@contextlib.contextmanager
+def _patched_specs(specs):
+    """Serve ``specs`` as the catalog, leaving no trace of it in any cache.
+
+    Several lookups in ``target`` are ``lru_cache``d on the loaded specs, and
+    some are filled as a side effect of building an arch (a bare op_id resolves
+    through its physical atom). Clearing only the one a test has in mind lets the
+    rest keep a synthetic catalog for whichever test runs next.
+    """
+
+    def clear():
+        for value in vars(target).values():
+            if hasattr(value, "cache_clear"):
+                value.cache_clear()
+
+    clear()
+    try:
+        with mock.patch("rocke.core.arch.target._load_specs", return_value=specs):
+            yield
+    finally:
+        clear()
 
 
 def _row(**over):
@@ -127,15 +150,11 @@ class TestEmulationDescriptor(unittest.TestCase):
         """
         specs = copy.deepcopy(_load_specs())
         specs["gfx942"]["mma"].append(_row())
-        _build_target.cache_clear()
-        try:
-            with mock.patch("rocke.core.arch.target._load_specs", return_value=specs):
-                with pytest.raises(
-                    ValueError, match="not a natively encoded atom of gfx942"
-                ):
-                    ArchTarget.from_gfx("gfx942")
-        finally:
-            _build_target.cache_clear()
+        with _patched_specs(specs):
+            with pytest.raises(
+                ValueError, match="not a natively encoded atom of gfx942"
+            ):
+                ArchTarget.from_gfx("gfx942")
 
     def test_verifier_lookup_refuses_a_physical_atom_with_no_fragments(self):
         """The bare-op_id lookup reads raw rows, before any arch's catalog is built.
@@ -150,13 +169,9 @@ class TestEmulationDescriptor(unittest.TestCase):
                 emulation={"recipe": "bf16x3", "physical_op_id": "mfma_nonexistent"},
             )
         )
-        _op_id_emulated_tf32_operands.cache_clear()
-        try:
-            with mock.patch("rocke.core.arch.target._load_specs", return_value=specs):
-                with pytest.raises(ValueError, match="no fragment metadata"):
-                    emulated_tf32_operand_lens("mfma_f32_16x16x64_xf32")
-        finally:
-            _op_id_emulated_tf32_operands.cache_clear()
+        with _patched_specs(specs):
+            with pytest.raises(ValueError, match="no fragment metadata"):
+                emulated_tf32_operand_lens("mfma_f32_16x16x64_xf32")
 
     def test_verifier_lookup_answers_only_for_emulated_tf32_atoms(self):
         self.assertEqual(
