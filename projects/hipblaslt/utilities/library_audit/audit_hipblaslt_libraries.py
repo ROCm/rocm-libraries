@@ -44,10 +44,25 @@ from audit_checks import (
     validate_use_custom_main_loop_schedule,
 )
 
-try:
-    YAML_LOADER = yaml.CSafeLoader
-except AttributeError:  # pragma: no cover
-    YAML_LOADER = yaml.SafeLoader
+def _yaml_safe_load(source: Any) -> Any:
+    """Load one YAML document without constructing arbitrary objects.
+
+    Uses ``yaml.CSafeLoader`` when the C extension is present. That loader is
+    the C implementation of ``yaml.SafeLoader``. Bandit flags every
+    ``yaml.load`` call, so the restricted loader is marked explicitly.
+
+    Args:
+        source: Open text file or YAML text.
+
+    Returns:
+        The parsed YAML document.
+
+    Raises:
+        yaml.YAMLError: If *source* is not valid YAML.
+    """
+    if hasattr(yaml, "CSafeLoader"):
+        return yaml.load(source, Loader=yaml.CSafeLoader)  # nosec B506
+    return yaml.safe_load(source)
 
 
 # ========================================================================
@@ -1449,8 +1464,20 @@ def _group_key(record: LibraryRecord) -> tuple[str, str, str, str]:
 
 
 def _load_yaml(path: Path) -> Any:
+    """Load a library logic YAML file with the safe loader.
+
+    Args:
+        path: Library YAML path.
+
+    Returns:
+        Parsed YAML document.
+
+    Raises:
+        OSError: If *path* cannot be read.
+        yaml.YAMLError: If the file is not valid YAML.
+    """
     with path.open("r", encoding="utf-8") as handle:
-        return yaml.load(handle, Loader=YAML_LOADER)
+        return _yaml_safe_load(handle)
 
 
 def _audit_file_worker(
@@ -1953,7 +1980,7 @@ def base_yaml_format(repo_root: Path, base_ref: str, rel_path: str) -> Optional[
     if proc.returncode != 0:
         return None
     try:
-        data = yaml.load(proc.stdout.decode("utf-8", errors="replace"), Loader=YAML_LOADER)
+        data = _yaml_safe_load(proc.stdout.decode("utf-8", errors="replace"))
     except yaml.YAMLError:
         return None
     return yaml_root_format(data)
