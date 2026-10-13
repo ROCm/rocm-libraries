@@ -203,6 +203,28 @@ int64_t rocsparse_clients::spmat_descr<T, I, J>::get_nrows() const
 }
 
 template <typename T, typename I, typename J>
+int64_t rocsparse_clients::spmat_descr<T, I, J>::get_nnz() const
+{
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
+    return std::visit(select_lambdas{
+                          [](const coo_t& that) -> int64_t { return that.host().nnz; },
+                          [](const coo_aos_t& that) -> int64_t { return that.host().nnz; },
+                          [](const csr_t& that) -> int64_t { return that.host().nnz; },
+                          [](const csc_t& that) -> int64_t { return that.host().nnz; },
+                          [](const ell_t& that) -> int64_t { return that.host().nnz; },
+                          [](const bell_t& that) -> int64_t {
+                              return static_cast<int64_t>(that.host().m) * that.host().ell_cols;
+                          },
+                          [](const bsr_t& that) -> int64_t {
+                              return static_cast<int64_t>(that.host().nnzb)
+                                     * that.host().row_block_dim * that.host().col_block_dim;
+                          },
+                          [](const sell_t& that) -> int64_t { return that.host().nnz; },
+                      },
+                      this->m_data);
+}
+
+template <typename T, typename I, typename J>
 int64_t rocsparse_clients::spmat_descr<T, I, J>::get_size_values() const
 {
     ROCSPARSE_CLIENTS_ROUTINE_TRACE;

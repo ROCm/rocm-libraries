@@ -254,8 +254,7 @@ void rocsparse_clients::dnmat_descr<T>::print()
         std::cout << "hprint   " << std::endl;
         h.print();
         std::cout << "dprint   " << std::endl;
-        //	  d.print();
-        //	  h.near_check(d);
+        d.print();
     }
     std::cout << "PRINT DNMAT DONE DESCR ------------------------------------ " << std::endl;
 }

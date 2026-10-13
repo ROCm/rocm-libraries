@@ -38,7 +38,7 @@ extern "C" {
  *  \f[
  *    Y =  \alpha \cdot X^T,
  *  \f]
- *  where \alpha, or \p alpha is a scalar.
+ *  where \p alpha is a scalar.
  *
  *  \note Dense matrix orders (\ref rocsparse_order) can be arbitrary.
  *  The number of rows (resp. columns) of \p X must equal the number of columns (resp. rows) of \p Y;

@@ -39,7 +39,7 @@ extern "C" {
  *  \f[
  *    Y =  \alpha \cdot X,
  *  \f]
- *  where \alpha, or \p alpha is a scalar.
+ *  where \p alpha is a scalar.
  *
  *  \note Dense matrix orders (\ref rocsparse_order) can be arbitrary.
  *  The number of rows and the number of columns must be the same.

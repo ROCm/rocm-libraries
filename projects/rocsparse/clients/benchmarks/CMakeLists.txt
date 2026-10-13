@@ -30,11 +30,6 @@ if(BUILD_ROCSPARSE_ILP64)
   add_compile_options(-Drocsparse_ILP64)
 endif()
 
-# TO DELETE
-#if(BUILD_WITH_TRSM_REFACTORING)
-#  add_compile_options(-DROCSPARSE_WITH_TRSM_REFACTORING)
-#endif()
-
 set(ROCSPARSE_BENCHMARK_SOURCES
   client.cpp
   rocsparse_bench_app.cpp

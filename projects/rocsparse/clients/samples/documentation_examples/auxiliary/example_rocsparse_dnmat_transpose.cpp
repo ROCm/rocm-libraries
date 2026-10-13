@@ -20,7 +20,6 @@
  * THE SOFTWARE.
  *
  * ************************************************************************ */
-#if defined(ROCSPARSE_WITH_TRSM_REFACTORING)
 
 #include <iostream>
 
@@ -133,12 +132,3 @@ int main()
     return failed;
 }
 //! [doc example]
-
-#else
-
-int main()
-{
-    return 0;
-}
-
-#endif

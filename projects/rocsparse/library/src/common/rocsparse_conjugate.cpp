@@ -24,6 +24,7 @@
 
 #include "rocsparse_common.h"
 #include "rocsparse_common.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_utility.hpp"
 
 namespace rocsparse
@@ -42,12 +43,20 @@ namespace rocsparse
         array[0] = rocsparse::conj(array[0]);
     }
 
-    template <uint32_t BLOCKSIZE, typename T, typename U>
+    template <uint32_t BLOCKSIZE, typename T>
     ROCSPARSE_KERNEL(BLOCKSIZE)
-    void conjugate_kernel(int64_t length, U array, int64_t array_inc, int64_t array_dist)
+    void conjugate_kernel(int64_t batch_count,
+                          int64_t length,
+                          T* __restrict__ array,
+                          int64_t array_inc,
+                          int64_t array_dist)
     {
-        auto p = batched_pointer(hipBlockIdx_y, array, array_dist);
-        rocsparse::conjugate_device<BLOCKSIZE>(length, p, array_inc);
+
+        for(int64_t batch = hipBlockIdx_y; batch < batch_count; batch += hipGridDim_y)
+        {
+            auto p = rocsparse::load_pointer(array, batch, array_dist);
+            rocsparse::conjugate_device<BLOCKSIZE>(length, p, array_inc);
+        }
     }
 
     template <typename T>
@@ -58,15 +67,18 @@ namespace rocsparse
                                                                     int64_t          array_inc,
                                                                     int64_t          array_stride)
     {
-        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::conjugate_kernel<256, T, T*>),
-                                           dim3((length - 1) / 256 + 1, batch_count),
-                                           dim3(256),
-                                           0,
-                                           handle->stream,
-                                           length,
-                                           reinterpret_cast<T*>(array),
-                                           array_inc,
-                                           array_stride);
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+            (rocsparse::conjugate_kernel<256, T>),
+            dim3(rocsparse::get_grid_size_x(handle, (length - 1) / 256 + 1, 256),
+                 rocsparse::get_grid_size_y(handle, batch_count)),
+            dim3(256),
+            0,
+            handle->stream,
+            batch_count,
+            length,
+            reinterpret_cast<T*>(array),
+            array_inc,
+            array_stride);
         return rocsparse_status_success;
     }
 

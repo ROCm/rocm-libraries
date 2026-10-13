@@ -361,8 +361,6 @@ Tests:
   precision: *single_double_precisions_complex_real
   M_N: *M_N_range_nightly
   K: [32]
-  ld_multiplier_B: [3]
-  ld_multiplier_C: [3]
   alpha_alphai: *alpha_range_nightly
   transA: [rocsparse_operation_none]
   transB: [rocsparse_operation_none]
@@ -387,8 +385,6 @@ Tests:
   M: 1
   N: 1
   K: [16]
-  ld_multiplier_B: [2]
-  ld_multiplier_C: [1]
   alpha_alphai: *alpha_range_nightly_one
   transA: [rocsparse_operation_transpose]
   transB: [rocsparse_operation_transpose]
@@ -413,8 +409,6 @@ Tests:
   M: 1
   N: 1
   K: [57]
-  ld_multiplier_B: [2]
-  ld_multiplier_C: [1]
   alpha_alphai: *alpha_range_nightly_one
   transA: [rocsparse_operation_transpose]
   transB: [rocsparse_operation_transpose]
@@ -440,8 +434,6 @@ Tests:
   M: 1
   N: 1
   K: [3]
-  ld_multiplier_B: [3]
-  ld_multiplier_C: [2]
   alpha_alphai: *alpha_range_nightly_one
   transA: [rocsparse_operation_transpose, rocsparse_operation_conjugate_transpose]
   transB: [rocsparse_operation_none, rocsparse_operation_conjugate_transpose]

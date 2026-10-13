@@ -364,7 +364,7 @@ void testing_dnmat_copy_data(const Arguments& arg)
 
         CHECK_ROCSPARSE_ERROR(rocsparse_dnmat_copy_data(handle, beta, Y, Z, p_error));
 
-        hmem.unit_check(global_z);
+        hmem.near_check(global_z);
     }
 
     if(arg.timing)

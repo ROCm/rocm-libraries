@@ -468,7 +468,8 @@ void testing_sptrsm(const Arguments& arg)
 
     CHECK_ROCSPARSE_ERROR(rocsparse_spmat_set_attribute(
         A, rocsparse_spmat_matrix_type, &A_matrix_type, sizeof(A_matrix_type)));
-    const int64_t M = A.get_nrows();
+    const int64_t M     = A.get_nrows();
+    const int64_t A_nnz = A.get_nnz();
 
     if(verbose)
     {
@@ -679,7 +680,6 @@ void testing_sptrsm(const Arguments& arg)
                                                buffer_size_in_bytes,
                                                buffer,
                                                p_error);
-        int64_t      A_nnz       = 0;
         const double gflop_count = spsv_gflop_count(M, A_nnz, A_diag) * Y_n * batch_count;
         const double gpu_gflops  = get_gpu_gflops(gpu_time_used, gflop_count);
 
