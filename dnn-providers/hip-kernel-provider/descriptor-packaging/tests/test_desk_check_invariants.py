@@ -269,7 +269,6 @@ class TestRealBundleDtypeVocabulary:
     bundle -- data_types.fbs:6-26), and a raw string compare false-positives on
     every rocKE kernel that ships."""
 
-
     @pytest.mark.parametrize(
         "spec_dtype,meta_dtype",
         [
