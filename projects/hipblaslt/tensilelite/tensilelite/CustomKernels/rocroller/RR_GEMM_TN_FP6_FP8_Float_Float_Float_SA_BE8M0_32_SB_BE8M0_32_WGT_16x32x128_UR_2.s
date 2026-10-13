@@ -1,3 +1,6 @@
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
  // Tensor.FP6.d2 0, (base=&0, sizes={&8 &16 }, strides={&24 &32 })
  // T_LOAD_TILED 1 Source 0
  // Tensor.FP8.d2 2, (base=&40, sizes={&48 &56 }, strides={&64 &72 })
