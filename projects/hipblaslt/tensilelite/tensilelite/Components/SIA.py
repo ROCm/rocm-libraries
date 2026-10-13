@@ -29,7 +29,7 @@ from rocisa.container import DSModifiers, HolderContainer, replaceHolder
 from rocisa.instruction import SWaitCnt, SWaitAlu, DSStoreB128, DSStoreB64, DSStoreB32, TensorLoadToLds
 
 from ..Common import roundUp, print2
-from ..Common.MxScaleLayout import mxUnitsAre1
+from ..Common.MxScaleLayout import splatFirst
 from ..Component import SIA
 
 from copy import deepcopy
@@ -514,18 +514,13 @@ def fixLocalWriteEndMfmaIndex(writer, kernel, tPA, tPB, globalReadIncACode, glob
 ################################################################################
 
 def _globalReadFamilySlots(writer, kernel):
-    """TDM tensor_load family order.
-
-    mxUnit==1 issues MXSA → MXSB → A → B. MX16/MX32 keep A → MXSA → MXSB → B.
-    Empty MX modules are no-ops.
-    """
-    mxsa = ("MXSA", writer.codes.globalReadMXSA, writer.codes.dtlsM0UpdateMXSA)
-    mxsb = ("MXSB", writer.codes.globalReadMXSB, writer.codes.dtlsM0UpdateMXSB)
-    a = ("A", writer.codes.globalReadA, writer.codes.dtlsM0UpdateA)
-    b = ("B", writer.codes.globalReadB, writer.codes.dtlsM0UpdateB)
-    if mxUnitsAre1(kernel):
-        return (mxsa, mxsb, a, b)
-    return (a, mxsa, mxsb, b)
+    """TDM tensor_load family order (splatFirst). Empty MX modules are no-ops."""
+    return tuple(splatFirst(kernel, (
+        ("A", writer.codes.globalReadA, writer.codes.dtlsM0UpdateA),
+        ("MXSA", writer.codes.globalReadMXSA, writer.codes.dtlsM0UpdateMXSA),
+        ("MXSB", writer.codes.globalReadMXSB, writer.codes.dtlsM0UpdateMXSB),
+        ("B", writer.codes.globalReadB, writer.codes.dtlsM0UpdateB),
+    ), key=lambda slot: slot[0]))
 
 
 def _splitTdmLoad(grCode):
@@ -568,7 +563,7 @@ def noSchedGlobalRead(writer, kernel, globalReadIncACode, globalReadIncBCode):
             # Emitting them eagerly lets the async TDM overwrite the MX-scale LDS while
             # this wave's own MX ds_loads are still reading it (self-wave WAR; s_wait_dscnt
             # does not gate TDM, which retires on tensorcnt).
-            # Issue order matches SIA4 ds_load: MXSA → MXSB → A → B.
+            # Issue order matches ds_load: splat-fed kinds first.
             tdmLoads = []
             for name, grCode, dtls in _globalReadFamilySlots(writer, kernel):
                 imod.addComment1("Global Read %s" % name)
@@ -628,7 +623,7 @@ def prepareGRInstToSched(writer, kernel, isNGLL):
     writer.codes.unrollLoopHeader.add(writer.codes.globalReadMetadata.header) if kernel["ProblemType"]["Sparse"] else None
 
     # Add all loads from middle as individual schedulable items.
-    # Family order matches SIA4 ds_load: MXSA → MXSB → A → B.
+    # Family order matches ds_load: splat-fed kinds first.
     familyMiddles = [list(grCode.middle.items()) for _name, grCode, _dtls in _globalReadFamilySlots(writer, kernel)]
     familyMiddles.append(list(writer.codes.globalReadMetadata.middle.items()))
     # when using PGR2, put global read instruction right after corresponding localWrite instruction
