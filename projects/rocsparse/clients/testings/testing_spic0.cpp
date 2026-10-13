@@ -25,8 +25,8 @@
 #include "rocsparse_clients_objects.hpp"
 #include "rocsparse_clients_spmat_descr.hpp"
 #include "rocsparse_enum.hpp"
-#include <memory>
 #include "testing.hpp"
+#include <memory>
 
 namespace rocsparse_clients
 {
@@ -1308,24 +1308,25 @@ namespace
     }
 
     template <typename T, typename I, typename J>
-    void spic0_check_pivots(rocsparse_handle            handle,
-                            rocsparse_spic0_descr       spic0_descr,
-                            rocsparse_spic0_stage       stage,
-                            int64_t                     batch_count,
-                            int64_t                     expected,
-                            rocsparse_error*            p_error)
+    void spic0_check_pivots(rocsparse_handle      handle,
+                            rocsparse_spic0_descr spic0_descr,
+                            rocsparse_spic0_stage stage,
+                            int64_t               batch_count,
+                            int64_t               expected,
+                            rocsparse_error*      p_error)
     {
         hipStream_t stream;
         CHECK_ROCSPARSE_ERROR(rocsparse_get_stream(handle, &stream));
 
         host_dense_vector<int64_t> h_pivot(batch_count);
         host_dense_vector<int64_t> h_expected(batch_count);
-        CHECK_ROCSPARSE_ERROR(rocsparse_spic0_get_output(handle,
-                                                         spic0_descr,
-                                                         rocsparse_spic0_output_singularity_position,
-                                                         h_pivot,
-                                                         sizeof(int64_t),
-                                                         p_error));
+        CHECK_ROCSPARSE_ERROR(
+            rocsparse_spic0_get_output(handle,
+                                       spic0_descr,
+                                       rocsparse_spic0_output_singularity_position,
+                                       h_pivot,
+                                       sizeof(int64_t),
+                                       p_error));
         CHECK_HIP_ERROR(hipStreamSynchronize(stream));
         for(int64_t i = 0; i < batch_count; ++i)
         {
@@ -1372,16 +1373,15 @@ namespace
                                                         sizeof(compute_datatype),
                                                         p_error));
         CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
-        CHECK_ROCSPARSE_ERROR(
-            rocsparse_spic0_set_input(handle,
-                                      spic0_descr,
-                                      rocsparse_spic0_input_singularity_tolerance,
-                                      &singular_pivot_tolerance,
-                                      sizeof(double),
-                                      p_error));
+        CHECK_ROCSPARSE_ERROR(rocsparse_spic0_set_input(handle,
+                                                        spic0_descr,
+                                                        rocsparse_spic0_input_singularity_tolerance,
+                                                        &singular_pivot_tolerance,
+                                                        sizeof(double),
+                                                        p_error));
 
-        int64_t struct_pivot  = -1;
-        int64_t numeric_pivot = -1;
+        int64_t struct_pivot   = -1;
+        int64_t numeric_pivot  = -1;
         int64_t singular_pivot = -1;
         host_csric0<T, I, J>(h_A.m,
                              h_A.ptr,
@@ -1407,8 +1407,7 @@ namespace
 
             const int64_t expected
                 = (stage == rocsparse_spic0_stage_analysis) ? struct_pivot : singular_pivot;
-            spic0_check_pivots<T, I, J>(
-                handle, spic0_descr, stage, batch_count, expected, p_error);
+            spic0_check_pivots<T, I, J>(handle, spic0_descr, stage, batch_count, expected, p_error);
         }
 
         if(check_values)
@@ -1418,10 +1417,10 @@ namespace
     }
 
     template <typename T, typename I, typename J>
-    void bsric0_zero_batch_stride(const Arguments&             arg,
-                                  host_gebsr_matrix<T, I, J>&  h_A,
-                                  int64_t                      batch_count,
-                                  bool                         check_values = true)
+    void bsric0_zero_batch_stride(const Arguments&            arg,
+                                  host_gebsr_matrix<T, I, J>& h_A,
+                                  int64_t                     batch_count,
+                                  bool                        check_values = true)
     {
         rocsparse_error*       p_error = nullptr;
         rocsparse_local_handle local_handle(arg);
@@ -1453,13 +1452,12 @@ namespace
                                                         sizeof(compute_datatype),
                                                         p_error));
         CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
-        CHECK_ROCSPARSE_ERROR(
-            rocsparse_spic0_set_input(handle,
-                                      spic0_descr,
-                                      rocsparse_spic0_input_singularity_tolerance,
-                                      &singular_pivot_tolerance,
-                                      sizeof(double),
-                                      p_error));
+        CHECK_ROCSPARSE_ERROR(rocsparse_spic0_set_input(handle,
+                                                        spic0_descr,
+                                                        rocsparse_spic0_input_singularity_tolerance,
+                                                        &singular_pivot_tolerance,
+                                                        sizeof(double),
+                                                        p_error));
 
         int64_t struct_pivot  = -1;
         int64_t numeric_pivot = -1;
@@ -1487,8 +1485,7 @@ namespace
 
             const int64_t expected
                 = (stage == rocsparse_spic0_stage_analysis) ? struct_pivot : numeric_pivot;
-            spic0_check_pivots<T, I, J>(
-                handle, spic0_descr, stage, batch_count, expected, p_error);
+            spic0_check_pivots<T, I, J>(handle, spic0_descr, stage, batch_count, expected, p_error);
         }
 
         if(check_values)
@@ -1552,7 +1549,7 @@ void testing_spic0_extra(const Arguments& arg)
         std::unique_ptr<host_csr_matrix<T, I, J>> h_csr(
             rocsparse_clients::csr_tridiag_matrix_t<T, I, J>::init(4));
         h_csr->val[0] = static_cast<T>(0);
-        auto h_B = csr_as_bsr1<T, I, J>(*h_csr);
+        auto h_B      = csr_as_bsr1<T, I, J>(*h_csr);
         bsric0_zero_batch_stride<T, I, J>(arg, *h_B, batch_count, false);
     }
 }

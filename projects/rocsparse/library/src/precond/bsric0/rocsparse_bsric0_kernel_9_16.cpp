@@ -459,7 +459,7 @@ namespace rocsparse
         const int64_t done_array_stride = A->rows;
         // A zero value stride aliases every instance onto the same values.
         const int64_t A_batch_count = (A->batch_stride == 0) ? 1 : A->batch_count;
-        auto          numeric_exact     = bsric0_info->get_singularity_numeric_exact();
+        auto          numeric_exact = bsric0_info->get_singularity_numeric_exact();
 
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
             (rocsparse::bsric0_kernel_9_16<MAX_NNZB>),

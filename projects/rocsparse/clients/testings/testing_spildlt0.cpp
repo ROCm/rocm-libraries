@@ -25,8 +25,8 @@
 #include "rocsparse_clients_objects.hpp"
 #include "rocsparse_clients_spmat_descr.hpp"
 #include "rocsparse_enum.hpp"
-#include <memory>
 #include "testing.hpp"
+#include <memory>
 
 // rocsparse_spildlt0_input_diag is deprecated but still exercised here (to check it keeps
 // working). Referencing the [[deprecated]] enumerator directly would raise
@@ -1079,12 +1079,13 @@ namespace
                                                            &analysis_policy,
                                                            sizeof(analysis_policy),
                                                            p_error));
-        CHECK_ROCSPARSE_ERROR(rocsparse_spildlt0_set_input(handle,
-                                                           spildlt0_descr,
-                                                           rocsparse_spildlt0_input_compute_datatype,
-                                                           &compute_datatype,
-                                                           sizeof(compute_datatype),
-                                                           p_error));
+        CHECK_ROCSPARSE_ERROR(
+            rocsparse_spildlt0_set_input(handle,
+                                         spildlt0_descr,
+                                         rocsparse_spildlt0_input_compute_datatype,
+                                         &compute_datatype,
+                                         sizeof(compute_datatype),
+                                         p_error));
         CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
         CHECK_ROCSPARSE_ERROR(
             rocsparse_spildlt0_set_input(handle,
@@ -1094,11 +1095,11 @@ namespace
                                          sizeof(double),
                                          p_error));
 
-        const J                             M = h_A.m;
-        host_vector<floating_data_t<T>>     h_diag_one(M);
-        int64_t                             struct_pivot   = -1;
-        int64_t                             numeric_pivot  = -1;
-        int64_t                             singular_pivot = -1;
+        const J                         M = h_A.m;
+        host_vector<floating_data_t<T>> h_diag_one(M);
+        int64_t                         struct_pivot   = -1;
+        int64_t                         numeric_pivot  = -1;
+        int64_t                         singular_pivot = -1;
         host_csrildlt0_ref<T, I, J>(h_A.m,
                                     h_A.ptr,
                                     h_A.ind,

@@ -22,9 +22,9 @@
  * ************************************************************************ */
 
 #include "rocsparse_assign_async.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_one.hpp"
 #include "rocsparse_pivot_info_t.hpp"
-#include "rocsparse_grid.hpp"
 #include "rocsparse_utility.hpp"
 
 rocsparse::position_t::position_t()

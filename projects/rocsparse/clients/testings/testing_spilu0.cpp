@@ -1686,7 +1686,7 @@ void testing_spilu0_extra(const Arguments& arg)
         std::unique_ptr<host_csr_matrix<T, I, J>> h_csr(
             rocsparse_clients::csr_tridiag_matrix_t<T, I, J>::init(4));
         h_csr->val[0] = static_cast<T>(0);
-        auto h_B = csr_as_bsr1<T, I, J>(*h_csr);
+        auto h_B      = csr_as_bsr1<T, I, J>(*h_csr);
         bsrilu0_zero_batch_stride<T, I, J>(arg, *h_B, batch_count, false);
     }
 }
