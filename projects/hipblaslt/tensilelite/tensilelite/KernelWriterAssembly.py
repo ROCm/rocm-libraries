@@ -841,27 +841,11 @@ class KernelWriterAssembly(KernelWriter):
 
   def defineSgpr(self, name, numSgprs, align=1):
     if numSgprs == 0: return Module()
-    # Temporarily mark parked (freeSgprVarPool) vars in-use so this checkout does
-    # not grab their registers, then restore them afterwards. A parked var may
-    # already be borrowed as a main-loop temp (its registers currently checked
-    # out) -- e.g. StreamK parks SrdWS specifically for reuse during the main
-    # loop. In that case its registers are not Available, this checkout cannot
-    # grab them anyway, and setSgprToInUseState would raise; skip such vars and
-    # only restore the ones we actually flipped back to in-use here.
-    protected = []
+    # check if previous define sgprs are being used..
     for s in self.states.freeSgprVarPool:
-      # Ask the pool rather than calling and catching: a parked var is skippable
-      # when it is not currently a temp checkout, or when its registers are
-      # borrowed elsewhere (e.g. StreamK reuses SrdWS during the main loop). In
-      # both cases the checkout below could not grab those registers anyway.
-      # Matching the text of the raised error instead would also swallow
-      # unrelated pool failures -- that is how a duplicate define went unnoticed.
-      if not self.sgprPool.canRemoveFromCheckOut(self.sgprs[s]):
-        continue
       self.setSgprToInUseState(s)
-      protected.append(s)
     ret = RegSet("s", "sgpr"+name, self.defineSgprIdx(name, numSgprs, align))
-    for s in protected:
+    for s in self.states.freeSgprVarPool:
       self.setSgprToFreeState(s)
     return ret
 
