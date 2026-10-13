@@ -80,11 +80,11 @@ namespace
         {
             if(m_had)
             {
-                setenv(m_name, m_saved.c_str(), 1);
+                set_env(m_name, m_saved.c_str());
             }
             else
             {
-                unsetenv(m_name);
+                unset_env(m_name);
             }
         }
 
@@ -209,10 +209,10 @@ TEST_F(CovGap81, handle_layer_logs_and_arch)
     EnvGuard trace("ROCSPARSE_LOG_TRACE_PATH");
     EnvGuard bench("ROCSPARSE_LOG_BENCH_PATH");
     EnvGuard debug("ROCSPARSE_LOG_DEBUG_PATH");
-    setenv("ROCSPARSE_LAYER", "7", 1);
-    unsetenv("ROCSPARSE_LOG_TRACE_PATH");
-    unsetenv("ROCSPARSE_LOG_BENCH_PATH");
-    unsetenv("ROCSPARSE_LOG_DEBUG_PATH");
+    set_env("ROCSPARSE_LAYER", "7");
+    unset_env("ROCSPARSE_LOG_TRACE_PATH");
+    unset_env("ROCSPARSE_LOG_BENCH_PATH");
+    unset_env("ROCSPARSE_LOG_DEBUG_PATH");
 
     hipStream_t stream;
     ASSERT_EQ(hipStreamCreate(&stream), hipSuccess);
@@ -220,9 +220,12 @@ TEST_F(CovGap81, handle_layer_logs_and_arch)
     EXPECT_EQ(open_and_close(nullptr), rocsparse_status_success);
     EXPECT_EQ(open_and_close(stream), rocsparse_status_success);
 
-    setenv("ROCSPARSE_LOG_TRACE_PATH", "/tmp/rocsparse-cov81-trace.txt", 1);
-    setenv("ROCSPARSE_LOG_BENCH_PATH", "/tmp/rocsparse-cov81-bench.txt", 1);
-    setenv("ROCSPARSE_LOG_DEBUG_PATH", "/tmp/rocsparse-cov81-debug.txt", 1);
+    const std::string trace_path = temp_file_path("rocsparse-cov81-trace.txt");
+    const std::string bench_path = temp_file_path("rocsparse-cov81-bench.txt");
+    const std::string debug_path = temp_file_path("rocsparse-cov81-debug.txt");
+    set_env("ROCSPARSE_LOG_TRACE_PATH", trace_path.c_str());
+    set_env("ROCSPARSE_LOG_BENCH_PATH", bench_path.c_str());
+    set_env("ROCSPARSE_LOG_DEBUG_PATH", debug_path.c_str());
 
     rocsparse_handle logged = nullptr;
     ASSERT_EQ(rocsparse_create_handle(&logged), rocsparse_status_success);
@@ -246,15 +249,15 @@ TEST_F(CovGap81, handle_layer_logs_and_arch)
         const std::string text((std::istreambuf_iterator<char>(in)), {});
         return text.find(needle) != std::string::npos;
     };
-    EXPECT_TRUE(file_has("/tmp/rocsparse-cov81-trace.txt", "cov81"));
-    EXPECT_TRUE(file_has("/tmp/rocsparse-cov81-bench.txt", "cov81"));
-    EXPECT_TRUE(file_has("/tmp/rocsparse-cov81-debug.txt", "cov81"));
+    EXPECT_TRUE(file_has(trace_path.c_str(), "cov81"));
+    EXPECT_TRUE(file_has(bench_path.c_str(), "cov81"));
+    EXPECT_TRUE(file_has(debug_path.c_str(), "cov81"));
     EXPECT_EQ(open_and_close(stream), rocsparse_status_success);
 
     // A missing directory leaves the ofstream closed, so the cerr fallback runs.
-    setenv("ROCSPARSE_LOG_TRACE_PATH", "/no/such/dir/rocsparse-cov81-trace.txt", 1);
-    setenv("ROCSPARSE_LOG_BENCH_PATH", "/no/such/dir/rocsparse-cov81-bench.txt", 1);
-    setenv("ROCSPARSE_LOG_DEBUG_PATH", "/no/such/dir/rocsparse-cov81-debug.txt", 1);
+    set_env("ROCSPARSE_LOG_TRACE_PATH", "/no/such/dir/rocsparse-cov81-trace.txt");
+    set_env("ROCSPARSE_LOG_BENCH_PATH", "/no/such/dir/rocsparse-cov81-bench.txt");
+    set_env("ROCSPARSE_LOG_DEBUG_PATH", "/no/such/dir/rocsparse-cov81-debug.txt");
     EXPECT_EQ(open_and_close(nullptr), rocsparse_status_success);
     EXPECT_EQ(open_and_close(stream), rocsparse_status_success);
     EXPECT_FALSE(std::ifstream("/no/such/dir/rocsparse-cov81-trace.txt").good());

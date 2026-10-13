@@ -484,18 +484,18 @@ TEST_F(HandleTest, logging_streams_and_layer_mode)
     rocsparse::open_log_stream(&cerr_stream, &file, "ROCSPARSE_COV_LOG_UNSET");
     EXPECT_EQ(cerr_stream, &std::cerr);
 
-    const char* path = "/tmp/rocsparse-cov-gap-log.txt";
-    ASSERT_EQ(::setenv("ROCSPARSE_COV_LOG_FILE", path, 1), 0);
+    const std::string path = temp_file_path("rocsparse-cov-gap-log.txt");
+    set_env("ROCSPARSE_COV_LOG_FILE", path.c_str());
     rocsparse::open_log_stream(&cerr_stream, &file, "ROCSPARSE_COV_LOG_FILE");
     EXPECT_TRUE(file.is_open());
     file.close();
 
-    ASSERT_EQ(::setenv("ROCSPARSE_COV_LOG_FILE", "/no/such/dir/rocsparse-cov-gap-log.txt", 1), 0);
+    set_env("ROCSPARSE_COV_LOG_FILE", "/no/such/dir/rocsparse-cov-gap-log.txt");
     std::ofstream missing;
     rocsparse::open_log_stream(&cerr_stream, &missing, "ROCSPARSE_COV_LOG_FILE");
     EXPECT_FALSE(missing.is_open());
     EXPECT_EQ(cerr_stream, &std::cerr);
-    ::unsetenv("ROCSPARSE_COV_LOG_FILE");
+    unset_env("ROCSPARSE_COV_LOG_FILE");
 
     EXPECT_NE(rocsparse::replaceX<float>("rocsparse_Xcov").find('s'), std::string::npos);
     EXPECT_NE(rocsparse::replaceX<double>("rocsparse_Xcov").find('d'), std::string::npos);
