@@ -228,8 +228,8 @@ private:
 
     // Loaded data (const members like 2D pattern)
     std::vector<std::string> features;
-    // Ordered engineered-feature names from the metadata's "derived_features"; empty for models that
-    // predate named engineered features, which then use the fixed positional engineered block.
+    // Ordered engineered-feature names from the metadata's "derived_features"; empty for models
+    // that predate named engineered features, which then use the fixed positional engineered block.
     std::vector<std::string> derived_feature_names;
     size_t num_inputs;
     size_t num_outputs;

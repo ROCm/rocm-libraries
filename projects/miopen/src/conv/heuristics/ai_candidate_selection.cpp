@@ -590,9 +590,9 @@ EngineerCandidateSelectionInputFeatures(const std::map<std::string, float>& feat
     // Derived feature block (shared with the TunaNet path). Dimensions above are normalized to the
     // forward (driver) convention; the GEMM assignment is selected by the actual direction. The
     // direction feature is encoded as 0=Forward, 1=BackwardData, 2=BackwardWeights.
-    const auto gemm_dir = direction_code == 0.0f   ? common::ConvDirection::Forward
-                          : direction_code == 1.0f ? common::ConvDirection::BackwardData
-                                                   : common::ConvDirection::BackwardWeights;
+    const auto gemm_dir       = direction_code == 0.0f   ? common::ConvDirection::Forward
+                                : direction_code == 1.0f ? common::ConvDirection::BackwardData
+                                                         : common::ConvDirection::BackwardWeights;
     const auto& derived_names = metadata.derived_feature_names();
     std::vector<float> derived;
     if(!derived_names.empty())
@@ -625,24 +625,26 @@ EngineerCandidateSelectionInputFeatures(const std::map<std::string, float>& feat
     else
     {
         // Older model without named engineered features: keep the fixed positional block.
-        derived = is_3d ? common::EngineeredConvFeatures(N,
-                                                         C_in,
-                                                         C_out,
-                                                         H_in,
-                                                         W_in,
-                                                         H_out,
-                                                         W_out,
-                                                         K_h,
-                                                         K_w,
-                                                         groups,
-                                                         num_cu,
-                                                         gemm_dir,
-                                                         3,
-                                                         D_in,
-                                                         D_out,
-                                                         K_d)
-                        : common::EngineeredConvFeatures(
-                              N, C_in, C_out, H_in, W_in, H_out, W_out, K_h, K_w, groups, num_cu, gemm_dir);
+        derived =
+            is_3d
+                ? common::EngineeredConvFeatures(N,
+                                                 C_in,
+                                                 C_out,
+                                                 H_in,
+                                                 W_in,
+                                                 H_out,
+                                                 W_out,
+                                                 K_h,
+                                                 K_w,
+                                                 groups,
+                                                 num_cu,
+                                                 gemm_dir,
+                                                 3,
+                                                 D_in,
+                                                 D_out,
+                                                 K_d)
+                : common::EngineeredConvFeatures(
+                      N, C_in, C_out, H_in, W_in, H_out, W_out, K_h, K_w, groups, num_cu, gemm_dir);
     }
     engineered.insert(engineered.end(), derived.begin(), derived.end());
 

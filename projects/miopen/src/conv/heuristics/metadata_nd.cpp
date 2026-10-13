@@ -438,8 +438,8 @@ size_t MetadataND::GetEngineeredNumInputs() const
             ++count;
     }
     // Named engineered features (if the model lists them) drive the count; otherwise fall back to
-    // the positional block (18 for 2D, 19 for 3D), derived from common::EngineeredConvFeatures so it
-    // stays in lockstep if that block changes.
+    // the positional block (18 for 2D, 19 for 3D), derived from common::EngineeredConvFeatures so
+    // it stays in lockstep if that block changes.
     count += derived_feature_names.empty() ? common::EngineeredConvFeatureCount(spatial_dim)
                                            : derived_feature_names.size();
     return count;
