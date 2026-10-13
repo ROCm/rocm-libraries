@@ -356,6 +356,13 @@ typedef struct rocke_conv_build_ctx
     rocke_value_t* group_idx;
     rocke_value_t* k_out_group_base;
 
+    /* ---- wgrad stream-K state (NULL off the stream-K path) ---- *
+     * wgrad_c_kpg       = b.const_i32(kpg)  (grouped dY k_out fold, Python c_kpg)
+     * wgrad_replica_sel = linear CTA index hashed into the workspace replica in
+     *                     place of block_id_z (Python replica_sel). */
+    rocke_value_t* wgrad_c_kpg;
+    rocke_value_t* wgrad_replica_sel;
+
     /* ---- LDS plan + smem handles ---- */
     rocke_conv_lds_layout_t lds_layout; /* spec.effective_lds_layout()         */
     bool double_buffer; /* compv4 || async_dma || unroll_k     */
