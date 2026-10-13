@@ -8,7 +8,7 @@
 // engine only through this header and candidate_search.hpp, so every client
 // translation unit sees the same hooks.
 #ifdef HIPBLASLT_BENCHMARK_CHECK_HIP
-#error "include benchmark_hooks.hpp before any hipblaslt_benchmark header"
+#error "include benchmark_hooks.hpp before hipblaslt_benchmark/benchmark_timing.hpp"
 #endif
 
 #include "hipblaslt_test.hpp" // CHECK_HIP_ERROR
