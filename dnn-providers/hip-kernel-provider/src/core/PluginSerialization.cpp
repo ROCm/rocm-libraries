@@ -53,10 +53,12 @@ hipdnnPluginStatus_t hipdnnEnginePluginSerializeExecutionContext(
         auto bytes = std::make_unique<uint8_t[]>(encoded.size());
         std::memcpy(bytes.get(), encoded.data(), encoded.size());
 
+        LOG_API_SUCCESS(apiName, "serializedContext->size=" << encoded.size());
+
+        // Nothing below may throw: once the buffer is released the caller owns it, and a
+        // failure status stops hipDNN from ever calling the destroy hook.
         serializedContext->size = encoded.size();
         serializedContext->ptr = bytes.release();
-
-        LOG_API_SUCCESS(apiName, "serializedContext->size=" << serializedContext->size);
     });
 }
 
