@@ -19,11 +19,14 @@ from pathlib import Path
 import numpy as np
 
 from .architectures import get_architecture
-from .contract import Case, array_digest, decode, file_digest, write_json
+from .contract import Case
+from reference_common.numeric import array_digest, decode, file_digest, write_json
 
 
 def run(request: dict, output: Path) -> None:
     """Execute a single declared case, poisoning every output before each run."""
+    target = get_architecture(request["architecture"])
+
     import rocke
     from rocke.runtime import DeviceMem, KernelLauncher, LaunchConfig, Runtime
     from rocke.runtime.hip_module import get_device_arch, get_device_target_id
@@ -31,7 +34,6 @@ def run(request: dict, output: Path) -> None:
     root = Path(request["platform_root"]).resolve()
     if not Path(rocke.__file__).resolve().is_relative_to(root):
         raise RuntimeError("worker imported rocKE outside its selected source/runtime")
-    target = get_architecture(request.get("architecture", "gfx942"))
     if get_device_arch() != target.NAME:
         raise RuntimeError(
             f"SDPA correctness requires a HIP-visible {target.NAME} device"
