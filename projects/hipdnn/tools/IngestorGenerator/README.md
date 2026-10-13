@@ -318,9 +318,10 @@ deliberate, reviewed update.
    heuristics are trained against, so a change that adds, removes or renames kernels is
    also a retraining decision, not only a catalog edit.
 4. Raise the manifest's `max_kernels` only deliberately: every kernel is a comgr build.
-5. If `tests/test_registry_regeneration.py` fails on the pinned registry-only spec fields,
-   a registry default moved a knob the shipped KDP does not carry. Edit the literal
-   snapshot in the same review.
+5. A field the registry spec has and the shipped KDP does not carry is built at its
+   dataclass default, so adding one is non-breaking and needs no update here. Refresh the
+   shipped KDP (enumerate without the manifest's `spec_fields`) when the integration is
+   next updated deliberately.
 
 Shipped `priority` is 0 for every kernel and the enumerator emits none: ranking is the
 engine's native `score()` alone, and the registry's default-first ordering never reaches

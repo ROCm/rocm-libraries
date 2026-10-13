@@ -120,10 +120,9 @@ def compare_catalog(
     shipped value, is reported either way.
 
     The caller owns the claim that fields the shipped catalog does not carry
-    sit at their expected values (``test_registry_regeneration`` pins them to a
-    checked-in literal snapshot). ``strict_spec=True`` compares the FULL spec
-    of the two catalogs both ways, so any field only one side carries is a
-    difference.
+    sit at their defaults (``test_registry_regeneration`` asserts it against
+    the spec dataclass). ``strict_spec=True`` compares the FULL spec of the two
+    catalogs both ways, so any field only one side carries is a difference.
     """
     spec_keys: frozenset | None = None
     if not strict_spec:
