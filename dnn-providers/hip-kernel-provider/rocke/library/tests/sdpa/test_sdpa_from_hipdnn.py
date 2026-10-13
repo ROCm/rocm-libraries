@@ -1,0 +1,297 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+"""``from_hipdnn``: hipDNN flatbuffer JSON -> ``SdpaRequest``.
+
+Graphs are built in the shape hipDNN's JSON helpers and golden generator write:
+a node with ``inputs`` / ``outputs`` / ``attributes`` and a ``tensors`` list.
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pytest
+
+from dispatch.sdpa import SdpaRequest, from_hipdnn, from_hipdnn_graph
+
+B, H, S, D = 2, 4, 8, 16
+
+_INPUT_UIDS = (
+    "attn_mask_tensor_uid",
+    "scale_tensor_uid",
+    "seq_len_q_tensor_uid",
+    "seq_len_kv_tensor_uid",
+    "seed_tensor_uid",
+    "offset_tensor_uid",
+    "dropout_mask_tensor_uid",
+    "dropout_scale_tensor_uid",
+    "page_table_k_tensor_uid",
+    "page_table_v_tensor_uid",
+    "block_mask_tensor_uid",
+    "sink_token_tensor_uid",
+    "descale_q_tensor_uid",
+    "descale_k_tensor_uid",
+    "descale_v_tensor_uid",
+    "descale_s_tensor_uid",
+    "scale_s_tensor_uid",
+    "scale_o_tensor_uid",
+)
+_OUTPUT_UIDS = (
+    "stats_tensor_uid",
+    "max_tensor_uid",
+    "sum_exp_tensor_uid",
+    "rng_dump_tensor_uid",
+    "amax_s_tensor_uid",
+    "amax_o_tensor_uid",
+)
+
+
+def _tensor(uid, dims, data_type="half", **extra):
+    strides, acc = [], 1
+    for d in reversed(dims):
+        strides.append(acc)
+        acc *= d
+    entry = {
+        "uid": uid,
+        "name": f"t{uid}",
+        "data_type": data_type,
+        "dims": list(dims),
+        "strides": list(reversed(strides)),
+        "virtual": False,
+    }
+    entry.update(extra)
+    return entry
+
+
+def _graph(attributes=None, inputs=None, outputs=None, tensors=()):
+    """A one-node SDPA graph; extra uids reference ``tensors`` (uids >= 10)."""
+    node = {
+        "type": "SdpaAttributes",
+        "name": "",
+        "compute_data_type": "float",
+        "inputs": {"q_tensor_uid": 0, "k_tensor_uid": 1, "v_tensor_uid": 2},
+        "outputs": {"o_tensor_uid": 3},
+        "attributes": {
+            "generate_stats": None,
+            "alibi_mask": False,
+            "padding_mask": False,
+            "causal_mask": False,
+            "causal_mask_bottom_right": False,
+            "dropout_probability": None,
+            "attn_scale_value": None,
+            "left_bound": None,
+            "right_bound": None,
+            "max_seq_len_kv": None,
+            "diagonal_alignment": "TOP_LEFT",
+            "mma_core_mode": "unset",
+            "implementation": "AUTO",
+        },
+    }
+    node["inputs"].update({key: None for key in _INPUT_UIDS})
+    node["outputs"].update({key: None for key in _OUTPUT_UIDS})
+    node["inputs"].update(inputs or {})
+    node["outputs"].update(outputs or {})
+    node["attributes"].update(attributes or {})
+    primaries = [_tensor(uid, (B, H, S, D)) for uid in range(4)]
+    return {"nodes": [node], "tensors": primaries + list(tensors)}
+
+
+def _request(**kwargs) -> SdpaRequest:
+    return from_hipdnn_graph(_graph(**kwargs), "gfx950")
+
+
+def test_minimal_node():
+    req = _request()
+    assert req.q.dims == (B, H, S, D) and req.q.dtype == "fp16"
+    assert (req.scale_source, req.scale) == ("default", 1.0)
+    assert (req.diagonal, req.left_bound, req.right_bound) == ("top_left", -1, -1)
+    assert req.compute_dtype == "fp32"
+    assert req.features() == {"layout_bhsd"}
+
+
+def test_from_hipdnn_accepts_a_uid_mapping():
+    graph = _graph()
+    tensors = {t["uid"]: t for t in graph["tensors"]}
+    assert from_hipdnn(graph["nodes"][0], tensors, "gfx950") == _request()
+
+
+# --- mask precedence: hipDNN getMaskType ---------------------------------------
+
+
+@pytest.mark.parametrize(
+    "attributes, band",
+    [
+        ({}, ("top_left", -1, -1)),
+        ({"right_bound": 0}, ("top_left", -1, 0)),
+        ({"left_bound": 3}, ("top_left", 3, -1)),
+        (
+            {"left_bound": 3, "right_bound": 0, "diagonal_alignment": "BOTTOM_RIGHT"},
+            ("bottom_right", 3, 0),
+        ),
+        # A deprecated flag wins and the trio is ignored.
+        (
+            {
+                "causal_mask": True,
+                "left_bound": 5,
+                "right_bound": 2,
+                "diagonal_alignment": "BOTTOM_RIGHT",
+            },
+            ("top_left", -1, 0),
+        ),
+        (
+            {"causal_mask_bottom_right": True, "left_bound": 5, "right_bound": 2},
+            ("bottom_right", -1, 0),
+        ),
+        ({"left_bound": -4, "right_bound": -9}, ("top_left", -1, -1)),
+    ],
+)
+def test_mask_precedence_matches_get_mask_type(attributes, band):
+    req = _request(attributes=attributes)
+    assert (req.diagonal, req.left_bound, req.right_bound) == band
+
+
+def test_both_deprecated_causal_flags_are_rejected():
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        _request(attributes={"causal_mask": True, "causal_mask_bottom_right": True})
+
+
+# --- scale: exactly one source ---------------------------------------------------
+
+
+def test_scale_value():
+    req = _request(attributes={"attn_scale_value": 0.125})
+    assert (req.scale_source, req.scale) == ("value", 0.125)
+
+
+def test_scale_tensor():
+    req = _request(
+        inputs={"scale_tensor_uid": 10}, tensors=[_tensor(10, (1,), "float")]
+    )
+    assert req.scale_source == "tensor" and req.scale_tensor.dims == (1,)
+    assert "scale_tensor" in req.features()
+
+
+def test_by_value_scale_tensor_folds_to_value():
+    scale = _tensor(
+        10,
+        (1,),
+        "float",
+        is_runtime_pass_by_value=True,
+        value_type="Float32Value",
+        value=0.5,
+    )
+    req = _request(inputs={"scale_tensor_uid": 10}, tensors=[scale])
+    assert (req.scale_source, req.scale, req.scale_tensor) == ("value", 0.5, None)
+
+
+def test_scale_tensor_and_value_are_exclusive():
+    with pytest.raises(ValueError, match="cannot both be set"):
+        _request(
+            attributes={"attn_scale_value": 0.5},
+            inputs={"scale_tensor_uid": 10},
+            tensors=[_tensor(10, (1,), "float")],
+        )
+
+
+# --- every other field lands somewhere ---------------------------------------------
+
+
+def test_stats_needs_generate_stats_and_a_tensor():
+    lse = [_tensor(10, (B, H, S, 1), "float")]
+    assert _request(outputs={"stats_tensor_uid": 10}, tensors=lse).stats is None
+    req = _request(
+        attributes={"generate_stats": True},
+        outputs={"stats_tensor_uid": 10},
+        tensors=lse,
+    )
+    assert req.stats.dims == (B, H, S, 1) and "lse" in req.features()
+
+
+@pytest.mark.parametrize(
+    "kwargs, feature",
+    [
+        ({"attributes": {"alibi_mask": True}}, "alibi"),
+        ({"attributes": {"padding_mask": True}}, "padded"),
+        ({"inputs": {"seq_len_q_tensor_uid": 10}}, "padded"),
+        ({"inputs": {"attn_mask_tensor_uid": 10}}, "bias"),
+        ({"inputs": {"block_mask_tensor_uid": 10}}, "block_mask"),
+        ({"inputs": {"sink_token_tensor_uid": 10}}, "sinks"),
+        ({"attributes": {"dropout_probability": 0.1}}, "dropout"),
+        ({"inputs": {"seed_tensor_uid": 10}}, "dropout"),
+        ({"outputs": {"rng_dump_tensor_uid": 10}}, "dropout"),
+        ({"inputs": {"page_table_k_tensor_uid": 10}}, "paged"),
+        ({"attributes": {"max_seq_len_kv": 64}}, "paged"),
+        ({"inputs": {"descale_q_tensor_uid": 10}}, "fp8"),
+        ({"inputs": {"scale_o_tensor_uid": 10}}, "fp8_s_o"),
+        ({"outputs": {"amax_s_tensor_uid": 10}}, "fp8_s_o"),
+        ({"outputs": {"max_tensor_uid": 10}}, "max_sum_exp"),
+        ({"outputs": {"sum_exp_tensor_uid": 10}}, "max_sum_exp"),
+        ({"attributes": {"mma_core_mode": "float"}}, "mma_core_mode"),
+        ({"attributes": {"implementation": "UNIFIED"}}, "implementation_hint"),
+    ],
+)
+def test_field_reaches_features(kwargs, feature):
+    extra = [_tensor(10, (1, 1, S, S), "float")]
+    req = _request(tensors=extra, **kwargs)
+    assert feature in req.features()
+
+
+def test_ragged_and_dtypes_map():
+    graph = _graph()
+    for t in graph["tensors"]:
+        t["data_type"] = "BFLOAT16"  # flatc spells enums in upper case
+        t["strides"] = [S * H * D, D, H * D, 1]
+        t["ragged_offset_tensor_uid"] = 10
+        t["ragged_offset_multiplier"] = H * D
+    graph["nodes"][0]["compute_data_type"] = "half"
+    req = from_hipdnn_graph(graph, "gfx950")
+    assert req.q.dtype == "bf16" and req.compute_dtype == "fp16"
+    assert req.q.ragged and req.q.ragged_offset_multiplier == H * D
+    assert {"ragged", "layout_bshd", "compute_dtype"} <= req.features()
+
+
+@pytest.mark.parametrize(
+    "graph_edit, match",
+    [
+        (lambda g: g["nodes"][0].update(type="MatmulAttributes"), "SdpaAttributes"),
+        (lambda g: g["nodes"][0]["inputs"].update(q_tensor_uid=None), "missing"),
+        (lambda g: g["nodes"][0]["inputs"].update(seed_tensor_uid=99), "uid 99"),
+        (lambda g: g["tensors"][0].update(data_type="fp12"), "data_type"),
+        (lambda g: g["tensors"][1].update(dims=[B, H, S, 2 * D]), "head dim"),
+    ],
+)
+def test_malformed_graphs_are_rejected(graph_edit, match):
+    graph = _graph()
+    graph_edit(graph)
+    with pytest.raises(ValueError, match=match):
+        from_hipdnn_graph(graph, "gfx950")
+
+
+# --- the checked-in hipDNN golden bundles ------------------------------------------
+
+_BUNDLES = (
+    Path(__file__).resolve().parents[5]
+    / "integration-tests"
+    / "integration-test-bundles"
+)
+_GRAPHS = sorted(
+    p
+    for p in _BUNDLES.glob("*/SdpaFwd*/**/*.json")
+    if not p.name.endswith(("meta.json", "support.json", "sweep.json"))
+    and "Default" not in p.parts
+)
+
+
+@pytest.mark.skipif(not _GRAPHS, reason="hipDNN SDPA golden bundles not in this tree")
+@pytest.mark.parametrize("path", _GRAPHS, ids=lambda p: str(p.relative_to(_BUNDLES)))
+def test_golden_bundle_graphs_translate(path):
+    graph = json.loads(path.read_text())
+    req = from_hipdnn_graph(graph, "gfx950")
+    assert SdpaRequest.from_normalized(json.loads(json.dumps(req.normalized()))) == req
+    node = graph["nodes"][0]
+    assert ("lse" in req.features()) == bool(node["attributes"]["generate_stats"])
+    assert ("padded" in req.features()) == (
+        node["inputs"]["seq_len_q_tensor_uid"] is not None
+    )
