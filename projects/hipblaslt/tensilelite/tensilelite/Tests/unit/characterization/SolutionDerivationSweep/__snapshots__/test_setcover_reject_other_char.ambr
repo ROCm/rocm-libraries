@@ -183,7 +183,7 @@
     'Valid': False,
     '_GlobalAccumulation': 'MultipleBuffer',
     'rejections': list([
-      'SourceSwap not compatible with StoreRemap',
+      'storeRemap + SourceSwap: MatrixInstBM(1)/MatrixInstBN(2) > 1 is not derived',
     ]),
   })
 # ---

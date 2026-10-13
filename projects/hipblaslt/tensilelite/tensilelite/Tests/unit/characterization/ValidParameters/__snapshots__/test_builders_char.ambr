@@ -1492,6 +1492,7 @@
     'StaggerUStride',
     'StinkyTofuParameters',
     'StorePriorityOpt',
+    'StoreRemapTensorStore',
     'StoreRemapVectorWidth',
     'StoreSyncOpt',
     'StoreVectorWidth',
@@ -1522,6 +1523,7 @@
     'TemporalHintMXSB',
     'TemporalHintMetadata',
     'TemporalHintWS',
+    'TensorStore',
     'ThreadTile',
     'TileProcessingStrategy',
     'TransposeLDS',
@@ -1541,6 +1543,9 @@
     'WaveSeparateGlobalReadA',
     'WaveSeparateGlobalReadB',
     'WaveSplitK',
+    'WaveTransposeStore',
+    'WaveTransposeStorePipe',
+    'WaveTransposeStoreTDM',
     'WavefrontSize',
     'WorkAssignment',
     'WorkGroup',
@@ -2672,6 +2677,15 @@
       'len': 2,
       'type': 'list',
     }),
+    'StoreRemapTensorStore': dict({
+      'head': list([
+        -1,
+        0,
+        1,
+      ]),
+      'len': 3,
+      'type': 'list',
+    }),
     'StoreRemapVectorWidth': dict({
       'head': list([
         -1,
@@ -2933,6 +2947,14 @@
       'len': 8,
       'type': 'list',
     }),
+    'TensorStore': dict({
+      'head': list([
+        False,
+        True,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
     'ThreadTile': dict({
       'head': list([
         list([
@@ -3099,6 +3121,32 @@
       'type': 'list',
     }),
     'WaveSplitK': dict({
+      'head': list([
+        False,
+        True,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'WaveTransposeStore': dict({
+      'head': list([
+        -1,
+        0,
+        1,
+      ]),
+      'len': 6,
+      'type': 'list',
+    }),
+    'WaveTransposeStorePipe': dict({
+      'head': list([
+        0,
+        1,
+        2,
+      ]),
+      'len': 3,
+      'type': 'list',
+    }),
+    'WaveTransposeStoreTDM': dict({
       'head': list([
         False,
         True,

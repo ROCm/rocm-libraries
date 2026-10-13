@@ -47,7 +47,7 @@ _TRIPS = {
     "wf32_source": ("gfx942_HSS", {"WavefrontSize": 32, "KernelLanguage": "Source"}),
     "ucms_tailloop": ("gfx942_HSS", {"UseCustomMainLoopSchedule": 1, "TailloopInNll": True}),
     "af0em_nohpa": ("gfx942_HSS", {"ProblemType.HighPrecisionAccumulate": False, "AssertFree0ElementMultiple": 1}),
-    "srmap_sourceswap": ("gfx942_HSS", {"StoreRemapVectorWidth": 4, "SourceSwap": True}),
+    "srmap_sourceswap": ("gfx942_HSS", {"StoreRemapVectorWidth": 4, "SourceSwap": True, "MIBlock": [16, 16, 16, 1, 1, 2]}),
     # BufferLoad=0 returning-reject chain (one config clears the earlier guards)
     "nobuf_pgr2": ("gfx942_HSS", {"BufferLoad": False, "PrefetchGlobalRead": 2}),
     "nobuf_dtva": ("gfx942_HSS", {"BufferLoad": False, "PrefetchGlobalRead": 1, "DirectToVgprA": True}),
