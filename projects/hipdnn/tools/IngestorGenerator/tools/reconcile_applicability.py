@@ -35,12 +35,6 @@ from dispatch_parity import (  # noqa: E402
 )
 
 
-def _pin(profile: dict) -> dict:
-    """The selector fields ``dispatch.pin`` names, or none for a profile whose
-    dispatcher selects without pinning."""
-    return dict((profile.get("dispatch") or {}).get("pin") or {})
-
-
 def reference_serves(shapes: list[dict], profile: dict) -> dict:
     """For each shape: does the reference kernel FAMILY serve it, and which candidate?
 
@@ -95,8 +89,7 @@ def reference_serves(shapes: list[dict], profile: dict) -> dict:
     arch = profile.get("arch")
     # Opt-in defaults ARE inherited here: without its selector, a candidate that only
     # matches when the request names it declines everything and reconciles trivially.
-    # `dispatch.pin` is that selector for a pinning dispatcher, so it is inherited too.
-    defaults = {**(reference_decl.get("defaults") or {}), **_pin(profile)}
+    defaults = dict(reference_decl.get("defaults") or {})
 
     # An optional translator (`reference_request.via: {module, function}`)
     # taking the shape dict to a reference request, for a corpus written in the
@@ -329,10 +322,7 @@ def main(argv=None) -> int:
     # count alone proves nothing. A shape either side serves proves the
     # comparison is live.
     match_key = ((profile.get("reference_candidates") or {}).get("match")) or ""
-    request_defaults = {
-        **((profile.get("request") or {}).get("defaults") or {}),
-        **_pin(profile),
-    }
+    request_defaults = (profile.get("request") or {}).get("defaults") or {}
     nothing_served = not both_serve and not only_reference and not only_ours
     if shapes and nothing_served and match_key and match_key not in request_defaults:
         print(
@@ -341,7 +331,7 @@ def main(argv=None) -> int:
             f"opt-in kernel only\n  admits a request that names it, so the reference "
             f"declines every shape and this\n  integration declines them for the same "
             f"reason -- agreement about nothing.\n  Add '{match_key}' to "
-            f"request.defaults or dispatch.pin, or pass --allow-empty if a corpus\n  that nothing "
+            f"request.defaults, or pass --allow-empty if a corpus that\n  nothing "
             f"serves is genuinely what you meant to reconcile.",
             file=sys.stderr,
         )
