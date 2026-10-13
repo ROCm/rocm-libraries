@@ -271,27 +271,47 @@ def _is_master_library_state(data):
 
 
 def _native_msgpack_writer():
-    """The C++ writer module, when this build produced it.
-
-    Missing means the extension was not built (a YAML host that is not
-    generating libraries, or a pure Python tree). A module that is present
-    but fails to load is reported rather than replaced with packb.
-    """
-    import importlib.util
-
-    if importlib.util.find_spec("tensilelite.tensilelite_write") is None:
-        return None
-    from tensilelite import tensilelite_write
+    """The C++ writer. MessagePack library files are not packed in Python."""
+    try:
+        from tensilelite import tensilelite_write
+    except ImportError as error:
+        printExit("MessagePack libraries are written by tensilelite.tensilelite_write, "
+                  "which this build did not produce: {}".format(error))
     return tensilelite_write
+
+
+def _index_to_name_mapping(data):
+    """The lazy-library index file: index to code-object file prefix."""
+    if not isinstance(data, dict):
+        return None
+    pairs = []
+    for key, value in data.items():
+        if isinstance(key, bool) or not isinstance(value, str):
+            return None
+        if isinstance(key, int):
+            index = key
+        elif isinstance(key, str):
+            try:
+                index = int(key)
+            except ValueError:
+                return None
+        else:
+            return None
+        pairs.append((index, value))
+    return pairs
 
 
 def writeMsgPack(filename, data):
     """Writes data to file in compressed Message Pack format (.dat.zlib)."""
-    writer = _native_msgpack_writer() if _is_master_library_state(data) else None
-    if writer is not None:
+    writer = _native_msgpack_writer()
+    if _is_master_library_state(data):
         raw = writer.write_library(msgpack.packb(data))
     else:
-        raw = msgpack.packb(data)
+        mapping = _index_to_name_mapping(data)
+        if mapping is None:
+            printExit("writeMsgPack writes a MasterSolutionLibrary or an "
+                      "index-to-file mapping")
+        raw = writer.write_mapping(mapping)
     compressed = zlib.compress(raw, 9)
     with open(filename + ".zlib", "wb") as f:
         f.write(compressed)
@@ -313,8 +333,7 @@ def writeMsgPackIndexed(filename, data):
     on its own into one concatenated BIN blob, described by a flat
     [index, offset, length, ...] side table. That lets the runtime hold the
     blob unparsed and deserialize only the solutions a query actually
-    selects. When tensilelite_write is importable, MessagePackWriteIndexedLibraryData
-    emits that document. Otherwise the packing below does.
+    selects. MessagePackWriteIndexedLibraryData emits that document.
 
     Only MasterSolutionLibrary payloads may be written this way. Flat
     dictionaries such as the per-arch lazy-loading mapping file have no
@@ -324,33 +343,7 @@ def writeMsgPackIndexed(filename, data):
         printExit("writeMsgPackIndexed requires a MasterSolutionLibrary state dict "
                   "with 'solutions' and 'library' keys")
 
-    writer = _native_msgpack_writer()
-    if writer is not None:
-        raw = writer.write_library_indexed(msgpack.packb(data))
-    else:
-        # state() emits solutions as a list of dicts, so sorting needs an explicit
-        # key; a bare sorted() would try to order dicts and raise TypeError.
-        solutions = sorted(data["solutions"], key=lambda s: s["index"])
-
-        packer = msgpack.Packer(use_bin_type=True)
-        solutionsIndex = []
-        chunks = []
-        offset = 0
-        for solution in solutions:
-            packed = packer.pack(solution)
-            solutionsIndex.extend((solution["index"], offset, len(packed)))
-            chunks.append(packed)
-            offset += len(packed)
-
-        # Fixed key order keeps the artifact byte-reproducible across runs.
-        indexed = {"format_version": INDEXED_FORMAT_VERSION}
-        if "version" in data:
-            indexed["version"] = data["version"]
-        indexed["solutions_index"] = solutionsIndex
-        indexed["solutions_blob"] = b"".join(chunks)
-        indexed["library"] = data["library"]
-
-        raw = msgpack.packb(indexed, use_bin_type=True)
+    raw = _native_msgpack_writer().write_library_indexed(msgpack.packb(data))
     compressed = zlib.compress(raw, 9)
     with open(filename + ".zlib", "wb") as f:
         f.write(compressed)

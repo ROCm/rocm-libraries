@@ -44,4 +44,18 @@ NB_MODULE(tensilelite_write, m)
         },
         nb::arg("msgpack_bytes"),
         "Return the format_version 2 indexed document for msgpack_bytes.");
+
+    m.def(
+        "write_mapping",
+        [](nb::list pairs) {
+            std::map<int, std::string> mapping;
+            for(nb::handle item : pairs)
+            {
+                nb::tuple pair = nb::cast<nb::tuple>(item);
+                mapping.emplace(nb::cast<int>(pair[0]), nb::cast<std::string>(pair[1]));
+            }
+            return asBytes(TensileLite::MessagePackWriteLibraryMapping(mapping));
+        },
+        nb::arg("index_name_pairs"),
+        "Return the lazy-library index-to-file-prefix table.");
 }
