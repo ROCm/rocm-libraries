@@ -5,20 +5,26 @@
 
 WHAT IS REGISTERED
 ------------------
-Exactly the instances in the per-arch lists under
-``grouped_convolution_instances/`` -- currently ``gfx942_fwd.json`` and
-``gfx950_fwd.json``, forward convolutions only. Every record there spells the
-:class:`KernelIdentity` of one AOT kernel (format: :class:`InstanceList`;
-edit with ``benchmarks/common/grouped_conv/instance_list.py``) and becomes one
-:class:`KernelCandidate`, whose ``name`` and ``spec_id`` are the identity's
-lossless name (:meth:`KernelIdentity.label`, format in
-:mod:`kernels.common.conv_kernel_label`) and whose ``algorithm`` is the kernel
-family (``implicit_gemm``, ``direct_nongrouped``, ``direct_depthwise_tiled``,
-...). So a request can pin one family (``algorithm=``) or one instance
-(``spec_id=<name>``).
+Exactly the instances in the per-arch, per-direction lists under
+``grouped_convolution_instances/`` (``<arch>_<direction>.json``) -- currently
+forward and backward-data (dgrad) convolutions on gfx950 (the gfx942 forward
+list is registered but empty). Every
+record there spells the :class:`KernelIdentity` of one AOT kernel (format:
+:class:`InstanceList`; edit with
+``benchmarks/common/grouped_conv/instance_list.py``) and becomes one
+:class:`KernelCandidate` of its direction's registry, whose ``name`` and
+``spec_id`` are the identity's lossless name (:meth:`KernelIdentity.label`,
+format in :mod:`kernels.common.conv_kernel_label`) and whose ``algorithm`` is
+the kernel family (``implicit_gemm``, ``direct_nongrouped``,
+``direct_depthwise_dgrad``, ...). So a request can pin one family
+(``algorithm=``) or one instance (``spec_id=<name>``).
 
-Nothing else is registered: no wgrad, no dgrad, no other arch. A request for
-any of those is rejected with a reason rather than routed to a default.
+Nothing else is registered: no wgrad, no other arch. A request for either is
+rejected with a reason rather than routed to a default.
+
+A dgrad request describes the same convolution as the forward one (its
+``Hi``/``Wi`` are dX's extents, ``Ho``/``Wo`` dY's); the instance computes dX
+from dY and the filter.
 
 WHAT DISPATCH DECIDES
 ---------------------
@@ -40,8 +46,12 @@ WHAT DISPATCH DECIDES
 Building the instances is not done here: their binaries come from the AOT
 build (``benchmarks/common/grouped_conv/benchmark_grouped_conv.py
 --compile-all``), keyed by the same identity. What dispatch hands a launcher is
-the identity, the launch geometry, the kernarg signature and the kernarg values
-(:func:`launch_values_for`).
+a :class:`ConvLaunchPlan` (:func:`launch_plan_for`): the kernels to launch in
+order -- each one's identity, launch geometry, kernarg signature and buffers
+-- plus the scratch and host tables they need. Most instances are one kernel;
+the MFMA direct dgrad first runs the weight transforms named in its spec's
+``helpers``, and implicit-GEMM dgrad reads a tilde sub-GEMM table the caller
+uploads.
 """
 
 from __future__ import annotations
@@ -49,19 +59,22 @@ from __future__ import annotations
 import dataclasses
 import functools
 import json
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 
 from rocke.core.arch import ArchTarget
 from kernels.common.conv_direct_grouped import DirectConvProblem
 from kernels.common.conv_direct_variants import (
+    direct_dgrad_weight_transforms,
+    direct_dgrad_workspaces,
     direct_spec_for_problem,
     make_direct_spec,
 )
 from kernels.common.conv_implicit_gemm import ConvProblem
 from kernels.common.conv_kernel_identity import (
     KernelIdentity,
+    dgrad_sub_gemms,
     identity_supports_problem,
 )
 from kernels.common.conv_kernel_label import field_baseline
@@ -80,11 +93,14 @@ from rocke.dispatch.core import (
 )
 
 __all__ = [
+    "CONV_DGRAD_REGISTRY",
+    "CONV_DIRECT_ABI_VERSION",
     "CONV_FWD_REGISTRY",
     "CONV_GROUPED_ABI_VERSION",
-    "CONV_DIRECT_ABI_VERSION",
     "ConvGroupedRequest",
     "ConvInstanceSpec",
+    "ConvLaunchPlan",
+    "ConvLaunchStep",
     "InstanceList",
     "InstanceListError",
     "conv_grouped_candidates",
@@ -92,7 +108,7 @@ __all__ = [
     "dispatch_conv_grouped",
     "dispatch_conv_grouped_all",
     "format_instance_list",
-    "launch_values_for",
+    "launch_plan_for",
     "load_instance_list",
     "registered_conv_grouped_combos",
     "registered_conv_grouped_instances",
@@ -102,7 +118,8 @@ __all__ = [
 # Family / ABI constants
 # ---------------------------------------------------------------------------
 
-_FAMILY_FWD = "conv_fwd"
+# Registry family of each direction that has registered instances.
+_FAMILIES = {"fwd": "conv_fwd", "dgrad": "conv_dgrad"}
 
 # Kernarg layouts: implicit GEMM takes the conv_args_signature ABI, every
 # direct variant the conv_direct_args_signature one.
@@ -114,7 +131,11 @@ _INSTANCE_DIR = Path(__file__).resolve().with_name("grouped_convolution_instance
 _INSTANCE_LISTS: dict[tuple[str, str], str] = {
     ("gfx942", "fwd"): "gfx942_fwd.json",
     ("gfx950", "fwd"): "gfx950_fwd.json",
+    ("gfx950", "dgrad"): "gfx950_dgrad.json",
 }
+
+# The buffers bound to an instance's A, B and D operands, by direction.
+_OPERANDS = {"fwd": ("x", "w", "y"), "dgrad": ("dy", "w", "dx")}
 
 # ---------------------------------------------------------------------------
 # Request
@@ -142,7 +163,7 @@ class ConvGroupedRequest(OperatorRequest):
     dilation_w: int = 1
     dtype: str = "fp16"
     layout: str = "NHWC"
-    # Only "fwd" has registered instances; any other direction is rejected.
+    # "fwd" or "dgrad" (the directions with registered instances).
     direction: str = "fwd"
     # 3D depth fields -- all must be set together or all left as None (2D).
     Di: int | None = None
@@ -268,15 +289,16 @@ def _direct_problem(req: ConvGroupedRequest) -> tuple[DirectConvProblem | None, 
 
 @functools.lru_cache(maxsize=256)
 def _request_errors(req: OperatorRequest) -> tuple[str, ...]:
-    """Why ``req`` is not a well-formed forward grouped convolution (empty if it is)."""
+    """Why ``req`` is not a well-formed grouped convolution (empty if it is)."""
     if not isinstance(req, ConvGroupedRequest):
         return (f"expected ConvGroupedRequest, got {type(req).__name__}",)
     errors: list[str] = []
     if req.op != "conv_grouped":
         errors.append(f"unsupported op {req.op!r}")
-    if req.direction.lower() != "fwd":
+    if req.direction.lower() not in _FAMILIES:
         errors.append(
-            f"only forward instances are registered, got direction={req.direction!r}"
+            f"no {req.direction!r} instances are registered "
+            f"(directions: {', '.join(_FAMILIES)})"
         )
     for field_name in ("N", "C", "K", "Hi", "Wi", "Y", "X", "G"):
         if int(getattr(req, field_name)) <= 0:
@@ -331,16 +353,24 @@ class ConvInstanceSpec:
     ``name`` is the instance's lossless kernel name and ``identity`` the AOT
     identity it decodes to -- the key its binary is built and cached under.
     ``block`` is the workgroup size the binary is launched with; it is a
-    function of the instance's tuning alone, never of the shape.
+    function of the instance's tuning alone, never of the shape. ``helpers``
+    are the binaries a run launches before it (the MFMA dgrad's weight
+    transforms), built and cached alongside it.
     """
 
     name: str
     identity: KernelIdentity
     block: tuple[int, int, int]
+    helpers: tuple[KernelIdentity, ...] = ()
 
     @property
     def algorithm(self) -> str:
         return self.identity.algorithm
+
+    @property
+    def direction(self) -> str:
+        """``fwd`` or ``dgrad``, for implicit GEMM and direct conv alike."""
+        return self.identity.direction.removeprefix("direct_")
 
     @property
     def dtype(self) -> str:
@@ -419,6 +449,32 @@ def _instance_block(identity: KernelIdentity) -> tuple[int, int, int]:
     return (spec.threads_per_block, 1, 1)
 
 
+def _instance_helpers(identity: KernelIdentity) -> tuple[KernelIdentity, ...]:
+    """The weight-transform binaries an MFMA dgrad instance launches first.
+
+    They read the filter and channel counts alone, so the AOT cache keys them
+    with padding and stride zeroed: every instance sharing a filter shares
+    them.
+    """
+    if identity.algorithm != "direct_grouped_dgrad_mfma":
+        return ()
+    return tuple(
+        dataclasses.replace(
+            identity,
+            algorithm=helper,
+            direction="direct_dgrad_helper",
+            pad_h=0,
+            pad_w=0,
+            stride_h=0,
+            stride_w=0,
+            knobs=json.dumps(helper_knobs, sort_keys=True),
+        )
+        for helper, helper_knobs, _, _ in direct_dgrad_weight_transforms(
+            _instance_knobs(identity)
+        )
+    )
+
+
 # ---------------------------------------------------------------------------
 # Launch contract
 # ---------------------------------------------------------------------------
@@ -430,9 +486,20 @@ def _signature(spec: ConvInstanceSpec) -> tuple[dict, ...]:
         conv_direct_args_signature,
     )
 
-    if spec.is_direct:
-        return tuple(conv_direct_args_signature(spec.dtype, direction="fwd"))
-    return tuple(conv_args_signature(spec.dtype, is_3d=spec.identity.is_3d))
+    if not spec.is_direct:
+        return tuple(
+            conv_args_signature(
+                spec.dtype, direction=spec.direction, is_3d=spec.identity.is_3d
+            )
+        )
+    # The MFMA dgrad's own kernel is a forward pass over the transposed problem.
+    direction = "fwd" if spec.helpers else spec.direction
+    return tuple(conv_direct_args_signature(spec.dtype, direction=direction))
+
+
+@functools.lru_cache(maxsize=4096)
+def _sub_gemms(identity: KernelIdentity, req: ConvGroupedRequest) -> tuple:
+    return tuple(dgrad_sub_gemms(identity, _conv_problem(req)))
 
 
 def _grid(spec: ConvInstanceSpec, req: OperatorRequest) -> tuple[int, int, int]:
@@ -447,10 +514,19 @@ def _grid(spec: ConvInstanceSpec, req: OperatorRequest) -> tuple[int, int, int]:
         if isinstance(launch_spec, DirectNongroupedConvSpec):
             return launch_spec.grid()
         return direct_launch_geometry(launch_spec)[0]
+    ident = spec.identity
+    if spec.direction == "dgrad":
+        # One workgroup per tile of every tilde sub-GEMM (the kernel finds its
+        # sub-GEMM by binary search over the table); the group rides y.
+        tiles = sum(
+            -(-sg.gemm_m // ident.tile_m) * -(-sg.gemm_n // ident.tile_n)
+            for sg in _sub_gemms(ident, req)
+        )
+        return (tiles, max(1, req.G), max(1, ident.split_k))
     from kernels.common.conv_args import ConvArgs
 
     return ConvArgs.from_problem(
-        _conv_problem(req), tile_m=spec.identity.tile_m, tile_n=spec.identity.tile_n
+        _conv_problem(req), tile_m=ident.tile_m, tile_n=ident.tile_n
     ).grid()
 
 
@@ -458,38 +534,136 @@ def _block(spec: ConvInstanceSpec) -> tuple[int, int, int]:
     return spec.block
 
 
-def launch_values_for(
-    req: ConvGroupedRequest,
-    spec: ConvInstanceSpec,
-    *,
-    A_ptr: int,
-    B_ptr: int,
-    D_ptr: int,
-    A_bytes: int,
-    B_bytes: int,
-    D_bytes: int,
-) -> dict:
-    """The full kernarg ``values`` of ``spec`` launched on ``req``.
+@dataclass(frozen=True)
+class ConvLaunchStep:
+    """One kernel launch of a :class:`ConvLaunchPlan`.
 
-    A = activation (NHWC), B = filter (KYXC, per-group channels), D = output
-    (NHWK), for both families. Implicit GEMM takes its tile counts as kernargs
-    (the chiplet-swizzle path decodes the workgroup id against them), so the
-    instance's tile is part of the values.
+    ``identity`` is the binary to launch (its AOT cache key). ``buffers``
+    names the buffers bound to its A, B and D kernarg slots; the weight
+    transforms take no B and no extents (``args`` is ``None``), a convolution
+    kernel takes its extents from ``args``.
+    """
+
+    identity: KernelIdentity
+    grid: tuple[int, int, int]
+    block: tuple[int, int, int]
+    signature: tuple[dict, ...]
+    buffers: tuple[str, str | None, str]
+    args: object = None
+
+
+@dataclass(frozen=True)
+class ConvLaunchPlan:
+    """Everything a launcher needs to run one instance on one request.
+
+    The steps run in order on one stream; the last is the instance's own
+    kernel. Buffers are named: the operands ``x``/``w``/``y`` (fwd) or
+    ``dy``/``w``/``dx`` (dgrad), the caller-allocated scratch in
+    ``workspaces`` (name -> bytes, no initial contents), and for implicit-GEMM
+    dgrad ``sub_gemms``, a device copy of the i32 table ``sub_gemm_table``
+    (``num_sub_gemms`` records).
+    """
+
+    steps: tuple[ConvLaunchStep, ...]
+    workspaces: Mapping[str, int] = field(default_factory=dict)
+    sub_gemm_table: tuple[int, ...] = ()
+    num_sub_gemms: int = 0
+
+    def values(
+        self, step: ConvLaunchStep, ptrs: Mapping[str, int], sizes: Mapping[str, int]
+    ) -> dict:
+        """The full kernarg ``values`` of ``step``, its buffers at ``ptrs``."""
+        a, b, d = step.buffers
+        if step.args is None:
+            return {
+                "A": ptrs[a],
+                "D": ptrs[d],
+                "A_bytes": sizes[a],
+                "D_bytes": sizes[d],
+            }
+        extras = {}
+        if self.num_sub_gemms:
+            extras = {
+                "sub_gemm_buf": ptrs["sub_gemms"],
+                "num_sub_gemms": self.num_sub_gemms,
+            }
+        return step.args.to_launch_values(
+            ptrs[a], ptrs[b], ptrs[d], sizes[a], sizes[b], sizes[d], **extras
+        )
+
+
+def launch_plan_for(req: ConvGroupedRequest, spec: ConvInstanceSpec) -> ConvLaunchPlan:
+    """How to run the admitted instance ``spec`` on ``req``.
+
+    A = dY / activation (NHWK / NHWC), B = filter (KYXC, per-group channels),
+    D = dX / output. Implicit GEMM takes its tile counts as kernargs (the
+    chiplet-swizzle path decodes the workgroup id against them), so the
+    instance's tile is part of the extents.
     """
     from kernels.common.conv_args import ConvArgs
 
-    if spec.is_direct:
-        problem, why = _direct_problem(req)
-        if problem is None:
-            raise ValueError(f"{spec.name} cannot run this request: {why}")
-        args = ConvArgs.from_problem(problem, direction="fwd")
-    else:
+    ident = spec.identity
+    step = functools.partial(
+        ConvLaunchStep,
+        ident,
+        _grid(spec, req),
+        spec.block,
+        _signature(spec),
+        _OPERANDS[spec.direction],
+    )
+    if not ident.is_direct:
         args = ConvArgs.from_problem(
             _conv_problem(req),
-            tile_m=spec.identity.tile_m,
-            tile_n=spec.identity.tile_n,
+            direction=spec.direction,
+            tile_m=ident.tile_m,
+            tile_n=ident.tile_n,
         )
-    return args.to_launch_values(A_ptr, B_ptr, D_ptr, A_bytes, B_bytes, D_bytes)
+        if spec.direction != "dgrad":
+            return ConvLaunchPlan((step(args),))
+        from kernels.common.conv_implicit_gemm_dgrad import pack_sub_gemm_buffer
+
+        sub_gemms = list(_sub_gemms(ident, req))
+        return ConvLaunchPlan(
+            (step(args),),
+            sub_gemm_table=tuple(
+                pack_sub_gemm_buffer(sub_gemms, ident.tile_m, ident.tile_n)
+            ),
+            num_sub_gemms=len(sub_gemms),
+        )
+    problem, _ = _direct_problem(req)
+    if not spec.helpers:
+        args = ConvArgs.from_problem(problem, direction=spec.direction)
+        return ConvLaunchPlan((step(args),))
+
+    # MFMA dgrad: the weight transforms, then a forward pass over the
+    # transposed problem reading the transformed weights.
+    from kernels.common.conv_abi import conv_direct_transform_signature
+    from kernels.common.conv_direct_grouped import direct_launch_geometry
+
+    knobs = _instance_knobs(ident)
+    transforms = direct_dgrad_weight_transforms(knobs)
+    steps = []
+    for helper, (variant, helper_knobs, src, dst) in zip(spec.helpers, transforms):
+        grid, block = direct_launch_geometry(
+            make_direct_spec(variant, problem, helper_knobs)
+        )
+        steps.append(
+            ConvLaunchStep(
+                helper,
+                grid,
+                block,
+                tuple(conv_direct_transform_signature(spec.dtype)),
+                (src, None, dst),
+            )
+        )
+    launch_spec, _ = _direct_launch_spec(ident, req)
+    steps.append(
+        dataclasses.replace(
+            step(ConvArgs.from_problem(launch_spec.problem, direction="fwd")),
+            buffers=("dy", transforms[-1][3], "dx"),
+        )
+    )
+    return ConvLaunchPlan(tuple(steps), direct_dgrad_workspaces(problem, knobs))
 
 
 # ---------------------------------------------------------------------------
@@ -518,7 +692,7 @@ def _make_instance_candidate(spec: ConvInstanceSpec, priority: int) -> KernelCan
 
     candidate = KernelCandidate(
         name=name,
-        family=_FAMILY_FWD,
+        family=_FAMILIES[spec.direction],
         algorithm=identity.algorithm,
         spec_id=name,
         abi_version=(
@@ -707,7 +881,7 @@ def load_instance_list(path: Path) -> InstanceList:
     """The instance list in ``path``, its identities in priority order.
 
     Fails on a broken list rather than skipping an entry: a record that does
-    not spell a forward identity of the list's arch, or one that repeats an
+    not spell an identity of the list's arch and direction, or one that repeats an
     earlier record's kernel, is an error naming its position.
     """
     try:
@@ -777,11 +951,13 @@ def format_instance_list(lst: InstanceList) -> str:
     lines.append(f'  "direction": {_json(lst.direction)},')
     if lst.defaults:
         lines.append(f'  "defaults": {_json(lst.defaults)},')
-    lines.append('  "instances": [')
-    lines += [f"    {_json(lst.record(i))}," for i in lst.identities]
     if lst.identities:
+        lines.append('  "instances": [')
+        lines += [f"    {_json(lst.record(i))}," for i in lst.identities]
         lines[-1] = lines[-1].rstrip(",")
-    lines.append("  ]")
+        lines.append("  ]")
+    else:
+        lines.append('  "instances": []')
     lines.append("}")
     return "\n".join(lines) + "\n"
 
@@ -829,7 +1005,12 @@ _CONV_DIM_VOCABULARY = (
     "Do",
 )
 
-CONV_FWD_REGISTRY = CandidateRegistry(_FAMILY_FWD, dim_vocabulary=_CONV_DIM_VOCABULARY)
+_REGISTRIES = {
+    direction: CandidateRegistry(family, dim_vocabulary=_CONV_DIM_VOCABULARY)
+    for direction, family in _FAMILIES.items()
+}
+CONV_FWD_REGISTRY = _REGISTRIES["fwd"]
+CONV_DGRAD_REGISTRY = _REGISTRIES["dgrad"]
 # Registered instances by name; a candidate's spec does not depend on the request.
 _INSTANCE_SPECS: dict[str, ConvInstanceSpec] = {}
 for (_arch, _direction), _ in _INSTANCE_LISTS.items():
@@ -838,9 +1019,10 @@ for (_arch, _direction), _ in _INSTANCE_LISTS.items():
             name=_identity.label(),
             identity=_identity,
             block=_instance_block(_identity),
+            helpers=_instance_helpers(_identity),
         )
         _INSTANCE_SPECS[_spec.name] = _spec
-        CONV_FWD_REGISTRY.register(_make_instance_candidate(_spec, _priority))
+        _REGISTRIES[_direction].register(_make_instance_candidate(_spec, _priority))
 
 
 # ---------------------------------------------------------------------------
@@ -851,14 +1033,18 @@ for (_arch, _direction), _ in _INSTANCE_LISTS.items():
 def _kernel_id(
     req: OperatorRequest, candidate: KernelCandidate, spec: ConvInstanceSpec
 ) -> KernelId:
-    return make_kernel_id(req, candidate, spec, op="conv_fwd")
+    return make_kernel_id(req, candidate, spec, op=_FAMILIES[spec.direction])
+
+
+def _registry(req: ConvGroupedRequest) -> CandidateRegistry:
+    """The registry of a request :func:`_request_errors` accepted."""
+    return _REGISTRIES[req.direction.lower()]
 
 
 def conv_grouped_candidates(direction: str = "fwd") -> tuple[KernelCandidate, ...]:
     """Every registered candidate of ``direction``, in priority order."""
-    if direction != "fwd":
-        return ()
-    return CONV_FWD_REGISTRY.candidates()
+    registry = _REGISTRIES.get(direction)
+    return registry.candidates() if registry is not None else ()
 
 
 def registered_conv_grouped_instances(
@@ -881,14 +1067,14 @@ def registered_conv_grouped_combos(
     """Every registered ``(candidate, spec)`` that can run ``req``, in priority order."""
     if _request_errors(req):
         return ()
-    return CONV_FWD_REGISTRY.combos(req)
+    return _registry(req).combos(req)
 
 
 def conv_grouped_sweep_space(req: OperatorRequest) -> Sequence[ConvInstanceSpec]:
     """Every registered instance that can run ``req``, in priority order."""
     if _request_errors(req):
         return ()
-    return CONV_FWD_REGISTRY.sweep_space(req, spec_key=lambda spec: spec.name)
+    return _registry(req).sweep_space(req, spec_key=lambda spec: spec.name)
 
 
 def dispatch_conv_grouped_all(req: ConvGroupedRequest) -> tuple[DispatchResult, ...]:
@@ -899,7 +1085,7 @@ def dispatch_conv_grouped_all(req: ConvGroupedRequest) -> tuple[DispatchResult, 
     """
     if _request_errors(req):
         return ()
-    return CONV_FWD_REGISTRY.dispatch_all(req, kernel_id=_kernel_id)
+    return _registry(req).dispatch_all(req, kernel_id=_kernel_id)
 
 
 def _no_instance_reason(req: ConvGroupedRequest) -> str:
@@ -913,7 +1099,7 @@ def _no_instance_reason(req: ConvGroupedRequest) -> str:
     if errors:
         return "; ".join(errors)
     reasons: dict[str, int] = {}
-    for candidate in CONV_FWD_REGISTRY.candidates():
+    for candidate in _registry(req).candidates():
         ok, why = candidate.admits(req)
         if not ok:
             reasons[why] = reasons.get(why, 0) + 1
@@ -934,15 +1120,21 @@ def dispatch_conv_grouped(
     Raises ``ValueError`` when no registered instance can run ``req`` (a
     ``PinRefused`` when ``spec_id`` pins one that cannot).
     """
-    if not CONV_FWD_REGISTRY.supported(req):
+    if _request_errors(req):
+        raise ValueError(
+            f"no registered grouped-convolution instance can run the request: "
+            f"{'; '.join(_request_errors(req))}"
+        )
+    registry = _registry(req)
+    if not registry.supported(req):
         if normalize_selector(getattr(req, "spec_id", "auto")) != "auto":
             # The registry's pin refusal names the pinned instance's reason.
-            CONV_FWD_REGISTRY.select(req, ranker=ranker)
+            registry.select(req, ranker=ranker)
         raise ValueError(
             f"no registered grouped-convolution instance can run the request: "
             f"{_no_instance_reason(req)}"
         )
-    candidate = CONV_FWD_REGISTRY.select(req, ranker=ranker)
+    candidate = registry.select(req, ranker=ranker)
     spec = candidate.select_spec(req)
     return make_dispatch_result(
         req,

@@ -38,13 +38,15 @@ from typing import Dict, Iterator, List, Optional, Sequence, Tuple
 
 from benchmarks.common.kernel_cache import KernelCache, KernelIdentity
 from benchmarks.common.kernel_sweep import BuildJob, compile_jobs
+from kernels.common.conv_abi import conv_direct_transform_signature
 from kernels.common.conv_direct_variants import (  # noqa: F401 (make_spec, validate_spec re-exported)
     DIRECT_DGRAD_REORGANIZE as _REORGANIZE,
     DIRECT_DGRAD_TRANSPOSE as _TRANSPOSE,
     build_direct_kernel as _build_kernel,
+    direct_dgrad_weight_transforms,
+    direct_dgrad_workspaces,
     direct_mfma_knobs_reason as _mfma_knobs_reason,
     direct_spec_for_problem,
-    direct_uses_coalesced_weights as _uses_coalesced_weights,
     make_direct_spec as make_spec,
     validate_direct_spec as validate_spec,
 )
@@ -577,22 +579,14 @@ def _caps_jobs(
             )
         ]
         if variant == "direct_grouped_dgrad_mfma":
-            cell.append(
-                _job(
-                    _helper_identity(arch, wave_size, _TRANSPOSE, caps, {}, dtype),
-                    caps,
-                    {},
-                )
-            )
-            if _uses_coalesced_weights(knobs):
-                reorg = {"fold_k32": knobs["fold_k32"]}
+            for helper, helper_knobs, _, _ in direct_dgrad_weight_transforms(knobs):
                 cell.append(
                     _job(
                         _helper_identity(
-                            arch, wave_size, _REORGANIZE, caps, reorg, dtype
+                            arch, wave_size, helper, caps, helper_knobs, dtype
                         ),
                         caps,
-                        reorg,
+                        helper_knobs,
                     )
                 )
         out.extend((job.identity.stable_hash(), job) for job in cell)
@@ -838,18 +832,6 @@ def compile_all_direct(
 # ---------------------------------------------------------------------------
 
 
-def _transform_signature(dtype: str) -> list:
-    """Launch signature of the weight-transform kernels: source, destination
-    and their byte sizes, nothing else."""
-    elem = {"fp16": "f16", "bf16": "bf16"}[dtype]
-    return [
-        {"name": "A", "type": f"ptr<{elem}, global>", "size_bytes": 8},
-        {"name": "D", "type": f"ptr<{elem}, global>", "size_bytes": 8},
-        {"name": "A_bytes", "type": "i32", "size_bytes": 4},
-        {"name": "D_bytes", "type": "i32", "size_bytes": 4},
-    ]
-
-
 @dataclass(frozen=True)
 class DirectStep:
     """One kernel launch of a plan.
@@ -946,10 +928,7 @@ def plan_for(
     # MFMA pipeline: W -> W_T (transpose), optionally W_T -> W_coa
     # (reorganize), then a forward pass over the transposed problem.
     caps = _caps_of(identity)
-    helpers = [(_TRANSPOSE, {}, "w", "ws_t")]
-    use_coalesced = _uses_coalesced_weights(knobs)
-    if use_coalesced:
-        helpers.append((_REORGANIZE, {"fold_k32": knobs["fold_k32"]}, "ws_t", "ws_coa"))
+    helpers = direct_dgrad_weight_transforms(knobs)
     steps = []
     for helper, helper_knobs, src, dst in helpers:
         helper_id = _helper_identity(
@@ -970,24 +949,20 @@ def plan_for(
             DirectStep(
                 kernel_name=entry[1]["kernel_name"],
                 hsaco_path=helper_path,
-                signature=_transform_signature(identity.dtype_a),
+                signature=conv_direct_transform_signature(identity.dtype_a),
                 grid=grid,
                 block=block,
                 buffers=(src, None, dst),
             )
         )
-    weights = "ws_coa" if use_coalesced else "ws_t"
+    weights = helpers[-1][3]
     # The compute pass is a *forward* kernel: forward ABI, transposed extents.
     steps.append(
         _conv_step(
             identity, hsaco_path, meta, spec, spec.problem, "fwd", ("dy", weights, "dx")
         )
     )
-    workspaces = {"ws_t": dc.direct_dgrad_workspace_bytes(problem)}
-    if use_coalesced:
-        workspaces["ws_coa"] = dc.direct_dgrad_coalesced_workspace_bytes(
-            problem, fold_k32=knobs["fold_k32"]
-        )
+    workspaces = direct_dgrad_workspaces(problem, knobs)
     return DirectPlan(identity, tuple(steps), workspaces), "ok"
 
 

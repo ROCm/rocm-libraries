@@ -20,6 +20,8 @@ __all__ = [
     "DIRECT_DGRAD_REORGANIZE",
     "DIRECT_DGRAD_TRANSPOSE",
     "build_direct_kernel",
+    "direct_dgrad_weight_transforms",
+    "direct_dgrad_workspaces",
     "direct_mfma_knobs_reason",
     "direct_spec_for_problem",
     "direct_uses_coalesced_weights",
@@ -116,6 +118,35 @@ def direct_uses_coalesced_weights(knobs: dict) -> bool:
     it reads the plain transposed weights and the reorganize pass is skipped.
     """
     return knobs["waves_k"] > 1 or knobs["runtime_k_loop"]
+
+
+def direct_dgrad_weight_transforms(
+    knobs: dict,
+) -> tuple[tuple[str, dict, str, str], ...]:
+    """The weight transforms the MFMA dgrad runs before its fprop pass.
+
+    ``(variant, knobs, source, destination)`` per kernel, in launch order, over
+    the buffers ``w`` (the KYXC filter), ``ws_t`` and ``ws_coa`` (the scratch
+    of :func:`direct_dgrad_workspaces`). The fprop pass reads the last
+    destination.
+    """
+    passes = [(DIRECT_DGRAD_TRANSPOSE, {}, "w", "ws_t")]
+    if direct_uses_coalesced_weights(knobs):
+        reorganize = {"fold_k32": knobs["fold_k32"]}
+        passes.append((DIRECT_DGRAD_REORGANIZE, reorganize, "ws_t", "ws_coa"))
+    return tuple(passes)
+
+
+def direct_dgrad_workspaces(problem, knobs: dict) -> dict[str, int]:
+    """Scratch buffer -> bytes of the MFMA dgrad's weight transforms."""
+    from kernels.common import conv_direct_grouped as dc
+
+    workspaces = {"ws_t": dc.direct_dgrad_workspace_bytes(problem)}
+    if direct_uses_coalesced_weights(knobs):
+        workspaces["ws_coa"] = dc.direct_dgrad_coalesced_workspace_bytes(
+            problem, fold_k32=knobs["fold_k32"]
+        )
+    return workspaces
 
 
 def validate_direct_spec(variant: str, spec, arch: str) -> tuple[bool, str]:

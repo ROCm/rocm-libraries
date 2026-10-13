@@ -3,13 +3,18 @@
 """Build and benchmark the grouped-convolution dispatcher's registered instances.
 
 The dispatcher (``dispatch.grouped_convolution``) registers a fixed list of
-forward AOT instances -- implicit-GEMM and direct-conv kernels, listed in
-``dispatch/grouped_convolution_instances/`` (edit with instance_list.py) and
-named by their lossless labels. This benchmark
+forward and backward-data (dgrad) AOT instances -- implicit-GEMM and
+direct-conv kernels, listed in ``dispatch/grouped_convolution_instances/``
+(edit with instance_list.py) and named by their lossless labels. This benchmark
 compiles those instances ahead of time into a kernel cache and times them on
-concrete shapes, the dispatcher deciding which instances can run each shape.
-The instances are shape-generic binaries (problem extents are kernargs), so a
-cache built once serves every later shape.
+concrete shapes, the dispatcher deciding which instances can run each shape
+and how (:func:`dispatch.grouped_convolution.launch_plan_for`: the MFMA dgrad
+runs its weight transforms first, and they are timed with it). The instances
+are shape-generic binaries (problem extents are kernargs), so a cache built
+once serves every later shape.
+
+--direction picks the pass the cases run (default fwd); MIOpen commands keep
+the cases whose -F includes it.
 
 Modes, as in benchmark_implicit_gemm_conv.py and benchmark_direct_conv.py:
 
@@ -41,6 +46,10 @@ Examples:
   python benchmark_grouped_conv.py --run-from-cache ./kernel_cache \\
       --N 8 --Hi 56 --Wi 56 --C 64 --K 64 --Y 3 --X 3 --verify
 
+  # The same shape's backward-data pass:
+  python benchmark_grouped_conv.py --run-from-cache ./kernel_cache \\
+      --direction dgrad --N 8 --Hi 56 --Wi 56 --C 64 --K 64 --Y 3 --X 3 --verify
+
   # Build what a case list needs (reusing ./kernel_cache) and run it:
   python benchmark_grouped_conv.py --cache-dir ./kernel_cache \\
       --json-file bench_cases_conv.json --algorithm implicit_gemm
@@ -63,6 +72,9 @@ os.environ.setdefault("ROCKE_CPP_QUIET_FALLBACK", "1")
 from benchmarks.common.early_stop import EarlyStop, add_early_stop_arg  # noqa: E402
 
 _DTYPES = ("fp16", "bf16")
+_DIRECTIONS = ("fwd", "dgrad")
+# MIOpen -F bit (and ckProfiler direction) of each pass.
+_FORW_BIT = {"fwd": 1, "dgrad": 2}
 
 
 # ---------------------------------------------------------------------------
@@ -204,7 +216,7 @@ def parse_miopen_cmd(cmd: str):
             -t 1 -in_layout=NHWC
 
     Only 2-D NHWC convolutions are accepted (``ValueError`` otherwise).
-    ``forw`` is the raw ``-F`` value; the caller keeps the forward cases.
+    ``forw`` is the raw ``-F`` value; the caller keeps the cases of the --direction pass.
     """
     import shlex
 
@@ -277,9 +289,9 @@ def parse_miopen_cmd(cmd: str):
     return problem, dtype, a.forw
 
 
-def _is_forward(forw: int) -> bool:
-    """MIOpen ``-F``: 0 runs every direction, bit 0 is the forward pass."""
-    return forw == 0 or bool(forw & 1)
+def _runs_direction(forw: int, direction: str) -> bool:
+    """MIOpen ``-F``: 0 runs every direction, bit 0 forward, bit 1 dgrad."""
+    return forw == 0 or bool(forw & _FORW_BIT[direction])
 
 
 def _parse_cases(args) -> list:
@@ -322,10 +334,10 @@ def _parse_cases(args) -> list:
             except ValueError as e:
                 print(f"[warn] {where}:{lineno}: skipping — {e}", file=sys.stderr)
                 continue
-            if not _is_forward(forw):
+            if not _runs_direction(forw, args.direction):
                 print(
-                    f"[skip] {where}:{lineno}: -F {forw} has no forward pass "
-                    f"(only forward instances are registered)",
+                    f"[skip] {where}:{lineno}: -F {forw} has no {args.direction} "
+                    f"pass (--direction {args.direction})",
                     file=sys.stderr,
                 )
                 continue
@@ -363,10 +375,11 @@ def _parse_cases(args) -> list:
 # ---------------------------------------------------------------------------
 
 
-def _request_for(problem, dtype: str, arch: str):
+def _request_for(problem, dtype: str, arch: str, direction: str):
     from dispatch.grouped_convolution import ConvGroupedRequest
 
     fields = dict(
+        direction=direction,
         N=problem.N,
         C=problem.C,
         K=problem.K,
@@ -425,7 +438,7 @@ class _Selection:
 def _select(args, problem, dtype: str, case_idx: int) -> _Selection:
     from dispatch.grouped_convolution import dispatch_conv_grouped_all
 
-    req = _request_for(problem, dtype, args.arch)
+    req = _request_for(problem, dtype, args.arch, args.direction)
     admitted = list(dispatch_conv_grouped_all(req))
     keep = _filters(args)
     results = [r for r in admitted if keep(r.spec)]
@@ -477,22 +490,27 @@ def _check_flavor(specs) -> int:
 def _build_jobs(specs):
     """``{(dtype, family): [BuildJob]}`` for the instances, or raise LookupError.
 
-    Each instance is rebuilt from the job ``--compile-all`` of its own family
-    builds for its identity, so its binary is the one the implicit-GEMM and
-    direct-conv caches would hold for that name.
+    Each instance -- and each helper kernel it launches, once however many
+    instances share it -- is rebuilt from the job ``--compile-all`` of its own
+    family builds for its identity, so its binary is the one the implicit-GEMM
+    and direct-conv caches would hold for that name.
     """
     from benchmarks.common.direct_kernel_sweep import direct_job_for_identity
     from benchmarks.common.kernel_sweep import job_for_identity
 
     groups: dict = {}
+    seen: set = set()
     for spec in specs:
-        ident = spec.identity
-        job = (
-            direct_job_for_identity(ident)
-            if ident.is_direct
-            else job_for_identity(ident)
-        )
-        groups.setdefault((ident.dtype_a, ident.is_direct), []).append(job)
+        for ident in (*spec.helpers, spec.identity):
+            if ident in seen:
+                continue
+            seen.add(ident)
+            job = (
+                direct_job_for_identity(ident)
+                if ident.is_direct
+                else job_for_identity(ident)
+            )
+            groups.setdefault((ident.dtype_a, ident.is_direct), []).append(job)
     return groups
 
 
@@ -509,7 +527,7 @@ def _compile(cache, specs, arch: str, jobs: int, limit: int | None = None) -> in
     rc = 0
     for (dtype, direct), all_jobs in sorted(groups.items()):
         family = "direct conv" if direct else "implicit GEMM"
-        print(f"\n== {family} {dtype}: {len(all_jobs)} instances", flush=True)
+        print(f"\n== {family} {dtype}: {len(all_jobs)} kernels", flush=True)
         rc = max(
             rc,
             compile_jobs(
@@ -518,7 +536,7 @@ def _compile(cache, specs, arch: str, jobs: int, limit: int | None = None) -> in
                 build=build_direct_job if direct else build_kernel,
                 arch=arch,
                 dtype=dtype,
-                directions=["direct_fwd" if direct else "fwd"],
+                directions=sorted({j.identity.direction for j in all_jobs}),
                 jobs=jobs,
                 limit=limit,
             ),
@@ -531,9 +549,11 @@ def _compile_all(args) -> int:
     from dispatch.grouped_convolution import registered_conv_grouped_instances
 
     keep = _filters(args)
+    directions = (args.direction,) if args.direction else _DIRECTIONS
     specs = [
         s
-        for s in registered_conv_grouped_instances(args.arch)
+        for d in directions
+        for s in registered_conv_grouped_instances(args.arch, direction=d)
         if keep(s) and (args.dtype is None or s.dtype == args.dtype)
     ]
     if not specs:
@@ -547,7 +567,8 @@ def _compile_all(args) -> int:
         return rc
     cache_dir = Path(args.cache_dir or "./kernel_cache")
     print(
-        f"AOT build: {len(specs)} registered {args.arch} instances -> {cache_dir}",
+        f"AOT build: {len(specs)} registered {args.arch} "
+        f"{'/'.join(directions)} instances -> {cache_dir}",
         flush=True,
     )
     return _compile(
@@ -556,15 +577,16 @@ def _compile_all(args) -> int:
 
 
 def _describe_cache(cache, specs) -> None:
-    """How many of the instances ``specs`` the cache holds, and how fresh."""
+    """How many of the kernels ``specs`` launch the cache holds, and how fresh."""
     from benchmarks.common.kernel_cache import current_emitter_digest
 
     digest = current_emitter_digest()
-    present = [cache.meta(s.identity) for s in specs if cache.has(s.identity)]
+    binaries = {i for s in specs for i in (*s.helpers, s.identity)}
+    present = [cache.meta(i) for i in binaries if cache.has(i)]
     stale = sum(1 for m in present if m.get("emitter_digest") != digest)
     print(
-        f"  cache holds {len(present)} of the {len(specs)} instances these cases admit"
-        + (f" ({stale} built from older emitter sources)" if stale else ""),
+        f"  cache holds {len(present)} of the {len(binaries)} kernels these cases "
+        f"launch" + (f" ({stale} built from older emitter sources)" if stale else ""),
         flush=True,
     )
 
@@ -629,9 +651,10 @@ def _verify(rt, run, out_dev, out_t, ref_out, name: str, dump_fail, u8):
 def _run_case(args, cache, problem, dtype: str, sel) -> int:
     import ctypes
 
+    import numpy as np
     import torch
 
-    from dispatch.grouped_convolution import launch_values_for
+    from dispatch.grouped_convolution import launch_plan_for
     from rocke.runtime import synchronize_and_release
     from rocke.runtime.hip_module import HipError, Runtime
     from rocke.runtime.launcher import KernelLauncher, LaunchConfig
@@ -640,6 +663,7 @@ def _run_case(args, cache, problem, dtype: str, sel) -> int:
         return (ctypes.c_uint8 * t.nbytes).from_address(t.data_ptr())
 
     p = problem
+    direction = sel.request.direction
     torch_dt = {"fp16": torch.float16, "bf16": torch.bfloat16}[dtype]
     torch.manual_seed(42)
 
@@ -648,24 +672,41 @@ def _run_case(args, cache, problem, dtype: str, sel) -> int:
             return torch.full(shape, args.debug_init, dtype=torch_dt)
         return torch.empty(*shape).uniform_(-1.0, 1.0).to(torch_dt)
 
-    A_t = _make(p.N, p.Hi, p.Wi, p.C)
-    B_t = _make(p.K, p.Y, p.X, p.C // p.groups)
-    D_t = torch.empty(p.N, p.Ho, p.Wo, p.K, dtype=torch_dt)
+    x_shape = (p.N, p.Hi, p.Wi, p.C)
+    y_shape = (p.N, p.Ho, p.Wo, p.K)
+    W_t = _make(p.K, p.Y, p.X, p.C // p.groups)
+    if direction == "fwd":
+        in_name, out_name = "x", "y"
+        In_t, Out_t = _make(*x_shape), torch.empty(*y_shape, dtype=torch_dt)
+    else:
+        in_name, out_name = "dy", "dx"
+        In_t, Out_t = _make(*y_shape), torch.empty(*x_shape, dtype=torch_dt)
     flop = float(p.flops)
-    bytes_xfer = float(A_t.nbytes + B_t.nbytes + D_t.nbytes)
+    bytes_xfer = float(In_t.nbytes + W_t.nbytes + Out_t.nbytes)
 
     ref_out = None
     if args.verify or args.dump_fail:
-        from builders.common.conv_reference import conv_reference
+        from builders.common.conv_reference import conv_reference, dgrad_reference
 
-        ref_out = conv_reference(A_t.cuda(), B_t.cuda(), p, out_dtype=torch_dt)
+        if direction == "fwd":
+            ref_out = conv_reference(In_t.cuda(), W_t.cuda(), p, out_dtype=torch_dt)
+        else:
+            # Rounded to the output dtype, as conv_reference's out_dtype does.
+            ref_out = dgrad_reference(In_t, W_t, p).to(torch_dt).float()
 
+    plans = {r.spec.name: launch_plan_for(r.request, r.spec) for r in sel.results}
     rt = Runtime()
-    A_dev, B_dev, D_dev = (rt.alloc(t.nbytes) for t in (A_t, B_t, D_t))
-    rt.memcpy_h2d(A_dev, _u8(A_t), A_t.nbytes)
-    rt.memcpy_h2d(B_dev, _u8(B_t), B_t.nbytes)
+    sizes = {in_name: In_t.nbytes, "w": W_t.nbytes, out_name: Out_t.nbytes}
+    # Scratch is sized for the largest plan and shared, as benchmark_direct_conv
+    # does; it needs no initial contents.
+    for plan in plans.values():
+        for name, nbytes in plan.workspaces.items():
+            sizes[name] = max(sizes.get(name, 0), nbytes)
+    ptrs = {name: rt.alloc(nbytes) for name, nbytes in sizes.items()}
+    rt.memcpy_h2d(ptrs[in_name], _u8(In_t), In_t.nbytes)
+    rt.memcpy_h2d(ptrs["w"], _u8(W_t), W_t.nbytes)
 
-    stop = EarlyStop.for_case(args, p, dtype, "fwd")
+    stop = EarlyStop.for_case(args, p, dtype, direction)
     measured: list[_Measured] = []
     n_missing = n_failed = 0
     n = len(sel.results)
@@ -673,40 +714,60 @@ def _run_case(args, cache, problem, dtype: str, sel) -> int:
     try:
         for idx, result in enumerate(sel.results, 1):
             spec = result.spec
-            entry = cache.get(spec.identity)
-            if entry is None:
+            plan = plans[spec.name]
+            entries = [cache.get(step.identity) for step in plan.steps]
+            if any(e is None for e in entries):
                 n_missing += 1
                 if n_missing <= 5:
-                    print(f"  [missing] {spec.name}: not in the cache", flush=True)
+                    absent = next(
+                        s.identity for s, e in zip(plan.steps, entries) if e is None
+                    )
+                    print(
+                        f"  [missing] {spec.name}: {absent.label()} not in the cache",
+                        flush=True,
+                    )
                 continue
-            hsaco, meta = entry
+            if "sub_gemms" in ptrs:
+                synchronize_and_release(0)
+                rt.free(ptrs.pop("sub_gemms"))
+            if plan.num_sub_gemms:
+                # The tilde record table depends on the instance's tile.
+                table = np.array(plan.sub_gemm_table, dtype=np.int32)
+                ptrs["sub_gemms"] = rt.alloc(table.nbytes)
+                rt.memcpy_h2d(ptrs["sub_gemms"], table.ctypes.data, table.nbytes)
             try:
-                launcher = KernelLauncher(
-                    hsaco=hsaco,
-                    kernel_name=meta["kernel_name"],
-                    signature=list(result.signature),
-                )
+                # Each step bound once: a timed loop that packs per launch
+                # times the host, not a short kernel.
+                bound = [
+                    KernelLauncher(
+                        hsaco=hsaco,
+                        kernel_name=meta["kernel_name"],
+                        signature=list(step.signature),
+                    ).bind(
+                        plan.values(step, ptrs, sizes),
+                        config=LaunchConfig(grid=step.grid, block=step.block, stream=0),
+                    )
+                    for step, (hsaco, meta) in zip(plan.steps, entries)
+                ]
             except (HipError, KeyError) as e:
                 print(f"  [skip] {spec.name}: {e}", flush=True)
                 continue
-            values = launch_values_for(
-                result.request,
-                spec,
-                A_ptr=int(A_dev),
-                B_ptr=int(B_dev),
-                D_ptr=int(D_dev),
-                A_bytes=A_t.nbytes,
-                B_bytes=B_t.nbytes,
-                D_bytes=D_t.nbytes,
-            )
-            run = launcher.bind(
-                values,
-                config=LaunchConfig(grid=result.grid, block=result.block, stream=0),
-            )
+
+            def run(bound=bound):
+                for launch in bound:
+                    launch()
+
             passed = None
             if ref_out is not None:
                 stopped, passed = _verify(
-                    rt, run, D_dev, D_t, ref_out, spec.name, args.dump_fail, _u8
+                    rt,
+                    run,
+                    ptrs[out_name],
+                    Out_t,
+                    ref_out,
+                    spec.name,
+                    args.dump_fail,
+                    _u8,
                 )
                 if stopped:
                     return 1
@@ -735,7 +796,7 @@ def _run_case(args, cache, problem, dtype: str, sel) -> int:
             )
     finally:
         synchronize_and_release(0)
-        for ptr in (A_dev, B_dev, D_dev):
+        for ptr in ptrs.values():
             rt.free(ptr)
 
     if n_missing:
@@ -804,7 +865,12 @@ def _list_case(sel) -> None:
     )
     for r in sel.results:
         mark = "*" if r.spec.name == sel.default_pick else " "
-        print(f"   {mark} {r.spec.name}  grid={r.grid} block={r.block}")
+        helpers = (
+            f" (after {len(r.spec.helpers)} weight transforms)"
+            if r.spec.helpers
+            else ""
+        )
+        print(f"   {mark} {r.spec.name}  grid={r.grid} block={r.block}{helpers}")
 
 
 # ---------------------------------------------------------------------------
@@ -815,9 +881,14 @@ _CK_DTYPE_STR = {"fp32": "fp32", "fp16": "fp16", "bf16": "bfp16"}
 
 
 def _run_ckprofiler(
-    problem, dtype: str, ckprofiler: str, converter_script: str, verify: int
+    problem,
+    dtype: str,
+    direction: str,
+    ckprofiler: str,
+    converter_script: str,
+    verify: int,
 ) -> None:
-    """Run ckProfiler's forward conv on ``problem`` via convert_miopen_driver_to_profiler.py.
+    """Run ckProfiler's ``direction`` pass on ``problem`` via convert_miopen_driver_to_profiler.py.
 
     Builds the args namespace the converter's argparse would produce and
     calls its ``init_const_args`` / ``run_ck_profiler`` directly.
@@ -859,7 +930,7 @@ def _run_ckprofiler(
         conv_stride_d=1,
         pad_d=0,
         dilation_d=1,
-        forw=1,
+        forw=_FORW_BIT[direction],
         verify=verify,
         time=1,
         instance=-1,
@@ -876,10 +947,17 @@ def _run_ckprofiler(
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Build (AOT) and benchmark the forward instances registered "
-        "in the grouped-convolution dispatcher."
+        description="Build (AOT) and benchmark the instances registered in the "
+        "grouped-convolution dispatcher."
     )
     parser.add_argument("--arch", default="gfx950", help="gfx target (default: gfx950)")
+    parser.add_argument(
+        "--direction",
+        choices=_DIRECTIONS,
+        default=None,
+        help="pass the cases run (default: fwd); with --compile-all, build only "
+        "this direction's instances (default: all)",
+    )
     parser.add_argument(
         "--dtype",
         choices=_DTYPES,
@@ -939,7 +1017,8 @@ def _parser() -> argparse.ArgumentParser:
         default=None,
         help="comma-separated instance families to keep (implicit_gemm, "
         "direct_nongrouped, direct_grouped, direct_depthwise, "
-        "direct_depthwise_tiled, direct_depthwise_spatial, direct_depthwise_col)",
+        "direct_depthwise_tiled, direct_depthwise_spatial, direct_depthwise_col; "
+        "dgrad: direct_depthwise_dgrad, direct_grouped_dgrad_mfma)",
     )
     filt.add_argument(
         "--instance",
@@ -1003,7 +1082,9 @@ def _parser() -> argparse.ArgumentParser:
     )
 
     miopen_grp = parser.add_argument_group(
-        "MIOpen input", "Cases from MIOpenDriver commands; forward (-F 1 or 0) only."
+        "MIOpen input",
+        "Cases from MIOpenDriver commands whose -F includes --direction "
+        "(0 runs every pass).",
     )
     miopen_grp.add_argument("--miopen-cmd", default=None, metavar="CMD")
     miopen_grp.add_argument(
@@ -1032,7 +1113,8 @@ def _parser() -> argparse.ArgumentParser:
 
     ck_grp = parser.add_argument_group(
         "ckProfiler comparison",
-        "Run ckProfiler's forward conv on each case before the instances.",
+        "Run ckProfiler's conv (the --direction pass) on each case before the "
+        "instances.",
     )
     ck_grp.add_argument(
         "--ckprofiler", default=None, metavar="PATH", help="ckProfiler binary"
@@ -1080,6 +1162,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.compile_all:
         return _compile_all(args)
+    args.direction = args.direction or "fwd"
 
     cases = _parse_cases(args)
     if isinstance(cases, int):
@@ -1088,7 +1171,9 @@ def main(argv: list[str] | None = None) -> int:
     from benchmarks.common.kernel_cache import KernelCache
     from dispatch.grouped_convolution import registered_conv_grouped_instances
 
-    rc = _check_flavor(registered_conv_grouped_instances(args.arch))
+    rc = _check_flavor(
+        registered_conv_grouped_instances(args.arch, direction=args.direction)
+    )
     if rc:
         return rc
 
@@ -1100,7 +1185,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.list:
         for idx, ((problem, dtype), sel) in enumerate(zip(cases, selections), 1):
             print(
-                f"\nCase {idx}/{len(cases)}: {problem.short()} {dtype} — "
+                f"\nCase {idx}/{len(cases)}: {problem.short()} {dtype} {args.direction} — "
                 f"{sel.n_admitted} admitted, {len(sel.results)} after filters"
             )
             if sel.results:
@@ -1139,7 +1224,7 @@ def main(argv: list[str] | None = None) -> int:
         for idx, ((problem, dtype), sel) in enumerate(zip(cases, selections), 1):
             print(f"\n{'#' * 72}", flush=True)
             print(
-                f"# Case {idx}/{len(cases)}: {problem.short()} {dtype} — "
+                f"# Case {idx}/{len(cases)}: {problem.short()} {dtype} {args.direction} — "
                 f"{sel.n_admitted} instances admitted"
                 + (
                     f", {len(sel.results)} after filters"
@@ -1154,6 +1239,7 @@ def main(argv: list[str] | None = None) -> int:
                 _run_ckprofiler(
                     problem,
                     dtype,
+                    args.direction,
                     args.ckprofiler,
                     args.ckprofiler_script,
                     int(args.verify),

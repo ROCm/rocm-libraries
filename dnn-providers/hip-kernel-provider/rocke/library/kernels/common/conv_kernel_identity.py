@@ -30,6 +30,7 @@ from dataclasses import asdict, dataclass, field
 __all__ = [
     "KernelIdentity",
     "current_llvm_flavor",
+    "dgrad_sub_gemms",
     "identity_supports_problem",
 ]
 
@@ -258,22 +259,25 @@ class KernelIdentity:
 _DGRAD_DEFAULT_MAX_SUB_GEMMS = 64
 
 
-def _dgrad_sub_gemm_count(identity: KernelIdentity, problem: object) -> int:
-    """Tilde sub-GEMM count ``problem`` decomposes into for this binary's tile."""
+def dgrad_sub_gemms(identity: KernelIdentity, problem: object) -> list:
+    """The tilde sub-GEMMs ``problem`` decomposes into for this binary's tile.
+
+    An implicit-GEMM dgrad binary reads them at run time, as the record table
+    :func:`~kernels.common.conv_implicit_gemm_dgrad.pack_sub_gemm_buffer`
+    packs; its grid is their total tile count.
+    """
     from kernels.common.conv_implicit_gemm_dgrad import (
         compute_tilde,
         enumerate_sub_gemms,
     )
 
-    return len(
-        enumerate_sub_gemms(
-            problem,
-            compute_tilde(problem),
-            identity.tile_m,
-            identity.tile_n,
-            tile_k=identity.tile_k,
-            split_k=max(1, identity.split_k),
-        )
+    return enumerate_sub_gemms(
+        problem,
+        compute_tilde(problem),
+        identity.tile_m,
+        identity.tile_n,
+        tile_k=identity.tile_k,
+        split_k=max(1, identity.split_k),
     )
 
 
@@ -502,7 +506,7 @@ def identity_supports_problem(
     # sized at build time for ``max_sub_gemms``; a problem that decomposes
     # into more would be rejected only at launch.
     if identity.direction == "dgrad" and not identity.is_direct:
-        n_sub = _dgrad_sub_gemm_count(identity, problem)
+        n_sub = len(dgrad_sub_gemms(identity, problem))
         bound = identity.max_sub_gemms or _DGRAD_DEFAULT_MAX_SUB_GEMMS
         if n_sub > bound:
             return False, (

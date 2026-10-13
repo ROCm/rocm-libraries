@@ -1,18 +1,20 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""The grouped-convolution dispatcher registers its instance list and nothing else.
+"""The grouped-convolution dispatcher registers its instance lists and nothing else.
 
 ``dispatch.grouped_convolution`` registers one candidate per record of
 ``dispatch/grouped_convolution_instances/*.json`` -- shape-generic AOT
-binaries, named by their lossless labels. These tests pin down that:
+binaries, named by their lossless labels, forward and dgrad. These tests pin
+down that:
 
-* the registry is exactly the list, in list order, and every instance has
+* each registry is exactly its lists, in list order, and every instance has
   the AOT build job ``--compile-all`` makes its binary from;
-* the list file is canonical and its loader refuses a broken one;
-* nothing outside the list (another arch, another direction) dispatches;
+* the list files are canonical and their loader refuses a broken one;
+* nothing outside the lists (another arch, another direction) dispatches;
 * the dispatcher admits a shape exactly when the AOT cache's run path would
-  launch that binary on it, with the same grid, block, signature and kernarg
-  values -- the binaries were built and verified through that path;
+  launch that binary on it, with the same kernels, grids, blocks, signatures,
+  buffers, kernarg values and scratch -- the binaries were built and verified
+  through that path;
 * pins and the priority order behave.
 
 CPU only: nothing is compiled or launched.
@@ -20,6 +22,7 @@ CPU only: nothing is compiled or launched.
 
 from __future__ import annotations
 
+import ctypes
 import json
 from pathlib import Path
 
@@ -35,9 +38,7 @@ from rocke.dispatch.core import PinRefused
 _ARCH = "gfx950"
 _INSTANCE_DIR = Path(gc.__file__).resolve().with_name("grouped_convolution_instances")
 _LIST = _INSTANCE_DIR / "gfx950_fwd.json"
-_FWD_ARCHES = tuple(
-    sorted(arch for arch, direction in gc._INSTANCE_LISTS if direction == "fwd")
-)
+_LISTS = {key: _INSTANCE_DIR / name for key, name in gc._INSTANCE_LISTS.items()}
 
 
 def _listed_names(path: Path = _LIST) -> list[str]:
@@ -47,18 +48,22 @@ def _listed_names(path: Path = _LIST) -> list[str]:
 @pytest.fixture(autouse=True)
 def _instance_flavor(monkeypatch):
     """Lower the flavor the instances were named for: admission checks it."""
-    flavors = {s.identity.llvm_flavor for s in gc.registered_conv_grouped_instances()}
+    flavors = {
+        s.identity.llvm_flavor
+        for direction in ("fwd", "dgrad")
+        for s in gc.registered_conv_grouped_instances(direction=direction)
+    }
     assert len(flavors) == 1
     monkeypatch.setenv("ROCKE_LLVM_FLAVOR", flavors.pop())
 
 
 def _req(**kw) -> gc.ConvGroupedRequest:
-    base = dict(N=2, C=64, K=64, Hi=28, Wi=28, Y=3, X=3, pad_h=1, pad_w=1)
+    base = dict(N=2, C=64, K=64, Hi=28, Wi=28, Y=3, X=3, pad_h=1, pad_w=1, arch=_ARCH)
     base.update(kw)
-    return gc.ConvGroupedRequest(arch=_ARCH, **base)
+    return gc.ConvGroupedRequest(**base)
 
 
-# Shapes that reach every registered family: dense (implicit GEMM and
+# Shapes that reach every registered forward family: dense (implicit GEMM and
 # direct_nongrouped), grouped cpg=16 and cpg=4 (direct_grouped), depthwise
 # 3x3 / 7x7 / 11x11 / stride 2 (the depthwise variants), the dilated
 # non-grouped instances, odd channels (scalar-vector implicit GEMM) and bf16.
@@ -80,46 +85,80 @@ _SHAPES = {
     ),
 }
 
+# Shapes that reach every registered dgrad family: implicit GEMM with one
+# tilde sub-GEMM and with several (stride 2, dilation 2), the depthwise dgrad
+# filters and strides, and every channel pair the MFMA dgrad instances bake.
+_DGRAD_SHAPES = {
+    "dense3x3": dict(),
+    "dense_stride2": dict(stride_h=2, stride_w=2, K=128),
+    "dense_dilated2_bf16": dict(
+        Hi=32, Wi=32, dilation_h=2, dilation_w=2, pad_h=2, pad_w=2, dtype="bf16"
+    ),
+    "grouped_cpg4": dict(C=512, K=512, G=128),
+    "grouped_cpg8": dict(C=512, K=512, G=64),
+    "grouped_cpg16_bf16": dict(C=1024, K=1024, G=64, dtype="bf16"),
+    "grouped_cpg24": dict(C=384, K=384, G=16),
+    "grouped_cpg48_kpg192": dict(C=384, K=1536, G=8),
+    "grouped_cpg4_kpg320": dict(C=64, K=5120, G=16),
+    "depthwise3x3": dict(C=144, K=144, G=144),
+    "depthwise3x3_s2": dict(C=144, K=144, G=144, stride_h=2, stride_w=2),
+    "depthwise7x7": dict(C=96, K=96, G=96, Y=7, X=7, pad_h=3, pad_w=3),
+}
+
+_CASES = [
+    pytest.param(arch, direction, shape, id=f"{arch}-{direction}-{shape}")
+    for arch, direction in sorted(gc._INSTANCE_LISTS)
+    for shape in sorted(_SHAPES if direction == "fwd" else _DGRAD_SHAPES)
+]
+
+
+def _case_req(arch: str, direction: str, shape: str) -> gc.ConvGroupedRequest:
+    shapes = _SHAPES if direction == "fwd" else _DGRAD_SHAPES
+    return _req(arch=arch, direction=direction, **shapes[shape])
+
 
 # ---------------------------------------------------------------------------
 # What is registered
 # ---------------------------------------------------------------------------
 
 
-def test_registry_is_exactly_the_instance_list_in_order():
-    names = _listed_names()
-    assert names, "the instance list is empty"
-    assert [s.name for s in gc.registered_conv_grouped_instances(_ARCH)] == names
-    for candidate in gc.conv_grouped_candidates():
-        assert candidate.spec_id == candidate.name
-        assert len(candidate.capability.arches) == 1
-    for (arch, direction), filename in gc._INSTANCE_LISTS.items():
-        if direction != "fwd":
-            continue
-        assert [s.name for s in gc.registered_conv_grouped_instances(arch)] == (
-            _listed_names(_INSTANCE_DIR / filename)
-        )
+def test_registry_is_exactly_the_instance_lists_in_order():
+    for (arch, direction), path in _LISTS.items():
+        names = _listed_names(path)
+        got = gc.registered_conv_grouped_instances(arch, direction=direction)
+        assert [s.name for s in got] == names
+    for direction in ("fwd", "dgrad"):
+        for candidate in gc.conv_grouped_candidates(direction):
+            assert candidate.spec_id == candidate.name
+            assert len(candidate.capability.arches) == 1
 
 
-def test_every_instance_is_a_canonical_forward_name():
-    for spec in gc.registered_conv_grouped_instances():
+@pytest.mark.parametrize("direction", ["fwd", "dgrad"])
+def test_every_instance_is_a_canonical_name(direction):
+    arches = {arch for arch, d in gc._INSTANCE_LISTS if d == direction}
+    for spec in gc.registered_conv_grouped_instances(direction=direction):
         assert KernelIdentity.from_label(spec.name) == spec.identity
         assert spec.identity.label() == spec.name
-        assert spec.identity.arch in _FWD_ARCHES
-        assert spec.identity.direction == ("direct_fwd" if spec.is_direct else "fwd")
+        assert spec.identity.arch in arches
+        assert spec.direction == direction
+        assert spec.identity.direction == (
+            f"direct_{direction}" if spec.is_direct else direction
+        )
         assert spec.algorithm == spec.identity.algorithm
 
 
-def test_every_instance_has_the_aot_build_job_compile_all_uses():
-    """``--compile-all`` builds each instance from its family's job; a name the
-    generators cannot reproduce would be an instance with no binary."""
-    for spec in gc.registered_conv_grouped_instances():
-        ident = spec.identity
-        if ident.is_direct:
-            job = dks.direct_job_for_identity(ident)
-        else:
-            job = ks.job_for_identity(ident)
-        assert job.identity == ident
+@pytest.mark.parametrize("direction", ["fwd", "dgrad"])
+def test_every_instance_has_the_aot_build_job_compile_all_uses(direction):
+    """``--compile-all`` builds each instance (and the helpers it launches) from
+    its family's job; a name the generators cannot reproduce would be an
+    instance with no binary."""
+    for spec in gc.registered_conv_grouped_instances(direction=direction):
+        for ident in (*spec.helpers, spec.identity):
+            if ident.is_direct:
+                job = dks.direct_job_for_identity(ident)
+            else:
+                job = ks.job_for_identity(ident)
+            assert job.identity == ident
 
 
 @pytest.mark.parametrize(
@@ -127,14 +166,17 @@ def test_every_instance_has_the_aot_build_job_compile_all_uses():
     [
         (dict(arch="gfx90a"), "arch 'gfx90a'"),
         (dict(arch="gfx1250"), "arch 'gfx1250'"),
-        (dict(direction="wgrad"), "only forward instances"),
-        (dict(direction="dgrad"), "only forward instances"),
+        (dict(direction="wgrad"), "no 'wgrad' instances"),
         (dict(dtype="fp32"), "fp16 or bf16 only"),
         (dict(C=63, G=2), "divisible by G"),
         (dict(Di=8, Z=3, stride_d=1, pad_d=1, dilation_d=1), "3-D capability"),
+        (
+            dict(direction="dgrad", Di=8, Z=3, stride_d=1, pad_d=1, dilation_d=1),
+            "3-D capability",
+        ),
     ],
 )
-def test_nothing_outside_the_list_dispatches(kw, match):
+def test_nothing_outside_the_lists_dispatches(kw, match):
     fields = dict(N=2, C=64, K=64, Hi=28, Wi=28, Y=3, X=3, pad_h=1, pad_w=1, G=1)
     fields.update(kw)
     fields.setdefault("arch", _ARCH)
@@ -144,10 +186,18 @@ def test_nothing_outside_the_list_dispatches(kw, match):
     assert not gc.dispatch_conv_grouped_all(req)
 
 
-def test_no_backward_candidates():
+def test_only_wgrad_has_no_candidates():
     assert gc.conv_grouped_candidates("wgrad") == ()
-    assert gc.conv_grouped_candidates("dgrad") == ()
     assert gc.registered_conv_grouped_instances(direction="wgrad") == ()
+    assert gc.conv_grouped_candidates("dgrad")
+
+
+def test_dispatch_stays_in_the_requested_direction():
+    for direction in ("fwd", "dgrad"):
+        results = gc.dispatch_conv_grouped_all(_req(direction=direction))
+        assert results
+        assert {r.spec.direction for r in results} == {direction}
+        assert {r.kernel_id.op for r in results} == {f"conv_{direction}"}
 
 
 def test_another_llvm_flavor_admits_nothing(monkeypatch):
@@ -161,6 +211,75 @@ def test_another_llvm_flavor_admits_nothing(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
+def _implicit_problem(req):
+    from kernels.common.conv_implicit_gemm import ConvProblem
+
+    return ConvProblem(
+        N=req.N,
+        Hi=req.Hi,
+        Wi=req.Wi,
+        C=req.C,
+        K=req.K,
+        Y=req.Y,
+        X=req.X,
+        sH=req.stride_h,
+        sW=req.stride_w,
+        pH=req.pad_h,
+        pW=req.pad_w,
+        dH=req.dilation_h,
+        dW=req.dilation_w,
+        groups=req.G,
+    )
+
+
+def _direct_problem(req):
+    from kernels.common.conv_direct_grouped import DirectConvProblem
+
+    return DirectConvProblem(
+        N=req.N,
+        H=req.Hi,
+        W=req.Wi,
+        groups=req.G,
+        cpg=req.C // req.G,
+        kpg=req.K // req.G,
+        KH=req.Y,
+        KW=req.X,
+        PAD=req.pad_h,
+        stride=req.stride_h,
+        dtype=req.dtype,
+        dil_h=req.dilation_h,
+        dil_w=req.dilation_w,
+    )
+
+
+class _HelperCache:
+    """Stands in for a kernel cache holding every MFMA dgrad helper; records
+    which helper identities ``plan_for`` looks up."""
+
+    def __init__(self):
+        self.looked_up: list[KernelIdentity] = []
+
+    def get(self, identity):
+        self.looked_up.append(identity)
+        return b"", {"kernel_name": "helper"}
+
+    def hsaco_path(self, identity):
+        return Path("unused.hsaco")
+
+
+def _direct_plan(spec, req):
+    cache = _HelperCache()
+    plan, why = dks.plan_for(
+        cache,
+        spec.identity,
+        Path("unused.hsaco"),
+        {"kernel_name": "k"},
+        _direct_problem(req),
+        req.arch,
+    )
+    return plan, why, cache.looked_up
+
+
 def _cache_side_admits(spec, req) -> bool:
     """Would the AOT run path launch ``spec``'s binary on ``req``?
 
@@ -169,165 +288,156 @@ def _cache_side_admits(spec, req) -> bool:
     ``direct_kernel_sweep.plan_for``.
     """
     from benchmarks.common.kernel_cache import KernelCache
-    from kernels.common.conv_direct_grouped import DirectConvProblem
-    from kernels.common.conv_implicit_gemm import ConvProblem
 
     ident = spec.identity
     if ident.dtype_a != req.dtype:
         return False
     if not ident.is_direct:
-        problem = ConvProblem(
-            N=req.N,
-            Hi=req.Hi,
-            Wi=req.Wi,
-            C=req.C,
-            K=req.K,
-            Y=req.Y,
-            X=req.X,
-            sH=req.stride_h,
-            sW=req.stride_w,
-            pH=req.pad_h,
-            pW=req.pad_w,
-            dH=req.dilation_h,
-            dW=req.dilation_w,
-            groups=req.G,
-        )
-        return KernelCache.supports_problem(ident, problem)[0]
+        return KernelCache.supports_problem(ident, _implicit_problem(req))[0]
     if req.stride_h != req.stride_w or req.pad_h != req.pad_w:
         return False
     if ident.algorithm == "direct_nongrouped" and req.G != 1:
         return False
-    problem = DirectConvProblem(
-        N=req.N,
-        H=req.Hi,
-        W=req.Wi,
-        groups=req.G,
-        cpg=req.C // req.G,
-        kpg=req.K // req.G,
-        KH=req.Y,
-        KW=req.X,
-        PAD=req.pad_h,
-        stride=req.stride_h,
-        dtype=req.dtype,
-        dil_h=req.dilation_h,
-        dil_w=req.dilation_w,
-    )
-    if not KernelCache.supports_problem(ident, problem)[0]:
+    if not KernelCache.supports_problem(ident, _direct_problem(req))[0]:
         return False
-    plan, _why = dks.plan_for(
-        None, ident, Path("unused.hsaco"), {"kernel_name": "k"}, problem, _ARCH
-    )
-    return plan is not None
+    return _direct_plan(spec, req)[0] is not None
 
 
-@pytest.mark.parametrize("shape", sorted(_SHAPES), ids=str)
-def test_admission_matches_the_aot_run_path(shape):
-    req = _req(**_SHAPES[shape])
+@pytest.mark.parametrize("arch, direction, shape", _CASES)
+def test_admission_matches_the_aot_run_path(arch, direction, shape):
+    req = _case_req(arch, direction, shape)
     admitted = [r.spec.name for r in gc.dispatch_conv_grouped_all(req)]
     expected = [
         s.name
-        for s in gc.registered_conv_grouped_instances(_ARCH)
+        for s in gc.registered_conv_grouped_instances(arch, direction=direction)
         if _cache_side_admits(s, req)
     ]
     assert admitted == expected
-    assert admitted, f"{shape}: no registered instance runs it"
+    if arch == _ARCH:
+        assert admitted, f"{shape}: no registered instance runs it"
 
 
-def test_the_shapes_reach_every_registered_family():
-    families = {s.algorithm for s in gc.registered_conv_grouped_instances(_ARCH)}
+@pytest.mark.parametrize("direction", ["fwd", "dgrad"])
+def test_the_shapes_reach_every_registered_family(direction):
+    shapes = _SHAPES if direction == "fwd" else _DGRAD_SHAPES
+    families = {
+        s.algorithm
+        for s in gc.registered_conv_grouped_instances(_ARCH, direction=direction)
+    }
     reached = {
         r.spec.algorithm
-        for kw in _SHAPES.values()
-        for r in gc.dispatch_conv_grouped_all(_req(**kw))
+        for kw in shapes.values()
+        for r in gc.dispatch_conv_grouped_all(_req(direction=direction, **kw))
     }
     assert reached == families
 
 
-def _cache_side_launch(spec, req, ptrs, sizes):
-    """``(grid, block, signature names, values)`` the AOT run path launches."""
+class _UploadRecorder:
+    """Stands in for the HIP runtime: records the one table a dgrad run
+    uploads."""
+
+    PTR = 0x9000
+
+    def __init__(self):
+        self.table: tuple[int, ...] = ()
+
+    def alloc(self, nbytes):
+        return self.PTR
+
+    def memcpy_h2d(self, dst, src, nbytes):
+        import numpy as np
+
+        raw = ctypes.string_at(src, nbytes)
+        self.table = tuple(int(v) for v in np.frombuffer(raw, dtype=np.int32))
+
+
+def _cache_side_plan(spec, req, ptrs, sizes):
+    """``(steps, workspaces, table)`` the AOT run path launches, one step being
+    ``(identity, grid, block, signature names, buffers, values)``."""
     from benchmarks.common.benchmark_implicit_gemm_conv import (
-        _grid_for,
+        _extras_and_grid,
         _signature_for_identity,
     )
-    from kernels.common.conv_direct_grouped import DirectConvProblem
-    from kernels.common.conv_implicit_gemm import ConvProblem
 
     ident = spec.identity
+    direction = spec.direction
     if not ident.is_direct:
-        problem = ConvProblem(
-            N=req.N,
-            Hi=req.Hi,
-            Wi=req.Wi,
-            C=req.C,
-            K=req.K,
-            Y=req.Y,
-            X=req.X,
-            sH=req.stride_h,
-            sW=req.stride_w,
-            pH=req.pad_h,
-            pW=req.pad_w,
-            dH=req.dilation_h,
-            dW=req.dilation_w,
-            groups=req.G,
+        problem = _implicit_problem(req)
+        rt = _UploadRecorder()
+        extras, grid = _extras_and_grid(direction, problem, ident, rt, ident.dtype_a)
+        buffers = gc._OPERANDS[direction]
+        values = ks._launch_values_for(
+            direction,
+            problem,
+            ident,
+            tuple(ptrs[b] for b in buffers),
+            tuple(sizes[b] for b in buffers),
+            extras,
         )
-        return (
-            _grid_for("fwd", problem, ident),
+        step = (
+            ident,
+            tuple(grid),
             (ident.warp_m * ident.warp_n * ident.wave_size, 1, 1),
             [a["name"] for a in _signature_for_identity(ident, ident.dtype_a)],
-            ks._launch_values_for("fwd", problem, ident, ptrs, sizes, {}),
+            buffers,
+            values,
         )
-    problem = DirectConvProblem(
-        N=req.N,
-        H=req.Hi,
-        W=req.Wi,
-        groups=req.G,
-        cpg=req.C // req.G,
-        kpg=req.K // req.G,
-        KH=req.Y,
-        KW=req.X,
-        PAD=req.pad_h,
-        stride=req.stride_h,
-        dtype=req.dtype,
-        dil_h=req.dilation_h,
-        dil_w=req.dilation_w,
-    )
-    plan, why = dks.plan_for(
-        None, ident, Path("unused.hsaco"), {"kernel_name": "k"}, problem, _ARCH
-    )
+        return [step], {}, rt.table
+    plan, why, helpers = _direct_plan(spec, req)
     assert plan is not None, why
-    (step,) = plan.steps
-    assert step.buffers == ("x", "w", "y")
-    return (
-        step.grid,
-        step.block,
-        [a["name"] for a in step.signature],
-        dks.launch_values(
-            step, dict(zip(step.buffers, ptrs)), dict(zip(step.buffers, sizes))
-        ),
-    )
-
-
-@pytest.mark.parametrize("shape", sorted(_SHAPES), ids=str)
-def test_launch_contract_matches_the_aot_run_path(shape):
-    req = _req(**_SHAPES[shape])
-    ptrs, sizes = (0x1000, 0x2000, 0x3000), (111, 222, 333)
-    for result in gc.dispatch_conv_grouped_all(req):
-        values = gc.launch_values_for(
-            result.request,
-            result.spec,
-            A_ptr=ptrs[0],
-            B_ptr=ptrs[1],
-            D_ptr=ptrs[2],
-            A_bytes=sizes[0],
-            B_bytes=sizes[1],
-            D_bytes=sizes[2],
+    steps = [
+        (
+            identity,
+            tuple(step.grid),
+            tuple(step.block),
+            [a["name"] for a in step.signature],
+            step.buffers,
+            dks.launch_values(step, ptrs, sizes),
         )
-        grid, block, names, want = _cache_side_launch(result.spec, req, ptrs, sizes)
-        assert result.grid == tuple(grid), result.spec.name
-        assert result.block == tuple(block), result.spec.name
-        assert [a["name"] for a in result.signature] == names, result.spec.name
-        assert values == want, result.spec.name
-        assert set(values) == set(names), result.spec.name
+        for identity, step in zip((*helpers, ident), plan.steps, strict=True)
+    ]
+    return steps, dict(plan.workspaces), ()
+
+
+_PTRS = {
+    name: 0x1000 * (i + 1)
+    for i, name in enumerate(("x", "w", "y", "dy", "dx", "ws_t", "ws_coa"))
+}
+_PTRS["sub_gemms"] = _UploadRecorder.PTR
+_SIZES = {name: 100 + i for i, name in enumerate(_PTRS)}
+
+
+@pytest.mark.parametrize("arch, direction, shape", _CASES)
+def test_launch_plan_matches_the_aot_run_path(arch, direction, shape):
+    for result in gc.dispatch_conv_grouped_all(_case_req(arch, direction, shape)):
+        name = result.spec.name
+        plan = gc.launch_plan_for(result.request, result.spec)
+        got = [
+            (
+                s.identity,
+                s.grid,
+                s.block,
+                [a["name"] for a in s.signature],
+                s.buffers,
+                plan.values(s, _PTRS, _SIZES),
+            )
+            for s in plan.steps
+        ]
+        want, workspaces, table = _cache_side_plan(
+            result.spec, result.request, _PTRS, _SIZES
+        )
+        assert got == want, name
+        assert dict(plan.workspaces) == workspaces, name
+        assert plan.sub_gemm_table == table, name
+        # The dispatch result describes the instance's own kernel: the last step.
+        own = plan.steps[-1]
+        assert own.identity == result.spec.identity, name
+        assert (result.grid, result.block) == (own.grid, own.block), name
+        assert result.signature == own.signature, name
+        for s in plan.steps:
+            assert set(plan.values(s, _PTRS, _SIZES)) == {
+                a["name"] for a in s.signature
+            }, name
 
 
 # ---------------------------------------------------------------------------
@@ -377,10 +487,11 @@ def test_algorithm_pin_keeps_one_family():
 # ---------------------------------------------------------------------------
 
 
-def test_instance_list_file_is_canonical():
+@pytest.mark.parametrize("path", sorted(_LISTS.values()), ids=lambda p: p.name)
+def test_instance_list_file_is_canonical(path):
     """Fix with ``instance_list.py format``."""
-    lst = gc.load_instance_list(_LIST)
-    assert _LIST.read_text(encoding="utf-8") == gc.format_instance_list(lst)
+    lst = gc.load_instance_list(path)
+    assert path.read_text(encoding="utf-8") == gc.format_instance_list(lst)
 
 
 def _implicit_record() -> dict:
@@ -420,8 +531,26 @@ def test_instance_record_spells_the_label(tmp_path):
     )
 
 
-def test_every_listed_instance_round_trips_through_its_record():
-    lst = gc.load_instance_list(_LIST)
+def test_a_dgrad_list_gives_its_direct_records_the_direct_direction(tmp_path):
+    direct = {
+        "algorithm": "direct_depthwise_dgrad",
+        "dtype": "fp16",
+        "filter": [3, 3],
+        "pad": [1, 1],
+        "stride": [1, 1],
+        "dilation": [1, 1],
+        "cpg": 1,
+        "kpg": 1,
+        "knobs": {"block_w": 8, "block_waves": 1},
+    }
+    path = _write_list(tmp_path, [_implicit_record(), direct], direction="dgrad")
+    implicit, depthwise = gc.load_instance_list(path).identities
+    assert (implicit.direction, depthwise.direction) == ("dgrad", "direct_dgrad")
+
+
+@pytest.mark.parametrize("path", sorted(_LISTS.values()), ids=lambda p: p.name)
+def test_every_listed_instance_round_trips_through_its_record(path):
+    lst = gc.load_instance_list(path)
     for identity in lst.identities:
         record = lst.record(identity)
         assert lst.identity(json.loads(json.dumps(record)), "rt") == identity
