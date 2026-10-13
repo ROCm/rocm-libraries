@@ -19,6 +19,7 @@ rocBLAS documentation is available at
 ### Changed
 
 * `trsm`, `trsm_batched`, and `trsm_strided_batched` print the required and available workspace sizes when they return `rocblas_status_memory_error` because a fixed-size handle workspace is too small and the new `ROCBLAS_VERBOSE_ERROR` environment variable is set. Previously this failure looked identical to running out of device memory.
+* On gfx942, hipBLASLt is now the default GEMM backend for the `f16_r`, `bf16_r`, and `f64_r` input types, including their mixed-precision `gemm_ex` forms. All other input types on gfx942 continue to default to Tensile, and problems for which hipBLASLt provides no solution still fall back to Tensile.
 
 ### Removed
 
