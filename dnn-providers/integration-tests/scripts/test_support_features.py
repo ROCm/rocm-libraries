@@ -22,7 +22,14 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from support_features import Feature, FeatureError, registry, sdpa, sdpa_backward
+from support_features import (
+    Feature,
+    FeatureError,
+    pointwise,
+    registry,
+    sdpa,
+    sdpa_backward,
+)
 from support_features.coverage import (
     DEFAULT_BUNDLES_DIR,
     compute_coverage,
@@ -110,8 +117,10 @@ class TestRegistry:
         for node_type, module in registry.OPS.items():
             assert module.NODE_TYPE == node_type
 
-    def test_pending_type_has_no_module(self) -> None:
-        assert registry.op_module(next(iter(registry.PENDING))) is None
+    def test_pending_type_has_no_module(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # Its own PENDING, so the test outlives the real list emptying.
+        monkeypatch.setattr(registry, "PENDING", frozenset({"LaterAttributes"}))
+        assert registry.op_module("LaterAttributes") is None
 
     def test_unknown_type_raises(self) -> None:
         with pytest.raises(FeatureError, match="NotAnOpAttributes"):
@@ -185,7 +194,7 @@ class TestCatalogProblems:
 # --------------------------------------------------------------------------
 
 FAKE_TYPE = "SdpaAttributes"
-PENDING_TYPE = "PointwiseAttributes"
+PENDING_TYPE = "CustomOpAttributes"
 
 
 def _fake_extract(node: dict, tensors_by_uid: dict) -> set[str]:
@@ -214,7 +223,8 @@ FAKE_OP = SimpleNamespace(
 @pytest.fixture()
 def fake_registry(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(registry, "OPS", {FAKE_TYPE: FAKE_OP})
-    monkeypatch.setattr(registry, "PENDING", registry.PENDING - {FAKE_TYPE})
+    # A fixed PENDING, not the real one, which shrinks with every op catalogued.
+    monkeypatch.setattr(registry, "PENDING", frozenset({PENDING_TYPE}))
 
 
 def _write_json(path: Path, data: object) -> None:
@@ -320,8 +330,8 @@ class TestJoin:
     def test_pending_types_are_listed_even_with_no_graphs(self, tmp_path: Path) -> None:
         _bundle(tmp_path, "a", [_node(features=["dtype:fp16"])])
         coverage, _ = _coverage(tmp_path)
-        assert set(coverage.pending_graphs) == registry.PENDING
-        assert "CustomOpAttributes (0)" in render_markdown(coverage)
+        assert set(coverage.pending_graphs) == {PENDING_TYPE}
+        assert f"{PENDING_TYPE} (0)" in render_markdown(coverage)
 
     def test_extract_error_is_reported_with_its_location(self, tmp_path: Path) -> None:
         _bundle(tmp_path, "a", [_node(boom="head dim 96 is not catalogued")])
@@ -708,6 +718,209 @@ class TestSdpaBackwardExtract:
         ):
             reached |= self._extract(**kwargs)
         assert reached == {feature.id for feature in sdpa_backward.FEATURES}
+
+
+# --------------------------------------------------------------------------
+# PointwiseAttributes
+# --------------------------------------------------------------------------
+
+# Every key the serializer writes under "inputs" besides the ports
+# (utilities/json/PointwiseAttributes.hpp), null unless a test sets it.
+_POINTWISE_SCALARS = (
+    "relu_lower_clip",
+    "relu_upper_clip",
+    "relu_lower_clip_slope",
+    "axis_tensor_uid",
+    "swish_beta",
+    "elu_alpha",
+    "softplus_beta",
+)
+
+
+def _pointwise(
+    mode: str = "relu_fwd",
+    *,
+    n_inputs: int | None = None,
+    dtype: str = "float",
+    in_dtypes: tuple[str, ...] | None = None,
+    out_dtype: str | None = None,
+    dims: tuple[int, ...] = (2, 3, 4),
+    in_dims: tuple[tuple[int, ...], ...] | None = None,
+    **params,
+) -> tuple[dict, dict]:
+    """A pointwise node: in_0.. on uids 1.., out_0 on uid 9.
+
+    ``n_inputs`` defaults to the mode's arity; a test passes it to bind the
+    wrong number.
+    """
+    n = pointwise.ARITY.get(mode, 1) if n_inputs is None else n_inputs
+    in_dtypes = in_dtypes or (dtype,) * n
+    in_dims = in_dims or (dims,) * n
+    tensors = {
+        uid: {"uid": uid, "dims": list(d), "data_type": t}
+        for uid, d, t in zip(range(1, n + 1), in_dims, in_dtypes)
+    }
+    tensors[9] = {"uid": 9, "dims": list(dims), "data_type": out_dtype or dtype}
+    ports = ("in_0_tensor_uid", "in_1_tensor_uid", "in_2_tensor_uid")
+    inputs = {"operation": mode}
+    inputs |= {name: None for name in _POINTWISE_SCALARS}
+    inputs |= {port: (i + 1 if i < n else None) for i, port in enumerate(ports)}
+    node = {
+        "type": "PointwiseAttributes",
+        "inputs": inputs | params,
+        "outputs": {"out_0_tensor_uid": 9},
+    }
+    return node, tensors
+
+
+def _schema_enum(file: str, name: str) -> set[str]:
+    match = re.search(
+        rf"\benum\s+{name}\s*:\s*\w+\s*\{{(.*?)\}}", _schema_text(file), re.S
+    )
+    assert match, f"enum {name} not found"
+    return set(re.findall(r"^\s*(\w+)\s*=", match.group(1), re.M))
+
+
+class TestPointwiseExtract:
+    def _extract(self, mode: str = "relu_fwd", **kwargs) -> set[str]:
+        return pointwise.extract(*_pointwise(mode, **kwargs))
+
+    def test_plain_graph(self) -> None:
+        assert self._extract() == {"mode:relu_fwd", "dtype:fp32"}
+
+    def test_every_schema_mode_has_an_arity(self) -> None:
+        modes = _schema_enum("pointwise_attributes.fbs", "PointwiseMode")
+        assert set(pointwise.ARITY) == {m.lower() for m in modes} - {"unset"}
+
+    def test_arity_lists_are_disjoint(self) -> None:
+        unary, binary = set(pointwise.UNARY), set(pointwise.BINARY)
+        assert not unary & binary
+        assert not (unary | binary) & set(pointwise.TERNARY)
+
+    @pytest.mark.parametrize("mode", sorted(pointwise.ARITY))
+    def test_every_mode_extracts_at_its_arity(self, mode: str) -> None:
+        assert f"mode:{mode}" in self._extract(mode)
+
+    @pytest.mark.parametrize(
+        "mode, n_inputs",
+        [("relu_fwd", 2), ("add", 1), ("add", 3), ("binary_select", 2)],
+    )
+    def test_wrong_arity_raises(self, mode: str, n_inputs: int) -> None:
+        with pytest.raises(FeatureError, match=f"{mode} takes"):
+            self._extract(mode, n_inputs=n_inputs)
+
+    def test_input_bound_to_the_wrong_port_raises(self) -> None:
+        node, tensors = _pointwise("add")
+        inputs = node["inputs"]
+        inputs["in_2_tensor_uid"] = inputs.pop("in_1_tensor_uid")
+        with pytest.raises(FeatureError, match="add takes 2"):
+            pointwise.extract(node, tensors)
+
+    @pytest.mark.parametrize("mode", ["unset", "relu", None])
+    def test_uncatalogued_mode_raises(self, mode) -> None:
+        with pytest.raises(FeatureError, match="pointwise mode"):
+            self._extract(mode)
+
+    @pytest.mark.parametrize(
+        "dtype, expected",
+        [("float", "dtype:fp32"), ("half", "dtype:fp16"), ("bfloat16", "dtype:bf16")],
+    )
+    def test_dtype(self, dtype: str, expected: str) -> None:
+        assert self._extract(dtype=dtype) == {"mode:relu_fwd", expected}
+
+    @pytest.mark.parametrize(
+        "mode, dtype", [("relu_fwd", "int32"), ("logical_not", "boolean")]
+    )
+    def test_uncatalogued_data_dtype_raises(self, mode: str, dtype: str) -> None:
+        with pytest.raises(FeatureError, match="in_0 dtype"):
+            self._extract(mode, dtype=dtype)
+
+    def test_uncatalogued_port_dtype_raises(self) -> None:
+        with pytest.raises(FeatureError, match="int32"):
+            self._extract("add", in_dtypes=("float", "int32"))
+
+    @pytest.mark.parametrize(
+        "mode, kwargs",
+        [
+            ("relu_fwd", {"out_dtype": "bfloat16"}),
+            ("add", {"in_dtypes": ("float", "half")}),
+            ("relu_bwd", {"in_dtypes": ("half", "half")}),
+        ],
+    )
+    def test_mixed_precision(self, mode: str, kwargs: dict) -> None:
+        assert "precision:mixed" in self._extract(mode, **kwargs)
+
+    def test_bool_output_is_not_mixed_precision(self) -> None:
+        features = self._extract("cmp_lt", out_dtype="boolean")
+        assert features == {"mode:cmp_lt", "dtype:fp32"}
+
+    def test_broadcast(self) -> None:
+        features = self._extract("add", in_dims=((2, 3, 4), (1, 3, 1)))
+        assert "broadcast:in" in features
+        assert "broadcast:in" not in self._extract("add")
+
+    @pytest.mark.parametrize(
+        "mode, param, value, expected",
+        [
+            ("relu_fwd", "relu_lower_clip", 0.0, set()),
+            ("relu_fwd", "relu_lower_clip", 0.1, {"relu:lower_clip"}),
+            ("relu_bwd", "relu_lower_clip", 0.1, {"relu:lower_clip"}),
+            ("relu_fwd", "relu_upper_clip", 6.0, {"relu:upper_clip"}),
+            ("relu_fwd", "relu_lower_clip_slope", 0.0, set()),
+            ("relu_fwd", "relu_lower_clip_slope", 0.01, {"relu:leaky"}),
+            ("swish_fwd", "swish_beta", 1.0, set()),
+            ("swish_bwd", "swish_beta", 1.5, {"swish:beta"}),
+            ("elu_fwd", "elu_alpha", 1.0, set()),
+            ("elu_bwd", "elu_alpha", 0.5, {"elu:alpha"}),
+            ("softplus_fwd", "softplus_beta", 1.0, set()),
+            ("softplus_bwd", "softplus_beta", 2.0, {"softplus:beta"}),
+            ("gen_index", "axis_tensor_uid", 1, set()),
+        ],
+    )
+    def test_parameter_counts_only_off_its_default(
+        self, mode: str, param: str, value, expected: set[str]
+    ) -> None:
+        dtype = "half" if mode.endswith("_bwd") else "float"
+        features = self._extract(mode, dtype=dtype, **{param: value})
+        assert features - {f"mode:{mode}", "dtype:fp16", "dtype:fp32"} == expected
+
+    @pytest.mark.parametrize(
+        "mode, param, value",
+        [
+            ("relu_fwd", "swish_beta", 1.0),
+            ("add", "relu_upper_clip", 6.0),
+            ("relu_fwd", "axis_tensor_uid", 0),
+            ("swish_fwd", "elu_alpha", 0.5),
+        ],
+    )
+    def test_parameter_on_a_mode_that_ignores_it_raises(
+        self, mode: str, param: str, value
+    ) -> None:
+        with pytest.raises(FeatureError, match=f"{param} is set, but {mode}"):
+            self._extract(mode, **{param: value})
+
+    def test_scalars_are_read_from_inputs(self) -> None:
+        node, tensors = _pointwise(relu_upper_clip=6.0)
+        assert "relu:upper_clip" in pointwise.extract(node, tensors)
+        node["parameters"] = {"relu_upper_clip": node["inputs"].pop("relu_upper_clip")}
+        assert "relu:upper_clip" not in pointwise.extract(node, tensors)
+
+    def test_every_feature_is_reachable(self) -> None:
+        """No catalogued feature is one extract() can never return."""
+        reached = set()
+        for mode in pointwise.ARITY:
+            reached |= self._extract(mode)
+        for kwargs in (
+            {"dtype": "half", "relu_lower_clip": 0.1, "relu_upper_clip": 6.0},
+            {"dtype": "bfloat16", "relu_lower_clip_slope": 0.01},
+            {"out_dtype": "half"},
+        ):
+            reached |= self._extract(**kwargs)
+        reached |= self._extract("add", in_dims=((2, 3, 4), (1, 3, 1)))
+        reached |= self._extract("swish_fwd", swish_beta=1.5)
+        reached |= self._extract("elu_fwd", elu_alpha=0.5)
+        reached |= self._extract("softplus_fwd", softplus_beta=2.0)
+        assert reached == {feature.id for feature in pointwise.FEATURES}
 
 
 # --------------------------------------------------------------------------
