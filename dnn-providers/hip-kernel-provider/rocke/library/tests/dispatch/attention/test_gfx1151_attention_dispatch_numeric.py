@@ -440,7 +440,7 @@ class TestMetadataSafety(unittest.TestCase):
     def test_lse_tensor_is_required_and_validated(self):
         from dispatch.attention.bindings import _gfx1151_validate_and_collect
 
-        request = _dense_request(return_lse=True)
+        request = _dense_request(emit_lse=True)
         spec = _dense_spec()
         q = _fake_tensor((2, 32, 4, 64))
         k = _fake_tensor((2, 32, 2, 64))
@@ -719,7 +719,7 @@ class TestMetadataSafety(unittest.TestCase):
         q = _fake_tensor((2, 4, 32, 64))
         k = _fake_tensor((2, 2, 32, 64))
         lse = _fake_tensor((2, 4, 32, 1), dtype="float32")
-        request = _dense_request(tensor_layout="bhsd", return_lse=True)
+        request = _dense_request(tensor_layout="bhsd", emit_lse=True)
         values = _gfx1151_validate_and_collect(
             request,
             _dense_spec(),
@@ -1317,7 +1317,7 @@ def test_dispatch_dense_lse(mask, sq, sk, left, right, use_sinks):
         sliding_window=left,
         window_right=right,
         use_sinks=use_sinks,
-        return_lse=True,
+        emit_lse=True,
     )
     arrays = {
         "q": q,
@@ -1348,7 +1348,7 @@ def test_dispatch_dense_lse_does_not_change_output():
     q, k, v = _random_qkv(303, batch, sq, sk, hq, hkv, dim, dim)
     scale = 1.0 / np.sqrt(dim)
     base = _dense_direct_request(batch, sq, sk, hq, hkv, dim, dim)
-    with_lse = _dense_direct_request(batch, sq, sk, hq, hkv, dim, dim, return_lse=True)
+    with_lse = _dense_direct_request(batch, sq, sk, hq, hkv, dim, dim, emit_lse=True)
 
     def arrays(with_stats):
         a = {
@@ -1376,7 +1376,7 @@ def test_dispatch_dense_lse_gapped_batch_stride_uses_runtime_stride():
     v_store = np.zeros_like(k_store)
     k_store[:, :sk], v_store[:, :sk] = k, v
     scale = 1.0 / np.sqrt(dim)
-    request = _dense_direct_request(batch, sq, sk, hq, hkv, dim, dim, return_lse=True)
+    request = _dense_direct_request(batch, sq, sk, hq, hkv, dim, dim, emit_lse=True)
     lse = np.full((batch, hq, sq), np.nan, dtype=np.float32)
     out = np.full((batch, sq, hq, dim), np.nan, dtype=q.dtype)
     got = _launch_views_lse(
@@ -1464,7 +1464,7 @@ def test_dispatch_ragged_lse_gqa(use_sinks):
         layout="ragged",
         mask_type=AttentionMaskType.BOTTOM_RIGHT_CAUSAL,
         use_sinks=use_sinks,
-        return_lse=True,
+        emit_lse=True,
     )
     arrays = {
         "q": q,
@@ -1563,7 +1563,7 @@ def test_dispatch_dense_attn_bias_shapes(bias_dtype, mask, bias_shape):
     shape = tuple(dims[d] for d in bias_shape.split(","))
     bias = _make_bias(402, shape, bias_dtype)
     request = _bias_request(
-        batch, sq, sk, hq, hkv, dim, bias_dtype, mask, return_lse=True
+        batch, sq, sk, hq, hkv, dim, bias_dtype, mask, emit_lse=True
     )
     arrays = {
         "q": q,
@@ -1815,7 +1815,7 @@ def test_dispatch_bhsd_head96_noncausal_window_with_lse():
             mask_type=AttentionMaskType.SLIDING_WINDOW,
             window_left=3,
             window_right=5,
-            return_lse=True,
+            emit_lse=True,
         )
         tensors = {
             "q": _view_as(buffers, "q", q_view),

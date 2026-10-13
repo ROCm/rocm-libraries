@@ -94,7 +94,7 @@ lengths, MHA/GQA/MQA ratios, window widths, and dense layouts.
 The dense binding accepts logical BSHD and BHSD tensors. The innermost head
 dimension must remain contiguous, but batch, token, and head strides may be any
 positive non-overlapping element strides; compact storage is not required.
-`return_lse=True` adds a caller-owned FP32 output. hipDNN uses logical shape
+`emit_lse=True` adds a caller-owned FP32 output. hipDNN uses logical shape
 `[B,S,H,1]` for BSHD or `[B,H,S,1]` for BHSD; direct dispatch also accepts
 compact rank-3 forms. Each element is the natural-log log-sum-exp of that row.
 
@@ -239,7 +239,7 @@ without host-side relaunches.
 
 ### Softmax statistics (LSE)
 
-`return_lse=True` supplies the runtime `write_lse` gate and a caller-owned FP32
+`emit_lse=True` supplies the runtime `write_lse` gate and a caller-owned FP32
 buffer. The kernel writes the natural-log log-sum-exp of each scaled, masked,
 biased row; sink mass is included in the denominator and an empty row stores
 `-inf`. LSE is not a spec or cache dimension.

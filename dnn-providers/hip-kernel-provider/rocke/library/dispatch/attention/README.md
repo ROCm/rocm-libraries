@@ -293,6 +293,12 @@ Selection pins a spec the same way for dense and unified:
   reason; nothing falls back. An id from
   another variant is rejected before the search.
 - `tuning_id="auto"` selects the candidate's base spec.
+- `emit_lse=True` asks for the optional FP32 LSE output (natural-log softmax
+  normalizer). It is the `lse` request feature; only the dense candidates declare
+  it, so an unpinned LSE request is refused instead of reaching a kernel without
+  the output. It is a dense output field (`DENSE_OUTPUT_FIELDS`), so sweeps
+  never vary it. The caller passes the buffer to `bind_torch` as `tensors["lse"]`;
+  the dense runner validates its shape, dtype, device, and overlap.
 
 A candidate resolves a request once: `support` and `select_spec` share a
 per-candidate cache, so a pin is not resolved twice.
@@ -401,7 +407,7 @@ width; `window_right` supplies an optional runtime right bound, while
 tensor `[B|1, H|1, Sq|1, Sk]` with a unit-stride key dimension;
 `attn_bias_dtype` is `"f32"` (default) or `"q"` (the Q dtype). Broadcast,
 expanded, permuted, and row-padded views are accepted without copies; invalid
-dtype, rank, extent, or key stride raises `ValueError`. `return_lse=True`
+dtype, rank, extent, or key stride raises `ValueError`. `emit_lse=True`
 requires a caller-owned FP32 `lse` tensor; direct dispatch accepts
 `[B,Hq,Sq]`, `[Hq,total_q]`, and layout-shaped forms, while the hipDNN graph
 contract uses rank-4 stats. Fully masked rows store `-inf`.
@@ -411,7 +417,7 @@ on gfx1151.
 
 The dense binding accepts either BSHD or BHSD shapes (`tensor_layout` disambiguates
 equal sequence/head extents) and preserves independently padded, non-overlapping
-batch/token/head strides. Set `return_lse=True` and provide an FP32 `lse` tensor
+batch/token/head strides. Set `emit_lse=True` and provide an FP32 `lse` tensor
 to receive row-wise log-sum-exp values. The binding otherwise takes `q`, `k`,
 `v`, and `out`; packed inputs also provide the selected prefix sums or paged
 metadata. Runtime kwargs are `softmax_scale`, positive `softcap` when selected,

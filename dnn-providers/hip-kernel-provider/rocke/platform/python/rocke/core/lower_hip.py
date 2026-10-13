@@ -20,6 +20,9 @@ from typing import List, Optional
 from .arch.wmma_scale import gfx1250_scaled_wmma
 from .dtypes import dtype_info
 from .ir import (
+    _FENCE_ORDERINGS,
+    _FENCE_SCOPES,
+    _FLAG_STORE_ORDERINGS,
     KernelDef,
     Op,
     PtrType,
@@ -28,6 +31,8 @@ from .ir import (
     Type,
     Value,
     VectorType,
+    _sync_attr,
+    require_streaming_arch,
 )
 
 
@@ -191,6 +196,14 @@ _VEC_PREFIX = {
 }
 
 
+def _nontemporal(op: Op) -> bool:
+    """The op's ``nontemporal`` attr; absent means False, non-bool is rejected."""
+    nt = op.attrs.get("nontemporal", False)
+    if not isinstance(nt, bool):
+        raise ValueError(f"{op.name}: nontemporal attr must be a bool, got {nt!r}")
+    return nt
+
+
 def _vec_prefix(elem_name: str, op_desc: str) -> str:
     """Vector prefix for a vector load/store ``elem_type``. Validate rather than
     silently falling back to f16, which would reinterpret the bits of another
@@ -259,6 +272,21 @@ def _encode_waitcnt_gfx11(vmcnt: int, expcnt: int, lgkmcnt: int) -> int:
     lk_b = 0x3F if lgkmcnt < 0 else min(max(lgkmcnt, 0), 0x3F)
     return (ec_b & 0x7) | ((lk_b & 0x3F) << 4) | ((vm_b & 0x3F) << 10)
 
+
+# Fence / flag-op scope and ordering spellings for the HIP atomic builtins.
+_HIP_ATOMIC_ORDER = {
+    "monotonic": "__ATOMIC_RELAXED",
+    "acquire": "__ATOMIC_ACQUIRE",
+    "release": "__ATOMIC_RELEASE",
+    "acq_rel": "__ATOMIC_ACQ_REL",
+    "seq_cst": "__ATOMIC_SEQ_CST",
+}
+_HIP_FENCE_SCOPE = {"workgroup": "workgroup", "agent": "agent", "system": ""}
+_HIP_MEMORY_SCOPE = {
+    "workgroup": "__HIP_MEMORY_SCOPE_WORKGROUP",
+    "agent": "__HIP_MEMORY_SCOPE_AGENT",
+    "system": "__HIP_MEMORY_SCOPE_SYSTEM",
+}
 
 # Default arch for the HIP path. gfx950 is the historical CDNA target whose
 # emitted source is the byte-identical baseline; callers that don't pass an
@@ -500,7 +528,16 @@ class _Lowerer:
             raise ValueError(
                 "global_load_vN: alignment must be a positive power of two"
             )
+        nontemporal = _nontemporal(op)
+        if nontemporal:
+            require_streaming_arch(op.name, self.arch.gfx)
         if align < byte_count or byte_count & (byte_count - 1):
+            if nontemporal:
+                raise NotImplementedError(
+                    "global_load_vN: the HIP backend does not yet lower "
+                    "nontemporal on the memcpy path (under-aligned or "
+                    "non-power-of-two payload)"
+                )
             # Non-power-of-two vector objects include padding. Copy only the
             # payload, using only the alignment guaranteed by the IR.
             self._emit(
@@ -510,10 +547,13 @@ class _Lowerer:
                 f"{byte_count});"
             )
             return
-        self._emit(
-            f"{prefix}{vec} {_name(op.result)} = "
-            f"*reinterpret_cast<const {prefix}{vec}*>({_name(ptr)} + {_name(idx)});"
-        )
+        src = f"reinterpret_cast<const {prefix}{vec}*>({_name(ptr)} + {_name(idx)})"
+        if nontemporal:
+            self._emit(
+                f"{prefix}{vec} {_name(op.result)} = __builtin_nontemporal_load({src});"
+            )
+            return
+        self._emit(f"{prefix}{vec} {_name(op.result)} = *{src};")
 
     def _op_tile_smem_store_vN(self, op: Op) -> None:
         smem = op.operands[0]
@@ -1710,6 +1750,34 @@ class _Lowerer:
             f"{_name(val)});"
         )
 
+    def _op_memref_fence(self, op: Op) -> None:
+        """Lower ``memref.fence`` via ``__builtin_amdgcn_fence``."""
+        scope = _sync_attr(op, "scope", _FENCE_SCOPES)
+        ordering = _sync_attr(op, "ordering", _FENCE_ORDERINGS)
+        self._emit(
+            f"__builtin_amdgcn_fence({_HIP_ATOMIC_ORDER[ordering]}, "
+            f'"{_HIP_FENCE_SCOPE[scope]}");'
+        )
+
+    def _op_memref_global_flag_store(self, op: Op) -> None:
+        """Lower ``memref.global_flag_store`` via ``__hip_atomic_store``."""
+        ptr, idx, val = op.operands
+        scope = _sync_attr(op, "scope", _FENCE_SCOPES)
+        ordering = _sync_attr(op, "ordering", _FLAG_STORE_ORDERINGS)
+        self._emit(
+            f"__hip_atomic_store(&{_name(ptr)}[{_name(idx)}], {_name(val)}, "
+            f"{_HIP_ATOMIC_ORDER[ordering]}, {_HIP_MEMORY_SCOPE[scope]});"
+        )
+
+    def _op_memref_global_flag_wait_eq(self, op: Op) -> None:
+        """Lower ``memref.global_flag_wait_eq`` to an acquire-load spin loop."""
+        ptr, idx, expect = op.operands
+        scope = _sync_attr(op, "scope", _FENCE_SCOPES)
+        self._emit(
+            f"while (__hip_atomic_load(&{_name(ptr)}[{_name(idx)}], __ATOMIC_ACQUIRE, "
+            f"{_HIP_MEMORY_SCOPE[scope]}) != {_name(expect)}) {{}}"
+        )
+
     def _op_memref_global_atomic_add_pk_bf16(self, op: Op) -> None:
         """Lower the packed-bf16 atomic add via the AMDGPU builtin.
 
@@ -1843,17 +1911,27 @@ class _Lowerer:
             raise ValueError(
                 "global_store_vN: alignment must be a positive power of two"
             )
+        nontemporal = _nontemporal(op)
+        if nontemporal:
+            require_streaming_arch(op.name, self.arch.gfx)
         if align < byte_count or byte_count & (byte_count - 1):
+            if nontemporal:
+                raise NotImplementedError(
+                    "global_store_vN: the HIP backend does not yet lower "
+                    "nontemporal on the memcpy path (under-aligned or "
+                    "non-power-of-two payload)"
+                )
             self._emit(
                 f"__builtin_memcpy("
                 f"__builtin_assume_aligned({_name(ptr)} + {_name(idx)}, {align}), "
                 f"&{_name(val)}, {byte_count});"
             )
             return
-        self._emit(
-            f"*reinterpret_cast<{prefix}{n}*>({_name(ptr)} + {_name(idx)}) = "
-            f"{_name(val)};"
-        )
+        dst = f"reinterpret_cast<{prefix}{n}*>({_name(ptr)} + {_name(idx)})"
+        if nontemporal:
+            self._emit(f"__builtin_nontemporal_store({_name(val)}, {dst});")
+            return
+        self._emit(f"*{dst} = {_name(val)};")
 
     def _op_memref_global_atomic_add_f32(self, op: Op) -> None:
         ptr, idx, val = op.operands

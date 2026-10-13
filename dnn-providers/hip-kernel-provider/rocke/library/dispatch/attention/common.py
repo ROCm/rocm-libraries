@@ -113,7 +113,6 @@ class AttentionRequest(OperatorRequest):
     window_left: int | None = None
     window_right: int | None = None
     window_bottom_right: bool = False
-    return_lse: bool = False
     tensor_layout: str = "auto"  # dense tensors only: "auto" | "bshd" | "bhsd"
     kv_block_size: int = 16  # paged KV block_size (modulus); {16,32,64}
     num_cus: int = (
@@ -147,6 +146,11 @@ class AttentionRequest(OperatorRequest):
     # dtype). A candidate must declare the "attn_bias" feature.
     use_attn_bias: bool = False
     attn_bias_dtype: str = "f32"
+    kv_layout: str = "paged"  # "paged" | "strided" (non-paged decode)
+    # Also write the natural-log softmax normalizer (LSE) into a caller-owned
+    # FP32 ``tensors["lse"]``. Reported as the ``lse`` feature, so only
+    # candidates whose kernels implement it (dense, gfx1151 WMMA) admit it.
+    emit_lse: bool = False
 
     def __post_init__(self):
         # Callers rebuild pins from stored JSON; a bad value fails here, with
@@ -182,6 +186,8 @@ class AttentionRequest(OperatorRequest):
 
     def features(self) -> frozenset[str]:
         active = set()
+        if self.kv_layout == "strided":
+            active.add("strided_kv")
         try:
             mask_type = _parse_attention_mask_type(self.mask_type)
         except ValueError:
@@ -214,7 +220,7 @@ class AttentionRequest(OperatorRequest):
                     active.add("noncausal_window")
         if self.window_right is not None and int(self.window_right) >= 0:
             active.add("window_right")
-        if bool(self.return_lse):
+        if self.emit_lse:
             active.add("lse")
         if bool(self.use_sinks):
             active.add("sinks")
@@ -270,8 +276,12 @@ def _request_errors(
     if not isinstance(req, AttentionRequest):
         return [f"expected AttentionRequest, got {type(req).__name__}"]
     errors: list[str] = []
+    if req.kv_layout not in ("paged", "strided"):
+        errors.append("kv_layout must be paged or strided")
     if req.op != "attention":
         errors.append(f"unsupported op {req.op!r}")
+    if type(req.emit_lse) is not bool:
+        errors.append(f"emit_lse must be a bool, got {type(req.emit_lse).__name__}")
     for field in ("batch", "nhead_q", "nhead_k", "seqlen_q", "seqlen_k", "hdim_q"):
         if int(getattr(req, field)) <= 0:
             errors.append(f"{field} must be positive")

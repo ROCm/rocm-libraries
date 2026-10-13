@@ -269,9 +269,9 @@ def validate_tuning_attention_tensors(
 # Declared runner contracts. Inferring them with inspect.signature drops
 # arguments the runner does not list and launches a different kernel.
 _DENSE_OPTIONAL_INPUTS = {
-    "gfx942": frozenset({"cu_seqlens_q", "cu_seqlens_kv"}),
+    "gfx942": frozenset({"cu_seqlens_q", "cu_seqlens_kv", "lse"}),
     "gfx950": frozenset(
-        {"cu_seqlens_q", "cu_seqlens_kv", "block_tables", "kv_lens", "sinks"}
+        {"cu_seqlens_q", "cu_seqlens_kv", "block_tables", "kv_lens", "sinks", "lse"}
     ),
 }
 
@@ -292,6 +292,8 @@ def bind_dense_attention_torch(
     """Bind a dense ``AttentionTuningSpec`` to ``q``/``k``/``v``/``out`` tensors.
 
     Grid and block come from the spec, the same values the candidate reports.
+    An ``emit_lse`` spec also needs ``tensors["lse"]``: a caller-owned FP32
+    buffer the kernel fills in place (the runner validates it).
     """
     run = _dense_runner(str(getattr(request, "arch", "")))
     spec = tuning_spec.kernel_spec
@@ -317,6 +319,7 @@ def bind_dense_attention_torch(
             "block_tables": _kw.get("block_tables", tensors.get("block_tables")),
             "kv_lens": _kw.get("kv_lens", tensors.get("kv_lens")),
             "sinks": _kw.get("sinks", tensors.get("sinks")),
+            "lse": _kw.get("lse", tensors.get("lse")),
         }
         accepted = _DENSE_OPTIONAL_INPUTS[str(request.arch)]
         for name, value in optional.items():
@@ -640,7 +643,7 @@ def _gfx1151_validate_and_collect(
     ):
         raise ValueError("transposed QK requires complete query and KV tiles")
     required = ["q", "k", "v", "out"]
-    if bool(request.return_lse):
+    if bool(request.emit_lse):
         required.append("lse")
     missing = [name for name in required if tensors.get(name) is None]
     if missing:
@@ -699,7 +702,7 @@ def _gfx1151_validate_and_collect(
         "bottom_right": int(bottom_right),
         "window_left": _fits_signed_i32(window_left, "window_left"),
         "window_right": _fits_signed_i32(window_right, "window_right"),
-        "write_lse": int(bool(request.return_lse)),
+        "write_lse": int(bool(request.emit_lse)),
         "stride_q_batch": 0,
         "stride_k_batch": 0,
         "stride_v_batch": 0,
@@ -751,7 +754,7 @@ def _gfx1151_validate_and_collect(
                 "stride_o_head": _fits_i32(out.stride(head_axis), "stride_o_head"),
             }
         )
-        if bool(request.return_lse):
+        if bool(request.emit_lse):
             shape = _shape(lse, "lse")
             if _dtype_kind(lse, "lse") != "fp32":
                 raise ValueError("lse dtype must be FP32")
@@ -806,7 +809,7 @@ def _gfx1151_validate_and_collect(
                 "stride_o_head": _fits_i32(out.stride(1), "stride_o_head"),
             }
         )
-        if bool(request.return_lse):
+        if bool(request.emit_lse):
             lse_shape = _shape(lse, "lse")
             total_q = _shape(q, "q")[0]
             heads = int(request.nhead_q)
@@ -992,7 +995,7 @@ def bind_gfx1151_attention_torch(
     Handles dense BSHD/BHSD tensors with arbitrary non-overlapping outer
     strides, packed ragged/paged layouts, FP16/BF16, and OCP fp8e4m3 KV
     storage. Tensor keys are ``q``/``k``/``v``/``out`` plus caller-owned
-    ``lse`` when ``request.return_lse`` is true, layout metadata, and enabled
+    ``lse`` when ``request.emit_lse`` is true, layout metadata, and enabled
     score inputs including dense additive ``attn_bias``. LSE accepts live-head
     ``[B,H,S]`` / ``[H,total_q]`` layouts and layout-shaped forms. Runtime
     scalar kwargs are ``softmax_scale`` (default ``1/sqrt(D)``), ``softcap``

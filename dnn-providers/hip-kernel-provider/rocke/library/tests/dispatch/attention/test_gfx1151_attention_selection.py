@@ -67,7 +67,7 @@ class TestGfx1151AttentionSelection(unittest.TestCase):
         self.assertEqual(first, second)
 
     def test_head_dim_96_and_lse_are_supported(self):
-        result = dispatch_attention(_request(hdim_q=96, hdim_v=96, return_lse=True))
+        result = dispatch_attention(_request(hdim_q=96, hdim_v=96, emit_lse=True))
         self.assertEqual(result.spec.head_size, 96)
         self.assertFalse(result.spec.transposed_qk)
 
@@ -187,11 +187,11 @@ class TestGfx1151AttentionSelection(unittest.TestCase):
         for layout in ("dense", "ragged"):
             with self.subTest(layout=layout):
                 plain = dispatch_attention(_request(layout=layout)).spec
-                lse = dispatch_attention(_request(layout=layout, return_lse=True)).spec
+                lse = dispatch_attention(_request(layout=layout, emit_lse=True)).spec
                 self.assertEqual(plain, lse)
         for arch in ("gfx950", "gfx942"):
             with self.subTest(arch=arch), self.assertRaises(ValueError):
-                dispatch_attention(_request(arch=arch, return_lse=True))
+                dispatch_attention(_request(arch=arch, emit_lse=True))
 
     def test_attn_bias_selects_a_bias_kernel_only_on_gfx1151(self):
         for layout in ("dense", "ragged", "paged"):
@@ -217,7 +217,7 @@ class TestGfx1151AttentionSelection(unittest.TestCase):
                 use_softcap=True,
                 use_alibi=True,
                 use_qq_bias=True,
-                return_lse=True,
+                emit_lse=True,
                 mask_type=AttentionMaskType.TOP_LEFT_CAUSAL,
             )
         ).spec
@@ -235,7 +235,7 @@ class TestGfx1151AttentionSelection(unittest.TestCase):
                     use_softcap=True,
                     use_alibi=True,
                     use_qq_bias=True,
-                    return_lse=False,
+                    emit_lse=False,
                     mask_type=AttentionMaskType.TOP_LEFT_CAUSAL,
                 )
             ).spec,

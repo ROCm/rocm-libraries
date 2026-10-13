@@ -20,10 +20,18 @@ from dispatch.attention.common import ATTENTION_FEATURES
 # edit on an existing one) fails ``test_declared_features_are_frozen`` until it
 # is listed here, so a widening like fp8 can never silently reach a path that
 # does not implement it.
-_GFX950_DENSE_FEATURES = {"causal", "sinks", "sliding_window"}
+# ``lse`` is an output feature, not part of ATTENTION_FEATURES: only the dense
+# kernels write LSE, so every other candidate must keep declining it.
+_GFX950_DENSE_FEATURES = {"causal", "lse", "sinks", "sliding_window"}
 _GFX950_DENSE_GRID_FEATURES = _GFX950_DENSE_FEATURES | {"causal_bottom_right"}
 EXPECTED_FEATURES = {
-    "attention_gfx942_dense": {"causal", "sliding_window"},
+    "attention_strided_decode": {
+        "strided_kv",
+        "causal",
+        "causal_bottom_right",
+        "sliding_window",
+    },
+    "attention_gfx942_dense": {"causal", "lse", "sliding_window"},
     "attention_gfx950_dense_grid": set(_GFX950_DENSE_GRID_FEATURES),
     "attention_gfx950_dense_persist": set(_GFX950_DENSE_FEATURES),
     "attention_gfx950_dense_persist_widedma": set(_GFX950_DENSE_FEATURES),

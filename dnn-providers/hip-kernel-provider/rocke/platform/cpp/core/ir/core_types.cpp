@@ -678,6 +678,11 @@ static const char* const rocke_opcode_names[ROCKE_OP__COUNT] = {
     "scf.yield",
     "cf.return",
 
+    /* memref.* cross-workgroup synchronisation */
+    "memref.fence",
+    "memref.global_flag_store",
+    "memref.global_flag_wait_eq",
+
     "vector.undef",
     "tile.buffer_load_f16_d16"};
 
@@ -927,7 +932,12 @@ static const bool rocke_opcode_pure[ROCKE_OP__COUNT] = {
     /* scf.yield    */ false,
     /* cf.return    */ false,
 
-    /* vector.undef              */ false,
+    /* memref.* cross-workgroup synchronisation (effectful) */
+    /* memref.fence               */ false,
+    /* memref.global_flag_store   */ false,
+    /* memref.global_flag_wait_eq */ false,
+
+    /* vector.undef               */ false,
     /* tile.buffer_load_f16_d16   */ false};
 
 bool rocke_opcode_is_pure(rocke_opcode_t op)
