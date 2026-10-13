@@ -23,6 +23,12 @@
 #   not folded into the tiers below, all of which run on single-GPU runners where
 #   every multi_gpu test would skip while the run still reported green.
 #
+#   "*TuningStore.*" is a second exception: the tuning-store cases are a plain
+#   gtest suite, host-only and well under a second, so every tier runs all of
+#   them. They are compiled into hipblaslt-test, rather than run through the
+#   standalone hipblaslt-test-tuning-store binary, so hipBLASLt keeps one ctest
+#   entry per tier (see the comment on that target in clients/CMakeLists.txt).
+#
 # These tiers are TheRock ctest presets; they are NOT a port of hipBLASLt's
 # rocJenkins job filters (those are wired differently).
 #
@@ -38,6 +44,7 @@ test_categories:
     description: "Smoke surface for fast PR gating (target: ~5 min)"
     test_patterns:
       - "*smoke*"
+      - "*TuningStore.*"
     exclude:
       - "*known_bug*"
     labels:
@@ -50,6 +57,7 @@ test_categories:
       - "*smoke*"
       - "*quick*"
       - "*pre_checkin*"
+      - "*TuningStore.*"
     exclude:
       - "*known_bug*"
     labels:
@@ -64,6 +72,7 @@ test_categories:
       - "*quick*"
       - "*pre_checkin*"
       - "*nightly*"
+      - "*TuningStore.*"
     exclude:
       - "*known_bug*"
     labels:
@@ -79,6 +88,7 @@ test_categories:
       - "*pre_checkin*"
       - "*nightly*"
       - "*HMM*"
+      - "*TuningStore.*"
     exclude:
       - "*known_bug*"
     labels:

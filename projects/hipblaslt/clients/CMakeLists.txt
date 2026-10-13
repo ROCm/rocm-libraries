@@ -213,6 +213,7 @@ if(BUILD_TESTING OR HIPBLASLT_BUILD_TESTING)
         PRIVATE
             hip::device
             hipblaslt::hipblaslt-clients-common
+            hipblaslt-tuning-store
             roc::tensilelite-host
             GTest::gtest
             OpenMP::OpenMP_CXX
@@ -234,7 +235,6 @@ if(BUILD_TESTING OR HIPBLASLT_BUILD_TESTING)
         # This ensures we test the real library code, not stubs
         target_link_libraries(hipblaslt-test PRIVATE
             $<TARGET_OBJECTS:hipblaslt>
-            hipblaslt-tuning-store
             roc::tensilelite-host
             ${CMAKE_DL_LIBS}
         )
@@ -257,7 +257,10 @@ if(BUILD_TESTING OR HIPBLASLT_BUILD_TESTING)
 
     # The tuning file's row format and store, tested on their own: no device,
     # no solution library and no test hooks, so they run wherever the tests
-    # build.
+    # build. CI runs the same cases inside hipblaslt-test. Don't register this
+    # binary with ctest: TheRock shards hipBLASLt by ctest entry and by gtest
+    # case at once, and a second entry makes some cases of both binaries run
+    # on no shard.
     add_executable(hipblaslt-test-tuning-store
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/src/tuning_store_test.cpp")
     target_link_libraries(hipblaslt-test-tuning-store
