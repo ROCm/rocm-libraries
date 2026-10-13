@@ -48,13 +48,7 @@ class Tuner(BaseTuner):
         params['block_size_x'] = BLOCK_SIZES
         params['ipt'] = IPT
         return params
-
-    def _get_key_type_name(self) -> str:
-        return "input_type"
-
-    def _get_value_type_name(self):
-        return ""
-
+    
     def _get_restrictions(
         self, types: Dict[str, Any]
     ) -> Callable[[dict], bool]:
