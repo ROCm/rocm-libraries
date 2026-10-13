@@ -25,6 +25,8 @@ import pytest
 from support_features import (
     Feature,
     FeatureError,
+    batchnorm,
+    batchnorm_training,
     convolution,
     convolution_bwd,
     convolution_fwd,
@@ -32,6 +34,7 @@ from support_features import (
     pointwise,
     registry,
     sdpa,
+    scalar_source,
     sdpa_backward,
 )
 from support_features.coverage import (
@@ -1293,6 +1296,414 @@ class TestConvolutionFwdExtract:
     def test_uncatalogued_rank_raises(self, spatial, n: int) -> None:
         with pytest.raises(FeatureError, match=f"{n} spatial dims"):
             self._extract(spatial=spatial)
+
+
+# --------------------------------------------------------------------------
+# Scalar operands
+# --------------------------------------------------------------------------
+
+
+def _scalar(uid: int, source: str = "fixed", dims: list[int] | None = None) -> dict:
+    """A scalar as the serializer writes it: baked, runtime, or in a buffer."""
+    dims = [1] if dims is None else dims
+    tensor = {"uid": uid, "data_type": "double", "dims": dims, "virtual": False}
+    tensor["strides"] = [1] * len(dims)
+    if source == "fixed":
+        tensor |= {"value": 1e-5, "value_type": "Float64Value"}
+    elif source == "runtime":
+        tensor["is_runtime_pass_by_value"] = True
+    return tensor
+
+
+class TestScalarSource:
+    @pytest.mark.parametrize(
+        "tensor, expected",
+        [
+            (_scalar(1, "fixed"), "fixed"),
+            (_scalar(1, "runtime"), "runtime"),
+            # A runtime scalar may carry a default; the caller still passes it.
+            (_scalar(1, "fixed") | {"is_runtime_pass_by_value": True}, "runtime"),
+            (_scalar(1, "fixed") | {"is_runtime_pass_by_value": False}, "fixed"),
+            (_scalar(1, "fixed", dims=[1, 1, 1, 1]), "fixed"),
+        ],
+    )
+    def test_source(self, tensor: dict, expected: str) -> None:
+        assert scalar_source(tensor, "epsilon_tensor_uid") == expected
+
+    @pytest.mark.parametrize(
+        "tensor, match",
+        [
+            (_scalar(1, "buffer"), "neither a baked constant nor runtime"),
+            (_scalar(1, "fixed", dims=[2]), r"\[2\] are not one scalar"),
+            (_scalar(1, "fixed", dims=[]), r"\[\] are not one scalar"),
+            (_scalar(1, "fixed", dims=[1, 0]), "not one scalar"),
+        ],
+    )
+    def test_not_a_pass_by_value_scalar_raises(self, tensor: dict, match: str) -> None:
+        with pytest.raises(FeatureError, match=match):
+            scalar_source(tensor, "epsilon_tensor_uid")
+
+
+# --------------------------------------------------------------------------
+# Batch normalization (shared core) and the batch-norm ops
+# --------------------------------------------------------------------------
+
+
+def _channel(uid: int, dims: list[int], dtype: str = "float") -> dict:
+    return {
+        "uid": uid,
+        "dims": dims,
+        "strides": _layout_strides(dims, "nchw"),
+        "data_type": dtype,
+        "virtual": False,
+    }
+
+
+# The BatchnormAttributes ports, as utilities/json/BatchnormAttributes.hpp
+# writes them. Written out here rather than read from the module, so _bn
+# builds what the API binds, not what the module believes.
+_BN_X, _BN_Y = "x_tensor_uid", "y_tensor_uid"
+_BN_RUNNING = (
+    "prev_running_mean_tensor_uid",
+    "prev_running_variance_tensor_uid",
+    "next_running_mean_tensor_uid",
+    "next_running_variance_tensor_uid",
+)
+
+
+def _bn(
+    *,
+    batch: int = 2,
+    spatial: tuple[int, ...] = (8, 8),
+    channels: int = 4,
+    layout: str = "nchw",
+    y_layout: str | None = None,
+    dtype: str = "float",
+    y_dtype: str | None = None,
+    y_virtual: bool = False,
+    affine: list[int] | None = None,
+    bias: list[int] | None = None,
+    affine_dtype: str = "float",
+    epsilon: str = "fixed",
+    running_stats: bool = False,
+    momentum: str | None = None,
+    saved: tuple[str, ...] = ("mean", "inv_variance"),
+    peer_stats: int = 0,
+) -> tuple[dict, dict]:
+    """A BatchnormAttributes node.
+
+    ``x`` on uid 1, ``y`` on 2, scale and bias on 3 and 4, epsilon on 5, the
+    saved statistics on 6 and 7, the running statistics on 8 to 11, momentum
+    on 12, peer statistics from 13. ``affine`` is the scale shape (default
+    ``[1, C, 1, ...]``), ``bias`` the bias shape (default: the scale's).
+    """
+    dims = [batch, channels, *spatial]
+    per_channel = [1, channels, *(1 for _ in spatial)]
+    affine = per_channel if affine is None else affine
+
+    def activation(uid: int, dt: str, lay: str, virtual: bool) -> dict:
+        strides = _layout_strides(dims, lay)
+        return {
+            "uid": uid,
+            "dims": list(dims),
+            "strides": strides,
+            "data_type": dt,
+            "virtual": virtual,
+        }
+
+    tensors = {
+        1: activation(1, dtype, layout, False),
+        2: activation(2, y_dtype or dtype, y_layout or layout, y_virtual),
+        3: _channel(3, affine, affine_dtype),
+        4: _channel(4, affine if bias is None else bias, affine_dtype),
+        5: _scalar(5, epsilon),
+        6: _channel(6, per_channel),
+        7: _channel(7, per_channel),
+        **{uid: _channel(uid, per_channel) for uid in range(8, 12)},
+        **{uid: _channel(uid, per_channel) for uid in range(13, 13 + peer_stats)},
+    }
+    if momentum is not None:
+        tensors[12] = _scalar(12, momentum)
+    running = dict(zip(_BN_RUNNING, range(8, 12)))
+    inputs = {
+        _BN_X: 1,
+        "scale_tensor_uid": 3,
+        "bias_tensor_uid": 4,
+        "epsilon_tensor_uid": 5,
+        "peer_stats_tensor_uid": list(range(13, 13 + peer_stats)),
+        "prev_running_mean_tensor_uid": None,
+        "prev_running_variance_tensor_uid": None,
+        "momentum_tensor_uid": 12 if momentum is not None else None,
+    }
+    outputs = {
+        _BN_Y: 2,
+        "mean_tensor_uid": 6 if "mean" in saved else None,
+        "inv_variance_tensor_uid": 7 if "inv_variance" in saved else None,
+        "next_running_mean_tensor_uid": None,
+        "next_running_variance_tensor_uid": None,
+    }
+    if running_stats:
+        for port, uid in running.items():
+            (inputs if port.startswith("prev_") else outputs)[port] = uid
+    node = {"type": "BatchnormAttributes", "inputs": inputs, "outputs": outputs}
+    return node, tensors
+
+
+class TestBatchnormTrainingBinding:
+    def test_builder_binds_every_schema_field(self) -> None:
+        node, _ = _bn()
+        assert set(batchnorm.bound(node)) == table_fields(
+            batchnorm_training.SCHEMA_FILE, batchnorm_training.SCHEMA_TABLE
+        )
+
+    def test_ports_are_the_schema_fields(self) -> None:
+        m = batchnorm_training
+        ports = {
+            m.X,
+            m.Y,
+            *m.AFFINE,
+            m.EPSILON,
+            m.MOMENTUM,
+            *m.RUNNING_STATS,
+            *m.SAVED_STATS,
+            m.PEER_STATS,
+        }
+        assert ports == table_fields(m.SCHEMA_FILE, m.SCHEMA_TABLE)
+
+    def test_every_feature_is_reachable(self) -> None:
+        """No catalogued feature is one extract() can never return."""
+        extract = batchnorm_training.extract
+        reached = extract(*_bn())
+        for kwargs in (
+            {"spatial": (), "dtype": "half", "y_dtype": "float"},
+            {"spatial": (8,), "layout": "nhwc", "dtype": "bfloat16"},
+            {"spatial": (4, 8, 8), "affine": [4, 1]},
+            {"epsilon": "runtime", "running_stats": True, "momentum": "fixed"},
+            {"running_stats": True, "momentum": "runtime", "peer_stats": 2},
+        ):
+            reached |= extract(*_bn(**kwargs))
+        assert reached == {feature.id for feature in batchnorm_training.FEATURES}
+
+
+class TestBatchnormTrainingExtract:
+    PLAIN = {
+        "dtype:fp32",
+        "rank:2d",
+        "layout:nchw",
+        "affine:full_rank",
+        "epsilon:fixed",
+        "out:mean",
+        "out:inv_variance",
+    }
+
+    def _extract(self, **kwargs) -> set[str]:
+        return batchnorm_training.extract(*_bn(**kwargs))
+
+    def _raises(self, match: str, **kwargs) -> None:
+        with pytest.raises(FeatureError, match=match):
+            self._extract(**kwargs)
+
+    def test_plain_graph(self) -> None:
+        assert self._extract() == self.PLAIN
+
+    @pytest.mark.parametrize(
+        "spatial, expected",
+        [((8,), "rank:1d"), ((8, 8), "rank:2d"), ((4, 8, 8), "rank:3d")],
+    )
+    @pytest.mark.parametrize("layout", convolution.LAYOUTS)
+    def test_rank_and_layout(self, spatial, expected: str, layout: str) -> None:
+        features = self._extract(spatial=spatial, layout=layout)
+        rank_and_layout = {expected, f"layout:{layout}"}
+        assert features == self.PLAIN - {"rank:2d", "layout:nchw"} | rank_and_layout
+
+    def test_rank_0d_adds_no_layout(self) -> None:
+        # [N, C] is the same in both layouts.
+        features = self._extract(spatial=())
+        assert features == self.PLAIN - {"rank:2d", "layout:nchw"} | {"rank:0d"}
+
+    def test_disagreeing_layouts_raise(self) -> None:
+        self._raises("layouts disagree", y_layout="nhwc")
+
+    def test_uncatalogued_rank_raises(self) -> None:
+        self._raises("4 spatial dims", spatial=(2, 2, 2, 2))
+
+    def test_fewer_than_two_dims_raises(self) -> None:
+        node, tensors = _bn(spatial=())
+        for uid in (1, 2):
+            tensors[uid] |= {"dims": [4], "strides": [1]}
+        with pytest.raises(FeatureError, match="-1 spatial dims"):
+            batchnorm_training.extract(node, tensors)
+
+    @pytest.mark.parametrize(
+        "dtype, expected",
+        [("float", "dtype:fp32"), ("half", "dtype:fp16"), ("bfloat16", "dtype:bf16")],
+    )
+    def test_dtype(self, dtype: str, expected: str) -> None:
+        features = self._extract(dtype=dtype)
+        assert features == self.PLAIN - {"dtype:fp32"} | {expected}
+
+    def test_dtype_is_x(self) -> None:
+        features = self._extract(dtype="half", y_dtype="float")
+        assert {"dtype:fp16", "precision:mixed"} <= features
+        assert "dtype:fp32" not in features
+
+    def test_mixed_precision_counts_only_non_virtual_tensors(self) -> None:
+        mixed = {"dtype": "half", "y_dtype": "float"}
+        assert "precision:mixed" in self._extract(**mixed)
+        assert "precision:mixed" not in self._extract(**mixed, y_virtual=True)
+
+    @pytest.mark.parametrize(
+        "kwargs, match",
+        [
+            ({"dtype": "int8"}, "x_tensor_uid dtype"),
+            ({"y_dtype": "int32"}, r"\['int32'\]"),
+            # A virtual y does not count toward precision, but its dtype is
+            # still checked.
+            ({"y_dtype": "int32", "y_virtual": True}, r"\['int32'\]"),
+        ],
+    )
+    def test_uncatalogued_dtype_raises(self, kwargs: dict, match: str) -> None:
+        self._raises(match, **kwargs)
+
+    def test_activation_shapes_that_differ_raise(self) -> None:
+        node, tensors = _bn()
+        tensors[2]["dims"] = [2, 4, 8, 4]
+        with pytest.raises(FeatureError, match="activation shapes differ"):
+            batchnorm_training.extract(node, tensors)
+
+    @pytest.mark.parametrize(
+        "batch, spatial", [(1, ()), (1, (1,)), (1, (1, 1)), (1, (1, 1, 1))]
+    )
+    def test_one_value_per_channel_raises(self, batch: int, spatial) -> None:
+        self._raises("one value per channel", batch=batch, spatial=spatial)
+
+    @pytest.mark.parametrize("batch, spatial", [(2, ()), (1, (2,)), (1, (1, 2))])
+    def test_more_than_one_value_per_channel(self, batch: int, spatial) -> None:
+        assert "affine:full_rank" in self._extract(batch=batch, spatial=spatial)
+
+    @pytest.mark.parametrize(
+        "spatial, affine",
+        [
+            ((8, 8), [4]),
+            ((8, 8), [4, 1]),
+            ((8, 8), [4, 1, 1]),
+            ((8,), [4, 1]),
+            ((4, 8, 8), [4, 1, 1, 1]),
+        ],
+    )
+    def test_reduced_rank_affine(self, spatial, affine: list[int]) -> None:
+        features = self._extract(spatial=spatial, affine=affine)
+        assert "affine:reduced_rank" in features
+        assert "affine:full_rank" not in features
+
+    @pytest.mark.parametrize(
+        "affine",
+        [
+            # Per-activation mode: the API rejects a spatial dim above 1.
+            [1, 4, 8, 8],
+            [1, 4, 8, 1],
+            # The API takes [1, C] for 4D x; no provider reads it.
+            [1, 4],
+            [1, 4, 1],
+            # [C, 1, ...] at the rank of x is neither shape.
+            [4, 1, 1, 1],
+            [1, 3, 1, 1],
+            [3],
+            [],
+        ],
+    )
+    def test_uncatalogued_affine_shape_raises(self, affine: list[int]) -> None:
+        self._raises("are neither", affine=affine)
+
+    def test_scale_and_bias_shapes_that_differ_raise(self) -> None:
+        self._raises("scale dims .* != bias dims", affine=[4, 1], bias=[1, 4, 1, 1])
+
+    @pytest.mark.parametrize("affine_dtype", ["half", "bfloat16", "double"])
+    def test_non_fp32_affine_raises(self, affine_dtype: str) -> None:
+        self._raises("scale_tensor_uid dtype", affine_dtype=affine_dtype)
+
+    def test_runtime_epsilon(self) -> None:
+        features = self._extract(epsilon="runtime")
+        assert features == self.PLAIN - {"epsilon:fixed"} | {"epsilon:runtime"}
+
+    def test_epsilon_in_a_buffer_raises(self) -> None:
+        self._raises("epsilon_tensor_uid is neither", epsilon="buffer")
+
+    @pytest.mark.parametrize("momentum", ["fixed", "runtime"])
+    def test_running_stats(self, momentum: str) -> None:
+        features = self._extract(running_stats=True, momentum=momentum)
+        assert features - self.PLAIN == {"running_stats:on", f"momentum:{momentum}"}
+
+    def test_momentum_in_a_buffer_raises(self) -> None:
+        self._raises(
+            "momentum_tensor_uid is neither", running_stats=True, momentum="buffer"
+        )
+
+    @pytest.mark.parametrize("unbound", _BN_RUNNING)
+    def test_partial_running_stats_raise(self, unbound: str) -> None:
+        node, tensors = _bn(running_stats=True, momentum="fixed")
+        side = "inputs" if unbound.startswith("prev_") else "outputs"
+        assert node[side][unbound] is not None
+        node[side][unbound] = None
+        with pytest.raises(FeatureError, match="without the rest"):
+            batchnorm_training.extract(node, tensors)
+
+    def test_momentum_without_running_stats_raises(self) -> None:
+        self._raises("momentum without running statistics", momentum="fixed")
+
+    def test_running_stats_without_momentum_raise(self) -> None:
+        self._raises("running statistics without momentum", running_stats=True)
+
+    @pytest.mark.parametrize("uid", [6, 7, 8, 9, 10, 11])
+    @pytest.mark.parametrize(
+        "change, match",
+        [
+            ({"dims": [1, 4, 8, 8]}, r"are not \[1, 4, 1, ...\]"),
+            ({"dims": [4, 1, 1, 1]}, r"are not \[1, 4, 1, ...\]"),
+            ({"dims": [4]}, r"are not \[1, 4, 1, ...\]"),
+            ({"data_type": "half"}, "dtype 'half' is not catalogued"),
+        ],
+    )
+    def test_statistics_are_fp32_and_channel_only(
+        self, uid: int, change: dict, match: str
+    ) -> None:
+        node, tensors = _bn(running_stats=True, momentum="fixed")
+        tensors[uid] |= change
+        with pytest.raises(FeatureError, match=match):
+            batchnorm_training.extract(node, tensors)
+
+    @pytest.mark.parametrize(
+        "saved, expected",
+        [
+            ((), set()),
+            (("mean",), {"out:mean"}),
+            (("inv_variance",), {"out:inv_variance"}),
+        ],
+    )
+    def test_saved_stats_are_independent(self, saved, expected: set[str]) -> None:
+        features = self._extract(saved=saved)
+        assert features - (self.PLAIN - {"out:mean", "out:inv_variance"}) == expected
+
+    def test_peer_stats(self) -> None:
+        assert "peer_stats:on" not in self._extract(peer_stats=0)
+        assert "peer_stats:on" in self._extract(peer_stats=2)
+
+    @pytest.mark.parametrize(
+        "port",
+        [
+            "x_tensor_uid",
+            "y_tensor_uid",
+            "scale_tensor_uid",
+            "bias_tensor_uid",
+            "epsilon_tensor_uid",
+        ],
+    )
+    def test_unbound_required_port_raises(self, port: str) -> None:
+        node, tensors = _bn()
+        side = "outputs" if port == _BN_Y else "inputs"
+        node[side][port] = None
+        with pytest.raises(FeatureError, match=f"required port {port}"):
+            batchnorm_training.extract(node, tensors)
 
 
 # --------------------------------------------------------------------------

@@ -19,6 +19,7 @@ Layout:
 
 - ``registry.py`` -- API node type -> op module; ops not yet catalogued.
 - ``coverage.py`` -- joins claim units with extracted features; the CLI.
+- ``convolution.py``, ``batchnorm.py`` -- the features a family of ops shares.
 - one module per op (``sdpa.py``, ...), each exposing ``NODE_TYPE``,
   ``SCHEMA_FILE``, ``SCHEMA_TABLE``, ``FEATURES``, ``NOT_FEATURES`` and
   ``extract(node, tensors_by_uid) -> set[str]``.
@@ -53,3 +54,25 @@ class Feature:
     @property
     def group(self) -> str:
         return self.id.split(":", 1)[0]
+
+
+def scalar_source(tensor: dict, port: str) -> str:
+    """How a scalar operand (an epsilon, a momentum) gets its value.
+
+    ``"runtime"``: the tensor is runtime pass-by-value, so the caller passes
+    the value with each execution (with or without a default baked into the
+    graph). ``"fixed"``: the value is a constant baked into the graph. These
+    are the states ``isPassByValueTensor`` (FlatbufferUtils.hpp) accepts; a
+    scalar in device memory is in neither and raises, as does one with more
+    than one element.
+    """
+    elements = 1
+    for dim in tensor.get("dims") or ():
+        elements *= dim
+    if not tensor.get("dims") or elements != 1:
+        raise FeatureError(f"{port} dims {tensor.get('dims')} are not one scalar")
+    if tensor.get("is_runtime_pass_by_value"):
+        return "runtime"
+    if "value" in tensor:
+        return "fixed"
+    raise FeatureError(f"{port} is neither a baked constant nor runtime pass-by-value")
