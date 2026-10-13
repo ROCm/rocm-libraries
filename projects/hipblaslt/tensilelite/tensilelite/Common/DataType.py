@@ -22,10 +22,13 @@
 #
 ################################################################################
 
-from rocisa.enum import DataTypeEnum
-from ..Utilities.DataTypes import TYPE_PROPERTIES
-from functools import lru_cache
 import functools
+from functools import lru_cache
+
+from rocisa.enum import DataTypeEnum
+
+from ..Utilities.DataTypes import TYPE_PROPERTIES
+
 
 @lru_cache
 def _is8bitFloat(value):
@@ -51,7 +54,7 @@ class DataType:
     """
 
     properties = [
-        {'enum': getattr(DataTypeEnum, name), **properties._asdict()}
+        {"enum": getattr(DataTypeEnum, name), **properties._asdict()}
         for name, properties in TYPE_PROPERTIES.items()
     ]
     lookup = {}

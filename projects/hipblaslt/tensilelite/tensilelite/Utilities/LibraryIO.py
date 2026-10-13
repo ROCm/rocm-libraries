@@ -159,10 +159,12 @@ def iterSolutionRecords(
     Unrequested indices have a ``None`` record. Exposing their indices lets a
     catalog detect collisions across shards without decoding their indexed blob
     entries. Legacy arrays still require decoding each record. At most one shard
-    is decompressed at a time; heuristic tables are never materialized.
+    is decompressed at a time; heuristic tables are never materialized. The whole
+    file is still read and decompressed, even when selecting a single index.
 
     This checks container structure and index consistency, not native solution
-    predicates. Indexed records outside the selection remain undecoded.
+    predicates. Consume the iterator fully to validate the whole container.
+    Indexed records outside the selection remain undecoded.
     """
     import msgpack
 
