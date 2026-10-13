@@ -55,11 +55,13 @@ foreach(generator sobol32 scrambled_sobol32 sobol64 scrambled_sobol64)
         )
         # Not registered through add_relative_test: that path appends a gtest
         # filter, and this binary is not a GoogleTest executable (see the
-        # test's source code for the reason). Label it so the filters of
-        # ctest -L quick / -L standard still run it.
+        # test's source code for the reason). Label it, in both the build and
+        # install trees, so the filters of ctest -L quick / -L standard still
+        # run it.
         set_tests_properties(${test_name} PROPERTIES LABELS "quick;standard")
         file(APPEND "${INSTALL_TEST_FILE}"
-            "add_test(${test_name} \"../test_rocrand_sobol_exit\" ${generator} ${mode})\n")
+            "add_test(${test_name} \"../test_rocrand_sobol_exit\" ${generator} ${mode})\n"
+            "set_tests_properties(${test_name} PROPERTIES LABELS \"quick;standard\")\n")
     endforeach()
 endforeach()
 
