@@ -42,6 +42,10 @@
           "bytes": 98392,
           "sha256": "305409b65503241921220ccaa73b350d1011a727c352ae41e8f1ead88ed54fef"
         },
+        "attention_dense_gfx942/dispatch_lse_d128_bf16_causal": {
+          "bytes": 177689,
+          "sha256": "e161b8a0de9e4164977f4ae8631aa266b009d55e37329b38aa0f124f36999930"
+        },
         "attention_dense_gfx942/dispatch_sink_d64_bf16_causal": {
           "bytes": 104831,
           "sha256": "e5bd846f9ab5dac5e7c1a56bcd7c5a3c127b70b4b84738090aed07574e0f6e0b"
@@ -49,6 +53,18 @@
         "attention_dense_gfx942/dispatch_swa_d128_bf16_w128": {
           "bytes": 175001,
           "sha256": "443e2dc10e981be13c5946a9594db674ff39af026386dda7b6538373ae1ea418"
+        },
+        "attention_dense_gfx942/lse_d128_bf16_causal": {
+          "bytes": 177689,
+          "sha256": "e161b8a0de9e4164977f4ae8631aa266b009d55e37329b38aa0f124f36999930"
+        },
+        "attention_dense_gfx942/lse_persist_empty_window_d128_bf16": {
+          "bytes": 184443,
+          "sha256": "5d6db8b2dc0fef4f94d618f6bf64861e87614fe31c590b357c6e3ac555a0556b"
+        },
+        "attention_dense_gfx942/lse_sink_persist_empty_window_d128_bf16": {
+          "bytes": 184990,
+          "sha256": "d0fa692777ad8667736de1c417b698ca4efdc786ceb303daaff38f3bd91f2b15"
         },
         "attention_dense_gfx942/persist_d128_bf16_intl": {
           "bytes": 173617,
@@ -158,6 +174,10 @@
           "bytes": 98488,
           "sha256": "930b02fedbb935624accd81ff1fe561c6597a28ca11cf615becb9784d7522439"
         },
+        "attention_dense_gfx942/dispatch_lse_d128_bf16_causal": {
+          "bytes": 177785,
+          "sha256": "63490a820e7354947c259d49672c5ea01889f9c9864e02efe0ed259ca9ffe61d"
+        },
         "attention_dense_gfx942/dispatch_sink_d64_bf16_causal": {
           "bytes": 104927,
           "sha256": "b812d4f95f9a0d54b145fd37adf33ebb5cd103b27904a1041c9cd95e7d1753a9"
@@ -165,6 +185,18 @@
         "attention_dense_gfx942/dispatch_swa_d128_bf16_w128": {
           "bytes": 175097,
           "sha256": "831246c3f5a0e5f0509f926405cab8b5f30e29df9e6a7c6d5da46bc45db399f6"
+        },
+        "attention_dense_gfx942/lse_d128_bf16_causal": {
+          "bytes": 177785,
+          "sha256": "63490a820e7354947c259d49672c5ea01889f9c9864e02efe0ed259ca9ffe61d"
+        },
+        "attention_dense_gfx942/lse_persist_empty_window_d128_bf16": {
+          "bytes": 184539,
+          "sha256": "43c47ec48fdd586066beaa21f871a63ac389f84574af1152cccd612ab4fad1fb"
+        },
+        "attention_dense_gfx942/lse_sink_persist_empty_window_d128_bf16": {
+          "bytes": 185086,
+          "sha256": "a55bdf94404df1fa02009d4429dcacef74fddd5e4dd4e6798dcda7c50a58e9b4"
         },
         "attention_dense_gfx942/persist_d128_bf16_intl": {
           "bytes": 173713,
@@ -274,6 +306,10 @@
           "bytes": 98552,
           "sha256": "d28c4327b2b18d3987f1574ae59f32d7107b327a6b9aed1c3b668462d17839a7"
         },
+        "attention_dense_gfx942/dispatch_lse_d128_bf16_causal": {
+          "bytes": 177849,
+          "sha256": "f3418840281d17d90e0434d94cfd621994943c5f8d18b7ad7fe941205ffc96ee"
+        },
         "attention_dense_gfx942/dispatch_sink_d64_bf16_causal": {
           "bytes": 104991,
           "sha256": "848048dafc4dde8c3ee3d6b81e3147d0806d4c7887a2d31072eeceb8a1ec553a"
@@ -281,6 +317,18 @@
         "attention_dense_gfx942/dispatch_swa_d128_bf16_w128": {
           "bytes": 175161,
           "sha256": "d74be2c22e40bc578efe055fc2d6d0f16ae806efdadbfdea71b7e21c997af12b"
+        },
+        "attention_dense_gfx942/lse_d128_bf16_causal": {
+          "bytes": 177849,
+          "sha256": "f3418840281d17d90e0434d94cfd621994943c5f8d18b7ad7fe941205ffc96ee"
+        },
+        "attention_dense_gfx942/lse_persist_empty_window_d128_bf16": {
+          "bytes": 184603,
+          "sha256": "f5308fb42fa20539fdd172b8ab3804fe3f94c43a07ee1111579d73df162d7dac"
+        },
+        "attention_dense_gfx942/lse_sink_persist_empty_window_d128_bf16": {
+          "bytes": 185150,
+          "sha256": "76e220469b933345536e1e33db30973b99d2a1016958c794418aba782676d1d4"
         },
         "attention_dense_gfx942/persist_d128_bf16_intl": {
           "bytes": 173777,
