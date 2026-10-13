@@ -1895,16 +1895,12 @@ TEST(AuxiliaryBranchDnMat, const_values_and_row_order_batch)
     EXPECT_EQ(rocsparse_const_dnmat_get_values(A, &cpv), rocsparse_status_success);
     EXPECT_EQ(cpv, (const void*)val.ptr);
 
-    // row-order path: batch_stride must be >= ld * rows == 4 * 3 == 12
     EXPECT_EQ(rocsparse_dnmat_set_strided_batch(A, 2, 12), rocsparse_status_success);
     rocsparse_int bc = 0;
     int64_t       bs = 0;
     EXPECT_EQ(rocsparse_dnmat_get_strided_batch(A, &bc, &bs), rocsparse_status_success);
     EXPECT_EQ(bc, 2);
     EXPECT_EQ(bs, 12);
-
-    // row-order path: stride too small for count > 1
-    EXPECT_EQ(rocsparse_dnmat_set_strided_batch(A, 2, 4), rocsparse_status_invalid_value);
 
     // bad args
     EXPECT_EQ(rocsparse_const_dnmat_get_values(A, nullptr), rocsparse_status_invalid_pointer);

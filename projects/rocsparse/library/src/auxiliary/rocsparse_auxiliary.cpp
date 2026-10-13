@@ -5474,7 +5474,7 @@ try
     ROCSPARSE_CHECKARG_POINTER(0, descr);
     ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG(1, batch_count, (batch_count <= 0), rocsparse_status_invalid_value);
-
+    ROCSPARSE_CHECKARG(2, batch_stride, (batch_stride < 0), rocsparse_status_invalid_value);
     //
     // No constraint on the batch_stride value.
     //
