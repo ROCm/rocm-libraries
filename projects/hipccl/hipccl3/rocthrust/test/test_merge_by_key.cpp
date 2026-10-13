@@ -32,7 +32,7 @@
 #  include <type_traits>
 #endif
 
-template <class Input, class CompareFunction = thrust::less<Input>>
+template <class Input, class CompareFunction = _THRUST_STD::less<Input>>
 struct ParamsMerge
 {
   using input_type       = Input;
@@ -48,22 +48,22 @@ public:
 };
 
 using MergeByKeyTestsParams = ::testing::Types<
-  ParamsMerge<short, thrust::less<short>>,
-  ParamsMerge<int, thrust::less<int>>,
-  ParamsMerge<long long, thrust::less<long long>>,
-  ParamsMerge<unsigned short, thrust::less<unsigned short>>,
-  ParamsMerge<unsigned int, thrust::less<unsigned int>>,
-  ParamsMerge<unsigned long long, thrust::less<unsigned long int>>,
-  ParamsMerge<float, thrust::less<float>>,
-  ParamsMerge<double, thrust::less<double>>,
-  ParamsMerge<short, thrust::greater<short>>,
-  ParamsMerge<int, thrust::greater<int>>,
-  ParamsMerge<long long, thrust::greater<long long>>,
-  ParamsMerge<unsigned short, thrust::greater<unsigned short>>,
-  ParamsMerge<unsigned int, thrust::greater<unsigned int>>,
-  ParamsMerge<unsigned long long, thrust::greater<unsigned long int>>,
-  ParamsMerge<float, thrust::greater<float>>,
-  ParamsMerge<double, thrust::greater<double>>>;
+  ParamsMerge<short, _THRUST_STD::less<short>>,
+  ParamsMerge<int, _THRUST_STD::less<int>>,
+  ParamsMerge<long long, _THRUST_STD::less<long long>>,
+  ParamsMerge<unsigned short, _THRUST_STD::less<unsigned short>>,
+  ParamsMerge<unsigned int, _THRUST_STD::less<unsigned int>>,
+  ParamsMerge<unsigned long long, _THRUST_STD::less<unsigned long int>>,
+  ParamsMerge<float, _THRUST_STD::less<float>>,
+  ParamsMerge<double, _THRUST_STD::less<double>>,
+  ParamsMerge<short, _THRUST_STD::greater<short>>,
+  ParamsMerge<int, _THRUST_STD::greater<int>>,
+  ParamsMerge<long long, _THRUST_STD::greater<long long>>,
+  ParamsMerge<unsigned short, _THRUST_STD::greater<unsigned short>>,
+  ParamsMerge<unsigned int, _THRUST_STD::greater<unsigned int>>,
+  ParamsMerge<unsigned long long, _THRUST_STD::greater<unsigned long int>>,
+  ParamsMerge<float, _THRUST_STD::greater<float>>,
+  ParamsMerge<double, _THRUST_STD::greater<double>>>;
 
 TYPED_TEST_SUITE(MergeByKeyTestsClass, MergeByKeyTestsParams);
 
@@ -188,7 +188,7 @@ auto call_merge_by_key(Args&&... args) -> decltype(thrust::merge_by_key(std::for
   else
   {
     // TODO(bgruber): remove next line in C++17 and pass CompareOp{} directly to stable_sort
-    using C = _THRUST_STD::conditional_t<_THRUST_STD::is_void<CompareOp>::value, thrust::less<T>, CompareOp>;
+    using C = _THRUST_STD::conditional_t<_THRUST_STD::is_void<CompareOp>::value, _THRUST_STD::less<T>, CompareOp>;
     return thrust::merge_by_key(std::forward<Args>(args)..., C{});
   }
   __builtin_unreachable();
@@ -234,8 +234,8 @@ TYPED_TEST(MergeByKeyTestsClass, TestMergeByKey)
         else
         {
           // TODO(bgruber): remove next line in C++17 and pass compare_function{} directly to stable_sort
-          using C =
-            _THRUST_STD::conditional_t<_THRUST_STD::is_void<compare_function>::value, thrust::less<T>, compare_function>;
+          using C = _THRUST_STD::
+            conditional_t<_THRUST_STD::is_void<compare_function>::value, _THRUST_STD::less<T>, compare_function>;
           thrust::stable_sort(h_a_keys.begin(), h_a_keys.end(), C{});
           thrust::stable_sort(h_b_keys.begin(), h_b_keys.end(), C{});
         }
@@ -468,8 +468,8 @@ TEST(MergeByKeyTests, TestMergeByKeyDevice)
       thrust::host_vector<T> h_values_b = get_random_data<T>(
         size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed + seed_value_addition);
 
-      thrust::stable_sort(h_keys_a.begin(), h_keys_a.end(), thrust::greater<T>());
-      thrust::stable_sort(h_keys_b.begin(), h_keys_b.end(), thrust::greater<T>());
+      thrust::stable_sort(h_keys_a.begin(), h_keys_a.end(), _THRUST_STD::greater<T>());
+      thrust::stable_sort(h_keys_b.begin(), h_keys_b.end(), _THRUST_STD::greater<T>());
 
       thrust::device_vector<T> d_keys_a = h_keys_a;
       thrust::device_vector<T> d_keys_b = h_keys_b;

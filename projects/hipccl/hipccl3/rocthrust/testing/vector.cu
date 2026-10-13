@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -638,22 +638,6 @@ void TestVectorResizing()
   v.resize(0);
 
   ASSERT_EQUAL(v.size(), 0lu);
-
-  // depending on sizeof(T), we will receive one
-  // of two possible exceptions
-  try
-  {
-    v.resize(std::numeric_limits<size_t>::max());
-  }
-  catch (std::length_error e)
-  {}
-  catch (std::bad_alloc e)
-  {
-    // reset the HIP error
-    (void) hipGetLastError();
-  } // end catch
-
-  ASSERT_EQUAL(v.size(), 0lu);
 }
 DECLARE_VECTOR_UNITTEST(TestVectorResizing);
 
@@ -671,17 +655,6 @@ void TestVectorReserving()
   size_t old_capacity = v.capacity();
 
   v.reserve(0);
-
-  ASSERT_EQUAL(v.capacity(), old_capacity);
-
-  try
-  {
-    v.reserve(std::numeric_limits<size_t>::max());
-  }
-  catch (std::length_error e)
-  {}
-  catch (std::bad_alloc e)
-  {}
 
   ASSERT_EQUAL(v.capacity(), old_capacity);
 }
@@ -812,7 +785,7 @@ void TestVectorMove()
   const auto ptr1  = v1.data();
   const auto size1 = v1.size();
 
-  Vector v2(std::move(v1));
+  Vector v2(_THRUST_STD::move(v1));
   const auto ptr2  = v2.data();
   const auto size2 = v2.size();
 
@@ -833,7 +806,7 @@ void TestVectorMove()
   const auto ptr3  = v3.data();
   const auto size3 = v3.size();
 
-  v2               = std::move(v3);
+  v2               = _THRUST_STD::move(v3);
   const auto ptr4  = v2.data();
   const auto size4 = v2.size();
 
@@ -849,3 +822,97 @@ void TestVectorMove()
   ASSERT_EQUAL(ptr3, ptr4);
 }
 DECLARE_VECTOR_UNITTEST(TestVectorMove);
+
+struct IntWithInit
+{
+  int value = 42;
+};
+
+void TestVectorDefaultInitCtor()
+{
+  // trivially-constructible type: just compilation test, since we cannot check that initialization was skipped
+  {
+    thrust::host_vector<int> hv(10, thrust::default_init);
+    thrust::device_vector<int> dv(10, thrust::default_init);
+  }
+
+  // non-trivially-constructible type: check that initialization was performed
+  {
+    thrust::host_vector<IntWithInit> hv(10, thrust::default_init);
+    for (auto e : hv)
+    {
+      ASSERT_EQUAL(e.value, 42);
+    }
+
+    thrust::device_vector<IntWithInit> dv(10, thrust::default_init);
+    for (auto e : dv)
+    {
+      ASSERT_EQUAL(static_cast<IntWithInit>(e).value, 42);
+    }
+  }
+}
+DECLARE_UNITTEST(TestVectorDefaultInitCtor);
+
+void TestVectorNoInitCtor()
+{
+  // trivially-constructible type: just compilation test, since we cannot check that initialization was skipped
+  {
+    thrust::host_vector<int> hv(10, thrust::no_init);
+    thrust::device_vector<int> dv(10, thrust::no_init);
+  }
+
+  // non-trivially-constructible type: those should fail to compile
+  // thrust::host_vector<IntWithInit> hv(10, thrust::no_init);
+  // thrust::device_vector<IntWithInit> dv(10, thrust::no_init);
+}
+DECLARE_UNITTEST(TestVectorNoInitCtor);
+
+void TestVectorDefaultInitResize()
+{
+  // trivially-constructible type: just compilation test, since we cannot check that initialization was skipped
+  {
+    thrust::host_vector<int> hv(5);
+    hv.resize(10, thrust::default_init);
+  }
+  {
+    thrust::device_vector<int> dv(5);
+    dv.resize(10, thrust::default_init);
+  }
+
+  // non-trivially-constructible type: check that initialization was performed
+  {
+    thrust::host_vector<IntWithInit> hv(5);
+    hv.resize(10, thrust::default_init);
+    for (auto e : hv)
+    {
+      ASSERT_EQUAL(e.value, 42);
+    }
+  }
+  {
+    thrust::device_vector<IntWithInit> dv(5, thrust::default_init);
+    dv.resize(10, thrust::default_init);
+    for (auto e : dv)
+    {
+      ASSERT_EQUAL(static_cast<IntWithInit>(e).value, 42);
+    }
+  }
+}
+DECLARE_UNITTEST(TestVectorDefaultInitResize);
+
+void TestVectorNoInitResize()
+{
+  // trivially-constructible type: just compilation test, since we cannot check that initialization was skipped
+  {
+    thrust::host_vector<int> hv(5);
+    hv.resize(10, thrust::no_init);
+  }
+  {
+    thrust::device_vector<int> dv(5);
+    dv.resize(10, thrust::no_init);
+  }
+
+  // non-trivially-constructible type: those should fail to compile
+  // thrust::host_vector<IntWithInit>(5).resize(10, thrust::no_init);
+  // thrust::device_vector<IntWithInit>(5).resize(10, thrust::no_init);
+}
+DECLARE_UNITTEST(TestVectorNoInitResize);

@@ -57,14 +57,14 @@ count_if(execution_policy<Derived>& policy, InputIt first, InputIt last, UnaryPr
   using flag_iterator_t = transform_iterator<UnaryPred, InputIt, size_type, size_type>;
 
   return hip_rocprim::reduce_n(
-    policy, flag_iterator_t(first, unary_pred), thrust::distance(first, last), size_type(0), plus<size_type>());
+    policy, flag_iterator_t(first, unary_pred), _THRUST_STD::distance(first, last), size_type(0), plus<size_type>());
 }
 
 template <class Derived, class InputIt, class Value>
 thrust::detail::it_difference_t<InputIt> THRUST_HOST_DEVICE
 count(execution_policy<Derived>& policy, InputIt first, InputIt last, Value const& value)
 {
-  return hip_rocprim::count_if(policy, first, last, thrust::detail::equal_to_value<Value>(value));
+  return hip_rocprim::count_if(policy, first, last, thrust::detail::equal_to_value<Value>{value});
 }
 
 } // namespace hip_rocprim
