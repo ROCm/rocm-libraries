@@ -250,6 +250,13 @@ if(ROCSPARSE_ENABLE_SPMAT_SCALE)
   list(APPEND ROCSPARSE_TEST_SOURCES test_spmat_scale.cpp)
 endif()
 
+if(BUILD_WITH_SPSORT)
+  list(APPEND ROCSPARSE_TEST_SOURCES
+    test_spsort_coo.cpp
+    test_spsort_csr.cpp
+    test_spsort_csc.cpp)
+endif()
+
 if(ROCSPARSE_ENABLE_SDDMM_BATCHED)
   list(APPEND ROCSPARSE_TEST_SOURCES
     test_sddmm_batched_ell.cpp
@@ -426,6 +433,13 @@ if(ROCSPARSE_ENABLE_SPMAT_SCALE)
   list(APPEND ROCSPARSE_CLIENTS_TESTINGS ../testings/testing_spmat_scale.cpp)
 endif()
 
+if(BUILD_WITH_SPSORT)
+  list(APPEND ROCSPARSE_CLIENTS_TESTINGS
+    ../testings/testing_spsort_coo.cpp
+    ../testings/testing_spsort_csr.cpp
+    ../testings/testing_spsort_csc.cpp)
+endif()
+
 if(ROCSPARSE_ENABLE_SDDMM_BATCHED)
   list(APPEND ROCSPARSE_CLIENTS_TESTINGS
     ../testings/testing_sddmm_batched_ell.cpp
@@ -590,6 +604,10 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml")
 else()
   message(STATUS "rocSPARSE: No test_categories.yaml (CTest categories not used)")
 endif()
+
+# clients/unittests appends the unit-test binaries to this file later in configure.
+# install(FILES) reads it at install time, so those entries are included.
+set(ROCSPARSE_CTEST_INSTALL_FILE "${ROCSPARSE_CTEST_INSTALL_FILE}" PARENT_SCOPE)
 
 # Install CTestTestfile.cmake to bin/rocsparse/ for TheRock (relocatable tests; run ctest from that dir)
 if(ROCSPARSE_CTEST_INSTALL_FILE)

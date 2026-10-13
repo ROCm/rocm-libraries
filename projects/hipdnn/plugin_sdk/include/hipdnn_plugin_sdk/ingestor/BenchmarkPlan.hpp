@@ -40,10 +40,11 @@ namespace hipdnn_plugin_sdk::ingestor
 constexpr int BENCHMARK_WARMUP_RUNS = 1;
 constexpr int BENCHMARK_ITERATIONS = 7;
 
-/// A finite negative elapsed time is a known artifact of HIP event timing near the
-/// clock's resolution floor, not proof a candidate is broken: sampleCandidate() discards
-/// it and re-measures the same slot, using at most this many extra attempts for the
-/// whole candidate. NaN, Inf, and a backend timing error are never retried this way.
+/// A finite negative elapsed time is a bad HIP event reading, not proof a candidate is
+/// broken: the Windows HIP runtime reports them (ROCm/rocm-systems#12925).
+/// sampleCandidate() discards one and re-measures the same slot, using at most this many
+/// extra attempts per candidate in each sampling pass. NaN, Inf, and a backend timing
+/// error are never retried this way.
 constexpr int MAX_NEGATIVE_SAMPLE_RETRIES = 2;
 
 // A zero iteration count would leave sampleCandidate()'s reduction at its DBL_MAX seed
@@ -454,11 +455,10 @@ private:
     /// the sign check below, so a negative sample can never hide a restart the comparison
     /// actually needs. A backend error (no elapsed time at all) or a non-finite sample
     /// (NaN/Inf) scores the candidate unusable immediately, with no retry. A finite
-    /// negative sample is instead treated as a transient HIP-event-timing artifact: it is
-    /// discarded and the same slot re-measured, using at most MAX_NEGATIVE_SAMPLE_RETRIES
-    /// extra attempts for the whole candidate; exhausting that budget scores the
-    /// candidate unusable without the malformed value ever reaching the reduction,
-    /// ranking, or cache.
+    /// negative sample is instead treated as a bad HIP event reading: it is discarded and
+    /// the same slot re-measured, using at most MAX_NEGATIVE_SAMPLE_RETRIES extra attempts
+    /// for this pass; exhausting that budget scores the candidate unusable without the
+    /// malformed value ever reaching the reduction, ranking, or cache.
     ///
     /// Samples are reduced with robustMean() rather than by taking the fastest: a kernel
     /// that is usually slower but occasionally lucky would win on its best sample and then
