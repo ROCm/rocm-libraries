@@ -372,12 +372,12 @@ void rocke_gfx1151_dfcp_wmma_gemm_from_lds(rocke_gfx1151_dfcp_build_ctx_t* ctx,
     dfcp_layout_coord0(b, b_map, grid->lane, &b_k, &b_col);
     rocke_value_t* warp_m_off = rocke_warp_grid_warp_m_off(b, grid);
     rocke_value_t* warp_n_off = rocke_warp_grid_warp_n_off(b, grid);
-    int ds_per_frag = (op->a_frag_len + 7) / 8;
+    int ds_per_frag = (op->srcs[0].frag_len + 7) / 8;
     int n_ds = ds_per_frag * (mfmas_m + mfmas_n);
 
     int n_acc = mfmas_m * mfmas_n;
     for(int i = 0; i < n_acc; ++i)
-        out_accs[i] = rocke_b_zero_vec_f32(b, op->c_frag_len);
+        out_accs[i] = rocke_b_zero_vec_f32(b, op->srcs[2].frag_len);
 
     for(int kk = 0; kk < k_atoms; ++kk)
     {
@@ -389,14 +389,14 @@ void rocke_gfx1151_dfcp_wmma_gemm_from_lds(rocke_gfx1151_dfcp_build_ctx_t* ctx,
             rocke_value_t* atom_row
                 = rocke_b_add(b, warp_m_off, rocke_b_const_i32(b, mi * DFCP_WMMA));
             a_rows[mi] = rocke_conv_emit_frag_smem_load(
-                b, a_smem, a_row, a_k, atom_row, k_tile_base, op->a_frag_len);
+                b, a_smem, a_row, a_k, atom_row, k_tile_base, op->srcs[0].frag_len);
         }
         for(int ni = 0; ni < mfmas_n; ++ni)
         {
             rocke_value_t* atom_row
                 = rocke_b_add(b, warp_n_off, rocke_b_const_i32(b, ni * DFCP_WMMA));
             b_cols[ni] = rocke_conv_emit_frag_smem_load(
-                b, b_smem, b_col, b_k, atom_row, k_tile_base, op->b_frag_len);
+                b, b_smem, b_col, b_k, atom_row, k_tile_base, op->srcs[1].frag_len);
         }
         int flat = 0;
         for(int mi = 0; mi < mfmas_m; ++mi)
@@ -436,7 +436,7 @@ void rocke_gfx1151_dfcp_wmma_gemm_from_lds_int(rocke_gfx1151_dfcp_build_ctx_t* c
 
     int n_acc = mfmas_m * mfmas_n;
     for(int i = 0; i < n_acc; ++i)
-        out_accs[i] = rocke_b_zero_vec(b, rocke_i32(), op->c_frag_len);
+        out_accs[i] = rocke_b_zero_vec(b, rocke_i32(), op->srcs[2].frag_len);
 
     for(int kk = 0; kk < k_atoms; ++kk)
     {
@@ -490,11 +490,11 @@ void rocke_gfx1151_dfcp_wmma_gemm_conv0_direct(rocke_gfx1151_dfcp_build_ctx_t* c
     dfcp_layout_coord0(b, b_map, grid->lane, &b_k, &b_col);
     rocke_value_t* warp_m_off = rocke_warp_grid_warp_m_off(b, grid);
     rocke_value_t* warp_n_off = rocke_warp_grid_warp_n_off(b, grid);
-    int n_ds = op->a_frag_len * mfmas_m + ((op->b_frag_len + 7) / 8) * mfmas_n;
+    int n_ds = op->srcs[0].frag_len * mfmas_m + ((op->srcs[1].frag_len + 7) / 8) * mfmas_n;
 
     int n_acc = mfmas_m * mfmas_n;
     for(int i = 0; i < n_acc; ++i)
-        out_accs[i] = rocke_b_zero_vec_f32(b, op->c_frag_len);
+        out_accs[i] = rocke_b_zero_vec_f32(b, op->srcs[2].frag_len);
 
     for(int kk = 0; kk < k_atoms; ++kk)
     {
@@ -508,14 +508,14 @@ void rocke_gfx1151_dfcp_wmma_gemm_conv0_direct(rocke_gfx1151_dfcp_build_ctx_t* c
                 = rocke_b_add(b, warp_m_off, rocke_b_const_i32(b, mi * DFCP_WMMA));
             rocke_value_t* m_row = rocke_b_add(b, atom_row, a_row);
             a_rows[mi] = rocke_gfx1151_dfcp_load_conv0_a_frag_from_footprint(
-                ctx, inp_smem, m_row, k_base, op->a_frag_len);
+                ctx, inp_smem, m_row, k_base, op->srcs[0].frag_len);
         }
         for(int ni = 0; ni < mfmas_n; ++ni)
         {
             rocke_value_t* atom_row
                 = rocke_b_add(b, warp_n_off, rocke_b_const_i32(b, ni * DFCP_WMMA));
             b_cols[ni] = rocke_conv_emit_frag_smem_load(
-                b, w0_smem, b_col, b_k, atom_row, k_tile_base, op->b_frag_len);
+                b, w0_smem, b_col, b_k, atom_row, k_tile_base, op->srcs[1].frag_len);
         }
         int flat = 0;
         for(int mi = 0; mi < mfmas_m; ++mi)
@@ -555,7 +555,7 @@ void rocke_gfx1151_dfcp_wmma_gemm_conv0_direct_int(rocke_gfx1151_dfcp_build_ctx_
 
     int n_acc = mfmas_m * mfmas_n;
     for(int i = 0; i < n_acc; ++i)
-        out_accs[i] = rocke_b_zero_vec(b, rocke_i32(), op->c_frag_len);
+        out_accs[i] = rocke_b_zero_vec(b, rocke_i32(), op->srcs[2].frag_len);
 
     for(int kk = 0; kk < k_atoms; ++kk)
     {
@@ -626,7 +626,7 @@ void rocke_gfx1151_dfcp_wmma_gemm_conv1_i4_from_lds(rocke_gfx1151_dfcp_build_ctx
 
     int n_acc = mfmas_m * mfmas_n;
     for(int i = 0; i < n_acc; ++i)
-        out_accs[i] = rocke_b_zero_vec(b, rocke_i32(), op->c_frag_len);
+        out_accs[i] = rocke_b_zero_vec(b, rocke_i32(), op->srcs[2].frag_len);
 
     const void* per_step = sched_fuse ? NULL : policy;
 
@@ -734,7 +734,7 @@ void rocke_gfx1151_dfcp_wmma_gemm_conv1_i4_packed_from_lds(rocke_gfx1151_dfcp_bu
 
     int n_acc = mfmas_m * mfmas_n;
     for(int i = 0; i < n_acc; ++i)
-        out_accs[i] = rocke_b_zero_vec(b, rocke_i32(), op->c_frag_len);
+        out_accs[i] = rocke_b_zero_vec(b, rocke_i32(), op->srcs[2].frag_len);
 
     for(int kk = 0; kk < k_atoms; ++kk)
     {
@@ -796,7 +796,7 @@ void rocke_gfx1151_dfcp_wmma_gemm_conv1_i4_from_regs(rocke_gfx1151_dfcp_build_ct
 
     int n_acc = mfmas_m * mfmas_n;
     for(int i = 0; i < n_acc; ++i)
-        out_accs[i] = rocke_b_zero_vec(b, rocke_i32(), op->c_frag_len);
+        out_accs[i] = rocke_b_zero_vec(b, rocke_i32(), op->srcs[2].frag_len);
 
     const void* per_step = sched_fuse ? NULL : policy;
 
@@ -882,7 +882,7 @@ void rocke_gfx1151_dfcp_wmma_gemm_conv1_i8_from_regs(rocke_gfx1151_dfcp_build_ct
 
     int n_acc = mfmas_m * mfmas_n;
     for(int i = 0; i < n_acc; ++i)
-        out_accs[i] = rocke_b_zero_vec(b, rocke_i32(), op->c_frag_len);
+        out_accs[i] = rocke_b_zero_vec(b, rocke_i32(), op->srcs[2].frag_len);
 
     const void* per_step = sched_fuse ? NULL : policy;
 
@@ -968,11 +968,11 @@ void rocke_gfx1151_dfcp_fuse_c0_to_conv1_a_regs(rocke_gfx1151_dfcp_build_ctx_t* 
             rocke_value_t* acc = accs0[mi * mfmas_n + kk];
             /* codes = [code_fn(b.vec_extract(acc, s)) for s in range(op0.c_frag_len)] */
             rocke_value_t* codes[ROCKE_GFX1151_DFCP_MAX_ACCS];
-            for(int s = 0; s < op0->c_frag_len; ++s)
+            for(int s = 0; s < op0->dst.frag_len; ++s)
                 codes[s] = rocke_gfx1151_dfcp_apply_code_fn(
                     ctx, code_fn, rocke_b_vec_extract(b, acc, s));
             /* words = b.bitcast(b.vec_pack(codes, I8), VectorType(I32, 2)) */
-            rocke_value_t* packed_i8 = rocke_b_vec_pack(b, codes, op0->c_frag_len, rocke_i8());
+            rocke_value_t* packed_i8 = rocke_b_vec_pack(b, codes, op0->dst.frag_len, rocke_i8());
             rocke_value_t* words
                 = rocke_b_bitcast(b, packed_i8, rocke_vector_type(b, rocke_i32(), 2));
             rocke_value_t* lo = rocke_b_vec_extract(b, words, 0);

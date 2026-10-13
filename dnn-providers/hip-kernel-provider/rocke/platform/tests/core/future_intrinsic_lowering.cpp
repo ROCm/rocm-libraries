@@ -941,11 +941,7 @@ void case_wmma_result_count()
             }
             else
             {
-                char expected[80];
-                snprintf(expected,
-                         sizeof(expected),
-                         "tile.mma: expected exactly one result, got %d",
-                         count);
+                const char* expected = "unscaled WMMA expects 3 operands and 1 result";
                 if(status != ROCKE_ERR_VALUE || out || strcmp(err, expected) != 0)
                     fail("malformed WMMA did not return its result-count error", __LINE__);
             }
