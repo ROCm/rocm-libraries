@@ -658,11 +658,6 @@ struct BlockwiseGemmXdlops_k0mk1_k0nk1_m0n0m1n1m2m3m4n2_loop_knm_v1
     {
         barrier.Join();
 
-        // auto barrier_wait = [&]() {
-        //     __builtin_amdgcn_s_barrier_signal_var(math_barrier, 0);
-        //     __builtin_amdgcn_s_barrier_wait(8);
-        // };
-
         const int wave_id           = ThisThreadBlock::GetThreadId() / WaveSize;
         constexpr index_t num_waves = ThisThreadBlock::GetNumOfThread() / WaveSize;
         bool wave_pong              = (wave_id / (num_waves / 2) == 1);
@@ -676,9 +671,10 @@ struct BlockwiseGemmXdlops_k0mk1_k0nk1_m0n0m1n1m2m3m4n2_loop_knm_v1
         auto b_thread_buf = make_static_buffer<AddressSpaceEnum::Vgpr, ElementDataTypeB>(
             b_thread_desc_.GetElementSpaceSize());
 
-        // constexpr index_t KInner = 2;
-        constexpr index_t MInner = 4;
-        constexpr index_t NInner = 2;
+        constexpr index_t MInner              = math::min(4, MRepeat);
+        constexpr index_t NInner              = 1;
+        constexpr index_t NumInstPerTransferA = KPack / A_K1;
+        constexpr index_t NumInstPerTransferB = KPack / B_K1;
 
         static_for<0, KRepeat, 1>{}([&](auto k) {
             static_for<0, NRepeat, NInner>{}([&](auto n0) {
@@ -772,13 +768,13 @@ struct BlockwiseGemmXdlops_k0mk1_k0nk1_m0n0m1n1m2m3m4n2_loop_knm_v1
                     constexpr index_t a_ds_cnt =
                         (m0 != MRepeat - MInner) || (m0 == MRepeat - MInner &&
                                                      n0 == NRepeat - NInner && k + 1 < KRepeat)
-                            ? 2 * MInner
+                            ? NumInstPerTransferA * MInner
                             : 0;
                     constexpr index_t b_ds_cnt =
                         (m0 == MRepeat - MInner && n0 != NRepeat - NInner) ||
                                 (m0 == MRepeat - MInner && n0 == NRepeat - NInner &&
                                  k + 1 < KRepeat)
-                            ? 2 * NInner
+                            ? NumInstPerTransferB * NInner
                             : 0;
 
                     wait_dscnt(Number<a_ds_cnt + b_ds_cnt>{});
@@ -786,7 +782,6 @@ struct BlockwiseGemmXdlops_k0mk1_k0nk1_m0n0m1n1m2m3m4n2_loop_knm_v1
 
                     static_for<0, NInner, 1>{}([&](auto n1) {
                         static_for<0, MInner, 1>{}([&](auto m1) {
-                            // static_for<0, MRepeat, 1>{}([&](auto m0) {
                             vector_type<ElementDataTypeA, KPack> a_thread_vec;
                             vector_type<ElementDataTypeB, KPack> b_thread_vec;
 
