@@ -16,6 +16,8 @@ they stay fast and hardware-free.
 
 from unittest.mock import MagicMock
 
+import pytest
+
 from rocisa.code import Label, Module
 from rocisa.container import DSModifiers, MemTokenData, sgpr, vgpr
 from rocisa.instruction import DSLoadB64, Instruction, SAndB32, SBarrier, SBitcmp1B32, SCBranchSCC1, SCmpEQU32, SCmpLeU32, SLShiftRightB32, TensorLoadToLds, VReadfirstlaneB32
@@ -23,6 +25,9 @@ from rocisa.instruction import DSLoadB64, Instruction, SAndB32, SBarrier, SBitcm
 from Tensile.Components.DecouplePGR import dcpThickGateFromTokenPasses
 from Tensile.Components.Subtile.ClusterBarrier import insertClusterBarrier
 from Tensile.KernelWriter import KernelWriter
+
+
+pytestmark = pytest.mark.unit
 
 
 def _mockWriter():
@@ -338,12 +343,14 @@ def test_the_pass_preserves_barriers_for_the_single_loop_pgr_bypass():
     toPGR1 = Label("toPGR1", "")
     authored = SBarrier(comment="writer barrier for the single-loop path")
     root = Module("kernelBody")
-    root.add(_branchTo(toPGR1, "single-loop bypass"))
-    root.add(_fill())
-    root.add(authored)
-    root.add(_read())
-    root.add(toPGR1)
-    root.add(_read())
+    loop = Module("main loop")
+    loop.add(_branchTo(toPGR1, "single-loop bypass"))
+    loop.add(_fill())
+    loop.add(authored)
+    loop.add(_read())
+    loop.add(toPGR1)
+    loop.add(_read())
+    root.add(loop)
 
     _runPass(_waveParityKernel(), root)
 
