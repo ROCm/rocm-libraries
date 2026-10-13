@@ -1219,6 +1219,70 @@ namespace TensileLite
             return rv;
         }
 
+        // Contractions.ASSERT_DIM_MAP_PREDICATES. A value of -1 skips that index.
+        bool isDimAssertKey(std::string const& key)
+        {
+            return key == "AssertSizeEqual" || key == "AssertSizeGreaterThan"
+                   || key == "AssertSizeLessThan" || key == "AssertStrideAEqual"
+                   || key == "AssertStrideBEqual" || key == "AssertStrideCEqual"
+                   || key == "AssertStrideDEqual";
+        }
+
+        // Contractions.extractDimPredicate. One constraint is that predicate;
+        // more than one is their conjunction. An empty map, or a map whose
+        // values are all -1, contributes nothing.
+        std::shared_ptr<ProblemPredicate> dimAssertPredicate(std::string const& key,
+                                                             Value const&       value)
+        {
+            using namespace Predicates::Contraction;
+            if(value.object().type != object_type::MAP)
+                throw std::runtime_error(key + " must be a dict of {index: value}");
+
+            auto make = [&](size_t index, size_t size) -> std::shared_ptr<ProblemPredicate> {
+                if(key == "AssertSizeEqual")
+                    return withIndexValue<SizeEqual>(index, size);
+                if(key == "AssertSizeGreaterThan")
+                    return withIndexValue<SizeGreaterThan>(index, size);
+                if(key == "AssertSizeLessThan")
+                    return withIndexValue<SizeLessThan>(index, size);
+                if(key == "AssertStrideAEqual")
+                    return withIndexValue<StrideAEqual>(index, size);
+                if(key == "AssertStrideBEqual")
+                    return withIndexValue<StrideBEqual>(index, size);
+                if(key == "AssertStrideCEqual")
+                    return withIndexValue<StrideCEqual>(index, size);
+                if(key == "AssertStrideDEqual")
+                    return withIndexValue<StrideDEqual>(index, size);
+                throw std::runtime_error("Unknown assertion key: " + key);
+            };
+
+            std::vector<std::shared_ptr<ProblemPredicate>> predicates;
+            auto const&                                    map = value.object().via.map;
+            for(uint32_t i = 0; i < map.size; i++)
+            {
+                Value index(map.ptr[i].key, value.path() + " index");
+                Value entry(map.ptr[i].val, value.path());
+                if(index.object().type != object_type::POSITIVE_INTEGER
+                   && index.object().type != object_type::NEGATIVE_INTEGER)
+                    index.fail("an integer index");
+                auto position = index.integer();
+                if(position < 0)
+                    index.fail("an index >= 0");
+                if(entry.equals(-1))
+                    continue;
+                if(entry.object().type != object_type::POSITIVE_INTEGER
+                   && entry.object().type != object_type::NEGATIVE_INTEGER)
+                    entry.fail("an integer");
+                auto size = entry.integer();
+                if(size < 0)
+                    entry.fail("a size >= 0");
+                predicates.push_back(make(size_t(position), size_t(size)));
+            }
+            if(predicates.empty())
+                return nullptr;
+            return conjunction(predicates);
+        }
+
         // Contractions.ProblemPredicate.FromOriginalKeyPair.
         std::shared_ptr<ProblemPredicate> problemPredicateFromKeyPair(std::string const& key,
                                                                       Value const&       value)
@@ -1228,6 +1292,8 @@ namespace TensileLite
                 return value.number() > 0 ? withValue<AIGreaterThanEqual>(value.number()) : nullptr;
             if(key == "AssertAILessThanEqual")
                 return value.number() > 0 ? withValue<AILessThanEqual>(value.number()) : nullptr;
+            if(isDimAssertKey(key))
+                return dimAssertPredicate(key, value);
 
             auto endsWith = [&](std::string_view suffix) {
                 return key.size() >= suffix.size()
@@ -1360,9 +1426,14 @@ namespace TensileLite
                     std::array<int, 2>{32, int(state.integer("GlobalSplitU"))}));
 
             if(state.has("WorkGroupMappingXCC") && state.has("WorkGroupMappingXCCGroup"))
+            {
+                // The library stores only `value`. Loading the file reads the
+                // device compute-unit count; building this record must not.
                 rv.push_back(std::make_shared<WorkgroupMappingXCCCheck>(
                     std::array<int, 2>{int(state.integer("WorkGroupMappingXCC")),
-                                       int(state.integer("WorkGroupMappingXCCGroup"))}));
+                                       int(state.integer("WorkGroupMappingXCCGroup"))},
+                    size_t{0}));
+            }
 
             if(problem.truthy("SwizzleTensorA"))
                 rv.push_back(withValue<SwizzleTensorA>(true));

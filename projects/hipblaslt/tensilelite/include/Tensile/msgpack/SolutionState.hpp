@@ -16,15 +16,16 @@ namespace TensileLite
     /**
      * Builds the library record of a TensileLite kernel from its solution
      * state, the map TensileLite writes as the custom.config of the kernel's
-     * metadata, as Solution.FromOriginalState in Tensile/Contractions.py does.
+     * metadata, as Solution.FromOriginalState in Contractions.py does.
      *
      * The state may be read from a code object's metadata note. The assembler
      * types each scalar of the note from its YAML text, so an empty string
      * arrives as 0.0 and a null as the string "null"; both are read as the
      * values the state holds.
      *
-     * As when loading a library, the WorkgroupMappingXCCCheck predicate reads
-     * the current HIP device's compute unit count.
+     * WorkgroupMappingXCCCheck is recorded with a compute-unit count of 0.
+     * The library file stores only the predicate value, and the device's
+     * compute-unit count is read when that file is loaded.
      *
      * Throws std::runtime_error naming the key when a key the record needs is
      * missing or holds a value of the wrong kind.
