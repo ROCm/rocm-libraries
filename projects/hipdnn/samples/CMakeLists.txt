@@ -161,13 +161,13 @@ if(HIPDNN_ENABLE_CUDNN_COMPATIBILITY AND HIPDNN_ENABLE_SDPA)
     )
 endif()
 
-# Node-coverage samples mirror the upstream cuDNN FE sample names.
-# Host-only: they build and validate the graph, no device required.
+# cuDNN-shim samples: host-only graph validation, except HipifyConvFprop, which runs on a GPU.
 if(HIPDNN_ENABLE_CUDNN_COMPATIBILITY)
     add_hipdnn_sample(hipdnn_sample_cudnn_shim_conv_fprop cudnn_shim/ConvFprop.cpp)
     add_hipdnn_sample(hipdnn_sample_cudnn_shim_matmul cudnn_shim/Matmul.cpp)
     add_hipdnn_sample(hipdnn_sample_cudnn_shim_layernorm cudnn_shim/Layernorm.cpp)
     add_hipdnn_sample(hipdnn_sample_cudnn_shim_pointwise cudnn_shim/Pointwise.cpp)
+    add_hipdnn_sample(hipdnn_sample_cudnn_shim_hipify_conv_fprop cudnn_shim/HipifyConvFprop.cpp)
 endif()
 
 add_hipdnn_sample(hipdnn_sample_knobs_usage knobs/KnobsUsage.cpp)
@@ -337,6 +337,7 @@ if(HIPDNN_ENABLE_CUDNN_COMPATIBILITY)
     add_hipdnn_sample_test(hipdnn_sample_cudnn_shim_matmul)
     add_hipdnn_sample_test(hipdnn_sample_cudnn_shim_layernorm)
     add_hipdnn_sample_test(hipdnn_sample_cudnn_shim_pointwise)
+    add_hipdnn_sample_test(hipdnn_sample_cudnn_shim_hipify_conv_fprop)
 endif()
 
 # Register knobs sample
