@@ -19,8 +19,10 @@ from probe_support import (  # noqa: F401 (pytest fixtures)
     derive_and_pack,
     hip_source,
     hipcc,
+    read_packed,
     rocm_kpack_dir,
     run_assert,
+    write_packed,
 )
 
 # What derive keeps from the main fixture for gfx950: pointwise.kdp.json (gfx942 and
@@ -262,12 +264,12 @@ def test_assert_fails_when_arch_is_not_the_ukds_pass(
 ):
     out, expect = generic_tree
     path = out / _MEMBER / kdp
-    doc = json.loads(path.read_text())
+    doc = read_packed(path)
     if edit_ukd:
         doc["kernelDescriptors"][0]["arch"] = wrong
     else:
         doc["arch"] = wrong
-    path.write_text(json.dumps(doc, indent=2))
+    write_packed(path, doc)
     result = _generic_assert(out, expect, rocm_kpack_dir)
     assert result.returncode == 1
     assert "FAIL arch-field:" in result.stderr

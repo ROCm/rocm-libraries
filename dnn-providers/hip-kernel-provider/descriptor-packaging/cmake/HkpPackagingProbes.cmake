@@ -146,6 +146,30 @@ function(_hkp_probe_check_ukds name)
 endfunction()
 
 # ---------------------------------------------------------------------------
+# _hkp_probe_add_assert_test(<name> <out_root> <arch> <expect_file>)
+#   Register ctest entry hkp-probe-<name>, which asserts the probe's packed output with
+#   the kpack dir and comgr library hkp_load_packaging_probes() stored.
+# ---------------------------------------------------------------------------
+function(_hkp_probe_add_assert_test name out_root arch expect_file)
+    get_property(_kpack_dir GLOBAL PROPERTY HKP_PROBE_ROCM_KPACK_DIR)
+    get_property(_comgr_lib GLOBAL PROPERTY HKP_PROBE_COMGR_LIB)
+    set(_assert_args
+        --out-root "${out_root}"
+        --arch "${arch}"
+        --expect "${expect_file}"
+        --kpack-python-dir "${_kpack_dir}"
+        --stamp-name "${HKP_PACK_STAMP_NAME}")
+    if(_comgr_lib)
+        list(APPEND _assert_args --expect-comgr "${_comgr_lib}")
+    endif()
+    add_test(NAME "hkp-probe-${name}"
+             COMMAND "${Python3_EXECUTABLE}"
+                     "${HKP_PKG_DIR}/tools/hkp_probe_assert.py" ${_assert_args})
+    set_tests_properties("hkp-probe-${name}" PROPERTIES
+        ENVIRONMENT "PYTHONPATH=${HKP_PYTHON_ROOT}")
+endfunction()
+
+# ---------------------------------------------------------------------------
 # hkp_add_packaging_probe(ARCH <gfxNNN> [ROOT <dir>] [NAME <n>] [UKDS <ukd-name>...]
 #                         [PACK_JOBS <j>])
 #   Declare one probe: pack a descriptor root for ARCH and assert the output.
@@ -228,7 +252,6 @@ function(hkp_add_packaging_probe)
 
     get_property(_kpack_dir GLOBAL PROPERTY HKP_PROBE_ROCM_KPACK_DIR)
     get_property(_hipcc GLOBAL PROPERTY HKP_PROBE_HIPCC)
-    get_property(_comgr_lib GLOBAL PROPERTY HKP_PROBE_COMGR_LIB)
     get_property(_root_args GLOBAL PROPERTY HKP_PROBE_ROOT_ARGS)
 
     set(_probe_dir "${CMAKE_BINARY_DIR}/hkp-probes/${ARG_NAME}")
@@ -243,7 +266,11 @@ function(hkp_add_packaging_probe)
         return()
     endif()
 
-    # Empty PACK_JOBS passes nothing to the packer, which then uses its own default.
+    # Omitted PACK_JOBS passes nothing to the packer, which then uses its own default.
+    set(_pack_jobs_args "")
+    if(ARG_PACK_JOBS)
+        list(APPEND _pack_jobs_args PACK_JOBS "${ARG_PACK_JOBS}")
+    endif()
     hkp_wire_pack_target(
         NAME "probe_${ARG_NAME}"
         SOURCE_ROOT "${_root}"
@@ -252,22 +279,10 @@ function(hkp_add_packaging_probe)
         ROCM_KPACK_DIR "${_kpack_dir}"
         OUT_ROOT "${_out_root}"
         ${_root_args}
-        PACK_JOBS "${ARG_PACK_JOBS}")
+        ${_pack_jobs_args})
 
-    set(_assert_args
-        --out-root "${_out_root}"
-        --arch "${ARG_ARCH}"
-        --expect "${_expect_file}"
-        --kpack-python-dir "${_kpack_dir}"
-        --stamp-name "${HKP_PACK_STAMP_NAME}")
-    if(_comgr_lib)
-        list(APPEND _assert_args --expect-comgr "${_comgr_lib}")
-    endif()
-    add_test(NAME "hkp-probe-${ARG_NAME}"
-             COMMAND "${Python3_EXECUTABLE}"
-                     "${HKP_PKG_DIR}/tools/hkp_probe_assert.py" ${_assert_args})
-    set_tests_properties("hkp-probe-${ARG_NAME}" PROPERTIES
-        ENVIRONMENT "PYTHONPATH=${HKP_PYTHON_ROOT}")
+    _hkp_probe_add_assert_test("${ARG_NAME}" "${_out_root}" "${ARG_ARCH}"
+                               "${_expect_file}")
 
     set_property(GLOBAL APPEND PROPERTY HKP_PROBE_NAMES "${ARG_NAME}")
 endfunction()
