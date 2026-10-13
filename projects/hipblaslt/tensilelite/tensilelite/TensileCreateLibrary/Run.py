@@ -424,7 +424,17 @@ def _applyCustomKernelDefToSol(sol, result):
     if ckDef is not None:
         sol.originalSolution._state["CustomKernel"] = ckDef
         from ..Contractions import CustomKernel as CK
-        sol.customKernel = CK.FromOriginalState(ckDef)
+        sol.customKernel = CK(
+            name=ckDef["name"],
+            args=ckDef["args"],
+            macrotile=ckDef["macrotile"],
+            threads=ckDef["threads"],
+            grid=ckDef["grid"],
+            workspaceType=ckDef.get("workspaceType", "None"),
+            workspaceSizePerElemC=ckDef.get("workspaceSizePerElemC", 0),
+            workspaceSizePerElemBias=ckDef.get("workspaceSizePerElemBias", 0),
+            generated=ckDef.get("generated", False),
+        )
 
 def passPostKernelInfoToLibrary(results, kernels, masterLibraries, splitGSU: bool):
     resultDict = {}

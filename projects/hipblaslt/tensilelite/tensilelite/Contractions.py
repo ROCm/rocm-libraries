@@ -22,23 +22,91 @@
 #
 ################################################################################
 
-from .ExecutionPolicy import isPersistent, isStreamK, isPersistentDataParallel, normalize_execution_policy
+from .ExecutionPolicy import isPersistent, isStreamK
 
 from typing import Dict
+
+import copy
 
 from .Activation import ActivationType
 from . import Hardware
 from . import Properties
-from .Common import state, state_key_ordering, IsaInfo
+from .Common import printExit, state, state_key_ordering, IsaInfo
+
+# state() methods below shadow this name. Call the helper through the alias.
+_dump_state = state
 from .Common.Architectures import gfxToIsa
 from .Common.DataType import DataType
-from .Common.GlobalParameters import internalParameters
 from .SolutionStructs import Solution as OriginalSolution
 from .SolutionStructs.Problem import getBiasDataTypeListDefault, getGateResidualDataTypeListDefault
 from .Toolchain.Component import Assembler
 from math import ceil
 
 MIN_K_FOR_GSU = 32
+
+def _state_from_document(obj):
+    """Serialize a record holder. Assigned attributes overlay the C++ document."""
+    record = getattr(obj, "_record", None)
+    if record is None:
+        return {key: _dump_state(getattr(obj, key)) for key in obj.StateKeys}
+    rv = {}
+    for key, value in record.items():
+        rv[key] = _dump_state(getattr(obj, key, value))
+    # Fields assigned after the record was built, when the document omitted them.
+    for key in obj.StateKeys:
+        if key not in rv and hasattr(obj, key):
+            rv[key] = _dump_state(getattr(obj, key))
+    return rv
+
+
+def _fill_document(obj, document):
+    obj._record = document
+    for key, value in document.items():
+        setattr(obj, key, value)
+    return obj
+
+
+def _restore_predicate_value(value):
+    if isinstance(value, dict) and "type" in value:
+        return _predicate_from_document(Properties.Predicate, value)
+    if isinstance(value, list):
+        return [_restore_predicate_value(item) for item in value]
+    return value
+
+
+def _predicate_from_document(cls, document):
+    value = _restore_predicate_value(document["value"]) if "value" in document else None
+    index = document["index"] if "index" in document else None
+    predicate = cls(document["type"], index, value)
+    predicate._record = document
+    return predicate
+
+
+def _pack_default(obj):
+    # SolutionStructs.ProblemType stores its fields in a dict named state.
+    # Data types and other values expose that dict through a state method.
+    state_attr = getattr(obj, "state", None)
+    if isinstance(state_attr, dict):
+        return state_attr
+    if callable(state_attr):
+        return state_attr()
+    raise TypeError("Cannot pack {} into a solution state".format(type(obj).__name__))
+
+
+def _solution_record(d):
+    """Build one solution's library record with tensilelite_write.solution_from_state."""
+    try:
+        from tensilelite import tensilelite_write
+    except (ImportError, OSError) as exc:
+        printExit(
+            "tensilelite.tensilelite_write is required to build a solution record ({})".format(exc)
+        )
+    import msgpack
+    raw = msgpack.packb(d, default=_pack_default, use_bin_type=True)
+    packed = tensilelite_write.solution_from_state(raw)
+    return msgpack.unpackb(packed, raw=False, strict_map_key=False)
+
+
 @state_key_ordering
 class FreeIndex:
     StateKeys = ['isA', 'i', 'c', 'd']
@@ -386,6 +454,12 @@ class ProblemType:
 
         return ret
 
+    def state(self):
+        record = getattr(self, "_record", None)
+        if record is not None:
+            return copy.deepcopy(record)
+        return {key: _dump_state(getattr(self, key)) for key in self.StateKeys}
+
     def predicates(self, includeBatch=False, includeOperation=False, includeType=False):
         predicates = []
 
@@ -466,30 +540,11 @@ def extractDimPredicate(cls, value, predicateName):
         return cls.And(predicates)
 
 class TaskPredicate(Properties.Predicate):
-    @classmethod
-    def FromOriginalKeyPair(cls, pair):
-        (key, value) = pair
-        if key == "_WorkspaceSizePerElemC" and value > 0:
-            return cls("WorkspaceCheck")
-        return None
-
-    @classmethod
-    def ExtraPredicates(cls, state):
-        rv = []
-
-        # LaunchLimits predicate checks that launch grid will not overflow hip API limits
-        # TODO This predicate could also verify limits on some kernel arguments
-        # Stream-k kernels currently do not need limit check since launch grid should be limited by the grid model
-        if not isPersistent(state):
-            rv += [cls('LaunchLimits')]
-
-        return rv
-
-    @classmethod
-    def FromOriginalState(cls, d, problemType, morePreds=[]):
-        extraPredicates = cls.ExtraPredicates(d)
-        predicates = [p for p in map(cls.FromOriginalKeyPair, d.items()) if p is not None] + extraPredicates
-        return cls.And(predicates)
+    def state(self):
+        record = getattr(self, "_record", None)
+        if record is not None:
+            return copy.deepcopy(record)
+        return super().state()
 
 class ProblemPredicate(Properties.Predicate):
     @classmethod
@@ -668,14 +723,11 @@ class ProblemPredicate(Properties.Predicate):
 
         return rv
 
-    @classmethod
-    def FromOriginalState(cls, d, problemType, morePreds=[]):
-        problemTypePreds = problemType.predicates(True, True, True)
-        compoundPreds = cls.CompoundPredicates(d, problemType)
-        extraPreds = problemTypePreds + compoundPreds + morePreds
-
-        predicates = [p for p in map(cls.FromOriginalKeyPair, d.items()) if p is not None] + extraPreds
-        return cls.And(predicates)
+    def state(self):
+        record = getattr(self, "_record", None)
+        if record is not None:
+            return copy.deepcopy(record)
+        return super().state()
 
 class CustomKernel:
     StateKeys = ['name',
@@ -688,17 +740,8 @@ class CustomKernel:
                  'workspaceSizePerElemBias',
                  'generated']
 
-    @classmethod
-    def FromOriginalState(cls, d):
-        return cls(name=d['name'],
-                   args=d['args'],
-                   macrotile=d['macrotile'],
-                   threads=d['threads'],
-                   grid=d['grid'],
-                   workspaceType=d.get('workspaceType', 'None'),
-                   workspaceSizePerElemC=d.get('workspaceSizePerElemC', 0),
-                   workspaceSizePerElemBias=d.get('workspaceSizePerElemBias', 0),
-                   generated=d.get('generated', False))
+    def state(self):
+        return _state_from_document(self)
 
     def __init__(self, **kwargs):
         for (key, value) in list(kwargs.items()):
@@ -767,111 +810,8 @@ class SizeMapping:
                  'clusterDim'
                  ]
 
-    @classmethod
-    def FromOriginalState(cls, d):
-        # This describes an existing artifact: preserve its argument version
-        # while translating selectors and inactive legacy options together.
-        d = normalize_execution_policy(d, regenerate=False)
-        globalAccum = 0
-        if d['_GlobalAccumulation'] == 'SingleBuffer':
-            globalAccum = 1
-        if d['_GlobalAccumulation'] == 'MultipleBuffer':
-            globalAccum = 2
-        if d['_GlobalAccumulation'] == 'MultipleBufferSingleKernel':
-            globalAccum = 3
-        if d['_GlobalAccumulation'] == 'PartialsBuffer':
-            globalAccum = 4
-        pgr = int(d['PrefetchGlobalRead'])
-        synchronizerSizePerWG = ceil((d['MIWaveTile'][0]*d['MIWaveTile'][1] if d['EnableMatrixInstruction'] else d['ThreadTile0']*d['ThreadTile1'])        \
-                                    * (ceil((d['NumElementsPerThread'])/d['NumElementsPerBatchStore']) if d['NumElementsPerBatchStore'] != 0 else d['NumElementsPerThread'])        \
-                                    * ceil(d["NumThreads"] / d["WavefrontSize"]))
-
-
-        # Converts list of list specified in SFCWGM to a 32bit signed integer that is passed to the WGM arg
-        # Input: nested list in the form [[GridDimM_L1, GridDimN_L1], [GridDimM_L2, GridDimN_L2]], all values are 8bit unsigned
-        # Output: to be stored in 32bit WGM kernel arg - (msb)[GridDimN_L2, GridDimM_L2, GridDimN_L1, GridDimM_L1](lsb)
-        def convertSFCWGMListToHex(value):
-            import ctypes
-            output = 0
-            for idx in range(len(value)):
-                gridDims = value[idx]
-                output = output | gridDims[0] << (16 * idx)
-                output = output | (gridDims[1] << (8 + 16 * idx))
-            # WGM kernel param is interpreted as int so, 32bit output to 32b int
-            return ctypes.c_int(output & 0xFFFFFFFF).value
-
-        dtva = bool(d['DirectToVgprA'])
-        dtvb = bool(d['DirectToVgprB'])
-        dtlA = bool(d['DirectToLdsA'])
-        dtlB = bool(d['DirectToLdsB'])
-
-        return cls(waveNum                  = d['NumThreads'] // d['WavefrontSize'],
-                   workGroup                = d['WorkGroup'],
-                   macroTile                = cls.ReadOriginalMacroTile(d),
-                   threadTile               = d['ThreadTile'],
-                   matrixInstruction        = d['MatrixInstruction'],
-                   grvwA                    = d['GlobalReadVectorWidthA'],
-                   grvwB                    = d['GlobalReadVectorWidthB'],
-                   gwvwC                    = d['StoreVectorWidth'],
-                   gwvwD                    = d['StoreVectorWidth'],
-                   workGroupMapping         = d['WorkGroupMapping'] if len(d['SpaceFillingAlgo']) == 0 else convertSFCWGMListToHex(d['SFCWGM']),
-                   staggerU                 = d['StaggerU'] if 'StaggerU' in d else 0,
-                   staggerUMapping          = d['StaggerUMapping'] if 'StaggerUMapping' in d else 0,
-                   depthU                   = d['DepthU'],
-                   globalSplitUPGR          = internalParameters["GlobalSplitUPGR"],
-                   globalSplitU             = d['GlobalSplitU'],
-                   staggerStrideShift       = d['_staggerStrideShift'] if '_staggerStrideShift' in d else 0,
-                   packBatchDims            = 0,
-                   tileProcessingStrategy   = d['TileProcessingStrategy'],
-                   workAssignment           = d['WorkAssignment'],
-                   streamKAtomic            = d['StreamKAtomic'] if 'StreamKAtomic' in d else 0,
-                   prefetchAcrossPersistent = d.get('PrefetchAcrossPersistent', 0),
-                   magicDivAlg              = d.get('MagicDivAlg', 1),
-                   sourceKernel             = d['KernelLanguage'] == 'Source',
-                   globalAccumulation       = globalAccum,
-                   adaptiveGemmGSUA         = d['AdaptiveGemmGSUA'] if 'AdaptiveGemmGSUA' in d else 0,
-                   workspaceSizePerElemC    = d['_WorkspaceSizePerElemC'],
-                   workspaceSizePerElemBias = d['_WorkspaceSizePerElemBias'],
-                   activationFused          = d['ActivationFused'],
-                   workGroupMappingXCC      = d['WorkGroupMappingXCC'],
-                   workGroupMappingXCCGroup = d['WorkGroupMappingXCCGroup'],
-                   globalSplitUCoalesced    = d['GlobalSplitUCoalesced'],
-                   globalSplitUWorkGroupMappingRoundRobin = d['GlobalSplitUWorkGroupMappingRoundRobin'],
-                   CUOccupancy              = d['CUOccupancy'],
-                   PrefetchGlobalRead       = pgr,
-                   MathClocksUnrolledLoop   = d['MathClocksUnrolledLoop'],
-                   synchronizerSizePerWG    = synchronizerSizePerWG,
-                   nonTemporalA             = d['NonTemporalA'],
-                   nonTemporalB             = d['NonTemporalB'],
-                   temporalHintA            = d.get('TemporalHintA', 0),
-                   temporalHintB            = d.get('TemporalHintB', 0),
-                   hasTemporalHint          = bool(d.get('_HasTemporalHint', False)),
-                   adaptiveGemmNTAB         = d['AdaptiveGemmNTAB'] if 'AdaptiveGemmNTAB' in d else 0,
-                   customMainLoopScheduling = d['UseCustomMainLoopSchedule'],
-                   useSubtileImpl           = bool(d.get('UseSubtileImpl', False)),
-                   NonTemporalD             = d['NonTemporalD'],
-                   WaveSeparateGlobalReadA  = d['WaveSeparateGlobalReadA'],
-                   WaveSeparateGlobalReadB  = d['WaveSeparateGlobalReadB'],
-                   UnrollLoopSwapGlobalReadOrder = d['UnrollLoopSwapGlobalReadOrder'],
-                   DirectToVgprA            = dtva,
-                   DirectToVgprB            = dtvb,
-                   NumLoadsCoalescedA       = d['NumLoadsCoalescedA'],
-                   NumLoadsCoalescedB       = d['NumLoadsCoalescedB'],
-                   WaveGroup                = d["MIWaveGroup"],
-                   VectorWidthA             = d["VectorWidthA"],
-                   VectorWidthB             = d["VectorWidthB"],
-                   LocalSplitU              = d["LocalSplitU"],
-                   DirectToLdsA             = dtlA,
-                   DirectToLdsB             = dtlB,
-                   ExpertSchedulingMode     = d.get('ExpertSchedulingMode', 0),
-                   clusterDim               = d['ClusterDim']
-                   )
-    @classmethod
-    def ReadOriginalMacroTile(cls, d):
-        rv = [1,1,1]
-        rv[0] = d['MacroTile0']
-        rv[1] = d['MacroTile1']
-        return rv
+    def state(self):
+        return _state_from_document(self)
 
     def __init__(self, **kwargs):
         for (key, value) in list(kwargs.items()):
@@ -888,20 +828,8 @@ class InternalArgsSupport:
                  'useSFC'
                  ]
 
-    @classmethod
-    def FromOriginalState(cls, d):
-        # Set useSFC to True if SpaceFillingAlgo is non-empty, regardless of
-        # the explicit InternalSupportParams setting
-        useSFC = d['InternalSupportParams']['UseSFC'] or len(d.get('SpaceFillingAlgo', [])) > 0
-        isp = d['InternalSupportParams']
-        return cls(version = isp['KernArgsVersion'],
-                   persistentLoopArgsVersion = isp.get('PersistentLoopArgsVersion', 0),
-                   gsu = isp['SupportUserGSU'],
-                   wgm = isp['SupportCustomWGM'],
-                   staggerU = isp['SupportCustomStaggerU'],
-                   perTileExtraIters = isp.get('SupportStreamKPerTileExtraIters', False),
-                   useUniversalArgs = isp['UseUniversalArgs'],
-                   useSFC = useSFC)
+    def state(self):
+        return _state_from_document(self)
 
     def __init__(self, **kwargs):
         for (key, value) in list(kwargs.items()):
@@ -960,54 +888,6 @@ class Solution:
             *,
             raiseProblemTypeOnTypeMismatch: bool = True,
         ):
-        rv = cls()
-
-        if 'SolutionNameMin' in d:
-            rv.name = d['SolutionNameMin']
-
-        if 'KernelNameMin' in d:
-            rv.kernelName = d['KernelNameMin']
-
-        rv.problemType = ProblemType.FromOriginalState(d['ProblemType'])
-
-        # MXScaleFormat is a Solution-level knob (lives in d, not d['ProblemType']),
-        # but it describes the in-device MX scale layout the kernel expects, which
-        # the host (DataInitialization) needs to know to pick an upload layout.
-        # Plumb it onto problemType so the host can read it post-solution-pick.
-        rv.problemType.mxScaleFormat = {"NoSwizzle": 0,
-                                        "HostPreSwizzle": 1,
-                                        "InMemorySwizzle": 2}.get(d.get("MXScaleFormat", "NoSwizzle"), 0)
-
-        rv.problemPredicate = ProblemPredicate.FromOriginalState(d, rv.problemType)
-        rv.taskPredicate = TaskPredicate.FromOriginalState(d, rv.problemType)
-
-        if 'DebugKernel' in d:
-            rv.debugKernel = d['DebugKernel']
-
-        if 'SolutionIndex' in d:
-            rv.index = d['SolutionIndex']
-
-        info = cls.ReadOriginalInfo(d)
-        rv.libraryLogicIndex = int(info.get("SolutionIndex", -1))
-
-        rv.sizeMapping = SizeMapping.FromOriginalState(d)
-        if 'CustomKernel' in d:
-            rv.customKernel = CustomKernel.FromOriginalState(d['CustomKernel'])
-        else:
-            rv.customKernel = {}
-
-        rv.internalArgsSupport = InternalArgsSupport.FromOriginalState(d)
-
-        if 'Ideals' in d:
-            rv.ideals = d['Ideals']
-        else:
-            rv.ideals = {}
-
-        if 'LinearModel' in d:
-            rv.linearModel = d['LinearModel']
-        else:
-            rv.linearModel = {}
-
         if 'ISA' not in d:
             if d['KernelLanguage'] == 'Assembly':
                 d['ISA'] = gfxToIsa(deviceInfo[1])
@@ -1015,9 +895,37 @@ class Solution:
         if 'CUCount' not in d:
             d['CUCount'] = None
 
-        rv.hardwarePredicate = Hardware.HardwarePredicate.FromHardware(
-            d['ISA'], d['CUCount'], d.get('DeviceNames', None), logicFile=srcName
+        record = _solution_record(d)
+        rv = cls()
+        rv.name = record.get("name")
+        rv.kernelName = record.get("kernelName")
+        rv.index = record.get("index")
+        rv.debugKernel = record.get("debugKernel", False)
+        rv.libraryLogicIndex = record.get("libraryLogicIndex", -1)
+        rv.ideals = record.get("ideals", {})
+        rv.linearModel = record.get("linearModel", {})
+
+        # Index geometry and data-type objects are not in the library record.
+        # Client config reads them off this object. state() returns the record.
+        rv.problemType = ProblemType.FromOriginalState(d["ProblemType"])
+        problemTypeRecord = record["problemType"]
+        rv.problemType.mxScaleFormat = problemTypeRecord.get("mxScaleFormat", 0)
+        rv.problemType._record = problemTypeRecord
+
+        rv.problemPredicate = _predicate_from_document(ProblemPredicate, record["problemPredicate"])
+        rv.taskPredicate = _predicate_from_document(TaskPredicate, record["taskPredicate"])
+        rv.hardwarePredicate = _predicate_from_document(
+            Hardware.HardwarePredicate, record["hardwarePredicate"]
         )
+        rv.sizeMapping = _fill_document(SizeMapping(), record["sizeMapping"])
+        if "customKernel" in record:
+            rv.customKernel = _fill_document(CustomKernel(), record["customKernel"])
+        else:
+            rv.customKernel = {}
+        rv.internalArgsSupport = _fill_document(
+            InternalArgsSupport(), record["internalArgsSupport"]
+        )
+
         rv.originalSolution = OriginalSolution(
                                   d,
                                   splitGSU,
@@ -1031,10 +939,6 @@ class Solution:
         rv.srcName = srcName
 
         return rv
-
-    @classmethod
-    def ReadOriginalInfo(cls, d):
-        return dict([(key, str(value)) for (key, value) in list(d.items()) if key != 'ProblemType'])
 
     def __init__(self, **kwargs):
         self.name = None
