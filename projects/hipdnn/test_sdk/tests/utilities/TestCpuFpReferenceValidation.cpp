@@ -961,3 +961,102 @@ TYPED_TEST(CpuIntReferenceValidationSentinel, PassesForNonSentinelValues)
 }
 
 /* ================================================= */
+
+/* ======== Ragged comparison tests (TYPED_TEST across fp types) ======== */
+
+template <typename T>
+class CpuFpReferenceValidationRagged : public ::testing::Test
+{
+};
+
+using RaggedFpValidationTypes = ::testing::Types<float, half, bfloat16>;
+TYPED_TEST_SUITE(CpuFpReferenceValidationRagged, RaggedFpValidationTypes, );
+
+TYPED_TEST(CpuFpReferenceValidationRagged, PassesForIdenticalTensors)
+{
+    const CpuFpReferenceValidation<TypeParam> refValidation;
+    auto reference = createRaggedSdpaTensor<TypeParam>(0.5f);
+    auto implementation = createRaggedSdpaTensor<TypeParam>(0.5f);
+
+    EXPECT_TRUE(refValidation.allClose(reference, implementation));
+}
+
+TYPED_TEST(CpuFpReferenceValidationRagged, SkipsInBlockNaNReference)
+{
+    const CpuFpReferenceValidation<TypeParam> refValidation;
+    auto reference = createRaggedSdpaTensor<TypeParam>(0.5f);
+    auto implementation = createRaggedSdpaTensor<TypeParam>(0.5f);
+    reference.setHostValue(std::numeric_limits<TypeParam>::quiet_NaN(), 1, 1, 2, 1);
+    implementation.setHostValue(TypeParam(2.0f), 1, 1, 2, 1);
+
+    EXPECT_TRUE(refValidation.allClose(reference, implementation));
+}
+
+TYPED_TEST(CpuFpReferenceValidationRagged, FailsForInBlockDifference)
+{
+    const CpuFpReferenceValidation<TypeParam> refValidation;
+    auto reference = createRaggedSdpaTensor<TypeParam>(0.5f);
+    auto implementation = createRaggedSdpaTensor<TypeParam>(0.5f);
+    implementation.setHostValue(TypeParam(2.0f), 1, 1, 2, 1);
+
+    EXPECT_FALSE(refValidation.allClose(reference, implementation));
+}
+
+TYPED_TEST(CpuFpReferenceValidationRagged, FailsWhenEveryReferenceValueIsNaN)
+{
+    const CpuFpReferenceValidation<TypeParam> refValidation;
+    auto reference = createRaggedSdpaTensor<TypeParam>(std::numeric_limits<float>::quiet_NaN());
+    auto implementation = createRaggedSdpaTensor<TypeParam>(0.5f);
+
+    EXPECT_FALSE(refValidation.allClose(reference, implementation));
+}
+
+TYPED_TEST(CpuFpReferenceValidationRagged, FailsForMismatchedRaggedLayouts)
+{
+    const CpuFpReferenceValidation<TypeParam> refValidation;
+    auto reference = createRaggedSdpaTensor<TypeParam>(0.5f);
+    auto implementation = createRaggedSdpaTensor<TypeParam>(0.5f, {0, 3, 5});
+
+    EXPECT_FALSE(refValidation.allClose(reference, implementation));
+}
+
+TYPED_TEST(CpuFpReferenceValidationRagged, FailsForRaggedAgainstDense)
+{
+    const CpuFpReferenceValidation<TypeParam> refValidation;
+    auto ragged = createRaggedSdpaTensor<TypeParam>(0.5f);
+    Tensor<TypeParam> dense(RAGGED_SDPA_DIMS);
+    dense.fillTensorWithValue(0.5f);
+
+    EXPECT_FALSE(refValidation.allClose(ragged, dense));
+    EXPECT_FALSE(refValidation.allClose(dense, ragged));
+}
+
+TEST(TestCpuIntReferenceValidationRagged, PassesForIdenticalTensors)
+{
+    const CpuIntReferenceValidation<int32_t> refValidation;
+    auto reference = createRaggedSdpaTensor<int32_t>(7.0f);
+    auto implementation = createRaggedSdpaTensor<int32_t>(7.0f);
+
+    EXPECT_TRUE(refValidation.allClose(reference, implementation));
+}
+
+TEST(TestCpuIntReferenceValidationRagged, FailsForInBlockDifference)
+{
+    const CpuIntReferenceValidation<int32_t> refValidation;
+    auto reference = createRaggedSdpaTensor<int32_t>(7.0f);
+    auto implementation = createRaggedSdpaTensor<int32_t>(7.0f);
+    implementation.setHostValue(8, 1, 1, 2, 1);
+
+    EXPECT_FALSE(refValidation.allClose(reference, implementation));
+}
+
+TEST(TestCpuIntReferenceValidationRagged, FailsForMismatchedRaggedLayouts)
+{
+    const CpuIntReferenceValidation<int32_t> refValidation;
+    auto reference = createRaggedSdpaTensor<int32_t>(7.0f);
+    auto implementation = createRaggedSdpaTensor<int32_t>(7.0f, {0, 3, 5});
+
+    EXPECT_FALSE(refValidation.allClose(reference, implementation));
+}
+
+/* ================================================= */

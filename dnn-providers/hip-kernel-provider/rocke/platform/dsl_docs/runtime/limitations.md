@@ -181,7 +181,7 @@ That is harmless for in-process dispatch, where the key is the identity. It bloc
 - **AOT packaging**, where the symbol *is* the identity and the two bodies collide.
 - **Partial specialization** — baking `batch` for a hot shape while keeping the seqlens runtime. The cache key follows a narrowed `runtime_param_fields` automatically, but `_shape_name_parts()` is all-or-nothing (it emits both seqlen tokens or neither) and does not derive from that tuple.
 
-Precondition for either: make the symbol name derive from `runtime_param_fields` first. Baking the *whole* shape is already safe — it goes through an existing mode flag (persistent / ragged / varlen / paged / sliding-window), which restores both the per-shape key and the `sq`/`sk` name tokens.
+Precondition for either: make the symbol name derive from `runtime_param_fields` first. Baking the *whole* shape is already safe — it goes through an existing mode flag, which restores both the per-shape key and the `sq`/`sk` name tokens: persistent / ragged / varlen / paged / sliding-window on gfx950, ragged / varlen / paged on gfx942 (where persistent and sliding-window are on the runtime path and restore neither).
 
 ## Multi-GPU and RCCL
 

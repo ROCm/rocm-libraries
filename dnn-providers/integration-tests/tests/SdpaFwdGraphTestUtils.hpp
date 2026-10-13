@@ -98,10 +98,10 @@ inline flatbuffers::FlatBufferBuilder
 // Layout of the optional stats (LSE) output of a ragged SDPA graph.
 enum class RaggedStatsLayout
 {
-    // [B, Sq_max, H, 1], contiguous, no ragged_offset. The frontend produces this when stats
+    // [B, H, Sq_max, 1], contiguous, no ragged_offset. The frontend produces this when stats
     // strides are unset.
     DENSE,
-    // [B, Sq_max, H, 1], packed by token (seq stride = H) with its own ragged_offset.
+    // [B, H, Sq_max, 1], packed by token (seq stride = H) with its own ragged_offset.
     PACKED,
 };
 
@@ -131,7 +131,7 @@ struct RaggedSdpaFwdGraphOptions
     // Output dtype. UNSET means the input dtype. fp8 graphs use bf16 here.
     hipdnn_flatbuffers_sdk::data_objects::DataType oDataType
         = hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET;
-    // FLOAT LSE output [B, Sq, H, 1].
+    // FLOAT LSE output [B, H, Sq, 1].
     std::optional<int64_t> statsUid;
     RaggedStatsLayout statsLayout = RaggedStatsLayout::DENSE;
     // INT32 ragged_offset uid for the stats tensor. Required for PACKED stats.
@@ -147,12 +147,12 @@ struct RaggedSdpaFwdGraphOptions
     std::optional<int64_t> raggedOffsetVUid;
     std::optional<int64_t> raggedOffsetOUid;
     // Token-unit offsets, AITER's form: each ragged tensor's ragged_offset_multiplier is its seq
-    // stride (strides[1] = H*D, or H for a packed LSE), so the Q table also serves O and the K
+    // stride (strides[2] = H*D, or H for a packed LSE), so the Q table also serves O and the K
     // table also serves V even when their widths differ. Default: element offsets (multiplier 1).
     bool tokenOffsets = false;
 };
 
-// Builds a one-node ragged SDPA forward graph (RFC-0014: packed [B,S,H,D] plus ragged_offset).
+// Builds a one-node ragged SDPA forward graph (RFC-0014: packed BSHD plus ragged_offset).
 // Q/K/V/O are packed by token and each carries a ragged_offset uid, which routes the node to the
 // ragged reference. Each ragged_offset aux is INT32 [batch+1,1,1,1].
 inline flatbuffers::FlatBufferBuilder
@@ -174,6 +174,7 @@ inline flatbuffers::FlatBufferBuilder
     using hipdnn_test_sdk::utilities::raggedDims;
     using hipdnn_test_sdk::utilities::raggedHeads;
     using hipdnn_test_sdk::utilities::raggedSeqExtent;
+    using hipdnn_test_sdk::utilities::raggedSeqStride;
     using hipdnn_test_sdk::utilities::raggedStrides;
 
     const DataType outputDataType
@@ -212,7 +213,7 @@ inline flatbuffers::FlatBufferBuilder
     const auto vStrides = raggedStrides(vDims);
     const auto oStrides = raggedStrides(oDims);
     const auto multiplier = [&](const std::vector<int64_t>& strides) {
-        return options.tokenOffsets ? strides[1] : 1;
+        return options.tokenOffsets ? raggedSeqStride(strides) : 1;
     };
 
     const auto raggedOffsetVUid = options.raggedOffsetVUid.value_or(raggedOffsetKvUid);

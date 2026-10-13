@@ -3456,6 +3456,492 @@
         "seed": 1,
         "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormFwdInferenceVariance2dFp32.Correctness_3"
       }
+    },
+    {
+      "id": "16_3_8_14_14_bfp16_ndhwc",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              16,
+              3,
+              8,
+              14,
+              14
+            ],
+            "strides": [
+              4704,
+              1,
+              588,
+              42,
+              3
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              16,
+              3,
+              8,
+              14,
+              14
+            ],
+            "strides": [
+              4704,
+              1,
+              588,
+              42,
+              3
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              3,
+              1,
+              1,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              3,
+              1,
+              1,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1,
+              3,
+              1,
+              1,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 6,
+            "dims": [
+              1,
+              3,
+              1,
+              1,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "inputs": {
+          "1": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "4": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "6": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": 0.10000000149011612
+          },
+          "5": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "2": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuBatchnormFwdInferenceVariance3dBfp16.Correctness/3",
+        "operation": "Smoke/IntegrationGpuBatchnormFwdInferenceVariance3dBfp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuBatchnormFwdInferenceVariance3dBfp16.Correctness_3"
+      }
+    },
+    {
+      "id": "16_3_8_14_14_fp16_ncdhw",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              16,
+              3,
+              8,
+              14,
+              14
+            ],
+            "strides": [
+              4704,
+              1568,
+              196,
+              14,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              16,
+              3,
+              8,
+              14,
+              14
+            ],
+            "strides": [
+              4704,
+              1568,
+              196,
+              14,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              3,
+              1,
+              1,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              3,
+              1,
+              1,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1,
+              3,
+              1,
+              1,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 6,
+            "dims": [
+              1,
+              3,
+              1,
+              1,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "inputs": {
+          "1": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "4": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "6": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": 0.10000000149011612
+          },
+          "5": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "2": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuBatchnormFwdInferenceVariance3dFp16.Correctness/1",
+        "operation": "Smoke/IntegrationGpuBatchnormFwdInferenceVariance3dFp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuBatchnormFwdInferenceVariance3dFp16.Correctness_1"
+      }
+    },
+    {
+      "id": "16_3_8_14_14_fp32_ndhwc",
+      "values": {
+        "io_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              16,
+              3,
+              8,
+              14,
+              14
+            ],
+            "strides": [
+              4704,
+              1,
+              588,
+              42,
+              3
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              16,
+              3,
+              8,
+              14,
+              14
+            ],
+            "strides": [
+              4704,
+              1,
+              588,
+              42,
+              3
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              3,
+              1,
+              1,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              3,
+              1,
+              1,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1,
+              3,
+              1,
+              1,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 6,
+            "dims": [
+              1,
+              3,
+              1,
+              1,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "inputs": {
+          "1": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "4": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "6": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": 0.10000000149011612
+          },
+          "5": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "2": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuBatchnormFwdInferenceVariance3dFp32.Correctness/3",
+        "operation": "Smoke/IntegrationGpuBatchnormFwdInferenceVariance3dFp32",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuBatchnormFwdInferenceVariance3dFp32.Correctness_3"
+      }
     }
   ]
 }

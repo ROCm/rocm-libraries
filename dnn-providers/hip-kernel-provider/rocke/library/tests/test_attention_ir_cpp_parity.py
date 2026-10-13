@@ -9,11 +9,14 @@ The IR-sha256 golden for these kernels lives in the platform parity harness
 ``rocke_golden_static`` CTest entry. That golden pins the *Python* lowering only.
 This file adds the other half for the same case set: the C++ engine
 (``rocke_engine``) must lower each of those kernels to byte-identical IR.
+The harness also pins representative ``emit_lse`` cases in that golden (gfx942 LSE
+cases live in ``tests/golden/attention_dense_gfx942_ir_sha256.json``); the extra
+LSE-enabled dense cases declared below widen only the cross-engine check.
 
-Cases are read back from the harness rather than redeclared, so the two gates can
-never drift apart. Importing the harness is the allowed ``library -> platform``
-direction (the reverse is forbidden); it is reached by path because the harness
-ships in the platform *test* tree, not inside the ``rocke`` package.
+The original cases are read back from the harness rather than redeclared.
+Importing the harness is the allowed ``library -> platform`` direction (the
+reverse is forbidden); it is reached by path because the harness ships in the
+platform *test* tree, not inside the ``rocke`` package.
 """
 
 from __future__ import annotations
@@ -72,6 +75,96 @@ def test_attention_ir_cpp_python_byte_identity():
     # it. Harness drift must not be reported as an engine gap.
     empty = set(_FAMILIES) - {c["family"] for c in cases}
     assert not empty, f"harness declares no cases for families {sorted(empty)}"
+
+    # Exercise both final-output stages, including the no-key/sink branches.
+    # Sq256/Skv64/window64 includes both nonempty and empty query rows.
+    for label, overrides in (
+        ("ordinary", {}),
+        ("persistent", {"persistent": True}),
+        ("empty_window", {"seqlen_q": 256, "seqlen_kv": 64, "sliding_window": 64}),
+        (
+            "persistent_empty_window",
+            {
+                "persistent": True,
+                "seqlen_q": 256,
+                "seqlen_kv": 64,
+                "sliding_window": 64,
+            },
+        ),
+        (
+            "empty_window_sinks",
+            {
+                "seqlen_q": 256,
+                "seqlen_kv": 64,
+                "sliding_window": 64,
+                "use_sinks": True,
+            },
+        ),
+        (
+            "persistent_empty_window_sinks",
+            {
+                "persistent": True,
+                "seqlen_q": 256,
+                "seqlen_kv": 64,
+                "sliding_window": 64,
+                "use_sinks": True,
+            },
+        ),
+    ):
+        cases.append(
+            {
+                "family": "attention_dense",
+                "case_id": f"attention_dense_gfx950_lse_{label}",
+                "arch": "gfx950",
+                "build": _harness().build_attention_dense(
+                    "gfx950",
+                    emit_lse=True,
+                    **overrides,
+                ),
+            }
+        )
+
+    # gfx942 has one shared epilogue for both grids; cover each grid with and
+    # without keyless rows (the harness has no gfx942 dense builder).
+    from kernels.gfx942.attention_dense import (
+        Gfx942AttentionDenseSpec,
+        build_attention_dense as build_gfx942_dense,
+    )
+
+    gfx942_base = dict(
+        batch=1,
+        seqlen_q=512,
+        seqlen_kv=512,
+        num_query_heads=8,
+        num_kv_heads=2,
+        head_size=128,
+        dtype="bf16",
+        emit_lse=True,
+    )
+    for label, overrides in (
+        ("ordinary", {}),
+        ("persistent", {"persistent": True, "num_persistent": 304}),
+        ("empty_window", {"seqlen_q": 256, "seqlen_kv": 64, "sliding_window": 64}),
+        (
+            "persistent_empty_window",
+            {
+                "persistent": True,
+                "num_persistent": 304,
+                "seqlen_q": 256,
+                "seqlen_kv": 64,
+                "sliding_window": 64,
+            },
+        ),
+    ):
+        spec = Gfx942AttentionDenseSpec(**{**gfx942_base, **overrides})
+        cases.append(
+            {
+                "family": "attention_dense",
+                "case_id": f"attention_dense_gfx942_lse_{label}",
+                "arch": "gfx942",
+                "build": lambda spec=spec: build_gfx942_dense(spec, arch="gfx942"),
+            }
+        )
 
     prev = os.environ.get("ROCKE_CPP_STRICT")
     os.environ["ROCKE_CPP_STRICT"] = "1"
