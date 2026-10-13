@@ -178,8 +178,8 @@
         #endif
     #endif
     #define ROCPRIM_IS_CDNA4() __builtin_amdgcn_processor_is("gfx950")
-    #define ROCPRIM_IS_CDNA3()                                                              \
-        (__builtin_amdgcn_processor_is("gfx942") || __builtin_amdgcn_processor_is("gfx950") \
+    #define ROCPRIM_IS_CDNA3()                    \
+        (__builtin_amdgcn_processor_is("gfx942")  \
          || __builtin_amdgcn_processor_is("gfx9-4-generic"))
     #define ROCPRIM_IS_CDNA2() (__builtin_amdgcn_processor_is("gfx90a"))
     #define ROCPRIM_IS_CDNA1() (__builtin_amdgcn_processor_is("gfx908"))

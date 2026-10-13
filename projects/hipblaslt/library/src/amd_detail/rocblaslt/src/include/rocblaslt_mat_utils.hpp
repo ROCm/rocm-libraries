@@ -34,23 +34,25 @@
 #include <limits>
 
 /*******************************************************************************
- * Validate Workspace Size
+ * Clamp Workspace Size
  * Kernels and helper kernels address the workspace with 32-bit byte offsets
- * and buffer sizes, so a larger workspace cannot be used.
+ * and buffer sizes, so a larger workspace cannot be used. A workspace size or
+ * limit is a ceiling, so larger values (e.g. SIZE_MAX for "no limit") are
+ * clamped.
  ******************************************************************************/
 constexpr size_t rocblaslt_max_workspace_bytes = std::numeric_limits<uint32_t>::max();
 
-inline rocblaslt_status validateWorkspaceSize(const char* func, size_t workspaceBytes)
+inline size_t clampWorkspaceSize(const char* func, size_t workspaceBytes)
 {
     if(workspaceBytes <= rocblaslt_max_workspace_bytes)
-        return rocblaslt_status_success;
-    log_error(func,
+        return workspaceBytes;
+    log_hints(func,
               "workspace size",
               workspaceBytes,
-              "exceeds the maximum of",
+              "clamped to the maximum of",
               rocblaslt_max_workspace_bytes,
               "bytes");
-    return rocblaslt_status_invalid_value;
+    return rocblaslt_max_workspace_bytes;
 }
 
 inline bool isValidOrderForDatatype(hipDataType datatype, hipblasLtOrder_t order)
