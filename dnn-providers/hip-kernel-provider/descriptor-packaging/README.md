@@ -294,6 +294,11 @@ entry is an independent process labeled `unit_test;hip-kernel-provider;host`, pl
 tier labels `HKP_PACK_CTEST_CATEGORIES_YAML` assigns it; the installed twin carries the
 same labels as the build-tree entry.
 
+Every entry, controls included, unsets `GTEST_SHARD_INDEX` and `GTEST_TOTAL_SHARDS` through
+`ENVIRONMENT_MODIFICATION`. CI shards a component by exporting them for the whole ctest
+run, and a census that inherited them would have the other shards' cases sharded out and
+fail. A census is therefore run in full on every shard, which costs seconds.
+
 ```bash
 ctest --test-dir <build>/dnn-providers/hip-kernel-provider \
   --no-tests=error -V -R '^hip-kernel-provider-hkp-census-<arch>-<suite>$'

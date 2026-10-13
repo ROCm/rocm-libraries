@@ -1968,6 +1968,16 @@ function(_hkp_add_census_test _name _target _filter _environment _pass_regex)
     endif()
     list(APPEND _merged_environment ${_environment})
 
+    # A census must see the whole suite: the listener refuses sharded-out cases, so the
+    # GTEST_SHARD_INDEX / GTEST_TOTAL_SHARDS that CI exports for the whole ctest run (TheRock's
+    # test_runner.py, which shards hipkernelprovider with GTest only) would fail every shard
+    # on the cases the other one ran.
+    # ENVIRONMENT cannot remove an inherited variable, ENVIRONMENT_MODIFICATION can. The
+    # local rebinding is deliberate: _hkp_record_census_install_entry reads it from this
+    # scope, so the installed twin unsets the same variables.
+    set(TEST_ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
+        "GTEST_SHARD_INDEX=unset:" "GTEST_TOTAL_SHARDS=unset:")
+
     _hkp_record_census_install_entry("${_name}" "${_target}" "${_filter}"
                                      "${_merged_environment}" "${_pass_regex}")
 
@@ -1979,15 +1989,11 @@ function(_hkp_add_census_test _name _target _filter _environment _pass_regex)
         LABELS "unit_test;hip-kernel-provider;host"
         TIMEOUT 300)
 
-    # PATH prepends (Windows ASAN runtime / ROCm / build DLL dirs) go through
-    # ENVIRONMENT_MODIFICATION so the runtime PATH is extended rather than replaced, which
-    # a literal PATH= entry in ENVIRONMENT cannot do. It needs its own guard: it is
-    # Windows-only under BUILD_ADDRESS_SANITIZER, while TEST_ENVIRONMENT is also defined
-    # for both THEROCK_SANITIZER ASAN flavours.
-    if(DEFINED TEST_ENVIRONMENT_MODIFICATION)
-        set_tests_properties("${_name}" PROPERTIES
-            ENVIRONMENT_MODIFICATION "${TEST_ENVIRONMENT_MODIFICATION}")
-    endif()
+    # ENVIRONMENT_MODIFICATION carries the sharding unsets above and, where defined, the
+    # PATH prepends (Windows ASAN runtime / ROCm / build DLL dirs), which extend the
+    # runtime PATH rather than replace it as a literal PATH= entry in ENVIRONMENT would.
+    set_tests_properties("${_name}" PROPERTIES
+        ENVIRONMENT_MODIFICATION "${TEST_ENVIRONMENT_MODIFICATION}")
 
     if(_pass_regex)
         set_tests_properties("${_name}" PROPERTIES
