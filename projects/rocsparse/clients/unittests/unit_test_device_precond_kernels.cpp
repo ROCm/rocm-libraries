@@ -556,7 +556,28 @@ namespace
             // Row 5 of this pattern has no diagonal, so analysis records that pivot.
             EXPECT_EQ(pivot_st, rocsparse_status_zero_pivot);
             EXPECT_EQ(pivot, static_cast<rocsparse_int>(5));
-            expect_close(to_host(dval), host_csrilu0<T>(pattern, host_val, boost_mode));
+            const auto got = to_host(dval);
+            expect_close(got, host_csrilu0<T>(pattern, host_val, boost_mode));
+            if(boost_mode == 0)
+            {
+                // Entries worked out by hand, so a mistake copied into both the
+                // kernel and host_csrilu0 still fails. Diagonals are 4 and the
+                // off-diagonals 0.1; the first rows only have a diagonal to the
+                // right, so each lower entry is 0.1 / 4 and no row is updated.
+                const auto expect_entry = [&](int32_t pos, double want) {
+                    ASSERT_LT(static_cast<size_t>(pos), got.size());
+                    EXPECT_NEAR(part_re(got[static_cast<size_t>(pos)]), want, 10 * close_tol<T>())
+                        << "entry " << pos;
+                    EXPECT_NEAR(part_im(got[static_cast<size_t>(pos)]), 0.0, close_tol<T>())
+                        << "entry " << pos;
+                };
+                expect_entry(pattern.row_ptr[1], 0.025);
+                expect_entry(pattern.row_ptr[1] + 1, 4.0);
+                expect_entry(pattern.row_ptr[2], 0.025);
+                expect_entry(pattern.row_ptr[3], 0.025);
+                expect_entry(pattern.row_ptr[m - 1], 0.025);
+                expect_entry(pattern.row_ptr[m] - 1, 4.0);
+            }
         }
 
         EXPECT_EQ(rocsparse_csrilu0_clear(handle, info), rocsparse_status_success);
@@ -1330,6 +1351,52 @@ namespace
                                                    buffer);
     }
 
+    // Exact ILU(0) of a sorted CSR matrix, stored in place (unit L below, U on
+    // and above the diagonal). The iterative kernels converge to this.
+    template <typename T>
+    std::vector<T> host_exact_ilu0(const std::vector<rocsparse_int>& row_ptr,
+                                   const std::vector<rocsparse_int>& col_ind,
+                                   std::vector<T>                    val)
+    {
+        const size_t m = row_ptr.size() - 1;
+        for(size_t i = 0; i < m; ++i)
+        {
+            for(rocsparse_int p = row_ptr[i]; p < row_ptr[i + 1] && col_ind[p] < (rocsparse_int)i;
+                ++p)
+            {
+                const size_t  k = static_cast<size_t>(col_ind[p]);
+                rocsparse_int d = -1;
+                for(rocsparse_int q = row_ptr[k]; q < row_ptr[k + 1]; ++q)
+                {
+                    if(col_ind[q] == (rocsparse_int)k)
+                        d = q;
+                }
+                val[p] = val[p] / val[d];
+                for(rocsparse_int q = p + 1; q < row_ptr[i + 1]; ++q)
+                {
+                    for(rocsparse_int r = row_ptr[k]; r < row_ptr[k + 1]; ++r)
+                    {
+                        if(col_ind[r] == col_ind[q])
+                            val[q] = val[q] - val[p] * val[r];
+                    }
+                }
+            }
+        }
+        return val;
+    }
+
+    template <typename T>
+    double max_abs_diff(const std::vector<T>& a, const std::vector<T>& b)
+    {
+        double e = 0.0;
+        for(size_t i = 0; i < a.size(); ++i)
+        {
+            e = std::max(e, std::abs(part_re(a[i]) - part_re(b[i])));
+            e = std::max(e, std::abs(part_im(a[i]) - part_im(b[i])));
+        }
+        return e;
+    }
+
     // dense == false builds a tridiagonal (integer mean nnz per row <= 2).
     // Otherwise a dense matrix, whose integer mean nnz per row equals m.
     void run_itilu0(rocsparse_handle     handle,
@@ -1356,7 +1423,8 @@ namespace
         device_vector<rocsparse_int> drow{row_ptr};
         device_vector<rocsparse_int> dcol{col_ind};
         device_vector<double>        dval{val};
-        device_vector<double>        dilu{val.size()};
+        // ilu0 is also the starting iterate (L0 = lower(ilu0), U0 = upper(ilu0)).
+        device_vector<double> dilu{val};
         ASSERT_TRUE(drow.ptr && dcol.ptr && dval.ptr && dilu.ptr);
 
         size_t           buffer_size = 0;
@@ -1437,10 +1505,17 @@ namespace
         ASSERT_EQ(factor.size(), val.size());
         for(size_t i = 0; i < factor.size(); ++i)
             EXPECT_TRUE(std::isfinite(factor[i])) << i;
-        // Row 0 of both generators starts with the diagonal. Two sweeps of a
-        // diagonally dominant matrix leave that pivot near 4.
-        if(m <= 8)
-            EXPECT_NEAR(factor[0], 4.0, 0.5);
+        {
+            // Two sweeps do not reach ILU(0) on the larger dense matrices, but
+            // they must land closer to it than the starting matrix does, and
+            // on the small ones they are very close.
+            const auto   exact   = host_exact_ilu0<double>(row_ptr, col_ind, val);
+            const double err_in  = max_abs_diff(val, exact);
+            const double err_out = max_abs_diff(factor, exact);
+            EXPECT_LT(err_out, err_in) << "m=" << m;
+            if(m <= 8)
+                EXPECT_LT(err_out, 1.0e-4) << "m=" << m;
+        }
 
         if(query_history)
         {
@@ -1451,8 +1526,15 @@ namespace
                       rocsparse_status_success);
             EXPECT_GT(niter, 0);
             EXPECT_LE(niter, nmaxiter);
-            for(rocsparse_int i = 0; i < niter * 2 && static_cast<size_t>(i) < hist.size(); ++i)
-                EXPECT_TRUE(std::isfinite(hist[static_cast<size_t>(i)])) << i;
+            // The residual norms follow the niter correction norms.
+            if(niter >= 2)
+            {
+                const double first = hist[static_cast<size_t>(niter)];
+                const double last  = hist[static_cast<size_t>(niter) * 2 - 1];
+                EXPECT_TRUE(std::isfinite(first));
+                EXPECT_TRUE(std::isfinite(last));
+                EXPECT_LT(last, first);
+            }
         }
     }
 
@@ -1479,7 +1561,7 @@ namespace
         device_vector<rocsparse_int> drow{row_ptr};
         device_vector<rocsparse_int> dcol{col_ind};
         device_vector<T>             dval{val};
-        device_vector<T>             dilu{(size_t)nnz};
+        device_vector<T>             dilu{val};
         ASSERT_TRUE(drow.ptr && dcol.ptr && dval.ptr && dilu.ptr);
 
         size_t buffer_size = 0;
@@ -1525,8 +1607,10 @@ namespace
             EXPECT_TRUE(std::isfinite(part_re(factor[i]))) << "re " << i;
             EXPECT_TRUE(std::isfinite(part_im(factor[i]))) << "im " << i;
         }
-        EXPECT_NEAR(part_re(factor[0]), 4.0, 0.5);
-        EXPECT_NEAR(part_im(factor[0]), 0.0, close_tol<T>());
+        const auto   exact   = host_exact_ilu0<T>(row_ptr, col_ind, val);
+        const double err_out = max_abs_diff(factor, exact);
+        EXPECT_LT(err_out, max_abs_diff(val, exact));
+        EXPECT_LT(err_out, 1.0e-4);
     }
 
     const rocsparse_int k_itilu_options = rocsparse_itilu0_option_stopping_criteria

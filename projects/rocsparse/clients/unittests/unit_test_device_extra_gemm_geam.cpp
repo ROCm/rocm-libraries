@@ -481,6 +481,24 @@ namespace
                           rocsparse_status_success);
             }
             ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+
+            // I * I = I for every transpose / conjugate variant tested here.
+            const auto hrow = to_host(Cp);
+            const auto hcol = to_host(Cc);
+            ASSERT_GE(hrow.size(), size_t{3});
+            ASSERT_GE(hcol.size(), size_t{2});
+            EXPECT_EQ(hrow[0], I{0});
+            EXPECT_EQ(hrow[1], I{1});
+            EXPECT_EQ(hrow[2], I{2});
+            EXPECT_EQ(hcol[0], J{0});
+            EXPECT_EQ(hcol[1], J{1});
+            std::vector<char> raw(2 * sizeof(T));
+            ASSERT_EQ(hipMemcpy(raw.data(), Cv.ptr, raw.size(), hipMemcpyDeviceToHost), hipSuccess);
+            for(size_t i = 0; i < 2; ++i)
+            {
+                EXPECT_NEAR(as_float(raw.data() + i * sizeof(T), dt), 1.f, 1.e-2f)
+                    << "C[" << i << "]";
+            }
         }
         else if(expect != rocsparse_status_success)
         {

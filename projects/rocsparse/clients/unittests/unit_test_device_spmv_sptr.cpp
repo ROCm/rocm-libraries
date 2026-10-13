@@ -1566,6 +1566,10 @@ TEST_F(SptrsvDispatch, scalar_mismatch)
     if(numeric_ran)
         expect_filled_f64(yh.ptr, 3, 1.0);
 
+    // Device pointer mode with a scalar type that differs from the compute type
+    // only exercises that conversion branch and its status. The library takes
+    // the scalar from handle->alpha there, not from alpha_d, so y is not a
+    // valid oracle for this call (the host-mode call above is the numeric one).
     ASSERT_EQ(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_device),
               rocsparse_status_success);
     ASSERT_TRUE(run_sptrsv(handle,
