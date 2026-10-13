@@ -31,6 +31,7 @@ target_sources(tensilelite-host
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/DataTypes_Float6.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/DataTypes_Float8_BFloat8.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/DataTypes_Half.hpp"
+                "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/DataTypes_Int4.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/DataTypes_Int8.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/DataTypes_Int8x4.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/DataTypes_XFloat32.hpp"
