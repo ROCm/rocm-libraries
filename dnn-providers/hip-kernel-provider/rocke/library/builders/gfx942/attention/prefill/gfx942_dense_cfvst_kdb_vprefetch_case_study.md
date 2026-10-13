@@ -138,6 +138,18 @@ The complete experiment can be summarized as follows:
 ```
 To obtain results on 8 shapes, we run the ablation on 8 shapes and pick necessary fields.
 
+#### Benchmark Environment and Provenance
+
+| Component | Configuration |
+|---|---|
+| Hardware target | gfx942, 304 CUs |
+| Benchmarked source commit | `39416d4e229e4c70daf52f4902cd0cc8df72751d` |
+| ROCm wheel stack | 10.0.0 |
+| HIP version | 7.15.26333 |
+| Python | 3.12.3 |
+| PyTorch | 2.13.0+rocm10.0.0 |
+| Triton | 3.8.0+git4cff872c.rocm10.0.0 |
+
 #### Test configuration
 
 The default benchmark configuration used by the harness is:

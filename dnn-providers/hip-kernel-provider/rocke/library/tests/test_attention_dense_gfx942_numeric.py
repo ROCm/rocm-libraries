@@ -1027,10 +1027,10 @@ def test_cfvst_pipeline_strict_numeric(dtype, persistent, sq, skv):
         )
 
 
-# Every knob supports_attention_dense accepts on the opt-in bf16 D128 CFVST path,
-# each with and without the K-double-buffer + V-prefetch pipeline. The tuning sweep
-# crosses use_cfvst with exactly these one-knob points, so each one it can emit is
-# validated here: (id, (Hq, Hkv), Skv, persistent, knobs).
+# Representative BF16 D128 CFVST numeric tests covering selected tile,
+# scheduling, output-store, and persistent-grid configurations, with and
+# without KDB/VPF. This is not an exhaustive sweep of supported knobs.
+# Each row is (id, (Hq, Hkv), Skv, persistent, knobs).whe
 _CFVST_KNOB_ROWS = [
     ("bn32", (16, 4), 512, False, {"block_n": 32}),
     ("bm128", (16, 4), 512, False, {"block_m": 128}),
