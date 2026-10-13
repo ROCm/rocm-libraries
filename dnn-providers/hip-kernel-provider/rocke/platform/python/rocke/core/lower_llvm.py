@@ -39,6 +39,9 @@ from typing import Dict, FrozenSet, List, NamedTuple, Optional, Set, Tuple
 
 from .codegen_policy import codegen_policy_for_kernel
 from .ir import (
+    _FENCE_ORDERINGS,
+    _FENCE_SCOPES,
+    _FLAG_STORE_ORDERINGS,
     BF16,
     F32,
     F16,
@@ -54,6 +57,7 @@ from .ir import (
     Type,
     Value,
     VectorType,
+    _sync_attr,
     require_streaming_arch,
     split_loc,
 )
@@ -298,21 +302,16 @@ def _detect_llvm_flavor() -> str:
     Loading and querying are owned by runtime.comgr, which caches the result
     for its loaded handle. ROCm package versions and compiler executables on
     PATH are not evidence about that compiler. If COMGR cannot be loaded or
-    queried, retain the llvm22 offline default; callers can pin a flavor with
-    ROCKE_LLVM_FLAVOR or the lowering API's llvm_flavor argument.
+    queried, raise; offline callers must pin a flavor with ROCKE_LLVM_FLAVOR
+    or the lowering API's llvm_flavor argument.
     """
     env = os.environ.get("ROCKE_LLVM_FLAVOR", "").strip().lower()
     if env in LLVM_FLAVORS:
         return env
-    try:
-        from ..runtime.comgr import loaded_compiler_info
+    from ..runtime.comgr import _require_compiler_info
 
-        info = loaded_compiler_info()
-        if info is not None and info.llvm_version is not None:
-            return _flavor_for_llvm(info.llvm_version[0])
-    except Exception:  # noqa: BLE001 - preserve best-effort automatic detection
-        pass
-    return LLVM_FLAVOR_LLVM22
+    info = _require_compiler_info()
+    return _flavor_for_llvm(info.llvm_version[0])
 
 
 def _resolve_llvm_flavor() -> str:
@@ -1139,6 +1138,16 @@ def _param_llvm_type(p: Param) -> str:
         if ovr == "global":
             return "ptr addrspace(1)"
     return _llvm_type(p.type)
+
+
+def _llvm_syncscope(scope: str) -> str:
+    """Render a fence / flag-op scope as an LLVM ``syncscope`` clause.
+
+    ``system`` is LLVM's default scope and has no textual clause.
+    """
+    if scope == "system":
+        return ""
+    return f' syncscope("{scope}")'
 
 
 def _escape_llvm_asm_string(s: str) -> str:
@@ -2949,6 +2958,56 @@ class _Lowerer:
             f"  {op.result.name} = atomicrmw {rmw_op} ptr addrspace(1) {gep}, "
             f"{elem_ty} {self._operand(val)} {ordering}{md}"
         )
+
+    def _op_memref_fence(self, op: Op) -> None:
+        """Lower ``memref.fence`` to an LLVM ``fence`` at the op's scope."""
+        scope = _sync_attr(op, "scope", _FENCE_SCOPES)
+        ordering = _sync_attr(op, "ordering", _FENCE_ORDERINGS)
+        self._current().emit(f"  fence{_llvm_syncscope(scope)} {ordering}")
+
+    def _op_memref_global_flag_store(self, op: Op) -> None:
+        """Lower ``memref.global_flag_store`` to a scoped ``store atomic i32``."""
+        ptr, idx, val = op.operands
+        scope = _sync_attr(op, "scope", _FENCE_SCOPES)
+        ordering = _sync_attr(op, "ordering", _FLAG_STORE_ORDERINGS)
+        gep = self._fresh("gep")
+        self._current().emit(
+            f"  {gep} = getelementptr inbounds i32, ptr addrspace(1) "
+            f"{self._operand(ptr)}, i32 {self._operand(idx)}"
+        )
+        self._current().emit(
+            f"  store atomic i32 {self._operand(val)}, ptr addrspace(1) {gep}"
+            f"{_llvm_syncscope(scope)} {ordering}, align 4"
+        )
+
+    def _op_memref_global_flag_wait_eq(self, op: Op) -> None:
+        """Lower ``memref.global_flag_wait_eq`` to a self-contained spin loop.
+
+        The loop re-issues an ``acquire`` atomic load until the flag matches;
+        an atomic load cannot be hoisted out of the loop, and the acquire
+        orders every later global load after the observed flag value.
+        """
+        ptr, idx, expect = op.operands
+        scope = _sync_attr(op, "scope", _FENCE_SCOPES)
+        gep = self._fresh("gep")
+        cur = self._current()
+        cur.emit(
+            f"  {gep} = getelementptr inbounds i32, ptr addrspace(1) "
+            f"{self._operand(ptr)}, i32 {self._operand(idx)}"
+        )
+        spin = self._new_block("flag.wait")
+        cur.emit(f"  br label %{spin.label}")
+        cur.terminated = True
+        val = self._fresh("flag")
+        hit = self._fresh("flag.hit")
+        spin.emit(
+            f"  {val} = load atomic i32, ptr addrspace(1) {gep}"
+            f"{_llvm_syncscope(scope)} acquire, align 4"
+        )
+        spin.emit(f"  {hit} = icmp eq i32 {val}, {self._operand(expect)}")
+        done = self._new_block("flag.done")
+        spin.emit(f"  br i1 {hit}, label %{done.label}, label %{spin.label}")
+        spin.terminated = True
 
     def _op_memref_global_atomic_add_pk_bf16(self, op: Op) -> None:
         """Lower the packed-bf16 atomic add via a generic ``atomicrmw fadd``

@@ -17,6 +17,8 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 * [Conv] Added gfx950 patch-embedding kernels (fp16/bf16), gfx950 TF32 kernels for dense
   and depthwise forward/backward-data and dense backward-weights, and gfx1250 depthwise
   backward-weights kernels (fp16/bf16) to the `ConvHipConv` solver (hipconv v0.3.2).
+* [Conv] Added a gfx1250 dense backward-weights kernel (fp16/bf16) to the `ConvHipConv`
+  solver (hipconv v0.4.0).
 
 ### Changed
 * [Reduce] `miopenGetReductionWorkspaceSize` and `miopenGetReductionIndicesSize` now reject tensors
@@ -34,6 +36,9 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 * [Conv] Fixed a `ConvHipConv` crash on gfx1250 for grouped convolutions with more than
   65535 group-batch tiles, and an LDS race in its gfx1250 direct kernel
   (hipconv v0.3.2).
+* [Conv] Fixed `ConvHipConv` losing its tuned config on a perf-db reload, which could fail
+  execution with "not enough workspace for direct kernel" after an exhaustive Find. Records
+  now carry the hipconv minor version, and records from another version are discarded.
 
 ## MIOpen 3.6.1 for ROCm 10.1.0
 
