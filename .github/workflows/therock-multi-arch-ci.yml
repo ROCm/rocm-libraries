@@ -207,7 +207,7 @@ jobs:
         {
           "repository": "${{ github.repository }}",
           "ref": "${{ github.sha }}",
-          "extra_cmake_options": "-DTHEROCK_FLAG_HIPKERNELPROVIDER_ENABLE_ROCKE=ON"
+          "extra_cmake_options": "-DTHEROCK_FLAG_HIPDNN_ENABLE_SDPA=ON -DTHEROCK_FLAG_HIPDNN_ENABLE_KERNEL_INGESTOR=ON -DTHEROCK_FLAG_HIPKERNELPROVIDER_ENABLE_ROCKE=ON"
         }
 
   linux_build_and_test:
@@ -227,7 +227,7 @@ jobs:
       rocm_package_version: ${{ needs.setup.outputs.rocm_package_version }}
       rocm_deb_package_version: ${{ needs.setup.outputs.rocm_deb_package_version }}
       rocm_rpm_package_version: ${{ needs.setup.outputs.rocm_rpm_package_version }}
-      test_type: ${{ needs.configure.outputs.test_type }}
+      test_type: standard
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
       # Empty string when run_all_tests=true triggers full test run in downstream workflow
       changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.test_projects }}
@@ -253,7 +253,7 @@ jobs:
       build_config: ${{ needs.setup.outputs.windows_build_config }}
       test_labels: ${{ needs.setup.outputs.windows_test_labels }}
       rocm_package_version: ${{ needs.setup.outputs.rocm_package_version }}
-      test_type: ${{ needs.configure.outputs.test_type }}
+      test_type: standard
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
       # Empty string when run_all_tests=true triggers full test run in downstream workflow
       changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.test_projects }}
