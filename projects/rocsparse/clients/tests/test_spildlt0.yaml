@@ -67,7 +67,7 @@ Tests:
 # rocsparse_spildlt0 is the only public entry point that reaches csrildlt0, and
 # it also drives the csrildlt0_copy_diag launch which had the same grid.y issue.
 - name: spildlt0_large_batch_count
-  category: quick
+  category: pre_checkin
   function: spildlt0
   precision: *single_precision
   M_N:
@@ -77,7 +77,7 @@ Tests:
   formatA: [rocsparse_format_csr]
   matrix: [rocsparse_matrix_random]
   indextype: *i32
-  batch_count: [65536]
+  batch_count: [70000]
 
 - name: spildlt0
   category: quick

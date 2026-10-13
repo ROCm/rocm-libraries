@@ -126,11 +126,12 @@ Tests:
   batch_count: [8]
 
 # AISPARSE-690: grid.y is clamped and the kernels grid-stride over the batch.
-# Instance 65535 is reached only by the stride loop. batch_count stays at 65536
-# until assign_async is clamped too (AISPARSE-697). The BSR entry checks launch
-# success only: the random BSR generator always reports a symbolic pivot.
+# batch_count is past the device grid.y limit, so the last instances are reached
+# only by the stride loop. pre_checkin, because the host reference factorizes
+# every batch. The BSR entry checks launch success only: the random BSR
+# generator always reports a symbolic pivot.
 - name: spic0_large_batch_count
-  category: quick
+  category: pre_checkin
   function: spic0
   precision: *single_precision
   M_N:
@@ -141,10 +142,10 @@ Tests:
   formatA: [rocsparse_format_csr]
   matrix: [rocsparse_matrix_random]
   indextype: *i32
-  batch_count: [65536]
+  batch_count: [70000]
 
 - name: spic0_large_batch_count
-  category: quick
+  category: pre_checkin
   function: spic0
   precision: *single_precision
   M_N:
@@ -156,7 +157,7 @@ Tests:
   formatA: [rocsparse_format_bsr]
   matrix: [rocsparse_matrix_random]
   indextype: *i32
-  batch_count: [65536]
+  batch_count: [70000]
 
 - name: spic0_bad_arg
   category: pre_checkin
