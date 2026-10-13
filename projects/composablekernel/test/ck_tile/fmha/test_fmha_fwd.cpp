@@ -416,19 +416,19 @@ TEST(TestCkTileFmhaFwd, QrTdmLdsArenaPrefill)
 // 75 at bm0=64), so the remap of the bhsd and bshd tile indices is not the
 // identity. Per-batch effective lengths keep the round-robin order and return
 // early from the blocks past each batch's seqlen_q.
-class BatchXcdRemap
+class BatchXCDRemap
     : public TestWithParam<std::tuple<bool, std::tuple<std::vector<int>, std::vector<int>>>>
 {
 };
 
 INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaFwd,
-                         BatchXcdRemap,
+                         BatchXCDRemap,
                          Combine(Bool(),
                                  Values(std::tuple{std::vector<int>{}, std::vector<int>{}},
                                         std::tuple{std::vector<int>{300, 64, 1},
                                                    std::vector<int>{300, 100, 7}})));
 
-TEST_P(BatchXcdRemap, DataTypeConfig)
+TEST_P(BatchXCDRemap, DataTypeConfig)
 {
     auto [perm, eff_lens]          = GetParam();
     auto [q_eff_lens, kv_eff_lens] = eff_lens;

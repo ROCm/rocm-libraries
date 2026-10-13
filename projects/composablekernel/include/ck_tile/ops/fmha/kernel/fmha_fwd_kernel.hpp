@@ -1590,18 +1590,19 @@ struct FmhaFwdKernel
             return kargs.cu_seqlen_q_ptr == nullptr && kargs.cu_seqlen_k_ptr == nullptr;
     }
 
-    // Block L is dispatched to XCD L % kNumXcds, which scatters consecutive ids
+    // Block L is dispatched to XCD L % kNumXCDs, which scatters consecutive ids
     // over every L2. Remap them to contiguous per-XCD segments, the bijection of
     // GemmSpatiallyLocalTilePartitioner::RemapXCD in branch-free form: segment x
-    // starts at x * per + min(x, rem) and holds per + (x < rem) ids.
-    CK_TILE_DEVICE static index_t RemapXcd(index_t linear_id)
+    // starts at x * short_len + min(x, tall_xcds) and holds short_len + 1 ids on
+    // the first tall_xcds XCDs, short_len on the others.
+    CK_TILE_DEVICE static index_t RemapXCD(index_t linear_id)
     {
-        constexpr index_t kNumXcds = CK_TILE_FMHA_FWD_NUM_XCDS;
-        const index_t n_total      = gridDim.x * gridDim.y * gridDim.z;
-        const index_t per          = n_total / kNumXcds;
-        const index_t rem          = n_total - per * kNumXcds;
-        const index_t xcd          = linear_id % kNumXcds;
-        return xcd * per + min(xcd, rem) + linear_id / kNumXcds;
+        constexpr index_t kNumXCDs = CK_TILE_FMHA_FWD_NUM_XCDS;
+        const index_t num_blocks   = gridDim.x * gridDim.y * gridDim.z;
+        const index_t short_len    = num_blocks / kNumXCDs;
+        const index_t tall_xcds    = num_blocks - short_len * kNumXCDs;
+        const index_t xcd          = linear_id % kNumXCDs;
+        return xcd * short_len + min(xcd, tall_xcds) + linear_id / kNumXCDs;
     }
 #endif
 
@@ -1748,9 +1749,9 @@ struct FmhaFwdKernel
 
 #if CK_TILE_FMHA_FWD_NUM_XCDS
                 // The m-tiles of one (batch, head) are consecutive in linear_id
-                // and read the same K/V; keep them on one XCD (see RemapXcd).
+                // and read the same K/V; keep them on one XCD (see RemapXCD).
                 if(HasUniformWork(kargs))
-                    linear_id = RemapXcd(linear_id);
+                    linear_id = RemapXCD(linear_id);
 #endif
 
                 const index_t i_batch = linear_id / blocks_per_batch;
@@ -1826,7 +1827,7 @@ struct FmhaFwdKernel
                 if(HasUniformWork(kargs) && gridDim.y > 1)
                 {
                     const index_t linear_id =
-                        RemapXcd(blockIdx.x + gridDim.x * (blockIdx.y + gridDim.y * blockIdx.z));
+                        RemapXCD(blockIdx.x + gridDim.x * (blockIdx.y + gridDim.y * blockIdx.z));
 
                     const index_t rest = linear_id / static_cast<index_t>(gridDim.y);
                     i_block            = linear_id - rest * static_cast<index_t>(gridDim.y);
