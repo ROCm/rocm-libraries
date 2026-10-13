@@ -2615,7 +2615,7 @@ class Solution(collections.abc.Mapping):
          and state["_ScheduleIterAlg"] == 3:
         reject(state, printRejectionReason, "Complex WMMA de-interleave does not support ScheduleIterAlg=3")
         return
-      if state["InterleaveAlpha"]:
+      if state["InterleaveAlpha"] == 1:
         reject(state, printRejectionReason, "Matrix instruction doesn't support InterleaveAlpha")
         return
       if state["ProblemType"]["DataType"].isInt8():
@@ -3536,6 +3536,21 @@ class Solution(collections.abc.Mapping):
         (state["HalfPLRB"] and not (state["UnrollMajorLDSB"] or state["enableLDSTrB"])):
         reject(state, printRejectionReason, "Currently HalfPLR does not support packing (need UnrollMajorLDS or use LDSTrInst)")
         return
+      # The non-LDSTr local-read path (Components/LocalRead.py "without enableLDSTr"
+      # branch) generates addresses over a full double-buffered span (2 * numVgprValuPerBlock)
+      # and relies on getHalfPLRGroups()/getHalfPLRValuStr() to remap them onto HalfPLR's
+      # reduced 1.5-block (3 half-group) vgpr allocation. That remap only accounts for a
+      # 2-group active window per call, so any read whose offset reaches a full block
+      # (gIdx == 2) indexes past the 2-element group list and crashes with IndexError.
+      # This has only been observed (and reproduced) for datatypes wider than 2 bytes
+      # (e.g. F32), where enableLDSTr is never available (isLDSTrEnabled has no arm for
+      # numBytes > 2) and the vgpr spans involved are large enough to cross a full-block
+      # boundary; narrower (<=2-byte) non-LDSTr HalfPLR configs packing via UnrollMajorLDS
+      # alone are unaffected and remain supported (e.g. sk_halfplr_f8gemm_tdm.yaml).
+      if (state["HalfPLRA"] and not state["enableLDSTrA"] and numBytesA > 2) or \
+        (state["HalfPLRB"] and not state["enableLDSTrB"] and numBytesB > 2):
+        reject(state, printRejectionReason, "HalfPLR requires enableLDSTr for datatypes wider than 2 bytes; the non-LDSTr local-read path does not correctly bound HalfPLR's vgpr group window for wider types")
+        return
       if state["InnerUnroll"] != 1:
         reject(state, printRejectionReason, "Currently HalfPLR only supports InnerUnroll = 1")
         return
@@ -3649,7 +3664,7 @@ class Solution(collections.abc.Mapping):
         "ScheduleGlobalRead": state["ScheduleGlobalRead"] == 1,
         "ScheduleLocalWrite": state["ScheduleLocalWrite"] == 1,
         "GlobalReadPerMfma": state["GlobalReadPerMfma"] == 1,
-        "InterleaveAlpha": not state["InterleaveAlpha"],
+        "InterleaveAlpha": state["InterleaveAlpha"] != 1,
         "DirectToLds": not state["DirectToLds"],
         "UseSgprForGRO": state["UseSgprForGRO"] == -1,
         "UseInstOffsetForGRO": not state["UseInstOffsetForGRO"],

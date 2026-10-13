@@ -196,9 +196,9 @@ matching how ``hipblaslt-bench`` selects. The benchmarking effort can be adjuste
    export HIPBLASLT_TUNING_FLUSH_ICACHE=<0|1>           (Default value is: 1)
    export HIPBLASLT_TUNING_BUDGET_MS_PER_SHAPE=<value>  (Default value is: 300000, five minutes)
 
-Each candidate is measured the way ``hipblaslt-bench`` measures one: ``HIPBLASLT_TUNING_COLD_ITERS``
-untimed launches, then ``HIPBLASLT_TUNING_HOT_ITERS`` launches timed as a single span and reported as
-the per-launch mean. Every candidate gets the full measurement, so there is no cheap ranking round
+Each candidate is measured, and the winner picked, by the same code ``hipblaslt-bench`` uses:
+``HIPBLASLT_TUNING_COLD_ITERS`` untimed launches, then ``HIPBLASLT_TUNING_HOT_ITERS`` launches timed as
+a single span and reported as the per-launch mean, the fastest candidate winning. Every candidate gets the full measurement, so there is no cheap ranking round
 that could discard the real winner before it has been timed properly.
 
 Candidates are measured against rotating copies of the tensors, so that successive launches do not
@@ -208,8 +208,9 @@ fastest. ``HIPBLASLT_TUNING_ROTATING_MB`` is the memory the rotation may use, an
 
 Rotation is declined for problems whose buffer sizes cannot be established from the problem
 description alone, such as broadcast inputs with a zero batch stride and swizzled ``A`` or ``B``.
-Those shapes are still tuned, just with their inputs cache-resident. Very small problems rotate over
-fewer blocks than the memory budget would allow, since each block costs setup work per candidate.
+Those shapes are still tuned, just with their inputs cache-resident. As in ``hipblaslt-bench``, a
+problem never rotates over more blocks than a candidate has launches to cycle through them, so very
+small problems use fewer blocks than the memory budget would allow.
 
 The instruction cache is invalidated between timed launches, the same way and with the same kernel
 the bench client uses, so a candidate is not timed with its own code already resident. It costs
@@ -273,11 +274,12 @@ that measures every candidate is kept however long it took, because a complete s
 answer regardless of its duration.
 
 The time ``hipblaslt-bench`` prints for a kernel is its own benchmark, separate from the tuner's
-measurement, so the two can disagree between kernels that are within noise of each other. The tuner
-caps how many rotation blocks it uses, leaves the scale vectors and a forward bias unrotated, and
-always times with HIP events; ``hipblaslt-bench`` times with HIP events only with
-``--use_gpu_timer`` and otherwise uses a synchronized CPU timer. Treat ``hipblaslt-bench``'s benchmark
-as the reference when a shape matters enough to check by hand.
+measurement, so the two can disagree between kernels that are within noise of each other. Both run
+the same measurement code, but on different buffers: the tuner rotates copies of your tensors in
+memory it owns, leaves the scale vectors and a forward bias unrotated, and rotates ``C`` even when
+``beta`` is zero. The tuner always times with HIP events; ``hipblaslt-bench`` times with HIP events
+only with ``--use_gpu_timer`` and otherwise uses a synchronized CPU timer. Treat
+``hipblaslt-bench``'s benchmark as the reference when a shape matters enough to check by hand.
 
 Benchmarking never writes to your buffers. Candidates run against memory the library allocates for
 the purpose, and only the winner runs on the real output.

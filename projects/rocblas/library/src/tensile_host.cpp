@@ -339,6 +339,14 @@ namespace
         {
             return Tensile::LazyLoadingInit::gfx1153;
         }
+        else if(deviceString.find("gfx1170") != std::string::npos)
+        {
+            return Tensile::LazyLoadingInit::gfx1170;
+        }
+        else if(deviceString.find("gfx1171") != std::string::npos)
+        {
+            return Tensile::LazyLoadingInit::gfx1171;
+        }
         else if(deviceString.find("gfx1200") != std::string::npos)
         {
             return Tensile::LazyLoadingInit::gfx1200;
@@ -1284,10 +1292,9 @@ bool useHipBLASLt(const RocblasContractionProblem<Ti, To, Tc>& prob)
     {
         int arch = rocblas_internal_get_arch(prob.handle);
 
-        // gfx950: hipBLASLt is used for fp16/bf16/fp64/int8
-        // TODO remove after all types are supported
-        if constexpr(sizeof(Ti) != 2 && !std::is_same<Ti, double>::value
-                     && !std::is_same<Ti, int8_t>::value)
+        // gfx950: Tensile remains the default only for SGEMM (real f32).
+        // TODO remove after SGEMM is supported
+        if constexpr(std::is_same<Ti, float>::value)
         {
             if(arch == 950)
                 return false;

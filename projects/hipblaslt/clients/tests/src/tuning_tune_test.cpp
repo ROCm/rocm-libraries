@@ -66,6 +66,8 @@ extern "C" size_t hipblaslt_tuning_scratch_plan_for_test(void*       handle,
                                                          size_t      workspaceBytes,
                                                          size_t      rotatingBytes,
                                                          size_t      capBytes,
+                                                         int32_t     coldIters,
+                                                         int32_t     hotIters,
                                                          uint64_t*   values,
                                                          size_t      count);
 
@@ -164,10 +166,9 @@ namespace
         setenv("HIPBLASLT_TUNING_FLUSH_ICACHE", "1", 1);
 
         // Large enough to rotate over several blocks rather than collapsing to
-        // one. runGemm asks for a 32 MiB workspace, and the workspace is part of
-        // the per-block footprint, so a budget below that silently disables
-        // rotation and leaves the seeding and per-block pointer arithmetic
-        // untested. Still far below the 512 MiB default.
+        // one, so the seeding and per-block pointer arithmetic are exercised;
+        // the launch counts above bound the rotation at five blocks. Still far
+        // below the 512 MiB default.
         setenv("HIPBLASLT_TUNING_ROTATING_MB", "160", 1);
 
         hipblaslt_tuning_reset_for_test();
@@ -2100,9 +2101,11 @@ namespace
         hipblasLtEpilogue_t epilogue   = HIPBLASLT_EPILOGUE_DEFAULT;
         int32_t             biasStride = 0;
 
-        size_t workspaceBytes = 0;
-        size_t rotatingBytes  = 0;
-        size_t cap            = std::numeric_limits<size_t>::max();
+        size_t  workspaceBytes = 0;
+        size_t  rotatingBytes  = 0;
+        size_t  cap            = std::numeric_limits<size_t>::max();
+        int32_t coldIters      = 1000;
+        int32_t hotIters       = 1000;
     };
 
     struct Plan
@@ -2198,6 +2201,8 @@ namespace
                                                        c.workspaceBytes,
                                                        c.rotatingBytes,
                                                        c.cap,
+                                                       c.coldIters,
+                                                       c.hotIters,
                                                        v,
                                                        10)
                     >= 10;
@@ -2365,18 +2370,26 @@ namespace
         EXPECT_EQ(plan.total, bare.total + withWorkspace.workspaceBytes);
     }
 
-    // However small the problem, the number of rotation blocks stays bounded:
-    // each costs a solve and a copy per candidate.
-    TEST_F(TuningScratchPlan_pre_checkin, RotationIsBoundedForTinyProblems)
+    // However small the problem, there are never more rotation blocks than the
+    // larger of a candidate's cold and timed launch counts, as in hipblaslt-bench:
+    // each block costs a solve per candidate, and blocks past the last launch
+    // would go unused.
+    TEST_F(TuningScratchPlan_pre_checkin, RotationIsBoundedByTheLaunchCount)
     {
         PlanCase tiny;
         tiny.m = tiny.n = tiny.k = 16;
         tiny.rotatingBytes       = size_t(1) << 30;
+        tiny.coldIters           = 200;
+        tiny.hotIters            = 300;
 
         Plan plan;
         ASSERT_TRUE(planFor(tiny, &plan));
         ASSERT_TRUE(plan.usable);
-        EXPECT_EQ(plan.blocks, 128u);
+        EXPECT_EQ(plan.blocks, 300u);
+
+        tiny.coldIters = 400;
+        ASSERT_TRUE(planFor(tiny, &plan));
+        EXPECT_EQ(plan.blocks, 400u);
     }
 
     // A layout whose span does not fit in size_t is declined rather than
