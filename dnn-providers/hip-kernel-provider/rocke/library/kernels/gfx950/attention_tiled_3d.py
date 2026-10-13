@@ -772,9 +772,9 @@ def build_unified_attention_3d_tiled(
             # page of the sequence; the in_prefix mask discards their tokens.
             seq_pages = b.div(b.add(seq_len, b.const_i32(BS - 1)), b.const_i32(BS))
         tokens_per_call = KV_HALVES_PER_CALL // HD
-        assert BS % tokens_per_call == 0, (
-            f"page-id loader needs whole calls per page (BS={BS}, HD={HD})"
-        )
+        assert (
+            BS % tokens_per_call == 0
+        ), f"page-id loader needs whole calls per page (BS={BS}, HD={HD})"
         calls_per_block = BS // tokens_per_call
         lane_tok = b.div(lane_half_base, b.const_i32(HD))
         lane_dim = b.mod(lane_half_base, b.const_i32(HD))

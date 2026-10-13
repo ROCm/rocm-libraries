@@ -2599,7 +2599,9 @@ class TestAttentionHelpers(unittest.TestCase):
                         spec = au._tiled_3d_spec_from_problem(problem)
                         ll = lower_kernel_to_llvm(build(spec, arch="gfx942"))
                         lds = int(
-                            re.search(r"addrspace\(3\) global \[(\d+) x i8\]", ll).group(1)
+                            re.search(
+                                r"addrspace\(3\) global \[(\d+) x i8\]", ll
+                            ).group(1)
                         )
                         self.assertLessEqual(lds, 64 * 1024)
 
