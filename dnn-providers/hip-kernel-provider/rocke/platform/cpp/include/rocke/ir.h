@@ -372,7 +372,7 @@ typedef enum rocke_opcode
     ROCKE_OP_TILE_DS_SWIZZLE,
     ROCKE_OP_TILE_MOV_DPP8,
     ROCKE_OP_TILE_QUAD_PERM,
-    ROCKE_OP_TILE_DPP_ROW_MIRROR,
+    ROCKE_OP_TILE_DPP_XOR,
     ROCKE_OP_TILE_WAVE_REDUCE,
     ROCKE_OP_TILE_READLANE,
     ROCKE_OP_TILE_WRITELANE,
@@ -1262,18 +1262,22 @@ rocke_value_t* rocke_b_permlane16(rocke_ir_builder_t* b,
  * fixed at 15, 15 by the lowerers. */
 rocke_value_t*
     rocke_b_quad_perm(rocke_ir_builder_t* b, rocke_value_t* data, int p0, int p1, int p2, int p3);
-/* dpp_row_mirror: half=false is DPP row_mirror (0x140; lane i of each 16-lane
- * row reads lane 15-i), half=true is row_half_mirror (0x141; lane i of each
- * 8-lane half-row reads lane 7-i). i32 data only. Wave-size-independent (16
- * divides 32 and 64); base DPP; row/bank masks fixed at 15, 15 by the
- * lowerers. After two quad_perm xor stages, half mirror then mirror completes
- * a 16-lane commutative reduction in every lane. Valid only for a commutative
- * combine (lanes see operands in different orders) with every lane of the row
- * active, for any combine including a sum: each lane also relays its
- * partners' partial results, so an inactive lane leaves the active lanes with
- * wrong totals. The lowerers set bound_ctrl, which only makes a source lane
- * disabled in EXEC read 0. See IRBuilder.dpp_row_mirror. */
-rocke_value_t* rocke_b_dpp_row_mirror(rocke_ir_builder_t* b, rocke_value_t* data, bool half);
+/* dpp_xor (tile.dpp_xor): lane i of each 16-lane row reads lane i ^ xor_mask
+ * of the same row; xor_mask in 1..15, i32 data only. Low-level op behind
+ * rocke_b_warp_shuffle_xor_dpp. The IR carries only the mask; the lowerers
+ * pick the DPP control word per target (rocke_i_dpp_xor_ctrl): 0x160|mask
+ * (row_xmask) on gfx11/gfx12/gfx1250; on gfx9 CDNA 1/2/3 -> quad_perm,
+ * 7 -> row_half_mirror (lane i of each 8-lane half-row reads 7-i == i^7),
+ * 8 -> row_ror:8, 15 -> row_mirror (lane i reads 15-i == i^15), and any
+ * other mask fails to lower with ROCKE_ERR_VALUE. See IRBuilder.dpp_xor. */
+rocke_value_t* rocke_b_dpp_xor(rocke_ir_builder_t* b, rocke_value_t* data, int xor_mask);
+/* warp_shuffle_xor_dpp: the kernel-facing VALU XOR shuffle (CUDA
+ * __shfl_xor_sync within a 16-lane row): lane l gets v from lane l ^ lane_xor,
+ * lane_xor in 1..15, one rocke_b_dpp_xor (f32 bitcast through i32, as
+ * rocke_b_warp_shuffle_xor). Per 16-lane row, never crosses a row; every lane
+ * of the row must be active for a butterfly reduction. See
+ * IRBuilder.warp_shuffle_xor_dpp for the mask -> instruction table. */
+rocke_value_t* rocke_b_warp_shuffle_xor_dpp(rocke_ir_builder_t* b, rocke_value_t* v, int lane_xor);
 rocke_value_t* rocke_b_permlane64(rocke_ir_builder_t* b, rocke_value_t* src);
 rocke_value_t* rocke_b_alignbyte(rocke_ir_builder_t* b,
                                  rocke_value_t* a,

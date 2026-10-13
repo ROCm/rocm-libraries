@@ -3564,76 +3564,190 @@ class TestNewTargetIntrinsics(unittest.TestCase):
         with self.assertRaises(ValueError):
             b.warp_shuffle_xor_quad(b.const_i32(1), 4)
 
-    # ---- dpp_row_mirror ----
-    def test_dpp_row_mirror_encodes_ctrl(self):
-        # half=True is row_half_mirror (0x141 == 321), half=False row_mirror
-        # (0x140 == 320). One kernel per value, asserting the expected control
-        # AND the absence of the other, so a swapped mapping fails here.
-        call = (
-            "call i32 @llvm.amdgcn.update.dpp.i32("
-            "i32 1, i32 1, i32 {}, i32 15, i32 15, i1 true)"
-        )
-        for half, want, other in ((True, 321, 320), (False, 320, 321)):
-            with self.subTest(half=half):
-                ll = self._lower(
-                    f"rmirror_{int(half)}",
-                    lambda b: b.dpp_row_mirror(b.const_i32(1), half=half),
-                )
-                self.assertIn(call.format(want), ll)
-                self.assertNotIn(f"i32 {other}, i32 15, i32 15", ll)
+    # ---- dpp_xor / warp_shuffle_xor_dpp ----
+    _DPP_CALL = (
+        "call i32 @llvm.amdgcn.update.dpp.i32("
+        "i32 1, i32 1, i32 {}, i32 15, i32 15, i1 true)"
+    )
 
-    def test_dpp_row_mirror_emits_hip_builtin(self):
+    def test_warp_shuffle_xor_dpp_gfx9_encodings(self):
+        """gfx9 CDNA has no ``row_xmask``: each mask with a register-only
+        encoding lowers to it (quad_perm 1/2/3, row_half_mirror 7, row_ror:8,
+        row_mirror 15), one kernel per (arch, mask), with exactly one DPP call
+        so a swapped table entry fails here."""
+        want = {1: 177, 2: 78, 3: 27, 7: 321, 8: 296, 15: 320}
+        for arch in ("gfx942", "gfx950"):
+            for mask, ctrl in want.items():
+                with self.subTest(arch=arch, mask=mask):
+                    ll = self._lower(
+                        f"dppx_{arch}_{mask}",
+                        lambda b: b.warp_shuffle_xor_dpp(b.const_i32(1), mask),
+                        arch=arch,
+                    )
+                    self.assertIn(self._DPP_CALL.format(ctrl), ll)
+                    self.assertEqual(
+                        ll.count("call i32 @llvm.amdgcn.update.dpp.i32("), 1
+                    )
+
+    def test_warp_shuffle_xor_dpp_row_xmask_targets_unchanged(self):
+        """Targets with ``row_xmask`` (gfx11, gfx12, gfx1250) keep
+        ``0x160 | mask`` for every mask, as before the gfx9 table existed."""
+        for arch in ("gfx1151", "gfx1201", "gfx1250"):
+            for mask in range(1, 16):
+                with self.subTest(arch=arch, mask=mask):
+                    ll = self._lower(
+                        f"dppx_{arch}_{mask}",
+                        lambda b: b.warp_shuffle_xor_dpp(b.const_i32(1), mask),
+                        arch=arch,
+                    )
+                    self.assertIn(self._DPP_CALL.format(0x160 | mask), ll)
+
+    def test_warp_shuffle_xor_dpp_emits_hip_builtin(self):
         from rocke.core.ir import IRBuilder
         from rocke.core.lower_hip import lower_kernel_to_hip
 
-        for half, want, other in ((True, 321, 320), (False, 320, 321)):
-            with self.subTest(half=half):
-                b = IRBuilder(f"rmirror_hip_{int(half)}")
-                b.dpp_row_mirror(b.const_i32(1), half=half)
-                hip = lower_kernel_to_hip(b.kernel)
+        for arch, want in (("gfx942", 321), ("gfx950", 321), ("gfx1201", 359)):
+            with self.subTest(arch=arch):
+                b = IRBuilder(f"dppx_hip_{arch}")
+                b.warp_shuffle_xor_dpp(b.const_i32(1), 7)
+                hip = lower_kernel_to_hip(b.kernel, arch=arch)
                 self.assertIn(
                     f"__builtin_amdgcn_update_dpp(c1, c1, {want}, 15, 15, 1)", hip
                 )
-                self.assertNotIn(f", {other}, 15, 15, 1)", hip)
 
-    def _row_mirror_butterfly(self, vals, active=None):
-        """Lane model of ``xor 1, xor 2, half mirror, mirror`` as an add.
+    def test_warp_shuffle_xor_dpp_f32_goes_through_i32(self):
+        ll = self._lower(
+            "dppx_f32", lambda b: b.warp_shuffle_xor_dpp(b.const_f32(1.0), 15)
+        )
+        self.assertIn("bitcast float", ll)
+        self.assertIn("i32 320, i32 15, i32 15, i1 true)", ll)
+        self.assertIn("to float", ll)
 
-        Driven by the control words the builder actually emits, so it checks
-        the docstring claims against the encoding, not a restatement of them.
-        ``active[i]`` False models lane ``i`` disabled in EXEC for the whole
-        sequence: it never updates, and with ``bound_ctrl`` a lane reading it
-        gets ``0``.
-        """
+    def test_warp_shuffle_xor_dpp_gfx9_rejects_unencodable_mask(self):
+        """A mask with no register-only encoding on gfx9 CDNA fails loudly in
+        every lowerer, naming the supported masks and the LDS fallback; the
+        same mask lowers on a ``row_xmask`` target."""
+        import importlib.util
 
-        def src_lane(ctrl, lane):
-            if ctrl == 0x140:  # row_mirror: lane i of a row reads 15 - i
-                return (lane & ~15) | (15 - (lane & 15))
-            if ctrl == 0x141:  # row_half_mirror: lane i of a half-row reads 7 - i
-                return (lane & ~7) | (7 - (lane & 7))
-            self.assertTrue(0 <= ctrl <= 255, ctrl)  # quad_perm selectors
+        from rocke.core.ir import DPP_XOR_CTRL_NO_ROW_XMASK
+        from rocke.core.ir_serialize import serialize
+        from rocke.core.lower_hip import lower_kernel_to_hip
+        from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
+
+        have_cpp = importlib.util.find_spec("rocke_engine") is not None
+        msg = r"no register-only DPP encoding on gfx942.*1, 2, 3, 7, 8 and 15.*warp_shuffle_xor"
+        for mask in range(1, 16):
+            if mask in DPP_XOR_CTRL_NO_ROW_XMASK:
+                continue
+            with self.subTest(mask=mask):
+                b = self._builder(f"dppx_bad_{mask}")
+                b.warp_shuffle_xor_dpp(b.const_i32(1), mask)
+                b.ret()
+                for lower in (_lower_kernel_to_llvm_python, lower_kernel_to_hip):
+                    with self.assertRaisesRegex(ValueError, msg):
+                        lower(b.kernel, arch="gfx942")
+                if have_cpp:
+                    from rocke.core.backend import _lower_via_cpp_engine
+
+                    with self.assertRaisesRegex(RuntimeError, msg):
+                        _lower_via_cpp_engine(serialize(b.kernel), "gfx942", None)
+                _lower_kernel_to_llvm_python(b.kernel, arch="gfx1201")
+
+    def test_dpp_xor_lowering_rejects_bad_mask(self):
+        """A raw ``xor_mask`` outside 1..15 used to be masked with ``& 0xF``
+        (0 and 16 both became row_xmask:0). Now every lowerer rejects it, on
+        every target."""
+        from rocke.core.lower_hip import lower_kernel_to_hip
+        from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
+
+        for bad in (0, 16, -1, 0x141):
+            for arch in ("gfx950", "gfx1201"):
+                with self.subTest(mask=bad, arch=arch):
+                    b = self._builder(f"dppx_raw_{bad}")
+                    value = b.dpp_xor(b.const_i32(1), 1)
+                    value.op.attrs["xor_mask"] = bad
+                    for lower in (_lower_kernel_to_llvm_python, lower_kernel_to_hip):
+                        with self.assertRaisesRegex(
+                            ValueError, r"xor_mask must be in 1\.\.15"
+                        ):
+                            lower(b.kernel, arch=arch)
+
+    def test_warp_shuffle_xor_dpp_builder_rejects_invalid_input(self):
+        b = self._builder("dppx_builder_bad")
+        for bad in (0, 16, -1):
+            with self.subTest(lane_xor=bad):
+                with self.assertRaisesRegex(ValueError, "must be 1..15"):
+                    b.warp_shuffle_xor_dpp(b.const_i32(1), bad)
+                with self.assertRaisesRegex(ValueError, "must be 1..15"):
+                    b.dpp_xor(b.const_i32(1), bad)
+        # The mask is never coerced: True would silently become mask 1.
+        for bad in (True, 1.0, "1"):
+            with self.subTest(lane_xor=bad):
+                with self.assertRaisesRegex(TypeError, "must be an int"):
+                    b.warp_shuffle_xor_dpp(b.const_i32(1), bad)
+                with self.assertRaisesRegex(TypeError, "must be an int"):
+                    b.dpp_xor(b.const_i32(1), bad)
+        with self.assertRaises(ValueError):
+            b.dpp_xor(b.const_f32(1.0), 1)
+        with self.assertRaises(ValueError):
+            b.warp_shuffle_xor_dpp(b.const_i64(1), 1)
+
+    @staticmethod
+    def _dpp_src_lane(ctrl, lane):
+        """Source lane of ``lane`` under a DPP control word: the hardware
+        definitions of each pattern, independent of the XOR claim."""
+        row, i = lane & ~15, lane & 15
+        if ctrl <= 0xFF:  # quad_perm: lane 4q + j reads 4q + sel[j]
             return (lane & ~3) | ((ctrl >> (2 * (lane & 3))) & 3)
+        if ctrl == 0x128:  # row_ror:8: rotate the 16-lane row by 8
+            return row | ((i + 8) & 15)
+        if ctrl == 0x140:  # row_mirror: lane i reads 15 - i
+            return row | (15 - i)
+        if ctrl == 0x141:  # row_half_mirror: lane i of a half-row reads 7 - i
+            return (lane & ~7) | (7 - (lane & 7))
+        if 0x161 <= ctrl <= 0x16F:  # row_xmask
+            return row | (i ^ (ctrl & 15))
+        raise AssertionError(f"unmodelled DPP control {ctrl:#x}")
 
-        b = self._builder("rmirror_model")
-        x = b.const_i32(1)
-        ctrls = [
-            v.op.attrs["ctrl"]
-            for v in (
-                b.warp_shuffle_xor_quad(x, 1),
-                b.warp_shuffle_xor_quad(x, 2),
-                b.dpp_row_mirror(x, half=True),
-                b.dpp_row_mirror(x, half=False),
-            )
-        ]
+    def test_dpp_xor_every_encoding_is_exactly_xor(self):
+        """Every control word the lowerers pick, on every target, moves lane
+        ``i`` to read lane ``i ^ mask`` of its 16-lane row, in wave32 and
+        wave64. Driven by :func:`dpp_xor_ctrl` itself, so it checks the
+        table the lowerers use, not a restatement of it."""
+        from rocke.core.arch.target import ArchTarget
+        from rocke.core.ir import dpp_xor_ctrl
+
+        for gfx in ("gfx942", "gfx950", "gfx1151", "gfx1201", "gfx1250"):
+            arch = ArchTarget.from_gfx(gfx)
+            for mask in range(1, 16):
+                b = self._builder("dppx_model")
+                op = b.dpp_xor(b.const_i32(1), mask).op
+                try:
+                    ctrl = dpp_xor_ctrl(op, arch)
+                except ValueError:
+                    self.assertFalse(arch.has_dpp_row_xmask, (gfx, mask))
+                    continue
+                for lane in range(64):
+                    with self.subTest(gfx=gfx, mask=mask, lane=lane):
+                        self.assertEqual(self._dpp_src_lane(ctrl, lane), lane ^ mask)
+
+    def _xor_butterfly(self, masks, vals, active=None):
+        """Lane model of ``v = v + shuffle(v, m)`` for ``m`` in ``masks``,
+        through the gfx9 control words. ``active[i]`` False models lane ``i``
+        disabled in EXEC for the whole sequence: it never updates, and with
+        ``bound_ctrl`` a lane reading it gets ``0``."""
+        from rocke.core.ir import DPP_XOR_CTRL_NO_ROW_XMASK
+
         n = len(vals)
         if active is None:
             active = [True] * n
         cur = list(vals)
-        for ctrl in ctrls:
+        for m in masks:
+            ctrl = DPP_XOR_CTRL_NO_ROW_XMASK[m]
+            src = [self._dpp_src_lane(ctrl, i) for i in range(n)]
             cur = [
                 (
-                    cur[i]
-                    + (cur[src_lane(ctrl, i)] if active[src_lane(ctrl, i)] else 0)
+                    (cur[i] + (cur[src[i]] if active[src[i]] else 0))
                     if active[i]
                     else cur[i]
                 )
@@ -3641,96 +3755,54 @@ class TestNewTargetIntrinsics(unittest.TestCase):
             ]
         return cur
 
-    def test_dpp_row_mirror_butterfly_lane_model(self):
-        """``xor 1, xor 2, half mirror, mirror`` leaves each 16-lane row's sum
-        in every lane of that row, in wave32 and wave64, with every lane
-        active.
-
-        With floats it also checks that every lane of a row gets the same
-        bits: lanes combine their operands in different orders, which a
-        commutative add makes harmless.
-        """
+    def test_xor_butterfly_leaves_row_sum_in_every_lane(self):
+        """Masks that span all four lane-index bits (``1, 2, 7, 15`` or
+        ``1, 2, 8, 7``, both register-only on gfx9) leave each 16-lane row's
+        sum in every lane of that row, in wave32 and wave64."""
         import random
 
         rng = random.Random(0)
-        for wave in (32, 64):
-            for draw in (lambda: rng.randint(-1000, 1000), lambda: rng.uniform(-1, 1)):
-                for _ in range(50):
-                    vals = [draw() for _ in range(wave)]
-                    cur = self._row_mirror_butterfly(vals)
+        for masks in ((1, 2, 7, 15), (1, 2, 8, 7), (15, 7, 2, 1)):
+            for wave in (32, 64):
+                for _ in range(20):
+                    vals = [rng.randint(-1000, 1000) for _ in range(wave)]
+                    cur = self._xor_butterfly(masks, vals)
                     for row in range(wave // 16):
                         lanes = cur[16 * row : 16 * row + 16]
-                        self.assertEqual(len(set(lanes)), 1, (wave, row, lanes))
-                        self.assertAlmostEqual(
-                            lanes[0], sum(vals[16 * row : 16 * row + 16]), places=9
+                        self.assertEqual(
+                            set(lanes), {sum(vals[16 * row : 16 * row + 16])}
                         )
 
-    def test_dpp_row_mirror_butterfly_needs_every_lane_active(self):
-        """One inactive lane breaks the sum too, not just max/min/product.
-
-        ``bound_ctrl`` makes the inactive lane read as ``0``, but in a
-        butterfly every lane also relays its partners' partial sums, so the
-        active lanes lose more than the inactive lane's own value and end with
-        different, wrong totals. This pins the "every lane of the row active"
-        contract of :meth:`IRBuilder.dpp_row_mirror`.
-        """
+    def test_xor_butterfly_needs_every_lane_active(self):
+        """One inactive lane breaks the sum. ``bound_ctrl`` makes it read as
+        ``0``, but every lane also relays its partners' partial sums, so the
+        active lanes lose more than the inactive lane's own value and end
+        with different, wrong totals."""
         vals = list(range(1, 17))
         active = [lane != 2 for lane in range(16)]
-        cur = self._row_mirror_butterfly(vals, active)
+        cur = self._xor_butterfly((1, 2, 7, 15), vals, active)
         got = [cur[i] for i in range(16) if active[i]]
         want = sum(v for v, on in zip(vals, active) if on)
-        self.assertEqual(want, 133)
-        self.assertEqual((min(got), max(got)), (100, 133))
         self.assertNotEqual(set(got), {want})
 
-    def test_dpp_row_mirror_is_pure(self):
+    def test_dpp_xor_is_pure(self):
         from rocke.core.ir import is_pure_op_name
 
-        b = self._builder("rmirror_pure")
-        value = b.dpp_row_mirror(b.const_i32(1), half=False)
+        b = self._builder("dppx_pure")
+        value = b.dpp_xor(b.const_i32(1), 15)
         self.assertTrue(value.op.is_pure)
-        self.assertTrue(is_pure_op_name("tile.dpp_row_mirror"))
-
-    def test_dpp_row_mirror_rejects_non_i32(self):
-        b = self._builder("rmirror_bad")
-        with self.assertRaises(ValueError):
-            b.dpp_row_mirror(b.const_f32(1.0), half=False)
-
-    def test_dpp_row_mirror_rejects_non_bool_half(self):
-        # ``half`` picks the lane mapping, so only a real bool is accepted: a
-        # truthy/falsy stand-in such as "false" must not select one silently.
-        for bad in ("false", "True", None, 0, 1, 1.0):
-            with self.subTest(half=bad):
-                b = self._builder("rmirror_half")
-                with self.assertRaisesRegex(TypeError, "half must be a bool"):
-                    b.dpp_row_mirror(b.const_i32(1), half=bad)
-
-    def test_dpp_row_mirror_lowering_rejects_other_ctrl(self):
-        """Any control other than 0x140/0x141 is a different lane mapping
-        (0x142 is row_bcast:15, 0x40 a quad_perm); IR that skipped the
-        builder must fail in both lowerers instead of emitting it."""
-        from rocke.core.lower_hip import lower_kernel_to_hip
-        from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
-
-        for bad_ctrl in (0x142, 0x40, -1):
-            with self.subTest(ctrl=bad_ctrl):
-                b = self._builder(f"rmirror_ctrl_{bad_ctrl}")
-                value = b.dpp_row_mirror(b.const_i32(1), half=False)
-                value.op.attrs["ctrl"] = bad_ctrl
-                for lower in (_lower_kernel_to_llvm_python, lower_kernel_to_hip):
-                    with self.assertRaisesRegex(ValueError, r"ctrl must be 320 or 321"):
-                        lower(b.kernel)
+        self.assertTrue(is_pure_op_name("tile.dpp_xor"))
 
     def test_dpp_lowering_rejects_malformed_raw_op(self):
         """Raw IR that skipped the builder is rejected, never coerced, by both
         Python lowerers for both DPP ops: anything but one operand and one
         result is a ValueError (zero operands included, not a crash), a
-        missing ``ctrl`` is a KeyError, a non-``int`` one a TypeError
-        (``int()`` used to turn 320.9 into 320, ``"321"`` into 321 and
-        ``True`` into quad_perm control 1), and non-i32 data or a non-i32
-        result a ValueError (HIP would convert between ``int`` and ``float``
-        silently). The C++ twins return ROCKE_ERR_VALUE / _KEY / _TYPE
-        (``tests/core/future_intrinsic_lowering.cpp``)."""
+        missing ``ctrl`` / ``xor_mask`` is a KeyError, a non-``int`` one a
+        TypeError (``int()`` used to turn 320.9 into 320, ``"321"`` into 321
+        and ``True`` into quad_perm control 1 or xor mask 1), and non-i32 data
+        or a non-i32 result a ValueError (HIP would convert between ``int``
+        and ``float`` silently). The C++ twins return ROCKE_ERR_VALUE / _KEY /
+        _TYPE (``tests/core/future_intrinsic_lowering.cpp``)."""
         from rocke.core.ir import F32, I32
         from rocke.core.lower_hip import lower_kernel_to_hip
         from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
@@ -3738,15 +3810,18 @@ class TestNewTargetIntrinsics(unittest.TestCase):
         def i32_data(b):
             return [b.const_i32(1)]
 
-        for op_name, ctrl in (("tile.quad_perm", 177), ("tile.dpp_row_mirror", 0x140)):
-            ok = {"ctrl": ctrl}
+        for op_name, key, ctrl in (
+            ("tile.quad_perm", "ctrl", 177),
+            ("tile.dpp_xor", "xor_mask", 7),
+        ):
+            ok = {key: ctrl}
             cases = (
-                ("missing", i32_data, [I32], {}, KeyError, "missing 'ctrl'"),
+                ("missing", i32_data, [I32], {}, KeyError, f"missing '{key}'"),
                 (
                     "float",
                     i32_data,
                     [I32],
-                    {"ctrl": ctrl + 0.9},
+                    {key: ctrl + 0.9},
                     TypeError,
                     "must be an int",
                 ),
@@ -3754,11 +3829,11 @@ class TestNewTargetIntrinsics(unittest.TestCase):
                     "str",
                     i32_data,
                     [I32],
-                    {"ctrl": str(ctrl)},
+                    {key: str(ctrl)},
                     TypeError,
                     "must be an int",
                 ),
-                ("bool", i32_data, [I32], {"ctrl": True}, TypeError, "must be an int"),
+                ("bool", i32_data, [I32], {key: True}, TypeError, "must be an int"),
                 (
                     "f32_data",
                     lambda b: [b.const_f32(1.0)],

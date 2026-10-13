@@ -137,21 +137,22 @@ def require_streaming_arch(op_name: str, gfx: str) -> None:
         )
 
 
-def dpp_ctrl_attr(op: "Op") -> int:
-    """Return the validated ``ctrl`` of a one-operand i32 DPP op.
+def dpp_ctrl_attr(op: "Op", key: str = "ctrl") -> int:
+    """Return the validated int attribute ``key`` of a one-operand i32 DPP op.
 
-    Shared by both Python lowerers for ``tile.quad_perm`` and
-    ``tile.dpp_row_mirror``. The builders already guarantee all of this; the
-    lowerers check again because IR can reach them without a builder
-    (hand-built, deserialized, or rewritten by a pass). The checks, in order:
+    Shared by both Python lowerers for ``tile.quad_perm`` (``key="ctrl"``)
+    and ``tile.dpp_xor`` (``key="xor_mask"``, through :func:`dpp_xor_ctrl`).
+    The builders already guarantee all of this; the lowerers check again
+    because IR can reach them without a builder (hand-built, deserialized, or
+    rewritten by a pass). The checks, in order:
 
     * anything but exactly one operand and one result is a ``ValueError``;
     * non-i32 data or a non-i32 result is a ``ValueError`` (the DPP move is
       32-bit, f32 callers bitcast first, and HIP would otherwise convert
       between ``int`` and ``float`` silently);
-    * a missing ``ctrl`` is a ``KeyError``;
-    * a ``ctrl`` that is not exactly ``int`` (``bool``, ``float``, ``str``) is
-      a ``TypeError``; it is never coerced into a control word.
+    * a missing ``key`` is a ``KeyError``;
+    * a ``key`` value that is not exactly ``int`` (``bool``, ``float``,
+      ``str``) is a ``TypeError``; it is never coerced into a control word.
 
     The per-op range check stays with each lowerer. Mirrored in the C++
     lowerers (``lower_llvm/crosslane.cpp``, ``lower_hip/lower_hip_mma.cpp``),
@@ -167,11 +168,65 @@ def dpp_ctrl_attr(op: "Op") -> int:
         raise ValueError(f"{op.name} requires i32 data, got {data.type.name}")
     if op.result.type.name != "i32":
         raise ValueError(f"{op.name} requires an i32 result, got {op.result.type.name}")
-    if "ctrl" not in op.attrs:
-        raise KeyError(f"{op.name}: missing 'ctrl'")
-    ctrl = op.attrs["ctrl"]
-    if type(ctrl) is not int:
-        raise TypeError(f"{op.name}: ctrl must be an int, got {type(ctrl).__name__}")
+    if key not in op.attrs:
+        raise KeyError(f"{op.name}: missing '{key}'")
+    value = op.attrs[key]
+    if type(value) is not int:
+        raise TypeError(f"{op.name}: {key} must be an int, got {type(value).__name__}")
+    return value
+
+
+# DPP control word of each XOR mask that has a register-only (VALU) encoding
+# on a target without ``row_xmask`` -- the gfx9 CDNA family (gfx90a, gfx942,
+# gfx950). Each entry makes lane ``i`` of every 16-lane row read lane
+# ``i ^ mask`` of the same row, exactly, for any data:
+#
+# * 1, 2, 3: ``quad_perm`` (lane ``4q + j`` reads ``4q + (j ^ mask)``);
+# * 7: ``row_half_mirror`` (lane ``j`` of an 8-lane half-row reads ``7 - j``,
+#   and ``7 - j == j ^ 7`` for ``j`` in 0..7);
+# * 8: ``row_ror:8`` (rotating 16 lanes by 8 flips lane bit 3);
+# * 15: ``row_mirror`` (``15 - j == j ^ 15`` for ``j`` in 0..15).
+#
+# Every other mask in 1..15 needs ``row_xmask`` (gfx10 and later) or the LDS
+# path (``ds_swizzle``), so it is rejected on these targets. Mirrored in C++
+# (``rocke_i_dpp_xor_ctrl`` in ``core/ir/ir_flow.cpp``).
+DPP_XOR_CTRL_NO_ROW_XMASK = {
+    1: 0xB1,  # quad_perm [1, 0, 3, 2]
+    2: 0x4E,  # quad_perm [2, 3, 0, 1]
+    3: 0x1B,  # quad_perm [3, 2, 1, 0]
+    7: 0x141,  # row_half_mirror
+    8: 0x128,  # row_ror:8
+    15: 0x140,  # row_mirror
+}
+
+
+def dpp_xor_ctrl(op: "Op", arch) -> int:
+    """Return the DPP control word that lowers ``tile.dpp_xor`` on ``arch``.
+
+    Shared by both Python lowerers. ``arch`` is the
+    :class:`~rocke.core.arch.target.ArchTarget` being lowered for. The op is
+    validated as in :func:`dpp_ctrl_attr` (``xor_mask`` in place of
+    ``ctrl``), and ``xor_mask`` outside 1..15 is a ``ValueError``: the
+    partner would leave the 16-lane row. Then:
+
+    * with ``row_xmask`` (gfx10 and later, gfx1250 included) the control is
+      ``0x160 | xor_mask``, for every mask;
+    * without it (gfx9 CDNA) the control comes from
+      :data:`DPP_XOR_CTRL_NO_ROW_XMASK`; any other mask is a ``ValueError``
+      that names the supported masks and points at ``warp_shuffle_xor``.
+    """
+    mask = dpp_ctrl_attr(op, "xor_mask")
+    if not 1 <= mask <= 15:
+        raise ValueError(f"{op.name}: xor_mask must be in 1..15, got {mask}")
+    if arch.has_dpp_row_xmask:
+        return 0x160 | mask
+    ctrl = DPP_XOR_CTRL_NO_ROW_XMASK.get(mask)
+    if ctrl is None:
+        raise ValueError(
+            f"{op.name}: xor_mask {mask} has no register-only DPP encoding on "
+            f"{arch.gfx} (no row_xmask); masks 1, 2, 3, 7, 8 and 15 do. Use "
+            f"warp_shuffle_xor (ds_swizzle) for this mask"
+        )
     return ctrl
 
 
@@ -3368,23 +3423,34 @@ class IRBuilder:
         ).result
 
     def dpp_xor(self, data: Value, xor_mask: int) -> Value:
-        """``v_mov_b32_dpp`` ``row_xmask`` — cross-lane XOR permute on the
-        **VALU** (NOT the LDS port).
+        """Cross-lane XOR permute within each 16-lane DPP row, on the
+        **VALU** (NOT the LDS port). Low-level op behind
+        :meth:`warp_shuffle_xor_dpp`; kernels should call that.
 
         Lane ``L`` reads ``data`` from lane ``(L & ~0xF) | ((L & 0xF) ^
         xor_mask)`` — i.e. an XOR butterfly *within* each 16-lane DPP row.
-        ``xor_mask`` must be in 1..15 so the partner stays in the same row.
+        ``xor_mask`` must be an ``int`` in 1..15 so the partner stays in the
+        same row. Data must be ``i32``.
 
-        This is the RDNA (gfx11/gfx12) replacement for the gfx9/gfx95
-        :meth:`ds_swizzle_xor` softmax-reduction butterfly. ``ds_swizzle``
-        is an LDS-bus op that costs ``lgkmcnt`` and serialises on the LDS
-        port; ``row_xmask`` runs entirely in the VALU pipeline, and LLVM's
-        DPP-combine folds a single-use ``update.dpp`` + ``fmax``/``fadd``
-        into one ``v_max_f32_dpp`` / ``v_add_f32_dpp``. Lowered through
-        ``llvm.amdgcn.update.dpp.i32`` with ``dpp_ctrl = 0x160 | mask``
-        (the AMDGPU ``DPP_ROW_XMASK`` encoding). Data must be ``i32``."""
+        The IR op ``tile.dpp_xor`` carries only the mask; the lowerer picks
+        the DPP control word for the target (:func:`dpp_xor_ctrl`), always
+        through ``llvm.amdgcn.update.dpp.i32`` with row/bank masks ``15, 15``
+        and ``bound_ctrl`` set:
+
+        * targets with ``row_xmask`` (gfx11, gfx12, gfx1250): ``0x160 |
+          mask`` (the AMDGPU ``DPP_ROW_XMASK`` encoding), for every mask;
+        * gfx9 CDNA (gfx90a, gfx942, gfx950), which has no ``row_xmask``:
+          1, 2, 3 -> ``quad_perm``; 7 -> ``row_half_mirror``; 8 ->
+          ``row_ror:8``; 15 -> ``row_mirror``. Each is exactly XOR with that
+          mask. Any other mask fails to lower with a ``ValueError``; use
+          :meth:`warp_shuffle_xor` (``ds_swizzle``) for it.
+
+        ``ds_swizzle`` is an LDS-bus op that costs ``lgkmcnt`` and
+        serialises on the LDS port; DPP runs in the VALU pipeline."""
         if data.type.name != "i32":
             raise ValueError("dpp_xor requires i32 data")
+        if type(xor_mask) is not int:
+            raise TypeError(f"dpp_xor xor_mask must be an int, got {xor_mask!r}")
         if not (1 <= xor_mask <= 15):
             raise ValueError(
                 f"dpp_xor xor_mask must be 1..15 (intra-16-lane row), got {xor_mask}"
@@ -3413,8 +3479,7 @@ class IRBuilder:
 
         That is a property of the quad, not a claim about every target:
         the op still requires DPP-capable hardware. Base-DPP
-        ``quad_perm`` is available on CDNA, where the RDNA-only
-        ``row_xmask`` of :meth:`dpp_xor` is not.
+        ``quad_perm`` is available on CDNA, where ``row_xmask`` is not.
 
         The op carries no lane targeting -- the control word is broadcast
         to every quad in the wave, with row and bank masks fixed at
@@ -3435,62 +3500,12 @@ class IRBuilder:
             result_name_hint="qperm",
         ).result
 
-    def dpp_row_mirror(self, data: Value, half: bool) -> Value:
-        """In-row ``v_mov_b32_dpp`` mirror on the VALU.
-
-        ``half=False`` is ``row_mirror`` (DPP control ``0x140``): lane ``i``
-        of every 16-lane row reads lane ``15 - i`` of the same row.
-        ``half=True`` is ``row_half_mirror`` (``0x141``): lane ``i`` of every
-        8-lane half-row reads lane ``7 - i`` of the same half-row.
-
-        A mirror is not an XOR permutation, but for a commutative reduction
-        it is an equivalent butterfly stage once the narrower stages are
-        done: after the two :meth:`quad_perm` stages every lane of a quad
-        holds the quad's value, the half mirror pairs quad 0 with quad 1 of
-        each half-row, and the row mirror pairs the two half-rows. So
-        ``xor 1, xor 2, half mirror, mirror`` leaves the full 16-lane sum in
-        every lane, with no ``ds_swizzle`` (lane model:
-        ``TestNewTargetIntrinsics`` in ``tests/test_rocke.py``).
-
-        That recipe is only valid under two conditions. (1) The combine must
-        be commutative: different lanes see their operands in different
-        orders (lane 0 combines its half-row with the upper one, lane 15 the
-        upper with the lower), so a non-commutative combine gives different
-        values in different lanes. Floating-point add is commutative, so
-        every lane still gets the same bits. (2) Every lane of the row must
-        be active, for any combine, a sum included. In a butterfly each lane
-        also relays its partners' partial results, so an inactive lane drops
-        more than its own value and the active lanes end with different,
-        wrong totals. The lowerers emit ``bound_ctrl = 1``; that only makes
-        a source lane disabled in EXEC read ``0`` instead of keeping the old
-        value, it does not make the recipe tolerate inactive lanes.
-
-        Like :meth:`quad_perm` the mapping is wave-size-independent (16
-        divides 32 and 64), the op needs base DPP (available on CDNA), and
-        the row and bank masks are fixed at ``15, 15`` by the lowerers.
-
-        ``half`` must be a ``bool``: it selects the lane mapping, so a
-        truthy or falsy stand-in (``"false"``, ``None``, ``1``) is rejected
-        instead of silently picking one.
-        """
-        if type(half) is not bool:
-            raise TypeError(f"dpp_row_mirror: half must be a bool, got {half!r}")
-        if data.type.name != "i32":
-            raise ValueError("dpp_row_mirror requires i32 data")
-        ctrl = 0x141 if half else 0x140
-        return self._op(
-            "tile.dpp_row_mirror",
-            [data],
-            [I32],
-            attrs={"ctrl": ctrl},
-            result_name_hint="rmirror",
-        ).result
-
     def warp_shuffle_xor_quad(self, v: Value, xor_mask: int) -> Value:
         """XOR shuffle within a four-lane quad.
 
-        Masks 1 and 2 stay inside the quad and use :meth:`quad_perm`. Larger
-        masks require :meth:`warp_shuffle_xor`, which uses ``ds_swizzle``.
+        Masks 1 and 2 stay inside the quad and use :meth:`quad_perm`. For
+        other masks use :meth:`warp_shuffle_xor_dpp` (VALU) or
+        :meth:`warp_shuffle_xor` (``ds_swizzle``).
         """
         if xor_mask == 1:
             perm = [1, 0, 3, 2]
@@ -3753,17 +3768,47 @@ class IRBuilder:
         )
 
     def warp_shuffle_xor_dpp(self, v: Value, lane_xor: int) -> Value:
-        """VALU XOR shuffle (lane ``l`` gets ``v`` from lane ``l ^ lane_xor``)
-        via :meth:`dpp_xor` ``row_xmask`` — the RDNA replacement for the
-        :meth:`warp_shuffle_xor` ``ds_swizzle`` path.
+        """VALU XOR shuffle: lane ``l`` gets ``v`` from lane ``l ^ lane_xor``
+        (CUDA ``__shfl_xor_sync`` within a 16-lane row), on registers only,
+        with no LDS (``ds_swizzle``) traffic.
 
-        ``lane_xor`` must be in 1..15 (the XOR partner stays inside the
-        16-lane DPP row, which is exactly the WMMA 16-lane softmax
-        row-group). Runs on the VALU (no LDS port / ``lgkmcnt``); LLVM's
-        DPP-combine folds the single-use result into the consuming
-        ``v_max_f32``/``v_add_f32`` to give one ``v_*_f32_dpp`` per stage.
+        Emits one :meth:`dpp_xor` (``tile.dpp_xor``); the lowerer picks the
+        register-only DPP encoding of the mask for the target:
+
+        ============  ==========================  ======================
+        ``lane_xor``  gfx9 CDNA (gfx90a, gfx942,  gfx11, gfx12, gfx1250
+                      gfx950)
+        ============  ==========================  ======================
+        1             ``quad_perm [1,0,3,2]``     ``row_xmask:1``
+        2             ``quad_perm [2,3,0,1]``     ``row_xmask:2``
+        3             ``quad_perm [3,2,1,0]``     ``row_xmask:3``
+        7             ``row_half_mirror``         ``row_xmask:7``
+        8             ``row_ror:8``               ``row_xmask:8``
+        15            ``row_mirror``              ``row_xmask:15``
+        other 1..15   rejected at lowering        ``row_xmask:<mask>``
+        ============  ==========================  ======================
+
+        Every entry is exactly XOR with the mask, for any data. On gfx9 CDNA
+        a mask outside the table raises ``ValueError`` when the kernel is
+        lowered (the builder does not know the target); use
+        :meth:`warp_shuffle_xor` there, which goes through ``ds_swizzle``.
+
+        The shuffle works per 16-lane DPP row (4 rows in wave64, 2 in
+        wave32) and never crosses a row, so ``lane_xor`` must be an ``int``
+        in 1..15. A 16-lane all-reduce is ``v = v + shuffle(v, m)`` for ``m``
+        in ``1, 2, 7, 15`` (those masks span all four lane-index bits) or
+        ``1, 2, 4, 8`` on targets with ``row_xmask``. As in any butterfly,
+        every lane of the row must be active: each lane relays its
+        partners' partial results, so one inactive lane leaves wrong totals
+        in the active lanes (``bound_ctrl`` only makes a disabled source
+        lane read ``0``).
+
         Handles f32 by bitcasting through i32 (matching
         :meth:`warp_shuffle_xor`)."""
+        if type(lane_xor) is not int:
+            raise TypeError(
+                f"warp_shuffle_xor_dpp lane_xor must be an int, got {lane_xor!r}"
+            )
         if not (1 <= lane_xor <= 15):
             raise ValueError(
                 f"warp_shuffle_xor_dpp lane_xor must be 1..15, got {lane_xor}"
@@ -5357,7 +5402,6 @@ PURE_OP_NAMES = {
     "tile.ds_swizzle",
     "tile.mov_dpp8",
     "tile.quad_perm",
-    "tile.dpp_row_mirror",
     "tile.wave_reduce",
     "tile.readlane",
     "tile.writelane",

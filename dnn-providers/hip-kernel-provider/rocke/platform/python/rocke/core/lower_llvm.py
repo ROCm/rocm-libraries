@@ -60,6 +60,7 @@ from .ir import (
     _sync_attr,
     check_cluster_dims,
     dpp_ctrl_attr,
+    dpp_xor_ctrl,
     require_streaming_arch,
     split_loc,
 )
@@ -4126,20 +4127,23 @@ class _Lowerer:
         )
 
     def _op_tile_dpp_xor(self, op: Op) -> None:
-        """``v_mov_b32_dpp`` ``row_xmask`` XOR butterfly (VALU, not LDS).
+        """In-row XOR shuffle as one ``v_mov_b32_dpp`` (VALU, not LDS).
 
-        ``dpp_ctrl = 0x160 | mask`` is the AMDGPU ``DPP_ROW_XMASK``
-        encoding: within each 16-lane DPP row, lane ``L`` reads from lane
-        ``(L & 0xF) ^ mask``. ``row_mask``/``bank_mask`` are 0xF (all
-        rows/banks). ``bound_ctrl=true`` so every lane writes (the partner
-        is always in-row for mask 1..15, so no out-of-row fill happens).
-        Passing ``src`` as ``old`` makes single-use results fusable into
+        :func:`~rocke.core.ir.dpp_xor_ctrl` picks the DPP control word for
+        the target: ``0x160 | mask`` (``DPP_ROW_XMASK``) where ``row_xmask``
+        exists, else the base-DPP encoding of the mask on gfx9 CDNA
+        (``quad_perm`` / ``row_half_mirror`` / ``row_ror:8`` /
+        ``row_mirror``), and a ``ValueError`` for a mask with none. Within
+        each 16-lane DPP row, lane ``L`` reads from lane ``(L & 0xF) ^
+        mask``. ``row_mask``/``bank_mask`` are 0xF (all rows/banks).
+        ``bound_ctrl=true`` so every lane writes (the partner is always
+        in-row for mask 1..15, so no out-of-row fill happens). Passing
+        ``src`` as ``old`` makes single-use results fusable into
         ``v_max_f32_dpp`` / ``v_add_f32_dpp`` by the DPP-combine pass.
         """
+        dpp_ctrl = dpp_xor_ctrl(op, self._backend.arch)
         (data,) = op.operands
         self._need("update.dpp.i32")
-        mask = int(op.attrs["xor_mask"])
-        dpp_ctrl = 0x160 | (mask & 0xF)
         self._current().emit(
             f"  {op.result.name} = call i32 @llvm.amdgcn.update.dpp.i32("
             f"i32 {self._operand(data)}, i32 {self._operand(data)}, "
@@ -4162,28 +4166,6 @@ class _Lowerer:
         (data,) = op.operands
         if not 0 <= ctrl <= 255:
             raise ValueError(f"tile.quad_perm: ctrl must be in 0..255, got {ctrl}")
-        self._need("update.dpp.i32")
-        self._current().emit(
-            f"  {op.result.name} = call i32 @llvm.amdgcn.update.dpp.i32("
-            f"i32 {self._operand(data)}, i32 {self._operand(data)}, "
-            f"i32 {ctrl}, i32 15, i32 15, i1 true)"
-        )
-
-    def _op_tile_dpp_row_mirror(self, op: Op) -> None:
-        """Lower a DPP ``row_mirror`` (0x140) / ``row_half_mirror`` (0x141).
-
-        Only those two control words are legal. Reject anything else rather
-        than emit it: any other DPP control is a different, silently valid
-        lane mapping. As for ``tile.quad_perm``,
-        :func:`~rocke.core.ir.dpp_ctrl_attr` first rejects wrong arity,
-        non-i32 data or result, and a missing or non-``int`` ``ctrl``.
-        """
-        ctrl = dpp_ctrl_attr(op)
-        (data,) = op.operands
-        if ctrl not in (0x140, 0x141):
-            raise ValueError(
-                f"tile.dpp_row_mirror: ctrl must be 320 or 321, got {ctrl}"
-            )
         self._need("update.dpp.i32")
         self._current().emit(
             f"  {op.result.name} = call i32 @llvm.amdgcn.update.dpp.i32("

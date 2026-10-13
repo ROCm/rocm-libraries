@@ -27,6 +27,7 @@
  * getattr-dispatch raises immediately and we reproduce that same rejection.
  * Every opcode is registered in the dispatch table; none is dropped.
  */
+#include "rocke/arch_target.h"
 #include "rocke/ir.h"
 #include "rocke/ir_internal.h"
 #include "rocke/lower_hip.h"
@@ -366,12 +367,13 @@ static rocke_status_t rocke_h_op_tile_ds_swizzle_xor(rocke_h_lowerer_t* lw, cons
     return lw->status;
 }
 
-/* Validated ctrl of a one-operand i32 DPP op (tile.quad_perm,
- * tile.dpp_row_mirror); see ll_dpp_ctrl in lower_llvm/crosslane.cpp for the
- * checks and failure kinds. Call it before touching operands[0] or results[0].
- * The i32 data and result checks matter most here: HIP would convert between
- * int and float silently. */
-static int64_t h_dpp_ctrl(rocke_h_lowerer_t* lw, const rocke_op_t* op, const char* opname)
+/* Validated int attribute `key` ("ctrl" / "xor_mask") of a one-operand i32
+ * DPP op (tile.quad_perm, tile.dpp_xor); see ll_dpp_attr in
+ * lower_llvm/crosslane.cpp for the checks and failure kinds. Call it before
+ * touching operands[0] or results[0]. The i32 data and result checks matter
+ * most here: HIP would convert between int and float silently. */
+static int64_t
+    h_dpp_attr(rocke_h_lowerer_t* lw, const rocke_op_t* op, const char* opname, const char* key)
 {
     if(op->num_operands != 1 || op->num_results != 1)
         rocke_h_fail(lw,
@@ -394,17 +396,17 @@ static int64_t h_dpp_ctrl(rocke_h_lowerer_t* lw, const rocke_op_t* op, const cha
                      "%s requires an i32 result, got %s",
                      opname,
                      res->type ? res->type->name : "(null)");
-    const rocke_attr_value_t* v = rocke_attr_get(&op->attrs, "ctrl");
+    const rocke_attr_value_t* v = rocke_attr_get(&op->attrs, key);
     if(!v)
-        rocke_h_fail(lw, ROCKE_ERR_KEY, "%s: missing 'ctrl'", opname);
+        rocke_h_fail(lw, ROCKE_ERR_KEY, "%s: missing '%s'", opname, key);
     if(v->kind != ROCKE_ATTR_INT)
-        rocke_h_fail(lw, ROCKE_ERR_TYPE, "%s: ctrl must be an int", opname);
+        rocke_h_fail(lw, ROCKE_ERR_TYPE, "%s: %s must be an int", opname, key);
     return v->u.i;
 }
 
 static rocke_status_t rocke_h_op_tile_quad_perm(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
-    const int64_t ctrl = h_dpp_ctrl(lw, op, "tile.quad_perm");
+    const int64_t ctrl = h_dpp_attr(lw, op, "tile.quad_perm", "ctrl");
     const rocke_value_t* data = op->operands[0];
     const rocke_value_t* r = h_res(op);
     /* 0..255 is the whole legal range: ctrl packs four two-bit lane
@@ -423,17 +425,29 @@ static rocke_status_t rocke_h_op_tile_quad_perm(rocke_h_lowerer_t* lw, const roc
     return lw->status;
 }
 
-static rocke_status_t rocke_h_op_tile_dpp_row_mirror(rocke_h_lowerer_t* lw, const rocke_op_t* op)
+/* Python _op_tile_dpp_xor: per-target DPP control (rocke_i_dpp_xor_ctrl);
+ * see _op_tile_dpp_xor in lower_llvm/crosslane.cpp. */
+static rocke_status_t rocke_h_op_tile_dpp_xor(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
-    const int64_t ctrl = h_dpp_ctrl(lw, op, "tile.dpp_row_mirror");
+    const int64_t mask = h_dpp_attr(lw, op, "tile.dpp_xor", "xor_mask");
     const rocke_value_t* data = op->operands[0];
     const rocke_value_t* r = h_res(op);
-    /* Only 0x140 / 0x141 are legal (see lower_llvm/crosslane.cpp). */
-    if(ctrl != 0x140 && ctrl != 0x141)
+    const char* gfx = lw->arch.gfx ? lw->arch.gfx : "gfx950";
+    if(mask < 1 || mask > 15)
         return rocke_h_fail(lw,
                             ROCKE_ERR_VALUE,
-                            "tile.dpp_row_mirror: ctrl must be 320 or 321, got %lld",
-                            (long long)ctrl);
+                            "tile.dpp_xor: xor_mask must be in 1..15, got %lld",
+                            (long long)mask);
+    const int64_t ctrl
+        = rocke_i_dpp_xor_ctrl(mask, rocke_arch_has_dpp_row_xmask(rocke_arch_target_from_gfx(gfx)));
+    if(ctrl < 0)
+        return rocke_h_fail(lw,
+                            ROCKE_ERR_VALUE,
+                            "tile.dpp_xor: xor_mask %lld has no register-only DPP encoding on %s "
+                            "(no row_xmask); masks 1, 2, 3, 7, 8 and 15 do. Use warp_shuffle_xor "
+                            "(ds_swizzle) for this mask",
+                            (long long)mask,
+                            gfx);
     rocke_h_emitf(lw,
                   "int %s = __builtin_amdgcn_update_dpp(%s, %s, %lld, 15, 15, 1);",
                   rocke_h_name(lw, r),
@@ -1463,7 +1477,7 @@ const rocke_h_handler_entry_t* rocke_h_handlers_mma(void)
         {ROCKE_OP_TILE_DS_BPERMUTE_B64, rocke_h_op_tile_ds_bpermute_b64},
         {ROCKE_OP_TILE_DS_SWIZZLE_XOR, rocke_h_op_tile_ds_swizzle_xor},
         {ROCKE_OP_TILE_QUAD_PERM, rocke_h_op_tile_quad_perm},
-        {ROCKE_OP_TILE_DPP_ROW_MIRROR, rocke_h_op_tile_dpp_row_mirror},
+        {ROCKE_OP_TILE_DPP_XOR, rocke_h_op_tile_dpp_xor},
         {ROCKE_OP_TILE_MOV_DPP, rocke_h_op_tile_mov_dpp},
         {ROCKE_OP_TILE_PERMLANE32_SWAP, rocke_h_op_tile_permlane32_swap},
         {ROCKE_OP_TILE_PERM_B32, rocke_h_op_tile_perm_b32},

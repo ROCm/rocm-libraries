@@ -402,58 +402,172 @@ void case_quad_perm_rejects_out_of_range_ctrl()
     expect_quad_perm_ctrl_rejected(-1);
 }
 
-/* ---- dpp_row_mirror ---- */
-/* One kernel per `half` value, asserting the expected control word AND the
- * absence of the other: emitting both in one kernel cannot tell a swapped
- * half -> ctrl mapping from the right one. row_half_mirror == 0x141 == 321,
- * row_mirror == 0x140 == 320. */
-void case_dpp_row_mirror()
+/* ---- dpp_xor / warp_shuffle_xor_dpp ---- */
+/* The DPP control word each XOR mask lowers to on gfx9 CDNA (no row_xmask):
+ * quad_perm 0xB1/0x4E/0x1B, row_half_mirror 0x141, row_ror:8 0x128,
+ * row_mirror 0x140. Each is exactly lane i -> i ^ mask in a 16-lane row. */
+static const struct
 {
-    const std::string half = lower_one("rmirror_half", [](rocke_ir_builder_t* b) {
-        rocke_b_dpp_row_mirror(b, rocke_b_const_i32(b, 1), true);
-    });
-    EXPECT_IR(half,
-              "declare i32 @llvm.amdgcn.update.dpp.i32("
-              "i32, i32, i32 immarg, i32 immarg, i32 immarg, i1 immarg)");
-    EXPECT_IR(half,
-              "call i32 @llvm.amdgcn.update.dpp.i32("
-              "i32 1, i32 1, i32 321, i32 15, i32 15, i1 true)");
-    EXPECT_NO_IR(half, "i32 320, i32 15, i32 15");
+    int mask;
+    int ctrl;
+} k_dpp_xor_gfx9[] = {{1, 177}, {2, 78}, {3, 27}, {7, 321}, {8, 296}, {15, 320}};
 
-    const std::string full = lower_one("rmirror_full", [](rocke_ir_builder_t* b) {
-        rocke_b_dpp_row_mirror(b, rocke_b_const_i32(b, 1), false);
-    });
-    EXPECT_IR(full,
-              "call i32 @llvm.amdgcn.update.dpp.i32("
-              "i32 1, i32 1, i32 320, i32 15, i32 15, i1 true)");
-    EXPECT_NO_IR(full, "i32 321, i32 15, i32 15");
+static bool dpp_xor_gfx9_has(int mask)
+{
+    for(const auto& e : k_dpp_xor_gfx9)
+        if(e.mask == mask)
+            return true;
+    return false;
 }
 
-void case_dpp_row_mirror_hip()
+static std::string dpp_call(int ctrl)
 {
-    const std::string half = lower_one_hip(
-        "rmirror_hip_half",
-        [](rocke_ir_builder_t* b) { rocke_b_dpp_row_mirror(b, rocke_b_const_i32(b, 1), true); },
-        "gfx950");
-    EXPECT_IR(half, "__builtin_amdgcn_update_dpp(c1, c1, 321, 15, 15, 1)");
-    EXPECT_NO_IR(half, ", 320, 15, 15, 1)");
-
-    const std::string full = lower_one_hip(
-        "rmirror_hip_full",
-        [](rocke_ir_builder_t* b) { rocke_b_dpp_row_mirror(b, rocke_b_const_i32(b, 1), false); },
-        "gfx950");
-    EXPECT_IR(full, "__builtin_amdgcn_update_dpp(c1, c1, 320, 15, 15, 1)");
-    EXPECT_NO_IR(full, ", 321, 15, 15, 1)");
+    return "call i32 @llvm.amdgcn.update.dpp.i32(i32 1, i32 1, i32 " + std::to_string(ctrl)
+           + ", i32 15, i32 15, i1 true)";
 }
 
-void case_dpp_row_mirror_rejects_non_i32()
+/* One kernel per (arch, mask): the expected control word and no other
+ * update.dpp call, so a swapped table entry fails here. */
+void case_dpp_xor_gfx9_encodings()
+{
+    for(const char* arch : {"gfx942", "gfx950"})
+        for(const auto& e : k_dpp_xor_gfx9)
+        {
+            const int mask = e.mask;
+            const std::string ir = lower_one(
+                "dppx_gfx9",
+                [mask](rocke_ir_builder_t* b) {
+                    rocke_b_warp_shuffle_xor_dpp(b, rocke_b_const_i32(b, 1), mask);
+                },
+                arch);
+            EXPECT_IR(ir,
+                      "declare i32 @llvm.amdgcn.update.dpp.i32("
+                      "i32, i32, i32 immarg, i32 immarg, i32 immarg, i1 immarg)");
+            EXPECT_IR(ir, dpp_call(e.ctrl).c_str());
+            EXPECT_IR_COUNT(ir, "call i32 @llvm.amdgcn.update.dpp.i32(", 1);
+        }
+}
+
+/* Targets with row_xmask keep 0x160 | mask for every mask 1..15. */
+void case_dpp_xor_row_xmask_encodings()
+{
+    for(const char* arch : {"gfx1151", "gfx1201", "gfx1250"})
+        for(int mask = 1; mask <= 15; ++mask)
+        {
+            const std::string ir = lower_one(
+                "dppx_rdna",
+                [mask](rocke_ir_builder_t* b) {
+                    rocke_b_warp_shuffle_xor_dpp(b, rocke_b_const_i32(b, 1), mask);
+                },
+                arch);
+            EXPECT_IR(ir, dpp_call(0x160 | mask).c_str());
+        }
+}
+
+void case_dpp_xor_hip()
+{
+    const std::string gfx9 = lower_one_hip(
+        "dppx_hip_gfx9",
+        [](rocke_ir_builder_t* b) { rocke_b_warp_shuffle_xor_dpp(b, rocke_b_const_i32(b, 1), 7); },
+        "gfx942");
+    EXPECT_IR(gfx9, "__builtin_amdgcn_update_dpp(c1, c1, 321, 15, 15, 1)");
+    const std::string rdna = lower_one_hip(
+        "dppx_hip_rdna",
+        [](rocke_ir_builder_t* b) { rocke_b_warp_shuffle_xor_dpp(b, rocke_b_const_i32(b, 1), 7); },
+        "gfx1201");
+    EXPECT_IR(rdna, "__builtin_amdgcn_update_dpp(c1, c1, 359, 15, 15, 1)");
+}
+
+/* f32 goes through i32: bitcast, one dpp_xor, bitcast back. */
+void case_warp_shuffle_xor_dpp_f32()
+{
+    const std::string ir = lower_one("dppx_f32", [](rocke_ir_builder_t* b) {
+        rocke_b_warp_shuffle_xor_dpp(b, rocke_b_const_f32(b, 1.0), 15);
+    });
+    EXPECT_IR(ir, "bitcast float");
+    EXPECT_IR(ir, "i32 320, i32 15, i32 15, i1 true)");
+    EXPECT_IR(ir, "to float");
+}
+
+/* Both C++ lowerers must return `want` for a builder-made dpp_xor of `mask`. */
+void expect_dpp_xor_status(const char* arch, int mask, rocke_status_t want, int line)
+{
+    char msg[160];
+    {
+        rocke_ir_builder_t b;
+        rocke_ir_builder_init(&b, "dppx_status_hip");
+        rocke_b_dpp_xor(&b, rocke_b_const_i32(&b, 1), mask);
+        rocke_b_ret(&b);
+        rocke_strbuf_t out;
+        rocke_strbuf_init(&out, 256);
+        rocke_lower_hip_opts_t opts{};
+        opts.include_prologue = false;
+        opts.include_prologue_set = true;
+        opts.arch = arch;
+        const rocke_status_t st
+            = rocke_lower_kernel_to_hip(&b, rocke_ir_builder_kernel(&b), &opts, &out);
+        if(st != want)
+        {
+            snprintf(msg,
+                     sizeof(msg),
+                     "HIP %s mask %d: status %d, want %d",
+                     arch,
+                     mask,
+                     (int)st,
+                     (int)want);
+            fail(msg, line);
+        }
+        rocke_strbuf_free(&out);
+        rocke_ir_builder_free(&b);
+    }
+    {
+        rocke_ir_builder_t b;
+        rocke_ir_builder_init(&b, "dppx_status_ll");
+        rocke_b_dpp_xor(&b, rocke_b_const_i32(&b, 1), mask);
+        rocke_b_ret(&b);
+        char* ll = nullptr;
+        char err[ROCKE_ERR_MSG_CAP];
+        err[0] = '\0';
+        const rocke_status_t st = rocke_lower_kernel_to_llvm_ex(
+            rocke_ir_builder_kernel(&b), ROCKE_LLVM_FLAVOR_AUTO, arch, &ll, err, sizeof(err));
+        if(st != want)
+        {
+            snprintf(msg,
+                     sizeof(msg),
+                     "LLVM %s mask %d: status %d, want %d",
+                     arch,
+                     mask,
+                     (int)st,
+                     (int)want);
+            fail(msg, line);
+        }
+        std::free(ll);
+        rocke_ir_builder_free(&b);
+    }
+}
+
+/* gfx9 CDNA has no row_xmask: a mask outside the table fails loudly in both
+ * lowerers instead of emitting a control word the target does not have. The
+ * same masks lower on a row_xmask target. */
+void case_dpp_xor_gfx9_rejects_unencodable_mask()
+{
+    for(int mask = 1; mask <= 15; ++mask)
+    {
+        const rocke_status_t want = dpp_xor_gfx9_has(mask) ? ROCKE_OK : ROCKE_ERR_VALUE;
+        expect_dpp_xor_status("gfx942", mask, want, __LINE__);
+        expect_dpp_xor_status("gfx950", mask, want, __LINE__);
+        expect_dpp_xor_status("gfx1201", mask, ROCKE_OK, __LINE__);
+    }
+}
+
+void expect_builder_rejects(const char* what, rocke_value_t* (*build)(rocke_ir_builder_t*))
 {
     rocke_ir_builder_t b;
-    rocke_ir_builder_init(&b, "rmirror_f32");
+    rocke_ir_builder_init(&b, "dppx_builder_bad");
     bool rejected = false;
     try
     {
-        rocke_value_t* r = rocke_b_dpp_row_mirror(&b, rocke_b_const_f32(&b, 1.0), false);
+        rocke_value_t* r = build(&b);
         rejected = (r == nullptr || rocke_ir_builder_status(&b) == ROCKE_ERR_VALUE);
     }
     catch(...)
@@ -461,11 +575,34 @@ void case_dpp_row_mirror_rejects_non_i32()
         rejected = true;
     }
     if(!rejected)
-        fail("dpp_row_mirror must reject non-i32 data", __LINE__);
+        fail(what, __LINE__);
     rocke_ir_builder_free(&b);
 }
 
-/* How a raw DPP op carries its `ctrl` attribute. */
+void case_dpp_xor_builders_reject_invalid_input()
+{
+    expect_builder_rejects("dpp_xor must reject f32 data", [](rocke_ir_builder_t* b) {
+        return rocke_b_dpp_xor(b, rocke_b_const_f32(b, 1.0), 1);
+    });
+    expect_builder_rejects("dpp_xor must reject mask 0", [](rocke_ir_builder_t* b) {
+        return rocke_b_dpp_xor(b, rocke_b_const_i32(b, 1), 0);
+    });
+    expect_builder_rejects("dpp_xor must reject mask 16", [](rocke_ir_builder_t* b) {
+        return rocke_b_dpp_xor(b, rocke_b_const_i32(b, 1), 16);
+    });
+    expect_builder_rejects("warp_shuffle_xor_dpp must reject mask 0", [](rocke_ir_builder_t* b) {
+        return rocke_b_warp_shuffle_xor_dpp(b, rocke_b_const_i32(b, 1), 0);
+    });
+    expect_builder_rejects("warp_shuffle_xor_dpp must reject mask 16", [](rocke_ir_builder_t* b) {
+        return rocke_b_warp_shuffle_xor_dpp(b, rocke_b_const_i32(b, 1), 16);
+    });
+    expect_builder_rejects("warp_shuffle_xor_dpp must reject i64", [](rocke_ir_builder_t* b) {
+        return rocke_b_warp_shuffle_xor_dpp(b, rocke_b_const_i64(b, 1), 1);
+    });
+}
+
+/* How a raw DPP op carries its int attribute ("ctrl", or "xor_mask" for
+ * tile.dpp_xor). */
 enum class RawCtrl
 {
     Missing,
@@ -491,6 +628,7 @@ enum class RawShape
 void build_dpp_raw(
     rocke_ir_builder_t* b, rocke_opcode_t opcode, RawShape shape, RawCtrl kind, int64_t ctrl)
 {
+    const char* key = opcode == ROCKE_OP_TILE_DPP_XOR ? "xor_mask" : "ctrl";
     rocke_value_t* data
         = shape == RawShape::F32Data ? rocke_b_const_f32(b, 1.0) : rocke_b_const_i32(b, 1);
     rocke_value_t* operands[] = {data, rocke_b_const_i32(b, 2)};
@@ -507,16 +645,16 @@ void build_dpp_raw(
     case RawCtrl::Missing:
         break;
     case RawCtrl::Int:
-        rocke_attr_set_int(b, &attrs, "ctrl", ctrl);
+        rocke_attr_set_int(b, &attrs, key, ctrl);
         break;
     case RawCtrl::Float:
-        rocke_attr_set_float(b, &attrs, "ctrl", (double)ctrl + 0.9);
+        rocke_attr_set_float(b, &attrs, key, (double)ctrl + 0.9);
         break;
     case RawCtrl::Bool:
-        rocke_attr_set_bool(b, &attrs, "ctrl", true);
+        rocke_attr_set_bool(b, &attrs, key, true);
         break;
     case RawCtrl::Str:
-        rocke_attr_set_str(b, &attrs, "ctrl", text);
+        rocke_attr_set_str(b, &attrs, key, text);
         break;
     }
     rocke_b_op(b,
@@ -581,22 +719,22 @@ void expect_dpp_raw_rejected(rocke_opcode_t opcode,
     }
 }
 
-void case_dpp_row_mirror_rejects_bad_ctrl()
+/* A raw tile.dpp_xor whose xor_mask is out of range (0, 16, -1, or a DPP
+ * control word stuffed into the mask) or has no gfx9 encoding (4) fails in
+ * both lowerers instead of being masked to four bits or emitted. */
+void case_dpp_xor_rejects_bad_mask()
 {
-    const rocke_opcode_t op = ROCKE_OP_TILE_DPP_ROW_MIRROR;
+    const rocke_opcode_t op = ROCKE_OP_TILE_DPP_XOR;
     const RawShape ok = RawShape::Ok;
     expect_dpp_raw_rejected(op, ok, RawCtrl::Missing, 0, ROCKE_ERR_KEY, __LINE__);
-    /* Each is a legal DPP control for a different lane mapping (0x142 is
-     * row_bcast:15, 0x40 a quad_perm) or not a control at all (-1). */
-    expect_dpp_raw_rejected(op, ok, RawCtrl::Int, 0x142, ROCKE_ERR_VALUE, __LINE__);
-    expect_dpp_raw_rejected(op, ok, RawCtrl::Int, 0x40, ROCKE_ERR_VALUE, __LINE__);
-    expect_dpp_raw_rejected(op, ok, RawCtrl::Int, -1, ROCKE_ERR_VALUE, __LINE__);
+    for(int64_t bad : {0, 16, -1, 0x141, 4})
+        expect_dpp_raw_rejected(op, ok, RawCtrl::Int, bad, ROCKE_ERR_VALUE, __LINE__);
 }
 
 /* The shape and the attribute types, for both DPP ops: anything but one
  * operand and one result is ROCKE_ERR_VALUE (zero operands included: a clean
- * error, not a NULL dereference), a non-int ctrl is ROCKE_ERR_TYPE (not read
- * as missing, not coerced), and non-i32 data or a non-i32 result is
+ * error, not a NULL dereference), a non-int ctrl/xor_mask is ROCKE_ERR_TYPE
+ * (not read as missing, not coerced), and non-i32 data or a non-i32 result is
  * ROCKE_ERR_VALUE (HIP would convert between int and float silently). Python
  * raises ValueError / TypeError for the same raw ops. */
 void case_dpp_ops_reject_untyped_raw_op()
@@ -605,7 +743,7 @@ void case_dpp_ops_reject_untyped_raw_op()
     {
         rocke_opcode_t opcode;
         int64_t ctrl;
-    } ops[] = {{ROCKE_OP_TILE_QUAD_PERM, 177}, {ROCKE_OP_TILE_DPP_ROW_MIRROR, 0x140}};
+    } ops[] = {{ROCKE_OP_TILE_QUAD_PERM, 177}, {ROCKE_OP_TILE_DPP_XOR, 7}};
     const RawShape ok = RawShape::Ok;
     for(const auto& o : ops)
     {
@@ -2907,7 +3045,7 @@ void case_opcode_names_are_aligned()
         {ROCKE_OP_TILE_DS_SWIZZLE_XOR, "tile.ds_swizzle_xor"},
         {ROCKE_OP_TILE_MOV_DPP8, "tile.mov_dpp8"},
         {ROCKE_OP_TILE_QUAD_PERM, "tile.quad_perm"},
-        {ROCKE_OP_TILE_DPP_ROW_MIRROR, "tile.dpp_row_mirror"},
+        {ROCKE_OP_TILE_DPP_XOR, "tile.dpp_xor"},
         {ROCKE_OP_TILE_WAVE_REDUCE, "tile.wave_reduce"},
         {ROCKE_OP_TILE_READLANE, "tile.readlane"},
         {ROCKE_OP_TILE_WRITELANE, "tile.writelane"},
@@ -2968,7 +3106,7 @@ void case_opcode_names_are_aligned()
         }
         if(rocke_opcode_from_name(e.name) != e.opcode)
             fail(e.name, __LINE__);
-        if((e.opcode == ROCKE_OP_TILE_QUAD_PERM || e.opcode == ROCKE_OP_TILE_DPP_ROW_MIRROR)
+        if((e.opcode == ROCKE_OP_TILE_QUAD_PERM || e.opcode == ROCKE_OP_TILE_DPP_XOR)
            && !rocke_opcode_is_pure(e.opcode))
             fail(e.name, __LINE__);
     }
@@ -3064,10 +3202,13 @@ const TestCase k_cases[] = {
     {"quad_perm_rejects_invalid_input", case_quad_perm_rejects_invalid_input},
     {"quad_perm_hip_rejects_missing_ctrl", case_quad_perm_hip_rejects_missing_ctrl},
     {"quad_perm_rejects_out_of_range_ctrl", case_quad_perm_rejects_out_of_range_ctrl},
-    {"dpp_row_mirror", case_dpp_row_mirror},
-    {"dpp_row_mirror_hip", case_dpp_row_mirror_hip},
-    {"dpp_row_mirror_rejects_non_i32", case_dpp_row_mirror_rejects_non_i32},
-    {"dpp_row_mirror_rejects_bad_ctrl", case_dpp_row_mirror_rejects_bad_ctrl},
+    {"dpp_xor_gfx9_encodings", case_dpp_xor_gfx9_encodings},
+    {"dpp_xor_row_xmask_encodings", case_dpp_xor_row_xmask_encodings},
+    {"dpp_xor_hip", case_dpp_xor_hip},
+    {"warp_shuffle_xor_dpp_f32", case_warp_shuffle_xor_dpp_f32},
+    {"dpp_xor_gfx9_rejects_unencodable_mask", case_dpp_xor_gfx9_rejects_unencodable_mask},
+    {"dpp_xor_builders_reject_invalid_input", case_dpp_xor_builders_reject_invalid_input},
+    {"dpp_xor_rejects_bad_mask", case_dpp_xor_rejects_bad_mask},
     {"dpp_ops_reject_untyped_raw_op", case_dpp_ops_reject_untyped_raw_op},
     {"ds_swizzle_xor", case_ds_swizzle_xor},
     {"mov_dpp8_i32", case_mov_dpp8_i32},

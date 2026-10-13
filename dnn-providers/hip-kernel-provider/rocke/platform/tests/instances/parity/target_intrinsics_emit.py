@@ -116,9 +116,11 @@ def build_quad_perm(b: IRBuilder) -> None:
     b.ret()
 
 
-def build_dpp_row_mirror(b: IRBuilder) -> None:
-    h = b.dpp_row_mirror(b.const_i32(1), half=True)
-    b.dpp_row_mirror(h, half=False)
+def build_warp_shuffle_xor_dpp(b: IRBuilder) -> None:
+    v = b.const_i32(1)
+    for mask in (1, 2, 3, 7, 8, 15):
+        v = b.warp_shuffle_xor_dpp(v, mask)
+    b.warp_shuffle_xor_dpp(b.const_f32(1.0), 7)
     b.ret()
 
 
@@ -146,7 +148,7 @@ BUILDERS = [
     build_quad_perm,
     build_av_b128,
     build_scheduler_hints,
-    build_dpp_row_mirror,
+    build_warp_shuffle_xor_dpp,
 ]
 
 
