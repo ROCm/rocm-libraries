@@ -114,13 +114,11 @@ namespace TensileLite
                                       TimingEvents const& stopEvents) override
             {
             }
-            // Deliberately unchecked: the readback synchronizes the stream,
-            // perturbing the back-to-back cadence these enqueues exercise.
+            // Opt-in readback after the group, never between its launches.
+            // Disabled by default to avoid perturbing benchmark timing.
             virtual void validateEnqueues(std::vector<size_t> const& slots,
                                           TimingEvents const&        startEvents,
-                                          TimingEvents const&        stopEvents) override
-            {
-            }
+                                          TimingEvents const&        stopEvents) override;
 
             virtual void finalizeReport() override {}
 
@@ -130,6 +128,9 @@ namespace TensileLite
             }
 
         private:
+            // Preserve transfer failures for the final solution verdict.
+            void validateInputs(std::vector<size_t> const& slots, char const* stage);
+
             /// Checks every Synchronizer buffer reachable from *inputs*.
             /// `stage` names the launch phase, for the diagnostic.
             void
@@ -152,6 +153,7 @@ namespace TensileLite
             uint8_t* stagingBuffer(size_t bytes);
 
             bool                m_enabled      = false;
+            bool                m_validateAfterEnqueues = false;
             std::vector<std::shared_ptr<DeviceContext>> m_devices;
             // One narrow-alpha warning per run, not one per solution.
             bool                m_narrowAlphaWarned = false;
