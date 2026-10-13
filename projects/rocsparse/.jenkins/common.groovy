@@ -43,8 +43,14 @@ def runTestCommand (platform, project, gfilter, boolean rocmExamples=false, Stri
 
     def command = """#!/usr/bin/env bash
                 set -ex
-                cd ${project.paths.project_build_prefix}/build/${dirmode}/clients/staging
+                cd ${project.paths.project_build_prefix}/build/${dirmode}
                 export LD_LIBRARY_PATH=/opt/rocm/lib/
+                # Same shell step as rocsparse-test. Groovy calls before this
+                # script are not executed by Math CI.
+                cmake --build . --target rocsparse-unit-test rocsparse-unit-test-device
+                GTEST_LISTENER=NO_PASS_LINE_IN_LOG ./clients/staging/rocsparse-unit-test --gtest_output=xml:test_detail_unit.xml --gtest_color=yes
+                GTEST_LISTENER=NO_PASS_LINE_IN_LOG ./clients/staging/rocsparse-unit-test-device --gtest_output=xml:test_detail_unit_device.xml --gtest_color=yes
+                cd clients/staging
                 ${hmmTestCommand}
             """
 
@@ -84,6 +90,23 @@ def runUnitTestCommand (platform, project, String dirmode = "release")
                 export LD_LIBRARY_PATH=/opt/rocm/lib/
                 cmake --build . --target rocsparse-unit-test
                 GTEST_LISTENER=NO_PASS_LINE_IN_LOG ./clients/staging/rocsparse-unit-test --gtest_output=xml:test_detail_unit.xml --gtest_color=yes
+            """
+
+    platform.runCommand(this, command)
+}
+
+
+// GPU unit tests (rocsparse-unit-test-device). The precheckin test stage already
+// has a GPU, so this runs there with the host unit tests. install.sh builds the
+// clients-tests target; cmake --build ensures this binary exists before launch.
+def runUnitTestDeviceCommand (platform, project, String dirmode = "release")
+{
+    def command = """#!/usr/bin/env bash
+                set -ex
+                cd ${project.paths.project_build_prefix}/build/${dirmode}
+                export LD_LIBRARY_PATH=/opt/rocm/lib/
+                cmake --build . --target rocsparse-unit-test-device
+                GTEST_LISTENER=NO_PASS_LINE_IN_LOG ./clients/staging/rocsparse-unit-test-device --gtest_output=xml:test_detail_unit_device.xml --gtest_color=yes
             """
 
     platform.runCommand(this, command)
@@ -130,6 +153,12 @@ def runCoverageCommand (platform, project, gfilter, String dirmode = "release")
                     set -ex
                     cd ${project.paths.project_build_prefix}/build/${dirmode}
                     export LD_LIBRARY_PATH=/opt/rocm/lib/
+                    # Same shell step as coverage. Groovy calls before this
+                    # script are not executed, so a unit-test failure must be
+                    # raised here, before make coverage ignores it.
+                    cmake --build . --target rocsparse-unit-test rocsparse-unit-test-device
+                    GTEST_LISTENER=NO_PASS_LINE_IN_LOG ./clients/staging/rocsparse-unit-test --gtest_output=xml:test_detail_unit.xml --gtest_color=yes
+                    GTEST_LISTENER=NO_PASS_LINE_IN_LOG ./clients/staging/rocsparse-unit-test-device --gtest_output=xml:test_detail_unit_device.xml --gtest_color=yes
                     GTEST_LISTENER=NO_PASS_LINE_IN_LOG make coverage_cleanup coverage GTEST_FILTER=${gfilter}-*known_bug*
                     /usr/local/bin/codecov -v -U \$http_proxy -t ${CODECOV_TOKEN} --file coverage-report/coverage.info --name rocm-libraries --flags rocSPARSE --sha ${commitSha}
                 """
