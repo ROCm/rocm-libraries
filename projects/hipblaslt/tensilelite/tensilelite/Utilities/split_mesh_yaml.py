@@ -16,14 +16,11 @@ import argparse
 import csv
 import lzma
 import os
-import sys
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
-
-from Tensile.CustomYamlLoader import load_yaml_stream
-from Tensile.LibraryIO import StrictTypeLoader, _loadMeshTableFromCsvXz
 
 import yaml
+
+from tensilelite.CustomYamlLoader import load_yaml_stream
+from tensilelite.LibraryIO import StrictTypeLoader, _loadMeshTableFromCsvXz
 
 
 def _get_library_type(data):
