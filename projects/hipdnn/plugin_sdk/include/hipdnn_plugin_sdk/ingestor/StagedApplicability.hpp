@@ -26,14 +26,17 @@ class ApplicabilityScope
 {
 public:
     /// The device the first ingestor engine resolved, and the catalog key for it. The
-    /// key carries no engine identity, so every engine on that device shares it.
+    /// key carries no engine identity, so every engine on that device shares it. Written
+    /// once per call, by the first engine, and never replaced: pending checks point into
+    /// `properties`.
     struct Device
     {
         /// The resolver that answered; an engine with another resolver resolves its own
         /// device, and shares the key only if it lands on the same device id.
         const void* resolver = nullptr;
         DeviceId deviceId = NO_DEVICE;
-        const DeviceProperties* deviceProperties = nullptr;
+        /// A copy, so a pending check does not depend on the resolver keeping its reference.
+        DeviceProperties properties;
         /// nullopt when the graph yields no usable key; meaningful once keyBuilt.
         std::optional<CatalogKey> key;
         bool keyBuilt = false;

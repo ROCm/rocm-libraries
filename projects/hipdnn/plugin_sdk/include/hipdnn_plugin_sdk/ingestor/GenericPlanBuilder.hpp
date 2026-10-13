@@ -118,21 +118,30 @@ public:
             auto& shared = scope.device();
             const void* resolver = &_deviceResolver;
             DeviceId deviceId = NO_DEVICE;
+            // Borrowed, never owned here: from the scope, or from this engine's own resolver
+            // when it is not the scope's. A pending check copies the latter before it outlives
+            // this call, so it never depends on the resolver keeping the reference.
             const DeviceProperties* deviceProperties = nullptr;
+            bool fromResolver = false;
             if(shared.has_value() && shared->resolver == resolver)
             {
                 deviceId = shared->deviceId;
-                deviceProperties = shared->deviceProperties;
+                deviceProperties = &shared->properties;
             }
             else
             {
                 const auto resolved = contextFor(handle, opGraph);
                 deviceId = resolved.deviceId;
-                deviceProperties = &resolved.deviceProperties;
                 if(!shared.has_value())
                 {
                     shared = ApplicabilityScope::Device{
-                        resolver, deviceId, deviceProperties, std::nullopt, false};
+                        resolver, deviceId, resolved.deviceProperties, std::nullopt, false};
+                    deviceProperties = &shared->properties;
+                }
+                else
+                {
+                    deviceProperties = &resolved.deviceProperties;
+                    fromResolver = true;
                 }
             }
             const MatchContext context{opGraph, deviceId, *deviceProperties};
@@ -175,7 +184,16 @@ public:
             pending->owner = &_stateManager;
             pending->graph = &opGraph;
             pending->deviceId = deviceId;
-            pending->deviceProperties = deviceProperties;
+            if(fromResolver)
+            {
+                // Set only once the copy is in the heap-allocated state, which does not move.
+                pending->ownedProperties = *deviceProperties;
+                pending->deviceProperties = &*pending->ownedProperties;
+            }
+            else
+            {
+                pending->deviceProperties = deviceProperties;
+            }
             pending->ownedKey = std::move(ownedKey);
             pending->key = pending->ownedKey.has_value() ? &*pending->ownedKey : key;
             pending->stage = std::move(*stage);
@@ -547,13 +565,16 @@ public:
 
 private:
     /// What finishApplicability needs: the context begin resolved and the catalog's
-    /// graph-level stage. The graph, device properties and a scope-owned key are borrowed
-    /// from the caller, which keeps them alive until every finish has returned.
+    /// graph-level stage. The graph is borrowed from the caller, which keeps it alive until
+    /// every finish has returned. The device properties and the key are borrowed from the
+    /// scope, or owned here when this engine's resolver or device is not the scope's.
     struct PendingCatalog : PendingApplicability::State
     {
         const IGraph* graph = nullptr;
         DeviceId deviceId = NO_DEVICE;
         const DeviceProperties* deviceProperties = nullptr;
+        /// Set when this engine's resolver is not the scope's: its own copy of the properties.
+        std::optional<DeviceProperties> ownedProperties;
         /// Set when this engine's device differs from the scope's, so the key is its own.
         std::optional<CatalogKey> ownedKey;
         const CatalogKey* key = nullptr;

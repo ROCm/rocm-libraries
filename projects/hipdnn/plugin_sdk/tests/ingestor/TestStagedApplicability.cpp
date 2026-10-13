@@ -551,6 +551,257 @@ TEST(TestIngestorStagedApplicability, WarmEnginesSharingAScopeKeyTheGraphOnce)
 }
 
 // ---------------------------------------------------------------------------
+// Devices and resolvers: what a scope shares, and what it must not
+// ---------------------------------------------------------------------------
+
+/// Reports whichever device a test selects, with the properties registered for it. A device
+/// nobody registered has none, as HandleDeviceResolver reports for NO_DEVICE.
+class ScriptedDeviceResolver : public IDeviceResolver<StubHandle>
+{
+public:
+    explicit ScriptedDeviceResolver(DeviceId selected)
+        : _selected(selected)
+    {
+    }
+
+    void registerDevice(DeviceId device, DeviceProperties properties)
+    {
+        _properties[device] = std::move(properties);
+    }
+
+    void select(DeviceId device)
+    {
+        _selected = device;
+    }
+
+    DeviceId deviceId(const StubHandle& /*handle*/) const override
+    {
+        return _selected;
+    }
+
+    const DeviceProperties& deviceProperties(DeviceId device) const override
+    {
+        const auto found = _properties.find(device);
+        return found != _properties.end() ? found->second : _unregistered;
+    }
+
+private:
+    DeviceId _selected;
+    std::unordered_map<DeviceId, DeviceProperties> _properties;
+    DeviceProperties _unregistered;
+};
+
+DeviceProperties propertiesFor(const char* arch)
+{
+    auto properties = testDeviceProperties();
+    properties.gcnArchName = arch;
+    return properties;
+}
+
+/// The scope's device is the first resolver's. An engine whose resolver lands on another
+/// device must cache under that device, never under the scope's: a catalog stored under the
+/// wrong device's key answers for a device it was never built for.
+TEST(TestIngestorStagedApplicability, AnEngineOnAnotherDeviceCachesUnderItsOwnDevice)
+{
+    const ScopedSymbols symbols(GRAPH_SYMBOL, acceptGraph, KERNEL_SYMBOL, countingFloatKernels);
+    ScriptedDeviceResolver firstResolver(0);
+    firstResolver.registerDevice(0, testDeviceProperties());
+    ScriptedDeviceResolver secondResolver(1);
+    secondResolver.registerDevice(0, testDeviceProperties());
+    secondResolver.registerDevice(1, propertiesFor(UNAVAILABLE_ARCH));
+    const auto first = makeEngine(firstResolver);
+    // Its only pack runs on device 1 and nowhere else.
+    const auto second
+        = makeEngine(secondResolver, {makePack({KERNEL_MATCHER_ID}, {UNAVAILABLE_ARCH})});
+    const TestGraph graph(makeGraphId(0xB5));
+    StubHandle handle;
+    ApplicabilityScope scope;
+
+    ASSERT_TRUE(stage(*first, handle, graph, scope).verdict);
+    ASSERT_TRUE(stage(*second, handle, graph, scope).verdict);
+
+    // Device 1's verdict is cached: no rematch.
+    counters().reset();
+    EXPECT_TRUE(second->isApplicable(handle, graph));
+    EXPECT_EQ(counters().graphMatchCalls, 0);
+
+    // Nothing is cached for device 0, where that pack cannot run.
+    secondResolver.select(0);
+    EXPECT_FALSE(second->isApplicable(handle, graph))
+        << "the catalog built for device 1 answered for device 0";
+}
+
+/// Different resolvers that land on one device still share the scope's one key: the key
+/// carries the device, not the resolver, so a second build would be wasted work.
+TEST(TestIngestorStagedApplicability, EnginesOnOneDeviceKeyTheGraphOnceThroughDifferentResolvers)
+{
+    const ScopedSymbols symbols(GRAPH_SYMBOL, acceptGraph, KERNEL_SYMBOL, countingFloatKernels);
+    ScriptedDeviceResolver firstResolver(0);
+    firstResolver.registerDevice(0, testDeviceProperties());
+    ScriptedDeviceResolver secondResolver(0);
+    secondResolver.registerDevice(0, testDeviceProperties());
+    const auto probe = makeEngine(firstResolver);
+    const auto first = makeEngine(firstResolver);
+    const auto second = makeEngine(secondResolver);
+    const auto bytesCalls = std::make_shared<std::atomic_uint>(0);
+    const CountingBytesGraph graph(bytesCalls);
+    StubHandle handle;
+
+    const unsigned oneKeyBuild = bytesReadStaging({probe.get()}, handle, graph, *bytesCalls);
+    ASSERT_GT(oneKeyBuild, 0U);
+
+    EXPECT_EQ(bytesReadStaging({first.get(), second.get()}, handle, graph, *bytesCalls),
+              oneKeyBuild)
+        << "two engines on one device must key the graph once, not once each";
+}
+
+struct UnresolvedDeviceCase
+{
+    std::string name;
+    DeviceId selected;
+    /// Registers the selected device with no gcnArchName instead of leaving it unregistered.
+    bool registered;
+    /// Stages an engine on a healthy resolver first, so the scope already holds a device.
+    bool healthyFirst;
+};
+
+class TestIngestorStagedApplicabilityUnresolvedDevice
+    : public ::testing::TestWithParam<UnresolvedDeviceCase>
+{
+};
+
+/// A device that cannot be resolved declines in begin, with the error and the log
+/// isApplicable() gives, whether the engine is first on its scope or follows an engine
+/// that resolved a device through another resolver.
+TEST_P(TestIngestorStagedApplicabilityUnresolvedDevice, DeclinesAsIsApplicableDoes)
+{
+    const auto& param = GetParam();
+    const ScopedSymbols symbols(GRAPH_SYMBOL, acceptGraph, KERNEL_SYMBOL, countingFloatKernels);
+    ScriptedDeviceResolver unresolved(param.selected);
+    if(param.registered)
+    {
+        unresolved.registerDevice(param.selected, DeviceProperties{});
+    }
+    const StubDeviceResolver healthyResolver;
+    const auto healthy = makeEngine(healthyResolver);
+    const auto staged = makeEngine(unresolved);
+    const auto twin = makeEngine(unresolved);
+    const TestGraph graph(makeGraphId(0xB6));
+    StubHandle handle;
+
+    auto recorder = SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+    const auto expected = record(recorder, [&] { return twin->isApplicable(handle, graph); });
+
+    ApplicabilityScope scope;
+    if(param.healthyFirst)
+    {
+        ASSERT_TRUE(stage(*healthy, handle, graph, scope).verdict);
+    }
+    StagedOutcome outcome;
+    const auto actual = record(recorder, [&] {
+        outcome = stage(*staged, handle, graph, scope);
+        return outcome.verdict;
+    });
+
+    EXPECT_FALSE(expected.verdict);
+    EXPECT_FALSE(actual.verdict);
+    EXPECT_TRUE(outcome.decidedInBegin);
+    EXPECT_EQ(actual.graphMatchCalls, 0);
+    ASSERT_FALSE(expected.logs.empty()) << "an unresolved device must be reported";
+    EXPECT_EQ(actual.logs, expected.logs);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    Cases,
+    TestIngestorStagedApplicabilityUnresolvedDevice,
+    ::testing::Values(UnresolvedDeviceCase{"NoDevice", NO_DEVICE, false, false},
+                      UnresolvedDeviceCase{"EmptyArch", 0, true, false},
+                      UnresolvedDeviceCase{"NoDeviceAfterAHealthyEngine", NO_DEVICE, false, true},
+                      UnresolvedDeviceCase{"EmptyArchAfterAHealthyEngine", 0, true, true}),
+    [](const ::testing::TestParamInfo<UnresolvedDeviceCase>& info) { return info.param.name; });
+
+/// Overwrites one slot on every deviceProperties() call, as a resolver keeping a single
+/// scratch result would. A reference it returned is good only until its next call.
+class SingleSlotDeviceResolver : public IDeviceResolver<StubHandle>
+{
+public:
+    explicit SingleSlotDeviceResolver(DeviceId selected)
+        : _selected(selected)
+    {
+    }
+
+    void registerDevice(DeviceId device, DeviceProperties properties)
+    {
+        _registered[device] = std::move(properties);
+    }
+
+    void select(DeviceId device)
+    {
+        _selected = device;
+    }
+
+    DeviceId deviceId(const StubHandle& /*handle*/) const override
+    {
+        return _selected;
+    }
+
+    const DeviceProperties& deviceProperties(DeviceId device) const override
+    {
+        _slot = _registered.at(device);
+        return _slot;
+    }
+
+private:
+    DeviceId _selected;
+    std::unordered_map<DeviceId, DeviceProperties> _registered;
+    mutable DeviceProperties _slot;
+};
+
+/// A pending check decides for the device its begin resolved, whatever the resolver reports
+/// afterwards. Device 0 runs the pack's kernels and device 1 does not, so a finish that read
+/// the resolver's slot after it moved to device 1 would decline. Covers an engine that is
+/// first on its scope, and one whose resolver is not the scope's.
+TEST(TestIngestorStagedApplicability, APendingCheckKeepsItsDeviceWhenTheResolverMovesOn)
+{
+    for(const bool otherResolverFirst : {false, true})
+    {
+        SCOPED_TRACE(otherResolverFirst ? "scope held by another resolver"
+                                        : "engine first on its scope");
+        const ScopedSymbols symbols(GRAPH_SYMBOL, acceptGraph, KERNEL_SYMBOL, countingFloatKernels);
+        SingleSlotDeviceResolver resolver(0);
+        resolver.registerDevice(0, propertiesFor(UNAVAILABLE_ARCH));
+        resolver.registerDevice(1, testDeviceProperties());
+        const StubDeviceResolver otherResolver;
+        const auto other = makeEngine(otherResolver);
+        // Every kernel runs on device 0 alone.
+        auto pack = makePack({KERNEL_MATCHER_ID});
+        for(auto& kernel : pack.kernels)
+        {
+            kernel.arch = {UNAVAILABLE_ARCH};
+        }
+        const auto engine = makeEngine(resolver, {std::move(pack)});
+        const TestGraph graph(makeGraphId(0xB7));
+        StubHandle handle;
+        ApplicabilityScope scope;
+        if(otherResolverFirst)
+        {
+            ASSERT_TRUE(stage(*other, handle, graph, scope).verdict);
+        }
+
+        auto staged = engine->beginApplicability(handle, graph, scope);
+        ASSERT_FALSE(staged.decided);
+        ASSERT_TRUE(staged.pending.valid());
+
+        // Another caller on this resolver moves it to device 1, rewriting its slot.
+        resolver.select(1);
+        static_cast<void>(resolver.deviceProperties(1));
+
+        EXPECT_TRUE(engine->finishApplicability(std::move(staged.pending)))
+            << "the check read the resolver's slot after it moved to another device";
+    }
+}
+
+// ---------------------------------------------------------------------------
 // prewarmGraph
 // ---------------------------------------------------------------------------
 
