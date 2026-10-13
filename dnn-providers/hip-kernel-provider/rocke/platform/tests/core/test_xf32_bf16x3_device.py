@@ -46,6 +46,7 @@ initialisation out of the pytest process and bounds a hung device.
 
 from __future__ import annotations
 
+import importlib.util
 import os
 import subprocess
 import sys
@@ -54,8 +55,28 @@ from pathlib import Path
 
 _ARCH = "gfx950"
 _REQUIRE_ENV = "ROCKE_REQUIRE_GFX950"
-_PYROOT = Path(__file__).resolve().parents[2] / "python"
-_HARNESS = _PYROOT / "rocke" / "examples" / "gfx950" / "xf32" / "bf16x3_parity.py"
+# The harness is run as a module, so the only thing that has to be found is the
+# package -- not where the examples directory happens to sit relative to this file.
+_HARNESS_MODULE = "rocke.examples.gfx950.xf32.bf16x3_parity"
+
+
+def _import_root() -> Path:
+    """The directory that makes ``import rocke`` resolve, wherever that is.
+
+    ``python/`` in a source checkout; ``bin/<subdir>/`` in an installed provider,
+    where the package sits next to ``tests/`` and there is no ``python/`` at all.
+    Counting path components up from this file only ever described the first, so
+    the harness was looked for at a path that does not exist once installed.
+    Asking the import system also guarantees the child processes below import the
+    same ``rocke`` this suite is testing.
+    """
+    spec = importlib.util.find_spec("rocke")
+    if spec is None or not spec.submodule_search_locations:
+        # Not importable from here -- a bare checkout run without PYTHONPATH --
+        # and the source layout is the only one that can be.
+        return Path(__file__).resolve().parents[2] / "python"
+    return Path(next(iter(spec.submodule_search_locations))).resolve().parent
+
 
 # Prints `NO_HIP <reason>` when the runtime cannot be loaded at all, otherwise
 # one `DEVICE <index> <arch>` line per visible device, with `?` for an
@@ -99,7 +120,7 @@ _VISIBILITY_VARS = ("HIP_VISIBLE_DEVICES", "CUDA_VISIBLE_DEVICES")
 def _env() -> dict:
     env = dict(os.environ)
     env["PYTHONPATH"] = os.pathsep.join(
-        p for p in (str(_PYROOT), env.get("PYTHONPATH")) if p
+        p for p in (str(_import_root()), env.get("PYTHONPATH")) if p
     )
     return env
 
@@ -184,7 +205,7 @@ class TestBf16x3OnDevice(unittest.TestCase):
         # selected it, so a harness that cannot find one is broken and must
         # not exit 0 as a skip.
         done = subprocess.run(
-            [sys.executable, str(_HARNESS), "--require-device"],
+            [sys.executable, "-m", _HARNESS_MODULE, "--require-device"],
             env=self.env,
             capture_output=True,
             text=True,
