@@ -861,10 +861,16 @@ TEST(PredictionLibraryTest, TilewrightContextHonorsTheStreamK5ForceMode)
 #if defined(TILEWRIGHT_TEST_WEIGHTS_DIR)
 namespace
 {
+    // A shipped MLREC_v2 model, which the tests below expect: it records no
+    // launch model, supports the whole device with the default schedule
+    // alone and gives the probe kernels the order they test. The gfx950
+    // TF32 TT library's model is one and stays one while the other gfx950
+    // libraries move to MLREC_v3 models; once it moves too, these tests need
+    // a model of their own.
     std::filesystem::path shippedGfx950Model()
     {
         return std::filesystem::path(TILEWRIGHT_TEST_WEIGHTS_DIR) / "gfx950" / "gfx950"
-               / "gfx950_Cijk_Ailk_Bljk_BBS_BH_BiasSB_HAS_SAV_UserArgs.tilewright.bin";
+               / "gfx950_Cijk_Alik_Bjlk_S_MX_B_Bias_HAS_SAV_UserArgs.tilewright.bin";
     }
 
     // Loads `table` and the model at `model` as the library of `stem`.
