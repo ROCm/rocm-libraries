@@ -14,6 +14,7 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -353,8 +354,15 @@ namespace
     class HostBufferValidator : public SynchronizerValidator
     {
     public:
-        explicit HostBufferValidator(std::vector<std::shared_ptr<DeviceContext>> devices)
-            : SynchronizerValidator(enabledArgs(), std::move(devices))
+        explicit HostBufferValidator(std::vector<std::shared_ptr<DeviceContext>> devices,
+                                     bool afterEnqueues = false)
+            : SynchronizerValidator(
+                [afterEnqueues]() {
+                    auto args = enabledArgs();
+                    args["validate-after-enqueues"].value() = afterEnqueues;
+                    return args;
+                }(),
+                std::move(devices))
         {
         }
         TransferFailure failure = TransferFailure::None;
@@ -387,22 +395,24 @@ namespace
         }
     };
 
-    class SynchronizerValidatorLifecycle : public ::testing::TestWithParam<TransferFailure> {};
+    class SynchronizerValidatorLifecycle
+        : public ::testing::TestWithParam<std::tuple<TransferFailure, bool>> {};
 }
 
 TEST_P(SynchronizerValidatorLifecycle, FailureSurvivesReferenceVerdictAndNextSolutionIsClean)
 {
+    auto [failure, afterEnqueues] = GetParam();
     auto reporter = std::make_shared<FakeResultReporter>();
 
     TensileLite::ContractionProblemGemm problem;
     problem.setSynchronizer(rocisa::DataType::Int32, 4);
-    std::vector<uint32_t> buffer{0, 1, 0, 0};
+    std::vector<uint32_t> buffer{0, 0, 0, 0};
     auto inputs = std::make_shared<TensileLite::ContractionInputs>();
     inputs->Synchronizer = buffer.data();
     auto device                  = std::make_shared<DeviceContext>(0, true);
     device->inputArr             = {inputs};
     auto validator               = std::make_shared<HostBufferValidator>(
-        std::vector<std::shared_ptr<DeviceContext>>{device});
+        std::vector<std::shared_ptr<DeviceContext>>{device}, afterEnqueues);
     MetaRunListener listeners;
     // Match main: postSolution visits these in reverse order.
     listeners.addListener(validator);
@@ -411,25 +421,34 @@ TEST_P(SynchronizerValidatorLifecycle, FailureSurvivesReferenceVerdictAndNextSol
     TimingEvents events({}, 0, 0);
     listeners.preProblem(&problem);
     listeners.preSolution(nullptr);
-    validator->failure = GetParam();
+    // First launch is clean; a later launch leaves residue or fails readback.
+    listeners.validateWarmups({0}, events, events);
+    buffer[1] = 1;
+    validator->failure = failure;
+    auto validate = [&]() {
+        if(afterEnqueues)
+            listeners.validateEnqueues({0}, events, events);
+        else
+            listeners.validateWarmups({0}, events, events);
+    };
 
-    if(GetParam() == TransferFailure::None)
-        EXPECT_NO_THROW(listeners.validateWarmups({0}, events, events));
+    if(failure == TransferFailure::None)
+        EXPECT_NO_THROW(validate());
     else
-        EXPECT_THROW(listeners.validateWarmups({0}, events, events), std::runtime_error);
+        EXPECT_THROW(validate(), std::runtime_error);
     listeners.postSolution();
 
     EXPECT_EQ(listeners.error(), 1);
     ASSERT_EQ(reporter->stringReports.size(), 2u);
     EXPECT_EQ(reporter->stringReports.back(),
               std::make_pair(std::string(ResultKey::Validation), std::string("FAILED")));
-    EXPECT_EQ(buffer[1], GetParam() == TransferFailure::None ? 0u : 1u);
+    EXPECT_EQ(buffer[1], failure == TransferFailure::None ? 0u : 1u);
 
     // A later successful check must not inherit the earlier solution's verdict.
     validator->failure = TransferFailure::None;
     std::fill(buffer.begin(), buffer.end(), 0);
     listeners.preSolution(nullptr);
-    listeners.validateWarmups({0}, events, events);
+    validate();
     listeners.postSolution();
     EXPECT_EQ(listeners.error(), 1);
     ASSERT_EQ(reporter->stringReports.size(), 3u);
@@ -438,9 +457,29 @@ TEST_P(SynchronizerValidatorLifecycle, FailureSurvivesReferenceVerdictAndNextSol
 
 INSTANTIATE_TEST_SUITE_P(Transfers,
                         SynchronizerValidatorLifecycle,
-                        ::testing::Values(TransferFailure::None,
-                                          TransferFailure::Readback,
-                                          TransferFailure::Clear));
+                        ::testing::Combine(::testing::Values(TransferFailure::None,
+                                                             TransferFailure::Readback,
+                                                             TransferFailure::Clear),
+                                           ::testing::Bool()));
+
+TEST(SynchronizerValidatorReporting, EnqueuesAreUncheckedByDefault)
+{
+    TensileLite::ContractionProblemGemm problem;
+    problem.setSynchronizer(rocisa::DataType::Int32, 4);
+    std::vector<uint32_t> buffer{0, 1, 0, 0};
+    auto inputs = std::make_shared<TensileLite::ContractionInputs>();
+    inputs->Synchronizer = buffer.data();
+    auto device                  = std::make_shared<DeviceContext>(0, true);
+    device->inputArr             = {inputs};
+    HostBufferValidator validator(std::vector<std::shared_ptr<DeviceContext>>{device});
+    TimingEvents events({}, 0, 0);
+    validator.preProblem(&problem);
+    validator.preSolution(nullptr);
+    validator.failure = TransferFailure::Readback;
+    EXPECT_NO_THROW(validator.validateEnqueues({0}, events, events));
+    EXPECT_EQ(buffer[1], 1u);
+    EXPECT_EQ(validator.error(), 0);
+}
 
 namespace
 {

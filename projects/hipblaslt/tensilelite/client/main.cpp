@@ -267,6 +267,8 @@ namespace TensileLite
                 ("check-synchronizer",       po::value<bool>()->default_value(true),
                 "Fail the run if a StreamK, GSU MBSK or output-amax kernel leaves the shared Synchronizer buffer nonzero on exit."
                 " Solutions known not to use the buffer are skipped.")
+                ("validate-after-enqueues",  po::value<bool>()->default_value(false),
+                "Validate final output and synchronizer state after each enqueue group; requires c-equal-d=false.")
                 ("bounds-check",             po::value<BoundsCheckMode>()->default_value(BoundsCheckMode::Disable),
                 "1:Use sentinel values to check memory boundaries."
                 "2:Memory bound check by front guard page"
