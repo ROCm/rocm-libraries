@@ -6498,7 +6498,6 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
               module.add(self.localWriteResetOffsets(kernel, False, tensorParametersB["MX"]))
 
         if ((kernel["DirectToLdsA"] or kernel["DirectToLdsB"])
-            and not (kernel["enableTDMA"] and kernel["enableTDMB"])
             and self.isPrefetchAcrossPersistentEnabled(kernel)):
           module.add(self.papDtlShiftTailLdsWriteBank(kernel, tensorParametersA, tensorParametersB))
 

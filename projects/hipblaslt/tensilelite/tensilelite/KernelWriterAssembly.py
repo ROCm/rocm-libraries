@@ -21005,7 +21005,6 @@ class KernelWriterAssembly(KernelWriter):
     # Same gate as the papDtlRestoreLdsBank call in setupNewTile.
     return (self.states.IncLdsBufSwitch and kernel["LdsOffsetA_Blk"] != 0
             and (kernel["DirectToLdsA"] or kernel["DirectToLdsB"])
-            and not (kernel["enableTDMA"] and kernel["enableTDMB"])
             and self.isPrefetchAcrossPersistentEnabled(kernel))
 
   def papDtlLdsBankMask(self, kernel: Mapping) -> int:

@@ -6777,10 +6777,9 @@ class Solution(collections.abc.Mapping):
       state["LdsOffsetBiasGSU"] = ldsNumBytesRemapCGSU
       state["LdsOffsetBias"] = ldsNumBytesRemapC
     # A DTL PAP prefetch keeps the next tile's first PGR group in one of the A/B
-    # LDS banks through the whole epilogue. TDM A+B uses _SeparateEpilogueLds.
+    # LDS banks through the whole epilogue.
     if state.get("PrefetchAcrossPersistent", 0) and \
-        (state["DirectToLdsA"] or state["DirectToLdsB"]) and \
-        not (state["enableTDMA"] and state["enableTDMB"]):
+        (state["DirectToLdsA"] or state["DirectToLdsB"]):
       if state["LocalSplitU"] > 1:
         reject(state, printRejectionReason, "PrefetchAcrossPersistent with DirectToLds not supported with LocalSplitU > 1 (reduction reuses the A/B LDS banks)")
         return
