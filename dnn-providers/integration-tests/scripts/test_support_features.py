@@ -43,6 +43,7 @@ from support_features import (
     pointwise,
     reduction,
     registry,
+    resample_fwd,
     rmsnorm,
     rmsnorm_backward,
     sdpa,
@@ -4570,6 +4571,595 @@ class TestReductionExtract:
         node["inputs"] = {"in_tensor_uid": node.pop("in_tensor_uid")}
         node["outputs"] = {"out_tensor_uid": node.pop("out_tensor_uid")}
         self._raises(node, tensors, "required port in_tensor_uid")
+
+
+def _rsf(
+    *,
+    mode: object = "maxpool",
+    padding_mode: object = "neg_inf_pad",
+    dims: tuple[int, ...] = (2, 3, 8, 8),
+    window: tuple[int, ...] = (2, 2),
+    stride: tuple[int, ...] = (2, 2),
+    pre: tuple[int, ...] | None = None,
+    post: tuple[int, ...] | None = None,
+    dtype: str = "float",
+    y_dtype: str | None = None,
+    layout: str = "nchw",
+    y_layout: str | None = None,
+    index: bool = True,
+    generate: bool | None = True,
+) -> tuple[dict, dict]:
+    """A ResampleFwdAttributes node: ``x`` on uid 0, ``y`` on uid 1 and, with
+    ``index``, an int32 index on uid 2 of ``y``'s dims and strides, as the
+    API infers it. Packed ``layout`` strides.
+
+    Padding defaults to 0 in each spatial dim; ``y`` takes the dims the
+    pooling gives, and ``x``'s dtype and layout unless told otherwise;
+    ``generate=None`` leaves ``generate_index`` out. Ports at the top of the
+    node, as utilities/json/ResampleFwdAttributes.hpp writes them.
+    """
+    spatial = len(dims) - 2
+    pre = pre if pre is not None else (0,) * spatial
+    post = post if post is not None else (0,) * spatial
+    y_dims = [
+        *dims[:2],
+        *(
+            (d + p + q - w) // s + 1
+            for d, p, q, w, s in zip(dims[2:], pre, post, window, stride)
+        ),
+    ]
+
+    def tensor(uid: int, shape: list[int], dt: str, lay: str) -> dict:
+        return {
+            "uid": uid,
+            "dims": list(shape),
+            "strides": _layout_strides(list(shape), lay),
+            "data_type": dt,
+            "virtual": False,
+        }
+
+    tensors = {
+        0: tensor(0, list(dims), dtype, layout),
+        1: tensor(1, y_dims, y_dtype or dtype, y_layout or layout),
+    }
+    node = {
+        "type": "ResampleFwdAttributes",
+        "compute_data_type": "float",
+        "x_tensor_uid": 0,
+        "y_tensor_uid": 1,
+        "pre_padding": list(pre),
+        "post_padding": list(post),
+        "stride": list(stride),
+        "window": list(window),
+        "resample_mode": mode,
+        "padding_mode": padding_mode,
+    }
+    if index:
+        tensors[2] = {**tensors[1], "uid": 2, "data_type": "int32"}
+        node["index_tensor_uid"] = 2
+    if generate is not None:
+        node["generate_index"] = generate
+    return node, tensors
+
+
+def _serialized_enum(name: str) -> dict[str, str]:
+    """``name`` enumerator -> the name utilities/json/Common.hpp writes."""
+    path = (
+        registry.REPO_ROOT
+        / "projects/hipdnn/flatbuffers_sdk/include/hipdnn_flatbuffers_sdk"
+        / "utilities/json/Common.hpp"
+    )
+    # Missing, the mode check would pass vacuously, as for the schemas.
+    assert path.is_file(), f"serializer not found: {path}"
+    pairs = re.findall(rf'\{{{name}::(\w+),\s*"(\w+)"\}}', path.read_text())
+    assert pairs, f"the serializer's {name} names were not found"
+    return dict(pairs)
+
+
+# avgpool takes no index: the provider rejects one.
+_AVG = {"index": False, "generate": False}
+
+
+class TestResampleFwdExtract:
+    PLAIN = {
+        "mode:maxpool",
+        "dtype:fp32",
+        "rank:2d",
+        "layout:nchw",
+        "stride:strided",
+        "index:generated",
+    }
+
+    def _extract(self, **kwargs) -> set[str]:
+        return resample_fwd.extract(*_rsf(**kwargs))
+
+    def _raises(self, node: dict, tensors: dict, match: str) -> None:
+        with pytest.raises(FeatureError, match=match):
+            resample_fwd.extract(node, tensors)
+
+    def _group(self, features: set[str], group: str) -> set[str]:
+        return {f for f in features if f.startswith(f"{group}:")}
+
+    def test_builder_binds_every_schema_field(self) -> None:
+        node, _ = _rsf()
+        written = set(node) - {"type", "compute_data_type"}
+        assert written == table_fields(
+            resample_fwd.SCHEMA_FILE, resample_fwd.SCHEMA_TABLE
+        )
+
+    @pytest.mark.parametrize(
+        "enum, names, unset",
+        [
+            ("ResampleMode", resample_fwd.MODES, "not_set"),
+            ("PaddingMode", resample_fwd.PADDING_MODES, "padding_not_set"),
+        ],
+    )
+    def test_the_serializer_names_every_schema_enumerator(
+        self, enum: str, names: tuple[str, ...], unset: str
+    ) -> None:
+        serialized = _serialized_enum(enum)
+        assert set(serialized) == _schema_enum("resample_common.fbs", enum)
+        assert set(names) == set(serialized.values()) - {unset}
+
+    def test_every_feature_is_reachable(self) -> None:
+        reached = self._extract()
+        for kwargs in (
+            {"mode": "avgpool_exclude_padding", "dtype": "half", **_AVG},
+            {"mode": "avgpool_include_padding", "dtype": "bfloat16", **_AVG},
+            {"pre": (1, 1), "post": (1, 1), "window": (3, 3)},
+            {"pre": (1, 0), "padding_mode": "zero_pad", "layout": "nhwc"},
+            {"dims": (2, 3, 8, 8, 8), "window": (2, 2, 2), "stride": (2, 2, 2)},
+            {"stride": (1, 3), **_AVG, "mode": "avgpool_exclude_padding"},
+            {"index": False, "generate": None},
+        ):
+            reached |= self._extract(**kwargs)
+        assert reached == {f.id for f in resample_fwd.FEATURES}
+
+    def test_plain_graph(self) -> None:
+        assert self._extract() == self.PLAIN
+
+    def test_uid_zero_is_a_binding(self) -> None:
+        node, tensors = _rsf()
+        assert node["x_tensor_uid"] == 0
+        assert resample_fwd.extract(node, tensors) == self.PLAIN
+
+    @pytest.mark.parametrize("mode", resample_fwd.MODES)
+    def test_mode(self, mode: str) -> None:
+        kwargs = {} if mode == "maxpool" else _AVG
+        features = self._extract(mode=mode, **kwargs)
+        assert self._group(features, "mode") == {f"mode:{mode}"}
+
+    @pytest.mark.parametrize(
+        "mode", ["not_set", "MAXPOOL", "avgpool", "", 1, ["maxpool"], None]
+    )
+    def test_a_mode_that_is_not_catalogued_raises(self, mode) -> None:
+        self._raises(*_rsf(mode=mode), "resample_mode .* is not catalogued")
+
+    @pytest.mark.parametrize(
+        "padding_mode",
+        ["padding_not_set", "NEG_INF_PAD", "zero", "", 2, ["zero_pad"], None],
+    )
+    def test_a_padding_mode_that_is_not_catalogued_raises(self, padding_mode) -> None:
+        self._raises(
+            *_rsf(padding_mode=padding_mode), "padding_mode .* is not catalogued"
+        )
+
+    @pytest.mark.parametrize("key", ["resample_mode", "padding_mode"])
+    def test_a_missing_mode_raises(self, key: str) -> None:
+        node, tensors = _rsf()
+        del node[key]
+        self._raises(node, tensors, f"{key} None is not catalogued")
+
+    @pytest.mark.parametrize(
+        "dtype, expected",
+        [("float", "dtype:fp32"), ("half", "dtype:fp16"), ("bfloat16", "dtype:bf16")],
+    )
+    def test_dtype(self, dtype: str, expected: str) -> None:
+        features = self._extract(dtype=dtype)
+        assert features == self.PLAIN - {"dtype:fp32"} | {expected}
+
+    @pytest.mark.parametrize(
+        "dtype, y_dtype",
+        [("half", "float"), ("float", "bfloat16"), ("bfloat16", "half")],
+    )
+    def test_a_y_of_another_dtype_raises(self, dtype: str, y_dtype: str) -> None:
+        self._raises(*_rsf(dtype=dtype, y_dtype=y_dtype), "is not that of x_tensor_uid")
+
+    @pytest.mark.parametrize("uid, port", [(0, "x_tensor_uid"), (1, "y_tensor_uid")])
+    @pytest.mark.parametrize("dtype", ["int8", "int32", "fp8_e4m3", "double", None])
+    def test_an_uncatalogued_dtype_raises(self, uid: int, port: str, dtype) -> None:
+        node, tensors = _rsf()
+        tensors[uid]["data_type"] = dtype
+        self._raises(node, tensors, f"{port} dtype .* is not catalogued")
+
+    @pytest.mark.parametrize(
+        "dims, window, stride, expected",
+        [
+            ((2, 3, 8, 8), (2, 2), (2, 2), "rank:2d"),
+            ((2, 3, 4, 8, 8), (2, 2, 2), (2, 2, 2), "rank:3d"),
+        ],
+    )
+    def test_rank(
+        self,
+        dims: tuple[int, ...],
+        window: tuple[int, ...],
+        stride: tuple[int, ...],
+        expected: str,
+    ) -> None:
+        features = self._extract(dims=dims, window=window, stride=stride)
+        assert self._group(features, "rank") == {expected}
+
+    @pytest.mark.parametrize(
+        "dims, window, stride",
+        [
+            # The API takes rank 3 (1D); the provider and the CPU reference
+            # do not.
+            ((2, 3, 8), (2,), (2,)),
+            ((2, 3, 4, 4, 4, 4), (2, 2, 2, 2), (2, 2, 2, 2)),
+        ],
+    )
+    def test_a_rank_the_provider_rejects_raises(
+        self, dims: tuple[int, ...], window: tuple[int, ...], stride: tuple[int, ...]
+    ) -> None:
+        node, tensors = _rsf(dims=dims, window=window, stride=stride)
+        self._raises(node, tensors, f"rank {len(dims)} is not catalogued")
+
+    def test_x_and_y_of_different_ranks_raise(self) -> None:
+        node, tensors = _rsf()
+        tensors[1]["dims"] = [2, 3, 4, 4, 1]
+        self._raises(node, tensors, "are not the rank of x_tensor_uid")
+
+    @pytest.mark.parametrize(
+        "name", ["pre_padding", "post_padding", "stride", "window"]
+    )
+    @pytest.mark.parametrize(
+        "values", [[2], [2, 2, 2], [], None, "2", [2, 2.0], [True, 2]]
+    )
+    def test_a_parameter_list_of_the_wrong_shape_raises(
+        self, name: str, values
+    ) -> None:
+        node, tensors = _rsf()
+        node[name] = values
+        self._raises(node, tensors, f"{name} .* does not have 2 int entries")
+
+    @pytest.mark.parametrize(
+        "name", ["pre_padding", "post_padding", "stride", "window"]
+    )
+    def test_a_missing_parameter_list_raises(self, name: str) -> None:
+        node, tensors = _rsf()
+        del node[name]
+        self._raises(node, tensors, f"{name} None does not have")
+
+    @pytest.mark.parametrize("name", ["pre_padding", "post_padding"])
+    def test_negative_padding_raises(self, name: str) -> None:
+        node, tensors = _rsf()
+        node[name] = [0, -1]
+        self._raises(node, tensors, "negative padding")
+
+    @pytest.mark.parametrize("name", ["stride", "window"])
+    def test_a_stride_or_window_below_1_raises(self, name: str) -> None:
+        node, tensors = _rsf()
+        node[name] = [2, 0]
+        # Not "below 1" alone: the spatial check's message says that too.
+        self._raises(node, tensors, r"stride \[.*\] / window \[.*\] below 1")
+
+    @pytest.mark.parametrize(
+        "y_dims, match",
+        [
+            ([1, 3, 4, 4], "do not keep N and C"),
+            ([2, 6, 4, 4], "do not keep N and C"),
+            ([2, 3, 4, 5], r"spatial dims \[4, 5\] are not \[4, 4\]"),
+            ([2, 3, 3, 4], r"spatial dims \[3, 4\] are not \[4, 4\]"),
+        ],
+    )
+    def test_a_y_the_pooling_does_not_give_raises(
+        self, y_dims: list[int], match: str
+    ) -> None:
+        node, tensors = _rsf()
+        tensors[1]["dims"] = y_dims
+        self._raises(node, tensors, match)
+
+    def test_a_window_beyond_the_padded_x_raises(self) -> None:
+        # (2 + 0 + 0 - 4) // 1 + 1 = -1: no y cell.
+        node, tensors = _rsf(dims=(2, 3, 2, 2), window=(4, 4), stride=(1, 1))
+        self._raises(node, tensors, "or one is below 1")
+
+    @pytest.mark.parametrize(
+        "dims, layout, expected",
+        [
+            ((2, 3, 8, 8), "nchw", {"layout:nchw"}),
+            ((2, 3, 8, 8), "nhwc", {"layout:nhwc"}),
+            ((2, 3, 4, 8, 8), "nhwc", {"layout:nhwc"}),
+            # C of 1: no tensor tells.
+            ((2, 1, 8, 8), "nhwc", set()),
+        ],
+    )
+    def test_layout(
+        self, dims: tuple[int, ...], layout: str, expected: set[str]
+    ) -> None:
+        spatial = len(dims) - 2
+        features = self._extract(
+            dims=dims, layout=layout, window=(2,) * spatial, stride=(2,) * spatial
+        )
+        assert self._group(features, "layout") == expected
+
+    def test_x_and_y_in_different_layouts_raise(self) -> None:
+        node, tensors = _rsf(layout="nchw", y_layout="nhwc")
+        self._raises(node, tensors, "layouts of x_tensor_uid, y_tensor_uid")
+
+    def test_an_index_in_another_layout_raises(self) -> None:
+        node, tensors = _rsf()
+        tensors[2]["strides"] = _layout_strides(tensors[2]["dims"], "nhwc")
+        self._raises(node, tensors, "layouts of .*index_tensor_uid disagree")
+
+    @pytest.mark.parametrize("uid", [0, 1, 2])
+    def test_strides_no_layout_describes_raise(self, uid: int) -> None:
+        node, tensors = _rsf()
+        tensors[uid]["strides"] = list(reversed(tensors[uid]["strides"]))
+        self._raises(node, tensors, "not a catalogued layout|overlap")
+
+    @pytest.mark.parametrize(
+        "pre, post, expected",
+        [
+            ((0, 0), (0, 0), set()),
+            ((1, 1), (1, 1), {"padding:symmetric"}),
+            ((1, 0), (1, 0), {"padding:symmetric"}),
+            ((0, 1), (0, 1), {"padding:symmetric"}),
+            ((1, 0), (0, 1), {"padding:asymmetric"}),
+            ((0, 0), (1, 0), {"padding:asymmetric"}),
+            ((0, 1), (0, 0), {"padding:asymmetric"}),
+        ],
+    )
+    def test_padding(
+        self, pre: tuple[int, ...], post: tuple[int, ...], expected: set[str]
+    ) -> None:
+        features = self._extract(pre=pre, post=post)
+        assert self._group(features, "padding") == expected
+
+    @pytest.mark.parametrize(
+        "window, stride, expected",
+        [
+            ((2, 2), (2, 2), {"stride:strided"}),
+            ((1, 1), (1, 1), set()),
+            ((2, 2), (1, 1), {"window:overlapping"}),
+            ((3, 3), (2, 2), {"stride:strided", "window:overlapping"}),
+            ((2, 2), (3, 3), {"stride:strided", "window:gapped"}),
+            ((1, 2), (2, 1), {"stride:strided", "window:overlapping", "window:gapped"}),
+        ],
+    )
+    def test_stride_and_window(
+        self, window: tuple[int, ...], stride: tuple[int, ...], expected: set[str]
+    ) -> None:
+        features = self._extract(window=window, stride=stride)
+        assert (
+            self._group(features, "stride") | self._group(features, "window")
+            == expected
+        )
+
+    @pytest.mark.parametrize(
+        "pre, post, window, stride, reached",
+        [
+            ((0, 0), (0, 0), (2, 2), (2, 2), False),
+            ((1, 0), (0, 0), (2, 2), (2, 2), True),
+            ((0, 1), (0, 0), (2, 2), (2, 2), True),
+            # x 8: (8 + 1 - 2) // 2 + 1 = 4 windows, the last ending on x[7].
+            ((0, 0), (1, 0), (2, 2), (2, 2), False),
+            # (8 + 1 - 3) // 2 + 1 = 4 windows, the last ending on x[8], padding.
+            ((0, 0), (1, 0), (3, 2), (2, 2), True),
+            ((0, 0), (0, 1), (2, 3), (2, 1), True),
+        ],
+    )
+    @pytest.mark.parametrize("padding_mode", resample_fwd.PADDING_MODES)
+    def test_padding_mode_counts_under_maxpool_when_a_window_reaches_padding(
+        self,
+        pre: tuple[int, ...],
+        post: tuple[int, ...],
+        window: tuple[int, ...],
+        stride: tuple[int, ...],
+        reached: bool,
+        padding_mode: str,
+    ) -> None:
+        features = self._extract(
+            pre=pre, post=post, window=window, stride=stride, padding_mode=padding_mode
+        )
+        expected = {f"padding_mode:{padding_mode}"} if reached else set()
+        assert self._group(features, "padding_mode") == expected
+
+    @pytest.mark.parametrize(
+        "mode", ["avgpool_exclude_padding", "avgpool_include_padding"]
+    )
+    @pytest.mark.parametrize("padding_mode", resample_fwd.PADDING_MODES)
+    def test_an_average_reads_no_padding_mode_and_no_index(
+        self, mode: str, padding_mode: str
+    ) -> None:
+        features = self._extract(
+            mode=mode, padding_mode=padding_mode, pre=(1, 1), post=(1, 1), **_AVG
+        )
+        assert not self._group(features, "padding_mode")
+        assert not self._group(features, "index")
+
+    @pytest.mark.parametrize("generate", [False, None])
+    def test_maxpool_without_an_index(self, generate: bool | None) -> None:
+        features = self._extract(index=False, generate=generate)
+        assert features == self.PLAIN - {"index:generated"} | {"index:none"}
+
+    @pytest.mark.parametrize(
+        "mode", ["maxpool", "avgpool_exclude_padding", "avgpool_include_padding"]
+    )
+    def test_generate_index_without_an_index_raises(self, mode: str) -> None:
+        node, tensors = _rsf(mode=mode, index=False, generate=True)
+        self._raises(node, tensors, "generate_index is on but index_tensor_uid")
+
+    @pytest.mark.parametrize(
+        "mode", ["avgpool_exclude_padding", "avgpool_include_padding"]
+    )
+    @pytest.mark.parametrize("generate", [True, False])
+    def test_an_index_under_an_average_raises(self, mode: str, generate: bool) -> None:
+        node, tensors = _rsf(mode=mode, generate=generate)
+        self._raises(node, tensors, f"index_tensor_uid is bound under .* {mode}")
+
+    @pytest.mark.parametrize("generate", [False, None])
+    def test_an_index_left_ungenerated_raises(self, generate: bool | None) -> None:
+        # The provider leaves it unwritten; the CPU reference fills it.
+        node, tensors = _rsf(generate=generate)
+        self._raises(node, tensors, "index_tensor_uid is bound but generate_index")
+
+    @pytest.mark.parametrize("value", [1, 0, "true", None])
+    def test_a_generate_index_that_is_not_a_bool_raises(self, value) -> None:
+        node, tensors = _rsf()
+        node["generate_index"] = value
+        self._raises(node, tensors, "generate_index .* is not a bool")
+
+    @pytest.mark.parametrize("dtype", ["int8", "int64", "float", None])
+    def test_an_index_that_is_not_int32_raises(self, dtype) -> None:
+        # The API takes int8; the provider and the CPU reference do not.
+        node, tensors = _rsf()
+        tensors[2]["data_type"] = dtype
+        self._raises(node, tensors, "index_tensor_uid dtype .* is not catalogued")
+
+    def test_an_index_not_of_y_dims_raises(self) -> None:
+        node, tensors = _rsf()
+        tensors[2]["dims"] = [2, 3, 8, 8]
+        tensors[2]["strides"] = _layout_strides([2, 3, 8, 8], "nchw")
+        self._raises(node, tensors, "index_tensor_uid dims .* are not y_tensor_uid")
+
+    def test_uid_zero_is_an_index_binding(self) -> None:
+        node, tensors = _rsf()
+        tensors = {
+            0: {**tensors[2], "uid": 0},
+            1: tensors[1],
+            2: {**tensors[0], "uid": 2},
+        }
+        node["x_tensor_uid"], node["index_tensor_uid"] = 2, 0
+        assert resample_fwd.extract(node, tensors) == self.PLAIN
+
+    @pytest.mark.parametrize(
+        "kwargs, expected",
+        # The bundles' shapes, in each layout.
+        [
+            (
+                {
+                    "mode": "avgpool_include_padding",
+                    "padding_mode": "zero_pad",
+                    "dims": (1, 2, 4, 5, 3),
+                    "window": (2, 2, 2),
+                    "stride": (1, 2, 1),
+                    "pre": (1, 0, 1),
+                    "post": (0, 1, 0),
+                    **_AVG,
+                },
+                {
+                    "mode:avgpool_include_padding",
+                    "rank:3d",
+                    "padding:asymmetric",
+                    "stride:strided",
+                    "window:overlapping",
+                },
+            ),
+            (
+                {
+                    "mode": "avgpool_exclude_padding",
+                    "padding_mode": "zero_pad",
+                    "dims": (2, 3, 7, 5),
+                    "window": (3, 2),
+                    "stride": (2, 1),
+                    "pre": (1, 0),
+                    "post": (0, 1),
+                    **_AVG,
+                },
+                {
+                    "mode:avgpool_exclude_padding",
+                    "rank:2d",
+                    "padding:asymmetric",
+                    "stride:strided",
+                    "window:overlapping",
+                },
+            ),
+            (
+                {
+                    "mode": "avgpool_include_padding",
+                    "padding_mode": "zero_pad",
+                    "dims": (2, 3, 7, 5),
+                    "window": (2, 3),
+                    "stride": (1, 2),
+                    "pre": (0, 1),
+                    "post": (1, 0),
+                    **_AVG,
+                },
+                {
+                    "mode:avgpool_include_padding",
+                    "rank:2d",
+                    "padding:asymmetric",
+                    "stride:strided",
+                    "window:overlapping",
+                },
+            ),
+            (
+                {
+                    "dims": (1, 2, 4, 5, 3),
+                    "window": (2, 2, 2),
+                    "stride": (1, 2, 1),
+                },
+                {
+                    "mode:maxpool",
+                    "rank:3d",
+                    "stride:strided",
+                    "window:overlapping",
+                    "index:generated",
+                },
+            ),
+            (
+                {"dims": (2, 3, 8, 6)},
+                {"mode:maxpool", "rank:2d", "stride:strided", "index:generated"},
+            ),
+            (
+                {
+                    "padding_mode": "zero_pad",
+                    "dims": (2, 3, 8, 6),
+                    "window": (3, 3),
+                    "pre": (1, 1),
+                    "post": (1, 1),
+                },
+                {
+                    "mode:maxpool",
+                    "padding_mode:zero_pad",
+                    "rank:2d",
+                    "padding:symmetric",
+                    "stride:strided",
+                    "window:overlapping",
+                    "index:generated",
+                },
+            ),
+        ],
+    )
+    @pytest.mark.parametrize("layout", ["nchw", "nhwc"])
+    def test_bundle_shapes(self, kwargs: dict, expected: set[str], layout: str) -> None:
+        features = self._extract(**kwargs, layout=layout)
+        assert features == expected | {"dtype:fp32", f"layout:{layout}"}
+
+    @pytest.mark.parametrize("port", ["x_tensor_uid", "y_tensor_uid"])
+    @pytest.mark.parametrize("unbound", ["null", "missing"])
+    def test_unbound_required_port_raises(self, port: str, unbound: str) -> None:
+        node, tensors = _rsf()
+        if unbound == "null":
+            node[port] = None
+        else:
+            del node[port]
+        self._raises(node, tensors, f"required port {port}")
+
+    def test_a_null_index_is_unbound(self) -> None:
+        node, tensors = _rsf(generate=False)
+        node["index_tensor_uid"] = None
+        assert resample_fwd.extract(node, tensors) == self.PLAIN - {
+            "index:generated"
+        } | {"index:none"}
+
+    def test_ports_under_inputs_and_outputs_are_not_read(self) -> None:
+        # The serializer writes them at the top, as for reduction.
+        node, tensors = _rsf()
+        node["inputs"] = {"x_tensor_uid": node.pop("x_tensor_uid")}
+        node["outputs"] = {"y_tensor_uid": node.pop("y_tensor_uid")}
+        self._raises(node, tensors, "required port x_tensor_uid")
 
 
 # --------------------------------------------------------------------------

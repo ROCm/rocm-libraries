@@ -30,6 +30,7 @@ from support_features import (
     matmul,
     pointwise,
     reduction,
+    resample_fwd,
     rmsnorm,
     rmsnorm_backward,
     sdpa,
@@ -57,6 +58,7 @@ OPS: dict[str, ModuleType] = {
         matmul,
         pointwise,
         reduction,
+        resample_fwd,
         rmsnorm,
         rmsnorm_backward,
         sdpa,
@@ -72,7 +74,6 @@ PENDING = frozenset(
         "MoeGroupedMatmulAttributes",
         "MoeGroupedMatmulBwdAttributes",
         "ResampleBwdAttributes",
-        "ResampleFwdAttributes",
     }
 )
 
