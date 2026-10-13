@@ -131,6 +131,8 @@ TEST(OrderedBlockID, Unique)
                                     ordered_bid_type::get_temp_storage_layout()))));
 
     auto ordered_bid = ordered_bid_type::create(ordered_bid_storage);
+    // Zero the storage to ensure the first bid is zero
+    HIP_CHECK(ordered_bid.reset_from_host());
 
     constexpr size_t grid_dim  = 8;
     constexpr size_t block_dim = 8;
