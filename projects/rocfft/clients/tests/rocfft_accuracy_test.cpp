@@ -21,6 +21,7 @@
 #include <gtest/gtest.h>
 #include <math.h>
 #include <stdexcept>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -67,6 +68,9 @@ static user_mp_launch_command get_mp_launch_command()
     }
     return ret;
 }
+
+// fft_vs_reference_impl only calls this check if it exists, so guard against it vanishing
+static_assert(std::is_member_function_pointer_v<decltype(&rocfft_params::validate_work_memory)>);
 
 void fft_vs_reference(rocfft_params& params, bool round_trip)
 {

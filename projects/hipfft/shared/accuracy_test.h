@@ -548,6 +548,9 @@ inline void fft_vs_reference_impl(Tparams& params, bool round_trip)
     // Make sure FFT buffers fit in device memory
     check_problem_fits_device_memory(params, verbose);
 
+    if constexpr(requires { params.validate_work_memory(); })
+        params.validate_work_memory();
+
     auto ibuffer_sizes = params.ibuffer_sizes();
     auto obuffer_sizes = params.obuffer_sizes();
     // Allocate device input buffer(s)
