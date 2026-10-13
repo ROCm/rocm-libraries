@@ -40,6 +40,7 @@ from support_features import (
     layernorm,
     layernorm_backward,
     matmul,
+    moe_grouped_matmul,
     pointwise,
     reduction,
     registry,
@@ -4643,12 +4644,13 @@ def _rsf(
     return node, tensors
 
 
-def _serialized_enum(name: str) -> dict[str, str]:
-    """``name`` enumerator -> the name utilities/json/Common.hpp writes."""
+def _serialized_enum(name: str, header: str = "Common.hpp") -> dict[str, str]:
+    """``name`` enumerator -> the name utilities/json/``header`` writes."""
     path = (
         registry.REPO_ROOT
         / "projects/hipdnn/flatbuffers_sdk/include/hipdnn_flatbuffers_sdk"
-        / "utilities/json/Common.hpp"
+        / "utilities/json"
+        / header
     )
     # Missing, the mode check would pass vacuously, as for the schemas.
     assert path.is_file(), f"serializer not found: {path}"
@@ -5503,6 +5505,395 @@ class TestResampleBwdExtract:
         node["inputs"] = {"dy_tensor_uid": node.pop("dy_tensor_uid")}
         node["outputs"] = {"dx_tensor_uid": node.pop("dx_tensor_uid")}
         self._raises(node, tensors, "required port dy_tensor_uid")
+
+
+# --------------------------------------------------------------------------
+# MoeGroupedMatmulAttributes
+# --------------------------------------------------------------------------
+
+
+def _moe(
+    *,
+    mode: str = "none",
+    experts: int = 2,
+    batch: int = 1,
+    tokens: int = 8,
+    k: int = 16,
+    n: int = 32,
+    top_k: int | None = None,
+    routed: int | None = None,
+    dtype: str = "float",
+    weight_dtype: str | None = None,
+    out_dtype: str | None = None,
+    weight_layout: str = "row_major",
+    token_virtual: bool = False,
+    output_virtual: bool = False,
+) -> tuple[dict, dict]:
+    """A MoeGroupedMatmulAttributes node: ``token`` on uid 1, ``weight`` on 2,
+    the offset on 3, the index on 4, the ks on 5, ``output`` on 6.
+
+    ``gather`` binds an index of ``routed`` rows (``tokens`` unless told
+    otherwise), ``scatter`` an index and a ks of ``tokens`` rows; ``top_k``
+    is 1 under ``scatter`` and 0 otherwise unless told. ``output`` has the
+    rows the mode routes to. Ports as
+    utilities/json/MoeGroupedMatmulAttributes.hpp writes them.
+    """
+    if top_k is None:
+        top_k = 1 if mode == "scatter" else 0
+    rows = tokens if routed is None else routed
+
+    def tensor(uid: int, dims: list[int], dt: str, virtual: bool = False) -> dict:
+        return {
+            "uid": uid,
+            "dims": dims,
+            "strides": _matrix_strides(dims, "row_major"),
+            "data_type": dt,
+            "virtual": virtual,
+        }
+
+    weight = tensor(2, [experts, k, n], weight_dtype or dtype)
+    weight["strides"] = _matrix_strides(weight["dims"], weight_layout)
+    tensors = {
+        1: tensor(1, [1, tokens, k], dtype, token_virtual),
+        2: weight,
+        3: tensor(3, [batch * experts, 1, 1], "int32"),
+        4: tensor(4, [1, rows, 1], "int32"),
+        5: tensor(5, [1, rows, 1], "int32"),
+        6: tensor(
+            6,
+            [1, rows if mode == "gather" else tokens, n],
+            out_dtype or dtype,
+            output_virtual,
+        ),
+    }
+    inputs = {
+        "token_tensor_uid": 1,
+        "weight_tensor_uid": 2,
+        "first_token_offset_tensor_uid": 3,
+    }
+    if mode in ("gather", "scatter"):
+        inputs["token_index_tensor_uid"] = 4
+    if mode == "scatter":
+        inputs["token_ks_tensor_uid"] = 5
+    node = {
+        "type": "MoeGroupedMatmulAttributes",
+        "inputs": inputs,
+        "outputs": {"output_tensor_uid": 6},
+        "mode": mode,
+        "top_k": top_k,
+    }
+    return node, tensors
+
+
+class TestMoeGroupedMatmulExtract:
+    PLAIN = {"mode:none", "dtype:fp32", "batch:single", "weight_layout:row_major"}
+
+    def _extract(self, **kwargs) -> set[str]:
+        return moe_grouped_matmul.extract(*_moe(**kwargs))
+
+    def _raises(self, node: dict, tensors: dict, match: str) -> None:
+        with pytest.raises(FeatureError, match=match):
+            moe_grouped_matmul.extract(node, tensors)
+
+    @staticmethod
+    def _group(features: set[str], group: str) -> set[str]:
+        return {f for f in features if f.startswith(f"{group}:")}
+
+    def test_builder_binds_every_schema_field(self) -> None:
+        node, _ = _moe(mode="scatter")
+        written = set(batchnorm.bound(node)) | set(node) - {"type", "inputs", "outputs"}
+        assert written == table_fields(
+            moe_grouped_matmul.SCHEMA_FILE, moe_grouped_matmul.SCHEMA_TABLE
+        )
+
+    def test_the_serializer_names_every_schema_enumerator(self) -> None:
+        # No NOT_SET to leave out: the schema's default is NONE.
+        serialized = _serialized_enum(
+            "MoeGroupedMatmulMode", "MoeGroupedMatmulAttributes.hpp"
+        )
+        assert set(serialized) == _schema_enum(
+            moe_grouped_matmul.SCHEMA_FILE, "MoeGroupedMatmulMode"
+        )
+        assert set(moe_grouped_matmul.MODES) == set(serialized.values())
+
+    def test_every_feature_is_reachable(self) -> None:
+        reached = self._extract()
+        for kwargs in (
+            {"mode": "gather", "dtype": "half", "out_dtype": "float", "batch": 2},
+            {"mode": "scatter", "dtype": "bfloat16", "weight_layout": "col_major"},
+            {"mode": "scatter", "top_k": 2},
+        ):
+            reached |= self._extract(**kwargs)
+        assert reached == {f.id for f in moe_grouped_matmul.FEATURES}
+
+    def test_plain_graph(self) -> None:
+        assert self._extract() == self.PLAIN
+
+    @pytest.mark.parametrize(
+        "dtype, expected",
+        [("float", "dtype:fp32"), ("half", "dtype:fp16"), ("bfloat16", "dtype:bf16")],
+    )
+    def test_dtype(self, dtype: str, expected: str) -> None:
+        features = self._extract(dtype=dtype)
+        assert features == self.PLAIN - {"dtype:fp32"} | {expected}
+
+    @pytest.mark.parametrize(
+        "dtype, out_dtype",
+        [
+            ("half", "float"),
+            ("bfloat16", "float"),
+            ("float", "half"),
+            ("float", "bfloat16"),
+        ],
+    )
+    def test_mixed_output(self, dtype: str, out_dtype: str) -> None:
+        # The CPU reference's pairs: the other dtype fp32.
+        features = self._extract(dtype=dtype, out_dtype=out_dtype)
+        assert "precision:mixed_output" in features
+
+    @pytest.mark.parametrize("virtual", ["token_virtual", "output_virtual"])
+    def test_a_virtual_tensor_is_not_mixed(self, virtual: str) -> None:
+        features = self._extract(dtype="half", out_dtype="float", **{virtual: True})
+        assert features == self.PLAIN - {"dtype:fp32"} | {"dtype:fp16"}
+
+    @pytest.mark.parametrize("output_virtual", [False, True])
+    @pytest.mark.parametrize(
+        "dtype, out_dtype", [("half", "bfloat16"), ("bfloat16", "half")]
+    )
+    def test_an_output_pair_with_no_plan_raises(
+        self, dtype: str, out_dtype: str, output_virtual: bool
+    ) -> None:
+        # The signature key reads the dtype of a virtual output too.
+        node, tensors = _moe(
+            dtype=dtype, out_dtype=out_dtype, output_virtual=output_virtual
+        )
+        self._raises(node, tensors, "output_tensor_uid dtype .* has no plan")
+
+    def test_a_weight_not_of_token_dtype_raises(self) -> None:
+        node, tensors = _moe(dtype="half", weight_dtype="float")
+        self._raises(node, tensors, "weight_tensor_uid dtype .* is not that of")
+
+    @pytest.mark.parametrize(
+        "kwargs, port",
+        [
+            ({"dtype": "int8"}, "token_tensor_uid"),
+            ({"weight_dtype": "double"}, "weight_tensor_uid"),
+            ({"out_dtype": "int32"}, "output_tensor_uid"),
+        ],
+    )
+    def test_an_uncatalogued_dtype_raises(self, kwargs: dict, port: str) -> None:
+        node, tensors = _moe(**kwargs)
+        self._raises(node, tensors, f"{port} dtype .* is not catalogued")
+
+    @pytest.mark.parametrize(
+        "mode, expected",
+        [("none", "mode:none"), ("gather", "mode:gather"), ("scatter", "mode:scatter")],
+    )
+    def test_mode(self, mode: str, expected: str) -> None:
+        assert self._group(self._extract(mode=mode), "mode") == {expected}
+
+    @pytest.mark.parametrize("mode", ["NONE", "not_set", None, 0, "missing"])
+    def test_an_uncatalogued_mode_raises(self, mode) -> None:
+        # The reader requires mode, so a missing one is not NONE.
+        node, tensors = _moe()
+        if mode == "missing":
+            del node["mode"]
+        else:
+            node["mode"] = mode
+        self._raises(node, tensors, "mode .* is not catalogued")
+
+    @pytest.mark.parametrize(
+        "batch, expected", [(1, "batch:single"), (2, "batch:multi"), (3, "batch:multi")]
+    )
+    @pytest.mark.parametrize("experts", [1, 2, 4])
+    def test_batch(self, batch: int, expected: str, experts: int) -> None:
+        # Read on G against E, not on G alone.
+        features = self._extract(batch=batch, experts=experts)
+        assert self._group(features, "batch") == {expected}
+
+    @pytest.mark.parametrize(
+        "top_k, expected", [(1, {"top_k:one"}), (2, {"top_k:multi"})]
+    )
+    def test_top_k_under_scatter(self, top_k: int, expected: set[str]) -> None:
+        features = self._extract(mode="scatter", top_k=top_k)
+        assert self._group(features, "top_k") == expected
+
+    @pytest.mark.parametrize("mode", ["none", "gather"])
+    def test_no_top_k_feature_off_scatter(self, mode: str) -> None:
+        assert not self._group(self._extract(mode=mode), "top_k")
+
+    @pytest.mark.parametrize("top_k", [0, -1, 3])
+    def test_a_scatter_top_k_off_1_to_experts_raises(self, top_k: int) -> None:
+        node, tensors = _moe(mode="scatter", top_k=top_k)
+        self._raises(node, tensors, f"top_k {top_k} is not from 1 to 2 experts")
+
+    @pytest.mark.parametrize("top_k", [1, -1])
+    @pytest.mark.parametrize("mode", ["none", "gather"])
+    def test_a_top_k_off_scatter_raises(self, mode: str, top_k: int) -> None:
+        node, tensors = _moe(mode=mode, top_k=top_k)
+        self._raises(node, tensors, f"top_k {top_k} is not 0 under mode {mode}")
+
+    @pytest.mark.parametrize("top_k", [True, False, 1.0, "1", None, "missing"])
+    def test_a_top_k_that_is_not_an_int_raises(self, top_k) -> None:
+        node, tensors = _moe(mode="scatter")
+        if top_k == "missing":
+            del node["top_k"]
+        else:
+            node["top_k"] = top_k
+        self._raises(node, tensors, "top_k .* is not an int")
+
+    @pytest.mark.parametrize("port", ["token_index_tensor_uid", "token_ks_tensor_uid"])
+    def test_none_binding_routing_raises(self, port: str) -> None:
+        # The frontend takes an index under NONE; the backend does not.
+        node, tensors = _moe()
+        node["inputs"][port] = 4
+        self._raises(node, tensors, "mode none binds")
+
+    @pytest.mark.parametrize(
+        "drop, add",
+        [("token_index_tensor_uid", None), (None, "token_ks_tensor_uid")],
+    )
+    def test_gather_not_binding_an_index_alone_raises(self, drop, add) -> None:
+        node, tensors = _moe(mode="gather")
+        if drop:
+            node["inputs"][drop] = None
+        if add:
+            node["inputs"][add] = 5
+        self._raises(node, tensors, "mode gather does not bind token_index")
+
+    @pytest.mark.parametrize("port", ["token_index_tensor_uid", "token_ks_tensor_uid"])
+    def test_scatter_not_binding_both_raises(self, port: str) -> None:
+        node, tensors = _moe(mode="scatter")
+        del node["inputs"][port]
+        self._raises(node, tensors, "mode scatter does not bind both")
+
+    @pytest.mark.parametrize(
+        "mode, uid", [("gather", 4), ("scatter", 4), ("scatter", 5)]
+    )
+    @pytest.mark.parametrize("dtype", ["int64", "int8", "float", None])
+    def test_routing_not_int32_raises(self, mode: str, uid: int, dtype) -> None:
+        node, tensors = _moe(mode=mode)
+        tensors[uid]["data_type"] = dtype
+        self._raises(node, tensors, "token_(index|ks)_tensor_uid dtype .* is not int32")
+
+    @pytest.mark.parametrize("uid", [4, 5])
+    @pytest.mark.parametrize("dims", [[8], [1, 8], [2, 8, 1], [1, 8, 2], [1, 0, 1]])
+    def test_routing_not_1_rows_1_raises(self, uid: int, dims: list[int]) -> None:
+        node, tensors = _moe(mode="scatter")
+        tensors[uid]["dims"] = dims
+        self._raises(node, tensors, "token_(index|ks)_tensor_uid dims .* rows, 1")
+
+    @pytest.mark.parametrize("uid, rows", [(4, 5), (5, 5)])
+    def test_scatter_index_and_ks_rows_disagreeing_raises(
+        self, uid: int, rows: int
+    ) -> None:
+        node, tensors = _moe(mode="scatter")
+        tensors[uid]["dims"] = [1, rows, 1]
+        self._raises(node, tensors, "rows .* are not token_tensor_uid rows 8")
+
+    def test_scatter_routing_not_token_rows_raises(self) -> None:
+        # The API checks only that index and ks agree; the CPU reference
+        # bounds them by token's rows.
+        node, tensors = _moe(mode="scatter", routed=5)
+        self._raises(node, tensors, "index_tensor_uid rows 5 and .* rows 5 are not")
+
+    @pytest.mark.parametrize("routed", [5, 8, 13])
+    def test_gather_output_rows_are_the_index_rows(self, routed: int) -> None:
+        features = self._extract(mode="gather", routed=routed)
+        assert self._group(features, "mode") == {"mode:gather"}
+
+    def test_gather_output_of_token_rows_raises(self) -> None:
+        node, tensors = _moe(mode="gather", routed=5)
+        tensors[6]["dims"] = [1, 8, 32]
+        self._raises(node, tensors, r"output_tensor_uid dims .* are not \[1, 5, 32\]")
+
+    @pytest.mark.parametrize("mode", ["none", "scatter"])
+    @pytest.mark.parametrize("dims", [[1, 8, 16], [1, 7, 32], [2, 8, 32]])
+    def test_an_output_of_the_wrong_dims_raises(self, mode: str, dims) -> None:
+        node, tensors = _moe(mode=mode)
+        tensors[6]["dims"] = dims
+        self._raises(node, tensors, r"output_tensor_uid dims .* are not \[1, 8, 32\]")
+
+    @pytest.mark.parametrize(
+        "uid, port",
+        [
+            (1, "token_tensor_uid"),
+            (2, "weight_tensor_uid"),
+            (3, "first_token_offset_tensor_uid"),
+            (6, "output_tensor_uid"),
+        ],
+    )
+    @pytest.mark.parametrize("dims", [[8, 16], [1, 1, 8, 16], [1, 0, 16], []])
+    def test_a_required_tensor_not_rank_3_raises(self, uid, port, dims) -> None:
+        node, tensors = _moe()
+        tensors[uid]["dims"] = dims
+        self._raises(node, tensors, f"{port} dims .*: not rank 3 with dims >= 1")
+
+    @pytest.mark.parametrize("dims", [[2, 8, 16], [1, 8, 15]])
+    def test_a_token_not_1_tokens_k_raises(self, dims: list[int]) -> None:
+        node, tensors = _moe()
+        tensors[1]["dims"] = dims
+        self._raises(
+            node, tensors, r"token_tensor_uid dims .* are not \[1, tokens, 16\]"
+        )
+
+    @pytest.mark.parametrize("dims", [[2, 2, 1], [2, 1, 2], [3, 1, 1], [1, 1, 1]])
+    def test_an_offset_not_a_multiple_of_experts_raises(self, dims) -> None:
+        node, tensors = _moe()
+        tensors[3]["dims"] = dims
+        self._raises(node, tensors, "first_token_offset_tensor_uid dims .* 2 experts")
+
+    @pytest.mark.parametrize("dtype", ["int64", "float", None])
+    def test_an_offset_not_int32_raises(self, dtype) -> None:
+        node, tensors = _moe()
+        tensors[3]["data_type"] = dtype
+        self._raises(
+            node, tensors, "first_token_offset_tensor_uid dtype .* is not int32"
+        )
+
+    @pytest.mark.parametrize(
+        "layout, expected",
+        [
+            ("row_major", "weight_layout:row_major"),
+            ("col_major", "weight_layout:col_major"),
+        ],
+    )
+    def test_weight_layout(self, layout: str, expected: str) -> None:
+        features = self._extract(weight_layout=layout)
+        assert self._group(features, "weight_layout") == {expected}
+
+    def test_col_major_is_cudnn_documented_strides(self) -> None:
+        # {K*N, 1, K}: the CPU reference's column path.
+        _, tensors = _moe(weight_layout="col_major")
+        assert tensors[2]["strides"] == [16 * 32, 1, 16]
+
+    def test_a_weight_with_no_unit_stride_raises(self) -> None:
+        node, tensors = _moe()
+        tensors[2]["strides"] = [2 * 16 * 32, 64, 2]
+        self._raises(node, tensors, "weight_tensor_uid strides .* no unit stride")
+
+    def test_uid_zero_is_a_binding(self) -> None:
+        node, tensors = _moe()
+        tensors[0] = {**tensors.pop(1), "uid": 0}
+        node["inputs"]["token_tensor_uid"] = 0
+        assert moe_grouped_matmul.extract(node, tensors) == self.PLAIN
+
+    @pytest.mark.parametrize("port", moe_grouped_matmul.REQUIRED)
+    @pytest.mark.parametrize("unbound", ["null", "missing"])
+    def test_unbound_required_port_raises(self, port: str, unbound: str) -> None:
+        node, tensors = _moe()
+        ports = node["outputs" if port == "output_tensor_uid" else "inputs"]
+        if unbound == "null":
+            ports[port] = None
+        else:
+            del ports[port]
+        self._raises(node, tensors, f"required port {port}")
+
+    def test_ports_at_the_top_of_the_node_are_not_read(self) -> None:
+        # Unlike reduction and resample: the serializer nests them.
+        node, tensors = _moe()
+        node.update(node.pop("inputs"))
+        self._raises(node, tensors, "required port token_tensor_uid")
 
 
 # --------------------------------------------------------------------------
