@@ -423,6 +423,27 @@ The Reading guide at the end of the full document spells out the rest,
 including the `[multi_batch]` / `[grouped]` / `[stride]` / `[dilation]` /
 `[padding]` variant tags.
 
+### Feature coverage per op
+
+The matrix counts graphs; it cannot show that an op has a feature no bundle
+touches. `scripts/support_features/` counts features instead: for each op, the
+share of its API features that at least one bundle graph exercises (*tested*),
+and the share that at least one claimed graph exercises on each arch. Features
+count singly, not in combination.
+
+```bash
+python3 dnn-providers/integration-tests/scripts/support_features/coverage.py
+```
+
+The denominator is the op's API, not the bundles: each op module
+(`support_features/sdpa.py`, ...) catalogs the features of one node type in
+the flatbuffers schema, and `test_support_features.py` fails if a schema field
+is neither used by a feature nor listed with a reason it is not one. A graph
+that uses a value its catalog does not name — a new dtype, an uncatalogued head
+dim — is an error, not a silent omission. Node types without a catalog yet are
+listed in `support_features/registry.py` and reported by graph count only. The
+tests run as the `hipdnn_support_features_python_tests` ctest.
+
 ## Test Tiers
 
 Tiers bound how long a run takes. They apply to both the C++ reference-executor

@@ -189,10 +189,18 @@ if(Python3_FOUND)
     )
     set(HIPDNN_IT_SUPPORT_MATRIX_RENDERER_TEST hipdnn_support_matrix_renderer_python_tests)
 
-    # Neither suite uses a third-party plugin; don't let a broken one installed
-    # in the developer's environment fail them.
+    add_test(
+        NAME hipdnn_support_features_python_tests
+        COMMAND ${Python3_EXECUTABLE} -m pytest -q -p no:cacheprovider
+                ${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_support_features.py
+    )
+    set(HIPDNN_IT_SUPPORT_FEATURES_TEST hipdnn_support_features_python_tests)
+
+    # None of these suites uses a third-party plugin; don't let a broken one
+    # installed in the developer's environment fail them.
     set_tests_properties(
         hipdnn_bundle_discovery_python_tests hipdnn_support_matrix_renderer_python_tests
+        hipdnn_support_features_python_tests
         PROPERTIES ENVIRONMENT "PYTEST_DISABLE_PLUGIN_AUTOLOAD=1"
     )
 
@@ -355,6 +363,9 @@ if(EXISTS "${HIPDNN_IT_GTEST_CATEGORIES_YAML}"
     endif()
     if(HIPDNN_IT_SUPPORT_MATRIX_RENDERER_TEST)
         _apply_provider_ctest_category_labels(${HIPDNN_IT_SUPPORT_MATRIX_RENDERER_TEST})
+    endif()
+    if(HIPDNN_IT_SUPPORT_FEATURES_TEST)
+        _apply_provider_ctest_category_labels(${HIPDNN_IT_SUPPORT_FEATURES_TEST})
     endif()
     if(HIPDNN_IT_GOLDEN_GENERATOR_TEST)
         _apply_provider_ctest_category_labels(${HIPDNN_IT_GOLDEN_GENERATOR_TEST})

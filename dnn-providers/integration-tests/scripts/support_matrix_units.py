@@ -550,6 +550,10 @@ class ClaimUnit:
     # is rendered.
     key: tuple = ()
     digest: str = ""
+    # The resolved graph, for readers that need more than the labels above
+    # (support_features/ extracts API features from it). Never rendered, and
+    # left out of equality and repr: ``digest`` already stands for it.
+    graph: dict = field(default_factory=dict, repr=False, compare=False)
 
     @property
     def label(self) -> str:
@@ -650,6 +654,7 @@ def collect_sweep_units(
             tiers=[place.tier],
             key=("sweep", place.location, case_id),
             digest=graph_digest(graph),
+            graph=graph,
         )
         for engine, per_case in claims_by_case.items():
             pairs = per_case.get(case_id)
@@ -695,6 +700,7 @@ def collect_single_graph_unit(
         tiers=[place.tier],
         key=("single", place.location, graph_path.name),
         digest=graph_digest(graph),
+        graph=graph,
     )
     for engine, arch_map in claims.items():
         pairs = support_pairs(arch_map)
