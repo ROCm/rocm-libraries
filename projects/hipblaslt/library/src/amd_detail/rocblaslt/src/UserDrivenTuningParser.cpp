@@ -35,6 +35,7 @@
 #include <mutex>
 #include <set>
 #include <sstream>
+#include <tuple>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -172,9 +173,11 @@ namespace TensileLite
             // mutex already live here.
             std::unordered_set<ProblemOverride> attemptedKeys;
 
-            // Indexes already counted as rejected, per key. A key can hold
-            // several entries, and each is its own rejected entry.
-            std::unordered_map<ProblemOverride, std::set<int>> invalidEntries;
+            // Match TunedEntry::sameIdentity: rows can share an index while
+            // naming different kernels, and each is a separate rejected entry.
+            using EntryIdentity
+                = std::tuple<int32_t, std::optional<std::string>, std::optional<std::string>>;
+            std::unordered_map<ProblemOverride, std::set<EntryIdentity>> invalidEntries;
         };
 
         void summaryTally(uint64_t* shapes, uint64_t* matched, uint64_t* fellback, uint64_t* tuned)
@@ -328,11 +331,13 @@ namespace TensileLite
             inserted.first->second = true;
     }
 
-    bool recordTuningInvalidation(const ProblemOverride& key, int solutionIndex)
+    bool recordTuningInvalidation(const ProblemOverride& key, const TunedEntry& entry)
     {
         DiagnosticsState&           state = DiagnosticsState::instance();
         std::lock_guard<std::mutex> lock(state.mutex);
-        return state.invalidEntries[key].insert(solutionIndex).second;
+        return state.invalidEntries[key]
+            .emplace(entry.solutionIndex, entry.kernelName, entry.solutionName)
+            .second;
     }
 
     void recordTuningAttempt(const ProblemOverride& key)

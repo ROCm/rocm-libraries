@@ -313,8 +313,12 @@ Limitations
 * Tuning happens on the C API execution path. Callers of the C++ extension API can replay a cache but
   do not tune.
 * Grouped GEMM is not served from the cache, and neither is a pointer-array batch called with
-  ``algo=nullptr``. Grouped GEMM, pointer-array batch, RocRoller and HIP graph capture are excluded
+  ``algo=nullptr``. Grouped GEMM, pointer-array batch, rocRoller and HIP graph capture are excluded
   from tuning.
+* Calls dispatched to rocRoller bypass direct cache replay when ``algo=nullptr``. This includes
+  calls using ``HIPBLASLT_USE_ROCROLLER=1`` and block-scaled calls selected for rocRoller by default.
+  Cache rows currently accept only nonnegative Tensile solution indexes; rocRoller uses negative
+  encoded indexes.
 * An uncached in-place problem where ``C`` and ``D`` alias and ``beta`` is nonzero runs with normal
   selection instead of being tuned. Repeated benchmark launches would otherwise overwrite and reuse C
   rather than measuring the caller's input.
