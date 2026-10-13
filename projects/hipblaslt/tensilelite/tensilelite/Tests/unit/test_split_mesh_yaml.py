@@ -1,14 +1,14 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Unit tests for Tensile.Utilities.split_mesh_yaml."""
+"""Unit tests for tensilelite.Utilities.split_mesh_yaml."""
 
 import csv
 import lzma
 
 import pytest
 
-from Tensile.Utilities.split_mesh_yaml import (
+from tensilelite.Utilities.split_mesh_yaml import (
     _clear_exact_logic,
     _get_exact_logic,
     _get_library_type,
