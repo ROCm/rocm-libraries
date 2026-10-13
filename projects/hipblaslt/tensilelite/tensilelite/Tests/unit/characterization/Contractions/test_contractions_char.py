@@ -92,10 +92,13 @@ def test_size_mapping(solution_state, snapshot):
     assert isinstance(state(sm), dict)
 
 
-def test_internal_args_support(solution_state):
-    ias = C.InternalArgsSupport.FromOriginalState(solution_state)
+@pytest.mark.parametrize("enabled", [False, True])
+def test_internal_args_support(solution_state, enabled):
+    explicit_state = deepcopy(solution_state)
+    explicit_state["InternalSupportParams"]["SupportDeviceScalarAlpha"] = enabled
+    ias = C.InternalArgsSupport.FromOriginalState(explicit_state)
     assert ias is not None
-    assert ias.deviceScalarAlpha is True
+    assert ias.deviceScalarAlpha is enabled
 
 
 def test_internal_args_support_device_scalar_alpha_defaults_false(solution_state):

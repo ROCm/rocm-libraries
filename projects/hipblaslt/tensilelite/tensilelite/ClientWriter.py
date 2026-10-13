@@ -258,7 +258,25 @@ def runNewClient(scriptPath, clientParametersPath, cxxCompiler: str, cCompiler: 
     printWarning("ClientWriter Benchmark Process exited with error: {}".format(e))
 
 
-def runClient(libraryLogicPath, forBenchmark, enableTileSelection, cxxCompiler: str, cCompiler: str, outputPath, configPaths=None):
+def _deviceScalarAlphaConfig(configPath, scalar, primary):
+  """Reuse the library/code objects, keeping alternate-mode results separate."""
+  path = Path(configPath)
+  suffix = "_DeviceScalarAlpha" + str(scalar)
+  modePath = path.with_name(path.stem + suffix + path.suffix)
+  lines = []
+  for line in path.read_text().splitlines(keepends=True):
+    if line.startswith("device-scalar-alpha="):
+      line = f"device-scalar-alpha={scalar}\n"
+    elif not primary and line.startswith("results-file="):
+      results = Path(line.split("=", 1)[1].strip())
+      results = results.with_name(results.stem + suffix + results.suffix)
+      line = f"results-file={results}\n"
+    lines.append(line)
+  modePath.write_text("".join(lines))
+  return str(modePath)
+
+
+def runClient(libraryLogicPath, forBenchmark, enableTileSelection, cxxCompiler: str, cCompiler: str, outputPath, configPaths=None, deviceScalarAlphaModes=None):
   buildPath = ensurePath(outputPath / "build")
   timingEnabled = globalParameters.get("TimingInstrumentation", False)
   parallelGpus = globalParameters.get("ParallelGpuExecution", 1)
@@ -269,6 +287,20 @@ def runClient(libraryLogicPath, forBenchmark, enableTileSelection, cxxCompiler: 
     configPaths.append(os.path.join(buildPath, "../source/ClientParameters.ini"))
     if enableTileSelection:
       configPaths.append(os.path.join(buildPath, "../source/ClientParameters_Granularity.ini"))
+
+  if deviceScalarAlphaModes is not None:
+    # Each mode launches the same kernels. Only the first mode feeds LibraryLogic;
+    # the other result files are correctness evidence, not additional tuning rows.
+    returncode = 0
+    for index, scalar in enumerate(deviceScalarAlphaModes):
+      print1(f"# Running client with DeviceScalarAlpha={scalar}")
+      modePaths = [_deviceScalarAlphaConfig(path, scalar, index == 0) for path in configPaths]
+      # Run configs separately so a passing run cannot hide an earlier failure.
+      for modePath in modePaths:
+        modeExit = runClient(libraryLogicPath, forBenchmark, enableTileSelection,
+                             cxxCompiler, cCompiler, outputPath, configPaths=[modePath])
+        returncode = returncode or modeExit
+    return returncode
 
   # Determine number of GPUs to use
   if parallelGpus == 0:
@@ -664,7 +696,9 @@ def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs
         param('use-scaleAB',   problemType.useScaleAB)
         param('use-scaleCD',   problemType.useScaleCD)
         param('use-scaleAlphaVec',   problemType.useScaleAlphaVec)
-        param('device-scalar-alpha', globalParameters['DeviceScalarAlpha'])
+        # BenchmarkFinalParameters.DeviceScalarAlpha selects runtime variants
+        # in runClient; the base configuration uses ordinary alpha semantics.
+        param('device-scalar-alpha', False)
         param('swizzle-tensor-a', problemType.swizzleTensorA)
         param('swizzle-tensor-b', problemType.swizzleTensorB)
         param('fused-gemm-a2a', problemType.fusedGemmA2A)
