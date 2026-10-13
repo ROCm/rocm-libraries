@@ -71,6 +71,8 @@ _BASELINE: Dict[str, Any] = dict(
     streamk="off",
     streamk_reduction="",
     group_merge=1,
+    prefetch_addr=False,
+    uniform_k_decode=False,
     num_load_waves=0,
     cshuffle_no_alias=False,
     is_3d=False,
@@ -258,6 +260,8 @@ _TAGS: Tuple[_Tag, ...] = (
     _Tag(("two_stage",), "2stage"),
     _num(("ws_replicas",), "wsr"),
     _num(("group_merge",), "gm"),
+    _Tag(("prefetch_addr",), "pfa"),
+    _Tag(("uniform_k_decode",), "ukd"),
     _num(("max_sub_gemms",), "msg"),
     _num(("block_h",), "bh"),
 )

@@ -597,6 +597,67 @@ def test_direct_nongrouped_abi_and_shape_invariance(stride, knobs):
     assert _names(conv_direct_args_signature("bf16")) == expected
 
 
+@pytest.mark.parametrize(
+    "knobs",
+    [
+        dict(),
+        dict(waves_k=2, waves_c=3, waves_q=2, ho_per_block=3),
+        dict(waves_k=4, mfma_k=16, ho_per_block=30),
+    ],
+    ids=["base", "wk2_wc3_wq2", "wk4_mk16"],
+)
+@pytest.mark.parametrize("dtype", ["fp16", "bf16"])
+def test_direct_wgrad_runtime_channels_shape_invariance(knobs, dtype):
+    """With ``runtime_channels`` the wgrad kernel bakes no channel count.
+
+    cpg, kpg and the group count vary here alongside the batch and the image,
+    including channel counts that leave a partial k/c tile, so the IR must
+    match across all of them; and it must differ from the baked kernel, whose
+    channel counts are constants.
+    """
+    from kernels.common.conv_direct_grouped import (
+        DirectConvProblem,
+        DirectConvWgradSpec,
+        build_direct_conv_wgrad,
+    )
+
+    fingerprints = set()
+    kernel = None
+    for N, H, W, groups, cpg, kpg in [
+        (2, 14, 14, 1, 256, 256),
+        (3, 29, 37, 1, 48, 192),
+        (1, 64, 64, 4, 64, 64),
+        (2, 20, 24, 32, 16, 16),
+        (1, 9, 40, 1, 24, 24),
+    ]:
+        problem = DirectConvProblem(
+            N=N,
+            H=H,
+            W=W,
+            groups=groups,
+            cpg=cpg,
+            kpg=kpg,
+            KH=3,
+            KW=3,
+            PAD=1,
+            stride=1,
+            dtype=dtype,
+        )
+        spec = DirectConvWgradSpec(problem=problem, runtime_channels=True, **knobs)
+        kernel = build_direct_conv_wgrad(spec, arch=_ARCH)
+        assert kernel.name.endswith("_rtc")
+        fingerprints.add(_op_signature(kernel))
+    assert len(fingerprints) == 1, "runtime-channel wgrad IR depends on cpg/kpg"
+    expected = [n for n, _ in conv_direct_arg_names(direction="wgrad")]
+    assert [p.name for p in kernel.params] == expected
+
+    baked = build_direct_conv_wgrad(
+        DirectConvWgradSpec(problem=problem, **knobs), arch=_ARCH
+    )
+    assert _op_signature(baked) not in fingerprints
+    assert baked.name != kernel.name
+
+
 @pytest.mark.parametrize("fold_k32", [False, True])
 def test_direct_dgrad_weight_transforms_are_shape_invariant(fold_k32):
     """The MFMA dgrad's weight transforms are cached once per filter/channels.
@@ -618,6 +679,115 @@ def test_direct_dgrad_weight_transforms_are_shape_invariant(fold_k32):
             dc.DirectReorganizeWeightsSpec(problem=problem, fold_k32=fold_k32),
             arch=_ARCH,
         )
+        fingerprints.add((_op_signature(transpose), _op_signature(reorganize)))
+    assert len(fingerprints) == 1
+
+
+@pytest.mark.parametrize(
+    "knobs",
+    [
+        dict(block_q=32, block_h=8),
+        dict(block_h=8, waves_k=4),
+        dict(block_h=16, waves_k=2, fold_k32=True),
+        dict(block_q=32, waves_q=2, runtime_k_loop=True),
+    ],
+    ids=["plain_loop", "wk4_preload", "wk2_k32", "wq2_rk"],
+)
+@pytest.mark.parametrize("dtype", ["fp16", "bf16"])
+def test_direct_mfma_dgrad_runtime_channels_shape_invariance(knobs, dtype):
+    """With ``runtime_channels`` the MFMA dgrad compute pass bakes only its
+    K-atom and M-tile counts.
+
+    The dgrad problems below differ in batch, image, group count and in the
+    exact per-group channel counts -- including partial K-atoms and M-tiles --
+    but share the tile counts, so the IR must not change. It must differ from
+    the baked kernel, which takes cpg/kpg as constants.
+    """
+    from dataclasses import replace
+
+    from kernels.common import conv_direct_grouped as dc
+
+    fold_k32 = knobs.get("fold_k32", False)
+    fprop_knobs = {k: v for k, v in knobs.items() if k != "fold_k32"}
+    # (N, H, W, groups, cpg, kpg) of the dgrad problem; kpg is the K reduction.
+    if fold_k32:
+        shapes = [
+            (2, 14, 14, 1, 48, 192),
+            (3, 29, 37, 1, 36, 192),
+            (1, 9, 40, 2, 44, 192),
+        ]
+    elif knobs.get("waves_k", 1) > 1:
+        shapes = [
+            (2, 14, 14, 1, 48, 192),
+            (3, 29, 37, 1, 36, 180),
+            (1, 9, 40, 2, 44, 184),
+        ]
+    else:
+        shapes = [(2, 14, 14, 1, 24, 24), (3, 29, 37, 4, 20, 20), (1, 9, 40, 2, 32, 28)]
+    fingerprints = set()
+    spec = None
+    for N, H, W, groups, cpg, kpg in shapes:
+        problem = dc.DirectConvProblem(
+            N=N, H=H, W=W, groups=groups, cpg=cpg, kpg=kpg, dtype=dtype
+        )
+        base = dc.make_dgrad_fprop_spec(problem, block_groups=1, **fprop_knobs)
+        base = replace(base, fold_k32=fold_k32)
+        spec = replace(
+            base,
+            runtime_channels=True,
+            k_atoms=base.problem_k_atoms(),
+            m_tiles=base.problem_m_tiles(),
+        )
+        kernel = dc.build_direct_conv(spec, arch=_ARCH)
+        fingerprints.add(_op_signature(kernel))
+    assert len(fingerprints) == 1, "runtime-channel dgrad IR depends on cpg/kpg"
+    assert [p.name for p in kernel.params] == [
+        n for n, _ in conv_direct_arg_names(direction="fwd")
+    ]
+    baked = dc.build_direct_conv(
+        replace(spec, runtime_channels=False, k_atoms=0, m_tiles=0), arch=_ARCH
+    )
+    assert _op_signature(baked) not in fingerprints
+    assert baked.name != kernel.name
+
+
+@pytest.mark.parametrize("fold_k32", [False, True])
+def test_direct_dgrad_weight_transforms_runtime_channels_are_channel_invariant(
+    fold_k32,
+):
+    """The runtime-channel weight transforms bake the filter and nothing else:
+    any channel count and group count gives the same binary, and they take the
+    channel counts as two trailing kernargs."""
+    from kernels.common import conv_direct_grouped as dc
+
+    fingerprints = set()
+    for N, H, W, groups, cpg, kpg in [
+        (2, 14, 14, 1, 48, 192),
+        (3, 29, 37, 16, 32, 32),
+        (1, 64, 64, 1, 4, 320),
+        (1, 9, 40, 3, 24, 64),
+    ]:
+        problem = dc.DirectConvProblem(
+            N=N, H=H, W=W, groups=groups, cpg=cpg, kpg=kpg, KH=3, KW=3, PAD=1, stride=1
+        )
+        transpose = dc.build_direct_transpose_weights_dgrad(
+            dc.DirectTransposeWeightsDgradSpec(problem=problem, runtime_channels=True),
+            arch=_ARCH,
+        )
+        reorganize = dc.build_direct_reorganize_weights(
+            dc.DirectReorganizeWeightsSpec(
+                problem=problem, fold_k32=fold_k32, runtime_channels=True
+            ),
+            arch=_ARCH,
+        )
+        for kernel in (transpose, reorganize):
+            assert [p.name for p in kernel.params] == [
+                "A",
+                "D",
+                "A_bytes",
+                "D_bytes",
+                *dc.DIRECT_WEIGHT_TRANSFORM_RTC_ARGS,
+            ]
         fingerprints.add((_op_signature(transpose), _op_signature(reorganize)))
     assert len(fingerprints) == 1
 
@@ -1160,6 +1330,66 @@ def test_count_jobs_matches_the_generators(monkeypatch, directions):
     )
     assert walked > 0
     assert counted == walked
+
+
+def test_aot_wgrad_dgrad_jobs_pick_the_lds_layout_and_split(monkeypatch):
+    """The AOT grid builds what the JIT sweep would pick, not spec defaults.
+
+    wgrad takes ``default_lds_k_outer`` per geometry (a pure function of
+    arch/dtype/atom). dgrad's predicate also wants an even channel run, which a
+    shape-generic binary only knows through its B width: vec_b > 1 binaries are
+    K-outer, vec_b == 1 ones stay M-outer. The non-split wgrad kernel is
+    cached alongside the split-K one, except for group-merged kernels.
+    """
+    from rocke.core.arch import ArchTarget
+    from kernels.common.conv_implicit_gemm_dgrad import DgradConvSpec
+    from kernels.common.conv_implicit_gemm_wgrad import WgradConvSpec
+
+    ks = _shrink_sweep_grid(monkeypatch)
+    target = ArchTarget.from_gfx(_ARCH)
+    family = "wmma" if target.wave_size == 32 else "mma"
+    wgrad = list(
+        ks._wgrad_jobs(
+            _ARCH, "fp16", target.wave_size, family, target, ks.CACHE_WGRAD_SPLIT_KS
+        )
+    )
+    for job in wgrad:
+        i = job.identity
+        assert i.lds_k_outer == WgradConvSpec.default_lds_k_outer(
+            arch=_ARCH,
+            dtype_a="fp16",
+            dtype_b="fp16",
+            warp_tile_m=i.warp_tile_m,
+            warp_tile_n=i.warp_tile_n,
+            wave_size=target.wave_size,
+        )
+        assert job.spec_kwargs["lds_k_outer"] == i.lds_k_outer
+        assert job.spec_kwargs.get("prefetch_addr", False) == i.prefetch_addr
+    # Pinned, not just re-derived: gfx950 16-bit wgrad is K-outer throughout.
+    assert wgrad and all(j.identity.lds_k_outer for j in wgrad)
+    assert {j.identity.split_k for j in wgrad if j.identity.group_merge == 1} == {1, 2}
+    assert {j.identity.split_k for j in wgrad if j.identity.group_merge > 1} == {2}
+
+    dgrad = list(ks._dgrad_jobs(_ARCH, "fp16", target.wave_size, family, target, 64))
+    # Pinned: a scalar-B binary may serve an odd channel run, so it stays
+    # M-outer; some wider ones are K-outer.
+    assert not any(
+        j.identity.lds_k_outer for j in dgrad if j.identity.vector_size_b == 1
+    )
+    assert any(j.identity.lds_k_outer for j in dgrad)
+    for job in dgrad:
+        i = job.identity
+        assert i.lds_k_outer == (
+            i.vector_size_b > 1
+            and DgradConvSpec.default_lds_k_outer(
+                arch=_ARCH,
+                dtype_b="fp16",
+                warp_tile_n=i.warp_tile_n,
+                cpg=2,
+                wave_size=target.wave_size,
+                pipeline=i.pipeline,
+            )
+        )
 
 
 def _shrink_sweep_grid(monkeypatch):
