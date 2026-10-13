@@ -685,7 +685,7 @@ class ProblemPredicate(Properties.Predicate):
             rv += [cls('SwizzleTensorB', value=state['ProblemType']['SwizzleTensorB'])]
 
         if state['ProblemType']['FusedGemmA2A']:
-            rv += [cls('FusedA2ATileDivisible', value=state['MacroTile0'])]
+            rv += [cls('FusedA2AShape', value=state['MacroTile0'])]
 
         # Exact-size custom kernels record the M/N/K window they won. Without
         # it, a multi-solution lookup also accepts the neighboring tile.
