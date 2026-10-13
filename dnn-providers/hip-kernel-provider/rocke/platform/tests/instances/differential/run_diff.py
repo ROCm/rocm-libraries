@@ -697,7 +697,11 @@ def _run_family_hashed(name, binpath, mode, canonical, src_dir):
                 verdict = "CANON_EQUAL"
             else:
                 verdict = "STRUCT_DRIFT"
-        ref_sha = p_emission.canonical_sha if canonical else p_emission.output_sha
+        ref_sha = (
+            p_emission.canonical_sha or p_emission.output_sha
+            if canonical
+            else p_emission.output_sha
+        )
         configs.append(
             _config_record(
                 idx,

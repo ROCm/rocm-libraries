@@ -315,6 +315,62 @@ class TestDifferentialConcurrency(unittest.TestCase):
         self.assertEqual(result["status"], "BATCH_INCOMPLETE")
         self.assertIn("native returned 1 records", result["error"])
 
+    def test_noncanonicalizable_equal_output_retains_raw_reference_sha(self):
+        raw_sha = run_diff.sh(b"identical but not canonicalizable")
+        invalid = run_diff.Emission(
+            0,
+            True,
+            raw_sha,
+            "",
+            canonical_error="invalid test IR",
+        )
+        ended = run_diff.Emission(2, False, None, "unknown config")
+        with mock.patch.object(
+            run_diff, "compile_c", return_value=(Path("emit_c"), "")
+        ):
+            with mock.patch.object(
+                run_diff, "_run_native_configs", return_value=batch(invalid, ended)
+            ):
+                with mock.patch.object(
+                    run_diff, "_run_python_batch", return_value=batch(invalid, ended)
+                ):
+                    result = run_diff.run_family(
+                        "gemm", Path("archive.a"), "ir", canonical=True
+                    )
+        self.assertEqual(result["status"], "GREEN")
+        self.assertEqual(run_diff.collect_ref_shas([result]), {"gemm": {"0": raw_sha}})
+
+    def test_noncanonicalizable_differing_output_is_canon_error(self):
+        c_invalid = run_diff.Emission(
+            0,
+            True,
+            run_diff.sh(b"C++ output"),
+            "",
+            canonical_error="invalid test C++ IR",
+        )
+        p_invalid = run_diff.Emission(
+            0,
+            True,
+            run_diff.sh(b"Python output"),
+            "",
+            canonical_error="invalid test Python IR",
+        )
+        ended = run_diff.Emission(2, False, None, "unknown config")
+        with mock.patch.object(
+            run_diff, "compile_c", return_value=(Path("emit_c"), "")
+        ):
+            with mock.patch.object(
+                run_diff, "_run_native_configs", return_value=batch(c_invalid, ended)
+            ):
+                with mock.patch.object(
+                    run_diff, "_run_python_batch", return_value=batch(p_invalid, ended)
+                ):
+                    result = run_diff.run_family(
+                        "gemm", Path("archive.a"), "ir", canonical=True
+                    )
+        self.assertEqual(result["status"], "DRIFT")
+        self.assertEqual(result["configs"][0]["verdict"], "CANON_ERROR")
+
     def test_malformed_batch_reports_its_fatal_diagnostic(self):
         success = run_diff.Emission(0, True, "same", "")
         ended = run_diff.Emission(2, False, None, "unknown config")
