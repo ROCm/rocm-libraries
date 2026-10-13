@@ -1,5 +1,18 @@
 # GEMM candidates for a solution index
 
+A solution index identifies a kernel configuration in a particular library
+build. Its tunable parameters include the macro tile, reduction block and
+workgroup mapping. Different input geometries can take different paths through
+that solution: K affects reduction loops and tails, M/N affect output edges,
+and beta, bias and activation affect the epilogue. A runtime race detector can
+check only the paths that execute, so testing one geometry leaves other paths
+unchecked.
+
+This utility chooses a set of geometries for a given case budget, aiming to
+exercise those boundaries. It does not measure path coverage. Element types
+and transpose modes follow the selected solution; strides use packed layouts.
+Dimensions and supported runtime settings vary across the generated cases.
+
 `library.get_problems(index)` returns a deterministic `list[GemmCase]` to try
 with one packaged TensileLite solution, with up to ten cases by default. Pass
 a second positional argument or `number_of_problems=...` to change the budget.
