@@ -89,7 +89,7 @@ EncodeKernelConfigsWithFdeep(const std::vector<std::vector<float>>& encoded_cand
 /// skipping the whole config tower (feature engineering + fdeep). nullopt on any miss so the
 /// caller falls back to the neural path. Keyed on the raw encoded candidate, so it must run
 /// before EngineerKernelConfigFeaturesImpl. Implemented in ai_heuristics.cpp.
-std::optional<std::vector<std::vector<float>>>
+MIOPEN_INTERNALS_EXPORT std::optional<std::vector<std::vector<float>>>
 TryEncodeKernelConfigsFromTable(const std::vector<std::vector<float>>& encoded_candidates,
                                 const std::string& arch,
                                 const std::string& solver);
