@@ -186,9 +186,9 @@ namespace hipblaslt_bench
 
         for(size_t sol = 0; sol < candidates; sol++)
         {
-            const bool failedBefore = detail::aborted(should_abort);
+            const bool failed_before = detail::aborted(should_abort);
             prepare(sol);
-            if(!failedBefore && detail::aborted(should_abort))
+            if(!failed_before && detail::aborted(should_abort))
             {
                 result.aborted = true;
                 return result;
