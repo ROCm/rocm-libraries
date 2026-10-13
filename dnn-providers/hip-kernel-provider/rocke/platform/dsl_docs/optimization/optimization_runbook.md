@@ -1993,6 +1993,10 @@ Per-arch facts belong in the arch references — see §21.
 | `reduction` | `StreamKGemmSpec` | `Atomic` | `StreamKReductionStrategy.{Atomic, Reduction, AtomicWithFixup}` |
 | split-K | GEMM (not yet a spec field; available primitives) | — | `b.global_atomic_add_f32` for atomic split-K; `helpers/streamk.py` for the Stream-K macro tile decode |
 | Grouped GEMM persistent | `instances/grouped_gemm.py` | per-group launches | v2 persistent variant is a documented follow-up |
+| `streamk` | `WgradConvSpec` | `"off"` | `"dp_sk"` launches one CTA per data-parallel tile plus `streamk_ctas` stream-K CTAs; `"persistent"` launches only the pool and round-robins the data-parallel tiles. Both balance MAC iterations across CTAs instead of tiles, so a shape with few tiles and a long `wg_K` still fills the device. Mutually exclusive with `split_k` |
+| `streamk_reduction` | `WgradConvSpec` | `"linear"` | How CTAs sharing a tile combine partials. `"linear"`: the owner waits on each later contributor in turn and stores once. `"tree"`: pairwise fan-in, `ceil(log2)` rounds. Both are deterministic and need no dW pre-zeroing. `"atomic"`: f32 atomics into dW (fp32 only). `"workspace"`: f32 scratch atomics plus the Stage 2 reduce kernel |
+| `streamk_ctas` | `WgradConvSpec` | `-1` | The CTA pool the stream-K remainder is spread over (CK `max_active_wgs`). A launch parameter, not part of the kernel: it sizes the host partition that arrives as the `sk_*` kernargs. `-1` resolves per reduction: `workspace`/`atomic` (no waiting) get four CTAs per CU (`_STREAMK_CTAS_PER_CU`, counted in CTAs, not waves); `linear`/`tree` get one CTA per CU, because their fixups get slower as more CTAs share a tile. The pool need not be resident: a CTA waits only on higher-index CTAs and publishes its own partial first, so ascending workgroup dispatch keeps the waits from starving their producers |
+| `--streamk` (sweep) | `benchmark_implicit_gemm_conv.py` / `kernel_sweep.py` | `off` | Opt-in wgrad stream-K candidates (`dp_sk`/`persistent`/`all` × `--streamk-reductions`); the dispatcher does not select stream-K |
 
 #### 12.1.J Quantization
 

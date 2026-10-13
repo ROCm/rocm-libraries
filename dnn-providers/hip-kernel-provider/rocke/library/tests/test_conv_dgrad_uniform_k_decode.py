@@ -84,22 +84,19 @@ class TestDgradUniformKDecodeGate(unittest.TestCase):
         self.assertEqual(_buffer_loads(on), 2 * _buffer_loads(off))
 
     def test_decode_loop_divides_only_ahead_of_the_loop(self):
-        """The decode loop's own per-chunk addressing has no k division.
+        """The decode loop's own per-chunk addressing has no division.
 
         Every division the flag adds is uniform set-up (decoding k_lo, the
-        kpg % tile_k gate) or the loop-invariant (n, ho, wo) row decode the
-        plain loop also performs; the k decode itself -- two divisions per
-        chunk per iteration in the plain loop -- is gone.
+        kpg % tile_k gate). The k decode is gone from the loop, and the
+        loop-invariant (n, ho, wo) row decode goes through the record's magic
+        pairs, as in the plain loop.
         """
         off = _lower(_spec())
         on = _lower(_spec(uniform_k_decode=True))
         uk_body = on[on.index("%uk_k") :]
         uk_body = uk_body[: uk_body.index("fb_acc_m0_n0")]
-        # A: m decode per chunk (n, m_rem, htl, wtl) = 4 divisions per chunk;
-        # B: none. The plain loop adds the 4-op k decode for A and B chunks.
-        a_chunks = 64 * 64 // 8 // 256
-        self.assertEqual(_sdivs(uk_body), 4 * a_chunks)
-        self.assertGreater(_sdivs(off), _sdivs(uk_body))
+        self.assertEqual(_sdivs(uk_body), 0)
+        self.assertGreaterEqual(_sdivs(off), _sdivs(uk_body))
 
     def test_every_sync_pipeline_is_admitted(self):
         from kernels.common.conv_implicit_gemm_dgrad import is_valid_dgrad_spec

@@ -90,6 +90,7 @@ from rocke.core.ir import (
     BF16,
     F16,
     F32,
+    I32,
     IRBuilder,
     KernelDef,
     PtrType,
@@ -591,6 +592,37 @@ class WgradConvSpec:
     # is a knob, not a constant: another arch or a different filter shape can
     # want a different contention-versus-footprint tradeoff.
     ws_replicas: int = _DEFAULT_WS_REPLICAS
+    # Stream-K execution (CK Tile StreamKTilePartitioner). "off" keeps the
+    # classic grid-per-tile kernel. "dp_sk" launches one CTA per data-parallel
+    # tile plus ``streamk_ctas`` stream-K CTAs, each owning a balanced,
+    # contiguous range of MAC iterations that may straddle output tiles.
+    # "persistent" launches exactly ``streamk_ctas`` CTAs that round-robin the
+    # data-parallel tiles and then run their stream-K range.
+    #
+    # Default "off": strictly additive, so every existing config emits
+    # byte-identical IR and keeps its kernel name.
+    streamk: str = "off"
+    # How the CTAs that share an output tile combine their partial K-sums.
+    #   "linear"    -- the tile owner waits on each later contributor's flag
+    #                  and folds its partial in order, then stores dW once.
+    #                  Deterministic; dW needs no pre-zeroing.
+    #   "tree"      -- pairwise fan-in with doubling stride; the owner stores.
+    #                  Deterministic; dW needs no pre-zeroing.
+    #   "atomic"    -- every contributor f32-atomic-adds into dW (dtype_d fp32
+    #                  only). The caller zeroes dW before every launch.
+    #   "workspace" -- every contributor f32-atomic-adds into the two-stage
+    #                  scratch; the Stage 2 reduce kernel casts it into dW.
+    # linear/tree hand partials over a flag table; their workspace is
+    # ``wgrad_streamk_workspace_nbytes`` and only its flag region has to be
+    # zeroed before each launch.
+    streamk_reduction: str = "linear"
+    # The CTA pool the stream-K remainder is spread over (CK max_active_wgs).
+    # -1 = auto, resolved by the builder via wgrad_streamk_default_ctas: sized
+    # to the occupancy target for the reductions that never wait, one per CU
+    # for linear/tree. Any explicit value > 0 is safe: those two wait only on
+    # later CTAs, which ascending dispatch always starts (see
+    # wgrad_streamk_default_ctas).
+    streamk_ctas: int = -1
 
     @property
     def block_size(self) -> int:
@@ -727,6 +759,14 @@ class WgradConvSpec:
                 "unroll": self.unroll_k,
                 # A different K-loop body; only tagged when set.
                 "pfa": self.prefetch_addr,
+                # Stream-K changes the grid decode, the K ranges and the
+                # epilogue, and the launch mode and the reduction both change
+                # the emitted body. The CTA pool does not: like the split-K
+                # degree it is a launch parameter, so it is not in the name.
+                "sk": self.streamk != "off",
+                "skpers": self.streamk == "persistent",
+                f"skr{self.streamk_reduction}": self.streamk != "off"
+                and self.streamk_reduction != "linear",
             },
         )
 
@@ -762,6 +802,9 @@ class WgradConvSpec:
                 f"ws_replicas must be >= 1 (got {self.ws_replicas}); it is the "
                 f"number of scratch slabs a group's K-slices spread over"
             )
+        _sk_ok, _sk_why = wgrad_streamk_available(self)
+        if not _sk_ok:
+            raise ValueError(_sk_why)
         # Delegate rather than re-derive -- is_valid_wgrad_spec calls the same
         # predicate, so the two cannot drift apart.
         _gm_ok, _gm_why = wgrad_group_merge_available(self)
@@ -1167,6 +1210,334 @@ def _gm_dw_addr_fn(
     return dw_addr
 
 
+# Stream-K is MFMA-only: the flag/fence fixup and the per-CTA partial slots
+# are validated on these targets.
+_STREAMK_ARCHES = ("gfx942", "gfx950")
+_STREAMK_MODES = ("off", "dp_sk", "persistent")
+_STREAMK_REDUCTIONS = ("linear", "tree", "atomic", "workspace")
+
+
+def wgrad_streamk_available(spec: "WgradConvSpec") -> Tuple[bool, str]:
+    """Arch-independent stream-K gates, shared by ``validate()`` and
+    :func:`is_valid_wgrad_spec` so the two cannot drift apart.
+
+    Stream-K owns the K range and the tile mapping, so every knob that also
+    partitions K, remaps tiles, or pipelines the K loop is rejected alongside
+    it.
+    """
+    if spec.streamk not in _STREAMK_MODES:
+        return False, (
+            f"streamk must be 'off', 'dp_sk' or 'persistent' (got {spec.streamk!r})"
+        )
+    if spec.streamk == "off":
+        return True, "ok"
+    if spec.streamk_reduction not in _STREAMK_REDUCTIONS:
+        return False, (
+            "streamk_reduction must be 'linear', 'tree', 'atomic' or 'workspace' "
+            f"(got {spec.streamk_reduction!r})"
+        )
+    if spec.streamk_ctas == 0 or spec.streamk_ctas < -1:
+        return False, f"streamk_ctas must be -1 (auto) or > 0 (got {spec.streamk_ctas})"
+    if spec.wave_size != 64:
+        return (
+            False,
+            f"stream-K wgrad is MFMA wave64 only (got wave_size={spec.wave_size})",
+        )
+    if spec.split_k != 1:
+        return False, (
+            f"streamk and split_k both partition K_wg; use split_k=1 with streamk "
+            f"(got split_k={spec.split_k})"
+        )
+    if spec.two_stage:
+        return False, (
+            "two_stage is the split-K scratch path; use "
+            "streamk_reduction='workspace' for the stream-K equivalent"
+        )
+    if spec.async_dma or spec.unroll_k:
+        return False, (
+            "streamk runs one plain K loop per work item; async_dma/unroll_k "
+            "pipeline the K loop across items"
+        )
+    if spec.prefetch_addr:
+        return False, (
+            "streamk runs its own K loop per work item; prefetch_addr rewrites "
+            "the data-parallel K loop, which stream-K never reaches"
+        )
+    if spec.epilogue != "default":
+        return False, (
+            f"streamk requires epilogue='default' (got {spec.epilogue!r}): the "
+            "epilogue runs once per tile inside the stream-K tile loop"
+        )
+    if spec.chiplet_swizzle:
+        return False, (
+            "chiplet_swizzle remaps the 2-D tile grid; stream-K decodes its "
+            "tiles from a linear CTA index instead"
+        )
+    if spec.group_merge > 1:
+        return False, (
+            f"streamk folds conv groups into GEMM-M; use group_merge=1 "
+            f"(got {spec.group_merge})"
+        )
+    if spec.streamk_reduction == "atomic" and spec.data.dtype_d != "fp32":
+        return False, (
+            f"streamk_reduction='atomic' needs dtype_d='fp32' (got "
+            f"{spec.data.dtype_d!r}); use 'linear', 'tree' or 'workspace'"
+        )
+    if not spec.acc_epilogue.is_identity():
+        return False, (
+            "streamk supports only the identity acc_epilogue: partial K-sums "
+            "are combined after the per-tile accumulation"
+        )
+    return True, "ok"
+
+
+# CTAs per CU in the default pool of the stream-K reductions that never wait.
+# Each resident CTA streams its own K range, so this is the number of
+# independent reduction streams a CU keeps in flight to hide memory latency.
+# Counted in CTAs rather than waves: a wider CTA does not add streams. One per
+# CU leaves a single stream per CU; past four the CTAs mostly contend for the
+# same caches.
+_STREAMK_CTAS_PER_CU = 4
+
+
+def wgrad_streamk_default_ctas(spec: "WgradConvSpec", arch: str) -> int:
+    """Default stream-K CTA pool for ``spec`` on ``arch`` (``streamk_ctas=-1``).
+
+    The reductions that never wait on another CTA (``workspace``, ``atomic``)
+    are sized for throughput: ``_STREAMK_CTAS_PER_CU`` CTAs per CU. Nothing
+    there requires the pool to be resident at once, so a CTA that does not fit
+    only runs later.
+
+    ``linear`` and ``tree`` get one CTA per CU: those fixups get slower, not
+    faster, with more contributors per tile (the owner folds every partial).
+    Their pool need not be resident at once. A CTA waits only on higher-index
+    CTAs and publishes its own partial before it waits, so with workgroups
+    dispatched in ascending order only the CTAs of the tile straddling the
+    dispatch front can wait on one that has not started, and they hold a
+    bounded number of slots (one for linear, about one per round for tree).
+    """
+    return wgrad_streamk_default_pool(spec.streamk_reduction, arch)
+
+
+def wgrad_streamk_default_pool(reduction: str, arch: str) -> int:
+    """:func:`wgrad_streamk_default_ctas` for a bare ``reduction`` name.
+
+    Lets selection policy size the pool a launch will use before any spec
+    exists.
+    """
+    from rocke.helpers.split_k import _ARCH_NUM_CUS, _DEFAULT_NUM_CUS
+
+    num_cus = _ARCH_NUM_CUS.get(arch, _DEFAULT_NUM_CUS)
+    if reduction in ("linear", "tree"):
+        return num_cus
+    return num_cus * _STREAMK_CTAS_PER_CU
+
+
+def wgrad_streamk_launch(spec: "WgradConvSpec", *, arch: str = "gfx950"):
+    """The :class:`~kernels.common.conv_args.StreamKLaunch` of ``spec``.
+
+    The pool is ``spec.streamk_ctas``, or the arch default for ``-1``. It is
+    a launch parameter: the kernel reads the partition it implies from its
+    kernargs, so the same binary runs with any pool.
+    """
+    from kernels.common.conv_args import StreamKLaunch
+
+    if spec.streamk == "off":
+        raise ValueError("wgrad_streamk_launch requires streamk != 'off'")
+    # Same contract as the validator and the C port (rocke_wgrad_conv_streamk_ctas):
+    # -1 is auto, anything else not > 0 is an error rather than the auto pool.
+    if spec.streamk_ctas == 0 or spec.streamk_ctas < -1:
+        raise ValueError(
+            f"streamk_ctas must be -1 (auto) or > 0 (got {spec.streamk_ctas})"
+        )
+    pool = (
+        spec.streamk_ctas
+        if spec.streamk_ctas > 0
+        else wgrad_streamk_default_ctas(spec, arch)
+    )
+    return StreamKLaunch(
+        pool=pool,
+        persistent=spec.streamk == "persistent",
+        reduction=spec.streamk_reduction,
+    )
+
+
+def _wgrad_streamk_launch_problem(spec: WgradConvSpec, problem=None) -> ConvProblem:
+    """The launch shape, checked against what the kernel baked in.
+
+    One stream-K binary serves any shape that keeps its build-time modes:
+    grouping, 2-D/3-D (the kernarg list), pointwise addressing, and channel
+    runs at least as wide as the built load/store vectors. Anything else would
+    launch the wrong code, so it is rejected rather than silently mis-run.
+    """
+    built = spec.problem
+    if problem is None:
+        return built
+
+    def _vec(chan: int, dtype: str, cap: int | None) -> int:
+        widths = (8, 4, 2, 1) if dtype != "fp32" else (4, 2, 1)
+        auto = next(v for v in widths if chan % v == 0)
+        return auto if cap is None else min(auto, cap)
+
+    checks = (
+        ("grouping (groups > 1)", built.groups > 1, problem.groups > 1),
+        ("is_3d", built.is_3d, problem.is_3d),
+        ("is_pointwise", built.is_pointwise, problem.is_pointwise),
+    )
+    for what, want, got in checks:
+        if want != got:
+            raise ValueError(
+                f"launch problem is incompatible with the built kernel: {what} "
+                f"differs (built {want}, launch {got}); build a kernel for this shape"
+            )
+    # Both X (operand B) and dW (operand D) run along cpg, with their own
+    # vector widths, so each check names the operand it guards.
+    chans = (
+        ("dY", "kpg", built.kpg, problem.kpg, spec.data.dtype_a, spec.vector_size_a),
+        ("X", "cpg", built.cpg, problem.cpg, spec.data.dtype_b, spec.vector_size_b),
+        ("dW", "cpg", built.cpg, problem.cpg, spec.data.dtype_d, spec.vector_size_c),
+    )
+    for operand, what, want, got, dtype, cap in chans:
+        width = _vec(want, dtype, cap)
+        if got % width:
+            raise ValueError(
+                f"launch problem is incompatible with the built kernel: {what}="
+                f"{got} is not a multiple of the built {width}-wide {operand} "
+                f"vector ({what}={want}); build a kernel for this shape"
+            )
+    return problem
+
+
+def _wgrad_streamk_args(spec: "WgradConvSpec", problem=None):
+    from kernels.common.conv_args import ConvArgs
+
+    return ConvArgs.from_problem(
+        _wgrad_streamk_launch_problem(spec, problem),
+        direction="wgrad",
+        tile_m=spec.tile_m,
+        tile_n=spec.tile_n,
+        tile_k=spec.tile_k,
+    )
+
+
+def wgrad_streamk_partition(
+    spec: "WgradConvSpec", *, arch: str = "gfx950", problem=None
+):
+    """The :class:`~rocke.helpers.streamk.StreamKIterPartition` of a launch.
+
+    ``problem`` is the launch shape and defaults to ``spec.problem``. Output
+    tiles are ``ceil(wg_M / tile_m) * groups`` by ``ceil(wg_N / tile_n)``; the
+    conv groups fold into GEMM-M per group, so a partial last M tile of one
+    group never spills into the next.
+    """
+    sk = wgrad_streamk_launch(spec, arch=arch)
+    return _wgrad_streamk_args(spec, problem).streamk_partition(
+        sk.pool, persistent=sk.persistent
+    )
+
+
+def wgrad_streamk_grid(
+    spec: "WgradConvSpec", *, arch: str = "gfx950", problem=None
+) -> Tuple[int, int, int]:
+    """Launch grid of a stream-K wgrad kernel (one-dimensional)."""
+    return (wgrad_streamk_partition(spec, arch=arch, problem=problem).grid_size, 1, 1)
+
+
+def wgrad_streamk_workspace_layout(
+    spec: "WgradConvSpec", *, arch: str = "gfx950", problem=None
+) -> Tuple[int, int]:
+    """``(flags_bytes, partials_bytes)`` of a linear/tree stream-K launch.
+
+    One i32 flag per (stream-K CTA, wave), padded to 256 bytes, then one f32
+    tile of partial sums per stream-K CTA. Pass the base as ``sk_flags`` and
+    ``base + flags_bytes`` as ``sk_partials``. Only the flag region has to be
+    zeroed before each launch; partials are always written before being read.
+    """
+    if spec.streamk_reduction not in ("linear", "tree"):
+        return 0, 0
+    part = wgrad_streamk_partition(spec, arch=arch, problem=problem)
+    flags_bytes = part.flags_bytes(spec.warp_m * spec.warp_n)
+    partials_bytes = part.sk_ctas * spec.tile_m * spec.tile_n * 4
+    return flags_bytes, partials_bytes
+
+
+def wgrad_streamk_workspace_nbytes(
+    spec: "WgradConvSpec", *, arch: str = "gfx950", problem=None
+) -> int:
+    """Device workspace a stream-K wgrad launch needs, in bytes.
+
+    linear/tree: the flag table plus the partial slots. workspace: the
+    two-stage f32 scratch (``groups * ws_replicas * wg_M * wg_N * 4``) that the
+    Stage 2 reduce kernel consumes. atomic: none.
+    """
+    if spec.streamk == "off" or spec.streamk_reduction == "atomic":
+        return 0
+    if spec.streamk_reduction == "workspace":
+        p = _wgrad_streamk_launch_problem(spec, problem)
+        return p.groups * spec.ws_replicas * _wg_M(p) * _wg_N(p) * 4
+    flags_bytes, partials_bytes = wgrad_streamk_workspace_layout(
+        spec, arch=arch, problem=problem
+    )
+    return flags_bytes + partials_bytes
+
+
+def wgrad_streamk_signature(spec: "WgradConvSpec") -> list:
+    """Launch signature of a stream-K wgrad kernel.
+
+    The wgrad conv ABI with the stream-K extras of ``spec``'s reduction: the
+    ``ws_ptr``/``ws_bytes`` scratch for ``workspace``, ``sk_flags``/
+    ``sk_partials`` for ``linear``/``tree``, then the partition block.
+    Binding is positional, as for every AOT conv kernel.
+    """
+    from kernels.common.conv_abi import conv_args_signature
+
+    return conv_args_signature(
+        spec.data.dtype_a,
+        direction="wgrad",
+        dtype_b=spec.data.dtype_b,
+        dtype_d=spec.data.dtype_d,
+        is_3d=spec.problem.is_3d,
+        streamk=spec.streamk_reduction,
+    )
+
+
+def wgrad_streamk_launch_values(
+    spec: "WgradConvSpec",
+    dY_ptr: int,
+    X_ptr: int,
+    dW_ptr: int,
+    dY_bytes: int,
+    X_bytes: int,
+    dW_bytes: int,
+    *,
+    arch: str = "gfx950",
+    problem=None,
+    ws_ptr: Optional[int] = None,
+    ws_bytes: Optional[int] = None,
+    sk_flags: Optional[int] = None,
+    sk_partials: Optional[int] = None,
+) -> Dict[str, int]:
+    """The kernarg ``values`` of a stream-K wgrad launch.
+
+    ``problem`` is the launch shape (default ``spec.problem``); the partition
+    block is computed from it and from the pool of
+    :func:`wgrad_streamk_launch`.
+    """
+    return _wgrad_streamk_args(spec, problem).to_launch_values(
+        dY_ptr,
+        X_ptr,
+        dW_ptr,
+        dY_bytes,
+        X_bytes,
+        dW_bytes,
+        streamk=wgrad_streamk_launch(spec, arch=arch),
+        ws_ptr=ws_ptr,
+        ws_bytes=ws_bytes,
+        sk_flags=sk_flags,
+        sk_partials=sk_partials,
+    )
+
+
 def wgrad_group_merge_available(
     spec: WgradConvSpec, arch: str = "gfx950"
 ) -> Tuple[bool, str]:
@@ -1282,6 +1653,14 @@ def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool
         return False, (
             f"spec wave_size {spec.wave_size} != {arch} wave_size {target.wave_size}"
         )
+    if spec.streamk != "off" and arch not in _STREAMK_ARCHES:
+        return False, (
+            f"stream-K wgrad supports only {', '.join(_STREAMK_ARCHES)} "
+            f"(got {arch})"
+        )
+    _sk_ok, _sk_why = wgrad_streamk_available(spec)
+    if not _sk_ok:
+        return False, _sk_why
 
     sk = spec.split_k
     if sk < -1 or sk == 0:
@@ -1638,6 +2017,9 @@ def build_implicit_gemm_conv_wgrad(
     # Two-stage: the scratch slab index is group * R + z % R and the group
     # decode reads ks_count, so nothing in the body depends on the degree.
     _is_two_stage = _is_split_k and spec.two_stage
+    _is_streamk = spec.streamk != "off"
+    # Stream-K reductions that accumulate atomically instead of storing once.
+    _streamk_atomic = _is_streamk and spec.streamk_reduction in ("atomic", "workspace")
     # At group_merge == groups the merged problem has a single group, but the
     # kernel still has to decode the K-slice off z and the epilogue still has to
     # mask off-diagonal pairs -- so the grouped path stays engaged. Without this
@@ -1663,7 +2045,10 @@ def build_implicit_gemm_conv_wgrad(
     #   split_k > 1 two-stage: Stage 1 never touches dW (Stage 2 writes it),
     #                         but dW stays in the ABI so the atomic and
     #                         two-stage signatures line up.
-    _dw_writeonly = not _is_split_k
+    #   stream-K linear/tree: the tile owner stores dW once (writeonly); the
+    #                         atomic and workspace reductions read-modify-write
+    #                         their target.
+    _dw_writeonly = not _is_split_k and not _streamk_atomic
 
     def _declare_wgrad_ptr(name: str, kind: str) -> Value:
         if kind == "a":
@@ -1690,14 +2075,22 @@ def build_implicit_gemm_conv_wgrad(
                 writeonly=_dw_writeonly,
                 align=16,
             )
-        # Two-stage scratch: f32 accumulator every K-slice atomic-adds into,
-        # size groups*ws_replicas*wg_M*wg_N*4. Not ``writeonly``: an
-        # atomicrmw reads its target.
+        if kind == "i32*":
+            # Stream-K linear/tree ready flags, read back by the tile owner.
+            return b.param(name, PtrType(I32, "global"), noalias=True, align=16)
+        # Two-stage / stream-K workspace scratch: f32 accumulator every K-slice
+        # atomic-adds into, size groups*ws_replicas*wg_M*wg_N*4; or the stream-K
+        # linear/tree partial slots. Not ``writeonly``: both are read back.
         return b.param(name, PtrType(F32, "global"), noalias=True, align=16)
 
     params = emit_param_block(
         b,
-        conv_arg_names(direction="wgrad", is_3d=p.is_3d, two_stage=_is_two_stage),
+        conv_arg_names(
+            direction="wgrad",
+            is_3d=p.is_3d,
+            two_stage=_is_two_stage,
+            streamk=spec.streamk_reduction if _is_streamk else None,
+        ),
         declare_ptr=_declare_wgrad_ptr,
     )
     dY = params["dY"]
@@ -1725,6 +2118,8 @@ def build_implicit_gemm_conv_wgrad(
     p_num_pid_n = params["p_num_pid_n"]
     # Variant-specific extras; absent from the parameter list when unused.
     ws_ptr = params.get("ws_ptr")
+    sk_flags = params.get("sk_flags")
+    sk_partials = params.get("sk_partials")
     # Slice width and slice count, always kernargs. ks_count is what decodes
     # block_id_z = group*ks_count + slice; ks is how wide each slice is. They
     # are different numbers, so one cannot stand in for the other.
@@ -1818,17 +2213,21 @@ def build_implicit_gemm_conv_wgrad(
     # bounds, so the padding contributes nothing -- which is what lets the split
     # and unsplit cases share one bound computation instead of two branches
     # that have to be kept in step.
+    #
+    # Stream-K launches a one-dimensional grid and folds the group into its
+    # linear tile index, so it skips this decode and binds both per work item.
     c_ks = _ks_param
-    z_id = b.block_id_z()
-    if grouped:
-        group_v = b.to_sgpr_u32(b.div(z_id, _ks_count_param))
-        slice_id = b.mod(z_id, _ks_count_param)
-        if spec.group_merge > 1:
-            slice_v = slice_id
-    else:
-        slice_id = b.mod(z_id, _ks_count_param)
-    k_lo = b.to_sgpr_u32(b.mul(slice_id, c_ks))
-    k_hi = b.to_sgpr_u32(b.add(k_lo, c_ks))
+    if not _is_streamk:
+        z_id = b.block_id_z()
+        if grouped:
+            group_v = b.to_sgpr_u32(b.div(z_id, _ks_count_param))
+            slice_id = b.mod(z_id, _ks_count_param)
+            if spec.group_merge > 1:
+                slice_v = slice_id
+        else:
+            slice_id = b.mod(z_id, _ks_count_param)
+        k_lo = b.to_sgpr_u32(b.mul(slice_id, c_ks))
+        k_hi = b.to_sgpr_u32(b.add(k_lo, c_ks))
 
     # Chiplet swizzle (same logic as forward; tile counts from wgrad GEMM dims).
     # The tile counts are runtime kernargs — the host computes them from the
@@ -2379,6 +2778,287 @@ def build_implicit_gemm_conv_wgrad(
             )
 
         return new_accs
+
+    def _emit_streamk_tiles() -> None:
+        """Stream-K body: a loop over this CTA's work items.
+
+        A work item is one output tile plus the slice of its MAC iterations this
+        CTA owns. A non-persistent CTA walks the tiles its iteration range
+        touches (exactly one whole tile for a data-parallel CTA); a persistent
+        CTA first round-robins the data-parallel tiles and then walks its
+        stream-K range. Every item runs the ordinary K loop over its slice and
+        then the configured fixup, so the GEMM body is emitted once.
+
+        The kernel is shape- and pool-agnostic: the partition arrives as the
+        ``sk_*`` kernargs (see ``ConvArgs.streamk_partition``), so every loop
+        bound below is a CTA-uniform runtime value.
+
+        The tile mapping and group fold rebind the offsets the descriptor
+        closures read, exactly as the split-K path binds its K slice.
+        """
+        nonlocal block_m_off_v, block_n_off_v, group_v, grid
+        from rocke.helpers.streamk import (
+            StreamKIterArgs,
+            emit_streamk_iter_range,
+            emit_streamk_sk_start_iter,
+        )
+
+        reduction = spec.streamk_reduction
+        persistent = spec.streamk == "persistent"
+        c_one = b.const_i32(1)
+        c_ipt = params["sk_iters_per_tile"]
+        c_dp_tiles = params["sk_dp_tiles"]
+        c_sk_ctas = params["sk_ctas"]
+        c_per_cta = params["sk_iters_per_cta"]
+        c_extra = params["sk_extra_iters"]
+        sk_args = StreamKIterArgs(
+            iters_per_tile=c_ipt,
+            dp_tiles=c_dp_tiles,
+            total_dp_iters=b.to_sgpr_u32(b.mul(c_dp_tiles, c_ipt)),
+            iters_per_sk_cta=c_per_cta,
+            extra_iters=c_extra,
+        )
+        cta = b.to_sgpr_u32(b.block_id_x())
+        if persistent:
+            c_pool = params["sk_pool"]
+            # DP tiles cta, cta + pool, ... : ceil((dp_tiles - cta) / pool).
+            # cta < pool, so the numerator is never negative.
+            n_dp = b.div(b.add(b.sub(c_dp_tiles, cta), b.sub(c_pool, c_one)), c_pool)
+            rng = emit_streamk_iter_range(b, cta, sk_args, dp=False)
+            first_tile = b.div(rng.start, c_ipt)
+            last_tile = b.div(b.sub(rng.end, c_one), c_ipt)
+            n_sk = b.add(b.sub(last_tile, first_tile), c_one)
+            # An all-DP partition has no stream-K CTAs; persistent CTAs are
+            # either all stream-K CTAs or none of them.
+            n_sk = b.select(b.cmp_lt(cta, c_sk_ctas), n_sk, c0)
+            n_items = b.to_sgpr_u32(b.add(n_dp, n_sk))
+            sk_cta = cta
+        else:
+            rng = emit_streamk_iter_range(b, cta, sk_args, dp=True)
+            first_tile = b.div(rng.start, c_ipt)
+            last_tile = b.div(b.sub(rng.end, c_one), c_ipt)
+            n_items = b.to_sgpr_u32(b.add(b.sub(last_tile, first_tile), c_one))
+            sk_cta = rng.sk_cta
+
+        n_waves = spec.warp_m * spec.warp_n
+        n_slots = len(accs) * c_per_lane
+
+        def _flag_idx(sk_idx: Value) -> Value:
+            # One flag per (stream-K CTA, wave): a consumer lane only ever
+            # reads the partial its own wave's lane wrote, so each wave can
+            # release and acquire independently with no workgroup barrier.
+            return b.add(b.mul(sk_idx, b.const_i32(n_waves)), warp_id)
+
+        def _slot_base(sk_idx: Value) -> Value:
+            # Partials are [sk_cta][slot][tid] f32: lanes of one slot are
+            # adjacent, so every partial store and load is fully coalesced.
+            return b.add(b.mul(sk_idx, b.const_i32(n_slots * threads)), tid)
+
+        def _store_partial(sk_idx: Value, vals: Sequence[Value]) -> None:
+            base = _slot_base(sk_idx)
+            for ai, acc in enumerate(vals):
+                for i in range(c_per_lane):
+                    off = b.add(base, b.const_i32((ai * c_per_lane + i) * threads))
+                    b.global_store(sk_partials, off, b.vec_extract(acc, i), align=4)
+            b.fence(scope="agent", ordering="release")
+            b.global_flag_store(sk_flags, _flag_idx(sk_idx), c_one)
+
+        def _load_partial(sk_idx: Value) -> List[Value]:
+            base = _slot_base(sk_idx)
+            out = []
+            for ai in range(len(accs)):
+                comps = [
+                    b.global_load_f32(
+                        sk_partials,
+                        b.add(base, b.const_i32((ai * c_per_lane + i) * threads)),
+                    )
+                    for i in range(c_per_lane)
+                ]
+                out.append(b.vec_pack(comps, F32))
+            return out
+
+        def _sk_cta_of(it: Value) -> Value:
+            # The stream-K CTA owning global iteration ``it``: CTAs below
+            # extra_iters own iters_per_sk_cta + 1 iterations, the rest one fewer.
+            rel = b.sub(it, sk_args.total_dp_iters)
+            wide = b.add(c_per_cta, c_one)
+            boundary = b.mul(c_extra, wide)
+            lead = b.div(rel, wide)
+            tail = b.add(c_extra, b.div(b.sub(rel, boundary), c_per_cta))
+            return b.select(b.cmp_lt(rel, boundary), lead, tail)
+
+        def _store_tile(vals: Sequence[Value]) -> None:
+            _emit_wgrad_direct_epilogue(
+                b, spec, vals, grid, dw_rsrc, params, group=group_v
+            )
+
+        loop = b.scf_for(c0, n_items, c_one, iv_name="sk_item")
+        with loop as item:
+            if persistent:
+                is_dp = b.cmp_lt(item, n_dp)
+                dp_tile = b.add(cta, b.mul(item, c_pool))
+                sk_tile = b.add(first_tile, b.sub(item, n_dp))
+                tile = b.to_sgpr_u32(b.select(is_dp, dp_tile, sk_tile))
+                dp_start = b.mul(tile, c_ipt)
+                item_start = b.select(is_dp, dp_start, rng.start)
+                item_end = b.select(is_dp, b.add(dp_start, c_ipt), rng.end)
+            else:
+                tile = b.to_sgpr_u32(b.add(first_tile, item))
+                item_start = rng.start
+                item_end = rng.end
+            tile_start = b.mul(tile, c_ipt)
+            tile_end = b.add(tile_start, c_ipt)
+            lo = b.sub(b.smax(item_start, tile_start), tile_start)
+            hi = b.sub(b.smin(item_end, tile_end), tile_start)
+
+            # Tile -> (group, m_tile, n_tile). Groups are folded into GEMM-M
+            # group-fastest, CK's i_g = tile_m % GemmBatch; m_tiles is defined
+            # per group, so the fold is exact for any wg_M.
+            n_tile = b.mod(tile, p_num_pid_n)
+            m_idx = b.div(tile, p_num_pid_n)
+            if grouped:
+                group_v = b.to_sgpr_u32(b.mod(m_idx, p_groups))
+                m_tile = b.div(m_idx, p_groups)
+            else:
+                m_tile = m_idx
+            block_m_off_v = b.to_sgpr_u32(b.mul(m_tile, b.const_i32(block_m)))
+            block_n_off_v = b.to_sgpr_u32(b.mul(n_tile, b.const_i32(block_n)))
+            grid = dc_replace(
+                grid, block_m_off=block_m_off_v, block_n_off=block_n_off_v
+            )
+
+            k_lo_t = b.to_sgpr_u32(b.mul(lo, c_block_k))
+            k_hi_t = b.to_sgpr_u32(b.mul(hi, c_block_k))
+            for_op = b.scf_for_iter(k_lo_t, k_hi_t, c_block_k, accs, iv_name="k0")
+            with for_op as (k0, iter_vars):
+                emit_load_phase(k0, A_smem, B_smem)
+                b.sync()
+                new_accs = emit_mfma_phase(A_smem, B_smem, iter_vars)
+                b.sync()
+                b.scf_yield(*new_accs)
+            tile_accs = for_op.results
+
+            if reduction in ("linear", "tree"):
+                # Whether this item covers the start / the end of its tile. A
+                # data-parallel tile (and every tile of an all-DP partition)
+                # has both. Built only for the flag-handoff fixups, so the
+                # atomic and workspace bodies carry no dead compares.
+                started = b.cmp_eq(lo, c0)
+                ended = b.cmp_eq(hi, c_ipt)
+
+            if reduction == "atomic":
+                _emit_wgrad_split_k_epilogue(
+                    b,
+                    spec,
+                    atom,
+                    tile_accs,
+                    warp_m_idx,
+                    warp_n_idx,
+                    lane,
+                    block_m_off_v,
+                    block_n_off_v,
+                    dW,
+                    c_per_lane,
+                    params,
+                    group=group_v,
+                )
+            elif reduction == "workspace":
+                _emit_wgrad_workspace_store_epilogue(
+                    b,
+                    spec,
+                    atom,
+                    tile_accs,
+                    warp_m_idx,
+                    warp_n_idx,
+                    lane,
+                    block_m_off_v,
+                    block_n_off_v,
+                    ws_ptr,
+                    c_per_lane,
+                    params,
+                    gm_group=group_v,
+                    replica_sel=cta,
+                )
+            elif reduction == "linear":
+                # A data-parallel tile has started and ended, so it folds no
+                # partners and stores.
+                with b.scf_if_else(started) as (owner, contributor):
+                    with owner:
+                        # Fold every later contributor in order, then store once.
+                        last = _sk_cta_of(b.sub(tile_end, c_one))
+                        n_partners = b.select(ended, c0, b.sub(last, sk_cta))
+                        fold = b.scf_for_iter(
+                            c_one,
+                            b.to_sgpr_u32(b.add(n_partners, c_one)),
+                            c_one,
+                            [(f"sk_{nm}", v) for (nm, _), v in zip(accs, tile_accs)],
+                            iv_name="sk_p",
+                        )
+                        with fold as (pi, folded):
+                            partner = b.add(sk_cta, pi)
+                            b.global_flag_wait_eq(sk_flags, _flag_idx(partner), c_one)
+                            parts = _load_partial(partner)
+                            b.scf_yield(
+                                *[b.vector_add(v, q) for v, q in zip(folded, parts)]
+                            )
+                        _store_tile(fold.results)
+                    with contributor:
+                        _store_partial(sk_cta, tile_accs)
+            else:
+                # Tree: round r pairs CTAs 2^r apart within the tile. A receiver
+                # folds its partner in; the first round in which a contributor
+                # is not a receiver it publishes its sum and drops out. The
+                # round count is a kernarg (0 for an all-DP partition), so the
+                # rounds are a runtime loop carrying the partial sums, the pair
+                # stride and a dropped-out flag; every predicate is uniform.
+                not_started = b.lnot(started)
+                local = b.sub(sk_cta, _sk_cta_of(tile_start))
+                zero_acc = b.zero_vec_f32(c_per_lane)
+                c_two = b.const_i32(2)
+                n_acc = len(accs)
+                rounds = b.scf_for_iter(
+                    c0,
+                    params["sk_tree_rounds"],
+                    c_one,
+                    [(f"skt_{nm}", v) for (nm, _), v in zip(accs, tile_accs)]
+                    + [("skt_stride", c_one), ("skt_done", c0)],
+                    iv_name="sk_r",
+                )
+                with rounds as (_r, carried):
+                    vals = list(carried[:n_acc])
+                    stride = carried[n_acc]
+                    live = b.cmp_eq(carried[n_acc + 1], c0)
+                    partner = b.add(sk_cta, stride)
+                    in_tile = b.land(
+                        b.lnot(ended),
+                        b.cmp_lt(
+                            emit_streamk_sk_start_iter(b, partner, sk_args), tile_end
+                        ),
+                    )
+                    is_recv = b.cmp_eq(b.mod(local, b.mul(stride, c_two)), c0)
+                    recv = b.land(b.land(is_recv, in_tile), live)
+                    with b.scf_if(recv):
+                        b.global_flag_wait_eq(sk_flags, _flag_idx(partner), c_one)
+                    # Non-receivers read slot 0 (always in bounds) and discard it.
+                    parts = _load_partial(b.select(recv, partner, c0))
+                    vals = [
+                        b.vector_add(v, b.select(recv, q, zero_acc))
+                        for v, q in zip(vals, parts)
+                    ]
+                    send = b.land(b.land(not_started, b.lnot(is_recv)), live)
+                    with b.scf_if(send):
+                        _store_partial(sk_cta, vals)
+                    b.scf_yield(
+                        *vals,
+                        b.mul(stride, c_two),
+                        b.select(send, c_one, carried[n_acc + 1]),
+                    )
+                with b.scf_if(started):
+                    _store_tile(list(rounds.results[:n_acc]))
+
+    if _is_streamk:
+        _emit_streamk_tiles()
+        return b.kernel
 
     # ---- K loop ----
     # k_lo / k_hi select the slice this CTA processes: k_lo = slice*ks,
@@ -3205,6 +3885,7 @@ def _emit_wgrad_workspace_store_epilogue(
     c_per_lane: int,
     params: Dict[str, Value],
     gm_group: Optional[Value] = None,
+    replica_sel: Optional[Value] = None,
 ) -> None:
     """Two-stage Stage 1 epilogue: f32 atomic-add into the scratch accumulator.
 
@@ -3258,17 +3939,24 @@ def _emit_wgrad_workspace_store_epilogue(
     # downstream SSA value and break byte-identity on the default path.
     # Scratch total size = groups * R * wg_M * wg_N (f32 elements); R is a
     # build-time knob, the slab size is the runtime wg_M * wg_N.
+    #
+    # ``replica_sel`` replaces blockIdx.z as the hash input: a stream-K launch
+    # is one-dimensional, so it passes its linear CTA index instead.
     reps = spec.ws_replicas
     _slab_idx = None
+
+    def _replica_src() -> Value:
+        return replica_sel if replica_sel is not None else b.block_id_z()
+
     if gm_group is not None and reps > 1:
         _slab_idx = b.add(
             b.mul(gm_group, b.const_i32(reps)),
-            b.mod(b.block_id_z(), b.const_i32(reps)),
+            b.mod(_replica_src(), b.const_i32(reps)),
         )
     elif gm_group is not None:
         _slab_idx = gm_group
     elif reps > 1:
-        _slab_idx = b.mod(b.block_id_z(), b.const_i32(reps))
+        _slab_idx = b.mod(_replica_src(), b.const_i32(reps))
     slab_off = b.mul(_slab_idx, slab_v) if _slab_idx is not None else None
 
     # Merged-path setup. Only materialised when gm > 1, for the same
@@ -3345,7 +4033,7 @@ def _emit_wgrad_workspace_store_epilogue(
                         if reps > 1:
                             group_true = b.add(
                                 b.mul(group_true, c_reps_v),
-                                b.mod(b.block_id_z(), c_reps_v),
+                                b.mod(_replica_src(), c_reps_v),
                             )
                         n_true = b.mul(yx, c_cpg_v) if p.cpg > 1 else yx
                         if p.cpg > 1:
