@@ -102,13 +102,38 @@ set_target_properties(rocsparse-unit-test PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/staging"
 )
 
+# TheRock's test artifact includes bin/rocsparse/** and bin/rocsparse-test*,
+# and ctest runs from bin/rocsparse. These binaries do not match
+# bin/rocsparse-test*, so install them beside CTestTestfile.cmake. That is one
+# directory deeper than the other clients, so the RPATH gains an extra "..".
+function(rocsparse_install_unit_test target)
+  # TheRock's post-configure hook rewrites INSTALL_RPATH for every executable
+  # as if it lived in bin/. These binaries are installed in bin/rocsparse/, so
+  # tell that hook the real directory. It then emits $ORIGIN/../../lib, which
+  # reaches the same lib/ that rocsparse-test finds via $ORIGIN/../lib.
+  set_property(TARGET ${target} PROPERTY THEROCK_INSTALL_RPATH_ORIGIN
+    "${CMAKE_INSTALL_BINDIR}/rocsparse")
+  if(NOT WIN32)
+    set_property(TARGET ${target} PROPERTY INSTALL_RPATH
+      "$ORIGIN/../../llvm/lib"
+      "$ORIGIN/../../lib"
+      "$ORIGIN/../../lib/rocsparse-clients/lib")
+  endif()
+  # Windows has no RPATH. The same directories are prepended to PATH in the
+  # installed CTestTestfile below, because ctest runs from bin/rocsparse/.
+  install(
+    TARGETS ${target}
+    RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}/rocsparse"
+    COMPONENT tests)
+endfunction()
+
 # CTest registration. enable_testing() is already invoked at the top-level
-# project scope (projects/rocsparse/CMakeLists.txt, guarded by BUILD_CLIENTS_TESTS),
-# so this test is discoverable via `ctest` from the top build directory. This lets
-# CI run the fast, GPU-independent unit tests as an early gate: `ctest -R rocsparse-unit-test`.
+# project scope (projects/rocsparse/CMakeLists.txt, guarded by BUILD_CLIENTS_TESTS).
+# Tier labels are applied with the device binary below, so ctest -L quick
+# (and standard / comprehensive / full) runs this target.
 add_test(NAME rocsparse-unit-test COMMAND rocsparse-unit-test)
 
-rocm_install(TARGETS rocsparse-unit-test COMPONENT tests)
+rocsparse_install_unit_test(rocsparse-unit-test)
 
 # ---------------------------------------------------------------------------
 # rocsparse-unit-test-device : GPU (device) unit tests.
@@ -421,12 +446,58 @@ set_target_properties(rocsparse-unit-test-device PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/staging"
 )
 
-# Registered with CTest but tagged so CI can schedule it on a GPU node only
-# (it is NOT part of the fast CPU-only gate).
+# Device unit tests run in the same quick / standard / comprehensive / full
+# tiers as the CPU binary. The gpu label remains so a GPU-only ctest selection
+# still finds it.
 add_test(NAME rocsparse-unit-test-device COMMAND rocsparse-unit-test-device)
-set_tests_properties(rocsparse-unit-test-device PROPERTIES LABELS "gpu")
 
-rocm_install(TARGETS rocsparse-unit-test-device COMPONENT tests)
+rocsparse_install_unit_test(rocsparse-unit-test-device)
+
+# Register each binary once in the build tree. TheRock instead selects tests
+# from the installed bin/rocsparse/CTestTestfile.cmake below, where gfx1151
+# requires separate entries carrying its GPU-specific label.
+set(ROCSPARSE_UNIT_TEST_CI_LABELS quick standard comprehensive full)
+
+set_tests_properties(rocsparse-unit-test PROPERTIES LABELS "${ROCSPARSE_UNIT_TEST_CI_LABELS}")
+set_tests_properties(rocsparse-unit-test-device PROPERTIES LABELS "gpu;${ROCSPARSE_UNIT_TEST_CI_LABELS}")
+
+if(ROCSPARSE_CTEST_INSTALL_FILE)
+  file(APPEND "${ROCSPARSE_CTEST_INSTALL_FILE}" [=[
+# rocSPARSE unit-test binaries (quick, standard, comprehensive, full).
+# Installed into bin/rocsparse/ next to this file. TheRock packages that
+# directory, and ctest runs from it. gfx1151 entries carry ex_gpu_gfx1151 so
+# TheRock selects them with -L <tier> -L ex_gpu_gfx1151. Other GPUs exclude
+# ex_gpu and run the plain entries.
+
+add_test(rocsparse-unit-test "./rocsparse-unit-test")
+set_tests_properties(rocsparse-unit-test PROPERTIES LABELS "quick;standard;comprehensive;full")
+
+add_test(rocsparse-unit-test_gfx1151 "./rocsparse-unit-test")
+set_tests_properties(rocsparse-unit-test_gfx1151 PROPERTIES LABELS "quick;standard;comprehensive;full;ex_gpu_gfx1151")
+
+add_test(rocsparse-unit-test-device "./rocsparse-unit-test-device")
+set_tests_properties(rocsparse-unit-test-device PROPERTIES LABELS "gpu;quick;standard;comprehensive;full")
+
+add_test(rocsparse-unit-test-device_gfx1151 "./rocsparse-unit-test-device")
+set_tests_properties(rocsparse-unit-test-device_gfx1151 PROPERTIES LABELS "gpu;quick;standard;comprehensive;full;ex_gpu_gfx1151")
+
+]=])
+  # The device binary imports the HIP runtime. rocsparse-test.exe finds those
+  # DLLs because it lives in bin/; these tests live in bin/rocsparse/. ctest's
+  # working directory is that folder, so ".." is bin/.
+  if(WIN32)
+    file(APPEND "${ROCSPARSE_CTEST_INSTALL_FILE}" [=[
+set_tests_properties(
+  rocsparse-unit-test
+  rocsparse-unit-test_gfx1151
+  rocsparse-unit-test-device
+  rocsparse-unit-test-device_gfx1151
+  PROPERTIES ENVIRONMENT_MODIFICATION
+    "PATH=path_list_prepend:../../lib/rocsparse-clients/lib;PATH=path_list_prepend:../../llvm/lib;PATH=path_list_prepend:../../lib;PATH=path_list_prepend:..")
+
+]=])
+  endif()
+endif()
 
 # ---------------------------------------------------------------------------
 # Code coverage: instrument the unit-test binaries so the library sources that
