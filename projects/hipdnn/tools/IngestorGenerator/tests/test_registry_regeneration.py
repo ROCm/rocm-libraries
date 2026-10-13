@@ -20,8 +20,12 @@ The slice rule (what "the shipped catalog" means) is explicit:
 The slice itself lives in ``tools/registry_enumerator.py``; this test drives it
 from the engine manifest, so it checks the tool, not a copy of its logic.
 
-The registry spec dataclass carries more fields than the shipped KDP spec; the
-extra ones must sit at their dataclass defaults, which is asserted here.
+The registry spec dataclass carries more fields than the shipped KDP spec. The
+shipped KDP cannot express them, yet ``hkp_pack`` hydrates ``Spec(**fields)`` and so
+compiles whatever they are: each one is pinned to a literal below. A registry or
+dataclass change that moves one (or adds a field) fails here and is resolved by
+editing the literal in review -- a deliberate change to the integration, never a
+silent one. Refreshing the shipped KDP to carry the full spec retires this snapshot.
 
 Skipped when rocKE is not importable (a plain IngestorGenerator checkout).
 """
@@ -56,6 +60,29 @@ _MANIFEST = (
     / "configs"
     / "gfx950_attention_dense.engine.yaml"
 )
+
+# The registry-spec fields the shipped KDP's kernel_source.spec does not carry, with
+# the value every shipped-slice spec holds today. Literal on purpose: comparing to
+# the dataclass default would follow a default change instead of catching it.
+_UNSHIPPED_SPEC_FIELDS = {
+    "causal_bottom_right": False,
+    "causal_diag_split": True,
+    "emit_lse": False,
+    "exp_per_pv_step": None,
+    "iglp_mode": None,
+    "lazy_rescale_threshold": 8.0,
+    "lds_k_row_pad": 8,
+    "lds_num_buffers": 2,
+    "o_store_width": 4,
+    "partial_vmcnt_prefetch": True,
+    "pv_loop_order": None,
+    "pv_priority": 1,
+    "pv_sched_fence": None,
+    "pv_sched_fence_mask": 0,
+    "pv_sched_group_ds_read": 2,
+    "pv_sched_group_template": None,
+    "use_exp2_fast": True,
+}
 
 
 @pytest.fixture(scope="module")
@@ -139,14 +166,6 @@ def _entry(shipped_entry: dict, ks) -> dict:
     }
 
 
-def _field_default(f: dataclasses.Field):
-    if f.default is not dataclasses.MISSING:
-        return f.default
-    if f.default_factory is not dataclasses.MISSING:
-        return f.default_factory()
-    return dataclasses.MISSING
-
-
 def test_registry_reproduces_the_shipped_dense_catalog(shipped, registry):
     template = shipped["kernelDescriptors"][0]
     shipped_keys = set(template["kernel_source"]["spec"])
@@ -162,20 +181,25 @@ def test_registry_reproduces_the_shipped_dense_catalog(shipped, registry):
     assert not problems, "\n".join(problems)
     assert len(entries) == len(shipped["kernelDescriptors"])
 
-    # The registry spec is wider than the shipped one. The shipped catalog is
-    # only the same kernel set if every field it does not carry sits at its
-    # dataclass default -- hkp_pack hydrates Spec(**fields), so that is what the
-    # packer compiles. A registry candidate that moves one off-default is a
-    # different binary the shipped KDP cannot express.
-    off_default = []
+    # The registry spec is wider than the shipped one. The shipped catalog is only
+    # the same kernel set if every field it does not carry holds the snapshot value.
+    drift = set()
     for _, ks in pairs:
-        for f in dataclasses.fields(ks):
-            if f.name in shipped_keys:
-                continue
-            default = _field_default(f)
-            if default is dataclasses.MISSING or getattr(ks, f.name) != default:
-                off_default.append((f.name, getattr(ks, f.name), default))
-    assert not off_default, sorted({repr(o) for o in off_default})[:10]
+        unshipped = {
+            f.name: getattr(ks, f.name)
+            for f in dataclasses.fields(ks)
+            if f.name not in shipped_keys
+        }
+        if unshipped != _UNSHIPPED_SPEC_FIELDS:
+            for name in unshipped.keys() | _UNSHIPPED_SPEC_FIELDS.keys():
+                got = unshipped.get(name, "<absent>")
+                want = _UNSHIPPED_SPEC_FIELDS.get(name, "<absent>")
+                if got != want:
+                    drift.add((name, got, want))
+    assert not drift, (
+        "registry-only spec fields moved off the checked-in snapshot "
+        f"(field, registry, snapshot): {sorted(drift, key=repr)}"
+    )
 
 
 def test_block_n_256_exists_at_d64_and_not_at_d128(shipped, registry):

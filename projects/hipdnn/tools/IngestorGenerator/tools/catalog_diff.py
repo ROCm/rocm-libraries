@@ -120,9 +120,10 @@ def compare_catalog(
     shipped value, is reported either way.
 
     The caller owns the claim that fields the shipped catalog does not carry
-    sit at their defaults (``test_registry_regeneration`` asserts it against
-    the spec dataclass). ``strict_spec=True`` compares the FULL spec both ways
-    instead, so any regenerated-only field is a difference.
+    sit at their expected values (``test_registry_regeneration`` pins them to a
+    checked-in literal snapshot). ``strict_spec=True`` compares the FULL spec
+    of the two catalogs both ways, so any field only one side carries is a
+    difference.
     """
     spec_keys: frozenset | None = None
     if not strict_spec:
@@ -397,9 +398,12 @@ def main(argv=None) -> int:
         "--strict-spec",
         action="store_true",
         help="compare the FULL kernel_source.spec both ways, so a field only "
-        "the regenerated catalog carries is a difference. By default only the "
-        "fields the shipped catalog carries are compared (a dropped or changed "
-        "shipped field is always reported).",
+        "one catalog carries is a difference. By default only the fields the "
+        "shipped catalog carries are compared (a dropped or changed shipped "
+        "field is always reported). It sees only what the regenerated catalog "
+        "holds: a generator config built with the manifest's enumerate."
+        "spec_fields projects the spec to those fields, so the comparison is "
+        "full-spec only once the shipped catalog carries the full spec.",
     )
     parser.add_argument(
         "--shipped-kmd",

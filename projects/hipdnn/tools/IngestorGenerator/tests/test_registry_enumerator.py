@@ -120,7 +120,6 @@ def test_unrenderable_name_template_is_an_error(manifest, bound):
 def test_regeneration_is_a_no_op_against_the_shipped_catalog(manifest, bound, tmp_path):
     """enumerate -> generate -> catalog_diff, with only UUIDs allowed to differ."""
     pytest.importorskip("jinja2")
-    pytest.importorskip("pydantic")
     if not _SHIPPED.is_dir():
         pytest.skip(f"shipped descriptors not in this checkout: {_SHIPPED}")
     config = tmp_path / "config.yaml"
@@ -142,6 +141,10 @@ def test_regeneration_is_a_no_op_against_the_shipped_catalog(manifest, bound, tm
     assert gen.returncode == 0, gen.stderr[-2000:]
     regenerated = next(out.rglob("gfx950_attention_dense.kdp.json"))
     shipped = _SHIPPED / "gfx950_attention_dense.kdp.json"
+    # The KMD is the typed field list the C++ matcher compares against: its names,
+    # types and defaults are part of the captured integration state.
+    shipped_kmd = _SHIPPED / "gfx950_attention_dense.kmd.json"
+    regenerated_kmd = regenerated.with_name("gfx950_attention_dense.kmd.json")
     for strict in ([], ["--strict-spec"]):
         diff = subprocess.run(
             [
@@ -152,6 +155,10 @@ def test_regeneration_is_a_no_op_against_the_shipped_catalog(manifest, bound, tm
                 "--regenerated",
                 str(regenerated),
                 "--ignore-ids",
+                "--shipped-kmd",
+                str(shipped_kmd),
+                "--regenerated-kmd",
+                str(regenerated_kmd),
                 *strict,
             ],
             capture_output=True,
