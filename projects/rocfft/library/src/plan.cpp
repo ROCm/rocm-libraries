@@ -4403,6 +4403,75 @@ catch(...)
     return false;
 }
 
+bool rocfft_plan_t::BuildEmbarrassinglyParallelPlan()
+try
+{
+    // Reject single-device usage (and imitations thereof)
+    // TODO: relax this condition when execution items are
+    // unified for multi-device and single-device plans
+    if(desc.has_undistributed_io_on_current_location())
+        return false;
+
+    // length axes must be undistributed for both input and output
+    if(!desc.get_field_for(io_data_label::INPUT).has_undistributed_length_axes()
+       || !desc.get_field_for(io_data_label::OUTPUT).has_undistributed_length_axes())
+        return false;
+
+    const auto input_view  = make_user_field_view<io_data_label::INPUT>();
+    const auto output_view = make_user_field_view<io_data_label::OUTPUT>();
+
+    // reorder output bricks to match input order
+    auto paired_bricks  = output_view.field.get_bricks();
+    auto paired_buffers = output_view.buffers;
+    for(size_t in_idx = 0; in_idx < input_view.field.num_bricks(); in_idx++)
+    {
+        const auto& ibrick  = input_view.field.get_brick(in_idx);
+        size_t      out_idx = in_idx;
+        for(; out_idx < paired_bricks.size(); out_idx++)
+        {
+            const auto& obrick = paired_bricks[out_idx];
+            // length axes are full on both sides, so equal batch ranges mean equal transforms
+            if(obrick.location == ibrick.location
+               && obrick.layout.has_same_batch_range_as(ibrick.layout)
+               && (placement != rocfft_placement_inplace
+                   || paired_buffers[out_idx] == input_view.buffers[in_idx]))
+                break;
+        }
+        if(out_idx == paired_bricks.size())
+            return false;
+        std::swap(paired_bricks[in_idx], paired_bricks[out_idx]);
+        std::swap(paired_buffers[in_idx], paired_buffers[out_idx]);
+    }
+    // unpaired output bricks can only be empty
+    paired_bricks.erase(paired_bricks.begin() + input_view.field.num_bricks(), paired_bricks.end());
+    paired_buffers.erase(paired_buffers.begin() + input_view.field.num_bricks(),
+                         paired_buffers.end());
+
+    embarrassingly_parallel_fft fft(transformType,
+                                    placement,
+                                    precision,
+                                    input_view,
+                                    field_view_t(rocfft_field_t(std::move(paired_bricks)),
+                                                 paired_buffers,
+                                                 output_view.array_type,
+                                                 precision,
+                                                 output_view.group_name));
+    fft.set_load_ops(desc.loadOps);
+    fft.set_store_ops(desc.storeOps);
+    create_plan_items_for(fft, {});
+    return true;
+}
+catch(const std::exception& e)
+{
+    discard_failed_multi_device_plan(ROCFFT_CURRENT_FUNCTION, e.what());
+    return false;
+}
+catch(...)
+{
+    discard_failed_multi_device_plan(ROCFFT_CURRENT_FUNCTION, nullptr);
+    return false;
+}
+
 // All-gather all of the brick parameters for a given field.
 #ifdef ROCFFT_MPI_ENABLE
 rocfft_status
@@ -4906,22 +4975,26 @@ static rocfft_status rocfft_plan_create_internal(rocfft_plan                   p
         if(rcfft != rocfft_status_success)
             return rcfft;
 
-#ifdef ROCFFT_RCCL_ENABLE
-        // init rccl before any plan-building path is chosen.
-        // on failure it leaves rccl empty and we fall back to the P2P / A2A paths
-        plan->InitRCCLCommunicator();
-#endif
-
         log_bench(rocfft_bench_command(plan));
 
-        // Construct the plan
-        if(plan->desc.has_undistributed_io_on_current_location()
-           || !(plan->BuildOptMultiDevicePlan() || plan->BuildMultiDevicePlan()))
+        if(!plan->BuildEmbarrassinglyParallelPlan())
         {
-            // Plan is configured for single-device operations or the multi-device plan
-            // creation failed. Either way, a single-device execution is used, possibly
-            // with gather/scatter steps.
-            plan->MakeSingleDevPlanWithGatherScatterIfNeeded();
+#ifdef ROCFFT_RCCL_ENABLE
+            // communications may be required: init rccl before any plan-building
+            // path is chosen. On failure it leaves rccl empty and we fall back to
+            // the P2P / A2A paths
+            plan->InitRCCLCommunicator();
+#endif
+            // Construct the plan
+            // Note: both BuildOptMultiDevicePlan and BuildMultiDevicePlan
+            // reject single-device configurations
+            if(!plan->BuildOptMultiDevicePlan() && !plan->BuildMultiDevicePlan())
+            {
+                // Plan is configured for single-device operations or the multi-device plan
+                // creation failed. Either way, a single-device execution is used, possibly
+                // with gather/scatter steps.
+                plan->MakeSingleDevPlanWithGatherScatterIfNeeded();
+            }
         }
 
         // Roll up all of the information on individual temp buffers

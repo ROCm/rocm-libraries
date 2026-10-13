@@ -16,6 +16,9 @@ Documentation for rocFFT is available at
 * Function pointer callbacks specified with the deprecated `rocfft_execution_info_set_load_callback` and
   `rocfft_execution_info_set_store_callback` APIs are now disallowed with transforms that have fields
   specified on the plan description.
+* Multi-device plans are now built as independent per-brick transforms, without any data movement
+  between devices, when no input or output brick splits a transform length and every input brick
+  has an output brick on the same device covering the same batch range.
 
 ### Resolved issues
 
