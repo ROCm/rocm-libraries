@@ -427,13 +427,28 @@ class TestConfigEnumeration(unittest.TestCase):
         return rows, ir_artifact_diff.family_status(rows)[0], indices
 
     def test_both_drivers_visit_all_configs_and_stop_at_end(self):
-        self.assertEqual(self.config_count, 472)
+        self.assertEqual(self.config_count, 477)
         for driver, status in (("builders", "GREEN"), ("artifacts", "IDENTICAL")):
             with self.subTest(driver=driver):
                 rows, actual_status, indices = self.drive_family(driver)
                 self.assertEqual(len(rows), self.config_count)
                 self.assertEqual(indices, list(range(self.config_count + 1)))
                 self.assertEqual(actual_status, status)
+
+    def test_new_feature_probes_follow_the_existing_scale_configs(self):
+        self.assertEqual(
+            [build.__name__ for build, arch in self.emitter.CONFIGS[472:]],
+            [
+                "build_data_prefetch",
+                "build_cluster",
+                "build_cluster_dims",
+                "build_multicast",
+                "build_tdm",
+            ],
+        )
+        self.assertTrue(
+            all(arch == "gfx1250" for _, arch in self.emitter.CONFIGS[472:])
+        )
 
     def test_both_drivers_detect_drift_beyond_default_cap(self):
         late = run_diff.MAX_CFG

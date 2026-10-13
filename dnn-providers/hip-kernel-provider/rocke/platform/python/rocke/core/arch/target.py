@@ -154,6 +154,23 @@ def _load_specs() -> Dict[str, dict]:
     return doc["arches"]
 
 
+# LLVM defines generic-processor membership explicitly; it is not a naming
+# wildcard. Keep this list aligned with LLVM's AMDGPU Generic Processors table:
+# https://llvm.org/docs/AMDGPUUsage.html#amdgpu-generic-processor-table
+_GFX11_GENERIC_PROCESSORS = frozenset(
+    {
+        "gfx1100",
+        "gfx1101",
+        "gfx1102",
+        "gfx1103",
+        "gfx1150",
+        "gfx1151",
+        "gfx1152",
+        "gfx1153",
+        "gfx1154",
+    }
+)
+
 # A callable that, given an :class:`~rocke.core.ir.IRBuilder`, a runtime lane
 # ``Value`` (0..wave_size-1) and a compile-time fragment slot index, emits the
 # index arithmetic for the two tile coordinates of that fragment element and
@@ -1037,6 +1054,12 @@ class MemoryCapabilities:
     # ``buffer_load_max_dwords``, which is the *register* vector buffer-load
     # width: CDNA3 loads a full dwordx4 into VGPRs but only a dword into LDS.
     async_lds_max_dwords: int
+    # gfx1250 feature flags. An arch sets one only after its feature passes a
+    # functional run on a device; the ops themselves are gated separately.
+    has_scalar_data_prefetch: bool = False
+    has_global_prefetch: bool = False
+    has_cluster_launch: bool = False
+    has_multicast_load: bool = False
 
 
 @dataclass(frozen=True)
@@ -1380,6 +1403,10 @@ def _build_target(gfx: str) -> ArchTarget:
             has_tdm=mem.get("has_tdm", False),
             buffer_load_max_dwords=mem["buffer_load_max_dwords"],
             async_lds_max_dwords=mem["async_lds_max_dwords"],
+            has_scalar_data_prefetch=mem.get("has_scalar_data_prefetch", False),
+            has_global_prefetch=mem.get("has_global_prefetch", False),
+            has_cluster_launch=mem.get("has_cluster_launch", False),
+            has_multicast_load=mem.get("has_multicast_load", False),
         ),
         limits=ResourceLimits(
             max_threads_per_block=lim["max_threads_per_block"],
@@ -1426,18 +1453,8 @@ def target_id_from_isa(isa: str) -> str:
     return isa[start:] if start >= 0 else isa
 
 
-def base_arch_from_target_id(target_id: str) -> str:
-    """Derive the architecture name used for rocKE catalog lookup and lowering.
-
-    Removes features after ``:`` and profile suffixes such as ``-strict``:
-    ``gfx1250-strict`` becomes ``gfx1250`` and ``gfx942:xnack-`` becomes
-    ``gfx942``. Names already in :func:`known_arches`, including
-    ``gfx11-generic``, are preserved.
-
-    An unknown name is reduced to its leading ``gfx`` token when possible.
-    This does not check support; :meth:`ArchTarget.from_gfx` requires a
-    matching catalog entry.
-    """
+def _processor_from_target_id(target_id: str) -> str:
+    """Extract the processor token before any profile or feature suffix."""
 
     target_without_features = target_id.split(":", 1)[0]
     arches = known_arches()
@@ -1446,26 +1463,59 @@ def base_arch_from_target_id(target_id: str) -> str:
     for arch in sorted(arches, key=len, reverse=True):
         if target_without_features.startswith(f"{arch}-"):
             return arch
+    for processor in _GFX11_GENERIC_PROCESSORS:
+        if target_without_features == processor or target_without_features.startswith(
+            f"{processor}-"
+        ):
+            return processor
     match = re.match(r"^(gfx[0-9a-z]+)", target_without_features)
     return match.group(1) if match else target_without_features
+
+
+def base_arch_from_target_id(target_id: str) -> str:
+    """Derive the architecture name used for rocKE catalog lookup and lowering.
+
+    Removes features after ``:`` and profile suffixes such as ``-strict``:
+    ``gfx1250-strict`` becomes ``gfx1250`` and ``gfx942:xnack-`` becomes
+    ``gfx942``. Names already in :func:`known_arches`, including
+    ``gfx11-generic``, are preserved. A concrete processor in LLVM's documented
+    ``gfx11-generic`` compatibility domain uses that generic rocKE catalog row
+    unless rocKE has a more-specific row; exact rows therefore take precedence.
+
+    Any other unknown name is reduced to its leading ``gfx`` token when
+    possible. This does not check support; :meth:`ArchTarget.from_gfx` requires
+    a matching catalog entry.
+    """
+
+    target_without_features = target_id.split(":", 1)[0]
+    processor = _processor_from_target_id(target_id)
+    if processor in known_arches():
+        return processor
+    if processor in _GFX11_GENERIC_PROCESSORS and (
+        target_without_features == processor
+        or target_without_features.startswith(f"{processor}-")
+    ):
+        return "gfx11-generic"
+    return processor
 
 
 def compiler_target_from_target_id(target_id: str) -> str:
     """Derive the target name that the compile helpers pass to COMGR or hipcc.
 
-    Removes profile suffixes such as ``-strict`` using
-    :func:`base_arch_from_target_id`, but keeps features after ``:``.
-    For example, ``gfx1250-strict`` becomes ``gfx1250``, while
-    ``gfx942:sramecc+:xnack-`` stays unchanged.
+    Removes profile suffixes such as ``-strict`` from the processor token, but
+    keeps features after ``:``. Catalog selection remains independent, so a
+    concrete processor may compile for itself while lowering through a generic
+    rocKE catalog row. For example, ``gfx1250-strict`` becomes ``gfx1250``,
+    while ``gfx942:sramecc+:xnack-`` stays unchanged.
 
     This only converts the string. COMGR or hipcc checks whether the target
     and its features are supported when compilation runs.
     """
 
     target_without_features, separator, features = target_id.partition(":")
-    base_arch = base_arch_from_target_id(target_id)
-    if target_without_features.startswith(f"{base_arch}-"):
-        target_without_features = base_arch
+    processor = _processor_from_target_id(target_id)
+    if target_without_features.startswith(f"{processor}-"):
+        target_without_features = processor
     if separator:
         return f"{target_without_features}:{features}"
     return target_without_features

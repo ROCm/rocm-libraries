@@ -154,26 +154,26 @@ endif()
 
 if(ROCPRIM_ENABLE_ASSERTS)
   if(NOT "${CMAKE_BUILD_TYPE}" STREQUAL "")
-      string(TOUPPER ${CMAKE_BUILD_TYPE} BUILD_TYPE)
-      set(BUILD_TYPE_CXX_FLAGS "CMAKE_CXX_FLAGS_${BUILD_TYPE}")
-      set(BUILD_TYPE_C_FLAGS "CMAKE_C_FLAGS_${BUILD_TYPE}")
+    string(TOUPPER ${CMAKE_BUILD_TYPE} BUILD_TYPE)
+    set(BUILD_TYPE_CXX_FLAGS "CMAKE_CXX_FLAGS_${BUILD_TYPE}")
+    set(BUILD_TYPE_C_FLAGS "CMAKE_C_FLAGS_${BUILD_TYPE}")
   endif()
 
   string(REGEX REPLACE "-DNDEBUG( |$)" "" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
   string(REGEX REPLACE "-DNDEBUG( |$)" "" CMAKE_C_FLAGS "${CMAKE_C_FLAGS}")
   if(NOT "${CMAKE_BUILD_TYPE}" STREQUAL "")
-      string(REGEX REPLACE "-DNDEBUG( |$)" "" ${BUILD_TYPE_CXX_FLAGS} "${${BUILD_TYPE_CXX_FLAGS}}")
-      string(REGEX REPLACE "-DNDEBUG( |$)" "" ${BUILD_TYPE_C_FLAGS} "${${BUILD_TYPE_C_FLAGS}}")
+    string(REGEX REPLACE "-DNDEBUG( |$)" "" ${BUILD_TYPE_CXX_FLAGS} "${${BUILD_TYPE_CXX_FLAGS}}")
+    string(REGEX REPLACE "-DNDEBUG( |$)" "" ${BUILD_TYPE_C_FLAGS} "${${BUILD_TYPE_C_FLAGS}}")
   endif()
 endif()
 
 # Check if mold linker is available and use it if so
 find_program(MOLD_LINKER mold)
 if(MOLD_LINKER)
-    message(STATUS "Using mold linker")
-    add_link_options(-fuse-ld=mold)
+  message(STATUS "Using mold linker")
+  add_link_options(-fuse-ld=mold)
 else()
-    message(STATUS "mold not found, using default linker")
+  message(STATUS "mold not found, using default linker")
 endif()
 
 set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE CACHE BOOL "Add paths to linker search and installed rpath")
@@ -228,7 +228,7 @@ find_package(hip REQUIRED CONFIG PATHS ${HIP_DIR} ${ROCM_PATH} /opt/rocm)
 # already shipped at 4.x, so aligning it down to the umbrella version would
 # be a backwards version move and would break downstream
 # find_package(rocprim 4.x) consumers.
-set(VERSION_STRING "5.0.0")
+set(VERSION_STRING "4.8.0")
 rocm_setup_version(VERSION ${VERSION_STRING})
 math(EXPR rocprim_VERSION_NUMBER "${rocprim_VERSION_MAJOR} * 100000 + ${rocprim_VERSION_MINOR} * 100 + ${rocprim_VERSION_PATCH}")
 

@@ -1,6 +1,6 @@
 # MIT License
 #
-# Copyright (c) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -50,15 +50,16 @@ function(add_hipcub_benchmark BENCHMARK_SOURCE)
   # both derive their CMake target name from that filename - so nesting both in
   # one configure failed with "add_executable cannot create target ... because
   # another target with the same name already exists". Prefix the *target* name
-  # here; OUTPUT_NAME below keeps the produced binary's filename unchanged,
-  # which matters because the benchmark runner (.gitlab/run_benchmarks.py)
-  # selects binaries with a filename regex.
+  # here, as benchmark_hipcub_<name>. The target name is also the binary name,
+  # so it is unique across components in a shared bin/. The benchmark runner
+  # (.gitlab/run_benchmarks.py) selects binaries with a filename regex whose
+  # default, ^benchmark, still matches.
   #
-  # rocPRIM's copy is deliberately left untouched: there BENCHMARK_TARGET also
+  # rocPRIM's copy is deliberately left alone: there BENCHMARK_TARGET also
   # doubles as a source path ("${BENCHMARK_TARGET}.parallel.cpp.in") and as a
   # lookup key into benchmark/ConfigAutotuneSettings.cmake, so renaming it
   # would break config tuning. Renaming one side is enough to break the clash.
-  set(BENCHMARK_TARGET "hipcub_${BENCHMARK_NAME}")
+  string(REGEX REPLACE "^benchmark_" "benchmark_hipcub_" BENCHMARK_TARGET "${BENCHMARK_NAME}")
 
   if(USE_HIPCXX)
     set_source_files_properties(${BENCHMARK_SOURCE} PROPERTIES LANGUAGE HIP)
@@ -91,10 +92,8 @@ function(add_hipcub_benchmark BENCHMARK_SOURCE)
   endif()
 
   # NOTE(hipccl3): ${PROJECT_BINARY_DIR}, not ${CMAKE_BINARY_DIR}. rocPRIM
-  # writes its benchmarks to a "benchmark" directory too, and OUTPUT_NAME
-  # above restores the un-prefixed filename, so one shared directory would let
-  # the two projects' identically-named binaries silently overwrite each other
-  # in a nested build. PROJECT_BINARY_DIR equals CMAKE_BINARY_DIR for a
+  # writes its benchmarks to a "benchmark" directory too, so each project gets
+  # its own in a nested build. PROJECT_BINARY_DIR equals CMAKE_BINARY_DIR for a
   # top-level project, so standalone builds land in the same place as before
   # while nested builds get <build>/hipcub/benchmark. This also matches the
   # DLL copy destination below, which already used PROJECT_BINARY_DIR - when
@@ -102,7 +101,6 @@ function(add_hipcub_benchmark BENCHMARK_SOURCE)
   # find their DLLs.
   set_target_properties(${BENCHMARK_TARGET}
     PROPERTIES
-    OUTPUT_NAME "${BENCHMARK_NAME}"
     RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/benchmark"
   )
   rocm_install(TARGETS ${BENCHMARK_TARGET} COMPONENT benchmarks)

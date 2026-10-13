@@ -41,6 +41,7 @@
 # Build output goes to /tmp (repo tree is slow NFS). No git operations.
 
 import argparse
+import concurrent.futures as cf
 import hashlib
 import json
 import os
@@ -62,6 +63,17 @@ LIB_PARITY = ROCKE.parent / "library" / "tests" / "parity"
 INCLUDE = ROCKE / "cpp" / "include"
 TMP = Path(tempfile.gettempdir()) / "rocke_diff"
 TMP.mkdir(parents=True, exist_ok=True)
+
+# Families do not share emitter binaries or process state, so run them in
+# parallel.  The old serial loop launched thousands of short-lived C/Python
+# processes one after another and made this CPU-parallel gate take many
+# minutes.  Each worker also launches compilers and emitters, so cap the outer
+# pool at eight; using every logical CPU here oversubscribes the actual child
+# processes and is slower.  Respect a smaller affinity/quota allocation through
+# the same host-cap helper as the engine build.
+if str(ROCKE / "tools") not in sys.path:
+    sys.path.insert(0, str(ROCKE / "tools"))
+from _hostcaps import available_cpus  # noqa: E402
 
 # L5 golden anchor: committed per-(mode,family,config) reference shas. This is
 # the absolute regression anchor -- any future change that alters an emitted
@@ -512,6 +524,12 @@ def main():
     )
     ap.add_argument("--json", default=str(TMP / "dashboard.json"))
     ap.add_argument(
+        "--jobs",
+        type=int,
+        default=0,
+        help="families to compare concurrently (default: min(8, available CPUs))",
+    )
+    ap.add_argument(
         "--record-golden",
         action="store_true",
         help="bless the current reference shas into the committed "
@@ -547,14 +565,23 @@ def main():
         subs = [s for s in args.only.split(",") if s]
         fams = [(n, d) for n, d in fams if any(s in n for s in subs)]
 
-    print(f"mode={args.mode}  families={len(fams)}  archive={archive}")
+    jobs = args.jobs or min(8, available_cpus())
+    print(f"mode={args.mode}  families={len(fams)}  jobs={jobs}  archive={archive}")
     print(f"engine build-id: {archive_build_id(archive)}")
-    results = []
-    for name, src_dir in fams:
-        r = run_family(
+
+    def compare(family):
+        name, src_dir = family
+        return run_family(
             name, archive, args.mode, canonical=args.canonical, src_dir=src_dir
         )
-        results.append(r)
+
+    # executor.map preserves discovery order, keeping both the table and JSON
+    # deterministic while the expensive family comparisons run concurrently.
+    with cf.ThreadPoolExecutor(max_workers=jobs) as pool:
+        results = list(pool.map(compare, fams))
+
+    for r in results:
+        name = r["family"]
         tag = r["status"]
         extra = ""
         if r.get("n") is not None:

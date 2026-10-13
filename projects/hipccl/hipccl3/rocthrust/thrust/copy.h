@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -23,6 +23,13 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/detail/execution_policy.h>
 
 THRUST_NAMESPACE_BEGIN
@@ -254,7 +261,7 @@ OutputIterator copy_n(InputIterator first, Size n, OutputIterator result);
  *
  *  \tparam DerivedPolicy The name of the derived execution policy.
  *  \tparam InputIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input
- * Iterator</a>, and \p InputIterator's \c value_type is convertible to \p Predicate's \c argument_type. \tparam
+ * Iterator</a>, and \p InputIterator's \c value_type is convertible to \p Predicate's argument type. \tparam
  * OutputIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/output_iterator">Output
  * Iterator</a>. \tparam Predicate is a model of <a
  * href="https://en.cppreference.com/w/cpp/concepts/predicate">Predicate</a>.
@@ -270,7 +277,7 @@ OutputIterator copy_n(InputIterator first, Size n, OutputIterator result);
  *  ...
  *  struct is_even
  *  {
- *    THRUST_HOST_DEVICE
+ *    __host__ __device__
  *    bool operator()(const int x)
  *    {
  *      return (x % 2) == 0;
@@ -315,7 +322,7 @@ THRUST_HOST_DEVICE OutputIterator copy_if(
  *          evaluated to \c true in the range <tt>[first, last)</tt>.
  *
  *  \tparam InputIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input
- * Iterator</a>, and \p InputIterator's \c value_type is convertible to \p Predicate's \c argument_type. \tparam
+ * Iterator</a>, and \p InputIterator's \c value_type is convertible to \p Predicate's argument type. \tparam
  * OutputIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/output_iterator">Output
  * Iterator</a>. \tparam Predicate is a model of <a
  * href="https://en.cppreference.com/w/cpp/concepts/predicate">Predicate</a>.
@@ -330,7 +337,7 @@ THRUST_HOST_DEVICE OutputIterator copy_if(
  *  ...
  *  struct is_even
  *  {
- *    THRUST_HOST_DEVICE
+ *    __host__ __device__
  *    bool operator()(const int x)
  *    {
  *      return (x % 2) == 0;
@@ -377,7 +384,7 @@ OutputIterator copy_if(InputIterator first, InputIterator last, OutputIterator r
  *  \tparam InputIterator1 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input
  * Iterator</a>. \tparam InputIterator2 is a model of <a
  * href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a>, and \p InputIterator2's \c
- * value_type is convertible to \p Predicate's \c argument_type. \tparam OutputIterator is a model of <a
+ * value_type is convertible to \p Predicate's argument type. \tparam OutputIterator is a model of <a
  * href="https://en.cppreference.com/w/cpp/named_req/OutputIterator">Output Iterator</a>. \tparam Predicate is a model
  * of <a href="https://en.cppreference.com/w/cpp/concepts/predicate">Predicate</a>.
  *
@@ -395,7 +402,7 @@ OutputIterator copy_if(InputIterator first, InputIterator last, OutputIterator r
  *  ...
  *  struct is_even
  *  {
- *    THRUST_HOST_DEVICE
+ *    __host__ __device__
  *    bool operator()(const int x)
  *    {
  *      return (x % 2) == 0;
@@ -450,7 +457,7 @@ THRUST_HOST_DEVICE OutputIterator copy_if(
  *  \tparam InputIterator1 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input
  * Iterator</a>. \tparam InputIterator2 is a model of <a
  * href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a>, and \p InputIterator2's \c
- * value_type is convertible to \p Predicate's \c argument_type. \tparam OutputIterator is a model of <a
+ * value_type is convertible to \p Predicate's argument type. \tparam OutputIterator is a model of <a
  * href="https://en.cppreference.com/w/cpp/named_req/OutputIterator">Output Iterator</a>. \tparam Predicate is a model
  * of <a href="https://en.cppreference.com/w/cpp/concepts/predicate">Predicate</a>.
  *
@@ -466,7 +473,7 @@ THRUST_HOST_DEVICE OutputIterator copy_if(
  *  ...
  *  struct is_even
  *  {
- *    THRUST_HOST_DEVICE
+ *    __host__ __device__
  *    bool operator()(const int x)
  *    {
  *      return (x % 2) == 0;

@@ -94,6 +94,9 @@ Complete reference of operations recognized by `core/ir.py` and lowered to AMDGP
 | `memref.global_store_typed`   | `global_store`                | typed `store addrspace(1)` |
 | `memref.global_store_vN`      | `global_store_vN`             | vector `store addrspace(1)` |
 | `memref.global_atomic_add_f32`| `global_atomic_add_f32`       | `atomicrmw fadd addrspace(1)` |
+| `memref.fence`               | `fence`                       | `fence syncscope(...) <ordering>` |
+| `memref.global_flag_store`   | `global_flag_store`           | `store atomic i32 ... syncscope(...) <ordering>` |
+| `memref.global_flag_wait_eq` | `global_flag_wait_eq`         | spin loop around `load atomic i32 ... acquire` |
 
 `masked_global_load(ptr, idx, mask, other, dtype)` clamps the false-lane index to 0 before loading, then selects `other` afterward.
 
