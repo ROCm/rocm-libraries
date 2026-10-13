@@ -149,20 +149,6 @@ inline std::string formatEngineIdHex(int64_t id)
     return oss.str();
 }
 
-// Helper function to get engine name from ID (throws std::out_of_range if not found)
-inline std::string_view getEngineNameFromId(int64_t id)
-{
-    auto& idToName = getEngineIdToNameMap();
-    auto it = idToName.find(id);
-    if(it != idToName.end())
-    {
-        return it->second;
-    }
-
-    throw std::out_of_range("Engine ID " + formatEngineIdHex(id)
-                            + " not found in registered engines");
-}
-
 /**
  * @brief Gets the registered name of an engine ID without an exception
  *
@@ -182,6 +168,18 @@ inline std::optional<std::string_view> tryGetEngineNameFromId(int64_t id) noexce
     return found->second;
 }
 
+// Helper function to get engine name from ID (throws std::out_of_range if not found)
+inline std::string_view getEngineNameFromId(int64_t id)
+{
+    if(const auto name = tryGetEngineNameFromId(id); name.has_value())
+    {
+        return *name;
+    }
+
+    throw std::out_of_range("Engine ID " + formatEngineIdHex(id)
+                            + " not found in registered engines");
+}
+
 /**
  * @brief Names an engine ID from the static registry, falling back to hexadecimal
  *
@@ -193,14 +191,12 @@ inline std::optional<std::string_view> tryGetEngineNameFromId(int64_t id) noexce
  */
 inline std::string engineNameOrHex(int64_t id)
 {
-    try
+    if(const auto name = tryGetEngineNameFromId(id); name.has_value())
     {
-        return std::string(getEngineNameFromId(id));
+        return std::string(*name);
     }
-    catch(const std::out_of_range&)
-    {
-        return formatEngineIdHex(id);
-    }
+
+    return formatEngineIdHex(id);
 }
 
 struct EngineRegistrar
