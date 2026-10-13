@@ -390,6 +390,10 @@ validParameters = { # we need to make sure this matches develop
     # 1LDSBuffer never competes with this: TDM already resolves 1LDSBuffer==-1 to 0
     # and rejects 1LDSBuffer==1 with PGR2.
     "TDMPlusLdsBuf": [-1,0,1],
+    # Opt-in: give MX scale (SA/SB) each (group, K-chunk) its own persistent vgpr tile
+    # for the whole unroll iteration instead of ping-ponging 2 physical sets. Uses the
+    # already-reserved mxScaleVgprReserve headroom; see KNOWN_ISSUES.md "Scale LDS reads".
+    "ScaleLRFullResidency": [0,1],
     # We use double LDS buffer when PrefetchGlobalRead.
     # While it reads data from LDS[0]/[1], it prefetch global data and writes to LDS[1]/[0]
     # If we can make sure all data are read from LDS to register before writing data to LDS, we can use 1 LDS buffer to save LDS memory.

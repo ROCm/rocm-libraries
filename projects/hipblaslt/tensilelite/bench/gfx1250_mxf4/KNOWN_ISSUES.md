@@ -183,6 +183,155 @@ removed). Worth doing once the TDM limit moves. A real implementation needs a sc
 with each lane's four K-chunks contiguous ([M block][row][K chunk][4 B] instead of
 [M block][K chunk][row][4 B]) and about 4x the live scale VGPRs.
 
+**VGPR headroom re-examined (2026-10-13), "zero headroom" was wrong.** Both DepthU 256 and 512
+builds report `.amdhsa_next_free_vgpr 1024`, which looked like a hard "+24 VGPR, no room"
+blocker for the wide-read idea above. A `PrintRP` trace (`KernelWriter.py`'s
+`self.db["PrintRP"]`, temporarily set, reverted after) showed the 1024 ceiling is not from
+main-loop register pressure: `RegisterPool.size()` (`register.py`) is a monotonic high-water
+mark for the whole kernel generation (prologue through epilogue), and the two overflow events
+that push it to 1024 both come from `setOccupancy`/`refineOccupancy`'s GlobalWrite-epilogue
+`growPool(..., "grow-pool for GlobalWrite")` calls (`KernelWriterAssembly.py` ~16777-16984), not
+the main loop. gfx1250 also never runs the pass that would tighten `.amdhsa_next_free_vgpr` to
+the true liveness peak (`updateOccupancyFromMaxVgpr`'s `ArchAccUnifiedRegs` check only fires on
+gfx90a/gfx942/gfx950). Separately, `reserveMxScaleVgprs`/`numScaleTileVgprs` (`KernelWriter.py`
+11873-11896) already reserves `localMMATileGrid[0] * localMMATileGrid[1]` VGPRs per scale
+tensor as a bank-0 hole, purely to satisfy the gfx1250 VGPR-MSB bank constraint -- 16 for MXSA
++ 32 for MXSB = 48 total, already carved out of today's budget, of which only 24 are live
+destinations (the scheduler ping-pongs 2-deep across K-steps). So the wide-read idea's "+24
+VGPR" fits inside already-reserved, half-idle headroom; it needed a scheduling change, not a
+bigger pool.
+
+**TDM hardware ruled out for the wide read (2026-10-13), by encoding, no GPU test needed.**
+Re-read `TensorDataMover.py`'s descriptor fields: Group1 has exactly one stride word
+(`setStride0`, GLOBAL-side only), so there is no independent per-dimension LDS stride to
+redirect a K-major global stream into a lane-major LDS layout. The LDS padding mechanism
+(`setPadding`/`calPadInterval`) only inserts bytes after a run of `ldsBlockSizePerPad` bytes --
+monotonic, one-directional, cannot reorder or transpose a stream -- and `calPadInterval`
+additionally requires `ldsBlockSizePerPad // 4` to be a power of 2 with a minimum of 2 dwords
+(8 bytes), ruling out the 4-byte-granularity interleave a true `ds_load_b128` consolidation
+would need. The originally-planned minimal GPU probe (patch MXSA's padding fields on a
+known-good `kernel.co`) was dropped as moot once this fell out of static analysis -- never run.
+
+**`ScaleLRFullResidency` implemented and GPU-validated (2026-10-13).** Opt-in kernel param
+(`ScaleLRFullResidency`, default 0): gives SA/SB each `(group, K-chunk)` its own persistent
+VGPR tile for the whole unroll iteration, using the already-reserved 48-VGPR
+`mxScaleVgprReserve` block, instead of the current 2-deep ping-pong reuse. Pure
+scheduling/allocation change in `LogicalScheduler.py`'s `_assign_vgpr_tiles_deterministic`
+(new `_num_sets_for`, replacing the hardcoded 2-way `_tile_set_idx`) plus plumbing in
+`Kernel.py`, `GlobalParameters.py`, `ValidParameters.py` -- zero new instructions, zero LDS
+writes, zero TDM descriptor changes. CPU-only codegen (`configs/du512_scalefullres.yaml`)
+confirmed 48 distinct, non-aliased `ds_load_b32` destinations (v38-v85, all 12 scale groups x
+4 K-steps) with `.amdhsa_next_free_vgpr` unchanged at 1024, exactly as predicted. `validate.py`
+on GPU 2, 10/10 default sizes, `mx-scale-jitter=4`: all PASSED (`logs/20261013-151009`). This is
+the VGPR-residency *prerequisite* only -- removing the 2-deep aliasing so the now-non-aliased
+reads *can* be clustered. The actual clustering (moving the SA/SB narrow reads to issue right
+after the TDM wait instead of spread across subIterK 0-3, to realize a wait-reduction) is not
+yet implemented.
+
+**Scale reads clustered after `ScaleLRFullResidency` (2026-10-13), small real win.** With the
+2-deep ping-pong gone, SA/SB's current-iteration reads no longer need to stay 1-ahead-of-MFMA
+staggered across subIterK 0-3 -- `_place_LRs_for_partition` (`LogicalScheduler.py`) now pins
+every same-iteration SA/SB `LRPlacement` to subIterK slot 0 (right after the first barrier,
+alongside the K=1 reads already there) when `ScaleLRFullResidency` is set and there is a single
+partition; the cross-iteration wrap prefetch chunk is untouched. Dependency annotation
+(`annotate_deps`/`_tiles_overlap`) matches producer to consumer by K-range, not by this
+placement slot, so the existing cross-subIterK wait machinery (the same mechanism that already
+staggers A/B's 1-ahead prefetch) picks this up for free -- no new preOp/wait logic needed.
+Confirmed in the generated assembly (`logs/20261013-154939` vs `logs/20261013-151009`): all 24
+K=2/K=3 scale `ds_load_b32`s move from their old positions (deep in phase 1/phase 2) to right
+after the first barrier, next to the K=1 reads; several `s_set_vgpr_msb` bank-select prefixes
+collapse since consecutive reads now share a prefix (35771 vs 35795 total lines, -24).
+`.amdhsa_next_free_vgpr` unchanged at 1024. `validate.py` on GPU 2, 10/10 default sizes,
+`mx-scale-jitter=4`: all PASSED. `alt_timing.py` on GPU 2, 10 alternating rounds,
+(4096, 4096, 1, 65536) against both the unmodified baseline and the residency-only build
+(`logs/20261013-155226`, `logs/20261013-151009`): 203.02 (baseline) / 202.94 (residency-only,
+faster in 6/10) / 202.29 us (clustered, faster in 7/10 vs baseline, mean +0.74 us, sd 1.38) --
+about 0.36%, 10831 to 10871 TFLOPS. Small and partly inside the round-to-round noise (sd exceeds
+half the mean diff), but consistently positive and free (same instruction count, same VGPRs, no
+TDM descriptor changes). Matches the standing finding above that this kernel is TDM-supply
+bound and scheduling changes mostly "move the waiting around" rather than remove it -- this one
+happened to hide a little more of it. The wrap-prefetch chunk (next iteration's K=0) and the
+multi-partition path are untouched; clustering those too is a possible follow-up but likely
+same order of magnitude or smaller.
+
+**Why the win is small: clustering added a third barrier (2026-10-13), found statically, no
+profiling needed.** Live GPU profiling (ATT and every PMC/`--pmc` mode) is currently blocked
+(see "rocprofv3 cannot run against this client" below), so this was found by diffing the
+generated main-loop assembly directly instead. In the unmodified baseline and in the
+residency-only build (`logs/20261013-155226`, `logs/20261013-151009`), all four TDM-loaded
+tensors (A, B, MXSA, MXSB) share **one** combined buffer-swap/reissue barrier, positioned
+between `subIterK=2` and `subIterK=3` -- 674 main-loop instructions, 2 `s_barrier_signal`/
+`s_barrier_wait` pairs, 5 `s_wait_dscnt`. In the clustered build (`logs/20261013-154939`),
+moving the SA/SB reads earlier also pulled their buffer-swap-and-TDM-reissue earlier with them
+(the scheduler recognized the old buffer is now fully drained sooner, so it is safe to recycle
+sooner) -- but A/B's own reissue stayed at its old, later position. The net effect: the one
+shared barrier **split into two separate ones**, for 3 barrier pairs per iteration instead of 2
+(666 instructions, 6 `s_wait_dscnt` -- fewer instructions overall from collapsed
+`s_set_vgpr_msb` prefixes, but one more full-workgroup rendezvous point). Confirmed by counting
+`s_barrier_signal`/`s_barrier_wait`/`s_wait_dscnt` in the `label_LoopBeginL` .. `s_cbranch_scc0
+label_LoopBeginL` range of all three builds' `.s` files. Barrier rendezvous has its own fixed
+cost (the "Where an iteration goes" breakdown above measured one barrier instance at 189 cycles
+on this kernel), so this extra barrier is a plausible explanation for why the measured win
+(+0.36%) is small rather than large: the aliasing-removal and front-loaded reads are a real
+gain, partly offset by this new synchronization point. Not yet attempted: deferring the scale
+buffer swap+reissue back to the same later point A/B already uses (merging back to 2 barriers)
+while keeping the reads clustered early, which should be independent -- the reads just need to
+happen before use, the swap/reissue can still wait for the shared barrier.
+
+**rocprofv3 cannot run against this client (2026-10-13), unrelated to this work, unresolved.**
+Both `rocprofv3 --att` and every `--pmc`/`--input <yaml>` PMC job (via `pmc_compare.sh`,
+`pmc_tdm.sh`, `cycles.sh`, direct `rocprofv3` invocation) fail deterministically (9/9+
+reproductions) with:
+```
+amd_comgr_set_data(...) INVALID_ARGUMENT :: isa=(amdgcn-amd-amdhsa--gfx12-5-generic, 0, 0)
+terminate: Client must be linked with an embedded library or a library must be specified at runtime.
+```
+Reproduces identically on an unmodified baseline client, and persists after rebuilding the
+client with `-DTENSILELITE_CLIENT_ENABLE_ROCPROFSDK=ON` (`invoke build-client -g gfx1250
+--enable-rocprof`) -- so not caused by anything in this round's changes, and not fixed by the
+one client-side build flag available. The plain, unwrapped client runs fine with identical
+env/args. Looks like a `rocprofiler-sdk`/`comgr` incompatibility with gfx1250's "generic"
+code-object target variant on this ROCm build (`/opt/rocm-10.1.0a20260908+bkc.20260917`); no
+alternate ROCm/rocprofv3 install exists on this box to try instead. The `umr` LDS-counter
+registers for GPU 2 (DRM instance 17, per "Enabling the TX_VMW LDS counters" in `README.md`)
+were correctly written and verified via readback this round, but are moot until this is fixed --
+remember these do not survive a GPU reset/reboot. Blocks live confirmation of the barrier-count
+finding above; the static assembly comparison was used instead.
+
+**Barrier-merge follow-up tried and ruled out (2026-10-13).** Attempted the natural next step
+suggested by the finding above: defer MXSA/MXSB's buffer-swap-and-TDM-reissue back to the same
+later barrier A/B already uses, while keeping the narrow reads clustered early, to merge 3
+barriers back to 2. Root cause of the split, found by instrumenting `place_GRs` directly (not
+guessed): a GR's physical slot is decided by `_build_gr_slot_bounds`'s conflict check, which
+pushes it later only while a same-iteration LR of that tensor still reads *after* it in program
+order -- clustering removed all such later SA/SB reads, so nothing pushed their GR past slot 0
+anymore. Fix: added `LRPlacement.data_ready_slot` to record each clustered LR's pre-clustering
+("natural") slot, and fed that into the conflict check instead of the physical slot, so SA/SB's
+GR still gets pushed to slot 2 (matching A/B) while the reads stay at slot 0. Verified
+structurally exactly as designed: barriers 3 -> 2, main-loop instructions 666 -> 663 (fewer than
+either prior build), reads still clustered at `subIterK=0`, `validate.py` 10/10 PASSED on GPU 2
+(`logs/20261013-163638`). But `alt_timing.py` on GPU 2, 16 alternating rounds against `baseline`
+and the already-committed `cluster` build, says otherwise: median 205.52 (baseline) / **204.95
+(cluster, fastest)** / 205.86 (merged, slowest of the three; one baseline round was an unrelated
+428 us system-noise outlier, excluded, means move the same direction either way). The merged
+build is not just no better than `cluster`, it is slightly worse, including versus plain
+baseline. Likely explanation, consistent with "TDM supply is the limit" above: issuing MXSA/
+MXSB's TDM reissue early (even paying for an extra barrier) gives that fetch more overlap time
+with compute before its data is needed, which matters more for a TDM-bound kernel than avoiding
+one barrier -- merging it back into the later, bunched reissue point removes that head start.
+Reverted (`LRPlacement.data_ready_slot` and the `_build_gr_slot_bounds` conflict-flat change);
+`cluster` (3 barriers, committed in `83101adfc8c`) remains the best measured build.
+
+Environment note from this round: the prebuilt `tensilelite-client` (dated Oct 7) started
+throwing `"Failed to load solution library"` (SIGABRT) on startup for every build, including a
+clean unmodified baseline -- a stale client vs. current Python-side library format, fixed by
+`invoke build-client -g gfx1250 --clean`. Separately, two node reboots happened during this
+investigation; `sudo journalctl -k -b -1`/`-b -2` traced both to a GPU-driver MES deadlock
+(`tensilelite-cli` stuck 245-491+ s in `kfd_ioctl_runtime_enable` -> `amdgpu_mes_reg_write_reg_wait`,
+a D-state hang that `SIGKILL`/timeouts cannot clear) rather than anything in the code above --
+no TDM-descriptor-touching GPU test was ever run this round. Worth remembering: on this shared
+gfx1250 node, a wedged MES blocks every user's KFD process until the node is rebooted.
+
 ### Ruled out at DepthU 512
 
 - Main-loop buffer swaps (14 `v_xor_b32` + 4 `s_xor_b32`): removing them saves 0.5% of cycles,
@@ -327,6 +476,86 @@ the last `tensor_load_to_lds`. Two fixes:
   4 KiB), so three buffers fit only with a different segment layout.
 
 The floor with no TDM loads at all was 159.8 us.
+
+**TDMGroup1Reuse attempt (2026-10-12): hoisting the descriptor rebuild found a correctness bug.**
+Independently re-confirmed the "TDM descriptors rebuilt from scratch" finding above by reading
+the current production DepthU 512, 2-buffer main loop
+(`outdir3/.../build_tmp/SOURCE/assembly/...-cI-NVA=.s`, lines 1967-2640, 674 instructions/iter):
+323 scalar (`s_*`) vs 142 vector (`v_*`, 128 of them `v_wmma_scale`) vs 176 `ds_load`
+instructions. Of the 323 scalar ops, `s_set_vgpr_msb` (the gfx1250 extended-VGPR-bank-select
+prefix, one needed before almost every VALU/LDS op once a kernel's VGPR footprint exceeds 256)
+accounts for 247 -- 81% of (`v_wmma` + `ds_load`) count, tied to tile size (see the macro-tile
+VGPR-wall note elsewhere). The other ~53 "plain" SALU ops are dominated by the Group1 rebuild:
+confirmed via `grep -c "TDM Group1 control"` that the full rebuild (dim0/dim1/tile0/tile1-clamp/
+stride/reserved, ~9-10 SALU x 4 tensors = A/B/MXSA/MXSB) is textually emitted at exactly 4
+points in the generated file -- two one-shot PGR prefetch stages before `label_LoopBeginL`, the
+one truly repeating body between `label_LoopBeginL` and its back-branch, and one one-shot
+straight-line NLL tail block after `label_SkipToNLL` (confirmed no back-branch there). Only the
+repeating body's copy costs anything per-K; the other three are one-time. Branch census: exactly
+one `s_cbranch` inside the loop body (the back-branch itself) -- no divergent branches, so the
+"stalls" are the already-documented barriers/`s_wait_dscnt`/`s_wait_tensorcnt`, not branches.
+
+Tried to hoist Group1 (SizeI/SizeJ/SizeL/StrideA0I/StrideB1J/`tdmClamp{tc}` are all invariant
+for the whole kernel invocation, not just the loop) out of the repeating body, relying on the
+last PGR prefetch stage having already written it, and leaving only Group0 (global address +
+LDS-swap address) refreshed per iteration -- i.e. generator-equivalent of what the "Descriptor
+rebuild trimmed" update above already did for the per-wave clamp SGPRs, taken one step further.
+New opt-in kernel param `TDMGroup1Reuse` (default 0, zero risk to any other config), threaded
+through `SubtileGREmit.py` (`skipGroup1` arg on `initTDMDescriptorSubtile` /
+`_initTDMDescriptorSubtileMX` / `refreshTDMDescriptorSubtile`), `InstructionEmitter.emit_gr`
+(reads a new `self._stage` tag), and `LogicalScheduler.populate_instructions` (tags each
+`populate()` call `preloop`/`mainloop`/`ngll`/`nll`; only `mainloop` is allowed to skip Group1).
+`Tensile/Common/{GlobalParameters,ValidParameters}.py` got the new param registered.
+
+Built clean (`configs/du512_group1reuse.yaml` = `du512_timing.yaml` + `TDMGroup1Reuse: [1]`,
+`logs/20261012-214438`): confirmed in the generated assembly that `label_LoopBeginL`'s body now
+has zero "TDM Group1 control" lines (down from 4 occurrences file-wide to 3), loop body shrank
+674 to 640 lines, SALU count 323 to 289 (-34, matching the ~36 estimate). **`validate.py` on
+GPU 2 then failed 7 of 10 default sizes** -- `256,256,1,256` (0 main-loop iters), `2048,1024,1,384`
+(0 iters, the StreamK edge case) and `300,200,1,1024` (2 iters) passed; every K >= 2048 size
+(4+ iters: `256,256,1,2048`, `512,256,1,2048`, `256,512,1,2048`, `512,512,1,2048`,
+`4096,4096,1,8192`, `384,320,1,2048`, `1000,1500,1,2048`) failed. Pattern suggests the bug does
+not manifest until several iterations in, which does not fit a simple "Group1 never gets
+written at all" bug (that would fail even 2-iteration cases) -- leading hypothesis, not yet
+tested: the SGPR allocator previously treated the Group1 SGPR range as dead in between the
+(always-immediate) rewrites and may have let some other temp (`writer.allocTmpSgpr` or similar)
+alias those same physical SGPRs elsewhere in the loop body, now silently corrupting Group1
+after the first iteration or two once it is no longer rewritten every pass. Not yet checked:
+whether this is StreamK-related (DP-partial tiles reuse/rewrite SGPR ranges differently) given
+the known StreamK partials-write aliasing bug above. **Reverted cleanly** (`git checkout --`
+on all 5 touched files, confirmed clean `git status`/`git diff --stat`); no generator code is
+currently modified. Next: reproduce with a 4-iteration-only size under `rocgdb`
+(`HSA_ENABLE_PRECISE_MEMORY=1`) or dump the Group1 SGPR values iteration-by-iteration to see
+which word actually goes stale and trace what else writes those SGPR numbers.
+
+**Root cause found (2026-10-13), no GPU execution needed.** The baseline (unmodified)
+assembly's own `.set` directives show MXSA/MXSB do not just alias A/B's Group0 (as the
+"Descriptor rebuild trimmed" note above already says) -- they alias Group1 too:
+`sgprtdmAGroup0=40, sgprtdmAGroup1=72`, `sgprtdmMXSAGroup0 = sgprtdmAGroup0+0`,
+`sgprtdmMXSAGroup1 = sgprtdmAGroup1+0` (B/MXSB the same way at 80/84). So the real per-iteration
+sequence is: write A's *full* descriptor (Group0+Group1) into sgpr 40/72, issue A's
+`tensor_load_to_lds`, then immediately overwrite those same four SGPRs with MXSA's *full*
+descriptor (different control word, different dims) and issue MXSA's load. The "redundant"
+Group1 rebuild is not redundant across iterations at all -- it is required within every single
+iteration, because the register is time-shared between two unrelated descriptor shapes
+(A and MXSA) moments apart. `TDMGroup1Reuse` skipped it on the assumption the value survives
+untouched between A's uses, which is false: MXSA's refresh clobbers it before A's next turn.
+This matches the pass/fail split exactly -- `K=1024` (2 total iterations, equal to
+`PrefetchGlobalRead`'s prefetch depth) never executes the patched main-loop body at all (both
+iterations are covered by the two prologue prefetch stages), while `K>=2048` does execute it
+and corrupts A/B's descriptor from the first pass. Also explains why past attempts to give
+MXSA/MXSB non-aliased SGPRs were rejected (122 SGPRs needed vs. a 106 limit, per the
+"Descriptor rebuild trimmed" note) -- the aliasing is load-bearing, not an oversight, and
+`TDMGroup1Reuse` as designed cannot work while it stands.
+
+A narrower variant might still be worth it: instead of skipping the Group1 *write* (impossible
+while A and MXSA time-share the register), precompute the packed dim0/dim1/tile0 *values* once
+per tensor in the prologue into small dedicated (non-aliased) scratch SGPRs, and have the
+main-loop refresh become a few plain `s_mov` copies from that scratch into the shared Group1
+slot instead of the current 6-instruction shift/or chain. Register must still be rewritten
+every use (unavoidable), but the computation feeding it gets cheaper (roughly 9-10 to 6-7 SALU
+per tensor, not the full ~9-10 removed as hoped) -- smaller win, extra persistent SGPRs needed,
+not yet attempted.
 
 **Descriptor rebuild trimmed (2026-10-06, `logs/*-gen-v4`).** Separate scale descriptors would
 need 122 SGPRs (limit 106), so the aliasing stays and the per-load rebuild is cheaper:

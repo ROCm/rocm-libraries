@@ -341,6 +341,10 @@ class SchedulerConfig:
     pgl: int = 0              # Prefetch GL2 (0=off, 1 or 2 tiles ahead)
     numLdsBlk: int = 2        # LDS double/triple-buffer depth. GR(n) reuses the buffer
                               # LR(n-numLdsBlk) read, so numLdsBlk-1 fills stay in flight.
+    scaleFullResidency: bool = False  # Opt-in: give SA/SB each (group, K-chunk) its own
+                              # persistent vgpr tile for the whole unroll iter instead of
+                              # ping-ponging 2 sets. Prerequisite for clustering scale LRs
+                              # upfront; by itself just removes the 2-deep register reuse.
 
     # Resolve a partition spec into per-partition sizes along one dimension.
     # spec is either:
@@ -1005,14 +1009,30 @@ class LogicalScheduler:
                                 continue
                             placed.add(lr_key)
 
+                        # Cluster this-iteration scale reads at slot 0 (right
+                        # after the TDM wait) instead of 1-ahead across
+                        # subIterK, now that ScaleLRFullResidency gives each
+                        # K-chunk its own persistent vgpr tile (no more
+                        # aliasing to force staggering). Scoped to the
+                        # single-partition case and the current-MT chunks
+                        # only -- the cross-iteration wrap prefetch (lr_mt
+                        # == 1) stays at its natural (last) slot. Dependency
+                        # annotation matches by tiles (K-range), not by this
+                        # emission slot, so moving it is safe (see
+                        # annotate_deps / _tiles_overlap).
+                        emit_slot = slot_k
+                        if (cfg.scaleFullResidency and tensor in ('SA', 'SB')
+                                and lr_mt == 0 and not multi_part):
+                            emit_slot = 0
+
                         lr = LRPlacement(
                             tensor=tensor,
                             mtIteration=lr_mt,
                             tiles=MFMATileRange(lr_k_start, lr_k_end, ts, te),
-                            subIterK_slot=slot_k,
+                            subIterK_slot=emit_slot,
                         )
-                        slots[slot_k].lrs.append(lr)
-                        slot_mt[slot_k] = lr_mt
+                        slots[emit_slot].lrs.append(lr)
+                        slot_mt[emit_slot] = lr_mt
 
         return slots
 
@@ -1256,11 +1276,19 @@ class LogicalScheduler:
         if pgr0:
             unroll_factor = 1
 
+        def _num_sets_for(tensor):
+            if pgr0:
+                return 1
+            if cfg.scaleFullResidency and tensor in ('SA', 'SB'):
+                return num_k_groups[tensor]
+            return 2
+
         def _tile_set_idx(tensor, unroll_iter, k_chunk, gran):
             if pgr0:
                 return 0
             nkg = num_k_groups[tensor]
-            return (unroll_iter * nkg + k_chunk // gran.k) % 2
+            ns = _num_sets_for(tensor)
+            return (unroll_iter * nkg + k_chunk // gran.k) % ns
 
         def _tile_id(tensor, set_idx, pos):
             return set_idx * max_groups[tensor] + pos
@@ -1301,8 +1329,7 @@ class LogicalScheduler:
                             tile_map[group] = _tile_id(tensor, set_idx, pos)
                         lr.vgpr_tile_map.append(tile_map)
 
-        num_sets = 1 if pgr0 else 2
-        self.tile_peaks = {t: num_sets * max_groups[t] for t in self.tensors}
+        self.tile_peaks = {t: _num_sets_for(t) * max_groups[t] for t in self.tensors}
         self.compact_b_overlay = False
         self.unroll_factor = unroll_factor
         self.needs_unrolling = unroll_factor > 1

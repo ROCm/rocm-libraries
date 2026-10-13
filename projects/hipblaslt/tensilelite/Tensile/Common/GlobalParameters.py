@@ -622,6 +622,7 @@ defaultBenchmarkCommonParameters = [
     {"ScheduleGROverBarrier": [-1]},
     {"DtlPlusLdsBuf": [-1]},
     {"TDMPlusLdsBuf": [0]},
+    {"ScaleLRFullResidency": [0]},
     {"MinGRIncPerMfma": [-1]},
     {"UsePLRPack": [0]},
     {"TDMInst": [0]},

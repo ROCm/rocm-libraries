@@ -1480,6 +1480,7 @@ def mainLoop(writer, kernel):
           grPlacement=grPlacement,
           pgl=kernel.get("PrefetchGL2", 0),
           numLdsBlk=kernel.get("NumLdsBlk", 2),
+          scaleFullResidency=bool(kernel.get("ScaleLRFullResidency", False)),
       )
 
       scheduler = LogicalScheduler(cfg)
