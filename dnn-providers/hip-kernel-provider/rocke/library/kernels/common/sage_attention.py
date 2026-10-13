@@ -532,7 +532,7 @@ def _build_sage_mfma(spec: SageAttentionSpec, arch: str = "gfx950") -> KernelDef
         c_block_k = b.const_i32(MFMA_ATTN_BLOCK_K)
 
         def _k_block_scale_transform(
-            b: IRBuilder, score: Value, kt: Value, _row_in_atom: int
+            b: IRBuilder, score: Value, kt: Value, _row_in_atom: int, **_coords
         ) -> Value:
             """Apply ``k_scale[k_block_idx(kt)]`` to one per-lane score.
 

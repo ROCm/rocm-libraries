@@ -272,9 +272,7 @@ def mfma_attention_fwd_inner_body(
     v_row_base_fn: Optional[Callable[[IRBuilder, Value], Value]] = None,
     k_tile_start: Optional[Value] = None,
     k_tile_stop: Optional[Value] = None,
-    extra_score_transform: Optional[
-        Callable[[IRBuilder, Value, Value, int], Value]
-    ] = None,
+    extra_score_transform: Callable[..., Value] | None = None,
     extra_mask_predicate: Optional[Callable[[IRBuilder, Value], Value]] = None,
     extra_skip_predicate: Optional[Callable[[IRBuilder, Value], Value]] = None,
     k_block_iter_fn: Optional[Callable[[IRBuilder, Value], Value]] = None,
@@ -285,6 +283,7 @@ def mfma_attention_fwd_inner_body(
     use_async_kv: bool = False,
     codebook_ptr: Optional[Value] = None,
     wmma_v_lds_stage: bool = False,
+    epilogue_fn: Callable[..., None] | None = None,
     arch: str = "gfx950",
 ) -> None:
     """One MFMA-tiled QK→softmax→PV pass for a ``BLOCK_M``-row Q tile.
@@ -316,10 +315,22 @@ def mfma_attention_fwd_inner_body(
     kernel so a single CTA handles one K segment.
 
     ``extra_score_transform``: callback
-    ``(b, score_log2_per_lane, k_tile_idx, row_in_atom) ->
+    ``(b, score_log2_per_lane, k_tile_idx, row_in_atom, *, q_row, k_col) ->
     score_log2`` invoked after the QK reduction and ``scale_log2``
-    multiply, before the mask. Used by sage attention to apply
-    per-block Q + K scales.
+    multiply, before the mask. ``q_row`` and ``k_col`` are this score
+    cell's query and key positions (i32), the same values the mask
+    reads, so a callback can index per-element data such as an additive
+    bias. Used by sage attention to apply per-block Q + K scales; a
+    callback that needs no coordinates takes them as ``**_``.
+
+    ``epilogue_fn``: callback ``(b, *, m_log2, l, row, row_valid)``
+    invoked once per accumulator row slot after O is stored, with the
+    row's final running max (log2 domain) and softmax denominator, and
+    the O row index ``row`` (the same row the O store addressed). Every
+    lane of a row holds the same ``m_log2`` and ``l``. ``row_valid`` is
+    ``None``: this body writes every row of its tile and has no Q-length
+    bound, so a caller that clips rows derives validity from ``row``.
+    Used to store the log-sum-exp; ``None`` emits no extra IR.
 
     ``extra_mask_predicate``: callback ``(b, k_tile_idx) -> i1``
     returning a per-K-tile keep flag. When false, the whole K-tile
@@ -490,6 +501,7 @@ def mfma_attention_fwd_inner_body(
             k_block_iter_fn=k_block_iter_fn,
             v_scale=v_scale,
             v_lds_stage=wmma_v_lds_stage,
+            epilogue_fn=epilogue_fn,
             arch=arch,
             target=target,
         )
@@ -709,6 +721,8 @@ def mfma_attention_fwd_inner_body(
                     s_r_scaled,
                     kt,
                     r,
+                    q_row=row_q_pos,
+                    k_col=k_col_pos,
                 )
             s_r_scaled = apply_attention_mask(
                 b,
@@ -832,9 +846,9 @@ def mfma_attention_fwd_inner_body(
 
     # ---- Pull final state ----
     final = kloop.results
-    # ``ms_final`` is the per-lane row-max; the scaled-acc / l_final pair
-    # already encodes everything the epilogue needs, so we only consume
-    # the normalisation factors below.
+    # The O store needs only ``ls_final``; ``ms_final`` (the per-row max) is
+    # read only by ``epilogue_fn``.
+    ms_final = [final[2 * r] for r in range(atom.c_per_lane)]
     ls_final = [final[2 * r + 1] for r in range(atom.c_per_lane)]
     accs_final = list(final[2 * atom.c_per_lane :])
 
@@ -871,6 +885,14 @@ def mfma_attention_fwd_inner_body(
                 o_col,
             )
             b.global_store(O, addr, v_out, align=2)
+
+    if epilogue_fn is not None:
+        for r in range(atom.c_per_lane):
+            o_row = b.add(
+                b.add(q_tile_base, b.mul(m_blk, b.const_i32(4))),
+                b.const_i32(r),
+            )
+            epilogue_fn(b, m_log2=ms_final[r], l=ls_final[r], row=o_row, row_valid=None)
 
 
 # ---------------------------------------------------------------------------
@@ -949,12 +971,13 @@ def _wmma_attention_fwd_inner_body(
     v_row_base_fn: Optional[Callable[[IRBuilder, Value], Value]],
     k_tile_start: Optional[Value],
     k_tile_stop: Optional[Value],
-    extra_score_transform: Optional[Callable[[IRBuilder, Value, Value, int], Value]],
+    extra_score_transform: Callable[..., Value] | None,
     extra_mask_predicate: Optional[Callable[[IRBuilder, Value], Value]],
     extra_skip_predicate: Optional[Callable[[IRBuilder, Value], Value]],
     k_block_iter_fn: Optional[Callable[[IRBuilder, Value], Value]],
     v_scale: Optional[Value],
     v_lds_stage: bool = False,
+    epilogue_fn: Callable[..., None] | None = None,
     arch: str,
     target,
 ) -> None:
@@ -1113,7 +1136,9 @@ def _wmma_attention_fwd_inner_body(
             row_q_pos = b.add(q_pos_for_mask, row_rel)
             k_col_pos = b.add(k_tile_base, col_k)
             if extra_score_transform is not None:
-                s_r = extra_score_transform(b, s_r, kt, r)
+                s_r = extra_score_transform(
+                    b, s_r, kt, r, q_row=row_q_pos, k_col=k_col_pos
+                )
             s_r = apply_attention_mask(
                 b,
                 s_r,
@@ -1238,6 +1263,7 @@ def _wmma_attention_fwd_inner_body(
         b.scf_yield(*yields)
 
     final = kloop.results
+    ms_final = [final[2 * r] for r in range(c_frag)]
     ls_final = [final[2 * r + 1] for r in range(c_frag)]
     accs_final = list(final[2 * c_frag :])
 
@@ -1261,3 +1287,9 @@ def _wmma_attention_fwd_inner_body(
                 o_col,
             )
             b.global_store(O, o_addr, b.cast_f32_to(v_f32, dtype_ir), align=2)
+
+    if epilogue_fn is not None:
+        for r in range(c_frag):
+            row_rel, _ = c_map.coord(b, lane, r)
+            o_row = b.add(q_tile_base, row_rel)
+            epilogue_fn(b, m_log2=ms_final[r], l=ls_final[r], row=o_row, row_valid=None)
