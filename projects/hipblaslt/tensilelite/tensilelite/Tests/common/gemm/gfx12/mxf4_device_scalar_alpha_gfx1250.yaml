@@ -22,9 +22,8 @@ GlobalParameters:
   DataInitTypeAlpha: 17
   # Nonzero beta*C must not be scaled again by the SingleBuffer conversion.
   DataInitTypeBeta: 1
-  # ScaleAlphaVec[0] (+2) is the effective alpha.
+  # Scalar: effective alpha=+2. Vector: inline alpha(-1) * vector factor(+2)=-2.
   DataInitTypeScaleAlphaVec: 2
-  DeviceScalarAlpha: True
   NumWarmups: 0
   EnqueuesPerSync: 0
   PrintWinnersOnly: False
@@ -54,6 +53,8 @@ BenchmarkProblems:
       DataTypeMXSB: f8
 
     - # Cover direct output, MultipleBuffer conversion, and MBSK reduction.
+      InternalSupportParams:
+        SupportDeviceScalarAlpha: True
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
@@ -98,6 +99,8 @@ BenchmarkProblems:
           - Exact: [128, 128, 1, 256]
           - Exact: [126, 130, 1, 256]
         - BiasTypeArgs: ['s']
+        # Reuse each kernel in scalar and vector mode; keep their results separate.
+        - DeviceScalarAlpha: [True, False]
   -
     - # Mode 2 (N direction) with a device per-tensor alpha.
       OperationType: GEMM
@@ -119,6 +122,8 @@ BenchmarkProblems:
       DataTypeMXSB: f8
 
     - # Cover direct output, MultipleBuffer conversion, and MBSK reduction.
+      InternalSupportParams:
+        SupportDeviceScalarAlpha: True
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
@@ -160,6 +165,7 @@ BenchmarkProblems:
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Exact: [128, 128, 1, 256]
+        - DeviceScalarAlpha: [True, False]
   -
     - # Mode 3 (runtime-selected M/N direction) with a device per-tensor alpha.
       OperationType: GEMM
@@ -181,6 +187,8 @@ BenchmarkProblems:
       DataTypeMXSB: f8
 
     - # Cover direct output, MultipleBuffer conversion, and MBSK reduction.
+      InternalSupportParams:
+        SupportDeviceScalarAlpha: True
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
@@ -223,6 +231,7 @@ BenchmarkProblems:
         - ProblemSizes:
           - Exact: [128, 128, 1, 256]
         - FactorDimArgs: [0, 1]
+        - DeviceScalarAlpha: [True, False]
   -
     - # SingleBuffer with FP32 workspace and a separate FP16 output conversion.
       OperationType: GEMM
@@ -244,6 +253,8 @@ BenchmarkProblems:
       DataTypeMXSB: f8
     - BenchmarkCommonParameters:
         - KernelLanguage: [Assembly]
+      InternalSupportParams:
+        SupportDeviceScalarAlpha: True
       ForkParameters:
         - UseSgprForGRO: [0]
         - ForceDisableShadowInit: [true]
@@ -280,3 +291,4 @@ BenchmarkProblems:
         - ProblemSizes:
           - Exact: [128, 128, 1, 512]
           - Exact: [126, 130, 1, 512]
+        - DeviceScalarAlpha: [True]

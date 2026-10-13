@@ -202,8 +202,8 @@ class BenchmarkProcess:
         self.paramGroups = _expandGroupedParameters(forkParams.pop("Groups")) if "Groups" in forkParams else []
         self.customKernels = getNonNoneFromConfig("CustomKernels", [])
         self.internalSupportParams = getNonNoneFromConfig("InternalSupportParams", {})
-        if self.customKernels == [] and self.internalSupportParams != {}:
-            printExit("InternalSupportParams only supports Custom Kernels")
+        if self.customKernels == [] and set(self.internalSupportParams) - {"SupportDeviceScalarAlpha"}:
+            printExit("Only SupportDeviceScalarAlpha may be set in InternalSupportParams for generated kernels")
 
         ispPrefix = f"{keyPathPrefix}.InternalSupportParams" if keyPathPrefix \
                     else "InternalSupportParams"
@@ -215,6 +215,7 @@ class BenchmarkProcess:
         activationConf = ""
         biasTypesConf  = ""
         factorDimConf  = ""
+        deviceScalarAlphaModes = None
         icacheFlush = None
         gateTypesConf = ""
         if "BenchmarkFinalParameters" in config:
@@ -232,6 +233,15 @@ class BenchmarkProcess:
                   if factorDimConf:
                     printExit("Duplicated FactorDimArgs.")
                   factorDimConf = bfp["FactorDimArgs"]
+                if "DeviceScalarAlpha" in bfp:
+                  if deviceScalarAlphaModes is not None:
+                    printExit("Duplicated DeviceScalarAlpha.")
+                  deviceScalarAlphaModes = bfp["DeviceScalarAlpha"]
+                  if (not isinstance(deviceScalarAlphaModes, list)
+                      or not deviceScalarAlphaModes
+                      or any(type(mode) is not bool for mode in deviceScalarAlphaModes)
+                      or len(set(deviceScalarAlphaModes)) != len(deviceScalarAlphaModes)):
+                    printExit("DeviceScalarAlpha must be a non-empty list of distinct booleans.")
                 if "ICacheFlush" in bfp:
                   if icacheFlush is not None:
                     printExit("Duplicated ICacheFlush.")
@@ -253,6 +263,7 @@ class BenchmarkProcess:
         self.biasTypesArgs  = BiasTypeArgs(self.problemType, biasTypesConf)
         self.activationArgs = ActivationArgs(self.problemType, activationConf)
         self.factorDimArgs  = FactorDimArgs(self.problemType, factorDimConf)
+        self.deviceScalarAlphaModes = deviceScalarAlphaModes
         self.icacheFlushArgs = icacheFlush
         self.gateTypesArgs = GateTypeArgs(self.problemType, gateTypesConf)
 
@@ -276,8 +287,8 @@ class BenchmarkProcess:
             )
 
         # TODO other checks on groups (same params for each entry? no dups between groups?)
-        for gIdx, list in enumerate(self.paramGroups):
-            for eIdx, group in enumerate(list):
+        for gIdx, entries in enumerate(self.paramGroups):
+            for eIdx, group in enumerate(entries):
                 groupsPrefix = f"{forkPrefix}.Groups[{gIdx}][{eIdx}]"
                 for k, v in group.items():
                     checkParametersAreValid(
@@ -298,6 +309,12 @@ class BenchmarkProcess:
             params.pop(policyKey, None)
         params.update({**benchmarkCommonParams, **forkParams})
         self.singleValueParams, self.multiValueParams = separateParameters(params)
+        # Forward only the generated-kernel opt-in; other internal ABI overrides
+        # remain exclusive to custom kernels.
+        if "SupportDeviceScalarAlpha" in self.internalSupportParams:
+            self.singleValueParams["InternalSupportParams"] = {
+                "SupportDeviceScalarAlpha": self.internalSupportParams["SupportDeviceScalarAlpha"]
+            }
 
         # print summary of parameter values
         print2("Single Value Parameters:")
@@ -337,7 +354,8 @@ class BenchmarkProcess:
                 self.activationArgs, \
                 self.icacheFlushArgs, \
                 self.benchmarkStepIdx, \
-                gateTypeArgs=self.gateTypesArgs)
+                gateTypeArgs=self.gateTypesArgs,
+                deviceScalarAlphaModes=self.deviceScalarAlphaModes)
         self.benchmarkSteps.append(benchmarkStep)
         self.benchmarkStepIdx += 1
 
@@ -408,7 +426,7 @@ def constructLazyForkPermutations(forkParams, paramGroups):
 class BenchmarkStep:
     """A single benchmark step which consists of constant and fork parameters and a set of sizes"""
 
-    def __init__(self, forkParams, constantParams, paramGroups, customKernels, internalSupportParams, problemSizes, biasTypeArgs, factorDimArgs, activationArgs, icacheFlushArgs, idx, gateTypeArgs=None):
+    def __init__(self, forkParams, constantParams, paramGroups, customKernels, internalSupportParams, problemSizes, biasTypeArgs, factorDimArgs, activationArgs, icacheFlushArgs, idx, gateTypeArgs=None, deviceScalarAlphaModes=None):
         """Basic constructor storing each argument"""
         self.forkParams = forkParams
         self.constantParams = constantParams
@@ -418,6 +436,7 @@ class BenchmarkStep:
         self.problemSizes = problemSizes
         self.biasTypeArgs = biasTypeArgs
         self.factorDimArgs = factorDimArgs
+        self.deviceScalarAlphaModes = deviceScalarAlphaModes
         self.activationArgs = activationArgs
         self.icacheFlushArgs = icacheFlushArgs
         self.gateTypeArgs = gateTypeArgs

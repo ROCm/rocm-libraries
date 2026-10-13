@@ -2320,16 +2320,17 @@ class Solution(collections.abc.Mapping):
     state["InternalSupportParams"]["SupportStreamKPerTileExtraIters"] = \
         _supportStreamKPerTileExtraIters(state)
 
-    # The generated F32 ScaleAlphaVec path understands
-    # internalArg0 bit 11: it dereferences element zero into the existing Alpha
-    # SGPR and uses an identity factor in the vector-alpha epilogue.
-    # Do not claim this capability for handwritten kernels
-    # unless their config explicitly opts in; their ABI remains unchanged.
-    if (state["ProblemType"]["UseScaleAlphaVec"]
-          and state["ProblemType"]["ComputeDataType"].isSingle()
-          and state["KernelLanguage"] == "Assembly"
-          and not isCustomKernelConfig(state)):
-      state["InternalSupportParams"]["SupportDeviceScalarAlpha"] = True
+    # Explicit opt-in: ordinary SAV kernels retain their existing ABI and GSU
+    # mask. DeviceScalarAlpha is a separate client runtime selector, not a
+    # request to change the generated kernel's capability.
+    if (state["InternalSupportParams"]["SupportDeviceScalarAlpha"]
+          and not isCustomKernelConfig(state)
+          and not (state["ProblemType"]["UseScaleAlphaVec"]
+                   and state["ProblemType"]["ComputeDataType"].isSingle()
+                   and state["KernelLanguage"] == "Assembly")):
+      reject(state, printRejectionReason,
+             "SupportDeviceScalarAlpha requires an Assembly kernel with UseScaleAlphaVec and FP32 compute")
+      return
 
     if isPersistent(state):
       #state["AssertSummationElementMultiple"] = 1 # Cannot keep ASEM with Stream-K

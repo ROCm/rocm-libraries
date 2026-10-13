@@ -35,6 +35,7 @@ import os
 import re
 
 import pytest
+import yaml
 
 from config_harness import emit_kernels_from_config, solutions_from_config
 
@@ -124,9 +125,21 @@ def test_r6_rich_gfx1250_bias_and_scale_present():
     )
 
 
-def test_r6_rich_gfx1250_device_scalar_alpha_dispatch_present():
+@pytest.fixture
+def scalar_config(tmp_path):
+    with open(_CONFIG) as stream:
+        config = yaml.safe_load(stream)
+    config["BenchmarkProblems"][0][1]["InternalSupportParams"] = {
+        "SupportDeviceScalarAlpha": True
+    }
+    path = tmp_path / "rich_scalar_gemm.yaml"
+    path.write_text(yaml.safe_dump(config))
+    return path
+
+
+def test_r6_rich_gfx1250_device_scalar_alpha_dispatch_present(scalar_config):
     """Device scalar mode schedules its value load before the common Alpha consumer."""
-    results = emit_kernels_from_config(_CONFIG, limit=8, arch=_ARCH)
+    results = emit_kernels_from_config(scalar_config, limit=8, arch=_ARCH)
     assert len(results) >= 1, "Need at least one kernel to check scalar-alpha dispatch"
     for base, src, err in results:
         assert err == 0, f"Kernel {base!r} emitted with err={err}, expected 0"
@@ -246,13 +259,13 @@ def test_r6_rich_gfx1250_device_scalar_alpha_dispatch_present():
             )
 
 
-def test_r6_rich_gfx1250_conversion_uses_scalar_alpha_element_zero():
+def test_r6_rich_gfx1250_conversion_uses_scalar_alpha_element_zero(scalar_config):
     """Post-GSU conversion replaces inline alpha with the device scalar."""
     from Tensile.KernelHelperNaming import initConversionKernelObjects
     from Tensile.TensileCreateLibrary.Run import generateKernelObjectsFromSolutions
     import codegen_harness as _ch
 
-    sols = solutions_from_config(_CONFIG, arch=_ARCH, limit_solutions=1)
+    sols = solutions_from_config(scalar_config, arch=_ARCH, limit_solutions=1)
     assert sols, "Need one solution to generate the conversion helper"
     kernels = generateKernelObjectsFromSolutions(sols)
     assert kernels, "Need one generated kernel to derive production helper state"

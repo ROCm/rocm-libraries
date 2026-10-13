@@ -3,27 +3,27 @@
   dict({
     'gfx90a/HSS.yaml': list([
       tuple(
-        'Cijk_SS_BiasH_HAS_ScaleAlphaVec_DSA_PostGSU16_VW1',
+        'Cijk_SS_BiasH_HAS_ScaleAlphaVec_PostGSU16_VW1',
         0,
       ),
       tuple(
-        'Cijk_SS_BiasH_HAS_ScaleAlphaVec_DSA_PostGSU16_VW2',
+        'Cijk_SS_BiasH_HAS_ScaleAlphaVec_PostGSU16_VW2',
         0,
       ),
       tuple(
-        'Cijk_SS_BiasH_HAS_ScaleAlphaVec_DSA_PostGSU16_VW4',
+        'Cijk_SS_BiasH_HAS_ScaleAlphaVec_PostGSU16_VW4',
         0,
       ),
       tuple(
-        'Cijk_SS_BiasS_HAS_ScaleAlphaVec_DSA_PostGSU16_VW1',
+        'Cijk_SS_BiasS_HAS_ScaleAlphaVec_PostGSU16_VW1',
         0,
       ),
       tuple(
-        'Cijk_SS_BiasS_HAS_ScaleAlphaVec_DSA_PostGSU16_VW2',
+        'Cijk_SS_BiasS_HAS_ScaleAlphaVec_PostGSU16_VW2',
         0,
       ),
       tuple(
-        'Cijk_SS_BiasS_HAS_ScaleAlphaVec_DSA_PostGSU16_VW4',
+        'Cijk_SS_BiasS_HAS_ScaleAlphaVec_PostGSU16_VW4',
         0,
       ),
       tuple(
@@ -37,15 +37,15 @@
     ]),
     'gfx942/F8N_multi.yaml': list([
       tuple(
-        'Cijk_SF8N_BiasH_AuxH_HAS_ScaleAB_ScaleCD_ScaleAlphaVec_DSA_PostGSU16_VW1',
+        'Cijk_SF8N_BiasH_AuxH_HAS_ScaleAB_ScaleCD_ScaleAlphaVec_PostGSU16_VW1',
         0,
       ),
       tuple(
-        'Cijk_SF8N_BiasH_AuxH_HAS_ScaleAB_ScaleCD_ScaleAlphaVec_DSA_PostGSU16_VW2',
+        'Cijk_SF8N_BiasH_AuxH_HAS_ScaleAB_ScaleCD_ScaleAlphaVec_PostGSU16_VW2',
         0,
       ),
       tuple(
-        'Cijk_SF8N_BiasH_AuxH_HAS_ScaleAB_ScaleCD_ScaleAlphaVec_DSA_PostGSU16_VW4',
+        'Cijk_SF8N_BiasH_AuxH_HAS_ScaleAB_ScaleCD_ScaleAlphaVec_PostGSU16_VW4',
         0,
       ),
       tuple(
@@ -73,27 +73,27 @@
     ]),
     'gfx942/HSS_BH_Bias.yaml': list([
       tuple(
-        'Cijk_SS_BiasH_HAS_ScaleAlphaVec_DSA_PostGSU16_VW1',
+        'Cijk_SS_BiasH_HAS_ScaleAlphaVec_PostGSU16_VW1',
         0,
       ),
       tuple(
-        'Cijk_SS_BiasH_HAS_ScaleAlphaVec_DSA_PostGSU16_VW2',
+        'Cijk_SS_BiasH_HAS_ScaleAlphaVec_PostGSU16_VW2',
         0,
       ),
       tuple(
-        'Cijk_SS_BiasH_HAS_ScaleAlphaVec_DSA_PostGSU16_VW4',
+        'Cijk_SS_BiasH_HAS_ScaleAlphaVec_PostGSU16_VW4',
         0,
       ),
       tuple(
-        'Cijk_SS_BiasS_HAS_ScaleAlphaVec_DSA_PostGSU16_VW1',
+        'Cijk_SS_BiasS_HAS_ScaleAlphaVec_PostGSU16_VW1',
         0,
       ),
       tuple(
-        'Cijk_SS_BiasS_HAS_ScaleAlphaVec_DSA_PostGSU16_VW2',
+        'Cijk_SS_BiasS_HAS_ScaleAlphaVec_PostGSU16_VW2',
         0,
       ),
       tuple(
-        'Cijk_SS_BiasS_HAS_ScaleAlphaVec_DSA_PostGSU16_VW4',
+        'Cijk_SS_BiasS_HAS_ScaleAlphaVec_PostGSU16_VW4',
         0,
       ),
       tuple(
@@ -107,27 +107,27 @@
     ]),
     'gfx950/HHS.yaml': list([
       tuple(
-        'Cijk_SH_BiasH_HAS_ScaleAlphaVec_DSA_PostGSU16_VW1',
+        'Cijk_SH_BiasH_HAS_ScaleAlphaVec_PostGSU16_VW1',
         0,
       ),
       tuple(
-        'Cijk_SH_BiasH_HAS_ScaleAlphaVec_DSA_PostGSU16_VW2',
+        'Cijk_SH_BiasH_HAS_ScaleAlphaVec_PostGSU16_VW2',
         0,
       ),
       tuple(
-        'Cijk_SH_BiasH_HAS_ScaleAlphaVec_DSA_PostGSU16_VW4',
+        'Cijk_SH_BiasH_HAS_ScaleAlphaVec_PostGSU16_VW4',
         0,
       ),
       tuple(
-        'Cijk_SH_BiasS_HAS_ScaleAlphaVec_DSA_PostGSU16_VW1',
+        'Cijk_SH_BiasS_HAS_ScaleAlphaVec_PostGSU16_VW1',
         0,
       ),
       tuple(
-        'Cijk_SH_BiasS_HAS_ScaleAlphaVec_DSA_PostGSU16_VW2',
+        'Cijk_SH_BiasS_HAS_ScaleAlphaVec_PostGSU16_VW2',
         0,
       ),
       tuple(
-        'Cijk_SH_BiasS_HAS_ScaleAlphaVec_DSA_PostGSU16_VW4',
+        'Cijk_SH_BiasS_HAS_ScaleAlphaVec_PostGSU16_VW4',
         0,
       ),
       tuple(
@@ -145,15 +145,15 @@
         0,
       ),
       tuple(
-        'Cijk_II8_BiasS_HAS_ScaleAlphaVec_DSA_PostGSU16_VW1',
+        'Cijk_II8_BiasS_HAS_ScaleAlphaVec_PostGSU16_VW1',
         0,
       ),
       tuple(
-        'Cijk_II8_BiasS_HAS_ScaleAlphaVec_DSA_PostGSU16_VW2',
+        'Cijk_II8_BiasS_HAS_ScaleAlphaVec_PostGSU16_VW2',
         0,
       ),
       tuple(
-        'Cijk_II8_BiasS_HAS_ScaleAlphaVec_DSA_PostGSU16_VW4',
+        'Cijk_II8_BiasS_HAS_ScaleAlphaVec_PostGSU16_VW4',
         0,
       ),
       tuple(
