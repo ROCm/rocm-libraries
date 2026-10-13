@@ -225,6 +225,7 @@ class ConfigSectionGenerator:
             params['DataInitTypeMXSB'] = 3
             if self.config["ARCH"].startswith("gfx950"):
                 params['MXScaleFormat'] = 1
+        params.update(self.config.get("DATA_INIT") or {})
         return params
 
     def _resolve_bias_type(self) -> Optional[str]:

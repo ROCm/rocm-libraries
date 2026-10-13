@@ -624,11 +624,16 @@ class GFX1250GAParams(GFX1250GAOrigamiPolicy, BaseOptimizationParams):
     # not a clearance. StreamK: true puts persistent kernels in the space.
 
     @param
-    def global_split_u(self, ctx: SizeContext) -> ForkParameter:
+    def global_split_u(self, ctx: SizeContext) -> Optional[ForkParameter]:
         """-1 lets Tensile choose. With StreamK: false, MIDesign also attaches
         a per-MI GlobalSplitU that would override this one for those MIs
         (Tensile lets a group entry win over a flat parameter);
-        _GFX1250DropMIGroupGSU in post_processor.py strips it."""
+        _GFX1250DropMIGroupGSU in post_processor.py strips it.
+
+        ``GSU_PER_MI: true`` keeps the per-MI values instead, so no flat value is
+        emitted and MIs without one run Tensile's default GlobalSplitU 1."""
+        if self.config.get("GSU_PER_MI"):
+            return None
         return self._make_param("GlobalSplitU", [-1])
 
     @param

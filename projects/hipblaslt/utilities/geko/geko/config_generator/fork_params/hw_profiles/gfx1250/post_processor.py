@@ -179,6 +179,8 @@ class _GFX1250DropMIGroupGSU:
     per-MI one wins for those MIs. Doing it here rather than in MIDesign keeps
     the change inside the generic gfx1250 search space: MIDesign is shared by
     every architecture, and the heuristic profile still wants its per-MI value.
+    ``GSU_PER_MI: true`` drops the flat parameter instead, so this step finds
+    nothing to resolve and the per-MI values stay.
     """
 
     @mark_post_process

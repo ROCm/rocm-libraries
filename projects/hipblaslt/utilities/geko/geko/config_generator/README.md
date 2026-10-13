@@ -93,6 +93,8 @@ If the YAML omits them, these are filled from `HARDWARE_MAP[ARCH]` in [`load_inp
 | `CMS` / `CMS_PRIORITY` | CMS optimization / tile priority (defaults **on** for `gfx950`, **off** for gfx942 family) |
 | `MI_FILTER` | MI filtering: `0` none, `1` moderate, `2` aggressive |
 | `EPILOGUES` | Include epilogues |
+| `GSU_PER_MI` | `True` gives each MI group the `GlobalSplitU` MIDesign picks for it (the smallest GSU that fills the CUs), with or without `StreamK`. `False` (default) leaves the gfx1250 generic space on one `GlobalSplitU: [-1]`, which Tensile resolves at run time |
+| `DATA_INIT` | Map of Tensile `DataInitType*` / `DataInitSeed` overrides for the emitted `GlobalParameters`, e.g. `{DataInitTypeC: 3, DataInitTypeD: 2, DataInitSeed: 0}` to initialise buffers like a hand-written Tensile config. Default: none (A/B/C/D TrigSin/TrigCos, seed 1) |
 | `MX` | `True` = MX block scaling on the arch's default block (32) with E8 scales. `F4` is always MX; only `F4` and `F8` take MX |
 | `MX_BLOCK` | MX block size, 16 or 32; setting it turns MX on. `0` forces plain non-MX, which `F4` and `MX: True` reject. MXFP8 is `F8` with 32, NVFP4 is `F4` with 16 |
 | `MX_SCALE_TYPE` | MX scale dtype: `E8` (E8M0, default), `F8` (E4M3, for NVFP4) or `E5M3` |
@@ -101,7 +103,7 @@ If the YAML omits them, these are filled from `HARDWARE_MAP[ARCH]` in [`load_inp
 
 With `SIZE_OPTION: 2`, each log row's `scaleA` / `scaleB` gives its MX format. The MX keys apply to the log's `F4` / `F8` rows that carry none, and must agree with the rows that do. Output files of an MX format the data type does not imply are tagged with it, e.g. `F8BS_MXE8B32_TN_0.yaml` (MXFP8) or `F4BS_MXF8B16_TN_0.yaml` (NVFP4).
 
-With `--tune` (the `geko` CLI), this file supplies the GEMM problems, each with its MX format (`MX`, `MX_BLOCK`, `MX_SCALE_TYPE`), and the keys `EPILOGUES` and `LIBRARY_TYPE` (`LIST_FORWARDED_KEYS` in [`constants.py`](constants.py)); architecture, backend and search space come from the command line, and other keys are ignored. `scripts/config_generator.py --config` applies every key.
+With `--tune` (the `geko` CLI), this file supplies the GEMM problems, each with its MX format (`MX`, `MX_BLOCK`, `MX_SCALE_TYPE`), and the keys `EPILOGUES`, `LIBRARY_TYPE`, `GSU_PER_MI` and `DATA_INIT` (`LIST_FORWARDED_KEYS` in [`constants.py`](constants.py)); architecture, backend and search space come from the command line, and other keys are ignored. `scripts/config_generator.py --config` applies every key.
 
 ### Environment variable override
 

@@ -306,7 +306,7 @@ class MIDesign:
                 and not (size[0] < smallest_M_in_MFMA and size[1] < smallest_N_in_MFMA)): 
                 continue
 
-            if not self.config['StreamK']: # DP tuning
+            if self._per_mi_gsu:
                 #TODO BBK, check with Alex on the workspace size for streamk
                 WorkspaceSizePerElemC = computeDataTypeSize[self._gt.compute_data_type]
                 gsuMultiplier = GSU if GSU > 1 else 0
@@ -314,6 +314,7 @@ class MIDesign:
                 if size[0] * size[1] * size[2] * WorkspaceSizePerElemC * gsuMultiplier > MAX_GSU_WORKSPACE_SIZE:
                     break
 
+            if not self.config['StreamK']: # DP tuning
                 # TODO: BBK/Koji, please check this condition.
                 if (LSU > 1 and ((mfma_params.MT0*mfma_params.MT1*LSU*computeDataTypeSize[self._gt.data_type] > 64*1024) or (mfma_params.MT0*mfma_params.MT1*LSU*computeDataTypeSize[self._gt.data_type] >= 64*1024 and self._gt.transA == "N" and self._gt.transB == "T"))):
                     break
@@ -595,7 +596,7 @@ class MIDesign:
 
         if mfma_cand.LSU > 1:
             base_mfma_dict["WorkGroup"] = [mfma_cand.WG0, mfma_cand.WG1, mfma_cand.LSU]
-        if mfma_cand.GSU > 1 and not self.config["StreamK"]:
+        if mfma_cand.GSU > 1 and self._per_mi_gsu:
             base_mfma_dict["GlobalSplitU"] = [mfma_cand.GSU]
 
         # Determine which DepthU values to emit
@@ -668,6 +669,11 @@ class MIDesign:
 
       self._valid_mfmas, self._smallest_M, self._smallest_N = self.generate_all_mfmas()
 
+  @property
+  def _per_mi_gsu(self) -> bool:
+      """MI groups carry their own GlobalSplitU in DP tuning, and with StreamK under GSU_PER_MI."""
+      return not self.config["StreamK"] or bool(self.config.get("GSU_PER_MI"))
+
   def generate_for_size(
       self,
       size: Tuple[int, int, int, int],
@@ -694,7 +700,9 @@ class MIDesign:
           self._valid_mfmas, self._smallest_M, self._smallest_N, size, wavefront_size=wavefront_size)
 
       mfma_list = self._sort_mfmas(mfma_list)
-      if self.config.get("StreamK", False):
+      # StreamK collapses candidates that differ only in GSU. GSU_PER_MI keeps
+      # those values, so the dedup would throw away the split MIDesign just chose.
+      if self.config.get("StreamK", False) and not self.config.get("GSU_PER_MI"):
         logger.debug("Removing GSU duplicates for StreamK")
         mfma_list = self._remove_GSU_duplicates(mfma_list)
 

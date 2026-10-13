@@ -525,6 +525,14 @@ _CONFIG_OPTIONAL_COMMON = {
     "ONE_SIZE_PER_CONFIG": True,
     "MI_FILTER": 2,
     "EPILOGUES": True,
+    # Give each MI group the GlobalSplitU that MIDesign picks for it (the smallest GSU that
+    # fills the CUs at this size), with or without StreamK. False leaves the gfx1250 generic
+    # profile on its single GlobalSplitU -1, which Tensile resolves at run time.
+    "GSU_PER_MI": False,
+    # Overrides for the DataInit* entries of the emitted GlobalParameters, e.g.
+    # {"DataInitTypeD": 2} to initialise buffers like a hand-written Tensile config.
+    # Keys must be Tensile DataInitType* names or DataInitSeed; values are integers.
+    "DATA_INIT": None,
     "CLUSTER": 0,
     "DUCTILE_VALIDATION_PROFILE": 1,
 }
@@ -542,7 +550,7 @@ ENV_UPDATABLE_KEYS = {
 # would otherwise fall back to their defaults. The MX format needs no entry:
 # each row carries it as its hipBLASLt scaleA / scaleB value, which is decoded
 # again when the rows are grouped into GemmConfigs, as for a workload log.
-LIST_FORWARDED_KEYS = ("EPILOGUES", "LIBRARY_TYPE")
+LIST_FORWARDED_KEYS = ("EPILOGUES", "LIBRARY_TYPE", "GSU_PER_MI", "DATA_INIT")
 
 _CMS_DEFAULTS_GFX950 = {"CMS": True, "CMS_PRIORITY": False}
 _CMS_DEFAULTS_GFX942_FAMILY = {"CMS": False, "CMS_PRIORITY": False, "StreamK": False}
