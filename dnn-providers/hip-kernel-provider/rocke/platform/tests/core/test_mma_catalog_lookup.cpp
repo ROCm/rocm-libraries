@@ -3,6 +3,7 @@
 /* Exercise public catalog queries against stored keys, without normalizing
  * away malformed table entries. Alias queries must find the same atom. */
 #include "mma_family_index.h"
+#include "rocke/abi.h"
 #include "rocke/arch_target.h"
 #include "rocke/error.hpp"
 #include "rocke/helper_rocke.core.arch.h"
@@ -10,9 +11,23 @@
 
 #include <atomic>
 #include <initializer_list>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 #include <thread>
+
+/* Layout canary. Growing or reordering rocke_mma_op_t changes the stride of the
+ * ops[] array every catalog hands out, so a caller built against the old header
+ * indexes it wrongly while still passing its own ABI check -- unless
+ * ROCKE_ABI_VERSION moved with the struct. This pins the two together: editing
+ * the struct fails the build here, and the fix is to bump ROCKE_ABI_VERSION in
+ * rocke/abi.h and update both numbers in the same change. 64-bit only, where
+ * the pointer width that is part of the layout is known. */
+#if INTPTR_MAX == INT64_MAX
+static_assert(sizeof(rocke_mma_op_t) == 160 && ROCKE_ABI_VERSION >= 3,
+              "rocke_mma_op_t changed size: bump ROCKE_ABI_VERSION in rocke/abi.h, then "
+              "update this pin");
+#endif
 
 static const char* short_dtype(const char* dtype)
 {
