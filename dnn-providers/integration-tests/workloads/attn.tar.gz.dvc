@@ -1,4 +1,4 @@
-md5: b4fea08ed63a5287b64a8e0fff60dd0d
+md5: b17a6e808eb4a4b7abe1513019cb7ada
 frozen: true
 deps:
 - path: Workloads/headline/attn.tar.gz
@@ -9,4 +9,5 @@ outs:
 - md5: 506430dcfe2729675a169b825ce87793
   size: 40141
   hash: md5
+  remote: dnn-benchmarking
   path: attn.tar.gz

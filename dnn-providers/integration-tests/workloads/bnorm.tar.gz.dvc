@@ -1,4 +1,4 @@
-md5: feadf338df691afe97bf233067c0985c
+md5: 0e87a5552d9bfb40da817a2ee1567a2d
 frozen: true
 deps:
 - path: Workloads/headline/bnorm.tar.gz
@@ -9,4 +9,5 @@ outs:
 - md5: b440a677cd4920abc3b764eabed8030a
   size: 3933
   hash: md5
+  remote: dnn-benchmarking
   path: bnorm.tar.gz

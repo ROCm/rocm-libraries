@@ -1,4 +1,4 @@
-md5: 9c4b16fc55d9460179d87f0230128c40
+md5: f7fcf37072ebfb1bbbcfbae5cdf06ced
 frozen: true
 deps:
 - path: Workloads/headline/conv.tar.gz
@@ -9,4 +9,5 @@ outs:
 - md5: b8e7d9105a49d3e9c566bf26a0f87451
   size: 21264
   hash: md5
+  remote: dnn-benchmarking
   path: conv.tar.gz

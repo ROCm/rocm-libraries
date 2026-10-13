@@ -202,11 +202,12 @@ jobs:
 
       # Optional dnn-benchmarking workload graphs (workloads/*.tar.gz.dvc, see
       # dnn-providers/integration-tests/README.md). Configure extracts whatever
-      # was pulled, so this MUST also precede configure. The `full` ctest
-      # category then runs them as dnn_benchmarking_* tests. They run on the
-      # nightly schedule and on manual runs, and on a PR only when it changes
-      # the pinned pointers, so a dnn-benchmarking bump is tested in the PR that
-      # takes it.
+      # was pulled, so this MUST also precede configure. This lane only builds
+      # and does not execute the bundle tests, so what it proves is that the
+      # pinned pointers can be fetched and the archives extract. The GPU lanes
+      # that run the `full` category execute them as dnn_benchmarking_* tests.
+      # This runs on the nightly schedule and on manual runs, and on a PR only
+      # when it changes the pinned pointers.
       - name: Select dnn-benchmarking workloads
         id: workloads
         env:

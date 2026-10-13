@@ -1,4 +1,4 @@
-md5: 650de9cb3076eea02f059d630aeb22a6
+md5: 18c7d9d46f094361116b92cc9f7baf00
 frozen: true
 deps:
 - path: Workloads/headline/hipblaslt.tar.gz
@@ -9,4 +9,5 @@ outs:
 - md5: a31a8e48d4031f974ad7fec9b359e101
   size: 37123
   hash: md5
+  remote: dnn-benchmarking
   path: hipblaslt.tar.gz

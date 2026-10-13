@@ -1,4 +1,4 @@
-md5: 8aef521fd70c14abbc3272ea6fb6051e
+md5: ab684032e591ef85dae543f18bd07081
 frozen: true
 deps:
 - path: Workloads/headline/norm.tar.gz
@@ -9,4 +9,5 @@ outs:
 - md5: d12e33a357a93f4609299c978da7cab9
   size: 8159
   hash: md5
+  remote: dnn-benchmarking
   path: norm.tar.gz

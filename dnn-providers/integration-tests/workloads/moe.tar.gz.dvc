@@ -1,4 +1,4 @@
-md5: 927b4900347321c34ca44cb39c69d93c
+md5: 745d8d4a880e91f41a84179f86edca44
 frozen: true
 deps:
 - path: Workloads/headline/moe.tar.gz
@@ -9,4 +9,5 @@ outs:
 - md5: d9702d81b85dd61f968c41aa97a748ee
   size: 28433
   hash: md5
+  remote: dnn-benchmarking
   path: moe.tar.gz
