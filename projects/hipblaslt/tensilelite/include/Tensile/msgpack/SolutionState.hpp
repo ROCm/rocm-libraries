@@ -7,7 +7,7 @@
 
 #include <msgpack.hpp>
 
-#include <Tensile/ContractionSolution.hpp>
+#include <Tensile/ContractionSolution_fwd.hpp>
 
 #include <tensilelitehost/export.h>
 

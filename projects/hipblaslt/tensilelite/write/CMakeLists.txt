@@ -1,0 +1,117 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+# Nanobind module TensileCreateLibrary uses to write MessagePack libraries.
+# rocisa fetches nanobind; this target stays separate from _rocisa.
+
+if(NOT COMMAND nanobind_add_module)
+    message(FATAL_ERROR "tensilelite_write requires nanobind_add_module (built with rocisa)")
+endif()
+
+set(_tensilelite_write_output "${CMAKE_BINARY_DIR}/tensilelite/python/tensilelite")
+set(_tensilelite_write_install "${CMAKE_INSTALL_LIBDIR}/hipblaslt/tensilelite")
+
+set(_link_msgpack_host FALSE)
+if(TARGET tensilelite-host AND NOT HIPBLASLT_ENABLE_YAML)
+    set(_link_msgpack_host TRUE)
+endif()
+
+nanobind_add_module(tensilelite_write NB_SUPPRESS_WARNINGS
+    "${CMAKE_CURRENT_SOURCE_DIR}/tensilelite_write.cpp")
+
+set_target_properties(tensilelite_write PROPERTIES
+    LIBRARY_OUTPUT_DIRECTORY "${_tensilelite_write_output}"
+)
+
+set_property(TARGET tensilelite_write PROPERTY THEROCK_INSTALL_RPATH_ORIGIN
+    "${_tensilelite_write_install}")
+
+if(_link_msgpack_host)
+    # SolutionState.hpp includes msgpack, which tensilelite-host links privately.
+    target_link_libraries(tensilelite_write PRIVATE tensilelite-host ${hipblaslt_msgpack_target})
+    set_target_properties(tensilelite_write PROPERTIES
+        BUILD_RPATH "$<TARGET_FILE_DIR:tensilelite-host>"
+        INSTALL_RPATH "$ORIGIN/../.."
+    )
+else()
+    # Host library is absent (gemm-libs) or compiled for YAML, which does not
+    # build src/msgpack. Compile the writer and the serialization sources it
+    # links into this module. A YAML host that is not generating device
+    # libraries does not reach this directory.
+    if(NOT TARGET ZLIB::ZLIB)
+        find_package(ZLIB REQUIRED)
+    endif()
+    if(NOT hipblaslt_msgpack_target)
+        message(FATAL_ERROR "tensilelite_write requires msgpack-cxx")
+    endif()
+
+    file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/include/tensilelitehost")
+    file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/include/tensilelitehost/export.h"
+"// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+#pragma once
+#define TENSILELITEHOST_EXPORT
+")
+
+    set(_tensilelite_src "${CMAKE_CURRENT_SOURCE_DIR}/../src")
+    add_library(tensilelite-msgpack-writer STATIC
+        "${_tensilelite_src}/Activation.cpp"
+        "${_tensilelite_src}/AMDGPU.cpp"
+        "${_tensilelite_src}/ContractionProblem.cpp"
+        "${_tensilelite_src}/ContractionSolution.cpp"
+        "${_tensilelite_src}/DataTypes.cpp"
+        "${_tensilelite_src}/Debug.cpp"
+        "${_tensilelite_src}/EmbeddedData.cpp"
+        "${_tensilelite_src}/EmbeddedLibrary.cpp"
+        "${_tensilelite_src}/KernelArguments.cpp"
+        "${_tensilelite_src}/KernelLanguageTypes.cpp"
+        "${_tensilelite_src}/MLFeatures.cpp"
+        "${_tensilelite_src}/MLPNet.cpp"
+        "${_tensilelite_src}/PerformanceMetricTypes.cpp"
+        "${_tensilelite_src}/ScalarValueTypes.cpp"
+        "${_tensilelite_src}/TensorDescriptor.cpp"
+        "${_tensilelite_src}/TensorOps.cpp"
+        "${_tensilelite_src}/Tensile.cpp"
+        "${_tensilelite_src}/Utils.cpp"
+        "${_tensilelite_src}/hip/HipHardware.cpp"
+        "${_tensilelite_src}/hip/HipSolutionAdapter.cpp"
+        "${_tensilelite_src}/msgpack/MessagePack.cpp"
+        "${_tensilelite_src}/msgpack/SolutionState.cpp"
+        "${_tensilelite_src}/msgpack/Writing.cpp"
+    )
+    set_target_properties(tensilelite-msgpack-writer PROPERTIES
+        POSITION_INDEPENDENT_CODE ON
+    )
+    target_compile_features(tensilelite-msgpack-writer PRIVATE cxx_std_17)
+    target_compile_definitions(tensilelite-msgpack-writer
+        PRIVATE
+            TENSILE_MSGPACK
+            __HIP_HCC_COMPAT_MODE__=1
+    )
+    if(HIP_HAS_CLUSTER_LAUNCH)
+        target_compile_definitions(tensilelite-msgpack-writer PRIVATE HIP_HAS_CLUSTER_LAUNCH)
+    endif()
+    target_include_directories(tensilelite-msgpack-writer
+        PUBLIC
+            "${CMAKE_CURRENT_BINARY_DIR}/include"
+            "${CMAKE_CURRENT_SOURCE_DIR}/../include"
+    )
+    target_link_libraries(tensilelite-msgpack-writer
+        PUBLIC
+            rocisa::rocisa-cpp
+            roc::origami
+            hip::host
+            ${hipblaslt_msgpack_target}
+            ZLIB::ZLIB
+        PRIVATE
+            hip::device
+            ${CMAKE_DL_LIBS}
+    )
+    target_link_libraries(tensilelite_write PRIVATE tensilelite-msgpack-writer)
+endif()
+
+install(TARGETS tensilelite_write
+    LIBRARY DESTINATION "${_tensilelite_write_install}"
+    RUNTIME DESTINATION "${_tensilelite_write_install}"
+    COMPONENT devel
+)

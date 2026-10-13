@@ -21,6 +21,7 @@
 #include <Tensile/AMDGPU.hpp>
 #include <Tensile/AMDGPUPredicates.hpp>
 #include <Tensile/ContractionProblemPredicates.hpp>
+#include <Tensile/ContractionSolution.hpp>
 #include <Tensile/ContractionTaskPredicates.hpp>
 #include <Tensile/KernelLanguageTypes.hpp>
 #include <Tensile/msgpack/SolutionState.hpp>
