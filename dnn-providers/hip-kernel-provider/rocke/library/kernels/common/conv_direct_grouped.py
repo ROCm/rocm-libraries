@@ -2531,6 +2531,33 @@ def is_valid_spec(spec: "DirectConvSpec", arch: str = "gfx950") -> Tuple[bool, s
         a_dtype=ab_dtype, b_dtype=ab_dtype, c_dtype="fp32", m=16, n=16, k=32
     ):
         return False, f"fold_k32 requires mfma_f32_16x16x32_{ab_dtype} on {arch}"
+
+    # LDS budget: the A/B staging ring (the chunk loader's lds_total_fp16
+    # halves, ×2 when double_buffer gives B its own buffer instead of
+    # aliasing A) plus the waves_k>1 cross-wave reduction scratch. Mirrors
+    # build_direct_conv's own sizing exactly -- this validator must reject
+    # anything that formula would overflow, or an over-budget spec reaches
+    # comgr and fails codegen instead of is_valid_spec.
+    _load_vec = 8 if spec.fold_k32 else 4
+    _n_vecs = p.cpg // _load_vec
+    _lds_w = (spec.block_q - 1) * p.stride + p.KW
+    _threads = spec.threads_per_block
+    _num_chunks = _lds_w * spec.block_groups * _n_vecs
+    _passes = (_num_chunks + _threads - 1) // _threads
+    _lds_total_fp16 = _passes * _threads * _load_vec
+    _ab_bytes = _lds_total_fp16 * 2 * (2 if spec.double_buffer else 1)
+    _red_bytes = (
+        (spec.waves_q * spec.waves_k) * spec.wave_size * 4 * 4
+        if spec.waves_k > 1
+        else 0
+    )
+    _total_lds = _ab_bytes + _red_bytes
+    if not target.fits_lds(_total_lds):
+        return False, (
+            f"LDS budget {_total_lds} bytes "
+            f"(A/B={'x2 ' if spec.double_buffer else ''}{_lds_total_fp16 * 2}, "
+            f"red={_red_bytes}) > {target.lds_capacity_bytes} cap on {arch}"
+        )
     return True, "ok"
 
 
@@ -5559,31 +5586,10 @@ def build_direct_depthwise_dgrad_streaming(
     b_rsrc = b.buffer_rsrc(Bp, B_bytes)
     d_rsrc = b.buffer_rsrc(D, D_bytes)
 
-    # dY descriptor: A[N, Ho, Wo, groups] NHWK.
-    dy_desc = DynamicTensorDescriptor.create(
-        "dY_nhwc_dw",
-        coord_names=["n", "ho", "wo", "ch"],
-        strides=[
-            params["p_dY_stride_n"],
-            params["p_dY_stride_ho"],
-            params["p_dY_stride_wo"],
-            b.const_i32(1),
-        ],
-    )
-    # W descriptor: B[groups, KH, KW, 1] KRSC.
+    # W descriptor: B[groups, KH, KW, 1] KRSC. dY (NHWK) and dX (NHWC) are
+    # addressed through their kernarg strides below.
     b_desc = TensorDescriptor.naive(
         "B", lengths=[p.groups, p.KH, p.KW, 1], coord_names=("k", "r", "s", "c")
-    )
-    # dX descriptor: D[N, H, W, groups] NHWC.
-    d_desc = DynamicTensorDescriptor.create(
-        "dX_nhwc_dw",
-        coord_names=["n", "h", "w", "ch"],
-        strides=[
-            params["p_dX_stride_n"],
-            params["p_dX_stride_hi"],
-            params["p_dX_stride_wi"],
-            b.const_i32(1),
-        ],
     )
 
     # Preload W[ch, r, s, 0] into f32 registers (KH*KW values per thread).
@@ -5622,17 +5628,22 @@ def build_direct_depthwise_dgrad_streaming(
     # the loop variable is then always 0 mod KH, and
     # ``y_base*stride ≡ 0 (mod stride*KH)`` drops out of the slot arithmetic.
     #
-    # The loop runs to ceil((H + PAD) / stride) windows, which is what it takes
-    # to cover every dX row. Rows past Ho load nothing (the ho bound below
-    # rejects them) and only flush, so the tail needs no special case; rows
-    # past the rounded-up trip count flush windows entirely outside [0, H),
+    # Two loops cover the ceil((H + PAD) / stride) windows it takes to reach
+    # every dX row. The first runs the groups of KH rows that hold dY rows
+    # (ceil(Ho / KH) of them); rows of its last group past Ho load nothing
+    # (the ho bound below rejects them). The second only flushes: the windows
+    # past the last dY row complete dX rows but have no tap left to add.
+    # Windows past the rounded-up trip count lie entirely outside [0, H),
     # which the store guard drops.
     c_stride_v = b.const_i32(stride)
     c_KH_v = b.const_i32(p.KH)
+    c1 = b.const_i32(1)
     y_end_v = b.div(
         b.add(b.add(p_Hi, b.const_i32(p.PAD)), b.const_i32(stride - 1)),
         c_stride_v,
     )
+    n_groups_v = b.div(b.add(y_end_v, b.const_i32(p.KH - 1)), c_KH_v)
+    n_fma_groups_v = b.div(b.add(c_Ho, b.const_i32(p.KH - 1)), c_KH_v)
 
     slot_args = [
         (f"dgs_acc_s{slot}_w{j}", zero_f32)
@@ -5643,15 +5654,30 @@ def build_direct_depthwise_dgrad_streaming(
     def _slot_index(slot: int, j: int) -> int:
         return slot * BLOCK_W + j
 
-    # wi is loop-invariant: hoist it and its bound check out of the body.
-    wi_vals = [b.add(wi_tile_start, b.const_i32(j)) for j in range(BLOCK_W)]
-    wi_oks = [b.cmp_lt(wi, c_Wi) for wi in wi_vals]
+    # Bounds travel as byte offsets -- the OOB sentinel where the access is
+    # out of range, which the buffer descriptor turns into a zero load and a
+    # dropped store as long as the tensor is under 2 GiB, the limit of the
+    # i32 offsets anyway -- rather than as booleans: a boolean per column
+    # held across the loop is a 64-bit lane mask, and a dozen of them spill
+    # the SGPRs.
+    ch_off = b.mul(ch, c_half_bytes)
+
+    # Store terms: wi and the channel guard are loop-invariant, so each dX
+    # column folds its bound and its lane's channel offset into one term.
+    st_terms = []
+    for j in range(BLOCK_W):
+        wi = b.add(wi_tile_start, b.const_i32(j))
+        wi_ok = b.land(b.cmp_lt(wi, c_Wi), ch_ok)
+        wi_off = b.add(b.mul(b.mul(wi, params["p_dX_stride_wi"]), c_half_bytes), ch_off)
+        st_terms.append(b.select(wi_ok, wi_off, oob_sentinel))
 
     # Tap (s, j) reads dY column wo = (wi + PAD - s) / stride, which depends on
     # j - s only: one load per distinct d = j - s serves every tap (and every
-    # r) that reads it. The column bound, the stride divisibility and the
-    # channel guard do not depend on the row, so they are hoisted too.
-    cols = []
+    # r) that reads it. The column bound and the stride divisibility do not
+    # depend on the row, so they are hoisted into one uniform term per
+    # column. Lanes past the channel count need no load guard: they read
+    # whatever lies there and their sums are never stored.
+    col_terms = []
     for d in range(1 - p.KW, BLOCK_W):
         wi_p_s = b.add(wi_tile_start, b.const_i32(p.PAD + d))
         if stride > 1:
@@ -5660,57 +5686,93 @@ def build_direct_depthwise_dgrad_streaming(
         else:
             div_ok = None
             wo = wi_p_s
-        col_ok = b.land(b.land(b.cmp_ge(wi_p_s, c0), b.cmp_lt(wo, c_Wo)), ch_ok)
+        col_ok = b.land(b.cmp_ge(wi_p_s, c0), b.cmp_lt(wo, c_Wo))
         if stride > 1:
             col_ok = b.land(col_ok, div_ok)
-        cols.append((wo, col_ok))
+        col_off = b.mul(b.mul(wo, params["p_dY_stride_wo"]), c_half_bytes)
+        col_terms.append(b.select(col_ok, col_off, oob_sentinel))
+    n_cols = len(col_terms)
+    dy_n_off = b.mul(n, params["p_dY_stride_n"])
+    dx_n_off = b.mul(n, params["p_dX_stride_n"])
 
-    def load_rows(y0: Value) -> List[Value]:
-        """Raw dY values of rows y0 .. y0 + KH - 1, row-major by column.
+    def load_row(y_v: Value) -> List[Value]:
+        """Raw dY values of row ``y_v``, one per distinct column.
 
-        Rows past Ho, columns outside [0, Wo) or off the stride and lanes past
-        the channel count load from the OOB sentinel, which the buffer
-        descriptor returns as zero.
+        Rows past Ho and columns outside [0, Wo) or off the stride load from
+        the OOB sentinel, which the buffer descriptor returns as zero.
         """
+        ho_ok = b.cmp_lt(y_v, c_Ho)
+        row_off = b.mul(
+            b.add(dy_n_off, b.mul(y_v, params["p_dY_stride_ho"])), c_half_bytes
+        )
         vals: List[Value] = []
-        for jj in range(p.KH):
-            y_v = b.add(y0, b.const_i32(jj))
-            ho_ok = b.cmp_lt(y_v, c_Ho)
-            for wo, col_ok in cols:
-                dy_off, _ = dy_desc.offset(b, n=n, ho=y_v, wo=wo, ch=ch)
-                safe_dy = b.select(
-                    b.land(col_ok, ho_ok), b.mul(dy_off, c_half_bytes), oob_sentinel
-                )
-                vals.append(
-                    b.buffer_load_bf16(a_rsrc, safe_dy, c0)
-                    if p.dtype == "bf16"
-                    else b.buffer_load_f16(a_rsrc, safe_dy, c0)
-                )
+        for col_term in col_terms:
+            s_term = b.select(ho_ok, b.add(row_off, col_term), oob_sentinel)
+            v_off = b.add(ch_off, s_term)
+            vals.append(
+                b.buffer_load_bf16(a_rsrc, v_off, c0)
+                if p.dtype == "bf16"
+                else b.buffer_load_f16(a_rsrc, v_off, c0)
+            )
         return vals
 
-    # The dY rows are software-pipelined one iteration ahead: each iteration
-    # issues the loads of the next KH rows and carries them to the next
-    # iteration, then computes from the rows the previous one loaded. Loaded
-    # and used in the same iteration, the loads are scheduled next to their
-    # FMAs and each waits out the full memory latency before the next issues.
-    n_cols = len(cols)
-    row_names = [
-        f"dgs_dy_r{jj}_d{d}" for jj in range(p.KH) for d in range(1 - p.KW, BLOCK_W)
-    ]
-    row_args = list(zip(row_names, load_rows(c0)))
+    def flush(y_v: Value, jj: int, slots_flat: List[Value]) -> None:
+        """Store the window of row ``y_v`` (step ``jj``); reset its slots."""
+        for d in range(stride):
+            slot = (jj * stride - p.PAD + d) % n_slots
+            hi_flush_v = b.add(b.mul(y_v, c_stride_v), b.const_i32(d - p.PAD))
+            hi_flush_ok = b.land(b.cmp_ge(hi_flush_v, c0), b.cmp_lt(hi_flush_v, p_Hi))
+            row_off = b.mul(
+                b.add(dx_n_off, b.mul(hi_flush_v, params["p_dX_stride_hi"])),
+                c_half_bytes,
+            )
+            for j in range(BLOCK_W):
+                flat = _slot_index(slot, j)
+                safe_d = b.select(
+                    hi_flush_ok, b.add(row_off, st_terms[j]), oob_sentinel
+                )
+                if p.dtype == "bf16":
+                    b.buffer_store_bf16(
+                        d_rsrc, safe_d, c0, b.trunc_f32_to_bf16(slots_flat[flat])
+                    )
+                else:
+                    b.buffer_store_f16(
+                        d_rsrc, safe_d, c0, b.trunc_f32_to_f16(slots_flat[flat])
+                    )
+                # Reset the slot for the next wrap.
+                slots_flat[flat] = zero_f32
 
-    for_op = b.scf_for_iter(c0, y_end_v, c_KH_v, slot_args + row_args, iv_name="dgs_ho")
-    with for_op as (y_base, loop_vals):
-        slots_flat = list(loop_vals[: len(slot_args)])
-        cur_rows = loop_vals[len(slot_args) :]
-        next_rows = load_rows(b.add(y_base, c_KH_v))
+    # The dY rows are software-pipelined PF rows ahead: step y issues the
+    # loads of row y + PF before computing row y, and the PF rows in flight at
+    # the end of an iteration are carried into the next one. Loaded and used
+    # in the same step, every load would wait out the full memory latency
+    # before the next one issues. Carrying a whole KH-row group instead holds
+    # KH x n_cols loads in registers on top of the n_slots x BLOCK_W
+    # accumulators and the KH x KW weights, which halves the occupancy (or
+    # spills); a few rows hide the latency as well.
+    PF = min(p.KH, -(-16 // n_cols))
+    row_args = []
+    for k in range(PF):
+        for d, v in zip(range(n_cols), load_row(b.const_i32(k))):
+            row_args.append((f"dgs_dy_r{k}_d{d}", v))
+    n_acc = len(slot_args)
+
+    fma_loop = b.scf_for_iter(
+        c0, n_fma_groups_v, c1, slot_args + row_args, iv_name="dgs_grp"
+    )
+    with fma_loop as (grp_iv, loop_vals):
+        slots_flat = list(loop_vals[:n_acc])
+        window = [
+            list(loop_vals[n_acc + k * n_cols : n_acc + (k + 1) * n_cols])
+            for k in range(PF)
+        ]
+        y_base = b.mul(grp_iv, c_KH_v)
 
         for jj in range(p.KH):
             y_v = b.add(y_base, b.const_i32(jj))
-            dy_row = [
-                b.cast_to_f32(dy_h)
-                for dy_h in cur_rows[jj * n_cols : (jj + 1) * n_cols]
-            ]
+            # Issue row y + PF, then compute row y (the oldest in flight).
+            window.append(load_row(b.add(y_v, b.const_i32(PF))))
+            dy_row = [b.cast_to_f32(dy_h) for dy_h in window.pop(0)]
 
             # Every tap accumulates, also into the slots of dX rows outside
             # [0, H): the flush below never stores those, and resets each slot
@@ -5728,31 +5790,33 @@ def build_direct_depthwise_dgrad_streaming(
                         )
 
             # Flush this row's window: hi in [y*stride - PAD, +stride).
-            for d in range(stride):
-                slot = (jj * stride - p.PAD + d) % n_slots
-                hi_flush_v = b.add(b.mul(y_v, c_stride_v), b.const_i32(d - p.PAD))
-                hi_flush_ok = b.land(
-                    b.cmp_ge(hi_flush_v, c0), b.cmp_lt(hi_flush_v, p_Hi)
-                )
-                for j in range(BLOCK_W):
-                    flat = _slot_index(slot, j)
-                    d_off, _ = d_desc.offset(b, n=n, h=hi_flush_v, w=wi_vals[j], ch=ch)
-                    store_ok = b.land(b.land(ch_ok, wi_oks[j]), hi_flush_ok)
-                    safe_d = b.select(
-                        store_ok, b.mul(d_off, c_half_bytes), oob_sentinel
-                    )
-                    if p.dtype == "bf16":
-                        b.buffer_store_bf16(
-                            d_rsrc, safe_d, c0, b.trunc_f32_to_bf16(slots_flat[flat])
-                        )
-                    else:
-                        b.buffer_store_f16(
-                            d_rsrc, safe_d, c0, b.trunc_f32_to_f16(slots_flat[flat])
-                        )
-                    # Reset the slot for the next wrap.
-                    slots_flat[flat] = zero_f32
+            flush(y_v, jj, slots_flat)
 
-        b.scf_yield(*slots_flat, *next_rows)
+        # Pass the accumulators through an empty asm on their way into the
+        # next iteration. Without it LLVM's SLP vectorizer pairs the loop-
+        # carried FMA chains into v_pk_fma_f32, which requires their operands
+        # in adjacent registers; the register copies needed to arrange that
+        # cost VGPRs. The asm emits no instruction.
+        slots_flat = [
+            b.inline_asm("", "=v,0", [a], result_type=F32, sideeffect=False)
+            for a in slots_flat
+        ]
+        b.scf_yield(*slots_flat, *(v for row in window for v in row))
+
+    # The windows past the last dY row: no tap, only dX rows to complete.
+    flush_loop = b.scf_for_iter(
+        n_fma_groups_v,
+        n_groups_v,
+        c1,
+        [(f"dgs_tail_acc_{i}", fma_loop.results[i]) for i in range(n_acc)],
+        iv_name="dgs_tail",
+    )
+    with flush_loop as (grp_iv, loop_vals):
+        slots_flat = list(loop_vals)
+        y_base = b.mul(grp_iv, c_KH_v)
+        for jj in range(p.KH):
+            flush(b.add(y_base, b.const_i32(jj)), jj, slots_flat)
+        b.scf_yield(*slots_flat)
 
     return b.kernel
 
@@ -6206,9 +6270,9 @@ def depthwise_stream_register_reason(spec) -> Optional[str]:
     :class:`DirectDepthwiseSpatialSpec` (one output column per lane). Not a
     validity rule -- a spilling kernel is still correct -- but both hold all
     ``KH x KW`` weights and ``KH`` accumulators per output column in
-    registers, and past the register file the backend spends minutes spilling
-    a loop body of ``KH^2 x KW`` FMAs per column into a kernel that runs
-    orders of magnitude slower. A sweep should leave such shapes to the
+    registers, and past the register file the backend spends a long time
+    spilling a loop body of ``KH^2 x KW`` FMAs per column into a kernel that
+    runs much slower. A sweep should leave such shapes to the
     output-stationary kernel (:class:`DirectDepthwiseTiledSpec`). The estimate
     counts the weights, the accumulators and the prefetched input rows.
     """
@@ -6248,8 +6312,8 @@ class DirectDepthwiseTiledSpec:
     The row-streaming :class:`DirectDepthwiseSpec` keeps all ``KH x KW``
     weights and ``KH`` accumulator slots per output column in registers and
     unrolls ``KH`` streaming rows per loop iteration, so its register use and
-    loop body grow with ``KH^2 * KW``. Past 11x11 that spills heavily and takes
-    minutes to compile. This kernel's footprint is linear in the filter width:
+    loop body grow with ``KH^2 * KW``. Past 11x11 that spills heavily and
+    compiles slowly. This kernel's footprint is linear in the filter width:
 
       - A block owns a ``block_h x block_w`` output tile of ``block_ch``
         channels (one lane per channel); the grid also splits the output rows,
@@ -6352,6 +6416,12 @@ class DirectDepthwiseTiledSpec:
             raise ValueError(
                 f"DirectDepthwiseTiledSpec: stride must be >= 1 and PAD >= 0 "
                 f"(got stride={p.stride}, PAD={p.PAD})"
+            )
+        if p.Ho < 1 or p.Wo < 1:
+            raise ValueError(
+                f"DirectDepthwiseTiledSpec: filter does not fit the padded "
+                f"input: Ho={p.Ho}, Wo={p.Wo} (H={p.H}, W={p.W}, KH={p.KH}, "
+                f"KW={p.KW}, PAD={p.PAD}, stride={p.stride})"
             )
 
 
@@ -6729,7 +6799,7 @@ class DirectDepthwiseColSpec:
         return kernel_name_join(*parts)
 
     def validate(self) -> None:
-        """Prerequisite check only (cpg=kpg=1, block_h > 0).
+        """Prerequisite check only (cpg=kpg=1, no dilation, block_h > 0).
 
         Call :func:`is_valid_depthwise_col_spec` for the full constraint set
         (dtype, geometry, VGPR budget) before dispatch.
@@ -6740,6 +6810,10 @@ class DirectDepthwiseColSpec:
                 f"DirectDepthwiseColSpec requires cpg=kpg=1 "
                 f"(got cpg={p.cpg}, kpg={p.kpg})"
             )
+        # The tap indexing has no dilation term.
+        why = dilation_reason(p)
+        if why is not None:
+            raise ValueError(why)
         if self.block_h <= 0:
             raise ValueError(
                 f"DirectDepthwiseColSpec block_h must be > 0 (got {self.block_h}): "

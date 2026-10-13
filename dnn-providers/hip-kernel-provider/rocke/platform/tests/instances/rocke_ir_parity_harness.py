@@ -178,6 +178,9 @@ def build_conv_wgrad(
     split_k=1,
     dtype_d="fp16",
     two_stage=False,
+    streamk="off",
+    streamk_reduction="linear",
+    streamk_ctas=-1,
 ):
     def _build():
         from kernels.common.conv_implicit_gemm_wgrad import (
@@ -207,6 +210,9 @@ def build_conv_wgrad(
             epilogue=epilogue,
             split_k=split_k,
             two_stage=two_stage,
+            streamk=streamk,
+            streamk_reduction=streamk_reduction,
+            streamk_ctas=streamk_ctas,
         )
         return build_implicit_gemm_conv_wgrad(spec, arch=arch)
 
@@ -1914,6 +1920,162 @@ def cases():
             epilogue="cshuffle",
         ),
     )
+    # Stream-K wgrad: the linear and tree flag fixups, the atomic reduction,
+    # the persistent launch and the group fold into GEMM-M. MFMA-only.
+    add(
+        "conv_wgrad",
+        "conv_wgrad/gfx950/n1h8c16k32r3_sk_linear",
+        "gfx950",
+        build_conv_wgrad(
+            "irhash_wgrad_950_sk_linear",
+            "gfx950",
+            wgrad1,
+            wave_size=64,
+            wtm=32,
+            wtn=32,
+            wtk=16,
+            tile_m=64,
+            tile_n=64,
+            tile_k=16,
+            streamk="dp_sk",
+        ),
+    )
+    add(
+        "conv_wgrad",
+        "conv_wgrad/gfx950/n1h8c16k32r3_sk_atomic",
+        "gfx950",
+        build_conv_wgrad(
+            "irhash_wgrad_950_sk_atomic",
+            "gfx950",
+            wgrad1,
+            wave_size=64,
+            wtm=32,
+            wtn=32,
+            wtk=16,
+            tile_m=64,
+            tile_n=64,
+            tile_k=16,
+            dtype_d="fp32",
+            streamk="dp_sk",
+            streamk_reduction="atomic",
+        ),
+    )
+    add(
+        "conv_wgrad",
+        "conv_wgrad/gfx942/n1h8c64k64r3_g4_sk_tree_pers",
+        "gfx942",
+        build_conv_wgrad(
+            "irhash_wgrad_942_g4_sk_tree_pers",
+            "gfx942",
+            wgrad_g4,
+            wave_size=64,
+            wtm=16,
+            wtn=16,
+            wtk=16,
+            tile_m=64,
+            tile_n=32,
+            tile_k=16,
+            streamk="persistent",
+            streamk_reduction="tree",
+        ),
+    )
+    # The remaining {dp_sk, persistent} x {linear, tree, atomic, workspace}
+    # combinations, so every fixup is pinned under both launch modes.
+    add(
+        "conv_wgrad",
+        "conv_wgrad/gfx950/n1h8c16k32r3_sk_tree",
+        "gfx950",
+        build_conv_wgrad(
+            "irhash_wgrad_950_sk_tree",
+            "gfx950",
+            wgrad1,
+            wave_size=64,
+            wtm=32,
+            wtn=32,
+            wtk=16,
+            tile_m=64,
+            tile_n=64,
+            tile_k=16,
+            streamk="dp_sk",
+            streamk_reduction="tree",
+        ),
+    )
+    add(
+        "conv_wgrad",
+        "conv_wgrad/gfx942/n1h8c64k64r3_g4_sk_workspace",
+        "gfx942",
+        build_conv_wgrad(
+            "irhash_wgrad_942_g4_sk_workspace",
+            "gfx942",
+            wgrad_g4,
+            wave_size=64,
+            wtm=16,
+            wtn=16,
+            wtk=16,
+            tile_m=64,
+            tile_n=32,
+            tile_k=16,
+            streamk="dp_sk",
+            streamk_reduction="workspace",
+        ),
+    )
+    add(
+        "conv_wgrad",
+        "conv_wgrad/gfx950/n1h8c64k64r3_g4_sk_linear_pers",
+        "gfx950",
+        build_conv_wgrad(
+            "irhash_wgrad_950_g4_sk_linear_pers",
+            "gfx950",
+            wgrad_g4,
+            wave_size=64,
+            wtm=32,
+            wtn=32,
+            wtk=16,
+            tile_m=64,
+            tile_n=64,
+            tile_k=16,
+            streamk="persistent",
+        ),
+    )
+    add(
+        "conv_wgrad",
+        "conv_wgrad/gfx942/n1h8c16k32r3_sk_atomic_pers",
+        "gfx942",
+        build_conv_wgrad(
+            "irhash_wgrad_942_sk_atomic_pers",
+            "gfx942",
+            wgrad1,
+            wave_size=64,
+            wtm=16,
+            wtn=16,
+            wtk=16,
+            tile_m=64,
+            tile_n=32,
+            tile_k=16,
+            dtype_d="fp32",
+            streamk="persistent",
+            streamk_reduction="atomic",
+        ),
+    )
+    add(
+        "conv_wgrad",
+        "conv_wgrad/gfx950/n1h8c16k32r3_sk_workspace_pers",
+        "gfx950",
+        build_conv_wgrad(
+            "irhash_wgrad_950_sk_workspace_pers",
+            "gfx950",
+            wgrad1,
+            wave_size=64,
+            wtm=32,
+            wtn=32,
+            wtk=16,
+            tile_m=64,
+            tile_n=64,
+            tile_k=16,
+            streamk="persistent",
+            streamk_reduction="workspace",
+        ),
+    )
     # Grouped + cshuffle epilogue (MFMA): the LDS-staged store threads the
     # per-group k_out fold (group*kpg) and derives its store-vec from cpg.
     add(
@@ -2896,6 +3058,22 @@ def cases():
                 "num_persistent": 256,
                 "use_sinks": True,
                 "sliding_window": 128,
+            },
+        ),
+        # --- optional LSE output: the ordinary epilogue, the packed (varlen)
+        # store guard, and the persistent epilogue with keyless rows + sink LSE.
+        ("lse_default_sq512", {"emit_lse": True}),
+        ("lse_varlen_sq512", {"emit_lse": True, "varlen": True}),
+        (
+            "lse_persist_empty_window_sinks_sq256",
+            {
+                "emit_lse": True,
+                "persistent": True,
+                "num_persistent": 256,
+                "seqlen_q": 256,
+                "seqlen_kv": 64,
+                "sliding_window": 64,
+                "use_sinks": True,
             },
         ),
     ):

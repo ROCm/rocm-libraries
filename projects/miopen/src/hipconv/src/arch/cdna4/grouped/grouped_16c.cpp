@@ -20,6 +20,8 @@
 // every MFMA.
 
 #include "conv_kernel_table.h"
+#include "direction_field.h"
+#include "kv_descriptor.h"
 #include "grouped_conv_kernel.h"
 #include "matrix_layout.h"
 #include "swizzle.h"
@@ -926,6 +928,20 @@ public:
         launch.grid       = dim3(blocks_w_n, blocks_c, blocks_n_fold);
         launch.block_size = dim3(cfg_.block_size(), 1, 1);
         return launch;
+    }
+
+    KVDescriptor config_descriptor() const override
+    {
+        KVDescriptor d;
+        d.int_field("group_size", cfg_.group_size);
+        d.int_field("waves_per_wg", cfg_.waves_per_wg);
+        d.int_field("stride", cfg_.stride, /*default=*/1);
+        d.int_field("dilation", cfg_.dilation, /*default=*/1);
+        direction_field(d, cfg_.direction);
+        d.int_field("kh", cfg_.kh, /*default=*/3);
+        d.int_field("kw", cfg_.kw, /*default=*/3);
+        d.int_field("n_fold", cfg_.n_fold, /*default=*/8);
+        return d;
     }
 
 protected:
