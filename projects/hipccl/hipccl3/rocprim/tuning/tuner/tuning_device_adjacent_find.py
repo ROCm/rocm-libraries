@@ -58,7 +58,7 @@ class Tuner(BaseTuner):
     def _get_restrictions(
         self, types: Dict[str, Any]
     ) -> Callable[[dict], bool]:
-        size = self.bytes_size // TYPE_CONFIGS[types["value_type"]].size
+        size = self.bytes_size // TYPE_CONFIGS[types["input_type"]].size
 
         def validate(params):
             return size >= 2
@@ -68,7 +68,7 @@ class Tuner(BaseTuner):
     def tune_all(self) -> None:
         """Tune for all value type combinations"""
         for val_type in COMMON_KEY_TYPES:
-            self.tune_type({"value_type" : val_type})
+            self.tune_type({"input_type" : val_type})
 
 
 if __name__ == "__main__":
