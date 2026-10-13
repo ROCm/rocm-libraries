@@ -3,15 +3,28 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <complex>
-#include <initializer_list>
 #include <roc/hostnumerics/scalar_type.hpp>
+#include <roc/hostnumerics/shape.hpp>
+#include <roc/hostnumerics/version.hpp>
+#include <span>
+#include <stdexcept>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <utility>
+#include <vector>
+
+namespace {
+using namespace roc::hostnumerics;
+
+TEST(Core, Version) {
+    EXPECT_EQ(version(), "0.1.0");
+    EXPECT_EQ(scalarTypeInfo(ScalarType::Float16).storageBits, 16);
+}
 
 TEST(Core, ScalarTypes) {
-    using namespace roc::hostnumerics;
     // nativeScalarType<std::string> is a compilation error. Use NativeScalar<T>
     // to query whether T has a mapping without causing an error.
     static_assert(nativeScalarType<bool> == ScalarType::Boolean);
@@ -122,3 +135,30 @@ TEST(Core, ScalarTypes) {
             << "ScalarType value: " << static_cast<int>(invalid);
     }
 }
+
+TEST(ShapeCpp, ConstructionAndOwnership) {
+    static_assert(!std::is_constructible_v<Shape, size_t>);
+    static_assert(!std::is_convertible_v<std::vector<size_t>, Shape>);
+    static_assert(!std::is_convertible_v<std::span<const size_t>, Shape>);
+    EXPECT_EQ(Shape{}, Shape({}));
+    EXPECT_EQ(Shape{7}.rank(), 1);
+    std::vector<size_t> source{2, 3, 4};
+    const Shape copied(source), spanCopy{std::span<const size_t>(source)};
+    source[0] = 9;
+    EXPECT_EQ(copied, (Shape{2, 3, 4}));
+    EXPECT_EQ(spanCopy, copied);
+    EXPECT_EQ(Shape(std::move(source)), (Shape{9, 3, 4}));
+    EXPECT_EQ(Shape(std::array<size_t, 3>{2, 3, 4}), copied);
+}
+
+TEST(ShapeCpp, CallerProvidedCoordinates) {
+    const Shape shape{2, 3, 4};
+    const std::array<size_t, 3> order{2, 1, 0};
+    std::array<size_t, 3> output{};
+    shape.coordinates(17, order, output);
+    EXPECT_EQ(output, (std::array<size_t, 3>{1, 2, 2}));
+    EXPECT_EQ(shape.linearIndex(output, order), 17);
+    EXPECT_EQ(shape.coordinates(17, order), (std::vector<size_t>{1, 2, 2}));
+    EXPECT_THROW(shape.coordinates(0, order, {}), std::invalid_argument);
+}
+}  // namespace
