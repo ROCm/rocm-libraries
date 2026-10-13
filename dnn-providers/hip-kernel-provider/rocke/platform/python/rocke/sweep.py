@@ -241,6 +241,7 @@ def build_all_instances(
     arch: Optional[str] = None,
     isa: str = "amdgcn-amd-amdhsa--gfx950",
     parallel: Optional[int] = None,
+    stall_timeout: float = 300.0,
 ) -> List[BuildRecord]:
     """Build every spec to a cached HSACO blob.
 
@@ -279,9 +280,80 @@ def build_all_instances(
         n = parallel or os.cpu_count() or 4
         ctx = mp.get_context("fork")  # avoid re-importing rocke in spawn
         with ctx.Pool(n) as pool:
-            out_dicts = pool.map(_build_one, work)
+            out_dicts = _collect_builds(pool, work, stall_timeout=stall_timeout)
 
     return [BuildRecord(**d) for d in out_dicts]
+
+
+def _dead_worker_record(item: Tuple[str, Dict[str, object], str, str, str],
+                        reason: str) -> Dict[str, object]:
+    """A build record for a spec whose worker never returned a result."""
+    _hash, spec_dict, _cache, _isa, _arch = item
+    tile = spec_dict.get("tile", {}) if isinstance(spec_dict, dict) else {}
+    return asdict(
+        BuildRecord(
+            name=str(spec_dict.get("name", "<unknown>")),
+            spec_dict=spec_dict,
+            ok=False,
+            error=reason,
+            block_m=int(tile.get("tile_m", 0) or 0),
+            block_n=int(tile.get("tile_n", 0) or 0),
+            block_k=int(tile.get("tile_k", 0) or 0),
+        )
+    )
+
+
+def _collect_builds(
+    pool,
+    work: Sequence[Tuple[str, Dict[str, object], str, str, str]],
+    *,
+    stall_timeout: float,
+) -> List[Dict[str, object]]:
+    """Run every build, surviving a worker that dies instead of returning.
+
+    ``pool.map`` cannot do this. A worker killed mid-build -- which is what a
+    backend that aborts rather than raising looks like -- never delivers its
+    result, so ``map`` waits on it forever and the whole stage hangs with no
+    output and no CPU. That is indistinguishable from a slow build until you
+    sample CPU time, and it has cost real debugging sessions.
+
+    The watchdog is on *progress*, not on any single build: a build may take as
+    long as it likes while others are still completing. Only when nothing at
+    all has finished for ``stall_timeout`` seconds are the stragglers written
+    off as dead and recorded as build failures, which is what the caller
+    already knows how to report.
+    """
+    pending = {i: pool.apply_async(_build_one, (item,)) for i, item in enumerate(work)}
+    out: List[Optional[Dict[str, object]]] = [None] * len(work)
+    last_progress = time.monotonic()
+
+    while pending:
+        finished = [i for i, r in pending.items() if r.ready()]
+        for i in finished:
+            try:
+                out[i] = pending[i].get(timeout=0)
+            except Exception as exc:  # the worker raised, or died mid-result
+                out[i] = _dead_worker_record(work[i], f"{type(exc).__name__}: {exc}")
+            del pending[i]
+        if finished:
+            last_progress = time.monotonic()
+            continue
+        if time.monotonic() - last_progress > stall_timeout:
+            stalled = sorted(pending)
+            for i in stalled:
+                out[i] = _dead_worker_record(
+                    work[i],
+                    f"build worker produced no result in {stall_timeout:.0f}s "
+                    "(worker died, e.g. a backend abort); recorded as a build "
+                    "failure so the stage can finish",
+                )
+            pending.clear()
+            pool.terminate()  # the pool is unusable once a worker is lost
+            break
+        time.sleep(0.05)
+
+    return [d if d is not None else _dead_worker_record(work[i], "no result")
+            for i, d in enumerate(out)]
 
 
 def write_sweep_manifest(
