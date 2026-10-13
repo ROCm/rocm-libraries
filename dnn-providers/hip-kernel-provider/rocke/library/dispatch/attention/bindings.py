@@ -466,3 +466,84 @@ def bind_wmma_attention_torch(
         return out
 
     return TorchBinding(launch=launch, grid=grid, block=block)
+
+
+def bind_swapqk_torch(
+    request, spec, tensors: Mapping[str, Any], **kwargs
+) -> TorchBinding:
+    """Bind a gfx1151 swapqk spec to dense ``q``/``k``/``v``/``out`` tensors.
+
+    The kernarg ABI is byte-identical to the gfx1250 WMMA one: four pointers, a
+    log2 scale, the two sequence lengths, then eight element strides. The stride
+    arguments stay row-major even under ``v_transposed`` -- the kernel derives
+    the transposed V addressing from ``seqlen_k`` itself.
+
+    ``v_transposed`` is on by default and makes V a ``[B, Hk, D, Sk]`` tensor.
+    A row-major V would be read as that layout and return plausible-looking
+    garbage, so the shape check below is load-bearing: it is what turns a silent
+    wrong answer into a diagnostic. Relay with ``swapqk_transpose_v``.
+    """
+    import struct
+
+    from kernels.gfx1151.wmma_fmha_swapqk import build_wmma_fmha_swapqk, swapqk_grid
+    from rocke.helpers import compile_kernel
+    from rocke.runtime.hip_module import Runtime
+
+    if spec.v_paged:
+        raise ValueError(
+            "bind_swapqk_torch has no paged-V path: a paged spec also needs a "
+            "block table, block-table stride and entry count appended to the "
+            "kernargs, which this dense q/k/v/out binding cannot supply"
+        )
+
+    batch = int(request.batch)
+    seqlen_q, seqlen_k = int(request.seqlen_q), int(request.seqlen_k)
+    hq, hk, d = int(spec.num_query_heads), int(spec.kv_heads), int(spec.head_size)
+
+    grid = swapqk_grid(spec, seqlen_q=seqlen_q, batch=batch)
+    block = (int(spec.block_size), 1, 1)
+    scale_log2 = float(kwargs.get("scale_log2", 1.0 / math.sqrt(d) * math.log2(math.e)))
+
+    expected_v = (
+        (batch, hk, d, seqlen_k) if spec.v_transposed else (batch, seqlen_k, hk, d)
+    )
+
+    def launch(**_kw):
+        q, k, v, out = tensors["q"], tensors["k"], tensors["v"], tensors["out"]
+        actual_v = _shape(v, "v")
+        if actual_v != expected_v:
+            layout = "[B, Hk, D, Sk]" if spec.v_transposed else "[B, Sk, Hk, D]"
+            raise ValueError(
+                f"v has shape {actual_v}, expected {expected_v} {layout}; "
+                "relay a row-major V through swapqk_transpose_v, or build the "
+                "spec with v_transposed=False"
+            )
+        kernel = build_wmma_fmha_swapqk(spec, arch=str(request.arch))
+        art = compile_kernel(kernel, arch=str(request.arch))
+        rt = Runtime()
+        module = rt.load_module(art.hsaco)
+        fn = module.get_function(art.kernel_name)
+        packed = struct.pack(
+            "<QQQQfiiiiiiiiii",
+            int(q.data_ptr()),
+            int(k.data_ptr()),
+            int(v.data_ptr()),
+            int(out.data_ptr()),
+            float(_kw.get("scale_log2", scale_log2)),
+            seqlen_q,
+            seqlen_k,
+            hq * d,
+            d,
+            hk * d,
+            d,
+            hk * d,
+            d,
+            hq * d,
+            d,
+        )
+        rt.launch(fn, grid, block, packed)
+        rt.sync()
+        module.unload()
+        return out
+
+    return TorchBinding(launch=launch, grid=grid, block=block)

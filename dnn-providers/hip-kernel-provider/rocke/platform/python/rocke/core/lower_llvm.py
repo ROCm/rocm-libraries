@@ -731,6 +731,17 @@ _INTRINSIC_DECLS: Dict[str, str] = {
         "declare i16 @llvm.amdgcn.raw.ptr.buffer.load.i16("
         "ptr addrspace(8) nocapture readonly, i32, i32, i32 immarg)"
     ),
+    # D16 2-byte buffer load returning `half` DIRECTLY (not i16+bitcast). This is
+    # the enabler for `buffer_load_short_d16` / `buffer_load_short_d16_hi`
+    # selection: when two of these feed an `insertelement <2 x half>`, the AMDGPU
+    # backend packs them into one register's lo/hi half (the buffer analogue of
+    # global_load_d16_b16/_hi_b16) -- recovering the free f16 packing the i16 path
+    # loses (which otherwise needs an explicit v_mov_b16 per element + serializes
+    # the load clause). Same OOB-per-element clamp as the i16 form.
+    "raw.ptr.buffer.load.f16": (
+        "declare half @llvm.amdgcn.raw.ptr.buffer.load.f16("
+        "ptr addrspace(8) nocapture readonly, i32, i32, i32 immarg)"
+    ),
     "raw.ptr.buffer.store.i32": (
         "declare void @llvm.amdgcn.raw.ptr.buffer.store.i32("
         "i32, ptr addrspace(8) nocapture writeonly, i32, i32, i32 immarg)"
@@ -3043,7 +3054,8 @@ class _Lowerer:
             f"{self._operand(ptr)}, i32 {self._operand(idx)}"
         )
         self._current().emit(
-            f"  store {elem_ty} {self._operand(val)}, ptr addrspace(1) {gep}, align {align}"
+            f"  store {elem_ty} {self._operand(val)}, ptr addrspace(1) {gep}, "
+            f"align {align}{self._nontemporal_md(op)}"
         )
 
     def _op_memref_global_atomic_add(self, op: Op) -> None:
@@ -5345,6 +5357,57 @@ class _Lowerer:
         )
         self._current().emit(f"  {op.result.name} = bitcast i16 {tmp} to half")
 
+    def _op_tile_buffer_load_f16_d16(self, op: Op) -> None:
+        """D16 half buffer load via ``raw.ptr.buffer.load.f16`` (returns `half`
+        directly). Lets the backend pack two strided halves into one register's
+        lo/hi lane (buffer_load_short_d16 / _d16_hi) when the results feed an
+        insertelement <2 x half>, instead of the i16-path's explicit v_mov_b16."""
+        rsrc, voffset, soffset = op.operands
+        self._need("raw.ptr.buffer.load.f16")
+        self._current().emit(
+            f"  {op.result.name} = call half @llvm.amdgcn.raw.ptr.buffer.load.f16("
+            f"ptr addrspace(8) {self._operand(rsrc)}, "
+            f"i32 {self._operand(voffset)}, "
+            f"i32 {self._operand(soffset)}, "
+            f"i32 0)"
+        )
+
+    def _op_tile_buffer_load_d16_pack(self, op: Op) -> None:
+        """Pack two strided f16 buffer loads into one dword via inline-asm
+        ``buffer_load_d16_b16`` + ``buffer_load_d16_hi_b16`` (result `i32`).
+
+        This is the buffer-path analogue of the flat ``global_load_d16_hi_b16``
+        the backend selects automatically. The typed ``raw.ptr.buffer.load.f16``
+        intrinsic will NOT select the D16-hi buffer form (verified: it always
+        lowers to ``buffer_load_u16`` + an explicit ``v_mov_b16`` pack), so the
+        only way to write both strided halves DIRECTLY into one VGPR's lo/hi
+        lanes -- eliminating the per-dword ``v_mov_b16`` -- is to pin the two
+        machine instructions with inline asm and tie the hi load's destination
+        to the lo load's result (``0`` constraint).
+
+        HAZARD: inline-asm loads are OUTSIDE the backend's ``vmcnt`` model, so
+        NO ``s_waitcnt`` is auto-inserted before the consumer. The caller MUST
+        emit an explicit ``s_waitcnt(vmcnt=0)`` fence after the gather and
+        before the WMMA that reads the fragment (see ``fmha_swapqk`` d16hi path).
+        """
+        rsrc, voffset, soffset_lo, soffset_hi = op.operands
+        voff = self._operand(voffset)
+        rs = self._operand(rsrc)
+        lo = self._fresh("d16lo")
+        # lo half: buffer_load_d16_b16 dst, voff, rsrc, soff_lo
+        self._current().emit(
+            f"  {lo} = call i32 asm sideeffect "
+            f'"buffer_load_d16_b16 $0, $1, $2, $3 offen", "=v,v,s,s"('
+            f"i32 {voff}, ptr addrspace(8) {rs}, i32 {self._operand(soffset_lo)})"
+        )
+        # hi half: buffer_load_d16_hi_b16 dst, voff, rsrc, soff_hi  (dst tied to lo)
+        self._current().emit(
+            f"  {op.result.name} = call i32 asm sideeffect "
+            f'"buffer_load_d16_hi_b16 $0, $2, $3, $4 offen", "=v,0,v,s,s"('
+            f"i32 {lo}, i32 {voff}, ptr addrspace(8) {rs}, "
+            f"i32 {self._operand(soffset_hi)})"
+        )
+
     def _op_tile_buffer_load_vN(self, op: Op) -> None:
         """Dtype-generic vectorised buffer load.
 
@@ -5768,6 +5831,20 @@ class _Lowerer:
         self._current().emit(
             f"  {op.result.name} = fptrunc {in_ty} {self._operand(v)} to {out_ty}"
         )
+
+    def _op_vector_ext_to_f32(self, op: Op) -> None:
+        (v,) = op.operands
+        self._current().emit(
+            f"  {op.result.name} = fpext {_llvm_type(v.type)} {self._operand(v)} "
+            f"to {_llvm_type(op.result.type)}"
+        )
+
+    def _op_vector_undef(self, op: Op) -> None:
+        # freeze(poison): a defined-but-arbitrary vector with nothing to
+        # materialize -> the backend drops the dead zero-init when every lane is
+        # subsequently overwritten (e.g. a full gather).
+        t = _llvm_type(op.result.type)
+        self._current().emit(f"  {op.result.name} = freeze {t} poison")
 
     def _op_memref_global_store_vN(self, op: Op) -> None:
         ptr, idx, val = op.operands

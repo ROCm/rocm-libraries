@@ -36,6 +36,7 @@ EXPECTED_FEATURES = {
     "attention_gfx950_dense_persist": set(_GFX950_DENSE_FEATURES),
     "attention_gfx950_dense_persist_widedma": set(_GFX950_DENSE_FEATURES),
     "attention_d256_decode": {"causal", "causal_bottom_right"},
+    "attention_gfx1151_swapqk": {"causal"},
     "attention_gfx1250_wmma": {"causal"},
     "attention_gfx942_dense_pipe": {
         "causal",

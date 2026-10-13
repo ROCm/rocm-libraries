@@ -42,6 +42,7 @@ from . import (
     gfx942_unified,
     gfx950_dense,
     gfx950_unified,
+    gfx1151,
     gfx1250,
     strided_decode,
 )
@@ -86,6 +87,7 @@ for _module in (
     gfx942_unified,
     gfx950_dense,
     gfx950_unified,
+    gfx1151,
     gfx1250,
 ):
     _module.register(ATTENTION_ROUTE_REGISTRY, ATTENTION_EXECUTION_REGISTRY)
