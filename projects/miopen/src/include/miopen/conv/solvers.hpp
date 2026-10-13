@@ -4639,36 +4639,26 @@ struct MIOPEN_INTERNALS_EXPORT ConvDepthwiseFwd3D final : ConvSolver
                              const miopen::conv::ProblemDescription&) const override;
 };
 
-// Tuning state for the vendored hipconv solver.
-//
-// hipconv exposes its per-shape kernels as an ordered, deterministic list
-// (hipconv::get_valid_configs), already filtered to the layer and ranked, so the list
-// index is the entire key and a stored index survives only as long as the list order
-// does. Keying on hipconv::describe_config() would remove that dependence, and waits on
-// descriptor coverage across every family.
-struct PerformanceConfigConvHipConv : PerfConfigBase<PerformanceConfigConvHipConv>
+// ConvHipConv tuning state: a hipconv config record, resolved to a config index at runtime.
+// Serialized whole because PerfConfigBase's field-wise format splits on the record's commas.
+struct PerformanceConfigConvHipConv : PerfConfig
 {
-    // Arch-neutral kernel identity ("family[field=value,...]", e.g.
-    // "direct[tile_size_k=256,...]"). This is the serialized form, so a perf
-    // config is portable across architectures: the perf-config picker ranks over
-    // it and the perf-db stores it. Resolved to `index` at runtime against the
-    // live get_valid_configs enumeration, which is arch- and build-specific.
-    // mutable because IsValid() keeps it in sync with `index` on a const config
-    // (search path) as well as resolving from it (picker path).
+    // Perf-db record, "<hipconv config_version>:family[field=value,...]" with every field.
+    // mutable because IsValid() sets it from `index` on a const config after a search.
     mutable std::string descriptor;
 
-    // Arch-local index into get_valid_configs, resolved from `descriptor` (or set
-    // directly by search / heuristic init). NOT serialized. mutable because
-    // IsValid() resolves it on a const config in the perf-config-picker walk.
+    // Index into this build's get_valid_configs list; not serialized.
+    // mutable because IsValid() resolves it from `descriptor` on a const config.
     mutable int index = -1;
 
     PerformanceConfigConvHipConv() = default;
     PerformanceConfigConvHipConv(bool) {}
 
-    template <class Self, class F>
-    static void Visit(Self&& self, F f)
+    void Serialize(std::ostream& stream) const override { stream << descriptor; }
+    bool Deserialize(const std::string& s) override
     {
-        f(self.descriptor, "descriptor");
+        descriptor = s;
+        return true;
     }
 
     void HeuristicInit(const ExecutionContext&, const miopen::conv::ProblemDescription&);
@@ -4678,16 +4668,12 @@ struct PerformanceConfigConvHipConv : PerfConfigBase<PerformanceConfigConvHipCon
     bool operator==(const PerformanceConfigConvHipConv& other) const;
 
 private:
-    // Populate index from a resolved arch handle (as const void* to keep hipconv
-    // types out of this header).
+    // The arch is a const void* to keep hipconv types out of this header.
     void InitFromArch(const void* arch, const miopen::conv::ProblemDescription&);
 
-    // Length of the config list for this enumeration, filled by IsValid() and read by
-    // SetNextValue(), which has no ExecutionContext of its own to resolve the arch.
+    // Config list length, set by IsValid() for SetNextValue(), which has no arch to query.
     //
-    // ComputedIterator (generic_search.hpp) calls IsValid on this same object before
-    // every SetNextValue, so the length is always in place by the time it is read.
-    //
+    // ComputedIterator (generic_search.hpp) calls IsValid() before every SetNextValue().
     // maybe_unused because the !MIOPEN_USE_HIPCONV stubs read nothing.
     [[maybe_unused]] mutable int config_count = -1;
 };

@@ -14,6 +14,7 @@
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/VariantPackUtils.hpp>
+#include <hipdnn_test_sdk/utilities/detail/FlatbufferTensorAttributesUtils.hpp>
 
 namespace hipdnn_integration_tests::bundle::detail
 {
@@ -171,6 +172,7 @@ OutputTensors allocateSentinelOutputs(
                              const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorAttributes,
     const std::vector<int64_t>& outputTensorUids,
+    const TensorMap& loadedTensors,
     bool onDevice)
 {
     OutputTensors outputs;
@@ -179,7 +181,23 @@ OutputTensors allocateSentinelOutputs(
     for(const int64_t uid : outputTensorUids)
     {
         const auto& attributes = *tensorAttributes.at(uid);
-        outputs[uid] = hipdnn_test_sdk::detail::createTensorFromAttribute(attributes);
+        const auto raggedOffsetUid = attributes.ragged_offset_tensor_uid();
+        if(raggedOffsetUid.has_value())
+        {
+            const auto offsetIt = loadedTensors.find(raggedOffsetUid.value());
+            if(offsetIt == loadedTensors.end())
+            {
+                throw std::invalid_argument(
+                    "ragged output " + std::to_string(uid) + " references offset tensor "
+                    + std::to_string(raggedOffsetUid.value()) + ", which is not loaded");
+            }
+            outputs[uid] = hipdnn_test_sdk::detail::createRaggedTensorFromAttributeAndOffset(
+                attributes, offsetIt->second);
+        }
+        else
+        {
+            outputs[uid] = hipdnn_test_sdk::detail::createTensorFromAttribute(attributes);
+        }
 
         if(onDevice && fillSentinelOnDevice(*outputs[uid]))
         {
