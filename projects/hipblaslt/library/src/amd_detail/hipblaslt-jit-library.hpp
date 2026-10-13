@@ -24,11 +24,13 @@ namespace TensileLite::hip
 namespace hipblaslt_jit
 {
     // Pre-built TensileLite indices are dense from 0 and other encoded solution indices
-    // are negative, so JIT solution library indices use the rest of the int32 range.
+    // are negative. JIT solution library indices are [jitIndexBase, jitIndexEnd), and
+    // [jitIndexEnd, 2^31) is left to runtime user kernel registration.
     constexpr int32_t jitIndexBase = 0x40000000;
+    constexpr int32_t jitIndexEnd  = 0x60000000;
     constexpr bool    isJitIndex(int32_t index) noexcept
     {
-        return index >= jitIndexBase;
+        return index >= jitIndexBase && index < jitIndexEnd;
     }
 
     // Libraries live under "v<jitLibrarySchema>"; other versions are never read.

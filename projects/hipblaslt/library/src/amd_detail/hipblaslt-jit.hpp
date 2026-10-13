@@ -18,12 +18,12 @@ namespace hipblaslt_ext::experimental::jit
     // Look up the JIT solution library on the current HIP device (which must
     // equal device) and publish with jit when the request is not already
     // there. A hit does not generate. Sets result for the first published
-    // index: result.algo carries that JIT solution library index, from 2^30,
-    // and result.workspaceSize the published solution's workspace. Any process
-    // that can read the library can run the algorithm with hipblasLtMatmul or
-    // hipblaslt_ext::Gemm, under the existing handle, workspace and stream
-    // requirements. A capturing stream may return a hit and does not start a
-    // build. Unsupported requests return NOT_SUPPORTED.
+    // index: result.algo carries that JIT solution library index, in
+    // [jitIndexBase, jitIndexEnd), and result.workspaceSize the published
+    // solution's workspace. Any process that can read the library can run the
+    // algorithm with hipblasLtMatmul or hipblaslt_ext::Gemm, under the existing
+    // handle, workspace and stream requirements. A capturing stream may return a
+    // hit and does not start a build. Unsupported requests return NOT_SUPPORTED.
     HIPBLASLT_EXPORT hipblasStatus_t
         getJitAlgo(int                                               device,
                    const std::shared_ptr<const detail::GemmRequest>& request,

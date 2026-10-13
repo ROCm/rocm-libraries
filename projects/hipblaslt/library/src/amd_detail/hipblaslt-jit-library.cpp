@@ -1025,8 +1025,9 @@ namespace hipblaslt_jit
                     return status;
                 if(auto status = msgpack_io::readAllocator(bytes, next); !status.ok())
                     return status;
-                if(next < jitIndexBase)
-                    return failed(Stage::Publish, allocator.u8string() + " is below the JIT range");
+                if(next < jitIndexBase || next > jitIndexEnd)
+                    return failed(Stage::Publish,
+                                  allocator.u8string() + " is outside the JIT range");
             }
             std::map<int, std::string> mapping;
             if(auto status = readMapping(Stage::Publish, slice->mappingPath(target), mapping);
@@ -1076,7 +1077,7 @@ namespace hipblaslt_jit
                     namedIndex.push_back((*same)->index);
                     continue;
                 }
-                if(next > INT32_MAX)
+                if(next >= jitIndexEnd)
                     return failed(Stage::Publish, "The reserved JIT index range is exhausted");
                 auto copy   = copySolution(solution);
                 copy->index = static_cast<int32_t>(next++);

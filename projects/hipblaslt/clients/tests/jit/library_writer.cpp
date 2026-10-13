@@ -2,10 +2,13 @@
 // SPDX-License-Identifier: MIT
 #include "library_fixture.hpp"
 #include "solution_entry.hpp"
+#include "hipblaslt-jit-fs.hpp"
+#include "hipblaslt-jit-msgpack.hpp"
 #include <Tensile/hip/HipHardware.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <hip/hip_runtime_api.h>
 
+#include <cstdint>
 #include <filesystem>
 #include <set>
 #include <string>
@@ -13,7 +16,8 @@
 
 // Builds the committed assembly for this device and publishes, at each K the
 // tests use, every solution that supports it into the JIT solution library.
-// CTest runs this before the loader. Also checks the support check on its own.
+// CTest runs this before the loader. Also checks the support check on its own
+// and that publication allocates no index at or above jitIndexEnd.
 namespace
 {
     namespace fs = std::filesystem;
@@ -154,5 +158,116 @@ TEST_CASE("the support check applies each solution's predicates and workspace", 
     {
         INFO(("A workspace limit equal to the requirement dropped the split-K copy"));
         REQUIRE((hj::supportingSolutions({split}, k256, *hardware, required).size() == 1));
+    }
+}
+
+TEST_CASE("publication allocates no index at or above jitIndexEnd", "[jit-gpu]")
+{
+    {
+        INFO(("The JIT range is not [jitIndexBase, jitIndexEnd)"));
+        REQUIRE((hj::isJitIndex(hj::jitIndexBase) && hj::isJitIndex(hj::jitIndexEnd - 1)
+                 && !hj::isJitIndex(hj::jitIndexBase - 1) && !hj::isJitIndex(hj::jitIndexEnd)
+                 && !hj::isJitIndex(INT32_MAX)));
+    }
+    int             device = 0;
+    hipDeviceProp_t properties{};
+    {
+        INFO(("Cannot query the current HIP device"));
+        REQUIRE((hipGetDevice(&device) == hipSuccess
+            && hipGetDeviceProperties(&properties, device) == hipSuccess));
+    }
+    const auto target  = hipblaslt_jit_test::deviceTarget(properties);
+    const auto scratch = fs::u8path(HIPBLASLT_JIT_SCRATCH) / "index-end";
+    fs::remove_all(scratch);
+    fs::create_directories(scratch);
+    const auto plain
+        = hipblaslt_jit_test::prepareSolutions(fs::u8path(HIPBLASLT_JIT_DATA), target, scratch)
+              .front();
+    hj::Artifact executable;
+    auto         built
+        = hj::makeComgrBuilder()->build(plain.source, hj::BuildKind::Executable, executable);
+    hj::keepBuildLog(built, scratch);
+    {
+        INFO(("The build for " + target.targetId() + " failed: " + built.message));
+        REQUIRE((built.ok()));
+    }
+
+    // Each K is its own entry, so publishing at a new K allocates an index.
+    hj::JitLibrary library(scratch / "library");
+    const auto     key     = hipblaslt_jit_test::pregeneratedKey(properties);
+    const auto     publish = [&](size_t k, std::vector<int32_t>& indices) {
+        return library.publish(key,
+                               device,
+                               hipblaslt_jit_test::fp16Gemm(false, k),
+                               executable,
+                               plain.source.solutions,
+                               indices);
+    };
+    const auto allocator = library.buildDirectory() / "allocator.dat";
+    const auto setNext   = [&](int64_t next) {
+        std::vector<uint8_t> bytes;
+        INFO(("Cannot write " + allocator.u8string()));
+        REQUIRE((hj::msgpack_io::writeAllocator(next, bytes).ok()
+                 && hj::files::writeAtomically(library.directory(key) / "staging", allocator, bytes)
+                        .ok()));
+    };
+    const auto storedNext = [&] {
+        std::vector<uint8_t> bytes;
+        int64_t              next = 0;
+        INFO(("Cannot read " + allocator.u8string()));
+        REQUIRE((hj::files::readFile(allocator, 1 << 20, bytes).ok()
+                 && hj::msgpack_io::readAllocator(bytes, next).ok()));
+        return next;
+    };
+
+    std::vector<int32_t> first, last, past, again;
+    {
+        const auto status = publish(512, first);
+        INFO(("publish: " + status.message));
+        REQUIRE((status.ok() && first == std::vector<int32_t>{hj::jitIndexBase}));
+    }
+    setNext(hj::jitIndexEnd - 1);
+    {
+        const auto status = publish(1024, last);
+        INFO(("The last JIT index was not allocated: " + status.message));
+        REQUIRE((status.ok() && last == std::vector<int32_t>{hj::jitIndexEnd - 1}));
+    }
+    {
+        const auto status = publish(1536, past);
+        INFO(("An exhausted range allocated an index: " + status.message));
+        REQUIRE((!status.ok() && status.message.find("exhausted") != std::string::npos
+                 && past.empty()));
+    }
+    {
+        const auto next = storedNext();
+        INFO(("The allocator holds " + std::to_string(next) + ", not jitIndexEnd"));
+        REQUIRE((next == hj::jitIndexEnd));
+    }
+    {
+        const auto status = publish(1024, again);
+        INFO(("A published solution lost its index once the range was exhausted: "
+              + status.message));
+        REQUIRE((status.ok() && again == last));
+    }
+
+    hj::Status why;
+    const auto lastView = library.resolve(device, hj::jitIndexEnd - 1, why);
+    {
+        INFO(("The last JIT index does not resolve: " + why.message));
+        REQUIRE((lastView.master != nullptr));
+    }
+    const auto endView = library.resolve(device, hj::jitIndexEnd, why);
+    {
+        INFO(("jitIndexEnd resolved as a JIT index"));
+        REQUIRE((endView.master == nullptr
+                 && why.message.find("outside the reserved JIT range") != std::string::npos));
+    }
+
+    setNext(hj::jitIndexEnd + 1);
+    {
+        const auto status = publish(1024, again);
+        INFO(("An allocator above jitIndexEnd was used"));
+        REQUIRE((!status.ok()
+                 && status.message.find("outside the JIT range") != std::string::npos));
     }
 }

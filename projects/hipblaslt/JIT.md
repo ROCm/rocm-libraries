@@ -68,8 +68,8 @@ is the only place a JIT solution lives: nothing is loaded in process, and a
 bundle whose build, support check or publish fails is reported and contributes
 no solution. `getJitAlgo`, in `hipblaslt-jit.hpp`, sets a
 `hipblasLtMatmulHeuristicResult_t` whose `algo` carries the JIT solution
-library index, from 2^30, and whose `workspaceSize` is the published
-solution's workspace.
+library index, in [2^30, 0x60000000), and whose `workspaceSize` is the
+published solution's workspace.
 
 A `Target` holds the TensileLite `AMDGPU::Processor`, an `Any`, `On` or `Off`
 setting for each of `sramecc` and `xnack`, and the device's ASIC revision.
@@ -150,7 +150,10 @@ file in the message.
 ### JIT solution library
 
 `JitLibrary` in `hipblaslt-jit-library.{hpp,cpp}` is a TensileLite
-lazy-loading library on disk. Indices start at `2^30` (`jitIndexBase`). Each
+lazy-loading library on disk. Its solution indices run from `jitIndexBase`
+(2^30) up to, but not including, `jitIndexEnd` (0x60000000): 2^29 indices.
+Publication fails once they are used up. Indices from 0x60000000 to `INT32_MAX`
+are left to runtime user kernel registration and are never JIT indices. Each
 slice directory holds a master library, an index mapping, and one entry file
 and one code object per published executable. TensileLite's writer
 (`MessagePackWriteLibraryData` and `MessagePackWriteLibraryMapping`) writes
