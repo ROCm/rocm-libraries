@@ -377,14 +377,12 @@ class SchedulerConfig:
         self.plr = 0 if self.pgr == 0 else 1
         self.offsetPartition = 1 if self.pgr >= 2 else 0
         if self.spanNgllMerge:
-            # A partition whose target wraps past the last one is loading for
-            # the macro tile after next, so its GRs come out at mtIteration 2.
-            # Offsetting by the whole partition count makes every partition
-            # wrap, which is what puts *every* load two macro tiles ahead
-            # rather than just B's last slice. The four-deep tail needs that:
-            # it reaches its second DepthU in partition 0, far too early to
-            # issue the loads that fill it, so they have to have been issued a
-            # whole macro tile earlier and be resident by the time it starts.
+            # Block scheduling merges NGLL into NLL, so the tail is four
+            # k-iterations deep instead of one. It reaches its second DepthU
+            # back in partition 0 -- far too early to issue the loads that fill
+            # it. Offsetting by the whole partition count makes every partition
+            # wrap, so every load is issued a full macro tile earlier and is
+            # resident by the time the tail starts.
             self.offsetPartition = self.numPartitions
         if self.pgr == 0:
             assert self.numPartitions == 1, "pgr=0 requires numPartitions=1"

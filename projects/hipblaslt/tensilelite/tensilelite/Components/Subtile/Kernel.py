@@ -1382,56 +1382,40 @@ def mainLoop(writer, kernel):
   M = tiA.localMMATileGrid[0]
   N = tiB.localMMATileGrid[0]
   candidates = [(M, N)] if pgr == 0 else MFMASchedulerConfig.get_partition_candidates(tiA, tiB)
-  # Partitioning is normally a VGPR-pressure escape valve: the full-size candidate is
-  # first and wins whenever it fits, so every kernel schedules as one partition. A
-  # partition owns a disjoint set of D tiles and runs its whole K reduction before the
-  # next one starts, which is the staggered-completion structure the staged store needs,
-  # so allow asking for a floor on the partition count while that is being measured.
-  # Scoped to staging-eligible tiles: a kernel that cannot stage gains nothing
-  # from a finer split and pays the extra LDS re-reads, and MT>256x256 is also
-  # pushed off its full-size candidate onto an uneven N split, which breaks the
-  # lending weave. Only candidates staging can actually cut on are kept -- an
-  # N-only split (sizeM == M) into equal groups (N % sizeN == 0).
-  # Block-scheduling tiles want the split for its own sake, so they ask for four
-  # blocks rather than accepting the one-partition candidate that always fits.
-  minParts = 4 if plsinBlockSchedTile(kernel) else 1
+  # Block scheduling cuts the tile into blocks that each run a whole K reduction
+  # and then store while the next block's MFMAs are still issuing. Partitioning
+  # is otherwise a VGPR-pressure escape valve whose full-size candidate always
+  # fits and always wins, so these tiles ask for a floor instead.
+  #
+  # Only the tail is partitioned: the mainloop keeps the one-partition candidate
+  # and comes out identical to baseline, while the tail gets its own VGPR tile
+  # layout and reuses the registers the mainloop held for B. MT>256x256 is out
+  # because it stores by lending, which stages nothing.
+  #
+  # The resulting grid on MT256x256, where M and N are 8 MFMA tiles each:
+  #
+  #       N ->  0,1    2,3    4,5    6,7       sizeN = 2: the MX scale read
+  #   M 0..3  |  s0  |  s1  |  s2  |  s3  |    granularity forbids narrower
+  #   | 4..7  |  s4  |  s5  |  s6  |  s7  |    sizeM = 4: 2 does not assemble
+  #   v                                        (tile assignment diverges)
+  #
+  # The M split is what makes the grid finer than N alone can. It is not free:
+  # A and scale-A become partition-varying, so their LDS reads are re-issued per
+  # partition.
+  blockSched = plsinBlockSchedTile(kernel)
+  minParts = 4 if blockSched else 1
   wider = []
-  if minParts > 1 and pgr != 0 and plsinBlockSchedTile(kernel):
+  if minParts > 1 and pgr != 0:
     def _stageable(sizeM, sizeN):
       return sizeM == M and N % sizeN == 0 and ceilDivide(N, sizeN) >= minParts
     wider = [c for c in candidates if _stageable(*c)]
-  # The tail-own-tiles split moves the partitioning off the mainloop and onto the
-  # four-deep tail, which is the only body that stores. The mainloop then takes
-  # the one-partition candidate and comes out identical to baseline. Confined to
-  # kernels the staged store could actually cut: elsewhere there is no tail to
-  # carry the split, and forcing one costs registers for nothing.
-  # A stageable candidate is not enough on its own. Tiles above 256 take the
-  # Lend path, and _plsinStagedStoreCount returns 0 for any lending store, so
-  # those kernels would give up the mainloop split without staging anything.
   lendStore = kernel["MacroTile0"] > 256 or kernel["MacroTile1"] > 256
-  # Giving the tail its own VGPR tile layout lets it reuse the registers the
-  # mainloop held for B, so the larger body is 48 tiles rather than the 64 a
-  # merged layout asks for. Spanning in the parent instead partitions the
-  # mainloop and measured a 1.7% geomean loss on the swapAB-swizzleA shapes.
   tailOwnTiles = bool(wider) and not lendStore
   tailPartitionSizeN = wider[0][1] if tailOwnTiles else 0
-  # The N split floors at 4 partitions: the MX scale read granularity forbids a
-  # partition narrower than 2 MFMA tiles, and N is 8. Splitting M as well is the
-  # only way to stage the store any finer, and it is what pulls the first store
-  # forward from 72 of the arm's 256 MFMAs to 40. It is not free -- an M split
-  # makes A and scale-A partition-varying, so their LDS reads are re-issued per
-  # partition.
-  #
-  # On at 4 M tiles per partition -- a 2x4 grid on MT256x256 -- for the tiles
-  # block scheduling is scoped to, and off everywhere else, so a geometry it has
-  # not been measured on keeps its shipped schedule. 2 (a 4x4 grid) does not
-  # assemble: vgpr tile assignment stops converging.
-  tailPartitionSizeM = (4 if plsinBlockSchedTile(kernel) else 0) \
-      if tailOwnTiles else 0
-  # Only split M when it divides evenly. An uneven split -- M=6 against a size of
-  # 4 gives [4,2] -- is worse than not splitting at all: _plsinStagedStoreCount
-  # requires uniform partition sizes, so the kernel would lose the N-only staging
-  # it has today and get nothing back. Silently dropping to no M split keeps it.
+  tailPartitionSizeM = (4 if blockSched else 0) if tailOwnTiles else 0
+  # An uneven M split is worse than none: _plsinStagedStoreCount requires
+  # uniform partition sizes, so the kernel would lose the N-only staging it has
+  # today and get nothing back.
   if tailPartitionSizeM and M % tailPartitionSizeM != 0:
       tailPartitionSizeM = 0
   if wider and not tailOwnTiles:
@@ -1457,7 +1441,7 @@ def mainLoop(writer, kernel):
           pgr=schedulerPgr,
           grPlacement=grPlacement,
           pgl=kernel.get("PrefetchGL2", 0),
-          blockSched=plsinBlockSchedTile(kernel),
+          blockSched=blockSched,
           isMxf4Subtile=isMxf4SubtilePath(kernel),
           tailOwnTiles=tailOwnTiles,
           tailPartitionSizeN=tailPartitionSizeN,

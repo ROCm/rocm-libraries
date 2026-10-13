@@ -15211,42 +15211,30 @@ class KernelWriterAssembly(KernelWriter):
     # later-emitted PLAIN NLL / post-loop that reference these symbols stay valid.
     # We remove them again after the store to restore the pool state exactly.
     lentSgprs = []
-    # Also lend the global-read SRDs (SrdA/SrdB/SrdMXSA/SrdMXSB): they are 4-aligned
-    # 4-reg blocks, dead during the NLL drain (all global loads are complete), and
-    # endSummation reclaims them the same way (addSgprVarToPool) right after. Lending
-    # them here gives the transient store SRDs (SrdD + the bias/SAV/scale epilogue
-    # SRDs) genuinely-free 4-aligned blocks to reuse, so the fused store does not
-    # extend the SGPR pool past budget when the bias/SAV epilogue is enabled.
-    # SrdC (4-aligned, 4 regs) is dead here: the fused front guard guarantees
-    # beta==0, so C is never read by the fused store. Lending it hands the epilogue
-    # a genuinely-free 4-aligned block (the scarcest resource for the bias/SAV/D
-    # SRDs). StreamKLocalStart/StreamKLocalEnd must NOT be lent: although the fused
-    # front guard consumes them *before* this body, the POST-LOOP dedup guard
-    # (emitFusedStoreGuard at the DoPostLoopStore site) re-reads them to re-decide
-    # owner-vs-partial. Reusing them as store temps clobbers their runtime content,
-    # so under the UserArgs (ArgType==3) path an owner that just fused mis-evaluates
-    # the dedup guard, falls into the post-loop writePartials path with a garbage
-    # partials index, and does an OOB workspace store (illegal memory access at
-    # multi-tile sizes in hipblaslt-bench). The persistent loop counters
-    # (StreamKIter/StreamKIterEnd) are likewise NOT lent (live across tiles).
-    # SrdWS (workspace SRD, 4-aligned) must NOT be lent, even though it looks dead
-    # for a full-tile owner that writes D directly. In a persistent StreamK WG the
-    # SAME wave is a full owner for some tiles but a split contributor / fixup
-    # reducer for others, so SrdWS stays live across the persistent loop; reusing
-    # it as a transient store SGPR corrupts the workspace descriptor the wave later
-    # needs, giving an intermittent VM_L2_PROTECTION_FAULT (OOB workspace store) on
-    # StreamK-split shapes (e.g. 200x57344x8192, 256x256x16384). It is dropped from
-    # the lent set below at zero SGPR cost: the epilogue kernarg block first-fits
-    # into the remaining dead SRD holes (SrdA/SrdB/MXSA/MXSB), so next_free_sgpr is
-    # unchanged (96, still under the gfx950 MaxSgpr=102 cap).
+    # Lent on top of those: the global-read SRDs, dead once the NLL drain has
+    # retired every load, and SrdC, which the front guard's beta==0 makes
+    # unreadable. All are 4-aligned 4-reg blocks, the scarcest shape for the
+    # transient store SRDs (SrdD, bias, scaleAlphaVec), so lending them is what
+    # keeps the fused store inside the SGPR budget with the epilogue enabled.
+    #
+    # Dead-looking here but NOT lendable. Each of these is read again after the
+    # fused store, so reusing it as a store temp corrupts live runtime state;
+    # the failing shapes are in the commit that added each entry.
+    _neverLend = {
+        "SrdWS":             "live across the persistent StreamK loop -- the same "
+                             "wave owns some tiles and contributes to splits of others",
+        "StreamKLocalStart": "re-read by the post-loop dedup guard",
+        "StreamKLocalEnd":   "re-read by the post-loop dedup guard",
+        "StreamKIter":       "persistent loop counter, live across tiles",
+        "StreamKIterEnd":    "persistent loop counter, live across tiles",
+    }
     _lendNames = ["LocalWriteBaseAddrA", "LocalWriteBaseAddrB",
                   "LocalWriteBaseAddrMXSA", "LocalWriteBaseAddrMXSB",
                   "SwapA", "SwapB", "SwapMXSA", "SwapMXSB",
                   "SrdA", "SrdB", "SrdMXSA", "SrdMXSB",
                   "SrdC"]
-    # SrdWS is deliberately absent: on StreamK a persistent WG that owns one tile
-    # but contributes to a split of another keeps SrdWS live across the persistent
-    # loop, and a static SGPR allocation cannot be branched on that at runtime.
+    assert not (set(_lendNames) & set(_neverLend)), \
+        "lending an SGPR the store cannot have: %s" % sorted(set(_lendNames) & set(_neverLend))
     for _name in _lendNames:
       if _name in self.sgprs and _name not in self.states.freeSgprVarPool:
         self.addSgprVarToPool(_name)
@@ -15349,33 +15337,18 @@ class KernelWriterAssembly(KernelWriter):
     savedBpeCext = self.states.bpeCexternal
     self.states.bpeCexternal = self.states.bpeCexternalGSU1
 
-    # --- transient store SRD (SrdD) for the FUSED NLL (SGPR-defer) ---
-    # SrdD is no longer reserved early / hoisted pre-loop (that cost 4 main-loop-
-    # resident SGPRs and overflowed MT256x256 fp4). Define it here from the drain-era
-    # pool and compute its full value, then undefine after the store (below) so
-    # endSummation re-defines SrdD for the PLAIN / SkipToEnd post-loop store.
+    # --- transient store SGPRs for the FUSED NLL ---
+    # SrdD is not reserved pre-loop (4 main-loop-resident SGPRs, which overflowed
+    # MT256x256 fp4). It is taken from the drain-era pool here and undefined after
+    # the store, so endSummation can re-define it for the PLAIN / SkipToEnd arm.
+    # That is safe only because the undefine below happens BEFORE the lent
+    # main-loop SGPRs are reclaimed, so no live var ever overlaps it.
     #
-    # Use defineSgprIdx (UNPROTECTED) so the 4-aligned checkout reuses a dead-during-
-    # fused 4-aligned block — on StreamK the parked SrdWS (workspace SRD, not touched
-    # by the beta0/full-tile fused store) — instead of extending the pool. This keeps
-    # .sgpr_count from growing. Safe because SrdD is undefined below BEFORE SrdWS / the
-    # lent main-loop SGPRs are reclaimed, so no live var overlaps it.
-    #
-    # SrdD value: the SAME store-init builder the post-loop store uses, but with
-    # labelSuffix="Fused" so its per-channel SRD-init labels do not collide with the
-    # post-loop D-init, channels=["D"] only (beta==0 per the front guard => C is never
-    # read), skipUndefine=True (keep AddressD/GSULog2Bpe* live for the post-loop store),
-    # and noMultipleBuffer=True (skip the GSU/SK reduction tails — a full-tile owner
-    # writes straight to D, no workspace reduction).
-    # --- load the epilogue store kernargs FIRST (before SrdD / the transient SRDs) ---
-    # loadFusedEpilogueStoreSgprs allocates a single contiguous ~13-SGPR block
-    # (Address*, BiasType/Stride, activation args via defineMultiSgprIndex). It is the
-    # largest transient allocation, so it must grab the widest contiguous lent hole
-    # (SrdWS+Swap*+LocalWrite*+StreamKLocal* form a ~14-reg run) BEFORE the 4-reg SRDs
-    # (SrdD/SrdBias/SrdScaleAlphaVec) fragment it. Allocating it after those SRDs left
-    # no 13-wide contiguous hole low, forcing the block to extend the pool past budget
-    # (drove .sgpr_count to 105 -> overflow on MT>=256). Doing it first packs the block
-    # into the low holes and keeps .sgpr_count within budget.
+    # Allocation order matters and is not arbitrary. loadFusedEpilogueStoreSgprs
+    # wants one contiguous ~13-SGPR block and is the widest request, so it has to
+    # run before the 4-reg SRDs (SrdD, bias, scaleAlphaVec) fragment the lent
+    # holes; taken the other way round there is no 13-wide hole left low and the
+    # block extends the pool past the gfx950 102-SGPR cap.
     fusedEpilogueArgs = []
     # Scalar UseScaleAB is not folded into Alpha on the fused arm (no alpha
     # multiply). AddressScaleA/B still live in numStoreSgprNames that
