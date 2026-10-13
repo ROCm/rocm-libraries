@@ -262,12 +262,20 @@ def test_mx_issue_tp_list_mxs_then_ab_when_mx_unit_1():
     assert chars == ["MXSA", "MXSB", "A", "B"]
 
 
-def test_mx_issue_tp_list_ab_then_mxs_when_mx_unit_not_1():
+def test_mx_issue_tp_list_base_order_when_mx_unit_not_1():
     tPA = {"tensorChar": "A", "MX": {"tensorChar": "MXSA"}}
     tPB = {"tensorChar": "B", "MX": {"tensorChar": "MXSB"}}
     kernel = {"MatrixInstK": 128, "ProblemType": {"MXBlockA": 32, "MXBlockB": 32}}
     chars = [tp["tensorChar"] for tp in mxIssueTpList(kernel, tPA, tPB)]
     assert chars == ["A", "B", "MXSA", "MXSB"]
+
+
+def test_mx_issue_tp_list_only_splat_side_moves_first():
+    tPA = {"tensorChar": "A", "MX": {"tensorChar": "MXSA"}}
+    tPB = {"tensorChar": "B", "MX": {"tensorChar": "MXSB"}}
+    kernel = {"MatrixInstK": 128, "ProblemType": {"MXBlockA": 32, "MXBlockB": 128}}
+    chars = [tp["tensorChar"] for tp in mxIssueTpList(kernel, tPA, tPB)]
+    assert chars == ["MXSB", "A", "B", "MXSA"]
 
 
 def test_mx_issue_tp_list_without_mx_is_ab():
