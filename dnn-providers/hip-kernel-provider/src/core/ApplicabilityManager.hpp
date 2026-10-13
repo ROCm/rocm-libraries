@@ -22,46 +22,32 @@
 namespace hip_kernel_provider::core
 {
 
-/// Total threads, caller included, for one applicability call. 1 keeps the sequential loop;
-/// 0 or `auto` sizes from the pending work and the CPUs.
-static constexpr const char* APPLICABILITY_MAX_THREADS_ENV_NAME
-    = "HIPDNN_APPLICABILITY_MAX_THREADS";
-
-/// Offloaded work, in catalog variants, below which a call stays on the caller thread.
+/// Offloaded work, in catalog variants, below which a call stays on the caller thread. An
+/// override of DEFAULT_MIN_OFFLOAD_VARIANTS, for calibration.
 static constexpr const char* APPLICABILITY_MIN_OFFLOAD_VARIANTS_ENV_NAME
     = "HIPDNN_APPLICABILITY_MIN_OFFLOAD_VARIANTS";
-
-static constexpr std::size_t DEFAULT_APPLICABILITY_MAX_THREADS = 1;
 
 /// The smallest offload measured to beat staying inline on gfx950 dense-attention packs.
 static constexpr std::size_t DEFAULT_MIN_OFFLOAD_VARIANTS = 50;
 
-/// Upper bound on total threads when HIPDNN_APPLICABILITY_MAX_THREADS is auto.
-static constexpr std::size_t AUTO_APPLICABILITY_MAX_THREADS = 9;
-
-/// Parses a HIPDNN_APPLICABILITY_MAX_THREADS value. Empty returns the default, 1. `0` and
-/// `auto` return 0, meaning auto. Anything but a non-negative integer logs a WARN and returns
-/// the default.
-std::size_t parseMaxThreads(const std::string& raw);
+/// Upper bound on the total threads, caller included, one applicability call uses.
+static constexpr std::size_t MAX_APPLICABILITY_THREADS = 9;
 
 /// Parses a HIPDNN_APPLICABILITY_MIN_OFFLOAD_VARIANTS value. Empty returns the default.
 /// Anything but a non-negative integer logs a WARN and returns the default.
 std::size_t parseMinOffloadVariants(const std::string& raw);
 
-/// Read on every call, never cached.
-std::size_t maxThreadsFromEnv();
+/// Read on every call that has two or more pending engines, never cached.
 std::size_t minOffloadVariantsFromEnv();
 
-/// Threads, caller included, for `pending` engines: min(pending, cpus,
-/// AUTO_APPLICABILITY_MAX_THREADS) when maxThreads is 0, else min(maxThreads, pending).
-/// Never less than 1.
-std::size_t
-    resolveTotalThreads(std::size_t maxThreads, std::size_t pending, std::size_t cpus) noexcept;
+/// Threads, caller included, for `pending` engines on `cpus` CPUs: min(pending, cpus,
+/// MAX_APPLICABILITY_THREADS). Never less than 1.
+std::size_t resolveTotalThreads(std::size_t pending, std::size_t cpus) noexcept;
 
 /// The provider's engine manager. Adds threaded applicability for staged (ingestor) engines:
-/// with at least two of them registered and HIPDNN_APPLICABILITY_MAX_THREADS other than 1,
-/// their per-variant catalog loops may finish on pool threads. Otherwise every call is the
-/// base class's sequential loop.
+/// with at least two of them registered, a call whose pending engines have enough variants left
+/// to walk finishes all but the largest on pool threads. Below that, every call is the base
+/// class's sequential loop or its equivalent on the caller thread.
 class ApplicabilityManager : public hipdnn_plugin_sdk::EngineManager<Handle, Settings, Context>
 {
 public:
@@ -89,8 +75,7 @@ private:
         StagedEngine* staged;
     };
 
-    std::vector<int64_t>
-        getApplicableEngineIdsStaged(Handle& handle, const IGraph& opGraph, std::size_t maxThreads);
+    std::vector<int64_t> getApplicableEngineIdsStaged(Handle& handle, const IGraph& opGraph);
 
     // Inside the guard: the pool is only used by the staged path, and an unused private
     // reference member fails -Werror (-Wunused-private-field) in a build without the ingestor.

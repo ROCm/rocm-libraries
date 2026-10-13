@@ -34,29 +34,6 @@ std::optional<std::size_t> parseCount(const std::string& text)
 
 } // namespace
 
-std::size_t parseMaxThreads(const std::string& raw)
-{
-    if(raw.empty())
-    {
-        return DEFAULT_APPLICABILITY_MAX_THREADS;
-    }
-
-    const std::string normalized
-        = hipdnn_data_sdk::utilities::toLower(hipdnn_data_sdk::utilities::trim(raw));
-    if(normalized == "auto")
-    {
-        return 0;
-    }
-    if(const auto value = parseCount(normalized))
-    {
-        return *value;
-    }
-
-    HIPDNN_PLUGIN_LOG_WARN("ignoring unrecognized value for " << APPLICABILITY_MAX_THREADS_ENV_NAME
-                                                              << ": '" << raw << "'");
-    return DEFAULT_APPLICABILITY_MAX_THREADS;
-}
-
 std::size_t parseMinOffloadVariants(const std::string& raw)
 {
     if(raw.empty())
@@ -74,23 +51,15 @@ std::size_t parseMinOffloadVariants(const std::string& raw)
     return DEFAULT_MIN_OFFLOAD_VARIANTS;
 }
 
-std::size_t maxThreadsFromEnv()
-{
-    return parseMaxThreads(hipdnn_data_sdk::utilities::getEnv(APPLICABILITY_MAX_THREADS_ENV_NAME));
-}
-
 std::size_t minOffloadVariantsFromEnv()
 {
     return parseMinOffloadVariants(
         hipdnn_data_sdk::utilities::getEnv(APPLICABILITY_MIN_OFFLOAD_VARIANTS_ENV_NAME));
 }
 
-std::size_t
-    resolveTotalThreads(std::size_t maxThreads, std::size_t pending, std::size_t cpus) noexcept
+std::size_t resolveTotalThreads(std::size_t pending, std::size_t cpus) noexcept
 {
-    const auto limit
-        = maxThreads == 0 ? std::min(cpus, AUTO_APPLICABILITY_MAX_THREADS) : maxThreads;
-    return std::max<std::size_t>(1, std::min(limit, pending));
+    return std::max<std::size_t>(1, std::min({pending, cpus, MAX_APPLICABILITY_THREADS}));
 }
 
 ApplicabilityManager::ApplicabilityManager([[maybe_unused]] ApplicabilityPool& pool)
@@ -126,14 +95,10 @@ std::vector<int64_t> ApplicabilityManager::getApplicableEngineIds(Handle& handle
                                                                   const IGraph& opGraph)
 {
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
-    // Static gate first: the knobs are not read unless threading could apply.
+    // Fewer than two staged engines can never have two pending, so they keep the base loop.
     if(_stagedCount >= 2)
     {
-        const auto maxThreads = maxThreadsFromEnv();
-        if(maxThreads != 1)
-        {
-            return getApplicableEngineIdsStaged(handle, opGraph, maxThreads);
-        }
+        return getApplicableEngineIdsStaged(handle, opGraph);
     }
 #endif
     return Base::getApplicableEngineIds(handle, opGraph);
@@ -142,8 +107,7 @@ std::vector<int64_t> ApplicabilityManager::getApplicableEngineIds(Handle& handle
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
 std::vector<int64_t> ApplicabilityManager::getApplicableEngineIdsStaged(Handle& handle,
-                                                                        const IGraph& opGraph,
-                                                                        std::size_t maxThreads)
+                                                                        const IGraph& opGraph)
 {
     struct Slot
     {
@@ -174,8 +138,6 @@ std::vector<int64_t> ApplicabilityManager::getApplicableEngineIdsStaged(Handle& 
     {
         slots.emplace_back(entry);
     }
-
-    hipdnn_plugin_sdk::ingestor::prewarmGraph(opGraph);
 
     // Caller thread, in order. The first error ends the walk where the sequential loop would
     // have thrown, so no later engine runs.
@@ -251,10 +213,17 @@ std::vector<int64_t> ApplicabilityManager::getApplicableEngineIdsStaged(Handle& 
             }
         }
 
-        const auto workers
-            = resolveTotalThreads(maxThreads, pendingSlots.size(), affinityCpuCount()) - 1;
-        finished = _pool.tryRun(
-            order.size(), workers, [&finish, &order](std::size_t task) { finish(order[task]); });
+        const auto workers = resolveTotalThreads(pendingSlots.size(), affinityCpuCount()) - 1;
+        if(workers > 0)
+        {
+            // Workers read the graph's lazily built views alongside this thread, so they are
+            // built here first. Engines on this thread build them on demand, as the sequential
+            // loop does, so a call that stays here never pays for them up front.
+            hipdnn_plugin_sdk::ingestor::prewarmGraph(opGraph);
+            finished = _pool.tryRun(order.size(), workers, [&finish, &order](std::size_t task) {
+                finish(order[task]);
+            });
+        }
     }
     if(!finished)
     {

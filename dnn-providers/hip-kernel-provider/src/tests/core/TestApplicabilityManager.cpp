@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -12,6 +13,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -72,55 +74,6 @@ std::vector<std::thread::id> runOnPool(ApplicabilityPool& pool,
 // Knobs
 // ---------------------------------------------------------------------------------------------
 
-TEST(TestApplicabilityKnobs, MaxThreadsDefaultsToOneWhenUnsetOrEmpty)
-{
-    EXPECT_EQ(parseMaxThreads(""), 1u);
-
-    const ScopedEnvironmentVariableSetter guard(APPLICABILITY_MAX_THREADS_ENV_NAME);
-    hipdnn_data_sdk::utilities::unsetEnv(APPLICABILITY_MAX_THREADS_ENV_NAME);
-    EXPECT_EQ(maxThreadsFromEnv(), 1u);
-}
-
-TEST(TestApplicabilityKnobs, MaxThreadsAutoAndZeroBothMeanAuto)
-{
-    EXPECT_EQ(parseMaxThreads("0"), 0u);
-    EXPECT_EQ(parseMaxThreads("auto"), 0u);
-    EXPECT_EQ(parseMaxThreads("AUTO"), 0u);
-    EXPECT_EQ(parseMaxThreads(" auto "), 0u);
-
-    const ScopedEnvironmentVariableSetter guard(APPLICABILITY_MAX_THREADS_ENV_NAME, "auto");
-    EXPECT_EQ(maxThreadsFromEnv(), 0u);
-}
-
-TEST(TestApplicabilityKnobs, MaxThreadsTakesAnExplicitCount)
-{
-    const auto recorder = SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
-
-    EXPECT_EQ(parseMaxThreads("3"), 3u);
-    EXPECT_EQ(parseMaxThreads("1"), 1u);
-
-    const ScopedEnvironmentVariableSetter guard(APPLICABILITY_MAX_THREADS_ENV_NAME, "3");
-    EXPECT_EQ(maxThreadsFromEnv(), 3u);
-
-    EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_WARN), 0u) << recorder.getRecordedLogsAsString();
-}
-
-TEST(TestApplicabilityKnobs, MaxThreadsJunkFallsBackToOffWithAWarning)
-{
-    for(const std::string raw : {"junk", "-2", "3x", "99999999999999999999999999"})
-    {
-        SCOPED_TRACE(raw);
-        const auto recorder = SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
-
-        EXPECT_EQ(parseMaxThreads(raw), 1u);
-        EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, raw))
-            << recorder.getRecordedLogsAsString();
-    }
-
-    const ScopedEnvironmentVariableSetter guard(APPLICABILITY_MAX_THREADS_ENV_NAME, "junk");
-    EXPECT_EQ(maxThreadsFromEnv(), 1u);
-}
-
 TEST(TestApplicabilityKnobs, MinOffloadVariantsDefaultsAndParses)
 {
     const auto recorder = SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
@@ -148,20 +101,13 @@ TEST(TestApplicabilityKnobs, MinOffloadVariantsJunkFallsBackToTheDefaultWithAWar
     }
 }
 
-TEST(TestApplicabilityKnobs, AutoIsCappedByPendingCpusAndNine)
+TEST(TestApplicabilityKnobs, ThreadsAreCappedByPendingCpusAndNine)
 {
-    EXPECT_EQ(resolveTotalThreads(0, 20, 64), 9u);
-    EXPECT_EQ(resolveTotalThreads(0, 3, 64), 3u);
-    EXPECT_EQ(resolveTotalThreads(0, 20, 4), 4u);
-    EXPECT_GE(resolveTotalThreads(0, 20, 0), 1u);
-}
-
-TEST(TestApplicabilityKnobs, ExplicitCountIsCappedByPendingOnly)
-{
-    EXPECT_EQ(resolveTotalThreads(2, 20, 64), 2u);
-    EXPECT_EQ(resolveTotalThreads(5, 3, 64), 3u);
-    EXPECT_EQ(resolveTotalThreads(16, 20, 4), 16u);
-    EXPECT_EQ(resolveTotalThreads(1, 20, 64), 1u);
+    EXPECT_EQ(resolveTotalThreads(20, 64), 9u);
+    EXPECT_EQ(resolveTotalThreads(3, 64), 3u);
+    EXPECT_EQ(resolveTotalThreads(20, 4), 4u);
+    EXPECT_EQ(resolveTotalThreads(1, 64), 1u);
+    EXPECT_EQ(resolveTotalThreads(20, 0), 1u);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -304,6 +250,30 @@ using hipdnn_plugin_sdk::ingestor::StagedApplicability;
 
 using PlainEngine = hipdnn_plugin_sdk::IEngine<Handle, Settings, Context>;
 
+/// A graph that counts reads of its tensor map, one of the lazily built views prewarmGraph
+/// builds.
+class CountingGraph : public hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper
+{
+public:
+    using GraphWrapper::GraphWrapper;
+
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
+        getTensorMap() const override
+    {
+        ++_tensorMapReads;
+        return GraphWrapper::getTensorMap();
+    }
+
+    unsigned tensorMapReads() const
+    {
+        return _tensorMapReads.load();
+    }
+
+private:
+    mutable std::atomic<unsigned> _tensorMapReads{0};
+};
+
 enum class Failure
 {
     NONE,
@@ -334,6 +304,27 @@ public:
         _cv.notify_all();
     }
 
+    /// A call through the engine's plain isApplicable(), which the sequential loop makes and
+    /// the staged path never does.
+    void recordPlainCall(int64_t engineId)
+    {
+        const std::lock_guard<std::mutex> lock(_mutex);
+        _plainCalls.push_back(engineId);
+    }
+
+    /// How many times the graph's tensor map had been read when a finish started.
+    void recordViewsAtFinish(unsigned reads)
+    {
+        const std::lock_guard<std::mutex> lock(_mutex);
+        _viewsAtFinish.push_back(reads);
+    }
+
+    std::vector<unsigned> viewsAtFinish() const
+    {
+        const std::lock_guard<std::mutex> lock(_mutex);
+        return _viewsAtFinish;
+    }
+
     void recordHandWritten(int64_t engineId)
     {
         const std::lock_guard<std::mutex> lock(_mutex);
@@ -349,6 +340,20 @@ public:
             return std::any_of(_finishes.begin(), _finishes.end(), [&](const auto& entry) {
                 return entry.second != self;
             });
+        });
+    }
+
+    /// Blocks until @p sameEngine finishes of @p engineId and @p otherEngines finishes of
+    /// other engines have started, on any threads.
+    void awaitMeeting(int64_t engineId, std::size_t sameEngine, std::size_t otherEngines)
+    {
+        std::unique_lock<std::mutex> lock(_mutex);
+        _cv.wait_for(lock, RENDEZVOUS_TIMEOUT, [&] {
+            const auto same = static_cast<std::size_t>(
+                std::count_if(_finishes.begin(), _finishes.end(), [&](const auto& entry) {
+                    return entry.first == engineId;
+                }));
+            return same >= sameEngine && _finishes.size() - same >= otherEngines;
         });
     }
 
@@ -383,6 +388,13 @@ public:
             all.begin(), all.end(), [&](const auto& entry) { return entry.first == engineId; }));
     }
 
+    std::size_t plainCallCount(int64_t engineId) const
+    {
+        const std::lock_guard<std::mutex> lock(_mutex);
+        return static_cast<std::size_t>(
+            std::count(_plainCalls.begin(), _plainCalls.end(), engineId));
+    }
+
     std::thread::id finishThread(int64_t engineId) const
     {
         for(const auto& entry : finishes())
@@ -400,6 +412,8 @@ public:
         const std::lock_guard<std::mutex> lock(_mutex);
         _finishes.clear();
         _handWritten.clear();
+        _plainCalls.clear();
+        _viewsAtFinish.clear();
     }
 
 private:
@@ -408,6 +422,8 @@ private:
     std::condition_variable _cv;
     std::vector<std::pair<int64_t, std::thread::id>> _finishes;
     std::vector<std::pair<int64_t, std::thread::id>> _handWritten;
+    std::vector<int64_t> _plainCalls;
+    std::vector<unsigned> _viewsAtFinish;
 };
 
 /// The non-applicability half of the engine interface, which no test here reaches.
@@ -486,6 +502,11 @@ struct StagedSpec
     std::string failureMessage;
     /// Hold this finish until a sibling's finish has run on another thread.
     bool awaitSibling = false;
+    /// Hold this finish until this many finishes of its own engine and of other engines have
+    /// started. Held on one engine, it makes concurrent calls meet inside the pool, and keeps
+    /// their callers from draining the tasks that the workers must run.
+    std::size_t holdForCallers = 0;
+    std::size_t holdForOthers = 0;
 };
 
 /// An ingestor-style engine. Its plain isApplicable is begin-then-finish on the caller, which
@@ -506,6 +527,7 @@ public:
 
     bool isApplicable(Handle& handle, const IGraph& graph) const override
     {
+        _journal.recordPlainCall(id());
         ApplicabilityScope scope;
         auto staged = beginApplicability(handle, graph, scope);
         if(staged.decided)
@@ -516,7 +538,7 @@ public:
     }
 
     StagedApplicability beginApplicability(Handle& /*handle*/,
-                                           const IGraph& /*graph*/,
+                                           const IGraph& graph,
                                            ApplicabilityScope& /*scope*/) const override
     {
         if(_spec->failure == Failure::IN_BEGIN)
@@ -536,6 +558,7 @@ public:
         state->predictedVariants = _spec->predictedVariants;
         state->verdict = _spec->verdict;
         state->owner = this;
+        state->graph = &graph;
         staged.pending = PendingApplicability(std::move(state));
         return staged;
     }
@@ -549,9 +572,20 @@ public:
                                 : nullptr;
 
         _journal.recordFinish(id());
+        if(state != nullptr)
+        {
+            if(const auto* counting = dynamic_cast<const CountingGraph*>(state->graph))
+            {
+                _journal.recordViewsAtFinish(counting->tensorMapReads());
+            }
+        }
         if(_spec->awaitSibling)
         {
             _journal.awaitFinishOnAnotherThread();
+        }
+        if(_spec->holdForCallers > 0)
+        {
+            _journal.awaitMeeting(id(), _spec->holdForCallers, _spec->holdForOthers);
         }
         // Long enough for the other tasks of the call to be in flight at the same time.
         std::this_thread::sleep_for(std::chrono::microseconds(300));
@@ -567,6 +601,7 @@ private:
     struct State : PendingApplicability::State
     {
         bool verdict = false;
+        const IGraph* graph = nullptr;
     };
 
     std::shared_ptr<StagedSpec> _spec;
@@ -623,21 +658,39 @@ protected:
         return spec;
     }
 
-    /// One call under the given knobs. An empty knob value means unset.
-    Outcome run(ApplicabilityManager& manager,
-                const std::string& maxThreads,
-                const std::string& minOffload)
+    /// One call with the offload threshold set. An empty value means unset.
+    Outcome run(ApplicabilityManager& manager, const std::string& minOffload)
     {
-        const ScopedEnvironmentVariableSetter threadsKnob(APPLICABILITY_MAX_THREADS_ENV_NAME);
         const ScopedEnvironmentVariableSetter offloadKnob(
             APPLICABILITY_MIN_OFFLOAD_VARIANTS_ENV_NAME);
-        setOrUnset(APPLICABILITY_MAX_THREADS_ENV_NAME, maxThreads);
         setOrUnset(APPLICABILITY_MIN_OFFLOAD_VARIANTS_ENV_NAME, minOffload);
 
+        return call(manager, _handle, _graph);
+    }
+
+    /// One call through the base class's sequential loop: the answer every threaded call must
+    /// match.
+    Outcome runSequential(ApplicabilityManager& manager)
+    {
+        return capture([&] {
+            return static_cast<ApplicabilityManager::Base&>(manager).getApplicableEngineIds(_handle,
+                                                                                            _graph);
+        });
+    }
+
+    /// One call, reporting what it returned or threw. It touches no environment, so
+    /// concurrent callers can share it.
+    static Outcome call(ApplicabilityManager& manager, Handle& handle, const IGraph& graph)
+    {
+        return capture([&] { return manager.getApplicableEngineIds(handle, graph); });
+    }
+
+    static Outcome capture(const std::function<std::vector<int64_t>()>& getIds)
+    {
         Outcome outcome;
         try
         {
-            outcome.ids = manager.getApplicableEngineIds(_handle, _graph);
+            outcome.ids = getIds();
         }
         catch(const HipdnnPluginException& e)
         {
@@ -651,6 +704,12 @@ protected:
             outcome.thrown = {HIPDNN_PLUGIN_STATUS_SUCCESS, e.what()};
         }
         return outcome;
+    }
+
+    /// Offloading needs a worker, which a one-CPU host never grants.
+    static bool lacksASecondCpu()
+    {
+        return affinityCpuCount() < 2;
     }
 
     /// The manager's own iteration order, filtered to @p wanted: the order every
@@ -705,7 +764,7 @@ constexpr int64_t PENDING_E = 0x3005;
 
 } // namespace
 
-TEST_F(TestApplicabilityManager, ThreadedResultsMatchSequentialAcrossEveryKnob)
+TEST_F(TestApplicabilityManager, ThreadedResultsMatchSequentialAcrossEveryThreshold)
 {
     WorkerBudget budget{8};
     ApplicabilityPool pool{budget};
@@ -726,36 +785,29 @@ TEST_F(TestApplicabilityManager, ThreadedResultsMatchSequentialAcrossEveryKnob)
     const auto expected
         = inIterationOrder(manager, {HAND_YES, DECIDED_YES, PENDING_A, PENDING_C, PENDING_D});
 
-    const auto sequential = run(manager, "1", "");
+    const auto sequential = runSequential(manager);
     ASSERT_FALSE(sequential.threw) << sequential.thrown.message;
     ASSERT_EQ(sequential.ids, expected);
 
-    for(const std::string maxThreads : {"1", "2", "4", "auto"})
+    for(const std::string minOffload : {"0", "200", "1000000000"})
     {
-        for(const std::string minOffload : {"0", "200", "1000000000"})
+        SCOPED_TRACE("MIN_OFFLOAD_VARIANTS=" + minOffload);
+        // A one-CPU host never grants a worker, so nothing is offloaded there.
+        const bool gateOpens = minOffload != "1000000000" && !lacksASecondCpu();
+        // Where the gate opens, hold the caller's engine until a worker has finished one, so
+        // the threaded path is the one compared rather than a caller that drained the whole
+        // batch before any worker woke.
+        largest->awaitSibling = gateOpens;
+        _journal.clear();
+
+        const auto outcome = run(manager, minOffload);
+
+        ASSERT_FALSE(outcome.threw) << outcome.thrown.message;
+        EXPECT_EQ(outcome.ids, sequential.ids);
+        EXPECT_EQ(_journal.anyFinishOffCaller(), gateOpens);
+        for(const auto& [engineId, thread] : _journal.handWritten())
         {
-            SCOPED_TRACE(std::string("MAX_THREADS=")
-                             .append(maxThreads)
-                             .append(" MIN_OFFLOAD_VARIANTS=")
-                             .append(minOffload));
-            // Auto never exceeds the CPUs, so on a one-CPU host it means no worker at all.
-            const bool gateOpens = maxThreads != "1" && minOffload != "1000000000"
-                                   && (maxThreads != "auto" || affinityCpuCount() > 1);
-            // Where the gate opens, hold the caller's engine until a worker has finished one,
-            // so the threaded path is the one compared rather than a caller that drained the
-            // whole batch before any worker woke.
-            largest->awaitSibling = gateOpens;
-            _journal.clear();
-
-            const auto outcome = run(manager, maxThreads, minOffload);
-
-            ASSERT_FALSE(outcome.threw) << outcome.thrown.message;
-            EXPECT_EQ(outcome.ids, sequential.ids);
-            EXPECT_EQ(_journal.anyFinishOffCaller(), gateOpens);
-            for(const auto& [engineId, thread] : _journal.handWritten())
-            {
-                EXPECT_EQ(thread, _journal.caller()) << "hand-written engine " << engineId;
-            }
+            EXPECT_EQ(thread, _journal.caller()) << "hand-written engine " << engineId;
         }
     }
     EXPECT_EQ(budget.available(), 8u);
@@ -771,7 +823,7 @@ TEST_F(TestApplicabilityManager, StaysInlineWithFewerThanTwoPending)
     addStaged(manager, decided(DECIDED_NO, false));
     addStaged(manager, pending(PENDING_A, true, 1000000));
 
-    const auto outcome = run(manager, "4", "0");
+    const auto outcome = run(manager, "0");
 
     ASSERT_FALSE(outcome.threw) << outcome.thrown.message;
     EXPECT_EQ(outcome.ids, inIterationOrder(manager, {DECIDED_YES, PENDING_A}));
@@ -794,7 +846,7 @@ TEST_F(TestApplicabilityManager, StaysInlineWhenOffloadedVariantsAreBelowTheThre
     addStaged(manager, pending(PENDING_B, true, 100));
     addStaged(manager, pending(PENDING_C, false, 100));
 
-    const auto outcome = run(manager, "4", "201");
+    const auto outcome = run(manager, "201");
 
     ASSERT_FALSE(outcome.threw) << outcome.thrown.message;
     EXPECT_EQ(outcome.ids, inIterationOrder(manager, {PENDING_A, PENDING_B}));
@@ -804,6 +856,11 @@ TEST_F(TestApplicabilityManager, StaysInlineWhenOffloadedVariantsAreBelowTheThre
 
 TEST_F(TestApplicabilityManager, OffloadsWhenOffloadedVariantsReachTheThreshold)
 {
+    if(lacksASecondCpu())
+    {
+        GTEST_SKIP() << "offloading needs a second CPU";
+    }
+
     WorkerBudget budget{8};
     ApplicabilityPool pool{budget};
     ApplicabilityManager manager{pool};
@@ -816,39 +873,20 @@ TEST_F(TestApplicabilityManager, OffloadsWhenOffloadedVariantsReachTheThreshold)
         addStaged(manager, std::move(spec));
     }
 
-    const auto outcome = run(manager, "4", "200");
+    const auto outcome = run(manager, "200");
 
     ASSERT_FALSE(outcome.threw) << outcome.thrown.message;
     EXPECT_EQ(outcome.ids, inIterationOrder(manager, {PENDING_A, PENDING_B}));
     EXPECT_TRUE(_journal.anyFinishOffCaller());
 }
 
-TEST_F(TestApplicabilityManager, StaysInlineWhenMaxThreadsIsOne)
-{
-    WorkerBudget budget{8};
-    ApplicabilityPool pool{budget};
-    ApplicabilityManager manager{pool};
-
-    addStaged(manager, pending(PENDING_A, true, 1000000));
-    addStaged(manager, pending(PENDING_B, true, 1000000));
-    addStaged(manager, pending(PENDING_C, false, 1000000));
-
-    for(const std::string maxThreads : {"1", ""})
-    {
-        SCOPED_TRACE("MAX_THREADS='" + maxThreads + "'");
-        _journal.clear();
-
-        const auto outcome = run(manager, maxThreads, "0");
-
-        ASSERT_FALSE(outcome.threw) << outcome.thrown.message;
-        EXPECT_EQ(outcome.ids, inIterationOrder(manager, {PENDING_A, PENDING_B}));
-        EXPECT_TRUE(allFinishesOnCaller());
-        EXPECT_EQ(pool.threadCount(), 0u);
-    }
-}
-
 TEST_F(TestApplicabilityManager, RunsTheLargestPendingEngineOnTheCaller)
 {
+    if(lacksASecondCpu())
+    {
+        GTEST_SKIP() << "offloading needs a second CPU";
+    }
+
     WorkerBudget budget{8};
     ApplicabilityPool pool{budget};
     ApplicabilityManager manager{pool};
@@ -863,7 +901,7 @@ TEST_F(TestApplicabilityManager, RunsTheLargestPendingEngineOnTheCaller)
     addHandWritten(manager, HAND_YES, true);
     addStaged(manager, decided(DECIDED_NO, false));
 
-    const auto outcome = run(manager, "4", "0");
+    const auto outcome = run(manager, "0");
 
     ASSERT_FALSE(outcome.threw) << outcome.thrown.message;
     EXPECT_EQ(outcome.ids, inIterationOrder(manager, {PENDING_A, PENDING_B, PENDING_C, HAND_YES}));
@@ -885,6 +923,11 @@ TEST_F(TestApplicabilityManager, RunsTheLargestPendingEngineOnTheCaller)
 
 TEST_F(TestApplicabilityManager, RethrowsTheLowestIndexFailureThreadedOrNot)
 {
+    if(lacksASecondCpu())
+    {
+        GTEST_SKIP() << "offloading needs a second CPU";
+    }
+
     // Two throwers in finish, and each in turn the largest, so "lowest index" cannot be
     // passed by "whichever ran on the caller" or "whichever finished first".
     for(const bool lowerIsLargest : {true, false})
@@ -919,9 +962,9 @@ TEST_F(TestApplicabilityManager, RethrowsTheLowestIndexFailureThreadedOrNot)
         largest->predictedVariants = 5000;
         smaller->predictedVariants = 400;
 
-        const auto sequential = run(manager, "1", "");
+        const auto sequential = runSequential(manager);
         largest->awaitSibling = true;
-        const auto threaded = run(manager, "4", "0");
+        const auto threaded = run(manager, "0");
 
         for(const auto* outcome : {&sequential, &threaded})
         {
@@ -962,8 +1005,8 @@ TEST_F(TestApplicabilityManager, LowerIndexFinishFailureBeatsHigherIndexBeginFai
     higher->failureStatus = HIPDNN_PLUGIN_STATUS_BAD_PARAM;
     higher->failureMessage = "graph stage failed";
 
-    const auto sequential = run(manager, "1", "");
-    const auto threaded = run(manager, "4", "0");
+    const auto sequential = runSequential(manager);
+    const auto threaded = run(manager, "0");
 
     for(const auto* outcome : {&sequential, &threaded})
     {
@@ -992,7 +1035,7 @@ TEST_F(TestApplicabilityManager, ExhaustedBudgetRunsInlineWithTheSameResult)
     const auto held = budget.tryAcquire(4);
     ASSERT_EQ(held, 4u);
 
-    const auto outcome = run(manager, "4", "0");
+    const auto outcome = run(manager, "0");
 
     ASSERT_FALSE(outcome.threw) << outcome.thrown.message;
     EXPECT_EQ(outcome.ids, expected);
@@ -1013,7 +1056,7 @@ TEST_F(TestApplicabilityManager, ZeroCapacityBudgetRunsInlineWithTheSameResult)
     addStaged(manager, pending(PENDING_B, false, 5000));
     addStaged(manager, pending(PENDING_C, true, 5000));
 
-    const auto outcome = run(manager, "auto", "0");
+    const auto outcome = run(manager, "0");
 
     ASSERT_FALSE(outcome.threw) << outcome.thrown.message;
     EXPECT_EQ(outcome.ids, inIterationOrder(manager, {PENDING_A, PENDING_C}));
@@ -1023,6 +1066,11 @@ TEST_F(TestApplicabilityManager, ZeroCapacityBudgetRunsInlineWithTheSameResult)
 
 TEST_F(TestApplicabilityManager, DestroyingThePoolOwnerJoinsEveryWorker)
 {
+    if(lacksASecondCpu())
+    {
+        GTEST_SKIP() << "offloading needs a second CPU";
+    }
+
     const auto baseline = ApplicabilityPool::liveThreads();
     {
         WorkerBudget budget{8};
@@ -1035,7 +1083,7 @@ TEST_F(TestApplicabilityManager, DestroyingThePoolOwnerJoinsEveryWorker)
             addStaged(manager, std::move(spec));
         }
 
-        const auto outcome = run(manager, "4", "0");
+        const auto outcome = run(manager, "0");
 
         ASSERT_FALSE(outcome.threw) << outcome.thrown.message;
         ASSERT_TRUE(_journal.anyFinishOffCaller());
@@ -1051,6 +1099,11 @@ TEST_F(TestApplicabilityManager, DestroyingTheContainerJoinsEveryWorker)
     // resolve the device.
     SKIP_IF_NO_DEVICES();
 
+    if(lacksASecondCpu())
+    {
+        GTEST_SKIP() << "offloading needs a second CPU";
+    }
+
     const auto baseline = ApplicabilityPool::liveThreads();
     {
         Container container;
@@ -1062,7 +1115,7 @@ TEST_F(TestApplicabilityManager, DestroyingTheContainerJoinsEveryWorker)
             addStaged(manager, std::move(spec));
         }
 
-        const auto outcome = run(manager, "4", "0");
+        const auto outcome = run(manager, "0");
 
         ASSERT_FALSE(outcome.threw) << outcome.thrown.message;
         for(const auto engineId : {PENDING_A, PENDING_B, PENDING_C, PENDING_D})
@@ -1073,6 +1126,241 @@ TEST_F(TestApplicabilityManager, DestroyingTheContainerJoinsEveryWorker)
         }
         ASSERT_TRUE(_journal.anyFinishOffCaller());
         EXPECT_GT(ApplicabilityPool::liveThreads(), baseline);
+    }
+    EXPECT_EQ(ApplicabilityPool::liveThreads(), baseline);
+}
+
+// A call that stays on the caller thread leaves the graph's lazily built views to the engines
+// that read them, as the sequential loop does: it pays for none up front.
+TEST_F(TestApplicabilityManager, ACallThatStaysInlineBuildsNoGraphViewsOfItsOwn)
+{
+    WorkerBudget budget{8};
+    ApplicabilityPool pool{budget};
+    ApplicabilityManager manager{pool};
+    addStaged(manager, pending(PENDING_A, true, 1000));
+    addStaged(manager, pending(PENDING_B, true, 1000));
+
+    const flatbuffers::FlatBufferBuilder buffer
+        = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
+    const CountingGraph graph(buffer.GetBufferPointer(), buffer.GetSize());
+    Handle handle;
+    const ScopedEnvironmentVariableSetter offloadKnob(APPLICABILITY_MIN_OFFLOAD_VARIANTS_ENV_NAME,
+                                                      "1000000000");
+
+    const auto outcome = call(manager, handle, graph);
+
+    ASSERT_FALSE(outcome.threw) << outcome.thrown.message;
+    EXPECT_EQ(outcome.ids, inIterationOrder(manager, {PENDING_A, PENDING_B}));
+    EXPECT_TRUE(allFinishesOnCaller());
+    EXPECT_EQ(graph.tensorMapReads(), 0u);
+}
+
+// Workers read the graph's views alongside the caller, so they must exist before any finish
+// starts, on any thread.
+TEST_F(TestApplicabilityManager, OffloadingBuildsTheGraphViewsBeforeAnyFinishRuns)
+{
+    if(lacksASecondCpu())
+    {
+        GTEST_SKIP() << "offloading needs a second CPU";
+    }
+
+    WorkerBudget budget{8};
+    ApplicabilityPool pool{budget};
+    ApplicabilityManager manager{pool};
+    for(const auto engineId : {PENDING_A, PENDING_B})
+    {
+        auto spec = pending(engineId, true, 1000);
+        spec.awaitSibling = true;
+        addStaged(manager, std::move(spec));
+    }
+
+    const flatbuffers::FlatBufferBuilder buffer
+        = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
+    const CountingGraph graph(buffer.GetBufferPointer(), buffer.GetSize());
+    Handle handle;
+    const ScopedEnvironmentVariableSetter offloadKnob(APPLICABILITY_MIN_OFFLOAD_VARIANTS_ENV_NAME,
+                                                      "0");
+
+    const auto outcome = call(manager, handle, graph);
+
+    ASSERT_FALSE(outcome.threw) << outcome.thrown.message;
+    ASSERT_TRUE(_journal.anyFinishOffCaller());
+    const auto views = _journal.viewsAtFinish();
+    ASSERT_EQ(views.size(), 2u);
+    for(const auto reads : views)
+    {
+        EXPECT_GE(reads, 1u) << "a finish started before the graph's views were built";
+    }
+}
+
+// A static gate: fewer than two staged engines can never have two pending, so they keep the
+// base class's loop, which calls each engine's plain isApplicable(). The staged path calls
+// begin and finish instead.
+TEST_F(TestApplicabilityManager, FewerThanTwoStagedEnginesKeepTheSequentialLoop)
+{
+    WorkerBudget budget{8};
+    ApplicabilityPool pool{budget};
+    ApplicabilityManager manager{pool};
+
+    addHandWritten(manager, HAND_YES, true);
+    addStaged(manager, pending(PENDING_A, true, 1000000));
+    ASSERT_EQ(manager.stagedEngineCount(), 1u);
+
+    const auto single = run(manager, "0");
+
+    ASSERT_FALSE(single.threw) << single.thrown.message;
+    EXPECT_EQ(single.ids, inIterationOrder(manager, {HAND_YES, PENDING_A}));
+    EXPECT_EQ(_journal.plainCallCount(PENDING_A), 1u);
+    EXPECT_EQ(pool.threadCount(), 0u);
+
+    // A second staged engine opens the gate: begin and finish replace the plain call.
+    addStaged(manager, pending(PENDING_B, true, 1000000));
+    _journal.clear();
+    const auto pair = run(manager, "0");
+
+    ASSERT_FALSE(pair.threw) << pair.thrown.message;
+    EXPECT_EQ(pair.ids, inIterationOrder(manager, {HAND_YES, PENDING_A, PENDING_B}));
+    EXPECT_EQ(_journal.plainCallCount(PENDING_A), 0u);
+    EXPECT_EQ(_journal.plainCallCount(PENDING_B), 0u);
+}
+
+// Nothing configured: offloading starts at DEFAULT_MIN_OFFLOAD_VARIANTS offloadable variants,
+// which is the second engine's here, since the largest stays on the caller.
+TEST_F(TestApplicabilityManager, OffloadsByDefaultFromTheDefaultThreshold)
+{
+    if(lacksASecondCpu())
+    {
+        GTEST_SKIP() << "offloading needs a second CPU";
+    }
+
+    for(const bool reachesDefault : {false, true})
+    {
+        SCOPED_TRACE(reachesDefault ? "offloadable variants at the default"
+                                    : "offloadable variants one below the default");
+        WorkerBudget budget{8};
+        ApplicabilityPool pool{budget};
+        ApplicabilityManager manager{pool};
+        _journal.clear();
+
+        auto largest = pending(PENDING_A, true, 5000);
+        largest.awaitSibling = reachesDefault;
+        addStaged(manager, std::move(largest));
+        auto second = pending(PENDING_B,
+                              true,
+                              reachesDefault ? DEFAULT_MIN_OFFLOAD_VARIANTS
+                                             : DEFAULT_MIN_OFFLOAD_VARIANTS - 1);
+        second.awaitSibling = reachesDefault;
+        addStaged(manager, std::move(second));
+
+        const auto outcome = run(manager, "");
+
+        ASSERT_FALSE(outcome.threw) << outcome.thrown.message;
+        EXPECT_EQ(outcome.ids, inIterationOrder(manager, {PENDING_A, PENDING_B}));
+        EXPECT_EQ(_journal.anyFinishOffCaller(), reachesDefault);
+    }
+}
+
+// One Container's pool serves every handle, so concurrent calls share it. Both callers
+// must get the sequential answer, and the budget and the threads must come back whole.
+TEST_F(TestApplicabilityManager, TwoCallersShareOnePoolAndEachGetTheSequentialAnswer)
+{
+    if(lacksASecondCpu())
+    {
+        GTEST_SKIP() << "offloading needs a second CPU";
+    }
+
+    const auto baseline = ApplicabilityPool::liveThreads();
+    {
+        WorkerBudget budget{8};
+        ApplicabilityPool pool{budget};
+        ApplicabilityManager manager{pool};
+
+        addHandWritten(manager, HAND_YES, true);
+        addStaged(manager, decided(DECIDED_NO, false));
+        const auto largest = addStaged(manager, pending(PENDING_A, true, 900));
+        addStaged(manager, pending(PENDING_B, false, 400));
+        addStaged(manager, pending(PENDING_C, true, 300));
+        const auto expected = inIterationOrder(manager, {HAND_YES, PENDING_A, PENDING_C});
+
+        const auto sequential = runSequential(manager);
+        ASSERT_FALSE(sequential.threw) << sequential.thrown.message;
+        ASSERT_EQ(sequential.ids, expected);
+
+        // Each call runs its largest engine, A, on its caller. Hold both callers there until
+        // the pool has started the other four tasks, two per call. Only workers can run
+        // them, so the pool serves both batches at once with neither caller free to drain
+        // either.
+        largest->holdForCallers = 2;
+        largest->holdForOthers = 4;
+        _journal.clear();
+
+        const ScopedEnvironmentVariableSetter offloadKnob(
+            APPLICABILITY_MIN_OFFLOAD_VARIANTS_ENV_NAME, "0");
+
+        // A graph's lazily built views belong to its caller, so each caller has its own.
+        struct Caller
+        {
+            Caller()
+                : buffer(hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph())
+                , graph(buffer.GetBufferPointer(), buffer.GetSize())
+            {
+            }
+
+            flatbuffers::FlatBufferBuilder buffer;
+            hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph;
+            Handle handle;
+            std::thread::id thread;
+            Outcome outcome;
+        };
+
+        std::array<Caller, 2> callers;
+        std::vector<std::thread> threads;
+        threads.reserve(callers.size());
+        for(auto& caller : callers)
+        {
+            threads.emplace_back([&manager, &caller] {
+                caller.thread = std::this_thread::get_id();
+                caller.outcome = call(manager, caller.handle, caller.graph);
+            });
+        }
+        for(auto& thread : threads)
+        {
+            thread.join();
+        }
+
+        for(const auto& caller : callers)
+        {
+            ASSERT_FALSE(caller.outcome.threw) << caller.outcome.thrown.message;
+            EXPECT_EQ(caller.outcome.ids, sequential.ids);
+        }
+
+        const auto onACaller = [&callers](std::thread::id thread) {
+            return thread == callers[0].thread || thread == callers[1].thread;
+        };
+        std::vector<std::thread::id> largestThreads;
+        for(const auto& [engineId, thread] : _journal.finishes())
+        {
+            if(engineId == PENDING_A)
+            {
+                largestThreads.push_back(thread);
+                EXPECT_TRUE(onACaller(thread));
+            }
+            else
+            {
+                EXPECT_FALSE(onACaller(thread)) << "engine " << engineId << " ran on a caller";
+            }
+        }
+        ASSERT_EQ(largestThreads.size(), 2u);
+        EXPECT_NE(largestThreads[0], largestThreads[1]);
+        for(const auto engineId : {PENDING_A, PENDING_B, PENDING_C})
+        {
+            EXPECT_EQ(_journal.finishCount(engineId), 2u) << "engine " << engineId;
+        }
+        EXPECT_EQ(_journal.finishCount(DECIDED_NO), 0u);
+
+        EXPECT_EQ(budget.available(), 8u);
+        EXPECT_GE(pool.threadCount(), 1u);
+        EXPECT_LE(pool.threadCount(), 4u);
     }
     EXPECT_EQ(ApplicabilityPool::liveThreads(), baseline);
 }

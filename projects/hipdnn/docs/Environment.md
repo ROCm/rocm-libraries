@@ -249,40 +249,15 @@ export HIPDNN_FORCE_BENCHMARKING=0
 
 ### Engine Applicability Threading
 
-The hip-kernel-provider can finish its kernel ingestor engines' applicability checks on worker threads. A check that misses the engine's catalog cache walks every arch-eligible kernel variant, about 0.26 µs per variant; with several such engines pending in one call, all but the largest can run beside the calling thread. Threading is **off by default**. It is considered only when the provider has at least two ingestor engines, so a single-engine build never reads these variables.
+The hip-kernel-provider finishes its kernel ingestor engines' applicability checks on worker threads when that pays for itself. A check that misses the engine's catalog cache walks every arch-eligible kernel variant, about 0.26 µs per variant. With at least two ingestor engines pending in one call, all but the largest can run beside the calling thread. It does so only when enough variants can be handed off; below that, and with fewer than two ingestor engines, applicability runs on the calling thread exactly as it always has.
 
 Applicability results are identical either way: the same engines, in the same order, and the same error when one fails.
 
-#### HIPDNN_APPLICABILITY_MAX_THREADS
-
-Total threads, the calling thread included, one applicability call may use.
-
-| Value      | Description                                            |
-|------------|--------------------------------------------------------|
-| (unset)    | Same as `1` (the default) |
-| `1`        | Threading off: engines are checked one after another on the calling thread |
-| `0`, `auto` | min(pending engines, CPUs the process may run on, 9) |
-| `<n>`, n ≥ 2 | At most min(n, pending engines) threads |
-
-Values are case-insensitive and tolerant of surrounding whitespace. Anything that is not a non-negative integer or `auto` is ignored, treated as unset, and logs a warning naming the variable and the value.
-
-**Example:**
-```bash
-#Let applicability use as many threads as the pending work and the CPUs allow
-export HIPDNN_APPLICABILITY_MAX_THREADS=auto
-
-#At most 4 threads per call
-export HIPDNN_APPLICABILITY_MAX_THREADS=4
-```
-
-**Notes:**
-- The variable is read on every applicability call.
-- Worker threads belong to the plugin and live until the last hipDNN handle is destroyed. They are created on the first call that offloads work.
-- Workers are also limited process-wide to half the CPUs the process may run on (at least 1), shared by every concurrent call. A call that finds none free runs on its own thread; it never waits for a worker.
+The threshold is the only setting. A call uses at most min(pending engines, CPUs the process may run on, 9) threads, the calling thread included.
 
 #### HIPDNN_APPLICABILITY_MIN_OFFLOAD_VARIANTS
 
-Diagnostic. The least work, in kernel variants, a call must be able to hand to other threads before it uses any. The offloadable work is the sum of the pending engines' arch-eligible variants minus the largest engine's, which stays on the calling thread. Calls under the threshold, or with fewer than two pending engines, stay on the calling thread. Has no effect while `HIPDNN_APPLICABILITY_MAX_THREADS` is `1`.
+Overrides the threshold, for calibration. The least work, in kernel variants, a call must be able to hand to other threads before it uses any. The offloadable work is the sum of the pending engines' arch-eligible variants minus the largest engine's, which stays on the calling thread. Calls under the threshold, or with fewer than two pending engines, stay on the calling thread.
 
 | Value      | Description                                            |
 |------------|--------------------------------------------------------|
@@ -294,13 +269,14 @@ Anything that is not a non-negative integer is ignored, treated as unset, and lo
 **Example:**
 ```bash
 #Offload whenever two or more engines are pending, to measure the dispatch cost
-export HIPDNN_APPLICABILITY_MAX_THREADS=auto
 export HIPDNN_APPLICABILITY_MIN_OFFLOAD_VARIANTS=0
 ```
 
 **Notes:**
 - The variable is read on every call that has at least two pending engines.
 - Engines that answer from their catalog cache, or decline the graph before walking variants, are never pending.
+- Worker threads belong to the plugin and live until the last hipDNN handle is destroyed. They are created on the first call that offloads work.
+- Workers are limited process-wide to half the CPUs the process may run on (at least 1), shared by every concurrent call. A call that finds none free runs on its own thread; it never waits for a worker.
 
 ### Caching
 
