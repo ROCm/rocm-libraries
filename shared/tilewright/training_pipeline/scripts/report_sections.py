@@ -21,6 +21,7 @@ library build.
 """
 import html
 import math
+import numbers
 import statistics
 import sys
 from collections import defaultdict
@@ -33,6 +34,7 @@ PIPELINE_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_MIN_CELL_GEMMS = 50
 DEFAULT_MIN_EVAL_GEMMS = 20
 DEFAULT_SPLIT_AFTER = 2
+DEFAULT_MAX_SPLIT_DEPTH = 6
 NO_EVIDENCE = "no held-out evidence"
 ACTIONS = (
     "none",
@@ -75,7 +77,8 @@ def esc(s):
 
 
 def _ok(v):
-    return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
+    """A finite number, numpy's included (not a bool)."""
+    return isinstance(v, numbers.Real) and not isinstance(v, bool) and math.isfinite(v)
 
 
 def pct(v, digits=2):
@@ -147,6 +150,9 @@ def run_settings(config_text):
         ),
         "split_after": as_int(
             get("validate.split_after_attempts", None), DEFAULT_SPLIT_AFTER
+        ),
+        "max_split_depth": as_int(
+            get("validate.max_split_depth", None), DEFAULT_MAX_SPLIT_DEPTH
         ),
     }
 
@@ -292,7 +298,9 @@ def recommend(ev, settings):
     attributes) or a pool whose keys serve better kernels; otherwise the largest
     loss of the held-out decomposition picks a tier policy or the kernel
     pool, and a ranking loss a retrain, or a split after
-    validate.split_after_attempts retrains."""
+    validate.split_after_attempts retrains when the cell can split
+    (`lib.subcells.split_eligible_axes`: a Large M or N or a LargeK axis,
+    below validate.max_split_depth); a cell that cannot is retrained."""
     target = settings["target"]
     if not ev.has_model and ev.n_gemms < settings["min_cell_gemms"]:
         return (
@@ -354,10 +362,26 @@ def recommend(ev, settings):
         ev.retrain_attempts >= settings["split_after"]
         and ev.n_gemms >= 2 * settings["min_cell_gemms"]
     ):
+        pipeline_on_path()
+        from lib import subcells
+
+        depth = settings.get("max_split_depth", DEFAULT_MAX_SPLIT_DEPTH)
+        if not subcells.split_eligible_axes(ev.cell, depth):
+            return "retrain", why + "; " + (
+                f"it cannot split: it is at validate.max_split_depth {depth}"
+                if subcells.split_depth(ev.cell) >= depth
+                else "it cannot split: only a Large M or N or a LargeK axis "
+                "splits, and its base cell has none"
+            )
         return (
             "split",
-            f"{why}; {ev.retrain_attempts} retrain attempt(s) did not reach "
-            "the target",
+            f"{why}; "
+            + (
+                f"{ev.retrain_attempts} retrain attempt(s) did not reach the target"
+                if ev.retrain_attempts
+                else "validate.split_after_attempts 0 splits it without a retrain "
+                "first"
+            ),
         )
     return "retrain", why
 
@@ -759,6 +783,11 @@ _STEP_COLORS = {
 }
 
 
+def range_txt(r):
+    """An efficiency range [low, high] as `low-high` (percent)."""
+    return f"{pct(r[0])}&ndash;{pct(r[1])}" if r else "&ndash;"
+
+
 def _bar(steps, scale):
     parts = []
     for s, color in _STEP_COLORS.items():
@@ -799,9 +828,12 @@ def decomposition_html(analysis, title_note="", order=None):
         b = ' class="total" style="font-weight:600"' if bold else ""
         return (
             f'<tr{b}><td class="c">{esc(label)}</td><td>{intf(d.get("n_gemms"))}</td>'
-            f'<td>{intf(d.get("n_served"))}</td><td>{intf(d.get("n_miss"))}</td>'
+            f'<td>{intf(d.get("n_served"))}</td><td>{intf(d.get("n_top_unrunnable"))}</td>'
+            f'<td>{intf(d.get("n_miss"))}</td>'
             f'<td>{intf(unserved)}</td><td class="c">{why}</td>{tds}'
-            f'<td><b>{pct(d.get("sel_eff"))}</b></td><td>{pct(d.get("deployed_sel_eff"))}</td>'
+            f'<td><b>{pct(d.get("sel_eff"))}</b></td>'
+            f'<td>{range_txt(d.get("sel_eff_range"))}</td>'
+            f'<td>{pct(d.get("deployed_sel_eff"))}</td>'
             f"<td>{_bar(steps, scale)}</td></tr>"
         )
 
@@ -825,32 +857,60 @@ def decomposition_html(analysis, title_note="", order=None):
         '<p class="cap">Per leaf cell, the efficiency each selection step loses on the GEMMs '
         "the model serves: <b>library pool</b> = best kernel of the serving library vs the "
         "fastest measured kernel (rows of other libraries, such as planner banks, can be the "
-        "fastest but cannot be picked); <b>hard rules</b> = best kernel passing the LDS gate "
-        "and the correctness rules; <b>non-temporal rule</b> = the optional cache-hint rule "
-        "(when the model serves with it); <b>tier 1</b> = the cell's whitelist (all feasible "
-        "kernels when the whitelist keeps none); <b>cascade</b> = the view keys a cascade "
-        "model scores; <b>ranking</b> = the pick vs the best scored kernel. Losses multiply "
-        "to the selection efficiency. Kernels cost what the stages charge them under "
+        "fastest but cannot be picked); <b>hard rules</b> = best kernel passing the LDS gate, "
+        "the leading-free rule (TensileLite's predicate: a kernel failing it cannot run) "
+        "and the small-batched and Dot2 rules where the bundle serves with them (always "
+        "for MLREC_v2, by its serving flags for MLREC_v3); <b>non-temporal rule</b> = the "
+        "optional cache-hint rule (when the model serves with it); <b>tier 1</b> = the "
+        "cell's whitelist (all feasible kernels when the whitelist keeps none); "
+        "<b>cascade</b> = the view keys a cascade model scores; <b>ranking</b> = the pick "
+        "vs the best scored kernel. Losses multiply to the selection efficiency; no "
+        "level is charged more than the pick costs. Kernels cost what the stages charge "
+        "them under "
         f"<code>validate.pick_measurement: {esc(pm)}</code>"
         + {
-            "timed": " (a pick with only a warm-up row, or off the shape's planned kernel "
-            "list, is a <b>miss</b> at the slowest latency the GEMM measured)",
+            "timed": " (a pick with only a warm-up row is a <b>miss</b> at the slowest "
+            "latency the GEMM measured, a pick off the shape's planned kernel list a "
+            "<b>miss</b> without a reading)",
             "warmup": " (a warm-up row counts with its warm-up latency; a pick off the "
-            "shape's planned kernel list is a <b>miss</b> at the slowest latency the GEMM "
-            "measured)",
+            "shape's planned kernel list is a <b>miss</b> without a reading)",
         }.get(
             pm,
             " (a warm-up row counts with its warm-up latency; kernels off the planned "
             "list are passed over)",
         )
-        + ". <b>unserved</b> GEMMs have no pick (reason: the first empty level; tier = no "
-        "serving cell); <b>deployed %</b> also counts them with the runtime's fallback pick "
-        f"when it was measured, as stages 4.5, 6 and 8 do.{note}"
+        + ". The pick is the first scored kernel the runtime runs: one that fails the "
+        "leading-free rule (TensileLite's predicate; no bench has a row of it) is passed "
+        "over for the next (<b>unrunnable kernel ranked above the pick</b> counts the "
+        "GEMMs where at least one such kernel ranks above the served pick). A miss "
+        "without a reading counts at the next-ranked kernel with a reading the pick "
+        "measurement accepts; <b>sel_eff range</b> puts each such pick at "
+        "the slowest latency its GEMM measured (what stages 4.5, 6 and 8 charge it "
+        "unless a re-bench measured it; stage05 charges the winner's latency over "
+        "<code>train.off_list_sel_eff</code>, the slowest when that gives no "
+        "efficiency; stage 7 leaves the GEMM out of its selection efficiency) and "
+        "at the winner's. <b>unserved</b> GEMMs "
+        "have no pick (reason: the first empty level; tier = no serving cell); "
+        "<b>deployed %</b> also counts them with the runtime's fallback pick when it was "
+        f"measured, as stages 4.5, 6 and 8 do.{note}"
         f'{title_note}</p><p class="cap">{legend}</p>'
         + table(
-            ["<cell", "GEMMs", "served", "misses", "unserved", "<unserved at"]
+            [
+                "<cell",
+                "GEMMs",
+                "served",
+                "unrunnable kernel ranked above the pick",
+                "misses",
+                "unserved",
+                "<unserved at",
+            ]
             + [f"{esc(STEP_TITLES[s])} loss %" for s in STEPS]
-            + ["sel_eff %", "deployed %", "<losses (bar = worst cell)"],
+            + [
+                "sel_eff %",
+                "<sel_eff range %",
+                "deployed %",
+                "<losses (bar = worst cell)",
+            ],
             rows,
             style="font-size:11px",
         )
@@ -1284,12 +1344,16 @@ def weak_cells(decomp, settings):
     return rows
 
 
-def contexts_html(analysis, s4b_rows, settings, names=None):
+def contexts_html(analysis, s4b_rows, settings, names=None, audit=None):
     """Selection efficiency per execution context: the pipeline's own
-    held-out measurements (stage04b, per round) and the report's re-ranking
-    under the shipped bundle, trained and held-out contexts separately, and
-    the weak cells of each context."""
+    held-out measurements (stage04b, per round), the report's re-ranking
+    under the shipped bundle of the GEMMs it never trained on, and, apart,
+    its in-sample re-ranking of its training benches beside the audit set's
+    held-out result of the same context (`audit`: {context label: {"sel_eff",
+    "n", "protocol", "round", "group"}}), and the weak cells of each
+    context."""
     names = names or {}
+    audit = audit or {}
     target = settings["target"]
 
     def name(label):
@@ -1330,24 +1394,49 @@ def contexts_html(analysis, s4b_rows, settings, names=None):
             )
         )
     sets = context_sets(analysis)
-    trs = []
-    for kind, title in CONTEXT_SETS:
-        for label, dec in sorted(sets[kind].items()):
-            d = dec.get("*") or {}
-            weak = weak_cells(dec, settings)
-            se = d.get("sel_eff")
-            trs.append(
-                f'<tr class="{"lose" if _ok(se) and se < target else ""}">'
-                f'<td class="c">{esc(name(label))}</td><td class="c">{esc(title)}</td>'
-                f'<td>{intf(d.get("n_gemms"))}</td><td>{intf(d.get("n_served"))}</td>'
-                f'<td>{intf(d.get("n_miss"))}</td><td><b>{pct(se)}</b></td>'
-                f'<td>{pct(d.get("deployed_sel_eff"))}</td>'
+
+    def ctx_row(label, title, dec, held):
+        d = dec.get("*") or {}
+        se = d.get("sel_eff")
+        a = audit.get(label) or {}
+        ase = a.get("sel_eff")
+        judged = ase if not held else se
+        cls = "lose" if _ok(judged) and judged < target else ""
+        own = (
+            f'<td class="c">{esc(name(label))}</td>'
+            + ("" if not held else f'<td class="c">{esc(title)}</td>')
+            + f'<td>{intf(d.get("n_gemms"))}</td><td>{intf(d.get("n_served"))}</td>'
+            f'<td>{intf(d.get("n_miss"))}</td><td><b>{pct(se)}</b></td>'
+            f'<td class="c">{range_txt(d.get("sel_eff_range"))}</td>'
+            f'<td>{pct(d.get("deployed_sel_eff"))}</td>'
+        )
+        if held:
+            return (
+                f'<tr class="{cls}">{own}'
                 f"<td>{_fmt((se - target) * 100 if _ok(se) else None, True)}</td>"
-                f"<td>{len(weak)}</td></tr>"
+                f"<td>{len(weak_cells(dec, settings))}</td></tr>"
             )
-    if trs:
+        where = (
+            f"{a.get('round')}, group {a.get('group')}, protocol {a.get('protocol')}"
+            if a
+            else "not measured on the audit set"
+        )
+        return (
+            f'<tr class="{cls}">{own}<td>{len(weak_cells(dec, settings))}</td>'
+            f"<td><b>{pct(ase)}</b></td>"
+            f"<td>{_fmt((ase - target) * 100 if _ok(ase) else None, True)}</td>"
+            f'<td>{intf(a.get("n"))}</td><td class="c">{esc(where)}</td></tr>'
+        )
+
+    held_rows = [
+        ctx_row(label, title, dec, True)
+        for kind, title in CONTEXT_SETS
+        if kind != "training"
+        for label, dec in sorted(sets[kind].items())
+    ]
+    if held_rows:
         parts.append(
-            "<h3>Shipped bundle per context (the report's re-ranking)</h3>"
+            "<h3>Re-ranking of the GEMMs the bundle never trained on</h3>"
             + table(
                 [
                     "<context",
@@ -1356,11 +1445,43 @@ def contexts_html(analysis, s4b_rows, settings, names=None):
                     "served",
                     "misses",
                     "sel_eff %",
+                    "<sel_eff range %",
                     "deployed %",
                     "vs target pp",
                     "weak cells",
                 ],
-                trs,
+                held_rows,
+            )
+        )
+    in_rows = [
+        ctx_row(label, "", dec, False)
+        for label, dec in sorted(sets["training"].items())
+    ]
+    if in_rows:
+        parts.append(
+            "<h3>In-sample re-ranking (training benches)</h3>"
+            '<p class="cap">The bundle re-ranked on the GEMMs it trained on, per '
+            "context: in-sample, context only, never a measure of the goal. Beside "
+            "it, the audit set's held-out result of the same context for the bundle "
+            "(GEMMs no round trained on; cell mean, under the official protocol for "
+            "the exclusive group and v2 for the others), which is the measure; rows "
+            "are marked by it.</p>"
+            + table(
+                [
+                    "<context",
+                    "GEMMs",
+                    "served",
+                    "misses",
+                    "in-sample sel_eff %",
+                    "<range %",
+                    "deployed %",
+                    "in-sample weak cells",
+                    "held-out audit %",
+                    "audit vs target pp",
+                    "audit GEMMs",
+                    "<audit evaluation",
+                ],
+                in_rows,
             )
         )
     blocks = []
@@ -1399,9 +1520,10 @@ def contexts_html(analysis, s4b_rows, settings, names=None):
         parts.append(
             "<h3>Weak cells per context</h3>"
             f'<p class="cap">Leaf cells below the {target * 100:.1f}% target with at least '
-            f'{settings["min_eval_gemms"]} served GEMMs in that context; gain = share of the '
-            "context's served GEMMs &times; gap. Weak cells of held-out contexts are not chosen "
-            "for training.</p>" + "".join(blocks)
+            f'{settings["min_eval_gemms"]} served GEMMs in that context, in the re-rankings '
+            "above (those of training GEMMs are in-sample: context only); gain = share of "
+            "the context's served GEMMs &times; gap. Weak cells of held-out contexts are not "
+            "chosen for training.</p>" + "".join(blocks)
         )
     return "".join(parts)
 

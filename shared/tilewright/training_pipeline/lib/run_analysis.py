@@ -12,13 +12,20 @@ are the cheapest cost among
   oracle   every measured solution;
   pool     the kernels of the serving library pool (rows of other libraries,
            such as planner banks, can win but cannot be picked);
-  hard     the kernels that pass the LDS gate and the hard feasibility rules
-           (small batched problems fit one tile, Dot2 only for M < 3, a
-           contiguous free dimension holds one global-read vector);
-  soft     those that also pass the non-temporal rule, when the model serves
+  hard     the kernels that pass the LDS gate, the leading-free rule (a
+           contiguous free dimension holds one global-read vector:
+           TensileLite's predicate, so a kernel failing it cannot run,
+           whether the engine applies the rule, as MLREC_v2 does, or leaves
+           it to the integration, as MLREC_v3 does) and the small-batched
+           (small batched problems fit one tile) and Dot2 (only for M < 3)
+           rules when the bundle serves with them (`serving_rules`: always
+           for MLREC_v2, by its serving flags for MLREC_v3);
+  soft     those that also pass the non-temporal rule, when the bundle serves
            with it (else the same as `hard`);
-  tier     those of tier 1: feasible and on the serving cell's whitelist, or
-           every feasible kernel when the whitelist keeps none of the pool;
+  tier     those of tier 1: the kernels the engine admits under the bundle's
+           rules that are on the serving cell's whitelist, or every one it
+           admits when the whitelist keeps none of the pool, less those that
+           cannot run;
   scored   those the engine scores in the GEMM's execution context (a cascade
            model scores only the best view keys of a tier without a
            whitelist);
@@ -28,17 +35,31 @@ are the cheapest cost among
 A kernel's cost is `lib.evaluate.pick_cost` under the run's
 `validate.pick_measurement`, as in stages 4.5, 6, 7 and 8: a timed row costs
 its latency; a skip row (screened, one warm-up run) costs its warm-up
-latency under `any` and is a miss under `timed`, as is, under `timed`, a
-kernel left off the GEMM's planned kernel list (stage02 plan.json); a miss
-costs the slowest latency the GEMM measured. A kernel without a row and on
-the list (or without a list) is not run.
+latency under `any` and `warmup` and is a miss at the slowest latency the
+GEMM measured under `timed`. The pick is the kernel the runtime serves
+(`resolve_pick`): the first scored kernel that runs. A kernel without a row
+and on the GEMM's planned kernel list (stage02 plan.json), or without a
+list, is one the bench did not run, so the runtime does not either; one
+that fails the leading-free rule cannot run (`leading_free_mask`); the
+runtime passes over both. A kernel off the list that passes the rule may
+run but was never measured: under `any` it is passed over too, under the
+other measurements it is the pick, a miss (`not_benched`) whose cost is
+unknown. The pick level then holds the next-ranked kernel that has a reading
+the measurement accepts (the slowest latency the GEMM measured when none
+does), and `decomposition` bounds the selection efficiency between that
+pick at the slowest latency the GEMM measured and at the winner's
+(`sel_eff_range`); levels before it charge such a kernel the slowest
+latency.
 
-Each level is clamped to be no faster than the previous one, so the per-step
-losses log(level / previous level) add up to -log(selection efficiency). A
-GEMM whose pick does not exist (no serving cell, nothing feasible, or no
-scored kernel runs) is counted as unserved; its loss is not decomposed, and
-`deployed_sel_eff` counts it with the runtime's fallback pick when that was
-measured, as the stages do. `scored` and `pick` need the tilewright module
+Each level is clamped to be no faster than the previous one and no slower
+than the pick, so the per-step losses log(level / previous level) add up to
+-log(selection efficiency) and the pick is charged its own cost: a GEMM
+whose engine scores a kernel the levels before `scored` leave out (the
+report's rules disagree with the engine's; `n_inconsistent` counts them)
+loses no more than its pick costs. A GEMM whose pick does not exist (no
+serving cell, nothing feasible, or no scored kernel runs) is counted as
+unserved; its loss is not decomposed, and `deployed_sel_eff` counts it with
+the runtime's fallback pick when that was measured, as the stages do. `scored` and `pick` need the tilewright module
 and the model file.
 
 A kernel is its 8-field signature (SIG_FIELDS: macro tile M / N, depthU,
@@ -183,6 +204,32 @@ def holdout_context_dir(rd: Path) -> Path:
     return rd / "stage03c" / "holdout" / "stage04"
 
 
+def _plan_file(
+    path: Path, identity: Optional[ki.LibraryIdentity]
+) -> Tuple[
+    Optional[Dict[str, Any]], Optional[Dict[ShapeKey, Optional[FrozenSet[int]]]]
+]:
+    """(the plan.json document, {shape: its kernel list, None when benched
+    exhaustively}) of one stage02 plan, its indices those of `identity`'s
+    library when given; (None, None) when it cannot be read."""
+    try:
+        doc = dict(json.loads(Path(path).read_text()), path=str(path))
+    except (OSError, ValueError, TypeError):
+        return None, None
+    try:
+        lookup = ev.remapped_plan_lookup(doc, identity, str(path))
+    except (KeyError, TypeError, ValueError):
+        return doc, None
+    return doc, {
+        shape: (
+            frozenset(int(s) for s in e["kernels"])
+            if e.get("kernels") is not None
+            else None
+        )
+        for shape, e in lookup.items()
+    }
+
+
 def round_plan(
     rd: Path, identity: Optional[ki.LibraryIdentity] = None
 ) -> Optional[Dict[ShapeKey, Optional[FrozenSet[int]]]]:
@@ -191,21 +238,35 @@ def round_plan(
     of `identity`'s library when given; None without a plan."""
     try:
         path = run_layout.plan_dir(rd) / "plan.json"
-        doc = dict(json.loads(path.read_text()), path=str(path))
-    except (OSError, ValueError, TypeError):
+    except ValueError:
         return None
+    return _plan_file(path, identity)[1]
+
+
+def round_context_plans(
+    rd: Path, identity: Optional[ki.LibraryIdentity] = None
+) -> Dict[Tuple[int, str], PlanLookup]:
+    """{(cu_budget, schedule): `round_plan`-like lookup} of the round's
+    execution-context re-plans (stage02's contexts/<label>/plan.json, each
+    naming its context). stage03c benches a context's shape from its
+    re-plan's list when the re-plan holds the shape, else from the round's
+    own list."""
     try:
-        lookup = ev.remapped_plan_lookup(doc, identity, str(path))
-    except (KeyError, TypeError, ValueError):
-        return None
-    return {
-        shape: (
-            frozenset(int(s) for s in e["kernels"])
-            if e.get("kernels") is not None
-            else None
-        )
-        for shape, e in lookup.items()
-    }
+        root = run_layout.plan_dir(rd) / "contexts"
+    except ValueError:
+        return {}
+    out: Dict[Tuple[int, str], PlanLookup] = {}
+    for path in sorted(root.glob("*/plan.json")) if root.is_dir() else []:
+        doc, lookup = _plan_file(path, identity)
+        ctx = (doc or {}).get("context")
+        if lookup is None or not isinstance(ctx, dict):
+            continue
+        try:
+            key = (int(ctx["cu_budget"]), str(ctx.get("schedule") or "default"))
+        except (KeyError, TypeError, ValueError):
+            continue
+        out[key] = lookup
+    return out
 
 
 def bench_dirs(run_dir: Path) -> List[Path]:
@@ -425,12 +486,20 @@ def _fallback(per: Mapping[int, Row]) -> Optional[int]:
 
 
 def _listed(
-    shape: ShapeKey, plans: Sequence[Optional[PlanLookup]]
+    shape: ShapeKey,
+    plans: Sequence[Optional[PlanLookup]],
+    own: Optional[Sequence[Optional[PlanLookup]]] = None,
 ) -> Optional[FrozenSet[int]]:
     """The union of the kernel lists the plans of a GEMM's bench folders give
-    its shape; None when any of them benched it exhaustively or has no plan."""
+    its shape; None when any of them benched it exhaustively or has no plan.
+    `own` (aligned with `plans`) holds each folder's re-plan of the GEMM's
+    execution context, which takes the place of the folder's plan for the
+    shapes it holds."""
     lists = []
-    for lk in plans:
+    for j, lk in enumerate(plans):
+        mine = own[j] if own is not None else None
+        if mine is not None and shape in mine:
+            lk = mine
         if lk is None or shape not in lk or lk[shape] is None:
             return None
         lists.append(lk[shape])
@@ -551,11 +620,17 @@ def load_bench(
     aggregation: str = repeats.DEFAULT_AGGREGATION,
     blocklist: Optional[Any] = None,
     pool_indices: Optional[Iterable[int]] = None,
+    context_plans: Optional[
+        Sequence[Optional[Mapping[Tuple[int, str], PlanLookup]]]
+    ] = None,
 ) -> Bench:
     """GEMMs of the enriched chunks of `dirs` (their union; repeated
     measurements of a solution merged by `aggregation`, lib/repeats.py),
     routed to leaves with `tree`. `keep` filters GEMMs by their problem fields; `plans` (aligned
-    with `dirs`, see `round_plan`) set each GEMM's planned kernel list.
+    with `dirs`, see `round_plan`) set each GEMM's planned kernel list, a
+    GEMM of an execution context taking its shape's list from its
+    context's re-plan of the folder (`context_plans`, aligned with `dirs`,
+    see `round_context_plans`) when that holds the shape.
     With `identity` each folder's solution indices are the library's
     (`folder_remaps`; with `strict`, BuildChangedError unless every folder's
     indices still name their kernels) and a planned list holds the aliases
@@ -700,8 +775,18 @@ def load_bench(
         tested = us[~skip]
         winner = float(tested.min()) if tested.size else float(us.min())
         m, n, k, b = key[:4]
+        folders = sorted(origin[key])
+        ctx = tuple(key[len(PROBLEM_FIELDS) :]) or None
         listed = (
-            _listed((m, n, k, b), [plans[i] for i in sorted(origin[key])])
+            _listed(
+                (m, n, k, b),
+                [plans[i] for i in folders],
+                (
+                    [(context_plans[i] or {}).get(ctx) for i in folders]
+                    if context_plans is not None and ctx is not None
+                    else None
+                ),
+            )
             if plans is not None
             else None
         )
@@ -808,23 +893,44 @@ def pool_for(bench: Bench, library: Optional[Sequence[Mapping[str, Any]]]) -> Po
     return Pool(kernels, "bench")
 
 
+def leading_free_mask(pool: Pool, problem: Mapping[str, Any]) -> np.ndarray:
+    """Kernels of `pool` that pass the leading-free rule for one problem
+    (`lib.features` problem kwargs): a contiguous free dimension holds one
+    global-read vector (M >= grvw_a unless A is transposed, N >= grvw_b when
+    B is; not checked for Int8x4). It is TensileLite's
+    LeadingFree0/1SizesGreaterOrEqual predicate, so a kernel failing it
+    cannot run on the problem, whether or not the model's engine applies the
+    rule; no bench row has such a kernel."""
+    f = pool.f
+    M, N = int(problem["m"]), int(problem["n"])
+    ok = np.ones(len(pool), dtype=bool)
+    if fs.normalize_dtype_name(problem["a_dtype"]) == "int8x4":
+        return ok
+    if not feasibility._is_t(problem["a_transpose"]):
+        ok &= ~(M < f["grvw_a"])
+    if feasibility._is_t(problem["b_transpose"]):
+        ok &= ~(N < f["grvw_b"])
+    return ok
+
+
 def gate_masks(
     pool: Pool,
     problem: Mapping[str, Any],
     *,
     lds_bytes: int,
-    non_temporal_rule: bool,
-    non_temporal_family_rule: bool = False,
+    rules: Mapping[str, bool],
 ) -> Tuple[np.ndarray, np.ndarray]:
     """(hard, soft) pass masks over `pool` for one problem (`lib.features`
-    problem kwargs): `hard` = LDS gate and the rules that keep results
-    correct, `soft` = `hard` and, with `non_temporal_rule`, the non-temporal
-    rule (refined family-wise with `non_temporal_family_rule`); `soft` is
-    `lib.feasibility.passes_gates`."""
+    problem kwargs) under the rules a bundle serves with (`rules`:
+    `lib.feasibility.passes_gates` keywords, `serving_rules`): `hard` = the
+    LDS gate and the small-batched, Dot2 and leading-free rules where
+    `rules` applies them (an absent keyword applies the rule, as
+    `passes_gates` does), `soft` = `hard` and the non-temporal rule (refined
+    family-wise) where `rules` applies it; `soft` is
+    `lib.feasibility.passes_gates`, the kernels the engine admits."""
     f = pool.f
     M, N, K, B = (int(problem[x]) for x in ("m", "n", "k", "batch"))
     a_dt, b_dt = problem["a_dtype"], problem["b_dtype"]
-    a_t = feasibility._is_t(problem["a_transpose"])
     b_t = feasibility._is_t(problem["b_transpose"])
     la, lb = feasibility.lds_bits(a_dt), feasibility.lds_bits(b_dt)
     if la <= 0 or lb <= 0:
@@ -832,18 +938,17 @@ def gate_masks(
         return none, none.copy()
     usage = f["mt_m"] * f["mt_k"] * (la / 8.0) + f["mt_n"] * f["mt_k"] * (lb / 8.0)
     ok = usage <= float(lds_bytes)
-    if M <= 256 and N <= 256 and K < 1024 and B != 1:
-        ok &= ~((f["mt_m"] < M) | (f["mt_n"] < N))
-    if M > 2:
+    if rules.get("small_batched_rule", True):
+        if M <= 256 and N <= 256 and K < 1024 and B != 1:
+            ok &= ~((f["mt_m"] < M) | (f["mt_n"] < N))
+    if rules.get("dot2_rule", True) and M > 2:
         ok &= ~((f["mi_m"] == 1) & (f["mi_n"] == 1) & (f["mi_k"] == 64))
-    if fs.normalize_dtype_name(a_dt) != "int8x4":
-        if not a_t:
-            ok &= ~(M < f["grvw_a"])
-        if b_t:
-            ok &= ~(N < f["grvw_b"])
-    if not non_temporal_rule:
+    if rules.get("leading_free_rule", True):
+        ok &= leading_free_mask(pool, problem)
+    if not rules.get("non_temporal_rule", True):
         return ok, ok.copy()
     ra, rb = feasibility.rule_bits(a_dt), feasibility.rule_bits(b_dt)
+    a_t = feasibility._is_t(problem["a_transpose"])
     cha, chb = f["cache_hints_a"], f["cache_hints_b"]
     hinted = (cha != 0) | (chb != 0)
     nt = feasibility.NON_TEMPORAL
@@ -860,7 +965,9 @@ def gate_masks(
         fail = np.where(aligned, fail_aligned, hinted)
     else:
         fail = hinted
-    if non_temporal_family_rule and feasibility.in_family_region(M, N, K, B):
+    if rules.get("non_temporal_family_rule", False) and feasibility.in_family_region(
+        M, N, K, B
+    ):
         passing = np.zeros(int(pool.family.max()) + 1 if len(pool) else 0, dtype=bool)
         np.logical_or.at(passing, pool.family, ~fail)
         fail = fail & ~(pool.family_kept & ~passing[pool.family])
@@ -899,6 +1006,31 @@ class ModelInfo:
     # The rounds whose every GEMM a bundle trained on at once (the final
     # retrain's); None for a round's bundle.
     trained_rounds: Optional[List[str]] = None
+    # The model file's format version and the rules it serves with
+    # (`lib.feasibility.soft_rules` of its serving flags); None when the
+    # file was not read.
+    version: Optional[int] = None
+    rules: Optional[Dict[str, bool]] = None
+
+
+def serving_rules(model: Optional[ModelInfo]) -> Dict[str, bool]:
+    """`lib.feasibility.passes_gates` rule keywords of the rules `model`
+    serves with: those of its model file's serving flags when it was read
+    (`ModelInfo.rules`), else MLREC_v2's: the small-batched, Dot2 and
+    leading-free rules, and the non-temporal rule (refined family-wise) as
+    the model records it."""
+    if model is not None and model.rules is not None:
+        return dict(model.rules)
+    nt = model.non_temporal_rule if model is not None else True
+    out = {
+        "small_batched_rule": True,
+        "dot2_rule": True,
+        "leading_free_rule": True,
+        "non_temporal_rule": bool(nt),
+    }
+    if nt and model is not None and model.non_temporal_family_rule:
+        out["non_temporal_family_rule"] = True
+    return out
 
 
 def _read(path: Path) -> Optional[Dict[str, Any]]:
@@ -1048,6 +1180,8 @@ def final_model(
                 for c in parsed["cells"]
             }
             serving = parsed.get("serving") or {}
+            info.version = int(parsed.get("version") or 2)
+            info.rules = feasibility.soft_rules(serving, info.version)
             if parsed.get("version") == 3 and serving.get("whitelist_tier"):
                 info.view_keys = {
                     str(c["label"]): [int(h) for h in c.get("view_key_hashes") or []]
@@ -1128,10 +1262,14 @@ def _model_bytes(
 
 @dataclass
 class BenchSet:
-    """Folders of one group of benches and the plan of each."""
+    """Folders of one group of benches, the plan of each and its execution
+    contexts' re-plans (`round_context_plans`)."""
 
     dirs: List[Path]
     plans: List[Optional[PlanLookup]]
+    context_plans: List[Optional[Dict[Tuple[int, str], PlanLookup]]] = field(
+        default_factory=list
+    )
 
     def __bool__(self) -> bool:
         return bool(self.dirs)
@@ -1158,7 +1296,9 @@ def model_benches(
     A bundle that trained on every GEMM of its rounds at once (the final
     retrain: `ModelInfo.trained_rounds`) has their stage04 as training and
     that of any other round as held_out. With `identity` the plans' kernel
-    lists are its library's indices.
+    lists are its library's indices. Each folder's GEMMs of an execution
+    context are listed by the round's re-plan of that context
+    (`round_context_plans`), as they were benched.
     """
     rounds = round_dirs(run_dir)
     names = [rd.name for rd in rounds]
@@ -1170,6 +1310,10 @@ def model_benches(
         else None
     )
     plans = {rd.name: round_plan(rd, identity) if with_plans else None for rd in rounds}
+    replans = {
+        rd.name: round_context_plans(rd, identity) if with_plans else {}
+        for rd in rounds
+    }
     out = {k: BenchSet([], []) for k in ("training", "held_out", "gate")}
     out["holdout_contexts"] = BenchSet([], [])
 
@@ -1177,6 +1321,7 @@ def model_benches(
         if d is not None and _has_chunks(d):
             out[kind].dirs.append(d)
             out[kind].plans.append(plans[rd.name] if plan else None)
+            out[kind].context_plans.append(replans[rd.name] if plan else None)
 
     for i, rd in enumerate(rounds):
         if every is not None:
@@ -1220,6 +1365,13 @@ class Evaluated:
     pick_measurement: str = CONFIG_PICK_MEASUREMENT
     miss: List[Optional[str]] = field(default_factory=list)
     fallback_us: Optional[np.ndarray] = None
+    # Per GEMM: the pick can run but was never measured (its level holds an
+    # estimate, `resolve_pick`), the slowest latency the GEMM measured (its
+    # worst case), and the scored kernels ranked above the pick that cannot
+    # run (the leading-free rule).
+    unmeasured: Optional[np.ndarray] = None
+    worst_us: Optional[np.ndarray] = None
+    n_unrunnable: Optional[np.ndarray] = None
     n_inconsistent: int = 0
     n_out_of_pool_rows: int = 0
     n_without_pool_kernel: int = 0
@@ -1245,6 +1397,71 @@ def _restricted(g: Gemm, inside: np.ndarray) -> Gemm:
     )
 
 
+@dataclass
+class Pick:
+    """The kernel the runtime serves from one GEMM's scored ranking
+    (`resolve_pick`): its pool position (-1: none runs), cost and miss
+    reason; `unmeasured` when it can run but has no reading, `cost` then
+    being the next-ranked kernel's with a reading the measurement accepts
+    (else the slowest latency the GEMM measured); `n_unrunnable` counts the
+    scored kernels ranked above it that cannot run."""
+
+    pos: int = -1
+    cost: float = math.nan
+    miss: Optional[str] = None
+    unmeasured: bool = False
+    n_unrunnable: int = 0
+
+
+def resolve_pick(
+    scored: Sequence[int],
+    sids: np.ndarray,
+    runnable: np.ndarray,
+    timed: Mapping[int, float],
+    screened: Mapping[int, float],
+    listed: Optional[Iterable[int]],
+    pick_measurement: str,
+) -> Pick:
+    """The kernel the runtime serves from `scored` (the engine's scored
+    pool positions, best first; `sids` the pool's solution indices) for one
+    GEMM with rows `timed` / `screened` ({solution: latency}) and planned
+    list `listed`: the first one that runs. A kernel with a row runs. One
+    without a row that fails the leading-free rule (`runnable` False:
+    TensileLite's predicate) cannot run, and one on the list (or without a
+    list) is one the bench did not run (`lib.evaluate.pick_cost`): the
+    runtime passes over both. One off the list that passes the rule may
+    run: under `pick_measurement` "any" it is passed over like a kernel
+    without a row, as the stages do; otherwise it is the pick, a
+    `not_benched` miss without a reading, costed at the next-ranked kernel
+    with a reading the measurement accepts, else the slowest latency the
+    GEMM measured."""
+    out = Pick()
+    for j, p in enumerate(scored):
+        sid = int(sids[p])
+        if sid not in timed and sid not in screened and not runnable[p]:
+            out.n_unrunnable += 1
+            continue
+        runs, cost, miss = ev.pick_cost(sid, timed, screened, listed, pick_measurement)
+        if not runs:
+            continue
+        out.pos, out.miss = int(p), miss
+        if miss != "not_benched":
+            out.cost = float(cost)
+            return out
+        out.unmeasured = True
+        out.cost = float(cost)
+        for q in scored[j + 1 :]:
+            qs = int(sids[q])
+            if qs not in timed and qs not in screened:
+                continue
+            ok, c, m = ev.pick_cost(qs, timed, screened, listed, pick_measurement)
+            if ok and m is None:
+                out.cost = float(c)
+                break
+        return out
+    return out
+
+
 def evaluate(
     bench: Bench,
     pool: Pool,
@@ -1268,8 +1485,7 @@ def evaluate(
     engine = tw is not None and model is not None and model.data is not None
     labels = set(model.labels) if model else set()
     lds = model.hardware.lds_bytes if model and model.hardware else None
-    nt_rule = model.non_temporal_rule if model else True
-    nt_family = bool(model.non_temporal_family_rule) if model else False
+    rules = serving_rules(model)
     wl_masks: Dict[str, np.ndarray] = {}
     if engine:
         loaded = ev.load_model_bytes(model.data, tw)
@@ -1299,6 +1515,9 @@ def evaluate(
     cells: List[Optional[str]] = [None] * n
     miss: List[Optional[str]] = [None] * n
     fallback_us = np.full(n, np.nan)
+    unmeasured = np.zeros(n, dtype=bool)
+    worst_us = np.full(n, np.nan)
+    n_unrunnable = np.zeros(n, dtype=np.int64)
     pick_pos = np.full(n, -1, dtype=np.int64)
     winner_pos = np.full(n, -1, dtype=np.int64)
     n_bad = n_win_out = 0
@@ -1314,6 +1533,7 @@ def evaluate(
             if hit.size:
                 fallback_us[i] = float(g.us[hit[0]])
         worst = float(g.us.max())
+        worst_us[i] = worst
         row_cost = np.where(g.skip & screened_miss, worst, g.us)
         inside = pos >= 0
         cost = np.full(P, np.inf)
@@ -1333,14 +1553,10 @@ def evaluate(
             levels[i, :2] = lv
             blocked[i] = "hard"
             continue
-        hard, soft = gate_masks(
-            pool,
-            prob,
-            lds_bytes=lds,
-            non_temporal_rule=nt_rule,
-            non_temporal_family_rule=nt_family,
-        )
-        masks = [hard, soft]
+        hard, soft = gate_masks(pool, prob, lds_bytes=lds, rules=rules)
+        runnable = leading_free_mask(pool, prob)
+        masks = [hard & runnable, soft & runnable]
+        admitted = soft
         if cell is not None:
             wl = wl_masks.get(cell)
             if wl is None:
@@ -1349,10 +1565,10 @@ def evaluate(
                     model.view_keys.get(cell) or [],
                     model.attribute_spec,
                 )
-            tier = soft & wl
-            if not tier.any():
-                tier = soft
-            masks.append(tier)
+            admitted = soft & wl
+            if not admitted.any():
+                admitted = soft
+            masks.append(admitted & runnable)
         stop = None
         for name, m in zip(LEVELS[2:], masks):
             best = float(cost[m].min()) if m.any() else math.inf
@@ -1368,29 +1584,29 @@ def evaluate(
                 contexts[ctx] = ev.make_context(tw, ctx)
             ranked = cs.rank(pobj, hw, 1, contexts[ctx])
             scored = [int(r.config_index) for r in ranked if r.scored]
+            timed = {int(s): float(u) for s, u, k in zip(g.sids, g.us, g.skip) if not k}
+            screened = {int(s): float(u) for s, u, k in zip(g.sids, g.us, g.skip) if k}
+            pk = resolve_pick(
+                scored, pool.sids, runnable, timed, screened, g.listed, pick_measurement
+            )
+            n_unrunnable[i] = pk.n_unrunnable
             runs = [p for p in scored if math.isfinite(cost[p])]
-            if not runs:
+            if pk.pos < 0:
                 stop = "scored"
             else:
-                if not masks[-1][runs].all():
+                if not admitted[runs].all():
                     n_bad += 1
-                lv.append(max(lv[-1], float(cost[runs].min())))
-                lv.append(max(lv[-1], float(cost[runs[0]])))
-                pick_pos[i] = runs[0]
+                # When the rule fails every scored kernel with a cost (the
+                # pool's vector widths disagree with the build benched), the
+                # pick has a row: it ran, so it is costed among `runs`.
+                costed = [p for p in runs if runnable[p]] or runs
+                lv.append(max(lv[-1], float(cost[costed].min())))
+                lv.append(max(w, pk.cost))
+                lv[1:-1] = [min(v, lv[-1]) for v in lv[1:-1]]
+                pick_pos[i] = pk.pos
                 served[i] = True
-                timed = {
-                    int(s): float(u) for s, u, k in zip(g.sids, g.us, g.skip) if not k
-                }
-                screened = {
-                    int(s): float(u) for s, u, k in zip(g.sids, g.us, g.skip) if k
-                }
-                _, _, miss[i] = ev.pick_cost(
-                    int(pool.sids[runs[0]]),
-                    timed,
-                    screened,
-                    g.listed,
-                    pick_measurement,
-                )
+                miss[i] = pk.miss
+                unmeasured[i] = pk.unmeasured
         levels[i, : len(lv)] = lv
         blocked[i] = stop
     return Evaluated(
@@ -1408,6 +1624,9 @@ def evaluate(
         pick_measurement=pick_measurement,
         miss=miss,
         fallback_us=fallback_us,
+        unmeasured=unmeasured,
+        worst_us=worst_us,
+        n_unrunnable=n_unrunnable,
         n_inconsistent=n_bad,
         n_out_of_pool_rows=n_out,
         n_without_pool_kernel=n_empty,
@@ -1442,16 +1661,42 @@ def decomposition(
     over the served GEMMs, the efficiency ceilings of each level over every
     GEMM that reaches it, why the unserved GEMMs have no pick, the misses
     among the picks, and `deployed_sel_eff`, the served picks and the
-    runtime's fallback picks of the unserved GEMMs together (the number the
-    stages report)."""
+    runtime's fallback picks of the unserved GEMMs together, as stages 4.5,
+    6 and 8 count them. It is not the stages' number where they charge a
+    pick differently: a pick that can run but was never measured counts here
+    at its estimate (`resolve_pick`), where stages 4.5, 6 and 8 charge it
+    the slowest latency its GEMM measured unless a re-bench measured it
+    (`validate.rebench_misses`) and stage05 the winner's latency over
+    `train.off_list_sel_eff` (the slowest latency when that gives no
+    efficiency: unset, or `auto` with fewer re-benched misses than
+    `train.off_list_min_misses` and no `train.off_list_fallback`); a kernel
+    off the planned list that cannot run is passed over here, as the runtime
+    passes over it, where stages 4.5, 5, 6 and 8 charge it as their pick
+    under every measurement but `any`. Stage 7 costs the runtime's top-1
+    without the planned list: it leaves out of its selection efficiency a
+    problem whose top-1 kernel has no row, whether the kernel was never
+    measured or cannot run. `n_unmeasured` counts the
+    picks that can run but were never measured; `sel_eff_range` and
+    `deployed_sel_eff_range` bound the efficiencies with each of them at the
+    slowest latency its GEMM measured and at the winner's ([low, high]; None
+    without such picks). `n_top_unrunnable` counts the served GEMMs with at
+    least one scored kernel ranked above the pick that cannot run (the
+    leading-free rule; `Pick.n_unrunnable`), the top-ranked one or another,
+    which the runtime passes over."""
     keys = _group_keys(e, by)
     groups: Dict[str, List[int]] = defaultdict(list)
     for i in range(len(e.gemms)) if where is None else where:
         groups[keys[i]].append(i)
         groups["*"].append(i)
+    n = len(e.gemms)
+    unmeasured = e.unmeasured if e.unmeasured is not None else np.zeros(n, bool)
+    unrunnable = e.n_unrunnable if e.n_unrunnable is not None else np.zeros(n, int)
     with np.errstate(divide="ignore", invalid="ignore"):
         logs = np.log(e.levels)
         fb = np.log(e.fallback_us) if e.fallback_us is not None else None
+        worst = np.log(e.worst_us) if e.worst_us is not None else logs[:, -1]
+    pick_lo = np.where(unmeasured, worst, logs[:, -1])
+    pick_hi = np.where(unmeasured, logs[:, 0], logs[:, -1])
     out: Dict[str, Dict[str, Any]] = {}
     for k, idx in groups.items():
         idx_a = np.asarray(idx, dtype=np.int64)
@@ -1464,12 +1709,21 @@ def decomposition(
         misses = Counter(e.miss[i] for i in idx if e.served[i] and e.miss[i])
         rec["n_miss"] = sum(misses.values())
         rec["n_miss_by_reason"] = dict(misses)
+        um = unmeasured[idx_a] & sv
+        rec["n_unmeasured"] = int(um.sum())
+        rec["n_top_unrunnable"] = int(((unrunnable[idx_a] > 0) & sv).sum())
+        rec["sel_eff_range"] = rec["deployed_sel_eff_range"] = None
         steps = {}
         if sv.any():
             d = np.diff(lg[sv], axis=1)
             for j, s in enumerate(STEPS):
                 steps[s] = _geo_eff(d[:, j])
             rec["sel_eff"] = _geo_eff(lg[sv, -1] - lg[sv, 0])
+            if um.any():
+                rec["sel_eff_range"] = [
+                    _geo_eff(pick_lo[idx_a][sv] - lg[sv, 0]),
+                    _geo_eff(pick_hi[idx_a][sv] - lg[sv, 0]),
+                ]
         else:
             rec["sel_eff"] = None
             for j, s in enumerate(STEPS):
@@ -1482,11 +1736,19 @@ def decomposition(
             if j > 0
         }
         if e.engine:
-            dep = np.where(sv, lg[:, -1], fb[idx_a] if fb is not None else np.nan)
+            fbk = fb[idx_a] if fb is not None else np.nan
+            dep = np.where(sv, lg[:, -1], fbk)
             ok = np.isfinite(dep)
             rec["n_fallback"] = int((ok & ~sv).sum())
             rec["n_deployed"] = int(ok.sum())
             rec["deployed_sel_eff"] = _geo_eff(dep[ok] - lg[ok, 0])
+            if um.any():
+                lo = np.where(sv, pick_lo[idx_a], fbk)
+                hi = np.where(sv, pick_hi[idx_a], fbk)
+                rec["deployed_sel_eff_range"] = [
+                    _geo_eff(lo[ok] - lg[ok, 0]),
+                    _geo_eff(hi[ok] - lg[ok, 0]),
+                ]
         losses = {s: 1.0 - v for s, v in steps.items() if v is not None}
         rec["dominant"] = (
             max(losses, key=losses.get) if losses and max(losses.values()) > 0 else None
@@ -1764,8 +2026,8 @@ def cell_kernel_usage(e: Evaluated, top: int = 5) -> Dict[str, Dict[str, Any]]:
         if e.served[i]:
             pp = int(e.pick_pos[i])
             p[g.leaf][int(si[pp])] += 1
-            same_sid[g.leaf] += pp == wp
-            same_sig[g.leaf] += wp >= 0 and si[pp] == si[wp]
+            same_sid[g.leaf] += int(pp == wp)
+            same_sig[g.leaf] += int(wp >= 0 and bool(si[pp] == si[wp]))
     label = [signature_label(s) for s in e.pool.signatures]
     out = {}
     for c in sorted(set(w) | set(p)):
@@ -1925,6 +2187,7 @@ def analyze_run(
             identity=ident,
             aggregation=aggregation,
             blocklist=blocklist,
+            context_plans=bs.context_plans,
         )
         if model is not None:
             model.notes.extend(n for n in bench.notes if n not in model.notes)
@@ -2156,6 +2419,8 @@ def summarize_evaluation(
                 "source": m.source,
                 "n_cells": len(m.labels),
                 "non_temporal_rule": m.non_temporal_rule,
+                "version": m.version,
+                "rules": serving_rules(m),
                 "cascade_keys": m.cascade_keys,
                 "launch_keys": m.launch_keys,
                 "weight_dtype": m.weight_dtype,

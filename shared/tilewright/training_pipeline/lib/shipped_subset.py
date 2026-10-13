@@ -693,7 +693,8 @@ def cost_rows(
     g: Any, u_pos: Mapping[int, int], n: int, sids: np.ndarray, pick_measurement: str
 ) -> Tuple[np.ndarray, float]:
     """(charged cost per universe config, fallback latency or NaN) of one
-    `run_analysis.Gemm`, as `run_analysis.evaluate` charges picks."""
+    `run_analysis.Gemm`, as the stages charge picks: a kernel off the GEMM's
+    planned list at the slowest latency the GEMM measured."""
     screened_miss = pick_measurement not in ev.WARMUP_COUNTS
     worst = float(g.us.max())
     row_cost = np.where(g.skip & screened_miss, worst, g.us)
