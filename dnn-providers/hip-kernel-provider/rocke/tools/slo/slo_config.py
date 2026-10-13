@@ -33,3 +33,25 @@ OVERLAP_MIN_SLOC = 200  # files smaller than this are not compared
 OVERLAP_MIN_LINE_CHARS = 14  # shorter lines (after whitespace squeeze) are ignored
 OVERLAP_MIN_SHARED = 60  # a pair must share at least this many distinct lines
 OVERLAP_LIST_FROM = 0.30  # pairs at or above this overlap are listed in the report
+
+# Which direction is "worse" for every metric the baseline tracks.
+# Pattern counts (pat.*) are always "up is worse".
+WORSE_IF = {
+    "sloc": "up",
+    "longest_fn": "up",
+    "raw_per_100": "up",
+    "hcr": "down",
+    "spec_bools_max": "up",
+    "overlap_max": "up",
+}
+
+# Report-only metrics: shown as warnings, never fail, even with --fail-on increase.
+# hcr misses some helper styles, so it is not trusted as a gate yet.
+REPORT_ONLY = {"hcr"}
+
+# Ratios move a little on any edit. A change smaller than this is ignored.
+TOLERANCE = {
+    "raw_per_100": 0.0,
+    "hcr": 0.0,
+    "overlap_max": 0.0,
+}

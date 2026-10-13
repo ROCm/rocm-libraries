@@ -6,11 +6,20 @@ No LLM, no network, no GPU. Python 3.10+ stdlib only.
 ## Run it
 
 ```
-python tools/slo/slo.py report [--json FILE] [--scope DIR]
+python tools/slo/slo.py report   [--json FILE] [--scope DIR]
+python tools/slo/slo.py check    [--base REF] [--json|--junit|--markdown FILE] [--github]
+python tools/slo/slo.py baseline --update
 ```
 
-`report` prints every number, with no pass/fail. `--json -` writes the JSON to stdout.
-`--scope DIR` (repeatable, rocke-relative) measures other folders instead of the configured scope.
+- `report`: every number, no pass/fail. `--json -` writes the JSON to stdout.
+  `--scope DIR` (repeatable, rocke-relative) measures other folders instead of the configured scope.
+- `check`: compares with `baseline.json`. Lists what got worse (warning) and what got better.
+  `--base REF` limits it to files changed since `REF` and follows renames (needs git).
+- `baseline --update`: saves today's numbers. Warns if any number is looser than before.
+
+Warn only by default: `check` exits 0 even with warnings. `--fail-on increase` makes "worse"
+exit 1. Nothing else changes. CI snippets and the full contract: `CI.md`.
+
 The tool finds the rocke folder from its own location (two folders up), so it works from a
 source tree or an installed copy. `--root` points it somewhere else.
 
@@ -18,8 +27,9 @@ source tree or an installed copy. `--root` points it somewhere else.
 
 | Code | Meaning |
 |---|---|
-| 0 | Ran fine. |
-| 2 | The tool could not run: bad args, or a file that does not parse. |
+| 0 | Ran fine. Warnings do not change this unless `--fail-on increase`. |
+| 1 | Something got worse, and `--fail-on increase` was given. |
+| 2 | The tool could not run: bad args, a file that does not parse, git missing when asked. |
 
 ## Checks
 
@@ -31,8 +41,10 @@ source tree or an installed copy. `--root` points it somewhere else.
 | SLO104 | Helper-call ratio | report only |
 | SLO105 | Bool fields per frozen dataclass | 8 or less |
 | SLO106 | Copy-paste overlap with any other file | 40% or less |
-| SLO107 | Repeated low-level patterns (14 kinds, see `slo_patterns.py`) | count only |
+| SLO107 | Repeated low-level patterns (14 kinds, see `slo_patterns.py`) | may not rise |
 
+Old files are compared to their own baseline numbers, not to the targets. A new file over a
+target is a warning. SLO104 is report only: it never fails, even with `--fail-on increase`.
 The targets are proposals. Limits and scope live in `slo_config.py`, so owners change them
 there, not in the code.
 
@@ -63,5 +75,10 @@ builders are skipped.
 pytest tools/slo/tests
 ```
 
-Small examples with hand-counted answers for every metric and pattern, plus one run on the real
-tree that must parse every file and finish in under 10 seconds.
+- Small examples with hand-counted answers for every metric and pattern.
+- One run on the real tree that must parse every file and finish in under 10 seconds.
+- Compare, exit codes, every output format, and `--base` on a throwaway git repo.
+- Break it on purpose: on a copy of the real tree, add raw ops, grow the longest function and
+  paste a file. Each must give the right check id, and `--fail-on increase` must exit 1.
+
+`library/tests/test_slo_ratchet.py` runs `check` against the committed baseline. It only warns.
