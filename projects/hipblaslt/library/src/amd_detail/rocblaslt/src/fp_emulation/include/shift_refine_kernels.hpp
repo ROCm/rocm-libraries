@@ -15,9 +15,9 @@
  *
  *   refine_sftA_partial_kernel  per-row max of |C32i_prelim|
  *   col_max_kernel              per-column max of |C32i_prelim|
- *   adp_reduce_A_kernel         A-side ADP log2P requirement
+ *   adp_reduce_A_kernel         A-side ADP crt_capacity_bits requirement
  *   refine_sftA_apply_kernel    apply the A-side shift-refinement delta
- *   adp_reduce_B_kernel         B-side ADP log2P requirement (reads col_max)
+ *   adp_reduce_B_kernel         B-side ADP crt_capacity_bits requirement (reads col_max)
  *   refine_sftB_kernel          apply the B-side shift-refinement delta
  *
  * This header must be compiled as HIP.
@@ -85,8 +85,8 @@ namespace FixedPointEmulation
 
     /* Computes global max of  (52 − sftA_init[i]) + 0.5·log2(row_max[i]) + 200
      * over all rows i ∈ [0, m).  The +200 bias guarantees a non-negative result
-     * (log2P_req_unbiased is in ≈ [−50, 170] for any valid FP64 input).
-     * Subtract 200 on the host to recover the actual log2P requirement.
+     * (crt_capacity_bits_req_unbiased is in ≈ [−50, 170] for any valid FP64 input).
+     * Subtract 200 on the host to recover the actual crt_capacity_bits requirement.
      *
      * Must be launched AFTER refine_sftA_partial_kernel (which fills row_max[])
      * and BEFORE refine_sftA_apply_kernel (which overwrites sftA[]).           */
@@ -100,7 +100,7 @@ namespace FixedPointEmulation
         const int64_t    row
             = static_cast<int64_t>(blockIdx.x) * blockDim.x + static_cast<int64_t>(threadIdx.x);
 
-        /* Biased log2P requirement for this row.
+        /* Biased crt_capacity_bits requirement for this row.
          * Skip rows where row_max == 0: those rows have all-zero preliminary inner
          * products (e.g. zero-matrix inputs) and need zero CRT precision (s=2).
          * Using max(row_max,1) would incorrectly return (adp_bits − sftA_init)
@@ -112,7 +112,7 @@ namespace FixedPointEmulation
             const float   sftA_f  = static_cast<float>(sftA_init[row]);
             const float   log2_rm = 0.5f * log2f(static_cast<float>(rm));
             /* log2_rm = 0.5*log2(R_i): A-side half of the CRT budget (A/B split).
-             * Three independent lower bounds on log2P; the row needs the max:
+             * Three independent lower bounds on crt_capacity_bits; the row needs the max:
              *   crt_acc: CRT grid fine enough to resolve to 2^-adp_bits.
              *   crt_rep: |X_true| < M_s/2 representability (no adp_bits; the
              *            wraparound guard for wide-range/cancelling inputs).
@@ -149,7 +149,7 @@ namespace FixedPointEmulation
     __global__ static void refine_sftA_apply_kernel(const int32_t* __restrict__ row_max,
                                                     int16_t* __restrict__ sftA,
                                                     int64_t m,
-                                                    float   log2P)
+                                                    float   crt_capacity_bits)
     {
         const int64_t row
             = static_cast<int64_t>(blockIdx.x) * 64 + static_cast<int64_t>(threadIdx.x);
@@ -164,11 +164,11 @@ namespace FixedPointEmulation
          * the INT32 max, preventing underestimation of log2(max). */
         static constexpr float mh4u_ru = -0x1.0000060000000p-1F;
         sftA[row]
-            += static_cast<int16_t>(floorf(fmaf(mh4u_ru, __log2f(__int2float_ru(max_val)), log2P)));
+            += static_cast<int16_t>(floorf(fmaf(mh4u_ru, __log2f(__int2float_ru(max_val)), crt_capacity_bits)));
     }
 
     /* adp_reduce_B_kernel — reads the precomputed col_max[j] (NOT the full C32i
-     * matrix) to compute the B-side ADP log2P requirement.  col_max[] is filled by
+     * matrix) to compute the B-side ADP crt_capacity_bits requirement.  col_max[] is filled by
      * refine_sftA_partial_kernel in the same pass that computes row_max[], so
      * C32i is read only ONCE total instead of three times.
      *
@@ -210,7 +210,7 @@ namespace FixedPointEmulation
     __global__ static void refine_sftB_kernel(const int32_t* __restrict__ col_max,
                                               int64_t n,
                                               int16_t* __restrict__ sftB,
-                                              float log2P)
+                                              float crt_capacity_bits)
     {
         const int64_t col
             = static_cast<int64_t>(blockIdx.x) * blockDim.x + static_cast<int64_t>(threadIdx.x);
@@ -221,7 +221,7 @@ namespace FixedPointEmulation
             local_max = 1;
         static constexpr float mh4u_ru = -0x1.0000060000000p-1F; /* see refine_sftA_apply_kernel */
         sftB[col] += static_cast<int16_t>(
-            floorf(fmaf(mh4u_ru, __log2f(__int2float_ru(local_max)), log2P)));
+            floorf(fmaf(mh4u_ru, __log2f(__int2float_ru(local_max)), crt_capacity_bits)));
     }
 
 } // namespace FixedPointEmulation

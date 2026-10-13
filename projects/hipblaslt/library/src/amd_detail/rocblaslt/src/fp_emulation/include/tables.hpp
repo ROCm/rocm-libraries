@@ -594,16 +594,16 @@ namespace FixedPointEmulation
         return vc[s_idx][mod_idx];
     }
 
-    // log2P(s_idx): usable CRT capacity (bits) for (s_idx+2) moduli.
+    // crt_capacity_bits(s_idx): usable CRT capacity (bits) for (s_idx+2) moduli.
     //
     //   log2(P_s)/2 - 0.5: per-side CRT capacity.  The 1/2 splits the single
     //     CRT budget log2(M_s/2) equally between the A and B shifts; the -0.5
     //     folds in the M_s/2 safety divisor.
     //   - 1.0: REQUIRED one-bit CRT safety margin (do NOT remove).
     //
-    // Used both to pick effective_s (min s with log2P(s-2) >= log2P_needed)
-    // and as refine_log2P in refine_sftA/B_kernel, which folds it into the
-    // per-row/col shifts (sft += floor(-0.5*log2(max_val) + log2P)).
+    // Used both to pick effective_s (min s with crt_capacity_bits(s-2) >= crt_capacity_bits_needed)
+    // and as refine_crt_capacity_bits in refine_sftA/B_kernel, which folds it into the
+    // per-row/col shifts (sft += floor(-0.5*log2(max_val) + crt_capacity_bits)).
     // Reconstruction folds Z into (-M/2, M/2] via q=rint(Z/M), X=Z-q*M, so
     // correctness needs |X_true| <= M/2.  But sftA/sftB are set BEFORE X_true
     // is known, from preliminary GEMM maxima + a float __log2f that can
@@ -611,7 +611,7 @@ namespace FixedPointEmulation
     // error still lands inside M/2.
     //
     // Computed lazily on first host call; host-only.
-    inline double log2P(unsigned s_idx) noexcept
+    inline double crt_capacity_bits(unsigned s_idx) noexcept
     {
         static const auto v = []() {
             auto                          P = make_P_table();

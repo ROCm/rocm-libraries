@@ -126,7 +126,7 @@ namespace FixedPointEmulation
 
     /* atomicMax for non-negative floats: IEEE 754 positive floats are totally ordered
      * by their integer bit representation, so int-based atomicMax is correct.
-     * The caller must ensure val ≥ 0 (we bias log2P_req values by +200 to guarantee this). */
+     * The caller must ensure val ≥ 0 (we bias crt_capacity_bits_req values by +200 to guarantee this). */
     static __device__ __forceinline__ void adp_atomicMaxF(float* addr, float val)
     {
         atomicMax(reinterpret_cast<int*>(addr), __float_as_int(val));

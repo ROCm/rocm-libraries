@@ -152,7 +152,7 @@ namespace FixedPointEmulation
     }
 
     /* Returns the minimum number of moduli s ∈ [2, S_MAX] such that
-     * log2P(s-2) >= adp_bits, used ONLY in the PERFORMANCE MODEL to predict
+     * crt_capacity_bits(s-2) >= adp_bits, used ONLY in the PERFORMANCE MODEL to predict
      * which s ADP will select at runtime.  Falls back to S_MAX when
      * adp_bits <= 0 (sentinel) or when all moduli are needed to reach the
      * target.                                                                */
@@ -161,7 +161,7 @@ namespace FixedPointEmulation
         if(adp_bits <= 0)
             return max_s;
         for(unsigned s = 2u; s <= max_s; ++s)
-            if(log2P(s - 2u) >= static_cast<float>(adp_bits))
+            if(crt_capacity_bits(s - 2u) >= static_cast<float>(adp_bits))
                 return s;
         return max_s;
     }
@@ -1447,7 +1447,7 @@ namespace FixedPointEmulation
          * Initialised to 0.0f (= biased −200 → effective_s=2 if all rows/cols zero). */
 
         /* effective_s: ADP may reduce this below num_moduli; determined BEFORE the
-         * shift-refinement delta is applied so we can use the correct log2P.       */
+         * shift-refinement delta is applied so we can use the correct crt_capacity_bits. */
         unsigned effective_s = num_moduli;
 
         (void)hipMemsetAsync(row_max, 0, szRowMax * sizeof(int32_t), stream);
@@ -1479,7 +1479,7 @@ namespace FixedPointEmulation
         /* ADP always runs: determine effective_s from the preliminary GEMM result
          * BEFORE applying any shift delta.  Both ADP kernels read sftA_init and
          * sftB_init (the values set in step 1a/1b, before any += delta).
-         * The refine delta is then applied using log2P_{effective_s} so that
+         * The refine delta is then applied using crt_capacity_bits(effective_s-2) so that
          * X_true is sized to fit within M_{effective_s}/2.                        */
         {
             _pstart();
@@ -1525,9 +1525,9 @@ namespace FixedPointEmulation
             float h_adp[2] = {0.0f, 0.0f};
             (void)hipMemcpy(h_adp, adp_buf, 2 * sizeof(float), hipMemcpyDeviceToHost);
 
-            const float log2P_needed = std::max(h_adp[0], h_adp[1]) - 200.0f;
+            const float crt_capacity_bits_needed = std::max(h_adp[0], h_adp[1]) - 200.0f;
 
-            if(log2P_needed > log2P(num_moduli - 2u))
+            if(crt_capacity_bits_needed > crt_capacity_bits(num_moduli - 2u))
             {
                 /* ADP determined the type's max moduli are still insufficient.
                  * Before giving up, check whether HIPBLASLT_EMULATION_NUM_MODULI
@@ -1545,17 +1545,17 @@ namespace FixedPointEmulation
                 {
                     /* No valid override: fall back to native GEMM.
                      * This occurs for matrices with extremely large dynamic range within
-                     * a single row/column (e.g. condition number ≫ 2^{2×log2P_18}).
+                     * a single row/column (e.g. condition number ≫ 2^{2×crt_capacity_bits(18)}).
                      * The Ozaki shift-refinement would set A8i_final or B8i_final to
                      * near-zero for the elements providing cancellation, giving wrong
                      * results regardless of s.  Rate-limited warning (≤5 per process). */
                     hipblaslt_cerr << "[hipBLASLt " << type_name
                                    << " emulation] WARNING: ADP overflow for GEMM " << "(m=" << m
                                    << ", n=" << n << ", k=" << k
-                                   << "): " << "A-side log2P_req=" << (h_adp[0] - 200.0f)
+                                   << "): " << "A-side crt_capacity_bits_req=" << (h_adp[0] - 200.0f)
                                    << " bits, " << "B-side=" << (h_adp[1] - 200.0f) << " bits, "
-                                   << "max required=" << log2P_needed
-                                   << " > supported max=" << log2P(num_moduli - 2u)
+                                   << "max required=" << crt_capacity_bits_needed
+                                   << " > supported max=" << crt_capacity_bits(num_moduli - 2u)
                                    << " (s=" << num_moduli << " moduli). Falling back to native "
                                    << native_str << "." << std::endl;
                     return rocblaslt_status_invalid_value;
@@ -1564,7 +1564,7 @@ namespace FixedPointEmulation
 
             for(unsigned s = 2u; s <= num_moduli; ++s)
             {
-                if(log2P(s - 2u) >= log2P_needed)
+                if(crt_capacity_bits(s - 2u) >= crt_capacity_bits_needed)
                 {
                     effective_s = s;
                     break;
@@ -1579,9 +1579,9 @@ namespace FixedPointEmulation
                 effective_s = override_s;
         }
 
-        /* Apply shift-refinement delta using the correct log2P for effective_s.
+        /* Apply shift-refinement delta using the correct crt_capacity_bits for effective_s.
          * This ensures X_true ≤ M_{effective_s}/4 < M_{effective_s}/2 (CRT safe). */
-        const float refine_log2P = log2P(effective_s - 2u);
+        const float refine_crt_capacity_bits = crt_capacity_bits(effective_s - 2u);
 
         _pstart();
         hipLaunchKernelGGL(refine_sftA_apply_kernel,
@@ -1592,7 +1592,7 @@ namespace FixedPointEmulation
                            row_max,
                            sftA,
                            m,
-                           refine_log2P);
+                           refine_crt_capacity_bits);
         hipLaunchKernelGGL(refine_sftB_kernel,
                            dim3((static_cast<unsigned>(n) + 255u) / 256u),
                            dim3(256),
@@ -1601,7 +1601,7 @@ namespace FixedPointEmulation
                            col_max,
                            n,
                            sftB,
-                           refine_log2P);
+                           refine_crt_capacity_bits);
         _pstop(_t_refine); /* partial: refine_sftA_apply + refine_sftB */
 
         /* Scale → INT8 GEMM → CRT accum/finalize.
