@@ -939,6 +939,34 @@ class Solution(collections.abc.Mapping):
     if (not state["ProblemType"]["StridedBatched"]) and (state["ProblemType"]["OperationType"] != 'GEMM'):
       reject(state, printRejectionReason, "General Batched GEMM only support GEMM OperationType")
 
+    # The four configurations below fail codegen on every arch; they are rejected
+    # on gfx1250 only.
+    #
+    # StridedBatched=False duplicates the loadBatchedAddress labels (moduleWg is
+    # emitted twice), which StinkyTofu's CFG builder aborts on, and the
+    # KernelWriterConversion helper emits invalid HIP for Batch{C,D}. Runtime
+    # general-batch is still available via ArgType==3 on StridedBatched
+    # SupportUserArgs kernels. See AIHPBLAS-4369.
+    if (not state["ProblemType"]["StridedBatched"]) and tuple(state["ISA"])[:2] == (12, 5):
+      reject(state, printRejectionReason, "StridedBatched=False is not supported on gfx1250")
+
+    # Batched=False has no batch index, but computeLoadSrd still branches to the
+    # StridedBatchedGemmLoad labels that are only created for a batch index, and
+    # KernelWriterConversion still emits batchIdx = id2.
+    if (not state["ProblemType"].get("Batched", True)) and tuple(state["ISA"])[:2] == (12, 5):
+      reject(state, printRejectionReason, "Batched=False is not supported on gfx1250")
+
+    # The KernelWriterConversion / KernelWriterBetaOnly helpers hard-code
+    # stride0 == 1 and assert on UseInitialStridesCD. See AIHPBLAS-4390.
+    if state["ProblemType"].get("UseInitialStridesCD", False) and tuple(state["ISA"])[:2] == (12, 5):
+      reject(state, printRejectionReason, "UseInitialStridesCD=True is not supported on gfx1250")
+
+    # UseInitialStridesAB needs len(IndexAssignments) strides (e.g. 3) per A/B,
+    # but rocisa's kernarg loader has no 3-dword form and DeviceUserArguments
+    # holds only two strides per tensor.
+    if state["ProblemType"].get("UseInitialStridesAB", False) and tuple(state["ISA"])[:2] == (12, 5):
+      reject(state, printRejectionReason, "UseInitialStridesAB=True is not supported on gfx1250")
+
     ### ---> This is where we previously called matrixInstructionToMIParameters
 
     EnableMatrixInstruction = state["EnableMatrixInstruction"] if "EnableMatrixInstruction" in state else None
@@ -2587,7 +2615,7 @@ class Solution(collections.abc.Mapping):
          and state["_ScheduleIterAlg"] == 3:
         reject(state, printRejectionReason, "Complex WMMA de-interleave does not support ScheduleIterAlg=3")
         return
-      if state["InterleaveAlpha"]:
+      if state["InterleaveAlpha"] == 1:
         reject(state, printRejectionReason, "Matrix instruction doesn't support InterleaveAlpha")
         return
       if state["ProblemType"]["DataType"].isInt8():
@@ -3508,6 +3536,21 @@ class Solution(collections.abc.Mapping):
         (state["HalfPLRB"] and not (state["UnrollMajorLDSB"] or state["enableLDSTrB"])):
         reject(state, printRejectionReason, "Currently HalfPLR does not support packing (need UnrollMajorLDS or use LDSTrInst)")
         return
+      # The non-LDSTr local-read path (Components/LocalRead.py "without enableLDSTr"
+      # branch) generates addresses over a full double-buffered span (2 * numVgprValuPerBlock)
+      # and relies on getHalfPLRGroups()/getHalfPLRValuStr() to remap them onto HalfPLR's
+      # reduced 1.5-block (3 half-group) vgpr allocation. That remap only accounts for a
+      # 2-group active window per call, so any read whose offset reaches a full block
+      # (gIdx == 2) indexes past the 2-element group list and crashes with IndexError.
+      # This has only been observed (and reproduced) for datatypes wider than 2 bytes
+      # (e.g. F32), where enableLDSTr is never available (isLDSTrEnabled has no arm for
+      # numBytes > 2) and the vgpr spans involved are large enough to cross a full-block
+      # boundary; narrower (<=2-byte) non-LDSTr HalfPLR configs packing via UnrollMajorLDS
+      # alone are unaffected and remain supported (e.g. sk_halfplr_f8gemm_tdm.yaml).
+      if (state["HalfPLRA"] and not state["enableLDSTrA"] and numBytesA > 2) or \
+        (state["HalfPLRB"] and not state["enableLDSTrB"] and numBytesB > 2):
+        reject(state, printRejectionReason, "HalfPLR requires enableLDSTr for datatypes wider than 2 bytes; the non-LDSTr local-read path does not correctly bound HalfPLR's vgpr group window for wider types")
+        return
       if state["InnerUnroll"] != 1:
         reject(state, printRejectionReason, "Currently HalfPLR only supports InnerUnroll = 1")
         return
@@ -3621,7 +3664,7 @@ class Solution(collections.abc.Mapping):
         "ScheduleGlobalRead": state["ScheduleGlobalRead"] == 1,
         "ScheduleLocalWrite": state["ScheduleLocalWrite"] == 1,
         "GlobalReadPerMfma": state["GlobalReadPerMfma"] == 1,
-        "InterleaveAlpha": not state["InterleaveAlpha"],
+        "InterleaveAlpha": state["InterleaveAlpha"] != 1,
         "DirectToLds": not state["DirectToLds"],
         "UseSgprForGRO": state["UseSgprForGRO"] == -1,
         "UseInstOffsetForGRO": not state["UseInstOffsetForGRO"],
