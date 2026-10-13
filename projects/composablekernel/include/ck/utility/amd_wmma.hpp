@@ -10,7 +10,7 @@
 // TODO: Add arch limitation
 namespace ck {
 
-#if defined(__gfx1170__) || defined(__gfx1171__)
+#if defined(__gfx1170__) || defined(__gfx1171__) || defined(__gfx11_7_generic__)
 #define __gfx117__
 #endif
 
@@ -19,8 +19,7 @@ namespace ck {
 #endif
 
 #if defined(__gfx1100__) || defined(__gfx1101__) || defined(__gfx1102__) || \
-    defined(__gfx1103__) || defined(__gfx115__) || defined(__gfx117__) ||   \
-    defined(__gfx11_generic__)
+    defined(__gfx1103__) || defined(__gfx115__) || defined(__gfx11_generic__)
 #define __gfx11__
 #endif
 
@@ -51,12 +50,6 @@ struct intrin_wmma_f32_16x16x16_f16_w32<16, 16>
 #if defined(__gfx11__) && !defined(__gfx117__)
         reg_c.template AsType<float8_t>()(Number<0>{}) = __builtin_amdgcn_wmma_f32_16x16x16_f16_w32(
             reg_a, reg_b, reg_c.template AsType<float8_t>()[Number<0>{}]);
-#elif defined(__gfx117__)
-        reg_c.template AsType<float8_t>()(Number<0>{}) =
-            __builtin_amdgcn_wmma_f32_16x16x16_f16_w32_gfx12(
-                __builtin_shufflevector(reg_a, reg_a, 0, 1, 2, 3, 4, 5, 6, 7),
-                __builtin_shufflevector(reg_b, reg_b, 0, 1, 2, 3, 4, 5, 6, 7),
-                reg_c.template AsType<float8_t>()[Number<0>{}]);
 #else
         ignore = reg_a;
         ignore = reg_b;
@@ -80,31 +73,6 @@ struct intrin_wmma_f32_16x16x16_bf16_w32<16, 16>
             __builtin_amdgcn_wmma_f32_16x16x16_bf16_w32(
                 bit_cast<int16x16_t>(reg_a),
                 bit_cast<int16x16_t>(reg_b),
-                reg_c.template AsType<float8_t>()[Number<0>{}]);
-#elif defined(__gfx117__)
-        // gfx12 variant takes int16x8_t (8 bf16 per thread) vs gfx11's int16x16_t
-        reg_c.template AsType<float8_t>()(Number<0>{}) =
-            __builtin_amdgcn_wmma_f32_16x16x16_bf16_w32_gfx12(
-                __builtin_shufflevector(bit_cast<int16x16_t>(reg_a),
-                                        bit_cast<int16x16_t>(reg_a),
-                                        0,
-                                        1,
-                                        2,
-                                        3,
-                                        4,
-                                        5,
-                                        6,
-                                        7),
-                __builtin_shufflevector(bit_cast<int16x16_t>(reg_b),
-                                        bit_cast<int16x16_t>(reg_b),
-                                        0,
-                                        1,
-                                        2,
-                                        3,
-                                        4,
-                                        5,
-                                        6,
-                                        7),
                 reg_c.template AsType<float8_t>()[Number<0>{}]);
 #else
         ignore = reg_a;
@@ -183,18 +151,6 @@ struct intrin_wmma_i32_16x16x16_iu8_w32<16, 16, neg_a, neg_b, clamp>
                 bit_cast<int32x4_t>(reg_a),
                 neg_b,
                 bit_cast<int32x4_t>(reg_b),
-                reg_c.template AsType<int32x8_t>()[Number<0>{}],
-                clamp);
-#elif defined(__gfx117__)
-        // gfx12 variant takes int32x2_t (8 int8 per thread) vs gfx11's int32x4_t (16 int8)
-        reg_c.template AsType<int32x8_t>()(Number<0>{}) =
-            __builtin_amdgcn_wmma_i32_16x16x16_iu8_w32_gfx12(
-                neg_a,
-                __builtin_shufflevector(
-                    bit_cast<int32x4_t>(reg_a), bit_cast<int32x4_t>(reg_a), 0, 1),
-                neg_b,
-                __builtin_shufflevector(
-                    bit_cast<int32x4_t>(reg_b), bit_cast<int32x4_t>(reg_b), 0, 1),
                 reg_c.template AsType<int32x8_t>()[Number<0>{}],
                 clamp);
 #else
