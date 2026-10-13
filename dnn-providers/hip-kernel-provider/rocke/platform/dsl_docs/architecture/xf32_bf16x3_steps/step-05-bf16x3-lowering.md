@@ -1,7 +1,7 @@
 # Step 5+6 — the BF16x3 expansion, in both engines
 
 Part of [XF32 via BF16x3 MMA emulation](../xf32_bf16x3_emulation_plan.md) (§4,
-steps 5 and 6). Ticket AICK-2208.
+steps 5 and 6).
 
 ## Contents
 
@@ -25,10 +25,12 @@ forbid. They are one commit.
 
 ## What the expansion emits
 
-For each fp32 operand fragment `x`, a Dekker-style split into two bf16
-fragments:
+Each operand is a logical TF32 fragment, an I32 carrier. The expansion first views
+its payload as fp32 — a `bitcast`, never a rounding, so every one of the 32 bits
+reaches the split — and then takes a Dekker-style split into two bf16 fragments:
 
 ```llvm
+%x       = bitcast <N x i32>    %tf      to <N x float>   ; payload, reinterpreted
 %big     = fptrunc <N x float>  %x       to <N x bfloat>   ; x, rounded
 %big_f32 = fpext   <N x bfloat> %big     to <N x float>    ; ... widened back
 %diff    = fsub    <N x float>  %x, %big_f32               ; ... what it lost
@@ -66,8 +68,8 @@ bit-for-bit what it was before this change.
 
 The question is asked per-arch rather than against a bare `op_id` table on
 purpose: the same logical atom may be native on one target and emulated on
-another, which is exactly the situation a native gfx942 XF32 atom (AICK-1714)
-would create.
+another, which is exactly the situation the base's native gfx942 XF32 atoms
+create: the same logical TF32 atom is native on gfx942 and emulated on gfx950.
 
 ## Why the split is written as raw LLVM lines
 
@@ -114,11 +116,12 @@ claiming a parity that is not yet there.
 ## Verification
 
 - [`tests/core/test_xf32_bf16x3_lowering.py`](../../../tests/core/test_xf32_bf16x3_lowering.py)
-  — 7 tests. The four-line split per operand, read back and re-derived; RNE and
+  — the bitcast and four-line split per operand, read back and re-derived; RNE and
   not truncation; three terms in the pinned order threading one accumulator;
   `small*small` absent; no emulated `op_id` surviving into the emitted IR; only
-  the last term writing the caller's value; and a native bf16 atom still
-  lowering to exactly one call with no split.
+  the last term writing the caller's value; a native bf16 atom still lowering to
+  exactly one call with no split; and the operand contract
+  ([step 11](step-11-tf32-operand-abi.md)).
 - [`tests/core/test_xf32_bf16x3_lowering.cpp`](../../../tests/core/test_xf32_bf16x3_lowering.cpp)
   — the same properties pinned directly on the C engine, by parsing serialized
   IR and inspecting the emitted text. Wired into ctest as
@@ -130,23 +133,21 @@ claiming a parity that is not yet there.
   `IDENTICAL` on all six, checked by lowering the serialized IR through
   `ir_lower_cli` and diffing against `_lower_kernel_to_llvm_python`. This is the
   check that actually proves the mirror; the ctest above proves the recipe.
-- `tests/core` — 398 passed, 23 skipped, 329 subtests.
-- C build clean; `ctest` 13/13.
-- Byte-identity gate at llvm20 **and** llvm22: 69 GREEN / 1 DRIFT, the DRIFT
-  being the `gfx942_attention_tiled_3d` cfg[3] divergence proven pre-existing in
-  [step 1](step-01-mma-result-dtype.md). No new drift — expected, since no
-  golden kernel selects xf32 yet.
+- Byte-identity gate at llvm20 **and** llvm22 was 69 GREEN / 1 DRIFT when this step
+  landed, the DRIFT being the `gfx942_attention_tiled_3d` cfg[3] divergence, proven
+  pre-existing (see [step 10](step-10-byte-identity.md)). No new drift — expected,
+  since no golden kernel selected an emulated atom yet.
 
 ## Follow-ups, closed after review
 
 - The bare-`op_id` fragment lookups did not know the emulated atoms, so neither
   the C builder's `rocke_b_mma` nor the bare-string form of Python's
-  `IRBuilder.mma` could construct an xf32 `tile.mma`. Both now resolve the
+  `IRBuilder.mma` could construct an emulated TF32 `tile.mma`. Both now resolve the
   logical op_id through its physical atom — see
   [step 4](step-04-gfx950-xf32-rows.md#follow-ups-left-open). The C test still
   embeds serialized IR, now so that it pins the recipe independent of the
   builder.
-- No shipped kernel selects an XF32 atom, so the byte-identity gate never
+- No shipped kernel selects an emulated atom, so the byte-identity gate never
   compared the engines on the expansion: the pybind parity test above skips in
   archive-only builds, and the C test checks only C output. The
   [`xf32_bf16x3_mma`](../../../tests/instances/parity/xf32_bf16x3_mma_emit.py)

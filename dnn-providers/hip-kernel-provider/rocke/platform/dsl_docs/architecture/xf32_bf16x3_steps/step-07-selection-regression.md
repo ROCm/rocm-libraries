@@ -1,7 +1,7 @@
 # Step 7 — nothing that predates XF32 moved
 
 Part of [XF32 via BF16x3 MMA emulation](../xf32_bf16x3_emulation_plan.md) (§4,
-step 7). Ticket AICK-2208.
+step 7).
 
 ## Contents
 
@@ -84,8 +84,8 @@ is just the native subset, and the expected answer is computed in the test
 rather than tabulated. `enumerate` is checked on **count and order**, because
 callers that take the first match would otherwise move silently.
 
-Coverage is all 51 native rows across all 7 arches (53 total, less the 2
-emulated).
+Coverage is every native row on every arch — the whole catalog less the emulated
+rows.
 
 ## Negative controls
 
@@ -102,10 +102,10 @@ induced and observed to go red:
 
 ## Verification
 
-- `tests/core/test_xf32_selection_regression.py` — 7 tests, 422 subtests, green.
-- `tests/core` — 409 passed, 19 skipped, 751 subtests.
-- `ctest` — 13/13, with `rocke_mma_catalog_lookup` reporting
-  `pre-existing selection: 51 native atoms unmoved`.
+- `tests/core/test_xf32_selection_regression.py` is green, and `ctest` runs its C
+  twin as `rocke_mma_catalog_lookup`, which reports how many pre-existing native atoms
+  it found unmoved.
 - No emission changed in this step, so byte-identity is untouched by
   construction; the gate result from
-  [steps 5+6](step-05-bf16x3-lowering.md) still stands.
+  [steps 5+6](step-05-bf16x3-lowering.md) still stands. The current gate results are
+  in [step 10](step-10-byte-identity.md) and [step 11](step-11-tf32-operand-abi.md).

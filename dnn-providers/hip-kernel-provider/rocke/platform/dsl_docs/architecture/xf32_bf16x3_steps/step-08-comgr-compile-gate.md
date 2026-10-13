@@ -1,7 +1,7 @@
 # Step 8 — the expansion survives codegen for gfx950
 
 Part of [XF32 via BF16x3 MMA emulation](../xf32_bf16x3_emulation_plan.md) (§4,
-step 8). Ticket AICK-2208.
+step 8).
 
 ## Contents
 
@@ -65,8 +65,8 @@ Both atoms, gfx950, `-O3`, `llvm23` IR:
 
 | atom | MFMA | packed convert |
 |---|---|---|
-| `xf32_bf16x3_f32_16x16x32` | 3 × `v_mfma_f32_16x16x32_bf16` | `v_cvt_pk_bf16_f32` |
-| `xf32_bf16x3_f32_32x32x16` | 3 × `v_mfma_f32_32x32x16_bf16` | `v_cvt_pk_bf16_f32` |
+| `mfma_f32_16x16x32_xf32` | 3 × `v_mfma_f32_16x16x32_bf16` | `v_cvt_pk_bf16_f32` |
+| `mfma_f32_32x32x16_xf32` | 3 × `v_mfma_f32_32x32x16_bf16` | `v_cvt_pk_bf16_f32` |
 
 No scalar `v_cvt_f32_bf16` truncating sequence appears in either. The
 subtraction lowers through `v_pk_add_f32`, so the split costs packed VALU work
@@ -99,12 +99,12 @@ ROCm installs `llvm-objdump` outside the default `PATH`, so
 
 ## Verification
 
-- `tests/core/test_xf32_comgr_compile.py` — 3 tests, 6 subtests, green against
-  the dev image's comgr (which the lowerer resolves to the `llvm23` flavor).
+- `tests/core/test_xf32_comgr_compile.py` is green against the dev image's comgr. Its
+  kernel wraps the loaded fp32 fragments as TF32 operands, as for a native atom
+  ([step 11](step-11-tf32-operand-abi.md)).
 - After review, each skip/fail path was driven by injecting the fault: IR that
   comgr rejects → 6 errors, no skips; comgr not listing gfx950, or not
   loading → all skip; no `llvm-objdump` → only the 4 disassembly subtests skip
   and the compile check passes.
-- `tests/core` — 412 passed, 19 skipped, 757 subtests.
 - No emission changed in this step, so the byte-identity result from
   [steps 5+6](step-05-bf16x3-lowering.md) still stands.

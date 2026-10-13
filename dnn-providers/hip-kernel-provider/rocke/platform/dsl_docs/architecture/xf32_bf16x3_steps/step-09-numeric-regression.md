@@ -1,7 +1,7 @@
 # Step 9 — what the recipe actually computes
 
 Part of [XF32 via BF16x3 MMA emulation](../xf32_bf16x3_emulation_plan.md) (§4,
-step 9). Ticket AICK-2208.
+step 9).
 
 ## Contents
 
@@ -106,27 +106,40 @@ only in how many terms it issues, so the two cannot drift apart.
 
 ## The on-device run
 
-**Measured on a gfx950 device, 2026-10-08.** An earlier revision of this
-doc recorded the run as not performed: the development host at the time saw
-only gfx942, and the emulated rows are gfx950-only. Both checks now run on
-silicon, with `--require-device` so a missing device cannot pass as green:
+**Measured on a gfx950 device**, first on 2026-10-08 and again on 2026-10-13 after the
+emulated atoms moved onto the TF32 operand type ([step 11](step-11-tf32-operand-abi.md)).
+An earlier revision of this doc recorded the run as not performed: the development
+host at the time saw only gfx942, and the emulated rows are gfx950-only. Both checks
+now run on silicon, with `--require-device` so a missing device cannot pass as green:
 
 | atom | expansion vs hand-written BF16x3 | emulated rel err | bf16-only rel err |
 |---|---|---|---|
-| `xf32_bf16x3_f32_16x16x32` | 0 of 256 slots differ | 1.188e-07 | 2.424e-04 |
-| `xf32_bf16x3_f32_32x32x16` | 0 of 1024 slots differ | 1.188e-07 | 2.424e-04 |
+| `mfma_f32_16x16x32_xf32` | 0 of 256 slots differ | 1.188e-07 | 2.424e-04 |
+| `mfma_f32_32x32x16_xf32` | 0 of 1024 slots differ | 1.188e-07 | 2.424e-04 |
 
+The figures are identical before and after the operand-type change, as they must be:
+the new first step of the expansion is a bitcast. The second run covered each lowering
+backend — the Python lowerer, the C++ engine with the Python fallback disabled
+(`ROCKE_BACKEND=cpp ROCKE_CPP_STRICT=1`), and both engines cross-checked
+(`ROCKE_BACKEND=both`) — so the C++ expansion is verified on silicon, not only
+byte-compared against the Python one.
 Both land three orders inside the `2^-16` tolerance, and the single-term
 control misses by more than its `2^-13` floor — so the tolerance check is
 being met by the residual terms rather than by bf16 happening to be good
 enough. The two atoms agree to the digit because the operands are constant and
 the accumulate is exact at both K.
 
+The constants carry bits below a native XF32 instruction's 10-bit mantissa, which
+that instruction would drop. Landing within tolerance of the exact product is
+therefore also the on-device pin on the contract that the emulation drops no
+payload bit.
+
 ### That the device checks bite
 
 Green on a check that cannot fail is worth nothing, so the lowering was broken
 twice — in the Python engine only, in a throwaway copy of the tree — and the
-harness re-run on the same device:
+harness re-run on the same device. Repeated after the operand-type change, with the
+same figures:
 
 | injected fault | result |
 |---|---|
@@ -184,15 +197,13 @@ is exactly what the bitwise differential above measures.
 
 ## Verification
 
-- `tests/core/test_xf32_bf16x3_numerics.py` — 13 tests, green.
-- `tests/core` on the gfx950 node — 440 passed, 7 skipped, 799 subtests with
-  the `rocke_engine` extension built; 428 / 19 without it (the extra skips are
-  all engine- or `ml_dtypes`-gated).
-- `examples/gfx950/xf32/bf16x3_parity.py --require-device` on gfx950 —
-  `PASSED`, with the figures tabulated above, in 0.7 s.
-- `tests/core/test_xf32_bf16x3_device.py` under `ROCKE_REQUIRE_GFX950=1` on
-  the same node — 1 passed.
-- Both injected faults rejected by the harness on-device (table above).
+- `tests/core/test_xf32_bf16x3_numerics.py` — the host half — is green.
+- `examples/gfx950/xf32/bf16x3_parity.py --require-device` on gfx950 — `PASSED`, with
+  the figures tabulated above, under each lowering backend.
+- `tests/core/test_xf32_bf16x3_device.py` under `ROCKE_REQUIRE_GFX950=1` on the same
+  node passes.
+- Both injected faults rejected by the harness on-device (table above), exit status 2,
+  with an unmodified control exiting 0.
 - Earlier, on a gfx942 host — the harness prints `SKIPPED` (exit 0) and
   `FAILED` (exit 2) under `--require-device`, and the test skips, erroring
   under `ROCKE_REQUIRE_GFX950=1`.
@@ -206,8 +217,8 @@ is exactly what the bitwise differential above measures.
   and selected; an existing `HIP_VISIBLE_DEVICES=4,5,6` resolves to `6` rather
   than being re-indexed to `2`; and `ROCKE_REQUIRE_GFX950=1` turns each skip
   into a failure.
-- On the development host as it stands — ROCm present, `hipGetDeviceCount`
-  answering `hipError(100)` — `tests/core` is 427 passed / 20 skipped, this
-  test among the skips, and 1 error under `ROCKE_REQUIRE_GFX950=1`.
+- On a host where ROCm is present but `hipGetDeviceCount` answers
+  `hipErrorNoDevice`, the test skips for that confirmed absence and errors under
+  `ROCKE_REQUIRE_GFX950=1`.
 - No emission changed in this step, so the byte-identity result from
   [steps 5+6](step-05-bf16x3-lowering.md) still stands.

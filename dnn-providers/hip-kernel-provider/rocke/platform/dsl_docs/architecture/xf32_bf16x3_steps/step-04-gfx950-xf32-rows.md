@@ -1,13 +1,11 @@
-# Step 4 — the two gfx950 XF32 catalog rows
+# Step 4 — the two gfx950 emulated TF32 catalog rows
 
 Part of [XF32 via BF16x3 MMA emulation](../xf32_bf16x3_emulation_plan.md) (§4, step 4).
-Ticket AICK-2208.
 
 ## Contents
 
 - [Why](#why)
 - [What changed](#what-changed)
-- [Divergence from the plan: no `"d"` key](#divergence-from-the-plan-no-d-key)
 - [The C mirror cannot derive](#the-c-mirror-cannot-derive)
 - [Two "not yet" tests became real invariants](#two-not-yet-tests-became-real-invariants)
 - [Verification](#verification)
@@ -16,9 +14,9 @@ Ticket AICK-2208.
 ## Why
 
 [Step 3](step-03-emulation-descriptor.md) added the vocabulary for an emulated
-atom but left the catalog with none. This step adds the two gfx950 rows the
-ticket asks for. After it, `xf32` is *selectable* — the lowering still cannot
-expand it, which is steps 5 and 6.
+atom but left the catalog with none. This step adds the two gfx950 rows this plan
+calls for. After it, a TF32 atom is *selectable* on gfx950 — the lowering still
+cannot expand it, which is steps 5 and 6.
 
 ## What changed
 
@@ -27,33 +25,18 @@ Two rows appended to the gfx950 MMA list in
 
 | op_id | shape | physical atom |
 |---|---|---|
-| `xf32_bf16x3_f32_16x16x32` | 16×16×32 | `mfma_f32_16x16x32_bf16` |
-| `xf32_bf16x3_f32_32x32x16` | 32×32×16 | `mfma_f32_32x32x16_bf16` |
+| `mfma_f32_16x16x32_xf32` | 16×16×32 | `mfma_f32_16x16x32_bf16` |
+| `mfma_f32_32x32x16_xf32` | 32×32×16 | `mfma_f32_32x32x16_bf16` |
 
-Both `a`/`b` = `xf32`, `c` = `fp32`, `recipe` = `bf16x3`. Mirrored in
+Both `a`/`b` = `tf32`, `c` = `fp32`, `recipe` = `bf16x3`. (This step first landed the
+rows as `xf32_bf16x3_f32_*` over an `xf32` selection tag; [step 11](step-11-tf32-operand-abi.md)
+moved them onto the base's `tf32` type and these names.) Mirrored in
 [`cpp/core/arch/data.cpp`](../../../cpp/core/arch/data.cpp).
 
 New tests:
 [`test_xf32_catalog_rows.py`](../../../tests/core/test_xf32_catalog_rows.py) and
 `test_emulated_rows_mirror_physical` in
 [`test_mma_catalog_lookup.cpp`](../../../tests/core/test_mma_catalog_lookup.cpp).
-
-## Divergence from the plan: no `"d"` key
-
-Plan §3.2's row snippet spells `"d": "fp32"`. These rows omit it.
-
-D and C coincide for this atom — it accumulates fp32 and produces fp32 — so the
-key carries no information. It does carry a cost: `d_dtype` unset means
-`MmaOp.result_dtype` falls back to the accumulator, and
-`test_shipped_atoms_produce_what_they_accumulate` in
-[`test_arch_mma_ssot.py`](../../../tests/core/test_arch_mma_ssot.py) pins exactly
-that across the whole catalog. Spelling a redundant `"d"` would have broken a
-live invariant in exchange for nothing, and created a second place for the two to
-disagree.
-
-Step 1's `d_dtype` field therefore still has no shipped user. That was already
-its expected shape: it exists for a *native* XF32 atom (AICK-1714), where D and C
-genuinely can differ.
 
 ## The C mirror cannot derive
 
@@ -80,44 +63,41 @@ catalog-build time, which a static table cannot do.
 
 ## Two "not yet" tests became real invariants
 
-Steps 2 and 3 left behind two tests asserting that nothing claimed `xf32` and
-that every atom was native. Step 4 is the change that makes both false, so they
-were replaced rather than deleted — each with the permanent invariant it was
-standing in for:
+Earlier steps left behind two tests asserting that nothing claimed the new dtype and
+that every atom was native. This step is the change that makes both false, so they
+were replaced rather than deleted — each with the permanent invariant it was standing
+in for. After the move onto the base's TF32 type they read:
 
-- `test_no_shipped_catalog_atom_claims_it_yet` →
-  `test_xf32_appears_only_as_an_operand_dtype` (xf32 may be A or B; C and D
-  describe values that really exist in registers, and none of them is xf32) plus
-  `test_xf32_operands_are_confined_to_gfx950_emulated_rows` (blast radius: only
-  gfx950, only emulated, never a mixed-operand row).
-- `test_every_shipped_atom_is_native` →
-  `test_emulation_is_confined_to_the_xf32_rows`.
+- `test_tf32_atoms_are_native_on_gfx942_emulated_on_gfx950_and_absent_elsewhere`
+  (blast radius: which arch offers which TF32 atoms, and no other) in
+  `test_xf32_catalog_rows.py`;
+- `test_emulation_is_confined_to_the_tf32_rows` in `test_mma_emulation_schema.py`
+  (every atom that is not TF32 is still native).
 
-`test_enumerate_is_unchanged_when_nothing_is_emulated` kept passing unmodified
-once real emulated rows existed — the emulated rows are reachable only through an
-xf32 query and there is no native xf32 atom to shadow them — so only its premise
-(now stale) was rewritten.
+`test_enumerate_is_unchanged_for_every_shipped_query` kept passing unmodified once
+real emulated rows existed — the emulated rows are reachable only through a TF32
+query, and no arch lists a native and an emulated atom for one `(m, n)` for the
+native-preferred rule to arbitrate — so only its premise was rewritten.
 
 ## Verification
 
 - [`tests/core/test_xf32_catalog_rows.py`](../../../tests/core/test_xf32_catalog_rows.py)
-  — 9 tests. Rows present with the right shape; recipe and physical atom; frag
-  metadata equal to the physical atom; physical atom native; fp32/unscaled/no-D;
-  xf32 queries reach both rows; `select_largest_k` picks 16×16×32; no other arch
-  offers xf32; and — the point of the exercise — gfx950 fp32 and bf16 enumeration
+  — rows present with the right shape; recipe and physical atom; frag metadata equal
+  to the physical atom; physical atom native; fp32 accumulator and unscaled; TF32
+  queries reach both rows; `select_largest_k` picks 16×16×32; which arch offers which
+  TF32 atoms; and — the point of the exercise — gfx950 fp32 and bf16 enumeration
   return exactly the same op_id sets as before.
-- `tests/core` — 391 passed, 22 skipped, 315 subtests. The only tests that moved
-  are the two "not yet" pins above.
-- C build clean; `ctest` 12/12, including the new mirror check.
-- Byte identity at llvm20 **and** llvm22: 69 GREEN / 1 DRIFT, the DRIFT being the
-  `gfx942_attention_tiled_3d` cfg[3] divergence proven pre-existing in
-  [step 1](step-01-mma-result-dtype.md). No new drift — expected, since no
-  emitted kernel selects xf32 yet.
+- The C twin, `test_emulated_rows_mirror_physical`, runs under `ctest` with the rest of
+  the engine's catalog tests.
+- Byte identity at llvm20 **and** llvm22 was 69 GREEN / 1 DRIFT when this step landed,
+  the DRIFT being the `gfx942_attention_tiled_3d` cfg[3] divergence, proven
+  pre-existing (see [step 10](step-10-byte-identity.md)). No new drift — expected,
+  since no emitted kernel selected an emulated atom yet.
 
 ## Follow-ups left open
 
-- gfx942 has no XF32 row. Native gfx942 XF32 is AICK-1714's; this ticket only
-  supplies the preference rule that will pick it over emulation when it lands.
+- gfx942 is offered no emulated row. Its native TF32 atoms came with the base, and the
+  K-packed bf16 atoms these rows expand into do not exist there (plan §3.2).
 - **Closed after review.** The bare-op_id fragment lookups (`_frag_info` in
   Python, `rocke_arch_mma_c_frag_len` in C) originally did not know the emulated
   op_ids, so the bare-string form of `IRBuilder.mma` and the C builder's

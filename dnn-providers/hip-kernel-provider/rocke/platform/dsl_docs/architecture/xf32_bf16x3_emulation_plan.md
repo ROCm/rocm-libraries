@@ -1,7 +1,8 @@
 # XF32 via BF16x3 MMA emulation — solution plan
 
-**Ticket:** AICK-2208 (`[rocKE] Add capability-based TF32 emulation using BF16x3 MMA`)
-**Related:** AICK-1714 (native XF32 MFMA atoms) · AICK-2169 (merged in as duplicate)
+**Goal:** capability-based TF32 emulation — a logical TF32 MMA atom that lowers to three
+BF16 MMAs on a target with no native XF32 instruction (gfx950), next to the native atoms
+gfx942 already has.
 **Reference implementation:** Composable Kernel, public repo `ROCm/composable_kernel`
 
 This document is a design/implementation plan, not a benchmark record. It contains no
@@ -10,24 +11,24 @@ measured performance results.
 ## Contents
 
 - [1. What CK actually does (verified against the source)](#1-what-ck-actually-does-verified-against-the-source)
-  - [1.1 The logical dtype is a selection tag, not a storage type](#11-the-logical-dtype-is-a-selection-tag-not-a-storage-type)
+  - [1.1 The logical dtype: a tag in CK, a typed operand in rocke](#11-the-logical-dtype-a-tag-in-ck-a-typed-operand-in-rocke)
   - [1.2 Native XF32 where the target has it](#12-native-xf32-where-the-target-has-it)
   - [1.3 The BF16x3 emulation on gfx950](#13-the-bf16x3-emulation-on-gfx950)
   - [1.4 Rounding mode — the one real parity hazard](#14-rounding-mode--the-one-real-parity-hazard)
 - [2. Current rocke state](#2-current-rocke-state)
-  - [2.1 Greenfield](#21-greenfield)
-  - [2.2 The stated prerequisite is real](#22-the-stated-prerequisite-is-real)
+  - [2.1 Starting point: native TF32 on gfx942 only](#21-starting-point-native-tf32-on-gfx942-only)
+  - [2.2 No result-dtype split is needed](#22-no-result-dtype-split-is-needed)
   - [2.3 The split primitive already exists and already has the right rounding](#23-the-split-primitive-already-exists-and-already-has-the-right-rounding)
   - [2.4 Physical bf16 atoms are already registered with verified layouts](#24-physical-bf16-atoms-are-already-registered-with-verified-layouts)
 - [3. Design](#3-design)
-  - [3.1 `xf32` as a logical dtype](#31-xf32-as-a-logical-dtype)
+  - [3.1 The operand ABI: `tf32`, carried as I32](#31-the-operand-abi-tf32-carried-as-i32)
   - [3.2 Catalog rows](#32-catalog-rows)
   - [3.3 The lowering](#33-the-lowering)
   - [3.4 Known cost, and the phase-2 lever](#34-known-cost-and-the-phase-2-lever)
   - [3.5 Explicitly out of scope](#35-explicitly-out-of-scope)
 - [4. Work breakdown](#4-work-breakdown)
 - [5. Definition of Done](#5-definition-of-done)
-- [6. Open questions to close with the reporter](#6-open-questions-to-close-with-the-reporter)
+- [6. Decisions and remaining open points](#6-decisions-and-remaining-open-points)
 
 ---
 
@@ -37,7 +38,7 @@ Two independent CK implementations agree on the recipe. Both were read directly.
 numbers below are CK-repo-relative and were accurate when this plan was written; re-confirm
 them against upstream before relying on any one of them.
 
-### 1.1 The logical dtype is a selection tag, not a storage type
+### 1.1 The logical dtype: a tag in CK, a typed operand in rocke
 
 `include/ck/utility/data_type.hpp:31`
 
@@ -50,9 +51,15 @@ selection. In ck_tile the atom is registered as
 `amdgcn_mma<tf32_t, tf32_t, fp32_t, M, N, K, ...>` — a *logical* `(xf32, xf32, fp32)`
 triple — while the `exec()` signature takes and returns **fp32** vectors.
 
-This is exactly the constraint AICK-2208 states twice: do not register emulation as
-`(fp32, fp32, fp32)`. CK arrived at the same design independently, which is good
-validation of the ticket's framing.
+The constraint that matters is that emulation must not be registered as
+`(fp32, fp32, fp32)`: ordinary fp32 selection must not move. CK satisfies it with a tag.
+
+rocke needs the same key and one thing more. Its native gfx942 atoms already exist, and
+they take a logical `tf32` operand — a real 32-bit IR type carried as I32 — so that raw
+payload bits and explicit round-to-nearest-even preparation stay distinguishable. The
+emulated atoms take **the same operand type**, which is what lets one kernel body reach
+either implementation through a `(tf32, tf32, fp32)` catalog query (§3.1). CK's
+fp32-typed `exec()` is the one place the two deliberately differ.
 
 ### 1.2 Native XF32 where the target has it
 
@@ -94,7 +101,7 @@ acc = mfma(a_big,   b_big,   acc)
 
 > **Watch out:** the comment above both CK call sites says "Run 3 times: big\*big,
 > small\*big, big\*small" — the *code* issues `small*big`, `big*small`, `big*big`.
-> The code is what matters and it matches the ticket body. Do not port the comment.
+> The code is what matters, and it is the order this plan targets. Do not port the comment.
 
 Order is load-bearing: FP32 accumulation is not associative, so reordering changes
 output bits and breaks the CK-parity acceptance criterion.
@@ -120,17 +127,20 @@ treat the truncate fallback as explicitly out of scope.
 
 ## 2. Current rocke state
 
-### 2.1 Greenfield
+### 2.1 Starting point: native TF32 on gfx942 only
 
-`xf32`/`tf32` appear nowhere in `python/`, and only in one unrelated comment in
-`cpp/core/lower_llvm/mma.cpp:664`. Nothing to refactor, nothing to preserve.
+The base carries a logical `tf32` dtype (`xf32` is an alias), carried as I32, and two
+native gfx942 atoms, `mfma_f32_16x16x8_xf32` and `mfma_f32_32x32x4_xf32`. gfx950 has no
+native XF32 instruction and no TF32 atom, so a TF32 query there is rejected. Nothing in
+existing selection has to move. The base states that cross-target emulation is outside
+what it adds; this plan is that part.
 
-### 2.2 The stated prerequisite is real
+### 2.2 No result-dtype split is needed
 
-`MmaOp` (`python/rocke/core/arch/target.py:148`) carries `a_dtype`, `b_dtype`,
-`c_dtype` and **no `d_dtype`**. `_op_id_c_dtype()` (`:1130`) is built on the assumption
-that C is the accumulator and D is implied by it. The ticket's "independent C and D
-atom metadata" dependency is genuine and blocking.
+An earlier draft treated independent C and D atom metadata as a prerequisite. It is not:
+every shipped atom, native and emulated, accumulates and produces fp32, and the TF32
+verifier requires the result of a TF32 atom to be its FP32 accumulator. The field that
+was added for it had no user and was removed.
 
 ### 2.3 The split primitive already exists and already has the right rounding
 
@@ -162,20 +172,29 @@ ready to enable on day one.** `MmaOp._require_layout` already raises
 
 ## 3. Design
 
-### 3.1 `xf32` as a logical dtype
+### 3.1 The operand ABI: `tf32`, carried as I32
 
-Add `xf32` to the dtype normalization table in
-[`python/rocke/core/dtypes.py`](../../python/rocke/core/dtypes.py) and its C mirror
-[`cpp/core/dtypes.cpp`](../../cpp/core/dtypes.cpp). Note this is the *logical* dtype
-registry, **not** the IR scalar type system in `cpp/core/ir/core_types.cpp` — `xf32`
-must stay out of the latter, exactly as `fp6e2m3` does. Accept `tf32` as an alias
-spelling that canonicalises to `xf32`. Constraints:
+The logical dtype is `tf32`; `xf32`, AMD's name for the same 19-bit format, is an accepted
+alias spelling. It is defined in [`python/rocke/core/dtypes.py`](../../python/rocke/core/dtypes.py)
+and its C mirror [`cpp/core/dtypes.cpp`](../../cpp/core/dtypes.cpp), and it is a real
+32-bit IR type, `tf32` / `vec<tf32xN>`, carried as I32 words: `bitcast` wraps an fp32 or
+I32 payload without rounding, `cvt_f32_to_tf32` rounds explicitly, and generic TF32
+arithmetic is rejected.
 
-- **Selection tag only.** No memref element type, no load/store, no conversion op.
-  This falls out of the existing design rather than needing new code: `io_ir_type`
-  already raises for anything but f16/bf16, and `rocke_scalar_by_name` already
-  returns NULL for unknown names. Pin both with tests so it stays true.
-- Physical A/B registers stay `f32`. The atom's `a_frag_len` describes **f32** slots.
+An emulated atom has exactly the native atoms' ABI:
+
+- A and B are `vec<tf32xN>`, N being the fragment length the atom borrows from its
+  physical atom (8 for both gfx950 atoms). The accumulator and the result are
+  `vec<f32xM>`.
+- The verifier derives all of it from the catalog — the `emulation` descriptor plus the
+  inherited fragment lengths — rather than from a per-atom table, so a new emulated row
+  needs no verifier edit. An fp32 vector, or a TF32 vector of the wrong length, is
+  rejected with the expected types named.
+- **No payload bit is dropped.** A native XF32 instruction ignores the low 13 bits of
+  each operand; the emulation reinterprets the whole 32-bit payload as fp32 and splits
+  it. It is therefore at least as accurate as the native atom on the same operands, and
+  the two are not bit-reproducible against each other across targets. The device gate
+  pins this with operands that carry bits below the native mantissa.
 
 ### 3.2 Catalog rows
 
@@ -185,9 +204,9 @@ Add an `emulation` descriptor to the MMA catalog row schema
 
 ```json
 {
-  "op_id": "xf32_bf16x3_f32_16x16x32",
+  "op_id": "mfma_f32_16x16x32_xf32",
   "family": "mma",
-  "a": "xf32", "b": "xf32", "c": "fp32", "d": "fp32",
+  "a": "tf32", "b": "tf32", "c": "fp32",
   "m": 16, "n": 16, "k": 32,
   "emulation": { "recipe": "bf16x3", "physical_op_id": "mfma_f32_16x16x32_bf16" }
 }
@@ -197,14 +216,23 @@ Rules:
 
 - Frag lengths and layout maps are **inherited verbatim** from `physical_op_id`. The
   logical A fragment occupies the same `(row, k)` coordinates; only the element type
-  differs (f32 in, bf16 to the instruction). Derive rather than duplicate, so the two
+  differs (TF32 in, bf16 to the instruction). Derive rather than duplicate, so the two
   can never drift.
-- A row with **no** `emulation` key is native. Selection prefers native over emulated
-  for the same logical triple and shape — one comparator in `MmaCatalog.enumerate`.
+- The recipe fixes the operand dtype (`bf16x3` emulates TF32), and the physical atom
+  must be a **native row of the same arch**. Both are checked when the catalog loads: a
+  row naming an atom its target cannot issue would claim support the compiler then
+  rejects at codegen.
+- A row with **no** `emulation` key is native. Selection prefers native over emulated at
+  the same shape — one comparator in `MmaCatalog.enumerate`. The comparator keys on the
+  full `(m, n, k)`, so it is sound only while no arch lists a native and an emulated atom
+  for the same `(a, b, c, m, n)`; a test pins that, and the rule has to be re-keyed on
+  `(m, n)` before an arch breaks it.
 - Absence of a row = explicit rejection. No architecture-wide fallback.
 
-Initial enablement: **gfx950 only** (`16x16x32`, `32x32x16`). gfx942 native XF32 rows
-are AICK-1714's; this ticket only supplies the preference rule that will select them.
+Enablement: **gfx950 only** (`16x16x32`, `32x32x16`). gfx942 keeps its native atoms and is
+offered no emulated ones. A gfx942 emulation could not reuse these two rows: the K-packed
+bf16 atoms they expand into do not exist there, so it would expand into gfx942's own
+(`16x16x16`, `32x32x8`), and the selection rule above would need re-keying first.
 
 ### 3.3 The lowering
 
@@ -214,10 +242,13 @@ One shared routine, mirrored byte-for-byte in both engines
 WMMA:
 
 ```
-split(X) -> (big, small):
-  big_bf   = fptrunc <N x float> X    to <N x bfloat>     # RNE, packed
+payload(X) -> F:                                          # X: vec<tf32xN>, an I32 carrier
+  F        = bitcast <N x i32> X to <N x float>           # reinterpret, never round
+
+split(F) -> (big, small):
+  big_bf   = fptrunc <N x float> F    to <N x bfloat>     # RNE, packed
   big_f32  = fpext   <N x bfloat> big_bf to <N x float>
-  diff     = fsub    <N x float> X, big_f32
+  diff     = fsub    <N x float> F, big_f32
   small_bf = fptrunc <N x float> diff to <N x bfloat>
 
 emit_mma(phys, a_small, b_big, C  ) -> t0
@@ -242,12 +273,13 @@ first.
 
 ### 3.5 Explicitly out of scope
 
-- **Frontend `allow_tf32` routing.** The merged AICK-2169 scope asks the frontend to
-  accept XF32 as a dtype or honour a PyTorch-style `allow_tf32` flag. That is
-  provider/dispatch-layer work and it contradicts this ticket's own "no autotuner
-  policy change" boundary. **Recommend splitting it into a follow-up ticket** rather
-  than letting it gate this one.
-- XF32 load/store dtypes.
+- **Frontend `allow_tf32` routing.** Accepting XF32 as a frontend dtype, or honouring a
+  PyTorch-style `allow_tf32` flag, is provider/dispatch-layer work and needs a selector
+  that maps a request onto a catalog query, which no production selector does yet. It is
+  also an autotuner policy change, which this plan does not make.
+- HIP-source lowering. The expansion exists only in the LLVM lowerer; the HIP lowerers
+  reject an emulated atom by name rather than failing as though they had merely missed a
+  hardware instruction.
 - Implicit C/D conversion.
 - The `small*small` term.
 
@@ -258,12 +290,14 @@ first.
 Each completed step leaves a note under
 [`xf32_bf16x3_steps/`](xf32_bf16x3_steps/) recording what it actually turned out to
 be, the design calls, and how it was verified — including where the step diverged
-from this plan.
+from this plan. Counts and figures in the older notes were taken on the base as it stood
+at the time; [step 10](xf32_bf16x3_steps/step-10-byte-identity.md) and
+[step 11](xf32_bf16x3_steps/step-11-tf32-operand-abi.md) record the current gates.
 
 | # | Step | Touches | Blocking | Notes |
 |---|---|---|---|---|
-| 1 | Add independent `d_dtype` to atom metadata (`MmaOp`, catalog JSON, C mirror, `_op_id_c_dtype` twin for D) | `core/arch/target.py`, `arch_specs.json`, `cpp/core/arch/data.cpp`, `cpp/.../query.cpp` | **yes — prerequisite** | ✅ [step 1](xf32_bf16x3_steps/step-01-mma-result-dtype.md) |
-| 2 | Register `xf32` logical dtype in both dtype registries; test that it is rejected for memory ops | `core/dtypes.py`, `cpp/core/dtypes.cpp` (**not** `cpp/core/ir/core_types.cpp` — see the step note) | | ✅ [step 2](xf32_bf16x3_steps/step-02-xf32-logical-dtype.md) |
+| 1 | ~~Add independent `d_dtype` to atom metadata~~ | — | — | **dropped** — no atom needs D ≠ C (§2.2) |
+| 2 | ~~Register `xf32` as a selection-tag dtype~~ | — | — | **superseded** by the base's logical `tf32` type (§3.1, [step 11](xf32_bf16x3_steps/step-11-tf32-operand-abi.md)) |
 | 3 | Add `emulation` descriptor to catalog schema; derive frag/layout from `physical_op_id`; native-preferred comparator in `MmaCatalog.enumerate` | `core/arch/target.py`, catalog JSON + C mirror | after 1 | ✅ [step 3](xf32_bf16x3_steps/step-03-emulation-descriptor.md) |
 | 4 | Add the two gfx950 emulated rows | catalog JSON + C mirror | after 3 | ✅ [step 4](xf32_bf16x3_steps/step-04-gfx950-xf32-rows.md) |
 | 5 | BF16x3 expansion in the Python lowering | `core/lower_llvm.py` | after 4 | ✅ [steps 5+6](xf32_bf16x3_steps/step-05-bf16x3-lowering.md) |
@@ -271,13 +305,15 @@ from this plan.
 | 7 | FP32-selection-unchanged regression test | `tests/` | after 3 | ✅ [step 7](xf32_bf16x3_steps/step-07-selection-regression.md) |
 | 8 | COMGR compile gate for gfx950 | `tests/` | after 6 | ✅ [step 8](xf32_bf16x3_steps/step-08-comgr-compile-gate.md) |
 | 9 | Numeric regression: vs FP32 reference **and** vs CK packed-path reference | `tests/core/` + `examples/gfx950/xf32/` | after 8 | ✅ [step 9](xf32_bf16x3_steps/step-09-numeric-regression.md) — host half green; device harness wired into pytest (`test_xf32_bf16x3_device.py`); **gfx950 device run green** — bitwise against the hand-written BF16x3 at both atoms, rel err 1.19e-07 vs K*alpha*beta, and both injected faults rejected |
-| 10 | Re-bless byte-identity goldens; run both LLVM flavors | `tools/check_byte_identity.py` | last | ✅ [step 10](xf32_bf16x3_steps/step-10-byte-identity.md) — with the `xf32_bf16x3_mma` parity family: 70 GREEN / 1 pre-existing DRIFT at llvm20, llvm22 and llvm23; no existing golden needed re-blessing, and the new family is blessed into both L5 anchor keys |
+| 10 | Re-bless byte-identity goldens; run both LLVM flavors | `tools/check_byte_identity.py` | last | ✅ [step 10](xf32_bf16x3_steps/step-10-byte-identity.md) |
+| 11 | Move the emulated atoms onto the base's TF32 operand ABI: `vec<tf32xN>` operands, `mfma_f32_<shape>_xf32` names, catalog-driven verifier, explicit HIP rejection | `core/arch/`, `core/tf32.py`, both lowerers, parity pair, tests | after 10 | ✅ [step 11](xf32_bf16x3_steps/step-11-tf32-operand-abi.md) |
 
 ---
 
 ## 5. Definition of Done
 
-Per `KERNEL_AUTHORING.md` (new-feature path), plus the ticket's own criteria:
+Per `KERNEL_AUTHORING.md` (new-feature path), plus the acceptance criteria this work
+started from:
 
 ```bash
 cd platform && export ROCKE=$(pwd) PYTHONPATH=$ROCKE/python
@@ -285,27 +321,30 @@ python tools/check_byte_identity.py
 ROCKE_LLVM_FLAVOR=llvm22 python tools/check_byte_identity.py
 ```
 
-- [ ] Python/C catalog parity — both engines enumerate identical atom sets including `d_dtype` and `emulation`.
+- [ ] Python/C catalog parity — both engines enumerate identical atom sets including `emulation`.
 - [ ] Byte identity GREEN for every family at both LLVM flavors.
 - [ ] COMGR compiles for each enabled target.
 - [ ] GPU numeric regression per enabled arch family, at a declared tolerance, against an independent reference. Byte-identity and successful compile are **not** correctness gates.
 - [ ] Ordinary `(fp32, fp32, fp32)` selection provably unchanged (test 7).
-- [ ] Unsupported targets reject `(xf32, xf32, fp32)` explicitly rather than silently falling back.
+- [ ] Unsupported targets reject `(tf32, tf32, fp32)` explicitly rather than silently falling back.
 - [ ] Native XF32 preferred over emulated where both are registered.
 
 ---
 
-## 6. Open questions to close with the reporter
+## 6. Decisions and remaining open points
 
-1. **Tolerance.** The AICK-2169 comment says "within tolerance (7-bit BF16 mantissa)".
-   BF16x3 minus `small*small` yields roughly 16 bits of effective product mantissa —
-   between TF32's 10 and FP32's 24. Clarify whether the tolerance is per-product or
-   post-accumulation before writing the numeric gate.
-2. **Rounding.** Confirm §1.4: parity target is CK's packed/RNE path, and the truncate
-   fallback is out of scope.
-3. **Scope split.** Confirm the `allow_tf32` frontend routing moves to its own ticket
+1. **Tolerance — decided.** BF16x3 minus `small*small` yields roughly 16 bits of effective
+   product mantissa, between TF32's 10 and FP32's 24. The numeric gate states its
+   tolerance post-accumulation, per output position, against `K*alpha*beta`
+   ([step 9](xf32_bf16x3_steps/step-09-numeric-regression.md)); a per-product tolerance
+   would be a different, tighter claim and is not made.
+2. **Rounding — decided.** The parity target is CK's packed/RNE path (§1.4); the truncating
+   scalar fallback is out of scope.
+3. **Scope split — decided.** The `allow_tf32` frontend routing is not part of this work
    (§3.5).
-4. **Target list.** gfx950 first. Which, if any, of gfx942 / gfx1250 must be enabled in
-   this change versus a follow-up? gfx942 has native XF32 (AICK-1714), so emulation
-   there is likely pointless; gfx1250 is WMMA/wave32 and needs its own layout
+4. **Target list — decided.** gfx950 only. gfx942 keeps its native atoms and is offered no
+   emulated ones (§3.2); gfx1250 is WMMA/wave32 and would need its own layout
    verification.
+5. **Open: emulation on gfx942.** It would be an accuracy option rather than a
+   capability, since the native atoms exist there, and it needs the re-keyed selection
+   rule (§3.2) and its own device validation.

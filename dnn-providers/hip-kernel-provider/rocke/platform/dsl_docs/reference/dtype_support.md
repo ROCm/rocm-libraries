@@ -85,8 +85,8 @@ logical-type and storage APIs linked above.
 > C5 separately measures whether kernel families accept the format.
 
 **TF32 is a logical dtype with a 32-bit I32 carrier.** `tf32` and its `xf32`
-alias select two native gfx942 XF32 atoms independently of ordinary FP32
-selection. The logical type survives serialization; only A/B are bitcast to
+alias select two native gfx942 XF32 atoms, or on gfx950 two atoms emulated by
+three BF16 MFMAs, independently of ordinary FP32 selection. The logical type survives serialization; only A/B are bitcast to
 the intrinsic's float-vector ABI, while C/D remain FP32.
 
 `bitcast(value, TF32)` wraps an FP32 or I32 payload without rounding.
@@ -101,9 +101,10 @@ target/alignment determine the machine transfer instructions.
 The fragment loader uses `storage_ir_type("tf32") == I32` and returns carriers
 that the caller wraps as logical TF32.
 
-Native XF32 is available on gfx942, but absent on gfx950 and gfx1250 (§4D).
-Production GEMM/convolution selectors and cross-target TF32 emulation remain
-outside this support. The [numerical probe](../../python/rocke/examples/gfx942/tf32_numerics/README.md)
+Native XF32 is available on gfx942, but absent on gfx950 and gfx1250 (§4D);
+gfx950's catalog carries two logical TF32 atoms emulated by three BF16 MFMAs
+([plan](../architecture/xf32_bf16x3_emulation_plan.md)). Production
+GEMM/convolution selectors remain outside this support. The [numerical probe](../../python/rocke/examples/gfx942/tf32_numerics/README.md)
 covers raw payloads, explicit RNE preparation, and ordinary FP32 controls.
 
 A **BF16 compute mode over `f32` storage** could convert operands to `bf16` and
@@ -115,7 +116,9 @@ of an `f32`, `GpuRefTypes.h:92-103`, gated by `USE_TF32`), while `bf16` keeps
 equivalent; `USE_TF32` output is not a bit-accuracy oracle for BF16 compute.
 
 The matrix below therefore labels this possible mode `bf16-mode`. It is separate
-from logical TF32; no production selector maps TF32 requests to BF16 compute.
+from logical TF32, including gfx950's BF16x3-emulated atoms, which split each
+operand's payload into three BF16 products rather than rounding it to BF16; no
+production selector maps TF32 requests to BF16 compute.
 
 **Types that are entirely absent from the vocabulary:** `f64`, unsigned
 `u8/u16/u32/u64`, and a distinct `bool` (predicates reuse `i1`). No engine
@@ -515,8 +518,11 @@ gfx1250 has no native F64 matrix instruction and is excluded from this gap.
 **Consequence for rocKE.** The gfx942 catalog declares
 `mfma_f32_16x16x8_xf32` and `mfma_f32_32x32x4_xf32`, with logical TF32 A/B and
 FP32 C/D. Both Python and C++ lowerers support them and reject these atoms on
-other targets. gfx950/gfx1250 have no native XF32 instruction. This atom support
-does not add production GEMM/convolution dispatch or cross-target emulation.
+other targets. gfx950/gfx1250 have no native XF32 instruction; gfx950's catalog
+carries two emulated atoms, `mfma_f32_16x16x32_xf32` and
+`mfma_f32_32x32x16_xf32`, which take the same logical TF32 operands and expand into
+three BF16 MFMAs. This atom support does not add production GEMM/convolution
+dispatch.
 See [§1](#1-the-canonical-dtype-set) for the distinction between logical TF32,
 raw payload wrapping, explicit RNE preparation, and a BF16 compute mode.
 

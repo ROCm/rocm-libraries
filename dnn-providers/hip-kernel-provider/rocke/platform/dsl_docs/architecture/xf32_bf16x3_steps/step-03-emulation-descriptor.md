@@ -1,7 +1,6 @@
 # Step 3 — the `emulation` descriptor and the native-preferred rule
 
 Part of [XF32 via BF16x3 MMA emulation](../xf32_bf16x3_emulation_plan.md) (§4, step 3).
-Ticket AICK-2208.
 
 ## Contents
 
@@ -103,8 +102,8 @@ emulation field must spell out every field positionally.
 - `tests/core` — 380 passed, 22 skipped.
 - C build clean; `ctest` 12/12 passed.
 - Byte identity at llvm20 **and** llvm22: 69 GREEN / 1 DRIFT, the one DRIFT being
-  the `gfx942_attention_tiled_3d` cfg[3] divergence proven pre-existing in
-  [step 1](step-01-mma-result-dtype.md). No new drift at either flavor.
+  the `gfx942_attention_tiled_3d` cfg[3] divergence, proven pre-existing (see
+  [step 10](step-10-byte-identity.md)). No new drift at either flavor.
 
 ## Follow-ups left open
 
@@ -114,3 +113,14 @@ emulation field must spell out every field positionally.
 - `_prefer_native` compares on `(m, n, k)` only. If a native and an emulated atom
   ever differ in scale-block granularity at the same shape, that comparison needs
   to widen.
+- The same full-shape key means a native atom of a *different* K does not shadow
+  an emulated one, and `select_largest_k` then prefers the larger K. No arch lists
+  both for one `(m, n)`, a test pins that, and the rule has to be re-keyed on
+  `(m, n)` before one does ([step 11](step-11-tf32-operand-abi.md)).
+
+## Later changes
+
+Step 11 adds three load-time checks to this schema: the recipe fixes the operand
+dtype, the physical atom must be a native row of the *same* arch, and an emulated
+TF32 atom's operand fragments are readable from the catalog by op_id. The result-
+dtype field the first draft of this step relied on was removed.
