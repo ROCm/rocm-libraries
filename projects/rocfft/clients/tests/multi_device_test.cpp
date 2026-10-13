@@ -77,7 +77,10 @@ enum SplitType
     DIFFERENT_IO_DEVICES,
     // split only the batch dimension, each output brick on the same device as the input
     // brick of same batch range, listed in a shuffled order (out-of-place only)
-    BATCH_COLOCATED
+    BATCH_COLOCATED,
+    // split only the batch dimension, each output brick on a different device than the
+    // input brick of same batch range (out-of-place only)
+    BATCH_RELOCATED
 };
 
 std::vector<fft_params> param_generator_multi_gpu(const SplitType type)
@@ -216,6 +219,13 @@ std::vector<fft_params> param_generator_multi_gpu(const SplitType type)
                 input_grid[0] = output_grid[0]
                     = std::min(p.nbatch, static_cast<size_t>(total_num_devices));
                 break;
+            case BATCH_RELOCATED:
+                if(p.nbatch < 2 || p.placement == fft_placement_inplace)
+                    continue;
+                input_grid[0] = output_grid[0]
+                    = std::min(p.nbatch, static_cast<size_t>(total_num_devices));
+                start_global_dev_id_output = 1;
+                break;
             default:
                 throw std::invalid_argument("param_generator_multi_gpu: unkonwn split type");
             }
@@ -314,6 +324,12 @@ INSTANTIATE_TEST_SUITE_P(multi_gpu_different_io_devices,
 INSTANTIATE_TEST_SUITE_P(multi_gpu_batch_colocated,
                          accuracy_test,
                          ::testing::ValuesIn(param_generator_multi_gpu(BATCH_COLOCATED)),
+                         accuracy_test::TestName);
+
+// batch-only split that cannot be paired brickwise, requiring data movement
+INSTANTIATE_TEST_SUITE_P(multi_gpu_batch_relocated,
+                         accuracy_test,
+                         ::testing::ValuesIn(param_generator_multi_gpu(BATCH_RELOCATED)),
                          accuracy_test::TestName);
 
 TEST(multi_gpu_validate, catch_validation_errors)
