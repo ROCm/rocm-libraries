@@ -28,6 +28,7 @@ from support_features import (
     batchnorm,
     batchnorm_backward,
     batchnorm_inference,
+    batchnorm_inference_variance_ext,
     batchnorm_training,
     convolution,
     convolution_bwd,
@@ -1873,12 +1874,14 @@ def _bn_inf(
     dtype: str = "float",
     y_dtype: str | None = None,
     y_virtual: bool = False,
+    epsilon: str | None = None,
 ) -> tuple[dict, dict]:
-    """A BatchnormInferenceAttributes node.
+    """A BatchnormInferenceAttributes node, or with ``epsilon`` a
+    BatchnormInferenceAttributesVarianceExt node.
 
     ``x`` on uid 1, ``y`` on 2, scale and bias on 3 and 4, the mean and
-    inverse variance on 5 and 6. Ports as
-    utilities/json/BatchnormInferenceAttributes.hpp writes them, written out
+    inverse variance (the variance, with ``epsilon``) on 5 and 6, epsilon on
+    7. Ports as utilities/json/BatchnormInference*.hpp write them, written out
     rather than read from the module.
     """
     dims = [batch, channels, *spatial]
@@ -1902,11 +1905,13 @@ def _bn_inf(
         "mean_tensor_uid": 5,
         "inv_variance_tensor_uid": 6,
     }
-    node = {
-        "type": "BatchnormInferenceAttributes",
-        "inputs": inputs,
-        "outputs": {"y_tensor_uid": 2},
-    }
+    node_type = "BatchnormInferenceAttributes"
+    if epsilon is not None:
+        del inputs["inv_variance_tensor_uid"]
+        inputs |= {"variance_tensor_uid": 6, "epsilon_tensor_uid": 7}
+        tensors[7] = _scalar(7, epsilon)
+        node_type = "BatchnormInferenceAttributesVarianceExt"
+    node = {"type": node_type, "inputs": inputs, "outputs": {"y_tensor_uid": 2}}
     return node, tensors
 
 
@@ -2015,6 +2020,72 @@ class TestBatchnormInferenceExtract:
     def test_unbound_required_port_raises(self, side: str, port: str) -> None:
         node, tensors = _bn_inf()
         node[side][port] = None
+        self._raises(node, tensors, f"required port {port}")
+
+
+class TestBatchnormInferenceVarianceExtExtract:
+    """What differs from BatchnormInferenceAttributes; the rest is shared."""
+
+    PLAIN = {"dtype:fp32", "rank:2d", "layout:nchw", "epsilon:fixed"}
+
+    def _extract(self, **kwargs) -> set[str]:
+        kwargs.setdefault("epsilon", "fixed")
+        return batchnorm_inference_variance_ext.extract(*_bn_inf(**kwargs))
+
+    def _raises(self, node: dict, tensors: dict, match: str) -> None:
+        with pytest.raises(FeatureError, match=match):
+            batchnorm_inference_variance_ext.extract(node, tensors)
+
+    def test_builder_binds_every_schema_field(self) -> None:
+        node, _ = _bn_inf(epsilon="fixed")
+        m = batchnorm_inference_variance_ext
+        assert set(batchnorm.bound(node)) == table_fields(m.SCHEMA_FILE, m.SCHEMA_TABLE)
+
+    def test_every_feature_is_reachable(self) -> None:
+        reached = self._extract()
+        for kwargs in (
+            {"spatial": (), "dtype": "half", "y_dtype": "float"},
+            {"spatial": (8,), "layout": "nhwc", "dtype": "bfloat16"},
+            {"spatial": (4, 8, 8), "epsilon": "runtime"},
+        ):
+            reached |= self._extract(**kwargs)
+        m = batchnorm_inference_variance_ext
+        assert reached == {feature.id for feature in m.FEATURES}
+
+    def test_plain_graph(self) -> None:
+        assert self._extract() == self.PLAIN
+
+    def test_shares_the_inference_features(self) -> None:
+        kwargs = {"spatial": (8,), "layout": "nhwc", "dtype": "half"}
+        assert self._extract(**kwargs) - {"epsilon:fixed"} == (
+            batchnorm_inference.extract(*_bn_inf(**kwargs))
+        )
+
+    def test_runtime_epsilon(self) -> None:
+        features = self._extract(epsilon="runtime")
+        assert features == self.PLAIN - {"epsilon:fixed"} | {"epsilon:runtime"}
+
+    def test_epsilon_in_a_buffer_raises(self) -> None:
+        self._raises(*_bn_inf(epsilon="buffer"), "epsilon_tensor_uid is neither")
+
+    @pytest.mark.parametrize(
+        "change, match",
+        [
+            ({"dims": [1, 4, 8, 8]}, r"are not \[1, 4, 1, ...\]"),
+            ({"data_type": "half"}, "dtype 'half' is not catalogued"),
+        ],
+    )
+    def test_variance_is_fp32_and_channel_only(self, change: dict, match: str) -> None:
+        node, tensors = _bn_inf(epsilon="fixed")
+        tensors[6] |= change
+        self._raises(node, tensors, f"variance_tensor_uid.*{match}")
+
+    @pytest.mark.parametrize(
+        "port", ["variance_tensor_uid", "epsilon_tensor_uid", "x_tensor_uid"]
+    )
+    def test_unbound_required_port_raises(self, port: str) -> None:
+        node, tensors = _bn_inf(epsilon="fixed")
+        node["inputs"][port] = None
         self._raises(node, tensors, f"required port {port}")
 
 

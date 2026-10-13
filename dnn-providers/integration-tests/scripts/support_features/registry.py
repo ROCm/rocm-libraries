@@ -18,6 +18,7 @@ from support_features import (
     FeatureError,
     batchnorm_backward,
     batchnorm_inference,
+    batchnorm_inference_variance_ext,
     batchnorm_training,
     convolution_bwd,
     convolution_fwd,
@@ -36,6 +37,7 @@ OPS: dict[str, ModuleType] = {
     for m in (
         batchnorm_backward,
         batchnorm_inference,
+        batchnorm_inference_variance_ext,
         batchnorm_training,
         convolution_bwd,
         convolution_fwd,
@@ -50,7 +52,6 @@ OPS: dict[str, ModuleType] = {
 # is reported for them.
 PENDING = frozenset(
     {
-        "BatchnormInferenceAttributesVarianceExt",
         "BlockScaleDequantizeAttributes",
         "BlockScaleQuantizeAttributes",
         "CustomOpAttributes",
