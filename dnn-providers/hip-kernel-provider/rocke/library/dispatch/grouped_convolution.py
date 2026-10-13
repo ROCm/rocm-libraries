@@ -6,8 +6,8 @@
 WHAT IS REGISTERED
 ------------------
 Exactly the instances in the per-arch lists under
-``grouped_convolution_instances/`` -- currently ``gfx950_fwd.json``, forward
-convolutions on gfx950 only. Every record there spells the
+``grouped_convolution_instances/`` -- currently ``gfx942_fwd.json`` and
+``gfx950_fwd.json``, forward convolutions only. Every record there spells the
 :class:`KernelIdentity` of one AOT kernel (format: :class:`InstanceList`;
 edit with ``benchmarks/common/grouped_conv/instance_list.py``) and becomes one
 :class:`KernelCandidate`, whose ``name`` and ``spec_id`` are the identity's
@@ -112,6 +112,7 @@ CONV_DIRECT_ABI_VERSION = "hipkg-conv-direct/v1"
 # The registered instance lists, by (arch, direction). Relative to this file.
 _INSTANCE_DIR = Path(__file__).resolve().with_name("grouped_convolution_instances")
 _INSTANCE_LISTS: dict[tuple[str, str], str] = {
+    ("gfx942", "fwd"): "gfx942_fwd.json",
     ("gfx950", "fwd"): "gfx950_fwd.json",
 }
 

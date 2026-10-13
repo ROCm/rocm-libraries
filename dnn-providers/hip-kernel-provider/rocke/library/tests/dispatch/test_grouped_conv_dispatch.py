@@ -33,14 +33,15 @@ from kernels.common.conv_kernel_identity import KernelIdentity
 from rocke.dispatch.core import PinRefused
 
 _ARCH = "gfx950"
-_LIST = (
-    Path(gc.__file__).resolve().with_name("grouped_convolution_instances")
-    / "gfx950_fwd.json"
+_INSTANCE_DIR = Path(gc.__file__).resolve().with_name("grouped_convolution_instances")
+_LIST = _INSTANCE_DIR / "gfx950_fwd.json"
+_FWD_ARCHES = tuple(
+    sorted(arch for arch, direction in gc._INSTANCE_LISTS if direction == "fwd")
 )
 
 
-def _listed_names() -> list[str]:
-    return [i.label() for i in gc.load_instance_list(_LIST).identities]
+def _listed_names(path: Path = _LIST) -> list[str]:
+    return [i.label() for i in gc.load_instance_list(path).identities]
 
 
 @pytest.fixture(autouse=True)
@@ -88,18 +89,23 @@ _SHAPES = {
 def test_registry_is_exactly_the_instance_list_in_order():
     names = _listed_names()
     assert names, "the instance list is empty"
-    assert [c.name for c in gc.conv_grouped_candidates()] == names
     assert [s.name for s in gc.registered_conv_grouped_instances(_ARCH)] == names
     for candidate in gc.conv_grouped_candidates():
         assert candidate.spec_id == candidate.name
-        assert candidate.capability.arches == (_ARCH,)
+        assert len(candidate.capability.arches) == 1
+    for (arch, direction), filename in gc._INSTANCE_LISTS.items():
+        if direction != "fwd":
+            continue
+        assert [s.name for s in gc.registered_conv_grouped_instances(arch)] == (
+            _listed_names(_INSTANCE_DIR / filename)
+        )
 
 
-def test_every_instance_is_a_canonical_forward_gfx950_name():
+def test_every_instance_is_a_canonical_forward_name():
     for spec in gc.registered_conv_grouped_instances():
         assert KernelIdentity.from_label(spec.name) == spec.identity
         assert spec.identity.label() == spec.name
-        assert spec.identity.arch == _ARCH
+        assert spec.identity.arch in _FWD_ARCHES
         assert spec.identity.direction == ("direct_fwd" if spec.is_direct else "fwd")
         assert spec.algorithm == spec.identity.algorithm
 
@@ -119,7 +125,7 @@ def test_every_instance_has_the_aot_build_job_compile_all_uses():
 @pytest.mark.parametrize(
     "kw, match",
     [
-        (dict(arch="gfx942"), "arch 'gfx942'"),
+        (dict(arch="gfx90a"), "arch 'gfx90a'"),
         (dict(arch="gfx1250"), "arch 'gfx1250'"),
         (dict(direction="wgrad"), "only forward instances"),
         (dict(direction="dgrad"), "only forward instances"),
@@ -220,7 +226,7 @@ def test_admission_matches_the_aot_run_path(shape):
     admitted = [r.spec.name for r in gc.dispatch_conv_grouped_all(req)]
     expected = [
         s.name
-        for s in gc.registered_conv_grouped_instances()
+        for s in gc.registered_conv_grouped_instances(_ARCH)
         if _cache_side_admits(s, req)
     ]
     assert admitted == expected
@@ -228,7 +234,7 @@ def test_admission_matches_the_aot_run_path(shape):
 
 
 def test_the_shapes_reach_every_registered_family():
-    families = {s.algorithm for s in gc.registered_conv_grouped_instances()}
+    families = {s.algorithm for s in gc.registered_conv_grouped_instances(_ARCH)}
     reached = {
         r.spec.algorithm
         for kw in _SHAPES.values()
@@ -351,7 +357,7 @@ def test_spec_id_pins_one_instance():
 def test_pin_to_an_instance_that_cannot_run_the_shape_is_refused():
     vec8 = next(
         s.name
-        for s in gc.registered_conv_grouped_instances()
+        for s in gc.registered_conv_grouped_instances(_ARCH)
         if not s.is_direct and s.identity.vector_size_a == 8 and s.dtype == "fp16"
     )
     with pytest.raises(PinRefused, match="not divisible by vector_size_a"):
