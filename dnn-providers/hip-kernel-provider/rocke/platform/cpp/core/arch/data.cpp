@@ -27,6 +27,7 @@
 #include <string.h>
 
 #include "rocke/arch_target_internal.h"
+#include "rocke/wmma_scale_internal.h"
 
 /* =========================================================================
  * lane-coord emitters (static rocke_lane_coord_fn)
@@ -1797,7 +1798,7 @@ static constexpr rocke_mma_op_t k_mma_gfx1250_unscaled[] = {
  * allocation, STL, JSON parsing, or Python dependency. */
 namespace
 {
-constexpr int k_scaled_count = 450;
+constexpr int k_scaled_count = 86;
 constexpr int k_unscaled_count = 7;
 constexpr const char* k_inputs[] = {"fp8", "bf8", "fp6", "bf6", "fp4"};
 constexpr const char* k_input_dtypes[] = {"fp8e4m3", "bf8e5m2", "fp6e2m3", "fp6e3m2", "fp4e2m1"};
@@ -1806,8 +1807,6 @@ constexpr int k_blocks[] = {32, 16};
 // Native's original E8M0 seed order predates the JSON order; retain both.
 constexpr int k_native_e8m0[][2]
     = {{0, 0}, {4, 0}, {2, 0}, {3, 0}, {1, 0}, {0, 1}, {4, 1}, {2, 1}, {3, 1}, {1, 1}};
-constexpr int k_homogeneous[][2]
-    = {{0, 0}, {2, 0}, {3, 0}, {1, 0}, {0, 1}, {2, 1}, {3, 1}, {4, 0}, {4, 1}, {1, 1}};
 struct scaled_key
 {
     int a, b, sa, sb, mode;
@@ -1823,6 +1822,8 @@ consteval scaled_keys make_scaled_keys()
     scaled_keys result{};
     bool seen[2][5][5][3][3] = {};
     auto add = [&](int a, int b, int sa, int sb, int mode) {
+        if(!rocke_scaled_wmma_formats_valid(a, b, sa, sb))
+            return;
         if(!seen[mode][a][b][sa][sb])
         {
             if(result.count == k_scaled_count)
@@ -1849,17 +1850,6 @@ consteval scaled_keys make_scaled_keys()
         for(int scale = 1; scale < 3; ++scale)
             add(4, 4, scale, scale, mode);
     }
-    for(const auto& seed : k_homogeneous)
-        for(int sa = 0; sa < 3; ++sa)
-            for(int sb = 0; sb < 3; ++sb)
-                add(seed[0], seed[0], sa, sb, seed[1]);
-    for(int mode = 0; mode < 2; ++mode)
-        for(int a = 0; a < 5; ++a)
-            for(int b = 0; b < 5; ++b)
-                if(a != b)
-                    for(int sa = 0; sa < 3; ++sa)
-                        for(int sb = 0; sb < 3; ++sb)
-                            add(a, b, sa, sb, mode);
     return result;
 }
 constexpr auto k_scaled_keys = make_scaled_keys();

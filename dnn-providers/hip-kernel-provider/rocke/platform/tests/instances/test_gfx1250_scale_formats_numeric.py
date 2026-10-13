@@ -8,6 +8,8 @@ import sys
 
 import pytest
 
+from rocke.core.arch.target import _gfx1250_scale_combination_valid
+
 _MODULE = "rocke.examples.gfx1250.gemm.scale_formats_gemm"
 
 # Independent scale encodings through both COMGR and HIP.
@@ -17,7 +19,7 @@ _MIXED = [
     for a, b, sa, sb in product(
         _FORMATS, _FORMATS, ("e8m0", "e5m3", "e4m3"), ("e8m0", "e5m3", "e4m3")
     )
-    if (sa, sb) != ("e8m0", "e8m0")
+    if (sa, sb) != ("e8m0", "e8m0") and _gfx1250_scale_combination_valid(a, b, sa, sb)
 ]
 
 
@@ -117,8 +119,13 @@ def test_scale_selector_fixed_bytes_numeric(gpu_env, dtype, operand, block_k, ro
 
     rt = Runtime()
     for scale in unity:
-        da, db = (dtype, "fp4") if operand == "a" else ("fp4", dtype)
+        # Sweep alternate selectors only on FP4, with a non-FP4 E8M0 partner.
+        # Non-FP4 operands still get the fixed-byte E8M0 control.
+        partner = "fp8e4m3" if dtype == "fp4" else "fp4"
+        da, db = (dtype, partner) if operand == "a" else (partner, dtype)
         sa, sb = (scale, "e8m0") if operand == "a" else ("e8m0", scale)
+        if not _gfx1250_scale_combination_valid(da, db, sa, sb):
+            continue
         spec = BlockScaledGemmSpec(
             name="fixed_scale_bytes",
             M=16,

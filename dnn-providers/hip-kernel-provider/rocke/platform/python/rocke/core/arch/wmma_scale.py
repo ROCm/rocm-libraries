@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .target import ArchTarget, MmaOp, MmaScaleDType
+from .target import ArchTarget, MmaOp, MmaScaleDType, _gfx1250_scale_combination_valid
 from ..dtypes import dtype_info
 from ..storage import BitPacking, FragmentPacking, MatrixFragmentLayout
 
@@ -119,6 +119,10 @@ def gfx1250_scaled_wmma(op_id: str) -> ScaledWmmaOp | None:
         or atom.shape != (16, 16, 128)
     ):
         raise ValueError(f"unsupported scaled WMMA backend contract: {atom.op_id}")
+    if not _gfx1250_scale_combination_valid(
+        atom.a_dtype, atom.b_dtype, atom.a_scale_dtype, atom.b_scale_dtype
+    ):
+        raise ValueError("unsupported scaled WMMA matrix/scale format combination")
     counts = (atom.a_scale_frag_len, atom.b_scale_frag_len)
     if any(count != atom.k // atom.scale_block_k for count in counts):
         raise ValueError(f"unsupported scaled WMMA scale fragment lengths: {counts}")

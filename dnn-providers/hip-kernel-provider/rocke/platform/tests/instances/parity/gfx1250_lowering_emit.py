@@ -20,6 +20,7 @@
 #
 # arch is per-config (see _spec), llvm_flavor = AUTO, matching the C side.
 from rocke.core.arch import ArchTarget
+from rocke.core.arch.target import _gfx1250_scale_combination_valid
 from rocke.core.ir import BF16, F16, F32, I16, I32, I64, IRBuilder, KernelDef, PtrType
 
 from _emit_common import run_emit
@@ -321,29 +322,22 @@ CONFIGS.extend(
 )
 
 
-# Keep the original FP4 scale cases first so configuration indices remain stable.
+# Keep the supported FP4 scale cases in their original order.
 _MATRIX_DTYPES = ("fp8", "bf8", "fp6", "bf6", "fp4")
 _SCALE_DTYPES = ("e8m0", "e5m3", "e4m3")
-_LEGACY_SCALE_PAIRS = (
-    [(a, "fp4", "e8m0", s) for a in _MATRIX_DTYPES[:-1] for s in _SCALE_DTYPES[1:]]
-    + [("fp4", b, s, "e8m0") for b in _MATRIX_DTYPES[:-1] for s in _SCALE_DTYPES[1:]]
-    + [("fp4", "fp4", s, s) for s in _SCALE_DTYPES[1:]]
-)
-_LEGACY_SCALE_PAIR_SET = set(_LEGACY_SCALE_PAIRS)
-_OTHER_SCALE_PAIRS = [
+_SCALE_PAIRS = [
     (a, b, sa, sb)
     for a in _MATRIX_DTYPES
     for b in _MATRIX_DTYPES
     for sa in _SCALE_DTYPES
     for sb in _SCALE_DTYPES
-    if (sa, sb) != ("e8m0", "e8m0") and (a, b, sa, sb) not in _LEGACY_SCALE_PAIR_SET
+    if (sa, sb) != ("e8m0", "e8m0") and _gfx1250_scale_combination_valid(a, b, sa, sb)
 ]
 
 CONFIGS.extend(
     (_wmma_scaled(a, b, mode, sa, sb), "gfx1250")
-    for pairs in (_LEGACY_SCALE_PAIRS, _OTHER_SCALE_PAIRS)
     for mode in ("scale", "scale16")
-    for a, b, sa, sb in pairs
+    for a, b, sa, sb in _SCALE_PAIRS
 )
 
 

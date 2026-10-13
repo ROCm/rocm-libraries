@@ -43,6 +43,20 @@ _GFX1250_SCALED_FAMILY = {
 }
 
 
+def _gfx1250_scale_combination_valid(a: str, b: str, sa: str, sb: str) -> bool:
+    """Supported matrix/scale combinations, independent of compiler version.
+
+    Mirrors LLVM's isValidWMMAScaleFmtCombination:
+    https://github.com/llvm/llvm-project/commit/7597c0c938b364306cbee21dd03835ff5b699c74
+    """
+    a, b = normalize_dtype(a), normalize_dtype(b)
+    return (
+        (a == "fp4e2m1" or sa == "e8m0")
+        and (b == "fp4e2m1" or sb == "e8m0")
+        and (a != "fp4e2m1" or b != "fp4e2m1" or sa == sb)
+    )
+
+
 def _expand_mma_rows(gfx: str, declarations: list[dict]) -> list[dict]:
     """Expand supported families to ordinary rows; reject duplicate identities."""
     if not isinstance(declarations, list):
@@ -77,8 +91,8 @@ def _gfx1250_scaled_rows(declaration: dict) -> list[dict]:
     inputs = declaration["input_dtypes"]
     scales = declaration["scale_dtypes"]
     blocks = declaration["block_k"]
-    # Original homogeneous E8M0 atoms precede mixed E8M0, the first FP4
-    # alternative encodings, then the remaining homogeneous/mixed encodings.
+    # Original homogeneous E8M0 atoms precede mixed E8M0 and supported FP4
+    # alternative encodings.
     homogeneous = [
         (0, 32),
         (2, 32),
@@ -107,24 +121,11 @@ def _gfx1250_scaled_rows(declaration: dict) -> list[dict]:
             (inputs[4], b, sa, scales[0], k) for b in inputs[:4] for sa in scales[1:]
         )
         keys.extend((inputs[4], inputs[4], scale, scale, k) for scale in scales[1:])
-    keys.extend(
-        (inputs[i], inputs[i], sa, sb, k)
-        for i, k in homogeneous
-        for sa in scales
-        for sb in scales
-    )
-    keys.extend(
-        (a, b, sa, sb, k)
-        for k in blocks
-        for a in inputs
-        for b in inputs
-        if a != b
-        for sa in scales
-        for sb in scales
-    )
     rows = []
-    # Later stages fill the Cartesian product without repeating earlier atoms.
+    # Preserve the supported atoms' historical order and reject unsupported pairs.
     for a, b, sa, sb, block_k in dict.fromkeys(keys):
+        if not _gfx1250_scale_combination_valid(a, b, sa, sb):
+            continue
         m, n, k = declaration["shape"]
         rows.append(
             {

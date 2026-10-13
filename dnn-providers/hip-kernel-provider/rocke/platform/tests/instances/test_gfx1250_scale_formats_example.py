@@ -14,7 +14,7 @@ from rocke.core.lower_llvm import lower_kernel_to_llvm
 
 
 @pytest.mark.parametrize(
-    "a,b,sa,sb", [("fp4", "fp4", "e4m3", "e5m3"), ("fp6", "fp8", "e4m3", "e5m3")]
+    "a,b,sa,sb", [("fp4", "fp4", "e4m3", "e4m3"), ("fp6", "fp4", "e8m0", "e5m3")]
 )
 @pytest.mark.parametrize("matrix_path", ["wmma_scale", "wmma_scale16"])
 @pytest.mark.parametrize("output_dtype", ["bf16", "fp16"])
@@ -138,7 +138,9 @@ def test_scale_formats_gemm_cli_rejects_invalid_spec_before_verify(
 
 @pytest.mark.parametrize("dtype", ["fp8", "bf8", "fp6", "bf6", "fp4"])
 @pytest.mark.parametrize("operand", ["a", "b"])
-def test_scale_formats_gemm_cli_accepts_alternate_scales(monkeypatch, dtype, operand):
+def test_scale_formats_gemm_cli_filters_alternate_scales(
+    monkeypatch, capsys, dtype, operand
+):
     from rocke.examples.gfx1250.gemm import scale_formats_gemm as example
 
     calls = []
@@ -149,6 +151,26 @@ def test_scale_formats_gemm_cli_accepts_alternate_scales(monkeypatch, dtype, ope
         return 0
 
     monkeypatch.setattr(example, "verify", verify)
-    assert example.main([f"--dtype-{operand}", dtype]) == 0
-    assert len(calls) == 1
-    assert calls[0].resolved_scale_dtypes() == ("e4m3", "e4m3")
+    if dtype == "fp4":
+        assert example.main([f"--dtype-{operand}", dtype]) == 0
+        assert len(calls) == 1
+        assert calls[0].resolved_scale_dtypes() == ("e4m3", "e4m3")
+    else:
+        with pytest.raises(SystemExit) as exc:
+            example.main([f"--dtype-{operand}", dtype])
+        assert exc.value.code == 2
+        assert not calls
+        assert "no gfx1250 scaled WMMA atom" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("operand", ["a", "b"])
+def test_scale_formats_gemm_cli_rejects_unequal_fp4_scales(
+    monkeypatch, capsys, operand
+):
+    from rocke.examples.gfx1250.gemm import scale_formats_gemm as example
+
+    monkeypatch.setattr(example, "verify", lambda *args: pytest.fail("must not verify"))
+    with pytest.raises(SystemExit) as exc:
+        example.main([f"--scale-dtype-{operand}", "e5m3"])
+    assert exc.value.code == 2
+    assert "no gfx1250 scaled WMMA atom" in capsys.readouterr().err

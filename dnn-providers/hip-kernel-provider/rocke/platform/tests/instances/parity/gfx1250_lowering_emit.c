@@ -17,6 +17,7 @@
 #include "rocke/ir_serialize.h"
 #include "rocke/lower_llvm.h"
 #include "rocke/verify.h"
+#include "rocke/wmma_scale_internal.h"
 
 /* Every builder call below is its own statement, and the statement order
  * matches the Python emitter exactly. Nesting a builder call inside an argument
@@ -660,13 +661,12 @@ static const char* const MATRIX_DTYPES[] = {"fp8", "bf8", "fp6", "bf6", "fp4"};
 static const char* const SCALE_DTYPES[] = {"e8m0", "e5m3", "e4m3"};
 static const int NUM_MATRIX_DTYPES = (int)(sizeof(MATRIX_DTYPES) / sizeof(MATRIX_DTYPES[0]));
 static const int NUM_SCALE_DTYPES = (int)(sizeof(SCALE_DTYPES) / sizeof(SCALE_DTYPES[0]));
-static const int FP4_INDEX = NUM_MATRIX_DTYPES - 1;
 static const int NUM_CONFIGS
     = NUM_BASE_CONFIGS + NUM_FEATURE_CONFIGS
-      + 2 * NUM_MATRIX_DTYPES * NUM_MATRIX_DTYPES * (NUM_SCALE_DTYPES * NUM_SCALE_DTYPES - 1);
+      + 2 * (2 * (NUM_MATRIX_DTYPES - 1) * (NUM_SCALE_DTYPES - 1) + NUM_SCALE_DTYPES - 1);
 
-/* Mirror the Python emitter's legacy FP4 cases, then its remaining scale pairs.
- * Selecting by index keeps the table immutable and preserves every case index.
+/* Mirror the Python emitter's supported scale pairs in their original order.
+ * Selecting by index keeps the table immutable.
  */
 static bool select_config(int idx, config_t* out)
 {
@@ -683,33 +683,28 @@ static bool select_config(int idx, config_t* out)
         return true;
     }
     idx -= NUM_BASE_CONFIGS;
-    for(int phase = 0; phase < 2; ++phase)
-        for(int mode = 0; mode < 2; ++mode)
-            for(int a = 0; a < NUM_MATRIX_DTYPES; ++a)
-                for(int b = 0; b < NUM_MATRIX_DTYPES; ++b)
-                    for(int sa = 0; sa < NUM_SCALE_DTYPES; ++sa)
-                        for(int sb = 0; sb < NUM_SCALE_DTYPES; ++sb)
+    for(int mode = 0; mode < 2; ++mode)
+        for(int a = 0; a < NUM_MATRIX_DTYPES; ++a)
+            for(int b = 0; b < NUM_MATRIX_DTYPES; ++b)
+                for(int sa = 0; sa < NUM_SCALE_DTYPES; ++sa)
+                    for(int sb = 0; sb < NUM_SCALE_DTYPES; ++sb)
+                    {
+                        if(sa == 0 && sb == 0)
+                            continue;
+                        if(!rocke_scaled_wmma_formats_valid(a, b, sa, sb))
+                            continue;
+                        if(idx-- == 0)
                         {
-                            if(sa == 0 && sb == 0)
-                                continue;
-                            bool legacy
-                                = (a != FP4_INDEX && b == FP4_INDEX && sa == 0 && sb != 0)
-                                  || (a == FP4_INDEX && b != FP4_INDEX && sa != 0 && sb == 0)
-                                  || (a == FP4_INDEX && b == FP4_INDEX && sa == sb);
-                            if(legacy != (phase == 0))
-                                continue;
-                            if(idx-- == 0)
-                            {
-                                *out = (config_t){NULL,
-                                                  "gfx1250",
-                                                  MATRIX_DTYPES[a],
-                                                  mode != 0,
-                                                  MATRIX_DTYPES[b],
-                                                  SCALE_DTYPES[sa],
-                                                  SCALE_DTYPES[sb]};
-                                return true;
-                            }
+                            *out = (config_t){NULL,
+                                              "gfx1250",
+                                              MATRIX_DTYPES[a],
+                                              mode != 0,
+                                              MATRIX_DTYPES[b],
+                                              SCALE_DTYPES[sa],
+                                              SCALE_DTYPES[sb]};
+                            return true;
                         }
+                    }
     return false;
 }
 

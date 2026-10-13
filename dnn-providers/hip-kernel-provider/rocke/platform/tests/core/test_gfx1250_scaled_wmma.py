@@ -65,7 +65,10 @@ class TestGfx1250ScaledWmma(unittest.TestCase):
         catalog = ArchTarget.from_gfx("gfx1250").mma
         for operand, field in enumerate(("a_scale_dtype", "b_scale_dtype")):
             for selector, dtype in enumerate(("e8m0", "e5m3", "e4m3")):
-                atom = replace(_scaled_atom(), **{field: dtype})
+                matrix_field = ("a_dtype", "b_dtype")[operand]
+                atom = replace(
+                    _scaled_atom(), **{matrix_field: "fp4e2m1", field: dtype}
+                )
                 with (
                     self.subTest(field=field, dtype=dtype),
                     mock.patch.object(catalog, "by_op_id", return_value=atom),

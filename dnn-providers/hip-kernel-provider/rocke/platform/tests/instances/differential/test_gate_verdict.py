@@ -671,19 +671,17 @@ class TestConfigEnumeration(unittest.TestCase):
         cls.config_count = len(emitter.CONFIGS)
 
     def test_scale_pair_order_matches_explicit_tables(self):
-        # Fingerprint captured from the explicit tuples before loop generation.
+        # Fingerprint captured from the supported explicit tuples before loop generation.
         # The order is observable: both emitters select kernels by case index.
-        legacy = self.emitter._LEGACY_SCALE_PAIRS
-        remaining = self.emitter._OTHER_SCALE_PAIRS
-        self.assertEqual((len(legacy), len(remaining)), (18, 182))
-        pairs = legacy + remaining
-        self.assertEqual(len(set(pairs)), 200)
+        pairs = self.emitter._SCALE_PAIRS
+        self.assertEqual(len(pairs), 18)
+        self.assertEqual(len(set(pairs)), 18)
         fingerprint = hashlib.sha256(
             json.dumps(pairs, separators=(",", ":")).encode()
         ).hexdigest()
         self.assertEqual(
             fingerprint,
-            "2e67cba9ddce17e2d13ff93f25a8492085b1eac54d9daa464d1931f48392f9a4",
+            "170e1ae8da6070187bb0877ee05a9ecc3999fd20e42dc4907e44478833e0b9aa",
         )
 
     def drive_family(self, driver, mismatch=None):
@@ -753,7 +751,7 @@ class TestConfigEnumeration(unittest.TestCase):
         return rows, ir_artifact_diff.family_status(rows)[0], indices
 
     def test_both_drivers_visit_all_configs_and_stop_at_end(self):
-        self.assertEqual(self.config_count, 477)
+        self.assertEqual(self.config_count, 113)
         for driver, status in (("builders", "GREEN"), ("artifacts", "IDENTICAL")):
             with self.subTest(driver=driver):
                 rows, actual_status, indices = self.drive_family(driver)
@@ -763,7 +761,7 @@ class TestConfigEnumeration(unittest.TestCase):
 
     def test_new_feature_probes_follow_the_existing_scale_configs(self):
         self.assertEqual(
-            [build.__name__ for build, arch in self.emitter.CONFIGS[472:]],
+            [build.__name__ for build, arch in self.emitter.CONFIGS[108:]],
             [
                 "build_data_prefetch",
                 "build_cluster",
@@ -773,21 +771,24 @@ class TestConfigEnumeration(unittest.TestCase):
             ],
         )
         self.assertTrue(
-            all(arch == "gfx1250" for _, arch in self.emitter.CONFIGS[472:])
+            all(arch == "gfx1250" for _, arch in self.emitter.CONFIGS[108:])
         )
 
     def test_both_drivers_detect_drift_beyond_default_cap(self):
         late = run_diff.MAX_CFG
-        for driver in ("builders", "artifacts"):
-            with self.subTest(driver=driver):
-                rows, status, _ = self.drive_family(driver, mismatch=late)
-                self.assertEqual(status, "DRIFT")
-                self.assertIn(rows[late]["verdict"], ("MISMATCH", "DRIFT"))
+        # The supported catalog is now smaller; retain the future-growth guard.
+        with mock.patch.object(self, "config_count", late + 17):
+            for driver in ("builders", "artifacts"):
+                with self.subTest(driver=driver):
+                    rows, status, _ = self.drive_family(driver, mismatch=late)
+                    self.assertEqual(status, "DRIFT")
+                    self.assertIn(rows[late]["verdict"], ("MISMATCH", "DRIFT"))
 
     def test_truncated_128_record_batch_is_not_complete_for_scaled_family(self):
         success = run_diff.Emission(0, True, "same", "")
         ended = run_diff.Emission(2, False, None, "unknown config")
-        full = batch(*([success] * self.config_count), ended)
+        synthetic_count = run_diff.MAX_CFG + 17
+        full = batch(*([success] * synthetic_count), ended)
         truncated = batch(*([success] * run_diff.MAX_CFG))
         for native, python in ((full, truncated), (truncated, full)):
             with (
@@ -806,6 +807,7 @@ class TestConfigEnumeration(unittest.TestCase):
         for driver, status in (("builders", "GREEN"), ("artifacts", "IDENTICAL")):
             with (
                 self.subTest(driver=driver),
+                mock.patch.object(self, "config_count", run_diff.MAX_CFG + 17),
                 mock.patch.object(run_diff, "FAMILY_MAX_CFG", {}),
             ):
                 rows, actual_status, _ = self.drive_family(

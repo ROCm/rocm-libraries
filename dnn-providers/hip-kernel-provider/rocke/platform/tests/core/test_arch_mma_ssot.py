@@ -33,14 +33,14 @@ from rocke.core.arch.target import (
 )
 
 
-def test_expanded_catalog_matches_pre_refactor_order_and_fields():
-    # Independent snapshot of all 457 hand-written rows at 0bba8265. A generator
-    # bug shared by both engines must not pass just because parity stays green.
+def test_filtered_catalog_preserves_supported_order_and_fields():
+    # Independent snapshot of the supported rows at 72c28a69, filtered with
+    # the LLVM legality table. Preserve all remaining fields and relative order.
     rows = _load_specs()["gfx1250"]["mma"]
-    assert len(rows) == 457
+    assert len(rows) == 93
     encoded = json.dumps(rows, sort_keys=True, separators=(",", ":")).encode()
     assert hashlib.sha256(encoded).hexdigest() == (
-        "95ae6cc6ecb4d704eea729eafd291ba2d1d89183d59be28ba50af66a0377590a"
+        "d31fe60f6172c7c2172a420cc4558591fa1389d41cc2829eafc99bceb66e858a"
     )
 
 
@@ -291,8 +291,8 @@ def test_e5m2_is_not_a_scale_dtype_alias(dtype, field):
 def test_scaled_catalog_identity_and_backend_contract():
     catalog = ArchTarget.from_gfx("gfx1250").mma
     rows = [row for row in catalog.ops if row.family == "wmma_scaled"]
-    assert len(rows) == 450
-    assert len({row.op_id for row in rows}) == 450
+    assert len(rows) == 86
+    assert len({row.op_id for row in rows}) == 86
     for row in rows:
         tokens = {
             "fp8e4m3": "fp8",

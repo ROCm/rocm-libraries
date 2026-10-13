@@ -30,10 +30,22 @@ from rocke.instances.gfx1250.block_scaled_gemm import (
 
 FORMATS = ("fp8", "bf8", "fp6", "bf6", "fp4")
 SCALES = ("e8m0", "e5m3", "e4m3")
+
+
+def legal_combination(a, b, sa, sb):
+    # Independent oracle for LLVM commit 7597c0c938b3's supported table.
+    allowed = {"fp4": SCALES}
+    return (
+        sa in allowed.get(a, ("e8m0",))
+        and sb in allowed.get(b, ("e8m0",))
+        and (a != "fp4" or b != "fp4" or sa == sb)
+    )
+
+
 PAIRS = [
     (a, b, sa, sb)
     for a, b, sa, sb in product(FORMATS, FORMATS, SCALES, SCALES)
-    if (sa, sb) != ("e8m0", "e8m0")
+    if (sa, sb) != ("e8m0", "e8m0") and legal_combination(a, b, sa, sb)
 ]
 
 
@@ -67,8 +79,13 @@ def test_catalog_and_builder_agree_on_legal_scale_combinations(a, b, sa, sb, blo
         k=128,
         scales=(sa, sb, block_k),
     )
-    assert atom is not None
-    assert is_valid_spec(spec_for(a, b, sa, sb, block_k))[0]
+    legal = legal_combination(a, b, sa, sb)
+    spec = spec_for(a, b, sa, sb, block_k)
+    assert (atom is not None) == legal
+    assert is_valid_spec(spec)[0] == legal
+    if not legal:
+        with pytest.raises(ValueError, match="no gfx1250 scaled WMMA atom"):
+            build_block_scaled_gemm(spec)
 
 
 @pytest.mark.parametrize("a,b,sa,sb", PAIRS)
@@ -218,15 +235,50 @@ def test_backend_rejects_invalid_contract_even_if_catalog_injected(
 
     atom = ArchTarget.from_gfx("gfx1250").mma.op_for_shape(
         family="wmma_scaled",
-        a_dtype="fp6",
+        a_dtype="fp4",
         b_dtype="fp8",
         c_dtype="fp32",
         m=16,
         n=16,
         k=128,
-        scales=("e4m3", "e5m3", 32),
+        scales=("e4m3", "e8m0", 32),
     )
     invalid = replace(atom, **{field: value})
     monkeypatch.setattr(MmaCatalog, "by_op_id", lambda self, op_id: invalid)
     with pytest.raises(ValueError, match="unsupported scaled WMMA backend contract"):
+        gfx1250_scaled_wmma(atom.op_id)
+
+
+@pytest.mark.parametrize(
+    "a,b,sa,sb",
+    [
+        (a, b, sa, sb)
+        for a, b, sa, sb in product(FORMATS, FORMATS, SCALES, SCALES)
+        if not legal_combination(a, b, sa, sb)
+    ],
+)
+def test_backend_rejects_invalid_scale_combination_even_if_catalog_injected(
+    monkeypatch, a, b, sa, sb
+):
+    from rocke.core.arch.target import MmaCatalog, normalize_dtype
+
+    atom = ArchTarget.from_gfx("gfx1250").mma.op_for_shape(
+        family="wmma_scaled",
+        a_dtype="fp4",
+        b_dtype="fp4",
+        c_dtype="fp32",
+        m=16,
+        n=16,
+        k=128,
+        scales=("e4m3", "e4m3", 32),
+    )
+    invalid = replace(
+        atom,
+        a_dtype=normalize_dtype(a),
+        b_dtype=normalize_dtype(b),
+        a_scale_dtype=sa,
+        b_scale_dtype=sb,
+    )
+    monkeypatch.setattr(MmaCatalog, "by_op_id", lambda self, op_id: invalid)
+    with pytest.raises(ValueError, match="matrix/scale format combination"):
         gfx1250_scaled_wmma(atom.op_id)

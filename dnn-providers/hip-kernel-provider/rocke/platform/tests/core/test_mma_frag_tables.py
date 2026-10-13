@@ -50,7 +50,7 @@ class TestMmaFragTables(unittest.TestCase):
             for row in _load_specs()["gfx1250"]["mma"]
             if row["family"] == "wmma_scaled"
         ]
-        self.assertEqual(len(rows), 450)
+        self.assertEqual(len(rows), 86)
         for row in rows:
             info = _MMA_FRAGMENT_INFO[row["op_id"]]
             self.assertEqual(

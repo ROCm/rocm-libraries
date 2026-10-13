@@ -109,7 +109,7 @@ int main(void)
             check_atom(&b, op.op_id, 8, false);
             ++scaled;
         }
-        CHECK(scaled == 450, "all scaled atoms must have accumulator metadata");
+        CHECK(scaled == 86, "all scaled atoms must have accumulator metadata");
     }
 
     /* Unknown op_id must be rejected. The engine's error path either returns

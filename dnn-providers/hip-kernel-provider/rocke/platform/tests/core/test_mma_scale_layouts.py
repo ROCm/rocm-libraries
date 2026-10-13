@@ -96,7 +96,7 @@ def test_every_scaled_catalog_coordinates_match_independent_lane_oracle():
         for op in ArchTarget.from_gfx("gfx1250").mma.ops
         if op.family == "wmma_scaled"
     ]
-    assert len(atoms) == 450
+    assert len(atoms) == 86
     for atom in atoms:
         for role in ("a_scale", "b_scale"):
             layout = getattr(atom, f"{role}_layout")()
