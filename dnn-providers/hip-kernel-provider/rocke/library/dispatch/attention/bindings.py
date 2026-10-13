@@ -499,9 +499,7 @@ def bind_swapqk_torch(
 
     grid = swapqk_grid(spec, seqlen_q=seqlen_q, batch=batch)
     block = (int(spec.block_size), 1, 1)
-    scale_log2 = float(
-        kwargs.get("scale_log2", 1.0 / math.sqrt(d) * math.log2(math.e))
-    )
+    scale_log2 = float(kwargs.get("scale_log2", 1.0 / math.sqrt(d) * math.log2(math.e)))
 
     expected_v = (
         (batch, hk, d, seqlen_k) if spec.v_transposed else (batch, seqlen_k, hk, d)

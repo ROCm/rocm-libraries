@@ -352,9 +352,7 @@ class TestIRWellFormed(unittest.TestCase):
         for splits in (1, 8, 16):
             cfg = _cfg(num_splits=splits)
             for phase, ll in (("seg", _seg(cfg)), ("reduce", _red(cfg))):
-                self.assertEqual(
-                    _dup_locals(ll), [], f"{phase} splits={splits}"
-                )
+                self.assertEqual(_dup_locals(ll), [], f"{phase} splits={splits}")
 
 
 class TestLaunchGeometry(unittest.TestCase):
@@ -431,9 +429,7 @@ class TestLaneRemap(unittest.TestCase):
                     q_and_k + (subtiles * cfg.ept if block_n == k_width else 0),
                 )
                 if block_n != k_width:
-                    self.assertEqual(
-                        widths.count(str(block_n)), subtiles * cfg.ept
-                    )
+                    self.assertEqual(widths.count(str(block_n)), subtiles * cfg.ept)
 
     def test_no_waterfall_at_any_lane_split(self):
         for d_lanes, block_n, _ in self._CASES:
@@ -497,8 +493,13 @@ class TuningKnobs(unittest.TestCase):
         for kw in bad:
             with self.subTest(**kw):
                 self.assertFalse(is_valid_spec(_cfg(**kw))[0])
-        for kw in (dict(unroll=8), dict(heads_per_cta=1), dict(heads_per_cta=2),
-                   dict(waves_per_eu=2), dict(reduce_unroll=1)):
+        for kw in (
+            dict(unroll=8),
+            dict(heads_per_cta=1),
+            dict(heads_per_cta=2),
+            dict(waves_per_eu=2),
+            dict(reduce_unroll=1),
+        ):
             with self.subTest(**kw):
                 self.assertTrue(is_valid_spec(_cfg(**kw))[0])
 
@@ -509,8 +510,13 @@ class TuningKnobs(unittest.TestCase):
         self.assertEqual(grp, (2, _HK * (_HQ // _HK), 8))
 
     def test_unrolled_and_grouped_stay_single_wave_no_lds(self):
-        for kw in (dict(unroll=2), dict(unroll=8), dict(heads_per_cta=1),
-                   dict(heads_per_cta=2, unroll=4), dict(waves_per_eu=4)):
+        for kw in (
+            dict(unroll=2),
+            dict(unroll=8),
+            dict(heads_per_cta=1),
+            dict(heads_per_cta=2, unroll=4),
+            dict(waves_per_eu=4),
+        ):
             with self.subTest(**kw):
                 ll = _seg(_cfg(**kw))
                 self.assertEqual(_dup_locals(ll), [])

@@ -480,7 +480,11 @@ def build_paged_decode_splitk_segment(
             vals += load_vec_as_f32(
                 b,
                 p["Q"],
-                b.add(q_row, d0) if off == 0 else b.add(q_row, b.add(d0, b.const_i32(off))),
+                (
+                    b.add(q_row, d0)
+                    if off == 0
+                    else b.add(q_row, b.add(d0, b.const_i32(off)))
+                ),
                 dtype=cfg.dtype,
                 n=w,
             )
@@ -496,9 +500,7 @@ def build_paged_decode_splitk_segment(
     # step past blk_end into the NEXT split's blocks, whose keys are < seqlen_k
     # and would otherwise be counted twice.
     key_limit = (
-        seqlen_k
-        if U == 1
-        else b.smin(seqlen_k, b.shl(blk_end, b.const_i32(bs_log2)))
+        seqlen_k if U == 1 else b.smin(seqlen_k, b.shl(blk_end, b.const_i32(bs_log2)))
     )
 
     def _block(m, l, acc, cache_base, key_base):  # noqa: E741
@@ -637,7 +639,9 @@ def build_paged_decode_splitk_segment(
     res = loop.results
     m_final = list(res[0:GF])
     l_final = list(res[GF : 2 * GF])
-    acc_final = [list(res[2 * GF + g * EPT : 2 * GF + (g + 1) * EPT]) for g in range(GF)]
+    acc_final = [
+        list(res[2 * GF + g * EPT : 2 * GF + (g + 1) * EPT]) for g in range(GF)
+    ]
 
     # ---- fold the KSUB key partitions together ----
     # Each partition ran an independent online softmax over disjoint keys, so
@@ -684,11 +688,7 @@ def build_paged_decode_splitk_segment(
     # After the fold every key partition holds the same value, so without this
     # guard KSUB lanes would issue identical stores to the same address.
     acc_widths = _chunk_widths(EPT)
-    guard = (
-        contextlib.nullcontext()
-        if KSUB == 1
-        else b.scf_if(b.cmp_eq(key_sub, c0))
-    )
+    guard = contextlib.nullcontext() if KSUB == 1 else b.scf_if(b.cmp_eq(key_sub, c0))
     with guard:
         for g in range(GF):
             acc_base = b.add(b.mul(b.add(unit, b.const_i32(g)), b.const_i32(D)), d0)
@@ -857,10 +857,7 @@ def build_paged_decode_splitk_reduce(
                 align=EPT * 4,
             )
             b.scf_yield(
-                *[
-                    b.fma(b.vec_extract(part, k), factor, running[k])
-                    for k in range(EPT)
-                ]
+                *[b.fma(b.vec_extract(part, k), factor, running[k]) for k in range(EPT)]
             )
 
         _store(g, [b.fmul(acc_loop.results[k], inv_l) for k in range(EPT)])

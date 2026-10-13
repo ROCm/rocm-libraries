@@ -1677,7 +1677,6 @@ def build_wmma_fmha_swapqk(
         def paged_v_bases(k_block_base):
             raise AssertionError("paged_v_bases is only reachable under v_paged")
 
-
     def gather_v_a_frag_buf(k_base, d):
         # k_base = batch_tok_k + k_block_base + ns*16 (uniform i32). Per-lane
         # voffset selects V[kv=0, d_col]; the buffer HW adds soffset = kv*stride_v.

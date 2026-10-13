@@ -186,7 +186,9 @@ class TestSwapQKValidity(unittest.TestCase):
     def test_rejects_gqa_fuse_with_persistent_or_q_lds(self):
         # Both decode work-items or LDS slabs from wave_id / a one-head-per-CTA
         # work count, neither of which survives fusion.
-        ok, why = is_valid_spec(_prod_cfg(num_kv_heads=6, gqa_fuse=4, num_persistent=960))
+        ok, why = is_valid_spec(
+            _prod_cfg(num_kv_heads=6, gqa_fuse=4, num_persistent=960)
+        )
         self.assertFalse(ok)
         self.assertIn("num_persistent", why)
         ok, why = is_valid_spec(_prod_cfg(num_kv_heads=6, gqa_fuse=4, q_lds=True))
@@ -280,9 +282,7 @@ class TestSwapQKLowering(unittest.TestCase):
         self.assertIn("addrspace(3)", ll)
         self.assertIn("llvm.amdgcn.s.barrier", ll)
         self.assertIn("raw.ptr.buffer.load", ll)  # V still on the gather
-        base = self._lower(
-            _prod_cfg(num_kv_heads=6, gqa_fuse=4, mask_mode="causal")
-        )
+        base = self._lower(_prod_cfg(num_kv_heads=6, gqa_fuse=4, mask_mode="causal"))
         self.assertNotIn("addrspace(3)", base)
 
     def test_distinct_configs_build_distinct_kernels(self):
@@ -389,9 +389,7 @@ class TestSwapQKCausalTrim(unittest.TestCase):
             cfg = _prod_cfg(mask_mode="causal", block_n=block_n)
             for g in range(6):
                 last_row = g * cfg.q_rows_per_cta + cfg.q_rows_per_cta - 1
-                self.assertEqual(
-                    swapqk_causal_kv_stop(cfg, g), last_row // block_n + 1
-                )
+                self.assertEqual(swapqk_causal_kv_stop(cfg, g), last_row // block_n + 1)
 
 
 class TestSwapQKAdaptiveBlockN(unittest.TestCase):
@@ -521,7 +519,9 @@ class TestSwapQKKLds(unittest.TestCase):
         cfg = self._fused()
         self.assertEqual(cfg.block_size, 256)
         self.assertEqual((cfg.block_n * cfg.head_size) % (cfg.block_size * 8), 0)
-        ok, why = is_valid_spec(_prod_cfg(head_size=64, block_n=64, k_lds=True, n_waves=2))
+        ok, why = is_valid_spec(
+            _prod_cfg(head_size=64, block_n=64, k_lds=True, n_waves=2)
+        )
         self.assertTrue(ok, why)  # 64*64 = 4096 over 64*8 = 512 -> 8 chunks
 
     def test_rejects_knobs_that_also_own_the_k_operand_or_the_tile_lifetime(self):
@@ -586,7 +586,9 @@ class TestSwapQKPagedV(unittest.TestCase):
     @staticmethod
     def _cfg(**kw):
         # The shipped production config, plus the lever under test.
-        return _prod_cfg(num_kv_heads=6, mask_mode="causal", gqa_fuse=4, k_lds=True, **kw)
+        return _prod_cfg(
+            num_kv_heads=6, mask_mode="causal", gqa_fuse=4, k_lds=True, **kw
+        )
 
     def _lower(self, cfg):
         from rocke.core.lower_llvm import lower_kernel_to_llvm
@@ -678,7 +680,9 @@ class TestSwapQKPagedV(unittest.TestCase):
         # causal trim. Partial removal is the highest-probability bug here and
         # it is silent: dropping the bound just reads past the keys.
         ref = self._lower(self._cfg()).count("%seqlen_k")
-        paged = self._lower(self._cfg(v_paged=True, kv_block_size=16)).count("%seqlen_k")
+        paged = self._lower(self._cfg(v_paged=True, kv_block_size=16)).count(
+            "%seqlen_k"
+        )
         self.assertGreater(ref, 10)
         self.assertLess(paged, 5, "seqlen_k still reaches the V address")
         self.assertGreater(paged, 0, "seqlen_k vanished -- the kv loop lost its bound")
@@ -697,7 +701,9 @@ class TestSwapQKPagedV(unittest.TestCase):
             self.assertEqual(ll.count(wide), ref.count(wide), f"bs={bs}")
             self.assertEqual(ll.count(narrow), 0, f"bs={bs}")
         # The contrast that gives the numbers above their meaning.
-        self.assertGreater(self._lower(self._cfg(v_transposed=False)).count(narrow), 200)
+        self.assertGreater(
+            self._lower(self._cfg(v_transposed=False)).count(narrow), 200
+        )
 
     def test_block_ids_are_promoted_to_sgpr_so_no_waterfall_is_emitted(self):
         # An addrspace(1) load is a divergence source, so without the
@@ -713,9 +719,7 @@ class TestSwapQKPagedV(unittest.TestCase):
         ref = self._lower(self._cfg()).count("readfirstlane")
         for bs, blocks in ((16, 4), (32, 2), (64, 1), (128, 1)):
             ll = self._lower(self._cfg(v_paged=True, kv_block_size=bs))
-            self.assertEqual(
-                ll.count("readfirstlane"), ref + blocks + 2, f"bs={bs}"
-            )
+            self.assertEqual(ll.count("readfirstlane"), ref + blocks + 2, f"bs={bs}")
 
     def test_block_table_lookups_are_deduped_to_one_per_distinct_block(self):
         # block_n=64 spans 64/bs physical blocks, so that is how many lookups a

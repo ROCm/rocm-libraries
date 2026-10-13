@@ -55,10 +55,12 @@ def _paged_layout(torch, K, V, seq_lens, kv_block_size, *, shuffle, poison=7777.
     block_table = ids.to(torch.int32).reshape(B, blocks_per_req)
 
     dev, dt = K.device, K.dtype
-    k_cache = torch.full((num_blocks, Hk, D // X, kv_block_size, X), poison,
-                         dtype=dt, device=dev)
-    v_cache = torch.full((num_blocks, Hk, D, kv_block_size), poison,
-                         dtype=dt, device=dev)
+    k_cache = torch.full(
+        (num_blocks, Hk, D // X, kv_block_size, X), poison, dtype=dt, device=dev
+    )
+    v_cache = torch.full(
+        (num_blocks, Hk, D, kv_block_size), poison, dtype=dt, device=dev
+    )
 
     # Page-aligned staging buffers, poison everywhere the request does not
     # reach: past its seq_len, and past Sk_max in the padded tail.
@@ -134,9 +136,17 @@ def _run_case(torch, args, B, Sk, num_splits, *, verbose=True):
 
     gen = torch.Generator(device=dev).manual_seed(0xA11E + B * 1000 + Sk)
     Sk_max = max(Sk, 1)
-    Q = (torch.randn((B, Hq, D), generator=gen, device=dev, dtype=torch.float32) * 0.3).to(dt)
-    K = (torch.randn((B, Sk_max, Hk, D), generator=gen, device=dev, dtype=torch.float32) * 0.3).to(dt)
-    V = (torch.randn((B, Sk_max, Hk, D), generator=gen, device=dev, dtype=torch.float32) * 0.3).to(dt)
+    Q = (
+        torch.randn((B, Hq, D), generator=gen, device=dev, dtype=torch.float32) * 0.3
+    ).to(dt)
+    K = (
+        torch.randn((B, Sk_max, Hk, D), generator=gen, device=dev, dtype=torch.float32)
+        * 0.3
+    ).to(dt)
+    V = (
+        torch.randn((B, Sk_max, Hk, D), generator=gen, device=dev, dtype=torch.float32)
+        * 0.3
+    ).to(dt)
     seq_lens = torch.full((B,), Sk, dtype=torch.int32, device="cpu")
 
     k_cache, v_cache, block_table = _paged_layout(
@@ -174,7 +184,9 @@ def _run_case(torch, args, B, Sk, num_splits, *, verbose=True):
     bad = int((diff > args.tol).sum())
     ok = nan == 0 and max_abs <= args.tol
 
-    us = _time_op(torch, launch, args.warmup, args.iters) if args.bench else float("nan")
+    us = (
+        _time_op(torch, launch, args.warmup, args.iters) if args.bench else float("nan")
+    )
 
     if verbose:
         verdict = "PASS" if ok else "FAIL"

@@ -107,7 +107,11 @@ def _get_launcher(
     if key in _KERNEL_CACHE:
         return _KERNEL_CACHE[key]
 
-    from kernels.gfx1151.wmma_fmha_swapqk import SwapQKCfg, build_wmma_fmha_swapqk, is_valid_spec
+    from kernels.gfx1151.wmma_fmha_swapqk import (
+        SwapQKCfg,
+        build_wmma_fmha_swapqk,
+        is_valid_spec,
+    )
     from rocke.helpers import compile_kernel
 
     cfg = SwapQKCfg(
@@ -166,7 +170,10 @@ def _launch_swapqk(q, k, v, out, scale: float, causal: bool) -> None:
     # swapqk_transpose_v expects [B,Sk,Hk,D] and returns [B,Hk,D,Sk]
     v_t_cpu = swapqk_transpose_v(v_cpu)
     import torch
-    v_t = torch.from_numpy(v_t_cpu).to(device=v.device, dtype=v.dtype, non_blocking=True)
+
+    v_t = torch.from_numpy(v_t_cpu).to(
+        device=v.device, dtype=v.dtype, non_blocking=True
+    )
 
     scale_log2 = float(scale * math.log2(math.e))
     grid = swapqk_grid(cfg, seqlen_q=Sq, batch=B)
@@ -181,19 +188,29 @@ def _launch_swapqk(q, k, v, out, scale: float, causal: bool) -> None:
     # (matches struct.pack "<QQQQfiiiiiiiiii" in wmma_fmha_swapqk_verify.py)
     packed = struct.pack(
         "<QQQQfiiiiiiiiii",
-        qd, kd, vd, od,
+        qd,
+        kd,
+        vd,
+        od,
         scale_log2,
-        Sq, Sk,
-        Hq * D, D,   # Q strides: row_stride, head_stride
-        Hk * D, D,   # K strides
-        Hk * D, D,   # V strides (over transposed layout, kernel re-derives internally)
-        Hq * D, D,   # O strides
+        Sq,
+        Sk,
+        Hq * D,
+        D,  # Q strides: row_stride, head_stride
+        Hk * D,
+        D,  # K strides
+        Hk * D,
+        D,  # V strides (over transposed layout, kernel re-derives internally)
+        Hq * D,
+        D,  # O strides
     )
 
     import ctypes
+
     packed_buf = (ctypes.c_uint8 * len(packed)).from_buffer(bytearray(packed))
 
     from rocke.runtime.torch_interop import resolve_stream
+
     stream = resolve_stream(0, device=q.device)
 
     rt.launch(fn, grid, block, packed_buf, stream=stream)

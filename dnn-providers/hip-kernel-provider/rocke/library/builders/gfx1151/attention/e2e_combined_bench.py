@@ -135,14 +135,26 @@ CTX_SWEEP = ["ctx2k", "ctx4k", "ctx8k", "ctx16k", "ctx32k"]
 # unconditional -- otherwise a workload below the threshold half-declines and
 # reports the incumbent under the rocKE arm's name.
 ARMS = {
-    "stock": {"_SWAPQK_MIN_SEQLEN": 10**9, "_PAGED_DECODE": "0",
-              "_PAGED_DECODE_MIN_KV_MIB": 0},
-    "prefill_only": {"_SWAPQK_MIN_SEQLEN": 512, "_PAGED_DECODE": "0",
-                     "_PAGED_DECODE_MIN_KV_MIB": 0},
-    "decode_only": {"_SWAPQK_MIN_SEQLEN": 10**9, "_PAGED_DECODE": "1",
-                    "_PAGED_DECODE_MIN_KV_MIB": 0},
-    "both": {"_SWAPQK_MIN_SEQLEN": 512, "_PAGED_DECODE": "1",
-             "_PAGED_DECODE_MIN_KV_MIB": 0},
+    "stock": {
+        "_SWAPQK_MIN_SEQLEN": 10**9,
+        "_PAGED_DECODE": "0",
+        "_PAGED_DECODE_MIN_KV_MIB": 0,
+    },
+    "prefill_only": {
+        "_SWAPQK_MIN_SEQLEN": 512,
+        "_PAGED_DECODE": "0",
+        "_PAGED_DECODE_MIN_KV_MIB": 0,
+    },
+    "decode_only": {
+        "_SWAPQK_MIN_SEQLEN": 10**9,
+        "_PAGED_DECODE": "1",
+        "_PAGED_DECODE_MIN_KV_MIB": 0,
+    },
+    "both": {
+        "_SWAPQK_MIN_SEQLEN": 512,
+        "_PAGED_DECODE": "1",
+        "_PAGED_DECODE_MIN_KV_MIB": 0,
+    },
 }
 
 # The same arms expressed as the environment variables the backend reads at
@@ -178,8 +190,9 @@ def build_prompt_ids(model: str, lengths) -> dict:
     tok = AutoTokenizer.from_pretrained(model)
     need = max(lengths)
     reps = need // 10 + 64
-    base = tok.encode("The quick brown fox jumps over the lazy dog. " * reps,
-                      add_special_tokens=False)
+    base = tok.encode(
+        "The quick brown fox jumps over the lazy dog. " * reps, add_special_tokens=False
+    )
     if len(base) < need:
         raise RuntimeError(f"filler gave {len(base)} tokens, need {need}")
     return {s: list(base[:s]) for s in sorted(set(lengths))}
@@ -214,21 +227,27 @@ def check_dispatch(arm, stats, why, n_layers, batch, gen):
     want_prefill = n_layers * batch
     if arm in SWAPQK_ARMS:
         if stats["swapqk"] != want_prefill or stats["triton_slice"] != 0:
-            return (f"expected swapqk={want_prefill} triton_slice=0, got "
-                    f"swapqk={stats['swapqk']} triton_slice={stats['triton_slice']}")
+            return (
+                f"expected swapqk={want_prefill} triton_slice=0, got "
+                f"swapqk={stats['swapqk']} triton_slice={stats['triton_slice']}"
+            )
         # The paged-V gates fail into the permute path rather than into Triton,
         # so the swapqk counter above cannot see them.
         if stats["paged_v_declined"]:
             return f"paged_v_declined={stats['paged_v_declined']} (expected 0)"
     else:
         if stats["triton_slice"] != want_prefill or stats["swapqk"] != 0:
-            return (f"expected triton_slice={want_prefill} swapqk=0, got "
-                    f"swapqk={stats['swapqk']} triton_slice={stats['triton_slice']}")
+            return (
+                f"expected triton_slice={want_prefill} swapqk=0, got "
+                f"swapqk={stats['swapqk']} triton_slice={stats['triton_slice']}"
+            )
 
     if arm in DECODE_ARMS:
         if stats["paged_decode_declined"]:
-            return (f"paged_decode_declined={stats['paged_decode_declined']} "
-                    f"reasons={why}")
+            return (
+                f"paged_decode_declined={stats['paged_decode_declined']} "
+                f"reasons={why}"
+            )
         if why:
             return f"decode declines recorded: {why}"
         if gen > 1:
@@ -238,8 +257,10 @@ def check_dispatch(arm, stats, why, n_layers, batch, gen):
             # incumbent, counted under this arm's name. A mixed prefill+decode
             # batch lands here too.
             if stats["fallback"]:
-                return (f"fallback={stats['fallback']} on a rocKE-decode arm -- "
-                        "some steps ran the incumbent")
+                return (
+                    f"fallback={stats['fallback']} on a rocKE-decode arm -- "
+                    "some steps ran the incumbent"
+                )
     else:
         if stats["paged_decode"]:
             return f"paged_decode={stats['paged_decode']} on a non-decode arm"
@@ -267,29 +288,45 @@ def run_once(llm, mod, prompt_cls, sp_cls, ids, batch, gen, arm, patch_arm):
 def main() -> int:
     ap = argparse.ArgumentParser(
         description="Combined prefill+decode e2e sweep for the gfx1151 rocKE "
-                    "attention kernels (README sections 4.1, 6 and 7).")
+        "attention kernels (README sections 4.1, 6 and 7)."
+    )
     ap.add_argument("--model", default="/home/user/models/Qwen3-8B")
     # The ctx* sweep is opt-in: it overlaps the named workloads and would
     # otherwise triple the default runtime for rows nobody asked for.
     ap.add_argument("--workloads", default=",".join(NAMED_WORKLOADS))
-    ap.add_argument("--ctx-sweep", action="store_true",
-                    help="replace --workloads with the B=1 context sweep that "
-                         "produces the README's ladders")
+    ap.add_argument(
+        "--ctx-sweep",
+        action="store_true",
+        help="replace --workloads with the B=1 context sweep that "
+        "produces the README's ladders",
+    )
     ap.add_argument("--arms", default=",".join(ARMS))
     ap.add_argument("--reps", type=int, default=3)
-    ap.add_argument("--gen-lo", type=int, default=48,
-                    help="slope anchor; must clear the request-admission ramp")
-    ap.add_argument("--gen-hi", type=int, default=304,
-                    help="headline generation length; total_ms is measured here")
+    ap.add_argument(
+        "--gen-lo",
+        type=int,
+        default=48,
+        help="slope anchor; must clear the request-admission ramp",
+    )
+    ap.add_argument(
+        "--gen-hi",
+        type=int,
+        default=304,
+        help="headline generation length; total_ms is measured here",
+    )
     ap.add_argument("--cudagraph-mode", default="PIECEWISE")
     ap.add_argument("--eager", action="store_true", help="enforce_eager")
-    ap.add_argument("--capture-check", action="store_true",
-                    help="single-arm FULL-mode confirmation: apply the arm via "
-                         "the environment before LLM(), assert on capture-time "
-                         "counters, never patch between generates")
+    ap.add_argument(
+        "--capture-check",
+        action="store_true",
+        help="single-arm FULL-mode confirmation: apply the arm via "
+        "the environment before LLM(), assert on capture-time "
+        "counters, never patch between generates",
+    )
     ap.add_argument("--gpu-memory-utilization", type=float, default=0.90)
-    ap.add_argument("--out", default=None,
-                    help="optional path to dump the raw measurements as JSON")
+    ap.add_argument(
+        "--out", default=None, help="optional path to dump the raw measurements as JSON"
+    )
     args = ap.parse_args()
 
     if args.ctx_sweep:
@@ -298,8 +335,10 @@ def main() -> int:
     arms = [a.strip() for a in args.arms.split(",") if a.strip()]
     for w in wls:
         if w not in WORKLOADS:
-            print(f"unknown workload {w!r}, pick from {sorted(WORKLOADS)}",
-                  file=sys.stderr)
+            print(
+                f"unknown workload {w!r}, pick from {sorted(WORKLOADS)}",
+                file=sys.stderr,
+            )
             return 2
     for a in arms:
         if a not in ARMS:
@@ -311,10 +350,13 @@ def main() -> int:
 
     captures_decode = not args.eager and args.cudagraph_mode in FULL_MODES
     if captures_decode and not args.capture_check:
-        print(f"cudagraph_mode={args.cudagraph_mode} captures decode: the arm "
-              "and the dispatch counters both freeze at capture. Use PIECEWISE "
-              "for the interleaved sweep, or --capture-check for a single-arm "
-              "confirmation run.", file=sys.stderr)
+        print(
+            f"cudagraph_mode={args.cudagraph_mode} captures decode: the arm "
+            "and the dispatch counters both freeze at capture. Use PIECEWISE "
+            "for the interleaved sweep, or --capture-check for a single-arm "
+            "confirmation run.",
+            file=sys.stderr,
+        )
         return 2
     if args.capture_check and len(arms) != 1:
         print("--capture-check takes exactly one --arms value", file=sys.stderr)
@@ -340,13 +382,16 @@ def main() -> int:
 
     n_layers = AutoConfig.from_pretrained(args.model).num_hidden_layers
     mode = "eager" if args.eager else args.cudagraph_mode
-    print(f"[cmb] mode={mode} workloads={wls} arms={arms} reps={args.reps} "
-          f"gens={gens} layers={n_layers} capture_check={args.capture_check}",
-          flush=True)
+    print(
+        f"[cmb] mode={mode} workloads={wls} arms={arms} reps={args.reps} "
+        f"gens={gens} layers={n_layers} capture_check={args.capture_check}",
+        flush=True,
+    )
 
     prompts = build_prompt_ids(args.model, lens)
-    print(f"[cmb] prompts built: {[(s, len(v)) for s, v in prompts.items()]}",
-          flush=True)
+    print(
+        f"[cmb] prompts built: {[(s, len(v)) for s, v in prompts.items()]}", flush=True
+    )
 
     from vllm import LLM, SamplingParams
 
@@ -355,18 +400,20 @@ def main() -> int:
     except Exception:
         prompt_cls = None
 
-    kwargs = {} if args.eager else {
-        "compilation_config": {"cudagraph_mode": args.cudagraph_mode}
-    }
+    kwargs = (
+        {}
+        if args.eager
+        else {"compilation_config": {"cudagraph_mode": args.cudagraph_mode}}
+    )
     t_load = time.perf_counter()
     llm = LLM(
         model=args.model,
-        dtype="float16",               # the dispatch gate is query.dtype == fp16
+        dtype="float16",  # the dispatch gate is query.dtype == fp16
         max_model_len=max_len,
         max_num_batched_tokens=max_batched,
         max_num_seqs=max_batch,
         enable_chunked_prefill=False,  # chunking makes query_len != seq_len
-        enable_prefix_caching=False,   # a cache hit does the same
+        enable_prefix_caching=False,  # a cache hit does the same
         gpu_memory_utilization=args.gpu_memory_utilization,
         enforce_eager=args.eager,
         attention_backend="ROCKE_GFX1151",
@@ -403,11 +450,15 @@ def main() -> int:
         want_pd = arm in DECODE_ARMS
         got_pd = captured.get("paged_decode", 0)
         if want_pd and got_pd <= 0:
-            failures.append(f"capture-check {arm}: paged_decode=0 at capture -- "
-                            "the decode kernel was not the one captured")
+            failures.append(
+                f"capture-check {arm}: paged_decode=0 at capture -- "
+                "the decode kernel was not the one captured"
+            )
         if not want_pd and got_pd:
-            failures.append(f"capture-check {arm}: paged_decode={got_pd} at "
-                            "capture on a non-decode arm")
+            failures.append(
+                f"capture-check {arm}: paged_decode={got_pd} at "
+                "capture on a non-decode arm"
+            )
 
     # rep 0 is a warmup: it absorbs per-arm kernel compile and first-touch of
     # every allocation. Discarded.
@@ -424,26 +475,43 @@ def main() -> int:
                 for arm in arms:
                     try:
                         dt, stats, why, out_ids = run_once(
-                            llm, rk, prompt_cls, SamplingParams, prompts[plen],
-                            batch, gen, arm, patch_arm=not args.capture_check,
+                            llm,
+                            rk,
+                            prompt_cls,
+                            SamplingParams,
+                            prompts[plen],
+                            batch,
+                            gen,
+                            arm,
+                            patch_arm=not args.capture_check,
                         )
                     except Exception as exc:
-                        print(f"[cmb] rep{rep} {w} g={gen} {arm}: EXCEPTION {exc}",
-                              flush=True)
+                        print(
+                            f"[cmb] rep{rep} {w} g={gen} {arm}: EXCEPTION {exc}",
+                            flush=True,
+                        )
                         failures.append(f"{w} g={gen} {arm}: {exc}")
                         continue
 
                     tag = "warmup" if rep == 0 else f"rep{rep}"
-                    bad = "" if args.capture_check else check_dispatch(
-                        arm, stats, why, n_layers, batch, gen)
+                    bad = (
+                        ""
+                        if args.capture_check
+                        else check_dispatch(arm, stats, why, n_layers, batch, gen)
+                    )
                     if bad:
-                        print(f"[cmb] {tag} {w} g={gen} {arm}: DISPATCH -- {bad}",
-                              flush=True)
+                        print(
+                            f"[cmb] {tag} {w} g={gen} {arm}: DISPATCH -- {bad}",
+                            flush=True,
+                        )
                         failures.append(f"{w} g={gen} {arm}: {bad}")
                         continue
 
-                    print(f"[cmb] {tag} {w:9s} g={gen:4d} {arm:12s} "
-                          f"{dt * 1e3:10.1f} ms  {stats}", flush=True)
+                    print(
+                        f"[cmb] {tag} {w:9s} g={gen:4d} {arm:12s} "
+                        f"{dt * 1e3:10.1f} ms  {stats}",
+                        flush=True,
+                    )
                     if rep > 0:
                         k = key(w, arm, gen)
                         samples.setdefault(k, []).append(dt)
@@ -452,9 +520,11 @@ def main() -> int:
 
     # Shared box: contention can only inflate, so take the minimum.
     table = {
-        k: {"min_ms": min(v) * 1e3,
+        k: {
+            "min_ms": min(v) * 1e3,
             "median_ms": statistics.median(v) * 1e3,
-            "n": len(v)}
+            "n": len(v),
+        }
         for k, v in samples.items()
     }
 
@@ -490,38 +560,56 @@ def main() -> int:
             if ref_arm is None:
                 continue
             ref = tokens[key(w, ref_arm, gen)]
-            bad = [a for a in arms
-                   if key(w, a, gen) in tokens and tokens[key(w, a, gen)] != ref]
-            identity[key(w, gen)] = {"ref_arm": ref_arm, "mismatched": bad,
-                                     "head": ref[:8]}
+            bad = [
+                a
+                for a in arms
+                if key(w, a, gen) in tokens and tokens[key(w, a, gen)] != ref
+            ]
+            identity[key(w, gen)] = {
+                "ref_arm": ref_arm,
+                "mismatched": bad,
+                "head": ref[:8],
+            }
             for a in bad:
                 failures.append(
                     f"{w} g={gen}: arm {a} tokens differ from {ref_arm} "
-                    f"({tokens[key(w, a, gen)][:8]} vs {ref[:8]})")
+                    f"({tokens[key(w, a, gen)][:8]} vs {ref[:8]})"
+                )
 
     print(f"\n[cmb] === {mode}, min of {args.reps} reps, ms ===", flush=True)
-    print(f"{'workload':>10} {'arm':>13} | {'TTFT':>10} {'total':>10} "
-          f"{'ITL':>8} {'req tok/s':>10} {'dec tok/s':>10}", flush=True)
+    print(
+        f"{'workload':>10} {'arm':>13} | {'TTFT':>10} {'total':>10} "
+        f"{'ITL':>8} {'req tok/s':>10} {'dec tok/s':>10}",
+        flush=True,
+    )
     for w in wls:
         for arm in arms:
             d = derived.get(key(w, arm))
             if d is None:
-                print(f"{w:>10} {arm:>13} | {'--':>10} {'--':>10} {'--':>8} "
-                      f"{'--':>10} {'--':>10}", flush=True)
+                print(
+                    f"{w:>10} {arm:>13} | {'--':>10} {'--':>10} {'--':>8} "
+                    f"{'--':>10} {'--':>10}",
+                    flush=True,
+                )
                 continue
             dec = d["decode_tok_per_s"]
             dec_s = f"{dec:.2f}" if dec else "--"
-            print(f"{w:>10} {arm:>13} | {d['ttft_ms']:10.1f} {d['total_ms']:10.1f} "
-                  f"{d['itl_ms']:8.3f} {d['tok_per_s']:10.1f} {dec_s:>10}",
-                  flush=True)
+            print(
+                f"{w:>10} {arm:>13} | {d['ttft_ms']:10.1f} {d['total_ms']:10.1f} "
+                f"{d['itl_ms']:8.3f} {d['tok_per_s']:10.1f} {dec_s:>10}",
+                flush=True,
+            )
 
     # Speedups against the matched control, in the fixed direction
     # baseline/optimized, so higher is always better.
     if BASELINE_ARM in arms:
-        print(f"\n[cmb] === speedup vs {BASELINE_ARM} (higher is better) ===",
-              flush=True)
-        print(f"{'workload':>10} {'arm':>13} | {'TTFT':>9} {'total':>9} "
-              f"{'ITL':>9}", flush=True)
+        print(
+            f"\n[cmb] === speedup vs {BASELINE_ARM} (higher is better) ===", flush=True
+        )
+        print(
+            f"{'workload':>10} {'arm':>13} | {'TTFT':>9} {'total':>9} " f"{'ITL':>9}",
+            flush=True,
+        )
         for w in wls:
             base = derived.get(key(w, BASELINE_ARM))
             if base is None:
@@ -532,10 +620,13 @@ def main() -> int:
                 d = derived.get(key(w, arm))
                 if d is None:
                     continue
-                print(f"{w:>10} {arm:>13} | "
-                      f"{base['ttft_ms'] / d['ttft_ms']:9.4f} "
-                      f"{base['total_ms'] / d['total_ms']:9.4f} "
-                      f"{base['itl_ms'] / d['itl_ms']:9.4f}", flush=True)
+                print(
+                    f"{w:>10} {arm:>13} | "
+                    f"{base['ttft_ms'] / d['ttft_ms']:9.4f} "
+                    f"{base['total_ms'] / d['total_ms']:9.4f} "
+                    f"{base['itl_ms'] / d['itl_ms']:9.4f}",
+                    flush=True,
+                )
 
     if args.out:
         doc = {
@@ -546,11 +637,12 @@ def main() -> int:
             "resolved_config": resolved,
             "model": args.model,
             "layers": n_layers,
-            "workloads": {w: {"batch": WORKLOADS[w][0],
-                              "prompt_len": WORKLOADS[w][1]} for w in wls},
+            "workloads": {
+                w: {"batch": WORKLOADS[w][0], "prompt_len": WORKLOADS[w][1]}
+                for w in wls
+            },
             "arms": arms,
-            "arm_settings": {a: {k: str(v) for k, v in ARMS[a].items()}
-                             for a in arms},
+            "arm_settings": {a: {k: str(v) for k, v in ARMS[a].items()} for a in arms},
             "reps": args.reps,
             "gens": gens,
             "gen_lo": args.gen_lo,
@@ -569,8 +661,10 @@ def main() -> int:
         print(f"\n[cmb] wrote {args.out}", flush=True)
 
     if failures:
-        print(f"[cmb] {len(failures)} FAILURES -- results above are not "
-              "trustworthy", flush=True)
+        print(
+            f"[cmb] {len(failures)} FAILURES -- results above are not " "trustworthy",
+            flush=True,
+        )
         for f in failures[:20]:
             print(f"  {f}", flush=True)
         return 1

@@ -198,9 +198,16 @@ def _pick_gqa_fuse(num_query_heads: int, num_kv_heads: int) -> int:
         f *= 2
     return f
 
-ROCKE_STATS = {"swapqk": 0, "triton_slice": 0, "fallback": 0, "paged_v": 0,
-               "paged_v_declined": 0, "paged_decode": 0,
-               "paged_decode_declined": 0}
+
+ROCKE_STATS = {
+    "swapqk": 0,
+    "triton_slice": 0,
+    "fallback": 0,
+    "paged_v": 0,
+    "paged_v_declined": 0,
+    "paged_decode": 0,
+    "paged_decode_declined": 0,
+}
 
 # Which decode gate turned a batch away, keyed by reason. paged_decode_declined
 # says only that something refused; every gate below returns silently into the
@@ -212,6 +219,7 @@ ROCKE_DECODE_DECLINE: dict[str, int] = {}
 def _decline(reason: str) -> None:
     ROCKE_DECODE_DECLINE[reason] = ROCKE_DECODE_DECLINE.get(reason, 0) + 1
 
+
 import atexit as _atexit
 
 
@@ -221,16 +229,29 @@ def _dump_rocke_stats():
 
 
 def _get_compiled_kernel(
-    num_query_heads: int, num_kv_heads: int, head_size: int, causal: bool,
-    block_n: int = 64, k_lds: bool = True, kv_block_size: int = 0,
+    num_query_heads: int,
+    num_kv_heads: int,
+    head_size: int,
+    causal: bool,
+    block_n: int = 64,
+    k_lds: bool = True,
+    kv_block_size: int = 0,
 ):
     """Compile+cache the swapqk HSACO for the given config. Returns None on failure."""
     # kv_block_size is in the key, not just _V_PAGED: the page size is baked
     # into the V addressing, so a cache hit across two block sizes would gather
     # from the wrong offsets while still producing plausible numbers.
-    key = (num_query_heads, num_kv_heads, head_size, causal,
-           _pick_gqa_fuse(num_query_heads, num_kv_heads), block_n, k_lds,
-           _V_TRANSPOSED, kv_block_size)
+    key = (
+        num_query_heads,
+        num_kv_heads,
+        head_size,
+        causal,
+        _pick_gqa_fuse(num_query_heads, num_kv_heads),
+        block_n,
+        k_lds,
+        _V_TRANSPOSED,
+        kv_block_size,
+    )
     if key in _KERNEL_CACHE:
         return _KERNEL_CACHE[key]
 
@@ -282,7 +303,11 @@ def _get_compiled_kernel(
         logger.info(
             "[RocKE] compiled swapqk for %s gqa_fuse=%d block_n=%d k_lds=%s "
             "block=%d as %s",
-            key, cfg.gqa_fuse, cfg.block_n, cfg.k_lds, cfg.block_size,
+            key,
+            cfg.gqa_fuse,
+            cfg.block_n,
+            cfg.k_lds,
+            cfg.block_size,
             art.kernel_name,
         )
         return entry
@@ -293,9 +318,9 @@ def _get_compiled_kernel(
 
 
 def _launch_swapqk_for_request(
-    q: torch.Tensor,    # [Sq, Hq, D]
-    k: torch.Tensor,    # [Sk, Hk, D]
-    v: torch.Tensor,    # [Sk, Hk, D]
+    q: torch.Tensor,  # [Sq, Hq, D]
+    k: torch.Tensor,  # [Sk, Hk, D]
+    v: torch.Tensor,  # [Sk, Hk, D]
     out: torch.Tensor,  # [Sq, Hq, D]
     scale: float,
     causal: bool,
@@ -354,8 +379,9 @@ def _launch_swapqk_for_request(
         # an odd number of i32s, so without the pad it lands 4 bytes early.
         # bt_stride is unused here (one request per launch means the kernel's
         # batch index is always 0) but must still be passed positionally.
-        packed += struct.pack("<4xQii", bt_row.data_ptr(), bt_num_entries,
-                              bt_num_entries)
+        packed += struct.pack(
+            "<4xQii", bt_row.data_ptr(), bt_num_entries, bt_num_entries
+        )
     packed_buf = (ctypes.c_uint8 * len(packed)).from_buffer(bytearray(packed))
 
     from rocke.runtime.torch_interop import resolve_stream
@@ -504,6 +530,7 @@ class RockeAttentionImpl(RocmAttentionImpl):
         and a vLLM change to either shape would otherwise mis-address silently
         instead of failing.
         """
+
         def no(reason):
             _decline(reason)
             return None
@@ -550,12 +577,13 @@ class RockeAttentionImpl(RocmAttentionImpl):
 
     def _forward_rocke_decode(
         self,
-        query: torch.Tensor,   # [num_tokens, Hq, D], one token per request
+        query: torch.Tensor,  # [num_tokens, Hq, D], one token per request
         kv_cache: torch.Tensor,
         attn_metadata: RocmAttentionMetadata,
         output: torch.Tensor,  # [num_tokens, Hq, D]
     ) -> bool:
         """rocKE paged split-K decode over the whole batch. False = not taken."""
+
         def no(reason):
             _decline(reason)
             return False
@@ -568,7 +596,9 @@ class RockeAttentionImpl(RocmAttentionImpl):
         block_table = attn_metadata.block_table
         seq_lens = attn_metadata.seq_lens
         if block_table is None or block_table.dtype != torch.int32:
-            return no(f"block_table={None if block_table is None else block_table.dtype}")
+            return no(
+                f"block_table={None if block_table is None else block_table.dtype}"
+            )
         if seq_lens is None or seq_lens.dtype != torch.int32:
             return no(f"seq_lens={None if seq_lens is None else seq_lens.dtype}")
 
@@ -600,8 +630,10 @@ class RockeAttentionImpl(RocmAttentionImpl):
         ROCKE_STATS["paged_decode"] += 1
         n = ROCKE_STATS["paged_decode"]
         if n == 1 or n % 3600 == 0:
-            print(f"[RocKE] stats {ROCKE_STATS} decode b={b} kv={kv_mib:.0f}MiB",
-                  flush=True)
+            print(
+                f"[RocKE] stats {ROCKE_STATS} decode b={b} kv={kv_mib:.0f}MiB",
+                flush=True,
+            )
         return True
 
     def _paged_v_cache(self, kv_cache: torch.Tensor):
@@ -647,12 +679,12 @@ class RockeAttentionImpl(RocmAttentionImpl):
 
     def _forward_rocke(
         self,
-        query: torch.Tensor,    # [num_tokens, Hq, D] flat
-        key: torch.Tensor,      # [num_tokens, Hk, D] flat
-        value: torch.Tensor,    # [num_tokens, Hk, D] flat
+        query: torch.Tensor,  # [num_tokens, Hq, D] flat
+        key: torch.Tensor,  # [num_tokens, Hk, D] flat
+        value: torch.Tensor,  # [num_tokens, Hk, D] flat
         kv_cache: torch.Tensor,
         attn_metadata: RocmAttentionMetadata,
-        output: torch.Tensor,   # [num_tokens, Hq, D] flat
+        output: torch.Tensor,  # [num_tokens, Hq, D] flat
         layout: tuple[list[int], list[int]],
     ) -> torch.Tensor:
         """Per-request swapqk dispatch over the flat token batch.
@@ -711,8 +743,13 @@ class RockeAttentionImpl(RocmAttentionImpl):
                     kv_bs = bs
             req_entry = (
                 _get_compiled_kernel(
-                    self.num_heads, self.num_kv_heads, self.head_size,
-                    causal, block_n, k_lds, kv_bs,
+                    self.num_heads,
+                    self.num_kv_heads,
+                    self.head_size,
+                    causal,
+                    block_n,
+                    k_lds,
+                    kv_bs,
                 )
                 if block_n
                 else None
@@ -721,16 +758,25 @@ class RockeAttentionImpl(RocmAttentionImpl):
                 # The paged build failed to compile but the contiguous one may
                 # still serve this request. Do not lose the request to Triton.
                 kv_bs = 0
-                req_entry = _get_compiled_kernel(
-                    self.num_heads, self.num_kv_heads, self.head_size,
-                    causal, block_n, k_lds,
-                ) if block_n else None
+                req_entry = (
+                    _get_compiled_kernel(
+                        self.num_heads,
+                        self.num_kv_heads,
+                        self.head_size,
+                        causal,
+                        block_n,
+                        k_lds,
+                    )
+                    if block_n
+                    else None
+                )
 
             if seqlen < _SWAPQK_MIN_SEQLEN or req_entry is None:
                 # Short sequence: use Triton for this slice.
                 from vllm.v1.attention.ops.triton_prefill_attention import (
                     context_attention_fwd,
                 )
+
                 local_starts = torch.tensor(
                     [0, seqlen], dtype=torch.int32, device=query.device
                 )
@@ -746,7 +792,10 @@ class RockeAttentionImpl(RocmAttentionImpl):
                     softmax_scale=self.scale,
                 )
                 ROCKE_STATS["triton_slice"] += 1
-                if ROCKE_STATS["triton_slice"] == 1 or ROCKE_STATS["triton_slice"] % 112 == 0:
+                if (
+                    ROCKE_STATS["triton_slice"] == 1
+                    or ROCKE_STATS["triton_slice"] % 112 == 0
+                ):
                     print(f"[RocKE] stats {ROCKE_STATS} seqlen={seqlen}", flush=True)
                 continue
 

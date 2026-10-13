@@ -43,6 +43,7 @@ from kernels.gfx1151.wmma_fmha_swapqk import (
     swapqk_transpose_v,
 )
 
+
 def _ref_attention(Q, K, V, *, causal: bool):
     """Dense attention reference, Q/K/V shape ``(seqlen, heads, head_size)``.
 
@@ -84,7 +85,9 @@ def _build_paged_v(np, V, block_size: int, *, shuffle: bool = True):
     """
     B, Sk, Hk, D = V.shape
     if Sk % block_size:
-        raise SystemExit(f"seqlen_k={Sk} must be a multiple of kv_block_size={block_size}")
+        raise SystemExit(
+            f"seqlen_k={Sk} must be a multiple of kv_block_size={block_size}"
+        )
     per_req = Sk // block_size
     needed = B * per_req
     # Slack pages exist only to be poison: they prove nothing is read past the
@@ -133,9 +136,7 @@ def main() -> int:
         choices=(0, 1),
         help="d-outer QK loop; measured a loss at both corners, default off",
     )
-    p.add_argument(
-        "--sched-mode", default="pingpong", choices=("pingpong", "none")
-    )
+    p.add_argument("--sched-mode", default="pingpong", choices=("pingpong", "none"))
     p.add_argument("--lazy-rescale", type=int, default=1, choices=(0, 1))
     p.add_argument(
         "--gqa-fuse",
