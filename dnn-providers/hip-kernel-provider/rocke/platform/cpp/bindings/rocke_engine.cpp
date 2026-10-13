@@ -2272,6 +2272,7 @@ rocke_implicit_gemm_conv_wgrad_spec_t conv_wgrad_build_spec(const py::dict& d,
     s.split_k = dict_int(d, "split_k", s.split_k);
     s.two_stage = dict_bool(d, "two_stage", s.two_stage);
     s.ws_replicas = dict_int(d, "ws_replicas", s.ws_replicas);
+    s.prefetch_addr = dict_bool(d, "prefetch_addr", s.prefetch_addr);
     s.streamk_ctas = dict_int(d, "streamk_ctas", s.streamk_ctas);
     s.group_merge = dict_int(d, "group_merge", s.group_merge);
     s.async_dma = dict_bool(d, "async_dma", s.async_dma);

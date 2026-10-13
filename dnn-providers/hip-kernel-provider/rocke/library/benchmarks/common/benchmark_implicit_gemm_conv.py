@@ -996,10 +996,12 @@ def main() -> int:
         dest="split_k_prune",
         metavar="PCT",
         help=(
-            "Only effective with --split-k 0 (sweep). "
+            "Only effective with --split-k 0 (sweep) or --run-from-cache. "
             "If a kernel's TFLOPS at a given split-K degree drops by at least PCT%% "
             "relative to its best split-K seen so far, skip all remaining split-K "
             "degrees for that tile/warp/pipeline/epilogue configuration. "
+            "With --run-from-cache a degree early-stopped after another was "
+            "measured prunes the rest too. "
             "Example: --split-k-prune 15 prunes when performance drops by >=15%%."
         ),
     )
@@ -1717,6 +1719,19 @@ def _build_wgrad_one(args_tuple):
         group_merge=group_merge,
         lds_k_outer=lds_k_outer,
         async_dma=async_dma,
+        # Per-combo, from the same policy the AOT cache generator uses.
+        # Stream-K never reaches the K loop prefetch_addr rewrites, so it is
+        # left off there.
+        prefetch_addr=combo.streamk == "off"
+        and WgradConvSpec.default_prefetch_addr(
+            arch=arch,
+            tile_m=tile_m,
+            tile_n=tile_n,
+            tile_k=tile_k,
+            lds_k_outer=lds_k_outer,
+            wave_size=target.wave_size,
+            async_dma=async_dma,
+        ),
         # Stream-K leg: the launch mode and reduction pick the kernel; the CTA
         # pool stays at -1 here (it is a kernarg, resolved at launch).
         **(
@@ -1865,6 +1880,20 @@ def _build_wgrad_two_stage_one(args_tuple):
             wave_size=target.wave_size,
         ),
     )
+    # Same per-combo policy as the single-stage leg, so the two legs stay
+    # comparable.
+    spec = dc_replace(
+        spec,
+        prefetch_addr=WgradConvSpec.default_prefetch_addr(
+            arch=arch,
+            tile_m=tile_m,
+            tile_n=tile_n,
+            tile_k=tile_k,
+            lds_k_outer=spec.lds_k_outer,
+            wave_size=target.wave_size,
+            async_dma=async_dma,
+        ),
+    )
     ok, _ = is_valid_wgrad_spec(spec, arch)
     if not ok:
         return None
@@ -1994,6 +2023,10 @@ def _build_dgrad_one(args_tuple):
         # The default epilogue stores scalar; the validator rejects any wider
         # vector_size_c with it.
         vector_size_c=1 if epilogue == "default" else vec_c,
+        # Per-combo, from the same policy the AOT cache generator uses.
+        uniform_k_decode=DgradConvSpec.default_uniform_k_decode(
+            arch=arch, wave_size=target.wave_size, pipeline=pipeline
+        ),
     )
     ok, _ = is_valid_dgrad_spec(spec, arch)
     if not ok:
@@ -2761,7 +2794,7 @@ def _run_wgrad_sweep(
     work = [(combo, problem, dtype, arch) for combo in combos]
     pending = _build_ir_parallel(work, _build_and_compile_wgrad_one, jobs)
     # Re-sort: group by config (all combo dims except split_k), then split_k descending
-    # so _SPLIT_K_AUTO order (128, 64, ..., 1) is preserved for --split-k-prune.
+    # so the descending degree order is preserved for --split-k-prune.
     pending.sort(key=lambda r: (r[0][:9], -r[2]))
     n_skipped = len(combos) - len(pending)
     n_built = len(pending)
@@ -3945,6 +3978,27 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                 )
                 continue
 
+            if (
+                direction == "wgrad"
+                and problem.cpg == problem.kpg == 1 < problem.groups
+            ):
+                # Depthwise: the non-split kernel leaves one workgroup per
+                # group and cannot fill the device, so -- as in the JIT
+                # sweep -- only split-K kernels are offered. Stream-K
+                # kernels (split_k = 1, but K partitioned over the CTA pool)
+                # stay.
+                candidates = [
+                    c for c in candidates if c[0].split_k > 1 or c[0].streamk != "off"
+                ]
+                if not candidates:
+                    print(
+                        f"Case {case_idx} {problem.short()} {case_dtype} wgrad: "
+                        f"no compatible kernel (depthwise runs split-K and "
+                        f"stream-K kernels only; the cache has none for this "
+                        f"shape)",
+                        flush=True,
+                    )
+                    continue
             if direction == "wgrad" and args.two_stage != "always":
                 # Same rule as the JIT sweep's --two-stage: by default the
                 # two-stage (scratch + reduce) kernels only run when C/groups
@@ -4059,6 +4113,10 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
             n_failed = 0
 
             n_cand = len(candidates)
+            # Device scratch of the launch configs in flight (two-stage
+            # workspaces, dgrad sub-GEMM tables): one per (kernel, degree),
+            # so it is freed as the sweep goes rather than per case.
+            live_extras: list = []
             for cand_idx, (ident, hsaco_path, meta) in enumerate(candidates, 1):
                 kernel_name = meta.get("kernel_name")
                 if not kernel_name:
@@ -4118,7 +4176,27 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                 else:
                     degrees = (None,)
 
+                # --split-k-prune, as in the JIT sweep: degrees run from the
+                # largest down, and once this kernel is PCT% off its best
+                # degree (or early-stopped after one was measured) the
+                # smaller degrees are not tried. A degree that is
+                # early-stopped before any was measured does not prune: the
+                # largest splits can be the slowest (K slices of a tile or
+                # two, all contending on the output atomics) on a kernel
+                # whose best degree is several steps down.
+                kernel_best_ms = None
+                _prune_stop = False
                 for split_k in degrees:
+                    if _prune_stop:
+                        break
+                    # Free the previous launch config's scratch before
+                    # allocating the next. Every path that gets here has
+                    # drained the device after its last launch: _verify_kernel
+                    # fences its launches and copies the output back,
+                    # time_launches drains whether it returns or raises (an
+                    # early-stopped kernel returns from it too), and both
+                    # exception handlers below drain before skipping a kernel.
+                    _free_extras(rt, live_extras)
                     bound = sk_bound or _cached_bind(
                         direction,
                         problem,
@@ -4134,6 +4212,7 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                         stage2_kernels,
                         KernelLauncher,
                         LaunchConfig,
+                        live_extras,
                     )
                     if bound is None:
                         continue
@@ -4141,21 +4220,37 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                     if ref_out is not None:
                         # The output is zeroed first: the atomic split-K
                         # epilogues accumulate into it. A kernel that fails is
-                        # reported and not timed, so it can never rank.
-                        stopped, passed = _verify_kernel(
-                            rt=rt,
-                            launch_fn=run,
-                            out_dev=D_dev,
-                            out_t=D_t,
-                            zero_init_out=True,
-                            ref_out=ref_out,
-                            kernel_name=label,
-                            dump_fail=args.dump_fail,
-                            u8=_u8,
-                            arch=arch,
-                            compute_dtype=case_dtype,
-                        )
+                        # reported and not timed, so it can never rank; so is
+                        # one whose launch fails.
+                        try:
+                            stopped, passed = _verify_kernel(
+                                rt=rt,
+                                launch_fn=run,
+                                out_dev=D_dev,
+                                out_t=D_t,
+                                zero_init_out=True,
+                                ref_out=ref_out,
+                                kernel_name=label,
+                                dump_fail=args.dump_fail,
+                                u8=_u8,
+                                arch=arch,
+                                compute_dtype=case_dtype,
+                            )
+                        except (HipError, RuntimeError) as e:
+                            print(f"  verify {label}: FAIL({e})", flush=True)
+                            # A launch that raised can leave work queued
+                            # before it (e.g. the two-stage scratch clear) in
+                            # flight on this config's scratch. A drain that
+                            # fails here ends the sweep: the device is in an
+                            # error state and the scratch cannot be freed.
+                            synchronize_and_release()
+                            stopped, passed = False, False
                         if stopped:
+                            _free_extras(rt, live_extras)
+                            if sk_free is not None:
+                                sk_free()
+                            for buf in (A_dev, B_dev, D_dev):
+                                rt.free(buf)
                             return 1
                         if not passed:
                             n_failed += 1
@@ -4170,10 +4265,28 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                         )
                     except (HipError, RuntimeError) as e:
                         print(f"  [skip] {ident.label()}: {e}", flush=True)
+                        # time_launches drained before raising, but it does
+                        # not raise a failed drain (the launch error is the
+                        # one it reports). Drain again so a failed drain ends
+                        # the sweep here rather than freeing this config's
+                        # scratch with launches possibly still using it.
+                        synchronize_and_release()
                         continue
                     if ms is None:
                         _stop.report(label)
+                        if args.split_k_prune is not None and (
+                            kernel_best_ms is not None
+                        ):
+                            break
                         continue
+                    if args.split_k_prune is not None and split_k is not None:
+                        # TFLOPS down PCT% from this kernel's best degree.
+                        if kernel_best_ms is not None and kernel_best_ms <= ms * (
+                            1.0 - args.split_k_prune / 100.0
+                        ):
+                            _prune_stop = True
+                        if kernel_best_ms is None or ms < kernel_best_ms:
+                            kernel_best_ms = ms
                     results.append(
                         (flop / (ms * 1e9), bytes_xfer / (ms * 1e6), ms, label)
                     )
@@ -4189,6 +4302,9 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                     sk_free()
 
             synchronize_and_release()
+            _free_extras(rt, live_extras)
+            for buf in (A_dev, B_dev, D_dev):
+                rt.free(buf)
             if ref_out is not None:
                 print(
                     f"  verify: {n_failed} of the launched kernels failed",
@@ -4215,6 +4331,15 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
             print(f"\nBest: {tflops:.1f} TFLOPS — {label}  {ms:.3f} ms", flush=True)
 
     return overall_rc
+
+
+def _free_extras(rt, live_extras: list) -> None:
+    """Free the device buffers :func:`_extras_and_grid` allocated, and forget them."""
+    for extras in live_extras:
+        for key in ("ws_ptr", "sub_gemm_buf"):
+            if key in extras:
+                rt.free(extras[key])
+    live_extras.clear()
 
 
 def _widest_vector_sizes(candidates):
@@ -4609,11 +4734,14 @@ def _cached_bind(
     stage2_kernels,
     KernelLauncher,
     LaunchConfig,
+    live_extras: list,
 ):
     """``(run, label)`` of a cached (non-stream-K) binary at ``split_k``.
 
-    ``ptrs`` / ``sizes`` are the A, B, D buffers. Returns None, after saying
-    why, when the binary cannot launch ``problem``.
+    ``ptrs`` / ``sizes`` are the A, B, D buffers. The device scratch the
+    launch config allocates is appended to ``live_extras`` (freed by
+    :func:`_free_extras`). Returns None, after saying why, when the binary
+    cannot launch ``problem``.
     """
     from benchmarks.common.kernel_sweep import _launch_values_for
 
@@ -4624,6 +4752,7 @@ def _cached_bind(
     except ValueError as e:
         print(f"  [skip] {ident.label()}: {e}", flush=True)
         return None
+    live_extras.append(extras)
     values = _launch_values_for(direction, problem, ident, ptrs, sizes, extras)
     cfg = LaunchConfig(
         grid=grid,

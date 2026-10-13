@@ -211,6 +211,31 @@ counterparts — and additionally keys on `cpg`: the saving is proportional to t
 B load width, which collapses to 1 on an odd channel run, where `axis_b` is
 already `"col"` and there is no scatter to remove.
 
+## Per-tile K decode (`uniform_k_decode`)
+
+The kernel is shape-generic: `kpg`, the tap counts and every stride are
+kernargs or record fields. The plain K loop therefore splits each load chunk's
+reduction index into `(ydot, xdot, k_out)` with two runtime signed divisions
+and builds the offset from runtime-stride products, per chunk and per
+iteration, ahead of the first `buffer_load`.
+
+`uniform_k_decode=True` adds a second K loop for problems with
+`kpg % tile_k == 0` (checked at run time). There a K tile never straddles a
+filter tap, so every element's `k_out` is the tile's base `k_out` plus its
+column. The loop carries the tile's `(k_out, xdot, ydot)` as uniform iteration
+arguments, advances them with a compare-and-wrap, and splits each offset into a
+loop-invariant per-element part and a uniform per-tile part; the `dY` bounds
+compare the invariant `(ho, wo)` base against shifted uniform limits. It issues
+all of the tile's reads before its LDS writes. The plain loop is emitted as
+well and runs for every other `kpg`, so the binary serves the same problems.
+Both loops visit the same k values in the same order: with `split_k == 1`, `dX`
+is bit-identical to the plain loop's.
+
+Rejected with `pipeline="wavelet"`, which has its own K loop. **Not a knob**:
+the field defaults `False`, and the sweep driver and the AOT job generator take
+the value from `DgradConvSpec.default_uniform_k_decode(*, arch, wave_size,
+pipeline)` (on for gfx950 wave64 outside the wavelet pipeline).
+
 ## Key Files
 
 | File | Purpose |

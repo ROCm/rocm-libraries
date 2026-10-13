@@ -207,6 +207,13 @@ class KernelIdentity:
     streamk: str = "off"
     streamk_reduction: str = ""
     group_merge: int = 1
+    # wgrad only (WgradConvSpec.prefetch_addr): carried K-loop byte offsets.
+    # Left out of the hash while False, like ws_replicas, so identities that
+    # predate the field keep their hash and their cache entries.
+    prefetch_addr: bool = False
+    # dgrad only (DgradConvSpec.uniform_k_decode): the per-tile reduction
+    # decode K loop. Left out of the hash while False, like prefetch_addr.
+    uniform_k_decode: bool = False
     num_load_waves: int = 0
     cshuffle_no_alias: bool = False
     # ---- capability: bounds which problems this binary can serve ----
@@ -277,6 +284,10 @@ class KernelIdentity:
         # field keep their hash (and their cache entries).
         if not fields["ws_replicas"]:
             del fields["ws_replicas"]
+        if not fields["prefetch_addr"]:
+            del fields["prefetch_addr"]
+        if not fields["uniform_k_decode"]:
+            del fields["uniform_k_decode"]
         # Same for the stream-K pair at "no stream-K".
         if fields["streamk"] == "off" and not fields["streamk_reduction"]:
             del fields["streamk"], fields["streamk_reduction"]
