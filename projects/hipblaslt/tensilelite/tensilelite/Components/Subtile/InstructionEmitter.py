@@ -306,9 +306,10 @@ class InstructionEmitter:
             grCnt = 0
             label = "full drain"
         elif counts.use_gr_placement_counts:
-            # Multi-partition reorder: A/B/SA/SB hold raw GRPlacement counts.
-            # Convert to buffer_loads via ceil(count / loadRatioGR) — correct
-            # for any partition/GR-subtile alignment.
+            # Multi-partition (block scheduling forces four; VGPR pressure can
+            # also split). A partition boundary need not land on a GR-subtile
+            # boundary, so the raw GRPlacement atom counts convert to
+            # buffer_loads by ceil rather than through the grMap table.
             import math
             sa_info = self.tileInfoMap.get('SA')
             sb_info = self.tileInfoMap.get('SB')

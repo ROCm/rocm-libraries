@@ -841,27 +841,11 @@ class KernelWriterAssembly(KernelWriter):
 
   def defineSgpr(self, name, numSgprs, align=1):
     if numSgprs == 0: return Module()
-    # Temporarily mark parked (freeSgprVarPool) vars in-use so this checkout does
-    # not grab their registers, then restore them afterwards. A parked var may
-    # already be borrowed as a main-loop temp (its registers currently checked
-    # out) -- e.g. StreamK parks SrdWS specifically for reuse during the main
-    # loop. In that case its registers are not Available, this checkout cannot
-    # grab them anyway, and setSgprToInUseState would raise; skip such vars and
-    # only restore the ones we actually flipped back to in-use here.
-    protected = []
+    # check if previous define sgprs are being used..
     for s in self.states.freeSgprVarPool:
-      # Ask the pool rather than calling and catching: a parked var is skippable
-      # when it is not currently a temp checkout, or when its registers are
-      # borrowed elsewhere (e.g. StreamK reuses SrdWS during the main loop). In
-      # both cases the checkout below could not grab those registers anyway.
-      # Matching the text of the raised error instead would also swallow
-      # unrelated pool failures -- that is how a duplicate define went unnoticed.
-      if not self.sgprPool.canRemoveFromCheckOut(self.sgprs[s]):
-        continue
       self.setSgprToInUseState(s)
-      protected.append(s)
     ret = RegSet("s", "sgpr"+name, self.defineSgprIdx(name, numSgprs, align))
-    for s in protected:
+    for s in self.states.freeSgprVarPool:
       self.setSgprToFreeState(s)
     return ret
 
@@ -14696,31 +14680,18 @@ class KernelWriterAssembly(KernelWriter):
     return module
 
   def globalWriteWorkGroupInit(self, kernel, skipUndefine=False, channels=None, labelSuffix="", noMultipleBuffer=False):
-    # skipUndefine: PostLoopStoreInNll emits this store-init twice — an early
-    # copy hoisted into the FUSED NLL (before endSummation) and the usual
-    # post-loop copy. The emit-time undefineSgpr(AddressC)/undefineSgpr(GSULog2BpeC)
-    # calls must run exactly once (double-undefine errors) and must not reclaim
-    # AddressC before the post-loop copy still needs it. So the NLL copy passes
-    # skipUndefine=True (no reclaim) and the authoritative post-loop copy
-    # (skipUndefine=False, default) performs the single reclaim. The runtime SRD
-    # compute is idempotent (allocPostLoopSrd re-copies Address*->Srd*+0:1 and
-    # computeStoreSrdStart offsets Srd*, never Address*), so running it twice at
-    # runtime recomputes SrdC/SrdD identically.
+    # PLSIN emits this store-init twice: an early copy hoisted into the fused
+    # NLL and the usual post-loop one. The runtime SRD compute is idempotent, so
+    # running it twice is fine, but the emit-time undefineSgpr(AddressC) /
+    # undefineSgpr(GSULog2BpeC) must happen exactly once and not before the
+    # post-loop copy still needs AddressC -- hence skipUndefine on the NLL copy,
+    # with the post-loop copy doing the single reclaim.
     #
-    # channels (Step 4b-2): None emits the historical full C+D store-SRD init,
-    # byte-identical to the pre-PostLoopStoreInNll path. PostLoopStoreInNll splits
-    # it by channel to hoist SrdD's value before the main loop for the FUSED NLL
-    # while leaving SrdC (and the PLAIN fallback arm) post-loop:
-    #   * ["D"] pre-main-loop -> compute SrdD only (fused stores to D; beta==0 so
-    #                            C is never read),
-    #   * ["C"] post-loop     -> compute SrdC only (SrdD already valid from the
-    #                            pre-loop copy; recomputing D post-loop would also
-    #                            re-emit the D SRD-init labels and duplicate them).
-    # Per-channel labels (RegularSrdInitialization{C,D}, GeneralBatchedGemmLoad{C,D})
-    # stay single-copy so nothing collides, and for every fused-eligible config
-    # (GSU != MultipleBuffer, StreamK == 0, non-packed) the shared
-    # computeStoreSrdStart tail (GSU/SK computeStoreSrdStart, PackedSize) is a
-    # no-op, so it is harmless whether it runs once (None) or once per channel call.
+    # channels splits that init by channel so SrdD can be computed pre-loop for
+    # the fused arm while SrdC stays post-loop: ["D"] early (beta==0, so C is
+    # never read), ["C"] late (recomputing D would re-emit its SRD-init labels).
+    # None keeps the historical combined C+D init, byte-identical to the
+    # pre-PLSIN path.
     module = Module("globalWriteWorkGroupInit")
     # The SrdC/SrdD setup below is the first consumer of the kern arg tail
     # (AddressC/D, StridesC/D), and is reached on both the ShadowInit and the
@@ -15240,42 +15211,30 @@ class KernelWriterAssembly(KernelWriter):
     # later-emitted PLAIN NLL / post-loop that reference these symbols stay valid.
     # We remove them again after the store to restore the pool state exactly.
     lentSgprs = []
-    # Also lend the global-read SRDs (SrdA/SrdB/SrdMXSA/SrdMXSB): they are 4-aligned
-    # 4-reg blocks, dead during the NLL drain (all global loads are complete), and
-    # endSummation reclaims them the same way (addSgprVarToPool) right after. Lending
-    # them here gives the transient store SRDs (SrdD + the bias/SAV/scale epilogue
-    # SRDs) genuinely-free 4-aligned blocks to reuse, so the fused store does not
-    # extend the SGPR pool past budget when the bias/SAV epilogue is enabled.
-    # SrdC (4-aligned, 4 regs) is dead here: the fused front guard guarantees
-    # beta==0, so C is never read by the fused store. Lending it hands the epilogue
-    # a genuinely-free 4-aligned block (the scarcest resource for the bias/SAV/D
-    # SRDs). StreamKLocalStart/StreamKLocalEnd must NOT be lent: although the fused
-    # front guard consumes them *before* this body, the POST-LOOP dedup guard
-    # (emitFusedStoreGuard at the DoPostLoopStore site) re-reads them to re-decide
-    # owner-vs-partial. Reusing them as store temps clobbers their runtime content,
-    # so under the UserArgs (ArgType==3) path an owner that just fused mis-evaluates
-    # the dedup guard, falls into the post-loop writePartials path with a garbage
-    # partials index, and does an OOB workspace store (illegal memory access at
-    # multi-tile sizes in hipblaslt-bench). The persistent loop counters
-    # (StreamKIter/StreamKIterEnd) are likewise NOT lent (live across tiles).
-    # SrdWS (workspace SRD, 4-aligned) must NOT be lent, even though it looks dead
-    # for a full-tile owner that writes D directly. In a persistent StreamK WG the
-    # SAME wave is a full owner for some tiles but a split contributor / fixup
-    # reducer for others, so SrdWS stays live across the persistent loop; reusing
-    # it as a transient store SGPR corrupts the workspace descriptor the wave later
-    # needs, giving an intermittent VM_L2_PROTECTION_FAULT (OOB workspace store) on
-    # StreamK-split shapes (e.g. 200x57344x8192, 256x256x16384). It is dropped from
-    # the lent set below at zero SGPR cost: the epilogue kernarg block first-fits
-    # into the remaining dead SRD holes (SrdA/SrdB/MXSA/MXSB), so next_free_sgpr is
-    # unchanged (96, still under the gfx950 MaxSgpr=102 cap).
+    # Lent on top of those: the global-read SRDs, dead once the NLL drain has
+    # retired every load, and SrdC, which the front guard's beta==0 makes
+    # unreadable. All are 4-aligned 4-reg blocks, the scarcest shape for the
+    # transient store SRDs (SrdD, bias, scaleAlphaVec), so lending them is what
+    # keeps the fused store inside the SGPR budget with the epilogue enabled.
+    #
+    # Dead-looking here but NOT lendable. Each of these is read again after the
+    # fused store, so reusing it as a store temp corrupts live runtime state;
+    # the failing shapes are in the commit that added each entry.
+    _neverLend = {
+        "SrdWS":             "live across the persistent StreamK loop -- the same "
+                             "wave owns some tiles and contributes to splits of others",
+        "StreamKLocalStart": "re-read by the post-loop dedup guard",
+        "StreamKLocalEnd":   "re-read by the post-loop dedup guard",
+        "StreamKIter":       "persistent loop counter, live across tiles",
+        "StreamKIterEnd":    "persistent loop counter, live across tiles",
+    }
     _lendNames = ["LocalWriteBaseAddrA", "LocalWriteBaseAddrB",
                   "LocalWriteBaseAddrMXSA", "LocalWriteBaseAddrMXSB",
                   "SwapA", "SwapB", "SwapMXSA", "SwapMXSB",
                   "SrdA", "SrdB", "SrdMXSA", "SrdMXSB",
                   "SrdC"]
-    # SrdWS is deliberately absent: on StreamK a persistent WG that owns one tile
-    # but contributes to a split of another keeps SrdWS live across the persistent
-    # loop, and a static SGPR allocation cannot be branched on that at runtime.
+    assert not (set(_lendNames) & set(_neverLend)), \
+        "lending an SGPR the store cannot have: %s" % sorted(set(_lendNames) & set(_neverLend))
     for _name in _lendNames:
       if _name in self.sgprs and _name not in self.states.freeSgprVarPool:
         self.addSgprVarToPool(_name)
@@ -15286,21 +15245,17 @@ class KernelWriterAssembly(KernelWriter):
     #   Lend  — every A/B/scale tile (terminal MFMAs already ran in the loop).
     #   Weave on MT>256x256 — K=0 A/B (+ unused scale); last-K sources stay live
     #                         and are woven into the store gaps.
-    # The loop already peaks at 256 arch VGPRs; if the store's temporaries
-    # (valuC window / coord0/1 / element batch) checked out fresh registers on
-    # top, the high-water mark would exceed the single-wave occupancy budget.
-    # Mark the dead tiles Available (addFromCheckOut is non-destructive: it
-    # frees the checked-out block WITHOUT reassigning its index) so the store
-    # batch first-fits into the freed holes and the watermark stays at the loop
-    # peak. We removeFromCheckOut (mark in-use again) after the store so the
-    # later-emitted PLAIN NLL arm and the end-of-kernel deallocVgprTiles see
-    # the exact original pool state. try/except guards tiles a tail path may
-    # have already released (already checked-in -> not lendable).
-    # Protected arch-VGPR set = every D-output tile register. For spill tiles
-    # (MIWaveTile product > 64) the >256th accumulators are parked in these VGPRs
-    # (which may alias dead input-tile VGPRs); a lent-then-reused register there
-    # would clobber a live spilled accumulator, corrupting D for both the fused
-    # store and the later post-loop store. Skip any input tile that overlaps.
+    # The loop already peaks at 256 arch VGPRs, so the store's temporaries have
+    # to land in freed holes rather than on top. addFromCheckOut marks the dead
+    # tiles Available without reassigning their indices, and the matching
+    # removeFromCheckOut after the store restores the pool exactly for the PLAIN
+    # NLL arm and deallocVgprTiles.
+    #
+    # Spilled D accumulators are the exception. Above MIWaveTile product 64 the
+    # accumulators past the AGPR file are parked in arch VGPRs that may alias a
+    # dead input tile; lending one and reusing it clobbers a live accumulator
+    # and corrupts D for both stores. Any input tile overlapping those is
+    # skipped.
     _protected = set()
     if kernel.get("UseSubtileImpl") and getattr(self.states, "d", None) is not None \
        and getattr(self.states.d, "tileInfo", None) is not None:
@@ -15358,24 +15313,14 @@ class KernelWriterAssembly(KernelWriter):
     # paired-store both-blocks-valid test -- is dead. Skip the allocation entirely and
     # leave the guard state None so those sites emit nothing; _emitSubtileGuards (~20
     # SALU + a v_readfirstlane, per fused emission) is skipped in globalWriteElements.
-    fusedDefinedGuards = not self._plsinFusedNoGuards()
-    if fusedDefinedGuards:
-      # Use defineSgpr (not defineSgprIdx) so the checkout skips vars currently
-      # parked in freeSgprVarPool. On StreamK the workspace SRD (SrdWS) is parked
-      # here (reused as a main-loop temp) and defineSgprIdx would grab its
-      # registers, making the later post-loop removeSgprVarFromPool("SrdWS") fail
-      # ("not in Available state"). defineSgpr temporarily marks the parked vars
-      # in-use across the checkout, so the guard SGPRs land on genuinely-free
-      # registers. Also protects the just-lent LocalWriteBaseAddr/Swap SGPRs above.
-      module.add(self.defineSgpr("SubtileMGuard", 1))
-      module.add(self.defineSgpr("SubtileNGuard", 1))
-      self.states.subtileM32ValidBlocksSgpr = self.sgprs["SubtileMGuard"]
-      self.states.subtileN16ValidBlocksSgpr = self.sgprs["SubtileNGuard"]
-    else:
-      self.states.subtileM32ValidBlocksSgpr = None
-      self.states.subtileN16ValidBlocksSgpr = None
-      self.states.subtileTotalMOffsetSgpr   = None
-      self.states.subtileMBlockSize         = 0
+    # So the guards are never defined on this arm. If a partial-tile fused store
+    # ever returns they come back here -- and note that this point is inside the
+    # NLL, where StreamK has SrdWS parked and borrowed as a main-loop temp, so
+    # they would have to be taken through defineSgpr rather than defineSgprIdx.
+    self.states.subtileM32ValidBlocksSgpr = None
+    self.states.subtileN16ValidBlocksSgpr = None
+    self.states.subtileTotalMOffsetSgpr   = None
+    self.states.subtileMBlockSize         = 0
 
     # --- external D bpe: the GSU==1 store arm normally sets bpeCexternal to the
     # external (DestDataType) bpe. Our noGSUBranch=True call skips the gsuLimit>1
@@ -15388,33 +15333,18 @@ class KernelWriterAssembly(KernelWriter):
     savedBpeCext = self.states.bpeCexternal
     self.states.bpeCexternal = self.states.bpeCexternalGSU1
 
-    # --- transient store SRD (SrdD) for the FUSED NLL (SGPR-defer) ---
-    # SrdD is no longer reserved early / hoisted pre-loop (that cost 4 main-loop-
-    # resident SGPRs and overflowed MT256x256 fp4). Define it here from the drain-era
-    # pool and compute its full value, then undefine after the store (below) so
-    # endSummation re-defines SrdD for the PLAIN / SkipToEnd post-loop store.
+    # --- transient store SGPRs for the FUSED NLL ---
+    # SrdD is not reserved pre-loop (4 main-loop-resident SGPRs, which overflowed
+    # MT256x256 fp4). It is taken from the drain-era pool here and undefined after
+    # the store, so endSummation can re-define it for the PLAIN / SkipToEnd arm.
+    # That is safe only because the undefine below happens BEFORE the lent
+    # main-loop SGPRs are reclaimed, so no live var ever overlaps it.
     #
-    # Use defineSgprIdx (UNPROTECTED) so the 4-aligned checkout reuses a dead-during-
-    # fused 4-aligned block — on StreamK the parked SrdWS (workspace SRD, not touched
-    # by the beta0/full-tile fused store) — instead of extending the pool. This keeps
-    # .sgpr_count from growing. Safe because SrdD is undefined below BEFORE SrdWS / the
-    # lent main-loop SGPRs are reclaimed, so no live var overlaps it.
-    #
-    # SrdD value: the SAME store-init builder the post-loop store uses, but with
-    # labelSuffix="Fused" so its per-channel SRD-init labels do not collide with the
-    # post-loop D-init, channels=["D"] only (beta==0 per the front guard => C is never
-    # read), skipUndefine=True (keep AddressD/GSULog2Bpe* live for the post-loop store),
-    # and noMultipleBuffer=True (skip the GSU/SK reduction tails — a full-tile owner
-    # writes straight to D, no workspace reduction).
-    # --- load the epilogue store kernargs FIRST (before SrdD / the transient SRDs) ---
-    # loadFusedEpilogueStoreSgprs allocates a single contiguous ~13-SGPR block
-    # (Address*, BiasType/Stride, activation args via defineMultiSgprIndex). It is the
-    # largest transient allocation, so it must grab the widest contiguous lent hole
-    # (SrdWS+Swap*+LocalWrite*+StreamKLocal* form a ~14-reg run) BEFORE the 4-reg SRDs
-    # (SrdD/SrdBias/SrdScaleAlphaVec) fragment it. Allocating it after those SRDs left
-    # no 13-wide contiguous hole low, forcing the block to extend the pool past budget
-    # (drove .sgpr_count to 105 -> overflow on MT>=256). Doing it first packs the block
-    # into the low holes and keeps .sgpr_count within budget.
+    # Allocation order matters and is not arbitrary. loadFusedEpilogueStoreSgprs
+    # wants one contiguous ~13-SGPR block and is the widest request, so it has to
+    # run before the 4-reg SRDs (SrdD, bias, scaleAlphaVec) fragment the lent
+    # holes; taken the other way round there is no 13-wide hole left low and the
+    # block extends the pool past the gfx950 102-SGPR cap.
     fusedEpilogueArgs = []
     # Scalar UseScaleAB is not folded into Alpha on the fused arm (no alpha
     # multiply). AddressScaleA/B still live in numStoreSgprNames that
@@ -15602,29 +15532,22 @@ class KernelWriterAssembly(KernelWriter):
             (len(_tt0Vals) // _nStagesM) if _nStagesM > 1 else (max(_tt0Vals) + 1)
         if _nStagesM > 1:
           # Put the elements in partition order so each stage is one contiguous
-          # run. Without this an M split hands the store p0,p1,p0,p1 within every
-          # pair of N groups, and since a stage boundary may only open a later
-          # stage, the revisited p0 elements fall into p1's stage: the stages come
-          # out alternating 4 and 12 elements and the *last* one -- the one with no
-          # following partition to drain under -- is a long one. Sorting makes them
-          # equal, which is what shortens the run of stores left after the final
-          # MFMA.
+          # run. An M split otherwise hands the store p0,p1,p0,p1 within every
+          # pair of N groups, and because a stage boundary may only open a later
+          # stage, the revisited p0 elements land in p1's stage -- stages come out
+          # alternating 4 and 12, with a long one last, where there is no
+          # following partition to drain under.
           #
-          # The key is the stage index itself (N group outer, M group inner, matching
-          # _partition_tile_range's pi = piM + piN * numPartitionsM), and the sort is
-          # stable, so element order within a stage is untouched and the paired-store
-          # pairing of adjacent tt0 still sees (0,1),(2,3) side by side.
+          # The sort is stable and keyed on the stage index, so order within a
+          # stage is untouched and the paired store still sees (0,1),(2,3)
+          # adjacent. It applies only to this fused store's private copy of the
+          # list; every other store path keeps the stock tt1-outer order.
           #
-          # Scoped to the list this one fused store consumes. notLocalFullTileElements
-          # and every other store path keep the stock tt1-outer order.
-          # An element's D address comes from its tuple, but the accumulator it
-          # drains comes from its *position*: globalWriteBatch pops the acc reads
-          # off self.codes.accVgprRead in element order. Permuting the elements
-          # alone would therefore re-pair every accumulator with the wrong address.
-          # The queue is a flat list in architectural order, gwvw*regsPerScalar
-          # items per element, and buildSubtileFusedStore already owns a private
-          # copy of it (rebuilt above, restored on the way out), so it can be
-          # permuted in lockstep here without disturbing any other store path.
+          # The accumulator queue must be permuted in lockstep. An element's D
+          # address comes from its tuple, but its accumulator comes from its
+          # position -- globalWriteBatch pops accVgprRead in element order -- so
+          # permuting the elements alone re-pairs every accumulator with the
+          # wrong address.
           _t1, _t0 = self.states.subtileStoreTt1PerStage, self.states.subtileStoreTt0PerStage
           _perm = [i for i, _ in sorted(
               enumerate(elements[0]), key=lambda ie: (ie[1][0] // _t1, ie[1][1] // _t0))]
@@ -15712,9 +15635,6 @@ class KernelWriterAssembly(KernelWriter):
          _spool[_idx].status == RegisterPool.Status.InUse:
         module.add(self.undefineSgpr(_name))
       self.sgprs.pop(_name, None)
-    if fusedDefinedGuards:
-      module.add(self.undefineSgpr("SubtileNGuard"))
-      module.add(self.undefineSgpr("SubtileMGuard"))
     self.states.subtileMBlockSize          = savedMBlockSize
     self.states.subtileTotalMOffsetSgpr    = savedTotalMOffSgpr
     self.states.subtileN16ValidBlocksSgpr  = savedN16Sgpr

@@ -455,10 +455,10 @@ class StateValues:
   postLoopStoreInNll: bool               = False
   postLoopStoreInjected: bool            = False
   postLoopSrdDHoisted: bool              = False
-  # PostLoopStoreInNll (PLSIN) store/init-weave state (B2). Declared here so the
-  # fused-store weave communicates through typed StateValues fields instead of
-  # dynamically-attached, stringly-typed getattr-with-default attributes. All
-  # default to the "not weaving" value, so a non-PLSIN kernel is unaffected.
+  # PostLoopStoreInNll (PLSIN) store/init-weave state. Declared here rather than
+  # attached dynamically, so a misspelled name is an AttributeError instead of a
+  # silent fall back to the default. All default to the "not weaving" value, so
+  # a non-PLSIN kernel is unaffected.
   subtileFusedWeave: bool                = False   # inside the fused-NLL weave store
   subtileFusedFullTileStore: bool        = False   # fused store is the full-tile (no-edge) arm
   subtileWeaveLookahead: int             = 4       # store-pairs ahead a pair's MFMAs are issued
@@ -488,15 +488,13 @@ class StateValues:
   subtileStagedStoreSeam: Optional[int]  = None    # index of the store body within the fused-store module
   subtileStoreStageHighWater: int        = 0       # highest stage opened so far (survives per-batch writer rebuild)
   subtilePairPackSlot: int               = 0       # rotating index into the paired-store pack ring
-  # Paired-store dwordx4 base hoist: which addrDVgpr / N group vgprAddrScratch currently
-  # holds.  Lives on the writer state so it survives the per-batch rebuild of
-  # GlobalWriteBatch -- as an instance field it reset every batch and the base was
-  # recomputed once per batch from unchanged inputs.  subtileHoistedAddrArm pins the
-  # owning store arm: one StoreState is built per arm (edge/beta/activation) and arms
-  # are runtime-exclusive branches, so a base produced in one must never be reused in
-  # another -- only the emit order makes them look sequential.  It is the arm counter
-  # rather than the StoreState itself because that object reaches the writer (and its
-  # register pools) and must not be retained here.
+  # Paired-store dwordx4 base hoist: which addrDVgpr / N group vgprAddrScratch
+  # holds, kept here so it survives the per-batch rebuild of GlobalWriteBatch.
+  # subtileHoistedAddrArm pins the owning store arm, because arms (edge / beta /
+  # activation) are runtime-exclusive branches that only the emit order makes
+  # look sequential -- a base produced in one must never be reused in another.
+  # It is the arm counter and not the StoreState itself, which reaches the
+  # writer's register pools and must not be retained here.
   subtileHoistedAddrDVgpr: int           = -1
   # Rows the fused store has already passed, when it addresses them absolutely
   # rather than by advancing SrdD. See GlobalWriteBatch._subtileStoreSoffset.

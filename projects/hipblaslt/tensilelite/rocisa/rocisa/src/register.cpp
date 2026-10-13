@@ -62,9 +62,6 @@ void init_register(nb::module_ m)
              nb::arg("size"),
              nb::arg("tag") = "")
         .def("removeFromCheckOut", &rocisa::RegisterPool::removeFromCheckOut, nb::arg("start"))
-        .def("canRemoveFromCheckOut",
-             &rocisa::RegisterPool::canRemoveFromCheckOut,
-             nb::arg("start"))
         .def("checkOut",
              &rocisa::RegisterPool::checkOut,
              nb::arg("size"),

@@ -1984,22 +1984,13 @@ class GlobalWriteBatchWriter:
         # Exec mask: lanes where both XOR swaps changed the value (i.e., the 'first' half of each pair)
         # selects lanes 0-15 and 32-47 within the wave.
         #
-        # Reuse the batch's own scratch SGPR pair (self.tmpS01) instead of a fresh
-        # checkOutAligned(2,2). The fresh aligned pair used preventOverflow=True and
-        # HARD-FAILED (no valid solution) when the ambient SGPR pool was at the
-        # occupancy-1 ceiling -- notably under PostLoopStoreInNll, whose fused store
-        # raises the whole-kernel SGPR high-water so no free 2-aligned pair remains
-        # here on skewed (non-256x256) tiles. This is a compile-time pool artifact:
-        # the partial-fixup path is emitted into the same kernel as the (runtime-
-        # exclusive) fused store and shares its register file. self.tmpS01 is the
-        # batch-owned lane-mask scratch: it is a laneSGPRC(=2)-wide, 2-aligned pair on
-        # wave64 (this subtile path is wave64-only + non-edge, see isSubtileNonEdge),
-        # and it is dead here (only written per-element later in the store loop), so
-        # borrowing it for this one-shot constant mask adds zero pool pressure and
-        # cannot overflow regardless of PLSIN's ambient footprint.
-        # Only the PLSIN fused store raises the high-water far enough to hit the
-        # failure described above, so borrow tmpS01 there and leave every other
-        # kernel on the original fresh allocation.
+        # Borrow the batch's own tmpS01 rather than checking out a fresh aligned
+        # pair. PLSIN's fused store raises the whole-kernel SGPR high-water, and
+        # the runtime-exclusive partial-fixup path shares its register file, so
+        # on skewed tiles there is no free 2-aligned pair left and the checkout
+        # hard-fails with no valid solution. tmpS01 is already a 2-aligned pair
+        # on this wave64-only path and is dead here -- it is written per-element
+        # later in the store loop -- so a one-shot mask costs nothing.
         _borrowTmpS01 = isMxf4SubtilePath(self.kernel)
         stmp = self.tmpS01 if _borrowTmpS01 \
           else self.parentWriter.sgprPool.checkOutAligned(2, 2, tag="_emitNonatomicAdd_stmp")
@@ -4411,17 +4402,13 @@ class GlobalWriteBatchWriter:
     #   1. Compute the adjusted D store address (VALU).
     #   2. Compute the exec mask for partial M/N blocks (SALU) — suppresses OOB lanes
     #      at tile boundaries without adding latency to the critical path.
-    # Hoisted store address: vAddrScratch = (scaled addrDVgpr) +
-    # lane_group*8 is identical for every paired store that shares this addrDVgpr and
-    # N-group -- the per-M-subtile-pair stride is carried by the MUBUF immediate offset
-    # (0/64/128/192) in Phase2, not by addrDVgpr.  So compute it once and reuse.
-    #
-    # Safe ONLY in the full-tile fused store (_fusedFullTileNoGuards): there every
-    # paired store in the N-group is emitted straight-line and unconditionally
-    # executed, so the register is guaranteed live at every reuse.  In the guarded
-    # path a runtime scalar/fallback branch may skip the producer, so we keep the
-    # original per-store recompute there.  Recompute whenever the addrDVgpr register
-    # or the N-group changes.
+    # The hoisted address is identical for every paired store sharing this
+    # addrDVgpr and N-group -- the per-M-subtile-pair stride rides the MUBUF
+    # immediate offset in Phase2, not addrDVgpr -- so it is computed once and
+    # recomputed only when either changes. Safe only on the full-tile fused
+    # arm, where every paired store is straight-line and unconditional; a
+    # guarded path can branch past the producer, so it keeps the per-store
+    # recompute.
     # Under permlane16 the row-byte delta is (lane_group&1)*12 rows,
     # precomputed into the (otherwise-dead) vPermAddr slot; otherwise it is the
     # standard lane_group*8 in vLGDelta.
