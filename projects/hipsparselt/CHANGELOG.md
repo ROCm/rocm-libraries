@@ -9,6 +9,8 @@ Full documentation for hipSPARSELt is available at [rocm.docs.amd.com/projects/h
 * Support for the following data type combinations for the LLVM target gfx942:
   * FP8_FNUZ(E4M3_FNUZ) inputs, F32 output, and F32 Matrix Core accumulation.
   * BF8_FNUZ(E5M2_FNUZ) inputs, F32 output, and F32 Matrix Core accumulation.
+* Support for the gate residual epilogue (`HIPSPARSELT_MATMUL_GATE_RESIDUAL_MAT_POINTER` and
+  `HIPSPARSELT_MATMUL_GATE_RESIDUAL_DESC`) for the LLVM targets gfx942 and gfx950.
 
 ## hipSPARSELt 0.2.8 for ROCm 7.13
 

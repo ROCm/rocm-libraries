@@ -52,4 +52,6 @@ Key features
    * Sigmoid
    * Tanh
 
+* Fused gate residual epilogue (see :doc:`Gate residual epilogue <./conceptual/gate-residual>`)
+
 
