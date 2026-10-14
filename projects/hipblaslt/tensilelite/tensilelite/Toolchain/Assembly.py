@@ -27,11 +27,13 @@ import math
 import shutil
 import subprocess
 
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Dict, List, Optional, Union, NamedTuple
 
 from ..Common import ensurePath, print1, print2, printWarning
 from ..Common.GlobalParameters import globalParameters
+from ..Common.Parallel import CPUThreadCount
 from ..Common.Architectures import compilerTargetOf, isaToGfx
 from ..Common.Types import IsaVersion
 from ..CustomKernels import validateCustomKernelMetadata
@@ -123,6 +125,7 @@ def buildAssemblyCodeObjectFiles(
       archKernelMap[tuple(k['ISA'])].append(k)
 
     coFiles = []
+    jobs = []
     for arch, archKernels in archKernelMap.items():
       if len(archKernels) == 0:
         continue
@@ -140,13 +143,23 @@ def buildAssemblyCodeObjectFiles(
           coFileMap[asmDir / (coName + extCoRaw)].add(str(asmDir / (kernel["BaseName"] + extObj)))
 
       for coFileRaw, objFiles in coFileMap.items():
-        # Canonicalize both the default-list and explicit-set linker input paths.
-        linker(sorted(objFiles), str(coFileRaw))
         coFile = destDir / coFileRaw.name.replace(extCoRaw, extCo)
-        if compress:
-          bundler.compress(str(coFileRaw), str(coFile), compilerTargetOf(name))
-        else:
-          shutil.move(coFileRaw, coFile)
+        # Canonicalize both the default-list and explicit-set linker input paths.
+        jobs.append((sorted(objFiles), coFileRaw, coFile, compilerTargetOf(name)))
         coFiles.append(coFile)
+
+    def linkAndBundle(job):
+      objFiles, coFileRaw, coFile, gfx = job
+      linker(objFiles, str(coFileRaw))
+      if compress:
+        bundler.compress(str(coFileRaw), str(coFile), gfx)
+      else:
+        shutil.move(coFileRaw, coFile)
+
+    # Each code object is an independent ld.lld + bundler subprocess pair, so
+    # run them concurrently; threads suffice since the work is in the children.
+    with ThreadPoolExecutor(max_workers=CPUThreadCount()) as executor:
+      for _ in executor.map(linkAndBundle, jobs):
+        pass
 
     return coFiles
