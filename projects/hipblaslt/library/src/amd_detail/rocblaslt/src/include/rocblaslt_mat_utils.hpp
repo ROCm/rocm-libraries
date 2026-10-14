@@ -149,19 +149,30 @@ inline rocblaslt_status validateMatmulSwizzleArgs(const rocblaslt_matmul_desc   
 }
 
 /*******************************************************************************
- * Validate Batch Strides
- * Kernels receive batch strides as 32-bit values; a single batch never uses its stride.
+ * Validate Kernel Argument Widths
+ * Kernels receive M, N, K, the leading dimensions and the batch strides as 32-bit
+ * values; a single batch never uses its batch stride.
  ******************************************************************************/
-inline bool batchStridesFitKernels(int64_t num_batches,
-                                   int64_t batch_stride_a,
-                                   int64_t batch_stride_b,
-                                   int64_t batch_stride_c,
-                                   int64_t batch_stride_d)
+inline bool problemFitsKernelArgs(int64_t m,
+                                  int64_t n,
+                                  int64_t k,
+                                  int64_t lda,
+                                  int64_t ldb,
+                                  int64_t ldc,
+                                  int64_t ldd,
+                                  int64_t num_batches,
+                                  int64_t batch_stride_a,
+                                  int64_t batch_stride_b,
+                                  int64_t batch_stride_c,
+                                  int64_t batch_stride_d)
 {
-    constexpr int64_t max_batch_stride = std::numeric_limits<uint32_t>::max();
+    constexpr int64_t max_arg = std::numeric_limits<uint32_t>::max();
+    for(int64_t value : {m, n, k, lda, ldb, ldc, ldd})
+        if(value > max_arg)
+            return false;
     return num_batches <= 1
-           || (batch_stride_a <= max_batch_stride && batch_stride_b <= max_batch_stride
-               && batch_stride_c <= max_batch_stride && batch_stride_d <= max_batch_stride);
+           || (batch_stride_a <= max_arg && batch_stride_b <= max_arg && batch_stride_c <= max_arg
+               && batch_stride_d <= max_arg);
 }
 
 /*******************************************************************************
@@ -183,6 +194,10 @@ inline rocblaslt_status validateMatmulArgs(int64_t                       m,
                                            rocblaslt_compute_type        compute_type,
                                            hipblasOperation_t            opA,
                                            hipblasOperation_t            opB,
+                                           int64_t                       lda,
+                                           int64_t                       ldb,
+                                           int64_t                       ldc,
+                                           int64_t                       ldd,
                                            int                           num_batches_a  = 1,
                                            int                           num_batches_b  = 1,
                                            int                           num_batches_c  = 1,
@@ -284,11 +299,36 @@ inline rocblaslt_status validateMatmulArgs(int64_t                       m,
         return rocblaslt_status_invalid_size;
     }
 
-    if(!batchStridesFitKernels(
-           num_batches_a, batch_stride_a, batch_stride_b, batch_stride_c, batch_stride_d))
+    if(!problemFitsKernelArgs(m,
+                              n,
+                              k,
+                              lda,
+                              ldb,
+                              ldc,
+                              ldd,
+                              num_batches_a,
+                              batch_stride_a,
+                              batch_stride_b,
+                              batch_stride_c,
+                              batch_stride_d))
     {
         log_error(__func__,
-                  "batch strides of 2^32 elements or more are not supported",
+                  "sizes, leading dimensions and batch strides of 2^32 elements or more are not "
+                  "supported",
+                  "m",
+                  m,
+                  "n",
+                  n,
+                  "k",
+                  k,
+                  "lda",
+                  lda,
+                  "ldb",
+                  ldb,
+                  "ldc",
+                  ldc,
+                  "ldd",
+                  ldd,
                   "stride_a",
                   batch_stride_a,
                   "stride_b",
@@ -517,6 +557,10 @@ inline rocblaslt_status rocblaslt_matmul_valid_args(const rocblaslt_matmul_desc 
                                             compute_type,
                                             matmul_descr->op_A,
                                             matmul_descr->op_B,
+                                            lda,
+                                            ldb,
+                                            ldc,
+                                            ldd,
                                             num_batches_a,
                                             num_batches_b,
                                             num_batches_c,

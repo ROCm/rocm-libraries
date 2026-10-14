@@ -143,6 +143,33 @@ namespace
         EXPECT_EQ(algosFor(int64_t(1) << 32), 0);
     }
 
+    // Kernels take M, N, K and the leading dimensions as 32-bit values too. With both
+    // operations N, A is M x K, B is K x N, and C and D are M x N, so a K of 2^32 also makes
+    // ldb 2^32 and an M of 2^32 also makes ldc and ldd 2^32.
+    TEST_F(AlgoErrors, smoke_HeuristicRefusesSizesPast32Bits)
+    {
+        auto algosFor = [&](int64_t m, int64_t n, int64_t k, int64_t lda) {
+            hipblasLtMatrixLayout_t a = nullptr, b = nullptr, cd = nullptr;
+            EXPECT_EQ(hipblasLtMatrixLayoutCreate(&a, kType, m, k, lda), HIPBLAS_STATUS_SUCCESS);
+            EXPECT_EQ(hipblasLtMatrixLayoutCreate(&b, kType, k, n, k), HIPBLAS_STATUS_SUCCESS);
+            EXPECT_EQ(hipblasLtMatrixLayoutCreate(&cd, kType, m, n, m), HIPBLAS_STATUS_SUCCESS);
+            hipblasLtMatmulHeuristicResult_t result{};
+            int                              returned = 0;
+            static_cast<void>(hipblasLtMatmulAlgoGetHeuristic(
+                handle, desc, a, b, cd, cd, pref, 1, &result, &returned));
+            hipblasLtMatrixLayoutDestroy(a);
+            hipblasLtMatrixLayoutDestroy(b);
+            hipblasLtMatrixLayoutDestroy(cd);
+            return returned;
+        };
+        constexpr int64_t past = int64_t(1) << 32;
+        EXPECT_GT(algosFor(kSize, kSize, kSize, kSize), 0);
+        EXPECT_EQ(algosFor(kSize, kSize, kSize, past), 0);
+        EXPECT_EQ(algosFor(kSize, past, kSize, kSize), 0);
+        EXPECT_EQ(algosFor(kSize, kSize, past, kSize), 0);
+        EXPECT_EQ(algosFor(past, kSize, kSize, past), 0);
+    }
+
     TEST_F(AlgoErrors, smoke_MatmulRejectsUnknownIndex)
     {
         const hipblasLtMatmulAlgo_t algo = algoWithUnknownIndex();
