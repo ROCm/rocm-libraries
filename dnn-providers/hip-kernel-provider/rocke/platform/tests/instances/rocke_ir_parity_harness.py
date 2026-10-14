@@ -130,6 +130,7 @@ def build_conv(
     epilogue="default",
     groups=1,
     vector_size_c=None,
+    group_merge=1,
 ):
     def _build():
         from kernels.common.conv_implicit_gemm import (
@@ -155,6 +156,7 @@ def build_conv(
             epilogue=epilogue,
             groups=groups,
             vector_size_c=vector_size_c,
+            group_merge=group_merge,
         )
         return build_implicit_gemm_conv(spec, arch=arch)
 
@@ -178,6 +180,9 @@ def build_conv_wgrad(
     split_k=1,
     dtype_d="fp16",
     two_stage=False,
+    streamk="off",
+    streamk_reduction="linear",
+    streamk_ctas=-1,
 ):
     def _build():
         from kernels.common.conv_implicit_gemm_wgrad import (
@@ -207,6 +212,9 @@ def build_conv_wgrad(
             epilogue=epilogue,
             split_k=split_k,
             two_stage=two_stage,
+            streamk=streamk,
+            streamk_reduction=streamk_reduction,
+            streamk_ctas=streamk_ctas,
         )
         return build_implicit_gemm_conv_wgrad(spec, arch=arch)
 
@@ -626,12 +634,12 @@ def build_attention_d256_gfx950(arch):
 
         problem = _d256_problem()
         with _pinned_attention_arch(arch):
-            if not _d256_gfx950_fast(problem):
+            if not _d256_gfx950_fast(problem, arch):
                 raise RuntimeError(
                     f"D256 fast spec not selected under pinned arch {arch!r}; "
                     "would pin the fallback (no pad/interleave)"
                 )
-            spec = _tiled_spec_from_problem(problem)
+            spec = _tiled_spec_from_problem(problem, arch)
             if not (spec.use_kq_lds_pad and spec.use_softmax_mfma_interleave):
                 raise RuntimeError(
                     "expected pad+interleave in the D256 fast spec; got "
@@ -661,12 +669,12 @@ def build_attention_d256_gfx942(arch):
 
         problem = _d256_problem()
         with _pinned_attention_arch(arch):
-            if not _d256_gfx942_fast(problem):
+            if not _d256_gfx942_fast(problem, arch):
                 raise RuntimeError(
                     f"D256 gfx942 fast route not selected under pinned arch "
                     f"{arch!r}; would pin the fallback (slow scalar path)"
                 )
-            spec = _tiled_spec_from_problem(problem)
+            spec = _tiled_spec_from_problem(problem, arch)
             return build_gfx942_4warp_gqa(spec, arch=arch)
 
     return _build
@@ -712,7 +720,7 @@ def build_attention_d128_swa_fold_gfx942(arch):
                     f"GQA head-fold not selected under pinned arch {arch!r}; "
                     "would pin the unfolded kernel"
                 )
-            spec = _tiled_spec_from_problem(problem)
+            spec = _tiled_spec_from_problem(problem, arch)
             kernel = build_gfx942_4warp_gqa(spec, arch=arch)
             if not kernel.name.endswith("_4wgqa_fold"):
                 raise RuntimeError(
@@ -1279,6 +1287,52 @@ def build_streaming_copy(arch):
     return _build
 
 
+def build_warp_shuffle_xor_dpp_reduce(arch, masks):
+    """16-lane i32 sum ``v = v + warp_shuffle_xor_dpp(v, m)`` over ``masks``:
+    pins the per-target ``tile.dpp_xor`` encodings inside the reduction they
+    exist for, so a change that alters the op's IR in both engines at once
+    still trips the golden. gfx9 uses masks 1, 2, 7, 15 (quad_perm x2,
+    row_half_mirror, row_mirror); a row_xmask target uses 1, 2, 4, 8."""
+
+    def _build():
+        from rocke.core.ir import I32, IRBuilder, PtrType
+
+        b = IRBuilder(f"irhash_warp_shuffle_xor_dpp_reduce_{arch}")
+        src = b.param("S", PtrType(I32, "global"), noalias=True, readonly=True)
+        dst = b.param("D", PtrType(I32, "global"), noalias=True)
+        tid = b.thread_id_x()
+        acc = b.global_load(src, tid, I32, align=4)
+        for m in masks:
+            acc = b.add(acc, b.warp_shuffle_xor_dpp(acc, m))
+        b.global_store(dst, tid, acc, align=4)
+        b.ret()
+        return b.kernel
+
+    return _build
+
+
+def build_warp_shuffle_xor_dpp_masks_f32(arch):
+    """f32 shuffle by every register-only gfx9 mask (1, 2, 3, 7, 8, 15),
+    summed: pins each table entry and the f32 <-> i32 bitcast path."""
+
+    def _build():
+        from rocke.core.ir import F32, IRBuilder, PtrType
+
+        b = IRBuilder(f"irhash_warp_shuffle_xor_dpp_masks_f32_{arch}")
+        src = b.param("S", PtrType(F32, "global"), noalias=True, readonly=True)
+        dst = b.param("D", PtrType(F32, "global"), noalias=True)
+        tid = b.thread_id_x()
+        x = b.global_load(src, tid, F32, align=4)
+        acc = x
+        for m in (1, 2, 3, 7, 8, 15):
+            acc = b.fadd(acc, b.warp_shuffle_xor_dpp(x, m))
+        b.global_store(dst, tid, acc, align=4)
+        b.ret()
+        return b.kernel
+
+    return _build
+
+
 def cases():
     out = []
 
@@ -1738,6 +1792,84 @@ def cases():
         ),
     )
 
+    # Conv forward + merged groups (group_merge).
+    #
+    # Merging folds Gm conv groups into one GEMM so the vector-width picker
+    # sees Gm channels per group instead of 1. It is admissible only on
+    # depthwise shapes (cpg == kpg == 1), so these cases need their own
+    # problem: conv1/conv2 above are dense and would be rejected by the gate.
+    #
+    # conv_dw is depthwise -- C == K == groups == 64, so cpg == kpg == 1 and
+    # M == 2*14*14 == 392. The variants below span the axes that actually
+    # change emitted IR under merge, which is what makes the golden a
+    # regression gate rather than a single smoke hash:
+    #   - dw_unmerged is the group_merge=1 control. Without it a drift in the
+    #     merged hashes could not be attributed to the merge path rather than
+    #     to the depthwise path, which carried no coverage here at all.
+    #   - dw_unmerged_cshuffle pins the Gm=1 cshuffle store width: it derives
+    #     from kpg (_vec(1) = 1 here) rather than a fixed 8, which failed the
+    #     whole-vector bound and dropped every output. Python twin of parity
+    #     config 28.
+    #   - gm4/gm8/gm32 vary the shift and mask width (log2 Gm) of the merged
+    #     k decode that feeds both the A channel and the B-load diagonal.
+    #   - gm64 is Gm == groups: one merged group, but the grouped decode stays
+    #     engaged because an AOT binary serves every group count Gm divides.
+    #   - dw_gm4_direct pins vector_size_c=1 to reach _emit_direct_epilogue.
+    #     Merged kpg otherwise auto-derives vec_c > 1, which the validator
+    #     turns into a cshuffle requirement, so without the pin every merged
+    #     case here would exercise only the cshuffle epilogue.
+    # The gfx942 case checks that merging is arch-independent: it shares the
+    # emitter path with gfx950 and differs only in atom and tile shape.
+    conv_dw = (2, 14, 14, 64, 64, 3, 3, 1, 1, 1, 1, 1, 1, 64)
+    for tag, gm, epi, vec_c in (
+        ("dw_unmerged", 1, "default", None),
+        ("dw_unmerged_cshuffle", 1, "cshuffle", None),
+        ("dw_gm4_direct", 4, "default", 1),
+        ("dw_gm8_cshuffle", 8, "cshuffle", None),
+        ("dw_gm32_cshuffle", 32, "cshuffle", None),
+        ("dw_gm64_cshuffle", 64, "cshuffle", None),
+    ):
+        add(
+            "conv",
+            f"conv/gfx950/n2h14c64k64r3g64/{tag}",
+            "gfx950",
+            build_conv(
+                f"irhash_conv_950_{tag}",
+                "gfx950",
+                conv_dw,
+                wave_size=64,
+                wtm=32,
+                wtn=32,
+                wtk=16,
+                tile_m=64,
+                tile_n=64,
+                tile_k=64,
+                pipeline="mem",
+                epilogue=epi,
+                vector_size_c=vec_c,
+                group_merge=gm,
+            ),
+        )
+    add(
+        "conv",
+        "conv/gfx942/n2h14c64k64r3g64/dw_gm8_cshuffle",
+        "gfx942",
+        build_conv(
+            "irhash_conv_942_dw_gm8",
+            "gfx942",
+            conv_dw,
+            wave_size=64,
+            wtm=16,
+            wtn=16,
+            wtk=16,
+            tile_m=64,
+            tile_n=32,
+            tile_k=16,
+            epilogue="cshuffle",
+            group_merge=8,
+        ),
+    )
+
     # Conv wgrad: implicit-GEMM backward-weight direction (NHWK x NHWC -> KYXC).
     # wgrad1: small 3x3 conv (N8 H8 W8 C16 K32 Y3 X3, stride/pad=defaults).
     # wgrad2: 1x1 conv (N2 H16 W16 C32 K32, no filter spatial).
@@ -1912,6 +2044,162 @@ def cases():
             tile_n=64,
             tile_k=32,
             epilogue="cshuffle",
+        ),
+    )
+    # Stream-K wgrad: the linear and tree flag fixups, the atomic reduction,
+    # the persistent launch and the group fold into GEMM-M. MFMA-only.
+    add(
+        "conv_wgrad",
+        "conv_wgrad/gfx950/n1h8c16k32r3_sk_linear",
+        "gfx950",
+        build_conv_wgrad(
+            "irhash_wgrad_950_sk_linear",
+            "gfx950",
+            wgrad1,
+            wave_size=64,
+            wtm=32,
+            wtn=32,
+            wtk=16,
+            tile_m=64,
+            tile_n=64,
+            tile_k=16,
+            streamk="dp_sk",
+        ),
+    )
+    add(
+        "conv_wgrad",
+        "conv_wgrad/gfx950/n1h8c16k32r3_sk_atomic",
+        "gfx950",
+        build_conv_wgrad(
+            "irhash_wgrad_950_sk_atomic",
+            "gfx950",
+            wgrad1,
+            wave_size=64,
+            wtm=32,
+            wtn=32,
+            wtk=16,
+            tile_m=64,
+            tile_n=64,
+            tile_k=16,
+            dtype_d="fp32",
+            streamk="dp_sk",
+            streamk_reduction="atomic",
+        ),
+    )
+    add(
+        "conv_wgrad",
+        "conv_wgrad/gfx942/n1h8c64k64r3_g4_sk_tree_pers",
+        "gfx942",
+        build_conv_wgrad(
+            "irhash_wgrad_942_g4_sk_tree_pers",
+            "gfx942",
+            wgrad_g4,
+            wave_size=64,
+            wtm=16,
+            wtn=16,
+            wtk=16,
+            tile_m=64,
+            tile_n=32,
+            tile_k=16,
+            streamk="persistent",
+            streamk_reduction="tree",
+        ),
+    )
+    # The remaining {dp_sk, persistent} x {linear, tree, atomic, workspace}
+    # combinations, so every fixup is pinned under both launch modes.
+    add(
+        "conv_wgrad",
+        "conv_wgrad/gfx950/n1h8c16k32r3_sk_tree",
+        "gfx950",
+        build_conv_wgrad(
+            "irhash_wgrad_950_sk_tree",
+            "gfx950",
+            wgrad1,
+            wave_size=64,
+            wtm=32,
+            wtn=32,
+            wtk=16,
+            tile_m=64,
+            tile_n=64,
+            tile_k=16,
+            streamk="dp_sk",
+            streamk_reduction="tree",
+        ),
+    )
+    add(
+        "conv_wgrad",
+        "conv_wgrad/gfx942/n1h8c64k64r3_g4_sk_workspace",
+        "gfx942",
+        build_conv_wgrad(
+            "irhash_wgrad_942_g4_sk_workspace",
+            "gfx942",
+            wgrad_g4,
+            wave_size=64,
+            wtm=16,
+            wtn=16,
+            wtk=16,
+            tile_m=64,
+            tile_n=32,
+            tile_k=16,
+            streamk="dp_sk",
+            streamk_reduction="workspace",
+        ),
+    )
+    add(
+        "conv_wgrad",
+        "conv_wgrad/gfx950/n1h8c64k64r3_g4_sk_linear_pers",
+        "gfx950",
+        build_conv_wgrad(
+            "irhash_wgrad_950_g4_sk_linear_pers",
+            "gfx950",
+            wgrad_g4,
+            wave_size=64,
+            wtm=32,
+            wtn=32,
+            wtk=16,
+            tile_m=64,
+            tile_n=64,
+            tile_k=16,
+            streamk="persistent",
+        ),
+    )
+    add(
+        "conv_wgrad",
+        "conv_wgrad/gfx942/n1h8c16k32r3_sk_atomic_pers",
+        "gfx942",
+        build_conv_wgrad(
+            "irhash_wgrad_942_sk_atomic_pers",
+            "gfx942",
+            wgrad1,
+            wave_size=64,
+            wtm=16,
+            wtn=16,
+            wtk=16,
+            tile_m=64,
+            tile_n=32,
+            tile_k=16,
+            dtype_d="fp32",
+            streamk="persistent",
+            streamk_reduction="atomic",
+        ),
+    )
+    add(
+        "conv_wgrad",
+        "conv_wgrad/gfx950/n1h8c16k32r3_sk_workspace_pers",
+        "gfx950",
+        build_conv_wgrad(
+            "irhash_wgrad_950_sk_workspace_pers",
+            "gfx950",
+            wgrad1,
+            wave_size=64,
+            wtm=32,
+            wtn=32,
+            wtk=16,
+            tile_m=64,
+            tile_n=64,
+            tile_k=16,
+            streamk="persistent",
+            streamk_reduction="workspace",
         ),
     )
     # Grouped + cshuffle epilogue (MFMA): the LDS-staged store threads the
@@ -2898,6 +3186,22 @@ def cases():
                 "sliding_window": 128,
             },
         ),
+        # --- optional LSE output: the ordinary epilogue, the packed (varlen)
+        # store guard, and the persistent epilogue with keyless rows + sink LSE.
+        ("lse_default_sq512", {"emit_lse": True}),
+        ("lse_varlen_sq512", {"emit_lse": True, "varlen": True}),
+        (
+            "lse_persist_empty_window_sinks_sq256",
+            {
+                "emit_lse": True,
+                "persistent": True,
+                "num_persistent": 256,
+                "seqlen_q": 256,
+                "seqlen_kv": 64,
+                "sliding_window": 64,
+                "use_sinks": True,
+            },
+        ),
     ):
         add(
             "attention_dense",
@@ -3643,6 +3947,28 @@ def cases():
             _arch,
             build_streaming_copy(_arch),
         )
+
+    # warp_shuffle_xor_dpp (tile.dpp_xor): gfx9 CDNA picks the base-DPP
+    # encoding per mask; a row_xmask target (gfx1201) keeps 0x160 | mask.
+    for _arch in ("gfx942", "gfx950"):
+        add(
+            "crosslane",
+            f"crosslane/{_arch}/warp_shuffle_xor_dpp_reduce_i32",
+            _arch,
+            build_warp_shuffle_xor_dpp_reduce(_arch, (1, 2, 7, 15)),
+        )
+        add(
+            "crosslane",
+            f"crosslane/{_arch}/warp_shuffle_xor_dpp_masks_f32",
+            _arch,
+            build_warp_shuffle_xor_dpp_masks_f32(_arch),
+        )
+    add(
+        "crosslane",
+        "crosslane/gfx1201/warp_shuffle_xor_dpp_reduce_i32",
+        "gfx1201",
+        build_warp_shuffle_xor_dpp_reduce("gfx1201", (1, 2, 4, 8)),
+    )
 
     return out
 
