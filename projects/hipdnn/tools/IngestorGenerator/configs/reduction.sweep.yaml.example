@@ -1,4 +1,6 @@
-# Example sweep config. Copy, edit, and run:
+# Example reduction sweep (RUNBOOK stage 6): one arm, the whole selection's install,
+# measured over the benchmark corpus and, when the user supplied owner data, the
+# ground_truth corpus. Copy, edit, and run:
 #
 #   <venv-python> $GEN/tools/sweep.py --config my-sweep.yaml
 #
@@ -39,53 +41,39 @@ arch: gfx950
 engine_name: hipkernel:Gfx950AttentionDense
 engine_ued_name: hipkernel:Gfx950AttentionDense
 
-# Corpora are measured separately and never merged: published is what the kernel team
-# judges themselves on, servable is what this integration generated for.
+# Corpora are measured separately and never merged. Delete the ground_truth entry when
+# no owner data was supplied.
 #
 # expected_graphs is a gate: a corpus that grew or shrank between runs is not the same
 # experiment, and resume binds the CONTENT of every graph file.
 corpora:
-  - name: published
-    path: /shared/sweeps/ingestor/corpora/published
-    expected_graphs: 142
-  - name: servable
-    path: /shared/sweeps/ingestor/corpora/servable
+  - name: bench
+    path: /shared/sweeps/ingestor/corpora/bench
     expected_graphs: 283
+  - name: ground_truth
+    path: /shared/sweeps/ingestor/corpora/ground_truth
+    expected_graphs: 40
 
-# ARMS RUN IN THIS ORDER, EVERY ROUND, NEVER ROTATED. If clocks cannot be pinned,
-# drift may penalise whichever arm runs later; with the BASELINE FIRST, an effect moving
-# the opposite way to that penalty cannot be explained by position. For an isolation
-# sweep these are the arms `knob_sweep.py --isolate` emitted.
-#
-# expected_descriptors is the count each install tree MUST have. An isolation arm has the
-# SAME count as parity by construction, so a different number means a different corpus.
+# expected_descriptors is the total of KDP `kernelDescriptors` entries the install tree
+# MUST have, test content included, so a different number means a different install.
+# Recount it after every reinstall.
 arms:
-  - name: parity
-    install_tree: /shared/sweeps/ingestor/arm-parity
-    expected_descriptors: 91
-  - name: block_n32
-    install_tree: /shared/sweeps/ingestor/arm-block_n32
-    expected_descriptors: 91
-  - name: use_exp2_fastFalse
-    install_tree: /shared/sweeps/ingestor/arm-exp2off
-    expected_descriptors: 91
-  - name: lazy_rescaleFalse
-    install_tree: /shared/sweeps/ingestor/arm-lazyoff
-    expected_descriptors: 91
+  - name: selection
+    install_tree: /shared/sweeps/ingestor/install
+    expected_descriptors: 840
 
-# The arm to run once and DISCARD, so round 1 does not measure a cool device. Name an arm
-# above or an explicit null; an absent key is refused rather than defaulted.
-warmup_arm: parity
+# The arm to run once and DISCARD, so round 1 does not measure a cool device. Name the
+# arm above or an explicit null; an absent key is refused rather than defaulted.
+warmup_arm: selection
 
-# Three rounds make drift measurable: round 1 against round N on the same arm reads it
-# directly. Group deviation and per-shape spread differ by an order of magnitude, so say
-# which you mean when reporting.
-rounds: 3
+# variant_reduce derives its noise floor from round-to-round spread, so a reduction
+# sweep needs at least 2 rounds.
+rounds: 2
 
 # A phase serving fewer than this many graphs through the ingestor FAILS. This catches a
 # dropped engine; the descriptor count cannot, being a property of files on disk while
 # the engine is rejected at load. Set it near the expected served count.
-min_served: 60
+min_served: 30
 
 # Tensor names whose presence makes a graph UNSERVABLE by the kernel under test.
 # Unsupported graphs may fall through to another engine, and a device fault invalidates
@@ -113,7 +101,8 @@ exclude_tensors:
 # programs" are different claims about what was measured.
 #
 # The driver OWNS --graph, --plugin-path, --engine, --warmup, --iters, -o/--output,
-# --validate and --backend, and refuses a config passing any of them.
+# --validate, --backend, --autotune and --hipdnn-cache-dir (the cache the rankings are
+# read from), and refuses a config passing any of them.
 benchmark:
   argv:
     - /shared/sweeps/ingestor/bench-venv/bin/dnn-benchmark

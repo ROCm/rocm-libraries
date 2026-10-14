@@ -136,7 +136,7 @@ neither SDPA reference supports a sink UID. Record **BLOCKED** when no capable r
 exists; a skip, automatic fallback exhaustion or unverified golden output cannot pass.
 
 The corpus sweep interface is `<PY> <GEN>/tools/sweep.py --config <absolute-YAML>` with
-`configs/sweep-isolation.sweep.yaml.example`. Correctness is separate from timing,
+`configs/reduction.sweep.yaml.example`. Correctness is separate from timing,
 engine attribution is exact, and resume is bound to current input content. `SWEEP_DONE`
 is validated completion; explicit `correctness.enabled: false` yields
 `SWEEP_TIMING_ONLY`, never final acceptance; unmet gates yield `SWEEP_INCOMPLETE`. After

@@ -22,10 +22,11 @@ pages supply contracts, not alternate procedures:
 ## Entry contract
 
 Record create/extend, source revision, target architecture, exact UED engine name,
-source/builder and requested scope. Extensions also record the known-good installed
-baseline and retained identities. Missing source, dependencies, representability or a
-capable numerical reference blocks the corresponding gate; scope changes require
-explicit approval. Keep local scheduling and experiment artifacts outside product source.
+source/builder (for rocKE, its registry candidate) and requested scope. Extensions also
+record the known-good installed baseline and retained identities. Missing source,
+dependencies, representability or a capable numerical reference blocks the corresponding
+gate; scope changes require explicit approval. Keep local scheduling and experiment
+artifacts outside product source.
 Follow a configured local evidence policy when one exists; otherwise use a user-selected
 per-run evidence directory as described in [RUNBOOK.md](RUNBOOK.md#paths-and-interpreters).
 
@@ -53,12 +54,14 @@ compiled-specialization claim their path cannot supply.
 
 ## Completion and handoff
 
-Identify the **final installation**, not a replaced baseline or isolation arm. Report
+Identify the **final installation**, not a replaced baseline or reduction iteration. Report
 the last completed RUNBOOK stage, blocked gates, source/config and final
 descriptor/payload/plugin identities, paths, commands, exit codes and evidence.
 Completion requires:
 
 - Approved feature/shape scope and complete corpus denominators with source provenance.
+- Every RUNBOOK user checkpoint (corpus, ground truth, knobs, build and sweep plan)
+  asked and its answer recorded.
 - Implemented referenced hooks, no reachable placeholders, applied source/test/CMake
   splices, and preserved extension identities and unchanged inventory.
 - Separately stated structural, applicable compiler/artifact, real native-loading and
@@ -69,10 +72,13 @@ Completion requires:
 - Exact-engine quick/standard numerics and required negative cases, with selected,
   served, skipped and failed counts. Zero selected, all-skipped or another engine's work
   is not correctness evidence. An extension must dispatch its new candidate.
-- Rebuilt/reinstalled artifacts after tuning or regeneration, then fresh final gates.
+- For an engine with a `reduction:` block, the `variant_reduce.py` report, the applied
+  rules and a user-accepted instance count; a remaining AOT-budget WARN is justified.
+- Rebuilt/reinstalled artifacts after reduction or regeneration, then fresh final gates.
   Every final corpus input has an attributable runtime outcome and the complete join
   required by [workloads.md](workloads.md); missing, ambiguous or error outcomes block
-  runtime acceptance, and without that join the accounting is incomplete.
+  runtime acceptance, and without that join the accounting is incomplete. Every
+  supplied ground-truth row is within the confirmed margin or its exception user-accepted.
 
 State what each observation proves and does not prove, including device, reference,
 graph and architecture limits. Generation, enumeration, proposed commands and queued

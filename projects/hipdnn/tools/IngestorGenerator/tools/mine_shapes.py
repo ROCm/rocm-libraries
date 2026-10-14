@@ -14,10 +14,9 @@ warning.
 
     mine_shapes.py --published <csv> --arch gfx942 --out shapes.json
 
-Emits request-field mappings (the corpus `variant_reachability.py --shapes` reads and
-the source an engine manifest's `enumerate.head_configs` is chosen from), and does not
-filter by what the kernel can serve: the dispatcher reports declines with reasons, and
-filtering here would hide the gap this corpus measures.
+Emits the request-field mappings `registry_enumerator.py --shapes` reads, and does not
+filter by what the kernel can serve: filtering here would hide the gap this corpus
+measures.
 """
 
 from __future__ import annotations
