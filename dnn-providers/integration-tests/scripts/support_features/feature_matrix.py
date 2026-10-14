@@ -256,13 +256,6 @@ def percent_cell(count: int, total: int) -> str:
     return f"{PARTIAL} {max(1, 100 * count // total)}%"
 
 
-def share_cell(count: int, total: int) -> str:
-    """``count / total (pct)``, for columns that are not a claim."""
-    if not total:
-        return "-"
-    return f"{count} / {total} ({100 * count // total}%)"
-
-
 # --------------------------------------------------------------------------
 # Document
 # --------------------------------------------------------------------------
@@ -414,8 +407,6 @@ def render_features_per_op(claims: FeatureClaims) -> list[str]:
 
 
 def render_gpu_targets(claims: FeatureClaims) -> list[str]:
-    every_op = claims.node_types
-    total = claims.total(every_op)
     rows = []
     for target in claims.targets:
         generation, products = GPU_INFO.get(target[0], ("", ""))
@@ -424,15 +415,14 @@ def render_gpu_targets(claims: FeatureClaims) -> list[str]:
                 f'<a id="{target_anchor(target)}"></a>**{target_name(target)}**',
                 generation,
                 products,
-                share_cell(claims.on_target(every_op, target), total),
             ]
         )
     return [
         "## GPU targets",
         "",
-        f"Options claimed: by any engine, out of {total} across all ops.",
+        "The GPU and OS targets the tables' columns link to.",
         "",
-        *table(["Target", "Architecture", "Products", "Options claimed"], rows),
+        *table(["Target", "Architecture", "Products"], rows),
     ]
 
 

@@ -67,7 +67,6 @@ from support_features.feature_matrix import (
     group_of,
     heading_anchor,
     percent_cell,
-    share_cell,
 )
 from support_features.feature_matrix import main as feature_matrix_main
 from support_features.feature_matrix import render as render_feature_matrix
@@ -602,10 +601,6 @@ class TestFeatureMatrixNames:
     def test_percent_cell(self, count: int, total: int, cell: str) -> None:
         assert percent_cell(count, total) == cell
 
-    def test_share_cell(self) -> None:
-        assert share_cell(2, 3) == "2 / 3 (66%)"
-        assert share_cell(0, 0) == "-"
-
 
 @pytest.mark.usefixtures("fake_registry")
 class TestFeatureMatrixMarkdown:
@@ -623,6 +618,15 @@ class TestFeatureMatrixMarkdown:
             claims={"E1": {"gfx1100": ["windows"]}},
         )
         return render_feature_matrix(_feature_claims(tmp_path))
+
+    def test_gpu_targets_name_the_hardware(self, tmp_path: Path) -> None:
+        document = self._document(tmp_path)
+        section = document.split("\n## GPU targets\n", 1)[1]
+        assert "| Target | Architecture | Products |\n" in section
+        assert (
+            '| <a id="gpu-gfx942-linux"></a>**gfx942-linux** | CDNA 3 | '
+            "Instinct MI300 series |\n"
+        ) in section
 
     def test_dashboard_cells_are_feature_shares(self, tmp_path: Path) -> None:
         document = self._document(tmp_path)
