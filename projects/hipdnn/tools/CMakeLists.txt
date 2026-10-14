@@ -25,11 +25,11 @@ install(TARGETS hipdnn_list_engines RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 
 # uhd_gen's Python tests pin the features_hash contract against the C++ FeatureExtractor, and
 # mine_shapes mines the shapes the IngestorGenerator consumes; both are ingestor tooling, so
-# a build without the ingestor registers neither. The suites self-skip (pytest.importorskip)
+# a build without the ingestor, or with HIPDNN_SKIP_TESTS, registers neither. The suites self-skip (pytest.importorskip)
 # when lightgbm/flatbuffers/numpy/pandas are absent; HIPDNN_REQUIRE_UHD_GEN_TESTS turns
 # uhd_gen's skips into failures (uhd_gen/conftest.py) and a missing pytest into a configure
 # error.
-if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+if(HIPDNN_ENABLE_KERNEL_INGESTOR AND NOT HIPDNN_SKIP_TESTS)
     if(HIPDNN_REQUIRE_UHD_GEN_TESTS)
         set(_uhd_gen_missing_severity FATAL_ERROR)
     else()
