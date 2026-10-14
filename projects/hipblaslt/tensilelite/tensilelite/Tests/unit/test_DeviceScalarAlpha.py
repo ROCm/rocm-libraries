@@ -17,7 +17,7 @@ pytestmark = pytest.mark.unit
 @pytest.mark.parametrize("problem_name", [
     "HSS_BH_Bias_HA_S_SAV_UserArgs",
     "HSS_BH_Bias_GG_HA_S_SAV_UserArgs",
-    "F4SS_MXAF8B16_MXBF8B16_BH_Bias_HA_S_UserArgs",
+    "F4SS_MXAF8B16_MXBF8B16_BH_Bias_HA_S_SAV_UserArgs",
 ])
 def test_shipped_scalar_logic_explicitly_advertises_capability_gfx1250(problem_name):
     from Tensile.Common.Architectures import gfxToIsa
