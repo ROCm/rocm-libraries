@@ -79,14 +79,11 @@ struct rocfft_rccl_comm_t::Impl
             {
                 if(comm)
                 {
-                    rocfft_scoped_device dev(device_id);
-                    auto                 nccl_ret = ncclCommFinalize(comm);
+                    // destroy is local after a successful finalize; otherwise
+                    // abort, since destroy would finalize ungrouped and hang
+                    auto nccl_ret = group_finalized ? ncclCommDestroy(comm) : ncclCommAbort(comm);
                     if(nccl_ret != ncclSuccess)
-                        throw rocfft_rccl_exception_t("ncclCommFinalize failed in destructor",
-                                                      nccl_ret);
-                    nccl_ret = ncclCommDestroy(comm);
-                    if(nccl_ret != ncclSuccess)
-                        throw rocfft_rccl_exception_t("ncclCommDestroy failed in destructor",
+                        throw rocfft_rccl_exception_t("ncclCommDestroy/Abort failed in destructor",
                                                       nccl_ret);
                 }
             }
@@ -117,15 +114,57 @@ struct rocfft_rccl_comm_t::Impl
         int device_id = -1;
 
     private:
+        friend Impl;
+
+        // must be called for all ranks inside one RCCL group: finalize is an
+        // intra-node collective and hangs if ranks are finalized one by one
+        // from the same thread
+        // NOTE: a non-RCCL throw here would hang the partial group!
+        void finalize()
+        {
+            if(!comm)
+                return;
+            auto nccl_ret = ncclCommFinalize(comm);
+            if(nccl_ret != ncclSuccess)
+                throw rocfft_rccl_exception_t("ncclCommFinalize failed", nccl_ret);
+        }
+
+        // set by Impl once the grouped finalize of all ranks has succeeded
+        bool group_finalized = false;
+
         hipStream_wrapper_t stream;
-        ncclComm_t          comm{};
+        ncclComm_t          comm = nullptr;
     };
 
     std::vector<rocfft_location_t>   nccl_rank_to_world_loc;
     std::map<rocfft_location_t, int> world_loc_to_nccl_rank;
+    // keyed by device_id (local to this process).
     std::map<int, device_state_t>    device_to_state;
     int                              local_world_rank = 0;
     ncclUniqueId                     uniqueId{};
+
+    // finalize all ranks in one group; each device_state_t then destroys
+    // its comm and stream when device_to_state is destroyed
+    ~Impl()
+    {
+        try
+        {
+            rocfft_rccl_group_t group;
+            for(auto& [dev, state] : device_to_state)
+                state.finalize();
+            group.end();
+            for(auto& [dev, state] : device_to_state)
+                state.group_finalized = true;
+        }
+        catch(const std::exception& e)
+        {
+            log_trace(__func__, "Failure finalizing RCCL communicators", e.what());
+        }
+        catch(...)
+        {
+            log_trace(__func__, "Failure finalizing RCCL communicators with unexpected exception");
+        }
+    }
 };
 
 std::map<std::set<rocfft_location_t>, rocfft_rccl_comm_t> rocfft_rccl_comm_t::comm_cache;

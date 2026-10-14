@@ -129,6 +129,14 @@ struct DynamicBuffer
             static_assert(!DoTranspose, "load-with-transpose only supported on gfx12+");
 #endif
         }
+        else if constexpr(GetAddressSpace() == AddressSpaceEnum::Lds && DoTranspose)
+        {
+#ifdef __gfx1250__
+            return amd_lds_load_transpose_to_vgpr(p_data_ + i);
+#else
+            static_assert(!DoTranspose, "load-with-transpose only supported on gfx12+");
+#endif
+        }
         else
         {
             if(is_valid_element)
@@ -254,7 +262,10 @@ struct DynamicBuffer
                                                             element_space_size_ / PackedSize);
     }
 
-    template <typename DstBuffer, index_t NumElemsPerThread, index_t static_dst_offset>
+    template <typename DstBuffer,
+              index_t NumElemsPerThread,
+              index_t static_dst_offset,
+              bool UseFullAssembly = false>
     __host__ __device__ void AsyncCopyToLds(DstBuffer& dst_buf,
                                             IndexType src_offset,
                                             IndexType dst_offset,
@@ -269,12 +280,24 @@ struct DynamicBuffer
                       "Source and destination buffer must have the same data type.");
 
         auto p_uniform_ptr = amd_wave_read_first_lane(p_data_);
-        amd_async_load_global_to_lds<remove_cvref_t<typename DstBuffer::type>,
-                                     NumElemsPerThread,
-                                     static_dst_offset,
-                                     true,
-                                     coherence>(
-            p_uniform_ptr, src_offset, dst_buf.p_data_, dst_offset, is_valid_element);
+        if constexpr(!UseFullAssembly)
+        {
+            amd_async_load_global_to_lds<remove_cvref_t<typename DstBuffer::type>,
+                                         NumElemsPerThread,
+                                         static_dst_offset,
+                                         true,
+                                         coherence>(
+                p_uniform_ptr, src_offset, dst_buf.p_data_, dst_offset, is_valid_element);
+        }
+        else
+        {
+            amd_async_load_global_to_lds_assembly<remove_cvref_t<typename DstBuffer::type>,
+                                                  NumElemsPerThread,
+                                                  static_dst_offset,
+                                                  true,
+                                                  coherence>(
+                p_uniform_ptr, src_offset, dst_buf.p_data_, dst_offset, is_valid_element);
+        }
     }
 
     template <typename X,

@@ -994,7 +994,11 @@ inline BenchmarkPlan<TestHandle>::Timer
                                                   uint32_t,
                                                   void*) -> std::optional<double> {
             const auto found = times.find(plan.getWorkspaceSize(handle));
-            return found != times.end() ? std::optional<double>(found->second) : std::nullopt;
+            if(found != times.end())
+            {
+                return found->second;
+            }
+            return std::nullopt;
         };
 }
 

@@ -1,0 +1,188 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+name: HostNumerics standalone CI
+
+on:
+  pull_request:
+    paths:
+      - "shared/hostnumerics/**"
+      - ".github/workflows/hostnumerics-ci.yml"
+  push:
+    branches:
+      - develop
+    paths:
+      - "shared/hostnumerics/**"
+      - ".github/workflows/hostnumerics-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hostnumerics-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  standalone:
+    name: GCC, Python ${{ matrix.python }}, tests ${{ matrix.testing }}, ${{ matrix.generator }}
+    runs-on: ubuntu-24.04
+    env:
+      CXX: g++
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - python: "ON"
+            testing: "ON"
+            generator: "Ninja Multi-Config"
+          - python: "OFF"
+            testing: "OFF"
+            generator: "Ninja"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          sparse-checkout: shared/hostnumerics
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        if: matrix.python == 'ON'
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        if: matrix.python == 'ON'
+        run: python -m pip install nanobind==3.0.1
+
+      - name: Configure and build
+        run: |
+          if [[ "${{ matrix.python }}" == ON ]]; then
+            python_options=("-DPython_EXECUTABLE=$(command -v python)")
+          else
+            python_options=(-DCMAKE_DISABLE_FIND_PACKAGE_Python=TRUE
+                            -DCMAKE_DISABLE_FIND_PACKAGE_nanobind=TRUE)
+          fi
+          cmake -S shared/hostnumerics \
+            -B "${RUNNER_TEMP}/hostnumerics-build" \
+            -G "${{ matrix.generator }}" \
+            -DHOSTNUMERICS_BUILD_TESTING=${{ matrix.testing }} \
+            -DHOSTNUMERICS_BUILD_PYTHON=${{ matrix.python }} \
+            -DCMAKE_BUILD_TYPE=Release \
+            "${python_options[@]}"
+          cmake --build "${RUNNER_TEMP}/hostnumerics-build" \
+            --config Release --parallel "$(nproc)"
+
+      - name: Test
+        if: matrix.testing == 'ON'
+        run: |
+          ctest --test-dir "${RUNNER_TEMP}/hostnumerics-build" \
+            -C Release --no-tests=error --output-on-failure
+
+      - name: Check tests are disabled
+        if: matrix.testing == 'OFF'
+        run: test ! -e "${RUNNER_TEMP}/hostnumerics-build/CTestTestfile.cmake"
+
+      - name: Test installed package
+        run: |
+          cmake --install "${RUNNER_TEMP}/hostnumerics-build" \
+            --config Release \
+            --prefix "${RUNNER_TEMP}/hostnumerics-install"
+          cmake -S shared/hostnumerics/tests/package \
+            -B "${RUNNER_TEMP}/hostnumerics-package-test" \
+            -G Ninja \
+            -DCMAKE_PREFIX_PATH="${RUNNER_TEMP}/hostnumerics-install"
+          cmake --build "${RUNNER_TEMP}/hostnumerics-package-test" --parallel "$(nproc)"
+          ctest --test-dir "${RUNNER_TEMP}/hostnumerics-package-test" \
+            --no-tests=error --output-on-failure
+
+      - name: Test installed Python package
+        if: matrix.python == 'ON'
+        run: |
+          PYTHONPATH="$(find "${RUNNER_TEMP}/hostnumerics-install" \
+            -type d -path '*/site-packages' -print -quit)" \
+            python -c "import hostnumerics; print(hostnumerics.__version__)"
+
+      - name: Test embedded defaults
+        if: matrix.python == 'OFF' && matrix.testing == 'OFF'
+        run: |
+          cmake -S shared/hostnumerics/tests/embedded \
+            -B "${RUNNER_TEMP}/hostnumerics-embedded-test" \
+            -G Ninja
+          cmake --build "${RUNNER_TEMP}/hostnumerics-embedded-test" --parallel "$(nproc)"
+          ctest --test-dir "${RUNNER_TEMP}/hostnumerics-embedded-test" \
+            --no-tests=error --output-on-failure
+
+  sanitizers:
+    name: Clang, ASan and UBSan
+    runs-on: ubuntu-24.04
+    env:
+      CXX: clang++-18
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          sparse-checkout: shared/hostnumerics
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes clang-18 libclang-rt-18-dev ninja-build
+
+      - name: Configure and build
+        run: |
+          cmake -S shared/hostnumerics \
+            -B "${RUNNER_TEMP}/hostnumerics-sanitizers" \
+            -G Ninja \
+            -DHOSTNUMERICS_BUILD_TESTING=ON \
+            -DHOSTNUMERICS_BUILD_PYTHON=OFF \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=all" \
+            -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
+          cmake --build "${RUNNER_TEMP}/hostnumerics-sanitizers" --parallel "$(nproc)"
+
+      - name: Test
+        run: |
+          ctest --test-dir "${RUNNER_TEMP}/hostnumerics-sanitizers" \
+            --no-tests=error --output-on-failure
+
+  # Keep CPU-only analysis on the same sparse checkout and Ubuntu runner as the
+  # standalone tests; the shared clang-tidy workflow currently installs ROCm.
+  clang-tidy:
+    name: Clang-tidy
+    runs-on: ubuntu-24.04
+    env:
+      CXX: clang++-18
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          sparse-checkout: shared/hostnumerics
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes clang-18 clang-tidy-18 ninja-build
+
+      - name: Install Python dependencies
+        run: python -m pip install nanobind==3.0.1
+
+      - name: Configure and build
+        run: |
+          cmake -S shared/hostnumerics \
+            -B "${RUNNER_TEMP}/hostnumerics-clang-tidy" \
+            -G Ninja \
+            -DHOSTNUMERICS_BUILD_TESTING=ON \
+            -DHOSTNUMERICS_BUILD_PYTHON=ON \
+            -DPython_EXECUTABLE="$(command -v python)" \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+          cmake --build "${RUNNER_TEMP}/hostnumerics-clang-tidy" --parallel "$(nproc)"
+
+      - name: Analyze HostNumerics sources, tests, and Python bindings
+        run: |
+          run-clang-tidy-18 \
+            -p "${RUNNER_TEMP}/hostnumerics-clang-tidy" \
+            -clang-tidy-binary clang-tidy-18 \
+            -config-file shared/hostnumerics/.clang-tidy \
+            -j "$(nproc)" '(^|/)shared/hostnumerics/'

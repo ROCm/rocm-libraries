@@ -29,8 +29,11 @@ namespace hipdnn_frontend::graph
  * SdpaBackwardAttributes configures the backward pass of scaled dot-product
  * attention, computing gradients with respect to Q, K, and V:
  * @code
- * Attention(Q, K, V) = softmax(Q * K^T / sqrt(d_k)) * V
+ * Attention(Q, K, V) = softmax(scale * Q * K^T) * V
  * @endcode
+ *
+ * `scale` is attn_scale_value or the Attn_scale tensor, and 1.0 (no scaling) when neither
+ * is set, as in cuDNN. It must match the forward pass.
  *
  * **Required inputs:**
  * - Q: Query tensor from forward pass [B, H, S_q, D]
@@ -50,7 +53,7 @@ namespace hipdnn_frontend::graph
  * - Additive attention bias gradient (dBias)
  * - Dropout (probability + seed/offset tensors, or explicit mask)
  * - ALiBi positional encoding
- * - Attention scale override (attn_scale_value)
+ * - Attention scale (attn_scale_value or an Attn_scale tensor; 1.0 when neither is set)
  *
  * @code{.cpp}
  * SdpaBackwardAttributes attr;
