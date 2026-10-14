@@ -349,14 +349,20 @@ class FmhaFwdSplitKVApiTrait:
     @property
     def pagecheck(self) -> str:
         # A tile that compiles the cross-page merge reaches one page ahead, so it
-        # covers pages down to half its own length. Every other tile has to sit
-        # inside a single page, which is what a 128-row page always gave it.
+        # covers pages down to half its own length when page boundaries are aligned
+        # to half a tile. Every other tile needs page-aligned tile origins.
         if self.pagedkv != "t":
             page = "true"
         elif self.page_shorter_than_tile:
-            page = f"{self.bn0} <= 2 * a.page_block_size"
+            page = (
+                f"{self.bn0} <= 2 * a.page_block_size && "
+                f"a.page_block_size % {self.bn0 // 2} == 0"
+            )
         else:
-            page = f"{self.bn0} <= a.page_block_size"
+            page = (
+                f"{self.bn0} <= a.page_block_size && "
+                f"a.page_block_size % {self.bn0} == 0"
+            )
         if self.constraint == "true":
             return page
         return f"({page}) && ({self.constraint})"
