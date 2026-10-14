@@ -1107,9 +1107,9 @@ int runGenerator(const std::vector<std::string>& args)
             return 1;
         }
         commands << "# hipdnn_bench invocations, one per problem, for "
-                 << (options.engineName.empty() ? "NO ENGINE -- applicability is declared, "
-                                                  "not tested (--without-engine)"
-                                                : options.engineName)
+                 << (resolvedEngine.empty() ? "NO ENGINE -- applicability is declared, "
+                                              "not tested (--without-engine)"
+                                            : resolvedEngine)
                  << "\n"
                  << "# Generated from declarations in " << options.operationsDir << "\n"
                  << "# Train on the times, not the rank column: configurations are often\n"
@@ -1596,7 +1596,8 @@ int runGenerator(const std::vector<std::string>& args)
                 options.benchPath,
                 options.pluginDirs,
                 graphPath.string(),
-                options.engineName,
+                // The registered name, also when the engine was named by --engine-id.
+                resolvedEngine,
                 graph.name,
                 entry.point,
                 (root / "results" / (graph.name + ".csv")).string())
