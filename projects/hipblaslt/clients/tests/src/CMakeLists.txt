@@ -39,6 +39,7 @@ target_sources(hipblaslt-test
 if(NOT WIN32)
     target_sources(hipblaslt-test PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/multi_gpu_gtest.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/cotenant_gtest.cpp
     )
 endif()
 
