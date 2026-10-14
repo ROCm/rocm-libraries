@@ -992,19 +992,44 @@ def build_unified_attention_3d_tiled(
                 align=4,
             )
 
-        def _window_tile_ids(window: Value, kv_tile_idx: Value) -> list:
+        def _window_tile_ids(page_id_window: Value, kv_tile_idx: Value) -> list:
             first_blk = b.mul(kv_tile_idx, b.const_i32(N_BLOCKS_PER_TILE))
             lane0 = b.mod(b.sub(first_blk, seg_first_page), b.const_i32(64))
-            id0 = b.readlane(window, lane0)
+            id0 = b.readlane(page_id_window, lane0)
             ids = [id0]
             for j in range(1, N_BLOCKS_PER_TILE):
-                idj = b.readlane(window, b.add(lane0, b.const_i32(j)))
+                idj = b.readlane(page_id_window, b.add(lane0, b.const_i32(j)))
                 live = b.cmp_lt(b.add(first_blk, b.const_i32(j)), seq_pages)
                 ids.append(b.select(live, idj, id0))
             return ids
 
-        window0 = _load_page_id_window(b.const_i32(0))
-        first_page_ids = _window_tile_ids(window0, tile_start)
+        def _refill_page_id_window(page_id_window: Value, kv_tile_idx: Value) -> Value:
+            # The window for the next iteration: if tile kv_tile_idx + 2 starts
+            # a new window, load it now (after this tile's copies, so the
+            # explicit waits still cover V(t)); the loop-top wait completes it
+            # before the next iteration reads it.
+            t2 = b.add(kv_tile_idx, b.const_i32(2))
+            rel2 = b.sub(b.mul(t2, b.const_i32(N_BLOCKS_PER_TILE)), seg_first_page)
+            cross = b.land(
+                b.cmp_eq(b.mod(rel2, b.const_i32(64)), b.const_i32(0)),
+                b.cmp_lt(t2, tile_end),
+            )
+            # A wave-uniform 0/1-trip loop is an if with a result (scf_if has
+            # none): 0 trips keep the window, 1 trip loads the next one. It
+            # compiles to a scalar branch around the load.
+            refill = b.scf_for_iter(
+                b.const_i32(0),
+                b.select(cross, b.const_i32(1), b.const_i32(0)),
+                b.const_i32(1),
+                [("pid_window_r", page_id_window)],
+                iv_name="pid_window_load",
+            )
+            with refill as (_iv, _w):
+                b.scf_yield(_load_page_id_window(rel2))
+            return refill.results[0]
+
+        first_page_id_window = _load_page_id_window(b.const_i32(0))
+        first_page_ids = _window_tile_ids(first_page_id_window, tile_start)
     elif PAGE_IDS:
         first_page_ids = _tile_page_ids(tile_start)
     _issue_k(tile_start, b.const_i32(0), first_page_ids)
@@ -1015,7 +1040,7 @@ def build_unified_attention_3d_tiled(
         for j, pid in enumerate(first_page_ids):
             iter_args.append((f"pid{j}", pid))
     if WAVE_PAGE_ID_LOAD:
-        iter_args.append(("pid_window", window0))
+        iter_args.append(("pid_window", first_page_id_window))
 
     # LICM hoist: per-row invariants that are constant across all KV tiles.
     # qp_r, qh_r, row_ok, and causal_lim depend only on CTA-level constants
@@ -1039,12 +1064,12 @@ def build_unified_attention_3d_tiled(
             alibi_slopes_ptr, qh_r, qh_ok, b.const_f32(0.0), dtype=F32, align=4
         )
 
-    # The QK A operand (Q) is read from LDS once; every tile's MFMAs take it
+    # The QK B operand (Q^T) is read from LDS once; every tile's MFMAs take it
     # from registers.
-    A_kits = []
+    Q_kits = []
     for k in range(QK_K_ITERS):
         q_col_off = b.add(b.const_i32(k * 32), b.mul(lane_rg, b.const_i32(8)))
-        A_kits.append(b.smem_load_vN(Q_lds, lane_col, q_col_off, dtype=dtype, n=8))
+        Q_kits.append(b.smem_load_vN(Q_lds, lane_col, q_col_off, dtype=dtype, n=8))
 
     kvloop = b.scf_for_iter(
         tile_start, tile_end, b.const_i32(1), iter_args, iv_name="kv_tile"
@@ -1073,8 +1098,8 @@ def build_unified_attention_3d_tiled(
         nxt_page_ids = None
         if WAVE_PAGE_ID_LOAD:
             # Read from the window in registers: no load in the loop.
-            window = carry[3 + PV_N_TILES + N_BLOCKS_PER_TILE]
-            nxt_page_ids = _window_tile_ids(window, safe_next_tile)
+            page_id_window = carry[3 + PV_N_TILES + N_BLOCKS_PER_TILE]
+            nxt_page_ids = _window_tile_ids(page_id_window, safe_next_tile)
         elif PAGE_IDS:
             # Loaded here, before this tile's V copies, so the load overlaps
             # the QK below; the next K copies still wait for it.
@@ -1087,37 +1112,16 @@ def build_unified_attention_3d_tiled(
             for k in range(QK_K_ITERS):
                 kc_off = b.add(b.const_i32(k * 32), b.mul(lane_rg, b.const_i32(8)))
                 k_row = b.add(b.const_i32(n * 16), lane_col)
-                B_v = b.smem_load_vN(
+                K_v = b.smem_load_vN(
                     K_lds, cur_buf, k_row, _kv_col(k_row, kc_off), dtype=dtype, n=8
                 )
-                acc_v = _mfma_16x16x32(b, dtype, B_v, A_kits[k], acc_v)
+                acc_v = _mfma_16x16x32(b, dtype, K_v, Q_kits[k], acc_v)
             S_n.append(acc_v)
 
         _issue_v(kv_tile_iv, v_buf, cur_page_ids)
         _issue_k(safe_next_tile, nxt_buf, nxt_page_ids)
         if WAVE_PAGE_ID_LOAD:
-            # Tile t + 2 starts a new window: load it now (after this tile's
-            # copies, so the explicit waits still cover V(t)); the loop-top
-            # wait completes it before the next iteration reads it.
-            t2 = b.add(kv_tile_iv, b.const_i32(2))
-            rel2 = b.sub(b.mul(t2, b.const_i32(N_BLOCKS_PER_TILE)), seg_first_page)
-            cross = b.land(
-                b.cmp_eq(b.mod(rel2, b.const_i32(64)), b.const_i32(0)),
-                b.cmp_lt(t2, tile_end),
-            )
-            # A wave-uniform 0/1-trip loop is an if with a result (scf_if has
-            # none): 0 trips keep the window, 1 trip loads the next one. It
-            # compiles to a scalar branch around the load.
-            refill = b.scf_for_iter(
-                b.const_i32(0),
-                b.select(cross, b.const_i32(1), b.const_i32(0)),
-                b.const_i32(1),
-                [("pid_window_r", window)],
-                iv_name="pid_window_load",
-            )
-            with refill as (_iv, _w):
-                b.scf_yield(_load_page_id_window(rel2))
-            window_n = refill.results[0]
+            nxt_page_id_window = _refill_page_id_window(page_id_window, kv_tile_iv)
 
         # See attention_tiled_2d.py for the rationale on applying ALiBi /
         # QQ-bias before the select-with-(-inf) (equivalent to Triton's
@@ -1220,7 +1224,7 @@ def build_unified_attention_3d_tiled(
         if PAGE_IDS:
             yields.extend(nxt_page_ids)
         if WAVE_PAGE_ID_LOAD:
-            yields.append(window_n)
+            yields.append(nxt_page_id_window)
         b.scf_yield(*yields)
 
     # ---------------- write segment workspace ----------------

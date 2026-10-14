@@ -653,11 +653,11 @@ rocke_value_t* rocke_gfx950_attention_tiled_3d_load_page_id_window(
     return rocke_b_masked_global_load(B, ctx->block_tables, idx, live, other, rocke_i32(), 4);
 }
 
-/* _window_tile_ids(window, kv_tile_idx): the tile's page ids from the 64-page
- * window (v_readlane); dead pages reuse the tile's first id, always live. */
+/* _window_tile_ids(page_id_window, kv_tile_idx): the tile's page ids from the
+ * 64-page window (v_readlane); dead pages reuse the tile's first id, always live. */
 void rocke_gfx950_attention_tiled_3d_window_tile_ids(
     rocke_gfx950_attention_tiled_3d_build_ctx_t* ctx,
-    rocke_value_t* window,
+    rocke_value_t* page_id_window,
     rocke_value_t* kv_tile_idx,
     rocke_value_t** out)
 {
@@ -666,15 +666,51 @@ void rocke_gfx950_attention_tiled_3d_window_tile_ids(
     rocke_value_t* first_blk = rocke_b_mul(B, kv_tile_idx, rocke_b_const_i32(B, NB));
     rocke_value_t* rel = rocke_b_sub(B, first_blk, ctx->seg_first_page);
     rocke_value_t* lane0 = rocke_b_mod(B, rel, rocke_b_const_i32(B, 64));
-    out[0] = rocke_b_readlane(B, window, lane0);
+    out[0] = rocke_b_readlane(B, page_id_window, lane0);
     for(j = 1; j < NB; ++j)
     {
         rocke_value_t* lane = rocke_b_add(B, lane0, rocke_b_const_i32(B, j));
-        rocke_value_t* idj = rocke_b_readlane(B, window, lane);
+        rocke_value_t* idj = rocke_b_readlane(B, page_id_window, lane);
         rocke_value_t* blk = rocke_b_add(B, first_blk, rocke_b_const_i32(B, j));
         rocke_value_t* live = rocke_b_cmp_lt(B, blk, ctx->seq_pages);
         out[j] = rocke_b_select(B, live, idj, out[0]);
     }
+}
+
+/* _refill_page_id_window(page_id_window, kv_tile_idx): the window for the next
+ * iteration. If tile kv_tile_idx + 2 starts a new window, load it now (after
+ * this tile's copies, so the explicit waits still cover V(t)); the loop-top
+ * wait completes it before the next iteration reads it. A wave-uniform 0/1-trip
+ * loop is an if with a result (scf_if has none): 0 trips keep the window, 1 trip
+ * loads the next one. It compiles to a scalar branch around the load. */
+rocke_value_t* rocke_gfx950_attention_tiled_3d_refill_page_id_window(
+    rocke_gfx950_attention_tiled_3d_build_ctx_t* ctx,
+    rocke_value_t* page_id_window,
+    rocke_value_t* kv_tile_idx)
+{
+    rocke_value_t* t2 = rocke_b_add(B, kv_tile_idx, rocke_b_const_i32(B, 2));
+    rocke_value_t* t2_blk = rocke_b_mul(B, t2, rocke_b_const_i32(B, CFG.N_BLOCKS_PER_TILE));
+    rocke_value_t* rel2 = rocke_b_sub(B, t2_blk, ctx->seg_first_page);
+    rocke_value_t* rel2_lane = rocke_b_mod(B, rel2, rocke_b_const_i32(B, 64));
+    rocke_value_t* at_start = rocke_b_cmp_eq(B, rel2_lane, rocke_b_const_i32(B, 0));
+    rocke_value_t* t2_live = rocke_b_cmp_lt(B, t2, ctx->tile_end);
+    rocke_value_t* cross = rocke_b_land(B, at_start, t2_live);
+    rocke_value_t* lo = rocke_b_const_i32(B, 0);
+    rocke_value_t* one = rocke_b_const_i32(B, 1);
+    rocke_value_t* zero = rocke_b_const_i32(B, 0);
+    rocke_value_t* trips = rocke_b_select(B, cross, one, zero);
+    rocke_value_t* step = rocke_b_const_i32(B, 1);
+    rocke_iter_arg_t wargs[1];
+    rocke_for_t refill;
+    rocke_value_t* next_window;
+    wargs[0].name = rocke_arena_strdup(&B->arena, "pid_window_r");
+    wargs[0].init = page_id_window;
+    refill = rocke_b_scf_for_iter(B, lo, trips, step, wargs, 1, "pid_window_load", false, true);
+    rocke_b_region_enter(B, refill.body);
+    next_window = rocke_gfx950_attention_tiled_3d_load_page_id_window(ctx, rel2);
+    rocke_b_scf_yield(B, &next_window, 1);
+    rocke_b_region_leave(B);
+    return refill.op->results[0];
 }
 
 /* _tile_page_ids(kv_tile_idx): one guarded block-table load per page of the

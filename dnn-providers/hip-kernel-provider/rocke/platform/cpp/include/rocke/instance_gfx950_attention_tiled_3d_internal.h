@@ -325,7 +325,7 @@ typedef struct rocke_gfx950_attention_tiled_3d_build_ctx
     rocke_value_t* lane_within_b[16];
     rocke_value_t* first_page_ids[8]; /* tile_start's page ids (PAGE_IDS; N <= 8) */
     rocke_value_t* seg_first_page; /* tile_start * N_BLOCKS_PER_TILE (WAVE_PAGE_ID_LOAD) */
-    rocke_value_t* page_id_window0; /* the first 64-page id window (WAVE_PAGE_ID_LOAD) */
+    rocke_value_t* first_page_id_window; /* the first 64-page id window (WAVE_PAGE_ID_LOAD) */
     rocke_value_t*
         kv_block_bytes_c; /* const_i32(kv_stride_blk_b): 1-block buffer bound (i64 path) */
 
@@ -423,13 +423,20 @@ rocke_value_t* rocke_gfx950_attention_tiled_3d_kv_col(
 rocke_value_t* rocke_gfx950_attention_tiled_3d_load_page_id_window(
     rocke_gfx950_attention_tiled_3d_build_ctx_t* ctx, rocke_value_t* rel_page);
 
-/* _window_tile_ids(window, kv_tile_idx): the tile's page ids, read from the
- * window with v_readlane; dead pages reuse the tile's first id. */
+/* _window_tile_ids(page_id_window, kv_tile_idx): the tile's page ids, read from
+ * the window with v_readlane; dead pages reuse the tile's first id. */
 void rocke_gfx950_attention_tiled_3d_window_tile_ids(
     rocke_gfx950_attention_tiled_3d_build_ctx_t* ctx,
-    rocke_value_t* window,
+    rocke_value_t* page_id_window,
     rocke_value_t* kv_tile_idx,
     rocke_value_t** out);
+
+/* _refill_page_id_window(page_id_window, kv_tile_idx): the window for the next
+ * iteration; loads a new one when tile kv_tile_idx + 2 starts it. */
+rocke_value_t* rocke_gfx950_attention_tiled_3d_refill_page_id_window(
+    rocke_gfx950_attention_tiled_3d_build_ctx_t* ctx,
+    rocke_value_t* page_id_window,
+    rocke_value_t* kv_tile_idx);
 
 /* _tile_page_ids(kv_tile_idx): the tile's page ids, one guarded block-table load
  * each, made wave-uniform; writes cfg.N_BLOCKS_PER_TILE values to out. */
