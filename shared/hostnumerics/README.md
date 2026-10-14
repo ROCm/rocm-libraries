@@ -68,7 +68,7 @@ reference. Compare representative input-generation and reference-computation
 timings, as well as their effect on complete test and benchmark runs, before
 removing an old accelerated path.
 
-C++ tests use GoogleTest 1.12.1 or newer. Test builds fetch 1.17.0, matching the shared superbuild, when no installed package is available; set `HOSTNUMERICS_ENABLE_FETCH=OFF` to require an existing package. GoogleTest is not installed or exported with HostNumerics.
+C++ tests use GoogleTest 1.12.1 or newer, retaining the repository's older compatibility baseline because these assertions need no newer API. Top-level test builds default to fetching 1.17.0, matching the shared superbuild, when no compatible installed package is available; set `HOSTNUMERICS_ENABLE_FETCH=OFF` to require an existing package. When a parent enables HostNumerics tests through `add_subdirectory`, fetching defaults to `OFF`: provide a compatible GoogleTest package or target, or explicitly set `HOSTNUMERICS_ENABLE_FETCH=ON`. Existing `GTest::gtest_main` targets must expose their version through the target's `VERSION` property or `GTest_VERSION`. GoogleTest is not installed or exported with HostNumerics.
 
 ## Build and test
 
@@ -99,7 +99,7 @@ are then unnecessary.
 when building HostNumerics standalone and `OFF` when another project includes it
 with `add_subdirectory`. CI covers ON/ON with Ninja Multi-Config and OFF/OFF with
 Ninja, including installation and an external C++ consumer for both. It also
-checks the embedded defaults. When configuring the package or embedded test project directly, pass `-DHOSTNUMERICS_SOURCE_DIR=/path/to/hostnumerics` so it can locate the shared test source and CMake helper.
+checks the embedded defaults and an installed GoogleTest package with fetching disabled. The package and embedded test projects default `HOSTNUMERICS_SOURCE_DIR` to the containing HostNumerics source tree; pass `-DHOSTNUMERICS_SOURCE_DIR=/path/to/hostnumerics` to use a different tree's shared test source and CMake helper.
 
 Install into a local prefix with:
 

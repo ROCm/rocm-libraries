@@ -5,14 +5,16 @@
 cmake_minimum_required(VERSION 3.25.2)
 project(HostNumericsEmbeddedTest LANGUAGES CXX)
 
-if(NOT HOSTNUMERICS_SOURCE_DIR)
-    message(FATAL_ERROR "Set HOSTNUMERICS_SOURCE_DIR to the HostNumerics source tree.")
-endif()
+set(HOSTNUMERICS_SOURCE_DIR "${CMAKE_CURRENT_LIST_DIR}/../.." CACHE PATH
+    "HostNumerics source tree containing the shared test sources and CMake helper.")
 
 set(CMAKE_DISABLE_FIND_PACKAGE_Python TRUE)
 set(CMAKE_DISABLE_FIND_PACKAGE_nanobind TRUE)
 add_subdirectory("${HOSTNUMERICS_SOURCE_DIR}" hostnumerics)
-if(HOSTNUMERICS_BUILD_TESTING OR HOSTNUMERICS_BUILD_PYTHON OR TARGET GTest::gtest)
+get_directory_property(_hostnumerics_test_dependencies_loaded
+    DIRECTORY "${HOSTNUMERICS_SOURCE_DIR}" HOSTNUMERICS_TEST_DEPENDENCIES_LOADED)
+if(HOSTNUMERICS_BUILD_TESTING OR HOSTNUMERICS_BUILD_PYTHON OR TARGET GTest::gtest
+   OR _hostnumerics_test_dependencies_loaded)
     message(FATAL_ERROR "Embedded HostNumerics should default to no tests or Python.")
 endif()
 
