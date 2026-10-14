@@ -65,7 +65,6 @@ public:
             const bool do_op = lid + i < VirtualWaveSize && lid < i;
             if(do_op)
             {
-                output  = storage_.values[lid];
                 T other = storage_.values[lid + i];
                 output  = reduce_op(output, other);
             }
@@ -100,7 +99,6 @@ public:
             const bool do_op = (lid + i) < VirtualWaveSize && lid < i && (lid + i) < valid_items;
             if(do_op)
             {
-                output  = storage_.values[lid];
                 T other = storage_.values[lid + i];
                 output  = reduce_op(output, other);
             }
