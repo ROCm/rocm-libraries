@@ -876,9 +876,9 @@ TEST_P(SplitKvSinkDoubleCount, DataTypeConfig)
         true, // i_perm
         true, // o_perm
         0,    // scale_s
-        0,    // logits_soft_cap,
+        0,    // logits_soft_cap
         def_is_v_rowmajor,
-        true,  // lse, the double count moves it,
+        true,  // lse, the double count moves it
         0,     // page_block_size
         false, // use_cache_batch_idx
         "n",   // bias, alibi has no split-KV instance under the test filter
@@ -901,8 +901,9 @@ TEST_P(SplitKvSinkDoubleCount, DataTypeConfig)
 
 // Both split-KV pipelines seed m at an i_split > 0 lookback; the nwarp one had
 // the wrong expression there. It is selected only when seqlen_q fits a single
-// 16-row tile, so nothing else in this file reaches it, and codegen emits it
-// for RDNA only.
+// 16-row tile, so nothing else in this file reaches it. Codegen emits it for
+// RDNA only: on gfx9 these parameters dispatch qr_vr instead, so a pass there
+// is not nwarp coverage.
 class SplitKvSinkNwarpSeed
     : public TestWithParam<std::tuple<std::tuple<int, int>, std::string, float>>
 {
@@ -941,7 +942,7 @@ TEST_P(SplitKvSinkNwarpSeed, DataTypeConfig)
         0,    // scale_s
         soft_cap,
         def_is_v_rowmajor,
-        true,  // lse,
+        true,  // lse
         0,     // page_block_size
         false, // use_cache_batch_idx
         "n",   // bias, alibi has no split-KV instance under the test filter
@@ -1003,9 +1004,9 @@ TEST_P(SplitKvSinkDroppedSink, DataTypeConfig)
         true, // i_perm
         true, // o_perm
         0,    // scale_s
-        0,    // logits_soft_cap,
+        0,    // logits_soft_cap
         def_is_v_rowmajor,
-        true,  // lse, the whole point of this case,
+        true,  // lse, the whole point of this case
         0,     // page_block_size
         false, // use_cache_batch_idx
         "n",   // bias, alibi has no split-KV instance under the test filter

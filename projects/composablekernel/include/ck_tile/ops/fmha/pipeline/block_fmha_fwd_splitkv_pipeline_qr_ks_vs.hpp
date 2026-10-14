@@ -287,9 +287,9 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVS
                     bool keeps_sink = (__builtin_isinf_sign(sink_v) >= 0) && i_split == 0;
                     if(keeps_sink && 1 < num_splits)
                     {
-                        // Ask for the ordinary range over the whole key axis.
-                        // GetSinkTileRangeAlongX folds the sink prefix into that
-                        // range, which would make an empty range look occupied.
+                        // Ask for the ordinary range over the whole key axis. The
+                        // sink-aware overload returns (sink_offset, start, end),
+                        // and sink_offset answers ownership, not occupancy.
                         auto [full_start, full_end] = mask.GetTileRangeAlongX(
                             q_origin.at(number<0>{}), number<kM0>{}, number<kN0>{}, 1, 0);
                         // Keep the sink here only when no split at all has work.
@@ -298,9 +298,9 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVS
                     if(keeps_sink)
                     {
                         // Mirror the main-path lse formula for the state this publishes
-                        // (m = sink seed, l = 1). Every seeding branch now leaves m in
-                        // final-logit units, so the natural-log lse is the same
-                        // expression throughout.
+                        // (m = sink seed, l = 1). The branches keep m in different
+                        // units, but each contributes exp(raw_sink) once consumed,
+                        // so a sink-only split reports raw_sink either way.
                         set_tile(lse_acc, SMPLComputeDataType{sink_v * scale_s});
                     }
                     else
