@@ -139,6 +139,17 @@ DW_WIN_MFMA_FOLDS = (1, 2, 4)
 DW_WIN_MFMA_WAVES = (4, 8)
 DW_WIN_MFMA_BLOCK_H = (4, 7, 8, 12, 14, 16)
 DW_WIN_MFMA_PREFETCH = 2
+# 4c dgrad (direct_grouped_dgrad_4c, cpg = kpg = 4): the 4x4x4 MFMA kernel on
+# the transposed problem with fused weights. The cache carries the image of
+# the 4c dispatch policy -- the (4, 16) tile with gathered weights, LDS-staged
+# weights (gfx950) and the row-staged form (gfx950) -- plus a small
+# neighbourhood of wider column and group tiles. The row-staged form takes one
+# q wave per 4 columns (waves_q = block_q / 4).
+DGRAD_4C_BLOCK_Q = (4, 8, 16)
+DGRAD_4C_BLOCK_GROUPS = (16, 32, 64)
+# (dgrad_weights_lds, stage_rows); the validator drops the LDS forms on
+# targets without transpose LDS reads.
+DGRAD_4C_FORMS = ((False, False), (True, False), (True, True))
 # Grouped scalar-FMA dgrad.
 DGRAD_BLOCK_Q = (4, 8, 16, 32)
 # MFMA dgrad fprop pass: output rows per block, then
@@ -424,6 +435,14 @@ DIRECT_CAPABILITIES: Dict[str, Tuple[str, Tuple[DirectCaps, ...]]] = {
             for c, k in _DENSE_MFMA_DGRAD_CHANNELS
         ),
     ),
+    # 4c dgrad: one fused-weight kernel, a forward 4c kernel on the
+    # transposed problem, so stride 1 and "same" padding; 1x1 and 3x3.
+    "direct_grouped_dgrad_4c": (
+        "dgrad",
+        tuple(
+            DirectCaps(KH=k, PAD=_same_pad(k), stride=1, cpg=4, kpg=4) for k in (1, 3)
+        ),
+    ),
     # The same pipeline with runtime channels: dense (groups == 1) and any
     # cpg/kpg whose tile counts a cached binary has (knobs k_atoms/m_tiles).
     "direct_dgrad_mfma_rtc": (
@@ -451,6 +470,9 @@ _REORGANIZE = "direct_dgrad_reorganize"
 _TRANSPOSE_RTC = "direct_dgrad_transpose_rtc"
 _REORGANIZE_RTC = "direct_dgrad_reorganize_rtc"
 _MFMA_DGRAD = ("direct_grouped_dgrad_mfma", "direct_dgrad_mfma_rtc")
+# Single-kernel dgrad variants that run a forward kernel on the transposed
+# problem (fused weights, no pre-pass): one step with the forward ABI.
+_DGRAD_FPROP_SINGLE = ("direct_grouped_dgrad_4c",)
 # variant -> (transpose helper, reorganize helper)
 _MFMA_HELPERS = {
     "direct_grouped_dgrad_mfma": (_TRANSPOSE, _REORGANIZE),
@@ -545,6 +567,16 @@ def _knob_grid(variant: str, arch: str, dtype: str) -> Iterator[dict]:
     elif variant == "direct_grouped_dgrad":
         for bq, bg in itertools.product(DGRAD_BLOCK_Q, BLOCK_GROUPS):
             yield dict(block_q=bq, block_groups=bg)
+    elif variant == "direct_grouped_dgrad_4c":
+        for bq, bg, (lds, sr) in itertools.product(
+            DGRAD_4C_BLOCK_Q, DGRAD_4C_BLOCK_GROUPS, DGRAD_4C_FORMS
+        ):
+            yield {
+                "block_q": bq,
+                "block_groups": bg,
+                "dgrad_weights_lds": lds,
+                "stage_rows": sr,
+            }
     elif variant == "direct_grouped_dgrad_mfma":
         for bq, bg, bh, (wq, wk, rk, pg, k32) in itertools.product(
             BLOCK_Q, BLOCK_GROUPS, DGRAD_BLOCK_H, DGRAD_WAVES
@@ -648,6 +680,20 @@ def make_spec(variant: str, problem, knobs: dict):
     if variant == "direct_grouped_dgrad":
         return dc.DirectConvDgradSpec(
             problem=problem, name="rocke_direct_dgrad", **knobs
+        )
+    if variant == "direct_grouped_dgrad_4c":
+        # The forward 4c kernel on the transposed problem (no problem check
+        # here: plan_for re-validates the spec on the real shape).
+        stage_rows = knobs["stage_rows"]
+        return dc.DirectConv4cSpec(
+            problem=dc.dgrad_4c_transposed_problem(problem),
+            name="rocke_direct_dgrad_4c",
+            block_q=knobs["block_q"],
+            block_groups=knobs["block_groups"],
+            dgrad_fused_weights=True,
+            dgrad_weights_lds=knobs["dgrad_weights_lds"],
+            stage_rows=stage_rows,
+            waves_q=knobs["block_q"] // 4 if stage_rows else 1,
         )
     if variant == "direct_grouped_dgrad_mfma":
         fold_k32 = knobs["fold_k32"]
@@ -782,6 +828,9 @@ def validate_spec(variant: str, spec, arch: str) -> Tuple[bool, str]:
             return dc.is_valid_depthwise_dgrad_win_spec(spec, arch=arch)
         if variant == "direct_grouped_dgrad":
             return dc.is_valid_dgrad_spec(spec, arch=arch)
+        if variant == "direct_grouped_dgrad_4c":
+            spec.validate()
+            return dc.is_valid_spec_4c(spec, arch=arch)
         if variant == "direct_wgrad":
             spec.validate()
             return dc.is_valid_wgrad_spec(spec, arch=arch)
@@ -808,6 +857,7 @@ def _build_kernel(variant: str, spec, arch: str):
         "direct_depthwise_dgrad": dc.build_direct_depthwise_dgrad_streaming,
         "direct_depthwise_dgrad_win": dc.build_direct_depthwise_dgrad_windowed,
         "direct_grouped_dgrad": dc.build_direct_conv_dgrad,
+        "direct_grouped_dgrad_4c": dc.build_direct_conv_4c,
         "direct_wgrad": dc.build_direct_conv_wgrad,
         _TRANSPOSE: dc.build_direct_transpose_weights_dgrad,
         _REORGANIZE: dc.build_direct_reorganize_weights,
@@ -1459,6 +1509,13 @@ def plan_for(
         # into atomically (the caller zeroes it).
         step = _conv_step(
             identity, hsaco_path, meta, spec, problem, "wgrad", ("dy", "x", "dw")
+        )
+        return DirectPlan(identity, (step,)), "ok"
+    if variant in _DGRAD_FPROP_SINGLE:
+        # A single forward kernel over the transposed problem that reads the
+        # original weights itself: forward ABI, transposed extents.
+        step = _conv_step(
+            identity, hsaco_path, meta, spec, spec.problem, "fwd", ("dy", "w", "dx")
         )
         return DirectPlan(identity, (step,)), "ok"
     if variant not in _MFMA_DGRAD:

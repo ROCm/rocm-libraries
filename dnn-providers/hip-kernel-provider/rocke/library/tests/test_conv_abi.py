@@ -410,6 +410,45 @@ def _direct_builders():
                 dc.DirectConv4cSpec(problem=pr, block_q=8), arch=_ARCH
             ),
         ),
+        # 4c dgrad: a forward 4c kernel over the transposed problem, so it
+        # takes the forward ABI -- fused gathered weights, LDS-staged weights
+        # and the row-staged runtime row stream.
+        (
+            "4c_dgrad_fw",
+            {"cpg": 4, "kpg": 4, "groups": 32},
+            "fwd",
+            lambda pr: dc.build_direct_conv_4c(
+                dc.make_dgrad_4c_spec(pr, block_q=8, dgrad_fused_weights=True),
+                arch=_ARCH,
+            ),
+        ),
+        (
+            "4c_dgrad_fwl",
+            {"cpg": 4, "kpg": 4, "groups": 32, "dtype": "bf16"},
+            "fwd",
+            lambda pr: dc.build_direct_conv_4c(
+                dc.make_dgrad_4c_spec(
+                    pr, dgrad_fused_weights=True, dgrad_weights_lds=True
+                ),
+                arch=_ARCH,
+            ),
+        ),
+        (
+            "4c_dgrad_sr",
+            {"cpg": 4, "kpg": 4, "groups": 32, "dtype": "bf16"},
+            "fwd",
+            lambda pr: dc.build_direct_conv_4c(
+                dc.make_dgrad_4c_spec(
+                    pr,
+                    block_q=8,
+                    block_groups=32,
+                    dgrad_fused_weights=True,
+                    dgrad_weights_lds=True,
+                    stage_rows=True,
+                ),
+                arch=_ARCH,
+            ),
+        ),
         (
             "8c",
             dict(cpg=8, kpg=8, groups=8),

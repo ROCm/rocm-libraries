@@ -200,6 +200,10 @@ bool rocke_direct_conv_16c_is_valid_spec(const rocke_direct_conv_16c_spec_t* spe
  *      block_q: int = 4
  *      block_groups: int = 16
  *      wave_size: int = 64
+ *      dgrad_fused_weights: bool = False
+ *      dgrad_weights_lds: bool = False
+ *      stage_rows: bool = False
+ *      waves_q: int = 1
  * ===================================================================== */
 typedef struct rocke_direct_conv_4c_spec
 {
@@ -208,18 +212,35 @@ typedef struct rocke_direct_conv_4c_spec
     int block_q; /* default 4  */
     int block_groups; /* default 16 */
     int wave_size; /* default 64 */
+    /* Dgrad only: B is the original weight W[groups*cpg, KH, KW, kpg] and the
+     * prologue builds the flipped, k<->c transposed fragments itself. */
+    bool dgrad_fused_weights; /* default false */
+    /* With dgrad_fused_weights: stage W in LDS and use ds_read_b64_tr_b16
+     * instead of per-element gathers (needs has_ds_read_tr). */
+    bool dgrad_weights_lds; /* default false */
+    /* Row-staged dgrad form (needs dgrad_fused_weights + dgrad_weights_lds and
+     * a stride-1 'same'-padded filter): the workgroup's input row is copied
+     * to a double-buffered padded LDS row with 16-byte loads, one row ahead,
+     * and the waves read their B fragments with ds_read_b64. The rows stream
+     * through a runtime loop bounded by p_Hi. */
+    bool stage_rows; /* default false */
+    /* stage_rows only: waves along q (4 columns each); block_q == 4*waves_q. */
+    int waves_q; /* default 1 */
 } rocke_direct_conv_4c_spec_t;
 
 /* Default 4c spec (name "direct_conv_4c", block_q 4, block_groups 16,
  * wave_size 64, problem == default()). */
 rocke_direct_conv_4c_spec_t rocke_direct_conv_4c_spec_default(void);
 
-/* @property threads_per_block -> (block_groups // 16) * wave_size. */
+/* @property threads_per_block -> (block_groups // 16) * waves_q * wave_size. */
 int rocke_direct_conv_4c_threads_per_block(const rocke_direct_conv_4c_spec_t* spec);
 
 /* kernel_name():
  *   kernel_name_join(name, problem.short(), f"bq{block_q}", f"bg{block_groups}",
- *                    flags={"bf16": dtype == "bf16"})
+ *                    flags={"bf16": dtype == "bf16",
+ *                           "fw": dgrad_fused_weights and not dgrad_weights_lds,
+ *                           "fwl": dgrad_fused_weights and dgrad_weights_lds,
+ *                           f"sr{waves_q}": stage_rows})
  * Writes NUL-terminated into out (capacity out_cap). */
 rocke_status_t rocke_direct_conv_4c_kernel_name(const rocke_direct_conv_4c_spec_t* spec,
                                                 char* out,
@@ -227,7 +248,8 @@ rocke_status_t rocke_direct_conv_4c_kernel_name(const rocke_direct_conv_4c_spec_
 
 /* validate(): the hard assertions of DirectConv4cSpec.validate (dtype in
  * {fp16, bf16}, cpg==kpg==4, block_groups % 16 == 0, block_q % 4 == 0,
- * groups % block_groups == 0). On a
+ * groups % block_groups == 0, dgrad_weights_lds implies dgrad_fused_weights,
+ * and the stage_rows / waves_q rules of rocke_dconv4c_stage_rows_reject). On a
  * violated invariant returns ROCKE_ERR_VALUE + (reason if non-NULL); else ROCKE_OK. */
 rocke_status_t rocke_direct_conv_4c_validate(const rocke_direct_conv_4c_spec_t* spec,
                                              char* reason,
@@ -236,7 +258,11 @@ rocke_status_t rocke_direct_conv_4c_validate(const rocke_direct_conv_4c_spec_t* 
 /* is_valid_spec_4c(spec, arch) -> (ok, reason). `arch` NULL => "gfx950".
  * Checks: ArchTarget.from_gfx(arch) resolves; dtype in {fp16, bf16}; "same"
  * padding; stride 1; cpg==kpg==4; block_groups % 16 == 0; block_q % 4 == 0;
- * groups % block_groups == 0. The 4x4x4 f16 / bf16 (_1k) atom is NOT gated
+ * groups % block_groups == 0; KH*KW <= ROCKE_DCONV4C_MAX_TAPS; the stage_rows
+ * / waves_q rules; dgrad_weights_lds needs dgrad_fused_weights, a target with
+ * ds_read_tr and at most ROCKE_DCONV4C_MAX_WL_PASSES staging passes;
+ * stage_rows needs at most ROCKE_DCONV4C_MAX_ROW_PASSES row passes and fits
+ * the target's LDS. The 4x4x4 f16 / bf16 (_1k) atom is NOT gated
  * through has_shape (catalog lists only warp tiles; comgr selects it on both
  * targets). On reject writes the reason and returns false; else "ok" + true. */
 bool rocke_direct_conv_4c_is_valid_spec(const rocke_direct_conv_4c_spec_t* spec,
