@@ -111,21 +111,25 @@ _WGM = [
 ]
 
 def _rocrollerWgmHeader() -> Path:
-    """Locate RocRollerWgmKernargs.hpp from a source checkout or an install.
+    """Locate RocRollerWgmKernargs.hpp next to this test or in the source tree.
 
-    The tensilelite unit job runs this file from
-    ``build/share/hipblaslt/tensilelite/tensilelite/Tests``. Three parents up
-    is that share directory, which does not contain ``include/Tensile``. The
-    header lives in the hipBLASLt source tree.
+    The unit job runs a copy of this file from
+    ``build/share/hipblaslt/tensilelite/tensilelite/Tests``. That copy does not
+    sit next to ``projects/hipblaslt/tensilelite/include``. The header is also
+    shipped inside this Python package so the installed tree can compile it.
     """
-    rel = Path("include") / "Tensile" / "RocRollerWgmKernargs.hpp"
-    source = Path("projects") / "hipblaslt" / "tensilelite" / rel
+    name = Path("Tensile") / "RocRollerWgmKernargs.hpp"
     here = Path(__file__).resolve()
+    packaged = here.parents[2] / "include" / name
+    if packaged.is_file():
+        return packaged
+    rel = Path("include") / name
+    source = Path("projects") / "hipblaslt" / "tensilelite" / rel
     for parent in here.parents:
         for candidate in (parent / rel, parent / source):
             if candidate.is_file():
                 return candidate
-    return here.parents[3] / rel
+    return packaged
 
 
 _HEADER = _rocrollerWgmHeader()
