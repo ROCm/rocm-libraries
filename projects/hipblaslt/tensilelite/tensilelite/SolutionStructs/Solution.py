@@ -4632,6 +4632,11 @@ class Solution(collections.abc.Mapping):
               state["LocalReadVectorWidthA"] = wlrB * state["MIInputPerThreadA"]
             if wlrA < wlrB:
               state["LocalReadVectorWidthB"] = wlrA * state["MIInputPerThreadB"]
+          elif isaInfoMap[isa].asmCaps["HasWMMA_V3"]:
+            lrBytesA = state["LocalReadVectorWidthA"] * state["ProblemType"]["MacDataTypeA"].numBytes()
+            lrBytesB = state["LocalReadVectorWidthB"] * state["ProblemType"]["MacDataTypeB"].numBytes()
+            if lrBytesA != lrBytesB:
+              reject(state, printRejectionReason, f"gfx1250 requires LocalReadVectorWidthA/B to read the same bytes, actual: {lrBytesA:g}/{lrBytesB:g}")
 
           if state["ProblemType"]["Sparse"] == 1:
             state["LocalReadVectorWidthMetadata"] = state["LocalReadVectorWidthA"]
