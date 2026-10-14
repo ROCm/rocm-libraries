@@ -565,9 +565,8 @@ class VMovB32(CommonInstruction):
           ``RegisterContainer`` from ``rocisa_stinkytofu_adaptor.container``).
         - src is an ``InstructionInput``-shaped value: Container | int |
           float | str. See ``_to_stinky_register`` for the routing table.
-        - ``dpp`` is forwarded through ``set_dpp`` (``convertDPPModifiers``
-          encoding). ``sdwa`` is still stored for rocisa-API parity and is
-          not forwarded yet.
+        - ``dpp`` is forwarded through ``set_dpp``. ``sdwa`` is forwarded
+          through ``set_sdwa``. This ctor does not accept ``vop3``.
     """
 
     def __init__(self, dst: Any, src: Any, sdwa: Any = None,
@@ -583,7 +582,7 @@ class VMovB32(CommonInstruction):
         )
         self.setInst("v_mov_b32")
 
-    _stinky_mods = ("dpp",)
+    _stinky_mods = ("sdwa", "dpp")
 
     def to_stinky_logical(self) -> Any:
         """Build a fresh ``_stinkytofu.VMovB32(dst_reg, src_reg, comment)``.
@@ -639,7 +638,7 @@ class VMovRelsD2B32(CommonInstruction):
         )
         self.setInst("v_movrelsd_2_b32")
 
-    _stinky_mods = ("dpp",)
+    _stinky_mods = ("sdwa", "dpp")
 
     def to_stinky_logical(self) -> Any:
         import stinkytofu as _st  # noqa: WPS433
@@ -671,7 +670,7 @@ class VPrngB32(CommonInstruction):
         )
         self.setInst("v_prng_b32")
 
-    _stinky_mods = ("dpp",)
+    _stinky_mods = ("sdwa", "dpp")
 
     def to_stinky_logical(self) -> Any:
         import stinkytofu as _st  # noqa: WPS433
@@ -1789,7 +1788,7 @@ class VCndMaskB16(CommonInstruction):
         )
         self.setInst("v_cndmask_b16")
 
-    _stinky_mods = ("dpp",)
+    _stinky_mods = ("sdwa", "dpp")
 
     def to_stinky_logical(self) -> Any:
         import stinkytofu as _st  # noqa: WPS433
