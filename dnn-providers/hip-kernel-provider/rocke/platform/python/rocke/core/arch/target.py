@@ -1102,6 +1102,66 @@ _MMA_FRAGMENT_INFO.update(
 )
 
 
+def _mfma_scaled_a(builder, lane, slot):
+    row = builder.mod(lane, builder.const_i32(32))
+    k = builder.add(
+        builder.mul(builder.div(lane, builder.const_i32(32)), builder.const_i32(32)),
+        builder.const_i32(slot),
+    )
+    return row, k
+
+
+def _mfma_scaled_f8_a(builder, lane, slot):
+    row = builder.mod(lane, builder.const_i32(32))
+    k = builder.add(
+        builder.mul(builder.div(lane, builder.const_i32(32)), builder.const_i32(16)),
+        builder.const_i32((slot // 16) * 32 + slot % 16),
+    )
+    return row, k
+
+
+def _mfma_scaled_f8_b(builder, lane, slot):
+    row, k = _mfma_scaled_f8_a(builder, lane, slot)
+    return k, row
+
+
+def _mfma_scaled_b(builder, lane, slot):
+    row, k = _mfma_scaled_a(builder, lane, slot)
+    return k, row
+
+
+def _mfma_scaled_scale_a(builder, lane, slot):
+    return builder.mod(lane, builder.const_i32(32)), builder.div(
+        lane, builder.const_i32(32)
+    )
+
+
+def _mfma_scaled_scale_b(builder, lane, slot):
+    row, k = _mfma_scaled_scale_a(builder, lane, slot)
+    return k, row
+
+
+_MMA_FRAGMENT_INFO.update(
+    {
+        f"mfma_gfx950_f32_32x32x64_{a}_{b}_scale_e8m0_e8m0_k32": _FragInfo(
+            32,
+            32,
+            16,
+            64,
+            _mfma_scaled_f8_a if a in ("fp8", "bf8") else _mfma_scaled_a,
+            _mfma_scaled_f8_b if b in ("fp8", "bf8") else _mfma_scaled_b,
+            _mfma_acc_32x32,
+            1,
+            1,
+            _mfma_scaled_scale_a,
+            _mfma_scaled_scale_b,
+        )
+        for a in ("fp8", "bf8", "fp6", "bf6", "fp4")
+        for b in ("fp8", "bf8", "fp6", "bf6", "fp4")
+    }
+)
+
+
 def _frag_info(op_id: str) -> _FragInfo:
     info = _MMA_FRAGMENT_INFO.get(op_id)
     if info is None:
@@ -1374,6 +1434,16 @@ class ArchTarget:
     @property
     def max_threads_per_block(self) -> int:
         return self.limits.max_threads_per_block
+
+    @property
+    def has_dpp_row_xmask(self) -> bool:
+        """Whether DPP has ``row_xmask`` (an XOR with any mask 1..15 inside a
+        16-lane row). It is a gfx10+ encoding: gfx11, gfx12 and gfx1250 have
+        it; the gfx9 CDNA targets (``gfx9_mfma``, ``gfx950``) do not. An
+        allow-list, so a new family gets the base-DPP encodings (valid on
+        every target) until someone adds it here. Mirrored by
+        ``rocke_arch_has_dpp_row_xmask`` in the C++ engine."""
+        return self.target_family in ("gfx11_rdna", "gfx12_rdna", "gfx12_cdna")
 
     @staticmethod
     def from_gfx(gfx: str) -> "ArchTarget":

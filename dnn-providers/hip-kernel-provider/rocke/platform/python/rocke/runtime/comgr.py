@@ -31,7 +31,14 @@ from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
 from ._ctypes_bind import _LazyFn
-from .runtime_coexistence import _IS_WINDOWS, _add_dll_dir, _candidate_lib_paths
+from .runtime_coexistence import (
+    _IS_WINDOWS,
+    _add_dll_dir,
+    _candidate_lib_paths,
+    _in_rocm_sdk_core,
+    _mapped_lib,
+    _rocm_sdk_core_release,
+)
 
 
 # Status codes.
@@ -68,6 +75,33 @@ def _load_lib() -> ctypes.CDLL:
     # tried, in order, is the whole diagnosis when resolution lands somewhere
     # unexpected, and the interesting failure is usually the first -- the library
     # that was supposed to load -- not the last.
+    # A different explicit COMGR beside an already mapped one can load a
+    # second LLVM and abort the process before COMGR can return an error.
+    # Only the single-copy case identifies that conflict without choosing a
+    # policy for multiple mappings. A non-ELF override cannot load as COMGR;
+    # let the existing candidate fallback handle invalid or unreadable files.
+    override = os.environ.get("ROCKE_COMGR_LIB")
+    if override and not _IS_WINDOWS and os.path.isfile(override):
+        mapped = _mapped_lib("amd_comgr", require_unique=True)
+        if mapped is not None:
+            try:
+                same_file = os.path.samefile(override, mapped)
+            except OSError:
+                pass
+            else:
+                if not same_file:
+                    try:
+                        with open(override, "rb") as candidate:
+                            is_elf = candidate.read(4) == b"\x7fELF"
+                    except OSError:
+                        is_elf = False
+                    if is_elf:
+                        raise ComgrError(
+                            f"ROCKE_COMGR_LIB={override!r} differs from the only "
+                            f"mapped COMGR {mapped!r}; opening a second COMGR can "
+                            "abort LLVM. Point ROCKE_COMGR_LIB at the mapped file "
+                            "or compile in a separate process before loading torch."
+                        )
     failures: List[Tuple[str, OSError]] = []
     for p in _candidate_lib_paths("amd_comgr", "ROCKE_COMGR_LIB", ["3"]):
         try:
@@ -147,9 +181,16 @@ def _read_rocm_version_file(path: str) -> Optional[Tuple[int, int]]:
 def resolved_lib_rocm_version() -> Optional[Tuple[int, int]]:
     """Best-effort package metadata for diagnostics, not LLVM compatibility.
 
-    Reads torch.version.hip for a torch-bundled library or .info/version near
-    the resolved COMGR path, with the historical /opt/rocm metadata fallback.
-    Compiler selection and validation use loaded_compiler_info instead.
+    Derived from the resolved COMGR path (:func:`resolved_lib_path`):
+
+      * a path under the imported torch package -> ``torch.version.hip``;
+      * a path under TheRock's ``_rocm_sdk_core`` wheel -> the wheel's ROCm
+        release (``rocm_sdk.__version__`` or ``rocm-sdk-core`` metadata);
+      * a ROCm install tree -> its root ``.info/version``, with
+        ``/opt/rocm/.info/version`` as a final fallback.
+
+    Returns ``None`` if no usable path or version is found. Compiler selection
+    and validation use :func:`loaded_compiler_info` instead.
     """
     path = resolved_lib_path()
     if not path:
@@ -171,6 +212,11 @@ def resolved_lib_rocm_version() -> Optional[Tuple[int, int]]:
             if rp == tdir or rp.startswith(tdir + os.sep):
                 ver = getattr(getattr(torch_mod, "version", None), "hip", None)
                 return _parse_rocm_version(ver) if ver else None
+    # TheRock wheel comgr -> the wheel's ROCm release. Without this the climb
+    # below finds no .info/version inside site-packages and falls back to
+    # /opt/rocm, reporting the host's release for the wheel's LLVM.
+    if _in_rocm_sdk_core(rp):
+        return _rocm_sdk_core_release()
     # ROCm tree -> the install *root's* ``.info/version``. Climb from the lib
     # dir collecting every ``.info/version`` we pass. This is deliberately a
     # climb, not a fixed ``dirname(dirname(path))``: a packaged ROCm 7.2 keeps

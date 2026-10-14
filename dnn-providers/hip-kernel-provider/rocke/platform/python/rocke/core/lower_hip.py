@@ -32,6 +32,8 @@ from .ir import (
     Value,
     VectorType,
     _sync_attr,
+    dpp_ctrl_attr,
+    dpp_xor_ctrl,
     require_streaming_arch,
 )
 
@@ -46,6 +48,7 @@ _HIP_TYPE = {
     "f16": "fp16",
     "bf16": "bf16",
     "f32": "float",
+    "f64": "double",
     "fp8e4m3": "fp8e4m3",
     "bf8e5m2": "bf8e5m2",
 }
@@ -73,6 +76,8 @@ def _type_to_hip(t) -> str:
             return f"bf16x{t.count}"
         if elem == "f32":
             return f"f32x{t.count}"
+        if elem == "f64":
+            return f"f64x{t.count}"
         if elem in ("i32", "tf32"):
             return f"i32x{t.count}"
         if elem == "i16":
@@ -128,6 +133,7 @@ _ROCKE_VEC(bf16, bf16x, 1); _ROCKE_VEC(bf16, bf16x, 2); _ROCKE_VEC(bf16, bf16x, 
 _ROCKE_VEC(bf16, bf16x, 8); _ROCKE_VEC(bf16, bf16x, 16);
 _ROCKE_VEC(float, f32x, 1); _ROCKE_VEC(float, f32x, 2); _ROCKE_VEC(float, f32x, 4);
 _ROCKE_VEC(float, f32x, 8); _ROCKE_VEC(float, f32x, 16);
+_ROCKE_VEC(double, f64x, 1); _ROCKE_VEC(double, f64x, 2);
 _ROCKE_VEC(int, i32x, 1); _ROCKE_VEC(int, i32x, 2); _ROCKE_VEC(int, i32x, 3);
 _ROCKE_VEC(int, i32x, 4); _ROCKE_VEC(int, i32x, 8); _ROCKE_VEC(int, i32x, 16);
 _ROCKE_VEC(int16_t, i16x, 1); _ROCKE_VEC(int16_t, i16x, 2);
@@ -187,6 +193,7 @@ _VEC_PREFIX = {
     "f16": "f16x",
     "bf16": "bf16x",
     "f32": "f32x",
+    "f64": "f64x",
     "i32": "i32x",
     "tf32": "i32x",
     "i16": "i16x",
@@ -218,6 +225,12 @@ def _vec_prefix(elem_name: str, op_desc: str) -> str:
         ) from None
 
 
+def _reject_f64(op: Op, tname: str) -> None:
+    """Reject an f64 operand for an op that has no f64 lowering."""
+    if tname == "f64":
+        raise NotImplementedError(f"{op.name} does not support f64")
+
+
 def _f32_literal(val: float) -> str:
     """Format a Python float for C++ float literal context.
 
@@ -232,6 +245,22 @@ def _f32_literal(val: float) -> str:
     if math.isinf(val):
         return "((float)-INFINITY)" if val < 0 else "((float)INFINITY)"
     return f"{val}f"
+
+
+def _f64_literal(val: float) -> str:
+    """Format a Python float for C++ double literal context.
+
+    ``repr`` is the shortest round-trip form, so finite values are exact;
+    ``inf`` / ``-inf`` / ``nan`` use the ``<math.h>`` macros as in
+    :func:`_f32_literal`.
+    """
+    import math
+
+    if math.isnan(val):
+        return "((double)NAN)"
+    if math.isinf(val):
+        return "((double)-INFINITY)" if val < 0 else "((double)INFINITY)"
+    return repr(val)
 
 
 def _encode_waitcnt_gfx9_10(vmcnt: int, expcnt: int, lgkmcnt: int) -> int:
@@ -372,6 +401,8 @@ class _Lowerer:
                 self._emit(f"{cpp_t} {_name(res)} = (fp16){literal};")
             else:
                 self._emit(f"{cpp_t} {_name(res)} = {literal};")
+        elif ity == "f64":
+            self._emit(f"{cpp_t} {_name(res)} = {_f64_literal(float(val))};")
         else:
             self._emit(f"{cpp_t} {_name(res)} = {val};")
 
@@ -602,6 +633,26 @@ class _Lowerer:
         from .tf32 import TF32_MMA
 
         op_id = op.attrs["op_id"]
+        from .arch.mfma_scale import (
+            gfx950_scaled_mfma,
+            scaled_mfma_error,
+            MATRIX_FORMATS,
+        )
+
+        atom = gfx950_scaled_mfma(op_id)
+        if atom is not None:
+            if self.arch.gfx != "gfx950":
+                raise NotImplementedError("scaled MFMA requires gfx950")
+            error = scaled_mfma_error(op_id, op.operands, op.results)
+            if error:
+                raise ValueError(error)
+            a, b, c, sa, sb = op.operands
+            self._emit(
+                f"f32x16 {_name(op.result)} = __builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4("
+                f"{_name(a)}, {_name(b)}, {_name(c)}, {MATRIX_FORMATS[atom.a_dtype]}, {MATRIX_FORMATS[atom.b_dtype]}, "
+                f"0, {_name(sa)}, 0, {_name(sb)});"
+            )
+            return
         if op_id in TF32_MMA:
             if self.arch.gfx != "gfx942":
                 raise ValueError("XF32 MMA requires gfx942")
@@ -1310,6 +1361,7 @@ class _Lowerer:
     def _op_arith_fabs(self, op: Op) -> None:
         (v,) = op.operands
         ty = _type_to_hip(op.result.type)
+        _reject_f64(op, op.result.type.name)
         # `__builtin_fabsf` lowers to a free `abs` modifier on AMDGPU
         # (exactly what the LLVM `llvm.fabs.f32` intrinsic produces);
         # for f16/bf16 the matching builtin yields the same modifier.
@@ -1323,6 +1375,7 @@ class _Lowerer:
     def _op_arith_fma(self, op: Op) -> None:
         a, b, c = op.operands
         ty = _type_to_hip(op.result.type)
+        _reject_f64(op, op.result.type.name)
         # `fmaf(a, b, c)` lowers to `v_fma_f32` on AMDGPU for f32; for
         # f16/bf16 we promote to f32, fma, and demote — semantically
         # identical to the IR-level `arith.fma` and matches the
@@ -1335,6 +1388,7 @@ class _Lowerer:
     def _op_arith_fmax3(self, op: Op) -> None:
         a, b, c = op.operands
         ty = _type_to_hip(op.result.type)
+        _reject_f64(op, op.result.type.name)
         # Two ternary ops in one statement; on AMDGPU the chain folds
         # into a single `v_max3_f32`.
         self._emit(
@@ -1349,6 +1403,7 @@ class _Lowerer:
     def _op_arith_fmin3(self, op: Op) -> None:
         a, b, c = op.operands
         ty = _type_to_hip(op.result.type)
+        _reject_f64(op, op.result.type.name)
         self._emit(
             f"{ty} {_name(op.result)} = "
             f"(({_name(b)} < {_name(c)}) ? {_name(b)} : {_name(c)});"
@@ -1427,6 +1482,7 @@ class _Lowerer:
         (v,) = op.operands
         tname = op.result.type.name
         cpp_t = _type_to_hip(op.result.type)
+        _reject_f64(op, tname)
         # ``__builtin_amdgcn_*`` only takes float. For non-f32 types,
         # round-trip via float so the math runs at f32 precision.
         if tname == "f32":
@@ -1449,11 +1505,14 @@ class _Lowerer:
 
     def _op_math_rcp(self, op: Op) -> None:
         # AMDGPU has a hardware reciprocal; emit the builtin directly for
-        # f32, promote-compute-demote for f16/bf16.
+        # f32, promote-compute-demote for f16/bf16. f64 divides in double
+        # (matching the LLVM ``fdiv``) so the result keeps f64 precision.
         (v,) = op.operands
         tname = op.result.type.name
         cpp_t = _type_to_hip(op.result.type)
-        if tname == "f32":
+        if tname == "f64":
+            self._emit(f"{cpp_t} {_name(op.result)} = 1.0 / {_name(v)};")
+        elif tname == "f32":
             self._emit(
                 f"{cpp_t} {_name(op.result)} = __builtin_amdgcn_rcpf({_name(v)});"
             )
@@ -1468,6 +1527,7 @@ class _Lowerer:
         (v,) = op.operands
         tname = op.result.type.name
         cpp_t = _type_to_hip(op.result.type)
+        _reject_f64(op, tname)
         if tname == "f32":
             self._emit(
                 f"{cpp_t} {_name(op.result)} = __builtin_amdgcn_rcpf({_name(v)});"
@@ -1486,6 +1546,7 @@ class _Lowerer:
         (v,) = op.operands
         tname = op.result.type.name
         cpp_t = _type_to_hip(op.result.type)
+        _reject_f64(op, tname)
         if tname == "f32":
             self._emit(
                 f"{cpp_t} {_name(op.result)} = __builtin_amdgcn_rsqf({_name(v)});"
@@ -2103,14 +2164,13 @@ class _Lowerer:
         )
 
     def _op_tile_dpp_xor(self, op: Op) -> None:
-        """``v_mov_b32_dpp`` ``row_xmask`` XOR butterfly (VALU, not LDS).
+        """In-row XOR shuffle as one ``v_mov_b32_dpp`` (VALU, not LDS).
 
-        ``dpp_ctrl = 0x160 | mask`` (AMDGPU ``DPP_ROW_XMASK``). See
-        :meth:`_op_tile_dpp_xor` in ``lower_llvm.py`` for the rationale.
+        :func:`~rocke.core.ir.dpp_xor_ctrl` picks the DPP control word for
+        the target. See :meth:`_op_tile_dpp_xor` in ``lower_llvm.py``.
         """
+        dpp_ctrl = dpp_xor_ctrl(op, self.arch)
         (data,) = op.operands
-        mask = int(op.attrs["xor_mask"])
-        dpp_ctrl = 0x160 | (mask & 0xF)
         self._emit(
             f"int {_name(op.result)} = __builtin_amdgcn_update_dpp("
             f"{_name(data)}, {_name(data)}, {dpp_ctrl}, 15, 15, 1);"
@@ -2121,10 +2181,12 @@ class _Lowerer:
 
         See :meth:`_op_tile_quad_perm` in ``lower_llvm.py``: ``ctrl``
         packs four two-bit lane selectors, so ``0..255`` is the whole
-        legal range and out-of-range values are malformed IR.
+        legal range and out-of-range values are malformed IR. The data and
+        the result must be i32: HIP would convert between ``int`` and
+        ``float`` without a word.
         """
+        ctrl = dpp_ctrl_attr(op)
         (data,) = op.operands
-        ctrl = int(op.attrs["ctrl"])
         if not 0 <= ctrl <= 255:
             raise ValueError(f"tile.quad_perm: ctrl must be in 0..255, got {ctrl}")
         self._emit(
@@ -2460,6 +2522,7 @@ class _Lowerer:
         a, bb, cc = op.operands
         n = op.result.type.count if isinstance(op.result.type, VectorType) else 1
         res_t = _type_to_hip(op.result.type)
+        _reject_f64(op, op.result.type.elem.name)
         nice = _name(op.result)
         self._emit(f"{res_t} {nice};")
         for i in range(n):

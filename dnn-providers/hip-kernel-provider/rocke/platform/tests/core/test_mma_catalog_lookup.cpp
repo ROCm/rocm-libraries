@@ -360,6 +360,33 @@ static int test_scale_layouts_and_families()
                 continue;
             }
             ++scaled;
+            if(strcmp(arches[i], "gfx950") == 0)
+            {
+                CHECK(strcmp(op->family, "mfma_scaled") == 0);
+                CHECK(op->m == 32 && op->n == 32 && op->k == 64);
+                CHECK(op->a_frag_len == 32 && op->b_frag_len == 32 && op->c_frag_len == 16);
+                CHECK(op->scale_block_k == ROCKE_MMA_SCALE_K32);
+                for(int source = 0; source < 2; ++source)
+                {
+                    const auto* map = source ? rocke_mma_op_b_scale_layout(op, NULL)
+                                             : rocke_mma_op_a_scale_layout(op, NULL);
+                    CHECK(map && map->frag_len == 1 && map->wave_size == 64);
+                    CHECK(map->role == (source ? ROCKE_MMA_ROLE_B_SCALE : ROCKE_MMA_ROLE_A_SCALE));
+                    for(int slot : {-1, 0, 1})
+                    {
+                        rocke_ir_builder_t b;
+                        CHECK(rocke_ir_builder_init(&b, "mfma_scale_layout") == ROCKE_OK);
+                        auto* lane = rocke_b_thread_id_x(&b);
+                        rocke_value_t *x = NULL, *y = NULL;
+                        const bool ok = rocke_layout_map_coord(map, &b, lane, slot, &x, &y);
+                        CHECK(ok == (slot == 0));
+                        CHECK(slot == 0 ? (x && y && b.status == ROCKE_OK)
+                                        : (!x && !y && b.status == ROCKE_ERR_VALUE));
+                        rocke_ir_builder_free(&b);
+                    }
+                }
+                continue;
+            }
             CHECK(strcmp(arches[i], "gfx1250") == 0);
             const int count = op->scale_block_k == ROCKE_MMA_SCALE_K16 ? 8 : 4;
             CHECK(op->a_scale_frag_len == count && op->b_scale_frag_len == count);
@@ -391,7 +418,7 @@ static int test_scale_layouts_and_families()
             }
         }
     }
-    CHECK(scaled == 50);
+    CHECK(scaled == 75);
     return 0;
 }
 
