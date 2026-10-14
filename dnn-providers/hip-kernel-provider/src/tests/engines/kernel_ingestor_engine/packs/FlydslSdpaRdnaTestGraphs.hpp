@@ -200,6 +200,8 @@ struct SdpaGraphSpec
     std::optional<int64_t> queryHeadDimStride;
     /// V's sequence stride, when it should not be the layout's (e.g. a padded row pitch).
     std::optional<int64_t> valueSequenceStride;
+    /// O's batch stride, when it should not be the layout's (e.g. a slice of a larger buffer).
+    std::optional<int64_t> outputBatchStride;
 
     /// Overrides of the bounds the mask kind sets, for bands and other windows.
     std::optional<int64_t> leftBound;
@@ -364,7 +366,11 @@ inline flatbuffers::FlatBufferBuilder buildFlydslSdpaRdnaGraph(const SdpaGraphSp
     {
         vStrides[2] = *spec.valueSequenceStride;
     }
-    const auto oStrides = sdpaStrides(spec.layout, spec.heads, spec.seqLenQ, valueHeadDim);
+    auto oStrides = sdpaStrides(spec.layout, spec.heads, spec.seqLenQ, valueHeadDim);
+    if(spec.outputBatchStride.has_value())
+    {
+        oStrides[0] = *spec.outputBatchStride;
+    }
 
     flatbuffers::FlatBufferBuilder builder;
     std::vector<flatbuffers::Offset<data_objects::TensorAttributes>> tensors;

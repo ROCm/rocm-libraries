@@ -784,6 +784,33 @@ TEST(TestFlydslSdpaRdnaKernelMatch, ADecodeObjectDeclinesWhatItsTileCannotHold)
         << "a decode object must name its merge kernel";
 }
 
+TEST(TestFlydslSdpaRdnaKernelMatch, ADecodeObjectDeclinesAnOutputItsMergeCannotAddress)
+{
+    // The merge kernel stores O and the LSE at one 32-bit element offset over the whole
+    // tensor: an O whose second batch starts past 2^31 elements is declined, one just
+    // inside is served.
+    const auto decode = makeFlydslSdpaRdnaKernel("bf16", 128, 1, 16, 32, 1, 0, 128, 1);
+    SdpaGraphSpec spec;
+    spec.headDim = 128;
+    spec.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+    spec.heads = 8;
+    spec.kvHeads = 2;
+    spec.seqLenQ = 1;
+    spec.seqLenKv = 300;
+    spec.outputBatchStride = (int64_t{1} << 31) - 4096;
+    {
+        const GraphFixture fixture(buildFlydslSdpaRdnaGraph(spec));
+        EXPECT_TRUE(
+            matchesKernel(FLYDSL_SDPA_RDNA_DECODE, fixture.context(), decode, bindingsFor(spec)))
+            << "O's last element just inside int32";
+    }
+    spec.outputBatchStride = int64_t{1} << 31;
+    const GraphFixture fixture(buildFlydslSdpaRdnaGraph(spec));
+    EXPECT_FALSE(
+        matchesKernel(FLYDSL_SDPA_RDNA_DECODE, fixture.context(), decode, bindingsFor(spec)))
+        << "O's second batch past int32";
+}
+
 TEST(TestFlydslSdpaRdnaKernelMatch, ADecodeBiasObjectServesABiasItsOffsetsReach)
 {
     const auto plain = makeFlydslSdpaRdnaKernel("bf16", 128, 1, 16, 32, 1, 0, 128, 1);

@@ -170,6 +170,59 @@ bool decodeBiasFits(const SdpaProblem& problem, const BiasStrides& strides)
            && *lastQuery <= BIAS_SLICE_ELEMENT_LIMIT - *lastKey - *lastHead;
 }
 
+/// One past the last element @p tensor's dims and strides reach, or nullopt past int64.
+std::optional<int64_t> wholeTensorElements(const data_objects::TensorAttributes& tensor)
+{
+    const auto* dims = tensor.dims();
+    const auto* strides = tensor.strides();
+    if(dims == nullptr || strides == nullptr || dims->size() != strides->size())
+    {
+        return std::nullopt;
+    }
+    int64_t last = 1;
+    for(flatbuffers::uoffset_t axis = 0; axis < dims->size(); ++axis)
+    {
+        const auto reach = checkedProduct({dims->Get(axis) - 1, strides->Get(axis)});
+        if(!reach.has_value() || *reach > INT32_LIMIT)
+        {
+            return std::nullopt;
+        }
+        last += *reach;
+    }
+    return last;
+}
+
+/// Whether the merge kernel's 32-bit element offsets reach everything it addresses: it
+/// indexes the split workspace by (row, split, column) and O and the LSE through their
+/// strides over the whole tensor, not one (batch, head) slice.
+bool decodeMergeReaches(const MatchContext& context,
+                        const BoundTokens& bound,
+                        const SdpaProblem& problem,
+                        int64_t splits)
+{
+    const auto workspace = checkedProduct(
+        {problem.batch, problem.numHeads, problem.seqLenQ, splits, problem.headDimV + 1});
+    if(!workspace.has_value() || *workspace > INT32_LIMIT)
+    {
+        return false;
+    }
+    for(const auto token : {O_TOKEN, STATS_TOKEN})
+    {
+        const auto uid = tryGetBoundInt(bound, token);
+        if(!uid.has_value() || (token == STATS_TOKEN && *uid == NO_STATS))
+        {
+            continue;
+        }
+        const auto* tensor = findTensor(context, *uid);
+        const auto elements = tensor == nullptr ? std::nullopt : wholeTensorElements(*tensor);
+        if(!elements.has_value() || *elements > INT32_LIMIT)
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
 /// Whether a decode object can compute the graph: one V head goes with each K head (the
 /// rows of a tile share one KV head), and its rows fit -- any number of 16-row tiles the
 /// grid's second dimension holds for a row-tiled object, one tile's for an object built
@@ -212,6 +265,13 @@ bool flydslSdpaRdnaDecodeKernelMatches(const MatchContext& context,
     if(!dvSplit.has_value() || !headDimMax.has_value() || *headDimMax % *dvSplit != 0
        || !decodeServes(problem, decodeRowTiled(kernel))
        || stringMetadata(kernel, MERGE_SYMBOL_FIELD).value_or("").empty())
+    {
+        return false;
+    }
+    const auto splits = decodeSplits(problem,
+                                     decodeRowTiles(problem, decodeRowTiled(kernel)),
+                                     context.deviceProperties.multiProcessorCount);
+    if(!decodeMergeReaches(context, bound, problem, splits))
     {
         return false;
     }
