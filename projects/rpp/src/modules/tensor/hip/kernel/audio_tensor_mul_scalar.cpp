@@ -58,6 +58,7 @@ RppStatus hip_exec_audio_tensor_mul_scalar(Rpp32f* srcPtr, Rpp32f scalarValue,
                        dim3(LOCAL_THREADS_X_1DIM, LOCAL_THREADS_Y_1DIM, LOCAL_THREADS_Z_1DIM), 0,
                        handle.GetStream(), srcPtr, srcDescPtr->strides.nStride, dstPtr,
                        dstDescPtr->strides.nStride, srcLengthTensor, scalarValue);
+    HIP_CHECK_LAUNCH_RETURN();
 
     return RPP_SUCCESS;
 }

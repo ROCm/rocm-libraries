@@ -9,10 +9,10 @@
  *     (rocke_h_dispatch), keyed by opcode,
  *   - emission + indent utilities (rocke_h_emit / rocke_h_emitf / rocke_h_emit_smem_decl
  *     / rocke_h_push_indent / rocke_h_pop_indent),
- *   - the sticky error / liveness channel (rocke_h_fail / rocke_h_live),
+ *   - exception-based errors and the NULL guard (rocke_h_fail / rocke_h_live),
  *   - naming / type mapping (rocke_h_name / rocke_h_type_to_hip / rocke_h_hip_scalar /
  *     rocke_h_vec_prefix),
- *   - float literal formatting (rocke_h_f32_literal),
+ *   - float literal formatting (rocke_h_f32_literal / rocke_h_f64_literal),
  *   - waitcnt encoders (rocke_h_encode_waitcnt + the two raw encoders),
  *   - arch gates (rocke_h_require_ds_read_tr / rocke_h_require_wmma_arch),
  *   - the smem storage side table (rocke_h_smem_storage / rocke_h_smem_set_storage),
@@ -28,11 +28,13 @@
  * arena-backed table keyed by the producing Value pointer, since the frozen IR
  * attrs must not be mutated.
  */
+#include "rocke/tf32_internal.h"
 #include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
 
+#include "rocke/arch_target.h" /* arch catalog lookup for the arch seam guard */
 #include "rocke/arena.h"
 #include "rocke/error.hpp" /* ckc::Error boundary translation */
 #include "rocke/ir.h"
@@ -74,12 +76,14 @@ const char* const ROCKE_HIP_PROLOGUE
       "_ROCKE_VEC(bf16, bf16x, 8); _ROCKE_VEC(bf16, bf16x, 16);\n"
       "_ROCKE_VEC(float, f32x, 1); _ROCKE_VEC(float, f32x, 2); _ROCKE_VEC(float, f32x, 4);\n"
       "_ROCKE_VEC(float, f32x, 8); _ROCKE_VEC(float, f32x, 16);\n"
+      "_ROCKE_VEC(double, f64x, 1); _ROCKE_VEC(double, f64x, 2);\n"
       "_ROCKE_VEC(int, i32x, 1); _ROCKE_VEC(int, i32x, 2); _ROCKE_VEC(int, i32x, 3);\n"
-      "_ROCKE_VEC(int, i32x, 4); _ROCKE_VEC(int, i32x, 8);\n"
+      "_ROCKE_VEC(int, i32x, 4); _ROCKE_VEC(int, i32x, 8); _ROCKE_VEC(int, i32x, 16);\n"
       "_ROCKE_VEC(int16_t, i16x, 1); _ROCKE_VEC(int16_t, i16x, 2);\n"
       "_ROCKE_VEC(int16_t, i16x, 4); _ROCKE_VEC(int16_t, i16x, 8);\n"
       "_ROCKE_VEC(int8_t, i8x, 1); _ROCKE_VEC(int8_t, i8x, 2);\n"
       "_ROCKE_VEC(int8_t, i8x, 4); _ROCKE_VEC(int8_t, i8x, 8); _ROCKE_VEC(int8_t, i8x, 16);\n"
+      "_ROCKE_VEC(int8_t, i8x, 32); _ROCKE_VEC(int8_t, i8x, 48); _ROCKE_VEC(int8_t, i8x, 64);\n"
       "_ROCKE_VEC(bool, boolx, 2); _ROCKE_VEC(bool, boolx, 4); _ROCKE_VEC(bool, boolx, 8);\n"
       "_ROCKE_VEC(bool, boolx, 16);\n"
       "#undef _ROCKE_VEC\n"
@@ -293,7 +297,7 @@ const char* rocke_h_hip_scalar(const char* ir_scalar_name)
     {
         return "int16_t";
     }
-    if(strcmp(ir_scalar_name, "i32") == 0)
+    if(strcmp(ir_scalar_name, "i32") == 0 || strcmp(ir_scalar_name, "tf32") == 0)
     {
         return "int";
     }
@@ -312,6 +316,10 @@ const char* rocke_h_hip_scalar(const char* ir_scalar_name)
     if(strcmp(ir_scalar_name, "f32") == 0)
     {
         return "float";
+    }
+    if(strcmp(ir_scalar_name, "f64") == 0)
+    {
+        return "double";
     }
     if(strcmp(ir_scalar_name, "fp8e4m3") == 0)
     {
@@ -343,7 +351,11 @@ const char* rocke_h_vec_prefix(const char* ir_scalar_name, bool full_map)
             {
                 return "f32x";
             }
-            if(strcmp(ir_scalar_name, "i32") == 0)
+            if(strcmp(ir_scalar_name, "f64") == 0)
+            {
+                return "f64x";
+            }
+            if(strcmp(ir_scalar_name, "i32") == 0 || strcmp(ir_scalar_name, "tf32") == 0)
             {
                 return "i32x";
             }
@@ -369,8 +381,57 @@ const char* rocke_h_vec_prefix(const char* ir_scalar_name, bool full_map)
     return "f16x";
 }
 
-/* Python _type_to_hip(t). Returns arena-owned string; "" + sticky error on an
- * unmappable type (KeyError parity). */
+/* True iff `name` is one of the element types rocke_h_vec_prefix maps for real
+ * (i.e. would not land on the "f16x" fallback). */
+static bool rocke_h_scalar_in_vec_map(const char* name, bool full_map)
+{
+    if(strcmp(name, "f16") == 0 || strcmp(name, "bf16") == 0)
+    {
+        return true;
+    }
+    if(!full_map)
+    {
+        return false;
+    }
+    return strcmp(name, "tf32") == 0 || strcmp(name, "f32") == 0 || strcmp(name, "f64") == 0
+           || strcmp(name, "i32") == 0 || strcmp(name, "i16") == 0 || strcmp(name, "i8") == 0
+           || strcmp(name, "fp8e4m3") == 0 || strcmp(name, "bf8e5m2") == 0;
+}
+
+const char* rocke_h_vec_prefix_checked(rocke_h_lowerer_t* lw,
+                                       const char* ir_scalar_name,
+                                       bool full_map,
+                                       const char* op_desc)
+{
+    /* Mirrors Python _vec_prefix: an elem_type outside the map is a hard error,
+     * not a silent "f16x" that would reinterpret the bits of another type. */
+    if(!ir_scalar_name || !rocke_h_scalar_in_vec_map(ir_scalar_name, full_map))
+    {
+        rocke_h_fail(lw,
+                     ROCKE_ERR_KEY,
+                     "%s: unsupported element type '%s'",
+                     op_desc,
+                     ir_scalar_name ? ir_scalar_name : "(null)");
+    }
+    return rocke_h_vec_prefix(ir_scalar_name, full_map);
+}
+
+/* Python _reject_f64(op, tname):
+ *   if tname == "f64":
+ *       raise NotImplementedError(f"{op.name} does not support f64") */
+void rocke_h_reject_f64(rocke_h_lowerer_t* lw, const rocke_op_t* op, const char* tname)
+{
+    if(tname && strcmp(tname, "f64") == 0)
+    {
+        rocke_h_fail(lw,
+                     ROCKE_ERR_NOTIMPL,
+                     "%s does not support f64",
+                     op->name ? op->name : rocke_opcode_name(op->opcode));
+    }
+}
+
+/* Python _type_to_hip(t). Returns an arena-owned string; throws on an unmappable
+ * HIP type (KeyError parity), including logical types without direct HIP lowering. */
 const char* rocke_h_type_to_hip(rocke_h_lowerer_t* lw, const rocke_type_t* t)
 {
     if(!t)
@@ -413,7 +474,8 @@ const char* rocke_h_type_to_hip(rocke_h_lowerer_t* lw, const rocke_type_t* t)
              * through to the KeyError. Detect the listed set explicitly so an
              * unknown vector elem is an error rather than silently "f16x". */
             if(strcmp(elem, "f16") != 0 && strcmp(elem, "bf16") != 0 && strcmp(elem, "f32") != 0
-               && strcmp(elem, "i32") != 0 && strcmp(elem, "i16") != 0 && strcmp(elem, "i8") != 0
+               && strcmp(elem, "tf32") != 0 && strcmp(elem, "f64") != 0 && strcmp(elem, "i32") != 0
+               && strcmp(elem, "i16") != 0 && strcmp(elem, "i8") != 0
                && strcmp(elem, "fp8e4m3") != 0 && strcmp(elem, "bf8e5m2") != 0)
             {
                 rocke_h_fail(lw, ROCKE_ERR_KEY, "type_to_hip: unmappable vector elem '%s'", elem);
@@ -474,6 +536,35 @@ const char* rocke_h_f32_literal(rocke_h_lowerer_t* lw, double val)
     /* NOTE(port): Python emits repr(float)+"f"; %g is a close approximation but
      * NOT guaranteed byte-identical to CPython repr. Known port hazard. */
     out = rocke_arena_printf(&lw->b->arena, "%gf", val);
+    return out ? out : "";
+}
+
+const char* rocke_h_f64_literal(rocke_h_lowerer_t* lw, double val)
+{
+    char* out;
+    if(!lw || !lw->b)
+    {
+        return "";
+    }
+    if(isnan(val))
+    {
+        out = rocke_arena_strdup(&lw->b->arena, "((double)NAN)");
+        return out ? out : "";
+    }
+    if(isinf(val))
+    {
+        out = rocke_arena_strdup(&lw->b->arena,
+                                 val < 0 ? "((double)-INFINITY)" : "((double)INFINITY)");
+        return out ? out : "";
+    }
+    if(val == 0.0 && signbit(val))
+    {
+        out = rocke_arena_strdup(&lw->b->arena, "-0.0");
+        return out ? out : "";
+    }
+    /* NOTE(port): Python emits repr(float); %.17g is a close approximation but
+     * NOT guaranteed byte-identical to CPython repr. Known port hazard. */
+    out = rocke_arena_printf(&lw->b->arena, "%.17g", val);
     return out ? out : "";
 }
 
@@ -759,6 +850,9 @@ rocke_status_t rocke_h_lower_op(rocke_h_lowerer_t* lw, const rocke_op_t* op)
     {
         return rocke_h_fail(lw, ROCKE_ERR_VALUE, "lower_op: NULL op");
     }
+    const char* tf32_error = rocke_tf32_op_error(op);
+    if(tf32_error)
+        return rocke_h_fail(lw, ROCKE_ERR_VALUE, "%s", tf32_error);
     fn = rocke_h_dispatch(op->opcode);
     if(!fn)
     {
@@ -849,12 +943,68 @@ rocke_hip_arch_t rocke_hip_arch_from_gfx(const char* gfx)
         a.has_wmma = true;
         a.family = "rdna";
     }
-    /* Anything unrecognised keeps the gfx950 default facts (per the header). */
+    /* Anything unrecognised keeps the gfx950 default facts (per the header).
+     * rocke_lower_kernel_to_hip rejects such a string before it gets here, so
+     * this fallback only serves direct callers of the resolver. */
 
     return a;
 }
 
 /* ============================== public entry ======================== */
+
+/* Mirrors _extra_vector_declarations: preserve the static prologue and add
+ * only widths actually encountered, in parameter/operand/result walk order. */
+static void
+    h_extra_vector_type(ckc::rocke_h_lowerer_t* lw, const rocke_type_t* t, rocke_strbuf_t* out)
+{
+    if(!t)
+        return;
+    if(t->kind == ROCKE_TYPE_PTR)
+        h_extra_vector_type(lw, t->pointee, out);
+    else if(t->kind == ROCKE_TYPE_SMEM)
+        h_extra_vector_type(lw, t->elem, out);
+    else if(t->kind == ROCKE_TYPE_VECTOR)
+    {
+        const char* name = ckc::rocke_h_type_to_hip(lw, t);
+        const char* prefix
+            = strcmp(t->elem->name, "i1") == 0
+                  ? "boolx"
+                  : ckc::rocke_h_vec_prefix_checked(lw, t->elem->name, true, "vector type");
+        const char* scalar
+            = strcmp(prefix, "i8x") == 0 ? "int8_t" : ckc::rocke_h_hip_scalar(t->elem->name);
+        const char* macro
+            = rocke_arena_printf(&lw->b->arena, "_ROCKE_VEC(%s, %s, %d)", scalar, prefix, t->count);
+        const char* declaration
+            = rocke_arena_printf(&lw->b->arena,
+                                 "using %s = %s __attribute__((ext_vector_type(%d)));",
+                                 name,
+                                 scalar,
+                                 t->count);
+        if(!macro || !declaration)
+            ckc::rocke_h_fail(lw, ROCKE_ERR_OOM, "vector declaration allocation failed");
+        if(!strstr(ROCKE_HIP_PROLOGUE, macro) && !strstr(rocke_strbuf_cstr(out), declaration))
+        {
+            rocke_strbuf_append(out, declaration);
+            rocke_strbuf_append_char(out, '\n');
+        }
+    }
+}
+
+static void h_extra_vector_region(ckc::rocke_h_lowerer_t* lw,
+                                  const rocke_region_t* region,
+                                  rocke_strbuf_t* out)
+{
+    for(int i = 0; i < region->num_ops; ++i)
+    {
+        const auto* op = region->ops[i];
+        for(int j = 0; j < op->num_operands; ++j)
+            h_extra_vector_type(lw, op->operands[j]->type, out);
+        for(int j = 0; j < op->num_results; ++j)
+            h_extra_vector_type(lw, op->results[j]->type, out);
+        for(int j = 0; j < op->num_regions; ++j)
+            h_extra_vector_region(lw, op->regions[j], out);
+    }
+}
 
 rocke_status_t rocke_lower_kernel_to_hip(rocke_ir_builder_t* b,
                                          const rocke_kernel_def_t* kernel,
@@ -890,6 +1040,15 @@ rocke_status_t rocke_lower_kernel_to_hip(rocke_ir_builder_t* b,
             include_prologue = opts->include_prologue;
         }
         arch_name = opts->arch;
+    }
+
+    /* Mirror the Python _Lowerer: an arch that was passed but is empty or is
+     * absent from the arch catalog is a caller bug (ValueError / KeyError
+     * there), so reject it instead of silently lowering with the gfx950
+     * baseline facts. A NULL arch still takes that baseline. */
+    if(arch_name && (arch_name[0] == '\0' || !rocke_arch_target_from_gfx(arch_name)))
+    {
+        return ROCKE_ERR_VALUE;
     }
 
     /* ---- init lowerer ---- */
@@ -946,6 +1105,9 @@ rocke_status_t rocke_lower_kernel_to_hip(rocke_ir_builder_t* b,
             rocke_strbuf_append(out, ROCKE_HIP_PROLOGUE);
             rocke_strbuf_append_char(out, '\n');
         }
+        for(int j = 0; j < kernel->num_params; ++j)
+            h_extra_vector_type(&lw, kernel->params[j]->type, out);
+        h_extra_vector_region(&lw, kernel->body, out);
         /* head */
         rocke_strbuf_appendf(out,
                              "extern \"C\" __global__ __launch_bounds__(%d)\n"

@@ -1,8 +1,9 @@
 # RocKE `unified_attention` parity & benchmark harness
 
-This folder hosts the cross-backend parity + benchmark script for AITER's
-`unified_attention` kernel. It is the canonical performance harness for
-the RocKE attention work.
+This folder documents the cross-backend parity + benchmark script for AITER's
+`unified_attention` kernel,
+[`prefill/parity_unified_attention.py`](prefill/parity_unified_attention.py).
+It is the canonical performance harness for the RocKE attention work.
 
 > **New to flash attention or this kernel family?** [`ALGORITHM.md`](ALGORITHM.md)
 > derives both kernels from the math up — the paged/varlen attention spec, the
@@ -11,7 +12,7 @@ the RocKE attention work.
 > q-block) paths on gfx950. Read it first if you want to understand *what* the
 > kernels compute before reading the parity + optimization history below.
 
-The script (`parity_unified_attention.py`):
+The script (`prefill/parity_unified_attention.py`):
 
 1. Builds the standard AITER unified-attention inputs (paged KV cache,
    block tables, cumulative query lengths, optional sliding window,
@@ -49,13 +50,16 @@ CK-3D, which is **not** apples-to-apples. The three tables resolve that:
 ## Running
 
 ```bash
-cd <composablekernel-checkout>
+cd <rocke>/platform
 export AITER_PATH=<aiter-checkout>
-PYTHONPATH="python:${AITER_PATH}" python \
-  python/rocke/examples/gfx950/attention/parity_unified_attention.py \
+PYTHONPATH=python:../library python -m \
+  builders.gfx950.attention.prefill.parity_unified_attention \
   --attempts 30 --warmup 10 \
   --report /tmp/unified_attention_parity.json
 ```
+
+The harness adds `AITER_PATH` to `sys.path` itself; without AITER, pass
+`--skip-triton` to run only the RocKE lanes.
 
 Flags (exactly as accepted by `parity_unified_attention.py`):
 
@@ -916,3 +920,22 @@ Passing `--report PATH` writes a list of per-scenario records:
   ...
 ]
 ```
+
+## Related: fp8 KV-cache decode cohort
+
+The fp8 (e4m3) KV-cache decode work on gfx950 — correctness + benchmark coverage
+plus the documented perf investigation (the cohort routes to 3D on its own via
+the live-CU-count resolver, #10583; no production kernel change) — is a separate
+cohort from this parity harness. It has its own driver, case study, and benchmark
+scenario (paths relative to `library/`):
+
+| Artifact | Path |
+|---|---|
+| Case study (coverage, and why there's no kernel change) | `builders/gfx950/attention/decode/README.md` |
+| On-GPU numeric gate (real launch, independent numpy ref, `run_checks --steps numeric`) | `builders/gfx950/attention/decode/fp8_decode_3d_verify.py` |
+| Benchmark scenario (cohort shapes) | `benchmarks/gfx950/attention/decode/fp8_decode_d64_gqa8_shapes.json` (run via `benchmark_decode_live.py --shapes ...`) |
+| Cross-backend comparison harness | `benchmarks/gfx950/attention/decode/fp8_decode_vs_baselines.py` |
+
+Measured conditions and numbers are intentionally omitted from this repository
+(per `platform/AGENTS.md` §Compliance); they are recorded only in the internal
+perf record.

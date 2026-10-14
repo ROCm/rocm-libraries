@@ -106,6 +106,11 @@ MIOPEN_INTERNALS_EXPORT std::size_t EngineeredConvFeatureCount(int spatial_dim =
 // one place. Defined in ai_heuristics.cpp.
 bool IsTunaNetCategoricalFeature(const std::string& name);
 
+// True when MIOPEN_DEBUG_LGBM_ONLY is set: the fdeep heuristics (TunaNet solver selection and the
+// KTN / two-tower kernel-tuning models) are bypassed so only the LGBM solver selector and LGBM
+// perf-config picker run. Defined in ai_heuristics.cpp.
+bool LgbmOnly();
+
 /**
  * @brief Load JSON from file path
  * @param path File system path to JSON file

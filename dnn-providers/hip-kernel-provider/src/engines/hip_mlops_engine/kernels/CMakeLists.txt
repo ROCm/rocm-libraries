@@ -18,6 +18,7 @@ add_kernels_for_embedding(
     ${CMAKE_CURRENT_SOURCE_DIR}/rmsnorm/RMSNormFwd.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/rmsnorm/RMSNormBwd.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/resample/ResampleFwd.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/resample/ResampleBwd.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/layernorm/LayernormBwd.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/layernorm/LayernormCommon.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/layernorm/LayernormFwd.cpp

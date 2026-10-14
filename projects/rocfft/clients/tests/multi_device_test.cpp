@@ -105,10 +105,8 @@ std::vector<fft_params> param_generator_multi_gpu(const SplitType type)
         ooffset_range_zero,
         place_range,
         false,
-        // function pointer callbacks need -fgpu-rdc, but that causes build
-        // nondeterminism in kpack.
-        // JIT callbacks are not yet supported on multi-GPU transforms
-        {fft_callback_type_none, /*fft_callback_type_funcptr, fft_callback_type_jit*/});
+        // function pointer callbacks are not supported for multi-GPU
+        {fft_callback_type_none, fft_callback_type_jit /*, fft_callback_type_funcptr*/});
 
     std::vector<fft_params> all_params;
 
@@ -203,8 +201,6 @@ std::vector<fft_params> param_generator_multi_gpu(const SplitType type)
                     continue; // FIXME, fails even with only 2 ranks
                 if(p.placement == fft_placement_inplace)
                     continue; // only out-of-place
-                if(p.run_callbacks != fft_callback_type_none)
-                    continue; // known issue to fix w/ callbacks
                 start_global_dev_id_input  = dev_rng(gen);
                 start_global_dev_id_output = dev_rng(gen);
                 while(start_global_dev_id_input == start_global_dev_id_output)
@@ -322,6 +318,11 @@ TEST(multi_gpu_validate, catch_validation_errors)
         {
             auto& param = params[i];
 
+            // We're only validating split types and these tests
+            // won't specify callbacks
+            if(param.run_callbacks != fft_callback_type_none)
+                continue;
+
             // this validation runs in rocfft-test itself and
             // multi-process libs are not initialized.
             if(param.mp_lib != fft_params::fft_mp_lib_none)
@@ -406,6 +407,10 @@ static const auto multi_gpu_tokens = {
     "real_forward_len_160_160_160_single_op_batch_1_ifield_brick_lower_0_0_0_0_upper_1_80_160_160_stride_0_25600_160_1_dev_0_brick_lower_0_80_0_0_upper_1_160_160_160_stride_0_25600_160_1_rank_1_dev_1_ofield_brick_lower_0_0_0_0_upper_1_160_80_81_stride_0_6560_82_1_dev_0_brick_lower_0_0_80_0_upper_1_160_160_81_stride_0_6560_82_1_rank_1_dev_1",
     // neither input nor output bricks are contiguous
     "real_forward_len_160_160_160_single_op_batch_1_ifield_brick_lower_0_0_0_0_upper_1_80_160_160_stride_0_25920_162_1_dev_0_brick_lower_0_80_0_0_upper_1_160_160_160_stride_0_25920_162_1_rank_1_dev_1_ofield_brick_lower_0_0_0_0_upper_1_160_80_81_stride_0_6560_82_1_dev_0_brick_lower_0_0_80_0_upper_1_160_160_81_stride_0_6560_82_1_rank_1_dev_1",
+    // slab-decomposed c2c with padded input strides
+    "complex_forward_len_128_256_single_op_batch_1_ifield_brick_lower_0_0_0_upper_1_64_256_stride_262144_4096_1_dev_0_brick_lower_0_64_0_upper_1_128_256_stride_262144_4096_1_dev_1_ofield_brick_lower_0_0_0_upper_1_128_128_stride_16384_128_1_dev_0_brick_lower_0_0_128_upper_1_128_256_stride_16384_128_1_dev_1",
+    // pencil-decomposed c2c with padded input distances
+    "complex_forward_len_8_8_8_single_op_batch_64_ifield_brick_lower_0_0_0_0_upper_64_4_4_8_stride_4096_32_8_1_dev_0_brick_lower_0_0_4_0_upper_64_4_8_8_stride_4096_32_8_1_dev_1_brick_lower_0_4_0_0_upper_64_8_4_8_stride_4096_32_8_1_dev_2_brick_lower_0_4_4_0_upper_64_8_8_8_stride_4096_32_8_1_dev_3_ofield_brick_lower_0_0_0_0_upper_64_4_8_4_stride_128_32_4_1_dev_0_brick_lower_0_0_0_4_upper_64_4_8_8_stride_128_32_4_1_dev_1_brick_lower_0_4_0_0_upper_64_8_8_4_stride_128_32_4_1_dev_2_brick_lower_0_4_0_4_upper_64_8_8_8_stride_128_32_4_1_dev_3",
     // 1D multi-process batched in-place transform using 1 device per rank
     "complex_forward_len_256_double_ip_batch_4_ifield_brick_lower_0_0_upper_4_128_stride_128_1_dev_0_brick_lower_0_128_upper_4_256_stride_128_1_rank_1_dev_1_ofield_brick_lower_0_0_upper_4_128_stride_128_1_dev_0_brick_lower_0_128_upper_4_256_stride_128_1_rank_1_dev_1",
     // 2D multi-process out-of-place transform using 2 MPI ranks each with 2 GPUs
@@ -417,6 +422,13 @@ static const auto multi_gpu_tokens = {
 
     // 2D, 2-device out-of-place transform where both devices require work memory
     "complex_forward_len_8_65536_8_single_op_batch_1_ifield_brick_lower_0_0_0_0_upper_1_8_32768_8_stride_2097152_262144_8_1_dev_0_brick_lower_0_0_32768_0_upper_1_8_65536_8_stride_2097152_262144_8_1_dev_1_ofield_brick_lower_0_0_0_0_upper_1_8_65536_4_stride_2097152_262144_4_1_dev_0_brick_lower_0_0_0_4_upper_1_8_65536_8_stride_2097152_262144_4_1_dev_1",
+    // 3D 8-device decomposition with an unbalanceable slow-dim pencil factorization
+    // exercises the BuildOptMultiDevicePlan exception-safety fallback
+    "complex_forward_len_8_2_2_single_op_batch_1_ifield_brick_lower_0_0_0_0_upper_1_2_1_2_stride_4_2_2_1_dev_0_brick_lower_0_0_1_0_upper_1_2_2_2_stride_4_2_2_1_dev_1_brick_lower_0_2_0_0_upper_1_4_1_2_stride_4_2_2_1_dev_2_brick_lower_0_2_1_0_upper_1_4_2_2_stride_4_2_2_1_dev_3_brick_lower_0_4_0_0_upper_1_6_1_2_stride_4_2_2_1_dev_4_brick_lower_0_4_1_0_upper_1_6_2_2_stride_4_2_2_1_dev_5_brick_lower_0_6_0_0_upper_1_8_1_2_stride_4_2_2_1_dev_6_brick_lower_0_6_1_0_upper_1_8_2_2_stride_4_2_2_1_dev_7_ofield_brick_lower_0_0_0_0_upper_1_8_1_1_stride_8_1_1_1_dev_0_brick_lower_0_0_0_1_upper_1_8_1_2_stride_8_1_1_1_dev_1_brick_lower_0_0_1_0_upper_1_8_2_1_stride_8_1_1_1_dev_2_brick_lower_0_0_1_1_upper_1_8_2_2_stride_8_1_1_1_dev_3",
+    // 3D pencil-to-slab
+    "complex_forward_len_8_8_8_single_op_batch_1_ifield_brick_lower_0_0_0_0_upper_1_4_4_8_stride_128_32_8_1_dev_0_brick_lower_0_0_4_0_upper_1_4_8_8_stride_128_32_8_1_dev_1_brick_lower_0_4_0_0_upper_1_8_4_8_stride_128_32_8_1_dev_2_brick_lower_0_4_4_0_upper_1_8_8_8_stride_128_32_8_1_dev_3_ofield_brick_lower_0_0_0_0_upper_1_2_8_8_stride_128_64_8_1_dev_0_brick_lower_0_2_0_0_upper_1_4_8_8_stride_128_64_8_1_dev_1_brick_lower_0_4_0_0_upper_1_6_8_8_stride_128_64_8_1_dev_2_brick_lower_0_6_0_0_upper_1_8_8_8_stride_128_64_8_1_dev_3",
+    // same, with JIT load/store callbacks
+    "complex_forward_len_8_8_8_single_op_batch_1_ifield_brick_lower_0_0_0_0_upper_1_4_4_8_stride_128_32_8_1_dev_0_brick_lower_0_0_4_0_upper_1_4_8_8_stride_128_32_8_1_dev_1_brick_lower_0_4_0_0_upper_1_8_4_8_stride_128_32_8_1_dev_2_brick_lower_0_4_4_0_upper_1_8_8_8_stride_128_32_8_1_dev_3_ofield_brick_lower_0_0_0_0_upper_1_2_8_8_stride_128_64_8_1_dev_0_brick_lower_0_2_0_0_upper_1_4_8_8_stride_128_64_8_1_dev_1_brick_lower_0_4_0_0_upper_1_6_8_8_stride_128_64_8_1_dev_2_brick_lower_0_6_0_0_upper_1_8_8_8_stride_128_64_8_1_dev_3_JITCB",
     // clang-format on
 };
 

@@ -3,7 +3,9 @@
 
 #include <algorithm>
 #include <array>
+#include <cstddef>
 #include <string>
+#include <vector>
 
 #include <gtest/gtest.h>
 
@@ -18,6 +20,10 @@
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
+#include <atomic>
+#include <set>
+#include <thread>
+
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
 #include "tests/engines/kernel_ingestor_engine/packs/PointwiseTestGraphs.hpp"
@@ -33,30 +39,38 @@ using namespace hip_kernel_provider::core;
 static_assert(hipdnn_plugin_sdk::HasGetEngineName<Container>::value,
               "Container::getEngineName must match the signature the plugin SDK calls");
 
-/// Engines the provider exposes: one per compiled-in native engine, plus one per
-/// discovered descriptor set, read from the inventory rather than hardcoded so a
-/// newly shipped pack is never silently uncounted.
-static uint32_t expectedEngines()
+/// Engines this build configuration exposes: every compiled-in native engine, plus every
+/// shipped descriptor set. Spelled out here rather than read from the provider inventory,
+/// so an engine that disappears from that inventory fails these tests.
+///
+/// Containment, not equality: the catalog is descriptor-driven, so a build that stages
+/// additional descriptor sets legitimately exposes more engines. These names are a floor.
+///
+/// The ingestor names are literals where the others are shared constants, and must stay
+/// that way. The others are declared in C++ and read here from the same constant as
+/// production, so a rename moves both sides together and goes undetected. These two are
+/// declared in descriptor JSON, so restating them here is an independent check.
+static std::vector<std::string> expectedEngineNames()
 {
-    uint32_t expected = 0;
+    std::vector<std::string> names;
 #ifdef HIPDNN_ENGINE_ASM_SDPA
-    ++expected;
+    names.emplace_back(hipdnn_data_sdk::utilities::ASM_SDPA_ENGINE_NAME);
 #endif
 #ifdef HIPDNN_ENGINE_HIP_MLOPS
-    ++expected;
+    names.emplace_back(hipdnn_data_sdk::utilities::HIP_MLOPS_ENGINE_NAME);
 #endif
 #ifdef HIPDNN_ENGINE_HIP_FLASH2
-    ++expected;
+    names.emplace_back(hipdnn_data_sdk::utilities::HIP_FLASH2_ENGINE_NAME);
 #endif
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
-    expected += static_cast<uint32_t>(
-        hip_kernel_provider::kernel_ingestor_engine::discoverDescriptorSets().size());
+    names.emplace_back("hipkernel:ConvFwd");
+    names.emplace_back("hipkernel:Pointwise");
 #endif
-    return expected;
+    return names;
 }
 
-/// Upper bound for the fixed-size buffers below; only needs to be at least
-/// expectedEngines().
+/// Upper bound for the fixed-size buffers below. Raise it when a configuration exposes
+/// more engines than this.
 constexpr uint32_t MAX_EXPECTED_ENGINES = 8;
 
 TEST(TestContainer, ConstructsSuccessfully)
@@ -64,13 +78,41 @@ TEST(TestContainer, ConstructsSuccessfully)
     const Container container;
 }
 
-TEST(TestContainer, CopyEngineIdsReturnsExpectedEngineCount)
+TEST(TestContainer, CopyEngineIdsAdvertisesEveryExpectedEngine)
 {
+    std::array<int64_t, MAX_EXPECTED_ENGINES> engineIds = {};
     uint32_t numEngines = 0;
-    auto totalEngines = Container::copyEngineIds(nullptr, 0, numEngines);
+    auto totalEngines
+        = Container::copyEngineIds(engineIds.data(), MAX_EXPECTED_ENGINES, numEngines);
 
-    EXPECT_EQ(totalEngines, expectedEngines());
-    EXPECT_EQ(numEngines, expectedEngines());
+    ASSERT_LE(totalEngines, MAX_EXPECTED_ENGINES) << "raise MAX_EXPECTED_ENGINES";
+    EXPECT_EQ(numEngines, totalEngines);
+
+    const auto expectedNames = expectedEngineNames();
+    EXPECT_GE(totalEngines, static_cast<uint32_t>(expectedNames.size()));
+
+    const auto last = engineIds.begin() + static_cast<std::ptrdiff_t>(numEngines);
+    for(const auto& name : expectedNames)
+    {
+        const auto engineId = hipdnn_data_sdk::utilities::engineNameToId(name);
+        EXPECT_NE(std::find(engineIds.begin(), last, engineId), last)
+            << "engine '" << name << "' is not advertised";
+    }
+}
+
+TEST(TestContainer, CopyEngineIdsReportsTheSameCountWithAndWithoutABuffer)
+{
+    uint32_t countedEngines = 0;
+    const auto totalFromCount = Container::copyEngineIds(nullptr, 0, countedEngines);
+
+    std::array<int64_t, MAX_EXPECTED_ENGINES> engineIds = {};
+    uint32_t copiedEngines = 0;
+    const auto totalFromCopy
+        = Container::copyEngineIds(engineIds.data(), MAX_EXPECTED_ENGINES, copiedEngines);
+
+    EXPECT_EQ(countedEngines, totalFromCount);
+    EXPECT_EQ(totalFromCopy, totalFromCount);
+    EXPECT_EQ(copiedEngines, std::min(totalFromCount, MAX_EXPECTED_ENGINES));
 }
 
 TEST(TestContainer, CopyEngineIdsWithBufferContainsHipMlopsEngineId)
@@ -83,8 +125,7 @@ TEST(TestContainer, CopyEngineIdsWithBufferContainsHipMlopsEngineId)
     auto totalEngines
         = Container::copyEngineIds(engineIds.data(), MAX_EXPECTED_ENGINES, numEngines);
 
-    EXPECT_EQ(totalEngines, expectedEngines());
-    EXPECT_EQ(numEngines, expectedEngines());
+    EXPECT_EQ(numEngines, totalEngines);
 
     bool containsHipMlopsEngine = false;
     for(const int64_t engine : engineIds)
@@ -117,6 +158,8 @@ TEST(TestContainer, ExposesAnEngineForEveryDiscoveredDescriptorSet)
         names.push_back(set.engine.name);
     }
     std::sort(names.begin(), names.end());
+    // Literals for the reason expectedEngineNames() records: a constant shared with
+    // the production table would make a rename propagate here and this never fail.
     for(const auto* expected : {"hipkernel:ConvFwd", "hipkernel:Pointwise"})
     {
         EXPECT_NE(std::find(names.begin(), names.end(), expected), names.end())
@@ -131,6 +174,126 @@ TEST(TestContainer, ExposesAnEngineForEveryDiscoveredDescriptorSet)
         const auto engineId = hipdnn_data_sdk::utilities::engineNameToId(set.engine.name);
         EXPECT_NE(std::find(allEngineIds.begin(), allEngineIds.end(), engineId), allEngineIds.end())
             << "no engine for descriptor set '" << set.engine.name << "'";
+    }
+}
+
+TEST(TestContainer, AContainerRebuiltFromTheRetainedSetsExposesEveryIngestorEngine)
+{
+    using namespace hip_kernel_provider::kernel_ingestor_engine;
+
+    const auto& sets = discoverDescriptorSets();
+    ASSERT_FALSE(sets.empty());
+
+    const auto expectEveryIngestorEngine = [&sets](Container& container, const char* which) {
+        const auto engineIds = container.getEngineManager().getAllEngineIds();
+        for(const auto& set : sets)
+        {
+            const auto engineId = hipdnn_data_sdk::utilities::engineNameToId(set.engine.name);
+            EXPECT_NE(std::find(engineIds.begin(), engineIds.end(), engineId), engineIds.end())
+                << which << " Container has no engine for descriptor set '" << set.engine.name
+                << "'";
+        }
+    };
+
+    // `earlier` takes whatever state managers are still in their slots, discovery's or a
+    // rediscovery's, so these two are on the rebuild path whatever ran before.
+    {
+        const Container earlier;
+    }
+    Container afterDestroyed;
+    expectEveryIngestorEngine(afterDestroyed, "the after-destroyed");
+    Container whileAlive;
+    expectEveryIngestorEngine(whileAlive, "the while-alive");
+}
+
+// The slot tests below refill the slots first: whichever test constructs the process's
+// first Container takes what discovery built, and shuffling moves that test around.
+
+TEST(TestContainer, EachDiscoveredSetsStateManagerIsHandedOutOnceAndToItsOwnSet)
+{
+    using namespace hip_kernel_provider::kernel_ingestor_engine;
+
+    const auto& sets = discoverDescriptorSets();
+    ASSERT_FALSE(sets.empty());
+
+    // The schema id is what a manager exposes of the set it was built from, so a slot
+    // serving another set's manager shows up only between sets whose schemas differ.
+    std::set<hipdnn_plugin_sdk::ingestor::DescriptorId> schemaIds;
+    for(const auto& set : sets)
+    {
+        schemaIds.insert(set.schema.id);
+    }
+    ASSERT_GE(schemaIds.size(), 2U)
+        << "every discovered set shares one metadata schema, so a mispaired slot is invisible";
+
+    rediscoverStateManagersForTesting();
+
+    for(const auto& set : sets)
+    {
+        const auto stateManager = takeDiscoveredStateManager(set.engine.id);
+        ASSERT_NE(stateManager.get(), nullptr)
+            << "no state manager handed off for descriptor set '" << set.engine.name << "'";
+        EXPECT_EQ(stateManager->metadataSchema().id, set.schema.id)
+            << "the id of '" << set.engine.name << "' took the state manager of another set";
+        EXPECT_EQ(takeDiscoveredStateManager(set.engine.id).get(), nullptr)
+            << "'" << set.engine.name << "' handed out a second state manager";
+    }
+}
+
+TEST(TestContainer, ConcurrentTakesOfOneDiscoveredStateManagerHandItOutOnce)
+{
+    using namespace hip_kernel_provider::kernel_ingestor_engine;
+
+    const auto& sets = discoverDescriptorSets();
+    ASSERT_FALSE(sets.empty());
+    const auto& engineId = sets.front().engine.id;
+    rediscoverStateManagersForTesting();
+
+    constexpr size_t THREAD_COUNT = 8;
+    std::atomic<bool> start{false};
+    std::atomic<size_t> handedOut{0};
+    std::vector<std::thread> threads;
+    threads.reserve(THREAD_COUNT);
+    for(size_t threadIndex = 0; threadIndex < THREAD_COUNT; ++threadIndex)
+    {
+        threads.emplace_back([&start, &handedOut, &engineId] {
+            while(!start.load())
+            {
+                std::this_thread::yield();
+            }
+            if(takeDiscoveredStateManager(engineId) != nullptr)
+            {
+                ++handedOut;
+            }
+        });
+    }
+    start.store(true);
+    for(auto& thread : threads)
+    {
+        thread.join();
+    }
+
+    EXPECT_EQ(handedOut.load(), 1U);
+}
+
+TEST(TestContainer, TheFirstContainerAfterRediscoveryTakesEveryDiscoveredStateManager)
+{
+    using namespace hip_kernel_provider::kernel_ingestor_engine;
+
+    const auto& sets = discoverDescriptorSets();
+    ASSERT_FALSE(sets.empty());
+    rediscoverStateManagersForTesting();
+
+    {
+        const Container container;
+    }
+
+    // A slot still full means that Container built the set's state manager a second time.
+    for(const auto& set : sets)
+    {
+        EXPECT_EQ(takeDiscoveredStateManager(set.engine.id).get(), nullptr)
+            << "the Container did not take the state manager discovered for '" << set.engine.name
+            << "'";
     }
 }
 
@@ -278,5 +441,13 @@ TEST(TestContainer, GetAllEngineIds)
 
     auto allEngines = engineManager.getAllEngineIds();
 
-    ASSERT_EQ(allEngines.size(), expectedEngines());
+    const auto expectedNames = expectedEngineNames();
+    ASSERT_GE(allEngines.size(), expectedNames.size());
+
+    for(const auto& name : expectedNames)
+    {
+        const auto engineId = hipdnn_data_sdk::utilities::engineNameToId(name);
+        EXPECT_NE(std::find(allEngines.begin(), allEngines.end(), engineId), allEngines.end())
+            << "engine '" << name << "' is missing from the engine manager";
+    }
 }

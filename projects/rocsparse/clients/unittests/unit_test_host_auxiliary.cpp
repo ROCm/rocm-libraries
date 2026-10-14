@@ -1226,6 +1226,14 @@ class AuxiliaryBranchHandle : public HandleTest
 {
 };
 
+TEST_F(AuxiliaryBranchHandle, default_stream_is_default)
+{
+    hipStream_t default_stream{};
+    hipStream_t stream = reinterpret_cast<hipStream_t>(0x1);
+    EXPECT_EQ(rocsparse_get_stream(handle, &stream), rocsparse_status_success);
+    EXPECT_EQ(default_stream, stream);
+}
+
 TEST_F(AuxiliaryBranchHandle, stream_get_set_roundtrip)
 {
     hipStream_t stream = nullptr;
@@ -1407,6 +1415,7 @@ TEST(AuxiliaryBranchCoo, const_get_set_pointers_batch)
               rocsparse_status_invalid_pointer);
     EXPECT_EQ(rocsparse_coo_set_strided_batch(A, 0, 3), rocsparse_status_invalid_value);
     EXPECT_EQ(rocsparse_coo_set_strided_batch(A, 2, -1), rocsparse_status_invalid_value);
+    EXPECT_EQ(rocsparse_coo_set_strided_batch(A, 1, 4), rocsparse_status_invalid_value);
 
     EXPECT_EQ(rocsparse_destroy_spmat_descr(A), rocsparse_status_success);
 }
@@ -1507,6 +1516,11 @@ TEST(AuxiliaryBranchCsr, set_pointers_batch_nnz)
     EXPECT_EQ(rocsparse_csr_set_strided_batch(A, 0, 4, 3), rocsparse_status_invalid_value);
     EXPECT_EQ(rocsparse_csr_set_strided_batch(A, 2, -1, 3), rocsparse_status_invalid_value);
     EXPECT_EQ(rocsparse_csr_set_strided_batch(A, 2, 4, -1), rocsparse_status_invalid_value);
+
+    EXPECT_EQ(rocsparse_csr_set_strided_batch(A, 1, 4, 0), rocsparse_status_invalid_value);
+    EXPECT_EQ(rocsparse_csr_set_strided_batch(A, 1, 0, 3), rocsparse_status_invalid_value);
+    EXPECT_EQ(rocsparse_csr_set_strided_batch(A, 1, 4, 3), rocsparse_status_invalid_value);
+
     EXPECT_EQ(rocsparse_spmat_set_nnz(A, -1), rocsparse_status_invalid_size);
     EXPECT_EQ(rocsparse_spmat_set_nnz(nullptr, 3), rocsparse_status_invalid_pointer);
 
@@ -1562,6 +1576,9 @@ TEST(AuxiliaryBranchCsc, const_get_set_pointers_batch)
               rocsparse_status_invalid_pointer);
     EXPECT_EQ(rocsparse_csc_set_strided_batch(A, 0, 4, 3), rocsparse_status_invalid_value);
     EXPECT_EQ(rocsparse_csc_set_strided_batch(A, 2, -1, 3), rocsparse_status_invalid_value);
+    EXPECT_EQ(rocsparse_csc_set_strided_batch(A, 1, 4, 0), rocsparse_status_invalid_value);
+    EXPECT_EQ(rocsparse_csc_set_strided_batch(A, 1, 0, 3), rocsparse_status_invalid_value);
+    EXPECT_EQ(rocsparse_csc_set_strided_batch(A, 1, 4, 3), rocsparse_status_invalid_value);
 
     EXPECT_EQ(rocsparse_destroy_spmat_descr(A), rocsparse_status_success);
 }
@@ -1611,6 +1628,8 @@ TEST(AuxiliaryBranchEll, const_get_set_pointers_nnz)
               rocsparse_status_invalid_pointer);
     EXPECT_EQ(rocsparse_ell_set_pointers(A, nullptr, ell_val2.ptr),
               rocsparse_status_invalid_pointer);
+
+    EXPECT_EQ(rocsparse_ell_set_strided_batch(A, 1, 4), rocsparse_status_invalid_value);
 
     EXPECT_EQ(rocsparse_destroy_spmat_descr(A), rocsparse_status_success);
 }
@@ -1876,16 +1895,12 @@ TEST(AuxiliaryBranchDnMat, const_values_and_row_order_batch)
     EXPECT_EQ(rocsparse_const_dnmat_get_values(A, &cpv), rocsparse_status_success);
     EXPECT_EQ(cpv, (const void*)val.ptr);
 
-    // row-order path: batch_stride must be >= ld * rows == 4 * 3 == 12
     EXPECT_EQ(rocsparse_dnmat_set_strided_batch(A, 2, 12), rocsparse_status_success);
     rocsparse_int bc = 0;
     int64_t       bs = 0;
     EXPECT_EQ(rocsparse_dnmat_get_strided_batch(A, &bc, &bs), rocsparse_status_success);
     EXPECT_EQ(bc, 2);
     EXPECT_EQ(bs, 12);
-
-    // row-order path: stride too small for count > 1
-    EXPECT_EQ(rocsparse_dnmat_set_strided_batch(A, 2, 4), rocsparse_status_invalid_value);
 
     // bad args
     EXPECT_EQ(rocsparse_const_dnmat_get_values(A, nullptr), rocsparse_status_invalid_pointer);

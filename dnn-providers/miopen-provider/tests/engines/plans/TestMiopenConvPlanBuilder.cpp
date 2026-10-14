@@ -6,6 +6,7 @@
 
 #include <gtest/gtest.h>
 
+#include "MiopenApi.hpp"
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_data_sdk/utilities/Workspace.hpp>
 #include <hipdnn_plugin_sdk/GlobalKnobDefines.hpp>
@@ -14,7 +15,6 @@
 #include <hipdnn_test_sdk/utilities/MockGraph.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/detail/FlatbufferTensorAttributesUtils.hpp>
-#include <miopen/miopen.h>
 
 #include "HipdnnMiopenHandle.hpp"
 #include "common/ConvolutionCommon.hpp"
@@ -403,7 +403,6 @@ TEST_F(TestGpuMiopenConvPlanBuilder, ActualWorkspaceSizeIsWithinRangeWrw)
 
 TEST_P(TestGpuMiopenConvPlanBuilderShapes, WorkspaceRangeIsConsistentAndExecutableFwd)
 {
-    SKIP_IF_ASAN(); // CK/MIOpen Fwd convolution hangs under ASAN on gfx942 (xnack+)
     const auto& tc = GetParam();
     auto xStrides = hipdnn_data_sdk::utilities::generateStrides(tc.xDims);
     auto wStrides = hipdnn_data_sdk::utilities::generateStrides(tc.wDims);
@@ -432,8 +431,6 @@ TEST_P(TestGpuMiopenConvPlanBuilderShapes, WorkspaceRangeIsConsistentAndExecutab
 
 TEST_P(TestGpuMiopenConvPlanBuilderShapes, WorkspaceRangeIsConsistentAndExecutableBwd)
 {
-    // rocBLAS/Tensile heap-buffer-overflow on gfx90a; CK ASAN stall on gfx942
-    SKIP_IF_ASAN();
     const auto& tc = GetParam();
     auto dxStrides = hipdnn_data_sdk::utilities::generateStrides(tc.xDims);
     auto wStrides = hipdnn_data_sdk::utilities::generateStrides(tc.wDims);

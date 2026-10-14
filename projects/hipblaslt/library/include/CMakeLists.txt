@@ -6,6 +6,11 @@ configure_file(
     "${CMAKE_CURRENT_BINARY_DIR}/hipblaslt/hipblaslt-version.h"
 )
 
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-opt-in-features.h.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/hipblaslt/hipblaslt-opt-in-features.h"
+)
+
 generate_export_header(hipblaslt
     EXPORT_FILE_NAME "${CMAKE_CURRENT_BINARY_DIR}/hipblaslt/hipblaslt-export.h"
     BASE_NAME hipblaslt
@@ -24,6 +29,7 @@ target_sources(hipblaslt
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt/hipblaslt_e8.h>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt/hipblaslt_e5m3.h>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt/hipblaslt-types.h>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/hipblaslt/hipblaslt-opt-in-features.h>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/hipblaslt/hipblaslt-version.h>
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/hipblaslt/hipblaslt.h>
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/hipblaslt-export.h>
@@ -36,6 +42,7 @@ target_sources(hipblaslt
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/hipblaslt/hipblaslt_e8.h>
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/hipblaslt/hipblaslt_e5m3.h>
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/hipblaslt/hipblaslt-types.h>
+        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/hipblaslt/hipblaslt-opt-in-features.h>
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/hipblaslt-version.h>
     PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt/hipblaslt_xfloat32.h"

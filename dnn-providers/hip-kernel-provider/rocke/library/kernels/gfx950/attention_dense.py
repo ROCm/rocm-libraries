@@ -10,7 +10,8 @@ step-1 pipeline with every WINNING lever baked in as always-on (no env gates):
   * **LDS bank-conflict padding on K** (``[NBUF, BN, D+8]``) — kills the 8-way conflict
     on the QK K-reads. The dominant base win (+80% over the naive baseline).
   * **native exp2_fast** (``v_exp_f32``, no overflow guard — the softmax argument is
-    always <= 0) — +11.5%.
+    bounded: at most the lazy-rescale threshold plus a small fma rounding residue) — one
+    instruction per exp.
   * **full-population ``sched_group_barrier`` template** naming DS_READ/MFMA/VALU/TRANS
     per PV step.
   * **diagonal-only causal masking** — a mask-free body loop over below-diagonal KV
@@ -22,6 +23,10 @@ step-1 pipeline with every WINNING lever baked in as always-on (no env gates):
   * **PV-only `s_setprio`** — the PV MFMA cluster is bracketed at raised priority so
     it wins issue slots; paired with the prefetch this is a measured ~+3.5%.
   * **vectorized O store**.
+  * **gfx950 wide LDS DMA** (qualified D128/BN64 persistent path) — two
+    ``buffer_load_dwordx4 ... lds`` operations per operand/wave feed 520/544-half
+    slab-padded K/V layouts. IGLP-1 owns the wide-path loop schedule and
+    K-major PV traversal keeps it at zero spill.
 
 Measured on MI355X (bf16, D=128, causal, 128/8 GQA, Sq=8192, 0 spill, err ~1.46e-3
 vs SDPA). Absolute TFLOPS swing +/-25-30% with auto-clock, so only SAME-SESSION
@@ -35,9 +40,10 @@ config (grid / decode / V-pad / lazy):
 
 Clock-invariant deltas (the load-bearing part): hkv/qb ~1.04x, V-pad 0->32 ~+5%,
 lazy ~+2%. Shape (batch/seqlen/heads/head_dim) is baked at build time (dense,
-compile-time-sized ABI); the KV tile, occupancy hint, and persistent knobs are the
-tunable parameters. Lazy online-softmax rescale (skip the O/l rescale when every
-lane's tile-max is within 8 log2 of the running max) is ALWAYS-ON by default
+compile-time-sized ABI); query/KV tile geometry, LDS V-row padding, occupancy hint,
+and persistent knobs live on ``Gfx950AttentionDenseSpec``. Lazy online-softmax rescale
+(skip the O/l rescale when every lane's tile-max is within 8 log2 of the running max)
+is ALWAYS-ON by default
 (``lazy_rescale=True``): parity-identical (1.46e-3) and ~+2%.
 
 Head-size / seqlen coverage:
@@ -66,392 +72,463 @@ staging, score truncation, PV V-prefetch) are intentionally NOT carried over —
 the experiment's ``plan.md`` for their measured results.
 """
 
+import hashlib
+import math
 from contextlib import nullcontext as _nullcontext
-from dataclasses import dataclass
+from dataclasses import dataclass, field, fields as _dataclass_fields
+from types import MappingProxyType
 from typing import Optional, Tuple
 
-from rocke.core.ir import IRBuilder, KernelDef, PtrType, BF16, F16, F32, I32, I64
+from rocke.core.ir import IRBuilder, KernelDef, PtrType, F32, I32, I64
 from rocke.helpers.attention import mfma_32x32x16_for_dtype, pv32_v_load_paired
 from rocke.helpers.schedule import MFMA, VALU, TRANS, DS_READ
-from rocke.helpers.spec import kernel_name_join
+from kernels.common.attention_dense_spec import (
+    AttentionDenseSpec as _AttentionDenseSpecBase,
+    DENSE_TILE_GEOMETRIES,
+    attention_dense_cache_key,
+    check_dense_spec_preflight,
+)
 from kernels.gfx950.attention_tiled_2d import _mfma_32x32_c_row, _mfma_32x32_c_col
+from kernels.common._lse_store import (
+    dense_row_has_key,
+    lse_store,
+    validate_dense_lse,
+    zero_keyless_row,
+)
 
 LOG2E = 1.4426950408889634
-_DTYPE_IR = {"bf16": BF16, "fp16": F16}
 
-# Baked pipeline constants (NOT tunable knobs — these are load-bearing):
-#   _BLOCK_M: query rows per CTA. The causal mask + P relayout assume 256; the
-#             kernel FAULTS at other values until those hardcodes are lifted.
-#   num_waves = _BLOCK_M // 32 = 8 (block = 512 threads).
-#   _NBUF=2 double-buffer (NBUF=3 is a measured dead end: 256 VGPR + 58 spills).
-#   _LDS_PAD=8 bf16 elements of K-row padding (the +80% bank-conflict fix).
-_BLOCK_M = 256
-_NBUF = 2
-_LDS_PAD = 8
-# _LDS_PAD_V: bf16 elements of V-row padding for the transposed PV read
+# gfx950 LDS layout policy is separate from shared query/KV tile geometry.
+GFX950_DENSE_LAYOUTS = MappingProxyType(
+    {"default": MappingProxyType({"lds_v_row_pad": 32})}
+)
+_DEFAULT_GFX950_LAYOUT = GFX950_DENSE_LAYOUTS["default"]
+
+# Shipped defaults of the performance knobs on Gfx950AttentionDenseSpec.
+#   lds_num_buffers=2: K/V double buffer. The prologue primes exactly two tiles,
+#     and NBUF=3 is a measured dead end (256 VGPR + 58 spills).
+#   lds_k_row_pad=8: D128 K-row padding, the +80% bank-conflict fix. Separate
+#     from the inherited D<128 lds_k_group_pad so neither re-sweep moves the other.
+_DEFAULT_LDS_NUM_BUFFERS = 2
+_DEFAULT_LDS_K_ROW_PAD = 8
+# lds_v_row_pad: bf16 elements of V-row padding for the transposed PV read
 #   (ds_read_b64_tr_b16). The transpose read has a stricter bank pattern than
-#   K's ds_read_b128, so it needs a LARGER pad than _LDS_PAD (8): a measured
+#   K's ds_read_b128, so it needs a LARGER pad than the K pad (8): a measured
 #   sweep @ GQA-8 S=8192 gives conflicts {VPAD0: 30, VPAD8: 29, VPAD16: 11,
 #   VPAD32: 0} and TFLOPS {906, 901, 944, 953} -- i.e. +8 is useless here and
 #   only +32 fully clears the V-read conflicts (matches flyDSL's SMEM_V_PAD).
-#   Overridable via ROCKE_DENSE_VPAD for re-sweeps.
-import os as _os  # noqa: E402
-
-_LDS_PAD_V = int(_os.environ.get("ROCKE_DENSE_VPAD", "32"))
 # Lazy-rescale re-anchor threshold in the log2 domain: skip the O/l rescale when
-# every lane's (tile_max - running_max) <= this. exp2(8)=256 bounds P safely.
-_LAZY_RESCALE_THRESHOLD = 8.0
+# every lane's (tile_max - running_max) <= this. exp2(8)=256 bounds P (times the
+# ordinary kernel's small fma rounding residue; see _MAX_SCALE), so the spec
+# rejects anything larger.
+_DEFAULT_LAZY_RESCALE_THRESHOLD = 8.0
+# sched_barrier mask: 11 instruction-class bits (__builtin_amdgcn_sched_barrier).
+_SCHED_BARRIER_MASK_MAX = 0x7FF
+_PV_LOOP_ORDERS = frozenset({"d_major", "k_major"})
+_IGLP_OFF = -1
+# Accepted softmax-scale range, a chosen safety margin (not a hardware limit).
+# The ordinary kernel takes the row max on unscaled scores (valid only for
+# scale > 0) and computes exp2(fma(s, qk_scale, -m)) with m = fl(max * qk_scale).
+# For the row-max element that argument is the product's rounding residue, at
+# most half an ulp of max * qk_scale, so a large scale or score lets it grow
+# until P overflows (first in the fp16 cast before the PV MFMA). At scale 2**4
+# and |raw score| <= 1e6 the residue is at most 1, so P stays within about
+# 2**9 even on top of the lazy-rescale threshold. The bounds also keep the
+# -2**99 mask sentinel exact, finite and far below real scores after the scale.
+# Scales outside [2**-64, 2**4], including NaN, +-inf and scale <= 0, are
+# rejected rather than mis-computed. The hipDNN matcher mirrors this range as
+# the literals 0x1p-64F / 0x1p4F in Gfx950AttentionDenseNative.cpp
+# (gfx950AttentionDenseGraphMatches) and its gtest; change them together.
+# TestScaleValidation pins both bounds to those literals.
+#
+# KNOWN LIMITATION (ordinary grid only): nothing bounds the raw score, so the
+# residue above is bounded only by the size of the log2-domain row max m, not by
+# the scale. Once |m| >= 2**28 (pre-softmax logit |q.k * scale| >~ 1.9e8) the
+# residue can exceed 8 and fp16 P overflows; once |m| >= 2**31 (logit >~ 1.5e9)
+# it can exceed 120 and exp2 itself overflows, for any dtype. The output is then
+# inf/NaN. Real logits are many orders of magnitude smaller, so this is accepted.
+# The persistent grid (which scales each fp32 score before the max), and this
+# kernel's earlier form (Q pre-scaled before the MFMA), use the same rounded score
+# for the max and every exponent, so the row max's exp2 argument is exactly 0 and
+# the output stays finite at any magnitude. If this limit is ever hit, apply the
+# persistent grid's form here: multiply each fp32 score by qk_scale after the QK
+# MFMA and use exp2(s - m). That costs the ordinary path a little speed.
+_MIN_SCALE = 2.0**-64
+_MAX_SCALE = 2.0**4
 
 
 @dataclass(frozen=True)
-class AttentionDenseSpec:
-    """Compile-time spec for the dense flash-attention prefill kernel.
+class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
+    """gfx950 dense-attention spec and architecture-specific codegen policy."""
 
-    Functional fields (batch / seqlen / heads / head_size / causal / dtype) are baked
-    into the kernel as constants — this is a dense, statically-sized ABI. ``block_n``
-    and ``waves_per_eu`` are the only performance knobs; every algorithmic lever is
-    always-on (see the module docstring).
-    """
+    lds_v_row_pad: int = _DEFAULT_GFX950_LAYOUT["lds_v_row_pad"]
+    wide_lds_dma: bool = False
+    emit_lse: bool = field(default=False, kw_only=True)
 
-    # --- functional (compile-time shape) ---
-    batch: int
-    seqlen_q: int
-    seqlen_kv: int
-    num_query_heads: int
-    num_kv_heads: int
-    head_size: int
-    causal: bool = True
-    dtype: str = "bf16"
-    # sliding_window: left-context window W. 0 = disabled (full causal, the
-    #   byte-identical always-on path). When W>0 each query token q attends to
-    #   keys k in [q-W+1, q] (causal AND within-window). The valid KV region per
-    #   256-row block is a slope-1 parallelogram band, so the KV loop is pruned
-    #   to ~(W/block_n + block_m/block_n) tiles instead of the full causal
-    #   triangle. Requires causal=True and W % block_n == 0.
-    sliding_window: int = 0
-    # ragged: separate kernel path for sequence lengths that are NOT a multiple
-    #   of the tile geometry (seqlen_q % 256 != 0 and/or seqlen_kv % block_n != 0).
-    #   Instead of host-side zero-padding (which we cannot do), the boundary tiles
-    #   are padded ON-CHIP: OOB query rows load as 0 via a bounds-checked buffer
-    #   load (register pad), OOB key rows load as 0 into LDS (LDS pad), the ceil'd
-    #   grid covers the partial last query block, and the partial O rows are
-    #   dropped by a guarded store. Causal masking already excludes the padded
-    #   keys (their token index >= seqlen_kv > every real query), so causal needs
-    #   NO extra key mask; non-causal adds a ktok<seqlen_kv key mask. Self-
-    #   attention only (seqlen_q == seqlen_kv). 0-cost when False: the aligned
-    #   kernel is emitted unchanged (byte-identical IR).
-    ragged: bool = False
-    # varlen: packed variable-length batch. Q/K/V/O are packed [total_tok, H, D]
-    #   and per-sequence boundaries come from cu_seqlens_q/cu_seqlens_kv (int32
-    #   [batch+1]) at runtime. seqlen_q/seqlen_kv are the MAX lengths (grid
-    #   sizing); each sequence's length must be a multiple of block_m (q) and
-    #   block_n (kv). Self-attention only (per-seq seqlen_q == seqlen_kv). Not
-    #   supported with persistent. 0-cost when False (dense uniform path).
-    varlen: bool = False
+    # Performance-only codegen knobs. Every legal value computes the same
+    # attention output; defaults reproduce the shipped kernel byte-for-byte.
+    # ``None`` resolves through the shipped per-path policy (``resolved_*``).
+    lds_num_buffers: int = field(default=_DEFAULT_LDS_NUM_BUFFERS, kw_only=True)
+    # D128 K-row pad (one row per DMA instr); inert at D64, which uses
+    # lds_k_group_pad between packed row-groups instead.
+    lds_k_row_pad: int = field(default=_DEFAULT_LDS_K_ROW_PAD, kw_only=True)
+    lazy_rescale_threshold: float = field(
+        default=_DEFAULT_LAZY_RESCALE_THRESHOLD, kw_only=True
+    )
+    use_exp2_fast: bool = field(default=True, kw_only=True)
+    # Softmax exp2 ops emitted per PV MFMA step. None: ceil(N_SUB*16 / PV steps)
+    # on the grid body, 1 on the persistent body (keeps it within 256 VGPR).
+    exp_per_pv_step: Optional[int] = field(default=None, kw_only=True)
+    # Loop-top wait keeps the newest V DMA in flight (the count stays derived:
+    # any other value reads stale LDS). False drains to vmcnt(0).
+    partial_vmcnt_prefetch: bool = field(default=True, kw_only=True)
+    # s_setprio level around the PV cluster; 0 emits no priority change.
+    pv_priority: int = field(default=1, kw_only=True)
+    # Depth-1 sched_barrier before PV. None: on unless wide_lds_dma (IGLP owns it).
+    pv_sched_fence: Optional[bool] = field(default=None, kw_only=True)
+    pv_sched_fence_mask: int = field(default=0, kw_only=True)
+    # Per-PV-step sched_group_barrier template. None: on unless wide_lds_dma.
+    # MFMA/VALU/TRANS populations follow what each step emits.
+    pv_sched_group_template: Optional[bool] = field(default=None, kw_only=True)
+    pv_sched_group_ds_read: int = field(default=2, kw_only=True)
+    # llvm.amdgcn.iglp.opt at the top of the KV loop body. None: 1 with
+    # wide_lds_dma, else off. -1 is off; exclusive with the fence and template.
+    iglp_mode: Optional[int] = field(default=None, kw_only=True)
+    # PV MFMA traversal: "d_major" (output tile outer) or "k_major" (key step
+    # outer). Each output tile accumulates in the same order either way.
+    # None: k_major with wide_lds_dma (zero spill), else d_major.
+    pv_loop_order: Optional[str] = field(default=None, kw_only=True)
+    # Causal only: unmasked body over below-diagonal KV tiles plus a masked
+    # diagonal tail, versus masking every tile. Sliding window keeps its phases.
+    causal_diag_split: bool = field(default=True, kw_only=True)
+    # Output elements per global store; alignment follows the width. bf16 only
+    # below 4: narrower fp16 stores change which f32->f16 conversion the backend
+    # selects for some elements, moving them by one ulp, so fp16 is fixed at 4.
+    o_store_width: int = field(default=4, kw_only=True)
 
-    # --- validated performance knobs ---
-    # block_n: KV tile length. 64 (66 KB LDS, WPE-tunable) and 128 (135 KB LDS, pins
-    #   the 256-VGPR cap) both match ~peak; 64 is strictly more resource-efficient.
-    block_n: int = 64
-    # waves_per_eu: occupancy hint. 2 is a free win (tighter allocation, still 2
-    #   waves/SIMD); 3 is a measured trap (VGPR<=170 forces spills -> -20%).
-    waves_per_eu: int = 2
-    # lds_k_group_pad: bf16 elements of K padding between DMA row-GROUPS, on the
-    #   packed head_size<128 path only (ignored at 128, which pads per row via
-    #   _LDS_PAD). The async DMA writes 128//head_size rows contiguously, so a
-    #   per-row pad is impossible there -- but the pad can sit BETWEEN groups and
-    #   still break the QK ds_read_b128 bank pattern. A wave64 b128 read moves
-    #   1024 B while LDS delivers 64 banks x 4 B = 256 B/cycle, so 4 lanes per
-    #   bank is the conflict-free floor. Aggregated over all 64 lanes (4 dwords
-    #   each): unpadded D=64 touches 16 of 64 banks at 16 lanes deep; a group pad
-    #   of 8, 16 or 24 reaches all 64 banks at that floor; 32 falls back to 32
-    #   banks at 8 deep. The whole-wave model does not separate 8/16/24, but a
-    #   16-lane phase (16 x 4 dwords = one full 64-bank sweep) does: pad 8 gives
-    #   16 distinct start banks, pad 16 repeats each twice -- hence 8, which is
-    #   also the cheaper of the two in LDS. Must be a non-negative multiple of 8
-    #   elements (16 B) because smem_load_vN stamps `align 16` on the n=8 read
-    #   unconditionally, so an 8-byte-aligned pitch would keep the ds_read_b128
-    #   while silently breaking its alignment contract. 0 reproduces the old
-    #   unpadded layout for A/B.
-    lds_k_group_pad: int = 8
-    # persistent: emit the grid-stride PERSISTENT variant instead of one CTA per
-    #   (query-block, head, batch). A 1-D grid of ``num_persistent`` long-lived CTAs
-    #   grid-strides over the W = (seqlen_q//256)*Hq*B work items, so the per-CTA
-    #   launch/dispatch + scalar setup + K/V-prime cold-start (~4.5 tile-equivalents,
-    #   plan.md "CAUSAL GAP = FIXED-COST AMORTIZATION") is paid once per CU instead of
-    #   once per query-block. Inner compute is byte-identical to the default path.
-    #   Measured MI355X Sq=8192 causal: 512 -> 853 TFLOPS (+70%), 0 spill, err 1.46e-3.
-    persistent: bool = False
-    # num_persistent: number of long-lived CTAs when ``persistent``. 256 = exactly one
-    #   8-wave block per CU on MI355X (256 CUs) at 2 waves/SIMD; larger oversubscribes
-    #   the CUs -> a serialized 2nd block -> tail loss (304 measured -20%).
-    num_persistent: int = 256
-    # interleave: boustrophedon query-block ordering that reverses qb on alternating
-    #   (hq,bt) planes to spread the triangular causal load across CTAs. A large-Sq
-    #   lever (helps Sq>=16384) that slightly hurts small Sq; only used when persistent.
-    interleave: bool = False
-    # persist_decode: work-item -> (qb, hq, bt) decode for the persistent grid.
-    #   "qb_major" (default): wi = qb*(Hq*B) + hq*B + bt. Balances the triangular
-    #     causal load across CTAs, but every 256-CTA grid-stride phase spans ALL
-    #     kv-heads at once -> large L2 footprint (measured 57% L2 hit @ GQA-8).
-    #   "hkv_major": wi = hkv*(NQB*gqa*B) + blk*(gqa*B) + hql*B + bt, with blk
-    #     folded to a low/high-paired qb. Concentrates each grid-stride phase on
-    #     ~1 kv-head so the shared GQA K/V stays L2-resident across its gqa query
-    #     heads (measured L2 hit 57% -> 93%, HBM misses 5.9x lower, matching the
-    #     non-persistent grid). Only balances the causal triangle when each CTA
-    #     grid-strides across BOTH halves of a kv-head, i.e. gqa*NQB*B >= 2*NP;
-    #     otherwise each CTA gets a fixed qb (severe imbalance) -> slower.
-    #   "auto" (default): hkv_major when it is balance-safe AND GQA
-    #     (gqa>1 and gqa*NQB*B >= 2*num_persistent), else qb_major. Strictly >=
-    #     qb_major (falls back where hkv_major would lose).
-    persist_decode: str = "auto"
-    # lazy_rescale: adaptive online-softmax rescale. Keep the running max as a
-    #   LAZY max that only re-anchors when a tile's max exceeds it by > 8 (log2);
-    #   when every lane is within 8 (wave_all vote) skip the O/l rescale entirely
-    #   (a 0/1-trip scf.for compiles the skip to a wave-uniform scalar branch),
-    #   cutting the per-tile VALU between the QK and PV MFMA clusters (raises
-    #   MFMA utilization). P is then bounded by exp2(8)=256 (safe for fp32 accum
-    #   / bf16 P) rather than <=1, so this is a numerically APPROXIMATE lever
-    #   (still within bf16/fp16 tolerance). ALWAYS-ON by default (parity-identical
-    #   at 1.46e-3, ~+2% TFLOPS); set False only to disable for A/B.
-    lazy_rescale: bool = True
-    # paged: read K/V from a paged cache [num_blocks, block_size, num_kv_heads,
-    #   head_size] via block_tables indirection instead of contiguous memory.
-    #   Single-sequence only in this revision. 0-cost when False (byte-identical IR).
-    paged: bool = False
-    # block_size: KV cache PAGE size (tokens per physical block). Distinct from
-    #   block_n (the compute KV tile). Required >0 and must divide block_n when paged.
-    block_size: int = 0
-    # num_kv_blocks: total physical blocks in the paged cache (key_cache.shape[0]).
-    #   Bounds the paged buffer resource. Required >0 when paged.
-    num_kv_blocks: int = 0
-    # use_sinks: A per-query-head learned scalar logit that participates in the softmax
-    # denominator but has no value vector, acting as a repository for unnecessary attention mass.
-    use_sinks: bool = False
+    def resolved_exp_per_pv_step(self) -> int:
+        if self.exp_per_pv_step is not None:
+            return int(self.exp_per_pv_step)
+        if self.persistent:
+            return 1
+        n_sub = self.block_n // 32
+        pv_steps = (self.head_size // 32) * (self.block_n // 16)
+        return -(-(n_sub * 16) // pv_steps)
+
+    def resolved_pv_sched_fence(self) -> bool:
+        if self.pv_sched_fence is None:
+            return not self.wide_lds_dma
+        return bool(self.pv_sched_fence)
+
+    def resolved_pv_sched_group_template(self) -> bool:
+        if self.pv_sched_group_template is None:
+            return not self.wide_lds_dma
+        return bool(self.pv_sched_group_template)
+
+    def resolved_iglp_mode(self) -> int:
+        if self.iglp_mode is None:
+            return 1 if self.wide_lds_dma else _IGLP_OFF
+        return int(self.iglp_mode)
+
+    def resolved_pv_loop_order(self) -> str:
+        if self.pv_loop_order is None:
+            return "k_major" if self.wide_lds_dma else "d_major"
+        return self.pv_loop_order
+
+    def supported_persist_decodes(self) -> frozenset[str]:
+        return super().supported_persist_decodes() | {
+            "gqa_pair",
+            "gqa_pair_2phase",
+        }
 
     def __post_init__(self) -> None:
-        if self.dtype not in _DTYPE_IR:
+        super().__post_init__()
+        if type(self.emit_lse) is not bool:
             raise ValueError(
-                f"dtype must be one of {sorted(_DTYPE_IR)}, got {self.dtype}"
+                f"emit_lse must be a bool, got {type(self.emit_lse).__name__}"
             )
-        # head_size must be 64 or 128: the QK/PV MFMA tiling needs a multiple of
-        # 32, and the async K/V DMA (64 lanes x 2 bf16 = 128 elems/instr) needs
-        # 128 % head_size == 0 so it packs a whole number of rows per instr.
-        if self.head_size not in (64, 128):
-            raise ValueError(f"head_size must be 64 or 128, got {self.head_size}")
-        # A group pitch that is not 16-byte aligned would keep the QK
-        # ds_read_b128 while breaking its alignment contract (smem_load_vN stamps
-        # `align 16` on the n=8 read unconditionally) -- wrong data or a fault,
-        # silently. Checked for every head size so an unused value cannot go
-        # stale and then bite when head_size changes.
-        if self.lds_k_group_pad < 0 or self.lds_k_group_pad % 8 != 0:
+        if self.lds_v_row_pad < 0 or self.lds_v_row_pad % 8 != 0:
             raise ValueError(
-                "lds_k_group_pad must be a non-negative multiple of 8 bf16 "
-                "elements (16 bytes) so the K group pitch stays "
-                f"ds_read_b128-aligned, got {self.lds_k_group_pad}"
+                "lds_v_row_pad must be a non-negative multiple of 8 bf16 "
+                f"elements (16 bytes), got {self.lds_v_row_pad}"
             )
-        if self.block_n % 32 != 0:
-            raise ValueError(f"block_n must be a multiple of 32, got {self.block_n}")
-        if self.ragged:
-            if self.seqlen_q <= 0 or self.seqlen_kv <= 0:
-                raise ValueError("ragged requires positive seqlen_q/seqlen_kv")
-            if self.seqlen_q != self.seqlen_kv:
+        self._validate_codegen_knobs()
+        if self.causal_bottom_right:
+            # The non-persistent contiguous builder is the only gfx950 path
+            # that implements the compile-time shifted diagonal.
+            if self.paged:
+                raise ValueError("causal_bottom_right is not supported with paged=True")
+            if self.persistent:
                 raise ValueError(
-                    "ragged is self-attention only (seqlen_q == seqlen_kv), got "
-                    f"{self.seqlen_q} != {self.seqlen_kv}"
+                    "causal_bottom_right is not supported with persistent=True"
                 )
-            if self.varlen:
-                raise ValueError("ragged is not supported with varlen")
             if self.sliding_window > 0:
-                raise ValueError("ragged is not supported with sliding_window")
-        else:
-            if self.seqlen_q % _BLOCK_M != 0:
                 raise ValueError(
-                    f"seqlen_q must be a multiple of {_BLOCK_M}, got {self.seqlen_q}"
+                    "causal_bottom_right is not supported with sliding_window>0"
                 )
-            if self.seqlen_kv % self.block_n != 0:
-                raise ValueError(
-                    f"seqlen_kv must be a multiple of block_n={self.block_n}, got {self.seqlen_kv}"
-                )
-        if self.num_kv_heads == 0 or self.num_query_heads % self.num_kv_heads != 0:
-            raise ValueError(
-                f"num_query_heads ({self.num_query_heads}) must be a positive multiple "
-                f"of num_kv_heads ({self.num_kv_heads})"
-            )
-        if self.block_n % 32 != 0 or self.block_n <= 0:
-            raise ValueError(
-                f"block_n must be a positive multiple of 32, got {self.block_n}"
-            )
-        if self.persistent and self.num_persistent <= 0:
-            raise ValueError(
-                f"num_persistent must be positive, got {self.num_persistent}"
-            )
-        if self.persist_decode not in ("qb_major", "hkv_major", "auto"):
-            raise ValueError(
-                f"persist_decode must be 'qb_major', 'hkv_major', or 'auto', got "
-                f"{self.persist_decode}"
-            )
-        if self.sliding_window < 0:
-            raise ValueError(f"sliding_window must be >= 0, got {self.sliding_window}")
-        if self.sliding_window > 0:
-            if not self.causal:
-                raise ValueError("sliding_window>0 requires causal=True")
-            if self.sliding_window % self.block_n != 0:
-                raise ValueError(
-                    f"sliding_window ({self.sliding_window}) must be a multiple of "
-                    f"block_n={self.block_n}"
-                )
-        if self.varlen:
-            if self.persistent:
-                raise ValueError("varlen is not supported with persistent=True")
-            if not self.causal:
-                raise ValueError("varlen requires causal=True")
-        if self.waves_per_eu < 1 or self.waves_per_eu > 8:
-            raise ValueError(
-                f"waves_per_eu must be in [1, 8], got {self.waves_per_eu} "
-                "(note: 3+ caps VGPRs at <=170 and causes spills on this kernel)"
-            )
-        if self.paged:
-            # --- Hard layout / hardware invariants (permanent contract) ---
-            if self.block_size <= 0:
-                raise ValueError("paged=True requires block_size > 0")
-            if self.block_size & (self.block_size - 1) != 0:
-                raise ValueError(
-                    f"paged block_size ({self.block_size}) must be a power of two so "
-                    "the per-page div/mod lower to shift/mask (production page sizes "
-                    "are 16/32); non-power-of-two is correct but pays magic-number "
-                    "address math"
-                )
-            if self.block_n % self.block_size != 0:
-                raise ValueError(
-                    f"block_n ({self.block_n}) must be a multiple of page "
-                    f"block_size ({self.block_size})"
-                )
-            rows_per_wave = (
-                self.block_n // self.num_waves
-            )  # per-wave K/V rows; fit 1 page
-            if self.block_size < rows_per_wave or self.block_size % rows_per_wave != 0:
-                raise ValueError(
-                    f"paged block_size ({self.block_size}) must be >= and a multiple of "
-                    f"ROWS_PER_WAVE ({rows_per_wave} = block_n/{self.num_waves}) so each "
-                    f"wave's K/V rows stay within one page"
-                )
-            if self.num_kv_blocks <= 0:
-                raise ValueError("paged=True requires num_kv_blocks > 0")
-            cache_bytes = (
-                self.num_kv_blocks
-                * self.block_size
-                * self.num_kv_heads
-                * self.head_size
-                * 2
-            )
-            if (
-                cache_bytes > 2**31 - 1
-            ):  # i32 byte-offset limit; i64 paging not yet impl.
-                raise ValueError(
-                    f"paged cache {cache_bytes} B exceeds i32 addressing (2 GiB); "
-                    "i64 paging not yet implemented"
-                )
-            # --- Not-yet-implemented shortcuts (deferred scope, NOT a permanent
-            #     contract; see the dense-paged design future-scope list). The paged
-            #     mechanism is general -- these cohorts are simply unverified so far and
-            #     are loud-rejected until each is validated on gfx950. Raised as
-            #     ValueError so supports_*() reports "unsupported" rather than faulting.
-            if self.batch != 1:
-                raise ValueError("paged multi-sequence (batch>1) not yet implemented")
             if self.varlen:
-                raise ValueError("paged varlen not yet implemented (single-seq only)")
-            if self.persistent:
                 raise ValueError(
-                    "paged + persistent not yet implemented "
-                    "(persistent builder is contiguous-only)"
+                    "causal_bottom_right is not supported with varlen=True"
                 )
-            if self.head_size != 128:
-                raise ValueError("paged not yet implemented for head_size != 128")
-            # forward guard: unreachable while _DTYPE_IR == {fp16, bf16} (both
-            # validated); fires if a future dtype is added there before paged-validation.
-            if self.dtype not in ("fp16", "bf16"):
+        if self.wide_lds_dma:
+            if not self.persistent:
+                raise ValueError("wide_lds_dma requires persistent=True")
+            if self.head_size != 128 or self.block_n != 64:
+                raise ValueError("wide_lds_dma requires head_size=128 and block_n=64")
+            if self.ragged or self.varlen or self.paged:
                 raise ValueError(
-                    f"paged not yet implemented for dtype={self.dtype} (fp16/bf16 only)"
+                    "wide_lds_dma is validated only for aligned contiguous K/V"
                 )
-            if self.sliding_window <= 0:
+            if (
+                self.lds_k_group_pad != 8
+                or self.lds_k_row_pad != _DEFAULT_LDS_K_ROW_PAD
+                or self.lds_v_row_pad != _DEFAULT_GFX950_LAYOUT["lds_v_row_pad"]
+            ):
                 raise ValueError(
-                    "paged not yet implemented for plain-causal (sliding_window>0 only)"
+                    "wide_lds_dma requires K/V slab padding of 8/32 elements"
                 )
-        if self.use_sinks and self.paged:
-            raise ValueError("use_sinks is not yet supported with paged KV")
-        if self.use_sinks and self.varlen:
-            raise ValueError("use_sinks is not yet supported with varlen")
 
-    @property
-    def num_waves(self) -> int:
-        return _BLOCK_M // 32
+        if self.persist_decode == "gqa_pair":
+            gqa = self.num_queries_per_kv
+            nqb = (self.seqlen_q + self.block_m - 1) // self.block_m
+            expected_np = nqb * self.num_kv_heads * self.batch
+            if not self.persistent or not self.causal:
+                raise ValueError("gqa_pair requires persistent causal attention")
+            if self.ragged or self.varlen or self.paged:
+                raise ValueError(
+                    "gqa_pair is validated only for aligned dense attention"
+                )
+            if nqb % 2 or gqa % 2:
+                raise ValueError("gqa_pair requires even NQB and even GQA ratio")
+            if self.num_persistent != expected_np:
+                raise ValueError(
+                    "gqa_pair requires num_persistent == NQB*Hkv*B "
+                    f"({expected_np}), got {self.num_persistent}"
+                )
+        if self.persist_decode == "gqa_pair_2phase":
+            gqa = self.num_queries_per_kv
+            nqb = (self.seqlen_q + self.block_m - 1) // self.block_m
+            expected_np = nqb * self.num_kv_heads * self.batch * gqa // 2
+            if not self.persistent or not self.causal:
+                raise ValueError("gqa_pair_2phase requires persistent causal attention")
+            if self.ragged or self.varlen or self.paged:
+                raise ValueError(
+                    "gqa_pair_2phase is validated only for aligned dense attention"
+                )
+            if nqb % 2 or gqa < 2:
+                raise ValueError("gqa_pair_2phase requires even NQB and GQA ratio >= 2")
+            if self.num_persistent != expected_np:
+                raise ValueError(
+                    "gqa_pair_2phase requires num_persistent == W/2 "
+                    f"({expected_np}), got {self.num_persistent}"
+                )
 
-    @property
-    def dtype_ir(self):
-        return _DTYPE_IR[self.dtype]
-
-    @property
-    def num_queries_per_kv(self) -> int:
-        return self.num_query_heads // self.num_kv_heads
+    def _validate_codegen_knobs(self) -> None:
+        if self.lds_k_row_pad < 0 or self.lds_k_row_pad % 8 != 0:
+            raise ValueError(
+                "lds_k_row_pad must be a non-negative multiple of 8 elements "
+                f"(16 bytes, keeps ds_read_b128 aligned), got {self.lds_k_row_pad}"
+            )
+        if self.lds_num_buffers != _DEFAULT_LDS_NUM_BUFFERS:
+            raise ValueError(
+                "lds_num_buffers: only 2 is implemented (the prologue primes two "
+                f"tiles; 3 spills), got {self.lds_num_buffers}"
+            )
+        if (
+            not 0.0
+            < float(self.lazy_rescale_threshold)
+            <= (_DEFAULT_LAZY_RESCALE_THRESHOLD)
+        ):
+            raise ValueError(
+                "lazy_rescale_threshold must be in (0, 8] log2 units (8 bounds P "
+                f"at 256), got {self.lazy_rescale_threshold}"
+            )
+        if self.exp_per_pv_step is not None and int(self.exp_per_pv_step) < 1:
+            raise ValueError(
+                f"exp_per_pv_step must be >= 1 or None, got {self.exp_per_pv_step}"
+            )
+        if not 0 <= int(self.pv_priority) <= 3:
+            raise ValueError(f"pv_priority must be in 0..3, got {self.pv_priority}")
+        if not 0 <= int(self.pv_sched_fence_mask) <= _SCHED_BARRIER_MASK_MAX:
+            raise ValueError(
+                f"pv_sched_fence_mask must be in 0..{_SCHED_BARRIER_MASK_MAX:#x}, "
+                f"got {self.pv_sched_fence_mask}"
+            )
+        if int(self.pv_sched_group_ds_read) < 1:
+            raise ValueError(
+                "pv_sched_group_ds_read must be >= 1, got "
+                f"{self.pv_sched_group_ds_read}"
+            )
+        if self.iglp_mode not in (None, _IGLP_OFF, 0, 1):
+            raise ValueError(
+                f"iglp_mode must be None, -1 (off), 0 or 1, got {self.iglp_mode}"
+            )
+        if self.pv_loop_order is not None and self.pv_loop_order not in (
+            _PV_LOOP_ORDERS
+        ):
+            raise ValueError(
+                f"pv_loop_order must be one of {sorted(_PV_LOOP_ORDERS)} or None, "
+                f"got {self.pv_loop_order!r}"
+            )
+        if self.o_store_width not in (1, 2, 4):
+            raise ValueError(
+                f"o_store_width must be 1, 2 or 4, got {self.o_store_width}"
+            )
+        if self.o_store_width != 4 and self.dtype == "fp16":
+            raise ValueError(
+                f"o_store_width={self.o_store_width} is bf16-only: narrower fp16 "
+                "stores are not bit-identical to the width-4 output"
+            )
+        if self.resolved_iglp_mode() != _IGLP_OFF and (
+            self.resolved_pv_sched_fence() or self.resolved_pv_sched_group_template()
+        ):
+            raise ValueError(
+                "iglp_mode owns loop scheduling; disable pv_sched_fence and "
+                "pv_sched_group_template when enabling it"
+            )
 
     @property
     def resolved_persist_decode(self) -> str:
-        """Resolve persist_decode='auto' to 'hkv_major' (GQA L2-locality win,
-        when balance-safe) or 'qb_major'. hkv_major balances the causal triangle
-        only when each CTA grid-strides across both halves of a kv-head
-        (gqa*NQB*B >= 2*num_persistent) and there is GQA sharing (gqa>1)."""
         if self.persist_decode != "auto":
             return self.persist_decode
-        gqa = self.num_query_heads // self.num_kv_heads
-        nqb = (self.seqlen_q + _BLOCK_M - 1) // _BLOCK_M  # ceil (ragged partial)
-        per_hkv = gqa * nqb * self.batch
-        if gqa > 1 and per_hkv >= 2 * self.num_persistent:
-            return "hkv_major"
-        return "qb_major"
+        gqa = self.num_queries_per_kv
+        nqb = (self.seqlen_q + self.block_m - 1) // self.block_m
+        aligned_causal = (
+            self.persistent
+            and self.causal
+            and not self.ragged
+            and not self.varlen
+            and not self.paged
+            and self.sliding_window == 0
+        )
+        if aligned_causal and nqb % 2 == 0 and gqa % 2 == 0:
+            pair_np = nqb * self.num_kv_heads * self.batch
+            if self.num_persistent == pair_np:
+                return "gqa_pair"
+        if aligned_causal and nqb % 2 == 0 and gqa >= 2:
+            two_phase_np = nqb * self.num_kv_heads * self.batch * gqa // 2
+            if self.num_persistent == two_phase_np:
+                return "gqa_pair_2phase"
+        return super().resolved_persist_decode
 
-    def kernel_name(self) -> str:
-        parts = [
-            "rocke_attention_dense",
-            f"d{self.head_size}",
-            f"hq{self.num_query_heads}",
-            f"kv{self.num_kv_heads}",
-            f"bn{self.block_n}",
-            self.dtype,
-        ]
-        # The K group pad changes the emitted layout, so it has to be part of the
-        # kernel identity or two kernels that differ only in pad share a symbol
-        # name (and a launcher-cache entry). Only live on the packed path, so the
-        # head_size=128 name is unchanged.
-        if 128 // self.head_size > 1:
-            parts.append(f"kpad{self.lds_k_group_pad}")
-        parts += [
-            f"sq{self.seqlen_q}",
-            f"sk{self.seqlen_kv}",
-            "causal" if self.causal else "full",
-        ]
-        if self.ragged:
-            parts.append("ragged")
-        if self.sliding_window > 0:
-            parts.append(f"swa{self.sliding_window}")
-        if self.use_sinks:
-            parts.append("sinks")
-        if self.varlen:
-            parts.append("varlen")
-        if self.paged:
-            parts.append(f"pgd{self.block_size}")
-            parts.append(
-                f"nb{self.num_kv_blocks}"
-            )  # IR-live: sets the paged rsrc bound
-        if self.lazy_rescale:
-            parts.append("lazyrs")
-        if self.persistent:
-            parts.append(f"persist{self.num_persistent}")
-            if self.resolved_persist_decode == "hkv_major":
-                parts.append("hkvmaj")
-            if self.interleave:
-                parts.append("intl")
-        return kernel_name_join(*parts)
+    @property
+    def runtime_shape(self) -> bool:
+        """Whether the body reads the problem shape *only* from its kernel params,
+        baking it nowhere -- so ONE compiled kernel serves every shape and the three
+        fields drop out of the cache key. This is what collapses the AOT
+        batch x seqlen instance explosion.
+
+        Not the same as having the params: every non-persistent body takes them (see
+        ``_has_shape_params``). The sub-modes excluded here take them too, and use
+        them for the q/k/o base offsets, but still bake seqlen somewhere else -- the
+        paged K/V bound, the ragged k-tail mask and OOB store predicate, the
+        non-runtime k-tile trip count -- so they must keep per-shape identity.
+        A moving bottom-right diagonal also bakes the sequence-length difference;
+        equal-length bottom-right stays in the unshifted runtime-shape cohort.
+        ``persistent`` is excluded for a stronger reason: it is a separate body that
+        declares no shape params at all."""
+        return not (
+            self.persistent
+            or self.ragged
+            or self.varlen
+            or self.paged
+            or self.sliding_window > 0
+            or (self.causal_bottom_right and self.seqlen_q != self.seqlen_kv)
+        )
+
+    @property
+    def runtime_param_fields(self) -> tuple[str, ...]:
+        """The shape fields this body reads *only* from its kernel params, and so
+        the fields ``attention_dense_cache_key`` may drop.
+
+        Gated on ``runtime_shape``, not on ``_has_shape_params``: taking a field as
+        a kernarg is necessary but not sufficient: a sub-mode that also bakes the
+        field elsewhere would be a cache collision if it declared it here.
+
+        Kept in sync with the body by hand. A future per-batch specialization would
+        narrow this (bake ``batch``, keep the seqlens runtime) -- the cache key
+        follows automatically, but the symbol name would have to derive from this
+        tuple first. It does not today.
+        """
+        return ("batch", "seqlen_q", "seqlen_kv") if self.runtime_shape else ()
+
+    def _layout_name_parts(self) -> tuple[str, ...]:
+        if self.head_size != 128:
+            return ()
+        parts = []
+        # The base names the D<128 group pad; the D128 row pads are tagged only
+        # when they differ from the shipped values, so default symbols are stable.
+        if self.lds_k_row_pad != _DEFAULT_LDS_K_ROW_PAD:
+            parts.append(f"krpad{self.lds_k_row_pad}")
+        if self.lds_v_row_pad != _DEFAULT_GFX950_LAYOUT["lds_v_row_pad"]:
+            parts.append(f"vpad{self.lds_v_row_pad}")
+        return tuple(parts)
+
+    def _shape_name_parts(self) -> tuple[str, ...]:
+        return () if self.runtime_shape else super()._shape_name_parts()
+
+    def _algorithm_name_parts(self) -> tuple[str, ...]:
+        parts = list(super()._algorithm_name_parts())
+        if self.wide_lds_dma:
+            parts.append("wdma")
+        # Preserve shipped symbols at the default while keeping explicitly
+        # swept WPE binaries distinct for AOT packaging and name-based tools.
+        if self.waves_per_eu != 2:
+            parts.append(f"wpe{self.waves_per_eu}")
+        codegen = self._codegen_name_part()
+        if codegen:
+            parts.append(codegen)
+        if self.emit_lse:
+            parts.append("lse")
+        return tuple(parts)
+
+    def _codegen_name_part(self) -> str:
+        """One token for every codegen knob set away from its default, so a
+        name-keyed AOT catalog cannot serve a default binary for a tuned spec."""
+        changed = sorted(
+            (name, getattr(self, name))
+            for name, default in _CODEGEN_KNOB_DEFAULTS.items()
+            if getattr(self, name) != default
+        )
+        if not changed:
+            return ""
+        return "cg" + hashlib.sha256(repr(changed).encode()).hexdigest()[:8]
+
+    def _persist_decode_name_part(self) -> str:
+        return {
+            "hkv_major": "hkvmaj",
+            "gqa_pair": "gqapair",
+            "gqa_pair_2phase": "gqapair2",
+        }.get(self.resolved_persist_decode, "")
+
+
+_CODEGEN_KNOB_DEFAULTS = MappingProxyType(
+    {
+        f.name: f.default
+        for f in _dataclass_fields(Gfx950AttentionDenseSpec)
+        if f.name
+        in (
+            "lds_num_buffers",
+            "lazy_rescale_threshold",
+            "use_exp2_fast",
+            "exp_per_pv_step",
+            "partial_vmcnt_prefetch",
+            "pv_priority",
+            "pv_sched_fence",
+            "pv_sched_fence_mask",
+            "pv_sched_group_template",
+            "pv_sched_group_ds_read",
+            "iglp_mode",
+            "pv_loop_order",
+            "causal_diag_split",
+            "o_store_width",
+        )
+    }
+)
+
+# Compatibility name for existing gfx950 callers. Cross-architecture code must
+# import the neutral base from kernels.common.attention_dense_spec instead.
+AttentionDenseSpec = Gfx950AttentionDenseSpec
 
 
 def supports_attention_dense(
@@ -460,11 +537,69 @@ def supports_attention_dense(
     """Return (ok, reason). The kernel is gfx950-only and dense (no paging/bias)."""
     if arch != "gfx950":
         return False, f"attention_dense is gfx950-only (got {arch})"
-    try:
-        AttentionDenseSpec(**{f.name: getattr(spec, f.name) for f in spec.__dataclass_fields__.values()})  # type: ignore[attr-defined]
-    except ValueError as e:
-        return False, str(e)
+    if not isinstance(spec, Gfx950AttentionDenseSpec):
+        return False, (
+            "gfx950 attention_dense requires Gfx950AttentionDenseSpec, got "
+            f"{type(spec).__name__}"
+        )
+    # Shared preflight: dataclass re-validation (which reconstructs THIS subclass, so
+    # the gfx950-private knob validators run too), positive extents, block_n dividing
+    # the query tile, and the 32-bit extent bounds. All four are base-spec properties
+    # with the same verdict for every dense body, so they live in kernels.common
+    # rather than being replicated here and in gfx942. The 32-bit check is what the
+    # runtime-shape path leans on: the extent is a device-side mul of two kernargs
+    # there, and batch/seqlen no longer split the launcher-cache key, so this is the
+    # only place an oversized launch can be caught -- and it runs per launch, since
+    # run_attention_dense calls supports() before the cache lookup.
+    ok, why = check_dense_spec_preflight(spec)
+    if not ok:
+        return False, why
+    supported_block_m = {
+        int(geometry["block_m"]) for geometry in DENSE_TILE_GEOMETRIES.values()
+    }
+    if spec.block_m not in supported_block_m:
+        return False, (
+            f"gfx950 block_m must be one of {sorted(supported_block_m)}, "
+            f"got {spec.block_m}"
+        )
+    if spec.block_n % spec.num_waves != 0:
+        return False, (
+            f"block_n={spec.block_n} must be divisible by num_waves="
+            f"{spec.num_waves} so K/V DMA rows distribute evenly"
+        )
     return True, ""
+
+
+def _pv_steps(order: str, d_tiles: int, kk_steps: int) -> Tuple[Tuple[int, int], ...]:
+    """PV MFMA ``(dt, kk_step)`` sequence for ``pv_loop_order``."""
+    if order == "k_major":
+        return tuple((dt, kk) for kk in range(kk_steps) for dt in range(d_tiles))
+    return tuple((dt, kk) for dt in range(d_tiles) for kk in range(kk_steps))
+
+
+def _dense_lse_output(
+    b, dst, index, m, l, row_exists, row_has_key, lane_half, *, sinks, head, dtype
+):
+    """Emit stats from one half-wave while both halves retain their O stores."""
+    owner = b.land(row_exists, b.cmp_eq(lane_half, b.const_i32(0)))
+    with b.scf_if(owner):
+        with b.scf_if(row_has_key):
+            lse_store(b, dst, index, m, l, row_has_mass=row_has_key)
+        with b.scf_if(b.lnot(row_has_key)):
+            if sinks is not None:
+                sink = b.cast_to_f32(b.global_load(sinks, head, dtype, align=2))
+                sink_m = b.fmul(sink, b.const_f32(LOG2E))
+                mass = b.cmp_eq(b.const_i32(1), b.const_i32(1))
+                lse_store(b, dst, index, sink_m, b.const_f32(1.0), row_has_mass=mass)
+            else:
+                lse_store(
+                    b,
+                    dst,
+                    index,
+                    b.const_f32(0.0),
+                    b.const_f32(1.0),
+                    row_has_mass=row_has_key,
+                )
 
 
 def build_attention_dense(
@@ -473,6 +608,9 @@ def build_attention_dense(
     """Emit the dense flash-attention prefill kernel described by ``spec``."""
     if arch != "gfx950":
         raise NotImplementedError(f"attention_dense is gfx950-only (got {arch})")
+    ok, reason = supports_attention_dense(spec, arch=arch)
+    if not ok:
+        raise ValueError(f"unsupported gfx950 attention_dense spec: {reason}")
 
     if spec.persistent:
         return _build_attention_dense_persistent(spec)
@@ -486,22 +624,35 @@ def build_attention_dense(
     causal = spec.causal
     dtype = spec.dtype_ir
 
-    BLOCK_M = _BLOCK_M
+    BLOCK_M = spec.block_m
     WAVES = spec.num_waves
     BN = spec.block_n
-    NBUF = _NBUF
-    PAD = _LDS_PAD
+    NBUF = spec.lds_num_buffers
+    PAD = spec.lds_k_row_pad
     W = spec.sliding_window
     Wt = W // BN  # window length in KV tiles (0 when disabled)
+    # Compile-time bottom-right diagonal shift. The persistent builder returns
+    # above and deliberately remains unchanged.
+    DIAG_OFF = (Skv - Sq) if spec.causal_bottom_right else 0
+    DIAG_TILES = DIAG_OFF // BN
     varlen = spec.varlen
     RAGGED = spec.ragged
     LAZY_RESCALE = spec.lazy_rescale
+    LAZY_THRESHOLD = float(spec.lazy_rescale_threshold)
     use_sinks = spec.use_sinks
 
     K_STEPS = D // 16
     D_TILES = D // 32
     N_SUB = BN // 32
     KK_STEPS = BN // 16
+    PV_STEPS = _pv_steps(spec.resolved_pv_loop_order(), D_TILES, KK_STEPS)
+    EXP_PER = spec.resolved_exp_per_pv_step()
+    SCHED_GROUP = spec.resolved_pv_sched_group_template()
+    SCHED_GROUP_DS_READ = int(spec.pv_sched_group_ds_read)
+    PV_FENCE = spec.resolved_pv_sched_fence()
+    PV_FENCE_MASK = int(spec.pv_sched_fence_mask)
+    PV_PRIORITY = int(spec.pv_priority)
+    IGLP = spec.resolved_iglp_mode()
     gqa = Hq // Hkv
     stride_q_tok = Hq * D
     stride_k_tok = Hkv * D
@@ -529,6 +680,21 @@ def build_attention_dense(
         "o_ptr", PtrType(dtype, "global"), noalias=True, writeonly=True, align=16
     )
     scale = b.param("scale", F32)
+    # Problem shape as kernel params. Unconditional here: every spec reaching this
+    # body takes them, so the base offsets below read params with no baked
+    # alternative. Declared right after scale to fix their ABI position (mirrored in
+    # attention_dense_signature, gated there by _has_shape_params because that
+    # function also serves the persistent body, which returned above and declares
+    # none of these).
+    #
+    # Taking the shape as params is an ABI fact and is NOT the same as
+    # ``spec.runtime_shape``, which is the narrower claim that the body bakes the
+    # shape *nowhere* and so can drop it from the cache key. Sub-modes still bake it
+    # elsewhere -- the paged K/V bound below, the ragged k-tail mask, the non-runtime
+    # k-tile trip count -- and keep per-shape identity via runtime_param_fields.
+    batch_p = b.param("batch", I32)
+    seqlen_q_p = b.param("seqlen_q", I32)
+    seqlen_kv_p = b.param("seqlen_kv", I32)
     if use_sinks:
         sinks = b.param(
             "sink_ptr", PtrType(dtype, "global"), noalias=True, readonly=True, align=16
@@ -553,9 +719,18 @@ def build_attention_dense(
             "kv_lens", PtrType(I32, "global"), noalias=True, readonly=True, align=4
         )
         bt_stride = b.param("block_table_stride", I32)
+    if spec.emit_lse:
+        lse = b.param(
+            "lse_ptr",
+            PtrType(F32, "global"),
+            noalias=True,
+            writeonly=True,
+            align=4,
+        )
     qk_scale = b.fmul(scale, b.const_f32(LOG2E))
 
-    _exp2 = b.exp2_fast  # native v_exp_f32 (softmax arg always <= 0)
+    # native v_exp_f32 (softmax arg bounded; see _MAX_SCALE) or the guarded exp2
+    _exp2 = b.exp2_fast if spec.use_exp2_fast else b.exp2
 
     tid = b.thread_id_x()
     wave = b.div(tid, b.const_i32(64))
@@ -563,7 +738,16 @@ def build_attention_dense(
     lane_m = b.mod(lane, b.const_i32(32))
     lane_h = b.div(lane, b.const_i32(32))
     d_base = b.mul(lane_h, b.const_i32(8))
-    neg_inf = b.const_f32(-1e30)
+    # Mask sentinel, written into RAW (unscaled) scores; it also seeds the running
+    # max m (log2 units) when there are no sinks. It is a power of two so
+    # sentinel * qk_scale is exact. A row fully masked in its first visited tile
+    # then gets, exactly: P = exp2(0) = 1 when qk_scale <= 1 (m = sentinel *
+    # qk_scale), or P = exp2(sentinel * (qk_scale - 1)) = 0 when qk_scale > 1
+    # (m stays at the sentinel). Either way the next tile with a real key has
+    # alpha = exp2(m_old - m_new) = 0, which clears it. A non-power-of-two
+    # sentinel would instead leave a huge rounding residue whose sign depends on
+    # the scale: exp2 of it is 0 when negative and inf (then NaN) when positive.
+    neg_inf = b.const_f32(-(2.0**99))
     if use_sinks:
         rcp_ln2 = b.const_f32(LOG2E)
         one_f = b.const_f32(1.0)
@@ -593,11 +777,11 @@ def build_attention_dense(
         )
     else:
         q_base = b.add(
-            b.mul(b.mul(bt, b.const_i32(Sq)), b.const_i32(stride_q_tok)),
+            b.mul(b.mul(bt, seqlen_q_p), b.const_i32(stride_q_tok)),
             b.mul(hq, b.const_i32(D)),
         )
         k_base = b.add(
-            b.mul(b.mul(bt, b.const_i32(Skv)), b.const_i32(stride_k_tok)),
+            b.mul(b.mul(bt, seqlen_kv_p), b.const_i32(stride_k_tok)),
             b.mul(hkv, b.const_i32(D)),
         )
 
@@ -616,7 +800,7 @@ def build_attention_dense(
         K_GROUP = ROWS_PER_INSTR
         K_ROWS_LDS = BN // K_GROUP
         LDROW = K_GROUP * D + spec.lds_k_group_pad
-    VROW = D + _LDS_PAD_V if ROWS_PER_INSTR == 1 else D
+    VROW = D + spec.lds_v_row_pad if ROWS_PER_INSTR == 1 else D
     K_lds = b.smem_alloc(dtype, [NBUF, K_ROWS_LDS, LDROW], name_hint="Klds")
     V_lds = b.smem_alloc(dtype, [NBUF, BN, VROW], name_hint="Vlds")
     # Packed-K read decode, hoisted out of the KV loop: krow = nsub*32 + lane_m
@@ -629,7 +813,10 @@ def build_attention_dense(
         k_lane_grp = None
         k_sub_col = None
 
-    # Q packs (B operand), scaled once by qk_scale = softmax_scale * log2(e).
+    # Q packs (B operand), loaded unscaled. qk_scale = softmax_scale * log2(e) is
+    # applied in fp32 after the QK MFMA (softmax_max + the exp2 FMA below):
+    # rounding Q * qk_scale back to bf16 costs up to 2^-8 relative error per
+    # element, and the score error it causes grows with the scale.
     # ragged: a bounds-checked buffer load returns 0 for OOB query rows (the
     # partial last block), so padded rows are register-zero (their output is
     # dropped by the guarded store). Aligned: direct global load (unchanged IR).
@@ -645,11 +832,7 @@ def build_attention_dense(
             )
         else:
             raw = b.global_load_vN(q, addr, dtype, 8, align=16)
-        elems = [
-            b.cast_f32_to(b.fmul(b.cast_to_f32(b.vec_extract(raw, j)), qk_scale), dtype)
-            for j in range(8)
-        ]
-        q_packs.append(b.vec_pack(elems, dtype))
+        q_packs.append(raw)
 
     # ragged: ceil so the partial last KV tile is visited (its OOB keys load 0
     # into LDS and are masked out); aligned: exact.
@@ -672,21 +855,43 @@ def build_attention_dense(
         f"K row-group split must divide evenly: BN={BN} K_GROUP={K_GROUP} "
         f"ROWS_PER_WAVE={ROWS_PER_WAVE} ROWS_PER_INSTR={ROWS_PER_INSTR}"
     )
-    WAVE_BYTES = 64 * 16
     V_DMA_PASSES = (BN * D) // (WAVES * 64 * 8)
+    LOOP_VMCNT = V_DMA_PASSES if spec.partial_vmcnt_prefetch else 0
     zero_soff = b.const_i32(0)
     K_lds_addr = b.smem_addr_of(K_lds)
     V_lds_addr = b.smem_addr_of(V_lds)
-    # Emit a SEPARATE b.const_i32 per buffer_rsrc (NOT a shared IR node): develop
-    # emits two consts here, so sharing one silently breaks paged=False byte-identity
-    # (the attention_dense representative-IR golden). ``_kv_cache_elems`` is a plain
-    # Python int; paged widens the bound to the whole cache, contiguous keeps B*Skv.
-    _kv_cache_elems = (
-        (spec.num_kv_blocks * spec.block_size if spec.paged else B * Skv) * Hkv * D * 2
-    )
-    k_rsrc = b.buffer_rsrc(k, b.const_i32(_kv_cache_elems))
-    v_rsrc = b.buffer_rsrc(v, b.const_i32(_kv_cache_elems))
-    v_wave_off_i64 = b.zext(b.to_sgpr_u32(b.mul(wave, b.const_i32(WAVE_BYTES))), I64)
+    # Emit a SEPARATE num_records IR node per buffer_rsrc (NOT one shared node):
+    # develop emits two here, so sharing one silently breaks byte-identity (the
+    # attention_dense representative-IR golden).
+    #
+    # Gated on ``spec.paged``, not on ``spec.runtime_shape``: the two branches bound
+    # two DIFFERENT buffers, so this is not the removable bookkeeping split that the
+    # batch/seqlen param declaration was.
+    if spec.paged:
+        # The paged bound is the WHOLE page cache. Pages are addressed through
+        # block_tables at page_id*block_size, so any page id the table can name must
+        # be in range -- batch*seqlen_kv is only the logical KV length of one
+        # request and is <= (usually <<) the cache extent. Bounding by it would put
+        # legitimately-high page ids past num_records, where buffer loads return 0
+        # with no fault. ``num_kv_blocks`` is not a kernel param, so this stays baked.
+        _kv_cache_elems = spec.num_kv_blocks * spec.block_size * Hkv * D * 2
+        k_rsrc = b.buffer_rsrc(k, b.const_i32(_kv_cache_elems))
+        v_rsrc = b.buffer_rsrc(v, b.const_i32(_kv_cache_elems))
+    else:
+        # Contiguous K/V: num_records must track THIS launch's real extent, since
+        # under runtime_shape one kernel serves every seqlen and a baked bound would
+        # drop valid reads for a larger one. For the baked sub-modes the product is
+        # exactly the B*Skv this used to bake -- run_attention_dense_torch fills the
+        # params from the same spec -- so only the emitted IR changes.
+        _kv_elem_bytes = Hkv * D * 2
+        k_rsrc = b.buffer_rsrc(
+            k, b.mul(b.mul(batch_p, seqlen_kv_p), b.const_i32(_kv_elem_bytes))
+        )
+        v_rsrc = b.buffer_rsrc(
+            v, b.mul(b.mul(batch_p, seqlen_kv_p), b.const_i32(_kv_elem_bytes))
+        )
+    # Unused, but the lowering keeps dead ops, so dropping it moves every golden.
+    b.zext(b.to_sgpr_u32(b.mul(wave, b.const_i32(64 * 16))), I64)
     if spec.paged:
         # ROWS_PER_WAVE <= block_size and block_size % ROWS_PER_WAVE == 0 is
         # enforced at spec construction (__post_init__ paged validation), so every
@@ -816,6 +1021,11 @@ def build_attention_dense(
                     col = b.add(k_sub_col, col)
                 k_pack = b.smem_load_vN(K_lds, kbuf, krow, col, dtype=dtype, n=8)
                 acc = mfma_32x32x16_for_dtype(b, dtype, k_pack, q_packs[ks], acc)
+            # Raw (unscaled) scores. qk_scale is folded into softmax_max (one
+            # multiply on the row max) and into the exp2 argument as one FMA,
+            # so the scale adds no per-score instruction. Needs qk_scale > 0
+            # (max commutes with the scale); the runner enforces the
+            # [_MIN_SCALE, _MAX_SCALE] range.
             s_reg.append([b.vec_extract(acc, i) for i in range(16)])
         return s_reg
 
@@ -828,6 +1038,8 @@ def build_attention_dense(
             return
         tile_key0 = b.mul(tile_idx, b.const_i32(BN))
         query_tok = b.add(q_tok0, _mfma_32x32_c_col(b, lane, 0))
+        if DIAG_OFF:
+            query_tok = b.add(query_tok, b.const_i32(DIAG_OFF))
         # lower bound key: q - W + 1  (keep iff ktok > q - W)
         win_lo = b.sub(query_tok, b.const_i32(W)) if lower else None
         for nsub in range(N_SUB):
@@ -862,11 +1074,13 @@ def build_attention_dense(
         for nsub in range(N_SUB):
             for i in range(16):
                 local_max = b.fmax(local_max, s_reg[nsub][i])
-        tile_max = b.fmax(local_max, b.warp_shuffle_xor(local_max, 32))
+        tile_max_raw = b.fmax(local_max, b.warp_shuffle_xor(local_max, 32))
+        # Into the log2 domain the running max, threshold, and sinks use.
+        tile_max = b.fmul(tile_max_raw, qk_scale)
         if LAZY_RESCALE:
             m_diff = b.fsub(tile_max, m_i)
             below_i32 = b.select(
-                b.fcmp("ole", m_diff, b.const_f32(_LAZY_RESCALE_THRESHOLD)),
+                b.fcmp("ole", m_diff, b.const_f32(LAZY_THRESHOLD)),
                 b.const_i32(1),
                 b.const_i32(0),
             )
@@ -910,14 +1124,11 @@ def build_attention_dense(
         )
 
     def do_pv(o_acc_in, p_packs, vbuf):
-        out = []
-        for dt in range(D_TILES):
-            acc_o = o_acc_in[dt]
-            for kk_step in range(KK_STEPS):
-                acc_o = mfma_32x32x16_for_dtype(
-                    b, dtype, read_v(dt, kk_step, vbuf), p_packs[kk_step], acc_o
-                )
-            out.append(acc_o)
+        out = list(o_acc_in)
+        for dt, kk_step in PV_STEPS:
+            out[dt] = mfma_32x32x16_for_dtype(
+                b, dtype, read_v(dt, kk_step, vbuf), p_packs[kk_step], out[dt]
+            )
         return out
 
     def rescale_o(o_acc, alpha):
@@ -929,37 +1140,39 @@ def build_attention_dense(
         ]
 
     def pv_fused_exp(o_acc_in, p_packs, vbuf, s_reg, m_new):
-        """Depth-1 cluster: interleave exp2(s - m_new) into the PV MFMA loop so the
+        """Depth-1 cluster: interleave exp2(s * qk_scale - m_new) into the PV MFMA loop so the
         softmax VALU/TRANS co-executes in the MFMA shadow. The full per-step
         instruction population (DS_READ/MFMA/VALU/TRANS) is named to sched_group_barrier
-        so the IGLP grouping matches the real stream."""
-        exp_per = -(-(N_SUB * 16) // (D_TILES * KK_STEPS))
+        so the IGLP grouping matches the real stream. The VALU count is an upper
+        bound: the compiler may pair two exp-argument FMAs into one v_pk_fma_f32, so a
+        step can issue fewer VALU ops than named."""
+        # fma(s, qk_scale, -m) is not bounded for huge scores: see the KNOWN
+        # LIMITATION note at _MAX_SCALE.
+        neg_m = b.fneg(m_new)
         slots = [(nsub, i) for nsub in range(N_SUB) for i in range(16)]
         p_vals = [[None] * 16 for _ in range(N_SUB)]
         it = iter(slots)
-        out = []
-        for dt in range(D_TILES):
-            acc_o = o_acc_in[dt]
-            for kk_step in range(KK_STEPS):
-                acc_o = mfma_32x32x16_for_dtype(
-                    b, dtype, read_v(dt, kk_step, vbuf), p_packs[kk_step], acc_o
-                )
-                n_emit = 0
-                for _ in range(exp_per):
-                    slot = next(it, None)
-                    if slot is None:
-                        break
-                    nsub, i = slot
-                    p_vals[nsub][i] = _exp2(b.fsub(s_reg[nsub][i], m_new))
-                    n_emit += 1
-                b.sched_group_barrier(DS_READ, 2, 0)
+        out = list(o_acc_in)
+        for dt, kk_step in PV_STEPS:
+            out[dt] = mfma_32x32x16_for_dtype(
+                b, dtype, read_v(dt, kk_step, vbuf), p_packs[kk_step], out[dt]
+            )
+            n_emit = 0
+            for _ in range(EXP_PER):
+                slot = next(it, None)
+                if slot is None:
+                    break
+                nsub, i = slot
+                p_vals[nsub][i] = _exp2(b.fma(s_reg[nsub][i], qk_scale, neg_m))
+                n_emit += 1
+            if SCHED_GROUP:
+                b.sched_group_barrier(DS_READ, SCHED_GROUP_DS_READ, 0)
                 b.sched_group_barrier(MFMA, 1, 0)
                 b.sched_group_barrier(VALU, max(1, n_emit), 0)
                 b.sched_group_barrier(TRANS, max(1, n_emit), 0)
-            out.append(acc_o)
         for slot in it:
             nsub, i = slot
-            p_vals[nsub][i] = _exp2(b.fsub(s_reg[nsub][i], m_new))
+            p_vals[nsub][i] = _exp2(b.fma(s_reg[nsub][i], qk_scale, neg_m))
         l_local = b.const_f32(0.0)
         for nsub in range(N_SUB):
             for i in range(16):
@@ -967,11 +1180,20 @@ def build_attention_dense(
         l_tile = b.fadd(l_local, b.warp_shuffle_xor(l_local, 32))
         return out, p_vals, l_tile
 
-    n_ktiles_val = (
-        b.div(seqlen_kv_b, b.const_i32(BN)) if varlen else b.const_i32(n_ktiles)
-    )
+    if varlen:
+        n_ktiles_val = b.div(seqlen_kv_b, b.const_i32(BN))
+    elif spec.runtime_shape:
+        n_ktiles_val = b.div(seqlen_kv_p, b.const_i32(BN))
+    else:
+        n_ktiles_val = b.const_i32(n_ktiles)
     if causal:
-        n_upper = b.add(b.mul(qb, b.const_i32(n_per)), b.const_i32(n_per))
+        # Ceil the final reachable key to a KV-tile count. block_m is a
+        # per-spec geometry choice; supports_attention_dense enforces that BN
+        # divides it, so the qb term can stay outside the ceil.
+        n_upper = b.add(
+            b.mul(qb, b.const_i32(n_per)),
+            b.const_i32((spec.block_m - 1 + DIAG_OFF) // BN + 1),
+        )
         n_upper = b.select(b.cmp_lt(n_upper, n_ktiles_val), n_upper, n_ktiles_val)
     else:
         n_upper = n_ktiles_val
@@ -1018,8 +1240,10 @@ def build_attention_dense(
 
     m0, alpha0, _skip0 = softmax_max(s0, m_init)
     # tile-0 softmax exp + relayout only; PV lags by one tile (fused into the loop).
+    neg_m0 = b.fneg(m0)  # same unbounded-score limitation; see _MAX_SCALE
     p0_vals = [
-        [_exp2(b.fsub(s0[nsub][i], m0)) for i in range(16)] for nsub in range(N_SUB)
+        [_exp2(b.fma(s0[nsub][i], qk_scale, neg_m0)) for i in range(16)]
+        for nsub in range(N_SUB)
     ]
     l0_local = b.const_f32(0.0)
     for nsub in range(N_SUB):
@@ -1042,6 +1266,8 @@ def build_attention_dense(
     _rs_ctr = [0]
 
     def emit_loop_body(j, carry, mask_lower=False, mask_upper=False, mask_kbound=False):
+        if IGLP != _IGLP_OFF:
+            b.iglp_opt(IGLP)
         m_i = carry[0]
         l_i = carry[1]
         o_acc = list(carry[2 : 2 + D_TILES])
@@ -1052,7 +1278,7 @@ def build_attention_dense(
 
         # PF (partial-vmcnt prefetch): keep the freshest V(j) DMA in flight so it
         # overlaps compute instead of a full vmcnt(0) serialize (bit-identical).
-        b.s_waitcnt(vmcnt=V_DMA_PASSES)
+        b.s_waitcnt(vmcnt=LOOP_VMCNT)
         b.s_barrier_bare()
         s = do_qk(kbuf)
         if mask_lower or mask_upper:
@@ -1060,10 +1286,13 @@ def build_attention_dense(
         if mask_kbound:
             do_kbound_mask(s, j)
         m_new, alpha, skip = softmax_max(s, m_i)
-        b.sched_barrier(0)  # depth-1 fence: m_new region-live-in
-        b.s_setprio(1)  # PV-only s_setprio (paired with PF ~+3.5%)
+        if PV_FENCE:
+            b.sched_barrier(PV_FENCE_MASK)  # depth-1 fence: m_new region-live-in
+        if PV_PRIORITY:
+            b.s_setprio(PV_PRIORITY)  # PV-only s_setprio (paired with PF ~+3.5%)
         o_acc, p_vals, l_tile = pv_fused_exp(o_acc, p_prev, vbuf_prev, s, m_new)
-        b.s_setprio(0)
+        if PV_PRIORITY:
+            b.s_setprio(0)
         if LAZY_RESCALE:
             _rs_ctr[0] += 1
             tg = _rs_ctr[0]
@@ -1120,9 +1349,11 @@ def build_attention_dense(
         loop = b.scf_for_iter(mid_hi, n_upper, b.const_i32(1), rgt_args, iv_name="swr")
         with loop as (j, carry):
             emit_loop_body(j, carry, mask_lower=True, mask_upper=True)
-    elif causal:
+    elif causal and spec.causal_diag_split:
         # Diagonal-only masking: below-diagonal tiles need no mask (~94% at Sq=8192).
         diag_start = b.mul(qb, b.const_i32(n_per))
+        if DIAG_TILES:
+            diag_start = b.add(diag_start, b.const_i32(DIAG_TILES))
         body_upper = b.select(b.cmp_lt(diag_start, n_upper), diag_start, n_upper)
         body = b.scf_for_iter(
             b.const_i32(1), body_upper, b.const_i32(1), iter_args, iv_name="nb"
@@ -1143,7 +1374,7 @@ def build_attention_dense(
             b.const_i32(1), n_upper, b.const_i32(1), iter_args, iv_name="nkt"
         )
         with loop as (j, carry):
-            emit_loop_body(j, carry, mask_kbound=RAG_KBOUND)
+            emit_loop_body(j, carry, mask_upper=causal, mask_kbound=RAG_KBOUND)
 
     res = loop.results
     l_i = res[1]
@@ -1157,19 +1388,54 @@ def build_attention_dense(
     o_acc = do_pv(o_acc, p_prev, last_vbuf)
 
     # Epilogue: O = (P@V) / l, vectorized bf16 store.
-    rcp_l = b.rcp(l_i)
+    if spec.emit_lse:
+        positive_l = b.fcmp("ogt", l_i, b.const_f32(0.0))
+        rcp_l = b.rcp(b.select(positive_l, l_i, b.const_f32(1.0)))
+    else:
+        rcp_l = b.rcp(l_i)
     if varlen:
         o_base = b.add(
             b.mul(q_seq0, b.const_i32(stride_q_tok)), b.mul(hq, b.const_i32(D))
         )
     else:
         o_base = b.add(
-            b.mul(b.mul(bt, b.const_i32(Sq)), b.const_i32(stride_q_tok)),
+            b.mul(b.mul(bt, seqlen_q_p), b.const_i32(stride_q_tok)),
             b.mul(hq, b.const_i32(D)),
         )
     qtok = b.add(q_tok0, _mfma_32x32_c_col(b, lane, 0))
     q_row_byte = b.add(o_base, b.mul(qtok, b.const_i32(stride_q_tok)))
     d_half = b.mul(lane_h, b.const_i32(4))
+    if spec.emit_lse:
+        row_has_key = dense_row_has_key(
+            b,
+            qtok,
+            seqlen_kv_b if varlen else seqlen_kv_p,
+            causal=causal,
+            diagonal=DIAG_OFF,
+            window=W,
+        )
+        if varlen:
+            lse_index = b.add(b.mul(b.add(q_seq0, qtok), b.const_i32(Hq)), hq)
+            row_exists = b.cmp_lt(qtok, seqlen_q_b)
+        else:
+            lse_index = b.add(
+                b.mul(b.add(b.mul(bt, b.const_i32(Hq)), hq), seqlen_q_p),
+                qtok,
+            )
+            row_exists = b.cmp_lt(qtok, seqlen_q_p)
+        _dense_lse_output(
+            b,
+            lse,
+            lse_index,
+            res[0],
+            l_i,
+            row_exists,
+            row_has_key,
+            lane_h,
+            sinks=sinks if use_sinks else None,
+            head=hq,
+            dtype=dtype,
+        )
     # ragged: drop padded query rows (qtok >= seqlen_q) via a per-lane guard so
     # they never write (and never clobber a neighbouring batch's real rows). A
     # buffer store's OOB-drop only protects the last batch's overflow, so use an
@@ -1177,20 +1443,48 @@ def build_attention_dense(
     o_store_ctx = (
         b.scf_if(b.cmp_lt(qtok, b.const_i32(Sq))) if RAGGED else _nullcontext()
     )
+    if spec.emit_lse and varlen:
+        o_store_ctx = b.scf_if(row_exists)
     with o_store_ctx:
-        for dt in range(D_TILES):
-            for g in range(4):
-                d0 = b.add(b.const_i32(dt * 32 + g * 8), d_half)
+        _emit_o_store(
+            b,
+            o,
+            q_row_byte,
+            d_half,
+            o_acc,
+            rcp_l,
+            dtype,
+            D_TILES,
+            spec.o_store_width,
+            row_has_key=row_has_key if spec.emit_lse else None,
+        )
+    b.ret()
+    return b.kernel
+
+
+def _emit_o_store(
+    b, o, q_row_byte, d_half, o_acc, rcp_l, dtype, d_tiles, width, row_has_key=None
+):
+    """O = acc / l, ``width`` contiguous head-dim elements per global store.
+
+    ``row_has_key`` (LSE path only) zeroes rows that see no key; ``None`` emits the
+    unchanged store sequence.
+    """
+    for dt in range(d_tiles):
+        for g in range(4):
+            for c in range(0, 4, width):
+                d0 = b.add(b.const_i32(dt * 32 + g * 8 + c), d_half)
                 addr = b.add(q_row_byte, d0)
                 vals = [
                     b.cast_f32_to(
                         b.fmul(b.vec_extract(o_acc[dt], g * 4 + kk), rcp_l), dtype
                     )
-                    for kk in range(4)
+                    for kk in range(c, c + width)
                 ]
-                b.global_store_vN(o, addr, b.vec_pack(vals, dtype), 4, align=8)
-    b.ret()
-    return b.kernel
+                packed = b.vec_pack(vals, dtype)
+                if row_has_key is not None:
+                    packed = zero_keyless_row(b, packed, row_has_key, dtype, width)
+                b.global_store_vN(o, addr, packed, width, align=2 * width)
 
 
 def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
@@ -1203,9 +1497,10 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
     instead of once per query-block (see the ``persistent`` spec field). Every
     algorithmic lever is the same always-on set as the default build; the only
     differences are the outer work loop, the qb-major work decode (load-balances the
-    causal triangle), the per-work-item state reset, and ``exp_per=1`` (keeps the
-    extra loop-carried index math within 256 VGPR at 0 spill; numerically identical
-    to the default's ``exp_per=2`` — pure emission ordering)."""
+    causal triangle), the per-work-item state reset, and a default
+    ``exp_per_pv_step`` of 1 (keeps the extra loop-carried index math within 256
+    VGPR at 0 spill; numerically identical to the grid body's 2 — pure emission
+    ordering)."""
     B = spec.batch
     Sq = spec.seqlen_q
     Skv = spec.seqlen_kv
@@ -1215,11 +1510,11 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
     causal = spec.causal
     dtype = spec.dtype_ir
 
-    BLOCK_M = _BLOCK_M
+    BLOCK_M = spec.block_m
     WAVES = spec.num_waves
     BN = spec.block_n
-    NBUF = _NBUF
-    PAD = _LDS_PAD
+    NBUF = spec.lds_num_buffers
+    PAD = spec.lds_k_row_pad
     NP = spec.num_persistent
     INTERLEAVE = spec.interleave
 
@@ -1227,6 +1522,15 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
     D_TILES = D // 32
     N_SUB = BN // 32
     KK_STEPS = BN // 16
+    PV_STEPS = _pv_steps(spec.resolved_pv_loop_order(), D_TILES, KK_STEPS)
+    EXP_PER = spec.resolved_exp_per_pv_step()
+    SCHED_GROUP = spec.resolved_pv_sched_group_template()
+    SCHED_GROUP_DS_READ = int(spec.pv_sched_group_ds_read)
+    PV_FENCE = spec.resolved_pv_sched_fence()
+    PV_FENCE_MASK = int(spec.pv_sched_fence_mask)
+    PV_PRIORITY = int(spec.pv_priority)
+    IGLP = spec.resolved_iglp_mode()
+    LAZY_THRESHOLD = float(spec.lazy_rescale_threshold)
     gqa = Hq // Hkv
     stride_q_tok = Hq * D
     stride_k_tok = Hkv * D
@@ -1245,6 +1549,7 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
     SWt = SW // BN  # window length in KV tiles
     LAZY_RESCALE = spec.lazy_rescale
     use_sinks = spec.use_sinks
+    WIDE_DMA = spec.wide_lds_dma
 
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = WAVES * 64
@@ -1267,8 +1572,16 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
         sinks = b.param(
             "sink_ptr", PtrType(dtype, "global"), noalias=True, readonly=True, align=16
         )
+    if spec.emit_lse:
+        lse = b.param(
+            "lse_ptr",
+            PtrType(F32, "global"),
+            noalias=True,
+            writeonly=True,
+            align=4,
+        )
     qk_scale = b.fmul(scale, b.const_f32(LOG2E))
-    _exp2 = b.exp2_fast
+    _exp2 = b.exp2_fast if spec.use_exp2_fast else b.exp2
 
     # ----- CTA-invariant scalar setup (paid ONCE per persistent CTA) -----
     tid = b.thread_id_x()
@@ -1282,9 +1595,33 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
         rcp_ln2 = b.const_f32(LOG2E)
         one_f = b.const_f32(1.0)
 
+    # The wide gfx950 layout stores 8 rows x 64 columns in each 520-element
+    # slab line. Two dwordx4 DMA instructions per wave fill the D=128 halves.
+    if WIDE_DMA:
+        K_GROUP = 1
+        K_D_RPT = D // 64
+        K_N_RPT = BN // 8
+        K_LINE_STRIDE = 64 * 8 + PAD  # 520 half elements
+        V_D_RPT = D // 64
+        V_N_RPT = BN // 8
+        V_LINE_STRIDE = 64 * 8 + spec.lds_v_row_pad
+        WIDE_LINE_PASSES = 8 // WAVES
+        assert 8 % WAVES == 0
+        K_lds = b.smem_alloc(
+            dtype,
+            [NBUF, K_D_RPT, K_N_RPT, K_LINE_STRIDE],
+            name_hint="Klds",
+        )
+        V_lds = b.smem_alloc(
+            dtype,
+            [NBUF, V_D_RPT, V_N_RPT, V_LINE_STRIDE],
+            name_hint="Vlds",
+        )
+        k_lane_grp = None
+        k_sub_col = None
     # 1 row/instr => per-row padded pitch (bank-conflict fix); packed D<128 =>
     # pad between DMA row-GROUPS on K, unpadded on V (see the default builder).
-    if ROWS_PER_INSTR == 1:
+    elif ROWS_PER_INSTR == 1:
         K_GROUP = 1
         K_ROWS_LDS = BN
         LDROW = D + PAD
@@ -1292,29 +1629,39 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
         K_GROUP = ROWS_PER_INSTR
         K_ROWS_LDS = BN // K_GROUP
         LDROW = K_GROUP * D + spec.lds_k_group_pad
-    VROW = (D + _LDS_PAD_V) if ROWS_PER_INSTR == 1 else D
-    K_lds = b.smem_alloc(dtype, [NBUF, K_ROWS_LDS, LDROW], name_hint="Klds")
-    V_lds = b.smem_alloc(dtype, [NBUF, BN, VROW], name_hint="Vlds")
-    if K_GROUP > 1:
-        k_lane_grp = b.div(lane_m, b.const_i32(K_GROUP))
-        k_sub_col = b.mul(b.mod(lane_m, b.const_i32(K_GROUP)), b.const_i32(D))
-    else:
-        k_lane_grp = None
-        k_sub_col = None
+    if not WIDE_DMA:
+        K_lds = b.smem_alloc(dtype, [NBUF, K_ROWS_LDS, LDROW], name_hint="Klds")
+        if K_GROUP > 1:
+            k_lane_grp = b.div(lane_m, b.const_i32(K_GROUP))
+            k_sub_col = b.mul(b.mod(lane_m, b.const_i32(K_GROUP)), b.const_i32(D))
+        else:
+            k_lane_grp = None
+            k_sub_col = None
+    if not WIDE_DMA:
+        VROW = (D + spec.lds_v_row_pad) if ROWS_PER_INSTR == 1 else D
+        V_lds = b.smem_alloc(dtype, [NBUF, BN, VROW], name_hint="Vlds")
 
-    K_BYTES_PER_BUF = K_ROWS_LDS * LDROW * 2
-    K_GROUP_BYTES = LDROW * 2
-    V_BYTES_PER_BUF = BN * VROW * 2
-    # Not a padded pitch -- see the default builder: the DMA writes contiguous
-    # rows, so padding V needs a pad-aware transposed read, not a wider stride.
-    V_GROUP_BYTES = ROWS_PER_INSTR * VROW * 2
+    if WIDE_DMA:
+        K_BYTES_PER_BUF = K_D_RPT * K_N_RPT * K_LINE_STRIDE * 2
+        K_GROUP_BYTES = K_LINE_STRIDE * 2
+    else:
+        K_BYTES_PER_BUF = K_ROWS_LDS * LDROW * 2
+        K_GROUP_BYTES = LDROW * 2
+    if WIDE_DMA:
+        V_BYTES_PER_BUF = V_D_RPT * V_N_RPT * V_LINE_STRIDE * 2
+        V_GROUP_BYTES = V_LINE_STRIDE * 2
+    else:
+        V_BYTES_PER_BUF = BN * VROW * 2
+        # Not a padded pitch -- see the default builder: the DMA writes contiguous
+        # rows, so padding V needs a pad-aware transposed read, not a wider stride.
+        V_GROUP_BYTES = ROWS_PER_INSTR * VROW * 2
     ROWS_PER_WAVE = BN // WAVES
     assert BN % K_GROUP == 0 and ROWS_PER_WAVE % ROWS_PER_INSTR == 0, (
         f"K row-group split must divide evenly: BN={BN} K_GROUP={K_GROUP} "
         f"ROWS_PER_WAVE={ROWS_PER_WAVE} ROWS_PER_INSTR={ROWS_PER_INSTR}"
     )
-    WAVE_BYTES = 64 * 16
     V_DMA_PASSES = (BN * D) // (WAVES * 64 * 8)
+    LOOP_VMCNT = V_DMA_PASSES if spec.partial_vmcnt_prefetch else 0
     zero_soff = b.const_i32(0)
     K_lds_addr = b.smem_addr_of(K_lds)
     V_lds_addr = b.smem_addr_of(V_lds)
@@ -1322,7 +1669,8 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
     v_rsrc = b.buffer_rsrc(v, b.const_i32(B * Skv * Hkv * D * 2))
     # ragged: bounds-checked Q load (OOB partial-block rows -> 0 register pad).
     q_rsrc = b.buffer_rsrc(q, b.const_i32(B * Sq * Hq * D * 2)) if RAGGED else None
-    v_wave_off_i64 = b.zext(b.to_sgpr_u32(b.mul(wave, b.const_i32(WAVE_BYTES))), I64)
+    # Unused, but the lowering keeps dead ops, so dropping it moves every golden.
+    b.zext(b.to_sgpr_u32(b.mul(wave, b.const_i32(64 * 16))), I64)
 
     # ----- persistent grid-stride loop over the flattened work-item space -----
     cta_id = b.block_id_x()
@@ -1334,7 +1682,46 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
         b.s_waitcnt(vmcnt=0)
         b.s_barrier_bare()
 
-        if spec.resolved_persist_decode == "hkv_major":
+        if spec.resolved_persist_decode == "gqa_pair_2phase":
+            # NP=W/2 CTAs. gqa neighboring CTAs cover all local query heads
+            # for one (qb_pair,hkv,bt); phase 0/1 selects complementary qbs.
+            cta = b.mod(wi, b.const_i32(NP))
+            phase = b.div(wi, b.const_i32(NP))
+            hql = b.mod(cta, b.const_i32(gqa))
+            rem = b.div(cta, b.const_i32(gqa))
+            bt = b.mod(rem, b.const_i32(B))
+            rem = b.div(rem, b.const_i32(B))
+            hkv = b.mod(rem, b.const_i32(Hkv))
+            qb_pair = b.div(rem, b.const_i32(Hkv))
+            hq = b.add(b.mul(hkv, b.const_i32(gqa)), hql)
+            qb = b.select(
+                b.cmp_ne(phase, b.const_i32(0)),
+                b.sub(b.const_i32(NQB - 1), qb_pair),
+                qb_pair,
+            )
+        elif spec.resolved_persist_decode == "gqa_pair":
+            # NP=NQB*Hkv*B CTAs. Two neighboring CTAs cover one
+            # (qb_pair,hkv,bt) group; each handles half the local query heads
+            # at both complementary qbs. The low/high costs sum to a constant.
+            cta = b.mod(wi, b.const_i32(NP))
+            phase = b.div(wi, b.const_i32(NP))
+            pair_lane = b.mod(cta, b.const_i32(2))
+            rem = b.div(cta, b.const_i32(2))
+            bt = b.mod(rem, b.const_i32(B))
+            rem = b.div(rem, b.const_i32(B))
+            hkv = b.mod(rem, b.const_i32(Hkv))
+            qb_pair = b.div(rem, b.const_i32(Hkv))
+            half_gqa = gqa // 2
+            high = b.cmp_ge(phase, b.const_i32(half_gqa))
+            phase_half = b.mod(phase, b.const_i32(half_gqa))
+            hql = b.add(b.mul(pair_lane, b.const_i32(half_gqa)), phase_half)
+            hq = b.add(b.mul(hkv, b.const_i32(gqa)), hql)
+            qb = b.select(
+                high,
+                b.sub(b.const_i32(NQB - 1), qb_pair),
+                qb_pair,
+            )
+        elif spec.resolved_persist_decode == "hkv_major":
             # hkv-MAJOR + causal-balanced decode:
             #   wi = hkv*(NQB*gqa*B) + blk*(gqa*B) + hql*B + bt
             # * hkv in the MSB -> each grid-stride phase (NP consecutive wi) stays
@@ -1368,7 +1755,9 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
             hq = b.mod(rem, b.const_i32(Hq))
             qb0 = b.div(rem, b.const_i32(Hq))
             if INTERLEAVE and causal and NQB > 1:
-                odd = b.cmp_eq(b.mod(rem, b.const_i32(2)), b.const_i32(1))
+                # Reverse qb for ODD hq. Keying on rem (= qb0*Hq + hq) instead is
+                # not a bijection for odd Hq: two qb0 alias onto one qb.
+                odd = b.cmp_eq(b.mod(hq, b.const_i32(2)), b.const_i32(1))
                 qb = b.select(odd, b.sub(b.const_i32(NQB - 1), qb0), qb0)
             else:
                 qb = qb0
@@ -1395,13 +1784,7 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
                 )
             else:
                 raw = b.global_load_vN(q, addr, dtype, 8, align=16)
-            elems = [
-                b.cast_f32_to(
-                    b.fmul(b.cast_to_f32(b.vec_extract(raw, j)), qk_scale), dtype
-                )
-                for j in range(8)
-            ]
-            q_packs.append(b.vec_pack(elems, dtype))
+            q_packs.append(raw)
 
         def _async_load(rsrc, lds_base, buf_val, tile_key0, bytes_per_buf, group_bytes):
             """Async DMA one K/V tile (see default builder ``_async_load``).
@@ -1457,15 +1840,103 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
                         rsrc, row_base, b.mul(voff, b.const_i32(2)), zero_soff, 1
                     )
 
-        def async_load_k(lds_base, buf_val, tile_key0):
-            _async_load(
-                k_rsrc, lds_base, buf_val, tile_key0, K_BYTES_PER_BUF, K_GROUP_BYTES
+        def _async_load_k_wide(lds_base, buf_val, tile_key0):
+            """Two 128-bit-per-lane DMAs fill one slab-padded K tile per wave."""
+            buf_off = b.mul(
+                b.zext(buf_val, I64),
+                b.const_i64(K_BYTES_PER_BUF),
             )
+            n_in_wave = b.div(lane, b.const_i32(8))
+            d_bucket = b.mod(lane, b.const_i32(8))
+            for n_pass in range(WIDE_LINE_PASSES):
+                line_id = b.add(wave, b.const_i32(n_pass * WAVES))
+                krow = b.add(
+                    tile_key0,
+                    b.add(b.mul(n_in_wave, b.const_i32(8)), line_id),
+                )
+                src_base = b.add(
+                    b.add(k_base, b.mul(krow, b.const_i32(stride_k_tok))),
+                    b.mul(d_bucket, b.const_i32(8)),
+                )
+                for d_rpt in range(K_D_RPT):
+                    line = b.add(
+                        b.mul(line_id, b.const_i32(K_LINE_STRIDE * 2)),
+                        b.const_i32(d_rpt * K_N_RPT * K_LINE_STRIDE * 2),
+                    )
+                    row_base = b.smem_ptr_add(
+                        lds_base,
+                        b.add(buf_off, b.zext(line, I64)),
+                    )
+                    voff = b.add(src_base, b.const_i32(d_rpt * 64))
+                    b.async_buffer_load_lds_addr(
+                        k_rsrc,
+                        row_base,
+                        b.mul(voff, b.const_i32(2)),
+                        zero_soff,
+                        4,
+                    )
+
+        def _async_load_v_wide(lds_base, buf_val, tile_key0):
+            """Two 128-bit-per-lane DMAs fill one slab-padded V tile per wave."""
+            buf_off = b.mul(
+                b.zext(buf_val, I64),
+                b.const_i64(V_BYTES_PER_BUF),
+            )
+            n_in_wave = b.div(lane, b.const_i32(8))
+            d_bucket = b.mod(lane, b.const_i32(8))
+            for n_pass in range(WIDE_LINE_PASSES):
+                line_id = b.add(wave, b.const_i32(n_pass * WAVES))
+                vrow = b.add(
+                    tile_key0,
+                    b.add(b.mul(n_in_wave, b.const_i32(8)), line_id),
+                )
+                src_base = b.add(
+                    b.add(k_base, b.mul(vrow, b.const_i32(stride_k_tok))),
+                    b.mul(d_bucket, b.const_i32(8)),
+                )
+                for d_rpt in range(V_D_RPT):
+                    line = b.add(
+                        b.mul(line_id, b.const_i32(V_LINE_STRIDE * 2)),
+                        b.const_i32(d_rpt * V_N_RPT * V_LINE_STRIDE * 2),
+                    )
+                    row_base = b.smem_ptr_add(
+                        lds_base,
+                        b.add(buf_off, b.zext(line, I64)),
+                    )
+                    voff = b.add(src_base, b.const_i32(d_rpt * 64))
+                    b.async_buffer_load_lds_addr(
+                        v_rsrc,
+                        row_base,
+                        b.mul(voff, b.const_i32(2)),
+                        zero_soff,
+                        4,
+                    )
+
+        def async_load_k(lds_base, buf_val, tile_key0):
+            if WIDE_DMA:
+                _async_load_k_wide(lds_base, buf_val, tile_key0)
+            else:
+                _async_load(
+                    k_rsrc,
+                    lds_base,
+                    buf_val,
+                    tile_key0,
+                    K_BYTES_PER_BUF,
+                    K_GROUP_BYTES,
+                )
 
         def async_load_v(lds_base, buf_val, tile_key0):
-            _async_load(
-                v_rsrc, lds_base, buf_val, tile_key0, V_BYTES_PER_BUF, V_GROUP_BYTES
-            )
+            if WIDE_DMA:
+                _async_load_v_wide(lds_base, buf_val, tile_key0)
+            else:
+                _async_load(
+                    v_rsrc,
+                    lds_base,
+                    buf_val,
+                    tile_key0,
+                    V_BYTES_PER_BUF,
+                    V_GROUP_BYTES,
+                )
 
         def load_tile(buf_val, tile_idx):
             tk0 = b.mul(tile_idx, b.const_i32(BN))
@@ -1476,17 +1947,45 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
             s_reg = []
             for nsub in range(N_SUB):
                 acc = b.zero_vec_f32(16)
-                if K_GROUP == 1:
+                if WIDE_DMA:
+                    kline = b.mod(lane_m, b.const_i32(8))
+                    kelem_base = b.add(
+                        b.add(
+                            b.mul(b.div(lane_m, b.const_i32(8)), b.const_i32(64)),
+                            b.mul(lane_h, b.const_i32(8)),
+                        ),
+                        b.const_i32(nsub * 256),
+                    )
+                elif K_GROUP == 1:
                     krow = b.add(b.const_i32(nsub * 32), lane_m)
                 else:
                     krow = b.add(b.const_i32(nsub * (32 // K_GROUP)), k_lane_grp)
                 for ks in range(K_STEPS):
-                    col = b.add(b.const_i32(ks * 16), d_base)
-                    if K_GROUP > 1:
-                        col = b.add(k_sub_col, col)
-                    k_pack = b.smem_load_vN(K_lds, kbuf, krow, col, dtype=dtype, n=8)
+                    if WIDE_DMA:
+                        kelem = b.add(
+                            kelem_base,
+                            b.const_i32((ks % 4) * 16),
+                        )
+                        k_pack = b.smem_load_vN(
+                            K_lds,
+                            kbuf,
+                            b.const_i32(ks // 4),
+                            kline,
+                            kelem,
+                            dtype=dtype,
+                            n=8,
+                        )
+                    else:
+                        col = b.add(b.const_i32(ks * 16), d_base)
+                        if K_GROUP > 1:
+                            col = b.add(k_sub_col, col)
+                        k_pack = b.smem_load_vN(
+                            K_lds, kbuf, krow, col, dtype=dtype, n=8
+                        )
                     acc = mfma_32x32x16_for_dtype(b, dtype, k_pack, q_packs[ks], acc)
-                s_reg.append([b.vec_extract(acc, i) for i in range(16)])
+                s_reg.append(
+                    [b.fmul(b.vec_extract(acc, i), qk_scale) for i in range(16)]
+                )
             return s_reg
 
         def do_mask(s_reg, tile_idx, lower=False, upper=True):
@@ -1533,7 +2032,7 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
                 # running max by > threshold; else keep m_i (skip the rescale).
                 m_diff = b.fsub(tile_max, m_i)
                 below_i32 = b.select(
-                    b.fcmp("ole", m_diff, b.const_f32(_LAZY_RESCALE_THRESHOLD)),
+                    b.fcmp("ole", m_diff, b.const_f32(LAZY_THRESHOLD)),
                     b.const_i32(1),
                     b.const_i32(0),
                 )
@@ -1577,7 +2076,42 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
                 packs.append(b.vec_pack(elems, dtype))
             return packs
 
+        if WIDE_DMA:
+            vline = b.add(
+                b.mul(lane_h, b.const_i32(4)),
+                b.div(b.mod(lane, b.const_i32(16)), b.const_i32(4)),
+            )
+            velem_lane = b.add(
+                b.mul(
+                    b.mod(b.div(lane, b.const_i32(16)), b.const_i32(2)),
+                    b.const_i32(16),
+                ),
+                b.mul(b.mod(lane, b.const_i32(4)), b.const_i32(4)),
+            )
+
         def read_v(dt, kk_step, vbuf):
+            if WIDE_DMA:
+                velem = b.add(
+                    velem_lane,
+                    b.const_i32((dt % 2) * 32 + kk_step * 128),
+                )
+                a0 = b.ds_read_tr16_b64(
+                    V_lds,
+                    vbuf,
+                    b.const_i32(dt // 2),
+                    vline,
+                    velem,
+                    dtype=dtype,
+                )
+                a1 = b.ds_read_tr16_b64(
+                    V_lds,
+                    vbuf,
+                    b.const_i32(dt // 2),
+                    vline,
+                    b.add(velem, b.const_i32(64)),
+                    dtype=dtype,
+                )
+                return b.vec_concat(a0, a1)
             return pv32_v_load_paired(
                 b,
                 V_lds=V_lds,
@@ -1590,14 +2124,11 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
             )
 
         def do_pv(o_acc_in, p_packs, vbuf):
-            out = []
-            for dt in range(D_TILES):
-                acc_o = o_acc_in[dt]
-                for kk_step in range(KK_STEPS):
-                    acc_o = mfma_32x32x16_for_dtype(
-                        b, dtype, read_v(dt, kk_step, vbuf), p_packs[kk_step], acc_o
-                    )
-                out.append(acc_o)
+            out = list(o_acc_in)
+            for dt, kk_step in PV_STEPS:
+                out[dt] = mfma_32x32x16_for_dtype(
+                    b, dtype, read_v(dt, kk_step, vbuf), p_packs[kk_step], out[dt]
+                )
             return out
 
         def rescale_o(o_acc, alpha):
@@ -1610,32 +2141,27 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
             ]
 
         def pv_fused_exp(o_acc_in, p_packs, vbuf, s_reg, m_new):
-            exp_per = (
-                1  # one exp2 per PV-MFMA step -> 256 VGPR / 0 spill (see docstring)
-            )
             slots = [(nsub, i) for nsub in range(N_SUB) for i in range(16)]
             p_vals = [[None] * 16 for _ in range(N_SUB)]
             it = iter(slots)
-            out = []
-            for dt in range(D_TILES):
-                acc_o = o_acc_in[dt]
-                for kk_step in range(KK_STEPS):
-                    acc_o = mfma_32x32x16_for_dtype(
-                        b, dtype, read_v(dt, kk_step, vbuf), p_packs[kk_step], acc_o
-                    )
-                    n_emit = 0
-                    for _ in range(exp_per):
-                        slot = next(it, None)
-                        if slot is None:
-                            break
-                        nsub, i = slot
-                        p_vals[nsub][i] = _exp2(b.fsub(s_reg[nsub][i], m_new))
-                        n_emit += 1
-                    b.sched_group_barrier(DS_READ, 2, 0)
+            out = list(o_acc_in)
+            for dt, kk_step in PV_STEPS:
+                out[dt] = mfma_32x32x16_for_dtype(
+                    b, dtype, read_v(dt, kk_step, vbuf), p_packs[kk_step], out[dt]
+                )
+                n_emit = 0
+                for _ in range(EXP_PER):
+                    slot = next(it, None)
+                    if slot is None:
+                        break
+                    nsub, i = slot
+                    p_vals[nsub][i] = _exp2(b.fsub(s_reg[nsub][i], m_new))
+                    n_emit += 1
+                if SCHED_GROUP:
+                    b.sched_group_barrier(DS_READ, SCHED_GROUP_DS_READ, 0)
                     b.sched_group_barrier(MFMA, 1, 0)
                     b.sched_group_barrier(VALU, max(1, n_emit), 0)
                     b.sched_group_barrier(TRANS, max(1, n_emit), 0)
-                out.append(acc_o)
             for slot in it:
                 nsub, i = slot
                 p_vals[nsub][i] = _exp2(b.fsub(s_reg[nsub][i], m_new))
@@ -1651,6 +2177,10 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
         def emit_loop_body(
             j, carry, mask_lower=False, mask_upper=False, mask_kbound=False
         ):
+            if IGLP != _IGLP_OFF:
+                # IGLP owns post-RA placement (the wide-DMA default); manual
+                # scheduling barriers are mutually exclusive with it.
+                b.iglp_opt(IGLP)
             m_i = carry[0]
             l_i = carry[1]
             o_acc = list(carry[2 : 2 + D_TILES])
@@ -1662,7 +2192,7 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
             # PF (partial-vmcnt prefetch): keep the freshest V(j) DMA in flight
             # (drain only V(j-1)+K(j), both older) so DMA overlaps compute instead
             # of a full vmcnt(0) serialize. Bit-identical, raises MfmaUtil.
-            b.s_waitcnt(vmcnt=V_DMA_PASSES)
+            b.s_waitcnt(vmcnt=LOOP_VMCNT)
             b.s_barrier_bare()
             s = do_qk(kbuf)
             if mask_lower or mask_upper:
@@ -1670,12 +2200,15 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
             if mask_kbound:
                 do_kbound_mask(s, j)
             m_new, alpha, skip = softmax_max(s, m_i)
-            b.sched_barrier(0)
+            if PV_FENCE:
+                b.sched_barrier(PV_FENCE_MASK)
             # PV-only s_setprio: the PV MFMA cluster wins issue slots; paired with
             # PF this converts to ~+3.5% (Sq=8192 causal, ~852 -> ~877 TFLOPS).
-            b.s_setprio(1)
+            if PV_PRIORITY:
+                b.s_setprio(PV_PRIORITY)
             o_acc, p_vals, l_tile = pv_fused_exp(o_acc, p_prev, vbuf_prev, s, m_new)
-            b.s_setprio(0)
+            if PV_PRIORITY:
+                b.s_setprio(0)
             if LAZY_RESCALE:
                 # Skip the O/l rescale via a wave-uniform 0/1-trip loop when the
                 # max didn't move (>threshold): 0 trips -> pass o_acc/l_i through
@@ -1788,7 +2321,7 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
             )
             with loop as (j, carry):
                 emit_loop_body(j, carry, mask_lower=True, mask_upper=True)
-        elif causal:
+        elif causal and spec.causal_diag_split:
             diag_start = b.mul(qb, b.const_i32(n_per))
             body_upper = b.select(b.cmp_lt(diag_start, n_upper), diag_start, n_upper)
             body = b.scf_for_iter(
@@ -1812,7 +2345,7 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
                 b.const_i32(1), n_upper, b.const_i32(1), iter_args, iv_name="nkt"
             )
             with loop as (j, carry):
-                emit_loop_body(j, carry, mask_kbound=RAG_KBOUND)
+                emit_loop_body(j, carry, mask_upper=causal, mask_kbound=RAG_KBOUND)
 
         res = loop.results
         l_i = res[1]
@@ -1828,14 +2361,41 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
         # Epilogue: recompute (bt, hq) from the live loop IV so they need not cross
         # the KV loop (keeps the loop-carried live set minimal -> 0 spill). Must
         # mirror the work-item decode used at the top of the loop.
-        rcp_l = b.rcp(l_i)
-        bt_e = b.mod(wi, b.const_i32(B))
-        if spec.resolved_persist_decode == "hkv_major":
+        if spec.emit_lse:
+            positive_l = b.fcmp("ogt", l_i, b.const_f32(0.0))
+            rcp_l = b.rcp(b.select(positive_l, l_i, b.const_f32(1.0)))
+        else:
+            rcp_l = b.rcp(l_i)
+        if spec.resolved_persist_decode == "gqa_pair_2phase":
+            cta_e = b.mod(wi, b.const_i32(NP))
+            hql_e = b.mod(cta_e, b.const_i32(gqa))
+            rem_e = b.div(cta_e, b.const_i32(gqa))
+            bt_e = b.mod(rem_e, b.const_i32(B))
+            rem_e = b.div(rem_e, b.const_i32(B))
+            hkv_e = b.mod(rem_e, b.const_i32(Hkv))
+            hq_e = b.add(b.mul(hkv_e, b.const_i32(gqa)), hql_e)
+        elif spec.resolved_persist_decode == "gqa_pair":
+            cta_e = b.mod(wi, b.const_i32(NP))
+            phase_e = b.div(wi, b.const_i32(NP))
+            pair_lane_e = b.mod(cta_e, b.const_i32(2))
+            rem_e = b.div(cta_e, b.const_i32(2))
+            bt_e = b.mod(rem_e, b.const_i32(B))
+            rem_e = b.div(rem_e, b.const_i32(B))
+            hkv_e = b.mod(rem_e, b.const_i32(Hkv))
+            phase_half_e = b.mod(phase_e, b.const_i32(gqa // 2))
+            hql_e = b.add(
+                b.mul(pair_lane_e, b.const_i32(gqa // 2)),
+                phase_half_e,
+            )
+            hq_e = b.add(b.mul(hkv_e, b.const_i32(gqa)), hql_e)
+        elif spec.resolved_persist_decode == "hkv_major":
+            bt_e = b.mod(wi, b.const_i32(B))
             rem_e = b.div(wi, b.const_i32(B))
             hql_e = b.mod(rem_e, b.const_i32(gqa))
             hkv_e = b.div(b.div(rem_e, b.const_i32(gqa)), b.const_i32(NQB))
             hq_e = b.add(b.mul(hkv_e, b.const_i32(gqa)), hql_e)
         else:
+            bt_e = b.mod(wi, b.const_i32(B))
             hq_e = b.mod(b.div(wi, b.const_i32(B)), b.const_i32(Hq))
         o_base = b.add(
             b.mul(b.mul(bt_e, b.const_i32(Sq)), b.const_i32(stride_q_tok)),
@@ -1844,22 +2404,53 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
         qtok = b.add(q_tok0, _mfma_32x32_c_col(b, lane, 0))
         q_row_byte = b.add(o_base, b.mul(qtok, b.const_i32(stride_q_tok)))
         d_half = b.mul(lane_h, b.const_i32(4))
+        if spec.emit_lse:
+            row_has_key = dense_row_has_key(
+                b,
+                qtok,
+                b.const_i32(Skv),
+                causal=causal,
+                diagonal=0,
+                window=SW,
+            )
+            lse_index = b.add(
+                b.mul(
+                    b.add(b.mul(bt_e, b.const_i32(Hq)), hq_e),
+                    b.const_i32(Sq),
+                ),
+                qtok,
+            )
+            row_exists = b.cmp_lt(qtok, b.const_i32(Sq))
+            _dense_lse_output(
+                b,
+                lse,
+                lse_index,
+                res[0],
+                l_i,
+                row_exists,
+                row_has_key,
+                lane_h,
+                sinks=sinks if use_sinks else None,
+                head=hq_e,
+                dtype=dtype,
+            )
         # ragged: guard padded query rows (qtok >= seqlen_q) so they never write.
         o_store_ctx = (
             b.scf_if(b.cmp_lt(qtok, b.const_i32(Sq))) if RAGGED else _nullcontext()
         )
         with o_store_ctx:
-            for dt in range(D_TILES):
-                for g in range(4):
-                    d0 = b.add(b.const_i32(dt * 32 + g * 8), d_half)
-                    addr = b.add(q_row_byte, d0)
-                    vals = [
-                        b.cast_f32_to(
-                            b.fmul(b.vec_extract(o_acc[dt], g * 4 + kk), rcp_l), dtype
-                        )
-                        for kk in range(4)
-                    ]
-                    b.global_store_vN(o, addr, b.vec_pack(vals, dtype), 4, align=8)
+            _emit_o_store(
+                b,
+                o,
+                q_row_byte,
+                d_half,
+                o_acc,
+                rcp_l,
+                dtype,
+                D_TILES,
+                spec.o_store_width,
+                row_has_key=row_has_key if spec.emit_lse else None,
+            )
 
     b.ret()
     return b.kernel
@@ -1876,13 +2467,31 @@ def attention_dense_grid(spec: AttentionDenseSpec) -> Tuple[int, int, int]:
     default = one CTA per (query-block, query-head, batch)."""
     if spec.persistent:
         return (spec.num_persistent, 1, 1)
-    nqb = (spec.seqlen_q + _BLOCK_M - 1) // _BLOCK_M  # ceil: ragged partial block
+    nqb = (
+        spec.seqlen_q + spec.block_m - 1
+    ) // spec.block_m  # ceil: ragged partial block
     return (nqb, spec.num_query_heads, spec.batch)
 
 
 def attention_dense_block(spec: AttentionDenseSpec) -> Tuple[int, int, int]:
     """CTA block dims: ``num_waves`` wave64s (= 512 threads)."""
     return (spec.num_waves * 64, 1, 1)
+
+
+def _has_shape_params(spec: AttentionDenseSpec) -> bool:
+    """Whether the body for ``spec`` takes batch/seqlen_q/seqlen_kv as kernargs.
+
+    ``build_attention_dense`` declares them unconditionally;
+    ``_build_attention_dense_persistent`` declares none, since its work-item space
+    ``NP = spec.num_persistent`` is validated against ``nqb*Hkv*B`` at spec
+    construction and is itself baked -- the shape cannot become a param there
+    without ``num_persistent`` following it.
+
+    This is the ABI question. ``spec.runtime_shape`` is the narrower cache-identity
+    question (does the body bake the shape *anywhere*), and the two differ for
+    paged / ragged / varlen / sliding-window / moving bottom-right causal.
+    """
+    return not spec.persistent
 
 
 def attention_dense_signature(spec: AttentionDenseSpec):
@@ -1899,6 +2508,14 @@ def attention_dense_signature(spec: AttentionDenseSpec):
         .ptr("o_ptr", spec.dtype)
         .scalar("scale", "f32")
     )
+    if _has_shape_params(spec):
+        # Mirrors the batch/seqlen_q/seqlen_kv params declared right after scale in
+        # build_attention_dense.
+        sig = (
+            sig.scalar("batch", "i32")
+            .scalar("seqlen_q", "i32")
+            .scalar("seqlen_kv", "i32")
+        )
     if spec.use_sinks:
         sig = sig.ptr("sink_ptr", spec.dtype)
     if spec.varlen:
@@ -1909,6 +2526,8 @@ def attention_dense_signature(spec: AttentionDenseSpec):
             .ptr("kv_lens", "i32")
             .scalar("block_table_stride", "i32")
         )
+    if spec.emit_lse:
+        sig = sig.ptr("lse_ptr", "f32")
     return sig.build()
 
 
@@ -1936,12 +2555,29 @@ def run_attention_dense_torch(
     kv_lens=None,
     sinks=None,
     validate_paged: bool = True,
+    lse=None,
 ):
     """High-level framework entry: compile (cached) + launch the dense prefill
     kernel on torch tensors. ``q``/``k``/``v``/``out`` are dense contiguous
     tensors ([B, S, H, D] for q/out, [B, Skv, Hkv, D] for k/v); ``scale`` is the
-    softmax scale (1/sqrt(D)). Returns ``out``. torch is imported lazily by the
-    launcher — this module stays torch-free at import time.
+    softmax scale (1/sqrt(D)) and is supported in ``[2**-64, 2**4]`` (the
+    ordinary kernel takes the row max on unscaled scores and folds the scale
+    into an fma; see ``_MAX_SCALE``). A NaN or infinite scale raises
+    ``ValueError``; a finite scale outside the range raises
+    ``NotImplementedError``. Returns ``out``.
+    torch is imported lazily by the launcher — this module stays torch-free at
+    import time.
+
+    ``spec.emit_lse=True`` requires a caller-owned contiguous FP32 ``lse`` tensor
+    on the same GPU, separate from every input and output. Its layout is
+    [B, Hq, Sq, 1], or [total_query_tokens, Hq, 1] for packed varlen. The kernel
+    writes natural-log softmax normalization while still returning ``out``.
+    Fully masked real rows write O=0 and LSE=-inf; with a finite attention sink,
+    those rows instead write the sink logit as LSE. Invalid padded rows do not
+    write. Supplying ``lse`` with ``emit_lse=False`` is an error.
+    The enabled varlen path checks cumulative offsets on the host (a device
+    sync): Q lengths must be block_m multiples, KV lengths positive block_n
+    multiples, and both must be within their spec maxima.
 
     Arbitrary (non-256-multiple) sequence lengths are served WITHOUT host
     padding by the in-kernel ragged path: build ``spec`` with ``ragged=True``
@@ -1950,10 +2586,9 @@ def run_attention_dense_torch(
     OOB query rows, LDS-zero OOB keys) and drops the partial O rows; the grid is
     ceil-sized automatically. See the ``ragged`` spec field.
 
-    Varlen (``spec.varlen``): the kernel emits a 7-arg ABI (packed
-    ``[total_tok, H, D]`` q/k/v/o + two int32 ``cu_seqlens`` [batch+1]); pass both
-    ``cu_seqlens_q`` and ``cu_seqlens_kv`` or a ``ValueError`` is raised (they are
-    required — never silently launch the 5-arg ABI against a 7-arg kernel).
+    Varlen (``spec.varlen``): q/k/v/o use packed [total_tok, H, D] storage.
+    Pass both int32 ``cu_seqlens`` [batch+1]. The nonpersistent ABI also takes
+    batch/seqlen_q/seqlen_kv scalars; optional LSE is the final pointer.
 
     Paged (``spec.paged``): K/V are a PAGED CACHE, not dense tensors -- ``k``/``v``
     are ``[num_kv_blocks, block_size, Hkv, D]`` and are addressed through
@@ -1979,10 +2614,17 @@ def run_attention_dense_torch(
     ok, why = supports_attention_dense(spec, arch=arch)
     if not ok:
         raise NotImplementedError(f"attention_dense unsupported for spec: {why}")
+    if not math.isfinite(scale):
+        raise ValueError(f"scale must be finite, got {scale!r}")
+    if not _MIN_SCALE <= scale <= _MAX_SCALE:
+        raise NotImplementedError(
+            "NOT_YET_IMPLEMENTED: the gfx950 dense kernel supports a softmax "
+            f"scale in [2**-64, 2**4], got {scale!r}"
+        )
     if spec.varlen and (cu_seqlens_q is None or cu_seqlens_kv is None):
         raise ValueError(
             "varlen=True requires cu_seqlens_q and cu_seqlens_kv (int32 [batch+1]); "
-            "the varlen kernel has a 7-arg ABI and cannot be launched with q/k/v/o/scale"
+            "packed attention cannot be launched without its offset pointers"
         )
     if not spec.varlen and (cu_seqlens_q is not None or cu_seqlens_kv is not None):
         raise ValueError("cu_seqlens_* provided but spec.varlen is False")
@@ -2067,17 +2709,28 @@ def run_attention_dense_torch(
         if not sinks.is_cuda:
             raise ValueError("sinks must be a CUDA tensor")
 
+    validate_dense_lse(
+        spec,
+        q,
+        k,
+        v,
+        out,
+        lse,
+        cu_seqlens_q=cu_seqlens_q,
+        cu_seqlens_kv=cu_seqlens_kv,
+        block_tables=block_tables,
+        kv_lens=kv_lens,
+        sinks=sinks,
+    )
+
     from rocke.helpers.compile import compile_kernel
     from rocke.runtime import KernelLauncher, LaunchConfig
 
-    # `batch` and `waves_per_eu` are baked into the kernel (K/V buffer extents /
-    # persistent work-item count W = NQB*Hq*B, and the amdgpu-waves-per-eu
-    # register-file hint respectively) but are NOT part of kernel_name(), so they
-    # must be part of the cache key: otherwise two specs differing only in either
-    # field collide and the second silently reuses the first binary. Keying here
-    # rather than widening kernel_name() keeps the emitted IR (and its hash)
-    # untouched.
-    key = (spec.kernel_name(), spec.batch, spec.waves_per_eu)
+    # Cache identity is the spec minus the fields it declares in
+    # runtime_param_fields, so every shape on the runtime path shares one
+    # compiled binary. Every field the body still bakes participates, whether or
+    # not kernel_name() remembered to append a token for it.
+    key = attention_dense_cache_key(spec, arch=arch)
     launcher = _DENSE_LAUNCHER_CACHE.get(key)
     if launcher is None:
         art = compile_kernel(
@@ -2093,6 +2746,10 @@ def run_attention_dense_torch(
         )
         _DENSE_LAUNCHER_CACHE[key] = launcher
     vals = {"q_ptr": q, "k_ptr": k, "v_ptr": v, "o_ptr": out, "scale": float(scale)}
+    if _has_shape_params(spec):
+        vals["batch"] = int(spec.batch)
+        vals["seqlen_q"] = int(spec.seqlen_q)
+        vals["seqlen_kv"] = int(spec.seqlen_kv)
     if spec.varlen:
         vals["cu_seqlens_q"] = cu_seqlens_q
         vals["cu_seqlens_kv"] = cu_seqlens_kv
@@ -2102,6 +2759,8 @@ def run_attention_dense_torch(
         vals["block_table_stride"] = int(block_tables.stride(0))
     if spec.use_sinks:
         vals["sink_ptr"] = sinks
+    if spec.emit_lse:
+        vals["lse_ptr"] = lse
     launcher(
         vals,
         config=LaunchConfig(

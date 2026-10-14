@@ -2,9 +2,9 @@
 
 #include <array>
 
-using hipconv::Conv2dParams;
 using hipconv::ConvAlgorithm;
 using hipconv::ConvKernelSpan;
+using hipconv::ConvParams;
 
 extern const ConvKernelSpan grouped_4c_cdna4_kernels;
 extern const ConvKernelSpan grouped_4c_wgrad_cdna4_kernels;
@@ -22,7 +22,7 @@ extern const ConvKernelSpan grouped_32c_wgrad_tf32_cdna4_kernels;
 namespace
 {
 
-bool is_applicable(const Conv2dParams& par)
+bool is_applicable(const ConvParams& par)
 {
     if(par.groups == 1)
         return false;

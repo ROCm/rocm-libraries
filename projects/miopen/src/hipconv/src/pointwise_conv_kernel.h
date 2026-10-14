@@ -1,7 +1,8 @@
 #pragma once
 
 #include "conv_kernel.h"
-#include "hipconv/conv2d_params.hpp"
+#include "explicit_gemm/hipblaslt_matmul.hpp"
+#include "hipconv/conv_params.hpp"
 
 namespace hipconv
 {
@@ -13,18 +14,20 @@ public:
 
     std::string_view name() const override { return "pointwise"; }
 
-    hipconv::Algorithm algorithm() const override { return hipconv::Algorithm::Pointwise; }
+    hipconv::Algorithm algorithm() const override { return hipconv::Algorithm::ExplicitGemm; }
 
-    bool is_applicable(const hipconv::Conv2dParams& par) const override
+    bool is_applicable(const hipconv::ConvParams& par) const override
     {
         using namespace hipconv;
 
         const bool ok_fp16bf16 =
             (par.input_type == DataType::fp16 || par.input_type == DataType::bf16) &&
-            par.weight_type == par.input_type &&
-            (par.direction == Direction::Wgrad ? par.weight_grad_type == DataType::fp32
-                                               : par.output_type == par.input_type);
-        if(!ok_fp16bf16)
+            par.weight_type == par.input_type && par.output_type == par.input_type;
+        const bool ok_tf32 = par.input_type == DataType::tf32 &&
+                             par.weight_type == DataType::tf32 && par.output_type == DataType::fp32;
+        if(!ok_fp16bf16 && !ok_tf32)
+            return false;
+        if(par.direction == Direction::Wgrad && par.weight_grad_type != DataType::fp32)
             return false;
         if(par.order != TensorOrder::NHWC)
             return false;
@@ -42,8 +45,13 @@ public:
         return true;
     }
 
+    bool runs_on_current_device(const hipconv::ConvParams& par) const override
+    {
+        return explicit_gemm::has_algorithm(par);
+    }
+
     // The hipBLASLt-backed pointwise path is the tuned choice for 1x1.
-    float get_weighted_throughput_index(const hipconv::Conv2dParams& /*par*/) const override
+    float get_weighted_throughput_index(const hipconv::ConvParams& /*par*/) const override
     {
         return 1.0f;
     }

@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <filesystem>
+#include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -15,9 +16,11 @@
 #include <stdexcept>
 #include <string>
 #include <system_error>
+#include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include <hipdnn_data_sdk/utilities/LineStore.hpp>
@@ -61,6 +64,45 @@ struct ResolvedDispatch
 {
     DispatchDescriptor descriptor;
     const IKernelDispatchHandler<THandle>* handler = nullptr;
+};
+
+/// A completed metadata tuple reduced to its values, in the tuple's own (name-sorted)
+/// order. completeMetadata() has already proven every tuple of an engine carries exactly
+/// the KMD's field names, so for comparing two of them the names are redundant, and
+/// leaving them out keeps hashing and comparing a key to the values alone.
+using MetadataTupleValues = std::vector<MetadataValue>;
+
+struct MetadataTupleValuesHash
+{
+    size_t operator()(const MetadataTupleValues& values) const
+    {
+        size_t seed = values.size();
+        const auto combine = [&seed](size_t hash) {
+            seed ^= hash + 0x9e3779b97f4a7c15ULL + (seed << 6) + (seed >> 2);
+        };
+        for(const auto& value : values)
+        {
+            combine(value.index());
+            std::visit(
+                [&combine](const auto& held) {
+                    using Held = std::decay_t<decltype(held)>;
+                    if constexpr(std::is_same_v<Held, std::vector<int64_t>>)
+                    {
+                        combine(held.size());
+                        for(const auto element : held)
+                        {
+                            combine(std::hash<int64_t>{}(element));
+                        }
+                    }
+                    else
+                    {
+                        combine(std::hash<Held>{}(held));
+                    }
+                },
+                value);
+        }
+        return seed;
+    }
 };
 
 /// The engine's view of its own kernels: which apply to a graph, in what order, and
@@ -207,6 +249,15 @@ public:
     /// `rank()` is never called; otherwise the heuristic orders it.
     Catalog sortedCatalog(const MatchContext& context) const
     {
+        // Mirrors catalogFor's own reject guard: cacheKey() below only reads graph and
+        // device ordinal, not arch, so without this an unresolved-arch context would
+        // cache an empty catalog under the SAME key a later, resolved call for this
+        // device reuses -- permanently hiding that device's real catalog.
+        if(context.deviceId == NO_DEVICE || context.deviceProperties.gcnArchName.empty())
+        {
+            return catalogFor(context);
+        }
+
         Catalog catalog = catalogFor(context);
 
         // A measured order is final; a heuristic one is provisional, so this lookup runs
@@ -241,19 +292,21 @@ public:
         return catalog;
     }
 
-    /// Records @p record under @p key, replacing any earlier ranking for it: a later
-    /// sweep measured the current candidate set, and the coverage gate only widens.
+    /// Records @p record under @p key. Whether an existing on-disk ranking for @p key is
+    /// kept or replaced depends on @p cause -- see the full rule below.
     ///
     /// Write-back: if this manager has an engine name, the record is also appended to
     /// the on-disk shard. Unlike the in-memory-only read-through path below, this holds
     /// the shard's own file lock across the whole read-then-append sequence as one
     /// critical section -- `_winnerCacheMutex` alone cannot serialize against a second
-    /// process sharing the file. If the shard's current ranking for this key already
-    /// matches, nothing is written and the on-disk record is adopted; if it differs, the
-    /// new ranking is appended and supersedes the old one under the reader's
-    /// last-line-wins merge. Any disk failure degrades to in-memory-only, keeping the
-    /// measurement just taken, logged once per manager.
-    void recordWinner(const WinnerKey& key, const WinnerRecord& record) const
+    /// process sharing the file. @p cause selects the write-back rule and is required,
+    /// not defaulted: an existing on-disk entry for the key is adopted as-is and nothing
+    /// is written on a fresh miss; on a coverage-triggered re-benchmark, the new ranking
+    /// is always appended and supersedes the old one under the reader's last-line-wins
+    /// merge, even if the ranking happens to be unchanged. Any disk failure degrades to
+    /// in-memory-only, keeping the measurement just taken, logged once per manager.
+    void
+        recordWinner(const WinnerKey& key, const WinnerRecord& record, WinnerWriteCause cause) const
     {
         if(record.empty())
         {
@@ -271,7 +324,7 @@ public:
             return;
         }
 
-        WinnerRecord adopted = writeBackToShard(key, record);
+        WinnerRecord adopted = writeBackToShard(key, record, cause);
 
         const std::lock_guard<std::mutex> guard(_winnerCacheMutex);
         _winnerCache[key] = std::move(adopted);
@@ -324,6 +377,17 @@ public:
         return _winnerCache.size();
     }
 
+    /// Is it worth building a WinnerKey for @p gcnArchName? True if the in-memory cache
+    /// holds anything, or this arch's shard has not been attempted yet. Probes the
+    /// stripped arch, matching how `loadShardIfAbsent()` latches.
+    bool mightHaveWinnerFor(const std::string& gcnArchName) const
+    {
+        const std::lock_guard<std::mutex> guard(_winnerCacheMutex);
+        return !_winnerCache.empty()
+               || _loadedWinnerShards.find(std::string(stripArchFeatures(gcnArchName)))
+                      == _loadedWinnerShards.end();
+    }
+
     /// Resolves how to size and launch @p kernel.
     /// @throws std::runtime_error if the kernel's dispatch descriptor is unknown.
     KernelDispatcher<THandle> getDispatchDetails(const KernelDefinition& kernel) const
@@ -368,9 +432,18 @@ private:
         // Two kernels may share a tuple when no single device can see both -- that is
         // exactly the per-arch shard layout. Uniqueness is therefore per overlapping-arch
         // group, not per engine: the tuple is the catalog key, and a catalog is built for
-        // one device. Keyed by the tuple (an ordered map, so it already orders) rather
-        // than scanned, which would be quadratic.
-        std::map<MetadataValues, std::vector<std::vector<std::string>>> archesClaimingTuple;
+        // one device. Keyed by the tuple's values in a hash map rather than scanned, which
+        // would be quadratic.
+        size_t kernelCount = 0;
+        for(const auto& pack : _packs)
+        {
+            kernelCount += pack.kernels.size();
+        }
+        std::unordered_map<MetadataTupleValues,
+                           std::vector<std::vector<std::string>>,
+                           MetadataTupleValuesHash>
+            archesClaimingTuple;
+        archesClaimingTuple.reserve(kernelCount);
 
         _definitions.reserve(_packs.size());
         for(const auto& pack : _packs)
@@ -415,10 +488,16 @@ private:
                 // tuple under disjoint arch -- one implementation per capability -- while
                 // still catching two that a single device would see together.
                 std::vector<std::string> kernelArch = kernel.arch.empty() ? pack.arch : kernel.arch;
+                MetadataTupleValues tuple;
+                tuple.reserve(key.size());
+                for(const auto& entry : key)
+                {
+                    tuple.push_back(entry.second);
+                }
                 // try_emplace, not operator[], only because misc-const-correctness
                 // misreads the operator[] form here and demands a const map.
                 std::vector<std::vector<std::string>>& claimants
-                    = archesClaimingTuple.try_emplace(key).first->second;
+                    = archesClaimingTuple.try_emplace(std::move(tuple)).first->second;
                 for(const auto& claimed : claimants)
                 {
                     if(archOverlaps(claimed, kernelArch))
@@ -513,9 +592,12 @@ private:
         // Pack pruning and matchers both read the device, so nothing below can be
         // answered without one. Checked here rather than in every provider's matchers,
         // where an omission is invisible.
-        if(context.deviceId == NO_DEVICE)
+        if(context.deviceId == NO_DEVICE || context.deviceProperties.gcnArchName.empty())
         {
-            HIPDNN_PLUGIN_LOG_INFO("ingestor: no device resolved; no kernel applies");
+            const auto* reason = context.deviceId == NO_DEVICE
+                                     ? "no device resolved"
+                                     : "resolved device reports no gcnArchName";
+            HIPDNN_PLUGIN_LOG_INFO("ingestor: " << reason << "; no kernel applies");
             return Catalog{};
         }
 
@@ -743,17 +825,6 @@ private:
         return ordered;
     }
 
-    /// Is it worth building a WinnerKey for @p gcnArchName? True if the in-memory cache
-    /// holds anything, or this arch's shard has not been attempted yet. Probes the
-    /// stripped arch, matching how `loadShardIfAbsent()` latches.
-    bool mightHaveWinnerFor(const std::string& gcnArchName) const
-    {
-        const std::lock_guard<std::mutex> guard(_winnerCacheMutex);
-        return !_winnerCache.empty()
-               || _loadedWinnerShards.find(std::string(stripArchFeatures(gcnArchName)))
-                      == _loadedWinnerShards.end();
-    }
-
     /// Loads the on-disk shard covering @p gcnArchName into `_winnerCache` once, tracked
     /// by `_loadedWinnerShards`. File I/O runs with `_winnerCacheMutex` UNHELD, so a slow
     /// disk read never blocks an unrelated call.
@@ -843,11 +914,13 @@ private:
         }
     }
 
-    /// Write-back: re-reads @p key's shard under its LineStore lock and appends
-    /// @p record unless the shard's current ranking for @p key already matches it, as
-    /// one critical section under the shard's own lock (mirrors
-    /// `LineStoreLockHelper.cpp`). The file lock rather than `_winnerCacheMutex`,
-    /// because the racing writer may be another process.
+    /// Write-back: re-reads @p key's shard under its LineStore lock, then applies
+    /// @p cause's rule, as one critical section under the shard's own lock (mirrors
+    /// `LineStoreLockHelper.cpp`). A fresh miss adopts any existing on-disk record for
+    /// @p key as-is and appends nothing; a coverage-triggered re-benchmark always appends
+    /// @p record, superseding the old entry under the reader's last-line-wins merge. The
+    /// file lock is used rather than `_winnerCacheMutex`, because the racing writer may
+    /// be another process.
     ///
     /// A record is never immutable: a shard may hold several lines for one key, and the
     /// reader resolves them last-line-wins (see `loadShardIfAbsent()`), so appending a
@@ -855,12 +928,13 @@ private:
     /// kernel could never satisfy the coverage gate again, and every later run would
     /// re-benchmark and discard the result forever.
     ///
-    /// @return The on-disk record, if its ranked ids already match @p record's -- an
-    ///     unchanged catalog, so nothing is written; otherwise @p record itself, both
+    /// @return The on-disk record for @p key, if one already exists AND @p cause is a fresh
+    ///     miss -- adopted as-is, so nothing is written; otherwise @p record itself, both
     ///     when it was appended and on every disk failure, since write-back is
     ///     best-effort and the caller's own measurement is the right value to keep in
     ///     memory.
-    WinnerRecord writeBackToShard(const WinnerKey& key, WinnerRecord record) const
+    WinnerRecord
+        writeBackToShard(const WinnerKey& key, WinnerRecord record, WinnerWriteCause cause) const
     {
         if(_engineName.empty())
         {
@@ -908,20 +982,23 @@ private:
             }
         }
 
-        if(onDiskWinner != nullptr && rankedIdsEqual(*onDiskWinner, record))
+        if(onDiskWinner != nullptr && cause == WinnerWriteCause::FRESH_MISS)
         {
-            // Same ranking already on disk: adopt it rather than appending a duplicate
-            // line for an unchanged catalog.
+            // Presence, not equality. Two writers racing the same fresh key measure the same
+            // candidates and rank them the same way up to noise, so comparing rankings let both
+            // append and the shard kept two lines for one graph. A re-benchmark forced by a record
+            // that no longer covers the candidate set is the only writer that supersedes.
             hipdnn_data_sdk::utilities::unlockLineStore(*shard);
             return *onDiskWinner;
         }
 
-        if(hipdnn_data_sdk::utilities::appendLine(*shard, encodeWinnerRecordLine(key, record))
-           != hipdnn_data_sdk::utilities::LineStoreStatus::OK)
+        const auto appendStatus
+            = hipdnn_data_sdk::utilities::appendLine(*shard, encodeWinnerRecordLine(key, record));
+        hipdnn_data_sdk::utilities::unlockLineStore(*shard);
+        if(appendStatus != hipdnn_data_sdk::utilities::LineStoreStatus::OK)
         {
             logShardFailureOnce(WinnerShardFailureKind::APPEND, gcnArchName);
         }
-        hipdnn_data_sdk::utilities::unlockLineStore(*shard);
         return record;
     }
 
