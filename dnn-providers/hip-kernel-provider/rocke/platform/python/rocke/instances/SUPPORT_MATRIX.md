@@ -140,7 +140,7 @@ parity runs on the matching device and is not implied by the ✅ here.
 
 | Instance | gfx942 | gfx950 | gfx1151 | Notes |
 |---|:--:|:--:|:--:|---|
-| `lightning_indexer` | ✅ | ✅ | ❌ | bf16; score-only DSA scorer (no softmax/value); scalar body (unaligned + single-query fallback, correctness oracle; not a tuned decode path) + MFMA body (16-aligned); fp8 is a later phase; gfx1151 (RDNA wave32) unsupported |
+| `lightning_indexer` | ✅ | ✅ | ❌ | bf16; score-only DSA scorer (no softmax/value); runtime seqlen_q/seqlen_k; scalar body (sub-tile seqlen_q / single-query decode fallback, correctness oracle) + MFMA body (tail-masked for any seqlen_q/seqlen_k; index_head_dim 16-aligned); fp8 is a later phase; gfx1151 (RDNA wave32) unsupported |
 
 ## Linear attention / recurrent-state decode
 

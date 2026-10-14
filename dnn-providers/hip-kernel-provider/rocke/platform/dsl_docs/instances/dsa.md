@@ -79,23 +79,25 @@ platform representative golden (`lightning_indexer/gfx942/*`).
 Two bodies behind the `IndexerSpec.body` field, selected by two dispatch
 candidates per arch:
 
-- Scalar (`body="scalar"`): one workgroup per query row; threads stride the key
-  range and each key's score is a straight FMA reduction over `index_head_dim`
-  followed by ReLU, the per-head weight, the head sum, and the causal bound. No
-  LDS. Grid `(seqlen_q, 1, 1)`. This is the correctness oracle and the fallback
-  for non-16-aligned shapes and single-query (`seqlen_q=1`) decode. It is
-  correctness-first, not a tuned decode path: one workgroup strides the whole key
-  range and `seqlen_k` is compile-time (a fresh compile each step as the cache
-  grows), so dispatch consumers should not treat it as a production decode kernel.
+- Scalar (`body="scalar"`): one workgroup per `(query row, key slice)`; keys are
+  parallelized across `grid.y`, one key per thread, and each key's score is a
+  straight FMA reduction over `index_head_dim` followed by ReLU, the per-head
+  weight, the head sum, and the causal bound. No LDS. Grid
+  `(seqlen_q, ceil(seqlen_k/block_size), 1)`. This is the correctness oracle and
+  the fallback for sub-tile `seqlen_q` (`< 16`, including single-query decode) and
+  the hook for a future fused top-k tail. `seqlen_q` / `seqlen_k` are runtime
+  kernel arguments, so decode does not recompile as the cache grows.
 - MFMA (`body="mfma"`): per head, `scores_h = Q_h @ K^T` over the 16x16x16 bf16
   contract atom, register-to-register (score-only means no value matmul, so no
   P->LDS round-trip and no LDS at all). Each workgroup owns one (16-query,
   16-key) output block, so the launch parallelizes over both dimensions: grid
-  `(seqlen_q/16, seqlen_k/16, 1)`, one wave64 per block. Requires 16-aligned
-  `seqlen_q` / `seqlen_k` / `index_head_dim`; unaligned requests fall to the
-  scalar candidate. This is the preferred candidate for 16-aligned shapes; it is
-  not yet perf-characterized against the scalar body (each 16x16 output block
-  reloads the Q tile, so expect it to be L2-bound).
+  `(ceil(seqlen_q/16), ceil(seqlen_k/16), 1)`, one wave64 per block. Non-16-aligned
+  `seqlen_q` / `seqlen_k` are handled by tail-masking (clamped tail loads,
+  predicated tail stores); only `index_head_dim` must be 16-aligned, and sub-tile
+  `seqlen_q` (`< 16`) falls to the scalar candidate. This is the preferred
+  candidate for `seqlen_q >= 16`; it is not yet perf-characterized against the
+  scalar body (each 16x16 output block reloads the Q tile, so expect it to be
+  L2-bound).
 
 Both run on gfx942 (CDNA3) and gfx950 (CDNA4): the 16x16x16 bf16 atom and the
 register-only body exist on both, so the kernel is arch-neutral and the two arches
