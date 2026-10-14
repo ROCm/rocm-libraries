@@ -306,7 +306,8 @@ class Library:
             Assumes no epilogues were previously added. Updates all solution
             names with appropriate suffixes and sets library flags.
         """
-        _NO_EPILOGUE_DTYPES = (1, 2, 3)  # f64_r, f32_c, f64_c
+        #_NO_EPILOGUE_DTYPES = (1, 2, 3)  # f64_r, f32_c, f64_c
+        _NO_EPILOGUE_DTYPES = (1, 2, 3, 6, 8)  # f64_r, f32_c, f64_c, Int32, Int8
         if self.problem.get("DataType") in _NO_EPILOGUE_DTYPES:
             return
 

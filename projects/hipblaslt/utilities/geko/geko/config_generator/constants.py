@@ -28,7 +28,7 @@ depthURange['B8F8'] = depthURange['F8']
 # fp4 MI16x16x128: DepthU must be a multiple of 2*MI_K = 256.
 depthURange['F4'] = [[256,512,768,1024], [256,512,768], [256,512], [256]]
 
-computeDataTypeSize = {'H': 4, 'B': 4, 'S': 4, 'D': 8, 'C': 8, 'Z': 16, 'I8': 4, 'X': 4, 'F8': 4, 'F8N': 4, 'F8B8': 4, 'B8F8': 4, 'X1': 4, 'F4': 4}
+computeDataTypeSize = {'H': 4, 'B': 4, 'S': 4, 'D': 8, 'C': 8, 'Z': 16, 'I8': 4, 'I': 4, 'X': 4, 'F8': 4, 'F8N': 4, 'F8B8': 4, 'B8F8': 4, 'X1': 4, 'F4': 4}
 
 
 # TODO update for every new arch, or import from tensilelite commons
@@ -66,7 +66,7 @@ def _build_mt_max_size(large: int, regular: int):
         'D': regular,
         'C': 32768,
         'Z': 16384,
-        'I8': large,
+        'I8': 90000, #large,
         'X': large,
         'X1': large,
         'F8': large,

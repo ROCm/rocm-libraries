@@ -51,7 +51,7 @@ class ConfigSectionGenerator:
     def _use_epilogues(self) -> bool:
         """Whether to emit epilogue fields for this GEMM type."""
         gt = self._gt
-        no_epilogue = (gt.data_type == "D" and gt.dest_data_type == "D") or gt.data_type in ("C", "Z")
+        no_epilogue = (gt.data_type == "D" and gt.dest_data_type == "D") or gt.data_type in ("C", "Z", "I8")
         return self.config["EPILOGUES"] and not no_epilogue
 
     def __init__(self, config: Dict[str, Any]) -> None:
@@ -104,7 +104,9 @@ class ConfigSectionGenerator:
         pt[f'{epi_tag}UseScaleAlphaVec'] = "1"
         pt[f'{epi_tag}UseBias'] = "1"
         if not self._is_mx():
-            if "8" in pt["DataType"] or "8" in pt["DestDataType"]:
+            #if "8" in pt["DataType"] or "8" in pt["DestDataType"]:
+            if (("8" in pt["DataType"] and pt["DataType"] != "I8") or
+                ("8" in pt["DestDataType"] and pt["DestDataType"] != "I8")):
                 pt[f'{epi_tag}UseScaleAB'] = "Scalar"
 
         pt['Batched'] = "True"
