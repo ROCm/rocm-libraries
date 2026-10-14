@@ -110,7 +110,25 @@ _WGM = [
     ((5, 0, 64, 64, 2), [0, 1073741823, 0, 2, 0, 1, 1073741823, 0, 0, 0, 0]),
 ]
 
-_HEADER = Path(__file__).resolve().parents[3] / "include" / "Tensile" / "RocRollerWgmKernargs.hpp"
+def _rocrollerWgmHeader() -> Path:
+    """Locate RocRollerWgmKernargs.hpp from a source checkout or an install.
+
+    The tensilelite unit job runs this file from
+    ``build/share/hipblaslt/tensilelite/tensilelite/Tests``. Three parents up
+    is that share directory, which does not contain ``include/Tensile``. The
+    header lives in the hipBLASLt source tree.
+    """
+    rel = Path("include") / "Tensile" / "RocRollerWgmKernargs.hpp"
+    source = Path("projects") / "hipblaslt" / "tensilelite" / rel
+    here = Path(__file__).resolve()
+    for parent in here.parents:
+        for candidate in (parent / rel, parent / source):
+            if candidate.is_file():
+                return candidate
+    return here.parents[3] / rel
+
+
+_HEADER = _rocrollerWgmHeader()
 
 
 def _python_magic(kind, divisor):
