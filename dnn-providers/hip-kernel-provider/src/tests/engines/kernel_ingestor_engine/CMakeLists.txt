@@ -25,8 +25,9 @@ target_sources(hip_kernel_provider_census_tests PRIVATE
 
 # Gated on the production root's offer, not GPU_TARGETS: the suites read a shard only the
 # Triton family stages (loadedSet() throws without one), and the device cases skip when
-# this device has no shard. The census suite goes to the census binary, registered per
-# arch in ../../CMakeLists.txt; the matcher and dispatch suites go to the ordinary one.
+# this device has no shard. The census and engine-tier suites go to the census binary,
+# registered per arch in ../../CMakeLists.txt; the matcher and dispatch suites go to the
+# ordinary one.
 hkp_product_offers_engine(_hkp_triton_rmsnorm_sources "hipkernel:TritonRmsNorm"
                           HIPKERNELPROVIDER_ENABLE_TRITON)
 if(_hkp_triton_rmsnorm_sources)
@@ -36,5 +37,6 @@ if(_hkp_triton_rmsnorm_sources)
     )
     target_sources(hip_kernel_provider_census_tests PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestTritonRmsNormPacks.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestTritonRmsNormEngineTier.cpp
     )
 endif()

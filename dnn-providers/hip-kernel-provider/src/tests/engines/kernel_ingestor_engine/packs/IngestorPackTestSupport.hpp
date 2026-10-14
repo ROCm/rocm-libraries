@@ -14,11 +14,14 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <variant>
+#include <vector>
 
 #include <hip/hip_runtime_api.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
+#include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 #include <hipdnn_plugin_sdk/ingestor/IKernelDispatchHandler.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
@@ -136,6 +139,21 @@ inline std::optional<hipdnn_plugin_sdk::ingestor::BoundTokens>
     return graphMatcher(pack)(context);
 }
 
+/// The bindings a real plan build would hand @p pack's dispatch, from running its graph
+/// match.
+///
+/// @throws std::logic_error when the graph does not match: every caller built it to.
+inline hipdnn_plugin_sdk::ingestor::BoundTokens
+    bindingsFor(const PackSymbols& pack, const hipdnn_plugin_sdk::ingestor::MatchContext& context)
+{
+    auto bound = matchesGraph(pack, context);
+    if(!bound.has_value())
+    {
+        throw std::logic_error("test graph does not match the pack it is dispatched against");
+    }
+    return std::move(*bound);
+}
+
 /// Runs the graph-scoped criterion that admits only @p pack's operation.
 ///
 /// Separate from matchesGraph() because the split is the contract: the engine's graph
@@ -190,6 +208,44 @@ inline hipdnn_plugin_sdk::ingestor::DeviceProperties currentDeviceProperties()
         resolved.multiProcessorCount = properties.multiProcessorCount;
     }
     return resolved;
+}
+
+/// The current device with the feature suffix stripped: hipGetDeviceProperties reports
+/// `gfx942:sramecc+:xnack-`, but shards are named by the bare arch and prepare() passes
+/// this string to the archive lookup.
+inline hipdnn_plugin_sdk::ingestor::DeviceProperties packedArchDeviceProperties()
+{
+    auto properties = currentDeviceProperties();
+    const auto colon = properties.gcnArchName.find(':');
+    if(colon != std::string::npos)
+    {
+        properties.gcnArchName.resize(colon);
+    }
+    return properties;
+}
+
+/// Row-major packed strides for @p dims: innermost stride 1, each outer stride the product
+/// of the extents inside it.
+inline std::vector<int64_t> packedStrides(const std::vector<int64_t>& dims)
+{
+    std::vector<int64_t> strides(dims.size(), 1);
+    for(size_t i = dims.size(); i-- > 1;)
+    {
+        strides[i - 1] = strides[i] * dims[i];
+    }
+    return strides;
+}
+
+/// @p values[field] when it is present and holds a T, else nullptr.
+///
+/// Looked up rather than indexed so a missing field fails the checking case instead of
+/// throwing out_of_range.
+template <typename T>
+const T* tryGetMetadataField(const hipdnn_plugin_sdk::ingestor::MetadataValues& values,
+                             const char* field)
+{
+    const auto it = values.find(std::string(field));
+    return it == values.end() ? nullptr : std::get_if<T>(&it->second);
 }
 
 /// Wraps a built graph buffer so a test reads it the way an engine does.

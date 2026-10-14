@@ -10,13 +10,11 @@
 #include <cstdint>
 #include <optional>
 #include <string>
-#include <variant>
 #include <vector>
 
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/layernorm_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/rmsnorm_attributes_generated.h>
-#include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 
 #include "engines/kernel_ingestor_engine/packs/IngestorPackTestSupport.hpp"
 
@@ -48,10 +46,7 @@ constexpr const char* TRITON_DTYPE_FIELD = "dtype";
 constexpr const char* TRITON_BLOCK_N_FIELD = "block_n";
 constexpr const char* TRITON_BLOCK_THREADS_FIELD = "block_threads";
 constexpr const char* TRITON_SHARED_MEM_BYTES_FIELD = "shared_mem_bytes";
-
-/// The largest `block_n` the shipped instances cover; a normalised width above it matches
-/// no kernel and the engine declines the graph.
-constexpr int64_t TRITON_MAX_BLOCK_N = 8192;
+constexpr const char* TRITON_ALIGNMENT_FIELD = "alignment";
 
 /// Epsilon the default graph bakes. Not a kernel property: any epsilon is a kernarg.
 constexpr float TRITON_DEFAULT_EPSILON = 1e-5F;
@@ -67,31 +62,7 @@ constexpr int64_t TRITON_INV_RMS_UID = 6;
 /// The INT32 offsets tensor a ragged operand names; emitted only when one is ragged.
 constexpr int64_t TRITON_RAGGED_OFFSET_UID = 7;
 
-/// @p values[field] when it is present and holds a T, else nullptr.
-///
-/// Looked up rather than indexed so a missing field fails the checking case instead of
-/// throwing out_of_range.
-template <typename T>
-const T* tryGetMetadataField(const hipdnn_plugin_sdk::ingestor::MetadataValues& values,
-                             const char* field)
-{
-    const auto it = values.find(std::string(field));
-    return it == values.end() ? nullptr : std::get_if<T>(&it->second);
-}
-
-/// @brief Row-major packed strides for @p dims, the only layout the kernel addresses
-/// (row `r` at `r * N`).
-inline std::vector<int64_t> tritonPackedStrides(const std::vector<int64_t>& dims)
-{
-    std::vector<int64_t> strides(dims.size(), 1);
-    for(size_t i = dims.size(); i-- > 1;)
-    {
-        strides[i - 1] = strides[i] * dims[i];
-    }
-    return strides;
-}
-
-/// Everything this pack's graph matcher gates, so each refusal case names the one field it
+/// Everything this pack's matchers gate, so each refusal case names the one field it
 /// changes. Defaults are a graph the shipped instances serve: packed row-major rank-2 bf16
 /// x/y, a scale vector as wide as the normalised axis, a baked epsilon and alignment 16.
 struct TritonRmsNormGraphOptions
@@ -113,7 +84,8 @@ struct TritonRmsNormGraphOptions
     bool withInvRms = false;
     hipdnn_flatbuffers_sdk::data_objects::NormFwdPhase forwardPhase
         = hipdnn_flatbuffers_sdk::data_objects::NormFwdPhase::NOT_SET;
-    /// Declared alignment per operand; the matcher requires a positive multiple of 16.
+    /// Declared alignment per operand; the kernel matcher requires a positive multiple of
+    /// the kernel's own.
     int64_t xAlignment = 16;
     int64_t scaleAlignment = 16;
     int64_t yAlignment = 16;
@@ -122,8 +94,15 @@ struct TritonRmsNormGraphOptions
     /// Makes the single node a LayernormAttributes node over the same uids; its required
     /// bias names TRITON_BIAS_UID.
     bool asLayernorm = false;
-    /// Emits no y tensor; the node still names TRITON_Y_UID.
+    /// Emits no node at all; the tensors are still emitted.
+    bool noNode = false;
+    /// Emits no x, scale or y tensor; the node still names its uid.
+    bool omitX = false;
+    bool omitScale = false;
     bool omitY = false;
+    /// Emits x without its dims or without its strides vector.
+    bool xWithoutDims = false;
+    bool xWithoutStrides = false;
     bool xVirtual = false;
     bool scaleVirtual = false;
     bool yVirtual = false;
@@ -143,6 +122,11 @@ struct TritonRmsNormGraphOptions
     bool xRagged = false;
     bool scaleRagged = false;
     bool yRagged = false;
+    /// The graph-level opt-in for execute-time override shapes.
+    bool overrideShapeEnabled = false;
+    /// The graph's `min_required_engine_api_version`; unstamped when unset.
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::EngineApiVersion>
+        minRequiredEngineApiVersion;
 };
 
 /**
@@ -163,10 +147,10 @@ inline flatbuffers::FlatBufferBuilder
                                : std::vector<int64_t>{options.xDims.back()};
     const auto scaleDataType = options.scaleDataType.value_or(options.dataType);
 
-    const auto xStrides = options.xStrides.value_or(tritonPackedStrides(options.xDims));
+    const auto xStrides = options.xStrides.value_or(packedStrides(options.xDims));
     const auto yDims = options.yDims.value_or(options.xDims);
-    const auto yStrides = options.yStrides.value_or(tritonPackedStrides(yDims));
-    const auto scaleStrides = options.scaleStrides.value_or(tritonPackedStrides(scaleDims));
+    const auto yStrides = options.yStrides.value_or(packedStrides(yDims));
+    const auto scaleStrides = options.scaleStrides.value_or(packedStrides(scaleDims));
 
     const auto raggedOffset = [](bool ragged) {
         return ragged ? flatbuffers::Optional<int64_t>(TRITON_RAGGED_OFFSET_UID)
@@ -175,30 +159,38 @@ inline flatbuffers::FlatBufferBuilder
 
     flatbuffers::FlatBufferBuilder builder;
     std::vector<flatbuffers::Offset<data_objects::TensorAttributes>> tensors;
-    tensors.push_back(data_objects::CreateTensorAttributesDirect(builder,
-                                                                 TRITON_X_UID,
-                                                                 "x",
-                                                                 options.dataType,
-                                                                 &xStrides,
-                                                                 &options.xDims,
-                                                                 options.xVirtual,
-                                                                 data_objects::TensorValue::NONE,
-                                                                 0,
-                                                                 options.xPassByValue,
-                                                                 raggedOffset(options.xRagged),
-                                                                 options.xAlignment));
-    tensors.push_back(data_objects::CreateTensorAttributesDirect(builder,
-                                                                 TRITON_SCALE_UID,
-                                                                 "scale",
-                                                                 scaleDataType,
-                                                                 &scaleStrides,
-                                                                 &scaleDims,
-                                                                 options.scaleVirtual,
-                                                                 data_objects::TensorValue::NONE,
-                                                                 0,
-                                                                 false,
-                                                                 raggedOffset(options.scaleRagged),
-                                                                 options.scaleAlignment));
+    if(!options.omitX)
+    {
+        tensors.push_back(data_objects::CreateTensorAttributesDirect(
+            builder,
+            TRITON_X_UID,
+            "x",
+            options.dataType,
+            options.xWithoutStrides ? nullptr : &xStrides,
+            options.xWithoutDims ? nullptr : &options.xDims,
+            options.xVirtual,
+            data_objects::TensorValue::NONE,
+            0,
+            options.xPassByValue,
+            raggedOffset(options.xRagged),
+            options.xAlignment));
+    }
+    if(!options.omitScale)
+    {
+        tensors.push_back(
+            data_objects::CreateTensorAttributesDirect(builder,
+                                                       TRITON_SCALE_UID,
+                                                       "scale",
+                                                       scaleDataType,
+                                                       &scaleStrides,
+                                                       &scaleDims,
+                                                       options.scaleVirtual,
+                                                       data_objects::TensorValue::NONE,
+                                                       0,
+                                                       false,
+                                                       raggedOffset(options.scaleRagged),
+                                                       options.scaleAlignment));
+    }
     if(!options.omitY)
     {
         tensors.push_back(
@@ -300,7 +292,10 @@ inline flatbuffers::FlatBufferBuilder
     };
 
     std::vector<flatbuffers::Offset<data_objects::Node>> nodes;
-    nodes.push_back(makeNode());
+    if(!options.noNode)
+    {
+        nodes.push_back(makeNode());
+    }
     if(options.secondNode)
     {
         nodes.push_back(makeNode());
@@ -314,6 +309,11 @@ inline flatbuffers::FlatBufferBuilder
     graphBuilder.add_name(name);
     graphBuilder.add_tensors(tensorsVector);
     graphBuilder.add_nodes(nodesVector);
+    graphBuilder.add_is_override_shape_enabled(options.overrideShapeEnabled);
+    if(options.minRequiredEngineApiVersion.has_value())
+    {
+        graphBuilder.add_min_required_engine_api_version(&*options.minRequiredEngineApiVersion);
+    }
     builder.Finish(graphBuilder.Finish());
 
     return builder;

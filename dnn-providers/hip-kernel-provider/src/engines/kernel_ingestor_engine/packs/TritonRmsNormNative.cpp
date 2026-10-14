@@ -13,13 +13,13 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include <hip/hip_runtime_api.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/rmsnorm_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
-#include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_plugin_sdk/PluginDeviceBuffers.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/RuntimePassByValue.hpp>
@@ -35,6 +35,7 @@
 #include "core/Handle.hpp"
 #include "engines/kernel_ingestor_engine/IngestorKernelCode.hpp"
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
+#include "engines/kernel_ingestor_engine/packs/TritonPackCommon.hpp"
 
 /**
  * @file TritonRmsNormNative.cpp
@@ -68,6 +69,7 @@ constexpr std::string_view DTYPE_FIELD = "dtype";
 constexpr std::string_view BLOCK_N_FIELD = "block_n";
 constexpr std::string_view BLOCK_THREADS_FIELD = "block_threads";
 constexpr std::string_view SHARED_MEM_BYTES_FIELD = "shared_mem_bytes";
+constexpr std::string_view ALIGNMENT_FIELD = "alignment";
 
 constexpr std::string_view X_TOKEN = "triton_rmsnorm.x.uid";
 constexpr std::string_view SCALE_TOKEN = "triton_rmsnorm.scale.uid";
@@ -75,16 +77,6 @@ constexpr std::string_view EPSILON_TOKEN = "triton_rmsnorm.epsilon.uid";
 constexpr std::string_view Y_TOKEN = "triton_rmsnorm.y.uid";
 constexpr std::string_view ROWS_TOKEN = "triton_rmsnorm.rows";
 constexpr std::string_view COLUMNS_TOKEN = "triton_rmsnorm.columns";
-
-/// The kernels carry a `tt.divisibility = 16` hint on the base pointers, so every operand
-/// base must be 16-byte aligned. The backend enforces only `ptr % alignment() == 0`, so a
-/// declared alignment guarantees that iff it is a positive multiple of 16; any other
-/// (8, 0, 24) is declined at match time. Launch does not re-check.
-constexpr int64_t REQUIRED_ALIGNMENT = 16;
-
-/// Kernarg slots 5 and 6, Triton's global and profile scratch pointers. Always null: the
-/// generator rejects any object that needs scratch.
-constexpr void* NO_SCRATCH = nullptr;
 
 // ---------------------------------------------------------------------------
 // Matching
@@ -101,13 +93,6 @@ struct TritonRmsNormBinding
     int64_t rows = 0;
     int64_t columns = 0;
 };
-
-const data_objects::TensorAttributes* findTensor(const MatchContext& context, int64_t uid)
-{
-    const auto& tensors = context.graph.getTensorMap();
-    auto it = tensors.find(uid);
-    return it == tensors.end() ? nullptr : it->second;
-}
 
 /// The node this pack's matchers read, or nullptr if the graph isn't a single RMS-norm
 /// node. `RMSNormAttributes` is its own union arm, so matching it is the whole node-type
@@ -128,147 +113,22 @@ const data_objects::RMSNormAttributes* rmsNormNode(const MatchContext& context)
     return &node.attributesAs<data_objects::RMSNormAttributes>();
 }
 
-/// Runs on an unvalidated graph, so it must be total: dims/strides may be null or
-/// mismatched, or an extent non-positive. Later helpers may assume positive extents.
-bool hasUsableShape(const data_objects::TensorAttributes& tensor, uint32_t minimumRank)
-{
-    const auto* dims = tensor.dims();
-    const auto* strides = tensor.strides();
-    if(dims == nullptr || strides == nullptr || strides->size() != dims->size()
-       || dims->size() < minimumRank)
-    {
-        return false;
-    }
-
-    for(flatbuffers::uoffset_t axis = 0; axis < dims->size(); ++axis)
-    {
-        if(dims->Get(axis) <= 0)
-        {
-            return false;
-        }
-    }
-    return true;
-}
-
-/// Dense row-major: innermost stride 1 and every outer stride the product of the extents
-/// inside it. This makes collapsing rank > 2 to (rows, N) sound, since the kernel addresses
-/// row `r` at `r * N`. Also false when the element count overflows int64, so products of
-/// extents after a true result (see rowCount) cannot overflow. Requires positive extents.
-bool isPackedRowMajor(const data_objects::TensorAttributes& tensor)
-{
-    const auto* dims = tensor.dims();
-    const auto* strides = tensor.strides();
-    int64_t expected = 1;
-    for(auto axis = static_cast<int64_t>(dims->size()) - 1; axis >= 0; --axis)
-    {
-        const auto index = static_cast<flatbuffers::uoffset_t>(axis);
-        if(strides->Get(index) != expected)
-        {
-            return false;
-        }
-        const auto extent = dims->Get(index);
-        if(expected > std::numeric_limits<int64_t>::max() / extent)
-        {
-            return false;
-        }
-        expected *= extent;
-    }
-    return true;
-}
-
-/// Product of every extent except the innermost: the row count the grid is sized from.
-/// Requires a tensor that passed isPackedRowMajor, which bounds the product.
-int64_t rowCount(const data_objects::TensorAttributes& tensor)
-{
-    const auto* dims = tensor.dims();
-    int64_t rows = 1;
-    for(flatbuffers::uoffset_t axis = 0; axis + 1 < dims->size(); ++axis)
-    {
-        rows *= dims->Get(axis);
-    }
-    return rows;
-}
-
-int64_t innermostExtent(const data_objects::TensorAttributes& tensor)
-{
-    const auto* dims = tensor.dims();
-    return dims->Get(dims->size() - 1);
-}
-
-bool sameShape(const data_objects::TensorAttributes& lhs, const data_objects::TensorAttributes& rhs)
-{
-    const auto* lhsDims = lhs.dims();
-    const auto* rhsDims = rhs.dims();
-    if(lhsDims->size() != rhsDims->size())
-    {
-        return false;
-    }
-    for(flatbuffers::uoffset_t axis = 0; axis < lhsDims->size(); ++axis)
-    {
-        if(lhsDims->Get(axis) != rhsDims->Get(axis))
-        {
-            return false;
-        }
-    }
-    return true;
-}
-
-/// A regular device operand: real storage, readable by the kernel through a pointer.
-bool isDeviceOperand(const data_objects::TensorAttributes& tensor)
-{
-    return !tensor.virtual_() && !hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(&tensor);
-}
-
-bool isAlignedForKernel(const data_objects::TensorAttributes& tensor)
-{
-    return tensor.alignment() > 0 && tensor.alignment() % REQUIRED_ALIGNMENT == 0;
-}
-
-/// The dtypes the shipped instances were built for (the UKDs' `dtype` metadata).
-bool isSupportedDataType(data_objects::DataType dataType)
-{
-    return dataType == data_objects::DataType::BFLOAT16 || dataType == data_objects::DataType::HALF;
-}
-
-/// The kernel metadata spelling of a graph dtype (`bf16`/`f16`, not the flatbuffer
-/// `BFLOAT16`/`HALF`).
-std::optional<std::string> kernelDataTypeName(data_objects::DataType dataType)
-{
-    switch(dataType)
-    {
-    case data_objects::DataType::BFLOAT16:
-        return std::string("bf16");
-    case data_objects::DataType::HALF:
-        return std::string("f16");
-    default:
-        return std::nullopt;
-    }
-}
-
-/// True when the epsilon tensor can be classified as a scalar operand (an unknown dtype
-/// cannot). The value is read at execute, never compared here.
-bool epsilonIsClassifiable(const MatchContext& context, int64_t uid)
-{
-    try
-    {
-        (void)hipdnn_plugin_sdk::makeScalarOperand(context.graph.getTensorMap(), uid, "epsilon");
-        return true;
-    }
-    catch(const hipdnn_plugin_sdk::HipdnnPluginException&)
-    {
-        return false;
-    }
-}
-
 /**
  * @brief Graph-scoped applicability: a single forward-inference RMS-norm node over
- *        packed row-major bf16/f16 operands whose declared alignment is a positive
- *        multiple of 16.
+ *        packed row-major operands of one dtype, with fixed shapes.
  *
- * Refuses rather than approximates. Any epsilon is accepted: it is a kernarg.
+ * Refuses rather than approximates. Any epsilon is accepted: it is a kernarg. Which
+ * dtypes and alignments a kernel serves is its own metadata, checked by
+ * tritonRmsNormKernelMatches.
  */
 std::optional<BoundTokens> tritonRmsNormGraphMatches(const MatchContext& context)
 {
+    // The grid and n_cols come from the graph's shapes; launch() takes none at execute.
+    if(context.graph.getGraph().is_override_shape_enabled())
+    {
+        return std::nullopt;
+    }
+
     // Exactly one node: each kernel serves one complete graph.
     const auto* attributesPtr = rmsNormNode(context);
     if(attributesPtr == nullptr)
@@ -285,15 +145,16 @@ std::optional<BoundTokens> tritonRmsNormGraphMatches(const MatchContext& context
         return std::nullopt;
     }
 
-    const auto* x = findTensor(context, attributes.x_tensor_uid());
-    const auto* scale = findTensor(context, attributes.scale_tensor_uid());
-    const auto* y = findTensor(context, attributes.y_tensor_uid());
+    const auto* x = triton::findTensor(context, attributes.x_tensor_uid());
+    const auto* scale = triton::findTensor(context, attributes.scale_tensor_uid());
+    const auto* y = triton::findTensor(context, attributes.y_tensor_uid());
     if(x == nullptr || scale == nullptr || y == nullptr)
     {
         return std::nullopt;
     }
 
-    if(!isDeviceOperand(*x) || !isDeviceOperand(*scale) || !isDeviceOperand(*y))
+    if(!triton::isDeviceOperand(*x) || !triton::isDeviceOperand(*scale)
+       || !triton::isDeviceOperand(*y))
     {
         return std::nullopt;
     }
@@ -306,35 +167,27 @@ std::optional<BoundTokens> tritonRmsNormGraphMatches(const MatchContext& context
     }
 
     // One dtype for all three: the kernel loads scale and writes y in x's element type.
-    if(!isSupportedDataType(x->data_type()) || scale->data_type() != x->data_type()
-       || y->data_type() != x->data_type())
+    if(scale->data_type() != x->data_type() || y->data_type() != x->data_type())
     {
         return std::nullopt;
     }
 
     // x and y need rank >= 2 (a row to reduce over); scale is a vector along that axis.
-    if(!hasUsableShape(*x, 2) || !hasUsableShape(*y, 2) || !hasUsableShape(*scale, 1))
+    if(!triton::hasUsableShape(*x, 2) || !triton::hasUsableShape(*y, 2)
+       || !triton::hasUsableShape(*scale, 1))
     {
         return std::nullopt;
     }
 
-    if(!sameShape(*x, *y) || !isPackedRowMajor(*x) || !isPackedRowMajor(*y)
-       || !isPackedRowMajor(*scale))
+    if(!triton::sameShape(*x, *y) || !triton::isPackedRowMajor(*x) || !triton::isPackedRowMajor(*y)
+       || !triton::isPackedRowMajor(*scale))
     {
         return std::nullopt;
     }
 
-    if(!isAlignedForKernel(*x) || !isAlignedForKernel(*scale) || !isAlignedForKernel(*y))
-    {
-        return std::nullopt;
-    }
-
-    const auto rows = rowCount(*x);
-    const auto columns = innermostExtent(*x);
-    if(rows <= 0 || columns <= 0)
-    {
-        return std::nullopt;
-    }
+    // Both positive: every extent passed hasUsableShape.
+    const auto rows = triton::rowCount(*x);
+    const auto columns = triton::innermostExtent(*x);
 
     // Rows and columns are bounded to int32 (n_cols is a 32-bit kernarg). The grid limit
     // depends on each instance's block width, so tritonRmsNormKernelMatches checks it.
@@ -345,12 +198,12 @@ std::optional<BoundTokens> tritonRmsNormGraphMatches(const MatchContext& context
     }
 
     // Scale must span exactly the normalised axis; the kernel does no broadcasting.
-    if(rowCount(*scale) != 1 || innermostExtent(*scale) != columns)
+    if(triton::rowCount(*scale) != 1 || triton::innermostExtent(*scale) != columns)
     {
         return std::nullopt;
     }
 
-    if(!epsilonIsClassifiable(context, attributes.epsilon_tensor_uid()))
+    if(!triton::scalarIsClassifiable(context, attributes.epsilon_tensor_uid(), "epsilon"))
     {
         return std::nullopt;
     }
@@ -365,15 +218,24 @@ std::optional<BoundTokens> tritonRmsNormGraphMatches(const MatchContext& context
     return bound;
 }
 
+/// The backend checks only `ptr % alignment() == 0`, so a declared alignment guarantees a
+/// kernel's base-pointer divisibility iff it is a positive multiple of it; any other
+/// (0, 24 for a 16-byte kernel) is declined. Launch does not re-check.
+bool isAlignedFor(const data_objects::TensorAttributes& tensor, int64_t kernelAlignment)
+{
+    return tensor.alignment() > 0 && tensor.alignment() % kernelAlignment == 0;
+}
+
 /**
- * @brief Kernel-scoped applicability: matching dtype, `block_n` >= the normalised axis, and
- *        a grid of one `block_threads`-wide block per row that HIP can launch.
+ * @brief Kernel-scoped applicability: the kernel's dtype, every operand's declared
+ *        alignment a positive multiple of the kernel's, `block_n` >= the normalised axis,
+ *        and a grid of one `block_threads`-wide block per row that HIP can launch.
  *
  * Each instance reduces one row with a single `block_n`-wide tile, so it must cover the
- * row. Several instances usually apply; the descriptors' priorities (see
- * tritonRmsNormScore) prefer the smallest. A row wider than the largest `block_n` admits
- * none, and the engine declines. HIP caps the threads per grid dimension at UINT32_MAX, so
- * a row count too large for a wide block may still be served by a narrower one.
+ * row. Several instances usually apply; the descriptors' priorities prefer the smallest.
+ * A row wider than the largest `block_n` admits none, and the engine declines. HIP caps
+ * the threads per grid dimension at UINT32_MAX, so a row count too large for a wide block
+ * may still be served by a narrower one.
  */
 bool tritonRmsNormKernelMatches(const MatchContext& context,
                                 const BoundTokens& bound,
@@ -385,20 +247,38 @@ bool tritonRmsNormKernelMatches(const MatchContext& context,
         return false;
     }
 
-    const auto* x = findTensor(context, attributes->x_tensor_uid());
-    if(x == nullptr)
+    const auto* x = triton::findTensor(context, attributes->x_tensor_uid());
+    const auto* scale = triton::findTensor(context, attributes->scale_tensor_uid());
+    const auto* y = triton::findTensor(context, attributes->y_tensor_uid());
+    if(x == nullptr || scale == nullptr || y == nullptr)
     {
         return false;
     }
 
-    const auto dtype = kernelDataTypeName(x->data_type());
-    if(!dtype.has_value() || kernel.getStringMetadata(std::string(DTYPE_FIELD)) != *dtype)
+    // A graph dtype no kernel is built for has no spelling, and equals no kernel's.
+    const auto dtype = triton::kernelDataTypeName(x->data_type());
+    if(kernel.getStringMetadata(std::string(DTYPE_FIELD)) != dtype)
+    {
+        return false;
+    }
+
+    // The kernel's base-pointer divisibility hint, which every operand must honour. A
+    // kernel stating none, or none positive, admits nothing.
+    const auto alignmentField = kernel.tryGetMetadata(std::string(ALIGNMENT_FIELD));
+    const auto* alignment
+        = alignmentField.has_value() ? std::get_if<int64_t>(&alignmentField.value()) : nullptr;
+    if(alignment == nullptr || *alignment <= 0)
+    {
+        return false;
+    }
+    if(!isAlignedFor(*x, *alignment) || !isAlignedFor(*scale, *alignment)
+       || !isAlignedFor(*y, *alignment))
     {
         return false;
     }
 
     const auto columns = hipdnn_plugin_sdk::ingestor::tryGetBoundInt(bound, COLUMNS_TOKEN);
-    if(!columns.has_value() || kernel.getIntMetadata(std::string(BLOCK_N_FIELD)) < *columns)
+    if(!columns.has_value() || kernel.getIntMetadata(std::string(BLOCK_N_FIELD)) < columns.value())
     {
         return false;
     }
@@ -412,18 +292,7 @@ bool tritonRmsNormKernelMatches(const MatchContext& context,
     // Division rather than rows * block_threads, which could overflow.
     constexpr auto UINT32_MAX_VALUE = static_cast<int64_t>(std::numeric_limits<uint32_t>::max());
     const auto blockThreads = kernel.getIntMetadata(std::string(BLOCK_THREADS_FIELD));
-    return blockThreads > 0 && *rows <= UINT32_MAX_VALUE / blockThreads;
-}
-
-/**
- * @brief Ranks the survivors by descriptor `priority`; the smallest `block_n` carries the
- *        highest.
- */
-double tritonRmsNormScore(const MatchContext& /*context*/,
-                          const BoundTokens& /*bound*/,
-                          const KernelDefinition& kernel)
-{
-    return static_cast<double>(kernel.priority);
+    return blockThreads > 0 && rows.value() <= UINT32_MAX_VALUE / blockThreads;
 }
 
 /**
@@ -457,51 +326,15 @@ TritonRmsNormBinding tritonRmsNormBinding(const BoundTokens& bound)
 // Dispatch
 // ---------------------------------------------------------------------------
 
-/// The loaded kernel plus everything read from the graph, resolved once at prepare().
-class PreparedTritonRmsNorm : public PreparedDispatch
+/// Everything launch() reads from the graph, resolved once at prepare().
+struct TritonRmsNormLaunch
 {
-public:
-    PreparedTritonRmsNorm(IngestorKernelCode code,
-                          TritonRmsNormBinding binding,
-                          hipdnn_plugin_sdk::ScalarOperand epsilon,
-                          int32_t columns)
-        : _code(std::move(code))
-        , _binding(binding)
-        , _epsilon(epsilon)
-        , _columns(columns)
-    {
-    }
-
-    /// The kernel for the stream's device; resolved per launch because a plan outlives the
-    /// handle it was built from.
-    compilation::IRunnableKernel& kernelForStream(hipStream_t stream) const
-    {
-        return _code.kernelForStream(stream);
-    }
-
-    const TritonRmsNormBinding& binding() const
-    {
-        return _binding;
-    }
-
-    const hipdnn_plugin_sdk::ScalarOperand& epsilon() const
-    {
-        return _epsilon;
-    }
-
-    int32_t columns() const
-    {
-        return _columns;
-    }
-
-private:
-    // Owns each device's program alongside the kernel viewing into it, so the module
-    // outlives every function resolved from it.
-    IngestorKernelCode _code;
-    TritonRmsNormBinding _binding;
-    hipdnn_plugin_sdk::ScalarOperand _epsilon;
-    int32_t _columns;
+    TritonRmsNormBinding binding;
+    hipdnn_plugin_sdk::ScalarOperand epsilon;
+    int32_t columns;
 };
+
+using PreparedTritonRmsNorm = triton::PreparedTritonDispatch<TritonRmsNormLaunch>;
 
 /**
  * @brief The explicit kernarg list, mirroring launch() below one for one.
@@ -576,10 +409,10 @@ public:
 
         return std::make_unique<PreparedTritonRmsNorm>(
             std::move(code),
-            binding,
-            hipdnn_plugin_sdk::makeScalarOperand(
-                context.graph.getTensorMap(), binding.epsilon, "epsilon"),
-            static_cast<int32_t>(columns));
+            TritonRmsNormLaunch{binding,
+                                hipdnn_plugin_sdk::makeScalarOperand(
+                                    context.graph.getTensorMap(), binding.epsilon, "epsilon"),
+                                static_cast<int32_t>(columns)});
     }
 
     void launch(const Handle& handle,
@@ -589,13 +422,14 @@ public:
                 void* /*workspace*/) const override
     {
         const auto& preparedRmsNorm = dynamic_cast<const PreparedTritonRmsNorm&>(prepared);
-        const auto& binding = preparedRmsNorm.binding();
+        const auto& state = preparedRmsNorm.state();
+        const auto& binding = state.binding;
 
         // A baked graph constant returns its value; a runtime pass-by-value operand reads
         // the host scalar from the execute buffers.
         const auto epsilon = static_cast<float>(
             hipdnn_plugin_sdk::toDouble(hipdnn_plugin_sdk::resolveScalarOperand(
-                preparedRmsNorm.epsilon(), deviceBuffers, numDeviceBuffers)));
+                state.epsilon, deviceBuffers, numDeviceBuffers)));
 
         const auto x
             = hipdnn_plugin_sdk::findDeviceBuffer(binding.x, deviceBuffers, numDeviceBuffers);
@@ -606,9 +440,9 @@ public:
 
         // Lvalues, because launch() takes each argument's address. Keep in step with
         // tritonRmsNormKernelSignature().
-        const int32_t nCols = preparedRmsNorm.columns();
-        void* globalScratch = NO_SCRATCH;
-        void* profileScratch = NO_SCRATCH;
+        const int32_t nCols = state.columns;
+        void* globalScratch = triton::NO_SCRATCH;
+        void* profileScratch = triton::NO_SCRATCH;
 
         preparedRmsNorm.kernelForStream(handle.getStream())
             .launch(handle.getStream(),
@@ -629,10 +463,7 @@ private:
 
 compilation::KpackModuleCache& tritonRmsNormKpackModuleCache()
 {
-    // Process-lifetime and per pack: the key is (archive, toc_key, arch), so a shared cache
-    // would answer other packs' lookups too.
-    static compilation::KpackModuleCache s_moduleCache;
-    return s_moduleCache;
+    return triton::kpackModuleCache<TritonRmsNormDispatchHandler>();
 }
 
 void resetTritonRmsNormModuleCache()
@@ -640,26 +471,13 @@ void resetTritonRmsNormModuleCache()
     tritonRmsNormKpackModuleCache().clear();
 }
 
-namespace
-{
-
-/// Process-lifetime: the registry holds a non-owning pointer, and Containers are created
-/// and destroyed per handle, so the handler and its loader must outlive every Container.
-const TritonRmsNormDispatchHandler& tritonRmsNormDispatchHandler()
-{
-    static const compilation::KpackKernelLoader s_kpackLoader(tritonRmsNormKpackModuleCache());
-    static const TritonRmsNormDispatchHandler s_dispatchHandler(s_kpackLoader);
-    return s_dispatchHandler;
-}
-
-} // namespace
-
 void registerTritonRmsNormSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope)
 {
     scope.add(std::string(GRAPH_MATCHER_SYMBOL), &tritonRmsNormGraphMatches);
     scope.add(std::string(KERNEL_MATCHER_SYMBOL), &tritonRmsNormKernelMatches);
-    scope.add(std::string(SCORE_SYMBOL), &tritonRmsNormScore);
-    scope.add(std::string(DISPATCH_SYMBOL), &tritonRmsNormDispatchHandler());
+    scope.add(std::string(SCORE_SYMBOL), &triton::priorityScore);
+    scope.add(std::string(DISPATCH_SYMBOL),
+              &triton::processDispatchHandler<TritonRmsNormDispatchHandler>());
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine
