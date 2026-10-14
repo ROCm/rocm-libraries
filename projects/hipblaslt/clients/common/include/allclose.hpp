@@ -432,17 +432,17 @@ bool allclose_check_general(char    allclose_type,
     return true;
 }
 
-bool allclose_check_general(char        allclose_type,
-                            int64_t     M,
-                            int64_t     N,
-                            int64_t     lda,
-                            int64_t     stride_a,
-                            void*       hCPU,
-                            void*       hGPU,
-                            int64_t     batch_count,
-                            double&     hipblaslt_atol,
-                            double&     hipblaslt_rtol,
-                            hipDataType type)
+inline bool allclose_check_general(char        allclose_type,
+                                   int64_t     M,
+                                   int64_t     N,
+                                   int64_t     lda,
+                                   int64_t     stride_a,
+                                   void*       hCPU,
+                                   void*       hGPU,
+                                   int64_t     batch_count,
+                                   double&     hipblaslt_atol,
+                                   double&     hipblaslt_rtol,
+                                   hipDataType type)
 {
     switch(type)
     {

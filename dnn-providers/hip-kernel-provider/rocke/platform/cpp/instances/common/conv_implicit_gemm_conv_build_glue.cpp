@@ -50,7 +50,9 @@
 
 #include "rocke/arena.h" /* rocke_arena_strdup */
 #include "rocke/error_boundary.hpp" /* ckc::guard_builder boundary shim */
+#include "rocke/helper_rocke.core.arch.h" /* rocke_archtarget_async_lds_max_dwords */
 #include "rocke/helper_rocke.helpers.grid.h" /* chiplet_aware_super_tile_dynamic */
+#include "rocke/instance_conv_abi.h"
 #include "rocke/instance_conv_implicit_gemm.h"
 #include "rocke/instance_conv_implicit_gemm_internal.h"
 #include "rocke/ir_internal.h" /* rocke_i_set_err */
@@ -108,6 +110,21 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
     ctx->ov = overrides;
     ctx->p = &spec->problem; /* p = spec.problem */
 
+    /* Group merging (Gm). The kernargs describe the TRUE problem -- the host
+     * packs them from the tensors, which do not merge -- so every merged extent
+     * the tile covers is derived in-kernel from the build-time degree. Merging
+     * is depthwise-only, so the merged per-group channel run is exactly Gm and
+     * folds to the constant c_gm; only the reduction extent (K_gemm*Gm) stays a
+     * runtime product. At group_merge 1 none of it is emitted. */
+    rocke_implicit_gemm_conv_spec_merged_problem(spec, &ctx->merged_problem);
+    ctx->p_load = &ctx->merged_problem;
+    ctx->group_merge = (spec->group_merge > 1) ? spec->group_merge : 1;
+    ctx->group_merge_log2 = 0;
+    for(int _gm = ctx->group_merge; _gm > 1; _gm >>= 1)
+        ctx->group_merge_log2++;
+    ctx->merged = ctx->group_merge > 1;
+    ctx->grouped = ctx->p->groups > 1 || ctx->merged;
+
     /* ---- spec.validate() ---- (line 787) */
     if(!rocke_implicit_gemm_conv_spec_validate(spec, reason, sizeof(reason)))
     {
@@ -121,6 +138,18 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
     {
         rocke_i_set_err(
             b, ROCKE_ERR_VALUE, "invalid conv_igemm spec for %s: %s", ctx->arch, reason);
+        return false;
+    }
+    /* The merged A/B addressing lives in the split address form; the
+     * descriptor-DAG path a caller-supplied (n, ho, wo) decode forces has no
+     * slot for the merged channel decode or the diagonal mask. (3-D, the other
+     * descriptor-DAG path, is rejected by rocke_conv_fwd_group_merge_available.) */
+    if(ctx->merged && overrides != NULL && overrides->a_mhw_index_fn != NULL)
+    {
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        "group_merge is not implemented with an a_mhw_index_fn override: "
+                        "it needs the 2-D split address form");
         return false;
     }
     /* Forward-conv-only: reject default epilogue when vec_c > 1 (auto-derived from kpg).
@@ -139,7 +168,15 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
         }
         else
         {
-            int _K = rocke_conv_problem_kpg(&spec->problem);
+            /* Read the *merged* problem: under group_merge the store runs over
+             * kpg*Gm consecutive output channels, so a depthwise spec that looks
+             * scalar here (kpg == 1) really stores Gm-wide. Using spec->problem
+             * would make this rule never fire on exactly the specs merging
+             * exists for, and the validator would then disagree with the emitter
+             * about which epilogue is legal. Identical at group_merge 1. */
+            rocke_conv_problem_t _merged;
+            rocke_implicit_gemm_conv_spec_merged_problem(spec, &_merged);
+            int _K = rocke_conv_problem_kpg(&_merged);
             bool _is_fp32_d = (spec->dtype_d && strcmp(spec->dtype_d, "fp32") == 0);
             if(_is_fp32_d)
                 _eff_vec_c = (_K % 4 == 0) ? 4 : (_K % 2 == 0) ? 2 : 1;
@@ -213,6 +250,80 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
         ctx->A_bytes = rocke_b_param(b, "A_bytes", rocke_i32(), NULL);
         ctx->B_bytes = rocke_b_param(b, "B_bytes", rocke_i32(), NULL);
         ctx->D_bytes = rocke_b_param(b, "D_bytes", rocke_i32(), NULL);
+    }
+
+    /* ---- AOT runtime problem-dimension params ----
+     * Emitted from the ordered ABI list, exactly as the Python builder emits
+     * from conv_fwd_problem_block(), so the kernel's parameter order and the
+     * launch signature cannot drift apart. */
+    {
+        const bool is_3d = spec->problem.is_3d;
+        const rocke_conv_param_slot_t slots[] = {
+            {"p_N", &ctx->p_N},
+            {"p_Hi", &ctx->p_Hi},
+            {"p_Wi", &ctx->p_Wi},
+            {"p_C", &ctx->p_C},
+            {"p_K", &ctx->p_K},
+            {"p_Y", &ctx->p_Y},
+            {"p_X", &ctx->p_X},
+            {"p_Z", &ctx->p_Z},
+            {"p_Di", &ctx->p_Di},
+            {"p_sH", &ctx->p_sH},
+            {"p_sW", &ctx->p_sW},
+            {"p_pH", &ctx->p_pH},
+            {"p_pW", &ctx->p_pW},
+            {"p_dH", &ctx->p_dH},
+            {"p_dW", &ctx->p_dW},
+            {"p_sD", &ctx->p_sD},
+            {"p_pD", &ctx->p_pD},
+            {"p_dD", &ctx->p_dD},
+            {"p_groups", &ctx->p_groups},
+            {"p_Ho", &ctx->p_Ho},
+            {"p_Wo", &ctx->p_Wo},
+            {"p_Do", &ctx->p_Do},
+            {"p_cpg", &ctx->p_cpg},
+            {"p_kpg", &ctx->p_kpg},
+            {"p_K_gemm", &ctx->p_K_gemm},
+            {"p_M", &ctx->p_M},
+            {"p_A_stride_n", &ctx->p_A_stride_n},
+            {"p_A_stride_di", &ctx->p_A_stride_di},
+            {"p_A_stride_hi", &ctx->p_A_stride_hi},
+            {"p_A_stride_wi", &ctx->p_A_stride_wi},
+            {"p_B_stride_k", &ctx->p_B_stride_k},
+            {"p_B_stride_z", &ctx->p_B_stride_z},
+            {"p_B_stride_y", &ctx->p_B_stride_y},
+            {"p_B_stride_x", &ctx->p_B_stride_x},
+            {"p_D_stride_n", &ctx->p_D_stride_n},
+            {"p_D_stride_do", &ctx->p_D_stride_do},
+            {"p_D_stride_ho", &ctx->p_D_stride_ho},
+            {"p_D_stride_wo", &ctx->p_D_stride_wo},
+            {"p_magic_m_Do_mult", &ctx->p_magic_m_Do_mult},
+            {"p_magic_m_Do_shift", &ctx->p_magic_m_Do_shift},
+            {"p_magic_m_Ho_mult", &ctx->p_magic_m_Ho_mult},
+            {"p_magic_m_Ho_shift", &ctx->p_magic_m_Ho_shift},
+            {"p_magic_m_Wo_mult", &ctx->p_magic_m_Wo_mult},
+            {"p_magic_m_Wo_shift", &ctx->p_magic_m_Wo_shift},
+            {"p_magic_k_Y_mult", &ctx->p_magic_k_Y_mult},
+            {"p_magic_k_Y_shift", &ctx->p_magic_k_Y_shift},
+            {"p_magic_k_X_mult", &ctx->p_magic_k_X_mult},
+            {"p_magic_k_X_shift", &ctx->p_magic_k_X_shift},
+            {"p_magic_k_cpg_mult", &ctx->p_magic_k_cpg_mult},
+            {"p_magic_k_cpg_shift", &ctx->p_magic_k_cpg_shift},
+            {"p_num_pid_m", &ctx->p_num_pid_m},
+            {"p_num_pid_n", &ctx->p_num_pid_n},
+        };
+        rocke_conv_arg_list_t block;
+        ctx->params_is_3d = is_3d;
+        rocke_conv_fwd_problem_block(is_3d, &block);
+        if(!rocke_conv_emit_param_block(
+               b, &block, NULL, NULL, slots, (int)(sizeof(slots) / sizeof(slots[0]))))
+        {
+            return false;
+        }
+        /* p_pH_neg / p_pW_neg are emitted inside the A-descriptor builder,
+         * where Python emits them, so the SSA numbering lines up. */
+        ctx->p_pH_neg = NULL;
+        ctx->p_pW_neg = NULL;
     }
 
     /* ---- resolve op + atom + frag widths ---- (811-815) */
@@ -329,33 +440,44 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
     /* ---- common geometry constants ---- (843-845) */
     ctx->c0 = rocke_b_const_i32(b, 0);
     ctx->c_block_k = rocke_b_const_i32(b, ctx->block_k);
-    ctx->c_K_gemm = rocke_b_const_i32(b, rocke_conv_problem_k_gemm(ctx->p));
+    if(ctx->merged)
+    {
+        /* Gm and its power-of-two split constants, materialised once, exactly
+         * where Python's `if merged:` block emits them. Gm is a power of two
+         * (enforced by the gate), so splitting the merged reduction index into
+         * its (filter position, merged group) parts is a shift and a mask. */
+        ctx->c_gm = rocke_b_const_i32(b, ctx->group_merge);
+        ctx->c_gm_mask = rocke_b_const_i32(b, ctx->group_merge - 1);
+        ctx->c_gm_shift = rocke_b_const_i32(b, ctx->group_merge_log2);
+        /* Merged: [Z*]Y*X*Gm. The kernargs describe the TRUE problem, so the
+         * merged reduction is scaled in-kernel by the build-time degree. */
+        ctx->c_K_gemm = rocke_b_mul(b, ctx->p_K_gemm, ctx->c_gm);
+    }
+    else
+    {
+        ctx->c_gm = ctx->c_gm_mask = ctx->c_gm_shift = NULL;
+        /* AOT: c_K_gemm is the runtime param p_K_gemm (was const_i32(p.K_gemm)) */
+        ctx->c_K_gemm = ctx->p_K_gemm;
+    }
 
     /* ---- per-CTA tile origins (chiplet-swizzle aware) ---- (858-879) */
     if(spec->chiplet_swizzle)
     {
-        int num_pid_m = (rocke_conv_problem_m(ctx->p) + ctx->block_m - 1) / ctx->block_m;
-        int num_pid_n = (rocke_conv_problem_n_gemm(ctx->p) + ctx->block_n - 1) / ctx->block_n;
-        rocke_value_t* c_num_pid_n = rocke_b_const_i32(b, num_pid_n);
-        /* wgid_flat = b.add(b.mul(b.block_id_y(), c_num_pid_n), b.block_id_x()).
-         * Python evaluates the add's first arg (b.mul(b.block_id_y(), ...)) fully
-         * before the second (b.block_id_x()): block_id_y -> mul -> block_id_x ->
-         * add. C arg eval order is unspecified, so pin it with temporaries. */
+        /* AOT: use dynamic variant with runtime p_num_pid_m/n params.
+         * Python: chiplet_aware_super_tile_dynamic(b, wgid_flat,
+         *             num_pid_m=p_num_pid_m, num_pid_n=p_num_pid_n, ...) */
         rocke_value_t* bid_y = rocke_b_block_id_y(b);
-        rocke_value_t* mul_y = rocke_b_mul(b, bid_y, c_num_pid_n);
+        rocke_value_t* mul_y = rocke_b_mul(b, bid_y, ctx->p_num_pid_n);
         rocke_value_t* bid_x = rocke_b_block_id_x(b);
         rocke_value_t* wgid_flat = rocke_b_add(b, mul_y, bid_x);
-        /* Python calls the COMPILE-TIME chiplet_aware_super_tile (conv tile
-         * counts are derived from the static problem shape): limit and
-         * num_wgid_in_group are folded consts, not div/mul IR. */
         rocke_super_tile_swizzle_result_t swz
-            = rocke_chiplet_aware_super_tile(b,
-                                             wgid_flat,
-                                             num_pid_m,
-                                             num_pid_n,
-                                             spec->chiplet_wgm,
-                                             spec->chiplet_num_xcds,
-                                             spec->chiplet_chunk_size);
+            = rocke_chiplet_aware_super_tile_dynamic(b,
+                                                     wgid_flat,
+                                                     ctx->p_num_pid_m,
+                                                     ctx->p_num_pid_n,
+                                                     spec->chiplet_wgm,
+                                                     spec->chiplet_num_xcds,
+                                                     spec->chiplet_chunk_size);
         ctx->block_m_off_v = rocke_b_mul(b, swz.row, rocke_b_const_i32(b, ctx->block_m));
         ctx->block_n_off_v = rocke_b_mul(b, swz.col, rocke_b_const_i32(b, ctx->block_n));
         /* grid = dc_replace(grid, block_m_off=..., block_n_off=...) so the
@@ -371,19 +493,24 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
 
     /* ---- grouped conv: group index + absolute output-filter base ---- (818-831)
      * Python:
-     *   grouped = p.groups > 1
+     *   grouped = p.groups > 1 or merged
      *   if grouped:
      *       group_idx = b.block_id_z()
      *       k_out_group_base = b.mul(group_idx, b.const_i32(p.kpg))
      *   else: group_idx = None; k_out_group_base = None
-     * Both are NULL for groups == 1 (byte-identical ungrouped path). */
-    if(ctx->p->groups > 1)
+     * Both are NULL for groups == 1 (byte-identical ungrouped path).
+     *
+     * Merged: "group" is the merged group (gridDim.z runs 0..groups/Gm) and
+     * the path stays engaged even at Gm == groups -- see ctx->grouped. */
+    if(ctx->grouped)
     {
         /* Python: group_idx = b.block_id_z(); k_out_group_base = b.mul(group_idx, b.const_i32(kpg))
          * Bind subexpressions in Python's left-to-right order to pin SSA ids. */
         ctx->group_idx = rocke_b_block_id_z(b);
-        rocke_value_t* c_kpg = rocke_b_const_i32(b, rocke_conv_problem_kpg(ctx->p));
-        ctx->k_out_group_base = rocke_b_mul(b, ctx->group_idx, c_kpg);
+        /* AOT: the runtime p_kpg param (was const_i32(p.kpg)). Merged: the
+         * merged kpg, which is Gm exactly (depthwise only), so c_gm. */
+        ctx->k_out_group_base
+            = rocke_b_mul(b, ctx->group_idx, ctx->merged ? ctx->c_gm : ctx->p_kpg);
     }
     else
     {
@@ -480,23 +607,10 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
 
     /* ---- global -> LDS coalesced copy plan ---- (924-925) */
     ctx->threads = rocke_implicit_gemm_conv_spec_block_size(spec);
-    ctx->load_vec = rocke_conv_choose_load_vec(spec);
-    /* Mirror Python default_vector_sizes: clamp the tile-geometry vec by the largest
-     * power-of-two that divides the per-group channel count (A strides over cpg,
-     * B strides over cpg). For groups==1 cpg==C -> byte-identical. For C=3 this
-     * yields vec=1; without the clamp the tile-geometry picker returns a wider vec
-     * that Python never uses, causing MISMATCH (e.g. ImageNet-stem C3 conv). */
-    {
-        bool is_fp32 = (spec->dtype_a && strcmp(spec->dtype_a, "fp32") == 0);
-        int max_elem = is_fp32 ? 4 : 8;
-        int c_dim = rocke_conv_problem_cpg(ctx->p);
-        int max_ab = (c_dim % max_elem == 0) ? max_elem
-                     : (c_dim % 4 == 0)      ? 4
-                     : (c_dim % 2 == 0)      ? 2
-                                             : 1;
-        if(ctx->load_vec > max_ab)
-            ctx->load_vec = max_ab;
-    }
+    /* Python _sync_load_vecs defaults: A from the merged channel run, B forced
+     * scalar under merge. Equal to each other at group_merge 1. */
+    ctx->load_vec = rocke_conv_default_load_vec(spec);
+    ctx->load_vec_b = rocke_conv_default_load_vec_b(spec);
 
     /* ---- coordinate-transform descriptors ---- (935-936).
      * Pointwise fast path: Y=X=1, stride=1, pad=0 -> descriptors are NULL and
@@ -506,7 +620,12 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
         ctx->is_pointwise = rocke_conv_problem_is_pointwise(ctx->p);
         ctx->c_wgK_pw = 0; /* forward conv: unused */
         ctx->c_wgN_pw = 0; /* forward conv: unused */
-        ctx->b_descriptor_fn = NULL; /* forward conv: use default rocke_conv_b_descriptor */
+        /* forward conv: default rocke_conv_b_descriptor, unless merging, which
+         * needs the k_gemm split and the diagonal mask. Merge rejects both
+         * async_dma and pointwise, so in practice only the sync non-pointwise
+         * leg sees the override -- but installing it here rather than at one
+         * call site means both loader legs pick it up if either gate relaxes. */
+        ctx->b_descriptor_fn = (ctx->group_merge > 1) ? rocke_conv_b_descriptor_merged : NULL;
         if(ctx->is_pointwise)
         {
             ctx->c_M_pw = rocke_conv_problem_m(ctx->p);
@@ -520,24 +639,24 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
             ctx->c_M_pw = 0;
             ctx->c_C_pw = 0;
             ctx->c_K_pw = 0;
+            /* AOT: use dynamic descriptor builders with runtime SSA Values.
+             * These mirror Python _make_a_descriptor_dynamic / _make_b_descriptor_dynamic. */
             bool decompose_m = !(overrides != NULL && overrides->a_mhw_index_fn != NULL);
-            ctx->A_desc = rocke_conv_make_a_descriptor(b, ctx->p, decompose_m);
-            ctx->B_desc = rocke_conv_make_b_descriptor(b, ctx->p);
+            ctx->A_desc = (struct rocke_tensor_descriptor*)rocke_conv_make_a_descriptor_dynamic(
+                b, ctx, decompose_m);
+            ctx->B_desc
+                = (struct rocke_tensor_descriptor*)rocke_conv_make_b_descriptor_dynamic(b, ctx);
         }
-        ctx->D_desc = NULL; /* built lazily in the epilogue phase */
+        ctx->D_desc = NULL; /* built below, before the K-loop */
     }
 
-    /* ---- pointwise IR constants (Python lines 987-990, before buffer resources).
-     * Python:  _c_C_ir = b.const_i32(cpg)    <- first
-     *          _c_K_ir = b.const_i32(kpg)    <- second
-     *          _c_M_ir = b.const_i32(M)      <- third
-     *          _always_valid = b.const_i32(1) <- fourth
-     * Emitted here (before buffer_rsrc) so the SSA sequence matches Python. */
+    /* ---- pointwise IR constants: AOT uses runtime params, not const_i32 ---- */
     if(ctx->is_pointwise)
     {
-        ctx->ir_c_C_pw = rocke_b_const_i32(b, ctx->c_C_pw);
-        ctx->ir_c_K_pw = rocke_b_const_i32(b, ctx->c_K_pw);
-        ctx->ir_c_M_pw = rocke_b_const_i32(b, ctx->c_M_pw);
+        /* Python: _c_C_ir = p_cpg, _c_K_ir = p_kpg, _c_M_ir = p_M, _always_valid = 1 */
+        ctx->ir_c_C_pw = ctx->p_cpg;
+        ctx->ir_c_K_pw = ctx->p_kpg;
+        ctx->ir_c_M_pw = ctx->p_M;
         ctx->ir_always_valid = rocke_b_const_i32(b, 1);
     }
     else
@@ -578,12 +697,28 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
         /* contig_cols = cpg: the tile's col axis is the reduction index (y, x, c)
          * and only the inner c is stride-1, so a chunk wider than cpg -- or one
          * that does not divide it -- would straddle a filter position and fetch
-         * the wrong elements with no diagnostic. Mirrors the Python call. */
+         * the wrong elements with no diagnostic. Mirrors the Python call.
+         * max_dwords = the arch's own buffer_load_lds width cap (CDNA3 moves
+         * only a dword per lane; the b96/b128 forms are CDNA4). Over-wide is
+         * not diagnosed -- the backend aborts the process -- so the cap is
+         * applied here, exactly as async_tile_loaders(spec, arch) does. */
         const int cpg = rocke_conv_problem_cpg(&spec->problem);
-        rocke_status_t sa = rocke_async_tile_loader_from_tile(
-            ctx->block_m, ctx->block_k, ctx->threads, spec->wave_size, 4, cpg, &ctx->a_loader);
-        rocke_status_t sb = rocke_async_tile_loader_from_tile(
-            ctx->block_n, ctx->block_k, ctx->threads, spec->wave_size, 4, cpg, &ctx->b_loader);
+        const int max_dwords
+            = rocke_archtarget_async_lds_max_dwords(rocke_archtarget_from_gfx(ctx->arch));
+        rocke_status_t sa = rocke_async_tile_loader_from_tile(ctx->block_m,
+                                                              ctx->block_k,
+                                                              ctx->threads,
+                                                              spec->wave_size,
+                                                              max_dwords,
+                                                              cpg,
+                                                              &ctx->a_loader);
+        rocke_status_t sb = rocke_async_tile_loader_from_tile(ctx->block_n,
+                                                              ctx->block_k,
+                                                              ctx->threads,
+                                                              spec->wave_size,
+                                                              max_dwords,
+                                                              cpg,
+                                                              &ctx->b_loader);
         if(sa != ROCKE_OK || sb != ROCKE_OK)
         {
             rocke_i_set_err(b, ROCKE_ERR_VALUE, "conv: async tile loader from_tile failed");
@@ -597,7 +732,7 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
          * (load-wave-relative thread index is load_tid = tid - block_size). */
         int load_threads = spec->num_load_waves * spec->wave_size;
         int load_vec_a = spec->has_vector_size_a ? spec->vector_size_a : ctx->load_vec;
-        int load_vec_b = spec->has_vector_size_b ? spec->vector_size_b : ctx->load_vec;
+        int load_vec_b = spec->has_vector_size_b ? spec->vector_size_b : ctx->load_vec_b;
         rocke_status_t sa = rocke_coalesced_tile_loader_from_tile(
             ctx->block_m, ctx->block_k, load_threads, load_vec_a, true, &ctx->a_wavelet_loader);
         rocke_status_t sb = rocke_coalesced_tile_loader_from_tile(
@@ -611,6 +746,7 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
 
         /* Wavelet local state: load_tid, is_math, K_iters, epi_barriers. */
         ctx->wavelet_n_math_warps = spec->warp_m * spec->warp_n;
+        ctx->wavelet_math_block_size = rocke_implicit_gemm_conv_spec_block_size(spec);
         ctx->wavelet_K_iters
             = (rocke_conv_problem_k_gemm(ctx->p) + ctx->block_k - 1) / ctx->block_k;
         /* epi_barriers = (no_alias ? 0 : war_barriers) + 1 (RAW), war_barriers=2 for wavelet.
@@ -625,14 +761,12 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
         else
             ctx->wavelet_epi_barriers = 0;
 
-        rocke_value_t* c_nmath = rocke_b_const_i32(b, ctx->wavelet_n_math_warps);
-        /* warp_id is tid/wave_size — a VGPR. Materialise as a scalar via readfirstlane
-         * so the branch lowers to s_cmp + s_cbranch (uniform), not v_cmpx (exec-masked),
-         * which would make barrier placement inside the branch accidentally legal. */
-        rocke_value_t* warp_id_s = rocke_b_readfirstlane(b, ctx->warp_id);
-        ctx->wavelet_is_math = rocke_b_cmp_lt(b, warp_id_s, c_nmath);
-        ctx->wavelet_load_tid = rocke_b_sub(
-            b, ctx->tid, rocke_b_const_i32(b, rocke_implicit_gemm_conv_spec_block_size(spec)));
+        /* is_math / load_tid are emitted by the wavelet driver itself, not
+         * here: Python computes them at the top of emit_wavelet_kloop_dynamic,
+         * which runs *after* the D descriptor is built, so emitting them in
+         * the prologue would shift every SSA id in between. */
+        ctx->wavelet_is_math = NULL;
+        ctx->wavelet_load_tid = NULL;
     }
     else
     {
@@ -640,7 +774,7 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
          *   load_vec_a = spec.vector_size_a if not None else _auto_load_vec
          *   load_vec_b = spec.vector_size_b if not None else _auto_load_vec */
         int load_vec_a = spec->has_vector_size_a ? spec->vector_size_a : ctx->load_vec;
-        int load_vec_b = spec->has_vector_size_b ? spec->vector_size_b : ctx->load_vec;
+        int load_vec_b = spec->has_vector_size_b ? spec->vector_size_b : ctx->load_vec_b;
         rocke_status_t sa = rocke_coalesced_tile_loader_from_tile(
             ctx->block_m, ctx->block_k, ctx->threads, load_vec_a, true, &ctx->a_sync_loader);
         rocke_status_t sb = rocke_coalesced_tile_loader_from_tile(
@@ -651,6 +785,24 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
             return false;
         }
         ctx->have_sync_loaders = true;
+    }
+
+    /* ---- A/B addressing split (Python: the `if split_ab:` block) ----
+     * Loop-invariant constants the split descriptors read; every operand is
+     * bound to a temporary in Python's left-to-right order. */
+    ctx->split_ab = !ctx->is_pointwise && !spec->problem.is_3d
+                    && !(overrides != NULL && overrides->a_mhw_index_fn != NULL);
+    if(ctx->split_ab)
+    {
+        ctx->split_neg_pH = rocke_b_sub(b, ctx->c0, ctx->p_pH);
+        ctx->split_neg_pW = rocke_b_sub(b, ctx->c0, ctx->p_pW);
+        ctx->split_ystep = rocke_b_mul(b, ctx->p_dH, ctx->p_A_stride_hi);
+        ctx->split_xstep = rocke_b_mul(b, ctx->p_dW, ctx->p_A_stride_wi);
+        /* Merged: the A channel slab is the merged group's, Gm channels wide. */
+        ctx->split_group_base
+            = ctx->group_idx != NULL
+                  ? rocke_b_mul(b, ctx->group_idx, ctx->merged ? ctx->c_gm : ctx->p_cpg)
+                  : NULL;
     }
 
     /* ---- schedule policy + prologue ---- (1029-1032) */
@@ -711,25 +863,56 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv(rocke_ir_builder_t* b,
         return NULL;
     }
 
+    /* ---- D descriptor (before the K-loop) ----
+     *
+     * Python builds the D descriptor and the d_addr closure ahead of the
+     * K-loop so the wavelet driver, whose epilogue is emitted from inside the
+     * math-wave region, shares the straight-line drivers' store code. The
+     * descriptor's stride constant is therefore emitted before the loop, and
+     * building it lazily in the epilogue would shift every SSA id in between.
+     */
+    if(ctx.is_pointwise)
+    {
+        /* Python: _always_valid_d = b.const_i32(1), used as the pointwise
+         * d_addr's validity. */
+        ctx.d_k_out_group_base = NULL;
+        ctx.ir_always_valid_d = rocke_b_const_i32(b, 1);
+    }
+    else
+    {
+        ctx.D_desc = (struct rocke_tensor_descriptor*)rocke_conv_make_d_descriptor_dynamic(b, &ctx);
+        /* Grouped conv: the per-warp N coord is within-group (n < kpg);
+         * recover the absolute NHWK filter k_out = g*kpg + n.
+         * Python binds block_id_z() before the multiply, so pin the order. */
+        if(ctx.grouped)
+        {
+            /* Merged: g is the merged group and the merged kpg is Gm, so the
+             * same expression yields k_out = merged_group*Gm + g_n. */
+            rocke_value_t* bid_z = rocke_b_block_id_z(b);
+            ctx.d_k_out_group_base = rocke_b_mul(b, bid_z, ctx.merged ? ctx.c_gm : ctx.p_kpg);
+        }
+        else
+        {
+            ctx.d_k_out_group_base = NULL;
+        }
+        ctx.ir_always_valid_d = NULL;
+    }
+
     /* ---- K-loop driver selection (1276-1347) ----
      *
      * The driver is chosen by K-loop *structure*, not by pipeline name.
-     * "mem", "compv3", and "compv4" all use the same scf.for_iter shape
-     * (load->sync->mfma->sync per tile) and therefore share kloop_simple.
-     * Their behavioural differences (scheduling hints, double-buffering) are
-     * encoded in ctx->schedule and ctx->double_buffer, which are consulted
-     * inside emit_mfma_phase and the LDS allocation respectively -- no
-     * K-loop structural change is needed for those pipelines.
+     * "mem", "compv3", "compv4", and "basic" all use the same scf.for_iter
+     * shape (load->sync->mfma->sync per tile) and therefore share kloop_simple.
+     * Their behavioural differences (scheduling hints) are encoded in
+     * ctx->schedule, which is consulted inside emit_mfma_phase -- no K-loop
+     * structural change is needed for those pipelines.
      *
      * A new driver is only justified when the K-loop itself has a different
      * shape that cannot be expressed inside kloop_simple:
      *
-     *   unroll_k     -> kloop_unroll  (Python-unrolled prologue+ping-pong;
-     *                                  2 LDS buffers; no scf.for_iter)
-     *   pipeline="basic"-> kloop_basic (split global_read/lds_write;
-     *                                   single LDS buffer; no scf.for_iter;
-     *                                   VMEM/compute overlap without double-buf)
-     *   else no async -> kloop_simple (scf.for_iter; mem/compv3/compv4 all
+     *   unroll_k     -> kloop_unroll  (2x-unrolled ping-pong body over two
+     *                                  LDS buffers)
+     *   else no async -> kloop_simple (scf.for_iter; mem/compv3/compv4/basic
      *                                  share this; pipeline string only
      *                                  affects schedule hints inside mfma)
      *   else (async)  -> kloop_async  (SoftwarePipeline.run_ping_pong over
@@ -737,10 +920,6 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv(rocke_ir_builder_t* b,
     if(spec->unroll_k)
     {
         rocke_conv_emit_kloop_unroll(&ctx);
-    }
-    else if(spec->pipeline != NULL && strcmp(spec->pipeline, "basic") == 0)
-    {
-        rocke_conv_emit_kloop_basic(&ctx);
     }
     else if(spec->pipeline != NULL && strcmp(spec->pipeline, "wavelet") == 0)
     {

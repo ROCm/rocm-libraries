@@ -376,6 +376,7 @@ namespace rocwmma
                         CHECK_HIP_ERROR(hipGetLastError());
                         CHECK_HIP_ERROR(hipEventRecord(syncEvent));
                         CHECK_HIP_ERROR(hipEventSynchronize(syncEvent));
+                        CHECK_HIP_ERROR(hipEventDestroy(syncEvent));
 
                         hipExtLaunchKernelGGL((this->kernelBwdImpl()),
                                               (this->gridDim()),

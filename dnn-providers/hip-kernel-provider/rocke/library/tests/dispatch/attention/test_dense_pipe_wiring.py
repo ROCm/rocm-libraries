@@ -201,6 +201,14 @@ class TestDensePipeRouting(unittest.TestCase):
             )
         self.assertEqual(r.candidate.spec_id, "gfx942_dense_pipe")
 
+    def test_bottom_right_preserves_dense_pipe_selection(self):
+        with _Gfx942Arch():
+            result = dispatch_attention(
+                _gfx942_fp16(seqlen_k=1024, mask_type=2, num_cus=120)
+            )
+        self.assertEqual(result.candidate.spec_id, "gfx942_dense_pipe")
+        self.assertEqual(result.spec.path, "2d")
+
     def test_gqa_short_context_does_not_route_dense_pipe(self):
         # GQA (nhead_q > nhead_k) short-context -> narrow path still wins;
         # dense_pipe support() must reject because fp16-flash is disabled for

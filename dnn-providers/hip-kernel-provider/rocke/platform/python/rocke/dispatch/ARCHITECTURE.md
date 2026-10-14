@@ -1,10 +1,14 @@
 # Kernel Family Registration and Dispatch Architecture
 
-Status: design proposal. Describes the target model for registering kernel
-families per architecture and routing a problem to one kernel — or to a ranked
-list of kernels — through a declared, testable filtering pipeline.
+Status: implemented through the registry, capability, binding, identity and
+tuning layers (sections 5–11 and 14); section 12 records the migration and
+section 13 what is still open. Describes the model for registering kernel
+families per architecture and routing a problem to one kernel — or to every
+eligible kernel and configuration — through a declared, testable filtering
+pipeline.
 
 Companion documents: `README.md` (current dispatcher usage),
+`tuning/` (the shared machinery for tuned candidates, section 14),
 `library/dispatch/AGENTS.md` (attention-family specifics).
 
 ---
@@ -145,7 +149,7 @@ flowchart TD
     subgraph S4["4 · Consume — one registry, three lanes"]
         direction LR
         C1["client API<br/>dispatch(req) → 1 kernel"]
-        C2["benchmark · autotune<br/>dispatch_all + sweep_space + bind"]
+        C2["benchmark · autotune<br/>dispatch_all + bind"]
         C3["CI<br/>by-id replay · coverage"]
     end
 
@@ -222,9 +226,10 @@ It is also the stage section 2 found leaking, and the leak is worth naming
 against the model just described: `library/kernels/gfx1250/wmma_attention_fwd.py`
 clears stages 1 and 2 — a finished spec-driven builder, a
 `wmma_attention_fwd_verify.py` harness, and a written-up case study — and still
-reaches no client, because `ATTENTION_REGISTRY` holds six candidates and not one
-of them is gfx1250. A kernel that stops at stage 2 is reachable only by running
-its verify script by hand. Section 9.1 shows the registration that closes it.
+reached no client, because `ATTENTION_REGISTRY` then held six candidates and not
+one of them was gfx1250. A kernel that stops at stage 2 is reachable only by
+running its verify script by hand. Section 9.1 shows the registration that
+closed it.
 
 ### 3.4 Consume
 
@@ -239,8 +244,9 @@ replacement is the hipDNN Universal Kernel Descriptor connector
 connector is the planned consumer of this lane, which is why single-kernel
 selection has to stay reproducible from a request alone.
 - **Benchmark and autotune** — `dispatch_*_all(req)` returns every eligible
-kernel, `sweep_space(req)` expands each into its knob variants, and `bind()`
-makes them launchable by one generic harness (section 7.5).
+spec (opt-in candidates included, each candidate's `sweep_space` already
+expanded), and `bind()` makes them launchable by one generic harness
+(section 7.5).
 - **CI** — by-identifier replay and coverage queries (sections 7.3 and 7.4)
 assert that what was registered is still selectable and still byte-identical.
 
@@ -262,6 +268,10 @@ in stage 3.
 | **Spec**       | The knobs handed to a builder. Must be the builder's actual input type.                                                                               |
 | **Binding**    | Allocation, argument packing, and reference check for one (request, spec) pair. What makes a selected kernel runnable.                                |
 | **KernelId**   | Stable identity of a selected (candidate, spec) pair. Resolvable back to the candidate.                                                               |
+| **Variant**    | One registered geometry of a tuned kernel (a tile, a codepath). A tuned candidate is one variant. |
+| **Knob space** | The fields a variant's configuration may vary, declared as `KnobAxis` data and walked by `rocke.dispatch.tuning`. |
+| **Tuned spec** | A variant plus a canonical knob dict. Carries `tuning_id` / `config_key` (the configuration, problem-independent) and `identity()` (the compiled kernel). |
+| **Route / execution registry** | A family may keep routing labels (no builder) apart from executable candidates; production selects from the first, sweeps enumerate the second. |
 
 
 The critical invariant: **the spec type a candidate produces is the argument
@@ -606,12 +616,22 @@ class KernelCandidate:
     grid: Callable[[Spec, Request], tuple[int, int, int]]
     block: Callable[[Spec], tuple[int, int, int]]
     signature: Callable[[Spec], Sequence[dict]]
-    sweep_space: Callable[[Request], Sequence[Spec]]  # tuning variants
+    sweep_space: Callable[[Request], Iterable[Spec]]  # configurations at the sweep level
+    sample_space: Callable[[Request, int, int], Iterable[Spec]] | None = None
+                                                      # n random draws from the full space
+    opt_in: bool = False                              # never selected under algorithm="auto"
 
     # --- execution (see 7.5) ---
     bind: Callable[[DispatchResult, bool], ProblemBinding] | None = None
     bind_torch: Callable[..., ProblemBinding] | None = None   # optional
 ```
+
+A candidate with more than one configuration per request is not written by
+hand: `rocke.dispatch.tuning.make_tuned_candidate` fills `_supports`,
+`select_spec`, `sweep_space` and `sample_space` from a `KnobSpace`, so every
+tuned candidate admits, pins, sweeps and names its specs the same way
+(sections 11.1 and 14). A candidate with one configuration keeps
+`sweep_space=lambda req: (select(req),)`.
 
 Three changes from today. `capability` makes coverage introspectable. `build`
 closes the loop from dispatch to codegen for every family rather than for GEMM
@@ -683,7 +703,7 @@ The concrete blockers, which are also the backfill order:
 | `conv_implicit_gemm` | 3 | `signature` is empty, so there is nothing to pack |
 | `norm2d` | 30 | same |
 | `moe_fused_mega` | 2 | same, plus `grid` is `(0, 0, 0)` (runtime `num_m_blocks`) |
-| attention (library) | 6 | geometry deferred by design; needs phase 6 |
+| attention path labels (library) | 5 | route-only by design until phase 6; every executable attention candidate (dense, unified tuning, WMMA) is on a separate execution registry that requires `build` and `bind_torch` |
 
 So the sequence is: declare the args signature, then write the binding, then
 flip `require_binding`. A family that has flipped it cannot silently regress,
@@ -877,30 +897,48 @@ for result in dispatch_attention_all(req):
     ...time it...
 ```
 
-Same filters, no ranking collapse: returns one `DispatchResult` per eligible
-candidate in ranked order. This is the correct primitive for a sweep lane —
-every entry is independently buildable and launchable, so timing them compares
-real kernels rather than re-timing one kernel under several names.
-
-For within-candidate tuning, expand `sweep_space`:
+Every family exposes the same entry points, all backed by
+`CandidateRegistry.iter_combos` / `sweep_space` / `iter_dispatch_all`:
 
 ```python
-def dispatch_attention_sweep(req):
-    for cand in ATTENTION_REGISTRY.supported(req):
-        for spec in cand.sweep_space(req):     # e.g. num_warps x waves_per_eu
-            yield cand, spec
+# Attention's route registry holds path labels that are not buildable;
+# sweeps use its execution registry.
+ATTENTION_EXECUTION_REGISTRY.iter_combos(req, sample=16, seed=0)  # (candidate, spec)
+ATTENTION_EXECUTION_REGISTRY.sweep_space(req)                     # deduped specs
+ATTENTION_EXECUTION_REGISTRY.iter_dispatch_all(req, kernel_id=_kernel_id)
 ```
 
-Two axes, deliberately separate: `dispatch_all` varies the kernel,
-`sweep_space` varies the knobs within one kernel. Section 7.5 completes the
-picture with the launch side — how a harness turns these candidates into timed,
-verified measurements.
+Family wrappers (`dispatch_gemm_fp16_all`, `kda_sweep_space`,
+`registered_moe_combos`, `iter_dispatch_attention_all`, …) keep the
+request-error short-circuit and any family-specific spec key.
+
+This is **not** `supported(req)`. Production `select` / `dispatch_*` still
+filter with `algorithm='auto'` and never see opt-in candidates. The sweep
+walks the full registry, probes each candidate by pinning its own
+`algorithm` / `spec_id`, and expands `candidate.sweep_space` -- or, with
+`sample > 0`, draws that many specs through `candidate.sample_space`. That is
+how dense variants, unified tuning geometries, and KDA split-path halves
+become visible to a bench without displacing auto.
+
+Tuned candidates read the sweep level (`configure_sweep("production")`, the
+curated set, or `"full"`, the whole pruned knob space) when the stream is
+created. Each result's stored request is pinned to its spec
+(`core.pin_to_spec`): for a tuned spec that includes its `tuning_id` and
+knobs, so `dispatch_*(result.request)` reselects exactly what ran and
+`request_hash` tells two configurations of one candidate apart. A spec with no
+`tuning_id` resets them to `"auto"` / `()`, so a stale pin on the input request
+is not carried along, and knobs that do not normalize raise rather than being
+dropped. A negative sample count is refused (`sample_count`); 0 walks the
+whole stream.
+
+Section 7.5 completes the picture with the launch side — how a harness turns
+these candidates into timed, verified measurements.
 
 ### 7.3 By identifier — replay and pinning
 
 ```python
 result = dispatch_attention_by_id(req, "attention_gfx1250_wmma")
-result = ATTENTION_REGISTRY.resolve(kernel_id)
+result = ATTENTION_EXECUTION_REGISTRY.resolve(kernel_id)
 ```
 
 Requires the registry additions:
@@ -926,13 +964,14 @@ def resolve(self, kernel_id: KernelId) -> KernelCandidate:
 
 The ABI check is what makes a persisted tuning result safe to replay: a cached
 `KernelId` from an older build fails loudly instead of silently binding to a
-changed kernel.
+changed kernel. For a tuned spec the candidate is only half the replay; the
+configuration is `(tuning_id, knobs)`, replayed as described in section 11.1.
 
 ### 7.4 Coverage query — no request needed
 
 ```python
-ATTENTION_REGISTRY.for_arch("gfx1250")   # -> candidates declaring gfx1250
-ATTENTION_REGISTRY.coverage()            # -> serializable manifest
+ATTENTION_EXECUTION_REGISTRY.for_arch("gfx1250")   # buildable candidates
+ATTENTION_EXECUTION_REGISTRY.coverage()            # serializable manifest
 ```
 
 Pure `Capability` reads. This is what a declarative capability buys, and it is
@@ -1043,38 +1082,39 @@ That is what keeps `dispatch/` free of a HIP import and lets a binding be built
 and asserted on a machine with no GPU, which is where most of its tests run. It
 is also, not coincidentally, the shape the existing adapters already use.
 
-A family-agnostic sweep is then the whole harness:
+A family-agnostic sweep is then the whole harness. `dispatch_*_all` already
+probes opt-in candidates and expands each candidate's `sweep_space`, so the
+loop is one result per concrete spec — do not nest another `sweep_space` walk.
 
 ```python
 def sweep(req, *, warmup=5, iters=100):
     rt = Runtime()
-    for result in dispatch_attention_all(req):          # every eligible kernel
+    for result in dispatch_attention_all(req):          # every eligible spec
         cand, spec = result.candidate, result.spec
-        for tuned in cand.sweep_space(req):             # knobs within the kernel
-            art = compile_kernel(cand.build(tuned, req.arch), arch=req.arch)
-            mod = rt.load_module(art.hsaco)
-            fn = mod.get_function(art.kernel_name)
+        art = compile_kernel(cand.build(spec, req.arch), arch=req.arch)
+        mod = rt.load_module(art.hsaco)
+        fn = mod.get_function(art.kernel_name)
 
-            b = cand.bind(req, tuned)
-            args, ptrs = b.make_args(rt)
-            ms = time_launches(
-                lambda: rt.launch(fn, cand.grid(tuned, req), cand.block(tuned), args),
-                warmup=warmup, iters=iters,
-            )
-            max_abs, bad, total = b.check(rt, ptrs) if b.check else (0.0, 0, 0)
+        b = cand.bind(result, verify=True)
+        args, ptrs = b.make_args(rt)
+        ms = time_launches(
+            lambda: rt.launch(fn, result.grid, result.block, args),
+            warmup=warmup, iters=iters,
+        )
+        max_abs, bad, total = b.check(rt, ptrs)
 
-            yield SweepRow(
-                kernel_id=result.kernel_id,
-                compile_key=result.kernel_id.compile_key,
-                ms=ms,
-                tflops=b.flop / 1e9 / ms,
-                gbps=b.bytes_moved / 1e6 / ms,
-                max_abs_diff=max_abs,
-                ok=(bad == 0),
-            )
-            for p in ptrs:
-                rt.free(p)
-            mod.unload()
+        yield SweepRow(
+            kernel_id=result.kernel_id,
+            compile_key=result.kernel_id.compile_key,
+            ms=ms,
+            tflops=b.flop / 1e9 / ms,
+            gbps=b.bytes_moved / 1e6 / ms,
+            max_abs_diff=max_abs,
+            ok=(bad == 0),
+        )
+        for p in ptrs:
+            rt.free(p)
+        mod.unload()
 ```
 
 Three properties worth noting. Every row is keyed by `kernel_id`, so a measured
@@ -1083,6 +1123,11 @@ number maps back to exactly one candidate and spec — the thing
 travels with timing, so a fast-but-wrong kernel cannot win a sweep. And because
 `compile_key` is spec-derived (section 11), repeat shapes that select the same
 spec hit the compile cache instead of rebuilding.
+
+For a tuned spec the row also records `tuning_id` and the canonical knobs,
+which is all a later run needs to rebuild that spec (section 11.1).
+Attention's combo sweep runs each configuration in an isolated child process
+and hands it exactly those two values, not a pickled spec.
 
 #### Substrate: numpy + HIP primary, torch second
 
@@ -1178,46 +1223,64 @@ platform and library trees gets a lane in each.
 library/dispatch/                         # library-owned kernels
   __init__.py
   attention/
-    __init__.py        # request type, registry assembly, dispatch entry points
-    common.py          # shared request validation, problem adapter, features
-    generic.py         # multi-arch unified_2d / unified_3d (explicit arch list)
-    gfx942.py          # dense_pipe, tiled_2d/3d specializations
-    gfx950.py          # d256 prefill, attention_dense, ...
-    gfx1250.py         # wmma_attention_fwd, tiled_2d/3d specializations
-  gemm/  conv/  moe/  norm/               # when library gains arch kernels here
+    __init__.py        # registry assembly, dispatch / sweep entry points
+    common.py          # request, AttentionTuningSpec, shared gates
+    generic.py         # multi-arch unified_2d / unified_3d path labels, d256_decode
+    gfx942_dense.py    # attention_dense (persistence and tile are knobs)
+    gfx942_unified.py  # dense_pipe, unified tuning catalog
+    gfx950_dense.py    # attention_dense_grid / attention_dense_persist (+ wide DMA)
+    gfx950_unified.py  # d256 prefill, unified tuning catalog
+    gfx1250.py         # wmma_attention_fwd
+    axes.py            # attention knob axes and production stacks (data)
+    dense_rules.py     # DenseSpace: dense rules as KnobSpace hooks
+    unified_rules.py   # UnifiedSpace: unified rules as KnobSpace hooks
+    candidate.py       # make_dense_candidate / make_tuning_candidate
+    tuning_specs.py    # policy-free explicit kernel-spec construction
+    bindings.py        # Torch bindings; grid and block read from the spec
+  kda/  gdn/                              # per-arch lanes for their kernels
+  grouped_convolution.py
 
 platform/python/rocke/dispatch/           # platform-owned kernels
-  core.py
+  core.py              # request / candidate / registry / result / identity
+  tuning/              # shared machinery for tuned candidates (section 14)
+    axes.py  walk.py  identity.py  space.py  candidate.py  spec.py  testing.py
   families/
-    conv.py  moe.py  norm.py              # cohort-parameterized, no lane earned
+    moe.py  norm.py                       # cohort-parameterized, no lane earned
   gemm/
-    common.py  fp16_rcr.py  bf16_rcr.py   # cohort-parameterized (universal GEMM)
+    common.py  support.py  binding.py
+    fp16_rcr.py  bf16_rcr.py              # cohort-parameterized (universal GEMM)
     gfx1151.py  gfx1201.py  gfx1250.py    # PLANNED: each instances/gfx*/wmma_gemm
 ```
 
-Everything above exists today except the `gfx<NNNN>.py` lanes, which appear only
-under `attention/`; the rest are where a lane goes when the rule says one is
-due. A platform lane registers a
-platform builder — it does not move kernels into `library/`, and library dispatch
-does not reach across into `platform/instances/`.
+Everything above exists today except the planned GEMM lanes. The per-arch
+`gfx<NNNN>.py` lanes appear under `attention/`, `kda/` and `gdn/`; elsewhere
+they are where a lane goes when the rule says one is due. A platform lane
+registers a platform builder — it does not move kernels into `library/`, and
+library dispatch does not reach across into `platform/instances/`.
+`library/` imports `rocke.dispatch` (core and tuning); the platform never
+imports the library.
 
 Registration is explicit, never an import side effect:
 
 ```python
 # library/dispatch/attention/gfx1250.py
-def register(registry: CandidateRegistry) -> None:
-    registry.register(_make_wmma_fwd_candidate())
-    registry.register(_make_tiled_2d_candidate())
+def register(route: CandidateRegistry, execution: CandidateRegistry) -> None:
+    route.register(_make_wmma_fwd_candidate())
+    execution.register(_make_wmma_fwd_candidate())
 ```
 
 ```python
 # library/dispatch/attention/__init__.py
-from . import generic, gfx942, gfx950, gfx1250
+from . import generic, gfx942_dense, gfx942_unified, gfx950_dense, gfx950_unified, gfx1250
 
-ATTENTION_REGISTRY = CandidateRegistry("attention_unified")
-for _module in (generic, gfx942, gfx950, gfx1250):
-    _module.register(ATTENTION_REGISTRY)
+for _module in (generic, gfx942_dense, gfx942_unified, gfx950_dense, gfx950_unified, gfx1250):
+    _module.register(ATTENTION_ROUTE_REGISTRY, ATTENTION_EXECUTION_REGISTRY)
 ```
+
+Attention keeps two registries: the route registry that production dispatch
+selects from (path labels included), and the execution registry that sweeps
+enumerate (every candidate there has `build` and `bind_torch`). Each module
+decides which of its candidates go on which.
 
 Explicit registration means the registry contents are a readable list, tests can
 build a registry with a subset of arch modules, and there is no import-order
@@ -1228,7 +1291,8 @@ dependence.
 1. Confirm the family has earned a lane at all: does this target need a builder
    the family does not already have? If not, extend the cohort tuple instead and
    stop here. If so, create `<tree>/dispatch/<family>/gfx<NNNN>.py` with a
-   `register(registry)`, where `<tree>` is whichever of `library/` or
+   `register(registry)` (or `register(route, execution)` in a family that keeps
+   two registries), where `<tree>` is whichever of `library/` or
    `platform/python/rocke/` owns the kernel.
 2. Confirm the arch exists in `core/arch/data/arch_specs.json`; add it if not.
 3. Declare each candidate's `Capability` with explicit `arches=("gfx<NNNN>",)`.
@@ -1347,144 +1411,125 @@ carrying that atom. `arches=("gfx1250",)` is what states the kernel was *built
 and tuned* for gfx1250, which is a different claim from "the hardware could run
 it."
 
-### 9.2 A heuristic-tuned kernel (gfx942 tiled 2D)
+### 9.2 A tuned kernel (unified tiled attention, gfx942 / gfx950)
 
-gfx942 is the more interesting case, because its spec carries tuning knobs that
-are currently chosen by heuristics living outside the dispatcher
-(`_select_2d_num_warps`, `_select_2d_tile_size`, `_select_2d_waves_per_eu`,
-`_select_2d_block_m_per_warp`). This is the shape a candidate takes once the
-engine owns its own tuning — the "per-engine" half of the design.
-
-`kernels/gfx942/attention_tiled_2d.py` supplies `UnifiedAttention2DTiledSpec`,
-`supports_tiled_2d(**knobs, arch=)`, and
-`build_unified_attention_2d_tiled(spec, arch=)`.
+The unified tiled kernels carry dozens of codegen knobs. Production still picks
+one point for each problem with heuristics below dispatch
+(`_select_2d_num_warps`, `_select_2d_tile_size`, …; moving them up is phase 6).
+The tuning candidates expose the rest to sweeps, one candidate per geometry
+variant, built on the section 14 template. The variant fixes codepath, tile,
+warps and backend; its space states the attention rules as `KnobSpace` hooks:
 
 ```python
-# library/dispatch/attention/gfx942.py
-"""gfx942 attention candidates (CDNA3, wave64, narrow 16x16x16 MFMA)."""
+# library/dispatch/attention/unified_rules.py
+@dataclass(frozen=True)
+class UnifiedSpace(WavesPerEuSpace):            # outer knob: waves_per_eu
+    variant: AttentionGeometryVariant = None
+    default_from_full = True
 
-from dataclasses import replace
+    def axes(self, base):                       # data, in axes.py
+        return _variant_axes(self.variant)
 
-from kernels.gfx942.attention_tiled_2d import (
-    UnifiedAttention2DTiledSpec,
-    build_unified_attention_2d_tiled,
-    supports_tiled_2d,
-)
-from rocke.dispatch.core import Capability, KernelCandidate, ShapeRange
+    def fixed(self, base):                      # the codepath's knobs
+        return _CODEPATH_KNOBS.get((self.arch, self.variant.codepath), {})
 
-ATTENTION_GFX942_ABI = "rocke-attention-gfx942/v1"
+    def refuse(self, base, knobs):              # never build known-wrong knobs
+        ...
 
-_TILED_2D_CAP = Capability(
-    arches=("gfx942",),
-    dtypes=("fp16", "bf16"),
-    shapes=(
-        ShapeRange("hdim_q", allowed=(64, 128, 256)),
-        ShapeRange("kv_block_size", allowed=(16, 32, 64)),
-    ),
-    # No fp8 K/V cache on gfx942: that path needs ds_read_tr_b8 (gfx950-only).
-    supports_features=frozenset(
-        {"causal", "gqa", "sliding_window", "sinks", "softcap", "paged_kv"}
-    ),
-)
+    def build(self, base, knobs):               # base is the request's problem
+        knobs = dict(knobs)
+        wpe = knobs.pop("waves_per_eu", None)
+        return UnifiedKernels(_explicit_2d_spec(base, self.variant, knobs, wpe))
+
+    def inert(self, base, kernel):              # a KQ pad the kernel lays out as none
+        ...
+
+    def validate(self, base, kernel):           # gfx950 2D: LDS budget, padded K vs aliased Q
+        ...
+
+    def production(self, base, axes, is_valid):  # the curated stacks
+        return _production_knob_sets(self.variant)
+
+    def wrap(self, base, kernel, knobs, key, tid):
+        return AttentionTuningSpec(..., tuning_id=tid, config_key=key, knobs=knobs)
 
 
-def _tiled_2d_spec(req) -> UnifiedAttention2DTiledSpec:
-    """Engine-owned geometry. These four knobs are the tuning surface; today
-    they live in attention_unified's _select_* heuristics."""
-    return UnifiedAttention2DTiledSpec(
-        head_size=int(req.hdim_q),
-        block_size=int(req.kv_block_size),
-        num_query_heads=int(req.nhead_q),
-        num_kv_heads=int(req.nhead_k),
-        dtype=req.dtype.lower(),
-        use_sinks=bool(req.use_sinks),
-        sliding_window=int(req.sliding_window),
-        has_softcap=bool(req.softcap),
-        num_seqs=int(req.batch),
-        num_warps=_num_warps_for(req),
-        waves_per_eu=_waves_per_eu_for(req),
+# library/dispatch/attention/candidate.py
+def make_tuning_candidate(variant):
+    return make_tuned_candidate(
+        name=variant.candidate_name,
+        family=FAMILY,
+        algorithm="unified_tuning",
+        spec_id=variant.spec_id,
+        abi_version=ATTENTION_ABI_VERSION,
+        priority=30,
+        capability=Capability(arches=(variant.arch,), ...),
+        space=unified_space(variant),
+        base=_problem,
+        precheck=lambda req: supports_native_unified_attention(
+            _problem(req), arch=variant.arch
+        ),
+        signature=signature,
+        build=build,
+        bind_torch=bind_torch,
+        grid=lambda spec, req: spec.launch_grid(_problem(req)),
     )
-
-
-def _make_tiled_2d_candidate() -> KernelCandidate:
-    def support(req):
-        spec = _tiled_2d_spec(req)
-        # The kernel's own validator is the authority on knob combinations.
-        return supports_tiled_2d(
-            head_size=spec.head_size,
-            block_size=spec.block_size,
-            dtype=spec.dtype,
-            num_queries_per_kv=spec.num_query_heads // spec.num_kv_heads,
-            use_alibi=spec.use_alibi,
-            use_qq_bias=spec.use_qq_bias,
-            use_fp8=False,
-            q_dtype=None,
-            num_warps=spec.num_warps,
-            arch=req.arch,          # request arch, NOT the running device
-        )
-
-    return KernelCandidate(
-        name="attention_gfx942_tiled_2d",
-        family="attention_unified",
-        algorithm="unified_2d",
-        spec_id="gfx942_tiled_2d",
-        abi_version=ATTENTION_GFX942_ABI,
-        priority=30,                # arch-specialized, shape-general
-        capability=_TILED_2D_CAP,
-        _supports=support,
-        select_spec=_tiled_2d_spec,
-        build=build_unified_attention_2d_tiled,
-        grid=_tiled_2d_grid,
-        block=lambda spec: (64 * spec.num_warps, 1, 1),   # wave64
-        signature=lambda spec: fmha_args_signature(),
-        sweep_space=_tiled_2d_sweep,
-    )
-
-
-def _tiled_2d_sweep(req):
-    """The knob grid the geometry heuristics currently pick one point from."""
-    base = _tiled_2d_spec(req)
-    out, seen = [], set()
-    for num_warps in (1, 2, 4):
-        for waves_per_eu in (None, 2, 3):
-            spec = replace(base, num_warps=num_warps, waves_per_eu=waves_per_eu)
-            if spec in seen:                      # frozen dataclass, hashable
-                continue
-            seen.add(spec)
-            out.append(spec)
-    return tuple(out)
 ```
 
-Two things this makes concrete. `arch=req.arch` is passed to `supports_tiled_2d`
-rather than letting the kernel resolve the device, which is the fix for the
-host-dependence in section 2. And `sweep_space` exposes the `num_warps x waves_per_eu` grid that the `_select_*` heuristics currently collapse to a
-single point — so an autotuner can search it while production keeps taking the
-heuristic's choice through `select_spec`.
+Three things this makes concrete. The arch comes from the variant and the
+request, never the running device, which is the fix for the host-dependence in
+section 2. The spec is the builder's input: `AttentionTuningSpec` owns `build`,
+`cache_key`, `launch_grid` and `launch_block`, and the runtime launches it
+without decoding anything. And the knob grid the heuristics collapse to a
+single point is fully searchable -- production stacks by default, the pruned
+product (sampled) at the `full` level -- while production traffic keeps taking
+the heuristic's choice through the route registry.
 
-### 9.3 Attention coverage once every arch module is registered
+`validate` exists because the tiled 2D validator does not model LDS: an
+over-budget spec only fails in codegen, and a padded K LDS that Q aliases
+computes wrong output. The LDS model is the pool the LLVM lowering packs
+(`_gfx950_2d_lds_bytes`, pinned to the lowered IR by a test), and `is_valid`
+applies it while walking, so the LDS-saving enabler axes that lead the axis
+order can still make a large tile legal.
 
+`WavesPerEuSpace` (`attention/waves.py`) is a thin `KnobSpace` subclass both
+attention spaces derive from. It is where `waves_per_eu` meets the generic
+outer-knob hooks: it sets `outer_knob = "waves_per_eu"` and the
+`{variant_id}_wpe{N}` stem and its prefix, so `rocke.dispatch.tuning` itself
+names no kernel field. Each space still supplies its own `outer_values`: the
+unified tables in `waves.py`, or values derived from the dense base spec's WPE.
 
-| Candidate                     | Arch                   | dtype     | Path / kernel               | Priority |
-| ----------------------------- | ---------------------- | --------- | --------------------------- | -------- |
-| `attention_gfx950_dense`      | gfx950                 | bf16/fp16 | persistent CK-1 (opt-in)    | 5        |
-| `attention_gfx942_dense_pipe` | gfx942                 | fp16      | transposed-x8 ring flash    | 10       |
-| `attention_gfx950_d256`       | gfx950                 | bf16      | 32x32 stack, FA3 interleave | 10       |
-| `attention_gfx1250_wmma`      | gfx1250                | fp16      | WMMA 16x16x32 forward       | 10       |
-| `attention_d256_decode`       | gfx942, gfx950         | bf16      | 3D split-KV decode          | 10       |
-| `attention_gfx942_tiled_2d`   | gfx942                 | fp16/bf16 | narrow-atom tiled 2D        | 30       |
-| `attention_gfx1250_tiled_2d`  | gfx1250                | fp16/bf16 | tiled 2D                    | 30       |
-| `attention_unified_2d`        | gfx90a, gfx942, gfx950 | fp16/bf16 | generic 2D tiled            | 50       |
-| `attention_unified_3d`        | gfx90a, gfx942, gfx950 | fp16/bf16 | generic 3D split-KV         | 50       |
+The dense candidates are the same shape with `DenseSpace` (whose `base` is the
+candidate's default kernel spec for the request) and `make_dense_candidate`; it
+derives from `WavesPerEuSpace` too. A dense candidate fixes only what selects
+its kernel body: on gfx950 the grid and persistent bodies are separate
+algorithms (`attention_dense_grid`, `attention_dense_persist`) with wide DMA a
+second persistent candidate, and the tile is a knob; gfx942 has one
+`attention_dense` candidate with persistence as a knob. `DenseSpace` adds two
+hooks over `KnobSpace`: `derived` recomputes problem fields that follow a knob
+(gfx950 `ragged` follows the tile), and `production` repeats the
+one-knob-at-a-time pass at each `block_m`.
 
+### 9.3 Attention coverage today
 
-The two generic candidates move from unconstrained to an explicit list of the
-three wave64 MFMA targets, and that is the fix for the misroute in section 2.
-The list is worth reading against that section's table: gfx1250 is absent even
-though it is CDNA-family, because the generic 2D kernel is a wave64 MFMA path
-and gfx1250 is wave32. A family-level gate would have re-admitted it and
-recreated the bug; an explicit list cannot, because omission is the default.
-gfx1201 is absent for the same reason, and neither arch is left unserved —
-gfx1250 has its own candidates at priorities 10 and 30.
+| Candidate | Arch | dtype | Path / kernel | Priority | Registries |
+| --- | --- | --- | --- | --- | --- |
+| `attention_gfx942_dense` | gfx942 | bf16/fp16 | standalone dense prefill; persistence and tile are knobs (opt-in) | 3 | route, execution |
+| `attention_gfx950_dense_{grid,persist,persist_widedma}` (3) | gfx950 | bf16/fp16 | grid body, persistent body, persistent + wide DMA; tile is a knob (opt-in) | 3 | route, execution |
+| `attention_gfx942_dense_pipe` | gfx942 | fp16 | transposed-x8 ring flash, 2D path | 5 | route |
+| `attention_gfx950_d256` | gfx950 | bf16 | D256 2D prefill | 5 | route |
+| `attention_d256_decode` | gfx942, gfx950 | bf16 | D256 3D split-KV decode | 5 | route |
+| `attention_gfx1250_wmma` | gfx1250 | fp16 | WMMA forward (selected only when pinned) | 5 | route, execution |
+| `attention_unified_2d` / `_3d` | every known arch | fp16/bf16 | path labels; backend chosen per device | 10 | route |
+| `attention_gfx942_u{2d,3d}_*` (75), `attention_gfx950_u{2d,3d}_*` (109) | one arch each | fp16/bf16 | unified tuning geometries (opt-in) | 30 | route, execution |
+
+The two generic candidates declare every known arch because they select a
+*path*, not a kernel: `attention_unified` picks the concrete backend downstream
+per device (section 12, phase 3, records why the earlier plan to narrow them
+was wrong). They are the named wave-size exemption in section 10. Every
+priority-3 and priority-30 candidate is opt-in: it admits a request only when
+both `algorithm` and `spec_id` name it, so `algorithm="auto"` keeps routing to
+the unified paths.
 
 ---
 
@@ -1492,7 +1537,7 @@ gfx1250 has its own candidates at priorities 10 and 30.
 
 ## 10. Testing contract
 
-Six invariants, one test module per family.
+Seven invariants, one test module per family.
 
 **Arch gate.** Every candidate rejects every architecture it does not declare.
 Parametrize over `known_arches()` and the registry — this catches a missing gate
@@ -1574,8 +1619,24 @@ spec/builder agreement: it catches an argument order that drifts from the
 kernel's `_declare_params`, which is otherwise a silent wrong-answer bug. Skip
 it when no device is visible, the way the existing runtime tests do.
 
+**Tuning contract.** Every tuned candidate keeps the contract of section
+11.1: `auto` is the first production spec; ids are unique; `(tuning_id, knobs)`,
+knobs alone, a bare production id, a display-stem change, and the stored
+dispatch request all reselect the same spec; knobs that do not reproduce the id
+are refused; default-valued knobs give the default spec; the same canonical
+knobs keep their `config_key` on another problem. One call checks
+all of it through the public candidate API:
+
+```python
+from rocke.dispatch.tuning.testing import assert_tuning_contract, representative
+
+for cand in representative(registry.candidates(), PREFIXES):
+    assert_tuning_contract(cand, SAMPLE_REQUESTS, other_requests=OTHER_SHAPES,
+                           default_knobs=..., refused_knobs=...)
+```
+
 Sample requests should be a per-family fixture covering each declared arch, so
-adding an arch module automatically extends all six invariants.
+adding an arch module automatically extends all seven invariants.
 
 ---
 
@@ -1598,6 +1659,7 @@ class KernelId:
     abi_version: str
     request_hash: str
     spec_hash: str
+    tuning_id: str = ""   # configuration identity of a tuned spec (11.1)
 
     @property
     def compile_key(self) -> str:
@@ -1619,6 +1681,121 @@ one compile. `selection_key` keys tuning records and dispatch logs, where the
 problem is precisely what you are indexing by. Today's `cache_key` is
 `selection_key` under a misleading name, and using it for compilation would
 recompile per shape.
+
+`spec_hash` hashes the spec's explicit `identity()` payload when the spec
+declares one, and every dataclass field otherwise. A wrapper spec declares one
+so its own metadata stays out: attention's `AttentionTuningSpec.identity()` is
+its field-complete kernel cache key (addressing width included), not
+`candidate_name` or the `allow_unsupported` debug switch.
+
+### 11.1 Tuned configurations: `tuning_id` and `config_key`
+
+A tuned attention spec (dense or unified) is one registered variant plus a
+**canonical knob dict**: the kernel fields set away from the variant's default
+spec, `waves_per_eu` included. `waves_per_eu` is the attention spaces' outer
+knob and shows in the stem (`library/dispatch/attention/waves.py`); the
+generic form is `{stem}@{config_key}` (section 14).
+
+```text
+tuning_id  = "{variant_id}_wpe{N}@{config_key}"
+config_key = sha256(json({v: TUNING_ID_VERSION, abi, arch, path, variant_id,
+                          knobs: sorted [[name, value], ...],
+                          defaults: fingerprint(variant defaults)}))[:16]
+```
+
+- **What the hash covers** is that explicit, versioned list, never `asdict`
+  of a spec. The defaults fingerprint covers every declared default, so adding
+  a defaulted field to a kernel spec, or changing a default, changes every id
+  of that variant and old pins are refused (see "Drift across releases"
+  below). This conservative invalidation is intentional even for a new
+  behavior-neutral field: replacement ids are validated before publication and
+  old ids are removed from the consumer's tuning store. Changing the payload
+  or the canonical-knob rules bumps
+  `TUNING_ID_VERSION` (currently 2: the defaults fingerprint was added).
+- **Problem-independent.** Problem fields (batch, lengths, heads) are not in
+  it, so one `config_key` names the same configuration on every problem the
+  variant admits. The `wpe{N}` stem is display: it shows the resolved value,
+  which a policy may pick per problem. `spec_hash` stays problem-bound.
+- **Runtime specializations are not configurations.** i32/i64 paged-KV
+  addressing is refreshed at bind time from the real cache size; it changes
+  `identity()` (a different binary) and never `tuning_id`.
+- **One kernel, one id.** Every entry point -- production stack, full walk,
+  sampler, knob pin, id replay -- goes through one canonicalize step,
+  `KnobSpace.canonicalize` in `rocke.dispatch.tuning` (section 14). Knobs that compile
+  to the default are dropped: values equal to the default spec, restated
+  policies, knobs the body does not read for that spec, knobs out of scope for
+  this problem, knobs only another codepath emits, gated sub-knobs with the
+  gate off, a gfx950 KQ LDS pad the kernel lays out as none (double-buffered K,
+  native-FP8 K, misaligned slabs). Knobs that are illegal are refused with a
+  reason: `KNOWN_WRONG_KNOBS`, fields that are not knobs of the variant,
+  changing a knob the variant's codepath fixes, anything the kernel validator
+  rejects, and on the gfx950 2D path a spec over the LDS budget or a padded K
+  that Q aliases. Values are first converted to the type their axis declares
+  (`True` / `1`, `2` / `2.0` name one configuration, since they hash alike);
+  a value with no lossless conversion is refused.
+- **Per-problem defaults are recorded.** Knobs are overrides of the
+  variant's default spec. Where that default is resolved per problem (gfx942
+  dense picks persistence from the work size and `waves_per_eu` from the
+  dtype; gfx950 wide DMA starts at 128×64 where 256×64 is ragged), the field
+  is always recorded with its effective value, so the same knobs give the same
+  `config_key` on every problem.
+- **Replay** is `(request, spec_id, tuning_id, knobs)`. The request carries
+  `tuning_knobs`, validated when the request is built (`normalize_knobs`: a
+  non-scalar value is a `TypeError` naming the knob). The candidate rebuilds
+  the spec from the knobs -- even an empty set, so the default configuration
+  replays directly -- and compares its **`config_key`** with the id's suffix;
+  the display stem is never compared. A bare id with no knobs resolves only
+  within the production set: dispatch never searches the full space, so a
+  full-space id must travel with its knobs. Benchmark rows record `tuning_id`,
+  `knobs` and the dispatch-time `spec_hash`; the isolated benchmark child
+  replays from them rather than from a pickled spec.
+- **A stale pin raises; it never falls back.** When a pinned request cannot be
+  honored -- its `spec_id` was removed from the catalog, its id is unknown, or
+  its knobs no longer reproduce its `config_key` -- `CandidateRegistry.select`
+  raises `PinRefused` (a `ValueError`) carrying the pinned candidate's reason
+  (`refusals` is empty when no candidate has that `spec_id`). No other kernel
+  or configuration is substituted; the caller chooses to re-sweep or to retry
+  with `algorithm="auto"`.
+- **Drift across releases is refused, not silent.** Knobs are a delta against
+  in-tree defaults: base-spec constants (a CU-count default, the shipped WPE),
+  layout pads, kernel dataclass defaults, a codepath's fixed knobs. Each
+  variant's `KnobSpace.defaults` reports those values (never problem fields or
+  recorded fields), and their fingerprint is part of `config_key`. If a
+  default changes, the same knobs give a new key, the stored id no longer
+  matches, and the pin is refused with both the stored id and the newly
+  canonicalized id plus an instruction to re-sweep/revalidate. The replacement
+  is never selected automatically. Anything that changes what a knob *means* without
+  changing a declared default -- builder logic, a policy function -- must bump
+  `TUNING_ID_VERSION`, which changes every key.
+- **What a long-lived cache should store and check** (hipDNN): `spec_id`,
+  `tuning_id`, `knobs`, and `spec_hash`. On replay, dispatch the pinned
+  request; `PinRefused` means re-sweep or fall back to auto. Then compare the
+  result's `kernel_id.spec_hash` with the stored one and treat a mismatch as a
+  cache miss. `config_key` catches declared-default drift inside dispatch;
+  `spec_hash` is the end-to-end check that the compiled kernel is the one that
+  was measured.
+- **Dispatch results pin the exact spec.** A result's stored request carries
+  the tuning id and knobs of the spec that ran, so `request_hash` tells two
+  configurations of one candidate apart and the stored request reselects the
+  same spec; an untuned spec resets them to `"auto"` / `()`. The explanation
+  lists `tuning_id` and `spec_hash`.
+
+### 11.2 Planned consumer: data-driven selection
+
+Nothing reads sweep results back yet: opt-in candidates are never picked
+automatically and `priority_ranker` is static. The planned consumer is a
+persisted table checked before the ranker:
+
+```text
+(arch, op, shape bucket) -> (spec_id, config_key, knobs)
+```
+
+A row is portable across the shapes in its bucket because `config_key` is
+problem-independent; at dispatch the row's knobs pin the request, the
+candidate canonicalizes them for the actual problem, and a row the candidate
+refuses (or whose knobs no longer reproduce `config_key` after a version bump)
+falls through to the static order. Heuristics that still live in kernels, such
+as gfx942 `_tuned_waves_per_eu`, become rows of that table rather than code.
 
 ---
 
@@ -1802,7 +1979,7 @@ tuned `compv4` + `cshuffle` candidate at twice the tile. The test pins both the
 inequality and the specific knobs that differ.
 
 **Registering a kernel makes it reachable; it does not make it the default.**
-Both attention additions are opt-in, matching the `attention_gfx950_dense`
+Both attention additions are opt-in, matching the gfx950 dense
 precedent. gfx1250 fp16 prefill still routes to `unified_2d`, which is the path
 its benchmark exercises — flipping that on the strength of a registration would
 swap a measured path for an unmeasured one. Conv gfx1250 is the opposite case
@@ -1821,11 +1998,11 @@ means each candidate's `select_spec` returns the builder's actual spec type and
 `AttentionSpec` disappears.
 
 Two constraints shape how this is done. First, **target arch must become a
-request field.** `_resolve_attention_arch()`, and its C++counterpart++
-`rocke_unified_attn_set_resolved_arch`++, read the running device; until selection
-keys off++ `req.arch`++, offline and cross-arch dispatch stay impossible and the
+request field.** `_resolve_attention_arch()`, and its C++ counterpart
+`rocke_unified_attn_set_resolved_arch`, read the running device; until selection
+keys off `req.arch`, offline and cross-arch dispatch stay impossible and the
 host-dependence in section 2 remains. Second, **the selectors are dual-engine.**
-They are mirrored in++ `cpp/instances/common/attention_unified_selectors.cpp`++, and
+They are mirrored in `cpp/instances/common/attention_unified_selectors.cpp`, and
 the C++ engine serves the provider with no Python at runtime. So this is a move
 of the *call site*, not a reimplementation: the selector functions remain the one
 shared definition both engines call, per rule 4 of section 6.2. Rewriting the
@@ -1863,7 +2040,17 @@ a family with a binding registers one that happens to delegate to it. Nothing in
 `run_manifest` imports `dispatch`, and that should stay true: it is what keeps
 the hand-built-manifest workflow, which is most of them, working untouched.
 
-Phases 1–5 and 7 are additive and low risk. Phase 6 is the one that requires
+**Phase 8 — tuned candidates on shared machinery (done).** Attention's dense
+and unified tuning candidates grew their own spec identity, walk, sampler and
+pin handling, and a review found ids that were host- and cache-size-dependent,
+knob-built ids that did not replay, and replay that could only search. The
+fix became `rocke.dispatch.tuning` (section 14): one canonicalize step per
+variant, a versioned problem-independent `config_key`, knob pins on the
+request for direct replay, `KernelId.tuning_id` and pinned result requests,
+and a conformance kit. Attention was migrated onto it; any family adopting a
+knob space starts there instead of copying attention.
+
+Phases 1–5, 7 and 8 are additive and low risk. Phase 6 is the one that requires
 care, because it changes what production compiles; migrating per cohort keeps
 each step verifiable against the existing golden IR tests.
 
@@ -1872,6 +2059,21 @@ each step verifiable against the existing golden IR tests.
 ## 13. Open items
 
 Recorded so they are not rediscovered later.
+
+**Resolve `num_cus` at the edge.** With `num_cus == 0` attention dispatch asks
+the live device for its CU count (falling back to 120 off-box). Tuning ids do
+not depend on it, but the production 2D/3D route and the 3D segment count do,
+and `request_hash` hashes the unresolved 0. For AOT use the request should
+carry a resolved `num_cus` (the benchmark CLI or framework adapter probes it),
+and dispatch should never query the device.
+
+**Pass the sweep level explicitly.** Candidates still read the level from a
+context variable when they create a stream. Sweep drivers are safe to
+interleave -- `tuning.iter_at_level` sets the level only while a stream
+advances, never while it is suspended, and attention's entry points use it --
+but passing `level` / `sample` / `seed` through `sweep_space` and
+`sample_space` would remove the global altogether. It changes the candidate
+signature of every family, so it waits for a family that needs it.
 
 **Build through the C++ builder from dispatch.** The `build` hook in section 5.2
 calls the Python builder. The C++ engine has builders of its own for most
@@ -1922,3 +2124,101 @@ Four things to settle before this is a plan rather than an idea:
   *builder* reachable from dispatch; it does not make *dispatch* reachable from
    the provider's no-Python-at-runtime path. That is the separate problem behind
    the dual-engine constraint in phase 6.
+
+---
+
+## 14. Tuned families: the template
+
+Most families register one spec per request (`sweep_space=lambda req:
+(select(req),)`). A family whose kernel has knobs worth sweeping builds on
+`rocke.dispatch.tuning` instead, and gets the identity, replay and sweep
+behavior of section 11.1 without writing it:
+
+| Module | Provides |
+|---|---|
+| `tuning.axes` | `KnobAxis` and `flag` / `values` / `gated` / `choices` to declare axes |
+| `tuning.walk` | sweep levels, the pruned depth-first walk, the sampler |
+| `tuning.identity` | `config_key`, `tuning_id`, `TUNING_ID_VERSION` |
+| `tuning.space` | `KnobSpace`: canonicalize, default, stream, sample, find |
+| `tuning.candidate` | `make_tuned_candidate`, `resolve_pinned`, `explicitly_pinned` |
+| `tuning.spec` | the `TunedSpec` and `TunableRequest` protocols |
+| `tuning.testing` | `assert_tuning_contract`, the conformance kit |
+
+What the family writes:
+
+```text
+<tree>/dispatch/<family>/
+  common.py     request (algorithm, spec_id, tuning_id, tuning_knobs) and the
+                tuned spec (tuning_id, variant_id, config_key, knobs,
+                identity(), launch_grid(), launch_block())
+  axes.py       knob axes, production stacks, known-wrong knobs -- data only
+  rules.py      a KnobSpace subclass per kind of variant
+  bindings.py   tensors -> runner ABI; grid and block read from the spec
+  gfx<NNN>.py   variants, base spec per request, register(route, execution)
+tests/dispatch/<family>/test_tuning_contract.py
+```
+
+**The space.** Subclass `KnobSpace` (a frozen dataclass carrying `abi`,
+`arch`, `path`, `variant_id`, `candidate_name`) and implement three methods:
+`axes(base)`, `build(base, knobs)` (raise `ValueError` / `TypeError` /
+`NotImplementedError` to refuse), and `wrap(base, kernel, knobs, key, tid)`.
+`base` is whatever one request gives the variant to build from -- a default
+kernel spec, or a problem description. The space knows no kernel field by
+name: anything family-specific is a hook. Override only the ones the kernel
+needs:
+
+| Hook | Default | Override when |
+|---|---|---|
+| `fixed(base)` | `{}` | the variant pins knobs (a codepath); restating is dropped, changing is refused |
+| `refuse(base, knobs)` | `None` | a knob is known to give wrong output |
+| `prefilter(base, knobs)` | identity | a knob is inert and the validator would reject it anyway |
+| `base_value(base, kernel, name)` | `getattr(base, name)` | the default lives elsewhere (dataclass defaults) |
+| `inert(base, kernel)` | `{}` | the body ignores a knob, or an explicit value restates a policy |
+| `validate(base, kernel)` | accept | the kernel has its own support check |
+| `defaults(base, kernel)` | `{}` | always, in practice: the problem-independent defaults the knobs are a delta against (fingerprinted into `config_key`) |
+| `known_knobs(base)` | the in-scope axes | axes are scoped per problem; out-of-scope knobs are then dropped instead of refused |
+| `recorded(base)` | none | `base` resolves a field per problem (work size, dtype) |
+| `outer_knob`, `outer_values(base, level)`, `outer_default(base)` | none | one field is cheap to sweep on top of every knob set (attention: `waves_per_eu`, in `attention/waves.py`) |
+| `stem(kernel)`, `stem_prefix()` | `variant_id` / `"{variant_id}@"` | the id should show more than the variant (attention: `_wpe{N}`) |
+| `production(base, axes, is_valid)` | every knob on its own | curated stacks |
+| `is_valid(base, knobs)` | canonical and valid | the walk should prune differently |
+| `accept_default(spec)`, `default_from_full` | any / production only | some legal specs should not be `auto` |
+
+**Rules the hooks encode.** A knob that compiles to the default is *dropped*;
+one that is illegal is *refused* with a reason. Never refuse an inert knob --
+a pin that travels across shapes would then fail where the knob happens to be
+inert. `inert` and `base_value` must not read the `outer_knob`: streams check
+a knob set once and only rebuild it per outer value. Knob values are coerced
+to the type their axis declares (the outer knob to the type of its values),
+so `True` and `1` name one configuration. A field the base resolves per
+problem must be `recorded`, or its `config_key` stops being portable.
+`defaults` must return the same values for every problem (the kit's
+portability check catches a problem field leaking in), and must cover every
+default the knobs are relative to, or a changed default drifts silently.
+Changing the payload, these rules, or what a knob means without changing a
+declared default bumps `TUNING_ID_VERSION`.
+
+**The candidate.** One `make_tuned_candidate(...)` per variant, giving the
+space, `base(req)`, the family's request-error check, and its signature,
+build, grid and Torch binding. Register the same instance on both registries,
+so a pinned replay resolves once. `base(req)` must be a pure function of the
+request's hash/equality-visible fields: it is memoized once and shared by
+resolution, sweeping and sampling. Normalize device or process state into the
+request first; do not probe it from `base`. Attention's explicit tuning
+candidates therefore use `_tuning_problem`, while production path routing uses
+the live-CU-aware `_problem`.
+
+**The test.** Call `assert_tuning_contract(candidate, requests,
+other_requests=..., default_knobs=..., refused_knobs=...)` for a
+representative set of candidates (`representative(candidates, prefixes)`
+picks them by name). It checks that `auto` is the first production spec, ids
+are unique, `(id, knobs)`, knobs alone, a bare id, and the stored dispatch
+request all reselect the spec, mismatched knobs are refused, default-valued
+knobs canonicalize to the default, and `config_key` survives a change of
+problem.
+
+Worked examples: the toy family in
+`platform/tests/dispatch/dispatch_tests/tuning/test_tuning_template.py` (every
+piece in one file) and attention (`library/dispatch/attention`: `DenseSpace`
+in `dense_rules.py`, `UnifiedSpace` in `unified_rules.py`, factories in
+`candidate.py`).
