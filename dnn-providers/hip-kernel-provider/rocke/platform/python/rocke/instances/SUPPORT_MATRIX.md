@@ -40,7 +40,17 @@ atom (CDNA: `pipeline=mem`/`compv*`; gfx1151: `pipeline=mem`, `epilogue=default`
 
 These emit generic AMDGPU IR; arch only sets the comgr target triple.
 
+`elementwise` and `reduce2d` also accept `dtype="f64"` (native f64
+compute, `vec=2`). f64 elementwise is limited to the native f64 ops `copy`,
+`neg`, `abs`, `relu`, `add`, `sub`, `mul`, `max` and `min`.
+
 ---
+
+## gfx1250 native scaled GEMM
+
+`block_scaled_gemm` supports homogeneous and mixed FP8 E4M3, BF8 E5M2, FP6 E2M3, FP6 E3M2,
+and FP4 E2M1 through SCALE and SCALE16 with LLVM 23 and E8M0 scales.
+See the [packed FP6 input contract](../examples/gfx1250/gemm/FP6.md).
 
 ## GEMM family
 
@@ -67,6 +77,10 @@ These emit generic AMDGPU IR; arch only sets the comgr target triple.
 | `conv_implicit_gemm_auto` | ✅ | ✅ | ❌ | MFMA-specialized autotuned path (raw `MfmaAtom`, K=32 kpack); not ported to WMMA |
 | `direct_conv_16c` | ❌ | ✅ | ❌ | `fold_k32` needs 16x16x32 atom (CDNA4) |
 | `direct_conv_4c` | ✅ | ✅ | ❌ | 4x4x4 MFMA atom not in WMMA catalog |
+| `conv_implicit_gemm_wgrad` | ✅ | ✅ | ✅ | gfx1151/gfx1201/gfx1250: WMMA, `default` epilogue, `split_k=1` |
+| `conv_implicit_gemm_wgrad` stream-K | ✅ | ✅ | ❌ | CK iteration-balanced partition; `linear`/`tree` deterministic fixups need the cross-workgroup flag ops |
+| `conv_direct_nongrouped` | ✅ | ✅ | ❌ | `groups=1`; gfx942 uses 32x32x8 / 16x16x16 atoms, gfx950 also 32x32x16 / 16x16x32; MFMA-only; the only direct kernel with dilation. Built from `library/kernels`; not yet wired into dispatch |
+| `direct_depthwise_tiled` | ✅ | ✅ | ❌ | `cpg=kpg=1`, filters up to 31x31, any padding; scalar FMA, wave64. Built from `library/kernels`; not yet wired into dispatch |
 
 ---
 
@@ -88,6 +102,7 @@ These emit generic AMDGPU IR; arch only sets the comgr target triple.
 | `unified_attention_2d` | ✅ | ✅ | ✅ | scalar (no matrix core) |
 | `unified_attention_3d` | ✅ | ✅ | ✅ | scalar |
 | `unified_attention_reduce` | ✅ | ✅ | ✅ | scalar |
+| tiled 3D `kv_layout="strided"` | ✅ | ✅ | ❌ | non-paged Sq=1, fp16/bf16 D64/128/256, aligned unit-D KV views; existing tiled segment/reduce pipeline |
 
 ---
 
@@ -102,6 +117,12 @@ as described in the notes.
 | `kda_chunk_prep` | ✅ | ✅ | ❌ | bf16 only; split path phase 1, one workgroup per chunk |
 | `kda_chunk_scan` | ✅ | ✅ | ❌ | bf16 only; split path phase 2, consumes what prep wrote |
 
+## Linear attention / recurrent-state decode
+
+| Instance | gfx942 | gfx950 | gfx1151 | Notes |
+|---|:--:|:--:|:--:|---|
+| `gdn_decode` | ❌ | ✅ | ❌ | gated delta rule, single-token decode over a paged recurrent state; no softmax |
+| `gdn_prefill` | ❌ | ✅ | ❌ | gated delta rule, chunkwise prefill, **bf16 only**; the KDA chunkwise pair in `gate_kind="gdn"` mode, two launches (`chunk_prep` then `chunk_scan`), no fused default |
 ---
 
 ## Arch-specific native instances
@@ -124,6 +145,34 @@ as described in the notes.
   `conv_implicit_gemm_auto` is a separate MFMA-specialized autotuned path
   (raw `MfmaAtom`, K=32 kpack) that has not been ported to the WMMA atom
   contract, so it stays MFMA-only.
+- **Merged groups (`group_merge`)** is available in the forward
+  (`conv_implicit_gemm`) and wgrad (`conv_implicit_gemm_wgrad`) directions for
+  **depthwise** problems only (`cpg == kpg == 1`), on `wave_size == 64` (MFMA)
+  only, and is inert at its default of `1`. The degree must be a power of two
+  in {2, 4, 8, 16, 32, 64} and divide `groups`. Beyond that the two directions
+  restrict differently. Forward additionally rejects `async_dma`, an explicit
+  `vector_size_b` other than 1, a `vector_size_a`/`vector_size_c` that does not
+  divide the degree, the pointwise fast path (`Y == X == 1`), **3-D
+  convolution**, a degree larger than `tile_n` (the merged GEMM-N is `Gm`), and
+  an `a_mhw_index_fn` override; since merging widens the default store vector,
+  it also requires `epilogue="cshuffle"` unless `vector_size_c=1` is pinned.
+  wgrad additionally rejects `split_k > 1` without `two_stage=True`, and a
+  merged GEMM that does not fit one tile (`Gm > tile_m`, or `Z*Y*X*Gm > tile_n`).
+  Forward merged kernels are built into the AOT kernel cache at every
+  admissible degree and selected there by timing; the grouped-conv dispatcher
+  does not select a forward merge degree. **Engine coverage differs between the two directions.** Forward is
+  implemented in **both** engines — `group_merge` is a field on the C-ABI spec
+  struct (`rocke_implicit_gemm_conv_spec`), is carried across the pybind
+  boundary, and the fwd parity emitters build eight depthwise configs
+  (`conv_implicit_gemm_emit.{py,c}` indices 21–28: 22–27 merged, 21 and 28 the
+  unmerged default/cshuffle controls) spanning both epilogues, the 1-wide
+  cshuffle store, `unroll_k`, and degrees with `groups/Gm > 1` as well as
+  `Gm == groups` (one merged group; the grouped decode stays engaged). Byte-identity is therefore a
+  real gate on merged emission, not a vacuous one. **wgrad is Python-engine
+  only:** the C++ engine has no merged wgrad configuration to express and its
+  parity emitter builds unmerged configs exclusively, so merged *wgrad* specs
+  carry no structural parity coverage and are verified by on-GPU numerics
+  alone. That gap predates the forward port and is tracked as follow-up work.
 - **GPU-numeric verification on gfx1151** (launched on the Radeon 8060S,
   output compared against a numpy reference). **Verified PASS:**
   `elementwise`, `reduce2d`, `rmsnorm2d`, `layernorm2d`, `transpose2d`,
@@ -163,3 +212,12 @@ as described in the notes.
 - gfx942/gfx950 cells use a portable f16 16x16x16 config; an instance marked ❌
   for a CDNA arch lacks the specific atom that config selects (e.g. `mfma_gemm`
   and `direct_conv_16c` need the CDNA4 16x16x32 atom absent on gfx942).
+- **`gdn_decode` dispatch is gfx950-only by registration and a wave64 target
+  match.** Its candidates are registered only for gfx950 and create a default
+  `GdnDecodeSpec` with `wave_size=64`. `is_valid_spec` requires that value to
+  match the target's hardware wave size, rejecting wave32 targets before it
+  considers the thread-block limit. The lane mapping and XOR butterfly depend
+  on this match. Adding an arch requires a new module under
+  `library/dispatch/gdn/` plus a tuning run. This instance is GPU-numeric-verified on
+  gfx950 against an fp32 reference, covering both the output and the in-place
+  recurrent-state update.

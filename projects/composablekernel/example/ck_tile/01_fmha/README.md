@@ -37,6 +37,99 @@ There are 2 template parameters for this kernel template.
 ## codegen
 To speed up compile time, we instantiate the kernels into separate file. In this way we can benefit from parallel building from CMake/Make system. This is achieved by `generate.py` script. Besides, you can look into this script to learn how to instantiate a kernel instance step by step, which is described in `FMHA_FWD_KERNEL_BODY` variable.
 
+### Scheduled TDM forward pipeline
+
+`qr_tdm_sched` shares the gfx125 TDM architecture requirements with `qr_tdm`.
+Its generated configurations use FP16 or BF16 Q/K/V with D64/V64, D128/V128,
+or D192/V128, and row-major V. They use no bias, dropout, logits
+soft cap, quantization, or sink tokens; LSE output is optional. Other configurations retain
+the existing pipeline candidates.
+Generated `qr_tdm_sched` requires a null runtime `sink_ptr`; a finite virtual-sink
+logit uses the existing `qr_tdm` fallback. This runtime pointer is independent
+of the compile-time sink-token flag.
+
+The generated API tries matching scheduled traits first. D64/V64 uses a
+128-by-64 Q/K sequence tile, matching the existing `qr_tdm` M128 geometry and
+compiler minimum-waves-per-EU hint of three. The launch API retains the
+historical `MinBlockPerCu` name; this hint does not establish achieved workgroup
+residency. Aligned batch K lengths use unpadded
+sequence traits; tails and group mode use padded traits. D64 uses compiler-scheduled
+softmax maximum chains and places each next-stage LDS read before the current
+WMMA, preserving read counts and stage-tail waits. Generated D64/D128/D192
+scheduled sources enable expert scheduling mode. D128 uses a
+128-by-128 Q/K sequence tile. D192 tries a 128-by-128 tile when average K length
+is at least 512, the Q grid fits within the CU count, logical length pointers
+are absent, and the mask is dense or square causal. Otherwise it uses a
+128-by-64 tile. Group mode compares packed K length against 512 times the batch
+count; its square-causal check compares packed Q/K totals. When
+`max_seqlen_q` is below 128, the existing fallback candidates are used.
+
+WG indexing follows the existing shared kernel rules. For batch BHSD square
+causal attention with one V tile and no dropout, sched D64/D128 visit the longest
+Q tile across heads within each batch first. Sched D192 keeps the existing
+head-major remap; group mode does not enter this batch-local branch. The XCC
+mode 5/tm5r experiment remains disabled unless `CK_TILE_FMHA_PAIRED_XCC_ORDER`
+is explicitly defined to a nonzero value. Its eight-XCC mapping assumptions
+must be checked on the target hardware before enabling it.
+
+The implementation separates tile selection, data operations, and placement:
+
+```text
+fmha_fwd.py: tile/pipeline compatibility + runtime constraints
+    -> generated Problem and BlockFmhaShape
+    -> FmhaTdmSchedPolicyFor<Problem>
+         Geometry: dtype, tile shape, WMMA decomposition, LDS layout
+         Tuning:   tensor waits, DS tail counts, compiler launch hint
+         Schedule: tile phase order and local instruction placement
+    -> BlockFmhaPipelineQRKSVSTdmSched<Problem, Policy>
+         owns tensors, TDM loads, synchronization, and operation callbacks
+    -> Schedule::Run(ops)
+         Begin -> QK -> Score -> Softmax -> NextK -> PV -> Advance
+    -> Policy stage operations + FmhaTdmSchedPlacementExecutor
+         execute local WMMA/read/fence/rescale callbacks
+```
+
+The shared pipeline body covers all three head dimensions. Geometry derives the
+number of QK/PV stages and LDS reads; default tuning derives its DS tail counts
+from those values. A specific tuning can override them without duplicating the
+pipeline. The LDS arena packs K0, K1, V0, and V1 in order. Q uses the K arena
+during the prologue before the synchronization that permits K reuse.
+
+The default tile schedule is `FmhaTdmSchedSequentialTileSchedule`. D64 uses
+`FmhaTdmSchedReadFirstPlacement`, which issues each row's reads and fences before
+its WMMA. D128/D192 use `FmhaTdmSchedWmmaFirstPlacement`, with a leading read on
+selected D128 stages. Each row divides its reads into two groups around a fence.
+BF16 D192/N128 uses `FmhaTdmSchedExplicitRowReadSchedule` with a concrete read
+placement and streams output rescale through the first PV stage. The other
+geometries use `FmhaTdmSchedEvenlyInterleavedReadSchedule`, which distributes
+the fixed read count across WMMA rows. In particular, FP16 D192/N128 uses evenly
+interleaved reads and rescales after softmax; it does not select the BF16
+explicit placement or streaming rescale. `DeferTensorReady` moves the V prefetch
+tensor wait from the score phase to after split softmax Part01 and before Part2.
+It applies to D128 batch/group kernels, including masked kernels, and to BF16
+D192/N64 dense batch/group kernels. LSE does not change this choice; sink-token
+and bias problems are excluded. D64, FP16 D192/N64, and both D192/N128 dtypes
+retain the score-phase wait. D128 rescales output before Part2; BF16 D192/N128
+streams rescale through the first PV stage; the remaining geometries rescale
+after Part2. Compile-time checks enforce matching geometry, stage counts, WMMA
+counts, and rescale modes.
+
+For a new placement, supply a policy's third template argument (the tile
+schedule) and implement its local callbacks. The executor executes those
+callbacks directly. TDM loads and hardware synchronization remain explicit
+pipeline phase boundaries. The pipeline and policy reject attention bias;
+other pipelines provide its existing dispatch fallback. Sink operations remain
+for the shared kernel entry. A runtime sink logit is independent of the
+compile-time sink-token flag.
+
+`test/ck_tile/fmha` contains the scheduled pipeline's layout, schedule,
+representation, sink, generated dispatch, and independent reference tests.
+The independent reference retains unquantized FP32 probabilities and reports
+both strict cosine diagnostics and the dtype component budget; see
+[`accuracy_contract.md`](../../../test/ck_tile/fmha/accuracy_contract.md).
+`test/ck_tile/tdm` retains the general TDM tests. The optional tm5r XCC ordering path remains guarded
+by `CK_TILE_FMHA_PAIRED_XCC_ORDER` and is disabled when the macro is absent.
+
 ## executable
 `tile_example_fmha_fwd` is the example executable, implemented in `fmha_fwd.cpp`. You can type `./bin/tile_example_fmha_fwd -?` to list all the arguments. Below is an example of the output (may subject to change)
 ```
@@ -194,3 +287,124 @@ zero, so `1.9` is applied as `1.0`.
 
 Round the V scale up to a power of two **at quantization time** and quantize with that same
 value. This is not checked at runtime.
+
+## backward
+
+`tile_example_fmha_bwd` is the training-side example, implemented in `example_fmha_bwd.cpp`.
+Build it with `ninja tile_example_fmha_bwd`. Given `Q`, `K`, `V`, the forward output `O` and the
+forward `LSE`, it produces `dQ`, `dK`, `dV` (and optionally `dBias`) from an incoming `dO`.
+
+### kernels
+
+One backward call launches two or three kernels:
+
+| kernel | what it does |
+|---|---|
+| `fmha_bwd_dot_do_o` | `D[q] = rowsum(dO[q,:] * O[q,:])`, the softmax-Jacobian correction term. Also accumulates the sink gradient when enabled. |
+| `fmha_bwd_dq_dk_dv` | the main loop: recompute `P = exp(S - LSE)`, then `dV = P^T dO`, `dP = dO V^T`, `dS = P * (dP - D)`, `dK = scale * dS^T Q`, `dQ = scale * dS K` |
+| `fmha_bwd_convert_dq` | converts the fp32 `dq_acc` scratch to the output type |
+
+`P` is never stored by the forward kernel. It is recomputed from `S` and the saved `LSE`, which is
+exact rather than approximate: `LSE >= rowmax`, so `exp(S - LSE)` cannot overflow, and the row-max
+term that online softmax subtracted in the forward pass cancels.
+
+The third kernel exists because most pipelines split the grid along `seqlen_k`. Each block then
+owns a slice of the sum that forms `dQ`, so partial results are accumulated into an fp32 `dq_acc`
+workspace with `buffer_atomic_add_f32` and converted afterwards. Pipelines that keep `dQ` in
+registers for the whole `K` loop (the decode pipeline, `seqlen_q <= 32`) finish `dQ` in place and
+skip both the workspace and the convert kernel.
+
+### executable
+
+`./bin/tile_example_fmha_bwd -?` lists every argument. The shape, layout, mask, bias and dropout
+arguments match `tile_example_fmha_fwd`, with these differences:
+
+| difference | detail |
+|---|---|
+| `-scale` | named `-scale_s` in the forward example |
+| `-dbias` | `1` also produces the bias gradient (requires elementwise bias) |
+| `-p_drop` | dropout probability; the forward example has no dropout argument |
+| `-deterministic` | `1` reduces `dQ` through per-block buffers instead of atomics, making the result bit-reproducible |
+| `-sink_grad` | `1` computes and validates the attention-sink gradient (see below) |
+| absent | `-vlayout`, `-lse`, `-qscale`, `-num_splits`, `-q_eff_lens`, `-kv_eff_lens` |
+
+Example 1: `./bin/tile_example_fmha_bwd -b=1 -h=16 -s=4096 -d=128` runs batch mode, nhead=16,
+seqlen 4096, hdim 128, fp16.
+
+Example 2: `./bin/tile_example_fmha_bwd -mode=1 -b=2 -h=8 -h_k=2 -s=1024,2048 -d=64 -mask=1`
+runs group mode with GQA (8 query heads over 2 kv heads), per-batch seqlens, and a top-left causal
+mask.
+
+### attention sink gradient
+
+An attention sink is a learned per-head logit that joins the softmax denominator without
+contributing a value vector, so the attention weights over real tokens no longer sum to one. This
+is the mechanism used by gpt-oss. Setting `-sink_grad=1` gives every head a sink score and
+validates its gradient:
+
+```
+P_sink[h,q] = exp(sink[h] - LSE[h,q])
+d_sink[h]   = -sum_q P_sink[h,q] * D[h,q]
+```
+
+The sum runs over every query row of every batch, so `d_sink` has shape `[nhead]` and is
+accumulated with `atomicAdd` from `fmha_bwd_dot_do_o`. Two consequences follow:
+
+- **The caller must zero `d_sink_ptr` before the call.** The kernel only accumulates into it and
+  never initialises it.
+- `d_sink` is not bit-reproducible across runs even with `-deterministic=1`, because that flag
+  controls the `dQ` reduction only.
+
+The `LSE` handed to the backward call must be the **post-sink** `LSE`, that is
+`log(exp(LSE_nosink) + exp(sink))`, which is what the forward kernel writes when a sink is
+enabled. This matters for fully masked rows: with a sink their `LSE` is `sink` rather than `-inf`,
+which is what keeps `exp(sink - LSE)` finite.
+
+A head whose sink score is `-inf` is treated as having no sink and yields a `d_sink` of exactly
+zero. This is handled by skipping the head rather than by evaluating the formula, because a fully
+masked row carries `LSE = -inf` as well (bottom-right causal with `seqlen_q > seqlen_k` produces
+such rows) and `exp(-inf - -inf)` is `NaN`. Passing `sink_ptr = nullptr` disables the sink for the
+whole call and is equivalent for a head that is `-inf` everywhere.
+
+`D` is scaled by `p_undrop` before the sink path reads it, so dropout feeds the sink gradient
+correctly.
+
+The sink field of the mask string (`-mask=t:l,r,sink`, the StreamingLLM rolling-cache sink) is
+parsed but **ignored** by the backward kernel, which always builds its mask with `sink_size = 0`.
+That masking scheme is defined for inference only and has no published backward formulation.
+
+### what the example binary can and cannot run
+
+`CMakeLists.txt` generates the backward instances with `--receipt 3`, which is considerably
+narrower than what the kernel templates support. Combinations outside it print
+`no kernel found for given traits, skipping run` and are skipped, not failed:
+
+| restriction from receipt 3 | effect |
+|---|---|
+| `dtype in [fp16, bf16]` | `-prec=fp32` has no instance |
+| `bias in [no, alibi]` | `-bias=e` has no instance, so `-dbias=1` is unreachable |
+| `deterministic == f` | `-deterministic=1` has no instance |
+| `dpad == dvpad` | `-d` and `-d_v` must fall in the same padding class (both multiples of 8, or neither) |
+
+On gfx1250 the `dq_dk_dv` pipeline follows the tile the dispatcher picks, so `-d` and `-s`
+together select the tile and the tile carries the pipeline with it. Head dim buckets are
+tested in ascending order, and within a bucket the first matching row wins:
+
+| head dim | condition | tile | pipeline |
+|---|---|---|---|
+| `<= 32` | — | b64x128 | `TdmKRKTR` |
+| `(32, 64]` | `seqlen_q <= 32` and `batch * nhead >= 768` | b32x32 | `TrLoadQRQTRDOR` + TDM policy (decode; `dQ` stays in registers) |
+| `(32, 64]` | otherwise | b64x128 | `TdmKRKTR` |
+| `(64, 128]` | masked, `seqlen_q <= 32` and `batch * nhead >= 768` | b32x32 | `TrLoadQRQTRDOR` + TDM policy (decode) |
+| `(64, 128]` | `seqlen_q <= 32` | b32x64 | `TdmKRKTR` |
+| `(64, 128]` | otherwise | b64x128 | `TdmKRKTR` |
+| `(128, 256]` | — | b32x64 | `TdmKRKTR` |
+
+The decode rows additionally require `hdim % 8 == 0`. Head dims of 32 and below, and above
+128, have no decode tile, so a short `seqlen_q` there stays on `TdmKRKTR`. At head dim 128 the
+b64x128 tile runs a shallower Q/dO ring up to `seqlen_q` 2048 and the deeper one beyond it.
+
+`KRKTRVRIGLP`, `KRKTRVR` and `TrLoadKRKTRVR` are still compiled and still selected on other
+architectures.
+
+Pass `-kname=1` to print which instance was dispatched.

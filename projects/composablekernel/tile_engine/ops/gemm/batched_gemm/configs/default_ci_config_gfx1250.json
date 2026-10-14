@@ -42,7 +42,9 @@
         },
         "warp_tile_k": {
             "values": [
-                32
+                4,
+                32,
+                64
             ]
         }
     },
@@ -51,7 +53,10 @@
             "values": [
                 "compv3",
                 "compv4",
-                "mem"
+                "mem",
+                "comp_async",
+                "comp_tdm",
+                "comp_tdm_v2"
             ]
         },
         "scheduler": {
@@ -63,22 +68,26 @@
         "epilogue": {
             "values": [
                 "cshuffle",
-                "default"
+                "default",
+                "tdm"
             ]
         },
         "pad_m": {
             "values": [
-                false
+                false,
+                true
             ]
         },
         "pad_n": {
             "values": [
-                false
+                false,
+                true
             ]
         },
         "pad_k": {
             "values": [
-                false
+                false,
+                true
             ]
         },
         "persistent": {

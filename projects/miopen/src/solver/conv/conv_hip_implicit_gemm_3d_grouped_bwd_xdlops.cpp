@@ -131,12 +131,13 @@ void PerformanceConfigHipImplicitGemm3DGroupBwdXdlops::InitValidKernels(
 void PerformanceConfigHipImplicitGemm3DGroupBwdXdlops::DefaultKernelFromList(
     const ExecutionContext& ctx)
 {
-    const auto dev_name = ctx.GetStream().GetDeviceName();
-    const bool is_gfx11 = StartsWith(dev_name, "gfx11");
-    const bool is_gfx12 = StartsWith(dev_name, "gfx12");
+    const auto dev_name  = ctx.GetStream().GetDeviceName();
+    const bool is_gfx11  = StartsWith(dev_name, "gfx110") || StartsWith(dev_name, "gfx115");
+    const bool is_gfx117 = StartsWith(dev_name, "gfx117");
+    const bool is_gfx12  = StartsWith(dev_name, "gfx12");
 
     auto* ranked_p = &ranked_gemm_3d_grp_bwd;
-    if(is_gfx11 || is_gfx12)
+    if(is_gfx11 || is_gfx12 || is_gfx117)
         ranked_p = &ranked_gemm_3d_grp_bwd_navi;
 
     const auto ranked_1st_applicable = *ranked_p;

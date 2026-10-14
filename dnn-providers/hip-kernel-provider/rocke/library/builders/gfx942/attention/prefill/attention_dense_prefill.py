@@ -16,7 +16,7 @@ THE SPEC COMES FROM DISPATCH, NOT FROM THIS FILE
 ------------------------------------------------
 Both harnesses (this one and the benchmark) used to HAND-BUILD an
 ``AttentionDenseSpec`` from CLI defaults. That is a silent-staleness machine: the
-tuning that actually ships lives in ``dispatch.attention.gfx942._dense_spec``
+tuning that actually ships lives in ``dispatch.attention.gfx942_dense._base_spec``
 (per-config ``waves_per_eu``, the 304-CTA persistent grid, the auto persistent
 decision, the ragged path), and a hardcoded CLI default freezes whatever that
 policy happened to be on the day the flag was written. A harness that measures a
@@ -26,10 +26,11 @@ regression.
 So the flow here is:
 
 1. build an :class:`AttentionRequest` from the CLI *shape* arguments,
-2. resolve the shipped concrete spec through the architecture-routed
-   :func:`dispatch.attention.dense_spec_for_request`,
-3. apply only the tuning flags the user *explicitly passed* as a
-   ``dataclasses.replace`` override on top of the resolved spec.
+2. resolve the shipped spec of the ``gfx942_dense`` candidate through
+   :func:`dispatch.attention.attention_tuning_spec` (``tuning_id=auto``),
+3. apply only the tuning flags the user *explicitly passed* as knobs of that
+   candidate through :func:`dispatch.attention.tuning_spec_with_knobs`, which
+   the kernel validates.
 
 Every tuning flag therefore defaults to ``None`` meaning "whatever dispatch
 ships": an omitted flag TRACKS future policy changes instead of pinning today's
@@ -42,18 +43,23 @@ These helpers (:func:`add_dense_tuning_args`, :func:`dense_request`,
 :func:`describe_dense_spec`) are the SINGLE copy — the live benchmark imports them
 from here rather than keeping a second, drifting resolver.
 
-NOTE: ``--sw`` (sliding window, P1+) still builds a spec that
-``supports_attention_dense`` rejects, so ``run`` raises a ``ValueError`` naming the
-reason. ``--persistent`` is NOT in that category any more: the persistent grid
-ships and dispatch turns it on automatically for large-Sq prefill. ``--bn`` must
-divide the 256-row query tile and keep ``K_lds+V_lds`` inside the 64 KB gfx942 LDS
--- ``--bn 128`` exceeds it at D128 and is rejected (it fits at D64).
+NOTE: ``--sw`` (sliding window) now builds a supported spec (KV-loop prune + window
+mask); only the degenerate shape whose last query block's window starts past
+``seqlen_kv`` is rejected (zero-trip KV loop -> NaN), and only without sinks: with
+sinks those rows output 0, softmax over the sink alone. ``--use-sinks`` adds random
+per-head sink logits and checks against a manual sink reference; it combines with
+``--sw``. ``--persistent`` is NOT a
+deferred mode either: the persistent grid ships and dispatch turns it on
+automatically for large-Sq prefill. ``--bn`` must divide the 256-row query tile and
+keep ``K_lds+V_lds`` inside the 64 KB gfx942 LDS -- ``--bn 128`` exceeds it at D128
+and is rejected (it fits at D64).
 
 Usage:
     python attention_dense_prefill.py                 # parity + bench, dispatch spec
     python attention_dense_prefill.py --dtype fp16 --d 64
     python attention_dense_prefill.py --persistent off   # force the default grid
     python attention_dense_prefill.py --wpe 2            # override the shipped wpe
+    python attention_dense_prefill.py --use-sinks        # attention sinks
 """
 import argparse
 import dataclasses
@@ -70,12 +76,14 @@ import torch  # noqa: E402
 
 from dispatch.attention import (  # noqa: E402
     AttentionRequest,
-    dense_spec_for_request,
+    attention_tuning_spec,
+    tuning_spec_with_knobs,
 )
 from kernels.gfx942.attention_dense import (  # noqa: E402
     Gfx942AttentionDenseSpec,
     attention_dense_block,
     attention_dense_grid,
+    attention_dense_runtime_args,
     attention_dense_signature,
     build_attention_dense,
     gfx942_kernel_name,
@@ -85,21 +93,19 @@ from rocke.helpers.compile import compile_kernel  # noqa: E402
 from rocke.runtime import KernelLauncher, LaunchConfig  # noqa: E402
 
 _ARCH = "gfx942"
+_SPEC_ID = "gfx942_dense"
 _TORCH_DT = {"bf16": torch.bfloat16, "fp16": torch.float16}
 
-# Spec fields a harness may override on top of the dispatch-resolved spec. Every
-# one of these is a real ``AttentionDenseSpec`` field with no ``AttentionRequest``
-# counterpart, so dispatch cannot resolve it and an explicit flag is the only way
-# to reach it. The persistent knobs are deliberately NOT here: they have request
-# fields (``dense_persistent`` / ``dense_num_persistent`` /
-# ``dense_persist_decode``), so they go through dispatch and get its gfx942
-# normalization (e.g. the shared 256-CTA default -> 304) instead of bypassing it.
+# Spec fields a harness may override on top of the candidate's default spec, as
+# knobs of the ``gfx942_dense`` candidate. ``sliding_window`` is problem shape,
+# not a knob: it goes on the request.
 _OVERRIDE_FIELDS = (
     "block_n",
     "waves_per_eu",
     "interleave",
     "lds_k_group_pad",
-    "sliding_window",
+    "num_persistent",
+    "persist_decode",
 )
 
 
@@ -182,7 +188,16 @@ def add_dense_tuning_args(ap: argparse.ArgumentParser) -> None:
         dest="sliding_window",
         type=int,
         default=None,
-        help="sliding_window (0=off; multiple of block_n). P1+: currently rejected",
+        help="sliding_window (0=off; multiple of block_n). Supported: KV-loop "
+        "prune + window mask.",
+    )
+    # A request property rather than a tuning override: it goes through dispatch
+    # like sliding_window does in dense_request.
+    ap.add_argument(
+        "--use-sinks",
+        dest="use_sinks",
+        action="store_true",
+        help="enable attention sinks (one [Hq] logit per query head)",
     )
 
 
@@ -197,20 +212,15 @@ def dense_request(
     head_size: int,
     causal: bool,
     dtype: str,
+    sliding_window: int = 0,
 ) -> AttentionRequest:
-    """The :class:`AttentionRequest` a production caller would submit.
+    """The :class:`AttentionRequest` pinned to the ``gfx942_dense`` candidate.
 
-    Shape comes from the caller; the three persistent knobs come from the CLI when
-    explicitly passed and otherwise keep the request defaults, so dispatch applies
-    its own gfx942 normalization to them.
+    Shape comes from the caller; tuning never rides on the request (it is a knob
+    of the candidate, see :func:`dense_spec_overrides`). ``sliding_window`` (0 =
+    full causal) and ``use_sinks`` (``--use-sinks``, read from ``args``) are
+    request properties, so dispatch ships the SWA-pruned, sink-seeded spec.
     """
-    req_kwargs = {}
-    if getattr(args, "persistent", None) is not None:
-        req_kwargs["dense_persistent"] = args.persistent
-    if getattr(args, "num_persistent", None) is not None:
-        req_kwargs["dense_num_persistent"] = int(args.num_persistent)
-    if getattr(args, "persist_decode", None) is not None:
-        req_kwargs["dense_persist_decode"] = args.persist_decode
     return AttentionRequest(
         batch=int(batch),
         nhead_q=int(num_query_heads),
@@ -222,20 +232,25 @@ def dense_request(
         arch=_ARCH,
         mask_type=1 if causal else 0,
         dtype=str(dtype).lower(),
+        sliding_window=int(sliding_window),
+        use_sinks=bool(getattr(args, "use_sinks", False)),
         # Opt-in selector: this is the candidate whose spec we are measuring.
         algorithm="attention_dense",
-        spec_id="gfx942_attention_dense",
-        **req_kwargs,
+        spec_id=_SPEC_ID,
     )
 
 
 def dense_spec_overrides(args: argparse.Namespace) -> dict:
-    """Spec-field overrides for the tuning flags the user EXPLICITLY passed."""
-    return {
+    """Knob overrides for the tuning flags the user EXPLICITLY passed."""
+    overrides = {
         name: getattr(args, name)
         for name in _OVERRIDE_FIELDS
         if getattr(args, name, None) is not None
     }
+    persistent = getattr(args, "persistent", None)
+    if persistent in ("on", "off"):
+        overrides["persistent"] = persistent == "on"
+    return overrides
 
 
 def assert_tracks_dispatch(
@@ -255,7 +270,7 @@ def assert_tracks_dispatch(
     wrong number, which is worse than a crash.
     """
     overrides = dict(overrides or {})
-    shipped = dense_spec_for_request(req)
+    shipped = attention_tuning_spec(req, _SPEC_ID).kernel_spec
     drift = [
         f"{f.name}: harness={getattr(spec, f.name)!r} dispatch={getattr(shipped, f.name)!r}"
         for f in dataclasses.fields(Gfx942AttentionDenseSpec)
@@ -282,9 +297,7 @@ def resolve_dense_spec(
             f"known fields: {sorted(known)}"
         )
 
-    spec = dense_spec_for_request(req)
-    if overrides:
-        spec = dataclasses.replace(spec, **overrides)
+    spec = tuning_spec_with_knobs(req, _SPEC_ID, overrides).kernel_spec
     assert_tracks_dispatch(spec, req, overrides)
     return spec
 
@@ -335,6 +348,71 @@ def _launch_config(spec: Gfx942AttentionDenseSpec, stream) -> LaunchConfig:
     )
 
 
+# --------------------------------------------------------------------------- #
+# inputs + fp32 reference (shared with the live benchmark)
+# --------------------------------------------------------------------------- #
+def make_sinks(spec: Gfx942AttentionDenseSpec, device="cuda"):
+    """Per-query-head sink logits ([Hq], q dtype) when ``spec.use_sinks``, else None."""
+    if not spec.use_sinks:
+        return None
+    return torch.randn(
+        spec.num_query_heads, dtype=_TORCH_DT[spec.dtype], device=device
+    ).contiguous()
+
+
+def dense_reference(q, k, v, spec: Gfx942AttentionDenseSpec, *, scale, sinks=None):
+    """fp32 reference [B, Sq, Hq, D] for ``spec`` (causal / full / SWA, GQA).
+
+    ``scale`` is the softmax scale the kernel was launched with, taken from the
+    caller so the reference cannot silently diverge from the launch.
+
+    Without sinks this is torch SDPA. With sinks SDPA cannot append the sink
+    column, so it is ``softmax(concat([QK*scale, sink]))[..., :-1] @ V``, chunked
+    over queries so the fp32 score matrix stays near 1 GiB at large Sq (softmax
+    runs along keys, so query rows are independent and chunking is exact).
+    """
+    B, Sq, Hq, _ = q.shape
+    Skv = k.shape[1]
+    dev = q.device
+    rep = Hq // k.shape[2]
+    qh = q.transpose(1, 2).float()
+    kh = k.transpose(1, 2).repeat_interleave(rep, 1).float()
+    vh = v.transpose(1, 2).repeat_interleave(rep, 1).float()
+    W = spec.sliding_window
+    ki = torch.arange(Skv, device=dev).view(1, -1)
+
+    if sinks is None:
+        if spec.causal and W > 0:
+            qi = torch.arange(Sq, device=dev).view(-1, 1)
+            allowed = (ki <= qi) & (ki > qi - W)
+            ref = torch.nn.functional.scaled_dot_product_attention(
+                qh, kh, vh, attn_mask=allowed, scale=scale
+            )
+        else:
+            ref = torch.nn.functional.scaled_dot_product_attention(
+                qh, kh, vh, is_causal=spec.causal, scale=scale
+            )
+        return ref.transpose(1, 2)
+
+    sink_col = sinks.float().view(1, Hq, 1, 1)
+    q_blk = max(1, min(Sq, (1 << 30) // max(1, B * Hq * (Skv + 1) * 4)))
+    ref = torch.empty_like(qh)
+    for q0 in range(0, Sq, q_blk):
+        q1 = min(q0 + q_blk, Sq)
+        attn = torch.einsum("bhqd,bhkd->bhqk", qh[:, :, q0:q1], kh) * scale
+        qi = torch.arange(q0, q1, device=dev).view(-1, 1)
+        mask = torch.zeros(q1 - q0, Skv, dtype=torch.bool, device=dev)
+        if spec.causal:
+            mask |= ki > qi
+        if W > 0:
+            mask |= ki <= qi - W
+        attn.masked_fill_(mask.view(1, 1, q1 - q0, Skv), float("-inf"))
+        attn = torch.cat([attn, sink_col.expand(B, Hq, q1 - q0, 1)], dim=-1)
+        attn = torch.softmax(attn, dim=-1)[..., :-1]
+        ref[:, :, q0:q1] = torch.einsum("bhqk,bhkd->bhqd", attn, vh)
+    return ref.transpose(1, 2)
+
+
 def run(
     spec: Gfx942AttentionDenseSpec,
     *,
@@ -353,11 +431,19 @@ def run(
     v = (torch.randn(B, Skv, Hkv, D, dtype=dt, device=dev) * 0.2).contiguous()
     out = torch.zeros(B, Sq, Hq, D, dtype=dt, device=dev)
     scale = 1.0 / math.sqrt(D)
+    sinks = make_sinks(spec, dev)
 
     launcher = _make_launcher(spec)
     stream = torch.cuda.current_stream().cuda_stream
     cfg = _launch_config(spec, stream)
     vals = {"q_ptr": q, "k_ptr": k, "v_ptr": v, "o_ptr": out, "scale": scale}
+    # The runtime i32 shape params attention_dense_signature declares after scale
+    # (empty on the baked paths); omitting them under-fills the kernarg buffer.
+    vals.update(attention_dense_runtime_args(spec))
+    if spec.use_sinks:
+        # Last param, after the runtime kernarg fields (attention_dense_signature
+        # order).
+        vals["sink_ptr"] = sinks
 
     def call():
         launcher(vals, config=cfg)
@@ -367,22 +453,7 @@ def run(
 
     err = float("nan")
     if check:
-        qh = q.transpose(1, 2).float()
-        rep = Hq // Hkv
-        kh = k.transpose(1, 2).repeat_interleave(rep, 1).float()
-        vh = v.transpose(1, 2).repeat_interleave(rep, 1).float()
-        W = spec.sliding_window
-        if spec.causal and W > 0:
-            qi = torch.arange(Sq, device=dev).view(-1, 1)
-            ki = torch.arange(Skv, device=dev).view(1, -1)
-            allowed = (ki <= qi) & (ki > qi - W)
-            ref = torch.nn.functional.scaled_dot_product_attention(
-                qh, kh, vh, attn_mask=allowed
-            ).transpose(1, 2)
-        else:
-            ref = torch.nn.functional.scaled_dot_product_attention(
-                qh, kh, vh, is_causal=spec.causal
-            ).transpose(1, 2)
+        ref = dense_reference(q, k, v, spec, scale=scale, sinks=sinks)
         err = (out.float() - ref).abs().max().item()
 
     for _ in range(warmup):
@@ -440,6 +511,7 @@ def main():
             head_size=args.d,
             causal=bool(args.causal),
             dtype=args.dtype,
+            sliding_window=int(args.sliding_window or 0),
         )
         spec = resolve_dense_spec(req, overrides)
         if args.dry_run:

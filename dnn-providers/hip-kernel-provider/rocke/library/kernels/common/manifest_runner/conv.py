@@ -5,10 +5,12 @@
 
 from __future__ import annotations
 
-import struct
 from typing import Optional, Tuple
 
+from kernels.common.conv_args import ConvArgs, ConvGeometry
+from kernels.common.conv_abi import conv_args_signature, conv_direct_args_signature
 from rocke.runtime.hip_module import Runtime
+from rocke.runtime.packing import pack_args
 from kernels.common.manifest_runner.utils import as_u8_buffer, nbytes, require_numpy
 
 
@@ -17,7 +19,19 @@ def run_conv_manifest_problem(
 ) -> tuple:
     np = require_numpy()
 
-    is_3d = manifest.get("conv_layout") == "implicit_gemm_3d"
+    conv_layout = str(manifest.get("conv_layout", "implicit_gemm"))
+    is_3d = conv_layout == "implicit_gemm_3d"
+    # The layout picks the ABI family: direct kernels (``direct_grouped``,
+    # ``direct_grouped_4c``, ...) bake the filter in and take a different
+    # kernarg block than implicit GEMM.
+    algorithm = "direct" if conv_layout.startswith("direct") else "implicit_gemm"
+    direction = str(manifest.get("direction", "fwd"))
+    if direction != "fwd":
+        # The buffers and the reference below are the forward conv's; packing
+        # them into a wgrad/dgrad ABI would launch but verify nonsense.
+        raise ValueError(
+            f"conv manifest runner only supports direction='fwd' (got {direction!r})"
+        )
 
     cv = [int(x) for x in manifest["conv"]]
     if is_3d:
@@ -76,6 +90,7 @@ def run_conv_manifest_problem(
             A = A.astype(np_dtype)
             B = B.astype(np_dtype)
 
+        Do = 1
         Ho = (Hi + 2 * pH - dH * (Y - 1) - 1) // sH + 1
         Wo = (Wi + 2 * pW - dW * (X - 1) - 1) // sW + 1
         D = np.empty((N, Ho, Wo, K), dtype=np_dtype)
@@ -107,6 +122,49 @@ def run_conv_manifest_problem(
     )
     bytes_xfer = float(A.itemsize) * (A.size + B.size + D.size)
 
+    # The kernel is AOT: the problem shape, the tensor strides and the
+    # magic-division pairs all travel as kernargs. Packing the old
+    # three-pointers-plus-three-sizes block would leave every argument past
+    # D_bytes reading stack garbage -- the kernel still launches and still
+    # reports a plausible TFLOPS, it just computes nonsense.
+    geom = ConvGeometry(
+        N=N,
+        Di=Di,
+        Hi=Hi,
+        Wi=Wi,
+        C=C,
+        K=K,
+        Z=Z,
+        Y=Y,
+        X=X,
+        sD=sD,
+        sH=sH,
+        sW=sW,
+        pD=pD,
+        pH=pH,
+        pW=pW,
+        dD=dD,
+        dH=dH,
+        dW=dW,
+        groups=groups,
+        is_3d=is_3d,
+    )
+    if algorithm == "direct":
+        # Direct conv has no GEMM tile: its block_m/block_n are Q-tile and
+        # group-tile widths, which the kernel never decodes against.
+        conv_args = ConvArgs(geom, direction, algorithm)
+        default_sig = conv_direct_args_signature(dtype, direction=direction)
+    else:
+        conv_args = ConvArgs(
+            geom,
+            direction,
+            algorithm,
+            tile_m=int(manifest["block_m"]),
+            tile_n=int(manifest["block_n"]),
+        )
+        default_sig = conv_args_signature(dtype, direction=direction, is_3d=is_3d)
+    signature = manifest.get("args_signature") or default_sig
+
     def make_args(rt: Runtime):
         A_dev = rt.alloc(nbytes(A))
         B_dev = rt.alloc(nbytes(B))
@@ -114,13 +172,15 @@ def run_conv_manifest_problem(
         rt.memcpy_h2d(A_dev, as_u8_buffer(A), nbytes(A))
         rt.memcpy_h2d(B_dev, as_u8_buffer(B), nbytes(B))
         rt.memset(D_dev, 0, nbytes(D))
-        if int(manifest.get("sig_has_bytes", 1)):
-            args = struct.pack(
-                "<QQQiii", A_dev, B_dev, D_dev, nbytes(A), nbytes(B), nbytes(D)
-            )
-        else:
-            args = struct.pack("<QQQ", A_dev, B_dev, D_dev)
-        return args, (A_dev, B_dev, D_dev)
+        values = conv_args.to_launch_values(
+            A_dev,
+            B_dev,
+            D_dev,
+            nbytes(A),
+            nbytes(B),
+            nbytes(D),
+        )
+        return pack_args(signature, values), (A_dev, B_dev, D_dev)
 
     def check(rt: Runtime, ptrs):
         if not verify:
