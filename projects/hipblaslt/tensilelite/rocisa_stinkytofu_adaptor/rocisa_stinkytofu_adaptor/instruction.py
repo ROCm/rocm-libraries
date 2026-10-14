@@ -5567,6 +5567,10 @@ class MFMAInstruction(Instruction):
             acc2_reg = _to_stinky_register(self.acc2_imm)
         elif self.acc2 is not None:
             acc2_reg = _to_stinky_register(self.acc2)
+        # rocisa getArgStr: HasWMMA_V1 -> neg_lo:[1,1,1], else neg_lo:[1,1].
+        neg_srcs = 0
+        if self.neg:
+            neg_srcs = 3 if caps.get("HasWMMA_V1", 0) else 2
         return _st.MFMA(
             type_str,
             _inst_type_to_str(self.accType),
@@ -5582,7 +5586,8 @@ class MFMAInstruction(Instruction):
             matrixBFmt=matrix_b_fmt,
             scaled=scaled,
             scaleOperands=scale_operands,
-            comment=self.comment)
+            comment=self.comment,
+            negSrcs=neg_srcs)
 
     def getParams(self):
         return [self.acc, self.a, self.b]

@@ -432,8 +432,12 @@ StinkyInstruction* createAsmFromIR(LogicalInstruction* irInst, GfxArchID arch) {
                 mod.reuseA = data->reuseA;
                 mod.reuseB = data->reuseB;
                 if (data->neg) {
-                    mod.negBits.negLo = {1, 1, 0};
-                    mod.negBits.numSrcs = 2;
+                    // rocisa MFMAInstruction::getArgStr: HasWMMA_V1 prints
+                    // neg_lo:[1,1,1]; otherwise neg_lo:[1,1]. The adaptor stores
+                    // that width in negSrcs. Any other value keeps the 2-source form.
+                    const int nSrcs = data->negSrcs == 3 ? 3 : 2;
+                    mod.negBits.numSrcs = static_cast<uint8_t>(nSrcs);
+                    mod.negBits.negLo = {1, 1, static_cast<uint8_t>(nSrcs == 3 ? 1 : 0)};
                 }
             }
             // gfx1250 f8f6f4-family WMMA carries per-matrix input formats
@@ -446,6 +450,7 @@ StinkyInstruction* createAsmFromIR(LogicalInstruction* irInst, GfxArchID arch) {
             }
         } else if (irInst->getOpcode() == logical::SMFMA) {
             const SMFMAData* data = irInst->asSMFMA();
+            // SMFMA getArgStr always prints neg_lo:[1,1], including when HasWMMA_V1 is set.
             if (data && data->neg) {
                 mod.negBits.negLo = {1, 1, 0};
                 mod.negBits.numSrcs = 2;
