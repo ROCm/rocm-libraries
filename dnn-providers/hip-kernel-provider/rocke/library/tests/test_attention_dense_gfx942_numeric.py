@@ -224,8 +224,8 @@ def test_dense_numeric_vs_fp32_sdpa(dtype, d, hq, hkv, persistent, causal):
     import torch
 
     # Element-wise atol + rtol*|ref| rather than a raw max-abs bound: rounding the
-    # fp32 reference to bf16 alone is up to ~8e-3 on these randn inputs, so a
-    # max-abs 1e-2 would leave little room for kernel error and turn seed-sensitive.
+    # fp32 reference to the output dtype alone consumes most of a fixed absolute
+    # budget on randn inputs, which would leave the check seed-sensitive.
     tol = 2e-3 if dtype == "fp16" else 1e-2
     tdt = getattr(torch, _TORCH_DT[dtype])
     B, S = 1, 512
