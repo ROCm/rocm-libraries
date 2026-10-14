@@ -326,6 +326,8 @@ if(NOT HIPDNN_SKIP_TESTS)
             INSTALL_SUBDIR hipblaslt_plugin
             TEST_CONFIG    ${CMAKE_CURRENT_SOURCE_DIR}/config/HIPBLASLT_ENGINE.toml
             GTEST_FILTER   "*Matmul*"
+            WORKLOAD_GTEST_FILTER
+                "dnn_benchmarking_hipblaslt_*"
             ${_external_category_args}
         )
         message(STATUS "Created ${PROJECT_NAME}-external-integration-check target")

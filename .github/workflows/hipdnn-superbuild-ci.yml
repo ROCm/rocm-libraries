@@ -282,7 +282,7 @@ jobs:
       # --output-junit is relative to --test-dir: this writes build/ctest-junit.xml.
       - name: Run tests
         id: run-tests
-        run: ctest --test-dir build --output-on-failure --output-junit ctest-junit.xml
+        run: ctest --test-dir build --output-on-failure -LE dnn_benchmarking --output-junit ctest-junit.xml
 
       # ctest counts a disabled or not-run test as success. Read the junit
       # "Run tests" wrote and fail if a declared packaging probe (listed in the
@@ -569,7 +569,7 @@ jobs:
         env:
           # Native rocKE AUTO detection must see the wheel COMGR used by packaging.
           ROCKE_COMGR_LIB: ${{ env.HKP_ROCKE_COMGR_LIB }}
-        run: ctest --test-dir build --output-on-failure --output-junit ctest-junit.xml
+        run: ctest --test-dir build --output-on-failure -LE dnn_benchmarking --output-junit ctest-junit.xml
 
       # ctest counts a disabled or not-run test as success. Read the junit
       # "Run tests" wrote and fail if a declared packaging probe (listed in the
@@ -615,6 +615,23 @@ jobs:
           ROCM_PATH="$ROCM_SDK_PATH" \
             LD_LIBRARY_PATH="$ROCM_SDK_PATH/lib:${LD_LIBRARY_PATH:-}" \
             "$VENV_PYTHON" -m pytest -q projects/hipdnn/python/frontend_wheel_package/tests
+
+      # The dnn_benchmarking ctest entries (one per provider engine, registered
+      # only when the workloads were pulled) take hours, so "Run tests" leaves
+      # them out and they run in the step after this one, last, so a workload
+      # failure cannot block the packaging above. Listing them is cheap, so it
+      # runs on every run that fetched the workloads and proves they registered.
+      - name: List dnn-benchmarking workload tests
+        if: steps.workloads.outputs.fetch == 'true'
+        run: ctest --test-dir build -N -L dnn_benchmarking --no-tests=error
+
+      # Nightly and manual runs only; a PR that bumps the pins still proves the
+      # pointers fetch, extract and register.
+      - name: Run dnn-benchmarking workloads
+        if: steps.workloads.outputs.fetch == 'true' && github.event_name != 'pull_request'
+        env:
+          ROCKE_COMGR_LIB: ${{ env.HKP_ROCKE_COMGR_LIB }}
+        run: ctest --test-dir build --output-on-failure -L dnn_benchmarking
 
   hipdnn_build_summary:
     name: hipDNN Superbuild Summary

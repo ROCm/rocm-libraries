@@ -422,6 +422,10 @@ if(NOT MIOPENPROVIDER_SKIP_TESTS)
             ENGINE_NAME    MIOPEN_ENGINE
             INSTALL_SUBDIR miopen_plugin
             TEST_CONFIG    ${CMAKE_CURRENT_SOURCE_DIR}/config/MIOPEN_ENGINE.toml
+            WORKLOAD_GTEST_FILTER
+                "dnn_benchmarking_conv_*"
+                "dnn_benchmarking_bnorm_*"
+                "dnn_benchmarking_rocke_conv.*"
             ${_external_category_args}
         )
         message(STATUS "Created ${PROJECT_NAME}-external-integration-check target")

@@ -71,6 +71,13 @@
 #     If omitted, all tests run. Patterns can be specified one per line for
 #     readability.
 #
+#   ``WORKLOAD_GTEST_FILTER``
+#     Optional list of Google Test filter expressions naming the
+#     dnn-benchmarking workload suites (``dnn_benchmarking_*``) this engine is
+#     expected to run. Joined with ``:``. When workload archives were pulled
+#     (``HIPDNN_IT_WORKLOAD_ARCHIVES_PRESENT``), one extra CTest entry
+#     ``<TARGET_NAME>-dnn-benchmarking`` runs them, labeled ``dnn_benchmarking``.
+#
 #   ``TEST_CATEGORIES_YAML``
 #     Optional path to a GTest ``test_categories.yaml``. When provided, this
 #     helper also creates category-specific CTest suites for
@@ -265,6 +272,50 @@ macro(_add_external_integration_category_suites)
     endif()
 endmacro()
 
+# True when dnn-benchmarking workload archives were pulled into ../workloads
+# (build-tree use only: the installed package ships none). Evaluated when this
+# module is included, so re-run configure after `dvc pull`.
+file(GLOB _hipdnn_it_workload_archives "${CMAKE_CURRENT_LIST_DIR}/../workloads/*.tar.gz")
+if(_hipdnn_it_workload_archives)
+    set(HIPDNN_IT_WORKLOAD_ARCHIVES_PRESENT TRUE)
+endif()
+
+# Registers the optional dnn-benchmarking workload CTest entry of one external
+# integration target: when workload archives were pulled (see
+# HIPDNN_IT_WORKLOAD_ARCHIVES_PRESENT) and the caller passed
+# WORKLOAD_GTEST_FILTER, this engine's share of them runs as one more entry. It is
+# labeled dnn_benchmarking, not integration_test, so label-based and bare runs can
+# leave it out; the superbuild CI runs it by that label.
+#
+# Uses the ARG_* variables parsed by add_external_integration_test_target().
+macro(_add_external_integration_workload_test)
+    if(ARG_WORKLOAD_GTEST_FILTER AND HIPDNN_IT_WORKLOAD_ARCHIVES_PRESENT)
+        list(JOIN ARG_WORKLOAD_GTEST_FILTER ":" _workload_filter)
+        set(_workload_test ${ARG_TARGET_NAME}-dnn-benchmarking)
+        # The engine's own GTEST_FILTER must not reach this command (a second
+        # --gtest_filter would be ambiguous); restore it for the code after.
+        set(_saved_gtest_filter "${ARG_GTEST_FILTER}")
+        unset(ARG_GTEST_FILTER)
+        _build_external_integration_command(_workload_cmd)
+        set(ARG_GTEST_FILTER "${_saved_gtest_filter}")
+        add_test(NAME ${_workload_test} COMMAND ${_workload_cmd} --gtest_filter=${_workload_filter})
+        set_tests_properties(${_workload_test} PROPERTIES
+            LABELS "dnn_benchmarking;external_integration_test;${_engine_label}"
+            TIMEOUT 14400)
+        if(ARG_ENVIRONMENT)
+            set_tests_properties(${_workload_test} PROPERTIES ENVIRONMENT "${ARG_ENVIRONMENT}")
+        endif()
+        if(ARG_ENVIRONMENT_MODIFICATION)
+            set_tests_properties(${_workload_test} PROPERTIES
+                ENVIRONMENT_MODIFICATION "${ARG_ENVIRONMENT_MODIFICATION}")
+        endif()
+        if(ARG_FIXTURES_REQUIRED)
+            set_tests_properties(${_workload_test} PROPERTIES
+                FIXTURES_REQUIRED "${ARG_FIXTURES_REQUIRED}")
+        endif()
+    endif()
+endmacro()
+
 # Adds a custom target and optional CTest entries for an external integration test.
 #
 # INSTALL_DESTINATION (optional, default <bindir>/<INSTALL_SUBDIR>) places the installed
@@ -289,7 +340,7 @@ function(add_external_integration_test_target)
         ARG
         ""
         "TARGET_NAME;PLUGIN_TARGET;ENGINE_NAME;INSTALL_SUBDIR;TEST_CONFIG;REFERENCE_EXECUTOR;TEST_CATEGORIES_YAML;INSTALL_TEST_FILE;TEST_NAME_PREFIX;INSTALL_DESTINATION;INSTALL_STAGING_KEY"
-        "GTEST_FILTER;ENVIRONMENT;INSTALL_ENVIRONMENT;ENVIRONMENT_MODIFICATION;FIXTURES_REQUIRED"
+        "GTEST_FILTER;WORKLOAD_GTEST_FILTER;ENVIRONMENT;INSTALL_ENVIRONMENT;ENVIRONMENT_MODIFICATION;FIXTURES_REQUIRED"
         ${ARGN}
     )
 
@@ -352,6 +403,9 @@ function(add_external_integration_test_target)
                 FIXTURES_REQUIRED "${ARG_FIXTURES_REQUIRED}")
         endif()
     endif()
+
+    # Optional dnn-benchmarking workloads, see the macro for what registers.
+    _add_external_integration_workload_test()
 
     # Stage an install-tree add_test() snippet so install_provider_ctest_files
     # can include this test in the installed CTestTestfile.cmake. Required for
