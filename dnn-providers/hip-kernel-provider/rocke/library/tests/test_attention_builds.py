@@ -133,6 +133,11 @@ _KERNEL_RESOURCE_BUDGETS = {
         "max_scratch_bytes": 32,
         "min_waves_per_simd": 2,
     },
+    # LSE retains the same persistent occupancy/scratch limits.
+    "rocke_attention_dense_d128_hq32_kv8_bn64_bf16_sq2048_sk2048_causal_lazyrs_lse_persist256": {
+        "max_scratch_bytes": 32,
+        "min_waves_per_simd": 2,
+    },
     # gfx942 fp16 D128 tiled-2d (shipped default geometry): 2 waves/EU caps VGPR at
     # 256; the kernel wants 354, so it spills ~40 B to hold 2-wave occupancy.
     "rocke_uattn2d_tiled_d128_b64_h32kv8_fp16_w4_wpe2_mw32_mfma32x8_stqk_s1_mask1_hoist_mlim_kvcpall_cfvst_ksring_rd2": {
@@ -1203,12 +1208,13 @@ class TestAttentionHelpers(unittest.TestCase):
 
         Dense bakes shape and ``AttentionDenseSpec.lds_v_row_pad`` in at build
         time and is LDS-heavy, so it is a live over-budget risk on its own.
-        Covers both the default and persistent (grid-stride) variants.
+        Covers default, persistent, and LSE-enabled wide-load variants.
         gfx950-only, torch-free -- comgr targets gfx950 via its triple.
         """
         from dataclasses import replace
 
         from kernels import AttentionDenseSpec, build_attention_dense
+        from kernels.gfx950.attention_dense import Gfx950AttentionDenseSpec
 
         base = AttentionDenseSpec(
             batch=1,
@@ -1220,9 +1226,23 @@ class TestAttentionHelpers(unittest.TestCase):
             causal=True,
             dtype="bf16",
         )
+        lse_base = Gfx950AttentionDenseSpec(
+            batch=base.batch,
+            seqlen_q=base.seqlen_q,
+            seqlen_kv=base.seqlen_kv,
+            num_query_heads=base.num_query_heads,
+            num_kv_heads=base.num_kv_heads,
+            head_size=base.head_size,
+            causal=base.causal,
+            dtype=base.dtype,
+            emit_lse=True,
+        )
         for label, spec in (
             ("default", base),
             ("persistent", replace(base, persistent=True)),
+            ("lse_default", lse_base),
+            ("lse_persistent", replace(lse_base, persistent=True)),
+            ("lse_wide", replace(lse_base, persistent=True, wide_lds_dma=True)),
         ):
             with self.subTest(variant=label):
                 k = build_attention_dense(spec, arch="gfx950")
@@ -3724,7 +3744,8 @@ class TestAttentionDenseGfx942RuntimeShapeCollision(unittest.TestCase):
         (q/k/v/o + scale + the five i32 shape args) and the persistent grid at each
         decode order, which appends that order's fast-division magic/shift pairs --
         a different tail per order, so a launcher packing one order's pairs for the
-        other would feed the decode the wrong divisors.
+        other would feed the decode the wrong divisors. Each arm is also checked
+        with ``use_sinks``, which appends ``sink_ptr`` after all of those.
         """
         from rocke.core.ir import PtrType
         from rocke.helpers.spec import ptr_type_str
@@ -3752,8 +3773,18 @@ class TestAttentionDenseGfx942RuntimeShapeCollision(unittest.TestCase):
             v: self._spec(**self._BASE_KWARGS, **kw)
             for v, (kw, _) in self._PERSIST_VARIANTS.items()
         }
+        rt_sinks = self._spec(**self._BASE_KWARGS, use_sinks=True)
+        persist_sinks = {
+            v: self._spec(**self._BASE_KWARGS, **kw, use_sinks=True)
+            for v, (kw, _) in self._PERSIST_VARIANTS.items()
+        }
 
-        for arm, spec in (("runtime-shape", rt), *persist.items()):
+        for arm, spec in (
+            ("runtime-shape", rt),
+            *persist.items(),
+            ("runtime-shape+sinks", rt_sinks),
+            *((f"{v}+sinks", s) for v, s in persist_sinks.items()),
+        ):
             with self.subTest(arm=arm):
                 params = build_attention_dense(spec, arch="gfx942").params
                 sig = attention_dense_signature(spec)
@@ -3793,6 +3824,16 @@ class TestAttentionDenseGfx942RuntimeShapeCollision(unittest.TestCase):
                     f"{variant}: persistent ABI is not the default ABI plus its "
                     "decode's magic/shift pairs",
                 )
+
+        # Sinks append exactly one kernarg, last, after any fast-division pairs.
+        for plain, with_sinks in (
+            (rt, rt_sinks),
+            *((persist[v], s) for v, s in persist_sinks.items()),
+        ):
+            self.assertEqual(
+                [a["name"] for a in attention_dense_signature(with_sinks)],
+                [a["name"] for a in attention_dense_signature(plain)] + ["sink_ptr"],
+            )
 
 
 class TestAttentionDenseGfx942RuntimeHeads(unittest.TestCase):

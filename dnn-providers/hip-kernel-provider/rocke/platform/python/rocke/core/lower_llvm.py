@@ -39,6 +39,9 @@ from typing import Dict, FrozenSet, List, NamedTuple, Optional, Set, Tuple
 
 from .codegen_policy import codegen_policy_for_kernel
 from .ir import (
+    _FENCE_ORDERINGS,
+    _FENCE_SCOPES,
+    _FLAG_STORE_ORDERINGS,
     BF16,
     F32,
     F16,
@@ -54,6 +57,8 @@ from .ir import (
     Type,
     Value,
     VectorType,
+    _sync_attr,
+    check_cluster_dims,
     require_streaming_arch,
     split_loc,
 )
@@ -298,21 +303,16 @@ def _detect_llvm_flavor() -> str:
     Loading and querying are owned by runtime.comgr, which caches the result
     for its loaded handle. ROCm package versions and compiler executables on
     PATH are not evidence about that compiler. If COMGR cannot be loaded or
-    queried, retain the llvm22 offline default; callers can pin a flavor with
-    ROCKE_LLVM_FLAVOR or the lowering API's llvm_flavor argument.
+    queried, raise; offline callers must pin a flavor with ROCKE_LLVM_FLAVOR
+    or the lowering API's llvm_flavor argument.
     """
     env = os.environ.get("ROCKE_LLVM_FLAVOR", "").strip().lower()
     if env in LLVM_FLAVORS:
         return env
-    try:
-        from ..runtime.comgr import loaded_compiler_info
+    from ..runtime.comgr import _require_compiler_info
 
-        info = loaded_compiler_info()
-        if info is not None and info.llvm_version is not None:
-            return _flavor_for_llvm(info.llvm_version[0])
-    except Exception:  # noqa: BLE001 - preserve best-effort automatic detection
-        pass
-    return LLVM_FLAVOR_LLVM22
+    info = _require_compiler_info()
+    return _flavor_for_llvm(info.llvm_version[0])
 
 
 def _resolve_llvm_flavor() -> str:
@@ -417,9 +417,11 @@ _INTRINSIC_DECLS: Dict[str, str] = {
     "sqrt.f32": "declare float @llvm.sqrt.f32(float)",
     "rsqrt.f32": "declare float @llvm.amdgcn.rsq.f32(float)",
     "rcp.f32": "declare float @llvm.amdgcn.rcp.f32(float)",
+    "maxnum.f64": "declare double @llvm.maxnum.f64(double, double)",
     "maxnum.f32": "declare float @llvm.maxnum.f32(float, float)",
     "maxnum.f16": "declare half @llvm.maxnum.f16(half, half)",
     "maxnum.bf16": "declare bfloat @llvm.maxnum.bf16(bfloat, bfloat)",
+    "minnum.f64": "declare double @llvm.minnum.f64(double, double)",
     "minnum.f32": "declare float @llvm.minnum.f32(float, float)",
     "minnum.f16": "declare half @llvm.minnum.f16(half, half)",
     "minnum.bf16": "declare bfloat @llvm.minnum.bf16(bfloat, bfloat)",
@@ -731,6 +733,10 @@ _INTRINSIC_DECLS: Dict[str, str] = {
         "declare i16 @llvm.amdgcn.raw.ptr.buffer.load.i16("
         "ptr addrspace(8) nocapture readonly, i32, i32, i32 immarg)"
     ),
+    "raw.ptr.buffer.load.f16": (
+        "declare half @llvm.amdgcn.raw.ptr.buffer.load.f16("
+        "ptr addrspace(8) nocapture readonly, i32, i32, i32 immarg)"
+    ),
     "raw.ptr.buffer.store.i32": (
         "declare void @llvm.amdgcn.raw.ptr.buffer.store.i32("
         "i32, ptr addrspace(8) nocapture writeonly, i32, i32, i32 immarg)"
@@ -953,6 +959,78 @@ _INTRINSIC_DECLS: Dict[str, str] = {
     "s.prefetch.inst.p4": (
         "declare void @llvm.amdgcn.s.prefetch.inst.p4(ptr addrspace(4), i32)"
     ),
+    "mfma.scale.f32.32x32x64.f8f6f4.v8i32.v8i32": "declare <16 x float> @llvm.amdgcn.mfma.scale.f32.32x32x64.f8f6f4.v8i32.v8i32(<8 x i32>, <8 x i32>, <16 x float>, i32 immarg, i32 immarg, i32 immarg, i32, i32 immarg, i32)",
+    # gfx1250 data prefetch (llvm23). ``s.prefetch.data`` is overloaded by
+    # address space exactly like ``s.prefetch.inst``; see
+    # _S_PREFETCH_DATA_PTR_TYPES.
+    "s.setreg": "declare void @llvm.amdgcn.s.setreg(i32 immarg, i32)",
+    "s.prefetch.data.p0": "declare void @llvm.amdgcn.s.prefetch.data.p0(ptr, i32)",
+    "s.prefetch.data.p1": (
+        "declare void @llvm.amdgcn.s.prefetch.data.p1(ptr addrspace(1), i32)"
+    ),
+    "s.prefetch.data.p4": (
+        "declare void @llvm.amdgcn.s.prefetch.data.p4(ptr addrspace(4), i32)"
+    ),
+    "s.buffer.prefetch.data": (
+        "declare void @llvm.amdgcn.s.buffer.prefetch.data("
+        "ptr addrspace(8), i32 immarg, i32)"
+    ),
+    "global.prefetch": (
+        "declare void @llvm.amdgcn.global.prefetch(ptr addrspace(1), i32 immarg)"
+    ),
+    "flat.prefetch": "declare void @llvm.amdgcn.flat.prefetch(ptr, i32 immarg)",
+    # gfx1250 workgroup clusters (llvm23).
+    "cluster.id.x": "declare i32 @llvm.amdgcn.cluster.id.x()",
+    "cluster.id.y": "declare i32 @llvm.amdgcn.cluster.id.y()",
+    "cluster.id.z": "declare i32 @llvm.amdgcn.cluster.id.z()",
+    "cluster.workgroup.id.x": "declare i32 @llvm.amdgcn.cluster.workgroup.id.x()",
+    "cluster.workgroup.id.y": "declare i32 @llvm.amdgcn.cluster.workgroup.id.y()",
+    "cluster.workgroup.id.z": "declare i32 @llvm.amdgcn.cluster.workgroup.id.z()",
+    "cluster.workgroup.max.id.x": (
+        "declare i32 @llvm.amdgcn.cluster.workgroup.max.id.x()"
+    ),
+    "cluster.workgroup.max.id.y": (
+        "declare i32 @llvm.amdgcn.cluster.workgroup.max.id.y()"
+    ),
+    "cluster.workgroup.max.id.z": (
+        "declare i32 @llvm.amdgcn.cluster.workgroup.max.id.z()"
+    ),
+    "cluster.workgroup.flat.id": (
+        "declare i32 @llvm.amdgcn.cluster.workgroup.flat.id()"
+    ),
+    "cluster.workgroup.max.flat.id": (
+        "declare i32 @llvm.amdgcn.cluster.workgroup.max.flat.id()"
+    ),
+    "s.cluster.barrier": "declare void @llvm.amdgcn.s.cluster.barrier()",
+    # gfx1250 cluster multicast loads (llvm23): (ptr, cachepolicy, M0 mask).
+    "cluster.load.b32.i32": (
+        "declare i32 @llvm.amdgcn.cluster.load.b32.i32("
+        "ptr addrspace(1), i32 immarg, i32)"
+    ),
+    "cluster.load.b64.v2i32": (
+        "declare <2 x i32> @llvm.amdgcn.cluster.load.b64.v2i32("
+        "ptr addrspace(1), i32 immarg, i32)"
+    ),
+    "cluster.load.b128.v4i32": (
+        "declare <4 x i32> @llvm.amdgcn.cluster.load.b128.v4i32("
+        "ptr addrspace(1), i32 immarg, i32)"
+    ),
+    "cluster.load.async.to.lds.b8": (
+        "declare void @llvm.amdgcn.cluster.load.async.to.lds.b8("
+        "ptr addrspace(1), ptr addrspace(3), i32 immarg, i32 immarg, i32)"
+    ),
+    "cluster.load.async.to.lds.b32": (
+        "declare void @llvm.amdgcn.cluster.load.async.to.lds.b32("
+        "ptr addrspace(1), ptr addrspace(3), i32 immarg, i32 immarg, i32)"
+    ),
+    "cluster.load.async.to.lds.b64": (
+        "declare void @llvm.amdgcn.cluster.load.async.to.lds.b64("
+        "ptr addrspace(1), ptr addrspace(3), i32 immarg, i32 immarg, i32)"
+    ),
+    "cluster.load.async.to.lds.b128": (
+        "declare void @llvm.amdgcn.cluster.load.async.to.lds.b128("
+        "ptr addrspace(1), ptr addrspace(3), i32 immarg, i32 immarg, i32)"
+    ),
 }
 
 # Address spaces each ``llvm_anyptr_ty`` intrinsic accepts, mapped to their LLVM
@@ -963,6 +1041,12 @@ _INTRINSIC_DECLS: Dict[str, str] = {
 # ``s.prefetch.inst`` reaches instruction memory through a flat, global, or
 # constant pointer (LLVM's own test uses ``addrspace(4)``).
 _S_PREFETCH_INST_PTR_TYPES: Dict[int, str] = {
+    0: "ptr",
+    1: "ptr addrspace(1)",
+    4: "ptr addrspace(4)",
+}
+# ``s.prefetch.data`` takes the same flat, global, or constant pointers.
+_S_PREFETCH_DATA_PTR_TYPES: Dict[int, str] = {
     0: "ptr",
     1: "ptr addrspace(1)",
     4: "ptr addrspace(4)",
@@ -1049,6 +1133,8 @@ def _llvm_type(t: Type) -> str:
         return "i8"
     if t.name == "f32":
         return "float"
+    if t.name == "f64":
+        return "double"
     raise NotImplementedError(f"no LLVM mapping for type {t!r}")
 
 
@@ -1139,6 +1225,16 @@ def _param_llvm_type(p: Param) -> str:
         if ovr == "global":
             return "ptr addrspace(1)"
     return _llvm_type(p.type)
+
+
+def _llvm_syncscope(scope: str) -> str:
+    """Render a fence / flag-op scope as an LLVM ``syncscope`` clause.
+
+    ``system`` is LLVM's default scope and has no textual clause.
+    """
+    if scope == "system":
+        return ""
+    return f' syncscope("{scope}")'
 
 
 def _escape_llvm_asm_string(s: str) -> str:
@@ -1552,6 +1648,8 @@ class _Lowerer:
         if op.name == "arith.constant":
             ity = op.attrs.get("ity", "i32")
             val = op.attrs["value"]
+            if ity == "f64":
+                return _fp64_hex(val)
             if ity == "f32":
                 return _fp32_hex(val)
             if ity == "f16":
@@ -1843,6 +1941,7 @@ class _Lowerer:
             "tf32": 4,
             "f32": 4,
             "i64": 8,
+            "f64": 8,
         }
 
         pool_name = f"@smem_pool.{self.kernel.name}"
@@ -1861,6 +1960,8 @@ class _Lowerer:
             return seg
 
         def _align(stype: "SmemType") -> int:
+            if stype.elem.name == "f64":
+                return 8
             return 16 if stype.elem.name in ("i8", "fp8e4m3", "bf8e5m2") else 4
 
         # ---- live intervals from the kernel body ----
@@ -2229,8 +2330,14 @@ class _Lowerer:
         # Dispatch on the operand FP width: half, float, bfloat each
         # have their own maxnum intrinsic. The previous f32-only path
         # silently mis-typed half operands as float and broke comgr.
-        llvm_ty = {"f32": "float", "f16": "half", "bf16": "bfloat"}.get(ty_name)
+        llvm_ty = {
+            "f64": "double",
+            "f32": "float",
+            "f16": "half",
+            "bf16": "bfloat",
+        }.get(ty_name)
         intrin_key = {
+            "f64": "maxnum.f64",
             "f32": "maxnum.f32",
             "f16": "maxnum.f16",
             "bf16": "maxnum.bf16",
@@ -2246,8 +2353,14 @@ class _Lowerer:
     def _op_arith_fmin(self, op: Op) -> None:
         a, b = op.operands
         ty_name = a.type.name
-        llvm_ty = {"f32": "float", "f16": "half", "bf16": "bfloat"}.get(ty_name)
+        llvm_ty = {
+            "f64": "double",
+            "f32": "float",
+            "f16": "half",
+            "bf16": "bfloat",
+        }.get(ty_name)
         intrin_key = {
+            "f64": "minnum.f64",
             "f32": "minnum.f32",
             "f16": "minnum.f16",
             "bf16": "minnum.bf16",
@@ -2847,6 +2960,58 @@ class _Lowerer:
             f"  {op.result.name} = call i32 @llvm.amdgcn.workgroup.id.{axis}()"
         )
 
+    # gfx1250 workgroup clusters
+
+    def _lower_cluster_read(self, op: Op, short_name: str, intrinsic: str) -> None:
+        self._require_gfx1250_llvm23(short_name)
+        if op.operands:
+            raise ValueError(f"{short_name} takes no operands")
+        if "{axis}" in intrinsic:
+            axis = op.attrs.get("axis")
+            if axis is None:
+                raise ValueError(f"{short_name} requires an axis attr")
+            if axis not in ("x", "y", "z"):
+                raise ValueError(f"{short_name} axis must be x, y, or z, got {axis!r}")
+            intrinsic = intrinsic.format(axis=axis)
+        self._need(intrinsic)
+        self._current().emit(
+            f"  {op.result.name} = call i32 @llvm.amdgcn.{intrinsic}()"
+        )
+
+    def _op_gpu_cluster_id(self, op: Op) -> None:
+        self._lower_cluster_read(op, "cluster_id", "cluster.id.{axis}")
+
+    def _op_gpu_cluster_workgroup_id(self, op: Op) -> None:
+        self._lower_cluster_read(
+            op, "cluster_workgroup_id", "cluster.workgroup.id.{axis}"
+        )
+
+    def _op_gpu_cluster_workgroup_max_id(self, op: Op) -> None:
+        self._lower_cluster_read(
+            op, "cluster_workgroup_max_id", "cluster.workgroup.max.id.{axis}"
+        )
+
+    def _op_gpu_cluster_workgroup_flat_id(self, op: Op) -> None:
+        self._lower_cluster_read(
+            op, "cluster_workgroup_flat_id", "cluster.workgroup.flat.id"
+        )
+
+    def _op_gpu_cluster_workgroup_max_flat_id(self, op: Op) -> None:
+        self._lower_cluster_read(
+            op, "cluster_workgroup_max_flat_id", "cluster.workgroup.max.flat.id"
+        )
+
+    def _op_tile_cluster_barrier(self, op: Op) -> None:
+        # Release/acquire at cluster scope around the LLVM cluster barrier. The
+        # intrinsic expands to a workgroup barrier followed by one signal per
+        # workgroup on the cluster barrier; waves never signal it directly.
+        self._require_gfx1250_llvm23("cluster_barrier")
+        self._need("s.cluster.barrier")
+        cur = self._current()
+        cur.emit('  fence syncscope("cluster") release')
+        cur.emit("  call void @llvm.amdgcn.s.cluster.barrier()")
+        cur.emit('  fence syncscope("cluster") acquire')
+
     # memory
 
     def _op_tile_smem_alloc(self, op: Op) -> None:
@@ -2949,6 +3114,56 @@ class _Lowerer:
             f"  {op.result.name} = atomicrmw {rmw_op} ptr addrspace(1) {gep}, "
             f"{elem_ty} {self._operand(val)} {ordering}{md}"
         )
+
+    def _op_memref_fence(self, op: Op) -> None:
+        """Lower ``memref.fence`` to an LLVM ``fence`` at the op's scope."""
+        scope = _sync_attr(op, "scope", _FENCE_SCOPES)
+        ordering = _sync_attr(op, "ordering", _FENCE_ORDERINGS)
+        self._current().emit(f"  fence{_llvm_syncscope(scope)} {ordering}")
+
+    def _op_memref_global_flag_store(self, op: Op) -> None:
+        """Lower ``memref.global_flag_store`` to a scoped ``store atomic i32``."""
+        ptr, idx, val = op.operands
+        scope = _sync_attr(op, "scope", _FENCE_SCOPES)
+        ordering = _sync_attr(op, "ordering", _FLAG_STORE_ORDERINGS)
+        gep = self._fresh("gep")
+        self._current().emit(
+            f"  {gep} = getelementptr inbounds i32, ptr addrspace(1) "
+            f"{self._operand(ptr)}, i32 {self._operand(idx)}"
+        )
+        self._current().emit(
+            f"  store atomic i32 {self._operand(val)}, ptr addrspace(1) {gep}"
+            f"{_llvm_syncscope(scope)} {ordering}, align 4"
+        )
+
+    def _op_memref_global_flag_wait_eq(self, op: Op) -> None:
+        """Lower ``memref.global_flag_wait_eq`` to a self-contained spin loop.
+
+        The loop re-issues an ``acquire`` atomic load until the flag matches;
+        an atomic load cannot be hoisted out of the loop, and the acquire
+        orders every later global load after the observed flag value.
+        """
+        ptr, idx, expect = op.operands
+        scope = _sync_attr(op, "scope", _FENCE_SCOPES)
+        gep = self._fresh("gep")
+        cur = self._current()
+        cur.emit(
+            f"  {gep} = getelementptr inbounds i32, ptr addrspace(1) "
+            f"{self._operand(ptr)}, i32 {self._operand(idx)}"
+        )
+        spin = self._new_block("flag.wait")
+        cur.emit(f"  br label %{spin.label}")
+        cur.terminated = True
+        val = self._fresh("flag")
+        hit = self._fresh("flag.hit")
+        spin.emit(
+            f"  {val} = load atomic i32, ptr addrspace(1) {gep}"
+            f"{_llvm_syncscope(scope)} acquire, align 4"
+        )
+        spin.emit(f"  {hit} = icmp eq i32 {val}, {self._operand(expect)}")
+        done = self._new_block("flag.done")
+        spin.emit(f"  br i1 {hit}, label %{done.label}, label %{spin.label}")
+        spin.terminated = True
 
     def _op_memref_global_atomic_add_pk_bf16(self, op: Op) -> None:
         """Lower the packed-bf16 atomic add via a generic ``atomicrmw fadd``
@@ -3055,7 +3270,7 @@ class _Lowerer:
             f"{', '.join(gidx)}"
         )
         # Alignment is the element byte size: 1 for i8, 2 for f16/bf16,
-        # 4 for f32/i32, 8 for i64. The AMDGPU backend rejects loads /
+        # 4 for f32/i32, 8 for i64/f64. The AMDGPU backend rejects loads /
         # stores with under-aligned addresses on ``addrspace(3)``.
         align = {
             "i8": 1,
@@ -3067,6 +3282,7 @@ class _Lowerer:
             "tf32": 4,
             "f32": 4,
             "i64": 8,
+            "f64": 8,
         }.get(value.type.name, 2)
         self._current().emit(
             f"  store {_llvm_type(value.type)} {self._operand(value)}, ptr addrspace(3) {gep}, align {align}"
@@ -3132,6 +3348,7 @@ class _Lowerer:
             "tf32": 4,
             "f32": 4,
             "i64": 8,
+            "f64": 8,
         }.get(
             value.type.elem.name, 2
         )  # type: ignore[attr-defined]
@@ -3206,7 +3423,8 @@ class _Lowerer:
         )
         elem_ty = _llvm_type(op.result.type.elem)  # type: ignore[attr-defined]
         # Element byte size drives the vector alignment. 16-bit
-        # (f16 / bf16): 2 bytes; 32-bit (f32 / i32): 4 bytes.
+        # (f16 / bf16): 2 bytes; 32-bit (f32 / i32): 4 bytes; 64-bit
+        # (i64 / f64): 8 bytes.
         elem_bytes = {
             "i8": 1,
             "f16": 2,
@@ -3215,6 +3433,7 @@ class _Lowerer:
             "tf32": 4,
             "f32": 4,
             "i64": 8,
+            "f64": 8,
         }.get(
             op.result.type.elem.name,
             2,  # type: ignore[attr-defined]
@@ -3438,6 +3657,29 @@ class _Lowerer:
     def _op_tile_mfma_f32_32x32x16_bf8(self, op: Op) -> None:
         self._lower_mfma_fp8_bf8(
             op, dtype="bf8", out_vec=16, intrinsic="32x32x16.bf8.bf8"
+        )
+
+    def _emit_gfx950_scaled_mfma(self, op: Op) -> None:
+        from .arch.mfma_scale import (
+            gfx950_scaled_mfma,
+            scaled_mfma_error,
+            MATRIX_FORMATS,
+            INTRINSIC_KEY,
+        )
+
+        atom = gfx950_scaled_mfma(op.attrs["op_id"])
+        if self._backend.arch.gfx != "gfx950":
+            raise NotImplementedError("scaled MFMA requires gfx950")
+        error = scaled_mfma_error(atom.op_id, op.operands, op.results)
+        if error:
+            raise ValueError(error)
+        a, b, c, sa, sb = op.operands
+        self._need(INTRINSIC_KEY)
+        self._current().emit(
+            f"  {op.result.name} = call <16 x float> @llvm.amdgcn.{INTRINSIC_KEY}("
+            f"<8 x i32> {self._operand(a)}, <8 x i32> {self._operand(b)}, <16 x float> {self._operand(c)}, "
+            f"i32 {MATRIX_FORMATS[atom.a_dtype]}, i32 {MATRIX_FORMATS[atom.b_dtype]}, "
+            f"i32 0, i32 {self._operand(sa)}, i32 0, i32 {self._operand(sb)})"
         )
 
     def _op_tile_mfma_scale_f32_16x16x128_f8f6f4(self, op: Op) -> None:
@@ -4168,6 +4410,79 @@ class _Lowerer:
             f"{ptr_ty} {self._operand(ptr)}, i32 {self._operand(length)})"
         )
 
+    # ----- gfx1250 data prefetch -----
+
+    def _check_cachepolicy(self, op: str, value: object) -> int:
+        v = int(value)  # type: ignore[call-overload]
+        if not 0 <= v <= 31:
+            raise ValueError(f"{op} cachepolicy must be in 0..31, got {v}")
+        return v
+
+    def _op_tile_s_setreg(self, op: Op) -> None:
+        self._require_gfx1250_llvm23("s_setreg")
+        (value,) = op.operands
+        simm16 = self._check_u16("s_setreg", "simm16", op.attrs.get("simm16", 0))
+        self._need("s.setreg")
+        self._current().emit(
+            f"  call void @llvm.amdgcn.s.setreg(i32 {simm16}, i32 {self._operand(value)})"
+        )
+
+    def _op_tile_s_prefetch_data(self, op: Op) -> None:
+        self._require_gfx1250_llvm23("s_prefetch_data")
+        ptr, length = op.operands
+        space, ptr_ty = self._anyptr_space(
+            "s_prefetch_data", ptr, _S_PREFETCH_DATA_PTR_TYPES
+        )
+        self._need(f"s.prefetch.data.p{space}")
+        self._current().emit(
+            f"  call void @llvm.amdgcn.s.prefetch.data.p{space}("
+            f"{ptr_ty} {self._operand(ptr)}, i32 {self._operand(length)})"
+        )
+
+    def _op_tile_s_buffer_prefetch_data(self, op: Op) -> None:
+        self._require_gfx1250_llvm23("s_buffer_prefetch_data")
+        rsrc, length = op.operands
+        offset = int(op.attrs.get("offset", 0))
+        if not -(2**31) <= offset <= 2**31 - 1:
+            raise ValueError(
+                f"s_buffer_prefetch_data offset must fit signed i32, got {offset}"
+            )
+        self._need("s.buffer.prefetch.data")
+        self._current().emit(
+            f"  call void @llvm.amdgcn.s.buffer.prefetch.data("
+            f"ptr addrspace(8) {self._operand(rsrc)}, i32 {offset}, "
+            f"i32 {self._operand(length)})"
+        )
+
+    def _op_tile_global_prefetch(self, op: Op) -> None:
+        self._require_gfx1250_llvm23("global_prefetch")
+        (ptr,) = op.operands
+        if self._ptr_llvm_type(ptr) != "ptr addrspace(1)":
+            raise TypeError(
+                f"global_prefetch ptr must be a global pointer, "
+                f"got {self._ptr_llvm_type(ptr)}"
+            )
+        cp = self._check_cachepolicy("global_prefetch", op.attrs.get("cachepolicy", 0))
+        self._need("global.prefetch")
+        self._current().emit(
+            f"  call void @llvm.amdgcn.global.prefetch("
+            f"ptr addrspace(1) {self._operand(ptr)}, i32 {cp})"
+        )
+
+    def _op_tile_flat_prefetch(self, op: Op) -> None:
+        self._require_gfx1250_llvm23("flat_prefetch")
+        (ptr,) = op.operands
+        if self._ptr_llvm_type(ptr) != "ptr":
+            raise TypeError(
+                f"flat_prefetch ptr must be a flat pointer, "
+                f"got {self._ptr_llvm_type(ptr)}"
+            )
+        cp = self._check_cachepolicy("flat_prefetch", op.attrs.get("cachepolicy", 0))
+        self._need("flat.prefetch")
+        self._current().emit(
+            f"  call void @llvm.amdgcn.flat.prefetch(ptr {self._operand(ptr)}, i32 {cp})"
+        )
+
     def _op_tile_permlane32_swap(self, op: Op) -> None:
         """``v_permlane32_swap_b32`` — wave64 half-swap in 1 VALU op."""
         lo, hi = op.operands
@@ -4472,6 +4787,16 @@ class _Lowerer:
             f"{self._operand(ptr)}, i64 {off64}"
         )
 
+    def _op_tile_global_ptr_to_i64(self, op: Op) -> None:
+        if len(op.operands) != 1 or len(op.results) != 1:
+            raise ValueError("global_ptr_to_i64 expects one operand and one result")
+        (ptr,) = op.operands
+        if self._ptr_llvm_type(ptr) != "ptr addrspace(1)":
+            raise TypeError("global_ptr_to_i64 ptr must be a global pointer")
+        self._current().emit(
+            f"  {op.result.name} = ptrtoint ptr addrspace(1) {self._operand(ptr)} to i64"
+        )
+
     def _op_tile_async_buffer_load_lds_addr(self, op: Op) -> None:
         rsrc, lds_addr, voff, soff = op.operands
         dwords = int(op.attrs["dwords"])
@@ -4673,6 +4998,80 @@ class _Lowerer:
             f"  {op.result.name} = call {llvm_ty} "
             f"@llvm.amdgcn.global.load.tr.b128.{suffix}("
             f"ptr addrspace(1) {self._operand(src_ptr)})"
+        )
+
+    def _cluster_load_policy(self, op: Op, short_name: str) -> int:
+        cachepolicy = int(op.attrs.get("cachepolicy", 0))
+        if not 0 <= cachepolicy <= 0x1F:
+            raise ValueError(
+                f"{short_name} cachepolicy must be in 0..31, got {cachepolicy}"
+            )
+        return cachepolicy
+
+    def _op_tile_cluster_load(self, op: Op) -> None:
+        self._require_gfx1250_llvm23("cluster_load")
+        if len(op.operands) != 2 or len(op.results) != 1:
+            raise ValueError("cluster_load expects two operands and one result")
+        ptr, mask = op.operands
+        if self._ptr_llvm_type(ptr) != "ptr addrspace(1)":
+            raise TypeError("cluster_load ptr must be a global pointer")
+        if mask.type != I32:
+            raise TypeError("cluster_load mask must be i32")
+        width = int(op.attrs.get("width_bytes", 0))
+        shapes = {
+            4: ("b32", "i32", I32),
+            8: ("b64", "v2i32", VectorType(I32, 2)),
+            16: ("b128", "v4i32", VectorType(I32, 4)),
+        }
+        if width not in shapes:
+            raise ValueError(
+                f"cluster_load width_bytes must be 4, 8, or 16, got {width}"
+            )
+        bits, suffix, expected = shapes[width]
+        if op.result.type != expected:
+            raise TypeError(
+                f"cluster_load result must be {expected.name}, "
+                f"got {getattr(op.result.type, 'name', op.result.type)}"
+            )
+        cachepolicy = self._cluster_load_policy(op, "cluster_load")
+        key = f"cluster.load.{bits}.{suffix}"
+        self._need(key)
+        self._current().emit(
+            f"  {op.result.name} = call {_llvm_type(expected)} "
+            f"@llvm.amdgcn.cluster.load.{bits}.{suffix}("
+            f"ptr addrspace(1) {self._operand(ptr)}, i32 {cachepolicy}, "
+            f"i32 {self._operand(mask)})"
+        )
+
+    def _op_tile_cluster_load_async_to_lds(self, op: Op) -> None:
+        self._require_gfx1250_llvm23("cluster_load_async_to_lds")
+        if len(op.operands) != 3:
+            raise ValueError("cluster_load_async_to_lds expects three operands")
+        src_ptr, lds_ptr, mask = op.operands
+        if self._ptr_llvm_type(src_ptr) != "ptr addrspace(1)":
+            raise TypeError(
+                "cluster_load_async_to_lds src_ptr must be a global pointer"
+            )
+        if mask.type != I32:
+            raise TypeError("cluster_load_async_to_lds mask must be i32")
+        width = int(op.attrs.get("width_bytes", 0))
+        if width not in (1, 4, 8, 16):
+            raise ValueError(
+                f"cluster_load_async_to_lds width_bytes must be 1, 4, 8, or 16, got {width}"
+            )
+        offset = int(op.attrs.get("offset_bytes", 0))
+        if not -(1 << 31) <= offset < (1 << 31):
+            raise ValueError(
+                f"cluster_load_async_to_lds offset_bytes must fit signed i32, got {offset}"
+            )
+        cachepolicy = self._cluster_load_policy(op, "cluster_load_async_to_lds")
+        suffix = {1: "b8", 4: "b32", 8: "b64", 16: "b128"}[width]
+        local = self._lds_ptr_operand("cluster_load_async_to_lds", lds_ptr)
+        self._need(f"cluster.load.async.to.lds.{suffix}")
+        self._current().emit(
+            f"  call void @llvm.amdgcn.cluster.load.async.to.lds.{suffix}("
+            f"ptr addrspace(1) {self._operand(src_ptr)}, ptr addrspace(3) {local}, "
+            f"i32 {offset}, i32 {cachepolicy}, i32 {self._operand(mask)})"
         )
 
     def _op_tile_tensor_load_to_lds(self, op: Op) -> None:
@@ -4998,6 +5397,19 @@ class _Lowerer:
             f"i32 0)"
         )
         self._current().emit(f"  {op.result.name} = bitcast i16 {tmp} to half")
+
+    def _op_tile_buffer_load_f16_d16(self, op: Op) -> None:
+        """D16-form scalar half buffer load: the raw ``raw.ptr.buffer.load.f16``
+        intrinsic returns ``half`` directly (no i16 + bitcast round-trip).
+        Port of the pinned PR9710 ``tile.buffer_load_f16_d16`` lowering.
+        """
+        rsrc, voffset, soffset = op.operands
+        self._need("raw.ptr.buffer.load.f16")
+        self._current().emit(
+            f"  {op.result.name} = call half @llvm.amdgcn.raw.ptr.buffer.load.f16("
+            f"ptr addrspace(8) {self._operand(rsrc)}, "
+            f"i32 {self._operand(voffset)}, i32 {self._operand(soffset)}, i32 0)"
+        )
 
     def _op_tile_buffer_load_vN(self, op: Op) -> None:
         """Dtype-generic vectorised buffer load.
@@ -5450,6 +5862,7 @@ class _Lowerer:
             "tf32": 4,
             "f32": 4,
             "i64": 8,
+            "f64": 8,
         }.get(elem_name, 2)
         align = int(op.attrs.get("align", vec * elem_bytes))
         if align <= 0 or align & (align - 1):
@@ -5492,6 +5905,14 @@ class _Lowerer:
             f"  {op.result.name} = extractelement {_llvm_type(v.type)} "
             f"{self._operand(v)}, i32 {i}"
         )
+
+    def _op_vector_undef(self, op: Op) -> None:
+        """Freeze-poison base for a vector fully overwritten by subsequent
+        inserts (never a zero substitute). Port of the pinned PR9710
+        ``vector.undef`` lowering.
+        """
+        dtype = _llvm_type(op.result.type)
+        self._current().emit(f"  {op.result.name} = freeze {dtype} poison")
 
     def _op_vector_splat(self, op: Op) -> None:
         (scalar,) = op.operands
@@ -5570,15 +5991,21 @@ class _Lowerer:
 
     def _op_vector_add(self, op: Op) -> None:
         elem = op.result.type.elem.name  # type: ignore[attr-defined]
-        self._vector_binop(op, "fadd" if elem in ("f16", "bf16", "f32") else "add")
+        self._vector_binop(
+            op, "fadd" if elem in ("f16", "bf16", "f32", "f64") else "add"
+        )
 
     def _op_vector_mul(self, op: Op) -> None:
         elem = op.result.type.elem.name  # type: ignore[attr-defined]
-        self._vector_binop(op, "fmul" if elem in ("f16", "bf16", "f32") else "mul")
+        self._vector_binop(
+            op, "fmul" if elem in ("f16", "bf16", "f32", "f64") else "mul"
+        )
 
     def _op_vector_sub(self, op: Op) -> None:
         elem = op.result.type.elem.name  # type: ignore[attr-defined]
-        self._vector_binop(op, "fsub" if elem in ("f16", "bf16", "f32") else "sub")
+        self._vector_binop(
+            op, "fsub" if elem in ("f16", "bf16", "f32", "f64") else "sub"
+        )
 
     def _op_vector_and(self, op: Op) -> None:
         self._vector_binop(op, "and")
@@ -6173,9 +6600,11 @@ class _Lowerer:
         out.append("}")
         out.append("")
         max_wg = self.kernel.max_workgroup_size
+        # LLVM discards inverted ranges, losing the declared resource limit.
+        min_wg = min(self._backend.arch.wave_size, max_wg)
         attr_parts = [
             '"uniform-work-group-size"="true"',
-            f'"amdgpu-flat-work-group-size"="64,{max_wg}"',
+            f'"amdgpu-flat-work-group-size"="{min_wg},{max_wg}"',
         ]
         scheduler_strategy = codegen_policy_for_kernel(self.kernel).scheduler_strategy
         if scheduler_strategy is not None:
@@ -6195,6 +6624,14 @@ class _Lowerer:
         agpr_alloc = self.kernel.attrs.get("agpr_alloc")
         if agpr_alloc is not None:
             attr_parts.append(f'"amdgpu-agpr-alloc"="{_format_agpr_alloc(agpr_alloc)}"')
+        # gfx1250 workgroup-cluster shape. The backend copies it to the
+        # code-object ``.cluster_dims`` metadata without range checks, so it
+        # is validated here; the launch must pass the same shape.
+        cluster_dims = self.kernel.attrs.get("cluster_dims")
+        if cluster_dims is not None:
+            self._require_gfx1250_llvm23("cluster_dims")
+            cx, cy, cz = check_cluster_dims(cluster_dims)
+            attr_parts.append(f'"amdgpu-cluster-dims"="{cx},{cy},{cz}"')
         out.append(
             "attributes #0 = { " + " ".join(attr_parts) + " norecurse nounwind }"
         )
@@ -6325,6 +6762,14 @@ def _encode_waitcnt_gfx11(vmcnt: int, expcnt: int, lgkmcnt: int) -> int:
     ec_b = 0x7 if expcnt < 0 else min(max(expcnt, 0), 0x7)
     lk_b = 0x3F if lgkmcnt < 0 else min(max(lgkmcnt, 0), 0x3F)
     return (ec_b & 0x7) | ((lk_b & 0x3F) << 4) | ((vm_b & 0x3F) << 10)
+
+
+def _fp64_hex(x: float) -> str:
+    # LLVM textual IR spells `double` hex constants as the raw IEEE-754 bits.
+    import struct
+
+    bits = struct.unpack("<Q", struct.pack("<d", float(x)))[0]
+    return f"0x{bits:016X}"
 
 
 def _fp32_hex(x: float) -> str:
