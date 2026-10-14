@@ -206,6 +206,18 @@ reduction:
     ignored: []
   aot_budget_per_arch: 1000
 
+# How owner benchmark rows become hipDNN graphs (tools/ground_truth.py graphs).
+# `${<request field>}` fills a scalar; `value_map` translates a request value to that
+# scalar or to JSON-pointer patches; an unlisted value fails the row.
+# A tensor's `"strides": "packed"` packs its axes outermost-first in `stride_order` (BSHD here).
+ground_truth:
+  graph_template: templates/attention_sdpa_fwd.graph.json
+  value_map:
+    dtype: {bf16: bfloat16, fp16: half}
+    mask_type:
+      TOP_LEFT_CAUSAL: {/nodes/0/attributes/causal_mask: true}
+      NO_MASK: {/nodes/0/attributes/causal_mask: false}
+
 # Launch-surface audit (`tools/launch_surface.py --check <this file>`).
 launch_surface:
   - name: grid

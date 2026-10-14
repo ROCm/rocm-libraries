@@ -273,7 +273,8 @@ def load_config(path):
     benchmark = config["benchmark"]
     _fields(benchmark, ("argv", "warmup", "iters"))
     benchmark["argv"] = _argv(benchmark["argv"], base)
-    # Phase flags are owned by this driver, so duplicate options cannot redirect evidence.
+    # Phase flags and the benchmark cache the rankings are read from are owned by this
+    # driver, so duplicate options cannot redirect evidence.
     reserved = {
         "--graph",
         "--plugin-path",
@@ -284,6 +285,8 @@ def load_config(path):
         "--validate",
         "--engine",
         "--backend",
+        "--autotune",
+        "--hipdnn-cache-dir",
     }
     if any(arg.split("=", 1)[0] in reserved for arg in benchmark["argv"][1:]):
         raise ConfigError("benchmark.argv must not override phase-owned options")
