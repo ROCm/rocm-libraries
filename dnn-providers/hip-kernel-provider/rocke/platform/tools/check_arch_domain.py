@@ -33,6 +33,7 @@ import os
 import sys
 import warnings
 from pathlib import Path
+from typing import NamedTuple
 
 from _flavor_gate import requires_newer_flavor
 
@@ -55,27 +56,49 @@ def _bootstrap_sys_path() -> None:
             break
 
 
+class Expected(NamedTuple):
+    """One allowlisted demand: why it is allowed, and by which corpus cases."""
+
+    reason: str
+    cases: frozenset[str]
+
+
 # Every (declaration key, target, flavor) the corpus is currently allowed to
-# demand against a target the artifact says cannot lower it, with the reason.
+# demand against a target the artifact says cannot lower it, with the reason
+# and the corpus cases that may demand it. Naming the cases is what keeps the
+# list from widening in silence: a different case that starts demanding the
+# same intrinsic is a new finding, and fixing one of two cases makes the entry
+# stale rather than leaving it to cover whatever comes next.
+#
 # Name the defect, not a tracker ID: the tracking reference belongs in the
 # commit that adds the entry, and an entry nobody owns cannot burn down.
 #
 # Same rule as KNOWN_BAD in check_ir_validity.py and KNOWN_VIOLATIONS in
 # library/tests/test_library_layering.py: **this list only ever SHRINKS**. An
-# entry that stops firing is itself a failure, and a new entry is a kernel bug
-# to fix rather than a line to add.
-EXPECTED_WARNINGS: dict[tuple[str, str, str], str] = {}
+# entry, or one of its cases, that stops firing is itself a failure, and a new
+# entry is a kernel bug to fix rather than a line to add.
+EXPECTED_WARNINGS: dict[tuple[str, str, str], Expected] = {}
+
+_HARNESS_REASON = (
+    "attention 3d d128/b64: the parity harness builds the gfx950 3D "
+    "kernel for these gfx942 cases, so they demand CDNA4 intrinsics on "
+    "a CDNA3 target; the same two cases check_ir_validity.py lists in "
+    "KNOWN_BAD, found here at declaration-demand time with the "
+    "intrinsic named"
+)
+_BF16_3D = "attention/gfx942/3d_bf16_d128_b64"
+_FP16_3D = "attention/gfx942/3d_fp16_d128_b64"
 
 for _flavor in ("llvm20", "llvm22", "llvm23"):
-    for _key in ("ds.read.tr16.b64", "mfma.f32.16x16x32.bf16", "mfma.f32.16x16x32.f16"):
-        EXPECTED_WARNINGS[(_key, "gfx942", _flavor)] = (
-            "attention 3d d128/b64: the parity harness builds the gfx950 3D "
-            "kernel for these gfx942 cases, so they demand CDNA4 intrinsics on "
-            "a CDNA3 target; the same two cases check_ir_validity.py lists in "
-            "KNOWN_BAD, found here at declaration-demand time with the "
-            "intrinsic named"
+    for _key, _cases in (
+        ("ds.read.tr16.b64", (_BF16_3D, _FP16_3D)),
+        ("mfma.f32.16x16x32.bf16", (_BF16_3D,)),
+        ("mfma.f32.16x16x32.f16", (_FP16_3D,)),
+    ):
+        EXPECTED_WARNINGS[(_key, "gfx942", _flavor)] = Expected(
+            _HARNESS_REASON, frozenset(_cases)
         )
-del _flavor, _key
+del _flavor, _key, _cases
 
 # `wmma.i32.16x16x16.iu4`/`.iu8` on gfx11-generic and gfx1151 at llvm20 were
 # listed here as artifact false negatives. Generator 5 builds each probe from
@@ -83,16 +106,63 @@ del _flavor, _key
 # those four cells now measure `ok`; the entries are deleted rather than kept.
 
 
-def _harvest(
-    cases: list[dict], flavor: str
+def judge(
+    found: dict[tuple[str, str, str], set[str]],
+    expected: dict[tuple[str, str, str], Expected],
+    lowered: dict[str, set[str]],
+    known_cases: set[str],
+    flavors: list[str],
 ) -> tuple[
-    dict[tuple[str, str, str], set[str]], list[tuple[str, str]], list[tuple[str, str]]
+    dict[tuple[str, str, str], set[str]],
+    list[tuple[tuple[str, str, str], str, str]],
+]:
+    """Compare what fired with the allowlist.
+
+    ``found`` maps (key, arch, flavor) to the case ids that demanded it,
+    ``lowered`` maps a flavor to the case ids that lowered there, and
+    ``known_cases`` is every case id in the corpus.
+
+    Returns ``(unexpected, stale)``. Unexpected: a triple the allowlist does not
+    have, or, for one it does have, only the cases it does not name. Stale: an
+    allowlisted case that lowered at the flavor and no longer demands the
+    intrinsic, or that the corpus no longer has. A case that did not run -- a
+    filtered selection, or an instance that declines the flavor -- says nothing,
+    so it is never judged.
+    """
+    unexpected: dict[tuple[str, str, str], set[str]] = {}
+    for triple, case_ids in found.items():
+        allowed = expected[triple].cases if triple in expected else frozenset()
+        extra = case_ids - allowed
+        if extra:
+            unexpected[triple] = set(extra)
+    stale: list[tuple[tuple[str, str, str], str, str]] = []
+    for triple, entry in sorted(expected.items()):
+        flavor = triple[2]
+        if flavor not in flavors:
+            continue
+        for case_id in sorted(entry.cases):
+            if case_id not in known_cases:
+                stale.append((triple, case_id, "the corpus has no such case"))
+            elif case_id in lowered.get(flavor, set()) and case_id not in found.get(
+                triple, set()
+            ):
+                stale.append((triple, case_id, "lowered, and no longer demands it"))
+    return unexpected, stale
+
+
+def _harvest(cases: list[dict], flavor: str) -> tuple[
+    dict[tuple[str, str, str], set[str]],
+    list[tuple[str, str]],
+    list[tuple[str, str]],
+    set[str],
 ]:
     """Lower every case at ``flavor`` and collect the arch-domain warnings.
 
     Returns the warnings keyed by (key, arch, flavor) -> the case ids that
     raised them, then two separate lists of cases that did not lower: the ones
-    that *could not* at this flavor, and the ones that failed.
+    that *could not* at this flavor, and the ones that failed. The last item is
+    the ids that did lower, which is what lets the gate tell an allowlisted case
+    that stopped demanding an intrinsic from one that never ran.
 
     The split matters because this gate lowers the corpus at *every* committed
     flavor, so an llvm23-gated instance always refuses on the llvm20/llvm22
@@ -112,6 +182,7 @@ def _harvest(
     found: dict[tuple[str, str, str], set[str]] = {}
     errors: list[tuple[str, str]] = []
     unlowerable: list[tuple[str, str]] = []
+    lowered: set[str] = set()
     for case in cases:
         with warnings.catch_warnings(record=True) as caught:
             # `always`, not the default `once`: `once` dedupes per code
@@ -124,11 +195,12 @@ def _harvest(
                 bucket = unlowerable if requires_newer_flavor(exc) else errors
                 bucket.append((case["case_id"], f"{type(exc).__name__}: {exc}"))
                 continue
+        lowered.add(case["case_id"])
         for item in caught:
             w = item.message
             if isinstance(w, ArchDomainWarning):
                 found.setdefault((w.key, w.arch, w.flavor), set()).add(case["case_id"])
-    return found, errors, unlowerable
+    return found, errors, unlowerable, lowered
 
 
 def main() -> int:
@@ -158,6 +230,7 @@ def main() -> int:
     from rocke_ir_parity_harness import cases
 
     keep = list(cases())
+    known_cases = {c["case_id"] for c in keep}
     if args.only:
         wanted = [s for s in args.only.split(",") if s]
         keep = [c for c in keep if any(w in c["case_id"] for w in wanted)]
@@ -188,26 +261,29 @@ def main() -> int:
     found: dict[tuple[str, str, str], set[str]] = {}
     errors: list[tuple[str, str]] = []
     unlowerable: list[tuple[str, str]] = []
+    lowered: dict[str, set[str]] = {}
     for flavor in flavors:
-        got, errs, skipped_cases = _harvest(keep, flavor)
+        got, errs, skipped_cases, ran = _harvest(keep, flavor)
         found.update(got)
         errors.extend(errs)
         unlowerable.extend(skipped_cases)
+        lowered[flavor] = ran
 
-    # Only entries whose flavor was actually measured can be judged stale: a
-    # --flavor or --arch selection narrows what ran.
-    selected_arches = {c["arch"] for c in keep}
+    # What ran bounds what can be judged: a --flavor, --arch or --only selection
+    # narrows it, and an allowlisted case that did not run is neither confirmed
+    # nor stale.
+    unexpected, stale = judge(found, EXPECTED_WARNINGS, lowered, known_cases, flavors)
     in_scope = {
         k
-        for k in EXPECTED_WARNINGS
-        if k[2] in flavors and k[1] in selected_arches and not args.only
+        for k, entry in EXPECTED_WARNINGS.items()
+        if k[2] in flavors and entry.cases & lowered.get(k[2], set())
     }
-    unexpected = {k: v for k, v in found.items() if k not in EXPECTED_WARNINGS}
-    stale = sorted(in_scope - set(found))
 
     print()
-    print(f"   expected  : {len(found) - len(unexpected)} / {len(in_scope)} in scope")
+    print(f"   expected  : {len(in_scope & set(found))} / {len(in_scope)} in scope")
     print(f"   unexpected: {len(unexpected)}")
+    if stale:
+        print(f"   stale     : {len(stale)}")
     if unlowerable:
         print(f"   not asked : {len(unlowerable)} (instance needs a newer LLVM)")
 
@@ -234,6 +310,8 @@ def main() -> int:
         print("\n== UNEXPECTED warnings ==")
         for k in sorted(unexpected):
             print(f"\n  {k[0]}  [{k[1]} @ {k[2]}]")
+            if k in EXPECTED_WARNINGS:
+                print("      allowlisted, but not for these cases:")
             for cid in sorted(unexpected[k]):
                 print(f"      {cid}")
         print(
@@ -242,15 +320,15 @@ def main() -> int:
         )
 
     if stale:
-        print("\n== STALE EXPECTED_WARNINGS entries (these no longer fire) ==")
-        for k in stale:
+        print("\n== STALE EXPECTED_WARNINGS entries (a case no longer demands it) ==")
+        for k, case_id, why in stale:
             print(
-                f"  {k[0]}  [{k[1]} @ {k[2]}]\n    reason on file: "
-                f"{EXPECTED_WARNINGS[k]}"
+                f"  {k[0]}  [{k[1]} @ {k[2]}]\n      {case_id}: {why}\n"
+                f"    reason on file: {EXPECTED_WARNINGS[k].reason}"
             )
         print(
-            "\n  EXPECTED_WARNINGS only shrinks. Delete these entries in the "
-            "change that fixed them."
+            "\n  EXPECTED_WARNINGS only shrinks. Delete these cases, and an entry "
+            "with none left, in the change that fixed them."
         )
 
     print()

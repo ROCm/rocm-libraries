@@ -358,7 +358,8 @@ per LLVM flavor under `platform/python/rocke/core/arch/data/`. The lowerer's
 `_need` chokepoint consults that table on every intrinsic demand and warns
 (`ArchDomainWarning`) when the answer is a measured negative. This gate lowers
 the same corpus §4.4 uses, harvests the warnings, and compares them against an
-`EXPECTED_WARNINGS` allowlist.
+`EXPECTED_WARNINGS` allowlist that names, for each entry, the corpus cases allowed
+to demand it.
 
 The two gates overlap on purpose and neither subsumes the other:
 
@@ -378,7 +379,9 @@ The two gates overlap on purpose and neither subsumes the other:
   one with a real diagnostic.
 
 `EXPECTED_WARNINGS` carries the same rule as `KNOWN_BAD`: **it only shrinks**,
-and an entry that stops firing is itself a failure. `ROCKE_ARCH_DOMAIN=off`
+and an entry, or one of its cases, that stops firing is itself a failure. Naming
+the cases is what stops it widening in silence: a different case that starts
+demanding an allowlisted intrinsic is a new finding. `ROCKE_ARCH_DOMAIN=off`
 disables the lookup.
 
 ---

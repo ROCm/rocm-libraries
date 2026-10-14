@@ -612,3 +612,105 @@ def test_corpus_matches_the_expected_warning_set() -> None:
     tool = PLATFORM / "tools" / "check_arch_domain.py"
     proc = subprocess.run([sys.executable, str(tool)], capture_output=True, text=True)
     assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+@pytest.fixture
+def gate(monkeypatch: pytest.MonkeyPatch):
+    """The gate script as a module: it is a tool, not part of the package."""
+    import importlib.util
+
+    monkeypatch.syspath_prepend(str(CHECK_GATE.parent))
+    spec = importlib.util.spec_from_file_location(
+        "check_arch_domain_under_test", CHECK_GATE
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+_TRIPLE = ("ds.read.tr16.b64", "gfx942", "llvm22")
+
+
+def _expect(gate, *cases: str) -> dict:
+    return {_TRIPLE: gate.Expected("a reason", frozenset(cases))}
+
+
+@_needs_sources
+def test_every_allowlisted_entry_names_its_cases(gate) -> None:
+    """An entry with no cases would allow any case to demand its intrinsic."""
+    assert gate.EXPECTED_WARNINGS
+    for triple, entry in gate.EXPECTED_WARNINGS.items():
+        assert entry.reason and entry.cases, triple
+
+
+@_needs_sources
+def test_the_expected_demand_is_clean(gate) -> None:
+    unexpected, stale = gate.judge(
+        {_TRIPLE: {"a", "b"}}, _expect(gate, "a", "b"), {"llvm22": {"a", "b"}},
+        {"a", "b"}, ["llvm22"],
+    )  # fmt: skip
+    assert (unexpected, stale) == ({}, [])
+
+
+@_needs_sources
+def test_another_case_demanding_an_allowlisted_intrinsic_is_unexpected(gate) -> None:
+    """The entry is keyed by triple *and* cases, so a new case cannot ride on
+    an old entry and leave the gate green."""
+    unexpected, stale = gate.judge(
+        {_TRIPLE: {"a", "b", "c"}}, _expect(gate, "a", "b"),
+        {"llvm22": {"a", "b", "c"}}, {"a", "b", "c"}, ["llvm22"],
+    )  # fmt: skip
+    assert unexpected == {_TRIPLE: {"c"}}
+    assert stale == []
+
+
+@_needs_sources
+def test_fixing_one_of_two_cases_makes_the_entry_stale(gate) -> None:
+    unexpected, stale = gate.judge(
+        {_TRIPLE: {"a"}}, _expect(gate, "a", "b"), {"llvm22": {"a", "b"}},
+        {"a", "b"}, ["llvm22"],
+    )  # fmt: skip
+    assert unexpected == {}
+    assert [(triple, case) for triple, case, _ in stale] == [(_TRIPLE, "b")]
+
+
+@_needs_sources
+def test_a_case_that_did_not_run_is_not_judged(gate) -> None:
+    """A filtered selection, or an instance that declines the flavor, says
+    nothing about an allowlisted case: it is neither confirmed nor stale."""
+    unexpected, stale = gate.judge(
+        {_TRIPLE: {"a"}}, _expect(gate, "a", "b"), {"llvm22": {"a"}},
+        {"a", "b"}, ["llvm22"],
+    )  # fmt: skip
+    assert (unexpected, stale) == ({}, [])
+
+
+@_needs_sources
+def test_an_entry_naming_a_removed_case_is_stale(gate) -> None:
+    unexpected, stale = gate.judge(
+        {_TRIPLE: {"a"}}, _expect(gate, "a", "gone"), {"llvm22": {"a"}},
+        {"a"}, ["llvm22"],
+    )  # fmt: skip
+    assert unexpected == {}
+    assert [(case, why) for _, case, why in stale] == [
+        ("gone", "the corpus has no such case")
+    ]
+
+
+@_needs_sources
+def test_a_triple_the_allowlist_lacks_is_unexpected_whole(gate) -> None:
+    other = ("mfma.f32.16x16x32.f16", "gfx942", "llvm22")
+    unexpected, stale = gate.judge(
+        {other: {"a"}}, {}, {"llvm22": {"a"}}, {"a"}, ["llvm22"]
+    )
+    assert unexpected == {other: {"a"}}
+    assert stale == []
+
+
+@_needs_sources
+def test_an_unmeasured_flavor_is_not_judged(gate) -> None:
+    unexpected, stale = gate.judge(
+        {}, _expect(gate, "a"), {"llvm20": {"a"}}, {"a"}, ["llvm20"]
+    )
+    assert (unexpected, stale) == ({}, [])
