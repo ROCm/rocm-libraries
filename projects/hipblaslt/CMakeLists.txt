@@ -1001,8 +1001,12 @@ if(HIPBLASLT_ENABLE_COVERAGE)
       )
       # Report hipBLASLt library code only. The test client is instrumented so that
       # inline library functions it shares are counted, but it is not product code.
-      # TensileLite reports under its own Codecov flags.
-      set(coverage_ignore_regex ".*Tensile.*|.*origami.*|.*/tensilelite/.*|.*/clients/.*")
+      # TensileLite reports under its own Codecov flags, and so do the components
+      # under shared/. Those matter here because instrumenting an archive also
+      # instruments the header-only templates its sources instantiate:
+      # hipblaslt-rocroller brought 6,205 lines of shared/rocroller headers into
+      # this report at 4.9%, which belong to the rocRoller flag, not this one.
+      set(coverage_ignore_regex ".*Tensile.*|.*origami.*|.*/tensilelite/.*|.*/clients/.*|.*/shared/.*")
       add_custom_target(
         coverage
         DEPENDS code_cov_tests

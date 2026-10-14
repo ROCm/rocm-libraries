@@ -753,11 +753,16 @@ script excludes tests known to crash under coverage, each with a ticket (see
 `HIPBLASLT_COVERAGE_EXTRA_PASSES=0` to run only the first pass locally.
 
 **What the number counts.** The report covers hipBLASLt library code only. Files under `clients/`
-(test code) and `tensilelite/` (reported under the TensileLite flags) are excluded. Everything
-linked into `libhipblaslt.so` from this directory is instrumented, which means the `hipblaslt`
-sources plus the two static archives folded into it, `hipblaslt-tuning-store` and the
-default-enabled `hipblaslt-rocroller` (7 files, about 3,250 lines). An archive without its own
-instrumentation contributes no lines at all, even when tests execute it. The test sources are
+(test code), `tensilelite/`, and `shared/` are excluded, the last two because TensileLite and the
+shared components (rocRoller, origami) report under their own Codecov flags. Everything linked into
+`libhipblaslt.so` from this directory is instrumented, which means the `hipblaslt` sources plus the
+two static archives folded into it, `hipblaslt-tuning-store` and the default-enabled
+`hipblaslt-rocroller` (2,574 lines across its sources and headers, 68.6% covered as of October
+2026). An archive without its own instrumentation contributes no lines at all, even when tests
+execute it. Instrumenting one also instruments whatever header-only template code its sources
+instantiate, which is what makes the `shared/` exclusion load-bearing rather than tidy: rocRoller's
+templates added 6,205 lines at 4.9% to this report, and pulled the reported number down by 15
+points, until they were excluded. The test sources are
 instrumented too, because they include library headers and so carry their own copies of the
 library's inline functions; the linker keeps one copy of each, and an uninstrumented copy would
 leave the library's calls uncounted. Numbers recorded before October 2026 counted test client code,
