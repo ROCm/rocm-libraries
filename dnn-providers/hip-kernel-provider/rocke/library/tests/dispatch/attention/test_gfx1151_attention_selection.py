@@ -7,7 +7,11 @@ import unittest
 from unittest import mock
 
 from dispatch.attention import AttentionMaskType, AttentionRequest, dispatch_attention
-from dispatch.attention.gfx1151 import _make_wmma_fwd_candidate, _wmma_fwd_spec
+from dispatch.attention.gfx1151 import (
+    _make_wmma_fwd_candidate,
+    _window_bounds,
+    _wmma_fwd_spec,
+)
 from kernels.gfx1151.wmma_fmha_fwd import is_valid_spec
 
 
@@ -153,6 +157,18 @@ class TestGfx1151AttentionSelection(unittest.TestCase):
         ).spec
         self.assertEqual(left, right)
         self.assertEqual(left.mask_mode, "window")
+
+    def test_causal_mask_with_window_left_keeps_the_diagonal(self):
+        # cuDNN spells a causal sliding window as causal + window_left; an
+        # unbounded left (-1) must stay plain causal, not become "no mask".
+        for mask in (
+            AttentionMaskType.TOP_LEFT_CAUSAL,
+            AttentionMaskType.BOTTOM_RIGHT_CAUSAL,
+        ):
+            for left, expected in ((-1, (-1, 0)), (9, (9, 0))):
+                with self.subTest(mask=mask, left=left):
+                    request = _request(mask_type=mask, window_left=left)
+                    self.assertEqual(_window_bounds(request), expected)
 
     def test_bf16_uses_transposed_fast_path(self):
         result = dispatch_attention(_request(dtype="bf16", layout="dense"))

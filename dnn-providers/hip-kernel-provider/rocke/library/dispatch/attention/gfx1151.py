@@ -129,9 +129,15 @@ def _window_bounds(req: AttentionRequest) -> tuple[int, int]:
         left = int(req.sliding_window) - 1
     else:
         left = -1
+    causal = int(req.mask_type) in (
+        AttentionMaskType.TOP_LEFT_CAUSAL,
+        AttentionMaskType.BOTTOM_RIGHT_CAUSAL,
+    )
     if req.window_right is not None:
         right = int(req.window_right)
-    elif left >= 0:
+    elif left >= 0 or causal:
+        # A causal mask keeps its diagonal even with an unbounded left side
+        # (cuDNN's causal + window_left=-1 is plain causal, not "no mask").
         right = 0
     else:
         right = -1
