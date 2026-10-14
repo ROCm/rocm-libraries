@@ -63,7 +63,7 @@ inline auto to<data_objects::KdaAttributes>(flatbuffers::FlatBufferBuilder& buil
         inputs.at("v_tensor_uid").get<int64_t>(),
         inputs.at("g_tensor_uid").get<int64_t>(),
         inputs.at("beta_tensor_uid").get<int64_t>(),
-        inputs.at("cu_seqlens_tensor_uid").get<std::optional<int64_t>>(),
+        inputs.at("cu_seqlens_tensor_uid").get<int64_t>(),
         inputs.at("initial_state_tensor_uid").get<std::optional<int64_t>>(),
         inputs.at("a_log_tensor_uid").get<std::optional<int64_t>>(),
         inputs.at("dt_bias_tensor_uid").get<std::optional<int64_t>>(),

@@ -32,7 +32,7 @@ struct KdaAttributesT : public ::flatbuffers::NativeTable {
   int64_t v_tensor_uid = 0;
   int64_t g_tensor_uid = 0;
   int64_t beta_tensor_uid = 0;
-  ::flatbuffers::Optional<int64_t> cu_seqlens_tensor_uid = ::flatbuffers::nullopt;
+  int64_t cu_seqlens_tensor_uid = 0;
   ::flatbuffers::Optional<int64_t> initial_state_tensor_uid = ::flatbuffers::nullopt;
   ::flatbuffers::Optional<int64_t> a_log_tensor_uid = ::flatbuffers::nullopt;
   ::flatbuffers::Optional<int64_t> dt_bias_tensor_uid = ::flatbuffers::nullopt;
@@ -112,11 +112,11 @@ struct KdaAttributes FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   bool mutate_beta_tensor_uid(int64_t _beta_tensor_uid = 0) {
     return SetField<int64_t>(VT_BETA_TENSOR_UID, _beta_tensor_uid, 0);
   }
-  ::flatbuffers::Optional<int64_t> cu_seqlens_tensor_uid() const {
-    return GetOptional<int64_t, int64_t>(VT_CU_SEQLENS_TENSOR_UID);
+  int64_t cu_seqlens_tensor_uid() const {
+    return GetField<int64_t>(VT_CU_SEQLENS_TENSOR_UID, 0);
   }
-  bool mutate_cu_seqlens_tensor_uid(int64_t _cu_seqlens_tensor_uid) {
-    return SetField<int64_t>(VT_CU_SEQLENS_TENSOR_UID, _cu_seqlens_tensor_uid);
+  bool mutate_cu_seqlens_tensor_uid(int64_t _cu_seqlens_tensor_uid = 0) {
+    return SetField<int64_t>(VT_CU_SEQLENS_TENSOR_UID, _cu_seqlens_tensor_uid, 0);
   }
   ::flatbuffers::Optional<int64_t> initial_state_tensor_uid() const {
     return GetOptional<int64_t, int64_t>(VT_INITIAL_STATE_TENSOR_UID);
@@ -279,7 +279,7 @@ struct KdaAttributesBuilder {
     fbb_.AddElement<int64_t>(KdaAttributes::VT_BETA_TENSOR_UID, beta_tensor_uid, 0);
   }
   void add_cu_seqlens_tensor_uid(int64_t cu_seqlens_tensor_uid) {
-    fbb_.AddElement<int64_t>(KdaAttributes::VT_CU_SEQLENS_TENSOR_UID, cu_seqlens_tensor_uid);
+    fbb_.AddElement<int64_t>(KdaAttributes::VT_CU_SEQLENS_TENSOR_UID, cu_seqlens_tensor_uid, 0);
   }
   void add_initial_state_tensor_uid(int64_t initial_state_tensor_uid) {
     fbb_.AddElement<int64_t>(KdaAttributes::VT_INITIAL_STATE_TENSOR_UID, initial_state_tensor_uid);
@@ -353,7 +353,7 @@ inline ::flatbuffers::Offset<KdaAttributes> CreateKdaAttributes(
     int64_t v_tensor_uid = 0,
     int64_t g_tensor_uid = 0,
     int64_t beta_tensor_uid = 0,
-    ::flatbuffers::Optional<int64_t> cu_seqlens_tensor_uid = ::flatbuffers::nullopt,
+    int64_t cu_seqlens_tensor_uid = 0,
     ::flatbuffers::Optional<int64_t> initial_state_tensor_uid = ::flatbuffers::nullopt,
     ::flatbuffers::Optional<int64_t> a_log_tensor_uid = ::flatbuffers::nullopt,
     ::flatbuffers::Optional<int64_t> dt_bias_tensor_uid = ::flatbuffers::nullopt,
@@ -381,7 +381,7 @@ inline ::flatbuffers::Offset<KdaAttributes> CreateKdaAttributes(
   if(dt_bias_tensor_uid) { builder_.add_dt_bias_tensor_uid(*dt_bias_tensor_uid); }
   if(a_log_tensor_uid) { builder_.add_a_log_tensor_uid(*a_log_tensor_uid); }
   if(initial_state_tensor_uid) { builder_.add_initial_state_tensor_uid(*initial_state_tensor_uid); }
-  if(cu_seqlens_tensor_uid) { builder_.add_cu_seqlens_tensor_uid(*cu_seqlens_tensor_uid); }
+  builder_.add_cu_seqlens_tensor_uid(cu_seqlens_tensor_uid);
   builder_.add_beta_tensor_uid(beta_tensor_uid);
   builder_.add_g_tensor_uid(g_tensor_uid);
   builder_.add_v_tensor_uid(v_tensor_uid);

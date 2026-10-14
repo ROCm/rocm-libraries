@@ -11,22 +11,24 @@ namespace hipdnn_flatbuffers_sdk.data_objects;
 // Kimi Delta Attention (KDA) forward. Mirrors the cudnn-frontend Python graph
 // op graph.kda (cudnn.linear_attention); cuDNN has no C++ node for it, so the
 // backend names carry the _EXT suffix. Per token t and head, with recurrent
-// state S [V, K] and per-key-channel decay alpha_t in R^K:
-//   S_t = (I - beta_t k_t^T k_t) Diag(alpha_t) S_{t-1} + beta_t k_t^T v_t
-//   o_t = scale q_t S_t
+// state S [V, K], per-key-channel decay alpha_t in R^K, and column vectors
+// k_t, v_t, q_t (the transpose of Kimi Linear Eq. 1, which is K-major):
+//   S_t = S_{t-1} Diag(alpha_t) (I - beta_t k_t k_t^T) + beta_t v_t k_t^T
+//   o_t = scale S_t q_t
 //
-// Layout matches GdnAttributes (see gdn_attributes.fbs) except that g is
-// per key channel: [T, HO, K] token-packed, or [N, T, HO, K] dense.
+// Layout and cross-field rules match GdnAttributes (see gdn_attributes.fbs),
+// except that g is per key channel, [T, HO, K], dt_bias is [HO, K], and
+// gate_lower_bound also requires safe_gate.
 table KdaAttributes {
     // Required input tensor UIDs
-    q_tensor_uid:    long (cache_uid);
-    k_tensor_uid:    long (cache_uid);
-    v_tensor_uid:    long (cache_uid);
-    g_tensor_uid:    long (cache_uid);  // decay per token, head and key channel
-    beta_tensor_uid: long (cache_uid);  // write strength (post-sigmoid by default)
+    q_tensor_uid:          long (cache_uid);
+    k_tensor_uid:          long (cache_uid);
+    v_tensor_uid:          long (cache_uid);
+    g_tensor_uid:          long (cache_uid);  // decay per token, head and key channel
+    beta_tensor_uid:       long (cache_uid);  // write strength (post-sigmoid by default)
+    cu_seqlens_tensor_uid: long (cache_uid);  // [N + 1] sequence offsets
 
     // Optional input tensor UIDs
-    cu_seqlens_tensor_uid:    long = null (cache_uid);  // [N + 1]
     initial_state_tensor_uid: long = null (cache_uid);  // absent: zero state
     a_log_tensor_uid:         long = null (cache_uid);  // [HO], safe_gate only
     dt_bias_tensor_uid:       long = null (cache_uid);  // [HO, K], safe_gate only
@@ -50,5 +52,5 @@ table KdaAttributes {
     gate_domain:               GateDomain = LOG;
     gate_lower_bound:          float = null;  // safe_gate lower bound in log space; absent: -5.0
     batch_invariant:           bool = false;
-    overwrite_initial_state:   bool = false;  // final_state written into initial_state
+    overwrite_initial_state:   bool = false;  // in-place: final_state shares initial_state's buffer
 }

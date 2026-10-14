@@ -1760,14 +1760,7 @@ inline void hashAppend(Hasher& hasher, const GdnAttributes* value, const UidCano
     hashAppend(hasher, canon(value->v_tensor_uid()));
     hashAppend(hasher, canon(value->g_tensor_uid()));
     hashAppend(hasher, canon(value->beta_tensor_uid()));
-    {
-        const auto optional = value->cu_seqlens_tensor_uid();
-        hasher.tag(optional ? 1 : 0);
-        if(optional)
-        {
-            hashAppend(hasher, canon(*optional));
-        }
-    }
+    hashAppend(hasher, canon(value->cu_seqlens_tensor_uid()));
     {
         const auto optional = value->initial_state_tensor_uid();
         hasher.tag(optional ? 1 : 0);
@@ -1866,17 +1859,9 @@ inline bool logicallyEqual(const GdnAttributes* a, const GdnAttributes* b, const
     {
         return false;
     }
+    if(aCanon(a->cu_seqlens_tensor_uid()) != bCanon(b->cu_seqlens_tensor_uid()))
     {
-        const auto aUid = a->cu_seqlens_tensor_uid();
-        const auto bUid = b->cu_seqlens_tensor_uid();
-        if(aUid.has_value() != bUid.has_value())
-        {
-            return false;
-        }
-        if(aUid.has_value() && aCanon(*aUid) != bCanon(*bUid))
-        {
-            return false;
-        }
+        return false;
     }
     {
         const auto aUid = a->initial_state_tensor_uid();
@@ -2151,14 +2136,7 @@ inline void hashAppend(Hasher& hasher, const KdaAttributes* value, const UidCano
     hashAppend(hasher, canon(value->v_tensor_uid()));
     hashAppend(hasher, canon(value->g_tensor_uid()));
     hashAppend(hasher, canon(value->beta_tensor_uid()));
-    {
-        const auto optional = value->cu_seqlens_tensor_uid();
-        hasher.tag(optional ? 1 : 0);
-        if(optional)
-        {
-            hashAppend(hasher, canon(*optional));
-        }
-    }
+    hashAppend(hasher, canon(value->cu_seqlens_tensor_uid()));
     {
         const auto optional = value->initial_state_tensor_uid();
         hasher.tag(optional ? 1 : 0);
@@ -2265,17 +2243,9 @@ inline bool logicallyEqual(const KdaAttributes* a, const KdaAttributes* b, const
     {
         return false;
     }
+    if(aCanon(a->cu_seqlens_tensor_uid()) != bCanon(b->cu_seqlens_tensor_uid()))
     {
-        const auto aUid = a->cu_seqlens_tensor_uid();
-        const auto bUid = b->cu_seqlens_tensor_uid();
-        if(aUid.has_value() != bUid.has_value())
-        {
-            return false;
-        }
-        if(aUid.has_value() && aCanon(*aUid) != bCanon(*bUid))
-        {
-            return false;
-        }
+        return false;
     }
     {
         const auto aUid = a->initial_state_tensor_uid();
