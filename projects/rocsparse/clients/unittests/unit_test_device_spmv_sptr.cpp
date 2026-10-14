@@ -1136,7 +1136,7 @@ TEST_F(V2SpmvDispatch, extras_and_batch)
     ASSERT_EQ(rocsparse_csr_set_strided_batch(A.d, 2, Id::n + 1, Id::nnz),
               rocsparse_status_success);
     expect_batch(rocsparse_v2_spmv_stage_analysis);
-    ASSERT_EQ(rocsparse_csr_set_strided_batch(A.d, 1, Id::n + 1, Id::nnz),
+    ASSERT_EQ(rocsparse_csr_set_strided_batch(A.d, 1, 0, 0),
               rocsparse_status_success);
 
     ASSERT_EQ(rocsparse_dnvec_set_strided_batch(x.d, 2, Id::n), rocsparse_status_success);
@@ -1954,12 +1954,14 @@ TEST_F(SptrsmDispatch, cases)
         ASSERT_EQ(rocsparse_csr_set_strided_batch(A.d, 2, Id::n + 1, Id::nnz),
                   rocsparse_status_success);
         expect_batch(rocsparse_sptrsm_stage_analysis);
-        ASSERT_EQ(rocsparse_csr_set_strided_batch(A.d, 1, Id::n + 1, Id::nnz),
+        ASSERT_EQ(rocsparse_csr_set_strided_batch(A.d, 1, 0, 0),
                   rocsparse_status_success);
         ASSERT_EQ(rocsparse_dnmat_set_strided_batch(X.d, 2, bx.n), rocsparse_status_success);
         expect_batch(rocsparse_sptrsm_stage_analysis);
         ASSERT_EQ(rocsparse_dnmat_set_strided_batch(X.d, 1, bx.n), rocsparse_status_success);
-        ASSERT_EQ(rocsparse_dnmat_set_strided_batch(Y.d, 2, by.n), rocsparse_status_success);
+        // The batch is driven by Y. A strided batch needs a non-zero stride;
+        // a Y batch with a matching stride is a supported batched solve.
+        ASSERT_EQ(rocsparse_dnmat_set_strided_batch(Y.d, 2, 0), rocsparse_status_success);
         expect_batch(rocsparse_sptrsm_stage_compute);
     }
 }
@@ -2088,8 +2090,12 @@ TEST_F(CsrsmSolveDispatch, blockdims)
 
                             const rocsparse_int ldb
                                 = (tb == rocsparse_operation_none) ? m : (nrhs > 0 ? nrhs : 1);
-                            const size_t nb = static_cast<size_t>(ldb)
-                                              * static_cast<size_t>(nrhs > 0 ? nrhs : 1);
+                            // op(B) is m x nrhs: B holds nrhs columns of ldb rows, or
+                            // for a transposed B, m columns of ldb rows.
+                            const size_t nb
+                                = static_cast<size_t>(ldb)
+                                  * static_cast<size_t>(
+                                      tb == rocsparse_operation_none ? (nrhs > 0 ? nrhs : 1) : m);
                             device_vector<float> B(std::vector<float>(nb, 1.f));
                             ASSERT_TRUE(B.ptr);
                             MatInfo info;
