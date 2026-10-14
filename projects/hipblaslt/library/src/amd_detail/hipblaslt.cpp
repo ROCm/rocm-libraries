@@ -428,7 +428,18 @@ try
     err = hipGetDevice(&deviceId);
     if(err == hipSuccess)
     {
-        retval = RocBlasLtStatusToHIPStatus(rocblaslt_create((rocblaslt_handle*)handle));
+        try
+        {
+            retval = RocBlasLtStatusToHIPStatus(rocblaslt_create((rocblaslt_handle*)handle));
+        }
+        catch(...)
+        {
+            // The flag buffers have not been transferred to the handle yet.
+            static_cast<void>(hipFree(d_StreamKFlags));
+            static_cast<void>(hipFree(d_Synchronizer));
+            rocblaslt::Debug::Instance().markerStop();
+            throw;
+        }
         (*(rocblaslt_handle*)handle)->Synchronizer = d_Synchronizer;
         (*(rocblaslt_handle*)handle)->StreamKFlags = d_StreamKFlags;
     }
