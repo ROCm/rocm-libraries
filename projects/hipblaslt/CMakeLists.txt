@@ -457,6 +457,35 @@ if(HIPBLASLT_ENABLE_HOST)
     add_subdirectory(library)
 endif()
 
+if(HIPBLASLT_ENABLE_HOST
+   AND HIPBLASLT_BUILD_SHARED_LIBS
+   AND TENSILELITE_BUILD_SHARED_LIBS
+   AND NOT WIN32
+   AND (HIPBLASLT_BUILD_TESTING OR TENSILELITE_BUILD_TESTING OR BUILD_TESTING))
+    get_filename_component(_hipblaslt_cxx_dir "${CMAKE_CXX_COMPILER}" REALPATH)
+    get_filename_component(_hipblaslt_cxx_dir "${_hipblaslt_cxx_dir}" DIRECTORY)
+    find_program(HIPBLASLT_LLVM_IFS llvm-ifs
+        HINTS "${_hipblaslt_cxx_dir}"
+        PATHS "${ROCM_PATH}/lib/llvm/bin" "$ENV{ROCM_PATH}/lib/llvm/bin" /opt/rocm/lib/llvm/bin
+    )
+    if(HIPBLASLT_LLVM_IFS)
+        enable_testing()
+        add_test(
+            NAME hipblaslt.symbol-contract.tensilelite-host
+            COMMAND "${CMAKE_COMMAND}"
+                "-DLLVM_IFS=${HIPBLASLT_LLVM_IFS}"
+                "-DCONSUMER=$<TARGET_FILE:hipblaslt>"
+                "-DPROVIDER=$<TARGET_FILE:tensilelite-host>"
+                "-DREQUIRED_IMPORTS=${CMAKE_CURRENT_SOURCE_DIR}/library/symbol-contract/tensilelite-host-imports.txt"
+                "-DNAMESPACE_PATTERN=11TensileLite"
+                "-DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/symbol-contract"
+                -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/hipblaslt_check_symbol_contract.cmake"
+        )
+    else()
+        message(STATUS "llvm-ifs not found; hipblaslt.symbol-contract.tensilelite-host test disabled")
+    endif()
+endif()
+
 if(HIPBLASLT_ENABLE_DEVICE)
     add_subdirectory(device-library)
 endif()
@@ -592,17 +621,6 @@ if(HIPBLASLT_ENABLE_DEVICE OR HIPBLASLT_ENABLE_ROCROLLER)
         DESTINATION ${HIPBLASLT_TENSILE_LIBRARY_DIR}
         COMPONENT runtime
     )
-    # The gfx1250 v0 GEMM tree builds into its own directory (see
-    # device-library/CMakeLists.txt) but installs as one more subdir of the same
-    # library/ root. The property is only set when that tree is built.
-    get_property(_gfx1250v0_library_dir GLOBAL PROPERTY HIPBLASLT_GFX1250V0_LIBRARY_DIR)
-    if(_gfx1250v0_library_dir)
-        rocm_install(
-            DIRECTORY "${_gfx1250v0_library_dir}"
-            DESTINATION "${HIPBLASLT_TENSILE_LIBRARY_DIR}/library"
-            COMPONENT runtime
-        )
-    endif()
 endif()
 
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md")
@@ -724,7 +742,7 @@ endif()
 
 if(HIPBLASLT_ENABLE_CLIENT AND (HIPBLASLT_BUILD_TESTING OR BUILD_TESTING))
     rocm_install(
-        TARGETS hipblaslt-test
+        TARGETS hipblaslt-test hipblaslt-test-tuning-store
         COMPONENT tests
     )
     rocm_install(
@@ -740,7 +758,8 @@ endif()
 
 # Install TensileLite Python packages and test tools for artifact-based testing.
 # Produces:
-#   share/hipblaslt/tensilelite/Tensile/     — Tensile Python package
+#   share/hipblaslt/tensilelite/tensilelite/ — Tensile Python package
+#   share/hipblaslt/tensilelite/Tensile/     — legacy import compatibility shim
 #   share/hipblaslt/tensilelite/rocisa/       — rocisa Python package (normalized layout)
 #   share/hipblaslt/tensilelite/rocisa_tests/ — rocisa pytest modules
 if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
@@ -749,12 +768,17 @@ if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
 
     # Tensile Python package
     install(
-        DIRECTORY "${_tensilelite_src}/Tensile/"
-        DESTINATION "${_tensilelite_install_dest}/Tensile"
+        DIRECTORY "${_tensilelite_src}/tensilelite/"
+        DESTINATION "${_tensilelite_install_dest}/tensilelite"
         COMPONENT tests
         PATTERN "__pycache__" EXCLUDE
         PATTERN ".pytest_cache" EXCLUDE
         PATTERN "*.pyc" EXCLUDE
+    )
+    install(
+        FILES "${_tensilelite_src}/Tensile/__init__.py"
+        DESTINATION "${_tensilelite_install_dest}/Tensile"
+        COMPONENT tests
     )
 
     # Scripts used by unit tests
@@ -766,11 +790,12 @@ if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
         COMPONENT tests
     )
 
-    # Imported directly by unit tests, so these generators must ship at the
+    # Imported or executed directly by unit tests, so these must ship at the
     # tensilelite root, not under scripts/.
     install(
         FILES
             "${_tensilelite_src}/AMaxGenerator.py"
+            "${_tensilelite_src}/SoftmaxGenerator.py"
             "${_tensilelite_src}/LayerNormGenerator.py"
         DESTINATION "${_tensilelite_install_dest}"
         COMPONENT tests
@@ -778,9 +803,9 @@ if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
     # Preserve executable permissions on entry points
     install(
         PROGRAMS
-            "${_tensilelite_src}/Tensile/bin/Tensile"
-            "${_tensilelite_src}/Tensile/bin/TensileCreateLibrary"
-        DESTINATION "${_tensilelite_install_dest}/Tensile/bin"
+            "${_tensilelite_src}/tensilelite/bin/Tensile"
+            "${_tensilelite_src}/tensilelite/bin/TensileCreateLibrary"
+        DESTINATION "${_tensilelite_install_dest}/tensilelite/bin"
         COMPONENT tests
     )
 
@@ -929,11 +954,27 @@ if(ROCM_LIBS_SUPERBUILD OR NOT HIPBLASLT_IS_SUBPROJECT)
 endif()
 
 if(HIPBLASLT_ENABLE_COVERAGE)
-    target_compile_options(hipblaslt PRIVATE -g -O0 -fprofile-instr-generate -fcoverage-mapping)
-    target_link_options(hipblaslt PUBLIC -fprofile-instr-generate)
+    # HIP C++ compilation has separate host and device passes; ordinary C is host-only.
+    # Keep each host selector paired with its flag so CMake does not de-duplicate it.
+    target_compile_options(hipblaslt PRIVATE
+        -g
+        -O0
+        "$<$<COMPILE_LANGUAGE:CXX>:SHELL:-Xarch_host -fprofile-instr-generate>"
+        "$<$<COMPILE_LANGUAGE:CXX>:SHELL:-Xarch_host -fcoverage-mapping>"
+        "$<$<COMPILE_LANGUAGE:C>:-fprofile-instr-generate>"
+        "$<$<COMPILE_LANGUAGE:C>:-fcoverage-mapping>"
+    )
+    target_link_options(hipblaslt PUBLIC "SHELL:-Xarch_host -fprofile-instr-generate")
 
-    target_compile_options(hipblaslt-clients-common PRIVATE -g -O0 -fprofile-instr-generate -fcoverage-mapping)
-    target_link_options(hipblaslt-clients-common PUBLIC -fprofile-instr-generate)
+    target_compile_options(hipblaslt-clients-common PRIVATE
+        -g
+        -O0
+        "$<$<COMPILE_LANGUAGE:CXX>:SHELL:-Xarch_host -fprofile-instr-generate>"
+        "$<$<COMPILE_LANGUAGE:CXX>:SHELL:-Xarch_host -fcoverage-mapping>"
+        "$<$<COMPILE_LANGUAGE:C>:-fprofile-instr-generate>"
+        "$<$<COMPILE_LANGUAGE:C>:-fcoverage-mapping>"
+    )
+    target_link_options(hipblaslt-clients-common PUBLIC "SHELL:-Xarch_host -fprofile-instr-generate")
     target_compile_definitions(hipblaslt-clients-common PRIVATE CODE_COVERAGE)
 
     set(coverage_dir "${CMAKE_CURRENT_BINARY_DIR}/coverage-report")

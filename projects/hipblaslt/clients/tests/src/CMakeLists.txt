@@ -6,27 +6,38 @@ target_sources(hipblaslt-test
         ${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt_gtest_main.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/caching_library_gtest.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/contraction_problem_gtest.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/hip_solution_adapter_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/secure_env_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/arch_revision_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/efficiency_monitor_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/matmul_gtest.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/math_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/auxiliary_gtest.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/heuristic_workspace_gtest.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/data_type_names_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/benchmark_stats_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/benchmark_collective_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/matrix_transform_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt_gtest_ext_op.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/streamk5_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/streamk_multistream_test.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/streamk_null_stream_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/synchronizer_size_check_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/row_uniformity_gtest.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/algo_order_gtest.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/contraction_problem_update_gtest.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/tuning_cache_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ulp_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/arguments_a2a_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/unit_gtest.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/algo_errors_gtest.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/fast_check_gtest.cpp
 )
 
 if(NOT WIN32)
     target_sources(hipblaslt-test PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/collective_rendezvous_gtest.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/multi_gpu_gtest.cpp
     )
 endif()
 

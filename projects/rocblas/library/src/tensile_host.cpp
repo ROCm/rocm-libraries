@@ -339,6 +339,14 @@ namespace
         {
             return Tensile::LazyLoadingInit::gfx1153;
         }
+        else if(deviceString.find("gfx1170") != std::string::npos)
+        {
+            return Tensile::LazyLoadingInit::gfx1170;
+        }
+        else if(deviceString.find("gfx1171") != std::string::npos)
+        {
+            return Tensile::LazyLoadingInit::gfx1171;
+        }
         else if(deviceString.find("gfx1200") != std::string::npos)
         {
             return Tensile::LazyLoadingInit::gfx1200;
@@ -1280,19 +1288,36 @@ template <typename Ti, typename To, typename Tc>
 bool useHipBLASLt(const RocblasContractionProblem<Ti, To, Tc>& prob)
 {
 #ifdef BUILD_WITH_HIPBLASLT
-    if constexpr(sizeof(Ti) != 2 && !std::is_same<Ti, double>::value)
+    if(!prob.handle->isHipBLASLtForcedOn())
     {
-        if(!prob.handle->isHipBLASLtForcedOn())
+        int arch = rocblas_internal_get_arch(prob.handle);
+
+        // gfx950: Tensile remains the default only for SGEMM (real f32).
+        // TODO remove after SGEMM is supported
+        if constexpr(std::is_same<Ti, float>::value)
         {
-            // gfx950: hipBLASLt is used only for fp16/bf16/fp64
-            // TODO remove after all types are supported
-            if(rocblas_internal_get_arch(prob.handle) == 950)
+            if(arch == 950)
                 return false;
+        }
+
+        // gfx942: hipBLASLt is used for fp64 on all gfx942 devices, and for fp16/bf16
+        // only on MI300X (304 CUs); MI300A (228 CUs) stays on Tensile for fp16/bf16.
+        // TODO remove after all types are supported
+        if(arch == 942)
+        {
+            if constexpr(sizeof(Ti) == 2)
+            {
+                if(prob.handle->device_properties.multiProcessorCount != 304)
+                    return false;
+            }
+            else if constexpr(!std::is_same<Ti, double>::value)
+            {
+                return false;
+            }
         }
     }
 
-    bool batched = !prob.strided_batch;
-    return prob.handle->tryHipBLASLt(batched);
+    return prob.handle->tryHipBLASLt();
 #else
     return false;
 #endif

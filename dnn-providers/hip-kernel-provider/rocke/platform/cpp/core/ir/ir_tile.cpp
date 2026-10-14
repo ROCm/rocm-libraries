@@ -13,6 +13,7 @@
  * rocke_i_attrs / type helpers) lives in bucket 0 (ir_core.c) and is declared
  * in rocke/ir_internal.h.
  */
+#include "rocke/tf32_internal.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -86,7 +87,7 @@ static const char* rocke_mma_result_hint(const char* op_id)
     return "acc";
 }
 
-/* element-byte width helper (mirrors smem_store_vN's inline ternary). */
+/* element-byte width helper (mirrors smem_store_vN's elem_bytes). */
 static int rocke_elem_bytes_name(const char* elem_name)
 {
     if(!elem_name)
@@ -98,7 +99,12 @@ static int rocke_elem_bytes_name(const char* elem_name)
     {
         return 1;
     }
-    if(strcmp(elem_name, "f32") == 0 || strcmp(elem_name, "i32") == 0)
+    if(strcmp(elem_name, "f64") == 0)
+    {
+        return 8;
+    }
+    if(strcmp(elem_name, "f32") == 0 || strcmp(elem_name, "i32") == 0
+       || strcmp(elem_name, "tf32") == 0)
     {
         return 4;
     }
@@ -238,6 +244,7 @@ void rocke_b_smem_store_vN(rocke_ir_builder_t* b,
     const char* elem_name;
     static const int allowed_8bit[] = {2, 4, 8, 16};
     static const int allowed_other[] = {2, 4, 8};
+    static const int allowed_64bit[] = {2};
     int elem_bytes;
     if(!rocke_i_live(b))
     {
@@ -269,10 +276,19 @@ void rocke_b_smem_store_vN(rocke_ir_builder_t* b,
     }
     elem_name = value->type->elem->name;
     {
-        bool eight = (strcmp(elem_name, "i8") == 0 || strcmp(elem_name, "fp8e4m3") == 0
-                      || strcmp(elem_name, "bf8e5m2") == 0);
-        const int* allowed = eight ? allowed_8bit : allowed_other;
-        int acount = eight ? 4 : 3;
+        const int* allowed = allowed_other;
+        int acount = 3;
+        if(strcmp(elem_name, "i8") == 0 || strcmp(elem_name, "fp8e4m3") == 0
+           || strcmp(elem_name, "bf8e5m2") == 0)
+        {
+            allowed = allowed_8bit;
+            acount = 4;
+        }
+        else if(strcmp(elem_name, "f64") == 0)
+        {
+            allowed = allowed_64bit;
+            acount = 1;
+        }
         if(!rocke_n_in(n, allowed, acount))
         {
             rocke_i_set_err(b,
@@ -349,8 +365,10 @@ rocke_value_t* rocke_b_smem_load_vN(rocke_ir_builder_t* b,
     const rocke_type_t* vt;
     rocke_attr_map_t attrs;
     const char* dn;
-    static const int allowed_8bit[] = {1, 2, 4, 8, 16};
-    static const int allowed_other[] = {1, 2, 4, 8};
+    static const int allowed_8bit[] = {1, 2, 4, 8, 12, 16};
+    static const int allowed_16bit[] = {1, 2, 4, 6, 8};
+    static const int allowed_32bit[] = {1, 2, 3, 4, 8};
+    static const int allowed_64bit[] = {1, 2};
     char hint[16];
     if(!rocke_i_live(b))
     {
@@ -362,21 +380,34 @@ rocke_value_t* rocke_b_smem_load_vN(rocke_ir_builder_t* b,
     }
     dn = dtype->name;
     if(!(strcmp(dn, "f16") == 0 || strcmp(dn, "bf16") == 0 || strcmp(dn, "f32") == 0
-         || strcmp(dn, "i32") == 0 || strcmp(dn, "fp8e4m3") == 0 || strcmp(dn, "bf8e5m2") == 0
-         || strcmp(dn, "i8") == 0))
+         || strcmp(dn, "tf32") == 0 || strcmp(dn, "i32") == 0 || strcmp(dn, "f64") == 0
+         || strcmp(dn, "fp8e4m3") == 0 || strcmp(dn, "bf8e5m2") == 0 || strcmp(dn, "i8") == 0))
     {
         return (rocke_value_t*)rocke_i_set_err(
             b,
             ROCKE_ERR_VALUE,
-            "smem_load_vN supports f16 / bf16 / f32 / i32 / fp8e4m3 / "
-            "bf8e5m2 / i8, got %s",
+            "smem_load_vN supports f16 / bf16 / f32 / i32 / tf32 / f64 / "
+            "fp8e4m3 / bf8e5m2 / i8, got %s",
             dn);
     }
     {
-        bool eight
-            = (strcmp(dn, "fp8e4m3") == 0 || strcmp(dn, "bf8e5m2") == 0 || strcmp(dn, "i8") == 0);
-        const int* allowed = eight ? allowed_8bit : allowed_other;
-        int acount = eight ? 5 : 4;
+        const int* allowed = allowed_32bit;
+        int acount = 5;
+        if(strcmp(dn, "fp8e4m3") == 0 || strcmp(dn, "bf8e5m2") == 0 || strcmp(dn, "i8") == 0)
+        {
+            allowed = allowed_8bit;
+            acount = 6;
+        }
+        else if(strcmp(dn, "f16") == 0 || strcmp(dn, "bf16") == 0)
+        {
+            allowed = allowed_16bit;
+            acount = 5;
+        }
+        else if(strcmp(dn, "f64") == 0)
+        {
+            allowed = allowed_64bit;
+            acount = 2;
+        }
         if(!rocke_n_in(n, allowed, acount))
         {
             return (rocke_value_t*)rocke_i_set_err(
@@ -605,6 +636,9 @@ rocke_value_t* rocke_b_mma(rocke_ir_builder_t* b,
     {
         ops[3 + i] = extra[i];
     }
+    const char* tf32_error = rocke_tf32_mma_error(op_id, ops, nops);
+    if(tf32_error)
+        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s", tf32_error);
     attrs = rocke_i_attrs(b);
     rocke_attr_set_str(b, &attrs, "op_id", op_id);
     return rocke_i_op1(b, ROCKE_OP_TILE_MMA, ops, nops, vt, &attrs, hint);
@@ -692,6 +726,39 @@ rocke_value_t* rocke_b_register_p_from_qk_c(rocke_ir_builder_t* b,
 /* ===================================================================== */
 /*  inline asm                                                           */
 /* ===================================================================== */
+
+rocke_value_t* rocke_b_optimization_barrier(rocke_ir_builder_t* b, rocke_value_t* value)
+{
+    if(!rocke_i_live(b))
+    {
+        return NULL;
+    }
+    if(!value || !value->type || value->type->kind != ROCKE_TYPE_SCALAR
+       || value->type->scalar < ROCKE_SCALAR_I1 || value->type->scalar > ROCKE_SCALAR_BF8E5M2)
+    {
+        return (rocke_value_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "optimization_barrier requires a directly lowerable scalar or i1");
+    }
+    if(value->type->scalar == ROCKE_SCALAR_I1 || value->type->scalar == ROCKE_SCALAR_I8
+       || value->type->scalar == ROCKE_SCALAR_FP8E4M3
+       || value->type->scalar == ROCKE_SCALAR_BF8E5M2)
+    {
+        bool encoded_float = value->type->scalar == ROCKE_SCALAR_FP8E4M3
+                             || value->type->scalar == ROCKE_SCALAR_BF8E5M2;
+        rocke_value_t* raw = encoded_float ? rocke_b_bitcast(b, value, rocke_i8()) : value;
+        rocke_value_t* wide = rocke_b_zext(b, raw, rocke_i32());
+        rocke_value_t* opaque = rocke_b_optimization_barrier(b, wide);
+        rocke_value_t* narrow = rocke_b_trunc(b, opaque, raw->type);
+        return encoded_float ? rocke_b_bitcast(b, narrow, value->type) : narrow;
+    }
+    rocke_inline_asm_opts_t opts = {};
+    opts.sideeffect_set = true;
+    opts.sideeffect = false;
+    rocke_value_t* operands[] = {value};
+    const rocke_type_t* types[] = {value->type};
+    rocke_op_t* op = rocke_b_inline_asm(b, "", "=v,0", operands, 1, types, 1, &opts);
+    return op ? op->results[0] : NULL;
+}
 
 rocke_op_t* rocke_b_inline_asm(rocke_ir_builder_t* b,
                                const char* asm_template,

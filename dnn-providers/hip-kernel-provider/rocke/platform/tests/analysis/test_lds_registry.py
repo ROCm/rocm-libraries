@@ -12,15 +12,18 @@ from rocke.analysis.lds.registry import (
 )
 
 
-def test_registry_selects_explicit_gfx90a_profile():
-    profile = resolve_profile("gfx90a")
+@pytest.mark.parametrize("target", ["gfx90a", "gfx942", "gfx950"])
+def test_registry_selects_explicit_profile(target):
+    profile = resolve_profile(target)
 
-    assert profile.identity.target == "gfx90a"
+    assert profile.identity.target == target
     assert profile.identity.profile_version == 1
-    assert registered_targets() == ("gfx90a",)
+    assert registered_targets() == ("gfx90a", "gfx942", "gfx950")
 
 
-@pytest.mark.parametrize("target", ["gfx942", "gfx950", "GFX90A", " gfx90a ", ""])
+@pytest.mark.parametrize(
+    "target", ["gfx9999", "GFX90A", " gfx90a ", "GFX942", " gfx942 ", ""]
+)
 def test_registry_rejects_unknown_targets_without_fallback(target):
     with pytest.raises(UnsupportedLdsTargetError, match="unsupported LDS target"):
         resolve_profile(target)

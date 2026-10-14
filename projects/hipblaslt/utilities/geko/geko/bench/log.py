@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Sequence, List, Tuple, Optional
 
 from geko.constants import LOG_FIELDS, GEMM_LOG_FIELDS, GEMM_FIELDS
+from geko.bench.utils import ensure_scale_columns
 from geko import bench
 from geko.bench.utils import update_lib_source
 from geko.utils import parse_devices
@@ -117,6 +118,8 @@ def parse(log_file: str | Path, as_df: bool = False, fmt: str = None) -> pd.Data
 
     df.rename({"m": "M", "n": "N", "k": "K"}, axis=1, inplace=True)
 
+    ensure_scale_columns(df)
+
     if not all(fld in df.columns for fld in GEMM_LOG_FIELDS):
         raise ValueError(f"Log must have all fields: {GEMM_LOG_FIELDS}")
 
@@ -197,11 +200,11 @@ def verify_output(latency_file: str | Path, bench_file: str | Path) -> bool:
 # Extra fields (beyond GEMM_LOG_FIELDS) that hipblaslt-bench echoes back in its
 # raw output under the same names used in bench yaml rows/LOG_FIELDS. Ordered
 # by how likely they are to distinguish otherwise-identical GEMM shapes.
+# Note: scaleA/scaleB are already part of GEMM_LOG_FIELDS (the core merge key),
+# so they are intentionally omitted here.
 _EXTRA_MATCH_FIELDS = (
     "alpha",
     "beta",
-    "scaleA",
-    "scaleB",
     "scaleC",
     "scaleD",
     "swizzleA",
@@ -240,7 +243,9 @@ def realign_rows(rows: List[dict], df: pd.DataFrame) -> pd.DataFrame:
     """
     df = df.rename(columns={"m": "M", "n": "N", "k": "K"})
     df["compute_type"] = df["compute_type"].apply(update_compute_type)
+    ensure_scale_columns(df)
     df_rows = pd.DataFrame(rows)
+    ensure_scale_columns(df_rows)
 
     key = list(GEMM_LOG_FIELDS)
     ambiguous = df_rows.duplicated(subset=key, keep=False)
@@ -335,6 +340,8 @@ def update(
             row["initialization"] = "trig_float"
 
         row["compute_type"] = update_compute_type(row["compute_type"])
+        row.setdefault("scaleA", 0)
+        row.setdefault("scaleB", 0)
         if "scale_type" not in row:
             row["scale_type"] = row["compute_type"].lstrip("c_").lstrip("x")
 

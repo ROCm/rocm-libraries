@@ -239,8 +239,9 @@ share:
 | `EXECUTED` | the graph ran, but no oracle compared its outputs |
 | `VERIFIED` | outputs compared against golden data or a reference |
 
-The fallback chain is unchanged — golden → GPU ref → CPU ref → skip — it just
-returns these values instead of skipping from six levels down.
+The fallback chain is golden → GPU ref → CPU ref → FAIL: a bundle no oracle can
+verify fails rather than skips. Each step returns these values instead of skipping
+from six levels down.
 
 ### Phase 3 — commit with the outcome
 
@@ -469,7 +470,7 @@ can become an engine run.
 | engine involved | yes | **no** |
 | support claims | queried and enforced | **not linked in** |
 | verification modes | `auto` / `golden` / `gpu` / `cpu` | n/a |
-| skip path | yes (no oracle, engine declines, TOML skip) | no *verification* skip; skips only when the machine cannot host it — no device, too little VRAM, wrong arch |
+| skip path | yes (engine declines, TOML skip); no oracle is a FAIL | no *verification* skip; skips only when the machine cannot host it — no device, too little VRAM, wrong arch |
 | TOML config | engine's own `config/<ENGINE>.toml`: skip list and tolerance overrides both apply | **none** — an engine's config cannot skip or loosen a check on our own data |
 | device | yes | GPU reference only; the CPU one is host-only |
 | ctest registration | per provider, via `add_external_integration_test_target()` | once, via `add_integration_test_target()` |
@@ -532,7 +533,9 @@ The pieces this harness is assembled from, and the one question each answers.
 | `IVerificationReporter` | Every verdict, coverage update and unverifiable reason the run publishes. |
 | `SupportClaimReport` | The end-of-run summary and the coverage counters behind it. |
 | `BundleReferenceValidationHarness` | The other job entirely: our golden data vs a reference. No engine, no claims, no skip path. |
-| `BundleRegistration` | Discovery and eager load, then one of two registration entry points — engine tests or golden-data tests. |
+| `BundleRegistration` | Discovery and eager load, shared by both binaries, then the engine-test registration entry point. |
+| `GoldenDataPlan` | What the golden-data binary registers for each bundle: each lane's verdict, and the cross-lane `_Unvalidated` check. Pure data, so the unit tests cover it. |
+| `GoldenDataRegistration` | Registers that plan's tests, the one place golden-data validation does. |
 
 ## See Also
 
