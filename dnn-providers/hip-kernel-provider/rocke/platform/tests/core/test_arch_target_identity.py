@@ -63,6 +63,61 @@ def test_target_id_extraction_accepts_all_triple_field_forms(
     assert target_id_from_isa(isa) == target_id
 
 
+@pytest.mark.parametrize(
+    "target_id",
+    [
+        "gfx1100",
+        "gfx1101",
+        "gfx1102",
+        "gfx1103",
+        "gfx1150",
+        "gfx1152",
+        "gfx1153",
+        "gfx1154",
+    ],
+)
+def test_gfx11_processors_use_the_generic_catalog_row(target_id: str) -> None:
+    assert base_arch_from_target_id(target_id) == "gfx11-generic"
+    assert compiler_target_from_target_id(target_id) == target_id
+
+
+@pytest.mark.parametrize(
+    ("target_id", "compiler_target"),
+    [
+        ("gfx1101:unknown+", "gfx1101:unknown+"),
+        ("gfx1101-strict", "gfx1101"),
+        ("gfx1101-strict:unknown+", "gfx1101:unknown+"),
+    ],
+)
+def test_gfx11_generic_catalog_selection_is_independent_of_target_suffixes(
+    target_id: str, compiler_target: str
+) -> None:
+    assert base_arch_from_target_id(target_id) == "gfx11-generic"
+    assert compiler_target_from_target_id(target_id) == compiler_target
+
+
+@pytest.mark.parametrize("target_id", ["gfx1170", "gfx1200", "gfx1101_bad"])
+def test_nonmembers_do_not_use_the_gfx11_generic_catalog_row(
+    target_id: str,
+) -> None:
+    expected = "gfx1101" if target_id == "gfx1101_bad" else target_id
+    assert base_arch_from_target_id(target_id) == expected
+
+
+@pytest.mark.parametrize(
+    ("target_id", "compiler_target"),
+    [
+        ("gfx1151", "gfx1151"),
+        ("gfx1151-strict:unknown+", "gfx1151:unknown+"),
+    ],
+)
+def test_exact_catalog_row_takes_precedence_over_generic_domain(
+    target_id: str, compiler_target: str
+) -> None:
+    assert base_arch_from_target_id(target_id) == "gfx1151"
+    assert compiler_target_from_target_id(target_id) == compiler_target
+
+
 def test_arch_target_uses_base_architecture_rows() -> None:
     assert ArchTarget.from_gfx("gfx1250").gfx == "gfx1250"
     with pytest.raises(KeyError, match="unknown gfx target"):
@@ -76,6 +131,9 @@ def test_cpp_target_identity_matches_python() -> None:
         pytest.skip("set ROCKE_ARCH_TARGET_TEST_EXE to the native target identity test")
     targets = [
         *known_arches(),
+        "gfx1101",
+        "gfx1170",
+        "gfx1101_bad",
         "gfx00a",
         "unexpected-target",
         "",

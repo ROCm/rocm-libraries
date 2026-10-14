@@ -49,6 +49,8 @@ target_sources(tensilelite-tests
         "${CMAKE_CURRENT_SOURCE_DIR}/ReferenceMXFastPath_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/SolutionValidation_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/StreamKLaunchSummary_test.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/SynchronizerResidue_test.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/SynchronizerValidatorReporting_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/TensorDescriptor_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/TestData.cpp"
 )
@@ -97,6 +99,11 @@ if(HIPBLASLT_ENABLE_MXDATAGENERATOR)
 endif()
 
 target_link_libraries(tensilelite-tests PUBLIC GTest::gtest)
+
+if(HIPBLASLT_ENABLE_YAML)
+    target_link_libraries(tensilelite-tests PRIVATE LLVMObjectYAML)
+    target_include_directories(tensilelite-tests PRIVATE ${LLVM_INCLUDE_DIRS})
+endif()
 
 # LaunchDimGuard_test asserts different outcomes for a cluster launch depending
 # on whether SolutionAdapter::launchKernel was compiled with the cluster path,

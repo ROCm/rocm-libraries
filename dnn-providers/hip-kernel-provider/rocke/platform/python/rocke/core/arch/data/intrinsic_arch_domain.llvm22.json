@@ -60,6 +60,7 @@
     "maxnum.bf16": "llvm.maxnum.bf16",
     "maxnum.f16": "llvm.maxnum.f16",
     "maxnum.f32": "llvm.maxnum.f32",
+    "maxnum.f64": "llvm.maxnum.f64",
     "mbcnt.hi": "llvm.amdgcn.mbcnt.hi",
     "mbcnt.lo": "llvm.amdgcn.mbcnt.lo",
     "mfma.f32.16x16x128.fp8.hero": "llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4.v8i32.v8i32",
@@ -83,6 +84,7 @@
     "minnum.bf16": "llvm.minnum.bf16",
     "minnum.f16": "llvm.minnum.f16",
     "minnum.f32": "llvm.minnum.f32",
+    "minnum.f64": "llvm.minnum.f64",
     "mov.dpp8.f32": "llvm.amdgcn.mov.dpp8.f32",
     "mov.dpp8.i32": "llvm.amdgcn.mov.dpp8.i32",
     "raw.ptr.buffer.load.i16": "llvm.amdgcn.raw.ptr.buffer.load.i16",
@@ -2271,6 +2273,36 @@
         "verified_on": "llvm22"
       }
     },
+    "maxnum.f64": {
+      "gfx11-generic": {
+        "status": "ok",
+        "verified_on": "llvm22"
+      },
+      "gfx1151": {
+        "status": "ok",
+        "verified_on": "llvm22"
+      },
+      "gfx1201": {
+        "status": "ok",
+        "verified_on": "llvm22"
+      },
+      "gfx1250": {
+        "status": "ok",
+        "verified_on": "llvm22"
+      },
+      "gfx90a": {
+        "status": "ok",
+        "verified_on": "llvm22"
+      },
+      "gfx942": {
+        "status": "ok",
+        "verified_on": "llvm22"
+      },
+      "gfx950": {
+        "status": "ok",
+        "verified_on": "llvm22"
+      }
+    },
     "mbcnt.hi": {
       "gfx11-generic": {
         "status": "ok",
@@ -3133,6 +3165,36 @@
       }
     },
     "minnum.f32": {
+      "gfx11-generic": {
+        "status": "ok",
+        "verified_on": "llvm22"
+      },
+      "gfx1151": {
+        "status": "ok",
+        "verified_on": "llvm22"
+      },
+      "gfx1201": {
+        "status": "ok",
+        "verified_on": "llvm22"
+      },
+      "gfx1250": {
+        "status": "ok",
+        "verified_on": "llvm22"
+      },
+      "gfx90a": {
+        "status": "ok",
+        "verified_on": "llvm22"
+      },
+      "gfx942": {
+        "status": "ok",
+        "verified_on": "llvm22"
+      },
+      "gfx950": {
+        "status": "ok",
+        "verified_on": "llvm22"
+      }
+    },
+    "minnum.f64": {
       "gfx11-generic": {
         "status": "ok",
         "verified_on": "llvm22"
@@ -5727,7 +5789,7 @@
       "gfx942",
       "gfx950"
     ],
-    "clang": "AMD clang version 22.0.0git (https://github.com/RadeonOpenCompute/llvm-project roc-7.2.0 26014 7b800a19466229b8479a78de19143dc33c3ab9b5)",
+    "clang": "AMD clang version 22.0.0git (https://github.com/RadeonOpenCompute/llvm-project roc-7.2.3 26084 f58b06dce1f9c15707c5f808fd002e18c2accf7e)",
     "flavor": "llvm22",
     "generator": 4,
     "probe_cflags": [
