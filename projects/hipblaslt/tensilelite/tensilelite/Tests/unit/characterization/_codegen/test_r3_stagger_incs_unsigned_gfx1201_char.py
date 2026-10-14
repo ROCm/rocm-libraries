@@ -96,7 +96,7 @@ def _emit_asm(config_path, arch, limit):
     from tensilelite.Common.Types import DebugConfig
     from tensilelite.KernelWriterAssembly import KernelWriterAssembly
     from tensilelite.SolutionStructs.Naming import getKernelFileBase
-    from tensilelite.TensileCreateLibrary.Run import generateKernelObjectsFromSolutions
+    from tensilelite.create_library.run import generateKernelObjectsFromSolutions
 
     assembler, isaInfoMap = _cfgh._toolchain_for(arch)
     out = []
