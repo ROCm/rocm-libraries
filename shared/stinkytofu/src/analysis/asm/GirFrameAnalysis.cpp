@@ -923,10 +923,10 @@ GirFrameHazardAnalysis::Result GirFrameHazardAnalysis::run(Function& function,
         LiveTouchKey producerKey{producer.frame, {producer.inst, producer.accessIndex}};
         LiveTouchKey consumerKey{consumer.frame, {consumer.inst, consumer.accessIndex}};
         if (!emitted.emplace(static_cast<int>(kind), producerKey, consumerKey, gap).second) return;
-        result.hazards.push_back({kind, producer.inst, consumer.inst, producer.block,
-                                  consumer.block, producer.instructionIndex,
-                                  consumer.instructionIndex, producer.frame, consumer.frame, gap,
-                                  crossAgent, actionOf(producer.inst), actionOf(consumer.inst)});
+        result.hazards.push_back(
+            {kind, producer.inst, consumer.inst, producer.block, consumer.block,
+             producer.instructionIndex, consumer.instructionIndex, producer.frame, consumer.frame,
+             gap, crossAgent, actionOf(producer.inst), actionOf(consumer.inst), producer.storage});
     };
 
     // Emit in program order, by POSITION: a label carries a per-run suffix, so ordering on it is
