@@ -1063,14 +1063,14 @@ def writeSolutionsAndKernelsTCL(
     outOptions = rocisa.rocIsa.getInstance().getOutputOptions()
     outOptions.outputNoComment = disableAsmComments
 
-    memcompress = len(uniqueAsmKernels) > 10000
+    # No in-memory compression of the source: it is written to disk in the
+    # worker that generated it and never returned to the parent.
     unaryProcessKernelSource = functools.partial(
         processKernelSource,
         kernelWriterAssembly,
         rocisa.rocIsa.getInstance().getData(),
         outOptions,
         splitGSU,
-        compress = memcompress,
     )
 
     unaryWriteAssembly = functools.partial(writeAssembly, assemblyTmpPath)
@@ -1079,7 +1079,9 @@ def writeSolutionsAndKernelsTCL(
             processed_kernel = unaryProcessKernelSource(kernel)
             written_kernel = unaryWriteAssembly(processed_kernel)
             assembled_kernel = assemble(written_kernel)
-            return processed_kernel
+            # The source is on disk (and assembled) by now; don't ship it back
+            # to the parent, which only needs the post-codegen kernel info.
+            return processed_kernel._replace(src=None, header=None)
         return composed_function
 
     unaryProcessNative = functools.partial(
@@ -1088,7 +1090,6 @@ def writeSolutionsAndKernelsTCL(
         str(asmToolchain.assembler.path),
         disableAsmComments,
         splitGSU,
-        compress=memcompress,
     )
 
     # The basename has to stay "Kernels": the emitted code object is named from
