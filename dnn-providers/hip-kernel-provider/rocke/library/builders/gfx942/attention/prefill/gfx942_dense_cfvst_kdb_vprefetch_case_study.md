@@ -69,7 +69,30 @@ None of the configurations improved the performance satisfactorily.
 
 ## Optimization 1: Enable CFVST
 
-V was stored in traditional layout in LDS. This caused bank conflicts during access. The hypothesis was that transposed layout would reduce bank conflicts. This feature was already present (CFVST) but disabled for bf16 due to register spillage concerns. Re-profiling found no register spillage. Infact performance improved substantially. Hence we adopted this optimization.
+V was stored in traditional layout in LDS. This caused bank conflicts during access. The hypothesis was that transposed layout would reduce bank conflicts. This feature was already present (CFVST) but disabled for bf16 due to register spillage concerns. Performance improved substantially with it enabled, so we adopted this optimization.
+
+#### Register usage
+
+VGPR count, spill count, and scratch bytes per thread, read from the code-object
+notes (`.vgpr_count`, `.vgpr_spill_count`, `.private_segment_fixed_size`) for gfx942,
+B1 S4096 Hq32 Hkv8 D128 causal, at two pinned toolchains: the `llvm20` IR flavor
+compiled by ROCm 7.1 comgr, and the `llvm23` IR flavor compiled by the ROCm 10 SDK comgr
+(AMD clang 23.0.0git). The `waves_per_eu=2` cap is 256 VGPRs.
+
+| variant | llvm20 VGPR | llvm20 spills | llvm20 scratch (B) | llvm23 VGPR | llvm23 spills | llvm23 scratch (B) |
+|---|---:|---:|---:|---:|---:|---:|
+| bf16 default (CFVST off) | 243 | 0 | 0 | 219 | 0 | 0 |
+| bf16 `use_cfvst=True` | 256 | 0 | 0 | 234 | 0 | 0 |
+| + `lds_num_buffers=2` | 256 | 4 | 20 | 230 | 0 | 0 |
+| + `emit_lse=True` | 256 | 5 | 24 | 230 | 0 | 0 |
+| + `persistent=True`, `num_persistent=304` | 256 | 16 | 68 | 256 | 7 | 32 |
+
+CFVST alone does not spill at either toolchain; at `llvm20` it sits exactly at the
+256-VGPR cap. The K double buffer and V prefetch pipeline spills at `llvm20`, and at
+`llvm23` only on the persistent grid. In every spilling variant the inner KV loop
+contains no scratch instructions: the spill reloads sit outside it, and on the
+persistent grid they run once per work item (16 at `llvm20`, 7 at `llvm23`). The
+`llvm22` flavor was not measured.
 
 ## Optimization 2 and 3: K LDS Double Buffering + V register pre-fetching
 

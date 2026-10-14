@@ -129,8 +129,10 @@ P5 is deliberately no-op for this kernel (a decision, not code):
 P1 conflict-free V (:func:`_use_cfvst`): V is stored TRANSPOSED via a perm_b32
 store-path transpose so the PV A-operand read is a contiguous ds_read_b64 instead of
 P0's 4 element-wise ds_read_u16 (128 -> ~32 LDS instrs/tile at D128). Gated to
-**D128 fp16**: D64 is VGPR-bound so the register round-trip regresses it, and D128
-bf16 spills over the waves-per-eu=2 cap (a P2/P3 register-headroom item). The lever
+**D128 fp16** by default: D64 is VGPR-bound so the register round-trip regresses it,
+and D128 bf16 CFVST leaves little VGPR headroom under the waves-per-eu=2 cap, so it is
+opt-in through ``use_cfvst=True`` (register usage is recorded in the gfx942 CFVST / KDB /
+VPF case study). The lever
 is numerically identity-preserving (same MFMA operands; only the LDS layout and read
 width change) -- the cohort's ``max_abs`` is unchanged from the naive path. The
 conflict-free vehicle was proven correct cross-part before being lifted (see the
@@ -845,10 +847,11 @@ def _use_cfvst(head_size: int, dtype: str) -> bool:
         (plan §6.1), so the register round-trip + perm temps raise pressure without
         relieving the actual bottleneck.
       * D128 bf16: the bf16 ``.1k`` MFMA schedule keeps more registers live, so cfvst
-        pushes VGPR over the waves-per-eu=2 cap (256) and SPILLS. fp16 does not
-        (it drops slightly, 176 -> 173). The flash x8 ladder is fp16-first anyway
-        (tiled_2d keeps bf16 D128 on the narrow path); a bf16 cfvst register-pressure
-        fix is a P3 occupancy item.
+        leaves little headroom under the waves-per-eu=2 VGPR cap. It is opt-in through
+        ``use_cfvst=True``; with ``lds_num_buffers=2`` it can spill, depending on the
+        LLVM toolchain and grid, outside the inner KV loop. Register usage per variant
+        and toolchain is recorded in the gfx942 CFVST / KDB / VPF case study. The flash
+        x8 ladder is fp16-first anyway.
     Gate on rows-per-DMA == 1 (D128) AND fp16 so the LDS budget and the body agree.
     """
     return _rows_per_instr(head_size) == 1 and dtype == "fp16"
