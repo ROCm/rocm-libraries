@@ -17,6 +17,7 @@
 # Nightly: develop at 03:00 UTC (7 pm PST, 8 pm PDT; GitHub cron is UTC).
 # On-demand: workflow_dispatch on any branch, no gating.
 
+# gfx1250_nightly_report.yml triggers on this name (workflow_run): rename both together.
 name: gfx1250 HW hipBLASLt + TensileLite Tests
 run-name: ${{ github.event_name == 'pull_request' && format('PR {0} @ {1}', github.event.pull_request.number, github.event.pull_request.head.sha) || format('{0}{1} @ {2}', github.event_name == 'schedule' && 'Nightly ' || '', github.ref_name, github.sha) }}
 
@@ -47,17 +48,9 @@ on:
         description: "Nightly ROCm SDK (rocm package) version to build and test against (empty = the pinned default)"
         type: string
         default: ""
-      send_report:
-        description: "Send the test report as the nightly does (to try the webhook)"
-        type: boolean
-        default: false
 
 permissions:
   contents: read
-
-env:
-  # The pinned ROCm SDK nightly; the install, the compiler check and the report read it.
-  ROCM_SDK_VERSION: ${{ inputs.rocm_sdk_version || '10.2.0a20261013' }}
 
 jobs:
   gate:
@@ -115,10 +108,6 @@ jobs:
       cancel-in-progress: true
     runs-on: blas-rocm-mi455-sandbox
     timeout-minutes: 600
-    # For the report job.
-    outputs:
-      runner: ${{ runner.name }}
-      steps: "SDK=${{ steps.sdk.outcome }}, Strict check=${{ steps.strict.outcome }}, Build=${{ steps.build.outcome }}, hipBLASLt tests=${{ steps.hipblaslt.outcome }}, TensileLite tests=${{ steps.tensilelite.outcome }}"
     # The ROCm SDK comes from the nightly pip index, not a host /opt/rocm: it must be
     # new enough to compile and run gfx1250-strict. The SDK install reuses downloaded
     # wheels from a pip cache on a host mount. Only the nightly writes it; other jobs get
@@ -151,6 +140,8 @@ jobs:
     env:
       # Run both suites as gfx1250-strict.
       HSA_DISABLE_GFX12_STRICT: "0"
+      # The pinned ROCm SDK nightly; the install and the compiler check both read it.
+      ROCM_SDK_VERSION: ${{ inputs.rocm_sdk_version || '10.2.0a20261013' }}
       GTEST_PRINT_TIME: "0"
       PYTHONUNBUFFERED: "1"
       # awk filter for all test and build logs
@@ -185,13 +176,14 @@ jobs:
           sparse-checkout-cone-mode: true
 
       - name: Install the ROCm SDK (gfx1250-strict capable)
-        id: sdk
         env:
           # Only this step uses the shared cache; later pip runs (the build's venv, tox,
           # which builds wheels from source) use pip's default cache under the job's HOME.
           PIP_CACHE_DIR: /pip-cache
         run: |
           set -euo pipefail
+          # Recorded with the results for the nightly report (gfx1250_nightly_report.yml).
+          mkdir -p test_results && echo "$ROCM_SDK_VERSION" > test_results/rocm_sdk_version.txt
           # pip never evicts and every SDK nightly adds several GB: the nightly, the only
           # job that can write the cache, drops files no job has read for 14 days. Other
           # jobs only read it.
@@ -306,7 +298,6 @@ jobs:
             || { echo "::error::runtime reports '${ARCH:-no GPU}', not gfx1250-strict"; exit 1; }
 
       - name: Build hipBLASLt from source
-        id: build
         run: |
           set -euo pipefail
           export CC="$ROCM_PATH/lib/llvm/bin/amdclang" CXX="$ROCM_PATH/lib/llvm/bin/amdclang++"
@@ -320,7 +311,6 @@ jobs:
             | awk -F, -v OFS=, "$HW_SCRUB"
 
       - name: Run hipBLASLt tests
-        id: hipblaslt
         timeout-minutes: 120
         if: ${{ github.event_name != 'workflow_dispatch' || inputs.run_hipblaslt }}
         env:
@@ -382,7 +372,6 @@ jobs:
           exit "$rc"
 
       - name: Run TensileLite common tests (fresh client)
-        id: tensilelite
         timeout-minutes: 350
         # Runs even if the hipBLASLt build or tests failed, but not if setup did.
         if: ${{ !cancelled() && steps.strict.outcome == 'success' && (github.event_name != 'workflow_dispatch' || inputs.run_tensilelite) }}
@@ -430,37 +419,3 @@ jobs:
         run: |
           owner="$(stat -c %u:%g "$GITHUB_WORKSPACE/..")"
           chown -R "$owner" "$GITHUB_WORKSPACE" "$RUNNER_TEMP" 2>/dev/null || true
-
-  report:
-    name: Nightly report
-    needs: [gate, gfx1250-tests]
-    # Every nightly (or a manual run with send_report) emails a test report, however the test job
-    # ended: failed, timed out, or never picked up by a runner. Runs on a GitHub-hosted runner from
-    # the test job's uploaded results, so the webhook secret never reaches the self-hosted runner.
-    if: ${{ always() && needs.gate.outputs.run == 'true' && (github.event_name == 'schedule' || inputs.send_report) }}
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: read
-      actions: read  # the previous nightly's results
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          sparse-checkout: .github/scripts
-      - name: Download this run's test results
-        # Absent when the test job never got far enough to upload them; the report says so.
-        continue-on-error: true
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          name: gfx1250-strict-test-results
-          path: results
-      - name: Send the report
-        env:
-          WEBHOOK_URL: ${{ secrets.GFX1250_BLAS_NIGHTLY_WEBHOOK_URL }}
-          # Optional System row in the report; a secret so its value stays out of the logs.
-          SYSTEM_LABEL: ${{ secrets.GFX1250_BLAS_SYSTEM_LABEL }}
-          GH_TOKEN: ${{ github.token }}
-          TEST_RUNNER_NAME: ${{ needs.gfx1250-tests.outputs.runner }}
-          STEPS: "Test job=${{ needs.gfx1250-tests.result }}${{ needs.gfx1250-tests.outputs.steps && ', ' || '' }}${{ needs.gfx1250-tests.outputs.steps }}"
-        run: |
-          [ -n "$WEBHOOK_URL" ] || { echo "::notice::GFX1250_BLAS_NIGHTLY_WEBHOOK_URL is not set; no report sent"; exit 0; }
-          python3 .github/scripts/gfx1250_nightly_report.py --results results --steps "$STEPS" --webhook-url "$WEBHOOK_URL"

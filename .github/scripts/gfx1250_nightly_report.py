@@ -17,8 +17,10 @@ Usage:
     # Compare with results on disk instead of fetching the previous nightly:
     python gfx1250_nightly_report.py --results DIR --previous PREV_DIR --previous-run-id ID --dry-run
 
-Uses GITHUB_* environment variables for the run metadata, and GH_TOKEN (needs
-actions: read) for the previous nightly's results. Standard library only.
+Uses GITHUB_* environment variables for the run metadata (REPORT_SHA,
+REPORT_REF_NAME, REPORT_EVENT_NAME and REPORT_RUN_ID describe the reported run
+when it isn't the current one), and GH_TOKEN (needs actions: read) for the
+previous nightly's results. Standard library only.
 """
 
 import argparse
@@ -602,6 +604,10 @@ def main():
     args = ap.parse_args()
 
     env, now = os.environ, datetime.datetime.now(datetime.timezone.utc)
+    # gfx1250_nightly_report.yml reports on another run (the nightly that triggered it).
+    for key in ("SHA", "REF_NAME", "EVENT_NAME", "RUN_ID"):
+        if env.get(f"REPORT_{key}"):
+            env[f"GITHUB_{key}"] = env[f"REPORT_{key}"]
     previous = {"status": "none", "missing": []}
     try:
         if args.previous:
