@@ -2053,7 +2053,7 @@ def test_runtime_head_dims_serve_every_width_in_a_bucket(bucket, dim, vlds):
     batch, sq, sk, hq, hkv = 2, 37, 53, 8, 4
     q, k, v = _rtdim_qkv(501, batch, sq, sk, hq, hkv, hkv, dim, dim)
     scale = 1.0 / np.sqrt(dim)
-    request = _dense_direct_request(batch, sq, sk, hq, hkv, dim, dim, return_lse=True)
+    request = _dense_direct_request(batch, sq, sk, hq, hkv, dim, dim, emit_lse=True)
     got = _run_rtdim(request, _rtdim_spec(bucket, vlds=vlds), q, k, v, scale=scale)
     out, lse = _rtdim_expected(q, k, v, scale, ctx=0, left=0, right=-1)
     np.testing.assert_allclose(got["out"], out, rtol=0, atol=2e-2)
@@ -2071,7 +2071,7 @@ def test_runtime_head_dims_unequal_widths(bucket, v_bucket, dq, dv, vlds):
     batch, sq, sk, hq, hkv = 2, 37, 53, 8, 4
     q, k, v = _rtdim_qkv(502, batch, sq, sk, hq, hkv, hkv, dq, dv)
     scale = 1.0 / np.sqrt(dq)
-    request = _dense_direct_request(batch, sq, sk, hq, hkv, dq, dv, return_lse=True)
+    request = _dense_direct_request(batch, sq, sk, hq, hkv, dq, dv, emit_lse=True)
     spec = _rtdim_spec(bucket, v_bucket=v_bucket, vlds=vlds)
     got = _run_rtdim(request, spec, q, k, v, scale=scale)
     out, lse = _rtdim_expected(q, k, v, scale, ctx=0, left=0, right=-1)
@@ -2088,7 +2088,7 @@ def test_runtime_head_dims_independent_v_heads(hv, vlds):
     batch, sq, sk, hq, hkv, dq, dv = 2, 33, 47, 8, 4, 64, 48
     q, k, v = _rtdim_qkv(503, batch, sq, sk, hq, hkv, hv, dq, dv)
     scale = 1.0 / np.sqrt(dq)
-    request = _dense_direct_request(batch, sq, sk, hq, hkv, dq, dv, return_lse=True)
+    request = _dense_direct_request(batch, sq, sk, hq, hkv, dq, dv, emit_lse=True)
     got = _run_rtdim(request, _rtdim_spec(128, vlds=vlds), q, k, v, scale=scale)
     out, lse = _rtdim_expected(q, k, v, scale, ctx=0, left=0, right=-1)
     np.testing.assert_allclose(got["out"], out, rtol=0, atol=2e-2)
@@ -2115,7 +2115,7 @@ def test_runtime_head_dims_causal_and_window(mask, vlds):
     q, k, v = _rtdim_qkv(504, 2, sq, sk, hq, hkv, hv, dim, dim)
     scale = 1.0 / np.sqrt(dim)
     request = _dense_direct_request(
-        2, sq, sk, hq, hkv, dim, dim, return_lse=True, **extra
+        2, sq, sk, hq, hkv, dim, dim, emit_lse=True, **extra
     )
     spec = _rtdim_spec(128, mask=mask, vlds=vlds)
     got = _run_rtdim(request, spec, q, k, v, scale=scale)
@@ -2141,7 +2141,7 @@ def test_runtime_head_dims_attn_bias_f32_with_lse(vlds):
         dim,
         "f32",
         AttentionMaskType.BOTTOM_RIGHT_CAUSAL,
-        return_lse=True,
+        emit_lse=True,
     )
     spec = _rtdim_spec(
         128, mask="causal", vlds=vlds, use_attn_bias=True, bias_dtype="f32"
@@ -2186,7 +2186,7 @@ def test_runtime_head_dims_never_touch_columns_past_the_widths(vlds):
         "out": view(arrays["out"], dv),
     }
     scale = 1.0 / np.sqrt(dq)
-    request = _dense_direct_request(batch, sq, sk, hq, hkv, dq, dv, return_lse=True)
+    request = _dense_direct_request(batch, sq, sk, hq, hkv, dq, dv, emit_lse=True)
     got = _launch_np(
         request,
         arrays,
@@ -2228,7 +2228,7 @@ def test_runtime_head_dims_rows_ending_at_the_allocation(bucket, dim, vlds):
     assert arrays["k"].size == batch * hkv * sk * dim
     scale = 1.0 / np.sqrt(dim)
     request = _dense_direct_request(
-        batch, sq, sk, hq, hkv, dim, dim, return_lse=True, tensor_layout="bhsd"
+        batch, sq, sk, hq, hkv, dim, dim, emit_lse=True, tensor_layout="bhsd"
     )
     got = _launch_np(
         request,
