@@ -932,7 +932,7 @@ def _stub_tensile_pipeline(monkeypatch, captured):
     pipeline is handed. Mirrors the stub set in test_tensile_backend_config.py."""
     import types
 
-    from tensilelite import Tensile as TensileModule
+    TensileModule = importlib.import_module("tensilelite.run")
 
     monkeypatch.setattr(
         TensileModule, "validateToolchain", lambda *a: ("cxx", "cc", "bundler")
@@ -1907,7 +1907,7 @@ def test_client_writer_receives_the_requested_names(monkeypatch, tmp_path):
     and the re-spawn."""
     import types
 
-    from tensilelite import Tensile as TensileModule
+    TensileModule = importlib.import_module("tensilelite.run")
 
     captured = {}
     monkeypatch.setattr(
