@@ -13,9 +13,9 @@ Two layers:
 * **Emit test (host-only, always runs):** the softmax lowers to ``exp2_fast`` for
   bf16 and fp16. Fails against the pre-change kernel (guarded ``math.exp2``).
 * **Scratch guard (needs comgr + llvm-readelf/objdump; skipped otherwise):**
-  ``exp2_fast`` drops the range-reduction guard, which also drops a scheduling
-  barrier and stretches live ranges toward the gfx942 256-VGPR cap -- adding
-  register pressure. Whether that turns into a spill is comgr-version-dependent
+  ``exp2_fast`` drops the range-reduction guard, which changes the instruction
+  schedule and raises register pressure toward the gfx942 256-VGPR cap. Whether
+  that turns into a spill is comgr-version-dependent
   (older comgr spills; the 7.13/7.14 comgr allocates the same IR spill-free), and
   the exact scratch size is not stable across toolchains -- so this test does NOT
   pin a specific byte count. It compiles the kernel and asserts
