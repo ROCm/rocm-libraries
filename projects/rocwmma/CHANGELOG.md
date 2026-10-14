@@ -3,6 +3,25 @@
 Documentation for rocWMMA is available at
 [https://rocm.docs.amd.com/projects/rocWMMA/en/latest](https://rocm.docs.amd.com/projects/rocWMMA/en/latest).
 
+## rocWMMA 2.2.2 for ROCm 10.2
+
+### Added
+
+* Added support for the `gfx1250-strict` target.
+* Added community samples for grouped MoE GEMM (`grouped_gemm_moe`), Stream-K GEMM (`simple_gemm_streamk`), and Flash Attention v2 (`simple_flash_attn_v2`).
+* Added host tests for test-kernel generation.
+
+### Changed
+
+* Reduced test build time through shared support objects, split GEMM instantiations, and lower template overhead.
+* Consolidated documentation dependencies in `rocm-docs-core`.
+
+### Resolved issues
+
+* Fixed HIP and OpenMP dependency discovery in the installed CMake package.
+* Fixed host/device annotations on constexpr functions for compatibility with stricter Clang diagnostics.
+* Fixed resource leaks in DLRM and hipRTC regression tests.
+
 ## Since last release (ROCm 7.12)
 
 ### Added
@@ -19,7 +38,6 @@ Documentation for rocWMMA is available at
 
 ### Resolved issues
 
-* Fixed the installed CMake package to discover its HIP and OpenMP dependencies, including LLVM's `OpenMP::omp` target when exported.
 * Improved HIP RTC regression test portability when deployed outside the default path
 
 ## rocWMMA 2.2.0 for ROCm 7.2.0
