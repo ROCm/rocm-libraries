@@ -1336,6 +1336,16 @@ class ArchTarget:
     def max_threads_per_block(self) -> int:
         return self.limits.max_threads_per_block
 
+    @property
+    def has_dpp_row_xmask(self) -> bool:
+        """Whether DPP has ``row_xmask`` (an XOR with any mask 1..15 inside a
+        16-lane row). It is a gfx10+ encoding: gfx11, gfx12 and gfx1250 have
+        it; the gfx9 CDNA targets (``gfx9_mfma``, ``gfx950``) do not. An
+        allow-list, so a new family gets the base-DPP encodings (valid on
+        every target) until someone adds it here. Mirrored by
+        ``rocke_arch_has_dpp_row_xmask`` in the C++ engine."""
+        return self.target_family in ("gfx11_rdna", "gfx12_rdna", "gfx12_cdna")
+
     @staticmethod
     def from_gfx(gfx: str) -> "ArchTarget":
         return _build_target(gfx)
