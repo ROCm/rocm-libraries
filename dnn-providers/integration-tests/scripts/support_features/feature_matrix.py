@@ -6,7 +6,8 @@
 The graph-based matrix answers "how many of the op's graphs does an engine
 claim". This one answers "how much of the op's API does an engine claim": a
 cell is the share of the op's catalogued features (``support_features/<op>.py``)
-that at least one claimed graph exercises on that GPU and OS.
+that at least one claimed graph exercises on that GPU and OS. The rendered
+document calls features "options", the plainer word for readers.
 
 Same layout as the graph-based percentage view: a dashboard of op groups by
 GPU and OS target, one table per architecture family; then one table per
@@ -208,9 +209,6 @@ class FeatureClaims:
     def total(self, node_types: list[str]) -> int:
         return sum(len(self.features[t]) for t in node_types)
 
-    def tested_count(self, node_types: list[str]) -> int:
-        return sum(len(self.tested.get(t, ())) for t in node_types)
-
     def on_target(self, node_types: list[str], target: Target) -> int:
         return sum(len(self.any_engine.get((t, target), ())) for t in node_types)
 
@@ -281,20 +279,21 @@ def share_cell(count: int, total: int) -> str:
 
 def render_dashboard(claims: FeatureClaims) -> list[str]:
     every_op = claims.node_types
-    features_link = link("Features per op", heading_anchor("Features per op"))
+    options_link = link("Options per op", heading_anchor("Options per op"))
     out = [
         "## Summary by architecture",
         "",
-        "- **Graphs**: bundle graphs that contain an op of the group.",
-        "- **API features**: the options the group's ops offer in the API "
-        "(data types, modes, flags, optional inputs, ...), catalogued from "
-        f"the flatbuffers schema. Each is listed in {features_link}.",
-        "- **Exercised**: API features at least one graph uses, claimed or "
-        "not. No GPU column can go higher.",
-        f"- **GPU columns**: share of the API features that a graph claimed "
-        f"on that GPU and OS (by any engine) uses. `{FULL}` all · "
+        "- **Op group (options)**: the number is how many options the "
+        "group's ops offer in the API (data types, mask modes, layouts, "
+        "optional inputs, ...), catalogued from the flatbuffers schema. Each "
+        f"option is counted once and listed in {options_link}, split into "
+        "those a test graph uses and those none does.",
+        "- **GPU columns**: share of those options used by at least one graph "
+        f"that an engine claims on that GPU and OS. `{FULL}` all · "
         f"`{PARTIAL} 45%` 45% · `{NOT_CLAIMED}` none. GPUs with the most "
-        "features claimed come first.",
+        "options claimed come first. Combinations aren't measured: a GPU can "
+        "cover fp8 and causal masking in separate graphs without any graph "
+        "testing them together.",
         "",
     ]
     for family, in_family in FAMILIES:
@@ -312,10 +311,7 @@ def render_dashboard(claims: FeatureClaims) -> list[str]:
             total = claims.total(members)
             rows.append(
                 [
-                    f"**{link(group, group_anchor(group))}**",
-                    str(claims.group_graphs.get(group, 0)),
-                    str(total),
-                    share_cell(claims.tested_count(members), total),
+                    f"**{link(group, group_anchor(group))}** ({total})",
                     *(
                         percent_cell(claims.on_target(members, t), total)
                         for t in targets
@@ -324,10 +320,7 @@ def render_dashboard(claims: FeatureClaims) -> list[str]:
             )
         out += table(
             [
-                "Op group",
-                "Graphs",
-                "API features",
-                "Exercised",
+                "Op group (options)",
                 *(link(target_name(t), target_anchor(t)) for t in targets),
             ],
             rows,
@@ -344,9 +337,9 @@ def render_by_engine(claims: FeatureClaims) -> list[str]:
         "",
         "- **Graphs claimed**: graphs of the op this engine claims on at "
         "least one GPU.",
-        "- **API features**: the op's catalogued API features, listed in "
-        f"{link('Features per op', heading_anchor('Features per op'))}.",
-        "- **GPU columns**: share of the op's API features that a graph this "
+        "- **Options**: the op's catalogued API options, listed in "
+        f"{link('Options per op', heading_anchor('Options per op'))}.",
+        "- **GPU columns**: share of the op's options that a graph this "
         f"engine claims on that GPU and OS uses. `{FULL}` all · "
         f"`{PARTIAL} 72%` 72% · `{NOT_CLAIMED}` none. L = Linux, "
         "W = Windows.",
@@ -377,7 +370,7 @@ def render_by_engine(claims: FeatureClaims) -> list[str]:
             [
                 "Op",
                 "Graphs claimed",
-                "API features",
+                "Options",
                 *map(short_target_link, claims.targets),
             ],
             rows,
@@ -396,6 +389,7 @@ def render_op_groups(claims: FeatureClaims) -> list[str]:
         rows.append(
             [
                 f'<a id="{group_anchor(group)}"></a>**{group}**',
+                str(claims.group_graphs.get(group, 0)),
                 str(claims.total(members)),
                 listed,
             ]
@@ -404,9 +398,10 @@ def render_op_groups(claims: FeatureClaims) -> list[str]:
         "## Op groups",
         "",
         "The API node types (`<Op>Attributes` in the flatbuffers schema) that "
-        "make up each group, with their API feature counts.",
+        "make up each group, with their option counts. *Graphs* counts "
+        "the test graphs holding an op of the group, claimed or not.",
         "",
-        *table(["Op group", "API features", "Ops (API features)"], rows),
+        *table(["Op group", "Graphs", "Options", "Ops (options)"], rows),
     ]
 
 
@@ -427,15 +422,21 @@ def render_features_per_op(claims: FeatureClaims) -> list[str]:
             ]
         )
     return [
-        "## Features per op",
+        "## Options per op",
         "",
-        "Every API feature the percentages count, catalogued per op in "
-        "`scripts/support_features/<op>.py`. A feature is one value of one "
-        "API option: `dtype:bf16`, `mask:causal`. Features nothing exercises "
-        "cannot be claimed on any GPU until a graph uses them.",
+        "Every API option the percentages count, catalogued per op in "
+        "`scripts/support_features/<op>.py`. An option is one value of one "
+        "API setting: `dtype:bf16`, `mask:causal`. An option no test graph "
+        "uses cannot be claimed on any GPU until one does.",
         "",
         *table(
-            ["Op", "Graphs", "Exercised", "Exercised by a graph", "Not exercised"],
+            [
+                "Op",
+                "Graphs",
+                "Used by tests",
+                "Used by a test graph",
+                "Used by no test graph",
+            ],
             rows,
         ),
     ]
@@ -458,13 +459,13 @@ def render_gpu_targets(claims: FeatureClaims) -> list[str]:
     return [
         "## GPU targets",
         "",
-        f"Features claimed: by any engine, out of {total} across all ops.",
+        f"Options claimed: by any engine, out of {total} across all ops.",
         "",
-        *table(["Target", "Architecture", "Products", "Features claimed"], rows),
+        *table(["Target", "Architecture", "Products", "Options claimed"], rows),
     ]
 
 
-TITLE = "Support matrix by API feature"
+TITLE = "Support matrix by API option"
 
 
 def render(claims: FeatureClaims) -> str:
@@ -472,7 +473,7 @@ def render(claims: FeatureClaims) -> str:
         *(name for name, _ in FAMILIES),
         "By engine",
         "Op groups",
-        "Features per op",
+        "Options per op",
         "GPU targets",
     ]
     jump = " · ".join(link(s, heading_anchor(s)) for s in sections)
@@ -482,9 +483,9 @@ def render(claims: FeatureClaims) -> str:
         f"<!-- Generated by {REGEN_COMMAND}; edit the script, not this file. -->",
         "",
         f"Generated from the committed support claims ({claims.unit_count} "
-        f"graphs, {claims.total(claims.node_types)} catalogued features). "
-        "Percentages are shares of each op's API features, not of its graphs. "
-        "Features count singly, not in combination.",
+        f"graphs, {claims.total(claims.node_types)} catalogued options). "
+        "Percentages are shares of each op's API options, not of its graphs. "
+        "Options count singly, not in combination.",
         "",
         f"**Jump to:** {jump}",
         "",

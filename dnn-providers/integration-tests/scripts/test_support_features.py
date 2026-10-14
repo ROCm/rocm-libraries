@@ -524,7 +524,7 @@ class TestFeatureClaims:
             claims={"E": {"gfx942": ["linux"]}},
         )
         claims = _feature_claims(tmp_path)
-        assert claims.tested_count([FAKE_TYPE]) == 2
+        assert claims.tested[FAKE_TYPE] == {"dtype:fp16", "mask:sliding"}
         assert claims.on_target([FAKE_TYPE], ("gfx942", "linux")) == 1
         assert claims.graphs[FAKE_TYPE] == 2
 
@@ -650,23 +650,21 @@ class TestFeatureMatrixMarkdown:
     def test_dashboard_cells_are_feature_shares(self, tmp_path: Path) -> None:
         document = self._document(tmp_path)
         rdna = _row(document, "### RDNA (consumer)", "Attention")
-        # Op group, Graphs, API features, Exercised, gfx1100-windows.
-        assert rdna == [
-            "**[Attention](#group-attention)**",
-            "2",
-            "4",
-            "3 / 4 (75%)",
-            "🟡 75%",
-        ]
+        # Op group (options), gfx1100-windows.
+        assert rdna == ["**[Attention](#group-attention)** (4)", "🟡 75%"]
         cdna = _row(document, "### CDNA (data center)", "Attention")
-        assert cdna[4] == "🟡 50%"
+        assert cdna[1] == "🟡 50%"
         # An op no graph exercises reads ❌, not a blank.
-        assert _row(document, "### CDNA (data center)", "CustomOp")[1:] == [
-            "0",
-            "2",
-            "0 / 2 (0%)",
+        assert _row(document, "### CDNA (data center)", "CustomOp") == [
+            "**[CustomOp](#group-customop)** (2)",
             "❌",
         ]
+
+    def test_op_groups_count_graphs_and_features(self, tmp_path: Path) -> None:
+        document = self._document(tmp_path)
+        section = document.split("\n## Op groups\n", 1)[1]
+        assert '<a id="group-attention"></a>**Attention** | 2 | 4 |' in section
+        assert '<a id="group-customop"></a>**CustomOp** | 0 | 2 |' in section
 
     def test_dashboard_puts_most_claimed_target_first(self, tmp_path: Path) -> None:
         _bundle(
@@ -692,7 +690,7 @@ class TestFeatureMatrixMarkdown:
 
     def test_engine_tables_count_only_that_engine(self, tmp_path: Path) -> None:
         document = self._document(tmp_path)
-        # Columns: Op, Graphs claimed, API features, gfx942 L, gfx1100 W.
+        # Columns: Op, Graphs claimed, Options, gfx942 L, gfx1100 W.
         assert _row(document, "### E1", "Sdpa") == [
             "**[Sdpa](#op-sdpa)**",
             "2",
@@ -709,7 +707,7 @@ class TestFeatureMatrixMarkdown:
 
     def test_every_feature_is_listed_per_op(self, tmp_path: Path) -> None:
         document = self._document(tmp_path)
-        section = document.split("\n## Features per op\n", 1)[1]
+        section = document.split("\n## Options per op\n", 1)[1]
         assert (
             '| <a id="op-sdpa"></a>**Sdpa** | 2 | 3 / 4 (75%) | '
             "`dtype:fp16`, `dtype:bf16`, `mask:causal` | `mask:sliding` |"
@@ -723,10 +721,12 @@ class TestFeatureMatrixMarkdown:
         document = self._document(tmp_path)
         summary = document.split("## Summary by architecture", 1)[1]
         summary = summary.split("\n### ", 1)[0]
-        for column in ("Graphs", "API features", "Exercised", "GPU columns"):
+        for column in ("Op group (options)", "GPU columns"):
             assert f"- **{column}**:" in summary
+        # The shares count options singly; the legend must say so.
+        assert "Combinations aren't measured" in summary
         engines = document.split("## By engine", 1)[1].split("\n### ", 1)[0]
-        for column in ("Graphs claimed", "API features", "GPU columns"):
+        for column in ("Graphs claimed", "Options", "GPU columns"):
             assert f"- **{column}**:" in engines
 
     def test_anchors_resolve(self, tmp_path: Path) -> None:
@@ -743,7 +743,7 @@ class TestFeatureMatrixMarkdown:
             "e1",
             "group-attention",
             "op-sdpa",
-            "features-per-op",
+            "options-per-op",
         } <= targets
         assert targets <= defined
 
@@ -760,7 +760,7 @@ class TestFeatureMatrixCli:
         output = tmp_path / "out.md"
         argv = ["--bundles-dir", str(tmp_path), "--output", str(output)]
         assert feature_matrix_main(argv) == 0
-        assert output.read_text().startswith("# Support matrix by API feature")
+        assert output.read_text().startswith("# Support matrix by API option")
         assert capsys.readouterr().out == f"wrote {output}\n"
 
     def test_defect_exits_one_and_writes_nothing(
