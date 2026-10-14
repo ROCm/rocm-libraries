@@ -123,9 +123,10 @@ reason  = "CPU reference verification of this shape takes longer than 60 s"
 
 # dnn-benchmarking fp32 gemm workloads. hipBLASLt and the CPU reference accumulate
 # K terms in different orders, so large-K fp32 results differ by more than the
-# default atol=rtol=1e-5 (e.g. fp32_m96_n6656_k6656: max abs diff 9.3e-5, 0.7% of
-# elements, at |c|~5).
+# default atol=rtol=1e-5. Observed max abs diff grows with K: 9.3e-5 at K=6656
+# (fp32_m96_n6656_k6656, 0.7% of elements, |c|~5) and 6.5e-4 at K=24576
+# (fp32_m32_n8192_k24576). atol=1e-3 leaves ~1.5x over the worst.
 [[tolerance_overrides]]
 filters = ["dnn_benchmarking_hipblaslt_gemm.fp32_*"]
-atol = 5e-4
+atol = 1e-3
 rtol = 1e-4
