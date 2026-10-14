@@ -32,6 +32,13 @@
 #include "rocsparse-types.h"
 #include "rocsparse/rocsparse-export.h"
 
+#ifdef ROCSPARSE_WITH_TRSM_REFACTORING
+
+#include "internal/auxiliary/rocsparse_dnmat_copy_data.h"
+#include "internal/auxiliary/rocsparse_dnmat_transpose.h"
+
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -1485,6 +1492,7 @@ rocsparse_status rocsparse_create_extract_descr(rocsparse_extract_descr*    desc
 ROCSPARSE_EXPORT
 rocsparse_status rocsparse_destroy_extract_descr(rocsparse_extract_descr descr);
 
+#if defined(ROCSPARSE_WITH_SPSORT)
 /*! \ingroup aux_module
 *  \brief Sparse matrix SpSort routine descriptor creation.
 *
@@ -1558,6 +1566,7 @@ rocsparse_status rocsparse_spsort_set_input(rocsparse_handle       handle,
                                             const void*            data,
                                             size_t                 data_size_in_bytes,
                                             rocsparse_error*       p_error);
+#endif
 
 /*! \ingroup aux_module
 *  \brief Sparse matrix SpGEAM routine descriptor creation.
@@ -3539,7 +3548,7 @@ rocsparse_status rocsparse_dnmat_get_strided_batch(rocsparse_const_dnmat_descr d
  *
  *  \retval rocsparse_status_success the operation completed successfully.
  *  \retval rocsparse_status_invalid_pointer if \p descr is invalid.
- *  \retval rocsparse_status_invalid_size if \p batch_count or \p batch_stride is invalid.
+ *  \retval rocsparse_status_invalid_size if \p batch_count is invalid.
  */
 ROCSPARSE_EXPORT
 rocsparse_status rocsparse_dnmat_set_strided_batch(rocsparse_dnmat_descr descr,
@@ -3577,7 +3586,7 @@ rocsparse_status rocsparse_dnvec_get_strided_batch(rocsparse_const_dnvec_descr d
  *
  *  \retval rocsparse_status_success the operation completed successfully.
  *  \retval rocsparse_status_invalid_pointer if \p descr is invalid.
- *  \retval rocsparse_status_invalid_size if \p batch_count or \p batch_stride is invalid.
+ *  \retval rocsparse_status_invalid_size if \p batch_count is invalid.
  */
 ROCSPARSE_EXPORT
 rocsparse_status rocsparse_dnvec_set_strided_batch(rocsparse_dnvec_descr descr,
