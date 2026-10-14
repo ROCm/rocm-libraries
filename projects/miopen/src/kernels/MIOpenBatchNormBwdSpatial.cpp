@@ -930,54 +930,6 @@ extern "C" __global__ void __launch_bounds__(
 
 #else
 
-// Chan's algorithm for merging two sets of statistics
-template <typename T>
-__forceinline__ __device__ void
-welford_merge(T& mean, T& sum_sq_diff, T& n, const T mean_b, const T sum_sq_diff_b, const T n_b)
-{
-    const T n_new = n + n_b;
-    const T rcp   = T(1) / miopen::max(n_new, T(1));
-    const T delta = mean_b - mean;
-    mean          = (mean * n + mean_b * n_b) * rcp;
-    sum_sq_diff   = sum_sq_diff + sum_sq_diff_b + delta * delta * (n * n_b * rcp);
-    n             = n_new;
-}
-
-// LDS reduce mean, sum of squared differences, and count across a workgroup
-template <typename TP, typename TA>
-__forceinline__ __device__ void lds_welford_reduce_2d(TP& mean,
-                                                      TP& sum_sq_diff,
-                                                      TP& n,
-                                                      TA* lcl_m,
-                                                      TA* lcl_s,
-                                                      TA* lcl_n,
-                                                      unsigned int xgrp_sz,
-                                                      unsigned int xlid,
-                                                      unsigned int row,
-                                                      unsigned int nrows)
-{
-    const unsigned int idx = row * xgrp_sz + xlid;
-    lcl_m[idx]             = mean;
-    lcl_s[idx]             = sum_sq_diff;
-    lcl_n[idx]             = n;
-    __syncthreads();
-
-    for(unsigned int red = miopen::reduction::detail::next_power_of_2(nrows) >> 1; red > 0;
-        red >>= 1)
-    {
-        if(row < red && row + red < nrows)
-        {
-            const unsigned int i = idx + red * xgrp_sz;
-            welford_merge<TA>(lcl_m[idx], lcl_s[idx], lcl_n[idx], lcl_m[i], lcl_s[i], lcl_n[i]);
-        }
-        __syncthreads();
-    }
-
-    mean        = lcl_m[xlid];
-    sum_sq_diff = lcl_s[xlid];
-    n           = lcl_n[xlid];
-}
-
 extern "C" __global__ void
 __launch_bounds__(MIO_BN_GRP0_FINAL* MIO_BN_GRP1_FINAL* MIO_BN_GRP2_FINAL)
     MIOpenBatchNormBwdSpatialFinalMeanVariance(fp_type* __restrict meanvarbuff,
@@ -1001,52 +953,60 @@ __launch_bounds__(MIO_BN_GRP0_FINAL* MIO_BN_GRP1_FINAL* MIO_BN_GRP2_FINAL)
         return;
     }
 
-    fp_prec_c_type mean        = toPrecCType(0);
-    fp_prec_c_type sum_sq_diff = toPrecCType(0);
-    fp_prec_c_type count       = toPrecCType(0);
-    fp_prec_c_type variance;
+    fp_prec_c_type variance = toPrecCType(0);
+    fp_prec_c_type mean     = toPrecCType(0);
     fp_prec_c_type invVariance;
 
     for(unsigned int zoffset = zlid; zoffset < MIO_BN_NGRPS2; zoffset += zgrp_sz)
     {
         for(unsigned int yoffset = ylid; yoffset < MIO_BN_NGRPS; yoffset += ygrp_sz)
         {
-            auto load = [&](unsigned int pos) {
-                return miopen::batchnorm::loadFromStash<fp_prec_c_type>(
-                    reinterpret_cast<const fp_c_type*>(meanvarbuff),
-                    pos,
-                    MIO_BN_GRP2 * zoffset * MIO_BN_N_ELEMENTS,
-                    MIO_BN_GRP1 * yoffset * mio_bn_config::vec_size_y,
-                    ystride / mio_bn_config::vec_size_x,
-                    xgrp_sz,
-                    xgrp_id,
-                    xlid,
-                    xstride);
-            };
-            const fp_prec_c_type m_b = load(0);
-            const fp_prec_c_type s_b = load(1);
-            const fp_prec_c_type n_b = load(2);
-            welford_merge<fp_prec_c_type>(mean, sum_sq_diff, count, m_b, s_b, n_b);
+            mean += miopen::batchnorm::loadFromStash<fp_prec_c_type>(
+                reinterpret_cast<const fp_c_type*>(meanvarbuff),
+                0,
+                MIO_BN_GRP2 * zoffset * MIO_BN_N_ELEMENTS,
+                MIO_BN_GRP1 * yoffset * mio_bn_config::vec_size_y,
+                ystride / mio_bn_config::vec_size_x,
+                xgrp_sz,
+                xgrp_id,
+                xlid,
+                xstride);
+            variance += miopen::batchnorm::loadFromStash<fp_prec_c_type>(
+                reinterpret_cast<const fp_c_type*>(meanvarbuff),
+                1,
+                MIO_BN_GRP2 * zoffset * MIO_BN_N_ELEMENTS,
+                MIO_BN_GRP1 * yoffset * mio_bn_config::vec_size_y,
+                ystride / mio_bn_config::vec_size_x,
+                xgrp_sz,
+                xgrp_id,
+                xlid,
+                xstride);
         }
     }
 
-    constexpr auto grp_final_total = MIO_BN_GRP0_FINAL * MIO_BN_GRP1_FINAL * MIO_BN_GRP2_FINAL;
-    __shared__ fp_accum_c_type lcl_m[grp_final_total];
-    __shared__ fp_accum_c_type lcl_s[grp_final_total];
-    __shared__ fp_accum_c_type lcl_n[grp_final_total];
+    if constexpr(!mio_bn_config::use_amdgcn || mio_bn_config::launch_dim.grp0 > 1 ||
+                 (mio_bn_config::lds_gcn_size == 1) || mio_bn_config::vec_size_x > 1)
+    {
+        __shared__ fp_accum_c_type
+            lcl_data[2 * MIO_BN_GRP0_FINAL * MIO_BN_GRP1_FINAL * MIO_BN_GRP2_FINAL];
+        miopen::reduction::lds_reduce2_2d(mean,
+                                          variance,
+                                          toAccumCType(INHW),
+                                          lcl_data,
+                                          xgrp_sz,
+                                          xlid,
+                                          ylid + zlid * ygrp_sz,
+                                          ygrp_sz * zgrp_sz);
+    }
+    else
+    {
+        constexpr auto grp_final_total = MIO_BN_GRP0_FINAL * MIO_BN_GRP1_FINAL * MIO_BN_GRP2_FINAL;
+        miopen::reduction::reduce2<fp_accum_c_type, grp_final_total>(
+            mean, variance, toAccumCType(INHW), ylid + zlid * ygrp_sz);
+    }
 
-    lds_welford_reduce_2d(mean,
-                          sum_sq_diff,
-                          count,
-                          lcl_m,
-                          lcl_s,
-                          lcl_n,
-                          xgrp_sz,
-                          xlid,
-                          ylid + zlid * ygrp_sz,
-                          ygrp_sz * zgrp_sz);
-
-    variance    = miopen::max(sum_sq_diff * toPrecCType(INHW), toPrecCType(0));
+    variance    = miopen::fma(-mean, mean, variance);
+    variance    = miopen::max(variance, toPrecCType(0));
     invVariance = miopen::rsqrt(variance + toPrecCType(epsilon));
 
     for(unsigned int zoffset = zlid; zoffset < MIO_BN_NGRPS2; zoffset += zgrp_sz)
@@ -1106,10 +1066,8 @@ extern "C" __global__ void __launch_bounds__(
         return;
     }
 
-    fp_prec_c_type mean        = toPrecCType(0);
-    fp_prec_c_type sum_sq_diff = toPrecCType(0);
-    fp_prec_c_type count       = toPrecCType(0);
-    constexpr unsigned W       = miopen::mapped_vector_info<fp_prec_ls_type>::size;
+    fp_prec_c_type variance = toPrecCType(0);
+    fp_prec_c_type mean     = toPrecCType(0);
 
     if(ygid * mio_bn_config::vec_size_y < mio_bn_config::hw && zgid < mio_bn_config::n)
     {
@@ -1121,60 +1079,52 @@ extern "C" __global__ void __launch_bounds__(
             unsigned int index    = index_base + n * mio_bn_config::chw;
             fp_prec_ls_type value = toPrecLsType(*reinterpret_cast<const fp_ls_type*>(in + index));
 
-            if constexpr(!mio_config::layout_nhwc)
-            {
-                // chunk statistics
-                fp_prec_c_type csum = toPrecCType(0);
-                miopen::batchnorm::_accumulate(csum, value);
-                fp_prec_c_type cmean = csum / toPrecCType(W);
-                auto d               = value - toPrecLsType(cmean);
-                fp_prec_c_type cS    = toPrecCType(0);
-                miopen::batchnorm::_accumulate_mad(cS, d, d);
-
-                // merge chunk statistics into group statistics
-                welford_merge<fp_prec_c_type>(mean, sum_sq_diff, count, cmean, cS, toPrecCType(W));
-            }
-            else
-            {
-                // each element is a single sample, so we can merge directly into group statistics
-                welford_merge<fp_prec_c_type>(
-                    mean, sum_sq_diff, count, toPrecCType(value), toPrecCType(0), toPrecCType(1));
-            }
+            miopen::batchnorm::_accumulate(mean, value);
+            miopen::batchnorm::_accumulate_mad(variance, value, value);
         }
     }
 
-    __shared__ fp_accum_c_type lcl_m[mio_bn_config::lds_size];
-    __shared__ fp_accum_c_type lcl_s[mio_bn_config::lds_size];
-    __shared__ fp_accum_c_type lcl_n[mio_bn_config::lds_size];
-
-    lds_welford_reduce_2d(mean,
-                          sum_sq_diff,
-                          count,
-                          lcl_m,
-                          lcl_s,
-                          lcl_n,
-                          xgrp_sz,
-                          xlid,
-                          ylid + zlid * ygrp_sz,
-                          ygrp_sz * zgrp_sz);
+    if constexpr(!mio_bn_config::use_amdgcn || mio_bn_config::launch_dim.grp0 > 1 ||
+                 (mio_bn_config::lds_gcn_size == 1) || mio_bn_config::vec_size_x > 1)
+    {
+        __shared__ fp_accum_c_type lcl_data[2 * mio_bn_config::lds_size];
+        miopen::reduction::lds_reduce2_2d(mean,
+                                          variance,
+                                          toAccumCType(1.0),
+                                          lcl_data,
+                                          xgrp_sz,
+                                          xlid,
+                                          ylid + zlid * ygrp_sz,
+                                          ygrp_sz * zgrp_sz);
+    }
+    else
+    {
+        miopen::reduction::reduce2<fp_accum_c_type, mio_bn_config::lds_size>(
+            mean, variance, toAccumCType(1.0), ylid + zlid * ygrp_sz);
+    }
 
     if(ylid == 0 && zlid == 0)
     {
-        auto store = [&](fp_prec_c_type val, unsigned int pos) {
-            miopen::batchnorm::storeToStash(val,
-                                            reinterpret_cast<fp_c_type*>(meanvarbuff),
-                                            pos,
-                                            zgrp_sz * zgrp_id * MIO_BN_N_ELEMENTS,
-                                            ygrp_sz * ygrp_id * mio_bn_config::vec_size_y,
-                                            ystride / mio_bn_config::vec_size_x,
-                                            xgrp_sz,
-                                            xgrp_id,
-                                            xlid,
-                                            xstride);
-        };
-        store(mean, 0);
-        store(sum_sq_diff, 1);
-        store(count, 2);
+        miopen::batchnorm::storeToStash(mean,
+                                        reinterpret_cast<fp_c_type*>(meanvarbuff),
+                                        0,
+                                        zgrp_sz * zgrp_id * MIO_BN_N_ELEMENTS,
+                                        ygrp_sz * ygrp_id * mio_bn_config::vec_size_y,
+                                        ystride / mio_bn_config::vec_size_x,
+                                        xgrp_sz,
+                                        xgrp_id,
+                                        xlid,
+                                        xstride);
+        miopen::batchnorm::storeToStash(variance,
+                                        reinterpret_cast<fp_c_type*>(meanvarbuff),
+                                        1,
+                                        zgrp_sz * zgrp_id * MIO_BN_N_ELEMENTS,
+                                        ygrp_sz * ygrp_id * mio_bn_config::vec_size_y,
+                                        ystride / mio_bn_config::vec_size_x,
+                                        xgrp_sz,
+                                        xgrp_id,
+                                        xlid,
+                                        xstride);
     }
 } // end spatial mean kernel
 
