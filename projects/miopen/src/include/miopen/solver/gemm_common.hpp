@@ -49,6 +49,10 @@ bool IsAnyBufferFp16(const TensorDescriptor& xDesc,
 
 double SlowdownFactor(int n_oper, double oper_factor, double multiple_oper_factor);
 
+// Excludes small-batch 2D NHWC single-group backward GEMM on gfx942 (slow in multi-node training).
+bool IsSmallBatchNhwcBackwardExcluded(const std::string& device_name,
+                                      const miopen::conv::ProblemDescription& problem);
+
 } // namespace gemm
 } // namespace conv
 } // namespace solver

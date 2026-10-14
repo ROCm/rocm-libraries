@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
-* Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
+* Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights Reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -41,6 +41,7 @@ namespace rocsparse
                                            I       N,
                                            I       K,
                                            int64_t nnz,
+                                           int64_t nblocks,
                                            int64_t batch_count,
                                            int64_t batch_stride_A,
                                            ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
@@ -76,6 +77,7 @@ namespace rocsparse
                                                 I       N,
                                                 I       K,
                                                 int64_t nnz,
+                                                int64_t nblocks,
                                                 int64_t batch_count,
                                                 int64_t batch_stride_A,
                                                 ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
