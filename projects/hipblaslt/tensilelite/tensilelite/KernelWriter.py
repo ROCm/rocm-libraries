@@ -9859,6 +9859,10 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       self.defineSgpr(self.loopCounterName(kernel,i), 1)
 
     self.defineSgpr("OrigLoopCounter", 1)
+    if kernel.get("LDSSegmentBRotate"):
+      # B-rotate: per-wave LocalReadAddrB+1 - LocalReadAddrB+0 (pair 0: +64K, pair 1: 64K - 2*S).
+      # Defined here (not in defineVariableSgprs) because lraDeclareAddresses is emitted first.
+      self.defineSgpr("BRotateLRDelta", 1)
 
     if self.debugConfig.debugKernel:
       self.defineSgpr("AddressDbg", self.states.numSgprAddressDbg)
