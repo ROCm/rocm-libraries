@@ -301,7 +301,8 @@ def test_fp8_mfma_qk_kv_threshold_splits_key(pin_arch):
 
 def test_single_batch_interleave_splits_key(pin_arch):
     # The d128 single-batch cohort turns on the softmax/MFMA interleave; the
-    # same shape at num_seqs=2 does not.
+    # same shape at num_seqs=2 does not. The search bucket also separates this
+    # pair, so the tail entry itself is pinned by the env-flip test below.
     pin_arch("gfx950")
     base = dict(
         num_query_heads=8,
@@ -315,6 +316,30 @@ def test_single_batch_interleave_splits_key(pin_arch):
     a = P(total_q=257, num_seqs=1, **base)
     b = P(total_q=514, num_seqs=2, **base)
     _assert_split(au._tiled_cache_key, _built_2d, a, b, "use_softmax_mfma_interleave")
+
+
+def test_env_knob_flip_splits_single_batch_key(pin_arch, monkeypatch):
+    # Routing env knobs are read on every launch and can change mid-process.
+    # q=257 under default env and q=1025 with both d128 knobs off resolve the
+    # same geometry; only the single-batch tail separates their keys.
+    pin_arch("gfx950")
+    base = dict(
+        num_seqs=1,
+        num_query_heads=8,
+        num_kv_heads=8,
+        head_size=128,
+        block_size=16,
+        dtype="bf16",
+    )
+    a = P(total_q=257, max_seqlen_q=257, max_seqlen_k=257, **base)
+    key_a = au._tiled_cache_key(a)
+    spec_a = _built_2d(a)["spec"]
+    monkeypatch.setenv("HIPDNN_GFX950_D128_SMALL_TILE", "0")
+    monkeypatch.setenv("HIPDNN_GFX950_D128_SOFTMAX_INTERLEAVE", "off")
+    b = P(total_q=1025, max_seqlen_q=1025, max_seqlen_k=1025, **base)
+    field = "use_softmax_mfma_interleave"
+    assert spec_a[field] != _built_2d(b)["spec"][field]
+    assert key_a != au._tiled_cache_key(b)
 
 
 # ---------------------------------------------------------------------------
