@@ -601,3 +601,70 @@ def test_tdm_pieces_land_where_the_local_reads_expect_them(tdmFuse, layout):
         rows = _tc_mt(state, tc) // numComp
         expected = [_read_addr(state, r["offsets"], tc, p * rows) for p in range(numComp)]
         assert _piece_lds_addrs(state, tc) == expected, (tc, numComp)
+
+
+# ---- LDSSegmentBRotate gate (b_rotate_reason) ----
+from Tensile.SolutionStructs.segment_interleave import b_rotate_reason
+
+def _brot_state(**ovr):
+    # F8 MT128x128x256 [2,2] aligned layout: A0,B0 fit seg0, so the oracle pads comp 1 to 64K.
+    s = _vw8_state(DepthU=256, MatrixInstM=16, MatrixInstN=16, MIWaveTile=[4, 4],
+                   VectorWidthA=4, VectorWidthB=1, LdsBlockSizePerPadA=256, LdsBlockSizePerPadB=256,
+                   LdsPadA=16, LdsPadB=16, PrefetchGlobalRead=2, LDSSegmentInterleave=1,
+                   ProblemType=dict(DataType=_FakeDataType(bf16=False, f8=True, nbytes=1.0)))
+    r = evaluate(s)
+    assert r["applicable"] and r["aligned"], r["reason"]
+    s.update({"LDSSegInterleaveOffsets": r["offsets"], "NumLdsBlk": 2, "1LDSBuffer": 0,
+              "LdsOffsetA_Blk": 131072, "StoreSwapAddr": False, "ExpandPointerSwap": 0,
+              "LDSSegmentBRotate": 1, "HalfPLR": 0, "LocalSplitU": 1})
+    s.update(ovr)
+    return s
+
+def test_brotate_applies_on_aligned_22():
+    assert b_rotate_reason(_brot_state()) is None
+    assert b_rotate_reason(_brot_state(VectorWidthB=2)) is None
+    # -1 = auto/unresolved tri-state knobs must not block.
+    assert b_rotate_reason(_brot_state(UseCustomMainLoopSchedule=-1)) is None
+
+def test_brotate_needs_even_vidx_count():
+    assert "even" in b_rotate_reason(_brot_state(VectorWidthB=4))
+
+def test_brotate_needs_lsi_aligned_layout():
+    assert "LDSSegmentInterleave" in b_rotate_reason(_brot_state(LDSSegmentInterleave=0))
+    s = _brot_state()
+    s["LDSSegInterleaveOffsets"] = {**s["LDSSegInterleaveOffsets"], "writeStrideBytes": 140000}
+    assert "[64K, 128K)" in b_rotate_reason(s)
+
+def test_brotate_rejects_unsupported():
+    assert "gfx1250" in b_rotate_reason(_brot_state(ISA=(9, 5, 0)))
+    assert "MX" in b_rotate_reason(_brot_state(ProblemType={**_brot_state()["ProblemType"], "MXBlockB": 32}))
+    assert "TDMSplit" in b_rotate_reason(_brot_state(TDMSplit=1))
+    assert "LdsOffsetA_Blk" in b_rotate_reason(_brot_state(LdsOffsetA_Blk=65536))
+    assert "persistent" in b_rotate_reason(_brot_state(), persistent=True)
+
+def _brot_tight_state(**ovr):
+    # F8 MT256x256x256 [2,2]: A0+B0 exceed 64K, so the oracle packs tight [A0][B0][A1][B1]
+    # with component stride S = fA+fB (64K < S < 128K); LDS buffers swap through StoreSwapAddr.
+    s = _vw8_state(DepthU=256, MatrixInstM=16, MatrixInstN=16, MIWaveTile=[8, 8],
+                   VectorWidthA=8, VectorWidthB=4, LdsBlockSizePerPadA=256, LdsBlockSizePerPadB=256,
+                   LdsPadA=16, LdsPadB=16, PrefetchGlobalRead=2, LDSSegmentInterleave=1,
+                   ProblemType=dict(DataType=_FakeDataType(bf16=False, f8=True, nbytes=1.0)))
+    r = evaluate(s)
+    assert r["applicable"] and r["reason"] == "tight", r["reason"]
+    s.update({"LDSSegInterleaveOffsets": r["offsets"], "NumLdsBlk": 2, "1LDSBuffer": 0,
+              "LdsOffsetA_Blk": 2 * r["offsets"]["writeStrideBytes"], "StoreSwapAddr": True,
+              "ExpandPointerSwap": 0, "LDSSegmentBRotate": 1, "HalfPLR": 3, "LocalSplitU": 1})
+    s.update(ovr)
+    return s
+
+def test_brotate_applies_on_tight_22_with_halfplr():
+    s = _brot_tight_state()
+    assert SEG < s["LDSSegInterleaveOffsets"]["writeStrideBytes"] < 2 * SEG
+    assert b_rotate_reason(s) is None
+    for vwb in (1, 2):
+        assert b_rotate_reason(_brot_tight_state(VectorWidthB=vwb)) is None
+
+def test_brotate_tight_needs_storeswap_or_pow2_blk():
+    # Without StoreSwapAddr the XOR/AND buffer swap needs a power-of-two block above the B span.
+    assert "LdsOffsetA_Blk" in b_rotate_reason(_brot_tight_state(StoreSwapAddr=False))
+    assert b_rotate_reason(_brot_tight_state(StoreSwapAddr=False, LdsOffsetA_Blk=262144)) is None
