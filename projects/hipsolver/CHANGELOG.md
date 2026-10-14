@@ -28,6 +28,10 @@ Full documentation for hipSOLVER is available at the [hipSOLVER Documentation](h
 ### Removed
 ### Optimized
 ### Resolved issues
+
+* Fixed hipsolverDnXpotrs calling 32-bit potrs instead of 64-bit potrs.
+* Fixed hipsolverSpSetStream not setting the internal rocsparse_handle stream.
+
 ### Known issues
 ### Upcoming changes
 
