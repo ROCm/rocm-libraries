@@ -198,6 +198,9 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
     // DirectLoad is not supported, wavelet model requires LDS as the sync boundary
     static constexpr bool DirectLoadEnabled = false;
 
+    static constexpr index_t MWaves = MPerBlock / (MPerXdl * MXdlPerWave);
+    static constexpr index_t NWaves = NPerBlock / (NPerXdl * NXdlPerWave);
+
     // =========================================================================
     // Wave specialization thread groups
     // =========================================================================
@@ -215,12 +218,14 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
 
         __device__ static index_t GetThreadId() { return get_thread_local_1d_id(); }
 
+        __device__ static index_t GetWaveId()
+        {
+            return GetThreadId() / (BlockSize / MWaves / NWaves);
+        }
+
         __device__ static constexpr index_t GetNumWaves()
         {
-            constexpr index_t MWaves = MPerBlock / (MPerXdl * MXdlPerWave);
-            constexpr index_t NWaves = NPerBlock / (NPerXdl * NXdlPerWave);
-            constexpr auto WaveSize  = BlockSize / MWaves / NWaves;
-            return TileMathThreadGroupSize / WaveSize;
+            return TileMathThreadGroupSize / (BlockSize / MWaves / NWaves);
         }
     };
 
@@ -239,12 +244,14 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
             return get_thread_local_1d_id() - TileMathThreadGroupSize;
         }
 
+        __device__ static index_t GetWaveId()
+        {
+            return GetThreadId() / (BlockSize / MWaves / NWaves);
+        }
+
         __device__ static constexpr index_t GetNumWaves()
         {
-            constexpr index_t MWaves = MPerBlock / (MPerXdl * MXdlPerWave);
-            constexpr index_t NWaves = NPerBlock / (NPerXdl * NXdlPerWave);
-            constexpr auto WaveSize  = BlockSize / MWaves / NWaves;
-            return TileLoadThreadGroupSize / WaveSize;
+            return TileLoadThreadGroupSize / (BlockSize / MWaves / NWaves);
         }
     };
 

@@ -21,6 +21,21 @@ template <typename ThreadGroup,
           index_t PadAmount>
 struct ThreadGroupTensorSliceTransfer_TDM
 {
+    // Note:
+    //  - ThreadGroup must have GetNumWaves and GetWaveId static methods
+    //  - BlockSliceLengths defines the box dims of loading tile (see ISA)
+    //  - ThreadClusterArrangeOrder defines the dimensions order. Slowest dimension is split between
+    //  waves in
+    //    ThreadGroup. This is currently not exposed to user but might changed in the future if
+    //    needed. Note that ThreadClusterArrangeOrder maps new to old dimensions so the slowest one
+    //    is always the first on in the sequence.
+    //  - SrcDesc must not have padding tranforms but keep the real dimensions (or results might be
+    //  wrong).
+    //    The OOB checks are supported by the instructions. The tensor dimensions are update after
+    //    moving the tile so the instruction will correctly detect OOB loads.
+    //  - PadInterval and PadAmount are defined according to ISA and they must be provided in bytes
+    //  units.
+
     static constexpr index_t nDim = remove_reference_t<SrcDesc>::GetNumOfDimension();
     static_assert(1 <= nDim && nDim <= 5, "TDM supports tensor rank in [1, 5].");
     static_assert(BlockSliceLengths::Size() == nDim,
@@ -29,6 +44,12 @@ struct ThreadGroupTensorSliceTransfer_TDM
                   "Thread cluster arrange order must match the tensor rank.");
     static_assert(is_valid_sequence_map<ThreadClusterArrangeOrder>::value,
                   "Thread cluster arrange order must be a dimension permutation.");
+    static_assert(nDim == remove_cvref_t<SrcDesc>::GetNumOfDimension() &&
+                      nDim == remove_cvref_t<DstDesc>::GetNumOfDimension(),
+                  "Inconsistent number of dimensions across src and dst descriptors.");
+    static_assert(ck::is_same_v<SrcData, DstData>,
+                  "Direct load transfer does not support datatypes conversion. Source and "
+                  "destination data types must be the same.");
     using Index = MultiIndex<nDim>;
 
     using SrcCoord = decltype(make_tensor_coordinate(SrcDesc{}, Index{}));
@@ -41,11 +62,7 @@ struct ThreadGroupTensorSliceTransfer_TDM
     static constexpr auto I0                  = Number<0>{};
     static constexpr auto wave_split_dim      = ThreadClusterArrangeOrder{}.At(I0);
     static constexpr auto block_slice_lengths = BlockSliceLengths{};
-    static constexpr index_t wave_size        = 32;
-    static constexpr index_t wave_num         = ThreadGroup::GetNumOfThread() / wave_size;
-    static_assert(ThreadGroup::GetNumOfThread() > 0 &&
-                      ThreadGroup::GetNumOfThread() % wave_size == 0,
-                  "Thread count must be a positive multiple of wave size (32).");
+    static constexpr index_t wave_num         = ThreadGroup::GetNumWaves();
     static_assert(block_slice_lengths[wave_split_dim] % wave_num == 0,
                   "Block slowest dimension must be divisible by number of waves.");
     static constexpr auto wave_box_dims_ = []() {
@@ -76,15 +93,8 @@ struct ThreadGroupTensorSliceTransfer_TDM
                                                             const DstDesc& dst_desc,
                                                             const Index& dst_block_slice_origin)
     {
-        static_assert(ck::is_same_v<SrcData, DstData>,
-                      "Direct load transfer does not support datatypes conversion. Source and "
-                      "destination data types must be the same.");
-
-        static_assert(nDim == remove_cvref_t<SrcDesc>::GetNumOfDimension() &&
-                          nDim == remove_cvref_t<DstDesc>::GetNumOfDimension(),
-                      "Inconsistent number of dimensions across lengths and descriptors.");
-
-        auto wave_id = amd_wave_read_first_lane(ThreadGroup::GetThreadId() / wave_size);
+        // Origin of src and dst per wave
+        auto wave_id = amd_wave_read_first_lane(ThreadGroup::GetWaveId());
 
         Index wave_data_idx_begin{};
         static_for<0, nDim, 1>{}([&](auto i) {
@@ -101,13 +111,14 @@ struct ThreadGroupTensorSliceTransfer_TDM
         SetSrcSliceOrigin(src_desc, src_block_slice_origin + wave_data_idx_begin);
         SetDstSliceOrigin(dst_desc, dst_block_slice_origin + wave_data_idx_begin);
 
-        // Cache tensor dims in TDM order (reversed from arrange order).
+        // Store tensor dims in TDM order (reversed from arrange order).
         static_for<0, nDim, 1>{}([&](auto i) {
             constexpr index_t ck_i = ThreadClusterArrangeOrder{}.At(Number<nDim - 1 - i>{});
-            cached_tensor_dims_[i] = static_cast<uint32_t>(src_desc.GetLength(Number<ck_i>{}) -
-                                                           src_slice_origin_[Number<ck_i>{}]);
+            tensor_dims_[i]        = static_cast<uint32_t>(src_desc.GetLength(Number<ck_i>{}) -
+                                                    src_slice_origin_[Number<ck_i>{}]);
         });
 
+        // Store tensor global strides in TDM order (reversed from arrange order).
         const auto zero_idx = []() {
             Index idx{};
             static_for<0, nDim, 1>{}([&](auto i) { idx(i) = 0; });
@@ -120,8 +131,8 @@ struct ThreadGroupTensorSliceTransfer_TDM
             Index unit_idx{};
             constexpr index_t ck_i = ThreadClusterArrangeOrder{}.At(Number<nDim - 1 - i>{});
             static_for<0, nDim, 1>{}([&](auto j) { unit_idx(j) = j == Number<ck_i>{} ? 1 : 0; });
-            const auto dim_stride     = src_desc.CalculateOffset(unit_idx) - src_base_offset;
-            cached_global_strides_[i] = static_cast<uint64_t>(dim_stride * cached_tensor_dims_[i]);
+            const auto dim_stride = src_desc.CalculateOffset(unit_idx) - src_base_offset;
+            global_strides_[i]    = static_cast<uint64_t>(dim_stride * tensor_dims_[i]);
         });
     }
 
@@ -144,9 +155,10 @@ struct ThreadGroupTensorSliceTransfer_TDM
 
     __device__ void PrecomputeIdx(const SrcDesc& src_desc)
     {
+        // For OOB check we need to update the tensor dimensions after moving the tile
         static_for<0, nDim, 1>{}([&](auto i) {
             constexpr index_t ck_i = ThreadClusterArrangeOrder{}.At(Number<nDim - 1 - i>{});
-            cached_tensor_dims_[i] = static_cast<uint32_t>(math::max(
+            tensor_dims_[i]        = static_cast<uint32_t>(math::max(
                 0, src_desc.GetLength(Number<ck_i>{}) - src_slice_origin_[Number<ck_i>{}]));
         });
     }
@@ -165,11 +177,14 @@ struct ThreadGroupTensorSliceTransfer_TDM
         static_assert(
             ck::is_same_v<remove_cvref_t<typename DstBuffer::type>, remove_cvref_t<DstData>>,
             "DstBuffer and DstData data types must be consistent.");
-        // load one wave tile with a single TDM instruction.
-        // cached_tensor_dims_ describe the full source tensor shape.
+
+        // load one wave tile with a single TDM instruction
+        // (we might add more flexibility and expose this to the user later on)
+        // tensor_dims_ describe the full source tensor shape.
         // wave_box_dims_ describe the tile shape loaded by this wave.
         TDMConfig tdm_config{};
 
+        // Pad encoding based on ISA document
         if constexpr(PadEnabled)
         {
             tdm_config.pad_enable              = PadEnabled;
@@ -181,8 +196,8 @@ struct ThreadGroupTensorSliceTransfer_TDM
             dst_buf,
             src_coord_.GetOffset(),
             dst_coord_.GetOffset(),
-            cached_tensor_dims_,
-            cached_global_strides_,
+            tensor_dims_,
+            global_strides_,
             tdm_wave_box_dims_.mData,
             tdm_config);
     }
@@ -198,8 +213,8 @@ struct ThreadGroupTensorSliceTransfer_TDM
     DstCoord dst_coord_;
     Index src_slice_origin_;
     Index dst_slice_origin_;
-    uint32_t cached_tensor_dims_[nDim];
-    uint64_t cached_global_strides_[nDim];
+    uint32_t tensor_dims_[nDim];
+    uint64_t global_strides_[nDim];
 };
 
 } // namespace ck

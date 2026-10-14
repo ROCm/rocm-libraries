@@ -15,6 +15,7 @@
 #include "amd_transpose_load.hpp"
 #include "generic_memory_space_atomic.hpp"
 #include "data_cache_prefetch.hpp"
+#include "amd_tdm.hpp"
 
 #if __clang_major__ >= 23
 #pragma clang diagnostic push
