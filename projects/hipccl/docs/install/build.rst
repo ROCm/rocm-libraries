@@ -110,7 +110,7 @@ Both layouts and the selector share these CMake options.
 ``HIPCCL_INSTALL_LEGACY_HEADER_SYMLINKS``
     Set to ``ON`` to install the temporary compatibility symlinks described in :doc:`../conceptual/hipccl-layout`.
     Set to ``OFF`` to skip them.
-    The default is ``ON`` in ``hipccl3`` and ``OFF`` in ``hipccl2``.
+    The default is ``ON``.
 
 ``BUILD_DOCS``
     Set to ``ON`` to build a local copy of the hipCCL documentation.

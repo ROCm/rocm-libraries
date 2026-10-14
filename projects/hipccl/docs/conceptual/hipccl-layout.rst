@@ -13,8 +13,7 @@ The directory contains two build layouts, ``hipccl3`` and ``hipccl2``, and a rou
 
 * ``hipccl3``: The default layout, and the layout under active development. Its copies of rocPRIM, hipCUB, and rocThrust stay in sync with each project's upstream development.
 
-* ``hipccl2``: A frozen compatibility snapshot of rocPRIM, hipCUB, and rocThrust from before unification.
-    It provides a stable fallback during migration. It's not kept in sync with upstream the way ``hipccl3`` is.
+* ``hipccl2``: A frozen compatibility snapshot of rocPRIM, hipCUB, and rocThrust from before unification. It provides a stable fallback during migration. It's not kept in sync with upstream the way ``hipccl3`` is.
 
 Both layouts expose the same CMake options: ``HIPCCL_BUILD_ROCPRIM``, ``HIPCCL_BUILD_HIPCUB``, ``HIPCCL_BUILD_ROCTHRUST``, and ``HIPCCL_BUILD_ALL``.
 Both use the same ``hipccl`` CPack package and the same ``find_package(hipccl)`` entry point.

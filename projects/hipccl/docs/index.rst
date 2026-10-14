@@ -13,23 +13,26 @@ hipCCL is AMD's unified package for `rocPRIM <https://rocm.docs.amd.com/projects
 The hipCCL project is located in `ROCm/rocm-libraries <https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipccl>`_.
 
 .. grid:: 2
+  :gutter: 3
 
   .. grid-item-card:: Install
 
     * :doc:`Install hipCCL <install/install>`
     * :doc:`Build from source <install/build>`
 
+.. grid:: 2
+  :gutter: 3
+
   .. grid-item-card:: Concepts
 
     * :doc:`hipCCL project layout <conceptual/hipccl-layout>`
 
-hipCCL defines no new C++ API.
-It packages rocPRIM, hipCUB, and rocThrust together.
-For per-algorithm API reference, see each component's documentation:
+  .. grid-item-card:: Related content
 
-* `rocPRIM documentation <https://rocm.docs.amd.com/projects/rocPRIM/en/latest/index.html>`_
-* `hipCUB documentation <https://rocm.docs.amd.com/projects/hipCUB/en/latest/index.html>`_
-* `rocThrust documentation <https://rocm.docs.amd.com/projects/rocThrust/en/latest/index.html>`_
+    * `rocPRIM <https://rocm.docs.amd.com/projects/rocPRIM/en/latest/index.html>`_
+    * `rocThrust <https://rocm.docs.amd.com/projects/rocThrust/en/latest/index.html>`_
+    * `hipCUB <https://rocm.docs.amd.com/projects/hipCUB/en/latest/index.html>`_
+
 
 To contribute to the documentation, refer to
 `Contributing to ROCm <https://rocm.docs.amd.com/en/latest/contribute/contributing.html>`_.
