@@ -1,5 +1,8 @@
 # Tensilelite
 
+For race-detection workloads, [regular GEMM generation](tensilelite/Utilities/regular_gemm.md)
+constructs one full-tile problem per ordinary fixed-split solution index.
+
 ## Building and Running Tests
 
 While full test suites can be run with a single `tox` command, developers may wish to
