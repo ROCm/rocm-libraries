@@ -50,19 +50,21 @@ class GFX942Params(BaseOptimizationParams):
     def direct_to_vgpr_b(self, ctx: SizeContext) -> ForkParameter:
         return self._make_param("DirectToVgprB", self._dtv_values("B", ctx))
 
-    def _dtv_values(self, a_or_b: str, ctx: SizeContext) -> List[int]:
+    def _dtv_values(self, a_or_b: str, ctx: SizeContext) -> List[bool]:
+        # DirectToVgprA/B are bool in TensileLite's validParameters; its input-YAML type check
+        # rejects 0 / 1 ("expected bool").
         transA, transB = self._gt.transA, self._gt.transB
         dsz = dataSize[self._gt.data_type]
         if transA == "N" and transB == "T" and dsz < 4:
             if a_or_b == "B" and ctx.M >= ctx.N and ctx.N < 512:
-                return [0]
+                return [False]
             if a_or_b == "A" and ctx.M < ctx.N and ctx.M < 512:
-                return [0]
-            return [0, 1]
+                return [False]
+            return [False, True]
         tlu = (a_or_b == "A" and transA == "N") or (a_or_b == "B" and transB == "T")
         if tlu:
-            return [0, 1]
-        return [0]
+            return [False, True]
+        return [False]
 
     @param
     def global_read_vector_width_a(self, ctx: SizeContext) -> ForkParameter:
