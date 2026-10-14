@@ -51,6 +51,67 @@ rocke_value_t* rocke_b_block_id_z(rocke_ir_builder_t* b)
     return rocke_i_block_id_axis(b, "z");
 }
 
+/* gfx1250 workgroup clusters. A launch without a cluster shape is a 1x1x1
+ * cluster: every id and max id inside the cluster reads 0 and the cluster id
+ * equals the workgroup id. */
+
+static rocke_value_t* rocke_i_cluster_axis_read(
+    rocke_ir_builder_t* b, rocke_opcode_t op, const char* name, const char* axis, const char* hint)
+{
+    rocke_attr_map_t a;
+    if(!rocke_i_live(b))
+        return NULL;
+    if(!axis)
+        return (rocke_value_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "%s axis must be x, y, or z, got None", name);
+    if(strcmp(axis, "x") != 0 && strcmp(axis, "y") != 0 && strcmp(axis, "z") != 0)
+        return (rocke_value_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "%s axis must be x, y, or z, got '%s'", name, axis);
+    a = rocke_i_attrs(b);
+    rocke_attr_set_str(b, &a, "axis", axis);
+    return rocke_i_op1(b, op, NULL, 0, rocke_i32(), &a, hint);
+}
+
+rocke_value_t* rocke_b_cluster_id(rocke_ir_builder_t* b, const char* axis)
+{
+    return rocke_i_cluster_axis_read(b, ROCKE_OP_GPU_CLUSTER_ID, "cluster_id", axis, "cid");
+}
+rocke_value_t* rocke_b_cluster_workgroup_id(rocke_ir_builder_t* b, const char* axis)
+{
+    return rocke_i_cluster_axis_read(
+        b, ROCKE_OP_GPU_CLUSTER_WORKGROUP_ID, "cluster_workgroup_id", axis, "cwid");
+}
+rocke_value_t* rocke_b_cluster_workgroup_max_id(rocke_ir_builder_t* b, const char* axis)
+{
+    return rocke_i_cluster_axis_read(
+        b, ROCKE_OP_GPU_CLUSTER_WORKGROUP_MAX_ID, "cluster_workgroup_max_id", axis, "cwmax");
+}
+rocke_value_t* rocke_b_cluster_workgroup_flat_id(rocke_ir_builder_t* b)
+{
+    rocke_attr_map_t a;
+    if(!rocke_i_live(b))
+        return NULL;
+    a = rocke_i_attrs(b);
+    return rocke_i_op1(
+        b, ROCKE_OP_GPU_CLUSTER_WORKGROUP_FLAT_ID, NULL, 0, rocke_i32(), &a, "cwflat");
+}
+rocke_value_t* rocke_b_cluster_workgroup_max_flat_id(rocke_ir_builder_t* b)
+{
+    rocke_attr_map_t a;
+    if(!rocke_i_live(b))
+        return NULL;
+    a = rocke_i_attrs(b);
+    return rocke_i_op1(
+        b, ROCKE_OP_GPU_CLUSTER_WORKGROUP_MAX_FLAT_ID, NULL, 0, rocke_i32(), &a, "cwmaxflat");
+}
+rocke_value_t* rocke_b_cluster_size(rocke_ir_builder_t* b, const char* axis)
+{
+    rocke_value_t* max_id = rocke_b_cluster_workgroup_max_id(b, axis);
+    if(!max_id)
+        return NULL;
+    return rocke_b_add(b, max_id, rocke_b_const_i32(b, 1));
+}
+
 /* ============================ global loads ============================== */
 
 rocke_value_t* rocke_b_global_load(rocke_ir_builder_t* b,
@@ -501,6 +562,147 @@ static bool rocke_i_ordering_ok(const char* ordering)
            && (!strcmp(ordering, "monotonic") || !strcmp(ordering, "acquire")
                || !strcmp(ordering, "release") || !strcmp(ordering, "acq_rel")
                || !strcmp(ordering, "seq_cst"));
+}
+
+/* IRBuilder._FENCE_SCOPES */
+static bool rocke_i_fence_scope_ok(const char* scope)
+{
+    return scope
+           && (!strcmp(scope, "workgroup") || !strcmp(scope, "agent") || !strcmp(scope, "system"));
+}
+
+void rocke_b_fence(rocke_ir_builder_t* b, const char* scope, const char* ordering)
+{
+    rocke_attr_map_t a;
+    if(!rocke_i_live(b))
+        return;
+    if(scope == NULL)
+        scope = "agent";
+    if(ordering == NULL)
+        ordering = "acq_rel";
+    if(!rocke_i_fence_scope_ok(scope))
+    {
+        (void)rocke_i_set_err(b, ROCKE_ERR_VALUE, "unknown fence scope '%s'", scope);
+        return;
+    }
+    if(strcmp(ordering, "acquire") && strcmp(ordering, "release") && strcmp(ordering, "acq_rel")
+       && strcmp(ordering, "seq_cst"))
+    {
+        (void)rocke_i_set_err(b, ROCKE_ERR_VALUE, "unknown fence ordering '%s'", ordering);
+        return;
+    }
+    a = rocke_i_attrs(b);
+    rocke_attr_set_str(b, &a, "scope", scope);
+    rocke_attr_set_str(b, &a, "ordering", ordering);
+    (void)rocke_i_op0(b, ROCKE_OP_MEMREF_FENCE, NULL, 0, &a);
+}
+
+/* ir._is_flag_ptr: the ptr<i32,global> a cross-workgroup flag op addresses. */
+static bool rocke_i_flag_ptr_ok(const rocke_type_t* t)
+{
+    return t && t->kind == ROCKE_TYPE_PTR && t->space && !strcmp(t->space, "global") && t->pointee
+           && rocke_i_type_is(t->pointee, "i32");
+}
+
+void rocke_b_global_flag_store(rocke_ir_builder_t* b,
+                               rocke_value_t* ptr,
+                               rocke_value_t* idx,
+                               rocke_value_t* value,
+                               const char* scope,
+                               const char* ordering)
+{
+    rocke_value_t* ops[3];
+    rocke_attr_map_t a;
+    if(!rocke_i_live(b))
+        return;
+    if(!ptr || !idx || !value)
+    {
+        (void)rocke_i_set_err(b, ROCKE_ERR_VALUE, "global_flag_store: null operand");
+        return;
+    }
+    if(scope == NULL)
+        scope = "agent";
+    if(ordering == NULL)
+        ordering = "release";
+    if(!rocke_i_flag_ptr_ok(ptr->type))
+    {
+        (void)rocke_i_set_err(b,
+                              ROCKE_ERR_VALUE,
+                              "global_flag_store expects a global i32 pointer, got %s",
+                              ptr->type ? ptr->type->name : "?");
+        return;
+    }
+    if(!rocke_i_type_is(value->type, "i32"))
+    {
+        (void)rocke_i_set_err(b,
+                              ROCKE_ERR_VALUE,
+                              "global_flag_store expects an i32 value, got %s",
+                              value->type->name);
+        return;
+    }
+    if(!rocke_i_fence_scope_ok(scope))
+    {
+        (void)rocke_i_set_err(b, ROCKE_ERR_VALUE, "unknown flag scope '%s'", scope);
+        return;
+    }
+    if(strcmp(ordering, "monotonic") && strcmp(ordering, "release") && strcmp(ordering, "seq_cst"))
+    {
+        (void)rocke_i_set_err(b, ROCKE_ERR_VALUE, "unknown flag store ordering '%s'", ordering);
+        return;
+    }
+    ops[0] = ptr;
+    ops[1] = idx;
+    ops[2] = value;
+    a = rocke_i_attrs(b);
+    rocke_attr_set_str(b, &a, "scope", scope);
+    rocke_attr_set_str(b, &a, "ordering", ordering);
+    (void)rocke_i_op0(b, ROCKE_OP_MEMREF_GLOBAL_FLAG_STORE, ops, 3, &a);
+}
+
+void rocke_b_global_flag_wait_eq(rocke_ir_builder_t* b,
+                                 rocke_value_t* ptr,
+                                 rocke_value_t* idx,
+                                 rocke_value_t* expect,
+                                 const char* scope)
+{
+    rocke_value_t* ops[3];
+    rocke_attr_map_t a;
+    if(!rocke_i_live(b))
+        return;
+    if(!ptr || !idx || !expect)
+    {
+        (void)rocke_i_set_err(b, ROCKE_ERR_VALUE, "global_flag_wait_eq: null operand");
+        return;
+    }
+    if(scope == NULL)
+        scope = "agent";
+    if(!rocke_i_flag_ptr_ok(ptr->type))
+    {
+        (void)rocke_i_set_err(b,
+                              ROCKE_ERR_VALUE,
+                              "global_flag_wait_eq expects a global i32 pointer, got %s",
+                              ptr->type ? ptr->type->name : "?");
+        return;
+    }
+    if(!rocke_i_type_is(expect->type, "i32"))
+    {
+        (void)rocke_i_set_err(b,
+                              ROCKE_ERR_VALUE,
+                              "global_flag_wait_eq expects an i32 value, got %s",
+                              expect->type->name);
+        return;
+    }
+    if(!rocke_i_fence_scope_ok(scope))
+    {
+        (void)rocke_i_set_err(b, ROCKE_ERR_VALUE, "unknown flag scope '%s'", scope);
+        return;
+    }
+    ops[0] = ptr;
+    ops[1] = idx;
+    ops[2] = expect;
+    a = rocke_i_attrs(b);
+    rocke_attr_set_str(b, &a, "scope", scope);
+    (void)rocke_i_op0(b, ROCKE_OP_MEMREF_GLOBAL_FLAG_WAIT_EQ, ops, 3, &a);
 }
 
 rocke_value_t* rocke_b_global_atomic_add(rocke_ir_builder_t* b,

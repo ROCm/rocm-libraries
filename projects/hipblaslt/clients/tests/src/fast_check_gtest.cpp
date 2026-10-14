@@ -14,12 +14,19 @@
 #include "fast_check.hpp"
 #include "hipBuffer.hpp"
 #include "hip_placement.hpp"
+#include "hipblaslt_init.hpp"
+#include "hipblaslt_test.hpp"
+#if HIPBLASLT_ENABLE_MXDATAGENERATOR
+#include "mxDataGen.hpp"
+#endif
 
 #include <hip/hip_runtime.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <thread>
 #include <vector>
 
 namespace
@@ -394,6 +401,338 @@ namespace
                   "  solution 0 (library index 9, kernel Cijk_MT32x32)");
     }
 
+    // scaleA (per row), scaleB (per column), scaleC and scaleD must all be folded into the
+    // check: a D built with every scale passes, and a D that used one wrong scaleB entry fails
+    // and is located in that column.
+    TEST(FastCheck_pre_checkin, every_scale_is_applied_and_a_wrong_one_is_located)
+    {
+        HostProblem        hp = default_problem(false, true);
+        std::vector<float> sa(size_t(hp.M)), sb(size_t(hp.N));
+        const float        sc = 3, sd = 2;
+        for(int64_t i = 0; i < hp.M; i++)
+            sa[size_t(i)] = float(1 + i % 4);
+        for(int64_t j = 0; j < hp.N; j++)
+            sb[size_t(j)] = float(1 + j % 5);
+        auto build = [&](int64_t bad_col) {
+            for(int64_t s = 0; s < hp.batch; s++)
+                for(int64_t j = 0; j < hp.N; j++)
+                    for(int64_t i = 0; i < hp.M; i++)
+                    {
+                        double acc = 0;
+                        for(int64_t k = 0; k < hp.K; k++)
+                            acc += hp.a(s, i, k) * hp.b(s, k, j);
+                        double b_scale = sb[size_t(j)] + (j == bad_col ? 1 : 0);
+                        hp.d(s, i, j)  = float(
+                            sd
+                            * (hp.alpha * hp.scale[size_t(i)] * sa[size_t(i)] * b_scale * acc
+                               + hp.beta * sc * hp.C[size_t(s * hp.stride_c() + j * hp.ldc + i)]
+                               + hp.bias[size_t(s * hp.M + i)]));
+                    }
+        };
+        FastCheckProblem p = hp.problem();
+        p.scale_a          = sa.data();
+        p.scale_a_vector   = true;
+        p.scale_b          = sb.data();
+        p.scale_b_vector   = true;
+        p.scale_c          = sc;
+        p.scale_d          = sd;
+
+        build(-1);
+        auto res = fast_check_gemm(p);
+        EXPECT_TRUE(res.passed) << res.message;
+
+        build(3);
+        res = fast_check_gemm(p);
+        ASSERT_FALSE(res.passed);
+        EXPECT_NE(res.message.find("col 3:"), std::string::npos) << res.message;
+        EXPECT_EQ(res.message.find("col 2:"), std::string::npos) << res.message;
+    }
+
+    // A bias gradient must equal the exact row sums of op(A) (BGRADA) or column sums of op(B)
+    // (BGRADB), and one wrong entry must be reported by index.
+    TEST(FastCheck_pre_checkin, bias_gradient_is_the_exact_sum_over_k)
+    {
+        for(bool trans : {false, true})
+        {
+            HostProblem        hp = default_problem(trans, !trans);
+            FastCheckProblem   p  = hp.problem();
+            std::vector<float> ga(size_t(hp.M), 0), gb(size_t(hp.N), 0);
+            for(int64_t k = 0; k < hp.K; k++)
+            {
+                for(int64_t i = 0; i < hp.M; i++)
+                    ga[size_t(i)] += float(hp.a(0, i, k));
+                for(int64_t j = 0; j < hp.N; j++)
+                    gb[size_t(j)] += float(hp.b(0, k, j));
+            }
+            EXPECT_TRUE(fast_check_bias_gradient(p, 'a', ga.data(), HIP_R_32F).passed);
+            EXPECT_TRUE(fast_check_bias_gradient(p, 'b', gb.data(), HIP_R_32F).passed);
+
+            ga[5] += 1;
+            gb[7] -= 1;
+            auto ra = fast_check_bias_gradient(p, 'a', ga.data(), HIP_R_32F);
+            auto rb = fast_check_bias_gradient(p, 'b', gb.data(), HIP_R_32F);
+            EXPECT_FALSE(ra.passed);
+            EXPECT_NE(ra.message.find("element 5:"), std::string::npos) << ra.message;
+            EXPECT_FALSE(rb.passed);
+            EXPECT_NE(rb.message.find("element 7:"), std::string::npos) << rb.message;
+        }
+    }
+
+    // A zero other operand makes the GEMM bound zero, but does not bound a
+    // bias-gradient reduction. 2^24 + 1 - 2^24 is order-dependent in f32.
+    TEST(FastCheck_pre_checkin, bias_gradient_refuses_inexact_partial_sums)
+    {
+        const float values[]  = {0x1p24f, 1.f, -0x1p24f};
+        const float zeros[]   = {0.f, 0.f, 0.f};
+        const float exact_sum = 1.f;
+        for(char source : {'a', 'b'})
+        {
+            FastCheckProblem p;
+            p.M = p.N = 1;
+            p.K       = 3;
+            p.A       = {source == 'a' ? values : zeros, HIP_R_32F, 1, 3, 1, 3};
+            p.B       = {source == 'b' ? values : zeros, HIP_R_32F, 3, 1, 3, 3};
+            p.beta    = 0;
+            ASSERT_TRUE(fast_check_expected(p).status.passed);
+            auto res = fast_check_bias_gradient(p, source, &exact_sum, HIP_R_32F);
+            EXPECT_FALSE(res.passed);
+            EXPECT_NE(res.message.find("cannot be checked exactly"), std::string::npos)
+                << res.message;
+        }
+    }
+
+    // The bound must be the largest sum over K of |a| times the largest |b| in that row of B, and
+    // a configuration must be refused once the bound reaches the range the compute type holds
+    // exactly (2^11 for f16), and accepted below it.
+    TEST(FastCheck_pre_checkin, exactness_bound_refuses_results_the_accumulator_cannot_hold)
+    {
+        for(int64_t K : {300, 1200})
+        {
+            HostProblem      hp(9, 4, K, 1, false, true, 1.f, 0.f, false, false);
+            FastCheckProblem p = hp.problem();
+            p.compute_type     = HIP_R_16F;
+
+            double expected = 0;
+            for(int64_t i = 0; i < hp.M; i++)
+            {
+                double s = 0;
+                for(int64_t k = 0; k < K; k++)
+                {
+                    double b_max = 0;
+                    for(int64_t j = 0; j < hp.N; j++)
+                        b_max = std::max(b_max, std::fabs(hp.b(0, k, j)));
+                    s += std::fabs(hp.a(0, i, k)) * b_max;
+                }
+                expected = std::max(expected, s);
+            }
+
+            FastCheckExpected e = fast_check_expected(p);
+            EXPECT_EQ(e.max_partial, expected) << "K=" << K;
+            EXPECT_EQ(e.max_result, expected) << "K=" << K;
+            if(K == 300)
+            {
+                ASSERT_LT(expected, 0x1p11);
+                EXPECT_TRUE(e.status.passed) << e.status.message;
+            }
+            else
+            {
+                ASSERT_GE(expected, 0x1p11);
+                EXPECT_FALSE(e.status.passed);
+                EXPECT_NE(e.status.message.find("refuses this configuration"), std::string::npos)
+                    << e.status.message;
+            }
+        }
+
+        // With alpha, the scaleAlpha vector, beta * C and the bias, a partial sum is bounded by
+        // the larger of the plain and the scaled sum, and a result by the scaled sum plus |beta|
+        // times the largest |C| in its row plus |bias|.
+        HostProblem      hp(9, 4, 50, 1, false, true, 2.f, -2.f, true, true);
+        FastCheckProblem p           = hp.problem();
+        double           max_partial = 0, max_result = 0;
+        for(int64_t i = 0; i < hp.M; i++)
+        {
+            double s = 0, c_max = 0;
+            for(int64_t k = 0; k < hp.K; k++)
+            {
+                double b_max = 0;
+                for(int64_t j = 0; j < hp.N; j++)
+                    b_max = std::max(b_max, std::fabs(hp.b(0, k, j)));
+                s += std::fabs(hp.a(0, i, k)) * b_max;
+            }
+            for(int64_t j = 0; j < hp.N; j++)
+                c_max = std::max(c_max, std::fabs(double(hp.C[size_t(j * hp.ldc + i)])));
+            const double scaled = 2 * std::fabs(double(hp.scale[size_t(i)])) * s;
+            max_partial         = std::max({max_partial, s, scaled});
+            max_result
+                = std::max(max_result, scaled + 2 * c_max + std::fabs(double(hp.bias[size_t(i)])));
+        }
+        FastCheckExpected e = fast_check_expected(p);
+        EXPECT_EQ(e.max_partial, max_partial);
+        EXPECT_EQ(e.max_result, max_result);
+        EXPECT_GT(max_result, max_partial) << "the beta and bias terms must count";
+    }
+
+#if HIPBLASLT_ENABLE_MXDATAGENERATOR
+    // integer_exact MX data: every dequantized value is an element in {0, 1, 2} (A) or
+    // {-2, ..., 2} (B) times a scale of 1, 2 or 4, and more than one scale is used, in both the
+    // layout the generator aligns itself and the one this change recomputes.
+    TEST(FastCheck_pre_checkin, integer_exact_mx_values_are_exact_with_varied_scales)
+    {
+        const uint64_t rows = 64, cols = 128;
+        for(hipDataType type : {HIP_R_8F_E4M3, HIP_R_8F_E5M2})
+            for(bool isMatrixA : {true, false})
+                for(bool transpose : {false, true})
+                {
+                    std::vector<uint8_t> data(rows * cols), scale(rows * cols / 32 + 64);
+                    std::vector<float>   ref = generateMXInput(type,
+                                                             HIP_R_8U,
+                                                             data.data(),
+                                                             scale.data(),
+                                                             rows,
+                                                             cols,
+                                                             rows,
+                                                             transpose,
+                                                             32,
+                                                             1,
+                                                             isMatrixA,
+                                                             MXScaleLayout::None,
+                                                             "integer_exact");
+                    ASSERT_EQ(ref.size(), rows * cols);
+                    bool sawLargeScale = false, sawUnitScale = false, sawNegative = false;
+                    for(float v : ref)
+                    {
+                        const float a = std::fabs(v);
+                        ASSERT_TRUE(a == 0 || a == 1 || a == 2 || a == 4 || a == 8)
+                            << v << " isMatrixA=" << isMatrixA << " transpose=" << transpose;
+                        sawLargeScale |= a == 8 || a == 4;
+                        sawUnitScale |= a == 1;
+                        sawNegative |= v < 0;
+                    }
+                    EXPECT_TRUE(sawLargeScale && sawUnitScale);
+                    EXPECT_EQ(sawNegative, !isMatrixA);
+
+                    // The reference must describe the bytes the GPU reads: decode each element and
+                    // its block's scale here, independently of the generator. K runs along the
+                    // stored rows when A is transposed or B is not; each run of 32 along K shares a
+                    // scale, which the other layouts index as (k / 32) * rows + row.
+                    const bool kMajor = isMatrixA == transpose;
+                    auto       decode = [type](uint8_t code) {
+                        // Normalize the E5M2 encodings of +/-1 to the E4M3 table.
+                        if(type == HIP_R_8F_E5M2 && (code & 0x7f) == 0x3c)
+                            code = uint8_t((code & 0x80) | 0x38);
+                        switch(code)
+                        {
+                        case 0xC0:
+                            return -2.f;
+                        case 0xB8:
+                            return -1.f;
+                        case 0x00:
+                            return 0.f;
+                        case 0x38:
+                            return 1.f;
+                        case 0x40:
+                            return 2.f;
+                        }
+                        ADD_FAILURE() << "unexpected fp8 code " << int(code);
+                        return 0.f;
+                    };
+                    for(size_t idx = 0; idx < ref.size(); idx++)
+                    {
+                        const size_t row = idx % rows, k = idx / rows;
+                        const size_t s = kMajor ? idx / 32 : (k / 32) * rows + row;
+                        const float  expected
+                            = decode(data[idx]) * std::ldexp(1.f, int(scale[s]) - 127);
+                        ASSERT_EQ(ref[idx], expected)
+                            << "element " << idx << " isMatrixA=" << isMatrixA
+                            << " transpose=" << transpose;
+                    }
+                }
+    }
+    // The reference must match the actual swizzled scale bytes, or explicitly refuse the
+    // layout. Decode using the documented axis permutations rather than the swizzle helper.
+    TEST(FastCheck_pre_checkin, integer_exact_mx_swizzled_references_match_or_refuse)
+    {
+        for(hipDataType type : {HIP_R_8F_E4M3, HIP_R_8F_E5M2})
+            for(bool isA : {true, false})
+                for(bool transpose : {true, false})
+                    for(MXScaleLayout layout : {MXScaleLayout::GFX950, MXScaleLayout::GFX1250})
+                        for(const auto& shape : {std::pair<size_t, size_t>{64, 256}, {80, 160}})
+                        {
+                            const auto [mn, K]          = shape;
+                            const bool           kMajor = isA == transpose;
+                            const size_t         rows = kMajor ? K : mn, cols = kMajor ? mn : K;
+                            const size_t         blocks = K / 32;
+                            std::vector<uint8_t> data(rows * cols), scale(rows * cols, 0xcc);
+                            std::vector<float>   ref;
+                            try
+                            {
+                                ref = generateMXInput(type,
+                                                      HIP_R_8U,
+                                                      data.data(),
+                                                      scale.data(),
+                                                      rows,
+                                                      cols,
+                                                      rows,
+                                                      transpose,
+                                                      32,
+                                                      1,
+                                                      isA,
+                                                      layout,
+                                                      "integer_exact");
+                            }
+                            catch(const std::runtime_error& e)
+                            {
+                                ASSERT_FALSE(kMajor) << e.what();
+                                EXPECT_NE(std::string(e.what()).find("integer_exact"),
+                                          std::string::npos);
+                                continue;
+                            }
+                            ASSERT_EQ(ref.size(), rows * cols);
+                            for(size_t idx = 0; idx < ref.size(); idx++)
+                            {
+                                const size_t k     = kMajor ? idx % rows : idx / rows;
+                                const size_t m     = kMajor ? idx / rows : idx % rows;
+                                const size_t block = k / 32;
+                                size_t       si;
+                                if(layout == MXScaleLayout::GFX1250)
+                                {
+                                    const size_t fast = kMajor ? blocks : mn;
+                                    const size_t slow = kMajor ? mn : blocks;
+                                    const size_t natural
+                                        = kMajor ? m * blocks + block : block * mn + m;
+                                    const size_t f = natural % fast, s = natural / fast;
+                                    si = (f / 4) * slow * 4 + s * 4 + f % 4;
+                                }
+                                else
+                                {
+                                    const size_t paddedBlocks = (blocks + 7) / 8 * 8;
+                                    si = (((((m / 32) * (paddedBlocks / 8) + block / 8) * 4
+                                            + block % 4)
+                                               * 16
+                                           + m % 16)
+                                              * 2
+                                          + (block / 4) % 2)
+                                             * 2
+                                         + (m / 16) % 2;
+                                }
+                                const uint8_t code = data[idx], magnitude = code & 0x7f;
+                                const uint8_t one = type == HIP_R_8F_E4M3 ? 0x38 : 0x3c;
+                                ASSERT_TRUE(magnitude == 0 || magnitude == one
+                                            || magnitude == 0x40);
+                                const float value = (magnitude == one    ? 1.f
+                                                     : magnitude == 0x40 ? 2.f
+                                                                         : 0.f)
+                                                    * ((code & 0x80) ? -1.f : 1.f);
+                                const float expected
+                                    = value * std::ldexp(1.f, int(scale[si]) - 127);
+                                ASSERT_EQ(ref[idx], expected)
+                                    << "idx=" << idx << " isA=" << isA << " transpose=" << transpose
+                                    << " layout=" << int(layout);
+                            }
+                        }
+    }
+#endif
+
     // ------------------------------------------------------------------------------------------
     // fast_check_result_device: D in device memory
     // ------------------------------------------------------------------------------------------
@@ -617,6 +956,421 @@ namespace
         auto res = fast_check_scan_padding_device(
             m.matrix(), DeviceMatrix::batch, DeviceMatrix::total, true, 0);
         EXPECT_TRUE(res.passed) << res.message;
+    }
+
+    // sparse_k must keep each row of A nonzero only at its chosen K indices, at most one per
+    // sixteenth of K plus the last, whichever way A is stored, and with at least K/16 rows every K
+    // index must be nonzero in some row; ternary must give B values in {-1, 0, 1} only.
+    TEST(FastCheckDevice_pre_checkin, integer_exact_patterns_keep_their_ranges)
+    {
+        IntegerExactPatternScope scope;
+        const size_t             K = 200, M = 16, pad = 2;
+        for(bool k_is_row : {false, true})
+        {
+            const size_t rows = k_is_row ? K : M, cols = k_is_row ? M : K, ld = rows + pad;
+            float*       d = nullptr;
+            ASSERT_EQ(hipMalloc(&d, ld * cols * sizeof(float)), hipSuccess);
+            set_integer_exact_pattern_state(IntegerExactPattern::sparse_k, K, k_is_row);
+            hipblaslt_init_device(ABC_dims::A,
+                                  hipblaslt_initialization::integer_exact,
+                                  false,
+                                  d,
+                                  rows,
+                                  cols,
+                                  ld,
+                                  HIP_R_32F,
+                                  0,
+                                  1);
+            std::vector<float> h(ld * cols);
+            ASSERT_EQ(hipMemcpy(h.data(), d, h.size() * sizeof(float), hipMemcpyDeviceToHost),
+                      hipSuccess);
+            (void)hipFree(d);
+
+            std::vector<bool> covered(K, false);
+            for(size_t m = 0; m < M; m++)
+            {
+                size_t kept = 0;
+                for(size_t k = 0; k < K; k++)
+                {
+                    const bool keep = integer_exact_sparse_k_kept(k, K, m);
+                    kept += keep;
+                    float v = k_is_row ? h[m * ld + k] : h[k * ld + m];
+                    EXPECT_TRUE(v == 0 || v == 1 || v == 2) << "k=" << k << " m=" << m;
+                    if(!keep)
+                        EXPECT_EQ(v, 0.f) << "k=" << k << " m=" << m << " k_is_row=" << k_is_row;
+                    if(v != 0)
+                        covered[k] = true;
+                }
+                EXPECT_TRUE(integer_exact_sparse_k_kept(K - 1, K, m));
+                EXPECT_LE(kept, kIntegerExactSparseKTerms + 1) << "m=" << m;
+                EXPECT_GE(kept, kIntegerExactSparseKTerms - 1) << "m=" << m;
+            }
+            for(size_t k = 0; k < K; k++)
+                EXPECT_TRUE(covered[k]) << "K index " << k << " is zero in every row";
+        }
+
+        float* d = nullptr;
+        ASSERT_EQ(hipMalloc(&d, 64 * 64 * sizeof(float)), hipSuccess);
+        set_integer_exact_pattern_state(IntegerExactPattern::ternary, 64, false);
+        hipblaslt_init_device(ABC_dims::B,
+                              hipblaslt_initialization::integer_exact,
+                              false,
+                              d,
+                              64,
+                              64,
+                              64,
+                              HIP_R_32F,
+                              0,
+                              1);
+        std::vector<float> h(64 * 64);
+        ASSERT_EQ(hipMemcpy(h.data(), d, h.size() * sizeof(float), hipMemcpyDeviceToHost),
+                  hipSuccess);
+        (void)hipFree(d);
+        int counts[3] = {0, 0, 0};
+        for(float v : h)
+        {
+            ASSERT_TRUE(v == -1 || v == 0 || v == 1) << v;
+            counts[int(v) + 1]++;
+        }
+        EXPECT_GT(counts[0], 0);
+        EXPECT_GT(counts[1], 0);
+        EXPECT_GT(counts[2], 0);
+    }
+
+    // Test workers may finish while another thread is still filling its operands.
+    // A worker's scope cleanup must not reset another thread's selected pattern.
+    TEST(FastCheckDevice_pre_checkin, integer_exact_pattern_is_local_to_the_test_thread)
+    {
+        IntegerExactPatternScope scope;
+        set_integer_exact_pattern_state(IntegerExactPattern::ternary, 64, false);
+        std::thread worker([] {
+            IntegerExactPatternScope workerScope;
+            set_integer_exact_pattern_state(IntegerExactPattern::sparse_k, 128, true);
+        });
+        worker.join();
+
+        HipDeviceBuffer d(HIP_R_32F, 64 * 64);
+        ASSERT_TRUE(d.buf());
+        hipblaslt_init_device(ABC_dims::B,
+                              hipblaslt_initialization::integer_exact,
+                              false,
+                              d.buf(),
+                              64,
+                              64,
+                              64,
+                              HIP_R_32F,
+                              0,
+                              1);
+        std::vector<float> h(64 * 64);
+        ASSERT_EQ(hipMemcpy(h.data(), d.buf(), h.size() * sizeof(float), hipMemcpyDeviceToHost),
+                  hipSuccess);
+        for(float v : h)
+            ASSERT_TRUE(v == -1 || v == 0 || v == 1) << v;
+    }
+
+    // With overlapping batches (a stride shorter than one matrix), the sparse_k fill must stay
+    // inside the allocation, lda * N + (batch_count - 1) * stride elements.
+    TEST(FastCheckDevice_pre_checkin, sparse_k_fill_stays_inside_overlapping_batches)
+    {
+        IntegerExactPatternScope scope;
+        const size_t             K = 64, M = 5, ld = 8, stride = 2 * ld, batches = 3, guard = 64;
+        const size_t             used = ld * K + (batches - 1) * stride;
+        std::vector<float>       h(used + guard, 77.f);
+        float*                   d = nullptr;
+        ASSERT_EQ(hipMalloc(&d, h.size() * sizeof(float)), hipSuccess);
+        ASSERT_EQ(hipMemcpy(d, h.data(), h.size() * sizeof(float), hipMemcpyHostToDevice),
+                  hipSuccess);
+        set_integer_exact_pattern_state(IntegerExactPattern::sparse_k, K, false);
+        hipblaslt_init_device(ABC_dims::A,
+                              hipblaslt_initialization::integer_exact,
+                              false,
+                              d,
+                              M,
+                              K,
+                              ld,
+                              HIP_R_32F,
+                              stride,
+                              batches);
+        ASSERT_EQ(hipMemcpy(h.data(), d, h.size() * sizeof(float), hipMemcpyDeviceToHost),
+                  hipSuccess);
+        (void)hipFree(d);
+        for(size_t idx = used; idx < h.size(); idx++)
+            EXPECT_EQ(h[idx], 77.f) << "offset " << idx;
+    }
+
+    // Pattern names parse to their pattern; an empty name means the standard one, and an unknown
+    // name is rejected.
+    TEST(FastCheck_pre_checkin, integer_exact_pattern_names_parse)
+    {
+        IntegerExactPattern p = IntegerExactPattern::ternary;
+        EXPECT_TRUE(parse_integer_exact_pattern("standard", p));
+        EXPECT_EQ(p, IntegerExactPattern::standard);
+        p = IntegerExactPattern::ternary;
+        EXPECT_TRUE(parse_integer_exact_pattern("", p));
+        EXPECT_EQ(p, IntegerExactPattern::standard);
+        EXPECT_TRUE(parse_integer_exact_pattern("ternary", p));
+        EXPECT_EQ(p, IntegerExactPattern::ternary);
+        EXPECT_TRUE(parse_integer_exact_pattern("sparse_k", p));
+        EXPECT_EQ(p, IntegerExactPattern::sparse_k);
+        EXPECT_FALSE(parse_integer_exact_pattern("sparse", p));
+    }
+
+    // D must equal scale_d * act(E / scale_e) for relu and clamp; one wrong element of D is
+    // reported, and amax is the largest |act| over the region.
+    TEST(FastCheckDevice_pre_checkin, activation_is_checked_through_e)
+    {
+        DeviceMatrix       d, e;
+        const float        scale_d = 2, scale_e = 3;
+        std::vector<float> he(DeviceMatrix::total, 99.f), hd(DeviceMatrix::total, 99.f);
+        for(FastCheckActivation act : {FastCheckActivation::relu, FastCheckActivation::clamp})
+        {
+            double top = 0;
+            for(size_t idx = 0; idx < DeviceMatrix::total; idx++)
+            {
+                if(!DeviceMatrix::in_region(idx))
+                    continue;
+                float pre = float(int(idx % 23) - 11);
+                float a   = act == FastCheckActivation::relu ? std::max(pre, 0.f)
+                                                             : std::max(-4.f, std::min(pre, 6.f));
+                he[idx]   = pre * scale_e;
+                hd[idx]   = a * scale_d;
+                top       = std::max(top, double(std::fabs(a)));
+            }
+            e.write(he);
+            d.write(hd);
+            double amax = -1;
+            auto   res  = fast_check_activation_device(d.matrix(),
+                                                    e.matrix(),
+                                                    DeviceMatrix::batch,
+                                                    scale_d,
+                                                    scale_e,
+                                                    act,
+                                                    -4,
+                                                    6,
+                                                    0,
+                                                    &amax);
+            EXPECT_TRUE(res.passed) << res.message;
+            EXPECT_EQ(amax, top);
+
+            // Offset 39 is batch 1, row 1, col 1.
+            ASSERT_TRUE(DeviceMatrix::in_region(39));
+            d.set(39, hd[39] + 1);
+            res = fast_check_activation_device(d.matrix(),
+                                               e.matrix(),
+                                               DeviceMatrix::batch,
+                                               scale_d,
+                                               scale_e,
+                                               act,
+                                               -4,
+                                               6,
+                                               0,
+                                               nullptr);
+            ASSERT_FALSE(res.passed);
+            EXPECT_NE(res.message.find("1 elements of D"), std::string::npos) << res.message;
+            EXPECT_NE(res.message.find("batch 1, row 1, col 1"), std::string::npos) << res.message;
+        }
+    }
+
+    // Arguments stores clamp bounds as float. Both the kernel and verifier receive that
+    // value, rather than independently converting a double literal such as 0.1.
+    TEST(FastCheckDevice_pre_checkin, activation_uses_the_float_clamp_argument)
+    {
+        const float  bound = 0.1f, scale = 9.f;
+        DeviceMatrix d, e;
+        d.write(std::vector<float>(DeviceMatrix::total, bound * scale));
+        e.write(std::vector<float>(DeviceMatrix::total, 1.f));
+        double amax = 0;
+        auto   res  = fast_check_activation_device(d.matrix(),
+                                                e.matrix(),
+                                                DeviceMatrix::batch,
+                                                scale,
+                                                1,
+                                                FastCheckActivation::clamp,
+                                                0,
+                                                bound,
+                                                0,
+                                                &amax);
+        EXPECT_TRUE(res.passed) << res.message;
+        EXPECT_EQ(amax, double(bound));
+    }
+
+    TEST(FastCheckDevice_pre_checkin, activation_read_failure_invalidates_amax)
+    {
+        DeviceMatrix d, e;
+        d.write(std::vector<float>(DeviceMatrix::total, 1.f));
+        auto unsupported = e.matrix();
+        unsupported.type = HIP_C_32F;
+        double amax      = 0;
+        auto   res       = fast_check_activation_device(d.matrix(),
+                                                unsupported,
+                                                DeviceMatrix::batch,
+                                                1,
+                                                1,
+                                                FastCheckActivation::relu,
+                                                0,
+                                                0,
+                                                0,
+                                                &amax);
+        EXPECT_FALSE(res.passed);
+        EXPECT_NE(res.message.find("could not copy"), std::string::npos) << res.message;
+        EXPECT_TRUE(std::isnan(amax));
+    }
+
+    // amaxD without an activation is the largest |D| over |scale_d|. A value outside the range the
+    // type stores exactly may have been rounded, and a scale of 0 erases the values, so neither
+    // amaxD nor the activation can be checked from it, and both say so rather than report a wrong
+    // value.
+    TEST(FastCheckDevice_pre_checkin, amax_and_activation_need_exact_values)
+    {
+        DeviceMatrix       d, e;
+        std::vector<float> he(DeviceMatrix::total, 99.f), hd(DeviceMatrix::total, 99.f);
+        for(size_t idx = 0; idx < DeviceMatrix::total; idx++)
+            if(DeviceMatrix::in_region(idx))
+            {
+                he[idx] = float(int(idx % 7) - 3);
+                hd[idx] = std::max(he[idx], 0.f);
+            }
+        e.write(he);
+        d.write(hd);
+        EXPECT_EQ(fast_check_amax_device(e.matrix(), DeviceMatrix::batch, 2, 0), 1.5);
+        EXPECT_EQ(fast_check_amax_device(e.matrix(), DeviceMatrix::batch, -2, 0), 1.5);
+        EXPECT_TRUE(std::isnan(fast_check_amax_device(e.matrix(), DeviceMatrix::batch, 0, 0)));
+        double amax = -1;
+        auto   res  = fast_check_activation_device(d.matrix(),
+                                                e.matrix(),
+                                                DeviceMatrix::batch,
+                                                1,
+                                                1,
+                                                FastCheckActivation::relu,
+                                                0,
+                                                0,
+                                                0,
+                                                &amax);
+        EXPECT_TRUE(res.passed) << res.message;
+        EXPECT_EQ(amax, 3);
+
+        res = fast_check_activation_device(d.matrix(),
+                                           e.matrix(),
+                                           DeviceMatrix::batch,
+                                           1,
+                                           0,
+                                           FastCheckActivation::relu,
+                                           0,
+                                           0,
+                                           0,
+                                           &amax);
+        EXPECT_FALSE(res.passed);
+        EXPECT_NE(res.message.find("scaled by 0"), std::string::npos) << res.message;
+        EXPECT_TRUE(std::isnan(amax));
+
+        // f32 stores integers exactly below 2^24.
+        e.set(39, 16777216.f);
+        d.set(39, 16777216.f);
+        EXPECT_TRUE(std::isnan(fast_check_amax_device(e.matrix(), DeviceMatrix::batch, 1, 0)));
+        res = fast_check_activation_device(d.matrix(),
+                                           e.matrix(),
+                                           DeviceMatrix::batch,
+                                           1,
+                                           1,
+                                           FastCheckActivation::relu,
+                                           0,
+                                           0,
+                                           0,
+                                           &amax);
+        ASSERT_FALSE(res.passed);
+        EXPECT_NE(res.message.find("1 elements of E are outside the range its type stores exactly"),
+                  std::string::npos)
+            << res.message;
+        EXPECT_TRUE(std::isnan(amax));
+    }
+
+    // Scales must be integers for the modular sums; a fractional one is refused with its name.
+    TEST(FastCheck_pre_checkin, non_integer_scales_are_refused)
+    {
+        auto refused = [](const FastCheckProblem& p, const char* reason) {
+            auto res = fast_check_gemm(p);
+            EXPECT_FALSE(res.passed) << reason;
+            EXPECT_NE(res.message.find(reason), std::string::npos) << res.message;
+        };
+        HostProblem      hp = default_problem();
+        FastCheckProblem p  = hp.problem();
+        p.scale_c           = 1.5;
+        refused(p, "integer scaleC and scaleD");
+
+        std::vector<float> sa(size_t(hp.M), 2.f), sb(size_t(hp.N), 2.f);
+        sa[5]            = 2.5f;
+        p                = hp.problem();
+        p.scale_a        = sa.data();
+        p.scale_a_vector = true;
+        refused(p, "integer scaleA entries");
+
+        sb[3]            = 0.5f;
+        p                = hp.problem();
+        p.scale_b        = sb.data();
+        p.scale_b_vector = true;
+        refused(p, "integer scaleB entries");
+
+        const float v = 5;
+        EXPECT_EQ(fast_check_load(&v, HIP_R_32F, 0), 5.0);
+
+        // Factors that each fit but whose product reaches 2^61 are refused, not overflowed.
+        p         = hp.problem();
+        p.beta    = 0x1p40;
+        p.scale_c = 0x1p30;
+        refused(p, "combine to values below 2^61");
+    }
+
+    // A case that cannot fit must say which memory is short and by how much; one that fits must
+    // get an empty answer.
+    // The large fast_check tiers run only under a gtest filter: an unfiltered run, or one that
+    // only excludes, skips them; any selecting pattern runs them.
+    TEST(FastCheck_pre_checkin, large_tiers_need_a_selecting_filter)
+    {
+        const std::string saved = ::testing::GTEST_FLAG(filter);
+        for(const auto& [filter, given] : std::vector<std::pair<std::string, bool>>{
+                {"*", false},
+                {"", false},
+                {"*-*known_bug*", false},
+                {"*stress*-*known_bug*", true},
+                {"*threshold*", true},
+                {"*smoke*:*quick*:*pre_checkin*-*known_bug*", true}})
+        {
+            ::testing::GTEST_FLAG(filter) = filter;
+            EXPECT_EQ(hipblaslt_gtest_filter_given(), given) << filter;
+        }
+        ::testing::GTEST_FLAG(filter) = saved;
+        EXPECT_TRUE(hipblaslt_category_needs_a_filter("stress"));
+        EXPECT_TRUE(hipblaslt_category_needs_a_filter("sdc_hunt"));
+        EXPECT_FALSE(hipblaslt_category_needs_a_filter("nightly"));
+    }
+
+    TEST(FastCheckDevice_pre_checkin, memory_shortfall_names_the_short_memory)
+    {
+        EXPECT_EQ(fast_check_memory_shortfall(0, 0), "");
+        std::string device = fast_check_memory_shortfall(size_t(1) << 60, 0);
+        EXPECT_NE(device.find("of device memory"), std::string::npos) << device;
+        std::string host = fast_check_memory_shortfall(0, size_t(1) << 60);
+        EXPECT_NE(host.find("of host memory"), std::string::npos) << host;
+    }
+
+    TEST(FastCheckDevice_pre_checkin, memory_shortfall_reclaims_idle_buffers)
+    {
+        // Hold one live allocation while returning another to the client pool. The latter
+        // is reusable capacity, so it must not make an otherwise fitting case skip.
+        auto live = memory_pool<d_memory>::Get(4096);
+        ASSERT_NE(live.get(), nullptr);
+        ASSERT_EQ(hipMemset(live.get(), 42, live.bytes()), hipSuccess);
+        auto cached = memory_pool<d_memory>::Get(size_t(16) << 20);
+        ASSERT_NE(cached.get(), nullptr);
+        const size_t capacity = cached.capacity();
+        memory_pool<d_memory>::Restore(cached);
+        size_t free_bytes = 0, total_bytes = 0;
+        ASSERT_EQ(hipMemGetInfo(&free_bytes, &total_bytes), hipSuccess);
+        EXPECT_EQ(fast_check_memory_shortfall(free_bytes + capacity / 2, 0), "");
+        unsigned char value = 0;
+        ASSERT_EQ(hipMemcpy(&value, live.get(), 1, hipMemcpyDeviceToHost), hipSuccess);
+        EXPECT_EQ(value, 42);
+        memory_pool<d_memory>::Restore(live);
     }
 
     // The fast_check_inject self-test corrupts exactly one element, and never leaves it holding
@@ -1362,6 +2116,40 @@ namespace
         ASSERT_TRUE(buffers[0].placement());
         EXPECT_EQ(buffers[0].placement()->ptr(), placed);
         EXPECT_EQ(hipMemset(placed, 0, 4 << 20), hipSuccess);
+    }
+
+    // The expected expression is +/- (2^61 - 1), so both modular probes of an
+    // incorrect zero are zero for every seed. Refuse the inexact configuration
+    // from its inputs even when the stored D takes the small-integer fast path.
+    TEST(FastCheckDevice_pre_checkin, modular_alias_of_large_result_is_refused)
+    {
+        float  a = 2, b = 1, bias = -1, d = 0;
+        float* device = nullptr;
+        ASSERT_EQ(hipMalloc(&device, sizeof(float)), hipSuccess);
+        ASSERT_EQ(hipMemcpy(device, &d, sizeof(float), hipMemcpyHostToDevice), hipSuccess);
+        FastCheckProblem p;
+        p.M = p.N = p.K = 1;
+        p.A             = {&a, HIP_R_32F, 1, 1, 1, 1};
+        p.B             = {&b, HIP_R_32F, 1, 1, 1, 1};
+        p.bias          = &bias;
+        for(int sign : {1, -1})
+        {
+            p.alpha = sign * 0x1p60;
+            bias    = float(-sign);
+            p.D     = {&d, HIP_R_32F, 1, 1, 1, 1};
+            auto e  = fast_check_expected(p);
+            EXPECT_FALSE(e.status.passed);
+            EXPECT_FALSE(fast_check_result(p, e).passed);
+            p.D.data = device;
+            EXPECT_FALSE(fast_check_result_device(p, e, nullptr).passed);
+        }
+        EXPECT_EQ(hipFree(device), hipSuccess);
+
+        // The same zero output is correct and accepted for a small exact case.
+        p.alpha  = 1;
+        bias     = -2;
+        p.D.data = &d;
+        EXPECT_TRUE(fast_check_gemm(p).passed);
     }
 
     TEST(FastCheckDevice_pre_checkin, copy_region_to_host_drops_the_padding)

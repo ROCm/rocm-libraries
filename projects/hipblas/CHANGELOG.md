@@ -5,6 +5,10 @@ Documentation for hipBLAS is available at
 
 ## hipBLAS 3.8.0
 
+### Changed
+
+* The minimum required CMake version is now 3.17, for the library and the clients. `FindCUDAToolkit`, used by the CUDA backend, was added in that release.
+
 ## hipBLAS 3.7.0
 
 ### Added
