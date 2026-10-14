@@ -621,13 +621,9 @@ inline std::optional<CdnaMask>
     bool alignBottomRight = false;
     if(topLeftDeprecated || bottomRightDeprecated)
     {
-        // The booleans mean right 0 at their corner, and the reference then ignores explicit
-        // bounds: a graph that sets other bounds as well is ambiguous and declines.
-        if(left != UNBOUNDED || (right != UNBOUNDED && right != 0))
-        {
-            return std::nullopt;
-        }
-        right = 0;
+        // The booleans mean right 0 at their corner; a right_bound the graph also sets wins,
+        // and a left_bound is kept (cuDNN and #13065; hipDNN's CPU reference drops both).
+        right = right == UNBOUNDED ? 0 : right;
         alignBottomRight = bottomRightDeprecated;
     }
     else

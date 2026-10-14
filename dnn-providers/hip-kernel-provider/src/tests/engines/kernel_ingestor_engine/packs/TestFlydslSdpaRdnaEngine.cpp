@@ -256,6 +256,16 @@ INSTANTIATE_TEST_SUITE_P(
                          s.deprecatedCausalBottomRight = true;
                          s.rightBound = 0;
                      })},
+        // A deprecated boolean with a left_bound keeps the window (gpt-oss SWA graphs), and
+        // an explicit right_bound wins over the boolean's 0.
+        AcceptedCase{"DeprecatedCausalWithAWindow", accepted([](SdpaGraphSpec& s) {
+                         s.deprecatedCausalBottomRight = true;
+                         s.leftBound = 32;
+                     })},
+        AcceptedCase{"DeprecatedCausalWithABand", accepted([](SdpaGraphSpec& s) {
+                         s.deprecatedCausalTopLeft = true;
+                         s.rightBound = 16;
+                     })},
         AcceptedCase{"SoftmaxStats", accepted([](SdpaGraphSpec& s) { s.stats = SdpaStats::LSE; })},
         AcceptedCase{"ScaleAbsent",
                      accepted([](SdpaGraphSpec& s) { s.scaleKind = SdpaScale::ABSENT; })},
@@ -302,16 +312,6 @@ INSTANTIATE_TEST_SUITE_P(
                          s.heads = 6;
                          s.kvHeads = 2;
                          s.valueHeads = 4;
-                     })},
-        // The reference ignores explicit bounds under a deprecated boolean; a graph that sets
-        // other bounds as well is ambiguous.
-        AcceptedCase{"DeprecatedCausalWithABand", accepted([](SdpaGraphSpec& s) {
-                         s.deprecatedCausalTopLeft = true;
-                         s.rightBound = 16;
-                     })},
-        AcceptedCase{"DeprecatedCausalWithAWindow", accepted([](SdpaGraphSpec& s) {
-                         s.deprecatedCausalBottomRight = true;
-                         s.leftBound = 32;
                      })},
         AcceptedCase{"BothDeprecatedBooleans", accepted([](SdpaGraphSpec& s) {
                          s.deprecatedCausalTopLeft = true;
@@ -426,6 +426,9 @@ TEST(TestFlydslSdpaRdnaBinding, TheDeprecatedBottomRightBooleanIsCausalAtTheBott
     EXPECT_EQ(boundInt(bound, FLYDSL_SDPA_RDNA_CAUSAL_TOKEN), 1);
     EXPECT_EQ(boundInt(bound, FLYDSL_SDPA_RDNA_RIGHT_BOUND_TOKEN), 0);
     EXPECT_EQ(boundInt(bound, FLYDSL_SDPA_RDNA_ALIGN_BOTTOM_RIGHT_TOKEN), 1);
+    // With a left_bound too, the window is kept (cuDNN and #13065), not dropped.
+    spec.leftBound = 32;
+    EXPECT_EQ(boundInt(bindingsFor(spec), FLYDSL_SDPA_RDNA_LEFT_BOUND_TOKEN), 32);
 }
 
 TEST(TestFlydslSdpaRdnaBinding, AWindowBindsItsLeftBoundAndClampsAnOversizedOne)

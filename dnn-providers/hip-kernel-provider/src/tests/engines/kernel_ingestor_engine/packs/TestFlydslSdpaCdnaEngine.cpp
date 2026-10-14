@@ -332,6 +332,11 @@ std::vector<CdnaCase> acceptedCases()
     deprecatedBottomRight.rightBound = 0;
     deprecatedBottomRight.seqLenQ = 64;
     cases.push_back({"DeprecatedBottomRightCausalWithItsOwnRightBound", deprecatedBottomRight});
+    // A deprecated boolean with a left_bound keeps the window (gpt-oss SWA graphs).
+    auto deprecatedWindow = cdnaSpec();
+    deprecatedWindow.deprecatedCausalBottomRight = true;
+    deprecatedWindow.leftBound = 32;
+    cases.push_back({"DeprecatedCausalWithAWindow", deprecatedWindow});
     // A window wider than any row reaches hides nothing; the bound is compared, never
     // subtracted, so even the largest one is no overflow.
     auto wideWindow = cdnaSpec();
@@ -425,17 +430,6 @@ std::vector<CdnaCase> declinedCases()
     group.heads = 30;
     group.kvHeads = 8;
     cases.push_back({"HeadsNotAMultipleOfKvHeads", group});
-    // The reference ignores explicit bounds under a deprecated boolean; a graph that sets
-    // other bounds as well is ambiguous.
-    auto deprecatedBand = cdnaSpec();
-    deprecatedBand.deprecatedCausalTopLeft = true;
-    deprecatedBand.rightBound = 16;
-    deprecatedBand.seqLenKv = 1024;
-    cases.push_back({"DeprecatedCausalWithABand", deprecatedBand});
-    auto deprecatedWindow = cdnaSpec();
-    deprecatedWindow.deprecatedCausalBottomRight = true;
-    deprecatedWindow.leftBound = 32;
-    cases.push_back({"DeprecatedCausalWithAWindow", deprecatedWindow});
     auto bothDeprecated = cdnaSpec();
     bothDeprecated.deprecatedCausalTopLeft = true;
     bothDeprecated.deprecatedCausalBottomRight = true;

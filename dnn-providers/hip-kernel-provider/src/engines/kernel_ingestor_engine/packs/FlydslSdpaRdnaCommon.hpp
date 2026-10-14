@@ -280,10 +280,11 @@ struct SdpaMask
  *
  * The kernel applies the reference's two-sided rule directly, so every bound pair is
  * served: causal (right 0), a band (right > 0), a sliding window (left >= 0), and either
- * diagonal alignment. The deprecated causal booleans mean right 0 at their corner, and the
- * reference (PlanUtils extractDiagonalBandParams) then ignores any explicit bounds; a graph
- * that sets a boolean together with bounds other than those it implies is ambiguous and
- * declined, as are both booleans together and an alignment the schema does not name.
+ * diagonal alignment. The deprecated causal booleans mean right 0 at their corner; a
+ * right_bound the graph also sets wins over the boolean's implied 0, and a left_bound is
+ * kept (a sliding window, as gpt-oss and Mistral graphs set it). That follows cuDNN and
+ * #13065; hipDNN's CPU reference still drops the bounds under a boolean. Both booleans
+ * together, and an alignment the schema does not name, decline.
  */
 inline std::optional<SdpaMask> maskFor(const data_objects::SdpaAttributes& attributes)
 {
@@ -305,11 +306,10 @@ inline std::optional<SdpaMask> maskFor(const data_objects::SdpaAttributes& attri
 
     if(topLeftDeprecated || bottomRightDeprecated)
     {
-        if(mask.left != UNBOUNDED || (mask.right != UNBOUNDED && mask.right != 0))
+        if(mask.right == UNBOUNDED)
         {
-            return std::nullopt;
+            mask.right = 0;
         }
-        mask.right = 0;
         mask.alignBottomRight = bottomRightDeprecated;
     }
     else
