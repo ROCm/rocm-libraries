@@ -9,6 +9,7 @@
 #include "gtest/gtest.h"
 
 #include <cmath>
+#include <random>
 #include <tuple>
 #include <type_traits>
 #include <vector>
@@ -20,6 +21,26 @@ namespace {
 // costs up to ~6% and would swamp the ~2% gain this test exists to catch.
 using QDataType = FmhaFwdTypeConfig<DataTypeConfig>::QDataType;
 using ODataType = FmhaFwdTypeConfig<DataTypeConfig>::ODataType;
+
+// Round-to-nearest-even on a format with t significand bits (stored mantissa plus the
+// implicit leading 1) is bounded, relative to the true value, by
+//     max |q(x) - x| / x = 2^-t / (1 + 2^-t) = 1 / (2^t + 1)
+// reached at the midpoint of the first gap in a binade, where the error is a half ulp while
+// the value is already 1 + 2^-t. The bound is scale-invariant: it holds in every normal
+// binade, so it does not depend on where the kernel places P.
+constexpr double rne_bound(int significand_bits) { return 1.0 / ((1ull << significand_bits) + 1); }
+
+// Two casts stand between the exact attention and the stored output. P goes to e4m3 for
+// gemm_1 while l accumulates the unrounded P, so O carries the mass bias
+// sum(q(P))/sum(P) - 1 -- a mean of the per-element rounding errors weighted by P_j/sum(P),
+// which inherits their bound. O then goes to the output type. Every output threshold below
+// is this number and not a measured one: a measured threshold locks in one observation, so
+// it false-fails when the value legitimately shifts and stays quiet when a real regression
+// lands under it.
+constexpr double kOutputBound =
+    (1 + rne_bound(4)) *                                           // P -> e4m3
+        (1 + rne_bound(std::is_same_v<ODataType, float> ? 24 : 8)) // O -> fp32 or bf16
+    - 1;
 
 constexpr const char* prec_string()
 {
@@ -37,8 +58,26 @@ struct SinkExactResult
     bool dispatched           = false;
 };
 
+// Score patterns. All three keep every q row identical, so the reference below stays a
+// single scalar computed from row 0. What differs is how the per-element P-rounding errors
+// combine: O/reference - 1 is sum(q(P))/sum(P) - 1, a mean of them weighted by P_j/sum(P).
+//   kFlat     all scores equal, so every P is exp2(kPShift) = 256, an e4m3 grid point. The
+//             rounding error is zero by construction and no mass bias is visible.
+//   kPeriodic a short score cycle repeated ~seqlen_k/9 times. The e4m3 cast of k collapses
+//             the nominal values to a handful, each landing above the midpoint of its gap
+//             and rounding up, so the errors share a sign and no length dilutes them.
+//   kRandom   q.k over N(0,1) entries with the usual 1/sqrt(d) scale, i.e. the score
+//             distribution a real workload produces. Rounding errors cancel the way they
+//             actually do, so this measures the bias that is really paid.
+enum ScorePattern : int
+{
+    kFlat     = 0,
+    kPeriodic = 1,
+    kRandom   = 2
+};
+
 SinkExactResult run_sink_exact(
-    int hdim, int seqlen_k, int seqlen_q, float sink, bool store_lse, bool varying = false)
+    int hdim, int seqlen_k, int seqlen_q, float sink, bool store_lse, int pattern = kFlat)
 {
     SinkExactResult result;
 
@@ -50,12 +89,28 @@ SinkExactResult run_sink_exact(
     std::vector<QDataType> v(seqlen_k * hdim, ck_tile::type_convert<QDataType>(1.f));
     std::vector<ODataType> o(seqlen_q * hdim, ck_tile::type_convert<ODataType>(NAN));
     std::vector<float> lse(seqlen_q, NAN);
-    if(varying)
+    if(pattern == kPeriodic)
     {
         for(int i = 0; i < seqlen_q; ++i)
             q[i * hdim] = ck_tile::type_convert<QDataType>(1.f);
         for(int j = 0; j < seqlen_k; ++j)
             k[j * hdim] = ck_tile::type_convert<QDataType>(-8.f + (j % 9 - 4) * 0.25f);
+    }
+    else if(pattern == kRandom)
+    {
+        // Fixed seed: the bias has to be reproducible run to run for the bound to mean
+        // anything, and a fresh draw would make a failure impossible to reproduce.
+        std::mt19937 gen(42);
+        std::normal_distribution<float> normal(0.f, 1.f);
+        std::vector<float> q_row(hdim);
+        for(float& value : q_row)
+            value = normal(gen);
+        for(int i = 0; i < seqlen_q; ++i)
+            for(int c = 0; c < hdim; ++c)
+                q[i * hdim + c] = ck_tile::type_convert<QDataType>(q_row[c]);
+        for(int j = 0; j < seqlen_k; ++j)
+            for(int c = 0; c < hdim; ++c)
+                k[j * hdim + c] = ck_tile::type_convert<QDataType>(normal(gen));
     }
 
     ck_tile::DeviceMem q_buf(q.size()), k_buf(k.size()), v_buf(v.size());
@@ -84,7 +139,8 @@ SinkExactResult run_sink_exact(
     args.seqlen_q = args.max_seqlen_q = seqlen_q;
     args.seqlen_k                     = seqlen_k;
     args.hdim_q = args.hdim_v = hdim;
-    args.scale_s              = varying ? 1.f : 1.f / std::sqrt(static_cast<float>(hdim));
+    // kPeriodic puts its spread straight in the logits, so it wants an identity scale.
+    args.scale_s = pattern == kPeriodic ? 1.f : 1.f / std::sqrt(static_cast<float>(hdim));
 
     args.stride_q = args.stride_k = args.stride_v = args.stride_o = hdim;
     args.nhead_stride_q = args.batch_stride_q = seqlen_q * hdim;
@@ -176,14 +232,20 @@ TEST_P(SinkExact, MatchesExactAttention)
         GTEST_SKIP() << "No instance for current parameters";
 
     EXPECT_TRUE(result.all_finite);
-    // Same 1% output gain bound the quantization-scale suites use.
-    EXPECT_LT(result.max_relative_error, 0.01);
+    // kFlat puts every P on 256, a grid point, so the mass term is structurally zero here
+    // and only the output cast can contribute. kOutputBound covers both and is loose for
+    // this pattern on purpose: one bound, derived from the formats, no per-pattern tuning.
+    EXPECT_LT(result.max_relative_error, kOutputBound);
     // LSE is the mathematical log-sum-exp: it carries the unquantized row sum, so it is
     // held to fp32 accumulation error rather than to the fp8 output bound.
     if(store_lse)
         EXPECT_LT(result.max_lse_error, 1e-4);
 }
 
+// The mass bias only survives when the per-element errors share a sign; otherwise the
+// weighted mean cancels them. kPeriodic constructs the surviving case, so this is the suite
+// that can actually approach kOutputBound.
+// LSE is unaffected -- it reports l, the unrounded row sum.
 TEST(SinkQuantizedMass, NonuniformRealScores)
 {
     for(int hdim : {64, 128})
@@ -191,13 +253,35 @@ TEST(SinkQuantizedMass, NonuniformRealScores)
         for(float sink : {-4.f, -ck_tile::numeric<float>::infinity()})
         {
             SCOPED_TRACE(::testing::Message() << "hdim=" << hdim << " sink=" << sink);
-            const auto result = run_sink_exact(hdim, 500, 63, sink, true, true);
+            const auto result = run_sink_exact(hdim, 500, 63, sink, true, kPeriodic);
             if(!result.dispatched)
                 GTEST_SKIP() << "No instance for current parameters";
             EXPECT_TRUE(result.all_finite);
-            EXPECT_LT(result.max_relative_error, 0.01);
+            EXPECT_LT(result.max_relative_error, kOutputBound);
             EXPECT_LT(result.max_lse_error, 1e-4);
         }
+    }
+}
+
+// The periodic case above is constructed and says nothing about what a real workload pays.
+// Here V=1 and there is no sink, so the exact output is 1.0 for every element and
+// max_relative_error IS the quantized-mass bias sum(q(P))/sum(P) - 1, with no other error
+// source mixed in, which is the point: kOutputBound is what the format permits, this is what
+// a real score distribution costs. Expect it far inside the bound.
+// Only the fp32-output binary can see it. Once the bias drops below half a bf16 ulp at 1.0,
+// the bf16 build rounds O back to exactly 1 and reports zero no matter what the bias was.
+TEST(SinkQuantizedMass, RandomRealScores)
+{
+    for(int seqlen_k : {512, 2048, 8192})
+    {
+        SCOPED_TRACE(::testing::Message() << "seqlen_k=" << seqlen_k);
+        const auto result =
+            run_sink_exact(128, seqlen_k, 64, -ck_tile::numeric<float>::infinity(), true, kRandom);
+        if(!result.dispatched)
+            GTEST_SKIP() << "No instance for current parameters";
+        EXPECT_TRUE(result.all_finite);
+        EXPECT_LT(result.max_relative_error, kOutputBound);
+        EXPECT_LT(result.max_lse_error, 1e-4);
     }
 }
 
