@@ -23,10 +23,10 @@ NODE_TYPE = "SdpaBackwardAttributes"
 SCHEMA_FILE = "sdpa_backward_attributes.fbs"
 SCHEMA_TABLE = "SdpaBackwardAttributes"
 
-DTYPES = ("bf16", "fp16")
+DTYPES = {"bfloat16": "bf16", "half": "fp16"}
 
 FEATURES = (
-    *(Feature(f"dtype:{dtype}", ("q_tensor_uid",)) for dtype in DTYPES),
+    *(Feature(f"dtype:{dtype}", ("q_tensor_uid",)) for dtype in DTYPES.values()),
     *(Feature(f"head_dim:{d}", sdpa.QV_FIELDS) for d in sdpa.HEAD_DIMS.values()),
     Feature("heads:mha", sdpa.QK_FIELDS, "as many k/v heads as q heads"),
     Feature("heads:gqa", sdpa.QK_FIELDS, "fewer k/v heads than q heads, more than one"),

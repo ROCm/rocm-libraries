@@ -17,12 +17,14 @@ inputs and outputs, each present or not.
 The value sets of ``dtype`` and ``head_dim`` are not in the schema, which
 types them only as tensors. They list what the op is meant to support; a graph
 outside them raises ``FeatureError`` rather than widening the denominator.
+q's data_type is read as written, not through the support matrix's labels,
+which name FNUZ fp8 as OCP fp8: gfx942 runs ``fp8e4m3_fnuz``, gfx950
+``fp8e4m3``, and the two are not bit-compatible.
 """
 
 from __future__ import annotations
 
 from support_features import Feature, FeatureError
-from support_matrix_units import dtype_label
 
 NODE_TYPE = "SdpaAttributes"
 SCHEMA_FILE = "sdpa_attributes.fbs"
@@ -46,7 +48,13 @@ MASK_FIELDS = (
 QK_FIELDS = ("q_tensor_uid", "k_tensor_uid")
 QV_FIELDS = ("q_tensor_uid", "v_tensor_uid")
 
-DTYPES = ("bf16", "fp16", "fp8e4m3", "fp8e5m2")
+# q's data_type as serialized -> dtype value.
+DTYPES = {
+    "bfloat16": "bf16",
+    "half": "fp16",
+    "fp8_e4m3": "fp8e4m3",
+    "fp8_e4m3_fnuz": "fp8e4m3_fnuz",
+}
 # (q / k head dim, v head dim) -> head_dim value. v may be narrower than q / k:
 # the ASM kernels run 192 x 128 (fmha_v3_*/*.csv).
 HEAD_DIMS = {
@@ -62,7 +70,7 @@ FEATURES = (
     Feature("dtype:bf16", ("q_tensor_uid",)),
     Feature("dtype:fp16", ("q_tensor_uid",)),
     Feature("dtype:fp8e4m3", ("q_tensor_uid",) + _FP8_SCALES),
-    Feature("dtype:fp8e5m2", ("q_tensor_uid",) + _FP8_SCALES),
+    Feature("dtype:fp8e4m3_fnuz", ("q_tensor_uid",) + _FP8_SCALES),
     *(Feature(f"head_dim:{d}", QV_FIELDS) for d in HEAD_DIMS.values()),
     Feature("heads:mha", QK_FIELDS, "as many k/v heads as q heads"),
     Feature("heads:gqa", QK_FIELDS, "fewer k/v heads than q heads, more than one"),
@@ -159,7 +167,7 @@ def core_features(
     attrs: dict,
     tensors_by_uid: dict,
     *,
-    dtypes: tuple[str, ...],
+    dtypes: dict[str, str],
     decode: bool,
     ragged: bool,
 ) -> set[str]:
@@ -169,6 +177,7 @@ def core_features(
     and ``scale``. ``decode`` says whether a single query position counts as
     ``seq:decode`` or as an ordinary ``q_eq_kv`` / ``q_ne_kv`` shape.
     ``ragged`` says whether a ragged q is ``layout:ragged`` or uncatalogued.
+    ``dtypes`` maps q's data_type as serialized to its dtype value.
     """
     inputs = node.get("inputs") or {}
     q, k, v = (tensors_by_uid[inputs[f"{port}_tensor_uid"]] for port in "qkv")
@@ -179,9 +188,10 @@ def core_features(
     _, heads_kv, seq_kv, _ = k["dims"]
     head_dim_v = v["dims"][3]
 
-    dtype = dtype_label(q.get("data_type"))
-    if dtype not in dtypes:
-        raise FeatureError(f"q dtype {q.get('data_type')!r} is not catalogued")
+    # type() rather than in: an unhashable value would raise TypeError.
+    dtype = q.get("data_type")
+    if type(dtype) is not str or dtype not in dtypes:
+        raise FeatureError(f"q dtype {dtype!r} is not catalogued")
     head_dim = HEAD_DIMS.get((head_dim_qk, head_dim_v))
     if head_dim is None:
         raise FeatureError(f"head dim {head_dim_qk} x {head_dim_v} is not catalogued")
@@ -197,7 +207,7 @@ def core_features(
         layout = LAYOUTS[order]
 
     features = {
-        f"dtype:{dtype}",
+        f"dtype:{dtypes[dtype]}",
         f"head_dim:{head_dim}",
         f"layout:{layout}",
         mask_kind(attrs),

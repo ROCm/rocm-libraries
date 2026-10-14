@@ -913,6 +913,9 @@ class TestSdpaExtract:
             # Each head dim is catalogued, the pair is not.
             ({"v_dims": (2, 8, 128, 64)}, "head dim 128 x 64"),
             ({"dtype": "float"}, "dtype 'float'"),
+            # No engine runs it.
+            ({"dtype": "fp8_e5m2"}, "dtype 'fp8_e5m2'"),
+            ({"dtype": ["bfloat16"]}, r"dtype \['bfloat16'\]"),
             (
                 {"q_dims": (8, 128, 128), "strides": lambda dims: [1] * len(dims)},
                 "q / k / v rank 3 / 4 / 4",
@@ -927,8 +930,16 @@ class TestSdpaExtract:
         with pytest.raises(FeatureError, match=match):
             self._extract(**kwargs)
 
-    def test_fp8_dtype_label(self) -> None:
-        assert self._group("dtype", dtype="fp8_e4m3") == "dtype:fp8e4m3"
+    @pytest.mark.parametrize(
+        "dtype, expected",
+        [
+            ("fp8_e4m3", "dtype:fp8e4m3"),
+            # Not folded into OCP fp8, as the support matrix's labels fold it.
+            ("fp8_e4m3_fnuz", "dtype:fp8e4m3_fnuz"),
+        ],
+    )
+    def test_fp8_dtype(self, dtype: str, expected: str) -> None:
+        assert self._group("dtype", dtype=dtype) == expected
 
     def test_scale(self) -> None:
         assert self._group("scale", attn_scale_value=0.125) == "scale:fixed"
@@ -989,7 +1000,7 @@ class TestSdpaExtract:
                 "k_dims": (2, 2, 128, 192),
             },
             {
-                "dtype": "fp8_e5m2",
+                "dtype": "fp8_e4m3_fnuz",
                 "strides": _bshd_strides,
                 "causal_mask": True,
                 "q_dims": (2, 8, 128, 192),
