@@ -26,6 +26,8 @@ NB_MODULE(origami, m) {
       .value("gfx950", hardware_t::architecture_t::gfx950)
       .value("gfx1200", hardware_t::architecture_t::gfx1200)
       .value("gfx1201", hardware_t::architecture_t::gfx1201)
+      .value("gfx1170", hardware_t::architecture_t::gfx1170)
+      .value("gfx1171", hardware_t::architecture_t::gfx1171)
       .value("gfx1100", hardware_t::architecture_t::gfx1100)
       .value("gfx1101", hardware_t::architecture_t::gfx1101)
       .value("gfx1150", hardware_t::architecture_t::gfx1150)

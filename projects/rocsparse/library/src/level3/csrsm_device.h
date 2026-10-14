@@ -78,12 +78,21 @@ namespace rocsparse
 
     // Body of ONE flattened block. block_id is that block's position in the
     // flattened (RHS panel, row) space and is a parameter rather than a read of
-    // hipBlockIdx_x, so the grid-stride loop lives in the __global__ wrapper below
-    // (the AISPARSE-666/677 idiom). Both coordinates are recovered from the same
+    // hipBlockIdx_x, so the grid-stride loop lives in csrsm_device below (the
+    // AISPARSE-666/677 idiom). Both coordinates are recovered from the same
     // induction variable: taking one from block_id and the other from
     // hipBlockIdx_x would pair the wrong row with the wrong panel on every sweep
     // after the first.
-    template <uint32_t BLOCKSIZE, bool SLEEP, typename I, typename J, typename T>
+    template <uint32_t BLOCKSIZE,
+              bool     SLEEP,
+              typename I,
+              typename J,
+              typename T
+#ifdef ROCSPARSE_WITH_TRSM_REFACTORING
+              ,
+              bool OP_A_CONJUGATE = false
+#endif
+              >
     ROCSPARSE_DEVICE_ILF void csrsm_block_device(int64_t             block_id,
                                                  rocsparse_operation transB,
                                                  J                   m,
@@ -160,8 +169,17 @@ namespace rocsparse
                 scsr_col_ind[hipThreadIdx_x] = (hipThreadIdx_x < row_end - j)
                                                    ? csr_col_ind[hipThreadIdx_x + j] - idx_base
                                                    : -1;
-                scsr_val[hipThreadIdx_x]
-                    = (hipThreadIdx_x < row_end - j) ? csr_val[hipThreadIdx_x + j] : -1;
+#ifdef ROCSPARSE_WITH_TRSM_REFACTORING
+                scsr_val[hipThreadIdx_x] = (hipThreadIdx_x < row_end - j)
+                                               ? (!OP_A_CONJUGATE)
+                                                     ? csr_val[hipThreadIdx_x + j]
+                                                     : rocsparse::conj(csr_val[hipThreadIdx_x + j])
+                                               : static_cast<T>(0);
+#else
+                scsr_val[hipThreadIdx_x] = (hipThreadIdx_x < row_end - j)
+                                               ? csr_val[hipThreadIdx_x + j]
+                                               : static_cast<T>(0);
+#endif
 
                 // Wait for preload to finish
                 __syncthreads();
@@ -259,14 +277,15 @@ namespace rocsparse
             // Wait for spin looping thread to finish as the whole block depends on this row
             __syncthreads();
 
-            // Make sure updated B is visible globally
-            __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "agent");
+            // Read the results of the dependencies only after their done flags
+            rocsparse::acquire_done_rows();
 
             // Index into X
             const int64_t idx_X = local_col * ldb + col_B;
 
             // Local sum computation for each lane
-            local_sum = (col_B < nrhs) ? rocsparse::fma(-local_val, B[idx_X], local_sum)
+            local_sum = (col_B < nrhs) ? rocsparse::fma(
+                            -local_val, rocsparse::load_done_row_data(&B[idx_X]), local_sum)
                                        : static_cast<T>(0);
         }
 
@@ -280,44 +299,51 @@ namespace rocsparse
         // Store result in B
         if(col_B < nrhs)
         {
-            B[idx_B] = local_sum;
+            rocsparse::store_done_row_data(&B[idx_B], local_sum);
         }
 
-        // Make sure B is written to global memory before setting row is done flag
-        __threadfence();
+        // Complete the stores of the results before the done flag is set
+        rocsparse::release_done_row_data();
 
-        // Wait for all threads to finish the threadfence before we mark the row "done"
+        // Wait for all wavefronts to complete their stores before we mark the row "done"
         __syncthreads();
 
         if(hipThreadIdx_x == 0)
         {
-            // Write the "row is done" flag
+            // Write the "row is done" flag. The stores of all wavefronts completed before the
+            // barrier, so a relaxed store suffices; set_done_flag only covers the calling
+            // wavefront.
             rocsparse::atomic_store(
                 &done_array[row + id], 1, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
         }
     }
 
-    template <uint32_t BLOCKSIZE, bool SLEEP, typename I, typename J, typename T>
-    ROCSPARSE_KERNEL(BLOCKSIZE)
-    void csrsm(rocsparse_operation transB,
-               J                   m,
-               J                   nrhs,
-               ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
-               const I* __restrict__ csr_row_ptr,
-               const J* __restrict__ csr_col_ind,
-               const T* __restrict__ csr_val,
-               T*      B,
-               int64_t ldb,
-               int* __restrict__ done_array,
-               const J* __restrict__ map,
-               J*                   zero_pivot,
-               rocsparse_index_base idx_base,
-               rocsparse_fill_mode  fill_mode,
-               rocsparse_diag_type  diag_type,
-               bool                 is_host_mode)
+    template <uint32_t BLOCKSIZE,
+              bool     SLEEP,
+              typename I,
+              typename J,
+              typename T
+#ifdef ROCSPARSE_WITH_TRSM_REFACTORING
+              ,
+              bool OP_A_CONJUGATE = false
+#endif
+              >
+    ROCSPARSE_DEVICE_ILF void csrsm_device(rocsparse_operation transB,
+                                           J                   m,
+                                           J                   nrhs,
+                                           T                   alpha,
+                                           const I* __restrict__ csr_row_ptr,
+                                           const J* __restrict__ csr_col_ind,
+                                           const T* __restrict__ csr_val,
+                                           T*      B,
+                                           int64_t ldb,
+                                           int* __restrict__ done_array,
+                                           const J* __restrict__ map,
+                                           J*                   zero_pivot,
+                                           rocsparse_index_base idx_base,
+                                           rocsparse_fill_mode  fill_mode,
+                                           rocsparse_diag_type  diag_type)
     {
-        ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
-
         if(m <= 0)
         {
             return;
@@ -366,22 +392,65 @@ namespace rocsparse
 
         for(int64_t block_id = hipBlockIdx_x; block_id < num_blocks; block_id += stride)
         {
-            rocsparse::csrsm_block_device<BLOCKSIZE, SLEEP>(block_id,
-                                                            transB,
-                                                            m,
-                                                            nrhs,
-                                                            alpha,
-                                                            csr_row_ptr,
-                                                            csr_col_ind,
-                                                            csr_val,
-                                                            B,
-                                                            ldb,
-                                                            done_array,
-                                                            map,
-                                                            zero_pivot,
-                                                            idx_base,
-                                                            fill_mode,
-                                                            diag_type);
+#ifdef ROCSPARSE_WITH_TRSM_REFACTORING
+            rocsparse::csrsm_block_device<BLOCKSIZE, SLEEP, I, J, T, OP_A_CONJUGATE>(
+#else
+            rocsparse::csrsm_block_device<BLOCKSIZE, SLEEP, I, J, T>(
+#endif
+                block_id,
+                transB,
+                m,
+                nrhs,
+                alpha,
+                csr_row_ptr,
+                csr_col_ind,
+                csr_val,
+                B,
+                ldb,
+                done_array,
+                map,
+                zero_pivot,
+                idx_base,
+                fill_mode,
+                diag_type);
         }
+    }
+
+    template <uint32_t BLOCKSIZE, bool SLEEP, typename I, typename J, typename T>
+    ROCSPARSE_KERNEL(BLOCKSIZE)
+    void csrsm(rocsparse_operation transB,
+               J                   m,
+               J                   nrhs,
+               ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
+               const I* __restrict__ csr_row_ptr,
+               const J* __restrict__ csr_col_ind,
+               const T* __restrict__ csr_val,
+               T*      B,
+               int64_t ldb,
+               int* __restrict__ done_array,
+               const J* __restrict__ map,
+               J*                   zero_pivot,
+               rocsparse_index_base idx_base,
+               rocsparse_fill_mode  fill_mode,
+               rocsparse_diag_type  diag_type,
+               bool                 is_host_mode)
+    {
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
+
+        rocsparse::csrsm_device<BLOCKSIZE, SLEEP>(transB,
+                                                  m,
+                                                  nrhs,
+                                                  alpha,
+                                                  csr_row_ptr,
+                                                  csr_col_ind,
+                                                  csr_val,
+                                                  B,
+                                                  ldb,
+                                                  done_array,
+                                                  map,
+                                                  zero_pivot,
+                                                  idx_base,
+                                                  fill_mode,
+                                                  diag_type);
     }
 }
