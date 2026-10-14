@@ -1338,13 +1338,20 @@ _CFVST_KNOB_ROWS = [
 ]
 
 
+# lds_num_buffers=2 is gated to block_n=64, so a row that sets another block_n runs at
+# nbuf=1 only.
+_CFVST_KNOB_CASES = [
+    pytest.param(*row[1:], nbuf, id=f"{row[0]}-{nbuf_id}")
+    for row in _CFVST_KNOB_ROWS
+    for nbuf, nbuf_id in ((1, "nbuf1"), (2, "kdbvpf"))
+    if nbuf == 1 or row[4].get("block_n", 64) == 64
+]
+
+
 @requires_gfx942_gpu
 @pytest.mark.gpu
-@pytest.mark.parametrize("lds_num_buffers", [1, 2], ids=["nbuf1", "kdbvpf"])
 @pytest.mark.parametrize(
-    "heads,skv,persistent,knobs",
-    [row[1:] for row in _CFVST_KNOB_ROWS],
-    ids=[row[0] for row in _CFVST_KNOB_ROWS],
+    "heads,skv,persistent,knobs,lds_num_buffers", _CFVST_KNOB_CASES
 )
 def test_cfvst_knob_matrix_numeric(heads, skv, persistent, knobs, lds_num_buffers):
     import torch

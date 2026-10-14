@@ -191,7 +191,7 @@ Measurements, register usage per toolchain, and methodology are in the
 | Lever | Config | Mechanism | Verdict |
 |---|---|---|---|
 | Conflict-free V at **bf16 D128** (`use_cfvst=True`) | bf16 D128 standard causal | same `perm_b32` store transpose as fp16 D128; fills the `waves_per_eu=2` VGPR budget with little headroom on the `.1k` MFMA schedule | **opt-in** — not a default; the earlier spill reading does not reproduce for CFVST alone |
-| K-only LDS double buffer + V register prefetch (`lds_num_buffers=2`) | bf16 D128 CFVST standard causal | two K LDS slots and one V LDS slot; the next V tile is carried in registers across softmax/PV, so it fits 64 KB LDS at `block_n=64` | **opt-in** — not a default; can spill depending on toolchain and grid |
+| K-only LDS double buffer + V register prefetch (`lds_num_buffers=2`) | bf16 D128 CFVST standard causal, `block_n=64` only | two K LDS slots and one V LDS slot; the next V tile is carried in registers across softmax/PV, so it fits 64 KB LDS at `block_n=64` | **opt-in** — not a default; can spill depending on toolchain and grid. Gated off at `block_n=32`, where the second K slot lowers occupancy at `block_m=128` and no measurement exists |
 
 ### Evaluated and rejected
 

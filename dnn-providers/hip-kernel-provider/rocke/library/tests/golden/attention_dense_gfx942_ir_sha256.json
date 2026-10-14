@@ -58,10 +58,6 @@
           "bytes": 175001,
           "sha256": "443e2dc10e981be13c5946a9594db674ff39af026386dda7b6538373ae1ea418"
         },
-        "attention_dense_gfx942/kdbvpf_d128_bf16_bn32": {
-          "bytes": 138141,
-          "sha256": "cba05363fc498e518d15945a26b215b9cab6f18a7ad908762d989c9f840af9f2"
-        },
         "attention_dense_gfx942/kdbvpf_d128_bf16_causal": {
           "bytes": 223052,
           "sha256": "fb5a0a563d2fb0b85256a0ff381264c7fda6c5d065047319c2b4eb6913290b1c"
@@ -210,10 +206,6 @@
           "bytes": 175097,
           "sha256": "831246c3f5a0e5f0509f926405cab8b5f30e29df9e6a7c6d5da46bc45db399f6"
         },
-        "attention_dense_gfx942/kdbvpf_d128_bf16_bn32": {
-          "bytes": 138237,
-          "sha256": "a9157db3c2a11bd544b2aeeee6f29a9c59bc75b4f16e516c095282f69f457ba0"
-        },
         "attention_dense_gfx942/kdbvpf_d128_bf16_causal": {
           "bytes": 223148,
           "sha256": "83e3a3a70f032b749ab5c710e18295ec15b2675c306525ec7fcae5e6411c8b52"
@@ -361,10 +353,6 @@
         "attention_dense_gfx942/dispatch_swa_d128_bf16_w128": {
           "bytes": 175161,
           "sha256": "d74be2c22e40bc578efe055fc2d6d0f16ae806efdadbfdea71b7e21c997af12b"
-        },
-        "attention_dense_gfx942/kdbvpf_d128_bf16_bn32": {
-          "bytes": 138301,
-          "sha256": "8936007ac433347e660d3ab23e93f11b77334ce521940b7aeda528d68f56ad2a"
         },
         "attention_dense_gfx942/kdbvpf_d128_bf16_causal": {
           "bytes": 223212,

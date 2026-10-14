@@ -277,15 +277,12 @@ def _cases():
         ),
         # --- opt-in bf16 D128 CFVST, alone and with the K-double-buffer + V-prefetch
         #     pipeline (lds_num_buffers=2). Default knobs never reach these bodies, so
-        #     without these entries the pipeline's IR has no drift tripwire. block_n=32
-        #     changes the V^T pad and the per-slot K offset; the persistent grid wraps
-        #     the pipeline's prologue/epilogue in the grid-stride loop. ---
+        #     without these entries the pipeline's IR has no drift tripwire. The
+        #     persistent grid wraps the pipeline's prologue/epilogue in the grid-stride
+        #     loop. ---
         "attention_dense_gfx942/cfvst_d128_bf16_causal": mk(use_cfvst=True),
         "attention_dense_gfx942/kdbvpf_d128_bf16_causal": mk(
             use_cfvst=True, lds_num_buffers=2
-        ),
-        "attention_dense_gfx942/kdbvpf_d128_bf16_bn32": mk(
-            use_cfvst=True, lds_num_buffers=2, block_n=32
         ),
         "attention_dense_gfx942/persist_kdbvpf_d128_bf16_qbmaj": mk(
             use_cfvst=True,

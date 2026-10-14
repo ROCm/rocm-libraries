@@ -434,8 +434,8 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
     #
     # lds_num_buffers: 1 uses a single K LDS buffer;
     #   2 enables K-only double buffering plus register V prefetch (BF16 D128,
-    #   CFVST and standard causal attention only). V stays single-buffered.
-    #   At block_n=64, this variant uses 51,200 B LDS with the shipped K pad.
+    #   CFVST, block_n=64 and standard causal attention only). V stays
+    #   single-buffered. This variant uses 51,200 B LDS with the shipped K pad.
     lds_num_buffers: int = field(default=1, kw_only=True)
     # iglp_mode: the iglp_opt argument emitted when ``iglp`` is on (0 or 1).
     iglp_mode: int = field(default=_DEFAULT_IGLP_MODE, kw_only=True)
@@ -1227,18 +1227,21 @@ def supports_attention_dense(
     # Performance-only codegen knobs: ranges, plus the one scheduling conflict.
     if spec.lds_num_buffers not in (1, 2):
         return False, "lds_num_buffers must be 1 or 2"
+    # block_n=64 only: the pipeline was measured there. At block_n=32 the second K
+    # slot lowers occupancy at block_m=128 and nothing has measured it.
     if _use_kdb_vpf(spec) and not (
         spec.dtype == "bf16"
         and spec.head_size == 128
         and spec.causal
         and spec.resolved_use_cfvst()
+        and spec.block_n == 64
         and spec.sliding_window == 0
         and not spec.causal_diag_split
         and not spec.use_sinks
     ):
         return False, (
             "NOT_YET_IMPLEMENTED: lds_num_buffers=2 requires bf16 D128 causal CFVST "
-            "without sliding_window, causal_diag_split, or sinks"
+            "at block_n=64, without sliding_window, causal_diag_split, or sinks"
         )
     if spec.iglp_mode not in (0, 1):
         return False, f"iglp_mode must be 0 or 1, got {spec.iglp_mode}"

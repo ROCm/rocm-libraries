@@ -1064,17 +1064,24 @@ def test_cfvst_kdb_vpf_knobs_reject_non_exact_types(overrides):
 
 
 def test_cfvst_kdb_vpf_rejects_over_budget_lds():
-    """Two K slots and one transposed V slot exceed 64 KiB at block_n=128."""
+    """Two K slots and one transposed V slot exceed 64 KiB with a wide K row pad.
+
+    lds_num_buffers=2 is gated to block_n=64, so the budget is reached through the
+    K pad: lds_row_pad=64 lands exactly on 65536 B (accepted), 68 is over."""
     spec = _spec(
-        block_n=128,
+        block_n=64,
         head_size=128,
         dtype="bf16",
-        lds_row_pad=8,
+        lds_row_pad=68,
         use_cfvst=True,
         lds_num_buffers=2,
     )
-    # 2 * 128 * (128 + 8) * 2 + 128 * 128 * 2 = 102400 B.
-    assert _lds_bytes(spec) == 102400
+    # 2 * 64 * (128 + 68) * 2 + 128 * 64 * 2 = 66560 B.
+    assert _lds_bytes(spec) == 66560
+    ok, _ = supports_attention_dense(
+        dataclasses.replace(spec, lds_row_pad=64), arch="gfx942"
+    )
+    assert ok, "65536 B is exactly the gfx942 LDS capacity and must fit"
     ok, reason = supports_attention_dense(spec, arch="gfx942")
     assert not ok and "LDS" in reason, reason
     with pytest.raises(ValueError, match="unsupported gfx942 attention_dense spec"):
@@ -1099,6 +1106,7 @@ def test_cfvst_kdb_vpf_rejects_over_budget_lds():
             "persistent": True,
             "num_persistent": 304,
         },
+        {"use_cfvst": True, "lds_num_buffers": 2, "block_n": 32},  # gated to 64
         {"use_cfvst": True, "lds_num_buffers": 3},
     ],
 )
