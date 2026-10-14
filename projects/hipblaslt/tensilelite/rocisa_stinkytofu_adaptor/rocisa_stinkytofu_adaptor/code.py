@@ -69,6 +69,19 @@ def _forward_true16(rocisa_item: Any, logical: Any) -> None:
     )
 
 
+def _forward_modifiers(rocisa_item: Any, logical: Any) -> None:
+    """Apply the shim's existing modifier set, then the module-level true16 pass.
+
+    ``to_stinky_logical()`` already calls ``_apply_modifiers`` so a direct call
+    keeps today's modifiers. This second call writes the same values; the
+    true16 pass still supplies ``dst1``, which that earlier call does not.
+    """
+    from .instruction import _apply_modifiers  # noqa: WPS433
+
+    _apply_modifiers(rocisa_item, logical)
+    _forward_true16(rocisa_item, logical)
+
+
 # Synthetic instruction-group name that marks the DAG-scheduler region spanning
 # the persistent prefetch prologue + main loop. Must match the registered gfx125x
 # group name (see Gfx1250Backend.cpp) and native's kPGR literal.
@@ -1574,7 +1587,7 @@ class Module(Item):
         # this the DAG scheduler cannot see LDS store->load / barrier ordering
         # and may reorder tensor_load_to_lds, corrupting the tensor descriptor.
         _forward_memtoken(it, logical)
-        _forward_true16(it, logical)
+        _forward_modifiers(it, logical)
         if isinstance(logical, list):
             for inst in logical:
                 if comment and not inst.comment:
@@ -1599,7 +1612,7 @@ class Module(Item):
             if logical is None:
                 continue
             _forward_memtoken(it, logical)
-            _forward_true16(it, logical)
+            _forward_modifiers(it, logical)
             if isinstance(logical, list):
                 out.extend(logical)
             else:
