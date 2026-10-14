@@ -124,8 +124,9 @@ rocke_value_t* rocke_b_zero_vec(rocke_ir_builder_t* b, const rocke_type_t* elem,
     if(rocke_type_eq(elem, rocke_f32()))
         return rocke_b_zero_vec_f32(b, n);
     if(rocke_type_eq(elem, rocke_f16()) || rocke_type_eq(elem, rocke_bf16())
-       || rocke_type_eq(elem, rocke_fp8e4m3()) || rocke_type_eq(elem, rocke_bf8e5m2())
-       || rocke_type_eq(elem, rocke_i8()) || rocke_type_eq(elem, rocke_i32()))
+       || rocke_type_eq(elem, rocke_f64()) || rocke_type_eq(elem, rocke_fp8e4m3())
+       || rocke_type_eq(elem, rocke_bf8e5m2()) || rocke_type_eq(elem, rocke_i8())
+       || rocke_type_eq(elem, rocke_i16()) || rocke_type_eq(elem, rocke_i32()))
     {
         hint = cz_hint(b, n);
         if(!hint)
@@ -698,6 +699,37 @@ rocke_value_t* rocke_b_sitofp_f32(rocke_ir_builder_t* b, rocke_value_t* v)
             b, ROCKE_ERR_VALUE, "sitofp_f32 expects i32 input, got %s", v->type->name);
     operands[0] = v;
     return rocke_i_op1(b, ROCKE_OP_ARITH_SITOFP_F32, operands, 1, rocke_f32(), NULL, "sitof");
+}
+
+/* f32 <-> f64 has its own opcode per direction rather than riding on
+ * cast_to_f32 / cast_f32_to: those two are the f16/bf16 <-> f32 hub and keep
+ * rejecting f64, so no caller widens or narrows a double by accident. */
+rocke_value_t* rocke_b_cvt_f32_to_f64(rocke_ir_builder_t* b, rocke_value_t* v)
+{
+    rocke_value_t* operands[1];
+    if(!rocke_i_live(b))
+        return NULL;
+    if(!v)
+        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "cvt_f32_to_f64 NULL value");
+    if(!rocke_i_type_is(v->type, "f32"))
+        return (rocke_value_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "cvt_f32_to_f64 expects f32 input, got %s", v->type->name);
+    operands[0] = v;
+    return rocke_i_op1(b, ROCKE_OP_ARITH_CVT_F32_TO_F64, operands, 1, rocke_f64(), NULL, "f64");
+}
+
+rocke_value_t* rocke_b_cvt_f64_to_f32(rocke_ir_builder_t* b, rocke_value_t* v)
+{
+    rocke_value_t* operands[1];
+    if(!rocke_i_live(b))
+        return NULL;
+    if(!v)
+        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "cvt_f64_to_f32 NULL value");
+    if(!rocke_i_type_is(v->type, "f64"))
+        return (rocke_value_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "cvt_f64_to_f32 expects f64 input, got %s", v->type->name);
+    operands[0] = v;
+    return rocke_i_op1(b, ROCKE_OP_ARITH_CVT_F64_TO_F32, operands, 1, rocke_f32(), NULL, "f32");
 }
 
 rocke_value_t* rocke_b_cvt_fp8_to_f32(rocke_ir_builder_t* b, rocke_value_t* v)

@@ -2477,6 +2477,19 @@ class _Lowerer:
             f"  {op.result.name} = fptrunc float {self._operand(v)} to {_llvm_type(op.result.type)}"
         )
 
+    def _op_arith_cvt_f32_to_f64(self, op: Op) -> None:
+        (v,) = op.operands
+        self._current().emit(
+            f"  {op.result.name} = fpext float {self._operand(v)} to double"
+        )
+
+    def _op_arith_cvt_f64_to_f32(self, op: Op) -> None:
+        # LLVM's fptrunc rounds to nearest even under the default FP environment.
+        (v,) = op.operands
+        self._current().emit(
+            f"  {op.result.name} = fptrunc double {self._operand(v)} to float"
+        )
+
     def _op_arith_sitofp_f32(self, op: Op) -> None:
         (v,) = op.operands
         if v.type.name != "i32":

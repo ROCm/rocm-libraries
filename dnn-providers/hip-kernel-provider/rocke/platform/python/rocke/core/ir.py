@@ -1252,6 +1252,28 @@ class IRBuilder:
             raise ValueError(f"sitofp_f32 expects i32 input, got {v.type.name}")
         return self._op("arith.sitofp_f32", [v], [F32], result_name_hint="sitof").result
 
+    # f32 <-> f64 has its own opcode per direction rather than riding on
+    # cast_to_f32 / cast_f32_to: those two are the f16/bf16 <-> f32 hub and
+    # keep rejecting f64, so no caller widens or narrows a double by accident.
+    def cvt_f32_to_f64(self, v: Value) -> Value:
+        """Convert an f32 to f64. Exact; lowers to one ``fpext float to double``."""
+        if v.type != F32:
+            raise ValueError(f"cvt_f32_to_f64 expects f32 input, got {v.type.name}")
+        return self._op(
+            "arith.cvt_f32_to_f64", [v], [F64], result_name_hint="f64"
+        ).result
+
+    def cvt_f64_to_f32(self, v: Value) -> Value:
+        """Convert an f64 to f32, rounding to nearest even.
+
+        Lowers to one ``fptrunc double to float``.
+        """
+        if v.type != F64:
+            raise ValueError(f"cvt_f64_to_f32 expects f64 input, got {v.type.name}")
+        return self._op(
+            "arith.cvt_f64_to_f32", [v], [F32], result_name_hint="f32"
+        ).result
+
     def cvt_fp8_to_f32(self, v: Value) -> Value:
         """Convert one fp8e4m3 element to f32.
 
@@ -1795,7 +1817,7 @@ class IRBuilder:
     def zero_vec(self, elem: Type, n: int) -> Value:
         if elem == F32:
             return self.zero_vec_f32(n)
-        if elem in (F16, BF16, FP8E4M3, BF8E5M2, I8, I32):
+        if elem in (F16, BF16, F64, FP8E4M3, BF8E5M2, I8, I16, I32):
             return self._op(
                 "arith.constant_vec",
                 result_types=[VectorType(elem, n)],
@@ -2311,8 +2333,8 @@ class IRBuilder:
 
     def smem_load_vN(self, smem: Value, *indices, dtype: Type, n: int = 0) -> Value:
         """LDS load of ``<N x dtype>``. Supports 8-bit (fp8e4m3 / bf8e5m2 /
-        i8), 16-bit (f16 / bf16), 32-bit (f32 / i32) and 64-bit (f64, ``n in
-        {1, 2}``) element types; loads exactly N elements. In addition to
+        i8), 16-bit (f16 / bf16 / i16), 32-bit (f32 / i32) and 64-bit (f64,
+        ``n in {1, 2}``) element types; loads exactly N elements. In addition to
         power-of-two widths, accepts 96-bit payloads (12 bytes, six halfwords,
         or three words), using element alignment. The target and alignment
         determine instruction selection.
@@ -2320,6 +2342,7 @@ class IRBuilder:
         if dtype.name not in (
             "f16",
             "bf16",
+            "i16",
             "f32",
             "i32",
             "tf32",
@@ -2329,12 +2352,12 @@ class IRBuilder:
             "i8",
         ):
             raise ValueError(
-                "smem_load_vN supports f16 / bf16 / f32 / i32 / tf32 / f64 / "
+                "smem_load_vN supports f16 / bf16 / i16 / f32 / i32 / tf32 / f64 / "
                 f"fp8e4m3 / bf8e5m2 / i8, got {dtype.name}"
             )
         if dtype.name in ("fp8e4m3", "bf8e5m2", "i8"):
             allowed_n = (1, 2, 4, 8, 12, 16)
-        elif dtype.name in ("f16", "bf16"):
+        elif dtype.name in ("f16", "bf16", "i16"):
             allowed_n = (1, 2, 4, 6, 8)
         elif dtype.name == "f64":
             allowed_n = (1, 2)
@@ -5394,6 +5417,8 @@ PURE_OP_NAMES = {
     "arith.cast_to_f32",
     "arith.cast_f32_to",
     "arith.sitofp_f32",
+    "arith.cvt_f32_to_f64",
+    "arith.cvt_f64_to_f32",
     "arith.cvt_fp8_to_f32",
     "math.exp2",
     "math.exp2_fast",

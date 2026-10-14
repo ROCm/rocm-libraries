@@ -188,6 +188,22 @@ if(BUILD_TESTING)
                  rocke_f64_lowering)
   endif()
 
+  # Pins every opcode's value, name and purity: rocke_opcode_t is C ABI.
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_opcode_values.cpp")
+    add_executable(rocke_opcode_values core/test_opcode_values.cpp)
+    target_link_libraries(rocke_opcode_values PRIVATE rocke_core)
+    add_test(NAME rocke_opcode_values COMMAND rocke_opcode_values)
+    set_tests_properties(rocke_opcode_values
+                         PROPERTIES LABELS "ckc;unit;host")
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_opcode_values)
+    set_target_properties(rocke_opcode_values
+                          PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+    install(TARGETS rocke_opcode_values
+            RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+    set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+                 rocke_opcode_values)
+  endif()
+
   # Holds the ISA-layer and lower_llvm-layer flavor->datalayout tables together.
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/flavor_datalayout_ssot.cpp")
     add_executable(rocke_flavor_datalayout_ssot core/flavor_datalayout_ssot.cpp)
