@@ -300,6 +300,8 @@ struct DeviceGroupedConvFwdMultipleABD_WaveletModel_Xdl_CShuffle_V3
     static_assert(is_same_v<AElementwiseOperation, element_wise::PassThrough>);
     static_assert(is_same_v<BElementwiseOperation, element_wise::PassThrough>);
     static_assert(is_same_v<CDEElementwiseOperation, element_wise::PassThrough>);
+    static_assert(!((UseTdm || UseNamedBarrier) && !DirectLoad),
+                  "Tdm and NamedBarriers are part of direct load pipeline");
 
     static constexpr GemmSpecialization GemmSpec =
         DirectLoad ? GemmSpecialization::MNKPadding : GemmSpecialization::Default;
@@ -1964,6 +1966,16 @@ struct DeviceGroupedConvFwdMultipleABD_WaveletModel_Xdl_CShuffle_V3
         if constexpr(DirectLoad)
         {
             str << "_DirectLoad";
+        }
+
+        if constexpr(UseTdm)
+        {
+            str << "_Tdm";
+        }
+
+        if constexpr(UseNamedBarrier)
+        {
+            str << "_PingPong";
         }
 
         str << "<"
