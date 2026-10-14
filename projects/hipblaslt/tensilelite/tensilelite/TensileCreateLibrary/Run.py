@@ -36,6 +36,7 @@ import subprocess
 import sys
 import pickle
 import zlib
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from pathlib import Path
 from timeit import default_timer as timer
@@ -788,38 +789,45 @@ def writeSolutionsAndKernelsTCL(
             return processed_kernel
         return composed_function
 
-    results = ParallelMap2(
-        compose(unaryAssemble, unaryWriteAssembly, unaryProcessKernelSource),
-        uniqueAsmKernels,
-        "Generating assembly kernels",
-        multiArg=False,
-        return_as="list"
-    )
-
-    buildAssemblyCodeObjectFiles(
-        asmToolchain.linker,
-        asmToolchain.bundler,
-        asmKernels,
-        destRoot,
-        assemblyTmpPath,
-        compress,
-        archNames=archNames,
-    )
-
     # The basename has to stay "Kernels": the emitted code object is named from
     # it, and the runtime opens Kernels.so-000-<arch>.hsaco by that name.
     writeHelpers(buildTmpPath, kernelHelperObjs, KERNEL_HELPER_FILENAME_CPP, KERNEL_HELPER_FILENAME_H)
     srcKernelFile = buildTmpPath / "Kernels.cpp"
 
-    buildSourceCodeObjectFiles(
-        srcToolchain.compiler,
-        srcToolchain.bundler,
-        destRoot,
-        objectTmpPath,
-        buildTmpPath,
-        srcKernelFile,
-        cmdlineArchs,
-    )
+    # The helper kernels in Kernels.cpp do not depend on the assembly kernels,
+    # so compile them (one long single-threaded clang job) while the assembly
+    # kernels are being generated instead of afterwards.
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        srcCodeObjects = executor.submit(
+            buildSourceCodeObjectFiles,
+            srcToolchain.compiler,
+            srcToolchain.bundler,
+            destRoot,
+            objectTmpPath,
+            buildTmpPath,
+            srcKernelFile,
+            cmdlineArchs,
+        )
+
+        results = ParallelMap2(
+            compose(unaryAssemble, unaryWriteAssembly, unaryProcessKernelSource),
+            uniqueAsmKernels,
+            "Generating assembly kernels",
+            multiArg=False,
+            return_as="list"
+        )
+
+        buildAssemblyCodeObjectFiles(
+            asmToolchain.linker,
+            asmToolchain.bundler,
+            asmKernels,
+            destRoot,
+            assemblyTmpPath,
+            compress,
+            archNames=archNames,
+        )
+
+        srcCodeObjects.result()
 
     return len(uniqueAsmKernels), uniqueAsmKernels, results
 
