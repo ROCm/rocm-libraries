@@ -83,7 +83,7 @@ and it still owes a real test.
 > <details>
 > <summary>The full account: the churn, the deadlock, and the plan that makes the net unnecessary</summary>
 >
-> [`KernelWriterAssembly.py`](tensilelite/KernelWriterAssembly.py) is where a GEMM kernel actually becomes
+> [`KernelWriterAssembly.py`](tensilelite/KernelWriterAssembly.py) is where a GEMM kernel is turned into
 > assembly, which makes it one of the highest-consequence files in the repository. It is 20,259 lines.
 > Since the monorepo reorganization in April 2025 it has taken 303 commits from 78 authors, adding
 > 13,810 lines and removing 7,277. That window undercounts the file, which is years older than this
@@ -212,9 +212,8 @@ Two of these checks — sibling-`DeviceNames` consistency and the gfx1250v0-over
 are implemented in `Tensile.TensileLogic.ValidCorpusConsistency` and run unconditionally inside
 `TensileLogic --check-all`, so every kernel-generating build checks them regardless of which test lane
 executes; see [Build-Time Validation of Library Logic](#build-time-validation-of-library-logic). A
-corpus-backed pytest copy of each also lives in
-[`test_PlaceholderMerge.py`](tensilelite/Tests/unit/test_PlaceholderMerge.py) and
-[`test_GpuRevisionTarget.py`](tensilelite/Tests/unit/test_GpuRevisionTarget.py) respectively — redundant
+corpus-backed pytest copy of the sibling-`DeviceNames` check also lives in
+[`test_PlaceholderMerge.py`](tensilelite/Tests/unit/test_PlaceholderMerge.py) — redundant
 confirmation wherever the real corpus happens to be on disk, not the enforcement point.
 
 The chip-ID-aware-arch lock, confirming that only gfx950 carries chip-ID-aware dispatch predicates,
@@ -379,7 +378,7 @@ Relative to the build, the logic YAML is compiler input rather than build output
 `TensileCreateLibrary` consumes it and emits kernels from it. Validating it is front-end analysis
 rather than testing, and running codegen over input already known to be invalid produces output nobody
 should trust. So the check is wired in as a CMake custom command in
-[`HipBLASLtCodegen.cmake`](../cmake/HipBLASLtCodegen.cmake) that runs ahead of
+[`hipblaslt_codegen.cmake`](../cmake/hipblaslt_codegen.cmake) that runs ahead of
 `TensileCreateLibrary` and writes a stamp file. A failure stops the build.
 
 That placement buys good reach. It runs on every build that generates kernels, including every

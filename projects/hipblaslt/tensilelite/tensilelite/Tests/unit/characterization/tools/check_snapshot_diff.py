@@ -34,7 +34,8 @@ Pass ``--characterization-dir`` when checking a different repository layout.
 
 Exit codes: ``0`` OK (within threshold, or a valid override was found), ``1`` a
 blanket regeneration was detected with no override, ``2`` a setup/usage problem
-(bad refs, git failure) rather than a detected violation.
+(bad refs, git failure, or a missing characterization dir at ``--head``) rather
+than a detected violation.
 """
 
 from __future__ import annotations
@@ -244,11 +245,33 @@ def _format_offenders(paths: list[str]) -> list[str]:
     return lines
 
 
+def _require_tree_at_head(head: str, characterization_dir: str, repo_root: Path) -> None:
+    """Fail closed if ``characterization_dir`` is not a directory at ``head``.
+
+    A pathspec naming a missing directory matches nothing, so the diff would report
+    zero changed goldens and the guard would pass vacuously (e.g. after the suite
+    moves without the default being updated).
+    """
+    spec = f"{head}:{characterization_dir.rstrip('/')}"
+    try:
+        kind = _run_git(["cat-file", "-t", spec], repo_root).strip()
+    except SnapshotDiffError as exc:
+        raise SnapshotDiffError(
+            f"characterization dir {characterization_dir!r} does not exist at {head!r}; "
+            "pass --characterization-dir if the suite has moved"
+        ) from exc
+    if kind != "tree":
+        raise SnapshotDiffError(
+            f"characterization dir {characterization_dir!r} at {head!r} is not a directory"
+        )
+
+
 def cmd_check(args: argparse.Namespace) -> int:
     repo_root = Path(args.repo_root)
     if not repo_root.is_dir():
         raise SnapshotDiffError(f"--repo-root {str(repo_root)!r} is not a directory")
     mb = merge_base(args.base, args.head, repo_root)
+    _require_tree_at_head(args.head, args.characterization_dir, repo_root)
 
     changed_ambr = changed_ambr_files(mb, args.head, repo_root, args.characterization_dir)
     if len(changed_ambr) <= args.threshold:
