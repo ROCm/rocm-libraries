@@ -236,16 +236,10 @@ static rocblas_status apply_diag_block(rocblas_handle handle,
                                        Istride strideB,
                                        I const batch_count)
 {
-    // LCOV_EXCL_START
+    if((n == 0) || (batch_count == 0) || (nrhs_arg == 0))
     {
-        // Extra defensive check for future proof
-        bool const has_work = (n >= 1) && (batch_count >= 1) && (nrhs_arg >= 1);
-        if(!has_work)
-        {
-            return (rocblas_status_success);
-        }
+        return rocblas_status_success;
     }
-    // LCOV_EXCL_STOP
 
     I const max_blocks = 64 * 1024 - 3;
     I const nbz = std::min(max_blocks, batch_count);
@@ -315,12 +309,9 @@ static __global__
     // NOTE: each thread block swap nrhs columns locally
     // so check value of nrhs
     // -------------------------------------------
+    if((nrhs == 0) || (n == 0) || (batch_count == 0))
     {
-        bool const has_work = (nrhs >= 1) && (n >= 1) && (batch_count >= 1);
-        if(!has_work)
-        {
-            return;
-        }
+        return;
     }
 
     // Fortran 1-based index value
@@ -499,18 +490,10 @@ static rocblas_status apply_pivot_upper(rocblas_handle handle,
                                         Istride const strideP,
                                         I const batch_count)
 {
-    // LCOV_EXCL_START
+    if((n == 0) || (nrhs_arg == 0) || (batch_count == 0))
     {
-        // ---------------------------------------------------
-        // extra defensive check retained for future-proofing
-        // ---------------------------------------------------
-        bool const has_work = (n >= 1) && (nrhs_arg >= 1) && (batch_count >= 1);
-        if(!has_work)
-        {
-            return (rocblas_status_success);
-        }
+        return rocblas_status_success;
     }
-    // LCOV_EXCL_STOP
 
     hipStream_t stream;
     rocblas_get_stream(handle, &stream);
@@ -757,18 +740,10 @@ static rocblas_status apply_pivot_lower(rocblas_handle handle,
                                         I const batch_count)
 
 {
-    // LCOV_EXCL_START
+    if((n == 0) || (nrhs_arg == 0) || (batch_count == 0))
     {
-        // ---------------------------------------------------
-        // extra defensive check retained for future-proofing
-        // ---------------------------------------------------
-        bool const has_work = (n >= 1) && (nrhs_arg >= 1) && (batch_count >= 1);
-        if(!has_work)
-        {
-            return (rocblas_status_success);
-        }
+        return rocblas_status_success;
     }
-    // LCOV_EXCL_STOP
 
     hipStream_t stream;
     rocblas_get_stream(handle, &stream);
@@ -819,18 +794,10 @@ static rocblas_status sytrs2_inner_template(rocblas_handle handle,
                                             void* const work,
                                             size_t const size_work)
 {
-    // LCOV_EXCL_START
+    if((n == 0) || (nrhs == 0) || (batch_count == 0))
     {
-        // ---------------------------------------------------
-        // extra defensive check retained for future-proofing
-        // ---------------------------------------------------
-        bool const has_work = (n >= 1) && (nrhs >= 1) && (batch_count >= 1);
-        if(!has_work)
-        {
-            return (rocblas_status_success);
-        }
+        return rocblas_status_success;
     }
-    // LCOV_EXCL_STOP
 
     T const one = 1;
 
@@ -1146,18 +1113,10 @@ static inline rocblas_status rocsolver_sytrs2_template(rocblas_handle handle,
                                                        void* const work,
                                                        size_t const size_work)
 {
-    // LCOV_EXCL_START
+    if((n == 0) || (nrhs == 0) || (batch_count == 0))
     {
-        // ---------------------------------------------------
-        // extra defensive check retained for future-proofing
-        // ---------------------------------------------------
-        bool const has_work = (n >= 1) && (nrhs >= 1) && (batch_count >= 1);
-        if(!has_work)
-        {
-            return (rocblas_status_success);
-        }
+        return rocblas_status_success;
     }
-    // LCOV_EXCL_STOP
 
     bool const is_upper = (uplo == rocblas_fill_upper);
 
