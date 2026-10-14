@@ -1,0 +1,142 @@
+{
+  "version": "1.0",
+  "id": "d1de3948-a405-4292-8e39-0bd4be5f09f4",
+  "name": "hipkernel:Gfx950ConvDgradAot (gfx950, 56 contribution(s))",
+  "adapter": "tree_data",
+  "features_signature": [
+    "$kernel.kernel_family",
+    "$kernel.direct_variant",
+    "$kernel.tile_m",
+    "$kernel.tile_n",
+    "$kernel.tile_k",
+    "$kernel.warp_m",
+    "$kernel.warp_n",
+    "$kernel.warp_tile_m",
+    "$kernel.warp_tile_n",
+    "$kernel.warp_tile_k",
+    "$kernel.pipeline",
+    "$kernel.epilogue",
+    "$kernel.vector_size_a",
+    "$kernel.vector_size_b",
+    "$kernel.vector_size_c",
+    "$kernel.lds_k_outer",
+    "$kernel.block_w",
+    "$kernel.block_waves",
+    "$kernel.block_h",
+    "$kernel.block_q",
+    "$kernel.block_groups",
+    "$kernel.fold_k32",
+    "$kernel.waves_k",
+    "$kernel.waves_q",
+    "$graph.arithmetic_intensity",
+    "$graph.flops",
+    "$graph.flops_by_type.ConvolutionBwdAttributes",
+    "$graph.logical_bytes",
+    "$graph.nodes[0].dilation[0]",
+    "$graph.nodes[0].dilation[1]",
+    "$graph.nodes[0].flops",
+    "$graph.nodes[0].post_padding[0]",
+    "$graph.nodes[0].post_padding[1]",
+    "$graph.nodes[0].pre_padding[0]",
+    "$graph.nodes[0].pre_padding[1]",
+    "$graph.nodes[0].stride[0]",
+    "$graph.nodes[0].stride[1]",
+    "$graph.nodes[0].w.data_type",
+    "$graph.nodes[0].w.dims[0]",
+    "$graph.nodes[0].w.dims[1]",
+    "$graph.nodes[0].w.dims[2]",
+    "$graph.nodes[0].w.dims[3]",
+    "$graph.nodes[0].w.numel",
+    "$graph.nodes[0].w.strides[0]",
+    "$graph.nodes[0].w.strides[2]",
+    "$graph.nodes[0].w.strides[3]",
+    "$graph.nodes[0].dx.data_type",
+    "$graph.nodes[0].dx.dims[0]",
+    "$graph.nodes[0].dx.dims[1]",
+    "$graph.nodes[0].dx.dims[2]",
+    "$graph.nodes[0].dx.dims[3]",
+    "$graph.nodes[0].dx.numel",
+    "$graph.nodes[0].dx.strides[0]",
+    "$graph.nodes[0].dx.strides[2]",
+    "$graph.nodes[0].dx.strides[3]",
+    "$graph.nodes[0].dy.data_type",
+    "$graph.nodes[0].dy.dims[0]",
+    "$graph.nodes[0].dy.dims[1]",
+    "$graph.nodes[0].dy.dims[2]",
+    "$graph.nodes[0].dy.dims[3]",
+    "$graph.nodes[0].dy.numel",
+    "$graph.nodes[0].dy.strides[0]",
+    "$graph.nodes[0].dy.strides[2]",
+    "$graph.nodes[0].dy.strides[3]",
+    "$graph.tensors[0].data_type",
+    "$graph.tensors[0].dims[0]",
+    "$graph.tensors[0].dims[1]",
+    "$graph.tensors[0].dims[2]",
+    "$graph.tensors[0].dims[3]",
+    "$graph.tensors[0].strides[0]",
+    "$graph.tensors[0].strides[2]",
+    "$graph.tensors[0].strides[3]",
+    "$graph.tensors[1].data_type",
+    "$graph.tensors[1].dims[0]",
+    "$graph.tensors[1].dims[1]",
+    "$graph.tensors[1].dims[2]",
+    "$graph.tensors[1].dims[3]",
+    "$graph.tensors[1].strides[0]",
+    "$graph.tensors[1].strides[2]",
+    "$graph.tensors[1].strides[3]",
+    "$graph.tensors[2].data_type",
+    "$graph.tensors[2].dims[0]",
+    "$graph.tensors[2].dims[1]",
+    "$graph.tensors[2].dims[2]",
+    "$graph.tensors[2].dims[3]",
+    "$graph.tensors[2].strides[0]",
+    "$graph.tensors[2].strides[2]",
+    "$graph.tensors[2].strides[3]"
+  ],
+  "features_hash": "sha256:2d7cb66b0b002ab2",
+  "trained_against": {
+    "ued": {
+      "id": "982553f9-07a6-4a9b-9387-c016c1a8febf",
+      "revision": "1.0"
+    },
+    "kmd": {
+      "id": "11e87973-b7f3-42eb-a69b-c51c3b49a835",
+      "revision": "1.0"
+    },
+    "umd": [
+      {
+        "id": "5ff91a1e-412e-4b0d-9e09-6cf504c72b85",
+        "revision": "1.0"
+      }
+    ],
+    "feature_semantics_revision": 1
+  },
+  "objective": "max",
+  "score": {
+    "metric": "tflops",
+    "calibrated": true,
+    "transform": "log"
+  },
+  "tree_data": {
+    "artifact": "model.bin",
+    "hash": "0e1d8065dacf9d8527dda88c3a338027bf26d7869ad7a6b4100957463dc5b5fb"
+  },
+  "categorical_encoding": {
+    "$kernel.direct_variant": {
+      "depthwise_dgrad": 0,
+      "grouped_dgrad_mfma": 1,
+      "none": 2
+    },
+    "$kernel.pipeline": {
+      "compv3": 0,
+      "compv4": 1,
+      "direct": 2,
+      "mem": 3
+    },
+    "$kernel.epilogue": {
+      "cshuffle": 0,
+      "default": 1,
+      "direct": 2
+    }
+  }
+}
