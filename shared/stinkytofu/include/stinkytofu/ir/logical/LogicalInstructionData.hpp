@@ -56,10 +56,15 @@ struct MFMAData {
     /// is tracked separately from `scaled` (which controls only the mnemonic).
     bool scaleOperands;
 
+    /// Width of neg_lo when `neg` is set. 3 is HasWMMA_V1 (`neg_lo:[1,1,1]`);
+    /// 2 is `neg_lo:[1,1]`. 0 keeps the historical 2-source form.
+    int negSrcs;
+
     MFMAData(const std::string& instType_, const std::string& accType_, int m_, int n_, int k_,
              int blocks_, bool mfma1k_, bool neg_ = false, bool reuseA_ = false,
              bool reuseB_ = false, const std::string& matrixAFmt_ = "",
-             const std::string& matrixBFmt_ = "", bool scaled_ = false, bool scaleOperands_ = false)
+             const std::string& matrixBFmt_ = "", bool scaled_ = false, bool scaleOperands_ = false,
+             int negSrcs_ = 0)
         : instType(instType_),
           accType(accType_),
           m(m_),
@@ -73,7 +78,8 @@ struct MFMAData {
           matrixAFmt(matrixAFmt_),
           matrixBFmt(matrixBFmt_),
           scaled(scaled_),
-          scaleOperands(scaleOperands_) {}
+          scaleOperands(scaleOperands_),
+          negSrcs(negSrcs_) {}
 };
 
 /**

@@ -131,7 +131,8 @@ static bool genSpecialMFMAClasses(std::ofstream& out) {
     out << "        const std::string& matrixBFmt = \"\",\n";
     out << "        bool scaled = false,\n";
     out << "        bool scaleOperands = false,\n";
-    out << "        const std::string& comment = \"\")\n";
+    out << "        const std::string& comment = \"\",\n";
+    out << "        int negSrcs = 0)\n";
     out << "    {\n";
     out << "        auto* inst = IRBase::createIR<LogicalInstruction>(logical::MFMA);\n";
     out << "        \n";
@@ -143,7 +144,7 @@ static bool genSpecialMFMAClasses(std::ofstream& out) {
     out << "        \n";
     out << "        // Create and set special data\n";
     out << "        auto* data = new MFMAData(instType, accType, m, n, k, blocks, mfma1k, "
-           "neg, reuseA, reuseB, matrixAFmt, matrixBFmt, scaled, scaleOperands);\n";
+           "neg, reuseA, reuseB, matrixAFmt, matrixBFmt, scaled, scaleOperands, negSrcs);\n";
     out << "        inst->setSpecialData(data);\n";
     out << "        inst->comment = comment;\n";
     out << "        \n";
