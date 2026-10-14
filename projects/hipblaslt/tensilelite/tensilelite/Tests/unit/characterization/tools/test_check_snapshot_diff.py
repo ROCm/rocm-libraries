@@ -539,3 +539,59 @@ def test_main_default_characterization_dir_detects_bulk_change(repo: _Repo, caps
     err = capsys.readouterr().err
     assert f"{changed_count} .ambr golden file(s) changed" in err
     assert f"{CHAR_DIR}/Module0" in err
+
+
+def test_main_honors_non_default_characterization_dir(repo: _Repo, capsys):
+    other_dir = "elsewhere/characterization"
+    for i in range(csd.DEFAULT_THRESHOLD + 1):
+        repo.write(f"{other_dir}/Module{i}/__snapshots__/test_char.ambr", "# v1\n")
+    base_sha = repo.commit("add goldens in a non-default dir")
+    for i in range(csd.DEFAULT_THRESHOLD + 1):
+        repo.write(f"{other_dir}/Module{i}/__snapshots__/test_char.ambr", "# v2\n")
+    head_sha = repo.commit("blanket regen in non-default dir")
+
+    args = ["--base", base_sha, "--head", head_sha, "--repo-root", str(repo.root)]
+    assert csd.main([*args, "--characterization-dir", other_dir]) == 1
+    assert f"{other_dir}/Module0" in capsys.readouterr().err
+
+
+def test_main_returns_two_when_characterization_dir_missing_at_head(repo: _Repo, capsys):
+    base_sha = repo._git("rev-parse", "HEAD").strip()
+    head_sha = _change_n_goldens(repo, 1, "scoped change")
+
+    rc = csd.main(
+        [
+            "--base",
+            base_sha,
+            "--head",
+            head_sha,
+            "--repo-root",
+            str(repo.root),
+            "--characterization-dir",
+            "no/such/dir",
+        ]
+    )
+
+    assert rc == 2
+    assert "does not exist at" in capsys.readouterr().err
+
+
+def test_main_returns_two_when_characterization_dir_is_a_file(repo: _Repo, capsys):
+    base_sha = repo._git("rev-parse", "HEAD").strip()
+    head_sha = _change_n_goldens(repo, 1, "scoped change")
+
+    rc = csd.main(
+        [
+            "--base",
+            base_sha,
+            "--head",
+            head_sha,
+            "--repo-root",
+            str(repo.root),
+            "--characterization-dir",
+            f"{CHAR_DIR}/adr/0001-placeholder.md",
+        ]
+    )
+
+    assert rc == 2
+    assert "is not a directory" in capsys.readouterr().err
