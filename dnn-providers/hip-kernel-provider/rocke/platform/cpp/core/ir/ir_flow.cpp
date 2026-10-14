@@ -533,6 +533,16 @@ rocke_value_t* rocke_b_warp_shuffle_xor(rocke_ir_builder_t* b, rocke_value_t* v,
         return (rocke_value_t*)rocke_i_set_err(
             b, ROCKE_ERR_VALUE, "warp_shuffle_xor: NULL operand");
 
+    /* f64: split into two i32 halves and shuffle each on the 32-bit path. */
+    if(rocke_i_type_is(v->type, "f64"))
+    {
+        rocke_value_t* halves = rocke_b_bitcast(b, v, rocke_vector_type(b, rocke_i32(), 2));
+        rocke_value_t* parts[2];
+        parts[0] = rocke_b_warp_shuffle_xor(b, rocke_b_vec_extract(b, halves, 0), lane_xor);
+        parts[1] = rocke_b_warp_shuffle_xor(b, rocke_b_vec_extract(b, halves, 1), lane_xor);
+        return rocke_b_bitcast(b, rocke_b_vec_pack(b, parts, 2, rocke_i32()), rocke_f64());
+    }
+
     if(lane_xor >= 1 && lane_xor <= 31)
     {
         /* Intra-32-lane XOR -> ds_swizzle (1 LDS op, no addr-compute). */
