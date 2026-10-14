@@ -106,6 +106,11 @@ class RMSEpilogueEmitter:
         self.MT0 = kernel["MacroTile0"]
         self.MT1 = kernel["MacroTile1"]
         self.numPairs = (self.T_M // 2) * self.T_N
+        # Interleave M-pairs (2q, 2q+1) per column so both 64B halves of each 128B
+        # residual line are requested back to back instead of T_N pairs apart. When
+        # T_M//2 is odd the order stays column-fastest: the partner half of the 128B
+        # line belongs to the neighbouring wave, so the 2x read amplification remains.
+        self.interleavePairs = (self.T_M // 2) % 2 == 0
         # The two-phase group loop handles a partial last group, so PREFETCH need not
         # divide numPairs. autoPrefetch defaults to a depth-4 ring (min(4, numPairs)):
         # depth 4 measured fastest on the MT256x256 baseline at zero extra VGPR cost,
@@ -916,8 +921,9 @@ class RMSEpilogueEmitter:
                                comment=f"+= gammaLdsBase({self.gammaLdsBase})."))
 
     def _issueGammaLds(self, module, g8Bank, mp):
-        """Issue the mp's two gamma DS reads early; called once per mp by _emitBody
-        when mp advances. Latency is hidden by the accumulator-stage, residual-cvt,
+        """Issue the mp's two gamma DS reads early; called by _emitBody on the first
+        visit to each mp, reading into that mp's parity bank (the single bank when
+        not interleaved). Latency is hidden by the accumulator-stage, residual-cvt,
         H8 add, and ssq tree that follow before the matching wait in
         _waitConvertGammaLds on the first column-tile of the mp."""
         vgprPool = self.writer.vgprPool
@@ -1044,15 +1050,33 @@ class RMSEpilogueEmitter:
         vgprPool.checkIn(addr)
         vgprPool.checkIn(val)
 
+    def _pairOrder(self):
+        """Return the (mp, n) visit order over all numPairs pairs.
+
+        Interleaved: for each M-pair-pair q and column-tile n, visit (2q, n) then
+        (2q+1, n) so the two halves of a 128B residual line load back to back.
+        Otherwise column-fastest: n = t % T_N, mp = t // T_N.
+        """
+        if not self.interleavePairs:
+            return [(t // self.T_N, t % self.T_N) for t in range(self.numPairs)]
+        order = []
+        for q in range(self.T_M // 4):
+            for n in range(self.T_N):
+                order.append((2 * q, n))
+                order.append((2 * q + 1, n))
+        assert len(order) == self.numPairs, "pair order must cover every pair"
+        return order
+
     def _emitBody(self, module, vgprTiles, isX4):
         """Per-arm two-phase pair loop with a depth-``PREFETCH`` residual ring.
 
         Faithful port of the @mega_fused_body two-phase loop (MLIR 290-397) over
-        all pairs in COLUMN-FASTEST order (n fastest): t -> n = t % T_N,
-        mp = t // T_N. Each group of up to ``PREFETCH`` pairs (the last group may be partial) first issues all P loads
-        (phase 1), then consumes each in turn (phase 2), so the next group's loads
-        cannot overwrite a bank until every consume of this group has finished in
-        program order (no WAR hazard on the ring).
+        all pairs in the order given by _pairOrder (t -> (mp, n)): M-pairs
+        interleaved per column when possible, else column-fastest. Each group of up
+        to ``PREFETCH`` pairs (the last group may be partial) first issues all P
+        loads (phase 1), then consumes each in turn (phase 2), so the next group's
+        loads cannot overwrite a bank until every consume of this group has finished
+        in program order (no WAR hazard on the ring).
 
         Per-pair vmem = 1 load + 2 stores (residualOut, then D for bf16 / MXScale for mxfp8). gfx950
         has a single combined vmcnt (loads+stores, FIFO). At consume d, load_d must
@@ -1067,24 +1091,25 @@ class RMSEpilogueEmitter:
         vgprPool = self.writer.vgprPool
         resBanks = [vgprPool.checkOutAligned(8, 4, tag=f"rms_resBank{d}") for d in range(P)]
         accStage = vgprPool.checkOutAligned(8, 2, tag="rms_accStage")
-        g8Bank   = vgprPool.checkOutAligned(8, 2, tag="rms_g8Bank")
+        # Gamma is a per-row (M) scale with no N dependence, so its value is identical
+        # across all T_N column-tiles of a given pair mp. One bank per mp parity keeps
+        # the LDS read once per mp even when interleaving alternates mp every pair.
+        gammaBanks = [vgprPool.checkOutAligned(8, 2, tag=f"rms_g8Bank{i}")
+                      for i in range(2 if self.interleavePairs else 1)]
+        loadedMp = [-1] * len(gammaBanks)
+        order = self._pairOrder()
         ssqAcc   = vgprPool.checkOut(self.T_N, tag="rms_ssqAcc")
         self.ssqAccBase = ssqAcc
         module.addComment1("zero-init ssqAcc[0..T_N-1].")
         for n in range(self.T_N):
             module.add(VMovB32(dst=vgpr(ssqAcc + n), src=0, comment=f"ssqAcc[{n}] = 0.0"))
-        # Gamma is a per-row (M) scale with no N dependence, so its value is identical
-        # across all T_N column-tiles of a given pair mp. Track the last mp whose gamma
-        # was loaded so we issue the LDS read once per mp instead of once per (mp, n).
-        prevMp = -1
         for grp in range(0, self.numPairs, P):
             # The last group is partial when P does not divide numPairs.
             groupSize = min(P, self.numPairs - grp)
             # Phase 1: issue all groupSize prefetch loads for this group.
             for d in range(groupSize):
                 t = grp + d
-                n = t % self.T_N
-                mp = t // self.T_N
+                mp, n = order[t]
                 module.addComment1(f"prefetch load pair t={t} (mp={mp}, n={n}) -> bank {d}.")
                 self._loadRaw(module, resBanks[d], mp, n, isX4)
             # Phase 2: consume each. At consume d the in-flight VMEM ops newer than
@@ -1093,8 +1118,7 @@ class RMSEpilogueEmitter:
             # stores/pair; a full group of 2 -> 1,2).
             for d in range(groupSize):
                 t = grp + d
-                n = t % self.T_N
-                mp = t // self.T_N
+                mp, n = order[t]
                 module.addComment1(f"consume pair t={t} (mp={mp}, n={n}) from bank {d}.")
                 module.add(_SWaitCnt(lgkmcnt=-1, vmcnt=groupSize - 1 + d,
                                      comment=f"combined vmcnt({groupSize - 1 + d}): (groupSize-1-d) loads + 2d stores in flight."))
@@ -1108,15 +1132,19 @@ class RMSEpilogueEmitter:
                 if self._pendingGammaDTLPublish:
                     self._publishGammaDTL(module)
                     self._pendingGammaDTLPublish = False
-                # Issue the pair's gamma LDS reads only when mp advances; reuse the
-                # converted g8Bank across every n of this mp. gammaFresh drives the
-                # matching wait+convert (Step 4) inside _computePair for the first n only.
-                gammaFresh = mp != prevMp
+                # Issue the pair's gamma LDS reads only the first time its mp is seen in
+                # its parity bank; reuse the converted bank across every n of this mp.
+                # gammaFresh drives the matching wait+convert (Step 4) inside
+                # _computePair for the first n only.
+                slot = mp % len(gammaBanks)
+                g8Bank = gammaBanks[slot]
+                gammaFresh = loadedMp[slot] != mp
                 if gammaFresh:
                     self._issueGammaLds(module, g8Bank, mp)
-                    prevMp = mp
+                    loadedMp[slot] = mp
                 self._computePair(module, vgprTiles, resBanks[d], accStage, g8Bank, ssqAcc, mp, n, isX4, gammaFresh)
-        vgprPool.checkIn(g8Bank)
+        for b in reversed(gammaBanks):
+            vgprPool.checkIn(b)
         vgprPool.checkIn(accStage)
         for b in reversed(resBanks):
             vgprPool.checkIn(b)
@@ -1528,8 +1556,9 @@ class RMSEpilogueEmitter:
         and Dout after the gamma multiply. ``accStage`` stages AGPR accumulator
         reads, ``g8Bank`` receives the pair's native gamma, and ``ssqAccBase`` is
         the T_N-wide f32 column partial array (caller zero-inits before the pair
-        loop). ``g8Bank`` is loaded and converted once per mp by the caller
-        (_emitBody) and reused across all n of that mp when gammaFresh is False.
+        loop). ``g8Bank`` is the bank for this mp's parity; it is loaded and
+        converted on the caller's (_emitBody) first visit to the mp and reused by
+        later n of that mp when gammaFresh is False.
 
         The one sanctioned deviation from MLIR is H = extf(native) + acc; the
         reference uses H = residual directly.
@@ -1537,8 +1566,8 @@ class RMSEpilogueEmitter:
         vgprPool = self.writer.vgprPool
         sgprPool = self.writer.sgprPool
         lsc = self.laneSGPRCount
-        # ---- Step 0: gamma LDS reads are issued once per pair mp by the caller
-        # (_emitBody) when mp advances, not per (mp, n); Steps 1-3 below hide that
+        # ---- Step 0: gamma LDS reads are issued by the caller (_emitBody) on the
+        # first visit to each mp, not per (mp, n); Steps 1-3 below hide that
         # read's latency for the first n, and the matching wait is gated at Step 4. ----
         # ---- Step 1: read the accumulator into native-order accRegs ----
         accRegs = []

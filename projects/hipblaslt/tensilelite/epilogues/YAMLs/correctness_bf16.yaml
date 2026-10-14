@@ -68,6 +68,7 @@ BenchmarkProblems:
             - [16, 16, 32, 1, 1, 10, 10, 2, 2] # MT0=320  MT1=320
             - [16, 16, 32, 1, 1, 8, 8, 2, 2]   # MT0=256  MT1=256
             - [16, 16, 32, 1, 1, 6, 6, 2, 2]   # MT0=192  256=192
+            - [16, 16, 32, 1, 1, 4, 16, 4, 1]  # MT0=256 MT1=256 (pinned top config, T_M=4 interleaved)
         - RMSEpilogue: [True]
         - StreamK: [3]
         - StreamKForceDPOnly: [1]
