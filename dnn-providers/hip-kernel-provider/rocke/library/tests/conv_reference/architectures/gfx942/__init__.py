@@ -5,12 +5,11 @@
 
 from __future__ import annotations
 
-import math
-from pathlib import Path
-from dataclasses import asdict
 from typing import TYPE_CHECKING
 
 from ...contract import Case
+from ...implementations import implicit_gemm_fwd
+from ..common import convolution_request, validate_library_root
 
 if TYPE_CHECKING:
     from rocke.runtime import KernelLauncher
@@ -28,6 +27,14 @@ CASES = tuple(
         ("asymmetric", {"Hi": 7, "Wi": 11, "N": 2}),
         ("multi-tile", {"K": 96}),
         ("odd-channels", {"K": 33}),
+        ("odd-input-channels", {"C": 33}),
+        ("stem", {"C": 3, "Hi": 16, "Wi": 16}),
+        ("large", {"N": 2, "Hi": 14, "Wi": 14, "C": 64, "K": 128}),
+        ("long-k", {"Y": 5, "X": 5, "pH": 2, "pW": 2, "sH": 2, "sW": 2}),
+        ("grouped-odd", {"C": 66, "K": 66, "groups": 2}),
+        ("depthwise", {"C": 64, "K": 64, "groups": 64}),
+        ("anisotropic", {"Y": 1, "X": 7, "pH": 0, "pW": 3, "sW": 2}),
+        ("out-1x1", {"Hi": 3, "Wi": 3, "pH": 0, "pW": 0}),
     )
     for dtype in ("fp16", "bf16")
 )
@@ -35,94 +42,18 @@ CASE_BY_ID = {case.id: case for case in CASES}
 
 
 def prepare(case: Case, library_root: str) -> tuple[KernelLauncher, dict]:
-    """Build the current production-selected Python kernel and its AOT ABI."""
-    import kernels
-    import dispatch
-    from dispatch.grouped_convolution import (
-        ConvGroupedRequest,
-        dispatch_conv_grouped,
-        launch_values_for,
-    )
-    from kernels.common.conv_implicit_gemm import ConvProblem, build_implicit_gemm_conv
-    from rocke import compile_kernel
-    from rocke.runtime import KernelLauncher
+    """Select the current kernel through gfx942's production dispatch policy."""
+    validate_library_root(library_root)
+    from dispatch.grouped_convolution import dispatch_conv_grouped
 
-    root = Path(library_root).resolve()
-    for package in (kernels, dispatch):
-        if not Path(package.__file__).resolve().is_relative_to(root):
-            raise RuntimeError(
-                "worker imported production packages outside the selected library"
-            )
-    req = ConvGroupedRequest(
-        N=case.N,
-        C=case.C,
-        K=case.K,
-        Hi=case.Hi,
-        Wi=case.Wi,
-        Y=case.Y,
-        X=case.X,
-        G=case.groups,
-        stride_h=case.sH,
-        stride_w=case.sW,
-        pad_h=case.pH,
-        pad_w=case.pW,
-        dilation_h=case.dH,
-        dilation_w=case.dW,
-        dtype=case.dtype,
-        arch=NAME,
-    )
-    selected = dispatch_conv_grouped(req)
-    spec = selected.spec.to_fwd_spec(ConvProblem(**case.problem_fields()))
-    kernel = build_implicit_gemm_conv(spec, arch=NAME)
-    artifact = compile_kernel(kernel, arch=NAME, backend="python")
-    launcher = KernelLauncher(
-        hsaco=artifact.hsaco,
-        kernel_name=artifact.kernel_name,
-        signature=selected.signature,
-    )
-    sizes = {name: 2 * math.prod(shape) for name, shape in case.input_shapes.items()}
-    # Capture every scalar ABI argument once. Replay substitutes only pointers;
-    # it never imports current convolution geometry or dispatch code.
-    values = launch_values_for(
-        req,
-        selected.spec,
-        A_ptr=0,
-        B_ptr=0,
-        D_ptr=0,
-        A_bytes=sizes["a"],
-        B_bytes=sizes["b"],
-        D_bytes=2 * math.prod(case.output_shape),
-    )
-    for name in ("A", "B", "D"):
-        del values[name]
-    metadata = {
-        "name": launcher.kernel_name,
-        "signature": launcher.signature,
-        "grid": selected.grid,
-        "block": selected.block,
-        "scalars": values,
-        "bindings": {"A": "a", "B": "b", "D": "out"},
-        "dispatch_spec": asdict(selected.spec),
-    }
-    return launcher, metadata
+    request = convolution_request(case, NAME)
+    selected = dispatch_conv_grouped(request)
+    return implicit_gemm_fwd.prepare(case, request, selected)
 
 
 def launch(prepared: tuple[KernelLauncher, dict], buffers: dict) -> None:
-    from rocke.runtime import LaunchConfig
-
-    launcher, metadata = prepared
-    values = dict(metadata["scalars"])
-    values.update(
-        {name: buffers[operand] for name, operand in metadata["bindings"].items()}
-    )
-    launcher(
-        values,
-        config=LaunchConfig(
-            grid=tuple(metadata["grid"]), block=tuple(metadata["block"]), fence=True
-        ),
-    )
+    implicit_gemm_fwd.launch(prepared, buffers)
 
 
 def exported_kernel(prepared: tuple[KernelLauncher, dict]) -> tuple[bytes, dict]:
-    launcher, metadata = prepared
-    return launcher._hsaco, metadata
+    return implicit_gemm_fwd.exported_kernel(prepared)

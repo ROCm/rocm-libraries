@@ -94,11 +94,12 @@ def qualify(
     runner.mkdir(parents=True)
     for name in ("__init__.py", "contract.py", "worker.py"):
         shutil.copy2(_PACKAGE / name, runner / name)
-    shutil.copytree(
-        _PACKAGE / "architectures",
-        runner / "architectures",
-        ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "baseline_lock.json"),
-    )
+    for package in ("architectures", "implementations"):
+        shutil.copytree(
+            _PACKAGE / package,
+            runner / package,
+            ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "baseline_lock.json"),
+        )
     shutil.copytree(
         _PACKAGE.parent / "reference_common",
         payload / "runner/reference_common",
