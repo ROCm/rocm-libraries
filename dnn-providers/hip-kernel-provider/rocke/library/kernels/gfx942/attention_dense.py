@@ -111,20 +111,19 @@ P5 is deliberately no-op for this kernel (a decision, not code):
     occupancy/latency-bound at 1 WG/CU and nowhere near compute-bound -- and the peel
     was proven negative on gfx942 tiled_2d via register pressure, which D128 (at its
     register floor) is the most exposed to. Keep the single-phase mask.
-  * partial-vmcnt software prefetch: N/A here, but NOT for the reason previously
-    recorded. It is a double-buffered pipelining lever and this kernel is
-    single-buffered (NBUF=1), so there is no prefetch to partially overlap. The old
-    "NBUF=2 does not fit 64 KB LDS at D128" justification is only true at the shipped
-    ``block_n=64`` (fp16 33 KB, 2x overflows): at ``block_n=32`` the K tile halves (V
-    stays width-64), D128 LDS drops to ~24.5 KB and NBUF=2 DOES fit.
-    That door is closed by measurement instead -- ``block_n=32`` was GPU-timed in the
-    Step-0 funnel and is proven-negative for fp16 D128 and only part-dependently
-    positive for bf16 D128 (halving the KV tile doubles the tile/grid count and the
-    extra loop/barrier overhead outweighs the LDS relief while occupancy stays
-    pinned), so it is not wired and the prefetch it would unlock is unreachable on
-    the shipped config. Independently, bounding the live set with partial ``vmcnt=N``
-    waits entangles with the K async DMA, which shares the same counter -- see the
-    reverted cfvst-chunking experiment recorded in the ``V_ITEMS`` NOTE below.
+  * partial-vmcnt software prefetch: N/A on the default build. It is a
+    double-buffered pipelining lever and the default build is single-buffered
+    (NBUF=1), so there is no prefetch to partially overlap. A full K+V NBUF=2 does not
+    fit 64 KB LDS at D128 ``block_n=64``; at ``block_n=32`` it fits, but ``block_n=32``
+    was GPU-timed in the Step-0 funnel and is proven-negative for fp16 D128 and only
+    part-dependently positive for bf16 D128 (halving the KV tile doubles the tile/grid
+    count and the extra loop/barrier overhead outweighs the LDS relief while occupancy
+    stays pinned). The opt-in ``lds_num_buffers=2`` path (bf16 D128 CFVST) instead
+    doubles only K at ``block_n=64`` and prefetches the next V tile into registers,
+    which does fit; it waits with a full ``vmcnt(0)``, not a partial one. Bounding the
+    live set with partial ``vmcnt=N`` waits entangles with the K async DMA, which
+    shares the same counter -- see the reverted cfvst-chunking experiment recorded in
+    the ``V_ITEMS`` NOTE below.
 
 P1 conflict-free V (:func:`_use_cfvst`): V is stored TRANSPOSED via a perm_b32
 store-path transpose so the PV A-operand read is a contiguous ds_read_b64 instead of
