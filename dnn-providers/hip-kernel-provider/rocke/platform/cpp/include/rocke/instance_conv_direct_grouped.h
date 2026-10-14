@@ -565,6 +565,76 @@ bool rocke_direct_depthwise_dgrad_is_valid_spec(const rocke_direct_depthwise_dgr
                                                 size_t reason_cap);
 
 /* ===================================================================== *
+ *  DirectDepthwiseDgradWindowedSpec  (cpg=kpg=1 dgrad, stride 1, windowed)
+ *
+ *  @dataclass(frozen=True)
+ *  class DirectDepthwiseDgradWindowedSpec:
+ *      problem: DirectConvProblem
+ *      name: str = "direct_depthwise_dgrad_win"
+ *      block_w: int = 8
+ *      block_waves: int = 1
+ *      ch_per_lane: int = 1
+ *      block_h: int = 8          # dX rows per block (a tile; must be > 0)
+ *      dot2: bool = False        # fdot2 tap pairs (gfx950)
+ *      mfma: bool = False        # Toeplitz MFMA form (gfx950)
+ *      w_fold: int = 1           # images per MFMA tile (mfma only)
+ *      prefetch_rows: int = 1    # dY rows in flight (mfma only)
+ *      wave_size: int = 64
+ *
+ *  AOT: takes the direct dgrad kernarg block (N, H, W, Ho, Wo, groups and the
+ *  dY/dX strides are runtime); KH, KW and PAD are baked.
+ *  Grid (VALU):  (ceil(W / block_w), ceil(groups / block_ch), N * ceil(H / block_h))
+ *  Grid (mfma):  (ceil(W / tile_w), ceil(groups / block_ch),
+ *                 ceil(N / w_fold) * ceil(H / block_h))
+ * ===================================================================== */
+#define ROCKE_DW_DGRAD_WIN_MAX_UNROLL (1 << 15)
+#define ROCKE_DW_DGRAD_WIN_OOB_LANE (1 << 30)
+#define ROCKE_DW_DGRAD_WIN_OOB_UNIFORM ((1 << 30) - 1)
+#define ROCKE_DW_DGRAD_WIN_MAX_TENSOR_BYTES ((1 << 30) - 1)
+#define ROCKE_DW_DGRAD_MFMA_CH 8
+#define ROCKE_DW_DGRAD_MFMA_MAX_UNROLL 512
+#define ROCKE_DW_DGRAD_MFMA_MAX_WAVES 8
+#define ROCKE_DW_DGRAD_MFMA_MAX_FRAG_VGPRS 224
+#define ROCKE_DW_DGRAD_MFMA_MAX_PREFETCH_ROWS 4
+#define ROCKE_DW_DGRAD_MFMA_LDS_BUDGET (64 * 1024)
+
+typedef struct rocke_direct_depthwise_dgrad_win_spec
+{
+    rocke_direct_conv_problem_t problem;
+    const char* name; /* default "direct_depthwise_dgrad_win" */
+    int block_w; /* default 8 */
+    int block_waves; /* default 1 */
+    int ch_per_lane; /* default 1 */
+    int block_h; /* default 8 */
+    bool dot2; /* default false */
+    bool mfma; /* default false */
+    int w_fold; /* default 1 */
+    int prefetch_rows; /* default 1 */
+    int wave_size; /* default 64 */
+} rocke_direct_depthwise_dgrad_win_spec_t;
+
+rocke_direct_depthwise_dgrad_win_spec_t rocke_direct_depthwise_dgrad_win_spec_default(void);
+int rocke_direct_depthwise_dgrad_win_threads_per_block(
+    const rocke_direct_depthwise_dgrad_win_spec_t* spec);
+int rocke_direct_depthwise_dgrad_win_block_ch(const rocke_direct_depthwise_dgrad_win_spec_t* spec);
+int rocke_direct_depthwise_dgrad_win_tile_w(const rocke_direct_depthwise_dgrad_win_spec_t* spec);
+long long rocke_direct_depthwise_dgrad_win_unrolled_fmas(
+    const rocke_direct_depthwise_dgrad_win_spec_t* spec);
+long long rocke_direct_depthwise_dgrad_win_unrolled_mfmas(
+    const rocke_direct_depthwise_dgrad_win_spec_t* spec);
+int rocke_direct_depthwise_dgrad_win_mfma_frag_vgprs(
+    const rocke_direct_depthwise_dgrad_win_spec_t* spec);
+int rocke_direct_depthwise_dgrad_win_mfma_lds_bytes(
+    const rocke_direct_depthwise_dgrad_win_spec_t* spec);
+rocke_status_t rocke_direct_depthwise_dgrad_win_kernel_name(
+    const rocke_direct_depthwise_dgrad_win_spec_t* spec, char* out, size_t out_cap);
+bool rocke_direct_depthwise_dgrad_win_is_valid_spec(
+    const rocke_direct_depthwise_dgrad_win_spec_t* spec,
+    const char* arch,
+    char* reason,
+    size_t reason_cap);
+
+/* ===================================================================== *
  *  DirectConvWgradSpec  (backward-weights, dW = dY^T * X)
  *
  *  @dataclass(frozen=True)
@@ -764,6 +834,15 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_dgrad(
     rocke_ir_builder_t* b, const rocke_direct_depthwise_dgrad_spec_t* spec, const char* arch);
 rocke_kernel_def_t* rocke_build_direct_depthwise_dgrad_new(
     rocke_ir_builder_t* b, const rocke_direct_depthwise_dgrad_spec_t* spec, const char* arch);
+
+/* build_direct_depthwise_dgrad_windowed(spec, arch). Windowed depthwise dgrad
+ * (stride 1, cpg=kpg=1): a block streams the dY rows of a tile of block_h dX
+ * rows once each; VALU, fdot2 or Toeplitz MFMA form. _new validates the spec
+ * (as the Python builder does) and names the kernel. */
+rocke_kernel_def_t* rocke_build_direct_depthwise_dgrad_win(
+    rocke_ir_builder_t* b, const rocke_direct_depthwise_dgrad_win_spec_t* spec, const char* arch);
+rocke_kernel_def_t* rocke_build_direct_depthwise_dgrad_win_new(
+    rocke_ir_builder_t* b, const rocke_direct_depthwise_dgrad_win_spec_t* spec, const char* arch);
 
 /* build_direct_conv_wgrad(spec, arch). Same contract as the 16c entry for the
  * backward-weights kernel (delta register ring + S-row strip, fp32 atomic dW). */

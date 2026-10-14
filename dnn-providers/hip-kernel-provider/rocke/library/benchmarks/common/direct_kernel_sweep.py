@@ -106,6 +106,39 @@ DW_TILED_UNROLL = (False, True)
 # costs up to 16% on a shape, dropping 8 up to 74%.
 DW_COL_BLOCK_W = (1, 2, 4)
 DW_COL_BLOCK_H = (8, 16, 32)
+# Windowed depthwise dgrad (direct_depthwise_dgrad_win, stride 1). Its row
+# loop is unrolled over a tile of block_h dX rows, so the tile is a knob while
+# the image height stays a kernarg. The cache carries the image of the tile
+# policy rather than a product: a tile that keeps a small feature map whole
+# (block_w == block_h, the 7..16-wide maps of the late CNN stages), and
+# narrower column tiles over row chunks for taller maps. block_waves covers
+# small channel counts (1) and the 256-channel block (4 waves of single
+# channels, 2 of channel pairs). Small filters (KW == 3) also get packed
+# channel pairs; wider ones pair their taps on fdot2 where the arch has it.
+DW_WIN_TILES = (
+    (7, 7),
+    (8, 8),
+    (12, 12),
+    (14, 14),
+    (16, 16),
+    (7, 14),
+    (8, 14),
+    (8, 16),
+    (7, 28),
+)
+DW_WIN_WAVES = (1, 4)
+DW_WIN_PAIR_WAVES = (2,)
+# Statically unrolled FMAs per lane the cache builds at most (the validator
+# allows more; past this the compile time grows without a matching win).
+DW_WIN_UNROLL_BUDGET = 1 << 14
+# Toeplitz MFMA form: "same"-padded filters, images folded 1/2/4 per tile,
+# 4- and 8-wave blocks, and row tiles that keep up to 16-row maps whole or
+# chunk taller ones.
+DW_WIN_MFMA_FILTERS = (5, 7, 9)
+DW_WIN_MFMA_FOLDS = (1, 2, 4)
+DW_WIN_MFMA_WAVES = (4, 8)
+DW_WIN_MFMA_BLOCK_H = (4, 7, 8, 12, 14, 16)
+DW_WIN_MFMA_PREFETCH = 2
 # Grouped scalar-FMA dgrad.
 DGRAD_BLOCK_Q = (4, 8, 16, 32)
 # MFMA dgrad fprop pass: output rows per block, then
@@ -357,6 +390,16 @@ DIRECT_CAPABILITIES: Dict[str, Tuple[str, Tuple[DirectCaps, ...]]] = {
             for pad in _all_pads(k)
         ),
     ),
+    # Depthwise dgrad, windowed kernel: stride 1, the same filters, every
+    # padding (it bounds its rows by p_Ho and its columns by p_Wo).
+    "direct_depthwise_dgrad_win": (
+        "dgrad",
+        tuple(
+            DirectCaps(KH=k, PAD=pad, stride=1, cpg=1, kpg=1)
+            for k in _DEPTHWISE_FILTERS
+            for pad in _all_pads(k)
+        ),
+    ),
     # Grouped dgrad, scalar FMA: any stride and padding the reference covers.
     "direct_grouped_dgrad": (
         "dgrad",
@@ -473,6 +516,27 @@ def _knob_grid(variant: str, arch: str, dtype: str) -> Iterator[dict]:
     elif variant == "direct_depthwise_dgrad":
         for bw, waves in itertools.product(DW_BLOCK_W_DGRAD, DW_BLOCK_WAVES):
             yield dict(block_w=bw, block_waves=waves)
+    elif variant == "direct_depthwise_dgrad_win":
+        for (bw, bh), dot2, waves in itertools.product(
+            DW_WIN_TILES, (False, True), DW_WIN_WAVES
+        ):
+            yield dict(
+                block_w=bw, block_h=bh, block_waves=waves, ch_per_lane=1, dot2=dot2
+            )
+        for (bw, bh), waves in itertools.product(DW_WIN_TILES, DW_WIN_PAIR_WAVES):
+            yield dict(
+                block_w=bw, block_h=bh, block_waves=waves, ch_per_lane=2, dot2=False
+            )
+        for fold, waves, bh in itertools.product(
+            DW_WIN_MFMA_FOLDS, DW_WIN_MFMA_WAVES, DW_WIN_MFMA_BLOCK_H
+        ):
+            yield dict(
+                mfma=True,
+                w_fold=fold,
+                block_waves=waves,
+                block_h=bh,
+                prefetch_rows=DW_WIN_MFMA_PREFETCH,
+            )
     elif variant == "direct_depthwise_col":
         for bh, bw, waves in itertools.product(
             DW_COL_BLOCK_H, DW_COL_BLOCK_W, DW_BLOCK_WAVES
@@ -577,6 +641,10 @@ def make_spec(variant: str, problem, knobs: dict):
         return dc.DirectDepthwiseDgradStreamSpec(
             problem=problem, name="rocke_direct_dw_dgrad", **knobs
         )
+    if variant == "direct_depthwise_dgrad_win":
+        return dc.DirectDepthwiseDgradWindowedSpec(
+            problem=problem, name="rocke_direct_dw_dgrad_win", **knobs
+        )
     if variant == "direct_grouped_dgrad":
         return dc.DirectConvDgradSpec(
             problem=problem, name="rocke_direct_dgrad", **knobs
@@ -635,6 +703,30 @@ def _mfma_knobs_reason(problem, knobs: dict) -> Optional[str]:
     return None
 
 
+def _dw_win_policy_reason(caps: DirectCaps, knobs: dict, arch: str) -> Optional[str]:
+    """Why the cache does not build this windowed depthwise dgrad knob for
+    ``caps`` (``None`` when it does). These are cache-scope rules of the knob
+    image (see :data:`DW_WIN_TILES`), not kernel limits: the validator still
+    accepts what they skip, so a JIT sweep can try it."""
+    from kernels.common.conv_direct_grouped import DW_DGRAD_WIN_DOT2_ARCHES
+
+    if knobs.get("mfma"):
+        if caps.KH not in DW_WIN_MFMA_FILTERS or caps.PAD != _same_pad(caps.KH):
+            return "the MFMA form is cached for 'same'-padded 5x5..9x9 only"
+        return None
+    want_dot2 = caps.KW >= 5 and arch in DW_DGRAD_WIN_DOT2_ARCHES
+    if knobs["dot2"] != want_dot2:
+        return "dot2 is cached exactly where it pairs taps (KW >= 5, fdot2 arch)"
+    if knobs["ch_per_lane"] > 1 and caps.KW != 3:
+        return "packed channel pairs are cached for 3x3 only"
+    fmas = (
+        knobs["block_h"] * caps.KH * caps.KW * knobs["block_w"] * knobs["ch_per_lane"]
+    )
+    if fmas > DW_WIN_UNROLL_BUDGET:
+        return f"{fmas} unrolled FMAs exceed the cache budget {DW_WIN_UNROLL_BUDGET}"
+    return None
+
+
 def _uses_coalesced_weights(knobs: dict) -> bool:
     """Does the MFMA dgrad's fprop pass read the reorganized weight layout?
 
@@ -686,6 +778,8 @@ def validate_spec(variant: str, spec, arch: str) -> Tuple[bool, str]:
             return dc.is_valid_depthwise_col_spec(spec, arch=arch)
         if variant == "direct_depthwise_dgrad":
             return dc.is_valid_depthwise_dgrad_stream_spec(spec, arch=arch)
+        if variant == "direct_depthwise_dgrad_win":
+            return dc.is_valid_depthwise_dgrad_win_spec(spec, arch=arch)
         if variant == "direct_grouped_dgrad":
             return dc.is_valid_dgrad_spec(spec, arch=arch)
         if variant == "direct_wgrad":
@@ -712,6 +806,7 @@ def _build_kernel(variant: str, spec, arch: str):
         "direct_depthwise_tiled": dc.build_direct_depthwise_tiled,
         "direct_depthwise_col": dc.build_direct_depthwise_col,
         "direct_depthwise_dgrad": dc.build_direct_depthwise_dgrad_streaming,
+        "direct_depthwise_dgrad_win": dc.build_direct_depthwise_dgrad_windowed,
         "direct_grouped_dgrad": dc.build_direct_conv_dgrad,
         "direct_wgrad": dc.build_direct_conv_wgrad,
         _TRANSPOSE: dc.build_direct_transpose_weights_dgrad,
@@ -932,6 +1027,10 @@ def _caps_jobs(
             if dgrad_rtc_spills(knobs, caps.KH, caps.KW, arch):
                 continue
         if variant in _MFMA_DGRAD and _mfma_knobs_reason(probe, knobs):
+            continue
+        if variant == "direct_depthwise_dgrad_win" and _dw_win_policy_reason(
+            caps, knobs, arch
+        ):
             continue
         spec = make_spec(variant, probe, knobs)
         if not validate_spec(variant, spec, arch)[0]:
