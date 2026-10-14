@@ -44,12 +44,6 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 * 64-bit APIs for existing functions:
     - LARFT_64
 
-### Changed
-### Removed
-### Optimized
-### Resolved issues
-### Known issues
-### Upcoming changes
 ### Optimized
 
 * Improved the performance of sygst/hegst.
