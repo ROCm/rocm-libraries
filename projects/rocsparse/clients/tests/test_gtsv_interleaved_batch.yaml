@@ -57,6 +57,25 @@ Tests:
   gtsv_interleaved_alg: [rocsparse_gtsv_interleaved_alg_thomas]
   matrix: [rocsparse_matrix_random]
 
+# The interleaved kernels address the batch_count-strided workspaces and the
+# batch_stride-strided user arrays with two different multipliers of the same row
+# index. batch_stride is deliberately well above batch_count here so that a
+# widened offset that picks up the wrong multiplier, or that truncates on the way
+# back into a 32-bit local, lands outside the batch it belongs to. M is past the
+# m > 2 and m > 3 special cases all three algorithms carry, so every one of the
+# forward, backward and pivoting offsets is exercised.
+- name: gtsv_interleaved_batch
+  category: quick
+  function: gtsv_interleaved_batch
+  precision: *single_double_precisions_complex_real
+  M: [513]
+  batch_count: [1000]
+  batch_stride: [2048]
+  gtsv_interleaved_alg: [rocsparse_gtsv_interleaved_alg_thomas, rocsparse_gtsv_interleaved_alg_lu, rocsparse_gtsv_interleaved_alg_qr]
+  matrix: [rocsparse_matrix_random]
+  host_memory_gb: 1
+  device_memory_gb: 1
+
 # Pre-checkin
 - name: gtsv_interleaved_batch_bad_arg
   category: pre_checkin

@@ -1,14 +1,16 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+#include <gtest/gtest.h>
+
 #include <complex>
 #include <initializer_list>
 #include <roc/hostnumerics/scalar_type.hpp>
-#include <stdexcept>
 #include <string>
+#include <string_view>
 #include <utility>
 
-int main() {
+TEST(Core, ScalarTypes) {
     using namespace roc::hostnumerics;
     // nativeScalarType<std::string> is a compilation error. Use NativeScalar<T>
     // to query whether T has a mapping without causing an error.
@@ -39,30 +41,31 @@ int main() {
     static_assert(!NativeScalar<std::string>);
     static_assert(!NativeScalar<std::string_view>);
 
-    const auto require = [](bool condition, const char* message) {
-        if (!condition) throw std::runtime_error(message);
-    };
-
     static_assert(scalarTypeInfo(ScalarType::Float32).exponentBits == 8);
 
     // IEEE binary16 has a five-bit exponent, ten fraction bits, and bias 15.
     const auto& half = scalarTypeInfo(ScalarType::Float16);
-    require(half.name == "f16" && half.category == ScalarCategory::FloatingPoint &&
-                half.storageBits == 16 && half.exponentBits == 5 && half.mantissaBits == 10 &&
-                half.exponentBias == 15 && half.supportsNaN && half.supportsInfinity &&
-                !half.isPacked(),
-            "Incorrect binary16 metadata.");
+    EXPECT_EQ(half.name, "f16");
+    EXPECT_EQ(half.category, ScalarCategory::FloatingPoint);
+    EXPECT_EQ(half.storageBits, 16);
+    EXPECT_EQ(half.exponentBits, 5);
+    EXPECT_EQ(half.mantissaBits, 10);
+    EXPECT_EQ(half.exponentBias, 15);
+    EXPECT_TRUE(half.supportsNaN);
+    EXPECT_TRUE(half.supportsInfinity);
+    EXPECT_FALSE(half.isPacked());
     const auto& complex = scalarTypeInfo(ScalarType::ComplexFloat32);
-    require(complex.category == ScalarCategory::Complex && complex.storageBits == 64 &&
-                complex.exponentBits == 8 && complex.mantissaBits == 23,
-            "Complex metadata must count both components' storage.");
+    EXPECT_EQ(complex.category, ScalarCategory::Complex);
+    EXPECT_EQ(complex.storageBits, 64);
+    EXPECT_EQ(complex.exponentBits, 8);
+    EXPECT_EQ(complex.mantissaBits, 23);
     const auto& packed = scalarTypeInfo(ScalarType::Float6E3M2);
-    require(packed.storageBits == 6 && packed.isPacked() && !packed.supportsNaN &&
-                !packed.supportsInfinity,
-            "Incorrect finite six-bit encoding metadata.");
-    require(scalarTypeInfo(ScalarType::Int4).category == ScalarCategory::SignedInteger &&
-                scalarTypeInfo(ScalarType::E8M0).category == ScalarCategory::FloatingPoint,
-            "Incorrect integer or floating-point category.");
+    EXPECT_EQ(packed.storageBits, 6);
+    EXPECT_TRUE(packed.isPacked());
+    EXPECT_FALSE(packed.supportsNaN);
+    EXPECT_FALSE(packed.supportsInfinity);
+    EXPECT_EQ(scalarTypeInfo(ScalarType::Int4).category, ScalarCategory::SignedInteger);
+    EXPECT_EQ(scalarTypeInfo(ScalarType::E8M0).category, ScalarCategory::FloatingPoint);
 
     // Check each identifier independently of its position in the metadata table.
     constexpr std::pair<ScalarType, std::string_view> expectedNames[] = {
@@ -96,25 +99,26 @@ int main() {
     };
     static_assert(std::size(expectedNames) == scalarTypeCount);
     for (const auto& [type, name] : expectedNames) {
-        require(scalarTypeName(type) == name, "Scalar identifier has the wrong metadata row.");
-        require(scalarTypeInfo(type).category < ScalarCategory::Count,
-                "Scalar metadata has an invalid category.");
+        SCOPED_TRACE(name);
+        EXPECT_EQ(scalarTypeName(type), name);
+        EXPECT_LT(scalarTypeInfo(type).category, ScalarCategory::Count);
     }
 
     for (ScalarType type :
          {ScalarType::E4M3, ScalarType::E5M3, ScalarType::E8M0, ScalarType::E8M0Zero}) {
+        SCOPED_TRACE(scalarTypeName(type));
         const auto& info = scalarTypeInfo(type);
-        require(info.category == ScalarCategory::FloatingPoint && !info.isSigned,
-                "Unsigned floating-point metadata mismatch.");
+        EXPECT_EQ(info.category, ScalarCategory::FloatingPoint);
+        EXPECT_FALSE(info.isSigned);
     }
-    require(scalarTypeInfo(ScalarType::Float32).isSigned &&
-                scalarTypeInfo(ScalarType::ComplexFloat32).isSigned &&
-                scalarTypeInfo(ScalarType::Int4).isSigned &&
-                !scalarTypeInfo(ScalarType::UInt8).isSigned &&
-                !scalarTypeInfo(ScalarType::Boolean).isSigned,
-            "Scalar signedness metadata mismatch.");
+    EXPECT_TRUE(scalarTypeInfo(ScalarType::Float32).isSigned);
+    EXPECT_TRUE(scalarTypeInfo(ScalarType::ComplexFloat32).isSigned);
+    EXPECT_TRUE(scalarTypeInfo(ScalarType::Int4).isSigned);
+    EXPECT_FALSE(scalarTypeInfo(ScalarType::UInt8).isSigned);
+    EXPECT_FALSE(scalarTypeInfo(ScalarType::Boolean).isSigned);
 
     for (ScalarType invalid : {ScalarType::Count, static_cast<ScalarType>(0xffff)}) {
-        require(!isConcreteScalarType(invalid), "Invalid scalar type classified as concrete.");
+        EXPECT_FALSE(isConcreteScalarType(invalid))
+            << "ScalarType value: " << static_cast<int>(invalid);
     }
 }

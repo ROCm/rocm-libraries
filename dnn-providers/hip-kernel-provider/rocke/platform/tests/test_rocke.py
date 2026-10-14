@@ -1032,6 +1032,22 @@ class TestElementwiseInstance(unittest.TestCase):
         with self.assertRaises(ValueError):
             build_elementwise(ElementwiseSpec(op="bogus"))
 
+    def test_f64_path_builds(self):
+        from rocke.instances import ElementwiseSpec, build_elementwise
+
+        kernel = build_elementwise(ElementwiseSpec(op="add", dtype="f64", vec=2))
+        ll = lower_kernel_to_llvm(kernel)
+        self.assertIn("fadd double", ll)
+
+    def test_f64_rejects_transcendental_ops_and_wide_vec(self):
+        from rocke.instances.common.elementwise import ElementwiseSpec, is_valid_spec
+
+        for op in ("exp2", "tanh", "silu", "gelu_tanh"):
+            ok, _ = is_valid_spec(ElementwiseSpec(op=op, dtype="f64", vec=2))
+            self.assertFalse(ok, op)
+        ok, _ = is_valid_spec(ElementwiseSpec(op="add", dtype="f64", vec=4))
+        self.assertFalse(ok)
+
 
 class TestLayerNormInstance(unittest.TestCase):
     def test_builds_with_save_mean(self):
@@ -1069,6 +1085,20 @@ class TestReduceInstance(unittest.TestCase):
             kernel = build_reduce2d(Reduce2DSpec(n_per_block=4096, op=op))
             ll = lower_kernel_to_llvm(kernel)
             self.assertIn("define amdgpu_kernel void", ll)
+
+    def test_f64_path_builds(self):
+        from rocke.instances import Reduce2DSpec, build_reduce2d
+
+        for op in ("sum", "max", "mean"):
+            spec = Reduce2DSpec(n_per_block=4096, op=op, dtype="f64", vec=2)
+            ll = lower_kernel_to_llvm(build_reduce2d(spec))
+            self.assertIn("double", ll)
+
+    def test_f64_rejects_wide_vec(self):
+        from rocke.instances.common.reduce import Reduce2DSpec, is_valid_spec
+
+        ok, _ = is_valid_spec(Reduce2DSpec(n_per_block=4096, dtype="f64", vec=4))
+        self.assertFalse(ok)
 
 
 class TestTransposeInstance(unittest.TestCase):
@@ -3563,6 +3593,317 @@ class TestNewTargetIntrinsics(unittest.TestCase):
         b = self._builder("qperm_xor_bad")
         with self.assertRaises(ValueError):
             b.warp_shuffle_xor_quad(b.const_i32(1), 4)
+
+    # ---- dpp_xor / warp_shuffle_xor_dpp ----
+    _DPP_CALL = (
+        "call i32 @llvm.amdgcn.update.dpp.i32("
+        "i32 1, i32 1, i32 {}, i32 15, i32 15, i1 true)"
+    )
+
+    def test_warp_shuffle_xor_dpp_gfx9_encodings(self):
+        """gfx9 CDNA has no ``row_xmask``: each mask with a register-only
+        encoding lowers to it (quad_perm 1/2/3, row_half_mirror 7, row_ror:8,
+        row_mirror 15), one kernel per (arch, mask), with exactly one DPP call
+        so a swapped table entry fails here."""
+        want = {1: 177, 2: 78, 3: 27, 7: 321, 8: 296, 15: 320}
+        for arch in ("gfx942", "gfx950"):
+            for mask, ctrl in want.items():
+                with self.subTest(arch=arch, mask=mask):
+                    ll = self._lower(
+                        f"dppx_{arch}_{mask}",
+                        lambda b: b.warp_shuffle_xor_dpp(b.const_i32(1), mask),
+                        arch=arch,
+                    )
+                    self.assertIn(self._DPP_CALL.format(ctrl), ll)
+                    self.assertEqual(
+                        ll.count("call i32 @llvm.amdgcn.update.dpp.i32("), 1
+                    )
+
+    def test_warp_shuffle_xor_dpp_row_xmask_targets_unchanged(self):
+        """Targets with ``row_xmask`` (gfx11, gfx12, gfx1250) keep
+        ``0x160 | mask`` for every mask, as before the gfx9 table existed."""
+        for arch in ("gfx1151", "gfx1201", "gfx1250"):
+            for mask in range(1, 16):
+                with self.subTest(arch=arch, mask=mask):
+                    ll = self._lower(
+                        f"dppx_{arch}_{mask}",
+                        lambda b: b.warp_shuffle_xor_dpp(b.const_i32(1), mask),
+                        arch=arch,
+                    )
+                    self.assertIn(self._DPP_CALL.format(0x160 | mask), ll)
+
+    def test_warp_shuffle_xor_dpp_emits_hip_builtin(self):
+        from rocke.core.ir import IRBuilder
+        from rocke.core.lower_hip import lower_kernel_to_hip
+
+        for arch, want in (("gfx942", 321), ("gfx950", 321), ("gfx1201", 359)):
+            with self.subTest(arch=arch):
+                b = IRBuilder(f"dppx_hip_{arch}")
+                b.warp_shuffle_xor_dpp(b.const_i32(1), 7)
+                hip = lower_kernel_to_hip(b.kernel, arch=arch)
+                self.assertIn(
+                    f"__builtin_amdgcn_update_dpp(c1, c1, {want}, 15, 15, 1)", hip
+                )
+
+    def test_warp_shuffle_xor_dpp_f32_goes_through_i32(self):
+        ll = self._lower(
+            "dppx_f32", lambda b: b.warp_shuffle_xor_dpp(b.const_f32(1.0), 15)
+        )
+        self.assertIn("bitcast float", ll)
+        self.assertIn("i32 320, i32 15, i32 15, i1 true)", ll)
+        self.assertIn("to float", ll)
+
+    def test_warp_shuffle_xor_dpp_gfx9_rejects_unencodable_mask(self):
+        """A mask with no register-only encoding on gfx9 CDNA fails loudly in
+        every lowerer, naming the supported masks and the LDS fallback; the
+        same mask lowers on a ``row_xmask`` target."""
+        import importlib.util
+
+        from rocke.core.ir import DPP_XOR_CTRL_NO_ROW_XMASK
+        from rocke.core.ir_serialize import serialize
+        from rocke.core.lower_hip import lower_kernel_to_hip
+        from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
+
+        have_cpp = importlib.util.find_spec("rocke_engine") is not None
+        msg = r"no register-only DPP encoding on gfx942.*1, 2, 3, 7, 8 and 15.*warp_shuffle_xor"
+        for mask in range(1, 16):
+            if mask in DPP_XOR_CTRL_NO_ROW_XMASK:
+                continue
+            with self.subTest(mask=mask):
+                b = self._builder(f"dppx_bad_{mask}")
+                b.warp_shuffle_xor_dpp(b.const_i32(1), mask)
+                b.ret()
+                for lower in (_lower_kernel_to_llvm_python, lower_kernel_to_hip):
+                    with self.assertRaisesRegex(ValueError, msg):
+                        lower(b.kernel, arch="gfx942")
+                if have_cpp:
+                    from rocke.core.backend import _lower_via_cpp_engine
+
+                    with self.assertRaisesRegex(RuntimeError, msg):
+                        _lower_via_cpp_engine(serialize(b.kernel), "gfx942", None)
+                _lower_kernel_to_llvm_python(b.kernel, arch="gfx1201")
+
+    def test_dpp_xor_lowering_rejects_bad_mask(self):
+        """A raw ``xor_mask`` outside 1..15 used to be masked with ``& 0xF``
+        (0 and 16 both became row_xmask:0). Now every lowerer rejects it, on
+        every target."""
+        from rocke.core.lower_hip import lower_kernel_to_hip
+        from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
+
+        for bad in (0, 16, -1, 0x141):
+            for arch in ("gfx950", "gfx1201"):
+                with self.subTest(mask=bad, arch=arch):
+                    b = self._builder(f"dppx_raw_{bad}")
+                    value = b.dpp_xor(b.const_i32(1), 1)
+                    value.op.attrs["xor_mask"] = bad
+                    for lower in (_lower_kernel_to_llvm_python, lower_kernel_to_hip):
+                        with self.assertRaisesRegex(
+                            ValueError, r"xor_mask must be in 1\.\.15"
+                        ):
+                            lower(b.kernel, arch=arch)
+
+    def test_warp_shuffle_xor_dpp_builder_rejects_invalid_input(self):
+        b = self._builder("dppx_builder_bad")
+        for bad in (0, 16, -1):
+            with self.subTest(lane_xor=bad):
+                with self.assertRaisesRegex(ValueError, "must be 1..15"):
+                    b.warp_shuffle_xor_dpp(b.const_i32(1), bad)
+                with self.assertRaisesRegex(ValueError, "must be 1..15"):
+                    b.dpp_xor(b.const_i32(1), bad)
+        # The mask is never coerced: True would silently become mask 1.
+        for bad in (True, 1.0, "1"):
+            with self.subTest(lane_xor=bad):
+                with self.assertRaisesRegex(TypeError, "must be an int"):
+                    b.warp_shuffle_xor_dpp(b.const_i32(1), bad)
+                with self.assertRaisesRegex(TypeError, "must be an int"):
+                    b.dpp_xor(b.const_i32(1), bad)
+        with self.assertRaises(ValueError):
+            b.dpp_xor(b.const_f32(1.0), 1)
+        with self.assertRaises(ValueError):
+            b.warp_shuffle_xor_dpp(b.const_i64(1), 1)
+
+    @staticmethod
+    def _dpp_src_lane(ctrl, lane):
+        """Source lane of ``lane`` under a DPP control word: the hardware
+        definitions of each pattern, independent of the XOR claim."""
+        row, i = lane & ~15, lane & 15
+        if ctrl <= 0xFF:  # quad_perm: lane 4q + j reads 4q + sel[j]
+            return (lane & ~3) | ((ctrl >> (2 * (lane & 3))) & 3)
+        if ctrl == 0x128:  # row_ror:8: rotate the 16-lane row by 8
+            return row | ((i + 8) & 15)
+        if ctrl == 0x140:  # row_mirror: lane i reads 15 - i
+            return row | (15 - i)
+        if ctrl == 0x141:  # row_half_mirror: lane i of a half-row reads 7 - i
+            return (lane & ~7) | (7 - (lane & 7))
+        if 0x161 <= ctrl <= 0x16F:  # row_xmask
+            return row | (i ^ (ctrl & 15))
+        raise AssertionError(f"unmodelled DPP control {ctrl:#x}")
+
+    def test_dpp_xor_every_encoding_is_exactly_xor(self):
+        """Every control word the lowerers pick, on every target, moves lane
+        ``i`` to read lane ``i ^ mask`` of its 16-lane row, in wave32 and
+        wave64. Driven by :func:`dpp_xor_ctrl` itself, so it checks the
+        table the lowerers use, not a restatement of it."""
+        from rocke.core.arch.target import ArchTarget
+        from rocke.core.ir import dpp_xor_ctrl
+
+        for gfx in ("gfx942", "gfx950", "gfx1151", "gfx1201", "gfx1250"):
+            arch = ArchTarget.from_gfx(gfx)
+            for mask in range(1, 16):
+                b = self._builder("dppx_model")
+                op = b.dpp_xor(b.const_i32(1), mask).op
+                try:
+                    ctrl = dpp_xor_ctrl(op, arch)
+                except ValueError:
+                    self.assertFalse(arch.has_dpp_row_xmask, (gfx, mask))
+                    continue
+                for lane in range(64):
+                    with self.subTest(gfx=gfx, mask=mask, lane=lane):
+                        self.assertEqual(self._dpp_src_lane(ctrl, lane), lane ^ mask)
+
+    def _xor_butterfly(self, masks, vals, active=None):
+        """Lane model of ``v = v + shuffle(v, m)`` for ``m`` in ``masks``,
+        through the gfx9 control words. ``active[i]`` False models lane ``i``
+        disabled in EXEC for the whole sequence: it never updates, and with
+        ``bound_ctrl`` a lane reading it gets ``0``."""
+        from rocke.core.ir import DPP_XOR_CTRL_NO_ROW_XMASK
+
+        n = len(vals)
+        if active is None:
+            active = [True] * n
+        cur = list(vals)
+        for m in masks:
+            ctrl = DPP_XOR_CTRL_NO_ROW_XMASK[m]
+            src = [self._dpp_src_lane(ctrl, i) for i in range(n)]
+            cur = [
+                (
+                    (cur[i] + (cur[src[i]] if active[src[i]] else 0))
+                    if active[i]
+                    else cur[i]
+                )
+                for i in range(n)
+            ]
+        return cur
+
+    def test_xor_butterfly_leaves_row_sum_in_every_lane(self):
+        """Masks that span all four lane-index bits (``1, 2, 7, 15`` or
+        ``1, 2, 8, 7``, both register-only on gfx9) leave each 16-lane row's
+        sum in every lane of that row, in wave32 and wave64."""
+        import random
+
+        rng = random.Random(0)
+        for masks in ((1, 2, 7, 15), (1, 2, 8, 7), (15, 7, 2, 1)):
+            for wave in (32, 64):
+                for _ in range(20):
+                    vals = [rng.randint(-1000, 1000) for _ in range(wave)]
+                    cur = self._xor_butterfly(masks, vals)
+                    for row in range(wave // 16):
+                        lanes = cur[16 * row : 16 * row + 16]
+                        self.assertEqual(
+                            set(lanes), {sum(vals[16 * row : 16 * row + 16])}
+                        )
+
+    def test_xor_butterfly_needs_every_lane_active(self):
+        """One inactive lane breaks the sum. ``bound_ctrl`` makes it read as
+        ``0``, but every lane also relays its partners' partial sums, so the
+        active lanes lose more than the inactive lane's own value and end
+        with different, wrong totals."""
+        vals = list(range(1, 17))
+        active = [lane != 2 for lane in range(16)]
+        cur = self._xor_butterfly((1, 2, 7, 15), vals, active)
+        got = [cur[i] for i in range(16) if active[i]]
+        want = sum(v for v, on in zip(vals, active) if on)
+        self.assertNotEqual(set(got), {want})
+
+    def test_dpp_xor_is_pure(self):
+        from rocke.core.ir import is_pure_op_name
+
+        b = self._builder("dppx_pure")
+        value = b.dpp_xor(b.const_i32(1), 15)
+        self.assertTrue(value.op.is_pure)
+        self.assertTrue(is_pure_op_name("tile.dpp_xor"))
+
+    def test_dpp_lowering_rejects_malformed_raw_op(self):
+        """Raw IR that skipped the builder is rejected, never coerced, by both
+        Python lowerers for both DPP ops: anything but one operand and one
+        result is a ValueError (zero operands included, not a crash), a
+        missing ``ctrl`` / ``xor_mask`` is a KeyError, a non-``int`` one a
+        TypeError (``int()`` used to turn 320.9 into 320, ``"321"`` into 321
+        and ``True`` into quad_perm control 1 or xor mask 1), and non-i32 data
+        or a non-i32 result a ValueError (HIP would convert between ``int``
+        and ``float`` silently). The C++ twins return ROCKE_ERR_VALUE / _KEY /
+        _TYPE (``tests/core/future_intrinsic_lowering.cpp``)."""
+        from rocke.core.ir import F32, I32
+        from rocke.core.lower_hip import lower_kernel_to_hip
+        from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
+
+        def i32_data(b):
+            return [b.const_i32(1)]
+
+        for op_name, key, ctrl in (
+            ("tile.quad_perm", "ctrl", 177),
+            ("tile.dpp_xor", "xor_mask", 7),
+        ):
+            ok = {key: ctrl}
+            cases = (
+                ("missing", i32_data, [I32], {}, KeyError, f"missing '{key}'"),
+                (
+                    "float",
+                    i32_data,
+                    [I32],
+                    {key: ctrl + 0.9},
+                    TypeError,
+                    "must be an int",
+                ),
+                (
+                    "str",
+                    i32_data,
+                    [I32],
+                    {key: str(ctrl)},
+                    TypeError,
+                    "must be an int",
+                ),
+                ("bool", i32_data, [I32], {key: True}, TypeError, "must be an int"),
+                (
+                    "f32_data",
+                    lambda b: [b.const_f32(1.0)],
+                    [I32],
+                    ok,
+                    ValueError,
+                    "requires i32 data",
+                ),
+                (
+                    "f32_result",
+                    i32_data,
+                    [F32],
+                    ok,
+                    ValueError,
+                    "requires an i32 result",
+                ),
+                (
+                    "two_operands",
+                    lambda b: [b.const_i32(1), b.const_i32(2)],
+                    [I32],
+                    ok,
+                    ValueError,
+                    "expects one operand and one result, got 2 and 1",
+                ),
+                (
+                    "no_operands",
+                    lambda b: [],
+                    [I32],
+                    ok,
+                    ValueError,
+                    "expects one operand and one result, got 0 and 1",
+                ),
+            )
+            for label, operands, results, attrs, exc, msg in cases:
+                for lower in (_lower_kernel_to_llvm_python, lower_kernel_to_hip):
+                    with self.subTest(op=op_name, case=label, lower=lower.__name__):
+                        b = self._builder(f"dpp_raw_{label}")
+                        b._op(op_name, operands(b), list(results), attrs=dict(attrs))
+                        with self.assertRaisesRegex(exc, msg):
+                            lower(b.kernel)
 
     # ---- mov_dpp8 ----
     def test_mov_dpp8_i32_emits_typed_intrinsic(self):
@@ -6907,6 +7248,296 @@ class TestLibDiscoveryOrder(unittest.TestCase):
             self.assertIsNone(result)
             self.assertNotIn("torch", sys.modules)
 
+    def _fake_torch_site(self, tmp):
+        """A site-packages holding a torch package and TheRock's
+        ``_rocm_sdk_core`` wheel layout: HIP and comgr under
+        ``_rocm_sdk_core/lib`` with only their SONAMEs, nothing in torch/lib."""
+        import os
+        import types
+
+        site = os.path.join(tmp, "site-packages")
+        os.makedirs(os.path.join(site, "torch", "lib"))
+        core_lib = os.path.join(site, "_rocm_sdk_core", "lib")
+        os.makedirs(core_lib)
+        open(os.path.join(site, "_rocm_sdk_core", "__init__.py"), "w").close()
+        for name in ("libamdhip64.so.7", "libamd_comgr.so.3", "libhiprtc.so.7"):
+            open(os.path.join(core_lib, name), "w").close()
+        torch_stub = types.ModuleType("torch")
+        torch_stub.__file__ = os.path.join(site, "torch", "__init__.py")
+        return site, core_lib, torch_stub
+
+    def _enter_fake_process(
+        self, stack, tmp, site, modules, absent=(), maps=None, root_libdirs=None
+    ):
+        """Patch this process to look like one that imported ``modules`` (and
+        not ``absent``), has ``site`` on sys.path, maps the libs listed in the
+        ``maps`` file and finds the ROCm installs ``root_libdirs``."""
+        import importlib
+        import os
+        import sys
+        from unittest import mock
+
+        from rocke.runtime import comgr as comgr_mod
+        from rocke.runtime import runtime_coexistence as rc
+
+        stack.enter_context(mock.patch.dict(sys.modules, modules))
+        stack.enter_context(mock.patch.object(sys, "path", [site] + sys.path))
+        stack.enter_context(mock.patch.object(rc, "_IS_WINDOWS", False))
+        stack.enter_context(
+            mock.patch.object(rc, "_PROC_MAPS", maps or os.path.join(tmp, "no-maps"))
+        )
+        if root_libdirs is not None:
+            stack.enter_context(
+                mock.patch.object(rc, "_rocm_root_libdirs", return_value=root_libdirs)
+            )
+        stack.enter_context(mock.patch.object(comgr_mod, "_lib", None))
+        stack.enter_context(mock.patch.dict(os.environ))
+        for name in ("_rocm_sdk_core",) + tuple(absent):
+            sys.modules.pop(name, None)
+        importlib.invalidate_caches()
+        os.environ.pop("ROCKE_HIP_LIB", None)
+        os.environ.pop("ROCKE_COMGR_LIB", None)
+
+    def test_torch_lib_resolves_into_the_rocm_sdk_core_wheel(self):
+        import importlib
+        import os
+        import sys
+        import tempfile
+        import types
+        from unittest import mock
+
+        from rocke.runtime import runtime_coexistence as rc
+
+        # TheRock torch preloads _rocm_sdk_core/lib/libamdhip64.so.7. Looking only
+        # in torch/lib missed it, so rocke loaded /opt/rocm's HIP as a second
+        # runtime and hipModuleGetFunction failed with hipError(500).
+        with tempfile.TemporaryDirectory() as tmp:
+            site, core_lib, torch_stub = self._fake_torch_site(tmp)
+            with mock.patch.dict(
+                sys.modules,
+                {"torch": torch_stub, "rocm_sdk": types.ModuleType("rocm_sdk")},
+            ), mock.patch.object(sys, "path", [site] + sys.path), mock.patch.object(
+                rc, "_IS_WINDOWS", False
+            ), mock.patch.object(
+                rc, "_PROC_MAPS", os.path.join(tmp, "no-maps")
+            ), mock.patch.dict(
+                os.environ
+            ):
+                sys.modules.pop("_rocm_sdk_core", None)
+                importlib.invalidate_caches()
+                os.environ.pop("ROCKE_HIP_LIB", None)
+                hip = os.path.join(core_lib, "libamdhip64.so.7")
+                self.assertEqual(rc._torch_bundled_lib("amdhip64"), hip)
+                self.assertEqual(
+                    rc._torch_bundled_lib("amd_comgr"),
+                    os.path.join(core_lib, "libamd_comgr.so.3"),
+                )
+                paths = rc._candidate_lib_paths("amdhip64", "ROCKE_HIP_LIB", ["7"])
+                self.assertEqual(paths[0], hip)
+                # The explicit override still outranks it.
+                os.environ["ROCKE_HIP_LIB"] = "/custom/libamdhip64.so"
+                paths = rc._candidate_lib_paths("amdhip64", "ROCKE_HIP_LIB", ["7"])
+                self.assertEqual(paths[:2], ["/custom/libamdhip64.so", hip])
+
+    def test_rocm_sdk_core_libs_need_therock_torch(self):
+        import contextlib
+        import os
+        import tempfile
+
+        from rocke.runtime import runtime_coexistence as rc
+
+        # A CUDA, CPU or older ROCm torch in a venv that also has rocm-sdk-core
+        # installed: torch loaded no ROCm libs and rocm_sdk is not imported.
+        # Binding to the wheel's HIP there picks a runtime nothing else uses.
+        with tempfile.TemporaryDirectory() as tmp, contextlib.ExitStack() as stack:
+            site, core_lib, torch_stub = self._fake_torch_site(tmp)
+            self._enter_fake_process(
+                stack, tmp, site, {"torch": torch_stub}, absent=("rocm_sdk",)
+            )
+            self.assertIsNone(rc._torch_bundled_lib("amdhip64"))
+            self.assertIsNone(rc._torch_bundled_lib("amd_comgr"))
+            paths = rc._candidate_lib_paths("amdhip64", "ROCKE_HIP_LIB", ["7"])
+            self.assertNotIn(os.path.join(core_lib, "libamdhip64.so.7"), paths)
+
+    def test_torch_lib_prefers_the_copy_already_mapped(self):
+        import os
+        import sys
+        import tempfile
+        from unittest import mock
+
+        from rocke.runtime import runtime_coexistence as rc
+
+        # Whatever layout torch's HIP came from, the mapped copy is the instance
+        # torch is using; it wins over every on-disk guess. Near-miss names
+        # (libhiprtc, libamdhip64_dbg) must not match.
+        with tempfile.TemporaryDirectory() as tmp:
+            site, _, torch_stub = self._fake_torch_site(tmp)
+            open(os.path.join(site, "torch", "lib", "libamdhip64.so"), "w").close()
+            mapped = "/opt/vendor dir/lib/libamdhip64.so.7.16.60100"
+            maps = os.path.join(tmp, "maps")
+            with open(maps, "w") as fh:
+                fh.write(
+                    "7f00-7f01 r-xp 00000000 08:01 11 /opt/x/lib/libamdhip64_dbg.so.7\n"
+                    "7f01-7f02 r-xp 00000000 08:01 12 /opt/x/lib/libhiprtc.so.7\n"
+                    "7f02-7f03 rw-p 00000000 00:00 0\n"
+                    f"7f03-7f04 r-xp 00000000 08:01 13 {mapped}\n"
+                )
+            with mock.patch.dict(sys.modules, {"torch": torch_stub}), mock.patch.object(
+                rc, "_IS_WINDOWS", False
+            ), mock.patch.object(rc, "_PROC_MAPS", maps):
+                self.assertEqual(rc._torch_bundled_lib("amdhip64"), mapped)
+                self.assertIsNone(rc._mapped_lib("amd_comgr"))
+
+    def test_multiple_mapped_hip_copies_are_not_selected_by_address(self):
+        import contextlib
+        import os
+        import tempfile
+        import types
+
+        from rocke.runtime import runtime_coexistence as rc
+
+        with tempfile.TemporaryDirectory() as tmp, contextlib.ExitStack() as stack:
+            site, core_lib, torch_stub = self._fake_torch_site(tmp)
+            wheel = os.path.join(core_lib, "libamdhip64.so.7")
+            foreign = "/opt/rocm-7.2.3/lib/libamdhip64.so.7"
+            other = "/opt/rocm-7.3.0/lib/libamdhip64.so.7"
+            maps = os.path.join(tmp, "maps")
+
+            def mapped(*paths):
+                with open(maps, "w") as fh:
+                    for index, path in enumerate(paths):
+                        fh.write(
+                            f"7f0{index}-7f0{index + 1} r-xp 00000000 "
+                            f"08:01 1{index} {path}\n"
+                        )
+
+            self._enter_fake_process(
+                stack,
+                tmp,
+                site,
+                {"torch": torch_stub, "rocm_sdk": types.ModuleType("rocm_sdk")},
+                maps=maps,
+            )
+            mapped(foreign, wheel)
+            self.assertEqual(rc._mapped_lib("amdhip64"), wheel)
+            self.assertEqual(
+                rc._candidate_lib_paths("amdhip64", "ROCKE_HIP_LIB", ["7"])[0],
+                wheel,
+            )
+            mapped(wheel, foreign)
+            self.assertEqual(rc._mapped_lib("amdhip64"), wheel)
+
+            mapped(foreign, other)
+            self.assertIsNone(rc._mapped_lib("amdhip64"))
+
+            torch_lib = os.path.join(site, "torch", "lib", "libamdhip64.so")
+            open(torch_lib, "w").close()
+            mapped(foreign, torch_lib)
+            self.assertEqual(rc._mapped_lib("amdhip64"), torch_lib)
+
+            mapped(foreign, foreign)
+            self.assertEqual(rc._mapped_lib("amdhip64"), foreign)
+
+    def test_comgr_override_rejects_only_a_different_unique_mapped_file(self):
+        import contextlib
+        import os
+        import tempfile
+        import types
+        from unittest import mock
+
+        from rocke.runtime import comgr as comgr_mod
+        from rocke.runtime import runtime_coexistence as rc
+
+        with tempfile.TemporaryDirectory() as tmp, contextlib.ExitStack() as stack:
+            site, core_lib, torch_stub = self._fake_torch_site(tmp)
+            wheel = os.path.join(core_lib, "libamd_comgr.so.3")
+            with open(wheel, "wb") as fh:
+                fh.write(b"\x7fELF")
+            root = os.path.join(tmp, "rocm-10.2.0", "lib")
+            os.makedirs(root)
+            host = os.path.join(root, "libamd_comgr.so.3")
+            with open(host, "wb") as fh:
+                fh.write(b"\x7fELF")
+            maps = os.path.join(tmp, "maps")
+            with open(maps, "w") as fh:
+                # Multiple map segments for one file are still one copy.
+                for address in ("7f00-7f01", "7f01-7f02"):
+                    fh.write(f"{address} r-xp 00000000 08:01 11 {wheel}\n")
+            sdk_stub = types.ModuleType("rocm_sdk")
+            sdk_stub.__version__ = "10.1.0a20260822"
+            self._enter_fake_process(
+                stack,
+                tmp,
+                site,
+                {"torch": torch_stub, "rocm_sdk": sdk_stub},
+                maps=maps,
+                root_libdirs=[root],
+            )
+            stack.enter_context(mock.patch.object(comgr_mod, "_IS_WINDOWS", False))
+            self.assertEqual(rc._mapped_lib("amd_comgr", require_unique=True), wheel)
+
+            os.environ["ROCKE_COMGR_LIB"] = host
+            with mock.patch.object(comgr_mod.ctypes, "CDLL") as load:
+                with self.assertRaises(comgr_mod.ComgrError) as error:
+                    comgr_mod._load_lib()
+                load.assert_not_called()
+            self.assertIn(repr(host), str(error.exception))
+            self.assertIn(repr(wheel), str(error.exception))
+            self.assertIn("separate process", str(error.exception))
+
+            # A different spelling of the *same* mapped file keeps override
+            # precedence; path aliases must not become hard failures.
+            same_file = os.path.join(core_lib, "..", "lib", "libamd_comgr.so.3")
+            self.assertEqual(os.path.realpath(same_file), os.path.realpath(wheel))
+            os.environ["ROCKE_COMGR_LIB"] = same_file
+            with mock.patch.object(comgr_mod.ctypes, "CDLL") as load:
+                self.assertIs(comgr_mod._load_lib(), load.return_value)
+                load.assert_called_once_with(same_file)
+
+            # An invalid override retains the existing fallback to torch's
+            # mapped library rather than becoming a new hard error.
+            missing = os.path.join(tmp, "missing", "libamd_comgr.so.3")
+            os.environ["ROCKE_COMGR_LIB"] = missing
+            with mock.patch.object(
+                comgr_mod.ctypes, "CDLL", side_effect=[OSError("missing"), object()]
+            ) as load:
+                comgr_mod._load_lib()
+                self.assertEqual(
+                    [call.args[0] for call in load.call_args_list], [missing, wheel]
+                )
+
+            # An existing text file is still an unloadable override, not a
+            # second COMGR. The native detector can map the fallback before
+            # Python resolves it, so this check must not reject its fallback.
+            invalid = os.path.join(tmp, "broken.so")
+            with open(invalid, "w") as fh:
+                fh.write("not a shared library")
+            os.environ["ROCKE_COMGR_LIB"] = invalid
+            loaded = object()
+            with mock.patch.object(
+                comgr_mod.ctypes, "CDLL", side_effect=[OSError("invalid ELF"), loaded]
+            ) as load:
+                self.assertIs(comgr_mod._load_lib(), loaded)
+                self.assertEqual(
+                    [call.args[0] for call in load.call_args_list], [invalid, wheel]
+                )
+
+            # No mapped copy, or multiple distinct mapped copies, leaves the
+            # existing override and mapped-tier policy unchanged.
+            os.environ["ROCKE_COMGR_LIB"] = host
+            with mock.patch.object(rc, "_PROC_MAPS", os.path.join(tmp, "no-maps")):
+                self.assertIsNone(rc._mapped_lib("amd_comgr", require_unique=True))
+                with mock.patch.object(comgr_mod.ctypes, "CDLL") as load:
+                    comgr_mod._load_lib()
+                    load.assert_called_once_with(host)
+            with open(maps, "a") as fh:
+                fh.write(f"7f02-7f03 r-xp 00000000 08:01 12 {host}\n")
+            self.assertEqual(rc._mapped_lib("amd_comgr"), wheel)
+            self.assertIsNone(rc._mapped_lib("amd_comgr", require_unique=True))
+            with mock.patch.object(comgr_mod.ctypes, "CDLL") as load:
+                comgr_mod._load_lib()
+                load.assert_called_once_with(host)
+
     def test_rocm_version_parsed_from_versioned_libdir(self):
         from rocke.runtime.runtime_coexistence import _rocm_version_from_libdir
 
@@ -7005,6 +7636,204 @@ class TestLibDiscoveryOrder(unittest.TestCase):
                 ):
                     self.assertEqual(rc._newest_rocm_root_version(), (7, 2))
                     self.assertTrue(rc._torch_comgr_is_stale())
+
+    def test_therock_torch_compares_its_rocm_release_not_its_hip_version(self):
+        import contextlib
+        import os
+        import tempfile
+        import types
+
+        from rocke.runtime import runtime_coexistence as rc
+
+        # TheRock torch reports the HIP version in torch.version.hip (7.17 on ROCm
+        # 10.2); its _rocm_sdk_core comgr belongs to the wheel's ROCm release.
+        # Read as a release, 7.17 is older than any /opt/rocm-10.x, so the
+        # wheel's comgr was always demoted, even beside the same release.
+        with tempfile.TemporaryDirectory() as tmp, contextlib.ExitStack() as stack:
+            site, core_lib, torch_stub = self._fake_torch_site(tmp)
+            torch_stub.version = types.SimpleNamespace(hip="7.17.26384-0000000")
+            sdk_stub = types.ModuleType("rocm_sdk")
+            bundled = os.path.join(core_lib, "libamd_comgr.so.3")
+            self._enter_fake_process(
+                stack,
+                tmp,
+                site,
+                {"torch": torch_stub, "rocm_sdk": sdk_stub},
+                root_libdirs=[os.path.join(tmp, "rocm-10.2.0", "lib")],
+            )
+            sdk_stub.__version__ = "10.2.0a20261001"
+            self.assertEqual(rc._torch_rocm_version(bundled), (10, 2))
+            self.assertFalse(rc._torch_comgr_is_stale(bundled))
+            # An older release beside it is still stale: the check compares.
+            sdk_stub.__version__ = "10.1.0a20260822"
+            self.assertTrue(rc._torch_comgr_is_stale(bundled))
+
+    def test_mapped_rocm_sdk_core_comgr_is_never_demoted(self):
+        import contextlib
+        import os
+        import tempfile
+        import types
+        from unittest import mock
+
+        from rocke.runtime import runtime_coexistence as rc
+
+        # ROCm 10.1 TheRock torch on a ROCm 10.2 host. initialize_process loaded
+        # the wheel comgr RTLD_GLOBAL; demoting it made rocke load the 10.2 comgr
+        # beside it, and two LLVMs in one process abort ("support is already
+        # registered for analysis").
+        with tempfile.TemporaryDirectory() as tmp, contextlib.ExitStack() as stack:
+            site, core_lib, torch_stub = self._fake_torch_site(tmp)
+            torch_stub.version = types.SimpleNamespace(hip="7.16.26332-0000000")
+            sdk_stub = types.ModuleType("rocm_sdk")
+            sdk_stub.__version__ = "10.1.0a20260822"
+            comgr = os.path.join(core_lib, "libamd_comgr.so.3")
+            root = os.path.join(tmp, "rocm-10.2.0", "lib")
+            maps = os.path.join(tmp, "maps")
+            with open(maps, "w") as fh:
+                fh.write(f"7f00-7f01 r-xp 00000000 08:01 11 {comgr}\n")
+            self._enter_fake_process(
+                stack,
+                tmp,
+                site,
+                {"torch": torch_stub, "rocm_sdk": sdk_stub},
+                maps=maps,
+                root_libdirs=[root],
+            )
+            paths = rc._candidate_lib_paths("amd_comgr", "ROCKE_COMGR_LIB", ["3"])
+            self.assertEqual(paths[0], comgr)
+            self.assertEqual(paths.count(comgr), 1)
+            # The staleness check itself still fires; only the demotion is skipped.
+            self.assertTrue(rc._torch_comgr_is_stale(comgr))
+            # Control: the same wheel comgr, not loaded yet, is still demoted.
+            stack.enter_context(
+                mock.patch.object(rc, "_PROC_MAPS", os.path.join(tmp, "no-maps"))
+            )
+            paths = rc._candidate_lib_paths("amd_comgr", "ROCKE_COMGR_LIB", ["3"])
+            self.assertEqual(paths[0], os.path.join(root, "libamd_comgr.so"))
+            self.assertEqual(paths[-2:], [comgr, "libamd_comgr.so"])
+
+    def test_mapped_torch_lib_comgr_is_still_demoted_when_stale(self):
+        import contextlib
+        import os
+        import tempfile
+        import types
+
+        from rocke.runtime import runtime_coexistence as rc
+
+        # Older wheels keep comgr in torch/lib; the demotion they were written
+        # for is unchanged, mapped or not.
+        with tempfile.TemporaryDirectory() as tmp, contextlib.ExitStack() as stack:
+            site, _, torch_stub = self._fake_torch_site(tmp)
+            torch_stub.version = types.SimpleNamespace(hip="7.0.51831-a1b2c3")
+            comgr = os.path.join(site, "torch", "lib", "libamd_comgr.so")
+            open(comgr, "w").close()
+            root = os.path.join(tmp, "rocm-7.2.3", "lib")
+            maps = os.path.join(tmp, "maps")
+            with open(maps, "w") as fh:
+                fh.write(f"7f00-7f01 r-xp 00000000 08:01 11 {comgr}\n")
+            self._enter_fake_process(
+                stack,
+                tmp,
+                site,
+                {"torch": torch_stub},
+                absent=("rocm_sdk",),
+                maps=maps,
+                root_libdirs=[root],
+            )
+            paths = rc._candidate_lib_paths("amd_comgr", "ROCKE_COMGR_LIB", ["3"])
+            self.assertEqual(paths[0], os.path.join(root, "libamd_comgr.so"))
+            self.assertEqual(paths[-2:], [comgr, "libamd_comgr.so"])
+
+    def test_torch_lib_comgr_version_ignores_an_unrelated_rocm_sdk(self):
+        import contextlib
+        import os
+        import tempfile
+        import types
+
+        from rocke.runtime import comgr as comgr_mod
+        from rocke.runtime import runtime_coexistence as rc
+
+        # Older ROCm 7.0 torch with comgr in torch/lib on a ROCm 7.2 host, with
+        # rocm_sdk 10.2 imported for something else. The comgr is 7.0 and stale;
+        # reading rocm_sdk.__version__ called it 10.2 and kept it first, while
+        # resolved_lib_rocm_version (by path) said 7.0.
+        with tempfile.TemporaryDirectory() as tmp, contextlib.ExitStack() as stack:
+            site, _, torch_stub = self._fake_torch_site(tmp)
+            torch_stub.version = types.SimpleNamespace(hip="7.0.51831-a1b2c3")
+            comgr = os.path.join(site, "torch", "lib", "libamd_comgr.so")
+            open(comgr, "w").close()
+            sdk_stub = types.ModuleType("rocm_sdk")
+            sdk_stub.__version__ = "10.2.0a20261001"
+            root = os.path.join(tmp, "rocm-7.2.3", "lib")
+            self._enter_fake_process(
+                stack,
+                tmp,
+                site,
+                {"torch": torch_stub, "rocm_sdk": sdk_stub},
+                root_libdirs=[root],
+            )
+            paths = rc._candidate_lib_paths("amd_comgr", "ROCKE_COMGR_LIB", ["3"])
+            self.assertEqual(paths[0], os.path.join(root, "libamd_comgr.so"))
+            self.assertEqual(paths[-2:], [comgr, "libamd_comgr.so"])
+            # Both version readers agree on the lib that will load.
+            self.assertEqual(comgr_mod.resolved_lib_path(), comgr)
+            self.assertEqual(rc._torch_rocm_version(comgr), (7, 0))
+            self.assertEqual(comgr_mod.resolved_lib_rocm_version(), (7, 0))
+
+    def test_rocm_sdk_core_comgr_reports_the_wheel_release(self):
+        import importlib
+        import os
+        import sys
+        import tempfile
+        import types
+        from unittest import mock
+
+        from rocke.runtime import comgr as comgr_mod
+        from rocke.runtime import runtime_coexistence as rc
+
+        # TheRock torch's comgr lives in _rocm_sdk_core/lib, outside the torch
+        # package. Its version came from the /opt/rocm fallback instead of the
+        # wheel, so a ROCm 10.1 wheel on a 10.2 host picked the LLVM flavor and
+        # capability guards for a comgr that was not the one loaded.
+        with tempfile.TemporaryDirectory() as tmp:
+            site, core_lib, torch_stub = self._fake_torch_site(tmp)
+            torch_stub.version = types.SimpleNamespace(hip="7.16.26332-0000000")
+            sdk_stub = types.ModuleType("rocm_sdk")
+            comgr = os.path.join(core_lib, "libamd_comgr.so.3")
+            with mock.patch.dict(
+                sys.modules, {"torch": torch_stub, "rocm_sdk": sdk_stub}
+            ), mock.patch.object(sys, "path", [site] + sys.path), mock.patch.object(
+                rc, "_IS_WINDOWS", False
+            ), mock.patch.object(
+                rc, "_PROC_MAPS", os.path.join(tmp, "no-maps")
+            ), mock.patch.object(
+                rc, "_rocm_root_libdirs", return_value=[]
+            ), mock.patch.object(
+                comgr_mod, "_lib", None
+            ), mock.patch.dict(
+                os.environ
+            ):
+                sys.modules.pop("_rocm_sdk_core", None)
+                importlib.invalidate_caches()
+                os.environ.pop("ROCKE_COMGR_LIB", None)
+                self.assertEqual(comgr_mod.resolved_lib_path(), comgr)
+                for sdk_version, expected in (
+                    ("10.1.0a20260822", (10, 1)),
+                    ("10.2.0a20261001", (10, 2)),
+                ):
+                    with self.subTest(rocm_sdk=sdk_version):
+                        sdk_stub.__version__ = sdk_version
+                        self.assertEqual(
+                            comgr_mod.resolved_lib_rocm_version(), expected
+                        )
+                # rocm_sdk not imported (e.g. ROCKE_COMGR_LIB points into the
+                # wheel): the installed rocm-sdk-core distribution names it.
+                del sdk_stub.__version__
+                with mock.patch(
+                    "importlib.metadata.version", return_value="10.1.0a20260822"
+                ) as dist_version:
+                    self.assertEqual(comgr_mod.resolved_lib_rocm_version(), (10, 1))
+                dist_version.assert_called_with("rocm-sdk-core")
 
 
 # ---------------------------------------------------------------------
