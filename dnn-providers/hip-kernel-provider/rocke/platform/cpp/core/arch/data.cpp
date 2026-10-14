@@ -3066,7 +3066,7 @@ static const rocke_arch_target_t k_target_gfx12_generic = {
     65536,
     6,
     {k_mma_gfx1201, K_NUM(k_mma_gfx1201)},
-    {false, false, 4},
+    {false, false, false, false, 4, 0, false, false, false, false},
     {1024, 256, 0, 106},
 };
 
@@ -3120,6 +3120,7 @@ static const char* const k_generic_gfx11_members[] = {
     "gfx1151",
     "gfx1152",
     "gfx1153",
+    "gfx1154",
     NULL,
 };
 

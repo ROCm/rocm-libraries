@@ -2619,6 +2619,10 @@
         "status": "ok",
         "verified_on": "llvm20"
       },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm20"
+      },
       "gfx1201": {
         "status": "ok",
         "verified_on": "llvm20"
@@ -3667,6 +3671,10 @@
         "verified_on": "llvm20"
       },
       "gfx1151": {
+        "status": "ok",
+        "verified_on": "llvm20"
+      },
+      "gfx12-generic": {
         "status": "ok",
         "verified_on": "llvm20"
       },

@@ -30,23 +30,6 @@ from ..dtypes import normalize_dtype
 
 _DATA_FILE = Path(__file__).parent / "data" / "arch_specs.json"
 
-# LLVM defines generic-processor membership explicitly; it is not a naming
-# wildcard. Keep this list aligned with LLVM's AMDGPU Generic Processors table:
-# https://llvm.org/docs/AMDGPUUsage.html#amdgpu-generic-processor-table
-_GFX11_GENERIC_PROCESSORS = frozenset(
-    {
-        "gfx1100",
-        "gfx1101",
-        "gfx1102",
-        "gfx1103",
-        "gfx1150",
-        "gfx1151",
-        "gfx1152",
-        "gfx1153",
-        "gfx1154",
-    }
-)
-
 # A callable that, given an :class:`~rocke.core.ir.IRBuilder`, a runtime lane
 # ``Value`` (0..wave_size-1) and a compile-time fragment slot index, emits the
 # index arithmetic for the two tile coordinates of that fragment element and
@@ -1489,7 +1472,7 @@ def _processor_from_target_id(target_id: str) -> str:
     for arch in sorted(arches, key=len, reverse=True):
         if target_without_features.startswith(f"{arch}-"):
             return arch
-    for processor in _GFX11_GENERIC_PROCESSORS:
+    for processor in _load_generic_targets()["gfx11-generic"]:
         if target_without_features == processor or target_without_features.startswith(
             f"{processor}-"
         ):
@@ -1517,7 +1500,7 @@ def base_arch_from_target_id(target_id: str) -> str:
     processor = _processor_from_target_id(target_id)
     if processor in known_arches():
         return processor
-    if processor in _GFX11_GENERIC_PROCESSORS and (
+    if processor in _load_generic_targets()["gfx11-generic"] and (
         target_without_features == processor
         or target_without_features.startswith(f"{processor}-")
     ):

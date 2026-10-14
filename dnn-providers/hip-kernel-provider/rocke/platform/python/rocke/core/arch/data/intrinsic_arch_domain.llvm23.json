@@ -2543,6 +2543,10 @@
         "status": "ok",
         "verified_on": "llvm23"
       },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
       "gfx1201": {
         "status": "ok",
         "verified_on": "llvm23"
@@ -3585,6 +3589,10 @@
         "verified_on": "llvm23"
       },
       "gfx1151": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
         "status": "ok",
         "verified_on": "llvm23"
       },

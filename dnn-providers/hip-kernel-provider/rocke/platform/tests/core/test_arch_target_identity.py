@@ -171,6 +171,8 @@ def test_cpp_target_identity_matches_python() -> None:
         "gfx00a",
         "gfx1100",
         "gfx1102",
+        "gfx1154",
+        "gfx1200",
         "gfx1010",
         "unexpected-target",
         "",
