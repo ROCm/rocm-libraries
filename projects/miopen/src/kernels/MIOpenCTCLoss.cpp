@@ -146,9 +146,9 @@ inline __device__ void CTCAlpha(const FLOAT* probs_logits,
             unsigned int lb_cur = (label_idx % 2 == 0) ? BLANK_LB : *(label_prime + label_idx);
             unsigned int lb_pre =
                 (label_idx % 2 == 0 || label_idx < 2) ? BLANK_LB : *(label_prime + label_idx - 2);
-            size_t pidx         = input_idx * PROBS_STRIDE0 + batch_id * PROBS_STRIDE1 + lb_cur;
-            size_t aidx_ts      = input_idx * label_prime_len + label_idx;
-            size_t aidx_t1s     = (input_idx - 1) * label_prime_len + label_idx;
+            size_t pidx     = input_idx * PROBS_STRIDE0 + batch_id * PROBS_STRIDE1 + lb_cur;
+            size_t aidx_ts  = input_idx * label_prime_len + label_idx;
+            size_t aidx_t1s = (input_idx - 1) * label_prime_len + label_idx;
 
             FLOAT alpha_t1s1 = *(alpha + aidx_t1s - 1);
             FLOAT alpha_t1s  = *(alpha + aidx_t1s);
