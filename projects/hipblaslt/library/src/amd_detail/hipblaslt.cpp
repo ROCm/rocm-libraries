@@ -678,7 +678,14 @@ try
         memcpy(&scaleAux, buf, sizeof(void*));
         if(scaleAux != nullptr)
         {
-            log_error(__func__, "an epilogue aux scale is not supported and is not applied");
+            log_error(__func__,
+                      "MatmulDesc: an epilogue aux scale is not supported and is not applied",
+                      "attribute",
+                      "HIPBLASLT_MATMUL_DESC_EPILOGUE_AUX_SCALE_POINTER",
+                      "scale_aux",
+                      scaleAux,
+                      "size_in_bytes",
+                      sizeInBytes);
             rocblaslt::Debug::Instance().markerStop();
             return HIPBLAS_STATUS_NOT_SUPPORTED;
         }

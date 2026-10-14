@@ -1034,7 +1034,30 @@ namespace hipblaslt_ext
     {
         if(inputs.getScaleAux() != nullptr)
         {
-            log_error(__func__, "an epilogue aux scale is not supported and is not applied");
+            log_error(__func__,
+                      "Gemm: an epilogue aux scale is not supported and is not applied",
+                      "m",
+                      m,
+                      "n",
+                      n,
+                      "k",
+                      k,
+                      "batch_count",
+                      batch_count,
+                      "op_a",
+                      hipblasOperation_to_string(problemtype.getOpA()),
+                      "op_b",
+                      hipblasOperation_to_string(problemtype.getOpB()),
+                      "type_a",
+                      hipDataType_to_bench_string(problemtype.getTypeA()),
+                      "type_b",
+                      hipDataType_to_bench_string(problemtype.getTypeB()),
+                      "type_c",
+                      hipDataType_to_bench_string(problemtype.getTypeC()),
+                      "type_d",
+                      hipDataType_to_bench_string(problemtype.getTypeD()),
+                      "scale_aux",
+                      inputs.getScaleAux());
             return HIPBLAS_STATUS_NOT_SUPPORTED;
         }
         rocblaslt::Debug::Instance().markerStart("hipblasLtGemmSetProblemFullV2Cpp");
@@ -1224,11 +1247,30 @@ namespace hipblaslt_ext
                                             std::vector<GemmInputs>&   inputs,
                                             GemmProblemType&           problemtype)
     {
-        for(auto& i : inputs)
+        for(size_t idx = 0; idx < inputs.size(); idx++)
         {
-            if(i.getScaleAux() != nullptr)
+            if(inputs[idx].getScaleAux() != nullptr)
             {
-                log_error(__func__, "an epilogue aux scale is not supported and is not applied");
+                log_error(__func__,
+                          "GroupedGemm: an epilogue aux scale is not supported and is not applied",
+                          "gemm_index",
+                          idx,
+                          "gemm_count",
+                          inputs.size(),
+                          "op_a",
+                          hipblasOperation_to_string(problemtype.getOpA()),
+                          "op_b",
+                          hipblasOperation_to_string(problemtype.getOpB()),
+                          "type_a",
+                          hipDataType_to_bench_string(problemtype.getTypeA()),
+                          "type_b",
+                          hipDataType_to_bench_string(problemtype.getTypeB()),
+                          "type_c",
+                          hipDataType_to_bench_string(problemtype.getTypeC()),
+                          "type_d",
+                          hipDataType_to_bench_string(problemtype.getTypeD()),
+                          "scale_aux",
+                          inputs[idx].getScaleAux());
                 return HIPBLAS_STATUS_NOT_SUPPORTED;
             }
         }
