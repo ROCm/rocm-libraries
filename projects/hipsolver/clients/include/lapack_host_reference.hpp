@@ -101,6 +101,9 @@ template <typename T>
 void cpu_lacgv(int n, T* x, int incx);
 
 template <typename T>
+void cpu_lacpy(hipsolverFillMode_t uplo, int m, int n, const T* A, int lda, T* B, int ldb);
+
+template <typename T>
 void cpu_larf(
     hipsolverSideMode_t side, int m, int n, T* x, int incx, T* alpha, T* A, int lda, T* work);
 
