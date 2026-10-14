@@ -12,7 +12,9 @@ tensor's ``ragged_offset_tensor_uid``) whatever its strides.
 
 Exclusive groups (exactly one feature per graph): ``dtype``, ``head_dim``,
 ``heads``, ``layout``, ``mask``, ``seq``, ``scale``. The rest are optional
-inputs and outputs, each present or not.
+inputs and outputs, each present or not, and ``precision:mixed_output``: o's
+dtype is not q's, as fp8 q / k / v with a bf16 o. k and v take q's dtype; a
+graph where they do not raises.
 
 The value sets of ``dtype`` and ``head_dim`` are not in the schema, which
 types them only as tensors. They list what the op is meant to support; a graph
@@ -96,6 +98,9 @@ FEATURES = (
     Feature("out:max_sum_exp", ("max_tensor_uid", "sum_exp_tensor_uid")),
     Feature("out:rng_dump", ("rng_dump_tensor_uid",)),
     Feature("fp8:amax", ("amax_s_tensor_uid", "amax_o_tensor_uid")),
+    Feature(
+        "precision:mixed_output", ("q_tensor_uid", "o_tensor_uid"), "o is not q's dtype"
+    ),
     Feature("bias:additive", ("attn_mask_tensor_uid",)),
     Feature("bias:alibi", ("alibi_mask",)),
     Feature(
@@ -117,7 +122,6 @@ FEATURES = (
 )
 
 NOT_FEATURES = {
-    "o_tensor_uid": "required; its shape follows q's, so it varies nothing q does not",
     "mma_core_mode": "a numerics hint to the engine, not a variant of the op",
     "implementation": "an engine-selection hint, not a variant of the op",
 }
@@ -192,6 +196,11 @@ def core_features(
     dtype = q.get("data_type")
     if type(dtype) is not str or dtype not in dtypes:
         raise FeatureError(f"q dtype {dtype!r} is not catalogued")
+    kv_dtypes = (k.get("data_type"), v.get("data_type"))
+    if kv_dtypes != (dtype, dtype):
+        raise FeatureError(
+            f"k / v dtype {kv_dtypes[0]!r} / {kv_dtypes[1]!r} is not q's"
+        )
     head_dim = HEAD_DIMS.get((head_dim_qk, head_dim_v))
     if head_dim is None:
         raise FeatureError(f"head dim {head_dim_qk} x {head_dim_v} is not catalogued")
@@ -234,6 +243,21 @@ def core_features(
     return features
 
 
+def mixed_output(node: dict, tensors_by_uid: dict) -> bool:
+    """Whether o's dtype is not q's. A virtual q or o takes the dtype of the op
+    on its other side, which that op's catalog counts."""
+    o_uid = (node.get("outputs") or {}).get("o_tensor_uid")
+    if o_uid is None:
+        raise FeatureError("required port o_tensor_uid is not bound")
+    q, o = tensors_by_uid[node["inputs"]["q_tensor_uid"]], tensors_by_uid[o_uid]
+    o_dtype = o.get("data_type")
+    if type(o_dtype) is not str or o_dtype not in DTYPES:
+        raise FeatureError(f"o dtype {o_dtype!r} is not catalogued")
+    if q.get("virtual") or o.get("virtual"):
+        return False
+    return o_dtype != q["data_type"]
+
+
 def extract(node: dict, tensors_by_uid: dict) -> set[str]:
     # The forward serializer writes scalars under "attributes" (backward
     # writes "parameters"; see utilities/json/Sdpa*Attributes.hpp).
@@ -257,6 +281,8 @@ def extract(node: dict, tensors_by_uid: dict) -> set[str]:
         features.add("out:rng_dump")
     if has("amax_s_tensor_uid") or has("amax_o_tensor_uid"):
         features.add("fp8:amax")
+    if mixed_output(node, tensors_by_uid):
+        features.add("precision:mixed_output")
     if has("attn_mask_tensor_uid"):
         features.add("bias:additive")
     if attrs.get("alibi_mask"):

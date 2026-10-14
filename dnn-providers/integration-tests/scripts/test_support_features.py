@@ -776,6 +776,7 @@ def _sdpa(
     k_dims=(2, 8, 128, 128),
     v_dims=None,
     dtype="bfloat16",
+    o_dtype=None,
     strides=_bhsd_strides,
     ragged=False,
     inputs=None,
@@ -784,7 +785,8 @@ def _sdpa(
 ) -> tuple[dict, dict]:
     """An SDPA node and its tensors, with every port and attribute unset.
 
-    v takes k's dims unless ``v_dims`` says otherwise. ``ragged`` packs q by
+    v takes k's dims unless ``v_dims`` says otherwise, and o takes q's dims
+    and q's dtype unless ``o_dtype`` says otherwise. ``ragged`` packs q by
     per-batch offsets.
     """
     tensors = {
@@ -794,8 +796,9 @@ def _sdpa(
             "strides": strides(list(dims)),
             "data_type": dtype,
         }
-        for uid, dims in ((1, q_dims), (2, k_dims), (8, v_dims or k_dims))
+        for uid, dims in ((1, q_dims), (2, k_dims), (8, v_dims or k_dims), (3, q_dims))
     }
+    tensors[3]["data_type"] = o_dtype or dtype
     if ragged:
         tensors[1]["ragged_offset_tensor_uid"] = 30
     node = {
@@ -941,6 +944,41 @@ class TestSdpaExtract:
     def test_fp8_dtype(self, dtype: str, expected: str) -> None:
         assert self._group("dtype", dtype=dtype) == expected
 
+    @pytest.mark.parametrize(
+        "o_dtype, mixed", [("bfloat16", True), ("fp8_e4m3", False)]
+    )
+    def test_mixed_output(self, o_dtype: str, mixed: bool) -> None:
+        features = self._extract(dtype="fp8_e4m3", o_dtype=o_dtype)
+        assert ("precision:mixed_output" in features) == mixed
+
+    @pytest.mark.parametrize("uid", [1, 3])
+    def test_virtual_q_or_o_is_not_mixed(self, uid: int) -> None:
+        node, tensors = _sdpa(dtype="fp8_e4m3", o_dtype="bfloat16")
+        tensors[uid]["virtual"] = True
+        assert "precision:mixed_output" not in sdpa.extract(node, tensors)
+
+    @pytest.mark.parametrize(
+        "uid, dtype, match",
+        [
+            (2, "half", "k / v dtype 'half' / 'bfloat16' is not q's"),
+            (8, "half", "k / v dtype 'bfloat16' / 'half' is not q's"),
+            (3, "float", "o dtype 'float'"),
+            (3, ["bfloat16"], r"o dtype \['bfloat16'\]"),
+        ],
+    )
+    def test_uncatalogued_tensor_dtype_raises(
+        self, uid: int, dtype: object, match: str
+    ) -> None:
+        node, tensors = _sdpa()
+        tensors[uid]["data_type"] = dtype
+        with pytest.raises(FeatureError, match=match):
+            sdpa.extract(node, tensors)
+
+    def test_unbound_o_raises(self) -> None:
+        node, tensors = _sdpa(outputs={"o_tensor_uid": None})
+        with pytest.raises(FeatureError, match="o_tensor_uid is not bound"):
+            sdpa.extract(node, tensors)
+
     def test_scale(self) -> None:
         assert self._group("scale", attn_scale_value=0.125) == "scale:fixed"
         assert (
@@ -996,6 +1034,7 @@ class TestSdpaExtract:
             {"dtype": "half", "q_dims": (2, 8, 1, 64), "k_dims": (2, 1, 128, 64)},
             {
                 "dtype": "fp8_e4m3",
+                "o_dtype": "bfloat16",
                 "q_dims": (2, 8, 64, 192),
                 "k_dims": (2, 2, 128, 192),
             },
@@ -1101,6 +1140,12 @@ class TestSdpaBackwardExtract:
     def test_fp8_raises(self) -> None:
         with pytest.raises(FeatureError, match="dtype 'fp8_e4m3'"):
             self._extract(dtype="fp8_e4m3")
+
+    def test_kv_dtype_not_q_raises(self) -> None:
+        node, tensors = _sdpa_backward()
+        tensors[8]["data_type"] = "half"
+        with pytest.raises(FeatureError, match="is not q's"):
+            sdpa_backward.extract(node, tensors)
 
     def test_ragged_raises(self) -> None:
         # Not counted as its bshd stride order.
