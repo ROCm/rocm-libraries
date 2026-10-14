@@ -3687,5 +3687,102 @@ class TestSmemForwarding(AdaptorTestCase):
         )
 
 
+class TestWaitCntCaps(unittest.TestCase):
+    """Typed loadcnt/dscnt clamp to MaxLoadcnt/MaxDscnt. Combined _SWaitCnt stores MaxLgkmcnt/MaxVmcnt."""
+
+    def _lower(self, inst, caps):
+        created = []
+
+        def factory(*_args, **_kwargs):
+            logical = unittest.mock.Mock()
+            created.append(logical)
+            return logical
+
+        fake_st = unittest.mock.Mock()
+        fake_st.SWaitCnt = unittest.mock.Mock(side_effect=factory)
+        with unittest.mock.patch.dict(sys.modules, {"stinkytofu": fake_st}), \
+             unittest.mock.patch(
+                 "rocisa_stinkytofu_adaptor.base.getAsmCaps",
+                 return_value=caps,
+             ):
+            out = inst.to_stinky_logical()
+        return out, created
+
+    @staticmethod
+    def _kwargs(logical):
+        logical.set_swaitcnt.assert_called_once()
+        return logical.set_swaitcnt.call_args.kwargs
+
+    def test_typed_load_and_ds_clamp_to_caps(self):
+        from rocisa_stinkytofu_adaptor.instruction import _SWaitDscnt, _SWaitLoadcnt
+
+        caps = {"MaxLoadcnt": 15, "MaxDscnt": 63, "MaxLgkmcnt": 9, "MaxVmcnt": 8}
+        _load, loads = self._lower(_SWaitLoadcnt(70), caps)
+        _ds, dss = self._lower(_SWaitDscnt(80), caps)
+        self.assertEqual(self._kwargs(loads[0]), dict(
+            vlcnt=15, vscnt=-1, dlcnt=-1, dscnt=-1, kmcnt=-1,
+            max_lgkmcnt=-1, max_vmcnt=-1,
+        ))
+        self.assertEqual(self._kwargs(dss[0]), dict(
+            vlcnt=-1, vscnt=-1, dlcnt=-1, dscnt=63, kmcnt=-1,
+            max_lgkmcnt=-1, max_vmcnt=-1,
+        ))
+
+    def test_missing_typed_cap_leaves_the_count(self):
+        from rocisa_stinkytofu_adaptor.instruction import _SWaitDscnt, _SWaitLoadcnt
+
+        _load, loads = self._lower(_SWaitLoadcnt(70), {"MaxDscnt": 4})
+        _ds, dss = self._lower(_SWaitDscnt(80), {"MaxLoadcnt": 4})
+        self.assertEqual(self._kwargs(loads[0])["vlcnt"], 70)
+        self.assertEqual(self._kwargs(dss[0])["dscnt"], 80)
+
+    def test_composite_keeps_split_order_and_clamps_only_load_and_ds(self):
+        caps = {
+            "MaxLoadcnt": 15, "MaxDscnt": 63, "MaxKmcnt": 3, "MaxVscnt": 4,
+            "MaxLgkmcnt": 9, "MaxVmcnt": 8,
+        }
+        out, created = self._lower(
+            SWaitCnt(dscnt=80, kmcnt=40, vlcnt=70, vscnt=50, comment="pair"),
+            caps,
+        )
+        self.assertEqual(out, created)
+        self.assertEqual(len(created), 4)
+        self.assertEqual(
+            [self._kwargs(inst) for inst in created],
+            [
+                dict(vlcnt=-1, vscnt=-1, dlcnt=-1, dscnt=63, kmcnt=-1,
+                     max_lgkmcnt=-1, max_vmcnt=-1),
+                dict(vlcnt=-1, vscnt=-1, dlcnt=-1, dscnt=-1, kmcnt=40,
+                     max_lgkmcnt=-1, max_vmcnt=-1),
+                dict(vlcnt=15, vscnt=-1, dlcnt=-1, dscnt=-1, kmcnt=-1,
+                     max_lgkmcnt=-1, max_vmcnt=-1),
+                dict(vlcnt=-1, vscnt=50, dlcnt=-1, dscnt=-1, kmcnt=-1,
+                     max_lgkmcnt=-1, max_vmcnt=-1),
+            ],
+        )
+
+    def test_combined_wait_stores_lgkm_and_vm_caps_without_clamping_counters(self):
+        _out, created = self._lower(
+            _SWaitCnt(lgkmcnt=20, vmcnt=40),
+            {"MaxLgkmcnt": 15, "MaxVmcnt": 10, "MaxDscnt": 3, "MaxLoadcnt": 4},
+        )
+        self.assertEqual(len(created), 1)
+        self.assertEqual(self._kwargs(created[0]), dict(
+            vlcnt=40, vscnt=-1, dlcnt=-1, dscnt=20, kmcnt=-1,
+            max_lgkmcnt=15, max_vmcnt=10,
+        ))
+
+    def test_missing_lgkm_and_vm_caps_stay_unset(self):
+        _out, created = self._lower(
+            _SWaitCnt(lgkmcnt=20, vmcnt=40),
+            {"MaxDscnt": 3, "MaxLoadcnt": 4},
+        )
+        kwargs = self._kwargs(created[0])
+        self.assertEqual(kwargs["dscnt"], 20)
+        self.assertEqual(kwargs["vlcnt"], 40)
+        self.assertEqual(kwargs["max_lgkmcnt"], -1)
+        self.assertEqual(kwargs["max_vmcnt"], -1)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -402,15 +402,14 @@ StinkyInstruction* createAsmFromIR(LogicalInstruction* irInst, GfxArchID arch) {
         asmInst->addModifier<LabelData>(LabelData{irInst->longBranchLabel.value()});
     }
     if (irInst->swaitcnt.has_value()) {
-        // Per-counter wait values {vlcnt, vscnt, dlcnt, dscnt, kmcnt} forwarded
-        // from the logical SWaitCnt. The rocisa->asm path attaches the same
-        // SWaitCntData in handleSWaitCntModifiers so legalizeWaitCnt (invoked in
-        // lowerToAsm) can split the combined s_waitcnt into the gfx12+ typed
-        // waits. Without it the adaptor's s_waitcnt reaches O3 as an opaque
-        // combined wait that waitReconstruction() cannot rebuild, so it is never
-        // removed/re-inserted and perturbs scheduling.
+        // {vlcnt, vscnt, dlcnt, dscnt, kmcnt, maxLgkmcnt, maxVmcnt}. The rocisa
+        // path attaches the same SWaitCntData so legalizeWaitCnt can split a
+        // combined s_waitcnt into the gfx12+ typed waits. maxLgkmcnt and
+        // maxVmcnt default to -1; the combined s_waitcnt emitter mins summed
+        // lgkmcnt/vmcnt only when a max is present. Typed loadcnt/dscnt are
+        // already clamped to MaxLoadcnt/MaxDscnt before they arrive here.
         const auto& w = irInst->swaitcnt.value();
-        asmInst->addModifier<SWaitCntData>(SWaitCntData{w[0], w[1], w[2], w[3], w[4]});
+        asmInst->addModifier<SWaitCntData>(SWaitCntData{w[0], w[1], w[2], w[3], w[4], w[5], w[6]});
     }
     if (irInst->sdelayalu.has_value()) {
         // s_delay_alu data carried from the adaptor's SDelayAlu shim. The

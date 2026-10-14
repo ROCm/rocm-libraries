@@ -759,13 +759,17 @@ NB_MODULE(_stinkytofu, m) {
             "CFGBuilderPass builds the CFG edge for the computed jump)")
         .def(
             "set_swaitcnt",
-            [](LogicalInstruction& inst, int vlcnt, int vscnt, int dlcnt, int dscnt, int kmcnt) {
-                inst.swaitcnt = std::array<int, 5>{vlcnt, vscnt, dlcnt, dscnt, kmcnt};
+            [](LogicalInstruction& inst, int vlcnt, int vscnt, int dlcnt, int dscnt, int kmcnt,
+               int maxLgkmcnt, int maxVmcnt) {
+                inst.swaitcnt =
+                    std::array<int, 7>{vlcnt, vscnt, dlcnt, dscnt, kmcnt, maxLgkmcnt, maxVmcnt};
             },
             nb::arg("vlcnt") = -1, nb::arg("vscnt") = -1, nb::arg("dlcnt") = -1,
-            nb::arg("dscnt") = -1, nb::arg("kmcnt") = -1,
+            nb::arg("dscnt") = -1, nb::arg("kmcnt") = -1, nb::arg("max_lgkmcnt") = -1,
+            nb::arg("max_vmcnt") = -1,
             "Set per-counter s_waitcnt values (forwarded to SWaitCntData; gfx12+ "
-            "legalizeWaitCnt splits the s_waitcnt into typed waits)")
+            "legalizeWaitCnt splits the s_waitcnt into typed waits). max_lgkmcnt "
+            "and max_vmcnt stay -1 unless the combined wait stored those caps.")
         .def(
             "set_sdelayalu",
             [](LogicalInstruction& inst, int id0Type, int id0Cnt, bool hasId1, int skip,
