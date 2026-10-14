@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: MIT
 """Type admission for attention inputs, independent of selection policy."""
 
+from math import isfinite
 from numbers import Real
 
 
@@ -62,7 +63,10 @@ def validate_attention_request_types(request):
         "request",
     )
     _fields(
-        request, ("use_sinks", "use_fp8", "fp8_fnuz"), require_attention_bool, "request"
+        request,
+        ("use_sinks", "use_fp8", "fp8_fnuz", "use_alibi", "use_qq_bias"),
+        require_attention_bool,
+        "request",
     )
     _fields(
         request,
@@ -70,6 +74,16 @@ def validate_attention_request_types(request):
         require_attention_string,
         "request",
     )
+    softcap = _field(request, "softcap", "request")
+    if (
+        not isinstance(softcap, Real)
+        or isinstance(softcap, bool)
+        or not isfinite(softcap)
+        or softcap < 0
+    ):
+        raise ValueError(
+            "request.softcap must be finite nonnegative real excluding bool"
+        )
 
 
 def validate_attention_problem_types(problem):

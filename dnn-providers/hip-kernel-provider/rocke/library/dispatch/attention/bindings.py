@@ -22,7 +22,10 @@ from kernels.common._attention_validation import (
     validate_attention_3d_spec_types,
 )
 
-from kernels.common.attention_paged_decode import validate_paged_loader_geometry
+from kernels.common.attention_paged_decode import (
+    validate_paged_loader_geometry,
+    validate_paged_3d_features,
+)
 
 from rocke.dispatch.core import TorchBinding
 
@@ -69,6 +72,10 @@ def _tolist(tensor, name: str):
 
 def validate_tuning_attention_contract(request, problem, spec) -> None:
     """Ensure request, runtime problem, and explicit specs describe one launch."""
+    from kernels.common.attention_unified import UnifiedAttentionProblem
+
+    if not isinstance(problem, UnifiedAttentionProblem):
+        raise TypeError("tensors['problem'] must be a UnifiedAttentionProblem")
     validate_attention_request_types(request)
     validate_attention_problem_types(problem)
     request_fields = (
@@ -79,6 +86,10 @@ def validate_tuning_attention_contract(request, problem, spec) -> None:
         ("kv_block_size", "block_size"),
         ("seqlen_q", "max_seqlen_q"),
         ("seqlen_k", "max_seqlen_k"),
+        ("sliding_window", "sliding_window"),
+        ("use_sinks", "use_sinks"),
+        ("use_alibi", "use_alibi"),
+        ("use_qq_bias", "use_qq_bias"),
     )
     for request_name, problem_name in request_fields:
         requested = getattr(request, request_name)
@@ -92,6 +103,8 @@ def validate_tuning_attention_contract(request, problem, spec) -> None:
         raise ValueError("request dtype disagrees with attention problem dtype")
     if request.use_fp8 != problem.use_fp8 or request.fp8_fnuz != problem.fp8_fnuz:
         raise ValueError("request FP8 encoding disagrees with attention problem")
+    if request.softcap != problem.softcap:
+        raise ValueError("request softcap disagrees with attention problem")
 
     kernel_spec = spec.kernel_spec
     if spec.path == "3d" and spec.arch in ("gfx942", "gfx950"):
@@ -104,6 +117,7 @@ def validate_tuning_attention_contract(request, problem, spec) -> None:
         ("num_kv_heads", problem.num_kv_heads),
         ("dtype", problem.dtype),
         ("num_seqs", problem.num_seqs),
+        ("sliding_window", problem.sliding_window),
     ):
         check = require_attention_string if name == "dtype" else require_attention_int
         check(getattr(kernel_spec, name), f"kernel_spec.{name}")
@@ -381,6 +395,21 @@ def bind_tuning_attention_torch(
         )
     validate_tuning_attention_contract(request, problem, spec)
     loader_geometry = validate_paged_loader_geometry(problem, spec)
+    inputs = {
+        name: kwargs.get(name, tensors.get(name, default))
+        for name, default in (
+            ("softcap", problem.softcap),
+            ("sinks", None),
+            ("alibi_slopes", None),
+            ("qq_bias", None),
+            ("k_scale", 1.0),
+            ("v_scale", 1.0),
+            ("out_scale", 1.0),
+            ("qq_bias_stride_0", 0),
+        )
+    }
+    if loader_geometry is not None:
+        validate_paged_3d_features(problem, spec, **inputs)
     unsafe_skip = kwargs.pop("unsafe_skip_paged_value_validation", False)
     if not isinstance(unsafe_skip, bool):
         raise TypeError("unsafe_skip_paged_value_validation must be a bool")
@@ -398,6 +427,8 @@ def bind_tuning_attention_torch(
     validate_tuning_attention_contract(request, problem, spec)
     if validate_paged_loader_geometry(problem, spec) != loader_geometry:
         raise ValueError("KV block retargeting must preserve paged loader geometry")
+    if loader_geometry is not None:
+        validate_paged_3d_features(problem, spec, **inputs)
     stream = kwargs.get("stream", 0)
     path = str(getattr(spec, "path", "2d"))
     backend = "tiled" if path == "2d" else path
@@ -406,6 +437,9 @@ def bind_tuning_attention_torch(
         scale = 1.0 / math.sqrt(int(problem.head_size))
 
     def launch(**_kw):
+        resolved = {name: _kw.get(name, value) for name, value in inputs.items()}
+        if loader_geometry is not None:
+            validate_paged_3d_features(problem, spec, **resolved)
         return run_unified_attention_torch(
             problem=problem,
             q=tensors["q"],
@@ -416,10 +450,7 @@ def bind_tuning_attention_torch(
             seqused_k=tensors["seqused_k"],
             softmax_scale=float(_kw.get("softmax_scale", scale)),
             block_table=tensors["block_table"],
-            softcap=float(_kw.get("softcap", tensors.get("softcap", 0.0))),
-            sinks=_kw.get("sinks", tensors.get("sinks")),
-            alibi_slopes=_kw.get("alibi_slopes", tensors.get("alibi_slopes")),
-            qq_bias=_kw.get("qq_bias", tensors.get("qq_bias")),
+            **resolved,
             backend=backend,
             stream=int(_kw.get("stream", stream)),
             tuning_spec=spec,

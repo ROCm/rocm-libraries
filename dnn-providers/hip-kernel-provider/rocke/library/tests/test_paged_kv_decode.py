@@ -456,6 +456,11 @@ def test_paged_direct_rejects_malformed_feature_contract(
 @pytest.mark.parametrize(
     "arch,page,policy",
     [
+        ("gfx942", 1, "32"),
+        ("gfx942", 16, "32"),
+        ("gfx950", 1, "32"),
+        ("gfx950", 16, "32"),
+        ("gfx950", 64, "32"),
         ("gfx942", 32, "1x"),
         ("gfx942", 64, "1x"),
         ("gfx942", 64, "32"),
@@ -496,6 +501,8 @@ def test_paged_direct_preserves_generic_features(
         elif feature == "window":
             updates["sliding_window"] = 16
         elif feature == "fp8":
+            if page < 32 or (arch == "gfx950" and page == 64 and policy == "32"):
+                continue
             updates.update(use_fp8=True, fp8_fnuz=arch == "gfx942")
             launch.update(k_scale=0.5, v_scale=2.0)
         problem = replace(kwargs["problem"], **updates)
@@ -504,7 +511,8 @@ def test_paged_direct_preserves_generic_features(
             ExplicitAttention3DConfig(num_segments=8, tile_policy=policy),
             arch=arch,
         )
-        assert not segment.uses_paged_gather
+        if feature == "fp8" and segment.uses_paged_gather:
+            continue
         concrete = replace(
             kwargs["tuning_spec"], kernel_spec=segment, reduce_spec=reducer
         )
@@ -588,7 +596,7 @@ def test_paged_direct_preserves_generic_features(
             initial = _structural_paged_spec(concrete, retarget=lambda count: returned)
             with pytest.raises(ValueError, match="kv_storage_dtype"):
                 au.run_unified_attention_torch(**dict(valid, tuning_spec=initial))
-    assert len(calls) == 8
+    assert len(calls) == (6 if segment.uses_paged_gather else 8)
 
 
 @pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
@@ -1175,14 +1183,14 @@ def _retarget_binding_case(case, arch, page):
 @pytest.mark.parametrize(
     "feature", ["softcap", "use_sinks", "use_alibi", "use_qq_bias"]
 )
-def test_paged_binding_rejects_unsupported_problem_features(
+def test_paged_binding_rejects_problem_feature_disagreement(
     paged_binding_case, arch, page, feature
 ):
     req, result, tensors = _retarget_binding_case(paged_binding_case, arch, page)
     tensors["problem"] = replace(
         tensors["problem"], **{feature: 1.0 if feature == "softcap" else True}
     )
-    with pytest.raises(ValueError, match="does not support softcap, sinks or bias"):
+    with pytest.raises(ValueError, match="disagrees"):
         result.candidate.bind_torch(req, result.spec, tensors)
     assert tensors["seqused_k"].reads == []
 
@@ -1191,7 +1199,7 @@ def test_paged_binding_rejects_unsupported_problem_features(
 @pytest.mark.parametrize("page", [1, 16, 32, 64])
 @pytest.mark.parametrize("feature", ["softcap", "sinks", "alibi_slopes", "qq_bias"])
 @pytest.mark.parametrize("stage", ["tensor", "bind", "launch"])
-def test_paged_binding_rejects_unsupported_feature_inputs(
+def test_paged_binding_rejects_input_feature_disagreement(
     paged_binding_case, monkeypatch, arch, page, feature, stage
 ):
     from kernels.common import attention_unified as au
@@ -1202,7 +1210,7 @@ def test_paged_binding_rejects_unsupported_feature_inputs(
         au, "run_unified_attention_torch", lambda **kw: calls.append(kw)
     )
     override = {feature: 1.0 if feature == "softcap" else object()}
-    with pytest.raises(ValueError, match="does not support softcap, sinks or bias"):
+    with pytest.raises(ValueError, match="disagrees"):
         if stage == "tensor":
             result.candidate.bind_torch(req, result.spec, dict(tensors, **override))
         elif stage == "bind":
@@ -1656,3 +1664,113 @@ def test_builder_rejects_missing_declared_spec_fields(
         delattr(raw, field)
         with subtests.test(field=field), pytest.raises(ValueError, match=field):
             build(raw, arch=arch)
+
+
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+@pytest.mark.parametrize("page", [1, 16, 32, 64])
+@pytest.mark.parametrize("stage", ["tensor", "bind", "launch"])
+def test_paged_binding_preserves_enabled_features(
+    paged_binding_case, monkeypatch, arch, page, stage
+):
+    from dispatch.attention import dispatch_attention
+    from dispatch.attention.common import _problem
+    from kernels.common import attention_unified as au
+
+    req, _, tensors = _retarget_binding_case(paged_binding_case, arch, page)
+    req = replace(req, softcap=2.0, use_sinks=True, use_alibi=True, use_qq_bias=True)
+    result = dispatch_attention(req)
+    tensors["problem"] = _problem(req)
+    features = dict(
+        softcap=3.0, sinks=object(), alibi_slopes=object(), qq_bias=object()
+    )
+    calls = []
+    monkeypatch.setattr(
+        au, "run_unified_attention_torch", lambda **kw: calls.append(kw)
+    )
+    if stage == "tensor":
+        binding = result.candidate.bind_torch(
+            req, result.spec, dict(tensors, **features)
+        )
+        binding.launch(qq_bias_stride_0=1)
+    elif stage == "bind":
+        binding = result.candidate.bind_torch(
+            req, result.spec, tensors, **features, qq_bias_stride_0=1
+        )
+        binding.launch()
+    else:
+        binding = result.candidate.bind_torch(
+            req, result.spec, dict(tensors, **features)
+        )
+        features = dict(
+            softcap=4.0, sinks=object(), alibi_slopes=object(), qq_bias=object()
+        )
+        binding.launch(**features, qq_bias_stride_0=1)
+    assert len(calls) == 1
+    assert all(calls[0][name] is value for name, value in features.items())
+    assert calls[0]["qq_bias_stride_0"] == 1
+    assert tensors["seqused_k"].reads == []
+
+
+@pytest.mark.parametrize("stage", ["tensor", "bind", "launch"])
+@pytest.mark.parametrize("value", [True, False, 1.5, "1", None, -1])
+def test_paged_binding_rejects_raw_bias_stride(paged_binding_case, stage, value):
+    req, result, tensors = paged_binding_case
+    override = dict(qq_bias_stride_0=value)
+    with pytest.raises(ValueError, match="qq_bias_stride_0"):
+        if stage == "tensor":
+            result.candidate.bind_torch(req, result.spec, dict(tensors, **override))
+        elif stage == "bind":
+            result.candidate.bind_torch(req, result.spec, tensors, **override)
+        else:
+            result.candidate.bind_torch(req, result.spec, tensors).launch(**override)
+
+
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+@pytest.mark.parametrize("page", [1, 16, 32, 64])
+@pytest.mark.parametrize("dtype", ["fp16", "bf16"])
+@pytest.mark.parametrize(
+    "feature", ["softcap", "sinks", "alibi", "qq_bias", "combined"]
+)
+@pytest.mark.parametrize("flavor", ["llvm20", "llvm22", "llvm23"])
+def test_paged_feature_native_parity(arch, page, dtype, feature, flavor, monkeypatch):
+    engine = pytest.importorskip("rocke_engine")
+    from dispatch.attention import AttentionRequest, dispatch_attention
+    from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
+
+    monkeypatch.setenv("ROCKE_LLVM_FLAVOR", flavor)
+    enabled = lambda name: feature in (name, "combined")
+    request = AttentionRequest(
+        batch=3,
+        nhead_q=8,
+        nhead_k=2,
+        seqlen_q=1,
+        seqlen_k=97,
+        hdim_q=128,
+        hdim_v=128,
+        arch=arch,
+        dtype=dtype,
+        kv_block_size=page,
+        algorithm="paged_decode_t32",
+        target_ctas=8,
+        sliding_window=33,
+        softcap=1.5 if enabled("softcap") else 0.0,
+        use_sinks=enabled("sinks"),
+        use_alibi=enabled("alibi"),
+        use_qq_bias=enabled("qq_bias"),
+    )
+    spec = dispatch_attention(request).spec
+    module = import_module(f"kernels.{arch}.attention_tiled_3d")
+    expected = _lower_kernel_to_llvm_python(
+        module.build_unified_attention_3d_tiled(spec.kernel_spec, arch=arch), arch=arch
+    )
+    if arch == "gfx950":
+        expected += _lower_kernel_to_llvm_python(
+            module.build_unified_attention_reduce_tiled(spec.reduce_spec, arch=arch),
+            arch=arch,
+        )
+    assert (
+        getattr(engine, f"{arch}_attention_tiled_3d_lower_llvm")(
+            asdict(spec.kernel_spec), arch
+        )
+        == expected
+    )

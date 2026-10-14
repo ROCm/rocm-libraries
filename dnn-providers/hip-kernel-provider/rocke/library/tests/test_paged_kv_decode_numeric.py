@@ -244,3 +244,162 @@ def test_paged_binding_metadata_replay(gpu, monkeypatch, page):
         expected = _reference(torch, qh, keys, values, [length], 0)
         torch.testing.assert_close(out.cpu().float(), expected, atol=0.01, rtol=0.02)
     au.clear_attention_3d_graph_cache()
+
+
+def _feature_reference(torch, q, k, v, lengths, window, features):
+    """CPU FP32 SDPA from rounded logical inputs, including a zero-valued sink."""
+    output = torch.zeros_like(q, dtype=torch.float32)
+    ratio = q.shape[1] // k.shape[1]
+    for batch, length in enumerate(lengths):
+        if length == 0:
+            continue
+        begin = max(0, length - window) if window else 0
+        for head in range(q.shape[1]):
+            scores = (
+                k[batch, head // ratio, begin:length].float() @ q[batch, head].float()
+            ) / math.sqrt(q.shape[2])
+            if features["softcap"]:
+                scores = features["softcap"] * torch.tanh(scores / features["softcap"])
+            if features["alibi_slopes"] is not None:
+                positions = torch.arange(begin, length) - (length - 1)
+                scores += features["alibi_slopes"][head] * positions
+            if features["qq_bias"] is not None:
+                # Decode has one query: only the last KV position is query-to-query.
+                scores[-1] += features["qq_bias"][0, 0]
+            if features["sinks"] is not None:
+                weights = torch.cat(
+                    (scores, features["sinks"][head].float().reshape(1))
+                ).softmax(0)[:-1]
+            else:
+                weights = scores.softmax(0)
+            output[batch, head] = (
+                weights @ v[batch, head // ratio, begin:length].float()
+            )
+    return output
+
+
+@pytest.mark.parametrize("page", [1, 16, 32, 64])
+@pytest.mark.parametrize("dtype", ["fp16", "bf16"])
+@pytest.mark.parametrize(
+    "feature", ["softcap", "sinks", "alibi", "qq_bias", "combined"]
+)
+def test_paged_features_numeric(gpu, page, dtype, feature):
+    from dispatch.attention import AttentionRequest, dispatch_attention
+    from dispatch.attention.common import _problem
+    from kernels.common import attention_unified as au
+
+    torch, arch = gpu
+    batch, heads, qheads, capacity, dim = 3, 2, 8, 97, 128
+    tdtype = torch.float16 if dtype == "fp16" else torch.bfloat16
+    rng = torch.Generator().manual_seed(1941)
+    qh = (torch.randn(batch, qheads, dim, generator=rng) * 2).to(tdtype)
+    kh = torch.randn(batch, heads, capacity, dim, generator=rng).to(tdtype)
+    vh = torch.randn(batch, heads, capacity, dim, generator=rng).to(tdtype)
+    enabled = lambda name: feature in (name, "combined")
+    host_features = dict(
+        softcap=1.5 if enabled("softcap") else 0.0,
+        sinks=torch.linspace(-1, 2, qheads).to(tdtype) if enabled("sinks") else None,
+        alibi_slopes=torch.linspace(0.01, 0.08, qheads) if enabled("alibi") else None,
+        qq_bias=(
+            torch.tensor([[1.25]], dtype=torch.float32) if enabled("qq_bias") else None
+        ),
+    )
+    features = {
+        name: value.cuda() if torch.is_tensor(value) else value
+        for name, value in host_features.items()
+    }
+    window = 33 if feature == "combined" else 0
+    req = AttentionRequest(
+        batch=batch,
+        nhead_q=qheads,
+        nhead_k=heads,
+        seqlen_q=1,
+        seqlen_k=capacity,
+        hdim_q=dim,
+        hdim_v=dim,
+        arch=arch,
+        dtype=dtype,
+        kv_block_size=page,
+        algorithm="paged_decode_t32",
+        target_ctas=8,
+        sliding_window=window,
+        softcap=features["softcap"],
+        use_sinks=enabled("sinks"),
+        use_alibi=enabled("alibi"),
+        use_qq_bias=enabled("qq_bias"),
+    )
+    result = dispatch_attention(req)
+    p = _problem(req)
+    gather = result.spec.kernel_spec.uses_paged_gather
+    q = qh.cuda()
+    k, table = _shuffled_cache(torch, kh, page, poison_tail=gather)
+    v, _ = _shuffled_cache(torch, vh, page, poison_tail=gather)
+    storage = torch.full((q.numel() + 64,), 117, dtype=tdtype).cuda()
+    out = storage[32:-32].view(q.shape)
+    used = torch.tensor([97, 33, 0], dtype=torch.int32).cuda()
+    tensors = dict(
+        problem=p,
+        q=q,
+        k=k,
+        v=v,
+        out=out,
+        cu_seqlens_q=torch.arange(batch + 1, dtype=torch.int32).cuda(),
+        seqused_k=used,
+        block_table=table,
+    )
+    stream = torch.cuda.Stream()
+    torch.cuda.synchronize()
+    arguments = dict(
+        tensors,
+        **features,
+        softmax_scale=1 / math.sqrt(dim),
+        qq_bias_stride_0=1 if enabled("qq_bias") else 0,
+        backend="3d",
+        stream=stream.cuda_stream,
+        tuning_spec=result.spec,
+        use_graph=False,
+    )
+    binding = result.candidate.bind_torch(
+        req,
+        result.spec,
+        tensors,
+        **features,
+        qq_bias_stride_0=arguments["qq_bias_stride_0"],
+        stream=stream.cuda_stream,
+    )
+    atol, rtol = (0.003, 0.005) if dtype == "fp16" else (0.01, 0.02)
+
+    def check(lengths):
+        stream.synchronize()
+        expected = _feature_reference(torch, qh, kh, vh, lengths, window, host_features)
+        torch.testing.assert_close(out.cpu().float(), expected, atol=atol, rtol=rtol)
+        assert bool((storage[:32].cpu() == 117).all())
+        assert bool((storage[-32:].cpu() == 117).all())
+
+    for lengths in ([97, 33, 0], [1, 32, 0]):
+        used.copy_(torch.tensor(lengths, dtype=torch.int32))
+        torch.cuda.synchronize()
+        au.run_unified_attention_torch(**arguments)
+        check(lengths)
+        binding.launch()
+        check(lengths)
+        if page == 1:
+            au.run_unified_attention_torch(**dict(arguments, tuning_spec=None))
+            check(lengths)
+    if feature == "combined":
+        execution = au.prepare_unified_attention_torch(**arguments)
+        try:
+            execution.launch()
+            check(lengths)
+            graph = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(graph, stream=stream):
+                execution.launch()
+            for lengths in ([65, 17, 0], [1, 33, 0]):
+                used.copy_(torch.tensor(lengths, dtype=torch.int32))
+                torch.cuda.synchronize()
+                with torch.cuda.stream(stream):
+                    graph.replay()
+                check(lengths)
+            del graph
+        finally:
+            execution.close()

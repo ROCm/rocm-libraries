@@ -929,9 +929,9 @@ def build_unified_attention_3d_tiled(
                     s_scaled = b.fadd(s_scaled, add_term)
                 if USE_QQ_BIAS:
                     krp = b.sub(col_abs, context_len)
-                    krp_ok = b.land(
-                        b.cmp_ge(krp, b.const_i32(0)), b.cmp_lt(krp, qq_bias_stride0_p)
-                    )
+                    krp_nonnegative = b.cmp_ge(krp, b.const_i32(0))
+                    krp_in_bias = b.cmp_lt(krp, qq_bias_stride0_p)
+                    krp_ok = b.land(krp_nonnegative, krp_in_bias)
                     qq_ok = b.land(row_ok, krp_ok)
                     qp_safe = b.select(row_ok, qp_r, b.const_i32(0))
                     qq_idx = b.add(b.mul(qp_safe, qq_bias_stride0_p), krp)

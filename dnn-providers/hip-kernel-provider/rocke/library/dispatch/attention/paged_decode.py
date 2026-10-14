@@ -10,13 +10,10 @@ may mutate valid values in place between launches. Pass
 at bind time; rebind after mutation when relying on that validation.
 """
 
-from dataclasses import replace
-from numbers import Real
-
 from kernels.common.attention_unified import _3d_signature, _num_segments
 from rocke.dispatch.core import Capability, KernelCandidate, ShapeRange
 
-from .bindings import bind_tuning_attention_torch
+from .bindings import bind_tuning_attention_torch, validate_tuning_attention_contract
 from .common import (
     FAMILY,
     AttentionMaskType,
@@ -27,20 +24,6 @@ from .common import (
     _selector_matches,
 )
 from .tuning_specs import ExplicitAttention3DConfig, make_explicit_attention_3d_specs
-
-
-def _validate_feature_inputs(values):
-    for name in ("k_scale", "v_scale", "out_scale"):
-        value = values.get(name, 1.0)
-        if isinstance(value, bool) or not isinstance(value, Real) or value != 1.0:
-            raise ValueError(f"paged decode binding requires {name}=1.0")
-    softcap = values.get("softcap", 0.0)
-    if not isinstance(softcap, Real) or isinstance(softcap, bool) or softcap != 0.0:
-        raise ValueError("paged decode binding does not support softcap, sinks or bias")
-    if any(
-        values.get(name) is not None for name in ("sinks", "alibi_slopes", "qq_bias")
-    ):
-        raise ValueError("paged decode binding does not support softcap, sinks or bias")
 
 
 def make_candidate():
@@ -93,38 +76,18 @@ def make_candidate():
         ok, why = candidate.admits(request)
         if not ok:
             raise ValueError(why)
+        tensors = dict(tensors)
+        if "problem" not in tensors:
+            tensors["problem"] = _problem(request)
+        validate_tuning_attention_contract(request, tensors["problem"], spec)
         if (
             spec.path != "3d"
             or spec.kernel_spec.tile_size != 32
             or spec.kernel_spec.kv_layout != "paged"
         ):
             raise ValueError("paged_decode_t32 requires a paged tile-32 segment spec")
-        tensors = dict(tensors)
-        tensors.setdefault("problem", _problem(request))
-        if tensors["problem"].sliding_window != request.sliding_window:
-            raise ValueError("request sliding_window disagrees with problem")
-        problem = tensors["problem"]
-        if (
-            problem.softcap
-            or problem.use_sinks
-            or problem.use_alibi
-            or problem.use_qq_bias
-        ):
-            raise ValueError(
-                "paged decode binding does not support softcap, sinks or bias"
-            )
-        _validate_feature_inputs(tensors)
-        _validate_feature_inputs(kwargs)
         kwargs.setdefault("unsafe_skip_paged_value_validation", True)
-        kwargs.setdefault("grid", spec.launch_grid(tensors["problem"]))
-        kwargs.setdefault("block", spec.launch_block())
-        binding = bind_tuning_attention_torch(request, spec, tensors, **kwargs)
-
-        def launch(**overrides):
-            _validate_feature_inputs(overrides)
-            return binding.launch(**overrides)
-
-        return replace(binding, launch=launch)
+        return bind_tuning_attention_torch(request, spec, tensors, **kwargs)
 
     candidate = KernelCandidate(
         name="attention_paged_decode_t32",
@@ -142,7 +105,15 @@ def make_candidate():
                 ShapeRange("kv_block_size", allowed=(1, 16, 32, 64)),
             ),
             supports_features=frozenset(
-                {"causal", "causal_bottom_right", "sliding_window"}
+                {
+                    "causal",
+                    "causal_bottom_right",
+                    "sliding_window",
+                    "sinks",
+                    "softcap",
+                    "alibi",
+                    "qq_bias",
+                }
             ),
         ),
         _supports=support,

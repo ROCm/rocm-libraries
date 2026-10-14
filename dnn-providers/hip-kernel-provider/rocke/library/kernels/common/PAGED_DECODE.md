@@ -27,7 +27,9 @@ layout and builder signatures are unchanged.
 ## Admission and addressing
 
 The initial token-mapped path admits fp16/bf16, D64/128/256, one query per
-sequence, GQA ratios dividing 16, and optional sliding windows. It uses
+sequence, GQA ratios dividing 16, sliding windows, softcap, attention sinks,
+ALiBi and query-to-query bias. These features share the existing segment
+computation; only the K/V loading changes. It uses
 pool-wide buffer descriptors with 64-bit base pointers and bounded i32 byte
 offsets. Both contiguous `[physical_pages,P,Hkv,D]` pools must fit in
 `0x7fff0000` bytes. Larger pools are rejected before cache lookup or launch;
@@ -70,8 +72,9 @@ sinks, ALiBi and QQ-bias flags against the problem and supplied feature inputs,
 before and after retargeting. Flags must be booleans; enabled pointer features
 require their inputs and disabled features reject supplied inputs. Enabled
 softcap accepts finite positive runtime values; disabled softcap requires zero.
-These checks apply to page-contained loaders too. Matching feature-enabled
-generic specs remain valid, and `allow_unsupported` cannot bypass agreement.
+These checks apply to gather and page-contained loaders, including automatic
+page-size-1 launches. Matching feature-enabled specs remain valid, and
+`allow_unsupported` cannot bypass agreement.
 K/V storage dtype must agree with the problem. FP8 page-contained loaders retain
 K/V dequantization scales; other explicit 3D loaders require numeric unit K/V
 scales. Output scaling is not forwarded by the 3D adapter and must be numeric
@@ -92,8 +95,11 @@ original device tensors live across launches. Pass
 the option requires a boolean. Rebind after mutation when relying on that
 synchronized check. The candidate accepts only numeric unit values for `k_scale`,
 `v_scale` and `out_scale` in tensor maps, binding arguments and launch overrides;
-`softmax_scale` remains independently configurable. Structural
-validation always applies. Candidate launches use direct-call ownership with
+`softmax_scale` remains independently configurable. Requests carry `softcap`,
+`use_sinks`, `use_alibi` and `use_qq_bias`; the problem and compiled spec must
+agree. Feature tensors may be supplied in the tensor map or at binding time,
+and replaced at launch while preserving enablement. Pass `qq_bias_stride_0`
+in elements with query-to-query bias. Structural validation always applies. Candidate launches use direct-call ownership with
 independent eager scratch on each invocation. For reusable scratch with a fixed
 eager stream and explicit close, use `prepare_unified_attention_torch` with the
 ownership and graph lifecycle described in

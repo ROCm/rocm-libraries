@@ -31,46 +31,54 @@ def validate_paged_3d_features(
     k_scale,
     v_scale,
     out_scale,
+    qq_bias_stride_0=0,
 ):
     """Match explicit CDNA paged 3D features to the inputs actually launched.
 
-    Page-contained kernels can implement features unavailable to gather. Read
-    the compiled spec rather than optional candidate metadata or tile size.
+    Read the compiled spec rather than optional candidate metadata or tile size.
     Geometry and gather-only address bounds have separate admission checks.
     """
-    segment = tuning_spec.kernel_spec
-    for name, expected in (
+    validate_attention_problem_types(problem)
+    require_attention_int(qq_bias_stride_0, "qq_bias_stride_0")
+    if qq_bias_stride_0 < 0:
+        raise ValueError("qq_bias_stride_0 must be nonnegative")
+    expected_flags = (
         ("has_softcap", problem.softcap > 0),
         ("use_sinks", problem.use_sinks),
         ("use_alibi", problem.use_alibi),
         ("use_qq_bias", problem.use_qq_bias),
-    ):
-        if not hasattr(segment, name):
-            raise ValueError(f"paged 3D kernel_spec.{name} is required")
-        value = getattr(segment, name)
-        if not isinstance(value, bool) or value is not expected:
+    )
+    storage = "fp8e4m3" if problem.use_fp8 else None
+    if tuning_spec is not None:
+        segment = tuning_spec.kernel_spec
+        for name, expected in expected_flags:
+            if not hasattr(segment, name):
+                raise ValueError(f"paged 3D kernel_spec.{name} is required")
+            value = getattr(segment, name)
+            if not isinstance(value, bool) or value is not expected:
+                raise ValueError(
+                    f"paged 3D kernel_spec.{name} must be a bool agreeing with problem"
+                )
+        if not hasattr(segment, "kv_storage_dtype"):
+            raise ValueError("paged 3D kernel_spec.kv_storage_dtype is required")
+        if segment.kv_storage_dtype != storage:
             raise ValueError(
-                f"paged 3D kernel_spec.{name} must be a bool agreeing with problem"
+                "paged 3D kernel_spec.kv_storage_dtype disagrees with problem"
             )
     if (
         not isinstance(softcap, Real)
         or isinstance(softcap, bool)
         or not isfinite(softcap)
-        or (softcap <= 0 if segment.has_softcap else softcap != 0)
+        or (softcap <= 0 if problem.softcap > 0 else softcap != 0)
     ):
         raise ValueError("paged 3D softcap disagrees with compiled enablement")
     for name, value, enabled in (
-        ("sinks", sinks, segment.use_sinks),
-        ("alibi_slopes", alibi_slopes, segment.use_alibi),
-        ("qq_bias", qq_bias, segment.use_qq_bias),
+        ("sinks", sinks, problem.use_sinks),
+        ("alibi_slopes", alibi_slopes, problem.use_alibi),
+        ("qq_bias", qq_bias, problem.use_qq_bias),
     ):
         if (value is not None) != enabled:
             raise ValueError(f"paged 3D {name} disagrees with compiled enablement")
-    if not hasattr(segment, "kv_storage_dtype"):
-        raise ValueError("paged 3D kernel_spec.kv_storage_dtype is required")
-    storage = segment.kv_storage_dtype
-    if storage != ("fp8e4m3" if problem.use_fp8 else None):
-        raise ValueError("paged 3D kernel_spec.kv_storage_dtype disagrees with problem")
     # The segment consumes K/V scales only in its FP8 dequantization loader;
     # the 3D adapter never forwards output scaling to either kernel.
     scales = [("out_scale", out_scale)]
@@ -201,8 +209,6 @@ def validate_paged_decode(problem, tensors, tuning_spec=None):
         raise ValueError("paged gather requires one query per sequence")
     if p.dtype not in ("fp16", "bf16") or p.use_fp8:
         raise ValueError("paged gather requires fp16/bf16")
-    if p.use_sinks or p.use_alibi or p.use_qq_bias or p.softcap:
-        raise ValueError("paged gather does not support sinks, bias or softcap")
     if not 0 <= p.max_seqlen_k <= BUFFER_LIMIT:
         raise ValueError("paged gather sequence length exceeds token-offset bound")
     if tuning_spec is not None:
@@ -223,10 +229,10 @@ def validate_paged_decode(problem, tensors, tuning_spec=None):
             ("sliding_window", p.sliding_window),
             ("kv_storage_dtype", None),
             ("use_i64_kv_addr", False),
-            ("use_sinks", False),
-            ("use_alibi", False),
-            ("use_qq_bias", False),
-            ("has_softcap", False),
+            ("use_sinks", p.use_sinks),
+            ("use_alibi", p.use_alibi),
+            ("use_qq_bias", p.use_qq_bias),
+            ("has_softcap", p.softcap > 0),
         ):
             if not hasattr(segment, name) or getattr(segment, name) != expected:
                 raise ValueError(

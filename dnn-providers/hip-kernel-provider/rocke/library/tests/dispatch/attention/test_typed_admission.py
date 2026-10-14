@@ -120,7 +120,9 @@ def test_request_integer_fields_before_extraction(field, subtests):
                     use()
 
 
-@pytest.mark.parametrize("field", ["use_sinks", "use_fp8", "fp8_fnuz"])
+@pytest.mark.parametrize(
+    "field", ["use_sinks", "use_fp8", "fp8_fnuz", "use_alibi", "use_qq_bias"]
+)
 def test_request_boolean_fields(field, subtests):
     for value in BAD_BOOLS:
         with subtests.test(value=repr(value)), pytest.raises(ValueError, match=field):
@@ -430,3 +432,41 @@ def test_missing_raw_fields_reject_before_conversion(kind, subtests):
         delattr(raw, field)
         with subtests.test(field=field), pytest.raises(ValueError, match=field):
             validate(raw)
+
+
+def test_request_softcap_before_selection(subtests):
+    req = _req()
+    for value in (True, False, "0", None, _Coercible(), -1, float("nan"), float("inf")):
+        with subtests.test(value=repr(value)):
+            with pytest.raises(ValueError, match="softcap"):
+                replace(req, softcap=value)
+            bad = _poison(req, "softcap", value)
+            for use in (bad.features, bad.normalized, lambda: _problem(bad)):
+                with pytest.raises(ValueError, match="softcap"):
+                    use()
+
+
+def test_paged_binding_checks_problem_before_reading_fields(monkeypatch):
+    from dispatch.attention.paged_decode import make_candidate
+
+    req = _req()
+    spec = dispatch_attention(req).spec
+
+    class PoisonProblem:
+        def __getattr__(self, name):
+            pytest.fail(f"read unvalidated problem.{name}")
+
+    with pytest.raises(TypeError, match="UnifiedAttentionProblem"):
+        make_candidate().bind_torch(req, spec, {"problem": PoisonProblem()})
+
+
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+@pytest.mark.parametrize("page", [1, 16, 32, 64])
+def test_paged_binding_checks_compiled_window(arch, page):
+    from dispatch.attention.paged_decode import make_candidate
+
+    req = replace(_req(arch), kv_block_size=page)
+    spec = dispatch_attention(req).spec
+    bad = replace(spec, kernel_spec=replace(spec.kernel_spec, sliding_window=17))
+    with pytest.raises(ValueError, match="kernel_spec.sliding_window"):
+        make_candidate().bind_torch(req, bad, {"problem": _problem(req)})

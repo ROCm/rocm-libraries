@@ -138,6 +138,9 @@ class AttentionRequest(OperatorRequest):
     use_fp8: bool = False
     fp8_fnuz: bool = False
     kv_layout: str = "paged"  # "paged" | "strided" (non-paged decode)
+    softcap: float = 0.0
+    use_alibi: bool = False
+    use_qq_bias: bool = False
 
     def __post_init__(self):
         validate_attention_request_types(self)
@@ -190,6 +193,12 @@ class AttentionRequest(OperatorRequest):
             active.add("sinks")
         if self.use_fp8:
             active.add("fp8")
+        if self.softcap > 0:
+            active.add("softcap")
+        if self.use_alibi:
+            active.add("alibi")
+        if self.use_qq_bias:
+            active.add("qq_bias")
         return frozenset(active)
 
 
@@ -338,6 +347,9 @@ def _problem_with_num_cus(
         dtype=req.dtype.lower(),
         sliding_window=req.sliding_window,
         use_sinks=req.use_sinks,
+        softcap=req.softcap,
+        use_alibi=req.use_alibi,
+        use_qq_bias=req.use_qq_bias,
         use_fp8=req.use_fp8,
         fp8_fnuz=req.fp8_fnuz,
         num_cus=num_cus,
