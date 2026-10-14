@@ -132,7 +132,7 @@ def test_a_retry_after_a_write_interrupted_between_the_two_files_adds_no_rows_tw
         write(path, writer)
 
     monkeypatch.setattr(store, "_write_atomically", crash_before_manifest)
-    with pytest.raises(OSError):
+    with pytest.raises(OSError, match="killed"):
         store.add(dataset, *contribution)
     monkeypatch.undo()
 

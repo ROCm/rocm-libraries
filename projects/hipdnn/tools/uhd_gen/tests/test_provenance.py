@@ -66,11 +66,13 @@ def test_snapshot_resolves_actual_semantic_revisions_and_sorted_matchers(tmp_pat
     ]
 
 
-@pytest.mark.parametrize("missing", ["metadata.kmd.json", "a.umd.json"])
-def test_missing_dependency_never_receives_an_invented_version(tmp_path, missing):
+@pytest.mark.parametrize(
+    "missing,kind", [("metadata.kmd.json", "KMD"), ("a.umd.json", "UMD")]
+)
+def test_missing_dependency_never_receives_an_invented_version(tmp_path, missing, kind):
     tree = _tree(tmp_path)
     (tree / missing).unlink()
-    with pytest.raises(ProvenanceError):
+    with pytest.raises(ProvenanceError, match=f"missing {kind} dependency"):
         snapshot_provenance(tree, arch="gfx942")
 
 
@@ -89,7 +91,7 @@ def test_duplicate_definitions_are_ambiguous_even_if_identical(tmp_path, conflic
         tree / "duplicate.kmd.json",
         {"id": KMD, "revision": "4.0" if conflicting else "3.12"},
     )
-    with pytest.raises(ProvenanceError):
+    with pytest.raises(ProvenanceError, match="duplicate/conflicting descriptor"):
         snapshot_provenance(tree)
 
 
@@ -97,7 +99,7 @@ def test_metadata_cannot_resolve_to_a_matcher_of_the_same_identity(tmp_path):
     tree = _tree(tmp_path)
     (tree / "metadata.kmd.json").unlink()
     _write(tree / "impostor.umd.json", {"id": KMD})
-    with pytest.raises(ProvenanceError):
+    with pytest.raises(ProvenanceError, match="missing KMD dependency"):
         snapshot_provenance(tree)
 
 
@@ -127,14 +129,22 @@ def test_incompatible_dependency_identity_or_revision_is_rejected(
         original = trained[kind][0] if kind == "umd" else trained[kind]
         major, minor = map(int, original["revision"].split("."))
         original["revision"] = f"{major}.{minor + 1}"
-    with pytest.raises(ProvenanceError):
+    refusal = (
+        "dependency .* is missing or not owned"
+        if change == "identity"
+        else ".* revision .* is incompatible with trained revision"
+    )
+    with pytest.raises(ProvenanceError, match=f"trained_against.{kind}: {refusal}"):
         compare_provenance(trained, actual)
 
 
 def test_removed_matcher_is_a_contract_break_not_a_coverage_addition(tmp_path):
     tree = _tree(tmp_path)
     trained = snapshot_provenance(tree, arch="gfx942")
-    with pytest.raises(ProvenanceError):
+    with pytest.raises(
+        ProvenanceError,
+        match="trained_against.umd: dependency .* is missing or not owned",
+    ):
         compare_provenance(trained, snapshot_provenance(tree, arch="gfx950"))
 
 
@@ -142,12 +152,14 @@ def test_removed_matcher_is_a_contract_break_not_a_coverage_addition(tmp_path):
 def test_malformed_explicit_revision_does_not_default(tmp_path, revision):
     tree = _tree(tmp_path)
     _write(tree / "metadata.kmd.json", {"id": KMD, "revision": revision})
-    with pytest.raises(ProvenanceError):
+    with pytest.raises(
+        ProvenanceError, match="expected semantic revision '<major>.<minor>'"
+    ):
         snapshot_provenance(tree)
 
 
 def test_snapshot_rejects_version_only_provenance():
-    with pytest.raises(ProvenanceError):
+    with pytest.raises(ProvenanceError, match="trained_against.umd must be an array"):
         validate_provenance({"ued": "1.0", "kmd": "1.0", "umd": "1.0"})
 
 
@@ -160,18 +172,24 @@ def test_an_engine_with_no_descriptors_is_trained_against_its_selector_revision(
 
 
 @pytest.mark.parametrize(
-    "snapshot",
+    "snapshot,refusal",
     [
-        {},
-        {"selector_revision": ""},
-        {"selector_revision": 3},
-        {"ued": {"id": UED, "revision": "1.0"}},
-        {"selector_revision": "rev", "unexpected": "value"},
+        ({}, "must name a descriptor set or a selector_revision"),
+        ({"selector_revision": ""}, "selector_revision must be a non-empty string"),
+        ({"selector_revision": 3}, "selector_revision must be a non-empty string"),
+        (
+            {"ued": {"id": UED, "revision": "1.0"}},
+            "trained_against requires exactly ued, kmd and umd",
+        ),
+        (
+            {"selector_revision": "rev", "unexpected": "value"},
+            r"trained_against has unknown members: \['unexpected'\]",
+        ),
     ],
 )
-def test_provenance_that_names_neither_form_completely_is_refused(snapshot):
+def test_provenance_that_names_neither_form_completely_is_refused(snapshot, refusal):
     """A partial descriptor set or empty revision is unverifiable, not weaker."""
-    with pytest.raises(ProvenanceError):
+    with pytest.raises(ProvenanceError, match=refusal):
         validate_provenance(snapshot)
 
 
@@ -232,5 +250,7 @@ def test_feature_semantics_is_kept_by_both_provenance_forms():
         {"selector_revision": "r", "feature_semantics_revision": 4}
     ) == {"selector_revision": "r", "feature_semantics_revision": 4}
     # Never on its own: it says what features meant, not what the model binds to.
-    with pytest.raises(ProvenanceError):
+    with pytest.raises(
+        ProvenanceError, match="must name a descriptor set or a selector_revision"
+    ):
         validate_provenance({"feature_semantics_revision": 1})

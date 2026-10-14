@@ -147,7 +147,7 @@ def test_the_slice_depends_on_the_set_and_seed_alone(slicing):
 def test_unlabelled_graphs_are_their_own_group_and_a_bad_fraction_is_refused(slicing):
     chosen = slicing.choose([{"benchmark": f"g{i}"} for i in range(10)], 0.2)
     assert chosen["by_regime"] == {"unlabelled": {"graphs": 10, "held_out": 2}}
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="0 < f < 1"):
         slicing.choose(_graphs({"a": 5}), 1.0)
     with pytest.raises(ValueError, match="no graph ids"):
         slicing.choose([{"regime": "a"}])

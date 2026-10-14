@@ -322,6 +322,36 @@ def test_a_caller_that_installs_the_model_itself_gets_no_hint(
     assert "Install:" not in capsys.readouterr().out
 
 
+def test_the_model_is_fitted_in_the_space_its_descriptor_declares(tmp_path, evaluator):
+    """The runtime inverts a model's raw output through the transform its descriptor names
+    (exp for `log`). A model fitted on the target itself would then report e^target, and one
+    declaring another transform would invert a log fit wrongly."""
+    import numpy as np
+    import pandas as pd
+
+    from uhd_gen import score_transform
+    from uhd_gen.train_uhd import predict, train_model
+
+    labels = np.array([50.0, 100.0, 150.0])
+    frame = pd.DataFrame({"x": np.repeat([1.0, 2.0, 3.0], 100)})
+    frame["tflops"] = frame["x"] * 50.0
+    model = train_model(
+        frame, ["x"], "tflops", num_boost_round=200, early_stopping_rounds=20
+    )
+    X = np.array([[1.0], [2.0], [3.0]])
+    # Noiseless and converged: the fit is the transformed label (within 0.1% with LightGBM
+    # 4.7; 1% leaves room for another version), far from the label itself.
+    np.testing.assert_allclose(model.predict(X), np.log(labels), rtol=1e-2)
+    np.testing.assert_allclose(predict(model, X), labels, rtol=1e-2)
+
+    corpus = _l1_corpus(tmp_path / "corpus.json", metric="tflops")
+    output = tmp_path / "model"
+    assert _l1_train(corpus, output, "--feature-evaluator", evaluator) == 0
+    descriptor = json.loads((output / "heuristic.uhd.json").read_text(encoding="utf-8"))
+    assert descriptor["score"]["transform"] == score_transform.TRAINED == "log"
+    assert _manifest(output)["score_transform"] == "log"
+
+
 def test_cross_validation_never_splits_a_shape_across_devices(monkeypatch):
     """A shape validated on one GPU while trained on another is not unseen."""
     import numpy as np

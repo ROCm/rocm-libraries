@@ -42,7 +42,9 @@ def test_published_names_are_not_rewritten_into_q_namespace():
     "entry", ['"$q.batch"', '{"log2":["$q.batch"]}', "q.batch", "", 1, None, []]
 )
 def test_stringified_or_noncanonical_entries_are_rejected(entry):
-    with pytest.raises(ValueError):
+    with pytest.raises(
+        ValueError, match=r"bare \$references or inline expression objects"
+    ):
         parse_signature_entry(entry)
 
 
@@ -161,7 +163,7 @@ def test_empty_encoding_preserves_existing_raw_reference_hash(evaluator):
 )
 def test_nonportable_literals_are_rejected_inside_nested_ast(literal):
     # Rejected at parse time, so no evaluator is needed.
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="magnitude below 1e15"):
         compute_features_hash([{"log2": [{"+": ["$attention.dims[2]", literal]}]}])
 
 

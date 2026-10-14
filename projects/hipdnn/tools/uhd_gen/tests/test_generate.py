@@ -111,9 +111,17 @@ def _collect(monkeypatch, tmp_path, responses, calls=None):
 
 
 @pytest.mark.parametrize(
-    "mutation", ["candidate", "knobs", "kernel_features", "provenance"]
+    "mutation,refusal",
+    [
+        ("candidate", "did not time exactly the catalog it reported"),
+        ("knobs", "timed knobs did not resolve to the enrolled candidate"),
+        ("kernel_features", "timing kernel metadata differs from enrolled candidate"),
+        ("provenance", "swept engine does not own the recorded UED provenance"),
+    ],
 )
-def test_timing_must_resolve_exact_enrolled_identity(monkeypatch, tmp_path, mutation):
+def test_timing_must_resolve_exact_enrolled_identity(
+    monkeypatch, tmp_path, mutation, refusal
+):
     page = _page()
     timed = _timing(page)
     if mutation == "provenance":
@@ -124,7 +132,7 @@ def test_timing_must_resolve_exact_enrolled_identity(monkeypatch, tmp_path, muta
         timed["results"][0]["knob_settings"] = {"tile_m": 64}
     else:
         timed["results"][0]["kernel_features"] = {"kernel.tile_m": 64}
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match=refusal):
         _collect(monkeypatch, tmp_path, [_sweep(page, timed["results"][0])])
 
 

@@ -26,6 +26,7 @@
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
@@ -121,10 +122,10 @@ bool prerequisitesRequired()
     return !value.empty() && value != "0";
 }
 
-/// Runs `python -m uhd_gen train <arguments>` against the evaluator beside this binary and
-/// returns its exit status. PYTHONPATH, not the working directory, makes the package
-/// importable, so the tools directory may be on a different drive from the test.
-int runUhdGenTrain(const std::string& arguments)
+/// Runs the configured Python with @p arguments and returns its exit status. PYTHONPATH, not
+/// the working directory, makes uhd_gen importable, so the tools directory may be on a
+/// different drive from the test.
+int runPython(const std::string& arguments)
 {
     std::string pythonPath = HIPDNN_UHD_GEN_TOOLS_DIR;
     const auto inherited = hipdnn_data_sdk::utilities::getEnv("PYTHONPATH");
@@ -135,8 +136,7 @@ int runUhdGenTrain(const std::string& arguments)
     const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter pythonPathForChild(
         "PYTHONPATH", pythonPath);
 
-    const std::string invocation = std::string("\"") + HIPDNN_UHD_GEN_PYTHON + "\" -m uhd_gen train"
-                                   + " --feature-evaluator \"" + featureEvaluator().string() + "\" "
+    const std::string invocation = std::string("\"") + HIPDNN_UHD_GEN_PYTHON + "\" "
                                    + arguments
                                    // Keep the tool's traceback in the test output.
                                    + " 1>&2";
@@ -149,6 +149,51 @@ int runUhdGenTrain(const std::string& arguments)
     return std::system(command.c_str());
 }
 
+/// Runs `python -m uhd_gen train <arguments>` against the evaluator beside this binary.
+int runUhdGenTrain(const std::string& arguments)
+{
+    return runPython("-m uhd_gen train --feature-evaluator \"" + featureEvaluator().string() + "\" "
+                     + arguments);
+}
+
+/// Writes, to argv[2], rows on every split threshold of the LightGBM model at argv[1] and rows
+/// with one feature (or all) missing, each with LightGBM's own raw score: what the runtime's
+/// tree walk must reproduce. A value exactly on a threshold is the only one that tells `<=`
+/// from `<`, and a missing one the only one that reads a node's default direction. JSON has
+/// no NaN, so a missing value is written as null.
+constexpr const char* PROBE_SCRIPT = R"(import json, sys
+import lightgbm as lgb
+import numpy as np
+
+booster = lgb.Booster(model_file=sys.argv[1])
+thresholds = []
+
+
+def walk(node):
+    if "split_feature" in node:
+        thresholds.append((node["split_feature"], node["threshold"]))
+        walk(node["left_child"])
+        walk(node["right_child"])
+
+
+for tree in booster.dump_model()["tree_info"]:
+    walk(tree["tree_structure"])
+base = [2048.0, 128.0]
+rows = []
+for feature, threshold in thresholds:
+    rows.append(list(base))
+    rows[-1][feature] = threshold
+for feature in range(len(base)):
+    rows.append(list(base))
+    rows[-1][feature] = float("nan")
+rows.append([float("nan")] * len(base))
+raw = booster.predict(np.array(rows), raw_score=True)
+with open(sys.argv[2], "w") as out:
+    json.dump({"thresholds": len(thresholds),
+               "rows": [[None if v != v else v for v in row] for row in rows],
+               "raw": [float(v) for v in raw]}, out)
+)";
+
 /// Trains on @p csv's single-layer corpus into @p outputDir.
 int runUhdGen(const std::filesystem::path& csv, const std::filesystem::path& outputDir)
 {
@@ -157,7 +202,9 @@ int runUhdGen(const std::filesystem::path& csv, const std::filesystem::path& out
                           + (csv.parent_path() / "provenance.json").string() + "\""
                           + " --output-dir \"" + outputDir.string() + "\""
                           + " --name \"uhd_gen artifact test\""
-                          + " --num-boost-round 200 --early-stopping 20");
+                          + " --num-boost-round 200 --early-stopping 20"
+                          // The LightGBM model itself, the oracle the tree walk is checked by.
+                          + " --keep-lgbm");
 }
 
 class TestUhdGenArtifact : public ::testing::Test
@@ -272,6 +319,40 @@ TEST_F(TestUhdGenArtifact, TheModelScoresAndOrdersByTheFeatureItWasTrainedOn)
     {
         const double expected = corpusTflops(QUERY_M, tileM);
         EXPECT_NEAR(scoreFor(tileM), expected, 0.01 * expected) << "tile_m=" << tileM;
+    }
+}
+
+TEST_F(TestUhdGenArtifact, TheRuntimeWalksTheTreesAsLightGbmDoes)
+{
+    const auto config = configFromTool();
+    const auto adapter = makeUhdAdapter(config);
+    ASSERT_NE(adapter, nullptr);
+    ASSERT_EQ(config.featuresSignature.size(), 2U) << "PROBE_SCRIPT's base row has two features";
+
+    const auto script = _dir->path() / "probe.py";
+    const auto probes = _dir->path() / "probes.json";
+    std::ofstream(script) << PROBE_SCRIPT;
+    ASSERT_EQ(runPython("\"" + script.string() + "\" \"" + (_outputDir / "model.lgbm").string()
+                        + "\" \"" + probes.string() + "\""),
+              0);
+    std::ifstream file(probes);
+    const auto document = nlohmann::json::parse(file);
+    ASSERT_GT(document.at("thresholds").get<size_t>(), 0U) << "the model has no split to probe";
+
+    const auto& rows = document.at("rows");
+    const auto& raw = document.at("raw");
+    ASSERT_EQ(rows.size(), raw.size());
+    for(size_t i = 0; i < rows.size(); ++i)
+    {
+        std::vector<double> features;
+        for(const auto& value : rows[i])
+        {
+            features.push_back(value.is_null() ? std::numeric_limits<double>::quiet_NaN()
+                                               : value.get<double>());
+        }
+        const double expected = raw[i].get<double>();
+        EXPECT_NEAR(adapter->score(features), expected, 1e-9 * std::max(1.0, std::abs(expected)))
+            << "probe " << i << ": " << rows[i].dump();
     }
 }
 

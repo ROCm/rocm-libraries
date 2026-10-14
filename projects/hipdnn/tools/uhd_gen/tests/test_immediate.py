@@ -121,17 +121,19 @@ def test_import_derives_physical_throughput_from_full_graph_and_mean_timing():
 @pytest.mark.parametrize("bad", [0, -1, float("nan"), float("inf"), True])
 def test_invalid_timing_cannot_become_a_training_label(bad):
     row = measurement(elapsed=bad)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="avgTimeMs must be a positive finite number"):
         normalize_row(row)
 
 
 def test_unknown_work_count_and_supplied_rate_are_not_substitutes_for_flops():
     row = measurement()
     row["tflops"] = 999.0
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="supplied tflops differs"):
         normalize_row(row)
     row["features"].pop("graph.flops")
-    with pytest.raises(ValueError):
+    with pytest.raises(
+        ValueError, match="graph.flops must be a positive finite number"
+    ):
         normalize_row(row)
 
 
@@ -141,21 +143,36 @@ def test_unknown_work_count_and_supplied_rate_are_not_substitutes_for_flops():
 def test_candidate_information_cannot_enter_an_l1_corpus_or_recipe(where):
     row = measurement()
     if where == "expression":
-        with pytest.raises(ValueError):
+        with pytest.raises(
+            ValueError,
+            match=r"cannot depend on kernel/candidate/timing inputs: \$kernel.tile_m",
+        ):
             validate_signature([{"/": ["$graph.flops", "$kernel.tile_m"]}])
     elif where == "label":
         # The label is envelope, never a feature input: reading it would fit the answer.
-        with pytest.raises(ValueError):
+        with pytest.raises(
+            ValueError,
+            match=r"cannot depend on kernel/candidate/timing inputs: \$graph.avgTimeMs",
+        ):
             validate_signature(["$graph.avgTimeMs"])
     elif where == "sweep":
-        with pytest.raises(ValueError):
+        with pytest.raises(
+            ValueError, match="one row per engine/graph/device, not a candidate sweep"
+        ):
             normalize_corpus(pd.DataFrame([row, copy.deepcopy(row)]))
     else:
         if where == "envelope":
             row["candidate_id"] = "winner"
         else:
             row["features"]["kernel.tile_m"] = 64
-        with pytest.raises(ValueError):
+        with pytest.raises(
+            ValueError,
+            match=(
+                r"candidate/search data: \['candidate_id'\]"
+                if where == "envelope"
+                else r"cannot depend on kernel/candidate/timing inputs: \$kernel.tile_m"
+            ),
+        ):
             normalize_row(row)
 
 
@@ -164,24 +181,30 @@ def test_engine_selector_provenance_is_the_descriptor_set_and_cannot_drift_mid_c
     row["binding"]["trained_against"] = {
         "engine": {"name": row["engine_name"], "version": "v1"}
     }
-    with pytest.raises(ValueError):
+    with pytest.raises(
+        ValueError, match=r"trained_against has unknown members: \['engine'\]"
+    ):
         normalize_row(row)
 
     first, second = measurement(), measurement(graph="other")
     second["binding"]["selector_revision"] = "provider-1/immediate-9/library-3"
-    with pytest.raises(ValueError):
+    with pytest.raises(
+        ValueError, match="provenance changed within the immediate corpus"
+    ):
         normalize_corpus(pd.DataFrame([first, second]))
 
     third = measurement(graph="third")
     third["binding"]["trained_against"]["ued"]["revision"] = "2.0"
-    with pytest.raises(ValueError):
+    with pytest.raises(
+        ValueError, match="provenance changed within the immediate corpus"
+    ):
         normalize_corpus(pd.DataFrame([first, third]))
 
 
 def test_cross_engine_labels_require_the_same_full_graph_work_count():
     first, second = measurement(), measurement(engine=8)
     second["features"]["graph.flops"] *= 2
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="logical work count cannot change"):
         normalize_corpus(pd.DataFrame([first, second]))
 
 
@@ -300,7 +323,9 @@ def test_runtime_prediction_must_match_measured_request_but_can_use_new_l1_model
     assert scorer(normalize_corpus(pd.DataFrame([row]))).tolist() == [1234]
     changed = copy.deepcopy(row)
     changed["features"]["constraint.workspace_limit"] = 0
-    with pytest.raises(ValueError):
+    with pytest.raises(
+        ValueError, match="differs from the measured graph/device/constraints"
+    ):
         scorer(normalize_corpus(pd.DataFrame([changed])))
     # An answer in another metric is refused, never converted.
     wrong_metric = copy.deepcopy(response)
