@@ -199,6 +199,7 @@ TEST(PredictionLibraryTest, MlpDeviceScalarAlphaFiltersUnadvertisedSolutions)
     lib.model->scaler.scale.assign(12, 1.0f);
     // Rank the unsupported solution first, then fall through to the capable one.
     lib.model->dense = MLPClassification::DenseLayer(std::vector<float>(24, 0.0f), {2.0f, 1.0f});
+    ASSERT_TRUE(lib.model->valid());
     auto problem = ContractionProblemGemm::GEMM(false, false, 4, 4, 4, 4, 4, 4, 1.0, false, 1);
     problem.setUseScaleAlphaVec(1);
     ASSERT_EQ(lib.findTopSolutions(problem, hardware, 2).size(), 2u);
