@@ -617,10 +617,12 @@ jobs:
             "$VENV_PYTHON" -m pytest -q projects/hipdnn/python/frontend_wheel_package/tests
 
       # The dnn_benchmarking ctest entries (one per provider engine, registered
-      # only when the workloads were pulled) take hours, so "Run tests" leaves
-      # them out and they run in the step after this one, last, so a workload
-      # failure cannot block the packaging above. Listing them is cheap, so it
-      # runs on every run that fetched the workloads and proves they registered.
+      # only when the workloads were pulled) are not run here. This lane builds
+      # on a runner with no GPU, where they would "pass" in 0.03 s without
+      # executing a graph, and with a GPU they would take hours. "Run tests"
+      # leaves them out, and this step proves they registered: it runs on every
+      # run that fetched the workloads. GPU lanes run them with
+      # `ctest -L dnn_benchmarking`.
       - name: List dnn-benchmarking workload tests
         if: steps.workloads.outputs.fetch == 'true'
         # ctest -N ignores --no-tests=error, so count the listing itself.
@@ -629,14 +631,6 @@ jobs:
           listing=$(ctest --test-dir build -N -L dnn_benchmarking)
           echo "$listing"
           grep -qE 'Total Tests: [1-9]' <<<"$listing"
-
-      # Nightly and manual runs only; a PR that bumps the pins still proves the
-      # pointers fetch, extract and register.
-      - name: Run dnn-benchmarking workloads
-        if: steps.workloads.outputs.fetch == 'true' && github.event_name != 'pull_request'
-        env:
-          ROCKE_COMGR_LIB: ${{ env.HKP_ROCKE_COMGR_LIB }}
-        run: ctest --test-dir build --output-on-failure -L dnn_benchmarking
 
   hipdnn_build_summary:
     name: hipDNN Superbuild Summary

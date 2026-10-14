@@ -319,9 +319,11 @@ Each provider also registers one CTest entry per engine when the archives are
 present, `<provider>-external-integration-check-dnn-benchmarking`, labeled
 `dnn_benchmarking`, that runs that engine's share (`WORKLOAD_GTEST_FILTER` in the
 provider's CMakeLists): MIOpen runs `conv`, `bnorm` and `rocke_conv`, hipBLASLt
-runs `hipblaslt_*`. Run them with `ctest -L dnn_benchmarking`. The superbuild CI
-excludes the label from its main `ctest` and runs it last, on nightly and manual
-runs. `attn`, `norm`, `moe` and `rocke_sdpa` are not registered for any engine yet.
+runs `hipblaslt_*`. Run them with `ctest -L dnn_benchmarking` on a machine with a
+GPU. The superbuild CI builds on a runner with no GPU, so it excludes the label
+from its main `ctest` and only lists the entries to prove they registered; it
+does not execute them. `attn`, `norm`, `moe` and `rocke_sdpa` are not registered
+for any engine yet.
 
 hipBLASLt matmul graphs are verified on the CPU (the GPU reference does not cover
 matmul), at about 3 GMAC/s. `HIPBLASLT_ENGINE.toml` therefore skips the 55 shapes
