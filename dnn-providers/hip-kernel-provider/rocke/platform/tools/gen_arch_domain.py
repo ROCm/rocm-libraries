@@ -206,6 +206,14 @@ _DECL_RE = re.compile(r"^declare\s+(.+?)\s+@([\w.]+)\((.*)\)\s*$")
 # `Segmentation fault (core dumped)` vs `Segmentation fault` is a property of
 # the host's core-dump settings, not of the crash. See `_crash_reason`.
 _CORE_DUMPED_RE = re.compile(r"\s*\(core dumped\)\s*$")
+# SelectionDAG diagnostics print allocator-dependent node addresses. They are
+# evidence formatting, not part of the backend's answer, and retaining them
+# makes two identical probes differ under ``--check``.
+_DAG_NODE_ADDRESS_RE = re.compile(
+    r"\b0x[0-9a-fA-F]+(?=:"
+    r"(?:\d+\b|\s+(?:ch|glue|untyped|[if]\d+|bf\d+|v\d+(?:[if]|bf)\d+|"
+    r"nxv\d+(?:[if]|bf)\d+)\b))"
+)
 
 # The buffer fat pointer is not a legal kernel-argument type and cannot be
 # produced by an addrspacecast, so it is the one operand we still pass poison
@@ -477,6 +485,16 @@ def _crash_reason(diag: str) -> str:
     return "; ".join(parts[-2:])[:200] or "clang crashed"
 
 
+def _normalize_dag_node_addresses(text: str) -> str:
+    """Remove node identities from a SelectionDAG ``Cannot select`` dump."""
+    marker = "cannot select:"
+    marker_at = text.lower().find(marker)
+    if marker_at < 0:
+        return text
+    dag_at = marker_at + len(marker)
+    return text[:dag_at] + _DAG_NODE_ADDRESS_RE.sub("0xADDR", text[dag_at:])
+
+
 def _first_error(text: str) -> str:
     for line in text.splitlines():
         s = line.strip()
@@ -484,8 +502,9 @@ def _first_error(text: str) -> str:
             continue
         low = s.lower()
         if "error" in low or "undefined symbol" in low or "cannot select" in low:
-            return s[:200]
-    return (text.strip().splitlines() or ["(no diagnostic)"])[0][:200]
+            return _normalize_dag_node_addresses(s)[:200]
+    first = (text.strip().splitlines() or ["(no diagnostic)"])[0]
+    return _normalize_dag_node_addresses(first)[:200]
 
 
 def _probe(
