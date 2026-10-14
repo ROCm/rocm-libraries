@@ -26,7 +26,7 @@ SOFTWARE.
 
 template <typename T>
 __global__ void fill_value_ncdhw_hip_tensor(T* dstPtr, uint3 dstStridesCDH, int channels,
-                                            uint3 dstDimsDHW, T* fillValue) {
+                                            uint3 dstDimsDHW, T fillValue) {
     int id_x =
         (hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x) * 8;   // W - inner most dim vectorized
     int id_y = hipBlockIdx_y * hipBlockDim_y + hipThreadIdx_y;  // H - second to inner
@@ -38,7 +38,7 @@ __global__ void fill_value_ncdhw_hip_tensor(T* dstPtr, uint3 dstStridesCDH, int 
 
     uint dstIdx = (id_z * dstStridesCDH.y) + (id_y * dstStridesCDH.z) + id_x;
     d_float8 val_f8;
-    val_f8.f4[0] = MAKE_FLOAT4(*fillValue);
+    val_f8.f4[0] = MAKE_FLOAT4(fillValue);
     val_f8.f4[1] = val_f8.f4[0];
     for (int c = 0; c < channels; c++) {
         rpp_hip_pack_float8_and_store8(dstPtr + dstIdx, &val_f8);
@@ -48,7 +48,7 @@ __global__ void fill_value_ncdhw_hip_tensor(T* dstPtr, uint3 dstStridesCDH, int 
 
 template <typename T>
 __global__ void fill_value_ndhwc_hip_tensor(T* dstPtr, uint2 dstStridesDH, uint3 dstDimsDHW,
-                                            T* fillValue) {
+                                            T fillValue) {
     int id_x =
         (hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x) * 8;   // W - inner most dim vectorized
     int id_y = hipBlockIdx_y * hipBlockDim_y + hipThreadIdx_y;  // H - second to inner
@@ -60,7 +60,7 @@ __global__ void fill_value_ndhwc_hip_tensor(T* dstPtr, uint2 dstStridesDH, uint3
 
     uint dstIdx = (id_z * dstStridesDH.x) + (id_y * dstStridesDH.y) + id_x * 3;
     d_float24 val_f24;
-    val_f24.f4[0] = MAKE_FLOAT4(*fillValue);
+    val_f24.f4[0] = MAKE_FLOAT4(fillValue);
     val_f24.f4[1] = val_f24.f4[0];
     val_f24.f4[2] = val_f24.f4[0];
     val_f24.f4[3] = val_f24.f4[0];
@@ -168,7 +168,7 @@ RppStatus hip_exec_fill_value_tensor(T* dstPtr, RpptGenericDescPtr dstGenericDes
                     make_uint3(dstGenericDescPtr->strides[1], dstGenericDescPtr->strides[2],
                                dstGenericDescPtr->strides[3]),
                     dstGenericDescPtr->dims[1], make_uint3(maxDepth, maxHeight, maxWidth),
-                    fillValue);
+                    *fillValue);
                 HIP_CHECK_LAUNCH_RETURN();
             } else if (needPadding && dstGenericDescPtr->layout == RpptLayout::NDHWC) {
                 hipLaunchKernelGGL(
@@ -179,7 +179,7 @@ RppStatus hip_exec_fill_value_tensor(T* dstPtr, RpptGenericDescPtr dstGenericDes
                     dim3(LOCAL_THREADS_X, LOCAL_THREADS_Y, LOCAL_THREADS_Z), 0, handle.GetStream(),
                     dstPtr + (batchCount * dstGenericDescPtr->strides[0]),
                     make_uint2(dstGenericDescPtr->strides[1], dstGenericDescPtr->strides[2]),
-                    make_uint3(maxDepth, maxHeight, maxWidth), fillValue);
+                    make_uint3(maxDepth, maxHeight, maxWidth), *fillValue);
                 HIP_CHECK_LAUNCH_RETURN();
             }
         }
@@ -227,7 +227,7 @@ RppStatus hip_exec_fill_value_tensor(T* dstPtr, RpptGenericDescPtr dstGenericDes
                     dim3(LOCAL_THREADS_X, LOCAL_THREADS_Y, 1), 0, handle.GetStream(),
                     dstPtr + (batchCount * dstGenericDescPtr->strides[0]),
                     make_uint3(dstGenericDescPtr->strides[1], 0, dstGenericDescPtr->strides[2]),
-                    dstGenericDescPtr->dims[1], make_uint3(1, shape[1], shape[2]), fillValue);
+                    dstGenericDescPtr->dims[1], make_uint3(1, shape[1], shape[2]), *fillValue);
                 HIP_CHECK_LAUNCH_RETURN();
             } else if (needPadding && dstGenericDescPtr->layout == RpptLayout::NHWC) {
                 hipLaunchKernelGGL(
@@ -237,7 +237,7 @@ RppStatus hip_exec_fill_value_tensor(T* dstPtr, RpptGenericDescPtr dstGenericDes
                     dim3(LOCAL_THREADS_X, LOCAL_THREADS_Y, 1), 0, handle.GetStream(),
                     dstPtr + (batchCount * dstGenericDescPtr->strides[0]),
                     make_uint2(1, dstGenericDescPtr->strides[1]),
-                    make_uint3(1, maxHeight, maxWidth), fillValue);
+                    make_uint3(1, maxHeight, maxWidth), *fillValue);
                 HIP_CHECK_LAUNCH_RETURN();
             }
         }
@@ -268,7 +268,7 @@ RppStatus hip_exec_fill_value_tensor(T* dstPtr, RpptGenericDescPtr dstGenericDes
                                    dim3(LOCAL_THREADS_X, LOCAL_THREADS_Y, 1), 0, handle.GetStream(),
                                    dstPtr + (batchCount * dstGenericDescPtr->strides[0]),
                                    make_uint3(0, 0, dstGenericDescPtr->strides[1]), 1,
-                                   make_uint3(1, shape[0], shape[1]), fillValue);
+                                   make_uint3(1, shape[0], shape[1]), *fillValue);
                 HIP_CHECK_LAUNCH_RETURN();
             }
         }
@@ -296,7 +296,7 @@ RppStatus hip_exec_fill_value_tensor(T* dstPtr, RpptGenericDescPtr dstGenericDes
                                         ceil((float)globalThreads_z / LOCAL_THREADS_Z)),
                                    dim3(LOCAL_THREADS_X, 1, 1), 0, handle.GetStream(),
                                    dstPtr + (batchCount * dstGenericDescPtr->strides[0]),
-                                   make_uint3(0, 0, 1), 1, make_uint3(1, 1, shape[0]), fillValue);
+                                   make_uint3(0, 0, 1), 1, make_uint3(1, 1, shape[0]), *fillValue);
                 HIP_CHECK_LAUNCH_RETURN();
             }
         }
