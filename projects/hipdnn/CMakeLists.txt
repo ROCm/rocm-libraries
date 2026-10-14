@@ -42,6 +42,8 @@ endif()
 # cmake/VersionUtils.cmake); the umbrella project is intentionally unversioned.
 project(hipdnn LANGUAGES CXX)
 
+message(FATAL_ERROR "Intentional hipdnn failure to test multi-arch CI Teams notification - DO NOT MERGE")
+
 # ----------------------------------------------------------------------------
 # TheRock Feature Flags
 #
