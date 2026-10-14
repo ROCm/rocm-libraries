@@ -21,35 +21,32 @@ Two verification modes over the same ragged paged-KV problem generator:
     rather than folded into a residual, which would either pass vacuously or
     go NaN.
 
-Both modes drive the same scenario table (``--scenario``), which crosses four
-shape families with two head counts. See :data:`SCENARIOS`.
+Both modes drive the same scenario table (``--scenario``): four short shape
+families crossed with two head counts, plus long-key (S_k 512 and 4096), ragged
+long-batch, and odd/six head-count cases. See :data:`SCENARIOS`.
 
-Run::
+Run (``$PY`` is a python with ``rocke/platform`` and ``rocke/library``
+editable-installed, e.g. ``build/rocke-pyenv/bin/python``; see ``BUILDING.md``)::
 
-    source .sandbox-env
     "$PY" -m builders.mla.verify_score_probe_gfx942                   # scores, all scenarios
     "$PY" -m builders.mla.verify_score_probe_gfx942 --mode full
     "$PY" -m builders.mla.verify_score_probe_gfx942 --scenario page_tail_h64
     "$PY" -m builders.mla.verify_score_probe_gfx942 --scenario adhoc --q-lens 5 7 --k-lens 20 19
     "$PY" -m builders.mla.verify_score_probe_gfx942 --mode full --dry-run   # geometry only, no GPU
 
-Tolerance (fixed before the first run, not fitted to the result): the kernel
-rounds two things to bf16 that the oracle keeps in fp32 -- the projected query
-and the expanded ``K_nope = c_kv @ W_UK`` -- so a mismatch of a few bf16 ulps is
-expected and is not a defect. bf16 carries 8 total mantissa bits, i.e. a relative
-epsilon of ``2**-9 == 2.0e-3``; a 192-term dot product with sign cancellation
-amplifies that against the tile peak. ``--tol 2e-2`` on
-``max|got - ref| / max|ref|`` is ~10 ulps of headroom over that.
+Tolerance: ``--tol`` (default :data:`BF16_ATTN_ATOL` = 4e-2) is an *absolute*
+bound, ``max|got - ref| <= tol``, against the fp32 oracle -- the same bf16 bar
+the other rocKE attention kernels are held to (see :data:`BF16_ATTN_ATOL` for the
+sources). In ``--mode full`` it bounds ``out`` and ``lse`` (fp32 on both sides,
+live rows only); in ``--mode scores`` it bounds the raw score tile.
 
-To separate "kernel is wrong" from "bf16 is coarse" the run also reports a
-second residual against a numpy model that rounds Q and the expanded K to bf16
-exactly as the kernel does. That one should land near fp32 noise; it is a
-diagnostic, not the acceptance criterion.
-
-In ``--mode full`` the same ``--tol`` bounds ``out``; ``out`` additionally lands
-in bf16 storage, so the run reports a second residual against the bf16-rounded
-oracle as the analogous diagnostic. ``lse`` is fp32 on both sides and is bounded
-by ``--tol`` relative to ``max|lse_ref|`` over the live rows only.
+The kernel rounds two things to bf16 that the oracle keeps in fp32 -- the
+projected query and the expanded ``K_nope = c_kv @ W_UK`` -- and stores ``out``
+as bf16, so a mismatch of a few bf16 ulps is expected and is not a defect. To
+separate "kernel is wrong" from "bf16 is coarse" the run also reports residuals
+against a numpy model that rounds Q and K to bf16 as the kernel does (scores)
+and against the bf16-rounded oracle (``out``), plus the error relative to the
+peak. Those are diagnostics, not the acceptance criterion.
 
 .. warning::
 
@@ -154,11 +151,79 @@ _SHAPES = (
 # H_q = 64 is a Kimi-K2 shaped model, 128 a DeepSeek-V3 shaped one.
 _HEAD_COUNTS = (64, 128)
 
+# Cases outside the cross product above: long key ranges (the shapes above stop
+# at three key tiles, so the unmasked main loop, the k-loop run-ahead and
+# page-index prefetch, and the long online-softmax rescale chain never run more
+# than a couple of iterations), and head counts that change the dispatched
+# layout. Each sets its own head count; the oracle cost grows with
+# S_q * S_k * H, so the long cases are not crossed with both head counts.
+_EXTRA = (
+    Scenario(
+        "sk512",
+        64,
+        (160,),
+        (512,),
+        "S_q < S_k at 32 key tiles: 22 tiles sit fully below the diagonal, so the "
+        "unmasked main loop and the run-ahead/prefetch run many iterations",
+    ),
+    Scenario(
+        "sk4096",
+        128,
+        (512,),
+        (4096,),
+        "S_q < S_k at 256 key tiles, the longest rescale chain. 512 queries x 128 "
+        "heads is 512 workgroups, which fills every CU of a CDNA3 part, so "
+        "dispatch picks the agpr_acc layout (key length >= 4096)",
+    ),
+    Scenario(
+        "ragged_long",
+        64,
+        (96, 257, 40, 130),
+        (1029, 300, 2048, 130),
+        "ragged batch of long sequences: page tails (1029, 300), S_q == S_k "
+        "(130), and S_q/S_k ratios from 0.02 to 0.86 in one launch",
+    ),
+    Scenario(
+        "single_head",
+        5,
+        (40, 24),
+        (531, 24),
+        "odd head count: dispatch packs two heads per workgroup only when H is "
+        "even, so H=5 runs the single-head layout",
+    ),
+    Scenario(
+        "six_heads",
+        6,
+        (40, 24),
+        (531, 24),
+        "H=6: three two-head workgroups per query group, a head count that does "
+        "not divide by four",
+    ),
+    Scenario(
+        "many_seqs",
+        64,
+        tuple(1 + (7 * i) % 9 for i in range(300)),
+        tuple(max(1, 1 + (7 * i) % 9 + (5 * i) % 13 - 3) for i in range(300)),
+        "300 short ragged sequences: past the 255 an 8-step seq_idx binary "
+        "search resolves, so q-blocks map to the right sequence only with the "
+        "12-step search. S_q 1..9, S_k 1..21 with page tails and S_q > S_k rows",
+    ),
+)
+
 SCENARIOS: dict = {
     f"{shape}_h{heads}": Scenario(shape, heads, tuple(q), tuple(k), why)
     for (shape, q, k, why) in _SHAPES
     for heads in _HEAD_COUNTS
 }
+SCENARIOS.update({f"{s.shape}_h{s.heads}": s for s in _EXTRA})
+
+# Acceptance bar for ``out`` (and ``lse``): absolute ``max|got - ref| <= 4e-2``
+# against the fp32 oracle. This is the bf16 attention bar every other rocKE
+# attention kernel is held to -- ``parity_unified_attention.py`` (default
+# ``--tol``: 2e-2 fp16 / 4e-2 bf16), ``test_attention_dense_gfx942_numeric.py``
+# and ``test_attention_dense_gfx950_numeric.py`` (``4e-2`` for bf16), and
+# ``test_gfx942_gqa_head_fold_numeric.py`` ("the repo-wide bf16 attention gate").
+BF16_ATTN_ATOL = 4e-2
 
 
 # --------------------------------------------------------------------------
@@ -282,16 +347,20 @@ def make_problem(
         rng.permutation(num_blocks).reshape(batch, max_blocks).astype(np.int32)
     )
 
-    def rand(*shape):
-        # 0.3 keeps the 192-term dot away from bf16's exponent extremes without
-        # shrinking it to a regime where cancellation dominates.
-        return _bf16(rng.standard_normal(shape).astype(np.float32) * 0.3)
+    def rand(*shape, std=1.0):
+        return _bf16(rng.standard_normal(shape).astype(np.float32) * std)
 
+    # Unit-variance regime: activations ~ N(0, 1) and each projection weight
+    # ~ N(0, 1/fan_in), so the projected Q, K_nope, K_rope and V are all
+    # ~ N(0, 1) and ``scale * q . k`` is ~ N(0, 1) -- the statistics of the
+    # ``randn`` q/k/v the dense attention numeric tests use, which is the regime
+    # the absolute BF16_ATTN_ATOL bar is calibrated in. (Larger weights make
+    # ``out`` O(10) and its bf16 storage ulp alone approaches the bar.)
     q_latent = rand(total_q, r_q)
     c_kv = rand(num_blocks, page, geom.r_kv)
     k_rope = rand(num_blocks, page, geom.d_rope)
-    w_uq = rand(geom.num_heads, r_q, geom.head_dim_qk)
-    w_uk = rand(geom.num_heads, geom.r_kv, geom.d_nope + geom.d_v)
+    w_uq = rand(geom.num_heads, r_q, geom.head_dim_qk, std=r_q**-0.5)
+    w_uk = rand(geom.num_heads, geom.r_kv, geom.d_nope + geom.d_v, std=geom.r_kv**-0.5)
 
     cu_q = np.concatenate([[0], np.cumsum(q_lens)]).astype(np.int32)
     cu_k = np.concatenate([[0], np.cumsum(k_lens)]).astype(np.int32)
@@ -712,8 +781,8 @@ def verify(spec: MlaPrefillSpec, p: Problem, *, arch: str, tol: float) -> bool:
 
         abs_o, rel_o, peak = _residual(tile, ref[i])
         _, rel_m, _ = _residual(tile, model[i])
-        verdict = "ok" if rel_o <= tol else "FAIL"
-        if rel_o > tol:
+        verdict = "ok" if abs_o <= tol else "FAIL"
+        if abs_o > tol:
             ok = False
         print(
             f"  seq {i}: S_q={hi - lo} S_k={s_k} peak={peak:.4f} "
@@ -770,6 +839,7 @@ def verify_full(spec: MlaPrefillSpec, p: Problem, *, arch: str, tol: float) -> b
     )
 
     ok = True
+    worst_out = worst_lse = 0.0
     for i in range(len(p.cu_seqlens_q) - 1):
         lo, hi = int(p.cu_seqlens_q[i]), int(p.cu_seqlens_q[i + 1])
         s_q, s_k = hi - lo, int(p.cu_seqlens_k[i + 1] - p.cu_seqlens_k[i])
@@ -805,7 +875,8 @@ def verify_full(spec: MlaPrefillSpec, p: Problem, *, arch: str, tol: float) -> b
         abs_o, rel_o, peak = _residual(live_out_got, live_out_ref)
         _, rel_bf, _ = _residual(live_out_got, _bf16(live_out_ref))
         abs_l, rel_l, peak_l = _residual(l_got[alive], l_ref[alive])
-        verdict = "ok" if (rel_o <= tol and rel_l <= tol) else "FAIL"
+        worst_out, worst_lse = max(worst_out, abs_o), max(worst_lse, abs_l)
+        verdict = "ok" if (abs_o <= tol and abs_l <= tol) else "FAIL"
         if verdict == "FAIL":
             ok = False
         print(
@@ -814,6 +885,10 @@ def verify_full(spec: MlaPrefillSpec, p: Problem, *, arch: str, tol: float) -> b
             f"rel_vs_bf16_ref={rel_bf:.3e}] "
             f"lse[peak={peak_l:.4f} max_abs={abs_l:.3e} rel={rel_l:.3e}]  {verdict}"
         )
+    print(
+        f"  worst: out max_abs={worst_out:.3e} lse max_abs={worst_lse:.3e} "
+        f"(tol {tol:g} absolute)"
+    )
     return ok
 
 
@@ -852,10 +927,20 @@ def describe_problem(spec: MlaPrefillSpec, p: Problem) -> str:
     return "\n".join(rows)
 
 
-def _dispatched_spec(heads: int, q_lens, k_lens, arch) -> MlaPrefillSpec:
-    """The forward spec the MLA dispatcher selects for this case."""
-    from dispatch.mla import MLARequest, dispatch_mla
+def _dispatched_spec(
+    heads: int, q_lens, k_lens, arch, agpr: bool | None = None
+) -> MlaPrefillSpec:
+    """The forward spec the MLA dispatcher selects for this case.
 
+    ``agpr`` forces dispatch's agpr_acc choice on (True) or off (False) through
+    its ``_AGPR_FORCE`` hook; None applies the shipped rule. A forced layout
+    admission refuses (e.g. the llvm20 flavor) falls back as dispatch would.
+    """
+    from dispatch.mla import MLARequest, dispatch_mla
+    from dispatch.mla import gfx942 as _mla_gfx942
+
+    saved = _mla_gfx942._AGPR_FORCE
+    _mla_gfx942._AGPR_FORCE = agpr
     try:
         return dispatch_mla(
             MLARequest(
@@ -870,6 +955,23 @@ def _dispatched_spec(heads: int, q_lens, k_lens, arch) -> MlaPrefillSpec:
         # Nothing admits the request; fall back to the default so the
         # admission check below reports why.
         return MlaPrefillSpec(num_heads=heads)
+    finally:
+        _mla_gfx942._AGPR_FORCE = saved
+
+
+def layout_name(spec: MlaPrefillSpec) -> str:
+    """Short tag for the forward layout ``spec`` runs, for logs and test ids."""
+    if spec.agpr_acc:
+        kind = "agpr_acc"
+    elif spec.heads_per_wg > 1 or spec.q_tiles_per_wg > 1:
+        kind = "packed"
+    else:
+        kind = "single_head"
+    return (
+        f"{kind}(heads_per_wg={spec.heads_per_wg} q_tiles={spec.q_tiles_per_wg} "
+        f"block_q={spec.block_q} xcds={spec.num_xcds}"
+        f"{' absorbed_query' if spec.absorbed_query else ''})"
+    )
 
 
 def run_case(
@@ -884,16 +986,22 @@ def run_case(
     tol: float,
     dry_run: bool,
     absorbed_query: bool = False,
-) -> bool:
-    """One (shape, heads) case end to end. Returns True on pass."""
+    agpr: bool | None = None,
+) -> bool | None:
+    """One (shape, heads) case end to end.
+
+    Returns True on pass, False on failure, and None when ``absorbed_query`` is
+    asked of a layout that does not implement it (the single-head layout) --
+    a skip, not a failure, since dispatch never ships that combination.
+    """
     # The score probe is single-tile (block_q == 16); the forward kernel runs
     # the spec dispatch ships for this case, so parity covers the shipped
-    # layout (four heads per workgroup when the head count allows it, the
-    # single-head default otherwise).
+    # layout (two heads per workgroup when the head count is even, the
+    # single-head default otherwise; agpr_acc for long keys filling the device).
     if mode == "scores":
         spec = MlaPrefillSpec(num_heads=heads, block_q=16)
     else:
-        spec = _dispatched_spec(heads, q_lens, k_lens, arch)
+        spec = _dispatched_spec(heads, q_lens, k_lens, arch, agpr=agpr)
         if absorbed_query:
             spec = dataclasses.replace(spec, absorbed_query=True)
     # --dry-run reports problem geometry, which is arch-independent, so it stays
@@ -901,13 +1009,19 @@ def run_case(
     if not dry_run:
         ok, reason = supports_mla_prefill(spec, arch=arch)
         if not ok:
+            if absorbed_query and layout_name(spec).startswith("single_head"):
+                print(f"[{name}] SKIP absorbed_query: {reason}")
+                return None
             print(f"[{name}] unsupported: {reason}")
             return False
+    if agpr and not spec.agpr_acc:
+        print(f"[{name}] note: agpr_acc forced but not admitted for this case")
 
     p = make_problem(spec, q_lens=q_lens, k_lens=k_lens, seed=seed)
     print(
         f"[{name}] heads={heads} q_lens={list(q_lens)} k_lens={list(k_lens)} "
         f"mode={mode} scale={p.scale:.6f} tol={tol:g}"
+        + ("" if mode == "scores" else f" layout={layout_name(spec)}")
     )
     if dry_run:
         print(describe_problem(spec, p))
@@ -944,7 +1058,20 @@ def main(argv=None) -> int:
         "--k-lens", type=int, nargs="+", default=[20, 19], help="--scenario adhoc only"
     )
     ap.add_argument("--seed", type=int, default=0)
-    ap.add_argument("--tol", type=float, default=2e-2, help="relative-to-peak bound")
+    ap.add_argument(
+        "--tol",
+        type=float,
+        default=BF16_ATTN_ATOL,
+        help="absolute max|got - ref| bound (default: the bf16 attention bar, "
+        f"{BF16_ATTN_ATOL:g})",
+    )
+    ap.add_argument(
+        "--agpr",
+        choices=("auto", "on", "off"),
+        default="auto",
+        help="--mode full only: force dispatch's agpr_acc layout on/off "
+        "(auto: the shipped rule, key length >= 4096 with every CU filled)",
+    )
     ap.add_argument("--arch", default=None, help="default: the local device")
     ap.add_argument(
         "--dry-run",
@@ -1011,13 +1138,17 @@ def main(argv=None) -> int:
                     tol=args.tol,
                     dry_run=args.dry_run,
                     absorbed_query=args.absorbed_query,
+                    agpr={"auto": None, "on": True, "off": False}[args.agpr],
                 ),
             )
         )
 
-    failed = [n for n, passed in results if not passed]
+    failed = [n for n, passed in results if passed is False]
+    skipped = [n for n, passed in results if passed is None]
+    ran = len(results) - len(skipped)
     print(
-        f"SUMMARY mode={args.mode} {len(results) - len(failed)}/{len(results)} passed"
+        f"SUMMARY mode={args.mode} {ran - len(failed)}/{ran} passed"
+        + (f"; skipped: {', '.join(skipped)}" if skipped else "")
         + (f"; failed: {', '.join(failed)}" if failed else "")
     )
     print("PASS" if not failed else "FAIL")
