@@ -31,6 +31,8 @@ new policy.
   - [B. New knob / optimization](#b-new-knob--optimization)
   - [C. New feature / enablement](#c-new-feature--enablement)
   - [D. Perf optimization (no new feature)](#d-perf-optimization-no-new-feature)
+  - [E. New operator with a hipDNN graph node](#e-new-operator-with-a-hipdnn-graph-node)
+  - [F. New operand or output on an existing operator](#f-new-operand-or-output-on-an-existing-operator)
 - [Local testing matrix (platforms)](#local-testing-matrix-platforms)
 - [Appendix — Attention (SDPA/MHA) library process](#appendix--attention-sdpamha-library-process)
 - [See also](#see-also)
@@ -187,6 +189,69 @@ also follow the matching [library process](#appendix--attention-sdpamha-library-
       record.
 - [ ] Replayable case study + runbook + qualifying benchmark/result-doc update.
 - [ ] Honest losses recorded, not just wins.
+
+### E. New operator with a hipDNN graph node
+
+When the operator exists as a hipDNN graph node (its schema is in
+[flatbuffers_sdk/schemas/](../../../projects/hipdnn/flatbuffers_sdk/schemas/)),
+the dispatch request is the contract between that node and rocKE kernels. The
+worked example is SDPA forward:
+[dispatch/sdpa/](library/dispatch/sdpa/) and
+[tests/sdpa/](library/tests/sdpa/).
+
+- [ ] **Lossless request type.** Every field of the hipDNN node, and every
+      operand's dtype, dims, strides and ragged flag, has a field on the request.
+      A field no kernel implements yet is still represented. It is never dropped.
+- [ ] **Unsupported is a feature, not an error.** `__post_init__` rejects only
+      what the hipDNN frontend rejects. Valid but unimplemented fields are
+      reported by `features()`, so every candidate declines them through
+      `Capability.check` with a reason instead of silently ignoring them.
+- [ ] **Normalized identity.** Construction folds equivalent spellings
+      (deprecated flags, unset defaults, broadcast ranks) into one, so
+      `normalized()` is a stable cache key and round-trips back to the request.
+- [ ] **Translator from the graph.** A `from_hipdnn()` builds the request from
+      the node's flatbuffer JSON, applying hipDNN's own precedence and validation
+      rules. A test runs it over the checked-in golden-bundle graphs for the
+      operator when they exist.
+- [ ] **Reference oracle with hipDNN semantics.** A numpy reference in
+      [numeric/references.py](platform/python/rocke/numeric/references.py) that
+      matches hipDNN's CPU reference and golden generator, including edge cases
+      (fully masked rows, padding). Features it does not implement raise
+      `NotImplementedError` by name.
+- [ ] **Case table.** One shared list of requests that together report every
+      feature at least once, including the decline-only ones, so each
+      candidate's verdict on each feature is recorded.
+- [ ] **Coverage test.** For every hipDNN field, a test shows the field changes
+      `features()` or `normalized()`.
+
+### F. New operand or output on an existing operator
+
+Adding a kernel argument such as an additive bias, a scale tensor, sequence
+lengths, or an LSE output. The request field, the feature, and each family's
+handling of it must stay in step.
+
+- [ ] **Request field and feature.** The operand is a field on the request (see
+      [E](#e-new-operator-with-a-hipdnn-graph-node)), and `features()` reports a
+      named feature when it is set.
+- [ ] **Route only to families that implement it.** Each family that supports
+      the operand adds the feature to its candidates' `supports_features` and
+      binds the request field to its kernel argument. Every other family keeps
+      declining the feature. A family must never accept the request and drop
+      the operand.
+- [ ] **Default-off in the kernel.** The new argument sits behind a spec flag
+      whose default emits today's IR. Prefer a pointer that is absent from the
+      signature when the flag is off, so existing kernel ABIs do not change. The
+      gate stays GREEN with no re-bless.
+- [ ] **Shared emission, not per-family copies.** Use the shared hooks on the
+      common inner bodies (for attention, the score hook's query and key
+      positions for bias, and `epilogue_fn` for LSE in
+      [mfma_attention.py](platform/python/rocke/helpers/mfma_attention.py))
+      or a shared helper, rather than re-implementing the operand in each family.
+- [ ] **Numeric test against the reference.** For each family that admits the
+      feature, an on-GPU test compares the kernel to the reference oracle on the
+      case-table entries that use it, including broadcast and edge cases.
+- [ ] **Case table and support matrix.** A case for the operand exists in the
+      case table, and the support matrix lists which families now serve it.
 
 ## Local testing matrix (platforms)
 
