@@ -27,43 +27,31 @@ static int make_spec(int idx, rocke_wmma_fmha_fwd_spec_t* spec)
     {
     case 0: /* H64, HQ4, HK0 (MHA), NONE, v_lds=False */
         spec->head_size = 64;
-        spec->num_query_heads = 4;
-        spec->num_kv_heads = 0;
         spec->mask_mode = ROCKE_FMHA_MASK_NONE;
         spec->v_lds_stage = false;
         break;
     case 1: /* H128, HQ8, HK0 (MHA), NONE, v_lds=False */
         spec->head_size = 128;
-        spec->num_query_heads = 8;
-        spec->num_kv_heads = 0;
         spec->mask_mode = ROCKE_FMHA_MASK_NONE;
         spec->v_lds_stage = false;
         break;
     case 2: /* H64, HQ4, HK0 (MHA), CAUSAL, v_lds=False */
         spec->head_size = 64;
-        spec->num_query_heads = 4;
-        spec->num_kv_heads = 0;
         spec->mask_mode = ROCKE_FMHA_MASK_CAUSAL;
         spec->v_lds_stage = false;
         break;
     case 3: /* H256, HQ8, HK2 (GQA), NONE, v_lds=False */
         spec->head_size = 256;
-        spec->num_query_heads = 8;
-        spec->num_kv_heads = 2;
         spec->mask_mode = ROCKE_FMHA_MASK_NONE;
         spec->v_lds_stage = false;
         break;
     case 4: /* H128, HQ4, HK4, CAUSAL, v_lds=False */
         spec->head_size = 128;
-        spec->num_query_heads = 4;
-        spec->num_kv_heads = 4;
         spec->mask_mode = ROCKE_FMHA_MASK_CAUSAL;
         spec->v_lds_stage = false;
         break;
     case 5: /* H64, HQ6, HK0 (MHA), NONE, v_lds=True */
         spec->head_size = 64;
-        spec->num_query_heads = 6;
-        spec->num_kv_heads = 0;
         spec->mask_mode = ROCKE_FMHA_MASK_NONE;
         spec->v_lds_stage = true;
         break;

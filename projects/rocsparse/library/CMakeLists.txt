@@ -52,6 +52,7 @@ endif()
 # Configure the version header (version numbers only) and the config header
 # (build-time feature flags). Variables referenced via #cmakedefine in the
 # .h.in must be set (or unset) prior to the configure_file() calls.
+set(ROCSPARSE_WITH_TRSM_REFACTORING ${BUILD_WITH_TRSM_REFACTORING})
 set(ROCSPARSE_WITH_SPMAT_SCALE ${ROCSPARSE_ENABLE_SPMAT_SCALE})
 set(ROCSPARSE_WITH_SDDMM_BATCHED ${ROCSPARSE_ENABLE_SDDMM_BATCHED})
 set(ROCSPARSE_WITH_ELL_TRSV ${BUILD_WITH_ELL_TRSV})
