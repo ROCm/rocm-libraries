@@ -157,7 +157,7 @@ def libraryDeviceNames(architectureName, deviceNames):
   """Keep a gfx950 library on 75a3 and 75a2 when the config names no such id."""
   if architectureName != "gfx950":
     return deviceNames
-  from Tensile.Common.Architectures import GFX_CHIP_IDS
+  from .Common.Architectures import GFX_CHIP_IDS
   supported = {chipId.lower() for chipId in GFX_CHIP_IDS.get("gfx950", [])}
   names = [] if deviceNames in (None, "", "fallback") else deviceNames
   if isinstance(names, str):

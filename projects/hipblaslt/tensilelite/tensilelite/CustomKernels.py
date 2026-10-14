@@ -300,7 +300,7 @@ def _metadataArgToCustomArg(metaArg, kernelName=None):
 
     # rocRoller suffixes (Subtract_21, MagicMultiple_26, WGM_18) are not
     # stable. The expression tree selects the launch semantic.
-    from Tensile.RocRollerWgm import custom_arg_for_metadata
+    from .RocRollerWgm import custom_arg_for_metadata
     wgmArg = custom_arg_for_metadata(metaArg)
     if wgmArg is not None:
         return wgmArg
@@ -361,7 +361,7 @@ def _hasRocRollerWgmArgs(args):
     does not match, and neither does a rocRoller kernel that does not hoist
     these libdivide arguments.
     """
-    from Tensile.RocRollerWgm import WGM_ROLE_ORDER
+    from .RocRollerWgm import WGM_ROLE_ORDER
 
     roles = frozenset(WGM_ROLE_ORDER)
     return any(arg.get("semantic") in roles for arg in args)
