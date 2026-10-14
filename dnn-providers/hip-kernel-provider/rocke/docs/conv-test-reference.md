@@ -15,7 +15,7 @@ the offline CLI accepts explicit bundle and lock paths to verify replacement can
 
 ## Coverage and execution
 
-The cohort contains sixteen cases: FP16 and BF16 for each of padded 3x3,
+The original published cohort contains sixteen cases: FP16 and BF16 for each of padded 3x3,
 pointwise 1x1, stride-2, dilation-2, groups=2, asymmetric spatial dimensions,
 K=96 output channels, and K=33 output channels.
 
@@ -41,6 +41,41 @@ runtime/worker. Replay replaces pointers with live allocations and does not
 import current convolution geometry or dispatch. Both workers poison output with
 NaNs, count launches, synchronize, check all outputs, and check unchanged inputs.
 Baseline and current interpreters remain separate even when reused across cases.
+
+## Adapter structure and architecture expansion
+
+Architecture modules own their case cohorts and production selection policy.
+`architectures/common.py` validates source isolation and constructs requests with
+an explicit target. `implementations/implicit_gemm_fwd.py` shares forward kernel
+building, launch ABI capture, execution, and export across those targets.
+Qualification copies both packages into the frozen runner so adapter imports do
+not depend on the current checkout.
+
+The current branch has independently qualified 32-case forward candidates for
+gfx942 and gfx950. Each adds odd input channels, stem geometry, larger spatial and
+channel grids, a longer reduction, grouped odd channels, depthwise geometry,
+anisotropic filters, and a one-pixel output to the original cohort. Both pass
+source verification and all three GPU failure controls. The local locks, archives
+and DVC pointers describe these candidates; **DVC upload, empty-cache retrieval
+and installed validation are pending**. gfx950 publication enrollment remains
+unchanged until those steps are complete. Do not merge the unpublished pointers.
+
+The first gradient implementation uses small live NumPy oracles, separately from
+the pinned forward contract. `test_conv_gradient_correctness.py` contains twelve
+backward-data and fourteen backward-weight cases per supported architecture,
+with three executions per case. gfx950 backward-data and both backward-weight
+lanes use production selection; gfx942 backward-data uses an explicit spec because
+there is no production candidate. Two-stage outputs are poisoned and atomic
+workspaces reset on every execution; operand and auxiliary-buffer integrity and
+launch counts are checked. These tests are registered in the installed library
+GPU suite. All 26 gradient cases passed on each architecture after Slurm network
+recovery, with three executions per case and no skips. Their host contracts also
+pass. Installed verification remains pending; these are not frozen gradient
+reference bundles.
+
+See [conv-six-lane-validation.md](conv-six-lane-validation.md) for the first-pass
+validation record and [gpu-reference-workflow.md](gpu-reference-workflow.md) for
+publication and installed verification.
 
 ## Numerical contract
 
