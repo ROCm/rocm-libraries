@@ -6,11 +6,19 @@ SPDX-License-Identifier: MIT
 # Convolution implementation inventory and coverage roadmap
 
 Assessment date: 2026-10-14. Source base: `c767fbe1af3`, including the local
-convolution reference adapter refactor. This is a source assessment with CPU
-selection and kernel-construction probes. No GPU qualification, compiler run,
-remote bundle fetch, or installed CI execution was performed for this assessment.
+convolution reference adapter refactor. The assessment below records the source
+inventory and CPU selection/kernel-construction probes used to plan the work.
 The older `conv-reference-coverage-analysis.md` describes an earlier checkout;
 its skip counts and implementation assumptions are not a current denominator.
+
+Delivery update: the first implicit-GEMM cohorts now pass source and installed
+verification on both targets: 32 forward, 12 backward-data and 14 backward-weight
+cases per architecture. Both forward bundles are published, independently
+retrieved from DVC, and enrolled in provider CI categories. Gradients use live
+NumPy oracles, with gfx942 backward-data explicitly testing specs outside
+production selection. See the [validation record](conv-six-lane-validation.md)
+for evidence and limits; the remaining implementation extensions below are
+future coverage, not prerequisites for these bounded cohorts.
 
 The central finding is that convolution coverage must distinguish direction,
 implementation, architecture, and execution protocol. More shapes in the current
@@ -26,9 +34,9 @@ not completion of the requested convolution coverage.
 
 | Direction | gfx942 | gfx950 |
 |---|---|---|
-| Forward | Existing pinned cohort; expand and requalify | Add and qualify cohort |
-| Backward-data | Existing builder, no production-dispatch candidate; begin with explicitly identified specs | Cover production selection plus required decomposition cases |
-| Backward-weight | Cover selected split-K and two-stage paths | Cover selected split-K, two-stage and merged-group paths |
+| Forward | 32-case published cohort; source and installed verification passed | 32-case published cohort; source and installed verification passed |
+| Backward-data | 12 explicit-spec cases passed; no production-dispatch candidate | 12 production-selected cases passed |
+| Backward-weight | 14 cases passed, including atomic split-K and two-stage paths | 14 cases passed, including atomic split-K, two-stage and merged-group paths |
 
 The direction/architecture scope does not specify every algorithm, dtype or
 geometry. Start with the existing FP16/BF16 implicit-GEMM surface and make each
@@ -45,7 +53,7 @@ selection remains a separate gap to resolve with the convolution team.
 
 | Path | Existing implementation | Coverage implication |
 |---|---|---|
-| Implicit-GEMM forward | Generic builder, grouped and depthwise geometry, multiple pipelines/epilogues, vector-width choices, merged depthwise groups, 2-D and 3-D geometry support | Current pinned harness covers only selected 2-D FP16/BF16 production configurations on gfx942 |
+| Implicit-GEMM forward | Generic builder, grouped and depthwise geometry, multiple pipelines/epilogues, vector-width choices, merged depthwise groups, 2-D and 3-D geometry support | Current pinned harness covers selected 2-D FP16/BF16 production configurations on gfx942 and gfx950 |
 | Direct grouped forward | Generic runtime-channel kernel and fixed 4/8/16/32-channel specializations | Separate preparation/spec selection; forward oracle is reusable; variant admission and dtype restrictions differ |
 | Direct depthwise forward | Row-streamed, spatial, tiled, and column-streamed variants | Different schedules and admitted filter/stride/padding ranges; one depthwise case does not cover all four |
 | Direct non-grouped forward | Halo-reusing tiled kernel, runtime shapes/channels, atom and tile choices | Cover channel/spatial tails, dilation, and one binary serving multiple shapes |
@@ -98,9 +106,10 @@ selection or packaged kernel availability.
 
 ## What the existing tests establish
 
-The published reference registry enrolls convolution on gfx942 only: eight
-geometries in two dtypes, plus three failure controls. The current refactor adds
-host ABI construction tests for gfx950, but does not publish a gfx950 cohort.
+At assessment time, the published reference registry enrolled convolution on
+gfx942 only: eight geometries in two dtypes, plus three failure controls. The
+completed first implementation doubles the cohort and publishes it on both
+gfx942 and gfx950, with separate gradient numerical tests as described above.
 See [the reference contract](conv-test-reference.md) and
 [publication registry](../platform/cmake/PublishedGpuReferences.cmake).
 
@@ -153,13 +162,14 @@ in both FP16 and BF16 on both gfx942 and gfx950:
 | Hi=Wi=3, padding=0 | One output pixel |
 
 Unspecified fields use the existing reference Case defaults. The selected tile
-was 64x64x64 and the epilogue cshuffle for all these probes. GPU qualification
-must still establish numerical validity and the available error margin.
+was 64x64x64 and the epilogue cshuffle for all these probes. Subsequent GPU
+qualification established numerical validity and the available error margin
+for both complete cohorts.
 
-An initial budget is 32 numerical cases per architecture: the existing sixteen
-plus these sixteen. Enrolling that cohort on gfx942 and gfx950 would yield 64
-architecture-specific numerical cases, not 64 unique geometries. This is a
-planning estimate, not a completed coverage claim or sufficient total target.
+The delivered forward cohorts contain 32 numerical cases per architecture: the
+original sixteen plus these sixteen. Together they provide 64 architecture-specific
+numerical cases. This count does not imply coverage of every implementation or
+configuration.
 
 All these forward selections used `group_merge=1`. The recently added merged
 forward builder path therefore needs explicit-spec coverage or a production

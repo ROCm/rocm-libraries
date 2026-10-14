@@ -171,20 +171,25 @@ the strategy's biggest holes live (see
   `platform/cmake/PublishedGpuReferences.cmake`; TheRock splits the payloads by target.
   The operation's architecture registry describes supported qualification cohorts,
   not publication status. SDPA/gfx942, SDPA/gfx950, SDPA/gfx1151, SDPA/gfx1201,
-  and convolution/gfx942 are published. Adding another
+  convolution/gfx942 and convolution/gfx950 are published. Adding another
   published pair requires its adapter, independently qualified lock, retrievable
   bundle, and publication entry.
   Qualification accepts `--arch` and freezes the shared worker and architecture
   adapters into the new bundle. Existing bundles keep their original frozen code.
 
 - The [convolution reference lane](docs/conv-test-reference.md) implements the
-  same offline qualification and GPU replay workflow for a bounded gfx942
-  forward cohort. It shares artifact, digest, budget, snapshot, and worker
-  transport code with SDPA. Its published gfx942 bundle is installed by default
-  alongside SDPA. Verify replacement candidates with explicit bundle and lock
-  paths through the offline CLI. Both operations use NumPy and ROCm without
+  same offline qualification and GPU replay workflow for bounded 32-case
+  forward cohorts on gfx942 and gfx950. It shares artifact, digest, budget,
+  snapshot, and worker transport code with SDPA. Both published convolution
+  bundles are installed by default alongside SDPA. Verify replacement candidates
+  with explicit bundle and lock paths through the offline CLI. Both operations use NumPy and ROCm without
   Torch in CI.
   Optional Torch cross-checking belongs only to offline convolution qualification.
+  Separately, the installed library GPU suite runs twelve backward-data and
+  fourteen backward-weight cases per target against live NumPy oracles, with
+  three executions per case. See the
+  [six-lane validation record](docs/conv-six-lane-validation.md) for selection
+  policy, installed results, and integration limits.
 
 - **Nothing else in this document proves the math is right.** Byte-identity
   ([§4.3](#43-do-the-two-implementations-agree-the-migration-gate)) and golden IR
