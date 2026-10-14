@@ -172,13 +172,11 @@ struct GemmPipelineAgBgCrCompTDMV1 : public BaseGemmPipelineAgBgCrCompTDM<Proble
 
     static constexpr bool DoubleSmemBuffer = Problem::DoubleSmemBuffer;
 
-    static_assert(DoubleSmemBuffer == true, "pipeline requires double smem buffer");
-
     static constexpr auto Scheduler = Problem::Scheduler;
 
     static constexpr auto pipeline_tune_params = Policy::template GetPipelineSubTileNum<Problem>();
     static constexpr index_t sub_tile_num      = pipeline_tune_params.value;
-    static constexpr index_t num_lds_buffers   = 2;
+    static constexpr index_t num_lds_buffers   = DoubleSmemBuffer ? 2 : 1;
 
     static constexpr bool UseDataCachePrefetch =
         (Policy::DataCachePrefetchA != DataCachePrefetchKind::None ||
@@ -295,6 +293,122 @@ struct GemmPipelineAgBgCrCompTDMV1 : public BaseGemmPipelineAgBgCrCompTDM<Proble
         {
             return remove_cvref_t<Window>{}
                 .template prefetch_for_tdm_covers_more_calls<PrefetchKind>(step);
+        }
+
+        template <bool HasHotLoop,
+                  TailNumber TailNum,
+                  bool IsAColMajor,
+                  bool IsBRowMajor,
+                  index_t NumLdsBuffers,
+                  typename ACopyDramWindow,
+                  typename BCopyDramWindow,
+                  typename ACopyLdsWindows,
+                  typename ALdsGemmWindows,
+                  typename BCopyLdsWindows,
+                  typename BLdsGemmWindows,
+                  typename TDMConfigA,
+                  typename TDMConfigB,
+                  typename std::enable_if_t<NumLdsBuffers == 1, bool> = true>
+        CK_TILE_DEVICE auto RunPipelineLoop(ACopyDramWindow& a_copy_dram_window,
+                                            BCopyDramWindow& b_copy_dram_window,
+                                            ACopyLdsWindows& a_copy_lds_windows,
+                                            ALdsGemmWindows& a_lds_gemm_windows,
+                                            BCopyLdsWindows& b_copy_lds_windows,
+                                            BLdsGemmWindows& b_lds_gemm_windows,
+                                            TDMConfigA& tdm_config_a,
+                                            TDMConfigB& tdm_config_b,
+                                            index_t num_loop,
+                                            bool data_cache_prefetch_a,
+                                            bool data_cache_prefetch_b) const
+        {
+            ignore = HasHotLoop;
+            ignore = TailNum;
+
+            using ADramTileWindowStep = typename ACopyDramWindow::BottomTensorIndex;
+            using BDramTileWindowStep = typename BCopyDramWindow::BottomTensorIndex;
+
+            constexpr ADramTileWindowStep a_dram_tile_window_step =
+                IsAColMajor ? make_array(KPerBlock, 0) : make_array(0, KPerBlock);
+            constexpr BDramTileWindowStep b_dram_tile_window_step =
+                IsBRowMajor ? make_array(KPerBlock, 0) : make_array(0, KPerBlock);
+
+            constexpr auto ALdsTileDistr = decltype(make_static_tile_distribution(
+                BlockGemm::MakeABlockDistributionEncode())){};
+            constexpr auto BLdsTileDistr = decltype(make_static_tile_distribution(
+                BlockGemm::MakeBBlockDistributionEncode())){};
+
+            using ALdsTile = decltype(make_static_distributed_tensor<ADataType>(ALdsTileDistr));
+            using BLdsTile = decltype(make_static_distributed_tensor<BDataType>(BLdsTileDistr));
+
+            ALdsTile a_block_tile[2];
+            BLdsTile b_block_tile[2];
+
+            auto block_gemm   = BlockGemm();
+            auto c_block_tile = block_gemm.MakeCBlockTile();
+            clear_tile(c_block_tile);
+
+            index_t i_global_read = 0;
+            do
+            {
+                block_sync_lds();
+
+                if constexpr(UseDataCachePrefetch)
+                {
+                    if(data_cache_prefetch_a)
+                        PrefetchForTDM<Policy::DataCachePrefetchA>(
+                            a_copy_dram_window, a_dram_tile_window_step, tdm_config_a);
+                    if(data_cache_prefetch_b)
+                        PrefetchForTDM<Policy::DataCachePrefetchB>(
+                            b_copy_dram_window, b_dram_tile_window_step, tdm_config_b);
+                }
+
+                Base::GlobalPrefetchTDM(tdm_config_a,
+                                        a_copy_lds_windows[I0{}],
+                                        a_copy_dram_window,
+                                        a_dram_tile_window_step);
+                Base::GlobalPrefetchTDM(tdm_config_b,
+                                        b_copy_lds_windows[I0{}],
+                                        b_copy_dram_window,
+                                        b_dram_tile_window_step);
+                s_wait_tensorcnt_barrier<0>();
+
+                block_gemm.template LocalPrefetch<sub_tile_num == 1 ? WindowSlideMode::Stay
+                                                                    : WindowSlideMode::Move>(
+                    a_block_tile[0],
+                    b_block_tile[0],
+                    a_lds_gemm_windows[I0{}],
+                    b_lds_gemm_windows[I0{}],
+                    is_a_load_tr_v,
+                    is_b_load_tr_v);
+
+                static_for<0, sub_tile_num - 1, 1>{}([&](auto i) {
+                    constexpr index_t compute_idx  = i.value % 2;
+                    constexpr index_t prefetch_idx = (i.value + 1) % 2;
+
+                    block_gemm.template LocalPrefetch<
+                        ((i.value + 1) == sub_tile_num - 1) ? WindowSlideMode::Reset
+                                                           : WindowSlideMode::Move>(
+                        a_block_tile[prefetch_idx],
+                        b_block_tile[prefetch_idx],
+                        a_lds_gemm_windows[I0{}],
+                        b_lds_gemm_windows[I0{}],
+                        is_a_load_tr_v,
+                        is_b_load_tr_v);
+                    block_gemm(
+                        c_block_tile, a_block_tile[compute_idx], b_block_tile[compute_idx]);
+                    HotLoopScheduler();
+                });
+
+                constexpr index_t final_compute_idx = (sub_tile_num - 1) % 2;
+                block_gemm(c_block_tile,
+                           a_block_tile[final_compute_idx],
+                           b_block_tile[final_compute_idx]);
+                HotLoopScheduler();
+
+                ++i_global_read;
+            } while(i_global_read < num_loop);
+
+            return c_block_tile;
         }
 
         // Pipeline loop function - handles prefetching and compute loop
