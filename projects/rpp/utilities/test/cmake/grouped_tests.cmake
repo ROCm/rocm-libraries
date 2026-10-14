@@ -22,17 +22,11 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ]]
 
-# Registers one CTest test per GTest suite (i.e. per RPP operator) instead of one per case.
+# Registers one CTest test per GTest suite (i.e. per RPP operator) instead of one per case, since
+# per-case registration spends most of its time on process start and RPP/HIP handle setup.
 #
-# gtest_discover_tests() registers every case separately, which for this suite is ~25000 CTest
-# tests, each paying a fresh process start plus RPP/HIP handle setup. That overhead dominates:
-# ~0.33s per case of spawn cost against a whole 8000-case category that runs in 18s in one
-# process. Grouping by suite keeps a named CTest test per operator -- so a failure still points at
-# an operator without reading any logs -- while cutting the process count by ~250x.
-#
-# Discovery mirrors gtest_discover_tests' POST_BUILD mode: the built binary is asked for its suite
-# list and a CTest include file is generated from it, so the registration cannot drift as
-# operators are added or renamed.
+# Like gtest_discover_tests' POST_BUILD mode, the built binary is asked for its suite list and a
+# CTest include file is generated from it.
 
 set(RPP_GROUPED_TESTS_IMPL "${CMAKE_CURRENT_LIST_DIR}/grouped_tests_impl.cmake"
     CACHE INTERNAL "Script that turns --gtest_list_tests output into add_test() calls")

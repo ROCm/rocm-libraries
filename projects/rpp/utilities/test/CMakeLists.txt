@@ -68,10 +68,8 @@ target_compile_options(rpp_tests PRIVATE -Wall -Wextra -Werror)
 # src/main.cpp provides main() (it installs the suite's own reporter), so gtest_main is not used.
 target_link_libraries(rpp_tests PRIVATE ${RPP_TEST_LINK_LIB} GTest::gtest)
 
-# One CTest test per GTest suite (per operator) by default -- see cmake/grouped_tests.cmake for
-# why. Per-case registration stays available: it isolates every case in its own process, so a
-# segfault or GPU fault takes down one case rather than its whole operator suite, at the cost of
-# ~25000 process starts.
+# One CTest test per GTest suite (per operator) by default; see cmake/grouped_tests.cmake.
+# Per-case registration isolates each case in its own process, at the cost of one start per case.
 option(RPP_TEST_CTEST_PER_CASE "Register one CTest test per GTest case (slow: one process each)" OFF)
 
 if(RPP_TEST_CTEST_PER_CASE)
