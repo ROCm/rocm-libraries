@@ -27,7 +27,9 @@ set_property(TARGET tensilelite_write PROPERTY THEROCK_INSTALL_RPATH_ORIGIN
     "${_tensilelite_write_install}")
 
 if(_link_msgpack_host)
-    target_link_libraries(tensilelite_write PRIVATE tensilelite-host)
+    # tensilelite-host links msgpack privately, so this module still needs
+    # the header for <msgpack.hpp>.
+    target_link_libraries(tensilelite_write PRIVATE tensilelite-host ${hipblaslt_msgpack_target})
     set_target_properties(tensilelite_write PROPERTIES
         BUILD_RPATH "$<TARGET_FILE_DIR:tensilelite-host>"
         INSTALL_RPATH "$ORIGIN/../.."

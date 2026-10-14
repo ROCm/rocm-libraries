@@ -279,7 +279,18 @@ namespace TensileLite
                 // Read above the format branch so both layouts pick it up, and
                 // so an indexed file does not leave the key unconsumed for
                 // checkUsedKeys() to flag under TENSILE_DB=0x1000.
-                iot::mapOptional(io, "version", lib.version);
+                // An absent version is omitted. An empty version is not a version.
+                if(iot::outputting(io))
+                {
+                    if(!lib.version.empty())
+                        iot::mapOptional(io, "version", lib.version);
+                }
+                else if(iot::hasKey(io, "version"))
+                {
+                    iot::mapOptional(io, "version", lib.version);
+                    if(lib.version.empty())
+                        iot::setError(io, "library version must not be empty");
+                }
 
                 // Absent (legacy) or 1 means the eager layout below. 2 is the
                 // indexed layout. Anything higher is a format this build does

@@ -24,8 +24,6 @@
 ################################################################################
 """Unit tests for Tensile.LibraryIO.writeMsgPack."""
 
-import functools
-import importlib.util
 import zlib
 import msgpack
 import pytest
@@ -33,23 +31,10 @@ import pytest
 from Tensile.LibraryIO import writeMsgPack, writeMsgPackIndexed
 
 
-def _requires_writer(test):
-    """Library MessagePack bytes come from tensilelite_write."""
-
-    @functools.wraps(test)
-    def wrapped(*args, **kwargs):
-        if importlib.util.find_spec("tensilelite.tensilelite_write") is None:
-            pytest.skip("tensilelite_write was not built")
-        return test(*args, **kwargs)
-
-    return wrapped
-
-
 def _mapping():
     return {0: "TensileLibrary_gfx942_0", 10: "TensileLibrary_gfx942_10"}
 
 
-@_requires_writer
 def test_writeMsgPack_produces_zlib_file(tmp_path):
     """writeMsgPack writes <filename>.zlib, not <filename>."""
     dest = str(tmp_path / "library.dat")
@@ -61,21 +46,16 @@ def test_writeMsgPack_produces_zlib_file(tmp_path):
     assert (tmp_path / "library.dat.zlib").exists()
 
 
-@_requires_writer
 def test_writeMsgPack_roundtrips_data(tmp_path):
-    """A lazy-library index map comes back with string keys, as the loader reads them."""
+    """A non-master payload is packed by msgpack.packb and round-trips."""
     dest = str(tmp_path / "library.dat")
 
     writeMsgPack(dest, _mapping())
 
     raw = zlib.decompress((tmp_path / "library.dat.zlib").read_bytes())
-    assert msgpack.unpackb(raw, raw=False, strict_map_key=False) == {
-        "0": "TensileLibrary_gfx942_0",
-        "10": "TensileLibrary_gfx942_10",
-    }
+    assert msgpack.unpackb(raw, raw=False, strict_map_key=False) == _mapping()
 
 
-@_requires_writer
 def test_writeMsgPack_uses_zlib_compression(tmp_path):
     """Output is valid zlib (not raw msgpack)."""
     dest = str(tmp_path / "library.dat")
@@ -87,7 +67,6 @@ def test_writeMsgPack_uses_zlib_compression(tmp_path):
     assert len(decompressed) > 0
 
 
-@_requires_writer
 def test_writeMsgPack_removes_stale_uncompressed(tmp_path):
     """A pre-existing uncompressed .dat is deleted so it cannot shadow the .zlib."""
     dat = tmp_path / "library.dat"
@@ -99,7 +78,6 @@ def test_writeMsgPack_removes_stale_uncompressed(tmp_path):
     assert (tmp_path / "library.dat.zlib").exists()
 
 
-@_requires_writer
 def test_writeMsgPack_missing_stale_uncompressed_is_noop(tmp_path):
     """Absence of an uncompressed sibling is not an error."""
     dest = str(tmp_path / "library.dat")
@@ -109,7 +87,6 @@ def test_writeMsgPack_missing_stale_uncompressed_is_noop(tmp_path):
     assert (tmp_path / "library.dat.zlib").exists()
 
 
-@_requires_writer
 def test_writeMsgPack_reader_contract_is_zlib_wrapped_msgpack(tmp_path):
     """The on-disk format the C++ loader depends on: zlib(msgpack(data)).
 
@@ -130,7 +107,6 @@ def test_writeMsgPack_reader_contract_is_zlib_wrapped_msgpack(tmp_path):
     assert msgpack.unpackb(raw, raw=False, strict_map_key=False) == data
 
 
-@_requires_writer
 def test_writeMsgPack_empty_mapping_roundtrips(tmp_path):
     """Corner case: an empty mapping still produces a loadable .zlib."""
     dest = str(tmp_path / "library.dat")

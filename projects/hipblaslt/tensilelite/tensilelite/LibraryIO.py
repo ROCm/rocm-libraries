@@ -280,38 +280,14 @@ def _native_msgpack_writer():
     return tensilelite_write
 
 
-def _index_to_name_mapping(data):
-    """The lazy-library index file: index to code-object file prefix."""
-    if not isinstance(data, dict):
-        return None
-    pairs = []
-    for key, value in data.items():
-        if isinstance(key, bool) or not isinstance(value, str):
-            return None
-        if isinstance(key, int):
-            index = key
-        elif isinstance(key, str):
-            try:
-                index = int(key)
-            except ValueError:
-                return None
-        else:
-            return None
-        pairs.append((index, value))
-    return pairs
-
-
 def writeMsgPack(filename, data):
     """Writes data to file in compressed Message Pack format (.dat.zlib)."""
-    writer = _native_msgpack_writer()
     if _is_master_library_state(data):
-        raw = writer.write_library(msgpack.packb(data))
+        raw = _native_msgpack_writer().write_library(msgpack.packb(data))
     else:
-        mapping = _index_to_name_mapping(data)
-        if mapping is None:
-            printExit("writeMsgPack writes a MasterSolutionLibrary or an "
-                      "index-to-file mapping")
-        raw = writer.write_mapping(msgpack.packb(dict(mapping)))
+        # Lists, empty documents, and lazy index maps stay on the Python
+        # encoder. Only a MasterSolutionLibrary is rewritten in C++.
+        raw = msgpack.packb(data)
     compressed = zlib.compress(raw, 9)
     with open(filename + ".zlib", "wb") as f:
         f.write(compressed)

@@ -4,6 +4,7 @@
 #include <Tensile/msgpack/Writing.hpp>
 
 #include <Tensile/CachingLibrary.hpp>
+#include <Tensile/ContractionProblemPredicates.hpp>
 #include <Tensile/msgpack/MessagePack.hpp>
 
 #include <limits>
@@ -53,6 +54,10 @@ namespace TensileLite
             loadMasterOrThrow(std::vector<uint8_t> const& data)
         {
             std::shared_ptr<MasterContractionLibrary> rv;
+
+            // Building the in-memory library must not query a device.
+            // hipGetDevice runs when a library is loaded to run a solution.
+            [[maybe_unused]] Predicates::Contraction::DeferWorkgroupMappingDeviceQuery deferDevice;
 
             auto result = msgpack::unpack(reinterpret_cast<const char*>(data.data()), data.size());
             LibraryIOContext<ContractionSolution> context{std::string(""), {}, nullptr};
