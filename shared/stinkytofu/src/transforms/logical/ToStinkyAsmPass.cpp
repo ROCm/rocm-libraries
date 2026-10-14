@@ -480,6 +480,7 @@ StinkyInstruction* createAsmFromIR(LogicalInstruction* irInst, GfxArchID arch) {
             }
         }
         asmInst->addModifier<MFMAModifiers>(mod);
+        asmInst->resolveMatrixFmtOverrides();
     }
 
     return asmInst;
