@@ -82,13 +82,7 @@ void cpu_hermitianize(const rocblas_fill uplo, const I n, Th hA, const I lda)
 // Aband is n-by-n, bandwidth kd; currently assumes lower band.
 // A is n-by-n.
 template <typename T, typename I, typename Th>
-void cpu_band2full(const rocblas_fill uplo,
-                   const I n,
-                   I kd,
-                   Th hAband,
-                   const I ldab,
-                   Th hA,
-                   const I lda)
+void cpu_band2full(const rocblas_fill uplo, const I n, I kd, Th hAband, const I ldab, Th hA, const I lda)
 {
     kd = std::min(kd, n - 1);
 
@@ -351,8 +345,7 @@ void sy2sb_he2hb_getError(const rocblas_handle handle,
         rocsolver_orgxr_ungxr(true, handle, n_kd, n_kd, n_kd, &dV[0][kd], lda, dTau[0]));
 
     // W = I.
-    CHECK_ROCBLAS_ERROR(
-        rocsolver_laset(handle, rocblas_fill_full, n_kd, n_kd, zero, one, dW[0], lda));
+    CHECK_ROCBLAS_ERROR(rocsolver_laset(handle, rocblas_fill_full, n_kd, n_kd, zero, one, dW[0], lda));
 
     // W = I - Q^H Q, with explicit Q in V.
     CHECK_ROCBLAS_ERROR(rocblas_gemm(handle, rocblas_operation_conjugate_transpose,
