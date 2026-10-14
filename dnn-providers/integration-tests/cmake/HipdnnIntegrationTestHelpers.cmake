@@ -75,7 +75,7 @@
 #     Optional list of Google Test filter expressions naming the
 #     dnn-benchmarking workload suites (``dnn_benchmarking_*``) this engine is
 #     expected to run. Joined with ``:``. When workload archives were pulled
-#     (``HIPDNN_IT_WORKLOAD_ARCHIVES_PRESENT``), one extra CTest entry
+#     (global property ``HIPDNN_IT_WORKLOADS_EXTRACTED``), one extra CTest entry
 #     ``<TARGET_NAME>-dnn-benchmarking`` runs them, labeled ``dnn_benchmarking``.
 #
 #   ``TEST_CATEGORIES_YAML``
@@ -272,24 +272,18 @@ macro(_add_external_integration_category_suites)
     endif()
 endmacro()
 
-# True when dnn-benchmarking workload archives were pulled into ../workloads
-# (build-tree use only: the installed package ships none). Evaluated when this
-# module is included, so re-run configure after `dvc pull`.
-file(GLOB _hipdnn_it_workload_archives "${CMAKE_CURRENT_LIST_DIR}/../workloads/*.tar.gz")
-if(_hipdnn_it_workload_archives)
-    set(HIPDNN_IT_WORKLOAD_ARCHIVES_PRESENT TRUE)
-endif()
-
 # Registers the optional dnn-benchmarking workload CTest entry of one external
-# integration target: when workload archives were pulled (see
-# HIPDNN_IT_WORKLOAD_ARCHIVES_PRESENT) and the caller passed
+# integration target: when the integration-tests project extracted workload
+# archives (global property HIPDNN_IT_WORKLOADS_EXTRACTED, set by its CMakeLists
+# at configure) and the caller passed
 # WORKLOAD_GTEST_FILTER, this engine's share of them runs as one more entry. It is
 # labeled dnn_benchmarking, not integration_test, so label-based and bare runs can
 # leave it out; the superbuild CI runs it by that label.
 #
 # Uses the ARG_* variables parsed by add_external_integration_test_target().
 macro(_add_external_integration_workload_test)
-    if(ARG_WORKLOAD_GTEST_FILTER AND HIPDNN_IT_WORKLOAD_ARCHIVES_PRESENT)
+    get_property(_workloads_extracted GLOBAL PROPERTY HIPDNN_IT_WORKLOADS_EXTRACTED)
+    if(ARG_WORKLOAD_GTEST_FILTER AND _workloads_extracted)
         list(JOIN ARG_WORKLOAD_GTEST_FILTER ":" _workload_filter)
         set(_workload_test ${ARG_TARGET_NAME}-dnn-benchmarking)
         # The engine's own GTEST_FILTER must not reach this command (a second

@@ -623,7 +623,12 @@ jobs:
       # runs on every run that fetched the workloads and proves they registered.
       - name: List dnn-benchmarking workload tests
         if: steps.workloads.outputs.fetch == 'true'
-        run: ctest --test-dir build -N -L dnn_benchmarking --no-tests=error
+        # ctest -N ignores --no-tests=error, so count the listing itself.
+        run: |
+          set -euo pipefail
+          listing=$(ctest --test-dir build -N -L dnn_benchmarking)
+          echo "$listing"
+          grep -qE 'Total Tests: [1-9]' <<<"$listing"
 
       # Nightly and manual runs only; a PR that bumps the pins still proves the
       # pointers fetch, extract and register.
