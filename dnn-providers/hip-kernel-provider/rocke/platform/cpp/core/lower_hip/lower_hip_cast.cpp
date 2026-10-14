@@ -171,6 +171,28 @@ static rocke_status_t rocke_h_op_arith_cast_f32_to(rocke_h_lowerer_t* lw, const 
     return lw->status;
 }
 
+/* def _op_arith_cvt_f32_to_f64(self, op):
+ *     (v,) = op.operands
+ *     self._emit(f"double {_name(op.result)} = (double){_name(v)};") */
+static rocke_status_t rocke_h_op_arith_cvt_f32_to_f64(rocke_h_lowerer_t* lw, const rocke_op_t* op)
+{
+    const rocke_value_t* v = op->operands[0];
+    const rocke_value_t* r = h_res(op);
+    rocke_h_emitf(lw, "double %s = (double)%s;", rocke_h_name(lw, r), rocke_h_name(lw, v));
+    return lw->status;
+}
+
+/* def _op_arith_cvt_f64_to_f32(self, op):
+ *     (v,) = op.operands
+ *     self._emit(f"float {_name(op.result)} = (float){_name(v)};") */
+static rocke_status_t rocke_h_op_arith_cvt_f64_to_f32(rocke_h_lowerer_t* lw, const rocke_op_t* op)
+{
+    const rocke_value_t* v = op->operands[0];
+    const rocke_value_t* r = h_res(op);
+    rocke_h_emitf(lw, "float %s = (float)%s;", rocke_h_name(lw, r), rocke_h_name(lw, v));
+    return lw->status;
+}
+
 /* def _op_arith_sitofp_f32(self, op):
  *     (v,) = op.operands
  *     self._emit(f"float {_name(op.result)} = (float){_name(v)};") */
@@ -455,6 +477,8 @@ const rocke_h_handler_entry_t* rocke_h_handlers_cast(void)
         {ROCKE_OP_ARITH_BITCAST, rocke_h_op_arith_bitcast},
         {ROCKE_OP_ARITH_CAST_TO_F32, rocke_h_op_arith_cast_to_f32},
         {ROCKE_OP_ARITH_CAST_F32_TO, rocke_h_op_arith_cast_f32_to},
+        {ROCKE_OP_ARITH_CVT_F32_TO_F64, rocke_h_op_arith_cvt_f32_to_f64},
+        {ROCKE_OP_ARITH_CVT_F64_TO_F32, rocke_h_op_arith_cvt_f64_to_f32},
         {ROCKE_OP_ARITH_SITOFP_F32, rocke_h_op_arith_sitofp_f32},
         {ROCKE_OP_ARITH_CVT_FP8_TO_F32, rocke_h_op_arith_cvt_fp8_to_f32},
         {ROCKE_OP_ARITH_CVT_BF8_TO_F32, rocke_h_op_arith_cvt_bf8_to_f32},

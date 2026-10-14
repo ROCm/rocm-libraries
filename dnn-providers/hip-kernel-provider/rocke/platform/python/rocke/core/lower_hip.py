@@ -1575,6 +1575,16 @@ class _Lowerer:
         cpp_t = _type_to_hip(op.result.type)
         self._emit(f"{cpp_t} {_name(op.result)} = ({cpp_t}){_name(v)};")
 
+    def _op_arith_cvt_f32_to_f64(self, op: Op) -> None:
+        # f32 -> f64 is exact; the C conversion is the same fpext.
+        (v,) = op.operands
+        self._emit(f"double {_name(op.result)} = (double){_name(v)};")
+
+    def _op_arith_cvt_f64_to_f32(self, op: Op) -> None:
+        # f64 -> f32 rounds to nearest even, as the C conversion does.
+        (v,) = op.operands
+        self._emit(f"float {_name(op.result)} = (float){_name(v)};")
+
     def _op_arith_sitofp_f32(self, op: Op) -> None:
         # i32 -> f32. C-style cast is sufficient.
         (v,) = op.operands

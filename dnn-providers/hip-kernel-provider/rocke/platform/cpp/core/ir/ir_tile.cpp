@@ -380,14 +380,15 @@ rocke_value_t* rocke_b_smem_load_vN(rocke_ir_builder_t* b,
         return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "smem_load_vN dtype is NULL");
     }
     dn = dtype->name;
-    if(!(strcmp(dn, "f16") == 0 || strcmp(dn, "bf16") == 0 || strcmp(dn, "f32") == 0
-         || strcmp(dn, "tf32") == 0 || strcmp(dn, "i32") == 0 || strcmp(dn, "f64") == 0
-         || strcmp(dn, "fp8e4m3") == 0 || strcmp(dn, "bf8e5m2") == 0 || strcmp(dn, "i8") == 0))
+    if(!(strcmp(dn, "f16") == 0 || strcmp(dn, "bf16") == 0 || strcmp(dn, "i16") == 0
+         || strcmp(dn, "f32") == 0 || strcmp(dn, "tf32") == 0 || strcmp(dn, "i32") == 0
+         || strcmp(dn, "f64") == 0 || strcmp(dn, "fp8e4m3") == 0 || strcmp(dn, "bf8e5m2") == 0
+         || strcmp(dn, "i8") == 0))
     {
         return (rocke_value_t*)rocke_i_set_err(
             b,
             ROCKE_ERR_VALUE,
-            "smem_load_vN supports f16 / bf16 / f32 / i32 / tf32 / f64 / "
+            "smem_load_vN supports f16 / bf16 / i16 / f32 / i32 / tf32 / f64 / "
             "fp8e4m3 / bf8e5m2 / i8, got %s",
             dn);
     }
@@ -399,7 +400,7 @@ rocke_value_t* rocke_b_smem_load_vN(rocke_ir_builder_t* b,
             allowed = allowed_8bit;
             acount = 6;
         }
-        else if(strcmp(dn, "f16") == 0 || strcmp(dn, "bf16") == 0)
+        else if(strcmp(dn, "f16") == 0 || strcmp(dn, "bf16") == 0 || strcmp(dn, "i16") == 0)
         {
             allowed = allowed_16bit;
             acount = 5;

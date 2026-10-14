@@ -198,7 +198,12 @@ typedef struct rocke_attr_map
 
 /* One enumerator per distinct op name string in rocke.core.ir. Every lowerer
  * dispatches on this enum instead of Python getattr(self, "_op_"+name). The
- * canonical dotted name string is recovered with rocke_opcode_name(). */
+ * canonical dotted name string is recovered with rocke_opcode_name().
+ *
+ * A new opcode goes at the end, just before ROCKE_OP__COUNT. Inserting one
+ * anywhere else renumbers every opcode after it, which breaks the C ABI (see
+ * "when to bump" in rocke/abi.h). tests/core/test_opcode_values.cpp pins the
+ * value of every existing opcode. */
 typedef enum rocke_opcode
 {
     ROCKE_OP_INVALID = 0,
@@ -446,6 +451,10 @@ typedef enum rocke_opcode
     ROCKE_OP_MEMREF_GLOBAL_FLAG_WAIT_EQ,
     ROCKE_OP_VECTOR_UNDEF,
     ROCKE_OP_TILE_BUFFER_LOAD_F16_D16,
+
+    /* arith.* f32 <-> f64 conversions */
+    ROCKE_OP_ARITH_CVT_F32_TO_F64,
+    ROCKE_OP_ARITH_CVT_F64_TO_F32,
 
     ROCKE_OP__COUNT
 } rocke_opcode_t;
@@ -841,6 +850,9 @@ rocke_value_t* rocke_b_cast_to_f32(rocke_ir_builder_t* b, rocke_value_t* v);
 rocke_value_t*
     rocke_b_cast_f32_to(rocke_ir_builder_t* b, rocke_value_t* v, const rocke_type_t* target);
 rocke_value_t* rocke_b_sitofp_f32(rocke_ir_builder_t* b, rocke_value_t* v);
+/* f32 <-> f64 have their own opcodes; cast_to_f32 / cast_f32_to reject f64. */
+rocke_value_t* rocke_b_cvt_f32_to_f64(rocke_ir_builder_t* b, rocke_value_t* v);
+rocke_value_t* rocke_b_cvt_f64_to_f32(rocke_ir_builder_t* b, rocke_value_t* v);
 rocke_value_t* rocke_b_cvt_fp8_to_f32(rocke_ir_builder_t* b, rocke_value_t* v);
 rocke_value_t* rocke_b_cvt_bf8_to_f32(rocke_ir_builder_t* b, rocke_value_t* v);
 rocke_value_t* rocke_b_cvt_pk_f32_fp8x4(rocke_ir_builder_t* b, rocke_value_t* v);
