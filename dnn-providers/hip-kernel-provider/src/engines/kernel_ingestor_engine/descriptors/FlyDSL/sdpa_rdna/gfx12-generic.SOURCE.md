@@ -28,7 +28,7 @@ instance list is untouched.
 | aiter_kernels_commit | `8253efc4059516f492df597b80ce5311e9fda8bd` |
 | rocm_version | `7.13.0` |
 | generic_target_shim | `chipset=gfx1200 flydsl_gpu_arch=gfx1200` |
-| inputs_sha256 | `f0b05e43a71a121075f97a74fca2d3dd38d7f3784dc2ec9f9ffb699d10baaa4a` |
+| inputs_sha256 | `b5519dc210da819b0786faec56718b441bfcae5ef9ee44cdc770a2e15b390d93` |
 
 ## Instances
 
@@ -75,10 +75,10 @@ changes when the object does. The full record is `gfx12-generic/manifest.json`.
 | `sdpa_rdna_bf16_dgeneric_causal1_bm64_bn32_dmax224_pair1` | 12 | 177 | 45568 | `a3b845f6230f9f6e` |
 | `sdpa_rdna_bf16_dgeneric_causal0_bm64_bn32_dv2_dmax256_pair1` | 10 | 140 | 49664 | `a15944f43b173d8d` |
 | `sdpa_rdna_bf16_dgeneric_causal1_bm64_bn32_dv2_dmax256_pair1` | 10 | 141 | 49664 | `8386da0442e30b1f` |
-| `sdpa_rdna_bf16_d64_causal0_bm64_bn32_sink1` | 100 | 121 | 8704 | `bd481b61a37759c6` |
-| `sdpa_rdna_bf16_d64_causal1_bm64_bn32_sink1` | 100 | 122 | 8704 | `e6b06568f0d009e4` |
-| `sdpa_rdna_bf16_d128_causal0_bm64_bn32_sink1` | 100 | 202 | 16896 | `56238b03dac6b7aa` |
-| `sdpa_rdna_bf16_d128_causal1_bm128_bn32_sink1` | 100 | 188 | 16896 | `1281bde572ceb4a0` |
+| `sdpa_rdna_bf16_d64_causal0_bm64_bn32_sink1` | 100 | 121 | 8704 | `8a6f989b23b656fe` |
+| `sdpa_rdna_bf16_d64_causal1_bm64_bn32_sink1` | 100 | 122 | 8704 | `63ddeebd329148f8` |
+| `sdpa_rdna_bf16_d128_causal0_bm64_bn32_sink1` | 100 | 202 | 16896 | `5e78e7206bb06556` |
+| `sdpa_rdna_bf16_d128_causal1_bm128_bn32_sink1` | 100 | 188 | 16896 | `739699c1e4c9ce94` |
 | `sdpa_rdna_f16_d64_causal0_bm64_bn32` | 100 | 115 | 8704 | `9d8cef18fe4267d6` |
 | `sdpa_rdna_f16_d64_causal0_bm128_bn32_bias1` | 100 | 132 | 8704 | `e5c5afe00fe1aa01` |
 | `sdpa_rdna_f16_d64_causal0_bm128_bn32_bias1_biasq1` | 100 | 132 | 8704 | `9e64d526154fa924` |
@@ -117,7 +117,7 @@ changes when the object does. The full record is `gfx12-generic/manifest.json`.
 | `sdpa_rdna_f16_dgeneric_causal1_bm64_bn32_dmax224_pair1` | 12 | 168 | 45568 | `a3a0129e470be93b` |
 | `sdpa_rdna_f16_dgeneric_causal0_bm64_bn32_dv2_dmax256_pair1` | 10 | 137 | 49664 | `47faf0b8c7ff2cc2` |
 | `sdpa_rdna_f16_dgeneric_causal1_bm64_bn32_dv2_dmax256_pair1` | 10 | 138 | 49664 | `161360f6faa6787a` |
-| `sdpa_rdna_f16_d64_causal0_bm64_bn32_sink1` | 100 | 115 | 8704 | `4e8f6caa38226709` |
-| `sdpa_rdna_f16_d64_causal1_bm64_bn32_sink1` | 100 | 116 | 8704 | `3d395a20fadf099a` |
-| `sdpa_rdna_f16_d128_causal0_bm64_bn32_sink1` | 100 | 195 | 16896 | `c4184fc8c64a3971` |
-| `sdpa_rdna_f16_d128_causal1_bm128_bn32_sink1` | 100 | 188 | 16896 | `93fc3aea0c782579` |
+| `sdpa_rdna_f16_d64_causal0_bm64_bn32_sink1` | 100 | 115 | 8704 | `9bf3b38cf8e90cbe` |
+| `sdpa_rdna_f16_d64_causal1_bm64_bn32_sink1` | 100 | 116 | 8704 | `f99b00e3adc3c101` |
+| `sdpa_rdna_f16_d128_causal0_bm64_bn32_sink1` | 100 | 195 | 16896 | `400dc553a48cac13` |
+| `sdpa_rdna_f16_d128_causal1_bm128_bn32_sink1` | 100 | 188 | 16896 | `19b600dd481781f1` |

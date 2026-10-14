@@ -1467,7 +1467,11 @@ void expectSdpaMatchesReference(const SdpaGraphSpec& spec,
     };
 
     // The attention sink, one logit per query head in the query's dtype, read as [1, H, 1, 1].
-    const DeviceTensor<T> sink({1, spec.heads, 1, 1}, {0, 1, 0, 0}, 7U, true);
+    DeviceTensor<T> sink({1, spec.heads, 1, 1}, {0, 1, 0, 0}, 7U, true);
+    if(spec.sinkNegativeInfinity)
+    {
+        sink.fillWith(T(-std::numeric_limits<float>::infinity()));
+    }
 
     float runtimeScale = spec.scale;
     std::vector<hipdnnPluginDeviceBuffer_t> buffers{{FLYDSL_SDPA_RDNA_Q_UID, qPtr},
@@ -1573,13 +1577,14 @@ void expectSdpaMatchesReference(const SdpaGraphSpec& spec,
                     // full miss.
                     const bool negativeInfinity = std::isinf(actualLse) && actualLse < 0.0;
                     double lseError = std::numeric_limits<double>::max();
-                    if((hasKeys || spec.withSink) && std::isfinite(actualLse))
+                    if(std::isinf(expectedLse) && expectedLse < 0.0)
+                    {
+                        // A keyless row without a sink, or with a sink of -inf.
+                        lseError = negativeInfinity ? 0.0 : lseError;
+                    }
+                    else if(std::isfinite(actualLse))
                     {
                         lseError = std::abs(actualLse - expectedLse);
-                    }
-                    else if(!hasKeys && !spec.withSink && negativeInfinity)
-                    {
-                        lseError = 0.0;
                     }
                     if(lseError > worstLse)
                     {
@@ -2656,6 +2661,38 @@ TEST(TestGpuFlydslSdpaAiwDispatch, AddsAnAttentionSink)
     spec.stats = SdpaStats::LSE;
     expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(
         spec, BF16_TOLERANCE, RdnaFamily::AIW);
+}
+
+/// A sink logit of -inf contributes nothing: rows with keys are plain softmax, and a row no
+/// key reaches (bottom-right, Sq > Skv) gets O = 0 and LSE = -inf, not NaN.
+SdpaGraphSpec sinkOfMinusInfinitySpec()
+{
+    SdpaGraphSpec spec;
+    spec.headDim = 64;
+    spec.heads = 8;
+    spec.kvHeads = 2;
+    spec.seqLenQ = 300;
+    spec.seqLenKv = 64;
+    spec.withSink = true;
+    spec.sinkNegativeInfinity = true;
+    spec.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+    spec.stats = SdpaStats::LSE;
+    return spec;
+}
+
+TEST(TestGpuFlydslSdpaAiwDispatch, AddsASinkOfMinusInfinityToRowsNoKeyReaches)
+{
+    SKIP_IF_NO_DEVICES();
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(
+        sinkOfMinusInfinitySpec(), BF16_TOLERANCE, RdnaFamily::AIW);
+}
+
+TEST(TestGpuFlydslSdpaRdnaDispatch, AddsASinkOfMinusInfinityToRowsNoKeyReaches)
+{
+    SKIP_IF_NO_DEVICES();
+    auto spec = sinkOfMinusInfinitySpec();
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(spec, BF16_TOLERANCE);
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(spec, BF16_TOLERANCE, true);
 }
 
 TEST(TestGpuFlydslSdpaAiwDispatch, ServesMlaAPaddedHeadDimAndVHeadsOfTheirOwn)

@@ -28,7 +28,7 @@ instance list is untouched.
 | aiter_kernels_commit | `8253efc4059516f492df597b80ce5311e9fda8bd` |
 | rocm_version | `7.13.0` |
 | generic_target_shim | `chipset=gfx1200 flydsl_gpu_arch=gfx1200` |
-| inputs_sha256 | `56c72d2621967d85ae0e6c79274b4e2220e375256a6bfaa2c54139b916cad022` |
+| inputs_sha256 | `3e7cfa0a348d095e66b8e60127f03ab39d460b00ffac779e9e7f10ebaacc35a7` |
 
 ## Instances
 
@@ -46,8 +46,8 @@ changes when the object does. The full record is `gfx12-generic/manifest.json`.
 | `sdpa_aiw_bf16_d256_causal0` | 100 | 256 | 35072 | `f17547372aa794d4` |
 | `sdpa_aiw_bf16_d256_causal0_bias1` | 100 | 256 | 35072 | `c99c7b9522638726` |
 | `sdpa_aiw_bf16_d256_causal0_bias1_f32bias1` | 100 | 256 | 35072 | `da93b385cca2026a` |
-| `sdpa_aiw_bf16_d64_causal0_sink1` | 100 | 138 | 8960 | `0cf4682674804e0d` |
-| `sdpa_aiw_bf16_d128_causal0_sink1` | 100 | 240 | 17664 | `356005af5b84bf5c` |
+| `sdpa_aiw_bf16_d64_causal0_sink1` | 100 | 138 | 8960 | `0efb9cd06ec41320` |
+| `sdpa_aiw_bf16_d128_causal0_sink1` | 100 | 240 | 17664 | `dd4a5984dd5af399` |
 | `sdpa_aiw_bf16_d192_causal0_vd128` | 100 | 243 | 21760 | `6be9d2229c1698a0` |
 | `sdpa_aiw_bf16_dgeneric_causal0_dmax64` | 40 | 153 | 8960 | `a3b1ebeaaf5aa53f` |
 | `sdpa_aiw_bf16_dgeneric_causal0_dmax96` | 30 | 193 | 13312 | `d373831d747d1dbd` |
@@ -64,8 +64,8 @@ changes when the object does. The full record is `gfx12-generic/manifest.json`.
 | `sdpa_aiw_bf16_d256_causal1` | 100 | 256 | 35072 | `29c7c12dfecd6bfb` |
 | `sdpa_aiw_bf16_d256_causal1_bias1` | 100 | 256 | 35072 | `5f2b339971819bbd` |
 | `sdpa_aiw_bf16_d256_causal1_bias1_f32bias1` | 100 | 256 | 35072 | `3cb2d4eaac5374f7` |
-| `sdpa_aiw_bf16_d64_causal1_sink1` | 100 | 140 | 8960 | `b6758d8915ea5658` |
-| `sdpa_aiw_bf16_d128_causal1_sink1` | 100 | 243 | 17664 | `99bc39176924cc25` |
+| `sdpa_aiw_bf16_d64_causal1_sink1` | 100 | 140 | 8960 | `ca439b7b622a520a` |
+| `sdpa_aiw_bf16_d128_causal1_sink1` | 100 | 243 | 17664 | `97fc10f679c9ccef` |
 | `sdpa_aiw_bf16_d192_causal1_vd128` | 100 | 204 | 21760 | `2a21bce27f3790b0` |
 | `sdpa_aiw_bf16_dgeneric_causal1_dmax64` | 40 | 155 | 8960 | `1655c5516c45dde1` |
 | `sdpa_aiw_bf16_dgeneric_causal1_dmax96` | 30 | 194 | 13312 | `15f988c7055b4e08` |
@@ -82,8 +82,8 @@ changes when the object does. The full record is `gfx12-generic/manifest.json`.
 | `sdpa_aiw_f16_d256_causal0` | 100 | 256 | 35072 | `4d4e689877a64a30` |
 | `sdpa_aiw_f16_d256_causal0_bias1` | 100 | 256 | 35072 | `10da05bdad052704` |
 | `sdpa_aiw_f16_d256_causal0_bias1_f32bias1` | 100 | 256 | 35072 | `4ec65e778cb1ea00` |
-| `sdpa_aiw_f16_d64_causal0_sink1` | 100 | 144 | 8960 | `3a11255f2cba92f3` |
-| `sdpa_aiw_f16_d128_causal0_sink1` | 100 | 240 | 17664 | `218954b2b4b24bab` |
+| `sdpa_aiw_f16_d64_causal0_sink1` | 100 | 144 | 8960 | `70ece3d370c52cb7` |
+| `sdpa_aiw_f16_d128_causal0_sink1` | 100 | 240 | 17664 | `1f57f65d8b7e89a6` |
 | `sdpa_aiw_f16_d192_causal0_vd128` | 100 | 243 | 21760 | `58d82b63ccc35b6c` |
 | `sdpa_aiw_f16_dgeneric_causal0_dmax64` | 40 | 158 | 8960 | `fd95ad6311d9a4b9` |
 | `sdpa_aiw_f16_dgeneric_causal0_dmax96` | 30 | 195 | 13312 | `a3dd225e27d677c1` |
@@ -100,8 +100,8 @@ changes when the object does. The full record is `gfx12-generic/manifest.json`.
 | `sdpa_aiw_f16_d256_causal1` | 100 | 256 | 35072 | `dff922d0a9079851` |
 | `sdpa_aiw_f16_d256_causal1_bias1` | 100 | 256 | 35072 | `c70a2dfce6e069b8` |
 | `sdpa_aiw_f16_d256_causal1_bias1_f32bias1` | 100 | 256 | 35072 | `dbfefb538b7f2405` |
-| `sdpa_aiw_f16_d64_causal1_sink1` | 100 | 146 | 8960 | `c5b25b3b24d7285a` |
-| `sdpa_aiw_f16_d128_causal1_sink1` | 100 | 244 | 17664 | `c453dde9210e86ff` |
+| `sdpa_aiw_f16_d64_causal1_sink1` | 100 | 146 | 8960 | `c0cead2880a415f1` |
+| `sdpa_aiw_f16_d128_causal1_sink1` | 100 | 244 | 17664 | `9acf79e0e606c1e5` |
 | `sdpa_aiw_f16_d192_causal1_vd128` | 100 | 204 | 21760 | `03ea7e7f99042a7a` |
 | `sdpa_aiw_f16_dgeneric_causal1_dmax64` | 40 | 160 | 8960 | `866196fcde69bad0` |
 | `sdpa_aiw_f16_dgeneric_causal1_dmax96` | 30 | 197 | 13312 | `9c03cb0d58604ce1` |

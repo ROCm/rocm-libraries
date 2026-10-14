@@ -128,6 +128,9 @@
 #      object exponentiates (s - m) * log2(e), which stays finite when a bias
 #      near -FLT_MAX masks the whole row (s * log2(e) - m * log2(e) overflowed
 #      to inf - inf).
+#  23. A sink of -inf on a row no key reaches: its max is floored at -FLT_MAX and
+#      1/l at 0 when l is 0, so O = 0 and LSE = -inf rather than NaN (sink objects
+#      only).
 #
 # Upstream-first: prefer landing these changes in AITER/FlyDSL; this copy exists
 # so the provider is not blocked on that.
@@ -1215,10 +1218,16 @@ def build_flash_attn_func_module(
             sink_val = fx.Float32(
                 fx.ptr_load(sink_ptr + fx.Int32(head_idx * sink_stride)).to(fx.Float32)
             )
-            m_top = row_has_keys.select(_fmax(m_natural, sink_val), sink_val)
+            # A sink of -inf on a row with no keys: m_top floored at -FLT_MAX so the
+            # sink's term is exp(-inf) = 0 rather than exp(-inf - -inf) = NaN; then
+            # l_total is 0, O is 0 and the LSE -inf (modification 23).
+            m_top = row_has_keys.select(
+                _fmax(m_natural, sink_val),
+                _fmax(sink_val, fx.Float32(-3.4028234663852886e38)),
+            )
             keep = row_has_keys.select(fx.math.exp(m_natural - m_top), c_zero_f)
             l_total = l_final * keep + fx.math.exp(sink_val - m_top)
-            inv_l = keep / l_total
+            inv_l = (l_total > c_zero_f).select(keep / l_total, c_zero_f)
             lse_val = m_top + fx.math.log(l_total)
         else:
             inv_l = row_has_keys.select(c_one_f / l_final, c_zero_f)

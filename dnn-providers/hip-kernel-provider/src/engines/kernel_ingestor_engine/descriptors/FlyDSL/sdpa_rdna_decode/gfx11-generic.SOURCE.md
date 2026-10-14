@@ -28,7 +28,7 @@ instance list is untouched.
 | aiter_kernels_commit | `8253efc4059516f492df597b80ce5311e9fda8bd` |
 | rocm_version | `7.13.0` |
 | generic_target_shim | `chipset=gfx1100` |
-| inputs_sha256 | `5280dd4eaa91bfd337f4afa3318719b90e8a2aab89e844a4cb3dbf8ec26a72a0` |
+| inputs_sha256 | `a9e01d6bbee3be5ba8fb9992d6795adce4d75fc4bf7489b430ec1526cca74c8d` |
 
 ## Instances
 
@@ -65,10 +65,10 @@ changes when the object does. The full record is `gfx11-generic/manifest.json`.
 | `sdpa_rdna_decode_bf16_d576_causal1_bm16_bn32_dv4_vd512` | 150 | 251 | 33792 | `f1784adab366b66c` |
 | `sdpa_rdna_decode_bf16_d512_causal0_bm16_bn32_dv4` | 150 | 251 | 33792 | `d929e1acbf38ea27` |
 | `sdpa_rdna_decode_bf16_d512_causal1_bm16_bn32_dv4` | 150 | 251 | 33792 | `3c5708b40f72a086` |
-| `sdpa_rdna_decode_bf16_d64_causal0_bm16_bn32_sink1` | 150 | 168 | 17408 | `9948aa2ed6d0afc6` |
-| `sdpa_rdna_decode_bf16_d64_causal1_bm16_bn32_sink1` | 150 | 168 | 17408 | `4ef1022207be5a4f` |
-| `sdpa_rdna_decode_bf16_d128_causal0_bm16_bn32_sink1` | 150 | 251 | 33792 | `a2eb7d6c0a3f3c10` |
-| `sdpa_rdna_decode_bf16_d128_causal1_bm16_bn32_sink1` | 150 | 251 | 33792 | `2870880b1e84a309` |
+| `sdpa_rdna_decode_bf16_d64_causal0_bm16_bn32_sink1` | 150 | 168 | 17408 | `dbbe02c054aafe34` |
+| `sdpa_rdna_decode_bf16_d64_causal1_bm16_bn32_sink1` | 150 | 168 | 17408 | `91e06b9d8eb11c9d` |
+| `sdpa_rdna_decode_bf16_d128_causal0_bm16_bn32_sink1` | 150 | 251 | 33792 | `e70855a75d82f3bb` |
+| `sdpa_rdna_decode_bf16_d128_causal1_bm16_bn32_sink1` | 150 | 251 | 33792 | `be1990e2c28c4b99` |
 | `sdpa_rdna_decode_bf16_dgeneric_causal0_bm16_bn32_dmax96` | 145 | 218 | 25600 | `2241463ef4672a7b` |
 | `sdpa_rdna_decode_bf16_dgeneric_causal1_bm16_bn32_dmax96` | 145 | 218 | 25600 | `9d067099a511ac66` |
 | `sdpa_rdna_decode_bf16_dgeneric_causal0_bm16_bn32_dv2_dmax256` | 140 | 194 | 33792 | `77f710cd6a356248` |
@@ -101,10 +101,10 @@ changes when the object does. The full record is `gfx11-generic/manifest.json`.
 | `sdpa_rdna_decode_f16_d576_causal1_bm16_bn32_dv4_vd512` | 150 | 254 | 33792 | `6fd3b85b522286a0` |
 | `sdpa_rdna_decode_f16_d512_causal0_bm16_bn32_dv4` | 150 | 254 | 33792 | `4a1d3acb42486088` |
 | `sdpa_rdna_decode_f16_d512_causal1_bm16_bn32_dv4` | 150 | 254 | 33792 | `e4c61494839cd2dd` |
-| `sdpa_rdna_decode_f16_d64_causal0_bm16_bn32_sink1` | 150 | 166 | 17408 | `1cdc9b024a23748a` |
-| `sdpa_rdna_decode_f16_d64_causal1_bm16_bn32_sink1` | 150 | 166 | 17408 | `890e0f589da73432` |
-| `sdpa_rdna_decode_f16_d128_causal0_bm16_bn32_sink1` | 150 | 254 | 33792 | `8fc0d3affe3d96dc` |
-| `sdpa_rdna_decode_f16_d128_causal1_bm16_bn32_sink1` | 150 | 254 | 33792 | `9dc12de90103ed36` |
+| `sdpa_rdna_decode_f16_d64_causal0_bm16_bn32_sink1` | 150 | 166 | 17408 | `c3cd77279e2047b8` |
+| `sdpa_rdna_decode_f16_d64_causal1_bm16_bn32_sink1` | 150 | 166 | 17408 | `5cafb0724cd79280` |
+| `sdpa_rdna_decode_f16_d128_causal0_bm16_bn32_sink1` | 150 | 254 | 33792 | `96dee046b044ca43` |
+| `sdpa_rdna_decode_f16_d128_causal1_bm16_bn32_sink1` | 150 | 254 | 33792 | `a73585fe1d67a386` |
 | `sdpa_rdna_decode_f16_dgeneric_causal0_bm16_bn32_dmax96` | 145 | 224 | 25600 | `6e128d7d12998a08` |
 | `sdpa_rdna_decode_f16_dgeneric_causal1_bm16_bn32_dmax96` | 145 | 224 | 25600 | `dd66e99d259773f7` |
 | `sdpa_rdna_decode_f16_dgeneric_causal0_bm16_bn32_dv2_dmax256` | 140 | 194 | 33792 | `eb40c1f451d5d254` |

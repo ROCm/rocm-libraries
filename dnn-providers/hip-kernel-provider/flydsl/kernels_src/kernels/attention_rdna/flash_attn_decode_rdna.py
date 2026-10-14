@@ -676,10 +676,17 @@ def build_flash_attn_decode_module(
                     ).to(fx.Float32)
                 )
                 m_natural = c_lse_scale * m_all
-                m_top = has.select(_fmax(m_natural, sink_val), sink_val)
+                # A sink of -inf on a row with no keys: floored so its term is
+                # exp(-inf) = 0, not NaN; O is then 0 and the LSE -inf.
+                m_top = has.select(
+                    _fmax(m_natural, sink_val),
+                    _fmax(sink_val, fx.Float32(-3.4028234663852886e38)),
+                )
                 keep = has.select(fx.math.exp(m_natural - m_top), c_zero)
                 l_total = l_all * keep + fx.math.exp(sink_val - m_top)
-                inv_l = single.select(keep / l_total, inv_l)
+                inv_l = single.select(
+                    (l_total > c_zero).select(keep / l_total, c_zero), inv_l
+                )
                 lse_val = single.select(m_top + fx.math.log(l_total), lse_val)
             o_base = b * o_sb + hq * o_sh + qpos * o_ss
             prow = ((b * hq_n + hq) * sq + qpos) * ns + split
@@ -831,10 +838,13 @@ def build_flash_attn_decode_module(
                     fx.Float32
                 )
             )
-            m_top = has.select(fx.Float32(m_all).maximumf(sink_val), sink_val)
+            m_top = has.select(
+                fx.Float32(m_all).maximumf(sink_val),
+                sink_val.maximumf(fx.Float32(-3.4028234663852886e38)),
+            )
             keep = has.select(fx.math.exp(m_safe - m_top), c_zero)
             l_total = l_all * keep + fx.math.exp(sink_val - m_top)
-            inv = keep / l_total
+            inv = (l_total > c_zero).select(keep / l_total, c_zero)
             sink_lse = m_top + fx.math.log(l_total)
         else:
             inv = has.select(fx.Float32(1.0) / l_all, c_zero)

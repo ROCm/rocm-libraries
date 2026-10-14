@@ -92,6 +92,13 @@ Apache-2.0 headers (FlyDSL Project Contributors); AOTriton's repository is MIT.
    passes zeros for the compact one. Checked on gfx1201 with (B, H, S), (B, S, H) and a
    view carved from a padded buffer: every element written and within 2e-6 of the
    reference; time unchanged.
+8. **A sink of -inf on a row no key reaches** (`flash_attn_func_gfx1201_aiw.py`). The
+   sink joins the row's softmax against `m_top`, the larger of the row's max and the
+   sink; a row with no keys took the sink's logit alone, so a -inf sink made `m_top`
+   -inf and the sink's term exp2(-inf - -inf) NaN (poison under fast-math), giving a NaN
+   LSE where hipDNN expects -inf. `m_top` there is floored at the kernel's own finite
+   m floor (-3.40282e38), so the term is exp2(-inf) = 0, `l` is exactly 0 and the LSE
+   takes modification 2's -inf. A row that reaches keys, or a finite sink, is unchanged.
 
 Not modified, but checked: **MLA's head_dim 192 with a value head_dim of 128** builds
 and runs as upstream wrote it. On gfx1201 against an f32 reference, causal and not and

@@ -222,6 +222,8 @@ struct SdpaGraphSpec
     /// unless sinkRank4 asks for [1, Hq, 1, 1].
     bool withSink = false;
     bool sinkRank4 = false;
+    /// Every sink logit -inf (the device values; the graph is unchanged).
+    bool sinkNegativeInfinity = false;
     std::optional<hipdnn_flatbuffers_sdk::data_objects::DataType> sinkDataType;
     /// The bias as the graph declares it: rank 1 to 4, right-aligned to [B, H, Sq, Skv].
     /// Empty dims mean a packed [1, 1, Sq, Skv]; empty strides mean packed row-major.

@@ -2175,7 +2175,14 @@ def build_flash_attn_func_aiw_module_primary(meta, knobs):
                 _m = fx.Float32(loop_results[2 * qt])
                 _l = fx.Float32(loop_results[2 * qt + 1])
                 _has = _l > fx.Float32(0.0)
-                _m_top = _has.select(fastmath.max(_m, _sink2), _sink2)
+                # Modification 8: a row no key reaches with a sink of -inf would put
+                # -inf in m_top, and exp2(-inf - -inf) is NaN even without fast-math.
+                # The kernel's own finite floor for m (c_m_init) keeps the sink term
+                # exp2(-inf) = 0, so l is 0 and the LSE takes the -inf branch below.
+                _m_top = _has.select(
+                    fastmath.max(_m, _sink2),
+                    fastmath.max(_sink2, fx.Float32(-3.40282e38)),
+                )
                 _keep = _has.select(
                     fx.Float32(
                         rocdl.exp2(
