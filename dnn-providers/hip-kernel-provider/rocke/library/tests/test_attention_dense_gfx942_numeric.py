@@ -5,7 +5,8 @@
 
 Drives the PUBLIC entry point ``run_attention_dense_torch`` end-to-end on a real
 gfx942 GPU and checks max_abs against an fp32 ``scaled_dot_product_attention``
-oracle, for both the default and the P4 persistent grid. This is the committed,
+oracle (the sink cohorts use an fp32 masked softmax with an appended sink column),
+for both the default and the P4 persistent grid. This is the committed,
 CI-collectable form of the acceptance criterion's "functional GPU-numeric bench,
 both variants, vs torch fp32 SDPA" -- previously only an out-of-tree verifier.
 
@@ -74,7 +75,7 @@ _COHORT = [
 ]
 
 # (dtype, head_size, num_query_heads, num_kv_heads, persistent, sliding_window, scale)
-# -- STANDALONE sliding-window (no sinks; gfx942 dense has no sink support yet). All
+# -- STANDALONE sliding-window (no sinks; SWA-sink is _SWA_SINK_COHORT below). All
 # rows are causal (sliding_window > 0 requires causal). Window is a multiple of the
 # shipped block_n (64): 128, 256. Covers both dtypes, D64/D128, and BOTH grid
 # variants -- the persistent rows exercise the per-work-item start_tile prune that the
@@ -90,6 +91,23 @@ _SWA_COHORT = [
     ("bf16", 128, 16, 4, False, 128, 1.0),
     ("bf16", 64, 16, 4, True, 128, 1.0),
 ]
+
+# (dtype, head_size, num_query_heads, num_kv_heads, persistent, causal): full-sink
+# cohort. Both dtypes, D64/D128, GQA + MHA, both grids, and non-causal on both grids.
+_SINK_COHORT = [
+    ("fp16", 128, 16, 4, False, True),
+    ("fp16", 128, 16, 4, True, True),
+    ("bf16", 128, 16, 4, False, True),
+    ("bf16", 128, 16, 4, True, True),
+    ("fp16", 64, 16, 16, False, True),
+    ("bf16", 64, 16, 4, True, True),
+    ("fp16", 128, 16, 4, False, False),
+    ("bf16", 128, 16, 4, False, False),
+    ("bf16", 128, 16, 4, True, False),
+]
+
+# SWA-sink: the standalone SWA rows with sinks on, scale column included.
+_SWA_SINK_COHORT = _SWA_COHORT
 
 # (head_size, dtype, persistent, scale) for test_dense_non_default_scale: every D128
 # combination, plus bf16 D64 at the larger scale on both grids. D64 has its own K
@@ -112,7 +130,9 @@ def _spec(
     causal=True,
     batch=1,
     sq=512,
+    sk=None,
     sliding_window=0,
+    use_sinks=False,
     persist_decode="auto",
 ):
     """The SHIPPED gfx942 dense spec for a cohort row, built through the dispatch
@@ -151,13 +171,14 @@ def _spec(
             nhead_q=hq,
             nhead_k=hkv,
             seqlen_q=sq,
-            seqlen_k=sq,
+            seqlen_k=sq if sk is None else sk,
             hdim_q=d,
             hdim_v=d,
             arch="gfx942",
             mask_type=1 if causal else 0,
             dtype=dtype,
             sliding_window=sliding_window,
+            use_sinks=use_sinks,
         ),
         "gfx942_dense",
         {"persistent": bool(persistent)},
@@ -488,9 +509,9 @@ def test_dense_swa_numeric_vs_fp32_sdpa(
     ``ki > qi`` plus window ``ki <= qi - W`` masked out) and the kernel applies
     (``cmp_le(ktok, q)`` + ``cmp_gt(ktok, q - SW)``): keep key k for query q iff
     ``q - W < k <= q``. Expressed here as a boolean SDPA attn_mask -- matching this
-    file's SDPA-based base oracle -- rather than gfx950's manual masked-softmax,
-    which exists only because gfx950 also concatenates a sink column (gfx942 has no
-    sinks yet). The diagonal k==q is always kept (W>0), so no row is fully masked."""
+    file's SDPA-based base oracle. The sink cohorts use the manual masked-softmax
+    in :func:`_sink_reference` instead, since SDPA cannot append a sink column. The
+    diagonal k==q is always kept (W>0), so no row is fully masked."""
     import torch
 
     tol = 2e-2 if dtype == "fp16" else 4e-2
@@ -527,6 +548,236 @@ def test_dense_swa_numeric_vs_fp32_sdpa(
     assert max_abs < tol, (
         f"{dtype} D{d} GQA{hq}/{hkv} swa{sliding_window} scale={scale:g} "
         f"{'persist' if persistent else 'default'}: max_abs={max_abs:.3e} >= {tol}"
+    )
+
+
+def _sink_reference(q, k, v, sinks, scale, *, causal=True, sliding_window=0):
+    """fp32 ``softmax(concat([QK*scale, sink]))[..., :-1] @ V``, the gfx950 sibling's
+    oracle. The sink is one extra logit per query head with no value row, so it only
+    grows the softmax denominator. Full [B,Hq,Sq,Skv] matrix; fine at these sizes.
+    Causal is top-left aligned (key ki visible to query qi iff ki <= qi), so a row
+    whose window holds no key softmaxes over the sink alone and outputs 0."""
+    import torch
+
+    B, Sq, Hq, _ = q.shape
+    Skv = k.shape[1]
+    rep = Hq // k.shape[2]
+    qh = q.transpose(1, 2).float()
+    kh = k.transpose(1, 2).float().repeat_interleave(rep, dim=1)
+    vh = v.transpose(1, 2).float().repeat_interleave(rep, dim=1)
+    attn = torch.einsum("bhqd,bhkd->bhqk", qh, kh) * scale
+    qi = torch.arange(Sq, device=q.device).view(-1, 1)
+    ki = torch.arange(Skv, device=q.device).view(1, -1)
+    mask = torch.zeros(Sq, Skv, dtype=torch.bool, device=q.device)
+    if causal:
+        mask |= ki > qi
+    if sliding_window > 0:
+        mask |= ki <= qi - sliding_window
+    attn.masked_fill_(mask.view(1, 1, Sq, Skv), float("-inf"))
+    sink_col = sinks.float().view(1, Hq, 1, 1).expand(B, Hq, Sq, 1)
+    attn = torch.softmax(torch.cat([attn, sink_col], dim=-1), dim=-1)[..., :-1]
+    return torch.einsum("bhqk,bhkd->bhqd", attn, vh).transpose(1, 2)
+
+
+_SINK_OFFSET = {"above_qk_max": 1.0, "below_qk_max": -1.0, "dominates_qk": 8.0}
+
+
+def _check_sinks(
+    dtype,
+    d,
+    hq,
+    hkv,
+    persistent,
+    causal,
+    sliding_window,
+    magnitude,
+    *,
+    sq=512,
+    sk=None,
+    scale=None,
+):
+    """Run the shipped sink spec and compare against :func:`_sink_reference`.
+
+    The sink is set relative to each head's max over the first (block_m x block_n)
+    tile. One logit above: the seeded m0 stays the running max through tile 0, so
+    alpha is 1 and the tile's p values carry the scaling. One below: tile 0 raises
+    the max and the seeded l0 = 1 must be rescaled by alpha on the first tile. Both
+    halves of the seed are exercised, which IR goldens cannot do. Eight above
+    (``dominates_qk``): the sink takes nearly all of every row's softmax, so the
+    non-vacuity check holds even with no causal mask."""
+    import torch
+
+    tol = 2e-2 if dtype == "fp16" else 4e-2
+    tdt = getattr(torch, _TORCH_DT[dtype])
+    B, Sq, Skv = 1, sq, sq if sk is None else sk
+    scale = 1.0 / math.sqrt(d) if scale is None else scale
+    torch.manual_seed(0)
+
+    q = torch.randn(B, Sq, hq, d, device="cuda", dtype=tdt)
+    k = torch.randn(B, Skv, hkv, d, device="cuda", dtype=tdt)
+    v = torch.randn(B, Skv, hkv, d, device="cuda", dtype=tdt)
+    out = torch.empty(B, Sq, hq, d, device="cuda", dtype=tdt)
+
+    spec = _spec(
+        dtype,
+        d,
+        hq,
+        hkv,
+        persistent,
+        causal=causal,
+        batch=B,
+        sq=Sq,
+        sk=Skv,
+        sliding_window=sliding_window,
+        use_sinks=True,
+    )
+
+    bm, bn = spec.block_m, spec.block_n
+    qt = q[:, :bm].transpose(1, 2).float()
+    kt = k[:, :bn].transpose(1, 2).float().repeat_interleave(hq // hkv, dim=1)
+    qk = torch.einsum("bhqd,bhkd->bhqk", qt, kt) * scale
+    if causal:
+        qi = torch.arange(bm, device="cuda").view(-1, 1)
+        ki = torch.arange(bn, device="cuda").view(1, -1)
+        qk.masked_fill_((ki > qi).view(1, 1, bm, bn), float("-inf"))
+    tile_max = qk.amax(dim=(-1, -2))[0]  # [Hq]
+    sinks = (tile_max + _SINK_OFFSET[magnitude]).to(tdt).contiguous()
+
+    run_attention_dense_torch(
+        spec=spec, q=q, k=k, v=v, out=out, scale=scale, sinks=sinks
+    )
+    torch.cuda.synchronize()
+
+    ref = _sink_reference(
+        q, k, v, sinks, scale, causal=causal, sliding_window=sliding_window
+    )
+    label = (
+        f"{dtype} D{d} GQA{hq}/{hkv} {'causal' if causal else 'full'} "
+        f"sq{Sq} sk{Skv} swa{sliding_window} scale={scale:g} "
+        f"{'persist' if persistent else 'default'} {magnitude}"
+    )
+    # max() propagates NaN and NaN < tol is False, so a NaN row fails here too.
+    max_abs = (ref - out.float()).abs().max().item()
+    assert max_abs < tol, f"{label}: max_abs={max_abs:.3e} >= {tol}"
+
+    # Rows whose window holds no key (qi >= Skv + W - 1) run a zero-trip KV loop.
+    # With sinks they softmax over the sink alone, so the output is exactly 0.
+    empty_rows = 0
+    if causal and sliding_window > 0 and Sq >= Skv + sliding_window:
+        first_empty = Skv + sliding_window - 1
+        tail = out[:, first_empty:]
+        empty_rows = tail.shape[1]
+        assert (
+            torch.count_nonzero(tail).item() == 0
+        ), f"{label}: rows >= {first_empty} have no visible key but are not all 0"
+
+    if causal or magnitude == "dominates_qk":
+        # Non-vacuity: under causal, query row 0 sees only key 0, so the sink takes a
+        # large share of its softmax; with dominates_qk it takes nearly all of every
+        # row. Either way the sink reference must move well past tol, so a kernel
+        # that ignored the sink would fail the parity assert above. Not asserted for
+        # non-causal at +/-1: with 512 visible keys the sink's share can sit under
+        # tol. Empty-window rows are NaN without a sink; they are checked above.
+        ref_nosink = _sink_reference(
+            q,
+            k,
+            v,
+            torch.full_like(sinks, float("-inf")),
+            scale,
+            causal=causal,
+            sliding_window=sliding_window,
+        )
+        delta = (ref - ref_nosink).nan_to_num(0.0).abs().max().item()
+        assert delta > tol, f"{label}: sinks moved the reference only {delta:.3e}"
+
+    return empty_rows
+
+
+@requires_gfx942_gpu
+@pytest.mark.gpu
+@pytest.mark.parametrize("sink_magnitude", ["above_qk_max", "below_qk_max"])
+@pytest.mark.parametrize("dtype,d,hq,hkv,persistent,causal", _SINK_COHORT)
+def test_dense_sinks_numeric_vs_fp32_reference(
+    dtype, d, hq, hkv, persistent, causal, sink_magnitude
+):
+    """Full-sink numeric parity (no sliding window), both grids."""
+    _check_sinks(dtype, d, hq, hkv, persistent, causal, 0, sink_magnitude)
+
+
+@requires_gfx942_gpu
+@pytest.mark.gpu
+@pytest.mark.parametrize(
+    "dtype,d,hq,hkv,persistent,causal", [r for r in _SINK_COHORT if not r[-1]]
+)
+def test_dense_sinks_non_causal_sink_dominates(dtype, d, hq, hkv, persistent, causal):
+    """Non-causal sink parity with a non-vacuity check: the sink sits eight logits
+    above the QK max, so it takes nearly all of every row and a kernel that dropped
+    it would miss the reference by far more than tol."""
+    _check_sinks(dtype, d, hq, hkv, persistent, causal, 0, "dominates_qk")
+
+
+# (dtype, head_size, num_query_heads, num_kv_heads, persistent, sq, sk,
+# sliding_window): SWA-sink with Sq > Skv so the trailing query blocks' windows
+# start past seqlen_kv. Those blocks run a zero-trip KV loop that supports only
+# admits with sinks (NaN without). At block_m 256 the first empty row is 383, so
+# query block 1 straddles the boundary and blocks 2 and 3 are fully empty.
+_SWA_SINK_EMPTY_WINDOW_COHORT = [
+    ("bf16", 128, 16, 4, False, 1024, 256, 128),
+    ("bf16", 128, 16, 4, True, 1024, 256, 128),
+    ("fp16", 128, 16, 4, False, 1024, 256, 128),
+    ("fp16", 128, 16, 4, True, 1024, 256, 128),
+    ("bf16", 64, 16, 4, False, 1024, 256, 128),
+    ("bf16", 64, 16, 4, True, 1024, 256, 128),
+]
+
+
+@requires_gfx942_gpu
+@pytest.mark.gpu
+@pytest.mark.parametrize("sink_magnitude", ["above_qk_max", "below_qk_max"])
+@pytest.mark.parametrize(
+    "dtype,d,hq,hkv,persistent,sq,sk,sliding_window", _SWA_SINK_EMPTY_WINDOW_COHORT
+)
+def test_dense_swa_sinks_empty_window_outputs_zero(
+    dtype, d, hq, hkv, persistent, sq, sk, sliding_window, sink_magnitude
+):
+    """Empty-window rows output exactly 0 (softmax over the sink alone) and every
+    other row keeps parity, on both grids."""
+    empty_rows = _check_sinks(
+        dtype,
+        d,
+        hq,
+        hkv,
+        persistent,
+        True,
+        sliding_window,
+        sink_magnitude,
+        sq=sq,
+        sk=sk,
+    )
+    assert empty_rows > 0, "cohort row does not reach an empty window"
+
+
+@requires_gfx942_gpu
+@pytest.mark.gpu
+@pytest.mark.parametrize("sink_magnitude", ["above_qk_max", "below_qk_max"])
+@pytest.mark.parametrize(
+    "dtype,d,hq,hkv,persistent,sliding_window,scale", _SWA_SINK_COHORT
+)
+def test_dense_swa_sinks_numeric_vs_fp32_reference(
+    dtype, d, hq, hkv, persistent, sliding_window, scale, sink_magnitude
+):
+    """SWA-sink numeric parity: the window prune and the sink seed together, on the
+    same rows as the standalone SWA cohort. Always causal (SWA requires it)."""
+    _check_sinks(
+        dtype,
+        d,
+        hq,
+        hkv,
+        persistent,
+        True,
+        sliding_window,
+        sink_magnitude,
+        scale=scale,
     )
 
 
@@ -857,6 +1108,76 @@ _KNOB_AB_COHORT = [
 ]
 
 
+def _tolerance(dtype):
+    return 2e-2 if dtype == "fp16" else 4e-2
+
+
+def _lse_reference(q, k, v, scale, *, causal, window=0, sinks=None):
+    """Independent FP32 O and natural-log LSE, including truly empty rows.
+
+    Scores use FP32 Q/K with the softmax scale applied in FP32. ``sinks`` adds one
+    logit per query head with no value row, so a row with no key has the sink as
+    its LSE.
+    """
+    batch, sq, hq = q.shape[:3]
+    skv, hkv = k.shape[1:3]
+    qh = q.transpose(1, 2).float()
+    kh = k.transpose(1, 2).float().repeat_interleave(hq // hkv, dim=1)
+    vh = v.transpose(1, 2).float().repeat_interleave(hq // hkv, dim=1)
+    scores = torch.matmul(qh, kh.transpose(-1, -2)) * scale
+    qi = torch.arange(sq, device=q.device).view(-1, 1)
+    ki = torch.arange(skv, device=q.device).view(1, -1)
+    allowed = torch.ones((sq, skv), device=q.device, dtype=torch.bool)
+    if causal:
+        allowed &= ki <= qi
+    if window:
+        allowed &= ki > qi - window
+    scores = scores.masked_fill(~allowed.view(1, 1, sq, skv), float("-inf"))
+    if sinks is not None:
+        sink_scores = sinks.float().view(1, hq, 1, 1).expand(batch, hq, sq, 1)
+        scores = torch.cat((scores, sink_scores), dim=-1)
+    lse = torch.logsumexp(scores, dim=-1)
+    has_mass = torch.isfinite(lse)
+    safe_lse = torch.where(has_mass, lse, torch.zeros_like(lse))
+    probabilities = torch.exp(scores - safe_lse.unsqueeze(-1))
+    probabilities = torch.where(has_mass.unsqueeze(-1), probabilities, 0.0)
+    out = torch.matmul(probabilities[..., :skv], vh).transpose(1, 2)
+    return out, lse.unsqueeze(-1)
+
+
+def _lse_spec(dtype, d, hq, hkv, persistent, **kwargs):
+    """The shipped dispatch spec for the row, with the LSE output enabled."""
+    return dataclasses.replace(
+        _as_gfx942_spec(_spec(dtype, d, hq, hkv, persistent, **kwargs)), emit_lse=True
+    )
+
+
+def _run_lse_and_off(spec, q, k, v, scale):
+    """Launch ``spec`` with LSE and its LSE-off twin on the same inputs."""
+    out = torch.empty_like(q)
+    lse = torch.full(
+        (spec.batch, spec.num_query_heads, spec.seqlen_q, 1),
+        float("nan"),
+        device=q.device,
+        dtype=torch.float32,
+    )
+    returned = run_attention_dense_torch(
+        spec=spec, q=q, k=k, v=v, out=out, lse=lse, scale=scale
+    )
+    off_out = torch.empty_like(q)
+    run_attention_dense_torch(
+        spec=dataclasses.replace(spec, emit_lse=False),
+        q=q,
+        k=k,
+        v=v,
+        out=off_out,
+        scale=scale,
+    )
+    torch.cuda.synchronize()
+    assert returned is out
+    return out, lse, off_out
+
+
 @requires_gfx942_gpu
 @pytest.mark.gpu
 @pytest.mark.parametrize("dtype,d,persistent,overrides", _KNOB_AB_COHORT)
@@ -886,6 +1207,357 @@ def test_codegen_knob_is_bit_identical_to_default(dtype, d, persistent, override
         f"{dtype} D{d} {'persist' if persistent else 'default'} {overrides}: "
         f"diverged from the shipped default (max_abs={max_abs:.3e})"
     )
+
+
+@requires_gfx942_gpu
+@pytest.mark.gpu
+class TestDenseLseNumericGfx942:
+    """Direct-runner LSE coverage on gfx942; no dispatcher or hipDNN feature implied.
+
+    Every random-input row also requires O to be bitwise identical to the LSE-off
+    kernel: those rows have no keyless query, so LSE must not perturb O.
+    """
+
+    @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
+    @pytest.mark.parametrize("d", [64, 128])
+    @pytest.mark.parametrize("heads", [(8, 8), (8, 2)], ids=["mha", "gqa"])
+    @pytest.mark.parametrize(
+        "persistent", [False, True], ids=["ordinary", "persistent"]
+    )
+    @pytest.mark.parametrize("causal", [True, False], ids=["causal", "full"])
+    def test_output_and_lse(self, dtype, d, heads, persistent, causal):
+        hq, hkv = heads
+        spec = _lse_spec(dtype, d, hq, hkv, persistent, causal=causal, batch=2)
+        tdt = getattr(torch, _TORCH_DT[dtype])
+        scale = 0.5
+        torch.manual_seed(11)
+        q = torch.randn(2, 512, hq, d, device="cuda", dtype=tdt)
+        k = torch.randn(2, 512, hkv, d, device=q.device, dtype=tdt)
+        v = torch.randn_like(k)
+        out, lse, off_out = _run_lse_and_off(spec, q, k, v, scale)
+        ref, lse_ref = _lse_reference(q, k, v, scale, causal=causal)
+        assert (out.float() - ref).abs().max().item() < _tolerance(dtype)
+        assert (lse - lse_ref).abs().max().item() < _tolerance(dtype)
+        assert torch.equal(out, off_out)
+
+    @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
+    @pytest.mark.parametrize("d", [64, 128])
+    @pytest.mark.parametrize(
+        "persistent", [False, True], ids=["ordinary", "persistent"]
+    )
+    def test_sliding_window_lse(self, dtype, d, persistent):
+        spec = _lse_spec(dtype, d, 8, 2, persistent, sliding_window=128)
+        tdt = getattr(torch, _TORCH_DT[dtype])
+        scale = 0.5
+        torch.manual_seed(13)
+        q = torch.randn(1, 512, 8, d, device="cuda", dtype=tdt)
+        k = torch.randn(1, 512, 2, d, device=q.device, dtype=tdt)
+        v = torch.randn_like(k)
+        out, lse, off_out = _run_lse_and_off(spec, q, k, v, scale)
+        ref, lse_ref = _lse_reference(q, k, v, scale, causal=True, window=128)
+        assert (out.float() - ref).abs().max().item() < _tolerance(dtype)
+        assert (lse - lse_ref).abs().max().item() < _tolerance(dtype)
+        assert torch.equal(out, off_out)
+
+    @pytest.mark.parametrize("width", [1, 2])
+    @pytest.mark.parametrize(
+        "persistent", [False, True], ids=["ordinary", "persistent"]
+    )
+    def test_narrow_o_store(self, width, persistent):
+        """BF16 store widths 1/2: keyless rows are zero, keyed rows match LSE-off."""
+        from dispatch.attention import AttentionRequest, tuning_spec_with_knobs
+
+        spec = dataclasses.replace(
+            tuning_spec_with_knobs(
+                AttentionRequest(
+                    batch=1,
+                    nhead_q=4,
+                    nhead_k=1,
+                    seqlen_q=256,
+                    seqlen_k=64,
+                    hdim_q=128,
+                    hdim_v=128,
+                    arch="gfx942",
+                    mask_type=1,
+                    dtype="bf16",
+                    sliding_window=64,
+                ),
+                "gfx942_dense",
+                {"persistent": bool(persistent), "o_store_width": width},
+            ).kernel_spec,
+            emit_lse=True,
+        )
+        assert spec.o_store_width == width
+        scale = 0.5
+        torch.manual_seed(17)
+        q = torch.randn(1, 256, 4, 128, device="cuda", dtype=torch.bfloat16)
+        k = torch.randn(1, 64, 1, 128, device=q.device, dtype=q.dtype)
+        v = torch.randn_like(k)
+        out, lse, off_out = _run_lse_and_off(spec, q, k, v, scale)
+        ref, lse_ref = _lse_reference(q, k, v, scale, causal=True, window=64)
+        # Rows 0..126 see at least one key; rows 127.. see none.
+        assert (out[:, :127].float() - ref[:, :127]).abs().max().item() < _tolerance(
+            "bf16"
+        )
+        assert torch.equal(out[:, :127], off_out[:, :127])
+        assert torch.equal(out[:, 127:], torch.zeros_like(out[:, 127:]))
+        finite = torch.isfinite(lse_ref)
+        assert (lse[finite] - lse_ref[finite]).abs().max().item() < _tolerance("bf16")
+        assert torch.equal(torch.isneginf(lse), torch.isneginf(lse_ref))
+
+    @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
+    @pytest.mark.parametrize(
+        "persistent", [False, True], ids=["ordinary", "persistent"]
+    )
+    @pytest.mark.parametrize("with_sink", [False, True], ids=["no-sink", "sink"])
+    def test_empty_window_rows(self, dtype, persistent, with_sink):
+        """Sq256/Skv64/window64: rows 63/126/127 see 64/1/0 keys (analytic LSE).
+
+        With sinks a row with no key has the sink as its only mass, so its LSE is
+        the sink logit rather than -inf."""
+        from dispatch.attention import AttentionRequest, tuning_spec_with_knobs
+
+        spec = dataclasses.replace(
+            tuning_spec_with_knobs(
+                AttentionRequest(
+                    batch=1,
+                    nhead_q=4,
+                    nhead_k=1,
+                    seqlen_q=256,
+                    seqlen_k=64,
+                    hdim_q=128,
+                    hdim_v=128,
+                    arch="gfx942",
+                    mask_type=1,
+                    dtype=dtype,
+                    sliding_window=64,
+                    use_sinks=with_sink,
+                ),
+                "gfx942_dense",
+                {"persistent": bool(persistent)},
+            ).kernel_spec,
+            emit_lse=True,
+        )
+        tdt = getattr(torch, _TORCH_DT[dtype])
+        q = torch.zeros(1, 256, 4, 128, device="cuda", dtype=tdt)
+        k = torch.zeros(1, 64, 1, 128, device=q.device, dtype=tdt)
+        v = torch.ones_like(k)
+        out = torch.full_like(q, float("nan"))
+        lse = torch.full(
+            (1, 4, 256, 1), float("nan"), device=q.device, dtype=torch.float32
+        )
+        sinks = (
+            torch.tensor([-2.0, 0.0, 1.0, 2.0], device=q.device, dtype=tdt)
+            if with_sink
+            else None
+        )
+        run_attention_dense_torch(
+            spec=spec, q=q, k=k, v=v, out=out, lse=lse, scale=0.5, sinks=sinks
+        )
+        torch.cuda.synchronize()
+        rows = torch.arange(256, device=q.device)
+        counts = (
+            (
+                torch.minimum(rows + 1, torch.full_like(rows, 64))
+                - (rows - 63).clamp_min(0)
+            )
+            .clamp_min(0)
+            .float()
+        )
+        assert counts[63].item() == 64
+        assert counts[126].item() == 1
+        assert counts[127].item() == 0
+        mass = counts.view(1, 1, 256, 1).expand(1, 4, 256, 1)
+        if with_sink:
+            mass = mass + sinks.float().exp().view(1, 4, 1, 1)
+        analytic_lse = mass.log()
+        ref, lse_ref = _lse_reference(q, k, v, 0.5, causal=True, window=64, sinks=sinks)
+        finite = torch.isfinite(analytic_lse)
+        assert (lse[finite] - analytic_lse[finite]).abs().max().item() < 1e-5
+        assert (lse_ref[finite] - analytic_lse[finite]).abs().max().item() < 1e-5
+        assert torch.equal(torch.isneginf(lse), torch.isneginf(analytic_lse))
+        assert (out.float() - ref).abs().max().item() < _tolerance(dtype)
+        assert torch.equal(out[:, 127:], torch.zeros_like(out[:, 127:]))
+        if with_sink:
+            expected = sinks.float().view(1, 4, 1, 1).expand(1, 4, 129, 1)
+            assert (lse[:, :, 127:] - expected).abs().max().item() < 1e-5
+        else:
+            assert torch.isneginf(lse[:, :, 127:]).all().item()
+
+    @pytest.mark.parametrize(
+        "failure",
+        [
+            "missing",
+            "unexpected",
+            "dtype",
+            "shape",
+            "layout",
+            "device",
+            "overlap_q",
+            "overlap_k",
+            "overlap_v",
+            "overlap_out",
+            "companion",
+        ],
+    )
+    def test_lse_buffer_errors(self, failure):
+        spec = _lse_spec("bf16", 128, 4, 1, False, batch=2, sq=256)
+        q = torch.zeros(2, 256, 4, 128, device="cuda", dtype=torch.bfloat16)
+        k = torch.zeros(2, 256, 1, 128, device=q.device, dtype=q.dtype)
+        v = torch.zeros_like(k)
+        out = torch.empty_like(q)
+        lse = torch.empty(2, 4, 256, 1, device=q.device, dtype=torch.float32)
+        if failure == "missing":
+            lse = None
+        elif failure == "unexpected":
+            spec = dataclasses.replace(spec, emit_lse=False)
+        elif failure == "dtype":
+            lse = lse.bfloat16()
+        elif failure == "shape":
+            lse = lse[..., 0]
+        elif failure == "layout":
+            lse = torch.empty(2, 4, 256, 2, device=q.device, dtype=torch.float32)[
+                ..., :1
+            ]
+        elif failure == "device":
+            lse = lse.cpu()
+        elif failure in {"overlap_q", "overlap_k", "overlap_v", "overlap_out"}:
+            tensor = {
+                "overlap_q": q,
+                "overlap_k": k,
+                "overlap_v": v,
+                "overlap_out": out,
+            }[failure]
+            # Reinterpret the real input/output allocation, not a copied tensor.
+            lse = tensor.view(torch.float32).view(-1)[:2048].view(2, 4, 256, 1)
+        elif failure == "companion":
+            k = k.cpu()
+        with pytest.raises(ValueError):
+            run_attention_dense_torch(
+                spec=spec, q=q, k=k, v=v, out=out, lse=lse, scale=0.5
+            )
+
+    def test_dispatched_lse(self):
+        """Request -> dispatch -> bind -> launch fills a caller-owned LSE buffer."""
+        from dispatch.attention import (
+            AttentionRequest,
+            attention_execution_candidates,
+            dispatch_attention,
+        )
+
+        candidate = next(
+            c for c in attention_execution_candidates() if c.spec_id == "gfx942_dense"
+        )
+        result = dispatch_attention(
+            AttentionRequest(
+                batch=2,
+                nhead_q=8,
+                nhead_k=2,
+                seqlen_q=512,
+                seqlen_k=512,
+                hdim_q=128,
+                hdim_v=128,
+                arch="gfx942",
+                mask_type=1,
+                dtype="bf16",
+                algorithm=candidate.algorithm,
+                spec_id="gfx942_dense",
+                emit_lse=True,
+            )
+        )
+        scale = 0.5
+        torch.manual_seed(23)
+        q = torch.randn(2, 512, 8, 128, device="cuda", dtype=torch.bfloat16)
+        k = torch.randn(2, 512, 2, 128, device=q.device, dtype=q.dtype)
+        v = torch.randn_like(k)
+        out = torch.empty_like(q)
+        lse = torch.full(
+            (2, 8, 512, 1), float("nan"), device=q.device, dtype=torch.float32
+        )
+        tensors = {"q": q, "k": k, "v": v, "out": out}
+        with pytest.raises(ValueError):
+            result.bind_torch(tensors, scale=scale).launch()
+        result.bind_torch({**tensors, "lse": lse}, scale=scale).launch()
+        torch.cuda.synchronize()
+        ref, lse_ref = _lse_reference(q, k, v, scale, causal=True)
+        assert (out.float() - ref).abs().max().item() < _tolerance("bf16")
+        assert (lse - lse_ref).abs().max().item() < _tolerance("bf16")
+
+    @pytest.mark.parametrize(
+        "persistent,decode",
+        [
+            (False, "qb_major"),
+            (True, "qb_major"),
+            (True, "hkv_major"),
+        ],
+        ids=["ordinary", "persistent_qb", "persistent_hkv"],
+    )
+    def test_lse_runtime_shape_reuse(self, persistent, decode):
+        """One LSE binary serves different B/Sq/Hq/Hkv values and writes each row.
+
+        This directly guards the runtime LSE index ``((b*Hq+h)*Sq+q)`` and the two
+        persistent work-item decoders introduced by #12859.
+        """
+        from kernels.common.attention_dense_spec import attention_dense_cache_key
+        from kernels.gfx942.attention_dense import _DENSE_LAUNCHER_CACHE
+
+        configs = [(1, 512, 8, 2), (2, 1024, 16, 4)]
+        specs = [
+            _lse_spec(
+                "bf16",
+                128,
+                hq,
+                hkv,
+                persistent,
+                batch=batch,
+                sq=sq,
+                persist_decode=decode,
+            )
+            for batch, sq, hq, hkv in configs
+        ]
+        assert all(s.runtime_shape for s in specs)
+        off_specs = [dataclasses.replace(spec, emit_lse=False) for spec in specs]
+        keys = {
+            attention_dense_cache_key(spec, arch="gfx942") for spec in specs + off_specs
+        }
+        assert len(keys) == 2, "LSE-on/off should each reuse one runtime-shape binary"
+        old_entries = {key: _DENSE_LAUNCHER_CACHE.pop(key, None) for key in keys}
+        scale = 0.5
+        launchers = []
+        try:
+            for index, spec in enumerate(specs):
+                torch.manual_seed(29 + index)
+                q = torch.randn(
+                    spec.batch,
+                    spec.seqlen_q,
+                    spec.num_query_heads,
+                    128,
+                    device="cuda",
+                    dtype=torch.bfloat16,
+                )
+                k = torch.randn(
+                    spec.batch,
+                    spec.seqlen_kv,
+                    spec.num_kv_heads,
+                    128,
+                    device=q.device,
+                    dtype=q.dtype,
+                )
+                v = torch.randn_like(k)
+                out, lse, off_out = _run_lse_and_off(spec, q, k, v, scale)
+                ref, lse_ref = _lse_reference(q, k, v, scale, causal=True)
+                assert (out.float() - ref).abs().max().item() < _tolerance("bf16")
+                assert (lse - lse_ref).abs().max().item() < _tolerance("bf16")
+                assert torch.equal(out, off_out)
+                launchers.append(_launcher_for(spec))
+            assert launchers[0] is not None
+            assert launchers[0] is launchers[1]
+            assert _launcher_for(off_specs[-1]) is not launchers[0]
+        finally:
+            for key, entry in old_entries.items():
+                _DENSE_LAUNCHER_CACHE.pop(key, None)
+                if entry is not None:
+                    _DENSE_LAUNCHER_CACHE[key] = entry
 
 
 if __name__ == "__main__":

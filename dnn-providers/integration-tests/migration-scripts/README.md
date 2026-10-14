@@ -319,6 +319,36 @@ python3 migration-scripts/diff_coverage.py \
 | Per-op defaults | `FillInputs.cpp` | **NOT stored** | Re-derived from topology |
 | Provenance | (new) | sweep `case.metadata.reference_source` | Per-case metadata |
 
+## Re-tiering existing cases
+
+To change which tier a case lives in (never what the case is), describe the
+target placement in an assignment file and let `retier_bundles.py` apply it:
+
+```bash
+# Start from "everything stays where it is", then edit proposed_tier.
+python3 retier_bundles.py --bundle-dir integration-test-bundles/ \
+    --write-identity assignments.json
+
+python3 retier_bundles.py --bundle-dir integration-test-bundles/ \
+    --assignments assignments.json            # dry run: plan + checks, no writes
+python3 retier_bundles.py --bundle-dir integration-test-bundles/ \
+    --assignments assignments.json --apply
+```
+
+Every case must be assigned (an unassigned case would otherwise vanish) and two
+cases with one id may not land in the same sweep. After `--apply` the tool
+re-reads the tree and checks, per case, that the expanded graph, metadata,
+`tensor_patches`, golden pointer and per-engine support claims are identical to
+before; it exits non-zero if not. Topologies whose `graph.template.json` differs
+between tiers are unified to the template with the most `${case.*}`
+placeholders, and moved cases gain the matching explicit `attributes`.
+
+Two things the tool cannot see: names that code refers to by tier
+(`quick_<Op>_...` in gtest filters, TOML `filters`, `knownReferenceGaps`, the
+`ffm-quick` ids in the provider YAMLs) and the `golden`/`dvc` data itself (only
+the pointers move). Grep for the case ids you moved and re-run
+`ctest -N -L <tier>` afterwards.
+
 ## Scripts
 
 | Script | Purpose |
@@ -328,6 +358,7 @@ python3 migration-scripts/diff_coverage.py \
 | `place_bundles.py` | Convert captured bundles into template+sweep format (Hop B) |
 | `verify_migration.py` | Reconcile census ↔ capture ↔ sweep, byte-diff graphs + metadata (Hop C) |
 | `import_graph.py` | Import a single graph with duplicate detection |
+| `retier_bundles.py` | Move existing cases between tiers, proving every case is unchanged |
 | `find_case.py` | Query cases by op, dtype, layout, shape, input range, or id |
 | `diff_coverage.py` | Differential coverage: assert `pass_set_bundle ⊇ pass_set_cpp` (Hop D) |
 | `run_capture_pipeline.sh` | Orchestrate all hops + verification layers |

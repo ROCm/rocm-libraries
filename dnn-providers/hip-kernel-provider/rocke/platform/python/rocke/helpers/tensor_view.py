@@ -431,9 +431,10 @@ class TensorView:
     ) -> Value:
         """Vectorised load of ``n`` consecutive elements starting at
         ``indices``. Supports ``n in {2, 4, 8}`` for f16/bf16 (global &
-        LDS); buffer ops use ``dwords = n // 2`` for f16 and support
-        ``n in {2, 4, 8}`` accordingly. ``nontemporal`` (global f16/bf16 only)
-        streams the load (cache-bypass)."""
+        LDS) and ``n = 2`` for f64 (global); buffer ops use ``dwords =
+        n // 2`` for f16 and support ``n in {2, 4, 8}`` accordingly.
+        ``nontemporal`` (global path only) streams the load
+        (cache-bypass)."""
         if self.addr_space == "lds":
             if self.dtype.name in ("f16", "bf16"):
                 return b.smem_load_vN(self.base, *indices, dtype=self.dtype, n=n)
@@ -458,7 +459,7 @@ class TensorView:
                 f"buffer vec load not yet wired for dtype {self.dtype.name}"
             )
         off = self.desc.offset(b, indices)
-        if self.dtype.name in ("f16", "bf16"):
+        if self.dtype.name in ("f16", "bf16", "f64"):
             return b.global_load_vN(
                 self.base,
                 off,
@@ -907,6 +908,20 @@ class TileWindow:
         self, b: IRBuilder, *local_indices: Value, value: Value, n: int
     ) -> None:
         self.view.store_vec(b, self._global_indices(b, local_indices), value=value, n=n)
+
+    def load_vec_scalars(
+        self, b: IRBuilder, *local_indices: Value, n: int
+    ) -> list[Value]:
+        """Vector load split into ``n`` scalars in the window's own dtype.
+
+        The no-promotion counterpart of :meth:`load_vec_as_f32`, used when
+        compute stays in the storage dtype (f64). ``n == 1`` routes through
+        :meth:`load_scalar`.
+        """
+        if n == 1:
+            return [self.load_scalar(b, *local_indices)]
+        v = self.load_vec(b, *local_indices, n=n)
+        return [b.vec_extract(v, i) for i in range(n)]
 
     # ---- compute-promoting vector ops ----
 
