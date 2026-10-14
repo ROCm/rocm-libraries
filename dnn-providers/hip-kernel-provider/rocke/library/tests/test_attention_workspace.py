@@ -13,11 +13,24 @@ from kernels.common import attention_unified as au
 
 @pytest.fixture
 def runtime(monkeypatch):
-    state = SimpleNamespace(stream=17, capturing=False, allocations=[])
+    state = SimpleNamespace(
+        stream=17, device=0, capturing=False, allocations=[], contexts=[]
+    )
+
+    @contextmanager
+    def device_context(device):
+        previous = state.device
+        state.contexts.append(("device", device))
+        state.device = getattr(device, "index", 0)
+        try:
+            yield
+        finally:
+            state.device = previous
 
     @contextmanager
     def stream_context(stream):
         previous = state.stream
+        state.contexts.append(("stream", stream.cuda_stream))
         state.stream = stream.cuda_stream
         try:
             yield
@@ -33,7 +46,8 @@ def runtime(monkeypatch):
         float32="float32",
         empty=empty,
         cuda=SimpleNamespace(
-            device=lambda device: nullcontext(),
+            device=device_context,
+            current_device=lambda: state.device,
             stream=stream_context,
             ExternalStream=lambda stream, device: SimpleNamespace(cuda_stream=stream),
             current_stream=lambda device=None: SimpleNamespace(
@@ -102,6 +116,28 @@ def test_workspace_uses_effective_stream(runtime, monkeypatch, stream, capturing
         assert args[1][name].stream == expected_stream
         assert args[1][name] is args[2][name]
     assert runtime.stream == 17
+
+
+@pytest.mark.parametrize("stream", [0, 17, 29])
+@pytest.mark.parametrize("current_device", [0, 1])
+@pytest.mark.parametrize("capturing", [False, True])
+def test_matching_device_stream_skips_contexts(
+    runtime, monkeypatch, stream, current_device, capturing
+):
+    runtime.device = current_device
+    runtime.capturing = capturing
+    arguments = _arguments()
+    arguments["q"].device = SimpleNamespace(index=0)
+    calls = []
+    monkeypatch.setattr(
+        au, "_launch_3d_pipeline", lambda *args, **kwargs: calls.append((args, kwargs))
+    )
+    au._run_3d_tiled(**arguments, stream=stream)
+    expected_stream = stream or 17
+    assert calls[0][0][3] == expected_stream
+    assert calls[0][1]["capturing"] is capturing
+    assert bool(runtime.contexts) is (current_device != 0 or expected_stream != 17)
+    assert runtime.stream == 17 and runtime.device == current_device
 
 
 @pytest.mark.parametrize("second_stream", [17, 29])

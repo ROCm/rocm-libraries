@@ -567,6 +567,14 @@ variant. Use rocprof to confirm, not to discover.
   launches.
 - Use `time_launches(..., warmup, iters)` to amortize the per-launch
   HIP module load before measuring.
+- Compare the public call against direct replay of its captured graph. If only
+  the public call regresses while emitted IR and device replay stay stable,
+  profile host binding checks and device/stream contexts before changing tiles.
+  Normalize live metadata once, preserve address/layout checks on every replay,
+  and bypass a context only when its device and stream are already active.
+  Keep cache bounds, capture isolation and drain-before-release rules intact.
+  Run comparison arms sequentially on the same node, reversing their order
+  across trials; check each arm against an independent numeric reference.
 
 ---
 

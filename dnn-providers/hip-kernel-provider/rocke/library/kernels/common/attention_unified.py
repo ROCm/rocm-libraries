@@ -3593,6 +3593,7 @@ class _Attention3DGraph:
     refs: tuple[Any, ...]
     device: Any
     stream: int
+    bindings: tuple[Any, ...]
 
 
 def _run_3d_tiled(*, q, stream: int = 0, execution=None, **kwargs):
@@ -3612,6 +3613,18 @@ def _run_3d_tiled(*, q, stream: int = 0, execution=None, **kwargs):
     try:
         if execution is not None and execution._closed:
             raise RuntimeError("execution is closed")
+        # Allocation and replay already use the required stream in the common
+        # case. Avoid constructing an ExternalStream and switching contexts
+        # when the caller has established that device/stream boundary.
+        device_index = getattr(q.device, "index", None)
+        if (
+            isinstance(device_index, int)
+            and torch.cuda.current_device() == device_index
+            and int(torch.cuda.current_stream().cuda_stream) == stream
+        ):
+            return _run_3d_tiled_on_stream(
+                q=q, stream=stream, execution=execution, **kwargs
+            )
         with torch.cuda.device(q.device), torch.cuda.stream(
             torch.cuda.ExternalStream(stream, device=q.device)
         ):
@@ -3673,6 +3686,27 @@ def _run_3d_tiled_on_stream(
     if kv_cache_layout is not None:
         cache_key = cache_key + ("strided_kv",)
     capturing = _torch_stream_capturing()
+    replay = use_graph and _enable_3d_graph_replay(problem) and not capturing
+    # Normalize once for both owner validation and graph binding checks. Keep
+    # mutable tensor metadata out of the hashed key: it is checked against the
+    # resident entry before every replay, including same-object storage changes.
+    tensors = (
+        q,
+        k,
+        v,
+        out,
+        cu_seqlens_q,
+        seqused_k,
+        block_table,
+        sinks,
+        alibi_slopes,
+        qq_bias,
+    )
+    layouts = (
+        tuple(_attention_tensor_layout(t) for t in tensors)
+        if execution is not None or replay
+        else None
+    )
     if execution is not None:
         identity = (
             problem,
@@ -3681,21 +3715,7 @@ def _run_3d_tiled_on_stream(
             q.device,
             execution._stream if capturing else int(stream),
             kv_cache_layout,
-            tuple(
-                _attention_tensor_layout(t)
-                for t in (
-                    q,
-                    k,
-                    v,
-                    out,
-                    cu_seqlens_q,
-                    seqused_k,
-                    block_table,
-                    sinks,
-                    alibi_slopes,
-                    qq_bias,
-                )
-            ),
+            layouts,
         )
         if execution._identity is None:
             if capturing:
@@ -3706,7 +3726,11 @@ def _run_3d_tiled_on_stream(
             raise ValueError(
                 "execution geometry, layout, device or stream changed; prepare again"
             )
-    if use_graph and _enable_3d_graph_replay(problem) and not capturing:
+    if replay:
+        bindings = tuple(
+            (layout, int(t.data_ptr()) if hasattr(t, "data_ptr") else 0)
+            for t, layout in zip(tensors, layouts)
+        )
         with _3D_GRAPH_LOCK:
             return _run_3d_graph(
                 problem=problem,
@@ -3733,6 +3757,7 @@ def _run_3d_tiled_on_stream(
                 kv_cache_layout=kv_cache_layout,
                 execution=execution,
                 cache_key=cache_key,
+                bindings=bindings,
             )
 
     prepared = _get_3d_pipeline(
@@ -3809,8 +3834,8 @@ def _attention_tensor_layout(tensor):
     if tensor is None:
         return None
     return (
-        str(getattr(tensor, "device", None)),
-        str(getattr(tensor, "dtype", None)),
+        getattr(tensor, "device", None),
+        getattr(tensor, "dtype", None),
         tuple(getattr(tensor, "shape", ())),
         tuple(tensor.stride()) if hasattr(tensor, "stride") else (),
     )
@@ -3842,6 +3867,7 @@ def _run_3d_graph(
     kv_cache_layout,
     execution,
     cache_key,
+    bindings,
 ):
     """Paired, bounded graph ownership; called under the graph submission lock."""
     graph_key = (
@@ -3850,24 +3876,6 @@ def _run_3d_graph(
         kv_cache_layout,
         int(problem.total_q),
         int(stream),
-        tuple(
-            (
-                _attention_tensor_layout(t),
-                int(t.data_ptr()) if hasattr(t, "data_ptr") else 0,
-            )
-            for t in (
-                q,
-                k,
-                v,
-                out,
-                cu_seqlens_q,
-                seqused_k,
-                block_table,
-                sinks,
-                alibi_slopes,
-                qq_bias,
-            )
-        ),
         id(q),
         id(k),
         id(v),
@@ -3886,7 +3894,27 @@ def _run_3d_graph(
         int(qq_bias_stride_0),
     )
     graphs = _3D_GRAPHS if execution is None else execution._graphs
-    entry = graphs.get(graph_key)
+    # Sequential decode usually replays the most recent binding. Reuse that
+    # resident key/entry without hashing the frozen problem and spec twice.
+    # The graph lock covers both this probe and submission; no separate hint
+    # can retain an entry after clear, close or eviction.
+    last_key = next(reversed(graphs), None)
+    recent = graph_key == last_key
+    if recent:
+        graph_key = last_key
+        entry = next(reversed(graphs.values()))
+    else:
+        entry = graphs.get(graph_key)
+    if entry is not None and entry.bindings != bindings:
+        # Same Python tensors can be rebound with set_/resize_/as_strided_.
+        # Replace their captured addresses/layout only after the old stream
+        # has drained, using the same bounded cache and ownership rules.
+        import torch
+
+        with torch.cuda.device(entry.device):
+            wait_stream_and_release(entry.stream)
+        del graphs[graph_key]
+        entry = None
     if entry is None:
         capacity = _3D_GRAPH_CAPACITY if execution is None else 1
         if len(graphs) >= capacity:
@@ -3982,9 +4010,11 @@ def _run_3d_graph(
             ),
             q.device,
             int(stream),
+            bindings,
         )
         graphs[graph_key] = entry
-    graphs.move_to_end(graph_key)
+    if not recent:
+        graphs.move_to_end(graph_key)
     # The boundary established the caller's effective Torch stream.
     entry.graph.replay()
     if _resolved_fence(True):

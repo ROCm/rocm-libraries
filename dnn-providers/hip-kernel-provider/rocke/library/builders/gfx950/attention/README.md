@@ -939,3 +939,9 @@ scenario (paths relative to `library/`):
 Measured conditions and numbers are intentionally omitted from this repository
 (per `platform/AGENTS.md` §Compliance); they are recorded only in the internal
 perf record.
+
+## Shared 3D runtime host overhead
+
+[The decode host-overhead case study](CASE_STUDY_DECODE_HOST_OVERHEAD.md)
+describes how to separate wrapper cost from device replay, and the binding,
+stream and lifetime checks required when optimizing a warm decode loop.

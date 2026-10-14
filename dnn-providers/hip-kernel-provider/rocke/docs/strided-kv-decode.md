@@ -79,8 +79,11 @@ structs; strided symbols carry `_stridedkv`.
 
 The shared 3D runtime resolves `stream=0` to Torch's current stream on Q's
 device. Scratch allocation, initialization, and segment/reduce launches all
-use that effective stream. Callers must make input production visible to it
-and wait before consuming outputs on another stream.
+use that effective stream. When Q is on the active device and the effective
+stream is already current, the runtime submits directly without rebuilding
+Torch device/stream contexts. Other devices and streams keep the explicit
+context boundary and restore the caller's state. Callers must make input
+production visible to it and wait before consuming outputs on another stream.
 
 Compiled kernels are cached. Each eager invocation allocates independent
 scratch, so overlapping calls cannot overwrite each other's partial results.
@@ -128,8 +131,13 @@ direct calls keep at most eight paired graph/resource entries, and a prepared
 execution keeps at most one. A binding change that evicts an entry waits only for
 that entry's stream before releasing it. Stable replay has no new allocation or
 extra completion wait beyond the requested fence. `clear_attention_3d_graph_cache()`
-explicitly drains and clears the direct cache. Tensor identity, address, layout,
-scalar parameters and metadata bindings participate in graph identity.
+explicitly drains and clears the direct cache. Tensor identity and scalar
+parameters select the resident graph; live addresses and normalized
+layout metadata are checked before each replay. Content-only updates reuse the
+graph. Rebinding the same tensor objects to new storage drains and replaces
+the captured graph; it does not recompile the cached kernels. Drain queued work
+before mutating storage metadata. Prepared owners still reject geometry, dtype,
+layout, device or stream changes.
 
 Asynchronous graph replay retains its resource entry until the stream is drained,
 even if the Python execution owner is discarded. Asynchronous eager launches also
@@ -144,8 +152,9 @@ The [numeric tests](../library/tests/test_strided_kv_decode_numeric.py) compare
 the direct runtime and registered binding against an independent CPU FP32
 reference after input quantization. They include batched BHSD/BSHD, different
 K/V strides, padding, unpadded capacity tails, changing valid lengths, empty
-sequences, windows, paged regressions, and graph replay. Concurrency tests cover
-eager calls, internal graphs, and separate external graphs captured on one
+sequences, windows, paged regressions, graph replay, content updates, and
+same-object Q/output storage rebinding for direct and prepared graph calls.
+Concurrency tests cover eager calls, internal graphs, and separate external graphs captured on one
 stream and replayed on different streams. They check scratch isolation and
 replay after temporary launch references are drained. Set
 `ROCKE_REQUIRE_DECODE_GPU=gfx942` or `gfx950` to require the target GPU rather
