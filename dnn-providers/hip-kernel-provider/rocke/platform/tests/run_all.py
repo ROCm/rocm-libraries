@@ -215,6 +215,7 @@ def native_pytest_env(build_root: Path, config: str) -> dict[str, str]:
     # survive a missing or partial configured build.
     env.pop("ROCKE_ONLINE_LIB", None)
     env.pop("ROCKE_REPLAY_CLI", None)
+    env.pop("ROCKE_PROVENANCE_MANIFEST", None)
     if (build_root / "CMakeCache.txt").is_file():
         subprocess.run(
             [

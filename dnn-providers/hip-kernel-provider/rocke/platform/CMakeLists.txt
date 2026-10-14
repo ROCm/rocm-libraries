@@ -193,6 +193,8 @@ message(STATUS
         "portable-IR build-id: ${ROCKE_CONFIGURE_BUILD_ID}  version: ${ROCKE_ENGINE_VERSION}")
 set(ROCKE_BUILD_ID_HEADER
     "${CMAKE_CURRENT_BINARY_DIR}/generated/rocke_build_id_values.h")
+set(ROCKE_BUILD_ID_MANIFEST
+    "${CMAKE_CURRENT_BINARY_DIR}/generated/rocke_portable_ir_provenance.txt")
 # Run on every build so a newly added private header is covered even before a
 # reconfigure. copy_if_different keeps rocke_build_id.o untouched when the hash
 # is unchanged.
@@ -201,9 +203,10 @@ add_custom_target(
   COMMAND "${CMAKE_COMMAND}"
           "-DROCKE_SOURCE_ROOT=${CMAKE_CURRENT_SOURCE_DIR}"
           "-DROCKE_BUILD_ID_HEADER=${ROCKE_BUILD_ID_HEADER}"
+          "-DROCKE_BUILD_ID_MANIFEST=${ROCKE_BUILD_ID_MANIFEST}"
           "-DROCKE_ENGINE_VERSION=${ROCKE_ENGINE_VERSION}"
           -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/generate_rocke_build_id.cmake"
-  BYPRODUCTS "${ROCKE_BUILD_ID_HEADER}"
+  BYPRODUCTS "${ROCKE_BUILD_ID_HEADER}" "${ROCKE_BUILD_ID_MANIFEST}"
   COMMENT "Refreshing rocKE portable-IR bundle build-id"
   VERBATIM)
 add_dependencies(rocke_core_objects rocke_build_id_header)
@@ -438,7 +441,7 @@ if(ROCKE_INSTALL_TESTS)
       # --print-llvm output test_unsigned_int_ops.py compares with the Python
       # builder's text.
       set(_rocke_pytest_env
-          "PYTHONPATH=.;ROCKE_REPLAY_CLI=${ROCKE_TEST_CTEST_REL}tests/portable_ir/rocke_portable_ir_replay_cli${CMAKE_EXECUTABLE_SUFFIX}")
+          "PYTHONPATH=.;ROCKE_REPLAY_CLI=${ROCKE_TEST_CTEST_REL}tests/portable_ir/rocke_portable_ir_replay_cli${CMAKE_EXECUTABLE_SUFFIX};ROCKE_PROVENANCE_MANIFEST=${ROCKE_TEST_CTEST_REL}tests/portable_ir/rocke_portable_ir_provenance.txt")
       if("rocke_unsigned_int_ops" IN_LIST _ROCKE_INSTALL_TEST_TARGETS)
         rocke_cxx_test_installed_name(_rocke_installed_name rocke_unsigned_int_ops)
         string(APPEND _rocke_pytest_env

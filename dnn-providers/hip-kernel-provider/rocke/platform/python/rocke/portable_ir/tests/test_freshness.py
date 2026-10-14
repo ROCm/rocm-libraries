@@ -113,10 +113,12 @@ class TestSourceBuildId(unittest.TestCase):
             for name in script_names:
                 shutil.copy2(source_cmake / name, cmake_dir / name)
             header = root / "generated" / "values.h"
+            manifest = root / "generated" / "provenance.txt"
             command = [
                 "cmake",
                 f"-DROCKE_SOURCE_ROOT={root}",
                 f"-DROCKE_BUILD_ID_HEADER={header}",
+                f"-DROCKE_BUILD_ID_MANIFEST={manifest}",
                 "-DROCKE_ENGINE_VERSION=test",
                 "-P",
                 str(cmake_dir / "generate_rocke_build_id.cmake"),
@@ -124,7 +126,9 @@ class TestSourceBuildId(unittest.TestCase):
             subprocess.run(command, check=True)
             expected = online.source_build_id(root)
             first_header = header.read_text()
+            first_manifest = manifest.read_text()
             self.assertIn(f"#define ROCKE_BUILD_ID {expected}", first_header)
+            self.assertEqual(first_manifest, f"test {expected}\n")
 
             # Re-run the build-time generator against the same output without a
             # configure step. This is the incremental path used by the custom
@@ -133,16 +137,71 @@ class TestSourceBuildId(unittest.TestCase):
             subprocess.run(command, check=True)
             refreshed = header.read_text()
             self.assertNotEqual(first_header, refreshed)
-            self.assertIn(
-                f"#define ROCKE_BUILD_ID {online.source_build_id(root)}", refreshed
-            )
+            refreshed_id = online.source_build_id(root)
+            self.assertIn(f"#define ROCKE_BUILD_ID {refreshed_id}", refreshed)
+            self.assertNotEqual(first_manifest, manifest.read_text())
+            self.assertEqual(manifest.read_text(), f"test {refreshed_id}\n")
 
     def test_installed_tree_without_cpp_sources_has_no_expected_id(self):
         with tempfile.TemporaryDirectory() as td:
             self.assertIsNone(online.source_build_id(td))
 
 
-class TestLoadedEngineFreshness(unittest.TestCase):
+class TestInstalledProvenanceManifest(unittest.TestCase):
+    def test_source_less_tree_uses_installed_expected_id(self):
+        with tempfile.TemporaryDirectory() as td:
+            manifest = Path(td) / "provenance.txt"
+            manifest.write_text("1.0.0 installed-build\n")
+            with (
+                mock.patch.dict(
+                    "os.environ",
+                    {"ROCKE_PROVENANCE_MANIFEST": str(manifest)},
+                    clear=True,
+                ),
+                mock.patch.object(
+                    online, "_current_source_build_id", return_value=None
+                ),
+            ):
+                self.assertEqual(
+                    online.provenance_manifest(), ("1.0.0", "installed-build")
+                )
+                self.assertEqual(online._expected_build_id(), "installed-build")
+
+    def test_manifest_must_match_source_when_both_are_present(self):
+        with tempfile.TemporaryDirectory() as td:
+            manifest = Path(td) / "provenance.txt"
+            manifest.write_text("1.0.0 installed-build\n")
+            with (
+                mock.patch.dict(
+                    "os.environ",
+                    {"ROCKE_PROVENANCE_MANIFEST": str(manifest)},
+                    clear=True,
+                ),
+                mock.patch.object(
+                    online, "_current_source_build_id", return_value="source-build"
+                ),
+            ):
+                with self.assertRaisesRegex(RuntimeError, "does not match"):
+                    online._expected_build_id()
+
+    def test_malformed_manifest_is_rejected(self):
+        with tempfile.TemporaryDirectory() as td:
+            manifest = Path(td) / "provenance.txt"
+            manifest.write_text("missing-build-id\n")
+            with self.assertRaisesRegex(RuntimeError, "invalid.*manifest"):
+                online.provenance_manifest(manifest)
+
+
+class _CleanEnvironmentTest(unittest.TestCase):
+    def setUp(self):
+        self._environment = mock.patch.dict(online.os.environ, {}, clear=True)
+        self._environment.start()
+
+    def tearDown(self):
+        self._environment.stop()
+
+
+class TestLoadedEngineFreshness(_CleanEnvironmentTest):
     def test_stale_engine_fails_once_with_both_build_ids(self):
         lib = _Library("old-build")
         with mock.patch.object(
@@ -153,7 +212,7 @@ class TestLoadedEngineFreshness(unittest.TestCase):
         message = str(cm.exception)
         self.assertIn("old-build", message)
         self.assertIn("current-build", message)
-        self.assertIn("online.build_lib", message)
+        self.assertIn("provenance manifest", message)
         self.assertIs(lib.rocke_build_id.restype, ctypes.c_char_p)
 
     def test_matching_engine_is_accepted(self):
@@ -202,7 +261,60 @@ class TestLoadedEngineFreshness(unittest.TestCase):
         online._lib_path = None
 
 
-class TestReplayCliFreshness(unittest.TestCase):
+class TestReplayCliFreshness(_CleanEnvironmentTest):
+    def test_source_less_matching_manifest_resolves_explicit_cli(self):
+        proc = subprocess.CompletedProcess(
+            ["cli", "--provenance"], 0, stdout="1.0 current-build\n", stderr=""
+        )
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            cli = root / "replay-cli"
+            cli.touch()
+            manifest = root / "provenance.txt"
+            manifest.write_text("1.0 current-build\n")
+            with (
+                mock.patch.object(online.subprocess, "run", return_value=proc),
+                mock.patch.object(
+                    online, "_current_source_build_id", return_value=None
+                ),
+                mock.patch.object(online, "build_replay_cli") as build,
+                mock.patch.dict(
+                    "os.environ",
+                    {
+                        "ROCKE_REPLAY_CLI": str(cli),
+                        "ROCKE_PROVENANCE_MANIFEST": str(manifest),
+                    },
+                    clear=True,
+                ),
+            ):
+                self.assertEqual(online.resolve_replay_cli_path(build=False), str(cli))
+        build.assert_not_called()
+
+    def test_source_less_installed_cli_is_checked_against_manifest(self):
+        proc = subprocess.CompletedProcess(
+            ["cli", "--provenance"], 0, stdout="1.0 stale-build\n", stderr=""
+        )
+        with tempfile.TemporaryDirectory() as td:
+            manifest = Path(td) / "provenance.txt"
+            manifest.write_text("1.0 current-build\n")
+            with (
+                mock.patch.object(online.subprocess, "run", return_value=proc),
+                mock.patch.object(
+                    online, "_current_source_build_id", return_value=None
+                ),
+                mock.patch.dict(
+                    "os.environ",
+                    {"ROCKE_PROVENANCE_MANIFEST": str(manifest)},
+                    clear=True,
+                ),
+            ):
+                with self.assertRaisesRegex(
+                    RuntimeError, "stale/mixed rocKE replay CLI"
+                ) as cm:
+                    online.replay_cli_provenance("cli")
+        self.assertIn("stale-build", str(cm.exception))
+        self.assertIn("current-build", str(cm.exception))
+
     def test_stale_cli_reports_both_build_ids(self):
         proc = subprocess.CompletedProcess(
             ["cli", "--provenance"], 0, stdout="1.0 old-build\n", stderr=""
@@ -221,7 +333,7 @@ class TestReplayCliFreshness(unittest.TestCase):
         self.assertIn("current-build", str(cm.exception))
 
 
-class TestArtifactBundleProvenance(unittest.TestCase):
+class TestArtifactBundleProvenance(_CleanEnvironmentTest):
     def test_matching_ids_allow_different_configure_date_versions(self):
         with (
             mock.patch.object(
@@ -252,7 +364,7 @@ class TestArtifactBundleProvenance(unittest.TestCase):
         self.assertIn("cli-id", str(cm.exception))
 
 
-class TestCacheSelection(unittest.TestCase):
+class TestCacheSelection(_CleanEnvironmentTest):
     def test_default_cache_is_keyed_by_source_build_id(self):
         with mock.patch.object(
             online, "_current_source_build_id", return_value="abc123"

@@ -116,7 +116,6 @@ def test_roll_hsaco_parity():
     assert r.returncode == 0, r.stdout[-8000:] + r.stderr[-4000:]
 
 
-@pytest.mark.integration
 def test_standalone_cli_replays_rolled_recipe(tmp_path):
     """A binary with no Python in it replays the PARAMETRIC recipe to Python's .ll.
 
@@ -259,7 +258,6 @@ def test_roll_nd_cross_product():
     assert "NOW ROLLS" not in r.stdout, r.stdout[-4000:]
 
 
-@pytest.mark.integration
 def test_standalone_cli_replays_multi_axis_recipe(tmp_path):
     """A binary with no Python replays a TWO-AXIS recipe to Python's exact .ll.
 
@@ -323,7 +321,6 @@ json.dump(shas, open(out + "/shas.json", "w"))
         )
 
 
-@pytest.mark.integration
 def test_standalone_cli_regenerates_magic_division_constants(tmp_path):
     """The C VM regenerates magic-division constants it never recorded.
 

@@ -132,6 +132,41 @@ def _current_source_build_id() -> str | None:
     return source_build_id()
 
 
+def provenance_manifest(path: str | Path | None = None) -> tuple[str, str] | None:
+    """Read the expected ``(version, build ID)`` for an installed artifact.
+
+    A source checkout computes its expectation directly. Relocated tests have no
+    native sources, so their build installs this independent manifest beside the
+    prebuilt replay CLI and selects it through ``ROCKE_PROVENANCE_MANIFEST``.
+    """
+    selected = path or os.environ.get("ROCKE_PROVENANCE_MANIFEST")
+    if selected is None:
+        return None
+    manifest = Path(selected)
+    if not manifest.is_file():
+        raise FileNotFoundError(
+            f"portable-IR provenance manifest not found at {str(manifest)!r}"
+        )
+    parts = manifest.read_text().strip().split()
+    if len(parts) != 2:
+        raise RuntimeError(
+            f"invalid portable-IR provenance manifest at {str(manifest)!r}"
+        )
+    return parts[0], parts[1]
+
+
+def _expected_build_id() -> str | None:
+    """Return the checkout or installed-manifest artifact expectation."""
+    source_id = _current_source_build_id()
+    installed = provenance_manifest()
+    if installed is not None and source_id is not None and installed[1] != source_id:
+        raise RuntimeError(
+            "portable-IR provenance manifest does not match the current source: "
+            f"manifest={installed[1]}, source={source_id}"
+        )
+    return source_id or (installed[1] if installed is not None else None)
+
+
 def _shared_library_name() -> str:
     if sys.platform == "win32":
         return "rocke.dll"
@@ -355,14 +390,13 @@ def replay_cli_provenance(path: str) -> tuple[str, str]:
     if len(parts) != 2:
         raise RuntimeError(f"invalid provenance from replay CLI at {path!r}")
     version, build_id = parts
-    expected = _current_source_build_id()
+    expected = _expected_build_id()
     if expected is not None and build_id != expected:
         raise RuntimeError(
             "stale/mixed rocKE replay CLI: "
-            f"{path!r} has build-id {build_id}, but the current bundle expects "
-            f'{expected}. Rebuild it with `python -c "from '
-            "rocke.portable_ir.src import online; "
-            f'online.build_replay_cli({path!r})"`'
+            f"{path!r} has build-id {build_id}, but the selected environment "
+            f"expects {expected}. Rebuild or reinstall the replay CLI and its "
+            "provenance manifest from the same source snapshot"
         )
     return version, build_id
 
@@ -620,8 +654,8 @@ def _check_abi(lib: ctypes.CDLL, path: str) -> None:
 
 
 def _check_source_freshness(lib: ctypes.CDLL, path: str) -> None:
-    """Reject a local engine stamped from different native bundle inputs."""
-    expected = _current_source_build_id()
+    """Reject an engine that differs from its source or installed manifest."""
+    expected = _expected_build_id()
     if expected is None:
         return
     try:
@@ -634,11 +668,9 @@ def _check_source_freshness(lib: ctypes.CDLL, path: str) -> None:
     if got != expected:
         raise RuntimeError(
             "stale/mixed rocKE engine: "
-            f"librocke at {path!r} has build-id {got}, but the current bundle "
-            f'expects {expected}. Rebuild it with `python -c "from '
-            "rocke.portable_ir.src import online; "
-            f'online.build_lib({path!r})"` or point ROCKE_ONLINE_LIB at a '
-            "library built from this checkout"
+            f"librocke at {path!r} has build-id {got}, but the selected "
+            f"environment expects {expected}. Rebuild or reinstall the library "
+            "and its provenance manifest from the same source snapshot"
         )
 
 

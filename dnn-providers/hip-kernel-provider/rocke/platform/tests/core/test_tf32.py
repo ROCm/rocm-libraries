@@ -381,10 +381,13 @@ def tf32_recipe_replay_cli():
     path = Path(executable).resolve()
     if not path.is_file():
         pytest.skip(f"TF32 native replay CLI not found: {path}")
-    return path
+    from rocke.portable_ir.src import online
+
+    resolved = online.resolve_replay_cli_path(build=False)
+    assert resolved is not None
+    return Path(resolved)
 
 
-@pytest.mark.integration
 @pytest.mark.parametrize("m", [16, 32])
 @pytest.mark.parametrize("mode", PREPARATIONS)
 def test_recipe_replay_preserves_ir(m, mode, tmp_path, tf32_recipe_replay_cli):

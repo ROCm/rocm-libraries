@@ -322,6 +322,8 @@ if(BUILD_TESTING)
     # Python recipe tests need the native VM in relocated test artifacts.
     install(TARGETS rocke_portable_ir_replay_cli
             RUNTIME DESTINATION "${ROCKE_TEST_INSTALL_DIR}/tests/portable_ir")
+    install(FILES "${ROCKE_BUILD_ID_MANIFEST}"
+            DESTINATION "${ROCKE_TEST_INSTALL_DIR}/tests/portable_ir")
   endif()
 
   # --- instances layer --------------------------------------------------------
