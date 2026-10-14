@@ -37,6 +37,9 @@ typedef std::tuple<vector<int>, printable_char> sytrf_tuple;
 
 // each matrix_size_range vector is a {n, lda, singular, bc}
 // if singular = 1, then the used matrix for the tests is singular
+// if singular = 2, then one of the matrices has a NaN on the diagonal element factored last
+// if singular = 3, then the matrices are random symmetric indefinite matrices (irregular 1x1 and
+// 2x2 pivots and interchanges)
 
 // each uplo_range is a {uplo}
 
@@ -55,7 +58,13 @@ const vector<vector<int>> matrix_size_range = {
     // normal (valid) samples
     {32, 32, 1, 3},
     {50, 50, 0, 3},
-    {70, 100, 1, 3}};
+    {70, 100, 1, 3},
+    {1, 1, 2, 3},
+    {5, 5, 2, 3},
+    {40, 40, 2, 3},
+    {40, 40, 3, 3},
+    {100, 110, 3, 3},
+    {300, 300, 3, 3}};
 
 // for daily_lapack tests
 const vector<vector<int>> large_matrix_size_range = {
@@ -110,7 +119,7 @@ protected:
 
         if constexpr(!(BATCHED || STRIDED))
             arg.batch_count = 1;
-        if(arg.singular == 1)
+        if(arg.singular == 1 || arg.singular == 2 || arg.singular == 3)
             testing_sytf2_sytrf<BATCHED, STRIDED, BLOCKED, T>(arg);
 
         arg.singular = 0;

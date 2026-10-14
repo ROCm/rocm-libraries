@@ -20,6 +20,18 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 * Improved performance of expert eigensolvers SYEVDX/HEEVDX, SYGVDX/HEGVDX
 
 ### Resolved issues
+
+* SYTRS returned wrong solutions, or NaN, for some matrices when nrhs >= n/2 (the case that uses the
+  algorithm of xSYTRS2): the row interchanges and the 2-by-2 diagonal blocks were applied in the
+  wrong order
+* SYTF2 and SYTRF could choose different pivots in different threads (the diagonal element used to
+  choose the pivot was read while it was being interchanged), which gave wrong factorizations, and
+  memory access faults, for some matrices
+* SYTF2 and SYTRF report a NaN pivot in info, as LAPACK's xSYTF2, instead of reading out of bounds
+* GECON could return a wrong estimate for n > 64 (a race in its LACN2 iteration)
+* GECON caused a memory access fault for n > 480 when the handle was in device pointer mode (the mode
+  set by `rocsolver_create_handle`)
+
 ### Known issues
 ### Upcoming changes
 

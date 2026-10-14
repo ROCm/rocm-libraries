@@ -862,7 +862,11 @@ static rocblas_status sytrs2_inner_template(rocblas_handle handle,
         return rocblas_status_success;
     }; // end call_trsm
 
-    bool const is_forward = false;
+    // the pivots and the diagonal blocks are applied in the order of LAPACK's xSYTRS2:
+    // with U, P**t * B and D \ B go from the last row to the first, and P * B from the first;
+    // with L, it is the opposite
+    bool const forward = true;
+    bool const backward = false;
     T const alpha = one;
 
     if(is_upper)
@@ -872,7 +876,7 @@ static rocblas_status sytrs2_inner_template(rocblas_handle handle,
         //
         //        P**t * B
         // ------------------------------------------
-        ROCBLAS_CHECK(apply_pivot_upper<T, I>(handle, is_forward, n, nrhs, B_arg, shiftB, ldb,
+        ROCBLAS_CHECK(apply_pivot_upper<T, I>(handle, backward, n, nrhs, B_arg, shiftB, ldb,
                                               strideB, ipiv_arg, strideP, batch_count));
 
         // --------------------------------------------------
@@ -885,9 +889,9 @@ static rocblas_status sytrs2_inner_template(rocblas_handle handle,
         // ---------------------------------------------
         //    compute D \ B -> B   [ B \ (U \P**t * B) ]
         // ---------------------------------------------
-        ROCBLAS_CHECK(apply_diag_block<T, I>(handle, is_forward, n, nrhs, A_arg, shiftA, lda,
-                                             strideA, ipiv_arg, strideP, E_arg, strideE, B_arg,
-                                             shiftB, ldb, strideB, batch_count));
+        ROCBLAS_CHECK(apply_diag_block<T, I>(handle, backward, n, nrhs, A_arg, shiftA, lda, strideA,
+                                             ipiv_arg, strideP, E_arg, strideE, B_arg, shiftB, ldb,
+                                             strideB, batch_count));
 
         // --------------------------------------------------------------
         //      compute (U**t \ B) -> B   [ U**t \ (D \ (U \P**t * B) ) ]
@@ -900,8 +904,8 @@ static rocblas_status sytrs2_inner_template(rocblas_handle handle,
         //        --------------------------------------------
         //        P * B  [ P * (U**t \ (D \ (U \P**t * B) )) ]
         //        --------------------------------------------
-        ROCBLAS_CHECK(apply_pivot_upper<T, I>(handle, is_forward, n, nrhs, B_arg, shiftB, ldb,
-                                              strideB, ipiv_arg, strideP, batch_count));
+        ROCBLAS_CHECK(apply_pivot_upper<T, I>(handle, forward, n, nrhs, B_arg, shiftB, ldb, strideB,
+                                              ipiv_arg, strideP, batch_count));
     }
     else
     {
@@ -910,8 +914,8 @@ static rocblas_status sytrs2_inner_template(rocblas_handle handle,
         // *
         // *       P**t * B
         // -------------------------------------------
-        ROCBLAS_CHECK(apply_pivot_lower<T, I>(handle, is_forward, n, nrhs, B_arg, shiftB, ldb,
-                                              strideB, ipiv_arg, strideP, batch_count));
+        ROCBLAS_CHECK(apply_pivot_lower<T, I>(handle, forward, n, nrhs, B_arg, shiftB, ldb, strideB,
+                                              ipiv_arg, strideP, batch_count));
 
         // ---------------------------------------------------
         //    compute (L \P**t * B) -> B    [ (L \P**t * B) ]
@@ -923,9 +927,9 @@ static rocblas_status sytrs2_inner_template(rocblas_handle handle,
         // ---------------------------------------------
         //    compute D \ B -> B   [ D \ (L \P**t * B) ]
         // ---------------------------------------------
-        ROCBLAS_CHECK(apply_diag_block<T, I>(handle, is_forward, n, nrhs, A_arg, shiftA, lda,
-                                             strideA, ipiv_arg, strideP, E_arg, strideE, B_arg,
-                                             shiftB, ldb, strideB, batch_count));
+        ROCBLAS_CHECK(apply_diag_block<T, I>(handle, forward, n, nrhs, A_arg, shiftA, lda, strideA,
+                                             ipiv_arg, strideP, E_arg, strideE, B_arg, shiftB, ldb,
+                                             strideB, batch_count));
 
         // ------------------------------------------------------------
         //    compute (L**t \ B) -> B   [ L**t \ (D \ (L \P**t * B) ) ]
@@ -938,7 +942,7 @@ static rocblas_status sytrs2_inner_template(rocblas_handle handle,
         // ----------------------------------------------------
         //         P * B  [ P * (L**t \ (D \ (L \P**t * B) )) ]
         // ----------------------------------------------------
-        ROCBLAS_CHECK(apply_pivot_lower<T, I>(handle, is_forward, n, nrhs, B_arg, shiftB, ldb,
+        ROCBLAS_CHECK(apply_pivot_lower<T, I>(handle, backward, n, nrhs, B_arg, shiftB, ldb,
                                               strideB, ipiv_arg, strideP, batch_count));
     }
 
