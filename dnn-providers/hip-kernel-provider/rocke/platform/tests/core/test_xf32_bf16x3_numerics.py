@@ -452,6 +452,52 @@ class TestTopBinadeSaturation(unittest.TestCase):
         self.assertTrue(np.isneginf(_bf16x3_dot(x, -x)))
 
 
+class TestSubnormalPayloads(unittest.TestCase):
+    """bf16 has fp32's exponent range but only 7 mantissa bits, so its smallest
+    positive value is 2^-133 and the split of a subnormal payload has an absolute
+    error floor instead of a relative one.
+
+    ``big`` lands on the bf16 grid, whose spacing down there is 2^-133, so it is
+    within 2^-134 of the payload, and ``small`` can only be 0 or one grid step; the
+    split is therefore good to an absolute 2^-134 per operand, and a payload no
+    larger than 2^-134 contributes nothing at all.
+    """
+
+    def test_a_subnormal_payload_splits_to_an_absolute_error_of_two_to_the_minus_134(
+        self,
+    ):
+        rng = np.random.default_rng(_SEED + 11)
+        bits = rng.integers(1, 0x00800000, size=100_000, dtype=np.uint64).astype(
+            np.uint32
+        )
+        x = bits.view(np.float32)
+        big, small = _split(x)
+        error = np.abs((big.astype(np.float64) + small) - x.astype(np.float64))
+        self.assertLessEqual(float(error.max()), 2.0**-134)
+
+    def test_a_payload_no_larger_than_two_to_the_minus_134_contributes_nothing(self):
+        partner = np.array([2.0**100], dtype=np.float32)
+        for bits in (0x00000001, 0x00001000, 0x00008000):
+            with self.subTest(hex(bits)):
+                x = np.array([_f32(bits)])
+                big, small = _split(x)
+                self.assertEqual((float(big[0]), float(small[0])), (0.0, 0.0))
+                self.assertEqual(float(_bf16x3_dot(x, partner)), 0.0)
+                # ... although the exact product is not zero.
+                self.assertGreater(float(x[0]) * float(partner[0]), 0.0)
+        # One step above that, the payload is represented.
+        big, small = _split(np.array([_f32(0x00008001)]))
+        self.assertEqual(float(big[0]), 2.0**-133)
+
+    def test_a_subnormal_the_bf16_grid_holds_exactly_is_exact(self):
+        """2^-131 and 2^-127 are on the grid, so nothing is lost."""
+        for bits in (0x00040000, 0x00200000, 0x80200000):
+            with self.subTest(hex(bits)):
+                x = np.array([_f32(bits)])
+                big, small = _split(x)
+                self.assertEqual(float(big[0]) + float(small[0]), float(x[0]))
+
+
 class TestNonFinitePayloads(unittest.TestCase):
     """An infinity or NaN in an operand makes every output it feeds non-finite.
 

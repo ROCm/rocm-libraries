@@ -96,8 +96,8 @@ _SMALLEST_NORMAL = 0x00800000
 # The edge cases run on constant operands, so the answer is K * alpha * beta at
 # every output position whatever the layout. Each is (label, alpha bits, beta
 # bits, expectation); expectations are "finite" (within the emulated
-# tolerance of the exact product), "+inf", "-inf", "nan", or "non-finite"
-# (infinity or NaN, which one is not promised).
+# tolerance of the exact product), "zero", "+inf", "-inf", "nan", or
+# "non-finite" (infinity or NaN, which one is not promised).
 _EDGE_CASES = (
     ("top binade x smallest normal", 0x7F7FE000, _SMALLEST_NORMAL, "finite"),
     ("-top binade x smallest normal", 0xFF7FE000, _SMALLEST_NORMAL, "finite"),
@@ -124,6 +124,15 @@ _EDGE_CASES = (
     ("NaN x 1", 0x7FC00000, 0x3F800000, "nan"),
     ("1 x NaN", 0x3F800000, 0x7FC00000, "nan"),
     ("NaN held in the low bits x 1", 0x7F800001, 0x3F800000, "nan"),
+    # A signed zero accumulates into the +0 the accumulator starts at.
+    ("-0 x 1", 0x80000000, 0x3F800000, "zero"),
+    # Subnormal payloads. bf16 reaches down to 2^-133, so a subnormal payload is
+    # split to an absolute error of 2^-134 rather than a relative one. These
+    # are exact or nearly so, against a partner that makes the product normal
+    # and against one that leaves it subnormal.
+    ("subnormal 2^-131 x 2^100", 0x00040000, 0x71800000, "finite"),
+    ("largest subnormal x 2^100", 0x007FFFFF, 0x71800000, "finite"),
+    ("-subnormal 2^-127 x 1", 0x80200000, 0x3F800000, "finite"),
     # An infinity against a partner large enough that its own residual overflows
     # against the cap: infinity or NaN, but never a finite number.
     ("+inf x large partner", 0x7F800000, 0x442BA000, "non-finite"),
@@ -311,6 +320,9 @@ def _edge_failures(op_id: str, atom, emulated, a_len: int, b_len: int) -> list[s
             shown = f"rel={err:.3e}"
         elif expect in ("+inf", "-inf"):
             ok = bool((got == (np.inf if expect == "+inf" else -np.inf)).all())
+            shown = f"{got[0]}"
+        elif expect == "zero":
+            ok = bool((got == 0).all())
             shown = f"{got[0]}"
         elif expect == "nan":
             ok = bool(np.isnan(got).all())

@@ -125,9 +125,10 @@ believing the agreement. Both checks here avoid needing the layout at all:
 3. **The edges of the payload domain.** The same constant-operand trick, now
    with the payloads that broke the first version of the split: the top of the
    finite range against the smallest normal (exact product `3.998046875` and
-   its relatives), products that really overflow, infinities, NaNs, and an
-   infinity against a partner large enough to hit the one documented
-   weakness. The expectation is closed-form at every output position. A
+   its relatives), products that really overflow, infinities, NaNs, signed zero,
+   subnormal payloads (the host model pins their absolute error floor,
+   `TestSubnormalPayloads`), and an infinity against a partner large enough to
+   hit the one documented weakness. The expectation is closed-form at every output position. A
    non-finite element in just one place of A or B is then checked to turn
    exactly the outputs that consume it non-finite — one row, `n` outputs, for
    an element of A; one column, `m`, for B — whatever the lane layout, with every

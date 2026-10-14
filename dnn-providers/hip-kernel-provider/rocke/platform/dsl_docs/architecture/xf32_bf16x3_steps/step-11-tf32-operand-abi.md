@@ -139,6 +139,17 @@ may come out as NaN rather than `inf`. It is still not finite, and a finite-look
 result is the failure this contract excludes. A native XF32 instruction handles these
 payloads in its own way, so this is not a claim of agreement with it either.
 
+**Subnormal payloads.** bf16 has fp32's exponent range but only seven mantissa bits, so
+its smallest positive value is `2^-133`. A payload below the smallest normal fp32 is
+therefore split to an *absolute* error of `2^-134` per operand rather than a relative
+one, and a payload no larger than `2^-134` (about `4.6e-41`) contributes nothing: both of
+its parts come out zero, though the exact product with a large partner is not. On a
+gfx950, subnormals the bf16 grid holds exactly (`0x00040000`, `0x00200000`) and the
+largest subnormal came out exact to `1.2e-7`, and `0x00000001` and `0x00001000` against
+`2^100` came out zero. Signed zero accumulates into the `+0` the accumulator starts at,
+so `-0 * 1` is `+0`. The contract above says "tracks the exact product" for payloads of
+ordinary magnitude; this is its floor.
+
 **What the cap costs** is a few integer operations on the narrowed value per operand
 fragment. The MMA count, their order and the packed convert are unchanged.
 
