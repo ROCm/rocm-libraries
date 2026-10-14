@@ -198,6 +198,18 @@ or are link-resolved-but-forward-declared; the byte-identity path is unaffected.
 | `deep_fused_conv_pool_value_types_and_spec.cpp` | Leading underlying-conv gate (`conv_spec=spec.conv_spec()`; `is_valid_conv_spec`) in `is_valid_spec`. | The per-family gate `rocke_implicit_gemm_conv_is_valid_spec` is public, but `spec.conv_spec()`'s only C port requires an `ir_builder_t*` for `kernel_name_join`; this validator is pure-compute with no builder. Needs a builder-free `conv_spec()` / validate path. |
 | `deep_fused_conv_pool_conv1_gemm_and_lds_staging.cpp` | `rocke_conv_apply_accumulator_epilogue` peer (called via a local extern-C forward decl). | The peer's `ConvAccumulatorEpilogue` struct in its private header collides with this TU's struct of the same name; needs the peer epilogue type exposed through a non-conflicting shared header. Currently **link-resolved (correct at runtime)**; forward-decl retained. |
 
+## 5. Library MLA — no C++ instance mirror, no emitter parity pair
+
+**Subsystem:** `library/kernels/mla/` (`mla_prefill_fwd`, `mla_decode`,
+`mla_decode_combine`)
+
+The MLA kernels are built by their Python builders only: there is no
+`platform/cpp/instances` counterpart and no `library/tests/parity/mla_*_emit.{py,c}`
+pair. Lowering is still dual-engine for decode
+(`library/tests/test_mla_decode_golden.py::test_mla_decode_cpp_python_byte_identity`
+lowers every case through both engines), and the Python-lowered IR of both
+kernels is pinned by the `library/tests/golden/mla_*_ir_sha256.json` goldens.
+
 ---
 
 ## 5. gfx942 MLA prefill — Python-only kernel builder

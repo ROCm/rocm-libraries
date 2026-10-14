@@ -80,6 +80,10 @@ Direct grouped 4c (same shape, cpg=kpg=4):
 | `fmha_fwd_fp8.py` | `FmhaFwdFp8Spec` (CK Tile 01 fp8; per-tensor scales) | `instances/attention.md` |
 | `sage_attention.py` | `SageAttentionSpec`, `SageQuantMode` (CK Tile 49; 4 variants) | `instances/attention.md` |
 | `sparse_attention.py` | `JengaSparseSpec`, `VsaSparseSpec` (CK Tile 50; jenga + VSA) | `instances/attention.md` |
+| `library/kernels/mla/mla_prefill_gfx942.py` | `MlaPrefillSpec` (MLA prefill, gfx942) | `instances/attention.md` |
+| `library/kernels/mla/mla_decode.py` | `MlaDecodeSpec` (MLA decode, weight-absorbed; gfx942) | `instances/attention.md` |
+| `library/kernels/mla/mla_decode_gfx950.py` | `MlaDecodeGfx950Spec` (MLA decode, gfx950) | `instances/attention.md` |
+| `library/kernels/mla/mla_decode_combine.py` | `MlaDecodeCombineSpec` (MLA decode split-KV combine) | `instances/attention.md` |
 
 Runtime entry point: `run_unified_attention_torch(...)`.
 

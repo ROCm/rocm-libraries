@@ -123,6 +123,7 @@ and [packed FP6 input contract](../examples/gfx1250/gemm/FP6.md).
 | `unified_attention_reduce` | ✅ | ✅ | ✅ | scalar |
 | tiled 3D `kv_layout="strided"` | ✅ | ✅ | ❌ | non-paged Sq=1, fp16/bf16 D64/128/256, aligned unit-D KV views; existing tiled segment/reduce pipeline |
 | `mla_prefill_fwd` | ✅ | ❌ | ❌ | bf16 only; paged compressed KV, `W_UK` absorbed into the query and `W_UV` applied in the epilogue (the latent KV is never expanded). Takes an already projected, RoPE-rotated query. Lives in `library/kernels/mla/`, dispatched by the separate `dispatch.mla` registry (not `dispatch.attention`). gfx950 is a later phase. |
+| `mla_decode` (+ `mla_decode_combine`) | ✅ | ✅ | ❌ | bf16 only; weight-absorbed decode (`Qa` in, normalized latent + LSE out; `W_UK`/`W_UV` are the caller's batched GEMMs), paged compressed KV, 64 heads per workgroup, split-KV with an arch-neutral combine. `library/kernels/mla/`; `dispatch.mla` selects it for `max_seqlen_q == 1`. gfx950 uses the `16x16x32` score atom and `ds_read_tr16_b64`. |
 
 ---
 

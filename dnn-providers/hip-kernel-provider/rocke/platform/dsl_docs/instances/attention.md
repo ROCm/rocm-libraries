@@ -568,6 +568,26 @@ So shape validity belongs in `supports_attention_dense`, which runs **per launch
 
 The 32-bit bound is **signed**: offsets are built from IRBuilder `add`/`mul`, which lower to `add nsw` / `mul nsw` i32, where overflow is UB rather than a wrap. The buffer-resource `num_records` field is unsigned in hardware, but it is emitted through `const_i32` with no range check and the voffset feeding it is signed, so 2³¹ binds on both paths.
 
+## MLA (library: `kernels/mla/`)
+
+Multi-head latent attention is its own dispatch family (`dispatch.mla`, op
+`mla_fwd`), not an `attention_unified` candidate: its query, key and value
+widths all differ, which a single `head_size` cannot name.
+
+| Kernel | Spec | Builder | Arches |
+|---|---|---|---|
+| prefill forward | `MlaPrefillSpec` | `build_mla_prefill_fwd` | gfx942 |
+| decode latent (weight-absorbed) | `MlaDecodeSpec` / `MlaDecodeGfx950Spec` | `build_mla_decode` / `build_mla_decode_gfx950` | gfx942 / gfx950 |
+| decode split-KV combine | `MlaDecodeCombineSpec` | `build_mla_decode_combine` | gfx942, gfx950 |
+
+`max_seqlen_q == 1` routes to decode (priority 5); prefill (priority 10) serves
+every other request and remains the `S_q = 1` fallback on gfx942. The decode
+kernel takes the absorbed query `[Q_nope @ W_UK_nopeᵀ | Q_rope]` and returns the
+normalized latent and the LSE; `W_UV` is the caller's batched GEMM. Heads sit on
+the MFMA n axis (64 per workgroup), and split-KV writes fp32 partials that the
+arch-neutral combine merges. Design: `library/builders/mla/DESIGN.md`; GPU
+parity: `library/builders/mla/verify_mla_decode.py`.
+
 ## Attention Failure Modes
 
 - Comparing 2D CK against 3D Triton or vice versa without labeling algorithm.
