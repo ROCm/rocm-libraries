@@ -42,6 +42,7 @@ from . import (
     gfx942_unified,
     gfx950_dense,
     gfx950_unified,
+    gfx1151,
     gfx1250,
     strided_decode,
 )
@@ -87,6 +88,7 @@ for _module in (
     gfx950_dense,
     gfx950_unified,
     gfx1250,
+    gfx1151,
 ):
     _module.register(ATTENTION_ROUTE_REGISTRY, ATTENTION_EXECUTION_REGISTRY)
 # Compatibility alias: production auto-dispatch and candidate listing.
@@ -202,7 +204,7 @@ def iter_dispatch_attention_all(
     sweep_level: str = "production",
 ) -> Iterator[DispatchResult]:
     """Yield each :func:`attention_dispatch_result` for ``req``."""
-    if _request_errors(req):
+    if _request_errors(req, allow_unequal_head_dims=True):
         return
     yield from iter_at_level(
         sweep_level,
@@ -291,7 +293,7 @@ def attention_sweep_space(
     ``limit`` stops after that many specs; the stream is only materialized
     up to what is returned.
     """
-    if _request_errors(req):
+    if _request_errors(req, allow_unequal_head_dims=True):
         return ()
     assert isinstance(req, AttentionRequest)
     specs = []

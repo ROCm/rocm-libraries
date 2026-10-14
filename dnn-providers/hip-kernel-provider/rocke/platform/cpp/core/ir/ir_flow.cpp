@@ -533,6 +533,16 @@ rocke_value_t* rocke_b_warp_shuffle_xor(rocke_ir_builder_t* b, rocke_value_t* v,
         return (rocke_value_t*)rocke_i_set_err(
             b, ROCKE_ERR_VALUE, "warp_shuffle_xor: NULL operand");
 
+    /* f64: split into two i32 halves and shuffle each on the 32-bit path. */
+    if(rocke_i_type_is(v->type, "f64"))
+    {
+        rocke_value_t* halves = rocke_b_bitcast(b, v, rocke_vector_type(b, rocke_i32(), 2));
+        rocke_value_t* parts[2];
+        parts[0] = rocke_b_warp_shuffle_xor(b, rocke_b_vec_extract(b, halves, 0), lane_xor);
+        parts[1] = rocke_b_warp_shuffle_xor(b, rocke_b_vec_extract(b, halves, 1), lane_xor);
+        return rocke_b_bitcast(b, rocke_b_vec_pack(b, parts, 2, rocke_i32()), rocke_f64());
+    }
+
     if(lane_xor >= 1 && lane_xor <= 31)
     {
         /* Intra-32-lane XOR -> ds_swizzle (1 LDS op, no addr-compute). */
@@ -1119,6 +1129,27 @@ rocke_value_t* rocke_b_buffer_load_f16(rocke_ir_builder_t* b,
     ops[1] = voffset;
     ops[2] = soffset;
     return rocke_i_op1(b, ROCKE_OP_TILE_BUFFER_LOAD_F16, ops, 3, rocke_f16(), NULL, "bl1");
+}
+
+/* D16-form scalar half buffer load: ``raw.ptr.buffer.load.f16`` returns
+ * ``half`` directly (no i16 bitcast). Port of Python
+ * IRBuilder.buffer_load_f16_d16 / the pinned PR9710
+ * tile.buffer_load_f16_d16 op. */
+rocke_value_t* rocke_b_buffer_load_f16_d16(rocke_ir_builder_t* b,
+                                           rocke_value_t* rsrc,
+                                           rocke_value_t* voffset,
+                                           rocke_value_t* soffset)
+{
+    rocke_value_t* ops[3];
+    if(!rocke_i_live(b))
+        return NULL;
+    if(!rsrc || !voffset || !soffset)
+        return (rocke_value_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "buffer_load_f16_d16: NULL operand");
+    ops[0] = rsrc;
+    ops[1] = voffset;
+    ops[2] = soffset;
+    return rocke_i_op1(b, ROCKE_OP_TILE_BUFFER_LOAD_F16_D16, ops, 3, rocke_f16(), NULL, "bld16");
 }
 
 void rocke_b_buffer_store_vN_f16(rocke_ir_builder_t* b,

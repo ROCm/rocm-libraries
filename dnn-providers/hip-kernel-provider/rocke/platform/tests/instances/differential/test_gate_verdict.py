@@ -784,7 +784,7 @@ class TestConfigEnumeration(unittest.TestCase):
                     self.assertEqual(status, "DRIFT")
                     self.assertIn(rows[late]["verdict"], ("MISMATCH", "DRIFT"))
 
-    def test_truncated_128_record_batch_is_not_complete_for_scaled_family(self):
+    def test_truncated_default_record_batch_is_not_complete_for_scaled_family(self):
         success = run_diff.Emission(0, True, "same", "")
         ended = run_diff.Emission(2, False, None, "unknown config")
         synthetic_count = run_diff.MAX_CFG + 17
@@ -800,10 +800,10 @@ class TestConfigEnumeration(unittest.TestCase):
             ):
                 result = run_diff.run_family("gfx1250_lowering", Path("archive"), "ll")
             self.assertEqual(result["status"], "BATCH_INCOMPLETE")
-            self.assertIn("128 records", result["error"])
+            self.assertIn(f"{run_diff.MAX_CFG} records", result["error"])
 
     def test_default_cap_would_miss_late_drift(self):
-        self.assertEqual(run_diff.config_limit("gemm"), 128)
+        self.assertEqual(run_diff.config_limit("gemm"), 256)
         for driver, status in (("builders", "GREEN"), ("artifacts", "IDENTICAL")):
             with (
                 self.subTest(driver=driver),

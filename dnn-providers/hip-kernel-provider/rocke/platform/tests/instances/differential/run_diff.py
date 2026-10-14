@@ -99,7 +99,7 @@ def collect_ref_shas(results):
     return out
 
 
-MAX_CFG = 128  # default cap on config enumeration per family
+MAX_CFG = 256  # default cap on config enumeration per family
 FAMILY_MAX_CFG = {"gfx1250_lowering": 512}
 TIMEOUT = 120  # seconds per emitter invocation
 
