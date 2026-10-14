@@ -3737,8 +3737,8 @@ inline hipsolverStatus_t hipsolver_geqrf_bufferSize(testAPI_t           API,
                                                     float*              A[],
                                                     int                 lda,
                                                     float*              tau[],
-                                                    int*                lworkOnDevice,
-                                                    int*                lworkOnHost,
+                                                    size_t*             lworkOnDevice,
+                                                    size_t*             lworkOnHost,
                                                     int                 bc)
 {
     *lworkOnHost = 0;
@@ -3760,8 +3760,8 @@ inline hipsolverStatus_t hipsolver_geqrf_bufferSize(testAPI_t           API,
                                                     double*             A[],
                                                     int                 lda,
                                                     double*             tau[],
-                                                    int*                lworkOnDevice,
-                                                    int*                lworkOnHost,
+                                                    size_t*             lworkOnDevice,
+                                                    size_t*             lworkOnHost,
                                                     int                 bc)
 {
     *lworkOnHost = 0;
@@ -3783,8 +3783,8 @@ inline hipsolverStatus_t hipsolver_geqrf_bufferSize(testAPI_t           API,
                                                     hipsolverComplex*   A[],
                                                     int                 lda,
                                                     hipsolverComplex*   tau[],
-                                                    int*                lworkOnDevice,
-                                                    int*                lworkOnHost,
+                                                    size_t*             lworkOnDevice,
+                                                    size_t*             lworkOnHost,
                                                     int                 bc)
 {
     *lworkOnHost = 0;
@@ -3807,8 +3807,8 @@ inline hipsolverStatus_t hipsolver_geqrf_bufferSize(testAPI_t               API,
                                                     hipsolverDoubleComplex* A[],
                                                     int                     lda,
                                                     hipsolverDoubleComplex* tau[],
-                                                    int*                    lworkOnDevice,
-                                                    int*                    lworkOnHost,
+                                                    size_t*                 lworkOnDevice,
+                                                    size_t*                 lworkOnHost,
                                                     int                     bc)
 {
     *lworkOnHost = 0;
@@ -3834,9 +3834,9 @@ inline hipsolverStatus_t hipsolver_geqrf(testAPI_t           API,
                                          float*              tau[],
                                          int                 stT,
                                          float*              workOnDevice,
-                                         int                 lworkOnDevice,
+                                         size_t              lworkOnDevice,
                                          float*              workOnHost,
-                                         int                 lworkOnHost,
+                                         size_t              lworkOnHost,
                                          int*                info,
                                          int                 bc)
 {
@@ -3861,9 +3861,9 @@ inline hipsolverStatus_t hipsolver_geqrf(testAPI_t           API,
                                          double*             tau[],
                                          int                 stT,
                                          double*             workOnDevice,
-                                         int                 lworkOnDevice,
+                                         size_t              lworkOnDevice,
                                          double*             workOnHost,
-                                         int                 lworkOnHost,
+                                         size_t              lworkOnHost,
                                          int*                info,
                                          int                 bc)
 {
@@ -3888,9 +3888,9 @@ inline hipsolverStatus_t hipsolver_geqrf(testAPI_t           API,
                                          hipsolverComplex*   tau[],
                                          int                 stT,
                                          hipsolverComplex*   workOnDevice,
-                                         int                 lworkOnDevice,
+                                         size_t              lworkOnDevice,
                                          hipsolverComplex*   workOnHost,
-                                         int                 lworkOnHost,
+                                         size_t              lworkOnHost,
                                          int*                info,
                                          int                 bc)
 {
@@ -3923,9 +3923,9 @@ inline hipsolverStatus_t hipsolver_geqrf(testAPI_t               API,
                                          hipsolverDoubleComplex* tau[],
                                          int                     stT,
                                          hipsolverDoubleComplex* workOnDevice,
-                                         int                     lworkOnDevice,
+                                         size_t                  lworkOnDevice,
                                          hipsolverDoubleComplex* workOnHost,
-                                         int                     lworkOnHost,
+                                         size_t                  lworkOnHost,
                                          int*                    info,
                                          int                     bc)
 {
@@ -6436,8 +6436,8 @@ inline hipsolverStatus_t hipsolver_getrf_bufferSize(testAPI_t           API,
                                                     int                 n,
                                                     float*              A[],
                                                     int                 lda,
-                                                    int*                lworkOnDevice,
-                                                    int*                lworkOnHost,
+                                                    size_t*             lworkOnDevice,
+                                                    size_t*             lworkOnHost,
                                                     int                 bc)
 {
     *lworkOnHost = 0;
@@ -6459,8 +6459,8 @@ inline hipsolverStatus_t hipsolver_getrf_bufferSize(testAPI_t           API,
                                                     int                 n,
                                                     double*             A[],
                                                     int                 lda,
-                                                    int*                lworkOnDevice,
-                                                    int*                lworkOnHost,
+                                                    size_t*             lworkOnDevice,
+                                                    size_t*             lworkOnHost,
                                                     int                 bc)
 {
     *lworkOnHost = 0;
@@ -6482,8 +6482,8 @@ inline hipsolverStatus_t hipsolver_getrf_bufferSize(testAPI_t           API,
                                                     int                 n,
                                                     hipsolverComplex*   A[],
                                                     int                 lda,
-                                                    int*                lworkOnDevice,
-                                                    int*                lworkOnHost,
+                                                    size_t*             lworkOnDevice,
+                                                    size_t*             lworkOnHost,
                                                     int                 bc)
 {
     *lworkOnHost = 0;
@@ -6505,8 +6505,8 @@ inline hipsolverStatus_t hipsolver_getrf_bufferSize(testAPI_t               API,
                                                     int                     n,
                                                     hipsolverDoubleComplex* A[],
                                                     int                     lda,
-                                                    int*                    lworkOnDevice,
-                                                    int*                    lworkOnHost,
+                                                    size_t*                 lworkOnDevice,
+                                                    size_t*                 lworkOnHost,
                                                     int                     bc)
 {
     *lworkOnHost = 0;
@@ -6533,9 +6533,9 @@ inline hipsolverStatus_t hipsolver_getrf(testAPI_t           API,
                                          int*                ipiv,
                                          int                 stP,
                                          float*              workOnDevice,
-                                         int                 lworkOnDevice,
+                                         size_t              lworkOnDevice,
                                          float*              workOnHost,
-                                         int                 lworkOnHost,
+                                         size_t              lworkOnHost,
                                          int*                info,
                                          int                 bc)
 {
@@ -6564,9 +6564,9 @@ inline hipsolverStatus_t hipsolver_getrf(testAPI_t           API,
                                          int*                ipiv,
                                          int                 stP,
                                          double*             workOnDevice,
-                                         int                 lworkOnDevice,
+                                         size_t              lworkOnDevice,
                                          double*             workOnHost,
-                                         int                 lworkOnHost,
+                                         size_t              lworkOnHost,
                                          int*                info,
                                          int                 bc)
 {
@@ -6595,9 +6595,9 @@ inline hipsolverStatus_t hipsolver_getrf(testAPI_t           API,
                                          int*                ipiv,
                                          int                 stP,
                                          hipsolverComplex*   workOnDevice,
-                                         int                 lworkOnDevice,
+                                         size_t              lworkOnDevice,
                                          hipsolverComplex*   workOnHost,
-                                         int                 lworkOnHost,
+                                         size_t              lworkOnHost,
                                          int*                info,
                                          int                 bc)
 {
@@ -6644,9 +6644,9 @@ inline hipsolverStatus_t hipsolver_getrf(testAPI_t               API,
                                          int*                    ipiv,
                                          int                     stP,
                                          hipsolverDoubleComplex* workOnDevice,
-                                         int                     lworkOnDevice,
+                                         size_t                  lworkOnDevice,
                                          hipsolverDoubleComplex* workOnHost,
-                                         int                     lworkOnHost,
+                                         size_t                  lworkOnHost,
                                          int*                    info,
                                          int                     bc)
 {
@@ -6693,7 +6693,7 @@ inline hipsolverStatus_t hipsolver_getri_bufferSize(testAPI_t         API,
                                                     int               strideP,
                                                     float*            C[],
                                                     int               ldc,
-                                                    int*              lwork,
+                                                    size_t*           lwork,
                                                     int               batch_count)
 {
     switch(API)
@@ -6716,7 +6716,7 @@ inline hipsolverStatus_t hipsolver_getri_bufferSize(testAPI_t         API,
                                                     int               strideP,
                                                     double*           C[],
                                                     int               ldc,
-                                                    int*              lwork,
+                                                    size_t*           lwork,
                                                     int               batch_count)
 {
     switch(API)
@@ -6739,7 +6739,7 @@ inline hipsolverStatus_t hipsolver_getri_bufferSize(testAPI_t         API,
                                                     int               strideP,
                                                     hipsolverComplex* C[],
                                                     int               ldc,
-                                                    int*              lwork,
+                                                    size_t*           lwork,
                                                     int               batch_count)
 {
     switch(API)
@@ -6770,7 +6770,7 @@ inline hipsolverStatus_t hipsolver_getri_bufferSize(testAPI_t               API,
                                                     int                     strideP,
                                                     hipsolverDoubleComplex* C[],
                                                     int                     ldc,
-                                                    int*                    lwork,
+                                                    size_t*                 lwork,
                                                     int                     batch_count)
 {
     switch(API)
@@ -6803,7 +6803,7 @@ inline hipsolverStatus_t hipsolver_getri(testAPI_t         API,
                                          float*            C[],
                                          int               ldc,
                                          float*            work,
-                                         int               lwork,
+                                         size_t            lwork,
                                          int*              devInfo,
                                          int               batch_count)
 {
@@ -6831,7 +6831,7 @@ inline hipsolverStatus_t hipsolver_getri(testAPI_t         API,
                                          double*           C[],
                                          int               ldc,
                                          double*           work,
-                                         int               lwork,
+                                         size_t            lwork,
                                          int*              devInfo,
                                          int               batch_count)
 {
@@ -6859,7 +6859,7 @@ inline hipsolverStatus_t hipsolver_getri(testAPI_t         API,
                                          hipsolverComplex* C[],
                                          int               ldc,
                                          hipsolverComplex* work,
-                                         int               lwork,
+                                         size_t            lwork,
                                          int*              devInfo,
                                          int               batch_count)
 {
@@ -6907,7 +6907,7 @@ inline hipsolverStatus_t hipsolver_getri(testAPI_t               API,
                                          hipsolverDoubleComplex* C[],
                                          int                     ldc,
                                          hipsolverDoubleComplex* work,
-                                         int                     lwork,
+                                         size_t                  lwork,
                                          int*                    devInfo,
                                          int                     batch_count)
 {
@@ -7548,7 +7548,7 @@ inline hipsolverStatus_t hipsolver_getrs_bufferSize(testAPI_t            API,
                                                     int                  stP,
                                                     float*               B[],
                                                     int                  ldb,
-                                                    int*                 lwork,
+                                                    size_t*              lwork,
                                                     int                  bc)
 {
     switch(API)
@@ -7574,7 +7574,7 @@ inline hipsolverStatus_t hipsolver_getrs_bufferSize(testAPI_t            API,
                                                     int                  stP,
                                                     double*              B[],
                                                     int                  ldb,
-                                                    int*                 lwork,
+                                                    size_t*              lwork,
                                                     int                  bc)
 {
     switch(API)
@@ -7600,7 +7600,7 @@ inline hipsolverStatus_t hipsolver_getrs_bufferSize(testAPI_t            API,
                                                     int                  stP,
                                                     hipsolverComplex*    B[],
                                                     int                  ldb,
-                                                    int*                 lwork,
+                                                    size_t*              lwork,
                                                     int                  bc)
 {
     switch(API)
@@ -7636,7 +7636,7 @@ inline hipsolverStatus_t hipsolver_getrs_bufferSize(testAPI_t               API,
                                                     int                     stP,
                                                     hipsolverDoubleComplex* B[],
                                                     int                     ldb,
-                                                    int*                    lwork,
+                                                    size_t*                 lwork,
                                                     int                     bc)
 {
     switch(API)
@@ -7676,7 +7676,7 @@ inline hipsolverStatus_t hipsolver_getrs(testAPI_t            API,
                                          int                  ldb,
                                          int                  stB,
                                          float*               work,
-                                         int                  lwork,
+                                         size_t               lwork,
                                          int*                 devInfo,
                                          int                  bc)
 {
@@ -7709,7 +7709,7 @@ inline hipsolverStatus_t hipsolver_getrs(testAPI_t            API,
                                          int                  ldb,
                                          int                  stB,
                                          double*              work,
-                                         int                  lwork,
+                                         size_t               lwork,
                                          int*                 devInfo,
                                          int                  bc)
 {
@@ -7742,7 +7742,7 @@ inline hipsolverStatus_t hipsolver_getrs(testAPI_t            API,
                                          int                  ldb,
                                          int                  stB,
                                          hipsolverComplex*    work,
-                                         int                  lwork,
+                                         size_t               lwork,
                                          int*                 devInfo,
                                          int                  bc)
 {
@@ -7799,7 +7799,7 @@ inline hipsolverStatus_t hipsolver_getrs(testAPI_t               API,
                                          int                     ldb,
                                          int                     stB,
                                          hipsolverDoubleComplex* work,
-                                         int                     lwork,
+                                         size_t                  lwork,
                                          int*                    devInfo,
                                          int                     bc)
 {

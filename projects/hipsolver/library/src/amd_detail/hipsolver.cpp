@@ -4411,7 +4411,7 @@ catch(...)
 
 /******************** GEQRF_BATCHED ********************/
 hipsolverStatus_t hipsolverSgeqrfBatched_bufferSize(
-    hipsolverHandle_t handle, int m, int n, float* A[], int lda, int* lwork, int batch_count)
+    hipsolverHandle_t handle, int m, int n, float* A[], int lda, size_t* lwork, int batch_count)
 try
 {
     if(!handle)
@@ -4429,10 +4429,8 @@ try
 
     if(status != HIPSOLVER_STATUS_SUCCESS)
         return status;
-    if(sz > INT_MAX)
-        return HIPSOLVER_STATUS_INTERNAL_ERROR;
 
-    *lwork = (int)sz;
+    *lwork = sz;
     return status;
 }
 catch(...)
@@ -4441,7 +4439,7 @@ catch(...)
 }
 
 hipsolverStatus_t hipsolverDgeqrfBatched_bufferSize(
-    hipsolverHandle_t handle, int m, int n, double* A[], int lda, int* lwork, int batch_count)
+    hipsolverHandle_t handle, int m, int n, double* A[], int lda, size_t* lwork, int batch_count)
 try
 {
     if(!handle)
@@ -4459,10 +4457,8 @@ try
 
     if(status != HIPSOLVER_STATUS_SUCCESS)
         return status;
-    if(sz > INT_MAX)
-        return HIPSOLVER_STATUS_INTERNAL_ERROR;
 
-    *lwork = (int)sz;
+    *lwork = sz;
     return status;
 }
 catch(...)
@@ -4475,7 +4471,7 @@ hipsolverStatus_t hipsolverCgeqrfBatched_bufferSize(hipsolverHandle_t handle,
                                                     int               n,
                                                     hipFloatComplex*  A[],
                                                     int               lda,
-                                                    int*              lwork,
+                                                    size_t*           lwork,
                                                     int               batch_count)
 try
 {
@@ -4494,10 +4490,8 @@ try
 
     if(status != HIPSOLVER_STATUS_SUCCESS)
         return status;
-    if(sz > INT_MAX)
-        return HIPSOLVER_STATUS_INTERNAL_ERROR;
 
-    *lwork = (int)sz;
+    *lwork = sz;
     return status;
 }
 catch(...)
@@ -4510,7 +4504,7 @@ hipsolverStatus_t hipsolverZgeqrfBatched_bufferSize(hipsolverHandle_t handle,
                                                     int               n,
                                                     hipDoubleComplex* A[],
                                                     int               lda,
-                                                    int*              lwork,
+                                                    size_t*           lwork,
                                                     int               batch_count)
 try
 {
@@ -4529,10 +4523,8 @@ try
 
     if(status != HIPSOLVER_STATUS_SUCCESS)
         return status;
-    if(sz > INT_MAX)
-        return HIPSOLVER_STATUS_INTERNAL_ERROR;
 
-    *lwork = (int)sz;
+    *lwork = sz;
     return status;
 }
 catch(...)
@@ -4547,7 +4539,7 @@ hipsolverStatus_t hipsolverSgeqrfBatched(hipsolverHandle_t handle,
                                          int               lda,
                                          float*            tau[],
                                          float*            work,
-                                         int               lwork,
+                                         size_t            lwork,
                                          int*              hInfo,
                                          int               batch_count)
 try
@@ -4596,7 +4588,7 @@ hipsolverStatus_t hipsolverDgeqrfBatched(hipsolverHandle_t handle,
                                          int               lda,
                                          double*           tau[],
                                          double*           work,
-                                         int               lwork,
+                                         size_t            lwork,
                                          int*              hInfo,
                                          int               batch_count)
 try
@@ -4645,7 +4637,7 @@ hipsolverStatus_t hipsolverCgeqrfBatched(hipsolverHandle_t handle,
                                          int               lda,
                                          hipFloatComplex*  tau[],
                                          hipFloatComplex*  work,
-                                         int               lwork,
+                                         size_t            lwork,
                                          int*              hInfo,
                                          int               batch_count)
 try
@@ -4699,7 +4691,7 @@ hipsolverStatus_t hipsolverZgeqrfBatched(hipsolverHandle_t handle,
                                          int               lda,
                                          hipDoubleComplex* tau[],
                                          hipDoubleComplex* work,
-                                         int               lwork,
+                                         size_t            lwork,
                                          int*              hInfo,
                                          int               batch_count)
 try
@@ -7910,7 +7902,7 @@ hipsolverStatus_t hipsolverSgetrfBatched_bufferSize(hipsolverHandle_t handle,
                                                     float*            A[],
                                                     int               lda,
                                                     int               strideP,
-                                                    int*              lwork,
+                                                    size_t*           lwork,
                                                     int               batch_count)
 try
 {
@@ -7933,10 +7925,8 @@ try
         return status;
     if(npvt_status != HIPSOLVER_STATUS_SUCCESS)
         return npvt_status;
-    if(sz > INT_MAX)
-        return HIPSOLVER_STATUS_INTERNAL_ERROR;
 
-    *lwork = (int)sz;
+    *lwork = sz;
     return HIPSOLVER_STATUS_SUCCESS;
 }
 catch(...)
@@ -7950,7 +7940,7 @@ hipsolverStatus_t hipsolverDgetrfBatched_bufferSize(hipsolverHandle_t handle,
                                                     double*           A[],
                                                     int               lda,
                                                     int               strideP,
-                                                    int*              lwork,
+                                                    size_t*           lwork,
                                                     int               batch_count)
 try
 {
@@ -7973,10 +7963,8 @@ try
         return status;
     if(npvt_status != HIPSOLVER_STATUS_SUCCESS)
         return npvt_status;
-    if(sz > INT_MAX)
-        return HIPSOLVER_STATUS_INTERNAL_ERROR;
 
-    *lwork = (int)sz;
+    *lwork = sz;
     return HIPSOLVER_STATUS_SUCCESS;
 }
 catch(...)
@@ -7990,7 +7978,7 @@ hipsolverStatus_t hipsolverCgetrfBatched_bufferSize(hipsolverHandle_t handle,
                                                     hipFloatComplex*  A[],
                                                     int               lda,
                                                     int               strideP,
-                                                    int*              lwork,
+                                                    size_t*           lwork,
                                                     int               batch_count)
 try
 {
@@ -8013,10 +8001,8 @@ try
         return status;
     if(npvt_status != HIPSOLVER_STATUS_SUCCESS)
         return npvt_status;
-    if(sz > INT_MAX)
-        return HIPSOLVER_STATUS_INTERNAL_ERROR;
 
-    *lwork = (int)sz;
+    *lwork = sz;
     return HIPSOLVER_STATUS_SUCCESS;
 }
 catch(...)
@@ -8030,7 +8016,7 @@ hipsolverStatus_t hipsolverZgetrfBatched_bufferSize(hipsolverHandle_t handle,
                                                     hipDoubleComplex* A[],
                                                     int               lda,
                                                     int               strideP,
-                                                    int*              lwork,
+                                                    size_t*           lwork,
                                                     int               batch_count)
 try
 {
@@ -8053,10 +8039,8 @@ try
         return status;
     if(npvt_status != HIPSOLVER_STATUS_SUCCESS)
         return npvt_status;
-    if(sz > INT_MAX)
-        return HIPSOLVER_STATUS_INTERNAL_ERROR;
 
-    *lwork = (int)sz;
+    *lwork = sz;
     return HIPSOLVER_STATUS_SUCCESS;
 }
 catch(...)
@@ -8070,7 +8054,7 @@ hipsolverStatus_t hipsolverSgetrfBatched(hipsolverHandle_t handle,
                                          float*            A[],
                                          int               lda,
                                          float*            work,
-                                         int               lwork,
+                                         size_t            lwork,
                                          int*              devIpiv,
                                          int               strideP,
                                          int*              devInfo,
@@ -8106,7 +8090,7 @@ hipsolverStatus_t hipsolverDgetrfBatched(hipsolverHandle_t handle,
                                          double*           A[],
                                          int               lda,
                                          double*           work,
-                                         int               lwork,
+                                         size_t            lwork,
                                          int*              devIpiv,
                                          int               strideP,
                                          int*              devInfo,
@@ -8142,7 +8126,7 @@ hipsolverStatus_t hipsolverCgetrfBatched(hipsolverHandle_t handle,
                                          hipFloatComplex*  A[],
                                          int               lda,
                                          hipFloatComplex*  work,
-                                         int               lwork,
+                                         size_t            lwork,
                                          int*              devIpiv,
                                          int               strideP,
                                          int*              devInfo,
@@ -8185,7 +8169,7 @@ hipsolverStatus_t hipsolverZgetrfBatched(hipsolverHandle_t handle,
                                          hipDoubleComplex* A[],
                                          int               lda,
                                          hipDoubleComplex* work,
-                                         int               lwork,
+                                         size_t            lwork,
                                          int*              devIpiv,
                                          int               strideP,
                                          int*              devInfo,
@@ -8231,7 +8215,7 @@ hipsolverStatus_t hipsolverSgetriBatched_bufferSize(hipsolverHandle_t handle,
                                                     int               strideP,
                                                     float*            C[],
                                                     int               ldc,
-                                                    int*              lwork,
+                                                    size_t*           lwork,
                                                     int               batch_count)
 try
 {
@@ -8264,10 +8248,8 @@ try
         return status;
     if(npvt_status != HIPSOLVER_STATUS_SUCCESS)
         return npvt_status;
-    if(sz > INT_MAX)
-        return HIPSOLVER_STATUS_INTERNAL_ERROR;
 
-    *lwork = (int)sz;
+    *lwork = sz;
     return status;
 }
 catch(...)
@@ -8283,7 +8265,7 @@ hipsolverStatus_t hipsolverDgetriBatched_bufferSize(hipsolverHandle_t handle,
                                                     int               strideP,
                                                     double*           C[],
                                                     int               ldc,
-                                                    int*              lwork,
+                                                    size_t*           lwork,
                                                     int               batch_count)
 try
 {
@@ -8316,10 +8298,8 @@ try
         return status;
     if(npvt_status != HIPSOLVER_STATUS_SUCCESS)
         return npvt_status;
-    if(sz > INT_MAX)
-        return HIPSOLVER_STATUS_INTERNAL_ERROR;
 
-    *lwork = (int)sz;
+    *lwork = sz;
     return status;
 }
 catch(...)
@@ -8335,7 +8315,7 @@ hipsolverStatus_t hipsolverCgetriBatched_bufferSize(hipsolverHandle_t handle,
                                                     int               strideP,
                                                     hipFloatComplex*  C[],
                                                     int               ldc,
-                                                    int*              lwork,
+                                                    size_t*           lwork,
                                                     int               batch_count)
 try
 {
@@ -8368,10 +8348,8 @@ try
         return status;
     if(npvt_status != HIPSOLVER_STATUS_SUCCESS)
         return npvt_status;
-    if(sz > INT_MAX)
-        return HIPSOLVER_STATUS_INTERNAL_ERROR;
 
-    *lwork = (int)sz;
+    *lwork = sz;
     return status;
 }
 catch(...)
@@ -8387,7 +8365,7 @@ hipsolverStatus_t hipsolverZgetriBatched_bufferSize(hipsolverHandle_t handle,
                                                     int               strideP,
                                                     hipDoubleComplex* C[],
                                                     int               ldc,
-                                                    int*              lwork,
+                                                    size_t*           lwork,
                                                     int               batch_count)
 try
 {
@@ -8420,10 +8398,8 @@ try
         return status;
     if(npvt_status != HIPSOLVER_STATUS_SUCCESS)
         return npvt_status;
-    if(sz > INT_MAX)
-        return HIPSOLVER_STATUS_INTERNAL_ERROR;
 
-    *lwork = (int)sz;
+    *lwork = sz;
     return status;
 }
 catch(...)
@@ -8440,7 +8416,7 @@ hipsolverStatus_t hipsolverSgetriBatched(hipsolverHandle_t handle,
                                          float*            C[],
                                          int               ldc,
                                          float*            work,
-                                         int               lwork,
+                                         size_t            lwork,
                                          int*              devInfo,
                                          int               batch_count)
 try
@@ -8478,7 +8454,7 @@ hipsolverStatus_t hipsolverDgetriBatched(hipsolverHandle_t handle,
                                          double*           C[],
                                          int               ldc,
                                          double*           work,
-                                         int               lwork,
+                                         size_t            lwork,
                                          int*              devInfo,
                                          int               batch_count)
 try
@@ -8516,7 +8492,7 @@ hipsolverStatus_t hipsolverCgetriBatched(hipsolverHandle_t handle,
                                          hipFloatComplex*  C[],
                                          int               ldc,
                                          hipFloatComplex*  work,
-                                         int               lwork,
+                                         size_t            lwork,
                                          int*              devInfo,
                                          int               batch_count)
 try
@@ -8570,7 +8546,7 @@ hipsolverStatus_t hipsolverZgetriBatched(hipsolverHandle_t handle,
                                          hipDoubleComplex* C[],
                                          int               ldc,
                                          hipDoubleComplex* work,
-                                         int               lwork,
+                                         size_t            lwork,
                                          int*              devInfo,
                                          int               batch_count)
 try
@@ -9011,7 +8987,7 @@ hipsolverStatus_t hipsolverSgetrsBatched_bufferSize(hipsolverHandle_t    handle,
                                                     int                  strideP,
                                                     float*               B[],
                                                     int                  ldb,
-                                                    int*                 lwork,
+                                                    size_t*              lwork,
                                                     int                  batch_count)
 try
 {
@@ -9046,10 +9022,8 @@ try
         return status;
     if(npvt_status != HIPSOLVER_STATUS_SUCCESS)
         return npvt_status;
-    if(sz > INT_MAX)
-        return HIPSOLVER_STATUS_INTERNAL_ERROR;
 
-    *lwork = (int)sz;
+    *lwork = sz;
     return status;
 }
 catch(...)
@@ -9067,7 +9041,7 @@ hipsolverStatus_t hipsolverDgetrsBatched_bufferSize(hipsolverHandle_t    handle,
                                                     int                  strideP,
                                                     double*              B[],
                                                     int                  ldb,
-                                                    int*                 lwork,
+                                                    size_t*              lwork,
                                                     int                  batch_count)
 try
 {
@@ -9102,10 +9076,8 @@ try
         return status;
     if(npvt_status != HIPSOLVER_STATUS_SUCCESS)
         return npvt_status;
-    if(sz > INT_MAX)
-        return HIPSOLVER_STATUS_INTERNAL_ERROR;
 
-    *lwork = (int)sz;
+    *lwork = sz;
     return status;
 }
 catch(...)
@@ -9123,7 +9095,7 @@ hipsolverStatus_t hipsolverCgetrsBatched_bufferSize(hipsolverHandle_t    handle,
                                                     int                  strideP,
                                                     hipFloatComplex*     B[],
                                                     int                  ldb,
-                                                    int*                 lwork,
+                                                    size_t*              lwork,
                                                     int                  batch_count)
 try
 {
@@ -9158,10 +9130,8 @@ try
         return status;
     if(npvt_status != HIPSOLVER_STATUS_SUCCESS)
         return npvt_status;
-    if(sz > INT_MAX)
-        return HIPSOLVER_STATUS_INTERNAL_ERROR;
 
-    *lwork = (int)sz;
+    *lwork = sz;
     return status;
 }
 catch(...)
@@ -9179,7 +9149,7 @@ hipsolverStatus_t hipsolverZgetrsBatched_bufferSize(hipsolverHandle_t    handle,
                                                     int                  strideP,
                                                     hipDoubleComplex*    B[],
                                                     int                  ldb,
-                                                    int*                 lwork,
+                                                    size_t*              lwork,
                                                     int                  batch_count)
 try
 {
@@ -9214,10 +9184,8 @@ try
         return status;
     if(npvt_status != HIPSOLVER_STATUS_SUCCESS)
         return npvt_status;
-    if(sz > INT_MAX)
-        return HIPSOLVER_STATUS_INTERNAL_ERROR;
 
-    *lwork = (int)sz;
+    *lwork = sz;
     return status;
 }
 catch(...)
@@ -9236,7 +9204,7 @@ hipsolverStatus_t hipsolverSgetrsBatched(hipsolverHandle_t    handle,
                                          float*               B[],
                                          int                  ldb,
                                          float*               work,
-                                         int                  lwork,
+                                         size_t               lwork,
                                          int*                 hInfo,
                                          int                  batch_count)
 try
@@ -9325,7 +9293,7 @@ hipsolverStatus_t hipsolverDgetrsBatched(hipsolverHandle_t    handle,
                                          double*              B[],
                                          int                  ldb,
                                          double*              work,
-                                         int                  lwork,
+                                         size_t               lwork,
                                          int*                 hInfo,
                                          int                  batch_count)
 try
@@ -9414,7 +9382,7 @@ hipsolverStatus_t hipsolverCgetrsBatched(hipsolverHandle_t    handle,
                                          hipFloatComplex*     B[],
                                          int                  ldb,
                                          hipFloatComplex*     work,
-                                         int                  lwork,
+                                         size_t               lwork,
                                          int*                 hInfo,
                                          int                  batch_count)
 try
@@ -9503,7 +9471,7 @@ hipsolverStatus_t hipsolverZgetrsBatched(hipsolverHandle_t    handle,
                                          hipDoubleComplex*    B[],
                                          int                  ldb,
                                          hipDoubleComplex*    work,
-                                         int                  lwork,
+                                         size_t               lwork,
                                          int*                 hInfo,
                                          int                  batch_count)
 try
