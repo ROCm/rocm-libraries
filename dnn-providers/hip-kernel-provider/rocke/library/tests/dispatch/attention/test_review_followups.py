@@ -86,7 +86,9 @@ class TestReviewFollowups(unittest.TestCase):
         def pipeline(_vals, _cfgs, *, stream):
             calls.append(("pipe", stream))
 
-        prepared = SimpleNamespace(pipeline=pipeline, seg_config=1, red_config=2)
+        prepared = SimpleNamespace(
+            pipeline=pipeline, seg_config=1, red_config=SimpleNamespace(fence=False)
+        )
 
         class _Fence:
             def __enter__(self):

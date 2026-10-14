@@ -8,6 +8,7 @@
 // here touches a device, the solution library or the logger, so the same code
 // builds into hipBLASLt and into a host-only test.
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -27,6 +28,37 @@
 
 namespace TensileLite
 {
+    enum class TuningMode : uint32_t
+    {
+        Off   = 0,
+        Cache = 1,
+    };
+
+    /**
+     * HIPBLASLT_TUNING_MODE and HIPBLASLT_TUNING_CACHE_PATH as the environment
+     * sets them.
+     */
+    struct TuningModeConfig
+    {
+        TuningMode  mode = TuningMode::Off;
+        std::string cachePath;
+
+        // A process in a secure execution context ignores both variables and
+        // stays off: they choose a file for it to read, which an inherited
+        // environment must not be able to impose on it. Set when that is why
+        // the mode is off, so the caller can say so.
+        bool suppressedForSecurity = false;
+
+        static TuningModeConfig fromEnvironment(bool isPrivileged);
+
+        // There is no default cache location, so a mode without a path does
+        // nothing.
+        bool reads() const
+        {
+            return mode != TuningMode::Off && !cachePath.empty();
+        }
+    };
+
     /**
      * The schema_version a row was written with.
      *
@@ -418,6 +450,17 @@ namespace TensileLite
         }
 
         /**
+         * Changes whenever an entry is added or the map is cleared, but not when
+         * a repeated row refreshes an entry's metadata. Lets a caller that
+         * derives something from a key's entries tell, without the lock, that
+         * it has to derive it again.
+         */
+        uint64_t generation() const
+        {
+            return m_generation.load(std::memory_order_acquire);
+        }
+
+        /**
          * Whether a path has already been read. Tracked per path rather than
          * inferred from the map, so a file that yields no usable rows is still
          * read only once.
@@ -446,12 +489,13 @@ namespace TensileLite
             m_override.clear();
             m_legacy.clear();
             m_loaded.clear();
+            m_generation.fetch_add(1, std::memory_order_release);
         }
 
     private:
         using Entries = std::multimap<ProblemOverride, TunedEntry>;
 
-        static bool addTo(Entries& entries, const ProblemOverride& key, const TunedEntry& entry)
+        bool addTo(Entries& entries, const ProblemOverride& key, const TunedEntry& entry)
         {
             auto range = entries.equal_range(key);
             for(auto it = range.first; it != range.second; ++it)
@@ -462,6 +506,7 @@ namespace TensileLite
                 }
 
             entries.emplace(key, entry);
+            m_generation.fetch_add(1, std::memory_order_release);
             return true;
         }
 
@@ -470,6 +515,7 @@ namespace TensileLite
         std::set<std::string>           m_loaded;
         std::mutex                      m_guard;
         mutable std::shared_timed_mutex m_mutex;
+        std::atomic<uint64_t>           m_generation{0};
     };
 
     struct TuningRowsLoaded

@@ -78,7 +78,10 @@ endif()
 # registers exactly the tests it did before that work.
 if(NOT MIOPEN_ENABLE_HIPDNN_WRAPPER)
     list(APPEND SKIP_TESTS
+        hipdnn_lru_cache.cpp
         hipdnn_shim_conv.cpp
+        hipdnn_shim_conv_gaps.cpp
+        hipdnn_shim_conv_translation.cpp
         version_api.cpp
     )
 endif()
@@ -306,9 +309,9 @@ function(add_gtest TEST_NAME TEST_CPP)
 
   endif()
 
-  # Among discrete binaries only hipdnn_shim_conv.cpp has shim tests; any other would replay
-  # nothing, which the comparison rejects. No GPU: the shim tests are all GPU tests.
-  if(MIOPEN_ENABLE_HIPDNN_WRAPPER AND NOT MIOPEN_NO_GPU AND (NOT MIOPEN_TEST_DISCRETE OR TEST_CPP STREQUAL "hipdnn_shim_conv.cpp"))
+  # Among discrete binaries only the hipdnn_shim_conv*.cpp files have shim tests; any other
+  # would replay nothing, which the comparison rejects. No GPU: the shim tests are all GPU tests.
+  if(MIOPEN_ENABLE_HIPDNN_WRAPPER AND NOT MIOPEN_NO_GPU AND (NOT MIOPEN_TEST_DISCRETE OR TEST_CPP MATCHES "^hipdnn_shim_conv"))
     miopen_forwarding_parity_entries(BUILD ${TEST_NAME})
   endif()
 
@@ -348,8 +351,21 @@ target_link_libraries(miopen_gtest_common PRIVATE GTest::gtest GTest::gmock MIOp
 # No include directory is needed: routing.cpp includes its own header by relative
 # path, and adding src/private here would expose miopen_private_rename.h to every
 # test-common source.
+#
+# hipdnn_graph.cpp (with the hipdnn_types.cpp it uses) comes along because
+# routing.cpp asks it whether hipDNN is available before reporting a route. The
+# test binary's copy answers that question and serves the last-error unit tests
+# in wrapper_routing.cpp. The forwarding the shim tests exercise happens inside
+# libMIOpen.so, against its own copy.
 if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
-  target_sources(miopen_gtest_common PRIVATE ${PROJECT_SOURCE_DIR}/src/private/routing.cpp)
+  if(NOT TARGET hipdnn_frontend_dynamic)
+    find_package(hipdnn_frontend REQUIRED)
+  endif()
+  target_sources(miopen_gtest_common PRIVATE
+    ${PROJECT_SOURCE_DIR}/src/private/routing.cpp
+    ${PROJECT_SOURCE_DIR}/src/private/hipdnn_graph.cpp
+    ${PROJECT_SOURCE_DIR}/src/private/hipdnn_types.cpp)
+  target_link_libraries(miopen_gtest_common PRIVATE hipdnn_frontend_dynamic)
 endif()
 if(WIN32)
   # Refer to https://en.cppreference.com/w/cpp/language/types for details.
@@ -369,6 +385,7 @@ function(miopen_forwarding_parity_entry MODE TEST_NAME ENTRY_NAME LABELS)
         --filter ${MIOPEN_FORWARDING_PARITY_FILTER}
         --output-dir ${PROJECT_BINARY_DIR}/test_results
         --lib-dir $<TARGET_FILE_DIR:MIOpen>
+        --known-divergences ${CMAKE_CURRENT_SOURCE_DIR}/known_forwarding_divergences.txt
       WORKING_DIRECTORY "${KERNELS_BINARY_DIR}"
     )
     # RUN_SERIAL: unlike the shard entries, nothing else keeps this one off a busy GPU.
@@ -379,9 +396,9 @@ function(miopen_forwarding_parity_entry MODE TEST_NAME ENTRY_NAME LABELS)
       ENVIRONMENT "${PARITY_ENVIRONMENT}"
     )
   elseif(MODE STREQUAL "INSTALL")
-    # No --output-dir or --lib-dir: the script's defaults fit the installed layout. python3
-    # because the configure machine's interpreter path need not exist where the package is
-    # tested.
+    # No --output-dir, --lib-dir or --known-divergences: the script's defaults fit the
+    # installed layout. python3 because the configure machine's interpreter path need not
+    # exist where the package is tested.
     file(APPEND "${INSTALL_TEST_FILE}"
 "add_test(${ENTRY_NAME} python3 \"../run_forwarding_parity.py\" \"--gtest\" \"../${TEST_NAME}\" \"--filter\" \"${MIOPEN_FORWARDING_PARITY_FILTER}\")
 set_tests_properties(${ENTRY_NAME} PROPERTIES RUN_SERIAL TRUE TIMEOUT ${MIOPEN_FORWARDING_PARITY_TIMEOUT} LABELS \"${LABELS}\" ENVIRONMENT \"${PARITY_ENVIRONMENT}\")
@@ -564,6 +581,7 @@ if( NOT ENABLE_ASAN_PACKAGING )
         FILES
           "${PROJECT_SOURCE_DIR}/test/public_abi/public_symbols.baseline"
           "${PROJECT_SOURCE_DIR}/test/public_abi/wrapper_excluded_symbols.txt"
+          "${CMAKE_CURRENT_SOURCE_DIR}/known_forwarding_divergences.txt"
         DESTINATION ${CMAKE_INSTALL_BINDIR}
         COMPONENT tests
     )

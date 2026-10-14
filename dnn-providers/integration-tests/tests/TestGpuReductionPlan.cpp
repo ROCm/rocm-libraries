@@ -9,6 +9,7 @@
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 
+#include "RaggedGraphTestUtils.hpp"
 #include "harness/gpu-graph-executor/detail/GpuPlanBuilderRegistry.hpp"
 #include "harness/gpu-graph-executor/detail/GpuReductionPlan.hpp"
 #include "harness/gpu-graph-executor/detail/GpuReductionSignatureKey.hpp"
@@ -51,6 +52,23 @@ TEST(TestGpuReductionPlanBuilder, IsApplicable)
     EXPECT_NE(nodeAttributes, nullptr);
     tensorMapCopy.erase(nodeAttributes->in_tensor_uid());
     EXPECT_FALSE(floatPlanBuilder.isApplicable(graph.getNode(0), tensorMapCopy));
+}
+
+TEST(TestGpuReductionPlanBuilder, IsNotApplicableForRaggedTensors)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidReductionGraph();
+
+    const GpuReductionPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT> patient;
+
+    auto denseWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        builder.GetBufferPointer(), builder.GetSize());
+    ASSERT_TRUE(patient.isApplicable(denseWrap.getNode(0), denseWrap.getTensorMap()));
+
+    auto ragged
+        = hipdnn_integration_tests::test_utils::markFirstTensorRagged(builder.GetBufferPointer());
+    auto raggedWrap
+        = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(ragged.data(), ragged.size());
+    EXPECT_FALSE(patient.isApplicable(raggedWrap.getNode(0), raggedWrap.getTensorMap()));
 }
 
 TEST(TestGpuReductionPlanBuilder, IsApplicableReturnsFalseForWrongAttributesType)
