@@ -299,8 +299,9 @@ void bdsvdx_getError(const rocblas_handle handle,
             // check singular vectors implicitly (B*v_k = s_k*u_k)
             for(rocblas_int k = 0; k < nn; ++k)
             {
-                cpu_gemv(rocblas_operation_none, n, n, T(1), B.data(), n, hZRes[0] + n + k * ldz, 1,
-                         -hSRes[0][k], hZRes[0] + k * ldz, 1);
+                cpu_gemv(rocblas_operation_none, n, n, T(1), B.data(), n,
+                         hZRes[0] + n + rocblas_stride(k) * ldz, 1, -hSRes[0][k],
+                         hZRes[0] + rocblas_stride(k) * ldz, 1);
             }
             err = double(snorm('F', n, nn, hZRes[0], ldz)) / double(snorm('F', n, n, B.data(), n));
             *max_err = err > *max_err ? err : *max_err;
@@ -461,7 +462,7 @@ void testing_bdsvdx(Arguments& argus)
     size_t size_E = n;
     size_t size_S = nsv_max;
     size_t size_S_cpu = n;
-    size_t size_Z = ldz * nsv_max;
+    size_t size_Z = rocblas_stride(ldz) * nsv_max;
     size_t size_Ifail = n;
     double max_error = 0, gpu_time_used = 0, cpu_time_used = 0;
 

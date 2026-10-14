@@ -76,13 +76,13 @@ ROCSOLVER_KERNEL void __launch_bounds__(LANGE_FROBENIUS_MAX_BDIM)
     {
         // sum absolute values in this block
         S block_sum = 0;
-        I start = block_id * LANGE_FROBENIUS_MAX_BDIM;
-        I end = std::min(start + LANGE_FROBENIUS_MAX_BDIM, m * n);
+        const int64_t start = int64_t(block_id) * LANGE_FROBENIUS_MAX_BDIM;
+        const int64_t end = std::min(start + LANGE_FROBENIUS_MAX_BDIM, int64_t(m) * n);
 
-        for(I i = start + tid; i < end; i += LANGE_FROBENIUS_MAX_BDIM)
+        for(int64_t i = start + tid; i < end; i += LANGE_FROBENIUS_MAX_BDIM)
         {
-            int row = i % m;
-            int col = i / m;
+            const I row = I(i % m);
+            const I col = I(i / m);
             block_sum += std::norm(a[idx2D(row, col, lda)]);
         }
 
@@ -333,7 +333,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(LANGE_FROBENIUS_MAX_BDIM)
     I tid = threadIdx.x;
 
     // select batch instance
-    I blocks = (m * n - 1) / LANGE_FROBENIUS_MAX_BDIM + 1;
+    int64_t blocks = ((int64_t)m * n - 1) / LANGE_FROBENIUS_MAX_BDIM + 1;
     T* a = load_ptr_batch<T>(A, bid, shiftA, strideA);
     S* block_maxs_block = load_ptr_batch<S>(block_maxs, bid, 0, blocks);
 
@@ -345,13 +345,13 @@ ROCSOLVER_KERNEL void __launch_bounds__(LANGE_FROBENIUS_MAX_BDIM)
     {
         // find maximum absolute value in this block
         S block_max = 0;
-        I start = block_id * LANGE_FROBENIUS_MAX_BDIM;
-        I end = std::min(start + LANGE_FROBENIUS_MAX_BDIM, m * n);
+        const int64_t start = int64_t(block_id) * LANGE_FROBENIUS_MAX_BDIM;
+        const int64_t end = std::min(start + LANGE_FROBENIUS_MAX_BDIM, int64_t(m) * n);
 
-        for(I i = start + tid; i < end; i += LANGE_FROBENIUS_MAX_BDIM)
+        for(int64_t i = start + tid; i < end; i += LANGE_FROBENIUS_MAX_BDIM)
         {
-            int row = i % m;
-            int col = i / m;
+            const I row = I(i % m);
+            const I col = I(i / m);
             block_max = rocblas_max_nan(block_max, rocblas_abs(a[idx2D(row, col, lda)]));
         }
 
@@ -385,7 +385,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(LANGE_FROBENIUS_MAX_BDIM)
     I tid = threadIdx.x;
 
     // select batch instance
-    rocblas_int blocks = (m * n - 1) / LANGE_FROBENIUS_MAX_BDIM + 1;
+    int64_t blocks = ((int64_t)m * n - 1) / LANGE_FROBENIUS_MAX_BDIM + 1;
     S* block_max = load_ptr_batch<S>(block_maxs, bid, 0, blocks);
 
     // shared variables
@@ -491,7 +491,7 @@ rocblas_status rocsolver_lange_argCheck(rocblas_handle handle,
         return rocblas_status_continue;
 
     // 3. invalid pointers
-    if((m * n && !A) || (m * n && !norms))
+    if((m && n && !A) || (m && n && !norms))
         return rocblas_status_invalid_pointer;
 
     return rocblas_status_continue;

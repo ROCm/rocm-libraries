@@ -152,9 +152,9 @@ void ormxl_unmxl_initData(const rocblas_handle handle,
             for(int j = 0; j < k; ++j)
             {
                 if(m - i == n - j)
-                    hA[0][i + j * lda] += 400;
+                    hA[0][i + rocblas_stride(j) * lda] += 400;
                 else
-                    hA[0][i + j * lda] -= 4;
+                    hA[0][i + rocblas_stride(j) * lda] -= 4;
             }
         }
 

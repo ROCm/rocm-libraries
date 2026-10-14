@@ -295,28 +295,28 @@ ROCSOLVER_KERNEL void larft_kernel_forward(const rocblas_storev storev,
         if(storev == rocblas_column_wise)
         {
             T* Vm = V + (kk + 1);
-            T* Vx = V + (kk + 1) + kk * ldv;
+            T* Vx = V + idx2D(kk + 1, kk, ldv);
 
             // gemv (conjugate transpose)
             for(I i = tid; i < mm; i += tid_inc)
             {
                 T temp = 0;
                 for(I j = 0; j < nn; j++)
-                    temp += conj(Vm[j + i * ldv]) * Vx[j];
+                    temp += conj(Vm[idx2D(j, i, ldv)]) * Vx[j];
                 work[i] = tau[kk] * temp + Fx[i];
             }
         }
         else
         {
-            T* Vm = V + (kk + 1) * ldv;
-            T* Vx = V + kk + (kk + 1) * ldv;
+            T* Vm = V + idx2D(0, kk + 1, ldv);
+            T* Vx = V + idx2D(kk, kk + 1, ldv);
 
             // gemv (no transpose)
             for(I i = tid; i < mm; i += tid_inc)
             {
                 T temp = 0;
                 for(I j = 0; j < nn; j++)
-                    temp += Vm[i + j * ldv] * conj(Vx[j * ldv]);
+                    temp += Vm[idx2D(i, j, ldv)] * conj(Vx[idx2D(0, j, ldv)]);
                 work[i] = tau[kk] * temp + Fx[i];
             }
         }
@@ -389,15 +389,15 @@ ROCSOLVER_KERNEL void larft_kernel_backward(const rocblas_storev storev,
         // compute the matrix vector product, using the householder vectors
         if(storev == rocblas_column_wise)
         {
-            T* Vm = V + (kk + 1) * ldv;
-            T* Vx = V + kk * ldv;
+            T* Vm = V + idx2D(0, kk + 1, ldv);
+            T* Vx = V + idx2D(0, kk, ldv);
 
             // gemv (conjugate transpose)
             for(I i = tid; i < mm; i += tid_inc)
             {
                 T temp = 0;
                 for(I j = 0; j < nn; j++)
-                    temp += conj(Vm[j + i * ldv]) * Vx[j];
+                    temp += conj(Vm[idx2D(j, i, ldv)]) * Vx[j];
                 work[i] = tau[kk] * temp + Fx[i];
             }
         }
@@ -411,7 +411,7 @@ ROCSOLVER_KERNEL void larft_kernel_backward(const rocblas_storev storev,
             {
                 T temp = 0;
                 for(I j = 0; j < nn; j++)
-                    temp += Vm[i + j * ldv] * conj(Vx[j * ldv]);
+                    temp += Vm[idx2D(i, j, ldv)] * conj(Vx[idx2D(0, j, ldv)]);
                 work[i] = tau[kk] * temp + Fx[i];
             }
         }
@@ -748,10 +748,10 @@ ROCSOLVER_KERNEL void larft_set_tri(const rocblas_fill uplo,
             T* Bp = &buffer[b * strideB];
 
             // copy A to buffer
-            Bp[i + j * ldb] = Ap[i + j * lda];
+            Bp[idx2D(i, j, ldb)] = Ap[idx2D(i, j, lda)];
 
             // set A to unit triangular
-            Ap[i + j * lda] = (i == j) ? 1 : 0;
+            Ap[idx2D(i, j, lda)] = (i == j) ? 1 : 0;
         }
     }
 }
@@ -783,7 +783,7 @@ ROCSOLVER_KERNEL void larft_restore_tri(const rocblas_fill uplo,
             T* Bp = &buffer[b * strideB];
 
             // copy buffer to A
-            Ap[i + j * lda] = Bp[i + j * ldb];
+            Ap[idx2D(i, j, lda)] = Bp[idx2D(i, j, ldb)];
         }
     }
 }

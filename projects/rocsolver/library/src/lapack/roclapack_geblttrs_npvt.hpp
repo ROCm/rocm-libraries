@@ -122,22 +122,22 @@ rocblas_status rocsolver_geblttrs_npvt_template(rocblas_handle handle,
                                                 const rocblas_int nblocks,
                                                 const rocblas_int nrhs,
                                                 U A,
-                                                const rocblas_int shiftA,
+                                                const rocblas_stride shiftA,
                                                 const rocblas_int inca,
                                                 const rocblas_int lda,
                                                 const rocblas_stride strideA,
                                                 U B,
-                                                const rocblas_int shiftB,
+                                                const rocblas_stride shiftB,
                                                 const rocblas_int incb,
                                                 const rocblas_int ldb,
                                                 const rocblas_stride strideB,
                                                 U C,
-                                                const rocblas_int shiftC,
+                                                const rocblas_stride shiftC,
                                                 const rocblas_int incc,
                                                 const rocblas_int ldc,
                                                 const rocblas_stride strideC,
                                                 U X,
-                                                const rocblas_int shiftX,
+                                                const rocblas_stride shiftX,
                                                 const rocblas_int incx,
                                                 const rocblas_int ldx,
                                                 const rocblas_stride strideX,
@@ -161,10 +161,10 @@ rocblas_status rocsolver_geblttrs_npvt_template(rocblas_handle handle,
     T minone = T(-1);
 
     // block strides
-    rocblas_int bsa = lda * nb;
-    rocblas_int bsb = ldb * nb;
-    rocblas_int bsc = ldc * nb;
-    rocblas_int bsx = ldx * nrhs;
+    rocblas_stride bsa = rocblas_stride(lda) * nb;
+    rocblas_stride bsb = rocblas_stride(ldb) * nb;
+    rocblas_stride bsc = rocblas_stride(ldc) * nb;
+    rocblas_stride bsx = rocblas_stride(ldx) * nrhs;
 
     // forward solve
     for(rocblas_int k = 0; k < nblocks; k++)
