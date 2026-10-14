@@ -51,6 +51,7 @@ from Tensile.Common.ValidParameters import (
     validParameters,
 )
 from Tensile.SolutionStructs.Problem import (
+    normalizeMXBlockTile,
     validateProblemTypeParameterTypes,
     _defaultProblemType,
 )
@@ -86,6 +87,10 @@ def _validate_problem_type(problem_type_dict, prefix, srcFile):
     # so we don't need to instantiate a ProblemType.
     state = {k: v for k, v in problem_type_dict.items()
              if k in _defaultProblemType}
+    # ProblemType.__init__ splits the [free, k] list form before the type gate.
+    for ab in ("A", "B"):
+        if "MXBlock" + ab in state:
+            normalizeMXBlockTile(state, ab, srcFile)
     validateProblemTypeParameterTypes(state, srcFile=srcFile,
                                       keyPathPrefix=prefix + ".ProblemType")
 
