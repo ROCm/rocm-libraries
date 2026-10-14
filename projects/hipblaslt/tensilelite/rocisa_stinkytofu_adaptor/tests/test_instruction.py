@@ -3336,5 +3336,77 @@ class TestMXMFMAAndSMFMAToString(AdaptorTestCase):
         )
 
 
+class TestDppForwarding(AdaptorTestCase):
+    """DPP encoding matches convertDPPModifiers(), then set_dpp on the logical op."""
+
+    def test_ctrl_priority_and_bound(self):
+        from rocisa_stinkytofu_adaptor.container import DPPModifiers
+        from rocisa_stinkytofu_adaptor.instruction import _apply_dpp
+
+        cases = (
+            (DPPModifiers(row_shr=1, quad_perm=[1, 0, 3, 2]), 0x111, 0),
+            (DPPModifiers(row_shr=8, bound_ctrl=1), 0x118, 1),
+            (DPPModifiers(row_bcast=15), 0x142, 0),
+            (DPPModifiers(row_bcast=31, bound_ctrl=0), 0x143, 0),
+            (DPPModifiers(quad_perm=[1, 0, 3, 2]), 0xB1, 0),
+            (DPPModifiers(row_xmask=7, bound_ctrl=1), 0x167, 1),
+            (DPPModifiers(row_shr=0, quad_perm=[1, 0, 3, 2]), 0xFFFF, 0),
+            (DPPModifiers(row_xmask=16), 0xFFFF, 0),
+            (DPPModifiers(bound_ctrl=-1), 0xFFFF, 0),
+        )
+        for dpp, ctrl, bound in cases:
+            logical = unittest.mock.Mock()
+            _apply_dpp(logical, dpp)
+            logical.set_dpp.assert_called_once_with(
+                dpp_ctrl=ctrl, row_mask=0xF, bank_mask=0xF, bound_ctrl=bound,
+            )
+
+    def test_absent_dpp_is_left_alone(self):
+        from rocisa_stinkytofu_adaptor.instruction import _apply_dpp
+
+        logical = unittest.mock.Mock()
+        _apply_dpp(logical, None)
+        logical.set_dpp.assert_not_called()
+
+    def _lower(self, inst, factory_name):
+        logical = unittest.mock.Mock()
+        fake_st = unittest.mock.Mock()
+        setattr(fake_st, factory_name, unittest.mock.Mock(return_value=logical))
+        with unittest.mock.patch.dict(sys.modules, {"stinkytofu": fake_st}), \
+             unittest.mock.patch(
+                 "rocisa_stinkytofu_adaptor.instruction._to_stinky_register",
+                 side_effect=lambda arg: arg,
+             ):
+            out = inst.to_stinky_logical()
+        self.assertIs(out, logical)
+        return logical
+
+    def test_vmov_forwards_quad_perm(self):
+        from rocisa_stinkytofu_adaptor.container import DPPModifiers
+
+        inst = VMovB32(vgpr(0), vgpr(0), dpp=DPPModifiers(quad_perm=[1, 0, 3, 2]))
+        logical = self._lower(inst, "VMovB32")
+        logical.set_dpp.assert_called_once_with(
+            dpp_ctrl=0xB1, row_mask=0xF, bank_mask=0xF, bound_ctrl=0,
+        )
+        logical.set_sdwa.assert_not_called()
+
+    def test_vadd_forwards_row_shr_and_row_bcast(self):
+        from rocisa_stinkytofu_adaptor.container import DPPModifiers
+
+        shr = VAddF32(vgpr(1), vgpr(1), vgpr(1), dpp=DPPModifiers(bound_ctrl=0, row_shr=4))
+        self._lower(shr, "VAddF32").set_dpp.assert_called_once_with(
+            dpp_ctrl=0x114, row_mask=0xF, bank_mask=0xF, bound_ctrl=0,
+        )
+        bcast = VAddF32(vgpr(1), vgpr(1), vgpr(1), dpp=DPPModifiers(bound_ctrl=0, row_bcast=15))
+        self._lower(bcast, "VAddF32").set_dpp.assert_called_once_with(
+            dpp_ctrl=0x142, row_mask=0xF, bank_mask=0xF, bound_ctrl=0,
+        )
+
+    def test_plain_vadd_does_not_set_dpp(self):
+        logical = self._lower(VAddF32(vgpr(1), vgpr(2), vgpr(3)), "VAddF32")
+        logical.set_dpp.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()

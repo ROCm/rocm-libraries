@@ -705,6 +705,17 @@ NB_MODULE(_stinkytofu, m) {
             nb::arg("dst_sel") = 0, nb::arg("dst_unused") = 0, nb::arg("src0_sel") = 0,
             nb::arg("src1_sel") = 0, "Set SDWA sub-dword modifiers")
         .def(
+            "set_dpp",
+            [](LogicalInstruction& inst, int dppCtrl, int rowMask, int bankMask, int boundCtrl) {
+                inst.dpp =
+                    DPPModifiers(static_cast<DppCtrl>(static_cast<uint16_t>(dppCtrl)),
+                                 static_cast<uint8_t>(rowMask), static_cast<uint8_t>(bankMask),
+                                 static_cast<uint8_t>(boundCtrl));
+            },
+            nb::arg("dpp_ctrl") = static_cast<int>(DppCtrl::NONE), nb::arg("row_mask") = 0xF,
+            nb::arg("bank_mask") = 0xF, nb::arg("bound_ctrl") = 0,
+            "Set DPP16 modifiers (dpp_ctrl, row_mask, bank_mask, bound_ctrl)")
+        .def(
             "set_true16",
             [](LogicalInstruction& inst, int dst0, int dst1, const std::vector<int>& srcs) {
                 std::vector<HighBitSel> srcSels;
