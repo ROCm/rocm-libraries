@@ -2703,7 +2703,7 @@ def test_disabled_threading_survives_the_split(monkeypatch):
 def test_children_can_import_tensile(monkeypatch):
     """The children are started with -m, which does not inherit the sys.path
     edit that bin/TensileCreateLibrary makes when Tensile is not installed."""
-    import Tensile
+    import tensilelite
 
     spawned = _spawnedCommands(monkeypatch, [[GFX1250], [GFX1250_STRICT]])
     packageRoot = str(Path(tensilelite.__file__).resolve().parent.parent)
