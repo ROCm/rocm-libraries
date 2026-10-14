@@ -15,6 +15,11 @@ from typing import Any
 # Serialization/SolutionLibrary.hpp. Versions 0/1 use the solutions array.
 INDEXED_FORMAT_VERSION = 2
 
+# Native solution indices use a signed 32-bit int. Match the native reader's
+# std::numeric_limits<int>::max() check in Serialization/SolutionLibrary.hpp
+# so an index cannot overflow into a different solution's key.
+_MAX_SOLUTION_INDEX = (1 << 31) - 1
+
 
 def _readBytes(path: Path) -> bytes:
     data = path.read_bytes()
@@ -76,7 +81,7 @@ def writeMessagePack(filename: str | Path, data: Any, *, indexed: bool = False) 
 
 def _solutionIndex(record: dict) -> int:
     index = record.get("index") if isinstance(record, dict) else None
-    if type(index) is not int or not 0 <= index <= 0x7FFFFFFF:
+    if type(index) is not int or not 0 <= index <= _MAX_SOLUTION_INDEX:
         raise ValueError(f"invalid solution index {index!r}")
     return index
 
@@ -93,7 +98,7 @@ def _indexedRecords(table, blob, wanted):
         index, offset, length = table[position : position + 3]
         if any(type(value) is not int or value < 0 for value in (index, offset, length)):
             raise ValueError("solutions_index fields must be nonnegative integers")
-        if index > 0x7FFFFFFF:
+        if index > _MAX_SOLUTION_INDEX:
             raise ValueError(f"invalid solution index {index!r}")
         if offset > len(blob) or length > len(blob) - offset:
             raise ValueError(f"solution {index}: slice lies outside solutions_blob")
