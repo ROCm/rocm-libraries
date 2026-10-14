@@ -82,15 +82,24 @@ def _predicate_from_document(cls, document):
     return predicate
 
 
-def _solution_record(d):
-    """Build one solution's library record with tensilelite_write.solution_from_state."""
+def _tensilelite_write():
     try:
         from tensilelite import tensilelite_write
     except (ImportError, OSError) as exc:
         printExit(
             "tensilelite.tensilelite_write is required to build a solution record ({})".format(exc)
         )
-    return tensilelite_write.solution_from_state(d)
+    return tensilelite_write
+
+
+def _solution_record(d):
+    """Build one solution's library record with tensilelite_write.solution_from_state."""
+    return _tensilelite_write().solution_from_state(d)
+
+
+def _problem_index_layout(d):
+    """Index geometry of a derived problem type. The C++ writer is the only reconstruction."""
+    return _tensilelite_write().index_layout(d)
 
 
 @state_key_ordering
@@ -131,54 +140,51 @@ class ProblemType:
                  'mxBlockA', 'mxBlockB', 'mxTypeA', 'mxTypeB', 'mxScaleFormat', 'fusedGemmA2A']
     @classmethod
     def FromOriginalState(cls, d):
-        indices = [None]*d['TotalIndices']
-        freeIndices  = []
-        batchIndices = []
-        boundIndices = []
-
-        for i in d['IndicesSummation']:
-            bi = BoundIndex(aMirror=('MirrorDimsA' in d and i in d['MirrorDimsA']),
-                            bMirror=('MirrorDimsB' in d and i in d['MirrorDimsB']))
-            indices[i] = bi
-            boundIndices.append(bi)
-
-        for i in range(0,d["NumIndicesC"]):
-            if i in d['IndicesBatch']:
-                bi = BatchIndex(c=i, d=i)
-                indices[i] = bi
-                batchIndices.append(bi)
+        # Data-type objects and the in-memory index objects stay here. The
+        # index layout itself, including batch and mirrored dimensions, comes
+        # from problemIndexLayout.
+        layout = _problem_index_layout(d)
+        indices = [None] * len(layout["indices"])
+        grouped = {"free": [], "batch": [], "bound": []}
+        for item in layout["indices"]:
+            kind = item["kind"]
+            if kind == "bound":
+                index = BoundIndex(a=item["a"], b=item["b"],
+                                   aMirror=item["aMirror"], bMirror=item["bMirror"])
+            elif kind == "batch":
+                index = BatchIndex(a=item["a"], b=item["b"], c=item["c"], d=item["d"])
+            elif kind == "free":
+                index = FreeIndex(isA=item["isA"], i=item["i"], c=item["c"], d=item["d"])
+                if item["hasA"]:
+                    index.a = item["a"]
+                if item["hasB"]:
+                    index.b = item["b"]
             else:
-                assert i in d['IndicesFree']
-                if i in d['IndexAssignmentsA']:
-                    fi = FreeIndex(isA=True, i=d["IndexAssignmentsA"].index(i), c=i, d=i)
-                elif i in d['IndexAssignmentsB']:
-                    fi = FreeIndex(isA=False, i=d["IndexAssignmentsB"].index(i), c=i, d=i)
-                else:
-                    raise RuntimeError("free index %u not in ia or ib"%i)
-                indices[i] = fi
-                freeIndices.append(fi)
+                raise RuntimeError("unknown problem index kind %s" % kind)
+            problemIndex = item["problemIndex"]
+            if (problemIndex < 0 or problemIndex >= len(indices)
+                    or indices[problemIndex] is not None):
+                raise RuntimeError("problem type index layout is not one slot per index")
+            indices[problemIndex] = index
+            grouped[kind].append((item["kindOrder"], index))
 
-        for ia, ic in enumerate(d['IndexAssignmentsA']):
-            indices[ic].a = ia
+        if any(index is None for index in indices):
+            raise RuntimeError("problem type index layout left a gap")
 
-        for ib, ic in enumerate(d['IndexAssignmentsB']):
-            indices[ic].b = ib
-
-        for idx in indices:
-            assert idx is not None
-            idxState = state(idx)
-            for (key, value) in list(idxState.items()):
-                assert value is not None
+        def ordered(kind):
+            return [index for _, index in sorted(grouped[kind], key=lambda pair: pair[0])]
 
         rv = cls()
         rv.indices = indices
-        rv.freeIndices = freeIndices
-        rv.batchIndices = batchIndices
-        rv.boundIndices = boundIndices
-        rv.aDims = len(d['IndexAssignmentsA'])
-        rv.bDims = len(d['IndexAssignmentsB'])
-        rv.cDims = d['NumIndicesC']
+        rv.freeIndices = ordered("free")
+        rv.batchIndices = ordered("batch")
+        rv.boundIndices = ordered("bound")
+        rv.aDims = layout["aDims"]
+        rv.bDims = layout["bDims"]
+        rv.cDims = layout["cDims"]
         rv.dDims = rv.cDims
+        rv._operation_identifier = layout["operationIdentifier"]
+        rv._index_names = tuple(layout["indexNames"])
 
         rv.aConjugate = d['ComplexConjugateA']
         rv.bConjugate = d['ComplexConjugateB']
@@ -374,6 +380,11 @@ class ProblemType:
 
     @property
     def indexNames(self):
+        # Names for a ProblemType built from index objects. FromOriginalState
+        # stores the names problemIndexLayout already produced.
+        cached = getattr(self, "_index_names", None)
+        if cached is not None:
+            return cached
         aNames = ['_'] * self.aDims
         bNames = ['_'] * self.bDims
         cNames = ['_'] * self.cDims
@@ -415,6 +426,9 @@ class ProblemType:
 
     @property
     def operationIdentifier(self):
+        cached = getattr(self, "_operation_identifier", None)
+        if cached is not None:
+            return cached
         (aNames, bNames, cNames, dNames, sumNames) = self.indexNames
 
         aOp = 'C' if self.aConjugate else ''

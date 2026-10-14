@@ -23,9 +23,18 @@ endif()
 if(TARGET tensilelite-host)
     list(APPEND _extop_runtime_lib_dirs "$<TARGET_FILE_DIR:tensilelite-host>")
 endif()
+set(_extop_sanitizer_flags "")
+if(HIPBLASLT_ENABLE_ASAN
+        OR THEROCK_SANITIZER STREQUAL "ASAN"
+        OR THEROCK_SANITIZER STREQUAL "HOST_ASAN")
+    list(APPEND _extop_sanitizer_flags ASAN)
+elseif(HIPBLASLT_ENABLE_TSAN OR THEROCK_SANITIZER STREQUAL "TSAN")
+    list(APPEND _extop_sanitizer_flags TSAN)
+endif()
 hipblaslt_make_python_command(_extop_python_command
     PYTHONPATH_DIRS ${_extop_python_path_dirs}
     RUNTIME_LIB_DIRS ${_extop_runtime_lib_dirs}
+    ${_extop_sanitizer_flags}
 )
 
 set(previous_target "")

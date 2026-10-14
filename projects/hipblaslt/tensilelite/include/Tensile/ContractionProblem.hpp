@@ -367,6 +367,10 @@ namespace TensileLite
             TENSOR_COUNT
         };
 
+        // Windows.h defines CONST as a macro. This enumeration uses that name.
+#ifdef CONST
+#undef CONST
+#endif
         enum CONST : int
         {
             ALPHA    = 0,

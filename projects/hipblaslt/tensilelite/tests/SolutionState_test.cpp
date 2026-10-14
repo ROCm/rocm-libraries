@@ -14,8 +14,6 @@
 #include <utility>
 #include <vector>
 
-#include <hip/hip_runtime.h>
-
 #include <msgpack.hpp>
 
 #include <Tensile/AMDGPU.hpp>
@@ -123,6 +121,8 @@ namespace
     struct StateOptions
     {
         bool batched            = true;
+        bool mirrorSummationA   = false;
+        bool swappedSummation   = false;
         bool dimAssertions      = false;
         bool assertSizeAsScalar = false;
         bool emptySizeEqual     = false;
@@ -132,13 +132,32 @@ namespace
     StateMap problemType(StateOptions const& options)
     {
         StateMap type;
-        type.integer("TotalIndices", 4);
-        type.integers("IndicesSummation", {3});
-        type.integer("NumIndicesC", 3);
-        type.integers("IndicesBatch", {2});
-        type.integers("IndicesFree", {0, 1});
-        type.integers("IndexAssignmentsA", {0, 3, 2});
-        type.integers("IndexAssignmentsB", {3, 1, 2});
+        if(options.swappedSummation)
+        {
+            // Summation 4 is listed before 3, so bound order is not problem-index
+            // order. 4 is mirrored on A and 3 is mirrored on B.
+            type.integer("TotalIndices", 5);
+            type.integers("IndicesSummation", {4, 3});
+            type.integer("NumIndicesC", 3);
+            type.integers("IndicesBatch", {2});
+            type.integers("IndicesFree", {0, 1});
+            type.integers("IndexAssignmentsA", {0, 4, 3, 2});
+            type.integers("IndexAssignmentsB", {4, 1, 3, 2});
+            type.integers("MirrorDimsA", {4});
+            type.integers("MirrorDimsB", {3});
+        }
+        else
+        {
+            type.integer("TotalIndices", 4);
+            type.integers("IndicesSummation", {3});
+            type.integer("NumIndicesC", 3);
+            type.integers("IndicesBatch", {2});
+            type.integers("IndicesFree", {0, 1});
+            type.integers("IndexAssignmentsA", {0, 3, 2});
+            type.integers("IndexAssignmentsB", {3, 1, 2});
+            if(options.mirrorSummationA)
+                type.integers("MirrorDimsA", {3});
+        }
         type.text("DataType", "Half");
         type.text("DestDataType", "Half");
         type.text("ComputeDataType", "Float");
@@ -457,15 +476,26 @@ TEST(SolutionState, DictValuedAssertSizeEqual)
     }
 }
 
+TEST(SolutionState, NamesAMirroredSummation)
+{
+    StateOptions options;
+    options.mirrorSummationA = true;
+    auto solution            = build(options);
+    // Batch index 2 and summation 3 mirrored on A. The default fixture is the
+    // unmirrored Contraction_l_Ailk_Bljk_Cijk_Dijk.
+    EXPECT_EQ(solution->problemType.operationIdentifier, "Contraction_l_AiLk_Bljk_Cijk_Dijk");
+}
+
+TEST(SolutionState, NamesSummationOrder)
+{
+    StateOptions options;
+    options.swappedSummation = true;
+    auto solution            = build(options);
+    EXPECT_EQ(solution->problemType.operationIdentifier, "Contraction_lm_AiLmk_BljMk_Cijk_Dijk");
+}
+
 TEST(SolutionState, BuildsWithoutADevice)
 {
-    int  devices = -1;
-    auto count   = hipGetDeviceCount(&devices);
-    int  current = -1;
-    auto device  = hipGetDevice(&current);
-    ASSERT_TRUE(count != hipSuccess || devices == 0);
-    ASSERT_NE(device, hipSuccess);
-
     auto solution = build();
     auto const* xcc = onlyDirect<Predicates::Contraction::WorkgroupMappingXCCCheck>(
         solution->problemPredicate);

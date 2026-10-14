@@ -265,7 +265,54 @@ NB_MODULE(tensilelite_write, m)
             return toPython(written.get());
         },
         nb::arg("state"),
-        "Return the solution record for one solution state.");
+        "Return the solution record for one fully derived solution state.");
+
+    m.def(
+        "index_layout",
+        [](nb::object data) {
+            auto bytes = asDocument(data);
+            auto handle
+                = msgpack::unpack(reinterpret_cast<char const*>(bytes.data()), bytes.size());
+            auto const& state = handle.get();
+            if(state.type != msgpack::type::MAP)
+                throw std::runtime_error("problem type must be a map");
+            auto layout = TensileLite::problemIndexLayout(state);
+            nb::dict result;
+            result["operationIdentifier"] = nb::str(layout.operationIdentifier.c_str());
+            nb::list names;
+            names.append(nb::str(layout.aNames.c_str()));
+            names.append(nb::str(layout.bNames.c_str()));
+            names.append(nb::str(layout.cNames.c_str()));
+            names.append(nb::str(layout.dNames.c_str()));
+            names.append(nb::str(layout.sumNames.c_str()));
+            result["indexNames"] = names;
+            result["aDims"]      = nb::int_(layout.aDims);
+            result["bDims"]      = nb::int_(layout.bDims);
+            result["cDims"]      = nb::int_(layout.cDims);
+            nb::list indices;
+            for(auto const& slot : layout.indices)
+            {
+                nb::dict item;
+                item["kind"]         = slot.kind == 0 ? "free" : slot.kind == 1 ? "batch" : "bound";
+                item["problemIndex"] = nb::int_(slot.problemIndex);
+                item["kindOrder"]    = nb::int_(slot.kindOrder);
+                item["isA"]          = nb::bool_(slot.isA);
+                item["i"]            = nb::int_(slot.i);
+                item["c"]            = nb::int_(slot.c);
+                item["d"]            = nb::int_(slot.d);
+                item["hasA"]         = nb::bool_(slot.hasA);
+                item["hasB"]         = nb::bool_(slot.hasB);
+                item["a"]            = nb::int_(slot.a);
+                item["b"]            = nb::int_(slot.b);
+                item["aMirror"]      = nb::bool_(slot.aMirror);
+                item["bMirror"]      = nb::bool_(slot.bMirror);
+                indices.append(item);
+            }
+            result["indices"] = indices;
+            return result;
+        },
+        nb::arg("problem_type"),
+        "Return the index layout of one fully derived problem type.");
 
     m.def(
         "encode",

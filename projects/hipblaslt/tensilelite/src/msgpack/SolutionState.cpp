@@ -888,8 +888,9 @@ namespace TensileLite
                 "Solution state ProblemType index assignments are inconsistent");
         }
 
-        // Contractions.ProblemType.operationIdentifier, from the index assignments.
-        std::string operationIdentifier(Dict const& d)
+        // The only reconstruction of a problem type's index layout. Python builds
+        // its index objects from problemIndexLayout and does not repeat this.
+        ProblemIndexLayout indexLayout(Dict const& d)
         {
             struct Index
             {
@@ -899,10 +900,12 @@ namespace TensileLite
                     Batch,
                     Bound
                 } kind;
-                bool                   isA = false;
-                int64_t                i   = 0;
-                int64_t                c   = 0;
-                int64_t                d   = 0;
+                int64_t                problemIndex = 0;
+                int64_t                kindOrder    = 0;
+                bool                   isA          = false;
+                int64_t                i            = 0;
+                int64_t                c            = 0;
+                int64_t                d            = 0;
                 std::optional<int64_t> a;
                 std::optional<int64_t> b;
                 bool                   aMirror = false;
@@ -933,30 +936,35 @@ namespace TensileLite
             using IndexPtr = std::shared_ptr<Index>;
             std::vector<IndexPtr> indices(total);
             std::vector<IndexPtr> freeIndices, batchIndices, boundIndices;
-            auto slot = [&](int64_t i) -> IndexPtr& {
+            auto normalize = [&](int64_t i) {
                 if(i < 0)
                     i += total;
                 if(i < 0 || i >= total)
                     inconsistentIndices();
-                return indices[i];
+                return i;
             };
+            auto slot = [&](int64_t i) -> IndexPtr& { return indices[normalize(i)]; };
 
             for(auto i : summation)
             {
-                auto bound     = std::make_shared<Index>(Index{Index::Bound});
-                bound->aMirror = contains(mirrorA, i);
-                bound->bMirror = contains(mirrorB, i);
-                slot(i)        = bound;
+                auto bound          = std::make_shared<Index>(Index{Index::Bound});
+                bound->aMirror      = contains(mirrorA, i);
+                bound->bMirror      = contains(mirrorB, i);
+                bound->problemIndex = normalize(i);
+                bound->kindOrder    = int64_t(boundIndices.size());
+                slot(i)             = bound;
                 boundIndices.push_back(bound);
             }
             for(int64_t i = 0; i < numIndicesC; i++)
             {
-                auto index = std::make_shared<Index>(Index{Index::Free});
+                auto index          = std::make_shared<Index>(Index{Index::Free});
                 index->c = index->d = i;
+                index->problemIndex = i;
                 if(contains(batch, i))
                 {
-                    index->kind = Index::Batch;
-                    slot(i)     = index;
+                    index->kind      = Index::Batch;
+                    index->kindOrder = int64_t(batchIndices.size());
+                    slot(i)          = index;
                     batchIndices.push_back(index);
                     continue;
                 }
@@ -977,7 +985,8 @@ namespace TensileLite
                     throw std::runtime_error("free index " + std::to_string(i)
                                              + " not in ia or ib");
                 }
-                slot(i) = index;
+                index->kindOrder = int64_t(freeIndices.size());
+                slot(i)          = index;
                 freeIndices.push_back(index);
             }
             for(size_t ia = 0; ia < assignA.size(); ia++)
@@ -1037,9 +1046,44 @@ namespace TensileLite
                 name(bNames, *index.b) = index.bMirror ? upper : letter;
             }
 
-            return "Contraction_" + sumNames + "_A" + aNames
-                   + (d.truthy("ComplexConjugateA") ? "C" : "") + "_B" + bNames
-                   + (d.truthy("ComplexConjugateB") ? "C" : "") + "_C" + cNames + "_D" + dNames;
+            ProblemIndexLayout layout;
+            layout.aNames   = aNames;
+            layout.bNames   = bNames;
+            layout.cNames   = cNames;
+            layout.dNames   = dNames;
+            layout.sumNames = sumNames;
+            layout.aDims    = int64_t(assignA.size());
+            layout.bDims    = int64_t(assignB.size());
+            layout.cDims    = numIndicesC;
+            layout.operationIdentifier = "Contraction_" + sumNames + "_A" + aNames
+                                         + (d.truthy("ComplexConjugateA") ? "C" : "") + "_B"
+                                         + bNames + (d.truthy("ComplexConjugateB") ? "C" : "")
+                                         + "_C" + cNames + "_D" + dNames;
+            layout.indices.reserve(indices.size());
+            for(auto const& index : indices)
+            {
+                ProblemIndexSlot slot;
+                if(index->kind == Index::Free)
+                    slot.kind = 0;
+                else if(index->kind == Index::Batch)
+                    slot.kind = 1;
+                else
+                    slot.kind = 2;
+                slot.problemIndex = index->problemIndex;
+                slot.kindOrder    = index->kindOrder;
+                slot.isA          = index->isA;
+                slot.i            = index->i;
+                slot.c            = index->c;
+                slot.d            = index->d;
+                slot.hasA         = index->a.has_value();
+                slot.hasB         = index->b.has_value();
+                slot.a            = slot.hasA ? *index->a : 0;
+                slot.b            = slot.hasB ? *index->b : 0;
+                slot.aMirror      = index->aMirror;
+                slot.bMirror      = index->bMirror;
+                layout.indices.push_back(slot);
+            }
+            return layout;
         }
 
         // Contractions.ProblemType.FromOriginalState.
@@ -1048,7 +1092,7 @@ namespace TensileLite
             ProblemType rv;
             auto&       record = rv.record;
 
-            auto opIdentifier = operationIdentifier(d);
+            auto opIdentifier = indexLayout(d).operationIdentifier;
 
             auto srcType     = d.dataType("DataType");
             auto dstType     = d.has("DestDataType") ? d.dataType("DestDataType") : srcType;
@@ -1760,6 +1804,11 @@ namespace TensileLite
             return rv;
         }
     } // namespace
+
+    ProblemIndexLayout problemIndexLayout(msgpack::object const& problemType)
+    {
+        return indexLayout(Dict(Value(problemType, "ProblemType")));
+    }
 
     std::shared_ptr<ContractionSolution> solutionFromState(msgpack::object const& state)
     {
