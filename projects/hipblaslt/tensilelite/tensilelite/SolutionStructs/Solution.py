@@ -4036,8 +4036,15 @@ class Solution(collections.abc.Mapping):
         ldsPadA = state["LdsPadA"]
         ldsPadB = state["LdsPadB"]
         ldsPadM = state["LdsPadMetadata"]
+        hasWmma = isaInfoMap[isa].asmCaps['HasWMMA']
         optPadA = lrvwA
         optPadB = lrvwB
+        if hasWmma and not wmmaV3:
+          # WMMA V1/V2 issue a local read wider than ds_load_b128 (e.g. fp16
+          # LRVW=16 on gfx11) as several b128 reads, and each one is what meets
+          # the banks. Pad by one instruction's width, not the whole vector.
+          optPadA = min(optPadA, int(Solution.MAX_NUM_DS_LOAD_BYTES // numBytesA))
+          optPadB = min(optPadB, int(Solution.MAX_NUM_DS_LOAD_BYTES // numBytesB))
         readRegsA = int(lrvwA * state["ProblemType"]["MacDataTypeA"].numBytes() // 4)
         readRegsB = int(lrvwB * state["ProblemType"]["MacDataTypeB"].numBytes() // 4)
         if state["ProblemType"]["Sparse"]:
@@ -4052,14 +4059,18 @@ class Solution(collections.abc.Mapping):
           return ldsPadA, ldsPadB, ldsPadM, 0, 0
         if state["EnableMatrixInstruction"]:
           # MI16x16xNx1 needs double padding to avoid bank conflict:
-          # WMMA_V3 doubles when readRegs == 2; other ISAs double when readRegs in {1, 4}.
+          # WMMA_V3 doubles when readRegs == 2; MFMA doubles when readRegs in {1, 4};
+          # WMMA V1/V2 doubles only when readRegs == 1.
           if state["MatrixInstB"] == 1 and state["MatrixInstM"] == 16:
             if wmmaV3:
               if readRegsA == 2: optPadA *= 2
               if readRegsB == 2: optPadB *= 2
             else:
-              if readRegsA in (1, 4): optPadA *= 2
-              if readRegsB in (1, 4): optPadB *= 2
+              # On WMMA V1/V2 a b128 read padded by its own width already shifts
+              # one 4-bank window per row. Doubling makes the row stride 4*even
+              # banks, a 2-way conflict.
+              if readRegsA == 1 or (readRegsA == 4 and not hasWmma): optPadA *= 2
+              if readRegsB == 1 or (readRegsB == 4 and not hasWmma): optPadB *= 2
 
         def calcLdsPadPerOperand(tc: str, idx: int, numBytes: float, lrvw: int, optPad: int) -> int:
           """Auto-resolve LdsPad{tc} (tc in {A, B}) when the user left it on -1.
