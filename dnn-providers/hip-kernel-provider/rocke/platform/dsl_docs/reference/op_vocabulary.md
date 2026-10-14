@@ -6,7 +6,7 @@ Complete reference of operations recognized by `core/ir.py` and lowered to AMDGP
 
 | Op name                | Builder                           | LLVM emission                          |
 |------------------------|-----------------------------------|----------------------------------------|
-| `arith.constant`       | `const_i32`, `const_i64`, `const_f32`, `fp16_zero` | constant value |
+| `arith.constant`       | `const_i32`, `const_i64`, `const_f32`, `const_f64`, `fp16_zero` | constant value |
 | `arith.constant_vec`   | `zero_vec_f32`, `zero_vec`        | `zeroinitializer` vector               |
 | `arith.add`            | `add`                             | `add` (integer)                        |
 | `arith.sub`            | `sub`                             | `sub`                                  |
@@ -19,8 +19,8 @@ Complete reference of operations recognized by `core/ir.py` and lowered to AMDGP
 | `arith.fmul`           | `fmul`                            | `fmul`                                 |
 | `arith.fdiv`           | `fdiv`                            | `fdiv`                                 |
 | `arith.fneg`           | `fneg`                            | `fneg`                                 |
-| `arith.fmax`           | `fmax`                            | `llvm.maxnum.{f32,f16,bf16}`           |
-| `arith.fmin`           | `fmin`                            | `llvm.minnum.{f32,f16,bf16}`           |
+| `arith.fmax`           | `fmax`                            | `llvm.maxnum.{f64,f32,f16,bf16}`       |
+| `arith.fmin`           | `fmin`                            | `llvm.minnum.{f64,f32,f16,bf16}`       |
 | `arith.cmp`            | `cmp_lt`, `cmp_le`, `cmp_gt`, `cmp_ge`, `cmp_eq`, `cmp_ne` | `icmp {slt,sle,sgt,sge,eq,ne}` |
 | `arith.fcmp`           | `fcmp(pred, ...)`                 | `fcmp {olt,ole,ogt,oge,oeq,one,ord,uno}` |
 | `arith.and`            | `land`                            | `and`                                  |
@@ -48,8 +48,10 @@ Complete reference of operations recognized by `core/ir.py` and lowered to AMDGP
 | `math.exp2`    | `exp2`       | `llvm.exp2.f32`                 |
 | `math.sqrt`    | `sqrt`       | `llvm.sqrt.f32`                 |
 | `math.rsqrt`   | `rsqrt`      | `llvm.amdgcn.rsq.f32`           |
-| `math.tanh`    | `tanh`       | `llvm.tanh.f32`                 |
+| `math.tanh`    | `tanh`       | piecewise f32 expansion: OCML polynomial for `abs(x) < 0.625`, otherwise `exp2` + reciprocal; bitwise sign restoration |
 | `math.rcp`     | `rcp`        | `1.0 / v` (hardware reciprocal) |
+
+`exp2`, `exp2_fast`, `log2`, `sqrt`, `rsqrt`, `rcp_fast`, `tanh`, `fabs`, `fma`, `fmax3`, `fmin3` and `vector_fma` have no f64 lowering and reject f64 inputs in both the LLVM and HIP lowerings; `rcp` accepts f64.
 
 `clamp_f32(v, lo, hi)` is `fmin(hi, fmax(lo, v))` — folds to `v_med3_f32`.
 
@@ -94,6 +96,9 @@ Complete reference of operations recognized by `core/ir.py` and lowered to AMDGP
 | `memref.global_store_typed`   | `global_store`                | typed `store addrspace(1)` |
 | `memref.global_store_vN`      | `global_store_vN`             | vector `store addrspace(1)` |
 | `memref.global_atomic_add_f32`| `global_atomic_add_f32`       | `atomicrmw fadd addrspace(1)` |
+| `memref.fence`               | `fence`                       | `fence syncscope(...) <ordering>` |
+| `memref.global_flag_store`   | `global_flag_store`           | `store atomic i32 ... syncscope(...) <ordering>` |
+| `memref.global_flag_wait_eq` | `global_flag_wait_eq`         | spin loop around `load atomic i32 ... acquire` |
 
 `masked_global_load(ptr, idx, mask, other, dtype)` clamps the false-lane index to 0 before loading, then selects `other` afterward.
 
@@ -179,3 +184,10 @@ static_if(host_bool, body)             # raises TypeError on SSA Value
 - `ir_lowering/ir_model.md` for the IRBuilder API by category.
 - `ir_lowering/lowering_pipeline.md` for the op-to-LLVM mapping.
 - `ir_lowering/backend_details.md` for purity classification and waitcnt encoding.
+
+`IRBuilder.cvt_f32_to_tf32` / `rocke_b_cvt_f32_to_tf32` is a scalar F32-to-TF32
+RNE recipe built from existing integer arithmetic, select, and bitcast ops; it
+introduces no serialized opcode. It quiets NaNs and retains their upper payload
+bits. `bitcast` to logical TF32 only reinterprets the payload. Logical TF32 uses
+I32 storage; general arithmetic requires explicitly reinterpreting it as F32.
+See [TF32 numerics](../../python/rocke/examples/gfx942/tf32_numerics/README.md).

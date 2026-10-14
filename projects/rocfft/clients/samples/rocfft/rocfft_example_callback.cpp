@@ -20,12 +20,6 @@
 * THE SOFTWARE.
 *******************************************************************************/
 
-// The static function-pointer callback path is unusable under the
-// SPIR-V JIT-link flow, so skip it in the device pass. Gate on
-// __HIP_DEVICE_COMPILE__ because when amdgcnspirv is the sole target
-// __SPIRV__ is also set in the host pass, which must still compile.
-#if !(defined(__HIP_DEVICE_COMPILE__) && defined(__SPIRV__))
-
 #include "rocfft/rocfft.h"
 #include <hip/hip_complex.h>
 #include <hip/hip_runtime.h>
@@ -253,5 +247,3 @@ int main()
 
     return 0;
 }
-
-#endif

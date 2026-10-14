@@ -4,9 +4,9 @@
 
 .. _installation:
 
-******************
+*******************
 Install hipThreads
-******************
+*******************
 
 Before you begin, verify that your system is supported.
 For more information, see :ref:`ROCm Core SDK components <rocm:release-components>`.
@@ -77,6 +77,14 @@ This is a granular subset of the ROCm Core SDK ``amdrocm-core-sdk`` that provide
          .. code-block:: bash
 
             sudo zypper install amdrocm-threads-devel
+
+.. _install-windows:
+
+Install hipThreads on Windows
+=============================
+
+hipThreads doesn't ship as a standalone native Windows package.
+It's installed with ROCm when :doc:`ROCm is installed on Windows <rocm:install/rocm>` with a tarball or a Python wheel with the ``rocm[devel]`` package.
 
 .. _install-nightly:
 

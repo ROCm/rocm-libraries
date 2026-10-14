@@ -4,10 +4,12 @@
 target_sources(hipblaslt-clients-common
     PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/benchmark_stats.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/benchmark_collective.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/benchmark_timing.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/allclose.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/argument_model.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/cblas_interface.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/multi_gpu.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/datatype_interface.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/device_vector.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/d_vector.hpp"
@@ -32,6 +34,7 @@ target_sources(hipblaslt-clients-common
         "${CMAKE_CURRENT_SOURCE_DIR}/test_cleanup.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/testing_auxiliary.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/testing_matmul.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/testing_multi_gpu.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/unit.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/utility.hpp"
 )

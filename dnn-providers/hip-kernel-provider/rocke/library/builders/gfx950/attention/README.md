@@ -1,8 +1,9 @@
 # RocKE `unified_attention` parity & benchmark harness
 
-This folder hosts the cross-backend parity + benchmark script for AITER's
-`unified_attention` kernel. It is the canonical performance harness for
-the RocKE attention work.
+This folder documents the cross-backend parity + benchmark script for AITER's
+`unified_attention` kernel,
+[`prefill/parity_unified_attention.py`](prefill/parity_unified_attention.py).
+It is the canonical performance harness for the RocKE attention work.
 
 > **New to flash attention or this kernel family?** [`ALGORITHM.md`](ALGORITHM.md)
 > derives both kernels from the math up — the paged/varlen attention spec, the
@@ -11,7 +12,7 @@ the RocKE attention work.
 > q-block) paths on gfx950. Read it first if you want to understand *what* the
 > kernels compute before reading the parity + optimization history below.
 
-The script (`parity_unified_attention.py`):
+The script (`prefill/parity_unified_attention.py`):
 
 1. Builds the standard AITER unified-attention inputs (paged KV cache,
    block tables, cumulative query lengths, optional sliding window,
@@ -49,13 +50,16 @@ CK-3D, which is **not** apples-to-apples. The three tables resolve that:
 ## Running
 
 ```bash
-cd <composablekernel-checkout>
+cd <rocke>/platform
 export AITER_PATH=<aiter-checkout>
-PYTHONPATH="python:${AITER_PATH}" python \
-  python/rocke/examples/gfx950/attention/parity_unified_attention.py \
+PYTHONPATH=python:../library python -m \
+  builders.gfx950.attention.prefill.parity_unified_attention \
   --attempts 30 --warmup 10 \
   --report /tmp/unified_attention_parity.json
 ```
+
+The harness adds `AITER_PATH` to `sys.path` itself; without AITER, pass
+`--skip-triton` to run only the RocKE lanes.
 
 Flags (exactly as accepted by `parity_unified_attention.py`):
 

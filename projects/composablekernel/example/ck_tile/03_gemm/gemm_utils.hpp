@@ -8,9 +8,12 @@
 #include "ck_tile/ops/epilogue.hpp"
 #include "ck_tile/ops/gemm.hpp"
 #include "ck_tile/utility/json_dump.hpp"
+#include "gemm_common/vector_size_fallback_dispatch.hpp"
 
 #include <string>
 #include <variant>
+
+using ck_tile_example::GemmConfigVectorSizeFallback;
 
 // Max. vectorized global memory access in bytes.
 static constexpr ck_tile::index_t kMaxVectorBytes = 16;
@@ -56,11 +59,12 @@ struct GemmConfigBase
     static constexpr ck_tile::index_t VectorSizeB = 1;
     static constexpr ck_tile::index_t VectorSizeC = 1;
 
-    // Enable for RCR
-    static constexpr bool EnableKPadFallback = false;
+    static constexpr bool EnableSmallerVectorLoadFallback = false;
+    static constexpr bool LargeTensors                    = false;
 };
 
-// A,B vector sizes must divide K_Warp_Tile.
+// A,B vector sizes must divide K_Warp_Tile. Used directly by test_gemm_unaligned_k.cpp; the
+// general run_gemm_example.inc dispatch path uses GemmConfigVectorSizeFallback instead.
 template <typename GemmConfig,
           ck_tile::index_t VectorSizeA_,
           ck_tile::index_t VectorSizeB_,
@@ -165,6 +169,10 @@ struct GemmConfigComputeV3_1 : public GemmConfigBase
 template <typename PrecType>
 struct GemmConfigComputeV3_2 : public GemmConfigBase
 {
+    static constexpr bool kPadM = true;
+    static constexpr bool kPadN = true;
+    static constexpr bool kPadK = true;
+
     static constexpr ck_tile::index_t M_Tile = 128;
     static constexpr ck_tile::index_t N_Tile = 128;
     static constexpr ck_tile::index_t K_Tile = 128 / sizeof(PrecType);
@@ -182,6 +190,9 @@ struct GemmConfigComputeV3_2 : public GemmConfigBase
     static constexpr ck_tile::GemmPipeline Pipeline = ck_tile::GemmPipeline::COMPUTE_V3;
 
     static constexpr int kBlockPerCu = 2;
+    static constexpr bool EnableSmallerVectorLoadFallback =
+        !std::is_same_v<PrecType, ck_tile::int8_t>;
+    static constexpr bool LargeTensors = !std::is_same_v<PrecType, ck_tile::int8_t>;
 };
 
 template <typename PrecType>
@@ -236,7 +247,8 @@ struct GemmConfigComputeV3_WMMA : public GemmConfigBase
 
     static constexpr int kBlockPerCu = 2;
 
-    static constexpr bool EnableKPadFallback = true;
+    static constexpr bool EnableSmallerVectorLoadFallback = true;
+    static constexpr bool LargeTensors = !std::is_same_v<PrecType, ck_tile::int8_t>;
 };
 
 template <typename PrecType>
@@ -245,8 +257,8 @@ struct GemmConfigComputeV3_WMMA_ClusterLaunch : public GemmConfigComputeV3_WMMA<
     static constexpr ck_tile::index_t kClusterSizeM = 2;
     static constexpr ck_tile::index_t kClusterSizeN = 2;
 
-    // KPad fallback not validated on the cluster-launch path yet, disable for now.
-    static constexpr bool EnableKPadFallback = false;
+    // Vector-size fallback not validated on the cluster-launch path yet, disable for now.
+    static constexpr bool EnableSmallerVectorLoadFallback = false;
 };
 
 template <typename PrecType>
