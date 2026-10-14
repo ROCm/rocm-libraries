@@ -1241,15 +1241,16 @@ class TestScopedGlobalFences(AdaptorTestCase):
         self.assertIn("global_inv scope:SCOPE_SYS", str(clone))
         self.assertIn("// acquire", str(clone))
 
-    def test_scope_is_forwarded_to_logical_global_modifier(self):
+    def test_scope_is_forwarded_as_cache_scope(self):
         logical = unittest.mock.Mock()
         fake_st = unittest.mock.Mock()
         fake_st.GlobalWb = unittest.mock.Mock(return_value=logical)
         with unittest.mock.patch.dict(sys.modules, {"stinkytofu": fake_st}):
             GlobalWb(scope=CacheScope.SCOPE_DEV).to_stinky_logical()
-        logical.set_global.assert_called_once_with(
+        logical.set_cache_scope.assert_called_once_with(
             scope=int(CacheScope.SCOPE_DEV),
         )
+        logical.set_global.assert_not_called()
 
     @unittest.skipUnless(_STINKY_OK, "stinkytofu binding not built")
     def test_emitted_assembly_contains_scope(self):
