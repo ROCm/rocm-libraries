@@ -1521,8 +1521,24 @@ void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
             return module_->getFunction(name) != nullptr;
         }
 
-        // Override emitAssembly to include signature
+        // Override emitAssembly to include signature.
+        // KeepSignatureOnEmit: a pre-pipeline dump also calls this. refreshSgprCount
+        // only ever lowers the declared count, so that dump would drop SGPRs the
+        // later pipeline still needs. The plugin flag emits the same text, then
+        // puts the declaration back.
         std::string emitAssembly() const {
+            const bool keepSignature = module_->getPluginDataI64("KeepSignatureOnEmit", 0) != 0;
+            int savedVgprs = 0;
+            int savedAgprs = 0;
+            int savedSgprs = 0;
+            int64_t savedBytes = -1;
+            if (keepSignature && signature_) {
+                const stinkytofu::SignatureKernelDescriptor& kd = signature_->kernelDescriptor;
+                savedVgprs = kd.originalTotalVgprs;
+                savedAgprs = kd.totalAgprs;
+                savedSgprs = kd.totalSgprs;
+                savedBytes = kd.totalInstructionBytes;
+            }
             std::string result;
             if (signature_) {
                 int64_t totalBytes = module_->getTotalInstructionBytes();
@@ -1532,6 +1548,10 @@ void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
                 result = signature_->toString();
             }
             result += module_->emitAssembly();
+            if (keepSignature && signature_) {
+                signature_->setGprs(savedVgprs, savedAgprs, savedSgprs);
+                signature_->setTotalInstructionBytes(savedBytes);
+            }
             return result;
         }
 
