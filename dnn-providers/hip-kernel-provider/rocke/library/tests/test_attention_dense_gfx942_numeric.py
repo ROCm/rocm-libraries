@@ -223,6 +223,9 @@ def _sdpa_reference(q, k, v, scale, *, causal=True, attn_mask=None):
 def test_dense_numeric_vs_fp32_sdpa(dtype, d, hq, hkv, persistent, causal):
     import torch
 
+    # Element-wise atol + rtol*|ref| rather than a raw max-abs bound: rounding the
+    # fp32 reference to bf16 alone is up to ~8e-3 on these randn inputs, so a
+    # max-abs 1e-2 would leave little room for kernel error and turn seed-sensitive.
     tol = 2e-3 if dtype == "fp16" else 1e-2
     tdt = getattr(torch, _TORCH_DT[dtype])
     B, S = 1, 512
@@ -242,9 +245,15 @@ def test_dense_numeric_vs_fp32_sdpa(dtype, d, hq, hkv, persistent, causal):
     ref = _sdpa_reference(q, k, v, scale, causal=causal)
 
     max_abs = (ref - out.float()).abs().max().item()
-    assert max_abs < tol, (
-        f"{dtype} D{d} GQA{hq}/{hkv} {'causal' if causal else 'full'} "
-        f"{'persist' if persistent else 'default'}: max_abs={max_abs:.3e} >= {tol}"
+    torch.testing.assert_close(
+        out.float(),
+        ref,
+        atol=tol,
+        rtol=tol,
+        msg=lambda m: (
+            f"{dtype} D{d} GQA{hq}/{hkv} {'causal' if causal else 'full'} "
+            f"{'persist' if persistent else 'default'}: max_abs={max_abs:.3e}\n{m}"
+        ),
     )
 
 
