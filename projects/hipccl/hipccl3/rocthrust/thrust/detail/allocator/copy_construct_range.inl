@@ -104,12 +104,12 @@ THRUST_HOST_DEVICE enable_if_convertible_t<FromSystem, ToSystem, Pointer> uninit
   ZipIterator end   = begin;
 
   // get a zip_iterator pointing to the end
-  const typename thrust::iterator_difference<InputIterator>::type n = thrust::distance(first, last);
+  const thrust::detail::it_difference_t<InputIterator> n = thrust::distance(first, last);
   thrust::advance(end, n);
 
   // create a functor
-  using InputType  = typename iterator_traits<InputIterator>::value_type;
-  using OutputType = typename iterator_traits<Pointer>::value_type;
+  using InputType  = it_value_t<InputIterator>;
+  using OutputType = it_value_t<Pointer>;
 
   // do the for_each
   // note we use to_system to dispatch the for_each
@@ -139,8 +139,8 @@ THRUST_HOST_DEVICE enable_if_convertible_t<FromSystem, ToSystem, Pointer> uninit
   ZipIterator begin = thrust::make_zip_iterator(thrust::make_tuple(first, result));
 
   // create a functor
-  using InputType  = typename iterator_traits<InputIterator>::value_type;
-  using OutputType = typename iterator_traits<Pointer>::value_type;
+  using InputType  = it_value_t<InputIterator>;
+  using OutputType = it_value_t<Pointer>;
 
   // do the for_each_n
   // note we use to_system to dispatch the for_each_n
@@ -206,8 +206,8 @@ copy_construct_range_n(
 }
 
 template <typename FromSystem, typename Allocator, typename InputIterator, typename Pointer>
-THRUST_HOST_DEVICE
-  _THRUST_STD::enable_if_t<needs_copy_construct_via_allocator<Allocator, typename pointer_element<Pointer>::type>::value, Pointer>
+THRUST_HOST_DEVICE _THRUST_STD::
+  enable_if_t<needs_copy_construct_via_allocator<Allocator, typename pointer_element<Pointer>::type>::value, Pointer>
   copy_construct_range(thrust::execution_policy<FromSystem>& from_system,
                        Allocator& a,
                        InputIterator first,
@@ -218,8 +218,8 @@ THRUST_HOST_DEVICE
 }
 
 template <typename FromSystem, typename Allocator, typename InputIterator, typename Size, typename Pointer>
-THRUST_HOST_DEVICE
-  _THRUST_STD::enable_if_t<needs_copy_construct_via_allocator<Allocator, typename pointer_element<Pointer>::type>::value, Pointer>
+THRUST_HOST_DEVICE _THRUST_STD::
+  enable_if_t<needs_copy_construct_via_allocator<Allocator, typename pointer_element<Pointer>::type>::value, Pointer>
   copy_construct_range_n(
     thrust::execution_policy<FromSystem>& from_system, Allocator& a, InputIterator first, Size n, Pointer result)
 {

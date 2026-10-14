@@ -107,6 +107,11 @@ through that suite's ordinary host run. [native-pack.md](native-pack.md) owns
 eligibility. Device proof must explicitly select and numerically verify the new
 candidate; passing the unchanged default is not extension acceptance.
 
+A new architecture is probed automatically, and a new compile path or `spec` value is
+packed by the automatic probe's default sample. When the addition needs a specific UKD
+(a value combination the sweep does not guarantee) packed on every PR, add its name to the
+integration's named probe `UKDS`. Run the `hkp-probe-*` entries as in RUNBOOK's final step.
+
 The handoff identifies retained IDs/references, changed/new files, baseline/final
 installations, whole-engine results and the addition's actual dispatch. RUNBOOK stage 5
 contains the bounded HALF/256 pointwise example; its one-element source is not

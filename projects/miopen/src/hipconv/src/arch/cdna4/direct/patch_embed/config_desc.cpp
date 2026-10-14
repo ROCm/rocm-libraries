@@ -10,6 +10,7 @@ ConfigMatcher::ConfigMatcher(const Config& cfg)
     int_field("k_chunk", cfg.k_chunk);
     int_field("waves_m", cfg.waves_m);
     int_field("waves_n", cfg.waves_n);
+    bool_field("row_pad", cfg.row_pad, /*default=*/false);
 }
 
 } // namespace hipconv::cdna4::patch_embed
