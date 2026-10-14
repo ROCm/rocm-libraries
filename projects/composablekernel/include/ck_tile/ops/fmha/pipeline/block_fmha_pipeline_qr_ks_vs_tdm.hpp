@@ -206,6 +206,53 @@ struct BlockFmhaPipelineQRKSVSTdm
         }
     }
 
+    // Sum twin of ReduceRowMaxLocal, reusing its chain split. Floating-point addition is
+    // not associative, so a compiler cannot reassociate the serial sweep into a tree; the
+    // split is what breaks the latency chain. The sum identity is 0, so every chain can be
+    // seeded from its first element and none needs initializing.
+    template <typename Tensor>
+    CK_TILE_DEVICE static auto ReduceRowSumLocal(const Tensor& values)
+    {
+        constexpr index_t partials = GetRowMaxPartialCount<Tensor>();
+        constexpr auto spans       = Tensor::get_distributed_spans();
+        if constexpr(partials > 0)
+        {
+            constexpr index_t local_columns = container_reduce(spans[I1].impl_, multiplies<>{}, 1);
+            constexpr auto columns =
+                make_naive_tensor_descriptor_packed(sequence_to_tuple_of_number(spans[I1].impl_));
+            constexpr auto distribution = make_static_tile_distribution(
+                ck_tile::detail::make_reduce_tile_distribution_encoding(
+                    Tensor::get_tile_distribution().get_static_tile_distribution_encoding(),
+                    sequence<1>{}));
+            auto sums = make_static_distributed_tensor<SMPLComputeDataType>(distribution);
+            constexpr index_t cols_per_partial = local_columns / partials;
+            sweep_tile_span(spans[I0], [&](auto row) {
+                thread_buffer<SMPLComputeDataType, partials> partial;
+                sweep_tile_span(spans[I1], [&](auto col) {
+                    constexpr index_t offset = columns.calculate_offset(col.impl_);
+                    constexpr index_t group  = offset / cols_per_partial;
+                    if constexpr(offset % cols_per_partial == 0)
+                        partial(number<group>{}) = values[make_tuple(row, col)];
+                    else
+                        partial(number<group>{}) =
+                            partial[number<group>{}] + values[make_tuple(row, col)];
+                });
+                if constexpr(partials == 2)
+                    sums(make_tuple(row)) = partial[number<0>{}] + partial[number<1>{}];
+                else
+                    sums(make_tuple(row)) = (partial[number<0>{}] + partial[number<1>{}]) +
+                                            (partial[number<2>{}] + partial[number<3>{}]);
+            });
+            return sums;
+        }
+        else
+        {
+            const auto f_sum = [](auto a, auto b) { return a + b; };
+            return block_tile_reduce<SMPLComputeDataType>(
+                values, sequence<1>{}, f_sum, SMPLComputeDataType{0});
+        }
+    }
+
     static constexpr bool kHwGemm1Scale = is_any_of<VDataType, fp8_t, bf8_t>::value &&
                                           BlockFmhaShape::Gemm1WarpTile::at(number<2>{}) == 128;
 
@@ -995,12 +1042,8 @@ struct BlockFmhaPipelineQRKSVSTdm
                 }
             }();
 
-            auto m_local = block_tile_reduce<SMPLComputeDataType>(
-                s_new,
-                sequence<1>{},
-                f_max,
-                -numeric<SMPLComputeDataType>::infinity()); // m_local = rowmax(S{j})
-            block_tile_reduce_sync(m_local, f_max, bool_constant<false>{});
+            auto m_local = ReduceRowMaxLocal(s_new); // m_local = rowmax(S{j})
+            ReduceRowSync(m_local, f_max);
 
             const auto m_old = m; // m{j-1}
             tile_elementwise_inout(
@@ -1050,10 +1093,8 @@ struct BlockFmhaPipelineQRKSVSTdm
                 });
             });
 
-            auto rowsum_p = block_tile_reduce<SMPLComputeDataType>(
-                p_compute, sequence<1>{}, f_sum, SMPLComputeDataType{0}); // rowsum(Pcompute{j})
-
-            block_tile_reduce_sync(rowsum_p, f_sum, bool_constant<false>{});
+            auto rowsum_p = ReduceRowSumLocal(p_compute); // rowsum(Pcompute{j})
+            ReduceRowSync(rowsum_p, f_sum);
 
             int32_t p_scale = 0;
             auto p_tile     = MakePForGemm1<decltype(gemm_1)>(p_compute, p_scale);
@@ -1970,8 +2011,7 @@ struct BlockFmhaPipelineQRKSVSTdm
                 }
                 else
                 {
-                    auto sum = block_tile_reduce<SMPLComputeDataType>(
-                        p_compute, sequence<1>{}, f_sum, SMPLComputeDataType{0});
+                    auto sum = ReduceRowSumLocal(p_compute); // rowsum(Pcompute{j})
                     ReduceRowSync(sum, f_sum);
                     return sum;
                 }
