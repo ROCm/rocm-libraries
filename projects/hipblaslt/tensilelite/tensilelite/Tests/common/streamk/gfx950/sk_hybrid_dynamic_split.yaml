@@ -10,9 +10,11 @@
 # items (raw-rank regimes: WorkGroupMappingXCC -1, and PersistentXCCMapping
 # with WorkGroupMappingXCC > 1), the per-tile arrival counter and the
 # fixed-order fixup by the last part, and batch-inclusive partial indexing.
-# Validation checks the first launch per problem; the Synchronizer check (on
-# by default) catches queue or arrival counters left nonzero, which would
-# corrupt a later launch rather than the one that left them. The activation problem builds
+# Each problem is validated after its first launch and again after a group of
+# back-to-back launches (ValidateAfterEnqueues) whose last launch writes a
+# rotating output buffer no earlier launch wrote. The Synchronizer check (on
+# by default) runs after both, so queue or arrival counters left nonzero fail
+# the run, as does work a later launch skips because of them. The activation problem builds
 # with ActivationFuncCall, whose call offsets are live across the partials
 # path into the fixup.
 TestParameters:
@@ -31,11 +33,12 @@ GlobalParameters:
   DataInitTypeB: 13
   DataInitTypeC: 12
   MaxWorkspaceSize: 134217728
-  # Several launches of each kernel, no timing runs: 2 warmups per run and 2
-  # runs per problem, over several problems. Each problem's first launch is
-  # validated and followed by the Synchronizer check, so residue from any
-  # earlier launch of the kernel shows up there.
-  SyncsPerBenchmark: 0
+  # Several launches of each kernel: 2 warmups and one group of 3
+  # back-to-back launches per run, 2 runs per problem, over several problems.
+  SyncsPerBenchmark: 1
+  EnqueuesPerSync: 3
+  ValidateAfterEnqueues: True
+  RotatingBufferSize: 512
   NumWarmups: 2
   NumBenchmarks: 2
   SleepPercent: 0
