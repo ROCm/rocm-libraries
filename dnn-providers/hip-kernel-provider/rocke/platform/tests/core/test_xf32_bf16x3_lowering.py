@@ -9,7 +9,10 @@ plus three BF16 MMAs threading one fp32 accumulator. What is pinned here is
 everything a numerics reviewer would want to re-derive by hand:
 
 * the payload is viewed as fp32 by a bitcast -- never a rounding;
-* the split is ``big = rne_bf16(x)``, ``small = rne_bf16(x - fp32(big))``;
+* the split is ``big = cap(rne_bf16(x))``, ``small = rne_bf16(x - fp32(big))``,
+  where ``cap`` holds ``big`` at the largest finite bf16 so that a payload that
+  rounds past it still splits into finite parts, and the residual is taken from
+  the payload itself;
 * the three terms are ``small*big``, ``big*small``, ``big*big`` **in that
   order** -- fp32 accumulation is not associative, so the order is part of the
   answer, not a detail of how it is written;
@@ -23,14 +26,20 @@ and, separately, that both engines emit the same bytes for all of it.
 
 from __future__ import annotations
 
+import os
 import re
+import shutil
+import subprocess
+import tempfile
 import unittest
+from pathlib import Path
 
+import numpy as np
 from rocke.core.arch import ArchTarget
 from rocke.core.backend import BackendError, _lower_via_cpp_engine
-from rocke.core.ir import F32, TF32, IRBuilder, KernelDef, VectorType
+from rocke.core.ir import F32, TF32, IRBuilder, KernelDef, PtrType, VectorType
 from rocke.core.ir_serialize import serialize
-from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
+from rocke.core.lower_llvm import _flavor_for_llvm, _lower_kernel_to_llvm_python
 
 _ARCH = "gfx950"
 _FLAVORS = ("llvm20", "llvm22", "llvm23")
@@ -68,6 +77,44 @@ def _mma_kernel(op_id: str, *, bare: bool = False) -> KernelDef:
     return builder.kernel
 
 
+def _lanes(value: int, n: int) -> str:
+    """The ``<n x i16>`` constant the lowering spells for a splat of ``value``."""
+    return "<" + ", ".join(f"i16 {value}" for _ in range(n)) + ">"
+
+
+def _name(line: str) -> str:
+    """The SSA name a line defines."""
+    return line.split(" =")[0]
+
+
+def _operand_split(body: list[str], side: str) -> dict[str, str]:
+    """One operand's expansion, as the eleven lines it emits, by role.
+
+    ``cast`` views the I32 carrier as fp32; ``rne`` .. ``sat`` build the capped
+    leading part; ``big`` .. ``small`` are the split proper.
+    """
+    roles = (
+        "cast",
+        "rne",
+        "bits",
+        "sign",
+        "cap",
+        "over",
+        "sat",
+        "big",
+        "big_f32",
+        "diff",
+        "small",
+    )
+    lines = [ln.strip() for ln in body if f"%xf32_{side}_" in ln.split("=")[0]]
+    assert len(lines) == len(
+        roles
+    ), f"operand {side}: expected {len(roles)} lines, got {len(lines)}:\n" + "\n".join(
+        lines
+    )
+    return dict(zip(roles, lines))
+
+
 def _body(llvm: str) -> list[str]:
     """The lines inside ``define ... {``, which is where emission is pinned."""
     lines = llvm.splitlines()
@@ -89,67 +136,85 @@ class TestBf16x3Expansion(unittest.TestCase):
             with self.subTest(op_id=op_id):
                 atom = ArchTarget.from_gfx(_ARCH).mma.by_op_id(op_id)
                 n = atom.a_frag_len
-                f32v, bf16v = f"<{n} x float>", f"<{n} x bfloat>"
+                f32v, bf16v, i16v = (
+                    f"<{n} x float>",
+                    f"<{n} x bfloat>",
+                    f"<{n} x i16>",
+                )
                 _, body = self._lower(op_id)
                 for side in ("a", "b"):
-                    split = [
-                        ln.strip()
-                        for ln in body
-                        if f"%xf32_{side}_" in ln.split("=")[0]
-                    ]
-                    self.assertEqual(
-                        len(split),
-                        5,
-                        f"operand {side}: expected a cast and a 4-line split",
-                    )
-                    cast, big, big_f32, diff, small = split
+                    ln = _operand_split(body, side)
                     # The I32 carrier is viewed as fp32 by a bitcast -- the whole
                     # difference from a native XF32 atom, which ignores the low 13
                     # payload bits; here every one of them reaches the split.
-                    cast_n = cast.split(" =")[0]
+                    src = _name(ln["cast"])
                     self.assertRegex(
-                        cast,
-                        rf"^{re.escape(cast_n)} = bitcast <{n} x i32> %\S+ to {re.escape(f32v)}$",
+                        ln["cast"],
+                        rf"^{re.escape(src)} = bitcast <{n} x i32> %\S+ to {re.escape(f32v)}$",
                     )
-                    src = big.split(f"fptrunc {f32v} ")[1].split(" to ")[0]
-                    self.assertEqual(src, cast_n)
-                    big_n = big.split(" =")[0]
-                    # big = rne_bf16(src)
-                    self.assertEqual(big, f"{big_n} = fptrunc {f32v} {src} to {bf16v}")
+                    # big starts as rne_bf16(payload) ...
+                    self.assertEqual(
+                        ln["rne"],
+                        f"{_name(ln['rne'])} = fptrunc {f32v} {src} to {bf16v}",
+                    )
+                    # ... is capped on its bit pattern (pinned in detail by
+                    # TestTopBinadeSaturation) and handed back as a bf16,
+                    self.assertEqual(
+                        ln["bits"],
+                        f"{_name(ln['bits'])} = bitcast {bf16v} {_name(ln['rne'])} to {i16v}",
+                    )
+                    self.assertEqual(
+                        ln["big"],
+                        f"{_name(ln['big'])} = bitcast {i16v} {_name(ln['sat'])} to {bf16v}",
+                    )
                     # ... widened back so the rounding error can be named,
-                    bf_n = big_f32.split(" =")[0]
                     self.assertEqual(
-                        big_f32, f"{bf_n} = fpext {bf16v} {big_n} to {f32v}"
+                        ln["big_f32"],
+                        f"{_name(ln['big_f32'])} = fpext {bf16v} {_name(ln['big'])} to {f32v}",
                     )
-                    # ... which is exactly what the source lost,
-                    diff_n = diff.split(" =")[0]
-                    self.assertEqual(diff, f"{diff_n} = fsub {f32v} {src}, {bf_n}")
-                    # ... itself rounded to bf16.
-                    small_n = small.split(" =")[0]
+                    # ... which is exactly what the *payload* lost -- taken against
+                    # the payload and not a capped copy, so a payload the cap
+                    # clipped leaves its remainder in small, and a non-finite one
+                    # leaves a non-finite small,
                     self.assertEqual(
-                        small, f"{small_n} = fptrunc {f32v} {diff_n} to {bf16v}"
+                        ln["diff"],
+                        f"{_name(ln['diff'])} = fsub {f32v} {src}, {_name(ln['big_f32'])}",
+                    )
+                    # ... itself rounded to bf16.
+                    self.assertEqual(
+                        ln["small"],
+                        f"{_name(ln['small'])} = fptrunc {f32v} {_name(ln['diff'])} to {bf16v}",
                     )
 
     def test_rounding_is_round_to_nearest_even_not_truncation(self):
-        """Both narrowing steps are ``fptrunc``, which LLVM defines as RNE.
+        """Every narrowing is an ``fptrunc``, which LLVM defines as RNE.
 
         The AMDGPU backend selects the packed ``v_cvt_pk_bf16_f32`` for the
         vector form on gfx950 -- CK's shipping packed path. CK's *scalar*
         fallback truncates instead, and is deliberately not the parity target:
         an RNE split is strictly the more accurate of the two.
+
+        The cap added after the first narrowing works on that result's bit
+        pattern, so it could not have replaced the rounding with a mask: the
+        only integer arithmetic in the expansion is on ``i16`` lanes, never on
+        the payload.
         """
         for op_id in _EMULATED:
             with self.subTest(op_id=op_id):
                 atom = ArchTarget.from_gfx(_ARCH).mma.by_op_id(op_id)
-                bf16v = f"<{atom.a_frag_len} x bfloat>"
+                i16v = f"<{atom.a_frag_len} x i16>"
                 _, body = self._lower(op_id)
-                narrowing = [ln for ln in body if ln.endswith(f" to {bf16v}")]
-                self.assertTrue(narrowing)
+                narrowing = [ln for ln in body if "fptrunc" in ln]
+                self.assertEqual(
+                    len(narrowing), 4, "big and small, for each of the two operands"
+                )
                 for line in narrowing:
-                    self.assertIn("fptrunc", line)
-                    # No intrinsic call, and no bit-masking stand-in for a cast.
+                    # No intrinsic call standing in for the cast.
                     self.assertNotIn("call ", line)
-                    self.assertNotIn(" and ", line)
+                bit_ops = [ln for ln in body if re.search(r" = (and|or) ", ln)]
+                self.assertEqual(len(bit_ops), 4, "sign and cap, per operand")
+                for line in bit_ops:
+                    self.assertIn(i16v, line)
 
     def test_three_terms_in_order_threading_one_accumulator(self):
         for op_id, physical in _EMULATED.items():
@@ -218,6 +283,235 @@ class TestBf16x3Expansion(unittest.TestCase):
                     names[2].startswith("%xf32_acc."),
                     "the last term writes the tile.mma result the caller named",
                 )
+
+
+class TestTopBinadeSaturation(unittest.TestCase):
+    """The cap on ``big``, read back out of the emitted IR.
+
+    bf16 round-to-nearest-even overflows to infinity for any fp32 payload of
+    magnitude 0x7f7f8000 or more -- the top 2^-9 of the finite range, where TF32's
+    largest finite values are. Uncapped, ``big`` is +-inf there and ``small`` the
+    opposite infinity, and the ``inf * 0`` in the cross terms makes a finite
+    product NaN. What the numbers do is checked on the host model
+    (``test_xf32_bf16x3_numerics.py``) and on a device
+    (``bf16x3_parity.py``); this pins that the IR is built the way those assume.
+    """
+
+    def _split(self, op_id: str, side: str):
+        atom = ArchTarget.from_gfx(_ARCH).mma.by_op_id(op_id)
+        llvm = _lower_kernel_to_llvm_python(
+            _mma_kernel(op_id), arch=_ARCH, llvm_flavor="llvm20"
+        )
+        return atom.a_frag_len, _operand_split(_body(llvm), side)
+
+    def test_the_cap_is_the_largest_finite_bf16_carrying_the_values_sign(self):
+        for op_id in _EMULATED:
+            for side in ("a", "b"):
+                with self.subTest(op_id=op_id, side=side):
+                    n, ln = self._split(op_id, side)
+                    i16v = f"<{n} x i16>"
+                    bits = _name(ln["bits"])
+                    # The sign bit, as the signed i16 literal for 0x8000 ...
+                    self.assertEqual(
+                        ln["sign"],
+                        f"{_name(ln['sign'])} = and {i16v} {bits}, {_lanes(-0x8000, n)}",
+                    )
+                    # ... joined to 0x7f7f, the largest finite bf16 magnitude
+                    # (0x7f80 is the infinity, so nothing finite is above it).
+                    self.assertEqual(
+                        ln["cap"],
+                        f"{_name(ln['cap'])} = or {i16v} {_name(ln['sign'])}, {_lanes(0x7F7F, n)}",
+                    )
+
+    def test_only_what_is_past_the_cap_is_replaced(self):
+        """An *unsigned* compare of the pattern against its own signed cap.
+
+        Unsigned, because a negative value's pattern has the sign bit set and
+        would otherwise compare below every positive one; and against a cap that
+        carries the value's own sign, so +-inf and every NaN (0x7f80 and up in
+        magnitude) are caught for both signs and no finite value is."""
+        for op_id in _EMULATED:
+            for side in ("a", "b"):
+                with self.subTest(op_id=op_id, side=side):
+                    n, ln = self._split(op_id, side)
+                    i16v = f"<{n} x i16>"
+                    bits, cap = _name(ln["bits"]), _name(ln["cap"])
+                    self.assertEqual(
+                        ln["over"],
+                        f"{_name(ln['over'])} = icmp ugt {i16v} {bits}, {cap}",
+                    )
+                    self.assertEqual(
+                        ln["sat"],
+                        f"{_name(ln['sat'])} = select <{n} x i1> {_name(ln['over'])}, "
+                        f"{i16v} {cap}, {i16v} {bits}",
+                    )
+
+    def test_the_capped_value_is_what_the_mmas_consume_as_big(self):
+        """The MMAs must read the capped ``big``, not the raw rounding."""
+        for op_id in _EMULATED:
+            with self.subTest(op_id=op_id):
+                llvm = _lower_kernel_to_llvm_python(
+                    _mma_kernel(op_id), arch=_ARCH, llvm_flavor="llvm20"
+                )
+                body = _body(llvm)
+                mma_args = " ".join(ln for ln in body if "mfma" in ln and "call" in ln)
+                for side in ("a", "b"):
+                    ln = _operand_split(body, side)
+                    self.assertIn(_name(ln["big"]) + ",", mma_args)
+                    self.assertNotIn(_name(ln["rne"]), mma_args)
+
+
+# A power of two, so its own split is exact and it can sit opposite any payload.
+_SMALLEST_NORMAL = 0x00800000
+
+
+def _opt() -> str | None:
+    """LLVM's ``opt``, which ROCm installs outside the default PATH."""
+    found = shutil.which("opt")
+    if found:
+        return found
+    candidate = Path(os.environ.get("ROCM_PATH", "/opt/rocm")) / "llvm" / "bin" / "opt"
+    return str(candidate) if candidate.exists() else None
+
+
+def _fold_kernel(op_id: str, a_bits: int, b_bits: int) -> KernelDef:
+    """One emulated ``tile.mma`` over constant payloads, its result stored.
+
+    The store keeps the MMA live: a call whose result is unused is deleted
+    outright, and with it the folded operands this reads back.
+    """
+    atom = ArchTarget.from_gfx(_ARCH).mma.by_op_id(op_id)
+
+    def payload(bits: int) -> float:
+        return float(np.array([bits], dtype=np.uint32).view(np.float32)[0])
+
+    builder = IRBuilder("fold_probe")
+    builder.kernel.attrs["max_workgroup_size"] = atom.wave_size
+    out = builder.param("out", PtrType(F32, "global"))
+    a = builder.vector_splat(builder.const_f32(payload(a_bits)), atom.a_frag_len)
+    b = builder.vector_splat(builder.const_f32(payload(b_bits)), atom.b_frag_len)
+    a = builder.bitcast(a, VectorType(TF32, atom.a_frag_len))
+    b = builder.bitcast(b, VectorType(TF32, atom.b_frag_len))
+    c = builder.vector_splat(builder.const_f32(0.0), atom.c_frag_len)
+    d = builder.mma(atom, a, b, c)
+    builder.store(builder.vec_extract(d, 0), out, builder.const_i32(0))
+    builder.ret()
+    return builder.kernel
+
+
+# payload bits -> (big, small) as bf16 bit patterns, with the arithmetic
+# spelled out. M is 0x7f7f0000, the largest finite bf16 (as an fp32 payload).
+_FOLDED_SPLITS = {
+    # x - M = 0xe000 * 2^104 = 1.75 * 2^119, exact in bf16.
+    0x7F7FE000: (0x7F7F, 0x7B60),
+    0xFF7FE000: (0xFF7F, 0xFB60),
+    # x - M = 2^119; the first payload that would have rounded to infinity.
+    0x7F7F8000: (0x7F7F, 0x7B00),
+    # Just below the threshold: rounds to M without any help from the cap, and
+    # the remainder (0x7fff * 2^104, ~2^119) rounds to the same 2^119.
+    0x7F7F7FFF: (0x7F7F, 0x7B00),
+    # x - M = 0xffff * 2^104, which rounds up to 2^120.
+    0x7F7FFFFF: (0x7F7F, 0x7B80),
+    # Non-finite: big is capped to a finite value, small stays +-inf / NaN.
+    0x7F800000: (0x7F7F, 0x7F80),
+    0xFF800000: (0xFF7F, 0xFF80),
+    0x7FC00000: (0x7F7F, 0x7FC0),
+    # Nothing special: 1 + 2^-8 sits halfway between two bf16 values, ties to
+    # even keeps 1.0 and leaves 2^-8 (exponent -8 -> 0x3b80) ...
+    0x3F808000: (0x3F80, 0x3B80),
+    # ... and 1 + 2^-11 + 2^-23 rounds to 1.0, leaving 2^-11 (-> 0x3a00).
+    0x3F801001: (0x3F80, 0x3A00),
+}
+
+
+class TestLlvmFoldsTheSplit(unittest.TestCase):
+    """LLVM's own constant folder, as an evaluator of the emitted IR.
+
+    Everything above reads the IR as text, and the host model reads it as
+    arithmetic; neither runs *it*. Here the lowered kernel is handed to ``opt``
+    with constant payloads, which folds the whole split -- the narrowing, the cap,
+    the widening, the subtraction -- down to the constants the three MMAs receive,
+    and those are compared with values worked out by hand below. No GPU is
+    needed, and no model of mine sits between the IR and the answer.
+
+    Skips without an ``opt``; it uses the IR flavor that matches that ``opt``.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        tool = _opt()
+        if tool is None:
+            raise unittest.SkipTest("opt not found; cannot evaluate the emitted IR")
+        version = subprocess.run(
+            [tool, "--version"], capture_output=True, text=True, check=False
+        ).stdout
+        match = re.search(r"LLVM version (\d+)", version)
+        if match is None:
+            raise unittest.SkipTest(f"cannot tell which LLVM this opt is: {version!r}")
+        cls.tool = tool
+        cls.flavor = _flavor_for_llvm(int(match.group(1)))
+
+    @staticmethod
+    def _patterns(operand: str) -> set[int]:
+        """Every distinct bf16 bit pattern a folded constant operand carries."""
+        if operand.strip() == "zeroinitializer":
+            return {0}
+        return {int(h, 16) for h in re.findall(r"0xR([0-9A-Fa-f]{4})", operand)}
+
+    def _folded_operands(self, op_id: str, a_bits: int, b_bits: int):
+        """``(a_small, b_big, a_big, b_small)`` as sets of bf16 patterns."""
+        llvm = _lower_kernel_to_llvm_python(
+            _fold_kernel(op_id, a_bits, b_bits),
+            arch=_ARCH,
+            llvm_flavor=self.flavor,
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / "split.ll"
+            source.write_text(llvm)
+            done = subprocess.run(
+                [self.tool, "-S", "-passes=instcombine", str(source), "-o", "-"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        self.assertEqual(done.returncode, 0, done.stderr)
+        calls = [
+            ln
+            for ln in done.stdout.splitlines()
+            if "@llvm.amdgcn.mfma" in ln and " call " in ln
+        ]
+        self.assertEqual(len(calls), 3, done.stdout)
+        operand = r"<\d+ x bfloat> (splat \(bfloat 0xR[0-9A-Fa-f]{4}\)|<[^>]*>|zeroinitializer|%\S+?)[,)]"
+        first, second = (re.findall(operand, call) for call in calls[:2])
+        for found in (first, second):
+            self.assertEqual(len(found), 2, calls)
+        # Terms 1 and 2 are small*big and big*small.
+        return tuple(
+            self._patterns(t) for t in (first[0], first[1], second[0], second[1])
+        )
+
+    def test_the_folded_split_matches_the_hand_derived_values(self):
+        for op_id in _EMULATED:
+            for a_bits, (big, small) in _FOLDED_SPLITS.items():
+                with self.subTest(op_id=op_id, payload=hex(a_bits)):
+                    a_small, b_big, a_big, b_small = self._folded_operands(
+                        op_id, a_bits, _SMALLEST_NORMAL
+                    )
+                    self.assertEqual((a_big, a_small), ({big}, {small}))
+                    # The other operand is a power of two: its split is exact, so
+                    # its remainder is zero, and it is unaffected by the cap.
+                    self.assertEqual((b_big, b_small), ({0x0080}, {0}))
+
+    def test_a_finite_payload_never_leaves_an_infinity_in_a_term(self):
+        """The failure the cap exists for, stated as a property of the folded IR."""
+        for op_id in _EMULATED:
+            for a_bits in (0x7F7F8000, 0x7F7FE000, 0x7F7FFFFF, 0xFF7FE000):
+                with self.subTest(op_id=op_id, payload=hex(a_bits)):
+                    parts = self._folded_operands(op_id, a_bits, _SMALLEST_NORMAL)
+                    for patterns in parts:
+                        for pattern in patterns:
+                            # Exponent field all ones is an infinity or a NaN.
+                            self.assertNotEqual(pattern & 0x7F80, 0x7F80, hex(pattern))
 
 
 class TestOperandContract(unittest.TestCase):

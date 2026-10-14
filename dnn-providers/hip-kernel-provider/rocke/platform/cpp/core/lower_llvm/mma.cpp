@@ -121,16 +121,68 @@ static const char*
     return cast;
 }
 
+/* bf16 as the i16 lanes the TF32 split saturates on (Python _BF16_MAX_FINITE and
+ * _BF16_SIGN_BIT): the largest finite bf16 has magnitude pattern 0x7f7f, and the
+ * sign bit is LLVM's signed i16 literal for 0x8000. */
+static const int kBf16MaxFinite = 0x7F7F;
+static const int kBf16SignBit = -0x8000;
+
+/* `<n x i16>` constant with every lane `value` (the `lanes` helper in Python
+ * _split_f32_to_bf16). An explicit list rather than `splat (...)`, which older
+ * LLVM flavors do not parse. Arena-owned, sized to the lane count. */
+static const char* _i16_lanes(rocke_lower_t* L, int value, int n)
+{
+    char lane[16];
+    const int lane_len = snprintf(lane, sizeof(lane), "i16 %d", value);
+    const size_t cap = (size_t)n * (size_t)(lane_len + 2) + 3;
+    char* out = static_cast<char*>(rocke_arena_alloc(&L->arena, cap));
+    char* p = out;
+    int i;
+
+    *p++ = '<';
+    for(i = 0; i < n; ++i)
+    {
+        if(i)
+        {
+            *p++ = ',';
+            *p++ = ' ';
+        }
+        memcpy(p, lane, (size_t)lane_len);
+        p += lane_len;
+    }
+    *p++ = '>';
+    *p = '\0';
+    return out;
+}
+
 /* Dekker-style split of an fp32 fragment into two bf16 fragments (Python
  * _split_f32_to_bf16). ``src`` names the fp32 vector of n elements. ``big`` is it
- * rounded to bf16; ``small`` is what that rounding threw away, itself rounded to
- * bf16.
+ * rounded to bf16 (and saturated, below); ``small`` is what that rounding threw
+ * away, itself rounded to bf16.
  *
- * Both conversions are `fptrunc ... to bfloat`, which is round-to-nearest-even
- * -- LLVM has no other fp32->bf16 rounding -- and the AMDGPU backend selects the
+ * The narrowings are `fptrunc ... to bfloat`, which is round-to-nearest-even --
+ * LLVM has no other fp32->bf16 rounding -- and the AMDGPU backend selects the
  * packed v_cvt_pk_bf16_f32 for the vector form on gfx950. That is CK's shipping
  * packed path; CK's *scalar* fallback truncates instead and is deliberately not
- * the parity target. */
+ * the parity target.
+ *
+ * SATURATION. Rounding to bf16 overflows to infinity for every payload of
+ * magnitude 0x7f7f8000 or more: the top 2^-9 of the finite fp32 range, which
+ * holds TF32's largest finite values. Left alone, ``big`` becomes +-inf and
+ * ``small`` the opposite infinity, and the `inf * 0` that results in the cross
+ * terms turns a finite product into NaN. ``big`` is therefore capped at the
+ * largest finite bf16, 0x7f7f, keeping the sign. ``small`` is still taken from
+ * the original payload, so it holds what the cap threw away -- finite, and within
+ * bf16's own precision of it -- and the three terms sum to the same product as
+ * anywhere else. Payloads below the threshold are untouched, bit for bit.
+ *
+ * A non-finite payload goes through the same cap, which makes ``big`` finite for
+ * it too. ``small`` is computed from the payload itself, so it stays +-inf (or
+ * NaN), and small*big -- the first term issued -- is then non-finite whatever the
+ * other operand holds: an infinity or NaN in an operand makes every output
+ * element it feeds non-finite. `Inf * 0` is NaN as IEEE says, and Inf against an
+ * ordinary finite partner stays Inf; a partner whose own residual is large enough
+ * to overflow against the cap can turn it into NaN. */
 static void _split_f32_to_bf16(rocke_lower_t* L,
                                const char* src,
                                const char* hint,
@@ -141,17 +193,39 @@ static void _split_f32_to_bf16(rocke_lower_t* L,
 {
     char f32v[24];
     char bf16v[24];
+    char i16v[24];
     char name_hint[32];
+    const char* big_rne;
+    const char* bits;
+    const char* sign;
+    const char* cap;
+    const char* over;
+    const char* sat;
     const char* big;
     const char* big_f32;
     const char* diff;
     const char* small;
+    const char* sign_lanes;
+    const char* max_lanes;
 
     snprintf(f32v, sizeof(f32v), "<%d x float>", n);
     snprintf(bf16v, sizeof(bf16v), "<%d x bfloat>", n);
+    snprintf(i16v, sizeof(i16v), "<%d x i16>", n);
 
     /* Fresh names are allocated in emission order, so the temp counter matches
      * the Python lowerer's and the two engines agree byte for byte. */
+    snprintf(name_hint, sizeof(name_hint), "%s_big_rne", hint);
+    big_rne = rocke_ll_fresh(L, name_hint);
+    snprintf(name_hint, sizeof(name_hint), "%s_big_bits", hint);
+    bits = rocke_ll_fresh(L, name_hint);
+    snprintf(name_hint, sizeof(name_hint), "%s_big_sign", hint);
+    sign = rocke_ll_fresh(L, name_hint);
+    snprintf(name_hint, sizeof(name_hint), "%s_big_cap", hint);
+    cap = rocke_ll_fresh(L, name_hint);
+    snprintf(name_hint, sizeof(name_hint), "%s_big_over", hint);
+    over = rocke_ll_fresh(L, name_hint);
+    snprintf(name_hint, sizeof(name_hint), "%s_big_sat", hint);
+    sat = rocke_ll_fresh(L, name_hint);
     snprintf(name_hint, sizeof(name_hint), "%s_big", hint);
     big = rocke_ll_fresh(L, name_hint);
     snprintf(name_hint, sizeof(name_hint), "%s_big_f32", hint);
@@ -161,7 +235,21 @@ static void _split_f32_to_bf16(rocke_lower_t* L,
     snprintf(name_hint, sizeof(name_hint), "%s_small", hint);
     small = rocke_ll_fresh(L, name_hint);
 
-    rocke_ll_emitf(L, "  %s = fptrunc %s %s to %s", big, f32v, src, bf16v);
+    sign_lanes = _i16_lanes(L, kBf16SignBit, n);
+    max_lanes = _i16_lanes(L, kBf16MaxFinite, n);
+
+    rocke_ll_emitf(L, "  %s = fptrunc %s %s to %s", big_rne, f32v, src, bf16v);
+    /* The bf16 bit patterns are ordered like their magnitudes, so "past the
+     * largest finite value" is an unsigned compare against that pattern with the
+     * value's own sign bit attached: it catches +-inf and every NaN (all 0x7f80
+     * and up in magnitude) and nothing finite. */
+    rocke_ll_emitf(L, "  %s = bitcast %s %s to %s", bits, bf16v, big_rne, i16v);
+    rocke_ll_emitf(L, "  %s = and %s %s, %s", sign, i16v, bits, sign_lanes);
+    rocke_ll_emitf(L, "  %s = or %s %s, %s", cap, i16v, sign, max_lanes);
+    rocke_ll_emitf(L, "  %s = icmp ugt %s %s, %s", over, i16v, bits, cap);
+    rocke_ll_emitf(
+        L, "  %s = select <%d x i1> %s, %s %s, %s %s", sat, n, over, i16v, cap, i16v, bits);
+    rocke_ll_emitf(L, "  %s = bitcast %s %s to %s", big, i16v, sat, bf16v);
     rocke_ll_emitf(L, "  %s = fpext %s %s to %s", big_f32, bf16v, big, f32v);
     rocke_ll_emitf(L, "  %s = fsub %s %s, %s", diff, f32v, src, big_f32);
     rocke_ll_emitf(L, "  %s = fptrunc %s %s to %s", small, f32v, diff, bf16v);
@@ -178,9 +266,9 @@ static void _split_f32_to_bf16(rocke_lower_t* L,
  * Python _expand_emulated_mma.
  *
  * BF16x3: reinterpret both TF32 operands as fp32, split them, then issue three
- * BF16 MMAs threading a single fp32 accumulator. The small*small term is dropped
- * -- its magnitude is the same order as the split's own representation error, so
- * computing it buys nothing.
+ * BF16 MMAs threading a single fp32 accumulator. The small*small term is dropped:
+ * it is below 2^-16 of the product, the same order as the split's own
+ * representation error, so a fourth MMA would buy back only part of the error.
  *
  * The term ORDER is load-bearing. fp32 accumulation is not associative, so
  * issuing these three in any other order produces different result bits and

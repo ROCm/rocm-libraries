@@ -1552,6 +1552,12 @@ class _DebugInfo:
 
 # ----------------------------- lowerer -----------------------------------
 
+# bf16 as the i16 lanes the TF32 split saturates on (``_split_f32_to_bf16``): the
+# largest finite bf16 has magnitude pattern 0x7f7f, and the sign bit is LLVM's
+# signed i16 literal for 0x8000.
+_BF16_MAX_FINITE = 0x7F7F
+_BF16_SIGN_BIT = -0x8000
+
 
 class _Lowerer:
     def __init__(
@@ -3496,22 +3502,65 @@ class _Lowerer:
         """Dekker-style split of an fp32 fragment into two bf16 fragments.
 
         ``src`` names the fp32 vector of ``n`` elements. ``big`` is it rounded to
-        bf16; ``small`` is the part that rounding threw away, itself rounded to
-        bf16. Together they carry ~16 mantissa bits of the original 24.
+        bf16 (and saturated, below); ``small`` is the part that rounding threw
+        away, itself rounded to bf16. Together they carry ~16 mantissa bits of the
+        original 24.
 
-        Both conversions are ``fptrunc ... to bfloat``, which is
+        The narrowings are ``fptrunc ... to bfloat``, which is
         round-to-nearest-even -- LLVM has no other fp32->bf16 rounding -- and the
         AMDGPU backend selects the packed ``v_cvt_pk_bf16_f32`` for the vector
         form on gfx950. That is CK's shipping packed path; CK's *scalar* fallback
         truncates instead, and is deliberately not the parity target here.
+
+        **Saturation.** Rounding to bf16 overflows to infinity for every payload
+        of magnitude 0x7f7f8000 or more: the top 2^-9 of the finite fp32 range,
+        which holds TF32's largest finite values. Left alone, ``big`` becomes
+        +-inf and ``small`` the opposite infinity, and the ``inf * 0`` that
+        results in the cross terms turns a finite product into NaN. ``big`` is
+        therefore capped at the largest finite bf16, 0x7f7f, keeping the sign.
+        ``small`` is still taken from the original payload, so it holds what the
+        cap threw away -- finite, and within bf16's own precision of it -- and
+        the three terms sum to the same product as anywhere else. Payloads below
+        the threshold are untouched, bit for bit.
+
+        A non-finite payload goes through the same cap, which makes ``big``
+        finite for it too. ``small`` is computed from the payload itself, so it
+        stays +-inf (or NaN), and ``small * big`` -- the first term issued -- is
+        then non-finite whatever the other operand holds. That is the contract:
+        an infinity or NaN in an operand makes every output element it feeds
+        non-finite. ``Inf * 0`` is NaN as IEEE says, and ``Inf`` against an
+        ordinary finite partner stays ``Inf``; a partner whose own residual is
+        large enough to overflow against the cap can turn it into NaN.
         """
-        f32v, bf16v = f"<{n} x float>", f"<{n} x bfloat>"
+        f32v, bf16v, i16v = f"<{n} x float>", f"<{n} x bfloat>", f"<{n} x i16>"
+
+        def lanes(value: int) -> str:
+            # An explicit list rather than `splat (...)`, which older LLVM
+            # flavors do not parse.
+            return "<" + ", ".join(f"i16 {value}" for _ in range(n)) + ">"
+
+        big_rne = self._fresh(f"{hint}_big_rne")
+        bits = self._fresh(f"{hint}_big_bits")
+        sign = self._fresh(f"{hint}_big_sign")
+        cap = self._fresh(f"{hint}_big_cap")
+        over = self._fresh(f"{hint}_big_over")
+        sat = self._fresh(f"{hint}_big_sat")
         big = Value(self._fresh(f"{hint}_big"), VectorType(BF16, n))
         big_f32 = self._fresh(f"{hint}_big_f32")
         diff = self._fresh(f"{hint}_diff")
         small = Value(self._fresh(f"{hint}_small"), VectorType(BF16, n))
         blk = self._current()
-        blk.emit(f"  {big.name} = fptrunc {f32v} {src} to {bf16v}")
+        blk.emit(f"  {big_rne} = fptrunc {f32v} {src} to {bf16v}")
+        # The bf16 bit patterns are ordered like their magnitudes, so "past the
+        # largest finite value" is an unsigned compare against that pattern with
+        # the value's own sign bit attached: it catches +-inf and every NaN
+        # (all 0x7f80 and up in magnitude) and nothing finite.
+        blk.emit(f"  {bits} = bitcast {bf16v} {big_rne} to {i16v}")
+        blk.emit(f"  {sign} = and {i16v} {bits}, {lanes(_BF16_SIGN_BIT)}")
+        blk.emit(f"  {cap} = or {i16v} {sign}, {lanes(_BF16_MAX_FINITE)}")
+        blk.emit(f"  {over} = icmp ugt {i16v} {bits}, {cap}")
+        blk.emit(f"  {sat} = select <{n} x i1> {over}, {i16v} {cap}, {i16v} {bits}")
+        blk.emit(f"  {big.name} = bitcast {i16v} {sat} to {bf16v}")
         blk.emit(f"  {big_f32} = fpext {bf16v} {big.name} to {f32v}")
         blk.emit(f"  {diff} = fsub {f32v} {src}, {big_f32}")
         blk.emit(f"  {small.name} = fptrunc {f32v} {diff} to {bf16v}")
@@ -3522,8 +3571,9 @@ class _Lowerer:
 
         BF16x3: reinterpret both TF32 operands as fp32, split them, then issue
         three BF16 MMAs threading a single fp32 accumulator. The ``small*small``
-        term is dropped -- its magnitude is the same order as the split's own
-        representation error, so computing it buys nothing.
+        term is dropped: it is below 2^-16 of the product, the same order as the
+        split's own representation error, so a fourth MMA would buy back only
+        part of the error.
 
         The term **order** is load-bearing. fp32 accumulation is not associative,
         so issuing these three in any other order produces different result bits

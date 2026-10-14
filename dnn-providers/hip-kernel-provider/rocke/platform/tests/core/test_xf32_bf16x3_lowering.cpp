@@ -122,9 +122,53 @@ static int count(const char* haystack, const char* needle)
     return n;
 }
 
+/* True when some MMA call line mentions needle. */
+static int mma_call_mentions(const char* ll, const char* needle)
+{
+    for(const char* p = ll; *p;)
+    {
+        const char* eol = strchr(p, '\n');
+        const char* end = eol ? eol : p + strlen(p);
+        const char* call_hit = strstr(p, " = call ");
+        const char* mma_hit = strstr(p, "@llvm.amdgcn.mfma.");
+        if(call_hit && call_hit < end && mma_hit && mma_hit < end)
+        {
+            const char* hit = strstr(p, needle);
+            if(hit && hit < end)
+            {
+                return 1;
+            }
+        }
+        p = eol ? eol + 1 : end;
+    }
+    return 0;
+}
+
+/* `<8 x i16>` constant with every lane `value`, as the lowering spells it. */
+static const char* lanes8(int value)
+{
+    static char buf[4][128];
+    static int next = 0;
+    char* out = buf[next++ % 4];
+    char lane[16];
+    snprintf(lane, sizeof(lane), "i16 %d", value);
+    out[0] = '<';
+    out[1] = '\0';
+    for(int i = 0; i < 8; ++i)
+    {
+        if(i)
+        {
+            strcat(out, ", ");
+        }
+        strcat(out, lane);
+    }
+    strcat(out, ">");
+    return out;
+}
+
 /* Each operand is reinterpreted as fp32 -- a bitcast, never a rounding -- and then
- * split into big / small by four lines: narrow, widen, subtract, narrow the
- * remainder. */
+ * split into big / small: narrow, cap at the largest finite bf16, widen, subtract
+ * from the PAYLOAD, narrow the remainder. */
 static int test_operands_are_split(void)
 {
     int failed = 0;
@@ -153,19 +197,79 @@ static int test_operands_are_split(void)
         CHECK(strstr(ll, "fptrunc <8 x float> %xf32_a_f32.") != NULL,
               "operand a is not narrowed to bf16");
         CHECK(strstr(ll, "fsub <8 x float> %xf32_a_f32.") != NULL,
-              "operand a's rounding error is not taken");
+              "operand a's rounding error is not taken from its payload");
         /* b: the same, from the other operand. */
         CHECK(strstr(ll, "fptrunc <8 x float> %xf32_b_f32.") != NULL,
               "operand b is not narrowed to bf16");
         CHECK(strstr(ll, "fsub <8 x float> %xf32_b_f32.") != NULL,
-              "operand b's rounding error is not taken");
-        /* Four narrowings and two widenings in total -- no more, no fewer. */
-        snprintf(line, sizeof(line), " to %s", cases[i].bf16v);
+              "operand b's rounding error is not taken from its payload");
+        /* Four fp32->bf16 narrowings (big and small, per operand) and two widenings
+         * in total -- no more, no fewer. The cap hands big back with a bitcast, which
+         * is not a rounding and does not count. */
+        snprintf(line, sizeof(line), "fptrunc %s", cases[i].f32v);
         CHECK(count(ll, line) == 4, "expected exactly four fp32->bf16 narrowings");
         snprintf(line, sizeof(line), "fpext %s", cases[i].bf16v);
         CHECK(count(ll, line) == 2, "expected exactly two bf16->fp32 widenings");
         /* RNE, not truncation: fptrunc is LLVM's only fp32->bf16 rounding. */
         CHECK(count(ll, "fptrunc") == 4, "the split must use fptrunc (RNE)");
+        free(ll);
+    }
+    return failed;
+}
+
+/* The cap on big. bf16 round-to-nearest-even overflows to infinity for every fp32
+ * payload of magnitude 0x7f7f8000 or more, which turns a finite product into NaN
+ * through the cross terms' inf*0. big is therefore held at the largest finite
+ * bf16 (0x7f7f, with the value's own sign) while small is still taken from the
+ * payload. The numbers are checked on the host model and on a device; this pins
+ * that the IR is built the way those assume. */
+static int test_big_is_capped_at_the_largest_finite_bf16(void)
+{
+    int failed = 0;
+    const char* const irs[2] = {k_ir_16x16x32, k_ir_32x32x16};
+    for(int i = 0; i < 2; ++i)
+    {
+        char* ll = lower(irs[i]);
+        CHECK(ll != NULL, "lowering produced no text");
+        if(!ll)
+        {
+            continue;
+        }
+        char want[256];
+        /* The sign bit (0x8000 as the signed i16 literal) and 0x7f7f, per operand. */
+        snprintf(want, sizeof(want), "and <8 x i16> %%xf32_a_big_bits.");
+        CHECK(strstr(ll, want) != NULL, "operand a's sign is not extracted");
+        snprintf(want, sizeof(want), ", %s\n", lanes8(-0x8000));
+        CHECK(count(ll, want) == 2, "expected the sign mask once per operand");
+        snprintf(want, sizeof(want), ", %s\n", lanes8(0x7F7F));
+        CHECK(count(ll, want) == 2, "expected the largest-finite-bf16 cap once per operand");
+        /* Unsigned: a negative value's pattern has the sign bit set and would
+         * otherwise compare below every positive one. */
+        CHECK(strstr(ll, "= icmp ugt <8 x i16> %xf32_a_big_bits.") != NULL,
+              "operand a's overflow test is not an unsigned compare");
+        CHECK(strstr(ll, "= icmp ugt <8 x i16> %xf32_b_big_bits.") != NULL,
+              "operand b's overflow test is not an unsigned compare");
+        CHECK(count(ll, "= icmp ") == 2, "expected one overflow test per operand");
+        CHECK(count(ll, "= select <8 x i1>") == 2, "expected one cap select per operand");
+        /* Only what is past the cap is replaced: the select keeps the capped value
+         * when the compare fires and the rounded pattern otherwise. */
+        CHECK(strstr(ll, "= select <8 x i1> %xf32_a_big_over.") != NULL,
+              "operand a's select is not driven by its overflow test");
+        /* The widening reads the capped value, not the raw rounding, and the
+         * remainder is taken against the payload. */
+        CHECK(strstr(ll, "= fpext <8 x bfloat> %xf32_a_big.") != NULL,
+              "operand a widens something other than its capped big");
+        CHECK(strstr(ll, "= fpext <8 x bfloat> %xf32_a_big_rne.") == NULL,
+              "operand a widens the uncapped rounding");
+        CHECK(strstr(ll, "fsub <8 x float> %xf32_a_f32.") != NULL,
+              "operand a's remainder is not taken against its payload");
+        /* The MMAs consume the capped value. */
+        CHECK(!mma_call_mentions(ll, "%xf32_a_big_rne."),
+              "an MMA consumes the uncapped rounding of a");
+        CHECK(!mma_call_mentions(ll, "%xf32_b_big_rne."),
+              "an MMA consumes the uncapped rounding of b");
+        CHECK(mma_call_mentions(ll, "%xf32_a_big."), "no MMA consumes the capped big of a");
+        CHECK(mma_call_mentions(ll, "%xf32_b_big."), "no MMA consumes the capped big of b");
         free(ll);
     }
     return failed;
@@ -414,6 +518,7 @@ int main(void)
 {
     int failed = 0;
     failed |= test_operands_are_split();
+    failed |= test_big_is_capped_at_the_largest_finite_bf16();
     failed |= test_three_terms_in_order();
     failed |= test_no_emulated_atom_survives();
     failed |= test_operands_must_be_tf32_fragments();
