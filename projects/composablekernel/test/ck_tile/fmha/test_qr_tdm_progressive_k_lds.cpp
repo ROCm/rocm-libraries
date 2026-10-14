@@ -140,7 +140,7 @@ using SingleBufferSinkM64Problem =
     TestFmhaProblem<64, false, false, ck_tile::half_t, TestCausalMask, TestFmhaSinkTraits>;
 using DoubleBufferSinkM64Problem =
     TestFmhaProblem<64, true, false, ck_tile::half_t, TestCausalMask, TestFmhaSinkTraits>;
-// The shipped d256 and d512 configurations: single K/V buffers, progressive
+// The shipped d256 and d512 configurations: single-V/double-K buffers, progressive
 // reload, and the plain single-buffer counterpart to cross-check them against.
 using SingleBufferD256Problem            = TestFmhaProblemForShape<TestFmhaShapeD256>;
 using SingleBufferProgressiveD256Problem = TestFmhaProblemForShape<TestFmhaShapeD256, false, true>;

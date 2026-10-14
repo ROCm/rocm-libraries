@@ -397,6 +397,25 @@ struct BlockFmhaPipelineQRKSVSTdm
         }
     }
 
+    // Progressive K reload: pull the next four K accesses back into k_tile once
+    // the WMMA sweep has consumed the fragments they overwrite. Both the single
+    // and the double K/V LDS buffer mainloops run this from their gemm0
+    // after-warp callback, so the reload shape, barrier mask and traversal stay
+    // defined in one place.
+    template <typename Window, typename Tile, index_t NIter>
+    CK_TILE_DEVICE static void
+    ReloadProgressiveKFragment(Window& k_lds_read_window, Tile& k_tile, number<NIter>)
+    {
+        // Allow VALU/SALU/VMEM/DS-write/TRANS/LDSDMA to cross while
+        // keeping MFMA/WMMA and DS-read ordered around the reload.
+        constexpr unsigned kProgressiveDsLoadSchedMask =
+            0x002 | 0x004 | 0x010 | 0x020 | 0x040 | 0x200 | 0x400 | 0x800;
+        __builtin_amdgcn_sched_barrier(kProgressiveDsLoadSchedMask);
+        constexpr index_t begin = 2 * (NIter - 1);
+        k_lds_read_window.template load_access_range<begin, begin + 4>(k_tile);
+        __builtin_amdgcn_sched_barrier(kProgressiveDsLoadSchedMask);
+    }
+
     CK_TILE_HOST_DEVICE static constexpr ck_tile::index_t GetSmemSize()
     {
         using Layout = typename Policy::template LdsArenaLayout<Problem>;
@@ -502,7 +521,7 @@ struct BlockFmhaPipelineQRKSVSTdm
         return p_tile;
     }
 
-    // Single K/V LDS buffer path.
+    // Single V, double K LDS buffer path.
     template <typename QDramBlockWindowTmp,
               typename KDramBlockWindowTmp,
               typename VDramBlockWindowTmp,
@@ -510,11 +529,12 @@ struct BlockFmhaPipelineQRKSVSTdm
               typename LSEaccDramBlockWindowTmp,
               typename PositionEncoding>
     CK_TILE_HOST_DEVICE auto
-    run_single_kv_lds_buffer(const QDramBlockWindowTmp& q_dram_block_window_tmp,       // M0*K0 tile
-                             const KDramBlockWindowTmp& k_dram_block_window_tmp,       // N0*K0 tile
-                             const VDramBlockWindowTmp& v_dram_block_window_tmp,       // N1*K1 tile
-                             const BiasDramBlockWindowTmp& bias_dram_block_window_tmp, // M0*N0 tile
-                             LSEaccDramBlockWindowTmp& lse_acc_dram_window_tmp,        // M0*1 tile
+    run_single_v_double_k_lds_buffer(
+        const QDramBlockWindowTmp& q_dram_block_window_tmp,       // M0*K0 tile
+        const KDramBlockWindowTmp& k_dram_block_window_tmp,       // N0*K0 tile
+        const VDramBlockWindowTmp& v_dram_block_window_tmp,       // N1*K1 tile
+        const BiasDramBlockWindowTmp& bias_dram_block_window_tmp, // M0*N0 tile
+        LSEaccDramBlockWindowTmp& lse_acc_dram_window_tmp,        // M0*1 tile
                              FmhaMask mask,
                              PositionEncoding position_encoding,
                              float scale_s,
@@ -935,15 +955,7 @@ struct BlockFmhaPipelineQRKSVSTdm
                             if constexpr(mIter == Gemm0::MIterPerWarp - 1 && kIter == 0 &&
                                          decltype(nIter)::value % 2 == 1)
                             {
-                                // Allow VALU/SALU/VMEM/DS-write/TRANS/LDSDMA to cross while
-                                // keeping MFMA/WMMA and DS-read ordered around the reload.
-                                constexpr unsigned kProgressiveDsLoadSchedMask =
-                                    0x002 | 0x004 | 0x010 | 0x020 | 0x040 | 0x200 | 0x400 | 0x800;
-                                __builtin_amdgcn_sched_barrier(kProgressiveDsLoadSchedMask);
-                                constexpr index_t begin = 2 * (decltype(nIter)::value - 1);
-                                k_lds_read_window.template load_access_range<begin, begin + 4>(
-                                    k_tile);
-                                __builtin_amdgcn_sched_barrier(kProgressiveDsLoadSchedMask);
+                                ReloadProgressiveKFragment(k_lds_read_window, k_tile, nIter);
                             }
                         });
                 });
@@ -1373,7 +1385,7 @@ struct BlockFmhaPipelineQRKSVSTdm
             "wrong!");
 
         // Hybrid loaders: Q/K via TDM, V via async_load + ds_load_tr (same
-        // as the single K/V LDS buffer overload above; see notes there).
+        // as the single-V/double-K LDS buffer overload above; see notes there).
         static_assert(kM0 == QDramBlockWindowTmp{}.get_window_lengths()[I0] &&
                           kSubQKHeaddim == QDramBlockWindowTmp{}.get_window_lengths()[I1] &&
                           kN0 == KDramBlockWindowTmp{}.get_window_lengths()[I0] &&
@@ -1824,16 +1836,7 @@ struct BlockFmhaPipelineQRKSVSTdm
                                 if constexpr(mIter == Gemm0::MIterPerWarp - 1 && kIter == 0 &&
                                              decltype(nIter)::value % 2 == 1)
                                 {
-                                    // Allow VALU/SALU/VMEM/DS-write/TRANS/LDSDMA to cross while
-                                    // keeping MFMA/WMMA and DS-read ordered around the reload.
-                                    constexpr unsigned kProgressiveDsLoadSchedMask =
-                                        0x002 | 0x004 | 0x010 | 0x020 | 0x040 | 0x200 | 0x400 |
-                                        0x800;
-                                    __builtin_amdgcn_sched_barrier(kProgressiveDsLoadSchedMask);
-                                    constexpr index_t begin = 2 * (decltype(nIter)::value - 1);
-                                    k_lds_read_window.template load_access_range<begin, begin + 4>(
-                                        k_tile);
-                                    __builtin_amdgcn_sched_barrier(kProgressiveDsLoadSchedMask);
+                                    ReloadProgressiveKFragment(k_lds_read_window, k_tile, nIter);
                                 }
                             });
                     }
@@ -2360,7 +2363,7 @@ struct BlockFmhaPipelineQRKSVSTdm
                                             1,
                                             1.0f);
         else
-            return run_single_kv_lds_buffer(q_dram_block_window_tmp,
+            return run_single_v_double_k_lds_buffer(q_dram_block_window_tmp,
                                             k_dram_block_window_tmp,
                                             v_dram_block_window_tmp,
                                             bias_dram_block_window_tmp,
@@ -2415,7 +2418,7 @@ struct BlockFmhaPipelineQRKSVSTdm
                                             block_scale_size_kv,
                                             v_descale);
         else
-            return run_single_kv_lds_buffer(q_dram_block_window_tmp,
+            return run_single_v_double_k_lds_buffer(q_dram_block_window_tmp,
                                             k_dram_block_window_tmp,
                                             v_dram_block_window_tmp,
                                             bias_dram_block_window_tmp,
@@ -2465,7 +2468,7 @@ struct BlockFmhaPipelineQRKSVSTdm
                                             1,
                                             1.0f);
         else
-            return run_single_kv_lds_buffer(q_dram_block_window_tmp,
+            return run_single_v_double_k_lds_buffer(q_dram_block_window_tmp,
                                             k_dram_block_window_tmp,
                                             v_dram_block_window_tmp,
                                             bias_dram_block_window_tmp,
@@ -2520,7 +2523,7 @@ struct BlockFmhaPipelineQRKSVSTdm
                                             block_scale_size_kv,
                                             v_descale);
         else
-            return run_single_kv_lds_buffer(q_dram_block_window_tmp,
+            return run_single_v_double_k_lds_buffer(q_dram_block_window_tmp,
                                             k_dram_block_window_tmp,
                                             v_dram_block_window_tmp,
                                             bias_dram_block_window_tmp,

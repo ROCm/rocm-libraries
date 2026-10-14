@@ -891,14 +891,14 @@ struct BlockFmhaPipelineQRKSVSTdmDefaultPolicy
 namespace detail {
 
 // One 256-byte-aligned arena backs every qr_tdm LDS region. Q intentionally aliases K0 at offset
-// zero and, on the single K/V LDS buffer path, overlaps the later S/V regions: the pipeline loads
+// zero and, on the single-V/double-K LDS buffer path, overlaps the later S/V regions: the pipeline loads
 // Q into registers and
 // completes the tensor-count barrier before K/V overwrite that storage. Both paths stage a whole
 // (kN0 x kSubQKHeaddim) K tile per buffer and reserve two K buffers: the double path ping-pongs K
 // and V, the single path ping-pongs only K (V stays single-buffered, S lives past K1). For the
 // measured d=128 K+V configuration the layouts are:
 //   double K/V LDS buffer: Q/K0=0, K1=17408, V0=34816, V1=53248, end=71680
-//   single K/V LDS buffer: Q/K0=0, K1=17408, S=34816, V0=34832, end=53248
+//   single-V/double-K LDS buffer: Q/K0=0, K1=17408, S=34816, V0=34832, end=53248
 // Region alignment follows one gfx1250 LDS bank row.
 template <typename Problem, typename QPadding, typename KPadding, typename VPadding>
 struct QrTdmLdsArenaLayout
@@ -1121,17 +1121,18 @@ CK_TILE_HOST_DEVICE constexpr bool validate_qr_tdm_reader_segments()
     constexpr auto d   = make_qr_tdm_reader_distribution<TensorTag, Problem>();
     using Distribution = remove_cvref_t<decltype(d)>;
 
-    constexpr bool UseDoubleKVLdsBuffer = Problem::kUseDoubleKVLdsBuffer;
-    constexpr index_t Rows              = TensorTag::Id == 0 ? Shape::kM0 : Shape::kN0;
-    constexpr index_t Cols              = TensorTag::Id == 0 ? Shape::kSubQKHeaddim
-                                          : TensorTag::Id == 1
-                                              ? (UseDoubleKVLdsBuffer ? Shape::kSubQKHeaddim : Shape::kK0)
-                                              : Shape::kN1;
-    constexpr index_t WindowRows        = TensorTag::Id == 2 ? Shape::kK1 : Rows;
-    constexpr index_t WindowCols        = TensorTag::Id == 1 ? Shape::kK0 : Cols;
-    constexpr index_t RowWindows        = TensorTag::Id == 2 ? Rows / WindowRows : 1;
-    constexpr index_t ColWindows =
-        TensorTag::Id == 1 && UseDoubleKVLdsBuffer ? Cols / WindowCols : 1;
+    // Both mainloops stage a whole kSubQKHeaddim-wide K tile -- they build the
+    // descriptor with MakeKLdsBlockDescriptor<Problem, true>() and read it back
+    // as k0_loops successive kK0-wide slices -- so K's column geometry does not
+    // depend on kUseDoubleKVLdsBuffer, which only selects which mainloop runs.
+    constexpr index_t Rows           = TensorTag::Id == 0 ? Shape::kM0 : Shape::kN0;
+    constexpr index_t Cols           = TensorTag::Id == 0   ? Shape::kSubQKHeaddim
+                                       : TensorTag::Id == 1 ? Shape::kSubQKHeaddim
+                                                            : Shape::kN1;
+    constexpr index_t WindowRows     = TensorTag::Id == 2 ? Shape::kK1 : Rows;
+    constexpr index_t WindowCols     = TensorTag::Id == 1 ? Shape::kK0 : Cols;
+    constexpr index_t RowWindows     = TensorTag::Id == 2 ? Rows / WindowRows : 1;
+    constexpr index_t ColWindows     = TensorTag::Id == 1 ? Cols / WindowCols : 1;
     constexpr index_t VectorElements = kQrTdmLdsAccessBytes / sizeof(DataType);
 
     static_assert(numeric_traits<DataType>::PackedSize == 1);

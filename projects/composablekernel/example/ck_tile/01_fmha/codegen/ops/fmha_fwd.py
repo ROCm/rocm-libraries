@@ -1796,7 +1796,7 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                 (256, 256),
                 (512, 512),
             }:
-                # D256 and D512 keep single K/V LDS buffers: their
+                # D256 and D512 keep single-V/double-K LDS buffers: their
                 # double-buffer arenas leave no room for the bank-conflict
                 # padding their row pitch needs, and at D512 one would not fit
                 # in LDS at all. Progressive K reload stays on for both: the
