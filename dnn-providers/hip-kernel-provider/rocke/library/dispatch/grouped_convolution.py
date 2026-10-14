@@ -205,6 +205,26 @@ _GFX942_WARP_N = 2
 _GFX942_WARP_TILE_MN = 16
 _GFX942_WARP_TILE_K = 16
 
+# gfx942 wgrad, wide variant — wave64, MFMA 16x16x16, 16 waves per CTA.
+#
+# Taken when the wgrad GEMM divides the tile exactly in both M and N (see
+# :func:`_gfx942_wgrad_wide_tile`). The 64x64 default is sized to be safe on
+# any shape, which means it pays a partial tile on most of them: wgrad's M
+# (``kpg``) and N (``Y*X*cpg``) are filter-sized, so a tile that does not
+# divide them leaves masked lanes in every CTA for the whole K reduction, and
+# the K reduction (``N*Ho*Wo``) is the long axis. When the division is exact
+# there is no masking to trade away, so the wider tile is free CTA-side and
+# buys the usual things: each operand row loaded into LDS feeds four times the
+# MFMA work, and the per-CTA K-loop address decode is amortised over four
+# times the output. Gated on exactness rather than on size because a 128-wide
+# tile on an indivisible shape is strictly worse than the 64 one.
+_GFX942_WGRAD_WIDE_TILE_MN = 128
+_GFX942_WGRAD_WIDE_TILE_K = 16
+_GFX942_WGRAD_WIDE_WARP_M = 4
+_GFX942_WGRAD_WIDE_WARP_N = 4
+_GFX942_WGRAD_WIDE_WARP_TILE_MN = 16
+_GFX942_WGRAD_WIDE_WARP_TILE_K = 16
+
 # gfx950 wgrad, scalar-B variant — wave64, MFMA 16x16x32, 8 waves per CTA.
 #
 # Taken when the X (B-operand) free-axis load cannot vectorise at all, i.e.
@@ -493,6 +513,7 @@ class ConvGroupedSpec:
     arch: str
     split_k: int = 1  # wgrad only
     lds_k_outer: bool = False  # wgrad only
+    lds_k_pad: Optional[int] = None  # wgrad only; None = spec default
     name: str = "rocke_conv_grouped"
 
     def kernel_name(self) -> str:
@@ -516,6 +537,11 @@ class ConvGroupedSpec:
         #     fetch rather than a transpose-on-store.
         if self.direction in ("wgrad", "dgrad") and self.lds_k_outer:
             parts.append("kouter")
+        #   lds_k_pad: a different LDS row stride, so different operand-fetch
+        #     addressing. Only tagged when set, so specs that take the layout
+        #     default keep their historical name.
+        if self.direction in ("wgrad", "dgrad") and self.lds_k_pad is not None:
+            parts.append(f"kpad{self.lds_k_pad}")
         return kernel_name_join(self.name, *parts)
 
     def to_fwd_spec(self, problem: "ConvProblem") -> "ImplicitGemmConvSpec":
@@ -558,6 +584,7 @@ class ConvGroupedSpec:
             problem=problem,
             name=self.name,
             lds_k_outer=self.lds_k_outer,
+            lds_k_pad=self.lds_k_pad,
             data=ConvDataSpec(
                 dtype_a=self.dtype,
                 dtype_b=self.dtype,
@@ -1086,17 +1113,49 @@ def _make_gfx942_fwd_candidate() -> KernelCandidate:
 # ---------------------------------------------------------------------------
 
 
+def _gfx942_wgrad_wide_tile(req: "ConvGroupedRequest") -> bool:
+    """Whether the wgrad GEMM divides the wide gfx942 tile exactly in M and N.
+
+    The wgrad GEMM is ``M = kpg``, ``N = Z*Y*X*cpg``; both are filter-sized, so
+    a tile that does not divide them is masked lanes in every CTA for the whole
+    K reduction. Exact division is what makes the wider tile free -- see the
+    ``_GFX942_WGRAD_WIDE_*`` constants.
+    """
+    p = _problem(req)
+    z = int(p.Z) if getattr(p, "Z", None) else 1
+    wg_M = int(p.kpg)
+    wg_N = z * int(p.Y) * int(p.X) * int(p.cpg)
+    t = _GFX942_WGRAD_WIDE_TILE_MN
+    return wg_M % t == 0 and wg_N % t == 0
+
+
 def _make_gfx942_wgrad_candidate() -> KernelCandidate:
     """Backward-weight conv for gfx942: 64×64×64, 2×2, 16×16×16 MFMA.
 
     Epilogue derived from vec_size_c (cshuffle when >1, default otherwise).
     Split-K forwarded from request (1=disabled, -1=auto CK formula, >1=fixed).
+
+    Two geometries, selected per request by :func:`_gfx942_wgrad_wide_tile`:
+    the 64×64 default, and the 128×128 / 16-wave variant for the shapes that
+    divide it exactly. One candidate rather than two for the same reason the
+    gfx950 pair is one (see :func:`_make_gfx950_wgrad_candidate`): the choice
+    is a pure function of the request with no overlap.
     """
     name = "implicit_gemm_conv_wgrad_gfx942"
     spec_id = "igemm_conv_wgrad_gfx942_64x64"
     algorithm = "implicit_gemm_wgrad_gfx942"
 
     def _tile(req: ConvGroupedRequest):
+        if _gfx942_wgrad_wide_tile(req):
+            return (
+                _GFX942_WGRAD_WIDE_TILE_MN,
+                _GFX942_WGRAD_WIDE_TILE_MN,
+                _GFX942_WGRAD_WIDE_TILE_K,
+                _GFX942_WGRAD_WIDE_WARP_M,
+                _GFX942_WGRAD_WIDE_WARP_N,
+                _GFX942_WGRAD_WIDE_WARP_TILE_MN,
+                _GFX942_WGRAD_WIDE_WARP_TILE_K,
+            )
         return (
             _GFX942_TILE_M,
             _GFX942_TILE_N,
@@ -1105,6 +1164,15 @@ def _make_gfx942_wgrad_candidate() -> KernelCandidate:
             _GFX942_WARP_N,
             _GFX942_WARP_TILE_MN,
             _GFX942_WARP_TILE_K,
+        )
+
+    def _pad(req: ConvGroupedRequest, tile_k: int) -> Optional[int]:
+        return WgradConvSpec.default_lds_k_pad(
+            arch=req.arch,
+            tile_k=tile_k,
+            dtype_a=req.dtype.lower(),
+            dtype_b=req.dtype.lower(),
+            wave_size=ArchTarget.from_gfx(req.arch).wave_size,
         )
 
     def _build_instance_spec(req: ConvGroupedRequest) -> WgradConvSpec:
@@ -1126,6 +1194,7 @@ def _make_gfx942_wgrad_candidate() -> KernelCandidate:
             pipeline=_PIPELINE,
             epilogue=_ep,
             split_k=_sk,
+            lds_k_pad=_pad(req, tk),
         )
 
     def support(req: OperatorRequest) -> Tuple[bool, str]:
@@ -1166,6 +1235,7 @@ def _make_gfx942_wgrad_candidate() -> KernelCandidate:
             dtype=req.dtype.lower(),
             arch=req.arch,
             split_k=_sk,
+            lds_k_pad=_pad(req, tk),
             name=name,
         )
 
