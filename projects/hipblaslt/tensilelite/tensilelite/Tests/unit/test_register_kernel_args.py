@@ -55,7 +55,7 @@ def _kernel(**over):
         "MXBlockA": False, "MXBlockB": False, "Sparse": False, "UseBeta": True,
         "UseScaleAB": False, "UseScaleCD": False, "UseScaleAlphaVec": 0, "UseE": False,
         "ActivationType": ActivationType("none"), "OutputAmaxD": False, "UseBias": 0,
-        "GroupedGemm": False,
+        "GroupedGemm": False, "ScaleBlockSizesA": [], "ScaleZeroPointA": False,
     }
     problem_type.update(over.pop("ProblemType", {}))
     kernel = {
@@ -207,6 +207,21 @@ def test_scale_addresses():
     for expected in ["AddressScaleA", "AddressScaleB", "AddressScaleC",
                      "AddressScaleD", "AddressScaleAlphaVec"]:
         assert expected in sems
+
+
+@pytest.mark.parametrize("groups", [[32], [32, 64, 128]])
+@pytest.mark.parametrize("zero_point", [False, True])
+def test_block_scale_argument_descriptor(groups, zero_point):
+    args = _register(_writer(), _kernel(ProblemType={
+        "UseScaleAB": "Block", "ScaleBlockSizesA": groups, "ScaleZeroPointA": zero_point}))
+    sems = [arg["semantic"] for arg in args]
+    assert sems[sems.index("AddressScaleA") + 1] == "AddressScaleB"
+    assert ("AddressScaleZeroA" in sems) == zero_point
+    if zero_point:
+        assert sems[sems.index("AddressScaleB") + 1] == "AddressScaleZeroA"
+    assert ("ScaleBlockSizeA" in sems) == (len(groups) > 1)
+    if len(groups) > 1:
+        assert args[-1] == {"type": "uint32", "semantic": "ScaleBlockSizeA"}
 
 
 def test_bias_address_with_type():

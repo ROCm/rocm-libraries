@@ -154,6 +154,10 @@ def _nameSafe(value) -> str:
 
 def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInternalArgs):
 
+  if state.get("W4A16Decode"):
+    from ..KernelWriterW4A16Decode import DecodeConfig
+    return DecodeConfig.fromSolution(state).kernelName()
+
   ck = state.get("CustomKernel")
   # CustomKernel.name on a generated kernel is the assembly identity.
   # Solution names (ignoreInternalArgs=False) still append the runtime
