@@ -179,7 +179,9 @@ void sytrs_initData(const rocblas_handle handle,
 
                 // set diagonal entries
                 {
-                    T const alpha = 0;
+                    using S = decltype(std::real(T{}));
+                    T const alpha = std::numeric_limits<S>::epsilon();
+
                     for(I i = 0; i < n; i++)
                     {
                         A[i + i * int64_t(lda)] = alpha;
