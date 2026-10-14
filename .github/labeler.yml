@@ -44,9 +44,17 @@
 - changed-files:
   - any-glob-to-any-file: 'dnn-providers/integration-tests/**/*'
 
-"project: hipcub":
+"project: hipccl":
+- changed-files:
+  - any-glob-to-any-file: 'projects/hipccl/**/*'
+
+"project: hipcub-deprecated":
 - changed-files:
   - any-glob-to-any-file: 'projects/hipcub/**/*'
+
+"project: hipcub":
+- changed-files:
+  - any-glob-to-any-file: 'projects/hipccl/hipccl3/hipcub/**/*'
 
 "project: hipdnn":
 - changed-files:
@@ -103,9 +111,13 @@
 - changed-files:
   - any-glob-to-any-file: 'projects/rocfft/**/*'
 
-"project: rocprim":
+"project: rocprim-deprecated":
 - changed-files:
   - any-glob-to-any-file: 'projects/rocprim/**/*'
+
+"project: rocprim":
+- changed-files:
+  - any-glob-to-any-file: 'projects/hipccl/hipccl3/rocprim/**/*'
 
 "project: rocrand":
 - changed-files:
@@ -119,9 +131,13 @@
 - changed-files:
   - any-glob-to-any-file: 'projects/rocsparse/**/*'
 
-"project: rocthrust":
+"project: rocthrust-deprecated":
 - changed-files:
   - any-glob-to-any-file: 'projects/rocthrust/**/*'
+
+"project: rocthrust":
+- changed-files:
+  - any-glob-to-any-file: 'projects/hipccl/hipccl3/rocthrust/**/*'
 
 "project: rpp":
 - changed-files:
@@ -185,3 +201,21 @@ github actions:
     - .github/scripts/**/*
     - .github/*.json
     - .github/*.yml
+
+# These labels help distinguish which subteams are responsible for reviews for changes made in CK, in both legacy CK and ck_tile
+
+"ck: convolution":
+- changed-files:
+  - any-glob-to-any-file:
+    - 'projects/composablekernel/**/*{conv[!e],2col,column}*'
+    - 'projects/composablekernel/**/*{conv[!e],2col,column}*/**'
+    - 'projects/composablekernel/**/*conv'
+    - 'projects/composablekernel/**/*conv/**'
+
+# This label covers attention and mixture-of-experts work
+
+"ck: attention-moe":
+- changed-files:
+  - any-glob-to-any-file:
+    - 'projects/composablekernel/**/*{mha,attention,attn,softmax_gemm,moe,topk}*'
+    - 'projects/composablekernel/**/*{mha,attention,attn,softmax_gemm,moe,topk}*/**'

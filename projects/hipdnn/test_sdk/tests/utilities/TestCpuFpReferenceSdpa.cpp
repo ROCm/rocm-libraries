@@ -1,6 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+#include <array>
 #include <cmath>
 #include <functional>
 #include <gtest/gtest.h>
@@ -36,7 +37,7 @@ TEST(TestCpuFpReferenceSdpaFp64, SanityCheck)
     // Q[0,0,0,:] = [1,0], Q[0,0,1,:] = [0,1]
     // K[0,0,0,:] = [1,0], K[0,0,1,:] = [0,1]
     // V[0,0,0,:] = [1,2], V[0,0,1,:] = [3,4]
-    // Default scale = 1/sqrt(2)
+    // No attention scale given: 1.0, no scaling.
 
     Tensor<double> q({1, 1, 2, 2});
     Tensor<double> k({1, 1, 2, 2});
@@ -59,10 +60,10 @@ TEST(TestCpuFpReferenceSdpaFp64, SanityCheck)
 
     CpuFpReferenceSdpa::forward(q, k, v, o);
 
-    // Expected using default scale = 1/sqrt(2):
+    // Expected with the default scale of 1.0:
     // sq=0: S[0]=scale, S[1]=0 → P[0]=1/(1+exp(-scale)), P[1]=exp(-scale)/(1+exp(-scale))
     // sq=1: S[0]=0, S[1]=scale → P[0]=exp(-scale)/(1+exp(-scale)), P[1]=1/(1+exp(-scale))
-    const float scale = 1.0f / std::sqrt(2.0f);
+    const float scale = 1.0f; // no attention scale given
     const float eLow = std::exp(-scale);
     const float sumExp = 1.0f + eLow;
     const float pHigh = 1.0f / sumExp; // weight for the matching kv token
@@ -79,9 +80,9 @@ TEST(TestCpuFpReferenceSdpaFp64, SanityCheck)
     EXPECT_NEAR(o.getHostValue(0, 0, 1, 1), static_cast<double>(pLow * 2.0f + pHigh * 4.0f), tol);
 }
 
-TEST(TestCpuFpReferenceSdpaFp64, DefaultScaleIs1OverSqrtD)
+TEST(TestCpuFpReferenceSdpaFp64, DefaultScaleIsOne)
 {
-    // Verify that the default attention scale equals 1/sqrt(headDim).
+    // An absent attention scale is 1.0 (no scaling), cuDNN's default, at any head size.
     // Q[0,0,0,0]=1, rest zero; K[0,0,0,0]=1 (dot=1), K[0,0,1,:]=0 (dot=0).
     const int64_t headDim = 4;
 
@@ -102,10 +103,9 @@ TEST(TestCpuFpReferenceSdpaFp64, DefaultScaleIs1OverSqrtD)
 
     CpuFpReferenceSdpa::forward(q, k, v, o);
 
-    // Default scale = 1/sqrt(headDim)
     // S[0] = 1 * scale, S[1] = 0
     // P[0] = 1/(1+exp(-scale)), P[1] = exp(-scale)/(1+exp(-scale))
-    const float defaultScale = 1.0f / std::sqrt(static_cast<float>(headDim));
+    const float defaultScale = 1.0f;
     const float e1 = std::exp(-defaultScale);
     const float sumE = 1.0f + e1;
     const float p0 = 1.0f / sumE;
@@ -117,7 +117,7 @@ TEST(TestCpuFpReferenceSdpaFp64, DefaultScaleIs1OverSqrtD)
 
 TEST(TestCpuFpReferenceSdpaFp64, CustomScale)
 {
-    // Verify that an explicit attnScaleValue overrides the default 1/sqrt(D).
+    // Verify that an explicit attnScaleValue overrides the default of 1.0.
     const int64_t headDim = 4;
 
     Tensor<double> q({1, 1, 1, headDim});
@@ -135,7 +135,7 @@ TEST(TestCpuFpReferenceSdpaFp64, CustomScale)
     v.setHostValue(1.0, 0, 0, 0, 0);
     v.setHostValue(2.0, 0, 0, 1, 0);
 
-    CpuFpReferenceSdpa::forward(q, k, v, oDefault); // default scale = 0.5
+    CpuFpReferenceSdpa::forward(q, k, v, oDefault); // default scale = 1.0
     CpuFpReferenceSdpa::forward(q, k, v, oCustom, std::optional<float>{2.0f}); // custom scale = 2.0
 
     // Expected with custom scale = 2.0: S[0]=2, S[1]=0
@@ -292,7 +292,7 @@ TEST(TestCpuFpReferenceSdpaFp64, GqaDifferentKVHeads)
 
     CpuFpReferenceSdpa::forward(q, k, v, o);
 
-    const float scale = 1.0f / std::sqrt(2.0f);
+    const float scale = 1.0f; // no attention scale given
     const float eLow = std::exp(-scale);
     const float sumExp = 1.0f + eLow;
     const float pHigh = 1.0f / sumExp;
@@ -362,7 +362,7 @@ TEST(TestCpuFpReferenceSdpaFp64, CausalMask)
     // [B=1, H=1, Sq=3, Skv=3, D=3, Dv=1]
     // Q[sq,:] = one-hot(sq), K[skv,:] = one-hot(skv) → dot(Q[sq], K[skv]) = δ(sq,skv)
     // V[skv,0] = skv+1: [1, 2, 3]
-    // scale = 1/sqrt(3), eNeg = exp(-scale)
+    // scale = 1.0 (none given), eNeg = exp(-scale)
     //
     // sq=0: only kv=0 unmasked, S[0]=scale → P[0]≈1       → O≈1
     // sq=1: kv=0,1 unmasked, S[0]=0, S[1]=scale           → O = eNeg/(1+eNeg)*1 + 1/(1+eNeg)*2
@@ -394,7 +394,7 @@ TEST(TestCpuFpReferenceSdpaFp64, CausalMask)
     const TensorBase<float>* noMask = nullptr;
     CpuFpReferenceSdpa::forward(q, k, v, o, std::nullopt, noMask, /*causalMask=*/true);
 
-    const float scale = 1.0f / std::sqrt(3.0f);
+    const float scale = 1.0f; // no attention scale given
     const float eNeg = std::exp(-scale);
 
     // sq=0: only kv=0 unmasked → P[0]≈1 → O≈V[0,0]=1
@@ -831,7 +831,7 @@ TEST(TestCpuFpReferenceSdpaFp64, LseOutputMatchesFormula)
     CpuFpReferenceSdpa::forward(q, k, v, o, std::nullopt, noMask, false, &lse);
 
     // Manually compute expected LSE
-    const float scale = 1.0f / std::sqrt(2.0f);
+    const float scale = 1.0f; // no attention scale given
 
     // For sq=0: dot products are [1,0] → scores = [scale, 0]
     const float maxVal0 = scale;
@@ -1147,7 +1147,7 @@ TEST(TestCpuFpReferenceSdpaBwdFp32, BackwardSanity)
     // [B=1, H=1, Sq=2, Skv=2, D=2, Dv=2]
     //
     // Q = [[1,0],[0,1]]  K = [[1,0],[0,1]]  V = [[1,2],[3,4]]  dO = [[1,1],[1,1]]
-    // scale = 1/sqrt(2)
+    // scale = 1.0 (none given)
     //
     // By symmetry of Q and K (identity matrices), the softmax probabilities
     // for sq=0 are [pH, pL] and for sq=1 are [pL, pH], where:
@@ -1193,7 +1193,7 @@ TEST(TestCpuFpReferenceSdpaBwdFp32, BackwardSanity)
     CpuFpReferenceSdpa::backward(q, k, v, o, dO, dQ, dK, dV);
 
     // Compute expected values
-    const float scale = 1.0f / std::sqrt(2.0f);
+    const float scale = 1.0f; // no attention scale given
     const float eS = std::exp(scale);
     const float pH = eS / (eS + 1.0f);
     const float pL = 1.0f / (eS + 1.0f);
@@ -2484,4 +2484,427 @@ TEST(TestCpuFpReferenceSdpaBwdFp32, BackwardWithLSEAndWindowMask)
             }
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// FP8 + descale forward tests
+//
+// The FP8 forward reference decodes fp8 inputs to float and applies per-tensor
+// (or per-KV-head) descales: Q/K descales fold into the pre-softmax scores and
+// V descale scales the output. This mirrors AITER's fp8 forward contract, which
+// only descales Q/K/V (no softmax/output requantization). These tests verify
+// that running the descale-aware fp8 path is equivalent to first dequantizing the
+// inputs into float and running the plain (descale-free) reference.
+// ---------------------------------------------------------------------------
+
+TEST(TestCpuFpReferenceSdpaFp8, PerTensorDescaleMatchesDequantizedInputs)
+{
+    const int64_t batch = 1;
+    const int64_t numHeads = 1;
+    const int64_t seqQ = 2;
+    const int64_t seqKv = 2;
+    const int64_t headDim = 2;
+    const int64_t headDimV = 2;
+
+    Tensor<fp8_e4m3> q({batch, numHeads, seqQ, headDim});
+    Tensor<fp8_e4m3> k({batch, numHeads, seqKv, headDim});
+    Tensor<fp8_e4m3> v({batch, numHeads, seqKv, headDimV});
+    Tensor<bfloat16> o({batch, numHeads, seqQ, headDimV});
+
+    // Values exactly representable in fp8_e4m3 (small multiples of powers of two),
+    // so the only numerical difference between the two paths is descale ordering.
+    const std::array<float, 4> qVals = {0.5f, -0.25f, 1.0f, 0.75f};
+    const std::array<float, 4> kVals = {0.25f, 0.5f, -0.5f, 1.0f};
+    const std::array<float, 4> vVals = {1.0f, -1.0f, 0.5f, 0.25f};
+
+    for(int64_t i = 0; i < seqQ; ++i)
+    {
+        for(int64_t j = 0; j < headDim; ++j)
+        {
+            const auto flat = static_cast<size_t>(i * headDim + j);
+            q.setHostValue(safeTestTypeCast<fp8_e4m3>(qVals[flat]), 0, 0, i, j);
+            k.setHostValue(safeTestTypeCast<fp8_e4m3>(kVals[flat]), 0, 0, i, j);
+            v.setHostValue(safeTestTypeCast<fp8_e4m3>(vVals[flat]), 0, 0, i, j);
+        }
+    }
+
+    const float descaleQValue = 2.0f; // exactly representable
+    const float descaleKValue = 3.0f;
+    const float descaleVValue = 4.0f;
+    Tensor<float> descaleQ({1});
+    Tensor<float> descaleK({1});
+    Tensor<float> descaleV({1});
+    descaleQ.setHostValue(descaleQValue, 0);
+    descaleK.setHostValue(descaleKValue, 0);
+    descaleV.setHostValue(descaleVValue, 0);
+
+    const TensorBase<float>* noMask = nullptr;
+    CpuFpReferenceSdpa::forward<fp8_e4m3, fp8_e4m3, fp8_e4m3, bfloat16, float>(
+        q, k, v, o, std::nullopt, noMask, -1, -1, true, nullptr, &descaleQ, &descaleK, &descaleV);
+
+    // Reference: dequantize inputs to float (decode(fp8) * descale), then run the
+    // plain reference with no descale.
+    Tensor<float> qF({batch, numHeads, seqQ, headDim});
+    Tensor<float> kF({batch, numHeads, seqKv, headDim});
+    Tensor<float> vF({batch, numHeads, seqKv, headDimV});
+    Tensor<bfloat16> oExpected({batch, numHeads, seqQ, headDimV});
+    for(int64_t i = 0; i < seqQ; ++i)
+    {
+        for(int64_t j = 0; j < headDim; ++j)
+        {
+            qF.setHostValue(
+                static_cast<float>(q.getHostValue(0, 0, i, j)) * descaleQValue, 0, 0, i, j);
+            kF.setHostValue(
+                static_cast<float>(k.getHostValue(0, 0, i, j)) * descaleKValue, 0, 0, i, j);
+            vF.setHostValue(
+                static_cast<float>(v.getHostValue(0, 0, i, j)) * descaleVValue, 0, 0, i, j);
+        }
+    }
+    CpuFpReferenceSdpa::forward<float, float, float, bfloat16, float>(qF, kF, vF, oExpected);
+
+    const float tol = 1e-2f; // BF16 output precision
+    for(int64_t i = 0; i < seqQ; ++i)
+    {
+        for(int64_t j = 0; j < headDimV; ++j)
+        {
+            EXPECT_NEAR(static_cast<float>(o.getHostValue(0, 0, i, j)),
+                        static_cast<float>(oExpected.getHostValue(0, 0, i, j)),
+                        tol)
+                << "mismatch at (sq=" << i << ", dv=" << j << ")";
+        }
+    }
+}
+
+TEST(TestCpuFpReferenceSdpaFp8, PerKvHeadDescaleMatchesDequantizedInputs)
+{
+    // Two independent heads (no GQA) with distinct per-head descales exercises the
+    // rank-2 [B, H_kv] descale path and its KV-head indexing.
+    const int64_t batch = 1;
+    const int64_t numHeads = 2;
+    const int64_t seqQ = 2;
+    const int64_t seqKv = 2;
+    const int64_t headDim = 2;
+    const int64_t headDimV = 2;
+
+    Tensor<fp8_e4m3> q({batch, numHeads, seqQ, headDim});
+    Tensor<fp8_e4m3> k({batch, numHeads, seqKv, headDim});
+    Tensor<fp8_e4m3> v({batch, numHeads, seqKv, headDimV});
+    Tensor<bfloat16> o({batch, numHeads, seqQ, headDimV});
+
+    q.fillWithValue(safeTestTypeCast<fp8_e4m3>(0.5f));
+    k.fillWithValue(safeTestTypeCast<fp8_e4m3>(0.25f));
+    // Distinct V per head so a wrong head index would be detected.
+    v.fillWithValue(safeTestTypeCast<fp8_e4m3>(0.5f));
+    v.setHostValue(safeTestTypeCast<fp8_e4m3>(1.0f), 0, 1, 0, 0);
+
+    const std::array<float, 2> descaleQPerHead = {2.0f, 0.5f};
+    const std::array<float, 2> descaleKPerHead = {1.0f, 4.0f};
+    const std::array<float, 2> descaleVPerHead = {2.0f, 0.25f};
+    Tensor<float> descaleQ({batch, numHeads, 1, 1});
+    Tensor<float> descaleK({batch, numHeads, 1, 1});
+    Tensor<float> descaleV({batch, numHeads, 1, 1});
+    for(int64_t h = 0; h < numHeads; ++h)
+    {
+        descaleQ.setHostValue(descaleQPerHead[static_cast<size_t>(h)], 0, h, 0, 0);
+        descaleK.setHostValue(descaleKPerHead[static_cast<size_t>(h)], 0, h, 0, 0);
+        descaleV.setHostValue(descaleVPerHead[static_cast<size_t>(h)], 0, h, 0, 0);
+    }
+
+    const TensorBase<float>* noMask = nullptr;
+    CpuFpReferenceSdpa::forward<fp8_e4m3, fp8_e4m3, fp8_e4m3, bfloat16, float>(
+        q, k, v, o, std::nullopt, noMask, -1, -1, true, nullptr, &descaleQ, &descaleK, &descaleV);
+
+    Tensor<float> qF({batch, numHeads, seqQ, headDim});
+    Tensor<float> kF({batch, numHeads, seqKv, headDim});
+    Tensor<float> vF({batch, numHeads, seqKv, headDimV});
+    Tensor<bfloat16> oExpected({batch, numHeads, seqQ, headDimV});
+    for(int64_t h = 0; h < numHeads; ++h)
+    {
+        for(int64_t s = 0; s < seqQ; ++s)
+        {
+            for(int64_t d = 0; d < headDim; ++d)
+            {
+                qF.setHostValue(static_cast<float>(q.getHostValue(0, h, s, d))
+                                    * descaleQPerHead[static_cast<size_t>(h)],
+                                0,
+                                h,
+                                s,
+                                d);
+                kF.setHostValue(static_cast<float>(k.getHostValue(0, h, s, d))
+                                    * descaleKPerHead[static_cast<size_t>(h)],
+                                0,
+                                h,
+                                s,
+                                d);
+                vF.setHostValue(static_cast<float>(v.getHostValue(0, h, s, d))
+                                    * descaleVPerHead[static_cast<size_t>(h)],
+                                0,
+                                h,
+                                s,
+                                d);
+            }
+        }
+    }
+    CpuFpReferenceSdpa::forward<float, float, float, bfloat16, float>(qF, kF, vF, oExpected);
+
+    const float tol = 1e-2f;
+    for(int64_t h = 0; h < numHeads; ++h)
+    {
+        for(int64_t s = 0; s < seqQ; ++s)
+        {
+            for(int64_t d = 0; d < headDimV; ++d)
+            {
+                EXPECT_NEAR(static_cast<float>(o.getHostValue(0, h, s, d)),
+                            static_cast<float>(oExpected.getHostValue(0, h, s, d)),
+                            tol)
+                    << "mismatch at (h=" << h << ", sq=" << s << ", dv=" << d << ")";
+            }
+        }
+    }
+}
+
+TEST(TestCpuFpReferenceSdpaFp8, GqaPerKvHeadDescaleMatchesDequantizedInputs)
+{
+    // Real GQA (H_q > H_kv): the descale is shaped [B, H_kv] and is indexed by the
+    // KV head each query head maps to (query head h -> h / (H_q / H_kv)). Distinct
+    // per-KV-head descales make an incorrect (query-head) indexing diverge, and the
+    // [B, H_kv] shape would be out of range if indexed by query head — so this test
+    // locks in AITER's [b, h_k] indexing contract, which H_q == H_kv cases cannot.
+    const int64_t batch = 1;
+    const int64_t numHeadsQ = 4;
+    const int64_t numHeadsKv = 2; // GQA ratio 2
+    const int64_t seqQ = 2;
+    const int64_t seqKv = 2;
+    const int64_t headDim = 2;
+    const int64_t headDimV = 2;
+    const int64_t groupsPerKv = numHeadsQ / numHeadsKv;
+
+    Tensor<fp8_e4m3> q({batch, numHeadsQ, seqQ, headDim});
+    Tensor<fp8_e4m3> k({batch, numHeadsKv, seqKv, headDim});
+    Tensor<fp8_e4m3> v({batch, numHeadsKv, seqKv, headDimV});
+    Tensor<bfloat16> o({batch, numHeadsQ, seqQ, headDimV});
+
+    q.fillWithValue(safeTestTypeCast<fp8_e4m3>(0.5f));
+    k.fillWithValue(safeTestTypeCast<fp8_e4m3>(0.5f));
+    v.fillWithValue(safeTestTypeCast<fp8_e4m3>(0.5f));
+    // Vary V across KV heads so a wrong per-head descale is observable in the output.
+    v.setHostValue(safeTestTypeCast<fp8_e4m3>(1.0f), 0, 1, 0, 0);
+
+    const std::array<float, 2> dq = {2.0f, 0.5f}; // indexed by KV head
+    const std::array<float, 2> dk = {1.0f, 4.0f};
+    const std::array<float, 2> dv = {2.0f, 0.25f};
+    Tensor<float> descaleQ({batch, numHeadsKv, 1, 1});
+    Tensor<float> descaleK({batch, numHeadsKv, 1, 1});
+    Tensor<float> descaleV({batch, numHeadsKv, 1, 1});
+    for(int64_t hk = 0; hk < numHeadsKv; ++hk)
+    {
+        descaleQ.setHostValue(dq[static_cast<size_t>(hk)], 0, hk, 0, 0);
+        descaleK.setHostValue(dk[static_cast<size_t>(hk)], 0, hk, 0, 0);
+        descaleV.setHostValue(dv[static_cast<size_t>(hk)], 0, hk, 0, 0);
+    }
+
+    const TensorBase<float>* noMask = nullptr;
+    CpuFpReferenceSdpa::forward<fp8_e4m3, fp8_e4m3, fp8_e4m3, bfloat16, float>(
+        q, k, v, o, std::nullopt, noMask, -1, -1, true, nullptr, &descaleQ, &descaleK, &descaleV);
+
+    // Reference: dequantize with descale indexed by KV head, then run descale-free.
+    Tensor<float> qF({batch, numHeadsQ, seqQ, headDim});
+    Tensor<float> kF({batch, numHeadsKv, seqKv, headDim});
+    Tensor<float> vF({batch, numHeadsKv, seqKv, headDimV});
+    Tensor<bfloat16> oExpected({batch, numHeadsQ, seqQ, headDimV});
+    for(int64_t h = 0; h < numHeadsQ; ++h)
+    {
+        const int64_t kvHead = h / groupsPerKv;
+        for(int64_t s = 0; s < seqQ; ++s)
+        {
+            for(int64_t d = 0; d < headDim; ++d)
+            {
+                qF.setHostValue(static_cast<float>(q.getHostValue(0, h, s, d))
+                                    * dq[static_cast<size_t>(kvHead)],
+                                0,
+                                h,
+                                s,
+                                d);
+            }
+        }
+    }
+    for(int64_t hk = 0; hk < numHeadsKv; ++hk)
+    {
+        for(int64_t s = 0; s < seqKv; ++s)
+        {
+            for(int64_t d = 0; d < headDim; ++d)
+            {
+                kF.setHostValue(static_cast<float>(k.getHostValue(0, hk, s, d))
+                                    * dk[static_cast<size_t>(hk)],
+                                0,
+                                hk,
+                                s,
+                                d);
+                vF.setHostValue(static_cast<float>(v.getHostValue(0, hk, s, d))
+                                    * dv[static_cast<size_t>(hk)],
+                                0,
+                                hk,
+                                s,
+                                d);
+            }
+        }
+    }
+    CpuFpReferenceSdpa::forward<float, float, float, bfloat16, float>(qF, kF, vF, oExpected);
+
+    const float tol = 1e-2f;
+    for(int64_t h = 0; h < numHeadsQ; ++h)
+    {
+        for(int64_t s = 0; s < seqQ; ++s)
+        {
+            for(int64_t d = 0; d < headDimV; ++d)
+            {
+                EXPECT_NEAR(static_cast<float>(o.getHostValue(0, h, s, d)),
+                            static_cast<float>(oExpected.getHostValue(0, h, s, d)),
+                            tol)
+                    << "mismatch at (h=" << h << ", sq=" << s << ", dv=" << d << ")";
+            }
+        }
+    }
+}
+
+TEST(TestCpuFpReferenceSdpaFp8, CausalMaskOverloadForwardsDescale)
+{
+    // The causalMask-bool convenience overload must forward descale tensors to the
+    // primary (bounds) overload. causalMask=false maps to leftBound=-1/rightBound=-1/
+    // TOP_LEFT, so the two entry points must produce bit-identical output.
+    const int64_t batch = 1;
+    const int64_t numHeads = 1;
+    const int64_t seqQ = 2;
+    const int64_t seqKv = 2;
+    const int64_t headDim = 2;
+    const int64_t headDimV = 2;
+
+    Tensor<fp8_e4m3> q({batch, numHeads, seqQ, headDim});
+    Tensor<fp8_e4m3> k({batch, numHeads, seqKv, headDim});
+    Tensor<fp8_e4m3> v({batch, numHeads, seqKv, headDimV});
+    Tensor<bfloat16> oViaBool({batch, numHeads, seqQ, headDimV});
+    Tensor<bfloat16> oViaBounds({batch, numHeads, seqQ, headDimV});
+    q.fillWithValue(safeTestTypeCast<fp8_e4m3>(0.5f));
+    k.fillWithValue(safeTestTypeCast<fp8_e4m3>(0.25f));
+    v.fillWithValue(safeTestTypeCast<fp8_e4m3>(0.75f));
+
+    Tensor<float> descaleQ({1});
+    Tensor<float> descaleK({1});
+    Tensor<float> descaleV({1});
+    descaleQ.fillWithValue(2.0f);
+    descaleK.fillWithValue(3.0f);
+    descaleV.fillWithValue(4.0f);
+
+    const TensorBase<float>* noMask = nullptr;
+    // Bool convenience overload (causalMask=false), with descale forwarded.
+    CpuFpReferenceSdpa::forward<fp8_e4m3, fp8_e4m3, fp8_e4m3, bfloat16, float>(q,
+                                                                               k,
+                                                                               v,
+                                                                               oViaBool,
+                                                                               std::nullopt,
+                                                                               noMask,
+                                                                               /*causalMask=*/false,
+                                                                               /*lse=*/nullptr,
+                                                                               &descaleQ,
+                                                                               &descaleK,
+                                                                               &descaleV);
+    // Equivalent primary (bounds) overload.
+    CpuFpReferenceSdpa::forward<fp8_e4m3, fp8_e4m3, fp8_e4m3, bfloat16, float>(q,
+                                                                               k,
+                                                                               v,
+                                                                               oViaBounds,
+                                                                               std::nullopt,
+                                                                               noMask,
+                                                                               -1,
+                                                                               -1,
+                                                                               true,
+                                                                               nullptr,
+                                                                               &descaleQ,
+                                                                               &descaleK,
+                                                                               &descaleV);
+
+    for(int64_t s = 0; s < seqQ; ++s)
+    {
+        for(int64_t d = 0; d < headDimV; ++d)
+        {
+            EXPECT_EQ(static_cast<float>(oViaBool.getHostValue(0, 0, s, d)),
+                      static_cast<float>(oViaBounds.getHostValue(0, 0, s, d)))
+                << "bool overload did not forward descale identically at (sq=" << s << ", dv=" << d
+                << ")";
+        }
+    }
+}
+
+TEST(TestCpuFpReferenceSdpaFp8, RejectsMismatchedRank4DescaleShape)
+{
+    // A non-scalar descale must be rank-4 [B, H_kv, 1, 1]; a mismatched rank-4 shape (or a
+    // legacy rank-2 [B, H_kv]) must be rejected up front rather than silently reading the
+    // wrong (or out-of-bounds) element in getDescaleFactor.
+    const int64_t batch = 1;
+    const int64_t numHeads = 2;
+    const int64_t seqQ = 2;
+    const int64_t seqKv = 2;
+    const int64_t headDim = 2;
+    const int64_t headDimV = 2;
+    Tensor<fp8_e4m3> q({batch, numHeads, seqQ, headDim});
+    Tensor<fp8_e4m3> k({batch, numHeads, seqKv, headDim});
+    Tensor<fp8_e4m3> v({batch, numHeads, seqKv, headDimV});
+    Tensor<bfloat16> o({batch, numHeads, seqQ, headDimV});
+    q.fillWithValue(safeTestTypeCast<fp8_e4m3>(0.5f));
+    k.fillWithValue(safeTestTypeCast<fp8_e4m3>(0.5f));
+    v.fillWithValue(safeTestTypeCast<fp8_e4m3>(0.5f));
+
+    const TensorBase<float>* noMask = nullptr;
+    auto runWith = [&](const TensorBase<float>* descaleQ) {
+        CpuFpReferenceSdpa::forward<fp8_e4m3, fp8_e4m3, fp8_e4m3, bfloat16, float>(
+            q, k, v, o, std::nullopt, noMask, -1, -1, true, nullptr, descaleQ, nullptr, nullptr);
+    };
+
+    // Rank-4 but shape [2, 3, 1, 1] != [batch=1, numHeadsKv=2, 1, 1].
+    Tensor<float> descaleBadRank4({2, 3, 1, 1});
+    descaleBadRank4.fillWithValue(1.0f);
+    EXPECT_THROW(runWith(&descaleBadRank4), std::invalid_argument);
+
+    // Legacy rank-2 [B, H_kv] is no longer accepted (hipDNN uses equal-rank [B, H_kv, 1, 1]).
+    Tensor<float> descaleRank2({batch, numHeads});
+    descaleRank2.fillWithValue(1.0f);
+    EXPECT_THROW(runWith(&descaleRank2), std::invalid_argument);
+}
+
+TEST(TestCpuFpReferenceSdpaFp8, InvalidDescaleShapeThrows)
+{
+    const int64_t batch = 1;
+    const int64_t numHeads = 1;
+    const int64_t seqQ = 2;
+    const int64_t seqKv = 2;
+    const int64_t headDim = 2;
+    const int64_t headDimV = 2;
+    Tensor<fp8_e4m3> q({batch, numHeads, seqQ, headDim});
+    Tensor<fp8_e4m3> k({batch, numHeads, seqKv, headDim});
+    Tensor<fp8_e4m3> v({batch, numHeads, seqKv, headDimV});
+    Tensor<bfloat16> o({batch, numHeads, seqQ, headDimV});
+    q.fillWithValue(safeTestTypeCast<fp8_e4m3>(0.5f));
+    k.fillWithValue(safeTestTypeCast<fp8_e4m3>(0.5f));
+    v.fillWithValue(safeTestTypeCast<fp8_e4m3>(0.5f));
+
+    // Rank-1 with more than one element is neither per-tensor nor [B, H_kv, 1, 1].
+    Tensor<float> descaleBad({2});
+    descaleBad.fillWithValue(1.0f);
+
+    const TensorBase<float>* noMask = nullptr;
+    EXPECT_THROW(
+        (CpuFpReferenceSdpa::forward<fp8_e4m3, fp8_e4m3, fp8_e4m3, bfloat16, float>(q,
+                                                                                    k,
+                                                                                    v,
+                                                                                    o,
+                                                                                    std::nullopt,
+                                                                                    noMask,
+                                                                                    -1,
+                                                                                    -1,
+                                                                                    true,
+                                                                                    nullptr,
+                                                                                    &descaleBad,
+                                                                                    nullptr,
+                                                                                    nullptr)),
+        std::invalid_argument);
 }

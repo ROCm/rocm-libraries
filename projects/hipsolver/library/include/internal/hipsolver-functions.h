@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc.
  * ************************************************************************ */
 
 /*! \file
@@ -769,6 +769,73 @@ HIPSOLVER_EXPORT hipsolverStatus_t hipsolverZgeqrf(hipsolverHandle_t handle,
                                                    int               lwork,
                                                    int*              devInfo);
 
+// geqrfBatched
+HIPSOLVER_EXPORT hipsolverStatus_t hipsolverSgeqrfBatched_bufferSize(
+    hipsolverHandle_t handle, int m, int n, float* A[], int lda, int* lwork, int batch_count);
+
+HIPSOLVER_EXPORT hipsolverStatus_t hipsolverDgeqrfBatched_bufferSize(
+    hipsolverHandle_t handle, int m, int n, double* A[], int lda, int* lwork, int batch_count);
+
+HIPSOLVER_EXPORT hipsolverStatus_t hipsolverCgeqrfBatched_bufferSize(hipsolverHandle_t handle,
+                                                                     int               m,
+                                                                     int               n,
+                                                                     hipFloatComplex*  A[],
+                                                                     int               lda,
+                                                                     int*              lwork,
+                                                                     int               batch_count);
+
+HIPSOLVER_EXPORT hipsolverStatus_t hipsolverZgeqrfBatched_bufferSize(hipsolverHandle_t handle,
+                                                                     int               m,
+                                                                     int               n,
+                                                                     hipDoubleComplex* A[],
+                                                                     int               lda,
+                                                                     int*              lwork,
+                                                                     int               batch_count);
+
+HIPSOLVER_EXPORT hipsolverStatus_t hipsolverSgeqrfBatched(hipsolverHandle_t handle,
+                                                          int               m,
+                                                          int               n,
+                                                          float*            A[],
+                                                          int               lda,
+                                                          float*            tau[],
+                                                          float*            work,
+                                                          int               lwork,
+                                                          int*              hInfo,
+                                                          int               batch_count);
+
+HIPSOLVER_EXPORT hipsolverStatus_t hipsolverDgeqrfBatched(hipsolverHandle_t handle,
+                                                          int               m,
+                                                          int               n,
+                                                          double*           A[],
+                                                          int               lda,
+                                                          double*           tau[],
+                                                          double*           work,
+                                                          int               lwork,
+                                                          int*              hInfo,
+                                                          int               batch_count);
+
+HIPSOLVER_EXPORT hipsolverStatus_t hipsolverCgeqrfBatched(hipsolverHandle_t handle,
+                                                          int               m,
+                                                          int               n,
+                                                          hipFloatComplex*  A[],
+                                                          int               lda,
+                                                          hipFloatComplex*  tau[],
+                                                          hipFloatComplex*  work,
+                                                          int               lwork,
+                                                          int*              hInfo,
+                                                          int               batch_count);
+
+HIPSOLVER_EXPORT hipsolverStatus_t hipsolverZgeqrfBatched(hipsolverHandle_t handle,
+                                                          int               m,
+                                                          int               n,
+                                                          hipDoubleComplex* A[],
+                                                          int               lda,
+                                                          hipDoubleComplex* tau[],
+                                                          hipDoubleComplex* work,
+                                                          int               lwork,
+                                                          int*              hInfo,
+                                                          int               batch_count);
+
 // gesv
 HIPSOLVER_EXPORT hipsolverStatus_t hipsolverSSgesv_bufferSize(hipsolverHandle_t handle,
                                                               int               n,
@@ -1270,6 +1337,188 @@ HIPSOLVER_EXPORT hipsolverStatus_t hipsolverZgetrf(hipsolverHandle_t handle,
                                                    int*              devIpiv,
                                                    int*              devInfo);
 
+// getrfBatched
+HIPSOLVER_EXPORT hipsolverStatus_t hipsolverSgetrfBatched_bufferSize(hipsolverHandle_t handle,
+                                                                     int               m,
+                                                                     int               n,
+                                                                     float*            A[],
+                                                                     int               lda,
+                                                                     int               strideP,
+                                                                     int*              lwork,
+                                                                     int               batch_count);
+
+HIPSOLVER_EXPORT hipsolverStatus_t hipsolverDgetrfBatched_bufferSize(hipsolverHandle_t handle,
+                                                                     int               m,
+                                                                     int               n,
+                                                                     double*           A[],
+                                                                     int               lda,
+                                                                     int               strideP,
+                                                                     int*              lwork,
+                                                                     int               batch_count);
+
+HIPSOLVER_EXPORT hipsolverStatus_t hipsolverCgetrfBatched_bufferSize(hipsolverHandle_t handle,
+                                                                     int               m,
+                                                                     int               n,
+                                                                     hipFloatComplex*  A[],
+                                                                     int               lda,
+                                                                     int               strideP,
+                                                                     int*              lwork,
+                                                                     int               batch_count);
+
+HIPSOLVER_EXPORT hipsolverStatus_t hipsolverZgetrfBatched_bufferSize(hipsolverHandle_t handle,
+                                                                     int               m,
+                                                                     int               n,
+                                                                     hipDoubleComplex* A[],
+                                                                     int               lda,
+                                                                     int               strideP,
+                                                                     int*              lwork,
+                                                                     int               batch_count);
+
+HIPSOLVER_EXPORT hipsolverStatus_t hipsolverSgetrfBatched(hipsolverHandle_t handle,
+                                                          int               m,
+                                                          int               n,
+                                                          float*            A[],
+                                                          int               lda,
+                                                          float*            work,
+                                                          int               lwork,
+                                                          int*              devIpiv,
+                                                          int               strideP,
+                                                          int*              devInfo,
+                                                          int               batch_count);
+
+HIPSOLVER_EXPORT hipsolverStatus_t hipsolverDgetrfBatched(hipsolverHandle_t handle,
+                                                          int               m,
+                                                          int               n,
+                                                          double*           A[],
+                                                          int               lda,
+                                                          double*           work,
+                                                          int               lwork,
+                                                          int*              devIpiv,
+                                                          int               strideP,
+                                                          int*              devInfo,
+                                                          int               batch_count);
+
+HIPSOLVER_EXPORT hipsolverStatus_t hipsolverCgetrfBatched(hipsolverHandle_t handle,
+                                                          int               m,
+                                                          int               n,
+                                                          hipFloatComplex*  A[],
+                                                          int               lda,
+                                                          hipFloatComplex*  work,
+                                                          int               lwork,
+                                                          int*              devIpiv,
+                                                          int               strideP,
+                                                          int*              devInfo,
+                                                          int               batch_count);
+
+HIPSOLVER_EXPORT hipsolverStatus_t hipsolverZgetrfBatched(hipsolverHandle_t handle,
+                                                          int               m,
+                                                          int               n,
+                                                          hipDoubleComplex* A[],
+                                                          int               lda,
+                                                          hipDoubleComplex* work,
+                                                          int               lwork,
+                                                          int*              devIpiv,
+                                                          int               strideP,
+                                                          int*              devInfo,
+                                                          int               batch_count);
+
+// getriBatched
+HIPSOLVER_EXPORT hipsolverStatus_t hipsolverSgetriBatched_bufferSize(hipsolverHandle_t handle,
+                                                                     int               n,
+                                                                     float*            A[],
+                                                                     int               lda,
+                                                                     int*              devIpiv,
+                                                                     int               strideP,
+                                                                     float*            C[],
+                                                                     int               ldc,
+                                                                     int*              lwork,
+                                                                     int               batch_count);
+
+HIPSOLVER_EXPORT hipsolverStatus_t hipsolverDgetriBatched_bufferSize(hipsolverHandle_t handle,
+                                                                     int               n,
+                                                                     double*           A[],
+                                                                     int               lda,
+                                                                     int*              devIpiv,
+                                                                     int               strideP,
+                                                                     double*           C[],
+                                                                     int               ldc,
+                                                                     int*              lwork,
+                                                                     int               batch_count);
+
+HIPSOLVER_EXPORT hipsolverStatus_t hipsolverCgetriBatched_bufferSize(hipsolverHandle_t handle,
+                                                                     int               n,
+                                                                     hipFloatComplex*  A[],
+                                                                     int               lda,
+                                                                     int*              devIpiv,
+                                                                     int               strideP,
+                                                                     hipFloatComplex*  C[],
+                                                                     int               ldc,
+                                                                     int*              lwork,
+                                                                     int               batch_count);
+
+HIPSOLVER_EXPORT hipsolverStatus_t hipsolverZgetriBatched_bufferSize(hipsolverHandle_t handle,
+                                                                     int               n,
+                                                                     hipDoubleComplex* A[],
+                                                                     int               lda,
+                                                                     int*              devIpiv,
+                                                                     int               strideP,
+                                                                     hipDoubleComplex* C[],
+                                                                     int               ldc,
+                                                                     int*              lwork,
+                                                                     int               batch_count);
+
+HIPSOLVER_EXPORT hipsolverStatus_t hipsolverSgetriBatched(hipsolverHandle_t handle,
+                                                          int               n,
+                                                          float*            A[],
+                                                          int               lda,
+                                                          int*              devIpiv,
+                                                          int               strideP,
+                                                          float*            C[],
+                                                          int               ldc,
+                                                          float*            work,
+                                                          int               lwork,
+                                                          int*              devInfo,
+                                                          int               batch_count);
+
+HIPSOLVER_EXPORT hipsolverStatus_t hipsolverDgetriBatched(hipsolverHandle_t handle,
+                                                          int               n,
+                                                          double*           A[],
+                                                          int               lda,
+                                                          int*              devIpiv,
+                                                          int               strideP,
+                                                          double*           C[],
+                                                          int               ldc,
+                                                          double*           work,
+                                                          int               lwork,
+                                                          int*              devInfo,
+                                                          int               batch_count);
+
+HIPSOLVER_EXPORT hipsolverStatus_t hipsolverCgetriBatched(hipsolverHandle_t handle,
+                                                          int               n,
+                                                          hipFloatComplex*  A[],
+                                                          int               lda,
+                                                          int*              devIpiv,
+                                                          int               strideP,
+                                                          hipFloatComplex*  C[],
+                                                          int               ldc,
+                                                          hipFloatComplex*  work,
+                                                          int               lwork,
+                                                          int*              devInfo,
+                                                          int               batch_count);
+
+HIPSOLVER_EXPORT hipsolverStatus_t hipsolverZgetriBatched(hipsolverHandle_t handle,
+                                                          int               n,
+                                                          hipDoubleComplex* A[],
+                                                          int               lda,
+                                                          int*              devIpiv,
+                                                          int               strideP,
+                                                          hipDoubleComplex* C[],
+                                                          int               ldc,
+                                                          hipDoubleComplex* work,
+                                                          int               lwork,
+                                                          int*              devInfo,
+                                                          int               batch_count);
+
 // getrs
 HIPSOLVER_EXPORT hipsolverStatus_t hipsolverSgetrs_bufferSize(hipsolverHandle_t    handle,
                                                               hipsolverOperation_t trans,
@@ -1366,6 +1615,119 @@ HIPSOLVER_EXPORT hipsolverStatus_t hipsolverZgetrs(hipsolverHandle_t    handle,
                                                    hipDoubleComplex*    work,
                                                    int                  lwork,
                                                    int*                 devInfo);
+
+// getrsBatched
+HIPSOLVER_EXPORT hipsolverStatus_t hipsolverSgetrsBatched_bufferSize(hipsolverHandle_t    handle,
+                                                                     hipsolverOperation_t trans,
+                                                                     int                  n,
+                                                                     int                  nrhs,
+                                                                     float*               A[],
+                                                                     int                  lda,
+                                                                     int*                 devIpiv,
+                                                                     int                  strideP,
+                                                                     float*               B[],
+                                                                     int                  ldb,
+                                                                     int*                 lwork,
+                                                                     int batch_count);
+
+HIPSOLVER_EXPORT hipsolverStatus_t hipsolverDgetrsBatched_bufferSize(hipsolverHandle_t    handle,
+                                                                     hipsolverOperation_t trans,
+                                                                     int                  n,
+                                                                     int                  nrhs,
+                                                                     double*              A[],
+                                                                     int                  lda,
+                                                                     int*                 devIpiv,
+                                                                     int                  strideP,
+                                                                     double*              B[],
+                                                                     int                  ldb,
+                                                                     int*                 lwork,
+                                                                     int batch_count);
+
+HIPSOLVER_EXPORT hipsolverStatus_t hipsolverCgetrsBatched_bufferSize(hipsolverHandle_t    handle,
+                                                                     hipsolverOperation_t trans,
+                                                                     int                  n,
+                                                                     int                  nrhs,
+                                                                     hipFloatComplex*     A[],
+                                                                     int                  lda,
+                                                                     int*                 devIpiv,
+                                                                     int                  strideP,
+                                                                     hipFloatComplex*     B[],
+                                                                     int                  ldb,
+                                                                     int*                 lwork,
+                                                                     int batch_count);
+
+HIPSOLVER_EXPORT hipsolverStatus_t hipsolverZgetrsBatched_bufferSize(hipsolverHandle_t    handle,
+                                                                     hipsolverOperation_t trans,
+                                                                     int                  n,
+                                                                     int                  nrhs,
+                                                                     hipDoubleComplex*    A[],
+                                                                     int                  lda,
+                                                                     int*                 devIpiv,
+                                                                     int                  strideP,
+                                                                     hipDoubleComplex*    B[],
+                                                                     int                  ldb,
+                                                                     int*                 lwork,
+                                                                     int batch_count);
+
+HIPSOLVER_EXPORT hipsolverStatus_t hipsolverSgetrsBatched(hipsolverHandle_t    handle,
+                                                          hipsolverOperation_t trans,
+                                                          int                  n,
+                                                          int                  nrhs,
+                                                          float*               A[],
+                                                          int                  lda,
+                                                          int*                 devIpiv,
+                                                          int                  strideP,
+                                                          float*               B[],
+                                                          int                  ldb,
+                                                          float*               work,
+                                                          int                  lwork,
+                                                          int*                 hInfo,
+                                                          int                  batch_count);
+
+HIPSOLVER_EXPORT hipsolverStatus_t hipsolverDgetrsBatched(hipsolverHandle_t    handle,
+                                                          hipsolverOperation_t trans,
+                                                          int                  n,
+                                                          int                  nrhs,
+                                                          double*              A[],
+                                                          int                  lda,
+                                                          int*                 devIpiv,
+                                                          int                  strideP,
+                                                          double*              B[],
+                                                          int                  ldb,
+                                                          double*              work,
+                                                          int                  lwork,
+                                                          int*                 hInfo,
+                                                          int                  batch_count);
+
+HIPSOLVER_EXPORT hipsolverStatus_t hipsolverCgetrsBatched(hipsolverHandle_t    handle,
+                                                          hipsolverOperation_t trans,
+                                                          int                  n,
+                                                          int                  nrhs,
+                                                          hipFloatComplex*     A[],
+                                                          int                  lda,
+                                                          int*                 devIpiv,
+                                                          int                  strideP,
+                                                          hipFloatComplex*     B[],
+                                                          int                  ldb,
+                                                          hipFloatComplex*     work,
+                                                          int                  lwork,
+                                                          int*                 hInfo,
+                                                          int                  batch_count);
+
+HIPSOLVER_EXPORT hipsolverStatus_t hipsolverZgetrsBatched(hipsolverHandle_t    handle,
+                                                          hipsolverOperation_t trans,
+                                                          int                  n,
+                                                          int                  nrhs,
+                                                          hipDoubleComplex*    A[],
+                                                          int                  lda,
+                                                          int*                 devIpiv,
+                                                          int                  strideP,
+                                                          hipDoubleComplex*    B[],
+                                                          int                  ldb,
+                                                          hipDoubleComplex*    work,
+                                                          int                  lwork,
+                                                          int*                 hInfo,
+                                                          int                  batch_count);
 
 // potrf
 HIPSOLVER_EXPORT hipsolverStatus_t hipsolverSpotrf_bufferSize(

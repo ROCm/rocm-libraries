@@ -9,6 +9,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include <hipdnn-gpu-ref/GpuFpReferenceCommon.hpp>
 #include <hipdnn-gpu-ref/GpuFpReferenceSdpa.hpp>
 #include <hipdnn_data_sdk/types/Bfloat16.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
@@ -16,12 +17,14 @@
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
+#include "RaggedGraphTestUtils.hpp"
 #include "SdpaFwdGraphTestUtils.hpp"
 #include "harness/gpu-graph-executor/detail/GpuSdpaFwdPlan.hpp"
 
 using namespace hipdnn_flatbuffers_sdk::data_objects;
 using namespace hipdnn_integration_tests::test_utils;
 using namespace hipdnn_integration_tests::gpu_graph_executor::detail;
+using namespace hipdnn_gpu_ref::common::gpu_fp_reference_tensor;
 
 namespace
 {
@@ -86,6 +89,24 @@ TEST(TestGpuSdpaFwdPlanBuilder, IsApplicable)
     auto tensorMapCopy = graphWrap.getTensorMap();
     tensorMapCopy.erase(K_UID);
     EXPECT_FALSE(floatPlanBuilder.isApplicable(graphWrap.getNode(0), tensorMapCopy));
+}
+
+// Ragged tensors are not yet supported by the GPU SDPA reference.
+// TODO: remove once supported.
+TEST(TestGpuSdpaFwdPlanBuilder, IsNotApplicableForRaggedTensors)
+{
+    const GpuSdpaFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
+        floatPlanBuilder;
+
+    auto graphBuilder = makeGraph();
+    auto denseWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
+    ASSERT_TRUE(floatPlanBuilder.isApplicable(denseWrap.getNode(0), denseWrap.getTensorMap()));
+
+    auto ragged = markFirstTensorRagged(graphBuilder.GetBufferPointer());
+    auto raggedWrap
+        = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(ragged.data(), ragged.size());
+    EXPECT_FALSE(floatPlanBuilder.isApplicable(raggedWrap.getNode(0), raggedWrap.getTensorMap()));
 }
 
 TEST(TestGpuSdpaFwdPlanBuilder, IsNotApplicableForUnsupportedModes)
@@ -196,9 +217,9 @@ TEST(TestGpuSdpaFwdPlanBuilder, ExecuteWritesLseThroughGraph)
     Tensor<float> q(DIMS);
     Tensor<float> k(DIMS);
     Tensor<float> v(DIMS);
-    q.fillWithRandomValues(-1.0f, 1.0f, /*seed=*/11);
-    k.fillWithRandomValues(-1.0f, 1.0f, /*seed=*/22);
-    v.fillWithRandomValues(-1.0f, 1.0f, /*seed=*/33);
+    fillWithRandomValues(q, -1.0f, 1.0f, /*seed=*/11);
+    fillWithRandomValues(k, -1.0f, 1.0f, /*seed=*/22);
+    fillWithRandomValues(v, -1.0f, 1.0f, /*seed=*/33);
 
     Tensor<float> oPlan(DIMS);
     Tensor<float> lsePlan(lseDims);

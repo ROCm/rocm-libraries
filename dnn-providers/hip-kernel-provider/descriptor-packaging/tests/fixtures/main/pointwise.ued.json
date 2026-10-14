@@ -1,7 +1,7 @@
 {
   "version": "0.1",
   "id": "ued-pointwise",
-  "name": "Pointwise engine",
+  "name": "test_fixture:pointwise",
   "heuristic": "uhd-shared",
   "metadata": "kmd-pointwise"
 }

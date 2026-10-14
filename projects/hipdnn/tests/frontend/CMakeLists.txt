@@ -193,7 +193,11 @@ target_link_libraries(
 )
 
 configure_hipdnn_public_frontend_test_target(hipdnn_public_frontend_dynamic_load_tests)
+# A built backend must load successfully; do not skip runtime-resolution failures.
 add_dependencies(hipdnn_public_frontend_dynamic_load_tests hipdnn_backend)
+target_compile_definitions(
+    hipdnn_public_frontend_dynamic_load_tests PRIVATE HIPDNN_TEST_EXPECT_BACKEND_LIBRARY
+)
 
 clang_tidy_check(hipdnn_public_frontend_dynamic_load_tests)
 add_hipdnn_test(hipdnn_public_frontend_dynamic_load_tests ${CMAKE_CURRENT_BINARY_DIR})

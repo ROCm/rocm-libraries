@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include "bindings.hpp"
+#include "dlpack_adapter.hpp"
 
 #include <hipdnn_frontend/Graph.hpp>
 #include <hipdnn_frontend/attributes/BatchnormAttributes.hpp>
@@ -34,6 +35,7 @@
 #include <nanobind/nanobind.h>
 #include <nanobind/stl/array.h>
 #include <nanobind/stl/optional.h>
+#include <nanobind/stl/pair.h>
 #include <nanobind/stl/shared_ptr.h>
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/unordered_map.h>
@@ -64,14 +66,13 @@ hipdnnHandle_t optionalRawHandle(const nb::object& handle)
     return reinterpret_cast<hipdnnHandle_t>(nb::cast<uintptr_t>(handlePtr));
 }
 
-// Shared body for both autotune() bindings. The UID-keyed and tensor-keyed variant
-// packs differ only in their key type, which Graph::autotune() itself overloads on.
-// Pointers cross the boundary as integers, exactly as the execute() binding does.
-template <typename KeyT>
+// Shared body for the autotune() binding. variant_pack keys may be tensor UIDs or
+// tensors, and values take the same kinds as execute(), so the conversion happens
+// here, while the GIL is still held.
 std::vector<AutotuneResult> autotunePy(graph::Graph& g,
                                        const nb::object& handle,
-                                       const std::unordered_map<KeyT, uintptr_t>& variantPack,
-                                       uintptr_t workspace,
+                                       const nb::dict& variantPack,
+                                       const nb::object& workspace,
                                        std::optional<int64_t> workspaceSize,
                                        const AutotuneConfig& config,
                                        const AutotuneStorageConfig& storageConfig)
@@ -80,16 +81,9 @@ std::vector<AutotuneResult> autotunePy(graph::Graph& g,
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
     auto rawHandle = reinterpret_cast<hipdnnHandle_t>(nb::cast<uintptr_t>(handlePtr));
 
-    std::unordered_map<KeyT, void*> cppVariantPack;
-    cppVariantPack.reserve(variantPack.size());
-    for(const auto& [key, value] : variantPack)
-    {
-        // NOLINTNEXTLINE(performance-no-int-to-ptr)
-        cppVariantPack[key] = reinterpret_cast<void*>(value);
-    }
-
-    // NOLINTNEXTLINE(performance-no-int-to-ptr)
-    void* workspacePtr = workspace ? reinterpret_cast<void*>(workspace) : nullptr;
+    auto cppVariantPack = hipdnn_python::toVariantPack(variantPack);
+    void* workspacePtr
+        = workspace.is_none() ? nullptr : hipdnn_python::toDataPointer(workspace, "workspace");
 
     // Benchmarking touches no Python object: config/settings are native types, and
     // AutotuneConfig::rankingFn (the one field that could call back into Python) is
@@ -117,6 +111,53 @@ std::vector<AutotuneResult> autotunePy(graph::Graph& g,
         throw std::runtime_error("Autotune failed: " + err.get_message());
     }
     return results;
+}
+
+// Shared body for the autotune_exhaustive_sweep() binding. Forces exhaustive mode and
+// benchmarking, accepts no sweep/variant parameter, and returns both the per-engine
+// results and the exact-match cache write outcome as a tuple, since nanobind does not
+// expose C++ out-parameters to Python.
+// Only a UID-keyed variant pack reaches C++, because Graph::autotuneExhaustiveSweep()
+// itself takes only that form; tensor keys are mapped to their UIDs first.
+std::pair<std::vector<AutotuneResult>, AutotuneCacheWriteOutcome>
+    autotuneExhaustiveSweepPy(graph::Graph& g,
+                              const nb::object& handle,
+                              const nb::dict& variantPack,
+                              const nb::object& workspace,
+                              int64_t workspaceSize,
+                              const AutotuneConfig& config,
+                              const AutotuneStorageConfig& storageConfig)
+{
+    auto handlePtr = handle.attr("get")();
+    // NOLINTNEXTLINE(performance-no-int-to-ptr)
+    auto rawHandle = reinterpret_cast<hipdnnHandle_t>(nb::cast<uintptr_t>(handlePtr));
+
+    auto cppVariantPack = hipdnn_python::toVariantPack(variantPack);
+    void* workspacePtr
+        = workspace.is_none() ? nullptr : hipdnn_python::toDataPointer(workspace, "workspace");
+
+    // Same rationale as autotunePy: benchmarking touches no Python object, so the GIL
+    // can be released for the duration of what may be a minutes-long call.
+    std::vector<AutotuneResult> results;
+    AutotuneCacheWriteOutcome outcome
+        = AutotuneCacheWriteOutcome::NOT_ATTEMPTED_NO_SUCCESSFUL_ENGINE;
+    Error err;
+    {
+        const nb::gil_scoped_release release;
+        err = g.autotuneExhaustiveSweep(rawHandle,
+                                        cppVariantPack,
+                                        workspacePtr,
+                                        workspaceSize,
+                                        config,
+                                        storageConfig,
+                                        &results,
+                                        &outcome);
+    }
+    if(err.is_bad())
+    {
+        throw std::runtime_error("autotune_exhaustive_sweep failed: " + err.get_message());
+    }
+    return {results, outcome};
 }
 
 } // namespace
@@ -227,28 +268,64 @@ void graphBindings(nb::module_& m)
             "execute",
             [](const graph::Graph& g,
                const nb::object& handle,
-               std::unordered_map<int64_t, uintptr_t>& variantPack,
-               uintptr_t workspace) {
+               const nb::dict& variantPack,
+               const nb::object& workspace) {
                 auto handlePtr = handle.attr("get")();
                 // NOLINTNEXTLINE(performance-no-int-to-ptr)
                 auto rawHandle = reinterpret_cast<hipdnnHandle_t>(nb::cast<uintptr_t>(handlePtr));
 
-                std::unordered_map<int64_t, void*> cppVariantPack;
-                for(const auto& [key, value] : variantPack)
-                {
-                    // NOLINTNEXTLINE(performance-no-int-to-ptr)
-                    cppVariantPack[key] = reinterpret_cast<void*>(value);
-                }
-
-                // NOLINTNEXTLINE(performance-no-int-to-ptr)
-                void* workspacePtr = workspace ? reinterpret_cast<void*>(workspace) : nullptr;
+                auto cppVariantPack = hipdnn_python::toVariantPack(variantPack);
+                void* workspacePtr = workspace.is_none()
+                                         ? nullptr
+                                         : hipdnn_python::toDataPointer(workspace, "workspace");
 
                 return g.execute(rawHandle, cppVariantPack, workspacePtr);
             },
             nb::arg("handle"),
             nb::arg("variant_pack"),
             nb::arg("workspace") = 0,
-            "Execute the graph with the given handle, variant pack, and optional workspace")
+            "Execute the graph with the given handle, variant pack, and optional workspace. "
+            "variant_pack keys are tensor UIDs or tensors. Values and workspace may be int "
+            "pointers, DeviceBuffer objects, objects with data_ptr(), or __dlpack__ "
+            "producers in host, ROCm, or pinned host memory; a runtime pass-by-value "
+            "tensor takes a host tensor. Callers must keep producers alive until the HIP "
+            "work completes.")
+        .def(
+            "execute_timed_ext",
+            [](const graph::Graph& g,
+               const nb::object& handle,
+               const nb::dict& variantPack,
+               const nb::object& workspace) {
+                auto handlePtr = handle.attr("get")();
+                // NOLINTNEXTLINE(performance-no-int-to-ptr)
+                auto rawHandle = reinterpret_cast<hipdnnHandle_t>(nb::cast<uintptr_t>(handlePtr));
+
+                auto cppVariantPack = hipdnn_python::toVariantPack(variantPack);
+                void* workspacePtr = workspace.is_none()
+                                         ? nullptr
+                                         : hipdnn_python::toDataPointer(workspace, "workspace");
+
+                ExecutionTiming timing;
+                Error err;
+                {
+                    const nb::gil_scoped_release release;
+                    err = g.execute_timed_ext(rawHandle, cppVariantPack, workspacePtr, timing);
+                }
+                return std::make_pair(err, timing);
+            },
+            nb::arg("handle"),
+            nb::arg("variant_pack"),
+            nb::arg("workspace") = 0,
+            "Execute the active plan once and return (Error, ExecutionTiming). "
+            "Blocks until timing completes, with no hidden warmup or retry. "
+            "Allocate workspace before the call. variant_pack and workspace accept the "
+            "same keys and values as execute().\n"
+            "On success, quality is DEVICE_ONLY when the stall removed host submission "
+            "overhead, UNSTALLED when the stall was not used, or INVALID when the "
+            "watchdog invalidated timing after execution completed. A watchdog release "
+            "sets timed_out=True and elapsed_ms=None; it does not disable later calls.\n"
+            "A bad Error reports execution or profiling failure and invalidates timing. "
+            "Profiling can fail after execution; do not assume an error means no work ran.")
         .def("get_execution_plan_count",
              &graph::Graph::get_execution_plan_count,
              "Number of compiled plans, including ones that failed to compile. Use with "
@@ -279,23 +356,17 @@ void graphBindings(nb::module_& m)
             "execute_plan_at_index",
             [](const graph::Graph& g,
                const nb::object& handle,
-               const std::unordered_map<int64_t, uintptr_t>& variantPack,
-               uintptr_t workspace,
+               const nb::dict& variantPack,
+               const nb::object& workspace,
                int64_t planIndex) {
                 auto handlePtr = handle.attr("get")();
                 // NOLINTNEXTLINE(performance-no-int-to-ptr)
                 auto rawHandle = reinterpret_cast<hipdnnHandle_t>(nb::cast<uintptr_t>(handlePtr));
 
-                std::unordered_map<int64_t, void*> cppVariantPack;
-                cppVariantPack.reserve(variantPack.size());
-                for(const auto& [key, value] : variantPack)
-                {
-                    // NOLINTNEXTLINE(performance-no-int-to-ptr)
-                    cppVariantPack[key] = reinterpret_cast<void*>(value);
-                }
-
-                // NOLINTNEXTLINE(performance-no-int-to-ptr)
-                void* workspacePtr = workspace ? reinterpret_cast<void*>(workspace) : nullptr;
+                auto cppVariantPack = hipdnn_python::toVariantPack(variantPack);
+                void* workspacePtr = workspace.is_none()
+                                         ? nullptr
+                                         : hipdnn_python::toDataPointer(workspace, "workspace");
 
                 return g.execute_plan_at_index(rawHandle, cppVariantPack, workspacePtr, planIndex);
             },
@@ -305,7 +376,8 @@ void graphBindings(nb::module_& m)
             nb::arg("plan_index"),
             "Execute one compiled plan without making it active. Returns an Error whose "
             "is_bad() is set for an out-of-bounds, barred or uncompiled plan, so a manual "
-            "tuning loop can skip it and continue.")
+            "tuning loop can skip it and continue. variant_pack and workspace accept the "
+            "same keys and values as execute().")
         .def(
             "get_workspace_size_plan_at_index",
             [](const graph::Graph& g, int64_t planIndex) {
@@ -448,7 +520,7 @@ void graphBindings(nb::module_& m)
              nb::rv_policy::reference_internal,
              "Bar plans belonging to these engine IDs.")
         .def("autotune",
-             &autotunePy<int64_t>,
+             &autotunePy,
              nb::arg("handle"),
              nb::arg("variant_pack"),
              nb::arg("workspace") = 0,
@@ -456,7 +528,8 @@ void graphBindings(nb::module_& m)
              nb::arg("config") = AutotuneConfig{},
              nb::arg("storage_config") = AutotuneStorageConfig{},
              "Benchmark autotune candidates and return one AutotuneResult per candidate.\n"
-             "variant_pack maps either tensor UIDs or tensors to device pointers.\n"
+             "variant_pack maps tensor UIDs or tensors to the same value kinds execute() "
+             "accepts.\n"
              "Pass workspace_size for the plan-spec path added via add_engine_*(), sized "
              "with get_estimated_max_workspace_size(); omit it for the compiled-plan path "
              "built with build_plans(BuildPlanPolicy.ALL), sized with "
@@ -466,15 +539,66 @@ void graphBindings(nb::module_& m)
              "The two C++ overloads taking a trailing userImpl pointer are not bound: that "
              "argument exists for cuDNN signature compatibility and is ignored, so calling "
              "this method covers them.")
-        .def("autotune",
-             &autotunePy<std::shared_ptr<graph::TensorAttributes>>,
+        .def("autotune_exhaustive_sweep",
+             &autotuneExhaustiveSweepPy,
              nb::arg("handle"),
              nb::arg("variant_pack"),
-             nb::arg("workspace") = 0,
-             nb::arg("workspace_size") = nb::none(),
+             nb::arg("workspace"),
+             nb::arg("workspace_size"),
              nb::arg("config") = AutotuneConfig{},
              nb::arg("storage_config") = AutotuneStorageConfig{},
-             "autotune() overload taking a tensor-keyed variant pack.")
+             "Benchmarks every candidate engine for this graph and caches the measured "
+             "ranking.\n"
+             "Compiles and times every plan spec added via "
+             "add_engine_configs()/add_all_engines()/add_engine(), ranks the engines by "
+             "measured speed, and writes that order to the exact-match autotune cache. "
+             "Takes no sweep/variant argument: populate candidates before calling.\n"
+             "This is a FULL sweep, meant to run once so every later run of the same graph "
+             "on the same device inherits the order. The cache record is keyed on the graph "
+             "and device only -- not on knobs, filters, or the workspace budget -- and is "
+             "consulted by every later run of that graph however it is configured. A "
+             "ranking is therefore only persisted when the sweep covered every engine a "
+             "later run could see, which means two things:\n"
+             "  1. One candidate per engine, no knob variants. Use add_engine_configs(), "
+             "add_all_engines(), or add_engine() with no knob settings. A record stores "
+             "engine ids, so several plan specs for one engine (add_engine_sweep(), "
+             "add_engine_variants(), or repeated add_engine() with different knobs) "
+             "collapse to one id: the best-ranked variant wins and the winning knob "
+             "settings are not recorded. Sweep knobs with autotune() instead, which keeps "
+             "them on the active plan.\n"
+             "  2. No filtering, and a workspace large enough for every candidate. Leave "
+             "config.engine_id_filter empty, apply no deselect filter, and pass a "
+             "workspace_size at least as large as get_autotune_workspace_size() reports. "
+             "Each of these can hold an applicable engine out of the timing loop while "
+             "leaving it a live candidate for a later unrestricted run -- an engine the "
+             "ranking never measured. Rather than persist a record that is wrong or "
+             "unusable, this call declines the write and reports "
+             "AutotuneCacheWriteOutcome.NOT_ATTEMPTED_PARTIAL_SWEEP. The sweep still runs "
+             "and still returns its results; only the cache write is skipped.\n"
+             "Engines are ranked on AutotuneResult.robust_time_ms -- the mean of a "
+             "candidate's iterations after discarding its slow tail -- so the order "
+             "reflects what each engine usually costs. A candidate that is normally slower "
+             "but occasionally lucky does not outrank a consistently faster one on the "
+             "strength of a single good iteration.\n"
+             "Two config fields are set by this call and ignored on input: mode "
+             "(TuneMode.EXHAUSTIVE) and the priming-failure policy (benchmark unprimed). "
+             "Every other field is honoured as given, including strategy.\n"
+             "More iterations improve the odds that the genuinely fastest engine ranks "
+             "first, at a proportional cost in sweep time. Engines whose true times differ "
+             "by a wide margin separate reliably at any count; engines within a few percent "
+             "of each other need substantially more iterations to order correctly, because "
+             "each measurement carries run-to-run jitter of a similar size. Which dial "
+             "applies depends on the strategy you set: config.timed_iterations is the exact "
+             "count per candidate under AutotuneStrategy.FIXED_AVERAGE, and is unused under "
+             "the default AutotuneStrategy.RUN_UNTIL_STABLE, which instead runs until the "
+             "trailing-window variation falls below config.stability_threshold or "
+             "config.max_iterations is reached. Set config.strategy = "
+             "AutotuneStrategy.FIXED_AVERAGE before raising config.timed_iterations, or the "
+             "raise has no effect.\n"
+             "The cached order is keyed on this graph's serialized content and the "
+             "handle's device. Returns a (results, cache_write_outcome) tuple: the "
+             "per-engine AutotuneResult list and the AutotuneCacheWriteOutcome reporting "
+             "whether that write happened. Raises RuntimeError if the sweep fails.")
         .def("set_name", &graph::Graph::set_name, nb::rv_policy::reference_internal)
         .def("set_compute_data_type",
              &graph::Graph::set_compute_data_type,
@@ -634,7 +758,20 @@ void graphBindings(nb::module_& m)
                     nb::arg("tensor"),
                     nb::rv_policy::reference)
         .def_static(
-            "tensor_like", &graph::Graph::tensor_like, nb::arg("tensor"), nb::arg("name") = "")
+            "tensor_like",
+            [](nb::handle tensor, const std::string& name) {
+                if(nb::isinstance<graph::TensorAttributes>(tensor))
+                {
+                    return graph::Graph::tensor_like(
+                        nb::cast<std::shared_ptr<graph::TensorAttributes>>(tensor), name);
+                }
+                return hipdnn_python::tensorAttributesFromDlpack(tensor, name);
+            },
+            nb::arg("tensor"),
+            nb::arg("name") = "",
+            "Create a tensor with the metadata of a hipdnn Tensor or a __dlpack__ producer. "
+            "A host (cpu) producer becomes a runtime pass-by-value tensor "
+            "whose value is passed to execute() as a host tensor.")
         .def(
             "to_json",
             [](graph::Graph& g) {
@@ -701,4 +838,12 @@ void graphBindings(nb::module_& m)
             "Deserialize graph structure from binary without a handle.\n"
             "Only restores the graph topology and attributes (nodes, tensors, parameters).\n"
             "Call build_operation_graph(handle) after to finalize for execution.");
+
+    // Private test hook: resolves a variant-pack value exactly as execute() does.
+    m.def(
+        "_get_data_ptr",
+        [](nb::handle value) {
+            return reinterpret_cast<uintptr_t>(hipdnn_python::toDataPointer(value, "value"));
+        },
+        nb::arg("value"));
 }

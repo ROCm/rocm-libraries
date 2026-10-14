@@ -36,7 +36,9 @@
 #include "testing_gesvda.hpp"
 #include "testing_gesvdj.hpp"
 #include "testing_getrf.hpp"
+#include "testing_getri.hpp"
 #include "testing_getrs.hpp"
+#include "testing_larft.hpp"
 #include "testing_orgbr_ungbr.hpp"
 #include "testing_orgqr_ungqr.hpp"
 #include "testing_orgtr_ungtr.hpp"
@@ -84,6 +86,7 @@ class hipsolver_dispatcher
             {"geev_64", testing_geev<API_COMPAT, false, false, T, T, int64_t, size_t>},
             {"gels", testing_gels<API_NORMAL, false, false, false, T>},
             {"geqrf", testing_geqrf<API_NORMAL, false, false, T, int, int>},
+            {"geqrf_batched", testing_geqrf<API_NORMAL, true, false, T, int, int>},
             {"geqrf_64", testing_geqrf<API_COMPAT, false, false, T, int64_t, size_t>},
             {"gesv", testing_gesv<API_NORMAL, false, false, false, T>},
             {"gesvd", testing_gesvd<API_NORMAL, false, false, false, T>},
@@ -91,9 +94,20 @@ class hipsolver_dispatcher
             {"gesvdj", testing_gesvdj<API_NORMAL, false, false, T>},
             {"gesvdj_batched", testing_gesvdj<API_NORMAL, false, true, T>},
             {"getrf", testing_getrf<API_NORMAL, false, false, false, T, int, int>},
+            {"getrf_npvt", testing_getrf<API_NORMAL, false, false, true, T, int, int>},
+            {"getrf_batched", testing_getrf<API_NORMAL, true, false, false, T, int, int>},
+            {"getrf_npvt_batched", testing_getrf<API_NORMAL, true, false, true, T, int, int>},
             {"getrf_64", testing_getrf<API_COMPAT, false, false, false, T, int64_t, size_t>},
-            {"getrs", testing_getrs<API_NORMAL, false, false, T, int, int>},
-            {"getrs_64", testing_getrs<API_COMPAT, false, false, T, int64_t, size_t>},
+            {"getrf_npvt_64", testing_getrf<API_COMPAT, false, false, true, T, int64_t, size_t>},
+            {"getri_batched", testing_getri<API_NORMAL, true, false, false, T, int, int>},
+            {"getri_npvt_batched", testing_getri<API_NORMAL, true, false, true, T, int, int>},
+            {"getrs", testing_getrs<API_NORMAL, false, false, false, T, int, int>},
+            {"getrs_npvt", testing_getrs<API_NORMAL, false, false, true, T, int, int>},
+            {"getrs_batched", testing_getrs<API_NORMAL, true, false, false, T, int, int>},
+            {"getrs_npvt_batched", testing_getrs<API_NORMAL, true, false, true, T, int, int>},
+            {"getrs_64", testing_getrs<API_COMPAT, false, false, false, T, int64_t, size_t>},
+            {"getrs_npvt_64", testing_getrs<API_COMPAT, false, false, true, T, int64_t, size_t>},
+            {"larft_64", testing_larft<API_COMPAT, false, false, T, int64_t, size_t>},
             {"potrf", testing_potrf<API_NORMAL, false, false, T>},
             {"potrf_batched", testing_potrf<API_NORMAL, true, false, T>},
             {"potri", testing_potri<API_NORMAL, false, false, T>},

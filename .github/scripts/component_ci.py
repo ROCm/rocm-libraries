@@ -7,6 +7,7 @@ Outputs boolean flags per component via GITHUB_OUTPUT:
   - geko=true/false
   - miopen=true/false
   - tensilelite_coverage=true/false
+  - hipblaslt_library_uniqueness=true/false
 
 Each component defines a set of path patterns. If any changed file matches,
 that component is marked as triggered.
@@ -33,11 +34,23 @@ COMPONENTS = {
     ],
     "miopen": [
         "projects/miopen/**",
+        # The hipDNN MIOpen provider hand-maintains copies of MIOpen's private
+        # entry-point declarations, which MIOpen CI cross-checks against the
+        # originals. A PR touching only the provider is exactly the drift that
+        # gate exists to catch, so it has to trigger this component too.
+        "dnn-providers/miopen-provider/**",
         ".github/workflows/component-ci-miopen.yml",
     ],
     "tensilelite_coverage": [
         "projects/hipblaslt/tensilelite/**",
         ".github/workflows/component-ci-tensilelite-coverage.yml",
+    ],
+    "hipblaslt_library_uniqueness": [
+        "projects/hipblaslt/library/src/amd_detail/rocblaslt/src/Tensile/Logic/**",
+        "projects/hipblaslt/tensilelite/tensilelite/Tests/unit/"
+        "test_solution_uid_uniqueness.py",
+        "projects/hipblaslt/tensilelite/tox.ini",
+        ".github/workflows/component-ci-library-uniqueness.yml",
     ],
 }
 

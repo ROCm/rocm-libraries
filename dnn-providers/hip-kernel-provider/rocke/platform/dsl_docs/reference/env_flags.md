@@ -1,9 +1,10 @@
 # Environment Variable Reference
 
-Every environment variable the CK DSL, its C++ engine, the hipDNN provider, and
-the tooling read. The **core** flags are the ones most users need; the rest are
-build/CI, integration, or experimental kernel-development knobs that are off by
-default. For setup and the most common flags in context, see
+Environment variables read by the CK DSL, its C++ engine, the hipDNN provider,
+and the tooling, plus external compiler-runtime settings that affect rocKE.
+The **core** flags are the ones most users need; other sections cover build/CI,
+integration, external runtime settings, and experimental kernel-development knobs.
+For setup and the most common flags in context, see
 [`../development/setup_guide.md`](../development/setup_guide.md).
 
 > Set on Linux with `export NAME=value`; on Windows with `set NAME=value`.
@@ -13,7 +14,7 @@ default. For setup and the most common flags in context, see
 | Variable | Values (default) | Purpose |
 |---|---|---|
 | `ROCKE_BACKEND` | `cpp` \| `python` \| `both` (**cpp**) | Which engine lowers Python-authored kernels. `cpp` = C++ engine (auto-falls back to Python if `rocke_engine` isn't built); `python` = native lowerer; `both` = run both and assert byte-identical (the differential check). |
-| `ROCKE_LLVM_FLAVOR` | `llvm22` \| `llvm20` \| `llvm23` (auto) | Force the LLVM IR flavor (datalayout/intrinsics). Auto-resolves from the **comgr lib that will actually load** (torch-bundled comgr 7.2 → `llvm22`; else `/opt/rocm` version, mapped ROCm `>= 7.13` → `llvm23`, `>= 7.2` → `llvm22`, else `llvm20`; default `llvm22`). `llvm23` (ROCm 7.13+) emits the same bytes as `llvm22` today — same datalayout, same declares — so it is a vintage label, not a third IR shape. **`llvm22` (ROCm 7.2) is the production backend and it MATERIALLY AFFECTS PERF** — MFMA scheduling and register allocation differ from `llvm20`, and some kernels (notably attention prefill bodies) that look register-bound / AGPR-spilled / occupancy-collapsed on `llvm20` are clean 2-WG/CU and far faster on `llvm22`. **Always benchmark on `llvm22`.** Import torch (or otherwise load comgr 7.2) FIRST so the right comgr is selected; forcing `llvm22` while the loaded comgr is 7.0/7.1 is rejected with a clean error (not a silent wrong-backend run). |
+| `ROCKE_LLVM_FLAVOR` | `llvm20` \| `llvm22` \| `llvm23` (auto) | Override the emitted LLVM IR flavor. AUTO loads COMGR, queries its compiler, and maps LLVM <=20 to `llvm20`, 21/22 to `llvm22`, and >=23 to `llvm23`. If no compiler can be queried, AUTO raises; select a flavor explicitly for offline IR emission. An override selects emission; it does not change or bypass validation against the loaded compiler. |
 | `ROCKE_CPP_STRICT` | `1` (unset) | Make `cpp` backend **raise** instead of silently falling back to Python when `rocke_engine` is unavailable. |
 | `ROCKE_DEBUG` | `1` (unset) | Verbose engine diagnostics during build/lowering. |
 | `ROCKE_DEBUG_LOC` | `1` (unset) | Record the Python call stack behind every op while the kernel builds, and lower it to DWARF inlining scopes, so an ATT trace maps instructions back to the source that authored them. Off by default for two reasons: it costs a stack walk per op (material on sweeps that build thousands of kernels), and populating `op.loc` **changes the emitted `.ll` bytes**, so the byte-identity gate and the IR goldens run without it. The added metadata does not change the generated ISA, so a trace captured with it on is still representative. `IRBuilder(capture_loc=True)` is the per-builder equivalent. Set it on the process that **builds** the kernel, not on the compiler; [`capture_wavescope_trace.py`](../optimization/utilities/tools/wavescope/capture_wavescope_trace.py) does that and the rest of the capture in one command. The same DWARF is what lets `rocgdb` name the authoring line behind a memory fault — see [`../development/debugging_rocgdb.md`](../development/debugging_rocgdb.md). |
@@ -52,6 +53,31 @@ default. For setup and the most common flags in context, see
 | `ROCM_PATH` | ROCm install prefix override (when not `/opt/rocm`). |
 | `LLVM_OBJDUMP` / `LLVM_READELF` | Paths to the LLVM tools the ISA/resource probes shell out to. |
 
+## External compiler runtime
+
+These settings are consumed by COMGR or supporting runtime components, rather
+than parsed as rocKE options. Their defaults and availability are determined by
+the loaded COMGR/toolchain version and the operating system.
+
+| Variable | Values / purpose |
+|---|---|
+| `AMD_COMGR_CACHE_DIR` | Path to COMGR's persistent compilation cache. On clusters with NFS-backed home directories, select a writable node-local directory to avoid synchronous cache metadata access over NFS. |
+| `AMD_COMGR_CACHE` | Set to `0` to disable COMGR caching for diagnosis. Repeated compilations then lose persistent cache hits; prefer relocating the cache to node-local storage for normal use. |
+| `TMPDIR` | On Unix-like systems, selects the temporary-file directory for components that honor it. Use a writable node-local directory for compilation jobs. This does not relocate the persistent COMGR cache. |
+
+Create the cache and temporary directories before launching the compilation
+process, and set these variables in the environment inherited by its workers.
+Workers on the same node can share the job's COMGR cache to retain cache reuse.
+A fresh job-local cache starts without entries from previous jobs; choose its
+lifetime according to the desired reuse and the site's scratch-storage policy.
+
+COMGR also reads ROCm/HIP metadata and toolchain inputs. If those paths are on
+NFS, relocating the cache alone may leave filesystem stalls. When using a
+locally staged ROCm installation, point `ROCM_PATH` and `HIP_PATH` at that
+installation and ensure the loaded COMGR library, compiler inputs, temporary
+files, and outputs use the intended local paths. Disabling the COMGR cache does
+not disable these other filesystem accesses.
+
 ## Case-study-specific flags
 
 Some flags are specific to one example/case study and are documented there, not
@@ -78,5 +104,64 @@ are diagnostics that intentionally change emission. None affect the default buil
 | gfx942 attention tuning | `HIPDNN_GFX942_NUM_WARPS`, `HIPDNN_GFX942_WAVES_PER_EU`, `HIPDNN_GFX942_IGLP`, `HIPDNN_GFX942_Q_DIRECT`, `HIPDNN_GFX942_Q_MAJOR_GRID`, `HIPDNN_GFX942_K_LDSSEQ`, `HIPDNN_GFX942_K_SLICED_RING`, `HIPDNN_GFX942_KV_CACHE_POLICY`, `HIPDNN_GFX942_GLOBAL_LOAD_LDS_K`, `HIPDNN_GFX942_SWIZZLE_VLDS`, `HIPDNN_GFX942_FLASH_WIDE` | experimental gfx942 FMHA levers |
 | gfx942 V-transpose-store diagnostics | `HIPDNN_GFX942_CFV`, `HIPDNN_GFX942_CFV_CK_VLDS`, `HIPDNN_GFX942_CFV_SCALAR_READ`, `HIPDNN_GFX942_CFV_STORE`, `HIPDNN_GFX942_CFV_STORE_PREZERO`, `HIPDNN_GFX942_CFV_STORE_SCALAR_LOAD`, `HIPDNN_GFX942_CFV_STORE_SCATTER`, `HIPDNN_GFX942_CFV_STORE_SEPOFF`, `HIPDNN_GFX942_CFV_STORE_SPLIT` | gfx942 cfv-store debug toggles (some intentionally change emission) |
 
-A flag not listed here that you find in the source is, by definition, an
-internal experimental knob — treat it as off-by-default and read its call site.
+For an unlisted variable, check its reader and documentation before assuming its
+default or stability. It may be an internal experimental knob or a setting owned
+by an external library or tool.
+
+### Compiler detection and provenance
+
+Compiler version information comes from the loaded binary. Distribution layout
+and release metadata describe packaging; they are not compiler-version inputs.
+Existing discovery rules still locate candidate libraries.
+
+```mermaid
+flowchart TD
+    A[Existing library discovery] --> B[Load COMGR]
+    B --> C{LLVMGetVersion available?}
+    C -->|Yes| D[Query LLVM version through the COMGR handle]
+    C -->|No| E[Preprocess Clang version macros through COMGR]
+    D --> F[Compiler version and provenance]
+    E --> F
+    F --> G[Map version to an emission flavor]
+    F --> H[Check runtime IR compatibility]
+```
+
+The query uses `LLVMGetVersion` from COMGR or its loaded dependencies. When LLVM
+symbols are hidden, it preprocesses Clang's built-in version macros through the
+same COMGR. The latter supports static LLVM builds (see
+[COMGR_STATIC_LLVM](https://github.com/ROCm/llvm-project/commit/772c38832056cb31d9fcbfdbe6c799af97f22d7f)).
+Neither path launches a compiler executable or reads a ROCm release file.
+Both are host-only queries and require no GPU.
+
+Python exposes `rocke.runtime.comgr.loaded_compiler_info()`. Its immutable
+`CompilerInfo` records `llvm_version`, `source`, `requested_comgr`, `comgr_path`,
+and `query_library_path`; `describe()` formats those fields for diagnostics.
+The paths are reported by the dynamic loader. A missing path remains unknown,
+while `requested_comgr` preserves the original loader input. A null result means
+COMGR could not be loaded; a result without a version means the loaded compiler
+could not be queried. No release metadata is substituted in either case.
+
+Python and native AUTO retain the first successfully loaded library and its query
+result for the process lifetime, including a loaded compiler whose version cannot
+be queried. Failed loads remain retryable if library availability changes. Configure
+library selection before automatic lowering or compilation; changing a retained
+compiler requires a new process.
+
+Standalone C++ AUTO is a convenience adapter: it discovers and retains a native
+COMGR candidate and queries that binary. Its diagnostics are implementation
+details, not part of the public lowering ABI. A native caller that owns a
+separate compilation stage must pass the flavor for its compiler explicitly;
+the AUTO adapter does not share its private handle with that stage.
+
+`ROCKE_LLVM_FLAVOR` and explicit API flavors support offline emission without
+loading COMGR. The runtime's p8-generation guard still checks against detected
+compiler evidence when compiling, even if emission used an override. If version
+information is unavailable, AUTO raises instead of selecting a default flavor.
+Replay and parity drivers also require compiler evidence for automatic selection;
+their explicit argument/environment precedence is unchanged. Offline IR emission
+requires an explicit flavor. COMGR compilation requires a known compiler version
+even with an emission override or an unrecognised input datalayout.
+
+The detected LLVM version selects a baseline flavor; it does not prove that
+all builds of that version share an exact DataLayout or intrinsic catalog.
+Toolchain-specific compilation and drift tests remain necessary.

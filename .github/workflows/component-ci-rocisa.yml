@@ -51,23 +51,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Shared stinkytofu: both the dlopen plugin and the compiled-in plugin exist.
-          # CMAKE_DISABLE_FIND_PACKAGE_stinkytofu pins rocisa to the monorepo sibling
-          # source build (rocisa prefers find_package when a stinkytofu is installed),
-          # so STINKYTOFU_BUILD_EXAMPLES/BUILD_SHARED_LIBS below actually take effect
-          # instead of being silently ignored by an already-installed stinkytofu.
           - config: shared
             cmake_args: >-
-              -DCMAKE_DISABLE_FIND_PACKAGE_stinkytofu=ON
               -DSTINKYTOFU_BUILD_EXAMPLES=ON
               -DROCISA_BUILD_HELLOWORLD_STATIC_PLUGIN=ON
-          # Static stinkytofu: only the compiled-in plugin can exist. STINKYTOFU_BUILD_EXAMPLES
-          # stays ON deliberately — it is what makes the "no dlopen'able plugin" assertion
-          # meaningful, since a build that came out shared despite BUILD_SHARED_LIBS=OFF
-          # would then produce one and fail the assertion.
           - config: static
             cmake_args: >-
-              -DCMAKE_DISABLE_FIND_PACKAGE_stinkytofu=ON
               -DBUILD_SHARED_LIBS=OFF
               -DSTINKYTOFU_BUILD_EXAMPLES=ON
               -DROCISA_BUILD_HELLOWORLD_STATIC_PLUGIN=ON

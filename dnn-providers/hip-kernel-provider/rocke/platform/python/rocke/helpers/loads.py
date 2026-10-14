@@ -17,9 +17,11 @@ Two strategies are exposed, both with the same authoring surface:
   without a register intermediate. The intrinsic writes
   *lane-contiguous* bytes: lane `i` of a wave deposits its payload at
   `lds_addr + i * size_bytes`. Each call moves `dwords ∈ {1, 3, 4}`
-  dwords per lane (so 4, 12, or 16 bytes per lane). Completion is
-  signalled via the VMEM counter, so consumers must drop an
-  `s_waitcnt(vmcnt=0)` before reading the LDS.
+  dwords per lane (so 4, 12, or 16 bytes per lane), capped per arch by
+  `ArchTarget.async_lds_max_dwords` — only CDNA4 (gfx950) has the 3/4
+  forms, CDNA3 (gfx942) is dword-only. Completion is signalled via the
+  VMEM counter, so consumers must drop an `s_waitcnt(vmcnt=0)` before
+  reading the LDS.
 
 Both loaders share the same authoring contract:
 
@@ -47,7 +49,7 @@ read), not by handing the intrinsic a swizzled destination pointer.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable, Optional, Tuple
+from typing import Callable, List, Optional, Sequence, Tuple
 
 from ..core.ir import F16, I64, IRBuilder, Type, Value
 
@@ -345,6 +347,96 @@ class CoalescedTileLoader:
         for row, col, v in staged:
             self._store_tile(b, smem_dst, row, col, v)
 
+    # ---- address-prefetch split -------------------------------------------
+    #
+    # ``load`` and ``load_global`` derive every chunk's global address from the
+    # K offset right before its read, so in a K loop the descriptor arithmetic
+    # sits between the loop back-edge and the first ``buffer_load``. The three
+    # methods below split that work so a caller can carry the byte offsets
+    # across iterations instead: decode the per-thread (row, col) slots once
+    # (``plan_slots``), compute the offsets for a K position
+    # (``slot_offsets``), and later issue the reads from those offsets
+    # (``issue_slots``). The emitted per-chunk ops are the ones ``load_global``
+    # emits, just regrouped; nothing here changes an existing caller.
+
+    def plan_slots(self, b: IRBuilder, *, tid: Value) -> List[Tuple[Value, Value]]:
+        """Decode the tile-local ``(row, col)`` of every per-thread chunk.
+
+        The decode depends only on ``tid``, so a K loop can emit it once ahead
+        of the loop and reuse the slots in every iteration.
+        """
+        c_threads = b.const_i32(self.block_size)
+        c_load_vec = b.const_i32(self.load_vec)
+        c_span = b.const_i32(
+            self.rows_per_vec if self.vector_axis == "row" else self.cols_per_vec
+        )
+        slots: List[Tuple[Value, Value]] = []
+        for e in range(self.vecs_per_thread):
+            vec_idx = b.add(b.mul(b.const_i32(e), c_threads), tid)
+            slots.append(
+                self._decode_row_col(b, vec_idx, c_span=c_span, c_load_vec=c_load_vec)
+            )
+        return slots
+
+    def slot_offsets(
+        self,
+        b: IRBuilder,
+        *,
+        slots: Sequence[Tuple[Value, Value]],
+        descriptor: DescriptorFn,
+    ) -> List[Value]:
+        """Byte ``voffset`` of each slot, with invalid chunks sent to the sentinel.
+
+        Buffer-resource loads only: the sentinel relies on the resource's range
+        check to turn an out-of-bounds read into zero.
+        """
+        if not self.use_buffer_rsrc:
+            raise ValueError(
+                "CoalescedTileLoader.slot_offsets requires use_buffer_rsrc=True"
+            )
+        elem_bytes = _ELEM_BYTES.get(self.elem_dtype.name)
+        if elem_bytes is None:
+            raise ValueError(
+                f"CoalescedTileLoader: unsupported elem_dtype {self.elem_dtype.name!r}"
+            )
+        c_elem_bytes = b.const_i32(elem_bytes)
+        c_oob = b.const_i32(self.oob_sentinel)
+        offsets: List[Value] = []
+        for row, col in slots:
+            off_elems, valid = descriptor(b, row, col)
+            off_bytes = b.mul(off_elems, c_elem_bytes)
+            offsets.append(
+                off_bytes if valid is None else b.select(valid, off_bytes, c_oob)
+            )
+        return offsets
+
+    def issue_slots(
+        self,
+        b: IRBuilder,
+        *,
+        rsrc: Value,
+        slots: Sequence[Tuple[Value, Value]],
+        offsets: Sequence[Value],
+    ) -> list:
+        """Issue one buffer read per slot from precomputed byte offsets.
+
+        Returns ``(row, col, v)`` triples for :meth:`store_lds`.
+        """
+        if len(slots) != len(offsets):
+            raise ValueError(
+                f"CoalescedTileLoader.issue_slots: {len(slots)} slots but "
+                f"{len(offsets)} offsets"
+            )
+        c0 = b.const_i32(0)
+        staged = []
+        for (row, col), off in zip(slots, offsets):
+            if self.load_vec == 1:
+                v = b.buffer_load(rsrc, off, c0, self.elem_dtype)
+            else:
+                v = b.buffer_load_vN(rsrc, off, c0, self.elem_dtype, self.load_vec)
+            staged.append((row, col, v))
+        return staged
+
     def load(
         self,
         b: IRBuilder,
@@ -445,7 +537,9 @@ class CoalescedTileLoader:
 
         c_threads = b.const_i32(self.block_size)
         c_load_vec = b.const_i32(self.load_vec)
-        c_cols_per_vec = b.const_i32(self.cols_per_vec)
+        c_span = b.const_i32(
+            self.rows_per_vec if self.vector_axis == "row" else self.cols_per_vec
+        )
         c_elem_bytes = b.const_i32(elem_bytes)
         c0 = b.const_i32(0)
         c_oob = b.const_i32(self.oob_sentinel)
@@ -455,9 +549,9 @@ class CoalescedTileLoader:
         fetched = []
         for e in range(self.vecs_per_thread):
             vec_idx = b.add(b.mul(b.const_i32(e), c_threads), tid)
-            row = b.div(vec_idx, c_cols_per_vec)
-            col_v = b.mod(vec_idx, c_cols_per_vec)
-            col = b.mul(col_v, c_load_vec) if self.load_vec > 1 else col_v
+            row, col = self._decode_row_col(
+                b, vec_idx, c_span=c_span, c_load_vec=c_load_vec
+            )
 
             off_elems, valid = descriptor(b, row, col)
             off_bytes = b.mul(off_elems, c_elem_bytes)
@@ -479,7 +573,7 @@ class CoalescedTileLoader:
     ) -> None:
         """Store a register tile (returned by :meth:`fetch`) into LDS."""
         for row, col, v in fetched:
-            b.smem_store_vN(smem_dst, [row, col], v, self.load_vec)
+            self._store_tile(b, smem_dst, row, col, v)
 
 
 # ---------------------------------------------------------------------
@@ -546,6 +640,14 @@ class AsyncTileLoader:
     elem_dtype: Type = F16
     dwords: int = 1  # 1, 3, or 4
     chunks_total: int = 0  # tile_rows * tile_cols / elems_per_chunk
+    # Length of the longest run of tile columns that is contiguous in global
+    # memory. ``None`` means "the col axis is dense across the whole tile" (the
+    # historical assumption). When the col axis is a composite index whose outer
+    # part strides -- e.g. wgrad's N_wg = (y, x, c), where only ``c`` is
+    # stride-1 -- a chunk that crosses one of those boundaries would fetch the
+    # wrong elements, silently. Setting this makes ``choose_dwords`` pick a
+    # width that always stays inside one run.
+    contig_cols: Optional[int] = None
     chunks_per_pass: int = 0  # = block_size
     passes: int = 0  # ceil(chunks_total / block_size)
 
@@ -558,6 +660,7 @@ class AsyncTileLoader:
         block_size: int,
         elem_bytes: int = 2,
         max_dwords: int = 4,
+        contig_cols: Optional[int] = None,
     ) -> int:
         """Pick the widest `dwords` value that divides the tile evenly.
 
@@ -565,6 +668,14 @@ class AsyncTileLoader:
         4 for f32/i32).  Each chunk carries ``dwords * 4 // elem_bytes``
         elements; ``tile_cols`` must be a multiple of that count and the
         tile must have at least ``block_size`` chunks.
+
+        ``max_dwords`` is the caller's cap and must not exceed the target's
+        ``ArchTarget.async_lds_max_dwords``: CDNA3 (gfx942) moves only a dword
+        per lane to LDS, the b96/b128 forms (3 and 4) arrived with CDNA4
+        (gfx950). Asking for a wider one than the arch has is not a compile
+        error -- the AMDGPU backend aborts the process with ``LLVM ERROR: Do
+        not know how to expand this operator's operand!``. ``max_dwords=0``
+        (an arch with no DRAM->LDS DMA at all) raises, as no width fits.
         """
         if max_dwords > 4:
             max_dwords = 4
@@ -574,8 +685,20 @@ class AsyncTileLoader:
             elems = (d * 4) // elem_bytes
             if tile_cols % elems != 0:
                 continue
+            # A chunk must lie entirely inside one contiguous run of columns.
+            if contig_cols is not None and (
+                elems > contig_cols or contig_cols % elems != 0
+            ):
+                continue
             chunks = (tile_rows * tile_cols) // elems
             if chunks < block_size:
+                continue
+            # Every pass fires block_size chunks. Chunks past chunks_total still
+            # issue (with the OOB sentinel, which the hardware zero-fills), so a
+            # partial last pass writes past this tile's allocation and into the
+            # next smem_alloc. Require whole passes; a narrower width is tried
+            # next and usually succeeds.
+            if chunks % block_size != 0:
                 continue
             return d
         raise ValueError(
@@ -593,6 +716,7 @@ class AsyncTileLoader:
         wave_size: int = 64,
         elem_dtype: Type = F16,
         max_dwords: int = 4,
+        contig_cols: Optional[int] = None,
     ) -> "AsyncTileLoader":
         eb = _ELEM_BYTES.get(elem_dtype.name)
         if eb is None:
@@ -605,6 +729,7 @@ class AsyncTileLoader:
             block_size=block_size,
             elem_bytes=eb,
             max_dwords=max_dwords,
+            contig_cols=contig_cols,
         )
         elems = (d * 4) // eb
         chunks = (tile_rows * tile_cols) // elems
@@ -615,6 +740,7 @@ class AsyncTileLoader:
             block_size=block_size,
             wave_size=wave_size,
             elem_dtype=elem_dtype,
+            contig_cols=contig_cols,
             dwords=d,
             chunks_total=chunks,
             chunks_per_pass=block_size,
@@ -635,8 +761,25 @@ class AsyncTileLoader:
         return self.dwords * 4
 
     @property
-    def cols_per_chunk(self) -> int:
-        return self.elems_per_chunk
+    def chunks_per_row(self) -> int:
+        """Chunks needed to cover one tile row of ``tile_cols`` elements.
+
+        This is the divisor that decodes a flat chunk index into a tile
+        coordinate in :meth:`AsyncTileLoaderSlot.issue`::
+
+            row = chunk_idx // chunks_per_row
+            col = (chunk_idx % chunks_per_row) * elems_per_chunk
+
+        It is *not* ``elems_per_chunk``. The two coincide only when
+        ``tile_cols == elems_per_chunk ** 2`` (e.g. tile_cols=64 for a 2-byte
+        dtype at dwords=4), which is why 64 used to be the only tile width the
+        async path loaded correctly -- every other width silently decoded to
+        the wrong row and to a column past the end of the tile.
+
+        ``choose_dwords`` guarantees ``tile_cols % elems_per_chunk == 0``, so
+        this division is exact.
+        """
+        return self.tile_cols // self.elems_per_chunk
 
     @property
     def wave_bytes(self) -> int:
@@ -714,7 +857,7 @@ class AsyncTileLoaderSlot:
         c_elem_bytes = b.const_i32(elem_bytes)
         c_oob = b.const_i32(oob_sentinel)
         c0 = b.const_i32(0)
-        c_cols_per_chunk = b.const_i32(L.cols_per_chunk)
+        c_chunks_per_row = b.const_i32(L.chunks_per_row)
 
         for p in range(L.passes):
             # Per-pass LDS base = per_wave_lds_base + p * pass_bytes.
@@ -732,8 +875,8 @@ class AsyncTileLoaderSlot:
 
             # chunk_idx = tid + p * block_size
             chunk_idx = b.add(tid, b.const_i32(p * L.block_size))
-            row = b.div(chunk_idx, c_cols_per_chunk)
-            col_v = b.mod(chunk_idx, c_cols_per_chunk)
+            row = b.div(chunk_idx, c_chunks_per_row)
+            col_v = b.mod(chunk_idx, c_chunks_per_row)
             col = b.mul(col_v, b.const_i32(L.elems_per_chunk))
 
             off_elems, valid = descriptor(b, row, col)
