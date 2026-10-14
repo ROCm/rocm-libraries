@@ -10,7 +10,8 @@
 # uhd_gen's requirements -- its training stack (LightGBM, pandas, pyarrow, ...), so the
 #               uhd_gen and skill-script suites and TestUhdGenArtifact run rather than skip.
 #
-# Installed with --upgrade, so nothing is pinned here.
+# The versions are pinned by constraints-hipdnn-superbuild-ci.txt.
+-c constraints-hipdnn-superbuild-ci.txt
 pytest
 build
 numpy

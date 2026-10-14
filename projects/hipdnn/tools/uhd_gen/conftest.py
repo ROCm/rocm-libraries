@@ -2,9 +2,10 @@
 # SPDX-License-Identifier: MIT
 """Fails the run on a skipped test when HIPDNN_REQUIRE_UHD_GEN_TESTS is set.
 
-Every skip in uhd_gen's suites (tests/ and dataset/tests/) is a missing prerequisite: a
-Python package (pytest.importorskip) or the hipdnn_uhd_features binary (the `evaluator`
-fixture). Locally that stays a skip. CMake's HIPDNN_REQUIRE_UHD_GEN_TESTS sets the variable
+Every skip in uhd_gen's suites (tests/ and dataset/tests/), and in the two that load this
+file with `-p uhd_gen.conftest` (the hipdnn-uhd skill scripts' and mine_shapes'), is a missing
+prerequisite: a Python package (pytest.importorskip), the hipdnn_uhd_features binary (the
+`evaluator` fixture), or the checkout's rocKE library. Locally that stays a skip. CMake's HIPDNN_REQUIRE_UHD_GEN_TESTS sets the variable
 on the ctest entries, so in CI a gap fails the run rather than passing having checked
 nothing. The skipped tests still report as skipped; the run's exit status is what changes.
 """

@@ -27,8 +27,8 @@ install(TARGETS hipdnn_list_engines RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 # mine_shapes mines the shapes the IngestorGenerator consumes; both are ingestor tooling, so
 # a build without the ingestor, or with HIPDNN_SKIP_TESTS, registers neither. The suites self-skip (pytest.importorskip)
 # when lightgbm/flatbuffers/numpy/pandas are absent; HIPDNN_REQUIRE_UHD_GEN_TESTS turns
-# uhd_gen's skips into failures (uhd_gen/conftest.py) and a missing pytest into a configure
-# error.
+# the skips of all four suites into failures (uhd_gen/conftest.py, which the two suites outside
+# uhd_gen/ load with `-p`) and a missing pytest into a configure error.
 if(HIPDNN_ENABLE_KERNEL_INGESTOR AND NOT HIPDNN_SKIP_TESTS)
     if(HIPDNN_REQUIRE_UHD_GEN_TESTS)
         set(_uhd_gen_missing_severity FATAL_ERROR)
@@ -64,17 +64,13 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR AND NOT HIPDNN_SKIP_TESTS)
                         ${CMAKE_CURRENT_SOURCE_DIR}/uhd_gen/dataset/tests
                 WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
             set_tests_properties(uhd_gen_dataset_tests PROPERTIES SKIP_RETURN_CODE 5)
-            if(HIPDNN_REQUIRE_UHD_GEN_TESTS)
-                set_property(TEST uhd_gen_tests uhd_gen_dataset_tests APPEND PROPERTY
-                             ENVIRONMENT "HIPDNN_REQUIRE_UHD_GEN_TESTS=1")
-            endif()
 
             # Only this file: the rest of IngestorGenerator/tests needs PyYAML/Jinja2 via its
             # conftest. --noconftest because test_mine_shapes.py must not inherit those
             # imports.
             add_test(
                 NAME mine_shapes_tests
-                COMMAND ${Python3_EXECUTABLE} -m pytest -q --noconftest
+                COMMAND ${Python3_EXECUTABLE} -m pytest -q --noconftest -p uhd_gen.conftest
                         ${CMAKE_CURRENT_SOURCE_DIR}/IngestorGenerator/tests/test_mine_shapes.py
                 WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
             set_tests_properties(mine_shapes_tests PROPERTIES SKIP_RETURN_CODE 5)
@@ -83,12 +79,18 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR AND NOT HIPDNN_SKIP_TESTS)
             # cases (promotion into a candidate tree) need the evaluator too.
             add_test(
                 NAME uhd_skill_scripts_tests
-                COMMAND ${Python3_EXECUTABLE} -m pytest -q
+                COMMAND ${Python3_EXECUTABLE} -m pytest -q -p uhd_gen.conftest
                         ${CMAKE_CURRENT_SOURCE_DIR}/ai/tests/test_uhd_skill_scripts.py
                 WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
             set_tests_properties(uhd_skill_scripts_tests PROPERTIES
                 SKIP_RETURN_CODE 5
                 ENVIRONMENT "HIPDNN_UHD_FEATURE_EVALUATOR=$<TARGET_FILE:hipdnn_uhd_features>")
+
+            if(HIPDNN_REQUIRE_UHD_GEN_TESTS)
+                set_property(TEST uhd_gen_tests uhd_gen_dataset_tests mine_shapes_tests
+                             uhd_skill_scripts_tests APPEND PROPERTY
+                             ENVIRONMENT "HIPDNN_REQUIRE_UHD_GEN_TESTS=1")
+            endif()
 
             # Build tree only: none of the four is installed.
             _apply_hipdnn_test_category_labels(uhd_gen_tests)
