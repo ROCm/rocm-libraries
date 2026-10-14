@@ -423,6 +423,49 @@ def test_binary_readers_reject_zlib_checksum_mismatch(tmp_path, reader):
         list(reader(path))
 
 
+@pytest.mark.parametrize(
+    "reader, location",
+    [
+        (readMessagePack, "container"),
+        (readMessagePack, "legacy"),
+        (iterSolutionRecords, "container"),
+        (iterSolutionRecords, "legacy"),
+        (iterSolutionRecords, "indexed"),
+    ],
+)
+@pytest.mark.parametrize("key", [[], {}])
+def test_binary_readers_reject_unhashable_map_keys(tmp_path, reader, location, key):
+    """Unsupported map keys must produce a filename-qualified metadata error."""
+    packer = msgpack.Packer(use_bin_type=True)
+    invalid_map = packer.pack_map_header(2) + (
+        packer.pack("index") + packer.pack(0) + packer.pack(key) + packer.pack(0)
+    )
+    if location == "container":
+        data = invalid_map
+    elif location == "legacy":
+        data = (
+            packer.pack_map_header(2)
+            + packer.pack("solutions")
+            + packer.pack_array_header(1)
+            + invalid_map
+            + packer.pack("library")
+            + packer.pack({})
+        )
+    else:
+        data = packer.pack(
+            {
+                "format_version": 2,
+                "solutions_index": [0, 0, len(invalid_map)],
+                "solutions_blob": invalid_map,
+                "library": {},
+            }
+        )
+    path = tmp_path / "library.dat"
+    path.write_bytes(data)
+    with pytest.raises(ValueError, match="library.dat: invalid"):
+        list(reader(path))
+
+
 @pytest.mark.parametrize("index", [True, -1, 2**31, 1.0, None])
 def test_legacy_reader_validates_indices_outside_selection(tmp_path, index):
     path = tmp_path / "library.dat"

@@ -35,14 +35,17 @@ def _readBytes(path: Path) -> bytes:
 
 
 def readMessagePack(path: str | Path) -> Any:
-    """Read one ordinary or zlib-compressed MessagePack value, without converting its schema."""
+    """Read one ordinary or zlib-compressed MessagePack value, without converting its schema.
+
+    Invalid encoded data raises ``ValueError`` with the input path.
+    """
     import msgpack
 
     path = Path(path)
     data = _readBytes(path)
     try:
         return msgpack.unpackb(data, raw=False, strict_map_key=False)
-    except (msgpack.UnpackException, ValueError) as error:
+    except (msgpack.UnpackException, ValueError, TypeError) as error:
         raise ValueError(f"{path}: invalid MessagePack data: {error}") from error
 
 
@@ -121,6 +124,8 @@ def _solutionRecords(data: bytes, wanted):
     has_library = False
     for _ in range(unpacker.read_map_header()):
         key = unpacker.unpack()
+        # Match unpackb's rejection of keys that cannot belong to a Python dict.
+        hash(key)
         if key in ("solutions", "format_version", "solutions_index", "solutions_blob"):
             if key in fields:
                 raise ValueError(f"duplicate {key} field")
@@ -170,6 +175,7 @@ def iterSolutionRecords(
     This checks container structure and index consistency, not native solution
     predicates. Consume the iterator fully to validate the whole container.
     Indexed records outside the selection remain undecoded.
+    Invalid encoded data raises ``ValueError`` with the input path.
     """
     import msgpack
 
@@ -187,5 +193,5 @@ def iterSolutionRecords(
                 raise ValueError(f"duplicate solution index {index}")
             seen.add(index)
             yield index, record
-    except (msgpack.UnpackException, ValueError) as error:
+    except (msgpack.UnpackException, ValueError, TypeError) as error:
         raise ValueError(f"{path}: invalid solution metadata: {error}") from error
