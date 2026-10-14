@@ -14,7 +14,8 @@
 #   so "*pre_checkin*" selects the tests whose category is pre_checkin.
 #
 #   Categories present in clients/tests/data today: smoke, quick, pre_checkin,
-#   nightly, HMM, plus known_bug (assigned dynamically, including per-GPU via
+#   nightly, stress, HMM, sdc_hunt (on demand, deliberately in no tier; see
+#   clients/scripts/sdc_hunt), plus known_bug (assigned dynamically, including per-GPU via
 #   known_bug_platforms).
 #
 #   multi_gpu is the exception: it has no entries in data/, and its tests are
@@ -85,6 +86,17 @@ test_categories:
       - "weekly"
       - "hmm"
 
+  stress:
+    description: "Size-threshold and address-overflow cases that need large device and host memory (32 GB+ per GPU for the largest); run on large-memory runners or weekly, not in every nightly"
+    test_patterns:
+      - "*stress*"
+    exclude:
+      - "*known_bug*"
+    labels:
+      - "stress"
+      - "weekly"
+      - "large_memory"
+
   multi_gpu:
     description: "Cross-device tests; needs two or more GPUs visible to one process"
     test_patterns:
@@ -108,5 +120,6 @@ execution_settings:
     quick: 600          # smoke can exceed 300s on some hosts
     standard: 3600      # 1 h
     comprehensive: 7200 # 2 h
+    stress: 14400       # 4 h
     full: 86400         # 24 h
     multi_gpu: 600      # 10 min

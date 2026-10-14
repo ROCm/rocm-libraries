@@ -64,14 +64,29 @@ function(hkp_resolve_kpack out_var python_exe)
 endfunction()
 
 # ---------------------------------------------------------------------------
+# hkp_is_concrete_arch(<out_var> <arch>)
+#   TRUE when <arch> (already stripped of any :feature suffix) is a concrete gfx target
+#   name: a lowercase processor id (gfx942) optionally followed by lowercase
+#   hyphen-separated words that name a distinct target (gfx1250-strict), and none of
+#   those words is generic, all, dcgpu, dgpu or igpu (generic targets and TheRock family
+#   names, which no device reports). Only the shape is checked.
+# ---------------------------------------------------------------------------
+function(hkp_is_concrete_arch out_var arch)
+    if(arch MATCHES "^gfx[0-9a-f]+(-[a-z]+)*$"
+       AND NOT arch MATCHES "-(generic|all|dcgpu|dgpu|igpu)(-|$)")
+        set(${out_var} TRUE PARENT_SCOPE)
+    else()
+        set(${out_var} FALSE PARENT_SCOPE)
+    endif()
+endfunction()
+
+# ---------------------------------------------------------------------------
 # hkp_selected_arches(<out_var> <out_source_var>)
 #   Normalize GPU_TARGETS (or AMDGPU_TARGETS) into a bare gfx arch list,
 #   stripping feature suffixes (gfx942:xnack-) and dropping anything that is not
 #   a concrete gfx target name.
 #
-#   A concrete name is a lowercase processor id (gfx942) optionally followed by
-#   lowercase hyphen-separated words that name a distinct target (gfx1250-strict).
-#   Dropped:
+#   A concrete name is one hkp_is_concrete_arch() accepts. Dropped:
 #     - TheRock family names, recognised by any hyphen-separated word of
 #       dcgpu, dgpu, igpu or all, so a variant such as gfx950-dcgpu-asan is
 #       dropped with its family (gfx94X-dcgpu, gfx950-dcgpu, gfx906-dgpu,
@@ -114,8 +129,8 @@ function(hkp_selected_arches out_var out_source_var)
         if(NOT _bare)
             continue()
         endif()
-        if(NOT _bare MATCHES "^gfx[0-9a-f]+(-[a-z]+)*$"
-           OR _bare MATCHES "-(generic|all|dcgpu|dgpu|igpu)(-|$)")
+        hkp_is_concrete_arch(_concrete "${_bare}")
+        if(NOT _concrete)
             message(WARNING
                 "hkp: ignoring '${_arch}' from ${_source}; it is not a concrete gfx "
                 "target name (a TheRock family, a generic target, or an unrecognised "
@@ -144,6 +159,17 @@ function(_hkp_disabled_kinds out_var enable_rocke)
     if(NOT enable_rocke)
         list(APPEND _pairs "rocke=HIPKERNELPROVIDER_ENABLE_ROCKE")
     endif()
+    set(${out_var} "${_pairs}" PARENT_SCOPE)
+endfunction()
+
+# ---------------------------------------------------------------------------
+# _hkp_disabled_kind_names(<out_var> <enable_rocke>)
+#   The bare kind names of _hkp_disabled_kinds(), the form the packer's --disable-kind
+#   and load_flat_input(disabled_kinds=) take. Every consumer of the list reads it here.
+# ---------------------------------------------------------------------------
+function(_hkp_disabled_kind_names out_var enable_rocke)
+    _hkp_disabled_kinds(_pairs "${enable_rocke}")
+    list(TRANSFORM _pairs REPLACE "=.*$" "")
     set(${out_var} "${_pairs}" PARENT_SCOPE)
 endfunction()
 
@@ -190,10 +216,9 @@ function(_hkp_pack_producer)
             "${Python3_EXECUTABLE}" "${HKP_TOOL}" PARENT_SCOPE)
         # A kind whose producer this build never made prunes like an arch-pruned UKD
         # rather than reaching a producer that does not exist.
-        _hkp_disabled_kinds(_disabled_pairs "${ARG_ENABLE_ROCKE}")
+        _hkp_disabled_kind_names(_kinds "${ARG_ENABLE_ROCKE}")
         set(_disable_args "")
-        foreach(_pair IN LISTS _disabled_pairs)
-            string(REGEX REPLACE "=.*$" "" _kind "${_pair}")
+        foreach(_kind IN LISTS _kinds)
             list(APPEND _disable_args --disable-kind "${_kind}")
         endforeach()
         set(_producer_arg ${_disable_args} PARENT_SCOPE)
@@ -1558,11 +1583,7 @@ function(_hkp_wire_root)
     if(NOT W_SOURCE_ROOT)
         set(_reason "empty-root")
     else()
-        set(_kinds "")
-        foreach(_pair IN LISTS _disabled_pairs)
-            string(REGEX REPLACE "=.*$" "" _kind "${_pair}")
-            list(APPEND _kinds "${_kind}")
-        endforeach()
+        _hkp_disabled_kind_names(_kinds "${W_ENABLE_ROCKE}")
         _hkp_root_probe(_shipped _offered _probe_ok "${W_SOURCE_ROOT}" "${W_ARCHES}"
                         "${W_EXCLUDE_FOLDERS}" "${_kinds}")
         set_property(GLOBAL PROPERTY HKP_PACK_PROBE_OK_${W_NAME} "${_probe_ok}")
@@ -1712,6 +1733,11 @@ function(hkp_add_packaging)
         ${_root_args})
 
     hkp_register_tests("${_rocm_kpack_dir}" "${HKP_HIPCC}" "${_rocke_comgr_lib}")
+    if(HIPKERNELPROVIDER_ENABLE_PACKAGING_PROBES)
+        include("${HKP_PKG_DIR}/cmake/HkpPackagingProbes.cmake")
+        hkp_load_packaging_probes(
+            "${_rocm_kpack_dir}" "${HKP_HIPCC}" "${_rocke_comgr_lib}" ${_root_args})
+    endif()
 endfunction()
 
 # ---------------------------------------------------------------------------

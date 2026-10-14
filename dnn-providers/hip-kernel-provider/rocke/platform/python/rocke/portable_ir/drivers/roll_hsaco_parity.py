@@ -230,14 +230,10 @@ def _alpha_norm(text: str) -> str:
 
 def _flavor() -> str:
     from rocke.core.lower_llvm import _flavor_for_llvm
-    from rocke.runtime.comgr import loaded_compiler_info
+    from rocke.runtime.comgr import _require_compiler_info
 
-    info = loaded_compiler_info()
-    return (
-        _flavor_for_llvm(info.llvm_version[0])
-        if info is not None and info.llvm_version is not None
-        else "llvm20"
-    )
+    info = _require_compiler_info()
+    return _flavor_for_llvm(info.llvm_version[0])
 
 
 def _hsaco(ll: str) -> bytes:
