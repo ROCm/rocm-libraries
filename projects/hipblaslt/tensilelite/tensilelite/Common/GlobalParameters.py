@@ -197,6 +197,8 @@ globalParameters["DataInitTypeScaleD"] = 2
 globalParameters["DataInitTypeScaleAlphaVec"] = 3
 globalParameters["DataInitTypeMXSA"] = 1
 globalParameters["DataInitTypeMXSB"] = 1
+globalParameters["DataInitTypeRMSGamma"] = 3
+globalParameters["DataInitTypeResidual"] = 3
 globalParameters["DataInitValueActivationArgs"] = [2.0, 2.0]
 # Runtime steering for solutions compiled with WorkAssignment=Hybrid; this
 # does not select a compiled tile-processing or work-assignment family.

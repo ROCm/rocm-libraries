@@ -31,6 +31,8 @@ GlobalParameters:
   Device: 0
   SkipSlowSolutionRatio: 0.0
   RotatingBufferSize: 1024
+  DataInitTypeRMSGamma: 1
+  DataInitTypeResidual: 2
 
 BenchmarkProblems:
 
@@ -99,6 +101,106 @@ BenchmarkProblems:
             - Exact: [768, 640, 1, 512]   # M=768, 768%8==0 -> WIDE
             - Exact: [521, 521, 1, 521]   # M=521, 521%8==1 -> NARROW
             - Exact: [532, 64, 1, 64]     # M=532, 532%8==4 -> NARROW
+
+  ########################################
+  # bf16 in, bf16 out — RMSEpilogue (PartialRMS + ResidualAdd + StoreBf16D)
+  # CMS (UseCustomMainLoopSchedule=1), data-parallel, MT 256x256x64, gfx950.
+  #
+  # The CMS kernel runs the same native RMS schedule as Subtile: WIDE (M%8==0,
+  # dwordx4) and NARROW (M%8!=0, scalar bf16) arms, both with row-OOB clamps, so
+  # partial M and N tiles are covered below.
+  ########################################
+  -
+    -
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: False
+      Batched: True
+      StridedBatched: True
+      GroupedGemm: False
+      UseBias: 0
+      UseScaleAB: ""
+      UseScaleCD: False
+      UseScaleAlphaVec: 0
+      UseScaleD: False
+      Sparse: 0
+      Activation: False
+      SupportUserArgs: False
+      UseRMSEpilogue: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1,  1, 8, 8,  2, 2]
+        - DepthU: [64]
+        - DirectToLds: [1]
+        - DirectToLdsMetadata: [0]
+        - DtlPlusLdsBuf: [0]
+        - ExpandPointerSwap: [False]
+        - GlobalReadVectorWidthA: [8]
+        - GlobalReadVectorWidthB: [8]
+        - GlobalSplitU: [1]
+        - GlobalSplitUAlgorithm: ["MultipleBuffer"]
+        - InitCIterWmma: [0]
+        - LdsBlockSizePerPadA: [1024]
+        - LdsBlockSizePerPadB: [1024]
+        - LdsBlockSizePerPadMXSA: [0]
+        - LdsBlockSizePerPadMXSB: [0]
+        - LdsBlockSizePerPadMetadata: [0]
+        - LdsPadA: [16]
+        - LdsPadB: [16]
+        - LdsPadMXSA: [0]
+        - LdsPadMXSB: [0]
+        - LdsPadMetadata: [0]
+        - LocalReadVectorWidth: [8]
+        - MaxOccupancy: [40]
+        - MinGRIncPerMfma: [1]
+        - MXLoadInst: ["BufferLoad"]
+        - MXScaleFormat: ["NoSwizzle"]
+        - NonTemporalA: [1]
+        - NonTemporalB: [1]
+        - NonTemporalC: [4]
+        - NonTemporalD: [3]
+        - NumElementsPerBatchStore: [12]
+        - PreloadKernArgs: [True]
+        - PrefetchGlobalRead: [2]
+        - RMSEpilogue: [True]
+        - RMSEpiloguePrefetchDepth: [2]
+        - ScheduleGROverBarrier: [0]
+        - ScheduleIterAlg: [3]
+        - SourceSwap: [True]
+        - StoreSyncOpt: [1]
+        - StoreVectorWidth: [8]
+        - StreamK: [3]
+        - StreamKAtomic: [0]
+        - StreamKForceDPOnly: [1]
+        - StreamKWorkStealing: [0]
+        - StreamKXCCMapping: [8]
+        - SwInstructionPrefetch: [1]
+        - TransposeLDS: [1]
+        - TransposeLDSMetadata: [1]
+        - UseCustomMainLoopSchedule: [1]
+        - UseSgprForGRO: [0]
+        - VectorWidthA: [8]
+        - VectorWidthB: [8]
+        - WorkGroupMappingXCC: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+            - Exact: [256, 256, 1, 256]    # M=256 = 1*MT0, N=256 (N%MT1==0)
+            - Exact: [512, 640, 1, 512]    # M=512 = 2*MT0, N=640 (N%MT1!=0)
+            - Exact: [1024, 512, 1, 512]   # M=1024 = 4*MT0, N=512
+            - Exact: [264, 256, 1, 256]    # M%256!=0, M%8==0 -> WIDE, partial M tile
+            - Exact: [520, 640, 1, 512]    # partial M and N tiles, WIDE
+            - Exact: [521, 300, 1, 256]    # M%8==1 -> NARROW, partial tiles
+            - Exact: [532, 264, 1, 512]    # M%8==4 -> NARROW, partial tiles
 
 LibraryLogic:
   ScheduleName: "bench_fused_bf16_partialrms_residualadd"

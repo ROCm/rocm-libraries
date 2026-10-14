@@ -16,8 +16,10 @@ YAML=epilogues/YAMLs/benchmark_k1_bf16_top_config.yaml
 VARIANTS=(rms beta none)
 
 usage() {
-  echo "usage: $0 [--gpu N] [--out-dir DIR] [--skip-build] [--timing-repeats R] [--force]" >&2
+  echo "usage: $0 [--gpu N] [--out-dir DIR] [--skip-build] [--timing-repeats R] [--force] [--yaml PATH]" >&2
   echo "  defaults: --gpu 0 --out-dir \$HOME/epilogue-profile --timing-repeats 3" >&2
+  echo "  --yaml PATH: Tensile config with one rms, one beta and one none problem (relative to the" >&2
+  echo "  tensilelite directory, or absolute); default epilogues/YAMLs/benchmark_k1_bf16_top_config.yaml" >&2
   exit 2
 }
 
@@ -28,6 +30,7 @@ while [[ $# -gt 0 ]]; do
     --skip-build) SKIP_BUILD=1; shift ;;
     --timing-repeats) TIMING_REPEATS="$2"; shift 2 ;;
     --force) FORCE=1; shift ;;
+    --yaml) YAML="$2"; shift 2 ;;
     -h|--help) usage ;;
     *) echo "unknown argument: $1" >&2; usage ;;
   esac
@@ -36,6 +39,12 @@ done
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TENSILE_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 ANALYZE="$SCRIPT_DIR/rocprof_analyze.py"
+# The stamp hashes the YAML file, so resolve a relative --yaml against the tensilelite directory.
+case "$YAML" in
+  /*) YAML_PATH="$YAML" ;;
+  *) YAML_PATH="$TENSILE_DIR/$YAML" ;;
+esac
+[[ -f "$YAML_PATH" ]] || { echo "error: yaml not found: $YAML_PATH" >&2; exit 2; }
 mkdir -p "$OUT_DIR"
 OUT="$(cd "$OUT_DIR" && pwd)"
 START_S=$SECONDS
@@ -85,7 +94,7 @@ current_stamp() {
   printf '{\n  "clang_version": "%s",\n  "git_head": "%s",\n  "rocm_core_version": "%s",\n  "rocm_root": "%s",\n  "tree_status_sha256": "%s",\n  "yaml_sha256": "%s"\n}\n' \
     "$(clang_version)" "$(git -C "$TENSILE_DIR" rev-parse HEAD)" "$(rocm_core_version)" \
     "$(readlink -f /opt/rocm/bin)" "$(tree_status_hash)" \
-    "$(sha256sum "$TENSILE_DIR/$YAML" | cut -d' ' -f1)"
+    "$(sha256sum "$YAML_PATH" | cut -d' ' -f1)"
 }
 
 STAMP="$OUT/tensile/build_stamp.json"

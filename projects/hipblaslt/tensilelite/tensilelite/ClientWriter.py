@@ -581,6 +581,8 @@ def dataInitParams(problemType):
     initScaleAlphaVec  = globalParameters['DataInitTypeScaleAlphaVec']
     initMXScaleA = globalParameters["DataInitTypeMXSA"]
     initMXScaleB = globalParameters["DataInitTypeMXSB"]
+    initRMSGamma = globalParameters["DataInitTypeRMSGamma"]
+    initResidual = globalParameters["DataInitTypeResidual"]
 
     if not problemType.useBeta:
         initBeta = 0
@@ -603,7 +605,9 @@ def dataInitParams(problemType):
             ('init-scaleD',        DataInitName(initScaleD).name),
             ('init-scaleAlphaVec', DataInitName(initScaleAlphaVec).name),
             ('init-mx-a',      DataInitName(initMXScaleA).name),
-            ('init-mx-b',      DataInitName(initMXScaleB).name)]
+            ('init-mx-b',      DataInitName(initMXScaleB).name),
+            ('init-rmsGamma',  DataInitName(initRMSGamma).name),
+            ('init-residual',  DataInitName(initResidual).name)]
 
 def boundsCheckName(mode):
     if mode == 0: return 'Disable'

@@ -51,8 +51,7 @@ HIP_OCCUPANCY = os.path.join(os.path.dirname(os.path.abspath(__file__)), "hip_oc
 PROBLEM_M, PROBLEM_N, PROBLEM_BATCH, PROBLEM_K = 2048, 16384, 1, 2048
 PROBLEM_FLOPS = 2 * PROBLEM_M * PROBLEM_N * PROBLEM_K * PROBLEM_BATCH
 BF16_BYTES = 2
-# One 16x16x32 bf16 MFMA is 16 * 16 * 32 * 2 flops; MOPS counters are flops / 512.
-MFMA_FLOPS_PER_INST = 16 * 16 * 32 * 2
+# MOPS counters are flops / 512.
 MFMA_MOPS_FLOPS = 512
 FLOPS_PER_CLK_PER_CU_BF16 = 4096
 
@@ -949,7 +948,7 @@ def ceil_div(a, b):
     return -(-a // b)
 
 
-def compulsory_bytes(use_beta, use_rms):
+def compulsory_bytes(use_beta, use_rms, mt0, mt1):
     """Analytic minimum DRAM traffic for one dispatch (batch 1, bf16 operands)."""
     a = PROBLEM_M * PROBLEM_K * BF16_BYTES
     b = PROBLEM_N * PROBLEM_K * BF16_BYTES
@@ -958,7 +957,9 @@ def compulsory_bytes(use_beta, use_rms):
     if use_beta:
         read += d
     if use_rms:
-        partial = ceil_div(PROBLEM_N, 256) * 256 * ceil_div(PROBLEM_M, 256) * 4
+        # Mirrors ContractionSolution::partialRMSPartialBufBytes: tokens (N) padded by MT1, one fp32
+        # per feature (M) macro tile.
+        partial = ceil_div(PROBLEM_N, mt1) * mt1 * ceil_div(PROBLEM_M, mt0) * 4
         read += d + PROBLEM_M * BF16_BYTES
         write += d + partial
     return read, write
@@ -1283,10 +1284,9 @@ row("coalescing", "l1_tag_accesses_per_vmem_wavefront", "tag accesses/wavefront"
 row("coalescing", "l2_read_req_per_vmem_rd_inst", "requests/instruction", "tcp_coal",
     lambda v, c: safe_div(v("TCP_TCC_READ_REQ_sum"), v("SQ_INSTS_VMEM_RD")),
     "TCP_TCC_READ_REQ / SQ_INSTS_VMEM_RD (same pass tcp_coal); 8 = minimum for buffer_load_dwordx4 "
-    "(1024 B/instr in 128-B lines); instruction-mix average: values below 8 mean narrower loads (beta "
-    "epilogue C uses buffer_load_dwordx2 -> 4 req/instr), above 8 mean sub-line requests (rms residual "
-    "64-B requests); not a coalescing comparison across variants; epilogue reads of beta/rms are "
-    "included in both terms", REF_COAL)
+    "(1024 B/instr in 128-B lines); instruction-mix average: values below 8 mean narrower loads "
+    "(buffer_load_dwordx2 -> 4 req/instr), above 8 mean sub-line requests (half-line 64-B requests); "
+    "not a coalescing comparison across variants; epilogue reads of beta/rms are included in both terms", REF_COAL)
 row("coalescing", "l2_write_req_per_vmem_wr_inst", "requests/instruction", "tcp_coal",
     lambda v, c: safe_div(v("TCP_TCC_WRITE_REQ_sum"), v("SQ_INSTS_VMEM_WR")),
     "TCP_TCC_WRITE_REQ / SQ_INSTS_VMEM_WR (same pass tcp_coal)", REF_COAL)
@@ -1311,9 +1311,7 @@ row("coalescing", "l2_write_req_efficiency", "ratio", "tcp_coal",
     lambda v, c: safe_div(c["comp_write"] / 64.0, v("TCP_TCC_WRITE_REQ_sum")),
     "(analytic written bytes / 64) / TCP_TCC_WRITE_REQ; written bytes = D (+ residual-out and the "
     "partial-sum buffer for rms); 1.0 means every write request carries 64 B; for rms the shortfall is "
-    "the partial-sum stores (observed for this problem: TCP_TCC_WRITE_REQ rms - none - ResidualOut "
-    "bytes / 64 = 65,536 small requests of about 8 B each vs 8,192 modelled), which also accounts for "
-    "~2 MB extra fabric write", REF_COAL)
+    "the partial-sum stores (small requests, see the excess_*_write rows)", REF_COAL)
 
 # --- L2 (1700) and memory traffic ---------------------------------------------------------------
 row("l2", "hit_rate_pct", "percent", "tcc_hit",
@@ -1441,7 +1439,21 @@ def disassemble_mfma(variant):
     for name in re.findall(r"^\s+(v_mfma\w*)", out, re.M):
         counts[name] = counts.get(name, 0) + 1
     bf16 = sum(n for name, n in counts.items() if "bf16" in name)
-    return {"counts": counts, "bf16": bf16, "prologue": sum(counts.values()) - bf16}
+    return {"counts": counts, "bf16": bf16, "prologue": sum(counts.values()) - bf16,
+            "flops_per_bf16_inst": bf16_mfma_flops(counts)}
+
+
+def bf16_mfma_flops(counts):
+    """Flops of one bf16 MFMA, read from its mnemonic (v_mfma_f32_16x16x32_bf16 is 2 * 16 * 16 * 32)."""
+    matches = {name: re.search(r"_(\d+)x(\d+)x(\d+)_?bf16", name) for name in counts if "bf16" in name}
+    unparsed = sorted(name for name, match in matches.items() if not match)
+    if unparsed:
+        fatal(f"cannot read the mfma shape from bf16 mnemonics {unparsed}")
+    shapes = {match.groups() for match in matches.values()}
+    if len(shapes) != 1:
+        fatal(f"expected exactly one bf16 MFMA shape in the code object, found {sorted(shapes)}")
+    m, n, k = (int(x) for x in shapes.pop())
+    return 2 * m * n * k
 
 
 def kernel_macro_tile(kernel_name):
@@ -1457,7 +1469,7 @@ def mfma_expectation(ctx):
     mt0, mt1 = kernel_macro_tile(ctx.target)
     tiles = ceil_div(PROBLEM_M, mt0) * ceil_div(PROBLEM_N, mt1) * PROBLEM_BATCH
     waves_per_tile = ctx.occ["waves_per_wg"]
-    bf16 = PROBLEM_FLOPS // MFMA_FLOPS_PER_INST
+    bf16 = PROBLEM_FLOPS // ctx.mfma["flops_per_bf16_inst"]
     prologue = ctx.mfma["prologue"] * tiles * waves_per_tile
     return {"tiles": tiles, "waves_per_tile": waves_per_tile, "bf16": bf16, "prologue": prologue,
             "total": bf16 + prologue}
@@ -1526,7 +1538,7 @@ def mfma_static_rows(ctx):
               "static non-bf16 MFMA count (accumulator-clear prologue)"),
              ("expected_mfma_tiles", e["tiles"], "tiles", "analytic",
               "ceil(M/MT0) * ceil(N/MT1) * batch, macro tile read from the kernel name"),
-             ("expected_mfma_bf16_inst_count", e["bf16"], "inst", "analytic", "2*M*N*K / 16384"),
+             ("expected_mfma_bf16_inst_count", e["bf16"], "inst", "analytic", "2*M*N*K / flops per bf16 MFMA (from the code object mnemonic)"),
              ("expected_mfma_inst_count", e["total"], "inst", "analytic",
               f"bf16 + prologue_mfma * tiles * waves_per_tile ({e['waves_per_tile']})")]
     return [static_row(ctx, "compute", m, v, u, "static" if r == "static" else "analytic", r, f, REF_DISASM)
@@ -1603,7 +1615,8 @@ def build_metrics(ctx):
     timing = Stats(ctx.timing_us)
     pmc = Stats([x for g in ctx.pass_durations_us.values() for x in g])
     rows = static_rows(ctx)
-    comp_read, comp_write = compulsory_bytes(ctx.variant["use_beta"], ctx.variant["use_rms_epilogue"])
+    mt0, mt1 = kernel_macro_tile(ctx.target)
+    comp_read, comp_write = compulsory_bytes(ctx.variant["use_beta"], ctx.variant["use_rms_epilogue"], mt0, mt1)
     ideal_l2_read_req = ideal_operand_l2_read_req(ctx)
     operand_bytes = (PROBLEM_M + PROBLEM_N) * PROBLEM_K * BF16_BYTES
     consts = {"cu_count": ctx.cu_count, "num_xcc": ctx.num_xcc,
@@ -1646,7 +1659,7 @@ def check_mfma_work(ctx):
               f"tiles={e['tiles']} waves_per_tile={e['waves_per_tile']}")
     ctx.check_within("V4", "512 * SQ_INSTS_VALU_MFMA_MOPS_BF16 equals 2*M*N*K (exact)",
                      mv["compute.mfma_flops_bf16"], float(PROBLEM_FLOPS), 1e-9)
-    ctx.check_within("V4", "SQ_INSTS_VALU_MFMA_BF16 equals 2*M*N*K / 16384",
+    ctx.check_within("V4", "SQ_INSTS_VALU_MFMA_BF16 equals 2*M*N*K / flops per bf16 MFMA",
                      mv["compute.mfma_bf16_inst_count"], float(e["bf16"]), 1e-4, detail=detail)
     ctx.check_within("V4", "SQ_INSTS_MFMA equals bf16 MFMA + prologue MFMA * tiles * waves_per_tile",
                      mv["compute.mfma_inst_count"], float(e["total"]), 1e-4,

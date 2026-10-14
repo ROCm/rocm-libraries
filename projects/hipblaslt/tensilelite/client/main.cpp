@@ -825,6 +825,7 @@ int main(int argc, const char* argv[])
     }
     std::cout << std::endl << "srand seed is set to " << seed << std::endl << std::endl;
     srand(seed);
+    TensileLite::Client::g_initSeed = seed;
 
     ClientProblemFactory problemFactory(args);
 

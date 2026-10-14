@@ -1,0 +1,305 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# CMS (UseCustomMainLoopSchedule=1) counterpart of benchmark_k1_bf16_top_config.yaml
+# for profile_epilogues.sh: the same rms, beta and none problems (in that order) on
+# the CMS MT 256x256x64 data-parallel kernel from benchmark_bf16_rms_cms_mt256x256_dp.yaml.
+# Only UseBeta, UseRMSEpilogue and RMSEpilogue differ between the three problems.
+
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250]
+
+GlobalParameters:
+  MinimumRequiredVersion: 5.0.0
+  SleepPercent: 0
+  EnqueuesPerSync: 20
+  NumWarmups: 20
+  KernelTime: true
+  NumElementsToValidate: -1
+  DataInitTypeA: 12
+  DataInitTypeB: 13
+  DataInitTypeC: 12
+  DataInitTypeD: 12
+  DataInitTypeAlpha: 1
+  DataInitTypeRMSGamma: 1
+  DataInitTypeResidual: 2
+  CSVExportWinner: true
+  CSVMergeSameProblemID: true
+  PreciseKernelTime: false
+  Device: 0
+  SkipSlowSolutionRatio: 0.0
+  KeepBuildTmp: true
+  RotatingBufferSize: 1024
+  PrintSolutionRejectionReason: True
+
+BenchmarkProblems:
+
+  ########################################
+  # rms: PartialRMS + ResidualAdd + StoreBf16D.
+  ########################################
+  -
+    -
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: False
+      Batched: True
+      StridedBatched: True
+      GroupedGemm: False
+      UseBias: 0
+      UseScaleAB: ""
+      UseScaleCD: False
+      UseScaleAlphaVec: 0
+      UseScaleD: False
+      Sparse: 0
+      Activation: False
+      SupportUserArgs: False
+      UseRMSEpilogue: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1,  1, 8, 8,  2, 2]  # MT 256x256
+        - DepthU: [64]
+        - DirectToLds: [1]
+        - DirectToLdsMetadata: [0]
+        - DtlPlusLdsBuf: [0]
+        - ExpandPointerSwap: [False]
+        - GlobalReadVectorWidthA: [8]
+        - GlobalReadVectorWidthB: [8]
+        - GlobalSplitU: [0]
+        - GlobalSplitUAlgorithm: ["MultipleBuffer"]
+        - InitCIterWmma: [0]
+        - LdsBlockSizePerPadA: [1024]
+        - LdsBlockSizePerPadB: [1024]
+        - LdsBlockSizePerPadMXSA: [0]
+        - LdsBlockSizePerPadMXSB: [0]
+        - LdsBlockSizePerPadMetadata: [0]
+        - LdsPadA: [16]
+        - LdsPadB: [16]
+        - LdsPadMXSA: [0]
+        - LdsPadMXSB: [0]
+        - LdsPadMetadata: [0]
+        - LocalReadVectorWidth: [8]
+        - MaxOccupancy: [40]
+        - MinGRIncPerMfma: [1]
+        - MXLoadInst: ["BufferLoad"]
+        - MXScaleFormat: ["NoSwizzle"]
+        - NonTemporalA: [1]
+        - NonTemporalB: [1]
+        - NonTemporalC: [4]
+        - NonTemporalD: [3]
+        - NumElementsPerBatchStore: [12]
+        - PreloadKernArgs: [True]
+        - PrefetchGlobalRead: [2]
+        - RMSEpilogue: [True]
+        - RMSEpiloguePrefetchDepth: [4]
+        - ScheduleGROverBarrier: [0]
+        - ScheduleIterAlg: [3]
+        - SourceSwap: [True]
+        - StoreSyncOpt: [1]
+        - StoreVectorWidth: [8]
+        - StreamK: [3]
+        - StreamKAtomic: [0]
+        - StreamKForceDPOnly: [1]
+        - StreamKWorkStealing: [0]
+        - StreamKXCCMapping: [8]
+        - SwInstructionPrefetch: [1]
+        - TransposeLDS: [1]
+        - TransposeLDSMetadata: [1]
+        - UseCustomMainLoopSchedule: [1]
+        - UseSgprForGRO: [0]
+        - VectorWidthA: [8]
+        - VectorWidthB: [8]
+        - WorkGroupMappingXCC: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+            - Exact: [2048, 16384, 1, 2048]
+  ########################################
+  # beta: D = alpha * A * B + beta * C, no RMS epilogue.
+  ########################################
+  -
+    -
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      StridedBatched: True
+      GroupedGemm: False
+      UseBias: 0
+      UseScaleAB: ""
+      UseScaleCD: False
+      UseScaleAlphaVec: 0
+      UseScaleD: False
+      Sparse: 0
+      Activation: False
+      SupportUserArgs: False
+      UseRMSEpilogue: False
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1,  1, 8, 8,  2, 2]  # MT 256x256
+        - DepthU: [64]
+        - DirectToLds: [1]
+        - DirectToLdsMetadata: [0]
+        - DtlPlusLdsBuf: [0]
+        - ExpandPointerSwap: [False]
+        - GlobalReadVectorWidthA: [8]
+        - GlobalReadVectorWidthB: [8]
+        - GlobalSplitU: [0]
+        - GlobalSplitUAlgorithm: ["MultipleBuffer"]
+        - InitCIterWmma: [0]
+        - LdsBlockSizePerPadA: [1024]
+        - LdsBlockSizePerPadB: [1024]
+        - LdsBlockSizePerPadMXSA: [0]
+        - LdsBlockSizePerPadMXSB: [0]
+        - LdsBlockSizePerPadMetadata: [0]
+        - LdsPadA: [16]
+        - LdsPadB: [16]
+        - LdsPadMXSA: [0]
+        - LdsPadMXSB: [0]
+        - LdsPadMetadata: [0]
+        - LocalReadVectorWidth: [8]
+        - MaxOccupancy: [40]
+        - MinGRIncPerMfma: [1]
+        - MXLoadInst: ["BufferLoad"]
+        - MXScaleFormat: ["NoSwizzle"]
+        - NonTemporalA: [1]
+        - NonTemporalB: [1]
+        - NonTemporalC: [4]
+        - NonTemporalD: [3]
+        - NumElementsPerBatchStore: [12]
+        - PreloadKernArgs: [True]
+        - PrefetchGlobalRead: [2]
+        - RMSEpilogue: [False]
+        - RMSEpiloguePrefetchDepth: [4]
+        - ScheduleGROverBarrier: [0]
+        - ScheduleIterAlg: [3]
+        - SourceSwap: [True]
+        - StoreSyncOpt: [1]
+        - StoreVectorWidth: [8]
+        - StreamK: [3]
+        - StreamKAtomic: [0]
+        - StreamKForceDPOnly: [1]
+        - StreamKWorkStealing: [0]
+        - StreamKXCCMapping: [8]
+        - SwInstructionPrefetch: [1]
+        - TransposeLDS: [1]
+        - TransposeLDSMetadata: [1]
+        - UseCustomMainLoopSchedule: [1]
+        - UseSgprForGRO: [0]
+        - VectorWidthA: [8]
+        - VectorWidthB: [8]
+        - WorkGroupMappingXCC: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+            - Exact: [2048, 16384, 1, 2048]
+  ########################################
+  # none: D = alpha * A * B, no beta and no RMS epilogue.
+  ########################################
+  -
+    -
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: False
+      Batched: True
+      StridedBatched: True
+      GroupedGemm: False
+      UseBias: 0
+      UseScaleAB: ""
+      UseScaleCD: False
+      UseScaleAlphaVec: 0
+      UseScaleD: False
+      Sparse: 0
+      Activation: False
+      SupportUserArgs: False
+      UseRMSEpilogue: False
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1,  1, 8, 8,  2, 2]  # MT 256x256
+        - DepthU: [64]
+        - DirectToLds: [1]
+        - DirectToLdsMetadata: [0]
+        - DtlPlusLdsBuf: [0]
+        - ExpandPointerSwap: [False]
+        - GlobalReadVectorWidthA: [8]
+        - GlobalReadVectorWidthB: [8]
+        - GlobalSplitU: [0]
+        - GlobalSplitUAlgorithm: ["MultipleBuffer"]
+        - InitCIterWmma: [0]
+        - LdsBlockSizePerPadA: [1024]
+        - LdsBlockSizePerPadB: [1024]
+        - LdsBlockSizePerPadMXSA: [0]
+        - LdsBlockSizePerPadMXSB: [0]
+        - LdsBlockSizePerPadMetadata: [0]
+        - LdsPadA: [16]
+        - LdsPadB: [16]
+        - LdsPadMXSA: [0]
+        - LdsPadMXSB: [0]
+        - LdsPadMetadata: [0]
+        - LocalReadVectorWidth: [8]
+        - MaxOccupancy: [40]
+        - MinGRIncPerMfma: [1]
+        - MXLoadInst: ["BufferLoad"]
+        - MXScaleFormat: ["NoSwizzle"]
+        - NonTemporalA: [1]
+        - NonTemporalB: [1]
+        - NonTemporalC: [4]
+        - NonTemporalD: [3]
+        - NumElementsPerBatchStore: [12]
+        - PreloadKernArgs: [True]
+        - PrefetchGlobalRead: [2]
+        - RMSEpilogue: [False]
+        - RMSEpiloguePrefetchDepth: [4]
+        - ScheduleGROverBarrier: [0]
+        - ScheduleIterAlg: [3]
+        - SourceSwap: [True]
+        - StoreSyncOpt: [1]
+        - StoreVectorWidth: [8]
+        - StreamK: [3]
+        - StreamKAtomic: [0]
+        - StreamKForceDPOnly: [1]
+        - StreamKWorkStealing: [0]
+        - StreamKXCCMapping: [8]
+        - SwInstructionPrefetch: [1]
+        - TransposeLDS: [1]
+        - TransposeLDSMetadata: [1]
+        - UseCustomMainLoopSchedule: [1]
+        - UseSgprForGRO: [0]
+        - VectorWidthA: [8]
+        - VectorWidthB: [8]
+        - WorkGroupMappingXCC: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+            - Exact: [2048, 16384, 1, 2048]
+LibraryLogic:
+  ScheduleName: "epilogues_bf16_cms_mt256x256_dp_profile"
+  DeviceNames: ["Device 75a0"]
+  ArchitectureName: "gfx950"
+  LibraryType: "Equality"

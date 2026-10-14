@@ -408,12 +408,10 @@ def _validateRMSEpilogue(state, printRejectionReason):
     return
   if not _validateSubtileEpiloguePrereqs(state, printRejectionReason, "RMSEpilogue"):
     return
-  # Non-subtile (CMS/interleaved) RMSEpilogue is unsupported: the native emitter
-  # is Subtile-only and there is no fallback path. Reject outright.
-  if not state["UseSubtileImpl"]:
-    reject(state, printRejectionReason,
-           "RMSEpilogue requires UseSubtileImpl=True; non-subtile (CMS) RMSEpilogue is not supported")
-    return
+  # Both UseSubtileImpl and CMS (UseCustomMainLoopSchedule=1) kernels are supported:
+  # _validateSubtileEpiloguePrereqs above enforces megaFusedEpilogueCompatible(state).
+  # Both run the native RMSEpilogueEmitter schedule; CMS kernels enter it through
+  # emitSubtileFusedEpilogue with a CMS layout (RMSEpilogueLayout.CmsRmsLayout).
   # The native RMSEpilogueEmitter supports bf16 and MXFP8 (float8) output.
   # All other dest types are unsupported; reject them.
   destType = state["ProblemType"]["DestDataType"]
@@ -422,6 +420,21 @@ def _validateRMSEpilogue(state, printRejectionReason):
            "RMSEpilogue supports bf16 or float8 output only; a non-bf16, non-float8 dest "
            "is not supported")
     return
+  # The CMS layout hardcodes the accumulator/lane geometry of the 256x256, 2x2-wave,
+  # bf16 kernel; reject every other CMS shape instead of emitting a wrong epilogue.
+  if not state.get("UseSubtileImpl"):
+    if not destType.isBFloat16():
+      reject(state, printRejectionReason,
+             "RMSEpilogue on a CMS kernel supports bf16 output only (no MXFP8 path)")
+      return
+    if state["MacroTile0"] != 256 or state["MacroTile1"] != 256:
+      reject(state, printRejectionReason,
+             "RMSEpilogue on a CMS kernel requires MacroTile0 == MacroTile1 == 256")
+      return
+    if list(state["MIWaveGroup"]) != [2, 2]:
+      reject(state, printRejectionReason,
+             "RMSEpilogue on a CMS kernel requires MIWaveGroup == [2, 2]")
+      return
   # Native-path even tile-M guard: pair-based body has no odd-T_M leftover path.
   tM = (state["MacroTile0"] // 16) // state["MIWaveGroup"][0]
   if tM % 2 != 0:

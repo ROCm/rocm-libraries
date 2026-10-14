@@ -43,6 +43,8 @@ GlobalParameters:
   Device: 0
   SkipSlowSolutionRatio: 0.0
   RotatingBufferSize: 1024
+  DataInitTypeRMSGamma: 1
+  DataInitTypeResidual: 2
 
 BenchmarkProblems:
 

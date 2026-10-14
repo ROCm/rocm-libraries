@@ -45,12 +45,16 @@
 #include <iostream>
 #include <list>
 #include <map>
+#include <omp.h>
+#include <random>
 #include <tuple>
 
 namespace TensileLite
 {
     namespace Client
     {
+        unsigned int g_initSeed = 0;
+
         template <typename K, typename T, std::size_t MaxNumEntries = 128>
         class LRUCache
         {
@@ -458,8 +462,9 @@ namespace TensileLite
 
 #pragma omp parallel
             {
-                std::random_device                      rd;
-                std::mt19937                            rng(rd());
+                std::seed_seq                           seq{g_initSeed,
+                                                            (unsigned int)omp_get_thread_num()};
+                std::mt19937                            rng(seq);
                 std::uniform_int_distribution<uint32_t> dist(
                     1, static_cast<uint32_t>(PruneSparseMode::MaxPruneMode) - 1);
 

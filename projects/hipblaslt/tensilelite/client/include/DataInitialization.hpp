@@ -40,6 +40,8 @@
 #include <map>
 #include <random>
 
+#include <omp.h>
+
 #include "RunListener.hpp"
 
 namespace TensileLite
@@ -115,9 +117,18 @@ namespace TensileLite
             Count
         };
 
+        // Module-level seed for deterministic, parallel-safe RNG.
+        // Set once from the --init-seed argument before any data init.
+        extern unsigned int g_initSeed;
+
         static int getThreadLocalRandInt()
         {
-            thread_local std::mt19937          generator(std::random_device{}());
+            // Seeded from g_initSeed combined with the per-thread index so the
+            // generator is both reproducible run-to-run and parallel-safe.
+            thread_local std::mt19937          generator([] {
+                std::seed_seq seq{g_initSeed, (unsigned int)omp_get_thread_num()};
+                return std::mt19937(seq);
+            }());
             std::uniform_int_distribution<int> distribution;
             return distribution(generator);
         }

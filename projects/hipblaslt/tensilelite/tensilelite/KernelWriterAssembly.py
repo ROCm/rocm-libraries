@@ -16284,10 +16284,15 @@ class KernelWriterAssembly(KernelWriter):
 
     Both bf16 and MXFP8 (float8 D) Subtile configs route to the native path. The
     MXFP8 native path also emits amax/quantMult/MXScale byte stores in-epilogue.
-    CMS/interleaved (non-UseSubtileImpl) RMSEpilogue configs are rejected by
-    Solution._validateRMSEpilogue and never reach codegen; there is no fallback path.
-    The tM%2 guard stays because the native body is pair-based
-    (numPairs = (T_M//2)*T_N) and has no odd-T_M leftover path.
+    CMS+RMSEpilogue kernels also reach the native path, via a different entry:
+    emitSubtileFusedEpilogue early-returns to RMSEpilogueEmitter.emit(None), which runs
+    the same schedule as Subtile (residual ring, DTL gamma, WIDE/NARROW arms with row-OOB
+    clamps, cross-wave partialBuf write) with a CMS layout (RMSEpilogueLayout.CmsRmsLayout):
+    it reads SS=True accumulators directly (no synthesized tile view, no AGPR transpose)
+    and reduces over the c lanes with DPP quad_perm reduce-scatter adds plus an LDS
+    transpose-sum, so every thread stores one column partial (no ds_bpermute). The tM%2 guard
+    is only meaningful for the Subtile pair-based body; CMS+RMS requires a 256x256 tile
+    (enforced in Solution._validateRMSEpilogue).
 
     RMSEpilogueEmitter._nativeEligible delegates to this predicate so the store gate and
     the emitter never drift.
@@ -16297,14 +16302,16 @@ class KernelWriterAssembly(KernelWriter):
     from .Components.CustomSchedule import megaFusedEpilogueCompatible
     if not megaFusedEpilogueCompatible(kernel):
       return False
-    if not kernel.get("UseSubtileImpl"):
+    # Both UseSubtileImpl and CMS (UseCustomMainLoopSchedule=1) route to the native path;
+    # CMS+RMS takes an early return in emitSubtileFusedEpilogue (no synthesized tile view).
+    if not kernel.get("UseSubtileImpl") and kernel.get("UseCustomMainLoopSchedule") != 1:
       return False
     destType = kernel["ProblemType"]["DestDataType"]
     # Both bf16 and float8 (MXFP8) route to the native emitter; all other dtypes
     # are rejected by Solution._validateRMSEpilogue and never reach here.
     if not destType.isBFloat16() and not destType.isFloat8():
       return False
-    # Tile-shape guard: pair-based body (numPairs = (T_M//2)*T_N), no odd-T_M path.
+    # Tile-shape guard: pair-based body (numUnits = (T_M//2)*T_N), no odd-T_M path.
     tM = (kernel["MacroTile0"] // 16) // kernel["MIWaveGroup"][0]
     return tM % 2 == 0
 
@@ -16313,6 +16320,14 @@ class KernelWriterAssembly(KernelWriter):
     module = Module("SubtileFusedEpilogue")
     from .Components.CustomSchedule import megaFusedEpilogueCompatible
     if not megaFusedEpilogueCompatible(kernel):
+      return module
+    # Native CMS path: the emitter runs the shared RMS schedule with a CMS layout that reads
+    # SS=True accumulators directly (no AGPR transpose, no synthesized tile view, so no
+    # vgprTiles). Gate: CMS + RMSEpilogue; Subtile is handled below.
+    if (kernel["RMSEpilogue"] and not kernel.get("UseSubtileImpl")
+            and kernel.get("UseCustomMainLoopSchedule") == 1):
+      from .Components.Subtile.RMSEpilogueEmit import RMSEpilogueEmitter
+      module.add(RMSEpilogueEmitter(self, kernel).emit(None))
       return module
     # CMS SourceSwap=True: transpose accumulators in/out so the non-SS emitter operates correctly.
     isCmsSS = (not kernel.get("UseSubtileImpl") and kernel.get("SourceSwap", False))

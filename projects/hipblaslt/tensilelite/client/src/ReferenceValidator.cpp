@@ -364,16 +364,14 @@ namespace TensileLite
             break;
             case rocisa::DataType::E8:
             {
-                // E8 encodes e8m0 scale bytes. Exact byte match is required unless the
-                // caller passes the MXFP8 sentinel threshold (set in validate()), which
-                // permits a +/-1 exponent step.
+                // E8 encodes e8m0 scale bytes; exact byte match is required.
                 rv = checkResultsTyped(tensor,
                                        (uint8_t const*)refPtr,
                                        (uint8_t const*)resPtr,
                                        maxElements,
                                        isgpu,
                                        validationStride,
-                                       threshold);
+                                       0.0);
             }
             break;
             default:
@@ -420,10 +418,6 @@ namespace TensileLite
             } else if (isTF32x1) {
                 threshold = 0.3 * sqrt(double(k));
             }
-
-            bool isMxfp8Quant = problem.rmsEpilogue()
-                                && problem.d().dataType() == rocisa::DataType::Float8
-                                && reference.mxScale != nullptr;
 
             for(size_t i = 0; i < problem.tensors().size(); i++)
             {
@@ -586,22 +580,13 @@ namespace TensileLite
                     continue;
                 }
 
-                double tensorThreshold = threshold;
-                if(isMxfp8Quant)
-                {
-                    auto mxIdx = static_cast<ContractionProblemGemm::TENSOR>(i);
-                    if(mxIdx == ContractionProblemGemm::TENSOR::MXSCALE)
-                        tensorThreshold = MXFP8ScaleE8M0Tol;
-                    else if(mxIdx == ContractionProblemGemm::TENSOR::D)
-                        tensorThreshold = MXFP8DequantBinadeTol;
-                }
                 rv &= checkResults(*validationTensor,
                     refPtr,
                     resPtr,
                     result.maxElements[i],
                     result.gpu,
                     validationStride,
-                    tensorThreshold);
+                    threshold);
             }
             return rv;
         }
