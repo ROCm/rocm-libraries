@@ -843,7 +843,12 @@ def build_flash_attn_func_module_primary(
                         dtype=fx.Float32,
                     )
                 )
-                acc.append(fx.Float32(carry[1 + j]) + w * ov)
+                # A split that reached no key of this row wrote no partial O; its slot
+                # holds whatever the workspace held, and 0 * NaN would poison the row
+                # (modification 27).
+                acc.append(
+                    fx.Float32(carry[1 + j]) + (li == c_ninf).select(c_zero, w * ov)
+                )
             res = yield [fx.Float32(carry[0]) + w] + acc
         l_all = fx.Float32(res[0])
         has = l_all > c_zero

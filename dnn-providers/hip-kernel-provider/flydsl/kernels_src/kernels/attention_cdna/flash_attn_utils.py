@@ -4707,8 +4707,15 @@ class GenericStoreHelper:
                     + ctx.lane_div_32 * fx.Index(4)
                     + fx.Index(grp * 8)
                 )
+                # A row no key of this split reached stores 0, selected rather than
+                # multiplied: a fully masked q-block's accumulators are not valid, and
+                # garbage * 0 can be NaN (modification 27; the direct store zeroes such
+                # blocks the same way).
                 vals = Vec.from_elements(
-                    [fx.Float32(v_o[grp * 4 + i]) for i in range_constexpr(4)],
+                    [
+                        has_keys.select(fx.Float32(v_o[grp * 4 + i]), ctx.c_zero_f)
+                        for i in range_constexpr(4)
+                    ],
                     fx.Float32,
                 )
                 buffer_ops.buffer_store(

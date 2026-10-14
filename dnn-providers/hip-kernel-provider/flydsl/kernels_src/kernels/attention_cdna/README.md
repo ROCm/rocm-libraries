@@ -293,6 +293,14 @@ diff against upstream plus the modifications below.
     - **Unchanged:** every 64/128/256 build compiles to the same object. The DMA paths,
       the permuting V^T store, K chunks and V column slices stay off at these widths.
       Not yet upstream.
+27. **A split that reached no key of a row contributes nothing** (`flash_attn_utils.py`,
+    `flash_attn_generic.py`). For a fully masked q-block (bottom-right with more queries
+    than keys, or a window) a split's accumulators are not valid; the direct store zeroes
+    such blocks, but the split store wrote them times 0, which is NaN when they hold
+    NaN, and the merge weighted that partial by 0 again. The row came out NaN instead of
+    0 (seen on gfx942; gfx950's workspace happened to hold zeros). The split store now
+    selects 0 for a row with no keys, and the merge selects away any partial whose LSE is
+    -inf. Not yet upstream.
 
 The repository's `black` hook reformats these files on commit; that changes
 formatting only (the syntax trees are unchanged).
