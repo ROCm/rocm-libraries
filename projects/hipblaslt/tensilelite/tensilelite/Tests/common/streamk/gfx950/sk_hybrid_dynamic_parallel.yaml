@@ -14,9 +14,12 @@
 # kernel; the problems cover one tile with a long K, edge tiles, batches whose
 # parts span batches, and 64 tiles. Both raw-rank queue regimes are built
 # (WorkGroupMappingXCC -1, and PersistentXCCMapping 8 with WorkGroupMappingXCC
-# 8), with and without ActivationFuncCall. Validation checks the first launch
-# per problem; the Synchronizer check (on by default) catches queue counters
-# left nonzero by a work item that did not return to its queue.
+# 8), with and without ActivationFuncCall. Each problem is validated after its
+# first launch and again after a group of back-to-back launches
+# (ValidateAfterEnqueues) whose last launch writes a rotating output buffer no
+# earlier launch wrote; the Synchronizer check (on by default) runs after both
+# and catches queue counters left nonzero by a work item that did not return
+# to its queue.
 TestParameters:
   marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250, skip-gfx1250-strict]
 
@@ -39,7 +42,12 @@ GlobalParameters:
   DataInitTypeBias: 2
   DataInitTypeScaleAlphaVec: 2
   MaxWorkspaceSize: 134217728
-  SyncsPerBenchmark: 0
+  # 2 warmups and one group of 3 back-to-back launches per run, 2 runs per
+  # problem.
+  SyncsPerBenchmark: 1
+  EnqueuesPerSync: 3
+  ValidateAfterEnqueues: True
+  RotatingBufferSize: 512
   NumWarmups: 2
   NumBenchmarks: 2
   SleepPercent: 0
