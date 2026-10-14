@@ -218,6 +218,7 @@ if(HIPBLASLT_JIT_BUILT_HIPKITTENS)
         "${hipblaslt_jit_source}"
         "${hipblaslt_jit_source}/rocblaslt/include"
         "${hipblaslt_jit_source}/rocblaslt/src/include")
-    target_link_libraries(hipblaslt-jit-hipkittens-test PRIVATE roc::hipblaslt hip::device)
+    target_link_libraries(hipblaslt-jit-hipkittens-test PRIVATE
+        roc::hipblaslt roc::tensilelite-host hip::device)
     hipblaslt_jit_catch_test(jit-hipkittens jit-gpu hipblaslt-jit-hipkittens-test)
 endif()
