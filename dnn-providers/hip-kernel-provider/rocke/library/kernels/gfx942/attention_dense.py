@@ -142,12 +142,11 @@ P0 is CORRECTNESS-FIRST: the naive-V path (D64 / bf16-D128) is non-pipelined (a
 single LDS buffer) and reads V element-wise; the remaining perf levers (P2-P4) layer
 on top. It is validated against an fp32 SDPA reference across the in-scope cohort.
 
-New opt-in BF16 D128 experiment (not a change to the historical shipped policy):
-``use_cfvst=True`` enables the existing V transpose, and additionally setting
-``lds_num_buffers=2`` uses two K LDS slots plus a single V LDS slot with the
-next V tile prefetched into registers. This does not change the original
-FP16/other default execution paths. Strict on-GPU numeric and ISA validation
-is required before enabling this path by default.
+Opt-in bf16 D128: ``use_cfvst=True`` enables the V transpose at bf16 D128 standard
+causal attention, and additionally setting ``lds_num_buffers=2`` uses two K LDS slots
+plus a single V LDS slot with the next V tile prefetched into registers. Both are
+opt-in; every default resolves to ``lds_num_buffers=1`` and the :func:`_use_cfvst`
+policy.
 
 :func:`supports_attention_dense` is the SINGLE gate: it rejects every spec
 :func:`build_attention_dense` cannot emit -- including the modes deferred to later
@@ -368,10 +367,10 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
     v_row_pad: int | None = None
 
     # use_cfvst: force the P1 conflict-free perm_b32 V transpose on/off.
-    #   None retains upstream fp16 D128 only; explicit True opts BF16 D128
-    #   into CFVST without silently changing any default BF16 kernels.
-    #   Explicit True may select other D128 modes for an A/B; D64 is rejected.
-    #   lds_num_buffers=2 explicitly enables KDB/VPF when BF16 CFVST is on.
+    #   None -> the :func:`_use_cfvst` policy (fp16 D128). True is also legal at
+    #   bf16 D128 standard causal attention (no sliding window, causal_diag_split,
+    #   or sinks); False is always legal; D64 rejects True. lds_num_buffers=2
+    #   requires bf16 D128 CFVST.
     use_cfvst: bool | None = None
 
     # use_v_swizzle: force the V^T XOR bank-conflict swizzle on/off, INDEPENDENTLY of
@@ -434,7 +433,7 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
     #   ``lazy_rescale`` field has no effect here: this body always rescales, and
     #   only the shared kernel_name() reads it (the ``lazyrs`` token).
     #
-    # lds_num_buffers: 1 reproduces the upstream single-K-buffer implementation;
+    # lds_num_buffers: 1 uses a single K LDS buffer;
     #   2 enables K-only double buffering plus register V prefetch (BF16 D128,
     #   CFVST and standard causal attention only). V stays single-buffered.
     #   At block_n=64, this variant uses 51,200 B LDS with the shipped K pad.
@@ -488,7 +487,7 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
             )
 
     def resolved_use_cfvst(self) -> bool:
-        """None selects upstream FP16-D128; True explicitly enables BF16-D128."""
+        """None -> the :func:`_use_cfvst` policy; True also enables bf16 D128."""
         if self.use_cfvst is None:
             return _use_cfvst(self.head_size, self.dtype)
         return bool(self.use_cfvst)
@@ -499,9 +498,9 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
         Read by both the builder's ``V_lds`` alloc and the :func:`_lds_bytes` budget, so
         the two cannot drift."""
         if self.v_row_pad is None:
-            # Preserve the exact upstream resolver for every pre-existing
-            # configuration, including explicit FP16 use_cfvst=False.  Only
-            # BF16 D128 opted into CFVST needs the transposed V-row pitch.
+            # The default resolver for every configuration, including explicit
+            # FP16 use_cfvst=False. Only bf16 D128 with use_cfvst=True needs the
+            # transposed V-row pitch.
             if self.resolved_use_cfvst() and not _use_cfvst(self.head_size, self.dtype):
                 return _v_swizzle_width(self.block_n) - self.block_n
             return _v_row_pad(self.head_size, self.dtype, self.block_n)
@@ -857,16 +856,16 @@ def _use_cfvst(head_size: int, dtype: str) -> bool:
     return _rows_per_instr(head_size) == 1 and dtype == "fp16"
 
 
-# A BF16 D128 opt-in overrides this historical policy at the spec resolver.
+# use_cfvst=True at bf16 D128 overrides this policy at the spec resolver.
 
 
 def _default_use_cfvst(spec: "Gfx942AttentionDenseSpec") -> bool:
-    """Unmodified upstream CFVST policy, used when comparing kernel-name tags."""
+    """The :func:`_use_cfvst` default policy, used when comparing kernel-name tags."""
     return _use_cfvst(spec.head_size, spec.dtype)
 
 
 def _default_v_row_pad(spec: "Gfx942AttentionDenseSpec") -> int:
-    """Default upstream V-row pad, independent of manual override."""
+    """The default V-row pad, independent of manual override."""
     return _v_row_pad(spec.head_size, spec.dtype, spec.block_n)
 
 
@@ -874,8 +873,8 @@ def _use_kdb_vpf(spec: "Gfx942AttentionDenseSpec") -> bool:
     """Whether the user requests K-only LDS double buffering + V prefetch.
 
     ``supports_attention_dense`` restricts depth 2 to standard causal BF16
-    D128 with CFVST. Every other accepted spec has NBUF=1, reproducing the
-    unchanged upstream codegen. No sequence-length based policy is used.
+    D128 with CFVST. Every other accepted spec has NBUF=1 and the single-K-buffer
+    body. No sequence-length based policy is used.
     """
     return spec.lds_num_buffers == 2
 
@@ -1360,9 +1359,9 @@ def build_attention_dense(
 ) -> KernelDef:
     """Emit the gfx942 dense flash-attention prefill kernel for ``spec``.
 
-    Delegates to :func:`_build_attention_dense_single_buffer` (historical name),
-    which preserves the existing single-buffer kernel and adds the gated bf16 D128
-    K-only double-buffer / V-prefetch path. It retains CFVST, exp2_fast, fused
+    Delegates to :func:`_build_attention_dense_single_buffer`, which builds both the
+    single-K-buffer body and, at ``lds_num_buffers=2``, the bf16 D128 K-double-buffer
+    / V-prefetch pipeline. It retains CFVST, exp2_fast, fused
     rescale, per-config waves-per-eu and persistent grid-stride. Every scope
     restriction --
     including the modes deferred to later follow-ups -- lives in
