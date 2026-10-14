@@ -47,67 +47,66 @@ Generated from the committed support claims (10710 graphs, 445 catalogued option
 
 **Engines:** [ASM_SDPA_ENGINE](#asm_sdpa_engine) · [HIPBLASLT_ENGINE](#hipblaslt_engine) · [HIP_MLOPS_ENGINE](#hip_mlops_engine) · [MIOPEN_ENGINE](#miopen_engine) · [MIOPEN_ENGINE_DETERMINISTIC](#miopen_engine_deterministic) · [hipkernel:Gfx950AttentionDense](#hipkernelgfx950attentiondense)
 
-- **Graphs claimed**: graphs of the op this engine claims on at least one GPU.
-- **Options**: the op's catalogued API options, listed in [Options per op](#options-per-op).
+- **Op (options)**: the number is how many options the op offers in the API, listed in [Options per op](#options-per-op).
 - **GPU columns**: share of the op's options that a graph this engine claims on that GPU and OS uses. `✅` all · `🟡 72%` 72% · `❌` none. L = Linux, W = Windows.
 
 An op appears under an engine that claims at least one of its graphs somewhere.
 
 ### ASM_SDPA_ENGINE
 
-| Op | Graphs claimed | Options | [gfx90a](#gpu-gfx90a-linux)<br>L | [gfx942](#gpu-gfx942-linux)<br>L | [gfx950](#gpu-gfx950-linux)<br>L | [gfx1030](#gpu-gfx1030-windows)<br>W | [gfx1100](#gpu-gfx1100-linux)<br>L | [gfx1101](#gpu-gfx1101-linux)<br>L | [gfx1101](#gpu-gfx1101-windows)<br>W | [gfx1150](#gpu-gfx1150-linux)<br>L | [gfx1151](#gpu-gfx1151-linux)<br>L | [gfx1151](#gpu-gfx1151-windows)<br>W | [gfx1200](#gpu-gfx1200-linux)<br>L | [gfx1201](#gpu-gfx1201-linux)<br>L |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| **[Sdpa](#op-sdpa)** | 12 | 33 | ❌ | 🟡 30% | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Op (options) | [gfx90a](#gpu-gfx90a-linux)<br>L | [gfx942](#gpu-gfx942-linux)<br>L | [gfx950](#gpu-gfx950-linux)<br>L | [gfx1030](#gpu-gfx1030-windows)<br>W | [gfx1100](#gpu-gfx1100-linux)<br>L | [gfx1101](#gpu-gfx1101-linux)<br>L | [gfx1101](#gpu-gfx1101-windows)<br>W | [gfx1150](#gpu-gfx1150-linux)<br>L | [gfx1151](#gpu-gfx1151-linux)<br>L | [gfx1151](#gpu-gfx1151-windows)<br>W | [gfx1200](#gpu-gfx1200-linux)<br>L | [gfx1201](#gpu-gfx1201-linux)<br>L |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| **[Sdpa](#op-sdpa)** (33) | ❌ | 🟡 30% | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
 
 ### HIPBLASLT_ENGINE
 
-| Op | Graphs claimed | Options | [gfx90a](#gpu-gfx90a-linux)<br>L | [gfx942](#gpu-gfx942-linux)<br>L | [gfx950](#gpu-gfx950-linux)<br>L | [gfx1030](#gpu-gfx1030-windows)<br>W | [gfx1100](#gpu-gfx1100-linux)<br>L | [gfx1101](#gpu-gfx1101-linux)<br>L | [gfx1101](#gpu-gfx1101-windows)<br>W | [gfx1150](#gpu-gfx1150-linux)<br>L | [gfx1151](#gpu-gfx1151-linux)<br>L | [gfx1151](#gpu-gfx1151-windows)<br>W | [gfx1200](#gpu-gfx1200-linux)<br>L | [gfx1201](#gpu-gfx1201-linux)<br>L |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| **[Matmul](#op-matmul)** | 333 | 16 | 🟡 81% | 🟡 81% | 🟡 81% | ❌ | ❌ | 🟡 81% | 🟡 81% | 🟡 81% | 🟡 81% | ❌ | 🟡 81% | ❌ |
-| **[Pointwise](#op-pointwise)** | 243 | 58 | 🟡 17% | 🟡 17% | 🟡 17% | ❌ | ❌ | 🟡 17% | 🟡 17% | 🟡 17% | 🟡 17% | ❌ | 🟡 17% | ❌ |
+| Op (options) | [gfx90a](#gpu-gfx90a-linux)<br>L | [gfx942](#gpu-gfx942-linux)<br>L | [gfx950](#gpu-gfx950-linux)<br>L | [gfx1030](#gpu-gfx1030-windows)<br>W | [gfx1100](#gpu-gfx1100-linux)<br>L | [gfx1101](#gpu-gfx1101-linux)<br>L | [gfx1101](#gpu-gfx1101-windows)<br>W | [gfx1150](#gpu-gfx1150-linux)<br>L | [gfx1151](#gpu-gfx1151-linux)<br>L | [gfx1151](#gpu-gfx1151-windows)<br>W | [gfx1200](#gpu-gfx1200-linux)<br>L | [gfx1201](#gpu-gfx1201-linux)<br>L |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| **[Matmul](#op-matmul)** (16) | 🟡 81% | 🟡 81% | 🟡 81% | ❌ | ❌ | 🟡 81% | 🟡 81% | 🟡 81% | 🟡 81% | ❌ | 🟡 81% | ❌ |
+| **[Pointwise](#op-pointwise)** (58) | 🟡 17% | 🟡 17% | 🟡 17% | ❌ | ❌ | 🟡 17% | 🟡 17% | 🟡 17% | 🟡 17% | ❌ | 🟡 17% | ❌ |
 
 ### HIP_MLOPS_ENGINE
 
-| Op | Graphs claimed | Options | [gfx90a](#gpu-gfx90a-linux)<br>L | [gfx942](#gpu-gfx942-linux)<br>L | [gfx950](#gpu-gfx950-linux)<br>L | [gfx1030](#gpu-gfx1030-windows)<br>W | [gfx1100](#gpu-gfx1100-linux)<br>L | [gfx1101](#gpu-gfx1101-linux)<br>L | [gfx1101](#gpu-gfx1101-windows)<br>W | [gfx1150](#gpu-gfx1150-linux)<br>L | [gfx1151](#gpu-gfx1151-linux)<br>L | [gfx1151](#gpu-gfx1151-windows)<br>W | [gfx1200](#gpu-gfx1200-linux)<br>L | [gfx1201](#gpu-gfx1201-linux)<br>L |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| **[Batchnorm](#op-batchnorm)** | 492 | 20 | 🟡 70% | 🟡 70% | 🟡 70% | ❌ | 🟡 70% | ❌ | 🟡 70% | 🟡 70% | 🟡 70% | 🟡 70% | 🟡 70% | ❌ |
-| **[BatchnormBackward](#op-batchnormbackward)** | 312 | 12 | 🟡 66% | 🟡 66% | 🟡 66% | ❌ | 🟡 66% | ❌ | 🟡 66% | 🟡 66% | 🟡 66% | 🟡 66% | 🟡 66% | ❌ |
-| **[BatchnormInference](#op-batchnorminference)** | 351 | 10 | 🟡 70% | 🟡 70% | 🟡 70% | ❌ | 🟡 70% | ❌ | 🟡 70% | 🟡 70% | 🟡 70% | 🟡 70% | 🟡 70% | ❌ |
-| **[BatchnormInferenceVarianceExt](#op-batchnorminferencevarianceext)** | 144 | 12 | 🟡 66% | 🟡 66% | 🟡 66% | ❌ | 🟡 66% | ❌ | 🟡 66% | 🟡 66% | 🟡 66% | 🟡 66% | 🟡 66% | ❌ |
-| **[Layernorm](#op-layernorm)** | 708 | 22 | 🟡 72% | 🟡 72% | 🟡 72% | ❌ | 🟡 72% | ❌ | 🟡 72% | 🟡 72% | 🟡 72% | 🟡 72% | 🟡 72% | ❌ |
-| **[LayernormBackward](#op-layernormbackward)** | 980 | 23 | 🟡 69% | 🟡 69% | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | 🟡 69% | ❌ | ❌ |
-| **[Pointwise](#op-pointwise)** | 3516 | 58 | 🟡 13% | 🟡 13% | 🟡 13% | ❌ | 🟡 13% | ❌ | 🟡 13% | 🟡 13% | 🟡 13% | 🟡 13% | 🟡 13% | ❌ |
-| **[ResampleFwd](#op-resamplefwd)** | 48 | 19 | 🟡 84% | 🟡 84% | 🟡 84% | ❌ | 🟡 84% | ❌ | 🟡 84% | 🟡 84% | 🟡 84% | 🟡 84% | 🟡 84% | ❌ |
-| **[RMSNorm](#op-rmsnorm)** | 2980 | 21 | 🟡 85% | 🟡 85% | 🟡 85% | ❌ | 🟡 85% | ❌ | 🟡 85% | 🟡 85% | 🟡 85% | 🟡 90% | 🟡 85% | ❌ |
-| **[RMSNormBackward](#op-rmsnormbackward)** | 1488 | 17 | 🟡 88% | 🟡 88% | 🟡 88% | ❌ | 🟡 88% | ❌ | 🟡 88% | 🟡 88% | 🟡 88% | 🟡 88% | 🟡 88% | ❌ |
+| Op (options) | [gfx90a](#gpu-gfx90a-linux)<br>L | [gfx942](#gpu-gfx942-linux)<br>L | [gfx950](#gpu-gfx950-linux)<br>L | [gfx1030](#gpu-gfx1030-windows)<br>W | [gfx1100](#gpu-gfx1100-linux)<br>L | [gfx1101](#gpu-gfx1101-linux)<br>L | [gfx1101](#gpu-gfx1101-windows)<br>W | [gfx1150](#gpu-gfx1150-linux)<br>L | [gfx1151](#gpu-gfx1151-linux)<br>L | [gfx1151](#gpu-gfx1151-windows)<br>W | [gfx1200](#gpu-gfx1200-linux)<br>L | [gfx1201](#gpu-gfx1201-linux)<br>L |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| **[Batchnorm](#op-batchnorm)** (20) | 🟡 70% | 🟡 70% | 🟡 70% | ❌ | 🟡 70% | ❌ | 🟡 70% | 🟡 70% | 🟡 70% | 🟡 70% | 🟡 70% | ❌ |
+| **[BatchnormBackward](#op-batchnormbackward)** (12) | 🟡 66% | 🟡 66% | 🟡 66% | ❌ | 🟡 66% | ❌ | 🟡 66% | 🟡 66% | 🟡 66% | 🟡 66% | 🟡 66% | ❌ |
+| **[BatchnormInference](#op-batchnorminference)** (10) | 🟡 70% | 🟡 70% | 🟡 70% | ❌ | 🟡 70% | ❌ | 🟡 70% | 🟡 70% | 🟡 70% | 🟡 70% | 🟡 70% | ❌ |
+| **[BatchnormInferenceVarianceExt](#op-batchnorminferencevarianceext)** (12) | 🟡 66% | 🟡 66% | 🟡 66% | ❌ | 🟡 66% | ❌ | 🟡 66% | 🟡 66% | 🟡 66% | 🟡 66% | 🟡 66% | ❌ |
+| **[Layernorm](#op-layernorm)** (22) | 🟡 72% | 🟡 72% | 🟡 72% | ❌ | 🟡 72% | ❌ | 🟡 72% | 🟡 72% | 🟡 72% | 🟡 72% | 🟡 72% | ❌ |
+| **[LayernormBackward](#op-layernormbackward)** (23) | 🟡 69% | 🟡 69% | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | 🟡 69% | ❌ | ❌ |
+| **[Pointwise](#op-pointwise)** (58) | 🟡 13% | 🟡 13% | 🟡 13% | ❌ | 🟡 13% | ❌ | 🟡 13% | 🟡 13% | 🟡 13% | 🟡 13% | 🟡 13% | ❌ |
+| **[ResampleFwd](#op-resamplefwd)** (19) | 🟡 84% | 🟡 84% | 🟡 84% | ❌ | 🟡 84% | ❌ | 🟡 84% | 🟡 84% | 🟡 84% | 🟡 84% | 🟡 84% | ❌ |
+| **[RMSNorm](#op-rmsnorm)** (21) | 🟡 85% | 🟡 85% | 🟡 85% | ❌ | 🟡 85% | ❌ | 🟡 85% | 🟡 85% | 🟡 85% | 🟡 90% | 🟡 85% | ❌ |
+| **[RMSNormBackward](#op-rmsnormbackward)** (17) | 🟡 88% | 🟡 88% | 🟡 88% | ❌ | 🟡 88% | ❌ | 🟡 88% | 🟡 88% | 🟡 88% | 🟡 88% | 🟡 88% | ❌ |
 
 ### MIOPEN_ENGINE
 
-| Op | Graphs claimed | Options | [gfx90a](#gpu-gfx90a-linux)<br>L | [gfx942](#gpu-gfx942-linux)<br>L | [gfx950](#gpu-gfx950-linux)<br>L | [gfx1030](#gpu-gfx1030-windows)<br>W | [gfx1100](#gpu-gfx1100-linux)<br>L | [gfx1101](#gpu-gfx1101-linux)<br>L | [gfx1101](#gpu-gfx1101-windows)<br>W | [gfx1150](#gpu-gfx1150-linux)<br>L | [gfx1151](#gpu-gfx1151-linux)<br>L | [gfx1151](#gpu-gfx1151-windows)<br>W | [gfx1200](#gpu-gfx1200-linux)<br>L | [gfx1201](#gpu-gfx1201-linux)<br>L |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| **[Batchnorm](#op-batchnorm)** | 589 | 20 | 🟡 75% | 🟡 75% | 🟡 75% | 🟡 75% | ❌ | 🟡 75% | ❌ | 🟡 75% | 🟡 75% | 🟡 75% | ❌ | 🟡 75% |
-| **[BatchnormBackward](#op-batchnormbackward)** | 372 | 12 | 🟡 75% | 🟡 75% | 🟡 75% | 🟡 75% | ❌ | 🟡 75% | ❌ | 🟡 75% | 🟡 75% | 🟡 75% | ❌ | 🟡 75% |
-| **[BatchnormInference](#op-batchnorminference)** | 447 | 10 | 🟡 80% | 🟡 80% | 🟡 80% | 🟡 80% | ❌ | 🟡 80% | ❌ | 🟡 80% | 🟡 80% | 🟡 80% | ❌ | 🟡 80% |
-| **[BatchnormInferenceVarianceExt](#op-batchnorminferencevarianceext)** | 242 | 12 | 🟡 83% | 🟡 83% | 🟡 83% | 🟡 83% | ❌ | 🟡 83% | ❌ | 🟡 83% | 🟡 83% | 🟡 83% | ❌ | 🟡 83% |
-| **[ConvolutionBwd](#op-convolutionbwd)** | 138 | 17 | 🟡 76% | 🟡 76% | 🟡 76% | 🟡 76% | ❌ | 🟡 76% | ❌ | 🟡 76% | 🟡 76% | 🟡 76% | ❌ | 🟡 76% |
-| **[ConvolutionFwd](#op-convolutionfwd)** | 1002 | 17 | 🟡 76% | 🟡 76% | 🟡 76% | 🟡 76% | ❌ | 🟡 76% | ❌ | 🟡 76% | 🟡 76% | 🟡 76% | ❌ | 🟡 76% |
-| **[ConvolutionWrw](#op-convolutionwrw)** | 139 | 17 | 🟡 76% | 🟡 76% | 🟡 76% | 🟡 76% | ❌ | 🟡 76% | ❌ | 🟡 76% | 🟡 76% | 🟡 76% | ❌ | 🟡 76% |
-| **[Pointwise](#op-pointwise)** | 1771 | 58 | 🟡 13% | 🟡 17% | 🟡 17% | 🟡 17% | ❌ | 🟡 17% | ❌ | 🟡 17% | 🟡 17% | 🟡 17% | ❌ | 🟡 17% |
+| Op (options) | [gfx90a](#gpu-gfx90a-linux)<br>L | [gfx942](#gpu-gfx942-linux)<br>L | [gfx950](#gpu-gfx950-linux)<br>L | [gfx1030](#gpu-gfx1030-windows)<br>W | [gfx1100](#gpu-gfx1100-linux)<br>L | [gfx1101](#gpu-gfx1101-linux)<br>L | [gfx1101](#gpu-gfx1101-windows)<br>W | [gfx1150](#gpu-gfx1150-linux)<br>L | [gfx1151](#gpu-gfx1151-linux)<br>L | [gfx1151](#gpu-gfx1151-windows)<br>W | [gfx1200](#gpu-gfx1200-linux)<br>L | [gfx1201](#gpu-gfx1201-linux)<br>L |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| **[Batchnorm](#op-batchnorm)** (20) | 🟡 75% | 🟡 75% | 🟡 75% | 🟡 75% | ❌ | 🟡 75% | ❌ | 🟡 75% | 🟡 75% | 🟡 75% | ❌ | 🟡 75% |
+| **[BatchnormBackward](#op-batchnormbackward)** (12) | 🟡 75% | 🟡 75% | 🟡 75% | 🟡 75% | ❌ | 🟡 75% | ❌ | 🟡 75% | 🟡 75% | 🟡 75% | ❌ | 🟡 75% |
+| **[BatchnormInference](#op-batchnorminference)** (10) | 🟡 80% | 🟡 80% | 🟡 80% | 🟡 80% | ❌ | 🟡 80% | ❌ | 🟡 80% | 🟡 80% | 🟡 80% | ❌ | 🟡 80% |
+| **[BatchnormInferenceVarianceExt](#op-batchnorminferencevarianceext)** (12) | 🟡 83% | 🟡 83% | 🟡 83% | 🟡 83% | ❌ | 🟡 83% | ❌ | 🟡 83% | 🟡 83% | 🟡 83% | ❌ | 🟡 83% |
+| **[ConvolutionBwd](#op-convolutionbwd)** (17) | 🟡 76% | 🟡 76% | 🟡 76% | 🟡 76% | ❌ | 🟡 76% | ❌ | 🟡 76% | 🟡 76% | 🟡 76% | ❌ | 🟡 76% |
+| **[ConvolutionFwd](#op-convolutionfwd)** (17) | 🟡 76% | 🟡 76% | 🟡 76% | 🟡 76% | ❌ | 🟡 76% | ❌ | 🟡 76% | 🟡 76% | 🟡 76% | ❌ | 🟡 76% |
+| **[ConvolutionWrw](#op-convolutionwrw)** (17) | 🟡 76% | 🟡 76% | 🟡 76% | 🟡 76% | ❌ | 🟡 76% | ❌ | 🟡 76% | 🟡 76% | 🟡 76% | ❌ | 🟡 76% |
+| **[Pointwise](#op-pointwise)** (58) | 🟡 13% | 🟡 17% | 🟡 17% | 🟡 17% | ❌ | 🟡 17% | ❌ | 🟡 17% | 🟡 17% | 🟡 17% | ❌ | 🟡 17% |
 
 ### MIOPEN_ENGINE_DETERMINISTIC
 
-| Op | Graphs claimed | Options | [gfx90a](#gpu-gfx90a-linux)<br>L | [gfx942](#gpu-gfx942-linux)<br>L | [gfx950](#gpu-gfx950-linux)<br>L | [gfx1030](#gpu-gfx1030-windows)<br>W | [gfx1100](#gpu-gfx1100-linux)<br>L | [gfx1101](#gpu-gfx1101-linux)<br>L | [gfx1101](#gpu-gfx1101-windows)<br>W | [gfx1150](#gpu-gfx1150-linux)<br>L | [gfx1151](#gpu-gfx1151-linux)<br>L | [gfx1151](#gpu-gfx1151-windows)<br>W | [gfx1200](#gpu-gfx1200-linux)<br>L | [gfx1201](#gpu-gfx1201-linux)<br>L |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| **[ConvolutionBwd](#op-convolutionbwd)** | 138 | 17 | 🟡 70% | 🟡 70% | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | 🟡 76% | ❌ | ❌ |
-| **[ConvolutionFwd](#op-convolutionfwd)** | 1002 | 17 | 🟡 70% | 🟡 70% | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | 🟡 76% | ❌ | ❌ |
-| **[ConvolutionWrw](#op-convolutionwrw)** | 139 | 17 | 🟡 70% | 🟡 70% | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | 🟡 76% | ❌ | ❌ |
-| **[Pointwise](#op-pointwise)** | 864 | 58 | ❌ | 🟡 12% | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | 🟡 12% | ❌ | ❌ |
+| Op (options) | [gfx90a](#gpu-gfx90a-linux)<br>L | [gfx942](#gpu-gfx942-linux)<br>L | [gfx950](#gpu-gfx950-linux)<br>L | [gfx1030](#gpu-gfx1030-windows)<br>W | [gfx1100](#gpu-gfx1100-linux)<br>L | [gfx1101](#gpu-gfx1101-linux)<br>L | [gfx1101](#gpu-gfx1101-windows)<br>W | [gfx1150](#gpu-gfx1150-linux)<br>L | [gfx1151](#gpu-gfx1151-linux)<br>L | [gfx1151](#gpu-gfx1151-windows)<br>W | [gfx1200](#gpu-gfx1200-linux)<br>L | [gfx1201](#gpu-gfx1201-linux)<br>L |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| **[ConvolutionBwd](#op-convolutionbwd)** (17) | 🟡 70% | 🟡 70% | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | 🟡 76% | ❌ | ❌ |
+| **[ConvolutionFwd](#op-convolutionfwd)** (17) | 🟡 70% | 🟡 70% | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | 🟡 76% | ❌ | ❌ |
+| **[ConvolutionWrw](#op-convolutionwrw)** (17) | 🟡 70% | 🟡 70% | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | 🟡 76% | ❌ | ❌ |
+| **[Pointwise](#op-pointwise)** (58) | ❌ | 🟡 12% | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | 🟡 12% | ❌ | ❌ |
 
 ### hipkernel:Gfx950AttentionDense
 
-| Op | Graphs claimed | Options | [gfx90a](#gpu-gfx90a-linux)<br>L | [gfx942](#gpu-gfx942-linux)<br>L | [gfx950](#gpu-gfx950-linux)<br>L | [gfx1030](#gpu-gfx1030-windows)<br>W | [gfx1100](#gpu-gfx1100-linux)<br>L | [gfx1101](#gpu-gfx1101-linux)<br>L | [gfx1101](#gpu-gfx1101-windows)<br>W | [gfx1150](#gpu-gfx1150-linux)<br>L | [gfx1151](#gpu-gfx1151-linux)<br>L | [gfx1151](#gpu-gfx1151-windows)<br>W | [gfx1200](#gpu-gfx1200-linux)<br>L | [gfx1201](#gpu-gfx1201-linux)<br>L |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| **[Sdpa](#op-sdpa)** | 45 | 33 | ❌ | ❌ | 🟡 42% | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Op (options) | [gfx90a](#gpu-gfx90a-linux)<br>L | [gfx942](#gpu-gfx942-linux)<br>L | [gfx950](#gpu-gfx950-linux)<br>L | [gfx1030](#gpu-gfx1030-windows)<br>W | [gfx1100](#gpu-gfx1100-linux)<br>L | [gfx1101](#gpu-gfx1101-linux)<br>L | [gfx1101](#gpu-gfx1101-windows)<br>W | [gfx1150](#gpu-gfx1150-linux)<br>L | [gfx1151](#gpu-gfx1151-linux)<br>L | [gfx1151](#gpu-gfx1151-windows)<br>W | [gfx1200](#gpu-gfx1200-linux)<br>L | [gfx1201](#gpu-gfx1201-linux)<br>L |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| **[Sdpa](#op-sdpa)** (33) | ❌ | ❌ | 🟡 42% | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
 
 ## Op groups
 
