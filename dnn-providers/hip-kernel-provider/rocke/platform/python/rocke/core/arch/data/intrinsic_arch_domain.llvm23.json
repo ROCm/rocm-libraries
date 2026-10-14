@@ -65,6 +65,7 @@
     "maxnum.bf16": "llvm.maxnum.bf16",
     "maxnum.f16": "llvm.maxnum.f16",
     "maxnum.f32": "llvm.maxnum.f32",
+    "maxnum.f64": "llvm.maxnum.f64",
     "mbcnt.hi": "llvm.amdgcn.mbcnt.hi",
     "mbcnt.lo": "llvm.amdgcn.mbcnt.lo",
     "mfma.f32.16x16x128.fp8.hero": "llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4.v8i32.v8i32",
@@ -89,6 +90,7 @@
     "minnum.bf16": "llvm.minnum.bf16",
     "minnum.f16": "llvm.minnum.f16",
     "minnum.f32": "llvm.minnum.f32",
+    "minnum.f64": "llvm.minnum.f64",
     "mov.dpp8.f32": "llvm.amdgcn.mov.dpp8.f32",
     "mov.dpp8.i32": "llvm.amdgcn.mov.dpp8.i32",
     "raw.ptr.buffer.load.async.lds": "llvm.amdgcn.raw.ptr.buffer.load.async.lds",
@@ -2254,6 +2256,36 @@
         "verified_on": "llvm23"
       }
     },
+    "maxnum.f64": {
+      "gfx11-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx1151": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx1201": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx1250": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx90a": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx942": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx950": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      }
+    },
     "mbcnt.hi": {
       "gfx11-generic": {
         "status": "ok",
@@ -3115,6 +3147,36 @@
       }
     },
     "minnum.f32": {
+      "gfx11-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx1151": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx1201": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx1250": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx90a": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx942": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx950": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      }
+    },
+    "minnum.f64": {
       "gfx11-generic": {
         "status": "ok",
         "verified_on": "llvm23"

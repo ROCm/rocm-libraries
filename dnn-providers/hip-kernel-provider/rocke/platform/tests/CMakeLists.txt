@@ -156,6 +156,22 @@ if(BUILD_TESTING)
                  rocke_tanh_lowering)
   endif()
 
+  # f64 op rejection and f64 vector arithmetic in both C++ lowerers.
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_f64_lowering.cpp")
+    add_executable(rocke_f64_lowering core/test_f64_lowering.cpp)
+    target_link_libraries(rocke_f64_lowering PRIVATE rocke_core)
+    add_test(NAME rocke_f64_lowering COMMAND rocke_f64_lowering)
+    set_tests_properties(rocke_f64_lowering
+                         PROPERTIES LABELS "ckc;unit;host")
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_f64_lowering)
+    set_target_properties(rocke_f64_lowering
+                          PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+    install(TARGETS rocke_f64_lowering
+            RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+    set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+                 rocke_f64_lowering)
+  endif()
+
   # Holds the ISA-layer and lower_llvm-layer flavor->datalayout tables together.
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/flavor_datalayout_ssot.cpp")
     add_executable(rocke_flavor_datalayout_ssot core/flavor_datalayout_ssot.cpp)
