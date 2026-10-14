@@ -67,6 +67,10 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   span. The 32-bit byte-offset overflow that motivated the gate is fixed in CK itself, so these
   problems can again use the faster int32 CK instances.
 * [Conv] Relaxed the ASM-GTC NHWC large-tensor guard for forward and backward-data. Those kernels address a full 4 GiB window per dispatch slice and advance the base pointer per batch-split, so the input and output bounds were redundant; what remains is a bound on the per-group weight size. Backward-weights keeps the stricter int32 bound, because 292 of its 900 kernels ignore the batch-split dimension (#11805). This restores 8,978 forward and backward-data entries across the six system find-databases that the guard's first revision removed.
+* [DB] Windows installs now place the system find-db, perf-db, kernel-db and AI heuristic model
+  files in `share\miopen\db`, the same location as Linux, instead of `bin`. MIOpen looks for them
+  in `share\miopen\db` under the parent of the directory that holds `MIOpen.dll`.
+  `MIOPEN_SYSTEM_DB_PATH` still overrides the location.
 
 ### Optimized
 * [Conv] Optimized the `ConvDirectNaiveConv` solver with per-direction kernel files, float

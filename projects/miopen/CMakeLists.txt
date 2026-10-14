@@ -606,14 +606,11 @@ message(STATUS "HALF_INCLUDE_DIR: ${HALF_INCLUDE_DIR}")
 
 option( MIOPEN_DEBUG_FIND_DB_CACHING "Use system find-db caching" ON)
 
-if(WIN32)
-    set( DATA_INSTALL_DIR bin )
-    set( DATABASE_INSTALL_DIR ${DATA_INSTALL_DIR})
-else()
-    set( MIOPEN_INSTALL_DIR miopen)
-    set( DATA_INSTALL_DIR ${CMAKE_INSTALL_DATADIR}/${MIOPEN_INSTALL_DIR} )
-    set( DATABASE_INSTALL_DIR ${DATA_INSTALL_DIR}/db )
-endif()
+# Windows and Linux share one data layout. MIOpen resolves DATABASE_INSTALL_DIR at runtime
+# relative to the directory holding the MIOpen library (src/db_path.cpp.in), so keep the two in sync.
+set( MIOPEN_INSTALL_DIR miopen)
+set( DATA_INSTALL_DIR ${CMAKE_INSTALL_DATADIR}/${MIOPEN_INSTALL_DIR} )
+set( DATABASE_INSTALL_DIR ${DATA_INSTALL_DIR}/db )
 
 if(MIOPEN_ENABLE_AI_KERNEL_TUNING OR MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK)
     find_package(frugally-deep CONFIG REQUIRED)
