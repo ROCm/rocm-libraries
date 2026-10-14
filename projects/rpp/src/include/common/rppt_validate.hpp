@@ -33,7 +33,7 @@ SOFTWARE.
 #include "rppdefs.h"
 
 inline RppLayoutParams get_layout_params(RpptLayout layout, Rpp32u channels) {
-    RppLayoutParams layoutParams;
+    RppLayoutParams layoutParams = {0, 0};
     if (layout == RpptLayout::NCHW || layout == RpptLayout::NCDHW) {
         if (channels == 1)  // PLN1
         {
