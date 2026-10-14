@@ -10,6 +10,9 @@
  *
  * Indices 0..10: rocke_direct_depthwise_dgrad_win_spec_t, VALU and dot2 forms;
  * 11..18: its Toeplitz MFMA form; 19: block_h = 0 (both reject).
+ * Indices 20..29: rocke_direct_conv_4c_spec_t, the 4c dgrad kernel on the
+ * transposed problem (fused gathered / LDS-staged weights, the row-staged
+ * runtime row stream; 28 and 29 both reject) -- mirrors _FOURC_CFGS.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -85,6 +88,59 @@ static int make_cfg(int idx, rocke_direct_depthwise_dgrad_win_spec_t* spec, cons
     return 0;
 }
 
+/* 4c dgrad configs, emitted as FOURC_CFG_BASE + idx (mirrors _FOURC_CFGS). */
+#define FOURC_CFG_BASE 20
+typedef struct fourc_cfg
+{
+    int N, H, W, G, KH;
+    const char* dtype;
+    const char* arch;
+    int block_q, block_groups, lds, stage_rows;
+} fourc_cfg_t;
+
+static const fourc_cfg_t FOURC_CFGS[] = {
+    {2, 13, 13, 32, 3, "bf16", "gfx950", 4, 16, 0, 0},
+    {1, 8, 8, 16, 3, "fp16", "gfx942", 8, 16, 0, 0},
+    {2, 15, 15, 32, 3, "bf16", "gfx950", 16, 32, 1, 0},
+    {1, 7, 9, 64, 1, "fp16", "gfx950", 4, 64, 1, 0},
+    {2, 13, 13, 32, 3, "bf16", "gfx950", 4, 16, 1, 1},
+    {1, 7, 9, 64, 1, "fp16", "gfx950", 4, 64, 1, 1},
+    {2, 9, 21, 64, 3, "bf16", "gfx950", 8, 32, 1, 1},
+    {1, 1, 6, 16, 3, "fp16", "gfx950", 4, 16, 1, 1},
+    {2, 13, 13, 32, 3, "bf16", "gfx942", 4, 16, 1, 0},
+    {1, 8, 8, 16, 5, "fp16", "gfx950", 4, 16, 0, 0},
+};
+
+static int make_fourc_cfg(int idx, rocke_direct_conv_4c_spec_t* spec, const char** arch)
+{
+    const int n = (int)(sizeof(FOURC_CFGS) / sizeof(FOURC_CFGS[0]));
+    if(idx < 0 || idx >= n)
+        return -1;
+    const fourc_cfg_t* c = &FOURC_CFGS[idx];
+    *spec = rocke_direct_conv_4c_spec_default();
+    spec->problem = rocke_direct_conv_problem_default();
+    spec->problem.N = c->N;
+    spec->problem.H = c->H;
+    spec->problem.W = c->W;
+    spec->problem.groups = c->G;
+    spec->problem.cpg = 4;
+    spec->problem.kpg = 4;
+    spec->problem.KH = c->KH;
+    spec->problem.KW = c->KH;
+    spec->problem.PAD = (c->KH - 1) / 2;
+    spec->problem.stride = 1;
+    spec->problem.dtype = c->dtype;
+    spec->name = "direct_conv_4c_dgrad";
+    spec->block_q = c->block_q;
+    spec->block_groups = c->block_groups;
+    spec->dgrad_fused_weights = true;
+    spec->dgrad_weights_lds = c->lds != 0;
+    spec->stage_rows = c->stage_rows != 0;
+    spec->waves_q = c->stage_rows ? c->block_q / 4 : 1;
+    *arch = c->arch;
+    return 0;
+}
+
 int main(int argc, char** argv)
 {
     if(argc < 2)
@@ -96,15 +152,23 @@ int main(int argc, char** argv)
     const char* mode = (argc > 2) ? argv[2] : "ll";
 
     rocke_direct_depthwise_dgrad_win_spec_t spec;
+    rocke_direct_conv_4c_spec_t spec4c;
     const char* arch = "gfx950";
-    if(make_cfg(idx, &spec, &arch) != 0)
+    int is_4c = 0;
+    if(make_fourc_cfg(idx - FOURC_CFG_BASE, &spec4c, &arch) == 0)
+    {
+        is_4c = 1;
+    }
+    else if(make_cfg(idx, &spec, &arch) != 0)
     {
         fprintf(stderr, "unknown config index %d\n", idx);
         return 2;
     }
 
     rocke_ir_builder_t b;
-    rocke_kernel_def_t* kernel = rocke_build_direct_depthwise_dgrad_win_new(&b, &spec, arch);
+    rocke_kernel_def_t* kernel = is_4c
+                                     ? rocke_build_direct_conv_4c_new(&b, &spec4c, arch)
+                                     : rocke_build_direct_depthwise_dgrad_win_new(&b, &spec, arch);
     if(kernel == NULL)
     {
         const char* m = rocke_ir_builder_error(&b);

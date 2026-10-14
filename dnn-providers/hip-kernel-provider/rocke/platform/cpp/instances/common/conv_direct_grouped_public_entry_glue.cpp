@@ -158,6 +158,13 @@ rocke_kernel_def_t* rocke_build_direct_conv_4c(rocke_ir_builder_t* b,
     ctx.arch = arch;
     ctx.p = spec->problem; /* p = spec.problem (by value) */
 
+    /* if spec.stage_rows: return _build_direct_conv_4c_staged(spec) (after the
+     * same validate() / is_valid_spec_4c gate). */
+    if(spec->stage_rows)
+    {
+        return rocke_dconv4c_build_staged(&ctx);
+    }
+
     /* spec.validate(); is_valid_spec_4c gate; params; consts; thread/grid
      * decode; buffer rsrcs.  (lines 833-876) Returns false on a rejected
      * spec / geometry violation. */

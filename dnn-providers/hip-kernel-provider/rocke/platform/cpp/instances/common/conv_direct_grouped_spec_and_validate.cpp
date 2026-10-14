@@ -38,6 +38,7 @@
 #include "rocke/helper_rocke.core.arch.h" /* rocke_archtarget_from_gfx, has_shape */
 #include "rocke/helper_rocke.helpers.fuse.h" /* rocke_fuse_dtype_to_ir_str          */
 #include "rocke/helper_rocke.helpers.spec.h" /* rocke_kernel_name_join, sig entry   */
+#include "rocke/instance_conv_direct_grouped_internal.h" /* ROCKE_DCONV4C_* bounds */
 
 /* ===================================================================== *
  *  DirectConvProblem
@@ -423,13 +424,100 @@ rocke_direct_conv_4c_spec_t rocke_direct_conv_4c_spec_default(void)
     s.block_q = 4;
     s.block_groups = 16;
     s.wave_size = 64;
+    s.dgrad_fused_weights = false;
+    s.dgrad_weights_lds = false;
+    s.stage_rows = false;
+    s.waves_q = 1;
     return s;
 }
 
 int rocke_direct_conv_4c_threads_per_block(const rocke_direct_conv_4c_spec_t* spec)
 {
-    /* (block_groups // 16) * wave_size */
-    return (spec->block_groups / 16) * spec->wave_size;
+    /* (block_groups // 16) * waves_q * wave_size */
+    return (spec->block_groups / 16) * spec->waves_q * spec->wave_size;
+}
+
+/* Python _staged_4c_geometry. */
+void rocke_dconv4c_staged_geometry(const rocke_direct_conv_4c_spec_t* spec,
+                                   rocke_dconv4c_staged_geo_t* geo)
+{
+    const rocke_direct_conv_problem_t* p = &spec->problem;
+    const int threads = rocke_direct_conv_4c_threads_per_block(spec);
+    const int wl_vecs = spec->block_groups * p->cpg * p->KH * p->KW * p->kpg / 8;
+    const int wl_elems = ((wl_vecs + threads - 1) / threads) * threads * 8;
+
+    geo->bc = spec->block_groups * p->cpg;
+    geo->lds_w = spec->block_q + p->KW - 1;
+    geo->vpc = geo->bc / 8;
+    geo->row_stride = geo->bc + 32;
+    geo->nchunk = geo->lds_w * geo->vpc;
+    geo->passes = (geo->nchunk + threads - 1) / threads;
+    geo->row_elems = ((geo->passes * threads + geo->vpc - 1) / geo->vpc) * geo->row_stride;
+    geo->lds_bytes = (2 * geo->row_elems + wl_elems) * 2;
+}
+
+/* Python _stage_rows_reject_reason: true + reason when illegal. */
+bool rocke_dconv4c_stage_rows_reject(const rocke_direct_conv_4c_spec_t* spec,
+                                     char* reason,
+                                     size_t reason_cap)
+{
+    const rocke_direct_conv_problem_t* p = &spec->problem;
+    char buf[ROCKE_ERR_MSG_CAP];
+    bool bad = true;
+
+    buf[0] = '\0';
+    if(spec->waves_q < 1)
+    {
+        snprintf(buf, sizeof buf, "waves_q must be >= 1 (got %d)", spec->waves_q);
+    }
+    else if(!spec->stage_rows)
+    {
+        if(spec->waves_q != 1)
+            snprintf(
+                buf, sizeof buf, "waves_q > 1 needs stage_rows (got waves_q=%d)", spec->waves_q);
+        else
+            bad = false;
+    }
+    else if(!(spec->dgrad_fused_weights && spec->dgrad_weights_lds))
+    {
+        snprintf(buf, sizeof buf, "stage_rows needs dgrad_fused_weights and dgrad_weights_lds");
+    }
+    else if(spec->block_q != 4 * spec->waves_q)
+    {
+        snprintf(buf,
+                 sizeof buf,
+                 "stage_rows needs block_q == 4*waves_q (got block_q=%d, waves_q=%d)",
+                 spec->block_q,
+                 spec->waves_q);
+    }
+    else if(p->stride != 1 || p->KH != 2 * p->PAD + 1 || p->KW != 2 * p->PAD + 1)
+    {
+        snprintf(buf,
+                 sizeof buf,
+                 "stage_rows needs stride 1 and 'same' padding (Ho == H, Wo == W: "
+                 "KH == KW == 2*PAD+1; got stride=%d, KH=%d, KW=%d, PAD=%d)",
+                 p->stride,
+                 p->KH,
+                 p->KW,
+                 p->PAD);
+    }
+    else if(rocke_direct_conv_4c_threads_per_block(spec) > ROCKE_DCONV4C_MAX_THREADS)
+    {
+        snprintf(buf,
+                 sizeof buf,
+                 "stage_rows needs threads_per_block <= %d (got %d)",
+                 ROCKE_DCONV4C_MAX_THREADS,
+                 rocke_direct_conv_4c_threads_per_block(spec));
+    }
+    else
+    {
+        bad = false;
+    }
+    if(bad && reason != NULL && reason_cap > 0)
+    {
+        snprintf(reason, reason_cap, "%s", buf);
+    }
+    return bad;
 }
 
 rocke_status_t rocke_direct_conv_4c_kernel_name(const rocke_direct_conv_4c_spec_t* spec,
@@ -456,18 +544,27 @@ rocke_status_t rocke_direct_conv_4c_kernel_name(const rocke_direct_conv_4c_spec_
     snprintf(bq_buf, sizeof(bq_buf), "bq%d", spec->block_q);
     snprintf(bg_buf, sizeof(bg_buf), "bg%d", spec->block_groups);
 
-    /* kernel_name_join(name, short, "bq..", "bg..", flags={"bf16": ...}) */
+    /* kernel_name_join(name, short, "bq..", "bg..",
+     *                  flags={"bf16", "fw", "fwl", f"sr{waves_q}"}) */
     parts[0] = short_buf;
     parts[1] = bq_buf;
     parts[2] = bg_buf;
     {
         const char* dt4c = spec->problem.dtype ? spec->problem.dtype : "fp16";
-        const char* flag_names4c[1];
-        int flag_on4c[1];
+        const char* flag_names4c[4];
+        int flag_on4c[4];
+        char sr_buf[32];
+        snprintf(sr_buf, sizeof(sr_buf), "sr%d", spec->waves_q);
         flag_names4c[0] = "bf16";
+        flag_names4c[1] = "fw";
+        flag_names4c[2] = "fwl";
+        flag_names4c[3] = sr_buf;
         flag_on4c[0] = (strcmp(dt4c, "bf16") == 0) ? 1 : 0;
+        flag_on4c[1] = (spec->dgrad_fused_weights && !spec->dgrad_weights_lds) ? 1 : 0;
+        flag_on4c[2] = (spec->dgrad_fused_weights && spec->dgrad_weights_lds) ? 1 : 0;
+        flag_on4c[3] = spec->stage_rows ? 1 : 0;
         return rocke_kernel_name_join(
-            spec->name, parts, 3, flag_names4c, flag_on4c, 1, out, out_cap, NULL);
+            spec->name, parts, 3, flag_names4c, flag_on4c, 4, out, out_cap, NULL);
     }
 }
 
@@ -536,6 +633,29 @@ rocke_status_t rocke_direct_conv_4c_validate(const rocke_direct_conv_4c_spec_t* 
                      spec->block_groups);
         }
         return ROCKE_ERR_VALUE;
+    }
+    /* if self.dgrad_weights_lds and not self.dgrad_fused_weights: raise */
+    if(spec->dgrad_weights_lds && !spec->dgrad_fused_weights)
+    {
+        if(reason != NULL && reason_cap > 0)
+        {
+            snprintf(reason,
+                     reason_cap,
+                     "DirectConv4cSpec dgrad_weights_lds requires dgrad_fused_weights");
+        }
+        return ROCKE_ERR_VALUE;
+    }
+    /* why = _stage_rows_reject_reason(self); raise ValueError(f"DirectConv4cSpec {why}") */
+    {
+        char why[ROCKE_ERR_MSG_CAP];
+        if(rocke_dconv4c_stage_rows_reject(spec, why, sizeof why))
+        {
+            if(reason != NULL && reason_cap > 0)
+            {
+                snprintf(reason, reason_cap, "DirectConv4cSpec %s", why);
+            }
+            return ROCKE_ERR_VALUE;
+        }
     }
     return ROCKE_OK;
 }
@@ -614,6 +734,62 @@ bool rocke_direct_conv_4c_is_valid_spec(const rocke_direct_conv_4c_spec_t* spec,
     {
         CK_DCONV4C_REJECT(
             "groups %d not divisible by block_groups %d", p->groups, spec->block_groups);
+    }
+    /* if p.KH * p.KW > DCONV4C_MAX_TAPS: return False, ... (the builder's
+     * per-tap arrays are sized ROCKE_DCONV4C_MAX_TAPS). */
+    if(p->KH * p->KW > ROCKE_DCONV4C_MAX_TAPS)
+    {
+        CK_DCONV4C_REJECT("DirectConv4cSpec supports KH*KW <= %d (got %d)",
+                          ROCKE_DCONV4C_MAX_TAPS,
+                          p->KH * p->KW);
+    }
+    /* why = _stage_rows_reject_reason(spec); if why: return False, why */
+    if(rocke_dconv4c_stage_rows_reject(spec, reason, reason_cap))
+    {
+        return false;
+    }
+    /* if spec.dgrad_weights_lds: needs fused weights + transpose LDS reads. */
+    if(spec->dgrad_weights_lds)
+    {
+        if(!spec->dgrad_fused_weights)
+        {
+            CK_DCONV4C_REJECT("dgrad_weights_lds requires dgrad_fused_weights");
+        }
+        if(!target->memory.has_ds_read_tr)
+        {
+            CK_DCONV4C_REJECT("dgrad_weights_lds needs ds_read_b64_tr_b16 (absent on %s)", arch);
+        }
+        /* wl_passes = ceil(block_groups*cpg*KH*KW*kpg/8 / threads) <= bound */
+        {
+            const int wl_vecs = spec->block_groups * p->cpg * p->KH * p->KW * p->kpg / 8;
+            const int wl_threads = rocke_direct_conv_4c_threads_per_block(spec);
+            const int wl_passes = (wl_vecs + wl_threads - 1) / wl_threads;
+            if(wl_passes > ROCKE_DCONV4C_MAX_WL_PASSES)
+            {
+                CK_DCONV4C_REJECT("dgrad_weights_lds needs %d staging passes (max %d)",
+                                  wl_passes,
+                                  ROCKE_DCONV4C_MAX_WL_PASSES);
+            }
+        }
+    }
+    /* stage_rows: row-staging pass bound and the target's LDS capacity. */
+    if(spec->stage_rows)
+    {
+        rocke_dconv4c_staged_geo_t geo;
+        rocke_dconv4c_staged_geometry(spec, &geo);
+        if(geo.passes > ROCKE_DCONV4C_MAX_ROW_PASSES)
+        {
+            CK_DCONV4C_REJECT("stage_rows needs %d row staging passes (max %d)",
+                              geo.passes,
+                              ROCKE_DCONV4C_MAX_ROW_PASSES);
+        }
+        if(geo.lds_bytes > target->lds_capacity_bytes)
+        {
+            CK_DCONV4C_REJECT("stage_rows needs %d bytes of LDS (more than %d on %s)",
+                              geo.lds_bytes,
+                              target->lds_capacity_bytes,
+                              arch);
+        }
     }
 
     /* The 4x4x4 atom is deliberately NOT gated through has_shape (catalog lists

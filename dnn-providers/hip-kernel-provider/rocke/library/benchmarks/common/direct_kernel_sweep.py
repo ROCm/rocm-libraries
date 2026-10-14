@@ -50,6 +50,9 @@ from kernels.common.conv_abi import conv_direct_transform_signature
 from kernels.conv.direct_aot_jobs import (  # noqa: F401 (the grid and builder, re-exported)
     BLOCK_GROUPS,
     BLOCK_Q,
+    DGRAD_4C_BLOCK_GROUPS,
+    DGRAD_4C_BLOCK_Q,
+    DGRAD_4C_FORMS,
     DGRAD_BLOCK_H,
     DGRAD_BLOCK_Q,
     DGRAD_RTC_LOOP_MAX_ATOMS,
@@ -98,6 +101,7 @@ from kernels.conv.direct_variants import (  # noqa: F401 (make_spec, validate_sp
     DIRECT_DGRAD_TRANSPOSE as _TRANSPOSE,
     DIRECT_DGRAD_TRANSPOSE_RTC as _TRANSPOSE_RTC,
     DIRECT_HALO_VARIANTS as _HALO_VARIANTS,
+    DIRECT_DGRAD_FPROP_SINGLE as _DGRAD_FPROP_SINGLE,
     DIRECT_MFMA_DGRAD as _MFMA_DGRAD,
     DIRECT_SPLIT_REDUCE as _SPLIT_REDUCE,
     DIRECT_WGRAD_FOLD as _WGRAD_FOLD,
@@ -569,6 +573,13 @@ def plan_for(
         # into atomically (the caller zeroes it).
         step = _conv_step(
             identity, hsaco_path, meta, spec, problem, "wgrad", ("dy", "x", "dw")
+        )
+        return DirectPlan(identity, (step,)), "ok"
+    if variant in _DGRAD_FPROP_SINGLE:
+        # A single forward kernel over the transposed problem that reads the
+        # original weights itself: forward ABI, transposed extents.
+        step = _conv_step(
+            identity, hsaco_path, meta, spec, spec.problem, "fwd", ("dy", "w", "dx")
         )
         return DirectPlan(identity, (step,)), "ok"
     if variant not in _MFMA_DGRAD:

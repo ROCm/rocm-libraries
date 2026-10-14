@@ -348,6 +348,106 @@ def test_windowed_depthwise_dgrad_binary_is_found_by_identity():
         assert dks.direct_job_for_identity(job.identity).identity == job.identity
 
 
+_4C = "direct_grouped_dgrad_4c"
+
+
+@pytest.mark.parametrize("KH", [1, 3])
+def test_dgrad_cpg4_offers_the_4c_kernel(cache, KH):
+    """A stride-1 "same"-padded cpg = kpg = 4 dgrad gets the 4c kernel: one
+    forward-ABI launch over the transposed problem that reads the original
+    weights itself (no transform helper, no workspace), with the 4c grid
+    (column tiles, group blocks, images). 3x3 also keeps the existing
+    variants; a 1x1 has only the 4c one."""
+    problem = _problem(
+        N=3, H=13, W=17, groups=64, cpg=4, kpg=4, KH=KH, KW=KH, PAD=KH // 2
+    )
+    plans, _ = dks.direct_plans(cache, problem, "dgrad", _ARCH)
+    expected = {_4C}
+    if KH == 3:
+        expected |= {
+            "direct_grouped_dgrad",
+            "direct_grouped_dgrad_mfma",
+            "direct_dgrad_mfma_rtc",
+        }
+    assert _variants(plans) == expected
+    fourc = [p for p in plans if p.identity.algorithm == _4C]
+    assert fourc
+    for plan in fourc:
+        knobs = json.loads(plan.identity.knobs)
+        (step,) = plan.steps
+        assert plan.workspaces == {}
+        assert step.buffers == ("dy", "w", "dx")
+        # Forward ABI: the A/D stride triples are the forward ones.
+        names = [e["name"] for e in step.signature]
+        assert "p_A_stride_n" in names and "p_dY_stride_n" not in names
+        threads = (knobs["block_groups"] // 16) * 64
+        if knobs["stage_rows"]:
+            threads *= knobs["block_q"] // 4
+        assert step.block == (threads, 1, 1)
+        assert step.grid == (
+            -(-problem.W // knobs["block_q"]),
+            problem.groups // knobs["block_groups"],
+            problem.N,
+        )
+        # The transposed problem: dY in, dX out (cpg and kpg swap).
+        assert step.conv_args.to_launch_values(1, 2, 3, 4, 5, 6)["p_Hi"] == problem.H
+
+
+def test_dgrad_cpg4_4c_cached_scope(jobs):
+    """The 4c dgrad cache is the policy image: block_q in {4, 8, 16}, block
+    groups in {16, 32, 64}, gathered weights, LDS-staged weights and the
+    row-staged form (one q wave per 4 columns); 1x1 and 3x3, stride 1, "same"
+    padding, cpg = kpg = 4."""
+    fourc = [j for j in jobs if j.identity.algorithm == _4C]
+    assert {
+        (j.identity.filter_h, j.identity.pad_h, j.identity.stride_h) for j in fourc
+    } == {(1, 0, 1), (3, 1, 1)}
+    assert {(j.identity.cpg, j.identity.kpg) for j in fourc} == {(4, 4)}
+    knobs = {json.dumps(j.spec_kwargs, sort_keys=True) for j in fourc}
+    assert len(knobs) == len(dks.DGRAD_4C_BLOCK_Q) * len(
+        dks.DGRAD_4C_BLOCK_GROUPS
+    ) * len(dks.DGRAD_4C_FORMS)
+    assert any(j.spec_kwargs["stage_rows"] for j in fourc)
+
+
+def test_dgrad_cpg4_4c_rejects_shapes_it_cannot_serve(cache):
+    """groups must divide block_groups; the rejected binaries say why."""
+    problem = _problem(groups=48, cpg=4, kpg=4)
+    plans, rejected = dks.direct_plans(cache, problem, "dgrad", _ARCH)
+    fourc = [p for p in plans if p.identity.algorithm == _4C]
+    assert fourc
+    assert all(json.loads(p.identity.knobs)["block_groups"] == 16 for p in fourc)
+    assert any(
+        "not divisible by block_groups" in why
+        for ident, why in rejected
+        if ident.algorithm == _4C
+    )
+    # No 4c kernel for stride 2 or a 5x5 filter (no such capability row).
+    for kw in ({"stride": 2}, {"KH": 5, "KW": 5, "PAD": 2}):
+        plans, _ = dks.direct_plans(
+            cache, _problem(groups=64, cpg=4, kpg=4, **kw), "dgrad", _ARCH
+        )
+        assert _4C not in _variants(plans)
+
+
+def test_dgrad_cpg4_4c_lds_forms_are_gfx950_only():
+    """gfx942 has no transpose LDS reads: its 4c cache is the gathered form."""
+    target = ArchTarget.from_gfx("gfx942")
+    for caps in dks.DIRECT_CAPABILITIES[_4C][1]:
+        cell = dks._caps_jobs("gfx942", target.wave_size, _4C, "dgrad", caps, "fp16")[1]
+        assert cell
+        assert not any(j.spec_kwargs["dgrad_weights_lds"] for _, j in cell)
+
+
+def test_dgrad_cpg4_4c_binary_is_found_by_identity():
+    target = ArchTarget.from_gfx(_ARCH)
+    for caps in dks.DIRECT_CAPABILITIES[_4C][1]:
+        for _, job in dks._caps_jobs(
+            _ARCH, target.wave_size, _4C, "dgrad", caps, "bf16"
+        )[1]:
+            assert dks.direct_job_for_identity(job.identity).identity == job.identity
+
+
 def _nongrouped(plans):
     return [p for p in plans if p.identity.algorithm == "direct_nongrouped"]
 
@@ -702,6 +802,9 @@ def test_mfma_dgrad_grid_skips_spilling_preloads(jobs):
         ("dgrad", _problem(groups=64, cpg=1, kpg=1, KH=7, KW=7, PAD=3)),
         ("dgrad", _problem(cpg=8, kpg=8, stride=2)),
         ("dgrad", _problem()),
+        # cpg = kpg = 4: the 4c kernel (forward ABI, transposed problem) too.
+        ("dgrad", _problem(groups=64, cpg=4, kpg=4)),
+        ("dgrad", _problem(groups=32, cpg=4, kpg=4, KH=1, KW=1, PAD=0)),
         ("wgrad", _problem()),
         ("wgrad", _problem(groups=1, cpg=48, kpg=192, KH=5, KW=5, PAD=0)),
         # Dense MFMA dgrad (runtime channels): transforms take two scalars.

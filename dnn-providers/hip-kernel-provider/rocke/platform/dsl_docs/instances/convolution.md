@@ -573,6 +573,36 @@ Levers:
 
 This path avoids the implicit-GEMM LDS machinery because the channel group is tiny and direct vectorization is cleaner.
 
+#### 4c dgrad (`make_dgrad_4c_spec`, AOT variant `direct_grouped_dgrad_4c`)
+
+Stride-1 dgrad with `cpg = kpg = 4` and a "same"-padded 1x1 or 3x3 filter runs
+the 4c kernel as a *forward* kernel over the transposed problem
+(`dgrad_4c_transposed_problem`: `dX = conv(dY, W_T)`), launched with the
+forward direct ABI over that problem. Knobs (all default off, so a forward 4c
+spec is unchanged):
+
+- `dgrad_fused_weights`: `B` is the original weight; the prologue gathers each
+  lane's flipped, k<->c transposed fragment (four scalar loads per tap), so
+  there is no weight pre-pass or workspace.
+- `dgrad_weights_lds` (with fused weights; needs `ds_read_b64_tr_b16`,
+  gfx950): the workgroup's W slice is copied to LDS with 16-byte loads and each
+  tap's fragment is one transpose read. Bounded by `DCONV4C_MAX_WL_PASSES`.
+- `stage_rows` / `waves_q` (with LDS weights; `block_q == 4 * waves_q`): once
+  per input row the workgroup copies its row (`block_q + KW - 1` columns of
+  `block_groups * cpg` channels) into a double-buffered, padded LDS row, one
+  row ahead through registers, and every wave reads its B fragments with
+  `ds_read_b64`. The rows stream through a runtime `scf.for` from `PAD` to
+  `p_Hi + KH - 1`, unrolled `lcm(KH, 2)` rows so the buffer parity and the
+  accumulator slots stay build-time constants; rows outside the image load
+  zeros through the out-of-range sentinel and drop their stores, and the row
+  and pixel offsets come from the stride kernargs. Bounded by
+  `DCONV4C_MAX_ROW_PASSES`, `DCONV4C_MAX_THREADS` and the target's LDS.
+
+The kernel name carries `fw` / `fwl` / `sr<waves_q>`. The AOT cache builds the
+policy image (`block_q` 4/8/16, `block_groups` 16/32/64, gathered, LDS-staged
+and row-staged weights) for both dtypes; `plan_for` emits one forward-ABI
+launch with the buffers `(dy, w, dx)`.
+
 ### Depthwise Kernel (`DirectDepthwiseSpec`)
 
 `DirectDepthwiseSpec` / `build_direct_depthwise`. Scalar FMA, no MFMA. Each lane owns

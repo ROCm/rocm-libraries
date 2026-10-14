@@ -135,6 +135,17 @@ DW_WIN_MFMA_FOLDS = (1, 2, 4)
 DW_WIN_MFMA_WAVES = (4, 8)
 DW_WIN_MFMA_BLOCK_H = (4, 7, 8, 12, 14, 16)
 DW_WIN_MFMA_PREFETCH = 2
+# 4c dgrad (direct_grouped_dgrad_4c, cpg = kpg = 4): the 4x4x4 MFMA kernel on
+# the transposed problem with fused weights. The cache carries the image of
+# the 4c dispatch policy -- the (4, 16) tile with gathered weights, LDS-staged
+# weights (gfx950) and the row-staged form (gfx950) -- plus a small
+# neighbourhood of wider column and group tiles. The row-staged form takes one
+# q wave per 4 columns (waves_q = block_q / 4).
+DGRAD_4C_BLOCK_Q = (4, 8, 16)
+DGRAD_4C_BLOCK_GROUPS = (16, 32, 64)
+# (dgrad_weights_lds, stage_rows); the validator drops the LDS forms on
+# targets without transpose LDS reads.
+DGRAD_4C_FORMS = ((False, False), (True, False), (True, True))
 # Grouped scalar-FMA dgrad.
 DGRAD_BLOCK_Q = (4, 8, 16, 32)
 # MFMA dgrad fprop pass: output rows per block, then
@@ -465,6 +476,14 @@ DIRECT_CAPABILITIES: Dict[str, Tuple[str, Tuple[DirectCaps, ...]]] = {
             for c, k in _DENSE_MFMA_DGRAD_CHANNELS
         ),
     ),
+    # 4c dgrad: one fused-weight kernel, a forward 4c kernel on the
+    # transposed problem, so stride 1 and "same" padding; 1x1 and 3x3.
+    "direct_grouped_dgrad_4c": (
+        "dgrad",
+        tuple(
+            DirectCaps(KH=k, PAD=_same_pad(k), stride=1, cpg=4, kpg=4) for k in (1, 3)
+        ),
+    ),
     # The same pipeline with runtime channels: dense (groups == 1) and any
     # cpg/kpg whose tile counts a cached binary has (knobs k_atoms/m_tiles).
     "direct_dgrad_mfma_rtc": (
@@ -624,6 +643,16 @@ def _knob_grid(
     elif variant == "direct_grouped_dgrad":
         for bq, bg in itertools.product(DGRAD_BLOCK_Q, BLOCK_GROUPS):
             yield dict(block_q=bq, block_groups=bg)
+    elif variant == "direct_grouped_dgrad_4c":
+        for bq, bg, (lds, sr) in itertools.product(
+            DGRAD_4C_BLOCK_Q, DGRAD_4C_BLOCK_GROUPS, DGRAD_4C_FORMS
+        ):
+            yield {
+                "block_q": bq,
+                "block_groups": bg,
+                "dgrad_weights_lds": lds,
+                "stage_rows": sr,
+            }
     elif variant == "direct_grouped_dgrad_mfma":
         for bq, bg, bh, (wq, wk, rk, pg, k32) in itertools.product(
             BLOCK_Q, BLOCK_GROUPS, DGRAD_BLOCK_H, DGRAD_WAVES
