@@ -49,7 +49,7 @@ dispatcher) from `cpg = C / groups`:
 | cpg | Spec class           | MFMA atom                    | Requirement       |
 |-----|----------------------|------------------------------|-------------------|
 | 1   | `DirectDepthwiseSpec`| scalar FMA (no MFMA)         | stride = 1        |
-| 4   | `DirectConv4cSpec`   | `mfma_f32_4x4x4_f16`        | cpg = kpg = 4     |
+| 4   | `DirectConv4cSpec`   | `mfma_f32_4x4x4_{f16,bf16}` | cpg = kpg = 4     |
 | 8   | `DirectConv8cSpec`   | `mfma_f32_16x16x16_f16`     | cpg = kpg = 8     |
 | 16  | `DirectConv16cSpec`  | `mfma_f32_16x16x16_f16`/`32`| cpg = kpg = 16    |
 | 32  | `DirectConv32cSpec`  | `mfma_f32_32x32x8_f16`      | cpg = kpg = 32    |

@@ -29,6 +29,7 @@
 #include "rocke/instance_conv_direct_grouped_internal.h"
 
 #include <stdio.h> /* snprintf (error messages) */
+#include <string.h> /* strcmp */
 
 #include "rocke/helper_rocke.helpers.io.h" /* rocke_b_io_ir_type */
 
@@ -74,13 +75,20 @@ bool rocke_dconv4c_prologue(rocke_dconv_4c_ctx_t* ctx)
 
     /* Line 837: p = spec.problem (already copied into ctx->p by the driver). */
 
+    /* io_type = _io_type(p.dtype): f16 or bf16 IR type (emits no IR). */
+    ctx->io_type = rocke_b_io_ir_type(b, p->dtype ? p->dtype : "fp16");
+    if(ctx->io_type == NULL)
+    {
+        return false; /* builder sticky error already set by rocke_b_io_ir_type */
+    }
+    ctx->is_bf16 = (p->dtype != NULL && strcmp(p->dtype, "bf16") == 0) ? 1 : 0;
+
     /* Line 839: b.kernel.attrs["max_workgroup_size"] = spec.threads_per_block. */
     rocke_attr_set_int(
         b, &b->kernel->attrs, "max_workgroup_size", rocke_direct_conv_4c_threads_per_block(spec));
 
     /* Lines 841-846: kernel params (AOT kernarg block, conv_abi order). */
-    rocke_dconv_emit_params(
-        b, &ctx->params, "fwd", rocke_b_io_ir_type(b, ctx->p.dtype ? ctx->p.dtype : "fp16"));
+    rocke_dconv_emit_params(b, &ctx->params, "fwd", ctx->io_type);
     ctx->A = ctx->params.A;
     ctx->Bp = ctx->params.Bp;
     ctx->D = ctx->params.D;
@@ -118,7 +126,7 @@ bool rocke_dconv4c_prologue(rocke_dconv_4c_ctx_t* ctx)
     ctx->a_rsrc = rocke_b_buffer_rsrc(b, ctx->A, ctx->A_bytes);
     ctx->b_rsrc = rocke_b_buffer_rsrc(b, ctx->Bp, ctx->B_bytes);
     ctx->d_rsrc = rocke_b_buffer_rsrc(b, ctx->D, ctx->D_bytes);
-    ctx->io_vec4_zero = rocke_b_zero_vec_f16(b, 4);
+    ctx->io_vec4_zero = rocke_b_zero_vec(b, ctx->io_type, 4);
     ctx->zero_acc = rocke_b_zero_vec_f32(b, 4);
 
     return rocke_ir_builder_ok(b);
@@ -170,9 +178,14 @@ void rocke_dconv4c_load_weights(rocke_dconv_4c_ctx_t* ctx)
             rocke_transforms_descriptor_offset(
                 b, ctx->b_desc, in_names, in_values, 4, &w_off, &w_valid);
 
-            /* b.buffer_load_vN_f16(b_rsrc, b.mul(w_off, c_half_bytes), c0, 2). */
-            w = rocke_b_buffer_load_vN_f16(
-                b, ctx->b_rsrc, rocke_b_mul(b, w_off, ctx->c_half_bytes), ctx->c0, 2);
+            /* _buf_load_vN(b, dtype, b_rsrc, b.mul(w_off, c_half_bytes), c0, 2). */
+            {
+                rocke_value_t* w_byte_off = rocke_b_mul(b, w_off, ctx->c_half_bytes);
+                if(ctx->is_bf16)
+                    w = rocke_b_buffer_load_vN_bf16(b, ctx->b_rsrc, w_byte_off, ctx->c0, 2);
+                else
+                    w = rocke_b_buffer_load_vN_f16(b, ctx->b_rsrc, w_byte_off, ctx->c0, 2);
+            }
             ctx->weights[ctx->n_weights++] = w;
         }
     }
@@ -349,7 +362,10 @@ rocke_kernel_def_t* rocke_dconv4c_stream_h_loop(rocke_dconv_4c_ctx_t* ctx)
                 }
                 safe_a = rocke_b_select(
                     b, valid, rocke_b_mul(b, a_off, ctx->c_half_bytes), ctx->oob_sentinel);
-                vec = rocke_b_buffer_load_vN_f16(b, ctx->a_rsrc, safe_a, ctx->c0, 2);
+                if(ctx->is_bf16)
+                    vec = rocke_b_buffer_load_vN_bf16(b, ctx->a_rsrc, safe_a, ctx->c0, 2);
+                else
+                    vec = rocke_b_buffer_load_vN_f16(b, ctx->a_rsrc, safe_a, ctx->c0, 2);
                 vec = rocke_b_select(b, valid, vec, ctx->io_vec4_zero);
                 inputs_by_qtile[qt][s_idx] = vec;
             }
@@ -367,8 +383,13 @@ rocke_kernel_def_t* rocke_dconv4c_stream_h_loop(rocke_dconv_4c_ctx_t* ctx)
                 rocke_value_t* acc = accs_flat[flat];
                 for(s_const = 0; s_const < p->KW; ++s_const)
                 {
-                    acc = rocke_b_mfma_f32_4x4x4_f16(
-                        b, ctx->weights[r_const * p->KW + s_const], inputs[s_const], acc);
+                    /* _mfma(b, dtype, "4x4x4", w, x, acc). */
+                    if(ctx->is_bf16)
+                        acc = rocke_b_mfma_f32_4x4x4_bf16(
+                            b, ctx->weights[r_const * p->KW + s_const], inputs[s_const], acc);
+                    else
+                        acc = rocke_b_mfma_f32_4x4x4_f16(
+                            b, ctx->weights[r_const * p->KW + s_const], inputs[s_const], acc);
                 }
                 accs_flat[flat] = acc;
             }
@@ -427,8 +448,16 @@ rocke_kernel_def_t* rocke_dconv4c_stream_h_loop(rocke_dconv_4c_ctx_t* ctx)
                 b, store_ok, rocke_b_mul(b, d_base, ctx->c_half_bytes), ctx->oob_sentinel);
             /* MFMA 4x4x4 wave64 per-lane output layout:
              *   acc[i] -> D[n, ho_row, out_q, g*kpg + i]  for i in 0..3 */
-            acc_h = rocke_b_vec_trunc_f32_to_f16(b, acc);
-            rocke_b_buffer_store_vN_f16(b, ctx->d_rsrc, safe_d, ctx->c0, acc_h, 2);
+            if(ctx->is_bf16)
+            {
+                acc_h = rocke_b_vec_trunc_f32_to_bf16(b, acc);
+                rocke_b_buffer_store_vN_bf16(b, ctx->d_rsrc, safe_d, ctx->c0, acc_h, 2);
+            }
+            else
+            {
+                acc_h = rocke_b_vec_trunc_f32_to_f16(b, acc);
+                rocke_b_buffer_store_vN_f16(b, ctx->d_rsrc, safe_d, ctx->c0, acc_h, 2);
+            }
             accs_flat[flat] = ctx->zero_acc;
         }
     }

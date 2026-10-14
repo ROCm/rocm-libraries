@@ -1639,7 +1639,9 @@ std::vector<std::string> conv_implicit_gemm_verify(const py::dict& d, const std:
 
 /* The direct-grouped family has two distinct spec structs (16-channel and
  * 4-channel). The dict carries "kind" ("16c"|"4c") to select the path. */
-void fill_direct_conv_problem(rocke_direct_conv_problem_t* p, const py::dict& d)
+void fill_direct_conv_problem(rocke_direct_conv_problem_t* p,
+                              const py::dict& d,
+                              std::deque<std::string>* store = nullptr)
 {
     p->N = dict_int(d, "N", p->N);
     p->H = dict_int(d, "H", p->H);
@@ -1653,6 +1655,17 @@ void fill_direct_conv_problem(rocke_direct_conv_problem_t* p, const py::dict& d)
     p->stride = dict_int(d, "stride", p->stride);
     p->dil_h = dict_int(d, "dil_h", p->dil_h);
     p->dil_w = dict_int(d, "dil_w", p->dil_w);
+    if(store != nullptr)
+    {
+        /* dtype is a borrowed C string; park it in `store` so it outlives the
+         * spec (same pattern as the spec name). */
+        std::string v;
+        if(dict_str(d, "dtype", v))
+        {
+            store->push_back(v);
+            p->dtype = store->back().c_str();
+        }
+    }
 }
 
 std::string conv_direct_grouped_kind(const py::dict& d)
@@ -1692,7 +1705,7 @@ rocke_direct_conv_4c_spec_t dg4_build_spec(const py::dict& d, std::deque<std::st
     };
     rocke_direct_conv_4c_spec_t s = rocke_direct_conv_4c_spec_default();
     if(d.contains("problem") && py::isinstance<py::dict>(d["problem"]))
-        fill_direct_conv_problem(&s.problem, d["problem"].cast<py::dict>());
+        fill_direct_conv_problem(&s.problem, d["problem"].cast<py::dict>(), &store);
     {
         std::string v;
         if(dict_str(d, "name", v))

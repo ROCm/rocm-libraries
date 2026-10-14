@@ -12,8 +12,9 @@
  *   - 16c variant (cpg=kpg=16): one wave owns one group; mfma_f32_16x16x16_f16
  *     (and, when fold_k32=True, the wide 16x16x32 f16 atom for S=0/1). 8 waves /
  *     block, LDS double-buffered ping-pong, 3-slot circular accumulator over H.
- *   - 4c  variant (cpg=kpg=4): mfma_f32_4x4x4_f16 emits 16 independent 4x4x4
- *     matmuls per wave, mapping one wave to 16 groups at once. No LDS staging;
+ *   - 4c  variant (cpg=kpg=4): mfma_f32_4x4x4_f16 (bf16 I/O: mfma_f32_4x4x4_bf16)
+ *     emits 16 independent 4x4x4 matmuls per wave, mapping one wave to 16 groups
+ *     at once. No LDS staging;
  *     per-lane register inputs only.
  *
  *   Python (conv_direct_grouped.py)        C99 (this header)
@@ -217,22 +218,25 @@ rocke_direct_conv_4c_spec_t rocke_direct_conv_4c_spec_default(void);
 int rocke_direct_conv_4c_threads_per_block(const rocke_direct_conv_4c_spec_t* spec);
 
 /* kernel_name():
- *   kernel_name_join(name, problem.short(), f"bq{block_q}", f"bg{block_groups}")
+ *   kernel_name_join(name, problem.short(), f"bq{block_q}", f"bg{block_groups}",
+ *                    flags={"bf16": dtype == "bf16"})
  * Writes NUL-terminated into out (capacity out_cap). */
 rocke_status_t rocke_direct_conv_4c_kernel_name(const rocke_direct_conv_4c_spec_t* spec,
                                                 char* out,
                                                 size_t out_cap);
 
-/* validate(): the hard assertions of DirectConv4cSpec.validate (cpg==kpg==4,
- * block_groups % 16 == 0, block_q % 4 == 0, groups % block_groups == 0). On a
+/* validate(): the hard assertions of DirectConv4cSpec.validate (dtype in
+ * {fp16, bf16}, cpg==kpg==4, block_groups % 16 == 0, block_q % 4 == 0,
+ * groups % block_groups == 0). On a
  * violated invariant returns ROCKE_ERR_VALUE + (reason if non-NULL); else ROCKE_OK. */
 rocke_status_t rocke_direct_conv_4c_validate(const rocke_direct_conv_4c_spec_t* spec,
                                              char* reason,
                                              size_t reason_cap);
 
 /* is_valid_spec_4c(spec, arch) -> (ok, reason). `arch` NULL => "gfx950".
- * Checks: ArchTarget.from_gfx(arch) resolves; cpg==kpg==4; block_groups % 16 == 0;
- * block_q % 4 == 0; groups % block_groups == 0. The 4x4x4 f16 atom is NOT gated
+ * Checks: ArchTarget.from_gfx(arch) resolves; dtype in {fp16, bf16}; "same"
+ * padding; stride 1; cpg==kpg==4; block_groups % 16 == 0; block_q % 4 == 0;
+ * groups % block_groups == 0. The 4x4x4 f16 / bf16 (_1k) atom is NOT gated
  * through has_shape (catalog lists only warp tiles; comgr selects it on both
  * targets). On reject writes the reason and returns false; else "ok" + true. */
 bool rocke_direct_conv_4c_is_valid_spec(const rocke_direct_conv_4c_spec_t* spec,
