@@ -154,7 +154,7 @@ bool GetTuningKernelInfo(ExecPlan& execPlan)
         tuningPacket->globalRW_per_thread[i]
             = (scheme == CS_KERNEL_2D_SINGLE) ? (lengths[0] * lengths[1]) / config.workgroup_size
                                               : -1;
-        tuningPacket->num_of_blocks[i] = gp.b_x;
+        tuningPacket->num_of_blocks[i] = gp.b_x * gp.b_y;
         tuningPacket->lds_bytes[i]     = gp.lds_bytes;
         tuningPacket->occupancy[i]     = occupancy;
         tuningPacket->wgs[i]           = config.workgroup_size;
