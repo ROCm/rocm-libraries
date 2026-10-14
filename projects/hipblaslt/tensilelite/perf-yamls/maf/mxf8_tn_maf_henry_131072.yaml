@@ -36,7 +36,7 @@ BenchmarkProblems:
     - # ProblemType, TN
       OperationType: GEMM
       DataType: F8
-      DestDataType: B
+      DestDataType: F8
       ComputeDataType: s
       HighPrecisionAccumulate:  True
       TransposeA: True
@@ -92,6 +92,9 @@ BenchmarkProblems:
         - SourceSwap: [True]
         - WorkGroupMapping: [1]
         - StoreVectorWidth: [-1]
+        - NumElementsPerBatchStore: [16]
+        - GroupLoadStore: [True]
+        - InterleaveAlpha: [2]
         - WavefrontSize: [32]
         - ExpandPointerSwap: [False]
         - PreloadKernArgs: [True]
