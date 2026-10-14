@@ -4,12 +4,16 @@
 ################################################################################
 """gfx950 MXF4 subtile characterization: host-pre-swizzled B.
 
-Drives ``data/_designed/gfx950/mxf4_swizzleb_subtile.yaml`` through the
-config-driven emit harness. The config has two problem groups that differ only in
-``SwizzleTensorB``, which is what makes them a scoping pair:
+Drives ``data/_designed/gfx950/mxf4_swizzle_subtile.yaml`` through the
+config-driven emit harness. Of that config's three problem groups this module
+uses the two that differ only in ``SwizzleTensorB``, which is what makes them a
+scoping pair:
 
   group 0  SwizzleTensorB: True   -> ``TileInfo.isPreShuffled`` True for B
-  group 1  SwizzleTensorB absent  -> ``isPreShuffled`` False, otherwise identical
+  group 1  neither flag set       -> ``isPreShuffled`` False, otherwise identical
+
+Group 2 is the swizzled-A mirror and belongs to
+``test_mxf4_swizzlea_subtile_char.py``.
 
 Target: every arm the pre-shuffled layout adds to the subtile emitters. When the
 host has already interleaved B into the MFMA-friendly 16-row layout, the kernel
@@ -48,7 +52,7 @@ _CONFIG = os.path.join(
     "test_data",
     "_designed",
     "gfx950",
-    "mxf4_swizzleb_subtile.yaml",
+    "mxf4_swizzle_subtile.yaml",
 )
 
 # Problem-group indices within the config. They are a matched pair: same solution

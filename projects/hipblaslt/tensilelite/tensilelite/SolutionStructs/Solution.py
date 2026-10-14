@@ -4960,8 +4960,11 @@ class Solution(collections.abc.Mapping):
             reject(state, printRejectionReason, f"SwizzleTensor{tc} doesn't support GRVW{tc} ({GRVW_TC}) != swizzle lane size ({laneSize})")
 
       if state["ProblemType"]["SwizzleTensorA"]:
-        if not state["DirectToVgprA"]:
-          reject(state, printRejectionReason, f"Tensor A swizzling requires DirectToVgprA")
+        # The subtile global-read emitter walks the swizzled A layout itself, so it
+        # does not need A staged through DirectToVgpr the way the classic path does.
+        if not state["UseSubtileImpl"]:
+          if not state["DirectToVgprA"]:
+            reject(state, printRejectionReason, f"Tensor A swizzling requires DirectToVgprA")
         if not state["ProblemType"]["TransposeA"]:
           reject(state, printRejectionReason, f"Tensor A swizzling supports TN or TT only")
 
