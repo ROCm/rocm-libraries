@@ -272,60 +272,6 @@ namespace rocisa
         }
         return module;
     }
-
-    
-    /**
-     * 64-bit floating point version of ceiling division for improved accuracy.
-     *
-     * Uses F64 operations instead of F32 to avoid precision loss with large
-     * matrix dimensions. Requires additional VGPRs (8 total instead of 4) since
-     * F64 operations use register pairs.
-     *
-     * @param qReg     Base register index for quotient (needs qReg and qReg+1 for F64)
-     * @param dReg     Register index for dividend
-     * @param divReg   Register index for divisor
-     * @param rReg     Base register index for remainder (needs rReg and rReg+1 for F64)
-     * @param doRemainder Whether to compute remainder (default true)
-     * @param tmpReg   Optional temporary register for ceiling computation (default: rReg+3)
-     * @param comment  Optional comment string
-     * @return Module containing the instruction sequence
-     */
-    inline std::shared_ptr<Module> vectorUInt32CeilDivideAndRemainder64(int  qReg,
-                                                                         int  dReg,
-                                                                         int  divReg,
-                                                                         int  rReg,
-                                                                         int  tmpReg = -1,
-                                                                         const std::string& comment
-                                                                         = "")
-    {
-        auto qRegVgpr   = vgpr(qReg);
-        auto rRegVgpr   = vgpr(rReg);
-        auto dRegVgpr   = vgpr(dReg);
-        auto divRegVgpr = vgpr(divReg);
-
-        std::string dComment = comment.empty()
-                                   ? qRegVgpr->toString() + " = ceil(" + dRegVgpr->toString()
-                                         + " / " + divRegVgpr->toString() + ")"
-                                   : comment;
-
-        auto pVCC  = MAKE(VCC);
-
-        auto module = std::make_shared<Module>("vectorUInt32CeilDivideAndRemainder64");
-
-        // Use 64-bit FP for better accuracy - F64 operations use register pairs
-        module->addT<VCvtU32toF64>(vgpr(qReg, 2), divRegVgpr, std::nullopt, dComment);
-        module->addT<VRcpF64>(vgpr(qReg, 2), vgpr(qReg, 2), dComment);
-        module->addT<VCvtU32toF64>(vgpr(rReg, 2), dRegVgpr, std::nullopt, dComment);
-        module->addT<VMulF64>(vgpr(qReg, 2), vgpr(qReg, 2), vgpr(rReg, 2), std::nullopt, dComment);
-        module->addT<VCvtF64toU32>(qRegVgpr, vgpr(qReg, 2), std::nullopt, dComment);
-
-        // Compute remainder and adjust for ceiling
-        module->addT<VMulU32U24>(rRegVgpr, qRegVgpr, divRegVgpr, dComment);
-        module->addT<VCmpLtU32>(pVCC, rRegVgpr, dRegVgpr, std::nullopt, dComment);
-        module->addT<VAddCCOU32>(qRegVgpr, pVCC, qRegVgpr, 0, pVCC, "ceil: add 1 if product < dividend");
-
-        return module;
-    }
         
     template <typename RREG, typename DREG>
     std::shared_ptr<Module> vectorStaticRemainder(int                               qReg,

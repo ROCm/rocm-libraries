@@ -35,7 +35,7 @@ from rocisa.container import DSModifiers, SDWAModifiers, VOP3PModifiers, \
 from rocisa.instruction import SGetPositivePCOffset, SLongBranch, SLongBranchPositive, SLongBranchNegative, SCLongBranchScc0, SCLongBranchScc1, SCLongBranchVccnz, \
                         SMulInt64to32, VCvtBF16toFP32, SBfeU32
 from rocisa.functions import vectorStaticDivide, vectorStaticRemainder, vectorUInt32CeilDivideAndRemainder, \
-                        vectorUInt32CeilDivideAndRemainder64, vectorStaticDivideAndRemainder, scalarStaticDivideAndRemainder, scalarStaticCeilDivide, \
+                        vectorStaticDivideAndRemainder, scalarStaticDivideAndRemainder, scalarStaticCeilDivide, \
                         scalarStaticRemainder, scalarUInt32DivideAndRemainder, sMagicDiv, vectorStaticMultiply, \
                         vectorStaticMultiplyAdd, scalarStaticMultiply64, BranchIfZero, BranchIfNotZero, DSInit, \
                         ArgumentLoader, scalarMultiplyBpe, scalarMultiply64Bpe, vectorMultiplyBpe, vectorMultiply64Bpe
@@ -3159,75 +3159,22 @@ class KernelWriterAssembly(KernelWriter):
 
       def calculateWG():
         #### calculate numWorkGroup ####
-        # F32 loses precision above 2^24 (16777216) due to 23-bit mantissa
-        # Generate runtime check: use F64 if SizesFree > 2^24, otherwise use F32
-        F32_PRECISION_LIMIT = 16777216  # 2^24
+        rReg = self.sgprPool.checkOut(1, tag="calculateWG_rReg")
+        tmpSgpr = self.sgprPool.checkOut(2, tag="calculateWG_tmpSgpr")
+        tmpSgprRes = ContinuousRegister(idx=tmpSgpr, size=2)
+        moduleWg.add(scalarStaticDivideAndRemainder(qReg="NumWorkGroups0", rReg=rReg, dReg="SizesFree+0",
+                                                     divisor=kernel["MacroTile0"], tmpSgprRes=tmpSgprRes, doRemainder=1))
+        # If remainder > 0, increment NumWorkGroups0 (ceiling division)
+        moduleWg.add(SCmpGtU32(src0=sgpr(rReg), src1=0, comment="Check if remainder > 0"))
+        moduleWg.add(SAddCU32(dst=sgpr("NumWorkGroups0"), src0=sgpr("NumWorkGroups0"), src1=0, comment="Increment if remainder > 0"))
 
-        # Allocate registers for both F32 and F64 paths (6 VGPRs to support F64)
-        # Layout: qReg[0:1] (F64 temp + result), dReg[2], divReg[3],
-        #         rReg[4:5] (F64 temp + remainder)
-        baseReg = self.vgprPool.checkOutAligned(6, 2, tag="calculateWG_baseReg")
-        qReg = baseReg
-        dReg = qReg + 2
-        divReg = qReg + 3
-        rReg = qReg + 4
-
-        # Allocate SGPR for precision limit comparison
-        with self.allocTmpSgpr(1, tag="calculateWG_precisionCheck") as tmpSgprRes:
-          tmpSgpr = tmpSgprRes.idx
-          # NumWorkGroups0 calculation
-          moduleWg.add(VMovB32(dst=vgpr(divReg), src="MT0", comment="set MT0 into sgpr"))
-          moduleWg.add(VMovB32(dst=vgpr(dReg), src=sgpr("SizesFree+0"), comment="set Free0 size"))
-
-          # Check if SizesFree+0 > 2^24 (requires F64 precision)
-          moduleWg.add(SMovB32(dst=sgpr(tmpSgpr), src=F32_PRECISION_LIMIT, comment="F32 precision limit (2^24)"))
-          moduleWg.add(SCmpGtU32(src0=sgpr("SizesFree+0"), src1=sgpr(tmpSgpr), comment="check if size > 2^24"))
-
-          # Use conditional branches for F32 vs F64 path
-          label_use_f64_dim0 = Label(self.labels.getNameInc("use_f64_dim0"), "")
-          label_done_dim0 = Label(self.labels.getNameInc("done_dim0"), "")
-
-          moduleWg.add(SCBranchSCC1(labelName=label_use_f64_dim0.getLabelName(), comment="branch if size > 2^24 (use F64)"))
-
-          # F32 path (size <= 2^24)
-          moduleWg.add(vectorUInt32CeilDivideAndRemainder(qReg=qReg, dReg=dReg, divReg=divReg, rReg=rReg, doRemainder=False))
-          moduleWg.add(SBranch(labelName=label_done_dim0.getLabelName(), comment="skip F64 path"))
-
-          # F64 path (size > 2^24)
-          moduleWg.add(label_use_f64_dim0)
-          moduleWg.add(vectorUInt32CeilDivideAndRemainder64(qReg=qReg, dReg=dReg, divReg=divReg, rReg=rReg))
-          if self.states.archCaps["TransOpWait"]:
-            moduleWg.add(SNop(waitState=0, comment="wait for F64 ops before reading NumWorkGroups0"))
-
-          moduleWg.add(label_done_dim0)
-          moduleWg.add(VReadfirstlaneB32(dst=sgpr("NumWorkGroups0"), src=vgpr(qReg), comment="set back to numWorkGroup0"))
-
-          # NumWorkGroups1 calculation
-          moduleWg.add(VMovB32(dst=vgpr(divReg), src="MT1", comment="set MT1 into sgpr"))
-          moduleWg.add(VMovB32(dst=vgpr(dReg), src=sgpr("SizesFree+1"), comment="set Free1 size"))
-
-          # Check if SizesFree+1 > 2^24 (requires F64 precision)
-          moduleWg.add(SCmpGtU32(src0=sgpr("SizesFree+1"), src1=sgpr(tmpSgpr), comment="check if size > 2^24"))
-
-          label_use_f64_dim1 = Label(self.labels.getNameInc("use_f64_dim1"), "")
-          label_done_dim1 = Label(self.labels.getNameInc("done_dim1"), "")
-
-          moduleWg.add(SCBranchSCC1(labelName=label_use_f64_dim1.getLabelName(), comment="branch if size > 2^24 (use F64)"))
-
-          # F32 path (size <= 2^24)
-          moduleWg.add(vectorUInt32CeilDivideAndRemainder(qReg=qReg, dReg=dReg, divReg=divReg, rReg=rReg, doRemainder=False))
-          moduleWg.add(SBranch(labelName=label_done_dim1.getLabelName(), comment="skip F64 path"))
-
-          # F64 path (size > 2^24)
-          moduleWg.add(label_use_f64_dim1)
-          moduleWg.add(vectorUInt32CeilDivideAndRemainder64(qReg=qReg, dReg=dReg, divReg=divReg, rReg=rReg))
-          if self.states.archCaps["TransOpWait"]:
-            moduleWg.add(SNop(waitState=0, comment="wait for F64 ops before reading NumWorkGroups1"))
-
-          moduleWg.add(label_done_dim1)
-          moduleWg.add(VReadfirstlaneB32(dst=sgpr("NumWorkGroups1"), src=vgpr(qReg), comment="set back to numWorkGroup1"))
-
-        self.vgprPool.checkIn(baseReg)
+        moduleWg.add(scalarStaticDivideAndRemainder(qReg="NumWorkGroups1", rReg=rReg, dReg="SizesFree+1",
+                                                     divisor=kernel["MacroTile1"], tmpSgprRes=tmpSgprRes, doRemainder=1))
+        # If remainder > 0, increment NumWorkGroups1 (ceiling division)
+        moduleWg.add(SCmpGtU32(src0=sgpr(rReg), src1=0, comment="Check if remainder > 0"))
+        moduleWg.add(SAddCU32(dst=sgpr("NumWorkGroups1"), src0=sgpr("NumWorkGroups1"), src1=0, comment="Increment if remainder > 0"))                                                     
+        self.sgprPool.checkIn(tmpSgpr)
+        self.sgprPool.checkIn(rReg)
 
       if self.states.numSgprPreload > 0:
         calculateWG()
