@@ -181,6 +181,24 @@ def native_pytest_env(build_root: Path, config: str) -> dict[str, str]:
             print(f"\n== {label}: {path} ==")
         else:
             print(f"\n== {label}: SKIPPED (no configured build or {var}) ==")
+
+    # The byte-identity stage has already built this production archive. The
+    # native compiler-detection tests otherwise configure and compile a second
+    # copy in pytest's temporary directory, then repeat that work in the
+    # differential pytest pass. Reuse is safe because the fixture explicitly
+    # asks for the same production archive and only links test wrappers around
+    # it; an explicit caller override still wins.
+    archive = env.get("ROCKE_TEST_ENGINE_ARCHIVE")
+    if not archive:
+        candidate = build_root / "librocke_core.a"
+        if candidate.is_file():
+            archive = str(candidate.resolve())
+    if archive:
+        path = Path(archive).resolve()
+        if not path.is_file():
+            raise ValueError(f"native detector archive does not exist: {path}")
+        env["ROCKE_TEST_ENGINE_ARCHIVE"] = str(path)
+        print(f"== native detector archive: {path} ==")
     return env
 
 

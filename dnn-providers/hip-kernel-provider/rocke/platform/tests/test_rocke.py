@@ -21,6 +21,7 @@ GPU), so the default run keeps the no-subprocess contract.
 
 from __future__ import annotations
 
+import re
 import unittest
 from unittest.mock import patch, Mock
 
@@ -3279,6 +3280,203 @@ class TestNewTargetIntrinsics(unittest.TestCase):
         _assert_engines_agree(self, b.kernel, ll, **kw)
         _assert_ir_assembles(self, ll, name)
         return ll
+
+    # ---- cross-workgroup fence / flag ops (stream-K fixup) ----
+    @staticmethod
+    def _flag_kernel(b):
+        from rocke.core.ir import I32, PtrType
+
+        return b.param("flags", PtrType(I32, "global"))
+
+    def test_fence_renders_scope_and_ordering(self):
+        ll = self._lower("fence", lambda b: b.fence(scope="agent", ordering="release"))
+        self.assertIn('  fence syncscope("agent") release', ll)
+
+    def test_fence_system_scope_has_no_syncscope_clause(self):
+        ll = self._lower(
+            "fencesys", lambda b: b.fence(scope="system", ordering="acquire")
+        )
+        self.assertIn("  fence acquire", ll)
+        self.assertNotIn("syncscope", ll)
+
+    def test_global_flag_store_is_scoped_atomic_store(self):
+        def build(b):
+            flags = self._flag_kernel(b)
+            b.global_flag_store(flags, b.const_i32(3), b.const_i32(1))
+
+        ll = self._lower("flagst", build)
+        self.assertRegex(
+            ll,
+            r"store atomic i32 1, ptr addrspace\(1\) %gep\.\d+ "
+            r'syncscope\("agent"\) release, align 4',
+        )
+
+    def test_global_flag_wait_eq_is_acquire_spin_loop(self):
+        def build(b):
+            flags = self._flag_kernel(b)
+            b.global_flag_wait_eq(flags, b.const_i32(2), b.const_i32(1))
+
+        ll = self._lower("flagwt", build)
+        self.assertRegex(
+            ll,
+            r"(?s)br label %(flag\.wait\.\d+)\n\1:\n"
+            r"  (%flag\.\d+) = load atomic i32, ptr addrspace\(1\) %gep\.\d+ "
+            r'syncscope\("agent"\) acquire, align 4\n'
+            r"  (%flag\.hit\.\d+) = icmp eq i32 \2, 1\n"
+            r"  br i1 \3, label %flag\.done\.\d+, label %\1\n",
+        )
+
+    def test_flag_ops_lower_to_hip_atomics(self):
+        from rocke.core.lower_hip import lower_kernel_to_hip
+
+        b = self._builder("flaghip")
+        flags = self._flag_kernel(b)
+        b.global_flag_store(flags, b.const_i32(0), b.const_i32(1))
+        b.fence(scope="agent", ordering="acquire")
+        b.global_flag_wait_eq(flags, b.const_i32(0), b.const_i32(1))
+        hip = lower_kernel_to_hip(b.kernel)
+        self.assertIn("__ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_AGENT);", hip)
+        self.assertIn('__builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "agent");', hip)
+        self.assertIn("while (__hip_atomic_load(", hip)
+
+    def test_flag_ops_reject_bad_scope_ordering_and_type(self):
+        b = self._builder("flagbad")
+        flags = self._flag_kernel(b)
+        with self.assertRaisesRegex(ValueError, "unknown fence scope"):
+            b.fence(scope="device")
+        with self.assertRaisesRegex(ValueError, "unknown fence ordering"):
+            b.fence(ordering="monotonic")
+        with self.assertRaisesRegex(ValueError, "expects an i32 value"):
+            b.global_flag_store(flags, b.const_i32(0), b.const_f32(1.0))
+        with self.assertRaisesRegex(ValueError, "unknown flag store ordering"):
+            b.global_flag_store(
+                flags, b.const_i32(0), b.const_i32(1), ordering="acquire"
+            )
+        with self.assertRaisesRegex(ValueError, "unknown flag scope"):
+            b.global_flag_wait_eq(flags, b.const_i32(0), b.const_i32(1), scope="gpu")
+
+    def test_flag_ops_reject_non_i32_pointer(self):
+        # LLVM GEPs the flag as i32 while HIP indexes the pointee type, so any
+        # other element type would make the two engines address different
+        # bytes. Builder and verifier both refuse it (C++ mirror:
+        # case_flag_ops_reject_non_i32_ptr).
+        from rocke.core.ir import F16, PtrType
+        from rocke.core.verify import ERROR, verify
+
+        b = self._builder("flagf16")
+        half = b.param("flags", PtrType(F16, "global"))
+        for name, emit in (
+            ("global_flag_store", b.global_flag_store),
+            ("global_flag_wait_eq", b.global_flag_wait_eq),
+        ):
+            with self.assertRaisesRegex(
+                ValueError,
+                f"^{name} expects a global i32 pointer, got ptr<f16,global>$",
+            ):
+                emit(half, b.const_i32(0), b.const_i32(1))
+
+        b = self._builder("flagf16verify")
+        flags = self._flag_kernel(b)
+        half = b.param("half", PtrType(F16, "global"))
+        b.global_flag_store(flags, b.const_i32(0), b.const_i32(1))
+        b.global_flag_wait_eq(flags, b.const_i32(0), b.const_i32(1))
+        b.ret()
+        for op in b.kernel.body.ops:
+            if op.name.startswith("memref.global_flag_"):
+                op.operands[0] = half
+        msgs = [d.message for d in verify(b.kernel) if d.severity == ERROR]
+        for name in ("memref.global_flag_store", "memref.global_flag_wait_eq"):
+            needle = f"{name}: expected a global i32 pointer, got ptr<f16,global>"
+            self.assertTrue(any(needle in m for m in msgs), (needle, msgs))
+
+    def test_flag_ops_lowerers_reject_bad_attrs(self):
+        # Python counterpart of the C++ expect_flag_attr_rejected: an op with a
+        # missing or unknown scope / ordering (serialized IR that skipped the
+        # builder and the verifier) is rejected by BOTH lowerers instead of
+        # defaulting or rendering invalid IR such as ``fence ... bogus``.
+        from rocke.core.backend import BackendError, _lower_via_cpp_engine
+        from rocke.core.ir_serialize import serialize
+        from rocke.core.lower_hip import lower_kernel_to_hip
+        from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
+
+        valid = {
+            "memref.fence": {"scope": "agent", "ordering": "acq_rel"},
+            "memref.global_flag_store": {"scope": "agent", "ordering": "release"},
+            "memref.global_flag_wait_eq": {"scope": "agent"},
+        }
+        cases = [
+            ("memref.fence", "ordering", "bogus"),
+            ("memref.fence", "scope", "bogus"),
+            ("memref.fence", "ordering", "monotonic"),
+            ("memref.global_flag_store", "ordering", "bogus"),
+            ("memref.global_flag_store", "ordering", "acquire"),
+            ("memref.global_flag_store", "scope", "bogus"),
+            ("memref.global_flag_wait_eq", "scope", "bogus"),
+        ] + [(name, key, None) for name, attrs in valid.items() for key in attrs]
+        for name, key, value in cases:
+            with self.subTest(op=name, key=key, value=value):
+                b = self._builder("flag_bad_attr")
+                if name == "memref.fence":
+                    b.fence()
+                else:
+                    flags = self._flag_kernel(b)
+                    emit = getattr(b, name.split(".", 1)[1])
+                    emit(flags, b.const_i32(0), b.const_i32(1))
+                b.ret()
+                (op,) = [o for o in b.kernel.body.ops if o.name == name]
+                op.attrs.clear()
+                op.attrs.update(valid[name])
+                if value is None:
+                    del op.attrs[key]
+                    want = f"{name}: {key} attribute missing or not a string"
+                else:
+                    op.attrs[key] = value
+                    want = f"{name}: unknown {key} '{value}'"
+                with self.assertRaisesRegex(ValueError, re.escape(want)):
+                    lower_kernel_to_hip(b.kernel)
+                with self.assertRaisesRegex(ValueError, re.escape(want)):
+                    _lower_kernel_to_llvm_python(b.kernel)
+                try:
+                    _lower_via_cpp_engine(serialize(b.kernel), "gfx950", "llvm20")
+                except BackendError:
+                    continue  # engine not built: C++ is covered by its ctest
+                except Exception as e:  # noqa: BLE001 -- engine error type
+                    self.assertIn(want, str(e))
+                else:
+                    self.fail(f"C++ engine accepted {name} with {key}={value!r}")
+
+    def test_verifier_rejects_malformed_flag_ops(self):
+        # Serialized IR can carry flag ops the builder would have refused; the
+        # verifier has to catch them before a lowerer unpacks the operands.
+        from rocke.core.ir import F32
+        from rocke.core.verify import ERROR, verify
+
+        b = self._builder("flagverify")
+        flags = self._flag_kernel(b)
+        b.fence(scope="agent", ordering="release")
+        b.global_flag_store(flags, b.const_i32(0), b.const_i32(1))
+        b.global_flag_wait_eq(flags, b.const_i32(0), b.const_i32(1))
+        b.ret()
+        ops = {op.name: op for op in b.kernel.body.ops}
+        self.assertEqual(
+            [d for d in verify(b.kernel) if d.severity == ERROR], [], "well-formed"
+        )
+        ops["memref.fence"].attrs["ordering"] = "monotonic"
+        ops["memref.global_flag_store"].attrs["scope"] = "gpu"
+        wait = ops["memref.global_flag_wait_eq"]
+        wait.operands[2] = b.const_f32(1.0)
+        msgs = [d.message for d in verify(b.kernel) if d.severity == ERROR]
+        for needle in (
+            "memref.fence: unknown ordering 'monotonic'",
+            "memref.global_flag_store: unknown scope 'gpu'",
+            f"memref.global_flag_wait_eq: value must be i32, got {F32.name}",
+        ):
+            self.assertTrue(any(needle in m for m in msgs), (needle, msgs))
+        del wait.operands[2]
+        msgs = [d.message for d in verify(b.kernel) if d.severity == ERROR]
+        self.assertTrue(
+            any("expected 3 operands / 0 results, got 2 / 0" in m for m in msgs), msgs
+        )
 
     # ---- ds_swizzle (raw offset + XOR-butterfly encoding) ----
     def test_ds_swizzle_passes_raw_offset_immediate(self):

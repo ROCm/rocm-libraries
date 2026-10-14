@@ -121,6 +121,8 @@ ROCKE_LLVM_FLAVOR=llvm23 python tools/check_byte_identity.py   # and llvm23
 ```
 
 A change is done only when the gate is GREEN for every family at every flavor.
+The llvm20 and llvm22 runs also re-run the `gfx1250_lowering` family at llvm23,
+because its gfx1250-only ops lower at no other flavor.
 
 ## Build / test / run
 

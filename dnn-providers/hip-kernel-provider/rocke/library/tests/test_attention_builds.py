@@ -3769,7 +3769,8 @@ class TestAttentionDenseGfx942RuntimeShapeCollision(unittest.TestCase):
         (q/k/v/o + scale + the five i32 shape args) and the persistent grid at each
         decode order, which appends that order's fast-division magic/shift pairs --
         a different tail per order, so a launcher packing one order's pairs for the
-        other would feed the decode the wrong divisors.
+        other would feed the decode the wrong divisors. Each arm is also checked
+        with ``use_sinks``, which appends ``sink_ptr`` after all of those.
         """
         from rocke.core.ir import PtrType
         from rocke.helpers.spec import ptr_type_str
@@ -3797,8 +3798,18 @@ class TestAttentionDenseGfx942RuntimeShapeCollision(unittest.TestCase):
             v: self._spec(**self._BASE_KWARGS, **kw)
             for v, (kw, _) in self._PERSIST_VARIANTS.items()
         }
+        rt_sinks = self._spec(**self._BASE_KWARGS, use_sinks=True)
+        persist_sinks = {
+            v: self._spec(**self._BASE_KWARGS, **kw, use_sinks=True)
+            for v, (kw, _) in self._PERSIST_VARIANTS.items()
+        }
 
-        for arm, spec in (("runtime-shape", rt), *persist.items()):
+        for arm, spec in (
+            ("runtime-shape", rt),
+            *persist.items(),
+            ("runtime-shape+sinks", rt_sinks),
+            *((f"{v}+sinks", s) for v, s in persist_sinks.items()),
+        ):
             with self.subTest(arm=arm):
                 params = build_attention_dense(spec, arch="gfx942").params
                 sig = attention_dense_signature(spec)
@@ -3838,6 +3849,16 @@ class TestAttentionDenseGfx942RuntimeShapeCollision(unittest.TestCase):
                     f"{variant}: persistent ABI is not the default ABI plus its "
                     "decode's magic/shift pairs",
                 )
+
+        # Sinks append exactly one kernarg, last, after any fast-division pairs.
+        for plain, with_sinks in (
+            (rt, rt_sinks),
+            *((persist[v], s) for v, s in persist_sinks.items()),
+        ):
+            self.assertEqual(
+                [a["name"] for a in attention_dense_signature(with_sinks)],
+                [a["name"] for a in attention_dense_signature(plain)] + ["sink_ptr"],
+            )
 
 
 class TestAttentionDenseGfx942RuntimeHeads(unittest.TestCase):

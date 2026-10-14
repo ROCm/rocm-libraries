@@ -1493,6 +1493,7 @@ void fill_conv_problem(rocke_conv_problem_t* p, const py::dict& d)
     p->pW = dict_int(d, "pW", p->pW);
     p->dH = dict_int(d, "dH", p->dH);
     p->dW = dict_int(d, "dW", p->dW);
+    p->groups = dict_int(d, "groups", p->groups);
     p->is_3d = dict_bool(d, "is_3d", p->is_3d);
     p->Di = dict_int(d, "Di", p->Di);
     p->Z = dict_int(d, "Z", p->Z);
@@ -1558,6 +1559,7 @@ rocke_implicit_gemm_conv_spec_t conv_igemm_build_spec(const py::dict& d,
     }
     s.k0_k1_split = dict_bool(d, "k0_k1_split", s.k0_k1_split);
     s.groups = dict_int(d, "groups", s.groups);
+    s.group_merge = dict_int(d, "group_merge", s.group_merge);
     if(d.contains("vector_size_a") && !d["vector_size_a"].is_none())
     {
         s.has_vector_size_a = true;
@@ -2323,10 +2325,38 @@ rocke_implicit_gemm_conv_wgrad_spec_t conv_wgrad_build_spec(const py::dict& d,
     s.split_k = dict_int(d, "split_k", s.split_k);
     s.two_stage = dict_bool(d, "two_stage", s.two_stage);
     s.ws_replicas = dict_int(d, "ws_replicas", s.ws_replicas);
+    s.prefetch_addr = dict_bool(d, "prefetch_addr", s.prefetch_addr);
+    s.streamk_ctas = dict_int(d, "streamk_ctas", s.streamk_ctas);
+    s.group_merge = dict_int(d, "group_merge", s.group_merge);
+    s.async_dma = dict_bool(d, "async_dma", s.async_dma);
+    s.unroll_k = dict_bool(d, "unroll_k", s.unroll_k);
+    s.lds_k_outer = dict_bool(d, "lds_k_outer", s.lds_k_outer);
+    s.chiplet_swizzle = dict_bool(d, "chiplet_swizzle", s.chiplet_swizzle);
+    s.chiplet_wgm = dict_int(d, "chiplet_wgm", s.chiplet_wgm);
+    s.chiplet_num_xcds = dict_int(d, "chiplet_num_xcds", s.chiplet_num_xcds);
+    s.chiplet_chunk_size = dict_int(d, "chiplet_chunk_size", s.chiplet_chunk_size);
+    /* Optional ints: absent or None keeps Python's None (has_* = false).
+     * Only the fields the C builder or validator honours are read: the C wgrad
+     * builder does not apply lds_k_pad or vector_size_a/b, so reading them
+     * would tag the kernel name (e.g. "pad<N>") without changing its body. */
+    if(d.contains("waves_per_eu") && !d["waves_per_eu"].is_none())
+    {
+        s.has_waves_per_eu = true;
+        s.waves_per_eu = d["waves_per_eu"].cast<int>();
+    }
+    if(d.contains("vector_size_c") && !d["vector_size_c"].is_none())
+    {
+        s.has_vector_size_c = true;
+        s.vector_size_c = d["vector_size_c"].cast<int>();
+    }
     {
         std::string v;
         if(dict_str(d, "name", v))
             s.name = keep(v);
+        if(dict_str(d, "streamk", v))
+            s.streamk = keep(v);
+        if(dict_str(d, "streamk_reduction", v))
+            s.streamk_reduction = keep(v);
         if(dict_str(d, "dtype_a", v))
             s.dtype_a = keep(v);
         if(dict_str(d, "dtype_b", v))
@@ -3968,6 +3998,59 @@ PYBIND11_MODULE(rocke_engine, m)
         "Return workspace bytes for the two-stage wgrad path.\n"
         "Formula: groups * ws_replicas * wg_M * wg_N * 4 (always f32).\n"
         "Returns 0 when two_stage=false, or split_k <= 1.");
+    m.def(
+        "conv_wgrad_is_valid_spec",
+        [](const py::dict& d, const std::string& arch) -> py::tuple {
+            std::deque<std::string> store;
+            rocke_implicit_gemm_conv_wgrad_spec_t s = conv_wgrad_build_spec(d, store);
+            char reason[1024] = {0};
+            const bool ok = rocke_implicit_gemm_conv_wgrad_is_valid_spec(
+                &s, arch_or_default(arch), reason, sizeof(reason));
+            return py::make_tuple(ok, ok ? std::string("ok") : std::string(reason));
+        },
+        py::arg("spec"),
+        py::arg("arch") = "gfx950",
+        "C port of is_valid_wgrad_spec: (ok, reason), reason 'ok' when accepted.");
+    m.def(
+        "conv_wgrad_streamk_default_pool",
+        [](const std::string& reduction, const std::string& arch) -> int {
+            return rocke_wgrad_conv_streamk_default_pool(reduction.c_str(), arch_or_default(arch));
+        },
+        py::arg("reduction"),
+        py::arg("arch") = "gfx950",
+        "C port of wgrad_streamk_default_pool: the CTA pool of a streamk_ctas=-1 launch.");
+    m.def(
+        "conv_wgrad_streamk_host",
+        [](const py::dict& d, const std::string& arch) -> py::dict {
+            std::deque<std::string> store;
+            rocke_implicit_gemm_conv_wgrad_spec_t s = conv_wgrad_build_spec(d, store);
+            /* Every helper resolves an auto pool (-1) for `arch` itself, as the
+             * Python wgrad_streamk_*(spec, arch=arch) twins do. Errors are
+             * ValueError, matching Python. */
+            const char* a = arch_or_default(arch);
+            int grid[3] = {0, 0, 0};
+            if(rocke_wgrad_conv_streamk_grid(&s, a, grid) != ROCKE_OK)
+                throw py::value_error(
+                    "rocke_engine.conv_wgrad_streamk_host: needs streamk != 'off' and "
+                    "streamk_ctas == -1 or > 0");
+            size_t flags_bytes = 0;
+            size_t partials_bytes = 0;
+            if(rocke_wgrad_conv_streamk_workspace_layout(&s, a, &flags_bytes, &partials_bytes)
+               != ROCKE_OK)
+                throw py::value_error(
+                    "rocke_engine.conv_wgrad_streamk_host: invalid stream-K workspace layout");
+            py::dict out;
+            out["grid"] = py::make_tuple(grid[0], grid[1], grid[2]);
+            out["flags_bytes"] = flags_bytes;
+            out["partials_bytes"] = partials_bytes;
+            out["workspace_bytes"] = rocke_wgrad_conv_streamk_workspace_bytes(&s, a);
+            out["is_deterministic"] = rocke_wgrad_conv_spec_is_deterministic(&s);
+            return out;
+        },
+        py::arg("spec"),
+        py::arg("arch") = "gfx950",
+        "Stream-K wgrad host plan of the C port: launch grid, workspace layout\n"
+        "and determinism, for cross-checking the Python wgrad_streamk_* helpers.");
 
     /* ---- attention families (separate TU; shared fmha/tiled struct tags) ---- */
     register_attention(m);
