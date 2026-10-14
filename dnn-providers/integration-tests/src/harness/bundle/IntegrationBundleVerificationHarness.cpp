@@ -710,8 +710,12 @@ std::optional<VerificationOutcome> IntegrationBundleVerificationHarness::fillBun
     FillResult fillResult;
     try
     {
-        fillResult = hipdnn_integration_tests::fillInputs(
-            wrapper.getGraph(), inputs, leafInputUids, _inputFillRecipes, device);
+        fillResult = hipdnn_integration_tests::fillInputs(wrapper.getGraph(),
+                                                          inputs,
+                                                          leafInputUids,
+                                                          _inputFillRecipes,
+                                                          device,
+                                                          device != nullptr);
     }
     catch(const DeviceInputError& e)
     {
@@ -738,8 +742,12 @@ std::optional<VerificationOutcome> IntegrationBundleVerificationHarness::fillBun
                 *tensorAttrMap.at(uid), /*packSubByteElements=*/true);
         }
 
-        auto packedFill = hipdnn_integration_tests::fillInputs(
-            wrapper.getGraph(), packed, leafInputUids, _inputFillRecipes, device);
+        auto packedFill = hipdnn_integration_tests::fillInputs(wrapper.getGraph(),
+                                                               packed,
+                                                               leafInputUids,
+                                                               _inputFillRecipes,
+                                                               device,
+                                                               device != nullptr);
         if(!packedFill.filled)
         {
             return unverifiable(packedFill.reason);

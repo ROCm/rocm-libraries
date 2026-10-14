@@ -451,7 +451,12 @@ protected:
 
         // No device filler: these tests read the tensors on the host through const
         // accessors, which cannot migrate device-generated data.
-        auto fillResult = fillInputs(fb, bundle.tensors, leafInputUids, _inputFillRecipes, nullptr);
+        auto fillResult = fillInputs(fb,
+                                     bundle.tensors,
+                                     leafInputUids,
+                                     _inputFillRecipes,
+                                     nullptr,
+                                     getReferenceExecutor().requiresDeviceMemory());
         if(!fillResult.filled)
         {
             return fillResult;

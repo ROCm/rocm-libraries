@@ -114,6 +114,7 @@ FillResult fillInputs(const hipdnn_flatbuffers_sdk::data_objects::Graph& graph,
                       InputTensorMap& inputs,
                       const std::vector<int64_t>& ownedUids,
                       InputFillRecipes& recipes,
-                      DeviceInputFiller* device);
+                      DeviceInputFiller* device,
+                      bool referenceUsesDevice = false);
 
 } // namespace hipdnn_integration_tests
