@@ -52,9 +52,9 @@ static const std::vector<std::vector<size_t>> multi_gpu_sizes = {
     {1, 1, 256},
     {1, 256, 1},
 };
-static const std::vector<size_t>        multi_gpu_batch_range = {4, 1};
-static std::vector<std::vector<size_t>> ioffset_range_zero    = {{0, 0}};
-static std::vector<std::vector<size_t>> ooffset_range_zero    = {{0, 0}};
+static constexpr size_t                 min_non_unit_batch = 4;
+static std::vector<std::vector<size_t>> ioffset_range_zero = {{0, 0}};
+static std::vector<std::vector<size_t>> ooffset_range_zero = {{0, 0}};
 
 enum SplitType
 {
@@ -96,6 +96,17 @@ std::vector<fft_params> param_generator_multi_gpu(const SplitType type)
 
     static const std::vector<std::vector<size_t>> stride_range = {{1}};
 
+    std::vector<size_t> batch_range = {min_non_unit_batch, 1};
+    if(mp_lib == fft_params::fft_mp_lib_mpi)
+    {
+        // with MPI, batch splits need a brick per rank, otherwise
+        // tests aren't generated and coverage is sacrificed
+        if(type == BATCH_COLOCATED || type == BATCH_RELOCATED)
+            batch_range = {std::max(min_non_unit_batch, total_num_devices)};
+        else if(type == IMPLICIT_HIPFFT && total_num_devices > min_non_unit_batch)
+            batch_range[0] = total_num_devices;
+    }
+
     // gather cases to test as single-device params, then distribute
     // to multiple GPUs
     std::vector<fft_params> params_single = param_generator_base(
@@ -103,7 +114,7 @@ std::vector<fft_params> param_generator_multi_gpu(const SplitType type)
         trans_type_range_full,
         multi_gpu_sizes,
         precision_range_sp_dp,
-        multi_gpu_batch_range,
+        batch_range,
         generate_types,
         stride_generator(stride_range),
         stride_generator(stride_range),
@@ -499,7 +510,7 @@ static std::vector<std::string> multi_gpu_bluestein_tokens()
             {
                 for(const auto placement : {fft_placement_notinplace, fft_placement_inplace})
                 {
-                    for(const auto nbatch : multi_gpu_batch_range)
+                    for(const size_t nbatch : {min_non_unit_batch, size_t{1}})
                     {
                         fft_params p;
                         p.length         = length;
@@ -661,7 +672,7 @@ std::vector<fft_params> param_generator_some_continuous_brick()
                                                           trans_type_range_full,
                                                           multi_gpu_sizes,
                                                           precision_range_sp_dp,
-                                                          multi_gpu_batch_range,
+                                                          {min_non_unit_batch, 1},
                                                           generate_types,
                                                           stride_generator({{1}}),
                                                           stride_generator({{1}}),
