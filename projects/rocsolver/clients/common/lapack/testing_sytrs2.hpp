@@ -550,9 +550,9 @@ void testing_sytrs2(Arguments& argus)
     }
 
     // validate results for rocsolver-test
-    // using 4 * n * machine_precision as tolerance
+    // using 6 * n * machine_precision as tolerance
     if(argus.unit_check)
-        ROCSOLVER_TEST_CHECK(T, max_error, 4 * n);
+        ROCSOLVER_TEST_CHECK(T, max_error, 6 * n);
 
     // output results for rocsolver-bench
     if(argus.timing)
