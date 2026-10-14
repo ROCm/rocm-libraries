@@ -225,7 +225,7 @@ __device__ static bool constexpr IsValidGemmCompilationParameter()
     }
 #endif
 
-#if defined(__gfx11__) || defined(__gfx117__)
+#if defined(__gfx11__)
     constexpr bool SupportMemOp = CGlobalMemoryDataOperation_ == InMemoryDataOperationEnum::Set;
 #else
     constexpr bool SupportMemOp =

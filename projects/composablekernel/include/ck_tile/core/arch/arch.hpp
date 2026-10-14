@@ -96,35 +96,36 @@ namespace core::arch {
  */
 enum struct amdgcn_target_id
 {
-    GFX908         = 0x0908, // MI-100...
-    GFX90A         = 0x090A,
-    GFX942         = 0x0942,
-    GFX950         = 0x0950,
-    GFX1030        = 0x1030,
-    GFX1031        = 0x1031,
-    GFX1032        = 0x1032,
-    GFX1033        = 0x1033,
-    GFX1034        = 0x1034,
-    GFX1035        = 0x1035,
-    GFX1036        = 0x1036,
-    GFX103_GENERIC = 0x103F,
-    GFX1100        = 0x1100,
-    GFX1101        = 0x1101,
-    GFX1102        = 0x1102,
-    GFX1103        = 0x1103,
-    GFX1150        = 0x1150,
-    GFX1151        = 0x1151,
-    GFX1152        = 0x1152,
-    GFX1153        = 0x1153,
-    GFX1170        = 0x1170,
-    GFX1171        = 0x1171,
-    GFX11_GENERIC  = 0x11FF,
-    GFX1200        = 0x1200,
-    GFX1201        = 0x1201,
-    GFX12_GENERIC  = 0x12FF,
-    GFX1250        = 0x1250,
-    AMDGCN_SPIRV   = 0xFFFF, // Target-agnostic SPIR-V (JIT to native at runtime)
-    HOST           = 0x0000,
+    GFX908          = 0x0908, // MI-100...
+    GFX90A          = 0x090A,
+    GFX942          = 0x0942,
+    GFX950          = 0x0950,
+    GFX1030         = 0x1030,
+    GFX1031         = 0x1031,
+    GFX1032         = 0x1032,
+    GFX1033         = 0x1033,
+    GFX1034         = 0x1034,
+    GFX1035         = 0x1035,
+    GFX1036         = 0x1036,
+    GFX103_GENERIC  = 0x103F,
+    GFX1100         = 0x1100,
+    GFX1101         = 0x1101,
+    GFX1102         = 0x1102,
+    GFX1103         = 0x1103,
+    GFX1150         = 0x1150,
+    GFX1151         = 0x1151,
+    GFX1152         = 0x1152,
+    GFX1153         = 0x1153,
+    GFX1170         = 0x1170,
+    GFX1171         = 0x1171,
+    GFX11_7_GENERIC = 0x117F,
+    GFX11_GENERIC   = 0x11FF,
+    GFX1200         = 0x1200,
+    GFX1201         = 0x1201,
+    GFX12_GENERIC   = 0x12FF,
+    GFX1250         = 0x1250,
+    AMDGCN_SPIRV    = 0xFFFF, // Target-agnostic SPIR-V (JIT to native at runtime)
+    HOST            = 0x0000,
 };
 
 // to_string methods for enum classes
@@ -154,6 +155,7 @@ CK_TILE_HOST_DEVICE constexpr const char* to_string(amdgcn_target_id target_id)
     case amdgcn_target_id::GFX1153: return "GFX1153";
     case amdgcn_target_id::GFX1170: return "GFX1170";
     case amdgcn_target_id::GFX1171: return "GFX1171";
+    case amdgcn_target_id::GFX11_7_GENERIC: return "GFX11_7_GENERIC";
     case amdgcn_target_id::GFX11_GENERIC: return "GFX11_GENERIC";
     case amdgcn_target_id::GFX1200: return "GFX1200";
     case amdgcn_target_id::GFX1201: return "GFX1201";
@@ -333,6 +335,15 @@ static constexpr bool is_target_family_gfx11()
 }
 
 template <typename CompilerTarget>
+static constexpr bool is_target_family_gfx117()
+{
+    return is_target_id_any_of<CompilerTarget,
+                               amdgcn_target_id::GFX1170,
+                               amdgcn_target_id::GFX1171,
+                               amdgcn_target_id::GFX11_7_GENERIC>();
+}
+
+template <typename CompilerTarget>
 static constexpr bool is_target_family_gfx12()
 {
     return CompilerTarget::FAMILY_ID == amdgcn_target_family_id::GFX12;
@@ -434,6 +445,7 @@ constexpr auto get_compiler_target()
     MAP_COMPILER_STATE_TO_GFX11_TARGET(CK_TILE_ARCH_GFX1153, GFX1153);
     MAP_COMPILER_STATE_TO_GFX11_TARGET(CK_TILE_ARCH_GFX1170, GFX1170);
     MAP_COMPILER_STATE_TO_GFX11_TARGET(CK_TILE_ARCH_GFX1171, GFX1171);
+    MAP_COMPILER_STATE_TO_GFX12_TARGET(CK_TILE_ARCH_GFX11_7_GENERIC, GFX11_7_GENERIC);
     MAP_COMPILER_STATE_TO_GFX11_TARGET(CK_TILE_ARCH_GFX11_GENERIC, GFX11_GENERIC);
     MAP_COMPILER_STATE_TO_GFX12_TARGET(CK_TILE_ARCH_GFX1200, GFX1200);
     MAP_COMPILER_STATE_TO_GFX12_TARGET(CK_TILE_ARCH_GFX1201, GFX1201);
@@ -503,6 +515,7 @@ static constexpr auto getCMakeCompilerTarget()
                       id == amdgcn_target_id::GFX1150 || id == amdgcn_target_id::GFX1151 ||
                       id == amdgcn_target_id::GFX1152 || id == amdgcn_target_id::GFX1153 ||
                       id == amdgcn_target_id::GFX1170 || id == amdgcn_target_id::GFX1171 ||
+                      id == amdgcn_target_id::GFX11_7_GENERIC ||
                       id == amdgcn_target_id::GFX11_GENERIC)
     {
         return make_amdgcn_gfx11_target<id>();
@@ -590,6 +603,7 @@ CK_TILE_HOST auto hip_device_prop_gcn_arch_name_to_amdgcn_target_id(char const* 
     MAP_HIP_DEVICE_PROP_GCN_ARCH_NAME_STRING_TO_TARGET_ID("gfx1153", GFX1153);
     MAP_HIP_DEVICE_PROP_GCN_ARCH_NAME_STRING_TO_TARGET_ID("gfx1170", GFX1170);
     MAP_HIP_DEVICE_PROP_GCN_ARCH_NAME_STRING_TO_TARGET_ID("gfx1171", GFX1171);
+    MAP_HIP_DEVICE_PROP_GCN_ARCH_NAME_STRING_TO_TARGET_ID("gfx11_7_generic", GFX11_7_GENERIC);
     MAP_HIP_DEVICE_PROP_GCN_ARCH_NAME_STRING_TO_TARGET_ID("gfx11_generic", GFX11_GENERIC);
     MAP_HIP_DEVICE_PROP_GCN_ARCH_NAME_STRING_TO_TARGET_ID("gfx1200", GFX1200);
     MAP_HIP_DEVICE_PROP_GCN_ARCH_NAME_STRING_TO_TARGET_ID("gfx1201", GFX1201);
@@ -886,6 +900,7 @@ CK_TILE_HOST_DEVICE constexpr auto get_compiler_target()
     MAP_COMPILER_STATE_TO_GFX11_TARGET(CK_TILE_ARCH_GFX1153, GFX1153);
     MAP_COMPILER_STATE_TO_GFX11_TARGET(CK_TILE_ARCH_GFX1170, GFX1170);
     MAP_COMPILER_STATE_TO_GFX11_TARGET(CK_TILE_ARCH_GFX1171, GFX1171);
+    MAP_COMPILER_STATE_TO_GFX12_TARGET(CK_TILE_ARCH_GFX11_7_GENERIC, GFX11_7_GENERIC);
     MAP_COMPILER_STATE_TO_GFX11_TARGET(CK_TILE_ARCH_GFX11_GENERIC, GFX11_GENERIC);
     MAP_COMPILER_STATE_TO_GFX12_TARGET(CK_TILE_ARCH_GFX1200, GFX1200);
     MAP_COMPILER_STATE_TO_GFX12_TARGET(CK_TILE_ARCH_GFX1201, GFX1201);
@@ -979,6 +994,7 @@ CK_TILE_HOST auto hip_device_prop_gcn_arch_name_to_amdgcn_target(char const* tes
     MAP_HIP_DEVICE_PROP_GCN_ARCH_NAME_STRING_TO_GFX11_TARGET("gfx1153", GFX1153);
     MAP_HIP_DEVICE_PROP_GCN_ARCH_NAME_STRING_TO_GFX11_TARGET("gfx1170", GFX1170);
     MAP_HIP_DEVICE_PROP_GCN_ARCH_NAME_STRING_TO_GFX11_TARGET("gfx1171", GFX1171);
+    MAP_HIP_DEVICE_PROP_GCN_ARCH_NAME_STRING_TO_GFX12_TARGET("gfx11_7_generic", GFX11_7_GENERIC);
     MAP_HIP_DEVICE_PROP_GCN_ARCH_NAME_STRING_TO_GFX11_TARGET("gfx11_generic", GFX11_GENERIC);
     MAP_HIP_DEVICE_PROP_GCN_ARCH_NAME_STRING_TO_GFX12_TARGET("gfx1200", GFX1200);
     MAP_HIP_DEVICE_PROP_GCN_ARCH_NAME_STRING_TO_GFX12_TARGET("gfx1201", GFX1201);
