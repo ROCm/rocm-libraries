@@ -65,6 +65,7 @@
 #include <omp.h>
 #include <optional>
 #include <set>
+#include <stdexcept>
 
 extern "C" __global__ void flush_icache()
 {
@@ -2018,6 +2019,16 @@ void testing_matmul_with_bias(const Arguments& arg,
                               hipDataType      Tbias,
                               hipDataType      Taux)
 {
+    hipblasOperation_t transA(char_to_hipblas_operation(arg.transA));
+    hipblasOperation_t transB(char_to_hipblas_operation(arg.transB));
+
+    // The preswizzled kernels and scale allocation require K along the stored rows.
+    // Reject other orientations before allocation or MX input generation, also in Release builds.
+    if(arg.scaleA == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT && transA != HIPBLAS_OP_T)
+        throw std::invalid_argument("scaleA=1001 requires transA=T");
+    if(arg.scaleB == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT && transB != HIPBLAS_OP_N)
+        throw std::invalid_argument("scaleB=1001 requires transB=N");
+
     double gpu_time_used, cpu_time_used, gpu_mem_gbytes;
     gpu_time_used = cpu_time_used = gpu_mem_gbytes = 0.0;
     bool                   HMM                     = arg.HMM;
@@ -2028,9 +2039,6 @@ void testing_matmul_with_bias(const Arguments& arg,
     hipEvent_t event_gpu_time_start, event_gpu_time_end;
     CHECK_HIP_ERROR(hipEventCreate(&event_gpu_time_start));
     CHECK_HIP_ERROR(hipEventCreate(&event_gpu_time_end));
-
-    hipblasOperation_t transA(char_to_hipblas_operation(arg.transA));
-    hipblasOperation_t transB(char_to_hipblas_operation(arg.transB));
 
     // If input type is complex then alpha is set to complex datatype else compute type 
     hipDataType Talpha = (TiA == HIP_C_32F || TiA == HIP_C_64F) ?  TiA : Tc;
