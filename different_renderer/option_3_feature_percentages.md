@@ -4,153 +4,160 @@
 
 Generated from the committed support claims (10710 graphs, 445 catalogued features). Percentages are shares of each op's API features, not of its graphs. Features count singly, not in combination.
 
-**Jump to:** [RDNA (consumer)](#rdna-consumer) · [CDNA (data center)](#cdna-data-center) · [By engine](#by-engine) · [Op groups](#op-groups) · [Untested features](#untested-features) · [GPU targets](#gpu-targets)
+**Jump to:** [RDNA (consumer)](#rdna-consumer) · [CDNA (data center)](#cdna-data-center) · [By engine](#by-engine) · [Op groups](#op-groups) · [Features per op](#features-per-op) · [GPU targets](#gpu-targets)
 
 ## Summary by architecture
 
-`✅` every feature claimed · `🟡 45%` 45% of the group's features claimed · `❌` none. A feature counts if a graph exercising it is claimed by any engine on that GPU and OS. *Tested* is the ceiling: features any bundle graph exercises, claimed or not. GPUs with the most features claimed come first.
+- **Graphs**: bundle graphs that contain an op of the group.
+- **API features**: the options the group's ops offer in the API (data types, modes, flags, optional inputs, ...), catalogued from the flatbuffers schema. Each is listed in [Features per op](#features-per-op).
+- **Exercised**: API features at least one graph uses, claimed or not. No GPU column can go higher.
+- **GPU columns**: share of the API features that a graph claimed on that GPU and OS (by any engine) uses. `✅` all · `🟡 45%` 45% · `❌` none. GPUs with the most features claimed come first.
 
 ### RDNA (consumer)
 
-| Op group | Features | Tested | [gfx1151-windows](#gpu-gfx1151-windows) | [gfx1150-linux](#gpu-gfx1150-linux) | [gfx1151-linux](#gpu-gfx1151-linux) | [gfx1101-windows](#gpu-gfx1101-windows) | [gfx1200-linux](#gpu-gfx1200-linux) | [gfx1100-linux](#gpu-gfx1100-linux) | [gfx1101-linux](#gpu-gfx1101-linux) | [gfx1030-windows](#gpu-gfx1030-windows) | [gfx1201-linux](#gpu-gfx1201-linux) |
-|---|---|---|---|---|---|---|---|---|---|---|---|
-| **[Attention](#group-attention)** | 57 | 32 / 57 (56%) | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| **[Batchnorm](#group-batchnorm)** | 54 | 43 / 54 (79%) | 🟡 79% | 🟡 79% | 🟡 79% | 🟡 68% | 🟡 68% | 🟡 68% | 🟡 77% | 🟡 77% | 🟡 77% |
-| **[Block scale](#group-block-scale)** | 39 | 11 / 39 (28%) | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| **[Convolution](#group-convolution)** | 51 | 39 / 51 (76%) | 🟡 76% | 🟡 76% | 🟡 76% | ❌ | ❌ | ❌ | 🟡 76% | 🟡 76% | 🟡 76% |
-| **[CustomOp](#group-customop)** | 8 | 0 / 8 (0%) | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| **[Layernorm](#group-layernorm)** | 45 | 32 / 45 (71%) | 🟡 71% | 🟡 35% | 🟡 35% | 🟡 35% | 🟡 35% | 🟡 35% | ❌ | ❌ | ❌ |
-| **[Matmul](#group-matmul)** | 35 | 13 / 35 (37%) | ❌ | 🟡 37% | 🟡 37% | 🟡 37% | 🟡 37% | ❌ | 🟡 37% | ❌ | ❌ |
-| **[Pointwise](#group-pointwise)** | 58 | 17 / 58 (29%) | 🟡 17% | 🟡 20% | 🟡 20% | 🟡 20% | 🟡 20% | 🟡 13% | 🟡 20% | 🟡 17% | 🟡 17% |
-| **[Reduction](#group-reduction)** | 26 | 19 / 26 (73%) | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| **[Resample](#group-resample)** | 34 | 16 / 34 (47%) | 🟡 47% | 🟡 47% | 🟡 47% | 🟡 47% | 🟡 47% | 🟡 47% | ❌ | ❌ | ❌ |
-| **[RMSNorm](#group-rmsnorm)** | 38 | 34 / 38 (89%) | 🟡 89% | 🟡 86% | 🟡 86% | 🟡 86% | 🟡 86% | 🟡 86% | ❌ | ❌ | ❌ |
+| Op group | Graphs | API features | Exercised | [gfx1151-windows](#gpu-gfx1151-windows) | [gfx1150-linux](#gpu-gfx1150-linux) | [gfx1151-linux](#gpu-gfx1151-linux) | [gfx1101-windows](#gpu-gfx1101-windows) | [gfx1200-linux](#gpu-gfx1200-linux) | [gfx1100-linux](#gpu-gfx1100-linux) | [gfx1101-linux](#gpu-gfx1101-linux) | [gfx1030-windows](#gpu-gfx1030-windows) | [gfx1201-linux](#gpu-gfx1201-linux) |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| **[Attention](#group-attention)** | 118 | 57 | 32 / 57 (56%) | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **[Batchnorm](#group-batchnorm)** | 1734 | 54 | 43 / 54 (79%) | 🟡 79% | 🟡 79% | 🟡 79% | 🟡 68% | 🟡 68% | 🟡 68% | 🟡 77% | 🟡 77% | 🟡 77% |
+| **[Block scale](#group-block-scale)** | 126 | 39 | 11 / 39 (28%) | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **[Convolution](#group-convolution)** | 1495 | 51 | 39 / 51 (76%) | 🟡 76% | 🟡 76% | 🟡 76% | ❌ | ❌ | ❌ | 🟡 76% | 🟡 76% | 🟡 76% |
+| **[CustomOp](#group-customop)** | 0 | 8 | 0 / 8 (0%) | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **[Layernorm](#group-layernorm)** | 1688 | 45 | 32 / 45 (71%) | 🟡 71% | 🟡 35% | 🟡 35% | 🟡 35% | 🟡 35% | 🟡 35% | ❌ | ❌ | ❌ |
+| **[Matmul](#group-matmul)** | 459 | 35 | 13 / 35 (37%) | ❌ | 🟡 37% | 🟡 37% | 🟡 37% | 🟡 37% | ❌ | 🟡 37% | ❌ | ❌ |
+| **[Pointwise](#group-pointwise)** | 5846 | 58 | 17 / 58 (29%) | 🟡 17% | 🟡 20% | 🟡 20% | 🟡 20% | 🟡 20% | 🟡 13% | 🟡 20% | 🟡 17% | 🟡 17% |
+| **[Reduction](#group-reduction)** | 114 | 26 | 19 / 26 (73%) | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **[Resample](#group-resample)** | 48 | 34 | 16 / 34 (47%) | 🟡 47% | 🟡 47% | 🟡 47% | 🟡 47% | 🟡 47% | 🟡 47% | ❌ | ❌ | ❌ |
+| **[RMSNorm](#group-rmsnorm)** | 5008 | 38 | 34 / 38 (89%) | 🟡 89% | 🟡 86% | 🟡 86% | 🟡 86% | 🟡 86% | 🟡 86% | ❌ | ❌ | ❌ |
 
 ### CDNA (data center)
 
-| Op group | Features | Tested | [gfx942-linux](#gpu-gfx942-linux) | [gfx90a-linux](#gpu-gfx90a-linux) | [gfx950-linux](#gpu-gfx950-linux) |
-|---|---|---|---|---|---|
-| **[Attention](#group-attention)** | 57 | 32 / 57 (56%) | 🟡 17% | ❌ | 🟡 24% |
-| **[Batchnorm](#group-batchnorm)** | 54 | 43 / 54 (79%) | 🟡 79% | 🟡 79% | 🟡 79% |
-| **[Block scale](#group-block-scale)** | 39 | 11 / 39 (28%) | ❌ | ❌ | ❌ |
-| **[Convolution](#group-convolution)** | 51 | 39 / 51 (76%) | 🟡 76% | 🟡 76% | 🟡 76% |
-| **[CustomOp](#group-customop)** | 8 | 0 / 8 (0%) | ❌ | ❌ | ❌ |
-| **[Layernorm](#group-layernorm)** | 45 | 32 / 45 (71%) | 🟡 71% | 🟡 71% | 🟡 35% |
-| **[Matmul](#group-matmul)** | 35 | 13 / 35 (37%) | 🟡 37% | 🟡 37% | 🟡 37% |
-| **[Pointwise](#group-pointwise)** | 58 | 17 / 58 (29%) | 🟡 20% | 🟡 20% | 🟡 20% |
-| **[Reduction](#group-reduction)** | 26 | 19 / 26 (73%) | ❌ | ❌ | ❌ |
-| **[Resample](#group-resample)** | 34 | 16 / 34 (47%) | 🟡 47% | 🟡 47% | 🟡 47% |
-| **[RMSNorm](#group-rmsnorm)** | 38 | 34 / 38 (89%) | 🟡 86% | 🟡 86% | 🟡 86% |
+| Op group | Graphs | API features | Exercised | [gfx942-linux](#gpu-gfx942-linux) | [gfx90a-linux](#gpu-gfx90a-linux) | [gfx950-linux](#gpu-gfx950-linux) |
+|---|---|---|---|---|---|---|
+| **[Attention](#group-attention)** | 118 | 57 | 32 / 57 (56%) | 🟡 17% | ❌ | 🟡 24% |
+| **[Batchnorm](#group-batchnorm)** | 1734 | 54 | 43 / 54 (79%) | 🟡 79% | 🟡 79% | 🟡 79% |
+| **[Block scale](#group-block-scale)** | 126 | 39 | 11 / 39 (28%) | ❌ | ❌ | ❌ |
+| **[Convolution](#group-convolution)** | 1495 | 51 | 39 / 51 (76%) | 🟡 76% | 🟡 76% | 🟡 76% |
+| **[CustomOp](#group-customop)** | 0 | 8 | 0 / 8 (0%) | ❌ | ❌ | ❌ |
+| **[Layernorm](#group-layernorm)** | 1688 | 45 | 32 / 45 (71%) | 🟡 71% | 🟡 71% | 🟡 35% |
+| **[Matmul](#group-matmul)** | 459 | 35 | 13 / 35 (37%) | 🟡 37% | 🟡 37% | 🟡 37% |
+| **[Pointwise](#group-pointwise)** | 5846 | 58 | 17 / 58 (29%) | 🟡 20% | 🟡 20% | 🟡 20% |
+| **[Reduction](#group-reduction)** | 114 | 26 | 19 / 26 (73%) | ❌ | ❌ | ❌ |
+| **[Resample](#group-resample)** | 48 | 34 | 16 / 34 (47%) | 🟡 47% | 🟡 47% | 🟡 47% |
+| **[RMSNorm](#group-rmsnorm)** | 5008 | 38 | 34 / 38 (89%) | 🟡 86% | 🟡 86% | 🟡 86% |
 
 ## By engine
 
 **Engines:** [ASM_SDPA_ENGINE](#asm_sdpa_engine) · [HIPBLASLT_ENGINE](#hipblaslt_engine) · [HIP_MLOPS_ENGINE](#hip_mlops_engine) · [MIOPEN_ENGINE](#miopen_engine) · [MIOPEN_ENGINE_DETERMINISTIC](#miopen_engine_deterministic) · [hipkernel:Gfx950AttentionDense](#hipkernelgfx950attentiondense)
 
-`✅` every feature of the op claimed · `🟡 72%` 72% of the op's features claimed · `❌` none claimed. L = Linux, W = Windows. An op appears under an engine that claims at least one of its graphs somewhere.
+- **Graphs claimed**: graphs of the op this engine claims on at least one GPU.
+- **API features**: the op's catalogued API features, listed in [Features per op](#features-per-op).
+- **GPU columns**: share of the op's API features that a graph this engine claims on that GPU and OS uses. `✅` all · `🟡 72%` 72% · `❌` none. L = Linux, W = Windows.
+
+An op appears under an engine that claims at least one of its graphs somewhere.
 
 ### ASM_SDPA_ENGINE
 
-| Op | Features | [gfx90a](#gpu-gfx90a-linux)<br>L | [gfx942](#gpu-gfx942-linux)<br>L | [gfx950](#gpu-gfx950-linux)<br>L | [gfx1030](#gpu-gfx1030-windows)<br>W | [gfx1100](#gpu-gfx1100-linux)<br>L | [gfx1101](#gpu-gfx1101-linux)<br>L | [gfx1101](#gpu-gfx1101-windows)<br>W | [gfx1150](#gpu-gfx1150-linux)<br>L | [gfx1151](#gpu-gfx1151-linux)<br>L | [gfx1151](#gpu-gfx1151-windows)<br>W | [gfx1200](#gpu-gfx1200-linux)<br>L | [gfx1201](#gpu-gfx1201-linux)<br>L |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| **[Sdpa](#group-attention)** | 33 | ❌ | 🟡 30% | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Op | Graphs claimed | API features | [gfx90a](#gpu-gfx90a-linux)<br>L | [gfx942](#gpu-gfx942-linux)<br>L | [gfx950](#gpu-gfx950-linux)<br>L | [gfx1030](#gpu-gfx1030-windows)<br>W | [gfx1100](#gpu-gfx1100-linux)<br>L | [gfx1101](#gpu-gfx1101-linux)<br>L | [gfx1101](#gpu-gfx1101-windows)<br>W | [gfx1150](#gpu-gfx1150-linux)<br>L | [gfx1151](#gpu-gfx1151-linux)<br>L | [gfx1151](#gpu-gfx1151-windows)<br>W | [gfx1200](#gpu-gfx1200-linux)<br>L | [gfx1201](#gpu-gfx1201-linux)<br>L |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| **[Sdpa](#op-sdpa)** | 12 | 33 | ❌ | 🟡 30% | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
 
 ### HIPBLASLT_ENGINE
 
-| Op | Features | [gfx90a](#gpu-gfx90a-linux)<br>L | [gfx942](#gpu-gfx942-linux)<br>L | [gfx950](#gpu-gfx950-linux)<br>L | [gfx1030](#gpu-gfx1030-windows)<br>W | [gfx1100](#gpu-gfx1100-linux)<br>L | [gfx1101](#gpu-gfx1101-linux)<br>L | [gfx1101](#gpu-gfx1101-windows)<br>W | [gfx1150](#gpu-gfx1150-linux)<br>L | [gfx1151](#gpu-gfx1151-linux)<br>L | [gfx1151](#gpu-gfx1151-windows)<br>W | [gfx1200](#gpu-gfx1200-linux)<br>L | [gfx1201](#gpu-gfx1201-linux)<br>L |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| **[Matmul](#group-matmul)** | 16 | 🟡 81% | 🟡 81% | 🟡 81% | ❌ | ❌ | 🟡 81% | 🟡 81% | 🟡 81% | 🟡 81% | ❌ | 🟡 81% | ❌ |
-| **[Pointwise](#group-pointwise)** | 58 | 🟡 17% | 🟡 17% | 🟡 17% | ❌ | ❌ | 🟡 17% | 🟡 17% | 🟡 17% | 🟡 17% | ❌ | 🟡 17% | ❌ |
+| Op | Graphs claimed | API features | [gfx90a](#gpu-gfx90a-linux)<br>L | [gfx942](#gpu-gfx942-linux)<br>L | [gfx950](#gpu-gfx950-linux)<br>L | [gfx1030](#gpu-gfx1030-windows)<br>W | [gfx1100](#gpu-gfx1100-linux)<br>L | [gfx1101](#gpu-gfx1101-linux)<br>L | [gfx1101](#gpu-gfx1101-windows)<br>W | [gfx1150](#gpu-gfx1150-linux)<br>L | [gfx1151](#gpu-gfx1151-linux)<br>L | [gfx1151](#gpu-gfx1151-windows)<br>W | [gfx1200](#gpu-gfx1200-linux)<br>L | [gfx1201](#gpu-gfx1201-linux)<br>L |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| **[Matmul](#op-matmul)** | 333 | 16 | 🟡 81% | 🟡 81% | 🟡 81% | ❌ | ❌ | 🟡 81% | 🟡 81% | 🟡 81% | 🟡 81% | ❌ | 🟡 81% | ❌ |
+| **[Pointwise](#op-pointwise)** | 243 | 58 | 🟡 17% | 🟡 17% | 🟡 17% | ❌ | ❌ | 🟡 17% | 🟡 17% | 🟡 17% | 🟡 17% | ❌ | 🟡 17% | ❌ |
 
 ### HIP_MLOPS_ENGINE
 
-| Op | Features | [gfx90a](#gpu-gfx90a-linux)<br>L | [gfx942](#gpu-gfx942-linux)<br>L | [gfx950](#gpu-gfx950-linux)<br>L | [gfx1030](#gpu-gfx1030-windows)<br>W | [gfx1100](#gpu-gfx1100-linux)<br>L | [gfx1101](#gpu-gfx1101-linux)<br>L | [gfx1101](#gpu-gfx1101-windows)<br>W | [gfx1150](#gpu-gfx1150-linux)<br>L | [gfx1151](#gpu-gfx1151-linux)<br>L | [gfx1151](#gpu-gfx1151-windows)<br>W | [gfx1200](#gpu-gfx1200-linux)<br>L | [gfx1201](#gpu-gfx1201-linux)<br>L |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| **[Batchnorm](#group-batchnorm)** | 20 | 🟡 70% | 🟡 70% | 🟡 70% | ❌ | 🟡 70% | ❌ | 🟡 70% | 🟡 70% | 🟡 70% | 🟡 70% | 🟡 70% | ❌ |
-| **[BatchnormBackward](#group-batchnorm)** | 12 | 🟡 66% | 🟡 66% | 🟡 66% | ❌ | 🟡 66% | ❌ | 🟡 66% | 🟡 66% | 🟡 66% | 🟡 66% | 🟡 66% | ❌ |
-| **[BatchnormInference](#group-batchnorm)** | 10 | 🟡 70% | 🟡 70% | 🟡 70% | ❌ | 🟡 70% | ❌ | 🟡 70% | 🟡 70% | 🟡 70% | 🟡 70% | 🟡 70% | ❌ |
-| **[BatchnormInferenceVarianceExt](#group-batchnorm)** | 12 | 🟡 66% | 🟡 66% | 🟡 66% | ❌ | 🟡 66% | ❌ | 🟡 66% | 🟡 66% | 🟡 66% | 🟡 66% | 🟡 66% | ❌ |
-| **[Layernorm](#group-layernorm)** | 22 | 🟡 72% | 🟡 72% | 🟡 72% | ❌ | 🟡 72% | ❌ | 🟡 72% | 🟡 72% | 🟡 72% | 🟡 72% | 🟡 72% | ❌ |
-| **[LayernormBackward](#group-layernorm)** | 23 | 🟡 69% | 🟡 69% | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | 🟡 69% | ❌ | ❌ |
-| **[Pointwise](#group-pointwise)** | 58 | 🟡 13% | 🟡 13% | 🟡 13% | ❌ | 🟡 13% | ❌ | 🟡 13% | 🟡 13% | 🟡 13% | 🟡 13% | 🟡 13% | ❌ |
-| **[ResampleFwd](#group-resample)** | 19 | 🟡 84% | 🟡 84% | 🟡 84% | ❌ | 🟡 84% | ❌ | 🟡 84% | 🟡 84% | 🟡 84% | 🟡 84% | 🟡 84% | ❌ |
-| **[RMSNorm](#group-rmsnorm)** | 21 | 🟡 85% | 🟡 85% | 🟡 85% | ❌ | 🟡 85% | ❌ | 🟡 85% | 🟡 85% | 🟡 85% | 🟡 90% | 🟡 85% | ❌ |
-| **[RMSNormBackward](#group-rmsnorm)** | 17 | 🟡 88% | 🟡 88% | 🟡 88% | ❌ | 🟡 88% | ❌ | 🟡 88% | 🟡 88% | 🟡 88% | 🟡 88% | 🟡 88% | ❌ |
+| Op | Graphs claimed | API features | [gfx90a](#gpu-gfx90a-linux)<br>L | [gfx942](#gpu-gfx942-linux)<br>L | [gfx950](#gpu-gfx950-linux)<br>L | [gfx1030](#gpu-gfx1030-windows)<br>W | [gfx1100](#gpu-gfx1100-linux)<br>L | [gfx1101](#gpu-gfx1101-linux)<br>L | [gfx1101](#gpu-gfx1101-windows)<br>W | [gfx1150](#gpu-gfx1150-linux)<br>L | [gfx1151](#gpu-gfx1151-linux)<br>L | [gfx1151](#gpu-gfx1151-windows)<br>W | [gfx1200](#gpu-gfx1200-linux)<br>L | [gfx1201](#gpu-gfx1201-linux)<br>L |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| **[Batchnorm](#op-batchnorm)** | 492 | 20 | 🟡 70% | 🟡 70% | 🟡 70% | ❌ | 🟡 70% | ❌ | 🟡 70% | 🟡 70% | 🟡 70% | 🟡 70% | 🟡 70% | ❌ |
+| **[BatchnormBackward](#op-batchnormbackward)** | 312 | 12 | 🟡 66% | 🟡 66% | 🟡 66% | ❌ | 🟡 66% | ❌ | 🟡 66% | 🟡 66% | 🟡 66% | 🟡 66% | 🟡 66% | ❌ |
+| **[BatchnormInference](#op-batchnorminference)** | 351 | 10 | 🟡 70% | 🟡 70% | 🟡 70% | ❌ | 🟡 70% | ❌ | 🟡 70% | 🟡 70% | 🟡 70% | 🟡 70% | 🟡 70% | ❌ |
+| **[BatchnormInferenceVarianceExt](#op-batchnorminferencevarianceext)** | 144 | 12 | 🟡 66% | 🟡 66% | 🟡 66% | ❌ | 🟡 66% | ❌ | 🟡 66% | 🟡 66% | 🟡 66% | 🟡 66% | 🟡 66% | ❌ |
+| **[Layernorm](#op-layernorm)** | 708 | 22 | 🟡 72% | 🟡 72% | 🟡 72% | ❌ | 🟡 72% | ❌ | 🟡 72% | 🟡 72% | 🟡 72% | 🟡 72% | 🟡 72% | ❌ |
+| **[LayernormBackward](#op-layernormbackward)** | 980 | 23 | 🟡 69% | 🟡 69% | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | 🟡 69% | ❌ | ❌ |
+| **[Pointwise](#op-pointwise)** | 3516 | 58 | 🟡 13% | 🟡 13% | 🟡 13% | ❌ | 🟡 13% | ❌ | 🟡 13% | 🟡 13% | 🟡 13% | 🟡 13% | 🟡 13% | ❌ |
+| **[ResampleFwd](#op-resamplefwd)** | 48 | 19 | 🟡 84% | 🟡 84% | 🟡 84% | ❌ | 🟡 84% | ❌ | 🟡 84% | 🟡 84% | 🟡 84% | 🟡 84% | 🟡 84% | ❌ |
+| **[RMSNorm](#op-rmsnorm)** | 2980 | 21 | 🟡 85% | 🟡 85% | 🟡 85% | ❌ | 🟡 85% | ❌ | 🟡 85% | 🟡 85% | 🟡 85% | 🟡 90% | 🟡 85% | ❌ |
+| **[RMSNormBackward](#op-rmsnormbackward)** | 1488 | 17 | 🟡 88% | 🟡 88% | 🟡 88% | ❌ | 🟡 88% | ❌ | 🟡 88% | 🟡 88% | 🟡 88% | 🟡 88% | 🟡 88% | ❌ |
 
 ### MIOPEN_ENGINE
 
-| Op | Features | [gfx90a](#gpu-gfx90a-linux)<br>L | [gfx942](#gpu-gfx942-linux)<br>L | [gfx950](#gpu-gfx950-linux)<br>L | [gfx1030](#gpu-gfx1030-windows)<br>W | [gfx1100](#gpu-gfx1100-linux)<br>L | [gfx1101](#gpu-gfx1101-linux)<br>L | [gfx1101](#gpu-gfx1101-windows)<br>W | [gfx1150](#gpu-gfx1150-linux)<br>L | [gfx1151](#gpu-gfx1151-linux)<br>L | [gfx1151](#gpu-gfx1151-windows)<br>W | [gfx1200](#gpu-gfx1200-linux)<br>L | [gfx1201](#gpu-gfx1201-linux)<br>L |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| **[Batchnorm](#group-batchnorm)** | 20 | 🟡 75% | 🟡 75% | 🟡 75% | 🟡 75% | ❌ | 🟡 75% | ❌ | 🟡 75% | 🟡 75% | 🟡 75% | ❌ | 🟡 75% |
-| **[BatchnormBackward](#group-batchnorm)** | 12 | 🟡 75% | 🟡 75% | 🟡 75% | 🟡 75% | ❌ | 🟡 75% | ❌ | 🟡 75% | 🟡 75% | 🟡 75% | ❌ | 🟡 75% |
-| **[BatchnormInference](#group-batchnorm)** | 10 | 🟡 80% | 🟡 80% | 🟡 80% | 🟡 80% | ❌ | 🟡 80% | ❌ | 🟡 80% | 🟡 80% | 🟡 80% | ❌ | 🟡 80% |
-| **[BatchnormInferenceVarianceExt](#group-batchnorm)** | 12 | 🟡 83% | 🟡 83% | 🟡 83% | 🟡 83% | ❌ | 🟡 83% | ❌ | 🟡 83% | 🟡 83% | 🟡 83% | ❌ | 🟡 83% |
-| **[ConvolutionBwd](#group-convolution)** | 17 | 🟡 76% | 🟡 76% | 🟡 76% | 🟡 76% | ❌ | 🟡 76% | ❌ | 🟡 76% | 🟡 76% | 🟡 76% | ❌ | 🟡 76% |
-| **[ConvolutionFwd](#group-convolution)** | 17 | 🟡 76% | 🟡 76% | 🟡 76% | 🟡 76% | ❌ | 🟡 76% | ❌ | 🟡 76% | 🟡 76% | 🟡 76% | ❌ | 🟡 76% |
-| **[ConvolutionWrw](#group-convolution)** | 17 | 🟡 76% | 🟡 76% | 🟡 76% | 🟡 76% | ❌ | 🟡 76% | ❌ | 🟡 76% | 🟡 76% | 🟡 76% | ❌ | 🟡 76% |
-| **[Pointwise](#group-pointwise)** | 58 | 🟡 13% | 🟡 17% | 🟡 17% | 🟡 17% | ❌ | 🟡 17% | ❌ | 🟡 17% | 🟡 17% | 🟡 17% | ❌ | 🟡 17% |
+| Op | Graphs claimed | API features | [gfx90a](#gpu-gfx90a-linux)<br>L | [gfx942](#gpu-gfx942-linux)<br>L | [gfx950](#gpu-gfx950-linux)<br>L | [gfx1030](#gpu-gfx1030-windows)<br>W | [gfx1100](#gpu-gfx1100-linux)<br>L | [gfx1101](#gpu-gfx1101-linux)<br>L | [gfx1101](#gpu-gfx1101-windows)<br>W | [gfx1150](#gpu-gfx1150-linux)<br>L | [gfx1151](#gpu-gfx1151-linux)<br>L | [gfx1151](#gpu-gfx1151-windows)<br>W | [gfx1200](#gpu-gfx1200-linux)<br>L | [gfx1201](#gpu-gfx1201-linux)<br>L |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| **[Batchnorm](#op-batchnorm)** | 589 | 20 | 🟡 75% | 🟡 75% | 🟡 75% | 🟡 75% | ❌ | 🟡 75% | ❌ | 🟡 75% | 🟡 75% | 🟡 75% | ❌ | 🟡 75% |
+| **[BatchnormBackward](#op-batchnormbackward)** | 372 | 12 | 🟡 75% | 🟡 75% | 🟡 75% | 🟡 75% | ❌ | 🟡 75% | ❌ | 🟡 75% | 🟡 75% | 🟡 75% | ❌ | 🟡 75% |
+| **[BatchnormInference](#op-batchnorminference)** | 447 | 10 | 🟡 80% | 🟡 80% | 🟡 80% | 🟡 80% | ❌ | 🟡 80% | ❌ | 🟡 80% | 🟡 80% | 🟡 80% | ❌ | 🟡 80% |
+| **[BatchnormInferenceVarianceExt](#op-batchnorminferencevarianceext)** | 242 | 12 | 🟡 83% | 🟡 83% | 🟡 83% | 🟡 83% | ❌ | 🟡 83% | ❌ | 🟡 83% | 🟡 83% | 🟡 83% | ❌ | 🟡 83% |
+| **[ConvolutionBwd](#op-convolutionbwd)** | 138 | 17 | 🟡 76% | 🟡 76% | 🟡 76% | 🟡 76% | ❌ | 🟡 76% | ❌ | 🟡 76% | 🟡 76% | 🟡 76% | ❌ | 🟡 76% |
+| **[ConvolutionFwd](#op-convolutionfwd)** | 1002 | 17 | 🟡 76% | 🟡 76% | 🟡 76% | 🟡 76% | ❌ | 🟡 76% | ❌ | 🟡 76% | 🟡 76% | 🟡 76% | ❌ | 🟡 76% |
+| **[ConvolutionWrw](#op-convolutionwrw)** | 139 | 17 | 🟡 76% | 🟡 76% | 🟡 76% | 🟡 76% | ❌ | 🟡 76% | ❌ | 🟡 76% | 🟡 76% | 🟡 76% | ❌ | 🟡 76% |
+| **[Pointwise](#op-pointwise)** | 1771 | 58 | 🟡 13% | 🟡 17% | 🟡 17% | 🟡 17% | ❌ | 🟡 17% | ❌ | 🟡 17% | 🟡 17% | 🟡 17% | ❌ | 🟡 17% |
 
 ### MIOPEN_ENGINE_DETERMINISTIC
 
-| Op | Features | [gfx90a](#gpu-gfx90a-linux)<br>L | [gfx942](#gpu-gfx942-linux)<br>L | [gfx950](#gpu-gfx950-linux)<br>L | [gfx1030](#gpu-gfx1030-windows)<br>W | [gfx1100](#gpu-gfx1100-linux)<br>L | [gfx1101](#gpu-gfx1101-linux)<br>L | [gfx1101](#gpu-gfx1101-windows)<br>W | [gfx1150](#gpu-gfx1150-linux)<br>L | [gfx1151](#gpu-gfx1151-linux)<br>L | [gfx1151](#gpu-gfx1151-windows)<br>W | [gfx1200](#gpu-gfx1200-linux)<br>L | [gfx1201](#gpu-gfx1201-linux)<br>L |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| **[ConvolutionBwd](#group-convolution)** | 17 | 🟡 70% | 🟡 70% | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | 🟡 76% | ❌ | ❌ |
-| **[ConvolutionFwd](#group-convolution)** | 17 | 🟡 70% | 🟡 70% | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | 🟡 76% | ❌ | ❌ |
-| **[ConvolutionWrw](#group-convolution)** | 17 | 🟡 70% | 🟡 70% | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | 🟡 76% | ❌ | ❌ |
-| **[Pointwise](#group-pointwise)** | 58 | ❌ | 🟡 12% | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | 🟡 12% | ❌ | ❌ |
+| Op | Graphs claimed | API features | [gfx90a](#gpu-gfx90a-linux)<br>L | [gfx942](#gpu-gfx942-linux)<br>L | [gfx950](#gpu-gfx950-linux)<br>L | [gfx1030](#gpu-gfx1030-windows)<br>W | [gfx1100](#gpu-gfx1100-linux)<br>L | [gfx1101](#gpu-gfx1101-linux)<br>L | [gfx1101](#gpu-gfx1101-windows)<br>W | [gfx1150](#gpu-gfx1150-linux)<br>L | [gfx1151](#gpu-gfx1151-linux)<br>L | [gfx1151](#gpu-gfx1151-windows)<br>W | [gfx1200](#gpu-gfx1200-linux)<br>L | [gfx1201](#gpu-gfx1201-linux)<br>L |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| **[ConvolutionBwd](#op-convolutionbwd)** | 138 | 17 | 🟡 70% | 🟡 70% | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | 🟡 76% | ❌ | ❌ |
+| **[ConvolutionFwd](#op-convolutionfwd)** | 1002 | 17 | 🟡 70% | 🟡 70% | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | 🟡 76% | ❌ | ❌ |
+| **[ConvolutionWrw](#op-convolutionwrw)** | 139 | 17 | 🟡 70% | 🟡 70% | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | 🟡 76% | ❌ | ❌ |
+| **[Pointwise](#op-pointwise)** | 864 | 58 | ❌ | 🟡 12% | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | 🟡 12% | ❌ | ❌ |
 
 ### hipkernel:Gfx950AttentionDense
 
-| Op | Features | [gfx90a](#gpu-gfx90a-linux)<br>L | [gfx942](#gpu-gfx942-linux)<br>L | [gfx950](#gpu-gfx950-linux)<br>L | [gfx1030](#gpu-gfx1030-windows)<br>W | [gfx1100](#gpu-gfx1100-linux)<br>L | [gfx1101](#gpu-gfx1101-linux)<br>L | [gfx1101](#gpu-gfx1101-windows)<br>W | [gfx1150](#gpu-gfx1150-linux)<br>L | [gfx1151](#gpu-gfx1151-linux)<br>L | [gfx1151](#gpu-gfx1151-windows)<br>W | [gfx1200](#gpu-gfx1200-linux)<br>L | [gfx1201](#gpu-gfx1201-linux)<br>L |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| **[Sdpa](#group-attention)** | 33 | ❌ | ❌ | 🟡 42% | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Op | Graphs claimed | API features | [gfx90a](#gpu-gfx90a-linux)<br>L | [gfx942](#gpu-gfx942-linux)<br>L | [gfx950](#gpu-gfx950-linux)<br>L | [gfx1030](#gpu-gfx1030-windows)<br>W | [gfx1100](#gpu-gfx1100-linux)<br>L | [gfx1101](#gpu-gfx1101-linux)<br>L | [gfx1101](#gpu-gfx1101-windows)<br>W | [gfx1150](#gpu-gfx1150-linux)<br>L | [gfx1151](#gpu-gfx1151-linux)<br>L | [gfx1151](#gpu-gfx1151-windows)<br>W | [gfx1200](#gpu-gfx1200-linux)<br>L | [gfx1201](#gpu-gfx1201-linux)<br>L |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| **[Sdpa](#op-sdpa)** | 45 | 33 | ❌ | ❌ | 🟡 42% | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
 
 ## Op groups
 
-The API node types (`<Op>Attributes` in the flatbuffers schema) that make up each group, with their feature counts. Each op's features are catalogued in `scripts/support_features/<op>.py`.
+The API node types (`<Op>Attributes` in the flatbuffers schema) that make up each group, with their API feature counts.
 
-| Op group | Features | Ops (features) |
+| Op group | API features | Ops (API features) |
 |---|---|---|
-| <a id="group-attention"></a>**Attention** | 57 | Sdpa (33), SdpaBackward (24) |
-| <a id="group-batchnorm"></a>**Batchnorm** | 54 | Batchnorm (20), BatchnormBackward (12), BatchnormInference (10), BatchnormInferenceVarianceExt (12) |
-| <a id="group-block-scale"></a>**Block scale** | 39 | BlockScaleDequantize (20), BlockScaleQuantize (19) |
-| <a id="group-convolution"></a>**Convolution** | 51 | ConvolutionBwd (17), ConvolutionFwd (17), ConvolutionWrw (17) |
-| <a id="group-customop"></a>**CustomOp** | 8 | CustomOp (8) |
-| <a id="group-layernorm"></a>**Layernorm** | 45 | Layernorm (22), LayernormBackward (23) |
-| <a id="group-matmul"></a>**Matmul** | 35 | Matmul (16), MoeGroupedMatmul (13), MoeGroupedMatmulBwd (6) |
-| <a id="group-pointwise"></a>**Pointwise** | 58 | Pointwise (58) |
-| <a id="group-reduction"></a>**Reduction** | 26 | Reduction (26) |
-| <a id="group-resample"></a>**Resample** | 34 | ResampleBwd (15), ResampleFwd (19) |
-| <a id="group-rmsnorm"></a>**RMSNorm** | 38 | RMSNorm (21), RMSNormBackward (17) |
+| <a id="group-attention"></a>**Attention** | 57 | [Sdpa](#op-sdpa) (33), [SdpaBackward](#op-sdpabackward) (24) |
+| <a id="group-batchnorm"></a>**Batchnorm** | 54 | [Batchnorm](#op-batchnorm) (20), [BatchnormBackward](#op-batchnormbackward) (12), [BatchnormInference](#op-batchnorminference) (10), [BatchnormInferenceVarianceExt](#op-batchnorminferencevarianceext) (12) |
+| <a id="group-block-scale"></a>**Block scale** | 39 | [BlockScaleDequantize](#op-blockscaledequantize) (20), [BlockScaleQuantize](#op-blockscalequantize) (19) |
+| <a id="group-convolution"></a>**Convolution** | 51 | [ConvolutionBwd](#op-convolutionbwd) (17), [ConvolutionFwd](#op-convolutionfwd) (17), [ConvolutionWrw](#op-convolutionwrw) (17) |
+| <a id="group-customop"></a>**CustomOp** | 8 | [CustomOp](#op-customop) (8) |
+| <a id="group-layernorm"></a>**Layernorm** | 45 | [Layernorm](#op-layernorm) (22), [LayernormBackward](#op-layernormbackward) (23) |
+| <a id="group-matmul"></a>**Matmul** | 35 | [Matmul](#op-matmul) (16), [MoeGroupedMatmul](#op-moegroupedmatmul) (13), [MoeGroupedMatmulBwd](#op-moegroupedmatmulbwd) (6) |
+| <a id="group-pointwise"></a>**Pointwise** | 58 | [Pointwise](#op-pointwise) (58) |
+| <a id="group-reduction"></a>**Reduction** | 26 | [Reduction](#op-reduction) (26) |
+| <a id="group-resample"></a>**Resample** | 34 | [ResampleBwd](#op-resamplebwd) (15), [ResampleFwd](#op-resamplefwd) (19) |
+| <a id="group-rmsnorm"></a>**RMSNorm** | 38 | [RMSNorm](#op-rmsnorm) (21), [RMSNormBackward](#op-rmsnormbackward) (17) |
 
-## Untested features
+## Features per op
 
-Features no bundle graph exercises: no engine can be shown to claim them until a graph does.
+Every API feature the percentages count, catalogued per op in `scripts/support_features/<op>.py`. A feature is one value of one API option: `dtype:bf16`, `mask:causal`. Features nothing exercises cannot be claimed on any GPU until a graph uses them.
 
-| Op | Graphs | Tested | Not exercised by any graph |
-|---|---|---|---|
-| **Batchnorm** | 805 | 16 / 20 (80%) | `precision:mixed`, `rank:0d`, `momentum:runtime`, `peer_stats:on` |
-| **BatchnormBackward** | 372 | 9 / 12 (75%) | `precision:mixed`, `rank:0d`, `peer_stats:on` |
-| **BatchnormInference** | 471 | 8 / 10 (80%) | `precision:mixed`, `rank:0d` |
-| **BatchnormInferenceVarianceExt** | 266 | 10 / 12 (83%) | `precision:mixed`, `rank:0d` |
-| **BlockScaleDequantize** | 126 | 11 / 20 (55%) | `dtype:fp32`, `dtype:fp16`, `dtype:bf16`, `scale_dtype:fp32`, `block:element`, `block:tile`, `block_length:other`, `fit:ragged`, `scale:negative_exponent` |
-| **BlockScaleQuantize** | 0 | 0 / 19 (0%) | `dtype:fp32`, `dtype:fp16`, `dtype:bf16`, `out_dtype:fp8e4m3`, `out_dtype:fp8e5m2`, `out_dtype:fp6e2m3`, `out_dtype:fp6e3m2`, `out_dtype:fp4e2m1`, `out_dtype:fp32`, `out_dtype:fp16`, `out_dtype:bf16`, `scale_dtype:fp8e8m0`, `scale_dtype:fp32`, `axis:last_dim`, `axis:other_dim`, `block_length:32`, `block_length:other`, `transpose:off`, `transpose:on` |
-| **ConvolutionBwd** | 138 | 13 / 17 (76%) | `precision:mixed`, `groups:depthwise`, `padding:asymmetric`, `mode:convolution` |
-| **ConvolutionFwd** | 1218 | 13 / 17 (76%) | `precision:mixed`, `groups:depthwise`, `padding:asymmetric`, `mode:convolution` |
-| **ConvolutionWrw** | 139 | 13 / 17 (76%) | `precision:mixed`, `groups:depthwise`, `padding:asymmetric`, `mode:convolution` |
-| **CustomOp** | 0 | 0 / 8 (0%) | `inputs:none`, `inputs:one`, `inputs:multi`, `outputs:none`, `outputs:one`, `outputs:multi`, `data:empty`, `data:present` |
-| **Layernorm** | 708 | 16 / 22 (72%) | `dims:1`, `dims:2`, `dims:3`, `norm:all_dims`, `affine:reduced_rank`, `epsilon:runtime` |
-| **LayernormBackward** | 980 | 16 / 23 (69%) | `dims:1`, `dims:2`, `dims:3`, `norm:all_dims`, `affine:reduced_rank`, `epsilon:default`, `epsilon:runtime` |
-| **Matmul** | 459 | 13 / 16 (81%) | `precision:mixed_inputs`, `precision:mixed_output`, `c_layout:col_major` |
-| **MoeGroupedMatmul** | 0 | 0 / 13 (0%) | `mode:none`, `mode:gather`, `mode:scatter`, `dtype:fp32`, `dtype:fp16`, `dtype:bf16`, `precision:mixed_output`, `batch:single`, `batch:multi`, `top_k:one`, `top_k:multi`, `weight_layout:row_major`, `weight_layout:col_major` |
-| **MoeGroupedMatmulBwd** | 0 | 0 / 6 (0%) | `dtype:fp32`, `dtype:fp16`, `dtype:bf16`, `precision:mixed_output`, `dweight_layout:col_major`, `dweight_layout:row_major` |
-| **Pointwise** | 5846 | 17 / 58 (29%) | `mode:abs`, `mode:ceil`, `mode:elu_fwd`, `mode:erf`, `mode:exp`, `mode:floor`, `mode:gelu_fwd`, `mode:gen_index`, `mode:identity`, `mode:log`, `mode:logical_not`, `mode:neg`, `mode:reciprocal`, `mode:rsqrt`, `mode:sigmoid_fwd`, `mode:sin`, `mode:softplus_fwd`, `mode:sqrt`, `mode:tan`, `mode:tanh_fwd`, `mode:add_square`, `mode:cmp_eq`, `mode:cmp_ge`, `mode:cmp_gt`, `mode:cmp_le`, `mode:cmp_lt`, `mode:cmp_neq`, `mode:div`, `mode:elu_bwd`, `mode:gelu_approx_tanh_bwd`, `mode:gelu_bwd`, `mode:logical_and`, `mode:logical_or`, `mode:sigmoid_bwd`, `mode:softplus_bwd`, `mode:swish_bwd`, `mode:tanh_bwd`, `mode:binary_select`, `swish:beta`, `elu:alpha`, `softplus:beta` |
-| **Reduction** | 114 | 19 / 26 (73%) | `precision:mixed_output`, `dims:1`, `dims:2`, `dims:3`, `dims:5`, `reduce:interleaved`, `deterministic:on` |
-| **ResampleBwd** | 0 | 0 / 15 (0%) | `mode:maxpool`, `mode:avgpool_exclude_padding`, `mode:avgpool_include_padding`, `dtype:fp32`, `dtype:fp16`, `dtype:bf16`, `rank:2d`, `rank:3d`, `layout:nchw`, `layout:nhwc`, `padding:symmetric`, `padding:asymmetric`, `stride:strided`, `window:overlapping`, `window:gapped` |
-| **ResampleFwd** | 48 | 16 / 19 (84%) | `padding_mode:neg_inf_pad`, `window:gapped`, `index:none` |
-| **RMSNorm** | 3340 | 19 / 21 (90%) | `dims:2`, `dims:3` |
-| **RMSNormBackward** | 1668 | 15 / 17 (88%) | `dims:2`, `dims:3` |
-| **Sdpa** | 102 | 20 / 33 (60%) | `dtype:fp8e5m2`, `mask:sliding_window`, `seq:decode`, `scale:default`, `out:max_sum_exp`, `out:rng_dump`, `fp8:amax`, `bias:additive`, `bias:alibi`, `dropout:on`, `kv:paged`, `input:block_mask`, `input:sink_token` |
-| **SdpaBackward** | 16 | 12 / 24 (50%) | `head_dim:64`, `head_dim:192`, `heads:gqa`, `heads:mqa`, `layout:bshd`, `varlen:seq_lens`, `scale:runtime`, `scale:default`, `bias:additive`, `bias:alibi`, `dropout:on`, `out:dbias` |
+| Op | Graphs | Exercised | Exercised by a graph | Not exercised |
+|---|---|---|---|---|
+| <a id="op-batchnorm"></a>**Batchnorm** | 805 | 16 / 20 (80%) | `dtype:fp32`, `dtype:fp16`, `dtype:bf16`, `rank:1d`, `rank:2d`, `rank:3d`, `layout:nchw`, `layout:nhwc`, `affine:full_rank`, `affine:reduced_rank`, `epsilon:fixed`, `epsilon:runtime`, `running_stats:on`, `momentum:fixed`, `out:mean`, `out:inv_variance` | `precision:mixed`, `rank:0d`, `momentum:runtime`, `peer_stats:on` |
+| <a id="op-batchnormbackward"></a>**BatchnormBackward** | 372 | 9 / 12 (75%) | `dtype:fp32`, `dtype:fp16`, `dtype:bf16`, `rank:1d`, `rank:2d`, `rank:3d`, `layout:nchw`, `layout:nhwc`, `saved_stats:on` | `precision:mixed`, `rank:0d`, `peer_stats:on` |
+| <a id="op-batchnorminference"></a>**BatchnormInference** | 471 | 8 / 10 (80%) | `dtype:fp32`, `dtype:fp16`, `dtype:bf16`, `rank:1d`, `rank:2d`, `rank:3d`, `layout:nchw`, `layout:nhwc` | `precision:mixed`, `rank:0d` |
+| <a id="op-batchnorminferencevarianceext"></a>**BatchnormInferenceVarianceExt** | 266 | 10 / 12 (83%) | `dtype:fp32`, `dtype:fp16`, `dtype:bf16`, `rank:1d`, `rank:2d`, `rank:3d`, `layout:nchw`, `layout:nhwc`, `epsilon:fixed`, `epsilon:runtime` | `precision:mixed`, `rank:0d` |
+| <a id="op-blockscaledequantize"></a>**BlockScaleDequantize** | 126 | 11 / 20 (55%) | `dtype:fp8e4m3`, `dtype:fp8e5m2`, `dtype:fp6e2m3`, `dtype:fp6e3m2`, `dtype:fp4e2m1`, `scale_dtype:fp8e8m0`, `block:last_dim`, `block:other_dim`, `block_length:32`, `fit:exact`, `scale:multiply` | `dtype:fp32`, `dtype:fp16`, `dtype:bf16`, `scale_dtype:fp32`, `block:element`, `block:tile`, `block_length:other`, `fit:ragged`, `scale:negative_exponent` |
+| <a id="op-blockscalequantize"></a>**BlockScaleQuantize** | 0 | 0 / 19 (0%) | — | `dtype:fp32`, `dtype:fp16`, `dtype:bf16`, `out_dtype:fp8e4m3`, `out_dtype:fp8e5m2`, `out_dtype:fp6e2m3`, `out_dtype:fp6e3m2`, `out_dtype:fp4e2m1`, `out_dtype:fp32`, `out_dtype:fp16`, `out_dtype:bf16`, `scale_dtype:fp8e8m0`, `scale_dtype:fp32`, `axis:last_dim`, `axis:other_dim`, `block_length:32`, `block_length:other`, `transpose:off`, `transpose:on` |
+| <a id="op-convolutionbwd"></a>**ConvolutionBwd** | 138 | 13 / 17 (76%) | `dtype:fp32`, `dtype:fp16`, `dtype:bf16`, `rank:1d`, `rank:2d`, `rank:3d`, `layout:nchw`, `layout:nhwc`, `groups:grouped`, `stride:strided`, `dilation:dilated`, `padding:symmetric`, `mode:cross_correlation` | `precision:mixed`, `groups:depthwise`, `padding:asymmetric`, `mode:convolution` |
+| <a id="op-convolutionfwd"></a>**ConvolutionFwd** | 1218 | 13 / 17 (76%) | `dtype:fp32`, `dtype:fp16`, `dtype:bf16`, `rank:1d`, `rank:2d`, `rank:3d`, `layout:nchw`, `layout:nhwc`, `groups:grouped`, `stride:strided`, `dilation:dilated`, `padding:symmetric`, `mode:cross_correlation` | `precision:mixed`, `groups:depthwise`, `padding:asymmetric`, `mode:convolution` |
+| <a id="op-convolutionwrw"></a>**ConvolutionWrw** | 139 | 13 / 17 (76%) | `dtype:fp32`, `dtype:fp16`, `dtype:bf16`, `rank:1d`, `rank:2d`, `rank:3d`, `layout:nchw`, `layout:nhwc`, `groups:grouped`, `stride:strided`, `dilation:dilated`, `padding:symmetric`, `mode:cross_correlation` | `precision:mixed`, `groups:depthwise`, `padding:asymmetric`, `mode:convolution` |
+| <a id="op-customop"></a>**CustomOp** | 0 | 0 / 8 (0%) | — | `inputs:none`, `inputs:one`, `inputs:multi`, `outputs:none`, `outputs:one`, `outputs:multi`, `data:empty`, `data:present` |
+| <a id="op-layernorm"></a>**Layernorm** | 708 | 16 / 22 (72%) | `dtype:fp32`, `dtype:fp16`, `dtype:bf16`, `precision:mixed_io`, `precision:mixed_affine`, `precision:mixed_stats`, `dims:4`, `dims:5`, `layout:nchw`, `layout:nhwc`, `norm:last_dim`, `norm:multi_dim`, `affine:full_rank`, `phase:inference`, `phase:training`, `epsilon:fixed` | `dims:1`, `dims:2`, `dims:3`, `norm:all_dims`, `affine:reduced_rank`, `epsilon:runtime` |
+| <a id="op-layernormbackward"></a>**LayernormBackward** | 980 | 16 / 23 (69%) | `dtype:fp32`, `dtype:fp16`, `dtype:bf16`, `precision:mixed_io`, `precision:mixed_affine`, `precision:mixed_stats`, `dims:4`, `dims:5`, `layout:nchw`, `layout:nhwc`, `norm:last_dim`, `norm:multi_dim`, `affine:full_rank`, `stats:saved`, `stats:recomputed`, `epsilon:fixed` | `dims:1`, `dims:2`, `dims:3`, `norm:all_dims`, `affine:reduced_rank`, `epsilon:default`, `epsilon:runtime` |
+| <a id="op-matmul"></a>**Matmul** | 459 | 13 / 16 (81%) | `dtype:fp32`, `dtype:fp16`, `dtype:bf16`, `batch:none`, `batch:single`, `batch:multi`, `broadcast:a`, `broadcast:b`, `a_layout:row_major`, `a_layout:col_major`, `b_layout:row_major`, `b_layout:col_major`, `c_layout:row_major` | `precision:mixed_inputs`, `precision:mixed_output`, `c_layout:col_major` |
+| <a id="op-moegroupedmatmul"></a>**MoeGroupedMatmul** | 0 | 0 / 13 (0%) | — | `mode:none`, `mode:gather`, `mode:scatter`, `dtype:fp32`, `dtype:fp16`, `dtype:bf16`, `precision:mixed_output`, `batch:single`, `batch:multi`, `top_k:one`, `top_k:multi`, `weight_layout:row_major`, `weight_layout:col_major` |
+| <a id="op-moegroupedmatmulbwd"></a>**MoeGroupedMatmulBwd** | 0 | 0 / 6 (0%) | — | `dtype:fp32`, `dtype:fp16`, `dtype:bf16`, `precision:mixed_output`, `dweight_layout:col_major`, `dweight_layout:row_major` |
+| <a id="op-pointwise"></a>**Pointwise** | 5846 | 17 / 58 (29%) | `mode:gelu_approx_tanh_fwd`, `mode:relu_fwd`, `mode:swish_fwd`, `mode:add`, `mode:max_op`, `mode:min_op`, `mode:mul`, `mode:relu_bwd`, `mode:sub`, `dtype:fp32`, `dtype:fp16`, `dtype:bf16`, `precision:mixed`, `broadcast:in`, `relu:lower_clip`, `relu:upper_clip`, `relu:leaky` | `mode:abs`, `mode:ceil`, `mode:elu_fwd`, `mode:erf`, `mode:exp`, `mode:floor`, `mode:gelu_fwd`, `mode:gen_index`, `mode:identity`, `mode:log`, `mode:logical_not`, `mode:neg`, `mode:reciprocal`, `mode:rsqrt`, `mode:sigmoid_fwd`, `mode:sin`, `mode:softplus_fwd`, `mode:sqrt`, `mode:tan`, `mode:tanh_fwd`, `mode:add_square`, `mode:cmp_eq`, `mode:cmp_ge`, `mode:cmp_gt`, `mode:cmp_le`, `mode:cmp_lt`, `mode:cmp_neq`, `mode:div`, `mode:elu_bwd`, `mode:gelu_approx_tanh_bwd`, `mode:gelu_bwd`, `mode:logical_and`, `mode:logical_or`, `mode:sigmoid_bwd`, `mode:softplus_bwd`, `mode:swish_bwd`, `mode:tanh_bwd`, `mode:binary_select`, `swish:beta`, `elu:alpha`, `softplus:beta` |
+| <a id="op-reduction"></a>**Reduction** | 114 | 19 / 26 (73%) | `mode:add`, `mode:mul`, `mode:min`, `mode:max`, `mode:amax`, `mode:avg`, `mode:norm1`, `mode:norm2`, `mode:mul_no_zeros`, `dtype:fp32`, `dtype:fp16`, `dtype:bf16`, `dims:4`, `reduce:all`, `reduce:trailing`, `reduce:leading`, `layout:nchw`, `layout:nhwc`, `deterministic:off` | `precision:mixed_output`, `dims:1`, `dims:2`, `dims:3`, `dims:5`, `reduce:interleaved`, `deterministic:on` |
+| <a id="op-resamplebwd"></a>**ResampleBwd** | 0 | 0 / 15 (0%) | — | `mode:maxpool`, `mode:avgpool_exclude_padding`, `mode:avgpool_include_padding`, `dtype:fp32`, `dtype:fp16`, `dtype:bf16`, `rank:2d`, `rank:3d`, `layout:nchw`, `layout:nhwc`, `padding:symmetric`, `padding:asymmetric`, `stride:strided`, `window:overlapping`, `window:gapped` |
+| <a id="op-resamplefwd"></a>**ResampleFwd** | 48 | 16 / 19 (84%) | `mode:maxpool`, `mode:avgpool_exclude_padding`, `mode:avgpool_include_padding`, `padding_mode:zero_pad`, `dtype:fp32`, `dtype:fp16`, `dtype:bf16`, `rank:2d`, `rank:3d`, `layout:nchw`, `layout:nhwc`, `padding:symmetric`, `padding:asymmetric`, `stride:strided`, `window:overlapping`, `index:generated` | `padding_mode:neg_inf_pad`, `window:gapped`, `index:none` |
+| <a id="op-rmsnorm"></a>**RMSNorm** | 3340 | 19 / 21 (90%) | `dtype:fp32`, `dtype:fp16`, `dtype:bf16`, `precision:mixed_io`, `precision:mixed_affine`, `precision:mixed_stats`, `dims:4`, `dims:5`, `layout:nchw`, `layout:nhwc`, `norm:last_dim`, `norm:multi_dim`, `norm:all_but_batch`, `bias:none`, `bias:bound`, `phase:inference`, `phase:training`, `epsilon:fixed`, `epsilon:runtime` | `dims:2`, `dims:3` |
+| <a id="op-rmsnormbackward"></a>**RMSNormBackward** | 1668 | 15 / 17 (88%) | `dtype:fp32`, `dtype:fp16`, `dtype:bf16`, `precision:mixed_io`, `precision:mixed_affine`, `precision:mixed_stats`, `dims:4`, `dims:5`, `layout:nchw`, `layout:nhwc`, `norm:last_dim`, `norm:multi_dim`, `norm:all_but_batch`, `dbias:none`, `dbias:bound` | `dims:2`, `dims:3` |
+| <a id="op-sdpa"></a>**Sdpa** | 102 | 20 / 33 (60%) | `dtype:bf16`, `dtype:fp16`, `dtype:fp8e4m3`, `head_dim:64`, `head_dim:128`, `head_dim:192`, `heads:mha`, `heads:gqa`, `heads:mqa`, `layout:bhsd`, `layout:bshd`, `mask:none`, `mask:causal_top_left`, `mask:causal_bottom_right`, `seq:q_eq_kv`, `seq:q_ne_kv`, `varlen:seq_lens`, `scale:fixed`, `scale:runtime`, `out:stats` | `dtype:fp8e5m2`, `mask:sliding_window`, `seq:decode`, `scale:default`, `out:max_sum_exp`, `out:rng_dump`, `fp8:amax`, `bias:additive`, `bias:alibi`, `dropout:on`, `kv:paged`, `input:block_mask`, `input:sink_token` |
+| <a id="op-sdpabackward"></a>**SdpaBackward** | 16 | 12 / 24 (50%) | `dtype:bf16`, `dtype:fp16`, `head_dim:128`, `heads:mha`, `layout:bhsd`, `mask:none`, `mask:causal_top_left`, `mask:causal_bottom_right`, `mask:sliding_window`, `seq:q_eq_kv`, `seq:q_ne_kv`, `scale:fixed` | `head_dim:64`, `head_dim:192`, `heads:gqa`, `heads:mqa`, `layout:bshd`, `varlen:seq_lens`, `scale:runtime`, `scale:default`, `bias:additive`, `bias:alibi`, `dropout:on`, `out:dbias` |
 
 ## GPU targets
 
