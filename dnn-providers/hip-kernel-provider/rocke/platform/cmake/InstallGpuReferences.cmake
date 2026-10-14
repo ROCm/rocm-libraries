@@ -27,8 +27,8 @@ foreach(_operation sdpa conv)
     if(NOT EXISTS "${_archive}")
       message(FATAL_ERROR
               "${_operation_upper} reference archive missing. Run dvc pull for "
-              "dnn-providers/hip-kernel-provider/rocke/library/tests/reference_bundles/${_operation}/${_arch}.tar.gz.dvc "
-              "or configure with ROCKE_INSTALL_TEST_GPU_REFERENCES=OFF.")
+              "${_archive}.dvc or configure with "
+              "ROCKE_INSTALL_TEST_GPU_REFERENCES=OFF.")
     endif()
     file(SHA256 "${_archive}" _archive_sha256)
     set(_bundle "${CMAKE_CURRENT_BINARY_DIR}/${_operation}-reference/${_arch}/${_archive_sha256}")
