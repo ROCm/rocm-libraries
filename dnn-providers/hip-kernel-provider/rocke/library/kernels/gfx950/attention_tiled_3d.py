@@ -30,8 +30,13 @@ from ..common._attention_validation import validate_attention_3d_spec_types
 from dataclasses import dataclass
 from typing import Optional, Tuple
 
+from kernels.common._attention_kv_loader import (
+    AttentionKVLoaderKind,
+    resolve_attention_kv_loader,
+)
 from kernels.common._attention_paged_kv import paged_kv_offset
 from kernels.common._attention_strided_kv import (
+    StridedKvParams,
     declare_strided_kv_params,
     strided_kv_offset,
     strided_kv_resource,
@@ -201,7 +206,12 @@ class UnifiedAttention3DTiledSpec:
 
     @property
     def uses_paged_gather(self) -> bool:
-        return self.kv_layout == "paged" and self.tile_size != self.block_size
+        return (
+            resolve_attention_kv_loader(
+                "gfx950", self.kv_layout, self.block_size, self.tile_size
+            )
+            is AttentionKVLoaderKind.PAGED_TOKEN_GATHER
+        )
 
     @property
     def dtype_ir(self) -> Type:
@@ -327,6 +337,7 @@ def build_unified_attention_3d_tiled(
     HD = spec.head_size
     T = spec.tile_size
     BS = spec.block_size
+    loader_kind = resolve_attention_kv_loader("gfx950", spec.kv_layout, BS, T)
     BLOCK_M = spec.block_m
     BLOCK_Q = spec.block_q
     NQK = spec.num_queries_per_kv
@@ -411,7 +422,8 @@ def build_unified_attention_3d_tiled(
     num_seqs_p = b.param("num_seqs", I32)
     bt_stride_p = b.param("block_table_stride", I32)
     qq_bias_stride0_p = b.param("qq_bias_stride_0", I32)
-    if spec.kv_layout == "strided":
+    k_strides = v_strides = None
+    if loader_kind is AttentionKVLoaderKind.STRIDED:
         k_strides = declare_strided_kv_params(b, "k")
         v_strides = declare_strided_kv_params(b, "v")
 
@@ -621,7 +633,7 @@ def build_unified_attention_3d_tiled(
 
     # ---------------- async K/V infra (identical to 2D) ----------------
     big_bytes = b.const_i32(0x7FFF0000)
-    if spec.kv_layout == "strided":
+    if loader_kind is AttentionKVLoaderKind.STRIDED:
         key_rsrc = strided_kv_resource(b, key, k_strides, seq_idx, kv_head_idx)
         value_rsrc = strided_kv_resource(b, value, v_strides, seq_idx, kv_head_idx)
     else:
@@ -655,7 +667,11 @@ def build_unified_attention_3d_tiled(
     # by ``unmerge(linear_half -> (token, dim))`` to split the per-lane
     # half offset, plus the byte-stride 4D base. One ``.offset()`` call
     # produces the final byte address for one async DMA call.
-    seq_base = b.mul(seq_idx, bt_stride_p) if spec.kv_layout == "paged" else None
+    seq_base = (
+        b.mul(seq_idx, bt_stride_p)
+        if loader_kind is not AttentionKVLoaderKind.STRIDED
+        else None
+    )
     paged_kv_desc = TensorDescriptor.naive(
         "paged_kv_bytes",
         lengths=[1 << 24, T, NUM_KV, HD],
@@ -666,18 +682,25 @@ def build_unified_attention_3d_tiled(
         unmerge("linear_half", into=("token", "dim"), dims=(T, HD)),
     )
 
-    def _issue_k_load(kv_tile_idx: Value, buf_idx: Value) -> None:
+    def _issue_kv_tile(
+        src: Value,
+        rsrc: Value,
+        strides: StridedKvParams | None,
+        lds_addr: Value,
+        kv_tile_idx: Value,
+        buf_idx: Value,
+    ) -> None:
         buf_off_i32 = b.mul(buf_idx, b.const_i32(bytes_per_buf))
         buf_off_i64 = b.zext(buf_off_i32, I64)
-        K_buf_base = b.smem_ptr_add(K_lds_addr, buf_off_i64)
+        buf_base = b.smem_ptr_add(lds_addr, buf_off_i64)
         for call in range(kv_calls_per_tile):
             linear_half = b.add(b.const_i32(call * KV_HALVES_PER_CALL), lane_half_base)
-            call_rsrc = key_rsrc
-            if spec.kv_layout == "strided":
+            call_rsrc = rsrc
+            if loader_kind is AttentionKVLoaderKind.STRIDED:
                 voff = strided_kv_offset(
-                    b, k_strides, kv_tile_idx, linear_half, seq_len, HD, T
+                    b, strides, kv_tile_idx, linear_half, seq_len, HD, T
                 )
-            elif spec.uses_paged_gather:
+            elif loader_kind is AttentionKVLoaderKind.PAGED_TOKEN_GATHER:
                 voff = paged_kv_offset(
                     b,
                     block_tables,
@@ -700,7 +723,7 @@ def build_unified_attention_3d_tiled(
                     kv_head=kv_head_idx,
                 )
                 call_rsrc = b.buffer_rsrc(
-                    b.global_ptr_add(key, base_i64), kv_block_bytes_c
+                    b.global_ptr_add(src, base_i64), kv_block_bytes_c
                 )
             else:
                 voff, _ = paged_kv_desc.offset(
@@ -709,54 +732,14 @@ def build_unified_attention_3d_tiled(
                     linear_half=linear_half,
                     kv_head=kv_head_idx,
                 )
-            k_dst = b.smem_ptr_add(K_buf_base, b.const_i64(call * bytes_per_call))
-            b.async_buffer_load_lds_addr(call_rsrc, k_dst, voff, zero_soff, 4)
+            dst = b.smem_ptr_add(buf_base, b.const_i64(call * bytes_per_call))
+            b.async_buffer_load_lds_addr(call_rsrc, dst, voff, zero_soff, 4)
+
+    def _issue_k_load(kv_tile_idx: Value, buf_idx: Value) -> None:
+        _issue_kv_tile(key, key_rsrc, k_strides, K_lds_addr, kv_tile_idx, buf_idx)
 
     def _issue_v_load(kv_tile_idx: Value, buf_idx: Value) -> None:
-        buf_off_i32 = b.mul(buf_idx, b.const_i32(bytes_per_buf))
-        buf_off_i64 = b.zext(buf_off_i32, I64)
-        V_buf_base = b.smem_ptr_add(V_lds_addr, buf_off_i64)
-        for call in range(kv_calls_per_tile):
-            linear_half = b.add(b.const_i32(call * KV_HALVES_PER_CALL), lane_half_base)
-            call_rsrc = value_rsrc
-            if spec.kv_layout == "strided":
-                voff = strided_kv_offset(
-                    b, v_strides, kv_tile_idx, linear_half, seq_len, HD, T
-                )
-            elif spec.uses_paged_gather:
-                voff = paged_kv_offset(
-                    b,
-                    block_tables,
-                    seq_base,
-                    kv_head_idx,
-                    kv_tile_idx,
-                    linear_half,
-                    seq_len,
-                    HD,
-                    BS,
-                    T,
-                    NUM_KV,
-                )
-            elif I64_KV_ADDR:
-                base_i64, voff, _ = paged_kv_desc.offset_i64_split(
-                    b,
-                    "physical_block",
-                    tile_idx=kv_tile_idx,
-                    linear_half=linear_half,
-                    kv_head=kv_head_idx,
-                )
-                call_rsrc = b.buffer_rsrc(
-                    b.global_ptr_add(value, base_i64), kv_block_bytes_c
-                )
-            else:
-                voff, _ = paged_kv_desc.offset(
-                    b,
-                    tile_idx=kv_tile_idx,
-                    linear_half=linear_half,
-                    kv_head=kv_head_idx,
-                )
-            v_dst = b.smem_ptr_add(V_buf_base, b.const_i64(call * bytes_per_call))
-            b.async_buffer_load_lds_addr(call_rsrc, v_dst, voff, zero_soff, 4)
+        _issue_kv_tile(value, value_rsrc, v_strides, V_lds_addr, kv_tile_idx, buf_idx)
 
     # FP8 K/V cache: sync dequant loader. See attention_tiled_2d.py for the
     # rationale. The FP8 path stores the working dtype (bf16/fp16) into LDS,

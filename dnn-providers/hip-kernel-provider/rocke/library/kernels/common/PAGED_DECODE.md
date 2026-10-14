@@ -5,6 +5,11 @@ compute tile size `T`. Both consume logical token tiles and stage the existing
 `[T,D]` K/V LDS operands. Transfer width and split-KV segment length remain
 separate target and scheduling choices. Staging is one compute tile per buffer;
 MFMA, online softmax, synchronization and the reducer are unchanged.
+An internal loader-kind resolver selects strided addressing, the existing paged
+descriptor, or per-token paged gather. Both engines use that decision for
+validation and architecture-local K/V tile issuing. Storage conversion, transfer
+width and address width remain separate choices; `uses_paged_gather` remains the
+compatibility view for structural specs. No public strategy field is introduced.
 For gfx942 D256/T32, V uses one tile buffer to fit the LDS budget. V has no
 next-tile prefetch; the existing loop-entry wait/barrier completes prior PV
 reads before the same buffer is written again. This intentionally changes
@@ -80,6 +85,13 @@ K/V dequantization scales; other explicit 3D loaders require numeric unit K/V
 scales. Output scaling is not forwarded by the 3D adapter and must be numeric
 unit scaling. Unit values exclude booleans, including on default P1 launches.
 Gather-only address and workspace bounds do not restrict page-contained loaders.
+
+The whole-page DMA work in PR #13492 can add a loader kind with separate
+cooperative-transfer geometry checks. Current gather restrictions remain in
+place, including rejection of P16/T64. Page-ID caching must preserve safe table
+reads, and page-ID substitution alone does not guarantee zero invalid K/V data.
+An LDS swizzle must be shared by tile writes and QK/PV reads. Selectable loaders
+at identical geometry must enter the concrete spec and compilation identity.
 
 ## Selection and validation
 

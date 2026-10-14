@@ -1503,9 +1503,7 @@ def test_tiled_spec_constructors_and_builders_reject_raw_types(
                 object.__setattr__(bad, field, value)
                 with pytest.raises(ValueError, match=field):
                     build(bad, arch=arch)
-    for field in (
-        ("dtype",) if reducer else ("dtype", "kv_layout", "kv_storage_dtype")
-    ):
+    for field in ("dtype",) if reducer else ("dtype", "kv_layout", "kv_storage_dtype"):
         with subtests.test(field=field), pytest.raises(ValueError, match=field):
             replace(concrete, **{field: 1})
 
@@ -1578,8 +1576,9 @@ def test_strided_structural_types_before_lds_and_launch(arch, monkeypatch, subte
             )
             target = bad.reduce_spec if reducer else bad.kernel_spec
             object.__setattr__(target, field, value)
-            with subtests.test(reducer=reducer, field=field), pytest.raises(
-                ValueError, match=field
+            with (
+                subtests.test(reducer=reducer, field=field),
+                pytest.raises(ValueError, match=field),
             ):
                 au._validate_strided_3d_spec(kwargs["problem"], bad)
 
@@ -1596,8 +1595,9 @@ def test_native_tiled_dictionary_types_before_casts(
         for value in _typed_bad_values(field in _TYPED_SEGMENT_BOOLS):
             if value is None:  # The native partial dictionary declares None as default.
                 continue
-            with subtests.test(field=field, value=repr(value)), pytest.raises(
-                ValueError, match=field
+            with (
+                subtests.test(field=field, value=repr(value)),
+                pytest.raises(ValueError, match=field),
             ):
                 fn({field: value}, arch)
     for field in ("dtype", "kv_storage_dtype", "kv_layout"):
@@ -1774,3 +1774,54 @@ def test_paged_feature_native_parity(arch, page, dtype, feature, flavor, monkeyp
         )
         == expected
     )
+
+
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+@pytest.mark.parametrize("tile", [16, 32])
+def test_structural_subpage_loader_contract(arch, tile):
+    from types import SimpleNamespace
+
+    from kernels.common.attention_paged_decode import validate_paged_loader_geometry
+
+    kwargs = _paged_runtime_kwargs(arch, 64)
+    concrete = kwargs["tuning_spec"]
+    snapshot = asdict(concrete.kernel_spec)
+    snapshot.update(
+        tile_size=tile, tile_size_override=tile, uses_paged_gather=arch == "gfx950"
+    )
+    structural = _structural_paged_spec(
+        concrete, kernel_spec=SimpleNamespace(**snapshot)
+    )
+    assert not hasattr(structural.kernel_spec, "kv_loader_kind")
+    if arch == "gfx950" and tile == 16:
+        with pytest.raises(ValueError, match="paged gather requires tile_size=32"):
+            validate_paged_loader_geometry(kwargs["problem"], structural)
+    else:
+        assert validate_paged_loader_geometry(kwargs["problem"], structural) == (
+            64,
+            tile,
+            arch == "gfx950",
+        )
+        structural.kernel_spec.uses_paged_gather = arch != "gfx950"
+        with pytest.raises(ValueError, match="disagrees with loader geometry"):
+            validate_paged_loader_geometry(kwargs["problem"], structural)
+
+
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+@pytest.mark.parametrize("field", ["block_size", "tile_size", "tile_size_override"])
+@pytest.mark.parametrize("value", [True, "32", 32.0])
+def test_structural_raw_geometry_checked_before_loader_resolution(
+    arch, field, value, monkeypatch
+):
+    from kernels.common import attention_paged_decode as admission
+
+    kwargs = _paged_runtime_kwargs(arch, 16)
+    structural = _structural_paged_spec(kwargs["tuning_spec"])
+    setattr(structural.kernel_spec, field, value)
+
+    def forbidden(*args):
+        pytest.fail("malformed raw geometry reached loader resolution")
+
+    monkeypatch.setattr(admission, "resolve_attention_kv_loader", forbidden)
+    with pytest.raises((TypeError, ValueError)):
+        admission.validate_paged_loader_geometry(kwargs["problem"], structural)

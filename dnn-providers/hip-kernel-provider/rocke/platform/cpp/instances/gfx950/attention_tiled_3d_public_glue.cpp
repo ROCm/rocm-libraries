@@ -905,7 +905,9 @@ static rocke_kernel_def_t* build_segment_gfx950(rocke_ir_builder_t* b,
                             "tiled decode requires page size 1/16/32/64 and tile size 16/32/64");
             return NULL;
         }
-        if(!strided_kv && (tile != spec->block_size)
+        const rocke_attention_kv_loader_kind_t loader_kind
+            = rocke_gfx950_resolve_attention_kv_loader(strided_kv, spec->block_size, tile);
+        if(loader_kind == ROCKE_ATTN_KV_PAGED_TOKEN_GATHER
            && (tile != 32 || spec->kv_storage_dtype != NULL || spec->use_i64_kv_addr
                || spec->use_wide_kv_load))
         {
@@ -954,6 +956,7 @@ static rocke_kernel_def_t* build_segment_gfx950(rocke_ir_builder_t* b,
         }
 
         ctx.strided_kv = strided_kv;
+        ctx.kv_loader_kind = loader_kind;
 
         /* b.kernel.attrs["max_workgroup_size"] = THREADS (line 303). */
         if(b->kernel != NULL)

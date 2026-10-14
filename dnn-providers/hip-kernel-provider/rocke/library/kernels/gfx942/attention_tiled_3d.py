@@ -36,8 +36,13 @@ from ..common._attention_validation import validate_attention_3d_spec_types
 from dataclasses import dataclass
 from typing import Optional, Tuple
 
+from kernels.common._attention_kv_loader import (
+    AttentionKVLoaderKind,
+    resolve_attention_kv_loader,
+)
 from kernels.common._attention_paged_kv import paged_kv_offset
 from kernels.common._attention_strided_kv import (
+    StridedKvParams,
     declare_strided_kv_params,
     strided_kv_offset,
     strided_kv_resource,
@@ -193,7 +198,12 @@ class UnifiedAttention3DTiledSpec:
 
     @property
     def uses_paged_gather(self) -> bool:
-        return self.kv_layout == "paged" and self.tile_size > self.block_size
+        return (
+            resolve_attention_kv_loader(
+                "gfx942", self.kv_layout, self.block_size, self.tile_size
+            )
+            is AttentionKVLoaderKind.PAGED_TOKEN_GATHER
+        )
 
     @property
     def dtype_ir(self) -> Type:
@@ -306,6 +316,7 @@ def build_unified_attention_3d_tiled(
     HD = spec.head_size
     T = spec.tile_size
     BS = spec.block_size
+    loader_kind = resolve_attention_kv_loader("gfx942", spec.kv_layout, BS, T)
     BLOCK_M = spec.block_m
     BLOCK_Q = spec.block_q
     NQK = spec.num_queries_per_kv
@@ -387,7 +398,8 @@ def build_unified_attention_3d_tiled(
     num_seqs_p = b.param("num_seqs", I32)
     bt_stride_p = b.param("block_table_stride", I32)
     qq_bias_stride0_p = b.param("qq_bias_stride_0", I32)
-    if spec.kv_layout == "strided":
+    k_strides = v_strides = None
+    if loader_kind is AttentionKVLoaderKind.STRIDED:
         k_strides = declare_strided_kv_params(b, "k")
         v_strides = declare_strided_kv_params(b, "v")
 
@@ -616,7 +628,7 @@ def build_unified_attention_3d_tiled(
     ASYNC_LDS_DWORDS = 1
     HALVES_PER_LANE = ASYNC_LDS_DWORDS * 2  # 4 bytes / 2 bytes-per-half
     big_bytes = b.const_i32(0x7FFF0000)
-    if spec.kv_layout == "strided":
+    if loader_kind is AttentionKVLoaderKind.STRIDED:
         key_rsrc = strided_kv_resource(b, key, k_strides, seq_idx, kv_head_idx)
         value_rsrc = strided_kv_resource(b, value, v_strides, seq_idx, kv_head_idx)
     else:
@@ -637,7 +649,11 @@ def build_unified_attention_3d_tiled(
     V_lds_addr = b.smem_addr_of(V_lds)
     zero_soff = b.const_i32(0)
 
-    seq_base = b.mul(seq_idx, bt_stride_p) if spec.kv_layout == "paged" else None
+    seq_base = (
+        b.mul(seq_idx, bt_stride_p)
+        if loader_kind is not AttentionKVLoaderKind.STRIDED
+        else None
+    )
     _kv_base = TensorDescriptor.naive(
         "paged_kv_bytes",
         lengths=[1 << 24, BS, NUM_KV, HD],
@@ -674,17 +690,23 @@ def build_unified_attention_3d_tiled(
             ),
         )
 
-    def _issue_k_load(kv_tile_idx: Value, buf_idx: Value) -> None:
+    def _issue_kv_tile(
+        rsrc: Value,
+        strides: StridedKvParams | None,
+        lds_addr: Value,
+        kv_tile_idx: Value,
+        buf_idx: Value,
+    ) -> None:
         buf_off_i32 = b.mul(buf_idx, b.const_i32(bytes_per_buf))
         buf_off_i64 = b.zext(buf_off_i32, I64)
-        K_buf_base = b.smem_ptr_add(K_lds_addr, buf_off_i64)
+        buf_base = b.smem_ptr_add(lds_addr, buf_off_i64)
         for call in range(kv_calls_per_tile):
             linear_half = b.add(b.const_i32(call * KV_HALVES_PER_CALL), lane_half_base)
-            if spec.kv_layout == "strided":
+            if loader_kind is AttentionKVLoaderKind.STRIDED:
                 voff = strided_kv_offset(
-                    b, k_strides, kv_tile_idx, linear_half, seq_len, HD, T
+                    b, strides, kv_tile_idx, linear_half, seq_len, HD, T
                 )
-            elif spec.uses_paged_gather:
+            elif loader_kind is AttentionKVLoaderKind.PAGED_TOKEN_GATHER:
                 voff = paged_kv_offset(
                     b,
                     block_tables,
@@ -705,46 +727,14 @@ def build_unified_attention_3d_tiled(
                     linear_half=linear_half,
                     kv_head=kv_head_idx,
                 )
-            k_dst = b.smem_ptr_add(K_buf_base, b.const_i64(call * bytes_per_call))
-            b.async_buffer_load_lds_addr(
-                key_rsrc, k_dst, voff, zero_soff, ASYNC_LDS_DWORDS
-            )
+            dst = b.smem_ptr_add(buf_base, b.const_i64(call * bytes_per_call))
+            b.async_buffer_load_lds_addr(rsrc, dst, voff, zero_soff, ASYNC_LDS_DWORDS)
+
+    def _issue_k_load(kv_tile_idx: Value, buf_idx: Value) -> None:
+        _issue_kv_tile(key_rsrc, k_strides, K_lds_addr, kv_tile_idx, buf_idx)
 
     def _issue_v_load(kv_tile_idx: Value, buf_idx: Value) -> None:
-        buf_off_i32 = b.mul(buf_idx, b.const_i32(bytes_per_buf))
-        buf_off_i64 = b.zext(buf_off_i32, I64)
-        V_buf_base = b.smem_ptr_add(V_lds_addr, buf_off_i64)
-        for call in range(kv_calls_per_tile):
-            linear_half = b.add(b.const_i32(call * KV_HALVES_PER_CALL), lane_half_base)
-            if spec.kv_layout == "strided":
-                voff = strided_kv_offset(
-                    b, v_strides, kv_tile_idx, linear_half, seq_len, HD, T
-                )
-            elif spec.uses_paged_gather:
-                voff = paged_kv_offset(
-                    b,
-                    block_tables,
-                    seq_base,
-                    kv_head_idx,
-                    kv_tile_idx,
-                    linear_half,
-                    seq_len,
-                    HD,
-                    BS,
-                    T,
-                    NUM_KV,
-                )
-            else:
-                voff, _ = paged_kv_desc.offset(
-                    b,
-                    tile_idx=kv_tile_idx,
-                    linear_half=linear_half,
-                    kv_head=kv_head_idx,
-                )
-            v_dst = b.smem_ptr_add(V_buf_base, b.const_i64(call * bytes_per_call))
-            b.async_buffer_load_lds_addr(
-                value_rsrc, v_dst, voff, zero_soff, ASYNC_LDS_DWORDS
-            )
+        _issue_kv_tile(value_rsrc, v_strides, V_lds_addr, kv_tile_idx, buf_idx)
 
     # Wide KV feed (opt-in): 8-half (16-byte / b128) synchronous global->register
     # ->LDS loads, mirroring the in-kernel fp8 loader and the 2D cfvst V store.

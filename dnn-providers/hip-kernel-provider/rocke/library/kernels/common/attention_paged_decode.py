@@ -3,6 +3,7 @@
 
 """Host admission for tiled paged decode. No device metadata reads."""
 
+from ._attention_kv_loader import AttentionKVLoaderKind, resolve_attention_kv_loader
 from ._attention_validation import (
     require_attention_int,
     validate_attention_problem_types,
@@ -165,7 +166,10 @@ def validate_paged_loader_geometry(
     expected_tile = override if override is not None else (32 if page == 1 else page)
     if tile != expected_tile:
         raise ValueError("3D kernel_spec.tile_size disagrees with tile_size_override")
-    gather = tile > page if tuning_spec.arch == "gfx942" else tile != page
+    loader_kind = resolve_attention_kv_loader(
+        tuning_spec.arch, values["kv_layout"], page, tile
+    )
+    gather = loader_kind is AttentionKVLoaderKind.PAGED_TOKEN_GATHER
     if values["uses_paged_gather"] != gather:
         raise ValueError(
             "3D kernel_spec.uses_paged_gather disagrees with loader geometry"
