@@ -862,6 +862,79 @@ def _apply_global(inst: Any, modifier: Any) -> None:
     )
 
 
+def _apply_mubuf(inst: Any, mubuf: Any) -> None:
+    """Forward the MUBUF fields the buffer factories currently pass through."""
+    if mubuf is None:
+        return
+    scope = getattr(mubuf, "scope", 0)
+    inst.set_mubuf(
+        offen=getattr(mubuf, "offen", False),
+        offset=getattr(mubuf, "offset12", 0),
+        glc=getattr(mubuf, "glc", False),
+        slc=getattr(mubuf, "slc", False),
+        nt=getattr(mubuf, "nt", False),
+        scope=scope if isinstance(scope, int) else scope.value,
+        th=int(getattr(mubuf, "th", -1)),
+        is_store=getattr(mubuf, "isStore", False),
+        nv=_mubuf_enum_int(getattr(mubuf, "nv", 0)),
+    )
+
+
+def _apply_ds(inst: Any, ds: Any) -> None:
+    """Forward the single offset the non-dual DS factories currently pass."""
+    if ds is None:
+        return
+    inst.set_ds(offset=getattr(ds, "offset", 0))
+
+
+def _apply_ds_full(inst: Any, ds: Any) -> None:
+    """Forward every DS field the dual-address load factory currently passes."""
+    if ds is None:
+        return
+    inst.set_ds(
+        na=getattr(ds, "na", 2),
+        offset=getattr(ds, "offset", 0),
+        offset0=getattr(ds, "offset0", 0),
+        offset1=getattr(ds, "offset1", 0),
+        gds=getattr(ds, "gds", False),
+    )
+
+
+def _apply_modifiers(item: Any, logical: Any) -> Any:
+    """Attach the modifiers this rocisa shim already forwards.
+
+    The set is ``type(item)._stinky_mods``. A shim with no entry keeps its
+    previous behavior, including modifiers it stores but does not lower.
+    Calling this twice writes the same values again.
+    """
+    if logical is None or isinstance(logical, list):
+        return logical
+    mods = getattr(item, "_stinky_mods", ())
+    if "vop3" in mods:
+        _apply_vop3(logical, getattr(item, "vop3", None))
+    if "sdwa" in mods:
+        _apply_sdwa(logical, getattr(item, "sdwa", None))
+    if "true16" in mods:
+        _apply_true16(logical, getattr(item, "dst", None), getattr(item, "srcs", None) or [])
+    if "flat" in mods:
+        _apply_flat(logical, getattr(item, "flat", None))
+    if "global_glob" in mods:
+        _apply_global(logical, getattr(item, "glob", None))
+    if "global_modifier" in mods:
+        _apply_global(logical, getattr(item, "_modifier", None))
+    if "global_modifiers" in mods:
+        _apply_global(logical, getattr(item, "_modifiers", None))
+    if "global_scope" in mods:
+        logical.set_global(scope=int(item.scope))
+    if "mubuf" in mods:
+        _apply_mubuf(logical, getattr(item, "mubuf", None))
+    if "ds_full" in mods:
+        _apply_ds_full(logical, getattr(item, "ds", None))
+    elif "ds" in mods:
+        _apply_ds(logical, getattr(item, "ds", None))
+    return logical
+
+
 def _make_scalar_alu_class(class_name: str, mnemonic: str, inst_type: "InstType",
                            base: type = None):
     """Factory for scalar/vector ALU instruction shim classes (dst, src0, src1).
@@ -923,14 +996,7 @@ def _make_scalar_alu_class(class_name: str, mnemonic: str, inst_type: "InstType"
         src1_reg = _to_stinky_register(self.srcs[1])
         factory = getattr(_st, class_name)
         inst = factory(dst_reg, src0_reg, src1_reg, comment=self.comment)
-        # Propagate VOP3P packed modifiers (op_sel / op_sel_hi / byte_sel).
-        # e.g. GlobalWriteBatch emits ``v_pk_mul_f32 ... op_sel_hi:[0,1,1]``
-        # for the alpha-scale packed multiply; dropping op_sel_hi yields an
-        # "invalid op_sel operand" from the assembler.
-        _apply_vop3(inst, getattr(self, "vop3", None))
-        _apply_sdwa(inst, getattr(self, "sdwa", None))
-        _apply_true16(inst, self.dst, self.srcs)
-        return inst
+        return _apply_modifiers(self, inst)
 
     def __deepcopy__(self, memo):
         return CommonInstruction.__deepcopy__(self, memo)
@@ -941,6 +1007,7 @@ def _make_scalar_alu_class(class_name: str, mnemonic: str, inst_type: "InstType"
         "to_stinky_logical": to_stinky_logical,
         "__deepcopy__": __deepcopy__,
     })
+    cls._stinky_mods = ("vop3", "sdwa", "true16")
     return cls
 
 
@@ -977,10 +1044,7 @@ def _make_scalar_unary_class(class_name: str, mnemonic: str, inst_type: "InstTyp
         src_reg = _to_stinky_register(self.srcs[0])
         factory = getattr(_st, class_name)
         inst = factory(dst_reg, src_reg, comment=self.comment)
-        _apply_vop3(inst, getattr(self, "vop3", None))
-        _apply_sdwa(inst, getattr(self, "sdwa", None))
-        _apply_true16(inst, self.dst, self.srcs)
-        return inst
+        return _apply_modifiers(self, inst)
 
     def __deepcopy__(self, memo):
         return CommonInstruction.__deepcopy__(self, memo)
@@ -991,6 +1055,7 @@ def _make_scalar_unary_class(class_name: str, mnemonic: str, inst_type: "InstTyp
         "to_stinky_logical": to_stinky_logical,
         "__deepcopy__": __deepcopy__,
     })
+    cls._stinky_mods = ("vop3", "sdwa", "true16")
     return cls
 
 
@@ -1079,8 +1144,7 @@ def _make_scoped_no_operand_class(class_name: str, mnemonic: str):
 
         factory = getattr(_st, class_name)
         inst = factory(self.comment)
-        inst.set_global(scope=int(self.scope))
-        return inst
+        return _apply_modifiers(self, inst)
 
     def __deepcopy__(self, memo):
         if id(self) in memo:
@@ -1102,6 +1166,7 @@ def _make_scoped_no_operand_class(class_name: str, mnemonic: str):
     })
     cls.__qualname__ = class_name
     cls.__module__ = __name__
+    cls._stinky_mods = ("global_scope",)
     return cls
 
 
@@ -1320,8 +1385,7 @@ def _make_scalar_shift_class(class_name: str, mnemonic: str, inst_type: "InstTyp
         src1_reg = _to_stinky_register(self.srcs[1])  # shift amount
         factory = getattr(_st, class_name)
         inst = factory(dst_reg, src0_reg, src1_reg, comment=self.comment)
-        _apply_sdwa(inst, getattr(self, "sdwa", None))
-        return inst
+        return _apply_modifiers(self, inst)
 
     def __deepcopy__(self, memo):
         return CommonInstruction.__deepcopy__(self, memo)
@@ -1332,6 +1396,7 @@ def _make_scalar_shift_class(class_name: str, mnemonic: str, inst_type: "InstTyp
         "to_stinky_logical": to_stinky_logical,
         "__deepcopy__": __deepcopy__,
     })
+    cls._stinky_mods = ("sdwa",)
     return cls
 
 
@@ -1434,13 +1499,9 @@ def _make_ternary_class(class_name: str, mnemonic: str, inst_type: "InstType",
         src2_reg = _to_stinky_register(self.srcs[2])
         factory = getattr(_st, class_name)
         inst = factory(dst_reg, src0_reg, src1_reg, src2_reg, comment=self.comment)
-        # Propagate VOP3P packed modifiers (op_sel / op_sel_hi / byte_sel).
-        # e.g. GlobalWriteBatch emits ``v_fma_mix_f32 ... op_sel:[..] op_sel_hi:[0,1,0]``
-        # for the beta-scale mix-precision FMA; dropping op_sel_hi makes the
-        # kernel read the wrong fp16 half and produces incorrect results.
-        _apply_vop3(inst, getattr(self, "vop3", None))
-        _apply_sdwa(inst, getattr(self, "sdwa", None))
-        return inst
+        # VOP3P (op_sel / op_sel_hi / byte_sel) is required for packed and
+        # mix-precision ops such as v_fma_mix_f32.
+        return _apply_modifiers(self, inst)
 
     def __deepcopy__(self, memo):
         return CommonInstruction.__deepcopy__(self, memo)
@@ -1451,6 +1512,7 @@ def _make_ternary_class(class_name: str, mnemonic: str, inst_type: "InstType",
         "to_stinky_logical": to_stinky_logical,
         "__deepcopy__": __deepcopy__,
     })
+    cls._stinky_mods = ("vop3", "sdwa")
     return cls
 
 
@@ -1493,8 +1555,7 @@ def _make_vector_shift_class(class_name: str, mnemonic: str, inst_type: "InstTyp
         src1_reg = _to_stinky_register(self.srcs[1])
         factory = getattr(_st, class_name)
         inst = factory(dst_reg, src0_reg, src1_reg, comment=self.comment)
-        _apply_sdwa(inst, getattr(self, "sdwa", None))
-        return inst
+        return _apply_modifiers(self, inst)
 
     def __deepcopy__(self, memo):
         return CommonInstruction.__deepcopy__(self, memo)
@@ -1505,6 +1566,7 @@ def _make_vector_shift_class(class_name: str, mnemonic: str, inst_type: "InstTyp
         "to_stinky_logical": to_stinky_logical,
         "__deepcopy__": __deepcopy__,
     })
+    cls._stinky_mods = ("sdwa",)
     return cls
 
 
@@ -1588,6 +1650,8 @@ class VCndMaskB32(CommonInstruction):
         )
         self.setInst("v_cndmask_b32")
 
+    _stinky_mods = ("sdwa",)
+
     def to_stinky_logical(self) -> Any:
         import stinkytofu as _st  # noqa: WPS433
 
@@ -1600,8 +1664,7 @@ class VCndMaskB32(CommonInstruction):
         )
         inst = _st.VCndMaskB32(
             dst_reg, src0_reg, src1_reg, src2_reg, comment=self.comment)
-        _apply_sdwa(inst, getattr(self, "sdwa", None))
-        return inst
+        return _apply_modifiers(self, inst)
 
     def __deepcopy__(self, memo):
         return CommonInstruction.__deepcopy__(self, memo)
@@ -2233,8 +2296,7 @@ def _make_vcmp_class(class_name: str, mnemonic: str, inst_type: "InstType"):
         src1_reg = _to_stinky_register(self.srcs[1])
         factory = getattr(_st, class_name)
         inst = factory(dst_reg, src0_reg, src1_reg, comment=self.comment)
-        _apply_sdwa(inst, getattr(self, "sdwa", None))
-        return inst
+        return _apply_modifiers(self, inst)
 
     def __deepcopy__(self, memo):
         return CommonInstruction.__deepcopy__(self, memo)
@@ -2247,7 +2309,9 @@ def _make_vcmp_class(class_name: str, mnemonic: str, inst_type: "InstType"):
     }
     if "_cmpx_" in mnemonic:
         attrs["toString"] = _vcmpx_to_string
-    return type(class_name, (CommonInstruction,), attrs)
+    cls = type(class_name, (CommonInstruction,), attrs)
+    cls._stinky_mods = ("sdwa",)
+    return cls
 
 
 def _vcmpx_to_string(self) -> str:
@@ -3677,9 +3741,7 @@ def _make_cvt_scale_class(class_name: str, mnemonic: str, inst_type: "InstType")
         scale_reg = _to_stinky_register(self.srcs[1])
         factory = getattr(_st, class_name)
         inst = factory(dst_reg, src_reg, scale_reg, comment=self.comment)
-        _apply_vop3(inst, getattr(self, "vop3", None))
-        _apply_sdwa(inst, getattr(self, "sdwa", None))
-        return inst
+        return _apply_modifiers(self, inst)
 
     def __deepcopy__(self, memo):
         return CommonInstruction.__deepcopy__(self, memo)
@@ -3690,6 +3752,7 @@ def _make_cvt_scale_class(class_name: str, mnemonic: str, inst_type: "InstType")
         "__deepcopy__": __deepcopy__,
     })
     cls.__qualname__ = class_name
+    cls._stinky_mods = ("vop3", "sdwa")
     return cls
 
 
@@ -3779,6 +3842,8 @@ VCvtScaleSRPkF32toFP8 = _make_cvt_scale_sr_class("VCvtScaleSRPkF32toFP8", "v_cvt
 class FlatAtomicDecU32(CommonInstruction):
     """``flat_atomic_dec_u32 dst, addr, data`` -- flat atomic decrement."""
 
+    _stinky_mods = ("flat",)
+
     def __init__(self, dst: Any, addr: Any, data: Any,
                  modifier: Any = None, comment: str = ""):
         super().__init__(
@@ -3804,8 +3869,7 @@ class FlatAtomicDecU32(CommonInstruction):
         data_reg = _to_stinky_register(self.srcs[1])
         inst = _st.FlatAtomicDecU32(
             dst_reg, addr_reg, data_reg, comment=self.comment)
-        _apply_flat(inst, self.flat)
-        return inst
+        return _apply_modifiers(self, inst)
 
     def __deepcopy__(self, memo):
         clone = CommonInstruction.__deepcopy__(self, memo)
@@ -3817,6 +3881,8 @@ class FlatAtomicDecU32(CommonInstruction):
 # ==========================================================================
 class GlobalAtomicIncU32Saddr(CommonInstruction):
     """``global_atomic_inc_u32 dst, vaddr, data, saddr`` -- SADDR atomic inc."""
+
+    _stinky_mods = ("global_glob",)
 
     def __init__(self, dst: Any, vaddr: Any, data: Any, saddr: Any,
                  modifier: Any = None, comment: str = ""):
@@ -3844,8 +3910,7 @@ class GlobalAtomicIncU32Saddr(CommonInstruction):
         saddr_reg = _to_stinky_register(self.srcs[2])
         inst = _st.GlobalAtomicIncU32Saddr(
             dst_reg, vaddr_reg, data_reg, saddr_reg, comment=self.comment)
-        _apply_global(inst, self.glob)
-        return inst
+        return _apply_modifiers(self, inst)
 
     def __deepcopy__(self, memo):
         clone = CommonInstruction.__deepcopy__(self, memo)
@@ -3941,19 +4006,7 @@ def _make_buffer_load_class(class_name: str, mnemonic: str, latency: int = 1, ba
             inst.add_src(_to_stinky_register(_soffset))
         elif self.srcs[1] is not None:
             inst.add_src(_st.Register("null"))
-        if self.mubuf is not None:
-            inst.set_mubuf(
-                offen=getattr(self.mubuf, "offen", False),
-                offset=getattr(self.mubuf, "offset12", 0),
-                glc=getattr(self.mubuf, "glc", False),
-                slc=getattr(self.mubuf, "slc", False),
-                nt=getattr(self.mubuf, "nt", False),
-                scope=getattr(self.mubuf, "scope", 0) if isinstance(getattr(self.mubuf, "scope", 0), int) else getattr(self.mubuf, "scope", 0).value,
-                th=int(getattr(self.mubuf, "th", -1)),
-                is_store=getattr(self.mubuf, "isStore", False),
-                nv=_mubuf_enum_int(getattr(self.mubuf, "nv", 0)),
-            )
-        return inst
+        return _apply_modifiers(self, inst)
 
     def __deepcopy__(self, memo):
         return CommonInstruction.__deepcopy__(self, memo)
@@ -3965,6 +4018,7 @@ def _make_buffer_load_class(class_name: str, mnemonic: str, latency: int = 1, ba
         **_mem_issue_latency(latency),
     })
     cls.__qualname__ = class_name
+    cls._stinky_mods = ("mubuf",)
     return cls
 
 
@@ -4000,19 +4054,7 @@ def _make_buffer_store_class(class_name: str, mnemonic: str, latency: int = 1, b
             inst.add_src(_to_stinky_register(_soffset))
         elif self.srcs[1] is not None:
             inst.add_src(_st.Register("null"))
-        if self.mubuf is not None:
-            inst.set_mubuf(
-                offen=getattr(self.mubuf, "offen", False),
-                offset=getattr(self.mubuf, "offset12", 0),
-                glc=getattr(self.mubuf, "glc", False),
-                slc=getattr(self.mubuf, "slc", False),
-                nt=getattr(self.mubuf, "nt", False),
-                scope=getattr(self.mubuf, "scope", 0) if isinstance(getattr(self.mubuf, "scope", 0), int) else getattr(self.mubuf, "scope", 0).value,
-                th=int(getattr(self.mubuf, "th", -1)),
-                is_store=getattr(self.mubuf, "isStore", False),
-                nv=_mubuf_enum_int(getattr(self.mubuf, "nv", 0)),
-            )
-        return inst
+        return _apply_modifiers(self, inst)
 
     def __deepcopy__(self, memo):
         return CommonInstruction.__deepcopy__(self, memo)
@@ -4024,6 +4066,7 @@ def _make_buffer_store_class(class_name: str, mnemonic: str, latency: int = 1, b
         **_mem_issue_latency(latency),
     })
     cls.__qualname__ = class_name
+    cls._stinky_mods = ("mubuf",)
     return cls
 
 
@@ -4048,8 +4091,7 @@ def _make_flat_load_class(class_name: str, mnemonic: str, latency: int = 1, base
             _to_stinky_register(self.dst),
             _to_stinky_register(self.srcs[0]),
             comment=self.comment)
-        _apply_flat(inst, self.flat)
-        return inst
+        return _apply_modifiers(self, inst)
 
     def __deepcopy__(self, memo):
         return CommonInstruction.__deepcopy__(self, memo)
@@ -4061,6 +4103,7 @@ def _make_flat_load_class(class_name: str, mnemonic: str, latency: int = 1, base
         **_mem_issue_latency(latency),
     })
     cls.__qualname__ = class_name
+    cls._stinky_mods = ("flat",)
     return cls
 
 
@@ -4086,8 +4129,7 @@ def _make_flat_store_class(class_name: str, mnemonic: str, latency: int = 1, bas
             _to_stinky_register(self.srcs[0]),
             _to_stinky_register(self.dst),
             comment=self.comment)
-        _apply_flat(inst, self.flat)
-        return inst
+        return _apply_modifiers(self, inst)
 
     def __deepcopy__(self, memo):
         return CommonInstruction.__deepcopy__(self, memo)
@@ -4099,6 +4141,7 @@ def _make_flat_store_class(class_name: str, mnemonic: str, latency: int = 1, bas
         **_mem_issue_latency(latency),
     })
     cls.__qualname__ = class_name
+    cls._stinky_mods = ("flat",)
     return cls
 
 
@@ -4124,8 +4167,7 @@ def _make_flat_atomic_class(class_name: str, mnemonic: str, latency: int = 1, ba
             _to_stinky_register(self.srcs[0]),
             _to_stinky_register(self.srcs[1]),
             comment=self.comment)
-        _apply_flat(inst, self.flat)
-        return inst
+        return _apply_modifiers(self, inst)
 
     def __deepcopy__(self, memo):
         return CommonInstruction.__deepcopy__(self, memo)
@@ -4137,6 +4179,7 @@ def _make_flat_atomic_class(class_name: str, mnemonic: str, latency: int = 1, ba
         **_mem_issue_latency(latency),
     })
     cls.__qualname__ = class_name
+    cls._stinky_mods = ("flat",)
     return cls
 
 
@@ -4161,9 +4204,7 @@ def _make_ds_load_class(class_name: str, mnemonic: str, latency: int = 1, base: 
             _to_stinky_register(self.dst),
             _to_stinky_register(self.srcs[0]),
             comment=self.comment)
-        if self.ds is not None:
-            inst.set_ds(offset=getattr(self.ds, "offset", 0))
-        return inst
+        return _apply_modifiers(self, inst)
 
     def __deepcopy__(self, memo):
         return CommonInstruction.__deepcopy__(self, memo)
@@ -4175,6 +4216,7 @@ def _make_ds_load_class(class_name: str, mnemonic: str, latency: int = 1, base: 
         **_mem_issue_latency(latency),
     })
     cls.__qualname__ = class_name
+    cls._stinky_mods = ("ds",)
     return cls
 
 
@@ -4199,9 +4241,7 @@ def _make_ds_store_class(class_name: str, mnemonic: str, latency: int = 1, base:
             _to_stinky_register(self.dst),
             _to_stinky_register(self.srcs[0]),
             comment=self.comment)
-        if self.ds is not None:
-            inst.set_ds(offset=getattr(self.ds, "offset", 0))
-        return inst
+        return _apply_modifiers(self, inst)
 
     def __deepcopy__(self, memo):
         return CommonInstruction.__deepcopy__(self, memo)
@@ -4213,6 +4253,7 @@ def _make_ds_store_class(class_name: str, mnemonic: str, latency: int = 1, base:
         **_mem_issue_latency(latency),
     })
     cls.__qualname__ = class_name
+    cls._stinky_mods = ("ds",)
     return cls
 
 
@@ -4238,9 +4279,7 @@ def _make_ds_store2_class(class_name: str, mnemonic: str, latency: int = 1, base
             _to_stinky_register(self.srcs[0]),
             _to_stinky_register(self.srcs[1]),
             comment=self.comment)
-        if self.ds is not None:
-            inst.set_ds(offset=getattr(self.ds, "offset", 0))
-        return inst
+        return _apply_modifiers(self, inst)
 
     def __deepcopy__(self, memo):
         return CommonInstruction.__deepcopy__(self, memo)
@@ -4252,6 +4291,7 @@ def _make_ds_store2_class(class_name: str, mnemonic: str, latency: int = 1, base
         **_mem_issue_latency(latency),
     })
     cls.__qualname__ = class_name
+    cls._stinky_mods = ("ds",)
     return cls
 
 
@@ -4402,8 +4442,7 @@ def _make_global_load_class(class_name: str, mnemonic: str, latency: int = 1, ba
             _to_stinky_register(self.srcs[0]),
             _to_stinky_register(self.srcs[1]),
             comment=self.comment)
-        _apply_global(inst, self._modifier)
-        return inst
+        return _apply_modifiers(self, inst)
 
     def __deepcopy__(self, memo):
         return CommonInstruction.__deepcopy__(self, memo)
@@ -4415,6 +4454,7 @@ def _make_global_load_class(class_name: str, mnemonic: str, latency: int = 1, ba
         **_mem_issue_latency(latency),
     })
     cls.__qualname__ = class_name
+    cls._stinky_mods = ("global_modifier",)
     return cls
 
 
@@ -4596,15 +4636,7 @@ def _make_ds_load2_class(class_name: str, mnemonic: str, latency: int = 1, base:
             src_reg,
             src_reg,
             comment=self.comment)
-        if self.ds is not None:
-            inst.set_ds(
-                na=getattr(self.ds, "na", 2),
-                offset=getattr(self.ds, "offset", 0),
-                offset0=getattr(self.ds, "offset0", 0),
-                offset1=getattr(self.ds, "offset1", 0),
-                gds=getattr(self.ds, "gds", False),
-            )
-        return inst
+        return _apply_modifiers(self, inst)
 
     def __deepcopy__(self, memo):
         return CommonInstruction.__deepcopy__(self, memo)
@@ -4616,6 +4648,7 @@ def _make_ds_load2_class(class_name: str, mnemonic: str, latency: int = 1, base:
         **_mem_issue_latency(latency),
     })
     cls.__qualname__ = class_name
+    cls._stinky_mods = ("ds_full",)
     return cls
 
 
@@ -4671,9 +4704,7 @@ def _make_ds_permute_class(class_name: str, mnemonic: str, latency: int = 1, bas
             _to_stinky_register(self.srcs[0]),
             _to_stinky_register(data0),
             comment=self.comment)
-        if self.ds is not None:
-            inst.set_ds(offset=getattr(self.ds, "offset", 0))
-        return inst
+        return _apply_modifiers(self, inst)
 
     def __deepcopy__(self, memo):
         return CommonInstruction.__deepcopy__(self, memo)
@@ -4685,6 +4716,7 @@ def _make_ds_permute_class(class_name: str, mnemonic: str, latency: int = 1, bas
         **_mem_issue_latency(latency),
     })
     cls.__qualname__ = class_name
+    cls._stinky_mods = ("ds",)
     return cls
 
 
@@ -4968,6 +5000,7 @@ def _make_global_prefetch_class():
 
     class GlobalPrefetchB8(CommonInstruction):
         __slots__ = ("_modifiers",)
+        _stinky_mods = ("global_modifiers",)
 
         def __init__(self, vaddr: Any = None, saddr: Any = None,
                      modifiers: Any = None, comment: str = "", **kw):
@@ -4989,8 +5022,7 @@ def _make_global_prefetch_class():
                 _to_stinky_register(self.srcs[0]),
                 _to_stinky_register(self.srcs[1]),
                 self.comment)
-            _apply_global(inst, self._modifiers)
-            return inst
+            return _apply_modifiers(self, inst)
 
         def __deepcopy__(self, memo):
             clone = CommonInstruction.__deepcopy__(self, memo)
@@ -5421,6 +5453,7 @@ class MFMAInstruction(Instruction):
 class MXMFMAInstruction(Instruction):
     """``v_wmma_scale_*`` / ``v_mfma_scale_*`` shim (rocisa ``MXMFMAInstruction``)."""
 
+    _stinky_mods = ("vop3",)
     __slots__ = ("accType", "mxScaleAType", "mxScaleBType", "variant",
                  "acc", "a", "b", "acc2", "mxsa", "mxsb", "vop3", "mxCBSZ",
                  "block", "reuseA", "reuseB", "mxScaleASel", "mxScaleBSel")
@@ -5548,8 +5581,7 @@ class MXMFMAInstruction(Instruction):
             mxScaleASel=self.mxScaleASel,
             mxScaleBSel=self.mxScaleBSel,
             comment=self.comment)
-        _apply_vop3(inst, self.vop3)
-        return inst
+        return _apply_modifiers(self, inst)
 
     def getParams(self):
         return [self.acc, self.a, self.b]
