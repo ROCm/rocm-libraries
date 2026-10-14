@@ -6,7 +6,7 @@
 #   path:     kernels/attention/flash_attn_generic.py
 #   compiler: flydsl 0.3.4 (pip wheel)
 #
-# CDNA (gfx942, gfx950) attention for the hipkernel:flydsl_sdpa_cdna engine.
+# CDNA (gfx90a, gfx942, gfx950) attention for the hipkernel:flydsl_sdpa_cdna engine.
 # Modifications are listed in README.md beside this file.
 
 """Generic f16/bf16 flash-attention kernel builder for FlyDSL.
@@ -41,6 +41,7 @@ from kernels.attention_cdna.flash_attn_utils import (
     GenericQLoader,
     GenericSoftmaxHelper,
     GenericStoreHelper,
+    _is_gfx942_class,
     _make_flash_attn_generic_traits,
     _waitcnt_vm_n,
     daz_denormal_attr,
@@ -180,7 +181,7 @@ def build_flash_attn_func_module_primary(
             has_sink=has_sink,
         )
         _bs_threshold = (
-            2048 * num_heads if gpu_arch.startswith("gfx942") else 4096 * num_heads
+            2048 * num_heads if _is_gfx942_class(gpu_arch) else 4096 * num_heads
         )
 
         def _extract_batch(args, kwargs):
@@ -220,8 +221,8 @@ def build_flash_attn_func_module_primary(
     else:
         _validate_path = "N32"
     _validate_block_n_out = 128 if _validate_path == "N128" else 64
-    _validate_has_lds_load_b128 = not gpu_arch.startswith("gfx942")
-    _validate_enable_gfx942_dma = gpu_arch.startswith("gfx942") and (
+    _validate_has_lds_load_b128 = not _is_gfx942_class(gpu_arch)
+    _validate_enable_gfx942_dma = _is_gfx942_class(gpu_arch) and (
         os.getenv("FLYDSL_FLASH_ATTN_FUNC_ENABLE_GFX942_DMA", "0") == "1"
     )
     _validate_enable_dma = _validate_enable_gfx942_dma or (

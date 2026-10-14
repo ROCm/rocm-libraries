@@ -3,7 +3,7 @@ Copyright © Advanced Micro Devices, Inc., or its affiliates.
 SPDX-License-Identifier:  MIT
 -->
 
-# FlyDSL attention for CDNA (gfx942, gfx950)
+# FlyDSL attention for CDNA (gfx90a, gfx942, gfx950)
 
 Vendored kernel sources for the `hipkernel:flydsl_sdpa_cdna` engine. The RDNA
 attention kernels are separate, under `../attention_rdna/`, and share nothing
@@ -12,7 +12,7 @@ with these but the `kernels/common` helpers.
 | File | Upstream | Serves |
 |---|---|---|
 | `flash_attn_gfx950.py` | FlyDSL `kernels/attention/flash_attn_gfx950.py` | gfx950: dual-wave, software-pipelined MFMA forward, head_dim 64 and 128 |
-| `flash_attn_generic.py` | FlyDSL `kernels/attention/flash_attn_generic.py` | gfx942 (and gfx950 off the dual-wave path): generic MFMA forward |
+| `flash_attn_generic.py` | FlyDSL `kernels/attention/flash_attn_generic.py` | gfx90a and gfx942 (and gfx950 off the dual-wave path): generic MFMA forward |
 | `flash_attn_utils.py` | FlyDSL `kernels/attention/flash_attn_utils.py` | helpers shared by both |
 
 Upstream: https://github.com/ROCm/FlyDSL at
@@ -257,6 +257,19 @@ diff against upstream plus the modifications below.
     alone). The LSE is now `l > 0 ? m * scale + log(l) : -inf`, its log without the
     fast flags, in the generic kernel's store, the dual-wave kernel's and the dual-wave
     split-K combine's (not built here). Timing is unchanged. Not yet upstream.
+24. **gfx90a (CDNA2)** (`flash_attn_utils.py`, `flash_attn_generic.py`). Upstream knew
+    two CDNA targets: its gfx942 branches tested `startswith("gfx942")`, and everything
+    else took gfx950's. On gfx90a that meant the 16-byte global-to-LDS DMA (gfx950 only)
+    for causal head_dim 128, and FlyDSL's arch-dispatched `s_waitcnt` raised outright.
+    - **Branches:** `_is_gfx942_class()` puts gfx90a with gfx942 -- the four-byte DMA,
+      the register-staged K/V prefetch, the K row padding, the launcher's 256-row
+      threshold -- since both have 64 KiB of LDS, DMA of at most four bytes and the
+      32x32x8 MFMA (bf16 `_1k` included). The gfx950-only paths (transpose read, 32x32x16
+      MFMA, permlane O store) were already gated on gfx950.
+    - **`s_waitcnt vmcnt`:** emitted through `cdna3.s_waitcnt`, the GFX9 encoding all
+      three targets share, instead of the dispatch that knows only gfx942 and gfx950.
+    - **Unchanged:** gfx942 and gfx950 take every branch they took before and build the
+      same code objects. Not yet upstream.
 
 The repository's `black` hook reformats these files on commit; that changes
 formatting only (the syntax trees are unchanged).

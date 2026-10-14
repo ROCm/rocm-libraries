@@ -6,7 +6,7 @@
 #   path:     kernels/attention/flash_attn_utils.py
 #   compiler: flydsl 0.3.4 (pip wheel)
 #
-# CDNA (gfx942, gfx950) attention for the hipkernel:flydsl_sdpa_cdna engine.
+# CDNA (gfx90a, gfx942, gfx950) attention for the hipkernel:flydsl_sdpa_cdna engine.
 # Modifications are listed in README.md beside this file.
 
 """Shared helpers for the gfx950 dual-wave, software-pipelined flash-attention kernels."""
@@ -20,6 +20,7 @@ from flydsl._mlir import ir
 from flydsl.compiler.ast_rewriter import ReplaceIfWithDispatch
 from flydsl._mlir.dialects import fly, llvm
 from flydsl.expr import arith, const_expr, gpu, range_constexpr, rocdl
+from flydsl.expr.rocdl import cdna3
 from flydsl.expr.typing import T
 from flydsl.expr.typing import Vector as Vec
 from flydsl.expr.utils.arith import _to_raw as as_mlir_value
@@ -56,8 +57,22 @@ def _if_then(cond, then_fn):
 
 
 def _waitcnt_vm_n(n):
-    """Emit s_waitcnt vmcnt(n) only."""
-    rocdl.s_waitcnt(vmcnt=n)
+    """Emit s_waitcnt vmcnt(n) only.
+
+    In the GFX9 encoding every CDNA target shares, emitted directly: FlyDSL's
+    arch-dispatched form knows only gfx942 and gfx950 (modification 24).
+    """
+    cdna3.s_waitcnt(vmcnt=n)
+
+
+def _is_gfx942_class(gpu_arch):
+    """gfx942 or gfx90a: the generic kernel's 64 KiB-LDS path (modification 24).
+
+    The two share what that path uses -- 64 KiB of LDS, global-to-LDS DMA of at most
+    four bytes, the 32x32x8 MFMA -- so gfx90a takes every gfx942 branch; gfx950 adds
+    the 16-byte DMA, the LDS transpose read and the 32x32x16 MFMA.
+    """
+    return gpu_arch.startswith(("gfx942", "gfx90a"))
 
 
 def _s_waitcnt(val):
@@ -1572,8 +1587,8 @@ def _make_flash_attn_generic_traits(
     enable_prefetch_3buf = (
         os.getenv("FLYDSL_FLASH_ATTN_FUNC_ENABLE_PREFETCH3", "0") == "1"
     )
-    has_lds_load_b128 = not gpu_arch.startswith("gfx942")
-    enable_gfx942_dma = gpu_arch.startswith("gfx942") and (
+    has_lds_load_b128 = not _is_gfx942_class(gpu_arch)
+    enable_gfx942_dma = _is_gfx942_class(gpu_arch) and (
         os.getenv("FLYDSL_FLASH_ATTN_FUNC_ENABLE_GFX942_DMA", "0") == "1"
     )
     enable_dma = enable_gfx942_dma or (
@@ -1584,13 +1599,13 @@ def _make_flash_attn_generic_traits(
         )
     )
     enable_gfx942_kv_gpfetch = (
-        gpu_arch.startswith("gfx942")
+        _is_gfx942_class(gpu_arch)
         and not enable_prefetch_3buf
         and (not enable_dma or enable_gfx942_dma)
         and os.getenv("FLYDSL_FLASH_ATTN_FUNC_ENABLE_KV_GPFETCH", "1") == "1"
     )
     enable_gfx942_vec_k = (
-        gpu_arch.startswith("gfx942")
+        _is_gfx942_class(gpu_arch)
         and enable_dma
         and os.getenv("FLYDSL_FLASH_ATTN_FUNC_ENABLE_GFX942_VEC_K", "1") == "1"
     )
@@ -1656,7 +1671,7 @@ def _make_flash_attn_generic_traits(
     stride_token_q = num_heads * head_dim
     stride_token_kv = num_kv_heads * head_dim
     stride_token_v = num_kv_heads * head_dim_v
-    _k_pad_default = 4 if (gpu_arch.startswith("gfx942") and not enable_dma) else 0
+    _k_pad_default = 4 if (_is_gfx942_class(gpu_arch) and not enable_dma) else 0
     _k_pad = int(os.getenv("FLYDSL_FLASH_ATTN_FUNC_K_PAD", str(_k_pad_default)))
     if k_pad is not None:
         _k_pad = int(k_pad)
