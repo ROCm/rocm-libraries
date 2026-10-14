@@ -27,7 +27,10 @@
 #include <hip/hip_ext.h>
 #include <hip/hip_runtime.h>
 
+#include <algorithm>
 #include <cstddef>
+#include <filesystem>
+#include <fstream>
 #include <limits>
 
 #include <Tensile/Debug.hpp>
@@ -83,6 +86,13 @@ namespace TensileLite
                         std::cerr << "hipModuleUnload failed: " << std::endl
                                   << " error: " << hipGetErrorString(error) << std::endl;
                     });
+#ifdef TENSILELITE_ENABLE_LOCAL_KERNELS
+            for(auto const& entry : m_localModules)
+                HIP_CHECK_PRINT(m_moduleApi.unload(entry.second), [&](hipError_t error) {
+                    std::cerr << "hipModuleUnload failed: " << entry.first << std::endl
+                              << " error: " << hipGetErrorString(error) << std::endl;
+                });
+#endif
             Debug::Instance().markerStop();
         }
 
@@ -210,11 +220,6 @@ namespace TensileLite
                 size_t start = path.rfind('/');
                 start        = (start == std::string::npos) ? 0 : start + 1;
                 m_loadedCOFiles.insert(removeXnack(std::string(path.begin() + start, path.end())));
-#ifdef TENSILELITE_ENABLE_LOCAL_KERNELS
-                // FindCodeObject looks absolute names up whole.
-                if(!path.empty() && path.front() == '/')
-                    m_loadedCOFiles.insert(path);
-#endif
             }
             Debug::Instance().markerStop();
             return hipSuccess;
@@ -301,20 +306,216 @@ namespace TensileLite
             }
         }
 
+#ifdef TENSILELITE_ENABLE_LOCAL_KERNELS
+        namespace
+        {
+            uint64_t readLE(unsigned char const* p, int bytes)
+            {
+                uint64_t v = 0;
+                for(int i = bytes - 1; i >= 0; --i)
+                    v = (v << 8) | p[i];
+                return v;
+            }
+
+            // hipModuleLoad can crash inside the runtime on a code object
+            // whose contents run past the end of the file (a truncated copy),
+            // so those are rejected before it sees them. The ELF, offload
+            // bundle and compressed offload bundle layouts are checked; any
+            // other file is left for hipModuleLoad to judge.
+            bool codeObjectFitsInFile(std::string const& path)
+            {
+                std::ifstream file(path, std::ios::binary);
+                if(!file)
+                    return true;
+                file.seekg(0, std::ios::end);
+                uint64_t const size = static_cast<uint64_t>(file.tellg());
+                file.seekg(0);
+
+                auto read = [&](uint64_t offset, uint64_t length) {
+                    std::vector<unsigned char> bytes(length);
+                    file.seekg(static_cast<std::streamoff>(offset));
+                    file.read(reinterpret_cast<char*>(bytes.data()),
+                              static_cast<std::streamsize>(length));
+                    return bytes;
+                };
+                auto fits = [size](uint64_t offset, uint64_t count, uint64_t entrySize) {
+                    return offset <= size
+                           && (entrySize == 0 || count <= (size - offset) / entrySize);
+                };
+                auto startsWith
+                    = [](std::vector<unsigned char> const& bytes, std::string const& magic) {
+                          return bytes.size() >= magic.size()
+                                 && std::equal(magic.begin(), magic.end(), bytes.begin());
+                      };
+
+                constexpr uint64_t headerSize = 64;
+                if(size < 4)
+                    return true;
+                auto header = read(0, std::min(size, headerSize));
+
+                // Compressed offload bundle: the header records the bundle's
+                // size from version 2 on.
+                if(startsWith(header, "CCOB"))
+                {
+                    if(size < 8)
+                        return false;
+                    uint64_t const version = readLE(&header[4], 2);
+                    if(version == 2)
+                        return size >= 12 && readLE(&header[8], 4) <= size;
+                    if(version >= 3)
+                        return size >= 16 && readLE(&header[8], 8) <= size;
+                    return true;
+                }
+
+                if(startsWith(header, "__CLANG_OFFLOAD_BUNDLE__"))
+                {
+                    if(size < 32)
+                        return false;
+                    uint64_t const entries = readLE(&header[24], 8);
+                    uint64_t       offset  = 32;
+                    for(uint64_t i = 0; i < entries; ++i)
+                    {
+                        if(!fits(offset, 3, 8))
+                            return false;
+                        auto     entry   = read(offset, 24);
+                        uint64_t idBytes = readLE(&entry[16], 8);
+                        if(!fits(readLE(&entry[0], 8), readLE(&entry[8], 8), 1)
+                           || !fits(offset + 24, idBytes, 1))
+                            return false;
+                        offset += 24 + idBytes;
+                    }
+                    return static_cast<bool>(file);
+                }
+
+                if(header[0] != 0x7f || header[1] != 'E' || header[2] != 'L' || header[3] != 'F')
+                    return true;
+                // ELFCLASS64, little-endian: what every AMDGPU code object is.
+                if(size < headerSize || header[4] != 2 || header[5] != 1)
+                    return false;
+
+                uint64_t const phoff     = readLE(&header[0x20], 8);
+                uint64_t const shoff     = readLE(&header[0x28], 8);
+                uint64_t const phentsize = readLE(&header[0x36], 2);
+                uint64_t const phnum     = readLE(&header[0x38], 2);
+                uint64_t const shentsize = readLE(&header[0x3A], 2);
+                uint64_t const shnum     = readLE(&header[0x3C], 2);
+                if((phnum && phentsize < 56) || (shnum && shentsize < 64)
+                   || !fits(phoff, phnum, phentsize) || !fits(shoff, shnum, shentsize))
+                    return false;
+
+                for(uint64_t i = 0; i < phnum; ++i)
+                {
+                    auto ph = read(phoff + i * phentsize, 56);
+                    if(!fits(readLE(&ph[8], 8), readLE(&ph[32], 8), 1))
+                        return false;
+                }
+                constexpr uint64_t SHT_NOBITS = 8;
+                for(uint64_t i = 0; i < shnum; ++i)
+                {
+                    auto sh = read(shoff + i * shentsize, 64);
+                    if(readLE(&sh[4], 4) != SHT_NOBITS
+                       && !fits(readLE(&sh[24], 8), readLE(&sh[32], 8), 1))
+                        return false;
+                }
+                return static_cast<bool>(file);
+            }
+        } // namespace
+
+        bool SolutionAdapter::isLocalCodeObject(std::string const& codeObjectFile)
+        {
+            return !codeObjectFile.empty() && std::filesystem::path(codeObjectFile).is_absolute();
+        }
+
+        hipError_t SolutionAdapter::loadLocalCodeObject(std::string const& path)
+        {
+            std::lock_guard<std::mutex> loadGuard(m_localLoadMutex);
+            {
+                std::lock_guard<std::mutex> guard(m_access);
+                if(m_localModules.count(path) != 0)
+                    return hipSuccess;
+            }
+
+            if(!codeObjectFitsInFile(path))
+            {
+                std::cerr << "hipModuleLoad skipped: " << path << std::endl
+                          << " error: code object is truncated or malformed" << std::endl;
+                return hipErrorInvalidImage;
+            }
+
+            hipModule_t module;
+            hipError_t  error;
+            try
+            {
+                error = m_moduleApi.load(&module, path.c_str());
+            }
+            catch(std::exception const& e)
+            {
+                std::cerr << "hipModuleLoad threw: " << e.what() << std::endl;
+                error = hipErrorInvalidImage;
+            }
+            if(error != hipSuccess)
+            {
+                (void)m_moduleApi.getLastError();
+                logCodeObjectLoadError(path, error);
+                return error;
+            }
+
+            if(m_debug)
+                std::cout << "loaded local code object " << path << std::endl;
+
+            std::lock_guard<std::mutex> guard(m_access);
+            m_localModules.emplace(path, module);
+            m_loadedModuleNames.push_back(concatenate("Local file ", path));
+            return hipSuccess;
+        }
+
+        hipError_t SolutionAdapter::getLocalKernel(hipFunction_t&     rv,
+                                                   std::string const& path,
+                                                   std::string const& name)
+        {
+            auto key = std::make_pair(path, name);
+            {
+                std::lock_guard<std::mutex> guard(m_access);
+                auto                        it = m_localKernels.find(key);
+                if(it != m_localKernels.end())
+                {
+                    rv = it->second;
+                    return hipSuccess;
+                }
+            }
+
+            hipError_t err = loadLocalCodeObject(path);
+            if(err != hipSuccess)
+                return err == hipErrorNotFound ? hipErrorFileNotFound : err;
+
+            std::lock_guard<std::mutex> guard(m_access);
+            err = hipModuleGetFunction(&rv, m_localModules.at(path), name.c_str());
+            if(err == hipSuccess)
+                m_localKernels.emplace(std::move(key), rv);
+            else
+                (void)m_moduleApi.getLastError();
+            return err;
+        }
+
+        size_t SolutionAdapter::localCodeObjectCount()
+        {
+            std::lock_guard<std::mutex> guard(m_access);
+            return m_localModules.size();
+        }
+#endif
+
         bool SolutionAdapter::FindCodeObject(std::string const& codeObjectFile)
         {
 #ifdef TENSILELITE_ENABLE_LOCAL_KERNELS
-            // A runtime-registered kernel names its code object by absolute
-            // path, which may be outside the library directory and may share a
-            // basename with a shipped one.
-            if(!codeObjectFile.empty() && codeObjectFile.front() == '/')
+            if(isLocalCodeObject(codeObjectFile))
             {
-                m_access.lock();
-                bool loaded = m_loadedCOFiles.count(codeObjectFile) != 0;
-                m_access.unlock();
-                if(!loaded)
-                    static_cast<void>(loadCodeObjectFile(codeObjectFile));
-                return loaded;
+                {
+                    std::lock_guard<std::mutex> guard(m_access);
+                    if(m_localModules.count(codeObjectFile) != 0)
+                        return true;
+                }
+                static_cast<void>(loadLocalCodeObject(codeObjectFile));
+                return false;
             }
 #endif
             //If required code object file hasn't yet been loaded, load it now
@@ -655,15 +856,28 @@ namespace TensileLite
             }
 
             hipFunction_t function;
-            HIP_CHECK_RETURN_WITH_LOG(getKernel(function, kernel.kernelName),
-                [&](hipError_t error) {
+            auto          findKernel = [&]() {
+#ifdef TENSILELITE_ENABLE_LOCAL_KERNELS
+                // Helper kernels (beta-only, output conversion) carry their
+                // solution's code object name but live in the shipped helpers.
+                if(isLocalCodeObject(kernel.codeObjectFile))
+                {
+                    hipError_t err
+                        = getLocalKernel(function, kernel.codeObjectFile, kernel.kernelName);
+                    if(err != hipErrorNotFound)
+                        return err;
+                }
+#endif
+                return getKernel(function, kernel.kernelName);
+            };
+            HIP_CHECK_RETURN_WITH_LOG(
+                findKernel(), [&](hipError_t error) {
                     std::cerr << "getKernel failed: " << kernel.kernelName << std::endl
                             << " with workgroup size: " << kernel.workGroupSize << std::endl
                             << " with numWorkGroups : " << kernel.numWorkGroups << std::endl
                             << " with numWorkItems : " << kernel.numWorkItems << std::endl
                             << " error: " << hipGetErrorString(error) << std::endl;
-                }
-            );
+                });
 
             void*  kernelArgs = const_cast<void*>(kernel.args.data());
             size_t argsSize   = kernel.args.size();

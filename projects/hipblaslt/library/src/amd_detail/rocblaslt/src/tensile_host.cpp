@@ -6073,6 +6073,10 @@ try
     if(auto st = getLocalKernelLibrary(handle, &localLibrary, &adapter);
        st != rocblaslt_status_success)
         return st;
+    auto gpu = std::dynamic_pointer_cast<TensileLite::AMDGPU>(
+        TensileLite::hip::GetDevice(handle->device));
+    if(!gpu)
+        return rocblaslt_status_internal_error;
 
     // Every device loads the code object by this name the first time it runs
     // one of the kernels, so it must not depend on the working directory.
@@ -6102,19 +6106,41 @@ try
         return rocblaslt_status_invalid_value;
     }
 
-    // Fails here, before anything is registered, if the code object does not
-    // load on this device.
-    if(adapter->loadCodeObjectFile(coPath) != hipSuccess)
-        return rocblaslt_status_invalid_value;
-
     std::vector<std::shared_ptr<TensileLite::ContractionSolution>> solutions;
     solutions.reserve(shard->solutions.size());
     for(auto const& entry : shard->solutions)
     {
         if(!entry.second)
             continue;
-        entry.second->codeObjectFilename = coPath;
+        if(!(*entry.second->hardwarePredicate)(*gpu))
+        {
+            log_error(__func__, "library was not built for this device", libraryPath);
+            return rocblaslt_status_invalid_value;
+        }
+        if(!TensileLite::pinToProcessor(*entry.second, gpu->processor))
+        {
+            log_error(__func__, "library has an unrecognized hardware predicate", libraryPath);
+            return rocblaslt_status_invalid_value;
+        }
         solutions.push_back(entry.second);
+    }
+
+    // Loaded at most once per path and without the shipped modules'
+    // out-of-memory recovery, so a bad file cannot unload shipped kernels.
+    if(adapter->loadLocalCodeObject(coPath) != hipSuccess)
+        return rocblaslt_status_invalid_value;
+
+    // Kernels resolve only within their own code object, so every one must be
+    // there; otherwise a launch would fail after selection had returned it.
+    for(auto const& solution : solutions)
+    {
+        hipFunction_t function;
+        if(adapter->getLocalKernel(function, coPath, solution->KernelName()) != hipSuccess)
+        {
+            log_error(__func__, "code object does not define kernel", solution->KernelName());
+            return rocblaslt_status_invalid_value;
+        }
+        solution->codeObjectFilename = coPath;
     }
 
     kernelIndices = localLibrary->addSolutions(solutions);
