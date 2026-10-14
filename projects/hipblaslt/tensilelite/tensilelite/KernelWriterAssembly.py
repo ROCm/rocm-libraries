@@ -3166,7 +3166,7 @@ class KernelWriterAssembly(KernelWriter):
       def calculateWG():
         #### calculate numWorkGroup ####
         rReg = self.sgprPool.checkOut(1, tag="calculateWG_rReg")
-        tmpSgpr = self.sgprPool.checkOut(2, tag="calculateWG_tmpSgpr")
+        tmpSgpr = self.sgprPool.checkOut(2, align=2, tag="calculateWG_tmpSgpr")
         tmpSgprRes = ContinuousRegister(idx=tmpSgpr, size=2)
         moduleWg.add(scalarStaticDivideAndRemainder(qReg="NumWorkGroups0", rReg=rReg, dReg="SizesFree+0",
                                                      divisor=kernel["MacroTile0"], tmpSgprRes=tmpSgprRes, doRemainder=1))
