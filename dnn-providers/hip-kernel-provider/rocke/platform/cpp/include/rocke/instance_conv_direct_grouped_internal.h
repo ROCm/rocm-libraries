@@ -291,6 +291,8 @@ typedef struct rocke_dconv_4c_ctx
 
     int q_tiles_per_wave; /* block_q // 4                              */
     int n_iters; /* H + KH - 1                                */
+    const rocke_type_t* io_type; /* _io_type(p.dtype): f16 or bf16       */
+    int is_bf16; /* p.dtype == "bf16"                         */
 
     /* ---- kernel params (Values) -- */
     rocke_dconv_params_t params; /* the AOT kernarg block (ABI order)    */
@@ -308,7 +310,7 @@ typedef struct rocke_dconv_4c_ctx
     rocke_value_t* c_kpg; /* const_i32(kpg)                        */
     rocke_value_t* c_half_bytes; /* const_i32(2)                          */
     rocke_value_t* oob_sentinel; /* const_i32((1<<31)-1)                  */
-    rocke_value_t* io_vec4_zero; /* zero_vec_f16(4)                       */
+    rocke_value_t* io_vec4_zero; /* zero_vec(io_type, 4)                  */
     rocke_value_t* zero_acc; /* zero_vec_f32(4)                       */
 
     /* ---- thread / wave / lane decode (SSA) -- */

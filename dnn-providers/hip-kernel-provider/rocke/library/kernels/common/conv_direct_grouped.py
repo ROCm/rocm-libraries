@@ -1120,9 +1120,10 @@ def build_direct_conv_16c(
 class DirectConv4cSpec:
     """Direct grouped convolution kernel for `cpg = kpg = 4`.
 
-    Uses `mfma_f32_4x4x4_f16`, whose wave64 form computes 16 independent
-    4x4x4 matmuls per wave. We map those 16 independent batches to 16
-    convolution groups, so a single wave processes 16 groups at once.
+    Uses `mfma_f32_4x4x4_f16` (fp16) or `mfma_f32_4x4x4_bf16` (bf16),
+    whose wave64 form computes 16 independent 4x4x4 matmuls per wave. We
+    map those 16 independent batches to 16 convolution groups, so a single
+    wave processes 16 groups at once.
     """
 
     problem: DirectConvProblem
@@ -1140,16 +1141,17 @@ class DirectConv4cSpec:
 
         p = self.problem
         return kernel_name_join(
-            self.name, p.short(), f"bq{self.block_q}", f"bg{self.block_groups}"
+            self.name,
+            p.short(),
+            f"bq{self.block_q}",
+            f"bg{self.block_groups}",
+            flags={"bf16": p.dtype == "bf16"},
         )
 
     def validate(self) -> None:
         p = self.problem
-        if p.dtype != "fp16":
-            raise ValueError(
-                f"DirectConv4cSpec: bf16 is not supported - the mfma_f32_4x4x4 atom "
-                f"is fp16-only on CDNA; use fp16 dtype or a different cpg variant"
-            )
+        if p.dtype not in ("fp16", "bf16"):
+            raise ValueError(f"DirectConv4cSpec: unsupported dtype {p.dtype!r}")
         if p.cpg != 4 or p.kpg != 4:
             raise ValueError(
                 f"DirectConv4cSpec expects cpg=kpg=4 (got {p.cpg}, {p.kpg})"
@@ -1167,15 +1169,15 @@ class DirectConv4cSpec:
 def is_valid_spec_4c(spec: DirectConv4cSpec, arch: str = "gfx950") -> Tuple[bool, str]:
     """Return ``(ok, reason)`` for a 4c spec on ``arch``.
 
-    The 4c kernel uses the tiny ``mfma_f32_4x4x4_f16`` atom (16
-    independent 4x4x4 matmuls per wave). That intrinsic is selectable on
-    both gfx942 and gfx950, so the kernel is arch-neutral: ``arch`` is
+    The 4c kernel uses the tiny ``mfma_f32_4x4x4_f16`` atom, or
+    ``mfma_f32_4x4x4_bf16`` (the ``_1k`` intrinsic) for bf16 I/O (16
+    independent 4x4x4 matmuls per wave). Both intrinsics are selectable on
+    gfx942 and gfx950, so the kernel is arch-neutral: ``arch`` is
     validated against :class:`rocke.core.arch.ArchTarget` (unknown gfx
     names rejected) but does not change the emitted MFMA. The 4x4x4 atom
     is deliberately not gated through the MMA catalog ``has_shape`` check
     because the catalog lists only the warp-tile (16x16 / 32x32) shapes,
     while comgr selects the 4x4x4 intrinsic directly on both targets.
-    bf16 is not supported — no 4x4x4 bf16 MFMA atom exists on CDNA.
     """
     from rocke.core.arch import ArchTarget
 
@@ -1184,10 +1186,8 @@ def is_valid_spec_4c(spec: DirectConv4cSpec, arch: str = "gfx950") -> Tuple[bool
     except KeyError as e:
         return False, str(e)
     p = spec.problem
-    if p.dtype != "fp16":
-        return False, (
-            f"DirectConv4cSpec: bf16 not supported - no mfma_f32_4x4x4_bf16 atom on CDNA"
-        )
+    if p.dtype not in ("fp16", "bf16"):
+        return False, f"unsupported dtype {p.dtype!r}; expected 'fp16' or 'bf16'"
     why = forward_padding_reason(p)
     if why is not None:
         return False, why
@@ -1217,7 +1217,7 @@ def build_direct_conv_4c(spec: DirectConv4cSpec, *, arch: str = "gfx950") -> Ker
     `k_in_group = 0..3` at fixed output W position `lane_q`.
 
     ``arch`` (``"gfx942"`` / ``"gfx950"``) selects the target GPU. The
-    ``mfma_f32_4x4x4_f16`` atom this kernel uses is selectable on both
+    ``mfma_f32_4x4x4_{f16,bf16}`` atom this kernel uses is selectable on both
     targets, so the kernel is arch-neutral; ``arch`` is validated (via
     :func:`is_valid_spec_4c`) but does not change the emitted IR.
     """
@@ -1269,7 +1269,7 @@ def build_direct_conv_4c(spec: DirectConv4cSpec, *, arch: str = "gfx950") -> Ker
     a_rsrc = b.buffer_rsrc(A, A_bytes)
     b_rsrc = b.buffer_rsrc(Bp, B_bytes)
     d_rsrc = b.buffer_rsrc(D, D_bytes)
-    fp16x4_zero = b.zero_vec_f16(4)
+    io_vec4_zero = b.zero_vec(io_type, 4)
     zero_acc = b.zero_vec_f32(4)
 
     # Weights: per (r, s), per lane: B[g*kpg + lane_q, r, s, 0:4].
@@ -1367,7 +1367,7 @@ def build_direct_conv_4c(spec: DirectConv4cSpec, *, arch: str = "gfx950") -> Ker
                     )
                     safe_a = b.select(valid, b.mul(a_off, c_half_bytes), oob_sentinel)
                     vec = _buf_load_vN(b, p.dtype, a_rsrc, safe_a, c0, 2)
-                    vec = b.select(valid, vec, fp16x4_zero)
+                    vec = b.select(valid, vec, io_vec4_zero)
                     inputs.append(vec)
                 inputs_by_qtile.append(inputs)
 
@@ -1379,8 +1379,13 @@ def build_direct_conv_4c(spec: DirectConv4cSpec, *, arch: str = "gfx950") -> Ker
                     flat = _acc_index(qt, p_idx)
                     acc = accs_flat[flat]
                     for s_const in range(p.KW):
-                        acc = b.mfma_f32_4x4x4_f16(
-                            weights[r_const * p.KW + s_const], inputs[s_const], acc
+                        acc = _mfma(
+                            b,
+                            p.dtype,
+                            "4x4x4",
+                            weights[r_const * p.KW + s_const],
+                            inputs[s_const],
+                            acc,
                         )
                     accs_flat[flat] = acc
 
@@ -8770,6 +8775,11 @@ def direct_launch_geometry(spec) -> Tuple[Tuple[int, int, int], Tuple[int, int, 
                 p.groups // spec.block_groups,
                 p.N * ceil_div(p.H, spec.block_h),
             )
+        return grid, (spec.threads_per_block, 1, 1)
+    if isinstance(spec, DirectConv4cSpec):
+        # bx = output-column tile, by = group block, bz = image; every row is
+        # streamed in-kernel up to p_Hi.
+        grid = (ceil_div(p.Wo, spec.block_q), p.groups // spec.block_groups, p.N)
         return grid, (spec.threads_per_block, 1, 1)
     if isinstance(spec, DirectDepthwiseSpatialSpec):
         # Every channel of the image lives in one wavefront.

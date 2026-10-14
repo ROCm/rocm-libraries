@@ -404,6 +404,14 @@ def _direct_builders():
             ),
         ),
         (
+            "4c_bf16",
+            {"cpg": 4, "kpg": 4, "groups": 32, "dtype": "bf16"},
+            "fwd",
+            lambda pr: dc.build_direct_conv_4c(
+                dc.DirectConv4cSpec(problem=pr, block_q=8), arch=_ARCH
+            ),
+        ),
+        (
             "8c",
             dict(cpg=8, kpg=8, groups=8),
             "fwd",

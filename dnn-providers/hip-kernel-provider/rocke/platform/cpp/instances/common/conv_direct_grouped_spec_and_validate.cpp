@@ -456,12 +456,19 @@ rocke_status_t rocke_direct_conv_4c_kernel_name(const rocke_direct_conv_4c_spec_
     snprintf(bq_buf, sizeof(bq_buf), "bq%d", spec->block_q);
     snprintf(bg_buf, sizeof(bg_buf), "bg%d", spec->block_groups);
 
-    /* kernel_name_join(name, short, "bq..", "bg..")  -- no flags */
+    /* kernel_name_join(name, short, "bq..", "bg..", flags={"bf16": ...}) */
     parts[0] = short_buf;
     parts[1] = bq_buf;
     parts[2] = bg_buf;
-
-    return rocke_kernel_name_join(spec->name, parts, 3, NULL, NULL, 0, out, out_cap, NULL);
+    {
+        const char* dt4c = spec->problem.dtype ? spec->problem.dtype : "fp16";
+        const char* flag_names4c[1];
+        int flag_on4c[1];
+        flag_names4c[0] = "bf16";
+        flag_on4c[0] = (strcmp(dt4c, "bf16") == 0) ? 1 : 0;
+        return rocke_kernel_name_join(
+            spec->name, parts, 3, flag_names4c, flag_on4c, 1, out, out_cap, NULL);
+    }
 }
 
 rocke_status_t rocke_direct_conv_4c_validate(const rocke_direct_conv_4c_spec_t* spec,
@@ -474,17 +481,14 @@ rocke_status_t rocke_direct_conv_4c_validate(const rocke_direct_conv_4c_spec_t* 
         return ROCKE_ERR_VALUE;
     }
     p = &spec->problem;
-    /* if p.dtype != "fp16": raise ValueError(...) — no mfma_f32_4x4x4_bf16 atom on CDNA */
+    /* if p.dtype not in ("fp16", "bf16"): raise ValueError(...) */
     {
         const char* dt = p->dtype ? p->dtype : "fp16";
-        if(strcmp(dt, "fp16") != 0)
+        if(strcmp(dt, "fp16") != 0 && strcmp(dt, "bf16") != 0)
         {
             if(reason != NULL && reason_cap > 0)
             {
-                snprintf(reason,
-                         reason_cap,
-                         "DirectConv4cSpec: bf16 is not supported - the mfma_f32_4x4x4 atom "
-                         "is fp16-only; use fp16 dtype or a different cpg variant");
+                snprintf(reason, reason_cap, "DirectConv4cSpec: unsupported dtype '%s'", dt);
             }
             return ROCKE_ERR_VALUE;
         }
@@ -573,13 +577,12 @@ bool rocke_direct_conv_4c_is_valid_spec(const rocke_direct_conv_4c_spec_t* spec,
     }
 
     p = &spec->problem;
-    /* if p.dtype != "fp16": return False, ... — no mfma_f32_4x4x4_bf16 atom on CDNA */
+    /* if p.dtype not in ("fp16", "bf16"): return False, ... */
     {
         const char* dt = p->dtype ? p->dtype : "fp16";
-        if(strcmp(dt, "fp16") != 0)
+        if(strcmp(dt, "fp16") != 0 && strcmp(dt, "bf16") != 0)
         {
-            CK_DCONV4C_REJECT("DirectConv4cSpec: bf16 not supported - "
-                              "no mfma_f32_4x4x4_bf16 atom");
+            CK_DCONV4C_REJECT("unsupported dtype '%s'; expected 'fp16' or 'bf16'", dt);
         }
     }
     {

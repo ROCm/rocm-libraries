@@ -550,7 +550,10 @@ Contract:
 cpg = 4, kpg = 4
 ```
 
-Uses `mfma_f32_4x4x4_f16`: one wave computes 16 independent 4x4x4 matmuls indexed by `batch = lane / 4`.
+Uses `mfma_f32_4x4x4_f16` (fp16) or `mfma_f32_4x4x4_bf16` (bf16, the CDNA2+
+`_1k` intrinsic, selectable on gfx942 and gfx950): one wave computes 16
+independent 4x4x4 matmuls indexed by `batch = lane / 4`. The kernel name carries
+a `bf16` flag for bf16 I/O.
 
 Algorithm:
 
@@ -559,9 +562,9 @@ Algorithm:
 2. For each output coordinate assigned to the wave:
    - Load needed input vectors with padding masks (no LDS row pipeline).
    - Load 4-channel weights.
-   - Issue mfma_f32_4x4x4_f16.
+   - Issue mfma_f32_4x4x4_{f16,bf16}.
 3. Accumulate across KH*KW.
-4. Vector-store the 4 output channels as one contiguous buffer_store_vN_f16.
+4. Vector-store the 4 output channels as one contiguous buffer_store_vN_{f16,bf16}.
 ```
 
 Levers:

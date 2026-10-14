@@ -902,6 +902,7 @@ def build_direct_4c(
     *,
     block_q=4,
     block_groups=16,
+    dtype="fp16",
 ):
     def _build():
         from kernels.common.conv_direct_grouped import (
@@ -920,6 +921,7 @@ def build_direct_4c(
             KH=KH,
             KW=KW,
             PAD=PAD,
+            dtype=dtype,
         )
         spec = DirectConv4cSpec(
             problem=p,
@@ -3655,6 +3657,39 @@ def cases():
             PAD=1,
             block_q=4,
             block_groups=16,
+        ),
+    )
+    # --- 4c bf16 (mfma_f32_4x4x4_bf16), gfx950 and gfx942 ---
+    add(
+        "conv_direct",
+        "conv_direct/gfx950/4c_bf16_n2h13",
+        "gfx950",
+        build_direct_4c(
+            "irhash_direct4c_950_bf16",
+            "gfx950",
+            N=2,
+            H=13,
+            W=13,
+            groups=32,
+            block_q=4,
+            block_groups=16,
+            dtype="bf16",
+        ),
+    )
+    add(
+        "conv_direct",
+        "conv_direct/gfx942/4c_bf16_n1h8",
+        "gfx942",
+        build_direct_4c(
+            "irhash_direct4c_942_bf16",
+            "gfx942",
+            N=1,
+            H=8,
+            W=8,
+            groups=16,
+            block_q=8,
+            block_groups=16,
+            dtype="bf16",
         ),
     )
     # --- 8c, gfx950 ---
