@@ -538,32 +538,32 @@ def gels_suite(*, suite, precision, case):
                     yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} -m {m} -n {n} --nrhs {nrhs} --lda {ld_a} --ldb {ld_b} --ldx {ld_x}')
 
 
-#def gelsBatch_suite(*, suite, precision, case):
-#    """
-#    GELSBATCH tests are run, for the given precision and number of rows (columns), with 26 columns (rows) and with 1,
-#    n/2 and n right-hand-vectors. We want the overdetermined case m >= n, but also the underdetermined m < n
-#    to actually test gelqf and ormlq/unmlq.
-#    gelqf uses:
-#    larft_forward_row
-#    larfb_forward_row_right_none
-#    ormlq uses:
-#    larft_forward_row
-#    larfb_forward_row_left_none
-#    """
-#    fn = 'gels_batched'
-#    mode = 'batched'
-#    size = get_size_configurations(case, mode)
-#    for s_shape in ['overdet']: #['overdet', 'underdet'] underdetermined systems are not currently supported in cuda
-#        for s_nrhs in ['one', 'half_n', 'n']:
-#            for s in size:
-#                nrhs = get_nrhs(s_nrhs, s)
-#                m,n = get_mn(s_shape, s, mode)
-#                ld_b = get_ld(s)
-#                ld_a = get_ld(m)
-#                ld_x = get_ld(n)
-#                if (s_shape == 'overdet' and m >= n) or (s_shape == 'underdet' and m < n):
-#                    row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'batch_count': bc, 'shape': s_shape, 'nrhs': s_nrhs, 'n': s}
-#                    yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --batch_count {bc} -m {m} -n {n} --nrhs {nrhs} --lda {ld_a} --ldb {ld_b} --ldx {ld_x}')
+def gelsBatch_suite(*, suite, precision, case):
+   """
+   GELSBATCH tests are run, for the given precision and number of rows (columns), with 26 columns (rows) and with 1,
+   n/2 and n right-hand-vectors. We want the overdetermined case m >= n, but also the underdetermined m < n
+   to actually test gelqf and ormlq/unmlq.
+   gelqf uses:
+   larft_forward_row
+   larfb_forward_row_right_none
+   ormlq uses:
+   larft_forward_row
+   larfb_forward_row_left_none
+   """
+   fn = 'gels_batched'
+   mode = 'batched'
+   size = get_size_configurations(case, mode)
+   for s_shape in ['overdet']: #['overdet', 'underdet'] underdetermined systems are not currently supported in cuda
+       for s_nrhs in ['one', 'half_n', 'n']:
+           for s in size:
+               nrhs = get_nrhs(s_nrhs, s)
+               m,n = get_mn(s_shape, s, mode)
+               ld_b = get_ld(s)
+               ld_a = get_ld(m)
+               ld_x = get_ld(n)
+               if (s_shape == 'overdet' and m >= n) or (s_shape == 'underdet' and m < n):
+                   row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'batch_count': bc, 'shape': s_shape, 'nrhs': s_nrhs, 'n': s}
+                   yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --batch_count {bc} -m {m} -n {n} --nrhs {nrhs} --lda {ld_a} --ldb {ld_b} --ldx {ld_x}')
 
 
 def xxgqr_suite(*, suite, precision, case):
@@ -927,7 +927,7 @@ SUITES = {
     'geqrf': geqrf_suite,
 #    'geqrfBatch': geqrfBatch_suite,
     'gels': gels_suite,
-#    'gelsBatch': gelsBatch_suite,
+    'gelsBatch': gelsBatch_suite,
     'xxgqr': xxgqr_suite,
     'xxmqr': xxmqr_suite,
 #    'larft': larft_suite,
