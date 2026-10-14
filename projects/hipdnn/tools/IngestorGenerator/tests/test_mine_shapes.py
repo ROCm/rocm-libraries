@@ -1301,16 +1301,26 @@ class TestTheOutputIsWhatTheRequestClassAccepts:
         )
 
         features = {}
+        windows = []
         for resolution in resolve(shapes):
             request = resolution.spec
             assert request_errors(request) == [], resolution.shape
             origin = resolution.shape["_provenance"]
             label = origin.get("graph") or origin["phase"]
             features.setdefault(label, set()).add(request.features())
+            if label == "swa":
+                windows.append(request)
+        # A sliding window's causal edge is its right bound, not a `causal` feature.
         assert features == {
             "br": {frozenset({"causal", "causal_bottom_right"})},
             "tl": {frozenset({"causal"})},
-            "swa": {frozenset({"causal", "sliding_window"})},
+            "swa": {frozenset({"sliding_window"})},
             "prefill": {frozenset({"causal"})},
             "decode": {frozenset({"causal", "causal_bottom_right"})},
         }
+        # left_bound 127, right_bound 0, in the width form rocKE resolves to those bounds:
+        # sliding_window - 1 to the left and, with no explicit right bound, 0 to the right.
+        assert [
+            (int(r.mask_type), int(r.sliding_window), r.window_left, r.window_right)
+            for r in windows
+        ] == [(3, 128, None, None)]
