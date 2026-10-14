@@ -36,17 +36,19 @@ so "only emulated atoms are affected" has to be measured, not asserted.
 ## Results
 
 One full run of `tools/check_byte_identity.py` per flavor, run sequentially, on the
-branch after it was merged with `develop` and the emulated atoms moved onto the TF32
-operand type:
+branch after it was merged with `develop`, the emulated atoms moved onto the TF32
+operand type, and the BF16 split capped; and again after the latest merge of `develop`,
+which is what the table records:
 
 | flavor | families GREEN | DRIFT | supplementary gfx1250 pass (llvm23) |
 |---|---|---|---|
-| llvm20 | 77 | 0 | GREEN |
-| llvm22 | 77 | 0 | GREEN |
-| llvm23 | 77 | 0 | (is the main pass) |
+| llvm20 | 78 | 0 | GREEN |
+| llvm22 | 78 | 0 | GREEN |
+| llvm23 | 78 | 0 | (is the main pass) |
 
-The 77 include the base's native TF32 family (`tf32_mma`, 10 configs) and this work's
-`xf32_bf16x3_mma` (2 configs). The engines agree, and no family's emission moved.
+The 78 include the base's native TF32 family (`tf32_mma`, 10 configs) and this work's
+`xf32_bf16x3_mma` (2 configs); the one family more than the previous run (77) came in
+with `develop`. The engines agree, and no family's emission moved.
 
 When the work was first written, against an older base, the same runs were 69 GREEN /
 1 DRIFT on both the base and the branch, down to the same single family.
@@ -97,8 +99,11 @@ No golden kernel selects an emulated atom, so none of them changed:
 
 The measurement above is what turns those three into a fact rather than an argument,
 and the representative-IR golden
-(`tests/golden/rocke_representative_ir_sha256.json`) is unchanged and checks clean at
-all three flavors.
+(`tests/golden/rocke_representative_ir_sha256.json`) is not touched by this work. Its
+check is clean for every case but one, `crosslane/gfx1201/warp_shuffle_xor_dpp_reduce_i32`,
+which drifts at all three flavors on the merged tree and, with the identical old and new
+hashes, on `develop` itself: the golden is stale against `develop`'s DPP lowering, which has
+nothing to do with an emulated atom, and it is left for its owners to re-bless.
 
 ### The parity family is blessed into the L5 anchor
 
@@ -188,17 +193,19 @@ on a two-CPU host.
 ## Verification
 
 - `python tools/check_byte_identity.py` at `ROCKE_LLVM_FLAVOR` llvm20, llvm22 and
-  llvm23: GREEN, 77 families each, no DRIFT.
+  llvm23: GREEN, 78 families each, no DRIFT.
 - The `xf32_bf16x3_mma` parity family, re-diffed against the final archive at every
   flavor in both `ll` and canonical `ir`: GREEN.
 - The scratch-copy mutation described above: DRIFT on both configs in the `ll` lane at
   every flavor, GREEN on the real archive.
-- `tests/golden/rocke_representative_ir_sha256.json` checks clean at llvm20, llvm22 and
-  llvm23, unchanged.
+- `tests/golden/rocke_representative_ir_sha256.json` is unchanged. It checks clean at
+  llvm20, llvm22 and llvm23 on every case except `crosslane/gfx1201/warp_shuffle_xor_dpp_reduce_i32`,
+  which drifts identically on `develop` (same old and new hashes at all three flavors), so
+  it is not this work's.
 - A full `ROCKE_LLVM_FLAVOR=llvm20 --check-golden` run in each mode: the family's two
   configs match the recorded shas in both keys, as do the base's `tf32_mma` configs; the
   remaining mismatches are the older entries described above.
 - With `rocke_engine` built, `test_xf32_bf16x3_lowering.py::TestEngineParity` also runs
   rather than skipping, so the expansion is compared across the engines by both routes —
   the parity family through the archive and the pybind module in-process.
-- No existing golden re-blessed; none needed it.
+- No existing golden re-blessed by this work; none of them moved because of it (the one drifting case above is `develop`'s own).
