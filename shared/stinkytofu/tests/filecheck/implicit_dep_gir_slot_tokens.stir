@@ -1,0 +1,20 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyBuildImplicitDependencyPass --print-output
+#
+# Under the GIR frame contract the pass derives one memtoken per concrete LDS slot, so a copy into
+# one buffer shares a pseudo-register with the reads of that buffer and with nothing else.
+#
+# CHECK-LABEL: @gir_slot_tokens_separate_buffers
+# CHECK: "st.ds_load_b64"(v10, LDS0)
+# CHECK-NEXT: LDS0 = "st.tensor_load_to_lds"
+# CHECK-NEXT: "st.ds_load_b64"(v11, LDS1)
+
+st.metadata "gir.frame_contract" {
+gir-frame-contract
+}
+
+st.func @gir_slot_tokens_separate_buffers() {
+^entry:
+  v[0:1] = "st.ds_load_b64"(v10) { mod.ds = { na = 1, offset = 0, gds = false }, mod.gir_action = { action = 0, anchor = 0, kind = read, access0_write = 0, access0_operand = 0, access0_ring = 2, access0_abs = 0 } }
+  "st.tensor_load_to_lds"(s[0:3], s[10:17]) { mod.gir_action = { action = 1, anchor = 1, kind = copy, access0_write = 1, access0_operand = 0, access0_ring = 2, access0_abs = 0 } }
+  v[2:3] = "st.ds_load_b64"(v11) { mod.ds = { na = 1, offset = 0, gds = false }, mod.gir_action = { action = 2, anchor = 2, kind = read, access0_write = 0, access0_operand = 1, access0_ring = 2, access0_abs = 0 } }
+}

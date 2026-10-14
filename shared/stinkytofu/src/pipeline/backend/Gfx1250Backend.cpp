@@ -114,8 +114,7 @@ void addGfx1250RegionPasses(PassManager& pm, const StinkyAsmModule& module, OptL
     // addPeepholeOptPasses(pm, optLevel);
 
     // Instruction scheduling
-    pm.addPass(
-        createStinkyBuildImplicitDependencyPass(!module.getModuleOptions().EnableGirFramePipeline));
+    pm.addPass(createStinkyBuildImplicitDependencyPass());
     if (runScheduler) {
         pm.addPass(createStinkyDAGSchedulerPass());
         pm.addPass(createStinkyMergeBarrierPass());

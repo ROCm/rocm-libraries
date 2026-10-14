@@ -25,8 +25,12 @@
 #include <cassert>
 #include <cstdint>
 #include <iostream>
+#include <map>
+#include <set>
+#include <vector>
 
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
+#include "stinkytofu/analysis/asm/GirFrameAnalysis.hpp"
 #include "stinkytofu/core/BasicBlock.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
@@ -55,6 +59,12 @@
 //    The def-use chain builder then sees:
 //      producer(def LDS[t]) → barrier(use+def LDS[t]) → consumer(use LDS[t])
 //    which forces the scheduler to respect: producers → barrier → consumers.
+//
+//    Under the GIR frame contract an instruction carries no MemTokenData; the token is derived
+//    here from GirFrameAnalysis instead: one token per concrete LDS slot ((operand, generation)),
+//    so touches of different slots share no pseudo-register. A static instruction can touch a
+//    different slot in each frame and gets the union. A GIR fence gets the slot of every hazard
+//    it encloses. The derived token then takes the normal path below.
 
 namespace {
 using namespace stinkytofu;
@@ -69,6 +79,36 @@ static void addUniqueLdsSrc(StinkyInstruction& inst, int tokenId) {
     for (const StinkyRegister& s : inst.getSrcRegs())
         if (s.reg.type == RegType::LDS && s.reg.idx == static_cast<uint32_t>(tokenId)) return;
     inst.addSrcReg(StinkyRegister(RegType::LDS, tokenId, 1));
+}
+
+using GirSlotTokens = std::map<const StinkyInstruction*, std::set<int>>;
+
+GirSlotTokens collectGirSlotTokens(Function& func, AnalysisManager& AM) {
+    GirSlotTokens tokens;
+    const auto& frames = AM.getResult<GirFrameAnalysis>(func);
+    if (frames.empty()) return tokens;
+
+    for (const GirAccessOccurrence& occurrence : frames.occurrences)
+        tokens[occurrence.inst].insert(occurrence.storage);
+
+    const auto& hazards = AM.getResult<GirFrameHazardAnalysis>(func);
+    for (const GirFrameHazard& hazard : hazards.hazards) {
+        for (const GirHazardFenceOwner& owner : enclosingFences(frames, hazard).owners) {
+            std::vector<StinkyInstruction*> pieces{owner.anchor};
+            if (const auto* action = owner.anchor->getModifier<GirActionData>()) {
+                auto owned = frames.actionInstructions.find(action->actionId);
+                if (owned != frames.actionInstructions.end()) pieces = owned->second;
+            }
+            for (const StinkyInstruction* piece : pieces) tokens[piece].insert(hazard.storage);
+        }
+    }
+    return tokens;
+}
+
+// The kinds the token branches below accept.
+bool takesLdsToken(const StinkyInstruction& inst) {
+    return isBarrier(inst) || inst.is(InstFlag::IF_WaitTensorCnt) || isTensorLoad(inst) ||
+           isDSWrite(inst) || isDSRead(inst) || isGlobalStoreAsyncFromLds(inst);
 }
 
 // Barrier: LDS tokens to both src and dest.
@@ -122,7 +162,7 @@ static void processLdsReader(StinkyInstruction& inst, const MemTokenData& mt,
 }
 
 void setPseudoRegistersInBlock(BasicBlock& bb, PassContext& passCtx,
-                               bool enableMemoryTokenDependencies) {
+                               bool enableMemoryTokenDependencies, const GirSlotTokens& girTokens) {
     const uint32_t wavefrontSize = passCtx.getWavefrontSize();
     for (auto it = bb.begin(); it != bb.end(); ++it) {
         auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
@@ -132,6 +172,11 @@ void setPseudoRegistersInBlock(BasicBlock& bb, PassContext& passCtx,
         legalizeImplicitSpecialRegisters(inst, wavefrontSize);
 
         if (!enableMemoryTokenDependencies) continue;
+        if (!inst->getModifier<MemTokenData>() && takesLdsToken(*inst)) {
+            if (auto slots = girTokens.find(inst); slots != girTokens.end())
+                inst->addModifier<MemTokenData>(
+                    MemTokenData{std::vector<int>(slots->second.begin(), slots->second.end())});
+        }
         const MemTokenData* mt = inst->getModifier<MemTokenData>();
         if (!mt) continue;
         assert(!mt->tokens.empty() && "MemTokenData with empty tokens");
@@ -168,10 +213,11 @@ class StinkyBuildImplicitDependencyPass : public StinkyInstPass {
         return &StinkyBuildImplicitDependencyPass::ID;
     }
 
-    PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& /*AM*/) override {
+    PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& AM) override {
+        const GirSlotTokens girTokens = collectGirSlotTokens(func, AM);
         for (BasicBlock& bb : func) {
             if (passCtx.shouldProcessBasicBlock(bb))
-                setPseudoRegistersInBlock(bb, passCtx, enableMemoryTokenDependencies);
+                setPseudoRegistersInBlock(bb, passCtx, enableMemoryTokenDependencies, girTokens);
         }
         return preserveCFGAnalyses();
     }
