@@ -33,14 +33,14 @@
 #   against the installed tree, where the labels below pick the tier and the
 #   tier's patterns have been baked into the hipblaslt-test entry as a gtest
 #   filter. The standard tier therefore invoked
-#       hipblaslt-test --gtest_filter=*smoke*:*quick*:*pre_checkin*:*HostUnit*-*known_bug*
+#       hipblaslt-test --gtest_filter=*smoke*:*quick*:*pre_checkin*:*HostUnit*:*TuningStore.*-*known_bug*
 #
 #   The HostUnit cases also carry a "smoke_" test-name prefix. That is redundant
 #   for the path above, since "*HostUnit*" already selects them in every tier,
 #   but it keeps them selected by test/therock/test_hipblaslt.py, which execs the
 #   binary directly with `--gtest_filter=*smoke*` on its quick tier.
 #
-#   "*TuningStore.*" is a second exception: the tuning-store cases are a plain
+#   "*TuningStore.*" works the same way: the tuning-store cases are a plain
 #   gtest suite, host-only and well under a second, so every tier runs all of
 #   them. They are compiled into hipblaslt-test, rather than run through the
 #   standalone hipblaslt-test-tuning-store binary, so hipBLASLt keeps one ctest
