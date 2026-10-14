@@ -670,10 +670,12 @@ inline void requireNoDuplicates(const std::vector<std::string>& values,
 /// reports features too (`gfx942:sramecc+:xnack-`) and archMatches stops the candidate
 /// at ':', so a bare id matches such a device -- but an authored entry may not carry
 /// features. Matching compares target-id text, so a partial id like `gfx942:xnack-`
-/// reads as reasonable and matches nothing. LLVM generic targets (`gfx9-4-generic`) stay
-/// legal: the '-' is part of the base id. Catches an authoring typo, which would
+/// reads as reasonable and matches nothing. LLVM generic targets (`gfx9-4-generic`) are
+/// well-formed: the '-' is part of the base id. Catches an authoring typo, which would
 /// otherwise disable the pack everywhere with nothing louder than an INFO decline; not
-/// an existence check, so an unheard-of but well-formed id still parses.
+/// an existence check on its own, so an unheard-of but well-formed id still passes here.
+/// A generic name absent from the generic target table is rejected separately, by
+/// requireArchList.
 inline bool isPlausibleArchBaseId(std::string_view value)
 {
     constexpr std::string_view PREFIX = "gfx";
@@ -2254,9 +2256,9 @@ inline std::vector<DescriptorSet> resolveDescriptorSets(DescriptorCatalog catalo
         {
             // Failure granularity is the pack: a pack whose cross-references dangle or
             // whose kernels contradict the KMD is dropped while the engine keeps its other
-            // packs. A duplicate kernel metadata tuple is the exception, for packs whose
-            // arch lists overlap -- the state manager's constructor throws on it, taking
-            // the whole engine. RFC 0017 §10
+            // packs. A duplicate kernel metadata tuple is the exception, for kernels that
+            // compete at the same arch tier -- the state manager's constructor throws on it,
+            // taking the whole engine. RFC 0017 §10
             // wants only the colliding kernel dropped; the upgrade is making that
             // constructor log and drop rather than throw, in one place, so hand-built packs
             // get the same behavior.

@@ -416,8 +416,9 @@ class TestGateCatchesEachDefect:
 class TestTheDeskCheckIdentityIsEngineWideAndArchAware:
     """The loader assembles ONE catalog per engine per device, so the identity is
     engine-wide and carries the effective architecture: an identical tuple in a gfx942
-    and a gfx950 pack is legal, while an overlap -- including a wildcard over a concrete
-    arch -- drops the engine."""
+    and a gfx950 pack is legal, while two packs that compete at the same arch tier drop the
+    engine. A wildcard over a concrete arch, or a generic over a member, sit at
+    different tiers and do not compete."""
 
     def _two_packs(self, gate, tag, left_arch, right_arch):
         root = gate.tmp / tag

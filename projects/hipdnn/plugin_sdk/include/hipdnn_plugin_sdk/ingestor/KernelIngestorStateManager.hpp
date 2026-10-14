@@ -486,7 +486,8 @@ private:
                 // one that declared a narrower list claims only that. Claiming by the
                 // kernel rather than the pack is what lets two kernels of ONE pack share a
                 // tuple under disjoint arch -- one implementation per capability -- while
-                // still catching two that a single device would see together.
+                // still catching two that compete at the same arch tier on a device.
+                // Kernels at different tiers do not collide: the better tier wins.
                 std::vector<std::string> kernelArch = kernel.arch.empty() ? pack.arch : kernel.arch;
                 MetadataTupleValues tuple;
                 tuple.reserve(key.size());

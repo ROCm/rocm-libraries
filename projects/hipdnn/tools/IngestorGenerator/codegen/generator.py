@@ -482,19 +482,19 @@ def build_kdp(
                     f"kernel {kernel.name!r} (pack {pack.name!r}) and kernel "
                     f"{prior['name']!r} (pack {prior['pack']!r}) are the SAME "
                     f"candidate and complete to the SAME catalog tuple "
-                    f"{json.loads(key)}, but their architectures overlap without "
-                    f"being equal ({arch or ['<any>']} vs "
+                    f"{json.loads(key)}, but they compete at the same arch tier "
+                    f"without having equal arch lists ({arch or ['<any>']} vs "
                     f"{prior['arch'] or ['<any>']}). On the shared architectures "
                     f"the matcher would see one tuple twice, which drops the whole "
                     f"engine at load; coalescing them would instead advertise one "
                     f"of the two on devices its arch list never claimed. Give the "
-                    f"two entries the SAME arch list so they de-duplicate, or make "
-                    f"them disjoint."
+                    f"two entries the SAME arch list so they de-duplicate, or put "
+                    f"them at different arch tiers."
                 )
             raise ValueError(
                 f"kernel {kernel.name!r} (pack {pack.name!r}) and kernel "
                 f"{prior['name']!r} (pack {prior['pack']!r}) complete to the SAME "
-                f"catalog tuple {json.loads(key)} on overlapping architectures "
+                f"catalog tuple {json.loads(key)} at the same arch tier "
                 f"({arch or ['<any>']} vs {prior['arch'] or ['<any>']}), but they "
                 f"are not the same candidate: their kernel_source/priority differ, "
                 f"so they name different binaries. The matcher compares the tuple "
@@ -502,7 +502,8 @@ def build_kdp(
                 f"whole engine at load, and dropping one of them here would "
                 f"discard a binary that was deliberately built. Distinguish them "
                 f"in metadata (a knob the spec pins belongs in the tuple), narrow "
-                f"one of the arch lists, or do not ship both."
+                f"one of the arch lists, move one to a different arch tier, or do "
+                f"not ship both."
             )
         if already is not None:
             # Carry the prior kernel's own pack: a drop that empties this pack

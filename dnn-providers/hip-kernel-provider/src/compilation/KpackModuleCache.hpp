@@ -275,8 +275,8 @@ public:
     /// The arch component is feature-stripped: flags like ":sramecc+:xnack-" describe the
     /// device, not the code object, and archMatches already gates on the bare name, so
     /// "gfx90a" and "gfx90a:xnack-" must reach one entry rather than load the same blob
-    /// twice. load() keeps the decorated string -- it feeds archMatches and names the
-    /// device arch in its diagnostics.
+    /// twice. load() keeps the decorated string -- it feeds selectArch, which ranks
+    /// entries by entryTier, and names the device arch in its diagnostics.
     ///
     /// `expectedSha256` is in the key so that no cache hit can bypass the digest check: a
     /// hit answers from the key alone, so a digest outside it would hand a second

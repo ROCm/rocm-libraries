@@ -168,7 +168,8 @@ def _arch_subset_ok(ukd_arch, kdp_arch, generic_targets):
     """A UKD's arch is admissible under a referencing KDP's arch.
 
     An empty list on either side is a wildcard: a wildcard KDP admits any UKD,
-    and a wildcard UKD is admissible under any KDP. Two explicit lists require
+    and a wildcard UKD is admissible under any KDP here (a standalone wildcard UKD
+    under a KDP that has an `arch` is rejected separately). Two explicit lists require
     the UKD's expanded device set to lie within the KDP's (a generic stands for
     its members).
     """
@@ -239,8 +240,9 @@ def _reject_nonbare_arch(archs, where):
 
     Mirrors the loader's isPlausibleArchBaseId (loader is authoritative): 'gfx'
     followed by one or more of [a-z0-9_-]. LLVM generic targets
-    ('gfx9-4-generic') are legal; a feature suffix ('gfx942:xnack-') is not,
-    since ':' is outside the set.
+    ('gfx9-4-generic') are well-formed here but must also be in the generic target
+    table (see `_reject_unknown_generics`); a feature suffix ('gfx942:xnack-') is
+    not, since ':' is outside the set.
 
     Fatal rather than advisory: a suffixed arch matches no shard, so the KDP
     prunes from every arch and the pack exits 0 having installed nothing --

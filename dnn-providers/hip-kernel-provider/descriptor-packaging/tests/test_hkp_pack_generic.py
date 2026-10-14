@@ -229,6 +229,38 @@ def test_merge_collision_with_differing_bytes_is_refused_and_leaves_the_member_u
 
 
 @pytest.mark.quick
+def test_merge_copy_failure_midway_is_refused_and_leaves_the_member_untouched(
+    tmp_path, monkeypatch
+):
+    generic_dir = tmp_path / "inter" / ".generic-out" / GENERIC
+    member_dir = tmp_path / "out" / MEMBER_A
+    staging = tmp_path / "out" / f".{MEMBER_A}.merge.staging"
+    _write(generic_dir / "first.kdp.json", {"id": "kdp-first"})
+    _write(generic_dir / "second.kdp.json", {"id": "kdp-second"})
+    _write(member_dir / "concrete_only.kdp.json", {"id": "kdp-c"})
+    before = _files(member_dir)
+
+    real_copyfile = shutil.copyfile
+    generic_copies = []
+
+    def failing_on_second_generic_copy(src, dst, *args, **kwargs):
+        if Path(src).is_relative_to(generic_dir):
+            generic_copies.append(src)
+            if len(generic_copies) == 2:
+                raise OSError("injected copy failure")
+        return real_copyfile(src, dst, *args, **kwargs)
+
+    monkeypatch.setattr(shutil, "copyfile", failing_on_second_generic_copy)
+
+    with pytest.raises(HkpPackError):
+        _merge_generic_into_member(generic_dir, member_dir, staging)
+
+    assert len(generic_copies) == 2, "the merge no longer copies via shutil.copyfile"
+    assert _files(member_dir) == before
+    assert not staging.exists()
+
+
+@pytest.mark.quick
 @pytest.mark.parametrize(
     "step, dropped, with_generic",
     [

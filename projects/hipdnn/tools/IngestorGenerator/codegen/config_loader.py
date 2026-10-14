@@ -1453,7 +1453,7 @@ def _check_generic_arch(config: IngestorConfig) -> None:
 def _check_kernel_arch_subset_of_pack(config: IngestorConfig) -> None:
     """Pre-mint check #4: a kernel's arch must be a subset of its pack's.
 
-    Mirrors ``DescriptorLoader.hpp``'s ``archCovers`` over expanded device sets.
+    Mirrors ``ingestor/DeviceProperties.hpp``'s ``archCovers`` over expanded device sets.
     """
     table = _generic_table()
     for pack in config.packs:

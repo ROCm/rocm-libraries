@@ -910,9 +910,10 @@ def test_ukd_arch_not_subset_of_kdp_hard_errors(
 def test_ukd_arch_subset_wildcard_combinations_accepted(
     tmp_path, main_fixture, hipcc, rocm_kpack_dir
 ):
-    # (a) UKD explicit subset of KDP explicit; (b) UKD wildcard + KDP explicit;
-    # (c) KDP wildcard + UKD explicit. Each loads without error and emits the
-    # standalone into the expected shard(s).
+    # (a) UKD explicit subset of KDP explicit; (c) KDP wildcard + UKD explicit.
+    # Each loads without error and emits the standalone into the expected shard(s).
+    # The legal wildcard-UKD shape is the inline UKD inheriting a concrete KDP's arch,
+    # covered by _ACCEPTED["inline_inheriting_a_concrete_kdp"].
     # (a) explicit subset: b128 -> [gfx942] under pointwise KDP [gfx942, gfx950].
     src_a = _copy_fixture(tmp_path / "a", main_fixture)
     p = src_a / _STANDALONE_UKD_FILE
@@ -922,12 +923,6 @@ def test_ukd_arch_subset_wildcard_combinations_accepted(
     _run(src_a, tmp_path / "a", hipcc, rocm_kpack_dir, arches=["gfx942", "gfx950"])
     assert (tmp_path / "a" / "out" / "gfx942" / _STANDALONE_UKD_FILE).exists()
     assert not (tmp_path / "a" / "out" / "gfx950" / _STANDALONE_UKD_FILE).exists()
-
-    # (b) UKD wildcard (unchanged fixture) under explicit KDP -> ships in both.
-    src_b = _copy_fixture(tmp_path / "b", main_fixture)
-    _run(src_b, tmp_path / "b", hipcc, rocm_kpack_dir, arches=["gfx942", "gfx950"])
-    assert (tmp_path / "b" / "out" / "gfx942" / _STANDALONE_UKD_FILE).exists()
-    assert (tmp_path / "b" / "out" / "gfx950" / _STANDALONE_UKD_FILE).exists()
 
     # (c) KDP wildcard + UKD explicit: reference b128 (arch [gfx942]) from the
     # wildcard KDP; it ships only in gfx942.
