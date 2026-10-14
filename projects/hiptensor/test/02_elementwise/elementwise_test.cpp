@@ -399,7 +399,7 @@ namespace hiptensor
             }
             else
             {
-                FAIL() << "Unexpected compute data type:" << computeDataType;
+                FAIL() << "Unexpected compute data type: " << computeDataType;
             }
 
             auto& opts     = HiptensorOptions::instance();
