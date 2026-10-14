@@ -91,6 +91,7 @@ class LogicalInstruction : public IRBase {
     std::optional<FLATModifiers> flat;         ///< Flat/global atomic memory modifier
     std::optional<GLOBALModifiers> global;     ///< Global memory modifier
     std::optional<MUBUFModifiers> mubuf;       ///< MUBUF (buffer load/store) modifier
+    std::optional<SMEMModifiers> smem;         ///< SMEM (scalar load/store/atomic) modifier
     std::optional<VOP3PModifiers> vop3;        ///< VOP3P (op_sel) modifier
     std::optional<True16Modifiers> true16;     ///< True16 (.l/.h half-select) modifier
     std::optional<std::vector<int>> memtoken;  ///< Memory token IDs for LDS dependency tracking
