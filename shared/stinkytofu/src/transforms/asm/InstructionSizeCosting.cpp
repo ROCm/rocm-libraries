@@ -190,6 +190,10 @@ inline bool parseLiteralStringToInt(const std::string& s, int32_t& out) {
 ///   1) VOP3P modifiers: non-empty **`op_sel`**, **`op_sel_hi`**, or
 ///   **`byte_sel`** forces VOP3 (8 B)
 ///      (all compact VALU, including the narrow converts below).
+///   1b) abs/neg source modifiers force VOP3 (8 B). These arrive either as an
+///      instruction-level **`VOP3Modifiers`** or as per-operand register modifiers
+///      (**`StinkyRegister::reg.isAbs`** / **`isMinus`**, e.g. `v_max_f32 vD, vD,
+///      abs(vSrc)`). clamp/omod are not counted: the emitter does not print them.
 ///   2) `v_cvt_f32_bf16` / `v_cvt_f32_f16` / `v_cvt_pk_*`, **when (1) did not
 ///   apply**: any **source** VGPR whose **logical** index (`phys % 256`, plus
 ///   `num`) spans above **127** requires `_e64` (8 B). **`v_cvt_f16_f32` uses the
@@ -215,6 +219,15 @@ int getEffectiveBaseSizeInBytesImpl(const StinkyInstruction& inst) {
                 return 8;  // e.g. v_cvt_f32_bf16 op_sel, v_cvt_pk_f32_fp8 op_sel,
                            // v_cvt_f32_fp8 byte_sel
         }
+        // abs/neg exist only in VOP3 (_e64); they arrive as VOP3Modifiers or as
+        // per-operand reg.isAbs / reg.isMinus.
+        if (const VOP3Modifiers* vop3 = inst.getModifier<VOP3Modifiers>()) {
+            if (vop3->neg_src0 || vop3->neg_src1 || vop3->neg_src2 || vop3->abs_src0 ||
+                vop3->abs_src1 || vop3->abs_src2)
+                return 8;
+        }
+        for (const StinkyRegister& s : srcs)
+            if (s.isRegister() && (s.reg.isAbs || s.reg.isMinus)) return 8;
         if (isVcvtNarrowSrcBankFamily(mnemonic)) {
             if (isVcvtF16F32DestBankPromotion(mnemonic)) {
                 const auto& destRegs = inst.getDestRegs();

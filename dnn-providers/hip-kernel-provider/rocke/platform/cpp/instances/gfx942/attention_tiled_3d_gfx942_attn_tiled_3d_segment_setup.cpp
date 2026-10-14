@@ -316,6 +316,11 @@ void rocke_gfx942_attention_tiled_3d_declare_params(
     ctx->num_seqs_p = rocke_b_param(B, "num_seqs", rocke_i32(), NULL);
     ctx->bt_stride_p = rocke_b_param(B, "block_table_stride", rocke_i32(), NULL);
     ctx->qq_bias_stride0_p = rocke_b_param(B, "qq_bias_stride_0", rocke_i32(), NULL);
+    if(ctx->strided_kv)
+    {
+        ctx->k_strides = rocke_declare_strided_kv_params(B, "k");
+        ctx->v_strides = rocke_declare_strided_kv_params(B, "v");
+    }
 }
 
 /* ============================================================ *
@@ -333,6 +338,10 @@ static void rocke__build_paged_kv_desc(rocke_gfx942_attention_tiled_3d_build_ctx
     const int NUM_KV = CFG.NUM_KV;
 
     /* seq_base = seq_idx * bt_stride_p (line 569) */
+    if(ctx->strided_kv)
+    {
+        return;
+    }
     ctx->seq_base = rocke_b_mul(B, ctx->seq_idx, ctx->bt_stride_p);
 
     /* _kv_base = TensorDescriptor.naive("paged_kv_bytes",
@@ -546,8 +555,18 @@ void rocke_gfx942_attention_tiled_3d_emit_async_infra(
 {
     /* ---- async DMA infra (lines 538-567) ---- */
     ctx->big_bytes = rocke_b_const_i32(B, 0x7FFF0000);
-    ctx->key_rsrc = rocke_b_buffer_rsrc(B, ctx->key, ctx->big_bytes);
-    ctx->value_rsrc = rocke_b_buffer_rsrc(B, ctx->value, ctx->big_bytes);
+    if(ctx->strided_kv)
+    {
+        ctx->key_rsrc = rocke_strided_kv_resource(
+            B, ctx->key, &ctx->k_strides, ctx->seq_idx, ctx->kv_head_idx);
+        ctx->value_rsrc = rocke_strided_kv_resource(
+            B, ctx->value, &ctx->v_strides, ctx->seq_idx, ctx->kv_head_idx);
+    }
+    else
+    {
+        ctx->key_rsrc = rocke_b_buffer_rsrc(B, ctx->key, ctx->big_bytes);
+        ctx->value_rsrc = rocke_b_buffer_rsrc(B, ctx->value, ctx->big_bytes);
+    }
     ctx->lane_half_base = rocke_b_mul(B, ctx->tid, rocke_b_const_i32(B, CFG.HALVES_PER_LANE));
     ctx->K_lds_addr = rocke_b_smem_addr_of(B, ctx->K_lds);
     ctx->V_lds_addr = rocke_b_smem_addr_of(B, ctx->V_lds);
@@ -708,7 +727,10 @@ void rocke_gfx942_attention_tiled_3d_issue_k_load(rocke_gfx942_attention_tiled_3
         rocke_value_t* linear_half
             = rocke_b_add(B, rocke_b_const_i32(B, call * KV_HALVES_PER_CALL), ctx->lane_half_base);
         rocke_value_t* voff
-            = rocke__paged_kv_offset(ctx, kv_tile_idx, linear_half, ctx->kv_head_idx);
+            = ctx->strided_kv
+                  ? rocke_strided_kv_offset(
+                        B, &ctx->k_strides, kv_tile_idx, linear_half, ctx->seq_len, CFG.HD, CFG.T)
+                  : rocke__paged_kv_offset(ctx, kv_tile_idx, linear_half, ctx->kv_head_idx);
         rocke_value_t* k_dst = rocke_b_smem_ptr_add(
             B, K_buf_base, rocke_b_const_i64(B, (int64_t)call * bytes_per_call));
         rocke_b_async_buffer_load_lds_addr(
@@ -737,7 +759,10 @@ void rocke_gfx942_attention_tiled_3d_issue_v_load(rocke_gfx942_attention_tiled_3
         rocke_value_t* linear_half
             = rocke_b_add(B, rocke_b_const_i32(B, call * KV_HALVES_PER_CALL), ctx->lane_half_base);
         rocke_value_t* voff
-            = rocke__paged_kv_offset(ctx, kv_tile_idx, linear_half, ctx->kv_head_idx);
+            = ctx->strided_kv
+                  ? rocke_strided_kv_offset(
+                        B, &ctx->v_strides, kv_tile_idx, linear_half, ctx->seq_len, CFG.HD, CFG.T)
+                  : rocke__paged_kv_offset(ctx, kv_tile_idx, linear_half, ctx->kv_head_idx);
         rocke_value_t* v_dst = rocke_b_smem_ptr_add(
             B, V_buf_base, rocke_b_const_i64(B, (int64_t)call * bytes_per_call));
         rocke_b_async_buffer_load_lds_addr(
