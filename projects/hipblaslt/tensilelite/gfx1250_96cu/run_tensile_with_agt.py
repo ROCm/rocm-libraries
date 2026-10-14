@@ -21,15 +21,17 @@ What it does:
   3. One tensilelite-client per GPU loads and initializes on its own, then waits at a release gate (agt_gate.c,
      preloaded) before its first kernel launch. Once every client waits they are released together, so their
      warmups and timed windows line up and no client's setup runs during another's window. A batch is not released
-     while another process has GPU queues on those packages.
+     while another process has GPU queues on those packages; one that another process's GPU work overlapped anyway
+     is kept in the outputs but not in the table, and run again (up to --retries times).
   4. A client's timed window is [enqueue-time - launches x time-us, enqueue-time]: the client stamps enqueue-time
      right after the sync that closes its timed launches. If the shortest window is under --min-window, the batch
      is run again with num-enqueues-per-sync scaled up; the short batch is kept in the outputs but not in the table.
   5. Per GPU: time-us, PFLOPS and TB/s from the client and, from the AGT samples wholly inside the window after its
      first 200 ms (while the power limit settles; a window too short for any such sample uses all of its samples,
-     shown as 0 steady in the table): the mean GFXCLK of the GPU's XCDs (Pre Deep Sleep Freq), their
-     target clock, the PPT_0 GFXCLK limit, package power, busy % of the GPU's XCDs and of the package's other XCDs,
-     and the share of the window that every other GPU's window covered.
+     shown as 0 steady in the table): the mean GFXCLK of the GPU's XCDs (Post Deep Sleep Freq; Pre Deep Sleep
+     Freq reads a constant 100 on gfx1250 firmware 2.125.13.3), their target clock, the PPT_0 GFXCLK limit, package
+     power, busy % of the GPU's XCDs and of the package's other XCDs, and the share of the window that every other
+     GPU's window covered.
 
 The client runs the build's ini, except: device-idx 0 (each client sees only its GPU), results-file, no validation,
 one benchmark of one sync (the syncs' launches merged into it), num-enqueues-per-sync set exactly (no
@@ -37,7 +39,7 @@ min-flops-per-sync or max-enqueues-per-sync adjustment), and --enqueues or --min
 GPU indices are HIP's (KFD topology order). Each GPU's AGT instance is found by PCI address in `agt_internal -i`; when
 a package is partitioned (e.g. DPX), its k-th GPU owns XCDs k x num_xcc to (k + 1) x num_xcc - 1.
 Outputs in <out>/<config>.gpu<list>.<time>/: unilog.csv, run<i>.gpu<d>.{ini,log,csv}, runs.tsv, summary.csv and
-summary.md. Exit status 0 when every run completed.
+summary.md. Exit status 0 when all --runs timed runs completed without other GPU users on their packages.
 """
 
 import argparse
@@ -264,6 +266,8 @@ def build_gate(root):
     """agt_gate.c compiled into <out>/gate/, named after its source hash."""
     src = open(GATE_SRC, "rb").read()
     so = os.path.join(root, "gate", f"agt_gate-{hashlib.sha256(src).hexdigest()[:12]}.so")
+    if re.search(r"[\s:]", so):   # LD_PRELOAD splits at spaces and colons, with no escape
+        fail(f"the gate {so} cannot be preloaded from a path with spaces or colons: pick another --out")
     if not os.path.exists(so):
         os.makedirs(os.path.dirname(so), exist_ok=True)
         tmp = f"{so}.{os.getpid()}.tmp"
@@ -560,9 +564,20 @@ def window(row, launches):
     return end - launches * time_us * 1e-6, end
 
 
+def agt_time(stamp):
+    """Epoch seconds of an AGT time stamp and whether they are exact, or (None, False). AGT writes a sample taken on
+    a whole second without its seconds (13.10.2026 16:57 for 16:57:15.000), which gives only the minute's start."""
+    for fmt, exact in (("%d.%m.%Y %H:%M:%S.%f", True), ("%d.%m.%Y %H:%M", False)):
+        try:
+            return datetime.datetime.strptime(stamp, fmt).timestamp(), exact
+        except ValueError:
+            pass
+    return None, False
+
+
 def load_unilog(path, columns):
     """Sample times and samples ({key: value}) of the wanted columns {key: column name}, sorted by time."""
-    samples = []
+    rows = []
     with open(path, newline="", errors="replace") as f:
         reader = csv.reader(f)
         header = [h.strip() for h in next(reader)]
@@ -571,12 +586,26 @@ def load_unilog(path, columns):
         ts = col.get("Time Stamp", 0)
         for row in reader:
             m = re.search(r"\[\s*(\S+ \S+)\s*\]", row[ts]) if len(row) > ts else None
-            if not m:
+            t, exact = agt_time(m.group(1)) if m else (None, False)
+            if t is None:
                 continue
             values = {}
             for key, i in want.items():
                 values[key] = number(row[i]) if i is not None and i < len(row) else None
-            samples.append((datetime.datetime.strptime(m.group(1), "%d.%m.%Y %H:%M:%S.%f").timestamp(), values))
+            rows.append((t, exact, values))
+    # A sample stamped with only its minute goes on the one whole second strictly between the samples just before and
+    # after it, which must both be exact, and that second must be in the stamped minute; otherwise (an end of the
+    # log, a neighbour without seconds, or none or several whole seconds between them after an AGT stall) it is left
+    # out.
+    samples = []
+    for k, (t, exact, values) in enumerate(rows):
+        if not exact:
+            lo, hi = (rows[j][0] if 0 <= j < len(rows) and rows[j][1] else None for j in (k - 1, k + 1))
+            s = None if lo is None else math.floor(lo) + 1
+            if s is None or hi is None or not (s < hi <= s + 1 and t <= s < t + 60):
+                continue
+            t = s
+        samples.append((t, values))
     samples.sort(key=lambda s: s[0])
     return [t for t, _ in samples], [v for _, v in samples]
 
@@ -608,7 +637,7 @@ def telemetry_columns(lay):
     for d in lay.values():
         inst = d["inst"]
         for x in d["xcds"] + d["other"]:
-            for key, name in (("clk", "Pre Deep Sleep Freq"), ("tgt", "Target Freq"), ("busy", "Busy")):
+            for key, name in (("clk", "Post Deep Sleep Freq"), ("tgt", "Target Freq"), ("busy", "Busy")):
                 cols[f"{inst}.{key}{x}"] = f"GPU{inst} XCD XCD{x} {name}"
         cols[f"{inst}.ppt0"] = f"GPU{inst} Frequency Limiters PPT_0 GFXCLK"
         cols[f"{inst}.power"] = f"GPU{inst} Input Telemetry Telemetry Power"
@@ -726,10 +755,12 @@ def main():
     ap.add_argument("--ready-timeout", type=float, default=1800.0, help="time the clients have to reach the gate, s")
     ap.add_argument("--busy-wait", type=float, default=600.0,
                     help="how long a batch waits for other GPU users to leave its packages, s")
+    ap.add_argument("--retries", type=int, default=3,
+                    help="times a batch that other GPU users on its packages overlapped is run again (default 3)")
     ap.add_argument("--run-timeout", type=float, default=1800.0, help="time a batch may run after its release, s")
     args = ap.parse_args()
-    if args.runs < 1 or (args.enqueues is not None and args.enqueues < 1) or args.min_window < 0:
-        fail("--runs and --enqueues must be at least 1, --min-window at least 0")
+    if args.runs < 1 or (args.enqueues is not None and args.enqueues < 1) or args.min_window < 0 or args.retries < 0:
+        fail("--runs and --enqueues must be at least 1, --min-window and --retries at least 0")
 
     ctx = Context()
     ctx.args, ctx.host = args, socket.gethostname()
@@ -817,10 +848,11 @@ def main():
     for s in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
         signal.signal(s, lambda *_: STOP.append(1))
     per_batch = args.ready_timeout + args.busy_wait + args.run_timeout + 300
-    ctx.agt = Agt(agt, sorted({d["inst"] for d in ctx.lay.values()}), ctx.rundir, per_batch * (args.runs + 1))
+    ctx.agt = Agt(agt, sorted({d["inst"] for d in ctx.lay.values()}), ctx.rundir,
+                  per_batch * (args.runs + 1 + args.retries))
     ctx.tsv = open(os.path.join(ctx.rundir, "runs.tsv"), "w", buffering=1)
     ctx.tsv.write("run\tgpu\tstatus\tlaunches\tprep\trelease\tend\trc\tother_gpu_users\tqueue_gpu_ids\tlog\n")
-    batches, kept, run, failed = [], 0, 0, None
+    batches, kept, run, failed, retries = [], 0, 0, None, 0
     try:
         ctx.agt.start(list(telemetry_columns(ctx.lay).values()))
         while kept < args.runs and not STOP:
@@ -839,6 +871,14 @@ def main():
                 enqueues = math.ceil(enqueues * min(1e4, args.min_window * 1.2 / max(shortest, 1e-6)))
                 say(f"shortest timed window {shortest:.3f} s < --min-window {args.min_window} s: running again with "
                     f"{enqueues} launches (run {run} stays in summary.csv, out of the table)")
+                continue
+            if any(c.foreign for c in clients.values()):
+                if retries == args.retries:
+                    failed = f"other GPU users on the packages in the last {retries + 1} run(s)"
+                    break
+                retries += 1
+                say(f"other GPU users on the packages during run {run}: running it again (retry {retries} of "
+                    f"{args.retries}; run {run} stays in summary.csv, out of the table)")
                 continue
             kept += 1
             if shortest is not None and shortest < args.min_window and args.enqueues is None:
