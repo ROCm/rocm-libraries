@@ -1,6 +1,18 @@
+# gfx942 bf16 D128 causal prefill: CFVST, K LDS double buffering, and V register prefetch
+
+Measured scope: the opt-in `use_cfvst=True`, `lds_num_buffers=2` configuration of the
+gfx942 dense prefill attention kernel, bf16, D128, causal, on gfx942 with 304 CUs.
+Baseline: the `baseline` arm of the ablation harness, compiled in the same process from
+the benchmarked source commit (see
+[Benchmark Environment and Provenance](#benchmark-environment-and-provenance)). Not yet
+recorded: the baseline arm's full spec (in particular `persistent` and `exp2_fast`, and
+whether it was hand-built or resolved through dispatch) and the tolerance of the
+pre-timing correctness check against the chunked FP32 reference. Result: 10.1-16.3% lower
+latency at the 12 measured configurations listed under Results.
+
 ## Introduction
 
-This optimization enables CFVST and implements K LDS Double Buffering and V register pre-fetching on D128 bf16 causual prefill attention gfx942 kernels. This reduces latency by 15% on various shapes. Lever sweep does not bridge the gap.
+This optimization enables CFVST and implements K LDS Double Buffering and V register pre-fetching on D128 bf16 causal prefill attention gfx942 kernels. At the 12 measured configurations it lowers latency by 10.1-16.3%. Lever sweep does not bridge the gap.
 
 ## Problem
 
