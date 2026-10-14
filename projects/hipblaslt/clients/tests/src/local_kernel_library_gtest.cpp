@@ -509,6 +509,70 @@ TEST(LocalKernelLibrary, smoke_FindAllAppliesSoftwarePredicate)
               SolutionSet<ContractionSolution>({plain, dynamicQueue}));
 }
 
+// A kernel pinned to one architecture is never selected on another, which is
+// what keeps the process-wide library per architecture on a mixed node.
+TEST(LocalKernelLibrary, smoke_PinnedKernelServesOnlyItsProcessor)
+{
+    auto         problem = makeProblem();
+    auto         gfx950  = makeGpu();
+    AMDGPU       gfx942(AMDGPU::Processor::gfx942, 304, "gfx942");
+    LocalLibrary library;
+
+    auto solution = makeSolution(problem);
+    ASSERT_TRUE(pinToProcessor(*solution, AMDGPU::Processor::gfx950));
+    int index = library.addSolutions({solution}).at(0);
+    ASSERT_TRUE(library.setExactMatch(localExactShapeFor(problem), index));
+
+    EXPECT_EQ(library.findExact(problem, gfx950), solution);
+    EXPECT_EQ(library.findExact(problem, gfx942), nullptr);
+    EXPECT_TRUE(library.findAll(problem, gfx942).empty());
+    EXPECT_TRUE(library.findAll(problem, gfx942, SolutionLibrarySearchType::HARDWARE_ONLY).empty());
+}
+
+TEST(LocalKernelLibrary, smoke_PinToProcessorKeepsTheAMDGPURoot)
+{
+    using AMDGPUPredicate = std::shared_ptr<Predicates::Predicate<AMDGPU>>;
+    using IsAMDGPU        = Predicates::IsSubclass<Hardware, AMDGPU>;
+    auto   problem        = makeProblem();
+    auto   gfx950         = makeGpu();
+    AMDGPU gfx950Other(AMDGPU::Processor::gfx950, 128, "gfx950");
+    AMDGPU gfx942(AMDGPU::Processor::gfx942, 256, "gfx942");
+
+    // Already pinned to this processor: left as built.
+    auto pinned               = makeSolution(problem);
+    pinned->hardwarePredicate = std::make_shared<IsAMDGPU>(
+        AMDGPUPredicate(std::make_shared<Predicates::And<AMDGPU>>(std::vector<AMDGPUPredicate>{
+            std::make_shared<Predicates::GPU::ProcessorEqual>(AMDGPU::Processor::gfx950),
+            std::make_shared<Predicates::GPU::CUCountEqual>(256)})));
+    auto before = pinned->hardwarePredicate;
+    ASSERT_TRUE(pinToProcessor(*pinned, AMDGPU::Processor::gfx950));
+    EXPECT_EQ(pinned->hardwarePredicate, before);
+
+    // Constrained, but not by processor: keeps its constraint and gains one.
+    auto unpinned               = makeSolution(problem);
+    unpinned->hardwarePredicate = std::make_shared<IsAMDGPU>(
+        AMDGPUPredicate(std::make_shared<Predicates::GPU::CUCountEqual>(256)));
+    ASSERT_TRUE(pinToProcessor(*unpinned, AMDGPU::Processor::gfx950));
+    ASSERT_NE(std::dynamic_pointer_cast<IsAMDGPU>(unpinned->hardwarePredicate), nullptr);
+    EXPECT_TRUE((*unpinned->hardwarePredicate)(gfx950));
+    EXPECT_FALSE((*unpinned->hardwarePredicate)(gfx950Other)) << "the CU count still applies";
+    EXPECT_FALSE((*unpinned->hardwarePredicate)(gfx942));
+
+    // Unconstrained: gains the AMDGPU root.
+    auto open = makeSolution(problem);
+    ASSERT_TRUE(pinToProcessor(*open, AMDGPU::Processor::gfx950));
+    ASSERT_NE(std::dynamic_pointer_cast<IsAMDGPU>(open->hardwarePredicate), nullptr);
+    EXPECT_TRUE((*open->hardwarePredicate)(gfx950Other));
+    EXPECT_FALSE((*open->hardwarePredicate)(gfx942));
+
+    // A root of any other form is refused and left alone.
+    auto other               = makeSolution(problem);
+    other->hardwarePredicate = std::make_shared<Predicates::False<Hardware>>();
+    before                   = other->hardwarePredicate;
+    EXPECT_FALSE(pinToProcessor(*other, AMDGPU::Processor::gfx950));
+    EXPECT_EQ(other->hardwarePredicate, before);
+}
+
 // Readers run while kernels are registered and mapped.
 TEST(LocalKernelLibrary, smoke_ConcurrentReadersAndWriter)
 {

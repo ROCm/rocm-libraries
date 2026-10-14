@@ -10,6 +10,19 @@
 #include <string>
 #include <utility>
 
+#ifdef TENSILELITE_ENABLE_LOCAL_KERNELS
+#include <unistd.h>
+
+#include <atomic>
+#include <chrono>
+#include <cstdint>
+#include <filesystem>
+#include <fstream>
+#include <stdexcept>
+#include <thread>
+#include <vector>
+#endif
+
 namespace
 {
     constexpr char primary[] = "/library/primary.co";
@@ -224,6 +237,156 @@ namespace
         EXPECT_EQ(loads.unloads, 4u);
         EXPECT_EQ(loads.live.size(), 2u);
     }
+
+#ifdef TENSILELITE_ENABLE_LOCAL_KERNELS
+    using TensileLite::hip::SolutionAdapter;
+
+    constexpr char local[] = "/payload/local.co";
+
+    // A local code object that does not load (built for another architecture,
+    // say) is caller input, not memory pressure: the shipped modules stay.
+    TEST_P(HipSolutionAdapterRecoveryTest, smoke_LocalCodeObjectFailureDoesNotEnterRecovery)
+    {
+        expectLoad(helper);
+        ASSERT_EQ(adapter->initializeLazyLoading("gfx942", "/library"), hipSuccess);
+        expectLoad(primary);
+        ASSERT_EQ(adapter->loadCodeObjectFile(primary), hipSuccess);
+        expectLoad(local, GetParam());
+        EXPECT_EQ(adapter->loadLocalCodeObject(local), GetParam());
+        EXPECT_EQ(loads.unloads, 0u);
+        EXPECT_EQ(loads.live.size(), 2u);
+        EXPECT_EQ(adapter->localCodeObjectCount(), 0u);
+        EXPECT_TRUE(adapter->FindCodeObject("primary.co")) << "the shipped module is still loaded";
+    }
+
+    TEST_F(HipSolutionAdapterTest, smoke_LocalCodeObjectLoadsOncePerPath)
+    {
+        expectLoad(local);
+        ASSERT_EQ(adapter->loadLocalCodeObject(local), hipSuccess);
+        EXPECT_EQ(adapter->loadLocalCodeObject(local), hipSuccess);
+        EXPECT_TRUE(adapter->FindCodeObject(local));
+        EXPECT_EQ(adapter->localCodeObjectCount(), 1u);
+    }
+
+    // What a device that did not register a payload does the first time it
+    // runs one of its kernels.
+    TEST_F(HipSolutionAdapterTest, smoke_FindCodeObjectLoadsLocalCodeObjectOnFirstUse)
+    {
+        expectLoad(local);
+        EXPECT_FALSE(adapter->FindCodeObject(local));
+        EXPECT_TRUE(adapter->FindCodeObject(local));
+        EXPECT_EQ(adapter->localCodeObjectCount(), 1u);
+    }
+
+    TEST_F(HipSolutionAdapterTest, smoke_FailedLocalCodeObjectIsRetried)
+    {
+        expectLoad(local, hipErrorNoBinaryForGpu);
+        EXPECT_FALSE(adapter->FindCodeObject(local));
+        expectLoad(local);
+        EXPECT_FALSE(adapter->FindCodeObject(local));
+        EXPECT_EQ(adapter->localCodeObjectCount(), 1u);
+    }
+
+    TEST_F(HipSolutionAdapterTest, smoke_OnlyAbsolutePathsAreLocalCodeObjects)
+    {
+        EXPECT_TRUE(SolutionAdapter::isLocalCodeObject(local));
+        EXPECT_FALSE(SolutionAdapter::isLocalCodeObject("primary.co"));
+        EXPECT_FALSE(SolutionAdapter::isLocalCodeObject("payload/local.co"));
+        EXPECT_FALSE(SolutionAdapter::isLocalCodeObject(""));
+    }
+
+    // hipModuleLoad can crash inside the runtime on such a file.
+    TEST_F(HipSolutionAdapterTest, smoke_TruncatedLocalCodeObjectIsNotLoaded)
+    {
+        auto path = std::filesystem::temp_directory_path()
+                    / ("hipblaslt-truncated-" + std::to_string(getpid()) + ".co");
+
+        // An ELF64 header whose section table lies past the end of the file.
+        std::vector<unsigned char> elf(64, 0);
+        elf[0]    = 0x7f;
+        elf[1]    = 'E';
+        elf[2]    = 'L';
+        elf[3]    = 'F';
+        elf[4]    = 2;
+        elf[5]    = 1;
+        elf[0x29] = 0x10; // e_shoff = 4096
+        elf[0x3A] = 64; // e_shentsize
+        elf[0x3C] = 4; // e_shnum
+
+        // A compressed offload bundle, the shipped format, that records a
+        // larger size than the file has.
+        std::vector<unsigned char> ccob(64, 0);
+        ccob[0] = 'C';
+        ccob[1] = 'C';
+        ccob[2] = 'O';
+        ccob[3] = 'B';
+        ccob[4] = 3; // version
+        ccob[6] = 1; // method
+        ccob[9] = 0x10; // total size = 4096
+
+        for(auto const* bytes : {&elf, &ccob})
+        {
+            std::ofstream(path, std::ios::binary)
+                .write(reinterpret_cast<char const*>(bytes->data()), bytes->size());
+            EXPECT_EQ(adapter->loadLocalCodeObject(path.string()), hipErrorInvalidImage);
+            EXPECT_EQ(adapter->localCodeObjectCount(), 0u);
+        }
+        std::filesystem::remove(path);
+    }
+
+    std::atomic<int> localLoads{0};
+    std::atomic<int> localUnloads{0};
+
+    hipError_t slowLocalLoad(hipModule_t* module, const char*)
+    {
+        int n = ++localLoads;
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        *module = reinterpret_cast<hipModule_t>(static_cast<uintptr_t>(n));
+        return hipSuccess;
+    }
+
+    hipError_t throwingLocalLoad(hipModule_t*, const char*)
+    {
+        throw std::length_error("basic_string::_M_create");
+    }
+
+    hipError_t countLocalUnload(hipModule_t)
+    {
+        ++localUnloads;
+        return hipSuccess;
+    }
+
+    hipError_t noLastError()
+    {
+        return hipSuccess;
+    }
+
+    TEST(HipSolutionAdapterLocalCodeObject, smoke_ConcurrentFirstUseLoadsOnce)
+    {
+        localLoads   = 0;
+        localUnloads = 0;
+        {
+            SolutionAdapter adapter(
+                SolutionAdapter::ModuleApi{slowLocalLoad, countLocalUnload, noLastError});
+            std::vector<std::thread> threads;
+            for(int i = 0; i < 8; i++)
+                threads.emplace_back([&]() { adapter.FindCodeObject(local); });
+            for(auto& thread : threads)
+                thread.join();
+            EXPECT_EQ(localLoads.load(), 1);
+            EXPECT_EQ(adapter.localCodeObjectCount(), 1u);
+        }
+        EXPECT_EQ(localUnloads.load(), 1) << "the adapter unloads the local module";
+    }
+
+    TEST(HipSolutionAdapterLocalCodeObject, smoke_LoadThatThrowsIsAnError)
+    {
+        SolutionAdapter adapter(
+            SolutionAdapter::ModuleApi{throwingLocalLoad, countLocalUnload, noLastError});
+        EXPECT_EQ(adapter.loadLocalCodeObject(local), hipErrorInvalidImage);
+        EXPECT_EQ(adapter.localCodeObjectCount(), 0u);
+    }
+#endif
 
     INSTANTIATE_TEST_SUITE_P(RecoverableErrors,
                              HipSolutionAdapterRecoveryTest,
