@@ -3117,7 +3117,22 @@ class Solution(collections.abc.Mapping):
       and ((numBytesB == 1 and isaInfoMap[isa].asmCaps["HasGLTr8B64"]) \
         or (numBytesB == 2 and isaInfoMap[isa].asmCaps["HasGLTr16B128"]) \
       )
-	  
+
+    # ON/OFF the sourceswap according to the sparse type automatically
+    if state["ProblemType"]["Sparse"]:
+      state["SourceSwap"] = False if state["ProblemType"]["Sparse"] == 1 else True
+
+    # Normalise AccumShuffle to 0 where the shuffle could not run regardless of what the
+    # yaml asked for: without enableLDSTrA there is no layout to bridge, and storeRemap is the
+    # alternative bridge rather than a companion. 1 and 2 would emit the same assembly as 0 in
+    # those cases, so collapsing them keeps one kernel name instead of three.
+    # VectorWidthA == 1 lands here too: the shuffle is a no-op at 1, so an explicit
+    # VectorWidthA: 1 with AccumShuffle 1 or 2 must not get its own kernel name.
+    # Checked here rather than with the other VectorWidthA preconditions because
+    # StoreRemapVectorWidth is not final until the block just above.
+    if not (state["enableLDSTrA"] and state["VectorWidthA"] > 1 and state["SourceSwap"]) or state["StoreRemapVectorWidth"] > 0:
+      state["AccumShuffle"] = 0
+
     # WaveContiguousOutput: the wave-contiguous store (WaveTransposeStore / WaveTransposeStoreTDM) stages
     # accumulator tiles by their (tt0,tt1) tile indices. With VW>1 the store enumeration folds those tiles
     # into vector components (vc0/vc1) of a single (0,0) tile (NotLocalFullTileElementsMFMA), so the store's
@@ -3266,7 +3281,7 @@ class Solution(collections.abc.Mapping):
     # it; its cost grows as VW*VW per group of VW tiles, so the wider settings want a
     # benchmark before use. Placed after the sparse block above because SourceSwap is not
     # final until then.
-    if state["enableLDSTrA"] and state["VectorWidthA"] > 1:
+    if state["enableLDSTrA"] and state["VectorWidthA"] > 1 and state["SourceSwap"]:
       vwA = state["VectorWidthA"]
       if vwA not in (2, 4, 8):
         reject(state, printRejectionReason, \
@@ -3291,11 +3306,6 @@ class Solution(collections.abc.Mapping):
         reject(state, printRejectionReason, \
             "enableLDSTrA with VectorWidthA>1 requires MatrixInstBM(%u) == 1" \
             % state["MatrixInstBM"])
-        return
-      if not state["SourceSwap"]:
-        reject(state, printRejectionReason, \
-            "enableLDSTrA with VectorWidthA>1 requires SourceSwap (the store path takes " \
-            "vectorWidth0 = VectorWidthA only in SourceSwap mode)")
         return
       if state["LocalSplitU"] > 1:
         reject(state, printRejectionReason, \
@@ -7004,17 +7014,6 @@ class Solution(collections.abc.Mapping):
           return
 
       ldsNumBytes = max(ldsNumBytes, ldsNumBytesRemapC)
-
-    # Normalise AccumShuffle to 0 where the shuffle could not run regardless of what the
-    # yaml asked for: without enableLDSTrA there is no layout to bridge, and storeRemap is the
-    # alternative bridge rather than a companion. 1 and 2 would emit the same assembly as 0 in
-    # those cases, so collapsing them keeps one kernel name instead of three.
-    # VectorWidthA == 1 lands here too: the shuffle is a no-op at 1, so an explicit
-    # VectorWidthA: 1 with AccumShuffle 1 or 2 must not get its own kernel name.
-    # Checked here rather than with the other VectorWidthA preconditions because
-    # StoreRemapVectorWidth is not final until the block just above.
-    if not (state["enableLDSTrA"] and state["VectorWidthA"] > 1) or state["StoreRemapVectorWidth"] > 0:
-      state["AccumShuffle"] = 0
 
     state["LdsOffsetBias"] = 0  # TODO: ldsBiasOffset = ldsNumBytesAB
     state["LdsOffsetBiasNonGSU"] = 0
