@@ -434,7 +434,10 @@ class TestLlvmFoldsTheSplit(unittest.TestCase):
     and those are compared with values worked out by hand below. No GPU is
     needed, and no model of mine sits between the IR and the answer.
 
-    Skips without an ``opt``; it uses the IR flavor that matches that ``opt``.
+    Both engines' output is evaluated -- the C++ engine's through the pybind
+    module, so that lane skips where only the archive is built -- rather than the
+    second being inferred from the byte-identity gate. Skips without an ``opt``;
+    it uses the IR flavor that matches that ``opt``.
     """
 
     @classmethod
@@ -458,13 +461,21 @@ class TestLlvmFoldsTheSplit(unittest.TestCase):
             return {0}
         return {int(h, 16) for h in re.findall(r"0xR([0-9A-Fa-f]{4})", operand)}
 
-    def _folded_operands(self, op_id: str, a_bits: int, b_bits: int):
+    def _lower(self, engine: str, kernel: KernelDef) -> str:
+        if engine == "python":
+            return _lower_kernel_to_llvm_python(
+                kernel, arch=_ARCH, llvm_flavor=self.flavor
+            )
+        try:
+            return _lower_via_cpp_engine(serialize(kernel), _ARCH, self.flavor)
+        except BackendError as exc:
+            self.skipTest(f"C++ engine unavailable: {exc}")
+
+    def _folded_operands(
+        self, op_id: str, a_bits: int, b_bits: int, engine: str = "python"
+    ):
         """``(a_small, b_big, a_big, b_small)`` as sets of bf16 patterns."""
-        llvm = _lower_kernel_to_llvm_python(
-            _fold_kernel(op_id, a_bits, b_bits),
-            arch=_ARCH,
-            llvm_flavor=self.flavor,
-        )
+        llvm = self._lower(engine, _fold_kernel(op_id, a_bits, b_bits))
         with tempfile.TemporaryDirectory() as tmp:
             source = Path(tmp) / "split.ll"
             source.write_text(llvm)
@@ -490,28 +501,42 @@ class TestLlvmFoldsTheSplit(unittest.TestCase):
             self._patterns(t) for t in (first[0], first[1], second[0], second[1])
         )
 
-    def test_the_folded_split_matches_the_hand_derived_values(self):
+    def _check_the_hand_derived_values(self, engine: str):
         for op_id in _EMULATED:
             for a_bits, (big, small) in _FOLDED_SPLITS.items():
-                with self.subTest(op_id=op_id, payload=hex(a_bits)):
+                with self.subTest(engine=engine, op_id=op_id, payload=hex(a_bits)):
                     a_small, b_big, a_big, b_small = self._folded_operands(
-                        op_id, a_bits, _SMALLEST_NORMAL
+                        op_id, a_bits, _SMALLEST_NORMAL, engine
                     )
                     self.assertEqual((a_big, a_small), ({big}, {small}))
                     # The other operand is a power of two: its split is exact, so
                     # its remainder is zero, and it is unaffected by the cap.
                     self.assertEqual((b_big, b_small), ({0x0080}, {0}))
 
-    def test_a_finite_payload_never_leaves_an_infinity_in_a_term(self):
+    def _check_no_infinity_in_a_term(self, engine: str):
         """The failure the cap exists for, stated as a property of the folded IR."""
         for op_id in _EMULATED:
             for a_bits in (0x7F7F8000, 0x7F7FE000, 0x7F7FFFFF, 0xFF7FE000):
-                with self.subTest(op_id=op_id, payload=hex(a_bits)):
-                    parts = self._folded_operands(op_id, a_bits, _SMALLEST_NORMAL)
+                with self.subTest(engine=engine, op_id=op_id, payload=hex(a_bits)):
+                    parts = self._folded_operands(
+                        op_id, a_bits, _SMALLEST_NORMAL, engine
+                    )
                     for patterns in parts:
                         for pattern in patterns:
                             # Exponent field all ones is an infinity or a NaN.
                             self.assertNotEqual(pattern & 0x7F80, 0x7F80, hex(pattern))
+
+    def test_the_folded_split_matches_the_hand_derived_values(self):
+        self._check_the_hand_derived_values("python")
+
+    def test_the_cpp_engines_folded_split_matches_too(self):
+        self._check_the_hand_derived_values("cpp")
+
+    def test_a_finite_payload_never_leaves_an_infinity_in_a_term(self):
+        self._check_no_infinity_in_a_term("python")
+
+    def test_the_cpp_engine_never_leaves_an_infinity_in_a_term_either(self):
+        self._check_no_infinity_in_a_term("cpp")
 
 
 class TestOperandContract(unittest.TestCase):

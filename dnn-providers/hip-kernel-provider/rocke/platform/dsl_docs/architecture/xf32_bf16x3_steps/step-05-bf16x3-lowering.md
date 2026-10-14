@@ -182,8 +182,10 @@ claiming a parity that is not yet there.
   subtraction down to the constants the three MMAs receive, and compares them with
   values derived by hand — the top of the finite range, both signs, the first
   overflowing payload, infinities, a NaN, and ordinary payloads that must not move.
-  Against the uncapped split it fails with `big = +inf` and `small = -inf`. It needs
-  no GPU and skips without an `opt`.
+  Both engines' output is evaluated, not only the Python one: the C++ engine's
+  through the `rocke_engine` module (that lane skips where only the archive is
+  built). Against the uncapped split it fails with `big = +inf` and `small = -inf`.
+  It needs no GPU and skips without an `opt`.
 - [`tests/core/test_xf32_bf16x3_lowering.cpp`](../../../tests/core/test_xf32_bf16x3_lowering.cpp)
   — the same properties pinned directly on the C engine, by parsing serialized
   IR and inspecting the emitted text. Wired into ctest as
