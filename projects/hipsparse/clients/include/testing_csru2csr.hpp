@@ -32,7 +32,9 @@
 #include "utility.hpp"
 
 #include <hipsparse.h>
+#include <algorithm>
 #include <string>
+#include <vector>
 
 using namespace hipsparse;
 using namespace hipsparse_test;
@@ -372,5 +374,109 @@ void testing_csru2csr(Arguments argus)
     }
 #endif
 }
+
+#if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
+// Reuse one csru2csrInfo across hipsparseDcsru2csr calls with different nnz
+static void csru2csr_double_sort_check(hipsparseHandle_t      handle,
+                                       hipsparseMatDescr_t    descr,
+                                       csru2csrInfo_t         info,
+                                       int                    m,
+                                       int                    n,
+                                       std::vector<int>       row_ptr,
+                                       std::vector<int>       col_unsorted)
+{
+    int nnz = row_ptr[m];
+
+    std::vector<double> val_unsorted(nnz);
+    for(int i = 0; i < m; ++i)
+        for(int j = row_ptr[i]; j < row_ptr[i + 1]; ++j)
+            val_unsorted[j] = 100.0 * i + col_unsorted[j];
+
+    std::vector<int>    col_gold = col_unsorted;
+    std::vector<double> val_gold(nnz);
+    for(int i = 0; i < m; ++i)
+        std::sort(col_gold.begin() + row_ptr[i], col_gold.begin() + row_ptr[i + 1]);
+    for(int i = 0; i < m; ++i)
+        for(int j = row_ptr[i]; j < row_ptr[i + 1]; ++j)
+            val_gold[j] = 100.0 * i + col_gold[j];
+
+    int*    drow;
+    int*    dcol;
+    double* dval;
+    CHECK_HIP_ERROR(hipMalloc((void**)&drow, sizeof(int) * (m + 1)));
+    CHECK_HIP_ERROR(hipMalloc((void**)&dcol, sizeof(int) * nnz));
+    CHECK_HIP_ERROR(hipMalloc((void**)&dval, sizeof(double) * nnz));
+    CHECK_HIP_ERROR(
+        hipMemcpy(drow, row_ptr.data(), sizeof(int) * (m + 1), hipMemcpyHostToDevice));
+    CHECK_HIP_ERROR(
+        hipMemcpy(dcol, col_unsorted.data(), sizeof(int) * nnz, hipMemcpyHostToDevice));
+    CHECK_HIP_ERROR(
+        hipMemcpy(dval, val_unsorted.data(), sizeof(double) * nnz, hipMemcpyHostToDevice));
+
+    size_t buffer_size = 0;
+    ASSERT_EQ(hipsparseDcsru2csr_bufferSizeExt(
+                  handle, m, n, nnz, dval, drow, dcol, info, &buffer_size),
+              HIPSPARSE_STATUS_SUCCESS);
+    void* dbuffer;
+    CHECK_HIP_ERROR(hipMalloc(&dbuffer, buffer_size > 0 ? buffer_size : 1));
+
+    ASSERT_EQ(hipsparseDcsru2csr(handle, m, n, nnz, descr, dval, drow, dcol, info, dbuffer),
+              HIPSPARSE_STATUS_SUCCESS);
+
+    std::vector<int>    col_out(nnz);
+    std::vector<double> val_out(nnz);
+    CHECK_HIP_ERROR(
+        hipMemcpy(col_out.data(), dcol, sizeof(int) * nnz, hipMemcpyDeviceToHost));
+    CHECK_HIP_ERROR(
+        hipMemcpy(val_out.data(), dval, sizeof(double) * nnz, hipMemcpyDeviceToHost));
+
+    EXPECT_EQ(col_out, col_gold);
+    EXPECT_EQ(val_out, val_gold);
+
+    CHECK_HIP_ERROR(hipFree(drow));
+    CHECK_HIP_ERROR(hipFree(dcol));
+    CHECK_HIP_ERROR(hipFree(dval));
+    CHECK_HIP_ERROR(hipFree(dbuffer));
+}
+
+TEST(csru2csr_info_reuse, double_realloc_and_empty_quick_return)
+{
+    std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
+    hipsparseHandle_t              handle = unique_ptr_handle->handle;
+    std::unique_ptr<descr_struct>  unique_ptr_descr(new descr_struct);
+    hipsparseMatDescr_t            descr = unique_ptr_descr->descr;
+    hipsparseSetMatIndexBase(descr, HIPSPARSE_INDEX_BASE_ZERO);
+    std::unique_ptr<csru2csr_struct> unique_ptr_info(new csru2csr_struct);
+    csru2csrInfo_t                   info = unique_ptr_info->info;
+
+    std::vector<int> small_ptr{0, 3, 5};
+    std::vector<int> small_col{3, 0, 2, 1, 0};
+    std::vector<int> large_ptr{0, 4, 6, 9};
+    std::vector<int> large_col{4, 1, 3, 0, 2, 0, 3, 1, 2};
+
+    // First call allocates info->P for nnz = 5
+    csru2csr_double_sort_check(handle, descr, info, 2, 4, small_ptr, small_col);
+    // info->size (5) != nnz (9): permutation is freed and reallocated
+    csru2csr_double_sort_check(handle, descr, info, 3, 5, large_ptr, large_col);
+
+    // Quick returns succeed and do not touch info
+    EXPECT_EQ(hipsparseDcsru2csr(
+                  handle, 3, 5, 0, descr, (double*)nullptr, nullptr, nullptr, info, nullptr),
+              HIPSPARSE_STATUS_SUCCESS);
+    EXPECT_EQ(hipsparseDcsru2csr(
+                  handle, 0, 5, 0, descr, (double*)nullptr, nullptr, nullptr, info, nullptr),
+              HIPSPARSE_STATUS_SUCCESS);
+    EXPECT_EQ(hipsparseDcsru2csr(
+                  handle, 3, 0, 0, descr, (double*)nullptr, nullptr, nullptr, info, nullptr),
+              HIPSPARSE_STATUS_SUCCESS);
+    EXPECT_EQ(hipsparseDcsru2csr(
+                  handle, 0, 5, 3, descr, (double*)nullptr, nullptr, nullptr, info, nullptr),
+              HIPSPARSE_STATUS_INVALID_VALUE);
+
+    // Info is still usable after the quick returns, including shrinking again
+    csru2csr_double_sort_check(handle, descr, info, 3, 5, large_ptr, large_col);
+    csru2csr_double_sort_check(handle, descr, info, 2, 4, small_ptr, small_col);
+}
+#endif
 
 #endif // TESTING_CSRU2CSR_HPP
