@@ -3,18 +3,25 @@
 
 """On-device numeric gate for the emulated TF32 atoms (BF16x3).
 
-Runs one wave of each emulated gfx950 atom and answers two questions the host
+Runs one wave of each emulated gfx950 atom and answers three questions the host
 tests cannot:
 
 1. **Is the expansion faithful?** The emulated ``tile.mma`` is compared, bit
    for bit, against a hand-written kernel that issues the same three BF16
    MFMAs over host-split operands in the same order. Agreement means the
    lowering's split, term order and accumulator threading are what the recipe
-   says they are -- on real silicon, not in an IR text check.
+   says they are -- on real silicon, not in an IR text check. The comparison is
+   on the ``uint32`` bit patterns, so it distinguishes ``+0`` from ``-0`` and
+   one NaN from another, which a float compare would not.
 
 2. **Is it accurate?** Against an absolute reference, with the emulation
    landing near fp32 and a plain BF16 MMA of the same operands landing far
    short of it.
+
+3. **Does it hold at the edges of the payload domain?** The top 2^-9 of the
+   finite range, where bf16 rounding overflows to infinity and an uncapped split
+   makes a finite product NaN; and infinities and NaNs, which must make every
+   output they feed non-finite -- and no other.
 
 Both checks are **layout-free by construction**, which is what makes them
 trustworthy without a hand-derived MFMA lane map:
@@ -78,6 +85,50 @@ _BETA = float(np.float32(1.0 - 2.0**-11 + 2.0**-19))
 # bounds is wide enough that neither is a coin flip.
 _TOL_EMULATED = 2.0**-16
 _MIN_BF16_ERROR = 2.0**-13
+
+# Payloads at the top of the finite range, where bf16 round-to-nearest-even
+# overflows to infinity (0x7f7f8000 and up). 0x7f7fe000 is TF32's largest finite
+# value and 0x7f7fffff is fp32's. The lowering caps the leading bf16 at its
+# largest finite value so these still split into finite parts.
+_TOP_BINADE = (0x7F7F8000, 0x7F7FA000, 0x7F7FC000, 0x7F7FE000, 0x7F7FFFFF)
+_SMALLEST_NORMAL = 0x00800000
+
+# The edge cases run on constant operands, so the answer is K * alpha * beta at
+# every output position whatever the layout. Each is (label, alpha bits, beta
+# bits, expectation); expectations are "finite" (within the emulated
+# tolerance of the exact product), "+inf", "-inf", "nan", or "non-finite"
+# (infinity or NaN, which one is not promised).
+_EDGE_CASES = (
+    ("top binade x smallest normal", 0x7F7FE000, _SMALLEST_NORMAL, "finite"),
+    ("-top binade x smallest normal", 0xFF7FE000, _SMALLEST_NORMAL, "finite"),
+    (
+        "first overflowing payload x smallest normal",
+        0x7F7F8000,
+        _SMALLEST_NORMAL,
+        "finite",
+    ),
+    ("largest finite x smallest normal", 0x7F7FFFFF, _SMALLEST_NORMAL, "finite"),
+    (
+        "just below the threshold x smallest normal",
+        0x7F7F7FFF,
+        _SMALLEST_NORMAL,
+        "finite",
+    ),
+    ("product overflows", 0x7F7FE000, 0x7F7FE000, "+inf"),
+    ("product overflows, negative", 0x7F7FE000, 0xFF7FE000, "-inf"),
+    ("+inf x 1", 0x7F800000, 0x3F800000, "+inf"),
+    ("-inf x 1", 0xFF800000, 0x3F800000, "-inf"),
+    ("1 x +inf", 0x3F800000, 0x7F800000, "+inf"),
+    ("+inf x +inf", 0x7F800000, 0x7F800000, "+inf"),
+    ("+inf x 0", 0x7F800000, 0x00000000, "nan"),
+    ("NaN x 1", 0x7FC00000, 0x3F800000, "nan"),
+    ("1 x NaN", 0x3F800000, 0x7FC00000, "nan"),
+    ("NaN held in the low bits x 1", 0x7F800001, 0x3F800000, "nan"),
+    # An infinity against a partner large enough that its own residual overflows
+    # against the cap: infinity or NaN, but never a finite number.
+    ("+inf x large partner", 0x7F800000, 0x442BA000, "non-finite"),
+    ("+inf x large negative partner", 0x7F800000, 0xC42BA000, "non-finite"),
+)
 
 # The order the lowering uses. Reproduced here rather than imported so that a
 # silent change to the lowering shows up as a device mismatch instead of being
@@ -170,8 +221,11 @@ def _to_bf16(x: np.ndarray) -> np.ndarray:
     RNE is what the ISA's fp32->bf16 conversion does, so the host split must
     match it or the differential would compare two different recipes. The
     carry into the exponent is handled by the add, which is why this is a
-    bias-and-shift rather than a truncate. Infinities and NaNs are out of
-    scope -- every operand here is finite by construction.
+    bias-and-shift rather than a truncate. A payload at the top of the range
+    carries all the way into an infinity, as the hardware narrowing does; the
+    cap that holds it back is in ``_split``. Infinities and NaNs never reach this
+    differential -- the operands it compares are finite by construction -- and
+    the non-finite cases are checked against closed-form expectations instead.
     """
     u = np.ascontiguousarray(x, dtype=np.float32).view(np.uint32)
     bias = np.uint32(0x7FFF) + ((u >> np.uint32(16)) & np.uint32(1))
@@ -183,9 +237,19 @@ def _from_bf16(u16: np.ndarray) -> np.ndarray:
     return (u16.astype(np.uint32) << np.uint32(16)).view(np.float32)
 
 
+def _cap(bf16: np.ndarray) -> np.ndarray:
+    """Hold bf16 bit patterns at the largest finite value, keeping the sign.
+
+    The lowering's cap, on the same patterns: an unsigned compare of each
+    against ``0x7f7f`` with its own sign bit attached.
+    """
+    cap = (bf16 & np.uint16(0x8000)) | np.uint16(0x7F7F)
+    return np.where(bf16 > cap, cap, bf16).astype(np.uint16)
+
+
 def _split(x: np.ndarray):
     """The host mirror of the lowering's Dekker split, as bf16 bit patterns."""
-    big = _to_bf16(x)
+    big = _cap(_to_bf16(x))
     small = _to_bf16(x - _from_bf16(big))
     return big, small
 
@@ -206,6 +270,101 @@ def _launch(kernel: KernelDef, values, *, wave_size: int):
     launcher = KernelLauncher(hsaco=hsaco, kernel_name=kernel.name, signature=signature)
     launcher(values, config=LaunchConfig(grid=(1, 1, 1), block=(wave_size, 1, 1)))
     synchronize_and_release()
+
+
+def _differ(label: str, op_id: str, got: np.ndarray, want: np.ndarray) -> list[str]:
+    """Report, and return failures for, any slot where two results differ in bits.
+
+    The ``uint32`` views are what is compared. A float compare treats ``+0`` and
+    ``-0`` as equal and a NaN as unequal to itself, so it would pass a sign
+    flip on a zero and fail a result that is bit-for-bit right.
+    """
+    mismatched = int(
+        np.count_nonzero(
+            np.ascontiguousarray(got, dtype=np.float32).view(np.uint32)
+            != np.ascontiguousarray(want, dtype=np.float32).view(np.uint32)
+        )
+    )
+    print(
+        f"  [{op_id}] expansion vs hand-written BF16x3, {label}: {mismatched} slots differ"
+    )
+    if mismatched:
+        return [f"{op_id}: expansion does not match the hand-written recipe ({label})"]
+    return []
+
+
+def _edge_failures(op_id: str, atom, emulated, a_len: int, b_len: int) -> list[str]:
+    """The edges of the payload domain, on constant operands (see ``_EDGE_CASES``)."""
+    failures: list[str] = []
+    k = float(atom.k)
+    for label, alpha_bits, beta_bits, expect in _EDGE_CASES:
+        alpha = np.array([alpha_bits], dtype=np.uint32).view(np.float32)[0]
+        beta = np.array([beta_bits], dtype=np.uint32).view(np.float32)[0]
+        got = emulated(
+            np.full(a_len, alpha, dtype=np.float32),
+            np.full(b_len, beta, dtype=np.float32),
+        )
+        if expect == "finite":
+            truth = k * float(alpha) * float(beta)
+            err = float(np.abs(got.astype(np.float64) - truth).max()) / abs(truth)
+            ok = bool(np.isfinite(got).all()) and err < _TOL_EMULATED
+            shown = f"rel={err:.3e}"
+        elif expect in ("+inf", "-inf"):
+            ok = bool((got == (np.inf if expect == "+inf" else -np.inf)).all())
+            shown = f"{got[0]}"
+        elif expect == "nan":
+            ok = bool(np.isnan(got).all())
+            shown = f"{got[0]}"
+        else:
+            ok = bool((~np.isfinite(got)).all())
+            shown = f"{got[0]}"
+        print(f"  [{op_id}] {label}: expect {expect}, got {shown}")
+        if not ok:
+            failures.append(f"{op_id}: {label}: expected {expect}, got {shown}")
+    return failures
+
+
+def _propagation_failures(
+    op_id: str, atom, emulated, a: np.ndarray, b: np.ndarray
+) -> list[str]:
+    """A non-finite payload reaches exactly the outputs that consume it.
+
+    One element of A feeds one row of the result -- ``n`` outputs -- and one
+    element of B one column -- ``m`` outputs -- whatever the lane layout, which
+    is what keeps this check layout-free. Every other output must come back
+    bit-identical to the run without the infinity, so a poisoned wave or a
+    result that smeared across lanes is caught as well as one that went missing.
+    """
+    failures: list[str] = []
+    m, n, _ = atom.shape
+    clean = emulated(a, b)
+    for name, bad in (("+inf", np.inf), ("-inf", -np.inf), ("NaN", np.nan)):
+        for operand, fed in (("A", n), ("B", m)):
+            poisoned_a, poisoned_b = a.copy(), b.copy()
+            if operand == "A":
+                poisoned_a[a.size // 3] = bad
+            else:
+                poisoned_b[b.size // 3] = bad
+            got = emulated(poisoned_a, poisoned_b)
+            hit = ~np.isfinite(got)
+            same = np.array_equal(
+                got[~hit].view(np.uint32), clean[~hit].view(np.uint32)
+            )
+            print(
+                f"  [{op_id}] {name} in one element of {operand}: "
+                f"{int(hit.sum())} non-finite outputs (expected {fed}), "
+                f"the rest {'unchanged' if same else 'CHANGED'}"
+            )
+            if int(hit.sum()) != fed:
+                failures.append(
+                    f"{op_id}: {name} in {operand} made {int(hit.sum())} outputs "
+                    f"non-finite, expected exactly {fed}"
+                )
+            if not same:
+                failures.append(
+                    f"{op_id}: {name} in {operand} changed an output it does not feed"
+                )
+    return failures
 
 
 def _run_atom(op_id: str) -> list[str]:
@@ -270,10 +429,23 @@ def _run_atom(op_id: str) -> list[str]:
     rng = np.random.default_rng(2208)
     a = rng.standard_normal(a_len, dtype=np.float32)
     b = rng.standard_normal(b_len, dtype=np.float32)
-    mismatched = int(np.count_nonzero(emulated(a, b) != handwritten(a, b, _TERMS)))
-    print(f"  [{op_id}] expansion vs hand-written BF16x3: {mismatched} slots differ")
-    if mismatched:
-        failures.append(f"{op_id}: expansion does not match the hand-written recipe")
+    failures.extend(
+        _differ("random operands", op_id, emulated(a, b), handwritten(a, b, _TERMS))
+    )
+
+    # The same differential with the top of the finite range mixed in, which is
+    # where the cap does its work. The partner is scaled down so that no sum of
+    # products reaches infinity: this one is about the split, and an overflowing
+    # sum would only add NaN payload bits to compare.
+    edge_a = a.copy()
+    top = np.array(_TOP_BINADE, dtype=np.uint32)
+    top = np.concatenate([top, top | np.uint32(0x80000000)]).view(np.float32)
+    edge_a[::7] = np.resize(top, edge_a[::7].shape)
+    edge_b = (b * np.float32(2.0**-8)).astype(np.float32)
+    got, want = emulated(edge_a, edge_b), handwritten(edge_a, edge_b, _TERMS)
+    failures.extend(_differ("top-binade operands", op_id, got, want))
+    if not np.isfinite(got).all():
+        failures.append(f"{op_id}: a top-binade payload produced a non-finite output")
 
     # (2) Accuracy, on constant operands, where the truth is K*alpha*beta at
     # every output position regardless of layout.
@@ -298,6 +470,19 @@ def _run_atom(op_id: str) -> list[str]:
             f"{op_id}: the BF16 baseline was too accurate ({bf16_err:.3e}); "
             "the operands no longer exercise the split"
         )
+
+    # (3) The edges of the payload domain.
+    failures.extend(_edge_failures(op_id, atom, emulated, a_len, b_len))
+    rng = np.random.default_rng(2209)
+    failures.extend(
+        _propagation_failures(
+            op_id,
+            atom,
+            emulated,
+            rng.standard_normal(a_len, dtype=np.float32),
+            rng.standard_normal(b_len, dtype=np.float32),
+        )
+    )
     return failures
 
 
