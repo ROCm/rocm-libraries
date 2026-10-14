@@ -837,18 +837,11 @@ def _build_warp_tiled(spec: GdnDecodeSpec) -> KernelDef:
             # xor 1/2 via quad_perm (VALU DPP: no LDS crossbar / no lgkmcnt(0) stall);
             # xor 4 crosses the 4-lane quad so it stays on ds_swizzle.
             #
-            # This split is NOT applied at the four sibling sites that make the
-            # same choice -- they are all still on plain warp_shuffle_xor, and
-            # each would take the same win for masks 1 and 2:
-            #   helpers/reduction.py `_warp_xor_reduce` (the generic form of
-            #     this loop, in a module this kernel already imports)
-            #   cpp/helpers/attention.cpp `rocke_warp_xor_reduce_sum` (its twin)
-            #   kernels/gfx950/kda_chunkwise.py `_reduce16_fadd`
-            #   attention_tiled_2d.py + its gfx950 twin, register transpose
-            # Sweeping them touches two engines and three families, so it is
-            # deliberately not done here; see the follow-up ticket. Anyone
-            # editing this loop should consider whether the sibling is still
-            # waiting.
+            # The four sibling sites that make the same choice now carry this
+            # split too: helpers/reduction.py `_warp_xor_reduce` and its C++ twin
+            # cpp/helpers/attention.cpp `rocke_warp_xor_reduce_sum`,
+            # kernels/gfx950/kda_chunkwise.py `_reduce16_fadd`, and
+            # attention_tiled_2d.py + its gfx950 twin (register transpose).
             for off in shfl:
                 if off <= 2:
                     v = b.fadd(v, b.warp_shuffle_xor_quad(v, off))

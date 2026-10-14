@@ -612,8 +612,15 @@ def is_valid_spec(spec: KdaChunkPrepSpec, arch: str = "gfx950") -> Tuple[bool, s
 
 def _reduce16_fadd(b: IRBuilder, v):
     """Sum ``v`` across the 16-lane row subgroup (XOR butterfly)."""
+    # Masks 1 and 2 stay inside the 4-lane quad -> warp_shuffle_xor_dpp
+    # (quad_perm on gfx9: VALU DPP, no LDS crossbar / no lgkmcnt(0) wait);
+    # masks 4 and 8 cross the quad -> ds_swizzle.
     for mask in (1, 2, 4, 8):
-        v = b.fadd(v, b.warp_shuffle_xor(v, mask))
+        if mask in (1, 2):
+            remote = b.warp_shuffle_xor_dpp(v, mask)
+        else:
+            remote = b.warp_shuffle_xor(v, mask)
+        v = b.fadd(v, remote)
     return v
 
 
