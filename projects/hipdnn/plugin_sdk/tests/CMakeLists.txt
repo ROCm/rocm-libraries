@@ -191,8 +191,12 @@ if(HIPDNN_UHD_GEN_RUNNABLE)
     # this machine, so the test skips where they do not exist. It finds hipdnn_uhd_features
     # beside itself: both are built into and installed to the same bin directory.
     get_filename_component(_uhd_gen_tools_dir "${CMAKE_CURRENT_SOURCE_DIR}/../../tools" ABSOLUTE)
+    # Forward slashes: these become C string literals, where a Windows path's `\r` or `\t`
+    # would be an escape.
+    string(REPLACE "\\" "/" _uhd_gen_python "${Python3_EXECUTABLE}")
+    string(REPLACE "\\" "/" _uhd_gen_tools_dir "${_uhd_gen_tools_dir}")
     target_compile_definitions(hipdnn_plugin_sdk_tests
-        PRIVATE HIPDNN_UHD_GEN_PYTHON="${Python3_EXECUTABLE}"
+        PRIVATE HIPDNN_UHD_GEN_PYTHON="${_uhd_gen_python}"
                 HIPDNN_UHD_GEN_TOOLS_DIR="${_uhd_gen_tools_dir}")
 
     add_dependencies(hipdnn_plugin_sdk_tests hipdnn_uhd_features)

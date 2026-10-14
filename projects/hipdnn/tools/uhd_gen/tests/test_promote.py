@@ -481,9 +481,9 @@ def test_an_unreadable_journal_is_refused_by_name_and_left_in_place(tmp_path):
     assert run_promote(promote_args) == 0, "deleting it, as the message says, unblocks"
 
 
-@pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits")
 def test_promoted_files_are_as_readable_as_the_files_they_join(tmp_path):
-    """Staged with mkstemp (0600); installed with the replaced file's mode, or the umask's."""
+    """Staged with mkstemp (0600 where modes have group and other bits); installed with
+    the replaced file's mode, or the mode a new file gets under the umask."""
     tree = _tree(tmp_path / "tree")
     model = _model(tmp_path / "model", tree)
     for path in tree.rglob("*"):
@@ -492,13 +492,21 @@ def test_promoted_files_are_as_readable_as_the_files_they_join(tmp_path):
     umask = os.umask(0o022)
     try:
         plan = build_plan(model, tree)
+        written = [
+            plan.destination_descriptor,
+            plan.ued_path,
+            *(d for _, d in plan.copies),
+        ]
+        reference = tmp_path / "new_file"
+        reference.write_text("")
+        expected = {
+            path: (path if path.exists() else reference).stat().st_mode & 0o777
+            for path in written
+        }
         _apply(plan)
     finally:
         os.umask(umask)
-    written = [plan.destination_descriptor, plan.ued_path, *(d for _, d in plan.copies)]
-    assert {path: oct(path.stat().st_mode & 0o777) for path in written} == {
-        path: "0o644" for path in written
-    }
+    assert {path: path.stat().st_mode & 0o777 for path in written} == expected
 
 
 @pytest.mark.parametrize(
