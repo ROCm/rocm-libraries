@@ -25,7 +25,7 @@ DTYPES = ("bf16", "fp16")
 
 FEATURES = (
     *(Feature(f"dtype:{dtype}", ("q_tensor_uid",)) for dtype in DTYPES),
-    *(Feature(f"head_dim:{d}", ("q_tensor_uid",)) for d in sdpa.HEAD_DIMS),
+    *(Feature(f"head_dim:{d}", sdpa.QV_FIELDS) for d in sdpa.HEAD_DIMS.values()),
     Feature("heads:mha", sdpa.QK_FIELDS, "as many k/v heads as q heads"),
     Feature("heads:gqa", sdpa.QK_FIELDS, "fewer k/v heads than q heads, more than one"),
     Feature("heads:mqa", sdpa.QK_FIELDS, "one k/v head"),
@@ -61,13 +61,12 @@ FEATURES = (
 )
 
 NOT_FEATURES = {
-    "v_tensor_uid": "required; its shape follows k's, so it varies nothing k does not",
     "o_tensor_uid": "required; its shape follows q's, so it varies nothing q does not",
     "do_tensor_uid": "required; its shape follows o's, so it varies nothing q does not",
     "stats_tensor_uid": "required; the forward's softmax stats, shaped by q and k",
     "dq_tensor_uid": "required; its shape follows q's, so it varies nothing q does not",
     "dk_tensor_uid": "required; its shape follows k's, so it varies nothing k does not",
-    "dv_tensor_uid": "required; its shape follows v's, so it varies nothing k does not",
+    "dv_tensor_uid": "required; its shape follows v's, so it varies nothing v does not",
 }
 
 

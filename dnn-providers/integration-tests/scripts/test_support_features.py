@@ -774,13 +774,17 @@ def _sdpa(
     *,
     q_dims=(2, 8, 128, 128),
     k_dims=(2, 8, 128, 128),
+    v_dims=None,
     dtype="bfloat16",
     strides=_bhsd_strides,
     inputs=None,
     outputs=None,
     **attrs,
 ) -> tuple[dict, dict]:
-    """An SDPA node and its tensors, with every port and attribute unset."""
+    """An SDPA node and its tensors, with every port and attribute unset.
+
+    v takes k's dims unless ``v_dims`` says otherwise.
+    """
     tensors = {
         uid: {
             "uid": uid,
@@ -788,11 +792,11 @@ def _sdpa(
             "strides": strides(list(dims)),
             "data_type": dtype,
         }
-        for uid, dims in ((1, q_dims), (2, k_dims))
+        for uid, dims in ((1, q_dims), (2, k_dims), (8, v_dims or k_dims))
     }
     node = {
         "type": "SdpaAttributes",
-        "inputs": {"q_tensor_uid": 1, "k_tensor_uid": 2, "v_tensor_uid": 2}
+        "inputs": {"q_tensor_uid": 1, "k_tensor_uid": 2, "v_tensor_uid": 8}
         | (inputs or {}),
         "outputs": {"o_tensor_uid": 3} | (outputs or {}),
         "attributes": {
@@ -875,13 +879,37 @@ class TestSdpaExtract:
             self._extract(strides=lambda dims: [1, 2, 3, 4])
 
     @pytest.mark.parametrize(
+        "qk, v, expected",
+        [
+            (64, 64, "head_dim:64"),
+            (192, 192, "head_dim:192"),
+            # A narrower v is its own kernel, not a 192.
+            (192, 128, "head_dim:192x128"),
+        ],
+    )
+    def test_head_dim_reads_q_and_v(self, qk: int, v: int, expected: str) -> None:
+        head_dim = self._group(
+            "head_dim",
+            q_dims=(2, 8, 128, qk),
+            k_dims=(2, 8, 128, qk),
+            v_dims=(2, 8, 128, v),
+        )
+        assert head_dim == expected
+
+    @pytest.mark.parametrize(
         "kwargs, match",
         [
-            ({"q_dims": (2, 8, 128, 96)}, "head dim 96"),
+            ({"q_dims": (2, 8, 128, 96)}, "head dim 96 x 128"),
+            # Each head dim is catalogued, the pair is not.
+            ({"v_dims": (2, 8, 128, 64)}, "head dim 128 x 64"),
             ({"dtype": "float"}, "dtype 'float'"),
             (
                 {"q_dims": (8, 128, 128), "strides": lambda dims: [1] * len(dims)},
-                "rank",
+                "q / k / v rank 3 / 4 / 4",
+            ),
+            (
+                {"v_dims": (2, 8, 128), "strides": lambda dims: [1] * len(dims)},
+                "q / k / v rank 4 / 4 / 3",
             ),
         ],
     )
@@ -949,7 +977,14 @@ class TestSdpaExtract:
                 "q_dims": (2, 8, 64, 192),
                 "k_dims": (2, 2, 128, 192),
             },
-            {"dtype": "fp8_e5m2", "strides": _bshd_strides, "causal_mask": True},
+            {
+                "dtype": "fp8_e5m2",
+                "strides": _bshd_strides,
+                "causal_mask": True,
+                "q_dims": (2, 8, 128, 192),
+                "k_dims": (2, 8, 128, 192),
+                "v_dims": (2, 8, 128, 128),
+            },
             {"causal_mask_bottom_right": True, "attn_scale_value": 0.5},
             {"left_bound": 8, "right_bound": 8, "inputs": {"scale_tensor_uid": 9}},
             {
@@ -1063,7 +1098,13 @@ class TestSdpaBackwardExtract:
             {},
             {"dtype": "half", "q_dims": (2, 8, 64, 64), "k_dims": (2, 1, 128, 64)},
             {"q_dims": (2, 8, 128, 192), "k_dims": (2, 2, 128, 192)},
-            {"strides": _bshd_strides, "causal_mask": True},
+            {
+                "strides": _bshd_strides,
+                "causal_mask": True,
+                "q_dims": (2, 8, 128, 192),
+                "k_dims": (2, 8, 128, 192),
+                "v_dims": (2, 8, 128, 128),
+            },
             {"causal_mask_bottom_right": True, "attn_scale_value": 0.5},
             {"left_bound": 8, "right_bound": 8, "inputs": {"scale_tensor_uid": 9}},
             {

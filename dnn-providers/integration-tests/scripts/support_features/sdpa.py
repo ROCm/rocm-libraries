@@ -3,8 +3,10 @@
 """Feature catalog for ``SdpaAttributes`` (scaled dot-product attention, forward).
 
 The features come from ``sdpa_attributes.fbs``. A few are read from the q / k
-tensors rather than from attributes -- dtype, head dim, head grouping, layout
-and sequence shape -- since the schema carries those only as tensor uids.
+/ v tensors rather than from attributes -- dtype, head dim, head grouping,
+layout and sequence shape -- since the schema carries those only as tensor
+uids. ``head_dim`` reads q and v together: ``192x128`` is a q / k head dim of
+192 with a v head dim of 128, its own kernel rather than a 192.
 
 Exclusive groups (exactly one feature per graph): ``dtype``, ``head_dim``,
 ``heads``, ``layout``, ``mask``, ``seq``, ``scale``. The rest are optional
@@ -40,9 +42,17 @@ MASK_FIELDS = (
     "diagonal_alignment",
 )
 QK_FIELDS = ("q_tensor_uid", "k_tensor_uid")
+QV_FIELDS = ("q_tensor_uid", "v_tensor_uid")
 
 DTYPES = ("bf16", "fp16", "fp8e4m3", "fp8e5m2")
-HEAD_DIMS = (64, 128, 192)
+# (q / k head dim, v head dim) -> head_dim value. v may be narrower than q / k:
+# the ASM kernels run 192 x 128 (fmha_v3_*/*.csv).
+HEAD_DIMS = {
+    (64, 64): "64",
+    (128, 128): "128",
+    (192, 192): "192",
+    (192, 128): "192x128",
+}
 # Order of q's dims by decreasing stride -> layout name. Dims are (b, h, s, d).
 LAYOUTS = {(0, 1, 2, 3): "bhsd", (0, 2, 1, 3): "bshd"}
 
@@ -51,7 +61,7 @@ FEATURES = (
     Feature("dtype:fp16", ("q_tensor_uid",)),
     Feature("dtype:fp8e4m3", ("q_tensor_uid",) + _FP8_SCALES),
     Feature("dtype:fp8e5m2", ("q_tensor_uid",) + _FP8_SCALES),
-    *(Feature(f"head_dim:{d}", ("q_tensor_uid",)) for d in HEAD_DIMS),
+    *(Feature(f"head_dim:{d}", QV_FIELDS) for d in HEAD_DIMS.values()),
     Feature("heads:mha", QK_FIELDS, "as many k/v heads as q heads"),
     Feature("heads:gqa", QK_FIELDS, "fewer k/v heads than q heads, more than one"),
     Feature("heads:mqa", QK_FIELDS, "one k/v head"),
@@ -96,7 +106,6 @@ FEATURES = (
 )
 
 NOT_FEATURES = {
-    "v_tensor_uid": "required; its shape follows k's, so it varies nothing k does not",
     "o_tensor_uid": "required; its shape follows q's, so it varies nothing q does not",
     "mma_core_mode": "a numerics hint to the engine, not a variant of the op",
     "implementation": "an engine-selection hint, not a variant of the op",
@@ -157,18 +166,20 @@ def core_features(
     ``seq:decode`` or as an ordinary ``q_eq_kv`` / ``q_ne_kv`` shape.
     """
     inputs = node.get("inputs") or {}
-    q = tensors_by_uid[inputs["q_tensor_uid"]]
-    k = tensors_by_uid[inputs["k_tensor_uid"]]
-    if len(q["dims"]) != 4 or len(k["dims"]) != 4:
-        raise FeatureError(f"q / k rank {len(q['dims'])} / {len(k['dims'])}, not 4")
-    _, heads_q, seq_q, head_dim = q["dims"]
+    q, k, v = (tensors_by_uid[inputs[f"{port}_tensor_uid"]] for port in "qkv")
+    ranks = [len(t["dims"]) for t in (q, k, v)]
+    if ranks != [4, 4, 4]:
+        raise FeatureError(f"q / k / v rank {' / '.join(map(str, ranks))}, not 4")
+    _, heads_q, seq_q, head_dim_qk = q["dims"]
     _, heads_kv, seq_kv, _ = k["dims"]
+    head_dim_v = v["dims"][3]
 
     dtype = dtype_label(q.get("data_type"))
     if dtype not in dtypes:
         raise FeatureError(f"q dtype {q.get('data_type')!r} is not catalogued")
-    if head_dim not in HEAD_DIMS:
-        raise FeatureError(f"head dim {head_dim} is not catalogued")
+    head_dim = HEAD_DIMS.get((head_dim_qk, head_dim_v))
+    if head_dim is None:
+        raise FeatureError(f"head dim {head_dim_qk} x {head_dim_v} is not catalogued")
     # Stable sort: dims of equal stride (a size-1 dim) keep their bhsd order.
     order = tuple(sorted(range(4), key=lambda dim: -q["strides"][dim]))
     if order not in LAYOUTS:
