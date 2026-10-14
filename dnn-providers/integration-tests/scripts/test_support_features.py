@@ -526,7 +526,6 @@ class TestFeatureClaims:
         claims = _feature_claims(tmp_path)
         assert claims.tested[FAKE_TYPE] == {"dtype:fp16", "mask:sliding"}
         assert claims.on_target([FAKE_TYPE], ("gfx942", "linux")) == 1
-        assert claims.graphs[FAKE_TYPE] == 2
 
     def test_fused_graph_counts_toward_each_op(self, tmp_path: Path) -> None:
         _bundle(
@@ -559,8 +558,6 @@ class TestFeatureClaims:
         _bundle(tmp_path, "b", [_node(features=["dtype:bf16"])])
         claims = _feature_claims(tmp_path)
         assert claims.group_graphs["Attention"] == 2
-        assert claims.graphs[FAKE_TYPE] == 2
-        assert claims.graphs[backward] == 1
 
 
 class TestFeatureMatrixNames:
@@ -689,11 +686,11 @@ class TestFeatureMatrixMarkdown:
         document = self._document(tmp_path)
         section = document.split("\n## Options per op\n", 1)[1]
         assert (
-            '| <a id="op-sdpa"></a>**Sdpa** | 2 | 3 / 4 (75%) | '
+            '| <a id="op-sdpa"></a>**Sdpa** (4) | '
             "`dtype:fp16`, `dtype:bf16`, `mask:causal` | `mask:sliding` |"
         ) in section
         assert (
-            '| <a id="op-customop"></a>**CustomOp** | 0 | 0 / 2 (0%) | — | '
+            '| <a id="op-customop"></a>**CustomOp** (2) | — | '
             "`data:empty`, `data:present` |"
         ) in section
 

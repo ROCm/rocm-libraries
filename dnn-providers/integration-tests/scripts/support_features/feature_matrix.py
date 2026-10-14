@@ -169,8 +169,6 @@ class FeatureClaims:
 
     # node type -> catalogued features, in catalog order
     features: dict[str, tuple[str, ...]]
-    # node type -> graphs holding it
-    graphs: dict[str, int] = field(default_factory=lambda: defaultdict(int))
     # group -> graphs holding any of its ops; a graph with two of them
     # counts once
     group_graphs: dict[str, int] = field(default_factory=lambda: defaultdict(int))
@@ -232,7 +230,6 @@ def compute_feature_claims(
         for group in {group_of(t) for t in found_features}:
             claims.group_graphs[group] += 1
         for node_type, features in found_features.items():
-            claims.graphs[node_type] += 1
             claims.tested[node_type] |= features
             for engine, pairs in unit.claims.items():
                 for target in pairs:
@@ -398,9 +395,8 @@ def render_features_per_op(claims: FeatureClaims) -> list[str]:
         missing = [f for f in features if f not in used]
         rows.append(
             [
-                f'<a id="{op_anchor(node_type)}"></a>**{display_name(node_type)}**',
-                str(claims.graphs.get(node_type, 0)),
-                share_cell(len(exercised), len(features)),
+                f'<a id="{op_anchor(node_type)}"></a>**{display_name(node_type)}** '
+                f"({len(features)})",
                 ", ".join(f"`{f}`" for f in exercised) or "—",
                 ", ".join(f"`{f}`" for f in missing) or "—",
             ]
@@ -413,16 +409,7 @@ def render_features_per_op(claims: FeatureClaims) -> list[str]:
         "API setting: `dtype:bf16`, `mask:causal`. An option no test graph "
         "uses cannot be claimed on any GPU until one does.",
         "",
-        *table(
-            [
-                "Op",
-                "Graphs",
-                "Used by tests",
-                "Used by a test graph",
-                "Used by no test graph",
-            ],
-            rows,
-        ),
+        *table(["Op (options)", "Used by a test graph", "Used by no test graph"], rows),
     ]
 
 
