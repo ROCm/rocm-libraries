@@ -114,7 +114,6 @@ try
     if(size_scalars > 0)
         init_scalars(handle, (T*)scalars);
 
-
     for(I isweep = 0; isweep < nsweep; isweep++)
     {
         I const bid = isweep * bid_inc;
