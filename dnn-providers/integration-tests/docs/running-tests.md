@@ -309,6 +309,10 @@ After an engine runs a bundle, the harness compares its output with an oracle.
 | `gpu` | the GPU reference executor (no DVC pull needed); **fails** if it cannot run the op |
 | `cpu` | the CPU reference executor (no DVC pull needed); **fails** if it cannot run the op |
 
+Which operations, datatypes and layouts each reference executor can run is documented in
+[GPU Reference Implementation - Operation Support](OperationSupport-GpuReferenceImpl.md) and
+[CPU Reference Implementation - Operation Support](../../../projects/hipdnn/docs/OperationSupport-ReferenceImpl.md).
+
 The comparison runs where the expected values are: on the device for a GPU
 reference, and on the host for a CPU reference or golden data.
 `--validator cpu|gpu` overrides this for the whole run. With `gpu`, the run
