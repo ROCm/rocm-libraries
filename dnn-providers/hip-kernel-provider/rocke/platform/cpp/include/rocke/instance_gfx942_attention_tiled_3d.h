@@ -232,6 +232,11 @@ int rocke_unified_attention_reduce_tiled_spec_kernel_name(
 
 /* Segment kernel (narrow 16x16x16 MFMA). Call with a spec validated by
  * rocke_unified_attention_3d_tiled_spec_validate. */
+/* Direct [B,H,S,D] KV input with runtime byte strides. Keeps the existing
+ * caller-owned spec layout and paged entry point ABI unchanged. */
+rocke_kernel_def_t* rocke_build_unified_attention_3d_tiled_strided_gfx942(
+    rocke_ir_builder_t* b, const rocke_unified_attention_3d_tiled_spec_t* spec, const char* arch);
+
 rocke_kernel_def_t* rocke_build_unified_attention_3d_tiled_gfx942(
     rocke_ir_builder_t* b, const rocke_unified_attention_3d_tiled_spec_t* spec, const char* arch);
 

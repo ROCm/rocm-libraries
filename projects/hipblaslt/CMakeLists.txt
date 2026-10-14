@@ -457,6 +457,35 @@ if(HIPBLASLT_ENABLE_HOST)
     add_subdirectory(library)
 endif()
 
+if(HIPBLASLT_ENABLE_HOST
+   AND HIPBLASLT_BUILD_SHARED_LIBS
+   AND TENSILELITE_BUILD_SHARED_LIBS
+   AND NOT WIN32
+   AND (HIPBLASLT_BUILD_TESTING OR TENSILELITE_BUILD_TESTING OR BUILD_TESTING))
+    get_filename_component(_hipblaslt_cxx_dir "${CMAKE_CXX_COMPILER}" REALPATH)
+    get_filename_component(_hipblaslt_cxx_dir "${_hipblaslt_cxx_dir}" DIRECTORY)
+    find_program(HIPBLASLT_LLVM_IFS llvm-ifs
+        HINTS "${_hipblaslt_cxx_dir}"
+        PATHS "${ROCM_PATH}/lib/llvm/bin" "$ENV{ROCM_PATH}/lib/llvm/bin" /opt/rocm/lib/llvm/bin
+    )
+    if(HIPBLASLT_LLVM_IFS)
+        enable_testing()
+        add_test(
+            NAME hipblaslt.symbol-contract.tensilelite-host
+            COMMAND "${CMAKE_COMMAND}"
+                "-DLLVM_IFS=${HIPBLASLT_LLVM_IFS}"
+                "-DCONSUMER=$<TARGET_FILE:hipblaslt>"
+                "-DPROVIDER=$<TARGET_FILE:tensilelite-host>"
+                "-DREQUIRED_IMPORTS=${CMAKE_CURRENT_SOURCE_DIR}/library/symbol-contract/tensilelite-host-imports.txt"
+                "-DNAMESPACE_PATTERN=11TensileLite"
+                "-DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/symbol-contract"
+                -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/hipblaslt_check_symbol_contract.cmake"
+        )
+    else()
+        message(STATUS "llvm-ifs not found; hipblaslt.symbol-contract.tensilelite-host test disabled")
+    endif()
+endif()
+
 if(HIPBLASLT_ENABLE_DEVICE)
     add_subdirectory(device-library)
 endif()
@@ -712,8 +741,15 @@ if(HIPBLASLT_ENABLE_CLIENT)
 endif()
 
 if(HIPBLASLT_ENABLE_CLIENT AND (HIPBLASLT_BUILD_TESTING OR BUILD_TESTING))
+    # hipblaslt-test-hostunit is the standalone host-only unit test binary. It is
+    # installed so it ships in TheRock's blas test artifact; see
+    # clients/tests/unit/CMakeLists.txt for why its name has to keep the
+    # "hipblaslt-test" prefix.
     rocm_install(
-        TARGETS hipblaslt-test
+        TARGETS
+            hipblaslt-test
+            hipblaslt-test-hostunit
+            hipblaslt-test-tuning-store
         COMPONENT tests
     )
     rocm_install(
@@ -729,7 +765,8 @@ endif()
 
 # Install TensileLite Python packages and test tools for artifact-based testing.
 # Produces:
-#   share/hipblaslt/tensilelite/Tensile/     — Tensile Python package
+#   share/hipblaslt/tensilelite/tensilelite/ — Tensile Python package
+#   share/hipblaslt/tensilelite/Tensile/     — legacy import compatibility shim
 #   share/hipblaslt/tensilelite/rocisa/       — rocisa Python package (normalized layout)
 #   share/hipblaslt/tensilelite/rocisa_tests/ — rocisa pytest modules
 if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
@@ -738,12 +775,17 @@ if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
 
     # Tensile Python package
     install(
-        DIRECTORY "${_tensilelite_src}/Tensile/"
-        DESTINATION "${_tensilelite_install_dest}/Tensile"
+        DIRECTORY "${_tensilelite_src}/tensilelite/"
+        DESTINATION "${_tensilelite_install_dest}/tensilelite"
         COMPONENT tests
         PATTERN "__pycache__" EXCLUDE
         PATTERN ".pytest_cache" EXCLUDE
         PATTERN "*.pyc" EXCLUDE
+    )
+    install(
+        FILES "${_tensilelite_src}/Tensile/__init__.py"
+        DESTINATION "${_tensilelite_install_dest}/Tensile"
+        COMPONENT tests
     )
 
     # Scripts used by unit tests
@@ -768,9 +810,9 @@ if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
     # Preserve executable permissions on entry points
     install(
         PROGRAMS
-            "${_tensilelite_src}/Tensile/bin/Tensile"
-            "${_tensilelite_src}/Tensile/bin/TensileCreateLibrary"
-        DESTINATION "${_tensilelite_install_dest}/Tensile/bin"
+            "${_tensilelite_src}/tensilelite/bin/Tensile"
+            "${_tensilelite_src}/tensilelite/bin/TensileCreateLibrary"
+        DESTINATION "${_tensilelite_install_dest}/tensilelite/bin"
         COMPONENT tests
     )
 
