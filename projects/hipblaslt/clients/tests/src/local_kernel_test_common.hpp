@@ -12,6 +12,7 @@
 #include <gtest/gtest.h>
 
 #include <hip/hip_runtime.h>
+#include <hip/hiprtc.h>
 #include <hipblaslt/hipblaslt-ext.hpp>
 #include <hipblaslt/hipblaslt-local-kernel.h>
 #include <hipblaslt/hipblaslt.h>
@@ -22,10 +23,12 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <string>
 #include <utility>
 #include <vector>
@@ -350,13 +353,22 @@ namespace local_kernel_test
         return value;
     }
 
-    // Runs `algo` on the current device with A and B all ones and checks that
-    // every element of D is K.
-    inline void runAndCheck(hipblasLtHandle_t            handle,
-                            Problem const&               p,
-                            hipblasLtMatmulAlgo_t const& algo,
-                            size_t                       workspace)
+    inline bool allEqualK(std::vector<uint16_t> const& d)
     {
+        return !d.empty() && std::all_of(d.begin(), d.end(), [](uint16_t bits) {
+            return bf16ToFloat(bits) == static_cast<float>(K);
+        });
+    }
+
+    // Runs `algo` on the current device with A and B all ones and D zeroed,
+    // and returns D in `hD`.
+    inline void runMatmul(hipblasLtHandle_t            handle,
+                          Problem const&               p,
+                          hipblasLtMatmulAlgo_t const& algo,
+                          size_t                       workspace,
+                          std::vector<uint16_t>&       hD)
+    {
+        hD.clear();
         const size_t          m = static_cast<size_t>(p.m);
         std::vector<uint16_t> hA(K * m, BF16_ONE), hB(K * N, BF16_ONE);
         DeviceBuffer          dA(hA.size() * 2), dB(hB.size() * 2);
@@ -391,15 +403,121 @@ namespace local_kernel_test
                   HIPBLAS_STATUS_SUCCESS);
         ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
 
-        std::vector<uint16_t> hD(m * N, 0);
+        hD.assign(m * N, 0);
         ASSERT_EQ(hipMemcpy(hD.data(), dD.ptr, hD.size() * 2, hipMemcpyDeviceToHost), hipSuccess);
-
-        bool exact = std::all_of(hD.begin(), hD.end(), [](uint16_t bits) {
-            return bf16ToFloat(bits) == static_cast<float>(K);
-        });
-        EXPECT_TRUE(exact) << "unexpected result: D[0] = " << bf16ToFloat(hD[0]) << " expected "
-                           << K;
     }
+
+    // Runs `algo` as runMatmul does and checks that every element of D is K.
+    inline void runAndCheck(hipblasLtHandle_t            handle,
+                            Problem const&               p,
+                            hipblasLtMatmulAlgo_t const& algo,
+                            size_t                       workspace)
+    {
+        std::vector<uint16_t> hD;
+        runMatmul(handle, p, algo, workspace, hD);
+        ASSERT_FALSE(hD.empty());
+        EXPECT_TRUE(allEqualK(hD))
+            << "unexpected result: D[0] = " << bf16ToFloat(hD[0]) << " expected " << K;
+    }
+
+    // The current device's architecture without target features, e.g. "gfx950".
+    inline std::string deviceArch()
+    {
+        int             device = 0;
+        hipDeviceProp_t prop;
+        if(hipGetDevice(&device) != hipSuccess
+           || hipGetDeviceProperties(&prop, device) != hipSuccess)
+            return {};
+        std::string arch = prop.gcnArchName;
+        return arch.substr(0, arch.find(':'));
+    }
+
+    inline std::string otherArch()
+    {
+        return deviceArch() == "gfx90a" ? "gfx942" : "gfx90a";
+    }
+
+    // Compiles HIP `source` for `arch` into a code object at `path`.
+    inline bool compileCodeObject(std::string const& source,
+                                  std::string const& arch,
+                                  std::string const& path)
+    {
+        hiprtcProgram program;
+        if(hiprtcCreateProgram(
+               &program, source.c_str(), "local_kernel_test.hip", 0, nullptr, nullptr)
+           != HIPRTC_SUCCESS)
+            return false;
+
+        std::string       option    = "--gpu-architecture=" + arch;
+        const char*       options[] = {option.c_str()};
+        std::vector<char> code;
+        size_t            size = 0;
+        bool              ok   = hiprtcCompileProgram(program, 1, options) == HIPRTC_SUCCESS
+                  && hiprtcGetCodeSize(program, &size) == HIPRTC_SUCCESS;
+        if(ok)
+        {
+            code.resize(size);
+            ok = hiprtcGetCode(program, code.data()) == HIPRTC_SUCCESS;
+        }
+        else if(hiprtcGetProgramLogSize(program, &size) == HIPRTC_SUCCESS && size > 0)
+        {
+            std::string log(size, '\0');
+            if(hiprtcGetProgramLog(program, log.data()) == HIPRTC_SUCCESS)
+                std::fprintf(stderr, "hiprtc: %s\n", log.c_str());
+        }
+        static_cast<void>(hiprtcDestroyProgram(&program));
+        if(!ok)
+            return false;
+
+        std::ofstream out(path, std::ios::binary);
+        out.write(code.data(), static_cast<std::streamsize>(code.size()));
+        return static_cast<bool>(out);
+    }
+
+    // Empty kernels with these names. The parameter is larger than any
+    // TensileLite kernel's arguments, so launching with those is accepted.
+    inline std::string standInKernels(std::vector<std::string> const& names)
+    {
+        std::string source = "struct StandInArgs { unsigned char bytes[4096]; };\n";
+        for(auto const& name : names)
+            source += "extern \"C\" __global__ void " + name + "(StandInArgs) {}\n";
+        return source;
+    }
+
+    // Copies the first half of `from` to `to`.
+    inline bool writeTruncatedCopy(std::string const& from, std::string const& to)
+    {
+        std::ifstream     in(from, std::ios::binary);
+        std::vector<char> bytes((std::istreambuf_iterator<char>(in)),
+                                std::istreambuf_iterator<char>());
+        if(bytes.size() < 2)
+            return false;
+        std::ofstream out(to, std::ios::binary);
+        out.write(bytes.data(), static_cast<std::streamsize>(bytes.size() / 2));
+        return static_cast<bool>(out);
+    }
+
+    // A directory for generated payload files, removed with the object.
+    struct ScratchDir
+    {
+        std::filesystem::path path;
+
+        ScratchDir()
+            : path(std::filesystem::temp_directory_path()
+                   / ("hipblaslt-local-kernel-" + std::to_string(getpid())))
+        {
+            std::filesystem::create_directories(path);
+        }
+        ~ScratchDir()
+        {
+            std::error_code ec;
+            std::filesystem::remove_all(path, ec);
+        }
+        std::string file(std::string const& name) const
+        {
+            return (path / name).string();
+        }
+    };
 
     // Re-runs this executable with only the named DISABLED_ case enabled and
     // returns its exit status, or -1 if it could not be run. Uses posix_spawn

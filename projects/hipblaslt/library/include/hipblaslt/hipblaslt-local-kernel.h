@@ -27,12 +27,22 @@ extern "C" {
  *  the same format the shipped library loads lazily.
  *
  *  Each solution in the payload receives an index usable with the index-based
- *  algorithm path of \ref hipblasLtMatmul, on any device of the same
- *  architecture. Registration does not change heuristic selection; use
+ *  algorithm path of \ref hipblasLtMatmul. Registration is per architecture:
+ *  the kernels serve devices of the architecture of the handle's device, and
+ *  on a device of any other architecture they are never selected and an index
+ *  is rejected as for any kernel that cannot serve the problem. Registration
+ *  does not change heuristic selection; use
  *  \ref hipblasLtLocalKernelSetExactMatch for that.
  *
+ *  The code object must define every kernel the shard names. Kernels run only
+ *  from the code object they were registered with, even if a shipped or
+ *  earlier registered kernel has the same name.
+ *
  *  Indices are valid only in the current process. Registering the same
- *  payload twice registers its kernels twice.
+ *  payload twice registers its kernels twice. A device loads a code object
+ *  path at most once and keeps it loaded for the life of the process, so a
+ *  file replaced at the same path after it was loaded is not reloaded, and a
+ *  code object loaded by a registration that then failed stays loaded.
  *
  *  @param[in]
  *  handle          Pointer to the allocated hipBLASLt handle.
@@ -54,9 +64,12 @@ extern "C" {
  *                  are written.
  *
  *  \retval HIPBLAS_STATUS_SUCCESS          The payload was registered.
- *  \retval HIPBLAS_STATUS_INVALID_VALUE    A file could not be read, held no
- *                                          solutions, or the code object could
- *                                          not be loaded on this device.
+ *  \retval HIPBLAS_STATUS_INVALID_VALUE    A file could not be read, the shard
+ *                                          held no solutions or was built for
+ *                                          another device, or the code object
+ *                                          could not be loaded on this device
+ *                                          or lacks one of the shard's kernels.
+ *                                          Nothing is registered.
  */
 HIPBLASLT_EXPORT
 hipblasStatus_t hipblasLtLocalKernelRegister(hipblasLtHandle_t handle,
