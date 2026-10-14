@@ -29,7 +29,7 @@ from rocisa.asmpass import getActFuncModuleName, getActFuncBranchModuleName
 from rocisa.code import KernelBody, Label, Macro, Module, RegSet, SrdUpperValue, \
                         StructuredModule, TextBlock, ValueEndif, ValueIf, ValueSet, SignatureBase
 from rocisa.container import DSModifiers, SDWAModifiers, VOP3PModifiers, \
-                      MUBUFModifiers, SMEMModifiers, EXEC, VCC, RegisterContainer, \
+                      MUBUFModifiers, SMEMModifiers, EXEC, EXECLO, EXECHI, VCC, RegisterContainer, \
                       DPPModifiers, vgpr, sgpr, accvgpr, mgpr, ContinuousRegister, \
                       HWRegContainer, GLOBALModifiers, MemTokenData
 from rocisa.instruction import SGetPositivePCOffset, SLongBranch, SLongBranchPositive, SLongBranchNegative, SCLongBranchScc0, SCLongBranchScc1, SCLongBranchVccnz, \
@@ -68,7 +68,7 @@ from rocisa.instruction import BranchInstruction, BufferLoadB128, BufferLoadB32,
   VCvtScalePkF16toBF8, VCvtScalePkF16toFP8, VCvtScalePkFP8toF16, VLShiftLeftB32, \
   VLShiftLeftB64, VLShiftRightB32, VLShiftRightB64, VMadU32U24, VMaxF32, VMinI32, VMovB32, VMovB64, VMulF32, \
   VMulHIU32, VMulLOU32, VMulPKF32S, VMulU32U24, VNotB32, VOrB32, VPackF16toB32, \
-  VPrngB32, VReadfirstlaneB32, VReadlaneB32, VSubF32, VSubI32, VSubU32, VXorB32, GlobalLoadTR8B64, GlobalLoadTR16B128, \
+  VPrngB32, VReadfirstlaneB32, VReadlaneB32, VWritelaneB32, VSubF32, VSubI32, VSubU32, VXorB32, GlobalLoadTR8B64, GlobalLoadTR16B128, \
   GlobalLoadB32, GlobalLoadB64, GlobalLoadB96, GlobalLoadB128, GlobalLoadD16B16, GlobalLoadD16HIB16, \
   GlobalLoadD16U8, GlobalLoadD16HIU8, \
   GlobalStoreB8, GlobalStoreB16, GlobalStoreB32, GlobalStoreB64, GlobalStoreB128, GlobalStoreD16HIB16
@@ -8544,8 +8544,8 @@ class KernelWriterAssembly(KernelWriter):
     """Emit one enqueuer's packing pass on peer queue i = qSgpr: one reservation,
     one COPY per block and one ATOMIC per group inside it, one submit.
 
-    Runs only on an elected wave. Each lane builds and stores one block's COPY;
-    lane 0 stores the group's ATOMIC after them.
+    Runs only on an elected wave. Each lane but the last builds and stores one
+    block's COPY; the last lane stores the group's ATOMIC with the final pass.
 
     Both loops are do-while with no top-of-loop test, so they require W >= 2
     (guarded by the election) and A2ABlockCount >= 1.
@@ -8706,13 +8706,15 @@ class KernelWriterAssembly(KernelWriter):
     vLane     = self.vgprPool.checkOut(1, tag="a2aEnq_lane")
     vLaneStep = self.vgprPool.checkOut(1, tag="a2aEnq_laneStep")
     vRectX    = self.vgprPool.checkOut(1, tag="a2aEnq_rectX")
-    vPkt      = self.vgprPool.checkOutAligned(16, 4, tag="a2aEnq_copyPacket")
-    vSig      = self.vgprPool.checkOutAligned(8, 4, tag="a2aEnq_signalPacket")
+    vLaneOff  = self.vgprPool.checkOut(1, tag="a2aEnq_laneOff")
+    vPkt      = self.vgprPool.checkOutAligned(16, 4, tag="a2aEnq_packet")
     module.add(VAndB32(dst=vgpr(vLane), src0=ww - 1, src1=vgpr("Serial"), comment="lane id"))
     module.add(VMulU32U24(dst=vgpr(vLaneStep), src0=sgpr("A2AShardCounter"), src1=vgpr(vLane),
                           comment="lane * W"))
     module.add(VSubU32(dst=vgpr(vLaneStep), src0=vgpr(vLaneStep), src1=vgpr(vLane),
                        comment="lane * (W-1): the lane's block below the pass's first"))
+    module.add(VMulU32U24(dst=vgpr(vLaneOff), src0=copyBytes, src1=vgpr(vLane),
+                          comment="the lane's COPY offset"))
     vTmp = self.vgprPool.checkOut(2, tag="a2aEnq_pitchSlice")
     module.add(VLShiftRightB32(dst=vgpr(vTmp), shiftHex=pkt.packetElementLog2 - log2(bpe), src=ldb,
                                comment="ldb in packet elements"))
@@ -8730,9 +8732,14 @@ class KernelWriterAssembly(KernelWriter):
     else:
       module.add(VMovB32(dst=vgpr(vRectX), src=vgpr(vTmp), comment="rect_x = pitch"))
     self.vgprPool.checkIn(vTmp)
-    pkt.emitBuildAtomicPacketUniformV(module, vSig)
+    module.add(SMovB32(dst=EXECLO(), src=0, comment="the signal lane"))
+    module.add(SMovB32(dst=EXECHI(), src=hex(1 << 31), comment="the signal lane"))
+    module.add(VMovB32(dst=vgpr(vLaneStep), src=hex(1 << 30),
+                       comment="the signal lane holds no block"))
+    pkt.emitBuildAtomicPacketUniformV(module, vPkt)
+    module.add(SMovB64(dst=EXEC(), src=-1, comment="restore EXEC = full"))
 
-    ring.emitPadV(module, self, vQBuf, pending, pad, vLane, vPkt + 3, ww)
+    ring.emitPadV(module, self, vQBuf, pending, pad, vLane, vPkt + 8, ww)
     self.sgprPool.checkIn(pad)
 
     pLeft = self.sgprPool.checkOut(1, tag="a2aEnq_pLeft", preventOverflow=False)
@@ -8774,7 +8781,30 @@ class KernelWriterAssembly(KernelWriter):
                        comment="the group's last block"))
 
     for h in range(subRounds):
-      module.addComment1("A2A: the group's COPYs, one block per lane")
+      with self.allocTmpSgpr(3, alignment=2, tag="a2aEnq_flag") as tmpSgprInfo:
+        fFlag = tmpSgprInfo.idx
+        fSlot = tmpSgprInfo.idx + 2
+        module.add(SSubU32(dst=sgpr(fSlot), src0=sgpr("A2AShardCounter"), src1=1, comment="W - 1"))
+        module.add(SMulI32(dst=sgpr(fSlot), src0=sgpr(bLast), src1=sgpr(fSlot),
+                           comment="bLast * (W-1)"))
+        module.add(SAddU32(dst=sgpr(fSlot), src0=sgpr(fSlot), src1=sgpr(qSgpr),
+                           comment="flag slot = bLast*(W-1) + i"))
+        if subRounds > 1:
+          module.add(SLShiftLeftB32(dst=sgpr(fSlot), shiftHex=log2(subRounds), src=sgpr(fSlot),
+                                    comment="(bLast*(W-1) + i) * S"))
+          if h > 0:
+            module.add(SAddU32(dst=sgpr(fSlot), src0=sgpr(fSlot), src1=h, comment="+ sub-round"))
+        module.add(SLShiftLeftB32(dst=sgpr(fSlot), shiftHex=2, src=sgpr(fSlot),
+                                  comment="flag slot byte offset"))
+        module.add(SAddU32(dst=sgpr(fSlot), src0=sgpr(fSlot), src1=FUSED_A2A_MODE1_FLAG_OFFSET,
+                           comment="past the cursor region"))
+        module.add(SAddU32(dst=sgpr(fFlag), src0=sgpr("A2ACounterPtr"), src1=sgpr(fSlot),
+                           comment="&flag[bLast][i] lo"))
+        module.add(SAddCU32(dst=sgpr(fFlag + 1), src0=sgpr("A2ACounterPtr+1"), src1=0,
+                            comment="&flag[bLast][i] hi (carry)"))
+        pkt.emitSignalAddressV(module, vPkt, fFlag, ww - 1)
+
+      module.addComment1("A2A: the group's COPYs, one block per lane, then its ATOMIC")
       cLoop = Label(self.labels.getNameInc("a2a_copy_loop"), "up to one block per lane")
       module.add(SMovB32(dst=sgpr(rowC), src=sgpr(row), comment="first block of this pass"))
       module.add(SMovB32(dst=sgpr(nLeft), src=sgpr(nBlk), comment="blocks left in the group"))
@@ -8807,57 +8837,38 @@ class KernelWriterAssembly(KernelWriter):
       module.add(VMinI32(dst=vgpr(vT), src0=mt, src1=vgpr(vT),
                          comment="rect_y = min(MT_token, tokens left)"))
       pkt.emitBuildCopyRectV(module, vPkt, vRectX, vT)
-      module.add(VMulU32U24(dst=vgpr(vT), src0=copyBytes, src1=vgpr(vLane),
-                            comment="the lane's COPY offset"))
-      ring.emitLaneRingAddrV(module, self, vAddr, vQBuf, pending, vT)
-      ring.emitStorePacketV(module, vAddr, vPkt, COPY_PACKET_DWORDS)
-      module.add(SNop(waitState=1, comment="write-data hazard"))
-      module.add(SMovB64(dst=EXEC(), src=-1, comment="restore EXEC = full"))
-      with self.allocTmpSgpr(1, tag="a2aEnq_passStep") as tmpSgprInfo:
-        t = tmpSgprInfo.idx
-        module.add(SMinU32(dst=sgpr(t), src0=sgpr(nLeft), src1=ww, comment="blocks placed this pass"))
+      with self.allocTmpSgpr(2, tag="a2aEnq_pass") as tmpSgprInfo:
+        t   = tmpSgprInfo.idx
+        sig = tmpSgprInfo.idx + 1
+        module.add(SMinU32(dst=sgpr(t), src0=sgpr(nLeft), src1=ww - 1,
+                           comment="blocks placed this pass"))
         module.add(SSubU32(dst=sgpr(nLeft), src0=sgpr(nLeft), src1=sgpr(t), comment="blocks left"))
         module.add(SMulI32(dst=sgpr(t), src0=sgpr(t), src1=copyBytes, comment="COPY bytes placed"))
+        module.add(VWritelaneB32(dst=vgpr(vLaneOff), src0=sgpr(t), src1=ww - 1,
+                                 comment="the signal follows the COPYs"))
+        module.add(SCmpEQU32(src0=sgpr(nLeft), src1=0, comment="the group's last pass?"))
+        module.add(SCSelectB32(dst=sgpr(sig), src0=hex(1 << 31), src1=0,
+                               comment="the signal lane, on the last pass"))
+        module.add(SOrB32(dst=EXECHI(), src0=EXECHI(), src1=sgpr(sig), comment="+ the signal lane"))
+        ring.emitLaneRingAddrV(module, self, vAddr, vQBuf, pending, vLaneOff)
+        ring.emitStorePacketV(module, vAddr, vPkt, ATOMIC_PACKET_DWORDS)
+        module.add(SAndN2B32(dst=EXECHI(), src0=EXECHI(), src1=sgpr(sig),
+                             comment="- the signal lane"))
+        ring.emitStorePacketV(module, vAddr, vPkt, COPY_PACKET_DWORDS,
+                              firstDword=ATOMIC_PACKET_DWORDS)
+        module.add(SNop(waitState=1, comment="write-data hazard"))
+        module.add(SMovB64(dst=EXEC(), src=-1, comment="restore EXEC = full"))
         module.add(SAddU32(dst=sgpr(pending), src0=sgpr(pending), src1=sgpr(t),
                            comment="pending += COPY bytes"))
         module.add(SAddCU32(dst=sgpr(pending + 1), src0=sgpr(pending + 1), src1=0,
                             comment="pending hi carry"))
-        module.add(SMulI32(dst=sgpr(t), src0=sgpr("A2AShardCounter"), src1=ww, comment="W * lanes"))
-        module.add(SSubU32(dst=sgpr(t), src0=sgpr(t), src1=ww, comment="(W-1) * lanes"))
+        module.add(SMulI32(dst=sgpr(t), src0=sgpr("A2AShardCounter"), src1=ww - 1,
+                           comment="W * COPY lanes"))
+        module.add(SSubU32(dst=sgpr(t), src0=sgpr(t), src1=ww - 1, comment="(W-1) * COPY lanes"))
         module.add(SSubU32(dst=sgpr(rowC), src0=sgpr(rowC), src1=sgpr(t),
                            comment="first block of the next pass"))
       module.add(SCmpLgU32(src0=sgpr(nLeft), src1=0, comment="blocks left in the group?"))
       module.add(SCBranchSCC1(labelName=cLoop.getLabelName(), comment="next pass"))
-
-      module.addComment1("A2A: the group's ATOMIC, from lane 0")
-      with self.allocTmpSgpr(3, alignment=2, tag="a2aEnq_flag") as tmpSgprInfo:
-        fFlag = tmpSgprInfo.idx
-        fSlot = tmpSgprInfo.idx + 2
-        module.add(SSubU32(dst=sgpr(fSlot), src0=sgpr("A2AShardCounter"), src1=1, comment="W - 1"))
-        module.add(SMulI32(dst=sgpr(fSlot), src0=sgpr(bLast), src1=sgpr(fSlot),
-                           comment="bLast * (W-1)"))
-        module.add(SAddU32(dst=sgpr(fSlot), src0=sgpr(fSlot), src1=sgpr(qSgpr),
-                           comment="flag slot = bLast*(W-1) + i"))
-        if subRounds > 1:
-          module.add(SLShiftLeftB32(dst=sgpr(fSlot), shiftHex=log2(subRounds), src=sgpr(fSlot),
-                                    comment="(bLast*(W-1) + i) * S"))
-          if h > 0:
-            module.add(SAddU32(dst=sgpr(fSlot), src0=sgpr(fSlot), src1=h, comment="+ sub-round"))
-        module.add(SLShiftLeftB32(dst=sgpr(fSlot), shiftHex=2, src=sgpr(fSlot),
-                                  comment="flag slot byte offset"))
-        module.add(SAddU32(dst=sgpr(fSlot), src0=sgpr(fSlot), src1=FUSED_A2A_MODE1_FLAG_OFFSET,
-                           comment="past the cursor region"))
-        module.add(SAddU32(dst=sgpr(fFlag), src0=sgpr("A2ACounterPtr"), src1=sgpr(fSlot),
-                           comment="&flag[bLast][i] lo"))
-        module.add(SAddCU32(dst=sgpr(fFlag + 1), src0=sgpr("A2ACounterPtr+1"), src1=0,
-                            comment="&flag[bLast][i] hi (carry)"))
-        pkt.emitSignalAddressV(module, vSig, fFlag)
-      module.add(VMovB32(dst=vgpr(vT), src=0, comment="lane 0's offset"))
-      ring.emitLaneRingAddrV(module, self, vAddr, vQBuf, pending, vT)
-      module.add(SMovB64(dst=EXEC(), src=1, comment="lane 0"))
-      ring.emitStorePacketV(module, vAddr, vSig, ATOMIC_PACKET_DWORDS)
-      module.add(SNop(waitState=1, comment="write-data hazard"))
-      module.add(SMovB64(dst=EXEC(), src=-1, comment="restore EXEC = full"))
       module.add(SAddU32(dst=sgpr(pending), src0=sgpr(pending), src1=ATOMIC_PACKET_DWORDS * 4,
                          comment="pending += signal bytes"))
       module.add(SAddCU32(dst=sgpr(pending + 1), src0=sgpr(pending + 1), src1=0,
@@ -8920,7 +8931,7 @@ class KernelWriterAssembly(KernelWriter):
       self.sgprPool.checkIn(reg)
     if subRounds > 1:
       self.vgprPool.checkIn(vCol)
-    for reg in (vAddr, vOff, vT, vTok, vRow, vSig, vPkt, vRectX, vLaneStep, vLane,
+    for reg in (vAddr, vOff, vT, vTok, vRow, vPkt, vLaneOff, vRectX, vLaneStep, vLane,
                 vGStart, vDst0, vSrc0, vQBuf):
       self.vgprPool.checkIn(reg)
     return module

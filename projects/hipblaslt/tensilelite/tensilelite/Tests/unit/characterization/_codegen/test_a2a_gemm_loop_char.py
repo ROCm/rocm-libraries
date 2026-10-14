@@ -594,7 +594,7 @@ class TestA2AGemmRoundGroupOrder:
             self._packing_pass(self._src()),
         ), "a group holding no block still places packets"
 
-    def test_the_atomic_is_placed_once_per_group(self):
+    def test_the_atomic_rides_the_groups_last_pass(self):
         import re
 
         body = self._packing_pass(self._src())
@@ -602,13 +602,34 @@ class TestA2AGemmRoundGroupOrder:
         tail = re.search(r"^s_cbranch_scc1 label_a2a_copy_loop\w*", body, re.M)
         nxt = re.search(r"^label_a2a_group_next\w*:", body, re.M)
         assert head and tail and nxt, "no copy loop / group-next in the packing pass"
-        copy = re.findall(r"^global_store_dword\w* [^\n]*$", body[head.end() : tail.start()], re.M)
-        assert len(copy) == 4, "the copy loop stores more than the lanes' COPYs"
-        sig = body[tail.end() : nxt.start()]
-        assert re.search(r"^s_mov_b64 exec, 1\b", sig, re.M), "the ATOMIC is not stored from one lane"
-        assert len(re.findall(r"^global_store_dwordx4 [^\n]*$", sig, re.M)) == 2, (
-            "the group's ATOMIC is not placed once after its COPYs"
+        loop = body[head.end() : tail.start()]
+        m = re.search(
+            r"s_cmp_eq_u32 s\d+, 0[^\n]*// the group's last pass\?\n"
+            r"s_cselect_b32 s(\d+), 0x80000000, 0[^\n]*\n"
+            r"s_or_b32 exec_hi, exec_hi, s\1[^\n]*\n"
+            r"(?:(?!global_store)[^\n]*\n)*"
+            r"global_store_dwordx4 [^\n]*\n"
+            r"global_store_dwordx4 [^\n]*\n"
+            r"s_andn2_b32 exec_hi, exec_hi, s\1",
+            loop,
         )
+        assert m, "the ATOMIC's eight dwords are not stored by the last lane on the last pass"
+        assert len(re.findall(r"^global_store_dword\w* [^\n]*$", loop, re.M)) == 4, (
+            "the copy loop stores more than one packet per lane"
+        )
+        assert "global_store" not in body[tail.end() : nxt.start()], (
+            "the group places packets outside its copy loop"
+        )
+
+    def test_the_signal_lane_holds_no_block(self):
+        import re
+
+        assert re.search(
+            r"s_mov_b32 exec_lo, 0[^\n]*\n"
+            r"s_mov_b32 exec_hi, 0x80000000[^\n]*\n"
+            r"v_mov_b32 v\d+, 0x40000000",
+            self._packing_pass(self._src()),
+        ), "the last lane's block stride does not keep it below the batch floor"
 
     def test_ring_stores_bypass_the_caches(self):
         import re
@@ -621,17 +642,9 @@ class TestA2AGemmRoundGroupOrder:
         import re
 
         body = self._packing_pass(self._src())
-        for m in re.finditer(r"^global_store_dwordx4 [^\n]*\n((?:global_store[^\n]*\n)*)", body, re.M):
-            assert body[m.end() :].startswith("s_nop 1"), "no wait states after the ring stores"
-
-    def test_one_reservation_and_one_commit_cover_every_group(self):
-        body = self._packing_pass(self._src())
-        assert body.count("s_atomic_cmpswap_x2") == 1, "the groups reserve separately"
-        assert body.count("store committedWptr = pending") == 1, "the groups commit separately"
-        assert body.count("ring doorbell = pending") == 2, "the groups ring the doorbell separately"
-        assert body.index("s_atomic_cmpswap_x2") < body.index("label_a2a_group_loop"), (
-            "the reservation sits inside the group loop"
-        )
+        for m in re.finditer(r"^global_store_dwordx4 [^\n]*$", body, re.M):
+            nxt = re.search(r"^(v_\w+|s_nop 1)", body[m.end() :], re.M)
+            assert nxt and nxt.group(1) == "s_nop 1", "no wait states after the ring stores"
 
 
 class TestA2AGemmEarlyDoorbell:

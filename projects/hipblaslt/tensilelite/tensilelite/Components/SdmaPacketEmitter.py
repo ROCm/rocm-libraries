@@ -32,7 +32,7 @@
 from rocisa.container import sgpr, vgpr
 from rocisa.instruction import (
     SMovB32, SMovB64, SSubU32, SOrB32, SLShiftLeftB32,
-    VMovB32, VAddU32, VLShiftLeftB32, VLShiftLeftOrB32,
+    VMovB32, VAddU32, VLShiftLeftB32, VLShiftLeftOrB32, VWritelaneB32,
 )
 
 
@@ -186,7 +186,8 @@ class SdmaPacketEmitter:
                            comment="ATOMIC DW6: cmp_data hi (unused), DW7: loop_interval=0"))
 
     # ---- VGPR builders ------------------------------------------------------
-    # One packet per lane. The lane-invariant dwords are written once; the
+    # One packet per lane, COPY and signal lanes sharing one block. The
+    # lane-invariant dwords are written once, under the caller's EXEC; the
     # caller writes the bases into COPY_DW_SRC / COPY_DW_DST and the target
     # into SIGNAL_DW_ADDR per placement.
 
@@ -222,9 +223,9 @@ class SdmaPacketEmitter:
         for dw in range(4, ATOMIC_PACKET_DWORDS):
             module.add(VMovB32(dst=vgpr(pktV + dw), src=0, comment="ATOMIC DW%d: 0" % dw))
 
-    def emitSignalAddressV(self, module, pktV, dstAddrS):
-        """ATOMIC DW1-DW2 = the 2-SGPR target address."""
-        module.add(VMovB32(dst=vgpr(pktV + SIGNAL_DW_ADDR), src=sgpr(dstAddrS + 0),
-                           comment="signal DW1: addr lo"))
-        module.add(VMovB32(dst=vgpr(pktV + SIGNAL_DW_ADDR + 1), src=sgpr(dstAddrS + 1),
-                           comment="signal DW2: addr hi"))
+    def emitSignalAddressV(self, module, pktV, dstAddrS, lane):
+        """ATOMIC DW1-DW2 of `lane` = the 2-SGPR target address."""
+        module.add(VWritelaneB32(dst=vgpr(pktV + SIGNAL_DW_ADDR), src0=sgpr(dstAddrS + 0),
+                                 src1=lane, comment="signal DW1: addr lo"))
+        module.add(VWritelaneB32(dst=vgpr(pktV + SIGNAL_DW_ADDR + 1), src0=sgpr(dstAddrS + 1),
+                                 src1=lane, comment="signal DW2: addr hi"))

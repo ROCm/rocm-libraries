@@ -431,11 +431,11 @@ class SdmaRingEmitter:
                               src2=VCC(), comment="ring address hi"))
 
     @staticmethod
-    def emitStorePacketV(module, addrV, packetV, numDwords):
-        """Store numDwords packet dwords from packetV (4-aligned) at addrV, per
-        active lane. The caller separates the last store from any VALU write
-        of packetV by SNop(1)."""
-        i = 0
+    def emitStorePacketV(module, addrV, packetV, numDwords, firstDword=0):
+        """Store packet dwords [firstDword, numDwords) from packetV (4-aligned)
+        at addrV, per active lane. The caller separates the last store from any
+        VALU write of packetV by SNop(1)."""
+        i = firstDword
         while i < numDwords:
             width = 4 if numDwords - i >= 4 else 1
             op = GlobalStoreB128 if width == 4 else GlobalStoreB32
