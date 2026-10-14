@@ -8,6 +8,7 @@ Documentation for rocRAND is available at
 ### Optimized
 
 * Added `__restrict__` qualifiers to the device API benchmark, enabling better compiler optimization.
+* Reduce shared memory usage and use the ADDC intrinsic in the Philox generator.
 
 ### Resolved Issues
 
