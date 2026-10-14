@@ -21,6 +21,7 @@ GPU), so the default run keeps the no-subprocess contract.
 
 from __future__ import annotations
 
+import re
 import unittest
 from unittest.mock import patch, Mock
 
@@ -1031,6 +1032,22 @@ class TestElementwiseInstance(unittest.TestCase):
         with self.assertRaises(ValueError):
             build_elementwise(ElementwiseSpec(op="bogus"))
 
+    def test_f64_path_builds(self):
+        from rocke.instances import ElementwiseSpec, build_elementwise
+
+        kernel = build_elementwise(ElementwiseSpec(op="add", dtype="f64", vec=2))
+        ll = lower_kernel_to_llvm(kernel)
+        self.assertIn("fadd double", ll)
+
+    def test_f64_rejects_transcendental_ops_and_wide_vec(self):
+        from rocke.instances.common.elementwise import ElementwiseSpec, is_valid_spec
+
+        for op in ("exp2", "tanh", "silu", "gelu_tanh"):
+            ok, _ = is_valid_spec(ElementwiseSpec(op=op, dtype="f64", vec=2))
+            self.assertFalse(ok, op)
+        ok, _ = is_valid_spec(ElementwiseSpec(op="add", dtype="f64", vec=4))
+        self.assertFalse(ok)
+
 
 class TestLayerNormInstance(unittest.TestCase):
     def test_builds_with_save_mean(self):
@@ -1068,6 +1085,20 @@ class TestReduceInstance(unittest.TestCase):
             kernel = build_reduce2d(Reduce2DSpec(n_per_block=4096, op=op))
             ll = lower_kernel_to_llvm(kernel)
             self.assertIn("define amdgpu_kernel void", ll)
+
+    def test_f64_path_builds(self):
+        from rocke.instances import Reduce2DSpec, build_reduce2d
+
+        for op in ("sum", "max", "mean"):
+            spec = Reduce2DSpec(n_per_block=4096, op=op, dtype="f64", vec=2)
+            ll = lower_kernel_to_llvm(build_reduce2d(spec))
+            self.assertIn("double", ll)
+
+    def test_f64_rejects_wide_vec(self):
+        from rocke.instances.common.reduce import Reduce2DSpec, is_valid_spec
+
+        ok, _ = is_valid_spec(Reduce2DSpec(n_per_block=4096, dtype="f64", vec=4))
+        self.assertFalse(ok)
 
 
 class TestTransposeInstance(unittest.TestCase):
@@ -1650,30 +1681,6 @@ class TestLlvmFlavorEnumeration(unittest.TestCase):
             "symbol-mangling spec and address spaces p10-p15",
         )
 
-    def test_flavor_for_rocm_clamps_at_both_ends(self):
-        """Version mapping is clamped, never raising: newest above, oldest below."""
-        from rocke.core.lower_llvm import (
-            LLVM_FLAVOR_LLVM20,
-            LLVM_FLAVOR_LLVM22,
-            LLVM_FLAVOR_LLVM23,
-            LLVM_FLAVORS,
-            _flavor_for_rocm,
-        )
-
-        # Exact boundaries.
-        self.assertEqual(_flavor_for_rocm(7, 1), LLVM_FLAVOR_LLVM20)
-        self.assertEqual(_flavor_for_rocm(7, 2), LLVM_FLAVOR_LLVM22)
-        self.assertEqual(_flavor_for_rocm(7, 12), LLVM_FLAVOR_LLVM22)
-        self.assertEqual(_flavor_for_rocm(7, 13), LLVM_FLAVOR_LLVM23)
-        # Clamped: a ROCm newer than anything we know resolves to the newest
-        # flavor, and one older than every row to the oldest.
-        self.assertEqual(_flavor_for_rocm(99, 9), LLVM_FLAVORS[-1])
-        self.assertEqual(_flavor_for_rocm(0, 0), LLVM_FLAVORS[0])
-        self.assertEqual(_flavor_for_rocm(6, 4), LLVM_FLAVOR_LLVM20)
-        # Never raises, and always returns a member of the enumeration.
-        for major, minor in ((0, 0), (-1, 0), (5, 7), (7, 2), (12, 0)):
-            self.assertIn(_flavor_for_rocm(major, minor), LLVM_FLAVORS)
-
     def test_is_modern_flavor_tracks_datalayout_kind(self):
         """The mfma-packing predicate is derived from the generation table."""
         from rocke.core.lower_llvm import (
@@ -1740,35 +1747,45 @@ class TestLlvmFlavorEnumeration(unittest.TestCase):
         def ir_for(flavor):
             return f'target datalayout = "{_datalayout_for_flavor(flavor)}"\n'
 
-        orig_ver = comgr_mod.resolved_lib_rocm_version
+        orig_ver = comgr_mod.loaded_compiler_info
         orig_path = comgr_mod.resolved_lib_path
         comgr_mod.resolved_lib_path = lambda: "/fake/libamd_comgr.so"
         try:
             # Same generation on both sides (including the llvm22-IR/llvm23-comgr
             # cross pair) must pass.
             for lib_ver, flavor in (
-                ((7, 0), "llvm20"),
-                ((7, 2), "llvm22"),
-                ((7, 13), "llvm23"),
-                ((7, 13), "llvm22"),
-                ((7, 2), "llvm23"),
+                ((20, 0, 0), "llvm20"),
+                ((22, 0, 0), "llvm22"),
+                ((23, 0, 0), "llvm23"),
+                ((23, 0, 0), "llvm22"),
+                ((22, 0, 0), "llvm23"),
             ):
                 with self.subTest(lib=lib_ver, ir=flavor):
-                    comgr_mod.resolved_lib_rocm_version = lambda v=lib_ver: v
+                    comgr_mod.loaded_compiler_info = (
+                        lambda v=lib_ver: comgr_mod.CompilerInfo(
+                            v, "test", None, "/fake/libamd_comgr.so", "/fake/libLLVM.so"
+                        )
+                    )
                     comgr_mod._assert_ir_flavor_matches_lib(ir_for(flavor))
             # Crossing the generation boundary must raise either way.
-            for lib_ver, flavor in (((7, 0), "llvm22"), ((7, 13), "llvm20")):
+            for lib_ver, flavor in (((20, 0, 0), "llvm22"), ((23, 0, 0), "llvm20")):
                 with self.subTest(lib=lib_ver, ir=flavor, expect="raise"):
-                    comgr_mod.resolved_lib_rocm_version = lambda v=lib_ver: v
+                    comgr_mod.loaded_compiler_info = (
+                        lambda v=lib_ver: comgr_mod.CompilerInfo(
+                            v, "test", None, "/fake/libamd_comgr.so", "/fake/libLLVM.so"
+                        )
+                    )
                     with self.assertRaises(comgr_mod.ComgrError) as cm:
                         comgr_mod._assert_ir_flavor_matches_lib(ir_for(flavor))
                     # The message must name both generations, not just "modern".
                     self.assertIn("p8_", str(cm.exception))
             # Unknown IR (no datalayout) never blocks compilation.
-            comgr_mod.resolved_lib_rocm_version = lambda: (7, 0)
+            comgr_mod.loaded_compiler_info = lambda: comgr_mod.CompilerInfo(
+                (20, 0, 0), "test", None, "/fake/libamd_comgr.so", "/fake/libLLVM.so"
+            )
             comgr_mod._assert_ir_flavor_matches_lib("define void @k() {}")
         finally:
-            comgr_mod.resolved_lib_rocm_version = orig_ver
+            comgr_mod.loaded_compiler_info = orig_ver
             comgr_mod.resolved_lib_path = orig_path
 
     def test_comgr_load_failure_names_every_candidate(self):
@@ -1880,8 +1897,7 @@ class TestLlvmFlavorEnumeration(unittest.TestCase):
 
 # Probe run in a child process: print the datalayout the Python resolver picks
 # for AUTO, and the one the C++ engine picks for AUTO (flavor=""). Must be a
-# child because the flavor depends on process environment and Python memoises
-# its answer per comgr path.
+# child because both engines retain the first successfully loaded COMGR.
 _FLAVOR_AUTO_PROBE = """
 import sys
 from rocke.core.ir import IRBuilder
@@ -1902,24 +1918,7 @@ print(cpp_dl)
 
 
 class TestCrossEngineFlavorAutoResolution(unittest.TestCase):
-    """The two engines must pick the SAME flavor when asked to auto-detect.
-
-    Both sides answer "which LLVM flavor is this host?" independently: Python in
-    ``_detect_llvm_flavor``, the engine in ``ll_resolve_flavor``. If they answer
-    differently they emit different IR from the same kernel while each looks
-    self-consistent, and no byte-identity run can see it -- the gate pins a
-    flavor explicitly, and ``backend.py`` resolves in Python before calling the
-    engine, so the engine's own resolver is never exercised on the paths the
-    suite covers. The C++ resolver used to read a single hardcoded
-    ``/opt/rocm/.info/version`` while Python located the comgr library that will
-    actually compile the IR and took *that* tree's ROCm version, so the two
-    disagreed on every host where /opt/rocm is absent, stale, or not the install
-    ``$ROCM_PATH`` names.
-
-    The layouts below are the ones that actually distinguish the resolvers; each
-    is checked through the emitted datalayout, which is the observable the
-    flavor controls.
-    """
+    """AUTO selects the loaded compiler despite conflicting package metadata."""
 
     def _probe(self, env_overrides):
         import os
@@ -1943,32 +1942,43 @@ class TestCrossEngineFlavorAutoResolution(unittest.TestCase):
         return py_dl, cpp_dl
 
     def _fake_rocm_tree(self):
-        """A packaged install: release 7.0.0 at the root, component 7.13.0 in
-        ``core-7.13/lib`` where comgr lives.
-
-        The two versions map to *different* flavors (llvm20 vs llvm23), which is
-        what makes this fixture worth having: a resolver that stops at the first
-        ``.info/version`` it meets while climbing out of the lib dir reads the
-        component version and picks llvm23 for a ROCm 7.0 toolchain.
-        """
+        """A loadable LLVM20 fixture under misleading release directories."""
         import os
         import shutil
+        import subprocess
         import tempfile
 
+        import sys
+
+        if sys.platform != "linux" or not shutil.which("cc"):
+            self.skipTest("ELF compiler fixture requires a Linux C compiler")
         root = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, root, ignore_errors=True)
-        rocm = os.path.join(root, "rocm-7.0.0")
+        rocm = os.path.join(root, "rocm-99.0.0")
         core_lib = os.path.join(rocm, "core-7.13", "lib")
-        os.makedirs(os.path.join(rocm, ".info"))
-        os.makedirs(os.path.join(rocm, "core-7.13", ".info"))
-        os.makedirs(core_lib)
-        os.makedirs(os.path.join(rocm, "lib"))
-        with open(os.path.join(rocm, ".info", "version"), "w") as fh:
-            fh.write("7.0.0-1234\n")
-        with open(os.path.join(rocm, "core-7.13", ".info", "version"), "w") as fh:
-            fh.write("7.13.0\n")
-        for d in (core_lib, os.path.join(rocm, "lib")):
-            open(os.path.join(d, "libamd_comgr.so"), "w").close()
+        for directory in (rocm, os.path.join(rocm, "core-7.13")):
+            os.makedirs(os.path.join(directory, ".info"))
+            with open(os.path.join(directory, ".info", "version"), "w") as fh:
+                fh.write("99.0.0\n")
+        source = os.path.join(root, "compiler.c")
+        with open(source, "w") as fh:
+            fh.write(
+                "void LLVMGetVersion(unsigned *a, unsigned *b, unsigned *c) "
+                "{ *a=20; *b=0; *c=0; }\n"
+            )
+        for directory in (core_lib, os.path.join(rocm, "lib")):
+            os.makedirs(directory)
+            subprocess.run(
+                [
+                    "cc",
+                    "-shared",
+                    "-fPIC",
+                    source,
+                    "-o",
+                    os.path.join(directory, "libamd_comgr.so"),
+                ],
+                check=True,
+            )
         return rocm
 
     def _assert_agree(self, env_overrides):
@@ -1995,9 +2005,7 @@ class TestCrossEngineFlavorAutoResolution(unittest.TestCase):
         """``$ROCM_PATH`` outranks /opt/rocm on both sides, or they split."""
         rocm = self._fake_rocm_tree()
         dl = self._assert_agree({"ROCM_PATH": rocm})
-        # 7.0.0 is pre-7.2, i.e. the LLVM 20 plain-p8 datalayout. Pinning the
-        # value (not just agreement) is what proves the env root was honoured
-        # rather than both engines ignoring it and agreeing on the host default.
+        # The callable LLVM20 version wins over the conflicting 99.0 metadata.
         self.assertIn("-p8:128:128-", dl)
 
     def test_agree_when_rocm_home_names_an_older_install(self):
@@ -2006,12 +2014,7 @@ class TestCrossEngineFlavorAutoResolution(unittest.TestCase):
         self.assertIn("-p8:128:128-", dl)
 
     def test_agree_when_comgr_lib_is_pinned_in_a_component_subdir(self):
-        """The RELEASE version wins over the component version next to comgr.
-
-        ``$ROCKE_COMGR_LIB`` points into ``core-7.13/lib``, whose own
-        ``.info/version`` says 7.13.0 (-> llvm23) while the install root says
-        7.0.0 (-> llvm20). Both engines must climb to the root.
-        """
+        """Neither root nor component metadata overrides the loaded compiler."""
         import os
 
         rocm = self._fake_rocm_tree()
@@ -3297,6 +3300,203 @@ class TestNewTargetIntrinsics(unittest.TestCase):
         _assert_engines_agree(self, b.kernel, ll, **kw)
         _assert_ir_assembles(self, ll, name)
         return ll
+
+    # ---- cross-workgroup fence / flag ops (stream-K fixup) ----
+    @staticmethod
+    def _flag_kernel(b):
+        from rocke.core.ir import I32, PtrType
+
+        return b.param("flags", PtrType(I32, "global"))
+
+    def test_fence_renders_scope_and_ordering(self):
+        ll = self._lower("fence", lambda b: b.fence(scope="agent", ordering="release"))
+        self.assertIn('  fence syncscope("agent") release', ll)
+
+    def test_fence_system_scope_has_no_syncscope_clause(self):
+        ll = self._lower(
+            "fencesys", lambda b: b.fence(scope="system", ordering="acquire")
+        )
+        self.assertIn("  fence acquire", ll)
+        self.assertNotIn("syncscope", ll)
+
+    def test_global_flag_store_is_scoped_atomic_store(self):
+        def build(b):
+            flags = self._flag_kernel(b)
+            b.global_flag_store(flags, b.const_i32(3), b.const_i32(1))
+
+        ll = self._lower("flagst", build)
+        self.assertRegex(
+            ll,
+            r"store atomic i32 1, ptr addrspace\(1\) %gep\.\d+ "
+            r'syncscope\("agent"\) release, align 4',
+        )
+
+    def test_global_flag_wait_eq_is_acquire_spin_loop(self):
+        def build(b):
+            flags = self._flag_kernel(b)
+            b.global_flag_wait_eq(flags, b.const_i32(2), b.const_i32(1))
+
+        ll = self._lower("flagwt", build)
+        self.assertRegex(
+            ll,
+            r"(?s)br label %(flag\.wait\.\d+)\n\1:\n"
+            r"  (%flag\.\d+) = load atomic i32, ptr addrspace\(1\) %gep\.\d+ "
+            r'syncscope\("agent"\) acquire, align 4\n'
+            r"  (%flag\.hit\.\d+) = icmp eq i32 \2, 1\n"
+            r"  br i1 \3, label %flag\.done\.\d+, label %\1\n",
+        )
+
+    def test_flag_ops_lower_to_hip_atomics(self):
+        from rocke.core.lower_hip import lower_kernel_to_hip
+
+        b = self._builder("flaghip")
+        flags = self._flag_kernel(b)
+        b.global_flag_store(flags, b.const_i32(0), b.const_i32(1))
+        b.fence(scope="agent", ordering="acquire")
+        b.global_flag_wait_eq(flags, b.const_i32(0), b.const_i32(1))
+        hip = lower_kernel_to_hip(b.kernel)
+        self.assertIn("__ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_AGENT);", hip)
+        self.assertIn('__builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "agent");', hip)
+        self.assertIn("while (__hip_atomic_load(", hip)
+
+    def test_flag_ops_reject_bad_scope_ordering_and_type(self):
+        b = self._builder("flagbad")
+        flags = self._flag_kernel(b)
+        with self.assertRaisesRegex(ValueError, "unknown fence scope"):
+            b.fence(scope="device")
+        with self.assertRaisesRegex(ValueError, "unknown fence ordering"):
+            b.fence(ordering="monotonic")
+        with self.assertRaisesRegex(ValueError, "expects an i32 value"):
+            b.global_flag_store(flags, b.const_i32(0), b.const_f32(1.0))
+        with self.assertRaisesRegex(ValueError, "unknown flag store ordering"):
+            b.global_flag_store(
+                flags, b.const_i32(0), b.const_i32(1), ordering="acquire"
+            )
+        with self.assertRaisesRegex(ValueError, "unknown flag scope"):
+            b.global_flag_wait_eq(flags, b.const_i32(0), b.const_i32(1), scope="gpu")
+
+    def test_flag_ops_reject_non_i32_pointer(self):
+        # LLVM GEPs the flag as i32 while HIP indexes the pointee type, so any
+        # other element type would make the two engines address different
+        # bytes. Builder and verifier both refuse it (C++ mirror:
+        # case_flag_ops_reject_non_i32_ptr).
+        from rocke.core.ir import F16, PtrType
+        from rocke.core.verify import ERROR, verify
+
+        b = self._builder("flagf16")
+        half = b.param("flags", PtrType(F16, "global"))
+        for name, emit in (
+            ("global_flag_store", b.global_flag_store),
+            ("global_flag_wait_eq", b.global_flag_wait_eq),
+        ):
+            with self.assertRaisesRegex(
+                ValueError,
+                f"^{name} expects a global i32 pointer, got ptr<f16,global>$",
+            ):
+                emit(half, b.const_i32(0), b.const_i32(1))
+
+        b = self._builder("flagf16verify")
+        flags = self._flag_kernel(b)
+        half = b.param("half", PtrType(F16, "global"))
+        b.global_flag_store(flags, b.const_i32(0), b.const_i32(1))
+        b.global_flag_wait_eq(flags, b.const_i32(0), b.const_i32(1))
+        b.ret()
+        for op in b.kernel.body.ops:
+            if op.name.startswith("memref.global_flag_"):
+                op.operands[0] = half
+        msgs = [d.message for d in verify(b.kernel) if d.severity == ERROR]
+        for name in ("memref.global_flag_store", "memref.global_flag_wait_eq"):
+            needle = f"{name}: expected a global i32 pointer, got ptr<f16,global>"
+            self.assertTrue(any(needle in m for m in msgs), (needle, msgs))
+
+    def test_flag_ops_lowerers_reject_bad_attrs(self):
+        # Python counterpart of the C++ expect_flag_attr_rejected: an op with a
+        # missing or unknown scope / ordering (serialized IR that skipped the
+        # builder and the verifier) is rejected by BOTH lowerers instead of
+        # defaulting or rendering invalid IR such as ``fence ... bogus``.
+        from rocke.core.backend import BackendError, _lower_via_cpp_engine
+        from rocke.core.ir_serialize import serialize
+        from rocke.core.lower_hip import lower_kernel_to_hip
+        from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
+
+        valid = {
+            "memref.fence": {"scope": "agent", "ordering": "acq_rel"},
+            "memref.global_flag_store": {"scope": "agent", "ordering": "release"},
+            "memref.global_flag_wait_eq": {"scope": "agent"},
+        }
+        cases = [
+            ("memref.fence", "ordering", "bogus"),
+            ("memref.fence", "scope", "bogus"),
+            ("memref.fence", "ordering", "monotonic"),
+            ("memref.global_flag_store", "ordering", "bogus"),
+            ("memref.global_flag_store", "ordering", "acquire"),
+            ("memref.global_flag_store", "scope", "bogus"),
+            ("memref.global_flag_wait_eq", "scope", "bogus"),
+        ] + [(name, key, None) for name, attrs in valid.items() for key in attrs]
+        for name, key, value in cases:
+            with self.subTest(op=name, key=key, value=value):
+                b = self._builder("flag_bad_attr")
+                if name == "memref.fence":
+                    b.fence()
+                else:
+                    flags = self._flag_kernel(b)
+                    emit = getattr(b, name.split(".", 1)[1])
+                    emit(flags, b.const_i32(0), b.const_i32(1))
+                b.ret()
+                (op,) = [o for o in b.kernel.body.ops if o.name == name]
+                op.attrs.clear()
+                op.attrs.update(valid[name])
+                if value is None:
+                    del op.attrs[key]
+                    want = f"{name}: {key} attribute missing or not a string"
+                else:
+                    op.attrs[key] = value
+                    want = f"{name}: unknown {key} '{value}'"
+                with self.assertRaisesRegex(ValueError, re.escape(want)):
+                    lower_kernel_to_hip(b.kernel)
+                with self.assertRaisesRegex(ValueError, re.escape(want)):
+                    _lower_kernel_to_llvm_python(b.kernel)
+                try:
+                    _lower_via_cpp_engine(serialize(b.kernel), "gfx950", "llvm20")
+                except BackendError:
+                    continue  # engine not built: C++ is covered by its ctest
+                except Exception as e:  # noqa: BLE001 -- engine error type
+                    self.assertIn(want, str(e))
+                else:
+                    self.fail(f"C++ engine accepted {name} with {key}={value!r}")
+
+    def test_verifier_rejects_malformed_flag_ops(self):
+        # Serialized IR can carry flag ops the builder would have refused; the
+        # verifier has to catch them before a lowerer unpacks the operands.
+        from rocke.core.ir import F32
+        from rocke.core.verify import ERROR, verify
+
+        b = self._builder("flagverify")
+        flags = self._flag_kernel(b)
+        b.fence(scope="agent", ordering="release")
+        b.global_flag_store(flags, b.const_i32(0), b.const_i32(1))
+        b.global_flag_wait_eq(flags, b.const_i32(0), b.const_i32(1))
+        b.ret()
+        ops = {op.name: op for op in b.kernel.body.ops}
+        self.assertEqual(
+            [d for d in verify(b.kernel) if d.severity == ERROR], [], "well-formed"
+        )
+        ops["memref.fence"].attrs["ordering"] = "monotonic"
+        ops["memref.global_flag_store"].attrs["scope"] = "gpu"
+        wait = ops["memref.global_flag_wait_eq"]
+        wait.operands[2] = b.const_f32(1.0)
+        msgs = [d.message for d in verify(b.kernel) if d.severity == ERROR]
+        for needle in (
+            "memref.fence: unknown ordering 'monotonic'",
+            "memref.global_flag_store: unknown scope 'gpu'",
+            f"memref.global_flag_wait_eq: value must be i32, got {F32.name}",
+        ):
+            self.assertTrue(any(needle in m for m in msgs), (needle, msgs))
+        del wait.operands[2]
+        msgs = [d.message for d in verify(b.kernel) if d.severity == ERROR]
+        self.assertTrue(
+            any("expected 3 operands / 0 results, got 2 / 0" in m for m in msgs), msgs
+        )
 
     # ---- ds_swizzle (raw offset + XOR-butterfly encoding) ----
     def test_ds_swizzle_passes_raw_offset_immediate(self):
@@ -6737,6 +6937,296 @@ class TestLibDiscoveryOrder(unittest.TestCase):
             self.assertIsNone(result)
             self.assertNotIn("torch", sys.modules)
 
+    def _fake_torch_site(self, tmp):
+        """A site-packages holding a torch package and TheRock's
+        ``_rocm_sdk_core`` wheel layout: HIP and comgr under
+        ``_rocm_sdk_core/lib`` with only their SONAMEs, nothing in torch/lib."""
+        import os
+        import types
+
+        site = os.path.join(tmp, "site-packages")
+        os.makedirs(os.path.join(site, "torch", "lib"))
+        core_lib = os.path.join(site, "_rocm_sdk_core", "lib")
+        os.makedirs(core_lib)
+        open(os.path.join(site, "_rocm_sdk_core", "__init__.py"), "w").close()
+        for name in ("libamdhip64.so.7", "libamd_comgr.so.3", "libhiprtc.so.7"):
+            open(os.path.join(core_lib, name), "w").close()
+        torch_stub = types.ModuleType("torch")
+        torch_stub.__file__ = os.path.join(site, "torch", "__init__.py")
+        return site, core_lib, torch_stub
+
+    def _enter_fake_process(
+        self, stack, tmp, site, modules, absent=(), maps=None, root_libdirs=None
+    ):
+        """Patch this process to look like one that imported ``modules`` (and
+        not ``absent``), has ``site`` on sys.path, maps the libs listed in the
+        ``maps`` file and finds the ROCm installs ``root_libdirs``."""
+        import importlib
+        import os
+        import sys
+        from unittest import mock
+
+        from rocke.runtime import comgr as comgr_mod
+        from rocke.runtime import runtime_coexistence as rc
+
+        stack.enter_context(mock.patch.dict(sys.modules, modules))
+        stack.enter_context(mock.patch.object(sys, "path", [site] + sys.path))
+        stack.enter_context(mock.patch.object(rc, "_IS_WINDOWS", False))
+        stack.enter_context(
+            mock.patch.object(rc, "_PROC_MAPS", maps or os.path.join(tmp, "no-maps"))
+        )
+        if root_libdirs is not None:
+            stack.enter_context(
+                mock.patch.object(rc, "_rocm_root_libdirs", return_value=root_libdirs)
+            )
+        stack.enter_context(mock.patch.object(comgr_mod, "_lib", None))
+        stack.enter_context(mock.patch.dict(os.environ))
+        for name in ("_rocm_sdk_core",) + tuple(absent):
+            sys.modules.pop(name, None)
+        importlib.invalidate_caches()
+        os.environ.pop("ROCKE_HIP_LIB", None)
+        os.environ.pop("ROCKE_COMGR_LIB", None)
+
+    def test_torch_lib_resolves_into_the_rocm_sdk_core_wheel(self):
+        import importlib
+        import os
+        import sys
+        import tempfile
+        import types
+        from unittest import mock
+
+        from rocke.runtime import runtime_coexistence as rc
+
+        # TheRock torch preloads _rocm_sdk_core/lib/libamdhip64.so.7. Looking only
+        # in torch/lib missed it, so rocke loaded /opt/rocm's HIP as a second
+        # runtime and hipModuleGetFunction failed with hipError(500).
+        with tempfile.TemporaryDirectory() as tmp:
+            site, core_lib, torch_stub = self._fake_torch_site(tmp)
+            with mock.patch.dict(
+                sys.modules,
+                {"torch": torch_stub, "rocm_sdk": types.ModuleType("rocm_sdk")},
+            ), mock.patch.object(sys, "path", [site] + sys.path), mock.patch.object(
+                rc, "_IS_WINDOWS", False
+            ), mock.patch.object(
+                rc, "_PROC_MAPS", os.path.join(tmp, "no-maps")
+            ), mock.patch.dict(
+                os.environ
+            ):
+                sys.modules.pop("_rocm_sdk_core", None)
+                importlib.invalidate_caches()
+                os.environ.pop("ROCKE_HIP_LIB", None)
+                hip = os.path.join(core_lib, "libamdhip64.so.7")
+                self.assertEqual(rc._torch_bundled_lib("amdhip64"), hip)
+                self.assertEqual(
+                    rc._torch_bundled_lib("amd_comgr"),
+                    os.path.join(core_lib, "libamd_comgr.so.3"),
+                )
+                paths = rc._candidate_lib_paths("amdhip64", "ROCKE_HIP_LIB", ["7"])
+                self.assertEqual(paths[0], hip)
+                # The explicit override still outranks it.
+                os.environ["ROCKE_HIP_LIB"] = "/custom/libamdhip64.so"
+                paths = rc._candidate_lib_paths("amdhip64", "ROCKE_HIP_LIB", ["7"])
+                self.assertEqual(paths[:2], ["/custom/libamdhip64.so", hip])
+
+    def test_rocm_sdk_core_libs_need_therock_torch(self):
+        import contextlib
+        import os
+        import tempfile
+
+        from rocke.runtime import runtime_coexistence as rc
+
+        # A CUDA, CPU or older ROCm torch in a venv that also has rocm-sdk-core
+        # installed: torch loaded no ROCm libs and rocm_sdk is not imported.
+        # Binding to the wheel's HIP there picks a runtime nothing else uses.
+        with tempfile.TemporaryDirectory() as tmp, contextlib.ExitStack() as stack:
+            site, core_lib, torch_stub = self._fake_torch_site(tmp)
+            self._enter_fake_process(
+                stack, tmp, site, {"torch": torch_stub}, absent=("rocm_sdk",)
+            )
+            self.assertIsNone(rc._torch_bundled_lib("amdhip64"))
+            self.assertIsNone(rc._torch_bundled_lib("amd_comgr"))
+            paths = rc._candidate_lib_paths("amdhip64", "ROCKE_HIP_LIB", ["7"])
+            self.assertNotIn(os.path.join(core_lib, "libamdhip64.so.7"), paths)
+
+    def test_torch_lib_prefers_the_copy_already_mapped(self):
+        import os
+        import sys
+        import tempfile
+        from unittest import mock
+
+        from rocke.runtime import runtime_coexistence as rc
+
+        # Whatever layout torch's HIP came from, the mapped copy is the instance
+        # torch is using; it wins over every on-disk guess. Near-miss names
+        # (libhiprtc, libamdhip64_dbg) must not match.
+        with tempfile.TemporaryDirectory() as tmp:
+            site, _, torch_stub = self._fake_torch_site(tmp)
+            open(os.path.join(site, "torch", "lib", "libamdhip64.so"), "w").close()
+            mapped = "/opt/vendor dir/lib/libamdhip64.so.7.16.60100"
+            maps = os.path.join(tmp, "maps")
+            with open(maps, "w") as fh:
+                fh.write(
+                    "7f00-7f01 r-xp 00000000 08:01 11 /opt/x/lib/libamdhip64_dbg.so.7\n"
+                    "7f01-7f02 r-xp 00000000 08:01 12 /opt/x/lib/libhiprtc.so.7\n"
+                    "7f02-7f03 rw-p 00000000 00:00 0\n"
+                    f"7f03-7f04 r-xp 00000000 08:01 13 {mapped}\n"
+                )
+            with mock.patch.dict(sys.modules, {"torch": torch_stub}), mock.patch.object(
+                rc, "_IS_WINDOWS", False
+            ), mock.patch.object(rc, "_PROC_MAPS", maps):
+                self.assertEqual(rc._torch_bundled_lib("amdhip64"), mapped)
+                self.assertIsNone(rc._mapped_lib("amd_comgr"))
+
+    def test_multiple_mapped_hip_copies_are_not_selected_by_address(self):
+        import contextlib
+        import os
+        import tempfile
+        import types
+
+        from rocke.runtime import runtime_coexistence as rc
+
+        with tempfile.TemporaryDirectory() as tmp, contextlib.ExitStack() as stack:
+            site, core_lib, torch_stub = self._fake_torch_site(tmp)
+            wheel = os.path.join(core_lib, "libamdhip64.so.7")
+            foreign = "/opt/rocm-7.2.3/lib/libamdhip64.so.7"
+            other = "/opt/rocm-7.3.0/lib/libamdhip64.so.7"
+            maps = os.path.join(tmp, "maps")
+
+            def mapped(*paths):
+                with open(maps, "w") as fh:
+                    for index, path in enumerate(paths):
+                        fh.write(
+                            f"7f0{index}-7f0{index + 1} r-xp 00000000 "
+                            f"08:01 1{index} {path}\n"
+                        )
+
+            self._enter_fake_process(
+                stack,
+                tmp,
+                site,
+                {"torch": torch_stub, "rocm_sdk": types.ModuleType("rocm_sdk")},
+                maps=maps,
+            )
+            mapped(foreign, wheel)
+            self.assertEqual(rc._mapped_lib("amdhip64"), wheel)
+            self.assertEqual(
+                rc._candidate_lib_paths("amdhip64", "ROCKE_HIP_LIB", ["7"])[0],
+                wheel,
+            )
+            mapped(wheel, foreign)
+            self.assertEqual(rc._mapped_lib("amdhip64"), wheel)
+
+            mapped(foreign, other)
+            self.assertIsNone(rc._mapped_lib("amdhip64"))
+
+            torch_lib = os.path.join(site, "torch", "lib", "libamdhip64.so")
+            open(torch_lib, "w").close()
+            mapped(foreign, torch_lib)
+            self.assertEqual(rc._mapped_lib("amdhip64"), torch_lib)
+
+            mapped(foreign, foreign)
+            self.assertEqual(rc._mapped_lib("amdhip64"), foreign)
+
+    def test_comgr_override_rejects_only_a_different_unique_mapped_file(self):
+        import contextlib
+        import os
+        import tempfile
+        import types
+        from unittest import mock
+
+        from rocke.runtime import comgr as comgr_mod
+        from rocke.runtime import runtime_coexistence as rc
+
+        with tempfile.TemporaryDirectory() as tmp, contextlib.ExitStack() as stack:
+            site, core_lib, torch_stub = self._fake_torch_site(tmp)
+            wheel = os.path.join(core_lib, "libamd_comgr.so.3")
+            with open(wheel, "wb") as fh:
+                fh.write(b"\x7fELF")
+            root = os.path.join(tmp, "rocm-10.2.0", "lib")
+            os.makedirs(root)
+            host = os.path.join(root, "libamd_comgr.so.3")
+            with open(host, "wb") as fh:
+                fh.write(b"\x7fELF")
+            maps = os.path.join(tmp, "maps")
+            with open(maps, "w") as fh:
+                # Multiple map segments for one file are still one copy.
+                for address in ("7f00-7f01", "7f01-7f02"):
+                    fh.write(f"{address} r-xp 00000000 08:01 11 {wheel}\n")
+            sdk_stub = types.ModuleType("rocm_sdk")
+            sdk_stub.__version__ = "10.1.0a20260822"
+            self._enter_fake_process(
+                stack,
+                tmp,
+                site,
+                {"torch": torch_stub, "rocm_sdk": sdk_stub},
+                maps=maps,
+                root_libdirs=[root],
+            )
+            stack.enter_context(mock.patch.object(comgr_mod, "_IS_WINDOWS", False))
+            self.assertEqual(rc._mapped_lib("amd_comgr", require_unique=True), wheel)
+
+            os.environ["ROCKE_COMGR_LIB"] = host
+            with mock.patch.object(comgr_mod.ctypes, "CDLL") as load:
+                with self.assertRaises(comgr_mod.ComgrError) as error:
+                    comgr_mod._load_lib()
+                load.assert_not_called()
+            self.assertIn(repr(host), str(error.exception))
+            self.assertIn(repr(wheel), str(error.exception))
+            self.assertIn("separate process", str(error.exception))
+
+            # A different spelling of the *same* mapped file keeps override
+            # precedence; path aliases must not become hard failures.
+            same_file = os.path.join(core_lib, "..", "lib", "libamd_comgr.so.3")
+            self.assertEqual(os.path.realpath(same_file), os.path.realpath(wheel))
+            os.environ["ROCKE_COMGR_LIB"] = same_file
+            with mock.patch.object(comgr_mod.ctypes, "CDLL") as load:
+                self.assertIs(comgr_mod._load_lib(), load.return_value)
+                load.assert_called_once_with(same_file)
+
+            # An invalid override retains the existing fallback to torch's
+            # mapped library rather than becoming a new hard error.
+            missing = os.path.join(tmp, "missing", "libamd_comgr.so.3")
+            os.environ["ROCKE_COMGR_LIB"] = missing
+            with mock.patch.object(
+                comgr_mod.ctypes, "CDLL", side_effect=[OSError("missing"), object()]
+            ) as load:
+                comgr_mod._load_lib()
+                self.assertEqual(
+                    [call.args[0] for call in load.call_args_list], [missing, wheel]
+                )
+
+            # An existing text file is still an unloadable override, not a
+            # second COMGR. The native detector can map the fallback before
+            # Python resolves it, so this check must not reject its fallback.
+            invalid = os.path.join(tmp, "broken.so")
+            with open(invalid, "w") as fh:
+                fh.write("not a shared library")
+            os.environ["ROCKE_COMGR_LIB"] = invalid
+            loaded = object()
+            with mock.patch.object(
+                comgr_mod.ctypes, "CDLL", side_effect=[OSError("invalid ELF"), loaded]
+            ) as load:
+                self.assertIs(comgr_mod._load_lib(), loaded)
+                self.assertEqual(
+                    [call.args[0] for call in load.call_args_list], [invalid, wheel]
+                )
+
+            # No mapped copy, or multiple distinct mapped copies, leaves the
+            # existing override and mapped-tier policy unchanged.
+            os.environ["ROCKE_COMGR_LIB"] = host
+            with mock.patch.object(rc, "_PROC_MAPS", os.path.join(tmp, "no-maps")):
+                self.assertIsNone(rc._mapped_lib("amd_comgr", require_unique=True))
+                with mock.patch.object(comgr_mod.ctypes, "CDLL") as load:
+                    comgr_mod._load_lib()
+                    load.assert_called_once_with(host)
+            with open(maps, "a") as fh:
+                fh.write(f"7f02-7f03 r-xp 00000000 08:01 12 {host}\n")
+            self.assertEqual(rc._mapped_lib("amd_comgr"), wheel)
+            self.assertIsNone(rc._mapped_lib("amd_comgr", require_unique=True))
+            with mock.patch.object(comgr_mod.ctypes, "CDLL") as load:
+                comgr_mod._load_lib()
+                load.assert_called_once_with(host)
+
     def test_rocm_version_parsed_from_versioned_libdir(self):
         from rocke.runtime.runtime_coexistence import _rocm_version_from_libdir
 
@@ -6835,6 +7325,204 @@ class TestLibDiscoveryOrder(unittest.TestCase):
                 ):
                     self.assertEqual(rc._newest_rocm_root_version(), (7, 2))
                     self.assertTrue(rc._torch_comgr_is_stale())
+
+    def test_therock_torch_compares_its_rocm_release_not_its_hip_version(self):
+        import contextlib
+        import os
+        import tempfile
+        import types
+
+        from rocke.runtime import runtime_coexistence as rc
+
+        # TheRock torch reports the HIP version in torch.version.hip (7.17 on ROCm
+        # 10.2); its _rocm_sdk_core comgr belongs to the wheel's ROCm release.
+        # Read as a release, 7.17 is older than any /opt/rocm-10.x, so the
+        # wheel's comgr was always demoted, even beside the same release.
+        with tempfile.TemporaryDirectory() as tmp, contextlib.ExitStack() as stack:
+            site, core_lib, torch_stub = self._fake_torch_site(tmp)
+            torch_stub.version = types.SimpleNamespace(hip="7.17.26384-0000000")
+            sdk_stub = types.ModuleType("rocm_sdk")
+            bundled = os.path.join(core_lib, "libamd_comgr.so.3")
+            self._enter_fake_process(
+                stack,
+                tmp,
+                site,
+                {"torch": torch_stub, "rocm_sdk": sdk_stub},
+                root_libdirs=[os.path.join(tmp, "rocm-10.2.0", "lib")],
+            )
+            sdk_stub.__version__ = "10.2.0a20261001"
+            self.assertEqual(rc._torch_rocm_version(bundled), (10, 2))
+            self.assertFalse(rc._torch_comgr_is_stale(bundled))
+            # An older release beside it is still stale: the check compares.
+            sdk_stub.__version__ = "10.1.0a20260822"
+            self.assertTrue(rc._torch_comgr_is_stale(bundled))
+
+    def test_mapped_rocm_sdk_core_comgr_is_never_demoted(self):
+        import contextlib
+        import os
+        import tempfile
+        import types
+        from unittest import mock
+
+        from rocke.runtime import runtime_coexistence as rc
+
+        # ROCm 10.1 TheRock torch on a ROCm 10.2 host. initialize_process loaded
+        # the wheel comgr RTLD_GLOBAL; demoting it made rocke load the 10.2 comgr
+        # beside it, and two LLVMs in one process abort ("support is already
+        # registered for analysis").
+        with tempfile.TemporaryDirectory() as tmp, contextlib.ExitStack() as stack:
+            site, core_lib, torch_stub = self._fake_torch_site(tmp)
+            torch_stub.version = types.SimpleNamespace(hip="7.16.26332-0000000")
+            sdk_stub = types.ModuleType("rocm_sdk")
+            sdk_stub.__version__ = "10.1.0a20260822"
+            comgr = os.path.join(core_lib, "libamd_comgr.so.3")
+            root = os.path.join(tmp, "rocm-10.2.0", "lib")
+            maps = os.path.join(tmp, "maps")
+            with open(maps, "w") as fh:
+                fh.write(f"7f00-7f01 r-xp 00000000 08:01 11 {comgr}\n")
+            self._enter_fake_process(
+                stack,
+                tmp,
+                site,
+                {"torch": torch_stub, "rocm_sdk": sdk_stub},
+                maps=maps,
+                root_libdirs=[root],
+            )
+            paths = rc._candidate_lib_paths("amd_comgr", "ROCKE_COMGR_LIB", ["3"])
+            self.assertEqual(paths[0], comgr)
+            self.assertEqual(paths.count(comgr), 1)
+            # The staleness check itself still fires; only the demotion is skipped.
+            self.assertTrue(rc._torch_comgr_is_stale(comgr))
+            # Control: the same wheel comgr, not loaded yet, is still demoted.
+            stack.enter_context(
+                mock.patch.object(rc, "_PROC_MAPS", os.path.join(tmp, "no-maps"))
+            )
+            paths = rc._candidate_lib_paths("amd_comgr", "ROCKE_COMGR_LIB", ["3"])
+            self.assertEqual(paths[0], os.path.join(root, "libamd_comgr.so"))
+            self.assertEqual(paths[-2:], [comgr, "libamd_comgr.so"])
+
+    def test_mapped_torch_lib_comgr_is_still_demoted_when_stale(self):
+        import contextlib
+        import os
+        import tempfile
+        import types
+
+        from rocke.runtime import runtime_coexistence as rc
+
+        # Older wheels keep comgr in torch/lib; the demotion they were written
+        # for is unchanged, mapped or not.
+        with tempfile.TemporaryDirectory() as tmp, contextlib.ExitStack() as stack:
+            site, _, torch_stub = self._fake_torch_site(tmp)
+            torch_stub.version = types.SimpleNamespace(hip="7.0.51831-a1b2c3")
+            comgr = os.path.join(site, "torch", "lib", "libamd_comgr.so")
+            open(comgr, "w").close()
+            root = os.path.join(tmp, "rocm-7.2.3", "lib")
+            maps = os.path.join(tmp, "maps")
+            with open(maps, "w") as fh:
+                fh.write(f"7f00-7f01 r-xp 00000000 08:01 11 {comgr}\n")
+            self._enter_fake_process(
+                stack,
+                tmp,
+                site,
+                {"torch": torch_stub},
+                absent=("rocm_sdk",),
+                maps=maps,
+                root_libdirs=[root],
+            )
+            paths = rc._candidate_lib_paths("amd_comgr", "ROCKE_COMGR_LIB", ["3"])
+            self.assertEqual(paths[0], os.path.join(root, "libamd_comgr.so"))
+            self.assertEqual(paths[-2:], [comgr, "libamd_comgr.so"])
+
+    def test_torch_lib_comgr_version_ignores_an_unrelated_rocm_sdk(self):
+        import contextlib
+        import os
+        import tempfile
+        import types
+
+        from rocke.runtime import comgr as comgr_mod
+        from rocke.runtime import runtime_coexistence as rc
+
+        # Older ROCm 7.0 torch with comgr in torch/lib on a ROCm 7.2 host, with
+        # rocm_sdk 10.2 imported for something else. The comgr is 7.0 and stale;
+        # reading rocm_sdk.__version__ called it 10.2 and kept it first, while
+        # resolved_lib_rocm_version (by path) said 7.0.
+        with tempfile.TemporaryDirectory() as tmp, contextlib.ExitStack() as stack:
+            site, _, torch_stub = self._fake_torch_site(tmp)
+            torch_stub.version = types.SimpleNamespace(hip="7.0.51831-a1b2c3")
+            comgr = os.path.join(site, "torch", "lib", "libamd_comgr.so")
+            open(comgr, "w").close()
+            sdk_stub = types.ModuleType("rocm_sdk")
+            sdk_stub.__version__ = "10.2.0a20261001"
+            root = os.path.join(tmp, "rocm-7.2.3", "lib")
+            self._enter_fake_process(
+                stack,
+                tmp,
+                site,
+                {"torch": torch_stub, "rocm_sdk": sdk_stub},
+                root_libdirs=[root],
+            )
+            paths = rc._candidate_lib_paths("amd_comgr", "ROCKE_COMGR_LIB", ["3"])
+            self.assertEqual(paths[0], os.path.join(root, "libamd_comgr.so"))
+            self.assertEqual(paths[-2:], [comgr, "libamd_comgr.so"])
+            # Both version readers agree on the lib that will load.
+            self.assertEqual(comgr_mod.resolved_lib_path(), comgr)
+            self.assertEqual(rc._torch_rocm_version(comgr), (7, 0))
+            self.assertEqual(comgr_mod.resolved_lib_rocm_version(), (7, 0))
+
+    def test_rocm_sdk_core_comgr_reports_the_wheel_release(self):
+        import importlib
+        import os
+        import sys
+        import tempfile
+        import types
+        from unittest import mock
+
+        from rocke.runtime import comgr as comgr_mod
+        from rocke.runtime import runtime_coexistence as rc
+
+        # TheRock torch's comgr lives in _rocm_sdk_core/lib, outside the torch
+        # package. Its version came from the /opt/rocm fallback instead of the
+        # wheel, so a ROCm 10.1 wheel on a 10.2 host picked the LLVM flavor and
+        # capability guards for a comgr that was not the one loaded.
+        with tempfile.TemporaryDirectory() as tmp:
+            site, core_lib, torch_stub = self._fake_torch_site(tmp)
+            torch_stub.version = types.SimpleNamespace(hip="7.16.26332-0000000")
+            sdk_stub = types.ModuleType("rocm_sdk")
+            comgr = os.path.join(core_lib, "libamd_comgr.so.3")
+            with mock.patch.dict(
+                sys.modules, {"torch": torch_stub, "rocm_sdk": sdk_stub}
+            ), mock.patch.object(sys, "path", [site] + sys.path), mock.patch.object(
+                rc, "_IS_WINDOWS", False
+            ), mock.patch.object(
+                rc, "_PROC_MAPS", os.path.join(tmp, "no-maps")
+            ), mock.patch.object(
+                rc, "_rocm_root_libdirs", return_value=[]
+            ), mock.patch.object(
+                comgr_mod, "_lib", None
+            ), mock.patch.dict(
+                os.environ
+            ):
+                sys.modules.pop("_rocm_sdk_core", None)
+                importlib.invalidate_caches()
+                os.environ.pop("ROCKE_COMGR_LIB", None)
+                self.assertEqual(comgr_mod.resolved_lib_path(), comgr)
+                for sdk_version, expected in (
+                    ("10.1.0a20260822", (10, 1)),
+                    ("10.2.0a20261001", (10, 2)),
+                ):
+                    with self.subTest(rocm_sdk=sdk_version):
+                        sdk_stub.__version__ = sdk_version
+                        self.assertEqual(
+                            comgr_mod.resolved_lib_rocm_version(), expected
+                        )
+                # rocm_sdk not imported (e.g. ROCKE_COMGR_LIB points into the
+                # wheel): the installed rocm-sdk-core distribution names it.
+                del sdk_stub.__version__
+                with mock.patch(
+                    "importlib.metadata.version", return_value="10.1.0a20260822"
+                ) as dist_version:
+                    self.assertEqual(comgr_mod.resolved_lib_rocm_version(), (10, 1))
+                dist_version.assert_called_with("rocm-sdk-core")
 
 
 # ---------------------------------------------------------------------
