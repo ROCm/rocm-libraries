@@ -976,9 +976,9 @@ def test_generic_target_provenance_names_the_compile_target(
         inter_root=tmp_path / "inter",
     )
     for shard, generic in (("gfx1151", "gfx11-generic"), ("gfx1201", "gfx12-generic")):
-        ukd = _read(tmp_path / "out" / shard / "target.kdp.json")["kernelDescriptors"][
-            0
-        ]
+        ukd = read_shipped(tmp_path / "out" / shard / "target.kdp.json")[
+            "kernelDescriptors"
+        ][0]
         assert ukd["arch"] == [shard]
         assert ukd["provenance"]["compile_target"] == generic
         observations = ukd["provenance"]["effective_spec"]["observations"]
@@ -996,7 +996,7 @@ def test_generic_target_provenance_names_the_compile_target(
         )
         with pytest.raises(HkpPackError, match="compile-target binding"):
             agreement.verify(forged, [], payload)
-    native_ukd = _read(tmp_path / "out" / "gfx1151" / "native.kdp.json")[
+    native_ukd = read_shipped(tmp_path / "out" / "gfx1151" / "native.kdp.json")[
         "kernelDescriptors"
     ][0]
     assert native_ukd["provenance"]["compile_target"] == "gfx1151"
