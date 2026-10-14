@@ -179,8 +179,8 @@ class WmmaFmhaFwdSpec:
 
 def is_valid_spec(spec: WmmaFmhaFwdSpec, arch: str = "gfx1151") -> Tuple[bool, str]:
     """Return ``(ok, reason)``. The WMMA 16x16x16 atom for the spec's dtype must
-    exist on ``arch`` and the target must be wave32 (WMMA is an RDNA/gfx11
-    instruction)."""
+    exist on ``arch`` and the target must be wave32 (WMMA is a wave32 RDNA
+    instruction; gfx11 and gfx12 each carry their own atom)."""
     from rocke.core.arch import ArchTarget
 
     if spec.dtype not in _DTYPE_IR:

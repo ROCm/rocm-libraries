@@ -5,8 +5,16 @@
 
 numpy has no native bfloat16 and numpy is rocKE's only hard dependency, so a
 bf16 tensor is carried on the host as raw ``uint16`` and converted by hand --
-per TESTING.md, "bf16 gets a hand-rolled encoding or an explicit
-NotImplementedError, never a silent upcast".
+the TESTING.md reference CI policy asks for explicit bf16 encoding and rounding,
+and the gate has to run on a toolchain image that carries no dev extras.
+
+``ml_dtypes`` (the ``dev`` extra) is therefore not imported here; it is the
+independent oracle instead. ``platform/tests/numeric/test_bf16_codec.py`` holds
+this codec bit-identical to ``ml_dtypes.bfloat16`` wherever it is installed:
+every finite and infinite value, plus NaN-ness and sign. Only the NaN *payload*
+differs, deliberately -- ``ml_dtypes`` canonicalises every NaN to
+``0x7FC0``/``0xFFC0``, while this codec keeps the payload bits that survive in
+the retained 7 mantissa bits (see ``f32_to_bf16``).
 
 This lives in ``platform`` so the one implementation is shared by every harness
 that needs it (``library/builders`` verify drivers and the ``library/tests``

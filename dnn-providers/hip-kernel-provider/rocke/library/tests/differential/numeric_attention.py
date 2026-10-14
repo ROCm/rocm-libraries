@@ -165,7 +165,9 @@ _ATTN_TOL = Tol(rtol=0.0, atol=2e-2)
 # RDNA WMMA FMHA forward (kernels/gfx1151/wmma_fmha_fwd.py), which carries the
 # bf16 I/O path. These are the on-GPU cases behind `--only wmma_fmha_fwd`;
 # without them that scope selects nothing and the gate passes vacuously.
-# is_valid_spec rejects them off gfx1151/gfx1201, so they self-skip on CDNA.
+# is_valid_spec is capability-driven: it rejects any target whose catalog lacks
+# the wave32 16x16x16 WMMA atom for the dtype (CDNA has MFMA instead), so the
+# cases self-skip there rather than failing.
 WMMA_CONFIGS: List[AttnCfg] = [
     AttnCfg("wmma_mha_b2_h4_s64_d64_f16", 2, 4, 4, 64, 64, 64),
     AttnCfg("wmma_causal_b2_h4_s64_d64_f16", 2, 4, 4, 64, 64, 64, causal=True),
@@ -446,7 +448,7 @@ def run_wmma_config(cfg: AttnCfg, arch: str = "gfx1151") -> NumericResult:
         res.detail = f"validate raised: {e}"
         return res
     if not ok:
-        # Expected off gfx1151/gfx1201 -- WMMA is an RDNA instruction.
+        # Expected on a target with no wave32 WMMA atom for this dtype (CDNA).
         res.status = "REJECTED"
         res.detail = f"is_valid_spec: {why}"
         return res

@@ -48,11 +48,12 @@ from rocke.runtime.hip_module import Runtime
 
 # Per-dtype parity tolerance. numpy is the only hard dependency, so bf16 has no
 # native host type: it is carried as raw uint16 and converted by hand (see
-# ``_f32_to_bf16`` / ``_bf16_to_f32``), per TESTING.md -- "bf16 gets a
-# hand-rolled encoding or an explicit NotImplementedError, never a silent
-# upcast". bf16 keeps 8 mantissa bits against fp16's 11, so it gets its own,
-# looser budget rather than reusing fp16's -- a shared tolerance would let a
-# structural bug hide inside bf16 quantisation noise (TESTING.md gap G5).
+# ``_f32_to_bf16`` / ``_bf16_to_f32``), per the TESTING.md reference CI policy
+# (bf16 storage has explicit encoding and rounding). bf16 keeps 8 mantissa bits
+# against fp16's 11, so its quantisation floor is higher, but it still gets its
+# own budget sized from that floor rather than inheriting fp16's gate -- the
+# inherited slack would let a structural bug hide inside bf16 quantisation
+# noise (TESTING.md gap G5).
 #
 # Measured on gfx1151 and gfx1201, B=2 Sq=Sk=64, inputs ~N(0, 0.3).
 # Both arches produce identical figures:
