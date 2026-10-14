@@ -12,6 +12,7 @@ import logging
 import os
 import re
 import shutil
+import stat
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -1244,6 +1245,17 @@ def _serialize_json(document) -> bytes:
     return (json.dumps(document, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
 
 
+def _new_file_mode(destination: Path) -> int:
+    """The permissions a file promoted to @p destination carries: those of the file it
+    replaces, else what the umask gives a new file. mkstemp's are 0600, which would leave the
+    installed tree unreadable to everyone else."""
+    if destination.exists():
+        return stat.S_IMODE(destination.stat().st_mode)
+    umask = os.umask(0)
+    os.umask(umask)
+    return 0o666 & ~umask
+
+
 def _temp_beside(destination: Path) -> Path:
     handle, name = tempfile.mkstemp(
         prefix=f".{destination.name}.", suffix=".tmp", dir=destination.parent
@@ -1271,20 +1283,37 @@ def _undo(journal_path: Path) -> None:
     Raises PromoteError, leaving the journal and every unrestored backup in place, when a
     destination cannot be put back; the next promotion into the tree tries again.
     """
-    journal = json.loads(journal_path.read_text(encoding="utf-8"))
+    try:
+        journal = json.loads(journal_path.read_text(encoding="utf-8"))
+        entries = [
+            (
+                Path(entry["destination"]),
+                Path(entry["staged"]),
+                None if entry.get("backup") is None else Path(entry["backup"]),
+            )
+            for entry in journal["entries"]
+        ]
+        created = [Path(directory) for directory in journal["created_dirs"]]
+    except (ValueError, KeyError, TypeError) as error:
+        # Written atomically, so a promotion never leaves one unreadable: something else
+        # changed it, and what it would have restored is unknown.
+        raise PromoteError(
+            f"{journal_path} records an interrupted promotion but cannot be read "
+            f"({error}), so the files it swapped cannot be put back. Restore the "
+            "descriptor tree (e.g. from version control; backups are the hidden "
+            "`.<name>.*.tmp` files beside the files they replace), then delete it"
+        ) from None
     failed = []
-    for entry in reversed(journal["entries"]):
-        destination = Path(entry["destination"])
-        backup = entry.get("backup")
+    for destination, staged, backup in reversed(entries):
         try:
-            if Path(entry["staged"]).exists():
+            if staged.exists():
                 # Never swapped in (os.replace consumes the staged file): unchanged.
-                Path(entry["staged"]).unlink()
+                staged.unlink()
                 if backup is not None:
-                    Path(backup).unlink(missing_ok=True)
+                    backup.unlink(missing_ok=True)
             elif backup is None:
                 destination.unlink(missing_ok=True)
-            elif Path(backup).exists():
+            elif backup.exists():
                 os.replace(backup, destination)
         except OSError as error:
             failed.append(f"{destination}: {error}")
@@ -1293,7 +1322,7 @@ def _undo(journal_path: Path) -> None:
             "an interrupted promotion could not be undone; the replaced files are kept "
             f"beside them and listed in {journal_path}: " + "; ".join(failed)
         )
-    for directory in map(Path, journal["created_dirs"]):
+    for directory in created:
         if directory.is_dir() and not any(directory.iterdir()):
             directory.rmdir()
     journal_path.unlink()
@@ -1344,6 +1373,8 @@ def _apply(plan: PromotePlan) -> None:
         for destination, data in documents:
             staged.append((_temp_beside(destination), destination))
             staged[-1][0].write_bytes(data)
+        for temp, destination in staged:
+            os.chmod(temp, _new_file_mode(destination))
         for _, destination in staged:
             if destination.exists():
                 backups[destination] = _temp_beside(destination)

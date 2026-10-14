@@ -9,6 +9,7 @@ import functools
 import hashlib
 import json
 import os
+import re
 import uuid
 from pathlib import Path
 
@@ -347,7 +348,14 @@ def test_a_failed_promotion_leaves_the_tree_as_it_was_and_can_be_retried(
     plan = build_plan(model, tree)
     assert plan.copies and plan.write_descriptor
     failure(monkeypatch, plan)
-    with pytest.raises((OSError, ValueError)):
+    with pytest.raises(
+        (OSError, ValueError),
+        match=(
+            "No space left on device"
+            if failure is _fail_on_ued_replace
+            else "surrogates not allowed"
+        ),
+    ):
         _apply(plan)
     assert _files(tmp_path) == before
     assert sorted(tmp_path.rglob("*")) == paths
@@ -372,7 +380,7 @@ def test_a_failed_promotion_puts_back_every_file_it_replaced(tmp_path, monkeypat
     tree, _, plan, artifact = _reinstall_plan(tmp_path)
     before = _files(tmp_path)
     _fail_on_ued_replace(monkeypatch, plan)
-    with pytest.raises(OSError):
+    with pytest.raises(OSError, match="No space left on device"):
         _apply(plan)
     assert (
         _files(tmp_path) == before
@@ -451,6 +459,48 @@ def test_an_undo_that_cannot_restore_keeps_the_journal_and_the_backups(
     assert _files(tmp_path) == before
 
 
+def test_an_unreadable_journal_is_refused_by_name_and_left_in_place(tmp_path):
+    """Written atomically, a journal is unreadable only when something else changed it; what
+    it would restore is then unknown, so promotion stops and says which file and why."""
+    from uhd_gen import promote
+
+    tree, model, _, _ = _reinstall_plan(tmp_path)
+    journal = tree / promote.JOURNAL_NAME
+    parser = argparse.ArgumentParser()
+    add_promote_arguments(parser)
+    promote_args = parser.parse_args(
+        ["--model-dir", str(model), "--descriptor-tree", str(tree)]
+    )
+    for damage in ("{not json", json.dumps({"entries": [{"destination": "x"}]})):
+        journal.write_text(damage)
+        with pytest.raises(PromoteError, match=re.escape(str(journal))):
+            promote.recover_interrupted(tree)
+        assert run_promote(promote_args) == 1
+        assert journal.read_text() == damage, "the evidence is kept"
+    journal.unlink()
+    assert run_promote(promote_args) == 0, "deleting it, as the message says, unblocks"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits")
+def test_promoted_files_are_as_readable_as_the_files_they_join(tmp_path):
+    """Staged with mkstemp (0600); installed with the replaced file's mode, or the umask's."""
+    tree = _tree(tmp_path / "tree")
+    model = _model(tmp_path / "model", tree)
+    for path in tree.rglob("*"):
+        if path.is_file():
+            path.chmod(0o644)
+    umask = os.umask(0o022)
+    try:
+        plan = build_plan(model, tree)
+        _apply(plan)
+    finally:
+        os.umask(umask)
+    written = [plan.destination_descriptor, plan.ued_path, *(d for _, d in plan.copies)]
+    assert {path: oct(path.stat().st_mode & 0o777) for path in written} == {
+        path: "0o644" for path in written
+    }
+
+
 @pytest.mark.parametrize(
     "role,arch", [("sort_kernel_catalog", "gfx950"), ("predict_engine", "gfx942")]
 )
@@ -467,7 +517,9 @@ def test_shared_identity_cannot_be_rewritten_from_another_binding(tmp_path, role
     ued.setdefault(role, {})[arch] = OTHER
     _write(tree / "engine.ued.json", ued)
     before = _files(tmp_path)
-    with pytest.raises(PromoteError):
+    with pytest.raises(
+        PromoteError, match="is already installed at .* with different content"
+    ):
         build_plan(model, tree)
     assert _files(tmp_path) == before
 
@@ -477,7 +529,9 @@ def test_same_id_in_another_directory_is_not_installed_twice(tmp_path):
     model = _model(tmp_path / "model", tree)
     _write(tree / "sub" / "different.uhd.json", _read(model / "heuristic.uhd.json"))
     before = _files(tmp_path)
-    with pytest.raises(PromoteError):
+    with pytest.raises(
+        PromoteError, match="is already installed at .* with different content"
+    ):
         build_plan(model, tree)
     assert _files(tmp_path) == before
 
@@ -493,37 +547,56 @@ def test_shared_artifact_collision_is_found_outside_destination_directory(tmp_pa
     destination.mkdir(parents=True)
     (destination / "model.bin").write_bytes(b"untargeted model")
     before = _files(tmp_path)
-    with pytest.raises(PromoteError):
+    with pytest.raises(PromoteError, match="artifact collision"):
         build_plan(model, tree)
     assert _files(tmp_path) == before
 
 
 @pytest.mark.parametrize(
-    "missing",
+    "missing,refusal",
     [
-        "trained_against",
-        "features_hash",
-        "features_signature",
-        "objective",
-        "tree_data",
-        "name",
-        "version",
+        ("trained_against", "trained_against must be an object"),
+        ("features_hash", "missing features_hash"),
+        ("features_signature", "requires nonempty features_signature"),
+        ("objective", "scorer requires objective min or max"),
+        ("tree_data", "requires exactly one body matching adapter tree_data"),
+        ("name", "missing required name"),
+        ("version", "unsupported UHD file-format version None"),
     ],
 )
-def test_absent_required_headers_fail_before_writes(tmp_path, missing):
+def test_absent_required_headers_fail_before_writes(tmp_path, missing, refusal):
     tree = _tree(tmp_path / "tree")
     model = _model(tmp_path / "model", tree)
     doc = _read(model / "heuristic.uhd.json")
     del doc[missing]
     _write(model / "heuristic.uhd.json", doc)
     before = _files(tmp_path)
-    with pytest.raises(PromoteError):
+    with pytest.raises(PromoteError, match=refusal):
         build_plan(model, tree)
     assert _files(tmp_path) == before
 
 
-@pytest.mark.parametrize("mutation", ["identity", "major", "minor", "manifest"])
-def test_incompatible_training_provenance_is_never_restamped(tmp_path, mutation):
+@pytest.mark.parametrize(
+    "mutation,refusal",
+    [
+        ("identity", "trained_against.ued: dependency .* is missing or not owned"),
+        (
+            "major",
+            "trained_against.kmd: .* revision 1.0 is incompatible with trained revision 2.0",
+        ),
+        (
+            "minor",
+            "trained_against.ued: .* revision 1.0 is incompatible with trained revision 1.1",
+        ),
+        (
+            "manifest",
+            "training manifest provenance differs from the UHD's trained_against",
+        ),
+    ],
+)
+def test_incompatible_training_provenance_is_never_restamped(
+    tmp_path, mutation, refusal
+):
     tree = _tree(tmp_path / "tree")
     model = _model(tmp_path / "model", tree)
     doc = _read(model / "heuristic.uhd.json")
@@ -541,7 +614,7 @@ def test_incompatible_training_provenance_is_never_restamped(tmp_path, mutation)
     if mutation != "manifest":
         (model / "train_manifest.json").unlink()
     before = _files(tmp_path)
-    with pytest.raises(PromoteError):
+    with pytest.raises(PromoteError, match=refusal):
         build_plan(model, tree, arch="gfx942")
     assert _files(tmp_path) == before
 
@@ -562,7 +635,9 @@ def test_explicit_knob_removal_requires_retraining_for_prospective_revision(tmp_
     tree = _tree(tmp_path / "tree")
     model = _model(tmp_path / "model", tree)
     before = _files(tmp_path)
-    with pytest.raises(PromoteError):
+    with pytest.raises(
+        PromoteError, match="revision 2.0 is incompatible with trained revision 1.0"
+    ):
         build_plan(model, tree, remove_knobs=["tile_m"])
     assert _files(tmp_path) == before
 
@@ -598,7 +673,9 @@ def test_explicit_knob_removal_cannot_invalidate_other_role_models(tmp_path):
     _write(tree / "other.uhd.json", other)
     (tree / "other.bin").write_bytes(b"other")
     before = _files(tmp_path)
-    with pytest.raises(PromoteError):
+    with pytest.raises(
+        PromoteError, match="knob removal would invalidate sort_kernel_catalog/gfx950"
+    ):
         build_plan(model, tree, remove_knobs=["tile_m"])
     assert _files(tmp_path) == before
 
@@ -608,7 +685,9 @@ def test_ambiguous_architecture_requires_an_explicit_target(tmp_path, arches):
     tree = _tree(tmp_path / "tree")
     model = _model(tmp_path / "model", tree)
     _write(model / "train_manifest.json", {"training_arches": arches})
-    with pytest.raises(PromoteError):
+    with pytest.raises(
+        PromoteError, match="training_arches does not identify one target"
+    ):
         build_plan(model, tree)
     _installed(tree / "other.uhd.json", OTHER)
     _apply(build_plan(model, tree, arch="default"))
@@ -618,7 +697,7 @@ def test_ambiguous_architecture_requires_an_explicit_target(tmp_path, arches):
 def test_training_architecture_cannot_be_silently_retargeted(tmp_path):
     tree = _tree(tmp_path / "tree")
     model = _model(tmp_path / "model", tree)
-    with pytest.raises(PromoteError):
+    with pytest.raises(PromoteError, match="target gfx950 is not in training_arches"):
         build_plan(model, tree, arch="gfx950")
 
 
@@ -713,24 +792,40 @@ def test_an_arch_already_binding_two_uhds_of_one_metric_is_refused(tmp_path):
 
 
 @pytest.mark.parametrize(
-    "score,objective",
+    "score,objective,refusal",
     [
-        ({"metric": "latency", "transform": "log1p"}, "min"),
-        ({"metric": "time", "transform": "log1p"}, "max"),
-        ({"metric": "tflops", "transform": "log1p"}, "min"),
-        ({"calibrated": True, "transform": "log1p"}, "max"),
-        ({"units": "tflops", "transform": "log1p"}, "max"),
+        (
+            {"metric": "latency", "transform": "log1p"},
+            "min",
+            "score.metric 'latency' is not a registered ranking metric",
+        ),
+        (
+            {"metric": "time", "transform": "log1p"},
+            "max",
+            "score.metric time ranks min; objective 'max' contradicts it",
+        ),
+        (
+            {"metric": "tflops", "transform": "log1p"},
+            "min",
+            "score.metric tflops ranks max; objective 'min' contradicts it",
+        ),
+        (
+            {"calibrated": True, "transform": "log1p"},
+            "max",
+            "a calibrated score must name its metric",
+        ),
+        ({"units": "tflops", "transform": "log1p"}, "max", "invalid score header"),
     ],
 )
 def test_a_score_must_name_a_registered_metric_in_its_own_direction(
-    tmp_path, score, objective
+    tmp_path, score, objective, refusal
 ):
     tree = _tree(tmp_path / "tree")
     model = _model(tmp_path / "model", tree)
     doc = _read(model / "heuristic.uhd.json")
     doc.update(score=score, objective=objective)
     _write(model / "heuristic.uhd.json", doc)
-    with pytest.raises(PromoteError):
+    with pytest.raises(PromoteError, match=refusal):
         build_plan(model, tree)
 
 
@@ -754,8 +849,16 @@ def test_a_static_order_declaring_criteria_is_refused_before_any_write(tmp_path)
     assert _files(tmp_path) == before
 
 
-@pytest.mark.parametrize("payload", ["missing.bin", "metadata.kmd.json"])
-def test_invalid_artifact_destination_or_source_never_writes(tmp_path, payload):
+@pytest.mark.parametrize(
+    "payload,refusal",
+    [
+        ("missing.bin", "model artifact does not exist"),
+        ("metadata.kmd.json", "the engine would refuse this artifact"),
+    ],
+)
+def test_invalid_artifact_destination_or_source_never_writes(
+    tmp_path, payload, refusal
+):
     tree = _tree(tmp_path / "tree")
     model = _model(tmp_path / "model", tree)
     doc = _read(model / "heuristic.uhd.json")
@@ -764,7 +867,7 @@ def test_invalid_artifact_destination_or_source_never_writes(tmp_path, payload):
     if payload != "missing.bin":
         (model / payload).write_bytes(b"unsafe payload")
     before = _files(tmp_path)
-    with pytest.raises(PromoteError):
+    with pytest.raises(PromoteError, match=refusal):
         build_plan(model, tree)
     assert _files(tmp_path) == before
 
@@ -1259,7 +1362,9 @@ def test_an_invalid_candidate_blocks_promotion_without_being_erased(tmp_path):
     )
     before = _read(corpus)
 
-    with pytest.raises(PromoteError):
+    with pytest.raises(
+        PromoteError, match="invalid marker, so package emission is refused"
+    ):
         build_plan(model, tree)
 
     assert _read(corpus) == before
@@ -1685,14 +1790,14 @@ def test_uhd_id_names_the_model_being_promoted_and_never_renames_it(tmp_path):
 
 
 @pytest.mark.parametrize(
-    "values",
+    "values,refusal",
     [
-        [NEW, f"time={OTHER}"],
-        [f"latency={NEW}"],
-        [f"time={NEW}", f"time={OTHER}"],
-        ["time=not-a-uuid"],
+        ([NEW, f"time={OTHER}"], "a bare --uhd-id names one model"),
+        ([f"latency={NEW}"], "'latency' is not a registered ranking metric"),
+        ([f"time={NEW}", f"time={OTHER}"], "--uhd-id names time twice"),
+        (["time=not-a-uuid"], "expected a UUID, got 'not-a-uuid'"),
     ],
 )
-def test_malformed_uhd_id_lists_are_refused(values):
-    with pytest.raises(ValueError):
+def test_malformed_uhd_id_lists_are_refused(values, refusal):
+    with pytest.raises(ValueError, match=refusal):
         parse_uhd_ids(values)
