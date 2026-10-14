@@ -911,7 +911,7 @@ struct WmmaSelector
     template <>
     constexpr auto GetWmma<half_t, half_t, float, 16, 16>()
     {
-#if defined(__gfx120__)
+#if defined(__gfx120__) || defined(__gfx117__)
         return WmmaInstr::wmma_f32_16x16x16_f16_gfx12;
 #elif defined(__gfx125__)
         return WmmaInstr::wmma_f32_16x16x32_f16_gfx12;
@@ -923,7 +923,7 @@ struct WmmaSelector
     template <>
     constexpr auto GetWmma<bhalf_t, bhalf_t, float, 16, 16>()
     {
-#if defined(__gfx120__)
+#if defined(__gfx120__) || defined(__gfx117__)
         return WmmaInstr::wmma_f32_16x16x16_bf16_gfx12;
 #elif defined(__gfx125__)
         return WmmaInstr::wmma_f32_16x16x32_bf16_gfx12;
@@ -955,7 +955,7 @@ struct WmmaSelector
     template <>
     constexpr auto GetWmma<int8_t, int8_t, int, 16, 16>()
     {
-#if defined(__gfx120__)
+#if defined(__gfx120__) || defined(__gfx117__)
         return WmmaInstr::wmma_i32_16x16x16_iu8_gfx12;
 #elif defined(__gfx125__)
         return WmmaInstr::wmma_i32_16x16x64_iu8_gfx12;
