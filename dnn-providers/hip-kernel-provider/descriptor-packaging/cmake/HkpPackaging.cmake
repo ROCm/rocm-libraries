@@ -1674,7 +1674,7 @@ function(hkp_add_packaging)
 
     # Test descriptors, one pack per authored set. The shared root is packed into both
     # test roots, so both test binaries see the same authored descriptors; the two need
-    # distinct NAMEs.
+    # distinct NAMEs. The archive_fixture set is also packed twice, once for each binary.
     set(_authored "${HIPKERNELPROVIDER_TEST_DESCRIPTOR_SOURCE_ROOT}")
     set(_unit "${HIPKERNELPROVIDER_UNIT_BUILD_DIR}")
     set(_integration "${HIPKERNELPROVIDER_INTEGRATION_BUILD_DIR}")
@@ -1729,6 +1729,18 @@ function(hkp_add_packaging)
         HIPCC "${HKP_HIPCC}"
         ROCM_KPACK_DIR "${_rocm_kpack_dir}"
         OUT_ROOT "${_integration}/${HIPKERNELPROVIDER_TEST_SET_ARCHIVE_FIXTURE}"
+        PACK_JOBS 1
+        ${_root_args})
+
+    # The unit binary's copy of the same set. It stages outside the unit root, so the unit
+    # engine does not discover it, and the integration suite cannot corrupt it.
+    _hkp_wire_root(
+        NAME unit_archive_fixture
+        SOURCE_ROOT "${_authored}/${HIPKERNELPROVIDER_TEST_SET_ARCHIVE_FIXTURE}"
+        ARCHES "${_arches}"
+        HIPCC "${HKP_HIPCC}"
+        ROCM_KPACK_DIR "${_rocm_kpack_dir}"
+        OUT_ROOT "${HIPKERNELPROVIDER_UNIT_ARCHIVE_FIXTURE_BUILD_DIR}"
         PACK_JOBS 1
         ${_root_args})
 

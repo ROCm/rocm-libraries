@@ -4,10 +4,19 @@
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
 #include <algorithm>
+#include <cstddef>
+#include <cstdint>
+#include <exception>
 #include <filesystem>
+#include <optional>
 #include <stdexcept>
 #include <string>
+#include <string_view>
+#include <typeinfo>
+#include <utility>
+#include <vector>
 
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
@@ -20,9 +29,14 @@
 
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_plugin_sdk/BehaviorNote.h>
 #include <hipdnn_plugin_sdk/GlobalKnobDefines.hpp>
+#include <hipdnn_plugin_sdk/PluginException.hpp>
+#include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 #include <hipdnn_plugin_sdk/ingestor/GenericPlan.hpp>
+#include <hipdnn_plugin_sdk/ingestor/IKernelDispatchHandler.hpp>
 #include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
+#include <hipdnn_plugin_sdk/ingestor/SavedDispatch.hpp>
 #include <hipdnn_plugin_sdk/ingestor/SymbolScope.hpp>
 #include <hipdnn_test_sdk/utilities/ScratchDirectory.hpp>
 
@@ -30,13 +44,16 @@
 #include "core/Context.hpp"
 #include "core/Handle.hpp"
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
+#include "tests/engines/kernel_ingestor_engine/packs/ConvFwdTestGraphs.hpp"
 #include "tests/engines/kernel_ingestor_engine/packs/PointwiseTestGraphs.hpp"
 
 /**
  * @file TestKernelIngestorEngine.cpp
- * @brief Tests registerNativeIngestorSymbols() and makePointwiseAddEngine(); GenericEngine
- *        itself is covered by the SDK's suite. Reached through Container and
- *        EngineManager since makePointwiseAddEngine() takes no injectable seams.
+ * @brief Tests registerNativeIngestorSymbols(), makePointwiseAddEngine() and the computed
+ *        execution plan serialization note;
+ *        GenericEngine itself is covered by the SDK's suite. The ingestor engine tests go
+ *        through Container and EngineManager, since makePointwiseAddEngine() takes no
+ *        injectable seams.
  */
 namespace
 {
@@ -46,6 +63,8 @@ using namespace hip_kernel_provider::kernel_ingestor_engine;
 using namespace hip_kernel_provider::kernel_ingestor_engine::testing;
 using hip_kernel_provider::core::Container;
 using hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper;
+using hipdnn_plugin_sdk::ingestor::DescriptorSet;
+using hipdnn_plugin_sdk::ingestor::KernelSourceKind;
 using hipdnn_test_sdk::utilities::claimScratchDirectory;
 using hipdnn_test_sdk::utilities::MockEngineConfig;
 using hipdnn_test_sdk::utilities::ScopedDirectory;
@@ -401,6 +420,174 @@ TEST(TestKernelIngestorEngine, IgnoresAHipdnnDescriptorRuntimeDirThatDoesNotExis
 
     ASSERT_EQ(roots.size(), 1U);
     EXPECT_EQ(roots.front(), descriptorSearchDirectory());
+}
+
+// ---------------------------------------------------------------------------
+// The execution plan serialization note
+// ---------------------------------------------------------------------------
+
+constexpr int32_t SERIALIZATION_NOTE
+    = static_cast<int32_t>(HIPDNN_BEHAVIOR_NOTE_SUPPORTS_EXECUTION_PLAN_SERIALIZATION);
+constexpr int32_t RUNTIME_COMPILATION_NOTE
+    = static_cast<int32_t>(HIPDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION);
+
+// A set with one pack for each entry of `packs`, and one kernel for each source kind in it.
+DescriptorSet setWithKernels(const std::vector<std::vector<KernelSourceKind>>& packs)
+{
+    DescriptorSet set;
+    for(const auto& kinds : packs)
+    {
+        hipdnn_plugin_sdk::ingestor::KernelDescriptorPack pack;
+        for(const auto kind : kinds)
+        {
+            pack.kernels.emplace_back().source.kind = kind;
+        }
+        set.packs.push_back(std::move(pack));
+    }
+    return set;
+}
+
+TEST(TestKernelIngestorEngine, SupportsSerializationOnlyWhenEveryKernelPassesTheGate)
+{
+    EXPECT_TRUE(supportsExecutionPlanSerialization(setWithKernels(
+        {{KernelSourceKind::KPACK}, {KernelSourceKind::KPACK, KernelSourceKind::KPACK}})));
+
+    // Saving accepts only kpack kernels: embedded_source kernels have no recorded argument
+    // signature, and their code bytes are not exposed.
+    EXPECT_FALSE(supportsExecutionPlanSerialization(
+        setWithKernels({{KernelSourceKind::KPACK},
+                        {KernelSourceKind::KPACK, KernelSourceKind::EMBEDDED_SOURCE}})));
+
+    EXPECT_FALSE(supportsExecutionPlanSerialization(DescriptorSet{}));
+    EXPECT_FALSE(supportsExecutionPlanSerialization(setWithKernels({{}, {}})));
+}
+
+TEST(TestKernelIngestorEngine, WithComputedBehaviorNotesAddsTheNoteOnce)
+{
+    DescriptorSet saveable = setWithKernels({{KernelSourceKind::KPACK}, {KernelSourceKind::KPACK}});
+    saveable.engine.behaviorNotes = {RUNTIME_COMPILATION_NOTE};
+
+    const std::vector<int32_t> expected{RUNTIME_COMPILATION_NOTE, SERIALIZATION_NOTE};
+    const DescriptorSet once = withComputedBehaviorNotes(saveable);
+    EXPECT_EQ(once.engine.behaviorNotes, expected);
+    EXPECT_EQ(withComputedBehaviorNotes(once).engine.behaviorNotes, expected);
+
+    DescriptorSet mixed
+        = setWithKernels({{KernelSourceKind::KPACK}, {KernelSourceKind::EMBEDDED_SOURCE}});
+    mixed.engine.behaviorNotes = {RUNTIME_COMPILATION_NOTE};
+    EXPECT_EQ(withComputedBehaviorNotes(mixed).engine.behaviorNotes,
+              std::vector<int32_t>{RUNTIME_COMPILATION_NOTE});
+}
+
+TEST(TestKernelIngestorEngine, ReportsTheSerializationNoteOnlyOnSaveableEngines)
+{
+    // getDetails reads the knob values from the device.
+    SKIP_IF_NO_DEVICES();
+
+    ASSERT_TRUE(supportsExecutionPlanSerialization(loadedSet(CONV_FWD.engineName)));
+    ASSERT_FALSE(supportsExecutionPlanSerialization(loadedSet(POINTWISE_ADD.engineName)));
+
+    Handle handle;
+
+    const auto notesOf = [&handle](Container& container,
+                                   std::string_view engineName,
+                                   const flatbuffers::FlatBufferBuilder& graph) {
+        hipdnnPluginConstData_t details{};
+        container.getEngineManager().getEngineDetails(
+            handle,
+            wrap(graph),
+            hipdnn_data_sdk::utilities::engineNameToId(std::string(engineName)),
+            details);
+        return hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineDetailsWrapper(details.ptr,
+                                                                                  details.size)
+            .behaviorNotes();
+    };
+    const auto expectTheNoteOnlyOnConvFwd = [&notesOf](Container& container) {
+        const auto convFwdNotes = notesOf(container, CONV_FWD.engineName, buildConvFwdGraph());
+        EXPECT_EQ(std::count(convFwdNotes.begin(), convFwdNotes.end(), SERIALIZATION_NOTE), 1);
+
+        const auto pointwiseNotes
+            = notesOf(container, POINTWISE_ADD.engineName, buildPointwiseGraph());
+        EXPECT_EQ(std::count(pointwiseNotes.begin(), pointwiseNotes.end(), SERIALIZATION_NOTE), 0);
+    };
+
+    // The first Container takes the state managers that discovery built; a later one builds
+    // its own. Both construction paths must report the note.
+    rediscoverStateManagersForTesting();
+    {
+        SCOPED_TRACE("first Container");
+        Container container;
+        ASSERT_EQ(takeDiscoveredStateManager(loadedSet(CONV_FWD.engineName).engine.id).get(),
+                  nullptr);
+        expectTheNoteOnlyOnConvFwd(container);
+    }
+    {
+        SCOPED_TRACE("later Container");
+        Container container;
+        expectTheNoteOnlyOnConvFwd(container);
+    }
+}
+
+// The SDK defaults return nullopt and nullptr without throwing, so only a throw is
+// evidence of an override. A handler's own save down-casts the prepared dispatch, which
+// rejects a foreign one with std::bad_cast; its own restore runs the shared restore checks,
+// which refuse an empty saved plan with HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE. Both reject
+// before any GPU work.
+TEST(TestKernelIngestorEngine, EveryHandlerOfANotedEngineSavesAndRestores)
+{
+    using hipdnn_plugin_sdk::HipdnnPluginException;
+    using hipdnn_plugin_sdk::ingestor::DispatchRegistry;
+    using hipdnn_plugin_sdk::ingestor::PreparedDispatch;
+    using hipdnn_plugin_sdk::ingestor::SavedKernelCode;
+    using hipdnn_plugin_sdk::ingestor::SavedLaunchInputs;
+
+    size_t probed = 0;
+    for(const auto& set : discoverDescriptorSets())
+    {
+        if(!supportsExecutionPlanSerialization(set))
+        {
+            continue;
+        }
+        for(const auto& pack : set.packs)
+        {
+            const auto dispatch
+                = std::find_if(set.dispatches.begin(),
+                               set.dispatches.end(),
+                               [&pack](const auto& entry) { return entry.id == pack.dispatchId; });
+            ASSERT_NE(dispatch, set.dispatches.end()) << set.engine.name << ": " << pack.name;
+            const auto* handler = DispatchRegistry<Handle>::resolve(dispatch->dispatchSymbol);
+            ASSERT_NE(handler, nullptr) << dispatch->dispatchSymbol;
+
+            bool saves = false;
+            try
+            {
+                const PreparedDispatch foreign{};
+                static_cast<void>(handler->saveLaunchInputs(foreign));
+            }
+            catch(const std::bad_cast&)
+            {
+                saves = true;
+            }
+            EXPECT_TRUE(saves) << dispatch->dispatchSymbol << " does not save its launch inputs";
+
+            bool restores = false;
+            try
+            {
+                static_cast<void>(
+                    handler->restoreLaunch(SavedLaunchInputs{}, SavedKernelCode{}, 0));
+            }
+            catch(const HipdnnPluginException& refusal)
+            {
+                EXPECT_EQ(refusal.getStatus(), HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE)
+                    << dispatch->dispatchSymbol << ": " << refusal.getMessage();
+                restores = true;
+            }
+            EXPECT_TRUE(restores) << dispatch->dispatchSymbol << " does not restore a launch";
+
+            ++probed;
+        }
+    }
+    EXPECT_GT(probed, 0U) << "no engine that reports the note was found";
 }
 
 } // namespace

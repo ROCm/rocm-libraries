@@ -49,6 +49,8 @@ exclude: |
     projects/hipdnn/.*\.bin$|
     # Generated hipDNN FlatBuffers headers
     projects/hipdnn/flatbuffers_sdk/include/hipdnn_flatbuffers_sdk/data_objects/.*_generated\.h|
+    # Generated hip-kernel-provider FlatBuffers header
+    dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/serialization/ingestor_plan_generated\.h|
     # Reference data (auto-generated)
     dnn-providers/integration-tests/integration-test-bundles/.*|
     # Generated files (see rocrand/tools/ _generator.cpp files)

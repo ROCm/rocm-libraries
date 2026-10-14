@@ -134,12 +134,13 @@ const std::vector<Container::EngineDefinition>& Container::getEngineDefinitions(
                          {
                              return hipdnn_plugin_sdk::ingestor::
                                  makeEngine<Handle, Settings, Context>(
-                                     set.engine,
+                                     kernel_ingestor_engine::engineWithComputedBehaviorNotes(set),
                                      std::move(stateManager),
                                      kernel_ingestor_engine::deviceResolver());
                          }
                          return hipdnn_plugin_sdk::ingestor::makeEngine<Handle, Settings, Context>(
-                             set, kernel_ingestor_engine::deviceResolver());
+                             kernel_ingestor_engine::withComputedBehaviorNotes(set),
+                             kernel_ingestor_engine::deviceResolver());
                      }
                      catch(const std::exception& error)
                      {
