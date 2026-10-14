@@ -84,12 +84,14 @@ void cpu_hermitianize(const rocblas_fill uplo, const I n, Th hA, const I lda)
 template <typename T, typename I, typename Th>
 void cpu_band2full(const rocblas_fill uplo,
                    const I n,
-                   const I kd,
+                   I kd,
                    Th hAband,
                    const I ldab,
                    Th hA,
                    const I lda)
 {
+    kd = std::min(kd, n - 1);
+
     if(uplo == rocblas_fill_lower)
     {
         // Set A = 0.
@@ -112,10 +114,9 @@ void cpu_band2full(const rocblas_fill uplo,
                   &hA[(lda + 1) * (n - kd)], lda); // dst
 
         // Hermitianize matrix A, copying conjugate of strictly lower to upper.
-        // todo: restrict to band.
         for(I j = 0; j < n; ++j)
         {
-            for(I i = 0; i < j; ++i) // strictly upper
+            for(I i = 0; i < std::max<I>(j - kd, 0); ++i) // strictly upper band
             {
                 hA[i + j * lda] = sconj(hA[j + i * lda]);
             }
@@ -267,6 +268,7 @@ void sy2sb_he2hb_getError(const rocblas_handle handle,
     T const neg_one = -1;
     T const zero = 0;
     I const idiag = kd - 1; // row of Aband storing diagonal
+    I const n_kd = std::max<I>(n - kd, 0);
 
     hipStream_t stream;
     CHECK_ROCBLAS_ERROR(rocblas_get_stream(handle, &stream));
@@ -309,7 +311,7 @@ void sy2sb_he2hb_getError(const rocblas_handle handle,
     // W = Q W = Q Aband. Updates rows kd:n.
     CHECK_ROCBLAS_ERROR(
         rocsolver_ormxr_unmxr(true, handle, rocblas_side_left, rocblas_operation_none, // opts
-                              n - kd, n, n - kd, // dims
+                              n_kd, n, n_kd, // dims
                               &dV[0][kd], lda, // Householder V vectors below bandwidth kd
                               dTau[0], // tau
                               &dW[0][kd], lda));
@@ -318,7 +320,7 @@ void sy2sb_he2hb_getError(const rocblas_handle handle,
     rocblas_operation trans = rocblas_is_complex<T> ? rocblas_operation_conjugate_transpose
                                                     : rocblas_operation_transpose;
     CHECK_ROCBLAS_ERROR(rocsolver_ormxr_unmxr(true, handle, rocblas_side_right, trans, // opts
-                                              n, n - kd, n - kd, // dims
+                                              n, n_kd, n_kd, // dims
                                               &dV[0][kd], lda, // Householder V vectors below bandwidth kd
                                               dTau[0], // tau
                                               &dW[0][kd * lda], lda));
@@ -346,27 +348,27 @@ void sy2sb_he2hb_getError(const rocblas_handle handle,
 
     // Generate Q, overwriting V.
     CHECK_ROCBLAS_ERROR(
-        rocsolver_orgxr_ungxr(true, handle, n - kd, n - kd, n - kd, &dV[0][kd], lda, dTau[0]));
+        rocsolver_orgxr_ungxr(true, handle, n_kd, n_kd, n_kd, &dV[0][kd], lda, dTau[0]));
 
     // W = I.
     CHECK_ROCBLAS_ERROR(
-        rocsolver_laset(handle, rocblas_fill_full, n - kd, n - kd, zero, one, dW[0], lda));
+        rocsolver_laset(handle, rocblas_fill_full, n_kd, n_kd, zero, one, dW[0], lda));
 
     // W = I - Q^H Q, with explicit Q in V.
     CHECK_ROCBLAS_ERROR(rocblas_gemm(handle, rocblas_operation_conjugate_transpose,
                                      rocblas_operation_none, // opts
-                                     n - kd, n - kd, n - kd, // dims
+                                     n_kd, n_kd, n_kd, // dims
                                      &neg_one, &dV[0][kd], lda, // Q^H
                                      &dV[0][kd], lda, // Q
                                      &one, dW[0], lda));
 
     // error = norm( W ) / (n - kd) = norm( I - Q^H Q ) / (n - kd).
     CHECK_ROCBLAS_ERROR(
-        rocsolver_lange(handle, rocsolver_norm_type_one, n - kd, n - kd, dW[0], lda, dnorm));
+        rocsolver_lange(handle, rocsolver_norm_type_one, n_kd, n_kd, dW[0], lda, dnorm));
     CHECK_HIP_ERROR(hnorm.transfer_from(dnorm));
     max_errors[1] = hnorm[0][0];
-    if(n - kd != 0)
-        max_errors[1] /= n - kd;
+    if(n_kd != 0)
+        max_errors[1] /= n_kd;
 }
 
 //------------------------------------------------------------------------------
