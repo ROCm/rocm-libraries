@@ -333,6 +333,30 @@ hipsolver<type>potrsBatched()
    :outline:
 .. doxygenfunction:: hipsolverSpotrsBatched
 
+.. _getri_batched_bufferSize:
+
+hipsolver<type>getriBatched_bufferSize()
+---------------------------------------------------
+.. doxygenfunction:: hipsolverZgetriBatched_bufferSize
+   :outline:
+.. doxygenfunction:: hipsolverCgetriBatched_bufferSize
+   :outline:
+.. doxygenfunction:: hipsolverDgetriBatched_bufferSize
+   :outline:
+.. doxygenfunction:: hipsolverSgetriBatched_bufferSize
+
+.. _getri_batched:
+
+hipsolver<type>getriBatched()
+---------------------------------------------------
+.. doxygenfunction:: hipsolverZgetriBatched
+   :outline:
+.. doxygenfunction:: hipsolverCgetriBatched
+   :outline:
+.. doxygenfunction:: hipsolverDgetriBatched
+   :outline:
+.. doxygenfunction:: hipsolverSgetriBatched
+
 .. _getrs_bufferSize:
 
 hipsolver<type>getrs_bufferSize()
@@ -356,6 +380,30 @@ hipsolver<type>getrs()
 .. doxygenfunction:: hipsolverDgetrs
    :outline:
 .. doxygenfunction:: hipsolverSgetrs
+
+.. _getrsBatched_bufferSize:
+
+hipsolver<type>getrsBatched_bufferSize()
+---------------------------------------------------
+.. doxygenfunction:: hipsolverZgetrsBatched_bufferSize
+   :outline:
+.. doxygenfunction:: hipsolverCgetrsBatched_bufferSize
+   :outline:
+.. doxygenfunction:: hipsolverDgetrsBatched_bufferSize
+   :outline:
+.. doxygenfunction:: hipsolverSgetrsBatched_bufferSize
+
+.. _getrsBatched:
+
+hipsolver<type>getrsBatched()
+---------------------------------------------------
+.. doxygenfunction:: hipsolverZgetrsBatched
+   :outline:
+.. doxygenfunction:: hipsolverCgetrsBatched
+   :outline:
+.. doxygenfunction:: hipsolverDgetrsBatched
+   :outline:
+.. doxygenfunction:: hipsolverSgetrsBatched
 
 .. _gesv_bufferSize:
 

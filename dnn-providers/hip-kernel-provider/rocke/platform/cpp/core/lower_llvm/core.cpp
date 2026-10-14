@@ -620,6 +620,8 @@ const char* rocke_ll_llvm_type(rocke_lower_t* L, const rocke_type_t* t)
             return "i8";
         if(strcmp(n, "f32") == 0)
             return "float";
+        if(strcmp(n, "f64") == 0)
+            return "double";
     }
     rocke_ll_fail(L, ROCKE_ERR_NOTIMPL, "no LLVM mapping for type %s", n ? n : "(null)");
 }
@@ -718,8 +720,16 @@ const char* rocke_ll_smem_storage_type(rocke_lower_t* L, const rocke_type_t* sme
 }
 
 /* ====================================================================== */
-/* FP hex constants (Python _fp32_hex / _fp16_hex)                        */
+/* FP hex constants (Python _fp64_hex / _fp32_hex / _fp16_hex)            */
 /* ====================================================================== */
+
+const char* rocke_ll_fp64_hex(rocke_lower_t* L, double x)
+{
+    /* LLVM textual IR spells `double` hex constants as the raw IEEE-754 bits. */
+    uint64_t bits;
+    memcpy(&bits, &x, sizeof bits);
+    return rocke_arena_printf(&L->arena, "0x%016llX", (unsigned long long)bits);
+}
 
 const char* rocke_ll_fp32_hex(rocke_lower_t* L, double x)
 {
@@ -881,6 +891,12 @@ const char* rocke_ll_operand(rocke_lower_t* L, const rocke_value_t* v)
         if(ity == NULL)
         {
             ity = "i32";
+        }
+        if(strcmp(ity, "f64") == 0)
+        {
+            double fv = 0.0;
+            rocke_attr_get_float(&op->attrs, "value", &fv);
+            return rocke_ll_fp64_hex(L, fv);
         }
         if(strcmp(ity, "f32") == 0)
         {
@@ -1203,7 +1219,7 @@ static int ll_smem_seg_size(const rocke_type_t* stype)
         eb = 2;
     else if(strcmp(n, "i32") == 0 || strcmp(n, "tf32") == 0 || strcmp(n, "f32") == 0)
         eb = 4;
-    else if(strcmp(n, "i64") == 0)
+    else if(strcmp(n, "i64") == 0 || strcmp(n, "f64") == 0)
         eb = 8;
     else
         eb = 2; /* default */
@@ -1219,6 +1235,8 @@ static int ll_smem_align(const rocke_type_t* stype)
     if(!stype || !stype->elem || !stype->elem->name)
         return 4;
     const char* n = stype->elem->name;
+    if(strcmp(n, "f64") == 0)
+        return 8;
     if(strcmp(n, "i8") == 0 || strcmp(n, "fp8e4m3") == 0 || strcmp(n, "bf8e5m2") == 0)
         return 16;
     return 4;
@@ -1713,6 +1731,61 @@ const char* rocke_ll_format_agpr_alloc(rocke_lower_t* L, const rocke_attr_value_
     return rocke_arena_printf(&L->arena, "%ld,%ld", lo, hi);
 }
 
+/* gfx1250 workgroup-cluster shape; mirrors Python ir.check_cluster_dims (same
+ * limits and messages) behind the gfx1250 + llvm23 gate. The backend copies
+ * the attribute to the code-object .cluster_dims metadata unchecked. */
+#define ROCKE_LL_MAX_CLUSTER_DIM 15
+#define ROCKE_LL_MAX_CLUSTER_WORKGROUPS 16
+
+static const char* rocke_ll_format_cluster_dims(rocke_lower_t* L, const rocke_attr_value_t* v)
+{
+    if(!L->backend || !L->backend->gfx || strcmp(L->backend->gfx, "gfx1250") != 0)
+    {
+        rocke_ll_fail(L,
+                      ROCKE_ERR_VALUE,
+                      "cluster_dims requires gfx1250, got %s",
+                      (L->backend && L->backend->gfx) ? L->backend->gfx : "(unknown)");
+    }
+    if(L->flavor != ROCKE_LLVM_FLAVOR_LLVM23)
+    {
+        rocke_ll_fail(L,
+                      ROCKE_ERR_VALUE,
+                      "cluster_dims requires LLVM flavor llvm23, got %s",
+                      rocke_llvm_flavor_name(L->flavor));
+    }
+    if(!v || v->kind != ROCKE_ATTR_INT_LIST || v->u.ilist.count != 3)
+    {
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "cluster_dims must be three integers (x, y, z)");
+    }
+    const long long x = (long long)v->u.ilist.ints[0];
+    const long long y = (long long)v->u.ilist.ints[1];
+    const long long z = (long long)v->u.ilist.ints[2];
+    if(x < 1 || y < 1 || z < 1 || x > ROCKE_LL_MAX_CLUSTER_DIM || y > ROCKE_LL_MAX_CLUSTER_DIM
+       || z > ROCKE_LL_MAX_CLUSTER_DIM)
+    {
+        rocke_ll_fail(L,
+                      ROCKE_ERR_VALUE,
+                      "cluster_dims (%lld, %lld, %lld): each dimension must be in 1..%d",
+                      x,
+                      y,
+                      z,
+                      ROCKE_LL_MAX_CLUSTER_DIM);
+    }
+    if(x * y * z > ROCKE_LL_MAX_CLUSTER_WORKGROUPS)
+    {
+        rocke_ll_fail(L,
+                      ROCKE_ERR_VALUE,
+                      "cluster_dims (%lld, %lld, %lld): %lld workgroups exceeds the "
+                      "cluster limit of %d",
+                      x,
+                      y,
+                      z,
+                      x * y * z,
+                      ROCKE_LL_MAX_CLUSTER_WORKGROUPS);
+    }
+    return rocke_arena_printf(&L->arena, "%lld,%lld,%lld", x, y, z);
+}
+
 static const char* rocke_ll_scheduler_strategy(rocke_lower_t* L, const rocke_attr_value_t* v)
 {
     if(!v || v->kind != ROCKE_ATTR_STR || !v->u.s)
@@ -1904,6 +1977,12 @@ void rocke_ll_finalize(rocke_lower_t* L, rocke_strbuf_t* out)
         {
             const char* fa = rocke_ll_format_agpr_alloc(L, agpr);
             rocke_strbuf_appendf(out, " \"amdgpu-agpr-alloc\"=\"%s\"", fa);
+        }
+        const rocke_attr_value_t* cluster = rocke_attr_get(&L->kernel->attrs, "cluster_dims");
+        if(cluster)
+        {
+            rocke_strbuf_appendf(
+                out, " \"amdgpu-cluster-dims\"=\"%s\"", rocke_ll_format_cluster_dims(L, cluster));
         }
     }
     rocke_strbuf_append(out, " norecurse nounwind }\n");
