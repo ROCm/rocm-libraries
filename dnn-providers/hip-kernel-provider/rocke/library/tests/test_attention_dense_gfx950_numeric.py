@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import dataclasses
 import math
+from dataclasses import replace
 
 import pytest
 
@@ -959,6 +960,836 @@ class TestWideDmaFeatures:
         assert max_abs < _tolerance(
             dtype
         ), f"{spec_id} {dtype} {_name}: max_abs={max_abs:.3e}"
+
+
+def _lse_reference(q, k, v, scale, *, causal, diagonal=0, window=0, sinks=None):
+    """Independent FP32 O and natural-log LSE, including truly empty rows.
+
+    Scores use FP32 Q/K with the softmax scale applied in FP32.
+    A sink adds denominator mass but contributes no value vector.
+    """
+    batch, sq, hq, _ = q.shape
+    skv, hkv = k.shape[1:3]
+    qh = q.transpose(1, 2).float()
+    kh = k.transpose(1, 2).float().repeat_interleave(hq // hkv, dim=1)
+    vh = v.transpose(1, 2).float().repeat_interleave(hq // hkv, dim=1)
+    scores = torch.matmul(qh, kh.transpose(-1, -2)) * scale
+    qi = torch.arange(sq, device=q.device).view(-1, 1) + diagonal
+    ki = torch.arange(skv, device=q.device).view(1, -1)
+    allowed = torch.ones((sq, skv), device=q.device, dtype=torch.bool)
+    if causal:
+        allowed &= ki <= qi
+    if window:
+        allowed &= ki > qi - window
+    scores = scores.masked_fill(~allowed.view(1, 1, sq, skv), float("-inf"))
+    if sinks is not None:
+        sink_scores = sinks.float().view(1, hq, 1, 1).expand(batch, hq, sq, 1)
+        scores = torch.cat((scores, sink_scores), dim=-1)
+    lse = torch.logsumexp(scores, dim=-1)
+    has_mass = torch.isfinite(lse)
+    safe_lse = torch.where(has_mass, lse, torch.zeros_like(lse))
+    probabilities = torch.exp(scores - safe_lse.unsqueeze(-1))
+    probabilities = torch.where(has_mass.unsqueeze(-1), probabilities, 0.0)
+    out = torch.matmul(probabilities[..., :skv], vh).transpose(1, 2)
+    return out, lse.unsqueeze(-1)
+
+
+@requires_gfx950_gpu
+@pytest.mark.gpu
+class TestDenseLseNumeric:
+    """Direct-runner LSE coverage; no dispatcher or hipDNN feature is implied."""
+
+    @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
+    @pytest.mark.parametrize("head_size", [64, 128])
+    @pytest.mark.parametrize(
+        "heads", [(4, 4), (4, 1), (8, 2)], ids=["mha", "mqa", "gqa"]
+    )
+    @pytest.mark.parametrize(
+        "persistent", [False, True], ids=["ordinary", "persistent"]
+    )
+    @pytest.mark.parametrize("geometry", ["default", "bm128"])
+    def test_output_and_lse(self, dtype, head_size, heads, persistent, geometry):
+        hq, hkv = heads
+        spec = Gfx950AttentionDenseSpec(
+            batch=2,
+            seqlen_q=512,
+            seqlen_kv=512,
+            num_query_heads=hq,
+            num_kv_heads=hkv,
+            head_size=head_size,
+            dtype=dtype,
+            persistent=persistent,
+            block_m=int(DENSE_TILE_GEOMETRIES[geometry]["block_m"]),
+            emit_lse=True,
+        )
+        tdt = getattr(torch, _TORCH_DT[dtype])
+        scale = 0.5
+        torch.manual_seed(11)
+        q = torch.randn(2, 512, hq, head_size, device="cuda", dtype=tdt)
+        k = torch.randn(2, 512, hkv, head_size, device=q.device, dtype=tdt)
+        v = torch.randn_like(k)
+        out = torch.empty_like(q)
+        lse = torch.full(
+            (2, hq, 512, 1),
+            float("nan"),
+            device=q.device,
+            dtype=torch.float32,
+        )
+        returned = run_attention_dense_torch(
+            spec=spec,
+            q=q,
+            k=k,
+            v=v,
+            out=out,
+            lse=lse,
+            scale=scale,
+        )
+        torch.cuda.synchronize()
+        ref, lse_ref = _lse_reference(q, k, v, scale, causal=True)
+        assert returned is out
+        assert (out.float() - ref).abs().max().item() < _tolerance(dtype)
+        assert (lse - lse_ref).abs().max().item() < _tolerance(dtype)
+        off_out = torch.empty_like(out)
+        run_attention_dense_torch(
+            spec=replace(spec, emit_lse=False),
+            q=q,
+            k=k,
+            v=v,
+            out=off_out,
+            scale=scale,
+        )
+        torch.cuda.synchronize()
+        # Every row has a key. Empty-row corrections are enabled-path-only.
+        assert torch.equal(out, off_out)
+
+    @pytest.mark.parametrize("width", [1, 2])
+    @pytest.mark.parametrize(
+        "persistent", [False, True], ids=["ordinary", "persistent"]
+    )
+    def test_narrow_o_store(self, width, persistent):
+        """BF16 store widths 1/2: keyless rows are zero, keyed rows match LSE-off."""
+        spec = Gfx950AttentionDenseSpec(
+            batch=1,
+            seqlen_q=256,
+            seqlen_kv=64,
+            num_query_heads=4,
+            num_kv_heads=1,
+            head_size=128,
+            dtype="bf16",
+            persistent=persistent,
+            sliding_window=64,
+            o_store_width=width,
+            emit_lse=True,
+        )
+        scale = 0.5
+        torch.manual_seed(17)
+        q = torch.randn(1, 256, 4, 128, device="cuda", dtype=torch.bfloat16)
+        k = torch.randn(1, 64, 1, 128, device=q.device, dtype=q.dtype)
+        v = torch.randn_like(k)
+        out = torch.full_like(q, float("nan"))
+        lse = torch.full(
+            (1, 4, 256, 1), float("nan"), device=q.device, dtype=torch.float32
+        )
+        run_attention_dense_torch(
+            spec=spec, q=q, k=k, v=v, out=out, lse=lse, scale=scale
+        )
+        off_out = torch.empty_like(q)
+        run_attention_dense_torch(
+            spec=replace(spec, emit_lse=False),
+            q=q,
+            k=k,
+            v=v,
+            out=off_out,
+            scale=scale,
+        )
+        torch.cuda.synchronize()
+        ref, lse_ref = _lse_reference(q, k, v, scale, causal=True, window=64)
+        # Rows 0..126 see at least one key; rows 127.. see none.
+        assert (out[:, :127].float() - ref[:, :127]).abs().max().item() < _tolerance(
+            "bf16"
+        )
+        assert torch.equal(out[:, :127], off_out[:, :127])
+        assert torch.equal(out[:, 127:], torch.zeros_like(out[:, 127:]))
+        finite = torch.isfinite(lse_ref)
+        assert (lse[finite] - lse_ref[finite]).abs().max().item() < _tolerance("bf16")
+        assert torch.equal(torch.isneginf(lse), torch.isneginf(lse_ref))
+
+    @pytest.mark.parametrize(
+        "persistent", [False, True], ids=["ordinary", "persistent"]
+    )
+    @pytest.mark.parametrize("with_sink", [False, True], ids=["no-sink", "sink"])
+    def test_empty_window_rows(self, persistent, with_sink):
+        spec = Gfx950AttentionDenseSpec(
+            batch=1,
+            seqlen_q=256,
+            seqlen_kv=64,
+            num_query_heads=3,
+            num_kv_heads=1,
+            head_size=128,
+            dtype="bf16",
+            persistent=persistent,
+            sliding_window=64,
+            use_sinks=with_sink,
+            emit_lse=True,
+        )
+        q = torch.zeros(1, 256, 3, 128, device="cuda", dtype=torch.bfloat16)
+        k = torch.zeros(1, 64, 1, 128, device=q.device, dtype=q.dtype)
+        v = torch.ones_like(k)
+        out = torch.full_like(q, float("nan"))
+        lse = torch.full(
+            (1, 3, 256, 1),
+            float("nan"),
+            device=q.device,
+            dtype=torch.float32,
+        )
+        sinks = (
+            torch.tensor([-2.0, 0.0, 2.0], device=q.device, dtype=q.dtype)
+            if with_sink
+            else None
+        )
+        run_attention_dense_torch(
+            spec=spec,
+            q=q,
+            k=k,
+            v=v,
+            out=out,
+            lse=lse,
+            scale=0.5,
+            sinks=sinks,
+        )
+        torch.cuda.synchronize()
+        rows = torch.arange(256, device=q.device)
+        counts = (
+            (
+                torch.minimum(rows + 1, torch.full_like(rows, 64))
+                - (rows - 63).clamp_min(0)
+            )
+            .clamp_min(0)
+            .float()
+        )
+        assert counts[63].item() == 64
+        assert counts[126].item() == 1
+        assert counts[127].item() == 0
+        mass = counts.view(1, 1, 256, 1).expand(1, 3, 256, 1)
+        if with_sink:
+            mass = mass + sinks.float().exp().view(1, 3, 1, 1)
+        analytic_lse = mass.log()
+        ref, lse_ref = _lse_reference(
+            q,
+            k,
+            v,
+            0.5,
+            causal=True,
+            window=64,
+            sinks=sinks,
+        )
+        finite = torch.isfinite(analytic_lse)
+        assert (lse[finite] - analytic_lse[finite]).abs().max().item() < 1e-5
+        assert (lse_ref[finite] - analytic_lse[finite]).abs().max().item() < 1e-5
+        assert torch.equal(torch.isneginf(lse), torch.isneginf(analytic_lse))
+        assert (out.float() - ref).abs().max().item() < _tolerance("bf16")
+        assert torch.equal(out[:, 127:], torch.zeros_like(out[:, 127:]))
+        if with_sink:
+            expected = sinks.float().view(1, 3, 1, 1).expand(1, 3, 129, 1)
+            assert (lse[:, :, 127:] - expected).abs().max().item() < 1e-5
+        else:
+            assert torch.isneginf(lse[:, :, 127:]).all().item()
+
+    @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
+    @pytest.mark.parametrize(
+        "case",
+        [
+            pytest.param(
+                {"ragged": True, "seqlen_q": 273, "seqlen_kv": 273}, id="ragged"
+            ),
+            pytest.param(
+                {"ragged": True, "seqlen_q": 273, "seqlen_kv": 273, "persistent": True},
+                id="ragged-persistent",
+            ),
+            pytest.param({"causal": False}, id="noncausal"),
+            pytest.param(
+                {"causal": False, "persistent": True}, id="noncausal-persistent"
+            ),
+            pytest.param({"sliding_window": 128}, id="window"),
+            pytest.param(
+                {"sliding_window": 128, "persistent": True}, id="window-persistent"
+            ),
+            pytest.param(
+                {
+                    "causal_bottom_right": True,
+                    "ragged": True,
+                    "seqlen_q": 197,
+                    "seqlen_kv": 400,
+                },
+                id="shifted-ragged",
+            ),
+            pytest.param(
+                {"causal_bottom_right": True, "seqlen_q": 256},
+                id="shifted-aligned",
+            ),
+            pytest.param({"use_sinks": True}, id="sinks"),
+            pytest.param(
+                {"use_sinks": True, "persistent": True}, id="sinks-persistent"
+            ),
+            pytest.param(
+                {"persistent": True, "persist_decode": "qb_major", "num_persistent": 4},
+                id="qb-major",
+            ),
+            pytest.param(
+                {
+                    "persistent": True,
+                    "persist_decode": "hkv_major",
+                    "num_persistent": 4,
+                },
+                id="hkv-major",
+            ),
+            pytest.param(
+                {"persistent": True, "persist_decode": "gqa_pair", "num_persistent": 4},
+                id="gqa-pair",
+            ),
+            pytest.param(
+                {
+                    "persistent": True,
+                    "persist_decode": "gqa_pair_2phase",
+                    "num_persistent": 8,
+                },
+                id="gqa-pair-2phase",
+            ),
+            pytest.param(
+                {
+                    "persistent": True,
+                    "persist_decode": "qb_major",
+                    "num_persistent": 4,
+                    "interleave": True,
+                },
+                id="interleaved",
+            ),
+            pytest.param(
+                {
+                    "persistent": True,
+                    "persist_decode": "qb_major",
+                    "num_persistent": 4,
+                    "wide_lds_dma": True,
+                },
+                id="wide-dma",
+            ),
+            pytest.param(
+                {
+                    "batch": 1,
+                    "paged": True,
+                    "block_size": 16,
+                    "num_kv_blocks": 32,
+                    "sliding_window": 128,
+                },
+                id="reverse-paged",
+            ),
+        ],
+    )
+    def test_legal_modes_and_tail_guards(self, dtype, case):
+        # One launch/check body, with separate pytest nodes for each legal mode.
+        options = dict(
+            batch=2,
+            seqlen_q=512,
+            seqlen_kv=512,
+            num_query_heads=4,
+            num_kv_heads=1,
+            head_size=128,
+            dtype=dtype,
+            emit_lse=True,
+        )
+        options.update(case)
+        spec = Gfx950AttentionDenseSpec(**options)
+        batch, sq, skv = spec.batch, spec.seqlen_q, spec.seqlen_kv
+        tdt = getattr(torch, _TORCH_DT[dtype])
+        torch.manual_seed(19)
+        q = torch.randn(batch, sq, 4, 128, device="cuda", dtype=tdt)
+        k = torch.randn(batch, skv, 1, 128, device=q.device, dtype=tdt)
+        v = torch.randn_like(k)
+        out_count = q.numel()
+        out_storage = torch.full(
+            (out_count + 16,),
+            123.0,
+            device=q.device,
+            dtype=tdt,
+        )
+        out = out_storage[:out_count].view_as(q)
+        count = batch * 4 * sq
+        storage = torch.full(
+            (count + 16,),
+            12345.0,
+            device=q.device,
+            dtype=torch.float32,
+        )
+        lse = storage[:count].view(batch, 4, sq, 1)
+        sinks = (
+            torch.linspace(-1, 1, 4, device=q.device).to(tdt)
+            if spec.use_sinks
+            else None
+        )
+        launch_k, launch_v = k, v
+        scale = 0.5
+        metadata = {}
+        if spec.paged:
+            page_ids = torch.arange(31, -1, -1, device=q.device, dtype=torch.int32)
+            launch_k = torch.empty(32, 16, 1, 128, device=q.device, dtype=tdt)
+            launch_v = torch.empty_like(launch_k)
+            launch_k[page_ids.long()] = k[0].view(32, 16, 1, 128)
+            launch_v[page_ids.long()] = v[0].view(32, 16, 1, 128)
+            metadata = {
+                "block_tables": page_ids.view(1, 32),
+                "kv_lens": torch.tensor([skv], device=q.device, dtype=torch.int32),
+            }
+        returned = run_attention_dense_torch(
+            spec=spec,
+            q=q,
+            k=launch_k,
+            v=launch_v,
+            out=out,
+            lse=lse,
+            scale=scale,
+            sinks=sinks,
+            **metadata,
+        )
+        torch.cuda.synchronize()
+        ref, lse_ref = _lse_reference(
+            q,
+            k,
+            v,
+            scale,
+            causal=spec.causal,
+            diagonal=skv - sq if spec.causal_bottom_right else 0,
+            window=spec.sliding_window,
+            sinks=sinks,
+        )
+        assert returned is out
+        assert (out.float() - ref).abs().max().item() < _tolerance(dtype)
+        assert (lse - lse_ref).abs().max().item() < _tolerance(dtype)
+        assert torch.equal(storage[count:], torch.full_like(storage[count:], 12345.0))
+        assert torch.equal(
+            out_storage[out_count:],
+            torch.full_like(out_storage[out_count:], 123.0),
+        )
+        off_out = torch.empty_like(out)
+        run_attention_dense_torch(
+            spec=replace(spec, emit_lse=False),
+            q=q,
+            k=launch_k,
+            v=launch_v,
+            out=off_out,
+            scale=scale,
+            sinks=sinks,
+            **metadata,
+        )
+        torch.cuda.synchronize()
+        assert torch.equal(out, off_out)
+
+    @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
+    @pytest.mark.parametrize(
+        "zero_q", [False, True], ids=["different-lengths", "zero-q"]
+    )
+    def test_packed_dense_lse(self, dtype, zero_q):
+        q_offsets = [0, 0, 512] if zero_q else [0, 256, 768]
+        k_offsets = [0, 128, 384]
+        spec = Gfx950AttentionDenseSpec(
+            batch=2,
+            seqlen_q=512,
+            seqlen_kv=256,
+            num_query_heads=4,
+            num_kv_heads=1,
+            head_size=128,
+            dtype=dtype,
+            varlen=True,
+            emit_lse=True,
+        )
+        torch.manual_seed(23)
+        tdt = getattr(torch, _TORCH_DT[dtype])
+        q = torch.randn(q_offsets[-1], 4, 128, device="cuda", dtype=tdt)
+        k = torch.randn(k_offsets[-1], 1, 128, device=q.device, dtype=tdt)
+        v = torch.randn_like(k)
+        out = torch.full_like(q, float("nan"))
+        count = q_offsets[-1] * 4
+        storage = torch.full(
+            (count + 16,),
+            12345.0,
+            device=q.device,
+            dtype=torch.float32,
+        )
+        lse = storage[:count].view(q_offsets[-1], 4, 1)
+        scale = 0.5
+        cu_q = torch.tensor(q_offsets, device=q.device, dtype=torch.int32)
+        cu_k = torch.tensor(k_offsets, device=q.device, dtype=torch.int32)
+        returned = run_attention_dense_torch(
+            spec=spec,
+            q=q,
+            k=k,
+            v=v,
+            out=out,
+            lse=lse,
+            scale=scale,
+            cu_seqlens_q=cu_q,
+            cu_seqlens_kv=cu_k,
+        )
+        torch.cuda.synchronize()
+        expected_out = torch.empty_like(out, dtype=torch.float32)
+        expected_lse = torch.empty_like(lse)
+        for seq in range(2):
+            q0, q1 = q_offsets[seq : seq + 2]
+            k0, k1 = k_offsets[seq : seq + 2]
+            if q0 == q1:
+                continue
+            ref, lse_ref = _lse_reference(
+                q[q0:q1].unsqueeze(0),
+                k[k0:k1].unsqueeze(0),
+                v[k0:k1].unsqueeze(0),
+                scale,
+                causal=True,
+            )
+            expected_out[q0:q1] = ref[0]
+            expected_lse[q0:q1] = lse_ref[0].transpose(0, 1)
+        assert returned is out
+        assert (out.float() - expected_out).abs().max().item() < _tolerance(dtype)
+        assert (lse - expected_lse).abs().max().item() < _tolerance(dtype)
+        assert torch.equal(storage[count:], torch.full_like(storage[count:], 12345.0))
+        # Packed varlen is the one mode where LSE changes the O store guard
+        # (stores only rows that exist), so pin the bits against LSE off.
+        off_out = torch.full_like(q, float("nan"))
+        run_attention_dense_torch(
+            spec=replace(spec, emit_lse=False),
+            q=q,
+            k=k,
+            v=v,
+            out=off_out,
+            scale=scale,
+            cu_seqlens_q=cu_q,
+            cu_seqlens_kv=cu_k,
+        )
+        torch.cuda.synchronize()
+        assert torch.equal(out.view(torch.int16), off_out.view(torch.int16))
+
+    @pytest.mark.parametrize(
+        "failure",
+        [
+            "q_tail",
+            "kv_tail",
+            "zero_kv",
+            "decreasing",
+            "first_offset",
+            "terminal_offset",
+            "q_above_max",
+            "kv_above_max",
+            "q_offset_dtype",
+            "kv_offset_dtype",
+            "q_offset_count",
+            "kv_offset_count",
+            "offset_layout",
+            "offset_device",
+            "missing_offsets",
+            "kv_extent",
+            "out_extent",
+            "packed_shape",
+            "packed_layout",
+        ],
+    )
+    def test_packed_lse_rejections(self, failure):
+        q_offsets, k_offsets = [0, 256, 768], [0, 128, 384]
+        if failure == "q_tail":
+            q_offsets = [0, 257, 768]
+        elif failure == "kv_tail":
+            k_offsets = [0, 129, 384]
+        elif failure == "zero_kv":
+            # The other KV length stays aligned and within the maximum.
+            k_offsets = [0, 0, 256]
+        elif failure == "decreasing":
+            q_offsets = [0, 512, 256]
+        elif failure == "first_offset":
+            q_offsets = [1, 256, 768]
+        elif failure == "terminal_offset":
+            q_offsets = [0, 256, 512]
+        elif failure == "q_above_max":
+            q_offsets = [0, 0, 768]
+        elif failure == "kv_above_max":
+            k_offsets = [0, 64, 384]
+        spec = Gfx950AttentionDenseSpec(
+            batch=2,
+            seqlen_q=512,
+            seqlen_kv=256,
+            num_query_heads=4,
+            num_kv_heads=1,
+            head_size=128,
+            dtype="bf16",
+            varlen=True,
+            emit_lse=True,
+        )
+        tq = 256 if failure == "decreasing" else 768
+        tk = 256 if failure == "zero_kv" else 384
+        q = torch.zeros(tq, 4, 128, device="cuda", dtype=torch.bfloat16)
+        k = torch.zeros(tk, 1, 128, device=q.device, dtype=q.dtype)
+        v = torch.zeros_like(k)
+        out = torch.empty_like(q)
+        lse = torch.empty(tq, 4, 1, device=q.device, dtype=torch.float32)
+        cu_q = torch.tensor(q_offsets, device=q.device, dtype=torch.int32)
+        cu_k = torch.tensor(k_offsets, device=q.device, dtype=torch.int32)
+        if failure == "q_offset_dtype":
+            cu_q = cu_q.long()
+        elif failure == "kv_offset_dtype":
+            cu_k = cu_k.long()
+        elif failure == "q_offset_count":
+            cu_q = cu_q[:-1]
+        elif failure == "kv_offset_count":
+            cu_k = cu_k[:-1]
+        elif failure == "offset_layout":
+            cu_q = torch.tensor(
+                [0, 0, 256, 0, 768, 0],
+                device=q.device,
+                dtype=torch.int32,
+            )[::2]
+        elif failure == "offset_device":
+            cu_k = cu_k.cpu()
+        elif failure == "missing_offsets":
+            cu_q = None
+        elif failure == "kv_extent":
+            v = v[:-1]
+        elif failure == "out_extent":
+            out = out[:-1]
+        elif failure == "packed_shape":
+            k = k.view(tk, 2, 64)
+        elif failure == "packed_layout":
+            k = torch.zeros(tk, 1, 256, device=q.device, dtype=q.dtype)[..., ::2]
+        with pytest.raises(ValueError):
+            run_attention_dense_torch(
+                spec=spec,
+                q=q,
+                k=k,
+                v=v,
+                out=out,
+                lse=lse,
+                scale=0.5,
+                cu_seqlens_q=cu_q,
+                cu_seqlens_kv=cu_k,
+            )
+
+    @pytest.mark.parametrize(
+        "failure",
+        [
+            "missing",
+            "unexpected",
+            "dtype",
+            "shape",
+            "layout",
+            "device",
+            "overlap_q",
+            "overlap_k",
+            "overlap_v",
+            "overlap_out",
+            "overlap_sink",
+            "overlap_metadata",
+            "companion",
+        ],
+    )
+    def test_lse_buffer_errors(self, failure):
+        spec = Gfx950AttentionDenseSpec(
+            batch=2,
+            seqlen_q=256,
+            seqlen_kv=256,
+            num_query_heads=4,
+            num_kv_heads=1,
+            head_size=128,
+            dtype="bf16",
+            emit_lse=True,
+        )
+        q = torch.zeros(2, 256, 4, 128, device="cuda", dtype=torch.bfloat16)
+        k = torch.zeros(2, 256, 1, 128, device=q.device, dtype=q.dtype)
+        v = torch.zeros_like(k)
+        out = torch.empty_like(q)
+        lse = torch.empty(2, 4, 256, 1, device=q.device, dtype=torch.float32)
+        sinks, metadata = None, {}
+        if failure == "missing":
+            lse = None
+        elif failure == "unexpected":
+            spec = replace(spec, emit_lse=False)
+        elif failure == "dtype":
+            lse = lse.bfloat16()
+        elif failure == "shape":
+            lse = lse[..., 0]
+        elif failure == "layout":
+            lse = torch.empty(
+                2,
+                4,
+                256,
+                2,
+                device=q.device,
+                dtype=torch.float32,
+            )[..., :1]
+        elif failure == "device":
+            lse = lse.cpu()
+        elif failure in {"overlap_q", "overlap_k", "overlap_v", "overlap_out"}:
+            tensor = {
+                "overlap_q": q,
+                "overlap_k": k,
+                "overlap_v": v,
+                "overlap_out": out,
+            }[failure]
+            # Reinterpret the real input/output allocation, not a copied tensor.
+            lse = tensor.view(torch.float32).view(-1)[:2048].view(2, 4, 256, 1)
+        elif failure == "overlap_sink":
+            spec = replace(spec, use_sinks=True)
+            sinks = lse.view(torch.bfloat16).view(-1)[:4]
+        elif failure == "overlap_metadata":
+            spec = replace(spec, varlen=True)
+            q, k, v, out = (tensor.flatten(0, 1) for tensor in (q, k, v, out))
+            lse = lse.view(512, 4, 1)
+            cu_q = lse.view(torch.int32).view(-1)[:3]
+            cu_q.copy_(torch.tensor([0, 256, 512], device=q.device, dtype=torch.int32))
+            metadata = {
+                "cu_seqlens_q": cu_q,
+                "cu_seqlens_kv": torch.tensor(
+                    [0, 256, 512],
+                    device=q.device,
+                    dtype=torch.int32,
+                ),
+            }
+        elif failure == "companion":
+            k = k.cpu()
+        with pytest.raises(ValueError):
+            run_attention_dense_torch(
+                spec=spec,
+                q=q,
+                k=k,
+                v=v,
+                out=out,
+                lse=lse,
+                scale=0.5,
+                sinks=sinks,
+                **metadata,
+            )
+
+    @pytest.mark.parametrize(
+        "spec_id",
+        ["gfx950_dense_grid", "gfx950_dense_persist", "gfx950_dense_persist_widedma"],
+    )
+    def test_dispatched_lse(self, spec_id):
+        """Request -> dispatch -> bind -> launch fills a caller-owned LSE buffer."""
+        from dispatch.attention import (
+            AttentionRequest,
+            attention_execution_candidates,
+            dispatch_attention,
+        )
+
+        candidate = next(
+            c for c in attention_execution_candidates() if c.spec_id == spec_id
+        )
+        result = dispatch_attention(
+            AttentionRequest(
+                batch=2,
+                nhead_q=8,
+                nhead_k=2,
+                seqlen_q=512,
+                seqlen_k=512,
+                hdim_q=128,
+                hdim_v=128,
+                arch="gfx950",
+                mask_type=1,
+                dtype="bf16",
+                algorithm=candidate.algorithm,
+                spec_id=spec_id,
+                emit_lse=True,
+            )
+        )
+        scale = 0.5
+        torch.manual_seed(23)
+        q = torch.randn(2, 512, 8, 128, device="cuda", dtype=torch.bfloat16)
+        k = torch.randn(2, 512, 2, 128, device=q.device, dtype=q.dtype)
+        v = torch.randn_like(k)
+        out = torch.empty_like(q)
+        lse = torch.full(
+            (2, 8, 512, 1), float("nan"), device=q.device, dtype=torch.float32
+        )
+        tensors = {"q": q, "k": k, "v": v, "out": out}
+        with pytest.raises(ValueError):
+            result.bind_torch(tensors, scale=scale).launch()
+        result.bind_torch({**tensors, "lse": lse}, scale=scale).launch()
+        torch.cuda.synchronize()
+        ref, lse_ref = _lse_reference(q, k, v, scale, causal=True)
+        assert (out.float() - ref).abs().max().item() < _tolerance("bf16")
+        assert (lse - lse_ref).abs().max().item() < _tolerance("bf16")
+
+    def test_lse_runtime_shape_reuse(self):
+        from kernels.common.attention_dense_spec import attention_dense_cache_key
+        from kernels.gfx950.attention_dense import _DENSE_LAUNCHER_CACHE
+
+        specs = [
+            Gfx950AttentionDenseSpec(
+                batch=batch,
+                seqlen_q=sq,
+                seqlen_kv=512,
+                num_query_heads=4,
+                num_kv_heads=1,
+                head_size=128,
+                dtype="bf16",
+                emit_lse=True,
+            )
+            for batch, sq in [(1, 512), (2, 1024)]
+        ]
+        enabled_keys = [
+            attention_dense_cache_key(spec, arch="gfx950") for spec in specs
+        ]
+        off_specs = [replace(spec, emit_lse=False) for spec in specs]
+        disabled_keys = [
+            attention_dense_cache_key(spec, arch="gfx950") for spec in off_specs
+        ]
+        # Own every potentially affected slot, even if a cache-key regression
+        # unexpectedly splits shape identity. Always restore prior entries.
+        owned_keys = set(enabled_keys + disabled_keys)
+        old_entries = {key: _DENSE_LAUNCHER_CACHE.pop(key, None) for key in owned_keys}
+        launchers = []
+        scale = 0.5
+        try:
+            for index, spec in enumerate(specs):
+                torch.manual_seed(29 + index)
+                batch, sq = spec.batch, spec.seqlen_q
+                q = torch.randn(batch, sq, 4, 128, device="cuda", dtype=torch.bfloat16)
+                k = torch.randn(batch, 512, 1, 128, device=q.device, dtype=q.dtype)
+                v = torch.randn_like(k)
+                out = torch.empty_like(q)
+                lse = torch.full(
+                    (batch, 4, sq, 1),
+                    float("nan"),
+                    device=q.device,
+                    dtype=torch.float32,
+                )
+                run_attention_dense_torch(
+                    spec=spec,
+                    q=q,
+                    k=k,
+                    v=v,
+                    out=out,
+                    lse=lse,
+                    scale=scale,
+                )
+                torch.cuda.synchronize()
+                ref, lse_ref = _lse_reference(q, k, v, scale, causal=True)
+                assert (out.float() - ref).abs().max().item() < _tolerance("bf16")
+                assert (lse - lse_ref).abs().max().item() < _tolerance("bf16")
+                launchers.append(_launcher_for(spec))
+            assert launchers[0] is not None
+            assert launchers[0] is launchers[1]
+            off_out = torch.empty_like(out)
+            run_attention_dense_torch(
+                spec=off_specs[-1],
+                q=q,
+                k=k,
+                v=v,
+                out=off_out,
+                scale=scale,
+            )
+            torch.cuda.synchronize()
+            assert torch.equal(out, off_out)
+            assert _launcher_for(off_specs[-1]) is not launchers[0]
+        finally:
+            for key, entry in old_entries.items():
+                _DENSE_LAUNCHER_CACHE.pop(key, None)
+                if entry is not None:
+                    _DENSE_LAUNCHER_CACHE[key] = entry
 
 
 if __name__ == "__main__":

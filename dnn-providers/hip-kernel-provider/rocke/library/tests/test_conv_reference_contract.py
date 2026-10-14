@@ -274,6 +274,13 @@ def test_source_adapter_selects_supported_production_cohort_without_torch():
         selected = dispatch_conv_grouped(request)
         assert selected.spec.direction == "fwd"
         assert all(v > 0 for v in selected.grid)
+        if case.name == "multi-tile":
+            assert selected.grid[0] == 2
+            assert case.K % selected.spec.tile_n != 0
+            assert selected.spec.epilogue == "cshuffle"
+        elif case.name == "odd-channels":
+            assert case.K % 2 == 1
+            assert selected.spec.epilogue == "default"
 
 
 @pytest.mark.parametrize("case", get_architecture("gfx942").CASES, ids=lambda c: c.id)
