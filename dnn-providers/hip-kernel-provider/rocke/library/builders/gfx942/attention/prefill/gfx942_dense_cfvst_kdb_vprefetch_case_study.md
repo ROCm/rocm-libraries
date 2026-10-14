@@ -65,7 +65,7 @@ Analysis of stalls using threadtrace found a large number of waiting at sync poi
 
 #### Results
 
-**Hardware:** AMD Instinct MI300X VF (gfx942, 304 CUs)
+**Hardware:** gfx942, 304 CUs
 
 | dtype | B  | S     | Hq | Hkv | D   | baseline vs new | latency reduction |
 |------:|---:|------:|---:|----:|----:|----------------:|------------------:|
