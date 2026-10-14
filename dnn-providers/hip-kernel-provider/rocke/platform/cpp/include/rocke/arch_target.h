@@ -176,7 +176,11 @@ const rocke_layout_map_t* rocke_mma_op_b_scale_layout(const rocke_mma_op_t* op,
 typedef struct rocke_memory_caps
 {
     bool has_async_lds;
+    /* Python defaults has_async_global_lds to has_async_lds when the JSON
+     * omits it. */
+    bool has_async_global_lds;
     bool has_ds_read_tr;
+    bool has_tdm;
     int buffer_load_max_dwords;
     /* Widest per-lane DRAM->LDS DMA the buffer_load_lds family can do, in
      * dwords (0 where the arch has no such instruction). Distinct from
@@ -184,6 +188,12 @@ typedef struct rocke_memory_caps
      * width: CDNA3 loads a full dwordx4 into VGPRs but only a dword into LDS.
      * Mirrors MemoryCapabilities.async_lds_max_dwords. */
     int async_lds_max_dwords;
+    /* gfx1250 feature flags; an arch sets one only after its feature passes a
+     * functional run on a device. */
+    bool has_scalar_data_prefetch;
+    bool has_global_prefetch;
+    bool has_cluster_launch;
+    bool has_multicast_load;
 } rocke_memory_caps_t;
 
 typedef struct rocke_resource_limits

@@ -53,6 +53,7 @@ BF16 = Type("bf16")
 F16 = Type("f16")
 F32 = Type("f32")
 TF32 = Type("tf32")
+F64 = Type("f64")
 FP8E4M3 = Type("fp8e4m3")
 BF8E5M2 = Type("bf8e5m2")
 FP4E2M1 = Type("fp4e2m1")
@@ -78,6 +79,7 @@ def dtype_to_ir_type(dtype: str) -> Type:
         "bf16": BF16,
         "fp32": F32,
         "tf32": TF32,
+        "fp64": F64,
         "fp8e4m3": FP8E4M3,
         "bf8e5m2": BF8E5M2,
         "fp4e2m1": FP4E2M1,
@@ -248,6 +250,77 @@ def _check_cachepolicy(op: str, value: int) -> int:
     return v
 
 
+def _check_axis(op: str, axis: object) -> str:
+    """Validate a grid axis name (``x``, ``y``, or ``z``)."""
+    if axis not in ("x", "y", "z"):
+        raise ValueError(f"{op} axis must be x, y, or z, got {axis!r}")
+    return str(axis)
+
+
+# gfx1250 workgroup-cluster shape limits, matching what clang accepts for
+# ``__cluster_dims__``: each axis must fit the 4-bit field (1..15) and the
+# cluster may hold at most 16 workgroups. The AMDGPU backend does not check
+# ``"amdgpu-cluster-dims"`` itself, so these checks are the only guard.
+MAX_CLUSTER_DIM = 15
+MAX_CLUSTER_WORKGROUPS = 16
+
+
+def check_cluster_dims(value: object) -> Tuple[int, int, int]:
+    """Validate a kernel ``cluster_dims`` attr and return it as ``(x, y, z)``.
+
+    Accepts a list or tuple (the serializer round-trips tuples as lists). The
+    error messages are mirrored by the C++ lowerer.
+    """
+    if (
+        not isinstance(value, (tuple, list))
+        or len(value) != 3
+        or any(isinstance(v, bool) or not isinstance(v, int) for v in value)
+    ):
+        raise ValueError("cluster_dims must be three integers (x, y, z)")
+    x, y, z = (int(v) for v in value)
+    if min(x, y, z) < 1 or max(x, y, z) > MAX_CLUSTER_DIM:
+        raise ValueError(
+            f"cluster_dims ({x}, {y}, {z}): each dimension must be in "
+            f"1..{MAX_CLUSTER_DIM}"
+        )
+    if x * y * z > MAX_CLUSTER_WORKGROUPS:
+        raise ValueError(
+            f"cluster_dims ({x}, {y}, {z}): {x * y * z} workgroups exceeds the "
+            f"cluster limit of {MAX_CLUSTER_WORKGROUPS}"
+        )
+    return (x, y, z)
+
+
+# Hardware-register ids for ``s_setreg``.
+HW_REG_MODE = 1
+# Bit in ``MODE`` that lets gfx1250 issue scalar data prefetches, taken from
+# the CDNA5 ISA MODE register description. LLVM has no symbolic name for it
+# (the disassembler prints ``hwreg(HW_REG_WAVE_MODE, 24, 1)``), so the toolchain
+# cannot cross-check it; re-confirm against the ISA when it changes. It does not
+# overlap the bit-25 ``s_setreg`` the llvm23 backend emits in every prologue.
+# Mirrored by ROCKE_MODE_SCALAR_PREFETCH_EN_BIT in rocke/ir.h; tests and probes
+# pin the packed selector ``hwreg(1, 24, 1) == 1537`` as a literal.
+MODE_SCALAR_PREFETCH_EN_BIT = 24
+
+
+def hwreg(reg_id: int, offset: int = 0, size: int = 32) -> int:
+    """Pack an ``s_setreg`` / ``s_getreg`` field selector.
+
+    Layout: ``id`` in bits [5:0], bit ``offset`` in [10:6], ``size - 1`` in
+    [15:11] -- the same packing as the assembler's ``hwreg(id, offset, size)``.
+    """
+    reg_id, offset, size = int(reg_id), int(offset), int(size)
+    if not 0 <= reg_id <= 0x3F:
+        raise ValueError(f"hwreg id must be in 0..63, got {reg_id}")
+    if not 0 <= offset <= 31:
+        raise ValueError(f"hwreg offset must be in 0..31, got {offset}")
+    if not 1 <= size <= 32 - offset:
+        raise ValueError(
+            f"hwreg size must be in 1..{32 - offset} for offset {offset}, got {size}"
+        )
+    return reg_id | (offset << 6) | ((size - 1) << 11)
+
+
 def _mma_c_frag_len(op_id: str) -> int:
     """Accumulator fragment length for ``op_id`` from the arch SSOT.
 
@@ -388,6 +461,13 @@ class KernelDef:
         than N threads/block triggers a HIP `unspecified launch
         failure`. Defaults to 256 for legacy kernels."""
         return int(self.attrs.get("max_workgroup_size", 256))
+
+    @property
+    def cluster_dims(self) -> Optional[Tuple[int, int, int]]:
+        """The gfx1250 workgroup-cluster shape ``(x, y, z)`` the kernel must be
+        launched with, or ``None`` for a kernel without one."""
+        value = self.attrs.get("cluster_dims")
+        return None if value is None else check_cluster_dims(value)
 
 
 # -------------------------- source locations ------------------------------
@@ -746,6 +826,15 @@ class IRBuilder:
             "arith.constant",
             result_types=[F32],
             attrs={"value": float(value), "ity": "f32"},
+            result_name_hint="c",
+        )
+        return op.result
+
+    def const_f64(self, value: float) -> Value:
+        op = self._op(
+            "arith.constant",
+            result_types=[F64],
+            attrs={"value": float(value), "ity": "f64"},
             result_name_hint="c",
         )
         return op.result
@@ -1655,6 +1744,77 @@ class IRBuilder:
             result_name_hint="bid",
         ).result
 
+    # ----- gfx1250 workgroup clusters -----
+    #
+    # Lowering requires gfx1250 and the llvm23 flavor. A launch without a
+    # cluster shape is a 1x1x1 cluster: every id and max id inside the cluster
+    # reads 0 and the cluster id equals the workgroup id.
+
+    def set_cluster_dims(self, x: int, y: int = 1, z: int = 1) -> None:
+        """Declare the workgroup-cluster shape this kernel must be launched with.
+
+        Sets the kernel ``cluster_dims`` attr, which lowers to
+        ``"amdgpu-cluster-dims"="x,y,z"`` and the code-object
+        ``.cluster_dims`` metadata. The launch must then pass the same shape
+        (``Runtime.launch(..., cluster=(x, y, z))``) and a grid divisible by
+        it. Each dimension is 1..15 with at most 16 workgroups per cluster.
+        """
+        self.kernel.attrs["cluster_dims"] = check_cluster_dims((x, y, z))
+
+    def _cluster_axis_read(self, name: str, axis: str, hint: str) -> Value:
+        return self._op(
+            f"gpu.{name}",
+            attrs={"axis": _check_axis(name, axis)},
+            result_types=[I32],
+            result_name_hint=hint,
+        ).result
+
+    def cluster_id(self, axis: str = "x") -> Value:
+        """``llvm.amdgcn.cluster.id.<axis>`` — this cluster's id in the grid."""
+        return self._cluster_axis_read("cluster_id", axis, "cid")
+
+    def cluster_workgroup_id(self, axis: str = "x") -> Value:
+        """``llvm.amdgcn.cluster.workgroup.id.<axis>`` — workgroup id inside the cluster."""
+        return self._cluster_axis_read("cluster_workgroup_id", axis, "cwid")
+
+    def cluster_workgroup_max_id(self, axis: str = "x") -> Value:
+        """``llvm.amdgcn.cluster.workgroup.max.id.<axis>`` — cluster size minus one."""
+        return self._cluster_axis_read("cluster_workgroup_max_id", axis, "cwmax")
+
+    def cluster_workgroup_flat_id(self) -> Value:
+        """``llvm.amdgcn.cluster.workgroup.flat.id`` — flattened id inside the cluster."""
+        return self._op(
+            "gpu.cluster_workgroup_flat_id",
+            result_types=[I32],
+            result_name_hint="cwflat",
+        ).result
+
+    def cluster_workgroup_max_flat_id(self) -> Value:
+        """``llvm.amdgcn.cluster.workgroup.max.flat.id`` — workgroups per cluster minus one."""
+        return self._op(
+            "gpu.cluster_workgroup_max_flat_id",
+            result_types=[I32],
+            result_name_hint="cwmaxflat",
+        ).result
+
+    def cluster_size(self, axis: str = "x") -> Value:
+        """Workgroups per cluster along ``axis``: ``cluster_workgroup_max_id + 1``."""
+        return self.add(self.cluster_workgroup_max_id(axis), self.const_i32(1))
+
+    def cluster_barrier(self) -> None:
+        """Barrier across every workgroup of the cluster.
+
+        Lowers to ``fence syncscope("cluster") release``,
+        ``llvm.amdgcn.s.cluster.barrier``, ``fence syncscope("cluster")
+        acquire``. The fences make global stores issued before the barrier
+        visible to every workgroup of the cluster after it. The intrinsic
+        first synchronises the waves of the workgroup on the workgroup
+        barrier, then one wave per workgroup signals the cluster barrier and
+        all waves wait on it; the workgroup barrier immediates used by
+        :meth:`s_barrier_signal` stay separate.
+        """
+        self._op("tile.cluster_barrier")
+
     # ----- memory -----
 
     def smem_alloc(
@@ -1776,9 +1936,10 @@ class IRBuilder:
         """Vectorised global load of N consecutive values.
 
         Supports f16/bf16/i16 (N in {2, 4, 6, 8, 16}), f32/i32/tf32
-        (N in {2, 3, 4, 8}), and fp8e4m3/bf8e5m2/i8 (N in {2, 4, 8, 12, 16}).
-        Loads exactly N elements. Instruction selection depends on target and
-        alignment; 96-bit payloads do not require a 96-bit scalar type.
+        (N in {2, 3, 4, 8}), f64 (N = 2), and fp8e4m3/bf8e5m2/i8
+        (N in {2, 4, 8, 12, 16}). Loads exactly N elements. Instruction
+        selection depends on target and alignment; 96-bit payloads do not
+        require a 96-bit scalar type.
 
         Default alignment is the payload size for power-of-two loads, and
         element alignment for 12-byte loads. An explicit alignment is a caller
@@ -1807,6 +1968,12 @@ class IRBuilder:
                 raise ValueError(
                     f"unsupported vector width for {dtype.name} global_load_vN: {n}"
                 )
+        elif dtype.name == "f64":
+            elem_bytes = 8
+            if n != 2:
+                raise ValueError(
+                    f"unsupported vector width for {dtype.name} global_load_vN: {n}"
+                )
         elif dtype.name in ("fp8e4m3", "bf8e5m2", "i8"):
             elem_bytes = 1
             if n not in (2, 4, 8, 12, 16):
@@ -1815,7 +1982,7 @@ class IRBuilder:
                 )
         else:
             raise ValueError(
-                "global_load_vN supports f16/bf16/i16/f32/i32/tf32/fp8e4m3/bf8e5m2/i8, "
+                "global_load_vN supports f16/bf16/i16/f32/i32/tf32/f64/fp8e4m3/bf8e5m2/i8, "
                 f"got {dtype.name}"
             )
         attrs = {
@@ -1992,19 +2159,20 @@ class IRBuilder:
         if not isinstance(value.type, VectorType):
             raise ValueError("smem_store_vN expects vector value for n > 1")
         elem_name = value.type.elem.name
-        allowed_n = (
-            (2, 4, 8, 16) if elem_name in ("i8", "fp8e4m3", "bf8e5m2") else (2, 4, 8)
-        )
+        if elem_name in ("i8", "fp8e4m3", "bf8e5m2"):
+            allowed_n = (2, 4, 8, 16)
+            elem_bytes = 1
+        elif elem_name == "f64":
+            allowed_n = (2,)
+            elem_bytes = 8
+        else:
+            allowed_n = (2, 4, 8)
+            elem_bytes = 4 if elem_name in ("f32", "i32", "tf32") else 2
         if n not in allowed_n:
             raise ValueError(
                 f"unsupported vector width for smem_store_vN of {elem_name}: {n} "
                 f"(allowed: {allowed_n})"
             )
-        elem_bytes = (
-            1
-            if elem_name in ("i8", "fp8e4m3", "bf8e5m2")
-            else 4 if elem_name in ("f32", "i32", "tf32") else 2
-        )
         self._op(
             "tile.smem_store_vN",
             [smem, *indices, value],
@@ -2036,10 +2204,11 @@ class IRBuilder:
 
     def smem_load_vN(self, smem: Value, *indices, dtype: Type, n: int = 0) -> Value:
         """LDS load of ``<N x dtype>``. Supports 8-bit (fp8e4m3 / bf8e5m2 /
-        i8), 16-bit (f16 / bf16) and 32-bit (f32 / i32) element types;
-        loads exactly N elements. In addition to power-of-two widths, accepts
-        96-bit payloads (12 bytes, six halfwords, or three words), using element
-        alignment. The target and alignment determine instruction selection.
+        i8), 16-bit (f16 / bf16), 32-bit (f32 / i32) and 64-bit (f64, ``n in
+        {1, 2}``) element types; loads exactly N elements. In addition to
+        power-of-two widths, accepts 96-bit payloads (12 bytes, six halfwords,
+        or three words), using element alignment. The target and alignment
+        determine instruction selection.
         """
         if dtype.name not in (
             "f16",
@@ -2047,19 +2216,23 @@ class IRBuilder:
             "f32",
             "i32",
             "tf32",
+            "f64",
             "fp8e4m3",
             "bf8e5m2",
             "i8",
         ):
             raise ValueError(
-                "smem_load_vN supports f16 / bf16 / f32 / i32 / tf32 / fp8e4m3 / "
-                f"bf8e5m2 / i8, got {dtype.name}"
+                "smem_load_vN supports f16 / bf16 / f32 / i32 / tf32 / f64 / "
+                f"fp8e4m3 / bf8e5m2 / i8, got {dtype.name}"
             )
-        allowed_n = (
-            (1, 2, 4, 8, 12, 16)
-            if dtype.name in ("fp8e4m3", "bf8e5m2", "i8")
-            else (1, 2, 4, 6, 8) if dtype.name in ("f16", "bf16") else (1, 2, 3, 4, 8)
-        )
+        if dtype.name in ("fp8e4m3", "bf8e5m2", "i8"):
+            allowed_n = (1, 2, 4, 8, 12, 16)
+        elif dtype.name in ("f16", "bf16"):
+            allowed_n = (1, 2, 4, 6, 8)
+        elif dtype.name == "f64":
+            allowed_n = (1, 2)
+        else:
+            allowed_n = (1, 2, 3, 4, 8)
         if n not in allowed_n:
             raise ValueError(
                 f"unsupported vector width {n} for smem_load_vN of {dtype.name} "
@@ -3011,6 +3184,105 @@ class IRBuilder:
         """``llvm.amdgcn.s.prefetch.inst`` — instruction-cache prefetch."""
         self._op("tile.s_prefetch_inst", [ptr, length])
 
+    # ----- gfx1250 data prefetch -----
+    #
+    # All of these are hints: they must never change a kernel's results, only
+    # when data arrives. Lowering requires gfx1250 and the llvm23 flavor.
+
+    def s_setreg(self, simm16: int, value: Value) -> None:
+        """``llvm.amdgcn.s.setreg`` — write ``value`` into a hardware-register field.
+
+        ``simm16`` selects the register field; build it with :func:`hwreg`.
+        Field layouts differ between generations, so the op is gfx1250-only.
+        """
+        simm16 = _check_u16("s_setreg", "simm16", simm16)
+        self._check_i32_value("s_setreg", "value", value)
+        self._op("tile.s_setreg", [value], attrs={"simm16": simm16})
+
+    def enable_scalar_prefetch(self) -> None:
+        """Set the ``MODE`` bit that lets ``s_prefetch_data`` issue on gfx1250.
+
+        Scalar data prefetches are dropped until this bit is set; see
+        :data:`MODE_SCALAR_PREFETCH_EN_BIT`. This only sets the bit; it does not
+        add the ``s_wait_xcnt 0`` each prefetch needs (see :meth:`s_prefetch_data`).
+        """
+        self.s_setreg(
+            hwreg(HW_REG_MODE, MODE_SCALAR_PREFETCH_EN_BIT, 1), self.const_i32(1)
+        )
+
+    def s_prefetch_data(self, ptr: Value, length: Value) -> None:
+        """``llvm.amdgcn.s.prefetch.data`` — scalar data-cache prefetch.
+
+        ``ptr`` is a flat, global, or constant pointer and must be wave-uniform:
+        the instruction reads it from an SGPR pair. ``length`` is an i32 with
+        value 0–31, encoding 1–32 chunks of 128 bytes (i.e., ``chunks - 1``).
+        The address is rounded down to 128-byte alignment by the hardware, so
+        an unaligned start needs one extra chunk to reach its last byte.
+        Pass ``min(31, ceil((ptr % 128 + bytes) / 128) - 1)``; see
+        ``block_scaled_gemm`` for a worked example.
+
+        This is the raw instruction. The CDNA5 ISA requires ``s_wait_xcnt 0``
+        before a scalar prefetch, and the op does not emit it; the caller must
+        call :meth:`s_wait_xcnt` first. It also needs
+        :meth:`enable_scalar_prefetch` earlier in the kernel.
+        """
+        if not isinstance(ptr.type, PtrType):
+            raise TypeError(f"s_prefetch_data ptr must be a pointer, got {ptr.type}")
+        self._check_i32_value("s_prefetch_data", "length", length)
+        self._op("tile.s_prefetch_data", [ptr, length])
+
+    def s_buffer_prefetch_data(
+        self, rsrc: Value, length: Value, *, offset: int = 0
+    ) -> None:
+        """``llvm.amdgcn.s.buffer.prefetch.data`` — scalar prefetch through a buffer.
+
+        ``rsrc`` comes from :meth:`buffer_rsrc`; ``offset`` is an immediate
+        byte offset and ``length`` an i32 encoded as in :meth:`s_prefetch_data`
+        (``chunks - 1``), with the same ``s_wait_xcnt 0`` prerequisite.
+        """
+        ty = rsrc.type
+        if not isinstance(ty, VectorType) or ty.elem is not I32 or ty.count != 4:
+            raise TypeError(
+                f"s_buffer_prefetch_data rsrc must come from buffer_rsrc, got {ty}"
+            )
+        self._check_i32_value("s_buffer_prefetch_data", "length", length)
+        self._op(
+            "tile.s_buffer_prefetch_data",
+            [rsrc, length],
+            attrs={"offset": _check_i32("s_buffer_prefetch_data", "offset", offset)},
+        )
+
+    def global_prefetch(self, ptr: Value, *, cachepolicy: int = 0) -> None:
+        """``llvm.amdgcn.global.prefetch`` — per-lane prefetch of a global address."""
+        if not isinstance(ptr.type, PtrType) or ptr.type.space != "global":
+            raise TypeError(
+                f"global_prefetch ptr must be a global pointer, got {ptr.type}"
+            )
+        self._op(
+            "tile.global_prefetch",
+            [ptr],
+            attrs={"cachepolicy": _check_cachepolicy("global_prefetch", cachepolicy)},
+        )
+
+    def flat_prefetch(self, ptr: Value, *, cachepolicy: int = 0) -> None:
+        """``llvm.amdgcn.flat.prefetch`` — per-lane prefetch of a flat address.
+
+        rocKE has no ``flat`` address space: the spaces that lower to a bare
+        ``ptr`` (``shared``, ``private``) are the flat ones. Global pointers
+        belong to :meth:`global_prefetch`.
+        """
+        if not isinstance(ptr.type, PtrType) or ptr.type.space in (
+            "global",
+            "constant",
+            "lds",
+        ):
+            raise TypeError(f"flat_prefetch ptr must be a flat pointer, got {ptr.type}")
+        self._op(
+            "tile.flat_prefetch",
+            [ptr],
+            attrs={"cachepolicy": _check_cachepolicy("flat_prefetch", cachepolicy)},
+        )
+
     def buffer_load_lds_async(
         self,
         rsrc: Value,
@@ -3336,8 +3608,14 @@ class IRBuilder:
         permlane32_swap or ds_bpermute).
 
         Works for any 32-bit scalar `v` (f32, i32). For half/bfloat,
-        bitcast to i32 via a 2-element vector first.
+        bitcast to i32 via a 2-element vector first. An f64 `v` is split
+        into two i32 halves, each shuffled on the 32-bit path.
         """
+        if v.type.name == "f64":
+            halves = self.bitcast(v, VectorType(I32, 2))
+            lo = self.warp_shuffle_xor(self.vec_extract(halves, 0), lane_xor)
+            hi = self.warp_shuffle_xor(self.vec_extract(halves, 1), lane_xor)
+            return self.bitcast(self.vec_pack([lo, hi], I32), F64)
         if 1 <= lane_xor <= 31:
             # Emits `ds_swizzle` (XOR pattern in the immediate offset), NOT
             # `ds_bpermute`: 1 LDS op, no addr-compute. This is the path the
@@ -3916,6 +4194,88 @@ class IRBuilder:
             result_name_hint="gtr",
         ).result
 
+    # ----- gfx1250 cluster multicast loads -----
+    #
+    # One load, delivered to every workgroup of the cluster whose bit is set in
+    # ``mask``. The mask goes to M0[15:0] (bit i is the workgroup whose
+    # cluster_workgroup_flat_id is i); lanes of the issuing workgroup must pass
+    # the same wave-uniform mask. Lowering requires gfx1250 and llvm23.
+
+    def cluster_load(
+        self,
+        ptr: Value,
+        mask: Value,
+        *,
+        width_bytes: int = 4,
+        cachepolicy: int = 0,
+    ) -> Value:
+        """``llvm.amdgcn.cluster.load.b{32,64,128}`` — multicast global load.
+
+        Returns ``i32`` for 4 bytes, ``vec<i32x2>`` for 8, ``vec<i32x4>`` for 16.
+        """
+        lanes = {4: 1, 8: 2, 16: 4}.get(width_bytes)
+        if lanes is None:
+            raise ValueError(
+                f"cluster_load width_bytes must be 4, 8, or 16 (got {width_bytes})"
+            )
+        if not isinstance(ptr.type, PtrType) or ptr.type.space != "global":
+            raise TypeError(
+                f"cluster_load ptr must be a global pointer, got {ptr.type}"
+            )
+        self._check_i32_value("cluster_load", "mask", mask)
+        result_type = I32 if lanes == 1 else VectorType(I32, lanes)
+        return self._op(
+            "tile.cluster_load",
+            [ptr, mask],
+            [result_type],
+            attrs={
+                "width_bytes": int(width_bytes),
+                "cachepolicy": _check_cachepolicy("cluster_load", cachepolicy),
+            },
+            result_name_hint="cld",
+        ).result
+
+    def cluster_load_async_to_lds(
+        self,
+        src_ptr: Value,
+        lds_ptr: Value,
+        mask: Value,
+        *,
+        width_bytes: int,
+        offset_bytes: int = 0,
+        cachepolicy: int = 0,
+    ) -> None:
+        """``llvm.amdgcn.cluster.load.async.to.lds`` — multicast global-to-LDS copy.
+
+        Each selected workgroup receives the data at ``lds_ptr`` in its own LDS.
+        Completion is tracked by ``ASYNCcnt``; wait with ``s_wait_asynccnt``.
+        """
+        if width_bytes not in (1, 4, 8, 16):
+            raise ValueError(
+                "cluster_load_async_to_lds width_bytes must be 1, 4, 8, or 16 "
+                f"(got {width_bytes})"
+            )
+        if not isinstance(src_ptr.type, PtrType) or src_ptr.type.space != "global":
+            raise TypeError(
+                "cluster_load_async_to_lds src_ptr must be a global pointer, "
+                f"got {src_ptr.type}"
+            )
+        self._check_local_ptr("cluster_load_async_to_lds", lds_ptr)
+        self._check_i32_value("cluster_load_async_to_lds", "mask", mask)
+        self._op(
+            "tile.cluster_load_async_to_lds",
+            [src_ptr, lds_ptr, mask],
+            attrs={
+                "width_bytes": int(width_bytes),
+                "offset_bytes": _check_i32(
+                    "cluster_load_async_to_lds", "offset_bytes", offset_bytes
+                ),
+                "cachepolicy": _check_cachepolicy(
+                    "cluster_load_async_to_lds", cachepolicy
+                ),
+            },
+        )
+
     def _check_tensor_descriptor_group(
         self, op: str, field: str, value: Value, lanes: int
     ) -> None:
@@ -3972,6 +4332,116 @@ class IRBuilder:
         self._tensor_lds_transfer(
             "tile.tensor_store_from_lds", d0, d1, d2, d3, d4, cachepolicy
         )
+
+    def tdm_descriptor_2d(
+        self,
+        global_ptr: Value,
+        lds_addr: Value,
+        *,
+        elem_bytes: int,
+        tensor_dim0: Value,
+        tensor_dim1: Value,
+        row_stride: Value,
+        tile_dim0: int,
+        tile_dim1: int,
+        workgroup_mask: int = 0,
+        pad_interval: int | None = None,
+        pad_amount: int = 0,
+    ) -> tuple[Value, Value, Value, Value, Value]:
+        """Build the five D# groups for a rank-2 TDM tile transfer.
+
+        Dimension 0 is the contiguous one. ``tensor_dim0`` / ``tensor_dim1``
+        are the extents (in elements) left from ``global_ptr`` — the hardware
+        clips the tile against them. ``row_stride`` is the element distance
+        between consecutive dimension-1 rows. The tile is
+        ``tile_dim1 x tile_dim0`` elements, packed row-major at ``lds_addr``
+        (an i64 from ``smem_addr_of`` or an i32 LDS byte address) unless
+        ``pad_interval`` is given, which enables LDS padding with the raw
+        ``pad_interval`` (0..7) and ``pad_amount`` (0..127) fields.
+        ``workgroup_mask`` selects the cluster workgroups that receive the
+        tile (0 = only the issuing workgroup).
+
+        Group 0 holds the addresses, group 1 the shape and element size;
+        groups 2..4 are zero (no rank > 2, no gather, no iteration). Every
+        dword is made wave-uniform with ``readfirstlane``. The layout
+        matches CK Tile's ``TDM_GROUP0`` / ``TDM_GROUP1``.
+        """
+        name = "tdm_descriptor_2d"
+        if (
+            not isinstance(global_ptr.type, PtrType)
+            or global_ptr.type.space != "global"
+        ):
+            raise TypeError(
+                f"{name} global_ptr must be a global pointer, got {global_ptr.type}"
+            )
+        if lds_addr.type is not I64 and lds_addr.type is not I32:
+            raise TypeError(f"{name} lds_addr must be i64 or i32, got {lds_addr.type}")
+        for field, value in (
+            ("tensor_dim0", tensor_dim0),
+            ("tensor_dim1", tensor_dim1),
+            ("row_stride", row_stride),
+        ):
+            self._check_i32_value(name, field, value)
+        data_size = {1: 0, 2: 1, 4: 2, 8: 3}.get(elem_bytes)
+        if data_size is None:
+            raise ValueError(
+                f"{name} elem_bytes must be 1, 2, 4, or 8 (got {elem_bytes})"
+            )
+        for field, value in (("tile_dim0", tile_dim0), ("tile_dim1", tile_dim1)):
+            if not 1 <= value <= 0xFFFF:
+                raise ValueError(f"{name} {field} must be in 1..65535 (got {value})")
+        if not 0 <= workgroup_mask <= 0xFFFF:
+            raise ValueError(
+                f"{name} workgroup_mask must be in 0..65535 (got {workgroup_mask})"
+            )
+        pad_enable = pad_interval is not None
+        if pad_enable and not 0 <= pad_interval <= 7:
+            raise ValueError(
+                f"{name} pad_interval must be in 0..7 (got {pad_interval})"
+            )
+        if not 0 <= pad_amount <= 0x7F or (pad_amount and not pad_enable):
+            raise ValueError(
+                f"{name} pad_amount must be in 0..127 and needs pad_interval (got {pad_amount})"
+            )
+
+        def word(value: int) -> Value:
+            # Descriptor words are raw bit patterns; print them as signed i32.
+            return self.const_i32(value - (1 << 32) if value & 0x80000000 else value)
+
+        c16 = self.const_i32(16)
+        # Group 0: count=1 | LDS byte address | global address lo | hi[24:0], type=2.
+        lds32 = lds_addr if lds_addr.type is I32 else self.trunc(lds_addr, I32)
+        gaddr = self.global_ptr_to_i64(global_ptr)
+        g_hi = self.trunc(self.lshr(gaddr, self.const_i64(32)), I32)
+        group0 = (
+            self.const_i32(1),
+            lds32,
+            self.trunc(gaddr, I32),
+            self.lor(self.land(g_hi, self.const_i32(0x1FFFFFF)), word(2 << 30)),
+        )
+        # Group 1: flags | tensor dims split 16/16 across words | tile dims |
+        # dim-0 stride = row_stride; dim-1 stride = 1, as CK Tile programs rank 2.
+        flags = (
+            workgroup_mask
+            | data_size << 16
+            | int(pad_enable) << 20
+            | (pad_interval or 0) << 22
+            | pad_amount << 25
+        )
+        group1 = (
+            word(flags),
+            self.shl(tensor_dim0, c16),
+            self.lor(self.lshr(tensor_dim0, c16), self.shl(tensor_dim1, c16)),
+            self.lor(self.lshr(tensor_dim1, c16), word(tile_dim0 << 16)),
+            self.const_i32(tile_dim1),
+            row_stride,
+            self.const_i32(1 << 16),
+            self.const_i32(0),
+        )
+        d0 = self.vec_pack([self.readfirstlane(v) for v in group0], I32)
+        d1 = self.vec_pack([self.readfirstlane(v) for v in group1], I32)
+        zero4 = self.zero_vec(I32, 4)
+        return d0, d1, zero4, zero4, self.zero_vec(I32, 8)
 
     def iglp_opt(self, level: int = 0) -> None:
         """`__builtin_amdgcn_iglp_opt(level)`.
@@ -4039,6 +4509,19 @@ class IRBuilder:
             [ptr, byte_off],
             [ptr.type],
             result_name_hint="gptr",
+        ).result
+
+    def global_ptr_to_i64(self, ptr: Value) -> Value:
+        """Return the 64-bit address of a global pointer (``ptrtoint``)."""
+        if not isinstance(ptr.type, PtrType) or ptr.type.space != "global":
+            raise TypeError(
+                f"global_ptr_to_i64 ptr must be a global pointer, got {ptr.type}"
+            )
+        return self._op(
+            "tile.global_ptr_to_i64",
+            [ptr],
+            [I64],
+            result_name_hint="gaddr",
         ).result
 
     def buffer_rsrc(self, ptr: Value, num_bytes: Value) -> Value:
@@ -4441,7 +4924,8 @@ class IRBuilder:
 
         Supports the full element-type catalog the LLVM lowering already
         emits: ``f16`` / ``bf16`` / ``i16`` (2-byte), ``f32`` / ``i32`` / ``tf32``
-        (4-byte), ``i8`` / ``fp8e4m3`` / ``bf8e5m2`` (1-byte). Lowers to
+        (4-byte), ``f64`` (8-byte, N in {1, 2}), ``i8`` / ``fp8e4m3`` /
+        ``bf8e5m2`` (1-byte). Lowers to
         a single ``store <N x elem>`` with the supplied address alignment.
         Payload width and address alignment are independent; target and
         alignment determine whether the transfer uses one machine instruction.
@@ -4467,11 +4951,15 @@ class IRBuilder:
             elem_bytes = 4
             if n == 16:
                 raise ValueError(f"global_store_vN n=16 not supported for {elem_name}")
+        elif elem_name == "f64":
+            elem_bytes = 8
+            if n > 2:
+                raise ValueError(f"global_store_vN n={n} not supported for {elem_name}")
         elif elem_name in ("i8", "fp8e4m3", "bf8e5m2"):
             elem_bytes = 1
         else:
             raise ValueError(
-                "global_store_vN supports f16/bf16/i16/f32/i32/tf32/i8/fp8e4m3/bf8e5m2, "
+                "global_store_vN supports f16/bf16/i16/f32/i32/tf32/f64/i8/fp8e4m3/bf8e5m2, "
                 f"got {elem_name}"
             )
         attrs = {
@@ -4775,6 +5263,11 @@ PURE_OP_NAMES = {
     "vector.insert",
     "gpu.thread_id",
     "gpu.block_id",
+    "gpu.cluster_id",
+    "gpu.cluster_workgroup_id",
+    "gpu.cluster_workgroup_max_id",
+    "gpu.cluster_workgroup_flat_id",
+    "gpu.cluster_workgroup_max_flat_id",
     "tile.readfirstlane",
     "tile.pin_sgpr",
     "tile.wave_all",
@@ -4783,6 +5276,7 @@ PURE_OP_NAMES = {
     "tile.sync_half_block",
     "tile.smem_addr_of",
     "tile.smem_ptr_add",
+    "tile.global_ptr_to_i64",
     "tile.lane_id",
     "tile.ds_bpermute",
     "tile.ds_read_tr16_b64",

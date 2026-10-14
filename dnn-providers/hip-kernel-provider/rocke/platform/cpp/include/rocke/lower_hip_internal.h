@@ -172,6 +172,10 @@ const char* rocke_h_vec_prefix_checked(rocke_h_lowerer_t* lw,
                                        bool full_map,
                                        const char* op_desc);
 
+/* Python _reject_f64(op, tname): raises ROCKE_ERR_NOTIMPL "<op> does not support
+ * f64" when `tname` is "f64", for an op that has no f64 lowering. */
+void rocke_h_reject_f64(rocke_h_lowerer_t* lw, const rocke_op_t* op, const char* tname);
+
 /* --------------------------------------------------------- literals / encode */
 
 /* Python _f32_literal(val): C++ float-literal text for a double, special-casing
@@ -180,6 +184,10 @@ const char* rocke_h_vec_prefix_checked(rocke_h_lowerer_t* lw,
  * byte-for-byte is a known port hazard (see notes / unported). Returns an
  * arena-owned string. */
 const char* rocke_h_f32_literal(rocke_h_lowerer_t* lw, double val);
+
+/* Python _f64_literal(val): C++ double-literal text for a double, special-casing
+ * nan / +/-inf like rocke_h_f32_literal. Returns an arena-owned string. */
+const char* rocke_h_f64_literal(rocke_h_lowerer_t* lw, double val);
 
 /* Python _encode_waitcnt: arch-aware s_waitcnt immediate. Selects the gfx9/10
  * split-VMCNT layout or the gfx11 contiguous layout off lw->arch. -1 on any
