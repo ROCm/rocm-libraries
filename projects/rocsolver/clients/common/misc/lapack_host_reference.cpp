@@ -1367,6 +1367,34 @@ void zungtr_(char* uplo,
              rocblas_double_complex* work,
              int* size_w,
              int* info);
+void sorghr_(int* n, int* ilo, int* ihi, float* A, int* lda, float* tau, float* work, int* lwork, int* info);
+void dorghr_(int* n,
+             int* ilo,
+             int* ihi,
+             double* A,
+             int* lda,
+             double* tau,
+             double* work,
+             int* lwork,
+             int* info);
+void cunghr_(int* n,
+             int* ilo,
+             int* ihi,
+             rocblas_float_complex* A,
+             int* lda,
+             rocblas_float_complex* tau,
+             rocblas_float_complex* work,
+             int* lwork,
+             int* info);
+void zunghr_(int* n,
+             int* ilo,
+             int* ihi,
+             rocblas_double_complex* A,
+             int* lda,
+             rocblas_double_complex* tau,
+             rocblas_double_complex* work,
+             int* lwork,
+             int* info);
 
 void sorm2r_(char* side,
              char* trans,
@@ -1917,6 +1945,175 @@ void zgehrd_(int* n,
              rocblas_double_complex* work,
              int* lwork,
              int* info);
+
+void sgebal_(char* job, int* n, float* A, int* lda, int* ilo, int* ihi, float* scale, int* info);
+void dgebal_(char* job, int* n, double* A, int* lda, int* ilo, int* ihi, double* scale, int* info);
+void cgebal_(char* job,
+             int* n,
+             rocblas_float_complex* A,
+             int* lda,
+             int* ilo,
+             int* ihi,
+             float* scale,
+             int* info);
+void zgebal_(char* job,
+             int* n,
+             rocblas_double_complex* A,
+             int* lda,
+             int* ilo,
+             int* ihi,
+             double* scale,
+             int* info);
+void sgebak_(char* job,
+             char* side,
+             int* n,
+             int* ilo,
+             int* ihi,
+             float* scale,
+             int* m,
+             float* V,
+             int* ldv,
+             int* info);
+void dgebak_(char* job,
+             char* side,
+             int* n,
+             int* ilo,
+             int* ihi,
+             double* scale,
+             int* m,
+             double* V,
+             int* ldv,
+             int* info);
+void cgebak_(char* job,
+             char* side,
+             int* n,
+             int* ilo,
+             int* ihi,
+             float* scale,
+             int* m,
+             rocblas_float_complex* V,
+             int* ldv,
+             int* info);
+void zgebak_(char* job,
+             char* side,
+             int* n,
+             int* ilo,
+             int* ihi,
+             double* scale,
+             int* m,
+             rocblas_double_complex* V,
+             int* ldv,
+             int* info);
+
+void chseqr_(char* job,
+             char* compz,
+             int* n,
+             int* ilo,
+             int* ihi,
+             rocblas_float_complex* H,
+             int* ldh,
+             rocblas_float_complex* W,
+             rocblas_float_complex* Z,
+             int* ldz,
+             rocblas_float_complex* work,
+             int* lwork,
+             int* info);
+void zhseqr_(char* job,
+             char* compz,
+             int* n,
+             int* ilo,
+             int* ihi,
+             rocblas_double_complex* H,
+             int* ldh,
+             rocblas_double_complex* W,
+             rocblas_double_complex* Z,
+             int* ldz,
+             rocblas_double_complex* work,
+             int* lwork,
+             int* info);
+
+void ctrexc_(char* compq,
+             int* n,
+             rocblas_float_complex* T,
+             int* ldt,
+             rocblas_float_complex* Q,
+             int* ldq,
+             int* ifst,
+             int* ilst,
+             int* info);
+void ztrexc_(char* compq,
+             int* n,
+             rocblas_double_complex* T,
+             int* ldt,
+             rocblas_double_complex* Q,
+             int* ldq,
+             int* ifst,
+             int* ilst,
+             int* info);
+
+void ctrevc3_(char* side,
+              char* howmny,
+              int* select,
+              int* n,
+              rocblas_float_complex* T,
+              int* ldt,
+              rocblas_float_complex* VL,
+              int* ldvl,
+              rocblas_float_complex* VR,
+              int* ldvr,
+              int* mm,
+              int* m,
+              rocblas_float_complex* work,
+              int* lwork,
+              float* rwork,
+              int* lrwork,
+              int* info);
+void ztrevc3_(char* side,
+              char* howmny,
+              int* select,
+              int* n,
+              rocblas_double_complex* T,
+              int* ldt,
+              rocblas_double_complex* VL,
+              int* ldvl,
+              rocblas_double_complex* VR,
+              int* ldvr,
+              int* mm,
+              int* m,
+              rocblas_double_complex* work,
+              int* lwork,
+              double* rwork,
+              int* lrwork,
+              int* info);
+
+void cgeev_(char* jobvl,
+            char* jobvr,
+            int* n,
+            rocblas_float_complex* A,
+            int* lda,
+            rocblas_float_complex* W,
+            rocblas_float_complex* VL,
+            int* ldvl,
+            rocblas_float_complex* VR,
+            int* ldvr,
+            rocblas_float_complex* work,
+            int* lwork,
+            float* rwork,
+            int* info);
+void zgeev_(char* jobvl,
+            char* jobvr,
+            int* n,
+            rocblas_double_complex* A,
+            int* lda,
+            rocblas_double_complex* W,
+            rocblas_double_complex* VL,
+            int* ldvl,
+            rocblas_double_complex* VR,
+            int* ldvr,
+            rocblas_double_complex* work,
+            int* lwork,
+            double* rwork,
+            int* info);
 
 void ssytrd_(char* uplo,
              int* n,
@@ -4664,6 +4861,63 @@ void cpu_orgtr_ungtr<rocblas_double_complex>(rocblas_fill uplo,
     zungtr_(&uploC, &n, A, &lda, Ipiv, work, &size_w, &info);
 }
 
+// orghr & unghr
+template <>
+void cpu_orghr_unghr<float>(rocblas_int n,
+                            rocblas_int ilo,
+                            rocblas_int ihi,
+                            float* A,
+                            rocblas_int lda,
+                            float* tau,
+                            float* work,
+                            rocblas_int size_w)
+{
+    int info;
+    sorghr_(&n, &ilo, &ihi, A, &lda, tau, work, &size_w, &info);
+}
+
+template <>
+void cpu_orghr_unghr<double>(rocblas_int n,
+                             rocblas_int ilo,
+                             rocblas_int ihi,
+                             double* A,
+                             rocblas_int lda,
+                             double* tau,
+                             double* work,
+                             rocblas_int size_w)
+{
+    int info;
+    dorghr_(&n, &ilo, &ihi, A, &lda, tau, work, &size_w, &info);
+}
+
+template <>
+void cpu_orghr_unghr<rocblas_float_complex>(rocblas_int n,
+                                            rocblas_int ilo,
+                                            rocblas_int ihi,
+                                            rocblas_float_complex* A,
+                                            rocblas_int lda,
+                                            rocblas_float_complex* tau,
+                                            rocblas_float_complex* work,
+                                            rocblas_int size_w)
+{
+    int info;
+    cunghr_(&n, &ilo, &ihi, A, &lda, tau, work, &size_w, &info);
+}
+
+template <>
+void cpu_orghr_unghr<rocblas_double_complex>(rocblas_int n,
+                                             rocblas_int ilo,
+                                             rocblas_int ihi,
+                                             rocblas_double_complex* A,
+                                             rocblas_int lda,
+                                             rocblas_double_complex* tau,
+                                             rocblas_double_complex* work,
+                                             rocblas_int size_w)
+{
+    int info;
+    zunghr_(&n, &ilo, &ihi, A, &lda, tau, work, &size_w, &info);
+}
+
 // ormqr & unmqr
 template <>
 void cpu_ormqr_unmqr<float>(rocblas_side side,
@@ -7320,6 +7574,332 @@ void cpu_gehrd<rocblas_double_complex>(rocblas_int n,
 {
     int info;
     zgehrd_(&n, &ilo, &ihi, A, &lda, ipiv, work, &lwork, &info);
+}
+
+// gebal
+template <>
+void cpu_gebal<float, float>(rocsolver_balance job,
+                             rocblas_int n,
+                             float* A,
+                             rocblas_int lda,
+                             rocblas_int* ilo,
+                             rocblas_int* ihi,
+                             float* scale,
+                             rocblas_int* info)
+{
+    char jobC = rocsolver2char_balance(job);
+    sgebal_(&jobC, &n, A, &lda, ilo, ihi, scale, info);
+}
+
+template <>
+void cpu_gebal<double, double>(rocsolver_balance job,
+                               rocblas_int n,
+                               double* A,
+                               rocblas_int lda,
+                               rocblas_int* ilo,
+                               rocblas_int* ihi,
+                               double* scale,
+                               rocblas_int* info)
+{
+    char jobC = rocsolver2char_balance(job);
+    dgebal_(&jobC, &n, A, &lda, ilo, ihi, scale, info);
+}
+
+template <>
+void cpu_gebal<rocblas_float_complex, float>(rocsolver_balance job,
+                                             rocblas_int n,
+                                             rocblas_float_complex* A,
+                                             rocblas_int lda,
+                                             rocblas_int* ilo,
+                                             rocblas_int* ihi,
+                                             float* scale,
+                                             rocblas_int* info)
+{
+    char jobC = rocsolver2char_balance(job);
+    cgebal_(&jobC, &n, A, &lda, ilo, ihi, scale, info);
+}
+
+template <>
+void cpu_gebal<rocblas_double_complex, double>(rocsolver_balance job,
+                                               rocblas_int n,
+                                               rocblas_double_complex* A,
+                                               rocblas_int lda,
+                                               rocblas_int* ilo,
+                                               rocblas_int* ihi,
+                                               double* scale,
+                                               rocblas_int* info)
+{
+    char jobC = rocsolver2char_balance(job);
+    zgebal_(&jobC, &n, A, &lda, ilo, ihi, scale, info);
+}
+
+// gebak
+template <>
+void cpu_gebak<float, float>(rocsolver_balance job,
+                             rocblas_side side,
+                             rocblas_int n,
+                             rocblas_int ilo,
+                             rocblas_int ihi,
+                             float* scale,
+                             rocblas_int m,
+                             float* V,
+                             rocblas_int ldv,
+                             rocblas_int* info)
+{
+    char jobC = rocsolver2char_balance(job);
+    char sideC = rocblas2char_side(side);
+    sgebak_(&jobC, &sideC, &n, &ilo, &ihi, scale, &m, V, &ldv, info);
+}
+
+template <>
+void cpu_gebak<double, double>(rocsolver_balance job,
+                               rocblas_side side,
+                               rocblas_int n,
+                               rocblas_int ilo,
+                               rocblas_int ihi,
+                               double* scale,
+                               rocblas_int m,
+                               double* V,
+                               rocblas_int ldv,
+                               rocblas_int* info)
+{
+    char jobC = rocsolver2char_balance(job);
+    char sideC = rocblas2char_side(side);
+    dgebak_(&jobC, &sideC, &n, &ilo, &ihi, scale, &m, V, &ldv, info);
+}
+
+template <>
+void cpu_gebak<rocblas_float_complex, float>(rocsolver_balance job,
+                                             rocblas_side side,
+                                             rocblas_int n,
+                                             rocblas_int ilo,
+                                             rocblas_int ihi,
+                                             float* scale,
+                                             rocblas_int m,
+                                             rocblas_float_complex* V,
+                                             rocblas_int ldv,
+                                             rocblas_int* info)
+{
+    char jobC = rocsolver2char_balance(job);
+    char sideC = rocblas2char_side(side);
+    cgebak_(&jobC, &sideC, &n, &ilo, &ihi, scale, &m, V, &ldv, info);
+}
+
+template <>
+void cpu_gebak<rocblas_double_complex, double>(rocsolver_balance job,
+                                               rocblas_side side,
+                                               rocblas_int n,
+                                               rocblas_int ilo,
+                                               rocblas_int ihi,
+                                               double* scale,
+                                               rocblas_int m,
+                                               rocblas_double_complex* V,
+                                               rocblas_int ldv,
+                                               rocblas_int* info)
+{
+    char jobC = rocsolver2char_balance(job);
+    char sideC = rocblas2char_side(side);
+    zgebak_(&jobC, &sideC, &n, &ilo, &ihi, scale, &m, V, &ldv, info);
+}
+
+// hseqr
+template <>
+void cpu_hseqr<rocblas_float_complex>(rocsolver_schur_job job,
+                                      rocsolver_schur_vectors compz,
+                                      rocblas_int n,
+                                      rocblas_int ilo,
+                                      rocblas_int ihi,
+                                      rocblas_float_complex* H,
+                                      rocblas_int ldh,
+                                      rocblas_float_complex* W,
+                                      rocblas_float_complex* Z,
+                                      rocblas_int ldz,
+                                      rocblas_float_complex* work,
+                                      rocblas_int lwork,
+                                      rocblas_int* info)
+{
+    char jobC = rocsolver2char_schur_job(job);
+    char compzC = rocsolver2char_schur_vectors(compz);
+    chseqr_(&jobC, &compzC, &n, &ilo, &ihi, H, &ldh, W, Z, &ldz, work, &lwork, info);
+}
+
+template <>
+void cpu_hseqr<rocblas_double_complex>(rocsolver_schur_job job,
+                                       rocsolver_schur_vectors compz,
+                                       rocblas_int n,
+                                       rocblas_int ilo,
+                                       rocblas_int ihi,
+                                       rocblas_double_complex* H,
+                                       rocblas_int ldh,
+                                       rocblas_double_complex* W,
+                                       rocblas_double_complex* Z,
+                                       rocblas_int ldz,
+                                       rocblas_double_complex* work,
+                                       rocblas_int lwork,
+                                       rocblas_int* info)
+{
+    char jobC = rocsolver2char_schur_job(job);
+    char compzC = rocsolver2char_schur_vectors(compz);
+    zhseqr_(&jobC, &compzC, &n, &ilo, &ihi, H, &ldh, W, Z, &ldz, work, &lwork, info);
+}
+
+// trexc
+template <>
+void cpu_trexc<rocblas_float_complex>(rocsolver_schur_vectors compq,
+                                      rocblas_int n,
+                                      rocblas_float_complex* T,
+                                      rocblas_int ldt,
+                                      rocblas_float_complex* Q,
+                                      rocblas_int ldq,
+                                      rocblas_int ifst,
+                                      rocblas_int ilst,
+                                      rocblas_int* info)
+{
+    char compqC = rocsolver2char_schur_vectors(compq);
+    ctrexc_(&compqC, &n, T, &ldt, Q, &ldq, &ifst, &ilst, info);
+}
+
+template <>
+void cpu_trexc<rocblas_double_complex>(rocsolver_schur_vectors compq,
+                                       rocblas_int n,
+                                       rocblas_double_complex* T,
+                                       rocblas_int ldt,
+                                       rocblas_double_complex* Q,
+                                       rocblas_int ldq,
+                                       rocblas_int ifst,
+                                       rocblas_int ilst,
+                                       rocblas_int* info)
+{
+    char compqC = rocsolver2char_schur_vectors(compq);
+    ztrexc_(&compqC, &n, T, &ldt, Q, &ldq, &ifst, &ilst, info);
+}
+
+// trevc3
+template <>
+void cpu_trevc3<rocblas_float_complex>(rocblas_side side,
+                                       rocsolver_eigenvectors howmny,
+                                       rocblas_int n,
+                                       rocblas_float_complex* T,
+                                       rocblas_int ldt,
+                                       rocblas_float_complex* VL,
+                                       rocblas_int ldvl,
+                                       rocblas_float_complex* VR,
+                                       rocblas_int ldvr,
+                                       rocblas_int* info)
+{
+    char sideC = rocblas2char_side(side);
+    char howmnyC = rocsolver2char_eigenvectors(howmny);
+    int select = 0;
+    int mm = n, m;
+
+    // workspace query (optimal size for the blocked back-transformation)
+    rocblas_float_complex wquery;
+    float rquery;
+    int lwork = -1, lrwork = -1;
+    ctrevc3_(&sideC, &howmnyC, &select, &n, T, &ldt, VL, &ldvl, VR, &ldvr, &mm, &m, &wquery, &lwork,
+             &rquery, &lrwork, info);
+
+    lwork = std::max(int(std::real(wquery)), 2 * n);
+    lwork = std::max(lwork, 1);
+    lrwork = std::max(n, 1);
+    std::vector<rocblas_float_complex> work(lwork);
+    std::vector<float> rwork(lrwork);
+    ctrevc3_(&sideC, &howmnyC, &select, &n, T, &ldt, VL, &ldvl, VR, &ldvr, &mm, &m, work.data(),
+             &lwork, rwork.data(), &lrwork, info);
+}
+
+template <>
+void cpu_trevc3<rocblas_double_complex>(rocblas_side side,
+                                        rocsolver_eigenvectors howmny,
+                                        rocblas_int n,
+                                        rocblas_double_complex* T,
+                                        rocblas_int ldt,
+                                        rocblas_double_complex* VL,
+                                        rocblas_int ldvl,
+                                        rocblas_double_complex* VR,
+                                        rocblas_int ldvr,
+                                        rocblas_int* info)
+{
+    char sideC = rocblas2char_side(side);
+    char howmnyC = rocsolver2char_eigenvectors(howmny);
+    int select = 0;
+    int mm = n, m;
+
+    // workspace query (optimal size for the blocked back-transformation)
+    rocblas_double_complex wquery;
+    double rquery;
+    int lwork = -1, lrwork = -1;
+    ztrevc3_(&sideC, &howmnyC, &select, &n, T, &ldt, VL, &ldvl, VR, &ldvr, &mm, &m, &wquery, &lwork,
+             &rquery, &lrwork, info);
+
+    lwork = std::max(int(std::real(wquery)), 2 * n);
+    lwork = std::max(lwork, 1);
+    lrwork = std::max(n, 1);
+    std::vector<rocblas_double_complex> work(lwork);
+    std::vector<double> rwork(lrwork);
+    ztrevc3_(&sideC, &howmnyC, &select, &n, T, &ldt, VL, &ldvl, VR, &ldvr, &mm, &m, work.data(),
+             &lwork, rwork.data(), &lrwork, info);
+}
+
+// geev
+template <>
+void cpu_geev<rocblas_float_complex>(rocblas_evect jobvl,
+                                     rocblas_evect jobvr,
+                                     rocblas_int n,
+                                     rocblas_float_complex* A,
+                                     rocblas_int lda,
+                                     rocblas_float_complex* W,
+                                     rocblas_float_complex* VL,
+                                     rocblas_int ldvl,
+                                     rocblas_float_complex* VR,
+                                     rocblas_int ldvr,
+                                     rocblas_int* info)
+{
+    char jobvlC = rocblas2char_evect(jobvl);
+    char jobvrC = rocblas2char_evect(jobvr);
+
+    // workspace query
+    rocblas_float_complex wquery;
+    std::vector<float> rwork(std::max(2 * n, 1));
+    int lwork = -1;
+    cgeev_(&jobvlC, &jobvrC, &n, A, &lda, W, VL, &ldvl, VR, &ldvr, &wquery, &lwork, rwork.data(),
+           info);
+
+    lwork = std::max(int(std::real(wquery)), 2 * n);
+    lwork = std::max(lwork, 1);
+    std::vector<rocblas_float_complex> work(lwork);
+    cgeev_(&jobvlC, &jobvrC, &n, A, &lda, W, VL, &ldvl, VR, &ldvr, work.data(), &lwork,
+           rwork.data(), info);
+}
+
+template <>
+void cpu_geev<rocblas_double_complex>(rocblas_evect jobvl,
+                                      rocblas_evect jobvr,
+                                      rocblas_int n,
+                                      rocblas_double_complex* A,
+                                      rocblas_int lda,
+                                      rocblas_double_complex* W,
+                                      rocblas_double_complex* VL,
+                                      rocblas_int ldvl,
+                                      rocblas_double_complex* VR,
+                                      rocblas_int ldvr,
+                                      rocblas_int* info)
+{
+    char jobvlC = rocblas2char_evect(jobvl);
+    char jobvrC = rocblas2char_evect(jobvr);
+
+    // workspace query
+    rocblas_double_complex wquery;
+    std::vector<double> rwork(std::max(2 * n, 1));
+    int lwork = -1;
+    zgeev_(&jobvlC, &jobvrC, &n, A, &lda, W, VL, &ldvl, VR, &ldvr, &wquery, &lwork, rwork.data(),
+           info);
+
+    lwork = std::max(int(std::real(wquery)), 2 * n);
+    lwork = std::max(lwork, 1);
+    std::vector<rocblas_double_complex> work(lwork);
+    zgeev_(&jobvlC, &jobvrC, &n, A, &lda, W, VL, &ldvl, VR, &ldvr, work.data(), &lwork,
+           rwork.data(), info);
 }
 
 // sbev & hbev
