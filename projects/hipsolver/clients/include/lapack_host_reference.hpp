@@ -241,6 +241,9 @@ template <typename T>
 void cpu_getrf(int m, int n, T* A, int lda, int* ipiv, int* info);
 
 template <typename T>
+void cpu_getri(int n, T* A, int lda, int* ipiv, T* work, int lwork, int* info);
+
+template <typename T>
 void cpu_getrs(hipsolverOperation_t trans,
                int                  n,
                int                  nrhs,
