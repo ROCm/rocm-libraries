@@ -3543,5 +3543,77 @@ class TestMubufForwarding(AdaptorTestCase):
         self.assertEqual(kwargs["lds"], True)
 
 
+class TestSdwaVop3Forwarding(AdaptorTestCase):
+    """Classes that accept sdwa or vop3 pass them through the modifier helper."""
+
+    def _lower(self, inst, factory_name):
+        logical = unittest.mock.Mock()
+        fake_st = unittest.mock.Mock()
+        setattr(fake_st, factory_name, unittest.mock.Mock(return_value=logical))
+        fake_st.Register = lambda *args, **kwargs: args[0] if args else None
+        with unittest.mock.patch.dict(sys.modules, {"stinkytofu": fake_st}), \
+             unittest.mock.patch(
+                 "rocisa_stinkytofu_adaptor.instruction._to_stinky_register",
+                 side_effect=lambda arg: arg,
+             ):
+            out = inst.to_stinky_logical()
+        self.assertIs(out, logical)
+        return logical
+
+    def test_sdwa_reaches_classes_that_only_stored_it(self):
+        from rocisa_stinkytofu_adaptor.container import SDWAModifiers
+        from rocisa_stinkytofu_adaptor.enum import SelectBit, UnusedBit
+        from rocisa_stinkytofu_adaptor.instruction import (
+            VCndMaskB16, VMovRelsD2B32, VPrngB32,
+        )
+
+        sdwa = SDWAModifiers(
+            dst_sel=SelectBit.WORD_0,
+            dst_unused=UnusedBit.UNUSED_PAD,
+            src0_sel=SelectBit.BYTE_0,
+            src1_sel=SelectBit.WORD_1,
+        )
+        expected = dict(
+            dst_sel=int(SelectBit.WORD_0),
+            dst_unused=int(UnusedBit.UNUSED_PAD),
+            src0_sel=int(SelectBit.BYTE_0),
+            src1_sel=int(SelectBit.WORD_1),
+        )
+        cases = (
+            (VMovB32(vgpr(0), vgpr(1), sdwa=sdwa), "VMovB32"),
+            (VMovRelsD2B32(vgpr(0), vgpr(1), sdwa=sdwa), "VMovRelsD2B32"),
+            (VPrngB32(vgpr(0), vgpr(1), sdwa=sdwa), "VPrngB32"),
+            (VCndMaskB16(vgpr(0), vgpr(1), vgpr(2), vgpr(3), sdwa=sdwa), "VCndMaskB16"),
+        )
+        for inst, name in cases:
+            logical = self._lower(inst, name)
+            logical.set_sdwa.assert_called_once_with(**expected)
+            logical.set_vop3.assert_not_called()
+
+    def test_absent_sdwa_is_left_alone(self):
+        logical = self._lower(VMovB32(vgpr(0), vgpr(1)), "VMovB32")
+        logical.set_sdwa.assert_not_called()
+
+    def test_vadd_forwards_vop3_and_sdwa(self):
+        from rocisa_stinkytofu_adaptor.container import SDWAModifiers, VOP3PModifiers
+        from rocisa_stinkytofu_adaptor.enum import SelectBit
+
+        inst = VAddF32(
+            vgpr(0), vgpr(1), vgpr(2),
+            sdwa=SDWAModifiers(src0_sel=SelectBit.DWORD),
+            vop3=VOP3PModifiers([0, 1], [1, 0], [2]),
+        )
+        logical = self._lower(inst, "VAddF32")
+        logical.set_sdwa.assert_called_once_with(
+            dst_sel=int(SelectBit.SEL_NONE),
+            dst_unused=0,
+            src0_sel=int(SelectBit.DWORD),
+            src1_sel=int(SelectBit.SEL_NONE),
+        )
+        logical.set_vop3.assert_called_once_with(
+            op_sel=[0, 1], op_sel_hi=[1, 0], byte_sel=[2],
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
