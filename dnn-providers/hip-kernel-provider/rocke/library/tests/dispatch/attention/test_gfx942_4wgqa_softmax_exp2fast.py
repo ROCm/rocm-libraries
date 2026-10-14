@@ -140,7 +140,14 @@ def _scratch_bytes(dtype: str) -> int:
     finally:
         if path and os.path.exists(path):
             os.unlink(path)
-    return int(res.scratch_bytes or 0)
+    # A kernel with no scratch still reports private_segment_fixed_size: 0, so
+    # None only means the notes were not parsed -- never read it as 0 B.
+    if res.scratch_bytes is None:
+        raise AssertionError(
+            "private_segment_fixed_size not found in the HSACO notes -- "
+            "readelf output format changed? (parse_resources)"
+        )
+    return res.scratch_bytes
 
 
 class TestGfx942_4wgqaSoftmaxExp2Fast(unittest.TestCase):
