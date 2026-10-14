@@ -59,6 +59,10 @@ def _is_use_cache_file(relpath):
     """
     parts = relpath.replace(os.sep, "/").split("/")
 
+    # TensileCreateLibrary writes the runnable library directly under output/.
+    if len(parts) >= 2 and parts[0] == "library":
+        return parts[-1].endswith((".co", ".hsaco", ".dat", ".dat.zlib", ".yaml"))
+
     if parts[-1] == "cache.yaml" and "caches" in parts:
         return True
 

@@ -1,5 +1,10 @@
 # hipblaslt-bench test
 
+For one regular GEMM per solution index, see the
+[TensileLite workload generator](../../tensilelite/tensilelite/Utilities/regular_gemm.md).
+In fixed-count mode, `--iters 0` disables timed launches. With `--cold_iters 0`
+and numerical validation enabled, the client performs one validation execution.
+
 ```
 # Go to hipBLASLt build directory
 cd hipBLASLt; cd build/release
