@@ -47,6 +47,15 @@ if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
     endif()
 endif()
 
+# Set explicitly rather than relying on hipBLASLt's cache variable, which is only
+# visible when hipBLASLt is pulled in via add_subdirectory(). Without this,
+# binaries built against a staged hipBLASLt package lose $ORIGIN/../llvm/lib and
+# fail to find libomp.so at startup.
+set(CMAKE_INSTALL_RPATH "$ORIGIN/../lib:$ORIGIN/../llvm/lib" CACHE STRING "Install RPATH")
+set(CMAKE_INSTALL_RPATH_USE_LINK_PATH FALSE CACHE BOOL "Use link path for RPATH")
+mark_as_advanced(CMAKE_INSTALL_RPATH)
+mark_as_advanced(CMAKE_INSTALL_RPATH_USE_LINK_PATH)
+
 # --- Build options and validation ---
 
 option(HIPSPARSELT_ENABLE_CUDA "Build hipSPARSELt with CUDA backend." OFF)
