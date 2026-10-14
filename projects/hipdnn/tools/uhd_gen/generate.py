@@ -420,13 +420,21 @@ def dataset_measurements(directory: Path, chosen: list, sources: list) -> dict:
 
 def _training_rows(directory: Path, chosen: list, sources: list, only, purposes):
     """source -> rows training reads, the usable repeats set aside, and the rows removed per
-    reason: from `training.parquet` when it was built from exactly `chosen`, else computed
-    from every stored row the same way (`best_per_shape`)."""
-    from .dataset.store import measurements, read_manifest, read_training_rows
+    reason: from `training.parquet` when it is the table the manifest describes and was built
+    from exactly `chosen`, else computed from every stored row the same way
+    (`best_per_shape`)."""
+    from .dataset.store import (
+        measurements,
+        read_manifest,
+        read_training_rows,
+        training_view_matches,
+    )
 
-    view = read_manifest(directory).get("training_view") or {}
+    manifest = read_manifest(directory)
+    view = manifest.get("training_view") or {}
     current = (
         only is None
+        and training_view_matches(directory, manifest)
         and tuple(purposes) == ("training",)
         and view.get("contributions") == [c["contribution_id"] for c in chosen]
         and all(str(source) in view.get("sources", {}) for source in sources)

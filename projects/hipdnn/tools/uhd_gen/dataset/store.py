@@ -196,11 +196,28 @@ def _training_view(
     }
 
 
+def _file_digest(path: pathlib.Path) -> str | None:
+    if not path.is_file():
+        return None
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
 def _write_training_view(
     directory: pathlib.Path, manifest: dict[str, Any], view: pd.DataFrame, summary
 ) -> None:
-    _write_data(directory / TRAINING_FILE, view)
-    manifest["training_view"] = summary
+    path = directory / TRAINING_FILE
+    _write_data(path, view)
+    # The manifest is written after the table, so a write interrupted between the two leaves
+    # a table the manifest does not describe; the digest is how a reader tells.
+    manifest["training_view"] = {**summary, "sha256": _file_digest(path)}
+
+
+def training_view_matches(directory: pathlib.Path, manifest: dict[str, Any]) -> bool:
+    """Whether `training.parquet` is the table the manifest's `training_view` describes."""
+    view = manifest.get("training_view") or {}
+    return "sha256" in view and view["sha256"] == _file_digest(
+        pathlib.Path(directory) / TRAINING_FILE
+    )
 
 
 # ---------------------------------------------------------------------------------------------

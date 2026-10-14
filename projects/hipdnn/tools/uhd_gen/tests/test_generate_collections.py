@@ -886,3 +886,61 @@ def test_training_reads_the_stored_table_and_a_subset_computes_the_same(tmp_path
     assert stored["rows"] == computed["rows"]
     assert [r["avgTimeMs"] for r in stored["rows"][None]] == [1.0, 2.0]
     assert stored["superseded_rows"] == computed["superseded_rows"] == 2
+
+
+def test_a_training_table_the_manifest_does_not_describe_is_not_read(tmp_path):
+    """A write interrupted after training.parquet but before the manifest leaves a table the
+    manifest does not describe; training recomputes rather than trusting it."""
+    import pandas as pd
+    from uhd_gen import generate
+    from uhd_gen.dataset import store
+
+    directory = tmp_path / "a"
+    directory.mkdir()
+    rows = [
+        {
+            "benchmark": f"g{index}",
+            "device": "d0",
+            "arch": "gfx942",
+            "kernel": "k0",
+            "knob_settings": "{}",
+            "avgTimeMs": 1.0 + index,
+        }
+        for index in range(3)
+    ]
+    (directory / "corpus.json").write_text(json.dumps(rows))
+    (directory / store.COLLECTION_MANIFEST).write_text(
+        json.dumps(
+            {
+                "schema": store.COLLECTION_SCHEMA,
+                "collected_at": "2026-10-01",
+                "role": "sort_kernel_catalog",
+                "engine": "e",
+                "engine_id": 7,
+                "engine_name": None,
+                "sources": [None],
+                "trained_against": {"ued": {"id": "u"}},
+                "selector_revision": None,
+                "arches": ["gfx942"],
+                "devices": ["d0"],
+                "graph_count": 3,
+                "row_counts": {"None": 3},
+                "published": [],
+                "kernel_fields": [],
+                "knob_encodings": {},
+                "shipping_knobs": [],
+                "collection_knobs": [],
+                "graphs": [],
+                "commands": [],
+                "failed_graphs": [],
+            }
+        )
+    )
+    dataset = tmp_path / "ds"
+    store.add(dataset, *store.from_collection(directory))
+    # What an interrupted later write leaves: a table holding a shape fewer.
+    table = dataset / store.TRAINING_FILE
+    pd.read_parquet(table).iloc[1:].to_parquet(table, index=False)
+
+    loaded = generate.load_dataset(dataset, role="sort_kernel_catalog", sources=[None])
+    assert sorted(r["benchmark"] for r in loaded["rows"][None]) == ["g0", "g1", "g2"]
