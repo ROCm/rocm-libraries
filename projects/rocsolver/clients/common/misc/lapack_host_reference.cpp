@@ -162,6 +162,45 @@ void zgecon_(char* norm,
              double* rwork,
              int* info);
 
+void ssycon_(char* uplo,
+             int* n,
+             float* A,
+             int* lda,
+             int* ipiv,
+             float* anorm,
+             float* rcond,
+             float* work,
+             int* iwork,
+             int* info);
+void dsycon_(char* uplo,
+             int* n,
+             double* A,
+             int* lda,
+             int* ipiv,
+             double* anorm,
+             double* rcond,
+             double* work,
+             int* iwork,
+             int* info);
+void csycon_(char* uplo,
+             int* n,
+             rocblas_float_complex* A,
+             int* lda,
+             int* ipiv,
+             float* anorm,
+             float* rcond,
+             rocblas_float_complex* work,
+             int* info);
+void zsycon_(char* uplo,
+             int* n,
+             rocblas_double_complex* A,
+             int* lda,
+             int* ipiv,
+             double* anorm,
+             double* rcond,
+             rocblas_double_complex* work,
+             int* info);
+
 void saxpy_(int* n, float* alpha, float* x, int* incx, float* y, int* incy);
 void daxpy_(int* n, double* alpha, double* x, int* incx, double* y, int* incy);
 void caxpy_(int* n,
@@ -530,6 +569,51 @@ void zposv_(char* uplo,
             int* lda,
             rocblas_double_complex* B,
             int* ldb,
+            int* info);
+
+void ssysv_(char* uplo,
+            int* n,
+            int* nrhs,
+            float* A,
+            int* lda,
+            int* ipiv,
+            float* B,
+            int* ldb,
+            float* work,
+            int* lwork,
+            int* info);
+void dsysv_(char* uplo,
+            int* n,
+            int* nrhs,
+            double* A,
+            int* lda,
+            int* ipiv,
+            double* B,
+            int* ldb,
+            double* work,
+            int* lwork,
+            int* info);
+void csysv_(char* uplo,
+            int* n,
+            int* nrhs,
+            rocblas_float_complex* A,
+            int* lda,
+            int* ipiv,
+            rocblas_float_complex* B,
+            int* ldb,
+            rocblas_float_complex* work,
+            int* lwork,
+            int* info);
+void zsysv_(char* uplo,
+            int* n,
+            int* nrhs,
+            rocblas_double_complex* A,
+            int* lda,
+            int* ipiv,
+            rocblas_double_complex* B,
+            int* ldb,
+            rocblas_double_complex* work,
+            int* lwork,
             int* info);
 
 void spotri_(char* uplo, int* n, float* A, int* lda, int* info);
@@ -3212,6 +3296,76 @@ double cpu_gecon<rocblas_double_complex, double>(char norm,
     return rcond;
 }
 
+// sycon
+
+template <>
+float cpu_sycon<float, float>(rocblas_fill uplo,
+                              rocblas_int n,
+                              float* A,
+                              rocblas_int lda,
+                              rocblas_int* ipiv,
+                              float anorm,
+                              float* work,
+                              rocblas_int* iwork)
+{
+    float rcond;
+    rocblas_int info;
+    char uploC = rocblas2char_fill(uplo);
+    ssycon_(&uploC, &n, A, &lda, ipiv, &anorm, &rcond, work, iwork, &info);
+    return rcond;
+}
+
+template <>
+double cpu_sycon<double, double>(rocblas_fill uplo,
+                                 rocblas_int n,
+                                 double* A,
+                                 rocblas_int lda,
+                                 rocblas_int* ipiv,
+                                 double anorm,
+                                 double* work,
+                                 rocblas_int* iwork)
+{
+    double rcond;
+    rocblas_int info;
+    char uploC = rocblas2char_fill(uplo);
+    dsycon_(&uploC, &n, A, &lda, ipiv, &anorm, &rcond, work, iwork, &info);
+    return rcond;
+}
+
+template <>
+float cpu_sycon<rocblas_float_complex, float>(rocblas_fill uplo,
+                                              rocblas_int n,
+                                              rocblas_float_complex* A,
+                                              rocblas_int lda,
+                                              rocblas_int* ipiv,
+                                              float anorm,
+                                              rocblas_float_complex* work,
+                                              rocblas_int* iwork)
+{
+    float rcond;
+    rocblas_int info;
+    char uploC = rocblas2char_fill(uplo);
+    csycon_(&uploC, &n, A, &lda, ipiv, &anorm, &rcond, work, &info);
+    return rcond;
+}
+
+template <>
+double cpu_sycon<rocblas_double_complex, double>(rocblas_fill uplo,
+                                                 rocblas_int n,
+                                                 rocblas_double_complex* A,
+                                                 rocblas_int lda,
+                                                 rocblas_int* ipiv,
+                                                 double anorm,
+                                                 rocblas_double_complex* work,
+                                                 rocblas_int* iwork)
+{
+    double rcond;
+    rocblas_int info;
+    char uploC = rocblas2char_fill(uplo);
+    zsycon_(&uploC, &n, A, &lda, ipiv, &anorm, &rcond, work, &info);
+    return rcond;
+}
+
 // axpy
 
 template <>
@@ -3287,6 +3441,32 @@ void cpu_lacpy<rocblas_double_complex>(rocblas_fill uplo,
 {
     char uploC = rocblas2char_fill(uplo);
     zlacpy_(&uploC, &m, &n, A, &lda, B, &ldb);
+}
+
+template <>
+void cpu_lacpy<float>(rocblas_fill uplo,
+                      rocblas_int m,
+                      rocblas_int n,
+                      float* A,
+                      rocblas_int lda,
+                      float* B,
+                      rocblas_int ldb)
+{
+    char uploC = rocblas2char_fill(uplo);
+    slacpy_(&uploC, &m, &n, A, &lda, B, &ldb);
+}
+
+template <>
+void cpu_lacpy<double>(rocblas_fill uplo,
+                       rocblas_int m,
+                       rocblas_int n,
+                       double* A,
+                       rocblas_int lda,
+                       double* B,
+                       rocblas_int ldb)
+{
+    char uploC = rocblas2char_fill(uplo);
+    dlacpy_(&uploC, &m, &n, A, &lda, B, &ldb);
 }
 
 // laswp
@@ -6065,6 +6245,75 @@ void cpu_posv(rocblas_fill uplo,
 {
     char uploC = rocblas2char_fill(uplo);
     zposv_(&uploC, &n, &nrhs, A, &lda, B, &ldb, info);
+}
+
+// sysv
+template <>
+void cpu_sysv(rocblas_fill uplo,
+              rocblas_int n,
+              rocblas_int nrhs,
+              float* A,
+              rocblas_int lda,
+              rocblas_int* ipiv,
+              float* B,
+              rocblas_int ldb,
+              float* work,
+              rocblas_int lwork,
+              rocblas_int* info)
+{
+    char uploC = rocblas2char_fill(uplo);
+    ssysv_(&uploC, &n, &nrhs, A, &lda, ipiv, B, &ldb, work, &lwork, info);
+}
+
+template <>
+void cpu_sysv(rocblas_fill uplo,
+              rocblas_int n,
+              rocblas_int nrhs,
+              double* A,
+              rocblas_int lda,
+              rocblas_int* ipiv,
+              double* B,
+              rocblas_int ldb,
+              double* work,
+              rocblas_int lwork,
+              rocblas_int* info)
+{
+    char uploC = rocblas2char_fill(uplo);
+    dsysv_(&uploC, &n, &nrhs, A, &lda, ipiv, B, &ldb, work, &lwork, info);
+}
+
+template <>
+void cpu_sysv(rocblas_fill uplo,
+              rocblas_int n,
+              rocblas_int nrhs,
+              rocblas_float_complex* A,
+              rocblas_int lda,
+              rocblas_int* ipiv,
+              rocblas_float_complex* B,
+              rocblas_int ldb,
+              rocblas_float_complex* work,
+              rocblas_int lwork,
+              rocblas_int* info)
+{
+    char uploC = rocblas2char_fill(uplo);
+    csysv_(&uploC, &n, &nrhs, A, &lda, ipiv, B, &ldb, work, &lwork, info);
+}
+
+template <>
+void cpu_sysv(rocblas_fill uplo,
+              rocblas_int n,
+              rocblas_int nrhs,
+              rocblas_double_complex* A,
+              rocblas_int lda,
+              rocblas_int* ipiv,
+              rocblas_double_complex* B,
+              rocblas_int ldb,
+              rocblas_double_complex* work,
+              rocblas_int lwork,
+              rocblas_int* info)
+{
+    char uploC = rocblas2char_fill(uplo);
+    zsysv_(&uploC, &n, &nrhs, A, &lda, ipiv, B, &ldb, work, &lwork, info);
 }
 
 // potri

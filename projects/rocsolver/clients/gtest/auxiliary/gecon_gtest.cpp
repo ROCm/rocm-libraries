@@ -37,7 +37,8 @@ using namespace std;
 template <typename I>
 using gecon_tuple = std::tuple<vector<I>, char>;
 
-// each size_range vector is a {N, lda}
+// each size_range vector is a {N, lda}, or {N, lda, 1} to run with the handle in device
+// pointer mode
 // case when N == 0 also executes the bad arguments test
 
 const vector<char> norm_range = {'1', 'I'};
@@ -52,7 +53,9 @@ const vector<vector<int>> matrix_size_range = {
     // normal (valid) samples
     {12, 12},
     {20, 25},
-    {33, 50}};
+    {33, 50},
+    // device pointer mode (with n large enough for rocBLAS to be called)
+    {500, 500, 1}};
 
 const vector<vector<int64_t>> matrix_size_range_64 = {
     // quick return
@@ -63,7 +66,9 @@ const vector<vector<int64_t>> matrix_size_range_64 = {
     // normal (valid) samples
     {12, 12},
     {20, 25},
-    {33, 50}};
+    {33, 50},
+    // device pointer mode (with n large enough for rocBLAS to be called)
+    {500, 500, 1}};
 
 // for daily_lapack tests
 const vector<vector<int>> large_matrix_size_range
@@ -83,6 +88,10 @@ Arguments gecon_setup_arguments(gecon_tuple<I> tup)
     arg.set<I>("n", matrix_size[0]);
     arg.set<I>("lda", matrix_size[1]);
     arg.set<char>("norm_type", norm_type);
+
+    // device pointer mode
+    if(matrix_size.size() > 2 && matrix_size[2] == 1)
+        arg.set<char>("pointer_mode", 'D');
 
     arg.timing = 0;
 
