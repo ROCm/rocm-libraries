@@ -18,7 +18,7 @@ import yaml
 
 pytestmark = pytest.mark.unit
 
-M = importlib.import_module("tensilelite.TensileLibLogicToYaml")
+M = importlib.import_module("tensilelite.lib_logic_to_yaml")
 LibraryIO = importlib.import_module("tensilelite.LibraryIO")
 
 from tensilelite.Common.GlobalParameters import defaultInternalSupportParams, defaultSolution
