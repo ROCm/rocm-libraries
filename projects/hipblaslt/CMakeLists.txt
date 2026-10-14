@@ -792,6 +792,7 @@ if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
     install(
         FILES
             "${_tensilelite_src}/scripts/analyze_timing.py"
+            "${_tensilelite_src}/scripts/check_no_absolute_imports.py"
             "${_tensilelite_src}/scripts/precommit_affected_tests.py"
         DESTINATION "${_tensilelite_install_dest}/scripts"
         COMPONENT tests
