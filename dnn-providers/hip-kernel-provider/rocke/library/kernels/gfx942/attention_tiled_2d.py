@@ -6584,4 +6584,11 @@ def supports_tiled_2d_spec(
         kv_storage_dtype=spec.kv_storage_dtype,
         tile_size=spec.tile_size,
         arch=arch,
+        use_mfma_32x32x8=spec.use_mfma_32x32x8,
+        use_transposed_qk_32x32=spec.use_transposed_qk_32x32,
+        use_k_single_buffer=spec.use_k_single_buffer,
+        use_conflict_free_v_store=spec.use_conflict_free_v_store,
+        use_k_sliced_ring=spec.use_k_sliced_ring,
+        ring_depth=spec.ring_depth,
+        k_slice_hd=spec.k_slice_hd,
     )

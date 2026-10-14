@@ -389,7 +389,7 @@ There is no packaging `--profile`, CMake `PROFILES` or external root manifest.
 |---|---|
 | `configs/scale_add.yaml` | Single-pack engine, like the shipped `conv_fwd`: one pack, one operation, its `graph_match` both admits the node type and validates shape |
 | `configs/binary_ops.yaml` | Multi-pack engine, like the shipped `pointwise`: one pack per operation sharing one KMD/UED/UHD/UDD, each naming its own operation-scoped UMD via `discriminator` |
-| `configs/gfx950_attention_dense.yaml` | The shipped `hipkernel:Gfx950AttentionDense` catalog (840 packaged rocKE kernels, a builder lowered by `hkp_pack` at build time), generated entirely from `variants`; also the packaged-dialect reference config the tests load |
+| `configs/gfx950_attention_dense.yaml` | The packaged-dialect reference config (`variants`, hand-expanded; builder lowered by `hkp_pack` at build time) that the loader and generator tests exercise. It is not the catalog's source: the registry is, via the engine manifest below |
 | `configs/gfx950_attention_dense.engine.yaml` | The engine manifest the shipped dense catalog is regenerated from: `registry_enumerator.py` walks the rocKE registry's `attention_dense_grid` candidate over the manifest's head configurations (840 kernels at `max_kernels`); `test_registry_enumerator.py` proves the result matches the shipped descriptors |
 | `configs/axes_example.yaml` | Pack-level `axes`: one `kernel_template` crossed with value lists, expanded at load time |
 | `configs/variants_example.yaml` | Pack-level `variants`: a shape list crossed per-shape with a named knob set (below) |

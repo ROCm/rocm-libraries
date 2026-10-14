@@ -1,4 +1,6 @@
-# Source of truth for the shipped hipkernel:Gfx950AttentionDense catalog.
+# Packaged-dialect (`variants`) reference config for the hipkernel:Gfx950AttentionDense
+# catalog. The catalog's source of truth is the rocKE dispatcher registry, expanded from
+# configs/gfx950_attention_dense.engine.yaml by tools/registry_enumerator.py.
 #
 # The descriptors under
 # dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/descriptors/rocKE/gfx950_attention_dense/

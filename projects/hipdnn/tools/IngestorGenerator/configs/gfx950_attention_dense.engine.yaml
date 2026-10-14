@@ -8,7 +8,7 @@
 # re-defaults changes the catalog on the next regeneration instead of being
 # re-transcribed by hand.
 #
-#     python tools/registry_enumerator.py #         --manifest configs/gfx950_attention_dense.engine.yaml --out <scratch>/config.yaml
+#     python tools/registry_enumerator.py \n#         --manifest configs/gfx950_attention_dense.engine.yaml --out <scratch>/config.yaml
 #     python generate.py --config <scratch>/config.yaml --output-dir <scratch>/out --force
 #     python tools/catalog_diff.py --shipped <provider kdp> --regenerated <out kdp> --ignore-ids
 #

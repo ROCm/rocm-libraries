@@ -158,6 +158,28 @@ def test_raising_predicate_does_not_block_packing():
     )
 
 
+@pytest.mark.quick
+@pytest.mark.parametrize("exc", [AttributeError("no field"), TypeError("bad call")])
+def test_predicate_wiring_error_is_surfaced(exc):
+    # An AttributeError/TypeError means the predicate cannot read this spec at
+    # all (a mis-aliased predicate); that must not pass silently as "valid".
+    def is_valid_spec(spec, *, arch="gfx942"):
+        raise exc
+
+    with pytest.raises(HkpPackError, match="cannot validate"):
+        _check_support_predicate(
+            _Mod(is_valid_spec=is_valid_spec), "build_x", _Spec(n=1), "gfx942"
+        )
+
+
+@pytest.mark.quick
+def test_reduce_builder_has_no_spec_shaped_alias():
+    from hkp_pack.rocke_compile import _PREDICATE_ALIASES
+
+    assert "build_unified_attention_reduce_tiled" not in _PREDICATE_ALIASES
+    assert "build_gfx942_4warp_gqa" not in _PREDICATE_ALIASES
+
+
 # --- C. Literal validation --------------------------------------------------
 @dataclasses.dataclass
 class _LiteralSpec:

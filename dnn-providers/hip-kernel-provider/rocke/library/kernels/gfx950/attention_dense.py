@@ -535,31 +535,44 @@ AttentionDenseSpec = Gfx950AttentionDenseSpec
 GFX950_LDS_CAPACITY_BYTES = 163840
 
 
-def gfx950_dense_static_lds_bytes(*, head_size: int, block_n: int) -> int:
+def gfx950_dense_static_lds_bytes(
+    *,
+    head_size: int,
+    block_n: int,
+    k_row_pad: int = _DEFAULT_LDS_K_ROW_PAD,
+    v_row_pad: int = _DEFAULT_GFX950_LAYOUT["lds_v_row_pad"],
+    k_group_pad: int = 8,
+) -> int:
     """Static LDS the non-persistent body allocates for one ``(head_size, block_n)``.
 
-    The K/V slabs at the layout every shipped variant is built with -- ``_NBUF`` = 2
-    buffers, K pad 8 (per row at D128, per packed row-group at D64), V pad 32 at D128
-    and none at D64, 2-byte elements::
+    The K/V slabs, ``_NBUF`` = 2 buffers, 2-byte elements. The pad arguments are
+    the spec's ``lds_k_row_pad`` / ``lds_v_row_pad`` / ``lds_k_group_pad`` and
+    default to the layout every shipped variant is built with (K pad 8, V pad 32,
+    group pad 8)::
 
-        D128: K [2, BN, 128 + 8] + V [2, BN, 128 + 32]   = 1184 * BN bytes
-        D64:  K [2, BN / 2, 2 * 64 + 8] + V [2, BN, 64]  =  528 * BN bytes
+        D128: K [2, BN, 128 + k_row_pad] + V [2, BN, 128 + v_row_pad]
+              = 1184 * BN bytes at the defaults
+        D64:  K [2, BN / 2, 2 * 64 + k_group_pad] + V [2, BN, 64]
+              =  528 * BN bytes at the defaults
 
-    ``block_m`` does not enter it. Returns 0 for any other head size; callers have
-    already required 64 or 128.
+    D128 pads per row (K and V); D64 packs two rows per DMA group, pads K between
+    groups and leaves V unpadded. ``block_m`` does not enter it. Returns 0 for any
+    other head size; callers have already required 64 or 128.
     """
-    buffers, element_bytes, k_pad, v_pad = 2, 2, 8, 32
+    buffers, element_bytes = 2, 2
     if head_size == 128:
         return (
             buffers
             * block_n
-            * ((head_size + k_pad) + (head_size + v_pad))
+            * ((head_size + k_row_pad) + (head_size + v_row_pad))
             * element_bytes
         )
     if head_size == 64:
         rows_per_group = 2
         k_bytes = (
-            buffers * (block_n // rows_per_group) * (rows_per_group * head_size + k_pad)
+            buffers
+            * (block_n // rows_per_group)
+            * (rows_per_group * head_size + k_group_pad)
         )
         v_bytes = buffers * block_n * head_size
         return (k_bytes + v_bytes) * element_bytes
@@ -633,7 +646,11 @@ def supports_attention_dense(
     # it the spec is accepted here and fails in codegen, so a catalog built from
     # this predicate would ship a tile that cannot be lowered.
     lds_bytes = gfx950_dense_static_lds_bytes(
-        head_size=int(spec.head_size), block_n=int(spec.block_n)
+        head_size=int(spec.head_size),
+        block_n=int(spec.block_n),
+        k_row_pad=int(spec.lds_k_row_pad),
+        v_row_pad=int(spec.lds_v_row_pad),
+        k_group_pad=int(spec.lds_k_group_pad),
     )
     if lds_bytes > GFX950_LDS_CAPACITY_BYTES:
         return False, (

@@ -67,76 +67,48 @@ def shipped() -> dict:
 
 @pytest.fixture(scope="module")
 def registry():
+    """The bound engine manifest: ``(enumerator, manifest)``."""
     missing = [str(p) for p in _ROCKE_PATHS if not p.is_dir()]
     if missing:
         pytest.skip(f"rocKE not in this checkout: {missing}")
     added = [str(p) for p in _ROCKE_PATHS if str(p) not in sys.path]
     sys.path[:0] = added
     try:
-        yield from _registry_enumerator()
+        import registry_enumerator as enumerator
+
+        manifest = enumerator.load_manifest(str(_MANIFEST))
+        try:
+            enumerator.bind_provider(manifest.get("provider_root"))
+            enumerator.enumerate_specs(manifest)
+        except enumerator.EnumerationError as exc:
+            pytest.skip(f"rocKE dispatcher registry not importable: {exc}")
+        yield enumerator, manifest
     finally:
         for p in added:
             if p in sys.path:
                 sys.path.remove(p)
 
 
-def _registry_enumerator():
-    import registry_enumerator as enumerator
-
-    manifest = enumerator.load_manifest(str(_MANIFEST))
-    try:
-        enumerator.bind_provider(manifest.get("provider_root"))
-        slice_ = enumerator._attention_slice(manifest)
-    except enumerator.EnumerationError as exc:
-        pytest.skip(f"rocKE dispatcher registry not importable: {exc}")
-    yield slice_
-
-
-def _heads(shipped: dict) -> set:
-    return {
-        (
-            e["kernel_source"]["spec"]["dtype"],
-            e["kernel_source"]["spec"]["head_size"],
-            e["kernel_source"]["spec"]["num_query_heads"],
-            e["kernel_source"]["spec"]["num_kv_heads"],
-            bool(e["kernel_source"]["spec"]["causal"]),
-        )
-        for e in shipped["kernelDescriptors"]
-    }
-
-
-def _entry(shipped_entry: dict, ks) -> dict:
-    """A catalog entry for registry spec ``ks``, in the shipped entry's shape."""
-    shipped_keys = shipped_entry["kernel_source"]["spec"].keys()
-    spec = {k: getattr(ks, k) for k in shipped_keys}
-    dtype = spec["dtype"]
-    name = (
-        f"attention_dense.{dtype}_d{spec['head_size']}"
-        f"_hq{spec['num_query_heads']}_kv{spec['num_kv_heads']}"
-        f"_c{int(spec['causal'])}_bm{spec['block_m']}_bn{spec['block_n']}.gfx950"
-    )
-    meta = {
-        "dtype": dtype.upper(),
-        "head_size": spec["head_size"],
-        "num_query_heads": spec["num_query_heads"],
-        "num_kv_heads": spec["num_kv_heads"],
-        "causal": int(spec["causal"]),
-        "ragged": int(spec["ragged"]),
-        "sliding_window": spec["sliding_window"],
-        "batch": spec["batch"],
-        "seqlen_q": spec["seqlen_q"],
-        "seqlen_kv": spec["seqlen_kv"],
-        "block_m": spec["block_m"],
-        "block_n": spec["block_n"],
-    }
-    return {
-        "version": shipped_entry["version"],
-        "id": "regenerated",
-        "name": name,
-        "kernel_source": {**shipped_entry["kernel_source"], "spec": spec},
-        "metadata": meta,
-        "priority": shipped_entry["priority"],
-    }
+def _entries(shipped: dict, enumerator, manifest: dict) -> list:
+    """The enumerator's own kernels (name, spec, metadata), in the shipped
+    entry's shape, so naming and metadata are never re-derived here."""
+    template = shipped["kernelDescriptors"][0]
+    shipped_keys = template["kernel_source"]["spec"].keys()
+    kernels = enumerator.build_config(manifest)["packs"][0]["kernels"]
+    return [
+        {
+            "version": template["version"],
+            "id": "regenerated",
+            "name": k["name"],
+            "kernel_source": {
+                **template["kernel_source"],
+                "spec": {n: k["kernel_source"]["spec"][n] for n in shipped_keys},
+            },
+            "metadata": k["metadata"],
+            "priority": template["priority"],
+        }
+        for k in kernels
+    ]
 
 
 def _field_default(f: dataclasses.Field):
@@ -148,14 +120,9 @@ def _field_default(f: dataclasses.Field):
 
 
 def test_registry_reproduces_the_shipped_dense_catalog(shipped, registry):
-    template = shipped["kernelDescriptors"][0]
-    shipped_keys = set(template["kernel_source"]["spec"])
-    pairs = [
-        (_entry(template, ks), ks)
-        for dtype, d, hq, hk, causal in sorted(_heads(shipped))
-        for ks in registry(dtype, d, hq, hk, causal)
-    ]
-    entries = [e for e, _ in pairs]
+    enumerator, manifest = registry
+    shipped_keys = set(shipped["kernelDescriptors"][0]["kernel_source"]["spec"])
+    entries = _entries(shipped, enumerator, manifest)
     regenerated = {**shipped, "kernelDescriptors": entries}
     # Every shipped field matches value for value (the default gate keys on them).
     problems = catalog_diff.compare_catalog(shipped, regenerated)
@@ -168,7 +135,7 @@ def test_registry_reproduces_the_shipped_dense_catalog(shipped, registry):
     # packer compiles. A registry candidate that moves one off-default is a
     # different binary the shipped KDP cannot express.
     off_default = []
-    for _, ks in pairs:
+    for _, ks in enumerator.enumerate_specs(manifest):
         for f in dataclasses.fields(ks):
             if f.name in shipped_keys:
                 continue
@@ -182,10 +149,10 @@ def test_block_n_256_exists_at_d64_and_not_at_d128(shipped, registry):
     """The tile axis is LDS-bounded: D128 needs 1184 B per block_n row, so
     256x256 (303,104 B) exceeds the 163,840 B budget and is pruned, while D64
     (528 B per row) keeps it. An earlier plan draft counted six D64 tiles."""
+    enumerator, manifest = registry
     by_d: dict[int, set] = {}
-    for dtype, d, hq, hk, causal in sorted(_heads(shipped)):
-        for ks in registry(dtype, d, hq, hk, causal):
-            by_d.setdefault(ks.head_size, set()).add((ks.block_m, ks.block_n))
+    for _, ks in enumerator.enumerate_specs(manifest):
+        by_d.setdefault(ks.head_size, set()).add((ks.block_m, ks.block_n))
     assert (256, 256) in by_d[64]
     assert (256, 256) not in by_d[128]
     assert len(by_d[64]) == 7

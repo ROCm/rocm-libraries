@@ -270,11 +270,14 @@ def _module_from_source(source):
 # kwargs-only and unreachable from a spec instance.  ``supports_tiled_2d_spec``
 # and ``supports_tiled_3d_spec`` are positional-first wrappers added to each
 # arch kernel module that extract fields from the spec and delegate.
+#
+# Deliberately NOT aliased: ``build_gfx942_4warp_gqa`` (its fast-path flag is not
+# a field of the spec, so a spec-shaped predicate would validate a different
+# kernel) and ``build_unified_attention_reduce_tiled`` (its spec is
+# ``UnifiedAttentionReduceTiledSpec``, which the 3D wrapper cannot read).
 _PREDICATE_ALIASES = {
     "build_unified_attention_2d_tiled": "supports_tiled_2d_spec",
-    "build_gfx942_4warp_gqa": "supports_tiled_2d_spec",
     "build_unified_attention_3d_tiled": "supports_tiled_3d_spec",
-    "build_unified_attention_reduce_tiled": "supports_tiled_3d_spec",
     "build_unified_attention_2d_fastkv_register_p": "supports_fastkv_register_p_2d",
 }
 
@@ -332,11 +335,18 @@ def _check_support_predicate(module, builder, spec_obj, arch):
     kwargs = {"arch": arch} if "arch" in params else {}
     try:
         verdict = predicate(spec_obj, **kwargs)
+    except (AttributeError, TypeError) as exc:
+        # The predicate was handed a spec it cannot read, or called with the
+        # wrong shape: a wiring bug (e.g. an alias pointing at another builder's
+        # predicate), not a verdict. Surface it instead of packing unchecked.
+        raise HkpPackError(
+            f"support predicate {name} cannot validate builder '{builder}' @ {arch}: "
+            f"{type(exc).__name__}: {exc}"
+        ) from exc
     except Exception:
-        # A predicate that cannot run must not block packing: it is a
-        # pre-flight check, and the builder itself remains the real gate.
+        # A predicate that itself breaks must not block packing: it is a
+        # pre-flight check, and the builder remains the real gate.
         return
-
     ok, reason = verdict if isinstance(verdict, tuple) else (verdict, "")
     if not ok:
         raise HkpPackError(

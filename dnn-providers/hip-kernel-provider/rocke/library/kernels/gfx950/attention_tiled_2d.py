@@ -4612,9 +4612,7 @@ def supports_tiled_2d_spec(
     ``supports_tiled_2d`` is kwargs-only and unreachable from a spec instance
     (``hkp_pack``'s ``_check_support_predicate`` skips kwargs-only predicates).
     This wrapper extracts the necessary fields and delegates, making the 2D
-    unified builder validatable at pack time. Update ``_PREDICATE_ALIASES`` in
-    ``hkp_pack/rocke_compile.py`` to point ``build_unified_attention_2d_tiled``
-    and ``build_gfx942_4warp_gqa`` here instead of at ``supports_tiled_2d``.
+    unified builder validatable at pack time.
     """
     use_fp8 = spec.kv_storage_dtype is not None
     return supports_tiled_2d(
