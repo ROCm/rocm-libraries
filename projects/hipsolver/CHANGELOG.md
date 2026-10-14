@@ -8,19 +8,22 @@ Full documentation for hipSOLVER is available at the [hipSOLVER Documentation](h
 ### Added
 
 * Added functions:
+  * geqrfBatched
+    * hipsolverSgeqrfBatched_bufferSize, hipsolverDgeqrfBatched_bufferSize, hipsolverCgeqrfBatched_bufferSize, hipsolverZgeqrfBatched_bufferSize
+    * hipsolverSgeqrfBatched, hipsolverDgeqrfBatched, hipsolverCgeqrfBatched, hipsolverZgeqrfBatched
   * getrfBatched
     * hipsolverSgetrfBatched_bufferSize, hipsolverDgetrfBatched_bufferSize, hipsolverCgetrfBatched_bufferSize, and hipsolverZgetrfBatched_bufferSize
     * hipsolverSgetrfBatched, hipsolverDgetrfBatched, hipsolverCgetrfBatched, and hipsolverZgetrfBatched
-* Added compatibility-only functions:
-  * trtri
-    * hipsolverDnXtrtri_bufferSize
-    * hipsolverDnXtrtri
   * getriBatched
     * hipsolverXgetriBatched_bufferSize
     * hipsolverXgetriBatched
   * getrsBatched
     * hipsolverSgetrsBatched_bufferSize, hipsolverDgetrsBatched_bufferSize, hipsolverCgetrsBatched_bufferSize, hipsolverZgetrsBatched_bufferSize
     * hipsolverSgetrsBatched, hipsolverDgetrsBatched, hipsolverCgetrsBatched, hipsolverZgetrsBatched
+* Added compatibility-only functions:
+  * trtri
+    * hipsolverDnXtrtri_bufferSize
+    * hipsolverDnXtrtri
 
 ### Changed
 
