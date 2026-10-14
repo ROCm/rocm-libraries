@@ -7,6 +7,14 @@ include(CMakeFindDependencyMacro)
 find_dependency(hipdnn_flatbuffers_sdk CONFIG REQUIRED)
 find_dependency(hipdnn_data_sdk @HIPDNN_PLUGIN_SDK_DATA_SDK_MIN_VERSION@ CONFIG REQUIRED)
 
+# Reflects how hipDNN was built; not consumer-overridable, since ingestor/ headers
+# (and DescriptorLoader.hpp's nlohmann/json.hpp include) are only in the install tree
+# when this was enabled at build time -- see plugin_sdk/CMakeLists.txt.
+set(HIPDNN_PLUGIN_SDK_ENABLE_KERNEL_INGESTOR @HIPDNN_ENABLE_KERNEL_INGESTOR@)
+if(HIPDNN_PLUGIN_SDK_ENABLE_KERNEL_INGESTOR)
+    find_dependency(nlohmann_json REQUIRED)
+endif()
+
 include("${CMAKE_CURRENT_LIST_DIR}/hipdnn_plugin_sdkTargets.cmake")
 
 check_required_components(hipdnn_plugin_sdk)

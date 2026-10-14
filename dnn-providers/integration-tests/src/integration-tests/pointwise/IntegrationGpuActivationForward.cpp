@@ -5,6 +5,7 @@
 
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/SdkFrontendTypeConversions.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "common/ActivationCommon.hpp"
@@ -51,7 +52,7 @@ public:
         auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xAttr));
 
         graph::PointwiseAttributes pwAttrs;
-        pwAttrs.set_mode(static_cast<hipdnn_frontend::PointwiseMode>(activTestCase.mode));
+        pwAttrs.set_mode(sdkToFrontendPointwiseMode(activTestCase.mode));
 
         if(activTestCase.reluLowerClip.has_value())
         {

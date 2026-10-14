@@ -705,10 +705,23 @@ try
 
         ("streamk_tile_scheduling",
          value<std::string>(&hipblaslt_bench_options::streamk_tile_scheduling_mode_str())->default_value(""),
-         "Select the StreamK=5 tile scheduling sub-path via the "
+         "Legacy alias for hybrid_assignment_policy via the "
          "HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT extension attribute. "
          "Accepts off|0, on|1, auto|2 (case-insensitive). When omitted the bench "
-         "leaves the attribute unset so the library default (auto) applies.")
+         "leaves the attribute unset so the library default applies.")
+
+        ("hybrid_assignment_policy",
+         value<std::string>(&hipblaslt_bench_options::hybrid_assignment_policy_str())->default_value(""),
+         "Launch policy for a selected WorkAssignment=Hybrid kernel: Default, DynamicWorkQueue, or Auto. "
+         "Default preserves the existing behavior, including the heuristic with a positive sm_count_target. "
+         "This option does not select a kernel family.")
+
+        ("uniform_summation_order",
+         value<std::string>(&hipblaslt_bench_options::uniform_summation_order_str())->default_value(""),
+         "Set the HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT extension attribute. "
+         "Accepts off|0, on|1 (case-insensitive). When on, the matmul returns "
+         "HIPBLAS_STATUS_INVALID_VALUE if no configuration honoring the guarantee exists. "
+         "When omitted the bench leaves the attribute unset so the library default (off) applies.")
 
         ("help,h", "produces this help message")
 
@@ -878,30 +891,43 @@ try
         return 1;
     }
 
-    // Resolve --streamk_tile_scheduling (off|0, on|1, auto|2) into the tri-state mode
-    // forwarded to HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT. A negative result
-    // means "unset": leave the attribute untouched so the library default applies.
-    {
-        std::string mode = hipblaslt_bench_options::streamk_tile_scheduling_mode_str();
+    // Empty string stays unset (-1). off|0, on|1, and optionally auto|2.
+    auto parseModeFlag = [](std::string mode, bool allowAuto, const char* err) -> int32_t {
         std::transform(mode.begin(), mode.end(), mode.begin(), [](unsigned char c) {
             return static_cast<char>(std::tolower(c));
         });
-        int32_t resolved = -1;
         if(mode.empty())
-            resolved = -1;
-        else if(mode == "off" || mode == "0")
-            resolved = 0;
-        else if(mode == "on" || mode == "1")
-            resolved = 1;
-        else if(mode == "auto" || mode == "2")
-            resolved = 2;
-        else
-        {
-            hipblaslt_cerr << "streamk_tile_scheduling must be one of off|0, on|1, auto|2."
-                           << std::endl;
+            return -1;
+        if(mode == "off" || mode == "0")
+            return 0;
+        if(mode == "on" || mode == "1")
             return 1;
-        }
-        hipblaslt_bench_options::streamk_tile_scheduling_mode() = resolved;
+        if(allowAuto && (mode == "auto" || mode == "2"))
+            return 2;
+        hipblaslt_cerr << err << std::endl;
+        return -2;
+    };
+
+    try
+    {
+        hipblaslt_bench_options::streamk_tile_scheduling_mode()
+            = hipblaslt_bench_options::resolve_hybrid_assignment_policy(
+                hipblaslt_bench_options::hybrid_assignment_policy_str(),
+                hipblaslt_bench_options::streamk_tile_scheduling_mode_str());
+    }
+    catch(std::invalid_argument const& error)
+    {
+        hipblaslt_cerr << error.what() << std::endl;
+        return 1;
+    }
+
+    {
+        const int32_t resolved = parseModeFlag(hipblaslt_bench_options::uniform_summation_order_str(),
+                                               false,
+                                               "uniform_summation_order must be one of off|0, on|1.");
+        if(resolved == -2)
+            return 1;
+        hipblaslt_bench_options::uniform_summation_order() = resolved;
     }
 
     // transfer local variable state
@@ -977,7 +1003,8 @@ try
     set_device(device_id);
 
     auto perf_monitor = EfficiencyMonitor::create();
-    perf_monitor->setDeviceId(device_id);
+    if(perf_monitor->enabled())
+        perf_monitor->setDeviceId(device_id);
 
     if(datafile)
         return hipblaslt_bench_datafile(filter, any_stride, props);

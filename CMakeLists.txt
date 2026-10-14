@@ -124,6 +124,14 @@ if(ROCM_LIBS_ENABLE_ROOT_CTEST AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/shared/ct
 endif()
 
 
+# This superbuild mirrors a developer environment: it supplies several
+# third-party dependencies by fetching them (see rocm_libs_declare_shared_deps
+# below), so subprojects are permitted to fetch what it does not supply.
+# Deliberately not FORCE'd -- an explicit -DALLOW_FETCH_DEPS=OFF still wins.
+set(ALLOW_FETCH_DEPS ON CACHE BOOL
+    "Allow fetching third-party dependencies the build environment does not provide"
+)
+
 # --- Shared third-party dependencies ---
 # Declare libraries that more than one subproject would otherwise fetch
 # independently (e.g. nlohmann_json used by both hipdnn and miopen).
@@ -343,4 +351,27 @@ endif()
 # add_subdirectory_with_message().
 if("hipthreads" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
     message(FATAL_ERROR "hipthreads is not yet supported in the superbuild")
+endif()
+
+# Root-level CTest aggregator for the install tree. When root CTest is enabled,
+# generate an install-tree bin/CTestTestfile.cmake at install time that chains
+# every component's installed bin/<component>/CTestTestfile.cmake via subdirs(),
+# so `ctest --test-dir <prefix>/bin` discovers all tests. The component dirs are
+# found by globbing the installed files, so any project that installs
+# bin/<x>/CTestTestfile.cmake is picked up automatically with no list to maintain.
+if(ROCM_LIBS_ENABLE_ROOT_CTEST)
+    install(CODE "
+        set(_bin_dir \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}\")
+        file(GLOB _ctest_files \"\${_bin_dir}/*/CTestTestfile.cmake\")
+        if(_ctest_files)
+            set(_content \"# Auto-generated root CTest aggregator (do not edit)\\n\")
+            foreach(_f IN LISTS _ctest_files)
+                get_filename_component(_dir \"\${_f}\" DIRECTORY)
+                get_filename_component(_name \"\${_dir}\" NAME)
+                string(APPEND _content \"subdirs(\\\"\${_name}\\\")\\n\")
+            endforeach()
+            file(WRITE \"\${_bin_dir}/CTestTestfile.cmake\" \"\${_content}\")
+            message(STATUS \"Generated root CTest aggregator: \${_bin_dir}/CTestTestfile.cmake\")
+        endif()
+    " ALL_COMPONENTS)
 endif()

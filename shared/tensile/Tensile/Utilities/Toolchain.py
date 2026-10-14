@@ -198,11 +198,7 @@ def _exeExists(file: Path) -> bool:
     Returns:
         If the file exists and is executable, True; otherwise, False
     """
-    if os.access(file, os.X_OK):
-        if "rocm" not in map(str.lower, file.parts):
-            warn(f"Found `{file.name}` but in a non-default ROCm location: {file}")
-        return True
-    return False
+    return bool(os.access(file, os.X_OK))
 
 
 def _validateExecutable(file: str, searchPaths: List[Path]) -> str:

@@ -212,10 +212,12 @@ std::atomic<int>& scoreCalls()
     return s_scoreCalls;
 }
 
-double countingScoreByBlockSize(const KernelDefinition& kernel, const MatchContext& context)
+double countingScoreByBlockSize(const MatchContext& context,
+                                const BoundTokens& bound,
+                                const KernelDefinition& kernel)
 {
     scoreCalls().fetch_add(1, std::memory_order_relaxed);
-    return scoreByBlockSize(kernel, context);
+    return scoreByBlockSize(context, bound, kernel);
 }
 
 thread_local bool holdUntilRanked = false;
@@ -286,20 +288,20 @@ TEST(TestIngestorStateManagerConcurrency, ARankingSurvivesAConcurrentUnsortedAcc
     rankingBarrier() = &barrier;
     scoreCalls().store(0);
 
-    GraphMatcherRegistry::registerSymbol(
-        BARRIER_GRAPH_SYMBOL, [](const MatchContext&, BoundTokens&) -> bool {
-            if(!rankingBarrier()->arriveAndWait())
-            {
-                rankingBarrier()->recordTimeout();
-                return true;
-            }
+    GraphMatchRegistry::registerSymbol(BARRIER_GRAPH_SYMBOL,
+                                       [](const MatchContext&) -> std::optional<BoundTokens> {
+                                           if(!rankingBarrier()->arriveAndWait())
+                                           {
+                                               rankingBarrier()->recordTimeout();
+                                               return BoundTokens{};
+                                           }
 
-            if(holdUntilRanked && !rankingBarrier()->waitForRanked())
-            {
-                rankingBarrier()->recordTimeout();
-            }
-            return true;
-        });
+                                           if(holdUntilRanked && !rankingBarrier()->waitForRanked())
+                                           {
+                                               rankingBarrier()->recordTimeout();
+                                           }
+                                           return BoundTokens{};
+                                       });
     KernelMatcherRegistry::registerSymbol(KERNEL_MATCH_SYMBOL, &acceptFloatKernels);
     ScoreRegistry::registerSymbol(COUNTING_SCORE_SYMBOL, &countingScoreByBlockSize);
 
@@ -312,20 +314,20 @@ TEST(TestIngestorStateManagerConcurrency, ARankingSurvivesAConcurrentUnsortedAcc
     KernelDescriptorPack pack;
     pack.id = PACK_ID;
     pack.name = "d3 pack";
-    pack.matcherIds = {GRAPH_MATCHER_ID, KERNEL_MATCHER_ID};
+    pack.matcherIds = {KERNEL_MATCHER_ID};
     pack.engineId = ENGINE_ID;
     pack.dispatchId = DISPATCH_ID;
     pack.kernels = {makeTestKernel(testId(0x64), "kernel_64_float", 64, "FLOAT"),
                     makeTestKernel(testId(0x65), "kernel_256_float", 256, "FLOAT")};
 
-    const KernelIngestorStateManager<int> manager(
+    const KernelIngestorStateManager<TestHandle> manager(
         std::move(schema),
         std::vector<MatchDescriptor>{
-            {GRAPH_MATCHER_ID, "barrier graph scoped", MatchScope::GRAPH, BARRIER_GRAPH_SYMBOL},
             {KERNEL_MATCHER_ID, "kernel scoped", MatchScope::KERNEL, KERNEL_MATCH_SYMBOL}},
         makeTestDispatches<TestHandle>(),
         std::vector<KernelDescriptorPack>{std::move(pack)},
-        std::make_shared<NativeKernelHeuristic>(COUNTING_SCORE_SYMBOL));
+        std::make_shared<NativeKernelHeuristic>(COUNTING_SCORE_SYMBOL),
+        BARRIER_GRAPH_SYMBOL);
 
     const TestGraph graph(makeGraphId(0x5E));
     const auto properties = testDeviceProperties();
@@ -355,7 +357,7 @@ TEST(TestIngestorStateManagerConcurrency, ARankingSurvivesAConcurrentUnsortedAcc
         << "the cached ranking was discarded, so this query had to rank again";
 
     rankingBarrier() = nullptr;
-    GraphMatcherRegistry::unregisterSymbol(BARRIER_GRAPH_SYMBOL);
+    GraphMatchRegistry::unregisterSymbol(BARRIER_GRAPH_SYMBOL);
     KernelMatcherRegistry::unregisterSymbol(KERNEL_MATCH_SYMBOL);
     ScoreRegistry::unregisterSymbol(COUNTING_SCORE_SYMBOL);
 }
@@ -367,7 +369,7 @@ TEST(TestIngestorRegistryConcurrency, ResolvesFromManyThreads)
     runConcurrently(THREAD_COUNT, [](int) {
         for(int i = 0; i < ITERATIONS_PER_THREAD; ++i)
         {
-            EXPECT_NE(GraphMatcherRegistry::resolve(std::string(GRAPH_MATCH_SYMBOL)), nullptr);
+            EXPECT_NE(GraphMatchRegistry::resolve(std::string(GRAPH_MATCH_SYMBOL)), nullptr);
             EXPECT_NE(ScoreRegistry::resolve(std::string(SCORE_SYMBOL)), nullptr);
         }
     });

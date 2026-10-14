@@ -223,6 +223,7 @@ def _rmtree(path: Path):
         "reconfigure": "Delete CMake cache to force a fresh configure (keeps compiled objects).",
         "gcc": "Use GCC instead of amdclang.",
         "coverage": "Build with code coverage instrumentation (use `invoke coverage` instead for the full report flow).",
+        "asan": "Build with AddressSanitizer instrumentation (use `invoke asan` instead for the full build+test flow).",
         "rocm_path": "Path to ROCm installation (default: ROCM_PATH env or /opt/rocm).",
     }
 )
@@ -238,6 +239,7 @@ def build(
     reconfigure=False,
     gcc=False,
     coverage=False,
+    asan=False,
     rocm_path=None,
 ):
     _check_venv()
@@ -264,6 +266,7 @@ def build(
         *cmake_build_args(tests=tests, python=not no_python, shared=not static),
         "-DSTINKYTOFU_ENABLE_WERROR=ON",
         f"-DSTINKYTOFU_CODE_COVERAGE={'ON' if coverage else 'OFF'}",
+        f"-DSTINKYTOFU_ENABLE_ASAN={'ON' if asan else 'OFF'}",
     ]
 
     if not no_python:
@@ -581,3 +584,40 @@ def coverage(c, build_dir=None, open_report=False, jobs=None, rocm_path=None):
         import webbrowser
 
         webbrowser.open((html_dir / "index.html").as_uri())
+
+
+@task(
+    help={
+        "build_dir": "ASan build directory (default: build-asan/).",
+        "jobs": "Number of parallel build jobs (default: all cores).",
+        "clean": "Remove the build directory before configuring.",
+        "rocm_path": "Path to ROCm installation (default: ROCM_PATH env or /opt/rocm).",
+    }
+)
+def asan(c, build_dir=None, jobs=None, clean=False, rocm_path=None):
+    """Build with AddressSanitizer instrumentation.
+
+    Uses a RelWithDebInfo build (keeps -g for symbolized reports without the
+    runtime cost of a full Debug build) with -fsanitize=address baked into
+    every target (library, tools, unit_tests, api_tests) so violations
+    anywhere in the call chain are caught, not just in test code.
+
+    Run the test suite separately, e.g.:
+        cd build-asan && ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 ctest --output-on-failure -LE python
+
+    The `-LE python` excludes the Python-binding tests: loading an
+    ASan-instrumented .so into a Python interpreter that wasn't itself
+    started with the ASan runtime preloaded fails with "undefined symbol:
+    __asan_option_detect_stack_use_after_return".
+    """
+    bld = Path(build_dir).resolve() if build_dir else (ROOT_PATH / "build-asan")
+
+    build(
+        c,
+        build_dir=str(bld),
+        build_type="RelWithDebInfo",
+        asan=True,
+        jobs=jobs,
+        clean=clean,
+        rocm_path=rocm_path,
+    )

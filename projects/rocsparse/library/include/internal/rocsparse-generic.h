@@ -47,14 +47,15 @@
 #ifdef ROCSPARSE_WITH_SPMAT_SCALE
 #include "generic/rocsparse_spmat_scale.h"
 #endif
-#ifdef ROCSPARSE_WITH_ILDLT0
 #include "generic/rocsparse_spildlt0.h"
-#endif
 #include "generic/rocsparse_spilu0.h"
 #include "generic/rocsparse_spitsv.h"
 #include "generic/rocsparse_spmm.h"
 #include "generic/rocsparse_spmv.h"
 #include "generic/rocsparse_spsm.h"
+#if defined(ROCSPARSE_WITH_SPSORT)
+#include "generic/rocsparse_spsort.h"
+#endif
 #include "generic/rocsparse_spsv.h"
 #include "generic/rocsparse_sptrsm.h"
 #include "generic/rocsparse_sptrsv.h"

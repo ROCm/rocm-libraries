@@ -111,6 +111,30 @@ struct ConvTestCase
     }
 };
 
+inline std::vector<ConvTestCase> getConvTestCases3D()
+{
+    unsigned seed = hipdnn_test_sdk::utilities::getGlobalTestSeed();
+
+    return {
+        // Filter 1
+        {{1, 16, 16}, {1, 16, 1}, {0}, {0}, {1}, {1}, seed},
+        // Filter 3, no padding
+        {{1, 16, 16}, {1, 16, 3}, {0}, {0}, {1}, {1}, seed},
+        // Padding = 1
+        {{1, 16, 16}, {1, 16, 3}, {1}, {1}, {1}, {1}, seed},
+        // Stride = 2
+        {{1, 16, 16}, {1, 16, 3}, {1}, {1}, {2}, {1}, seed},
+        // Dilation = 2
+        {{1, 16, 16}, {1, 16, 3}, {2}, {2}, {1}, {2}, seed},
+        // Batched convolution
+        {{8, 16, 16}, {1, 16, 1}, {0}, {0}, {1}, {1}, seed},
+        // Grouped convolution - 2 groups
+        {{1, 16, 16}, {2, 8, 3}, {1}, {1}, {1}, {1}, seed},
+        // Grouped convolution - 2 batches, 4 groups, stride, padding, dilation
+        {{2, 32, 16}, {4, 8, 3}, {1}, {1}, {2}, {2}, seed},
+    };
+}
+
 inline std::vector<ConvTestCase> getConvTestCases4D()
 {
     unsigned seed = hipdnn_test_sdk::utilities::getGlobalTestSeed();
@@ -162,6 +186,33 @@ inline std::vector<ConvTestCase> getConvTestCases5D()
         {{1, 16, 16, 16, 16}, {2, 8, 3, 3, 3}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, seed},
         // Grouped convolution - 2 batches, 4 groups, stride, padding, dilation
         {{2, 32, 16, 16, 16}, {4, 8, 3, 3, 3}, {1, 1, 1}, {1, 1, 1}, {2, 2, 2}, {2, 2, 2}, seed},
+    };
+}
+
+// Small cases the deterministic MIOpen engine supports for fprop, dgrad and wgrad.
+inline std::vector<ConvTestCase> getDeterministicConvTestCases4D()
+{
+    unsigned seed = hipdnn_test_sdk::utilities::getGlobalTestSeed();
+
+    return {
+        // Filter 1x1 - basic case
+        {{1, 16, 16, 16}, {1, 16, 1, 1}, {0, 0}, {0, 0}, {1, 1}, {1, 1}, seed},
+        // Filter 3x3 with padding - common case
+        {{1, 16, 16, 16}, {1, 16, 3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}, seed},
+        // Grouped convolution - 2 groups
+        {{1, 16, 16, 16}, {2, 8, 3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}, seed},
+    };
+}
+
+inline std::vector<ConvTestCase> getDeterministicConvTestCases5D()
+{
+    unsigned seed = hipdnn_test_sdk::utilities::getGlobalTestSeed();
+
+    return {
+        // Filter 1x1x1 - basic 5D case
+        {{1, 8, 8, 8, 8}, {1, 8, 1, 1, 1}, {0, 0, 0}, {0, 0, 0}, {1, 1, 1}, {1, 1, 1}, seed},
+        // Filter 3x3x3 with padding - common 5D case
+        {{1, 8, 8, 8, 8}, {1, 8, 3, 3, 3}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, seed},
     };
 }
 

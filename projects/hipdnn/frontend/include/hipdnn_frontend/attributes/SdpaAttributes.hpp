@@ -7,7 +7,7 @@
  *
  * This file defines the SdpaAttributes class used to configure
  * scaled dot-product attention operations, computing
- * Attention(Q, K, V) = softmax(Q * K^T / sqrt(d_k)) * V.
+ * Attention(Q, K, V) = softmax(scale * Q * K^T) * V.
  */
 
 #pragma once
@@ -30,8 +30,11 @@ namespace hipdnn_frontend::graph
  *
  * SdpaAttributes configures a scaled dot-product attention operation:
  * @code
- * Attention(Q, K, V) = softmax(Q * K^T / sqrt(d_k)) * V
+ * Attention(Q, K, V) = softmax(scale * Q * K^T) * V
  * @endcode
+ *
+ * `scale` is attn_scale_value or the Attn_scale tensor. When neither is set it is 1.0
+ * (no scaling), as in cuDNN; set 1/sqrt(d_k) explicitly for the conventional scaling.
  *
  * **Tensor Shapes (BHSD ordering):**
  * - **Q** (query): `(B, H, S_q, D)` — batch, heads, query sequence length, head dimension
@@ -59,7 +62,7 @@ namespace hipdnn_frontend::graph
  * - ALiBi positional encoding
  * - Paged attention (page_table_k, page_table_v)
  * - FP8 quantization (descale/scale tensors)
- * - Attention scale override (attn_scale_value)
+ * - Attention scale (attn_scale_value or an Attn_scale tensor; 1.0 when neither is set)
  *
  * @code{.cpp}
  * SdpaAttributes attr;
@@ -669,6 +672,34 @@ public:
         return *this;
     }
 
+    /**
+     * @brief Custom equality hooks for SDPA-specific attributes
+     *
+     * Compares all scalar/flag/enum configuration — stats generation, masking
+     * modes, dropout probability, attention scale, diagonal band bounds,
+     * paged-attention limits, diagonal alignment, compute-core mode, and
+     * implementation strategy — all of which define the mathematical
+     * semantics of the attention operation rather than tensor layout, so
+     * logical and strict equality coincide here.
+     */
+    bool logicallyEqualsImpl(const SdpaAttributes& other) const
+    {
+        return generate_stats == other.generate_stats && alibi_mask == other.alibi_mask
+               && padding_mask == other.padding_mask && causal_mask == other.causal_mask
+               && causal_mask_bottom_right == other.causal_mask_bottom_right
+               && dropout_probability == other.dropout_probability
+               && attn_scale_value == other.attn_scale_value && left_bound == other.left_bound
+               && right_bound == other.right_bound && max_seq_len_kv == other.max_seq_len_kv
+               && diagonal_alignment == other.diagonal_alignment
+               && mma_core_mode == other.mma_core_mode && implementation == other.implementation;
+    }
+
+    /// @brief Strict equality delegates to logical equality; no layout-only
+    ///        fields exist in this class to distinguish the two checks.
+    bool strictEqualsImpl(const SdpaAttributes& other) const
+    {
+        return logicallyEqualsImpl(other);
+    }
     // -- cuDNN parity setters --
     // Each accepts the cuDNN frontend spelling/overload/semantics that is more
     // than a straight rename of a native setter (overload merge, semantic remap,

@@ -208,6 +208,87 @@ TEST(rocfft_UnitTest, plan_description_reuse)
     ROCFFT_CATCH_TEST_EXCEPTIONS;
 }
 
+TEST(rocfft_UnitTest, zero_length_or_batch)
+{
+    // check that plan creation does not proceed with a zero length or batch.
+
+    PROB_SKIP_UNITTEST();
+
+    try
+    {
+        const rocfft_transform_type transform_types[] = {rocfft_transform_type_complex_forward,
+                                                         rocfft_transform_type_complex_inverse,
+                                                         rocfft_transform_type_real_forward,
+                                                         rocfft_transform_type_real_inverse};
+
+        const struct
+        {
+            size_t rank;
+            size_t lengths[3];
+            size_t number_of_transforms;
+        } rejected[] = {{1, {0, 1, 1}, 1},
+                        {2, {0, 8, 1}, 1},
+                        {2, {8, 0, 1}, 1},
+                        {3, {0, 8, 8}, 1},
+                        {3, {8, 0, 8}, 1},
+                        {3, {8, 8, 0}, 1},
+                        {1, {8, 1, 1}, 0},
+                        {3, {8, 8, 8}, 0}};
+
+        for(const auto transform_type : transform_types)
+        {
+            for(const auto& [rank, lengths, number_of_transforms] : rejected)
+            {
+                rocfft_plan plan = nullptr;
+                EXPECT_EQ(rocfft_plan_create(&plan,
+                                             rocfft_placement_notinplace,
+                                             transform_type,
+                                             rocfft_precision_single,
+                                             rank,
+                                             lengths,
+                                             number_of_transforms,
+                                             nullptr),
+                          rocfft_status_invalid_arg_value)
+                    << "transform type " << transform_type << ", rank " << rank << ", batch "
+                    << number_of_transforms;
+                rocfft_plan_destroy(plan);
+            }
+        }
+
+        // a rank outside the documented 1 to 3 range is a dimension error, not a size one
+        size_t      length = 8;
+        rocfft_plan plan   = nullptr;
+        for(const size_t rank : {static_cast<size_t>(0), static_cast<size_t>(4)})
+        {
+            EXPECT_EQ(rocfft_plan_create(&plan,
+                                         rocfft_placement_notinplace,
+                                         rocfft_transform_type_complex_forward,
+                                         rocfft_precision_single,
+                                         rank,
+                                         &length,
+                                         1,
+                                         nullptr),
+                      rocfft_status_invalid_dimensions)
+                << "rank " << rank;
+            rocfft_plan_destroy(plan);
+        }
+
+        // a valid plan is still accepted
+        plan = nullptr;
+        ASSERT_EQ(rocfft_plan_create(&plan,
+                                     rocfft_placement_notinplace,
+                                     rocfft_transform_type_complex_forward,
+                                     rocfft_precision_single,
+                                     1,
+                                     &length,
+                                     1,
+                                     nullptr),
+                  rocfft_status_success);
+        ASSERT_EQ(rocfft_plan_destroy(plan), rocfft_status_success);
+    }
+    ROCFFT_CATCH_TEST_EXCEPTIONS;
+}
+
 TEST(rocfft_UnitTest, nonzero_offsets)
 {
     // check that plan creation does not proceed with non-zero offsets.
@@ -387,6 +468,129 @@ TEST(rocfft_UnitTest, setup_cleanup_counter)
                             cleanup_statuses.end(),
                             [](rocfft_status status) { return status != rocfft_status_success; }),
                 ncleanups > nsetups);
+        }
+    }
+    ROCFFT_CATCH_TEST_EXCEPTIONS
+}
+
+// check that a multi-dimensional real transform gets its own twiddle table when
+// a plain complex kernel of the same size already has one cached.  A real
+// transform runs on a complex kernel with fused pre/post-processing, which needs
+// a half-N section appended that the complex kernel does not use; if the cache
+// hands it the complex kernel's shorter table it returns wrong numbers.  Both
+// the forward (R2C, post-processing) and inverse (C2R, pre-processing) direction
+// hit the same 2D kernel, so run both.
+TEST(rocfft_UnitTest, twiddle_cache_2D_real_after_complex)
+{
+    PROB_SKIP_UNITTEST();
+    try
+    {
+        LocalCleanup restore([]() {
+            rocfft_cleanup();
+            rocfft_setup();
+        });
+
+        // a real length of 8 on one dimension and 4 on the other decomposes to
+        // a 4x4 complex kernel whichever dimension is the fastest, so it
+        // collides with the complex transform below either way
+        const std::vector<size_t> real_lengths{8, 4};
+        const std::vector<size_t> complex_lengths{4, 4};
+
+        // both sides as float counts: the real side is one float per element,
+        // the Hermitian side is a complex (two-float) element per element
+        const size_t real_floats = real_lengths[0] * real_lengths[1];
+        const size_t herm_floats = (real_lengths[0] / 2 + 1) * real_lengths[1] * 2;
+
+        // run a real transform and return its output as floats
+        auto run_real_transform = [&](rocfft_transform_type     real_dft_type,
+                                      const std::vector<float>& input) {
+            const size_t output_floats
+                = real_dft_type == rocfft_transform_type_real_forward ? herm_floats : real_floats;
+            const size_t    ibytes = input.size() * sizeof(float);
+            const size_t    obytes = output_floats * sizeof(float);
+            gpubuf_t<float> idev;
+            gpubuf_t<float> odev;
+            EXPECT_EQ(idev.alloc(ibytes), hipSuccess);
+            EXPECT_EQ(odev.alloc(obytes), hipSuccess);
+            EXPECT_EQ(hipMemcpy(idev.data(), input.data(), ibytes, hipMemcpyHostToDevice),
+                      hipSuccess);
+
+            rocfft_plan plan = nullptr;
+            EXPECT_EQ(rocfft_plan_create(&plan,
+                                         rocfft_placement_notinplace,
+                                         real_dft_type,
+                                         rocfft_precision_single,
+                                         real_lengths.size(),
+                                         real_lengths.data(),
+                                         1,
+                                         nullptr),
+                      rocfft_status_success);
+            void* ibuf = idev.data();
+            void* obuf = odev.data();
+            EXPECT_EQ(rocfft_execute(plan, &ibuf, &obuf, nullptr), rocfft_status_success);
+            EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
+
+            std::vector<float> output(output_floats);
+            EXPECT_EQ(hipMemcpy(output.data(), obuf, obytes, hipMemcpyDeviceToHost), hipSuccess);
+            EXPECT_EQ(rocfft_plan_destroy(plan), rocfft_status_success);
+            return output;
+        };
+
+        // both directions hit the same 2D kernel; the float counts follow from
+        // the direction (R2C is real -> Hermitian, C2R the reverse)
+        for(const auto type :
+            {rocfft_transform_type_real_forward, rocfft_transform_type_real_inverse})
+        {
+            const bool   forward      = type == rocfft_transform_type_real_forward;
+            const size_t input_floats = forward ? real_floats : herm_floats;
+
+            // the input pattern is arbitrary (need not be Hermitian-symmetric) -
+            // the property under test is only that the same input gives the same
+            // output
+            std::vector<float> input(input_floats);
+            for(size_t i = 0; i < input.size(); ++i)
+                input[i] = static_cast<float>(i % 7) - 3.0f;
+
+            // baseline, with nothing else in the twiddle cache
+            rocfft_cleanup();
+            rocfft_setup();
+            const std::vector<float> expected = run_real_transform(type, input);
+
+            // again, but after a complex transform of the colliding lengths whose
+            // plan, and so whose cached twiddle table, is still alive
+            rocfft_cleanup();
+            rocfft_setup();
+
+            rocfft_plan complex_plan = nullptr;
+            ASSERT_EQ(rocfft_plan_create(&complex_plan,
+                                         rocfft_placement_inplace,
+                                         rocfft_transform_type_complex_forward,
+                                         rocfft_precision_single,
+                                         complex_lengths.size(),
+                                         complex_lengths.data(),
+                                         1,
+                                         nullptr),
+                      rocfft_status_success);
+            // hold the plan for the rest of the iteration, however it exits
+            LocalCleanup destroy_complex_plan(
+                [&]() { EXPECT_EQ(rocfft_plan_destroy(complex_plan), rocfft_status_success); });
+
+            const size_t complex_bytes
+                = complex_lengths[0] * complex_lengths[1] * sizeof(rocfft_complex<float>);
+            gpubuf_t<rocfft_complex<float>> complex_dev;
+            ASSERT_EQ(complex_dev.alloc(complex_bytes), hipSuccess);
+            ASSERT_EQ(hipMemset(complex_dev.data(), 0, complex_bytes), hipSuccess);
+            void* complex_buf = complex_dev.data();
+            ASSERT_EQ(rocfft_execute(complex_plan, &complex_buf, nullptr, nullptr),
+                      rocfft_status_success);
+            ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+
+            const std::vector<float> actual = run_real_transform(type, input);
+
+            ASSERT_EQ(actual.size(), expected.size());
+            for(size_t i = 0; i < expected.size(); ++i)
+                ASSERT_FLOAT_EQ(actual[i], expected[i])
+                    << "transform type " << type << ", float " << i;
         }
     }
     ROCFFT_CATCH_TEST_EXCEPTIONS
@@ -921,6 +1125,12 @@ TEST(rocfft_UnitTest, rtc_test_harness)
     ROCFFT_CATCH_TEST_EXCEPTIONS;
 }
 
+// Plan capacity tests are stress tests and aren't really adding
+// extra code path coverage over other test cases.  ASAN can hit
+// problems with address space fragmentation with a huge number of
+// plans, so disable these test cases in that build.
+#if !__has_feature(address_sanitizer) && !defined(__SANITIZE_ADDRESS__)
+
 // Create M identical Bluestein plans concurrently to stress the
 // hipModule refcount cache.  Plans destroyed before returning.
 static void run_plan_capacity_test(size_t M)
@@ -991,4 +1201,45 @@ TEST(rocfft_UnitTest, DISABLED_plan_capacity_1m)
 {
     PROB_SKIP_UNITTEST();
     run_plan_capacity_test(1'000'000);
+}
+
+#endif
+
+// Test calling rocfft_destroy after any library singletons are torn down
+TEST(rocfft_DeathTest, plan_destroyed_at_exit)
+{
+    struct exit_time_plan
+    {
+        rocfft_plan plan = nullptr;
+        ~exit_time_plan()
+        {
+            if(plan)
+                (void)rocfft_plan_destroy(plan);
+        }
+    };
+
+    auto create_plan_destroyed_at_exit = []() -> void {
+        // Create object with static lifetime - we're aiming to have this
+        // be destroyed after any library singleton that might do device
+        // memory accounting.
+        static exit_time_plan holder;
+
+        size_t length = 64;
+        if(rocfft_plan_create(&holder.plan,
+                              rocfft_placement_inplace,
+                              rocfft_transform_type_complex_forward,
+                              rocfft_precision_single,
+                              1,
+                              &length,
+                              1,
+                              nullptr)
+           != rocfft_status_success)
+            std::exit(2);
+        std::exit(0);
+    };
+
+    // Death tests run in a fresh process, so library singletons are
+    // created after the static plan holder.
+    ::testing::GTEST_FLAG(death_test_style) = "threadsafe";
+    EXPECT_EXIT(create_plan_destroyed_at_exit(), ::testing::ExitedWithCode(0), "");
 }

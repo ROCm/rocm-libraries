@@ -48,6 +48,7 @@ set(hipsolverDn_test_source
   hipsolver_gtest_main.cpp
   getrs_gtest.cpp
   getrf_gtest.cpp
+  getri_gtest.cpp
   gebrd_gtest.cpp
   gels_gtest.cpp
   geqrf_gtest.cpp
@@ -55,6 +56,7 @@ set(hipsolverDn_test_source
   gesvd_gtest.cpp
   gesvda_gtest.cpp
   gesvdj_gtest.cpp
+  larft_gtest.cpp
   potrf_gtest.cpp
   potri_gtest.cpp
   potrs_gtest.cpp
@@ -166,6 +168,11 @@ else()
   )
 
   target_link_libraries(hipsolver-test PRIVATE ${CUDA_LIBRARIES} Threads::Threads)
+endif()
+
+# Mirror feature flags to test behaviour
+if(HIPSOLVER_ENABLE_EIGENSOLVERS_64)
+  target_compile_definitions(hipsolver-test PRIVATE HIPSOLVER_ENABLE_EIGENSOLVERS_64)
 endif()
 
 set_target_properties(hipsolver-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/staging")

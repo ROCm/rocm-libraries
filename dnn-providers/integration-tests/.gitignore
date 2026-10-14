@@ -1,2 +1,15 @@
 # Scratch diagnostic output from the migration pipeline (regenerated each run).
 .migration_reports/
+
+# All binary tensor data must go through DVC, never committed to git directly.
+# Each bundle's .bin files are tracked by its <Name>.tensors.dvc pointer; this
+# rule is a catch-all safety net so raw .bin can never be staged by accident.
+# Scoped here (one level above integration-test-bundles/) rather than inside a
+# single bundle-tree directory name, so it still applies if that tree is ever
+# renamed or reorganized again (see #11446).
+*.bin
+
+# Pre-#10162 name for integration-test-bundles/. Renamed; nothing should ever
+# be added back under the old name, but guard against accidental recreation
+# (e.g. a stale script or muscle-memory path) getting committed again.
+integration_test_bundles/

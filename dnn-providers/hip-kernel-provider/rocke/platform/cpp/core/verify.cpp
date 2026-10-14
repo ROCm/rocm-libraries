@@ -23,6 +23,7 @@
  */
 
 #include "rocke/verify.h"
+#include "rocke/tf32_internal.h"
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -290,6 +291,8 @@ static const char* const* required_attrs(rocke_opcode_t o, int* n)
     static const char* mma_keys[] = {"op_id"};
     static const char* yield_keys[] = {"num"};
     static const char* asm_keys[] = {"template", "constraints"};
+    static const char* scope_order_keys[] = {"scope", "ordering"};
+    static const char* scope_keys[] = {"scope"};
     switch(o)
     {
     case ROCKE_OP_ARITH_CONSTANT:
@@ -308,6 +311,13 @@ static const char* const* required_attrs(rocke_opcode_t o, int* n)
     case ROCKE_OP_TILE_INLINE_ASM:
         *n = 2;
         return asm_keys;
+    case ROCKE_OP_MEMREF_FENCE:
+    case ROCKE_OP_MEMREF_GLOBAL_FLAG_STORE:
+        *n = 2;
+        return scope_order_keys;
+    case ROCKE_OP_MEMREF_GLOBAL_FLAG_WAIT_EQ:
+        *n = 1;
+        return scope_keys;
     default:
         *n = 0;
         return NULL;
@@ -319,8 +329,36 @@ static void check_op(verifier_t* v, const rocke_op_t* op);
 
 /* ---- contracts ---- */
 
+/* IRBuilder._FENCE_SCOPES / _FENCE_ORDERINGS / _FLAG_STORE_ORDERINGS. */
+static const char* const k_fence_scopes[] = {"workgroup", "agent", "system", NULL};
+static const char* const k_fence_orderings[] = {"acquire", "release", "acq_rel", "seq_cst", NULL};
+static const char* const k_flag_store_orderings[] = {"monotonic", "release", "seq_cst", NULL};
+
+static bool in_set(const char* s, const char* const* set)
+{
+    for(; *set; ++set)
+        if(!strcmp(s, *set))
+            return true;
+    return false;
+}
+
+/* Python Verifier._check_sync_attrs: scope / ordering values of a fence or
+ * flag op (presence is checked by the required-attrs pass). */
+static void check_sync_attrs(verifier_t* v, const rocke_op_t* op, const char* const* orderings)
+{
+    const char* scope = rocke_attr_get_str(&op->attrs, "scope");
+    const char* ordering = rocke_attr_get_str(&op->attrs, "ordering");
+    if(scope && !in_set(scope, k_fence_scopes))
+        v_errf(v, op, "%s: unknown scope '%s'", op->name, scope);
+    if(orderings && ordering && !in_set(ordering, orderings))
+        v_errf(v, op, "%s: unknown ordering '%s'", op->name, ordering);
+}
+
 static void check_contract(verifier_t* v, const rocke_op_t* op)
 {
+    const char* tf32_error = rocke_tf32_op_error(op);
+    if(tf32_error)
+        v_errf(v, op, "%s", tf32_error);
     rocke_opcode_t o = op->opcode;
     const char* name = op->name;
     if(is_binary_same_type(o))
@@ -367,6 +405,10 @@ static void check_contract(verifier_t* v, const rocke_op_t* op)
                    name,
                    tn(op->results[0]->type),
                    tn(op->operands[0]->type));
+        }
+        if(o == ROCKE_OP_MATH_TANH && strcmp(tn(op->operands[0]->type), "f32") != 0)
+        {
+            v_errf(v, op, "math.tanh requires f32 operand, got %s", tn(op->operands[0]->type));
         }
     }
     else if(is_cmp(o))
@@ -465,6 +507,45 @@ static void check_contract(verifier_t* v, const rocke_op_t* op)
         {
             v_errf(v, op, "%s: must have no operands and no results", name);
         }
+    }
+    else if(o == ROCKE_OP_MEMREF_FENCE)
+    {
+        if(op->num_operands || op->num_results)
+        {
+            v_errf(v, op, "%s: must have no operands and no results", name);
+        }
+        check_sync_attrs(v, op, k_fence_orderings);
+    }
+    else if(o == ROCKE_OP_MEMREF_GLOBAL_FLAG_STORE || o == ROCKE_OP_MEMREF_GLOBAL_FLAG_WAIT_EQ)
+    {
+        if(op->num_operands != 3 || op->num_results)
+        {
+            v_errf(v,
+                   op,
+                   "%s: expected 3 operands / 0 results, got %d / %d",
+                   name,
+                   op->num_operands,
+                   op->num_results);
+            return;
+        }
+        const rocke_type_t* pt = op->operands[0]->type;
+        /* ir._is_flag_ptr: both lowerers address the flag as an i32. */
+        if(!pt || pt->kind != ROCKE_TYPE_PTR || !pt->space || strcmp(pt->space, "global")
+           || strcmp(tn(pt->pointee), "i32"))
+        {
+            v_errf(v, op, "%s: expected a global i32 pointer, got %s", name, tn(pt));
+        }
+        const char* what[] = {"index", "value"};
+        for(int i = 0; i < 2; ++i)
+        {
+            const rocke_type_t* t = op->operands[i + 1]->type;
+            if(strcmp(tn(t), "i32"))
+            {
+                v_errf(v, op, "%s: %s must be i32, got %s", name, what[i], tn(t));
+            }
+        }
+        check_sync_attrs(
+            v, op, o == ROCKE_OP_MEMREF_GLOBAL_FLAG_STORE ? k_flag_store_orderings : NULL);
     }
 }
 

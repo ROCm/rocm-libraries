@@ -185,7 +185,9 @@ template <typename ALayout,
           bool PermuteB,
           bool IsBPreShuffled          = false,
           bool ForceThreadTileTransfer = false,
-          bool IsFusedKernel           = false>
+          bool IsFusedKernel           = false,
+          bool UseLdsTranspose         = false,
+          bool TransposeC              = false>
 struct GridwiseGemm_wmma_cshuffle_v3
     : GridwiseGemm_wmma_cshuffle_v3_base<
           ALayout,
@@ -240,7 +242,9 @@ struct GridwiseGemm_wmma_cshuffle_v3
           PermuteB,
           IsBPreShuffled,
           ForceThreadTileTransfer,
-          IsFusedKernel>
+          IsFusedKernel,
+          UseLdsTranspose,
+          TransposeC>
 {
     using Base = GridwiseGemm_wmma_cshuffle_v3_base<
         ALayout,
@@ -295,7 +299,9 @@ struct GridwiseGemm_wmma_cshuffle_v3
         PermuteB,
         IsBPreShuffled,
         ForceThreadTileTransfer,
-        IsFusedKernel>;
+        IsFusedKernel,
+        UseLdsTranspose,
+        TransposeC>;
 
     using Base::I0;
     using Base::I1;
@@ -1030,9 +1036,16 @@ struct GridwiseGemm_wmma_cshuffle_v3
 
         const auto ds_batch_offset = compute_ptr_offset_of_batch.GetDsPtrOffset(g_idx);
 
-        const long_index_t a_n_offset =
-            (!CTranspose) ? amd_wave_read_first_lane(compute_ptr_offset_of_n.GetAPtrOffset(n_idx))
-                          : 0;
+        const long_index_t a_n_offset = [&]() -> long_index_t {
+            if constexpr((is_fwd || is_bwd_data) && !CTranspose)
+            {
+                return amd_wave_read_first_lane(compute_ptr_offset_of_n.GetAPtrOffset(n_idx));
+            }
+            else
+            {
+                return 0;
+            }
+        }();
 
         // b_n_offset
         const auto b_n_offset = [&]() -> long_index_t {
@@ -1052,10 +1065,27 @@ struct GridwiseGemm_wmma_cshuffle_v3
             }
         }();
 
-        const auto e_n_offset =
-            amd_wave_read_first_lane(compute_ptr_offset_of_n.GetEPtrOffset(n_idx));
+        const auto e_n_offset = [&]() -> long_index_t {
+            if constexpr((is_fwd || is_bwd_data))
+            {
+                return amd_wave_read_first_lane(compute_ptr_offset_of_n.GetEPtrOffset(n_idx));
+            }
+            else
+            {
+                return 0;
+            }
+        }();
 
-        const auto ds_n_offset = compute_ptr_offset_of_n.GetDsPtrOffset(n_idx);
+        const auto ds_n_offset = [&]() {
+            if constexpr((is_fwd || is_bwd_data))
+            {
+                return compute_ptr_offset_of_n.GetDsPtrOffset(n_idx);
+            }
+            else
+            {
+                return 0;
+            }
+        }();
 
         // ======== Grid pointers ======== //
 

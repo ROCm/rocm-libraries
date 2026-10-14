@@ -92,3 +92,8 @@ set_target_properties(hipsolver-bench PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PRO
 rocm_install(TARGETS hipsolver-bench COMPONENT benchmarks)
 
 target_compile_definitions(hipsolver-bench PRIVATE HIPSOLVER_BENCH ROCM_USE_FLOAT16)
+
+# Mirror feature flags to test behaviour
+if(HIPSOLVER_ENABLE_EIGENSOLVERS_64)
+  target_compile_definitions(hipsolver-bench PRIVATE HIPSOLVER_ENABLE_EIGENSOLVERS_64)
+endif()

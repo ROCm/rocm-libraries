@@ -37,6 +37,11 @@ else()
     set(ROCM_PATH /opt/rocm CACHE PATH "Default ROCm installation path")
 endif()
 
+# Set ROCM_LIBRARIES_ROOT for monorepo builds (shared ctest infrastructure)
+if(NOT DEFINED ROCM_LIBRARIES_ROOT)
+    set(ROCM_LIBRARIES_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
+endif()
+
 # Check if lib/rocm_sysdeps/lib exists in the ROCm path which indicates ROCm installation via TheRock
 set(USING_THE_ROCK OFF)
 if(EXISTS "${ROCM_PATH}/lib/rocm_sysdeps/lib")
@@ -212,23 +217,36 @@ endif()
 
 # set global compiler flags for the project
 # -fPIC -- Generate position-independent code if possible.
-# -mavx2 -- Support MMX, SSE, SSE2, SSE3, SSSE3, SSE4.1, SSE4.2, AVX and AVX2 built-in functions and code generation.
-# -mfma -- Support MMX, SSE, SSE2, SSE3, SSSE3, SSE4.1, SSE4.2, AVX and FMA built-in functions and code generation.
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fPIC -mavx2 -mf16c -mfma")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fPIC")
 
-# Check AVX/SSE support
-include(CheckCXXCompilerFlag)
+set(RPP_SIMDE_TARGET "")
 
-# Check AVX flag
-check_cxx_compiler_flag("-mavx" COMPILER_SUPPORTS_AVX)
-if(COMPILER_SUPPORTS_AVX)
-    add_definitions(-D__AVX2__)
-else()
-    # Check SSE flag
-    check_cxx_compiler_flag("-msse4" COMPILER_SUPPORTS_SSE)
-    if(COMPILER_SUPPORTS_SSE)
-        add_definitions(-D__SSE4_1__)
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|amd64|AMD64")
+    # x86 SIMD flags
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -mavx2 -mf16c -mfma")
+
+    # Check AVX/SSE support
+    include(CheckCXXCompilerFlag)
+    check_cxx_compiler_flag("-mavx" COMPILER_SUPPORTS_AVX)
+    if(COMPILER_SUPPORTS_AVX)
+        add_definitions(-D__AVX2__)
+    else()
+        check_cxx_compiler_flag("-msse4" COMPILER_SUPPORTS_SSE)
+        if(COMPILER_SUPPORTS_SSE)
+            add_definitions(-D__SSE4_1__)
+        endif()
     endif()
+else()
+    # Non-x86: use SIMDE for portable SIMD intrinsics
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(SIMDE REQUIRED simde)
+    add_library(simde::simde INTERFACE IMPORTED)
+    set_target_properties(simde::simde PROPERTIES
+        INTERFACE_INCLUDE_DIRECTORIES "${SIMDE_INCLUDE_DIRS}"
+    )
+    add_definitions(-D__AVX2__)
+    set(RPP_SIMDE_TARGET simde::simde)
+    message("-- ${Green}SIMDE found: ${SIMDE_INCLUDE_DIRS} (AVX2 emulation enabled)${ColourReset}")
 endif()
 
 #Generate version info
@@ -257,7 +275,7 @@ if("${BACKEND}" STREQUAL "HIP")
         endif()
         include(ROCMCheckTargetIds OPTIONAL RESULT_VARIABLE HAS_ROCM_CHECK_TARGET_IDS)
 
-        set(OPTIONAL_GPU_TARGETS "gfx1250")
+        set(OPTIONAL_GPU_TARGETS "gfx1250;gfx1250-strict")
         if(HAS_ROCM_CHECK_TARGET_IDS)
             rocm_check_target_ids(OPTIONAL_GPU_TARGETS_AVAILABLE TARGETS ${OPTIONAL_GPU_TARGETS})
         else() # if we don't have rocm_check_target_ids, just assume the targets are available
@@ -361,6 +379,9 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
 if(RPP_HIP_HOST_TARGET)
     target_link_libraries(${PROJECT_NAME} PUBLIC ${RPP_HIP_HOST_TARGET})
 endif()
+if(RPP_SIMDE_TARGET)
+    target_link_libraries(${PROJECT_NAME} PUBLIC ${RPP_SIMDE_TARGET})
+endif()
 if(RPP_PRIVATE_LINK_LIBS)
     target_link_libraries(${PROJECT_NAME} PRIVATE ${RPP_PRIVATE_LINK_LIBS})
 endif()
@@ -433,6 +454,17 @@ install(FILES ${CMAKE_CURRENT_BINARY_DIR}/rpp_version.h
 install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/cmake DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/test COMPONENT test)
 install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/utilities/test_suite/ DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/test COMPONENT test)
 
+# Install shared ctest infrastructure for test filtering (quick, standard, comprehensive, full labels)
+# Files are installed to cmake/shared/ctest/ to match the path expected by TestCategories.cmake
+if(DEFINED ROCM_LIBRARIES_ROOT AND EXISTS "${ROCM_LIBRARIES_ROOT}/shared/ctest")
+    install(FILES
+        ${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake
+        ${ROCM_LIBRARIES_ROOT}/shared/ctest/parse_ctest_categories.py
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/test/cmake/shared/ctest
+        COMPONENT test
+    )
+endif()
+
 # set license information
 set(CPACK_RESOURCE_FILE_LICENSE  "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
 install(FILES ${CPACK_RESOURCE_FILE_LICENSE} DESTINATION ${CMAKE_INSTALL_DOCDIR} COMPONENT runtime)
@@ -461,6 +493,11 @@ set(BIN_INSTALL_DIR  "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}")
 set(RPP_PACKAGE_BACKEND_TYPE "${BACKEND}")
 # Audio augmentations (same effective flag as RPP_AUDIO_SUPPORT / rpp_audio_augmentations_support.h)
 set(RPP_PACKAGE_AUDIO_AUGMENTATIONS_SUPPORT "${RPP_AUDIO_SUPPORT}")
+if(RPP_SIMDE_TARGET)
+    set(RPP_PACKAGE_SIMDE ON)
+else()
+    set(RPP_PACKAGE_SIMDE OFF)
+endif()
 
 # Generate Config File for rpp
 configure_package_config_file(

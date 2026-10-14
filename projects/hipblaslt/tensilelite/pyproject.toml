@@ -29,11 +29,10 @@ sort = "Cover"
 # tox env reads it, so a job that runs that env fails when coverage drops below
 # this number, without the value being duplicated in tox.ini or CI YAML.
 # (coverage-unit measures with --fail-under=0 and does not gate; see tox.ini.)
-# Interim value: the GPU-less coverage-unit run currently measures ~79% and the
-# 80% target is aspirational. Set to 75 for now so the gate can land green while
-# the per-file ratchet (AIHPBLAS-3878) prevents regressions; ratchet this back
-# up toward 80 as coverage improves.
-fail_under = 75
+# The GPU-less coverage-unit run is stable at ~84%. Keep two percentage points
+# of headroom for run-to-run variation while the per-file ratchet
+# (AIHPBLAS-3878) protects the individual modules.
+fail_under = 82
 exclude_lines = [
     "pragma: no cover",
     "def __repr__",
@@ -62,7 +61,7 @@ show_contexts = true
 
 [tool.pytest.ini_options]
 # You can also move pytest config here if desired
-testpaths = ["Tensile/Tests", "rocisa/test"]
+testpaths = ["tensilelite/Tests", "rocisa/test"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
@@ -83,7 +82,7 @@ dependencies = [
     "orjson",
     "yappi",
     "setuptools",
-    "nanobind",
+    "nanobind>=2.0,!=3.0.0",  # see rocisa/pyproject.toml for why 3.0.0 is excluded
     "cmake",
     "invoke",
     "filelock",
@@ -92,12 +91,12 @@ dependencies = [
 ]
 
 [project.scripts]
-Tensile = "Tensile.Tensile:main"
-TensileCreateLibrary = "Tensile.TensileCreateLibrary:run"
-TensileVerifyStinkyElfText = "Tensile.verify_stinky_comment_vs_elf_text:main"
-TensileGetPath = "Tensile:PrintTensileRoot"
-TensileBenchmarkCluster = "Tensile.TensileBenchmarkCluster:main"
-TensileRetuneLibrary = "Tensile.TensileRetuneLibrary:main"
+Tensile = "tensilelite.Tensile:main"
+TensileCreateLibrary = "tensilelite.TensileCreateLibrary:run"
+TensileVerifyStinkyElfText = "tensilelite.verify_stinky_comment_vs_elf_text:main"
+TensileGetPath = "tensilelite:PrintTensileRoot"
+TensileBenchmarkCluster = "tensilelite.TensileBenchmarkCluster:main"
+TensileRetuneLibrary = "tensilelite.TensileRetuneLibrary:main"
 
 [dependency-groups]
 dev = [
@@ -116,10 +115,7 @@ requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["Tensile*"]
-
-[tool.setuptools.package-data]
-Tensile = ["cmake/*"]
+include = ["tensilelite*", "Tensile"]
 
 [tool.uv]
 # Use the user's existing interpreter; never download a uv-managed Python.
@@ -136,9 +132,8 @@ rocisa = { workspace = true }
 members = ["rocisa"]
 
 # Mutation testing (mutmut 3.x) — slice-1 pilot.
-# See the Mutation testing section of
-# Tensile/Tests/unit/characterization/README.md (full plan archived in the
-# internal TensileLiteQualityTools repo, evidence-archive/).
+# See projects/hipblaslt/skills/tensilelite-mutation-rerun/SKILL.md for the
+# optional workflow.
 # mutmut 3.x copies `source_paths` into a `mutants/` dir and runs the selected
 # tests there, so the WHOLE Tensile package is copied (for imports to resolve)
 # while `only_mutate` restricts which files are actually mutated to the slice.
@@ -146,35 +141,36 @@ members = ["rocisa"]
 # fixtures. mutmut caches the initial non-Python source copy, so snapshots must
 # be refreshed explicitly for the copied test tree to match the source suite.
 [tool.mutmut]
-source_paths = ["Tensile"]
+
+source_paths = ["tensilelite"]
 only_mutate = [
-    "Tensile/Common/DataType.py",
-    "Tensile/Common/Utilities.py",
-    "Tensile/Common/Types.py",
-    "Tensile/Common/ValidParameters.py",
-    "Tensile/SolutionStructs/Naming.py",
-    "Tensile/SolutionStructs/Utilities.py",
-    "Tensile/TensileLogic/ValidChipId.py",
-    "Tensile/TensileLogic/ValidMatrixInstruction.py",
-    "Tensile/TensileLogic/ValidWorkGroup.py",
-    "Tensile/TensileLogic/ValidWorkGroupMappingXCC.py",
+    "tensilelite/Common/DataType.py",
+    "tensilelite/Common/Utilities.py",
+    "tensilelite/Common/Types.py",
+    "tensilelite/Common/ValidParameters.py",
+    "tensilelite/SolutionStructs/Naming.py",
+    "tensilelite/SolutionStructs/Utilities.py",
+    "tensilelite/TensileLogic/ValidChipId.py",
+    "tensilelite/TensileLogic/ValidMatrixInstruction.py",
+    "tensilelite/TensileLogic/ValidWorkGroup.py",
+    "tensilelite/TensileLogic/ValidWorkGroupMappingXCC.py",
 ]
 do_not_mutate = [
-    "Tensile/Tests/*",
+    "tensilelite/Tests/*",
     "*/Tests/*",
     "*/test_*.py",
     "*/conftest.py",
 ]
 pytest_add_cli_args_test_selection = [
-    "Tensile/Tests/unit/characterization/CommonTypes",
-    "Tensile/Tests/unit/characterization/CommonUtilities",
-    "Tensile/Tests/unit/characterization/DataType",
-    "Tensile/Tests/unit/characterization/Naming",
-    "Tensile/Tests/unit/characterization/SolutionStructsUtils",
-    "Tensile/Tests/unit/characterization/TensileLogic",
-    "Tensile/Tests/unit/characterization/ValidParameters"
+    "tensilelite/Tests/unit/characterization/CommonTypes",
+    "tensilelite/Tests/unit/characterization/CommonUtilities",
+    "tensilelite/Tests/unit/characterization/DataType",
+    "tensilelite/Tests/unit/characterization/Naming",
+    "tensilelite/Tests/unit/characterization/SolutionStructsUtils",
+    "tensilelite/Tests/unit/characterization/TensileLogic",
+    "tensilelite/Tests/unit/characterization/ValidParameters"
 ]
-also_copy = ["pytest.ini", "Tensile/Tests/unit/characterization"]
+also_copy = ["pytest.ini", "tensilelite/Tests/unit/characterization"]
 # mutate_only_covered_lines MUST stay false here: when true, mutmut runs an
 # in-process coverage gather whose _unload_modules_not_in() pops `rocisa` from
 # sys.modules; the later "Running stats" phase re-imports rocisa in the SAME
@@ -184,5 +180,17 @@ also_copy = ["pytest.ini", "Tensile/Tests/unit/characterization"]
 # later, pre-import rocisa at interpreter startup (e.g. a sitecustomize.py on the
 # path) so the unload snapshot keeps it loaded. Verified in-container 2026-06-07.
 mutate_only_covered_lines = false
-# max_stack_depth = 8  # report's stack-depth control (keeps broad char tests from
-                       # being "the relevant test" for everything); tune after the pilot.
+# Timeout deadline = (baseline_test_time + timeout_constant) * timeout_multiplier,
+# enforced as a WALL-CLOCK limit (SIGXCPU from a checker thread). The baseline is
+# measured once on a lightly loaded box, so when the run self-contends (mutmut
+# defaults max_children to os.cpu_count() -> 128 workers here) or a neighbouring
+# container adds load, per-mutant wall time inflates past the fixed deadline and
+# healthy mutants are miscounted as timeouts. Raising the multiplier gives margin;
+# always pair with `mutmut run --max-children 32` to bound self-contention so the
+# measurement is reproducible regardless of host load. A slice-2 run at host load
+# 35 produced 178 spurious timeouts under the defaults. Verified 2026-07-22.
+timeout_multiplier = 30.0
+# max_stack_depth is intentionally unset. It controls mutmut's dynamic
+# test-to-function association rather than source slicing. Measure candidate
+# values against the full unit-test candidate set before enabling one; a value
+# that is too low can exclude valid deeper characterization tests.

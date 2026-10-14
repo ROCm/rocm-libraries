@@ -3,13 +3,62 @@
 rocBLAS documentation is available at
 [https://rocm.docs.amd.com/projects/rocBLAS/en/latest/index.html](https://rocm.docs.amd.com/projects/rocBLAS/en/latest/index.html).
 
-## rocBLAS 5.7.0
+## rocBLAS 5.8.0 
+
+### Added
+
+* gfx1170 and gfx1171 enabled. Level 3 `gemm`, `gemm_ex`, and the functions that internally use GEMM default to the hipBLASLt backend on these architectures. `ROCBLAS_USE_HIPBLASLT` continues to force or disable the hipBLASLt backend.
+
+### Changed
+
+* On gfx1250, rocBLAS loads the Tensile library catalog that matches the device revision. Strict-revision silicon uses `library/gfx1250-strict` when that catalog is present in the build, and otherwise falls back to `library/gfx1250`.
+* On gfx950, hipBLASLt is now the default GEMM backend for every input type except real `f32_r`. Real single precision still defaults to Tensile. `ROCBLAS_USE_HIPBLASLT` continues to force or disable the hipBLASLt backend.
+* On gfx942 double-precision Level 3 `gemm`, `gemm_ex`, and the functions that internally use GEMM now default to the hipBLASLt backend. gfx942 devices other than the MI300A (gfx942 with 228 compute units) also default for to hipBLASLt for `f16_r/bf16_r` data, while the remaining data types on gfx942 default to Tensile. `ROCBLAS_USE_HIPBLASLT` continues to force or disable the hipBLASLt backend.
+* Batched GEMM now uses the same hipBLASLt selection as other GEMM while a stream is capturing. Previously, batched APIs were forced to the Tensile backend during stream capture.
+* `trsm`, `trsm_batched`, and `trsm_strided_batched` print the required and available workspace sizes when they return `rocblas_status_memory_error` because a fixed-size handle workspace is too small if the new `ROCBLAS_VERBOSE_ERROR` environment variable is set. Previously this failure looked identical to running out of device memory.
+
+### Optimized
+
+* Improved the performance of Level 2 `gemv` non-transposed (`TransA == N`) by selecting the n-split reduction from the launch shape rather than a fixed output-length crossover. The split applies when the output grid has at most 8 tiles and the column split produces at least 2 parallel blocks, or when the output length is at or below the crossover.
+* Improved the performance of Level 3 `gemm` and `gemm_ex` for transposed operands with a very large summation dimension. k-chunking, which keeps Tensile element offsets inside 32 bits, previously used `max(lda, ldb)` for every transpose combination, so a unit-stride summation was split into many small launches. The bound is now the k stride of each operand: the leading dimension when that operand is k-major, and 1 otherwise. k-major layouts that can overflow are still chunked.
+
+### Removed
+
+* The `ROCBLAS_USE_HIPBLASLT_BATCHED` environment variable, deprecated in `rocBLAS 5.6.0`, is removed and is now ignored. Batched GEMM is controlled by the same environment variable as all other GEMM, so a batched-only override is no longer required. Use `ROCBLAS_USE_HIPBLASLT=0` to select the Tensile backend for all GEMM, including batched.
+
+### Resolved issues
+
+* Fix incorrect results and out-of-bounds reads from Level 1 ILP64 `dot` and `dotc`, including batched, strided-batched, and `_ex` forms, when a negative increment is wide enough to take the 64-bit increment path and `n` fits the single-block reduction. That path shifted by `(n - 1)` before calling the launcher, which applies the same walk, and the `y` shift tested `incx` rather than `incy`. The offsets are now passed through unshifted.
+* Fix incorrect results and out-of-bounds indexing from Level 1 ILP64 `axpy` and `axpy_ex`, including batched and strided-batched forms, when `batch_count` is greater than 65535 and an increment is wide enough to take the 64-bit kernel. That kernel was launched with the full `batch_count` rather than the chunk length, so each pass walked past the current batch and applied `alpha * x` again.
+* Fix incorrect results and out-of-bounds accesses from Level 1 ILP64 `rot` and `rot_ex`, including batched and strided-batched forms, when `n` or `batch_count` is large enough to chunk the launch and `incx` or `incy` is negative. Chunk offsets were `n_base * inc`, and the wide-increment path used `-inc * n_base`, so a negative increment started at the wrong end of the vector. Each chunk now starts at `offset + (inc < 0 ? -inc * (n - n_chunk - n_base) : n_base * inc)`.
+* Fix Level 2 `trsv` and Level 3 `trsm`, `trtri`, `trmm`, and `gemmt` returning `rocblas_status_success` when an internal GEMM, GEMV, vector copy, or block helper failed. Those statuses are now returned to the caller. On the negative-`incx` path, a failed `trsv` also restores the caller's input vector, which the solve reverses in place.
+* Fix `rocblas_get_commit_hash_string` writing past the caller's buffer. The length check compared against the size of a pointer, so a buffer shorter than the commit hash was accepted, and the copy omitted the terminating null. `rocblas_get_version_string` and `rocblas_get_commit_hash_string` now require the size reported by the matching `*_size` query, including the terminating null.
+
+## rocBLAS 5.7.0 for ROCm 10.1.0
 
 ### Added
 
 * Level 3 grouped batched GEMM functions `rocblas_sgemm_grouped_batched`, `rocblas_dgemm_grouped_batched`, and `rocblas_gemm_grouped_batched_ex` for both C and FORTRAN, including ILP64 API (`_64` name suffix).
 
-## rocBLAS 5.6.0
+
+### Optimized
+
+* Improved the performance of Level 3 `gemm` for the problem sizes where `m == 1` or `n == 1` and `batch_count == 1` by using `gemv` kernels, previously applied only in `gemm_ex`. On gfx11 the per-precision heuristics guarding this path are also bypassed, except for the `1x1` case.
+* Improved the performance of Level 2 `gemv` non-transposed (`TransA == N`) for the problem sizes where `m` is small and `n` is large by splitting the reduction across the grid, as the transposed case already does.
+
+### Resolved issues
+
+* Fix incorrect per-batch `alpha`/`beta` values on the ILP64 (`_64`) path for batched and strided-batched `scal` (including `_ex`), `ger`, `geru`, `gerc`, `syr`, `symv`, `hemv`, `sbmv`, and `spmv` when `rocblas_set_batch_alpha_stride` or `rocblas_set_batch_beta_stride` is set in device pointer mode. The 64-bit launchers passed an unoffset scalar pointer into each batch chunk, and `scal` also advanced `alpha` by the vector-length chunk instead of the batch index, so later batches used the wrong scalars.
+* Fix out-of-bounds workspace access in Level 3 batched and strided-batched `syrk` and `herk` on gfx90a and gfx942 with `batch_count` greater than 65536, `k` of at least 500, and `n` below an internal per-architecture threshold, where the GEMM-only path advanced its workspace pointer cumulatively on each pass of the batch sweep and so wrote past the end of the workspace. This could corrupt memory past a workspace supplied through `rocblas_set_workspace` or, when the device memory pool was sized to the requirement reported by a size query, fault or return incorrect results. The ILP64 (`_64`) forms were unaffected.
+* Fix incorrect results from Level 1 `dot` and `dotc` batched and strided-batched forms, including their `_ex` forms, when `batch_count` is greater than 65535. Every batch item at index 65535 and beyond reduced an empty range and returned zero. The ILP64 (`_64`) forms were unaffected, as they chunk the batch dimension below that limit.
+* Fix incorrect results from Level 3 batched and strided-batched `trsm` on the small left-side device path when `batch_count` is greater than 65535 and each batch item has a distinct `A` pointer. Threads that finished the first grid pass left the kernel, so later passes could not reload `A`. Also fix Level 3 `trmm` out-of-place when `batch_count` is greater than 65535 and a per-batch `alpha` of zero caused the kernel to skip remaining batches. The ILP64 (`_64`) forms were unaffected, as they chunk the batch dimension below that limit.
+* Fix the hipBLASLt backend returning `rocblas_status_internal_error` when an explicit GEMM solution index is unsupported. The call now returns `rocblas_status_invalid_value`, matching Tensile.
+* Fix `ROCBLAS_TENSILE_GEMM_OVERRIDE_PATH` ignoring the solution indices reported by `rocblas_gemm_ex_get_solutions` and `rocblas-gemm-tune`. Tensile solutions are reported as negative indices and were previously discarded when loading an override file, leaving the default kernel selection in place. Raw positive Tensile indices in existing override files are still honored after fix. An entry which names no Tensile solution is skipped with a warning instead of failing the other overrides in the file.
+* Fix `rocblas-gemm-tune` skipped best solution reporting when it came from the Tensile backend. Problems whose fastest kernel belongs to neither backend, such as the internal gemv kernel, remain unreported as no index can name them.
+* Fix a process hang on Windows exit when profile logging is enabled (`ROCBLAS_LAYER` bit 2, for example `ROCBLAS_LAYER=4`). The profile dump waited on a worker thread that the loader had already terminated during `DLL_PROCESS_DETACH`.
+
+
+## rocBLAS 5.6.0 for ROCm 10.0.0
 
 ### Added
 
@@ -18,7 +67,12 @@ rocBLAS documentation is available at
 * Per-batch `alpha` (scalar vector) API support for Level 1 `scal_batched`, `scal_strided_batched`, and their `_ex` forms through `rocblas_set_batch_alpha_stride` when `rocblas_handle` is in `rocblas_pointer_mode_device`.
 * Support custom build with CMake arguments `BUILD_WITH_HIPBLASLT_ONLY=ON` that bypasses legacy Tensile.
 
+### Optimized
+
+* Improved hipBLASLt GEMM performance by reusing the rocBLAS handle workspace instead of allocating and freeing workspace for each problem.
+
 ### Resolved issues
+
 * Fix for issue in `rocblas_gemm_batched_ex_get_solutions`. Starting in `rocBLAS 5.5.0` when using `hipBLASLt` backend it could provide sub-optimal solutions.
 
 ### Upcoming changes

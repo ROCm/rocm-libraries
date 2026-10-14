@@ -141,7 +141,6 @@ install(
     FILES_MATCHING
     PATTERN "*.h"
     PATTERN "*.hpp"
-    PATTERN "*.h.in" EXCLUDE
     REGEX "/hipdnn_compatibility/" EXCLUDE
 )
 
@@ -155,6 +154,7 @@ if(HIPDNN_ENABLE_CUDNN_COMPATIBILITY)
         COMPONENT Development
         FILES_MATCHING
         PATTERN "*.h"
+        PATTERN "*.hpp"
     )
 endif()
 
@@ -162,6 +162,12 @@ endif()
 install(
     FILES "${CMAKE_CURRENT_BINARY_DIR}/include/hipdnn_frontend/version.h"
     DESTINATION ${HIP_DNN_FRONTEND_INSTALL_INCLUDE_DIR}/hipdnn_frontend
+    COMPONENT Development
+)
+
+install(
+    FILES ${CMAKE_CURRENT_SOURCE_DIR}/THIRD_PARTY_LICENSES.md
+    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/doc/hipdnn_frontend
     COMPONENT Development
 )
 

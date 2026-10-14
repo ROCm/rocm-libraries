@@ -51,7 +51,7 @@ C++ unit → Tensile pytest → client/API → integration → perf. Pick the lo
 the regression. Map the base test-level table onto these lanes when advising or reviewing.
 
 ### Adds — characterization snapshot (`.ambr` golden) discipline
-Scope: `projects/hipblaslt/tensilelite/Tensile/Tests/unit/characterization/` — characterization tests
+Scope: `projects/hipblaslt/tensilelite/tensilelite/Tests/unit/characterization/` — characterization tests
 that pin TensileLite's *current* Python behavior as syrupy `.ambr` goldens, run in the `-m unit`
 lane. Green means "behavior unchanged," not "correct"; a red is information about the PR's own
 change. When a PR's diff touches any `.ambr` file, gate on all of the below.
@@ -103,10 +103,10 @@ Overlap with the base branch on any of these since the PR diverged → **mandato
 Some merge-time breakage has **no file overlap at all**: one PR changes a *validator or allow-list*
 while another adds *data the validator checks*. Treat these as a coupled pair even though they touch
 different paths. The concrete hipBLASLt instance:
-- Validator / allow-list: `projects/hipblaslt/tensilelite/Tensile/Common/GlobalParameters.py` (the
+- Validator / allow-list: `projects/hipblaslt/tensilelite/tensilelite/Common/GlobalParameters.py` (the
   global-parameter registry and the `_assertGlobalParametersAreValid` ignored-key allow-list), plus
-  the enforcing test `projects/hipblaslt/tensilelite/Tensile/Tests/unit/test_input_yaml_corpus_clean.py`.
-- Validated data: YAML fixtures under `projects/hipblaslt/tensilelite/Tensile/Tests/**` (e.g.
+  the enforcing test `projects/hipblaslt/tensilelite/tensilelite/Tests/unit/test_input_yaml_corpus_clean.py`.
+- Validated data: YAML fixtures under `projects/hipblaslt/tensilelite/tensilelite/Tests/**` (e.g.
   `common/gemm/**`).
 
 If, since the PR diverged, the base branch changed the validator/allow-list **and** this PR adds or
@@ -119,6 +119,26 @@ on the merge-target still accepts it.
 ### Tightens — approvals
 Changes to the high-coupling files above need **≥ 2 hipBLASLt code-owner approvals** after the
 local team review (stricter than a generic base approval count).
+
+### Adds — prose and style for written artifacts
+When writing the PR description, review comments, handoffs, or design notes, apply the style guide in
+[`prose-style-context.md`](prose-style-context.md) (same directory). It sets the reader model,
+length limits, the sentence-level gate, warning-word list, and the evidence/scope discipline for
+prose. It governs how findings are written; it never relaxes a base or overlay MUST-rule.
+
+### Adds — recommend a description rewrite (author and review)
+Both **Author assist** and **Review assist** must produce a concrete recommended PR-description
+rewrite, not just a critique.
+- **Author:** after drafting the description from the base template, run the draft through the
+  `prose-style-context.md` sentence-level gate and final acceptance test, then present the revised
+  description as the recommendation.
+- **Review:** read the PR's current description, check it against the same gate, and when it fails
+  any check (undefined term, vague-improvement or hand-waving word, missing evidence/scope,
+  repetition or length that obscures the change, or a heading that cannot be answered from the
+  body) output a specific rewrite the author can paste in. Cite which gate items failed.
+- The rewrite is **advisory**. Per base operating principle 1, never post it to GitHub or edit the
+  PR without explicit human approval; present it in the chat/`BLOCKING`-items output only. Preserve
+  every repository-required heading and the JIRA/issue line.
 
 ### Adds — `W-TUNE`
 Component-specific waiver for tuning-only PRs, on top of the base waiver set.

@@ -52,7 +52,7 @@ __global__ void busy_spin(int* ready)
     if(threadIdx.x == 0)
     {
         pad[0] = 1;
-        __hip_atomic_fetch_add(ready, 1, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
+        __scoped_atomic_fetch_add(ready, 1, __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM);
     }
     __syncthreads();
     for(;;)
