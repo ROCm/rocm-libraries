@@ -30,6 +30,7 @@ def runner(monkeypatch):
     monkeypatch.delenv("ROCKE_TEST_ENGINE_ARCHIVE", raising=False)
     monkeypatch.delenv("ROCKE_ONLINE_LIB", raising=False)
     monkeypatch.delenv("ROCKE_REPLAY_CLI", raising=False)
+    monkeypatch.delenv("ROCKE_PROVENANCE_MANIFEST", raising=False)
     return module
 
 
@@ -249,11 +250,13 @@ def test_missing_owned_portable_artifacts_clear_external_values(
 ):
     monkeypatch.setenv("ROCKE_ONLINE_LIB", str(tmp_path / "stale.so"))
     monkeypatch.setenv("ROCKE_REPLAY_CLI", str(tmp_path / "stale-cli"))
+    monkeypatch.setenv("ROCKE_PROVENANCE_MANIFEST", str(tmp_path / "stale-manifest"))
 
     env = runner.native_pytest_env(tmp_path, "Release")
 
     assert "ROCKE_ONLINE_LIB" not in env
     assert "ROCKE_REPLAY_CLI" not in env
+    assert "ROCKE_PROVENANCE_MANIFEST" not in env
 
 
 def test_explicit_engine_archive_override_wins(runner, monkeypatch, tmp_path):

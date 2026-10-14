@@ -29,3 +29,21 @@ file(REMOVE "${_tmp}")
 if(NOT _copy_result EQUAL 0)
   message(FATAL_ERROR "failed to publish ${ROCKE_BUILD_ID_HEADER}: ${_copy_result}")
 endif()
+
+# Source-less installed tests cannot recompute the bundle hash. Publish the same
+# build-time identity as an independent test-artifact manifest so they can
+# validate an explicitly installed CLI rather than trusting any matching binary.
+if(DEFINED ROCKE_BUILD_ID_MANIFEST)
+  get_filename_component(_manifest_dir "${ROCKE_BUILD_ID_MANIFEST}" DIRECTORY)
+  file(MAKE_DIRECTORY "${_manifest_dir}")
+  set(_manifest_tmp "${ROCKE_BUILD_ID_MANIFEST}.tmp")
+  file(WRITE "${_manifest_tmp}" "${ROCKE_ENGINE_VERSION} ${_rocke_build_id}\n")
+  execute_process(COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                          "${_manifest_tmp}" "${ROCKE_BUILD_ID_MANIFEST}"
+                  RESULT_VARIABLE _manifest_copy_result)
+  file(REMOVE "${_manifest_tmp}")
+  if(NOT _manifest_copy_result EQUAL 0)
+    message(FATAL_ERROR
+            "failed to publish ${ROCKE_BUILD_ID_MANIFEST}: ${_manifest_copy_result}")
+  endif()
+endif()

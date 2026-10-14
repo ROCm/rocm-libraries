@@ -51,16 +51,17 @@ end to author artifacts. The lanes are deliberately separated:
 | in-package unit modules | always; never builds native artifacts | codecs, ABI, guards, launch plans, freshness policy |
 | recorder coverage | always; pure Python | every buildable family records without gaps |
 | shared-engine parity | `integration`; source-matched library | C++ replay LLVM is byte-identical for each supported, buildable family/arch cell |
-| standalone replay | `integration`; matching library/CLI bundle | deployment-shaped replay is byte-identical |
-| recipe rolling | `integration` only where native replay is used | sampled and held-out recipes replay exactly |
+| standalone replay | explicit source-matched or installed-manifest-validated CLI | deployment-shaped replay is byte-identical |
+| recipe rolling | `integration` for shared-engine replay; explicit CLI for standalone replay | sampled and held-out recipes replay exactly |
 | CTest decoder/VM units | configured CMake build | hermetic native decoder and VM behavior |
 
-Direct pytest builds one source/build-recipe-keyed shared-engine/CLI bundle on
-demand for the integration lanes. The normal `tests/run_all.py` path configures,
+Direct pytest builds source/build-recipe-keyed artifacts on demand: CLI-only
+lanes resolve only the CLI, while integration lanes validate the complete
+shared-engine/CLI bundle. The normal `tests/run_all.py` path configures,
 preflights, and supplies both binaries from its build root, so an unrelated
 local cache cannot affect that gate. A deliberately supplied foreign CMake build
 root cannot own rocKE targets; in that exceptional case pytest resolves the same
-source-keyed bundle used by direct invocation.
+source-keyed artifacts used by direct invocation.
 
 ## The gate that matters
 
@@ -89,9 +90,12 @@ The full local path owns all of its artifacts and is the closest CI equivalent:
 python tests/run_all.py
 ```
 
-Cases that construct or require native replay artifacts carry the `integration`
-marker. The remaining unit, recorder, roller, codec, and coverage tier never
-constructs native artifacts; a few unit modules opportunistically exercise an
+Cases that require a shared engine or compile replayed artifacts carry the
+`integration` marker. Standalone CLI consumers remain in the installed quick
+lane: CTest supplies the prebuilt CLI and its build-generated provenance
+manifest, so those tests neither discover `librocke` nor build native code. The
+remaining unit, recorder, roller, codec, and coverage tier never constructs
+native artifacts; a few unit modules opportunistically exercise an
 already-supplied source-matched engine:
 
 ```

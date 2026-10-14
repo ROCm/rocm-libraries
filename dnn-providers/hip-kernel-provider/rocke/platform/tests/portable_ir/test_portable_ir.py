@@ -24,6 +24,7 @@
 #                   It comes from the same source-keyed artifact bundle.
 
 import os
+import pkgutil
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -32,18 +33,22 @@ from pathlib import Path
 
 import pytest
 
+import rocke.portable_ir.tests as _unit_tests
+
 _HERE = Path(__file__).resolve().parent
 _PLATFORM = _HERE.parents[1]  # tests/portable_ir -> tests -> platform
 _PYROOT = _PLATFORM / "python"
-_LIBRARY = _PLATFORM.parent / "library"
+_LIBRARY_ROOTS = (
+    _PLATFORM.parent / "library",  # source tree: rocke/library
+    _PLATFORM / "tests" / "library",  # installed tree: <test-root>/tests/library
+)
 
 
 def _env():
     """Subprocess env with the engine package (and the library tree) importable."""
     env = dict(os.environ)
     parts = [str(_PYROOT)]
-    if (_LIBRARY / "kernels").is_dir():
-        parts.append(str(_LIBRARY))
+    parts.extend(str(root) for root in _LIBRARY_ROOTS if (root / "kernels").is_dir())
     if env.get("PYTHONPATH"):
         parts.append(env["PYTHONPATH"])
     env["PYTHONPATH"] = os.pathsep.join(parts)
@@ -76,8 +81,14 @@ def _online_lib():
     return _portable_ir_artifacts().library
 
 
+@cache
 def _replay_cli():
-    return _portable_ir_artifacts().replay_cli
+    """Resolve the standalone CLI without imposing a shared-library dependency."""
+    from rocke.portable_ir.src import online
+
+    replay_cli = online.resolve_replay_cli_path()
+    assert replay_cli is not None
+    return replay_cli
 
 
 def _run(args, **kw):
@@ -86,14 +97,45 @@ def _run(args, **kw):
     )
 
 
+def test_subprocess_env_includes_an_installed_library_tree(monkeypatch, tmp_path):
+    installed = tmp_path / "tests" / "library"
+    (installed / "kernels").mkdir(parents=True)
+    monkeypatch.setattr(sys.modules[__name__], "_LIBRARY_ROOTS", (installed,))
+    monkeypatch.delenv("PYTHONPATH", raising=False)
+
+    assert str(installed) in _env()["PYTHONPATH"].split(os.pathsep)
+
+
+def test_replay_cli_resolution_does_not_require_a_shared_library(monkeypatch):
+    """Installed CLI consumers must not acquire the source-only library lane."""
+    from rocke.portable_ir.src import online
+
+    _replay_cli.cache_clear()
+    monkeypatch.setattr(online, "resolve_replay_cli_path", lambda: "installed-cli")
+    monkeypatch.setattr(
+        online,
+        "resolve_library_path",
+        lambda: pytest.fail("CLI-only resolution requested librocke"),
+    )
+    try:
+        assert _replay_cli() == "installed-cli"
+    finally:
+        _replay_cli.cache_clear()
+
+
 # ---------------------------------------------------------------------
 # Always-on unit/coverage lanes (never build a native artifact on demand)
 # ---------------------------------------------------------------------
-_UNIT_TEST_DIR = _PLATFORM / "python" / "rocke" / "portable_ir" / "tests"
-# Discovered rather than listed. A hardcoded list silently stops covering new
-# test modules -- test_roll_nd and test_roll_regimes were both missing from it --
-# and a test that never runs is worse than no test, because it reads as covered.
-_UNIT_MODULES = sorted(p.stem for p in _UNIT_TEST_DIR.glob("test_*.py"))
+# Discover through the importable package rather than a repository path. TheRock
+# relocates ``rocke`` beside the installed CTest metadata, where no
+# ``platform/python`` source layout exists.
+_UNIT_MODULES = sorted(
+    module.name
+    for module in pkgutil.iter_modules(_unit_tests.__path__)
+    if module.name.startswith("test_")
+)
+if not _UNIT_MODULES:
+    raise RuntimeError("portable-IR unit package contains no test modules")
 
 
 @pytest.mark.parametrize("mod", _UNIT_MODULES)
@@ -142,7 +184,6 @@ def test_parity_matrix():
     assert r.returncode == 0, r.stdout[-6000:] + r.stderr[-4000:]
 
 
-@pytest.mark.integration
 def test_standalone_cli_matches_python(tmp_path):
     """A binary with no Python in it reproduces the Python lowerer's .ll.
 
