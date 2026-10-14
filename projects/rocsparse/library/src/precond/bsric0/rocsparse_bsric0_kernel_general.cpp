@@ -126,7 +126,8 @@ namespace rocsparse
 
                     // Load diagonal entry
                     T diag_val
-                        = bsr_val[block_dim * block_dim * local_block_diag + block_dim * k + k];
+                        = bsr_val[static_cast<int64_t>(block_dim) * block_dim * local_block_diag
+                                  + block_dim * k + k];
 
                     // Row has numerical zero pivot
                     if(diag_val == static_cast<T>(0))
@@ -147,11 +148,13 @@ namespace rocsparse
                     // Corresponding value
                     if(direction == rocsparse_direction_row)
                     {
-                        val = bsr_val[block_dim * block_dim * j + block_dim * row + k];
+                        val = bsr_val[static_cast<int64_t>(block_dim) * block_dim * j
+                                      + block_dim * row + k];
                     }
                     else
                     {
-                        val = bsr_val[block_dim * block_dim * j + block_dim * k + row];
+                        val = bsr_val[static_cast<int64_t>(block_dim) * block_dim * j
+                                      + block_dim * k + row];
                     }
 
                     // Local row sum
@@ -196,15 +199,17 @@ namespace rocsparse
                                     T vj = static_cast<T>(0);
                                     if(direction == rocsparse_direction_row)
                                     {
-                                        vp = bsr_val[block_dim * block_dim * p + block_dim * k + q];
-                                        vj = bsr_val[block_dim * block_dim * m + block_dim * row
-                                                     + q];
+                                        vp = bsr_val[static_cast<int64_t>(block_dim) * block_dim * p
+                                                     + block_dim * k + q];
+                                        vj = bsr_val[static_cast<int64_t>(block_dim) * block_dim * m
+                                                     + block_dim * row + q];
                                     }
                                     else
                                     {
-                                        vp = bsr_val[block_dim * block_dim * p + block_dim * q + k];
-                                        vj = bsr_val[block_dim * block_dim * m + block_dim * q
-                                                     + row];
+                                        vp = bsr_val[static_cast<int64_t>(block_dim) * block_dim * p
+                                                     + block_dim * q + k];
+                                        vj = bsr_val[static_cast<int64_t>(block_dim) * block_dim * m
+                                                     + block_dim * q + row];
                                     }
 
                                     // If a match has been found, do linear combination
@@ -219,11 +224,15 @@ namespace rocsparse
 
                     if(direction == rocsparse_direction_row)
                     {
-                        bsr_val[block_dim * block_dim * j + block_dim * row + k] = val;
+                        bsr_val[static_cast<int64_t>(block_dim) * block_dim * j + block_dim * row
+                                + k]
+                            = val;
                     }
                     else
                     {
-                        bsr_val[block_dim * block_dim * j + block_dim * k + row] = val;
+                        bsr_val[static_cast<int64_t>(block_dim) * block_dim * j + block_dim * k
+                                + row]
+                            = val;
                     }
                 }
             }
@@ -231,7 +240,8 @@ namespace rocsparse
             // Handle diagonal block column of block row
             for(J j = 0; j < block_dim; j++)
             {
-                J row_diag = block_dim * block_dim * block_row_diag + block_dim * j + j;
+                int64_t row_diag = static_cast<int64_t>(block_dim) * block_dim * block_row_diag
+                                   + block_dim * j + j;
 
                 // Check if 'col' row is complete
                 if(j == row)
@@ -271,11 +281,13 @@ namespace rocsparse
                     // Corresponding value
                     if(direction == rocsparse_direction_row)
                     {
-                        val = bsr_val[block_dim * block_dim * block_row_diag + block_dim * row + j];
+                        val = bsr_val[static_cast<int64_t>(block_dim) * block_dim * block_row_diag
+                                      + block_dim * row + j];
                     }
                     else
                     {
-                        val = bsr_val[block_dim * block_dim * block_row_diag + block_dim * j + row];
+                        val = bsr_val[static_cast<int64_t>(block_dim) * block_dim * block_row_diag
+                                      + block_dim * j + row];
                     }
 
                     // Local row sum
@@ -289,13 +301,17 @@ namespace rocsparse
                         {
                             if(direction == rocsparse_direction_row)
                             {
-                                vk = bsr_val[block_dim * block_dim * k + block_dim * j + q];
-                                vj = bsr_val[block_dim * block_dim * k + block_dim * row + q];
+                                vk = bsr_val[static_cast<int64_t>(block_dim) * block_dim * k
+                                             + block_dim * j + q];
+                                vj = bsr_val[static_cast<int64_t>(block_dim) * block_dim * k
+                                             + block_dim * row + q];
                             }
                             else
                             {
-                                vk = bsr_val[block_dim * block_dim * k + block_dim * q + j];
-                                vj = bsr_val[block_dim * block_dim * k + block_dim * q + row];
+                                vk = bsr_val[static_cast<int64_t>(block_dim) * block_dim * k
+                                             + block_dim * q + j];
+                                vj = bsr_val[static_cast<int64_t>(block_dim) * block_dim * k
+                                             + block_dim * q + row];
                             }
 
                             // If a match has been found, do linear combination
@@ -307,17 +323,21 @@ namespace rocsparse
                     {
                         if(direction == rocsparse_direction_row)
                         {
-                            vk = bsr_val[block_dim * block_dim * block_row_diag + block_dim * j
-                                         + q];
-                            vj = bsr_val[block_dim * block_dim * block_row_diag + block_dim * row
-                                         + q];
+                            vk = bsr_val[static_cast<int64_t>(block_dim) * block_dim
+                                             * block_row_diag
+                                         + block_dim * j + q];
+                            vj = bsr_val[static_cast<int64_t>(block_dim) * block_dim
+                                             * block_row_diag
+                                         + block_dim * row + q];
                         }
                         else
                         {
-                            vk = bsr_val[block_dim * block_dim * block_row_diag + block_dim * q
-                                         + j];
-                            vj = bsr_val[block_dim * block_dim * block_row_diag + block_dim * q
-                                         + row];
+                            vk = bsr_val[static_cast<int64_t>(block_dim) * block_dim
+                                             * block_row_diag
+                                         + block_dim * q + j];
+                            vj = bsr_val[static_cast<int64_t>(block_dim) * block_dim
+                                             * block_row_diag
+                                         + block_dim * q + row];
                         }
 
                         // If a match has been found, do linear combination
@@ -329,11 +349,15 @@ namespace rocsparse
 
                     if(direction == rocsparse_direction_row)
                     {
-                        bsr_val[block_dim * block_dim * block_row_diag + block_dim * row + j] = val;
+                        bsr_val[static_cast<int64_t>(block_dim) * block_dim * block_row_diag
+                                + block_dim * row + j]
+                            = val;
                     }
                     else
                     {
-                        bsr_val[block_dim * block_dim * block_row_diag + block_dim * j + row] = val;
+                        bsr_val[static_cast<int64_t>(block_dim) * block_dim * block_row_diag
+                                + block_dim * j + row]
+                            = val;
                     }
                 }
 
