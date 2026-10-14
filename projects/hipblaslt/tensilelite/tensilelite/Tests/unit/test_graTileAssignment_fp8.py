@@ -158,6 +158,7 @@ TILE_CONFIGS_FP8 = [
 
 # ---- Pytest tests ----
 
+@pytest.mark.gpu
 @pytest.mark.skipif(not HAS_GFX950, reason=f"GPU tests require gfx950, found {GFX_TARGET}")
 class TestGraTileAssignmentFP8GPU:
 
