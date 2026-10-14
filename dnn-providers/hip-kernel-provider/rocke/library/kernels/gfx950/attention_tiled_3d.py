@@ -1276,13 +1276,10 @@ def supports_tiled_3d_spec(
 ) -> Tuple[bool, str]:
     """Spec-shaped wrapper for ``supports_tiled_3d``.
 
-    ``supports_tiled_3d`` is kwargs-only and unreachable from a spec instance
-    (``hkp_pack``'s ``_check_support_predicate`` skips kwargs-only predicates).
-    This wrapper extracts the necessary fields and delegates, making the 3D
-    unified builder validatable at pack time. Update ``_PREDICATE_ALIASES`` in
-    ``hkp_pack/rocke_compile.py`` to point ``build_unified_attention_3d_tiled``
-    and ``build_unified_attention_reduce_tiled`` here instead of at
-    ``supports_tiled_3d``.
+    ``supports_tiled_3d`` takes its parameters as keyword-only arguments, so
+    ``hkp_pack``'s ``_check_support_predicate`` cannot call it with a spec instance.
+    This wrapper reads each of them off the spec and delegates, making the 3D
+    unified builder validatable at pack time.
     """
     use_fp8 = spec.kv_storage_dtype is not None
     return supports_tiled_3d(

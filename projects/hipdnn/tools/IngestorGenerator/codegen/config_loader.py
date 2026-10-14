@@ -317,6 +317,10 @@ def load_config(path: Path) -> IngestorConfig:
                         f"pack '{pack_raw['name']}' kernel "
                         f"'{kernel_raw['name']}' arch",
                     ),
+                    default=_default_marker(
+                        kernel_raw.get("default", False),
+                        f"pack '{pack_raw['name']}' kernel '{kernel_raw['name']}'",
+                    ),
                 )
             )
         packs.append(
@@ -345,6 +349,8 @@ def load_config(path: Path) -> IngestorConfig:
     # sequence" ValueError from a scalar and preempt the shaped diagnostic.
     specialization_raw = raw.get("specialization") or {}
     _require_specialization_mapping(specialization_raw)
+    if "reduction" in raw:
+        check_reduction(raw["reduction"])
 
     config = IngestorConfig(
         engine=engine,
@@ -356,6 +362,7 @@ def load_config(path: Path) -> IngestorConfig:
         workspace_policy=raw.get("workspace_policy", "none"),
         authored_subpath=raw.get("authored_subpath", ""),
         specialization=dict(specialization_raw),
+        reduction=dict(raw.get("reduction") or {}),
     )
 
     _validate_config(config)
@@ -538,7 +545,7 @@ def _drop_tag_slot(match) -> str:
 
 #: A ``knob_set`` arm's own keys, which are NOT spec fields. Everything else in
 #: an arm is written into the kernel's ``kernel_source.spec``.
-_ARM_CONTROL_KEYS = frozenset({"tag", "ordinal_offset", "metadata"})
+_ARM_CONTROL_KEYS = frozenset({"tag", "ordinal_offset", "metadata", "default"})
 #: A shape entry's own keys, likewise not spec fields.
 _SHAPE_CONTROL_KEYS = frozenset({"knobs", "resolved", "ordinal"})
 
@@ -768,7 +775,7 @@ def _expand_one_arm(
             value = arm_metadata[field_name]
         # Not `field_name in spec`: a spec key present with value None means
         # the kernel's policy decides at build time, the same tri-state as
-        # omitting it (`dispatch_parity.build_config` dumps the builder's
+        # omitting it (`registry_enumerator.build_config` dumps the builder's
         # dataclass, so every unset policy knob arrives present-and-None).
         elif spec.get(field_name) is not None:
             value = spec[field_name]
@@ -842,9 +849,90 @@ def _expand_one_arm(
         "name": name,
         "kernel_source": {"spec": spec},
         "metadata": metadata,
+        "default": _default_marker(arm.get("default", False), f"{shape_where} arm"),
         _AUTHORED_KERNEL_SOURCE: (shape_where, {}),
         _EXPANDER_CONSUMED_DEFAULTS: frozenset({"spec"}),
     }
+
+
+def _default_marker(value, where: str) -> bool:
+    if not isinstance(value, bool):
+        raise ConfigError(
+            f"{where} 'default' must be true or false, got {value!r}. It marks the "
+            f"cell's declared default variant, which variant reduction always keeps."
+        )
+    return value
+
+
+#: Kernels per arch in one pack above which the AOT build is a red flag.
+DEFAULT_AOT_BUDGET_PER_ARCH = 1000
+
+_KNOWN_REDUCTION = frozenset({"fields", "aot_budget_per_arch"})
+_KNOWN_REDUCTION_FIELDS = frozenset({"feature", "performance", "ignored"})
+_KNOWN_PERFORMANCE_KNOB = frozenset({"name", "divides", "unset_resolves_by"})
+
+
+def _require_known_keys(value, known: frozenset, where: str) -> None:
+    _require_mapping(value, where)
+    unknown = sorted(set(value) - known)
+    if unknown:
+        raise ConfigError(
+            f"{where} declares {unknown}, which this loader does not read. Known "
+            f"keys: {sorted(known)}."
+        )
+
+
+def check_reduction(reduction) -> None:
+    """Validate a ``reduction`` block: ``fields.feature``/``performance``/``ignored``
+    (each field in at most one) and a positive ``aot_budget_per_arch``."""
+    _require_known_keys(reduction, _KNOWN_REDUCTION, "'reduction'")
+    if "fields" not in reduction:
+        raise ConfigError("'reduction' is missing required key 'fields'.")
+    fields = reduction["fields"]
+    _require_known_keys(fields, _KNOWN_REDUCTION_FIELDS, "'reduction.fields'")
+    listed = []
+    for key in ("feature", "ignored"):
+        names = _require_sequence(fields.get(key), f"'reduction.fields.{key}'")
+        if any(not isinstance(n, str) for n in names):
+            raise ConfigError(
+                f"'reduction.fields.{key}' must list field names; got {names!r}."
+            )
+        listed.extend(names)
+    knobs = _require_sequence(
+        fields.get("performance"), "'reduction.fields.performance'", what="knobs"
+    )
+    for index, knob in enumerate(knobs):
+        where = f"'reduction.fields.performance[{index}]'"
+        _require_known_keys(knob, _KNOWN_PERFORMANCE_KNOB, where)
+        if not isinstance(knob.get("name"), str):
+            raise ConfigError(f"{where} must name the knob under 'name'.")
+        if "divides" in knob and not isinstance(knob["divides"], str):
+            raise ConfigError(
+                f"{where} 'divides' must name the shape field the knob divides; got "
+                f"{knob['divides']!r}."
+            )
+        accessor = knob.get("unset_resolves_by")
+        if accessor is not None and (
+            not isinstance(accessor, str) or not accessor.isidentifier()
+        ):
+            raise ConfigError(
+                f"{where} 'unset_resolves_by' must name one zero-argument accessor on "
+                f"the spec; {accessor!r} is not an identifier."
+            )
+        listed.append(knob["name"])
+    repeated = sorted({n for n in listed if listed.count(n) > 1})
+    if repeated:
+        raise ConfigError(
+            f"'reduction.fields' lists {repeated} more than once. A field is a "
+            f"feature, a performance knob or ignored; two classifications leave "
+            f"reduction to guess which one holds."
+        )
+    budget = reduction.get("aot_budget_per_arch", DEFAULT_AOT_BUDGET_PER_ARCH)
+    if isinstance(budget, bool) or not isinstance(budget, int) or budget <= 0:
+        raise ConfigError(
+            f"'reduction.aot_budget_per_arch' must be a positive integer; got "
+            f"{budget!r}."
+        )
 
 
 def _reject_deprecated_dict_key(
@@ -935,6 +1023,7 @@ _KNOWN_TOP = frozenset(
         "authored_subpath",
         "graph_match",
         "specialization",
+        "reduction",
     }
 )
 _KNOWN_ENGINE = frozenset(
@@ -971,7 +1060,9 @@ _KNOWN_VARIANT_GROUP = frozenset(
         "spec_order",
     }
 )
-_KNOWN_KERNEL = frozenset({"name", "kernel_source", "metadata", "priority", "arch"})
+_KNOWN_KERNEL = frozenset(
+    {"name", "kernel_source", "metadata", "priority", "arch", "default"}
+)
 #: Each authored kind's MANDATORY ``kernel_source`` fields, mirroring
 #: ``hkp_pack._validate_ukd_fields``. Shared with `_KNOWN_KERNEL_SOURCE_BY_KIND`
 #: below so the required set and the closed vocabulary cannot drift.

@@ -432,3 +432,28 @@ class TestUsageErrorsAreNotDifferences:
         b.write_text(json.dumps({"version": "1.0"}))
         assert catalog_diff.main(["--shipped", str(a), "--regenerated", str(b)]) == 2
         assert "no 'kernelDescriptors'" in capsys.readouterr().err
+
+
+def _subset_case(change: str) -> tuple[dict, dict]:
+    shipped = _kdp([_entry("k0"), _entry("k1", 32)])
+    if change == "dropped":
+        return shipped, _kdp([_entry("k0")])
+    if change == "spec":
+        return shipped, _kdp([_entry("k0"), _entry("k1", 128)])
+    return shipped, _kdp([_entry("k0"), _entry("k1", 32), _entry("k_extra", 16)])
+
+
+@pytest.mark.parametrize("change,rc", [("dropped", 1), ("spec", 1), ("extra", 0)])
+def test_subset(run, capsys, change, rc):
+    shipped, regenerated = _subset_case(change)
+    assert run(shipped, regenerated, "--ignore-ids", "--subset") == rc
+    out = capsys.readouterr().out
+    if rc:
+        assert "only in shipped" in out and "k1" in out, out
+    else:
+        assert "registry extras (not shipped): 1" in out and "k_extra" in out, out
+
+
+def test_subset_excludes_strict_spec(run):
+    kdp = _kdp([_entry("k0")])
+    assert run(kdp, kdp, "--subset", "--strict-spec") == 2
