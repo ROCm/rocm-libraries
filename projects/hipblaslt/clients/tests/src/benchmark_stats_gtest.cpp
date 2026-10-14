@@ -8,6 +8,7 @@
 // Host-only unit tests for benchmark_stats.hpp: no GPU/HIP calls, pure logic.
 
 #include "benchmark_stats.hpp"
+#include "benchmark_timing.hpp"
 
 #include <gtest/gtest.h>
 
@@ -17,6 +18,25 @@ using hipblaslt_bench::compute_rotating_buffer_plan;
 using hipblaslt_bench::rate_per_second;
 using hipblaslt_bench::TimingConfig;
 using hipblaslt_bench::validate_adaptive_config;
+
+TEST(HostUnitBenchmarkTiming, smoke_ZeroTimedIterationsDoesNotLaunch)
+{
+    TimingConfig cfg;
+    cfg.iters = 0;
+    // The early return must work without a GPU or valid HIP events/stream.
+    cfg.use_gpu_timer = true;
+    hipblaslt_bench::TimingResult result;
+    result.mean_us   = 17.0;
+    result.hot_iters = 3;
+    int launches     = 0;
+    hipblaslt_bench::run_measurement(
+        [&](int64_t) { ++launches; }, cfg, nullptr, nullptr, nullptr, result);
+    EXPECT_EQ(launches, 0);
+    EXPECT_EQ(result.hot_iters, 0);
+    EXPECT_EQ(result.samples, 0);
+    EXPECT_EQ(result.batch, 0);
+    EXPECT_DOUBLE_EQ(result.mean_us, 0.0);
+}
 
 namespace
 {
