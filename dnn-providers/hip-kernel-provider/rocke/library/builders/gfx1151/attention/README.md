@@ -17,16 +17,15 @@ vLLM v1 serving path rather than in isolated microbenchmarks alone.
 | Regime | compute-bound, ~5500 FLOP/byte | bandwidth-bound, ~4 FLOP/byte |
 | Reported as | TFLOP/s | **GB/s** — see [§5.1](#51-why-decode-must-be-reported-in-gbs) |
 | Isolated best | **1.57×** at S=1024, **1.14×** at S=8192 | **1.09×** at Sk=32768 |
-| End-to-end | **1.073× TTFT** at a 30720-token prompt | **1.024× ITL** at ctx32k |
+| End-to-end | **1.115× TTFT** at a 30720-token prompt | **1.014× ITL** at ctx32k |
 | Default | on (`ROCKE_MIN_SEQLEN=512`) | off (`ROCKE_PAGED_DECODE=1` to enable) |
 
 **Together, on one Qwen3-8B request at batch 1 —** `generate(30720 prompt tokens, 304
-output tokens)` takes **62.09 s** with both kernels gated off and **59.12 s** with both
-on: a **1.0503×** speedup on the number a user actually waits for, and **10.83 → 11.06
-generated tokens/s**. Across the context ladder the geomean is **1.0201×**. The two wins
-are **additive to within 0.04 points** of the product of the two single-kernel speedups
-through ctx16k; at ctx32k the product over-predicts by ~0.4 points
-([§7](#7-both-kernels-together)).
+output tokens)` takes **63.22 s** with both kernels gated off and **59.06 s** with both
+on: a **1.0705×** speedup on the number a user actually waits for, and **10.90 → 11.06
+generated tokens/s**. Across the context ladder the geomean is **1.0243×**. The two wins
+are **additive to within 0.07 points** of the product of the two single-kernel speedups
+at every context on the ladder ([§7](#7-both-kernels-together)).
 
 > All e2e figures on this page are **batch 1**. This part serves one user at a time, so
 > batching is not the operating point; where a batched number exists it is labelled.
@@ -253,11 +252,11 @@ From the combined sweep ([§7](#7-both-kernels-together), reproduced by
 
 | context | prompt tokens | Triton TTFT (ms) | swapqk TTFT (ms) | speedup |
 |---|---:|---:|---:|---:|
-| ctx2k | 2048 | 1596.3 | 1566.4 | 1.0191× |
-| ctx4k | 4096 | 2988.4 | 2923.8 | 1.0221× |
-| ctx8k | 8192 | 6266.1 | 6052.6 | 1.0353× |
-| ctx16k | 16384 | 14485.5 | 13586.7 | 1.0662× |
-| ctx32k | 30720 | 34107.2 | 31784.4 | **1.0731×** |
+| ctx2k | 2048 | 1594.6 | 1563.7 | 1.0198× |
+| ctx4k | 4096 | 2957.0 | 2894.1 | 1.0217× |
+| ctx8k | 8192 | 6154.5 | 5968.4 | 1.0312× |
+| ctx16k | 16384 | 14509.5 | 13414.7 | 1.0816× |
+| ctx32k | 30720 | 35366.2 | 31709.1 | **1.1153×** |
 
 The win **grows with prompt length** because attention is O(S²) while the rest of the
 layer is O(S) — its share of prefill rises with S, and so does the share of the win that
@@ -390,20 +389,27 @@ measured generation lengths in the same session — see
 
 | context | ITL, HIP (ms) | ITL, rocKE (ms) | speedup |
 |---|---:|---:|---:|
-| ctx2k | 71.534 | 71.417 | 1.0016× |
-| ctx4k | 72.987 | 72.798 | 1.0026× |
-| ctx8k | 75.760 | 75.505 | 1.0034× |
-| ctx16k | 81.853 | 81.119 | 1.0090× |
-| ctx32k | 92.309 | 90.106 | **1.0244×** |
+| ctx2k | 71.430 | 71.427 | 1.0000× |
+| ctx4k | 72.831 | 72.785 | 1.0006× |
+| ctx8k | 75.827 | 75.460 | 1.0049× |
+| ctx16k | 81.675 | 81.112 | 1.0069× |
+| ctx32k | 91.714 | 90.429 | **1.0142×** |
 
-**The isolated 1.094× becomes 2.4% of ITL, and that is arithmetic, not disappointment.**
-Fit the control column: `ITL ≈ 69.96 ms + 7.26e-4 ms/token`. The intercept is everything
+**The isolated 1.094× becomes 1.4% of ITL, and that is arithmetic, not disappointment.**
+Fit the control column: `ITL ≈ 69.99 ms + 7.09e-4 ms/token`. The intercept is everything
 that is not attention — ~16.4 GB of weights streamed every single step. KV at 30720
-tokens is ~4.5 GB against that, so attention is **2.1% of ITL at ctx2k and 24.2% at
-ctx32k**. It closes: 36 layers × (679 − 619 µs) ≈ 2.16 ms off a 92.3 ms step; measured
-92.309 → 90.106, a 2.20 ms reduction.
+tokens is ~4.5 GB against that, so attention is **2.0% of ITL at ctx2k and 23.7% at
+ctx32k**.
 
-The 7.26e-4 ms/token slope implies **203 GB/s** of KV streaming inside the real model,
+The share gets the order of magnitude right and still **over-predicts the measured
+closing**: 36 layers × (679.8 − 618.9 µs) ≈ 2.19 ms should come off a 91.7 ms step, and
+the measured reduction is 91.714 → 90.429, **1.285 ms**. The isolated-rig delta
+over-predicts by ~1.7×, which is the same failure
+[§9.10](#910-expecting-the-decode-win-to-track-the-bandwidth-share) documents at every
+other context on the ladder: an isolated kernel speedup is an upper bound on the e2e
+effect, never an estimate of it.
+
+The 7.09e-4 ms/token slope implies **208 GB/s** of KV streaming inside the real model,
 which agrees with the isolated rig's ~200 GB/s — the kernel does in vLLM what it does on
 the bench.
 
@@ -440,41 +446,49 @@ byte-identical to stock vLLM with a different backend selected.
 
 | context | P | `stock` | `both` | **speedup** | `prefill_only` | `decode_only` | product |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| ctx2k | 2048 | 23261.4 | 23212.7 | **1.0021×** | 1.0012× | 1.0012× | 1.0023 |
-| ctx4k | 4096 | 25125.4 | 24977.2 | **1.0059×** | 1.0025× | 1.0035× | 1.0061 |
-| ctx8k | 8192 | 29231.9 | 28897.7 | **1.0116×** | 1.0077× | 1.0034× | 1.0112 |
-| ctx16k | 16384 | 39340.5 | 38142.4 | **1.0314×** | 1.0247× | 1.0069× | 1.0318 |
-| ctx32k | 30720 | 62094.5 | 59118.5 | **1.0503×** | 1.0433× | 1.0104× | 1.0542 |
+| ctx2k | 2048 | 23230.8 | 23201.8 | **1.0013×** | 1.0014× | 1.0000× | 1.0014 |
+| ctx4k | 4096 | 25039.1 | 24932.0 | **1.0043×** | 1.0028× | 1.0016× | 1.0044 |
+| ctx8k | 8192 | 29147.9 | 28797.0 | **1.0122×** | 1.0086× | 1.0043× | 1.0129 |
+| ctx16k | 16384 | 39267.2 | 37954.9 | **1.0346×** | 1.0297× | 1.0049× | 1.0347 |
+| ctx32k | 30720 | 63221.4 | 59055.3 | **1.0705×** | 1.0630× | 1.0073× | 1.0708 |
 
-Geomean across the ladder: **1.0201×**.
+Geomean across the ladder: **1.0243×**.
 
-**The two kernels are additive through ctx16k.** The `both` column and the product of the
-two single-kernel columns agree to within **0.04 points** at ctx2k–ctx16k. There is no
-interaction term to model: the prefill kernel does not change what decode reads, and
-decode does not change what prefill wrote.
+**The two kernels are additive at every context on the ladder.** The `both` column and
+the product of the two single-kernel columns agree to within **0.07 points**, and to
+within 0.03 points at ctx32k. There is no interaction term to model: the prefill kernel
+does not change what decode reads, and decode does not change what prefill wrote.
 
-At **ctx32k the product over-predicts by ~0.4 points** (1.0542 against a measured
-1.0503) — the two wins sub-add slightly at the longest context. That is ~8% of a
-5-point win, and it is the one row on this page where the composition is not clean. It
-is reported rather than explained; the mechanism is not established.
+An earlier session had the product over-predicting by ~0.4 points at ctx32k, and this
+page reported it as the one row where composition was not clean. **It did not
+reproduce.** Spread across the three reps of this sweep is 0.09–0.18%, so 0.03 points is
+noise — the sub-additivity was a property of that session, not of the kernels.
 
 **Generation rate**, the number a user perceives during streaming:
 
 | context | `stock` | `both` |
 |---|---:|---:|
-| ctx2k | 13.98 tok/s | 14.00 tok/s |
-| ctx8k | 13.20 tok/s | 13.26 tok/s |
-| ctx32k | 10.83 tok/s | **11.06 tok/s** |
+| ctx2k | 14.00 tok/s | 14.00 tok/s |
+| ctx8k | 13.19 tok/s | 13.25 tok/s |
+| ctx32k | 10.90 tok/s | **11.06 tok/s** |
 
 **ctx2k is a negative control and it behaves like one.** Both kernels are predicted to do
 nothing at 2048 tokens — the prompt is short enough that prefill attention is a rounding
-error, and the KV working set is inside the MALL. It reports 1.0021× and 13.98 → 14.00
+error, and the KV working set is inside the MALL. It reports 1.0013× and 14.00 → 14.00
 tok/s. An artifact that reports ≈0 where ≈0 is expected is what makes the ctx32k row
 credible.
 
+The sweep carries **two more null controls, and they fix the noise floor** for every
+number on this page. `decode_only` TTFT and `prefill_only` ITL are both 1.000 by
+construction — neither kernel touches the other's phase — and measured they span
+**0.9945–1.0025 on TTFT** and **0.9985–1.0010 on ITL**. So the ctx32k prefill TTFT win is
+~20× its floor and the ctx32k decode ITL win ~10× its floor, while everything at
+ctx2k–ctx4k sits at or inside the floor and should be read as zero rather than as a small
+positive result.
+
 **There is deliberately no single combined scalar.** Total latency is
 `≈ TTFT(P) + (G−1)·ITL`, and that reweights the two kernels by an order of magnitude
-across the ladder — at ctx32k the win is 1.0433 prefill × 1.0104 decode, so it is
+across the ladder — at ctx32k the win is 1.0630 prefill × 1.0073 decode, so it is
 overwhelmingly a prefill win at B=1. Quote a context length, never an average.
 
 ### 7.1 Why the sweep runs under PIECEWISE cudagraphs
@@ -832,11 +846,11 @@ like when you find one.
 
 ### 9.10 Expecting the decode win to track the bandwidth share
 
-The isolated decode kernel wins 1.094× at Sk=32768. Attention is 24.2% of ITL at that
-context. The tempting arithmetic — 24.2% of a 9.4% improvement ≈ 2.3% — is close enough
-to the measured 2.4% to feel like it works, and it does *not* generalise: at ctx8k the
-same arithmetic predicts 0.7% (7.9% share) and measures 0.34%, over-predicting by 2×.
-At ctx2k it predicts 0.2% and the measurement is barely above zero.
+The isolated decode kernel wins 1.094× at Sk=32768. Attention is 23.7% of ITL at that
+context. The tempting arithmetic — 23.7% of a 9.4% improvement ≈ 2.2% — over-predicts
+the measured **1.4%** by 1.6×, and it misses by about the same factor everywhere else on
+the ladder: at ctx8k it predicts 0.7% (7.7% share) and measures 0.49%; at ctx2k it
+predicts 0.2% and the measurement is indistinguishable from zero.
 
 The rule this produced is [§10](#10-measurement-discipline) rule 15: an isolated kernel
 speedup is an *upper bound* on the e2e effect, never an estimate of it. Compute the
