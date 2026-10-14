@@ -1,9 +1,9 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Seam SA on the MFMA and WMMA attention forward bodies.
+"""Optional hooks on the MFMA and WMMA attention forward bodies.
 
-``extra_score_transform`` receives each score cell's query row and key column,
+``extra_score_transform`` receives each score cell's query and key positions,
 and ``epilogue_fn`` receives each row's final max and denominator. Neither may
 cost IR when unused: the coordinates are the values the mask already computes,
 and ``epilogue_fn=None`` emits nothing. The byte-identity gate covers the
@@ -53,8 +53,8 @@ def _build_ir(monkeypatch, arch: str, mask_mode: str, **callbacks) -> str:
 def test_score_coordinates_cost_no_ir(monkeypatch, arch, _slots, mask_mode):
     seen = []
 
-    def identity(b, score, kt, row_in_atom, *, q_row, k_col):
-        seen.append((row_in_atom, q_row, k_col))
+    def identity(b, score, kt, row_in_atom, query_pos, key_pos):
+        seen.append((row_in_atom, query_pos, key_pos))
         return score
 
     baseline = _build_ir(monkeypatch, arch, mask_mode)
@@ -97,3 +97,24 @@ def test_epilogue_store_reaches_ir(monkeypatch, arch, _slots):
     with_store = lower_kernel_to_llvm(kernel, arch=arch)
     assert with_store != baseline
     assert with_store.count("store float") > baseline.count("store float")
+
+
+def test_wmma_epilogue_gets_the_row_bound(monkeypatch):
+    """With a Q-length bound, ``row_valid`` is the predicate the O store uses."""
+    calls = []
+
+    def epilogue(b, *, m_log2, l, row, row_valid):
+        calls.append(row_valid)
+
+    body = fmha_mfma.mfma_attention_fwd_inner_body
+
+    def bounded(*args, **kwargs):
+        # Any i32 Value works as the bound; the test checks the plumbing only.
+        return body(
+            *args, **kwargs, wmma_seqlen_q=kwargs["seqlen_k"], epilogue_fn=epilogue
+        )
+
+    monkeypatch.setattr(fmha_mfma, "mfma_attention_fwd_inner_body", bounded)
+    fmha_mfma.build_fmha_fwd_mfma(_spec("none"), arch="gfx1151")
+    assert len(calls) == 8
+    assert all(isinstance(v, Value) for v in calls)

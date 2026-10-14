@@ -70,9 +70,9 @@ namespace TensileLite
  */
     struct KernelLanguageTypeInfo
     {
-        static KernelLanguageTypeInfo const& Get(int index);
-        static KernelLanguageTypeInfo const& Get(KernelLanguage t);
-        static KernelLanguageTypeInfo const& Get(std::string const& str);
+        TENSILELITEHOST_EXPORT static KernelLanguageTypeInfo const& Get(int index);
+        TENSILELITEHOST_EXPORT static KernelLanguageTypeInfo const& Get(KernelLanguage t);
+        TENSILELITEHOST_EXPORT static KernelLanguageTypeInfo const& Get(std::string const& str);
 
         KernelLanguage m_kernelLanguage;
         std::string    name;

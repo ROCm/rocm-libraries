@@ -1069,6 +1069,8 @@ static rocke_status_t rocke_h_op_vector_fma(rocke_h_lowerer_t* lw, const rocke_o
     const rocke_value_t* c = op->operands[2];
     const rocke_value_t* r = h_res(op);
     const char* res_t = rocke_h_type_to_hip(lw, r->type);
+    rocke_h_reject_f64(
+        lw, op, r->type->kind == ROCKE_TYPE_VECTOR ? r->type->elem->name : r->type->name);
     const char* nice = rocke_h_name(lw, r);
     const char* an = rocke_h_name(lw, a);
     const char* bn = rocke_h_name(lw, b);
