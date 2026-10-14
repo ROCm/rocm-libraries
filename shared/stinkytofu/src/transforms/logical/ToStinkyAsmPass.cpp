@@ -367,6 +367,9 @@ StinkyInstruction* createAsmFromIR(LogicalInstruction* irInst, GfxArchID arch) {
     if (irInst->global.has_value()) {
         asmInst->addModifier<GLOBALModifiers>(irInst->global.value());
     }
+    if (irInst->cacheScope.has_value()) {
+        asmInst->addModifier<CacheScopeModifiers>(irInst->cacheScope.value());
+    }
     if (irInst->mubuf.has_value()) {
         asmInst->addModifier<MUBUFModifiers>(irInst->mubuf.value());
     }

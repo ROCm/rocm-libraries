@@ -667,6 +667,12 @@ NB_MODULE(_stinkytofu, m) {
             nb::arg("has_sc0_modifier") = false, nb::arg("has_dlc_modifier") = false,
             "Set GLOBAL memory modifiers")
         .def(
+            "set_cache_scope",
+            [](LogicalInstruction& inst, int scope) {
+                inst.cacheScope = CacheScopeModifiers(static_cast<MUBUFScope>(scope));
+            },
+            nb::arg("scope") = 0, "Set the SOPP fence cache scope (global_wb / global_inv)")
+        .def(
             "set_mubuf",
             [](LogicalInstruction& inst, bool offen, int offset, bool glc, bool slc, bool nt,
                int scope, int th, bool isStore, int nv, bool lds, bool hasMUBUFConst,
