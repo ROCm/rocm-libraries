@@ -72,32 +72,33 @@ Expression
   then round-to-nearest and clamp to [0, 255]. This covers Nearest and
   LinearV; CubicV uses the fixed-point form below instead.
 
-CubicV   (kernel-derived REGRESSION golden)
-  The doxygen for rppt_yuv_to_rgb_cubic_v -- "odd luma rows pass through
-  chroma unchanged (identity); even luma rows use a symmetric 4-tap filter" --
-  does not describe the op. The kernel implements FFmpeg swscale's bicubic
-  path: standard NV12 siting at p = (y - 0.5)/2 on BOTH parities via two
-  alternating asymmetric phases, integer taps applied in a 15-bit domain, and
-  FFmpeg's integer table colour math rather than the float matrix. See
-  docs/doc-defects/yuv-to-rgb-cubic-v.md.
+CubicV
+  Bit-exact with FFmpeg swscale's bicubic (B=0, C=0.6) scaled path:
+  - Siting is standard NV12, p = (y - 0.5) / 2, on both row parities. Even
+    rows use phase 0.75 (taps {-115, 985, 3572, -346} from chroma row
+    y/2 - 2); odd rows use phase 0.25 (the same taps reversed, from row
+    (y-1)/2 - 1). Luma rows 0 and 2 use FFmpeg initFilter's folded boundary
+    taps.
+  - Taps are FFmpeg's normalized integers (sum 4096), applied to chroma
+    lifted to 15 bits (<< 7) and rounded back with (acc + (1 << 18)) >> 19.
+  - Colour uses FFmpeg's integer table math (ff_yuv2rgb_coeffs, scaled as
+    ff_yuv2rgb_c_init_tables does for RGB24), not the float matrix above.
 
-  The spec the kernel cites (FFmpeg9_YUV_to_RGB_spec.md) is not in the tree,
-  so this branch is transcribed from the kernel with the user's explicit
-  authorization: it LOCKS current behaviour rather than encoding intent.
-  Everything outside the tap tables and the coefficient tables -- the row
-  clamping, the pitch addressing, the frame walk -- is still the suite's own.
+  The rppt_yuv_to_rgb_cubic_v doxygen ("odd luma rows pass through chroma
+  unchanged; even luma rows use a symmetric 4-tap filter", unknown standards
+  use BT.709) is a known documentation error. This model follows the
+  kernel, which is the intended behaviour.
 
 Notes
-  The header documents unknown colour standards as behaving like BT.709 and
-  unknown ranges as behaving like studio, so those are the defaults for the
-  float path. The CubicV coefficient table follows the kernel, which falls
-  back to BT.601 instead; that divergence is in the doc-defect note above.
+  Unknown ranges behave like studio on all three ops. Unknown colour
+  standards fall back to BT.709 for Nearest and LinearV, but to BT.601
+  (FFmpeg's default) for CubicV.
   RpptColorStandard_BT2020_CL reuses the BT2020_NCL coefficients on both
   paths, as the kernel does. True constant luminance is a genuinely different
   transfer, out of scope for this golden and not gridded.
 */
 
-// Which vertical chroma upsampler the op under test documents.
+// Which vertical chroma upsampler the op under test uses.
 enum class YuvChromaUpsample { Nearest, LinearV, CubicV };
 
 // ---- colour matrix ---------------------------------------------------------
