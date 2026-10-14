@@ -200,6 +200,12 @@ class TestAsmCapsVsCompiler:
             self._asm("v_cvt_f16_fp8 v[0], v[1] byte_sel:2")
         )
 
+    def test_has_v_maximumminimum_f32(self):
+        asm = self._caps()
+        assert asm["HasVMaximumMinimumF32"] == int(
+            self._asm("v_maximumminimum_f32 v0, v1, v2, v3")
+        )
+
     # -- Wait count limits (derived from instruction support) --
 
     def test_separate_vmcnt_and_limits(self):

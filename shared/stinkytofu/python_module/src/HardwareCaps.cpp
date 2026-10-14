@@ -184,6 +184,11 @@ std::map<std::string, int> initAsmCaps(const IsaVersion& v, const MnemonicMap& m
     rv["HasCvtScalePk8Bf8F32"] =
         tryAsm(isaName, ws, "v_cvt_scalef32_pk8_bf8_f32 v[0:1], v[2:9], s0");
 
+    // NaN-propagating f32 clamp. PackData fp8 pk8 saturation uses this to pick
+    // v_pk_fma_f32 + v_maximumminimum_f32 over cmp_class/med3/cndmask
+    // (mirrors rocisa hardware_caps.hpp HasVMaximumMinimumF32).
+    rv["HasVMaximumMinimumF32"] = tryAsm(isaName, ws, "v_maximumminimum_f32 v0, v1, v2, v3");
+
     // v_movrelsd_2_b32: indirect-VGPR-write move used by CompactLoopStore
     // (mirrors rocisa hardware_caps.hpp HasMovRelsD2B32).
     rv["HasMovRelsD2B32"] = hasMnemonic(m, "v_movrelsd_2_b32");
