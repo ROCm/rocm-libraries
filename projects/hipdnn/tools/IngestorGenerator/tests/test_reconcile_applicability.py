@@ -1,0 +1,752 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+"""The reference library is the applicability oracle, and a decline it does not share
+is a defect.
+
+The rule these tests defend:
+
+    If the reference serves an equivalent request and its result validates, this
+    integration must serve it too. A decline the reference does not share is missing
+    coverage or a matcher bug -- never a scope decision.
+
+A reference that ACCEPTS a request it computes wrongly is out of scope; this tool asks
+only about applicability, never numerics. Fixtures use a stub library, so what is
+under test is the reconciliation logic, not any kernel's support matrix.
+"""
+
+from __future__ import annotations
+
+import json
+import subprocess
+import sys
+import textwrap
+from pathlib import Path
+
+import pytest
+
+_TOOLS = Path(__file__).resolve().parents[1] / "tools"
+_TOOL = _TOOLS / "reconcile_applicability.py"
+
+sys.path.insert(0, str(_TOOLS))
+
+#: A stub standing in for both the kernel factory and the library entry point. Which
+#: shapes each serves is set per-test by the thresholds baked into the module.
+_STUB = '''
+import dataclasses
+
+
+@dataclasses.dataclass(frozen=True)
+class Spec:
+    batch: int
+    seqlen_q: int
+    head_size: int
+
+
+class Request:
+    def __init__(self, **kw):
+        self.__dict__.update(kw)
+        # Structural rejection at CONSTRUCTION, before any predicate -- the case a
+        # predicate-only support check silently reports as supported.
+        if int(kw.get("head_size", 128)) not in (64, 128):
+            raise ValueError("head_size must be 64 or 128")
+
+
+class Adapter:
+    """A request in the GENERATOR side's vocabulary.
+
+    Real integrations need one when the kernel's dispatch entry point wants a
+    different shape of argument than the library's registry does. It duck-types as a
+    request but is not a `Request`, which is the whole point of the test below.
+    """
+
+    def __init__(self, **kw):
+        self.__dict__.update(kw)
+        if int(kw.get("head_size", 128)) not in (64, 128):
+            raise ValueError("head_size must be 64 or 128")
+
+
+class Candidate:
+    def __init__(self, spec_id, algorithm, min_seqlen, opt_in=False, arches=()):
+        self.spec_id, self.algorithm = spec_id, algorithm
+        self.arches = arches
+        self.family = "shared_family"   # deliberately the same for ALL candidates
+        self._min, self._opt_in = min_seqlen, opt_in
+
+    def _supports(self, req):
+        """Residual checks ONLY. Deliberately does not re-check arch: real libraries
+        move that into `capability`, so a predicate can happily accept a target its
+        capability block forbids."""
+        if self._opt_in and getattr(req, "algorithm", None) != self.algorithm:
+            return False, f"{self.algorithm} is opt-in"
+        if int(req.seqlen_q) < self._min:
+            return False, f"seqlen_q must be at least {self._min}"
+        return True, ""
+
+    def admits(self, req):
+        """The complete capability and predicate question for a typed request."""
+        if not isinstance(req, Request):
+            raise TypeError(f"expected Request, got {type(req).__name__}")
+        if self.arches and getattr(req, "arch", None) not in self.arches:
+            return False, f"capability: arch {getattr(req, 'arch', None)!r} not in {self.arches}"
+        return self._supports(req)
+
+
+def candidates():
+    return (
+        Candidate("the_kernel", "dense", 256, opt_in=True, arches=("gfxstub",)),
+        Candidate("other_arch", "dense", 1, opt_in=True, arches=("gfxother",)),
+        Candidate("sibling", "tiled", 1),      # serves what dense refuses
+    )
+
+
+def kernel_spec(req):
+    """Construct a spec; support is decided by the explicit predicate."""
+    return Spec(batch=int(req.batch), seqlen_q=int(req.seqlen_q),
+                head_size=int(req.head_size))
+
+
+def supported(spec, *, arch):
+    if spec.seqlen_q < 256:
+        return False, "seqlen_q must be at least 256"
+    return True, ""
+'''
+
+
+@pytest.fixture
+def env(tmp_path):
+    lib = tmp_path / "rocke" / "library"
+    lib.mkdir(parents=True)
+    (tmp_path / "rocke" / "platform" / "python").mkdir(parents=True)
+    (lib / "stublib.py").write_text(_STUB)
+
+    def profile(family="dense", match="algorithm", opt_in=True) -> Path:
+        defaults = "{algorithm: dense}" if opt_in else "{}"
+        path = tmp_path / f"profile_{family}_{match}_{opt_in}.yaml"
+        path.write_text(
+            textwrap.dedent(
+                f"""
+                provider_root: {tmp_path}
+                slug: stub
+                arch: gfxstub
+                source: stub.py
+                builder: build_stub
+                engine: {{name: "hipkernel:Stub"}}
+                kmd_fields: []
+                metadata_fields: []
+                dispatch: {{module: stublib, function: kernel_spec}}
+                predicate: {{module: stublib, function: supported}}
+                request:
+                  module: stublib
+                  class: Request
+                  defaults: {defaults}
+                reference_candidates:
+                  module: stublib
+                  function: candidates
+                  match: {match}
+                  family: {family}
+                """
+            )
+        )
+        return path
+
+    def shapes(*specs) -> Path:
+        path = tmp_path / "shapes.json"
+        path.write_text(json.dumps(list(specs)))
+        return path
+
+    def run(profile_path, shapes_path, *extra):
+        return subprocess.run(
+            [
+                sys.executable,
+                str(_TOOL),
+                "--profile",
+                str(profile_path),
+                "--shapes",
+                str(shapes_path),
+                *extra,
+            ],
+            capture_output=True,
+            text=True,
+        )
+
+    return type(
+        "Env",
+        (),
+        {
+            "profile": staticmethod(profile),
+            "shapes": staticmethod(shapes),
+            "run": staticmethod(run),
+        },
+    )
+
+
+_LONG = {"batch": 1, "seqlen_q": 4096, "head_size": 128}
+_SHORT = {"batch": 1, "seqlen_q": 64, "head_size": 128}
+_UNBUILDABLE = {"batch": 1, "seqlen_q": 4096, "head_size": 256}
+
+
+class TestBothServe:
+    def test_a_shape_both_serve_reconciles(self, env):
+        """The control: every failure assertion below is worthless without it."""
+        result = env.run(env.profile(), env.shapes(_LONG))
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "RECONCILED" in result.stdout
+        assert "both serve              1" in result.stdout
+
+
+class TestScopingIsTheWholeDesign:
+    """A sibling kernel's coverage is not this integration's gap: comparing library-wide
+    reports as gaps the shapes a sibling serves and this kernel declines for the reasons
+    hipDNN does."""
+
+    def test_a_shape_only_a_SIBLING_family_serves_is_not_a_gap(self, env):
+        """The sibling serves the short sequence and dense does not, so this is a shared
+        decline."""
+        result = env.run(env.profile(family="dense"), env.shapes(_SHORT))
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "both decline            1" in result.stdout
+        assert "ONLY THE REFERENCE      0" in result.stdout
+
+    def test_the_same_shape_IS_a_gap_when_integrating_that_sibling(self, env):
+        """The converse: point the profile at the tiled family and the identical shape
+        becomes a real gap."""
+        result = env.run(env.profile(family="tiled", opt_in=False), env.shapes(_SHORT))
+        assert result.returncode == 1, result.stdout + result.stderr
+        assert "ONLY THE REFERENCE      1" in result.stdout
+
+    def test_a_family_that_matches_nothing_is_refused(self, env):
+        """A profile naming a family that does not exist would report EVERY shape as
+        unreconciled."""
+        result = env.run(env.profile(family="no_such_kernel"), env.shapes(_LONG))
+        assert result.returncode == 2
+        assert "no registered candidate" in (result.stdout + result.stderr)
+
+    def test_matching_on_the_wrong_attribute_is_refused(self, env):
+        """Every stub candidate shares `family`, as the real library does, so matching
+        on it cannot discriminate."""
+        result = env.run(env.profile(family="dense", match="family"), env.shapes(_LONG))
+        assert result.returncode == 2
+        assert "no registered candidate" in (result.stdout + result.stderr)
+
+
+class TestOptInSelectorIsInherited:
+    def test_without_the_selector_the_oracle_asks_nothing(self, env):
+        """An opt-in candidate declines everything unless the request names it, so
+        dropping the selector reconciles by asking nothing; with it, the long shape must
+        SERVE."""
+        with_selector = env.run(env.profile(opt_in=True), env.shapes(_LONG))
+        assert "both serve              1" in with_selector.stdout
+
+        without = env.run(env.profile(opt_in=False), env.shapes(_LONG))
+        assert "both serve              0" in without.stdout, (
+            "dropping the opt-in selector should make the reference decline "
+            "everything -- if it does not, the fixture is not exercising opt-in"
+        )
+
+
+class TestOnlyTheReferenceServes:
+
+    def test_the_diagnostic_names_both_sides(self, env):
+        result = env.run(env.profile(family="tiled", opt_in=False), env.shapes(_SHORT))
+        assert "sibling" in result.stdout
+        assert "seqlen_q must be at least 256" in result.stdout
+
+    def test_the_escape_hatch_is_explicit_and_still_reports(self, env):
+        result = env.run(
+            env.profile(family="tiled", opt_in=False),
+            env.shapes(_SHORT),
+            "--allow-unreconciled",
+        )
+        assert result.returncode == 0
+        assert "UNDER PROTEST" in result.stdout
+        assert "ONLY THE REFERENCE      1" in result.stdout
+
+
+class TestConstructionFailures:
+    @pytest.mark.parametrize(
+        "flags",
+        [
+            (),
+            ("--allow-empty",),
+            ("--allow-unreconciled",),
+            ("--allow-empty", "--allow-unreconciled"),
+        ],
+    )
+    def test_construction_failure_is_operational(self, env, flags):
+        result = env.run(env.profile(), env.shapes(_UNBUILDABLE), *flags)
+        assert result.returncode == 2
+        assert "RECONCILED" not in result.stdout
+
+
+class TestOracleDeclaration:
+    def test_a_missing_oracle_is_a_named_error_not_a_pass(self, env, tmp_path):
+        path = tmp_path / "no_oracle.yaml"
+        path.write_text(
+            textwrap.dedent(
+                f"""
+                provider_root: {tmp_path}
+                slug: stub
+                arch: gfxstub
+                source: stub.py
+                builder: build_stub
+                engine: {{name: "hipkernel:Stub"}}
+                kmd_fields: []
+                metadata_fields: []
+                dispatch: {{module: stublib, function: kernel_spec}}
+                request: {{module: stublib, class: Request}}
+                """
+            )
+        )
+        result = env.run(path, env.shapes(_LONG))
+        assert result.returncode == 2
+        assert "no oracle" in (result.stdout + result.stderr)
+
+
+class TestRuntimeDeclinesOverrideTheOfflineAnswer:
+    def test_a_runtime_decline_beats_what_the_dispatcher_says(self, env, tmp_path):
+        declines = tmp_path / "declines.json"
+        declines.write_text(json.dumps({"0": "no engine configurations available"}))
+        result = env.run(env.profile(), env.shapes(_LONG), "--declines", str(declines))
+        assert result.returncode == 1, result.stdout + result.stderr
+        assert "ONLY THE REFERENCE      1" in result.stdout
+
+
+class TestTheCompleteEligibilityQuestion:
+    """Registered candidates keep their arch and dtype gates in `capability`, so the
+    underscore predicate carries only the RESIDUAL checks and can accept a target its
+    capability block forbids."""
+
+    def test_a_candidate_gated_out_by_capability_does_not_count_as_serving(self, env):
+        """`other_arch` shares the dense family and accepts a short sequence, but its
+        capability block excludes this arch."""
+        result = env.run(env.profile(family="dense"), env.shapes(_SHORT))
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert (
+            "both decline            1" in result.stdout
+        ), "an arch-excluded candidate must not count as the reference serving it"
+        assert "ONLY THE REFERENCE      0" in result.stdout
+
+    def test_the_arch_gated_candidate_would_otherwise_have_accepted(self, env):
+        """Guards the test above: the predicate really does accept, so capability is
+        what excluded it."""
+        import subprocess as sp
+        import sys as s
+
+        probe = (
+            "import sys; sys.path.insert(0, %r); import stublib;"
+            "c = [x for x in stublib.candidates() if x.spec_id == 'other_arch'][0];"
+            "r = stublib.Request(batch=1, seqlen_q=64, head_size=128,"
+            "                    arch='gfxstub', algorithm='dense');"
+            "print('predicate:', c._supports(r)[0], '| admits:', c.admits(r)[0])"
+        )
+        lib = str(Path(env.profile()).parent / "rocke" / "library")
+        out = sp.run(
+            [s.executable, "-c", probe % lib], capture_output=True, text=True
+        ).stdout.strip()
+        assert out == "predicate: True | admits: False", out
+
+
+class TestDeclineReasonsAreNotMaskedBySiblings:
+    """Scoping on a shared attribute matches several candidates, and a rejection on
+    CAPABILITY says only "this sibling is not the one for this target". Recorded in
+    place of the kernel-specific reason it leaves the counts unaffected, so the gate
+    passes over a uniformly wrong root cause."""
+
+    def test_the_substantive_reason_wins_over_a_capability_rejection(self, env):
+        """`other_arch` rejects this arch on capability; `the_kernel` rejects on the
+        real predicate. The report must show the latter."""
+        result = env.run(env.profile(family="dense"), env.shapes(_SHORT))
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert (
+            "seqlen_q must be at least 256" in result.stdout
+        ), "the kernel-specific reason was masked by a sibling's capability gate"
+        assert (
+            "capability: arch" not in result.stdout
+        ), "a sibling's capability rejection is not evidence about this shape"
+
+    def test_the_reason_names_which_candidate_gave_it(self, env):
+        """With several candidates in a family, an unattributed reason cannot be acted
+        on."""
+        result = env.run(env.profile(family="dense"), env.shapes(_SHORT))
+        assert "[the_kernel]" in result.stdout
+
+
+class TestAGateThatCannotPassByAskingNothing:
+    """Three ways this tool could report success without comparing anything."""
+
+    def test_a_declines_key_matching_no_shape_is_a_hard_failure(self, env, tmp_path):
+        """A typo'd graph name silently ignored leaves the shape counted as served.
+        Index keys are worse: they shift when the corpus is re-mined, so the same file
+        marks a DIFFERENT shape."""
+        declines = tmp_path / "typo.json"
+        declines.write_text(json.dumps({"no_such_graph_name": "engine declined"}))
+        result = env.run(env.profile(), env.shapes(_LONG), "--declines", str(declines))
+        assert result.returncode == 2, result.stdout
+        assert "matched no shape" in result.stderr
+
+    def test_a_key_that_does_match_is_accepted(self, env, tmp_path):
+        """So the failure above is about the key matching nothing, not about --declines
+        being rejected wholesale."""
+        declines = tmp_path / "real.json"
+        declines.write_text(json.dumps({"0": "engine declined at runtime"}))
+        result = env.run(env.profile(), env.shapes(_LONG), "--declines", str(declines))
+        assert "matched no shape" not in result.stderr
+        assert "ONLY THE REFERENCE      1" in result.stdout
+
+    def test_neither_side_serving_anything_is_not_agreement(self, env):
+        """Both sides declining every shape is RECONCILED over 0-of-N served, so the
+        gate needs BOTH conditions: nothing served either side, and the scoping key
+        absent from request.defaults."""
+        result = env.run(env.profile(family="dense", opt_in=False), env.shapes(_SHORT))
+        assert result.returncode == 2, result.stdout
+        assert "agreement about nothing" in result.stderr
+        assert "algorithm" in result.stderr, "the diagnostic must name the missing key"
+
+    def test_an_empty_comparison_can_be_opted_into(self, env):
+        """The check guards a misconfiguration; an empty corpus can be legitimate."""
+        result = env.run(
+            env.profile(family="dense", opt_in=False),
+            env.shapes(_SHORT),
+            "--allow-empty",
+        )
+        assert result.returncode == 0
+
+    def test_an_unreadable_declines_path_names_the_problem(self, env, tmp_path):
+        result = env.run(env.profile(), env.shapes(_LONG), "--declines", str(tmp_path))
+        assert result.returncode == 2
+        assert "FAIL: --declines" in result.stderr
+        assert "Traceback" not in result.stderr
+
+    def test_a_declines_file_that_is_not_a_mapping_is_refused(self, env, tmp_path):
+        declines = tmp_path / "list.json"
+        declines.write_text(json.dumps(["0"]))
+        result = env.run(env.profile(), env.shapes(_LONG), "--declines", str(declines))
+        assert result.returncode == 2
+        assert "must be a JSON mapping" in result.stderr
+
+
+class TestReferenceRequestOverride:
+    """A profile whose `request.class` is an ADAPTER cannot use it against the
+    reference, and the failure looks exactly like a decline.
+
+    rocKE's candidates isinstance-check their argument, and that refusal is recorded per
+    shape as a decline, so the run reconciles having never consulted the reference.
+    `reference_request:` overrides `request:` for the reference side only, with an
+    optional `via:` translator.
+    """
+
+    @staticmethod
+    def _adapter_profile(tmp_path, *, reference_request: str) -> Path:
+        """`request.class` is `Adapter`, which every candidate type-rejects."""
+        path = tmp_path / f"adapter_{bool(reference_request)}.yaml"
+        path.write_text(
+            textwrap.dedent(
+                f"""
+                provider_root: {tmp_path}
+                slug: stub
+                arch: gfxstub
+                source: stub.py
+                builder: build_stub
+                engine: {{name: "hipkernel:Stub"}}
+                kmd_fields: []
+                metadata_fields: []
+                dispatch: {{module: stublib, function: kernel_spec}}
+                request:
+                  module: stublib
+                  class: Adapter
+                  defaults: {{algorithm: dense}}
+                {reference_request}
+                reference_candidates:
+                  module: stublib
+                  function: candidates
+                  match: algorithm
+                  family: dense
+                """
+            )
+        )
+        return path
+
+    def test_an_adapter_request_reconciles_by_asking_nothing(self, env, tmp_path):
+        """Without the override every shape raises at the type check, so nothing is
+        compared and the run must NOT report success."""
+        result = env.run(
+            self._adapter_profile(tmp_path, reference_request=""),
+            env.shapes(_LONG),
+        )
+        assert result.returncode == 2, result.stdout
+        assert "RECONCILED" not in result.stdout
+
+    def test_reference_request_restores_a_live_comparison(self, env, tmp_path):
+        override = textwrap.indent(
+            textwrap.dedent(
+                """
+                reference_request:
+                  module: stublib
+                  class: Request
+                  defaults: {algorithm: dense}
+                """
+            ).strip(),
+            " " * 16,
+        ).lstrip()
+        result = env.run(
+            self._adapter_profile(tmp_path, reference_request=override),
+            env.shapes(_LONG),
+        )
+        assert result.returncode == 0, result.stderr
+        assert "both serve              1" in result.stdout
+
+
+class TestServingWhatTheReferenceDeclines:
+    """A bucket keyed only on the reference's answer files a shape WE serve under "both
+    decline", printing the reference's reason as though we shared it."""
+
+    def test_a_shape_only_we_serve_is_reported_separately(self, env, tmp_path):
+        """Our dispatch serves the long shape while the reference declines it on
+        capability: neither a gap nor agreement."""
+        lib = tmp_path / "rocke" / "library"
+        (lib / "narrow.py").write_text(
+            "import stublib\n"
+            "class Narrow(stublib.Candidate):\n"
+            "    pass\n"
+            "def candidates():\n"
+            "    return (Narrow('elsewhere', 'dense', 1, arches=('gfxother',)),)\n"
+        )
+        path = tmp_path / "narrow.yaml"
+        path.write_text(
+            textwrap.dedent(
+                f"""
+                provider_root: {tmp_path}
+                slug: stub
+                arch: gfxstub
+                source: stub.py
+                builder: build_stub
+                engine: {{name: "hipkernel:Stub"}}
+                kmd_fields: []
+                metadata_fields: []
+                dispatch: {{module: stublib, function: kernel_spec}}
+                request:
+                  module: stublib
+                  class: Request
+                  defaults: {{algorithm: dense}}
+                reference_candidates:
+                  module: narrow
+                  function: candidates
+                  match: algorithm
+                  family: dense
+                """
+            )
+        )
+        result = env.run(path, env.shapes(_LONG))
+        assert "only this integration   1" in result.stdout, result.stdout
+        assert (
+            "both decline            0" in result.stdout
+        ), "a shape we serve is not a shared decline"
+
+    def test_a_live_comparison_is_never_called_vacuous(self, env):
+        """The control: with the scoping key still absent, a shape our side serves makes
+        the comparison live and the gate must stay quiet."""
+        result = env.run(env.profile(family="dense", opt_in=False), env.shapes(_LONG))
+        assert "asked nothing" not in result.stderr
+        assert "agreement about nothing" not in result.stderr
+
+
+@pytest.mark.parametrize(
+    "flags",
+    [
+        (),
+        ("--allow-empty",),
+        ("--allow-unreconciled",),
+        ("--allow-empty", "--allow-unreconciled"),
+    ],
+)
+@pytest.mark.parametrize(
+    "body",
+    [
+        "def admits(self): return True, ''",
+        "def admits(self, req): raise RuntimeError('broken oracle')",
+        "admits = None",
+        "def admits(self, req): return True",
+        "def admits(self, req): return (1, '')",
+        "def admits(self, req): return (False, None)",
+        "pass",
+    ],
+)
+def test_broken_candidate_after_acceptance_is_never_waived(env, tmp_path, flags, body):
+    module = tmp_path / "rocke" / "library" / "broken.py"
+    module.write_text(
+        "import stublib\nclass Broken:\n"
+        "    algorithm = 'dense'\n    spec_id = 'broken'\n    " + body + "\n"
+        "def candidates():\n"
+        "    return (stublib.candidates()[0], Broken())\n"
+    )
+    path = env.profile()
+    path.write_text(
+        path.read_text()
+        .replace(
+            "reference_candidates:\n                  module: stublib",
+            "reference_candidates:\n                  module: broken",
+        )
+        .replace(
+            "reference_candidates:\n  module: stublib",
+            "reference_candidates:\n  module: broken",
+        )
+    )
+    result = env.run(path, env.shapes(_LONG), *flags)
+    assert result.returncode == 2
+    assert "RECONCILED" not in result.stdout
+
+
+def test_decline_wording_is_not_an_api_error(env, tmp_path):
+    module = tmp_path / "rocke" / "library" / "stublib.py"
+    module.write_text(
+        module.read_text().replace(
+            'return False, f"seqlen_q must be at least {self._min}"',
+            'return False, "expected Request, got Adapter"',
+        )
+    )
+    result = env.run(env.profile(), env.shapes(_SHORT))
+    assert result.returncode == 0
+    assert "both decline            1" in result.stdout
+
+
+def test_runtime_decline_matches_retained_occurrence(env, tmp_path):
+    shape = {
+        **_LONG,
+        "_provenance": {"graph": "first"},
+        "_provenance_occurrences": [{"graph": "first"}, {"graph": "second"}],
+    }
+    declines = tmp_path / "declines.json"
+    declines.write_text(json.dumps({"second": "runtime rejection"}))
+    result = env.run(env.profile(), env.shapes(shape), "--declines", str(declines))
+    assert result.returncode == 1
+    assert "runtime rejection" in result.stdout
+
+
+#: Every escape hatch this tool offers. An operational error must survive all of them:
+#: the flags describe what a COMPLETED comparison may find.
+_ESCAPES = [
+    (),
+    ("--allow-empty",),
+    ("--allow-unreconciled",),
+    ("--allow-empty", "--allow-unreconciled"),
+]
+
+
+def _point_registry_at(profile_path: Path, module: str) -> None:
+    """Repoint `reference_candidates.module` without rewriting the whole profile."""
+    profile_path.write_text(
+        profile_path.read_text().replace(
+            "reference_candidates:\n  module: stublib",
+            f"reference_candidates:\n  module: {module}",
+        )
+    )
+
+
+@pytest.mark.parametrize("flags", _ESCAPES)
+@pytest.mark.parametrize(
+    "body",
+    [
+        pytest.param("", id="function_absent"),
+        pytest.param("candidates = None", id="not_callable"),
+        pytest.param("candidates = 'a string'", id="not_callable_value"),
+        pytest.param("def candidates(target): return ()", id="binding_failure"),
+        pytest.param(
+            "def candidates(): raise RuntimeError('registry blew up')",
+            id="invocation_failure",
+        ),
+        pytest.param("def candidates(): return 17", id="result_not_iterable"),
+    ],
+)
+def test_a_broken_candidate_registry_is_operational_under_every_flag(
+    env, tmp_path, flags, body
+):
+    """Every way of failing to obtain the candidate list means the reference was never
+    asked, which is exit 2 rather than a run with nothing unreconciled."""
+    (tmp_path / "rocke" / "library" / "reg.py").write_text(body + "\n")
+    path = env.profile()
+    _point_registry_at(path, "reg")
+    result = env.run(path, env.shapes(_LONG), *flags)
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "RECONCILED" not in result.stdout
+
+
+@pytest.mark.parametrize("flags", _ESCAPES)
+@pytest.mark.parametrize(
+    "raised",
+    [
+        pytest.param(
+            "ValueError('seqlen_q must be a multiple of 256')", id="ValueError"
+        ),
+        pytest.param(
+            "TypeError('spec factory got an unexpected field')", id="TypeError"
+        ),
+        pytest.param("KeyError('block_n')", id="KeyError"),
+    ],
+)
+def test_a_failing_spec_factory_is_operational_under_every_flag(
+    env, tmp_path, flags, raised
+):
+    """A factory that RAISES has failed to answer, not declined. The ValueError row
+    matters most: a validation error reads exactly like a support decision."""
+    (tmp_path / "rocke" / "library" / "badfab.py").write_text(
+        "import stublib\n"
+        f"def kernel_spec(req): raise {raised}\n"
+        "def supported(spec, *, arch): return True, ''\n"
+    )
+    path = env.profile()
+    path.write_text(
+        path.read_text()
+        .replace(
+            "dispatch: {module: stublib, function: kernel_spec}",
+            "dispatch: {module: badfab, function: kernel_spec}",
+        )
+        .replace(
+            "predicate: {module: stublib, function: supported}",
+            "predicate: {module: badfab, function: supported}",
+        )
+    )
+    result = env.run(path, env.shapes(_LONG), *flags)
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "RECONCILED" not in result.stdout
+
+
+@pytest.mark.parametrize("flags", _ESCAPES)
+@pytest.mark.parametrize(
+    "via, expected_absent",
+    [
+        pytest.param("via = None", "RECONCILED", id="not_callable"),
+        pytest.param(
+            "def via(fields): raise RuntimeError('translator blew up')",
+            "RECONCILED",
+            id="raises",
+        ),
+        pytest.param(
+            "def via(fields): return object()", "RECONCILED", id="wrong_request_type"
+        ),
+        pytest.param("def via(a, b): return a", "RECONCILED", id="binding_failure"),
+    ],
+)
+def test_a_broken_reference_translator_is_operational_under_every_flag(
+    env, tmp_path, flags, via, expected_absent
+):
+    """A `reference_request.via` translator that cannot produce a request means the
+    reference was never asked about that shape."""
+    (tmp_path / "rocke" / "library" / "trans.py").write_text(
+        "import stublib\n" + via + "\n"
+    )
+    path = env.profile()
+    path.write_text(
+        path.read_text().replace(
+            "reference_candidates:",
+            "reference_request:\n"
+            "  module: stublib\n"
+            "  class: Request\n"
+            "  defaults: {algorithm: dense}\n"
+            "  via: {module: trans, function: via}\n"
+            "reference_candidates:",
+        )
+    )
+    result = env.run(path, env.shapes(_LONG), *flags)
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert expected_absent not in result.stdout

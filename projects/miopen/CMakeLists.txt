@@ -163,8 +163,8 @@ option(MIOPEN_ENABLE_HIPDNN_WRAPPER
 if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
     message(STATUS
         "MIOPEN_ENABLE_HIPDNN_WRAPPER: ENABLED - building libMIOpen.so as a public "
-        "wrapper over libMIOpen_private.so. The wrapper is an unconditional "
-        "pass-through; runtime forwarding to hipDNN is not implemented yet.")
+        "wrapper over libMIOpen_private.so. Set MIOPEN_HIPDNN_FORWARDING=enabled "
+        "at run time to forward the convolution entry points to hipDNN.")
 endif()
 
 option(MIOPEN_INCBIN "Include kernels using incbin" OFF)
@@ -849,6 +849,12 @@ enable_cppcheck(
     SUPPRESS
         ConfigurationNotChecked
         constStatement
+        # cppcheck cannot resolve a transitive header for the LGBM picker gtests
+        # in project mode, so it aborts parsing the whole TU with a spurious
+        # syntaxError at the first TEST_F. The files compile fine with the real
+        # toolchain; suppress the parse-abort for just these two.
+        syntaxError:*test/gtest/lgbm_picker.cpp
+        syntaxError:*test/gtest/lgbm_pcfg_picker.cpp
         # There is no ODR violation because of using separate executables,
         # but cppcheck doesn't understand that as it assumes everything
         # will be compiled together in one binary.

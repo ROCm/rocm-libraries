@@ -167,6 +167,7 @@ When requested to build/test:
 
 ### File Headers
 - Copyright header on all source files: `// Copyright © Advanced Micro Devices, Inc., or its affiliates.` / `// SPDX-License-Identifier:  MIT`
+- Files containing code derived from third-party sources add a `// Portions derived from ...` block after the SPDX line, naming the upstream files and their copyright notice and pointing to `frontend/THIRD_PARTY_LICENSES.md`, which records the upstream version and full license text (example: `hipdnn_compatibility/cudnn/cudnn_frontend/graph_helpers.h`)
 - `#pragma once` immediately after copyright in header files (.h, .hpp)
 
 ### Code Practices

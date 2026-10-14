@@ -809,30 +809,34 @@ try
     *lworkOnHost   = 0;
 
     rocblas_start_device_memory_size_query((rocblas_handle)handle);
-    hipsolverStatus_t status;
+    hipsolverStatus_t status, npvt_status;
     if(dataTypeA == HIP_R_32F && computeType == HIP_R_32F)
     {
         status = hipsolver::rocblas2hip_status(
             rocsolver_sgetrf_info32((rocblas_handle)handle, m, n, nullptr, lda, nullptr, nullptr));
-        rocsolver_sgetrf_npvt_info32((rocblas_handle)handle, m, n, nullptr, lda, nullptr);
+        npvt_status = hipsolver::rocblas2hip_status(
+            rocsolver_sgetrf_npvt_info32((rocblas_handle)handle, m, n, nullptr, lda, nullptr));
     }
     else if(dataTypeA == HIP_R_64F && computeType == HIP_R_64F)
     {
         status = hipsolver::rocblas2hip_status(
             rocsolver_dgetrf_info32((rocblas_handle)handle, m, n, nullptr, lda, nullptr, nullptr));
-        rocsolver_dgetrf_npvt_info32((rocblas_handle)handle, m, n, nullptr, lda, nullptr);
+        npvt_status = hipsolver::rocblas2hip_status(
+            rocsolver_dgetrf_npvt_info32((rocblas_handle)handle, m, n, nullptr, lda, nullptr));
     }
     else if(dataTypeA == HIP_C_32F && computeType == HIP_C_32F)
     {
         status = hipsolver::rocblas2hip_status(
             rocsolver_cgetrf_info32((rocblas_handle)handle, m, n, nullptr, lda, nullptr, nullptr));
-        rocsolver_cgetrf_npvt_info32((rocblas_handle)handle, m, n, nullptr, lda, nullptr);
+        npvt_status = hipsolver::rocblas2hip_status(
+            rocsolver_cgetrf_npvt_info32((rocblas_handle)handle, m, n, nullptr, lda, nullptr));
     }
     else if(dataTypeA == HIP_C_64F && computeType == HIP_C_64F)
     {
         status = hipsolver::rocblas2hip_status(
             rocsolver_zgetrf_info32((rocblas_handle)handle, m, n, nullptr, lda, nullptr, nullptr));
-        rocsolver_zgetrf_npvt_info32((rocblas_handle)handle, m, n, nullptr, lda, nullptr);
+        npvt_status = hipsolver::rocblas2hip_status(
+            rocsolver_zgetrf_npvt_info32((rocblas_handle)handle, m, n, nullptr, lda, nullptr));
     }
     else
     {
@@ -841,7 +845,10 @@ try
     }
 
     rocblas_stop_device_memory_size_query((rocblas_handle)handle, lworkOnDevice);
-    return status;
+
+    if(status != HIPSOLVER_STATUS_SUCCESS)
+        return status;
+    return npvt_status;
 }
 catch(...)
 {
@@ -969,7 +976,7 @@ try
     *lwork = 0;
 
     rocblas_start_device_memory_size_query((rocblas_handle)handle);
-    hipsolverStatus_t status;
+    hipsolverStatus_t status, npvt_status;
     if(dataTypeA == HIP_R_32F && dataTypeB == HIP_R_32F)
     {
         status = hipsolver::rocblas2hip_status(
@@ -982,6 +989,15 @@ try
                                 nullptr,
                                 nullptr,
                                 ldb));
+        npvt_status = hipsolver::rocblas2hip_status(
+            rocsolver_sgetrs_npvt_64((rocblas_handle)handle,
+                                     hipsolver::hip2rocblas_operation(trans),
+                                     n,
+                                     nrhs,
+                                     nullptr,
+                                     lda,
+                                     nullptr,
+                                     ldb));
     }
     else if(dataTypeA == HIP_R_64F && dataTypeB == HIP_R_64F)
     {
@@ -995,6 +1011,15 @@ try
                                 nullptr,
                                 nullptr,
                                 ldb));
+        npvt_status = hipsolver::rocblas2hip_status(
+            rocsolver_dgetrs_npvt_64((rocblas_handle)handle,
+                                     hipsolver::hip2rocblas_operation(trans),
+                                     n,
+                                     nrhs,
+                                     nullptr,
+                                     lda,
+                                     nullptr,
+                                     ldb));
     }
     else if(dataTypeA == HIP_C_32F && dataTypeB == HIP_C_32F)
     {
@@ -1008,6 +1033,15 @@ try
                                 nullptr,
                                 nullptr,
                                 ldb));
+        npvt_status = hipsolver::rocblas2hip_status(
+            rocsolver_cgetrs_npvt_64((rocblas_handle)handle,
+                                     hipsolver::hip2rocblas_operation(trans),
+                                     n,
+                                     nrhs,
+                                     nullptr,
+                                     lda,
+                                     nullptr,
+                                     ldb));
     }
     else if(dataTypeA == HIP_C_64F && dataTypeB == HIP_C_64F)
     {
@@ -1021,6 +1055,15 @@ try
                                 nullptr,
                                 nullptr,
                                 ldb));
+        npvt_status = hipsolver::rocblas2hip_status(
+            rocsolver_zgetrs_npvt_64((rocblas_handle)handle,
+                                     hipsolver::hip2rocblas_operation(trans),
+                                     n,
+                                     nrhs,
+                                     nullptr,
+                                     lda,
+                                     nullptr,
+                                     ldb));
     }
     else
     {
@@ -1029,7 +1072,10 @@ try
     }
 
     rocblas_stop_device_memory_size_query((rocblas_handle)handle, lwork);
-    return status;
+
+    if(status != HIPSOLVER_STATUS_SUCCESS)
+        return status;
+    return npvt_status;
 }
 catch(...)
 {
@@ -1069,60 +1115,116 @@ try
 
     CHECK_ROCBLAS_ERROR(hipsolverZeroInfo((rocblas_handle)handle, devInfo, 1));
 
-    if(dataTypeA == HIP_R_32F && dataTypeB == HIP_R_32F)
+    if(devIpiv != nullptr)
     {
-        return hipsolver::rocblas2hip_status(
-            rocsolver_sgetrs_64((rocblas_handle)handle,
-                                hipsolver::hip2rocblas_operation(trans),
-                                n,
-                                nrhs,
-                                (float*)const_cast<void*>(A),
-                                lda,
-                                const_cast<int64_t*>(devIpiv),
-                                (float*)B,
-                                ldb));
-    }
-    else if(dataTypeA == HIP_R_64F && dataTypeB == HIP_R_64F)
-    {
-        return hipsolver::rocblas2hip_status(
-            rocsolver_dgetrs_64((rocblas_handle)handle,
-                                hipsolver::hip2rocblas_operation(trans),
-                                n,
-                                nrhs,
-                                (double*)const_cast<void*>(A),
-                                lda,
-                                const_cast<int64_t*>(devIpiv),
-                                (double*)B,
-                                ldb));
-    }
-    else if(dataTypeA == HIP_C_32F && dataTypeB == HIP_C_32F)
-    {
-        return hipsolver::rocblas2hip_status(
-            rocsolver_cgetrs_64((rocblas_handle)handle,
-                                hipsolver::hip2rocblas_operation(trans),
-                                n,
-                                nrhs,
-                                (rocblas_float_complex*)const_cast<void*>(A),
-                                lda,
-                                const_cast<int64_t*>(devIpiv),
-                                (rocblas_float_complex*)B,
-                                ldb));
-    }
-    else if(dataTypeA == HIP_C_64F && dataTypeB == HIP_C_64F)
-    {
-        return hipsolver::rocblas2hip_status(
-            rocsolver_zgetrs_64((rocblas_handle)handle,
-                                hipsolver::hip2rocblas_operation(trans),
-                                n,
-                                nrhs,
-                                (rocblas_double_complex*)const_cast<void*>(A),
-                                lda,
-                                const_cast<int64_t*>(devIpiv),
-                                (rocblas_double_complex*)B,
-                                ldb));
+        if(dataTypeA == HIP_R_32F && dataTypeB == HIP_R_32F)
+        {
+            return hipsolver::rocblas2hip_status(
+                rocsolver_sgetrs_64((rocblas_handle)handle,
+                                    hipsolver::hip2rocblas_operation(trans),
+                                    n,
+                                    nrhs,
+                                    (float*)const_cast<void*>(A),
+                                    lda,
+                                    const_cast<int64_t*>(devIpiv),
+                                    (float*)B,
+                                    ldb));
+        }
+        else if(dataTypeA == HIP_R_64F && dataTypeB == HIP_R_64F)
+        {
+            return hipsolver::rocblas2hip_status(
+                rocsolver_dgetrs_64((rocblas_handle)handle,
+                                    hipsolver::hip2rocblas_operation(trans),
+                                    n,
+                                    nrhs,
+                                    (double*)const_cast<void*>(A),
+                                    lda,
+                                    const_cast<int64_t*>(devIpiv),
+                                    (double*)B,
+                                    ldb));
+        }
+        else if(dataTypeA == HIP_C_32F && dataTypeB == HIP_C_32F)
+        {
+            return hipsolver::rocblas2hip_status(
+                rocsolver_cgetrs_64((rocblas_handle)handle,
+                                    hipsolver::hip2rocblas_operation(trans),
+                                    n,
+                                    nrhs,
+                                    (rocblas_float_complex*)const_cast<void*>(A),
+                                    lda,
+                                    const_cast<int64_t*>(devIpiv),
+                                    (rocblas_float_complex*)B,
+                                    ldb));
+        }
+        else if(dataTypeA == HIP_C_64F && dataTypeB == HIP_C_64F)
+        {
+            return hipsolver::rocblas2hip_status(
+                rocsolver_zgetrs_64((rocblas_handle)handle,
+                                    hipsolver::hip2rocblas_operation(trans),
+                                    n,
+                                    nrhs,
+                                    (rocblas_double_complex*)const_cast<void*>(A),
+                                    lda,
+                                    const_cast<int64_t*>(devIpiv),
+                                    (rocblas_double_complex*)B,
+                                    ldb));
+        }
+        else
+            return HIPSOLVER_STATUS_INVALID_ENUM;
     }
     else
-        return HIPSOLVER_STATUS_INVALID_ENUM;
+    {
+        if(dataTypeA == HIP_R_32F && dataTypeB == HIP_R_32F)
+        {
+            return hipsolver::rocblas2hip_status(
+                rocsolver_sgetrs_npvt_64((rocblas_handle)handle,
+                                         hipsolver::hip2rocblas_operation(trans),
+                                         n,
+                                         nrhs,
+                                         (float*)const_cast<void*>(A),
+                                         lda,
+                                         (float*)B,
+                                         ldb));
+        }
+        else if(dataTypeA == HIP_R_64F && dataTypeB == HIP_R_64F)
+        {
+            return hipsolver::rocblas2hip_status(
+                rocsolver_dgetrs_npvt_64((rocblas_handle)handle,
+                                         hipsolver::hip2rocblas_operation(trans),
+                                         n,
+                                         nrhs,
+                                         (double*)const_cast<void*>(A),
+                                         lda,
+                                         (double*)B,
+                                         ldb));
+        }
+        else if(dataTypeA == HIP_C_32F && dataTypeB == HIP_C_32F)
+        {
+            return hipsolver::rocblas2hip_status(
+                rocsolver_cgetrs_npvt_64((rocblas_handle)handle,
+                                         hipsolver::hip2rocblas_operation(trans),
+                                         n,
+                                         nrhs,
+                                         (rocblas_float_complex*)const_cast<void*>(A),
+                                         lda,
+                                         (rocblas_float_complex*)B,
+                                         ldb));
+        }
+        else if(dataTypeA == HIP_C_64F && dataTypeB == HIP_C_64F)
+        {
+            return hipsolver::rocblas2hip_status(
+                rocsolver_zgetrs_npvt_64((rocblas_handle)handle,
+                                         hipsolver::hip2rocblas_operation(trans),
+                                         n,
+                                         nrhs,
+                                         (rocblas_double_complex*)const_cast<void*>(A),
+                                         lda,
+                                         (rocblas_double_complex*)B,
+                                         ldb));
+        }
+        else
+            return HIPSOLVER_STATUS_INVALID_ENUM;
+    }
 }
 catch(...)
 {

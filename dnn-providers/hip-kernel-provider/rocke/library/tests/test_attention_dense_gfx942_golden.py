@@ -8,15 +8,20 @@ specs and compares against a checked-in per-flavor golden fixture, catching any
 unintended codegen drift across the P1-P4 lever set. Pure text lowering -- no GPU / no
 comgr required.
 
+Every flavor in ``LLVM_FLAVORS`` is checked from any host, through the shared
+``rocke.core.ir_golden`` comparator, so a newly added flavor fails here until the
+fixture is re-blessed.
+
 Covers the acceptance matrix: D64/D128 x bf16/fp16 x default/persistent x GQA, causal
-and full. Every case is in the gfx942 supported set (varlen / ragged / sliding-window
-are rejected on gfx942, so -- unlike the gfx950 sibling -- they are absent here).
+and full, plus sliding-window (W128/W256, both grids, D64/D128) and sinks (alone and
+combined). Every case is in the gfx942 supported set; varlen and ragged are rejected on
+gfx942, so unlike the gfx950 sibling they are absent here.
 
 Both D64 K-LDS layouts are pinned so drift on either is caught:
   * ``default_d64_*``  -- specs built DIRECTLY with ``lds_k_group_pad=0``: the UNPADDED
     layout, i.e. the A/B baseline the pad's ~2x is measured against.
   * ``dispatch_d64_*`` -- specs built through the gfx942 dispatch factory
-    (``_dense_spec``), which inherits the shared default pad -> this GUARDS the padded
+    (``attention_tuning_spec(req, "gfx942_dense")``), which inherits the shared default pad -> this GUARDS the padded
     IR the shipped D64 path actually emits. Building via the dispatch spec (rather than
     hard-coding the pad) means these cases auto-track any future D64 tuning change, so
     re-blessing stays a one-command operation across the kernel's evolution.
@@ -47,7 +52,6 @@ from pathlib import Path
 _GOLDEN = (
     Path(__file__).resolve().parent / "golden" / "attention_dense_gfx942_ir_sha256.json"
 )
-_FLAVORS = ("llvm20", "llvm22")
 _ARCH = "gfx942"
 
 # Pin the ``library/`` root ahead of everything on sys.path. When this file is run
@@ -69,17 +73,17 @@ def _cases():
         that layout is the A/B baseline, and nothing else in the fixture covers it now
         that the shared field defaults the pad ON.
       * ``mk_dispatch`` routes a request through the gfx942 dispatch factory
-        (``_dense_spec``), so the emitted spec carries whatever the SHIPPED path folds in
+        (``attention_tuning_spec(req, "gfx942_dense")``), so the emitted spec carries whatever the SHIPPED path folds in
         (for D64: the inherited K row-group pad + the bf16 ``waves_per_eu`` bump). These
         GUARD the IR that actually ships. Because they re-derive the spec from the
         dispatch policy rather than hard-coding the levers, a future D64 tuning change is
         captured automatically on the next re-bless -- no per-lever edits here."""
     from kernels.gfx942.attention_dense import (
         AttentionDenseSpec,
+        Gfx942AttentionDenseSpec,
         build_attention_dense,
     )
-    from dispatch.attention import AttentionRequest
-    from dispatch.attention.gfx942 import _dense_spec
+    from dispatch.attention import AttentionRequest, attention_tuning_spec
 
     base = dict(
         batch=1,
@@ -96,7 +100,10 @@ def _cases():
     def mk(**over):
         d = dict(base)
         d.update(over)
-        return lambda: build_attention_dense(AttentionDenseSpec(**d), arch=_ARCH)
+        spec_type = (
+            Gfx942AttentionDenseSpec if d.get("emit_lse", False) else AttentionDenseSpec
+        )
+        return lambda: build_attention_dense(spec_type(**d), arch=_ARCH)
 
     def mk_dispatch(**over):
         """Build via the gfx942 dispatch spec so the case tracks the SHIPPED config
@@ -114,9 +121,13 @@ def _cases():
             arch=_ARCH,
             mask_type=1 if over.get("causal", base["causal"]) else 0,
             dtype=over.get("dtype", base["dtype"]),
-            algorithm="attention_dense",
+            sliding_window=over.get("sliding_window", 0),
+            use_sinks=over.get("use_sinks", False),
+            emit_lse=over.get("emit_lse", False),
         )
-        return lambda: build_attention_dense(_dense_spec(req), arch=_ARCH)
+        return lambda: build_attention_dense(
+            attention_tuning_spec(req, "gfx942_dense").kernel_spec, arch=_ARCH
+        )
 
     return {
         # --- default grid: dtype x head_size x causal/full x GQA/MHA x block_n ---
@@ -176,13 +187,93 @@ def _cases():
             num_persistent=304,
             persist_decode="hkv_major",
         ),
+        # --- sliding-window (SWA): start_tile KV-loop prune + in-tile lower mask.
+        #     W % block_n == 0 (128, 256 = 2, 4 tiles at block_n=64). Default and
+        #     persistent grids both pruned per work item; dispatch case guards the
+        #     gfx942_dense sliding_window threading end to end. ---
+        "attention_dense_gfx942/swa_d128_bf16_w128": mk(sliding_window=128),
+        "attention_dense_gfx942/swa_d128_fp16_w256": mk(
+            dtype="fp16", sliding_window=256
+        ),
+        "attention_dense_gfx942/persist_swa_d128_bf16_w128": mk(
+            sliding_window=128,
+            persistent=True,
+            num_persistent=304,
+            persist_decode="qb_major",
+        ),
+        "attention_dense_gfx942/dispatch_swa_d128_bf16_w128": mk_dispatch(
+            sliding_window=128
+        ),
+        # D64 SWA: structurally distinct builder arm (packed 2-rows/DMA + K row-group
+        # pad + wpe=4 tune). Numeric coverage is in _SWA_COHORT
+        "attention_dense_gfx942/swa_d64_bf16_w128": mk(
+            head_size=64, sliding_window=128
+        ),
+        # --- sinks: m/l seeded from sink_ptr[hq] once per work item, before the KV
+        #     loop. Default and persistent grids (both decodes), full and causal,
+        #     both head sizes, SWA-sink, and a dispatch case that guards the
+        #     gfx942_dense._base_spec use_sinks threading end to end. ---
+        "attention_dense_gfx942/sink_d128_bf16_causal": mk(use_sinks=True),
+        "attention_dense_gfx942/sink_d128_fp16_full": mk(
+            dtype="fp16", causal=False, use_sinks=True
+        ),
+        "attention_dense_gfx942/sink_d64_fp16_causal": mk(
+            head_size=64, dtype="fp16", lds_k_group_pad=0, use_sinks=True
+        ),
+        "attention_dense_gfx942/persist_sink_d128_bf16_qbmaj": mk(
+            persistent=True,
+            num_persistent=304,
+            persist_decode="qb_major",
+            use_sinks=True,
+        ),
+        "attention_dense_gfx942/persist_sink_d128_fp16_hkvmaj": mk(
+            dtype="fp16",
+            persistent=True,
+            num_persistent=304,
+            persist_decode="hkv_major",
+            use_sinks=True,
+        ),
+        "attention_dense_gfx942/swa_sink_d128_bf16_w128": mk(
+            sliding_window=128, use_sinks=True
+        ),
+        "attention_dense_gfx942/persist_swa_sink_d128_bf16_w128": mk(
+            sliding_window=128,
+            persistent=True,
+            num_persistent=304,
+            persist_decode="qb_major",
+            use_sinks=True,
+        ),
+        "attention_dense_gfx942/dispatch_sink_d64_bf16_causal": mk_dispatch(
+            head_size=64, use_sinks=True
+        ),
+        # --- optional LSE output: ordinary epilogue, the persistent epilogue with
+        #     keyless rows (window shorter than the distance to the last key), and the
+        #     dispatcher path (AttentionRequest.emit_lse -> spec). ---
+        "attention_dense_gfx942/lse_d128_bf16_causal": mk(emit_lse=True),
+        "attention_dense_gfx942/lse_persist_empty_window_d128_bf16": mk(
+            emit_lse=True,
+            persistent=True,
+            num_persistent=304,
+            seqlen_q=256,
+            seqlen_kv=64,
+            sliding_window=64,
+        ),
+        "attention_dense_gfx942/dispatch_lse_d128_bf16_causal": mk_dispatch(
+            emit_lse=True
+        ),
+        # --- sinks + LSE: a keyless row keeps the sink seed (m = sink * LOG2E,
+        #     l = 1), so its LSE is the sink logit rather than -inf. Same geometry
+        #     as the LSE empty-window case. ---
+        "attention_dense_gfx942/lse_sink_persist_empty_window_d128_bf16": mk(
+            emit_lse=True,
+            use_sinks=True,
+            persistent=True,
+            num_persistent=304,
+            seqlen_q=256,
+            seqlen_kv=64,
+            sliding_window=64,
+        ),
     }
-
-
-def _current_flavor():
-    from rocke.core.lower_llvm import _resolve_llvm_flavor
-
-    return _resolve_llvm_flavor()
 
 
 def _sha_for(build, flavor):
@@ -193,38 +284,33 @@ def _sha_for(build, flavor):
     return hashlib.sha256(data).hexdigest(), len(data)
 
 
+def _run(flavor):
+    """One flavor's golden sub-document. A build error propagates with its
+    traceback, in the test and under ``--write`` alike, so a fixture can never be
+    blessed with a case that fails to lower."""
+    cases = {}
+    for cid, build in _cases().items():
+        sha, nbytes = _sha_for(build, flavor)
+        cases[cid] = {"sha256": sha, "bytes": nbytes}
+    return {"cases": cases}
+
+
 def _build_doc():
-    doc = {"schema": "attention_dense_gfx942.ir_golden_sha256/v1", "flavors": {}}
-    for flavor in _FLAVORS:
-        cases = {}
-        for cid, build in _cases().items():
-            try:
-                sha, nbytes = _sha_for(build, flavor)
-                cases[cid] = {"sha256": sha, "bytes": nbytes}
-            except Exception as e:  # pragma: no cover - diagnostic
-                cases[cid] = {"error": str(e)[:160]}
-        doc["flavors"][flavor] = {"cases": cases}
-    return doc
+    from rocke.core.ir_golden import GOLDEN_FLAVORS
+
+    return {
+        "schema": "attention_dense_gfx942.ir_golden_sha256/v1",
+        "flavors": {fl: _run(fl) for fl in GOLDEN_FLAVORS},
+    }
 
 
 def test_attention_dense_gfx942_ir_matches_golden():
     import pytest
+    from rocke.core.ir_golden import check_golden
 
     if not _GOLDEN.exists():
         pytest.skip("gfx942 golden fixture missing; generate with --write")
-    golden = json.loads(_GOLDEN.read_text())
-    flavor = _current_flavor()
-    gflav = golden.get("flavors", {}).get(flavor)
-    if not gflav:
-        pytest.skip(f"no gfx942 golden recorded for llvm flavor {flavor!r}")
-    drift = []
-    for cid, build in _cases().items():
-        want = gflav["cases"].get(cid, {}).get("sha256")
-        if want is None:
-            continue
-        got, _ = _sha_for(build, flavor)
-        if got != want:
-            drift.append(f"{cid}: {want} -> {got}")
+    drift = check_golden(_GOLDEN, _run)
     assert not drift, "gfx942 attention_dense IR drift vs golden:\n  " + "\n  ".join(
         drift
     )

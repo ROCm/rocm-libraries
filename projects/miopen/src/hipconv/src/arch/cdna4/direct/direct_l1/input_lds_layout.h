@@ -45,8 +45,15 @@ struct InputLdsLayout
     static constexpr int w_stride = block_size_c8;
     static constexpr int h_stride = block_size_w * w_stride;
 
-    // Data footprint of one buffer (tic or toc): the full block_size_h rows.
-    static constexpr int tic_data = block_size_h * h_stride;
+    // Planes each buffer holds: 2 for tf32's bf16 pair, 1 otherwise.
+    //
+    // Both planes use this same 16-bit layout and swizzle, so a plane is addressed
+    // exactly like a 16-bit tile and the small one sits plane_stride past the big.
+    static constexpr int planes       = cfg.elem_bytes == 4 ? 2 : 1;
+    static constexpr int plane_stride = block_size_h * h_stride;
+
+    // Data footprint of one buffer (tic or toc): planes x the full block_size_h rows.
+    static constexpr int tic_data = planes * plane_stride;
 
     // Rows the input loader writes per step (step 0 writes the bottom ones).
     //
@@ -58,7 +65,10 @@ struct InputLdsLayout
     //
     // Sized for the MAX stage (K64/wave, 16384 fp16); smaller stages use a top
     // sub-region. A static_assert in kernel.h checks this is >= the actual stage.
-    static constexpr int writer_stage_uint4 = 16384 / 8;
+    //
+    // tf32 never stages (its writer takes the narrow register store), so it reserves
+    // nothing -- which is what lets its doubled tile fit the 160 KiB budget.
+    static constexpr int writer_stage_uint4 = cfg.elem_bytes == 4 ? 0 : 16384 / 8;
 
     // Ideal inter-buffer pad (uint4) for the cross-round overlap.
     //
@@ -95,6 +105,9 @@ struct InputLdsLayout
 
     __device__ __host__ auto tic(int x) const { return step(x * tic_stride); }
     __device__ __host__ auto h(int x) const { return step(x * h_stride); }
+
+    // Plane within a buffer: 0 = big, 1 = small (tf32 only; planes == 1 otherwise).
+    __device__ __host__ auto plane(int x) const { return step(x * plane_stride); }
 
     // Combined (w, c8) step through the swizzle (w in 1-element units, c8 a C-strip).
     __device__ __host__ auto wc8(int w, int c8) const { return step(Swizzle::offset_uint4(w, c8)); }

@@ -34,14 +34,11 @@ class Tuner(TunerSelect):
     def _get_default_args(cls) -> TunerArgs:
         return TunerArgs(algo_full_name="device_select_predicated_flag")
 
-    def _get_value_type_name(self) -> str:
-        return "flag_type"
-
     def tune_all(self) -> None:
         """Tune for all key type and value type combinations"""
         for data_type in COMMON_KEY_TYPES:
             for flag_type in COMMON_VALUE_TYPES:
-                self.tune_type(data_type, flag_type)
+                self.tune_type({"data_type": data_type, "flag_type": flag_type})
 
 
 if __name__ == "__main__":

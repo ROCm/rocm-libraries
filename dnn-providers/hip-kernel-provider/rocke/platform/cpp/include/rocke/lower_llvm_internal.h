@@ -106,9 +106,8 @@ extern const int ROCKE_LL_INTRINSIC_DECLS_COUNT;
 extern const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES[];
 extern const int ROCKE_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES_COUNT;
 
-/* The LLVM23 overrides (Python _INTRINSIC_DECLS_LLVM23_OVERRIDES): identical to
- * the LLVM22 set for the declares rocke emits today; split entries here if an
- * LLVM 23 host proves drift. */
+/* The LLVM23 overrides (Python _INTRINSIC_DECLS_LLVM23_OVERRIDES): the LLVM22
+ * set plus declarations whose ABI changed again. */
 extern const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS_LLVM23_OVERRIDES[];
 extern const int ROCKE_LL_INTRINSIC_DECLS_LLVM23_OVERRIDES_COUNT;
 
@@ -129,6 +128,8 @@ typedef struct rocke_ll_anyptr_space
 
 extern const rocke_ll_anyptr_space_t ROCKE_LL_S_PREFETCH_INST_PTR_TYPES[];
 extern const int ROCKE_LL_S_PREFETCH_INST_PTR_TYPES_COUNT;
+extern const rocke_ll_anyptr_space_t ROCKE_LL_S_PREFETCH_DATA_PTR_TYPES[];
+extern const int ROCKE_LL_S_PREFETCH_DATA_PTR_TYPES_COUNT;
 extern const rocke_ll_anyptr_space_t ROCKE_LL_AV_B128_PTR_TYPES[];
 extern const int ROCKE_LL_AV_B128_PTR_TYPES_COUNT;
 
@@ -400,6 +401,7 @@ struct rocke_lower
     ROCKE_VEC(rocke_ll_need_t) needs;
     bool needs_fp_atomic_md; /* _needs_fp_atomic_md      */
     bool needs_av_scope_md; /* agent-scope metadata for av.load/store.b128 */
+    bool needs_nontemporal_md; /* _needs_nontemporal_md: "!5 = !{i32 1}" */
 
     /* dynamically-registered decls (Python self._decls mutation, e.g. vector
      * smax registers "llvm.smax.vNiW"). Keyed; consulted by _need fallback. */
@@ -555,10 +557,6 @@ int rocke_ll_anyptr_space(rocke_lower_t* L,
                           int count,
                           const char** out_ptr_ty);
 
-/* Map an IR type-NAME string (from op.attrs, e.g. iter_args metadata) back to
- * LLVM text (Python _llvm_type_from_name). Handles scalars + "vec<exN>". */
-const char* rocke_ll_llvm_type_from_name(rocke_lower_t* L, const char* name);
-
 /* LLVM aggregate storage type for a SmemType: nested arrays of the element
  * (Python _smem_storage_type). Arena-owned. */
 const char* rocke_ll_smem_storage_type(rocke_lower_t* L, const rocke_type_t* smem);
@@ -569,8 +567,9 @@ bool rocke_ll_is_constant(const rocke_value_t* v);
  * + returns 0 if not a constant. */
 int64_t rocke_ll_eval_constant(rocke_lower_t* L, const rocke_value_t* v);
 
-/* fp32 / fp16 LLVM hex constant spellings (Python _fp32_hex / _fp16_hex).
- * Arena-owned. */
+/* fp64 / fp32 / fp16 LLVM hex constant spellings (Python _fp64_hex / _fp32_hex /
+ * _fp16_hex). Arena-owned. */
+const char* rocke_ll_fp64_hex(rocke_lower_t* L, double x);
 const char* rocke_ll_fp32_hex(rocke_lower_t* L, double x);
 const char* rocke_ll_fp16_hex(rocke_lower_t* L, double x);
 

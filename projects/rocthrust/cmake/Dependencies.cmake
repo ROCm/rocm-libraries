@@ -461,6 +461,8 @@ if(USER_BUILD_BENCHMARK)
 
     # FetchContent runs in-process, so rocthrust's BUILD_BENCHMARK=ON and BUILD_TEST=ON leaks into
     # rocrand and causes its benchmarks and unit tests to build. Suppress that here.
+    set(_ROCTHRUST_SAVED_BUILD_BENCHMARK "${BUILD_BENCHMARK}")
+    set(_ROCTHRUST_SAVED_BUILD_TEST "${BUILD_TEST}")
     set(BUILD_BENCHMARK OFF)
     set(BUILD_TEST OFF)
     
@@ -474,8 +476,12 @@ if(USER_BUILD_BENCHMARK)
       LOG_INSTALL   TRUE
     )
     FetchContent_MakeAvailable(rocrand)
-    set(BUILD_BENCHMARK ON)
-    set(BUILD_TEST ON)
+    set(BUILD_BENCHMARK "${_ROCTHRUST_SAVED_BUILD_BENCHMARK}")
+    set(BUILD_TEST "${_ROCTHRUST_SAVED_BUILD_TEST}")
+
+    unset(_ROCTHRUST_SAVED_BUILD_BENCHMARK)
+    unset(_ROCTHRUST_SAVED_BUILD_TEST)
+
     if(NOT TARGET roc::rocrand)
       add_library(roc::rocrand ALIAS rocrand)
     endif()
