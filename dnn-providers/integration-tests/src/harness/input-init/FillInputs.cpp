@@ -279,7 +279,7 @@ std::optional<float> resolveSdpaBwdAttnScale(
 
     if(attrs.attn_scale_value().has_value())
     {
-        return attrs.attn_scale_value().value();
+        return attrs.attn_scale_value();
     }
     if(!attrs.scale_tensor_uid().has_value())
     {
@@ -396,19 +396,24 @@ void deriveSdpaBackwardOAndStats(const hipdnn_flatbuffers_sdk::data_objects::Nod
         return;
     }
 
+    // Overloads for some math operations (std::exp) in forward SDPA references do not exist for
+    // half and bfloat16. So we are restricting the compute type to float for this derivation.
+    if(node.compute_data_type() != hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT)
+    {
+        throw std::runtime_error("deriveSdpaBackwardOAndStats: compute type must be float");
+    }
+
     // Dispatch the SDPA backward derivation based on the data types of Q/K/V/O/C
     dispatchSdpaType(tensorDataTypes.at(attrs->q_tensor_uid()), [&](auto q) {
         dispatchSdpaType(tensorDataTypes.at(attrs->k_tensor_uid()), [&](auto k) {
             dispatchSdpaType(tensorDataTypes.at(attrs->v_tensor_uid()), [&](auto v) {
                 dispatchSdpaType(tensorDataTypes.at(attrs->o_tensor_uid()), [&](auto o) {
-                    dispatchSdpaType(node.compute_data_type(), [&](auto c) {
-                        deriveSdpaBackwardOAndStatsImpl<decltype(q),
-                                                        decltype(k),
-                                                        decltype(v),
-                                                        decltype(o),
-                                                        decltype(c)>(
-                            *attrs, tensorDataTypes, inputs, referenceUsesDevice, fillO, fillStats);
-                    });
+                    deriveSdpaBackwardOAndStatsImpl<decltype(q),
+                                                    decltype(k),
+                                                    decltype(v),
+                                                    decltype(o),
+                                                    float>(
+                        *attrs, tensorDataTypes, inputs, referenceUsesDevice, fillO, fillStats);
                 });
             });
         });
