@@ -985,8 +985,10 @@ std::vector<T> fillValues(size_t count, uint32_t seed)
     return values;
 }
 
-/// The LSE is computed in f32 from exact bf16 inputs; its magnitude is about ln(Skv).
-constexpr double LSE_TOLERANCE = 1e-2;
+/// The LSE is computed in f32 from exact bf16 inputs; its magnitude is about ln(Skv). Tight
+/// enough that an error the size vendored-kernel modification 21 fixed (1.2e-3) sits near
+/// the bound.
+constexpr double LSE_TOLERANCE = 2e-3;
 
 /// Runs @p kernel for @p spec through prepare() and launch() and checks every output element
 /// against a double-precision reference, in the memory layout @p spec names: BSHD, BHSD, or
@@ -1053,7 +1055,9 @@ void expectCandidateMatchesReference(const MatchContext& context,
         ASSERT_EQ(hipSuccess,
                   hipMemcpy(vDevice, v.data(), vCount * sizeof(T), hipMemcpyHostToDevice));
     }
-    ASSERT_EQ(hipSuccess, hipMemset(oDevice, 0, oCount * sizeof(T)));
+    // All-ones bytes are NaN in bf16 and f16: an element the kernel never writes fails rather
+    // than reading as a zero.
+    ASSERT_EQ(hipSuccess, hipMemset(oDevice, 0xFF, oCount * sizeof(T)));
     // The LSE output, [B, H, Sq] f32, when the graph asks for it.
     const bool withStats = spec.stats == SdpaStats::LSE;
     const auto statsCount = static_cast<size_t>(b * h * s);
@@ -1267,7 +1271,10 @@ void expectCandidateMatchesReference(const MatchContext& context,
                                     * at(v, vStrides, vStart, bi, hi / group, j, e);
                     }
                     expected = lastKey < firstKey ? 0.0 : expected / sum;
-                    const double error = std::abs(at(o, oStrides, 0, bi, hi, si, e) - expected);
+                    // NaN or inf (an unwritten element reads as NaN) is a full miss.
+                    const double actual = at(o, oStrides, 0, bi, hi, si, e);
+                    const double error = std::isfinite(actual) ? std::abs(actual - expected)
+                                                               : std::numeric_limits<double>::max();
                     if(error > worst)
                     {
                         worst = error;
@@ -1299,8 +1306,10 @@ void expectCdnaMatchesReference(const SdpaGraphSpec& spec, double absoluteTolera
         SCOPED_TRACE(kernel.name);
         if(spec.dataType == DataType::HALF)
         {
+            // P is rounded to the input dtype before the second product: f16's 11-bit
+            // mantissa allows about an eighth of bf16's budget.
             expectCandidateMatchesReference<hipdnn_data_sdk::types::half>(
-                fixture.context(), *bound, kernel, spec, absoluteTolerance);
+                fixture.context(), *bound, kernel, spec, std::min(absoluteTolerance, 4e-3));
         }
         else
         {
@@ -1431,6 +1440,59 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, ServesMoreQueriesThanKeysWithRowsNoKeyReache
     spec.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
     spec.stats = SdpaStats::LSE;
     expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+}
+
+TEST(TestGpuFlydslSdpaCdnaDispatch, ServesTheCombinationsNoOtherCaseReaches)
+{
+    // f16 objects built with kv_align (they run only at a key length that is a multiple of
+    // 64): non-causal at each exact head dim.
+    for(const int64_t headDim : {int64_t{64}, int64_t{128}, int64_t{256}})
+    {
+        SCOPED_TRACE("f16 aligned, head_dim " + std::to_string(headDim));
+        auto spec = cdnaSpec();
+        spec.dataType = DataType::HALF;
+        spec.headDim = headDim;
+        spec.seqLenQ = 200;
+        spec.seqLenKv = 1024;
+        expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+    }
+    // A split merge where no split reaches the first rows (bottom-right, Sq > Skv), with the
+    // LSE, with and without a sink: the merge must give O = 0 and LSE -inf (or the sink).
+    {
+        SCOPED_TRACE("merge, rows no split reaches");
+        auto spec = cdnaSpec();
+        spec.headDim = 64;
+        spec.seqLenQ = 600;
+        spec.seqLenKv = 520;
+        spec.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+        spec.stats = SdpaStats::LSE;
+        expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+        spec.withSink = true;
+        expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+    }
+    // A window with more queries than keys, bottom-right: the window's lower edge clamps.
+    {
+        SCOPED_TRACE("bottom-right window, Sq > Skv");
+        auto spec = cdnaSpec();
+        spec.seqLenQ = 500;
+        spec.seqLenKv = 300;
+        spec.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+        spec.leftBound = 48;
+        spec.stats = SdpaStats::LSE;
+        expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+    }
+    // One key, and one query over one key.
+    for(const int64_t seqLenQ : {int64_t{200}, int64_t{1}})
+    {
+        SCOPED_TRACE("Skv 1, Sq " + std::to_string(seqLenQ));
+        auto spec = cdnaSpec();
+        spec.seqLenQ = seqLenQ;
+        spec.seqLenKv = 1;
+        spec.stats = SdpaStats::LSE;
+        expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+        spec.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+        expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+    }
 }
 
 TEST(TestGpuFlydslSdpaCdnaDispatch, ServesChunkedPrefillWithTopLeftCausal)
