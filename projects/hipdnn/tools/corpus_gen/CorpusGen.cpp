@@ -40,7 +40,9 @@
 #include <fstream>
 #include <functional>
 #include <iostream>
+#include <limits>
 #include <map>
+#include <optional>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -282,22 +284,39 @@ ParseOutcome parseArguments(const std::vector<std::string>& args, Options& optio
             }
             return args[++i];
         };
-        // The whole value is the number, or the argument is refused: `--count abc` must not
-        // run as `--count 0` (the whole pool).
-        std::string badNumber;
-        const auto number = [&](auto& target, const auto& parse) {
+        // The whole value is the number, or the argument is refused: `--count abc` (or an
+        // empty value) must not run as `--count 0` (the whole pool). A number below the
+        // option's least is refused too: `--ceiling 0` leaves the search no extent to propose.
+        std::optional<std::string> badNumber;
+        std::string least;
+        const auto number = [&](auto& target, const auto& parse, auto atLeast) {
             const auto text = next();
-            const auto value = parse(text);
-            if(value)
+            if(missingValue)
             {
-                target = static_cast<std::remove_reference_t<decltype(target)>>(*value);
+                return;
             }
-            else if(!missingValue)
+            const auto value = parse(text);
+            if(!value)
             {
                 badNumber = text;
             }
+            else if(*value < atLeast)
+            {
+                badNumber = text;
+                std::ostringstream bound;
+                bound << atLeast;
+                least = bound.str();
+            }
+            else
+            {
+                target = static_cast<std::remove_reference_t<decltype(target)>>(*value);
+            }
         };
-        const auto integer = [&](auto& target) { number(target, hipdnn_corpus_gen::parseInteger); };
+        const auto integer = [&](auto& target, int64_t atLeast) {
+            number(target, hipdnn_corpus_gen::parseInteger, atLeast);
+        };
+        const auto share
+            = [&](double& target) { number(target, hipdnn_corpus_gen::parseReal, 0.0); };
 
         if(arg == "--help" || arg == "-h")
         {
@@ -320,7 +339,9 @@ ParseOutcome parseArguments(const std::vector<std::string>& args, Options& optio
         }
         else if(arg == "--engine-id")
         {
-            number(options.engineId, hipdnn_corpus_gen::parseEngineId);
+            number(options.engineId,
+                   hipdnn_corpus_gen::parseEngineId,
+                   std::numeric_limits<int64_t>::min());
             options.haveEngineId = true;
         }
         else if(arg == "--without-engine")
@@ -345,11 +366,11 @@ ParseOutcome parseArguments(const std::vector<std::string>& args, Options& optio
         }
         else if(arg == "--count")
         {
-            integer(options.count);
+            integer(options.count, 0);
         }
         else if(arg == "--per-combination")
         {
-            integer(options.exploration.pointsPerCombination);
+            integer(options.exploration.pointsPerCombination, 1);
         }
         else if(arg == "--kdp-root" || arg == "--kdp")
         {
@@ -361,15 +382,15 @@ ParseOutcome parseArguments(const std::vector<std::string>& args, Options& optio
         }
         else if(arg == "--model-share")
         {
-            number(options.shares["model"], hipdnn_corpus_gen::parseReal);
+            share(options.shares["model"]);
         }
         else if(arg == "--kernel-share")
         {
-            number(options.shares["kernel"], hipdnn_corpus_gen::parseReal);
+            share(options.shares["kernel"]);
         }
         else if(arg == "--sweep-share")
         {
-            number(options.shares["sweep"], hipdnn_corpus_gen::parseReal);
+            share(options.shares["sweep"]);
         }
         else if(arg == "--keep")
         {
@@ -406,7 +427,7 @@ ParseOutcome parseArguments(const std::vector<std::string>& args, Options& optio
         }
         else if(arg == "--regime-floor")
         {
-            integer(options.regimeFloor);
+            integer(options.regimeFloor, 0);
         }
         else if(arg == "--include-extremes")
         {
@@ -414,11 +435,11 @@ ParseOutcome parseArguments(const std::vector<std::string>& args, Options& optio
         }
         else if(arg == "--budget")
         {
-            integer(options.exploration.budgetPerCombination);
+            integer(options.exploration.budgetPerCombination, 1);
         }
         else if(arg == "--ceiling")
         {
-            integer(options.exploration.numericCeiling);
+            integer(options.exploration.numericCeiling, 1);
         }
         else if(arg == "--probe")
         {
@@ -426,23 +447,23 @@ ParseOutcome parseArguments(const std::vector<std::string>& args, Options& optio
         }
         else if(arg == "--restarts")
         {
-            integer(options.exploration.restarts);
+            integer(options.exploration.restarts, 1);
         }
         else if(arg == "--steps")
         {
-            integer(options.exploration.stepsPerStart);
+            integer(options.exploration.stepsPerStart, 1);
         }
         else if(arg == "--max-bytes")
         {
-            integer(options.maxBytes);
+            integer(options.maxBytes, 0);
         }
         else if(arg == "--max-skeleton")
         {
-            integer(options.exploration.maxSkeleton);
+            integer(options.exploration.maxSkeleton, 1);
         }
         else if(arg == "--seed")
         {
-            integer(options.exploration.seed);
+            integer(options.exploration.seed, std::numeric_limits<int64_t>::min());
         }
         else
         {
@@ -455,9 +476,10 @@ ParseOutcome parseArguments(const std::vector<std::string>& args, Options& optio
             std::cerr << arg << " needs a value\n";
             return ParseOutcome::INVALID;
         }
-        if(!badNumber.empty())
+        if(badNumber)
         {
-            std::cerr << arg << " needs a number, not '" << badNumber << "'\n";
+            std::cerr << arg << " needs a number" << (least.empty() ? "" : " of at least " + least)
+                      << ", not '" << *badNumber << "'\n";
             return ParseOutcome::INVALID;
         }
     }

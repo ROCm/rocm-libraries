@@ -42,6 +42,19 @@ TEST(TestCliNumbers, AnEngineIdIsDecimalOrHex)
     EXPECT_EQ(parseEngineId("-677973494996465522"), -677973494996465522);
     EXPECT_FALSE(parseEngineId("ten"));
     EXPECT_FALSE(parseEngineId("0x"));
+    EXPECT_FALSE(parseEngineId(""));
+}
+
+TEST(TestCliNumbers, AnIdOfTwoToTheSixtyThreeOrMoreHasEverySpelling)
+{
+    // One id, as hipdnn_list_engines prints it, as signed decimal and as unsigned decimal.
+    const auto id = parseEngineId("0xF6975AB2C79B088E");
+    ASSERT_TRUE(id);
+    EXPECT_LT(*id, 0);
+    EXPECT_EQ(parseEngineId("-677973494996465522"), id);
+    EXPECT_EQ(parseEngineId("17768770578713086094"), id);
+    EXPECT_EQ(parseEngineId("18446744073709551615"), -1);
+    EXPECT_FALSE(parseEngineId("18446744073709551616"));
 }
 
 } // namespace hipdnn_bench

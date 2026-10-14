@@ -55,6 +55,7 @@ def world(tmp_path, monkeypatch):
 
     def bench(command, environment, log_dir, ordinal, commands):
         engine["calls"] += 1
+        engine.setdefault("argv", []).append(command)
         commands.append({"argv": command})
         metric = command[command.index("--ranking-metric") + 1]
         graph = json.loads(
@@ -66,7 +67,7 @@ def world(tmp_path, monkeypatch):
         device = engine["device"]
         engine["scale"] *= engine.get("drift", 1.0)
         return {
-            "engine_id": 7,
+            "engine_id": engine.get("engine_id", 7),
             "engine_name": engine["engine_name"],
             "graph_id": graph["id"],
             "graph_key": graph["id"],
@@ -107,30 +108,29 @@ def world(tmp_path, monkeypatch):
     return {"tree": tree, "graphs": graphs, "engine": engine, "root": tmp_path}
 
 
-def _collect(world, name, collected_at=None, **engine):
+def _collect_arguments(world, name, engine_id="7"):
+    return [
+        "generate",
+        "--collect-only",
+        "--graphs",
+        str(world["graphs"]),
+        "--descriptor-tree",
+        str(world["tree"]),
+        "--engine-id",
+        engine_id,
+        "--role",
+        "predict_engine",
+        "--output-dir",
+        str(world["root"] / name),
+    ]
+
+
+def _collect(world, name, collected_at=None, engine_id="7", **engine):
     from uhd_gen.__main__ import main
 
     world["engine"].update(engine)
     output = world["root"] / name
-    assert (
-        main(
-            [
-                "generate",
-                "--collect-only",
-                "--graphs",
-                str(world["graphs"]),
-                "--descriptor-tree",
-                str(world["tree"]),
-                "--engine-id",
-                "7",
-                "--role",
-                "predict_engine",
-                "--output-dir",
-                str(output),
-            ]
-        )
-        == 0
-    )
+    assert main(_collect_arguments(world, name, engine_id)) == 0
     if collected_at:
         # The merge orders by when a collection was taken; pin it rather than sleep.
         manifest = json.loads(
@@ -224,6 +224,43 @@ def test_collect_only_records_measurements_and_trains_nothing(world):
         not (collection / "model").exists()
         and not (collection / "generation_manifest.json").exists()
     )
+
+
+@pytest.mark.parametrize(
+    "spelling", ["-677973494996465522", "17768770578713086094", "0xF6975AB2C79B088E"]
+)
+def test_an_engine_id_past_two_to_the_sixty_third_is_one_id_however_written(
+    world, spelling
+):
+    """hipdnn_list_engines prints ids as hex and bench reports them signed: every spelling
+    reaches bench as the id it reports, so its rows are accepted as that engine's."""
+    world["engine"]["engine_id"] = -677973494996465522
+    collection = _collect(world, "col", engine_id=spelling)
+    asked = {argv[argv.index("--engine-id") + 1] for argv in world["engine"]["argv"]}
+    assert asked == {"-677973494996465522"}
+    assert (
+        len(json.loads((collection / "corpus.json").read_text(encoding="utf-8")))
+        == GRAPHS
+    )
+
+
+@pytest.mark.parametrize(
+    "spelling,reason",
+    [
+        ("ten", "not an engine id"),
+        ("1_000", "not an engine id"),
+        ("0x", "not an engine id"),
+        ("18446744073709551616", "not a 64-bit engine id"),
+    ],
+)
+def test_an_engine_id_that_is_not_one_is_refused(world, capsys, spelling, reason):
+    from uhd_gen.__main__ import main
+
+    with pytest.raises(SystemExit) as refused:
+        main(_collect_arguments(world, "x", spelling))
+    assert refused.value.code == 2, "argparse's usage error"
+    assert f"{reason}: {spelling!r}" in capsys.readouterr().err
+    assert world["engine"]["calls"] == 0
 
 
 def test_a_recorded_collection_trains_what_the_one_shot_run_would(world, evaluator):
@@ -493,9 +530,10 @@ def test_published_candidates_of_one_problem_stay_distinct_rows():
     assert best_measurements(measured) == (measured, 0, {})
 
 
-def test_a_bench_that_names_no_graph_key_cannot_collect(world, caplog):
+def test_a_bench_that_names_no_graph_key_cannot_collect(world, caplog, monkeypatch):
     """A row keyed by anything but content could enter a training set twice."""
     from uhd_gen import generate
+    from uhd_gen.__main__ import main
 
     measure = generate._run_json
 
@@ -504,13 +542,10 @@ def test_a_bench_that_names_no_graph_key_cannot_collect(world, caplog):
         response.pop("graph_key", None)
         return response
 
-    generate._run_json = unkeyed
-    try:
-        with pytest.raises(AssertionError):
-            _collect(world, "unkeyed")
-    finally:
-        generate._run_json = measure
+    monkeypatch.setattr(generate, "_run_json", unkeyed)
+    assert main(_collect_arguments(world, "unkeyed")) == 1
     assert "reported no graph_key" in caplog.text
+    assert not (world["root"] / "unkeyed" / "collection_manifest.json").exists()
 
 
 @pytest.mark.parametrize(

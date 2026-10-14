@@ -31,7 +31,7 @@ from .generate import (
     load_dataset,
     read_regime_manifest,
 )
-from .immediate import ROLE
+from .immediate import ROLE, parse_engine_id
 from .ranking_metrics import DEFAULT_RANKING_METRIC, ranking_metric
 
 logger = logging.getLogger(__name__)
@@ -110,7 +110,7 @@ def add_size_arguments(parser: argparse.ArgumentParser) -> None:
     # Passed through to the `generate --dataset` run at every curve point.
     parser.add_argument("--descriptor-tree", required=True)
     parser.add_argument("--engine")
-    parser.add_argument("--engine-id", type=int)
+    parser.add_argument("--engine-id", type=parse_engine_id)
     parser.add_argument("--arch")
     parser.add_argument("--uhd-id")
     parser.add_argument("--metric", default=DEFAULT_RANKING_METRIC)

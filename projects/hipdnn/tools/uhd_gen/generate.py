@@ -42,6 +42,7 @@ from .immediate import (
     LABEL_STATISTIC,
     ROLE,
     binding_identity,
+    parse_engine_id,
     normalize_row,
     normalize_corpus,
     training_binding,
@@ -94,8 +95,9 @@ def add_generate_arguments(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--engine-id",
-        type=int,
-        help="Public hipDNN engine ID used by hipdnn_bench (required to measure)",
+        type=parse_engine_id,
+        help="Public hipDNN engine ID used by hipdnn_bench (required to measure): decimal, "
+        "or 0x-prefixed hex as hipdnn_list_engines prints it",
     )
     parser.add_argument(
         "--bench", default="hipdnn_bench", help="Public hipdnn_bench executable"

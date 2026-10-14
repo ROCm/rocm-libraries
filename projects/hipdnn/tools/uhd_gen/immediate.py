@@ -3,6 +3,7 @@
 """Engine-immediate measurements shared by collection, training and evaluation."""
 from __future__ import annotations
 
+import argparse
 import json
 import math
 import re
@@ -544,6 +545,22 @@ def prediction_scorer(descriptor: dict, responses: list[dict]):
         return np.asarray(values, dtype=float)
 
     return score
+
+
+def parse_engine_id(text: str) -> int:
+    """An engine id as hipdnn_bench reads one: signed or unsigned decimal, or 0x-prefixed hex
+    as `hipdnn_list_engines` prints it. Ids are 64-bit patterns, so all three name the same id;
+    it is returned as the signed value bench reports, so rows compare with the request.
+    """
+    if re.fullmatch(r"0[xX][0-9a-fA-F]+", text):
+        value = int(text[2:], 16)
+    elif re.fullmatch(r"[+-]?[0-9]+", text):
+        value = int(text, 10)
+    else:
+        raise argparse.ArgumentTypeError(f"not an engine id: {text!r}")
+    if not -(1 << 63) <= value < 1 << 64:
+        raise argparse.ArgumentTypeError(f"not a 64-bit engine id: {text!r}")
+    return value - (1 << 64) if value >= 1 << 63 else value
 
 
 def _engine_name_to_id(name: str) -> int:

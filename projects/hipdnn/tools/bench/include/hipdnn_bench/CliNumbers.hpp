@@ -46,10 +46,23 @@ inline std::optional<double> parseReal(const std::string& text)
     return value;
 }
 
-/// An engine id: decimal, or 0x-prefixed hex as `hipdnn_list_engines` prints it.
+/// An engine id: signed or unsigned decimal, or 0x-prefixed hex as `hipdnn_list_engines`
+/// prints it. Ids are 64-bit patterns, so an unsigned value of 2^63 or more names the id with
+/// the same bits (18446744073709551615 is -1).
 inline std::optional<int64_t> parseEngineId(const std::string& text)
 {
-    return hipdnn_data_sdk::utilities::detail::parseEngineNumericId(text);
+    if(const auto id = hipdnn_data_sdk::utilities::detail::parseEngineNumericId(text))
+    {
+        return id;
+    }
+    uint64_t value = 0;
+    const auto* end = text.data() + text.size();
+    const auto [stop, error] = std::from_chars(text.data(), end, value);
+    if(text.empty() || error != std::errc{} || stop != end)
+    {
+        return std::nullopt;
+    }
+    return static_cast<int64_t>(value);
 }
 
 } // namespace hipdnn_bench

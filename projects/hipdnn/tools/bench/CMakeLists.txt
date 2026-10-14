@@ -26,13 +26,19 @@ if(HIPDNN_BUILD_FRONTEND AND HIPDNN_BUILD_BACKEND)
         include(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/CliExitTests.cmake)
         hipdnn_add_cli_exit_tests(hipdnn_bench_cli hipdnn_bench_tool
             "help|--help|0|Usage:"
-            "unknown_flag|--graph,g.fb,--no-such-flag|1|Unknown argument: --no-such-flag"
+            # --help after it: a tool that only warned would print the help and exit 0.
+            "unknown_flag|--graph,g.fb,--no-such-flag,--help|1|Unknown argument: --no-such-flag"
             "flag_as_value|--problem-id,--no-header,--graph,g.fb|1|--problem-id needs a value"
             "trailing_flag|--graph|1|--graph needs a value"
             "warmup_not_a_number|--graph,g.fb,--warmup,x|1|--warmup needs a number"
             "stability_not_a_number|--graph,g.fb,--stability,5x|1|--stability needs a number"
             "engine_id_not_a_number|--engine-id,ten|1|--engine-id needs a number"
-            "error_before_help|--warmup,x,--help|1|--warmup needs a number")
+            "error_before_help|--warmup,x,--help|1|--warmup needs a number"
+            "warmup_empty|--graph,g.fb,--warmup,{empty},--help|1|--warmup needs a number, not ''"
+            "warmup_negative|--warmup,-1,--help|1|--warmup needs a number in"
+            "iterations_past_int|--max-iterations,4294967296,--help|1|--max-iterations needs a number in"
+            "stability_negative|--stability,-0.1,--help|1|--stability needs a number of at least 0"
+            "engine_id_unsigned|--engine-id,18446744073709551615,--help|0|Usage:")
     endif()
 endif()
 

@@ -39,7 +39,9 @@
 #include <cstring>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <map>
+#include <optional>
 #include <set>
 #include <sstream>
 #include <string>
@@ -167,18 +169,32 @@ ParseOutcome parseArguments(const std::vector<std::string>& args, Options& optio
             }
             return args[++i];
         };
-        // The whole value is the number, or the argument is refused.
-        std::string badNumber;
-        const auto integer = [&](auto& target) {
+        // The whole value is the number, or the argument is refused; an empty value is not a
+        // number. So is one outside what the option can hold: `--warmup -1` or a count that
+        // does not fit an int.
+        std::optional<std::string> badNumber;
+        std::string range;
+        const auto integer = [&](auto& target, int64_t atLeast) {
+            using Target = std::remove_reference_t<decltype(target)>;
             const auto text = next();
+            if(missingValue)
+            {
+                return;
+            }
             const auto value = hipdnn_bench::parseInteger(text);
-            if(!missingValue && !value)
+            const auto most = static_cast<int64_t>(std::numeric_limits<Target>::max());
+            if(!value)
             {
                 badNumber = text;
             }
-            else if(value)
+            else if(*value < atLeast || *value > most)
             {
-                target = static_cast<std::remove_reference_t<decltype(target)>>(*value);
+                badNumber = text;
+                range = " in [" + std::to_string(atLeast) + ", " + std::to_string(most) + "]";
+            }
+            else
+            {
+                target = static_cast<Target>(*value);
             }
         };
 
@@ -259,11 +275,7 @@ ParseOutcome parseArguments(const std::vector<std::string>& args, Options& optio
         else if(arg == "--offset" || arg == "--limit")
         {
             options.havePageOptions = true;
-            integer(arg == "--offset" ? options.offset : options.limit);
-            if((arg == "--offset" ? options.offset : options.limit) < 0)
-            {
-                throw std::invalid_argument("Invalid candidate page offset/limit");
-            }
+            integer(arg == "--offset" ? options.offset : options.limit, 0);
         }
         else if(arg == "--sweep")
         {
@@ -297,22 +309,23 @@ ParseOutcome parseArguments(const std::vector<std::string>& args, Options& optio
         }
         else if(arg == "--max-iterations")
         {
-            integer(options.maxIterations);
+            integer(options.maxIterations, 1);
         }
         else if(arg == "--warmup")
         {
-            integer(options.warmup);
+            integer(options.warmup, 0);
         }
         else if(arg == "--stability")
         {
             const auto text = next();
-            if(const auto value = hipdnn_bench::parseReal(text))
+            if(const auto value = hipdnn_bench::parseReal(text); value && *value >= 0.0)
             {
                 options.stability = static_cast<float>(*value);
             }
             else if(!missingValue)
             {
                 badNumber = text;
+                range = value ? " of at least 0" : "";
             }
         }
         else if(arg == "--query")
@@ -349,9 +362,9 @@ ParseOutcome parseArguments(const std::vector<std::string>& args, Options& optio
             std::cerr << arg << " needs a value\n";
             return ParseOutcome::INVALID;
         }
-        if(!badNumber.empty())
+        if(badNumber)
         {
-            std::cerr << arg << " needs a number, not '" << badNumber << "'\n";
+            std::cerr << arg << " needs a number" << range << ", not '" << *badNumber << "'\n";
             return ParseOutcome::INVALID;
         }
     }

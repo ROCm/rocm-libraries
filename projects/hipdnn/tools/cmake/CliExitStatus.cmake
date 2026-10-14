@@ -3,18 +3,27 @@
 
 # Runs TOOL with CLI_ARGS and checks its exit status, and that EXPECTED_OUTPUT appears in what
 # it printed. CLI_ARGS is comma-separated: a semicolon would split the add_test() command line.
+# `{empty}` is an empty argument, which a CMake list cannot carry.
 if(NOT DEFINED TOOL OR NOT DEFINED CLI_ARGS OR NOT DEFINED EXPECTED_EXIT
    OR NOT DEFINED EXPECTED_OUTPUT)
     message(FATAL_ERROR "TOOL, CLI_ARGS, EXPECTED_EXIT and EXPECTED_OUTPUT are required")
 endif()
 
 string(REPLACE "," ";" cliArgs "${CLI_ARGS}")
+set(quotedArgs "")
+foreach(cliArg IN LISTS cliArgs)
+    if(cliArg STREQUAL "{empty}")
+        set(cliArg "")
+    endif()
+    string(APPEND quotedArgs " [==[${cliArg}]==]")
+endforeach()
+cmake_language(EVAL CODE "
 execute_process(
-    COMMAND "${TOOL}" ${cliArgs}
+    COMMAND [==[${TOOL}]==]${quotedArgs}
     OUTPUT_VARIABLE toolStdout
     ERROR_VARIABLE toolStderr
     RESULT_VARIABLE toolResult
-)
+)")
 
 if(NOT "${toolResult}" STREQUAL "${EXPECTED_EXIT}")
     message(FATAL_ERROR
