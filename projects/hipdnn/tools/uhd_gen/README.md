@@ -334,7 +334,10 @@ Regret report (0019.13 §11.2, §11.4) -- ./uhd_output/eval_report.json
 
 ### A problem is `(benchmark, device)`
 
-The same graph on two GPUs is two problems with two different best kernels. Grouped on
+The `device` column is the device's identity by its properties (RFC 0019.13 §4.1): the hash
+of its DeviceKey -- arch, CU count, memory, clocks -- the same for every GPU of one kind. The
+same graph on two different kinds of card is two problems with two different best kernels;
+on two GPUs of one kind it is one. Grouped on
 `benchmark` alone, the oracle becomes the best kernel on whichever card is faster and
 the regret figure is a different quantity — on the demo corpus above, conflating two
 devices moved the mean from 0.70 to 0.26.
@@ -998,10 +1001,11 @@ remove`, `add --replace` and `retag` correct what is stored, each recorded in th
 out as JSON. A dataset of §8.3 CSVs alone trains as `train` would (`--target`, `--objective`,
 `--group-by-feature`, `--no-promote`).
 
-Training reads **one measurement of each configuration on each shape**, from the usable ones:
+Training reads **one measurement of each configuration on each shape and kind of device**, from
+the usable ones:
 a row checked numerically wrong, not measured (`is_valid`), not run (`succeeded`), errored, or
 without a finite `avgTimeMs` is removed, and of the repeats left the lowest `avgTimeMs` is kept
-(the newer on a tie). The same shape measured on two GPUs of an arch is one problem, not two;
+(the newer on a tie). The same shape measured on two GPUs of one kind (one `device`) is one problem, not two;
 kept twice, it would be weighted twice. For a catalog sweep, distinct kernel configurations on
 one shape are distinct rows. A repeat taken under another engine binding is refused rather
 than set aside. A dataset writes this table as `training.parquet` after every change and

@@ -61,9 +61,9 @@ def world(tmp_path, monkeypatch):
             Path(command[command.index("--graph") + 1]).read_text(encoding="utf-8")
         )
         average = (1.0 + graph["size"] / 10) * engine["scale"]
-        # `--device N` runs on board-N, as HIP_VISIBLE_DEVICES picks a GPU.
-        visible = environment.get("HIP_VISIBLE_DEVICES")
-        device = f"board-{visible}" if visible else engine["device"]
+        # `--device N` picks a GPU (HIP_VISIBLE_DEVICES); the device id is the hash of the
+        # device's properties, the same for every GPU of one kind, as the real bench reports.
+        device = engine["device"]
         engine["scale"] *= engine.get("drift", 1.0)
         return {
             "engine_id": 7,
@@ -337,31 +337,39 @@ def test_a_rebuilt_provider_measures_repeats_not_another_binding(world, evaluato
     assert manifest["superseded_rows"] == GRAPHS
 
 
-def test_a_shape_measured_on_two_gpus_of_the_arch_is_trained_on_once(world, evaluator):
-    """Another GPU of the same arch measures the same problem: one label, the best."""
-    older = _collect(
-        world,
-        "a",
-        collected_at="2026-09-28T10:00:00+00:00",
-        device="board-a",
-        scale=1.0,
-    )
-    newer = _collect(
-        world,
-        "b",
-        collected_at="2026-09-29T10:00:00+00:00",
-        device="board-b",
-        scale=0.5,
-    )
+def test_a_shape_measured_on_two_gpus_of_one_kind_is_trained_on_once(world, evaluator):
+    """Another GPU of the same kind measures the same problem: one label, the best."""
+    older = _collect(world, "a", collected_at="2026-09-28T10:00:00+00:00", scale=1.0)
+    newer = _collect(world, "b", collected_at="2026-09-29T10:00:00+00:00", scale=0.5)
     code, output = _train(world, "both", evaluator, collections=[older, newer])
     assert code == 0
     rows = json.loads((output / "corpus.json").read_text(encoding="utf-8"))
-    assert len(rows) == GRAPHS and {r["device"] for r in rows} == {"board-b"}
+    assert len(rows) == GRAPHS
     assert _labels(output) == _labels(newer)
     manifest = json.loads(
         (output / "generation_manifest.json").read_text(encoding="utf-8")
     )
     assert manifest["superseded_rows"] == GRAPHS
+
+
+def test_a_different_kind_of_card_measures_another_problem(world, evaluator):
+    """RFC 0019.13 §4.1: a device is its properties. A card of another kind (another device
+    identity) measures other problems, so neither measurement sets the other aside."""
+    first = _collect(
+        world, "a", collected_at="2026-09-28T10:00:00+00:00", device="kind-a"
+    )
+    second = _collect(
+        world, "b", collected_at="2026-09-29T10:00:00+00:00", device="kind-b"
+    )
+    code, output = _train(world, "kinds", evaluator, collections=[first, second])
+    assert code == 0
+    rows = json.loads((output / "corpus.json").read_text(encoding="utf-8"))
+    assert len(rows) == 2 * GRAPHS
+    assert {r["device"] for r in rows} == {"kind-a", "kind-b"}
+    manifest = json.loads(
+        (output / "generation_manifest.json").read_text(encoding="utf-8")
+    )
+    assert manifest["superseded_rows"] == 0
 
 
 def test_one_run_on_several_gpus_trains_on_each_shape_once(world, evaluator):
@@ -381,7 +389,13 @@ def test_one_run_on_several_gpus_trains_on_each_shape_once(world, evaluator):
     measured = json.loads((output / "measurements.json").read_text(encoding="utf-8"))
     assert len(measured) == 2 * GRAPHS
     rows = json.loads((output / "corpus.json").read_text(encoding="utf-8"))
-    assert len(rows) == GRAPHS and {r["device"] for r in rows} == {"board-0"}
+    assert len(rows) == GRAPHS
+    fastest = {}
+    for row in measured:
+        fastest[row["benchmark"]] = min(
+            fastest.get(row["benchmark"], row["avgTimeMs"]), row["avgTimeMs"]
+        )
+    assert {r["benchmark"]: r["avgTimeMs"] for r in rows} == fastest
     manifest = json.loads(
         (output / "generation_manifest.json").read_text(encoding="utf-8")
     )
@@ -712,12 +726,8 @@ def test_a_named_evaluation_set_holds_out_exactly_its_graphs(world, evaluator):
     """`--eval-benchmarks`: the held-out graphs are the ones a corpus fixed when it was made,
     not a fraction drawn from whatever this run happens to train on -- so they stay held out,
     and keep scoring, however the collections grow."""
-    first = _collect(
-        world, "a", collected_at="2026-01-01T00:00:00+00:00", device="board-0"
-    )
-    second = _collect(
-        world, "b", collected_at="2026-01-02T00:00:00+00:00", device="board-1"
-    )
+    first = _collect(world, "a", collected_at="2026-01-01T00:00:00+00:00")
+    second = _collect(world, "b", collected_at="2026-01-02T00:00:00+00:00")
     named = ["graph-1", "graph-4", "graph-9", "graph-12"]
     eval_set = world["root"] / "eval_slice.json"
     eval_set.write_text(
@@ -745,10 +755,10 @@ def test_a_named_evaluation_set_holds_out_exactly_its_graphs(world, evaluator):
         manifest["eval_benchmarks"]["listed"],
         manifest["eval_benchmarks"]["measured"],
     ) == (5, 4)
-    # Every named graph measured is scored -- once, on the newest measurement of it, as
-    # training takes one measurement per shape -- and none trains, whichever board took it.
+    # Every named graph measured is scored -- once, on the best measurement of it, as
+    # training takes one measurement per shape -- and none trains, whichever GPU took it.
     scored = manifest["models"][0]["eval_problem_keys"]
-    assert sorted(scored) == sorted([graph, "board-1"] for graph in named)
+    assert sorted(scored) == sorted([graph, "board"] for graph in named)
 
 
 @pytest.mark.parametrize(

@@ -148,9 +148,9 @@ def test_the_test_set_is_stratified_and_reproducible():
 # --------------------------------------------------------------------------------------
 
 
-def _noise(device: str, graph: str) -> float:
-    """Up to +/-8% per (device, shape), a few shapes much worse."""
-    digest = hashlib.sha256(f"{device}:{graph}".encode()).digest()
+def _noise(board: str, graph: str) -> float:
+    """Up to +/-8% per (board, shape), a few shapes much worse."""
+    digest = hashlib.sha256(f"{board}:{graph}".encode()).digest()
     spread = 0.6 if digest[1] < 20 else 0.16
     return 1.0 + (digest[0] / 255.0 - 0.5) * spread
 
@@ -184,7 +184,9 @@ def store(tmp_path, monkeypatch):
             writer.writerow(
                 [f"graph-{index}", f"g{index}", phase, phase, "sweep", "toy_op"]
             )
-    engine = {"device": "board-a"}
+    # Two boards of one kind: their timings differ, their device identity (the hash of the
+    # device's properties) does not.
+    engine = {"board": "board-a"}
 
     def bench(command, environment, log_dir, ordinal, commands):
         commands.append({"argv": command})
@@ -193,14 +195,14 @@ def store(tmp_path, monkeypatch):
             Path(command[command.index("--graph") + 1]).read_text(encoding="utf-8")
         )
         average = (1.0 + math.sqrt(graph["size"])) * _noise(
-            engine["device"], graph["id"]
+            engine["board"], graph["id"]
         )
         return {
             "engine_id": 7,
             "engine_name": "provider:engine7",
             "graph_id": graph["id"],
             "graph_key": graph["id"],
-            "device_id": engine["device"],
+            "device_id": "kind-1",
             "arch": "gfx942",
             "metric": metric,
             "binding": {
@@ -227,10 +229,10 @@ def store(tmp_path, monkeypatch):
     monkeypatch.setattr("uhd_gen.generate._run_json", bench)
     find_any_bench(monkeypatch)
 
-    def collect(name, device, collected_at):
+    def collect(name, board, collected_at):
         from uhd_gen.__main__ import main
 
-        engine["device"] = device
+        engine["board"] = board
         output = tmp_path / name
         assert (
             main(

@@ -5,7 +5,8 @@
 the best.
 
 The dataset keeps every measurement, failures and repeats included (store.py). Training reads
-one row per measured configuration on each graph: rows that carry no usable measurement are
+one row per measured configuration on each graph and kind of device: rows that carry no usable
+measurement are
 removed, and of the repeats that remain the one with the lowest `avgTimeMs` (the statistic a
 calibrated label is defined on, RFC 0019 §13.4) is kept, the newer on a tie. The store writes
 this table as `training.parquet` after every change, and `generate` computes it the same way
@@ -24,12 +25,14 @@ BEST_STATISTIC = "avgTimeMs"
 
 
 def measurement_key(row: dict) -> tuple:
-    """What a measurement is of: a configuration on a graph, on an arch.
+    """What a measurement is of: a configuration on a graph, on a kind of device.
 
     `benchmark` is the graph's content key, so one graph is one key however it was named or
-    generated. A collected row names its configuration by `kernel` and `knob_settings`; a
-    published row, by its `kernel.*` fields. An L1 row carries no configuration, so its key is
-    the graph alone.
+    generated. `device` is the device's identity by its properties (RFC 0019.13 §4.1): the
+    hash of its DeviceKey, the same for every GPU of one kind, so a repeat on another GPU of
+    the same kind is the same measurement and a different kind of card is another. A collected
+    row names its configuration by `kernel` and `knob_settings`; a published row, by its
+    `kernel.*` fields. An L1 row carries no configuration, so its key is the graph and device.
     """
     published = tuple(
         (name, str(row[name])) for name in sorted(row) if name.startswith("kernel.")
@@ -37,6 +40,7 @@ def measurement_key(row: dict) -> tuple:
     return (
         str(row["benchmark"]),
         str(row["arch"]),
+        str(row.get("device")),
         str(row.get("kernel")),
         str(row.get("knob_settings")),
         published if row.get("kernel") is None else (),

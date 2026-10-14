@@ -17,7 +17,8 @@ candidate (the oracle) and `v̂(p)` the model's first choice, both in the object
 | top-k recall | fraction of problems whose oracle is in the model's top k, k = 1, 3, 5 |
 | per-regime regret | mean top-1 regret grouped by the corpus regime column; §11.2's primary form |
 
-A **problem** is `(benchmark, device)`: the same graph on two GPUs is two problems.
+A **problem** is `(benchmark, device)`, `device` being the device's kind (a hash of its
+properties): the same graph on two kinds of card is two problems, on two GPUs of one kind one.
 The split holds out problems, not rows, by a seeded SHA-256 of the problem key.
 
 ## Keys
