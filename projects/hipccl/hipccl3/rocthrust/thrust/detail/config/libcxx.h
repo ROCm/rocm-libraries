@@ -47,10 +47,10 @@
     #define USE_LIBHIPCXX 1
 #endif
 
-// If the '::cuda::std' namespace from 'libcudacxx' or 'libhipcxx' is available.
+// If the '::cuda::std' namespace from 'libcudacxx' is available.
 // Not for HIP, where this may be NVIDIA's libcu++. libhipcxx is found via <hip/std/version>.
 #if !defined(__HIP__) && THRUST_HAS_INCLUDE(<cuda/std/version>) \
-	&& (USE_LIBCUDACXX || USE_LIBHIPCXX)
+	&& USE_LIBCUDACXX
 #  include <cuda/std/version>
 // If version matches and '_CUDA_VSTD' is available.
 #  if _LIBCUDACXX_CUDA_API_VERSION_MAJOR == _THRUST_REQUIRED_LIBCXX_VERSION_MAJOR \
