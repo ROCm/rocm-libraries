@@ -133,6 +133,11 @@ _KERNEL_RESOURCE_BUDGETS = {
         "max_scratch_bytes": 32,
         "min_waves_per_simd": 2,
     },
+    # LSE retains the same persistent occupancy/scratch limits.
+    "rocke_attention_dense_d128_hq32_kv8_bn64_bf16_sq2048_sk2048_causal_lazyrs_lse_persist256": {
+        "max_scratch_bytes": 32,
+        "min_waves_per_simd": 2,
+    },
     # gfx942 fp16 D128 tiled-2d (shipped default geometry): 2 waves/EU caps VGPR at
     # 256; the kernel wants 354, so it spills ~40 B to hold 2-wave occupancy.
     "rocke_uattn2d_tiled_d128_b64_h32kv8_fp16_w4_wpe2_mw32_mfma32x8_stqk_s1_mask1_hoist_mlim_kvcpall_cfvst_ksring_rd2": {
@@ -815,7 +820,7 @@ class TestAttentionHelpers(unittest.TestCase):
             max_seqlen_k=2011,
             dtype="fp16",
         )
-        ok, reason = supports_native_unified_attention(p)
+        ok, reason = supports_native_unified_attention(p, "gfx950")
         self.assertTrue(ok)
         self.assertIn("supported", reason)
 
@@ -853,13 +858,13 @@ class TestAttentionHelpers(unittest.TestCase):
                 # bs32 was an uncaught ValueError at spec build; must now build.
                 p32 = _p(32, dtype)
                 self.assertEqual(p32.select_path(), "2d")
-                self.assertFalse(au._enable_k_single_buffer(p32))
-                spec32 = au._tiled_spec_from_problem(p32)  # must NOT raise
+                self.assertFalse(au._enable_k_single_buffer(p32, "gfx950"))
+                spec32 = au._tiled_spec_from_problem(p32, "gfx950")  # must NOT raise
                 self.assertFalse(spec32.use_k_single_buffer)
                 # bs64 still satisfies block_m <= tile_size -> K-single stays on.
                 p64 = _p(64, dtype)
-                self.assertTrue(au._enable_k_single_buffer(p64))
-                spec64 = au._tiled_spec_from_problem(p64)
+                self.assertTrue(au._enable_k_single_buffer(p64, "gfx950"))
+                spec64 = au._tiled_spec_from_problem(p64, "gfx950")
                 self.assertTrue(spec64.use_k_single_buffer)
 
     def test_unified_attention_scalar_kernels_compile(self):
@@ -1190,7 +1195,7 @@ class TestAttentionHelpers(unittest.TestCase):
             with self.subTest(geometry=label, arch=arch):
                 with _patch_resolved_arch(arch):
                     problem = _budget_problem(**problem_kwargs)
-                    spec = au._tiled_spec_from_problem(problem)
+                    spec = au._tiled_spec_from_problem(problem, arch)
                     k = build_unified_attention_2d_tiled(spec, arch=arch)
                     art = _compile_or_skip(k, arch=arch)
                     self.assertGreater(art.hsaco_bytes, 0)
@@ -1203,12 +1208,13 @@ class TestAttentionHelpers(unittest.TestCase):
 
         Dense bakes shape and ``AttentionDenseSpec.lds_v_row_pad`` in at build
         time and is LDS-heavy, so it is a live over-budget risk on its own.
-        Covers both the default and persistent (grid-stride) variants.
+        Covers default, persistent, and LSE-enabled wide-load variants.
         gfx950-only, torch-free -- comgr targets gfx950 via its triple.
         """
         from dataclasses import replace
 
         from kernels import AttentionDenseSpec, build_attention_dense
+        from kernels.gfx950.attention_dense import Gfx950AttentionDenseSpec
 
         base = AttentionDenseSpec(
             batch=1,
@@ -1220,9 +1226,23 @@ class TestAttentionHelpers(unittest.TestCase):
             causal=True,
             dtype="bf16",
         )
+        lse_base = Gfx950AttentionDenseSpec(
+            batch=base.batch,
+            seqlen_q=base.seqlen_q,
+            seqlen_kv=base.seqlen_kv,
+            num_query_heads=base.num_query_heads,
+            num_kv_heads=base.num_kv_heads,
+            head_size=base.head_size,
+            causal=base.causal,
+            dtype=base.dtype,
+            emit_lse=True,
+        )
         for label, spec in (
             ("default", base),
             ("persistent", replace(base, persistent=True)),
+            ("lse_default", lse_base),
+            ("lse_persistent", replace(lse_base, persistent=True)),
+            ("lse_wide", replace(lse_base, persistent=True, wide_lds_dma=True)),
         ):
             with self.subTest(variant=label):
                 k = build_attention_dense(spec, arch="gfx950")
@@ -1863,7 +1883,7 @@ class TestAttentionHelpers(unittest.TestCase):
         # segm_output: 3 * 16 * 128 * 128 f32
         # segm_max/expsum: 2 * (3 * 16 * 128) f32
         expected = (3 * 16 * 128 * 128 + 2 * 3 * 16 * 128) * 4
-        self.assertEqual(attention_3d_workspace_nbytes(p), expected)
+        self.assertEqual(attention_3d_workspace_nbytes(p, arch="gfx950"), expected)
 
     def test_tiled_2d_support_gate_rejects_unsupported(self):
         from kernels import supports_tiled_2d
@@ -1933,7 +1953,7 @@ class TestAttentionHelpers(unittest.TestCase):
         for arch in ("gfx950", "gfx942"):
             with _patch_resolved_arch(arch):
                 # Must not raise (the regression was a TypeError on the kwarg).
-                ok, reason = supports_native_unified_attention_tiled(p)
+                ok, reason = supports_native_unified_attention_tiled(p, arch)
                 self.assertIsInstance(ok, bool)
                 self.assertIsInstance(reason, str)
                 self.assertTrue(
@@ -1989,32 +2009,32 @@ class TestAttentionHelpers(unittest.TestCase):
                             supports_native_unified_attention_tiled,
                             supports_native_unified_attention_3d_tiled,
                         ):
-                            ok, reason = gate(p)
+                            ok, reason = gate(p, arch)
                             self.assertIsInstance(ok, bool)
                             self.assertIsInstance(reason, str)
-                        ok_2d, _ = supports_native_unified_attention_tiled(p)
-                        ok_3d, _ = supports_native_unified_attention_3d_tiled(p)
+                        ok_2d, _ = supports_native_unified_attention_tiled(p, arch)
+                        ok_3d, _ = supports_native_unified_attention_3d_tiled(p, arch)
                         # Selected production path: gate-True => builder must
                         # construct the arch spec with NO exception.
                         if path == "2d" and ok_2d:
-                            spec = au._tiled_spec_from_problem(p)
+                            spec = au._tiled_spec_from_problem(p, arch)
                             self.assertIsInstance(spec, spec_2d_cls)
                         if path == "3d" and ok_3d:
-                            spec3 = au._tiled_3d_spec_from_problem(p)
+                            spec3 = au._tiled_3d_spec_from_problem(p, arch)
                             self.assertIsInstance(spec3, spec_3d_cls)
                         # Non-selected builder: exercise for cross-path drift.
                         # Tolerate an arch-legitimate ValueError; a TypeError is
                         # the missing-kwarg/field signature drift we guard.
                         if path != "2d" and ok_2d:
                             try:
-                                spec = au._tiled_spec_from_problem(p)
+                                spec = au._tiled_spec_from_problem(p, arch)
                             except ValueError:
                                 pass
                             else:
                                 self.assertIsInstance(spec, spec_2d_cls)
                         if path != "3d" and ok_3d:
                             try:
-                                spec3 = au._tiled_3d_spec_from_problem(p)
+                                spec3 = au._tiled_3d_spec_from_problem(p, arch)
                             except ValueError:
                                 pass
                             else:
@@ -2044,11 +2064,12 @@ class TestAttentionHelpers(unittest.TestCase):
         )
         with _patch_resolved_arch("gfx942"):
             self.assertTrue(
-                au._enable_gfx942_l4(p), "shape must be in the gfx942 L4 flash region"
+                au._enable_gfx942_l4(p, "gfx942"),
+                "shape must be in the gfx942 L4 flash region",
             )
             self.assertEqual(
-                au._select_2d_num_warps(p),
-                au._select_gfx942_flash_num_warps(p),
+                au._select_2d_num_warps(p, "gfx942"),
+                au._select_gfx942_flash_num_warps(p, "gfx942"),
             )
 
     def test_gfx942_d64_decode_num_warps(self):
@@ -2082,12 +2103,12 @@ class TestAttentionHelpers(unittest.TestCase):
             )
 
         with _patch_resolved_arch("gfx942"):
-            self.assertEqual(au._select_2d_num_warps(_p(1)), 1)  # decode
+            self.assertEqual(au._select_2d_num_warps(_p(1), "gfx942"), 1)  # decode
             # prefill: intercepted by the tuned sink-prefill cohort -> nw2
-            self.assertEqual(au._select_2d_num_warps(_p(512)), 2)
-            self.assertEqual(au._select_2d_num_warps(_p(2048)), 2)
+            self.assertEqual(au._select_2d_num_warps(_p(512), "gfx942"), 2)
+            self.assertEqual(au._select_2d_num_warps(_p(2048), "gfx942"), 2)
             self.assertEqual(
-                au._select_2d_num_warps(_p(1, use_fp8=True)), 4
+                au._select_2d_num_warps(_p(1, use_fp8=True), "gfx942"), 4
             )  # fp8 decode excluded
 
     def test_gfx942_sink_prefill_tuned_cohort(self):
@@ -2115,8 +2136,8 @@ class TestAttentionHelpers(unittest.TestCase):
 
         with _patch_resolved_arch("gfx942"):
             cohort = _make_problem()
-            self.assertTrue(au._enable_gfx942_sink_prefill_tuned(cohort))
-            spec = au._tiled_spec_from_problem(cohort)
+            self.assertTrue(au._enable_gfx942_sink_prefill_tuned(cohort, "gfx942"))
+            spec = au._tiled_spec_from_problem(cohort, "gfx942")
             self.assertEqual(spec.num_warps, 2)
             self.assertEqual(spec.block_m_per_warp, 16)
             self.assertEqual(spec.tile_size, 2 * cohort.block_size)
@@ -2130,8 +2151,8 @@ class TestAttentionHelpers(unittest.TestCase):
                 ("bs32", _make_problem(block_size=32)),
             ):
                 with self.subTest(near_miss=label):
-                    self.assertFalse(au._enable_gfx942_sink_prefill_tuned(p))
-                    s = au._tiled_spec_from_problem(p)
+                    self.assertFalse(au._enable_gfx942_sink_prefill_tuned(p, "gfx942"))
+                    s = au._tiled_spec_from_problem(p, "gfx942")
                     self.assertEqual(s.num_warps, 4)
                     self.assertEqual(s.block_m_per_warp, 32)
                     self.assertFalse(s.use_register_pv)
@@ -2139,7 +2160,9 @@ class TestAttentionHelpers(unittest.TestCase):
             # Decode (q==1) routes to the 3D path, not the 2D spec builder; the
             # cohort gate must still exclude it.
             self.assertFalse(
-                au._enable_gfx942_sink_prefill_tuned(_make_problem(max_seqlen_q=1))
+                au._enable_gfx942_sink_prefill_tuned(
+                    _make_problem(max_seqlen_q=1), "gfx942"
+                )
             )
 
     def test_gfx950_sink_prefill_wpe3_cohort(self):
@@ -2168,8 +2191,8 @@ class TestAttentionHelpers(unittest.TestCase):
 
         with _patch_resolved_arch("gfx950"):
             cohort = _make_problem()
-            self.assertTrue(au._enable_gfx950_sink_prefill_wpe3(cohort))
-            self.assertEqual(au._select_2d_waves_per_eu(cohort), 3)
+            self.assertTrue(au._enable_gfx950_sink_prefill_wpe3(cohort, "gfx950"))
+            self.assertEqual(au._select_2d_waves_per_eu(cohort, "gfx950"), 3)
 
             # Near-miss shapes must NOT hit the wpe=3 cohort.
             for label, p in (
@@ -2178,14 +2201,18 @@ class TestAttentionHelpers(unittest.TestCase):
                 ("bs32", _make_problem(block_size=32)),
             ):
                 with self.subTest(near_miss=label):
-                    self.assertFalse(au._enable_gfx950_sink_prefill_wpe3(p))
+                    self.assertFalse(au._enable_gfx950_sink_prefill_wpe3(p, "gfx950"))
             # Decode (q==1) routes to 3D; gate must still exclude it.
             self.assertFalse(
-                au._enable_gfx950_sink_prefill_wpe3(_make_problem(max_seqlen_q=1))
+                au._enable_gfx950_sink_prefill_wpe3(
+                    _make_problem(max_seqlen_q=1), "gfx950"
+                )
             )
             # gfx942 must not hit the gfx950 gate.
             with _patch_resolved_arch("gfx942"):
-                self.assertFalse(au._enable_gfx950_sink_prefill_wpe3(_make_problem()))
+                self.assertFalse(
+                    au._enable_gfx950_sink_prefill_wpe3(_make_problem(), "gfx942")
+                )
 
     def test_tiled_3d_dispatch_gate_accepts_kwargs_per_arch(self):
         """Regression: the shared dispatch entry
@@ -2213,7 +2240,7 @@ class TestAttentionHelpers(unittest.TestCase):
         for arch in ("gfx950", "gfx942"):
             with _patch_resolved_arch(arch):
                 # Must not raise (the regression was a TypeError on the kwarg).
-                ok, reason = supports_native_unified_attention_3d_tiled(p)
+                ok, reason = supports_native_unified_attention_3d_tiled(p, arch)
                 self.assertIsInstance(ok, bool)
                 self.assertIsInstance(reason, str)
                 self.assertTrue(
@@ -2254,12 +2281,12 @@ class TestAttentionHelpers(unittest.TestCase):
                 supports_native_unified_attention_3d_tiled,
                 supports_native_unified_attention,
             ):
-                ok, reason = gate(self._fp8_decode_problem())
+                ok, reason = gate(self._fp8_decode_problem(), "gfx942")
                 self.assertFalse(ok, msg=f"{gate.__name__} should reject OCP fp8")
                 self.assertIn("fnuz", reason)
             # Opt-in acknowledges fnuz bytes -> not rejected for the format.
             ok_fnuz, _ = supports_native_unified_attention_3d_tiled(
-                self._fp8_decode_problem(fp8_fnuz=True)
+                self._fp8_decode_problem(fp8_fnuz=True), "gfx942"
             )
             self.assertTrue(ok_fnuz)
 
@@ -2271,12 +2298,12 @@ class TestAttentionHelpers(unittest.TestCase):
 
         with _patch_resolved_arch("gfx950"):
             ok, reason = supports_native_unified_attention_3d_tiled(
-                self._fp8_decode_problem()
+                self._fp8_decode_problem(), "gfx950"
             )
             self.assertTrue(ok, msg=f"gfx950 decodes OCP fp8: {reason}")
 
             ok_fnuz, reason_fnuz = supports_native_unified_attention_3d_tiled(
-                self._fp8_decode_problem(fp8_fnuz=True)
+                self._fp8_decode_problem(fp8_fnuz=True), "gfx950"
             )
             self.assertFalse(ok_fnuz, msg="gfx950 should reject fnuz-declared fp8")
             self.assertIn("fnuz", reason_fnuz)
@@ -2305,13 +2332,13 @@ class TestAttentionHelpers(unittest.TestCase):
         )
         for arch in ("gfx942", "gfx950"):
             with _patch_resolved_arch(arch):
-                spec = au._tiled_3d_spec_from_problem(p)
+                spec = au._tiled_3d_spec_from_problem(p, arch)
                 self.assertIsInstance(spec, au._tiled_3d_impl(arch)[0])
         # The gfx942-only 3D knobs are inert on gfx950 (ignored-field contract).
         with _patch_resolved_arch("gfx950"):
-            self.assertIsNone(au._gfx942_3d_tile_size_override(p))
-            self.assertFalse(au._enable_gfx942_3d_invariant_hoist(p))
-            self.assertFalse(au._enable_gfx942_3d_wide_kv_load(p))
+            self.assertIsNone(au._gfx942_3d_tile_size_override(p, "gfx950"))
+            self.assertFalse(au._enable_gfx942_3d_invariant_hoist(p, "gfx950"))
+            self.assertFalse(au._enable_gfx942_3d_wide_kv_load(p, "gfx950"))
 
     def test_gfx950_3d_graph_replay_is_opt_in(self):
         """gfx950 3D split-KV graph replay stays off unless explicitly enabled.
@@ -2358,19 +2385,18 @@ class TestAttentionHelpers(unittest.TestCase):
             dtype="bf16",
             use_sinks=True,
         )
-        with _patch_resolved_arch("gfx950"):
-            with mock.patch.dict(os.environ, {}, clear=False):
-                os.environ.pop("HIPDNN_GFX950_3D_GRAPH", None)
-                self.assertFalse(au._enable_3d_graph_replay(decode))
-                self.assertFalse(au._enable_3d_graph_replay(prefill))
-                self.assertFalse(au._enable_3d_graph_replay(sinks))
-            with mock.patch.dict(os.environ, {"HIPDNN_GFX950_3D_GRAPH": "1"}):
-                self.assertFalse(au._enable_3d_graph_replay(prefill))
-                self.assertFalse(au._enable_3d_graph_replay(sinks))
-            with mock.patch.dict(os.environ, {"HIPDNN_GFX950_3D_GRAPH": "0"}):
-                self.assertFalse(au._enable_3d_graph_replay(decode))
-            with mock.patch.dict(os.environ, {"HIPDNN_GFX950_3D_GRAPH": "1"}):
-                self.assertTrue(au._enable_3d_graph_replay(decode))
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("HIPDNN_GFX950_3D_GRAPH", None)
+            self.assertFalse(au._enable_3d_graph_replay(decode, "gfx950"))
+            self.assertFalse(au._enable_3d_graph_replay(prefill, "gfx950"))
+            self.assertFalse(au._enable_3d_graph_replay(sinks, "gfx950"))
+        with mock.patch.dict(os.environ, {"HIPDNN_GFX950_3D_GRAPH": "1"}):
+            self.assertFalse(au._enable_3d_graph_replay(prefill, "gfx950"))
+            self.assertFalse(au._enable_3d_graph_replay(sinks, "gfx950"))
+        with mock.patch.dict(os.environ, {"HIPDNN_GFX950_3D_GRAPH": "0"}):
+            self.assertFalse(au._enable_3d_graph_replay(decode, "gfx950"))
+        with mock.patch.dict(os.environ, {"HIPDNN_GFX950_3D_GRAPH": "1"}):
+            self.assertTrue(au._enable_3d_graph_replay(decode, "gfx950"))
 
     def test_tiled_2d_spec_builder_constructs_per_arch_all_branches(self):
         """Drive ``_tiled_spec_from_problem`` through its three branches and
@@ -2440,7 +2466,7 @@ class TestAttentionHelpers(unittest.TestCase):
             for arch in arches:
                 with self.subTest(cfg=label, arch=arch):
                     with _patch_resolved_arch(arch):
-                        spec = au._tiled_spec_from_problem(p)
+                        spec = au._tiled_spec_from_problem(p, arch)
                         self.assertIsInstance(spec, au._tiled_2d_impl(arch)[0])
 
     def test_gfx950_fp16_d128_sw_routing(self):
@@ -2471,11 +2497,11 @@ class TestAttentionHelpers(unittest.TestCase):
                         block_size=bs,
                         sliding_window=4096,
                     )
-                    ok, reason = supports_native_unified_attention_tiled(p)
+                    ok, reason = supports_native_unified_attention_tiled(p, "gfx950")
                     self.assertTrue(ok, msg=reason)
                     # Must not raise: block_size 32/64 previously hit an
                     # uncaught ValueError building the combo spec here.
-                    spec = au._tiled_spec_from_problem(p)
+                    spec = au._tiled_spec_from_problem(p, "gfx950")
                     if bs == 16:
                         # routed to the transposed-32x32 combo at T=64
                         self.assertTrue(spec.use_mfma_32x32)
@@ -3724,7 +3750,8 @@ class TestAttentionDenseGfx942RuntimeShapeCollision(unittest.TestCase):
         (q/k/v/o + scale + the five i32 shape args) and the persistent grid at each
         decode order, which appends that order's fast-division magic/shift pairs --
         a different tail per order, so a launcher packing one order's pairs for the
-        other would feed the decode the wrong divisors.
+        other would feed the decode the wrong divisors. Each arm is also checked
+        with ``use_sinks``, which appends ``sink_ptr`` after all of those.
         """
         from rocke.core.ir import PtrType
         from rocke.helpers.spec import ptr_type_str
@@ -3752,8 +3779,18 @@ class TestAttentionDenseGfx942RuntimeShapeCollision(unittest.TestCase):
             v: self._spec(**self._BASE_KWARGS, **kw)
             for v, (kw, _) in self._PERSIST_VARIANTS.items()
         }
+        rt_sinks = self._spec(**self._BASE_KWARGS, use_sinks=True)
+        persist_sinks = {
+            v: self._spec(**self._BASE_KWARGS, **kw, use_sinks=True)
+            for v, (kw, _) in self._PERSIST_VARIANTS.items()
+        }
 
-        for arm, spec in (("runtime-shape", rt), *persist.items()):
+        for arm, spec in (
+            ("runtime-shape", rt),
+            *persist.items(),
+            ("runtime-shape+sinks", rt_sinks),
+            *((f"{v}+sinks", s) for v, s in persist_sinks.items()),
+        ):
             with self.subTest(arm=arm):
                 params = build_attention_dense(spec, arch="gfx942").params
                 sig = attention_dense_signature(spec)
@@ -3793,6 +3830,16 @@ class TestAttentionDenseGfx942RuntimeShapeCollision(unittest.TestCase):
                     f"{variant}: persistent ABI is not the default ABI plus its "
                     "decode's magic/shift pairs",
                 )
+
+        # Sinks append exactly one kernarg, last, after any fast-division pairs.
+        for plain, with_sinks in (
+            (rt, rt_sinks),
+            *((persist[v], s) for v, s in persist_sinks.items()),
+        ):
+            self.assertEqual(
+                [a["name"] for a in attention_dense_signature(with_sinks)],
+                [a["name"] for a in attention_dense_signature(plain)] + ["sink_ptr"],
+            )
 
 
 class TestAttentionDenseGfx942RuntimeHeads(unittest.TestCase):
@@ -4603,27 +4650,26 @@ class TestAttentionCdnaPrimitives(unittest.TestCase):
             num_seqs=1,
         )
 
-        with patch.object(au, "_resolve_attention_arch", return_value="gfx950"):
-            # Gate 1: combo must fire, selecting wpe=4
-            self.assertTrue(
-                au._enable_combo_2d(gate1_problem),
-                "_enable_combo_2d did not fire for fp16+sinks Gate 1 cohort",
-            )
-            self.assertEqual(
-                au._select_2d_waves_per_eu(gate1_problem),
-                4,
-                "waves_per_eu for fp16+sinks Gate 1 (combo) should be 4",
-            )
-            # Gate 2: wpe3 gate must fire, selecting wpe=3
-            self.assertTrue(
-                au._enable_gfx950_sink_prefill_wpe3(gate2_problem),
-                "_enable_gfx950_sink_prefill_wpe3 did not fire for fp16+sinks Gate 2 cohort",
-            )
-            self.assertEqual(
-                au._select_2d_waves_per_eu(gate2_problem),
-                3,
-                "waves_per_eu for fp16+sinks Gate 2 (wpe3) should be 3",
-            )
+        # Gate 1: combo must fire, selecting wpe=4
+        self.assertTrue(
+            au._enable_combo_2d(gate1_problem, "gfx950"),
+            "_enable_combo_2d did not fire for fp16+sinks Gate 1 cohort",
+        )
+        self.assertEqual(
+            au._select_2d_waves_per_eu(gate1_problem, "gfx950"),
+            4,
+            "waves_per_eu for fp16+sinks Gate 1 (combo) should be 4",
+        )
+        # Gate 2: wpe3 gate must fire, selecting wpe=3
+        self.assertTrue(
+            au._enable_gfx950_sink_prefill_wpe3(gate2_problem, "gfx950"),
+            "_enable_gfx950_sink_prefill_wpe3 did not fire for fp16+sinks Gate 2 cohort",
+        )
+        self.assertEqual(
+            au._select_2d_waves_per_eu(gate2_problem, "gfx950"),
+            3,
+            "waves_per_eu for fp16+sinks Gate 2 (wpe3) should be 3",
+        )
 
 
 # ---------------------------------------------------------------------

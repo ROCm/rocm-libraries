@@ -64,7 +64,8 @@ def _np_dtype(dtype: str):
 
     numpy has no native bfloat16 and this harness does not pull in ml_dtypes,
     so bf16 is carried as raw ``uint16`` and converted through
-    ``rocke.numeric.bf16`` (the same codec the builders verify driver uses).
+    ``rocke.numeric.bf16``, which its own tests hold bit-identical to
+    ``ml_dtypes.bfloat16``.
     Use ``_decode`` / ``_encode`` rather than ``.astype`` on a bf16 array --
     a raw uint16 reinterpreted as a number is silent garbage, not an upcast.
     """
@@ -212,9 +213,9 @@ WMMA_CONFIGS: List[AttnCfg] = [
 
 # Against an *fp32* reference the residual is dominated by the final rounding
 # to the I/O dtype, so bf16 (8 significand bits) lands ~8x above fp16 (11).
-# Worst observed on gfx1201 over the configs above: fp16 2.2e-04, bf16 1.8e-03.
-# bf16 therefore gets 1e-2 (~5x headroom), matching the budget the builders
-# verify driver uses, while fp16 keeps its historical 2e-2 attention gate. A
+# Worst observed on gfx1201 over the configs above, bar the bf16 staged-V one
+# (not yet run on hardware): fp16 2.2e-04, bf16 1.8e-03. bf16 therefore gets
+# 1e-2 (~5x headroom), while fp16 keeps its historical 2e-2 attention gate. A
 # tolerance loose enough to swallow bf16 quantisation noise would also swallow
 # a structural bug (TESTING.md gap G5), so bf16 is tightened, not relaxed.
 _WMMA_TOL = {"fp16": Tol(rtol=0.0, atol=2e-2), "bf16": Tol(rtol=0.0, atol=1e-2)}
@@ -412,9 +413,9 @@ def run_wmma_config(cfg: AttnCfg, arch: str = "gfx1151") -> NumericResult:
         build_wmma_fmha_fwd,
         is_valid_spec,
         wmma_fmha_fwd_grid,
+        wmma_fmha_fwd_signature,
     )
     from rocke.helpers.compile import compile_kernel
-    from rocke.helpers.spec import SignatureBuilder
     from rocke.numeric.references import dense_attention_reference
     from rocke.runtime.hip_module import Runtime
     from rocke.runtime.host_buffers import as_u8_buffer
@@ -431,10 +432,10 @@ def run_wmma_config(cfg: AttnCfg, arch: str = "gfx1151") -> NumericResult:
     tol = _WMMA_TOL[tol_key]
     res.rtol, res.atol = tol.rtol, tol.atol
 
+    # Only head_size is compiled into the code object; the head counts, strides
+    # and sequence lengths below are kernel arguments.
     spec = WmmaFmhaFwdSpec(
         head_size=cfg.head_size,
-        num_query_heads=cfg.heads,
-        num_kv_heads=cfg.kv_heads,
         dtype=cfg.dtype,
         mask_mode="causal" if cfg.causal else "none",
         v_lds_stage=cfg.v_lds_stage,
@@ -474,26 +475,8 @@ def run_wmma_config(cfg: AttnCfg, arch: str = "gfx1151") -> NumericResult:
     Qf, Kf, Vf = (_decode(t, tol_key) for t in (Q, K, V))
 
     scale_log2 = float(1.0 / _m.sqrt(D) * _m.log2(_m.e))
-    sig = (
-        SignatureBuilder()
-        .ptr("Q", cfg.dtype)
-        .ptr("K", cfg.dtype)
-        .ptr("V", cfg.dtype)
-        .ptr("Out", cfg.dtype)
-        .scalar("scale", "f32")
-        .scalar("Sq", "i32")
-        .scalar("Sk", "i32")
-        .scalar("sqt", "i32")
-        .scalar("sqh", "i32")
-        .scalar("skt", "i32")
-        .scalar("skh", "i32")
-        .scalar("svt", "i32")
-        .scalar("svh", "i32")
-        .scalar("sot", "i32")
-        .scalar("soh", "i32")
-        .build()
-    )
-    grid = wmma_fmha_fwd_grid(spec, seqlen_q=Sq, batch=B)
+    sig = wmma_fmha_fwd_signature(spec)
+    grid = wmma_fmha_fwd_grid(spec, seqlen_q=Sq, num_query_heads=Hq, batch=B)
     block = (spec.block_size, 1, 1)
 
     rt = Runtime()
@@ -506,22 +489,38 @@ def run_wmma_config(cfg: AttnCfg, arch: str = "gfx1151") -> NumericResult:
         rt.memcpy_h2d(k_dev.ptr(), as_u8_buffer(K), K.nbytes)
         rt.memcpy_h2d(v_dev.ptr(), as_u8_buffer(V), V.nbytes)
         rt.memset(o_dev.ptr(), 0, Out.nbytes)
+        # [B, S, H, D] row-major; strides are in elements. LSE is not written
+        # (write_lse=0) but the pointer must still be a valid one.
         values = {
-            "Out": o_dev,
             "Q": q_dev,
             "K": k_dev,
             "V": v_dev,
-            "scale": scale_log2,
-            "Sq": Sq,
-            "Sk": Sk,
-            "sqt": Hq * D,
-            "sqh": D,
-            "skt": Hk * D,
-            "skh": D,
-            "svt": Hk * D,
-            "svh": D,
-            "sot": Hq * D,
-            "soh": D,
+            "O": o_dev,
+            "LSE": o_dev,
+            "scale_log2": scale_log2,
+            "seqlen_q": Sq,
+            "seqlen_k": Sk,
+            "num_query_heads": Hq,
+            "num_kv_heads": Hk,
+            "bottom_right": 0,
+            "window_left": -1,
+            "window_right": 0,
+            "write_lse": 0,
+            "stride_q_batch": Sq * Hq * D,
+            "stride_q_token": Hq * D,
+            "stride_q_head": D,
+            "stride_k_batch": Sk * Hk * D,
+            "stride_k_token": Hk * D,
+            "stride_k_head": D,
+            "stride_v_batch": Sk * Hk * D,
+            "stride_v_token": Hk * D,
+            "stride_v_head": D,
+            "stride_o_batch": Sq * Hq * D,
+            "stride_o_token": Hq * D,
+            "stride_o_head": D,
+            "stride_lse_batch": 0,
+            "stride_lse_token": 0,
+            "stride_lse_head": 0,
         }
         launcher = KernelLauncher(
             hsaco=art.hsaco, kernel_name=art.kernel_name, signature=sig

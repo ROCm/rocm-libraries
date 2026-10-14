@@ -16,10 +16,10 @@ differs, deliberately -- ``ml_dtypes`` canonicalises every NaN to
 ``0x7FC0``/``0xFFC0``, while this codec keeps the payload bits that survive in
 the retained 7 mantissa bits (see ``f32_to_bf16``).
 
-This lives in ``platform`` so the one implementation is shared by every harness
-that needs it (``library/builders`` verify drivers and the ``library/tests``
-numeric gate alike). A second copy is how a harness ends up agreeing with
-itself rather than with the device.
+This lives in ``platform``, not beside its one consumer today (the
+``library/tests`` numeric gate), so that any other harness needing a torch-free
+bf16 encoding reuses it instead of growing a second copy -- a second copy is how
+a harness ends up agreeing with itself rather than with the device.
 """
 
 from __future__ import annotations

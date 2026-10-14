@@ -639,36 +639,232 @@ def cfgs_gfx1201_wmma_gemm():
 
 
 def cfgs_gfx1151_wmma_fmha_fwd():
-    # Mirrors make_spec in tests/parity/gfx1151_wmma_fmha_fwd_emit.c by index.
-    # Configs 6-8 are the bf16 trio: without them the binding could drop or
-    # misparse the dtype field and this gate would still report VALIDATED,
-    # because every remaining config is fp16 and fp16 is what an unset dtype
-    # falls back to. Config 8 is bf16 crossed with v_lds_stage, the one knob
-    # whose LDS allocation, stores and loads are typed by dtype -- bf16 and
-    # staged V are each covered alone by 6-7 and 5, but only 8 covers the
-    # combination.
-    # dtype is left unset on 0-5 exactly as the emitter leaves it, so the
-    # default-fp16 path stays covered too.
     rows = [
-        (64, 4, 0, "none", False, None),
-        (128, 8, 0, "none", False, None),
-        (64, 4, 0, "causal", False, None),
-        (256, 8, 2, "none", False, None),
-        (128, 4, 4, "causal", False, None),
-        (64, 6, 0, "none", True, None),
-        (64, 4, 0, "none", False, "bf16"),
-        (128, 8, 2, "causal", False, "bf16"),
-        (64, 4, 0, "none", True, "bf16"),
+        (64, 4, 0, "none", False),
+        (128, 8, 0, "none", False),
+        (64, 4, 0, "causal", False),
+        (256, 8, 2, "none", False),
+        (128, 4, 4, "causal", False),
+        (64, 6, 0, "none", True),
     ]
-    out = []
-    for h, q, k, m, v, dt in rows:
-        cfg = dict(
-            head_size=h, num_query_heads=q, num_kv_heads=k, mask_mode=m, v_lds_stage=v
+    configs = [
+        dict(head_size=h, mask_mode=m, v_lds_stage=v, dtype=dtype)
+        for dtype in ("fp16", "bf16")
+        for (h, _q, _k, m, v) in rows
+    ]
+    # Bottom-right alignment is runtime state, so these intentionally reuse
+    # the ordinary causal code objects represented by the standalone emitter.
+    configs += [dict(configs[index]) for index in (2, 8, 3, 9, 5, 11)]
+    tails = (
+        (12, True, False),
+        (13, True, False),
+        (3, False, True),
+        (9, False, True),
+        (12, True, True),
+        (13, True, True),
+        (16, True, True),
+        (17, True, True),
+    )
+    configs += [
+        dict(configs[index], query_tail=query_tail, kv_tail=kv_tail)
+        for index, query_tail, kv_tail in tails
+    ]
+    features = (
+        (12, dict(mask_mode="window")),
+        (13, dict(mask_mode="window")),
+        (2, dict(use_softcap=True)),
+        (8, dict(use_softcap=True)),
+        (2, dict(use_sinks=True)),
+        (8, dict(use_sinks=True)),
+        (12, dict(use_alibi=True)),
+        (13, dict(use_alibi=True)),
+        (0, dict(use_qq_bias=True)),
+        (6, dict(use_qq_bias=True)),
+        (18, dict(mask_mode="window", use_sinks=True)),
+        (19, dict(mask_mode="window", use_sinks=True)),
+        (
+            24,
+            dict(
+                mask_mode="window",
+                use_softcap=True,
+                use_sinks=True,
+                use_alibi=True,
+                use_qq_bias=True,
+            ),
+        ),
+        (
+            25,
+            dict(
+                mask_mode="window",
+                use_softcap=True,
+                use_sinks=True,
+                use_alibi=True,
+                use_qq_bias=True,
+            ),
+        ),
+        (2, dict(use_softcap=True, use_alibi=True)),
+        (8, dict(use_softcap=True, use_alibi=True)),
+    )
+    configs += [dict(configs[index], **flags) for index, flags in features]
+    layouts = (
+        (0, 0),
+        (7, 0),
+        (12, 0),
+        (15, 0),
+        (16, 0),
+        (39, 0),
+        (0, 16),
+        (7, 64),
+        (12, 16),
+        (15, 32),
+        (16, 32),
+        (17, 64),
+        (26, 64),
+        (33, 32),
+        (38, 16),
+        (39, 64),
+    )
+    configs += [
+        dict(configs[index], layout="paged" if page else "ragged", page_block_size=page)
+        for index, page in layouts
+    ]
+    configs += [
+        dict(configs[index], kv_dtype="fp8e4m3")
+        for index in (0, 7, 14, 15, 22, 23, 24, 25, 44, 47, 51, 57)
+    ]
+    transposed = [
+        dict(
+            head_size=head,
+            mask_mode=mask,
+            transposed_qk=True,
+            block_n=block,
+            num_waves=waves,
         )
-        if dt is not None:
-            cfg["dtype"] = dt
-        out.append(cfg)
-    return out
+        for head in (64, 128)
+        for mask in ("none", "causal")
+        for block in (32, 64)
+        for waves in (1, 2)
+    ]
+    return (
+        configs
+        + transposed
+        + [dict(config) for config in transposed if config["mask_mode"] == "causal"]
+        + [
+            dict(
+                head_size=64,
+                mask_mode="window",
+                layout="ragged",
+                query_tail=True,
+                kv_tail=True,
+                v_lds_stage=True,
+                scheduler_strategy=strategy,
+            )
+            for strategy in (
+                "max-ilp",
+                "max-memory-clause",
+                "iterative-ilp",
+                "iterative-minreg",
+                "iterative-maxocc",
+            )
+        ]
+        + [
+            dict(
+                head_size=256,
+                dtype=dtype,
+                mask_mode="causal" if vlds else "none",
+                query_tail=vlds,
+                kv_tail=vlds,
+                v_lds_stage=vlds,
+                value_tile_size=tile,
+            )
+            for dtype in ("fp16", "bf16")
+            for tile in (16, 32, 64, 128)
+            for vlds in (False, True)
+        ]
+        + [
+            dict(
+                head_size=256,
+                dtype=dtype,
+                mask_mode="causal",
+                query_tail=True,
+                kv_tail=True,
+                layout="paged" if paged else "ragged",
+                page_block_size=32 if paged else 0,
+                kv_dtype="fp8e4m3",
+                value_tile_size=128,
+                v_lds_stage=paged,
+            )
+            for dtype in ("fp16", "bf16")
+            for paged in (False, True)
+        ]
+        + [
+            dict(
+                head_size=head,
+                mask_mode="causal",
+                query_tail=tails,
+                kv_tail=tails,
+                v_lds_stage=tails,
+                causal_tile_skip=True,
+            )
+            for head in (64, 128)
+            for tails in (False, True)
+        ]
+        + [
+            dict(
+                head_size=head,
+                mask_mode=mask,
+                v_lds_stage=vlds,
+                v_head_size=v_head,
+                value_tile_size=tile,
+            )
+            for (head, v_head, tile, mask, vlds) in (
+                (128, 64, 0, "none", False),
+                (64, 128, 0, "causal", True),
+                (192, 128, 0, "none", True),
+                (128, 256, 64, "none", False),
+            )
+        ]
+        + [
+            dict(
+                head_size=head,
+                dtype=dtype,
+                mask_mode=mask,
+                query_tail=tails,
+                kv_tail=tails,
+                v_lds_stage=tails,
+                use_sinks=sinks,
+                use_softcap="s" in extras,
+                use_alibi="a" in extras,
+                use_qq_bias="q" in extras,
+                layout=layout,
+                page_block_size=page,
+                value_tile_size=tile,
+                use_attn_bias=True,
+                bias_dtype=bdt,
+            )
+            for (layout, page, head, mask, tails, sinks, bdt, extras, tile, dtype) in (
+                ("dense", 0, 64, "none", False, False, "f32", "", 0, "fp16"),
+                ("dense", 0, 64, "causal", True, True, "q", "", 0, "fp16"),
+                ("dense", 0, 128, "none", False, False, "q", "", 0, "fp16"),
+                ("ragged", 0, 64, "causal", True, True, "f32", "", 0, "fp16"),
+                ("paged", 16, 64, "causal", True, False, "q", "", 0, "fp16"),
+                ("dense", 0, 64, "causal", True, False, "f32", "saq", 0, "fp16"),
+                ("dense", 0, 256, "none", False, False, "f32", "", 64, "fp16"),
+                ("dense", 0, 128, "causal", True, True, "q", "saq", 0, "fp16"),
+                ("dense", 0, 64, "none", False, False, "q", "", 0, "bf16"),
+            )
+        ]
+    )
+
+
+def cfgs_gfx1201_wmma_fmha_fwd():
+    # The gfx1201 emitters carry the first 12 gfx1151 configs: 0-5 are the fp16
+    # specs and 6-11 repeat them as bf16. Config 11 is bf16 crossed with
+    # v_lds_stage, the one knob whose LDS allocation, stores and loads are typed
+    # by dtype. Without the bf16 rows a dropped or misparsed ``dtype`` in the
+    # binding would still report VALIDATED on this arch, because fp16 is what an
+    # unset dtype falls back to.
+    return cfgs_gfx1151_wmma_fmha_fwd()[:12]
 
 
 def cfgs_attention_unified():
@@ -1483,7 +1679,7 @@ def _selector_parity_row(problem_dict, arch):
             "kernels.common.attention_unified._resolve_attention_arch",
             return_value=arch,
         ):
-            py_spec_obj = _tiled_spec_from_problem(prob)
+            py_spec_obj = _tiled_spec_from_problem(prob, arch)
         # Normalise to the same field-set the C++ binding emits
         from dataclasses import asdict
 
@@ -1771,10 +1967,10 @@ FAMILIES = [
     (
         "gfx1201_wmma_fmha_fwd",
         # Same binding entry point as gfx1151: the spec is arch-parameterised,
-        # and gfx1201 selects the gfx12 WMMA atoms. Same 9 configs, so the
-        # gfx12 bf16 atom gets binding coverage too, not just the gfx11 one.
+        # and gfx1201 selects the gfx12 WMMA atoms, so the gfx12 bf16 atom gets
+        # binding coverage too, not just the gfx11 one.
         "gfx1151_wmma_fmha_fwd_lower_llvm",
-        cfgs_gfx1151_wmma_fmha_fwd(),
+        cfgs_gfx1201_wmma_fmha_fwd(),
         "gfx1201",
     ),
     (

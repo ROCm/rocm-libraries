@@ -89,6 +89,12 @@ from kernels.common.attention_dense_spec import (
     check_dense_spec_preflight,
 )
 from kernels.gfx950.attention_tiled_2d import _mfma_32x32_c_row, _mfma_32x32_c_col
+from kernels.common._lse_store import (
+    dense_row_has_key,
+    lse_store,
+    validate_dense_lse,
+    zero_keyless_row,
+)
 
 LOG2E = 1.4426950408889634
 
@@ -157,6 +163,7 @@ class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
 
     lds_v_row_pad: int = _DEFAULT_GFX950_LAYOUT["lds_v_row_pad"]
     wide_lds_dma: bool = False
+    emit_lse: bool = field(default=False, kw_only=True)
 
     # Performance-only codegen knobs. Every legal value computes the same
     # attention output; defaults reproduce the shipped kernel byte-for-byte.
@@ -236,6 +243,10 @@ class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
 
     def __post_init__(self) -> None:
         super().__post_init__()
+        if type(self.emit_lse) is not bool:
+            raise ValueError(
+                f"emit_lse must be a bool, got {type(self.emit_lse).__name__}"
+            )
         if self.lds_v_row_pad < 0 or self.lds_v_row_pad % 8 != 0:
             raise ValueError(
                 "lds_v_row_pad must be a non-negative multiple of 8 bf16 "
@@ -467,6 +478,8 @@ class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
         codegen = self._codegen_name_part()
         if codegen:
             parts.append(codegen)
+        if self.emit_lse:
+            parts.append("lse")
         return tuple(parts)
 
     def _codegen_name_part(self) -> str:
@@ -562,6 +575,31 @@ def _pv_steps(order: str, d_tiles: int, kk_steps: int) -> Tuple[Tuple[int, int],
     if order == "k_major":
         return tuple((dt, kk) for kk in range(kk_steps) for dt in range(d_tiles))
     return tuple((dt, kk) for dt in range(d_tiles) for kk in range(kk_steps))
+
+
+def _dense_lse_output(
+    b, dst, index, m, l, row_exists, row_has_key, lane_half, *, sinks, head, dtype
+):
+    """Emit stats from one half-wave while both halves retain their O stores."""
+    owner = b.land(row_exists, b.cmp_eq(lane_half, b.const_i32(0)))
+    with b.scf_if(owner):
+        with b.scf_if(row_has_key):
+            lse_store(b, dst, index, m, l, row_has_mass=row_has_key)
+        with b.scf_if(b.lnot(row_has_key)):
+            if sinks is not None:
+                sink = b.cast_to_f32(b.global_load(sinks, head, dtype, align=2))
+                sink_m = b.fmul(sink, b.const_f32(LOG2E))
+                mass = b.cmp_eq(b.const_i32(1), b.const_i32(1))
+                lse_store(b, dst, index, sink_m, b.const_f32(1.0), row_has_mass=mass)
+            else:
+                lse_store(
+                    b,
+                    dst,
+                    index,
+                    b.const_f32(0.0),
+                    b.const_f32(1.0),
+                    row_has_mass=row_has_key,
+                )
 
 
 def build_attention_dense(
@@ -681,6 +719,14 @@ def build_attention_dense(
             "kv_lens", PtrType(I32, "global"), noalias=True, readonly=True, align=4
         )
         bt_stride = b.param("block_table_stride", I32)
+    if spec.emit_lse:
+        lse = b.param(
+            "lse_ptr",
+            PtrType(F32, "global"),
+            noalias=True,
+            writeonly=True,
+            align=4,
+        )
     qk_scale = b.fmul(scale, b.const_f32(LOG2E))
 
     # native v_exp_f32 (softmax arg bounded; see _MAX_SCALE) or the guarded exp2
@@ -1342,7 +1388,11 @@ def build_attention_dense(
     o_acc = do_pv(o_acc, p_prev, last_vbuf)
 
     # Epilogue: O = (P@V) / l, vectorized bf16 store.
-    rcp_l = b.rcp(l_i)
+    if spec.emit_lse:
+        positive_l = b.fcmp("ogt", l_i, b.const_f32(0.0))
+        rcp_l = b.rcp(b.select(positive_l, l_i, b.const_f32(1.0)))
+    else:
+        rcp_l = b.rcp(l_i)
     if varlen:
         o_base = b.add(
             b.mul(q_seq0, b.const_i32(stride_q_tok)), b.mul(hq, b.const_i32(D))
@@ -1355,6 +1405,37 @@ def build_attention_dense(
     qtok = b.add(q_tok0, _mfma_32x32_c_col(b, lane, 0))
     q_row_byte = b.add(o_base, b.mul(qtok, b.const_i32(stride_q_tok)))
     d_half = b.mul(lane_h, b.const_i32(4))
+    if spec.emit_lse:
+        row_has_key = dense_row_has_key(
+            b,
+            qtok,
+            seqlen_kv_b if varlen else seqlen_kv_p,
+            causal=causal,
+            diagonal=DIAG_OFF,
+            window=W,
+        )
+        if varlen:
+            lse_index = b.add(b.mul(b.add(q_seq0, qtok), b.const_i32(Hq)), hq)
+            row_exists = b.cmp_lt(qtok, seqlen_q_b)
+        else:
+            lse_index = b.add(
+                b.mul(b.add(b.mul(bt, b.const_i32(Hq)), hq), seqlen_q_p),
+                qtok,
+            )
+            row_exists = b.cmp_lt(qtok, seqlen_q_p)
+        _dense_lse_output(
+            b,
+            lse,
+            lse_index,
+            res[0],
+            l_i,
+            row_exists,
+            row_has_key,
+            lane_h,
+            sinks=sinks if use_sinks else None,
+            head=hq,
+            dtype=dtype,
+        )
     # ragged: drop padded query rows (qtok >= seqlen_q) via a per-lane guard so
     # they never write (and never clobber a neighbouring batch's real rows). A
     # buffer store's OOB-drop only protects the last batch's overflow, so use an
@@ -1362,16 +1443,33 @@ def build_attention_dense(
     o_store_ctx = (
         b.scf_if(b.cmp_lt(qtok, b.const_i32(Sq))) if RAGGED else _nullcontext()
     )
+    if spec.emit_lse and varlen:
+        o_store_ctx = b.scf_if(row_exists)
     with o_store_ctx:
         _emit_o_store(
-            b, o, q_row_byte, d_half, o_acc, rcp_l, dtype, D_TILES, spec.o_store_width
+            b,
+            o,
+            q_row_byte,
+            d_half,
+            o_acc,
+            rcp_l,
+            dtype,
+            D_TILES,
+            spec.o_store_width,
+            row_has_key=row_has_key if spec.emit_lse else None,
         )
     b.ret()
     return b.kernel
 
 
-def _emit_o_store(b, o, q_row_byte, d_half, o_acc, rcp_l, dtype, d_tiles, width):
-    """O = acc / l, ``width`` contiguous head-dim elements per global store."""
+def _emit_o_store(
+    b, o, q_row_byte, d_half, o_acc, rcp_l, dtype, d_tiles, width, row_has_key=None
+):
+    """O = acc / l, ``width`` contiguous head-dim elements per global store.
+
+    ``row_has_key`` (LSE path only) zeroes rows that see no key; ``None`` emits the
+    unchanged store sequence.
+    """
     for dt in range(d_tiles):
         for g in range(4):
             for c in range(0, 4, width):
@@ -1383,9 +1481,10 @@ def _emit_o_store(b, o, q_row_byte, d_half, o_acc, rcp_l, dtype, d_tiles, width)
                     )
                     for kk in range(c, c + width)
                 ]
-                b.global_store_vN(
-                    o, addr, b.vec_pack(vals, dtype), width, align=2 * width
-                )
+                packed = b.vec_pack(vals, dtype)
+                if row_has_key is not None:
+                    packed = zero_keyless_row(b, packed, row_has_key, dtype, width)
+                b.global_store_vN(o, addr, packed, width, align=2 * width)
 
 
 def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
@@ -1472,6 +1571,14 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
     if use_sinks:
         sinks = b.param(
             "sink_ptr", PtrType(dtype, "global"), noalias=True, readonly=True, align=16
+        )
+    if spec.emit_lse:
+        lse = b.param(
+            "lse_ptr",
+            PtrType(F32, "global"),
+            noalias=True,
+            writeonly=True,
+            align=4,
         )
     qk_scale = b.fmul(scale, b.const_f32(LOG2E))
     _exp2 = b.exp2_fast if spec.use_exp2_fast else b.exp2
@@ -2254,7 +2361,11 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
         # Epilogue: recompute (bt, hq) from the live loop IV so they need not cross
         # the KV loop (keeps the loop-carried live set minimal -> 0 spill). Must
         # mirror the work-item decode used at the top of the loop.
-        rcp_l = b.rcp(l_i)
+        if spec.emit_lse:
+            positive_l = b.fcmp("ogt", l_i, b.const_f32(0.0))
+            rcp_l = b.rcp(b.select(positive_l, l_i, b.const_f32(1.0)))
+        else:
+            rcp_l = b.rcp(l_i)
         if spec.resolved_persist_decode == "gqa_pair_2phase":
             cta_e = b.mod(wi, b.const_i32(NP))
             hql_e = b.mod(cta_e, b.const_i32(gqa))
@@ -2293,6 +2404,36 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
         qtok = b.add(q_tok0, _mfma_32x32_c_col(b, lane, 0))
         q_row_byte = b.add(o_base, b.mul(qtok, b.const_i32(stride_q_tok)))
         d_half = b.mul(lane_h, b.const_i32(4))
+        if spec.emit_lse:
+            row_has_key = dense_row_has_key(
+                b,
+                qtok,
+                b.const_i32(Skv),
+                causal=causal,
+                diagonal=0,
+                window=SW,
+            )
+            lse_index = b.add(
+                b.mul(
+                    b.add(b.mul(bt_e, b.const_i32(Hq)), hq_e),
+                    b.const_i32(Sq),
+                ),
+                qtok,
+            )
+            row_exists = b.cmp_lt(qtok, b.const_i32(Sq))
+            _dense_lse_output(
+                b,
+                lse,
+                lse_index,
+                res[0],
+                l_i,
+                row_exists,
+                row_has_key,
+                lane_h,
+                sinks=sinks if use_sinks else None,
+                head=hq_e,
+                dtype=dtype,
+            )
         # ragged: guard padded query rows (qtok >= seqlen_q) so they never write.
         o_store_ctx = (
             b.scf_if(b.cmp_lt(qtok, b.const_i32(Sq))) if RAGGED else _nullcontext()
@@ -2308,6 +2449,7 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
                 dtype,
                 D_TILES,
                 spec.o_store_width,
+                row_has_key=row_has_key if spec.emit_lse else None,
             )
 
     b.ret()
@@ -2384,6 +2526,8 @@ def attention_dense_signature(spec: AttentionDenseSpec):
             .ptr("kv_lens", "i32")
             .scalar("block_table_stride", "i32")
         )
+    if spec.emit_lse:
+        sig = sig.ptr("lse_ptr", "f32")
     return sig.build()
 
 
@@ -2411,6 +2555,7 @@ def run_attention_dense_torch(
     kv_lens=None,
     sinks=None,
     validate_paged: bool = True,
+    lse=None,
 ):
     """High-level framework entry: compile (cached) + launch the dense prefill
     kernel on torch tensors. ``q``/``k``/``v``/``out`` are dense contiguous
@@ -2423,6 +2568,17 @@ def run_attention_dense_torch(
     torch is imported lazily by the launcher — this module stays torch-free at
     import time.
 
+    ``spec.emit_lse=True`` requires a caller-owned contiguous FP32 ``lse`` tensor
+    on the same GPU, separate from every input and output. Its layout is
+    [B, Hq, Sq, 1], or [total_query_tokens, Hq, 1] for packed varlen. The kernel
+    writes natural-log softmax normalization while still returning ``out``.
+    Fully masked real rows write O=0 and LSE=-inf; with a finite attention sink,
+    those rows instead write the sink logit as LSE. Invalid padded rows do not
+    write. Supplying ``lse`` with ``emit_lse=False`` is an error.
+    The enabled varlen path checks cumulative offsets on the host (a device
+    sync): Q lengths must be block_m multiples, KV lengths positive block_n
+    multiples, and both must be within their spec maxima.
+
     Arbitrary (non-256-multiple) sequence lengths are served WITHOUT host
     padding by the in-kernel ragged path: build ``spec`` with ``ragged=True``
     and the TRUE (un-rounded) ``seqlen_q``/``seqlen_kv`` and pass the true-length
@@ -2430,10 +2586,9 @@ def run_attention_dense_torch(
     OOB query rows, LDS-zero OOB keys) and drops the partial O rows; the grid is
     ceil-sized automatically. See the ``ragged`` spec field.
 
-    Varlen (``spec.varlen``): the kernel emits a 7-arg ABI (packed
-    ``[total_tok, H, D]`` q/k/v/o + two int32 ``cu_seqlens`` [batch+1]); pass both
-    ``cu_seqlens_q`` and ``cu_seqlens_kv`` or a ``ValueError`` is raised (they are
-    required — never silently launch the 5-arg ABI against a 7-arg kernel).
+    Varlen (``spec.varlen``): q/k/v/o use packed [total_tok, H, D] storage.
+    Pass both int32 ``cu_seqlens`` [batch+1]. The nonpersistent ABI also takes
+    batch/seqlen_q/seqlen_kv scalars; optional LSE is the final pointer.
 
     Paged (``spec.paged``): K/V are a PAGED CACHE, not dense tensors -- ``k``/``v``
     are ``[num_kv_blocks, block_size, Hkv, D]`` and are addressed through
@@ -2469,7 +2624,7 @@ def run_attention_dense_torch(
     if spec.varlen and (cu_seqlens_q is None or cu_seqlens_kv is None):
         raise ValueError(
             "varlen=True requires cu_seqlens_q and cu_seqlens_kv (int32 [batch+1]); "
-            "the varlen kernel has a 7-arg ABI and cannot be launched with q/k/v/o/scale"
+            "packed attention cannot be launched without its offset pointers"
         )
     if not spec.varlen and (cu_seqlens_q is not None or cu_seqlens_kv is not None):
         raise ValueError("cu_seqlens_* provided but spec.varlen is False")
@@ -2554,6 +2709,20 @@ def run_attention_dense_torch(
         if not sinks.is_cuda:
             raise ValueError("sinks must be a CUDA tensor")
 
+    validate_dense_lse(
+        spec,
+        q,
+        k,
+        v,
+        out,
+        lse,
+        cu_seqlens_q=cu_seqlens_q,
+        cu_seqlens_kv=cu_seqlens_kv,
+        block_tables=block_tables,
+        kv_lens=kv_lens,
+        sinks=sinks,
+    )
+
     from rocke.helpers.compile import compile_kernel
     from rocke.runtime import KernelLauncher, LaunchConfig
 
@@ -2590,6 +2759,8 @@ def run_attention_dense_torch(
         vals["block_table_stride"] = int(block_tables.stride(0))
     if spec.use_sinks:
         vals["sink_ptr"] = sinks
+    if spec.emit_lse:
+        vals["lse_ptr"] = lse
     launcher(
         vals,
         config=LaunchConfig(

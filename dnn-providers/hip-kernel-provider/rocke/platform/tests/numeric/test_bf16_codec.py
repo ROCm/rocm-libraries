@@ -45,6 +45,15 @@ def test_rounding_can_carry_into_the_exponent():
     assert f32_to_bf16(_bits([0x3FFFFFFF]))[0] == 0x4000
 
 
+def test_relative_error_meets_the_round_to_nearest_bound():
+    """RNE is bounded by half an ULP, so this also tells it from truncation."""
+    r = np.random.default_rng(0).standard_normal(200_000).astype(np.float32)
+    rel = float((np.abs(bf16_to_f32(f32_to_bf16(r)) - r) / np.abs(r)).max())
+    # bf16 carries 8 significand bits: RNE stays within 2**-8, while plain
+    # truncation would reach 2**-7.
+    assert rel <= 2**-8 + 1e-9
+
+
 @pytest.mark.parametrize(
     "pattern",
     [

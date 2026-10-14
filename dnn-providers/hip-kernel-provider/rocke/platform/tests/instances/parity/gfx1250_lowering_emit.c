@@ -388,6 +388,163 @@ static void build_scale_coordinates_k16(rocke_ir_builder_t* b)
     build_scale_coordinates(b, ROCKE_MMA_SCALE_K16);
 }
 
+/* Every data-prefetch op once, over each pointer space s_prefetch_data
+ * accepts, with non-default immediates so a dropped attr shows up. */
+static void build_data_prefetch(rocke_ir_builder_t* b)
+{
+    rocke_param_opts_t src_o;
+    rocke_param_opts_t table_o;
+    memset(&src_o, 0, sizeof(src_o));
+    memset(&table_o, 0, sizeof(table_o));
+    src_o.readonly = true;
+    src_o.readonly_set = true;
+    src_o.align = 16;
+    src_o.align_set = true;
+    table_o.addr_space = "constant";
+    rocke_value_t* src = rocke_b_param(b, "src", rocke_ptr_type(b, rocke_f32(), "global"), &src_o);
+    rocke_value_t* table
+        = rocke_b_param(b, "table", rocke_ptr_type(b, rocke_i32(), "global"), &table_o);
+    rocke_value_t* flat = rocke_b_param(b, "flat", rocke_ptr_type(b, rocke_f32(), "private"), NULL);
+    rocke_value_t* nbytes = rocke_b_param(b, "nbytes", rocke_i32(), NULL);
+    rocke_value_t* lines = rocke_b_const_i32(b, 4);
+    rocke_b_enable_scalar_prefetch(b);
+    rocke_b_s_prefetch_data(b, src, lines);
+    rocke_b_s_prefetch_data(b, table, lines);
+    rocke_b_s_prefetch_data(b, flat, lines);
+    rocke_value_t* rsrc = rocke_b_buffer_rsrc(b, src, nbytes);
+    rocke_b_s_buffer_prefetch_data(b, rsrc, lines, /*offset=*/256);
+    rocke_b_global_prefetch(b, src, /*cachepolicy=*/3);
+    rocke_b_flat_prefetch(b, flat, /*cachepolicy=*/5);
+    rocke_b_ret(b);
+}
+
+/* Every cluster read on every axis, stored so the pure reads stay live, then
+ * cluster_size and one cluster barrier. */
+static void build_cluster(rocke_ir_builder_t* b)
+{
+    static const char* const axes[] = {"x", "y", "z"};
+    rocke_value_t* out = rocke_b_param(b, "out", rocke_ptr_type(b, rocke_i32(), "global"), NULL);
+    rocke_value_t* tid = rocke_b_thread_id_x(b);
+    for(int i = 0; i < 3; ++i)
+    {
+        rocke_value_t* cid = rocke_b_cluster_id(b, axes[i]);
+        rocke_b_global_store(b, out, tid, cid, 1);
+        rocke_value_t* cwid = rocke_b_cluster_workgroup_id(b, axes[i]);
+        rocke_b_global_store(b, out, tid, cwid, 1);
+        rocke_value_t* cwmax = rocke_b_cluster_workgroup_max_id(b, axes[i]);
+        rocke_b_global_store(b, out, tid, cwmax, 1);
+    }
+    rocke_value_t* flat = rocke_b_cluster_workgroup_flat_id(b);
+    rocke_b_global_store(b, out, tid, flat, 1);
+    rocke_value_t* max_flat = rocke_b_cluster_workgroup_max_flat_id(b);
+    rocke_b_global_store(b, out, tid, max_flat, 1);
+    rocke_value_t* size = rocke_b_cluster_size(b, "y");
+    rocke_b_global_store(b, out, tid, size, 1);
+    rocke_b_cluster_barrier(b);
+    rocke_b_ret(b);
+}
+
+/* A 2x2x1 cluster shape: the only effect is the "amdgpu-cluster-dims"
+ * function attribute, so the body just reads the cluster-local flat id. */
+static void build_cluster_dims(rocke_ir_builder_t* b)
+{
+    static const int64_t dims[] = {2, 2, 1};
+    rocke_value_t* out = rocke_b_param(b, "out", rocke_ptr_type(b, rocke_i32(), "global"), NULL);
+    rocke_attr_set_int_list(b, &rocke_ir_builder_kernel(b)->attrs, "cluster_dims", dims, 3);
+    rocke_value_t* tid = rocke_b_thread_id_x(b);
+    rocke_value_t* flat = rocke_b_cluster_workgroup_flat_id(b);
+    rocke_b_global_store(b, out, tid, flat, 1);
+    rocke_b_ret(b);
+}
+
+/* Every cluster multicast width once, with non-default immediates so a
+ * dropped attr shows up; the sync results are stored so they stay live. */
+static void build_multicast(rocke_ir_builder_t* b)
+{
+    static const int shape[] = {64};
+    rocke_param_opts_t ro;
+    memset(&ro, 0, sizeof(ro));
+    ro.readonly = true;
+    ro.readonly_set = true;
+    ro.align = 16;
+    ro.align_set = true;
+    rocke_value_t* src = rocke_b_param(b, "src", rocke_ptr_type(b, rocke_i32(), "global"), &ro);
+    rocke_value_t* out = rocke_b_param(b, "out", rocke_ptr_type(b, rocke_i32(), "global"), NULL);
+    rocke_value_t* mask = rocke_b_param(b, "mask", rocke_i32(), NULL);
+    rocke_value_t* local
+        = rocke_b_smem_addr_of(b, rocke_b_smem_alloc(b, rocke_i32(), shape, 1, "stage"));
+    rocke_value_t* tid = rocke_b_thread_id_x(b);
+    rocke_value_t* v1 = rocke_b_cluster_load(b, src, mask, 4, 0);
+    rocke_b_global_store(b, out, tid, v1, 1);
+    rocke_value_t* v2 = rocke_b_cluster_load(b, src, mask, 8, 1);
+    rocke_b_global_store(b, out, tid, rocke_b_vec_extract(b, v2, 1), 1);
+    rocke_value_t* v4 = rocke_b_cluster_load(b, src, mask, 16, 8);
+    rocke_b_global_store(b, out, tid, rocke_b_vec_extract(b, v4, 3), 1);
+    rocke_b_cluster_load_async_to_lds(b, src, local, mask, 1, 0, 0);
+    rocke_b_cluster_load_async_to_lds(b, src, local, mask, 4, 16, 0);
+    rocke_b_cluster_load_async_to_lds(b, src, local, mask, 8, 0, 3);
+    rocke_b_cluster_load_async_to_lds(b, src, local, mask, 16, -32, 31);
+    rocke_b_ret(b);
+}
+
+/* Two packed TDM descriptors: the load takes the smem (i64) LDS address with
+ * padding and a workgroup mask set; the store takes an i32 LDS address with the
+ * defaults, so both address paths and every flag field show up. */
+static void build_tdm(rocke_ir_builder_t* b)
+{
+    static const int shape[] = {64 * 16};
+    rocke_param_opts_t ro;
+    rocke_param_opts_t wo;
+    rocke_value_t* g[5];
+    memset(&ro, 0, sizeof(ro));
+    memset(&wo, 0, sizeof(wo));
+    ro.readonly = true;
+    ro.readonly_set = true;
+    ro.align = 16;
+    ro.align_set = true;
+    wo.align = 16;
+    wo.align_set = true;
+    rocke_value_t* src = rocke_b_param(b, "src", rocke_ptr_type(b, rocke_i16(), "global"), &ro);
+    rocke_value_t* dst = rocke_b_param(b, "dst", rocke_ptr_type(b, rocke_i16(), "global"), &wo);
+    rocke_value_t* dim0 = rocke_b_param(b, "dim0", rocke_i32(), NULL);
+    rocke_value_t* dim1 = rocke_b_param(b, "dim1", rocke_i32(), NULL);
+    rocke_value_t* stride = rocke_b_param(b, "stride", rocke_i32(), NULL);
+    rocke_value_t* lds32 = rocke_b_param(b, "lds32", rocke_i32(), NULL);
+    rocke_value_t* lds
+        = rocke_b_smem_addr_of(b, rocke_b_smem_alloc(b, rocke_i16(), shape, 1, "tile"));
+    rocke_b_tdm_descriptor_2d(b,
+                              src,
+                              lds,
+                              /*elem_bytes=*/2,
+                              dim0,
+                              dim1,
+                              stride,
+                              /*tile_dim0=*/64,
+                              /*tile_dim1=*/16,
+                              /*workgroup_mask=*/3,
+                              /*pad_interval=*/2,
+                              /*pad_amount=*/5,
+                              g);
+    rocke_b_tensor_load_to_lds(b, g[0], g[1], g[2], g[3], g[4], 0);
+    rocke_b_s_wait_tensorcnt(b, 0);
+    rocke_b_tdm_descriptor_2d(b,
+                              dst,
+                              lds32,
+                              /*elem_bytes=*/2,
+                              dim0,
+                              dim1,
+                              stride,
+                              /*tile_dim0=*/0xFFFF,
+                              /*tile_dim1=*/16,
+                              /*workgroup_mask=*/0,
+                              /*pad_interval=*/-1,
+                              /*pad_amount=*/0,
+                              g);
+    rocke_b_tensor_store_from_lds(b, g[0], g[1], g[2], g[3], g[4], 5);
+    rocke_b_s_wait_tensorcnt(b, 0);
+    rocke_b_ret(b);
+}
+
 typedef void (*build_fn_t)(rocke_ir_builder_t*);
 
 typedef struct config
@@ -475,6 +632,11 @@ static const config_t CONFIGS[] = {
     {NULL, "gfx1250", "fp4", true, "bf8"},
     {NULL, "gfx1250", "fp4", true, "fp6"},
     {NULL, "gfx1250", "fp4", true, "bf6"},
+    {build_data_prefetch, "gfx1250"},
+    {build_cluster, "gfx1250"},
+    {build_cluster_dims, "gfx1250"},
+    {build_multicast, "gfx1250"},
+    {build_tdm, "gfx1250"},
 };
 
 static const int NUM_CONFIGS = (int)(sizeof(CONFIGS) / sizeof(CONFIGS[0]));
