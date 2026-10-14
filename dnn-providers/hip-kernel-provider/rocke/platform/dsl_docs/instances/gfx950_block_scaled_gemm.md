@@ -27,3 +27,19 @@ Other targets reject this atom family.
 
 [Example commands, storage, ISA references and numerical limits](../../python/rocke/examples/gfx950/gemm/README.md)
 explain the four focused entrypoints and their mandatory non-unity scale cases.
+
+## Relationship to Existing gfx950 MFMA Support
+
+This builder consumes the 32x32x64 `mfma_scaled` target-catalog family. It
+selects the complete shape/dtype/scale contract with `op_for_shape`, loads and
+packs the matrices and scales, then emits `IRBuilder.mma(atom, a, b, c, sa, sb)`.
+The Python/C++ builder modules are siblings of the gfx1250 block-scaled GEMM
+modules, and both instruction shapes share the existing MFMA lowering files.
+
+The existing `MfmaAtom.emit_scaled()` helper always calls the 16x16x128
+scaled wrapper. Separately, `MfmaAtom.fp8_16x16x128().emit()` is used by the
+gfx950 FP8 fused-MoE dispatcher, with constant in-instruction scales and
+FP32 block-scale factors applied outside the MFMA. This 32x32x64 builder
+passes independent E8M0 scales to the instruction and currently runs directly
+from a spec, without a GEMM dispatcher registration. See the
+[API and consumer comparison](../reference/mma_metadata.md#gfx950-scaled-mfma-paths).

@@ -4,6 +4,14 @@ These untuned correctness examples use the native 32x32x64 scaled MFMA and the
 reusable `instances/gfx950/block_scaled_gemm.py` builder. They make no
 performance claim.
 
+These entrypoints construct `BlockScaledGemmSpec` and call the builder directly.
+The builder selects a `mfma_scaled` catalog atom and emits `IRBuilder.mma`;
+there is currently no GEMM dispatcher registration for this family. The
+existing gfx950 FP8 fused-MoE dispatcher uses the separate 16x16x128 FP8
+atom, with its FP32 block scales applied outside the MFMA. See the
+[family contract](../../../../../dsl_docs/instances/gfx950_block_scaled_gemm.md)
+and [selection/emission comparison](../../../../../dsl_docs/reference/mma_metadata.md#gfx950-scaled-mfma-paths).
+
 Run from an installed rocKE package or with the platform `python` directory on
 `PYTHONPATH`. A gfx950 device, matching LLVM 20, 22 or 23 ROCm compiler/runtime
 libraries, NumPy and

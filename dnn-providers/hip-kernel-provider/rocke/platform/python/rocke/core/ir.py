@@ -2642,17 +2642,16 @@ class IRBuilder:
         a_scale: Value,
         b_scale: Value,
     ) -> Value:
-        """MX-MFMA with in-instruction scales (P15).
+        """Existing gfx950 16x16x128 MFMA with in-instruction scales (P15).
 
-        ``mfma_scale_f32_16x16x128_f8f6f4`` is the gfx950 MX MFMA
-        instruction family. Operands are 16-byte packed mantissa
-        vectors (fp8/fp6/fp4) plus per-warp E8M0 scales applied
-        in-instruction. The scale broadcast inside the instruction is
-        per-output-row (vs per-input-row), which is what fixes the
-        B_MX1 row-aware correctness gap that the post-hoc
-        scale-apply chain has.
+        This fixed-operation wrapper delegates to ``mma``. LLVM lowering
+        uses two ``<8 x i32>`` payloads, a ``<4 x float>`` accumulator and
+        separate i32 scale operands; A/B format selectors are fixed to zero.
+        It lowers to ``llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4``.
 
-        Lowers to ``llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4``.
+        For 32x32x64 with independently selected A/B formats and K32 E8M0
+        scales, resolve a ``mfma_scaled`` catalog atom and call ``mma``
+        with that atom and both scales. See ``reference/mma_metadata.md``.
         """
         return self.mma("mfma_scale_f32_16x16x128_f8f6f4", a, b, c, a_scale, b_scale)
 
