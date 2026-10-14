@@ -46,6 +46,7 @@
 #include "ReadyQueue.hpp"
 #include "RegionDAG.hpp"
 #include "planning/DsReadOrderPlanner.hpp"
+#include "planning/FillerDeadlinePlanner.hpp"
 #include "stinkytofu/analysis/asm/WmmaHideBudgetAnalysis.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
@@ -3585,42 +3586,7 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
         }
     }
 
-    // Deadline per filler: the planned window of the nearest consumer it feeds, minus the
-    // chain hops still to go. ds_loads are planned at the region's ds pace.
-    needWindow_.assign(deps.dag.nodes.size(), INT_MAX);
-    std::vector<int> planned(deps.dag.nodes.size(), INT_MAX);
-    int dsOrdinal = 0;
-    for (unsigned id = 0; id < deps.dag.nodes.size(); ++id) {
-        const StinkyInstruction* inst = deps.dag.nodes[id].inst;
-        if (isGlobalPrefetch(*inst)) {
-            auto it = prefetchEarliestWmma_.find(inst);
-            planned[id] = it != prefetchEarliestWmma_.end() ? it->second : 0;
-        } else if (isTensorLoad(*inst)) {
-            auto it = loadPlannedWindow.find(inst);
-            if (it != loadPlannedWindow.end()) planned[id] = it->second;
-        } else if (isDSRead(*inst) && dsTotalThisRegion_ > 0) {
-            planned[id] = dsOrdinal++ * wmmaTotalThisRegion_ / dsTotalThisRegion_;
-        }
-    }
-    auto isFillerInst = [](const StinkyInstruction& i) {
-        return isVectorALU(i) || isTranscendental(i) || isScalarALU(i);
-    };
-    for (bool changed = true; changed;) {
-        changed = false;
-        for (unsigned id = deps.dag.nodes.size(); id-- > 0;) {
-            if (!isFillerInst(*deps.dag.nodes[id].inst)) continue;
-            int need = needWindow_[id];
-            for (unsigned succ : deps.dag.graph[id]) {
-                const int via = planned[succ] != INT_MAX       ? planned[succ]
-                                : needWindow_[succ] != INT_MAX ? needWindow_[succ] - 1
-                                                               : INT_MAX;
-                need = std::min(need, via);
-            }
-            if (need < needWindow_[id]) {
-                needWindow_[id] = need;
-                changed = true;
-            }
-        }
-    }
+    needWindow_ = planFillerDeadlines(deps.dag, prefetchEarliestWmma_, loadPlannedWindow,
+                                      dsTotalThisRegion_, wmmaTotalThisRegion_);
 }
 }  // namespace
