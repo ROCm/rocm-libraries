@@ -9,9 +9,75 @@
 
 #include "local_kernel_test_common.hpp"
 
+#include <Tensile/ContractionProblem.hpp>
+#include <Tensile/ContractionSolution.hpp>
+#include <Tensile/MasterSolutionLibrary.hpp>
+#include <Tensile/Tensile.hpp>
+
+#include <atomic>
+#include <thread>
+
 namespace
 {
     using namespace local_kernel_test;
+
+    struct ShardKernel
+    {
+        int         shippedIndex;
+        std::string name;
+    };
+
+    // The shard's solutions in the order registration assigns their indices.
+    std::vector<ShardKernel> shardKernels(std::string const& dat)
+    {
+        using Problem  = TensileLite::ContractionProblemGemm;
+        using Solution = TensileLite::ContractionSolution;
+        auto shard     = std::dynamic_pointer_cast<TensileLite::MasterSolutionLibrary<Problem>>(
+            TensileLite::LoadLibraryFile<Problem, Solution>(dat));
+        if(!shard)
+            return {};
+        shard->materializeAllSolutions();
+        std::vector<ShardKernel> kernels;
+        for(auto const& entry : shard->solutions)
+            if(entry.second)
+                kernels.push_back({entry.first, entry.second->KernelName()});
+        return kernels;
+    }
+
+    std::vector<std::string> kernelNames(std::vector<ShardKernel> const& kernels)
+    {
+        std::vector<std::string> names;
+        for(auto const& kernel : kernels)
+            if(std::find(names.begin(), names.end(), kernel.name) == names.end())
+                names.push_back(kernel.name);
+        return names;
+    }
+
+    std::vector<int>
+        registerPayload(hipblasLtHandle_t handle, std::string const& dat, std::string const& co)
+    {
+        std::vector<int> indices(4096);
+        int              numIndices = 0;
+        if(hipblasLtLocalKernelRegister(handle,
+                                        dat.c_str(),
+                                        co.c_str(),
+                                        indices.data(),
+                                        static_cast<int>(indices.size()),
+                                        &numIndices)
+           != HIPBLAS_STATUS_SUCCESS)
+            return {};
+        indices.resize(std::min<size_t>(numIndices, indices.size()));
+        return indices;
+    }
+
+    bool resolve(hipblasLtHandle_t                 handle,
+                 Problem const&                    p,
+                 int                               index,
+                 hipblasLtMatmulHeuristicResult_t& out,
+                 size_t&                           workspace)
+    {
+        return findUsableKernel(handle, p, {index}, out, workspace) == index;
+    }
 
     // Two devices of one architecture, so a payload for one serves both.
     bool haveTwoMatchingDevices()
@@ -212,6 +278,211 @@ TEST(LocalKernelRegister, TwoDevices)
         GTEST_SKIP() << "needs two devices of the same architecture";
 
     EXPECT_EQ(runWorker("LocalKernelRegister.DISABLED_TwoDevicesWorker"), 0)
+        << "the worker failed; its output is above";
+}
+
+// Payloads that reach the code object load and fail there are refused cleanly:
+// nothing is registered and the shipped kernel already in use still runs.
+TEST(LocalKernelRegister, DISABLED_BadPayloadsWorker)
+{
+    const std::vector<std::string> candidates = candidatePayloads();
+    ASSERT_FALSE(candidates.empty()) << "no payload shard in this build's library";
+
+    hipblasLtHandle_t handle;
+    ASSERT_EQ(hipblasLtCreate(&handle), HIPBLAS_STATUS_SUCCESS);
+    expectNothingRegistered(handle);
+
+    Problem p;
+    ASSERT_EQ(buildProblem(p), HIPBLAS_STATUS_SUCCESS);
+    auto shipped = topResults(handle, p, 1);
+    ASSERT_EQ(shipped.size(), 1u);
+    runAndCheck(handle, p, shipped[0].algo, shipped[0].workspaceSize);
+
+    const std::string dat   = candidates[0] + ".dat";
+    const auto        names = kernelNames(shardKernels(dat));
+    ASSERT_FALSE(names.empty());
+
+    ScratchDir        scratch;
+    const std::string wrongArch = scratch.file("wrong_arch.co");
+    const std::string truncated = scratch.file("truncated.co");
+    const std::string unrelated = scratch.file("unrelated.co");
+    ASSERT_TRUE(compileCodeObject(standInKernels(names), otherArch(), wrongArch));
+    ASSERT_TRUE(writeTruncatedCopy(candidates[0] + ".co", truncated));
+    ASSERT_TRUE(
+        compileCodeObject(standInKernels({"NotAKernelOfThisShard"}), deviceArch(), unrelated));
+
+    const std::pair<char const*, std::string> cases[] = {
+        {"a code object for another architecture", wrongArch},
+        {"a truncated code object", truncated},
+        {"a code object without the shard's kernels", unrelated},
+    };
+    for(auto const& [what, co] : cases)
+    {
+        int numIndices = -1;
+        EXPECT_EQ(
+            hipblasLtLocalKernelRegister(handle, dat.c_str(), co.c_str(), nullptr, 0, &numIndices),
+            HIPBLAS_STATUS_INVALID_VALUE)
+            << what;
+        EXPECT_EQ(numIndices, 0) << what;
+
+        size_t registered = 123;
+        ASSERT_EQ(hipblasLtLocalKernelGetCounts(handle, &registered, nullptr),
+                  HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(registered, 0u) << what;
+
+        SCOPED_TRACE(std::string("the shipped kernel after ") + what);
+        runAndCheck(handle, p, shipped[0].algo, shipped[0].workspaceSize);
+    }
+
+    EXPECT_EQ(hipblasLtDestroy(handle), HIPBLAS_STATUS_SUCCESS);
+}
+
+TEST(LocalKernelRegister, RejectsBadPayloads)
+{
+    EXPECT_EQ(runWorker("LocalKernelRegister.DISABLED_BadPayloadsWorker"), 0)
+        << "the worker failed; its output is above";
+}
+
+// A kernel runs from the code object it was registered with, even when a
+// shipped kernel and an earlier registered kernel have the same name. The
+// replacement here is an empty kernel, so it leaves D untouched.
+TEST(LocalKernelRegister, DISABLED_OwnCodeObjectWorker)
+{
+    const std::vector<std::string> candidates = candidatePayloads();
+    ASSERT_FALSE(candidates.empty()) << "no payload shard in this build's library";
+
+    hipblasLtHandle_t handle;
+    ASSERT_EQ(hipblasLtCreate(&handle), HIPBLAS_STATUS_SUCCESS);
+    expectNothingRegistered(handle);
+
+    Problem p;
+    ASSERT_EQ(buildProblem(p), HIPBLAS_STATUS_SUCCESS);
+
+    std::string                      stem;
+    std::vector<int>                 original;
+    size_t                           position = 0;
+    hipblasLtMatmulHeuristicResult_t originalResult{};
+    size_t                           originalWs = 0;
+    for(auto const& candidate : candidates)
+    {
+        original = registerPayload(handle, candidate + ".dat", candidate + ".co");
+        ASSERT_FALSE(original.empty()) << candidate;
+        int idx = findUsableKernel(handle, p, original, originalResult, originalWs);
+        if(idx >= 0)
+        {
+            stem     = candidate;
+            position = std::find(original.begin(), original.end(), idx) - original.begin();
+            break;
+        }
+    }
+    ASSERT_FALSE(stem.empty()) << "no payload holds a kernel for this problem";
+
+    const auto kernels = shardKernels(stem + ".dat");
+    ASSERT_EQ(kernels.size(), original.size());
+    const std::string name = kernels[position].name;
+    EXPECT_EQ(hipblaslt_ext::getKernelNameFromAlgo(handle, originalResult.algo), name);
+
+    hipblasLtMatmulHeuristicResult_t shippedResult{};
+    size_t                           shippedWs = 0;
+    ASSERT_TRUE(resolve(handle, p, kernels[position].shippedIndex, shippedResult, shippedWs))
+        << "the shipped kernel of the same name";
+    runAndCheck(handle, p, shippedResult.algo, shippedWs);
+    runAndCheck(handle, p, originalResult.algo, originalWs);
+
+    ScratchDir        scratch;
+    const std::string standIn = scratch.file("stand_in.co");
+    ASSERT_TRUE(compileCodeObject(standInKernels(kernelNames(kernels)), deviceArch(), standIn));
+    const auto replaced = registerPayload(handle, stem + ".dat", standIn);
+    ASSERT_EQ(replaced.size(), original.size());
+
+    hipblasLtMatmulHeuristicResult_t replacedResult{};
+    size_t                           replacedWs = 0;
+    ASSERT_TRUE(resolve(handle, p, replaced[position], replacedResult, replacedWs));
+    EXPECT_EQ(hipblaslt_ext::getKernelNameFromAlgo(handle, replacedResult.algo), name);
+
+    std::vector<uint16_t> d;
+    runMatmul(handle, p, replacedResult.algo, replacedWs, d);
+    ASSERT_FALSE(d.empty());
+    EXPECT_FALSE(allEqualK(d)) << "the replacement ran another module's kernel of the same name";
+
+    runAndCheck(handle, p, originalResult.algo, originalWs);
+    runAndCheck(handle, p, shippedResult.algo, shippedWs);
+
+    EXPECT_EQ(hipblasLtDestroy(handle), HIPBLAS_STATUS_SUCCESS);
+}
+
+TEST(LocalKernelRegister, KernelsRunFromTheirOwnCodeObject)
+{
+    EXPECT_EQ(runWorker("LocalKernelRegister.DISABLED_OwnCodeObjectWorker"), 0)
+        << "the worker failed; its output is above";
+}
+
+// One thread keeps running a shipped kernel while another registers bad and
+// good payloads.
+TEST(LocalKernelRegister, DISABLED_RegisterWhileLaunchingWorker)
+{
+    const std::vector<std::string> candidates = candidatePayloads();
+    ASSERT_FALSE(candidates.empty()) << "no payload shard in this build's library";
+
+    int device = 0;
+    ASSERT_EQ(hipGetDevice(&device), hipSuccess);
+    hipblasLtHandle_t handle;
+    ASSERT_EQ(hipblasLtCreate(&handle), HIPBLAS_STATUS_SUCCESS);
+    expectNothingRegistered(handle);
+
+    Problem p;
+    ASSERT_EQ(buildProblem(p), HIPBLAS_STATUS_SUCCESS);
+    auto shipped = topResults(handle, p, 1);
+    ASSERT_EQ(shipped.size(), 1u);
+
+    const std::string dat = candidates[0] + ".dat";
+    ScratchDir        scratch;
+    const std::string wrongArch = scratch.file("wrong_arch.co");
+    const std::string truncated = scratch.file("truncated.co");
+    ASSERT_TRUE(
+        compileCodeObject(standInKernels(kernelNames(shardKernels(dat))), otherArch(), wrongArch));
+    ASSERT_TRUE(writeTruncatedCopy(candidates[0] + ".co", truncated));
+
+    std::atomic<bool> done{false};
+    std::atomic<int>  launches{0};
+    std::thread       launcher([&]() {
+        ASSERT_EQ(hipSetDevice(device), hipSuccess);
+        hipblasLtHandle_t own;
+        ASSERT_EQ(hipblasLtCreate(&own), HIPBLAS_STATUS_SUCCESS);
+        while(!done.load() || launches.load() < 10)
+        {
+            runAndCheck(own, p, shipped[0].algo, shipped[0].workspaceSize);
+            if(::testing::Test::HasFailure())
+                break;
+            ++launches;
+        }
+        EXPECT_EQ(hipblasLtDestroy(own), HIPBLAS_STATUS_SUCCESS);
+    });
+
+    for(int i = 0; i < 20; i++)
+    {
+        int numIndices = -1;
+        EXPECT_EQ(hipblasLtLocalKernelRegister(
+                      handle, dat.c_str(), wrongArch.c_str(), nullptr, 0, &numIndices),
+                  HIPBLAS_STATUS_INVALID_VALUE);
+        EXPECT_EQ(hipblasLtLocalKernelRegister(
+                      handle, dat.c_str(), truncated.c_str(), nullptr, 0, &numIndices),
+                  HIPBLAS_STATUS_INVALID_VALUE);
+    }
+    Registered r = registerUsable(handle, p, candidates);
+    ASSERT_GE(r.index, 0);
+    runAndCheck(handle, p, r.result.algo, r.workspace);
+
+    done.store(true);
+    launcher.join();
+    EXPECT_GE(launches.load(), 10);
+
+    EXPECT_EQ(hipblasLtDestroy(handle), HIPBLAS_STATUS_SUCCESS);
+}
+
+TEST(LocalKernelRegister, RegisterWhileLaunching)
+{
+    EXPECT_EQ(runWorker("LocalKernelRegister.DISABLED_RegisterWhileLaunchingWorker"), 0)
         << "the worker failed; its output is above";
 }
 
