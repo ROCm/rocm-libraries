@@ -177,12 +177,18 @@ def test_invalid_scale_spellings(dtype, field):
     assert not is_valid_spec(spec)[0]
     with pytest.raises(ValueError):
         build_block_scaled_gemm(spec)
+    with pytest.raises(ValueError, match="scale dtype must be e8m0, e4m3, or e5m3"):
+        make_case_inputs(spec, "mixed")
 
 
 def test_per_operand_overrides_preserve_defaults_and_aliases():
     implicit = spec_for(sa=None, sb=None)
     explicit = replace(implicit, scale_dtype_a="e8m0", scale_dtype_b="i8")
     assert implicit.kernel_name() == explicit.kernel_name()
+    for expected, actual in zip(
+        make_case_inputs(implicit, "mixed"), make_case_inputs(explicit, "mixed")
+    ):
+        np.testing.assert_array_equal(actual, expected)
     lower = lambda spec: lower_kernel_to_llvm(
         build_block_scaled_gemm(spec), arch="gfx1250", llvm_flavor="llvm23"
     )
@@ -192,6 +198,10 @@ def test_per_operand_overrides_preserve_defaults_and_aliases():
     )
     assert alias.resolved_scale_dtypes() == ("e4m3", "e4m3")
     assert alias.kernel_name() == spec_for().kernel_name()
+    for expected, actual in zip(
+        make_case_inputs(spec_for(), "mixed"), make_case_inputs(alias, "mixed")
+    ):
+        np.testing.assert_array_equal(actual, expected)
     assert lower(alias) == lower(spec_for())
     assert lower(implicit) != lower(spec_for())
 

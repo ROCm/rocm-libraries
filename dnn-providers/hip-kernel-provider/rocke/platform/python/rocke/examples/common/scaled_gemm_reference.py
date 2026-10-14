@@ -225,6 +225,8 @@ def make_case_inputs(
                     ),
                     127,
                 )
+            if dtype not in ("e4m3", "e5m3"):
+                raise ValueError("scale dtype must be e8m0, e4m3, or e5m3")
             bias = 7 if dtype == "e4m3" else 15
             # Include non-power-of-two scales to distinguish these from E8M0.
             codes = np.array(
