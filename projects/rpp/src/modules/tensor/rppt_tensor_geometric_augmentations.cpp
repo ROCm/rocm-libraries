@@ -1428,6 +1428,42 @@ RppStatus rppt_slice(RppPtr_t srcPtr, RpptGenericDescPtr srcGenericDescPtr, RppP
     if (srcGenericDescPtr->dataType != dstGenericDescPtr->dataType)
         return RPP_ERROR_INVALID_SRC_OR_DST_DATATYPE;
     if (srcGenericDescPtr->layout != dstGenericDescPtr->layout) return RPP_ERROR_LAYOUT_MISMATCH;
+    if (srcGenericDescPtr->numDims != dstGenericDescPtr->numDims) return RPP_ERROR_INVALID_DST_DIMS;
+
+    // slice dispatches on (numDims, layout); numDims here includes the batch dim. Reject any
+    // combination the kernels do not actually implement instead of silently writing nothing.
+    {
+        RpptLayout sliceLayout = srcGenericDescPtr->layout;
+        switch (srcGenericDescPtr->numDims) {
+            case 3:  // (N, H, W) -- no channel axis
+                if ((sliceLayout != RpptLayout::NCHW) && (sliceLayout != RpptLayout::NHWC))
+                    return RPP_ERROR_INVALID_SRC_LAYOUT;
+                break;
+            case 4:  // (N, C, H, W) planar or (N, H, W, C) packed
+                if (sliceLayout == RpptLayout::NCHW) {
+                    Rpp32u c = srcGenericDescPtr->dims[1];
+                    if ((c != 1) && (c != 3)) return RPP_ERROR_INVALID_SRC_CHANNELS;
+                } else if (sliceLayout == RpptLayout::NHWC) {
+                    if (srcGenericDescPtr->dims[3] != 3) return RPP_ERROR_INVALID_SRC_CHANNELS;
+                } else {
+                    return RPP_ERROR_INVALID_SRC_LAYOUT;
+                }
+                break;
+            case 5:  // (N, C, D, H, W) planar or (N, D, H, W, C) packed
+                if (sliceLayout == RpptLayout::NCDHW) {
+                    Rpp32u c = srcGenericDescPtr->dims[1];
+                    if ((c != 1) && (c != 3)) return RPP_ERROR_INVALID_SRC_CHANNELS;
+                } else if (sliceLayout == RpptLayout::NDHWC) {
+                    if (srcGenericDescPtr->dims[4] != 3) return RPP_ERROR_INVALID_SRC_CHANNELS;
+                } else {
+                    return RPP_ERROR_INVALID_SRC_LAYOUT;
+                }
+                break;
+            default:
+                return RPP_ERROR_INVALID_SRC_DIMS;
+        }
+    }
+
     rpp::Handle& handle = rpp::deref(rppHandle);
     [[maybe_unused]] RppBackend handleBackend = handle.GetBackend();
 
