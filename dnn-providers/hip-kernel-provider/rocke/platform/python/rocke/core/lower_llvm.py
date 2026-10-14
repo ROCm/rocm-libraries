@@ -787,6 +787,10 @@ _INTRINSIC_DECLS: Dict[str, str] = {
         "declare i16 @llvm.amdgcn.raw.ptr.buffer.load.i16("
         "ptr addrspace(8) nocapture readonly, i32, i32, i32 immarg)"
     ),
+    "raw.ptr.buffer.load.f16": (
+        "declare half @llvm.amdgcn.raw.ptr.buffer.load.f16("
+        "ptr addrspace(8) nocapture readonly, i32, i32, i32 immarg)"
+    ),
     "raw.ptr.buffer.store.i32": (
         "declare void @llvm.amdgcn.raw.ptr.buffer.store.i32("
         "i32, ptr addrspace(8) nocapture writeonly, i32, i32, i32 immarg)"
@@ -1009,6 +1013,7 @@ _INTRINSIC_DECLS: Dict[str, str] = {
     "s.prefetch.inst.p4": (
         "declare void @llvm.amdgcn.s.prefetch.inst.p4(ptr addrspace(4), i32)"
     ),
+    "mfma.scale.f32.32x32x64.f8f6f4.v8i32.v8i32": "declare <16 x float> @llvm.amdgcn.mfma.scale.f32.32x32x64.f8f6f4.v8i32.v8i32(<8 x i32>, <8 x i32>, <16 x float>, i32 immarg, i32 immarg, i32 immarg, i32, i32 immarg, i32)",
     # gfx1250 data prefetch (llvm23). ``s.prefetch.data`` is overloaded by
     # address space exactly like ``s.prefetch.inst``; see
     # _S_PREFETCH_DATA_PTR_TYPES.
@@ -3802,6 +3807,29 @@ class _Lowerer:
             op, dtype="bf8", out_vec=16, intrinsic="32x32x16.bf8.bf8"
         )
 
+    def _emit_gfx950_scaled_mfma(self, op: Op) -> None:
+        from .arch.mfma_scale import (
+            gfx950_scaled_mfma,
+            scaled_mfma_error,
+            MATRIX_FORMATS,
+            INTRINSIC_KEY,
+        )
+
+        atom = gfx950_scaled_mfma(op.attrs["op_id"])
+        if self._backend.arch.gfx != "gfx950":
+            raise NotImplementedError("scaled MFMA requires gfx950")
+        error = scaled_mfma_error(atom.op_id, op.operands, op.results)
+        if error:
+            raise ValueError(error)
+        a, b, c, sa, sb = op.operands
+        self._need(INTRINSIC_KEY)
+        self._current().emit(
+            f"  {op.result.name} = call <16 x float> @llvm.amdgcn.{INTRINSIC_KEY}("
+            f"<8 x i32> {self._operand(a)}, <8 x i32> {self._operand(b)}, <16 x float> {self._operand(c)}, "
+            f"i32 {MATRIX_FORMATS[atom.a_dtype]}, i32 {MATRIX_FORMATS[atom.b_dtype]}, "
+            f"i32 0, i32 {self._operand(sa)}, i32 0, i32 {self._operand(sb)})"
+        )
+
     def _op_tile_mfma_scale_f32_16x16x128_f8f6f4(self, op: Op) -> None:
         """Lower P15 MX MFMA scaled intrinsic.
 
@@ -5518,6 +5546,19 @@ class _Lowerer:
         )
         self._current().emit(f"  {op.result.name} = bitcast i16 {tmp} to half")
 
+    def _op_tile_buffer_load_f16_d16(self, op: Op) -> None:
+        """D16-form scalar half buffer load: the raw ``raw.ptr.buffer.load.f16``
+        intrinsic returns ``half`` directly (no i16 + bitcast round-trip).
+        Port of the pinned PR9710 ``tile.buffer_load_f16_d16`` lowering.
+        """
+        rsrc, voffset, soffset = op.operands
+        self._need("raw.ptr.buffer.load.f16")
+        self._current().emit(
+            f"  {op.result.name} = call half @llvm.amdgcn.raw.ptr.buffer.load.f16("
+            f"ptr addrspace(8) {self._operand(rsrc)}, "
+            f"i32 {self._operand(voffset)}, i32 {self._operand(soffset)}, i32 0)"
+        )
+
     def _op_tile_buffer_load_vN(self, op: Op) -> None:
         """Dtype-generic vectorised buffer load.
 
@@ -6012,6 +6053,14 @@ class _Lowerer:
             f"  {op.result.name} = extractelement {_llvm_type(v.type)} "
             f"{self._operand(v)}, i32 {i}"
         )
+
+    def _op_vector_undef(self, op: Op) -> None:
+        """Freeze-poison base for a vector fully overwritten by subsequent
+        inserts (never a zero substitute). Port of the pinned PR9710
+        ``vector.undef`` lowering.
+        """
+        dtype = _llvm_type(op.result.type)
+        self._current().emit(f"  {op.result.name} = freeze {dtype} poison")
 
     def _op_vector_splat(self, op: Op) -> None:
         (scalar,) = op.operands
@@ -6702,9 +6751,11 @@ class _Lowerer:
         out.append("}")
         out.append("")
         max_wg = self.kernel.max_workgroup_size
+        # LLVM discards inverted ranges, losing the declared resource limit.
+        min_wg = min(self._backend.arch.wave_size, max_wg)
         attr_parts = [
             '"uniform-work-group-size"="true"',
-            f'"amdgpu-flat-work-group-size"="64,{max_wg}"',
+            f'"amdgpu-flat-work-group-size"="{min_wg},{max_wg}"',
         ]
         scheduler_strategy = codegen_policy_for_kernel(self.kernel).scheduler_strategy
         if scheduler_strategy is not None:

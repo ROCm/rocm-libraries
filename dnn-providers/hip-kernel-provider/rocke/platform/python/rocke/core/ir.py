@@ -2076,6 +2076,19 @@ class IRBuilder:
             result_name_hint="splat",
         ).result
 
+    def undef_vec(self, elem: Type, n: int) -> Value:
+        """Freeze-poison base for a `<n x elem>` vector that will be fully
+        overwritten by subsequent inserts (never a zero substitute). Port of
+        the pinned PR9710 ``vector.undef`` op; lowers to ``freeze <nxtype>
+        poison``.
+        """
+        return self._op(
+            "vector.undef",
+            result_types=[VectorType(elem, n)],
+            attrs={"elem": elem.name, "vec": n},
+            result_name_hint=f"udf{n}",
+        ).result
+
     def vector_select(self, mask: Value, lhs: Value, rhs: Value) -> Value:
         if lhs.type != rhs.type:
             raise ValueError("vector_select lhs/rhs type mismatch")
@@ -2283,7 +2296,11 @@ class IRBuilder:
         op_id = op.op_id if hasattr(op, "op_id") else str(op)
         from .tf32 import tf32_mma_error
 
-        error = tf32_mma_error(op_id, [a, b, c, *extra])
+        from .arch.mfma_scale import scaled_mfma_error
+
+        error = scaled_mfma_error(op_id, [a, b, c, *extra]) or tf32_mma_error(
+            op_id, [a, b, c, *extra]
+        )
         if error:
             raise ValueError(error)
         c_frag_len = (
@@ -2299,7 +2316,7 @@ class IRBuilder:
         c_elem = I32 if is_int_acc else F32
         hint = (
             "mxacc"
-            if _arch._op_id_family().get(op_id) == "wmma_scaled"
+            if _arch._op_id_family().get(op_id) in ("wmma_scaled", "mfma_scaled")
             else _MMA_RESULT_HINT.get(op_id, "acc")
         )
         return self._op(
@@ -2662,17 +2679,16 @@ class IRBuilder:
         a_scale: Value,
         b_scale: Value,
     ) -> Value:
-        """MX-MFMA with in-instruction scales (P15).
+        """Existing gfx950 16x16x128 MFMA with in-instruction scales (P15).
 
-        ``mfma_scale_f32_16x16x128_f8f6f4`` is the gfx950 MX MFMA
-        instruction family. Operands are 16-byte packed mantissa
-        vectors (fp8/fp6/fp4) plus per-warp E8M0 scales applied
-        in-instruction. The scale broadcast inside the instruction is
-        per-output-row (vs per-input-row), which is what fixes the
-        B_MX1 row-aware correctness gap that the post-hoc
-        scale-apply chain has.
+        This fixed-operation wrapper delegates to ``mma``. LLVM lowering
+        uses two ``<8 x i32>`` payloads, a ``<4 x float>`` accumulator and
+        separate i32 scale operands; A/B format selectors are fixed to zero.
+        It lowers to ``llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4``.
 
-        Lowers to ``llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4``.
+        For 32x32x64 with independently selected A/B formats and K32 E8M0
+        scales, resolve a ``mfma_scaled`` catalog atom and call ``mma``
+        with that atom and both scales. See ``reference/mma_metadata.md``.
         """
         return self.mma("mfma_scale_f32_16x16x128_f8f6f4", a, b, c, a_scale, b_scale)
 
@@ -4621,6 +4637,18 @@ class IRBuilder:
             [rsrc, voffset, soffset],
             [F16],
             result_name_hint="bl1",
+        ).result
+
+    def buffer_load_f16_d16(self, rsrc: Value, voffset: Value, soffset: Value) -> Value:
+        """D16-form scalar half buffer load: ``raw_ptr_buffer_load.f16``
+        returns `half` directly (no i16 + bitcast round-trip). Port of the
+        pinned PR9710 ``tile.buffer_load_f16_d16`` op.
+        """
+        return self._op(
+            "tile.buffer_load_f16_d16",
+            [rsrc, voffset, soffset],
+            [F16],
+            result_name_hint="bld16",
         ).result
 
     def buffer_load_bf16(self, rsrc: Value, voffset: Value, soffset: Value) -> Value:
