@@ -73,18 +73,16 @@ C++ tests use GoogleTest 1.12.1 or newer, retaining the repository's older compa
 ## Build and test
 
 The standalone build requires CMake 3.25.2 or newer, a C++20 compiler, and Ninja.
-C++ tests use GoogleTest 1.12.1 or newer. Test builds fetch the pinned version
-when no installed package is available; set `HOSTNUMERICS_ENABLE_FETCH=OFF`
-to require an existing package. GoogleTest is not installed or exported with
-HostNumerics. The Python module also needs Python 3.10 or newer with development headers and
-nanobind. From the repository root, the following creates a virtual environment
-and build directory outside the source tree:
+The Python module also needs Python 3.10 or newer with development headers and
+nanobind. The Shape tests additionally require NumPy. From the repository root,
+the following creates a virtual environment and build directory outside the
+source tree:
 
 ```shell
 hostnumerics_venv="$PWD/../venvs/hostnumerics"
 hostnumerics_build="$PWD/../builds/hostnumerics"
 python3 -m venv "$hostnumerics_venv"
-"$hostnumerics_venv/bin/python" -m pip install nanobind==3.0.1
+"$hostnumerics_venv/bin/python" -m pip install nanobind==3.0.1 numpy
 
 cmake -S shared/hostnumerics -B "$hostnumerics_build" -G Ninja \
   -DCMAKE_BUILD_TYPE=Release \
