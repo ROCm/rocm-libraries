@@ -218,6 +218,13 @@ reaches the same pinned string-versus-integer `TypeError` before it can affect a
 name. [`AIHPBLAS-4297`](https://amd-hub.atlassian.net/browse/AIHPBLAS-4297)
 tracks this pinned defect.
 
+**Superseded split-GSU disposition (Naming).**
+**ADR:** [`adr/0034-fix-split-gsu-naming.md`](adr/0034-fix-split-gsu-naming.md).
+The two mutants above are no longer accepted equivalents: the naming path now
+emits `GSUM` for split and automatic GSU, so changes to the masked value are
+observable. Reevaluate their mutation results against the new regression test;
+the M5 counts above describe the historical run.
+
 The former WGMXCC and unreachable-abbreviation equivalents were removed as
 redundant/dead source instead of being fenced, unlike M2's documented pragmas.
 No new `# pragma: no mutate` fences are accepted in this round.
