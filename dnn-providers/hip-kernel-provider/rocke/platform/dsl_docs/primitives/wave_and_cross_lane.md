@@ -87,7 +87,7 @@ Notes:
 b.warp_shuffle_xor(v, lane_xor)
 ```
 
-Convenience wrapper: lane `l` gets `v` from lane `l ^ lane_xor`. Works for f32 and i32 directly; bitcast first for half / bf16. Internally:
+Convenience wrapper: lane `l` gets `v` from lane `l ^ lane_xor`. Works for f32 and i32 directly; bitcast first for half / bf16. An f64 `v` is split into two i32 halves, each shuffled separately, and reassembled. Internally:
 
 ```text
 addr = (lane_id() ^ lane_xor) << 2

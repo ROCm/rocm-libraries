@@ -28,7 +28,17 @@
 
 namespace rocsparse
 {
-    template <uint32_t BLOCKSIZE, bool SLEEP, typename I, typename J, typename T>
+    template <uint32_t BLOCKSIZE,
+              bool     SLEEP,
+              typename I,
+              typename J,
+              typename T
+
+#ifdef ROCSPARSE_WITH_TRSM_REFACTORING
+              ,
+              bool OP_A_CONJUGATE = false
+#endif
+              >
     ROCSPARSE_DEVICE_ILF void csrsm_device(rocsparse_operation transB,
                                            J                   m,
                                            J                   nrhs,
@@ -99,8 +109,17 @@ namespace rocsparse
                 scsr_col_ind[hipThreadIdx_x] = (hipThreadIdx_x < row_end - j)
                                                    ? csr_col_ind[hipThreadIdx_x + j] - idx_base
                                                    : -1;
-                scsr_val[hipThreadIdx_x]
-                    = (hipThreadIdx_x < row_end - j) ? csr_val[hipThreadIdx_x + j] : -1;
+#ifdef ROCSPARSE_WITH_TRSM_REFACTORING
+                scsr_val[hipThreadIdx_x] = (hipThreadIdx_x < row_end - j)
+                                               ? (!OP_A_CONJUGATE)
+                                                     ? csr_val[hipThreadIdx_x + j]
+                                                     : rocsparse::conj(csr_val[hipThreadIdx_x + j])
+                                               : static_cast<T>(0);
+#else
+                scsr_val[hipThreadIdx_x] = (hipThreadIdx_x < row_end - j)
+                                               ? csr_val[hipThreadIdx_x + j]
+                                               : static_cast<T>(0);
+#endif
 
                 // Wait for preload to finish
                 __syncthreads();
@@ -198,14 +217,15 @@ namespace rocsparse
             // Wait for spin looping thread to finish as the whole block depends on this row
             __syncthreads();
 
-            // Make sure updated B is visible globally
-            __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "agent");
+            // Read the results of the dependencies only after their done flags
+            rocsparse::acquire_done_rows();
 
             // Index into X
             const int64_t idx_X = local_col * ldb + col_B;
 
             // Local sum computation for each lane
-            local_sum = (col_B < nrhs) ? rocsparse::fma(-local_val, B[idx_X], local_sum)
+            local_sum = (col_B < nrhs) ? rocsparse::fma(
+                            -local_val, rocsparse::load_done_row_data(&B[idx_X]), local_sum)
                                        : static_cast<T>(0);
         }
 
@@ -219,20 +239,23 @@ namespace rocsparse
         // Store result in B
         if(col_B < nrhs)
         {
-            B[idx_B] = local_sum;
+            rocsparse::store_done_row_data(&B[idx_B], local_sum);
         }
 
-        // Make sure B is written to global memory before setting row is done flag
-        __threadfence();
+        // Complete the stores of the results before the done flag is set
+        rocsparse::release_done_row_data();
 
-        // Wait for all threads to finish the threadfence before we mark the row "done"
+        // Wait for all wavefronts to complete their stores before we mark the row "done"
         __syncthreads();
 
         if(hipThreadIdx_x == 0)
         {
-            // Write the "row is done" flag
+            // Write the "row is done" flag. The stores of all wavefronts completed before the
+            // barrier, so a relaxed store suffices; set_done_flag only covers the calling
+            // wavefront.
             rocsparse::atomic_store(
                 &done_array[row + id], 1, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
         }
     }
+
 }
