@@ -62,6 +62,18 @@ analyze_hsaco, analyze_llvm_ir, compare_variant_reports
 parse_isa, parse_resources
 ```
 
+## Keeping arithmetic operations separate
+
+`IRBuilder.optimization_barrier(value)` returns the same scalar value and type
+and prevents the compiler from combining operations across that value. Use
+the returned value when an intermediate result must round before the next
+operation. The C API is `rocke_b_optimization_barrier(builder, value)`.
+The supported compilation path is AMDGPU LLVM IR through COMGR; native
+HIP-source lowering is unsupported.
+
+See [the value-barrier guide](../primitives/intrinsics_and_primitives.md#keeping-operations-separate)
+for examples, supported types, and the difference from `sched_barrier`.
+
 ## `from rocke.helpers import ...` (extras not in top-level)
 
 ```text
@@ -340,6 +352,11 @@ b.clamp_f32(v, lo, hi) # fmin(hi, fmax(lo, v)) -- folds to v_med3_f32
 # and FMHA-backward dQ accumulate)
 b.global_atomic_add(ptr, idx, val, *, ordering="monotonic")
 b.lds_atomic_add(smem, [idx], val, *, ordering="monotonic")
+
+# : cross-workgroup synchronisation (stream-K fixup)
+b.fence(*, scope="agent", ordering="acq_rel") # memref.fence
+b.global_flag_store(ptr, idx, val_i32, *, scope="agent", ordering="release")
+b.global_flag_wait_eq(ptr, idx, expect_i32, *, scope="agent") # acquire spin
 
 # : bitwise integer helpers (also used by i4 unpack)
 b.xor(a, b) # arith.xor; same type on both operands
