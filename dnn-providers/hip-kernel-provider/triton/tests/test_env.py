@@ -1,7 +1,9 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Environment scrub/refuse, TRITONGEN-ARCH, and objdump resolution. Needs no triton."""
+"""Environment allowlist and refusals, TRITONGEN-ARCH, and objdump resolution. Needs
+no triton."""
 
+import json
 import os
 import sys
 import tempfile
@@ -11,14 +13,10 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from generators import _contract as C  # noqa: E402
-from generators import _triton_env as env  # noqa: E402
-from generators._codeobject import (  # noqa: E402
-    GeneratorError,
-    objdump_path,
-    target_arch,
-    verify_arch,
-)
+from tritongen import _family as F  # noqa: E402
+from tritongen import _triton_env as env  # noqa: E402
+from tritongen._codeobject import objdump_path, target_arch, verify_arch  # noqa: E402
+from tritongen._family import GeneratorError  # noqa: E402
 
 
 def prepare_under(environ: dict) -> dict:
@@ -30,41 +28,50 @@ def prepare_under(environ: dict) -> dict:
         return dict(os.environ)
 
 
-class EnvScrubTest(unittest.TestCase):
-    def test_refused_knobs_raise_env_error(self):
-        for name in env.REFUSED_KNOBS:
-            with self.assertRaises(GeneratorError) as raised:
-                prepare_under({name: "1"})
-            self.assertTrue(str(raised.exception).startswith(C.ERR_ENV))
+class EnvAllowlistTest(unittest.TestCase):
+    def test_refused_variables_raise_env_error(self):
+        for name in ("TRITON_INTERPRET", "TRITON_KERNEL_OVERRIDE"):
+            with self.subTest(name=name):
+                with self.assertRaises(GeneratorError) as raised:
+                    prepare_under({name: "1", "HOME": "/x"})
+                self.assertTrue(str(raised.exception).startswith(F.ERR_ENV))
+                self.assertIn(name, str(raised.exception))
 
-    def test_overriding_knobs_are_cleared_and_others_kept(self):
+    def test_only_allowlisted_variables_survive(self):
         after = prepare_under(
             {
-                "TRITON_OVERRIDE_ARCH": "gfx900",
-                "TRITON_ALWAYS_COMPILE": "1",
-                "TRITON_HIP_USE_BLOCK_PINGPONG": "1",
-                "AMDGCN_USE_BUFFER_OPS": "1",
-                "TRITON_ENABLE_FP_FUSION": "0",
+                "DISABLE_LLVM_OPT": "1",
                 "TRITON_F32_DEFAULT": "ieee",
+                "LLVM_PASS_PLUGIN_PATH": "/nonexistent",
+                "TRITON_HIP_USE_BLOCK_PINGPONG": "1",
+                "TRITON_DISABLE_LINE_INFO": "0",
                 "HOME": "/x",
+                "PATH": "/bin",
+                "ROCM_PATH": "/opt/rocm",
             }
         )
-        for name in (
-            "TRITON_OVERRIDE_ARCH",
-            "TRITON_ALWAYS_COMPILE",
-            "TRITON_HIP_USE_BLOCK_PINGPONG",
-            "AMDGCN_USE_BUFFER_OPS",
-            "TRITON_ENABLE_FP_FUSION",
-        ):
-            self.assertNotIn(name, after)
-        self.assertEqual(after["TRITON_F32_DEFAULT"], "ieee")
-        self.assertEqual(after["HOME"], "/x")
-        self.assertEqual(after["TRITON_DISABLE_LINE_INFO"], "1")
+        self.assertEqual(
+            after,
+            {
+                "HOME": "/x",
+                "PATH": "/bin",
+                "ROCM_PATH": "/opt/rocm",
+                "TRITON_DISABLE_LINE_INFO": "1",
+            },
+        )
 
-    def test_cleared_record_covers_the_predicates(self):
-        for entry in env.CLEARED_RECORD:
-            sample = entry.replace("*", "X")
-            self.assertTrue(env._is_cleared(sample), entry)
+    def test_manifest_record_carries_no_host_values(self):
+        host = {
+            "HOME": "/home/someone",
+            "PATH": "/opt/odd/bin",
+            "ROCM_PATH": "/opt/rocm-x",
+        }
+        with mock.patch.dict(os.environ, host, clear=True):
+            record = json.dumps(env.env_record())
+        for value in host.values():
+            self.assertNotIn(value, record)
+        for name in host:
+            self.assertIn(name, record)
 
 
 class ArchCheckTest(unittest.TestCase):
@@ -78,7 +85,7 @@ class ArchCheckTest(unittest.TestCase):
         verify_arch(described, "gfx942", "t")
         with self.assertRaises(GeneratorError) as raised:
             verify_arch(described, "gfx950", "t")
-        self.assertTrue(str(raised.exception).startswith(C.ERR_ARCH))
+        self.assertTrue(str(raised.exception).startswith(F.ERR_ARCH))
 
 
 class ObjdumpResolutionTest(unittest.TestCase):
@@ -101,7 +108,7 @@ class ObjdumpResolutionTest(unittest.TestCase):
                 with mock.patch.object(Path, "is_file", return_value=False):
                     with self.assertRaises(GeneratorError) as raised:
                         objdump_path()
-                    self.assertTrue(str(raised.exception).startswith(C.ERR_ENV))
+                    self.assertTrue(str(raised.exception).startswith(F.ERR_ENV))
                     tool = tmp + "/llvm-objdump"
                     Path(tool).write_text("#!/bin/sh\n")
                     os.chmod(tool, 0o755)

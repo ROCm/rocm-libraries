@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import atexit
 import dataclasses
+import hashlib
 import importlib.util
 import os
 import re
@@ -20,56 +21,25 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import _contract as C
-from ._codeobject import GeneratorError
+from . import _family as F
+from ._family import GeneratorError
 
-GENERATORS_DIR = Path(__file__).resolve().parent
-TRITON_DIR = GENERATORS_DIR.parent
-HKP_DIR = TRITON_DIR.parent
-REQUIREMENTS = TRITON_DIR / "requirements.txt"
-KERNEL_SOURCE = TRITON_DIR / C.KERNEL_SOURCE_FILE
-CONTENT_DIR = (
-    HKP_DIR
-    / "src"
-    / "engines"
-    / "kernel_ingestor_engine"
-    / "descriptors"
-    / C.FAMILY_FOLDER
-)
+# --- Environment -------------------------------------------------------------------
 
-# --- Environment knobs ------------------------------------------------------------------
-
-REFUSED_KNOBS = ("TRITON_INTERPRET", "TRITON_KERNEL_OVERRIDE")
-CLEARED_EXACT = ("TRITON_OVERRIDE_ARCH", "TRITON_ALWAYS_COMPILE")
-CLEARED_PREFIXES = ("AMDGCN_", "TRITON_HIP_")
-CLEARED_SUFFIXES = ("_FP_FUSION",)
-# Recorded in the manifest as a fixed list derived from the predicates above (not
-# the names that happened to be set), so the manifest does not depend on the
-# invoking environment.
-CLEARED_RECORD = tuple(
-    sorted(
-        (
-            *CLEARED_EXACT,
-            *(f"{prefix}*" for prefix in CLEARED_PREFIXES),
-            *(f"*{suffix}" for suffix in CLEARED_SUFFIXES),
-        )
-    )
-)
+# Refused outright: either one makes triton.compile return something other than a
+# compile of the kernel source.
+REFUSED_ENV = ("TRITON_INTERPRET", "TRITON_KERNEL_OVERRIDE")
+# Every other variable is removed before triton is imported; only these survive.
+ALLOWED_ENV = ("HOME", "PATH", "ROCM_PATH")
+# Set by the generator itself (TRITON_CACHE_DIR is a fresh directory per compile).
+FIXED_ENV = {"TRITON_DISABLE_LINE_INFO": "1"}
 
 _prepared = False
 _cache_dirs: list[str] = []
 
 
 def _env_error(message: str) -> GeneratorError:
-    return GeneratorError(f"{C.ERR_ENV}: {message}")
-
-
-def _is_cleared(name: str) -> bool:
-    return (
-        name in CLEARED_EXACT
-        or name.startswith(CLEARED_PREFIXES)
-        or name.endswith(CLEARED_SUFFIXES)
-    )
+    return GeneratorError(f"{F.ERR_ENV}: {message}")
 
 
 def _remove_cache_dirs() -> None:
@@ -93,44 +63,47 @@ def new_cache_dir() -> str:
 
 
 def prepare() -> None:
-    """Apply the environment scrub to this process. Idempotent; must precede ``import triton``."""
+    """Reduce this process's environment to the allowlist plus the fixed values.
+    Idempotent; must precede ``import triton``."""
     global _prepared
     if _prepared:
         return
-    for name in REFUSED_KNOBS:
+    for name in REFUSED_ENV:
         if os.environ.get(name):
             raise _env_error(f"{name} is set; refusing to generate under it")
-    for name in [n for n in os.environ if _is_cleared(n)]:
+    for name in [n for n in os.environ if n not in ALLOWED_ENV]:
         del os.environ[name]
-    os.environ["TRITON_DISABLE_LINE_INFO"] = "1"
+    os.environ.update(FIXED_ENV)
     _prepared = True
 
 
 def env_record() -> dict:
-    """The environment-knob snapshot for the manifest."""
-    f32 = os.environ.get("TRITON_F32_DEFAULT")
+    """The compile environment for the manifest: the allowlisted names and the fixed
+    values, never the host's values."""
     return {
-        "TRITON_DISABLE_LINE_INFO": os.environ.get("TRITON_DISABLE_LINE_INFO"),
-        "TRITON_CACHE_DIR": "<fresh per run>",
-        "TRITON_F32_DEFAULT": "unset" if f32 is None else f32,
-        "cleared": list(CLEARED_RECORD),
+        "allowed": list(ALLOWED_ENV),
+        **FIXED_ENV,
+        "TRITON_CACHE_DIR": "<fresh per compile>",
     }
 
 
 def wheel_sha256() -> str:
     """The wheel hash from the ``triton==`` line of ``requirements.txt``."""
-    for line in REQUIREMENTS.read_text(encoding="utf-8").splitlines():
+    for line in F.REQUIREMENTS.read_text(encoding="utf-8").splitlines():
         if line.startswith("triton=="):
             match = re.search(r"--hash=sha256:([0-9a-f]{64})", line)
             if match is None:
-                raise _env_error(f"{REQUIREMENTS}: triton line carries no sha256 hash")
-            sha = match.group(1)
-            if sha != C.TRITON_WHEEL_SHA256:
                 raise _env_error(
-                    f"{REQUIREMENTS} hash {sha} differs from _contract {C.TRITON_WHEEL_SHA256}"
+                    f"{F.REQUIREMENTS}: triton line carries no sha256 hash"
+                )
+            sha = match.group(1)
+            if sha != F.TRITON_WHEEL_SHA256:
+                raise _env_error(
+                    f"{F.REQUIREMENTS} hash {sha} differs from the pinned "
+                    f"{F.TRITON_WHEEL_SHA256}"
                 )
             return sha
-    raise _env_error(f"{REQUIREMENTS}: no triton== line")
+    raise _env_error(f"{F.REQUIREMENTS}: no triton== line")
 
 
 # --- triton import + guards ------------------------------------------------------
@@ -152,9 +125,9 @@ def import_triton():
             "(run with the generator venv)"
         ) from exc
 
-    if triton.__version__ != C.TRITON_VERSION:
+    if triton.__version__ != F.TRITON_VERSION:
         raise _env_error(
-            f"triton {triton.__version__} imported, expected {C.TRITON_VERSION}"
+            f"triton {triton.__version__} imported, expected {F.TRITON_VERSION}"
         )
     if not callable(getattr(triton, "compile", None)):
         raise _env_error("triton.compile is missing")
@@ -173,15 +146,25 @@ def import_triton():
     return triton
 
 
-def load_kernel():
-    """The ``@triton.jit`` RMSNorm kernel, loaded from its source file."""
+def libtriton_sha256() -> str:
+    """SHA256 of the imported wheel's ``triton/_C/libtriton.so`` (measured)."""
+    triton = import_triton()
+    path = Path(triton.__file__).resolve().parent / "_C" / "libtriton.so"
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError as exc:
+        raise _env_error(f"cannot read {path}: {exc}") from exc
+
+
+def load_kernel(op):
+    """The ``@triton.jit`` kernel of op contract ``op``, loaded from its source file."""
     import_triton()
     spec = importlib.util.spec_from_file_location(
-        "tritongen_rmsnorm_src", KERNEL_SOURCE
+        f"tritongen_{op.OP}_src", F.TRITON_DIR / op.KERNEL_SOURCE_FILE
     )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    return getattr(module, C.KERNEL_SYMBOL)
+    return getattr(module, op.KERNEL_SYMBOL)
 
 
 # --- Compile ---------------------------------------------------------------------
@@ -191,7 +174,7 @@ def load_kernel():
 class Compiled:
     hsaco: bytes
     name: str
-    shared: int
+    dynamic_lds_bytes: int
     num_warps: int
     warp_size: int
     global_scratch_size: int
@@ -204,7 +187,7 @@ def assert_options_match_wheel_defaults() -> None:
     from triton.backends.amd.compiler import HIPOptions  # noqa: PLC0415
 
     defaults = {f.name: f.default for f in dataclasses.fields(HIPOptions)}
-    for key, value in C.HIP_OPTIONS_FIXED.items():
+    for key, value in F.HIP_OPTIONS_FIXED.items():
         if key not in defaults or defaults[key] != value:
             raise _env_error(
                 f"HIPOptions.{key} default is {defaults.get(key)!r}, pinned {value!r}"
@@ -229,19 +212,19 @@ def compile_instance(
         source = ASTSource(fn, signature=signature, constexprs=constexprs, attrs=attrs)
         compiled = triton.compile(
             source,
-            target=GPUTarget(C.GPU_TARGET_BACKEND, arch, C.WARP_SIZE),
-            options=C.hip_options(num_warps),
+            target=GPUTarget(F.GPU_TARGET_BACKEND, arch, F.WARP_SIZE),
+            options=F.hip_options(num_warps),
         )
     except Exception as exc:
         raise GeneratorError(
-            f"{C.ERR_COMPILE}: {arch}: triton.compile failed: {exc}"
+            f"{F.ERR_COMPILE}: {arch}: triton.compile failed: {exc}"
         ) from exc
 
     fields = compiled.metadata._asdict()
     return Compiled(
         hsaco=compiled.asm["hsaco"],
         name=fields["name"],
-        shared=fields["shared"],
+        dynamic_lds_bytes=fields["shared"],
         num_warps=fields["num_warps"],
         warp_size=fields["warp_size"],
         global_scratch_size=fields["global_scratch_size"],

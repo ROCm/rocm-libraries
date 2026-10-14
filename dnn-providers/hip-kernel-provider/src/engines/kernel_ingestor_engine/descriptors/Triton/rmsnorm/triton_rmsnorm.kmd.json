@@ -18,6 +18,10 @@
     {
       "name": "shared_mem_bytes",
       "type": "int"
+    },
+    {
+      "name": "alignment",
+      "type": "int"
     }
   ]
 }

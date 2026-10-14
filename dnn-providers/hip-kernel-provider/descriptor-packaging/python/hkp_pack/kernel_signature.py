@@ -118,8 +118,9 @@ def amdgcn_object(data, where):
     return inner
 
 
-def _metadata_document(elf, where):
-    """The msgpack-decoded NT_AMDGPU_METADATA note, or raise."""
+def metadata_document(elf, where):
+    """The msgpack-decoded NT_AMDGPU_METADATA note of an amdgcn ELF (see
+    `amdgcn_object`), every argument included, or raise."""
     unpacker = _require_msgpack(where)
 
     if elf[4] != _ELFCLASS64 or elf[5] != _ELFDATA2LSB:
@@ -156,6 +157,10 @@ def _metadata_document(elf, where):
     )
 
 
+# The same function under its private name, which other generators call.
+_metadata_document = metadata_document
+
+
 def kernel_signature(code_object, symbol, where):
     """The marshalled argument list of `symbol` within `code_object`.
 
@@ -166,7 +171,7 @@ def kernel_signature(code_object, symbol, where):
     An empty list is a legitimate answer for a kernel that takes no arguments
     and is distinct from a missing signature, which raises.
     """
-    document = _metadata_document(amdgcn_object(code_object, where), where)
+    document = metadata_document(amdgcn_object(code_object, where), where)
 
     kernels = document.get("amdhsa.kernels")
     if not kernels:

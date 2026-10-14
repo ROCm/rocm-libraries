@@ -10,12 +10,9 @@ from pathlib import Path
 TRITON_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(TRITON_DIR))
 
-from generators import _contract as C  # noqa: E402
-from generators._codeobject import (  # noqa: E402
-    GeneratorError,
-    check_erratum_text,
-    isa_counts,
-)
+from tritongen import _family as F  # noqa: E402
+from tritongen._codeobject import check_erratum_text, isa_counts  # noqa: E402
+from tritongen._family import GeneratorError  # noqa: E402
 
 
 class IsaTextCheckerTest(unittest.TestCase):
@@ -23,7 +20,7 @@ class IsaTextCheckerTest(unittest.TestCase):
         text = "\tv_mfma_f32_16x16x32_bf16 v[0:3], v[4:7], v[8:11], 0\n\tv_pk_fma_f32 v[0:1], v[2:3], v[4:5], v[6:7]\n"
         with self.assertRaises(GeneratorError) as raised:
             check_erratum_text(text, "text")
-        self.assertTrue(str(raised.exception).startswith(C.ERR_ERRATUM))
+        self.assertTrue(str(raised.exception).startswith(F.ERR_ERRATUM))
 
     def test_each_alone_passes(self):
         check_erratum_text("\tv_pk_fma_f32 v[0:1], v[2:3], v[4:5], v[6:7]\n", "text")

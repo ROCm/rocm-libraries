@@ -22,6 +22,7 @@ on the target arch is the only check; no in-tree load test covers hsaco.
 """
 
 from .errors import HkpPackError
+from .kernel_signature import metadata_document
 from .pipeline import ArchResult, run_pipeline
 
-__all__ = ["HkpPackError", "ArchResult", "run_pipeline"]
+__all__ = ["HkpPackError", "ArchResult", "metadata_document", "run_pipeline"]

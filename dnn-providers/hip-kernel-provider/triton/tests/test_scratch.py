@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 """Non-zero global/profile scratch is rejected, naming the instance and both sizes.
-The sizes are injected into otherwise real metadata."""
+The sizes are injected into a committed object's otherwise real metadata."""
 
 import dataclasses
 import sys
@@ -10,35 +10,30 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from generators import _contract as C  # noqa: E402
-from generators import _triton_env as env  # noqa: E402
-from generators import gen_rmsnorm  # noqa: E402
-from generators._codeobject import GeneratorError, check_scratch  # noqa: E402
-
-INSTANCE = C.instances()[0]
+from tests.test_generator_contract import committed_compiled  # noqa: E402
+from tritongen import _family as F  # noqa: E402
+from tritongen import gen  # noqa: E402
+from tritongen._family import GeneratorError  # noqa: E402
+from tritongen.ops import OPS  # noqa: E402
 
 
 class ScratchRejectionTest(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        env.prepare()
-        cls.compiled = gen_rmsnorm.compile_rmsnorm(
-            env.load_kernel(), "gfx942", INSTANCE
-        )
-
     def assert_scratch_rejected(self, global_size, profile_size):
-        injected = dataclasses.replace(
-            self.compiled,
-            global_scratch_size=global_size,
-            profile_scratch_size=profile_size,
-        )
-        with self.assertRaises(GeneratorError) as raised:
-            gen_rmsnorm.verify_compiled(injected, INSTANCE, "gfx942")
-        message = str(raised.exception)
-        self.assertTrue(message.startswith(C.ERR_SCRATCH), message)
-        self.assertIn(INSTANCE.name, message)
-        self.assertIn(f"global_scratch_size={global_size}", message)
-        self.assertIn(f"profile_scratch_size={profile_size}", message)
+        for op in OPS.values():
+            arch, instance = op.ARCHES[0], op.instances()[0]
+            with self.subTest(op=op.OP):
+                injected = dataclasses.replace(
+                    committed_compiled(op, arch, instance),
+                    global_scratch_size=global_size,
+                    profile_scratch_size=profile_size,
+                )
+                with self.assertRaises(GeneratorError) as raised:
+                    gen.verify_compiled(op, injected, instance, arch)
+                message = str(raised.exception)
+                self.assertTrue(message.startswith(F.ERR_SCRATCH), message)
+                self.assertIn(instance.name, message)
+                self.assertIn(f"global_scratch_size={global_size}", message)
+                self.assertIn(f"profile_scratch_size={profile_size}", message)
 
     def test_global_scratch_rejected(self):
         self.assert_scratch_rejected(128, 0)
@@ -48,13 +43,6 @@ class ScratchRejectionTest(unittest.TestCase):
 
     def test_both_rejected(self):
         self.assert_scratch_rejected(128, 64)
-
-    def test_zero_scratch_accepted(self):
-        check_scratch(INSTANCE.name, 0, 0)
-        self.assertEqual(
-            (self.compiled.global_scratch_size, self.compiled.profile_scratch_size),
-            (0, 0),
-        )
 
 
 if __name__ == "__main__":

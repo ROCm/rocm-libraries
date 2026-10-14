@@ -14,7 +14,8 @@
     "dtype": "f16",
     "block_n": 8192,
     "block_threads": 512,
-    "shared_mem_bytes": 16384
+    "shared_mem_bytes": 16384,
+    "alignment": 16
   },
   "priority": 100,
   "provenance": {
@@ -29,7 +30,8 @@
             "dtype",
             "block_n",
             "block_threads",
-            "shared_mem_bytes"
+            "shared_mem_bytes",
+            "alignment"
           ],
           "bindings": {},
           "vocabulary": {}

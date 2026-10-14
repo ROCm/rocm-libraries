@@ -2,6 +2,7 @@
   "version": "1.0",
   "id": "67e77f6b-eb73-50e0-8173-ea26937e6c68",
   "name": "hipkernel:TritonRmsNorm",
+  "sdk_version": "1.2.0",
   "graph_match": {
     "native": "hipkernel.triton_rmsnorm.graph_match"
   },

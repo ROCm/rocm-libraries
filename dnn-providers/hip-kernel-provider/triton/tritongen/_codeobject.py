@@ -4,11 +4,11 @@
 
 """Read and verify a compiled code object.
 
-Each object is checked against the contract (arch, kernarg tuple, scratch, erratum ISA
-pattern) before it is written. Metadata is read with ``hkp_pack.kernel_signature``, the
-packer's own parser, which needs ``msgpack``. Every generator failure is reported
-with a ``TRITONGEN-*`` code (listed in README.md); the checks here raise
-``GeneratorError``.
+Each object is checked against its op contract (arch, derived kernarg ABI, scratch,
+erratum ISA pattern) before it is written, and again when descriptors are derived from
+it. Metadata is read with ``hkp_pack``'s public ``metadata_document``, the packer's own
+parser, which needs ``msgpack``. Every generator failure is reported with a
+``TRITONGEN-*`` code (listed in README.md); the checks here raise ``GeneratorError``.
 """
 
 from __future__ import annotations
@@ -22,10 +22,11 @@ import sys
 import tempfile
 from pathlib import Path
 
-from . import _contract as C
+from . import _family as F
+from ._family import Abi, GeneratorError
 
-HKP_DIR = Path(__file__).resolve().parents[2]
-PACKAGING_DIR = HKP_DIR / "descriptor-packaging" / "python"
+PACKAGING_DIR = F.HKP_DIR / "descriptor-packaging" / "python"
+HIDDEN_KIND_PREFIX = "hidden_"
 
 
 def objdump_path() -> str:
@@ -41,20 +42,16 @@ def objdump_path() -> str:
     found = shutil.which("llvm-objdump")
     if found is None:
         raise GeneratorError(
-            f"{C.ERR_ENV}: llvm-objdump not found in "
+            f"{F.ERR_ENV}: llvm-objdump not found in "
             f"{', '.join(map(str, candidates))} or on PATH"
         )
     return found
 
 
-class GeneratorError(RuntimeError):
-    """A generator failure; the message starts with its ``TRITONGEN-*`` code."""
-
-
 def hkp_pack_module():
     """Import ``hkp_pack.kernel_signature`` from the sibling packaging tree."""
     if not (PACKAGING_DIR / "hkp_pack").is_dir():
-        raise GeneratorError(f"{C.ERR_ENV}: hkp_pack not found under {PACKAGING_DIR}")
+        raise GeneratorError(f"{F.ERR_ENV}: hkp_pack not found under {PACKAGING_DIR}")
     if str(PACKAGING_DIR) not in sys.path:
         sys.path.insert(0, str(PACKAGING_DIR))
     from hkp_pack import kernel_signature as module  # noqa: PLC0415
@@ -65,7 +62,7 @@ def hkp_pack_module():
 def _pack_error(exc: Exception, where: str) -> GeneratorError:
     """An ``HkpPackError`` from reading an object: a missing ``msgpack`` is the
     environment's fault, anything else is the object's."""
-    code = C.ERR_ENV if isinstance(exc.__cause__, ImportError) else C.ERR_ABI
+    code = F.ERR_ENV if isinstance(exc.__cause__, ImportError) else F.ERR_ABI
     return GeneratorError(f"{code}: {where}: {exc}")
 
 
@@ -79,13 +76,13 @@ def _amdgcn_elf(hkp, blob: bytes, where: str) -> bytes:
 def describe(blob: bytes, where: str, symbol: str | None = None) -> dict:
     """The AMDGPU metadata facts we verify and record, for one code object.
 
-    ``signature`` lists the explicit kernargs only (``hidden_*`` arguments are
-    dropped, as the packer drops them).
+    ``signature`` lists the explicit kernargs only; ``hidden_kinds`` lists the
+    ``.value_kind`` of every ``hidden_*`` argument the object declares.
     """
     hkp = hkp_pack_module()
     elf = _amdgcn_elf(hkp, blob, where)
     try:
-        document = hkp._metadata_document(elf, where)
+        document = hkp.metadata_document(elf, where)
     except hkp.HkpPackError as exc:
         raise _pack_error(exc, where) from exc
 
@@ -95,22 +92,21 @@ def describe(blob: bytes, where: str, symbol: str | None = None) -> dict:
         if len(named) != 1:
             names = ", ".join(str(k.get(".name")) for k in kernels)
             raise GeneratorError(
-                f"{C.ERR_ABI}: {where}: no single kernel {symbol!r} in [{names}]"
+                f"{F.ERR_ABI}: {where}: no single kernel {symbol!r} in [{names}]"
             )
         kernels = named
     if len(kernels) != 1:
         names = ", ".join(str(k.get(".name")) for k in kernels)
         raise GeneratorError(
-            f"{C.ERR_ABI}: {where}: expected exactly one kernel in the object, found "
+            f"{F.ERR_ABI}: {where}: expected exactly one kernel in the object, found "
             f"{len(kernels)} [{names}]"
         )
     kernel = kernels[0]
 
-    args = [
-        arg
-        for arg in (kernel.get(".args") or [])
-        if not str(arg.get(".value_kind", "")).startswith(hkp._HIDDEN_KIND_PREFIX)
-    ]
+    args, hidden = [], []
+    for arg in kernel.get(".args") or []:
+        is_hidden = str(arg.get(".value_kind", "")).startswith(HIDDEN_KIND_PREFIX)
+        (hidden if is_hidden else args).append(arg)
     return {
         "symbol": kernel.get(".name"),
         "kernarg_segment_size": kernel.get(".kernarg_segment_size"),
@@ -119,6 +115,7 @@ def describe(blob: bytes, where: str, symbol: str | None = None) -> dict:
         "signature": tuple(
             (arg[".value_kind"], arg[".size"], arg[".offset"]) for arg in args
         ),
+        "hidden_kinds": tuple(arg[".value_kind"] for arg in hidden),
     }
 
 
@@ -132,19 +129,19 @@ def target_arch(targets, where: str) -> str:
     if isinstance(targets, (list, tuple)):
         if len(targets) != 1:
             raise GeneratorError(
-                f"{C.ERR_ARCH}: {where}: expected one target, got {targets!r}"
+                f"{F.ERR_ARCH}: {where}: expected one target, got {targets!r}"
             )
         target = targets[0]
     else:
         target = targets
     if not isinstance(target, str):
         raise GeneratorError(
-            f"{C.ERR_ARCH}: {where}: unreadable amdhsa.target {target!r}"
+            f"{F.ERR_ARCH}: {where}: unreadable amdhsa.target {target!r}"
         )
     match = _TARGET_ARCH.search(target.split(":", 1)[0])
     if match is None:
         raise GeneratorError(
-            f"{C.ERR_ARCH}: {where}: amdhsa.target {target!r} does not end in a gfx name"
+            f"{F.ERR_ARCH}: {where}: amdhsa.target {target!r} does not end in a gfx name"
         )
     return match.group(1)
 
@@ -154,37 +151,36 @@ def verify_arch(described: dict, arch: str, where: str) -> None:
     built_for = target_arch(described["targets"], where)
     if built_for != arch:
         raise GeneratorError(
-            f"{C.ERR_ARCH}: {where}: object targets {built_for!r} but is being "
+            f"{F.ERR_ARCH}: {where}: object targets {built_for!r} but is being "
             f"filed under {arch!r}"
         )
 
 
-def expected_signature() -> tuple:
-    return tuple((a.value_kind, a.size, a.offset) for a in C.KERNARGS)
+def expected_abi(op, instance) -> Abi:
+    """The kernarg ABI ``instance`` of op contract ``op`` must compile to."""
+    return F.derive_abi(op.KERNEL_SYMBOL, op.triton_signature(instance), op.ARG_NAMES)
 
 
-def verify_abi(described: dict, name: str, where: str) -> None:
-    """The full explicit kernarg tuple (both scratch slots included).
-
-    Any argument after slot 6 must be ``hidden_*``; ``describe`` drops those, so
-    a non-hidden extra argument shows up here as a tuple mismatch.
-    """
-    if described["signature"] != expected_signature():
+def verify_abi(described: dict, abi: Abi, name: str, where: str) -> None:
+    """The object's kernel symbol, explicit kernarg tuple (both scratch slots included),
+    exact ``kernarg_segment_size``, and absence of any ``hidden_*`` argument all equal
+    ``abi``. A compile that adds hidden arguments grows the segment and fails here."""
+    if described["symbol"] != abi.symbol:
         raise GeneratorError(
-            f"{C.ERR_ABI}: {where}: kernarg tuple for {name!r} is\n"
-            f"  {described['signature']}\nbut the contract declares\n"
-            f"  {expected_signature()}"
+            f"{F.ERR_ABI}: {where}: kernel symbol {described['symbol']!r}, "
+            f"expected {abi.symbol!r}"
+        )
+    if described["signature"] != abi.signature:
+        raise GeneratorError(
+            f"{F.ERR_ABI}: {where}: kernarg tuple for {name!r} is "
+            f"{described['signature']}, but the op contract derives {abi.signature}"
         )
     segment = described["kernarg_segment_size"]
-    if segment is None or segment < C.MIN_KERNARG_SEGMENT_SIZE:
+    hidden = described["hidden_kinds"]
+    if segment != abi.segment_size or hidden:
         raise GeneratorError(
-            f"{C.ERR_ABI}: {where}: kernarg_segment_size {segment} < "
-            f"{C.MIN_KERNARG_SEGMENT_SIZE}"
-        )
-    if described["symbol"] != C.KERNEL_SYMBOL:
-        raise GeneratorError(
-            f"{C.ERR_ABI}: {where}: kernel symbol {described['symbol']!r}, "
-            f"expected {C.KERNEL_SYMBOL!r}"
+            f"{F.ERR_ABI}: {where}: {name!r} kernarg_segment_size {segment}, expected "
+            f"{abi.segment_size}; unexpected argument kinds {list(hidden)}"
         )
 
 
@@ -192,16 +188,16 @@ def check_scratch(name: str, global_scratch_size, profile_scratch_size) -> None:
     """Reject any non-zero scratch, naming the instance and both sizes."""
     if global_scratch_size != 0 or profile_scratch_size != 0:
         raise GeneratorError(
-            f"{C.ERR_SCRATCH}: {name} global_scratch_size={global_scratch_size} "
+            f"{F.ERR_SCRATCH}: {name} global_scratch_size={global_scratch_size} "
             f"profile_scratch_size={profile_scratch_size}"
         )
 
 
-def arg_records(signature: tuple) -> list[dict]:
-    """The manifest's per-argument records: semantic name beside the real layout."""
+def arg_records(abi: Abi) -> list[dict]:
+    """The manifest's per-argument records: semantic name beside the layout."""
     return [
-        {"name": arg.name, "kind": kind, "size": size, "offset": offset}
-        for arg, (kind, size, offset) in zip(C.KERNARGS, signature)
+        {"name": a.name, "kind": a.kind, "size": a.size, "offset": a.offset}
+        for a in abi.args
     ]
 
 
@@ -213,7 +209,7 @@ _LLVM_COMMIT = re.compile(r"\(\S*llvm-project\s+([0-9a-f]{40})\)")
 def _comment_section(elf: bytes, where: str) -> str:
     if len(elf) < 0x40 or elf[:4] != b"\x7fELF" or elf[4] != 2 or elf[5] != 1:
         raise GeneratorError(
-            f"{C.ERR_ABI}: {where}: not a little-endian ELF64 code object"
+            f"{F.ERR_ABI}: {where}: not a little-endian ELF64 code object"
         )
     (shoff,) = struct.unpack_from("<Q", elf, 0x28)
     shentsize, shnum, shstrndx = struct.unpack_from("<HHH", elf, 0x3A)
@@ -228,7 +224,7 @@ def _comment_section(elf: bytes, where: str) -> str:
         end = names.index(b"\0", name)
         if names[name:end] == b".comment":
             return elf[offset : offset + size].decode("utf-8", "replace")
-    raise GeneratorError(f"{C.ERR_ENV}: {where}: object has no .comment section")
+    raise GeneratorError(f"{F.ERR_ENV}: {where}: object has no .comment section")
 
 
 def llvm_commit(blob: bytes, where: str) -> str:
@@ -237,7 +233,7 @@ def llvm_commit(blob: bytes, where: str) -> str:
     match = _LLVM_COMMIT.search(_comment_section(elf, where))
     if match is None:
         raise GeneratorError(
-            f"{C.ERR_ENV}: {where}: .comment carries no llvm-project commit"
+            f"{F.ERR_ENV}: {where}: .comment carries no llvm-project commit"
         )
     return match.group(1)
 
@@ -258,7 +254,7 @@ def check_erratum_text(disassembly: str, where: str) -> None:
     mfma, pk = isa_counts(disassembly)
     if mfma and pk:
         raise GeneratorError(
-            f"{C.ERR_ERRATUM}: {where}: {pk} v_pk_*_f32 beside {mfma} v_(s)mfma"
+            f"{F.ERR_ERRATUM}: {where}: {pk} v_pk_*_f32 beside {mfma} v_(s)mfma"
         )
 
 
@@ -275,10 +271,10 @@ def disassemble(blob: bytes, arch: str, where: str) -> str:
                 text=True,
             )
         except OSError as exc:
-            raise GeneratorError(f"{C.ERR_ENV}: {objdump} not runnable: {exc}") from exc
+            raise GeneratorError(f"{F.ERR_ENV}: {objdump} not runnable: {exc}") from exc
     if result.returncode != 0:
         raise GeneratorError(
-            f"{C.ERR_ENV}: {where}: {objdump} failed ({result.returncode}): "
+            f"{F.ERR_ENV}: {where}: {objdump} failed ({result.returncode}): "
             f"{result.stderr.strip()}"
         )
     return result.stdout
