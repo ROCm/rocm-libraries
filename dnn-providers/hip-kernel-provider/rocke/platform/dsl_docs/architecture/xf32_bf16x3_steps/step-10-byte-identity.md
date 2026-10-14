@@ -106,7 +106,7 @@ The parity family *is* also blessed, in both `differential/golden/llvm_gfx_all.j
 keys:
 
 ```json
-"ll":           { "xf32_bf16x3_mma": { "0": "97e859ac...", "1": "f0c0d916..." } }
+"ll":           { "xf32_bf16x3_mma": { "0": "6eea0fa7...", "1": "2ea60615..." } }
 "ir_canonical": { "xf32_bf16x3_mma": { "0": "24272fd3...", "1": "d1a1147a..." } }
 ```
 
@@ -121,6 +121,16 @@ The shas are the Python reference emission. They were read from `--only` runs an
 re-checked against full `--check-golden` runs — `--record-golden` replaces an entire
 key, so blessing them with it would have silently unblessed every other family.
 
+**The two `ll` entries have been re-recorded once, on purpose.** The expansion's
+split gained a cap on its leading bf16
+([step 5](step-05-bf16x3-lowering.md#saturation-the-top-of-the-finite-range)), which
+changes what an emulated atom emits and so changes these shas — in both engines, in
+the same change, GREEN against each other at every flavor. Before the entries were
+updated, `--check-golden` reported exactly these two configs as changed and nothing
+else; after, none. The `ir_canonical` entries did not move: that mode hashes the IR
+handed to the lowerer, which the cap does not touch. No other family's sha moved,
+which is the property the next section depends on.
+
 #### The `ll` entries are llvm20; the `ir_canonical` entries are flavor-free
 
 The anchor file carries no flavor axis, so each key holds exactly one sha per config and
@@ -129,8 +139,8 @@ All three differ in the `ll` lane:
 
 | config | llvm20 (recorded) | llvm22 | llvm23 |
 |---|---|---|---|
-| `mfma_f32_16x16x32_xf32` | `97e859ac` | `23829c27` | `d6ab3c6e` |
-| `mfma_f32_32x32x16_xf32` | `f0c0d916` | `89a0af35` | `1636e6f8` |
+| `mfma_f32_16x16x32_xf32` | `6eea0fa7` | `e2f3afcd` | `db1b5c8b` |
+| `mfma_f32_32x32x16_xf32` | `2ea60615` | `8d916e45` | `f5fa7e2b` |
 
 So `--check-golden` reports the family as changed in a ROCm 7.2 image, where the flavor
 auto-detects to llvm22 — `ROCKE_LLVM_FLAVOR=llvm20` is what makes it match. (Auto-detection

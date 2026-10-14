@@ -91,6 +91,12 @@ big   = bf16(x)
 small = bf16(x - fp32(big))
 ```
 
+The split as written is not defined for every fp32 payload: `bf16(x)` overflows to
+infinity for magnitudes of `0x7f7f8000` or more, after which `small` is the opposite
+infinity and a finite product comes out NaN. The lowering therefore holds `big` at the
+largest finite bf16 (§3.1, [step 5](xf32_bf16x3_steps/step-05-bf16x3-lowering.md#saturation-the-top-of-the-finite-range));
+below that threshold it is this split bit for bit.
+
 Then three MFMAs, accumulator threaded through all three, `small*small` dropped:
 
 ```
@@ -195,10 +201,18 @@ An emulated atom has exactly the native atoms' ABI:
   it. It therefore tracks the exact product of the payloads it is given. On raw fp32
   payloads that is more accurate than the native atom, which truncates them first; on
   payloads already prepared to TF32 precision the native atom is exact and the emulation
-  stays within `2^-18` (relative, per product) of it, the bound on the omitted
-  `small*small` term. The two are not bit-reproducible against each other across
-  targets. The device gate pins the first half with operands that carry bits below the
-  native mantissa.
+  is within `2^-16` (relative, per product) of it, the bound on the omitted
+  `small*small` term, which a pair of operands halfway between two bf16 values reaches
+  99% of (`A = B = 1 + 2^-8`: about `1.514e-5`). The two are not bit-reproducible against
+  each other across targets. The device gate pins the first half with operands that
+  carry bits below the native mantissa.
+- **Every 32-bit payload splits.** The leading bf16 is capped at the largest finite
+  value, so the top `2^-9` of the finite range — TF32's largest finite value among it —
+  does not round to an infinity and turn a finite product into NaN; and an infinity or
+  NaN in an operand makes every output element it feeds non-finite, and no other. The
+  one place that is weaker than IEEE: an infinity against a partner of magnitude 512 or
+  more may come out as NaN rather than `inf`. See
+  [step 11](xf32_bf16x3_steps/step-11-tf32-operand-abi.md#the-edges-of-the-payload-domain).
 
 ### 3.2 Catalog rows
 

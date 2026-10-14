@@ -72,6 +72,12 @@ No scalar `v_cvt_f32_bf16` truncating sequence appears in either. The
 subtraction lowers through `v_pk_add_f32`, so the split costs packed VALU work
 rather than a per-lane chain.
 
+The cap that holds the leading bf16 at its largest finite value
+([step 5](step-05-bf16x3-lowering.md#saturation-the-top-of-the-finite-range)) adds
+integer VALU work on the narrowed value — on gfx950 the backend selects a packed
+unsigned minimum (`v_pk_min_u16`) for its compare-and-select — and changes neither the
+MFMA count nor the packed convert, which are what this gate asserts.
+
 The instruction *count* of the convert is not asserted — only its presence. How
 many packed converts the scheduler emits for a given fragment width is a
 backend choice with no bearing on the numerics; which opcode it picks is not.

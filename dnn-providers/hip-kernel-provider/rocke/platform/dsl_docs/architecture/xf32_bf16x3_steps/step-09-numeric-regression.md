@@ -59,13 +59,34 @@ What it pins:
   themselves exactly representable in bf16 — they have to be, since the MMA
   will narrow them again.
 - **Three terms beat one by two orders of magnitude**, and beat real TF32 by
-  one. The emulation is *more* accurate than the thing it substitutes for, so
-  a caller swapping TF32 for xf32 never loses by it.
+  one *on raw fp32 operands*: the emulation tracks the payload it is given,
+  where TF32 first rounds most of it away. That is the whole claim. On operands
+  already rounded to TF32 precision the native atom is exact and the emulation
+  is not, so a caller swapping TF32 for xf32 gains on raw operands and can lose a
+  little on prepared ones ([step 11](step-11-tf32-operand-abi.md#no-payload-bit-is-dropped)).
 - **It lands near the fp32 accumulation noise floor.** An fp32 MMA is not
   exact either; over K=256 its own rounding is within about one order of
-  magnitude of where the emulation sits. That ceiling is why the fourth term
-  is not issued — `small*small` is measurably below where a fp32 accumulator
-  can carry it.
+  magnitude of where the emulation sits. On typical data that ceiling is why
+  the fourth term is not issued — `small*small` is below where a fp32
+  accumulator can carry it. Typical is not the bound: the omitted term is below
+  `2^-16` of a product and reaches 99% of that at an operand exactly halfway
+  between two bf16 values (`A = B = 1 + 2^-8`: `1.0078125` against
+  `1.0078277587890625`, about `1.514e-5` relative). That pair is a test of its
+  own (`TestTheOmittedTerm`), with every midpoint on the grid swept against the
+  bound.
+- **Every payload splits.** A payload of magnitude `0x7f7f8000` or more — the top
+  `2^-9` of the finite range, TF32's largest finite value among it — rounds to
+  an infinity in bf16, and uncapped, the model reproduces the failure: `big =
+  +inf`, `small = -inf`, and `0x7f7fe000 * 0x00800000`, whose exact value is
+  `3.998046875`, comes out NaN. With `big` held at the largest finite bf16 the
+  same product comes out exactly `3.998046875`, a product that really overflows
+  is an infinity rather than a NaN, and every payload below the threshold splits
+  bit for bit as before (`TestTopBinadeSaturation`).
+- **A non-finite payload makes every output it feeds non-finite**, `inf * 1` is
+  `inf`, `inf * 0` is NaN, NaN is NaN, and a dot product that does not contain
+  the element never sees it (`TestNonFinitePayloads`). Against a partner of
+  magnitude 512 or more an infinity may come out as NaN instead; it is never
+  finite.
 - **The term order is load-bearing.** fp32 addition is not associative, so a
   permutation is observable; summing smallest-magnitude first is not worse
   than the reverse. Without this, the order in `_expand_emulated_mma` would be
@@ -101,8 +122,25 @@ believing the agreement. Both checks here avoid needing the layout at all:
    same kernel with only `big*big` serves as a negative control: it must be
    badly wrong here, or the tolerance check proves nothing.
 
+3. **The edges of the payload domain.** The same constant-operand trick, now
+   with the payloads that broke the first version of the split: the top of the
+   finite range against the smallest normal (exact product `3.998046875` and
+   its relatives), products that really overflow, infinities, NaNs, and an
+   infinity against a partner large enough to hit the one documented
+   weakness. The expectation is closed-form at every output position. A
+   non-finite element in just one place of A or B is then checked to turn
+   exactly the outputs that consume it non-finite — one row, `n` outputs, for
+   an element of A; one column, `m`, for B — whatever the lane layout, with every
+   other output bit-identical to the run without it. The differential of (1) is
+   also run on operands with top-of-range payloads mixed in, against a host
+   split that applies the same cap independently.
+
 The second kernel is reused for both the reference and the control, differing
 only in how many terms it issues, so the two cannot drift apart.
+
+All of the device comparisons are on the `uint32` bit patterns. A float compare
+treats `+0` and `-0` as equal and a NaN as unequal to itself: it would pass a sign
+flip on a zero and fail a result that is bit-for-bit right.
 
 ## The on-device run
 
@@ -134,6 +172,16 @@ that instruction would drop. Landing within tolerance of the exact product is
 therefore also the on-device pin on the contract that the emulation drops no
 payload bit.
 
+After the cap was added the harness gained the third check and was run again, on both
+atoms and under all three backends. On each atom: the differential on top-of-range
+operands is 0 slots differ; the finite top-binade products land at relative error
+`0.000e+00` for the boundary example and its relatives (`6e-8` where the operand is
+fp32's largest value, which rounds in the product), the overflowing products are
+`+inf` and `-inf`, `inf * 1` is `inf`, `inf * inf` is `inf`, `inf * 0` and every NaN
+case are NaN, an infinity against a large partner is NaN (not finite, as documented),
+and one infinity or NaN in one element of A or B makes exactly 16 outputs non-finite
+on the 16x16x32 atom and 32 on the 32x32x16, the rest unchanged to the bit.
+
 ### That the device checks bite
 
 Green on a check that cannot fail is worth nothing, so the lowering was broken
@@ -145,6 +193,7 @@ same figures:
 |---|---|
 | term order rotated to `big*big, small*big, big*small` | 170 / 531 slots differ; exit 2 |
 | residual terms dropped, leaving `big*big` | 256 / 1024 slots differ, emulated err rises to the bf16 floor 2.424e-04; exit 2 |
+| the split without the cap, as first written | on top-of-range operands 256 / 1024 slots differ; every top-binade product and every overflowing product is NaN, and so is every infinity case; exit 2 |
 
 The first is caught by the differential alone and the second by both checks,
 which is the split the two were written for: the differential sees *order*, the
@@ -167,7 +216,10 @@ other test:
   whose gfx950 sits behind another card — which is a silent hole in the one
   gate that touches silicon, not a conservative default;
 - on gfx950 the harness runs with `--require-device`, and anything but exit 0
-  with `PASSED` fails the test;
+  with `PASSED` fails the test. It is run as a module (`python -m
+  rocke.examples.gfx950.xf32.bf16x3_parity`) from whichever directory makes
+  `import rocke` resolve, so it is found in an installed provider, where the package
+  sits at `bin/<subdir>/rocke` beside `tests/`, as well as in a source checkout;
 - it skips only on a *confirmed* absence, which takes three shapes: the HIP
   library will not load; `hipGetDeviceCount` answers `hipErrorNoDevice`, which
   is a real answer and what a host with ROCm but an unusable `/dev/kfd`
@@ -202,8 +254,11 @@ is exactly what the bitwise differential above measures.
   the figures tabulated above, under each lowering backend.
 - `tests/core/test_xf32_bf16x3_device.py` under `ROCKE_REQUIRE_GFX950=1` on the same
   node passes.
-- Both injected faults rejected by the harness on-device (table above), exit status 2,
+- Every injected fault rejected by the harness on-device (table above), exit status 2,
   with an unmodified control exiting 0.
+- The device wrapper, in a tree laid out as the install rules lay it out: the earlier
+  wrapper failed there with exit status 2 (it looked for `python/rocke/...`); the
+  current one passes, as it does in the source layout.
 - Earlier, on a gfx942 host — the harness prints `SKIPPED` (exit 0) and
   `FAILED` (exit 2) under `--require-device`, and the test skips, erroring
   under `ROCKE_REQUIRE_GFX950=1`.
@@ -220,5 +275,6 @@ is exactly what the bitwise differential above measures.
 - On a host where ROCm is present but `hipGetDeviceCount` answers
   `hipErrorNoDevice`, the test skips for that confirmed absence and errors under
   `ROCKE_REQUIRE_GFX950=1`.
-- No emission changed in this step, so the byte-identity result from
-  [steps 5+6](step-05-bf16x3-lowering.md) still stands.
+- The split's emission did change after this step first landed (the cap); the
+  byte-identity result from [step 10](step-10-byte-identity.md) was re-measured on the
+  capped lowering.

@@ -10,6 +10,7 @@ steps 5 and 6).
 - [Where it hooks in](#where-it-hooks-in)
 - [Why the split is written as raw LLVM lines](#why-the-split-is-written-as-raw-llvm-lines)
 - [Rounding: RNE, not truncation](#rounding-rne-not-truncation)
+- [Saturation: the top of the finite range](#saturation-the-top-of-the-finite-range)
 - [Synthetic ops in the C engine](#synthetic-ops-in-the-c-engine)
 - [One asymmetry left standing](#one-asymmetry-left-standing)
 - [Verification](#verification)
@@ -31,11 +32,22 @@ reaches the split — and then takes a Dekker-style split into two bf16 fragment
 
 ```llvm
 %x       = bitcast <N x i32>    %tf      to <N x float>   ; payload, reinterpreted
-%big     = fptrunc <N x float>  %x       to <N x bfloat>   ; x, rounded
+%rne     = fptrunc <N x float>  %x       to <N x bfloat>   ; x, rounded to nearest even
+%bits    = bitcast <N x bfloat> %rne     to <N x i16>      ; ... as bit patterns
+%sign    = and     <N x i16>    %bits, 0x8000              ; ... the sign bit
+%cap     = or      <N x i16>    %sign, 0x7f7f              ; ... largest finite bf16 of that sign
+%over    = icmp ugt <N x i16>   %bits, %cap                ; ... is the rounding past it?
+%sat     = select  <N x i1> %over, <N x i16> %cap, <N x i16> %bits ; ... held at it
+%big     = bitcast <N x i16>    %sat     to <N x bfloat>
 %big_f32 = fpext   <N x bfloat> %big     to <N x float>    ; ... widened back
-%diff    = fsub    <N x float>  %x, %big_f32               ; ... what it lost
+%diff    = fsub    <N x float>  %x, %big_f32               ; ... what the PAYLOAD lost
 %small   = fptrunc <N x float>  %diff    to <N x bfloat>   ; ... rounded too
 ```
+
+(The constants are spelled as explicit `<N x i16>` lane lists, `-32768` and `32639`.
+Everything between `%rne` and `%big` is the cap, explained
+[below](#saturation-the-top-of-the-finite-range); on every payload it does not fire for,
+`%big` is `%rne`.)
 
 then three MMAs on the catalog's `physical_op_id`, threading one fp32
 accumulator:
@@ -46,9 +58,12 @@ accumulator:
 | 2 | `a_big * b_small` | temp | temp |
 | 3 | `a_big * b_big` | temp | the caller's `D` |
 
-`a_small * b_small` is not computed: its magnitude is the same order as the
-split's own representation error, so forming it would cost a fourth MMA and buy
-nothing.
+`a_small * b_small` is not computed. It is below `2^-16` of the product, which is the
+same order as the representation error the split already carries (each `small` is
+itself rounded to 8 significant bits), so forming it would cost a fourth MMA to
+remove an error of that size from only one of its sources. The bound is reached, not
+just approached, by an operand exactly halfway between two bf16 values
+([step 11](step-11-tf32-operand-abi.md#no-payload-bit-is-dropped)).
 
 **The term order is load-bearing.** fp32 accumulation is not associative, so
 issuing the same three products in any other order gives different result bits.
@@ -76,7 +91,7 @@ create: the same logical TF32 atom is native on gfx942 and emulated on gfx950.
 No existing arith op can express a *vector* fp32→bf16 narrowing —
 `arith.trunc_f32_to_bf16` and `arith.cast_f32_to` both hardcode the scalar
 `float` type. Rather than widen an op that every other kernel family already
-depends on, the split emits its four lines directly at the lowering site. That
+depends on, the split emits its lines directly at the lowering site. That
 keeps the blast radius at zero for existing emission and makes the C mirror a
 transcription rather than a port.
 
@@ -88,8 +103,47 @@ AMDGPU backend selects the packed `v_cvt_pk_bf16_f32` for in the vector form on
 gfx950. That is CK's *shipping packed* path.
 
 CK's scalar fallback truncates instead. It is deliberately not the parity
-target: an RNE split is strictly the more accurate of the two, and the emulation
-as a whole is already more accurate than real TF32 applied to raw fp32 operands.
+target: an RNE split is the more accurate of the two, and on raw fp32 operands
+the emulation as a whole is more accurate than real TF32 (on operands already
+rounded to TF32 precision the comparison reverses; see
+[step 11](step-11-tf32-operand-abi.md#no-payload-bit-is-dropped)).
+
+## Saturation: the top of the finite range
+
+Round-to-nearest-even overflows to infinity for every fp32 payload of magnitude
+`0x7f7f8000` or more: the top `2^-9` of the finite range, which holds TF32's own
+largest finite value, `0x7f7fe000`. Left alone, `big` rounds to `+inf`, `small`
+becomes the opposite infinity, and the `inf * 0` that results in the cross terms
+turns a *finite* product into NaN. The boundary example is `0x7f7fe000 *
+0x00800000`, whose exact value is `3.998046875`. Uncapped, the split gives its first
+operand `big = +inf` and `small = -inf` (LLVM's own constant folder confirms it on the
+emitted IR) and the result is NaN on the host model and on a gfx950.
+
+So `big` is held at the largest finite bf16, `0x7f7f`, keeping its sign. The test is
+on the rounded value's *bit pattern*, because bf16 patterns are ordered like
+their magnitudes: an **unsigned** compare against `0x7f7f` with the value's own sign bit
+attached (unsigned, since a negative pattern has the sign bit set and would
+otherwise sort below every positive one; with the sign attached, so that both
+infinities are caught). That catches `±inf` and every NaN — all `0x7f80` and up in
+magnitude — and no finite value, so the cap is the identity on every payload that
+never needed it.
+
+`small` is still taken from the *payload*, not from the capped copy. For a payload the
+cap clipped, `small` then holds what was clipped — finite, and within bf16's own
+precision of it — and the three terms sum to the same product as anywhere else. The
+boundary example now comes out exactly `3.998046875`.
+
+The same cap is what defines the non-finite behaviour, with no special case: it makes
+`big` finite for an infinity or NaN as well, while `small`, computed from the
+payload, stays non-finite. The first term issued, `small * big`, is then non-finite
+whatever the other operand holds. The contract this gives, and its one weakness against
+IEEE, are in [step 11](step-11-tf32-operand-abi.md#the-edges-of-the-payload-domain).
+
+The cap costs a few integer operations on the narrowed value per operand fragment —
+an `and`, an `or`, an unsigned compare and a select, which the AMDGPU backend turns
+into a packed unsigned minimum on gfx950. The MMA count, their order and the packed
+convert are unchanged
+([step 8](step-08-comgr-compile-gate.md#observed-isa)).
 
 ## Synthetic ops in the C engine
 
@@ -116,12 +170,20 @@ claiming a parity that is not yet there.
 ## Verification
 
 - [`tests/core/test_xf32_bf16x3_lowering.py`](../../../tests/core/test_xf32_bf16x3_lowering.py)
-  — the bitcast and four-line split per operand, read back and re-derived; RNE and
+  — the bitcast and ten-line split per operand, read back and re-derived; the cap's
+  constants, its unsigned compare, and that the MMAs consume the capped `big`; RNE and
   not truncation; three terms in the pinned order threading one accumulator;
   `small*small` absent; no emulated `op_id` surviving into the emitted IR; only
   the last term writing the caller's value; a native bf16 atom still lowering to
   exactly one call with no split; and the operand contract
-  ([step 11](step-11-tf32-operand-abi.md)).
+  ([step 11](step-11-tf32-operand-abi.md)). The emitted split is also *evaluated*, not
+  just read: `TestLlvmFoldsTheSplit` hands the lowered kernel to LLVM's `opt` with
+  constant payloads, which folds the narrowing, the cap, the widening and the
+  subtraction down to the constants the three MMAs receive, and compares them with
+  values derived by hand — the top of the finite range, both signs, the first
+  overflowing payload, infinities, a NaN, and ordinary payloads that must not move.
+  Against the uncapped split it fails with `big = +inf` and `small = -inf`. It needs
+  no GPU and skips without an `opt`.
 - [`tests/core/test_xf32_bf16x3_lowering.cpp`](../../../tests/core/test_xf32_bf16x3_lowering.cpp)
   — the same properties pinned directly on the C engine, by parsing serialized
   IR and inspecting the emitted text. Wired into ctest as

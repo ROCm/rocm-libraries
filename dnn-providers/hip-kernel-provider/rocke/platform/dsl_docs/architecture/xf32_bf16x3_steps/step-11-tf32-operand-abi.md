@@ -10,6 +10,7 @@ step 11).
 - [Design calls](#design-calls)
   - [One operand ABI per logical dtype](#one-operand-abi-per-logical-dtype)
   - [No payload bit is dropped](#no-payload-bit-is-dropped)
+  - [The edges of the payload domain](#the-edges-of-the-payload-domain)
   - [The verifier reads the catalog](#the-verifier-reads-the-catalog)
   - [A catalog that cannot over-claim](#a-catalog-that-cannot-over-claim)
   - [The native-preferred rule keys on the full shape](#the-native-preferred-rule-keys-on-the-full-shape)
@@ -89,11 +90,57 @@ two is closer to that exact product depends on the operands:
 - on raw fp32 payloads the emulation is the more accurate, because the native atom
   truncates each operand to 10 mantissa bits first;
 - on payloads already prepared to TF32 precision the native atom is exact, while BF16x3
-  omits the `small*small` term, whose magnitude is bounded by `2^-18` of the product —
-  far below TF32's own `2^-11`, and not zero.
+  omits the `small*small` term. That term is below `2^-16` of the product and reaches
+  99% of it. For `A = B = 1 + 2^-8` each operand sits exactly halfway between two bf16
+  values, so round-to-nearest-even keeps `big = 1` and leaves `small = 2^-8`; the three
+  terms give `1.0078125` against the exact `1.0078277587890625`, a relative error of
+  about `1.514e-5`. That is far below TF32's own `2^-11`, and not zero. An earlier
+  version of this note bounded the term at `2^-18`; that operand pair exceeds it eight
+  times over.
+
+So "more accurate than native" is a statement about raw payloads, and no more. A caller
+who hands the atom operands it has already rounded to TF32 precision gets up to that
+`1.5e-5` per product less accuracy than the native atom gives it: the price of having
+the operation on a target whose hardware lacks it.
 
 The device harness pins the raw-payload half with operands that carry bits below the
-native mantissa.
+native mantissa, and the host model pins the midpoint pair
+([`test_xf32_bf16x3_numerics.py`](../../../tests/core/test_xf32_bf16x3_numerics.py),
+`TestTheOmittedTerm`).
+
+### The edges of the payload domain
+
+The operand ABI promises that every 32-bit payload reaches the split, so the split has to
+be defined for all of them rather than for the ones a model would draw.
+
+**The top of the finite range.** bf16 round-to-nearest-even overflows to infinity for
+every payload of magnitude `0x7f7f8000` or more: the top `2^-9` of the finite fp32
+range, which includes TF32's own largest finite value, `0x7f7fe000`. An uncapped split
+then gives `big = +inf` and `small = -inf`, and the `inf * 0` in the cross terms turns a
+*finite* product into NaN. `0x7f7fe000 * 0x00800000` is exactly `3.998046875`, and came
+out NaN. The split now holds `big` at the largest finite bf16, `0x7f7f`, keeping its
+sign, and takes `small` from the payload as before, so it holds what the cap threw away
+([step 5](step-05-bf16x3-lowering.md#saturation-the-top-of-the-finite-range)). The
+product comes out exactly `3.998046875`. Nothing below the threshold changes: the cap is
+the identity on every finite bf16, so every other payload splits bit for bit as it did.
+
+**Non-finite payloads.** The same cap makes `big` finite for an infinity or NaN, while
+`small`, computed from the payload, stays non-finite. The first term issued,
+`small * big`, is then non-finite whatever the other operand holds. The contract is:
+
+> an infinity or NaN in an operand makes every output element it feeds non-finite, and
+> no other output.
+
+`inf * 1` is `inf`, `inf * inf` is `inf`, `inf * 0` is NaN as IEEE says, and a NaN
+anywhere gives NaN. The one place this is weaker than IEEE: against a partner of
+magnitude 512 or more, the partner's own residual can overflow against the cap with the
+opposite sign, and the two infinities sum to NaN, so an infinity against a large partner
+may come out as NaN rather than `inf`. It is still not finite, and a finite-looking
+result is the failure this contract excludes. A native XF32 instruction handles these
+payloads in its own way, so this is not a claim of agreement with it either.
+
+**What the cap costs** is a few integer operations on the narrowed value per operand
+fragment. The MMA count, their order and the packed convert are unchanged.
 
 ### The verifier reads the catalog
 
@@ -181,10 +228,19 @@ Offering the emulated atoms on gfx942 as well was considered and dropped:
   `rocke_mma_catalog_lookup`, `rocke_xf32_bf16x3_lowering`, `rocke_mma_frag_ssot`.
 - The `xf32_bf16x3_mma` parity family is byte-identical between the engines at llvm20,
   llvm22 and llvm23, in both `ll` and canonical `ir` mode.
-- On gfx950 the emulated `tile.mma` matches the hand-written BF16x3 kernel bit for bit and
-  lands at the figures in [step 9](step-09-numeric-regression.md), under the Python
-  lowerer, the C++ engine with its fallback disabled, and both engines cross-checked; the
-  two injected faults are still rejected.
+- On gfx950 the emulated `tile.mma` matches the hand-written BF16x3 kernel bit for bit —
+  compared on the `uint32` patterns, with the top of the finite range mixed into the
+  operands — and lands at the figures in [step 9](step-09-numeric-regression.md), under
+  the Python lowerer, the C++ engine with its fallback disabled, and both engines
+  cross-checked; the two injected faults are still rejected. The edges of the payload
+  domain run there too: the top-binade products come out finite and exact, an infinity
+  or NaN reaches exactly the outputs that consume it (16 or 32 of them, the rest bit for
+  bit unchanged), and the same harness run against the uncapped split fails on all of
+  them.
+- The emitted split is also evaluated by LLVM's own constant folder, with the payloads
+  of the table above and the boundary example, and compared with hand-derived values
+  (`TestLlvmFoldsTheSplit`); against the uncapped split it fails with `big = +inf` and
+  `small = -inf`, the mechanism described above.
 - Byte identity across every kernel family: [step 10](step-10-byte-identity.md).
 
 ## Follow-ups left open
