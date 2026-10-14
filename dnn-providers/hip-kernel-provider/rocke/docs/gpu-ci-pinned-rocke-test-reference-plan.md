@@ -276,7 +276,7 @@ and `library/tests/conv_reference/`, with shared support in `reference_common/`:
 | `../reference_common/artifact.py` | Common archive command with explicit operation |
 | `../reference_common/numeric.py` / `source.py` | Storage, digests, conservative budgets, and committed snapshots |
 | `../reference_common/paths.py` | Relocatable source and installed bundle lookup |
-| `platform/cmake/PublishedGpuReferences.cmake` | Published operation/architecture pairs installed by default; SDPA/gfx942, SDPA/gfx950, SDPA/gfx1151, SDPA/gfx1201, and convolution/gfx942 |
+| `platform/cmake/PublishedGpuReferences.cmake` | Published operation/architecture pairs installed by default; SDPA/gfx942, SDPA/gfx950, SDPA/gfx1151, SDPA/gfx1201, convolution/gfx942 and convolution/gfx950 |
 | Provider CMake and category YAML | Staging, test registration, and normal provider CI selection |
 
 Workers are reused across cases to reduce process startup and runtime setup.
@@ -331,7 +331,10 @@ The numerical requirements below supplement the common workflow.
 The operation-specific paths are `reference_bundles/conv/<arch>.tar.gz.dvc` and installed
 `engines/test_arch_content/rocke/conv/<arch>/`. These are a layout convention,
 now used by the [forward-convolution infrastructure](conv-test-reference.md).
-That harness has a published bounded gfx942 forward cohort. Further convolution coverage still needs:
+That harness has published bounded 32-case forward cohorts on gfx942 and gfx950.
+Separate live NumPy tests cover twelve backward-data and fourteen backward-weight
+cases per target; see the [validation record](conv-six-lane-validation.md).
+Further convolution extensions must retain these requirements:
 
 1. **An explicit cohort.** Map forward, backward-data, and backward-weight tests
    separately. Record dimensions, groups, strides, padding, dilation, layouts,

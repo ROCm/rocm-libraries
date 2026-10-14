@@ -8,14 +8,15 @@ SPDX-License-Identifier: MIT
 The convolution harness compares current GPU kernels with precompiled baseline
 kernels qualified offline against an independent NumPy reference. Ordinary
 verification computes neither CPU reference answers nor replacement budgets and
-requires no Torch. This is infrastructure for a bounded gfx942 forward cohort;
-the gfx942 baseline lock and DVC pointer identify its published bundle. The
+requires no Torch. The published forward cohorts contain 32 cases each on
+gfx942 and gfx950; each architecture's baseline lock and DVC pointer identify
+its bundle. The
 publication registry enables default provider installation alongside SDPA;
 the offline CLI accepts explicit bundle and lock paths to verify replacement candidates.
 
 ## Coverage and execution
 
-The original published cohort contains sixteen cases: FP16 and BF16 for each of padded 3x3,
+Each cohort includes the original sixteen cases: FP16 and BF16 for each of padded 3x3,
 pointwise 1x1, stride-2, dilation-2, groups=2, asymmetric spatial dimensions,
 K=96 output channels, and K=33 output channels.
 
@@ -32,8 +33,9 @@ The current worker calls production `dispatch_conv_grouped`, builds the selected
 forward spec with the Python engine, and launches through the convolution AOT
 argument ABI. It covers Python-emitted implicit-GEMM kernels and production
 selection/argument construction; it does not exercise the C++ provider or shipped
-kernel-pack lookup. Direct convolution, backward-data, backward-weight, 3-D,
-additional architectures, and pipeline sweeps are outside this first cohort.
+kernel-pack lookup. Direct convolution, 3-D, additional architectures, and
+pipeline sweeps are outside these pinned cohorts. Gradients use the separate
+live-oracle tests described below.
 
 Qualification freezes the code object, signature, grid, block, every scalar AOT
 argument, pointer-to-operand bindings, selected dispatch spec, and old Python
@@ -51,14 +53,14 @@ building, launch ABI capture, execution, and export across those targets.
 Qualification copies both packages into the frozen runner so adapter imports do
 not depend on the current checkout.
 
-The current branch has independently qualified 32-case forward candidates for
+There are independently qualified and published 32-case forward bundles for
 gfx942 and gfx950. Each adds odd input channels, stem geometry, larger spatial and
 channel grids, a longer reduction, grouped odd channels, depthwise geometry,
 anisotropic filters, and a one-pixel output to the original cohort. Both pass
-source verification and all three GPU failure controls. The local locks, archives
-and DVC pointers describe these candidates; **DVC upload, empty-cache retrieval
-and installed validation are pending**. gfx950 publication enrollment remains
-unchanged until those steps are complete. Do not merge the unpublished pointers.
+source and installed verification and all three GPU failure controls. Both
+archives were published to DVC, retrieved anonymously into an empty cache, and
+authenticated against their committed locks. Both targets are enrolled for
+default provider installation and CI category selection.
 
 The first gradient implementation uses small live NumPy oracles, separately from
 the pinned forward contract. `test_conv_gradient_correctness.py` contains twelve
@@ -68,13 +70,13 @@ lanes use production selection; gfx942 backward-data uses an explicit spec becau
 there is no production candidate. Two-stage outputs are poisoned and atomic
 workspaces reset on every execution; operand and auxiliary-buffer integrity and
 launch counts are checked. These tests are registered in the installed library
-GPU suite. All 26 gradient cases passed on each architecture after Slurm network
-recovery, with three executions per case and no skips. Their host contracts also
-pass. Installed verification remains pending; these are not frozen gradient
-reference bundles.
+GPU suite. All 26 gradient cases passed in both source and installed verification
+on each architecture, with three executions per case and no skips. Their host
+contracts also pass. These tests use live NumPy answers rather than frozen
+gradient reference bundles.
 
-See [conv-six-lane-validation.md](conv-six-lane-validation.md) for the first-pass
-validation record and [gpu-reference-workflow.md](gpu-reference-workflow.md) for
+See [conv-six-lane-validation.md](conv-six-lane-validation.md) for the source and
+installed validation record and [gpu-reference-workflow.md](gpu-reference-workflow.md) for
 publication and installed verification.
 
 ## Numerical contract
@@ -142,13 +144,15 @@ cases address the coverage request in
 The umbrella option defaults ON for provider artifact builds and OFF for the
 rocm-libraries superbuild, which does not fetch the bundles. CMake installs each
 published operation/architecture bundle separately. The
-installed bundle is beneath
-`engines/test_arch_content/rocke/conv/gfx942/`, preserving architecture-specific,
+installed bundles are beneath
+`engines/test_arch_content/rocke/conv/<arch>/`, preserving architecture-specific,
 test-only artifact packaging. The generic artifact contains the harness and trusted
-lock. Host checks register as `rocke_conv_reference_unit_pytest`; the GPU entry
-`rocke_conv_gpu_gfx942_pytest` registers only when reference installation is enabled and a
-published bundle passes validation. Both entries are
-in the provider category YAML.
+locks. Host checks register as `rocke_conv_reference_unit_pytest`; GPU entries
+`rocke_conv_gpu_gfx942_pytest` and `rocke_conv_gpu_gfx950_pytest` register when
+reference installation is enabled and their published bundles pass validation.
+All three entries are in the provider category YAML. Gradient host contracts and
+numerical cases run through `rocke_library_conv_pytest` and
+`rocke_library_gpu_pytest`, respectively, without depending on pinned bundles.
 
 Test a replacement candidate before publication with the offline CLI's `verify`
 command, passing explicit `--bundle` and `--lock` paths. CMake installs only the
@@ -156,8 +160,8 @@ published archives and always validates them against their committed architectur
 locks. After publication, check the installed layout through the normal CMake path.
 
 `ROCKE_INSTALL_TEST_GPU_REFERENCES=OFF` registers no pinned-reference GPU entries
-for any operation. Required tests fail on missing gfx942 hardware or a
-missing/corrupt bundle; other unenrolled architectures remain outside the cohort.
+for any operation. Required tests fail if the intended GPU is unavailable or its
+bundle is missing/corrupt; entries assigned to other GPU lanes skip explicitly.
 
 Shared numeric, digest, archive, snapshot, and interpreter-transport support lives
 in `library/tests/reference_common`. Both operations import that support directly. Existing frozen SDPA bundles remain self-contained; newly qualified bundles
@@ -166,6 +170,13 @@ also freeze the shared support needed by their replay workers.
 Archive packaging uses the [packing and publication workflow](gpu-reference-workflow.md#5-review-pack-and-publish-the-replacement).
 
 ## Validation evidence
+
+On 2026-10-14, the 32-case cohorts on both targets passed independent NumPy
+qualification, source verification and installed verification. Both archives are
+published and anonymously retrievable. All 26 gradient cases also passed from
+source and installed trees on both targets. See the
+[six-lane validation record](conv-six-lane-validation.md) for exact suite counts,
+skips, Slurm jobs, publication checks and remaining integration limits.
 
 On 2026-10-07, the expanded gfx942 cohort passed offline qualification and
 Torch-free installed validation:
@@ -189,17 +200,20 @@ the lock and the expanded reference adapter frozen in the bundle.
 
 ## Bundle identity
 
-The authoritative baseline revision and manifest digest are in the
-[committed lock](../library/tests/conv_reference/architectures/gfx942/baseline_lock.json).
-The archive's content identity and size are in its
-[DVC pointer](../library/tests/reference_bundles/conv/gfx942.tar.gz.dvc).
+The authoritative baseline revisions and manifest digests are in the committed
+[gfx942 lock](../library/tests/conv_reference/architectures/gfx942/baseline_lock.json)
+and [gfx950 lock](../library/tests/conv_reference/architectures/gfx950/baseline_lock.json).
+Archive content identities and sizes are in the corresponding
+[gfx942 DVC pointer](../library/tests/reference_bundles/conv/gfx942.tar.gz.dvc)
+and [gfx950 DVC pointer](../library/tests/reference_bundles/conv/gfx950.tar.gz.dvc).
 Keep those files together when updating coverage; do not maintain a second copy
 of their hashes in this document. The bundle manifest records per-case bounds,
 input/output identities, compiler information, and offline oracle checks.
 
-Fetch the published archive from the rocm-libraries root before provider
+Fetch the published archives from the rocm-libraries root before provider
 configuration:
 
 ```bash
-dvc pull dnn-providers/hip-kernel-provider/rocke/library/tests/reference_bundles/conv/gfx942.tar.gz.dvc
+dvc pull dnn-providers/hip-kernel-provider/rocke/library/tests/reference_bundles/conv/gfx942.tar.gz.dvc \
+  dnn-providers/hip-kernel-provider/rocke/library/tests/reference_bundles/conv/gfx950.tar.gz.dvc
 ```
