@@ -122,9 +122,24 @@ class GFX1250Params(BaseOptimizationParams):
 
     @param
     def tdm_iterate_mode(self, ctx: SizeContext) -> Optional[ForkParameter]:
-        # if self._is_tn():
-        return self._make_param("TDMIterateMode", [0]) # 0, 1, 2, 3
-        # return None
+        """Equality libraries search only the TDM iterate modes this shape can use.
+
+        0 is always included. 1 requires M divisible by 4, 2 requires N
+        divisible by 4, and 3 requires both. OOB keeps the full sweep.
+        """
+        is_equality = str(self.config.get("LIBRARY_TYPE", "OOB")).lower() == "equality"
+        if not is_equality:
+            return self._make_param("TDMIterateMode", [0, 1, 2, 3])
+        values = [0]
+        m_aligned = ctx.M % 4 == 0
+        n_aligned = ctx.N % 4 == 0
+        if m_aligned:
+            values.append(1)
+        if n_aligned:
+            values.append(2)
+        if m_aligned and n_aligned:
+            values.append(3)
+        return self._make_param("TDMIterateMode", values)
 
     @param
     def init_c_iter_wmma(self, ctx: SizeContext) -> ForkParameter:
