@@ -201,6 +201,8 @@ struct GirFrameHazard {
     bool crossAgent = false;
     uint64_t producerAction = 0;
     uint64_t consumerAction = 0;
+    // The concrete LDS slot both ends touch (`GirAccessOccurrence::storage`).
+    int storage = -1;
 };
 
 struct GirHazardFenceOwner {
