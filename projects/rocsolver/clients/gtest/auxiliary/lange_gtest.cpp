@@ -44,13 +44,14 @@ using lange_tuple = std::tuple<vector<I>, string>;
 // 'B' = entries scaled close to the overflow threshold,
 // 'S' = entries scaled close to the underflow threshold
 // 'Q' = one entry is NaN (the norm must be NaN, as in LAPACK)
+// 'T' = all entries are +-tbig, the largest magnitude that is not scaled in the Frobenius norm
 // (the scaled matrices are only used with the Frobenius and max norms)
 
 // case when M == 0 also executes the bad arguments test
 // (null handle, null pointers and invalid values)
 
 const vector<string> norm_range
-    = {"1N", "IN", "FN", "MN", "FB", "FS", "MB", "MS", "1Q", "IQ", "FQ", "MQ"};
+    = {"1N", "IN", "FN", "MN", "FB", "FS", "MB", "MS", "1Q", "IQ", "FQ", "MQ", "FT"};
 
 // for checkin_lapack tests
 const vector<vector<int>> matrix_size_range = {
@@ -86,11 +87,15 @@ const vector<vector<int64_t>> matrix_size_range_64 = {
     {1500, 40, 1500}};
 
 // for daily_lapack tests
+// (the 1 x 2^24 matrix has enough entries for the sum of squares of the 'T' case to overflow in
+// single precision)
 const vector<vector<int>> large_matrix_size_range
-    = {{192, 192, 192}, {640, 300, 700}, {300, 640, 300}, {1024, 2000, 1024}, {2547, 2547, 2550}};
+    = {{192, 192, 192},    {640, 300, 700},    {300, 640, 300},
+       {1024, 2000, 1024}, {2547, 2547, 2550}, {1, 16777216, 1}};
 
 const vector<vector<int64_t>> large_matrix_size_range_64
-    = {{192, 192, 192}, {640, 300, 700}, {300, 640, 300}, {1024, 2000, 1024}, {2547, 2547, 2550}};
+    = {{192, 192, 192},    {640, 300, 700},    {300, 640, 300},
+       {1024, 2000, 1024}, {2547, 2547, 2550}, {1, 16777216, 1}};
 
 template <typename I>
 Arguments lange_setup_arguments(lange_tuple<I> tup)

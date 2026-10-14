@@ -38,8 +38,10 @@
 
 /* The test-only argument "magnitude" scales the random test matrix close to the overflow ('B')
    or underflow ('S') threshold, so that the squares of the entries overflow or underflow while
-   the norm itself is representable, or sets one entry to NaN ('Q'; the norm must be NaN, as in
-   LAPACK). It is 'N' (no scaling) by default. */
+   the norm itself is representable, sets one entry to NaN ('Q'; the norm must be NaN, as in
+   LAPACK), or sets all the entries to +-tbig, the largest magnitude that Blue's algorithm adds
+   without scaling ('T'; the sum of their squares overflows in single precision when there are
+   2^24 entries). It is 'N' (no scaling) by default. */
 template <typename S, typename I>
 S lange_magnitude_scale(const char magnitude, const I m, const I n)
 {
@@ -54,6 +56,9 @@ S lange_magnitude_scale(const char magnitude, const I m, const I n)
     }
     else if(magnitude == 'S')
         return std::ldexp(S(1), std::numeric_limits<S>::min_exponent + 4);
+    else if(magnitude == 'T')
+        return std::ldexp(
+            S(1), (std::numeric_limits<S>::max_exponent - std::numeric_limits<S>::digits + 1) / 2);
     else
         return S(1);
 }
@@ -123,6 +128,14 @@ void testing_lange_bad_arg()
 
     // check bad arguments
     lange_checkBadArgs(handle, norm_type, m, n, dA.data(), lda, dnorms.data());
+
+    // null pointers with dimensions whose product overflows I
+    const I big = I(1) << (4 * sizeof(I));
+    EXPECT_ROCBLAS_STATUS(
+        rocsolver_lange(handle, norm_type, big, big, (T*)nullptr, big, dnorms.data()),
+        rocblas_status_invalid_pointer);
+    EXPECT_ROCBLAS_STATUS(rocsolver_lange(handle, norm_type, big, big, dA.data(), big, (S*)nullptr),
+                          rocblas_status_invalid_pointer);
 }
 
 template <bool CPU, bool GPU, typename T, typename I, typename S, typename Td, typename Sd, typename Th, typename Sh>
@@ -152,7 +165,7 @@ void lange_initData(const rocblas_handle handle,
                 {
                     // mix the signs and scale to the requested magnitude
                     T factor = ((i + 2 * j) % 3 == 1) ? T(-scale) : T(scale);
-                    hA[0][i + j * lda] = hA[0][i + j * lda] * factor;
+                    hA[0][i + j * lda] = (magnitude == 'T') ? factor : hA[0][i + j * lda] * factor;
                 }
                 else
                 {

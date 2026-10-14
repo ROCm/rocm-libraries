@@ -52,7 +52,9 @@ ROCSOLVER_BEGIN_NAMESPACE
  * The Frobenius norm uses the scaled sums of squares of LAPACK's xLASSQ (Blue's algorithm): each
  * element goes into one of three accumulators (big, medium, small) depending on its magnitude, so
  * that the sum of squares does not overflow or underflow unless the norm itself does. As in
- * xLASSQ, the real and imaginary parts of complex elements are taken separately.
+ * xLASSQ, the real and imaginary parts of complex elements are taken separately. When the partial
+ * results are added, a medium accumulator that has grown past tmed is moved into the big one
+ * (scaled), as it could otherwise overflow while the norm is representable.
  *************************************************************/
 
 #define LANGE_NORM_SUM 0
@@ -86,6 +88,7 @@ struct lange_blue<float>
     static constexpr float tbig = 0x1p52f;
     static constexpr float ssml = 0x1p75f;
     static constexpr float sbig = 0x1p-76f;
+    static constexpr float tmed = 0x1p126f;
 };
 
 template <>
@@ -95,6 +98,7 @@ struct lange_blue<double>
     static constexpr double tbig = 0x1p486;
     static constexpr double ssml = 0x1p537;
     static constexpr double sbig = 0x1p-538;
+    static constexpr double tmed = 0x1p1022;
 };
 
 /** Adds x^2 to the accumulator of Blue's algorithm that corresponds to ax = |x| (NaN goes to the
@@ -111,6 +115,23 @@ __device__ __forceinline__ void lange_ssq_add(const S ax, S& abig, S& amed, S& a
     abig += xb * xb;
     amed += xm * xm;
     asml += xs * xs;
+}
+
+/** Adds the partial accumulators (bbig, bmed, bsml) to (abig, amed, asml). The medium
+    accumulators are at most tmed, so their sum does not overflow; if it exceeds tmed, it is moved
+    into the big accumulator. **/
+template <typename S>
+__device__ __forceinline__ void
+    lange_ssq_merge(S& abig, S& amed, S& asml, const S bbig, const S bmed, const S bsml)
+{
+    abig += bbig;
+    amed += bmed;
+    asml += bsml;
+    if(amed > lange_blue<S>::tmed)
+    {
+        abig += (amed * lange_blue<S>::sbig) * lange_blue<S>::sbig;
+        amed = 0;
+    }
 }
 
 /** Square root of the sum of squares given by the three accumulators (as in xLASSQ). **/
@@ -253,13 +274,11 @@ ROCSOLVER_KERNEL void __launch_bounds__(LANGE_BX* LANGE_BY)
             {
                 if constexpr(NORM == LANGE_NORM_MAX)
                     sacc[0][ty][tx] = rocblas_max_nan(sacc[0][ty][tx], sacc[0][ty][tx + k]);
+                else if constexpr(NORM == LANGE_NORM_FRO)
+                    lange_ssq_merge<S>(sacc[1][ty][tx], sacc[0][ty][tx], sacc[2][ty][tx],
+                                       sacc[1][ty][tx + k], sacc[0][ty][tx + k], sacc[2][ty][tx + k]);
                 else
                     sacc[0][ty][tx] += sacc[0][ty][tx + k];
-                if constexpr(NORM == LANGE_NORM_FRO)
-                {
-                    sacc[1][ty][tx] += sacc[1][ty][tx + k];
-                    sacc[2][ty][tx] += sacc[2][ty][tx + k];
-                }
             }
             __syncthreads();
         }
@@ -373,11 +392,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(LANGE_FINAL_THDS)
             if constexpr(NORM == LANGE_NORM_MAX)
                 acc = rocblas_max_nan(acc, p[k]);
             else
-            {
-                acc += p[k];
-                abig += p[k + psize];
-                asml += p[k + 2 * psize];
-            }
+                lange_ssq_merge<S>(abig, acc, asml, p[k + psize], p[k], p[k + 2 * psize]);
         }
     }
 
@@ -393,11 +408,8 @@ ROCSOLVER_KERNEL void __launch_bounds__(LANGE_FINAL_THDS)
         if(tid < k)
         {
             if constexpr(NORM == LANGE_NORM_FRO)
-            {
-                sacc[0][tid] += sacc[0][tid + k];
-                sacc[1][tid] += sacc[1][tid + k];
-                sacc[2][tid] += sacc[2][tid + k];
-            }
+                lange_ssq_merge<S>(sacc[1][tid], sacc[0][tid], sacc[2][tid], sacc[1][tid + k],
+                                   sacc[0][tid + k], sacc[2][tid + k]);
             else
                 sacc[0][tid] = rocblas_max_nan(sacc[0][tid], sacc[0][tid + k]);
         }
