@@ -562,26 +562,6 @@ class TestFeatureClaims:
         assert claims.graphs[FAKE_TYPE] == 2
         assert claims.graphs[backward] == 1
 
-    def test_engine_graphs_count_claimed_graphs_per_engine(
-        self, tmp_path: Path
-    ) -> None:
-        _bundle(
-            tmp_path,
-            "a",
-            [_node(features=["dtype:fp16"])],
-            claims={"E1": {"gfx942": ["linux", "windows"], "gfx90a": ["linux"]}},
-        )
-        _bundle(
-            tmp_path,
-            "b",
-            [_node(features=["dtype:bf16"])],
-            claims={"E1": {"gfx942": ["linux"]}, "E2": {"gfx942": ["linux"]}},
-        )
-        claims = _feature_claims(tmp_path)
-        # A graph claimed on several targets counts once.
-        assert claims.engine_graphs[(FAKE_TYPE, "E1")] == 2
-        assert claims.engine_graphs[(FAKE_TYPE, "E2")] == 1
-
 
 class TestFeatureMatrixNames:
     def test_every_real_op_lands_in_a_named_group(self) -> None:
@@ -685,20 +665,20 @@ class TestFeatureMatrixMarkdown:
         assert header.index("gfx950-linux") < header.index("gfx90a-linux")
         # The engine tables keep GPU order.
         engine = document.split("\n### E\n", 1)[1]
-        header = next(ln for ln in engine.splitlines() if ln.startswith("| Op |"))
+        header = next(
+            ln for ln in engine.splitlines() if ln.startswith("| Op (options) |")
+        )
         assert header.index("gfx90a") < header.index("gfx950")
 
     def test_engine_tables_count_only_that_engine(self, tmp_path: Path) -> None:
         document = self._document(tmp_path)
-        # Columns: Op, Graphs claimed, Options, gfx942 L, gfx1100 W.
+        # Columns: Op (options), gfx942 L, gfx1100 W.
         assert _row(document, "### E1", "Sdpa") == [
-            "**[Sdpa](#op-sdpa)**",
-            "2",
-            "4",
+            "**[Sdpa](#op-sdpa)** (4)",
             "🟡 50%",
             "🟡 25%",
         ]
-        assert _row(document, "### E2", "Sdpa")[1:] == ["1", "4", "❌", "🟡 50%"]
+        assert _row(document, "### E2", "Sdpa")[1:] == ["❌", "🟡 50%"]
 
     def test_engine_table_omits_ops_it_never_claims(self, tmp_path: Path) -> None:
         document = self._document(tmp_path)
@@ -726,7 +706,7 @@ class TestFeatureMatrixMarkdown:
         # The shares count options singly; the legend must say so.
         assert "Combinations aren't measured" in summary
         engines = document.split("## By engine", 1)[1].split("\n### ", 1)[0]
-        for column in ("Graphs claimed", "Options", "GPU columns"):
+        for column in ("Op (options)", "GPU columns"):
             assert f"- **{column}**:" in engines
 
     def test_anchors_resolve(self, tmp_path: Path) -> None:

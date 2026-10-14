@@ -174,10 +174,6 @@ class FeatureClaims:
     # group -> graphs holding any of its ops; a graph with two of them
     # counts once
     group_graphs: dict[str, int] = field(default_factory=lambda: defaultdict(int))
-    # (node type, engine) -> graphs holding it that the engine claims somewhere
-    engine_graphs: dict[tuple[str, str], int] = field(
-        default_factory=lambda: defaultdict(int)
-    )
     # node type -> features any bundle graph exercises, claimed or not
     tested: dict[str, set[str]] = field(default_factory=lambda: defaultdict(set))
     # (node type, target) -> features a graph claimed there by any engine
@@ -238,9 +234,7 @@ def compute_feature_claims(
         for node_type, features in found_features.items():
             claims.graphs[node_type] += 1
             claims.tested[node_type] |= features
-            # collect_units keeps an engine only with a target to claim.
             for engine, pairs in unit.claims.items():
-                claims.engine_graphs[(node_type, engine)] += 1
                 for target in pairs:
                     claims.any_engine[(node_type, target)] |= features
                     claims.by_engine[(node_type, engine, target)] |= features
@@ -335,9 +329,8 @@ def render_by_engine(claims: FeatureClaims) -> list[str]:
         "",
         f"**Engines:** {engines}",
         "",
-        "- **Graphs claimed**: graphs of the op this engine claims on at "
-        "least one GPU.",
-        "- **Options**: the op's catalogued API options, listed in "
+        "- **Op (options)**: the number is how many options the op offers in "
+        "the API, listed in "
         f"{link('Options per op', heading_anchor('Options per op'))}.",
         "- **GPU columns**: share of the op's options that a graph this "
         f"engine claims on that GPU and OS uses. `{FULL}` all · "
@@ -359,22 +352,13 @@ def render_by_engine(claims: FeatureClaims) -> list[str]:
             total = len(claims.features[node_type])
             rows.append(
                 [
-                    f"**{link(display_name(node_type), op_anchor(node_type))}**",
-                    str(claims.engine_graphs.get((node_type, engine), 0)),
-                    str(total),
+                    f"**{link(display_name(node_type), op_anchor(node_type))}** "
+                    f"({total})",
                     *(percent_cell(c, total) for c in counts),
                 ]
             )
         out += [f"### {engine}", ""]
-        out += table(
-            [
-                "Op",
-                "Graphs claimed",
-                "Options",
-                *map(short_target_link, claims.targets),
-            ],
-            rows,
-        )
+        out += table(["Op (options)", *map(short_target_link, claims.targets)], rows)
     return out
 
 
