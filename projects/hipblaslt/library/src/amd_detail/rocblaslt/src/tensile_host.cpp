@@ -8431,11 +8431,21 @@ namespace
         }
     }
 
-    // Parses a payload and points its solutions at `coPath`. With an adapter,
-    // also loads the code object on that device, so a payload that cannot run
-    // there fails before anything is registered.
+    std::shared_ptr<TensileLite::AMDGPU> localKernelDevice(int device)
+    {
+        return std::dynamic_pointer_cast<TensileLite::AMDGPU>(TensileLite::hip::GetDevice(device));
+    }
+
+    // Parses a payload, checks that it was built for `gpu`, pins it to that
+    // architecture, and points its solutions at `coPath`. The pin is not
+    // saved, so a payload loaded from the library is pinned again here.
+    //
+    // With an adapter, also loads the code object on that device and checks
+    // that it defines every kernel, so a payload that cannot run there fails
+    // before anything is registered.
     bool loadLocalKernelPayload(std::string const&                 shardFile,
                                 std::string const&                 coPath,
+                                TensileLite::AMDGPU const&         gpu,
                                 TensileLite::hip::SolutionAdapter* adapter,
                                 LocalKernelSolutions*              out)
     {
@@ -8455,24 +8465,59 @@ namespace
             return false;
         }
 
-        if(adapter && adapter->loadCodeObjectFile(coPath) != hipSuccess)
-        {
-            log_error(__func__, "cannot load code object", coPath);
-            return false;
-        }
-
+        LocalKernelSolutions solutions;
         for(auto const& entry : shard->solutions)
         {
             if(!entry.second)
                 continue;
-            entry.second->codeObjectFilename = coPath;
-            out->emplace_back(entry.first, entry.second);
+            if(!(*entry.second->hardwarePredicate)(gpu))
+            {
+                log_error(__func__, "library was not built for this device", shardFile);
+                return false;
+            }
+            if(!TensileLite::pinToProcessor(*entry.second, gpu.processor))
+            {
+                log_error(__func__, "library has an unrecognized hardware predicate", shardFile);
+                return false;
+            }
+            solutions.emplace_back(entry.first, entry.second);
         }
-        if(out->empty())
+        if(solutions.empty())
         {
             log_error(__func__, "library holds no solutions", shardFile);
             return false;
         }
+
+        if(adapter)
+        {
+            // Loaded at most once per path and without the shipped modules'
+            // out-of-memory recovery, so a bad file cannot unload shipped
+            // kernels.
+            if(adapter->loadLocalCodeObject(coPath) != hipSuccess)
+            {
+                log_error(__func__, "cannot load code object", coPath);
+                return false;
+            }
+
+            // Kernels resolve only within their own code object, so every one
+            // must be there; otherwise a launch would fail after selection had
+            // returned it.
+            for(auto const& entry : solutions)
+            {
+                hipFunction_t function;
+                if(adapter->getLocalKernel(function, coPath, entry.second->KernelName())
+                   != hipSuccess)
+                {
+                    log_error(
+                        __func__, "code object does not define kernel", entry.second->KernelName());
+                    return false;
+                }
+            }
+        }
+
+        for(auto const& entry : solutions)
+            entry.second->codeObjectFilename = coPath;
+        *out = std::move(solutions);
         return true;
     }
 
@@ -8510,10 +8555,11 @@ namespace
     // yet, and returns the number of kernels registered. Replaying mappings
     // this process made itself is harmless: the journal's order is the order
     // mappings were made in, across all processes. Requires registry.mutex.
-    size_t replayLocalKernelJournal(LocalKernelRegistry& registry,
-                                    uks::Store const&    store,
-                                    std::string const&   arch,
-                                    LocalKernelLibrary&  localLibrary)
+    size_t replayLocalKernelJournal(LocalKernelRegistry&       registry,
+                                    uks::Store const&          store,
+                                    std::string const&         arch,
+                                    TensileLite::AMDGPU const& gpu,
+                                    LocalKernelLibrary&        localLibrary)
     {
         uint64_t&                      offset = registry.journalOffsets[arch];
         std::vector<uks::JournalEntry> entries;
@@ -8538,6 +8584,7 @@ namespace
                 LocalKernelSolutions solutions;
                 if(!loadLocalKernelPayload(store.shardPath(entry.payload),
                                            store.codeObjectPath(id),
+                                           gpu,
                                            nullptr,
                                            &solutions)
                    || !publishLocalKernelPayload(registry, localLibrary, id, arch, solutions))
@@ -8631,14 +8678,16 @@ namespace
             return;
 
         const std::string arch = localKernelArch(device);
-        if(arch.empty())
+        auto const        gpu  = localKernelDevice(device);
+        if(arch.empty() || !gpu)
             return;
 
         auto&                       registry = localKernelRegistry();
         std::lock_guard<std::mutex> lock(registry.mutex);
         if(registry.journalOffsets.count(arch))
             return;
-        static_cast<void>(replayLocalKernelJournal(registry, *store, arch, *library->localLibrary));
+        static_cast<void>(
+            replayLocalKernelJournal(registry, *store, arch, *gpu, *library->localLibrary));
     }
     catch(const std::exception& e)
     {
@@ -8674,6 +8723,9 @@ rocblaslt_status rocblaslt_local_kernel_register(rocblaslt_handle  handle,
     if(auto st = getLocalKernelLibrary(handle, &localLibrary, &adapter);
        st != rocblaslt_status_success)
         return st;
+    auto const gpu = localKernelDevice(handle->device);
+    if(!gpu)
+        return rocblaslt_status_internal_error;
 
     // Every device loads the code object by this name the first time it runs
     // one of the kernels, so it must not depend on the working directory.
@@ -8723,7 +8775,7 @@ rocblaslt_status rocblaslt_local_kernel_register(rocblaslt_handle  handle,
     }
 
     LocalKernelSolutions solutions;
-    if(!loadLocalKernelPayload(shardFile, coFile, adapter, &solutions))
+    if(!loadLocalKernelPayload(shardFile, coFile, *gpu, adapter, &solutions))
         return rocblaslt_status_invalid_value;
 
     if(store && !store->appendPayload(arch, record, &error))
@@ -8813,12 +8865,13 @@ try
         return rocblaslt_status_success;
 
     const std::string arch = localKernelArch(handle->device);
-    if(arch.empty())
+    auto const        gpu  = localKernelDevice(handle->device);
+    if(arch.empty() || !gpu)
         return rocblaslt_status_internal_error;
 
     auto&                       registry = localKernelRegistry();
     std::lock_guard<std::mutex> lock(registry.mutex);
-    const size_t added = replayLocalKernelJournal(registry, *store, arch, *localLibrary);
+    const size_t added = replayLocalKernelJournal(registry, *store, arch, *gpu, *localLibrary);
     if(registered)
         *registered = added;
     return rocblaslt_status_success;
