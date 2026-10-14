@@ -6,7 +6,9 @@ The features come from ``sdpa_attributes.fbs``. A few are read from the q / k
 / v tensors rather than from attributes -- dtype, head dim, head grouping,
 layout and sequence shape -- since the schema carries those only as tensor
 uids. ``head_dim`` reads q and v together: ``192x128`` is a q / k head dim of
-192 with a v head dim of 128, its own kernel rather than a 192.
+192 with a v head dim of 128, its own kernel rather than a 192. ``layout`` is
+q's stride order, or ``ragged`` when q is packed by per-batch offsets (the
+tensor's ``ragged_offset_tensor_uid``) whatever its strides.
 
 Exclusive groups (exactly one feature per graph): ``dtype``, ``head_dim``,
 ``heads``, ``layout``, ``mask``, ``seq``, ``scale``. The rest are optional
@@ -66,6 +68,7 @@ FEATURES = (
     Feature("heads:gqa", QK_FIELDS, "fewer k/v heads than q heads, more than one"),
     Feature("heads:mqa", QK_FIELDS, "one k/v head"),
     *(Feature(f"layout:{name}", ("q_tensor_uid",)) for name in LAYOUTS.values()),
+    Feature("layout:ragged", ("q_tensor_uid",), "q packed by per-batch offsets"),
     Feature("mask:none", MASK_FIELDS),
     Feature("mask:causal_top_left", MASK_FIELDS),
     Feature("mask:causal_bottom_right", MASK_FIELDS),
@@ -158,12 +161,14 @@ def core_features(
     *,
     dtypes: tuple[str, ...],
     decode: bool,
+    ragged: bool,
 ) -> set[str]:
     """The exclusive groups shared by forward and backward.
 
     These are ``dtype``, ``head_dim``, ``heads``, ``layout``, ``mask``, ``seq``
     and ``scale``. ``decode`` says whether a single query position counts as
     ``seq:decode`` or as an ordinary ``q_eq_kv`` / ``q_ne_kv`` shape.
+    ``ragged`` says whether a ragged q is ``layout:ragged`` or uncatalogued.
     """
     inputs = node.get("inputs") or {}
     q, k, v = (tensors_by_uid[inputs[f"{port}_tensor_uid"]] for port in "qkv")
@@ -180,15 +185,21 @@ def core_features(
     head_dim = HEAD_DIMS.get((head_dim_qk, head_dim_v))
     if head_dim is None:
         raise FeatureError(f"head dim {head_dim_qk} x {head_dim_v} is not catalogued")
-    # Stable sort: dims of equal stride (a size-1 dim) keep their bhsd order.
-    order = tuple(sorted(range(4), key=lambda dim: -q["strides"][dim]))
-    if order not in LAYOUTS:
-        raise FeatureError(f"q stride order {order} is not a catalogued layout")
+    if q.get("ragged_offset_tensor_uid") is not None:
+        if not ragged:
+            raise FeatureError("ragged q is not catalogued")
+        layout = "ragged"
+    else:
+        # Stable sort: dims of equal stride (a size-1 dim) keep their bhsd order.
+        order = tuple(sorted(range(4), key=lambda dim: -q["strides"][dim]))
+        if order not in LAYOUTS:
+            raise FeatureError(f"q stride order {order} is not a catalogued layout")
+        layout = LAYOUTS[order]
 
     features = {
         f"dtype:{dtype}",
         f"head_dim:{head_dim}",
-        f"layout:{LAYOUTS[order]}",
+        f"layout:{layout}",
         mask_kind(attrs),
     }
     if heads_q == heads_kv:
@@ -218,7 +229,9 @@ def extract(node: dict, tensors_by_uid: dict) -> set[str]:
     # writes "parameters"; see utilities/json/Sdpa*Attributes.hpp).
     attrs = node.get("attributes") or {}
     has = ports(node)
-    features = core_features(node, attrs, tensors_by_uid, dtypes=DTYPES, decode=True)
+    features = core_features(
+        node, attrs, tensors_by_uid, dtypes=DTYPES, decode=True, ragged=True
+    )
 
     if (
         has("seq_len_q_tensor_uid")

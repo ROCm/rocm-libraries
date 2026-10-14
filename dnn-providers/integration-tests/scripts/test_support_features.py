@@ -777,13 +777,15 @@ def _sdpa(
     v_dims=None,
     dtype="bfloat16",
     strides=_bhsd_strides,
+    ragged=False,
     inputs=None,
     outputs=None,
     **attrs,
 ) -> tuple[dict, dict]:
     """An SDPA node and its tensors, with every port and attribute unset.
 
-    v takes k's dims unless ``v_dims`` says otherwise.
+    v takes k's dims unless ``v_dims`` says otherwise. ``ragged`` packs q by
+    per-batch offsets.
     """
     tensors = {
         uid: {
@@ -794,6 +796,8 @@ def _sdpa(
         }
         for uid, dims in ((1, q_dims), (2, k_dims), (8, v_dims or k_dims))
     }
+    if ragged:
+        tensors[1]["ragged_offset_tensor_uid"] = 30
     node = {
         "type": "SdpaAttributes",
         "inputs": {"q_tensor_uid": 1, "k_tensor_uid": 2, "v_tensor_uid": 8}
@@ -877,6 +881,12 @@ class TestSdpaExtract:
     def test_unknown_layout_raises(self) -> None:
         with pytest.raises(FeatureError, match="stride order"):
             self._extract(strides=lambda dims: [1, 2, 3, 4])
+
+    @pytest.mark.parametrize(
+        "strides", [_bshd_strides, _bhsd_strides, lambda dims: [1, 2, 3, 4]]
+    )
+    def test_ragged_layout_ignores_strides(self, strides) -> None:
+        assert self._group("layout", ragged=True, strides=strides) == "layout:ragged"
 
     @pytest.mark.parametrize(
         "qk, v, expected",
@@ -971,6 +981,7 @@ class TestSdpaExtract:
         reached = set()
         for kwargs in (
             {},
+            {"ragged": True},
             {"dtype": "half", "q_dims": (2, 8, 1, 64), "k_dims": (2, 1, 128, 64)},
             {
                 "dtype": "fp8_e4m3",
@@ -1079,6 +1090,11 @@ class TestSdpaBackwardExtract:
     def test_fp8_raises(self) -> None:
         with pytest.raises(FeatureError, match="dtype 'fp8_e4m3'"):
             self._extract(dtype="fp8_e4m3")
+
+    def test_ragged_raises(self) -> None:
+        # Not counted as its bshd stride order.
+        with pytest.raises(FeatureError, match="ragged q"):
+            self._extract(ragged=True, strides=_bshd_strides)
 
     def test_optional_ports(self) -> None:
         features = self._extract(

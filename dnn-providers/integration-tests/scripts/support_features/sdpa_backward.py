@@ -11,6 +11,8 @@ two differences:
 - The schema has no fp8 scale tensors, so ``dtype`` is bf16 and fp16 only.
 - There is no ``seq:decode``: a backward pass trains, and a single query
   position is an ordinary ``q_eq_kv`` / ``q_ne_kv`` shape.
+- There is no ``layout:ragged``: no backward engine reads ragged offsets, so a
+  ragged q raises ``FeatureError`` rather than counting as its stride order.
 """
 
 from __future__ import annotations
@@ -76,7 +78,7 @@ def extract(node: dict, tensors_by_uid: dict) -> set[str]:
     attrs = node.get("parameters") or {}
     has = sdpa.ports(node)
     features = sdpa.core_features(
-        node, attrs, tensors_by_uid, dtypes=DTYPES, decode=False
+        node, attrs, tensors_by_uid, dtypes=DTYPES, decode=False, ragged=False
     )
 
     if (
