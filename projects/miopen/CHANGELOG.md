@@ -39,6 +39,14 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 * Fixed a `uint64_t` typedef conflict between `miopen_cstdint.hpp` and the system `<stdint.h>`
   that broke runtime kernel compilation on LP64 Linux.
 * [Conv] Fixed `TransposedConvWinoRageRxS<2,3>` being unreachable: it was registered in the solver registry and explicitly instantiated but missing from both Find solver lists, so it could never be enumerated or selected for NHWC convolutions.
+* [Conv] Fixed wrong backward-weights results from `ConvAsmImplicitGemmGTCDynamicWrwXdlopsNHWC`
+  when a batch row read past N reaches 4 GiB. The fp16/bf16 kernels with filter padding read
+  batch rows in packs of 4 or 8, and those rows wrapped back into the tensor through 32-bit
+  offsets. Perf configs and problems that can wrap are now rejected.
+* [Conv] On gfx950, `ConvAsmImplicitGemmGTCDynamicWrwXdlopsNHWC` again accepts FP32 NCHW or
+  NHWC activations up to 4 GiB (previously 2 GiB), and the FP32 gfx950 find-db rows removed by
+  the 2 GiB bound are restored where the tuned config passes the new check. This restores
+  ResNet-50/101 FP32 batch-1024 backward-weights speed. FP16/BF16 keep the 2 GiB bound.
 
 ### Added
 * [Conv] Added gfx950 depthwise backward-weights (fp16/bf16) and gfx1250 depthwise
