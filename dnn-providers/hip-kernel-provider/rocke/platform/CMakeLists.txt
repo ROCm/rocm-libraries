@@ -691,6 +691,7 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_conv_wgrad_streamk_gpu.py"
         "tests/library/tests/test_conv_dgrad_correctness.py"
         "tests/library/tests/test_direct_conv_correctness.py"
+        "tests/library/tests/test_conv_dgrad_depthwise_windowed.py"
         "tests/library/tests/test_attention_dense_gfx942_numeric.py"
         "tests/library/tests/test_attn_bf16_d128_ring.py"
         "tests/library/tests/test_dtype_dispatch.py"

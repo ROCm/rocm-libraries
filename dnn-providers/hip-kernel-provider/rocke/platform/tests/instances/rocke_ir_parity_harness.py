@@ -1157,6 +1157,37 @@ def build_direct_depthwise_dgrad(
     return _build
 
 
+def build_direct_depthwise_dgrad_win(
+    name, arch, N, H, W, groups, KH, PAD, dtype, **knobs
+):
+    """Windowed depthwise dgrad (stride 1); ``knobs`` are the spec's."""
+
+    def _build():
+        from kernels.common.conv_direct_grouped import (
+            DirectConvProblem,
+            DirectDepthwiseDgradWindowedSpec,
+            build_direct_depthwise_dgrad_windowed,
+        )
+
+        p = DirectConvProblem(
+            N=N,
+            H=H,
+            W=W,
+            groups=groups,
+            cpg=1,
+            kpg=1,
+            KH=KH,
+            KW=KH,
+            PAD=PAD,
+            stride=1,
+            dtype=dtype,
+        )
+        spec = DirectDepthwiseDgradWindowedSpec(problem=p, name=name, **knobs)
+        return build_direct_depthwise_dgrad_windowed(spec, arch=arch)
+
+    return _build
+
+
 def build_direct_nongrouped(
     name,
     arch,
@@ -4058,6 +4089,50 @@ def cases():
             stride=2,
             block_w=8,
             block_waves=1,
+        ),
+    )
+
+    # --- conv_direct_dgrad: windowed depthwise dgrad (stride 1) ---
+    # The dot2 VALU form and the Toeplitz MFMA form, both gfx950; the branch
+    # matrix and the C++ twin live in library/tests/parity/conv_direct_dgrad_ext_emit.*.
+    add(
+        "conv_direct_dgrad",
+        "conv_direct_dgrad/gfx950/dw_dgrad_win_dot2_k7",
+        "gfx950",
+        build_direct_depthwise_dgrad_win(
+            "irhash_dw_dgrad_win_950_dot2_k7",
+            "gfx950",
+            N=2,
+            H=14,
+            W=14,
+            groups=64,
+            KH=7,
+            PAD=3,
+            dtype="bf16",
+            block_w=7,
+            block_h=14,
+            dot2=True,
+        ),
+    )
+    add(
+        "conv_direct_dgrad",
+        "conv_direct_dgrad/gfx950/dw_dgrad_win_mfma_k7",
+        "gfx950",
+        build_direct_depthwise_dgrad_win(
+            "irhash_dw_dgrad_win_950_mfma_k7",
+            "gfx950",
+            N=3,
+            H=14,
+            W=14,
+            groups=64,
+            KH=7,
+            PAD=3,
+            dtype="bf16",
+            block_waves=8,
+            block_h=14,
+            mfma=True,
+            w_fold=2,
+            prefetch_rows=2,
         ),
     )
 

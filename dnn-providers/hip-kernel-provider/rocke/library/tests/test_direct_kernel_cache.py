@@ -249,6 +249,105 @@ def test_no_spilling_row_streaming_depthwise_is_built(jobs):
         assert depthwise_stream_register_reason(spec) is None, job.identity.label()
 
 
+_WIN = "direct_depthwise_dgrad_win"
+
+
+def _win(plans):
+    return [p for p in plans if p.identity.algorithm == _WIN]
+
+
+@pytest.mark.parametrize("KH,PAD", [(3, 1), (7, 3), (5, 0), (11, 7)])
+def test_windowed_depthwise_dgrad_serves_stride_1(cache, KH, PAD):
+    """Stride-1 depthwise dgrad gets the windowed kernel beside the streaming
+    one, at every padding; each plan is one dgrad-ABI launch whose grid is
+    decoded from the runtime problem (row tiles of block_h, images folded by
+    w_fold in the MFMA form)."""
+    problem = _problem(N=3, H=13, W=17, groups=136, cpg=1, kpg=1, KH=KH, KW=KH, PAD=PAD)
+    plans, _ = dks.direct_plans(cache, problem, "dgrad", _ARCH)
+    assert {_WIN, "direct_depthwise_dgrad"} <= _variants(plans)
+    for plan in _win(plans):
+        knobs = json.loads(plan.identity.knobs)
+        (step,) = plan.steps
+        assert step.buffers == ("dy", "w", "dx")
+        assert [e["name"] for e in step.signature][:3] == ["A", "B", "D"]
+        h_tiles = -(-problem.H // knobs["block_h"])
+        if knobs.get("mfma"):
+            fold = knobs["w_fold"]
+            assert step.grid == (
+                -(-problem.W // (32 // fold)),
+                -(-problem.groups // (8 * knobs["block_waves"])),
+                -(-problem.N // fold) * h_tiles,
+            )
+        else:
+            assert step.grid == (
+                -(-problem.W // knobs["block_w"]),
+                -(
+                    -problem.groups
+                    // (64 * knobs["block_waves"] * knobs["ch_per_lane"])
+                ),
+                problem.N * h_tiles,
+            )
+
+
+def test_windowed_depthwise_dgrad_is_stride_1_only(cache):
+    problem = _problem(groups=64, cpg=1, kpg=1, KH=5, KW=5, PAD=2, stride=2)
+    plans, _ = dks.direct_plans(cache, problem, "dgrad", _ARCH)
+    assert plans and not _win(plans)
+
+
+def test_windowed_depthwise_dgrad_cached_scope(jobs):
+    """The cache holds the knob image of the tile policy, not a product: dot2
+    exactly where it pairs taps, channel pairs only for 3x3, the MFMA form
+    only for "same"-padded 5x5..9x9, and every tile within the unroll budget."""
+    win = [j for j in jobs if j.identity.algorithm == _WIN]
+    assert win
+    mfma = [j for j in win if j.spec_kwargs.get("mfma")]
+    valu = [j for j in win if not j.spec_kwargs.get("mfma")]
+    assert {(j.identity.filter_h, j.identity.pad_h) for j in mfma} == {
+        (k, (k - 1) // 2) for k in dks.DW_WIN_MFMA_FILTERS
+    }
+    for j in valu:
+        kw, knobs = j.identity.filter_w, j.spec_kwargs
+        assert knobs["dot2"] == (kw >= 5)
+        assert knobs["ch_per_lane"] == 1 or kw == 3
+        fmas = knobs["block_h"] * kw * kw * knobs["block_w"] * knobs["ch_per_lane"]
+        assert fmas <= dks.DW_WIN_UNROLL_BUDGET
+    # Every capability row has a binary (the smallest tile fits any filter).
+    assert {(j.identity.filter_h, j.identity.pad_h) for j in valu} == {
+        (c.KH, c.PAD) for c in dks.DIRECT_CAPABILITIES[_WIN][1]
+    }
+
+
+def test_windowed_depthwise_dgrad_mfma_needs_groups_multiple_of_8(cache):
+    problem = _problem(groups=60, cpg=1, kpg=1, KH=7, KW=7, PAD=3)
+    plans, rejected = dks.direct_plans(cache, problem, "dgrad", _ARCH)
+    assert _win(plans) and not any(
+        json.loads(p.identity.knobs).get("mfma") for p in _win(plans)
+    )
+    assert any(
+        "groups % 8" in why
+        for ident, why in rejected
+        if ident.algorithm == _WIN and json.loads(ident.knobs).get("mfma")
+    )
+
+
+def test_windowed_depthwise_dgrad_binary_is_found_by_identity():
+    """direct_job_for_identity rebuilds a windowed job from its identity alone
+    (both forms), as --compile-all does for a named kernel."""
+    target = ArchTarget.from_gfx(_ARCH)
+    cells = [
+        job
+        for caps in dks.DIRECT_CAPABILITIES[_WIN][1]
+        if (caps.KH, caps.PAD) == (7, 3)
+        for _, job in dks._caps_jobs(
+            _ARCH, target.wave_size, _WIN, "dgrad", caps, "bf16"
+        )[1]
+    ]
+    assert any(j.spec_kwargs.get("mfma") for j in cells)
+    for job in cells:
+        assert dks.direct_job_for_identity(job.identity).identity == job.identity
+
+
 def _nongrouped(plans):
     return [p for p in plans if p.identity.algorithm == "direct_nongrouped"]
 
@@ -599,6 +698,8 @@ def test_mfma_dgrad_grid_skips_spilling_preloads(jobs):
         # Only the column-streamed kernel serves non-"same" forward padding.
         ("fwd", _problem(groups=64, cpg=1, kpg=1, KH=5, KW=5, PAD=0, stride=2)),
         ("dgrad", _problem(groups=64, cpg=1, kpg=1, KH=5, KW=5, PAD=0, stride=2)),
+        # Stride-1 depthwise: the windowed kernel (both forms) as well.
+        ("dgrad", _problem(groups=64, cpg=1, kpg=1, KH=7, KW=7, PAD=3)),
         ("dgrad", _problem(cpg=8, kpg=8, stride=2)),
         ("dgrad", _problem()),
         ("wgrad", _problem()),

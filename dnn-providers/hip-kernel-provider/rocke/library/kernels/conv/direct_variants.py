@@ -128,6 +128,10 @@ def make_direct_spec(variant: str, problem, knobs: dict):
         return dc.DirectDepthwiseDgradStreamSpec(
             problem=problem, name="rocke_direct_dw_dgrad", **knobs
         )
+    if variant == "direct_depthwise_dgrad_win":
+        return dc.DirectDepthwiseDgradWindowedSpec(
+            problem=problem, name="rocke_direct_dw_dgrad_win", **knobs
+        )
     if variant == "direct_grouped_dgrad":
         return dc.DirectConvDgradSpec(
             problem=problem, name="rocke_direct_dgrad", **knobs
@@ -305,6 +309,8 @@ def validate_direct_spec(variant: str, spec, arch: str) -> tuple[bool, str]:
             return dc.is_valid_depthwise_col_spec(spec, arch=arch)
         if variant == "direct_depthwise_dgrad":
             return dc.is_valid_depthwise_dgrad_stream_spec(spec, arch=arch)
+        if variant == "direct_depthwise_dgrad_win":
+            return dc.is_valid_depthwise_dgrad_win_spec(spec, arch=arch)
         if variant == "direct_grouped_dgrad":
             return dc.is_valid_dgrad_spec(spec, arch=arch)
         if variant == "direct_wgrad":
@@ -369,6 +375,7 @@ def select_direct_kernel_builder(variant: str, spec, arch: str):
         "direct_depthwise_tiled": dc.build_direct_depthwise_tiled,
         "direct_depthwise_col": dc.build_direct_depthwise_col,
         "direct_depthwise_dgrad": dc.build_direct_depthwise_dgrad_streaming,
+        "direct_depthwise_dgrad_win": dc.build_direct_depthwise_dgrad_windowed,
         "direct_grouped_dgrad": dc.build_direct_conv_dgrad,
         "direct_wgrad": dc.build_direct_conv_wgrad,
         DIRECT_DGRAD_TRANSPOSE: dc.build_direct_transpose_weights_dgrad,

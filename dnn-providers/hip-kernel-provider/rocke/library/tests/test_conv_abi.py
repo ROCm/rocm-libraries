@@ -483,6 +483,57 @@ def _direct_builders():
                 dc.DirectDepthwiseDgradStreamSpec(problem=pr), arch=_ARCH
             ),
         ),
+        # Windowed depthwise dgrad: the tile height is baked, the image is not
+        # (row tiles decoded from p_Hi, padding rows guarded at run time).
+        (
+            "dw_dgrad_win",
+            dict(cpg=1, kpg=1, groups=32),
+            "dgrad",
+            lambda pr: dc.build_direct_depthwise_dgrad_windowed(
+                dc.DirectDepthwiseDgradWindowedSpec(
+                    problem=pr, block_w=8, block_waves=2, block_h=7
+                ),
+                arch=_ARCH,
+            ),
+        ),
+        (
+            "dw_dgrad_win_cpl2",
+            dict(cpg=1, kpg=1, groups=32),
+            "dgrad",
+            lambda pr: dc.build_direct_depthwise_dgrad_windowed(
+                dc.DirectDepthwiseDgradWindowedSpec(
+                    problem=pr, block_w=12, ch_per_lane=2, block_h=12
+                ),
+                arch=_ARCH,
+            ),
+        ),
+        (
+            "dw_dgrad_win_dot2",
+            dict(cpg=1, kpg=1, groups=32),
+            "dgrad",
+            lambda pr: dc.build_direct_depthwise_dgrad_windowed(
+                dc.DirectDepthwiseDgradWindowedSpec(
+                    problem=pr, block_w=7, block_h=14, dot2=True
+                ),
+                arch=_ARCH,
+            ),
+        ),
+        (
+            "dw_dgrad_win_mfma",
+            dict(cpg=1, kpg=1, groups=32),
+            "dgrad",
+            lambda pr: dc.build_direct_depthwise_dgrad_windowed(
+                dc.DirectDepthwiseDgradWindowedSpec(
+                    problem=pr,
+                    block_waves=4,
+                    block_h=8,
+                    mfma=True,
+                    w_fold=2,
+                    prefetch_rows=2,
+                ),
+                arch=_ARCH,
+            ),
+        ),
         (
             "wgrad",
             dict(cpg=16, kpg=16, groups=8),
