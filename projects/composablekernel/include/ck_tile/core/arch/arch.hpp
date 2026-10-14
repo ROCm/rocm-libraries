@@ -119,12 +119,13 @@ enum struct amdgcn_target_id
     GFX11_GENERIC   = 0x11FF,
     GFX1170         = 0x1170,
     GFX1171         = 0x1171,
-    GFX11_7_GENERIC = 0x117F GFX1200 = 0x1200,
-    GFX1201                          = 0x1201,
-    GFX12_GENERIC                    = 0x12FF,
-    GFX1250                          = 0x1250,
-    AMDGCN_SPIRV                     = 0xFFFF, // Target-agnostic SPIR-V (JIT to native at runtime)
-    HOST                             = 0x0000,
+    GFX11_7_GENERIC = 0x117F,
+    GFX1200         = 0x1200,
+    GFX1201         = 0x1201,
+    GFX12_GENERIC   = 0x12FF,
+    GFX1250         = 0x1250,
+    AMDGCN_SPIRV    = 0xFFFF, // Target-agnostic SPIR-V (JIT to native at runtime)
+    HOST            = 0x0000,
 };
 
 // to_string methods for enum classes
