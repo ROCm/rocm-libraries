@@ -3695,7 +3695,12 @@ class StreamKTwoTileDPFirst(StreamK):
         # here would over-count the -3 barrier. DEFER that arrive to just after the
         # work-check. The ForceDPOnly cluster has already dropped its no-work peers
         # in streamKClusterPadEarlyExit above, so it arrives here.
-        if streamKCluster(kernel):
+        #
+        # Subtile emits its own balanced signal/wait pair per section
+        # (Subtile/ClusterBarrier.insertClusterBarrier), so an extra arrive here
+        # is never consumed and leaks into the next launch's -3 barrier phase,
+        # hanging back-to-back launches.
+        if streamKCluster(kernel) and not kernel.get("UseSubtileImpl", False):
             module.add(self.streamKMulticastPrologueSignal(writer, kernel))
 
         if kernel["StreamKForceDPOnly"]:

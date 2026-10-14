@@ -136,6 +136,8 @@ class InstructionEmitter:
             'sync':         lambda em, ui: self.emit_sync(),
             'lr_inc':       lambda em, ui: self.emit_lr_inc(em.source),
             'gr_inc':       lambda em, ui: self.emit_gr_inc(em.source),
+            'tdm_refresh':  lambda em, ui: list(refreshTDMDescriptorSubtile(
+                                self.writer, self.kernel, em.source.tensor).flatitems()),
             'skip':         lambda em, ui: self.emit_skip(em.source),
             'mask_k':       lambda em, ui: self.emit_mask_k(em.source),
             'inline':       lambda em, ui: self.emit_inline(em.source),
@@ -267,7 +269,8 @@ class InstructionEmitter:
                     subtileK = (k - uid_k_base) // self.subtileShapeK
                     if (self.kernel.get("UseSubtileImpl")
                             and self.kernel.get("enableTDM%s" % tensor, False)
-                            and tileId == 0 and subtileK == 0):
+                            and tileId == 0 and subtileK == 0
+                            and not placement.tdmDescHoisted):
                         module.add(refreshTDMDescriptorSubtile(
                             self.writer, self.kernel, tensor))
                     module.add(emitSingleBufferLoad(ti, self.kernel, tileId, subtileK))

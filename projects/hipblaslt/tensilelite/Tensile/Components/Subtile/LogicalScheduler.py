@@ -242,9 +242,10 @@ class Pass(IntEnum):
     GROUP_LR_GR         = 8
     REMOVE_WAIT_LR_SYNC = 9
     REMOVE_WAIT_GR_SYNC = 10
-    EMIT                = 11
-    BUILD               = 12
-    POPULATE            = 13
+    HOIST_TDM_SETUP     = 11
+    EMIT                = 12
+    BUILD               = 13
+    POPULATE            = 14
 
     @classmethod
     def pipeline(cls) -> Tuple[Pass, ...]:
@@ -345,6 +346,8 @@ class SchedulerConfig:
                               # persistent vgpr tile for the whole unroll iter instead of
                               # ping-ponging 2 sets. Prerequisite for clustering scale LRs
                               # upfront; by itself just removes the 2-deep register reuse.
+    hoistTDMSetup: bool = False  # TDM A/B: issue gr_inc + descriptor refresh before the
+                              # GR chain's barrier so only tensor_load_to_lds waits on it.
 
     # Resolve a partition spec into per-partition sizes along one dimension.
     # spec is either:
@@ -556,6 +559,7 @@ class GRPlacement(Emittable):
     deps: List['Dep'] = field(default_factory=list)      # populated by annotate_deps()
     preOps: List['BaseOp'] = field(default_factory=list)     # populated by remove_cross_deps()
     postOps: List['BaseOp'] = field(default_factory=list)    # populated by insert_gr_lr_inc()
+    tdmDescHoisted: bool = False  # descriptor refresh moved to a TDMRefreshOp by hoist_tdm_setup()
 
     def __post_init__(self):
         self.kind = 'gr'
@@ -695,6 +699,18 @@ class GRIncOp(BaseOp):
 
     def __str__(self):
         return f"gr_inc({self.tensor})"
+
+
+@dataclass
+class TDMRefreshOp(BaseOp):
+    """Rebuild a TDM descriptor from the current address / LDS SGPRs."""
+    tensor: str = ""
+
+    def __post_init__(self):
+        self.kind = 'tdm_refresh'
+
+    def __str__(self):
+        return f"tdm_refresh({self.tensor})"
 
 
 @dataclass
@@ -2788,6 +2804,50 @@ class LogicalScheduler:
                     gr.preOps = [
                         SyncOp() if (isinstance(op, WaitLROp) and op.has_sync) else op
                         for op in gr.preOps]
+
+    @pipeline_pass(Pass.HOIST_TDM_SETUP)
+    def hoist_tdm_setup(self):
+        """Move TDM address/descriptor SALU above the barrier of each GR chain.
+
+        Only tensor_load_to_lds overwrites LDS other waves may still read; the
+        pointer update, LDS buffer swap and descriptor rebuild just write SGPRs.
+        Issuing them before the barrier lets the loads go back to back after it.
+
+        The A/B descriptor refreshes are hoisted, the SA/SB ones are not: the
+        scale descriptors alias the A/B descriptor SGPRs, so they can only be
+        rebuilt after the A/B loads have issued.
+        """
+        if not self.config.hoistTDMSetup:
+            return
+
+        def isSync(op):
+            return isinstance(op, SyncOp) or (
+                isinstance(op, (WaitLROp, WaitGROp)) and op.has_sync)
+
+        for slots in self._partitions:
+            for slot in slots:
+                grs = sorted(slot.grs, key=self._gr_sort_key)
+                if not grs or len({gr.tensor for gr in grs}) != len(grs):
+                    continue
+                first = grs[0]
+                syncIdx = next((i for i, op in enumerate(first.preOps) if isSync(op)), None)
+                if syncIdx is None:
+                    continue
+                hoisted = []
+                for gr in grs:
+                    start = syncIdx + 1 if gr is first else 0
+                    if any(isSync(op) for op in gr.preOps[start:]):
+                        break
+                    incs = [op for op in gr.preOps[start:] if isinstance(op, GRIncOp)]
+                    gr.preOps = gr.preOps[:start] + [
+                        op for op in gr.preOps[start:] if not isinstance(op, GRIncOp)]
+                    hoisted += incs
+                    gran = self.config.grA if gr.tensor == 'A' else self.config.grB
+                    if (gr.tensor in ('A', 'B') and gr.tiles.tileId_start == 0
+                            and gr.tiles.subIterK_start == gr.unrollId * gran.k):
+                        hoisted.append(TDMRefreshOp(tensor=gr.tensor))
+                        gr.tdmDescHoisted = True
+                first.preOps[syncIdx:syncIdx] = hoisted
 
 
     @pipeline_pass(Pass.REMOVE_WAIT_GR_SYNC)

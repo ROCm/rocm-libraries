@@ -315,5 +315,28 @@ class TestEmit:
                             + line.strip())
 
 
+_SUBTILE_SK3_CLUSTER = os.path.join(_DESIGNED, "subtile_mxf4_sk3_cluster.yaml")
+
+
+class TestSubtileClusterBarrierBalance:
+    """Subtile emits its own signal/wait pair per section, so the StreamK
+    prologue must not add an unpaired cluster arrive. An unconsumed arrive
+    carries into the next launch's -3 barrier phase and hangs back-to-back
+    launches after a few dispatches."""
+
+    def test_signals_match_waits(self):
+        from config_harness import emit_kernels_from_config
+        kernels = emit_kernels_from_config(_SUBTILE_SK3_CLUSTER, limit=1, arch=_ARCH,
+                                           cluster_dim=[2, 4])
+        assert kernels
+        for _b, src, err in kernels:
+            assert err == 0
+            code = [l.split("//")[0].strip() for l in src.splitlines()]
+            signals = sum(1 for l in code if l == "s_barrier_signal -3")
+            waits = sum(1 for l in code if l == "s_barrier_wait -3")
+            assert signals > 0
+            assert signals == waits, (signals, waits)
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))

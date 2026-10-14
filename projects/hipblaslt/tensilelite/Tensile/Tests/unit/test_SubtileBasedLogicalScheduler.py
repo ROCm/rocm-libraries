@@ -4238,3 +4238,47 @@ class TestInitCMakeOpWiring:
         # Last MFMA should NOT have reuse (no successor)
         assert not mfmas[-1].reuseA
         assert not mfmas[-1].reuseB
+
+
+class TestHoistTDMSetup:
+    """hoist_tdm_setup moves gr_inc + the A/B descriptor refresh above the GR
+    chain's barrier; only tensor_load_to_lds has to wait for other waves."""
+
+    @staticmethod
+    def _build(hoist):
+        cfg = SchedulerConfig(
+            numMFMATilesM=4, numMFMATilesN=8, numSubIterK=4,
+            lrA=ReadGranularity(mn=1, k=1), lrB=ReadGranularity(mn=1, k=1),
+            grA=ReadGranularity(mn=4, k=4), grB=ReadGranularity(mn=8, k=4),
+            pgr=2, grPlacement=GRPlacementStrategy.BUNCHED, hoistTDMSetup=hoist)
+        sched = LogicalScheduler(cfg)
+        parts = sched.build(stop_after=Pass.HOIST_TDM_SETUP)
+        grs = [gr for slots in parts for slot in slots for gr in slot.grs]
+        return sched, grs
+
+    def test_off_keeps_setup_after_barrier(self):
+        _sched, grs = self._build(False)
+        a, b = sorted(grs, key=lambda gr: gr.tensor)
+        assert [str(op) for op in a.preOps] == ['wait_lr_sync', 'gr_inc(A)']
+        assert [str(op) for op in b.preOps] == ['gr_inc(B)']
+        assert not a.tdmDescHoisted and not b.tdmDescHoisted
+
+    def test_on_hoists_setup_above_barrier(self):
+        sched, grs = self._build(True)
+        a, b = sorted(grs, key=lambda gr: gr.tensor)
+        assert [str(op) for op in a.preOps] == [
+            'gr_inc(A)', 'tdm_refresh(A)', 'gr_inc(B)', 'tdm_refresh(B)', 'wait_lr_sync']
+        assert b.preOps == []
+        assert a.tdmDescHoisted and b.tdmDescHoisted
+
+        emitted = sched.build(stop_after=Pass.EMIT)
+        slot = next(s for s in emitted[0] if any(e.opType == 'gr' for e in s))
+        byId = {e.moduleId: e for e in slot}
+        grA = next(e for e in slot if e.opType == 'gr' and e.source.tensor == 'A')
+        chain, node = [], grA
+        while node.before is not None:
+            node = byId[node.before]
+            chain.append(node.opType)
+        sync = chain.index('sync')
+        assert chain.count('tdm_refresh') == 2
+        assert all(chain.index(t) > sync for t in ('tdm_refresh', 'gr_inc'))

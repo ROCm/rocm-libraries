@@ -1481,6 +1481,7 @@ def mainLoop(writer, kernel):
           pgl=kernel.get("PrefetchGL2", 0),
           numLdsBlk=kernel.get("NumLdsBlk", 2),
           scaleFullResidency=bool(kernel.get("ScaleLRFullResidency", False)),
+          hoistTDMSetup=bool(kernel.get("enableTDMA") and kernel.get("enableTDMB")),
       )
 
       scheduler = LogicalScheduler(cfg)

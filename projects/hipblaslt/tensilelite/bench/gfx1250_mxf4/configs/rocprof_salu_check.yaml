@@ -1,0 +1,20 @@
+# Ad-hoc: quantify SALU/VALU/TDM instruction issue counts + WMMA active cycles
+# vs. total kernel-active cycles, to check whether the redundant per-wave TDM
+# issuance / s_set_vgpr_msb overhead shows up as real stall cycles on gfx1250.
+jobs:
+  - kernel_trace: true
+    kernel_include_regex: "Cijk"
+    pmc:
+      - SQ_INSTS_TDM
+      - SQ_INSTS_SALU
+      - SQ_INSTS_VALU
+      - SQ_INSTS_LDS
+      - SQ_INST_CYCLES_LDS
+      - SQ_INST_CYCLES_VALU_WMMA
+      - SQ_WAVES
+      - SQ_BUSY_CYCLES
+      - GRBM_GUI_ACTIVE
+    output_format:
+      - csv
+      - json
+    log_level: info
