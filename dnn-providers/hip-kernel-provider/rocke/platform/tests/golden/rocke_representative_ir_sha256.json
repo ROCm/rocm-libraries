@@ -1146,6 +1146,46 @@
           "sha256": "97e5d82a9b670492822cc4e88c8c71766d0269519cda08f4d75775010d33c4fa",
           "status": "ok"
         },
+        "crosslane/gfx1201/warp_shuffle_xor_dpp_reduce_i32": {
+          "arch": "gfx1201",
+          "bytes": 1571,
+          "family": "crosslane",
+          "kernel_name": "irhash_warp_shuffle_xor_dpp_reduce_gfx1201",
+          "sha256": "115eda75a10d675561a1344e3f027817a0dab0501300956b5b8e10913f5717db",
+          "status": "ok"
+        },
+        "crosslane/gfx942/warp_shuffle_xor_dpp_masks_f32": {
+          "arch": "gfx942",
+          "bytes": 2311,
+          "family": "crosslane",
+          "kernel_name": "irhash_warp_shuffle_xor_dpp_masks_f32_gfx942",
+          "sha256": "53bb172c0c1a4b92e5845ae25622a58cafc0ffc20cc253e9e36b30bfec30e5ca",
+          "status": "ok"
+        },
+        "crosslane/gfx942/warp_shuffle_xor_dpp_reduce_i32": {
+          "arch": "gfx942",
+          "bytes": 1569,
+          "family": "crosslane",
+          "kernel_name": "irhash_warp_shuffle_xor_dpp_reduce_gfx942",
+          "sha256": "bead4c0c6804d720d9c5cdade1c9db9c585a958a102c32b380391656e872c931",
+          "status": "ok"
+        },
+        "crosslane/gfx950/warp_shuffle_xor_dpp_masks_f32": {
+          "arch": "gfx950",
+          "bytes": 2311,
+          "family": "crosslane",
+          "kernel_name": "irhash_warp_shuffle_xor_dpp_masks_f32_gfx950",
+          "sha256": "2a246f1c01df84a8b72d784443527d68c87890b74e2ca1a1adbaf95a4717ee29",
+          "status": "ok"
+        },
+        "crosslane/gfx950/warp_shuffle_xor_dpp_reduce_i32": {
+          "arch": "gfx950",
+          "bytes": 1569,
+          "family": "crosslane",
+          "kernel_name": "irhash_warp_shuffle_xor_dpp_reduce_gfx950",
+          "sha256": "310bed93f62e50b2be8d0172eadcde77648e2da4715e1c931fa3d72c84f4a65f",
+          "status": "ok"
+        },
         "deep/common_gfx950_wt16/h16w16_k32": {
           "arch": "gfx950",
           "bytes": 54706,
@@ -1545,11 +1585,11 @@
         "arches": {
           "gfx11-generic": 1,
           "gfx1151": 10,
-          "gfx1201": 7,
+          "gfx1201": 8,
           "gfx1250": 4,
           "gfx90a": 5,
-          "gfx942": 40,
-          "gfx950": 123
+          "gfx942": 42,
+          "gfx950": 125
         },
         "expected_failures": 4,
         "families": {
@@ -1566,6 +1606,7 @@
           "conv_wgrad": 21,
           "conv_wgrad_reduce": 3,
           "conv_wgrad_two_stage": 2,
+          "crosslane": 5,
           "deep_fused_conv": 9,
           "gemm": 13,
           "grouped_gemm": 1,
@@ -1573,7 +1614,7 @@
           "moe": 9,
           "nontemporal": 2
         },
-        "ok_cases": 190
+        "ok_cases": 195
       }
     },
     "llvm22": {
@@ -2722,6 +2763,46 @@
           "sha256": "ba6a28520cba7ce7a5295016b0f8645ae0ef998574f396e5456e81206c04fc46",
           "status": "ok"
         },
+        "crosslane/gfx1201/warp_shuffle_xor_dpp_reduce_i32": {
+          "arch": "gfx1201",
+          "bytes": 1578,
+          "family": "crosslane",
+          "kernel_name": "irhash_warp_shuffle_xor_dpp_reduce_gfx1201",
+          "sha256": "29d179f2e0f445df22804d64bd5e660f35012d3c04f6ca024248f217b14e9a59",
+          "status": "ok"
+        },
+        "crosslane/gfx942/warp_shuffle_xor_dpp_masks_f32": {
+          "arch": "gfx942",
+          "bytes": 2318,
+          "family": "crosslane",
+          "kernel_name": "irhash_warp_shuffle_xor_dpp_masks_f32_gfx942",
+          "sha256": "ad8b6246296c643f5c5db09f94da3bab7fe03da2e44862eafe37c3cf2c6303d0",
+          "status": "ok"
+        },
+        "crosslane/gfx942/warp_shuffle_xor_dpp_reduce_i32": {
+          "arch": "gfx942",
+          "bytes": 1576,
+          "family": "crosslane",
+          "kernel_name": "irhash_warp_shuffle_xor_dpp_reduce_gfx942",
+          "sha256": "bba9fe84d9c58bef9c199c3af8c572d22ade94fa45cdccda7c5d13ba944fa032",
+          "status": "ok"
+        },
+        "crosslane/gfx950/warp_shuffle_xor_dpp_masks_f32": {
+          "arch": "gfx950",
+          "bytes": 2318,
+          "family": "crosslane",
+          "kernel_name": "irhash_warp_shuffle_xor_dpp_masks_f32_gfx950",
+          "sha256": "6e82642e4bc379043ed70fb6355cf8d25b04783637e2e0b160255ea9dc7116d7",
+          "status": "ok"
+        },
+        "crosslane/gfx950/warp_shuffle_xor_dpp_reduce_i32": {
+          "arch": "gfx950",
+          "bytes": 1576,
+          "family": "crosslane",
+          "kernel_name": "irhash_warp_shuffle_xor_dpp_reduce_gfx950",
+          "sha256": "a06965b32f3b9670dd64e852949294b94800ba823b453dc192d4e6ab50266cac",
+          "status": "ok"
+        },
         "deep/common_gfx950_wt16/h16w16_k32": {
           "arch": "gfx950",
           "bytes": 54888,
@@ -3121,11 +3202,11 @@
         "arches": {
           "gfx11-generic": 1,
           "gfx1151": 10,
-          "gfx1201": 7,
+          "gfx1201": 8,
           "gfx1250": 4,
           "gfx90a": 5,
-          "gfx942": 40,
-          "gfx950": 123
+          "gfx942": 42,
+          "gfx950": 125
         },
         "expected_failures": 4,
         "families": {
@@ -3142,6 +3223,7 @@
           "conv_wgrad": 21,
           "conv_wgrad_reduce": 3,
           "conv_wgrad_two_stage": 2,
+          "crosslane": 5,
           "deep_fused_conv": 9,
           "gemm": 13,
           "grouped_gemm": 1,
@@ -3149,7 +3231,7 @@
           "moe": 9,
           "nontemporal": 2
         },
-        "ok_cases": 190
+        "ok_cases": 195
       }
     },
     "llvm23": {
@@ -4298,6 +4380,46 @@
           "sha256": "fbf1a2b7546a2c19465b79b7b1446012e23dfae365e5e2886c80618e94bf6c0f",
           "status": "ok"
         },
+        "crosslane/gfx1201/warp_shuffle_xor_dpp_reduce_i32": {
+          "arch": "gfx1201",
+          "bytes": 1642,
+          "family": "crosslane",
+          "kernel_name": "irhash_warp_shuffle_xor_dpp_reduce_gfx1201",
+          "sha256": "6e69bb83a1c8f07bc9c57121e5f5758fe340d6df1d364b14894d9b01b483dcb6",
+          "status": "ok"
+        },
+        "crosslane/gfx942/warp_shuffle_xor_dpp_masks_f32": {
+          "arch": "gfx942",
+          "bytes": 2382,
+          "family": "crosslane",
+          "kernel_name": "irhash_warp_shuffle_xor_dpp_masks_f32_gfx942",
+          "sha256": "b5ac8c44ca66b388e1cf3f0caa231b712736d9c167efce3ad64bb0448e7050ae",
+          "status": "ok"
+        },
+        "crosslane/gfx942/warp_shuffle_xor_dpp_reduce_i32": {
+          "arch": "gfx942",
+          "bytes": 1640,
+          "family": "crosslane",
+          "kernel_name": "irhash_warp_shuffle_xor_dpp_reduce_gfx942",
+          "sha256": "5fb17686bcc9cc7d2a5eb55881449ffaffe4d34104f4c2ba2fe3890430005418",
+          "status": "ok"
+        },
+        "crosslane/gfx950/warp_shuffle_xor_dpp_masks_f32": {
+          "arch": "gfx950",
+          "bytes": 2382,
+          "family": "crosslane",
+          "kernel_name": "irhash_warp_shuffle_xor_dpp_masks_f32_gfx950",
+          "sha256": "3dc95376d3edbea4f9b153c17c814af871b06f2642eee86e1b24f81f13809e01",
+          "status": "ok"
+        },
+        "crosslane/gfx950/warp_shuffle_xor_dpp_reduce_i32": {
+          "arch": "gfx950",
+          "bytes": 1640,
+          "family": "crosslane",
+          "kernel_name": "irhash_warp_shuffle_xor_dpp_reduce_gfx950",
+          "sha256": "1876c64511c6c57254c6209e1b17fd0309a2fdc3dff7f0823cfc1c68a0909ee2",
+          "status": "ok"
+        },
         "deep/common_gfx950_wt16/h16w16_k32": {
           "arch": "gfx950",
           "bytes": 54952,
@@ -4712,11 +4834,11 @@
         "arches": {
           "gfx11-generic": 1,
           "gfx1151": 10,
-          "gfx1201": 7,
+          "gfx1201": 8,
           "gfx1250": 8,
           "gfx90a": 5,
-          "gfx942": 40,
-          "gfx950": 123
+          "gfx942": 42,
+          "gfx950": 125
         },
         "expected_failures": 0,
         "families": {
@@ -4733,6 +4855,7 @@
           "conv_wgrad": 21,
           "conv_wgrad_reduce": 3,
           "conv_wgrad_two_stage": 2,
+          "crosslane": 5,
           "deep_fused_conv": 9,
           "gemm": 17,
           "grouped_gemm": 1,
@@ -4740,7 +4863,7 @@
           "moe": 9,
           "nontemporal": 2
         },
-        "ok_cases": 194
+        "ok_cases": 199
       }
     }
   },
