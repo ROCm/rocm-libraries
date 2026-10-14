@@ -471,6 +471,9 @@ rocblaslt_status rocblaslt_copy_matmul(rocblaslt_matmul_desc src, rocblaslt_matm
 // the device-library subtree and the files inside it.
 std::string rocblaslt_internal_get_arch_name();
 
+// The same name, for the device described by prop.
+std::string rocblaslt_internal_get_arch_name(const hipDeviceProp_t& prop);
+
 // for internal use of testing existence of path
 bool rocblaslt_internal_test_path(const std::string&);
 
