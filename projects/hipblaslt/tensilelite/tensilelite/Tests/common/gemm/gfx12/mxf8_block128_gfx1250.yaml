@@ -9,14 +9,10 @@
 # The list is the scaling tile written innermost (K) extent last; a bare int is
 # the same as a one-element list. Derived from mxf8_gfx1250.yaml (1x16, 1x32).
 #
-# STATUS: host-side only. Reference, scale descriptors, data generation and
-# solution derivation all handle these shapes, but the assembly MAC path still
-# emits the 1x32 scaled WMMA (v_wmma_scale_f32_16x16x128_f8f6f4), so validation
-# is expected to mismatch. The "_wip" suffix makes config_helpers.configMarks
-# apply a non-strict xfail. Once the assembly lands this XPASSes -- fold both
-# groups into mxf8_gfx1250.yaml and delete this file then, and widen the
-# parameter sweeps (HalfPLR, TDMIterateMode, PrefetchGlobalRead, GlobalSplitU)
-# that mxf8_gfx1250.yaml runs for 1x16 / 1x32 and this file deliberately omits.
+# STATUS: both groups validate end to end. The parameter sweeps (HalfPLR,
+# TDMIterateMode, PrefetchGlobalRead, GlobalSplitU) that mxf8_gfx1250.yaml runs
+# for 1x16 / 1x32 are deliberately left out here; widen them and fold both
+# groups into mxf8_gfx1250.yaml once those combinations are known to work.
 #
 # TILE CHOICE: MT256x256 (MIWaveTile 8x8) does not fit -- 1049 VGPRs against a
 # 1024 budget -- and is a property of the tile, not of MX scaling: the same 8x8
