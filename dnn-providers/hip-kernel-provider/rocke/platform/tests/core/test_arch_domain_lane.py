@@ -290,6 +290,29 @@ def test_every_binding_requires_a_target() -> None:
     assert not offenders, offenders
 
 
+@_needs_sources
+def test_no_binding_source_defaults_the_target() -> None:
+    """The sweep above needs a built ``rocke_engine``, and CI builds none, so a
+    binding that guesses its target gets past every run without one. Each of the
+    two ways it happens shows in the source: the helper that stood for "usual
+    arch" when ``arch`` was empty, and a gfx target as the default of an
+    ``arch`` argument. Code written against develop keeps reaching for the first,
+    so this is checked from a source checkout, where a run without the extension
+    can still see it.
+    """
+    import re
+
+    sources = sorted((PLATFORM / "cpp" / "bindings").glob("*.[ch]pp"))
+    assert sources, "no binding sources found"
+    offenders = [
+        f"{path.name}:{number}: {line.strip()[:90]}"
+        for path in sources
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1)
+        if "arch_or_default" in line or re.search(r'py::arg\("arch"\)\s*=', line)
+    ]
+    assert not offenders, "\n".join(offenders)
+
+
 def test_explicit_arch_still_lowers() -> None:
     ir = lower_kernel_to_llvm(_a_kernel(), arch="gfx950")
     assert "target triple" in ir
