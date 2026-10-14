@@ -450,6 +450,107 @@ class TestCli:
         assert "error: 1 defect(s)" in captured.err
 
 
+@pytest.mark.usefixtures("fake_registry")
+class TestDrillDown:
+    """``--graphs``: the graphs behind one feature, and behind one cell."""
+
+    @staticmethod
+    def _tree(root: Path) -> None:
+        _bundle(root, "unclaimed", [_node(features=["dtype:fp16"])])
+        _bundle(
+            root,
+            "both",
+            [_node(features=["dtype:fp16", "mask:causal"])],
+            claims={"E1": {"gfx942": ["linux"]}, "E2": {"gfx950": ["windows"]}},
+        )
+        _bundle(
+            root,
+            "other",
+            [_node(features=["dtype:bf16"])],
+            claims={"E1": {"gfx942": ["linux"]}},
+        )
+
+    def _run(self, root: Path, capsys, *args: str) -> tuple[int, str, str]:
+        code = main(["--bundles-dir", str(root), "--graphs", *args])
+        captured = capsys.readouterr()
+        return code, captured.out, captured.err
+
+    def test_no_filter_lists_every_graph_exercising_the_feature(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        self._tree(tmp_path)
+        code, out, _ = self._run(tmp_path, capsys, "Sdpa", "dtype:fp16")
+        assert code == 0
+        assert out == (
+            "SdpaFwd/both [quick]: E1 gfx942/linux, E2 gfx950/windows\n"
+            "SdpaFwd/unclaimed [quick]: not claimed\n"
+            "2 graph(s)\n"
+        )
+
+    @pytest.mark.parametrize(
+        ("filters", "expected"),
+        [
+            (["--arch", "gfx942"], ["SdpaFwd/both [quick]: E1 gfx942/linux"]),
+            (["--engine", "E2"], ["SdpaFwd/both [quick]: E2 gfx950/windows"]),
+            (["--arch", "gfx942", "--platform", "windows"], []),
+            (["--engine", "E2", "--arch", "gfx942"], []),
+        ],
+    )
+    def test_filters_keep_only_graphs_claimed_where_all_hold(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+        filters: list[str],
+        expected: list[str],
+    ) -> None:
+        self._tree(tmp_path)
+        code, out, _ = self._run(tmp_path, capsys, "Sdpa", "dtype:fp16", *filters)
+        assert code == 0
+        assert out.splitlines() == [*expected, f"{len(expected)} graph(s)"]
+
+    def test_list_agrees_with_the_per_feature_counts(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        self._tree(tmp_path)
+        op = _coverage(tmp_path)[0].ops[FAKE_TYPE]
+        for feature in op.features:
+            _, out, _ = self._run(tmp_path, capsys, "SdpaAttributes", feature)
+            assert out.splitlines()[-1] == f"{op.tested[feature]} graph(s)"
+            for arch in ("gfx942", "gfx950"):
+                _, out, _ = self._run(tmp_path, capsys, "Sdpa", feature, "--arch", arch)
+                assert out.splitlines()[-1] == f"{op.claimed[arch][feature]} graph(s)"
+
+    def test_unknown_op_exits_two(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        code, out, err = self._run(tmp_path, capsys, "Attention", "dtype:fp16")
+        assert (code, out) == (2, "")
+        assert "unknown op 'Attention'" in err
+
+    def test_uncatalogued_feature_exits_two_and_lists_the_catalog(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        code, out, err = self._run(tmp_path, capsys, "Sdpa", "dtype:fp32")
+        assert (code, out) == (2, "")
+        assert "no feature 'dtype:fp32'" in err
+        assert "'mask:sliding'" in err
+
+    def test_filter_without_graphs_exits_two(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        assert main(["--bundles-dir", str(tmp_path), "--arch", "gfx942"]) == 2
+        assert "need --graphs" in capsys.readouterr().err
+
+    def test_defect_exits_one_and_lists_nothing(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        self._tree(tmp_path)
+        _bundle(tmp_path, "bad", [_node(boom="bad")])
+        code, out, err = self._run(tmp_path, capsys, "Sdpa", "dtype:fp16")
+        assert (code, out) == (1, "")
+        assert "error: 1 defect(s)" in err
+
+
 # --------------------------------------------------------------------------
 # Feature matrix: feature_matrix.py on small trees, with the stand-in ops
 # --------------------------------------------------------------------------

@@ -20,9 +20,16 @@ their features. A fused graph counts toward each catalogued op it contains.
 Nothing is written or committed: like the support matrix, this is a view of
 the committed graphs and sidecars, regenerated on demand.
 
+To check a number, list the graphs behind it and open them: ``--graphs``
+names every graph exercising one feature, and ``--engine``, ``--arch`` and
+``--platform`` narrow it to the graphs claimed there, the evidence for one
+cell of the support matrix by API option.
+
 Usage:
 
     python3 dnn-providers/integration-tests/scripts/support_features/coverage.py
+    python3 dnn-providers/integration-tests/scripts/support_features/coverage.py \\
+        --graphs Sdpa dtype:bf16 --arch gfx942 [--engine E] [--platform linux]
 """
 
 from __future__ import annotations
@@ -143,6 +150,74 @@ def compute_coverage(
 
 
 # --------------------------------------------------------------------------
+# Drill-down: the graphs behind one feature
+# --------------------------------------------------------------------------
+
+
+def resolve_node_type(op: str) -> str:
+    """``Sdpa`` or ``SdpaAttributes`` -> ``SdpaAttributes``, or raise."""
+    for node_type in registry.OPS:
+        if op in (node_type, node_type.replace("Attributes", "", 1)):
+            return node_type
+    raise ValueError(f"unknown op {op!r}; catalogued: {sorted(registry.OPS)}")
+
+
+def matching_claims(
+    unit: ClaimUnit,
+    engine: str | None,
+    arch: str | None,
+    platform: str | None,
+) -> list[tuple[str, str, str]]:
+    """The unit's (engine, arch, platform) claims that pass every filter."""
+    return sorted(
+        (e, a, p)
+        for e, pairs in unit.claims.items()
+        for a, p in pairs
+        if engine in (None, e) and arch in (None, a) and platform in (None, p)
+    )
+
+
+def graphs_with(
+    units: list[ClaimUnit],
+    node_type: str,
+    feature: str,
+    engine: str | None = None,
+    arch: str | None = None,
+    platform: str | None = None,
+    errors: list[str] | None = None,
+) -> list[tuple[ClaimUnit, list[tuple[str, str, str]]]]:
+    """Graphs exercising ``feature`` of ``node_type``, with their claims.
+
+    With no filter, every graph that exercises the feature, claimed or not:
+    the *tested* count. With any of ``engine``, ``arch``, ``platform``, only
+    graphs claimed where all the given filters hold: the graphs behind one
+    cell of the support matrix by API option.
+    """
+    filtered = (engine, arch, platform) != (None, None, None)
+    found = []
+    for unit in units:
+        if feature not in unit_features(unit, errors).get(node_type, ()):
+            continue
+        claims = matching_claims(unit, engine, arch, platform)
+        if filtered and not claims:
+            continue
+        found.append((unit, claims))
+    return sorted(found, key=lambda item: unit_location(item[0]))
+
+
+def render_graph_list(
+    found: list[tuple[ClaimUnit, list[tuple[str, str, str]]]],
+) -> str:
+    lines = []
+    for unit, claims in found:
+        tiers = ", ".join(sorted(unit.tiers))
+        claimed = ", ".join(f"{e} {a}/{p}" for e, a, p in claims) or "not claimed"
+        lines.append(f"{unit_location(unit)} [{tiers}]: {claimed}")
+    lines.append(f"{len(found)} graph(s)")
+    return "\n".join(lines) + "\n"
+
+
+# --------------------------------------------------------------------------
 # Markdown
 # --------------------------------------------------------------------------
 
@@ -216,15 +291,51 @@ def main(argv: list[str] | None = None) -> int:
         default=DEFAULT_BUNDLES_DIR,
         help=f"Bundle tree to scan (default: {DEFAULT_BUNDLES_DIR}).",
     )
+    parser.add_argument(
+        "--graphs",
+        nargs=2,
+        metavar=("OP", "FEATURE"),
+        help="List the graphs exercising one feature instead of the report, "
+        "e.g. --graphs Sdpa dtype:bf16. With --engine, --arch or --platform, "
+        "only graphs claimed there: the evidence behind one cell.",
+    )
+    parser.add_argument("--engine", help="With --graphs: claimed by this engine.")
+    parser.add_argument("--arch", help="With --graphs: claimed on this arch.")
+    parser.add_argument(
+        "--platform", choices=("linux", "windows"), help="With --graphs: on this OS."
+    )
     args = parser.parse_args(argv)
 
     if not args.bundles_dir.is_dir():
         print(f"error: {args.bundles_dir} is not a directory", file=sys.stderr)
         return 2
+    if not args.graphs and (args.engine or args.arch or args.platform):
+        print("error: --engine, --arch and --platform need --graphs", file=sys.stderr)
+        return 2
+    if args.graphs:
+        op, feature = args.graphs
+        try:
+            node_type = resolve_node_type(op)
+        except ValueError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
+        catalogued = [f.id for f in registry.op_module(node_type).FEATURES]
+        if feature not in catalogued:
+            print(
+                f"error: {node_type} has no feature {feature!r}; "
+                f"catalogued: {catalogued}",
+                file=sys.stderr,
+            )
+            return 2
 
     errors: list[str] = []
     units = collect_units(args.bundles_dir, errors)
-    coverage = compute_coverage(units, errors)
+    if args.graphs:
+        found = graphs_with(
+            units, node_type, feature, args.engine, args.arch, args.platform, errors
+        )
+    else:
+        coverage = compute_coverage(units, errors)
     if errors:
         # A graph left out of a share makes the share wrong, so none is shown.
         print(
@@ -232,7 +343,10 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 1
-    sys.stdout.write(render_markdown(coverage))
+    if args.graphs:
+        sys.stdout.write(render_graph_list(found))
+    else:
+        sys.stdout.write(render_markdown(coverage))
     return 0
 
 

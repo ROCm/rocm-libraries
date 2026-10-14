@@ -18,7 +18,8 @@ ConvolutionFwd and Pointwise.
 
 Features count singly, not in combination: bf16 and causal each being claimed
 says nothing about bf16 *with* causal. ``coverage.py`` prints the per-feature
-graph counts behind every cell.
+graph counts behind every cell, and ``coverage.py --graphs OP FEATURE --arch
+ARCH`` lists the graphs themselves.
 
 Usage:
 
