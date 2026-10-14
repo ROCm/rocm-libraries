@@ -36,7 +36,7 @@
  * @file TestFlydslSdpaCdnaEngine.cpp
  * @brief The hipkernel:flydsl_sdpa_cdna pack's seams: what its graph matcher accepts and
  *        declines, what it binds, which candidate a graph selects, and real launches of
- *        the staged gfx942/gfx950 objects checked against a host reference.
+ *        the staged gfx90a/gfx942/gfx950 objects checked against a host reference.
  *
  * The CDNA kernels bake the head counts, head_dim and contiguous BSHD, and assume equal
  * query and key lengths, so the accepted envelope is narrow on purpose; the
@@ -651,8 +651,7 @@ TEST(TestFlydslSdpaCdnaKernelMatch, RunsASlidingWindowOnlyOnTheGenericKernel)
     const GraphFixture fixture(buildFlydslSdpaRdnaGraph(spec));
     const auto bound = matchesGraph(FLYDSL_SDPA_CDNA, fixture.context());
     ASSERT_TRUE(bound.has_value());
-    EXPECT_FALSE(matchesKernel(
-        FLYDSL_SDPA_CDNA, fixture.context(), makeCdnaKernel("dualwave", 128, 1), *bound));
+    EXPECT_FALSE(matchesCdnaKernel(fixture.context(), makeCdnaKernel("dualwave", 128, 1), *bound));
     EXPECT_TRUE(matchesCdnaKernel(
         fixture.context(), makeCdnaKernel("generic", 128, 1, "bf16", 128), *bound));
 }

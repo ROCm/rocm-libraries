@@ -180,6 +180,13 @@ bool decodeServes(const SdpaProblem& problem, bool rowTiled)
     {
         return false;
     }
+    // The merge kernel runs one workgroup per (batch, query head, query position): a grid
+    // past int32 would be refused at launch, so it is declined here instead.
+    const auto mergeGrid = checkedProduct({problem.batch, problem.numHeads, problem.seqLenQ});
+    if(!mergeGrid.has_value() || *mergeGrid > INT32_LIMIT)
+    {
+        return false;
+    }
     return rowTiled ? decodeRowTiles(problem, rowTiled) <= DECODE_MAX_ROW_TILES
                     : (problem.numHeads / problem.numKvHeads) * problem.seqLenQ <= DECODE_ROWS;
 }

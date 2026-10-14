@@ -79,6 +79,24 @@ constexpr std::string_view BLOCK_THREADS_FIELD = "block_threads";
 /// in practice on the dispatch path, and x is 32-bit.
 constexpr int64_t GRID_YZ_LIMIT = 65535;
 
+/// The kernel loads rows as 8-element (16-byte) vectors, V through the hardware's 128-bit
+/// transposed load, and promises LLVM that alignment: every non-unit stride must keep it.
+constexpr int64_t ROW_VECTOR_ELEMENTS = 8;
+
+/// Whether @p tensor's batch, head and sequence strides keep each row 16-byte aligned (an
+/// axis of extent 1 is never stepped, so its stride is free).
+bool rowsAligned(const data_objects::TensorAttributes& tensor)
+{
+    for(const uint32_t axis : {BATCH_AXIS, HEAD_AXIS, SEQ_AXIS})
+    {
+        if(tensor.dims()->Get(axis) > 1 && tensor.strides()->Get(axis) % ROW_VECTOR_ELEMENTS != 0)
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
 /// Whether the graph needs the masked object: any bound, on either side. The non-masked
 /// object applies no window at all.
 bool needsMask(const FlydslSdpaRdnaBinding& binding)
@@ -124,7 +142,13 @@ bool flydslSdpaAiwKernelMatches(const MatchContext& context,
     const auto* q = findTensor(context, attributes->q_tensor_uid());
     const auto* k = findTensor(context, attributes->k_tensor_uid());
     const auto* v = findTensor(context, attributes->v_tensor_uid());
-    if(q == nullptr || k == nullptr || v == nullptr)
+    const auto* o = findTensor(context, attributes->o_tensor_uid());
+    if(q == nullptr || k == nullptr || v == nullptr || o == nullptr)
+    {
+        return false;
+    }
+    // Rows the kernel's vector loads and stores cannot reach aligned.
+    if(!rowsAligned(*q) || !rowsAligned(*k) || !rowsAligned(*v) || !rowsAligned(*o))
     {
         return false;
     }

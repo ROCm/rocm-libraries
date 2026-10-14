@@ -5,13 +5,14 @@ SPDX-License-Identifier:  MIT
 
 # What the FlyDSL packs cover
 
-Two packs, built once for each of two LLVM generic targets -- `gfx11-generic`
-(RDNA3 / RDNA3.5: gfx1100–gfx1103, gfx1150–gfx1153) and `gfx12-generic` (RDNA4:
-gfx1200, gfx1201) -- and shipped to every member: **RMSNorm forward** (12 kernel
-objects per family, §1–§4) and **SDPA forward** (156 per family, §5). A third,
-**SDPA forward on CDNA** (§7), is a separate engine built per arch for gfx950 and
-gfx942 from FlyDSL's own CDNA kernels; it is a first, deliberately narrow object
-set that proves the path end to end. Every graph a pack accepts is
+Built once for each of two LLVM generic targets -- `gfx11-generic` (RDNA3 /
+RDNA3.5: gfx1100–gfx1103, gfx1150–gfx1153) and `gfx12-generic` (RDNA4: gfx1200,
+gfx1201) -- and shipped to every member: **RMSNorm forward** (12 kernel objects per
+family, §1–§4) and **SDPA forward**, prefill and decode engines (156 per family, §5);
+on `gfx12-generic` also **AOTriton's gfx1201 kernel** as an engine of its own (72,
+§5.6). **SDPA forward on CDNA** (§7) is three engines -- the generic kernel's prefill,
+gfx950's dual-wave kernel and the split-KV decode -- built per arch for gfx950, gfx942
+and gfx90a from FlyDSL's own CDNA kernels. Every graph a pack accepts is
 computed by one of its objects; everything else is **declined**, so another
 engine gets the plan.
 
@@ -387,7 +388,7 @@ objects.
 
 | Claim | Checked by |
 |---|---|
-| The 156 objects are what the pinned toolchain produces | [REGEN.md](REGEN.md) §2 — 156/156 byte-identical |
+| The objects are what the pinned toolchain produces | [REGEN.md](REGEN.md) §2 — every object byte-identical, per target |
 | Each decode object carries its merge kernel, with both argument layouts as declared | `gen_sdpa_rdna_decode.py`, before the object is written; the 40-slot main layout by `TestFlydslSdpaRdnaDecodePacks` |
 | Each object has the declared 36-argument layout and spills no registers | `gen_sdpa_rdna.py`, before the object is written |
 | The vendored kernel matches AITER but for its recorded modifications | `tools/diff_upstream.py --aiter` ([REGEN.md](REGEN.md) §5) |
@@ -396,6 +397,29 @@ objects.
 | The staged objects compute attention and LSE — GQA, ragged lengths, cross-attention, both causal corners, windows, bands, keyless rows, decode, `head_dim` 96, runtime and default scale — against a double-precision reference | `TestGpuFlydslSdpaRdnaDispatch` |
 
 ---
+
+### 5.6 AOTriton's gfx1201 kernel — `hipkernel:flydsl_sdpa_aiw`
+
+AOTriton's FlyDSL forward for gfx12 (the kernel PyTorch's flash path runs there), vendored
+under [`kernels_src/kernels/attention_rdna4/`](kernels_src/kernels/attention_rdna4/README.md)
+with modifications for hipDNN's feature surface, as an engine of its own: its argument
+list (50 slots), its 3-D grid (query heads, query tiles, batch) and its tuning knobs share
+nothing with §5's kernels. `gfx12-generic` only; the native half is
+[`FlydslSdpaAiwNative.cpp`](../src/engines/kernel_ingestor_engine/packs/FlydslSdpaAiwNative.cpp),
+which applies §5's graph matcher and declines only what this kernel cannot compute.
+
+- **Served:** bf16 and f16; `head_dim` 64, 128 and 256 exactly, any multiple of 8 up to
+  a padded tier's width (64, 96, 128, 160, 224, 256), Q/K 192 with V 128; causal at
+  either alignment, sliding windows and two-sided bands (hipDNN's bottom-right window is
+  the kernel's shifted by `Skv - Sq`); an additive mask in Q's dtype or f32, broadcast
+  over B, H and Sq, its key axis contiguous; attention sinks at 64 and 128; a V head
+  count of its own; the LSE through its own strides; a scale baked or read at launch.
+- **Declined:** a mask whose key axis is strided; head dims that are not multiples of 8;
+  anything past 32-bit offsets. The kernel also takes packed (varlen) batches and
+  dropout, which this engine does not serve yet.
+- **Which engine runs a graph** both this and §5's prefill engine serve is autotune's
+  (UHD's) to decide: measured on gfx1201, this one is faster on MLA prefill and long
+  sequences, §5's on decode and sinks.
 
 ## 6. The instance budget: what is baked, what is runtime, and why
 
@@ -468,8 +492,10 @@ shard, so the shipped count per arch is the same as the authored count.
 | **Total, gfx11-generic** | | **168** | |
 | SDPA prefill schedules (§5.1) | not an axis: `block_m` 64 for `head_dim` 64, non-causal 128 without a bias and the generic tier up to 64, and head-dim pairs (`hd_pair`) for 256 and the generic tiers above 128, replace the schedules of the same classes | ±0 | shipped; the 66 objects whose schedule did not change rebuilt byte-identical with kernel modification 18 in the source |
 | **gfx12-generic** | the same table, built from the same sources for RDNA4 | **168** | shipped; GPU suites pass on gfx1201 |
-| **Total, both families** | | **336** | |
-| SDPA forward, CDNA (§7) | per arch: dtype (2) × `head_dim` × causal (2), the kernel family fixed by arch and `head_dim`; the generic non-causal class also by `kv_align`, the dual-wave causal class by `any_diagonal`, the dual-wave classes by `has_bias`; companion tiers (§7.6); the MLA objects by `head_dim_v` and `qk_mask` | 100 on gfx950, 102 on gfx942 | shipped; GPU suites pass on both |
+| SDPA forward, AOTriton's gfx1201 kernel (§5.6) | dtype (2) × causal (2) × {64, 128, 256 each plain, with a mask in Q's dtype, with an f32 mask; sinks at 64 and 128; MLA 192/128; padded tiers 64, 96, 128, 160, 224, 256} | 72 | shipped, `gfx12-generic` only; GPU suites pass on gfx1201 |
+| **Total, gfx12-generic** | | **240** | |
+| **Total, both families** | | **408** | |
+| SDPA forward, CDNA (§7) | per arch: dtype (2) × `head_dim` × causal (2), the kernel family fixed by arch and `head_dim`; the generic non-causal class also by `kv_align`, the dual-wave causal class by `any_diagonal`, the dual-wave classes by `has_bias`; companion tiers (§7.6); the MLA objects by `head_dim_v` and `qk_mask` | 100 on gfx950, 102 on gfx942, 80 on gfx90a | shipped; GPU suites pass on all three |
 
 Adding a row here, with its gate result in §6.1 where it introduces a runtime
 feature, is part of adding the feature.
@@ -534,7 +560,7 @@ and f16, the default tier first:
 | gfx942, gfx90a absorbed MLA, decode | Q/K up to 768 (multiples of 8), V 512, one KV head | the same, K staged in three 256-column chunks per KV tile (`k_chunk`), without the KV global prefetch | the same |
 | every arch, any other multiple of 8 | up to 64, 128, 256 (Q, K and V the graph's width) | `generic` with Q/K and V masked to the runtime width (`qk_mask`, `head_dim_v` = the bucket), ranked below every exact object | the same |
 | every arch, attention sink | 64, 128 | `generic` (gfx950 64 rows; gfx942 and gfx90a gfx942's default 128-row tier) with the sink (`has_sink`), and the split, packed decode tier with it | the same |
-| every arch, decode | 64, 128, 256 | `generic` 64 (128 at 256) with the keys split across workgroups and the GQA group packed into its rows (`split_kv`, `pack_gqa`), preferred below 16 query positions | the same |
+| every arch, decode | 64, 128, 256 | `generic` 64 (128 at 256) with the keys split across workgroups and the GQA group packed into its rows (`split_kv`, `pack_gqa`), an engine of its own (`hipkernel:flydsl_sdpa_cdna_decode`) that serves any query length; which engine runs a graph is autotune's (UHD's) | the same |
 
 The dual-wave kernel takes `head_dim` 64 and 128 only, so gfx950's 256 comes from the
 generic kernel, which at that width holds its tile without spilling only with the
@@ -642,7 +668,7 @@ above (§7.6), and repeated as features land.
 | Each engine's shard ships no two objects of one build, one top-ranked serve-all object per graph class, and each object with its family's signature | `TestFlydslSdpaCdnaPacks`, `TestFlydslSdpaCdnaDualwavePacks`, `TestFlydslSdpaCdnaDecodePacks`, and the shard census that runs them |
 | A generic-kernel companion outranks its class's default exactly where its rule prefers it | `TestFlydslSdpaCdnaKernelMatch` |
 | The accept/decline rules above, the causal and scale bindings, and candidate selection, including `kv_align` | `TestFlydslSdpaCdnaGraphAccepts`, `TestFlydslSdpaCdnaGraphDeclines`, `TestFlydslSdpaCdnaBinding`, `TestFlydslSdpaCdnaKernelMatch` |
-| Every staged object the matcher admits computes attention — non-causal and causal, ragged tails, a longer sequence, a scale value, a runtime scale tensor, MHA, MQA and an odd group size, cross-attention, chunked prefill, decode, rows no key reaches, a top-left band, `head_dim` 64 and 256, f16, BHSD and packed QKV, a per-head bias and a padding mask — and the LSE output, against a reference | `TestGpuFlydslSdpaCdnaDispatch`, on gfx950 and gfx942 |
+| Every staged object the matcher admits computes attention — non-causal and causal, ragged tails, a longer sequence, a scale value, a runtime scale tensor, MHA, MQA and an odd group size, cross-attention, chunked prefill, decode, rows no key reaches, a top-left band, `head_dim` 64 and 256, f16, BHSD and packed QKV, a per-head bias and a padding mask — and the LSE output, against a reference | `TestGpuFlydslSdpaCdnaDispatch`, on gfx950, gfx942 and gfx90a |
 
 ### 7.5 Measured costs, and deferred performance work
 
@@ -805,9 +831,18 @@ objects) and `hipkernel:flydsl_sdpa_cdna_decode` (24).
   114 TFLOP/s -- 63% of the 181 TFLOP/s peak, 86% of the best bf16 GEMM measured on
   the same GPU (133) and 1.10x PyTorch's flash path (AOTriton); `head_dim` 64 102
   TFLOP/s (1.10x); causal 82-96 TFLOP/s (0.92-1.08x).
+- **Through hipDNN, autotuned** (the dnn-benchmarking attention graphs FlyDSL serves on
+  gfx942, on an MI210): of the 2,243 measured, 2,242 served and none wrong (the rest
+  were the largest decode graphs, past the test node's memory); against
+  PyTorch's flash path on equal-head graphs 1.02x overall and fastest on 62%, `head_dim`
+  64 1.38x, 128 1.15x, Q/K 192 with V 128 2.11x; on the large prefill graphs `head_dim`
+  128 runs at 117 TFLOP/s median (125 best: 69% of peak, 94% of the measured GEMM).
 - **Behind AOTriton, deferred performance work:** `head_dim` 256 (39-44 TFLOP/s, about
-  0.5x: the tiles that fit 64 KiB of LDS are poor there) and short or narrow problems
-  (16 × 512, 16 heads × 1024: 0.35-0.6x, the 128- and 256-row tiles leave CUs idle).
+  0.6x: the tiles that fit 64 KiB of LDS are poor there); the head dims served by bucket
+  objects -- 160, 192, 224 at 0.4-0.5x and 13-18 TFLOP/s, 80 at 0.6x -- which run gfx942's
+  bucket tiers untuned for gfx90a (the 256 bucket at 64 rows without KV global
+  prefetch); and short or narrow problems (16 × 512, 16 heads × 1024: 0.35-0.6x, the
+  128- and 256-row tiles leave CUs idle).
 - **Found on the way:** without the KV global prefetch, bf16 at `head_dim` 64 with 128
   rows and 128 with 256 rows did not trace (an upstream loader mismatch, fixed by
   vendored-kernel modification 25, on gfx942 too).

@@ -5,10 +5,11 @@ SPDX-License-Identifier:  MIT
 
 # FlyDSL attention for RDNA4 (gfx12)
 
-Vendored kernel sources for a second prefill family of the `hipkernel:flydsl_sdpa_rdna`
-engine on RDNA4. The RDNA3/RDNA4 kernels under `../attention_rdna/` stay the engine's
-first family on both generations; this one adds AOTriton's FlyDSL forward kernel for
-gfx12, which is faster on medium and long sequences.
+Vendored kernel sources for the `hipkernel:flydsl_sdpa_aiw` engine: AOTriton's FlyDSL
+forward kernel for gfx12, an engine of its own beside `hipkernel:flydsl_sdpa_rdna` (one
+kernel family per engine). The RDNA3/RDNA4 kernels under `../attention_rdna/` stay that
+engine's; this one is faster on medium and long sequences, and which of the two runs a
+graph both serve is autotune's (UHD's) to decide.
 
 | File | Upstream | Role |
 |---|---|---|

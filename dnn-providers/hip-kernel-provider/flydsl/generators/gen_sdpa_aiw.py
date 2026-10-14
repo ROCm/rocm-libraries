@@ -239,6 +239,28 @@ def _compile(task: tuple):
             raise GeneratorError(f"{instance.name}: {exc}") from exc
 
 
+def _kernel_block_m(knobs) -> int:
+    """The query rows one workgroup covers, as the kernel resolves them: the block_m knob
+    with the K prefetch off, else derived the way `flash_attn_func_gfx1201_aiw` derives it,
+    through the tuning module's own policy functions."""
+    from kernels.attention_rdna4 import fmha_tuning_gfx1201 as tuning  # noqa: PLC0415
+
+    if knobs.k_prefetch_dist == 0:
+        return knobs.block_m
+    if knobs.shards is not None:
+        shards = knobs.shards
+    elif knobs.row_subtiles > 1:
+        shards = 1
+    else:
+        shards = tuning.resolve_shards(
+            knobs.block_dmodel, knobs.block_dmodel_v, knobs.block_n
+        )
+    q_tiles = max(
+        1, tuning.q_tiles_per_block(knobs.block_dmodel, shards) // knobs.row_subtiles
+    )
+    return 16 * knobs.row_subtiles * q_tiles
+
+
 def generate(arch: str, out_root: Path, keep_ir: Path | None = None) -> Path | None:
     instances = instances_for(OP, arch)
     if not instances:
@@ -291,6 +313,16 @@ def generate(arch: str, out_root: Path, keep_ir: Path | None = None) -> Path | N
         (op_dir / filename).write_bytes(blob)
 
         record = instance.to_record()
+        # The dispatcher's grid tiles the queries by the recorded block_m. With the K
+        # prefetch on, the kernel derives its row tile instead (from the head dim, the QK
+        # shards and the row sub-tiles): refuse an object whose two disagree, which would
+        # launch the wrong number of query tiles.
+        derived = _kernel_block_m(plan.knobs)
+        if derived != plan.knobs.block_m:
+            raise GeneratorError(
+                f"{where}: records block_m {plan.knobs.block_m} but the kernel tiles "
+                f"{derived} query rows per workgroup"
+            )
         # The schedule the tuning table chose, and the workgroup size it implies: knobs a
         # ranker can read, and the block the dispatcher launches.
         schedule = {name: getattr(plan.knobs, name) for name in _SCHEDULE_KNOBS}

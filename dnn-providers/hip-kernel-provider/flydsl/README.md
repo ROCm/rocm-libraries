@@ -16,6 +16,7 @@ file per engine:
 [`FlydslRmsNormNative.cpp`](../src/engines/kernel_ingestor_engine/packs/FlydslRmsNormNative.cpp),
 [`FlydslSdpaRdnaNative.cpp`](../src/engines/kernel_ingestor_engine/packs/FlydslSdpaRdnaNative.cpp),
 [`FlydslSdpaRdnaDecodeNative.cpp`](../src/engines/kernel_ingestor_engine/packs/FlydslSdpaRdnaDecodeNative.cpp),
+[`FlydslSdpaAiwNative.cpp`](../src/engines/kernel_ingestor_engine/packs/FlydslSdpaAiwNative.cpp),
 [`FlydslSdpaCdnaNative.cpp`](../src/engines/kernel_ingestor_engine/packs/FlydslSdpaCdnaNative.cpp),
 [`FlydslSdpaCdnaDualwaveNative.cpp`](../src/engines/kernel_ingestor_engine/packs/FlydslSdpaCdnaDualwaveNative.cpp)
 and
@@ -44,8 +45,10 @@ way to check it, or it is just bytes someone once vouched for.
 
 ## What ships
 
-For RDNA, two ops, 168 kernel objects per family, built once for each of two
-LLVM generic targets and shipped to every part each covers:
+For RDNA, three ops -- RMSNorm and SDPA prefill and decode, 168 kernel objects per
+family -- plus, on gfx12-generic only, AOTriton's gfx1201 attention kernel as a fourth
+(72 more, 240 in all), built once for each of two LLVM generic targets and shipped to
+every part each covers:
 
 - **`gfx11-generic`** -- RDNA3 / RDNA3.5: gfx1100, gfx1101, gfx1102, gfx1103,
   gfx1150, gfx1151, gfx1152 and gfx1153. Verified on gfx1151.
@@ -105,7 +108,7 @@ object and measured companions -- other tiles for short queries and large proble
 chosen by timing every candidate on the dnn-benchmarking attention graphs
 ([COVERAGE.md §7.6](COVERAGE.md)). It is the first set that carries
 these kernels through the whole path -- generation, packing, selection and
-launch -- and is verified on both arches; the order in which it widens is in
+launch -- and is verified on all three arches; the order in which it widens is in
 [COVERAGE.md §7](COVERAGE.md). The RDNA SDPA kernels stay RDNA-only.
 
 ## How it reaches hipDNN
@@ -163,8 +166,8 @@ Two flags, and the difference between them matters:
   ships FlyDSL objects for a requested architecture. Everything conditional
   keys on **this one**.
 
-The gap between them is real: with `GPU_TARGETS=gfx90a` the option is ON and yet
-nothing ships, because no gfx90a kernels are checked in. That configuration
+The gap between them is real: with `GPU_TARGETS=gfx908` the option is ON and yet
+nothing ships, because no gfx908 kernels are checked in. That configuration
 reports **dormant** and continues — it is not an error to build for an
 architecture this directory does not serve. Keying the engine TUs, the test TUs
 and the census on the outcome rather than the intent is what makes that
@@ -208,7 +211,8 @@ provider tree; everything else is relative to this directory.
 | `generators/_codeobject.py` | reads and verifies a compiled object (target, ELF generic machine), shared by every generator |
 | `generators/arch_families.json`, `_arch_families.py` | the generic targets and their member arches; read by the generators and `CMakeLists.txt` |
 | `generators/_generic_targets.py` | the FlyDSL 0.3.4 shim that lets MLIR lower for a generic target |
-| `generators/gen_<op>.py` | compile one op's (one engine's) rows into objects + manifest + `<target>.SOURCE.md`: `gen_rmsnorm`, `gen_sdpa_rdna`, `gen_sdpa_rdna_decode`, `gen_sdpa_cdna`, `gen_sdpa_cdna_dualwave`, `gen_sdpa_cdna_decode` |
+| `generators/gen_<op>.py` | compile one op's (one engine's) rows into objects + manifest + `<target>.SOURCE.md`: `gen_rmsnorm`, `gen_sdpa_rdna`, `gen_sdpa_rdna_decode`, `gen_sdpa_aiw`, `gen_sdpa_cdna`, `gen_sdpa_cdna_dualwave`, `gen_sdpa_cdna_decode` |
+| `generators/_parallel.py` | compiles a generator's objects in a pool of worker processes (`FLYDSL_GEN_JOBS`) |
 | `generators/_sdpa_rdna_build.py`, `_sdpa_cdna_build.py` | what each architecture's SDPA generators share |
 | `gen_descriptors.py` | derives descriptors from the objects; `--check` re-verifies |
 | `tools/diff_upstream.py` | vendored sources vs. their upstream checkouts, black-normalized |
@@ -270,7 +274,7 @@ Each link is checkable by a command, and [REGEN.md](REGEN.md) gives each command
 upstream FlyDSL @ 89ad52fbbb9e, AITER @ 8253efc40595
    │  tools/diff_upstream.py          — vendored copy == upstream, but for recorded modifications
 kernels_src/
-   │  gen_<op>.py (flydsl 0.3.4)      — byte-reproducible: 168/168 per RDNA family, 100/100 gfx950, 102/102 gfx942, 80/80 gfx90a
+   │  gen_<op>.py (flydsl 0.3.4)      — byte-reproducible: 168/168 gfx11-generic, 240/240 gfx12-generic, 100/100 gfx950, 102/102 gfx942, 80/80 gfx90a
 <content>/<op>/<arch>/*.hsaco + manifest.json
    │  gen_descriptors.py --check      — objects match manifest SHA256 and target; descriptors agree
 <content>/<op>/**/*.json (hsaco UKDs)

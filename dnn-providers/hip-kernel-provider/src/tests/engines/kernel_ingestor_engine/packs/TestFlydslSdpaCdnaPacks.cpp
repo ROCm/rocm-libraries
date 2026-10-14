@@ -175,15 +175,18 @@ void expectUniqueObjectsAndOneTopServeAllPerClass(const CdnaEngine& engine)
             }
             builds.insert(build.str());
 
+            const auto classKey = std::make_tuple(*dtype,
+                                                  field("head_dim"),
+                                                  field("head_dim_v"),
+                                                  field("causal"),
+                                                  field("has_bias"),
+                                                  field("has_sink"));
+            // Every class, so one whose objects all need an aligned key length (or offset 0)
+            // is caught for having no object that serves any graph of it.
+            serveAll[classKey];
             if(field("kv_align") == 0 && field("any_diagonal") == 1)
             {
-                serveAll[{*dtype,
-                          field("head_dim"),
-                          field("head_dim_v"),
-                          field("causal"),
-                          field("has_bias"),
-                          field("has_sink")}]
-                    .push_back(static_cast<int64_t>(kernel.priority));
+                serveAll[classKey].push_back(static_cast<int64_t>(kernel.priority));
             }
             ++kernels;
 
@@ -196,6 +199,14 @@ void expectUniqueObjectsAndOneTopServeAllPerClass(const CdnaEngine& engine)
     EXPECT_EQ(kernels, builds.size()) << "two objects share one build";
     for(const auto& [key, priorities] : serveAll)
     {
+        if(priorities.empty())
+        {
+            ADD_FAILURE() << std::get<0>(key) << " head_dim " << std::get<1>(key) << "/"
+                          << std::get<2>(key) << " causal " << std::get<3>(key) << " bias "
+                          << std::get<4>(key) << " sink " << std::get<5>(key)
+                          << ": no object serves any key length and diagonal";
+            continue;
+        }
         const auto top = *std::max_element(priorities.begin(), priorities.end());
         EXPECT_EQ(std::count(priorities.begin(), priorities.end(), top), 1)
             << std::get<0>(key) << " head_dim " << std::get<1>(key) << "/" << std::get<2>(key)

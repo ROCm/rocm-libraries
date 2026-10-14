@@ -19,13 +19,19 @@ import multiprocessing
 import os
 from collections.abc import Callable, Sequence
 from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures.process import BrokenProcessPool
 from typing import Any
 
 from . import _flydsl_env as env
+from ._codeobject import GeneratorError
 
 
 def _jobs(count: int) -> int:
     requested = os.environ.get("FLYDSL_GEN_JOBS")
+    if requested and not requested.isdigit():
+        raise GeneratorError(
+            f"FLYDSL_GEN_JOBS must be a positive integer, got {requested!r}"
+        )
     jobs = int(requested) if requested else max(1, (os.cpu_count() or 2) // 2)
     return max(1, min(jobs, count))
 
@@ -67,7 +73,15 @@ def compile_all(
         try:
             for done, future in enumerate(as_completed(futures), start=1):
                 index = futures[future]
-                results[index] = future.result()
+                try:
+                    results[index] = future.result()
+                except BrokenProcessPool as exc:
+                    # A worker died outright (out of memory, a crash in the compiler):
+                    # reported like any other failed object, not as a raw traceback.
+                    raise GeneratorError(
+                        f"{label(tasks[index])}: a compile worker died ({exc}); "
+                        "retry with fewer workers (FLYDSL_GEN_JOBS)"
+                    ) from exc
                 print(f"[{done}/{len(tasks)}] {label(tasks[index])}", flush=True)
         except BaseException:
             pool.shutdown(wait=True, cancel_futures=True)

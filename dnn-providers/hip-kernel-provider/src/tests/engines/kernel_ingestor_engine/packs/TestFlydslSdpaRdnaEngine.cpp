@@ -2247,6 +2247,17 @@ TEST(TestFlydslSdpaAiwKernelMatch, PairsTheMaskObjectWithTheMasksDtype)
     EXPECT_FALSE(aiwMatches(spec, makeAiwKernel("bf16", 64, 0, 64, 1, 1)));
 }
 
+TEST(TestFlydslSdpaAiwKernelMatch, DeclinesRowsItsVectorLoadsCannotReachAligned)
+{
+    // The kernel moves rows as 16-byte vectors and promises LLVM that alignment: a row
+    // pitch that is not a multiple of 8 elements would be read misaligned.
+    SdpaGraphSpec spec;
+    spec.valueSequenceStride = spec.kvHeads * spec.headDim + 8;
+    EXPECT_TRUE(aiwMatches(spec, makeAiwKernel("bf16", 64, 0))) << "a padded, aligned pitch";
+    spec.valueSequenceStride = spec.kvHeads * spec.headDim + 4;
+    EXPECT_FALSE(aiwMatches(spec, makeAiwKernel("bf16", 64, 0))) << "a pitch of 8n + 4 elements";
+}
+
 TEST(TestFlydslSdpaAiwKernelMatch, DeclinesAMaskWhoseKeyAxisIsNotContiguous)
 {
     // A mask stored key-major: the object reads eight adjacent keys per load.

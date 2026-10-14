@@ -1236,6 +1236,12 @@ inline bool familyKernelMatches(const MatchContext& context,
     {
         return false;
     }
+    // The merge kernel and the split workspace know only the baked V width: a split object
+    // whose V follows a narrower runtime width would overrun both.
+    if(vFollowsQk && tile->splitKv && problem.headDimV != *headDimV)
+    {
+        return false;
+    }
     const bool servesHead
         = *qkMask == 1 ? problem.headDim <= *headDim && problem.headDim % QK_MASK_ALIGN == 0
                        : *qkMask == 0 && *headDim == problem.headDim;

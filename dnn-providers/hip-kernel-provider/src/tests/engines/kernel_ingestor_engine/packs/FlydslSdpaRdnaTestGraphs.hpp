@@ -190,6 +190,8 @@ struct SdpaGraphSpec
     std::optional<hipdnn_flatbuffers_sdk::data_objects::DataType> keyDataType;
     /// Q's head-dim stride, when it should not be 1.
     std::optional<int64_t> queryHeadDimStride;
+    /// V's sequence stride, when it should not be the layout's (e.g. a padded row pitch).
+    std::optional<int64_t> valueSequenceStride;
 
     /// Overrides of the bounds the mask kind sets, for bands and other windows.
     std::optional<int64_t> leftBound;
@@ -275,11 +277,15 @@ inline flatbuffers::FlatBufferBuilder buildFlydslSdpaRdnaGraph(const SdpaGraphSp
     const auto kStrides = spec.packedQkv
                               ? sdpaPackedQkvStrides(spec)
                               : sdpaStrides(spec.layout, spec.kvHeads, spec.seqLenKv, spec.headDim);
-    const auto vStrides = spec.packedQkv ? sdpaPackedQkvStrides(spec)
-                                         : sdpaStrides(spec.valueLayout.value_or(spec.layout),
-                                                       valueHeads,
-                                                       spec.seqLenKv,
-                                                       valueHeadDim);
+    auto vStrides = spec.packedQkv ? sdpaPackedQkvStrides(spec)
+                                   : sdpaStrides(spec.valueLayout.value_or(spec.layout),
+                                                 valueHeads,
+                                                 spec.seqLenKv,
+                                                 valueHeadDim);
+    if(spec.valueSequenceStride.has_value())
+    {
+        vStrides[2] = *spec.valueSequenceStride;
+    }
     const auto oStrides = sdpaStrides(spec.layout, spec.heads, spec.seqLenQ, valueHeadDim);
 
     flatbuffers::FlatBufferBuilder builder;

@@ -101,28 +101,40 @@ about five minutes instead of twenty-five.
 This writes nothing into the tree. It is the check that backs every claim this
 directory makes about its own provenance.
 
+Each target has its own ops; pick one row and set `ARCH` and `OPS` from it:
+
+| `ARCH` | `OPS` | Objects |
+|---|---|---|
+| `gfx11-generic` | `rmsnorm sdpa_rdna sdpa_rdna_decode` | 168 (12 + 84 + 72) |
+| `gfx12-generic` | `rmsnorm sdpa_rdna sdpa_rdna_decode sdpa_aiw` | 240 (12 + 84 + 72 + 72) |
+| `gfx950` | `sdpa_cdna sdpa_cdna_dualwave sdpa_cdna_decode` | 100 (56 + 20 + 24) |
+| `gfx942` | `sdpa_cdna sdpa_cdna_decode` | 102 (78 + 24) |
+| `gfx90a` | `sdpa_cdna sdpa_cdna_decode` | 80 (56 + 24) |
+
 ```bash
 cd dnn-providers/hip-kernel-provider/flydsl
+ARCH=gfx11-generic OPS="rmsnorm sdpa_rdna sdpa_rdna_decode"
 
 # Compile into a scratch directory -- must be empty or nonexistent, since the
 # generator writes files rather than clearing the directory, so an object left
 # by an earlier run with a different instance list would survive and be compared.
-for op in rmsnorm sdpa_rdna; do
+for op in $OPS; do
   PYTHONDONTWRITEBYTECODE=1 \
-    $PY -m generators.gen_$op --arch gfx11-generic --out-dir "$REGEN_OUT"
+    $PY -m generators.gen_$op --arch $ARCH --out-dir "$REGEN_OUT"
 done
 ```
 
 Then compare every object against the manifests the tree ships:
 
 ```bash
-CONTENT=$CONTENT $PY - <<'PY'
+CONTENT=$CONTENT ARCH=$ARCH OPS="$OPS" $PY - <<'PY'
 import hashlib, json, os, pathlib, sys
 
 bad = total = 0
-for op in ("rmsnorm", "sdpa_rdna"):
-    manifest = json.loads((pathlib.Path(os.environ["CONTENT"]) / f"{op}/gfx11-generic/manifest.json").read_text())
-    regen = pathlib.Path(os.environ["REGEN_OUT"]) / f"{op}/gfx11-generic"
+arch = os.environ["ARCH"]
+for op in os.environ["OPS"].split():
+    manifest = json.loads((pathlib.Path(os.environ["CONTENT"]) / f"{op}/{arch}/manifest.json").read_text())
+    regen = pathlib.Path(os.environ["REGEN_OUT"]) / f"{op}/{arch}"
     for instance in manifest["instances"]:
         total += 1
         obj = regen / instance["file"]
@@ -138,19 +150,14 @@ PY
 The manifests and the provenance record must also come out identical:
 
 ```bash
-for op in rmsnorm sdpa_rdna; do
-  diff "$CONTENT/$op/gfx11-generic/manifest.json" "$REGEN_OUT/$op/gfx11-generic/manifest.json"
-  diff "$CONTENT/$op/gfx11-generic.SOURCE.md"     "$REGEN_OUT/$op/gfx11-generic.SOURCE.md"
+for op in $OPS; do
+  diff "$CONTENT/$op/$ARCH/manifest.json" "$REGEN_OUT/$op/$ARCH/manifest.json"
+  diff "$CONTENT/$op/$ARCH.SOURCE.md"     "$REGEN_OUT/$op/$ARCH.SOURCE.md"
 done
 ```
 
-Expected, and the state of the tree as committed: **168/168 byte-identical** (12
-RMSNorm, 156 SDPA), all four diffs empty. Repeat with `gfx12-generic` in place of
-`gfx11-generic` throughout: **168/168** there too.
-
-The CDNA SDPA op is built per arch rather than per family. The same three steps,
-with `sdpa_cdna` as the only op and `gfx950`, then `gfx942`, then `gfx90a`, as the target:
-**2/2** for each.
+Expected, and the state of the tree as committed: every object byte-identical -- the
+table's count for each target -- and every diff empty.
 
 `manifest.json` agreeing is the stronger of the two checks — it carries the
 `toolchain` block, so an identical manifest means the *recorded* toolchain and
@@ -182,6 +189,8 @@ for ARCH in gfx11-generic gfx12-generic; do
   $PY -m generators.gen_rmsnorm --arch $ARCH
   $PY -m generators.gen_sdpa_rdna --arch $ARCH
   $PY -m generators.gen_sdpa_rdna_decode --arch $ARCH
+  # AOTriton's gfx1201 kernel, its own engine (gfx12-generic only).
+  [ $ARCH = gfx12-generic ] && $PY -m generators.gen_sdpa_aiw --arch $ARCH
 
   # (2) Descriptors. Every field is derived from the manifest and the objects it
   #     names, so a descriptor cannot disagree with the object it describes.
