@@ -436,17 +436,17 @@ def getrsNpvtBatch_suite(*, suite, precision, case):
            yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --batch_count {bc} --nrhs {nrhs} -n {s} --lda {ld} --ldb {ld}')
 
 
-#def getriBatch_suite(*, suite, precision, case):
-#    """
-#    GETRIBATCH tests are run with the given precision and sizes
-#    """
-#    fn = 'getri_batched'
-#    mode = 'batched'
-#    size = get_size_configurations(case, mode)
-#    for s, bc in size:
-#        ld = get_ld(s)
-#        row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'batch_count': bc, 'n': s}
-#        yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --batch_count {bc} -n {s} --lda {ld} --ldc {ld}')
+def getriBatch_suite(*, suite, precision, case):
+   """
+   GETRIBATCH tests are run with the given precision and sizes
+   """
+   fn = 'getri_batched'
+   mode = 'batched'
+   size = get_size_configurations(case, mode)
+   for s, bc in size:
+       ld = get_ld(s)
+       row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'batch_count': bc, 'n': s}
+       yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --batch_count {bc} -n {s} --lda {ld} --ldc {ld}')
 
 
 #def trtri_suite(*, suite, precision, case):
@@ -920,7 +920,7 @@ SUITES = {
     'getrsBatch': getrsBatch_suite,
     'getrsNpvt': getrsNpvt_suite,
     'getrsNpvtBatch': getrsNpvtBatch_suite,
-#    'getriBatch': getriBatch_suite,
+    'getriBatch': getriBatch_suite,
 #    'trtri': trtri_suite,
 
     # Over-determined linear systems (least-squares)
