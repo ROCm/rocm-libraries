@@ -14,7 +14,9 @@
 
 name: TheRock Multi-Arch CI
 
-# TheRock ref: pinned to ROCm/TheRock commit c01e3a3f3f67966dd35612cf363b49964f33cd47.
+# TheRock ref: TEMPORARILY pointed at the branch
+# users/geomin12/external-ci-file-goodbye to test ROCm/TheRock's removal of
+# configure_external_repo_ci.py. Restore a pinned SHA before merging.
 # NOTE: update all `@<ref>` refs and `ref:` inputs together when switching.
 
 on:
@@ -35,17 +37,13 @@ on:
         type: string
         description: "Insert comma-separated list of Linux GPU families to build and test. ex: gfx94X, gfx120X (empty = skip linux)"
         default: ""
-      linux_test_labels:
-        type: string
-        description: "If enabled, reduce test set on Linux to the list of labels prefixed with 'test:'. ex: test:rocprim, test:hipcub"
-        default: ""
       windows_amdgpu_families:
         type: string
         description: "Insert comma-separated list of Windows GPU families to build and test. ex: gfx94X, gfx120X (empty = skip windows)"
         default: ""
-      windows_test_labels:
+      pr_labels:
         type: string
-        description: "If enabled, reduce test set on Windows to the list of labels prefixed with 'test:' ex: test:rocprim, test:hipcub"
+        description: "Comma-separated labels, as a PR would carry. ex: test:rocprim,test_filter:quick"
         default: ""
       prebuilt_stages:
         type: string
@@ -108,52 +106,9 @@ jobs:
         id: ci-env
         uses: ./.github/actions/ci-env
 
-  configure:
-    name: Configure Changed Projects
-    runs-on: ubuntu-24.04
-    outputs:
-      changed_projects: ${{ steps.configure.outputs.changed_projects }}
-      # TheRock's determine_rocm_test_dependencies.py natively resolves
-      # shared/* monorepo subtrees (shared/stinkytofu, shared/tensile,
-      # shared/origami, shared/mxdatagenerator, shared/rocroller) into the
-      # right consumer set, so changed_projects is passed straight through
-      # as test_projects without a rocm-libraries-side translation step.
-      # See ROCm/rocm-libraries#11784 for the retired stopgap this replaces.
-      test_projects: ${{ steps.configure.outputs.changed_projects }}
-      run_all_tests: ${{ steps.configure.outputs.run_all_tests }}
-      test_type: ${{ steps.configure.outputs.test_type }}
-    steps:
-      - name: Checkout repository config
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          sparse-checkout: |
-            .github/repos-config.json
-          sparse-checkout-cone-mode: false
-
-      - name: Checkout TheRock for configure script
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          repository: ROCm/TheRock
-          ref: c01e3a3f3f67966dd35612cf363b49964f33cd47
-          path: _therock
-          sparse-checkout: build_tools/github_actions
-          sparse-checkout-cone-mode: true
-
-      - name: Configure CI
-        id: configure
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: |
-          python3 _therock/build_tools/github_actions/configure_external_repo_ci.py \
-            --event-name "${{ github.event_name }}" \
-            --github-repo "${{ github.repository }}" \
-            --base-sha "${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}" \
-            --head-sha "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}" \
-            --config-path ".github/repos-config.json"
-
   setup:
-    needs: [ci-env, configure]
-    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@c01e3a3f3f67966dd35612cf363b49964f33cd47 # 2026-10-12
+    needs: [ci-env]
+    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@users/geomin12/external-ci-file-goodbye
     with:
       build_variant: "release"
       # Limit GPU families for rocm-libraries CI.
@@ -165,15 +120,23 @@ jobs:
       # only nightly.
       linux_amdgpu_families: ${{ inputs.linux_amdgpu_families || 'gfx94X,gfx950,gfx125X' }}
       windows_amdgpu_families: ${{ inputs.windows_amdgpu_families || 'gfx110X' }}
-      linux_test_labels: ${{ inputs.linux_test_labels || '' }}
-      windows_test_labels: ${{ inputs.windows_test_labels || '' }}
+      pr_labels: ${{ inputs.pr_labels || '' }}
       # Copy all stages except math-libs and ml-libs from TheRock baseline
       # rocm-libraries only affects math-libs and ml-libs source sets
-      # RPP owns cv-libs, so rebuild that stage when projects/rpp changes.
       # Note: compiler-runtime excluded due to hardcoded CMake paths (fftw3, etc.)
       # Copy prebuilt stages only when the resolved reuse policy provides a
       # baseline run ID. Otherwise, leave this empty for a full stage build.
-      prebuilt_stages: ${{ needs.ci-env.outputs.baseline-run-id != '' && (inputs.prebuilt_stages || (contains(format(',{0},', needs.configure.outputs.changed_projects), ',projects/rpp,') && 'runtime-tests,comm-libs,storage-libs,debug-tools,dctools-core,profiler-apps,media-libs,wsl-rocdxg' || 'runtime-tests,comm-libs,cv-libs,storage-libs,debug-tools,dctools-core,profiler-apps,media-libs,wsl-rocdxg')) || '' }}
+      #
+      # cv-libs is NOT in this list. It used to be dropped conditionally when
+      # projects/rpp changed, using the retired `configure` job's output. That
+      # is no longer expressible: changed_projects is now computed by `setup`
+      # itself, and prebuilt_stages is an input to that same job. TheRock does
+      # not filter explicit prebuilt_stages by changed-project impact, so
+      # listing cv-libs here would copy stale RPP artifacts over a real RPP
+      # change. Always rebuilding cv-libs is the safe choice.
+      # TODO: have TheRock drop prebuilt stages that build a changed project,
+      # then restore cv-libs here.
+      prebuilt_stages: ${{ needs.ci-env.outputs.baseline-run-id != '' && (inputs.prebuilt_stages || 'runtime-tests,comm-libs,storage-libs,debug-tools,dctools-core,profiler-apps,media-libs,wsl-rocdxg') || '' }}
       # Use the baseline selected by the artifact reuse policy above.
       baseline_run_id: ${{ needs.ci-env.outputs.baseline-run-id }}
       baseline_repository: ${{ inputs.baseline_repository || (inputs.baseline_run_id != '' && github.repository) || '' }}
@@ -192,8 +155,16 @@ jobs:
           'off'
         }}
       repository: ROCm/TheRock
-      ref: c01e3a3f3f67966dd35612cf363b49964f33cd47 # 2026-10-12
+      ref: users/geomin12/external-ci-file-goodbye
       # Pass external repo info for stage-impact analysis.
+      #
+      # event_name/pr_number/base_sha/head_sha let TheRock fetch this repo's
+      # diff. projects_config maps that diff onto changed projects, replacing
+      # the retired configure_external_repo_ci.py; skip_ci_config supplies the
+      # skip patterns. skip_ci_config is REQUIRED -- without it TheRock falls
+      # back to its own skip config, whose patterns reference TheRock-only
+      # paths that mean nothing in this repository.
+      #
       # extra_cmake_options is appended to the cmake configure line of every
       # build stage, scoped to this repository's CI runs. TheRock keeps
       # HIPKERNELPROVIDER_ENABLE_ROCKE OFF by default; enabling it here is what
@@ -210,19 +181,20 @@ jobs:
           "head_sha": "${{ github.sha }}",
           "pr_number": ${{ github.event.pull_request.number || 'null' }},
           "event_name": "${{ github.event_name }}",
+          "projects_config": ".github/repos-config.json",
           "skip_ci_config": ".github/skip-ci-config.toml",
           "extra_cmake_options": "-DTHEROCK_FLAG_HIPKERNELPROVIDER_ENABLE_ROCKE=ON"
         }
 
   linux_build_and_test:
     name: Linux::${{ fromJSON(needs.setup.outputs.linux_build_config || '{}').build_variant_label || 'skip' }}
-    needs: [configure, setup]
+    needs: [setup]
     if: >-
       ${{
         needs.setup.outputs.linux_build_config != '' &&
         needs.setup.outputs.enable_build_jobs == 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@c01e3a3f3f67966dd35612cf363b49964f33cd47 # 2026-10-12
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@users/geomin12/external-ci-file-goodbye
     secrets: inherit
     with:
       build_config: ${{ needs.setup.outputs.linux_build_config }}
@@ -230,38 +202,42 @@ jobs:
       rocm_package_version: ${{ needs.setup.outputs.rocm_package_version }}
       rocm_deb_package_version: ${{ needs.setup.outputs.rocm_deb_package_version }}
       rocm_rpm_package_version: ${{ needs.setup.outputs.rocm_rpm_package_version }}
-      test_type: ${{ needs.configure.outputs.test_type }}
+      test_type: ${{ needs.setup.outputs.test_type }}
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
-      # Empty string when run_all_tests=true triggers full test run in downstream workflow
-      changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.test_projects }}
+      # Scopes the test run to the projects this PR touched; empty means run
+      # everything. It does not narrow the build: TheRock builds every
+      # in-scope stage in full, so a rocPRIM change still rebuilds math-libs.
+      changed_projects: ${{ needs.setup.outputs.changed_projects }}
       repository: ROCm/TheRock
       # Concrete SHA resolved once by setup; do not re-resolve main here.
-      ref: c01e3a3f3f67966dd35612cf363b49964f33cd47 # 2026-10-12
+      ref: users/geomin12/external-ci-file-goodbye
     permissions:
       contents: read
       id-token: write
 
   windows_build_and_test:
     name: Windows::${{ fromJSON(needs.setup.outputs.windows_build_config || '{}').build_variant_label || 'skip' }}
-    needs: [configure, setup]
+    needs: [setup]
     if: >-
       ${{
         needs.setup.outputs.windows_build_config != '' &&
         needs.setup.outputs.enable_build_jobs == 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@c01e3a3f3f67966dd35612cf363b49964f33cd47 # 2026-10-12
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@users/geomin12/external-ci-file-goodbye
     secrets: inherit
     with:
       build_config: ${{ needs.setup.outputs.windows_build_config }}
       test_labels: ${{ needs.setup.outputs.windows_test_labels }}
       rocm_package_version: ${{ needs.setup.outputs.rocm_package_version }}
-      test_type: ${{ needs.configure.outputs.test_type }}
+      test_type: ${{ needs.setup.outputs.test_type }}
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
-      # Empty string when run_all_tests=true triggers full test run in downstream workflow
-      changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.test_projects }}
+      # Scopes the test run to the projects this PR touched; empty means run
+      # everything. It does not narrow the build: TheRock builds every
+      # in-scope stage in full, so a rocPRIM change still rebuilds math-libs.
+      changed_projects: ${{ needs.setup.outputs.changed_projects }}
       repository: ROCm/TheRock
       # Concrete SHA resolved once by setup; do not re-resolve main here.
-      ref: c01e3a3f3f67966dd35612cf363b49964f33cd47 # 2026-10-12
+      ref: users/geomin12/external-ci-file-goodbye
     permissions:
       contents: read
       id-token: write
@@ -271,14 +247,14 @@ jobs:
     # A caller cannot depend on an individual job inside a reusable workflow,
     # so start after the Linux workflow has finished publishing its artifacts.
     # This sidecar remains advisory and is not part of the required summary.
-    needs: [ci-env, configure, linux_build_and_test]
+    needs: [ci-env, setup, linux_build_and_test]
     if: >-
       ${{
         !cancelled() &&
         github.event_name == 'pull_request' &&
         (
-          contains(format(',{0},', needs.configure.outputs.changed_projects), ',projects/hipblaslt,') ||
-          contains(format(',{0},', needs.configure.outputs.changed_projects), ',projects/hipblaslt/tensilelite,') ||
+          contains(format(',{0},', needs.setup.outputs.changed_projects), ',projects/hipblaslt,') ||
+          contains(format(',{0},', needs.setup.outputs.changed_projects), ',projects/hipblaslt/tensilelite,') ||
           contains(github.event.pull_request.labels.*.name, 'test:hipblaslt')
         ) &&
         needs.linux_build_and_test.result != 'skipped'
@@ -308,7 +284,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           # Concrete SHA resolved once by setup; do not re-resolve main here.
-          ref: c01e3a3f3f67966dd35612cf363b49964f33cd47 # 2026-10-12
+          ref: users/geomin12/external-ci-file-goodbye
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
 
