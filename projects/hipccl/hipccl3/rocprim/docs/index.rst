@@ -31,7 +31,7 @@ The rocPRIM project is located in https://github.com/ROCm/rocm-libraries/tree/de
 
     * :doc:`Use the SPIR-V target with rocPRIM <./how-to/rocPRIM-spir-v>`
     * :doc:`Run unit tests on multiple GPUs <./how-to/rocPRIM-run-tests>`
-   
+
   .. grid-item-card:: Reference
 
     * `Benchmarking with Primbench <https://rocm.docs.amd.com/projects/primbench/en/latest>`_
@@ -52,6 +52,3 @@ The rocPRIM project is located in https://github.com/ROCm/rocm-libraries/tree/de
 To contribute to the documentation refer to `Contributing to ROCm  <https://rocm.docs.amd.com/en/latest/contribute/contributing.html>`_.
 
 You can find licensing information on the `Licensing <https://rocm.docs.amd.com/en/latest/about/license.html>`_ page.
-
-
-
