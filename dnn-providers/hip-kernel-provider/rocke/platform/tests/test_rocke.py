@@ -7020,15 +7020,15 @@ class TestLibDiscoveryOrder(unittest.TestCase):
         # runtime and hipModuleGetFunction failed with hipError(500).
         with tempfile.TemporaryDirectory() as tmp:
             site, core_lib, torch_stub = self._fake_torch_site(tmp)
-            with mock.patch.dict(
-                sys.modules,
-                {"torch": torch_stub, "rocm_sdk": types.ModuleType("rocm_sdk")},
-            ), mock.patch.object(sys, "path", [site] + sys.path), mock.patch.object(
-                rc, "_IS_WINDOWS", False
-            ), mock.patch.object(
-                rc, "_PROC_MAPS", os.path.join(tmp, "no-maps")
-            ), mock.patch.dict(
-                os.environ
+            with (
+                mock.patch.dict(
+                    sys.modules,
+                    {"torch": torch_stub, "rocm_sdk": types.ModuleType("rocm_sdk")},
+                ),
+                mock.patch.object(sys, "path", [site] + sys.path),
+                mock.patch.object(rc, "_IS_WINDOWS", False),
+                mock.patch.object(rc, "_PROC_MAPS", os.path.join(tmp, "no-maps")),
+                mock.patch.dict(os.environ),
             ):
                 sys.modules.pop("_rocm_sdk_core", None)
                 importlib.invalidate_caches()
@@ -7089,9 +7089,11 @@ class TestLibDiscoveryOrder(unittest.TestCase):
                     "7f02-7f03 rw-p 00000000 00:00 0\n"
                     f"7f03-7f04 r-xp 00000000 08:01 13 {mapped}\n"
                 )
-            with mock.patch.dict(sys.modules, {"torch": torch_stub}), mock.patch.object(
-                rc, "_IS_WINDOWS", False
-            ), mock.patch.object(rc, "_PROC_MAPS", maps):
+            with (
+                mock.patch.dict(sys.modules, {"torch": torch_stub}),
+                mock.patch.object(rc, "_IS_WINDOWS", False),
+                mock.patch.object(rc, "_PROC_MAPS", maps),
+            ):
                 self.assertEqual(rc._torch_bundled_lib("amdhip64"), mapped)
                 self.assertIsNone(rc._mapped_lib("amd_comgr"))
 
@@ -7507,18 +7509,16 @@ class TestLibDiscoveryOrder(unittest.TestCase):
             torch_stub.version = types.SimpleNamespace(hip="7.16.26332-0000000")
             sdk_stub = types.ModuleType("rocm_sdk")
             comgr = os.path.join(core_lib, "libamd_comgr.so.3")
-            with mock.patch.dict(
-                sys.modules, {"torch": torch_stub, "rocm_sdk": sdk_stub}
-            ), mock.patch.object(sys, "path", [site] + sys.path), mock.patch.object(
-                rc, "_IS_WINDOWS", False
-            ), mock.patch.object(
-                rc, "_PROC_MAPS", os.path.join(tmp, "no-maps")
-            ), mock.patch.object(
-                rc, "_rocm_root_libdirs", return_value=[]
-            ), mock.patch.object(
-                comgr_mod, "_lib", None
-            ), mock.patch.dict(
-                os.environ
+            with (
+                mock.patch.dict(
+                    sys.modules, {"torch": torch_stub, "rocm_sdk": sdk_stub}
+                ),
+                mock.patch.object(sys, "path", [site] + sys.path),
+                mock.patch.object(rc, "_IS_WINDOWS", False),
+                mock.patch.object(rc, "_PROC_MAPS", os.path.join(tmp, "no-maps")),
+                mock.patch.object(rc, "_rocm_root_libdirs", return_value=[]),
+                mock.patch.object(comgr_mod, "_lib", None),
+                mock.patch.dict(os.environ),
             ):
                 sys.modules.pop("_rocm_sdk_core", None)
                 importlib.invalidate_caches()
