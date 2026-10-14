@@ -2910,8 +2910,34 @@ _WAIT_MARKER_DSCNT = "\x00@WD@"
 _WAIT_MARKER_KMCNT = "\x00@WK@"
 
 
+def _asm_cap(name: str) -> Optional[int]:
+    """Return one asm cap, or ``None`` when this ISA does not define it."""
+    from .base import getAsmCaps  # noqa: WPS433
+
+    caps = getAsmCaps()
+    if name not in caps:
+        return None
+    return int(caps[name])
+
+
+def _clamp_wait_count(count: int, cap_name: str) -> int:
+    """Match ``handleSWaitDscntModifiers`` / ``handleSWaitLoadcntModifiers``.
+
+    A missing cap uses the count itself as the max, so the value is unchanged.
+    ``-1`` stays the absent sentinel.
+    """
+    if count < 0:
+        return count
+    cap = _asm_cap(cap_name)
+    if cap is None:
+        return count
+    return min(count, cap)
+
+
 def _make_swaitcnt(comment: str = "", vlcnt: int = -1, vscnt: int = -1,
-                   dlcnt: int = -1, dscnt: int = -1, kmcnt: int = -1) -> Any:
+                   dlcnt: int = -1, dscnt: int = -1, kmcnt: int = -1,
+                   *, clamp_vlcnt: bool = False, clamp_dscnt: bool = False,
+                   with_lgkm_vm_caps: bool = False) -> Any:
     """Build one logical ``s_waitcnt`` carrying per-counter SWaitCntData.
 
     The C++ lowering (ToStinkyAsmPass) forwards this to a ``SWaitCntData``
@@ -2922,14 +2948,35 @@ def _make_swaitcnt(comment: str = "", vlcnt: int = -1, vscnt: int = -1,
     ``s_waitcnt`` in the IR that ``waitReconstruction()`` could not rebuild — so
     it was never stripped/re-inserted and perturbed scheduling.
 
+    ``clamp_vlcnt`` / ``clamp_dscnt`` apply MaxLoadcnt / MaxDscnt before the
+    modifier is attached, matching the typed ``_SWaitLoadcnt`` / ``_SWaitDscnt``
+    handlers. ``with_lgkm_vm_caps`` stores MaxLgkmcnt / MaxVmcnt (or ``-1`` when
+    the ISA has no such cap) and leaves the counters themselves unchanged, so
+    the combined ``s_waitcnt`` emitter can min the summed lgkmcnt / vmcnt.
+
     If every counter is ``-1`` (a no-op wait) no SWaitCntData is attached and a
     bare ``s_waitcnt`` is returned unchanged.
     """
     import stinkytofu as _st  # noqa: WPS433
 
+    if clamp_vlcnt:
+        vlcnt = _clamp_wait_count(vlcnt, "MaxLoadcnt")
+    if clamp_dscnt:
+        dscnt = _clamp_wait_count(dscnt, "MaxDscnt")
+    max_lgkmcnt = -1
+    max_vmcnt = -1
+    if with_lgkm_vm_caps:
+        lgkm_cap = _asm_cap("MaxLgkmcnt")
+        vm_cap = _asm_cap("MaxVmcnt")
+        max_lgkmcnt = -1 if lgkm_cap is None else lgkm_cap
+        max_vmcnt = -1 if vm_cap is None else vm_cap
+
     inst = _st.SWaitCnt(_to_stinky_register(0), comment)
     if any(c != -1 for c in (vlcnt, vscnt, dlcnt, dscnt, kmcnt)):
-        inst.set_swaitcnt(vlcnt=vlcnt, vscnt=vscnt, dlcnt=dlcnt, dscnt=dscnt, kmcnt=kmcnt)
+        inst.set_swaitcnt(
+            vlcnt=vlcnt, vscnt=vscnt, dlcnt=dlcnt, dscnt=dscnt, kmcnt=kmcnt,
+            max_lgkmcnt=max_lgkmcnt, max_vmcnt=max_vmcnt,
+        )
     return inst
 
 
@@ -2966,16 +3013,18 @@ class _SWaitCnt(Instruction):
         return self.formatWithComment("s_waitcnt " + wait_str)
 
     def to_stinky_logical(self) -> Any:
-        """Map legacy _SWaitCnt to gfx12+ typed waits.
+        """Map legacy _SWaitCnt to one logical wait plus lgkm/vm caps.
 
-        On gfx12+, lgkmcnt maps to dscnt (DS/LDS counter) and vmcnt maps
-        to loadcnt (VMEM load counter), mirroring the native C++
-        AllHwMappings.cpp logic that sets dlcnt=lgkmcnt, vlcnt=vmcnt.
+        lgkmcnt is stored in dscnt and vmcnt in vlcnt. The counters are not
+        pre-clamped: MaxLgkmcnt and MaxVmcnt ride on SWaitCntData so the
+        combined s_waitcnt emitter can min the summed counts. A missing cap
+        is stored as -1, which leaves that sum unchanged.
         """
         return _make_swaitcnt(
             comment=self.comment,
             vlcnt=self.vmcnt,
             dscnt=self.lgkmcnt,
+            with_lgkm_vm_caps=True,
         )
 
     def __deepcopy__(self, memo):
@@ -3075,7 +3124,7 @@ class _SWaitLoadcnt(Instruction):
         return self.formatWithComment(f"s_wait_loadcnt {self.cnt}")
 
     def to_stinky_logical(self) -> Any:
-        return _make_swaitcnt(comment=self.comment, vlcnt=self.cnt)
+        return _make_swaitcnt(comment=self.comment, vlcnt=self.cnt, clamp_vlcnt=True)
 
     def __deepcopy__(self, memo):
         if id(self) in memo:
@@ -3141,7 +3190,7 @@ class _SWaitDscnt(Instruction):
         return self.formatWithComment(f"s_wait_dscnt {self.cnt}")
 
     def to_stinky_logical(self) -> Any:
-        return _make_swaitcnt(comment=self.comment, dscnt=self.cnt)
+        return _make_swaitcnt(comment=self.comment, dscnt=self.cnt, clamp_dscnt=True)
 
     def __deepcopy__(self, memo):
         if id(self) in memo:
@@ -3200,13 +3249,15 @@ class SWaitCnt(Instruction):
         comment = "(Wait all)" if self.waitAll else self.comment
 
         # Native emit order: _SWaitDscnt, _SWaitKMcnt, _SWaitLoadcnt, _SWaitStorecnt.
+        # dscnt / loadcnt are clamped here, the same way addModifiers clamps the
+        # typed waits. kmcnt and storecnt stay raw.
         parts: List[Any] = []
         if dscnt != -1:
-            parts.append(_make_swaitcnt(comment=comment, dscnt=dscnt))
+            parts.append(_make_swaitcnt(comment=comment, dscnt=dscnt, clamp_dscnt=True))
         if kmcnt != -1:
             parts.append(_make_swaitcnt(comment=comment, kmcnt=kmcnt))
         if vlcnt != -1:
-            parts.append(_make_swaitcnt(comment=comment, vlcnt=vlcnt))
+            parts.append(_make_swaitcnt(comment=comment, vlcnt=vlcnt, clamp_vlcnt=True))
         if vscnt != -1:
             parts.append(_make_swaitcnt(comment=comment, vscnt=vscnt))
         if not parts:
