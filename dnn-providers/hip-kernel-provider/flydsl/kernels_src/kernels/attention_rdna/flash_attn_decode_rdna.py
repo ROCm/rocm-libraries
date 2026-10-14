@@ -320,7 +320,10 @@ def build_flash_attn_decode_module(
             end_i32 = fx.Int32((_end < skv_i32).select(_end, skv_i32))
         else:
             end_i32 = skv_i32
-        span_u32 = fx.Uint32(end_i32 - first_i32)
+        # A row whose window starts past its end sees no key: span 0, not a wrapped
+        # difference that keeps every key.
+        _span_i32 = end_i32 - first_i32
+        span_u32 = fx.Uint32((_span_i32 > fx.Int32(0)).select(_span_i32, fx.Int32(0)))
 
         # The keys any row may see: from the window's edge for position 0 to the diagonal
         # for position Sq - 1. Split into tiles, the tiles into num_splits chunks.
@@ -553,10 +556,17 @@ def build_flash_attn_decode_module(
             p_vals = []
             lsum = c_zero
             for e in range_constexpr(16):
+                if const_expr(HAS_BIAS):
+                    # A row the bias masks with values near -FLT_MAX has a max whose
+                    # product with log2(e) overflows, so nsm would be +inf and every
+                    # p inf/NaN. The difference first stays finite.
+                    _arg = (s_raw[e] - m_safe) * c_sl2e
+                else:
+                    _arg = fx.math.fma(s_raw[e], c_sl2e, nsm)
                 p = fx.Float32(
                     fx.rocdl.exp2(
                         fx.Float32.ir_type,
-                        fx.Float32(fx.math.fma(s_raw[e], c_sl2e, nsm)).ir_value(),
+                        fx.Float32(_arg).ir_value(),
                     )
                 )
                 p_vals.append(p)

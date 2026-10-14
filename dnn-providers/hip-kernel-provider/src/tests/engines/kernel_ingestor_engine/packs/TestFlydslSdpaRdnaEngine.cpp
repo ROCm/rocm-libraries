@@ -1010,6 +1010,25 @@ public:
         return static_cast<double>(static_cast<float>(_host[static_cast<size_t>(index)]));
     }
 
+    /// Sets element (b, h, s, d) on the host; upload() copies it to the device.
+    void set(int64_t b, int64_t h, int64_t s, int64_t d, T value)
+    {
+        const auto index = b * _strides[0] + h * _strides[1] + s * _strides[2] + d * _strides[3];
+        _host[static_cast<size_t>(index)] = value;
+    }
+
+    /// Sets every element, so an element the kernel never writes reads back as @p value.
+    void fillWith(T value)
+    {
+        std::fill(_host.begin(), _host.end(), value);
+        upload();
+    }
+
+    void upload()
+    {
+        EXPECT_EQ(hipSuccess, hipMemcpy(_device, _host.data(), bytes(), hipMemcpyHostToDevice));
+    }
+
     /// Copies the device contents back over the host values.
     void readBack()
     {
@@ -1246,6 +1265,8 @@ void expectSdpaMatchesReference(const SdpaGraphSpec& spec,
                       sdpaStrides(spec.layout, spec.heads, spec.seqLenQ, dv),
                       4U,
                       false);
+    // NaN until written: an output row the kernel skips fails rather than reading as a zero.
+    o.fillWith(T(std::numeric_limits<float>::quiet_NaN()));
 
     // f32 [B, H, Sq, 1], packed BHSD or laid out [B, Sq, H]: the layout the graph builder
     // declares.
@@ -1256,6 +1277,7 @@ void expectSdpaMatchesReference(const SdpaGraphSpec& spec,
             : std::vector<int64_t>{spec.heads * spec.seqLenQ, spec.seqLenQ, 1, 1},
         5U,
         false);
+    stats.fillWith(std::numeric_limits<float>::quiet_NaN());
     const bool wantStats = spec.stats == SdpaStats::LSE;
 
     // The bias as the device holds it, indexed as [B, H, Sq, Skv]: the graph's right-aligned
@@ -1274,8 +1296,29 @@ void expectSdpaMatchesReference(const SdpaGraphSpec& spec,
     }
     // In f32, or in the query's dtype (the `bias_q` objects); one of the two is bound.
     const bool biasInQueryType = spec.withBias && spec.biasDataType != DataType::FLOAT;
-    const DeviceTensor<float> bias(biasDims4, biasStrides4, 6U, true);
-    const DeviceTensor<T> biasQ(biasDims4, biasStrides4, 6U, true);
+    DeviceTensor<float> bias(biasDims4, biasStrides4, 6U, true);
+    DeviceTensor<T> biasQ(biasDims4, biasStrides4, 6U, true);
+    if(spec.biasMasksRows)
+    {
+        // Every third query row masked on every key with the dtype's lowest finite value,
+        // as a padding mask writes it: the row's softmax is uniform over its keys.
+        for(int64_t b = 0; b < biasDims4[0]; ++b)
+        {
+            for(int64_t h = 0; h < biasDims4[1]; ++h)
+            {
+                for(int64_t s = 0; s < biasDims4[2]; s += 3)
+                {
+                    for(int64_t j = 0; j < biasDims4[3]; ++j)
+                    {
+                        bias.set(b, h, s, j, std::numeric_limits<float>::lowest());
+                        biasQ.set(b, h, s, j, std::numeric_limits<T>::lowest());
+                    }
+                }
+            }
+        }
+        bias.upload();
+        biasQ.upload();
+    }
     const auto biasAt = [&](int64_t b, int64_t h, int64_t s, int64_t j) {
         return biasInQueryType ? biasQ.at(b, h, s, j) : bias.at(b, h, s, j);
     };
@@ -1387,11 +1430,11 @@ void expectSdpaMatchesReference(const SdpaGraphSpec& spec,
                     // full miss.
                     const bool negativeInfinity = std::isinf(actualLse) && actualLse < 0.0;
                     double lseError = std::numeric_limits<double>::max();
-                    if(hasKeys || spec.withSink)
+                    if((hasKeys || spec.withSink) && std::isfinite(actualLse))
                     {
                         lseError = std::abs(actualLse - expectedLse);
                     }
-                    else if(negativeInfinity)
+                    else if(!hasKeys && !spec.withSink && negativeInfinity)
                     {
                         lseError = 0.0;
                     }
@@ -1411,7 +1454,10 @@ void expectSdpaMatchesReference(const SdpaGraphSpec& spec,
                         expected += scores[static_cast<size_t>(j)] * vAt(b, vHead, j, e);
                     }
                     expected = hasKeys ? expected / sum : 0.0;
-                    const double error = std::abs(o.at(b, h, s, e) - expected);
+                    // NaN or inf (an unwritten element reads as NaN) is a full miss.
+                    const double actual = o.at(b, h, s, e);
+                    const double error = std::isfinite(actual) ? std::abs(actual - expected)
+                                                               : std::numeric_limits<double>::max();
                     if(error > worst)
                     {
                         worst = error;
@@ -1649,6 +1695,50 @@ TEST(TestGpuFlydslSdpaRdnaDispatch, ZeroesRowsNoKeyReaches)
     spec.seqLenKv = 64;
     spec.stats = SdpaStats::LSE;
     expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(spec, BF16_TOLERANCE);
+}
+
+TEST(TestGpuFlydslSdpaRdnaDispatch, ZeroesRowsATopLeftWindowStartsPastTheKeys)
+{
+    SKIP_IF_NO_DEVICES();
+    // Top-left with Sq > Skv + left: rows past Skv + left have a window that starts after
+    // the last key, so they see none (O = 0, LSE = -inf), causal and left-only, prefill and
+    // decode objects alike.
+    SdpaGraphSpec spec;
+    spec.mask = SdpaMask::SLIDING_WINDOW;
+    spec.leftBound = 40;
+    spec.seqLenQ = 300;
+    spec.seqLenKv = 128;
+    spec.stats = SdpaStats::LSE;
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(spec, BF16_TOLERANCE);
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(spec, BF16_TOLERANCE, true);
+    spec.rightBound = -1;
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(spec, BF16_TOLERANCE);
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(spec, BF16_TOLERANCE, true);
+}
+
+TEST(TestGpuFlydslSdpaRdnaDispatch, AddsABiasThatMasksWholeRowsAtTheLowestFiniteValue)
+{
+    SKIP_IF_NO_DEVICES();
+    // A padding mask's fully masked rows: every key's score is about -FLT_MAX, so the row's
+    // softmax is uniform rather than NaN. f32 and query-dtype biases, prefill and decode.
+    SdpaGraphSpec spec;
+    spec.withBias = true;
+    spec.biasMasksRows = true;
+    spec.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+    spec.seqLenQ = 77;
+    spec.seqLenKv = 99;
+    spec.stats = SdpaStats::LSE;
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(spec, BF16_TOLERANCE);
+    spec.biasDataType = DataType::BFLOAT16;
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(spec, BF16_TOLERANCE);
+    // Decode: a few rows per head, the first of them masked, over a cache.
+    spec.heads = 8;
+    spec.kvHeads = 2;
+    spec.seqLenQ = 2;
+    spec.seqLenKv = 300;
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(spec, BF16_TOLERANCE, true);
+    spec.biasDataType = DataType::FLOAT;
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(spec, BF16_TOLERANCE, true);
 }
 
 TEST(TestGpuFlydslSdpaRdnaDispatch, ComputesHeadDim96)

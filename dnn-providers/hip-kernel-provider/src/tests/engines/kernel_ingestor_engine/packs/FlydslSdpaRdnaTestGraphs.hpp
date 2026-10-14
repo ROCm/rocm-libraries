@@ -212,6 +212,8 @@ struct SdpaGraphSpec
     std::vector<int64_t> biasStrides;
     hipdnn_flatbuffers_sdk::data_objects::DataType biasDataType
         = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT;
+    /// Every third query row's bias is the dtype's lowest finite value on every key.
+    bool biasMasksRows = false;
     bool withDropout = false;
     /// Marks Q as ragged (THD), which the kernel would read as dense.
     bool raggedQuery = false;

@@ -122,6 +122,12 @@
 #      LSE the same term, and a row no key reaches gets O = 0 and LSE = sink.
 #      The pointer and stride are appended last; objects without it ignore
 #      them and build as before.
+#  22. Rows with no reachable key under extreme masks: a row whose window starts
+#      past its end (top-left, seq_len_q > seq_len_kv + left_bound) gets an
+#      empty span rather than a wrapped one that kept every key, and a bias
+#      object exponentiates (s - m) * log2(e), which stays finite when a bias
+#      near -FLT_MAX masks the whole row (s * log2(e) - m * log2(e) overflowed
+#      to inf - inf).
 #
 # Upstream-first: prefer landing these changes in AITER/FlyDSL; this copy exists
 # so the provider is not blocked on that.
@@ -731,7 +737,13 @@ def build_flash_attn_func_module(
             )
         else:
             q_kv_end_i32 = seq_kv_i32
-        q_kv_span_u32 = fx.Uint32(q_kv_end_i32 - q_kv_first_i32)
+        # A row whose window starts past its end (top-left, seq_len_q > seq_len_kv
+        # + left_bound) sees no key: its span is 0, not a wrapped difference that
+        # would keep every key (modification 22).
+        _q_kv_span_i32 = q_kv_end_i32 - q_kv_first_i32
+        q_kv_span_u32 = fx.Uint32(
+            (_q_kv_span_i32 > fx.Int32(0)).select(_q_kv_span_i32, fx.Int32(0))
+        )
 
         # First KV column fully masked for this wave.
         wave_kv_limit_i32 = (
@@ -1053,11 +1065,18 @@ def build_flash_attn_func_module(
             p_vals = []
             local_sum = c_zero_f
             for r in range_constexpr(NUM_S_VALS):
-                diff = fx.math.fma(
-                    s_raw[r],
-                    c_sm_scale_log2e,
-                    neg_scaled_max,
-                )
+                if const_expr(HAS_BIAS):
+                    # A row the bias masks with values near -FLT_MAX has a max whose
+                    # product with log2(e) overflows, making neg_scaled_max +inf and
+                    # every p inf/NaN; the difference first stays finite
+                    # (modification 22).
+                    diff = _fmul(_fsub(s_raw[r], m_safe), c_sm_scale_log2e)
+                else:
+                    diff = fx.math.fma(
+                        s_raw[r],
+                        c_sm_scale_log2e,
+                        neg_scaled_max,
+                    )
                 p = fx.Float32(
                     fx.rocdl.exp2(fx.Float32.ir_type, fx.Float32(diff).ir_value())
                 )
