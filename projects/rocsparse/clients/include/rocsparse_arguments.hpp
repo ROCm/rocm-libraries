@@ -123,7 +123,12 @@ struct Arguments
     rocsparse_dense_to_sparse_alg  dense_to_sparse_alg;
     rocsparse_gtsv_interleaved_alg gtsv_interleaved_alg;
     rocsparse_gpsv_interleaved_alg gpsv_interleaved_alg;
-    rocsparse_spsort_alg           spsort_alg;
+#if defined(ROCSPARSE_WITH_SPSORT)
+    rocsparse_spsort_alg spsort_alg;
+#else
+    // Keeps the layout of Arguments the same without rocsparse_spsort.
+    int spsort_alg;
+#endif
 
     rocsparse_matrix_init      matrix;
     rocsparse_matrix_init_kind matrix_init_kind;
@@ -532,7 +537,11 @@ private:
         print("gtsv_interleaved_alg",
               rocsparse_gtsvinterleavedalg2string(arg.gtsv_interleaved_alg));
         print("gpsv_interleaved_alg", rocsparse_gpsvalg2string(arg.gpsv_interleaved_alg));
+#if defined(ROCSPARSE_WITH_SPSORT)
         print("spsort_alg", rocsparse_spsortalg2string(arg.spsort_alg));
+#else
+        print("spsort_alg", arg.spsort_alg);
+#endif
         print("matrix", rocsparse_matrix2string(arg.matrix));
         print("matrix_init_kind", rocsparse_matrix_init_kind2string(arg.matrix_init_kind));
         print("file", arg.filename);

@@ -35,8 +35,6 @@
 #include <roctracer/roctx.h>
 #endif
 
-#include <Tensile/Singleton.hpp>
-
 namespace TensileLite
 {
     using StringSet = std::set<std::string>;
@@ -44,9 +42,11 @@ namespace TensileLite
     /**
      * @brief Common place for defining flags which enable debug behaviour.
      */
-    class TENSILELITEHOST_EXPORT Debug : public LazySingleton<Debug>
+    class TENSILELITEHOST_EXPORT Debug
     {
     public:
+        static Debug& Instance();
+
         bool printPropertyEvaluation() const;
         bool printPredicateEvaluation() const;
         bool printPredicateEvaluationVerbose() const;
@@ -168,8 +168,6 @@ namespace TensileLite
         }
 
     private:
-        friend LazySingleton<Debug>;
-
         int         m_value;
         int         m_value2;
         bool        m_naivePropertySearch = false;
