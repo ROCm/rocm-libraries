@@ -269,11 +269,6 @@ class UnifiedAttention3DTiledSpec:
         return self.tile_size // self.block_size
 
     @property
-    def uses_p_lds(self) -> bool:
-        # P stays in registers (S^T layout); no [BLOCK_M, T] LDS tile.
-        return False
-
-    @property
     def dtype_ir(self) -> Type:
         return F16 if self.dtype == "fp16" else BF16
 

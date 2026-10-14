@@ -109,7 +109,6 @@ typedef struct rocke_gfx942_attn_tiled_3d_config
     bool USE_SINKS; /* spec.use_sinks                                     */
     bool USE_ALIBI; /* spec.use_alibi                                     */
     bool USE_QQ_BIAS; /* spec.use_qq_bias                                  */
-    bool USE_INVARIANT_HOIST; /* spec.use_invariant_hoist                     */
     bool KV_FP8; /* kv_storage_dtype == "fp8e4m3"                     */
     int KV_BYTES; /* 1 if KV_FP8 else 2                                */
 
@@ -272,7 +271,6 @@ typedef struct rocke_gfx942_attention_tiled_3d_build_ctx
     rocke_value_t* Q_lds; /* [BLOCK_M, HD]                             */
     rocke_value_t* K_lds; /* [2, T, HD]                                */
     rocke_value_t* V_lds; /* [2, T, HD]                                */
-    rocke_value_t* P_lds; /* [BLOCK_M, T]                              */
 
     /* ---------- async DMA infra (lines 551-567) ---------- */
     rocke_value_t* big_bytes; /* const_i32(0x7FFF0000)                     */
@@ -284,26 +282,24 @@ typedef struct rocke_gfx942_attention_tiled_3d_build_ctx
     rocke_value_t* zero_soff; /* const_i32(0)                             */
     rocke_value_t* seq_base; /* seq_idx * bt_stride_p                    */
 
-    /* ---------- online-softmax loop init carry (lines 508-536) ---------- *
-     * m_inits/l_inits: 4 regs. acc_inits: PV_N_TILES entries. cur_buf_init = 0.
-     * The body-implementing .c sizes the acc arrays from cfg.PV_N_TILES; this
-     * fixed-cap holds the legal max (HD=256 -> PV_N_TILES = 16). */
-    rocke_value_t* m_inits[4];
-    rocke_value_t* l_inits[4];
+    /* ---------- online-softmax loop init carry ---------- *
+     * The QK MFMA computes S^T = K Q^T: lane l owns query row l % 16, so the
+     * online softmax keeps one (m, l) per lane. acc_inits: PV_N_TILES entries
+     * (fixed cap: the legal max, HD=256 -> PV_N_TILES = 16). cur_buf_init = 0. */
+    rocke_value_t* m_init;
     rocke_value_t* acc_inits[16]; /* PV_N_TILES <= 16                          */
     rocke_value_t* cur_buf_init; /* const_i32(0)                              */
 
-    /* ---------- invariant-hoist cache (lines 485-506; NULL when off) ---------- *
-     * Per-reg (0..3) hoisted row / qp_r / qh_r / row_ok / causal_lim. */
-    rocke_value_t* hoist_row[4];
-    rocke_value_t* hoist_qp_r[4];
-    rocke_value_t* hoist_qh_r[4];
-    rocke_value_t* hoist_row_ok[4];
-    rocke_value_t* hoist_causal_lim[4];
+    /* ---------- the lane's query-row loop invariants ---------- */
+    rocke_value_t* row_qp; /* qb_start_pos + lane_col // NQK            */
+    rocke_value_t* row_qh; /* kv_head * NQK + lane_col % NQK            */
+    rocke_value_t* row_ok;
+    rocke_value_t* row_causal_lim; /* context_len + row_qp                 */
+    rocke_value_t* row_alibi; /* ALiBi slope of row_qh (NULL when off)    */
 
-    /* ---------- loop results (epilogue inputs, lines 915-918) ---------- */
-    rocke_value_t* m_final[4];
-    rocke_value_t* l_final[4];
+    /* ---------- loop results (epilogue inputs) ---------- */
+    rocke_value_t* m_final;
+    rocke_value_t* l_final;
     rocke_value_t* acc_final[16]; /* PV_N_TILES <= 16                          */
 
     /* ========================= REDUCE KERNEL ========================= */
@@ -427,10 +423,8 @@ void rocke_gfx942_attention_tiled_3d_emit_early_zero_fill(
 void rocke_gfx942_attention_tiled_3d_emit_q_to_lds(
     rocke_gfx942_attention_tiled_3d_build_ctx_t* ctx);
 
-/* Build the loop-carry init (m/l/acc/cur_buf, lines 508-536, 723-724),
- * including the sinks-conditioned m_inits and the invariant-hoist cache
- * (lines 485-506). Fills ctx->m_inits/l_inits/acc_inits/cur_buf_init + hoist_*.
- * Also issues the first K load (_issue_k(tile_start, 0), line 721). */
+/* Build the loop-carry init: the sinks-conditioned per-lane m_init, acc_inits
+ * and cur_buf_init. Also issues the first K load (_issue_k(tile_start, 0)). */
 void rocke_gfx942_attention_tiled_3d_emit_loop_init(
     rocke_gfx942_attention_tiled_3d_build_ctx_t* ctx);
 
@@ -440,11 +434,12 @@ void rocke_gfx942_attention_tiled_3d_emit_loop_init(
 void rocke_gfx942_attention_tiled_3d_emit_async_infra(
     rocke_gfx942_attention_tiled_3d_build_ctx_t* ctx);
 
-/* The online-softmax scf.for over [tile_start, tile_end) (lines 726-912): per-
- * iter buffer swap, QK narrow MFMA + V/next-K prefetch, alibi/softcap/qq_bias/
- * mask, online (m,l) update via warp_xor reductions, P_lds store, PV narrow MFMA
- * with strided-V B-operand, and the carry yield. Stashes final (m,l,acc) into
- * ctx->m_final/l_final/acc_final. */
+/* The online-softmax scf.for over [tile_start, tile_end), after the lane's
+ * query-row invariants and its Q^T operand (read once): per-iter buffer swap,
+ * QK^T (S^T = K Q^T, 16x16x16) + V/next-K prefetch, alibi/softcap/qq_bias/mask,
+ * per-lane online (m,l) update with a 4-lane row reduce, PV (O^T = V^T P^T: V^T
+ * from strided LDS loads, P^T from registers), and the carry yield. Stashes
+ * final (m,l,acc) into ctx->m_final/l_final/acc_final. */
 void rocke_gfx942_attention_tiled_3d_emit_softmax_loop(
     rocke_gfx942_attention_tiled_3d_build_ctx_t* ctx);
 

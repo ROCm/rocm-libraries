@@ -3313,8 +3313,8 @@ def _tiled_3d_spec_from_problem(
 
 
 def _tiled_3d_segment_lds_bytes(spec) -> int:
-    """Q[M,D], K[2,T,D], V[T,D] and, where the kernel uses one (``uses_p_lds``),
-    P[M,T] in the gfx942/gfx950 3D schedule.
+    """Q[M,D], K[2,T,D] and V[T,D] in the gfx942/gfx950 3D schedule (P stays in
+    registers).
 
     These tiles overlap in lifetime. Supported tile dimensions need no
     inter-allocation padding; the lowering aligns the final pool to 16 bytes.
@@ -3326,8 +3326,7 @@ def _tiled_3d_segment_lds_bytes(spec) -> int:
     if bits % 8:
         raise ValueError("tiled 3D LDS requires byte-addressable scalar elements")
     m, d, t = spec.block_m, spec.head_size, spec.tile_size
-    p = m * t if getattr(spec, "uses_p_lds", True) else 0
-    size = (m * d + 3 * t * d + p) * (bits // 8)
+    size = (m * d + 3 * t * d) * (bits // 8)
     return (size + 15) & ~15
 
 

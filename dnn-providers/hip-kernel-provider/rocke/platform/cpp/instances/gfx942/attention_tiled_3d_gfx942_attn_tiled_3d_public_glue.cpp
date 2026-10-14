@@ -647,7 +647,6 @@ bool rocke_gfx942_attn_tiled_3d_config_from_spec(
     out->USE_SINKS = spec->use_sinks;
     out->USE_ALIBI = spec->use_alibi;
     out->USE_QQ_BIAS = spec->use_qq_bias;
-    out->USE_INVARIANT_HOIST = spec->use_invariant_hoist;
     out->KV_FP8
         = (spec->kv_storage_dtype != NULL && rocke_attn3d_streq(spec->kv_storage_dtype, "fp8e4m3"));
     out->KV_BYTES = out->KV_FP8 ? 1 : 2;

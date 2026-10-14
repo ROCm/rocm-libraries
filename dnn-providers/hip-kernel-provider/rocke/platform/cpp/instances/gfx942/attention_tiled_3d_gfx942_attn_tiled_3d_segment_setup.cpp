@@ -516,10 +516,6 @@ void rocke_gfx942_attention_tiled_3d_emit_prologue(rocke_gfx942_attention_tiled_
         ctx->K_lds = rocke_b_smem_alloc(B, dtype, k_shape, 3, "Klds");
         ctx->V_lds = rocke_b_smem_alloc(B, dtype, v_shape, 3, "Vlds");
     }
-    {
-        const int p_shape[2] = {BLOCK_M, T};
-        ctx->P_lds = rocke_b_smem_alloc(B, dtype, p_shape, 2, "Plds");
-    }
 
     /* ---- SSA constants (lines 429-435) ---- */
     ctx->neg_inf = rocke_b_const_f32(B, -INFINITY);
