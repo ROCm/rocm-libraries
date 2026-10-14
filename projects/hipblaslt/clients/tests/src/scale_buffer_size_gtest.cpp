@@ -7,6 +7,40 @@
 
 namespace
 {
+    TEST(ScaleBufferSize, smoke_PaddedLayoutsRequireKAlongRows)
+    {
+        // An NT operand has M or N rows and K columns. The padded helper expects
+        // the TN orientation instead; debug builds must reject this misuse.
+        for(bool rocroller : {false, true})
+        {
+            SCOPED_TRACE(rocroller);
+            EXPECT_EQ(
+                blockScaleBufferSize(
+                    256, 1, hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT, true, rocroller),
+                256);
+            EXPECT_DEBUG_DEATH(
+                blockScaleBufferSize(
+                    1, 256, hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT, false, rocroller),
+                "require K along the rows");
+        }
+        for(auto format : {hipblaslt_scaling_format::Block_32_UE8M0,
+                           hipblaslt_scaling_format::Block_32_UE4M3,
+                           hipblaslt_scaling_format::Block_32_UE5M3,
+                           hipblaslt_scaling_format::Block_16_UE8M0,
+                           hipblaslt_scaling_format::Block_16_UE4M3,
+                           hipblaslt_scaling_format::Block_16_UE5M3})
+        {
+            SCOPED_TRACE(static_cast<int>(format));
+            EXPECT_EQ(blockScaleBufferSize(256, 1, format, true, true),
+                      blockSize(format) == 32 ? 256 : 512);
+            // The alternate layout still accepts K along columns.
+            EXPECT_EQ(blockScaleBufferSize(1, 256, format, false, false),
+                      blockSize(format) == 32 ? 32 : 128);
+            EXPECT_DEBUG_DEATH(blockScaleBufferSize(1, 256, format, false, true),
+                               "require K along the rows");
+        }
+    }
+
     TEST(ScaleBufferSize, smoke_PreswizzledPaddingDoesNotDependOnRocroller)
     {
         struct Case
