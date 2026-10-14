@@ -1129,10 +1129,28 @@ class TestSLoadB32Construction(AdaptorTestCase):
         self.assertIs(p[1], b)
         self.assertEqual(p[2], 4)
 
-    def test_smem_modifier_raises_on_logical_bridge(self):
-        m = SLoadB32(sgpr(0), sgpr(2, 2), 0, smem=SMEMModifiers(offset=4))
-        with self.assertRaises(NotImplementedError):
-            m.to_stinky_logical()
+    def test_smem_modifier_reaches_logical_bridge(self):
+        m = SLoadB32(
+            sgpr(0), sgpr(2, 2), 0,
+            smem=SMEMModifiers(glc=True, offset=4, nv=NonVolatile.NV),
+        )
+        logical = unittest.mock.Mock()
+        fake_st = unittest.mock.Mock()
+        fake_st.SLoadB32 = unittest.mock.Mock(return_value=logical)
+        with unittest.mock.patch.dict(sys.modules, {"stinkytofu": fake_st}), \
+             unittest.mock.patch(
+                 "rocisa_stinkytofu_adaptor.instruction._to_stinky_register",
+                 side_effect=lambda arg: arg,
+             ), \
+             unittest.mock.patch(
+                 "rocisa_stinkytofu_adaptor.base.getAsmCaps",
+                 return_value={"HasSCOPEModifier": 1},
+             ):
+            out = m.to_stinky_logical()
+        self.assertIs(out, logical)
+        logical.set_smem.assert_called_once_with(
+            glc=True, nv=True, offset=4, has_scope_modifier=True,
+        )
 
     def test_deepcopy(self):
         m = SLoadB32(sgpr(0), sgpr(2, 2), 0, comment="x")
@@ -3612,6 +3630,59 @@ class TestSdwaVop3Forwarding(AdaptorTestCase):
         )
         logical.set_vop3.assert_called_once_with(
             op_sel=[0, 1], op_sel_hi=[1, 0], byte_sel=[2],
+        )
+
+
+class TestSmemForwarding(AdaptorTestCase):
+    """s_load, s_store, and s_atomic_dec match convertSMEMModifiers()."""
+
+    def _lower(self, inst, factory_name, caps):
+        logical = unittest.mock.Mock()
+        fake_st = unittest.mock.Mock()
+        setattr(fake_st, factory_name, unittest.mock.Mock(return_value=logical))
+        with unittest.mock.patch.dict(sys.modules, {"stinkytofu": fake_st}), \
+             unittest.mock.patch(
+                 "rocisa_stinkytofu_adaptor.instruction._to_stinky_register",
+                 side_effect=lambda arg: arg,
+             ), \
+             unittest.mock.patch(
+                 "rocisa_stinkytofu_adaptor.base.getAsmCaps",
+                 return_value=caps,
+             ):
+            out = inst.to_stinky_logical()
+        self.assertIs(out, logical)
+        return logical
+
+    def test_store_and_atomic_dec_forward_glc_nv_offset(self):
+        from rocisa_stinkytofu_adaptor.instruction import SAtomicDec, SStoreB32
+
+        caps = {"HasSCOPEModifier": 0}
+        smem = SMEMModifiers(glc=True, offset=8, nv=NonVolatile.NV, dlc=True, isStore=True)
+        store = self._lower(
+            SStoreB32(sgpr(1), sgpr(2, 2), 0, smem=smem), "SStoreB32", caps,
+        )
+        dec = self._lower(
+            SAtomicDec(sgpr(1), sgpr(2, 2), smem=smem), "SAtomicDec", caps,
+        )
+        expected = dict(glc=True, nv=True, offset=8, has_scope_modifier=False)
+        store.set_smem.assert_called_once_with(**expected)
+        dec.set_smem.assert_called_once_with(**expected)
+
+    def test_absent_smem_is_left_alone(self):
+        logical = self._lower(SLoadB32(sgpr(0), sgpr(2, 2), 0), "SLoadB32", {})
+        logical.set_smem.assert_not_called()
+
+    def test_nv_none_stays_clear(self):
+        logical = self._lower(
+            SLoadB32(
+                sgpr(0), sgpr(2, 2), 0,
+                smem=SMEMModifiers(offset=0, nv=NonVolatile.NV_NONE),
+            ),
+            "SLoadB32",
+            {"HasSCOPEModifier": 1},
+        )
+        logical.set_smem.assert_called_once_with(
+            glc=False, nv=False, offset=0, has_scope_modifier=True,
         )
 
 

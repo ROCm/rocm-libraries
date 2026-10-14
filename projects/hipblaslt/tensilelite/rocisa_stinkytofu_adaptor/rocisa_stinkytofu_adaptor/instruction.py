@@ -974,6 +974,35 @@ def _apply_mubuf(inst: Any, item: Any) -> None:
     )
 
 
+def _smem_has_nv(nv: Any) -> bool:
+    """True when rocisa ``nv`` is anything other than ``NV_NONE``."""
+    if nv is None or nv is False:
+        return False
+    if nv is True:
+        return True
+    return int(getattr(nv, "value", nv)) != 0
+
+
+def _apply_smem(inst: Any, smem: Any) -> None:
+    """Match ``convertSMEMModifiers()``. A missing modifier stays unset.
+
+    Only ``glc``, ``nv`` (as a bool), ``offset``, and ``hasSCOPEModifier``
+    from the asm caps are copied. ``dlc``, ``isStore``, ``scope``, and ``th``
+    are not fields of stinkytofu ``SMEMModifiers``.
+    """
+    if smem is None:
+        return
+    from .base import getAsmCaps  # noqa: WPS433
+
+    caps = getAsmCaps()
+    inst.set_smem(
+        glc=bool(getattr(smem, "glc", False)),
+        nv=_smem_has_nv(getattr(smem, "nv", None)),
+        offset=int(getattr(smem, "offset", 0) or 0),
+        has_scope_modifier=bool(caps.get("HasSCOPEModifier", 0)),
+    )
+
+
 def _apply_ds(inst: Any, ds: Any) -> None:
     """Forward every field ``convertDSModifiers()`` copies.
 
@@ -1021,6 +1050,8 @@ def _apply_modifiers(item: Any, logical: Any) -> Any:
         logical.set_global(scope=int(item.scope))
     if "mubuf" in mods:
         _apply_mubuf(logical, item)
+    if "smem" in mods:
+        _apply_smem(logical, getattr(item, "smem", None))
     if "ds" in mods or "ds_full" in mods:
         _apply_ds(logical, getattr(item, "ds", None))
     return logical
@@ -1920,14 +1951,14 @@ SSetRegIMM32B32 = _make_scalar_unary_class("SSetRegIMM32B32", "s_setreg_IMM32_b3
 # logicalIR: ``SLoadB32`` … ``SLoadB512`` in LogicalInstructionDefs.inc
 #         (auto-generated ``_stinkytofu.SLoadB32(dest, src0, src1, comment)``).
 #
-# ``SMEMModifiers`` on the logical-IR Python binding is not wired yet;
-# ``to_stinky_logical`` raises if ``smem`` is not ``None``.
+# ``smem`` is forwarded through ``set_smem`` when it is not ``None``.
 
 
 class SMemLoadInstruction(Instruction):
     """``s_load_<b*> dst, base, soffset`` base (rocisa ``SMemLoadInstruction``)."""
 
     __slots__ = ("dst", "base", "soffset", "smem")
+    _stinky_mods = ("smem",)
 
     def __init__(
         self,
@@ -1981,11 +2012,6 @@ class SMemLoadInstruction(Instruction):
         return [self.base, self.soffset]
 
     def to_stinky_logical(self) -> Any:
-        if self.smem is not None:
-            raise NotImplementedError(
-                "rocisa_stinkytofu_adaptor: SMemLoad with non-None SMEMModifiers "
-                "is not yet supported on the stinkytofu logical-IR path.",
-            )
         import stinkytofu as _st  # noqa: WPS433
 
         try:
@@ -1998,12 +2024,13 @@ class SMemLoadInstruction(Instruction):
                 f"stinkytofu binding has no factory {fac_name!r}; rebuild stinkytofu "
                 f"(tablegen) after adding SLoad* to LogicalInstructionDefs.inc.",
             )
-        return factory(
+        inst = factory(
             _to_stinky_register(self.dst),
             _to_stinky_register(self.base),
             _to_stinky_register(self.soffset),
             self.comment,
         )
+        return _apply_modifiers(self, inst)
 
     def __deepcopy__(self, memo):
         clone = self.__class__.__new__(self.__class__)
@@ -2112,6 +2139,7 @@ class SMemStoreInstruction(Instruction):
     """``s_store_<b*> src, base, soffset`` base class."""
 
     __slots__ = ("src", "base", "soffset", "smem")
+    _stinky_mods = ("smem",)
 
     def __init__(
         self,
@@ -2159,23 +2187,19 @@ class SMemStoreInstruction(Instruction):
         return [self.src, self.base, self.soffset]
 
     def to_stinky_logical(self) -> Any:
-        if self.smem is not None:
-            raise NotImplementedError(
-                "rocisa_stinkytofu_adaptor: SMemStore with non-None SMEMModifiers "
-                "is not yet supported on the stinkytofu logical-IR path.",
-            )
         import stinkytofu as _st  # noqa: WPS433
 
         fac_name = _ST_SSTORE_LOGICAL_BY_INST_TYPE.get(self.instType)
         if fac_name is None:
             raise ValueError(f"SMemStore: unsupported instType {self.instType!r}")
         factory = getattr(_st, fac_name)
-        return factory(
+        inst = factory(
             _to_stinky_register(self.src),
             _to_stinky_register(self.base),
             _to_stinky_register(self.soffset),
             self.comment,
         )
+        return _apply_modifiers(self, inst)
 
     def __deepcopy__(self, memo):
         clone = self.__class__.__new__(self.__class__)
@@ -4879,6 +4903,7 @@ class SAtomicDec(Instruction):
     """``s_atomic_dec dst, base`` shim (no soffset)."""
 
     __slots__ = ("dst", "base", "smem")
+    _stinky_mods = ("smem",)
 
     def __init__(self, dst=None, base=None, smem=None, comment="", **kw):
         _ = kw
@@ -4910,10 +4935,10 @@ class SAtomicDec(Instruction):
 
     def to_stinky_logical(self) -> Any:
         import stinkytofu as _st
-        return _st.SAtomicDec(
+        return _apply_modifiers(self, _st.SAtomicDec(
             _to_stinky_register(self.dst),
             _to_stinky_register(self.base),
-            self.comment)
+            self.comment))
 
     def __deepcopy__(self, memo):
         if id(self) in memo:

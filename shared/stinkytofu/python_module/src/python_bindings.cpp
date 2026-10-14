@@ -684,6 +684,14 @@ NB_MODULE(_stinkytofu, m) {
             nb::arg("has_sc0_modifier") = false,
             "Set MUBUF modifiers (offen, offset, glc, slc, nt, scope, th, is_store, nv, lds, caps)")
         .def(
+            "set_smem",
+            [](LogicalInstruction& inst, bool glc, bool nv, int offset, bool hasSCOPEModifier) {
+                inst.smem = SMEMModifiers(glc, nv, offset, hasSCOPEModifier);
+            },
+            nb::arg("glc") = false, nb::arg("nv") = false, nb::arg("offset") = 0,
+            nb::arg("has_scope_modifier") = false,
+            "Set SMEM modifiers (glc, nv, offset, has_scope_modifier)")
+        .def(
             "add_src",
             [](LogicalInstruction& inst, const StinkyRegister& reg) { inst.srcs.push_back(reg); },
             nb::arg("reg"), "Add an additional source register operand")
