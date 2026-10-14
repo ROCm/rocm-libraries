@@ -59,7 +59,6 @@
 #include <memory>
 #include <mutex>
 #include <optional>
-#include <regex>
 #include <string>
 #include <type_traits>
 #include <vector>
@@ -923,28 +922,29 @@ namespace
 #endif
                     if(!TestPath(tensileLibraryPath))
                     {
+                        rocblas_internal_ostream msg;
+                        msg << "\nrocBLAS error: Cannot read " << tensileLibraryPath << ": "
+                            << strerror(errno);
 #if ROCBLAS_TENSILE_SEPARATE_ARCH
-                        rocblas_cerr << "\nrocBLAS error: Cannot read " << tensileLibraryPath
-                                     << ": " << strerror(errno) << " for GPU arch : " << processor
-                                     << std::endl;
+                        msg << " for GPU arch : " << processor;
+                        msg << "\n List of available TensileLibrary Files :";
 #if ROCBLAS_TENSILE_LAZY_LOAD
-                        std::regex fileMatcher(path + "/TensileLibrary_lazy.*");
+                        constexpr bool lazy_load = true;
 #else
-                        std::regex fileMatcher(path + "/TensileLibrary_gfx\\d+.dat");
+                        constexpr bool lazy_load = false;
 #endif
-                        rocblas_cerr << " List of available TensileLibrary Files : " << std::endl;
-                        for(auto& file_name : fs::directory_iterator(path))
+                        // Best-effort directory listing
+                        std::error_code list_ec;
+                        for(auto& file_name : fs::directory_iterator(path, list_ec))
                         {
-                            if(std::regex_match(file_name.path().string(), fileMatcher))
-                            {
-                                rocblas_cerr << file_name << std::endl;
-                            }
+                            // Match by filename prefix.
+                            if(rocblas_tensile_is_library_filename(
+                                   file_name.path().filename().string(), lazy_load))
+                                msg << "\n  " << file_name.path().string();
                         }
-#else
-                        rocblas_cerr << "\nrocBLAS error: Cannot read " << tensileLibraryPath
-                                     << ": " << strerror(errno) << std::endl;
 #endif
-                        rocblas_abort();
+                        rocblas_cerr << msg.str() << std::endl;
+                        throw std::runtime_error(msg.str());
                     }
                 }
             }
@@ -1121,10 +1121,11 @@ namespace
 
                 if(m_libraryMap.find(processor) == m_libraryMap.end())
                 {
-                    rocblas_cerr << "\nrocBLAS error: Could not initialize Tensile library for "
-                                    "architecture: "
-                                 << processor << std::endl;
-                    rocblas_abort();
+                    std::string errmsg = "\nrocBLAS error: Could not initialize Tensile library "
+                                        "for architecture: "
+                                        + processor;
+                    rocblas_cerr << errmsg << std::endl;
+                    throw std::runtime_error(errmsg);
                 }
             }
 
@@ -1211,20 +1212,20 @@ namespace
     {
         rocblas_cerr << "\nrocBLAS error: Could not initialize Tensile host:\n"
                      << e.what() << std::endl;
-        rocblas_abort();
+        throw;
     }
     catch(const rocblas_status& status)
     {
         rocblas_cerr << "\nrocBLAS error: Could not initialize Tensile host:\n"
                      << rocblas_status_to_string(status) << std::endl;
-        rocblas_abort();
+        throw;
     }
     catch(...)
     {
         rocblas_cerr
             << "\nrocBLAS error: Could not initialize Tensile host:\nUnknown exception thrown"
             << std::endl;
-        rocblas_abort();
+        throw;
     }
 
     /**************************************************************************
