@@ -202,6 +202,8 @@ struct SdpaGraphSpec
     std::optional<int64_t> valueSequenceStride;
     /// O's batch stride, when it should not be the layout's (e.g. a slice of a larger buffer).
     std::optional<int64_t> outputBatchStride;
+    /// The LSE's batch stride, when it should not be the layout's.
+    std::optional<int64_t> statsBatchStride;
 
     /// Overrides of the bounds the mask kind sets, for bands and other windows.
     std::optional<int64_t> leftBound;
@@ -468,11 +470,15 @@ inline flatbuffers::FlatBufferBuilder buildFlydslSdpaRdnaGraph(const SdpaGraphSp
     }
     const int64_t statsLast = spec.stats == SdpaStats::LSE_WRONG_SHAPE ? 2 : 1;
     const std::vector<int64_t> statsDims{spec.batch, spec.heads, spec.seqLenQ, statsLast};
-    const std::vector<int64_t> statsStrides
+    std::vector<int64_t> statsStrides
         = spec.statsSequenceMajor
               ? std::vector<int64_t>{spec.heads * spec.seqLenQ, 1, spec.heads, 1}
               : std::vector<int64_t>{
                     spec.heads * spec.seqLenQ * statsLast, spec.seqLenQ * statsLast, statsLast, 1};
+    if(spec.statsBatchStride.has_value())
+    {
+        statsStrides[0] = *spec.statsBatchStride;
+    }
     const bool withStatsTensor = spec.stats == SdpaStats::LSE || spec.stats == SdpaStats::LSE_BF16
                                  || spec.stats == SdpaStats::LSE_WRONG_SHAPE;
     if(withStatsTensor)
@@ -763,6 +769,27 @@ inline std::vector<SdpaFieldDecline> sdpaFieldDeclines()
             s.sinkDataType = data_objects::DataType::FLOAT;
         },
         withSink);
+
+    // Outputs whose elements share addresses: concurrent writes to one location race.
+    const auto twoBatches = [](SdpaGraphSpec& s) { s.batch = 2; };
+    edit(
+        "OverlappingOutputBatches",
+        [](SdpaGraphSpec& s) {
+            s.batch = 2;
+            s.outputBatchStride = s.headDim;
+        },
+        twoBatches);
+    edit(
+        "OverlappingStatsBatches",
+        [withStats](SdpaGraphSpec& s) {
+            withStats(s);
+            s.batch = 2;
+            s.statsBatchStride = 1;
+        },
+        [withStats](SdpaGraphSpec& s) {
+            withStats(s);
+            s.batch = 2;
+        });
 
     // Statistics asked for inconsistently.
     edit("StatsRequestedWithoutATensor",

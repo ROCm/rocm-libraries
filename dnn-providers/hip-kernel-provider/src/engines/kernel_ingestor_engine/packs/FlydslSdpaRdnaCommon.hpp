@@ -286,6 +286,44 @@ inline std::optional<int64_t> checkedProduct(std::initializer_list<int64_t> fact
     return product;
 }
 
+/// Whether no two elements of @p tensor share an address, which an output needs: concurrent
+/// workgroups writing one location race. Its axes of more than one element, ordered by
+/// stride, must each step past everything the axes inside it span. Conservative: a layout
+/// interleaving two axes inside one another's gaps declines too.
+inline bool elementsDoNotOverlap(const data_objects::TensorAttributes& tensor)
+{
+    const auto* dims = tensor.dims();
+    const auto* strides = tensor.strides();
+    if(dims == nullptr || strides == nullptr || dims->size() != strides->size())
+    {
+        return false;
+    }
+    std::vector<std::pair<int64_t, int64_t>> axes; // (stride, extent)
+    for(flatbuffers::uoffset_t axis = 0; axis < dims->size(); ++axis)
+    {
+        if(dims->Get(axis) > 1)
+        {
+            axes.emplace_back(strides->Get(axis), dims->Get(axis));
+        }
+    }
+    std::sort(axes.begin(), axes.end());
+    int64_t span = 1; // elements the inner axes reach, from the first
+    for(const auto& [stride, extent] : axes)
+    {
+        if(stride < span)
+        {
+            return false;
+        }
+        const auto reach = checkedProduct({extent - 1, stride});
+        if(!reach.has_value() || *reach > std::numeric_limits<int64_t>::max() - span)
+        {
+            return false;
+        }
+        span += *reach;
+    }
+    return true;
+}
+
 /**
  * @brief Total over an UNVALIDATED graph: rank, stride/dim agreement and positive extents,
  *        checked before anything indexes an axis; and the one layout rule the kernel has.
@@ -642,9 +680,11 @@ inline std::optional<BoundTokens> flydslSdpaRdnaGraphMatches(const MatchContext&
     {
         return std::nullopt;
     }
-    // Rows move as 16-byte vectors from each operand's base.
+    // Rows move as 16-byte vectors from each operand's base; O is written by many
+    // workgroups at once, so no two of its elements may share an address.
     if(!declaresAlignment(*q, VECTOR_BYTES) || !declaresAlignment(*k, VECTOR_BYTES)
-       || !declaresAlignment(*v, VECTOR_BYTES) || !declaresAlignment(*o, VECTOR_BYTES))
+       || !declaresAlignment(*v, VECTOR_BYTES) || !declaresAlignment(*o, VECTOR_BYTES)
+       || !elementsDoNotOverlap(*o))
     {
         return std::nullopt;
     }
@@ -802,6 +842,7 @@ inline std::optional<BoundTokens> flydslSdpaRdnaGraphMatches(const MatchContext&
         // two disagree, so the graph declines rather than one being ignored.
         const auto* stats = findTensor(context, attributes.stats_tensor_uid().value());
         if(stats == nullptr || !declaresAlignment(*stats, sizeof(float))
+           || !elementsDoNotOverlap(*stats)
            || (attributes.generate_stats().has_value() && !attributes.generate_stats().value())
            || !isServableStats(*stats, problem.batch, problem.numHeads, problem.seqLenQ))
         {
