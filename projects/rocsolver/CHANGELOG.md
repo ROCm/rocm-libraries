@@ -14,12 +14,18 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 * Support added for the gfx1250-strict architecture.
 
 ### Changed
+
+* Clarified in the API documentation that rocsolver_rfinfo is an input and output parameter as it could be modified within the functions.
+
 ### Removed
 ### Optimized
 
 * Improved performance of expert eigensolvers SYEVDX/HEEVDX, SYGVDX/HEGVDX
 
 ### Resolved issues
+
+* Fixed sparse functions potentially not using the stream set in the handle.
+
 ### Known issues
 ### Upcoming changes
 
@@ -39,15 +45,9 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
     - LARFT_64
 
 ### Changed
-
-* Clarified in the API documentation that rocsolver_rfinfo is an input and output parameter as it could be modified within the functions.
-
 ### Removed
 ### Optimized
 ### Resolved issues
-
-* Fixed sparse functions potentially not using the stream set in the handle.
-
 ### Known issues
 ### Upcoming changes
 ### Optimized
