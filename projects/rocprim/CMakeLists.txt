@@ -331,3 +331,8 @@ if(BUILD_CODE_COVERAGE AND ROCPRIM_PROJECT_IS_TOP_LEVEL)
     DEPENDS coverage_summary
   )
 endif()
+
+# CI TEST SCAFFOLDING -- do not merge.
+# Mock change to exercise ROCm/TheRock#external-ci-file-goodbye: this PR should
+# resolve changed_projects to exactly "projects/rocprim" and run only rocPRIM
+# tests, while still building every in-scope stage in full.
