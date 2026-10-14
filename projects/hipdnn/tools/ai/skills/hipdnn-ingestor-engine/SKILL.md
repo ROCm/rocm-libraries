@@ -74,6 +74,9 @@ Completion requires:
   is not correctness evidence. An extension must dispatch its new candidate.
 - For an engine with a `reduction:` block, the `variant_reduce.py` report, the applied
   rules and a user-accepted instance count; a remaining AOT-budget WARN is justified.
+- Packaging probes run and passing (RUNBOOK's final step): the automatic
+  `hkp-probe-<arch>` for the bundle's architecture (no edit), plus any named `UKDS` probe
+  the integration adds in `descriptor-packaging/probes/probes.cmake`.
 - Rebuilt/reinstalled artifacts after reduction or regeneration, then fresh final gates.
   Every final corpus input has an attributable runtime outcome and the complete join
   required by [workloads.md](workloads.md); missing, ambiguous or error outcomes block

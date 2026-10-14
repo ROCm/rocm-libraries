@@ -21,9 +21,6 @@
  *
  * ************************************************************************ */
 
-#include <map>
-#include <sstream>
-
 #include "internal/generic/rocsparse_sptrsv.h"
 #include "rocsparse_control.hpp"
 #include "rocsparse_enum_utils.hpp"
