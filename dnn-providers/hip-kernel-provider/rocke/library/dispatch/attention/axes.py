@@ -151,6 +151,12 @@ DENSE_VARIANT_FIELDS: Mapping[str, frozenset] = {
     "gfx950": frozenset({"persistent", "wide_lds_dma"}),
     "gfx942": frozenset(),
 }
+# Optional extra outputs each dense kernel implements. Set from the request, like
+# problem fields, and never swept: a tuning point must not add or drop an output.
+DENSE_OUTPUT_FIELDS: Mapping[str, frozenset] = {
+    "gfx950": frozenset({"emit_lse"}),
+    "gfx942": frozenset({"emit_lse"}),
+}
 DENSE_LOOP_FIELDS = frozenset({"waves_per_eu"})
 # Knobs with nothing to sweep: the validator accepts a single value, or (gfx942
 # ``lazy_rescale``) the body never reads the field and only the name changes.

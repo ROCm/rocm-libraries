@@ -647,10 +647,214 @@ def cfgs_gfx1151_wmma_fmha_fwd():
         (128, 4, 4, "causal", False),
         (64, 6, 0, "none", True),
     ]
-    return [
-        dict(head_size=h, num_query_heads=q, num_kv_heads=k, mask_mode=m, v_lds_stage=v)
-        for (h, q, k, m, v) in rows
+    configs = [
+        dict(head_size=h, mask_mode=m, v_lds_stage=v, dtype=dtype)
+        for dtype in ("fp16", "bf16")
+        for (h, _q, _k, m, v) in rows
     ]
+    # Bottom-right alignment is runtime state, so these intentionally reuse
+    # the ordinary causal code objects represented by the standalone emitter.
+    configs += [dict(configs[index]) for index in (2, 8, 3, 9, 5, 11)]
+    tails = (
+        (12, True, False),
+        (13, True, False),
+        (3, False, True),
+        (9, False, True),
+        (12, True, True),
+        (13, True, True),
+        (16, True, True),
+        (17, True, True),
+    )
+    configs += [
+        dict(configs[index], query_tail=query_tail, kv_tail=kv_tail)
+        for index, query_tail, kv_tail in tails
+    ]
+    features = (
+        (12, dict(mask_mode="window")),
+        (13, dict(mask_mode="window")),
+        (2, dict(use_softcap=True)),
+        (8, dict(use_softcap=True)),
+        (2, dict(use_sinks=True)),
+        (8, dict(use_sinks=True)),
+        (12, dict(use_alibi=True)),
+        (13, dict(use_alibi=True)),
+        (0, dict(use_qq_bias=True)),
+        (6, dict(use_qq_bias=True)),
+        (18, dict(mask_mode="window", use_sinks=True)),
+        (19, dict(mask_mode="window", use_sinks=True)),
+        (
+            24,
+            dict(
+                mask_mode="window",
+                use_softcap=True,
+                use_sinks=True,
+                use_alibi=True,
+                use_qq_bias=True,
+            ),
+        ),
+        (
+            25,
+            dict(
+                mask_mode="window",
+                use_softcap=True,
+                use_sinks=True,
+                use_alibi=True,
+                use_qq_bias=True,
+            ),
+        ),
+        (2, dict(use_softcap=True, use_alibi=True)),
+        (8, dict(use_softcap=True, use_alibi=True)),
+    )
+    configs += [dict(configs[index], **flags) for index, flags in features]
+    layouts = (
+        (0, 0),
+        (7, 0),
+        (12, 0),
+        (15, 0),
+        (16, 0),
+        (39, 0),
+        (0, 16),
+        (7, 64),
+        (12, 16),
+        (15, 32),
+        (16, 32),
+        (17, 64),
+        (26, 64),
+        (33, 32),
+        (38, 16),
+        (39, 64),
+    )
+    configs += [
+        dict(configs[index], layout="paged" if page else "ragged", page_block_size=page)
+        for index, page in layouts
+    ]
+    configs += [
+        dict(configs[index], kv_dtype="fp8e4m3")
+        for index in (0, 7, 14, 15, 22, 23, 24, 25, 44, 47, 51, 57)
+    ]
+    transposed = [
+        dict(
+            head_size=head,
+            mask_mode=mask,
+            transposed_qk=True,
+            block_n=block,
+            num_waves=waves,
+        )
+        for head in (64, 128)
+        for mask in ("none", "causal")
+        for block in (32, 64)
+        for waves in (1, 2)
+    ]
+    return (
+        configs
+        + transposed
+        + [dict(config) for config in transposed if config["mask_mode"] == "causal"]
+        + [
+            dict(
+                head_size=64,
+                mask_mode="window",
+                layout="ragged",
+                query_tail=True,
+                kv_tail=True,
+                v_lds_stage=True,
+                scheduler_strategy=strategy,
+            )
+            for strategy in (
+                "max-ilp",
+                "max-memory-clause",
+                "iterative-ilp",
+                "iterative-minreg",
+                "iterative-maxocc",
+            )
+        ]
+        + [
+            dict(
+                head_size=256,
+                dtype=dtype,
+                mask_mode="causal" if vlds else "none",
+                query_tail=vlds,
+                kv_tail=vlds,
+                v_lds_stage=vlds,
+                value_tile_size=tile,
+            )
+            for dtype in ("fp16", "bf16")
+            for tile in (16, 32, 64, 128)
+            for vlds in (False, True)
+        ]
+        + [
+            dict(
+                head_size=256,
+                dtype=dtype,
+                mask_mode="causal",
+                query_tail=True,
+                kv_tail=True,
+                layout="paged" if paged else "ragged",
+                page_block_size=32 if paged else 0,
+                kv_dtype="fp8e4m3",
+                value_tile_size=128,
+                v_lds_stage=paged,
+            )
+            for dtype in ("fp16", "bf16")
+            for paged in (False, True)
+        ]
+        + [
+            dict(
+                head_size=head,
+                mask_mode="causal",
+                query_tail=tails,
+                kv_tail=tails,
+                v_lds_stage=tails,
+                causal_tile_skip=True,
+            )
+            for head in (64, 128)
+            for tails in (False, True)
+        ]
+        + [
+            dict(
+                head_size=head,
+                mask_mode=mask,
+                v_lds_stage=vlds,
+                v_head_size=v_head,
+                value_tile_size=tile,
+            )
+            for (head, v_head, tile, mask, vlds) in (
+                (128, 64, 0, "none", False),
+                (64, 128, 0, "causal", True),
+                (192, 128, 0, "none", True),
+                (128, 256, 64, "none", False),
+            )
+        ]
+        + [
+            dict(
+                head_size=head,
+                dtype=dtype,
+                mask_mode=mask,
+                query_tail=tails,
+                kv_tail=tails,
+                v_lds_stage=tails,
+                use_sinks=sinks,
+                use_softcap="s" in extras,
+                use_alibi="a" in extras,
+                use_qq_bias="q" in extras,
+                layout=layout,
+                page_block_size=page,
+                value_tile_size=tile,
+                use_attn_bias=True,
+                bias_dtype=bdt,
+            )
+            for (layout, page, head, mask, tails, sinks, bdt, extras, tile, dtype) in (
+                ("dense", 0, 64, "none", False, False, "f32", "", 0, "fp16"),
+                ("dense", 0, 64, "causal", True, True, "q", "", 0, "fp16"),
+                ("dense", 0, 128, "none", False, False, "q", "", 0, "fp16"),
+                ("ragged", 0, 64, "causal", True, True, "f32", "", 0, "fp16"),
+                ("paged", 16, 64, "causal", True, False, "q", "", 0, "fp16"),
+                ("dense", 0, 64, "causal", True, False, "f32", "saq", 0, "fp16"),
+                ("dense", 0, 256, "none", False, False, "f32", "", 64, "fp16"),
+                ("dense", 0, 128, "causal", True, True, "q", "saq", 0, "fp16"),
+                ("dense", 0, 64, "none", False, False, "q", "", 0, "bf16"),
+            )
+        ]
+    )
 
 
 def cfgs_attention_unified():

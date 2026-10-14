@@ -110,6 +110,10 @@ class AttentionRequest(OperatorRequest):
     mask_type: AttentionMaskType | int = AttentionMaskType.NO_MASK
     use_sinks: bool = False
     sliding_window: int = 0
+    window_left: int | None = None
+    window_right: int | None = None
+    window_bottom_right: bool = False
+    tensor_layout: str = "auto"  # dense tensors only: "auto" | "bshd" | "bhsd"
     kv_block_size: int = 16  # paged KV block_size (modulus); {16,32,64}
     num_cus: int = (
         0  # 0 => auto-resolve to the device CU count at dispatch (_resolve_num_cus)
@@ -131,7 +135,22 @@ class AttentionRequest(OperatorRequest):
     tuning_knobs: Tuple[Tuple[str, object], ...] = ()
     use_fp8: bool = False
     fp8_fnuz: bool = False
+    # Explicit layouts and score features require candidate capability support.
+    # "auto" retains each existing candidate's layout convention.
+    layout: str = "auto"  # "auto" | "dense" | "ragged" | "paged"
+    use_softcap: bool = False
+    use_alibi: bool = False
+    use_qq_bias: bool = False
+    # Dense additive attention bias ``[B|1, H|1, Sq|1, Sk]`` (unit-stride keys)
+    # added to the scaled scores; ``attn_bias_dtype`` is "f32" or "q" (the Q
+    # dtype). A candidate must declare the "attn_bias" feature.
+    use_attn_bias: bool = False
+    attn_bias_dtype: str = "f32"
     kv_layout: str = "paged"  # "paged" | "strided" (non-paged decode)
+    # Also write the natural-log softmax normalizer (LSE) into a caller-owned
+    # FP32 ``tensors["lse"]``. Reported as the ``lse`` feature, so only
+    # candidates whose kernels implement it (dense, gfx1151 WMMA) admit it.
+    emit_lse: bool = False
 
     def __post_init__(self):
         # Callers rebuild pins from stored JSON; a bad value fails here, with
@@ -143,6 +162,14 @@ class AttentionRequest(OperatorRequest):
         d["dtype"] = self.dtype.lower()
         # IntEnum and raw-int callers describe the same request/cache identity.
         d["mask_type"] = _parse_attention_mask_type(self.mask_type).value
+        d["layout"] = (
+            self.layout.strip().lower() if isinstance(self.layout, str) else ""
+        )
+        d["tensor_layout"] = (
+            self.tensor_layout.strip().lower()
+            if isinstance(self.tensor_layout, str)
+            else ""
+        )
         return d
 
     def dims(self) -> dict[str, int]:
@@ -167,18 +194,56 @@ class AttentionRequest(OperatorRequest):
             # Let _request_errors report the invalid ordinal. In particular, do
             # not silently classify an arbitrary nonzero value as causal.
             mask_type = None
-        if mask_type is not None and mask_type != AttentionMaskType.NO_MASK:
+        if mask_type in (
+            AttentionMaskType.TOP_LEFT_CAUSAL,
+            AttentionMaskType.BOTTOM_RIGHT_CAUSAL,
+        ):
             active.add("causal")
         if mask_type == AttentionMaskType.BOTTOM_RIGHT_CAUSAL and int(
             self.seqlen_q
         ) != int(self.seqlen_k):
             active.add("causal_bottom_right")
-        if int(self.sliding_window) > 0:
+        explicit_window = self.window_left is not None or (
+            self.window_right is not None and int(self.window_right) >= 0
+        )
+        windowed = (
+            mask_type == AttentionMaskType.SLIDING_WINDOW
+            or int(self.sliding_window) > 0
+            or explicit_window
+        )
+        if windowed:
             active.add("sliding_window")
+            if explicit_window:
+                active.add("window_bounds")
+                right = -1 if self.window_right is None else int(self.window_right)
+                if right != 0:
+                    active.add("noncausal_window")
+        if self.window_right is not None and int(self.window_right) >= 0:
+            active.add("window_right")
+        if self.emit_lse:
+            active.add("lse")
         if bool(self.use_sinks):
             active.add("sinks")
         if bool(self.use_fp8):
             active.add("fp8")
+        if bool(self.use_softcap):
+            active.add("softcap")
+        if bool(self.use_alibi):
+            active.add("alibi")
+        if bool(self.use_qq_bias):
+            active.add("qq_bias")
+        if bool(self.use_attn_bias):
+            active.add("attn_bias")
+        layout = self.layout.strip().lower() if isinstance(self.layout, str) else ""
+        if layout not in ("auto", ""):
+            active.add(f"layout_{layout}")
+        tensor_layout = (
+            self.tensor_layout.strip().lower()
+            if isinstance(self.tensor_layout, str)
+            else ""
+        )
+        if tensor_layout == "bhsd":
+            active.add("layout_bhsd")
         return frozenset(active)
 
 
@@ -193,12 +258,21 @@ ATTENTION_DIM_VOCABULARY = (
     "kv_block_size",
 )
 
+# Feature set of the existing unified backend, not the union of standalone capabilities.
 ATTENTION_FEATURES = frozenset(
     {"causal", "causal_bottom_right", "sliding_window", "sinks", "fp8"}
 )
 
 
-def _request_errors(req: OperatorRequest) -> list[str]:
+def _request_errors(
+    req: OperatorRequest, *, allow_unequal_head_dims: bool = False
+) -> list[str]:
+    """Structural request errors.
+
+    ``allow_unequal_head_dims`` lets a candidate that supports a Q/K head size
+    different from the V/output head size (hdim_q != hdim_v) opt in; every
+    other candidate keeps the strict equality requirement.
+    """
     if not isinstance(req, AttentionRequest):
         return [f"expected AttentionRequest, got {type(req).__name__}"]
     errors: list[str] = []
@@ -206,17 +280,56 @@ def _request_errors(req: OperatorRequest) -> list[str]:
         errors.append("kv_layout must be paged or strided")
     if req.op != "attention":
         errors.append(f"unsupported op {req.op!r}")
+    if type(req.emit_lse) is not bool:
+        errors.append(f"emit_lse must be a bool, got {type(req.emit_lse).__name__}")
     for field in ("batch", "nhead_q", "nhead_k", "seqlen_q", "seqlen_k", "hdim_q"):
         if int(getattr(req, field)) <= 0:
             errors.append(f"{field} must be positive")
-    if req.hdim_q != req.hdim_v:
+    if allow_unequal_head_dims:
+        if int(req.hdim_v) <= 0:
+            errors.append("hdim_v must be positive")
+    elif req.hdim_q != req.hdim_v:
         errors.append("only hdim_q == hdim_v is supported")
-    if int(req.nhead_q) % int(req.nhead_k):
+    if int(req.nhead_k) > 0 and int(req.nhead_q) % int(req.nhead_k):
         errors.append("nhead_q must be divisible by nhead_k (GQA grouping)")
+    layout = req.layout.strip().lower() if isinstance(req.layout, str) else ""
+    if layout not in ("auto", "dense", "ragged", "paged"):
+        errors.append(f"unsupported attention layout {req.layout!r}")
+    tensor_layout = (
+        req.tensor_layout.strip().lower() if isinstance(req.tensor_layout, str) else ""
+    )
+    if tensor_layout not in ("auto", "bshd", "bhsd"):
+        errors.append(f"unsupported dense tensor layout {req.tensor_layout!r}")
+    if layout in ("ragged", "paged") and tensor_layout != "auto":
+        errors.append("tensor_layout is only valid for dense attention")
     try:
-        _parse_attention_mask_type(req.mask_type)
+        mask_type = _parse_attention_mask_type(req.mask_type)
     except ValueError as exc:
         errors.append(str(exc))
+        mask_type = None
+    explicit_left = req.window_left is not None
+    explicit_right = req.window_right is not None and int(req.window_right) >= 0
+    if int(req.sliding_window) < 0:
+        errors.append("sliding_window must be nonnegative")
+    for field in ("window_left", "window_right"):
+        value = getattr(req, field)
+        if value is not None and (int(value) < -1 or int(value) > 0x7FFF_FFFF):
+            errors.append(f"{field} must be -1 (unbounded) or a nonnegative I32")
+    if explicit_left and int(req.sliding_window) != 0:
+        errors.append("sliding_window cannot be combined with explicit window_left")
+    if explicit_left and mask_type != AttentionMaskType.SLIDING_WINDOW:
+        errors.append("explicit window_left requires mask_type=SLIDING_WINDOW")
+    if explicit_right and mask_type not in (
+        AttentionMaskType.NO_MASK,
+        AttentionMaskType.SLIDING_WINDOW,
+        AttentionMaskType.BOTTOM_RIGHT_CAUSAL,
+    ):
+        errors.append(
+            "window_right requires mask_type NO_MASK, SLIDING_WINDOW, "
+            "or BOTTOM_RIGHT_CAUSAL"
+        )
+    if bool(req.window_bottom_right) and mask_type != AttentionMaskType.SLIDING_WINDOW:
+        errors.append("window_bottom_right requires mask_type=SLIDING_WINDOW")
     try:
         ArchTarget.from_gfx(req.arch)
     except KeyError as e:

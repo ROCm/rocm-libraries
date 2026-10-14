@@ -56,15 +56,20 @@ class BasePostProcessor(BaseParamBuilder):
 
     Decorate methods with @mark_post_process.  Each receives
     (fork_params, mi_groups) and returns the modified pair.
-    Discovery uses vars(type(self)) — same pattern as OptimizationParams.
+    Discovery walks the MRO, so steps defined on mixin bases are collected too.
     """
 
     def __init__(self, config: Dict[str, Any]):
         super().__init__(config)
         self._post_process_methods: List[str] = []
-        for name, method in vars(type(self)).items():
-            if getattr(method, "_is_post_process", False):
-                self._post_process_methods.append(name)
+        # Walk the MRO in reverse so a subclass override replaces the parent's
+        # entry rather than adding a second one, and so mixins are seen at all.
+        seen = {}
+        for klass in reversed(type(self).__mro__):
+            for name, method in vars(klass).items():
+                if getattr(method, "_is_post_process", False):
+                    seen[name] = None
+        self._post_process_methods = list(seen)
 
     def apply(
         self,
@@ -86,10 +91,14 @@ class BasePostProcessor(BaseParamBuilder):
         if self.config.get("IGNORE_NON_TEMPORAL", False):
             fork_params = _apply_ignore_non_temporal_filter(fork_params)
 
-        # Remove DepthU from fork_params if present in all MI groups
+        # Remove DepthU from fork_params if present in all MI groups. The groups
+        # were expanded over the full DepthU axis, so drop those it no longer
+        # allows first, or an MT_DU pin would be lost with it.
         if "DepthU" in fork_params and all(
             "DepthU" in entry for entry in mi_groups
         ):
+            allowed = set(fork_params["DepthU"].values)
+            mi_groups = [entry for entry in mi_groups if set(entry["DepthU"].values) & allowed]
             del fork_params["DepthU"]
 
         return fork_params, mi_groups
@@ -97,6 +106,16 @@ class BasePostProcessor(BaseParamBuilder):
     # -----------------------------------------------------------------
     # Macrotile / Origami tuning (MT_DU) — HW-agnostic
     # -----------------------------------------------------------------
+
+    def _origami_picks_wgm(self) -> bool:
+        """Whether the runtime, not this search, picks WGM and StaggerU.
+
+        hipBLASLt takes the origami path only for persistent kernels, and Tensile
+        rejects ``WorkGroupMappingXCC: -1`` without a persistent strategy ("Can
+        only use auto WGMXCC with StreamK"). Profiles that also gate on something
+        else, such as the library type, override this.
+        """
+        return bool(self.config.get("StreamK", False))
 
     def _apply_mt_du(
         self,
@@ -108,6 +127,9 @@ class BasePostProcessor(BaseParamBuilder):
 
         Overrides select params with fixed values and filters MI groups
         to only keep entries matching the specified macro tile (MT0, MT1).
+        The origami sentinels (WorkGroupMapping 0, WorkGroupMappingXCC -1,
+        PersistentXCCMapping 0) are applied only when ``_origami_picks_wgm()``;
+        otherwise the profile's own values stay.
         """
         fixed_MT0, fixed_MT1, fixed_DU = mt_du[0], mt_du[1], mt_du[2]
 
@@ -119,8 +141,11 @@ class BasePostProcessor(BaseParamBuilder):
             "NonTemporalB": [0],
             "NonTemporalC": [0],
             "NonTemporalD": [0],
-            "StreamKXCCMapping": [0],
+            "PersistentXCCMapping": [0],
         }
+        if not self._origami_picks_wgm():
+            for name in ("WorkGroupMapping", "WorkGroupMappingXCC", "PersistentXCCMapping"):
+                del overrides[name]
         for name, values in overrides.items():
             if name in fork_params:
                 fork_params[name].values = values
@@ -135,7 +160,12 @@ class BasePostProcessor(BaseParamBuilder):
         return fork_params, mi_groups
 
 
+def mi_macro_tile(entry: Dict[str, ForkParameter]) -> Tuple[int, int]:
+    """``(MT0, MT1)`` of an MI group entry."""
+    mfma_params = MIDesign.calculate_mfma_parameters(MFMA.from_list(entry["MatrixInstruction"].values))
+    return mfma_params.MT0, mfma_params.MT1
+
+
 def _mi_matches_mt(entry: Dict[str, ForkParameter], fixed_MT0: int, fixed_MT1: int) -> bool:
     """Check if an MI group entry's macro tile matches the fixed MT."""
-    mfma_params = MIDesign.calculate_mfma_parameters(MFMA.from_list(entry["MatrixInstruction"].values))
-    return mfma_params.MT0 == fixed_MT0 and mfma_params.MT1 == fixed_MT1
+    return mi_macro_tile(entry) == (fixed_MT0, fixed_MT1)

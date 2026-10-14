@@ -89,7 +89,9 @@ def _base_spec(req: AttentionRequest):
         persist_decode="auto",
         ragged=ragged,
         sliding_window=int(req.sliding_window),
+        use_sinks=bool(req.use_sinks),
         waves_per_eu=_tuned_waves_per_eu(head_size, dtype),
+        emit_lse=bool(req.emit_lse),
     )
 
 
@@ -125,10 +127,10 @@ def _make_gfx942_attention_dense_candidate() -> KernelCandidate:
         variant_id=_VARIANT_ID,
         base_spec=_base_spec,
         supports=_supports,
-        # Dense: causal + sliding-window; no sinks or moving bottom-right
-        # diagonal. Head size stays out -- D64/D128 coverage is
-        # ``supports_attention_dense``'s call.
-        features=frozenset({"causal", "sliding_window"}),
+        # Dense: causal, sliding-window and sinks (alone or combined), optional
+        # LSE output; no moving bottom-right diagonal. Head size stays out:
+        # D64/D128 coverage is ``supports_attention_dense``'s call.
+        features=frozenset({"causal", "sliding_window", "sinks", "lse"}),
         # _base_spec picks these from the work size and dtype/head size.
         recorded=frozenset({"persistent", "waves_per_eu"}),
     )

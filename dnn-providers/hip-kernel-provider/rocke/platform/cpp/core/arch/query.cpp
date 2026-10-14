@@ -489,6 +489,18 @@ int rocke_arch_max_threads_per_block(const rocke_arch_target_t* t)
     return t->limits.max_threads_per_block;
 }
 
+bool rocke_arch_has_dpp_row_xmask(const rocke_arch_target_t* t)
+{
+    /* Python: ArchTarget.has_dpp_row_xmask. An allow-list of the gfx10+
+     * families; the gfx9 CDNA families (gfx9_mfma, gfx950) and any family not
+     * listed get the base-DPP encodings. */
+    if(!t || !t->target_family)
+        return false;
+    return strcmp(t->target_family, "gfx11_rdna") == 0
+           || strcmp(t->target_family, "gfx12_rdna") == 0
+           || strcmp(t->target_family, "gfx12_cdna") == 0;
+}
+
 /* ============================== module fns ============================ */
 
 const char* const* rocke_known_arches(int* count)
@@ -568,8 +580,46 @@ static const char* rocke_target_id_start(const char* isa)
     return target;
 }
 
-/* Length of the base architecture in target_id; consult the shared catalog so
- * names such as gfx11-generic are preserved before removing profile suffixes. */
+/* LLVM defines generic-processor membership explicitly; it is not a naming
+ * wildcard. Keep this list aligned with LLVM's AMDGPU Generic Processors table:
+ * https://llvm.org/docs/AMDGPUUsage.html#amdgpu-generic-processor-table */
+static const char* rocke_generic_arch_alias(const char* target_id)
+{
+    static const char* const gfx11_processors[] = {
+        "gfx1100",
+        "gfx1101",
+        "gfx1102",
+        "gfx1103",
+        "gfx1150",
+        "gfx1151",
+        "gfx1152",
+        "gfx1153",
+        "gfx1154",
+    };
+    size_t name_len = strcspn(target_id, ":");
+    for(int i = 0; i < rocke_ati_arch_registry_len; ++i)
+    {
+        const char* arch = rocke_ati_known_arches[i];
+        size_t len = strlen(arch);
+        if(len <= name_len && strncmp(target_id, arch, len) == 0
+           && (len == name_len || target_id[len] == '-'))
+            return NULL;
+    }
+    for(size_t i = 0; i < sizeof(gfx11_processors) / sizeof(gfx11_processors[0]); ++i)
+    {
+        const char* processor = gfx11_processors[i];
+        size_t len = strlen(processor);
+        if(len <= name_len && strncmp(target_id, processor, len) == 0
+           && (len == name_len || target_id[len] == '-'))
+            return "gfx11-generic";
+    }
+    return NULL;
+}
+
+/* Length of a base architecture that remains a prefix of target_id; consult the
+ * shared catalog so names such as gfx11-generic are preserved before removing
+ * profile suffixes. Generic aliases are handled separately because their catalog
+ * names are not prefixes of the concrete processor names. */
 static size_t rocke_base_arch_length(const char* target_id)
 {
     size_t name_len = strcspn(target_id, ":");
@@ -624,6 +674,9 @@ const char* rocke_base_arch_from_target_id(const char* target_id, char* out, siz
 {
     if(!target_id || !out || out_cap == 0)
         return NULL;
+    const char* alias = rocke_generic_arch_alias(target_id);
+    if(alias)
+        return rocke_copy_target(alias, strlen(alias), out, out_cap);
     return rocke_copy_target(target_id, rocke_base_arch_length(target_id), out, out_cap);
 }
 

@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -143,6 +143,7 @@ namespace rocsparse
                                       bool                 conj_B,
                                       J                    m,
                                       J                    n,
+                                      J                    k,
                                       int64_t              batch_count,
                                       int64_t              offsets_batch_stride_A,
                                       int64_t              columns_values_batch_stride_A,
@@ -174,6 +175,7 @@ namespace rocsparse
                                       bool                 conj_B,
                                       J                    m,
                                       J                    n,
+                                      J                    k,
                                       int64_t              batch_count,
                                       int64_t              offsets_batch_stride_A,
                                       int64_t              columns_values_batch_stride_A,

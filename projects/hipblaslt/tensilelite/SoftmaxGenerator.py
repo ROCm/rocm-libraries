@@ -645,7 +645,7 @@ def kernel_rodata(name: str, gfx_arch: Tuple[int, int, int]):
         header += f'.amdhsa_accum_offset 8\n'
     header += f'.amdhsa_next_free_vgpr .amdgcn.next_free_vgpr\n'
     header += f'.amdhsa_next_free_sgpr .amdgcn.next_free_sgpr\n'
-    if _global_ti.getArchCaps()["HasWave32"]:
+    if _global_ti.getArchCaps()["HasWavefrontSize32Directive"]:
         header += f'.amdhsa_wavefront_size32 1\n'
     header += f'.end_amdhsa_kernel\n'
     return header
