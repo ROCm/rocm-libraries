@@ -117,8 +117,10 @@ measures and reports exactly as described above.
   `error` (the worker reported a failure, e.g. the kernel refused the problem),
   `missing` (the worker died before reporting), `timeout`, `batch-error`,
   `mismatch` (with `--verify`) or `bad-output`, plus one `build-failed` row per
-  kernel that did not build. The main CSV holds only successful measurements, so
-  this file is what tells "could not run" apart from "never tried".
+  kernel that did not build, with the failed step and the first error line. The
+  main CSV holds every kernel that ran, including those that failed `--verify`
+  (`verified` is `False`); this file is what tells "could not run" apart from
+  "never tried".
 - `--repeat-top K` with `--repeat-count N` (default 5) — after the sweep, re-time
   the K fastest kernels of each problem N more times, each launch in its own
   subprocess, into `--repeat-csv` (default `<csv>.repeats.csv`). The fastest of
@@ -141,6 +143,10 @@ measures and reports exactly as described above.
   measures it, including the fixed-vector-width kernels a full run falls back to
   when a native kernel fails to build, so `"*"` entries for the problems an
   interrupted sweep did not reach complete it.
+
+The files a run writes (`--csv`, `--failures-csv`, `--repeat-csv`) and the
+`--pairs` file must all be different files; the driver refuses to start
+otherwise.
 
 ### Multi-GPU parallelism
 

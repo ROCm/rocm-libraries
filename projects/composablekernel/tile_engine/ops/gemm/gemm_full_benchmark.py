@@ -43,6 +43,7 @@ import io
 import json
 import os
 import queue
+import re
 import subprocess
 import sys
 import threading
@@ -360,6 +361,25 @@ def _run_batch_on_device(device_id, unit, args, worker_path, base_env, failures=
 # --failures-csv: one row per failed (kernel, problem) measurement, and one per
 # kernel whose build failed (problem fields empty).
 FAILURE_FIELDS = ["kernel", "problem_idx", "M", "N", "K", "device", "kind", "error"]
+
+
+def build_failure_summary(err, limit=300):
+    """One line for a failed build: the step, and for a failed codegen, compile
+    or link the first line of its output that mentions an error."""
+    lines = [ln.strip() for ln in str(err or "").splitlines() if ln.strip()]
+    if not lines:
+        return ""
+    head = lines[0]
+    m = re.match(r"(Codegen|Compile|Link) failed:\s*(.*)", head)
+    if m:
+        rest = ([m.group(2)] if m.group(2) else []) + lines[1:]
+        detail = next(
+            (ln for ln in rest if "error" in ln.lower()), rest[0] if rest else ""
+        )
+        head = f"{m.group(1)} failed: {detail}".rstrip(": ")
+    return head[:limit]
+
+
 # --repeat-top: one row per re-timing launch.
 REPEAT_FIELDS = [
     "kernel",
@@ -710,6 +730,27 @@ def main():
         parser.error("--repeat-top must be >= 0 and --repeat-count >= 1")
     if args.pairs and args.list_pairs:
         parser.error("--pairs and --list-pairs are mutually exclusive")
+    # Every file the run writes, and the pair list it reads, must be distinct:
+    # opening one twice corrupts it, and a later one replaces an earlier one.
+    files = [
+        ("--csv", args.csv),
+        ("--pairs", args.pairs),
+        ("--failures-csv", args.failures_csv),
+    ]
+    if args.repeat_top:
+        files.append(
+            (
+                "--repeat-csv",
+                args.repeat_csv or str(Path(args.csv).with_suffix(".repeats.csv")),
+            )
+        )
+    seen = {}
+    for opt, path in files:
+        if path:
+            key = Path(path).resolve()
+            if key in seen:
+                parser.error(f"{seen[key]} and {opt} name the same file: {path}")
+            seen[key] = opt
 
     arch = _resolve_arch(args.arch)
     config_paths = resolve_configs(args, arch)
@@ -908,6 +949,11 @@ def main():
     t0 = time.perf_counter()
     # CRITICAL: returns Path objects only, does NOT load any .so.
     build_kwargs = {"build_timeout": args.build_timeout} if args.build_timeout else {}
+    # Collect each failed build's reason only when recording failures, so the
+    # call is unchanged without --failures-csv.
+    build_errors = {} if args.failures_csv else None
+    if build_errors is not None:
+        build_kwargs["errors"] = build_errors
     lib_paths = setup_multiple_gemm_dispatchers(
         all_configs, verbose=True, max_workers=args.workers, **build_kwargs
     )
@@ -936,8 +982,29 @@ def main():
         f"({duplicate_count} duplicates filtered) in {build_time:.0f}s"
     )
 
+    # Failed builds are recorded now, so they are recorded even when nothing built.
+    fail_file = fail_writer = None
+    if args.failures_csv:
+        fail_file = open(args.failures_csv, "w", newline="")
+        fail_writer = csv.DictWriter(fail_file, fieldnames=FAILURE_FIELDS)
+        fail_writer.writeheader()
+        for name in dict.fromkeys(
+            cfg.name for cfg, lib in zip(all_configs, lib_paths) if lib is None
+        ):
+            fail_writer.writerow(
+                {
+                    "kernel": name,
+                    "kind": "build-failed",
+                    "error": build_failure_summary(build_errors.get(name)),
+                }
+            )
+        fail_file.flush()
+
     if not built_kernels:
         print("  ERROR: No kernels built successfully")
+        if fail_file:
+            fail_file.close()
+            print(f"  Failures: {args.failures_csv}")
         return 1
 
     # ========================================================================
@@ -1011,15 +1078,7 @@ def main():
             batch = [(i, *built_kernels[i]) for i in idx[start : start + args.batch_size]]
             work_q.put((prob_idx, prob_dict, batch))
 
-    fail_file = fail_writer = None
-    if args.failures_csv:
-        fail_file = open(args.failures_csv, "w", newline="")
-        fail_writer = csv.DictWriter(fail_file, fieldnames=FAILURE_FIELDS)
-        fail_writer.writeheader()
-        for name in dict.fromkeys(
-            cfg.name for cfg, lib in zip(all_configs, lib_paths) if lib is None
-        ):
-            fail_writer.writerow({"kernel": name, "kind": "build-failed"})
+    if fail_writer:
         for key, name, why in unmeasured:
             M, N, K = key.split("x")
             fail_writer.writerow(

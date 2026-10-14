@@ -18,6 +18,7 @@ import csv
 import json
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -91,6 +92,9 @@ def test_hipcc_timeout_names_the_step_and_limit(
 def test_codegen_step_limit(monkeypatch, tmp_path, extra, expected):
     run = _Run(expire_on=1)
     monkeypatch.setattr(subprocess, "run", run)
+    cfg_dir = tmp_path / "cfg"
+    cfg_dir.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(cfg_dir))
     args = {
         "output_dir": str(tmp_path),
         "tile_config_json": {},
@@ -104,7 +108,9 @@ def test_codegen_step_limit(monkeypatch, tmp_path, extra, expected):
     }
     ok, hdr, err = cu._generate_single_kernel_subprocess(args)
     assert not ok and run.timeouts == [expected]
-    assert str(expected) in err
+    # Same form as a compile or link timeout, and the config file is removed.
+    assert err == f"Timeout: codegen exceeded {expected} s"
+    assert list(cfg_dir.iterdir()) == []
 
 
 class _SyncPool:
@@ -166,6 +172,82 @@ def test_setup_applies_build_timeout_to_every_step(
     else:
         assert cg["timeout"] == 900
         assert job["compile_timeout"] == job["link_timeout"] == 900
+
+
+def _stub_setup(monkeypatch, tmp_path, codegen_fails=(), compile_fails=()):
+    (tmp_path / "libck_tile_dispatcher.a").touch()
+    monkeypatch.setattr(gu, "ProcessPoolExecutor", _SyncPool)
+    monkeypatch.setattr(gu, "as_completed", lambda futs: list(futs))
+    monkeypatch.setattr(cu, "get_build_dir", lambda: tmp_path)
+    monkeypatch.setattr(cu, "get_generated_kernels_dir", lambda: tmp_path)
+
+    def codegen(a):
+        name = a["hpp_glob_pattern"][: -len(".hpp")]
+        if name in codegen_fails:
+            return False, None, "Timeout: codegen exceeded 300 s"
+        return True, str(tmp_path / f"{name}.hpp"), ""
+
+    def hipcc(job):
+        if Path(job["lib_path"]).stem in compile_fails:
+            return (
+                False,
+                None,
+                "Compile failed: In file included from k.hpp:1:\nk.hpp:9:3: error: boom",
+            )
+        return True, job["lib_path"], ""
+
+    monkeypatch.setattr(cu, "_generate_single_kernel_subprocess", codegen)
+    monkeypatch.setattr(
+        gu,
+        "_build_compile_jobs",
+        lambda c, h: ({"lib_path": str(tmp_path / f"{c.name}.so")}, None),
+    )
+    monkeypatch.setattr(cu, "_run_hipcc_subprocess", hipcc)
+
+
+def test_setup_reports_each_failed_build(monkeypatch, tmp_path):
+    cfgs = [gu.GemmKernelConfig(gfx_arch="gfx950", tile_m=t) for t in (64, 128, 256)]
+    _stub_setup(
+        monkeypatch,
+        tmp_path,
+        codegen_fails={cfgs[0].name},
+        compile_fails={cfgs[1].name},
+    )
+    errors = {}
+    paths = gu.setup_multiple_gemm_dispatchers(
+        cfgs + cfgs[:1], verbose=False, errors=errors
+    )
+    assert [p is None for p in paths] == [True, True, False, True]
+    assert errors == {
+        cfgs[0].name: "Timeout: codegen exceeded 300 s",
+        cfgs[
+            1
+        ].name: "Compile failed: In file included from k.hpp:1:\nk.hpp:9:3: error: boom",
+    }
+
+
+@pytest.mark.parametrize(
+    "err, line",
+    [
+        (None, ""),
+        ("Timeout: compile exceeded 1200 s", "Timeout: compile exceeded 1200 s"),
+        (
+            "Compile failed: In file included from k.hpp:1:\nk.hpp:9:3: error: boom\n1 error generated.",
+            "Compile failed: k.hpp:9:3: error: boom",
+        ),
+        (
+            "Link failed: ld.lld: error: undefined symbol: f",
+            "Link failed: ld.lld: error: undefined symbol: f",
+        ),
+        ("Codegen failed: ", "Codegen failed"),
+        (
+            "Expected one .hpp matching x.hpp after codegen, got 0",
+            "Expected one .hpp matching x.hpp after codegen, got 0",
+        ),
+    ],
+)
+def test_build_failure_summary_is_one_line(err, line):
+    assert drv.build_failure_summary(err) == line
 
 
 # ------------------------------------------------- failure records per batch
@@ -308,9 +390,18 @@ def _main(
     built = []
 
     def build(cfgs, **kw):
-        built.append(kw)
+        built.append(dict(kw))
+        if kw.get("errors") is not None:
+            for c in cfgs:
+                if c.name in fail_build:
+                    kw["errors"][c.name] = (
+                        f"Compile failed: {c.name}.cpp:1:2: error: boom"
+                    )
         return [
-            None if c.name in fail_build else Path(f"/fake/{c.name}.so") for c in cfgs
+            None
+            if c.name in fail_build or "*" in fail_build
+            else Path(f"/fake/{c.name}.so")
+            for c in cfgs
         ]
 
     calls = []
@@ -405,7 +496,11 @@ def test_failures_csv_records_builds_and_runs(monkeypatch, capsys, tmp_path):
     )
     assert rc == 1
     rows = _csv(fpath)
-    assert {"kernel": bad_build, "kind": "build-failed"}.items() <= rows[0].items()
+    assert {
+        "kernel": bad_build,
+        "kind": "build-failed",
+        "error": f"Compile failed: {bad_build}.cpp:1:2: error: boom",
+    }.items() <= rows[0].items()
     runs = [r for r in rows if r["kind"] == "error"]
     assert {r["kernel"] for r in runs} == {bad_run}
     assert {(r["M"], r["N"], r["K"]) for r in runs} <= {
@@ -474,3 +569,49 @@ def test_repeat_top_skips_verification_failures(monkeypatch, capsys, tmp_path):
     reps = _csv(tmp_path / "r.csv")
     assert fastest not in {r["kernel"] for r in reps}
     assert len(reps) == len(PROBLEMS)
+
+
+def test_failures_csv_is_written_when_no_kernel_builds(monkeypatch, capsys, tmp_path):
+    fpath = tmp_path / "fail.csv"
+    rc, out, _, calls = _main(
+        monkeypatch, capsys, tmp_path, "--failures-csv", str(fpath), fail_build={"*"}
+    )
+    assert rc == 1 and not calls
+    assert "No kernels built successfully" in out and f"Failures: {fpath}" in out
+    rows = _csv(fpath)
+    assert rows and {r["kind"] for r in rows} == {"build-failed"}
+    assert len({r["kernel"] for r in rows}) == len(rows)
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ("--failures-csv", "{csv}"),
+        ("--repeat-top", "1", "--repeat-csv", "{csv}"),
+        (
+            "--failures-csv",
+            "{tmp}/f.csv",
+            "--repeat-top",
+            "1",
+            "--repeat-csv",
+            "{tmp}/f.csv",
+        ),
+        ("--failures-csv", "{tmp}/out.repeats.csv", "--repeat-top", "1"),
+        ("--pairs", "{csv}"),
+    ],
+)
+def test_output_files_must_be_distinct(monkeypatch, capsys, tmp_path, argv):
+    argv = [a.format(csv=tmp_path / "out.csv", tmp=tmp_path) for a in argv]
+    with pytest.raises(SystemExit) as e:
+        _main(monkeypatch, capsys, tmp_path, *argv)
+    assert e.value.code == 2
+    assert "name the same file" in capsys.readouterr().err
+    assert not (tmp_path / "out.csv").exists()
+
+
+def test_repeat_csv_alone_does_not_collide(monkeypatch, capsys, tmp_path):
+    # --repeat-csv is not written without --repeat-top, so it may name any file.
+    rc, *_ = _main(
+        monkeypatch, capsys, tmp_path, "--repeat-csv", str(tmp_path / "out.csv")
+    )
+    assert rc == 0

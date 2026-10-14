@@ -1108,7 +1108,8 @@ def _generate_single_kernel_subprocess(args: dict) -> Tuple[bool, Optional[str],
     can already hold headers that differ only in fields the glob leaves open
     (padding), so the header returned must be the one this call emitted.
 
-    ``timeout`` (seconds, default 300) bounds the codegen subprocess.
+    ``timeout`` (seconds, default 300) bounds the codegen subprocess; a timeout
+    is reported as ``Timeout: codegen exceeded N s``, like compile and link.
     """
     import subprocess
     import json
@@ -1145,10 +1146,17 @@ def _generate_single_kernel_subprocess(args: dict) -> Tuple[bool, Optional[str],
                 args.get("variant", "standard"),
             ]
 
-            res = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=args.get("timeout", 300)
-            )
-            os.unlink(config_file)
+            try:
+                res = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=args.get("timeout", 300),
+                )
+            except subprocess.TimeoutExpired as e:
+                return False, None, f"Timeout: codegen exceeded {e.timeout:g} s"
+            finally:
+                os.unlink(config_file)
 
             if res.returncode != 0:
                 return False, None, f"Codegen failed: {res.stderr[:200]}"

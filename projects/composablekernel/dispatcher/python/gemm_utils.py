@@ -2293,6 +2293,7 @@ def setup_multiple_gemm_dispatchers(
     verbose: bool = True,
     max_workers: Optional[int] = None,
     build_timeout: Optional[int] = None,
+    errors: Optional[Dict[str, str]] = None,
 ) -> List[Optional[Path]]:
     """Codegen + compile each config into its own .so. Returns .so paths.
 
@@ -2305,6 +2306,10 @@ def setup_multiple_gemm_dispatchers(
     codegen, compile and link. ``None`` keeps them: 300 s each, except 1200 s to
     compile a fixed-vector-width kernel. Each step is a wall-clock limit, so a
     build sharing the host with many parallel workers may need a larger one.
+
+    ``errors``, if given, receives ``{kernel name: message}`` for every config
+    whose codegen, compile or link failed (``Codegen failed: ...``,
+    ``Compile failed: ...``, ``Timeout: compile exceeded N s`` ...).
     """
     import sys
 
@@ -2432,8 +2437,11 @@ def setup_multiple_gemm_dispatchers(
                 headers[i] = Path(hdr)
                 if verbose:
                     print(f"  OK  codegen [{i}] {configs[i].name}")
-            elif verbose:
-                print(f"  FAIL codegen [{i}] {configs[i].name}: {err}")
+            else:
+                if errors is not None:
+                    errors[configs[i].name] = err
+                if verbose:
+                    print(f"  FAIL codegen [{i}] {configs[i].name}: {err}")
 
     # -- Step 2: parallel compile + link -----------------------------------
     compile_jobs = []
@@ -2466,8 +2474,11 @@ def setup_multiple_gemm_dispatchers(
                 results[i] = Path(lp)
                 if verbose:
                     print(f"  OK  compile [{i}] {Path(lp).name}")
-            elif verbose:
-                print(f"  FAIL compile [{i}] {configs[i].name}: {err}")
+            else:
+                if errors is not None:
+                    errors[configs[i].name] = err
+                if verbose:
+                    print(f"  FAIL compile [{i}] {configs[i].name}: {err}")
 
     # -- Fan the deduped result back out to every input index --------------
     for i, c in enumerate(configs):
