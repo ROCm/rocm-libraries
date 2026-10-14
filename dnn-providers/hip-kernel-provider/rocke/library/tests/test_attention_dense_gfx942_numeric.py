@@ -1218,7 +1218,8 @@ def test_codegen_knob_is_bit_identical_to_default(dtype, d, persistent, override
     "sq,skv",
     [
         (256, 64),  # n_up=1: zero-trip pipeline main loop
-        (512, 512),  # Multiple KV tiles
+        (256, 192),  # n_up=3: the loop runs, then the last tile is in K slot 0
+        (512, 512),  # Multiple KV tiles (even n_up: last tile in K slot 1)
     ],
 )
 def test_cfvst_pipeline_strict_numeric(dtype, persistent, sq, skv):
@@ -1290,6 +1291,8 @@ def test_cfvst_pipeline_strict_numeric(dtype, persistent, sq, skv):
 _CFVST_KNOB_ROWS = [
     ("bn32", (16, 4), 512, False, {"block_n": 32}),
     ("bm128", (16, 4), 512, False, {"block_m": 128}),
+    # block_m=64 -> n_up = 1..8 across query blocks, so odd n_up > 1 is covered.
+    ("bm64", (16, 4), 512, False, {"block_m": 64}),
     ("iglp0", (16, 4), 512, False, {"iglp": True}),
     ("iglp1", (16, 4), 512, False, {"iglp": True, "iglp_mode": 1}),
     ("kmajor", (16, 4), 512, False, {"pv_loop_order": "k_major"}),
