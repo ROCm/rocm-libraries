@@ -490,9 +490,9 @@ validator     = "rms"
 rms_threshold = 1e-4
 
 [[test_skips]]
-archs   = ["gfx90a", "gfx10", "gfx11", "gfx12"]   # optional; omit to skip everywhere
-filters = ["*_ConvolutionFwdPointwise_*"]
-reason  = "ROCm/rocm-libraries#6979 — no engine has an applicable solution for ConvBiasActiv fusion"
+archs   = ["gfx90a"]   # optional; omit to skip everywhere
+filters = ["*_SdpaFwd_Default.*_128_bfp16_*"]
+reason  = "no applicable kernel for this shape on this arch"
 ```
 
 - `filters` are GTest-style globs (`*` wildcard) matched against the full
@@ -653,10 +653,11 @@ So, in practice:
   `Smoke/IntegrationGpuResampleBackward*`) register under it too.
 
 Graph tests that have not been ported to bundles yet remain as migration
-debt: resample backward (always built, so its coverage is not dropped) and MoE
+debt. Resample backward (always built, so its coverage is not dropped) and MoE
 grouped matmul both need an input-fill recipe for their index/routing tensors
-before they can become bundles (ALMIOPEN-2880, ALMIOPEN-2881). Remove each
-file, and its allow-list entry, once its bundles land.
+before they can become bundles. Remove each file once its bundles land; the
+resample backward file also has an entry in `HIPDNN_IT_ALWAYS_BUILT_SOURCES`
+to remove (MoE is graph-gated, not on that allow-list).
 
 ## Adding a New Reference-Executor Operation
 
