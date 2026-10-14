@@ -1,9 +1,12 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 #
-# Regression guard for the per-XCD work-queue self-reset. Only the Synchronizer
-# dirty-buffer check can catch a regression here: the residue corrupts a later
-# launch, not this one, so the results of this config stay correct either way.
+# Regression guard for the per-XCD work-queue self-reset. The residue corrupts a
+# later launch, not the one that leaves it, so the first launch's results stay
+# correct either way. The Synchronizer dirty-buffer check catches it. Work a
+# later launch skips because of it shows up in the validation after a group of
+# back-to-back launches (ValidateAfterEnqueues), whose last launch writes a
+# rotating output buffer no earlier launch wrote.
 #
 # A queue counter's atomic_inc auto-reset bound assumes queue q receives exactly
 # W_q = distribute(skGrid, q) home fetches, so any prologue remap that is not a
@@ -18,7 +21,9 @@ TestParameters:
 GlobalParameters:
   # DynamicWorkQueue hybrid sub-path; the static sub-path has no work queue.
   HybridAssignmentPolicy: [DynamicWorkQueue]
-  SyncsPerBenchmark: 0
+  SyncsPerBenchmark: 1
+  ValidateAfterEnqueues: True
+  RotatingBufferSize: 512
   NumElementsToValidate: -1
   BoundsCheck: 0
   KernelTime: False
@@ -29,7 +34,7 @@ GlobalParameters:
   DataInitTypeC: 12
   MaxWorkspaceSize: 134217728
   NumWarmups: 0
-  EnqueuesPerSync: 1
+  EnqueuesPerSync: 3
   SleepPercent: 50
 
 BenchmarkProblems:
