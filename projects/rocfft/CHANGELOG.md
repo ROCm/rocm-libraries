@@ -7,6 +7,7 @@ Documentation for rocFFT is available at
 
 ### Added
 
+* Extended the optional RCCL backend to multi-process plans when built with both `ROCFFT_RCCL_ENABLE` and `ROCFFT_MPI_ENABLE`. RCCL is used for the transpose data plane when every MPI rank's bricks use exactly one device; otherwise the existing MPI paths remain. Set `ROCFFT_RCCL_DISABLE=1` to force the MPI fallback.
 * JIT callbacks specified with the `rocfft_plan_description_set_load_callback` and
   `rocfft_plan_description_set_store_callback` APIs can now be used with transforms that have fields
   specified on the same plan description.
