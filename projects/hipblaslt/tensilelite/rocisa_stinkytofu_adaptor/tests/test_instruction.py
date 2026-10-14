@@ -3784,5 +3784,47 @@ class TestWaitCntCaps(unittest.TestCase):
         self.assertEqual(kwargs["max_vmcnt"], -1)
 
 
+class TestMfmaNegSrcs(unittest.TestCase):
+    """MFMA neg follows HasWMMA_V1: three sources, otherwise two. Clear neg stays 0."""
+
+    def _lower(self, neg, caps):
+        from rocisa_stinkytofu_adaptor.instruction import MFMAInstruction
+
+        inst = MFMAInstruction(
+            instType=InstType.INST_F32, accType=InstType.INST_F32,
+            variant=[16, 16, 16, 1],
+            acc=vgpr(0), a=vgpr(1), b=vgpr(2),
+            neg=neg,
+        )
+        fake_st = unittest.mock.Mock()
+        with unittest.mock.patch.dict(sys.modules, {"stinkytofu": fake_st}), \
+             unittest.mock.patch(
+                 "rocisa_stinkytofu_adaptor.instruction._to_stinky_register",
+                 side_effect=lambda arg: arg,
+             ), \
+             unittest.mock.patch(
+                 "rocisa_stinkytofu_adaptor.base.getAsmCaps",
+                 return_value=caps,
+             ):
+            inst.to_stinky_logical()
+        fake_st.MFMA.assert_called_once()
+        return fake_st.MFMA.call_args.kwargs
+
+    def test_wmma_v1_uses_three_neg_sources(self):
+        kwargs = self._lower(True, {"HasWMMA_V1": 1})
+        self.assertTrue(kwargs["neg"])
+        self.assertEqual(kwargs["negSrcs"], 3)
+
+    def test_without_wmma_v1_uses_two_neg_sources(self):
+        kwargs = self._lower(True, {})
+        self.assertTrue(kwargs["neg"])
+        self.assertEqual(kwargs["negSrcs"], 2)
+
+    def test_clear_neg_stores_zero_sources(self):
+        kwargs = self._lower(False, {"HasWMMA_V1": 1})
+        self.assertFalse(kwargs["neg"])
+        self.assertEqual(kwargs["negSrcs"], 0)
+
+
 if __name__ == "__main__":
     unittest.main()
