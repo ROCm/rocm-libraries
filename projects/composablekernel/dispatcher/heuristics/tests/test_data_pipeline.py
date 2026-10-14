@@ -479,131 +479,81 @@ class TestVectorWidthSuffix:
         assert parse_kernel_name(self.BASE + "_vec16_2_16")["vec_a"] == 16
 
 
-# rocminfo as a gfx1250 node prints it, trimmed: a CPU agent, then GPU agents.
-# The layout is what the tests exercise: each agent's Name precedes its Device
-# Type, and the ISA list after "ISA Info:" ends with the generic
-# gfx12-5-generic target. The hardware values are placeholders; the CU count and
-# clock are the gfx1250 profile's in convert_csv_to_parquet.py.
-_ROCMINFO_GFX1250 = """\
-*******                  
-Agent 1                  
-*******                  
-  Name:                    AMD EPYC Processor                 
-  Marketing Name:          AMD EPYC Processor                 
-  Device Type:             CPU                                
-  Cache Info:              
-    L1:                      32768(0x8000) KB                   
-  Compute Unit:            128                                
-*******                  
-Agent 3                  
-*******                  
-  Name:                    gfx1250                            
-  Marketing Name:          AMD Radeon Graphics                
-  Device Type:             GPU                                
-  Cache Info:              
-    L1:                      32(0x20) KB                        
-    L2:                      4096(0x1000) KB                    
-  Max Clock Freq. (MHz):   2400                               
-  Compute Unit:            256                                
-  SIMDs per CU:            4                                  
-  Shader Engines:          16                                 
-  Shader Arrs. per Eng.:   1                                  
-  Wavefront Size:          32(0x20)                           
-  Max Waves Per CU:        32(0x20)                           
-  ISA Info:                
-    ISA 1                    
-      Name:                    amdgcn-amd-amdhsa--gfx1250         
-    ISA 2                    
-      Name:                    amdgcn-amd-amdhsa--gfx12-5-generic 
+def _rocminfo(gfx, generic, features=""):
+    """rocminfo-shaped text: a CPU agent, then one GPU agent named ``gfx``.
+
+    The layout is what the parser depends on, as rocminfo prints it: each
+    agent's Name precedes its Device Type, and the GPU's ISA list after
+    "ISA Info:" ends with a generic target. The values are arbitrary markers,
+    not any real part's; the CPU's differ from the GPU's, so a field read from
+    the wrong agent shows.
+    """
+    return f"""\
+*******
+Agent 1
+*******
+  Name:                    Test CPU
+  Marketing Name:          Test CPU
+  Device Type:             CPU
+  Cache Info:
+    L1:                      999(0x3e7) KB
+  Compute Unit:            999
+*******
+Agent 2
+*******
+  Name:                    {gfx}
+  Marketing Name:          Test GPU
+  Device Type:             GPU
+  Cache Info:
+    L1:                      11(0xb) KB
+    L2:                      22(0x16) KB
+    L3:                      33(0x21) KB
+  Max Clock Freq. (MHz):   1234
+  Compute Unit:            77
+  SIMDs per CU:            4
+  Shader Engines:          5
+  Wavefront Size:          32(0x20)
+  Max Waves Per CU:        16(0x10)
+  ISA Info:
+    ISA 1
+      Name:                    amdgcn-amd-amdhsa--{gfx}{features}
+    ISA 2
+      Name:                    amdgcn-amd-amdhsa--{generic}{features}
 *** Done ***
 """
 
-# rocminfo as a gfx950 node (MI350X) prints it, trimmed the same way. Its ISA
-# list ends with the generic gfx9-4-generic target.
-_ROCMINFO_GFX950 = """\
-*******                  
-Agent 1                  
-*******                  
-  Name:                    AMD Ryzen Threadripper PRO 7985WX 64-Cores
-  Marketing Name:          AMD Ryzen Threadripper PRO 7985WX 64-Cores
-  Device Type:             CPU                                
-  Cache Info:              
-    L1:                      32768(0x8000) KB                   
-  Compute Unit:            128                                
-*******                  
-Agent 2                  
-*******                  
-  Name:                    gfx950                             
-  Marketing Name:          AMD Instinct MI350X                
-  Device Type:             GPU                                
-  Cache Info:              
-    L1:                      32(0x20) KB                        
-    L2:                      4096(0x1000) KB                    
-    L3:                      262144(0x40000) KB                 
-  Max Clock Freq. (MHz):   2200                               
-  Compute Unit:            256                                
-  SIMDs per CU:            4                                  
-  Shader Engines:          32                                 
-  Shader Arrs. per Eng.:   1                                  
-  Wavefront Size:          64(0x40)                           
-  Max Waves Per CU:        32(0x20)                           
-  ISA Info:                
-    ISA 1                    
-      Name:                    amdgcn-amd-amdhsa--gfx950:sramecc+:xnack-
-    ISA 2                    
-      Name:                    amdgcn-amd-amdhsa--gfx9-4-generic:sramecc+:xnack-
-*** Done ***
-"""
+
+#: rocminfo text per arch; gfx950 nodes report ISA names with feature suffixes.
+_ROCMINFO_CASES = {
+    "gfx1250": _rocminfo("gfx1250", "gfx12-5-generic"),
+    "gfx950": _rocminfo("gfx950", "gfx9-4-generic", ":sramecc+:xnack-"),
+}
+
+#: The GPU agent's marker values, as the profile should report them.
+_GPU_FIELDS = {
+    "marketing_name": "Test GPU",
+    "num_cus": 77,
+    "simds_per_cu": 4,
+    "l1_cache_kb": 11,
+    "l2_cache_kb": 22,
+    "l3_cache_kb": 33,
+    "wavefront_size": 32,
+    "max_waves_per_cu": 16,
+    "shader_engines": 5,
+    "max_clock_mhz": 1234,
+}
 
 #: A further GPU agent, as on a node that exposes several GPUs.
 _ROCMINFO_EXTRA_GPU = """\
-*******                  
-Agent 4                  
-*******                  
-  Name:                    gfx1250                            
-  Device Type:             GPU                                
-  Cache Info:              
-    L1:                      64(0x40) KB                        
-  Compute Unit:            999                                
+*******
+Agent 3
+*******
+  Name:                    gfx1250
+  Device Type:             GPU
+  Cache Info:
+    L1:                      88(0x58) KB
+  Compute Unit:            888
 """
-
-
-#: (rocminfo text, arch, expected profile fields) for each recorded part.
-_ROCMINFO_CASES = {
-    "gfx1250": (
-        _ROCMINFO_GFX1250,
-        "gfx1250",
-        {
-            "gfx_name": "gfx1250",
-            "marketing_name": "AMD Radeon Graphics",
-            "lds_capacity": 327680,
-            "num_cus": 256,
-            "l1_cache_kb": 32,
-            "l2_cache_kb": 4096,
-            "wavefront_size": 32,
-            "max_waves_per_cu": 32,
-            "shader_engines": 16,
-            "max_clock_mhz": 2400,
-        },
-    ),
-    "gfx950": (
-        _ROCMINFO_GFX950,
-        "gfx950",
-        {
-            "gfx_name": "gfx950",
-            "marketing_name": "AMD Instinct MI350X",
-            "lds_capacity": 163840,
-            "num_cus": 256,
-            "l1_cache_kb": 32,
-            "l2_cache_kb": 4096,
-            "l3_cache_kb": 262144,
-            "wavefront_size": 64,
-            "max_waves_per_cu": 32,
-            "shader_engines": 32,
-            "max_clock_mhz": 2200,
-        },
-    ),
-}
 
 
 def _profile_from(monkeypatch, stdout):
@@ -622,41 +572,38 @@ def _profile_from(monkeypatch, stdout):
     return dp.get_hardware_profile()
 
 
-@pytest.mark.parametrize("part", sorted(_ROCMINFO_CASES))
+@pytest.mark.parametrize("arch", sorted(_ROCMINFO_CASES))
 class TestHardwareProfileRocminfoLayout:
-    """Real rocminfo layouts: an agent's Name precedes its Device Type, and its
-    ISA list ends with a generic target."""
+    """rocminfo's layout: an agent's Name precedes its Device Type, and its ISA
+    list ends with a generic target."""
 
-    def test_the_target_is_the_agent_name_not_the_last_isa(self, part, monkeypatch):
+    def test_the_target_is_the_agent_name_not_the_last_isa(self, arch, monkeypatch):
         # Reading Name after Device Type took the generic ISA, so the LDS lookup
         # missed and --capture_hw refused the node's own arch.
-        text, arch, expected = _ROCMINFO_CASES[part]
-        profile = _profile_from(monkeypatch, text)
-        assert profile["gfx_name"] == arch
-        assert profile["lds_capacity"] == expected["lds_capacity"]
+        from arch_specs_generated import LDS_TOTAL_CAPACITY_BY_ARCH
 
-    def test_the_arch_check_accepts_the_node(self, part, monkeypatch):
+        profile = _profile_from(monkeypatch, _ROCMINFO_CASES[arch])
+        assert profile["gfx_name"] == arch
+        assert profile["lds_capacity"] == LDS_TOTAL_CAPACITY_BY_ARCH[arch]
+
+    def test_the_arch_check_accepts_the_node(self, arch, monkeypatch):
         from data_pipeline import check_capture_hw_arch
 
-        text, arch, _ = _ROCMINFO_CASES[part]
-        profile = _profile_from(monkeypatch, text)
+        profile = _profile_from(monkeypatch, _ROCMINFO_CASES[arch])
         check_capture_hw_arch(profile, arch)
         other = "gfx950" if arch == "gfx1250" else "gfx1250"
         with pytest.raises(SystemExit):
             check_capture_hw_arch(profile, other)
 
-    def test_fields_come_from_the_gpu_agent(self, part, monkeypatch):
-        text, _, expected = _ROCMINFO_CASES[part]
-        profile = _profile_from(monkeypatch, text)
-        assert {k: profile.get(k) for k in expected} == expected
+    def test_fields_come_from_the_gpu_agent(self, arch, monkeypatch):
+        profile = _profile_from(monkeypatch, _ROCMINFO_CASES[arch])
+        assert {k: profile.get(k) for k in _GPU_FIELDS} == _GPU_FIELDS
 
-    def test_only_the_first_gpu_agent_is_read(self, part, monkeypatch):
-        text, _, expected = _ROCMINFO_CASES[part]
-        profile = _profile_from(
-            monkeypatch, text.replace("*** Done ***\n", _ROCMINFO_EXTRA_GPU)
-        )
-        assert profile["num_cus"] == expected["num_cus"]
-        assert profile["l1_cache_kb"] == expected["l1_cache_kb"]
+    def test_only_the_first_gpu_agent_is_read(self, arch, monkeypatch):
+        text = _ROCMINFO_CASES[arch].replace("*** Done ***\n", _ROCMINFO_EXTRA_GPU)
+        profile = _profile_from(monkeypatch, text)
+        assert profile["num_cus"] == _GPU_FIELDS["num_cus"]
+        assert profile["l1_cache_kb"] == _GPU_FIELDS["l1_cache_kb"]
 
 
 class TestHardwareProfileLdsCapacity:
