@@ -277,6 +277,22 @@ diff against upstream plus the modifications below.
     per thread from `coop_load_v_global_perm`. Tracing failed (`IndexError`) on gfx942
     and gfx90a alike. That path now loads with the permuting loader, as the prefetch path
     already did. Every build that traced before is unchanged. Not yet upstream.
+26. **Head dims that are not powers of two** (`flash_attn_utils.py`, `flash_attn_generic.py`).
+    The generic kernel built only 64, 128 and 256 wide (and their buckets), so 160 ran
+    on the 256 bucket with 37.5% of its matrix work on zero columns. Three things kept
+    96, 160, 192 and 224 out, all now handled, each behind a compile-time test that is
+    false at a power of two:
+    - **Load mapping:** a K or V row was loaded by `width / 16` threads, which must
+      divide the workgroup. It is loaded as the next power of two wide; a lane whose
+      columns start past the row's end reads column 0 instead and stores nothing to the
+      LDS (`K_LOAD_GUARD`, `V_LOAD_GUARD`).
+    - **K swizzle:** the XOR left a non-power-of-two row (at 192, column 64 ^ 128 = 192).
+      Its row mask is capped inside the largest power of two dividing the width.
+    - **Split-KV merge:** it covered `HEAD_DIM_V // 64 * 64` columns, silently dropping
+      the rest at 96, 160 and 224; it now covers every column.
+    - **Unchanged:** every 64/128/256 build compiles to the same object. The DMA paths,
+      the permuting V^T store, K chunks and V column slices stay off at these widths.
+      Not yet upstream.
 
 The repository's `black` hook reformats these files on commit; that changes
 formatting only (the syntax trees are unchanged).

@@ -819,7 +819,10 @@ def build_flash_attn_func_module_primary(
             m = yield [fx.Float32(carry[0]).maximumf(lse_at(i))]
         m_all = fx.Float32(m)
         m_safe = (m_all == c_ninf).select(c_zero, m_all)
-        cols = traits.HEAD_DIM_V // _MERGE_THREADS
+        # Every column, the last pass partial where V is not a multiple of 64 wide
+        # (modification 26).
+        cols = -(-traits.HEAD_DIM_V // _MERGE_THREADS)
+        partial = traits.HEAD_DIM_V % _MERGE_THREADS != 0
         init = [c_zero] + [c_zero for _ in range(cols)]
         res = init
         for i, carry in range(fx.Index(0), ns, fx.Index(1), init=init):
@@ -828,6 +831,8 @@ def build_flash_attn_func_module_primary(
             acc = []
             for j in range_constexpr(cols):
                 d = tid + fx.Index(j * _MERGE_THREADS)
+                if const_expr(partial and j == cols - 1):
+                    d = (d < fx.Index(traits.HEAD_DIM_V)).select(d, fx.Index(0))
                 ov = fx.Float32(
                     buffer_ops.buffer_load(
                         wso,
@@ -866,9 +871,15 @@ def build_flash_attn_func_module_primary(
         for j in range_constexpr(cols):
             d = tid + fx.Index(j * _MERGE_THREADS)
             val = (fx.Float32(res[1 + j]) * inv).to(elem_dtype)
-            buffer_ops.buffer_store(
-                as_mlir_value(val), o_rsrc, as_mlir_value(fx.Int32(o_base + d))
-            )
+            if const_expr(partial and j == cols - 1):
+                if d < fx.Index(traits.HEAD_DIM_V):
+                    buffer_ops.buffer_store(
+                        as_mlir_value(val), o_rsrc, as_mlir_value(fx.Int32(o_base + d))
+                    )
+            else:
+                buffer_ops.buffer_store(
+                    as_mlir_value(val), o_rsrc, as_mlir_value(fx.Int32(o_base + d))
+                )
         if tid == fx.Index(0):
             if fx.Int32(lse_on) != fx.Int32(0):
                 lse = has.select(m_all + fx.math.log(l_all), sink_val)

@@ -1428,6 +1428,12 @@ class FlashAttnGenericTraits:
     # K staged K_CHUNKS column chunks at a time, each K_STEPS_QK steps of the QK product
     # (modification 18): a head too wide for the LDS takes several passes per KV tile.
     K_CHUNKS: int = 1
+    # A K or V row whose width is not a power of two is loaded as the next power of two
+    # wide: lanes whose columns start at or past K_COLS / V_WIDTH read nothing past the
+    # row and store nothing to the LDS (modification 26).
+    K_COLS: int = 0
+    K_LOAD_GUARD: bool = False
+    V_LOAD_GUARD: bool = False
 
     @property
     def cache_tag(self):
@@ -1681,6 +1687,9 @@ def _make_flash_attn_generic_traits(
     # would not, and the upper 32 rows would be read through another swizzle
     # (modification 16).
     k_swz_rowmask = min(k_side // 16 - 1, 31)
+    # And at a width that is not a power of two, inside the largest power of two dividing
+    # it, so the XOR keeps every column in its row (modification 26).
+    k_swz_rowmask = min(k_swz_rowmask, (k_side & -k_side) // 16 - 1)
     if use_hw_tr:
         vt_stride = 0
         v_stride = v_width if enable_dma else v_width + 4
@@ -1706,7 +1715,12 @@ def _make_flash_attn_generic_traits(
 
     vec_width = 16 if enable_lds_vec16 else 8
     assert k_side % vec_width == 0
-    threads_per_row_load = k_side // vec_width
+    # A row that is not a power of two wide is loaded as the next power of two wide, the
+    # lanes past its end guarded (modification 26).
+    k_load_width = 1 << (k_side - 1).bit_length()
+    k_load_guard = k_load_width != k_side
+    assert not (k_load_guard and k_chunks > 1), "a K chunk must be a power of two wide"
+    threads_per_row_load = k_load_width // vec_width
     assert block_size % threads_per_row_load == 0
     rows_per_batch_load = block_size // threads_per_row_load
     if rows_per_batch_load >= block_n:
@@ -1719,12 +1733,19 @@ def _make_flash_attn_generic_traits(
 
     # The masked and narrow-V loads (modification 13) are on the plain load paths.
     narrow = head_dim_v != head_dim or bool(qk_mask) or dv_split > 1 or k_chunks > 1
+    # Guarded rows run on the plain load paths too (modification 26).
+    narrow = narrow or k_load_guard or (v_width & (v_width - 1)) != 0
     if narrow and (enable_dma or paged):
         raise NotImplementedError(
             "a narrow V or a runtime Q/K head dim needs the dense, non-DMA path"
         )
     # V's own load mapping over V_WIDTH (modification 16); K's when V is staged whole.
-    threads_per_row_load_v = v_width // vec_width
+    v_load_width = 1 << (v_width - 1).bit_length()
+    v_load_guard = v_load_width != v_width
+    assert not (
+        v_load_guard and dv_split > 1
+    ), "a V column slice must be a power of two wide"
+    threads_per_row_load_v = v_load_width // vec_width
     assert block_size % threads_per_row_load_v == 0
     rows_per_batch_load_v = block_size // threads_per_row_load_v
     if rows_per_batch_load_v >= block_n:
@@ -1868,6 +1889,9 @@ def _make_flash_attn_generic_traits(
         V_NEEDS_GUARD=v_needs_guard,
         Q_STREAM=q_stream,
         V_FOLLOWS_QK=v_follows_qk,
+        K_COLS=k_side,
+        K_LOAD_GUARD=k_load_guard,
+        V_LOAD_GUARD=v_load_guard,
         K_CHUNKS=k_chunks,
     )
 
@@ -3344,6 +3368,11 @@ class GenericKvGmemToLdsLoader:
             return self._masked_halves(
                 ctx.k_ptr, lambda c: self.global_idx(row_idx, c), col, zero=True
             )
+        if const_expr(traits.K_LOAD_GUARD):
+            # A lane past the row's end reads column 0 instead; it stores nothing
+            # (modification 26).
+            ok = col < fx.Index(traits.K_COLS)
+            col = ok.select(col, fx.Index(0))
         return self.load_f16xN(ctx.k_ptr, self.global_idx(row_idx, col))
 
     def _masked_halves(self, ptr, idx_fn, col, zero):
@@ -3380,6 +3409,10 @@ class GenericKvGmemToLdsLoader:
             )
         if const_expr(traits.HEAD_DIM_V != traits.V_WIDTH * traits.DV_SPLIT):
             ok = col < fx.Index(traits.HEAD_DIM_V)
+            col = ok.select(col, fx.Index(0))
+        if const_expr(traits.V_LOAD_GUARD):
+            # As K's (modification 26).
+            ok = col < fx.Index(traits.V_WIDTH)
             col = ok.select(col, fx.Index(0))
         return self.load_f16xN(ctx.v_ptr, ctx.global_idx_v(row_idx, col))
 
@@ -3476,9 +3509,8 @@ class GenericKvGmemToLdsLoader:
                         + lds_row * traits.K_STRIDE
                         + self.k_swizzle(lds_row, col)
                     )
-                    fx.ptr_store(
-                        self.load_k_cols(row_idx, col + fx.Index(col_off)),
-                        lds_kv + fx.Int64(lds_idx),
+                    self._k_lds_store(
+                        self.load_k_cols(row_idx, col + fx.Index(col_off)), lds_idx
                     )
 
                 _if_then(row < fx.Index(traits.BLOCK_N), _store_row)
@@ -3493,7 +3525,21 @@ class GenericKvGmemToLdsLoader:
                     )
                 else:
                     vec = self.load_k_cols(row_idx, col + fx.Index(col_off))
-                fx.ptr_store(vec, lds_kv + fx.Int64(lds_idx))
+                self._k_lds_store(vec, lds_idx)
+
+    def _k_lds_store(self, vec, lds_idx):
+        """Store one lane's K vector to the tile; a lane past a guarded row's end stores
+        nothing (modification 26)."""
+        ctx = self.ctx
+        traits = ctx.traits
+
+        def _store():
+            fx.ptr_store(vec, ctx.lds_kv + fx.Int64(lds_idx))
+
+        if const_expr(traits.K_LOAD_GUARD):
+            _if_then(ctx.load_col_base < fx.Index(traits.K_COLS), _store)
+        else:
+            _store()
 
     def coop_load_k_global(self, tile_start):
         ctx = self.ctx
@@ -3531,7 +3577,7 @@ class GenericKvGmemToLdsLoader:
                         + lds_row * traits.K_STRIDE
                         + self.k_swizzle(lds_row, ctx.load_col_base)
                     )
-                    fx.ptr_store(vecs[batch], ctx.lds_kv + fx.Int64(lds_idx))
+                    self._k_lds_store(vecs[batch], lds_idx)
 
                 _if_then(ctx.load_row_in_batch < fx.Index(traits.BLOCK_N), _store_row)
             else:
@@ -3541,9 +3587,21 @@ class GenericKvGmemToLdsLoader:
                     + lds_row * traits.K_STRIDE
                     + self.k_swizzle(lds_row, ctx.load_col_base)
                 )
-                fx.ptr_store(vecs[batch], ctx.lds_kv + fx.Int64(lds_idx))
+                self._k_lds_store(vecs[batch], lds_idx)
 
     def _v_store_to_lds(self, v_base, lds_row, vec):
+        ctx = self.ctx
+        traits = ctx.traits
+        if const_expr(traits.V_LOAD_GUARD):
+            # A lane past a guarded row's end stores nothing (modification 26).
+            _if_then(
+                ctx.load_col_base_v < fx.Index(traits.V_WIDTH),
+                lambda: self._v_store_to_lds_body(v_base, lds_row, vec),
+            )
+        else:
+            self._v_store_to_lds_body(v_base, lds_row, vec)
+
+    def _v_store_to_lds_body(self, v_base, lds_row, vec):
         ctx = self.ctx
         traits = ctx.traits
         if const_expr(traits.USE_HW_TR):
