@@ -273,7 +273,6 @@ jobs:
     if: always()
     needs:
       - ci-env
-      - configure
       - setup
       - linux_build_and_test
       - windows_build_and_test
