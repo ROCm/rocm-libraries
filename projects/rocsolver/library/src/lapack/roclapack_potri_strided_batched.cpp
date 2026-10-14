@@ -98,7 +98,6 @@ try
     tmpcopy = mem[4];
     workArr = mem[5];
 
-
     for(I isweep = 0; isweep < nsweep; isweep++)
     {
         I const bid = isweep * bid_inc;
