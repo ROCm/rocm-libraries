@@ -398,9 +398,13 @@ def render_features_per_op(claims: FeatureClaims) -> list[str]:
         "## Options per op",
         "",
         "Every API option the percentages count, catalogued per op in "
-        "`scripts/support_features/<op>.py`. An option is one value of one "
-        "API setting: `dtype:bf16`, `mask:causal`. An option no test graph "
-        "uses cannot be claimed on any GPU until one does.",
+        "`dnn-providers/integration-tests/scripts/support_features/<op>.py`. "
+        "An option is one choice a graph can make for an op: a data type "
+        "(`dtype:bf16`), a mode (`mask:causal_top_left`), a tensor-shape case "
+        "(`heads:gqa`), or an optional input or output (`out:stats`). *Test "
+        "graph* means a graph in `integration-test-bundles/`, any tier, "
+        "claimed or not. An option no test graph uses cannot be claimed on "
+        "any GPU until one does.",
         "",
         *table(["Op (options)", "Used by a test graph", "Used by no test graph"], rows),
     ]
