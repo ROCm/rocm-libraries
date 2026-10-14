@@ -12,7 +12,8 @@ non-causal, on gfx942 and gfx950. It records the experiments behind PR #12714, w
 added XCD- and L2-aware block orders. The previous version (the baseline) is `develop`
 at `c81bca5ecf`, whose dense kernels are unchanged up to `5d7f9be53e`. The new version
 is `1e905f9231`. The pair fold and the persistent `hq_minor_swz` (§2.3) came later, on
-top of it.
+top of it. §6.1 measures the final version, `9fc40bfb25a`, against its `develop` base
+`429ba1fe444`.
 
 Per [`platform/AGENTS.md`](../../AGENTS.md) §Compliance, this file records relative
 results only: ratios between two code paths on the same device, with the correctness
@@ -28,9 +29,9 @@ under a sliding window shorter than the keys).
 
 | set | shapes | what it is for |
 |---|---|---|
-| end-to-end set | 83 (gfx942) / 105 (gfx950) dense-eligible shapes: MHA with 32–40 heads; GQA with 4 or 8 KV heads and 28–128 query heads; `S` 512–8K; nearly all `B = 1`; D128 (a few D64); causal, plus a few non-causal and sliding-window on gfx950 | real-model prefill shapes run end to end through the dispatcher, previous vs new (§6.1) |
+| end-to-end set | 99 (gfx942) / 114 (gfx950) dense-eligible prefill shapes of public models: MHA with 32–40 heads; GQA with 4 or 8 KV heads and 28–128 query heads; `S` 512–16K; `B = 1` (one `B = 2`); D128 (5–7 D64); bf16/fp16; causal, 11 with a sliding window shorter than the keys, and one non-causal on gfx950. gfx950 also runs 46 decode shapes (`Sq = 1`), and with tuned specs only, 6 more sliding-window shapes (windows of 128–256 tokens) | real-model shapes run end to end through the dispatcher, `develop` vs the final version, with default and with per-shape tuned specs (§6.1) |
 | order-comparison grid | 48 prefill geometries plus a grid of MHA 8–128 heads and GQA `Hkv` ∈ {2, 4, 8, 16, 32} with `Hq` 32–128, `S` ∈ {8K, 32K}, `B` ∈ {1, 2, 4, 8}; causal and non-causal (about 250 shapes per arch) | the non-persistent orders compared with each other; the grid part is the Swizzled Head-first paper's grid, extended with more KV-head counts (§6.2) |
-| grid-choice set | the 46 distinct geometries of the end-to-end set, each run causal and non-causal | whether auto picks the right grid, persistent or non-persistent (§6.4) |
+| grid-choice set | the 46 distinct geometries of an earlier, smaller end-to-end set (83 gfx942 / 105 gfx950 shapes, `S` up to 8K), each run causal and non-causal | whether auto picks the right grid, persistent or non-persistent (§6.4) |
 | large-batch set | `B` ∈ {8, 16, 32} × MHA 64/64 and GQA 28/4, 32/8, 128/8 × `S` ∈ {2K, 8K}, causal (20 shapes within the kernel's 32-bit extents) | persistent orders and grid choice at large batch (§6.4) |
 | profiling set | six representative shapes (§6.3) | every order and grid with L2 counters (§6.3) |
 
@@ -79,7 +80,7 @@ The order therefore decides three things, which turned out to matter in this ord
   of `{p, NQB-1-p}` on one workgroup's consecutive steps, so every unit costs the
   same whatever the digit order. The fold balances only when a stride crosses both
   halves: automatic when the query block is the slowest digit (`qb_major`,
-  `bt_hkv_minor`, where pairing had almost no effect, §7), not under XCD head bands
+  `bt_hkv_minor`, where pairing measured at most 0.4% either way, §7), not under XCD head bands
   or with the kv head slowest.
 - **Alternating directions** (`interleave`: reverse on odd heads) is weaker than both.
   Every workgroup still sees the full cost range, and half of them end on the most
@@ -213,42 +214,92 @@ and `21ae719`, AOTriton 0.14b (`b5e8cfb`), FlashAttention `e9cf2c1`.
   shape verified bit-identical. On shapes too large for the reference, correctness
   rests on bit-identity with an order that passed SDPA at smaller shapes;
 - **timing:** one process per kernel; median of 3–5 timed runs of back-to-back
-  launches (warm caches); two independent passes;
-- **noise:** the per-shape run-to-run difference has a median of 0.2–0.8% and a 90th
-  percentile ≤ 1.7%.
+  launches (warm caches); two independent passes (§6.1: five rounds, below);
+- **uncertainty:** every result carries a 95% interval, written `±x` (points of the
+  percentage) or `[lo, hi]`:
+  - §6.1 alternates develop and the new version in five rounds on one node, so each
+    round gives one paired ratio per shape. A shape's interval is a t-interval over
+    its five ratios. An aggregate's interval is a t-interval over the five per-round
+    geomeans, so offsets that move a whole round are included. An A/A comparison
+    (the same version in two rounds) shows what no change looks like.
+  - §6.2–§6.4 and §7 (sweeps of two passes) pool the noise per sweep and arch from
+    the pass-to-pass differences of the paired ratios: σ = 0.26–0.9% per paired
+    measurement. A shape's interval is `±1.96·σ/√passes` (±0.4–1.2%). A geomean over
+    `n` shapes gets `±(1.96·σ/√(passes·n) + half its pass-to-pass difference)`
+    (±0.1–0.3 points). Rows measured in one pass take σ from A/A pairs in the same
+    run (the same kernel on both sides): σ = 0.3–1.1%.
+  - The intervals cover run-to-run noise on one node. They do not cover
+    node-to-node variation or the choice of shapes (§6.1 adds a bootstrap over
+    shapes for the latter).
+- **decision rule:** a delta counts as a gain or a loss only when its interval
+  excludes 0; otherwise it is reported as within noise. Every choice in §5 and §7
+  holds under this rule; where a delta is within noise, the text says so.
 - **configurations:** arms that pin an order or a grid are diagnostic configurations;
   "auto" is the default spec;
-- **dispatcher:** the runs predate the tuning-knob dispatch interface (#12719) and
-  pinned orders through the request fields it replaced; the kernels are the same.
+- **dispatcher:** the runs of §6.2–§6.4 and §7 predate the tuning-knob dispatch
+  interface (#12719) and pinned orders through the request fields it replaced; the
+  kernels are the same.
 
 Replay a single point with the builders
 `library/builders/{gfx942,gfx950}/attention/prefill/attention_dense_prefill.py`, which
 take `--nonpersist-decode` / `--persist-decode` and check parity against SDPA.
 
-### 6.1 End to end, previous → new, end-to-end set
+### 6.1 End to end, `develop` vs the final version, end-to-end set
 
-Both versions ran through the dispatcher: `develop` at `5d7f9be53e` against the new
-version `1e905f9231` (same tree). Each point is the median of 5 iterations of 250 timed
-executions after 75 warmups. Every output was checked against a reference: none was
-flagged, and error metrics were identical on both sides.
+Both versions ran through the dispatcher: `develop` at `429ba1fe444` against the final
+version `9fc40bfb25a`. Two configurations:
+- **default:** the dispatcher's default dense spec;
+- **tuned** (a diagnostic configuration): a per-shape dense spec from a tuner. `develop`
+  uses the specs tuned for it. The final version keeps each spec's tile and code
+  generation options but re-chooses its grid and block order per shape.
 
-| | gfx942 (83 shapes) | gfx950 (105 shapes) |
-|---|---|---|
-| geomean | **+11.4%** | **+4.2%** |
-| median | +9.9% | +2.5% |
-| faster / slower by more than 1% | 77 / 2 | 67 / 9 |
-| worst / best | −3.0% / +41% | −5.5% / +30% |
-| `S` 2K–4K | +15.0% | +7.7% |
-| `S ≤ 1K` | +9.5% | +0.9% |
-| `S ≥ 8K` | +7.6% | +3.6% |
+gfx942 ran on two parts with 304 CUs, (a) and (b); tuned specs exist for (b) and gfx950
+only. Per part, five rounds ran on one node; each round ran every configuration once
+per version, `develop` and the final version back to back, alternating which went
+first. Each point is the median of 5 iterations of 250 timed executions after 75
+warmups. Every output of both versions in every round was checked against an fp64
+reference, max abs error ≤ 5e-2: all passed. Ratios are throughput, final version over
+`develop`. `[lo, hi]` is the 95% interval over the rounds (§6). "Shape set" is a
+bootstrap over shapes: how much the geomean depends on which shapes were measured.
 
-- **gfx942 gains at every sequence length.** Most shapes now run the persistent grid
-  with the new decodes (§6.4). An earlier version of the rules, which kept gfx942 on
-  the non-persistent grid, measured +7.8% here (§7).
-- **gfx950 losses are almost all at `S ≤ 1K`,** where the work is about one wave or
-  less. The sliding-window shapes are unchanged (−0.2%).
-- The later pair fold and persistent `hq_minor_swz` (§2.3) change no kernel in this
-  set.
+| prefill shapes | default, gfx942 (a) | default, gfx942 (b) | default, gfx950 | tuned, gfx942 (b) | tuned, gfx950 |
+|---|---|---|---|---|---|
+| shapes | 99 | 99 | 114 | 99 | 120 |
+| **geomean** | **+8.5% [+8.4, +8.6]** | **+9.3% [+8.8, +9.8]** | **+2.7% [+2.5, +3.0]** | **+9.0% [+8.6, +9.3]** | **+1.4% [+1.1, +1.8]** |
+| shape set | [+6.7, +10.5] | [+7.4, +11.3] | [+1.3, +4.1] | [+7.0, +11.1] | [+0.6, +2.3] |
+| causal, `S ≤ 1K` | +5.4% [+5.1, +5.6] | +6.2% [+6.1, +6.4] | −1.2% [−1.8, −0.5] | +3.8% [+3.4, +4.2] | −1.0% [−1.8, −0.2] |
+| causal, `S` 2K–4K | +13.5% [+13.4, +13.5] | +14.3% [+13.7, +14.9] | +6.2% [+6.1, +6.3] | +18.0% [+17.9, +18.2] | +3.6% [+3.6, +3.7] |
+| causal, `S ≥ 8K` | +5.8% [+5.7, +6.0] | +6.2% [+5.7, +6.7] | +5.6% [+5.5, +5.8] | +5.9% [+5.8, +6.0] | +1.4% [+1.4, +1.5] |
+| sliding window shorter than the keys | +0.1% [−0.4, +0.6] | +0.3% [−0.9, +1.6] | −0.8% [−0.9, −0.7] | −0.7% [−1.6, +0.2] | −0.4% [−0.8, −0.1] |
+| D64 | +20.3% [+19.8, +20.8] | +22.9% [+21.7, +24.2] | +1.5% [+1.0, +2.0] | +8.1% [+7.0, +9.2] | +4.0% [+3.1, +4.9] |
+| faster / within noise / slower | 74 / 14 / 11 | 75 / 16 / 8 | 65 / 24 / 25 | 66 / 20 / 13 | 62 / 29 / 29 |
+| worst / best shape | −8.3% / +39.2% | −5.5% / +42.6% | −11.3% / +27.3% | −9.8% / +48.4% | −9.4% / +21.7% |
+| shape interval, median half-width | ±0.4% | ±0.8% | ±0.3% | ±0.7% | ±0.3% |
+
+**A/A** (the same version in consecutive rounds): a whole round moves by at most 0.14%
+(a), 0.94% (b) and 0.43% (gfx950) in geomean; 95% of single-shape A/A deltas are within
+1.0%, 2.1% and 2.2%.
+
+- **gfx942 gains at every sequence length,** default and tuned. Most shapes now run
+  the persistent grid with the new decodes (§6.4).
+- **The slower shapes fall into three groups,** plus four single shapes at −0.1% to
+  −1.3%:
+  - `S ≤ 1K` (7 / 5 / 22 of the default slower shapes; 11 / 26 tuned): at `S` = 512 a
+    launch is host-bound. The final version does more host work per launch (two more
+    spec fields in every validation, cache-key and name pass, and the order
+    resolution). A separate host-vs-device measurement on gfx950 at `S` = 512 put the
+    host time per launch up by about 8% and the device time up by only 0.4–6%. This
+    is why gfx950 `S ≤ 1K` reads −1%;
+  - sliding window: 1 / 1 / 3 default, 3 / 5 tuned. The worst is a 128-token window at
+    `S` = 512, tuned gfx942 (b) −9.8% [−11.5, −8.0]: its re-chosen spec runs the
+    persistent grid (`hq_minor_swz`) where `develop`'s tuned spec ran the
+    non-persistent one;
+  - 40 query heads at `S` = 4K on gfx942 (4 / 2 shapes, −1.0% to −4.7%): the work is
+    just over a whole number of persistent rounds, so the grid-stride tail is long;
+    per-shape tuned specs avoid it (§8).
+- **gfx950 decode** (`Sq = 1`, 46 shapes, default only; its kernels are unchanged):
+  −0.6% [−0.9, −0.4], 38 within noise. This is the host cost above, with nothing to
+  gain.
 
 ### 6.2 Non-persistent orders, order-comparison grid
 
@@ -264,14 +315,24 @@ is §6.4.
 | GQA `Hkv > 8` | causal | +28.1% / +28.4% / **+28.1%** | −1.8% | +35.5% / +38.4% / **+35.5%** | −3.3% |
 | all | non-causal | −8.4% … +0.2% / −4.1% … −0.9% / **0** | −0.0 … −0.7% | −7.5% … −1.0% / −3.0% … −1.2% / **0** | −0.4 … −1.1% |
 
+Uncertainty (§6): every geomean in this table has a 95% interval of ±0.1–0.3 points;
+one paired measurement has σ = 0.44% (gfx942) / 0.57% (gfx950). Within noise (the
+interval contains 0): the zero entries, gfx950 MHA causal auto vs best (−0.1%), and
+gfx942 `Hkv < 8` non-causal `bt_hkv_minor` (+0.2%). Every other entry excludes 0.
+"Auto vs best" picks the best order per shape on the mean of both passes; picking it on
+one pass and scoring on the other gives the same values within 0.1 point, so these gaps
+are not a selection artefact.
+
 - **Causal:** the new orders are worth about +24% to +38% over the previous order, and
   +45% to +67% at `S` 4K–8K. Auto is within 0.1–1.8% (gfx942) / 0.1–3.3% (gfx950) of
   the best order per shape.
 - **Where auto loses most:** large GQA (many heads, `B ≥ 4`, long `S`). There
-  `hq_minor_swz` beats `bt_hkv_minor` by up to 12% (gfx942) / 14% (gfx950). Auto
-  selects it only for MHA (§8).
-- **Non-causal:** the previous order is still the best non-persistent order, and step
-  0a agrees (every alternative 0.2–3.2% behind), so auto keeps it.
+  `hq_minor_swz` beats `bt_hkv_minor` by up to 13.8% ±0.6 (gfx942) / 16.9% ±0.8
+  (gfx950), both at GQA 128/32, `S` = 8K, `B` = 8. Auto selects it only for MHA (§8).
+- **Non-causal:** the previous order is still the best non-persistent order. Step 0a
+  agrees: on gfx942 every alternative is 1.2–3.2% behind (±0.2–0.4); on gfx950
+  `bt_hkv_minor` and Swizzled Head-first are 2.0% / 0.5% behind and two more orders tie
+  (−0.2% ±0.3). So auto keeps it.
 
 ### 6.3 Representative shapes: throughput and L2 counters
 
@@ -281,6 +342,13 @@ Throughput is relative to previous auto on the same arch. L2 hit rate is
 (`TCC_EA0_RDREQ`), relative to previous auto, median over 4 dispatches under
 rocprofv3. The non-persistent orders were bit-identical on every shape. The SDPA
 check ran on the `B = 1` shapes (the other two were too large).
+
+Uncertainty (§6): each throughput entry is the mean of two passes, with a 95% interval
+of ±0.4% (gfx942) / ±0.6% (gfx950) (pass-to-pass σ = 0.26% / 0.45% per paired
+measurement; same-kernel A/A pairs in these runs agree). Within noise: gfx942 32/8
+`S` = 32K non-persistent `hq_minor_swz` (−0.1%), gfx950 128/8 `B` = 16 new auto
+(+0.5%), and gfx950 non-causal non-persistent `qb_minor` / `bt_hkv_minor` (−0.3% /
++0.1%). Every other entry excludes 0.
 
 **gfx942**
 
@@ -376,7 +444,8 @@ check ran on the `B = 1` shapes (the other two were too large).
     orders are 9–13% behind it on gfx942);
   - large-batch GQA auto is still `hkv_major`, now with the pair fold: +5.9% on
     gfx942, where its hit rate rises from 56% to 87% because each grid-stride phase
-    spans fewer kv heads, and +0.5% on gfx950, where it was already 89%.
+    spans fewer kv heads, and unchanged within noise on gfx950 (+0.5% ±0.6), where
+    it was already 89%.
 
 ### 6.4 Grid choice (dispatch)
 
@@ -389,25 +458,32 @@ run with an affordable SDPA reference matched it (max abs error 3.9e-3 in bf16).
 
 | slice | gfx942 | gfx950 |
 |---|---|---|
-| causal, `B ≤ 4` (46) | **+10.9%** (worst −3.5%) | **+6.5%** (worst −1.3%) |
-| non-causal, `B ≤ 4` (46) | +5.5% (worst −3.1%) | +0.2% (worst −1.6%) |
-| D64, both masks (10 of the 92 above) | +18.2% | +2.9% |
-| causal, `B` 8–32 (20) | +4.3% (worst −1.0%) | +3.7% (worst −2.8%) |
-| all (112) | **+7.4%** (worst −3.5%) | **+3.3%** (worst −2.8%) |
+| causal, `B ≤ 4` (46) | **+10.9% ±0.1** (worst −3.5% ±0.6) | **+6.5% ±0.3** (worst −1.3% ±2.1) |
+| non-causal, `B ≤ 4` (46) | +5.5% ±0.1 (worst −3.1% ±0.6) | +0.2% ±0.3 (worst −1.6% ±2.1) |
+| D64, both masks (10 of the 92 above) | +18.2% ±0.2 | +2.9% ±0.6 |
+| causal, `B` 8–32 (20) | +4.3% ±0.2 (worst −1.0% ±0.5) | +3.7% ±0.1 (worst −2.8% ±0.5) |
+| all (112) | **+7.4% ±0.1** (worst −3.5% ±0.6) | **+3.3% ±0.2** (worst −2.8% ±0.5) |
+
+Uncertainty (§6): ± is the 95% interval. The `B ≤ 4` rows are one pass; their noise
+comes from A/A pairs in the same run (non-causal shapes whose kernel is the same on both
+versions): σ = 0.31% (gfx942) / 1.04% (gfx950) per paired measurement. The `B` 8–32
+rows are two passes (σ = 0.38% / 0.33%). Within noise: gfx950 non-causal (+0.2%, so
+unchanged) and both gfx950 `B ≤ 4` worst shapes. Every other entry excludes 0.
 
 - **gfx942 at D128: the persistent grid wins at every batch and mask.** With the new
-  decodes it is ahead of the non-persistent auto by about 4% on causal and 10% on
-  non-causal shapes (`B = 1`). That holds even when the work fits in one wave, so part
+  decodes it is ahead of the non-persistent auto by 3.8% ±0.3 on causal and 10.4% ±0.3
+  on non-causal shapes (`B = 1`). That holds even when the work fits in one wave, so part
   of the gap is the grid's code path rather than the order. The cause is not
   identified.
-- **gfx942 at D64: the non-persistent grid wins,** by about 11% (causal) and 16%
-  (non-causal).
-- **Large batch:** MHA now runs the persistent `hq_minor_swz`: +10.5% (gfx942) /
-  +20.0% (gfx950). GQA keeps the previous rule, `hkv_major` where it applied, now
-  with the pair fold: +2.8% / +0.0%, with gfx950 up to 2.8% behind at `S = 8K`.
+- **gfx942 at D64: the non-persistent grid wins,** by 10.8% ±0.9 (causal) and
+  15.8% ±0.9 (non-causal).
+- **Large batch:** MHA now runs the persistent `hq_minor_swz`: +10.5% ±0.3 (gfx942) /
+  +20.0% ±0.4 (gfx950). GQA keeps the previous rule, `hkv_major` where it applied, now
+  with the pair fold: +2.8% ±0.2 / +0.0% ±0.1 (unchanged), with gfx950 up to 2.8%
+  behind at `S = 8K`.
 - **gfx950 at `S ≤ 1K`:** the unchanged previous rule picks the non-persistent grid
   when the work does not fill the persistent grid. There the persistent grid measured
-  about 8% ahead on causal shapes (13 of 13) and 2% on non-causal (§8).
+  7.9% ±0.6 ahead on causal shapes (13 of 13) and 2.4% ±0.6 on non-causal (§8).
 - **Caveats:**
   - the `B ≤ 4` set is mostly `B = 1`;
   - D64 covers one geometry at five sequence lengths;
@@ -418,16 +494,16 @@ run with an affordable SDPA reference matched it (max abs error 3.9e-3 in bf16).
 
 | idea | result | why |
 |---|---|---|
-| all 24 digit orders × {ascending, longest-first, fold} **(experimental)** | only the batch/kv-head-fastest class generalizes. Orders with the query block fastest lose 22–31%; `BVGQ` was within 1.6% geomean of the per-shape best on every arch and grid | §2.3: nothing rescues query-block-fastest orders; balance is a hard gate |
+| all 24 digit orders × {ascending, longest-first, fold} **(experimental)** | only the batch/kv-head-fastest class generalizes. Orders with the query block fastest lose 22–31%; `BVGQ` was within 1.6% ±0.1 geomean of the per-shape best on every arch and grid (1.4% when the best is picked on one pass and scored on the other) | §2.3: nothing rescues query-block-fastest orders; balance is a hard gate |
 | locality-maximizing orders (one K/V stream per XCD, e.g. `VGQB`) **(experimental)** | the best locality measured *worst*; `BVGQ` won with 8–32× poorer locality | pinning one stream per XCD gives each workgroup one query block, which ruins causal balance. Locality only separates orders once balance is equal |
-| kv-phase split (split the fused `(batch, kv head)` identity across the fastest and slowest digits) **(experimental)** | +1.3% on gfx942 persistent at `Hkv = 8` (large batch only); ties elsewhere; about 12 extra integer ops per item | not worth a knob |
-| `gqa_pair`, `gqa_pair_2phase` (gfx950) | very restrictive: GQA with even `G`, even `NQB`, a baked shape, and a CTA count that must equal `NQB·Hkv·B` (or half the work), so under the default CTA count they fire only by coincidence. At matched CTA count they are **2.2% (93 shapes) / 3.9% (64 shapes) behind** the new auto; at the default CTA count, far behind | the new persistent orders balance and localize at least as well without the constraints; now explicit only |
-| pair fold for persistent `bt_hkv_minor` and `qb_major` (causal, 54 shapes) **(experimental)** | almost no effect | the query block is their slowest digit, so a workgroup's stride already crosses both halves of the fold |
-| `interleave` vs fold (persistent `qb_major`, causal, 62 shapes) **(experimental)** | fold ahead by 4.5% (gfx942) / 4.9% (gfx950) geomean; interleave only 0.4–0.7% better than ascending | §2.3; interleave is kept only as an explicit knob |
+| kv-phase split (split the fused `(batch, kv head)` identity across the fastest and slowest digits) **(experimental)** | +1.3% ±0.2 on gfx942 persistent at `Hkv = 8` (large batch only); −0.5% to +0.4% (±0.2–0.4) elsewhere; about 12 extra integer ops per item | not worth a knob |
+| `gqa_pair`, `gqa_pair_2phase` (gfx950) | very restrictive: GQA with even `G`, even `NQB`, a baked shape, and a CTA count that must equal `NQB·Hkv·B` (or half the work), so under the default CTA count they fire only by coincidence. At matched CTA count they are **2.2% ±0.2 (93 shapes) / 3.9% ±0.2 (64 shapes) behind** the new auto; at the default CTA count, far behind | the new persistent orders balance and localize at least as well without the constraints; now explicit only |
+| pair fold for persistent `bt_hkv_minor` and `qb_major` (causal, 54 shapes) **(experimental)** | `bt_hkv_minor` −0.3% ±0.2 (gfx942) / −0.4% ±0.2 (gfx950), a small loss; `qb_major` −0.3% ±0.3 / +0.1% ±0.2, a tie | the query block is their slowest digit, so a workgroup's stride already crosses both halves of the fold |
+| `interleave` vs fold (persistent `qb_major`, causal, 62 shapes) **(experimental)** | fold ahead by 3.3% ±0.2 (gfx942) / 2.8% ±0.2 (gfx950) geomean, and by 4.5% / 4.9% (±0.4) on the 30 shapes with `B < 8`; interleave only 0.7% / 0.4% (±0.1–0.2) better than ascending | §2.3; interleave is kept only as an explicit knob |
 | Swizzled Head-first on the persistent grid, as-is **(experimental)** | 10.5% (gfx942) / 27% (gfx950) behind auto on causal shapes, whatever the traversal | grid-stride advances the block digit by `NP/8`; when that is a multiple of `NQB`, every workgroup keeps one query block for its whole life. The pair fold fixes this (§2.3) |
-| aiter's KV-head-first swizzle (`hkv_minor_swz`: grid `(Hq·NQB, 1, B)`, XCD `a` owns kv heads `a·Hkv/8 …` one at a time, block-first over their query heads) **(prototype on the new version)** | vs non-persistent auto: `Hkv = 8` ties (+0.1–2.8%); `Hkv > 8` causal **+1.6% (gfx942) / +4.4% (gfx950)**, but gfx950 auto uses the faster persistent grid there anyway; `Hkv < 8` causal **13–35% behind**. MHA is identical to `hq_minor_swz` | `bt_hkv_minor` already pins each `(batch, kv head)` to one XCD whenever `B·Hkv % 8 == 0`. The `Hkv < 8` split hands one XCD the late, expensive blocks |
-| first version of the new rules, gfx942: persistent only from 16 batches | behind the previous auto on non-causal D128 (−3.3% geomean, worst −14.9%) and at `B = 8` (up to −7.3%) | it relied on the non-persistent grid beating the *old* persistent decodes; with the new ones the persistent grid wins at D128 (§6.4). The rule now keys on head size |
-| first version of the new rules: folded `qb_major` for aligned causal from `chiplet_num_xcds` batches | behind the previous `hkv_major` on gfx950 GQA (−2.9% geomean, worst −10.7%) | the earlier study compared it only with `bt_hkv_minor`; auto now keeps the previous rule there |
+| aiter's KV-head-first swizzle (`hkv_minor_swz`: grid `(Hq·NQB, 1, B)`, XCD `a` owns kv heads `a·Hkv/8 …` one at a time, block-first over their query heads) **(prototype on the new version)** | vs non-persistent auto: `Hkv = 8` +0.1–0.5% on three of the four arch × shape-set cells, +2.8% ±0.2 on the fourth (gfx950, paper grid); `Hkv > 8` causal **+1.6% ±0.2 (gfx942) / +4.4% ±0.3 (gfx950)**, but gfx950 auto uses the faster persistent grid there anyway; `Hkv < 8` causal **13–35% behind**. MHA is identical to `hq_minor_swz` | `bt_hkv_minor` already pins each `(batch, kv head)` to one XCD whenever `B·Hkv % 8 == 0`. The `Hkv < 8` split hands one XCD the late, expensive blocks |
+| first version of the new rules, gfx942: persistent only from 16 batches | behind the previous auto on non-causal D128 (−3.3% ±0.3 geomean, worst −14.9% ±1.9) and at `B = 8` (up to −7.3% ±1.0) | it relied on the non-persistent grid beating the *old* persistent decodes; with the new ones the persistent grid wins at D128 (§6.4). The rule now keys on head size |
+| first version of the new rules: folded `qb_major` for aligned causal from `chiplet_num_xcds` batches | behind the previous `hkv_major` on gfx950 GQA (−2.9% ±0.3 geomean, worst −10.7% ±1.2) | the earlier study compared it only with `bt_hkv_minor`; auto now keeps the previous rule there |
 
 **Measurement lessons.**
 - **The launcher cache is keyed by kernel name.** An order missing from the name
@@ -437,7 +513,8 @@ run with an affordable SDPA reference matched it (max abs error 3.9e-3 in bf16).
   overstates gains several-fold.
 - **Re-check the grid choice after improving either grid.** Both first-version rule
   errors above came from comparing a new candidate against a stale alternative.
-- **Median over runs, then two passes.** Single bad runs invent regressions.
+- **Median over runs, then two passes.** Single bad runs invent regressions, and the
+  pass-to-pass differences give the noise for the intervals (§6).
 - **Free noise probes.** Orders that coincide at `G = 1` or `B = 1` compile to the
   same mapping, so any gap between them is noise.
 
