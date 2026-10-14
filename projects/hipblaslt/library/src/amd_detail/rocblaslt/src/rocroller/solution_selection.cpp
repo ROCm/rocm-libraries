@@ -1,6 +1,12 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+// Windows host clang does not provide the BSD `uint` typedef that rocRoller
+// data-type headers use. Define it before those headers are included.
+#if defined(_WIN32)
+using uint = unsigned int;
+#endif
+
 #include "solution_selection.hpp"
 #include "analytical_utils.hpp"
 #include "kernel_type.hpp"
@@ -403,8 +409,8 @@ std::vector<SolutionIndexParameters> chooseSolutionIndexParameters(
             || kernelType.typeA == rocRoller::DataType::BF6
             || kernelType.typeB == rocRoller::DataType::FP6
             || kernelType.typeB == rocRoller::DataType::BF6)
-            && (!std::has_single_bit(static_cast<uint>(wgt.m))
-                || !std::has_single_bit(static_cast<uint>(wgt.n))))
+            && (!std::has_single_bit(static_cast<unsigned int>(wgt.m))
+                || !std::has_single_bit(static_cast<unsigned int>(wgt.n))))
             continue;
 
         // check if this size is valid for pre-swizzled data
