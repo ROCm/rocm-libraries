@@ -6379,7 +6379,8 @@ def build_gfx942_4warp_gqa(
         # fold acc *= alpha, then MFMA-accumulate PV directly into acc, dropping the separate
         # `pv` accumulator (~64 VGPR) to cut register pressure at the gfx942 256-VGPR cap.
         # This does NOT by itself keep the kernel spill-free: the exp2_fast swap above drops
-        # the range-reduction guard (and its scheduling barrier), which adds pressure.
+        # the range-reduction guard, which changes the instruction schedule and raises
+        # register pressure.
         # Whether the kernel actually spills is comgr-version-dependent -- older comgr (the
         # ROCm 7.2 sweep toolchain) spills at the cap; the 7.13/7.14 comgr (llvm23) allocates
         # the same IR spill-free. Perf-neutral either way: this path is memory-bound, so any
