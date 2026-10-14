@@ -20,6 +20,38 @@
  *   adp_reduce_B_kernel         B-side ADP crt_capacity_bits requirement (reads col_max)
  *   refine_sftB_kernel          apply the B-side shift-refinement delta
  *
+ * ─── ADP Condition Derivation ─────────────────────────────────────────────
+ *
+ * Goal: find the minimum CRT capacity  L := (1/2)*log2(M_s/2)  that
+ * simultaneously satisfies three requirements per row/column.
+ *
+ * Notation (A-side; B-side is symmetric with C_j / sftB_j):
+ *   sftA_i   initial per-row shift (sftA_init[i])
+ *   R_i      per-row max of |P_ij| from the preliminary GEMM (row_max[i])
+ *   b        target relative precision in bits (adp_bits)
+ *
+ * Shift refinement (refine_sftA_apply_kernel):
+ *   delta_i = floor(-0.5*log2(R_i) + L),   hat_sftA_i = sftA_i + delta_i
+ * The 1/2 factor splits the log-budget equally between A and B so that
+ * delta_i + delta_j ~ log2(M_s/2), consuming the full CRT range.
+ *
+ * Three lower bounds on L (adp_reduce_A_kernel; kernel takes the max):
+ *
+ *   crt_acc(i) = (b - sftA_i) + 0.5*log2(R_i)
+ *     CRT grid spacing 2^{-hat_sftA - hat_sftB} <= 2^{-b} * |D_ij|
+ *     (relative precision b bits).
+ *
+ *   crt_rep(i) = log2(R_i) - sftA_i
+ *     |Z_ij| < M_s/2 representability (no b dependence).
+ *     Prevents CRT wrap-around for wide-range or cancellation-heavy inputs.
+ *
+ *   trunc(i)   = b + 6 - 2*sftA_i
+ *     INT8 quantization noise floor.  The data-magnitude term 0.5*log2(R_i)
+ *     is dropped here (crt_acc/crt_rep carry it where it dominates).
+ *
+ *   L*_A = max_i  max(crt_acc(i), crt_rep(i), trunc(i))
+ *   L*   = max(L*_A, L*_B)
+ *
  * This header must be compiled as HIP.
  */
 
