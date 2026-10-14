@@ -3762,6 +3762,25 @@ def cases():
             "fp8_d64_swa_w128_sq512",
             {"kv_storage_dtype": "fp8e4m3", "head_size": 64, "sliding_window": 128},
         ),
+        # fp16 compute with fp8 KV (AICK-1932 fp16 output). D128 + D64 lock the
+        # fp16 MFMA dequant path through the golden and cpp byte-identity gate.
+        ("fp8_fp16_causal_sq512", {"kv_storage_dtype": "fp8e4m3", "dtype": "fp16"}),
+        (
+            "fp8_fp16_d64_causal_sq512",
+            {"kv_storage_dtype": "fp8e4m3", "dtype": "fp16", "head_size": 64},
+        ),
+        # fp8 with the remaining masks the grid variant advertises: non-causal
+        # (full) and the moving bottom-right diagonal. The loader is mask-
+        # independent, so these lock that it stays byte-identical under each mask.
+        ("fp8_noncausal_sq512", {"kv_storage_dtype": "fp8e4m3", "causal": False}),
+        (
+            "fp8_bottom_right_sq512",
+            {
+                "kv_storage_dtype": "fp8e4m3",
+                "seqlen_kv": 1024,
+                "causal_bottom_right": True,
+            },
+        ),
         # Opt-in two-phase async fp8 loader (staging slab + LDS->LDS dequant).
         # One case locks its distinct emission through the golden + cpp gate.
         (
