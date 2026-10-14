@@ -267,6 +267,7 @@ _UNBUILDABLE_SPEC_FIELDS = frozenset(
         "paged",
         "block_size",
         "num_kv_blocks",
+        "kv_storage_dtype",  # fp8 KV is gfx950-only; gfx942 supports() rejects it
         "lds_num_buffers",
     }
 )
@@ -295,6 +296,7 @@ _SPEC_PERTURBATIONS = {
     "head_size": (64, 128),
     "causal": (False, True),
     "causal_bottom_right": (True,),
+    "kv_storage_dtype": (),  # unbuildable on gfx942 (fp8 KV is gfx950-only)
     "dtype": ("bf16", "fp16"),
     "sliding_window": (64, 128),  # multiples of block_n=64; base is causal
     "ragged": (),  # unbuildable
