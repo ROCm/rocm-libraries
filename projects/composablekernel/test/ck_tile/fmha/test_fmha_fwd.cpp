@@ -567,16 +567,16 @@ TEST_P(General, DataTypeConfig)
     CHECK_RESULT(result);
 }
 
-// Row max of the scores next to the LSE (fmha_fwd_args::max_ptr). The long rows span several K
+// Max logits next to the LSE (fmha_fwd_args::max_logits_ptr). The long rows span several K
 // tiles; s_k=0 leaves rows with no visible key (-inf).
-class RowMax : public TestWithParam<std::tuple<std::tuple<int, int>,
-                                               mode_enum,
-                                               std::tuple<int, int, int, int, int, std::string>>>
+class MaxLogits : public TestWithParam<std::tuple<std::tuple<int, int>,
+                                                  mode_enum,
+                                                  std::tuple<int, int, int, int, int, std::string>>>
 {
 };
 
 INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaFwd,
-                         RowMax,
+                         MaxLogits,
                          Combine(HDimValues,
                                  ModeValues,
                                  Values(std::tuple{2, 2, 1, 1000, 1037, "0"},
@@ -589,7 +589,7 @@ INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaFwd,
                                         std::tuple{2, 16, -1, 1024, 1024, "1"},
                                         std::tuple{2, 16, -1, 16, 1024, "2"})));
 
-TEST_P(RowMax, DataTypeConfig)
+TEST_P(MaxLogits, DataTypeConfig)
 {
     if constexpr(ck_tile::is_any_of<DataTypeConfig, FmhaFwdFp16, FmhaFwdBf16>::value)
     {
@@ -632,9 +632,13 @@ TEST_P(RowMax, DataTypeConfig)
                                                    COMMON_ARGS,
                                                    std::nullopt,
                                                    &selected_kernel,
-                                                   true); // store_max
+                                                   true); // store_max_logits
         CHECK_RESULT(result);
-        EXPECT_NE(selected_kernel.find("_max"), std::string::npos) << selected_kernel;
+        EXPECT_NE(selected_kernel.find("_max_logits"), std::string::npos) << selected_kernel;
+    }
+    else
+    {
+        GTEST_SKIP() << "max logits: fp16/bf16 only";
     }
 }
 

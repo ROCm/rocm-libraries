@@ -25,7 +25,7 @@ template <bool kPadSeqLenQ_ /* padding for seqlen_q */,
           index_t kBlockPerCu_  = -1,    /* overwrite occupancy if not -1 */
           bool kSkipMinSeqlenQ_ = false, /* skip min seqlen q while chunked prefill */
           bool kHasSink_        = false,
-          bool kStoreRowMax_    = false>
+          bool kStoreMaxLogits_ = false>
 struct TileFmhaTraits
 {
     static constexpr bool kPadSeqLenQ       = kPadSeqLenQ_;
@@ -41,7 +41,7 @@ struct TileFmhaTraits
     static constexpr index_t kBlockPerCu    = kBlockPerCu_;
     static constexpr bool kSkipMinSeqlenQ   = kSkipMinSeqlenQ_;
     static constexpr bool kHasSink          = kHasSink_;
-    static constexpr bool kStoreRowMax      = kStoreRowMax_;
+    static constexpr bool kStoreMaxLogits   = kStoreMaxLogits_;
 };
 
 template <bool kPadSeqLenQ_ /* padding for seqlen_q */,

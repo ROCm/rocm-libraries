@@ -6,7 +6,6 @@ Documentation for Composable Kernel available at [https://rocm.docs.amd.com/proj
 
 ### Added
 
-* Added `fmha_fwd_args::max_ptr` to the CK Tile FMHA forward: on gfx9, the qr, qr_async and qr_async_trload pipelines can store the exact per-row max logit next to the LSE.
 * Added support for building Composable Kernel for the target-agnostic SPIR-V target (`amdgcnspirv`), which is compiled to native code at run time.
 * Added grouped convolution forward, backward data, and backward weight instances for gfx1250.
 * Added a wavelet GEMM pipeline for convolution forward that specializes waves into separate load and math roles to reduce VALU contention.
@@ -17,6 +16,7 @@ Documentation for Composable Kernel available at [https://rocm.docs.amd.com/proj
 * Added gfx1250 WMMA instance support to the CK backend for PyTorch Inductor, covering universal GEMM, batched GEMM, and grouped convolution forward.
 * Added the tanh approximation of GELU to the XDL two-stage MoE GEMM epilogue.
 * Added double-precision buffer atomic add support on gfx1250.
+* Added `fmha_fwd_args::max_logits_ptr` to the CK Tile FMHA forward: on gfx9, the qr, qr_async, and qr_async_trload pipelines can store the exact per-row max logits next to the LSE.
 
 ### Optimized
 
