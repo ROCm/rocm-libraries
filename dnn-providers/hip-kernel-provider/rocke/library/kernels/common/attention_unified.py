@@ -2632,19 +2632,38 @@ def _enable_i64_kv_addr(problem: UnifiedAttentionProblem) -> bool:
     return kv_cache_needs_i64_addr(problem.num_kv_blocks, _kv_block_bytes(problem))
 
 
+_KV_LIMIT_NO_I64_PATH = "no_i64_path"
+_KV_LIMIT_I32_BUFFER = "i32_buffer"
+
+
+@dataclass(frozen=True)
+class _KvAddrLimit:
+    """Largest paged K cache, in bytes, a compiled kernel reads, and what bounds it."""
+
+    nbytes: int
+    # _KV_LIMIT_NO_I64_PATH, _KV_LIMIT_I32_BUFFER, or the _I32_ONLY_KV_LOADERS
+    # flag that caps an i64 spec. Picks the fix the launch guard suggests.
+    cause: str
+
+
 def _kv_addr_limit(
     problem: UnifiedAttentionProblem, use_i64_kv_addr: bool | None
-) -> int | None:
-    """Largest paged K cache, in bytes, that a 2D kernel reads correctly.
+) -> _KvAddrLimit | None:
+    """The cache limit implied by the K/V address width alone.
 
     ``use_i64_kv_addr`` is the compiled kernel's flag. ``None`` means the
     kernel has no i64 path (scalar 2D, gfx942 4-warp GQA, gfx1250 tiled 2D)
     and indexes K/V with an i32 element offset. Returns ``None`` (no limit)
-    for i64 addressing.
+    for i64 addressing. This does not see the i32-only loaders an i64 tiled
+    spec can still select, so bound a tiled launch with ``_spec_kv_addr_limit``.
     """
     if use_i64_kv_addr is None:
-        return _I32_KV_ELEMENTS * (1 if problem.use_fp8 else 2)
-    return None if use_i64_kv_addr else _I32_KV_BUFFER_BYTES
+        return _KvAddrLimit(
+            _I32_KV_ELEMENTS * (1 if problem.use_fp8 else 2), _KV_LIMIT_NO_I64_PATH
+        )
+    if use_i64_kv_addr:
+        return None
+    return _KvAddrLimit(_I32_KV_BUFFER_BYTES, _KV_LIMIT_I32_BUFFER)
 
 
 # Tiled spec flags that select a K/V loader with no i64 branch, mapped to the
@@ -2668,7 +2687,7 @@ _I32_ONLY_KV_LOADERS = {
 
 def _spec_kv_addr_limit(
     problem: UnifiedAttentionProblem, spec, *, builder_kind: str = "tiled"
-) -> int | None:
+) -> _KvAddrLimit | None:
     """Largest paged K cache, in bytes, that the kernel built from ``spec`` reads.
 
     Reads the compiled spec rather than the problem, so a builder branch that
@@ -2683,51 +2702,68 @@ def _spec_kv_addr_limit(
     if not spec.use_i64_kv_addr:
         return _kv_addr_limit(problem, False)
     limits = [
-        limit
-        for flag, limit in _I32_ONLY_KV_LOADERS.items()
+        _KvAddrLimit(nbytes, flag)
+        for flag, nbytes in _I32_ONLY_KV_LOADERS.items()
         if getattr(spec, flag, False)
     ]
-    return min(limits, default=None)
+    return min(limits, key=lambda limit: limit.nbytes, default=None)
+
+
+def _kv_addr_fix(
+    problem: UnifiedAttentionProblem, num_kv_blocks: int, kv_addr_limit: _KvAddrLimit
+) -> str:
+    """What a caller can do about a cache past ``kv_addr_limit``."""
+    if kv_addr_limit.cause == _KV_LIMIT_NO_I64_PATH:
+        return (
+            "This kernel has no i64 KV path (the scalar, gfx942 4-warp GQA and "
+            "gfx1250 kernels index at most 2^31 elements), so fixing "
+            "num_kv_blocks will not help. Use a smaller cache."
+        )
+    if kv_addr_limit.cause != _KV_LIMIT_I32_BUFFER:
+        return (
+            f"The {kv_addr_limit.cause} K/V loader has no i64 path yet, so the "
+            "kernel cannot address this cache whatever num_kv_blocks says. Use a "
+            f"smaller cache, or for a hand-built spec set {kv_addr_limit.cause}"
+            "=False."
+        )
+    if problem.num_kv_blocks < num_kv_blocks:
+        return (
+            f"problem.num_kv_blocks={problem.num_kv_blocks} is below the cache's "
+            "block count. Build the problem with num_kv_blocks=k.shape[0] and the "
+            "spec from that problem (run_unified_attention_torch fills it when "
+            "the caller leaves it at 0)."
+        )
+    return (
+        "problem.num_kv_blocks already covers the cache, so the kernel itself "
+        "is i32. Rebuild a hand-built spec with use_i64_kv_addr=True."
+    )
 
 
 def _check_kv_addr_width(
-    problem: UnifiedAttentionProblem, k, kv_addr_limit: int | None
+    problem: UnifiedAttentionProblem, k, kv_addr_limit: _KvAddrLimit | None
 ) -> None:
     """Reject a launch whose K cache is larger than the kernel can address.
 
     ``_enable_i64_kv_addr`` only sees ``problem.num_kv_blocks``. A caller that
     builds the problem without it (0 means unknown, so assume small) or with a
     stale count gets the i32 path, and past the i32 limit the loads read zeros
-    or wrong data with no fault. Some kernels have no i64 path at all. ``k`` is
-    the real cache, so check it at launch against ``kv_addr_limit`` (see
-    ``_kv_addr_limit``). Overcounting only costs the i64 path on a small cache,
-    which is still correct, so it is allowed.
+    or wrong data with no fault. Some kernels have no i64 path at all, and some
+    i64 specs still select an i32-only loader. ``k`` is the real cache, so check
+    it at launch against ``kv_addr_limit`` (see ``_spec_kv_addr_limit``).
+    Overcounting only costs the i64 path on a small cache, which is still
+    correct, so it is allowed.
     """
     if kv_addr_limit is None or not hasattr(k, "shape") or len(k.shape) < 1:
         return
     num_kv_blocks = int(k.shape[0])
     cache_bytes = num_kv_blocks * _kv_block_bytes(problem)
-    if cache_bytes <= kv_addr_limit:
+    if cache_bytes <= kv_addr_limit.nbytes:
         return
-    if problem.num_kv_blocks < num_kv_blocks:
-        fix = (
-            f"problem.num_kv_blocks={problem.num_kv_blocks} is below the cache's "
-            "block count. Build the problem with num_kv_blocks=k.shape[0] and the "
-            "spec from that problem (run_unified_attention_torch fills it when "
-            "the caller leaves it at 0)."
-        )
-    else:
-        fix = (
-            "problem.num_kv_blocks already covers the cache, so the kernel itself "
-            "is i32. Rebuild a hand-built spec with use_i64_kv_addr=True and "
-            "without the K/V loaders that have no i64 branch (cfv, cfvst, vhbm, "
-            "khbm, fp8-PV), or use a kernel with an i64 KV path (the scalar, "
-            "gfx942 4-warp GQA and gfx1250 kernels have none)."
-        )
     raise ValueError(
         f"paged KV cache of {num_kv_blocks} blocks ({cache_bytes} bytes) exceeds "
-        f"the {kv_addr_limit} bytes this kernel's i32 KV addressing reads "
-        f"correctly; past that, loads return zeros or wrong data. {fix}"
+        f"the {kv_addr_limit.nbytes} bytes this kernel's i32 KV addressing reads "
+        "correctly; past that, loads return zeros or wrong data. "
+        + _kv_addr_fix(problem, num_kv_blocks, kv_addr_limit)
     )
 
 
@@ -3599,7 +3635,7 @@ def _attn_values(
     k_scale: float = 1.0,
     v_scale: float = 1.0,
     out_scale: float = 1.0,
-    kv_addr_limit: int | None,
+    kv_addr_limit: _KvAddrLimit | None,
 ):
     # Production 2D and scalar launches and the torch direct-launch harnesses
     # pack kernargs here, so check the real K cache against what the compiled
@@ -4154,7 +4190,7 @@ class _Attention2DLaunchMeta:
     grid: Tuple[int, int, int]
     block: Tuple[int, int, int]
     # What the compiled kernel addresses, from ``_spec_kv_addr_limit``.
-    kv_addr_limit: int | None
+    kv_addr_limit: _KvAddrLimit | None
 
 
 # Compiled state is shared; scratch belongs to an execution, invocation or graph.
@@ -4166,7 +4202,7 @@ _2D_LAUNCHERS: Dict[Tuple, KernelLauncher] = {}
 _2D_LAUNCH_META: Dict[Tuple, _Attention2DLaunchMeta] = {}
 # Per-cache-key ``_spec_kv_addr_limit`` of the default-route spec. The spec is a
 # function of the cache key, so it is built once per kernel, not per total_q.
-_2D_KV_ADDR_LIMITS: Dict[Tuple, int | None] = {}
+_2D_KV_ADDR_LIMITS: dict[tuple, _KvAddrLimit | None] = {}
 _2D_GRAPHS: Dict[Tuple, Any] = {}
 _2D_GRAPH_REFS: Dict[Tuple, Tuple[Any, ...]] = {}
 _SCALAR_LAUNCHERS: Dict[Tuple, KernelLauncher] = {}
