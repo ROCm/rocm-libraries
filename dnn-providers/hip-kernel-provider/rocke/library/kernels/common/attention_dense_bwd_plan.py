@@ -495,6 +495,7 @@ def attn_dense_bwd_plan(
         route="dense",
         route_tag=tag,
         perf_class=pclass,
+        perf_status=policy.status_of(arch, "dense", pclass),
         fill_bucket=_fill_bucket(req, grid[0] * grid[1] * grid[2]),
         specs=_freeze(specs),
         runtime=_freeze(rt),

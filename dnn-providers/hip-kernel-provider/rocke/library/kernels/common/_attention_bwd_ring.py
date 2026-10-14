@@ -101,7 +101,10 @@ _STATS = ("lse2", "dsum")
 _INF = float("inf")
 # M0 holds the LDS destination of an LDS DMA; one wait state between the SALU
 # write of M0 and the DMA (the CK form). The compiler does not track inline
-# asm, so it inserts no ``vmcnt`` wait for these copies anywhere.
+# asm, so it inserts no ``vmcnt`` wait for these copies anywhere. The 64-bit
+# global base (``s``) is the slab pointer formed with a readfirstlane'd offset
+# (``RowSlab.sgpr_ptr``): the production compiler can otherwise hand a uniform
+# pointer it keeps in a VGPR pair to the ``s`` operand.
 _ASM_X4 = "s_mov_b32 m0, $1\n\ts_nop 0\n\tglobal_load_lds_dwordx4 $0, $2"
 _ASM_X1 = "s_mov_b32 m0, $1\n\ts_nop 0\n\tglobal_load_lds_dword $0, $2"
 _ASM_CONSTRAINTS = "v,s,s,~{m0},~{memory}"
@@ -452,14 +455,16 @@ class QRing:
             if name in _STATS:
                 slab: WsSlab = ws[name]
                 voff = b.shl(slab.index(self.lane, 0), b.const_i32(2))
-                b.inline_asm(_ASM_X1, _ASM_CONSTRAINTS, [voff, m0, slab.ptr], None)
+                ptr = slab.sgpr_ptr()
+                b.inline_asm(_ASM_X1, _ASM_CONSTRAINTS, [voff, m0, ptr], None)
                 continue
             rslab: RowSlab = slabs[name]
             r_j, c_j = dma_lane_source(_HostInts(), self.layout, j, 0)
             row = b.add(tile.q0, b.add(row_l, b.const_i32(r_j)) if r_j else row_l)
             col = b.add(col_l, b.const_i32(c_j)) if c_j else col_l
             voff = b.shl(rslab.index(row, col), b.const_i32(1))
-            b.inline_asm(_ASM_X4, _ASM_CONSTRAINTS, [voff, m0, rslab.ptr], None)
+            ptr = rslab.sgpr_ptr()
+            b.inline_asm(_ASM_X4, _ASM_CONSTRAINTS, [voff, m0, ptr], None)
 
     # ----- prologue / drain ----------------------------------------------
     def prologue(self, b: IRBuilder, trip: Value, tiles, *, name: str) -> list[Value]:

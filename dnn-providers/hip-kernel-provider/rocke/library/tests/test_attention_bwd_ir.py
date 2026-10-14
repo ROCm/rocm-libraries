@@ -1520,12 +1520,11 @@ def test_zero_scratch_no_spills_and_lds_equal_to_the_plan(arch, var):
     if var == WIDE_SUFFIX and arch != "gfx950":
         pytest.skip("the 16x16x32 G1 / G3 atom is gfx950-only")
     pytest.importorskip("rocke.runtime.comgr")
-    from rocke.helpers.compile import compile_kernel
-
     from ._attention_bwd_resources import (
         GATE_FLAVOR,
         comgr_is_production,
         comgr_version,
+        compile_or_skip,
         current_flavor,
         evaluate_resource_gate,
         find_objdump,
@@ -1558,12 +1557,9 @@ def test_zero_scratch_no_spills_and_lds_equal_to_the_plan(arch, var):
         rows = [x for x in INSTANCES if x[0] == arch and x[-1] == var]
     for row in rows:
         r = resolved_of(*row)
-        try:
-            art = compile_kernel(
-                kernel_of(*row), arch=arch, capture_ir_text=False, backend="python"
-            )
-        except Exception as exc:  # noqa: BLE001 - comgr cannot target this arch here
-            pytest.skip(f"comgr cannot compile for {arch}: {exc}")
+        art = compile_or_skip(
+            kernel_of(*row), arch=arch, capture_ir_text=False, backend="python"
+        )
         res = evaluate_resource_gate(
             art.hsaco,
             arch=arch,

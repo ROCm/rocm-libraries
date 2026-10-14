@@ -553,19 +553,16 @@ def test_mirror_edge_rows_are_refused():
 
 def _compile(kernel, arch):
     pytest.importorskip("rocke.runtime.comgr")
-    from rocke.helpers.compile import compile_kernel
-
-    from ._attention_bwd_resources import find_objdump, pin_production_comgr
+    from ._attention_bwd_resources import (
+        compile_or_skip,
+        find_objdump,
+        pin_production_comgr,
+    )
 
     pin_production_comgr()  # torch's bundled comgr, by path; torch not imported
     if find_objdump() is None:
         pytest.skip("llvm-objdump not found")
-    try:
-        return compile_kernel(
-            kernel, arch=arch, capture_ir_text=False, backend="python"
-        )
-    except Exception as exc:  # noqa: BLE001 - comgr cannot target this arch here
-        pytest.skip(f"comgr cannot compile for {arch}: {exc}")
+    return compile_or_skip(kernel, arch=arch, capture_ir_text=False, backend="python")
 
 
 def _isa_model(kernel, arch):

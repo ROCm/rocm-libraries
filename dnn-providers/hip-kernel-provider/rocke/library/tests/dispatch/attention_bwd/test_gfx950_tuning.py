@@ -2,11 +2,12 @@
 # SPDX-License-Identifier: MIT
 """The gfx950 tuned tables of the attention backward and their plumbing.
 
-CPU only: the tables ship empty (routing and planning unchanged); the routed
-policy joins the per-arch general table and status, the dense table joins
-the per-arch dense table; the sweep's emitted dense entries become checked
-table entries (gfx950, the key's shape, knobs that plan on the key), and a
-general entry reaches the plan through the routed policy.
+CPU only: the routed policy joins the per-arch general tables and status,
+the dense table joins the per-arch dense tables; the sweep's emitted dense
+entries become checked table entries (gfx950, the key's shape, knobs that
+plan on the key), and a general entry reaches the plan through the routed
+policy. The shipped entries themselves are checked in
+``test_tuned_tables.py``.
 """
 
 from __future__ import annotations
@@ -16,6 +17,7 @@ import json
 
 import pytest
 
+from dispatch.attention_bwd import gfx942_tuning
 from dispatch.attention_bwd import gfx950_tuning as g
 from dispatch.attention_bwd import routing
 from dispatch.attention_bwd.dense_tuning import DENSE_BWD_TUNED
@@ -26,18 +28,35 @@ from kernels.common.attention_bwd_plan import (
 )
 
 
-def test_tables_ship_empty_and_change_nothing():
+def test_tables_are_registered_and_joined():
     assert g.ARCH == "gfx950"
-    assert g.GENERAL_TUNED_TABLE == {} and g.DENSE_TUNED == {}
-    assert g.GENERAL_PERF_STATUS == {}
-    assert routing.ARCH_TUNING == {"gfx950": g}
+    assert routing.ARCH_TUNING == {"gfx942": gfx942_tuning, "gfx950": g}
+    assert g.GENERAL_TUNED_TABLE and g.DENSE_TUNED
+    assert all(k[:2] == ("gfx950", "general") for k in g.GENERAL_PERF_STATUS)
+    assert all(k[:2] == ("gfx950", "dense") for k in g.DENSE_PERF_STATUS)
+    assert all(k[:2] == ("gfx950", "general") for k in g.GENERAL_TUNED_TABLE)
+    assert all(k[0] == "gfx950" for k in g.DENSE_TUNED)
     base = shipped_policy()
-    assert routing.arch_tuned_policy(base) is base
     pol = routing.routed_policy()
-    ref = routing.dense_policy(base)
+    joined = routing.arch_tuned_policy(base)
+    for mod in routing.ARCH_TUNING.values():
+        for key, knobs in mod.GENERAL_TUNED_TABLE.items():
+            assert pol.tuned_table[key] == knobs == joined.tuned_table[key]
+        assert set(mod.DENSE_TUNED) <= set(DENSE_BWD_TUNED) <= pol.dense_pack
+        for key, knobs in mod.DENSE_TUNED.items():
+            assert DENSE_BWD_TUNED[key] == knobs
+    assert len(DENSE_BWD_TUNED) == sum(
+        len(m.DENSE_TUNED) for m in routing.ARCH_TUNING.values()
+    )
+    ref = routing.dense_policy(joined)
     for f in ("tuned_table", "perf_status", "dense_pack", "declared_groups"):
         assert getattr(pol, f) == getattr(ref, f), f
-    assert set(g.DENSE_TUNED) <= set(DENSE_BWD_TUNED)
+    # the per-arch status tables join the policy's status (information only)
+    status = {}
+    for mod in routing.ARCH_TUNING.values():
+        status.update(mod.GENERAL_PERF_STATUS)
+        status.update(mod.DENSE_PERF_STATUS)
+    assert pol.perf_status == {**status, **base.perf_status}
 
 
 def _req(**kw):
@@ -52,6 +71,7 @@ class _Mod:
     def __init__(self, table=None, status=None):
         self.GENERAL_TUNED_TABLE = table or {}
         self.GENERAL_PERF_STATUS = status or {}
+        self.DENSE_PERF_STATUS = {}
         self.DENSE_TUNED = {}
 
 
@@ -94,8 +114,9 @@ def test_general_entry_reaches_the_plan(monkeypatch):
 def test_general_entries_are_checked():
     req = _req()
     key = attn_bwd_tuning_key(req, "gfx950")
-    doc = {"entries": [{"key": json.loads(json.dumps(key)), "knobs": {"waves": 4}}]}
-    assert g.general_entries(doc) == {key: {"waves": 4}}
+    good = {"edge_tiles": True}
+    doc = {"entries": [{"key": json.loads(json.dumps(key)), "knobs": good}]}
+    assert g.general_entries(doc) == {key: good}
     for bad in (
         attn_bwd_tuning_key(req, "gfx942"),  # another arch
         ("gfx950", "dense") + key[2:],  # another route
@@ -103,8 +124,12 @@ def test_general_entries_are_checked():
     ):
         with pytest.raises(ValueError):
             g.check_general_entry(bad, {})
+    # the knobs are planned on the key: a wave count without its warp grid
+    # does not plan, and the plan's reason is the error
+    with pytest.raises(ValueError, match="warp_grid_g4"):
+        g.general_entries([{"key": list(key), "knobs": {"waves": 4}}])
     with pytest.raises(ValueError, match="two entries"):
-        g.general_entries(doc["entries"] + [{"key": list(key), "knobs": {"waves": 8}}])
+        g.general_entries(doc["entries"] + [{"key": list(key), "knobs": {}}])
 
 
 def _dense_doc():

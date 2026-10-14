@@ -17,9 +17,9 @@ spec owns itself).
 knobs}`` with the dense key of
 :func:`kernels.common.attention_bwd_plan._dense_key`. A request routes to the
 dense family only when its exact key is in this table (and passed its gate);
-the table is empty until a key's performance gate passes, so routing is
-unchanged by the registry alone. It joins the per-arch tables
-(:mod:`.gfx950_tuning`: ``DENSE_TUNED``).
+a key enters only after its performance gate passed, so the registry alone
+changes no routing. It joins the per-arch tables (:mod:`.gfx942_tuning`,
+:mod:`.gfx950_tuning`: ``DENSE_TUNED``).
 
 ``dq_mode = "split"`` is built on the dense route: the dense main kernel
 computes dK / dV only and the dense split dQ kernel
@@ -46,7 +46,7 @@ from kernels.common.attention_dense_bwd_spec import (
 from kernels.common.attention_bwd import WS_LAYOUTS, _not_built
 from kernels.common.attention_bwd_plan import AUX_KNOBS, DQ_KNOBS, RUNTIME_KNOBS
 
-from . import gfx950_tuning
+from . import gfx942_tuning, gfx950_tuning
 from .tuning_common import BWD_KNOB_AXES, KIND_RUNTIME, KnobAxis, backward_axis
 
 __all__ = [
@@ -153,8 +153,11 @@ _SHARED_RUNTIME = tuple(k for k in RUNTIME_KNOBS if k != "use_worklist") + tuple
 _SHARED_DQ = tuple(DQ_KNOBS)
 
 # The tuned dense table: the per-arch tables (dispatch.attention_bwd.<arch>
-# _tuning; empty until a dense key passes its performance gate).
-DENSE_BWD_TUNED: Mapping[tuple, Mapping[str, Any]] = {**gfx950_tuning.DENSE_TUNED}
+# _tuning; a dense key enters only after its performance gate passed).
+DENSE_BWD_TUNED: Mapping[tuple, Mapping[str, Any]] = {
+    **gfx942_tuning.DENSE_TUNED,
+    **gfx950_tuning.DENSE_TUNED,
+}
 
 
 def dense_axis(name: str) -> KnobAxis:

@@ -21,6 +21,14 @@ policy's ``dense_pack`` and a tuning hook that answers the dense route from
 the table and every other route from the base policy. Forced routes
 (``route="general"`` / ``"dense"``) serve the gate runs that time both routes
 on the same cell; a forced route keeps the request's own predicate verdict.
+
+Serving: the routed policy serves every request the predicate accepts (and the
+plan builds). The per-arch performance status of a class (``verified``,
+``unverified``, ``below_baseline``; :data:`ARCH_TUNING`'s
+``GENERAL_PERF_STATUS`` / ``DENSE_PERF_STATUS``) is information only: the plan
+records it (``AttnBwdPlan.perf_status``) and
+:func:`attention_bwd_declaration` publishes it per class, and neither the
+route nor the knobs depend on it.
 """
 
 from __future__ import annotations
@@ -33,6 +41,7 @@ from kernels.common.attention_bwd_plan import (
     AttnBwdPolicy,
     AttnBwdRequest,
     _dense_key,
+    attn_bwd_declaration,
     attn_bwd_perf_class,
     attn_bwd_plan,
     attn_bwd_route,
@@ -47,13 +56,14 @@ from kernels.common.attention_bwd_unified_plan import (
 )
 from kernels.common.attention_dense_bwd_plan import attn_dense_bwd_plan
 
-from . import gfx950_tuning
+from . import gfx942_tuning, gfx950_tuning
 from .dense_tuning import DENSE_BWD_TUNED
 
 __all__ = [
     "ARCH_TUNING",
     "BWD_ROUTES",
     "arch_tuned_policy",
+    "attention_bwd_declaration",
     "attention_bwd_route",
     "dense_policy",
     "plan_attention_bwd",
@@ -64,18 +74,20 @@ __all__ = [
 BWD_ROUTES = ("general", "dense")
 # Per-arch tuned tables of the general family (GENERAL_TUNED_TABLE,
 # GENERAL_PERF_STATUS) and of the dense family (DENSE_TUNED, joined into
-# DENSE_BWD_TUNED): {arch: module}.
-ARCH_TUNING = {gfx950_tuning.ARCH: gfx950_tuning}
+# DENSE_BWD_TUNED; DENSE_PERF_STATUS): {arch: module}.
+ARCH_TUNING = {mod.ARCH: mod for mod in (gfx942_tuning, gfx950_tuning)}
 
 
 def arch_tuned_policy(base: AttnBwdPolicy) -> AttnBwdPolicy:
     """``base`` with the per-arch general tuned tables (:data:`ARCH_TUNING`)
-    joined into its ``tuned_table`` and ``perf_status`` (a base entry of the
-    same key wins). Empty per-arch tables leave ``base`` as it is."""
+    joined into its ``tuned_table``, and the per-arch general and dense
+    performance status into its ``perf_status`` (a base entry of the same key
+    wins). Empty per-arch tables leave ``base`` as it is."""
     table, status = {}, {}
     for mod in ARCH_TUNING.values():
         table.update(mod.GENERAL_TUNED_TABLE)
         status.update(mod.GENERAL_PERF_STATUS)
+        status.update(mod.DENSE_PERF_STATUS)
     if not table and not status:
         return base
     return dataclasses.replace(
@@ -110,8 +122,8 @@ def dense_policy(
 
 
 def routed_policy() -> AttnBwdPolicy:
-    """The shipped policy with the per-arch general tuned tables and the
-    shipped tuned dense table."""
+    """The shipped policy with the per-arch general tuned tables, the per-arch
+    performance status and the shipped tuned dense table."""
     return dense_policy(arch_tuned_policy(shipped_policy()))
 
 
@@ -162,6 +174,16 @@ def plan_attention_bwd(
     return dataclasses.replace(
         plan, perf_class=attn_bwd_perf_class(req, arch, "general")
     )
+
+
+def attention_bwd_declaration(
+    arch: str, *, policy: Optional[AttnBwdPolicy] = None
+) -> dict:
+    """The backward declaration of ``arch`` under the routed policy
+    (:func:`routed_policy`): served classes and the performance status of
+    every general class and every dense-pack key."""
+    policy = routed_policy() if policy is None else policy
+    return attn_bwd_declaration(arch, policy=policy)
 
 
 def plan_attention_bwd_unified(

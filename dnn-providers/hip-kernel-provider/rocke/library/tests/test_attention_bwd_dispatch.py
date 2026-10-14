@@ -13,8 +13,9 @@ gfx1151:
 * routes dense exactly when it is dense-eligible and its dense key is in the
   tuned dense table; never dense for an ineligible request, even with its key
   in the table;
-* with the shipped (empty) tuned dense table routes general, so routing
-  changes nothing until a dense key passes its gate;
+* with an empty tuned dense table routes general, so routing changes
+  nothing until a dense key passes its gate; with the shipped table only the
+  requests of a packed key route dense;
 * a forced general route on a packed key plans the general family; a forced
   dense route on an ineligible request raises.
 """
@@ -98,13 +99,16 @@ def test_exactly_one_family_and_dense_only_when_eligible(arch):
 
 @pytest.mark.parametrize("arch", ARCHS)
 def test_empty_table_routes_general(arch):
-    assert not DENSE_BWD_TUNED or all(k[0] != arch for k in DENSE_BWD_TUNED)
     policy = dense_policy(config_policy("default", arch), {})
+    shipped = dense_policy(config_policy("default", arch))
     for cid, req in _REQUESTS[::7]:
         if not attn_bwd_support(req, arch, policy=policy).ok:
             continue
         assert attention_bwd_route(req, arch, policy=policy)[0] == "general", cid
         assert _main_stages(plan_attention_bwd(req, arch, policy=policy)) == ["main"]
+        packed = (arch, _dense_key(req)) in DENSE_BWD_TUNED
+        want = "dense" if packed and dense_bwd_eligibility(req, arch)[0] else "general"
+        assert attention_bwd_route(req, arch, policy=shipped)[0] == want, cid
 
 
 @pytest.mark.parametrize("arch", ("gfx942", "gfx950"))

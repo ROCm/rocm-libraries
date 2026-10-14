@@ -348,6 +348,26 @@ def _elem_bytes(dtype: Type) -> int:
         raise ValueError(f"unsupported element type {dtype.name}") from None
 
 
+def sgpr_ptr(b: IRBuilder, ptr: Value, parts: tuple | None) -> Value:
+    """``ptr``, a wave-uniform slab pointer, for an operand that must be in
+    SGPRs.
+
+    ``parts`` is ``(base, byte_off, ptr)``: ``ptr`` was formed as ``base +
+    byte_off`` (``byte_off`` None: ``ptr`` is ``base``). The pointer is formed
+    again as ``base + readfirstlane(byte_off)``. An inline-asm ``"s"`` operand
+    (the LDS DMA's 64-bit global base) takes the registers the compiler
+    materialised the value in, and the production compiler can place a
+    uniform pointer in a VGPR pair, which the assembler rejects; the
+    readfirstlane puts the value in SGPRs.
+    """
+    if parts is None or parts[2] is not ptr:
+        raise ValueError("the slab pointer was not formed from (base, offset)")
+    base, off, _ptr = parts
+    if off is None:
+        return base
+    return b.global_ptr_add(base, b.readfirstlane(off))
+
+
 @dataclass(frozen=True, eq=False)
 class RowSlab:
     """A tensor rebased to ``(batch, head, base_row)``; i32 in-slab indexing."""
@@ -362,6 +382,12 @@ class RowSlab:
     # elements per access when stage_vec = 1 (2 or 4: every stride and the
     # base allow that width; 1: one element at a time)
     narrow: int = 1
+    # how ``ptr`` was formed: (base, i64 byte offset or None, ptr); see sgpr_ptr
+    parts: tuple | None = None
+
+    def sgpr_ptr(self) -> Value:
+        """``ptr`` for an operand that must be in SGPRs (:func:`sgpr_ptr`)."""
+        return sgpr_ptr(self.b, self.ptr, self.parts)
 
     def local_row(self, row: Value) -> Value:
         """i32 row offset from the slab base (clamped when the slab clamps)."""
@@ -551,7 +577,8 @@ class StridedTensorAddr:
         if off is None:
             ptr = self._base
         else:
-            ptr = b.global_ptr_add(self._base, b.mul(off, b.const_i64(self._esize)))
+            off = b.mul(off, b.const_i64(self._esize))
+            ptr = b.global_ptr_add(self._base, off)
         return RowSlab(
             b=b,
             ptr=ptr,
@@ -561,6 +588,7 @@ class StridedTensorAddr:
             last=self.seq.last if clamp else None,
             stage_vec=self.stage_vec,
             narrow=self.narrow_vec,
+            parts=(self._base, off, ptr),
         )
 
     def offset_bytes(self, h: IntOrValue, row0: IntOrValue = 0) -> Value:
@@ -591,15 +619,17 @@ class StridedTensorAddr:
         across steps) at base row ``row0``. Equal to :meth:`slab` ``(h, row0,
         clamp=clamp)`` when ``row0 <= last`` (the clamp of the base row is then
         an identity), which holds for every q tile a q loop visits."""
+        ptr = self.b.global_ptr_add(self._base, off)
         return RowSlab(
             b=self.b,
-            ptr=self.b.global_ptr_add(self._base, off),
+            ptr=ptr,
             dtype=self.dtype,
             t_stride=self.strides[2],
             base_row=_i32(self.b, row0),
             last=self.seq.last if clamp else None,
             stage_vec=self.stage_vec,
             narrow=self.narrow_vec,
+            parts=(self._base, off, ptr),
         )
 
 
@@ -641,6 +671,12 @@ class WsSlab:
     ptr: Value
     rows_left: Value
     row_stride: IntOrValue  # X (head-major) or H * X (token-major), elements
+    # how ``ptr`` was formed: (base, i64 byte offset, ptr); see sgpr_ptr
+    parts: tuple | None = None
+
+    def sgpr_ptr(self) -> Value:
+        """``ptr`` for an operand that must be in SGPRs (:func:`sgpr_ptr`)."""
+        return sgpr_ptr(self.b, self.ptr, self.parts)
 
     def row_ok(self, r: Value) -> Value:
         return self.b.cmp_lt(r, self.rows_left)
@@ -827,8 +863,12 @@ class WorkspaceAddr:
                 row_stride = nh * self.width
             else:
                 row_stride = _scaled32(b, nh, self.width)
-        ptr = b.global_ptr_add(self.ptr, b.mul(elem, b.const_i64(4)))
-        return WsSlab(b=b, ptr=ptr, rows_left=rows_left, row_stride=row_stride)
+        off = b.mul(elem, b.const_i64(4))
+        ptr = b.global_ptr_add(self.ptr, off)
+        return WsSlab(
+            b=b, ptr=ptr, rows_left=rows_left, row_stride=row_stride,
+            parts=(self.ptr, off, ptr),
+        )  # fmt: skip
 
 
 # ---------------------------------------------------------------------------

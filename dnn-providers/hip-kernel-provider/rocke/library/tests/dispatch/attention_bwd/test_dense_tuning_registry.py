@@ -6,7 +6,8 @@
 Every dense spec tuning field has one axis whose default is the field's
 default; not-built values are registered and refused by the kernel; every
 built value of every dense axis builds a legal spec on its arch; the body
-knobs are the general registry's axes; the shipped tuned table is empty.
+knobs are the general registry's axes; every shipped tuned entry plans on a
+census cell of its key.
 """
 
 from __future__ import annotations
@@ -140,12 +141,14 @@ def _tuned_entry_plans(table):
 
 
 def test_tuned_entries_plan_on_their_keys():
-    """Every shipped DENSE_BWD_TUNED entry plans on its key (empty today);
+    """Every shipped DENSE_BWD_TUNED entry plans on a census cell of its key;
     the check itself is exercised on an entry the sweep would emit."""
     from benchmarks.common import attention_bwd_sweep as sw
     from kernels.common.attention_bwd_plan import _dense_key
 
-    assert _tuned_entry_plans(DENSE_BWD_TUNED) == []
+    plans = _tuned_entry_plans(DENSE_BWD_TUNED)
+    assert len(plans) == len(DENSE_BWD_TUNED) > 0
+    assert all(p.route == "dense" for p in plans)
     sl = sw.primary_slice("gfx950", "dense", 128)
     gsl = sw.primary_slice("gfx950", "general", 128)
     knobs = dict(sw.default_knobs(gsl), global_path="dma", ring_depth=2)
@@ -174,7 +177,9 @@ def test_tuning_axes_and_table():
     names = {ax.name for ax in dense_tuning_axes("gfx942", "full")}
     assert {"oob", "epilogue", "persistent", "waves", "block_n"} <= names
     assert {"g_split", "lb_order", "xcd_chunk", "scale_placement"} <= names
-    assert dict(DENSE_BWD_TUNED) == {}
+    # the joined per-arch tables: (arch, dense key) keys of the CDNA targets
+    assert all(arch in ("gfx942", "gfx950") for arch, _key in DENSE_BWD_TUNED)
+    assert all(len(key) == 9 for _arch, key in DENSE_BWD_TUNED)
 
 
 def test_runtime_axes_are_the_general_runtime_axes():

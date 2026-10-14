@@ -369,7 +369,8 @@ fails if a field has no axis.
 The dense backward family adds `attention_bwd/dense_tuning.py` (one
 `KnobAxis` per dense-only spec field, the shared body's knobs reused from the
 general registry through `body_knobs`, and the tuned dense table
-`DENSE_BWD_TUNED`, empty until a dense key passes its performance gate) and
+`DENSE_BWD_TUNED`, the per-arch dense tables of `attention_bwd/gfx942_tuning.py`
+and `gfx950_tuning.py`, whose entries `attention_bwd/tuned_tables.py` checks) and
 `attention_bwd/routing.py` (`plan_attention_bwd`: an accepted request goes to
 the dense family when it is dense-eligible and its key is in the tuned dense
 table, else to the general family; `route=` forces one for gate runs).

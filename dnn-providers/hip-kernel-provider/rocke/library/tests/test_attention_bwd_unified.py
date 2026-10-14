@@ -458,9 +458,8 @@ def test_zero_scratch_no_spills_and_lds_equal_to_the_plan(row):
     no scratch, no spills, register budgets, LDS equal to the phase plan, no
     AGPR copies in the q loop beyond the model."""
     pytest.importorskip("rocke.runtime.comgr")
-    from rocke.helpers.compile import compile_kernel
-
     from ._attention_bwd_resources import (
+        compile_or_skip,
         evaluate_resource_gate,
         find_objdump,
         pin_production_comgr,
@@ -473,12 +472,9 @@ def test_zero_scratch_no_spills_and_lds_equal_to_the_plan(row):
     arch = row[0]
     facts = attn_bwd_arch_facts(arch)
     g = resolved_of(*row).general_spec()
-    try:
-        art = compile_kernel(
-            kernel_of(*row), arch=arch, capture_ir_text=False, backend="python"
-        )
-    except Exception as exc:  # noqa: BLE001 - comgr cannot target this arch here
-        pytest.skip(f"comgr cannot compile for {arch}: {exc}")
+    art = compile_or_skip(
+        kernel_of(*row), arch=arch, capture_ir_text=False, backend="python"
+    )
     res = evaluate_resource_gate(
         art.hsaco, arch=arch, lds_capacity_bytes=facts.lds_capacity_bytes, spec=g
     )

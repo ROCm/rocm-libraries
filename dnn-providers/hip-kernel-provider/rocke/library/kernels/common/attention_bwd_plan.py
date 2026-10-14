@@ -19,8 +19,8 @@ hooks, of in-repo tables): no device query, no allocation, no kernel build.
   declaration including the performance status per (route, class).
 
 Shipping policy (:class:`AttnBwdPolicy`): which functional feature groups have
-passed their correctness gate, whether unverified performance classes are
-waived, the static performance-status table, instances that failed the
+passed their correctness gate, the static performance-status table (information
+only unless a policy opts into the performance gate), instances that failed the
 resource gate, the dense pack and the tuning-table hook. The default policy is
 the shipped one; tests pass their own.
 """
@@ -480,13 +480,20 @@ class AttnBwdPolicy:
     """What ships: declared feature groups, performance policy and tables.
 
     * ``declared_groups``: functional groups whose correctness gate passed.
-    * ``waive_unverified``: claim classes whose performance status is
-      ``unverified`` (an explicit waiver of the performance requirement for
-      those classes); ``False`` declines them with ``PERF_UNVERIFIED``.
     * ``perf_status``: ``{perf_class: status}`` keyed by
       :func:`attn_bwd_perf_class` (which starts with arch and route); a missing
-      entry is ``unverified``. RDNA targets carry no performance claim and are never
-      declined on performance.
+      entry is ``unverified``. RDNA targets carry no performance claim
+      (``degraded``). The status is information: the plan records it
+      (``AttnBwdPlan.perf_status``) and the declaration publishes it per class;
+      it never changes the route or the knobs.
+    * ``perf_gate``: decline on the performance status, ``PERF_BELOW_BASELINE``
+      for a ``below_baseline`` class and ``PERF_UNVERIFIED`` for an
+      ``unverified`` one unless ``waive_unverified``. Off by default (the
+      shipped policy serves every request the predicate accepts); RDNA targets
+      are never declined on performance.
+    * ``waive_unverified``: under ``perf_gate``, serve ``unverified`` classes
+      (an explicit waiver of the performance requirement); no effect without
+      ``perf_gate``.
     * ``instance_unavailable``: base kernel names (``AttnBwdSpec.kernel_name``
       of the unsalted base key) whose instance failed the resource gate.
     * ``dense_pack``: ``{(arch, dense_key)}`` served by the dense family.
@@ -516,6 +523,7 @@ class AttnBwdPolicy:
     not_validated_archs: frozenset = frozenset(NOT_VALIDATED_ARCHS)
     tuned_table: Mapping = field(default_factory=dict)
     deterministic: bool = False
+    perf_gate: bool = False
 
     def status_of(self, arch: str, route: str, perf_class: tuple) -> str:
         if arch in RDNA_ARCHS:
@@ -553,6 +561,7 @@ def shipped_policy() -> AttnBwdPolicy:
         ),
         tuned_table=dict(getattr(mod, "GENERAL_TUNED_TABLE", {})),
         deterministic=bool(getattr(mod, "SERVE_DETERMINISTIC", False)),
+        perf_gate=bool(getattr(mod, "PERF_GATE", False)),
     )
 
 
@@ -1336,13 +1345,14 @@ def attn_bwd_support(
     key = _instance_key(req)
     if key in policy.instance_unavailable:
         return _decline("INSTANCE_UNAVAILABLE", f"{key} failed the resource gate")
-    route, _ = attn_bwd_route(req, arch, policy=policy)
-    pclass = attn_bwd_perf_class(req, arch, route)
-    status = policy.status_of(arch, route, pclass)
-    if status == "below_baseline":
-        return _decline("PERF_BELOW_BASELINE", f"class {pclass} below baseline")
-    if status == "unverified" and not policy.waive_unverified:
-        return _decline("PERF_UNVERIFIED", f"class {pclass} has no measured cell")
+    if policy.perf_gate:
+        route, _ = attn_bwd_route(req, arch, policy=policy)
+        pclass = attn_bwd_perf_class(req, arch, route)
+        status = policy.status_of(arch, route, pclass)
+        if status == "below_baseline":
+            return _decline("PERF_BELOW_BASELINE", f"class {pclass} below baseline")
+        if status == "unverified" and not policy.waive_unverified:
+            return _decline("PERF_UNVERIFIED", f"class {pclass} has no measured cell")
     missing = sorted(
         attn_bwd_feature_groups(req) - set(policy.declared_groups),
         key=FEATURE_GROUPS.index,
@@ -1475,6 +1485,9 @@ class AttnBwdPlan:
     workspace_bytes: int
     workspace_layout: Mapping[str, tuple[int, int]]
     tuning_key: tuple = ()  # attn_bwd_tuning_key of the request
+    # the policy's performance status of perf_class (information only: it
+    # never changes the plan); "" where the route records none (unified)
+    perf_status: str = ""
 
     @property
     def atomic_free(self) -> bool:
@@ -2111,6 +2124,7 @@ def attn_bwd_plan(
         workspace_bytes=ws_bytes,
         workspace_layout=_freeze(layout),
         tuning_key=tkey,
+        perf_status=policy.status_of(arch, route, pclass),
     )
 
 
@@ -2240,8 +2254,13 @@ def attn_bwd_declaration(arch: str, *, policy: Optional[AttnBwdPolicy] = None) -
             "AttnBwdPolicy.deterministic, on " + ", ".join(SPLIT_DQ_ARCHS),
         },
         "perf_policy": {
-            "unverified": "waived" if policy.waive_unverified else "declined",
-            "below_baseline": "declined",
+            "gate": "declines" if policy.perf_gate else "information_only",
+            "unverified": (
+                ("waived" if policy.waive_unverified else "declined")
+                if policy.perf_gate
+                else "served"
+            ),
+            "below_baseline": "declined" if policy.perf_gate else "served",
         },
         "perf": perf,
         "deferral_register": [dict(row) for row in DEFERRAL_REGISTER],

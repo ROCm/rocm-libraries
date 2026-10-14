@@ -30,9 +30,10 @@ knob value, a refused value, or a recorded design; no shipped kernel emits it.
   computes dK / dV only and the dQ kernel writes dQ once, deterministically
   (2.4).
 * The **dense** family (shape-specialised, per-arch builders running the
-  shared tile step behind a dense shell) is **built** (section 8.2); its
-  tuned table is empty, so routing still takes the general route for every
-  request until a dense key passes its performance gate. The **unified**
+  shared tile step behind a dense shell) is **built** (section 8.2); routing
+  takes it only for the dense keys of its tuned table (keys whose dense
+  winner passed its performance gate, 9.3) and the general route for every
+  other request. The **unified**
   family (THD queries over a paged KV cache, a rocKE-native entry point) is
   **built** (section 8.3, `attention_bwd_unified.md`).
 * Every tile, residency, path, schedule and codegen decision is a defaulted
@@ -74,8 +75,9 @@ knob value, a refused value, or a recorded design; no shipped kernel emits it.
 | `library/dispatch/attention_bwd/tuning_common.py` | the knob registry (`KnobAxis`) and `backward_spec_legality` |
 | `library/tests/test_attention_bwd_noatomic.py` | the slice sink and the atomic-free backward (2.5a): knob, plan, slice ownership, no atomic instruction in the IR, determinism policy, registry and sweep, device numerics and bitwise repeats |
 | `library/tests/test_attention_bwd_access.py` | the memory-access levers (3.9): legality, IR forms, plan narrowing, the resource gate of every new value, device bit-for-bit checks |
-| `library/dispatch/attention_bwd/dense_tuning.py`, `routing.py` | the dense knob registry and tuned dense table; `plan_attention_bwd` (routing among the families) |
-| `library/dispatch/attention_bwd/gfx950_tuning.py` | the gfx950 tuned tables (general, dense, performance status; empty) and the checks of the sweep's emitted entries (9.3) |
+| `library/dispatch/attention_bwd/dense_tuning.py`, `routing.py` | the dense knob registry and tuned dense table; `plan_attention_bwd` (routing among the families), `attention_bwd_declaration` (the declaration under the routed policy) |
+| `library/dispatch/attention_bwd/gfx942_tuning.py`, `gfx950_tuning.py`, `tuned_tables.py` | the per-arch tuned tables (general, dense, performance status) and the entry check every entry passes, also used on the sweep's emitted entries (9.3) |
+| `library/tests/dispatch/attention_bwd/test_serving_policy.py` | the shipped serving policy (9.3): every accepted request served on gfx942 / gfx950, the status recorded and published per class and never steering the plan, the remaining declines, the opt-in performance gate, tuned and untuned keys |
 | `library/benchmarks/common/attention_bwd_sweep.py` | the funnel sweep driver; `attention_bwd_compile.py` (compile cache, crash isolation), `attention_bwd_bench.py` (paired timing harness), `attention_bwd_census.json` (shape census, no measurements) |
 
 All backward modules are Python-only family glue (no C++ twin); compiled
@@ -811,7 +813,12 @@ loads, so their wait falls at the slot stores and leaves the dQ atomics in
 flight) and stores them to their slot at the end of the step; the DMA ring
 (`dma`, gfx950) copies global memory straight into the slot with
 `global_load_lds_dwordx4` / `_dword` (inline asm, into the 128-byte slab layout
-with a source-side XOR) and waits `vmcnt(N)` with `N` from its wait model.
+with a source-side XOR) and waits `vmcnt(N)` with `N` from its wait model. The
+copy's 64-bit global base is an SGPR operand (`"s"`): it is the slab pointer
+formed again from its base and a `readfirstlane`'d byte offset
+(`RowSlab.sgpr_ptr`, `WsSlab.sgpr_ptr`), since the production compiler can keep
+the wave-uniform pointer in a VGPR pair and hand that to the operand, which
+the assembler rejects (gfx950 debug d128 THD tiles with `stage_table_atomics`).
 Every in-step barrier is LDS-only; the step ends with the ring's wait and one
 LDS-only barrier that publishes the next slot and retires the reads of this
 one. Couplings: `qdo_stage = "split"` and `stats_load = "at_use"` (the ring
@@ -1155,7 +1162,9 @@ tests. The vector `lse2` / `Dsum` loads are `stats_vec` (3.2).
   slabs of the steps ahead from their (q tile, head) index, so the validator
   refuses `slab_carry` there; it also excludes `q_rotate`; inert with
   `head_pack` and in the grouped `head_outer` loops of edge tiles (their head
-  is loop-invariant inside the range loops already). It holds three more i64
+  is loop-invariant inside the range loops already). With
+  `stage_table_atomics` the loop carries the offsets before the deferred dQ
+  partial, which is read from the values after them. It holds three more i64
   values per tensor in SGPRs across the loop, so on tiles at the SGPR ceiling
   it trades the multiplies for SGPR spills; the resource gate decides per
   instance.
@@ -1734,10 +1743,13 @@ OK      -> attn_bwd_route: dense-eligible and key in dense_pack -> "dense"   -> 
 Routing uses request fields only (no device query) and never adds or removes
 a declared cell. `dispatch/attention_bwd/routing.py` (`plan_attention_bwd`)
 returns the plan of exactly one family: `dense_policy` turns the tuned dense
-table (`DENSE_BWD_TUNED`, empty until a dense key passes its performance
-gate) into the policy's `dense_pack` and dense tuning, `arch_tuned_policy`
-joins the per-arch general tables into the policy's `tuned_table` and
-`perf_status` (9.3), and `route=` forces a route for gate runs. There is no backward dispatcher (request / candidate /
+table (`DENSE_BWD_TUNED`, the per-arch dense tables; a dense key enters only
+after its performance gate) into the policy's `dense_pack` and dense tuning, `arch_tuned_policy`
+joins the per-arch general tables into the policy's `tuned_table` and the
+per-arch status into its `perf_status` (9.3), and `route=` forces a route for
+gate runs. The routed policy serves every request the predicate accepts and
+the plan builds; the performance status of a class never steers the route or
+the knobs (9.3). There is no backward dispatcher (request / candidate /
 ranker) yet; `dispatch/attention_bwd/` holds the knob registries and this
 routing. A paged (unified) request is not routed here: it has its own
 entry point (8.3).
@@ -1877,18 +1889,60 @@ hints), and no hint ever reaches the policy as a knob.
   unknown). `AttnBwdPolicy.tuned_table` is looked up most-specific first (exact,
   then either bucket as `*`, then both), then the `tuning` hook overrides it.
 * **Policy** (`shipped_policy`): reads `kernels/common/attention_bwd_tuning.py`
-  when the tree has it. This tree has none, so no class is measured: gfx942 /
-  gfx950 requests are declined `PERF_UNVERIFIED` unless a policy waives
-  unverified classes, and RDNA requests are served as `degraded`.
-* **Per-arch tables** (`dispatch/attention_bwd/gfx950_tuning.py`):
-  `GENERAL_TUNED_TABLE` (tuning key -> knobs), `GENERAL_PERF_STATUS` (class ->
-  status) and `DENSE_TUNED` (`(arch, dense key)` -> dense knobs) of gfx950,
-  empty until a key's winner passes the sweep's confirm stage. The routing
-  joins them (`routing.arch_tuned_policy` in `routed_policy`, and
-  `DENSE_BWD_TUNED`); with empty tables routing and plans are unchanged.
-  `dense_entries` / `general_entries` turn the sweep's emitted entries
-  (`--emit-dense-table`) into table entries, checking each one (the arch,
-  the key's shape, dense knobs that plan on the key) before it is added.
+  when the tree has it (this tree has none). Serving is functional only: the
+  shipped policy serves every request the predicate accepts and the plan
+  builds, on every declared target. The declines that remain are the
+  functional ones of 12.5 (scope, dtype, shape, layout, stride, range, the
+  resource gate, an undeclared feature group).
+* **Performance status is information.** Each class carries one of
+  `verified`, `unverified` (the default for a class with no entry) or
+  `below_baseline` (`AttnBwdPolicy.perf_status`); RDNA classes are `degraded`
+  (no performance claim). The plan records the status of its class
+  (`AttnBwdPlan.perf_status`) and the declaration publishes it per class
+  (12.6). It never changes the verdict, the route or the knobs: the same
+  request plans identically under any status. A policy that wants the old
+  claim discipline opts into `AttnBwdPolicy.perf_gate`: a `below_baseline`
+  class is declined `PERF_BELOW_BASELINE` and an `unverified` one
+  `PERF_UNVERIFIED` unless `waive_unverified` (off in the shipped policy;
+  RDNA is never declined on performance).
+* **Status source.** The per-arch status comes from the same gate-confirmed
+  bench results the tuned entries come from (clean A/A control, pruning-set
+  gate on, a confirm and not a screen), on the census cells the routed policy
+  serves on the class. A class is `below_baseline` when the confirmed winner of
+  one of its cells loses to the bar (the PyTorch-selected backend), and
+  `verified` when every such cell has a confirmed winner that does not and the
+  routed policy serves each of them with exactly the measured configuration.
+  Every other class is `unverified`: no confirmed cell, or a cell served with
+  a configuration other than its measured winner (an untuned key keeps the
+  defaults). The measurements themselves stay in the private record.
+* **Per-arch tables** (`dispatch/attention_bwd/gfx942_tuning.py`,
+  `gfx950_tuning.py`): `GENERAL_TUNED_TABLE` (tuning key -> knobs),
+  `GENERAL_PERF_STATUS` (general class -> status), `DENSE_TUNED`
+  (`(arch, dense key)` -> dense knobs) and `DENSE_PERF_STATUS` (dense class,
+  `(arch, "dense", *dense key)` -> status) of each arch; the status tables
+  list `verified` and `below_baseline` classes only. An
+  entry is a key whose winner passed the bench's confirm stage on every
+  measured cell of the key (clean A/A control, pruning-set gate on; a dense
+  entry also a paired win over the general winner), one configuration on all
+  of them. The routing joins them (`routing.ARCH_TUNING`,
+  `routing.arch_tuned_policy` in `routed_policy`, and `DENSE_BWD_TUNED`).
+  The fill bucket of a key is the measured one on the device (the requests
+  carried the device's `num_cus`), so a request without `num_cus` (fill
+  `unknown`) keeps the defaults.
+* **Entry check** (`dispatch/attention_bwd/tuned_tables.py`): every entry,
+  shipped or emitted by the sweep (`dense_entries` / `general_entries`), is
+  planned the way the routing consumes it on representative requests of its
+  key: for a general key, requests of its class and buckets that vary what
+  the key leaves free (head counts and group sizes of the head mode,
+  sequence lengths at both edges of the kv-tile bucket, batches and
+  `num_cus` at the edges of the fill bucket, with and without `num_xcds`,
+  both dense layouts, the band forms of the mask kind); for a dense key, its
+  shape over several batches with and without `num_cus` / `num_xcds`. Every
+  representative that plans without the entry must plan with it; the first
+  that does not raises with the plan's reason (an unknown knob, an illegal
+  value, a coupling, a `g_split` that does not divide every head group of
+  the class, mirror pairing at a fill edge that does not overfill the
+  device, an XCD remap without `num_xcds`).
 
 ### 9.4 Knob catalog
 
@@ -2048,6 +2102,10 @@ Runtime and aux values:
   `agpr_copy_budget`, and an SGPR watch level whose crossing is treated as a
   failure. A result counts only on the `llvm22` flavor with the production
   comgr vintage (`GATE_FLAVOR`, `GATE_COMGR_ROCM`); other toolchains skip.
+  The gate tests compile through `compile_or_skip`: a compile error skips
+  only where the loaded toolchain is not the gate's (another flavor, another
+  comgr, or a comgr without the target); on the gate's toolchain a kernel the
+  validator admits must compile, so the error fails the test.
   The production comgr is the torch wheel's bundled library. The library
   `conftest`, the compile cache's toolchain identity and the gate tests pin it
   by path (`ROCKE_COMGR_LIB`) without importing torch
@@ -2347,8 +2405,8 @@ check wins:
 | 21 | `RAGGED_FORMAT` | THD offsets not int32 / int64 `[B + 1]`; q-side or kv-side tensors not on one table; multiplier or token stride outside `[1, 2^31)`; a supplied `max_total_*` below 1 for a non-empty problem |
 | 22 | `EMPTY` | B, a head count, a sequence dim or D is 0 |
 | 23 | `INSTANCE_UNAVAILABLE` | the serving instance failed the resource gate |
-| 24 | `PERF_BELOW_BASELINE` | the request's performance class on its route is `below_baseline` |
-| 25 | `PERF_UNVERIFIED` | the class is `unverified` and the policy does not waive unverified classes |
+| 24 | `PERF_BELOW_BASELINE` | opt-in performance gate only (`AttnBwdPolicy.perf_gate`, off in the shipped policy): the request's performance class on its route is `below_baseline` |
+| 25 | `PERF_UNVERIFIED` | opt-in performance gate only: the class is `unverified` and the policy does not waive unverified classes |
 | 26 | `NOT_YET_DECLARED` | the request needs a functional feature group whose correctness gate has not passed |
 | - | `OK` | otherwise |
 
@@ -2373,6 +2431,13 @@ contract, the `workspace` formula, the `determinism` statement, the
 `perf_policy`, `perf` (one entry per (route, class) with its status), the
 `deferral_register` and `notes` (gfx1201: declared on its hardware run; its
 forward-chain tests skip because the forward probe shell has no gfx12 body).
+`perf_policy` states how the status is used: `gate` is `information_only`,
+with `unverified` and `below_baseline` both `served`, in the shipped policy,
+and `declines` under the opt-in performance gate. The kernels-level
+declaration reads the policy it is given (the shipped default has no status
+table, so every CDNA class reads `unverified`);
+`dispatch/attention_bwd/routing.attention_bwd_declaration` publishes it under
+the routed policy, with the per-arch general and dense-pack status of 9.3.
 
 Deferral register (`DEFERRAL_REGISTER`):
 

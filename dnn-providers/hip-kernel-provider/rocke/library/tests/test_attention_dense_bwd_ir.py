@@ -576,8 +576,6 @@ def test_zero_scratch_no_spills_and_lds_within_the_plan(arch, cid, over):
     no scratch, no spills, arch VGPR / AGPR budgets, occupancy >= 1, q-loop
     AGPR copies within the ceiling of the body tile, LDS within the plan."""
     pytest.importorskip("rocke.runtime.comgr")
-    from rocke.helpers.compile import compile_kernel
-
     from kernels.common.attention_bwd import attn_bwd_arch_facts, lds_plan
     from kernels.common.attention_dense_bwd_spec import validate_attn_dense_bwd_spec
 
@@ -585,6 +583,7 @@ def test_zero_scratch_no_spills_and_lds_within_the_plan(arch, cid, over):
         GATE_FLAVOR,
         comgr_is_production,
         comgr_version,
+        compile_or_skip,
         current_flavor,
         evaluate_resource_gate,
         find_objdump,
@@ -603,15 +602,12 @@ def test_zero_scratch_no_spills_and_lds_within_the_plan(arch, cid, over):
         )
     spec = _spec(arch, over)
     body = validate_attn_dense_bwd_spec(spec, arch)
-    try:
-        art = compile_kernel(
-            _builder(arch)(spec, arch=arch),
-            arch=arch,
-            capture_ir_text=False,
-            backend="python",
-        )
-    except Exception as exc:  # noqa: BLE001 - comgr cannot target this arch here
-        pytest.skip(f"comgr cannot compile for {arch}: {exc}")
+    art = compile_or_skip(
+        _builder(arch)(spec, arch=arch),
+        arch=arch,
+        capture_ir_text=False,
+        backend="python",
+    )
     facts = attn_bwd_arch_facts(arch)
     res = evaluate_resource_gate(
         art.hsaco, arch=arch, lds_capacity_bytes=facts.lds_capacity_bytes, spec=body
@@ -632,8 +628,6 @@ def test_dense_dq_resource_gate(arch, cid, over):
     budgets, occupancy, LDS within the dQ plan, no SGPR-margin warning, and
     with VGPR-form MFMA no AGPR read in a key loop."""
     pytest.importorskip("rocke.runtime.comgr")
-    from rocke.helpers.compile import compile_kernel
-
     from kernels.common.attention_bwd import attn_bwd_arch_facts
     from kernels.common.attention_bwd_dq import dq_lds_plan
     from kernels.common.attention_dense_bwd_dq import validate_attn_dense_bwd_dq_spec
@@ -642,6 +636,7 @@ def test_dense_dq_resource_gate(arch, cid, over):
         GATE_FLAVOR,
         comgr_is_production,
         comgr_version,
+        compile_or_skip,
         current_flavor,
         evaluate_resource_gate,
         find_objdump,
@@ -659,12 +654,9 @@ def test_dense_dq_resource_gate(arch, cid, over):
         )
     spec = _dq_spec(over)
     dq = validate_attn_dense_bwd_dq_spec(spec, arch)
-    try:
-        art = compile_kernel(
-            _dq_kernel(arch, over), arch=arch, capture_ir_text=False, backend="python"
-        )
-    except Exception as exc:  # noqa: BLE001 - comgr cannot target this arch here
-        pytest.skip(f"comgr cannot compile for {arch}: {exc}")
+    art = compile_or_skip(
+        _dq_kernel(arch, over), arch=arch, capture_ir_text=False, backend="python"
+    )
     facts = attn_bwd_arch_facts(arch)
     tile = {}
     if dq.agpr_alloc == (0, 0):

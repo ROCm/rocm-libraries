@@ -53,6 +53,7 @@ from kernels.common.attention_bwd import (
     validate_attn_bwd_spec,
 )
 from kernels.common._attention_bwd_frag import c_quad_transposable
+from kernels.common._attention_bwd_sched import SCHEDS
 from kernels.common._attention_bwd_body import BwdTileGeometry
 from kernels.common.attention_bwd_plan import (
     FEATURE_GROUPS,
@@ -338,6 +339,48 @@ def test_slab_carry_drops_the_per_step_products(arch):
     assert _body(a, spec.kernel_name()) == _body(b, ref.kernel_name())
 
 
+@pytest.mark.parametrize("sched", SCHEDS)
+@pytest.mark.parametrize("arch", ALL_ARCHS)
+def test_slab_carry_builds_with_every_schedule(arch, sched):
+    """slab_carry with every q-loop schedule the validator admits it with,
+    on every head size and both sequence modes: the main kernel builds. The
+    q loop carries the two slab offsets before the deferred dQ partial of
+    ``stage_table_atomics`` (its partial is read past the offsets: the
+    carried row and head of the partial are i32, the offsets i64). Emission
+    only: a resource refusal (RESOURCE_REFUSED) is bypassed."""
+    from unittest import mock
+
+    from kernels.common import attention_bwd as AB
+
+    built = 0
+    with mock.patch.object(AB, "resource_refusal", lambda s, a: None):
+        for d, dt in ((32, "fp16"), (64, "bf16"), (128, "bf16")):
+            for seq in ("batched", "thd"):
+                spec = AttnBwdSpec(
+                    head_size=d, dtype=dt, seq_mode=seq, slab_carry=True, sched=sched
+                )
+                try:
+                    validate_attn_bwd_spec(spec, arch)
+                except ValueError as exc:
+                    assert "slab_carry" not in str(exc), (d, seq, str(exc))
+                    continue
+                kernel = build_attn_bwd_main(spec, arch=arch)
+                built += 1
+                if d != 64:
+                    continue
+                ir = lower(kernel, arch=arch)
+                assert "%bwd_qoq = phi i64" in ir and "%bwd_qod = phi i64" in ir
+                deferred = "%bwd_qdqrow = phi i32" in ir
+                assert deferred == (sched == "stage_table_atomics"), (seq, sched)
+                if deferred:
+                    assert "%bwd_qdqhead = phi i32" in ir
+    if sched in ("none", "stage_table", "stage_table_atomics") and arch in (
+        "gfx942",
+        "gfx950",
+    ):
+        assert built == 6, built
+
+
 def test_narrow_width_follows_the_request():
     base = dict(b=2, h_q=4, h_k=4, h_v=4, s_q=40, s_kv=40, d_qk=64, d_v=64)
 
@@ -446,6 +489,10 @@ GATE_VARIANTS = {
     "slab_carry_edge": (
         {"slab_carry": True, "edge_tiles": True}, None, {}, {"edge_tiles": True},
     ),
+    "slab_carry_sta": (
+        {"slab_carry": True, "sched": "stage_table_atomics"}, None, {},
+        {"sched": "stage_table_atomics"},
+    ),
     "narrow4": ({"narrow_vec": 4}, None, {"stage_vec": 1}, {}),
 }  # fmt: skip
 GATE_HEADS = (64, 128)
@@ -480,7 +527,8 @@ def test_resource_gate_of_the_new_values(arch, variant):
     the validator admits passes outright (a row that fails is refused
     exactly, RESOURCE_REFUSED rows ``access`` of the refusal test, and its
     refusal is the lever's own: the reference row without the lever is
-    legal). The slice reduce kernel passes the gate."""
+    legal, or refused itself: a schedule value's own refusal). The slice
+    reduce kernel passes the gate."""
     pytest.importorskip("rocke.runtime.comgr")
     from rocke.helpers.compile import compile_kernel
 
@@ -526,7 +574,11 @@ def test_resource_gate_of_the_new_values(arch, variant):
     for d in GATE_HEADS:
         for dt in GATE_DTYPES:
             ref = gate_spec(variant, d, dt, reference=True)
-            validate_attn_bwd_spec(ref, arch)  # the reference row is legal
+            try:
+                validate_attn_bwd_spec(ref, arch)  # the reference row is legal
+            except ValueError as exc:  # or refused for its own resources
+                if "RESOURCE_REFUSED" not in str(exc):
+                    raise
             try:
                 validate_attn_bwd_spec(gate_spec(variant, d, dt), arch)
             except ValueError as exc:
@@ -580,6 +632,12 @@ LEVERS = {
     ),
     "slab_carry_head_outer_edge": (
         {"slab_carry": True, "step_order": "head_outer", "edge_tiles": True},
+        None,
+    ),
+    # the deferred dQ partial of stage_table_atomics carried with the slab
+    # offsets (atomic dQ: the schedule refuses split dQ)
+    "slab_carry_sta": (
+        {"slab_carry": True, "sched": "stage_table_atomics"},
         None,
     ),
     "cell_vec4": (
@@ -649,12 +707,18 @@ def test_lever_is_bitwise(case_id, lever, config):
 
     case = _case(case_id)
     knobs, _ = LEVERS[lever]
-    split = ARCH in SPLIT_DQ_ARCHS
+    split = ARCH in SPLIT_DQ_ARCHS and knobs.get("sched") != "stage_table_atomics"
     base_knobs = {k: v for k, v in knobs.items() if k not in _LEVER_KEYS}
     if split:
         base_knobs["dq_mode"] = "split"
         knobs = {**knobs, "dq_mode": "split"}
-    spec = plan_case(case, arch=ARCH, config=config, overrides=base_knobs).specs["main"]
+    try:
+        plan = plan_case(case, arch=ARCH, config=config, overrides=base_knobs)
+    except ValueError as exc:  # the reference itself (e.g. a schedule value)
+        if "RESOURCE_REFUSED" not in str(exc):
+            raise
+        pytest.skip(f"the reference {base_knobs} is refused: {exc}")
+    spec = plan.specs["main"]
     try:
         validate_attn_bwd_spec(
             dataclasses.replace(

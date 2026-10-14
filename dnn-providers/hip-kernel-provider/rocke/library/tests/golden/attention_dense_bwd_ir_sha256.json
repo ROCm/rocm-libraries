@@ -279,36 +279,36 @@
           "sha256": "5abce3ffa263fa7b447c07cc29c31ab40ca5d9c0673bce14cc3d27f16101ad67"
         },
         "gfx950/ring_dma1_bf16_d128": {
-          "bytes": 306450,
-          "sha256": "170be5bc83a014c498a4166caadbe9810aec6d519f599da4425e20979901c796"
+          "bytes": 310793,
+          "sha256": "f2575e68121ecc8b1edbacc97672ec7c2ec06200254052fce92ce6a3b1060b58"
         },
         "gfx950/ring_dma2_bf16_d128": {
-          "bytes": 338562,
-          "sha256": "00d5386067376435e64012a50aa0376199681e854e40f94b71dcbf64ea60ea2e"
+          "bytes": 347216,
+          "sha256": "f3c655383adfbcffca66b432ab9cea65d489e56c1d140ba152e3d6ff7b6984c1"
         },
         "gfx950/ring_dma2_clamp_ragged_bf16_d128": {
-          "bytes": 343343,
-          "sha256": "a8f5a0d41d38c068f0453cd5458bd81aee25c63e5ba8cc540a2bbdbc0f3d7a11"
+          "bytes": 352001,
+          "sha256": "69094fe81f7b3de467aba2af8c19bd0749af928cf515a516e43bb34ff4a2daad"
         },
         "gfx950/ring_dma2_persist_bf16_d128": {
-          "bytes": 339879,
-          "sha256": "f2d1e61a8598b8edb6d5ed3c9194c4299fe8fe0ba2b2de9807d4672d07a7f745"
+          "bytes": 348543,
+          "sha256": "e4d30819e06bf3f491c3bddab39bd42f13f4cc83b202591c9484a4dce6b320f8"
         },
         "gfx950/ring_dma2_ragged_br_fp16_d64_bhsd": {
-          "bytes": 343628,
-          "sha256": "024b3dedad52a4895d5507464c1429c99e377020b9486436f2aca2c2e66803e1"
+          "bytes": 349408,
+          "sha256": "61553701067d64d82f1bae3a98cca8f65460a3b59e56149af68ce53aeacd6216"
         },
         "gfx950/ring_dma2_winA_atomic_bf16_d128": {
-          "bytes": 223948,
-          "sha256": "1afab0c17e2802e6f465d26a2a2393a93b3e42be4f25869ba384cfa293d16588"
+          "bytes": 229116,
+          "sha256": "7df44fbed3a7fab3f92ff518c4b6eb442d5942f747c8fd265de7e68812654246"
         },
         "gfx950/ring_dma2_winA_stats_bf16_d128": {
-          "bytes": 555335,
-          "sha256": "e12ead76ffc8dc74539c29ad67e091b02c58b7986c53843ad6d288b17e585585"
+          "bytes": 571093,
+          "sha256": "bf950e4242a0157a958c086a64eb52f352dd55829d93423c30db3e6e03edfdd5"
         },
         "gfx950/ring_dma3_bf16_d128": {
-          "bytes": 366063,
-          "sha256": "cee53bc9ae70c807f37fa96cfe50ddeeb8ce242141569c0f0f2fb9bca972e89f"
+          "bytes": 379079,
+          "sha256": "bbcc909b692a5dc553ee8d85e566456552e1464d386c865b17fc7ca8f21ad91e"
         },
         "gfx950/ring_vgpr2_atomic_bf16_d128": {
           "bytes": 282683,
@@ -343,16 +343,16 @@
           "sha256": "93f2cbda1d5886a2f2d95f008e397dcea7a5e94cb745868e9da63de54a8ae143"
         },
         "gfx950/split_ring_dma2_g2_winA_bf16_d128": {
-          "bytes": 185236,
-          "sha256": "ff482c73612b1315204dcc604ca76d87cb95b5a28c8a1b661778d17d6443acaa"
+          "bytes": 190400,
+          "sha256": "e2528e88b46fc6b5ba940ad5d2e50712203b52a1105dab4f0792aaa86d53819a"
         },
         "gfx950/split_ring_dma2_w4_none_bf16_d64": {
-          "bytes": 157697,
-          "sha256": "82dec3ed174fbaae2ab0e3b0cc28bbce186acf2d9564802782ed7595955ba78b"
+          "bytes": 160589,
+          "sha256": "3be085467e31607d3ebdf3620f34d009a9e08ff35025e07aed8a5bc635662d17"
         },
         "gfx950/split_ring_dma2_winA_bf16_d128": {
-          "bytes": 434338,
-          "sha256": "6b7c66e0400e97a782c71772ec55320dceb346950d26a98260252e8e63ca3ab0"
+          "bytes": 450126,
+          "sha256": "af9306820d15ca5c763dccc770605f067b7a8e0a426da791d64a649029438a8e"
         },
         "gfx950/split_ring_vgpr2_atomic_bf16_d128": {
           "bytes": 220946,
@@ -659,36 +659,36 @@
           "sha256": "882d651430ef61df09cd722a120d4e2950e0080d27942f78de80db307d726579"
         },
         "gfx950/ring_dma1_bf16_d128": {
-          "bytes": 306546,
-          "sha256": "23e6f23ccb5464f0eba85db45164de222a9f92cc414f7d4a7d426c9c1dd8bdee"
+          "bytes": 310889,
+          "sha256": "aecfe8b52c78232795a19fa884430c327a412bf25f820b0055645078a661742d"
         },
         "gfx950/ring_dma2_bf16_d128": {
-          "bytes": 338658,
-          "sha256": "f160d1eaed2f545ebc9ea9746c17a30c9e8d8403a120221c13b4d8c0a613ddf9"
+          "bytes": 347312,
+          "sha256": "f2a8021afd188dbbacebbde6f22c8c8a118eeac403c1870bf1471abf14a84e86"
         },
         "gfx950/ring_dma2_clamp_ragged_bf16_d128": {
-          "bytes": 343350,
-          "sha256": "222f08e41328a63980a44d4f852b3690ee1c6aed72e672d7716a97048cb59777"
+          "bytes": 352008,
+          "sha256": "7e498356f8cb5fbda04d7e07ef26ecff26c7995add0d43fb1a468ec94ae462bd"
         },
         "gfx950/ring_dma2_persist_bf16_d128": {
-          "bytes": 339975,
-          "sha256": "9358e27b996eaa7f78fa74a2221d1407e928df8c9e94ce4bbb2ae12858de891e"
+          "bytes": 348639,
+          "sha256": "4944829dee98d5b12c2d2233b727be564cbf0052014991a74cf4fb4e085a1579"
         },
         "gfx950/ring_dma2_ragged_br_fp16_d64_bhsd": {
-          "bytes": 343724,
-          "sha256": "d41daf1851a81dcb1c49a9b9bc672348626c97a4ebad3e10d0978adadeee594e"
+          "bytes": 349504,
+          "sha256": "0140c161645ade5aa0db03a04910069754457a820d7c91ecfc114e39da183060"
         },
         "gfx950/ring_dma2_winA_atomic_bf16_d128": {
-          "bytes": 224044,
-          "sha256": "3dab91ba354a02bf239379d94d9c667dd4918420ac53894f0954da7b34df4460"
+          "bytes": 229212,
+          "sha256": "b2facda40e639027a8d8cd54246e56f75fa983f5636d3378838b97302e32997b"
         },
         "gfx950/ring_dma2_winA_stats_bf16_d128": {
-          "bytes": 555435,
-          "sha256": "2a5cf79c23cafd4e5332f4d616f3d60926e0ce0bba5215b7af270988813337b2"
+          "bytes": 571193,
+          "sha256": "bf07599c6f36144279d1331ca5241db45b9cf0bfcc999947a554f11d894462da"
         },
         "gfx950/ring_dma3_bf16_d128": {
-          "bytes": 366159,
-          "sha256": "b4e39ba1ca72fa83e321a2d2f39edd4bed9073c09e4cc36d940a851499085524"
+          "bytes": 379175,
+          "sha256": "10365e521a630672e6dcc5e3dc1ecb8d4da1d7177ce6a8db1ad7ce498df9c6f8"
         },
         "gfx950/ring_vgpr2_atomic_bf16_d128": {
           "bytes": 282779,
@@ -723,16 +723,16 @@
           "sha256": "0827ae72bf1f6c7499f4f07f6a9e241f9cf67c2e4fa6794fa777676bae065075"
         },
         "gfx950/split_ring_dma2_g2_winA_bf16_d128": {
-          "bytes": 185332,
-          "sha256": "e2e0b19918e504e1dd7699052d316b60bd7aceb12284aaf612ed5c6562f33134"
+          "bytes": 190496,
+          "sha256": "8f17247b6604a335e625f8387c48fd6745a2a0eef1c588016aa74351f4481e8e"
         },
         "gfx950/split_ring_dma2_w4_none_bf16_d64": {
-          "bytes": 157793,
-          "sha256": "7849b70a5c16eefd5a793f06349807cdec72866d190ced957493b66ae68d87e8"
+          "bytes": 160685,
+          "sha256": "bc96c323064a3d3e01f4c0947b68245e172b32c5a5ffc40ff68c835d258d674b"
         },
         "gfx950/split_ring_dma2_winA_bf16_d128": {
-          "bytes": 434434,
-          "sha256": "154c6652b21720e533b3092fdaa18aa4b858ebd5751754c7dea49649a39f0c92"
+          "bytes": 450222,
+          "sha256": "ecb039101151292f826850af42b78667fb9fcb7013557f728d9e813ba59fe009"
         },
         "gfx950/split_ring_vgpr2_atomic_bf16_d128": {
           "bytes": 221042,
@@ -1039,36 +1039,36 @@
           "sha256": "e848aa6db78eb2f294883d04817ec6d2e4b88a4ea3aa5905e104a8c66c938941"
         },
         "gfx950/ring_dma1_bf16_d128": {
-          "bytes": 306550,
-          "sha256": "312f8541aeb1a3ce70ec18083799f7acd7659809bce14990c2a48e39eecbc642"
+          "bytes": 310893,
+          "sha256": "4d6029da0562233e60647d51ddde218977f60c59a4ca24a87234fd83fa87a740"
         },
         "gfx950/ring_dma2_bf16_d128": {
-          "bytes": 338662,
-          "sha256": "0ac680303ffd973341cb88b382f24cd1d59e40f1bfd7e121d5537e4ad676a230"
+          "bytes": 347316,
+          "sha256": "f0496ebf1ac9cfe6acb8f0fded0c950137d7e03fef5426cd9b7b511956bfc476"
         },
         "gfx950/ring_dma2_clamp_ragged_bf16_d128": {
-          "bytes": 343354,
-          "sha256": "0e3106b1ed93ae9407727fa68cec435af0c22367d0fe775180ebf6025d208186"
+          "bytes": 352012,
+          "sha256": "3b6f10e3dff8a10e97590c4d588a54a221f9b8aaf7d5b25e624dd9bc318b62ba"
         },
         "gfx950/ring_dma2_persist_bf16_d128": {
-          "bytes": 339979,
-          "sha256": "7996c04383bd6ac1b13fe89a370799276af24542fca4378e768a82162c823013"
+          "bytes": 348643,
+          "sha256": "b47c72ffe78ba5961ef495b6c1ae18909d03ef131b9a240727e3afeca350a9e0"
         },
         "gfx950/ring_dma2_ragged_br_fp16_d64_bhsd": {
-          "bytes": 343728,
-          "sha256": "d9ed3bc881ce0b067797b28a150eb32a3d5fa5ead92e2ec970431fd387ef0246"
+          "bytes": 349508,
+          "sha256": "95f39cea39bd7f76164a399d1ba2e784332c8031d45f5c1328544854f4707d69"
         },
         "gfx950/ring_dma2_winA_atomic_bf16_d128": {
-          "bytes": 224048,
-          "sha256": "ae6d929055972f1ede3f70de04b60d2b60d3b3f6df90544323a397db65606507"
+          "bytes": 229216,
+          "sha256": "4deaf9c3f3b8570a1e1b9e89780ebbbcf82d7756aacf7b1dc40f91af0944aa55"
         },
         "gfx950/ring_dma2_winA_stats_bf16_d128": {
-          "bytes": 555439,
-          "sha256": "8373f74b16ebdc0626b089abb9c3c4cf30307df5d61d2430c15d89ea60b4b46b"
+          "bytes": 571197,
+          "sha256": "eb7cfb62f8f9761f96d3a5c14bf7afd3135f1d6d4f62cc4fa0e1f124f2687dc1"
         },
         "gfx950/ring_dma3_bf16_d128": {
-          "bytes": 366163,
-          "sha256": "e913e9e0ddd9a495edb9f67665995061845cd4b5ceb29124c2fa88403135655e"
+          "bytes": 379179,
+          "sha256": "49e33f4712c1c6bfca6f723afc14ba5f99e361668b1e5815bdfdcd8b4a12ac6a"
         },
         "gfx950/ring_vgpr2_atomic_bf16_d128": {
           "bytes": 282783,
@@ -1103,16 +1103,16 @@
           "sha256": "ca9fccbd624ecb6fb43f95c3cc0fc850cc8a13b1f463e87b138275f1d19b77c0"
         },
         "gfx950/split_ring_dma2_g2_winA_bf16_d128": {
-          "bytes": 185336,
-          "sha256": "451070df1c08ad01d0003829f4dc3967ea8135fcd37842a01a3f9964c2e35e4d"
+          "bytes": 190500,
+          "sha256": "145e04d9c308c53729d2f87da3f088b0328f3fe38c10c97a09e07ce129c85d94"
         },
         "gfx950/split_ring_dma2_w4_none_bf16_d64": {
-          "bytes": 157797,
-          "sha256": "7283e7abc5db19bb53ee22e0e54702780fc3f5e89aa8aeb93909291b8f2f2acc"
+          "bytes": 160689,
+          "sha256": "9d41756e421806d49ec9b5a946c1e2c0702b7e079a9df8cc3f8688de7d617f66"
         },
         "gfx950/split_ring_dma2_winA_bf16_d128": {
-          "bytes": 434438,
-          "sha256": "df91e8cfb567c8c31e32763690204f95f37773fdd55486c5b562a0ec251e9c3d"
+          "bytes": 450226,
+          "sha256": "96de103869700f161633422b7526bd3e3f1ceb5a2f77343d6daf019c89677cb6"
         },
         "gfx950/split_ring_vgpr2_atomic_bf16_d128": {
           "bytes": 221046,

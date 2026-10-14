@@ -2986,7 +2986,7 @@ def _kv_tile(
                 out, nxt_staged = step.run_q_step(
                     b, acc_of(cur), None, None, qt, h, k0, edge=edge,
                     packed=here.packed, staged=staged, next_loads=next_loads,
-                    pending=None if pend is None else pend.from_flat(cur[body_end:]),
+                    pending=None if pend is None else pend.from_flat(cur[body_end + n_carry :]),
                 )  # fmt: skip
                 pend_yields = ()
                 if pend is not None:  # stage_table_atomics: (staged, pending)
@@ -3023,7 +3023,7 @@ def _kv_tile(
                 out = step.run_q_step(
                     b, acc_of(cur), here.q_slab, here.do_slab, qt, h, k0, edge=edge,
                     packed=here.packed, ring=merged, prefetch=pf,
-                    pending=None if pend is None else pend.from_flat(cur[body_end:]),
+                    pending=None if pend is None else pend.from_flat(cur[body_end + n_carry :]),
                 )  # fmt: skip
                 pf_yields = pf.yields if pf is not None else ()
                 pend_yields = ()

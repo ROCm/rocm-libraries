@@ -153,13 +153,15 @@ _TRIGGERS = {
         "gfx942",
         dataclasses.replace(
             FULL,
+            perf_gate=True,
             perf_status={attn_bwd_perf_class(_req(), "gfx942"): "below_baseline"},
         ),
     ),
+    # the performance codes need the opt-in performance gate
     "PERF_UNVERIFIED": (
         _req(),
         "gfx942",
-        AttnBwdPolicy(declared_groups=frozenset(FEATURE_GROUPS)),
+        AttnBwdPolicy(declared_groups=frozenset(FEATURE_GROUPS), perf_gate=True),
     ),
     "NOT_YET_DECLARED": (
         # stage_vec = 1 under a policy that has not declared narrow_access
@@ -292,10 +294,10 @@ def test_narrow_access_rows_accept_with_stage_vec_1(name):
         assert main.stage_vec == 1
         assert {plan.specs[s].stage_vec for s in ("prep", "convert")} == {1}
         assert all("_sv1" in step.kernel for step in plan.launches)
-    # the shipped policy declares narrow access: never a stride decline
-    assert attn_bwd_support(req, "gfx1151").ok
-    assert attn_bwd_support(req, "gfx942").code == "PERF_UNVERIFIED"
-    assert attn_bwd_support(req, "gfx950").code == "PERF_UNVERIFIED"
+    # the shipped policy declares narrow access and serves every accepted
+    # request whatever its performance status: never a stride decline
+    for arch in ("gfx1151", "gfx942", "gfx950"):
+        assert attn_bwd_support(req, arch).ok
 
 
 def test_wide_access_needs_every_used_stride_a_multiple_of_8():
@@ -768,8 +770,8 @@ def test_shipped_policy_declares_the_gated_groups():
     # dK / dV), the padding group (per-batch SEQ_LEN counts) and the ragged
     # group (THD offsets) and the narrow-access group (stage_vec = 1: any
     # B/H/S stride, any element-aligned base) have passed their correctness
-    # gates. Nothing is measured, so CDNA declines on performance; RDNA (never
-    # declined on performance) serves exactly the cells of the declared groups.
+    # gates. The performance status is information only, so every target
+    # serves exactly the cells of the declared groups.
     gated = frozenset(
         {"base", "masks_and_stats", "grouped_heads", "split_kv_heads", "padding"}
         | {"ragged", "narrow_access"}
@@ -778,12 +780,12 @@ def test_shipped_policy_declares_the_gated_groups():
     assert SHIPPED_DECLARED_GROUPS == gated
     for case in _CASES:
         req = request_from_case(case)
-        assert attn_bwd_support(req, "gfx942").code == "PERF_UNVERIFIED"
-        v = attn_bwd_support(req, "gfx1151")
-        if attn_bwd_feature_groups(req) <= gated:
-            assert v.ok, (case.id, v)
-        else:
-            assert v.code == "NOT_YET_DECLARED", (case.id, v)
+        for arch in ("gfx942", "gfx950", "gfx1151"):
+            v = attn_bwd_support(req, arch)
+            if attn_bwd_feature_groups(req) <= gated:
+                assert v.ok, (case.id, arch, v)
+            else:
+                assert v.code == "NOT_YET_DECLARED", (case.id, arch, v)
 
 
 # ---------------------------------------------------------------------------
@@ -1339,7 +1341,17 @@ def test_declaration_shape_and_serialisable():
     )
     assert attn_bwd_declaration("gfx90a")["status"] == "unsupported"
     d = attn_bwd_declaration("gfx942")
-    assert d["perf_policy"]["unverified"] == "declined"
+    assert d["perf_policy"] == {
+        "gate": "information_only",
+        "unverified": "served",
+        "below_baseline": "served",
+    }
+    gated = dataclasses.replace(FULL, perf_gate=True)
+    assert attn_bwd_declaration("gfx942", policy=gated)["perf_policy"] == {
+        "gate": "declines",
+        "unverified": "waived",
+        "below_baseline": "declined",
+    }
     assert {e["perf"] for e in d["perf"]} == {"unverified"}
     assert {e["perf"] for e in attn_bwd_declaration("gfx1151")["perf"]} == {"degraded"}
     assert {e["perf"] for e in attn_bwd_declaration("gfx1201")["perf"]} == {"degraded"}
@@ -1413,11 +1425,12 @@ def test_declaration_agrees_with_predicate():
     for r in reqs:
         cls = attn_bwd_perf_class(r, "gfx942")
         statuses[cls] = rng.choice(("verified", "below_baseline", "unverified"))
-    for waive in (False, True):
+    for gate, waive in ((False, False), (True, False), (True, True)):
         policy = AttnBwdPolicy(
             declared_groups=frozenset(FEATURE_GROUPS),
             waive_unverified=waive,
             perf_status=statuses,
+            perf_gate=gate,
         )
         decl = attn_bwd_declaration("gfx942", policy=policy)
         table = {
@@ -1442,12 +1455,14 @@ def test_declaration_agrees_with_predicate():
             assert cls in table
             status = table[cls]
             v = attn_bwd_support(r, "gfx942", policy=policy)
-            if status == "below_baseline":
+            if gate and status == "below_baseline":
                 assert v.code == "PERF_BELOW_BASELINE"
-            elif status == "unverified" and not waive:
+            elif gate and status == "unverified" and not waive:
                 assert v.code == "PERF_UNVERIFIED"
             else:
                 assert v.ok, (r, v)
+                plan = attn_bwd_plan(r, "gfx942", policy=policy)
+                assert plan.perf_status == status
 
 
 def test_declared_feature_groups_track_the_policy():

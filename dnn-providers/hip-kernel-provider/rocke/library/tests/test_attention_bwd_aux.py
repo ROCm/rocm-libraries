@@ -390,11 +390,13 @@ def test_shipped_aux_instances_have_zero_scratch_and_spills(arch):
     stage_vec (8 and the narrow 1) x workspace layout, compiled for ``arch``
     (cross-compiled on any host with comgr; valid on llvm22 only)."""
     pytest.importorskip("rocke.runtime.comgr")
-    from rocke.helpers.compile import compile_kernel
-
     from kernels.common.attention_bwd import attn_bwd_arch_facts
 
-    from ._attention_bwd_resources import evaluate_resource_gate, pin_production_comgr
+    from ._attention_bwd_resources import (
+        compile_or_skip,
+        evaluate_resource_gate,
+        pin_production_comgr,
+    )
 
     pin_production_comgr()  # torch's bundled comgr, by path; torch not imported
     facts = attn_bwd_arch_facts(arch)
@@ -406,15 +408,12 @@ def test_shipped_aux_instances_have_zero_scratch_and_spills(arch):
         spec = _spec_for(
             stage, head_size=D, dtype=dt, seq_mode=sm, stage_vec=sv, ws_layout=lay
         )
-        try:
-            art = compile_kernel(
-                BUILDERS[stage](spec, arch=arch),
-                arch=arch,
-                capture_ir_text=False,
-                backend="python",
-            )
-        except Exception as exc:  # noqa: BLE001 - comgr cannot target this arch here
-            pytest.skip(f"comgr cannot compile for {arch}: {exc}")
+        art = compile_or_skip(
+            BUILDERS[stage](spec, arch=arch),
+            arch=arch,
+            capture_ir_text=False,
+            backend="python",
+        )
         res = evaluate_resource_gate(
             art.hsaco, arch=arch, lds_capacity_bytes=facts.lds_capacity_bytes
         )
@@ -529,11 +528,13 @@ def test_aux_tuning_instances_have_zero_scratch_and_spills(arch):
     ``convert_vec`` with the default, 2x and 4x rows per CTA, and prep at 2x /
     4x rows (d32 / d64 / d128, both ``stage_vec``, batched and THD)."""
     pytest.importorskip("rocke.runtime.comgr")
-    from rocke.helpers.compile import compile_kernel
-
     from kernels.common.attention_bwd import attn_bwd_arch_facts
 
-    from ._attention_bwd_resources import evaluate_resource_gate, pin_production_comgr
+    from ._attention_bwd_resources import (
+        compile_or_skip,
+        evaluate_resource_gate,
+        pin_production_comgr,
+    )
 
     pin_production_comgr()  # torch's bundled comgr, by path; torch not imported
     facts = attn_bwd_arch_facts(arch)
@@ -551,15 +552,12 @@ def test_aux_tuning_instances_have_zero_scratch_and_spills(arch):
             head_size=D, seq_mode=sm, stage_vec=sv, convert_vec=v,
             rows_per_cta=None if x == 1 else rows,
         )  # fmt: skip
-        try:
-            art = compile_kernel(
-                BUILDERS[stage](spec, arch=arch),
-                arch=arch,
-                capture_ir_text=False,
-                backend="python",
-            )
-        except Exception as exc:  # noqa: BLE001 - comgr cannot target this arch here
-            pytest.skip(f"comgr cannot compile for {arch}: {exc}")
+        art = compile_or_skip(
+            BUILDERS[stage](spec, arch=arch),
+            arch=arch,
+            capture_ir_text=False,
+            backend="python",
+        )
         res = evaluate_resource_gate(
             art.hsaco, arch=arch, lds_capacity_bytes=facts.lds_capacity_bytes
         )
@@ -690,11 +688,13 @@ def test_worklist_prep_instances_have_zero_scratch_and_spills(arch, D):
     """The resource gate on the work-list prep (per head size: fp16 / bf16,
     both ``stage_vec``, both workspace layouts, default and 2x rows)."""
     pytest.importorskip("rocke.runtime.comgr")
-    from rocke.helpers.compile import compile_kernel
-
     from kernels.common.attention_bwd import attn_bwd_arch_facts
 
-    from ._attention_bwd_resources import evaluate_resource_gate, pin_production_comgr
+    from ._attention_bwd_resources import (
+        compile_or_skip,
+        evaluate_resource_gate,
+        pin_production_comgr,
+    )
 
     pin_production_comgr()  # torch's bundled comgr, by path; torch not imported
     facts = attn_bwd_arch_facts(arch)
@@ -706,15 +706,12 @@ def test_worklist_prep_instances_have_zero_scratch_and_spills(arch, D):
         if x > 1:
             rows = X.attn_bwd_aux_rows_per_cta(spec, arch=arch) * x
             spec = dataclasses.replace(spec, rows_per_cta=rows)
-        try:
-            art = compile_kernel(
-                X.build_attn_bwd_prep(spec, arch=arch),
-                arch=arch,
-                capture_ir_text=False,
-                backend="python",
-            )
-        except Exception as exc:  # noqa: BLE001 - comgr cannot target this arch here
-            pytest.skip(f"comgr cannot compile for {arch}: {exc}")
+        art = compile_or_skip(
+            X.build_attn_bwd_prep(spec, arch=arch),
+            arch=arch,
+            capture_ir_text=False,
+            backend="python",
+        )
         res = evaluate_resource_gate(
             art.hsaco, arch=arch, lds_capacity_bytes=facts.lds_capacity_bytes
         )

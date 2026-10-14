@@ -748,6 +748,64 @@ def current_flavor() -> str:
         return os.environ.get("ROCKE_LLVM_FLAVOR", "unknown")
 
 
+def comgr_targets() -> frozenset[str] | None:
+    """The processors (``gfx950``, ...) the loaded comgr library has an ISA
+    for (None: the library cannot be asked)."""
+    try:
+        import ctypes
+
+        from rocke.runtime import comgr as _comgr
+
+        lib = _comgr._resolve_lib()
+        count = ctypes.c_size_t()
+        if lib.amd_comgr_get_isa_count(ctypes.byref(count)) != 0:
+            return None
+        out = set()
+        for i in range(count.value):
+            name = ctypes.c_char_p()
+            if lib.amd_comgr_get_isa_name(ctypes.c_size_t(i), ctypes.byref(name)):
+                return None
+            out.add(name.value.decode().rsplit("-", 1)[-1].split(":")[0])
+        return frozenset(out)
+    except Exception:  # noqa: BLE001 - unknown, never fatal
+        return None
+
+
+def gate_toolchain_gap(arch: str) -> str | None:
+    """Why the loaded toolchain is not the gate's for ``arch`` (None: it is:
+    the ``GATE_FLAVOR`` flavor and the production comgr, with a target for
+    ``arch``)."""
+    flavor, comgr = current_flavor(), comgr_version()
+    if flavor != GATE_FLAVOR:
+        return f"flavor {flavor}"
+    if not comgr_is_production(comgr):
+        return f"comgr {comgr}"
+    targets = comgr_targets()
+    if targets is not None and arch not in targets:
+        return f"comgr {comgr} has no {arch} target"
+    return None
+
+
+def compile_or_skip(kernel: Any, *, arch: str, **kw: Any) -> Any:
+    """``compile_kernel(kernel, arch=arch, **kw)`` for a test that compiles.
+
+    A compile error skips the test only where the loaded toolchain is not the
+    gate's (:func:`gate_toolchain_gap`). On the gate's toolchain (the
+    production comgr, ``llvm22``) a kernel the validator admits must compile,
+    so the error is raised and fails the test.
+    """
+    import pytest
+    from rocke.helpers.compile import compile_kernel
+
+    try:
+        return compile_kernel(kernel, arch=arch, **kw)
+    except Exception as exc:  # noqa: BLE001 - a defect unless the toolchain differs
+        gap = gate_toolchain_gap(arch)
+        if gap is None:
+            raise
+        pytest.skip(f"comgr cannot compile for {arch} ({gap}): {exc}")
+
+
 # --------------------------------------------------------------------------- gate
 @dataclass(frozen=True)
 class ResourceGateResult:

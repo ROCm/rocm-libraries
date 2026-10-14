@@ -306,9 +306,8 @@ def test_mirror_resource_gate(row):
     """The resource gate (production comgr) passes for the paired kernel and
     its one-tile twin: no failure and no crossed SGPR watch level."""
     pytest.importorskip("rocke.runtime.comgr")
-    from rocke.helpers.compile import compile_kernel
-
     from ._attention_bwd_resources import (
+        compile_or_skip,
         disassemble,
         evaluate_resource_gate,
         find_objdump,
@@ -323,13 +322,10 @@ def test_mirror_resource_gate(row):
     facts = attn_bwd_arch_facts(arch)
     for s in (spec, dataclasses.replace(spec, lb_mirror=False)):
         r = validate_attn_bwd_spec(s, arch)
-        try:
-            art = compile_kernel(
-                build_attn_bwd_main(s, arch=arch), arch=arch, capture_ir_text=False,
-                backend="python",
-            )  # fmt: skip
-        except Exception as exc:  # noqa: BLE001 - comgr cannot target this arch
-            pytest.skip(f"comgr cannot compile for {arch}: {exc}")
+        art = compile_or_skip(
+            build_attn_bwd_main(s, arch=arch), arch=arch, capture_ir_text=False,
+            backend="python",
+        )  # fmt: skip
         isa = disassemble(art.hsaco, arch=arch)
         res = evaluate_resource_gate(
             art.hsaco, arch=arch, lds_capacity_bytes=facts.lds_capacity_bytes, spec=r,

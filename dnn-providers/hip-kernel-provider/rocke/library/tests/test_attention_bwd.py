@@ -893,7 +893,7 @@ def test_accepted_agpr_reservations_compile(arch):
     default d64 tile and a four-wave tile compiles (the rule matches the
     backend; a recorded resource-gate failure still compiles)."""
     pytest.importorskip("rocke.runtime.comgr")
-    from rocke.helpers.compile import compile_kernel
+    from ._attention_bwd_resources import compile_or_skip
 
     tiles = (
         {},
@@ -907,15 +907,10 @@ def test_accepted_agpr_reservations_compile(arch):
                 _structural(spec, arch)
             except ValueError:
                 continue
-            try:
-                compile_kernel(
-                    _build(spec, arch), arch=arch,
-                    capture_ir_text=False, backend="python",
-                )  # fmt: skip
-            except Exception as exc:  # noqa: BLE001
-                if built == 0:  # the first spec is a known-good reservation
-                    pytest.skip(f"comgr cannot compile for {arch}: {exc}")
-                raise
+            compile_or_skip(
+                _build(spec, arch), arch=arch,
+                capture_ir_text=False, backend="python",
+            )  # fmt: skip
             built += 1
     assert built >= 5
 

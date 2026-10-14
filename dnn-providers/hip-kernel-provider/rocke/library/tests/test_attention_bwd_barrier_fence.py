@@ -205,14 +205,11 @@ def test_checker_accepts_the_ir_order_and_flags_a_moved_load():
 # --------------------------------------------------------------------------- ISA
 def _compile_isa(kernel, arch):
     pytest.importorskip("rocke.runtime.comgr")
-    from rocke.helpers.compile import compile_kernel
+    from ._attention_bwd_resources import compile_or_skip
 
     if R.find_objdump() is None:
         pytest.skip("llvm-objdump not found")
-    try:
-        art = compile_kernel(kernel, arch=arch, backend="python")
-    except Exception as exc:  # noqa: BLE001 - comgr cannot target this arch here
-        pytest.skip(f"comgr cannot compile for {arch}: {exc}")
+    art = compile_or_skip(kernel, arch=arch, backend="python")
     return art.llvm_text, R.parse_disassembly(R.disassemble(art.hsaco, arch=arch))
 
 
