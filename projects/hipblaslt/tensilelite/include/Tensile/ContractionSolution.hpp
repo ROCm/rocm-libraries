@@ -1370,6 +1370,8 @@ namespace TensileLite
             // newly generated StreamK 3 / SK5 set it true. Uniform-summation-order
             // grid steering consults the same bit.
             bool perTileExtraIters  = false;
+            // Kernel takes the ProbeAddr/ProbeEpoch/ProbeGrid tail args (CU-occupancy probe).
+            bool occupancyProbe     = false;
             bool useUniversalArgs   = true;
             bool useSFC             = false;
         };
