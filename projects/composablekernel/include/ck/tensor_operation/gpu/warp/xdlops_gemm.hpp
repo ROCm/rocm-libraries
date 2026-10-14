@@ -88,6 +88,7 @@ enum struct MfmaInstr
     wmma_f32_16x16x16_f16,
     wmma_f32_16x16x16_bf16,
     wmma_i32_16x16x16_iu8,
+    wmma_f32_16x16x16_xf32, // bf16x3 simulate tf32 on gfx11
     wmma_unsupport_16x16_gfx11,
     // gfx12
     wmma_f32_16x16x16_f16_gfx12,
@@ -97,6 +98,7 @@ enum struct MfmaInstr
     wmma_f32_16x16x16_f8bf8_gfx12,
     wmma_f32_16x16x16_bf8f8_gfx12,
     wmma_f32_16x16x16_bf8bf8_gfx12,
+    wmma_f32_16x16x16_xf32_gfx12, // bf16x3 simulate tf32 on gfx12
     wmma_unsupport_16x16_gfx12,
     // gfx125
     wmma_f16_16x16x32_f16_gfx125,
@@ -1179,6 +1181,32 @@ struct mfma_type<MfmaInstr::wmma_i32_16x16x16_iu8> : public mfma_type_gfx11_base
     }
 };
 
+// bf16x3 simulate tf32, as on gfx950 (see amd_xdlops.hpp): split each fp32 input into big and
+// small bf16 parts and accumulate small*big + big*small + big*big into the same fp32 accumulator.
+template <>
+struct mfma_type<MfmaInstr::wmma_f32_16x16x16_xf32> : public mfma_type_gfx11_base
+{
+    template <index_t MPerWmma, index_t NPerWmma, class FloatA, class FloatB, class FloatC>
+    __device__ void run(const FloatA& a, const FloatB& b, FloatC& reg_c) const
+    {
+        using I0 = Number<0>;
+        vector_type<bhalf_t, k_per_blk> a_big, a_small, b_big, b_small;
+        convert_float_to_bf16_pairs(vector_type<float, k_per_blk>{a}, a_big, a_small);
+        convert_float_to_bf16_pairs(vector_type<float, k_per_blk>{b}, b_big, b_small);
+
+        using Wmma = intrin_wmma_f32_16x16x16_bf16_w32<MPerWmma, NPerWmma>;
+        Wmma::Run(a_small.template AsType<bhalf16_t>()[I0{}],
+                  b_big.template AsType<bhalf16_t>()[I0{}],
+                  reg_c);
+        Wmma::Run(a_big.template AsType<bhalf16_t>()[I0{}],
+                  b_small.template AsType<bhalf16_t>()[I0{}],
+                  reg_c);
+        Wmma::Run(a_big.template AsType<bhalf16_t>()[I0{}],
+                  b_big.template AsType<bhalf16_t>()[I0{}],
+                  reg_c);
+    }
+};
+
 template <>
 struct mfma_type<MfmaInstr::wmma_unsupport_16x16_gfx11> : public mfma_type_gfx11_base
 {
@@ -1281,6 +1309,31 @@ struct mfma_type<MfmaInstr::wmma_f32_16x16x16_bf8bf8_gfx12> : public mfma_type_g
     __device__ void run(const FloatA& a, const FloatB& b, FloatC& reg_c) const
     {
         intrin_wmma_f32_16x16x16_bf8bf8_w32_gfx12<MPerWmma, NPerWmma>::Run(a, b, reg_c);
+    }
+};
+
+// bf16x3 simulate tf32; see the gfx11 variant above.
+template <>
+struct mfma_type<MfmaInstr::wmma_f32_16x16x16_xf32_gfx12> : public mfma_type_gfx12_base
+{
+    template <index_t MPerWmma, index_t NPerWmma, class FloatA, class FloatB, class FloatC>
+    __device__ void run(const FloatA& a, const FloatB& b, FloatC& reg_c) const
+    {
+        using I0 = Number<0>;
+        vector_type<bhalf_t, k_per_blk> a_big, a_small, b_big, b_small;
+        convert_float_to_bf16_pairs(vector_type<float, k_per_blk>{a}, a_big, a_small);
+        convert_float_to_bf16_pairs(vector_type<float, k_per_blk>{b}, b_big, b_small);
+
+        using Wmma = intrin_wmma_f32_16x16x16_bf16_w32_gfx12<MPerWmma, NPerWmma>;
+        Wmma::Run(a_small.template AsType<bhalf8_t>()[I0{}],
+                  b_big.template AsType<bhalf8_t>()[I0{}],
+                  reg_c);
+        Wmma::Run(a_big.template AsType<bhalf8_t>()[I0{}],
+                  b_small.template AsType<bhalf8_t>()[I0{}],
+                  reg_c);
+        Wmma::Run(a_big.template AsType<bhalf8_t>()[I0{}],
+                  b_big.template AsType<bhalf8_t>()[I0{}],
+                  reg_c);
     }
 };
 
@@ -1835,10 +1888,12 @@ struct MfmaSelector
     template <>
     constexpr auto GetMfma<tf32_t, 16, 16, tf32_t, is_single_rate_mfma>()
     {
-#if defined(__gfx12__)
+#if defined(__gfx125__)
         return MfmaInstr::wmma_unsupport_16x16_gfx12;
+#elif defined(__gfx120__)
+        return MfmaInstr::wmma_f32_16x16x16_xf32_gfx12;
 #elif defined(__gfx11__)
-        return MfmaInstr::wmma_unsupport_16x16_gfx11;
+        return MfmaInstr::wmma_f32_16x16x16_xf32;
 #elif defined(__gfx950__)
         return MfmaInstr::mfma_f32_16x16x32xf32;
 #elif defined(__gfx942__)

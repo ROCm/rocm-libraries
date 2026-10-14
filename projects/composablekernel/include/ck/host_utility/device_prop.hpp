@@ -7,6 +7,9 @@
 #include <string>
 #include <string_view>
 #include <hip/hip_runtime.h>
+#include <type_traits>
+
+#include "ck/utility/data_type.hpp"
 
 namespace ck {
 
@@ -133,7 +136,9 @@ inline bool is_xdl_wmma_supported()
             return false;
         }
 
-        if constexpr(sizeof(ADataType) > 2 || sizeof(BDataType) > 2)
+        // tf32_t is 4 bytes but runs as bf16x3 WMMA (see xdlops_gemm.hpp)
+        if constexpr((sizeof(ADataType) > 2 && !std::is_same_v<ADataType, tf32_t>) ||
+                     (sizeof(BDataType) > 2 && !std::is_same_v<BDataType, tf32_t>))
         {
             return false;
         }
@@ -232,6 +237,14 @@ inline bool is_wmma_supported()
 inline bool is_tf32_supported()
 {
     return ck::get_device_name() == "gfx942" || ck::get_device_name() == "gfx950";
+}
+
+// TF32 in the XDL grouped convolution forward ops: gfx942 and gfx950, plus gfx11 and gfx120, which
+// emulate it with bf16x3 WMMA on 16x16 tiles. The forward ops retile their instances to 16x16 on
+// those targets; the backward ops do not, so they keep is_tf32_supported().
+inline bool is_tf32_conv_fwd_supported()
+{
+    return is_tf32_supported() || is_gfx11_supported() || is_gfx120_supported();
 }
 
 inline int __host__ get_lds_size()

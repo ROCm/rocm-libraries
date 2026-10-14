@@ -439,7 +439,13 @@ bool profile_grouped_conv_fwd_impl(int do_verification,
                 // CPU verification path (original behavior)
                 out_device_buf.FromDevice(device_output.mData.data());
 
-                pass = pass & ck::utils::check_err(device_output, host_output);
+                // tf32 compute (native xf32 or bf16x3) needs tf32, not fp32, tolerances.
+                if constexpr(std::is_same_v<AComputeType, ck::tf32_t>)
+                    pass = pass & ck::utils::check_err<decltype(device_output),
+                                                       decltype(host_output),
+                                                       ck::tf32_t>(device_output, host_output);
+                else
+                    pass = pass & ck::utils::check_err(device_output, host_output);
 
                 if(do_log)
                 {
