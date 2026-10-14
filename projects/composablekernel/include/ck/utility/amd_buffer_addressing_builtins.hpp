@@ -7,7 +7,6 @@
 #if defined(__gfx125__)
 #include "ck/utility/amd_address_space.hpp"
 #endif
-#include "amd_tdm.hpp"
 
 namespace ck {
 

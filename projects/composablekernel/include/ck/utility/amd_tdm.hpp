@@ -5,6 +5,8 @@
 
 namespace ck {
 
+// This structs are fully based on ck tile that already supports TDM
+
 struct TDMLdsPaddingConfig
 {
     uint32_t pad_interval{0};
