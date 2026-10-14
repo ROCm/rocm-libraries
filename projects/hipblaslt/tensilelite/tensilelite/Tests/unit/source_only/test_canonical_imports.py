@@ -82,6 +82,12 @@ def _legacy_internal_imports(paths, root=_PACKAGE_ROOT):
         "ValidWorkGroup",
         "ValidWorkGroupMappingXCC",
     }
+
+    def has_legacy_prefix(module):
+        return any(
+            module == prefix or module.startswith(f"{prefix}.") for prefix in legacy_prefixes
+        )
+
     violations = []
 
     for path in sorted(paths):
@@ -92,7 +98,7 @@ def _legacy_internal_imports(paths, root=_PACKAGE_ROOT):
                 isinstance(node, ast.ImportFrom)
                 and node.level == 0
                 and node.module
-                and node.module.startswith(legacy_prefixes)
+                and has_legacy_prefix(node.module)
             ):
                 violations.append(f"{relative_path}:{node.lineno}: from {node.module}")
             elif (
@@ -130,7 +136,7 @@ def _legacy_internal_imports(paths, root=_PACKAGE_ROOT):
                         )
             elif isinstance(node, ast.Import):
                 for alias in node.names:
-                    if alias.name.startswith(legacy_prefixes):
+                    if has_legacy_prefix(alias.name):
                         violations.append(f"{relative_path}:{node.lineno}: import {alias.name}")
     return violations
 
@@ -147,6 +153,8 @@ def test_legacy_internal_import_scanner_covers_import_forms(tmp_path):
                 "from .ValidCorpusConsistency import check_corpus_invariants",
                 "from . import TensileLogic",
                 "from .._extops import SoftmaxGenerator",
+                "from tensilelite.TensileGenerateUID import main",
+                "import tensilelite.TensileGenerateUID",
             )
         ),
         encoding="utf-8",
