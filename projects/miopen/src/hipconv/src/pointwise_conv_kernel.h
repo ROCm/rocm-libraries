@@ -1,6 +1,7 @@
 #pragma once
 
 #include "conv_kernel.h"
+#include "explicit_gemm/hipblaslt_matmul.hpp"
 #include "hipconv/conv_params.hpp"
 
 namespace hipconv
@@ -42,6 +43,11 @@ public:
             return false;
 
         return true;
+    }
+
+    bool runs_on_current_device(const hipconv::ConvParams& par) const override
+    {
+        return explicit_gemm::has_algorithm(par);
     }
 
     // The hipBLASLt-backed pointwise path is the tuned choice for 1x1.

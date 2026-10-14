@@ -176,10 +176,10 @@ Clipping is BUILT and bit-exact on the masked path (`tiling_api_surface.md` 5b).
   tell `(free, K)` from `(K, free)`.
 - The rank-reducing slice `at_index(axis, i)` / `squeeze(axis)` yields the rank-2 view with strides
   preserved, **typed against the declared contraction role**: it fails-fast if asked to reduce the K axis.
-  Rank-2-ness is enforced at fragment construction and in `cooperative_load_desc` (which also runs the
-  extent-vs-allocation guard). The LDS memref stays 2D per iteration (a rank-3 LDS tile only on a
-  *measured* occupancy need, its served-group property re-derived by dumping the address map, NOT
-  inherited from the 2D case -- deferred; `lds_banks.md`).
+  Rank-2-ness is enforced when an operand is loaded (`load_fragment`) and in `cooperative_load_desc`
+  (which also runs the extent-vs-allocation guard). The LDS memref stays 2D per iteration (a rank-3
+  LDS tile only on a *measured* occupancy need, its served-group property re-derived by dumping the
+  address map, NOT inherited from the 2D case -- deferred; `lds_banks.md`).
 - **Batch loop owner, by shape:** independent batch -> the author's outer loop (later a typed pipeline
   stage that emits nothing); batch *inside the contraction* -> the `TileMmaDriver`'s carried accumulator
   (a naive outer loop is silently wrong -- each per-batch MMA is individually sound so no gate fires);

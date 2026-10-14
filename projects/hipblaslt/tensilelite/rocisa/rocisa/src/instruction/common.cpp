@@ -1845,6 +1845,22 @@ void common_inst(nb::module_ m_common)
         .def("__deepcopy__",
              [](const rocisa::VMed3F32& self, nb::dict&) { return new rocisa::VMed3F32(self); });
 
+    nb::class_<rocisa::VMaximumMinimumF32, rocisa::CommonInstruction>(m_common,
+                                                                      "VMaximumMinimumF32")
+        .def(nb::init<const std::shared_ptr<rocisa::Container>&,
+                      const InstructionInput&,
+                      const InstructionInput&,
+                      const InstructionInput&,
+                      const std::string&>(),
+             nb::arg("dst"),
+             nb::arg("src0"),
+             nb::arg("src1"),
+             nb::arg("src2"),
+             nb::arg("comment") = "")
+        .def("__deepcopy__", [](const rocisa::VMaximumMinimumF32& self, nb::dict&) {
+            return new rocisa::VMaximumMinimumF32(self);
+        });
+
     nb::class_<rocisa::VMinF16, rocisa::CommonInstruction>(m_common, "VMinF16")
         .def(nb::init<const std::shared_ptr<rocisa::Container>&,
                       const InstructionInput&,

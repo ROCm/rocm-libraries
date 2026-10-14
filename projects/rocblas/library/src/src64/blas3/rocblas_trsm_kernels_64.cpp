@@ -307,7 +307,11 @@ rocblas_status rocblas_internal_trsm_template_mem_64(rocblas_handle             
         workspace
             = handle->device_malloc(w_x_tmp_size, w_x_tmp_arr_size, w_invA_size, w_invA_arr_size);
         if(!workspace)
+        {
+            rocblas_internal_trsm_workspace_error(
+                handle, w_x_tmp_size, w_x_tmp_arr_size, w_invA_size, w_invA_arr_size);
             return rocblas_status_memory_error;
+        }
 
         w_mem_x_temp     = workspace[0];
         w_mem_x_temp_arr = workspace[1];
