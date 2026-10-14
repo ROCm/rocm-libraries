@@ -210,8 +210,12 @@ jobs:
           echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
           echo "VIRTUAL_ENV=$RUNNER_TEMP/venv" >> "$GITHUB_ENV"
           python3 -m pip install --upgrade pip
-          pip install --pre --index-url https://nightly.repo.amd.com/rocm/whl-next/ \
-            "rocm[libraries,devel,device-gfx1250]==${ROCM_SDK_VERSION}"
+          IDX=https://nightly.repo.amd.com/rocm/whl-next/
+          # rocm itself is a 28 kB sdist: build it with no cache, since pip stores built
+          # wheels in the cache, read-only outside the nightly. Its multi-GB dependencies
+          # are wheels and still come from the cache.
+          pip install --pre --index-url "$IDX" --no-cache-dir --no-deps "rocm==${ROCM_SDK_VERSION}"
+          pip install --pre --index-url "$IDX" "rocm[libraries,devel,device-gfx1250]==${ROCM_SDK_VERSION}"
           rocm-sdk init
           R="$(rocm-sdk path --root)"
           rocm-sdk path --bin >> "$GITHUB_PATH"
