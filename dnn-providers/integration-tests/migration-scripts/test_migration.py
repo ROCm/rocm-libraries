@@ -1065,6 +1065,212 @@ def test_diff_coverage_suite_qualified_join():
         print("  PASS: diff_coverage_suite_qualified_join")
 
 
+def _retier_graph_template(clip):
+    return {
+        "name": "g",
+        "io_data_type": "${case.io_data_type}",
+        "tensors": [
+            {
+                "uid": 0,
+                "dims": "${case.dims}",
+                "strides": "${case.strides}",
+                "data_type": "${case.data_type}",
+            }
+        ],
+        "nodes": [{"type": "PointwiseAttributes", "inputs": {"relu_lower_clip": clip}}],
+    }
+
+
+def _retier_case(case_id, clip_attr=None):
+    values = {
+        "io_data_type": "float",
+        "tensors": [
+            {"uid": 0, "dims": [1, 2], "strides": [2, 1], "data_type": "float"}
+        ],
+    }
+    if clip_attr is not None:
+        values["attributes"] = {"relu_lower_clip": clip_attr}
+    return {
+        "id": case_id,
+        "values": values,
+        "metadata": {"format_version": 1, "notes": case_id},
+    }
+
+
+def _retier_write(root, tier, template, cases, claims):
+    d = root / tier / "Op" / "Default"
+    d.mkdir(parents=True)
+    for name, obj in (
+        ("graph.template.json", template),
+        ("sweep.json", {"version": 1, "cases": cases}),
+        ("support.json", {"version": 1, "claims": claims}),
+    ):
+        with open(d / name, "w") as f:
+            json.dump(obj, f, indent=2)
+
+
+def _retier_load(root, tier):
+    d = root / tier / "Op" / "Default"
+    return {
+        n: json.load(open(d / n))
+        for n in ("graph.template.json", "sweep.json", "support.json")
+    }
+
+
+def test_retier_bundles():
+    """Moving cases between tiers keeps every case's expanded graph and claims.
+
+    The quick template hard-codes relu_lower_clip while the full template takes it
+    from the case, so a case moving from quick to a tier that uses the full
+    template has to gain the literal as an explicit attribute. Cases that stay put,
+    single-graph bundles and per-engine claims must come through unchanged, and a
+    plan that loses or duplicates a case must be refused before anything is written.
+    """
+    script = SCRIPT_DIR / "retier_bundles.py"
+    win = {"gfx1151": ["windows"]}
+    lin = {"gfx942": ["linux"]}
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp) / "integration-test-bundles"
+        _retier_write(
+            root,
+            "quick",
+            _retier_graph_template(None),
+            [_retier_case("a"), _retier_case("b")],
+            {
+                "MIOPEN_ENGINE": [
+                    {"cases": ["a"], "support": win},
+                    {"cases": ["b"], "support": lin},
+                ]
+            },
+        )
+        _retier_write(
+            root,
+            "full",
+            _retier_graph_template("${case.attributes.relu_lower_clip}"),
+            [_retier_case("0c", clip_attr=0.5)],
+            {"MIOPEN_ENGINE": [{"cases": ["0c"], "support": win}]},
+        )
+        single = root / "quick" / "Op2" / "nchw" / "fp32" / "Small"
+        single.mkdir(parents=True)
+        with open(single / "Small.json", "w") as f:
+            json.dump({"name": "s"}, f)
+        with open(single / "Small.meta.json", "w") as f:
+            json.dump({"format_version": 1}, f)
+
+        asg = Path(tmp) / "asg.json"
+
+        def write_assignments(rows):
+            with open(asg, "w") as f:
+                json.dump(
+                    [dict(current_tier=t, key=k, proposed_tier=n) for t, k, n in rows],
+                    f,
+                )
+
+        plan = [
+            ("quick", "Op/Default/a", "standard"),
+            ("quick", "Op/Default/b", "quick"),
+            ("full", "Op/Default/0c", "quick"),
+            ("quick", "Op2/nchw/fp32/Small", "full"),
+        ]
+
+        # A case without an assignment is refused and nothing is written.
+        write_assignments(plan[:-1])
+        r = run(
+            [
+                sys.executable,
+                script,
+                "--bundle-dir",
+                root,
+                "--assignments",
+                asg,
+                "--apply",
+            ],
+            check=False,
+        )
+        assert r.returncode != 0 and "no assignment" in r.stderr, r.stderr
+        assert (single / "Small.json").is_file() and not (root / "standard").exists()
+
+        # Two copies of one id may not land in the same sweep.
+        dup = root / "full" / "Op" / "Default"
+        sweep = json.load(open(dup / "sweep.json"))
+        sweep["cases"].append(_retier_case("a", clip_attr=1.0))
+        json.dump(sweep, open(dup / "sweep.json", "w"))
+        write_assignments(plan + [("full", "Op/Default/a", "standard")])
+        r = run(
+            [
+                sys.executable,
+                script,
+                "--bundle-dir",
+                root,
+                "--assignments",
+                asg,
+                "--apply",
+            ],
+            check=False,
+        )
+        assert r.returncode != 0 and "twice" in r.stderr, r.stderr
+        sweep["cases"].pop()
+        json.dump(sweep, open(dup / "sweep.json", "w"))
+
+        write_assignments(plan)
+        r = run(
+            [
+                sys.executable,
+                script,
+                "--bundle-dir",
+                root,
+                "--assignments",
+                asg,
+                "--apply",
+            ]
+        )
+        assert r.returncode == 0, r.stderr
+        assert "identical before and after" in r.stdout, r.stdout
+
+        std, quick = _retier_load(root, "standard"), _retier_load(root, "quick")
+        assert not (root / "full" / "Op").exists(), "emptied tier dir should be removed"
+        assert (
+            root / "full" / "Op2" / "nchw" / "fp32" / "Small" / "Small.meta.json"
+        ).is_file()
+        assert not single.exists()
+        # Unified template: the placeholder form, in every tier.
+        placeholder = "${case.attributes.relu_lower_clip}"
+        for tier_files in (std, quick):
+            assert (
+                tier_files["graph.template.json"]["nodes"][0]["inputs"][
+                    "relu_lower_clip"
+                ]
+                == placeholder
+            )
+        # "a" came from the literal-null template and carries it explicitly.
+        (case_a,) = std["sweep.json"]["cases"]
+        assert case_a["id"] == "a" and case_a["values"]["attributes"] == {
+            "relu_lower_clip": None
+        }
+        # "0c" kept its own value; "b" (stayed) gained the explicit null.
+        by_id = {c["id"]: c for c in quick["sweep.json"]["cases"]}
+        assert by_id["0c"]["values"]["attributes"] == {"relu_lower_clip": 0.5}
+        assert by_id["b"]["values"]["attributes"] == {"relu_lower_clip": None}
+        # Claims follow their case: b and 0c have different arch maps, so two groups.
+        groups = quick["support.json"]["claims"]["MIOPEN_ENGINE"]
+        assert {tuple(g["cases"]): g["support"] for g in groups} == {
+            ("b",): lin,
+            ("0c",): win,
+        }
+        # Canonical text: "0c" arrived after "b" but sorts first, and the sidecar
+        # tools refuse any file whose groups are not in sorted-first-case order.
+        sys.path.insert(0, str(SCRIPT_DIR.parent / "scripts"))
+        from support_sidecar import parse
+
+        for tier in ("quick", "standard"):
+            path = root / tier / "Op" / "Default" / "support.json"
+            parse(path, path.read_text("utf-8"))
+        assert std["support.json"]["claims"]["MIOPEN_ENGINE"] == [
+            {"cases": ["a"], "support": win}
+        ]
+        print("  PASS: retier_bundles")
+
+
 def main() -> int:
     verbose = "-v" in sys.argv
     failures = 0
@@ -1084,6 +1290,7 @@ def main() -> int:
         test_import_absent_vs_literal_marker,
         test_import_new_template_failure_diagnostics,
         test_diff_coverage_suite_qualified_join,
+        test_retier_bundles,
     ]
 
     for t in tests:
