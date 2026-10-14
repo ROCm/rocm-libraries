@@ -64,13 +64,41 @@ def validate_attention_request_types(request):
     )
     _fields(
         request,
-        ("use_sinks", "use_fp8", "fp8_fnuz", "use_alibi", "use_qq_bias"),
+        ("window_left", "window_right"),
+        require_attention_int,
+        "request",
+        optional=True,
+    )
+    _fields(
+        request,
+        (
+            "use_sinks",
+            "use_fp8",
+            "fp8_fnuz",
+            "use_alibi",
+            "use_qq_bias",
+            "use_softcap",
+            "use_attn_bias",
+            "emit_lse",
+            "window_bottom_right",
+        ),
         require_attention_bool,
         "request",
     )
     _fields(
         request,
-        ("arch", "op", "dtype", "algorithm", "spec_id", "tuning_id", "kv_layout"),
+        (
+            "arch",
+            "op",
+            "dtype",
+            "algorithm",
+            "spec_id",
+            "tuning_id",
+            "kv_layout",
+            "layout",
+            "tensor_layout",
+            "attn_bias_dtype",
+        ),
         require_attention_string,
         "request",
     )

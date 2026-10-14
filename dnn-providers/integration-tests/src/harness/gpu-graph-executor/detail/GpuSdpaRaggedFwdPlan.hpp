@@ -29,10 +29,10 @@
 namespace hipdnn_integration_tests::gpu_graph_executor::detail
 {
 
-// Unpacked attributes and resolved parameters for a ragged SDPA node (RFC-0014 packed
-// [B,S,H,D] + ragged_offset). q/k/v/o each carry an int32 offset aux [B+1,1,1,1], scaled to
-// elements by the tensor's ragged_offset_multiplier.
-// The optional LSE [B,Sq,H,1] is packed if it has its own ragged_offset aux, else dense.
+// Unpacked attributes and resolved parameters for a ragged SDPA node (RFC-0014 logical
+// [B,H,S,D], packed BSHD + ragged_offset). q/k/v/o each carry an int32 offset aux [B+1,1,1,1],
+// scaled to elements by the tensor's ragged_offset_multiplier.
+// The optional LSE [B,H,Sq,1] is packed if it has its own ragged_offset aux, else dense.
 struct GpuSdpaRaggedFwdParams
 {
     GpuSdpaRaggedFwdParams(
@@ -109,7 +109,7 @@ struct GpuSdpaRaggedFwdParams
     int64_t rightBound;
     bool topLeftAlignment;
     std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> lseTensor;
-    // Set only for a packed LSE. Absent means a dense [B,Sq,H,1] LSE.
+    // Set only for a packed LSE. Absent means a dense [B,H,Sq,1] LSE.
     std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> raggedOffsetLseTensor;
     // Optional fp8 descales (float): scalar [1] or per-KV-head [B, H_kv, 1, 1].
     std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> descaleQTensor;
@@ -244,7 +244,7 @@ private:
 
 // Same unsupported-feature gates as the dense GpuSdpaFwdPlanBuilder, plus: q/k/v/o (and a packed
 // LSE) must each carry a ragged_offset aux with a multiplier >= 1 and use the RFC-0014
-// [B, S, H, D] token-major layout, and seq_len_q/kv must be absent (the padded variant is not
+// [B, H, S, D] token-major layout, and seq_len_q/kv must be absent (the padded variant is not
 // supported).
 // GpuReferenceGraphExecutor::buildSignatureKey picks dense vs ragged.
 template <hipdnn_flatbuffers_sdk::data_objects::DataType QDataTypeEnum,
@@ -282,7 +282,7 @@ public:
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->o_tensor_uid(), ODataTypeEnum);
 
         // Each primary needs an INT32 ragged_offset aux (without them this is a dense SDPA node),
-        // a ragged_offset_multiplier >= 1 and the RFC-0014 [B, S, H, D] token-major layout.
+        // a ragged_offset_multiplier >= 1 and the RFC-0014 [B, H, S, D] token-major layout.
         for(const auto primaryUid : {nodeAttributes->q_tensor_uid(),
                                      nodeAttributes->k_tensor_uid(),
                                      nodeAttributes->v_tensor_uid(),
@@ -399,7 +399,7 @@ public:
         }
 
         // LSE (stats tensor) must be FLOAT. With an INT32 ragged_offset aux it is packed,
-        // otherwise dense [B,Sq,H,1].
+        // otherwise dense [B,H,Sq,1].
         if(nodeAttributes->stats_tensor_uid().has_value())
         {
             CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->stats_tensor_uid().value());
@@ -532,7 +532,7 @@ public:
     }
 
 private:
-    // RFC-0014 requires ragged_offset_multiplier >= 1 and a token-major [B, S, H, D] layout.
+    // RFC-0014 requires ragged_offset_multiplier >= 1 and a token-major [B, H, S, D] layout.
     static bool
         isSupportedRaggedLayout(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attr)
     {

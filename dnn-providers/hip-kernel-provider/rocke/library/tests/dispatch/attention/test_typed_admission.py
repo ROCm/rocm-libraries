@@ -134,6 +134,9 @@ def test_request_boolean_fields(field, subtests):
 )
 def test_request_string_fields(field, subtests):
     for value in (1, True, None, _Coercible()):
+        if field == "arch" and value is None:
+            assert replace(_req(), arch=None).arch == ""
+            continue
         with subtests.test(value=repr(value)), pytest.raises(ValueError, match=field):
             replace(_req(), **{field: value})
 
@@ -444,6 +447,53 @@ def test_request_softcap_before_selection(subtests):
             for use in (bad.features, bad.normalized, lambda: _problem(bad)):
                 with pytest.raises(ValueError, match="softcap"):
                     use()
+
+
+@pytest.mark.parametrize("field", ["window_left", "window_right"])
+def test_explicit_window_types_before_selection(field, subtests):
+    req = _req()
+    for value in BAD_INTS:
+        if value is None:
+            continue
+        with subtests.test(value=repr(value)), pytest.raises(ValueError, match=field):
+            replace(req, **{field: value})
+    assert getattr(replace(req, **{field: None}), field) is None
+
+
+@pytest.mark.parametrize(
+    "field", ["use_softcap", "use_attn_bias", "emit_lse", "window_bottom_right"]
+)
+def test_extended_request_flags_before_selection(field, subtests):
+    for value in BAD_BOOLS:
+        with subtests.test(value=repr(value)), pytest.raises(ValueError, match=field):
+            replace(_req(), **{field: value})
+
+
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+def test_paged_selection_uses_explicit_arch(arch, monkeypatch):
+    req = replace(_req(arch), arch=arch.upper() + ":xnack-", num_cus=120)
+    monkeypatch.setattr(
+        au, "_resolve_attention_arch", lambda: pytest.fail("selection read host arch")
+    )
+    spec = dispatch_attention(req).spec
+    assert spec.arch == arch
+    assert spec.kernel_spec.num_segments == au._num_segments(_problem(req), arch)
+
+
+@pytest.mark.parametrize("changes", [{"softcap": 2.0}, {"use_softcap": True}])
+def test_softcap_feature_accepts_both_request_forms(changes):
+    assert "softcap" in replace(_req(), **changes).features()
+
+
+def test_paged_softcap_flag_requires_numeric_value():
+    from dispatch.attention.paged_decode import make_candidate
+
+    candidate = make_candidate()
+    assert not candidate.admits(replace(_req(), use_softcap=True))[0]
+    req = replace(_req(), softcap=2.0)
+    assert req.use_softcap
+    assert candidate.admits(req)[0]
+    assert candidate.select_spec(req).kernel_spec.has_softcap
 
 
 def test_paged_binding_checks_problem_before_reading_fields(monkeypatch):

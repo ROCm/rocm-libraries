@@ -295,7 +295,7 @@ def test_strided_selection_uses_runtime_policy(arch, block_size, monkeypatch):
     assert (selected.kernel_spec, selected.reduce_spec) == (segment, reduce)
     assert segment.waves_per_eu is None
     monkeypatch.setattr(au, "_resolve_attention_arch", lambda: arch)
-    paged = au._tiled_3d_spec_from_problem(problem)
+    paged = au._tiled_3d_spec_from_problem(problem, arch)
     assert segment == replace(
         paged, kv_layout="strided", use_wide_kv_load=False, use_i64_kv_addr=False
     )
@@ -549,7 +549,7 @@ def test_paged_runtime_accepts_specs_without_layout(arch, path, monkeypatch):
     factory = (
         au._tiled_3d_spec_from_problem if path == "3d" else au._tiled_spec_from_problem
     )
-    kernel = factory(problem)
+    kernel = factory(problem, arch)
     assert not hasattr(kernel, "kv_layout")
     spec = AttentionTuningSpec(
         path=path,
@@ -563,7 +563,7 @@ def test_paged_runtime_accepts_specs_without_layout(arch, path, monkeypatch):
     )
     calls = []
 
-    def stop_before_launch(problem, tuning_spec, kind):
+    def stop_before_launch(problem, tuning_spec, kind, arch):
         calls.append((tuning_spec.kernel_spec, kind))
         return False, "paged contract reached"
 

@@ -1321,6 +1321,9 @@ class KernelWriterAssembly(KernelWriter):
     # MFMA case
     if kernel["UseMFMAF32XEmulation"]:
       self.moduleVgprMacroValuB_T.add(RegSet("v", "IdentityMatrix", self.states.startVgprIdentityMatrix, 0))
+    # TF32 Inf Support
+    if self.states.useTF32EmuInfSupport:
+      self.moduleVgprMacroValuB_T.add(RegSet("v", "InfCheck", self.states.startVgprInfCheck, 0))
 
   def _emitGL2PrefetchAddrRegSets(self, module, kernel, tPA, tPB):
     """Emit RegSet declarations for GL2 prefetch address vgprs (A, B, and MX scale variants)."""
@@ -11823,7 +11826,11 @@ class KernelWriterAssembly(KernelWriter):
       # PrefetchGlobalRead>=2 + (oneBufferScheduling or tailLoop) case, generate local read wait for DirectToLds
       # Early exit + Tailloop case, barrier sync might not be executed when reaching Tailloop.
       # Need sync before running GR for Tailloop.
-      if kernel["PrefetchGlobalRead"]>=2 and (self.states.oneBufferScheduling or tail) and not skipWait:
+      # A persistent kernel issues the first prefetch of the next tile while slower waves can still be
+      # reading LDS in the previous tile's store (the bias and scaleAlpha vectors are staged there).
+      nextTilePrefetch = mode == 0 and isPersistent(kernel) and not self.isPrefetchAcrossPersistentEnabled(kernel)
+      if kernel["PrefetchGlobalRead"]>=2 and (self.states.oneBufferScheduling or tail or nextTilePrefetch) \
+         and not skipWait:
         # do not generate local read wait for PGR=2
         DtldsModule.addComment0("before DirectToLds load, ensure prior ds_reads have finished")
         DtldsModule.add(SWaitCnt(dscnt=0, comment=""))
@@ -16911,8 +16918,8 @@ class KernelWriterAssembly(KernelWriter):
     maxVgprs, occupancy = self.getMaxRegsForOccupancy(kernel["NumThreads"], self.vgprPool.size(), requiredSgprs, \
                                                       self.getLdsSize(kernel), self.agprPool.size(), self.states.doubleVgpr)
     # Set occupancy limit for register pools
-    # TODO: Support gfx12
-    if kernel["ISA"][0] != 12:
+    # TODO: Support gfx12 and gfx117x
+    if kernel["ISA"][0] != 12 and kernel["ISA"][:2] != (11, 7):
       self.vgprPool.setOccupancyLimit(self.states.regCaps["MaxVgpr"], self.states.regCaps["PhysicalMaxVgpr"] // occupancy)
       self.sgprPool.setOccupancyLimit(self.states.regCaps["MaxSgpr"], self.states.regCaps["PhysicalMaxSgpr"] // occupancy)
     return maxVgprs, occupancy

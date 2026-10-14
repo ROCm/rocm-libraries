@@ -33,7 +33,11 @@ def build(spec, arch):
     ).build_unified_attention_3d_tiled(spec, arch=arch)
 
 
-if __name__ == "__main__":
+def main():
     from _emit_common import run_emit
 
-    raise SystemExit(run_emit(spec_for_index, build))
+    return run_emit(spec_for_index, build)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

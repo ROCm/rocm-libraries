@@ -908,7 +908,7 @@ def test_gfx942_page_one_default_uses_async_gather(dim, monkeypatch):
     monkeypatch.setattr(au, "_resolve_attention_arch", lambda: "gfx942")
     p, _ = inputs()
     p = replace(p, head_size=dim, clamp_arch="gfx942")
-    spec = au._tiled_3d_spec_from_problem(p)
+    spec = au._tiled_3d_spec_from_problem(p, "gfx942")
     assert spec.tile_size == 32 and spec.uses_paged_gather
     assert not spec.use_wide_kv_load
 
@@ -929,9 +929,9 @@ def test_runtime_preserves_specs_without_gather_property(arch, path, monkeypatch
         kwargs[name].dtype = "torch.bfloat16"
     monkeypatch.setattr(au, "_resolve_attention_arch", lambda: arch)
     kernel = (
-        au._tiled_spec_from_problem(p)
+        au._tiled_spec_from_problem(p, arch)
         if path == "2d"
-        else au._tiled_3d_spec_from_problem(p)
+        else au._tiled_3d_spec_from_problem(p, arch)
     )
     assert not hasattr(kernel, "uses_paged_gather")
 

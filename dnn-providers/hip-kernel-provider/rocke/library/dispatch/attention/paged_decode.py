@@ -32,6 +32,11 @@ def make_candidate():
             return False, "; ".join(errors)
         if req.kv_layout != "paged":
             return False, "requires paged KV"
+        if req.use_softcap and req.softcap == 0:
+            return (
+                False,
+                "paged decode requires a positive request.softcap when enabled",
+            )
         if (
             _parse_attention_mask_type(req.mask_type)
             == AttentionMaskType.TOP_LEFT_CAUSAL
@@ -57,7 +62,7 @@ def make_candidate():
         segment, reduce = make_explicit_attention_3d_specs(
             problem,
             ExplicitAttention3DConfig(
-                num_segments=_num_segments(problem), tile_policy="32"
+                num_segments=_num_segments(problem, req.arch), tile_policy="32"
             ),
             arch=req.arch.lower(),
         )
