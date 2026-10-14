@@ -8,7 +8,10 @@ front of a block-scaled (MX) matmul. The features come from
 (``utilities/json/BlockScaleDequantizeAttributes.hpp``) writes the ports
 under ``inputs`` (``x``, ``scale``) and ``outputs`` (``y``); its reader
 takes a missing ``block_size`` as empty and a missing ``is_negative_scale``
-as false. By group:
+as false. The dtypes are those the CPU reference executor registers
+(``BlockScaleDequantizeSignatureKey``): an MX ``x`` with an fp8e8m0
+``scale``, a float ``x`` with an fp32 one. hipBLASLt reads only the MX
+pairs, and only fused into its matmul. By group:
 
 - ``dtype`` (exclusive): the dtype of ``x``: an OCP MX dtype (fp8, fp6 or
   fp4) or a float one. The data_type is read as written, not through the
