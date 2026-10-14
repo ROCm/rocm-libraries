@@ -62,9 +62,10 @@
 //
 //    Under the GIR frame contract an instruction carries no MemTokenData; the token is derived
 //    here from GirFrameAnalysis instead: one token per concrete LDS slot ((operand, generation)),
-//    so touches of different slots share no pseudo-register. A static instruction can touch a
-//    different slot in each frame and gets the union. A GIR fence gets the slot of every hazard
-//    it encloses. The derived token then takes the normal path below.
+//    so touches of different slots share no pseudo-register. A rotating access moves between
+//    slots from frame to frame; it keeps one token across them, which an access that always hits
+//    the other buffer does not share. A GIR fence gets the token of every hazard it encloses.
+//    The derived token then takes the normal path below.
 
 namespace {
 using namespace stinkytofu;
@@ -83,13 +84,55 @@ static void addUniqueLdsSrc(StinkyInstruction& inst, int tokenId) {
 
 using GirSlotTokens = std::map<const StinkyInstruction*, std::set<int>>;
 
+// A physical slot is only meaningful in one frame, and a rotating access moves to another slot
+// in the next. Nodes are (frame, slot); the nodes one static access touches across frames are
+// joined, and a token is a class of nodes. Two accesses then share a token only if they hit the
+// same slot in some common frame, so a copy and a read that always land on different buffers
+// stay apart even though both rotate through the same ring.
+class GirSlotClasses {
+   public:
+    int node(const GirFrame& frame, int storage) {
+        auto [it, fresh] = ids.try_emplace({frame, storage}, static_cast<int>(parent.size()));
+        if (fresh) parent.push_back(it->second);
+        return it->second;
+    }
+
+    void join(int a, int b) {
+        parent[find(a)] = find(b);
+    }
+
+    int token(int n) {
+        auto [it, fresh] = tokenOf.try_emplace(find(n), static_cast<int>(tokenOf.size()));
+        return it->second;
+    }
+
+   private:
+    int find(int n) {
+        while (parent[n] != n) n = parent[n] = parent[parent[n]];
+        return n;
+    }
+
+    std::map<std::pair<GirFrame, int>, int> ids;
+    std::vector<int> parent;
+    std::map<int, int> tokenOf;
+};
+
 GirSlotTokens collectGirSlotTokens(Function& func, AnalysisManager& AM) {
     GirSlotTokens tokens;
     const auto& frames = AM.getResult<GirFrameAnalysis>(func);
     if (frames.empty()) return tokens;
 
+    GirSlotClasses classes;
+    std::map<std::pair<const StinkyInstruction*, size_t>, int> accessNode;
+    for (const GirAccessOccurrence& occurrence : frames.occurrences) {
+        const int n = classes.node(occurrence.frame, occurrence.storage);
+        auto [it, fresh] = accessNode.try_emplace({occurrence.inst, occurrence.accessIndex}, n);
+        if (!fresh) classes.join(it->second, n);
+    }
+    // Numbered in occurrence order, which is deterministic; the map is only a lookup.
     for (const GirAccessOccurrence& occurrence : frames.occurrences)
-        tokens[occurrence.inst].insert(occurrence.storage);
+        tokens[occurrence.inst].insert(
+            classes.token(accessNode.at({occurrence.inst, occurrence.accessIndex})));
 
     const auto& hazards = AM.getResult<GirFrameHazardAnalysis>(func);
     for (const GirFrameHazard& hazard : hazards.hazards) {
@@ -99,7 +142,12 @@ GirSlotTokens collectGirSlotTokens(Function& func, AnalysisManager& AM) {
                 auto owned = frames.actionInstructions.find(action->actionId);
                 if (owned != frames.actionInstructions.end()) pieces = owned->second;
             }
-            for (const StinkyInstruction* piece : pieces) tokens[piece].insert(hazard.storage);
+            const int producer = classes.token(classes.node(hazard.producerFrame, hazard.storage));
+            const int consumer = classes.token(classes.node(hazard.consumerFrame, hazard.storage));
+            for (const StinkyInstruction* piece : pieces) {
+                tokens[piece].insert(producer);
+                tokens[piece].insert(consumer);
+            }
         }
     }
     return tokens;
