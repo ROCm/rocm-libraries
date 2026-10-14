@@ -201,17 +201,17 @@ jobs:
       rocm_rpm_package_version: ${{ needs.setup.outputs.rocm_rpm_package_version }}
       test_type: ${{ needs.setup.outputs.test_type }}
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
-      # changed_projects is intentionally NOT passed yet. setup still computes
-      # it, and still uses it to drop prebuilt stages that build a changed
-      # project, but the artifact-granular build/test work it feeds downstream
-      # is unfinished. Leaving it unset keeps a full test run here.
+      # Scopes the test run to the projects this PR touched. It does not narrow
+      # the build: TheRock builds every in-scope stage in full for an external
+      # repo, so a rocPRIM change still rebuilds all of math-libs.
       #
       # TheRock's determine_rocm_test_dependencies.py natively resolves
       # shared/* monorepo subtrees (shared/stinkytofu, shared/tensile,
       # shared/origami, shared/mxdatagenerator, shared/rocroller) into the
-      # right consumer set, so when this is re-enabled the value can be passed
-      # straight through without a rocm-libraries-side translation step.
+      # right consumer set, so the value is passed straight through without a
+      # rocm-libraries-side translation step.
       # See ROCm/rocm-libraries#11784 for the retired stopgap this replaces.
+      changed_projects: ${{ needs.setup.outputs.changed_projects }}
       repository: ROCm/TheRock
       ref: users/geomin12/remove-external-configure-ci
     permissions:
@@ -234,7 +234,8 @@ jobs:
       rocm_package_version: ${{ needs.setup.outputs.rocm_package_version }}
       test_type: ${{ needs.setup.outputs.test_type }}
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
-      # changed_projects intentionally not passed yet; see the Linux job above.
+      # Test-only scoping; see the Linux job above.
+      changed_projects: ${{ needs.setup.outputs.changed_projects }}
       repository: ROCm/TheRock
       ref: users/geomin12/remove-external-configure-ci
     permissions:
