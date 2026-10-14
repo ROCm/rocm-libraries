@@ -31,12 +31,13 @@ from rocke.dispatch.core import (
     make_kernel_id,
 )
 
-from . import gfx942
+from . import gfx942, gfx950
 from .common import (
     FAMILY,
     MLA_ABI_VERSION,
     MLA_DIM_VOCABULARY,
     MLA_FEATURES,
+    MLA_OP,
     MLARequest,
     _request_errors,
     num_q_blocks_for,
@@ -47,7 +48,7 @@ _FAMILY = FAMILY
 MLA_REGISTRY = CandidateRegistry(
     _FAMILY, dim_vocabulary=MLA_DIM_VOCABULARY, require_build=True
 )
-for _module in (gfx942,):
+for _module in (gfx942, gfx950):
     _module.register(MLA_REGISTRY)
 
 
@@ -56,9 +57,8 @@ def mla_candidates() -> Tuple[KernelCandidate, ...]:
 
 
 def _kernel_id(req: MLARequest, candidate: KernelCandidate, spec: Any) -> KernelId:
-    # ``req.op`` rather than a literal: this family already anticipates a
-    # second op (decode-absorb), and a hard-coded "mla_prefill_fwd" would give
-    # two different ops the same selection key.
+    # One op for the family (``MLA_OP``): prefill and decode are told apart by
+    # candidate and spec, both of which are in the selection key.
     return make_kernel_id(req, candidate, spec, op=req.op)
 
 
@@ -131,6 +131,7 @@ __all__ = [
     "MLA_ABI_VERSION",
     "MLA_DIM_VOCABULARY",
     "MLA_FEATURES",
+    "MLA_OP",
     "MLA_REGISTRY",
     "MLARequest",
     "dispatch_mla",

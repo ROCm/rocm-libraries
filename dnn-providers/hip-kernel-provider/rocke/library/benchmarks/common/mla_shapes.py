@@ -127,6 +127,7 @@ class MLAShape:
             num_heads=self.num_query_heads,
             total_q=self.total_q,
             num_seqs=self.batch,
+            max_seqlen_q=self.seqlen_q,
             max_seqlen_k=self.seqlen_k,
             arch=arch,
             d_nope=self.geometry.qk_nope_dim,

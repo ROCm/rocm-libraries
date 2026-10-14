@@ -294,6 +294,10 @@ REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
     "kernels.gfx950.kda_chunkwise.KdaChunkPrepSpec": (),
     "kernels.gfx950.kda_chunkwise.KdaChunkScanSpec": (),
     "kernels.gfx950.kda_chunkwise.KdaTileSpec": (),
+    # MLA: the head count is the only problem shape.
+    "kernels.mla.mla_decode.MlaDecodeSpec": ("num_heads",),
+    "kernels.mla.mla_decode_gfx950.MlaDecodeGfx950Spec": ("num_heads",),
+    "kernels.mla.mla_decode_combine.MlaDecodeCombineSpec": ("num_heads",),
     "kernels.mla.mla_prefill_gfx942.MlaPrefillSpec": ("num_heads",),
     # Reached through a spec field, so a descriptor has to express it too.
     "rocke.helpers.qk_scale.QkScaleSpec": ("layout",),

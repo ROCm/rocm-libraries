@@ -498,6 +498,7 @@ class TestShippedLayoutOccupancy(_OccupancyGuard, unittest.TestCase):
                 num_heads=128,
                 total_q=64,
                 num_seqs=2,
+                max_seqlen_q=32,
                 max_seqlen_k=96,
                 arch="gfx942",
                 num_kv_blocks=12,
@@ -665,7 +666,14 @@ class TestLdsModelMatchesEmittedPool(unittest.TestCase):
         from dispatch.mla import MLARequest, dispatch_mla
 
         def shipped(**kw):
-            req = {"num_heads": 128, "total_q": 64, "num_seqs": 2, "max_seqlen_k": 96}
+            # Two equal sequences; callers that change total_q say how long.
+            req = {
+                "num_heads": 128,
+                "total_q": 64,
+                "num_seqs": 2,
+                "max_seqlen_q": 32,
+                "max_seqlen_k": 96,
+            }
             req.update(kw)
             # num_seqs sequences of ceil(max_seqlen_k / 16) pages each.
             req["num_kv_blocks"] = req["num_seqs"] * -(-req["max_seqlen_k"] // 16)
@@ -675,7 +683,7 @@ class TestLdsModelMatchesEmittedPool(unittest.TestCase):
             specs = {
                 "two heads x two tiles": shipped(),
                 "odd heads, single-head": shipped(num_heads=5),
-                "agpr_acc": shipped(total_q=8192, max_seqlen_k=8192),
+                "agpr_acc": shipped(total_q=8192, max_seqlen_q=4096, max_seqlen_k=8192),
             }
             self.assertTrue(specs["agpr_acc"].agpr_acc)
             self.assertEqual(specs["odd heads, single-head"].heads_per_wg, 1)
