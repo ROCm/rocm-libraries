@@ -196,6 +196,11 @@ struct SdpaGraphSpec
     /// Overrides of the bounds the mask kind sets, for bands and other windows.
     std::optional<int64_t> leftBound;
     std::optional<int64_t> rightBound;
+    /// The deprecated causal booleans, which the graph may set alongside (or instead of)
+    /// bounds, and an alignment value to write over the mask kind's.
+    bool deprecatedCausalTopLeft = false;
+    bool deprecatedCausalBottomRight = false;
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment> diagonalAlignment;
 
     SdpaStats stats = SdpaStats::NONE;
     /// The LSE output laid out [B, Sq, H] rather than packed [B, H, Sq].
@@ -433,9 +438,9 @@ inline flatbuffers::FlatBufferBuilder buildFlydslSdpaRdnaGraph(const SdpaGraphSp
     {
         attributesBuilder.add_right_bound(*right);
     }
-    attributesBuilder.add_diagonal_alignment(alignment);
-    attributesBuilder.add_causal_mask(false);
-    attributesBuilder.add_causal_mask_bottom_right(false);
+    attributesBuilder.add_diagonal_alignment(spec.diagonalAlignment.value_or(alignment));
+    attributesBuilder.add_causal_mask(spec.deprecatedCausalTopLeft);
+    attributesBuilder.add_causal_mask_bottom_right(spec.deprecatedCausalBottomRight);
 
     if(spec.scaleKind == SdpaScale::VALUE)
     {

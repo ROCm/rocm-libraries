@@ -9,6 +9,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <string>
@@ -187,23 +188,38 @@ bool isPackedRowMajor(const data_objects::TensorAttributes& tensor)
     for(auto axis = static_cast<int64_t>(dims->size()) - 1; axis >= 0; --axis)
     {
         const auto index = static_cast<flatbuffers::uoffset_t>(axis);
-        if(strides->Get(index) != expected)
+        const int64_t extent = dims->Get(index);
+        // A non-positive extent, or one whose product would overflow, describes no tensor
+        // the kernel can address.
+        if(strides->Get(index) != expected || extent <= 0
+           || expected > std::numeric_limits<int64_t>::max() / extent)
         {
             return false;
         }
-        expected *= dims->Get(index);
+        expected *= extent;
     }
     return true;
 }
 
+/// The largest operand the kernel addresses: it views each of x, y and gamma as one
+/// buffer whose offsets are 32-bit bytes, and takes M and N as int32.
+constexpr int64_t MAX_OPERAND_BYTES = 2147483647LL;
+
 /// Product of every extent except the innermost: the row count the grid is sized from.
+/// -1 for a non-positive extent or a product past MAX_OPERAND_BYTES, which no launch
+/// could address anyway.
 int64_t rowCount(const data_objects::TensorAttributes& tensor)
 {
     const auto* dims = tensor.dims();
     int64_t rows = 1;
     for(flatbuffers::uoffset_t axis = 0; axis + 1 < dims->size(); ++axis)
     {
-        rows *= dims->Get(axis);
+        const int64_t extent = dims->Get(axis);
+        if(extent <= 0 || rows > MAX_OPERAND_BYTES / extent)
+        {
+            return -1;
+        }
+        rows *= extent;
     }
     return rows;
 }
@@ -345,6 +361,12 @@ std::optional<BoundTokens> flydslRmsNormGraphMatches(const MatchContext& context
     const auto rows = rowCount(*x);
     const auto columns = innermostExtent(*x);
     if(rows <= 0 || columns <= 0)
+    {
+        return std::nullopt;
+    }
+    // Every element of x and y within the 32-bit byte offsets of one buffer view (2 bytes
+    // each, bf16 or f16), which also keeps M and N within the kernel's int32 arguments.
+    if(columns > MAX_OPERAND_BYTES / 2 || rows > MAX_OPERAND_BYTES / (2 * columns))
     {
         return std::nullopt;
     }

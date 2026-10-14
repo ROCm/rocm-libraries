@@ -229,6 +229,16 @@ bool flydslSdpaAiwKernelMatches(const MatchContext& context,
         {
             return false;
         }
+        // The mask is read 8 keys at a time at the vector's alignment, like Q/K/V/O's rows:
+        // each row it steps to (batch, head, query; a broadcast axis has stride 0) must
+        // start on an 8-element boundary.
+        for(size_t axis = 0; axis < 3; ++axis)
+        {
+            if((*strides)[axis] % ROW_VECTOR_ELEMENTS != 0)
+            {
+                return false;
+            }
+        }
     }
 
     return integerMetadata(kernel, HAS_SINK_FIELD) == (binding.sink == NO_SINK ? 0 : 1);

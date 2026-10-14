@@ -364,6 +364,10 @@ INSTANTIATE_TEST_SUITE_P(
                                                      false,
                                                      NormFwdPhase::TRAINING);
                   }},
+        // x and y are each one buffer view with 32-bit byte offsets: 2^30 elements of bf16
+        // (2 GiB) is one byte past it.
+        GraphCase{"PastThirtyTwoBitAddressing",
+                  [] { return buildFlydslRmsNormGraph(DataType::BFLOAT16, {1 << 20, 1 << 10}); }},
         // Only two dtypes were baked, and there is no upconverting path.
         GraphCase{"AnUnsupportedDtype", [] { return buildFlydslRmsNormGraph(DataType::FLOAT); }},
         // One instance, one dtype for all three operands -- gamma is read at x's type.

@@ -323,6 +323,21 @@ std::vector<CdnaCase> acceptedCases()
     bottomRightWindow.seqLenKv = 1024;
     bottomRightWindow.leftBound = 128;
     cases.push_back({"BottomRightSlidingWindow", bottomRightWindow});
+    // The deprecated booleans alone, or with the right bound they imply.
+    auto deprecated = cdnaSpec();
+    deprecated.deprecatedCausalTopLeft = true;
+    cases.push_back({"DeprecatedTopLeftCausal", deprecated});
+    auto deprecatedBottomRight = cdnaSpec();
+    deprecatedBottomRight.deprecatedCausalBottomRight = true;
+    deprecatedBottomRight.rightBound = 0;
+    deprecatedBottomRight.seqLenQ = 64;
+    cases.push_back({"DeprecatedBottomRightCausalWithItsOwnRightBound", deprecatedBottomRight});
+    // A window wider than any row reaches hides nothing; the bound is compared, never
+    // subtracted, so even the largest one is no overflow.
+    auto wideWindow = cdnaSpec();
+    wideWindow.mask = SdpaMask::TOP_LEFT_CAUSAL;
+    wideWindow.leftBound = std::numeric_limits<int64_t>::max();
+    cases.push_back({"LargestLeftBound", wideWindow});
     return cases;
 }
 
@@ -410,6 +425,44 @@ std::vector<CdnaCase> declinedCases()
     group.heads = 30;
     group.kvHeads = 8;
     cases.push_back({"HeadsNotAMultipleOfKvHeads", group});
+    // The reference ignores explicit bounds under a deprecated boolean; a graph that sets
+    // other bounds as well is ambiguous.
+    auto deprecatedBand = cdnaSpec();
+    deprecatedBand.deprecatedCausalTopLeft = true;
+    deprecatedBand.rightBound = 16;
+    deprecatedBand.seqLenKv = 1024;
+    cases.push_back({"DeprecatedCausalWithABand", deprecatedBand});
+    auto deprecatedWindow = cdnaSpec();
+    deprecatedWindow.deprecatedCausalBottomRight = true;
+    deprecatedWindow.leftBound = 32;
+    cases.push_back({"DeprecatedCausalWithAWindow", deprecatedWindow});
+    auto bothDeprecated = cdnaSpec();
+    bothDeprecated.deprecatedCausalTopLeft = true;
+    bothDeprecated.deprecatedCausalBottomRight = true;
+    cases.push_back({"BothDeprecatedBooleans", bothDeprecated});
+    auto unknownAlignment = cdnaSpec();
+    unknownAlignment.mask = SdpaMask::TOP_LEFT_CAUSAL;
+    unknownAlignment.diagonalAlignment
+        = static_cast<hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment>(7);
+    cases.push_back({"UnknownDiagonalAlignment", unknownAlignment});
+    // A right bound past the keys' diagonal, at the largest value: declined without
+    // overflowing.
+    auto hugeRight = cdnaSpec();
+    hugeRight.mask = SdpaMask::TOP_LEFT_CAUSAL;
+    hugeRight.rightBound = std::numeric_limits<int64_t>::max();
+    cases.push_back({"LargestRightBound", hugeRight});
+    // The bias is read as runs of 4 keys and its view ends at the last key, so a run that
+    // straddles that end could read as zero: a key length not a multiple of 4 declines.
+    auto biasTail = cdnaSpec();
+    biasTail.withBias = true;
+    biasTail.biasDataType = DataType::BFLOAT16;
+    biasTail.seqLenKv = 333;
+    biasTail.biasDims = {1, 1, 1, 333};
+    cases.push_back({"BiasOverAKeyLengthNotAMultipleOfFour", biasTail});
+    // Each query head reads V's head through K's.
+    auto valueHeads = cdnaSpec();
+    valueHeads.valueHeads = 4;
+    cases.push_back({"ValueHeadsOfTheirOwn", valueHeads});
     return cases;
 }
 

@@ -492,6 +492,13 @@ inline std::optional<BiasStrides> servableBias(const data_objects::TensorAttribu
     {
         return std::nullopt;
     }
+    // The kernels read the bias as runs of 4 keys, and the slice's view ends at the last
+    // row's last key: a run straddling that end may read as zero, so a key length that is
+    // not a multiple of 4 declines.
+    if(problem.seqLenKv % 4 != 0)
+    {
+        return std::nullopt;
+    }
     const auto span = checkedProduct({problem.seqLenQ - 1, stride[2]});
     if(!span.has_value() || (*span + problem.seqLenKv) * BYTES_PER_ELEMENT > INT32_LIMIT)
     {
@@ -544,7 +551,8 @@ inline std::optional<OperandStrides> servableStatsStrides(
     {
         return std::nullopt;
     }
-    // The merge kernel addresses the whole tensor with one 32-bit offset.
+    // The merge kernel addresses the whole tensor with one 32-bit byte offset (element
+    // offset times 4).
     int64_t last = 0;
     for(const auto& [extent, stride] : {std::pair{batch, *batchStride},
                                         std::pair{heads, *headStride},
@@ -557,7 +565,7 @@ inline std::optional<OperandStrides> servableStatsStrides(
         }
         last += *reach;
     }
-    if(last >= INT32_LIMIT)
+    if(last >= INT32_LIMIT / static_cast<int64_t>(sizeof(float)))
     {
         return std::nullopt;
     }
@@ -613,14 +621,24 @@ inline std::optional<CdnaMask>
     bool alignBottomRight = false;
     if(topLeftDeprecated || bottomRightDeprecated)
     {
-        // The booleans mean right 0 at their corner; a right_bound the graph also sets wins.
-        right = right == UNBOUNDED ? 0 : right;
+        // The booleans mean right 0 at their corner, and the reference then ignores explicit
+        // bounds: a graph that sets other bounds as well is ambiguous and declines.
+        if(left != UNBOUNDED || (right != UNBOUNDED && right != 0))
+        {
+            return std::nullopt;
+        }
+        right = 0;
         alignBottomRight = bottomRightDeprecated;
     }
     else
     {
-        alignBottomRight
-            = attributes.diagonal_alignment() == data_objects::DiagonalAlignment::BOTTOM_RIGHT;
+        const auto alignment = attributes.diagonal_alignment();
+        if(alignment != data_objects::DiagonalAlignment::TOP_LEFT
+           && alignment != data_objects::DiagonalAlignment::BOTTOM_RIGHT)
+        {
+            return std::nullopt;
+        }
+        alignBottomRight = alignment == data_objects::DiagonalAlignment::BOTTOM_RIGHT;
     }
     if(right == UNBOUNDED)
     {
@@ -631,15 +649,17 @@ inline std::optional<CdnaMask>
         return CdnaMask{};
     }
     const int64_t align = alignBottomRight ? seqLenKv - seqLenQ : 0;
-    const int64_t offset = align + right;
-    if(offset > seqLenKv - seqLenQ)
+    // Compared before adding, so a bound near INT64_MAX cannot overflow.
+    if(right > seqLenKv - seqLenQ - align)
     {
         return std::nullopt;
     }
+    const int64_t offset = align + right;
     CdnaMask mask{true, offset};
     // The last query row, the one reaching furthest right, hides keys j < (Sq - 1) +
-    // window_lo; at or below -(Sq - 1) the window hides nothing.
-    if(left != UNBOUNDED && align - left > -(seqLenQ - 1))
+    // window_lo; at or below -(Sq - 1) the window hides nothing (left compared, not
+    // subtracted, for the same reason).
+    if(left != UNBOUNDED && left < align + seqLenQ - 1)
     {
         mask.windowLo = align - left;
     }
@@ -1132,6 +1152,84 @@ inline std::optional<size_t> splitWorkspaceBytes(const SdpaProblem& problem, int
     return static_cast<size_t>(*elements) * sizeof(float);
 }
 
+/// The bytes from @p tensor's first element to one past its last, through @p strides, or
+/// nullopt past int64: what one 32-bit buffer view or offset over the whole tensor must
+/// reach.
+inline std::optional<int64_t> wholeTensorBytes(const OperandStrides& strides,
+                                               int64_t batch,
+                                               int64_t heads,
+                                               int64_t sequence,
+                                               int64_t width,
+                                               int64_t elementBytes)
+{
+    int64_t last = width;
+    for(const auto& [extent, stride] : {std::pair{batch, strides.batch},
+                                        std::pair{heads, strides.head},
+                                        std::pair{sequence, strides.sequence}})
+    {
+        const auto reach = checkedProduct({extent - 1, stride});
+        if(!reach.has_value() || *reach > INT32_LIMIT)
+        {
+            return std::nullopt;
+        }
+        last += *reach;
+    }
+    return checkedProduct({last, elementBytes});
+}
+
+/// Whether a split or packed-GQA object's whole-tensor addressing reaches every element of
+/// Q and O within 32 bits: the merge kernel stores O at one offset over the whole tensor,
+/// and a packed object views a KV head's group of Q (and O) heads as one buffer.
+inline bool reachesWithin32Bits(const MatchContext& context,
+                                const data_objects::SdpaAttributes& attributes,
+                                const SdpaProblem& problem,
+                                const CdnaTile& tile)
+{
+    if(!tile.splitKv && !tile.packGqa)
+    {
+        return true;
+    }
+    const auto* q = findTensor(context, attributes.q_tensor_uid());
+    const auto* o = findTensor(context, attributes.o_tensor_uid());
+    if(q == nullptr || o == nullptr)
+    {
+        return false;
+    }
+    const auto qStrides
+        = servableStrides(*q, problem.batch, problem.numHeads, problem.seqLenQ, problem.headDim);
+    const auto oStrides
+        = servableStrides(*o, problem.batch, problem.numHeads, problem.seqLenQ, problem.headDimV);
+    if(!qStrides.has_value() || !oStrides.has_value())
+    {
+        return false;
+    }
+    const auto fits
+        = [](std::optional<int64_t> bytes) { return bytes.has_value() && *bytes <= INT32_LIMIT; };
+    if(tile.splitKv
+       && !fits(wholeTensorBytes(*oStrides,
+                                 problem.batch,
+                                 problem.numHeads,
+                                 problem.seqLenQ,
+                                 problem.headDimV,
+                                 BYTES_PER_ELEMENT)))
+    {
+        return false;
+    }
+    if(tile.packGqa)
+    {
+        // One KV head's group: its query heads and every query row.
+        const int64_t group = problem.numHeads / problem.numKvHeads;
+        if(!fits(wholeTensorBytes(
+               *qStrides, 1, group, problem.seqLenQ, problem.headDim, BYTES_PER_ELEMENT))
+           || !fits(wholeTensorBytes(
+               *oStrides, 1, group, problem.seqLenQ, problem.headDimV, BYTES_PER_ELEMENT)))
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
 /**
  * @brief Kernel-scoped applicability: do THIS candidate's baked fields fit the graph?
  *
@@ -1169,6 +1267,10 @@ inline bool familyKernelMatches(const MatchContext& context,
                    problem,
                    candidateSplits(problem, *tile, context.deviceProperties.multiProcessorCount))
                    .has_value()))
+    {
+        return false;
+    }
+    if(!reachesWithin32Bits(context, *attributes, problem, *tile))
     {
         return false;
     }

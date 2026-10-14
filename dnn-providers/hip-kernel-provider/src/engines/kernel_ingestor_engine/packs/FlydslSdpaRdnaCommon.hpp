@@ -280,9 +280,10 @@ struct SdpaMask
  *
  * The kernel applies the reference's two-sided rule directly, so every bound pair is
  * served: causal (right 0), a band (right > 0), a sliding window (left >= 0), and either
- * diagonal alignment. The deprecated causal booleans mean right 0 at their corner; a
- * right_bound the graph also sets wins over the boolean's implied 0. Setting both booleans
- * is contradictory and declined.
+ * diagonal alignment. The deprecated causal booleans mean right 0 at their corner, and the
+ * reference (PlanUtils extractDiagonalBandParams) then ignores any explicit bounds; a graph
+ * that sets a boolean together with bounds other than those it implies is ambiguous and
+ * declined, as are both booleans together and an alignment the schema does not name.
  */
 inline std::optional<SdpaMask> maskFor(const data_objects::SdpaAttributes& attributes)
 {
@@ -304,16 +305,22 @@ inline std::optional<SdpaMask> maskFor(const data_objects::SdpaAttributes& attri
 
     if(topLeftDeprecated || bottomRightDeprecated)
     {
-        if(mask.right == UNBOUNDED)
+        if(mask.left != UNBOUNDED || (mask.right != UNBOUNDED && mask.right != 0))
         {
-            mask.right = 0;
+            return std::nullopt;
         }
+        mask.right = 0;
         mask.alignBottomRight = bottomRightDeprecated;
     }
     else
     {
-        mask.alignBottomRight
-            = attributes.diagonal_alignment() == data_objects::DiagonalAlignment::BOTTOM_RIGHT;
+        const auto alignment = attributes.diagonal_alignment();
+        if(alignment != data_objects::DiagonalAlignment::TOP_LEFT
+           && alignment != data_objects::DiagonalAlignment::BOTTOM_RIGHT)
+        {
+            return std::nullopt;
+        }
+        mask.alignBottomRight = alignment == data_objects::DiagonalAlignment::BOTTOM_RIGHT;
     }
     return mask;
 }

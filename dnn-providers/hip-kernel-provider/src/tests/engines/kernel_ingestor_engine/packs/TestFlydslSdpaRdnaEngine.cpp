@@ -249,6 +249,13 @@ INSTANTIATE_TEST_SUITE_P(
                          s.mask = SdpaMask::TOP_LEFT_CAUSAL;
                          s.rightBound = 16;
                      })},
+        AcceptedCase{"DeprecatedTopLeftCausal",
+                     accepted([](SdpaGraphSpec& s) { s.deprecatedCausalTopLeft = true; })},
+        AcceptedCase{"DeprecatedBottomRightCausalWithItsOwnRightBound",
+                     accepted([](SdpaGraphSpec& s) {
+                         s.deprecatedCausalBottomRight = true;
+                         s.rightBound = 0;
+                     })},
         AcceptedCase{"SoftmaxStats", accepted([](SdpaGraphSpec& s) { s.stats = SdpaStats::LSE; })},
         AcceptedCase{"ScaleAbsent",
                      accepted([](SdpaGraphSpec& s) { s.scaleKind = SdpaScale::ABSENT; })},
@@ -295,6 +302,26 @@ INSTANTIATE_TEST_SUITE_P(
                          s.heads = 6;
                          s.kvHeads = 2;
                          s.valueHeads = 4;
+                     })},
+        // The reference ignores explicit bounds under a deprecated boolean; a graph that sets
+        // other bounds as well is ambiguous.
+        AcceptedCase{"DeprecatedCausalWithABand", accepted([](SdpaGraphSpec& s) {
+                         s.deprecatedCausalTopLeft = true;
+                         s.rightBound = 16;
+                     })},
+        AcceptedCase{"DeprecatedCausalWithAWindow", accepted([](SdpaGraphSpec& s) {
+                         s.deprecatedCausalBottomRight = true;
+                         s.leftBound = 32;
+                     })},
+        AcceptedCase{"BothDeprecatedBooleans", accepted([](SdpaGraphSpec& s) {
+                         s.deprecatedCausalTopLeft = true;
+                         s.deprecatedCausalBottomRight = true;
+                     })},
+        AcceptedCase{"UnknownDiagonalAlignment", accepted([](SdpaGraphSpec& s) {
+                         s.mask = SdpaMask::TOP_LEFT_CAUSAL;
+                         s.diagonalAlignment
+                             = static_cast<hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment>(
+                                 7);
                      })},
         // A bound below -1 has no meaning in the reference's convention.
         AcceptedCase{"LeftBoundBelowMinusOne",
@@ -383,6 +410,20 @@ TEST(TestFlydslSdpaRdnaBinding, BottomRightCausalLeavesTheOffsetToTheKernel)
     const auto bound = bindingsFor(spec);
     EXPECT_EQ(boundInt(bound, FLYDSL_SDPA_RDNA_CAUSAL_TOKEN), 1);
     // The kernel derives Skv - Sq itself, so per-batch lengths can move it later.
+    EXPECT_EQ(boundInt(bound, FLYDSL_SDPA_RDNA_RIGHT_BOUND_TOKEN), 0);
+    EXPECT_EQ(boundInt(bound, FLYDSL_SDPA_RDNA_ALIGN_BOTTOM_RIGHT_TOKEN), 1);
+}
+
+TEST(TestFlydslSdpaRdnaBinding, TheDeprecatedBottomRightBooleanIsCausalAtTheBottomRight)
+{
+    // The graph's alignment field says top-left; the boolean overrides it, as in the
+    // reference.
+    SdpaGraphSpec spec;
+    spec.deprecatedCausalBottomRight = true;
+    spec.seqLenQ = 64;
+    spec.seqLenKv = 300;
+    const auto bound = bindingsFor(spec);
+    EXPECT_EQ(boundInt(bound, FLYDSL_SDPA_RDNA_CAUSAL_TOKEN), 1);
     EXPECT_EQ(boundInt(bound, FLYDSL_SDPA_RDNA_RIGHT_BOUND_TOKEN), 0);
     EXPECT_EQ(boundInt(bound, FLYDSL_SDPA_RDNA_ALIGN_BOTTOM_RIGHT_TOKEN), 1);
 }
@@ -2346,6 +2387,25 @@ TEST(TestFlydslSdpaAiwKernelMatch, DeclinesRowsItsVectorLoadsCannotReachAligned)
     EXPECT_TRUE(aiwMatches(spec, makeAiwKernel("bf16", 64, 0))) << "a padded, aligned pitch";
     spec.valueSequenceStride = spec.kvHeads * spec.headDim + 4;
     EXPECT_FALSE(aiwMatches(spec, makeAiwKernel("bf16", 64, 0))) << "a pitch of 8n + 4 elements";
+}
+
+TEST(TestFlydslSdpaAiwKernelMatch, DeclinesAMaskWhoseRowsItsVectorLoadsCannotReachAligned)
+{
+    // The mask is read 8 keys at a time at the vector's alignment: a packed mask's row
+    // pitch is Skv, so 77 keys would start rows misaligned; 80, or 77 padded to 80, do not.
+    SdpaGraphSpec spec;
+    spec.withBias = true;
+    spec.seqLenKv = 80;
+    EXPECT_TRUE(aiwMatches(spec, makeAiwKernel("bf16", 64, 0, 64, 1, 1))) << "Skv 80";
+    spec.seqLenKv = 77;
+    EXPECT_FALSE(aiwMatches(spec, makeAiwKernel("bf16", 64, 0, 64, 1, 1))) << "Skv 77";
+    spec.biasDims = {1, 1, spec.seqLenQ, spec.seqLenKv};
+    spec.biasStrides = {spec.seqLenQ * 80, spec.seqLenQ * 80, 80, 1};
+    EXPECT_TRUE(aiwMatches(spec, makeAiwKernel("bf16", 64, 0, 64, 1, 1))) << "Skv 77, pitch 80";
+    // A mask that broadcasts over the queries steps no row at all.
+    spec.biasDims = {spec.seqLenKv};
+    spec.biasStrides = {1};
+    EXPECT_TRUE(aiwMatches(spec, makeAiwKernel("bf16", 64, 0, 64, 1, 1))) << "[Skv] mask";
 }
 
 TEST(TestFlydslSdpaAiwKernelMatch, DeclinesAMaskWhoseKeyAxisIsNotContiguous)
