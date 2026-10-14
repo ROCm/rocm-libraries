@@ -41,7 +41,7 @@
 # Test suite names (from INSTANTIATE_TEST_CASE_P / TEST):
 #   Krylov: cg, bicgstab, bicgstabl, cr, fcg, fgmres, gmres, idr, qmrcgstab
 #   Direct: lu, qr, inversion
-#   AMG:    pairwise_amg, ruge_stueben_amg, saamg, uaamg
+#   AMG:    hybrid_amg, pairwise_amg, ruge_stueben_amg, saamg, uaamg
 #   Other:  preconditioner, itersolver, chebyshev, mixed_precision
 #   Local:  local_matrix_*, local_vector, local_stencil  (skip in emulation)
 #   Infra:  backend, backend_init_order                   (skip in emulation)

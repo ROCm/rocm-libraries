@@ -49,6 +49,7 @@ from typing import List, Tuple, Sequence
 from threading import Lock
 
 from geko.utils import run_silent_command, parse_devices
+from geko.bench.utils import ensure_scale_columns
 from geko.concurrency import parallel_for
 from geko.concurrency.runner import Runner, Worker
 from geko.library import Library, LibraryCollection
@@ -319,7 +320,7 @@ def merge(
         raise FileNotFoundError(f"hipBLASLt path not found: '{hipblaslt_path}'")
 
     logger.info(f"Calling TensileMergeLibrary on '{inc_dir}'")
-    cmd = [str(hipblaslt_path / "tensilelite/Tensile/bin/TensileMergeLibrary")]
+    cmd = [str(hipblaslt_path / "tensilelite/tensilelite/bin/TensileMergeLibrary")]
     if not eff:
         cmd += ["--no_eff"]
     cmd += ["--force_merge", str(force), orig_dir, inc_dir, output_dir]
@@ -348,12 +349,12 @@ def create(hipblaslt_path: str | Path, library_dir: str | Path, output_dir: str 
     if len(lib_paths) == 0:
         raise ValueError(f"No valid libraries found in '{library_dir}'")
 
-    arch = load_library(lib_paths[0]).arch
+    arch = load_library(lib_paths[0]).schedule
 
     logger.info(f"Calling TensileCreateLibrary on '{library_dir}'")
     run_silent_command(
         [
-            str(hipblaslt_path / "tensilelite/Tensile/bin/TensileCreateLibrary"),
+            str(hipblaslt_path / "tensilelite/tensilelite/bin/TensileCreateLibrary"),
             "--code-object-version",
             version,
             "--library-format",
@@ -390,11 +391,11 @@ def normalize(library_path: str | Path, output_path: str | Path, hipblaslt_path:
         sys.path.append(str(hipblaslt_path / "tensilelite"))
 
     try:
-        from Tensile import LibraryIO
-        from Tensile.CustomYamlLoader import load_yaml_stream
-        from Tensile.TensileMergeLibrary import convertToDict, normalizeDictLibraryLayout
+        from tensilelite import LibraryIO
+        from tensilelite.CustomYamlLoader import load_yaml_stream
+        from tensilelite.TensileMergeLibrary import convertToDict, normalizeDictLibraryLayout
     except ImportError as e:
-        raise ImportError(f"Failed to import Tensile. Install it or pass the correct path to hipBLASLt. Error: {e}. ")
+        raise ImportError(f"Failed to import tensilelite. Install it or pass the correct path to hipBLASLt. Error: {e}. ")
     
     data = load_yaml_stream(library_path, SafeLoader)
     if not isinstance(data, list):
@@ -440,7 +441,7 @@ def from_dataframe(
     if "lib" not in df.columns:
         raise ValueError(f"Each GEMM must contain the lib (file) it belongs to")
 
-    df = df.rename({"m": "M", "n": "N", "k": "K"}, axis=1)
+    df = ensure_scale_columns(df.rename({"m": "M", "n": "N", "k": "K"}, axis=1))
     if not all(c in df.columns for c in GEMM_LOG_FIELDS):
         raise ValueError(f"Input DataFrame has missing fields")
 
@@ -521,7 +522,7 @@ def from_full_dataframe(
     if "solutionIdx_reference" not in df.columns:
         raise ValueError(f"Each GEMM must contain the solutionIdx_reference column")
 
-    df = df.rename({"m": "M", "n": "N", "k": "K"}, axis=1)
+    df = ensure_scale_columns(df.rename({"m": "M", "n": "N", "k": "K"}, axis=1))
     if not all(c in df.columns for c in GEMM_LOG_FIELDS):
         raise ValueError(f"Input DataFrame has missing fields")
 

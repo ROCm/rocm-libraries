@@ -3,128 +3,396 @@
     "llvm20": {
       "cases": {
         "attention_dense_gfx942/default_d128_bf16_causal": {
-          "bytes": 186152,
-          "sha256": "9063c3a5320e8baa713ed5c8a209c95099944faf339a6d4037af67572db8f1f9"
+          "bytes": 170850,
+          "sha256": "f114a2f8804581630ce87caf972d7aabd2e32ffa122bc7f94f9b46ba6e038167"
         },
         "attention_dense_gfx942/default_d128_bf16_mha": {
-          "bytes": 186208,
-          "sha256": "c5f95a09cdd8dbfc59fedf8d46e155590442195dd8941cce1a9dabfdf415970b"
+          "bytes": 170850,
+          "sha256": "f114a2f8804581630ce87caf972d7aabd2e32ffa122bc7f94f9b46ba6e038167"
         },
         "attention_dense_gfx942/default_d128_fp16_causal": {
-          "bytes": 127884,
-          "sha256": "b8bd04a0e9c94600679cf8828e3f9160a1987148a6d5de5ab7009ae0ed222b87"
+          "bytes": 113206,
+          "sha256": "67333a65c6a6f4ccaa4b67c3eb59a48ff4c1cd49a1e4f2359b57ef336b53e16f"
         },
         "attention_dense_gfx942/default_d128_fp16_full": {
-          "bytes": 112800,
-          "sha256": "4ff37bfa00600aaf0a1b973a1accec562127cb3cf4fe6b7e97ac1cdbe652cccb"
+          "bytes": 97814,
+          "sha256": "a183a50eaa5374d0f78a93c76821e92d8c871d4fd944cfc9d9e478f4f00efa61"
         },
         "attention_dense_gfx942/default_d128_fp16_gqa16_8": {
-          "bytes": 127903,
-          "sha256": "828f3039e6565ccdad5dae189dbfc6bae6164d401fcaa8aab37769adcf565a4a"
+          "bytes": 113206,
+          "sha256": "67333a65c6a6f4ccaa4b67c3eb59a48ff4c1cd49a1e4f2359b57ef336b53e16f"
         },
         "attention_dense_gfx942/default_d64_bf16_bn128": {
-          "bytes": 191692,
-          "sha256": "57fe0e7a9f12b5d992d0adb61219a7a2291882ce7e390bb2b93961187a4f3e04"
+          "bytes": 185988,
+          "sha256": "de162ee0bd46b1dd0c2cf721f951fc39276cf14845e9f46495efb6a5da715b86"
         },
         "attention_dense_gfx942/default_d64_bf16_causal": {
-          "bytes": 109974,
-          "sha256": "935d79395de4936b7fc12c9362187193d5562ec73b1eac68878204e6848794ec"
+          "bytes": 103197,
+          "sha256": "5df3dd8bc0d490daa515f51c39a5c7265c6ae9eb67cc5db34c30dbd2925bd900"
         },
         "attention_dense_gfx942/default_d64_fp16_causal": {
-          "bytes": 103700,
-          "sha256": "1341f480a350904d7d8ab49ddf435461c4ff88162b04a46160ebefc34446e878"
+          "bytes": 97180,
+          "sha256": "29129acc4ed1a52a4c8c5c122a65ed546864018752ad15dd548134061fb655a2"
         },
         "attention_dense_gfx942/dispatch_d64_bf16_causal": {
-          "bytes": 111187,
-          "sha256": "1979d509eac1888a87016b1d9831d2e0857996dee0aa1908516e9eda76826ece"
+          "bytes": 104409,
+          "sha256": "dee9e70e44c2d724f07a5f6f3c400ad06d7340b48a0f526d606964a043d1b322"
         },
         "attention_dense_gfx942/dispatch_d64_fp16_causal": {
-          "bytes": 104913,
-          "sha256": "0aab9f3007a83f2ebb7419ec6556aa43562d8ee6102c6c8ffb1a86d9fe550e68"
+          "bytes": 98392,
+          "sha256": "305409b65503241921220ccaa73b350d1011a727c352ae41e8f1ead88ed54fef"
+        },
+        "attention_dense_gfx942/dispatch_lse_d128_bf16_causal": {
+          "bytes": 177689,
+          "sha256": "e161b8a0de9e4164977f4ae8631aa266b009d55e37329b38aa0f124f36999930"
+        },
+        "attention_dense_gfx942/dispatch_sink_d64_bf16_causal": {
+          "bytes": 104831,
+          "sha256": "e5bd846f9ab5dac5e7c1a56bcd7c5a3c127b70b4b84738090aed07574e0f6e0b"
+        },
+        "attention_dense_gfx942/dispatch_swa_d128_bf16_w128": {
+          "bytes": 175001,
+          "sha256": "443e2dc10e981be13c5946a9594db674ff39af026386dda7b6538373ae1ea418"
+        },
+        "attention_dense_gfx942/lse_d128_bf16_causal": {
+          "bytes": 177689,
+          "sha256": "e161b8a0de9e4164977f4ae8631aa266b009d55e37329b38aa0f124f36999930"
+        },
+        "attention_dense_gfx942/lse_persist_empty_window_d128_bf16": {
+          "bytes": 184443,
+          "sha256": "5d6db8b2dc0fef4f94d618f6bf64861e87614fe31c590b357c6e3ac555a0556b"
+        },
+        "attention_dense_gfx942/lse_sink_persist_empty_window_d128_bf16": {
+          "bytes": 184990,
+          "sha256": "d0fa692777ad8667736de1c417b698ca4efdc786ceb303daaff38f3bd91f2b15"
         },
         "attention_dense_gfx942/persist_d128_bf16_intl": {
-          "bytes": 187317,
-          "sha256": "fccf6bd8c682556dde15835b2485737d118a3e3764aa9dc844c1f665ff497b0f"
+          "bytes": 173617,
+          "sha256": "c2d907f63da1a257cacae2efb9adf3a226d2cf3f2d9eec5b1827aaca6620fa23"
         },
         "attention_dense_gfx942/persist_d128_bf16_qbmaj": {
-          "bytes": 186966,
-          "sha256": "6fecf26c983b463be9ebf64bf018de11ed2f87bbee88d19d361e213795dbcf08"
+          "bytes": 173206,
+          "sha256": "21b2414ed8e74b100057607234503f17af6df1661f222a119db911384b8e42e3"
         },
         "attention_dense_gfx942/persist_d128_fp16_hkvmaj": {
-          "bytes": 129235,
-          "sha256": "e5ac0e35ba19836e19d4f1080a72ce3173c9efaf33efa7fc0cde90b403a7ce26"
+          "bytes": 115765,
+          "sha256": "29559af89c008d4b1f73a605c4c8a8645720aa5f55f3a03c5b2c683069f98c5c"
         },
         "attention_dense_gfx942/persist_d64_bf16_hkvmaj": {
-          "bytes": 112247,
-          "sha256": "805aeda8dce5f5cd33a081fbab9c5424277a06c3c02a39fba2c9d1c855f15144"
+          "bytes": 106693,
+          "sha256": "e6d25511f4fb1f1d4e7f57aa136bf72b18ac0ee06f01e76987f7ce9887db80af"
         },
         "attention_dense_gfx942/persist_d64_fp16_qbmaj": {
-          "bytes": 105543,
-          "sha256": "568b407df7b49485cb4a6f32c4788423fb1ff6c72c950673009f7231ebbc628c"
+          "bytes": 100228,
+          "sha256": "ce955ab86bbf411befc81b3eda72d7cd9ea67a8388c8cf5247f112d2c15ee992"
+        },
+        "attention_dense_gfx942/persist_sink_d128_bf16_qbmaj": {
+          "bytes": 173736,
+          "sha256": "9d4fb5f841cc49e5f52f78f0d53a1aa8779d3c1debcccae6a3b28b103ab476ea"
+        },
+        "attention_dense_gfx942/persist_sink_d128_fp16_hkvmaj": {
+          "bytes": 116269,
+          "sha256": "36038c6aeb695898708fd8070322038878d746a4caac49dc5329e6ebf5f80aeb"
+        },
+        "attention_dense_gfx942/persist_swa_d128_bf16_w128": {
+          "bytes": 177498,
+          "sha256": "8a9ed70d9e9c9dc65e52e502908348437b42c45d012055988dceeaa555f30de3"
+        },
+        "attention_dense_gfx942/persist_swa_sink_d128_bf16_w128": {
+          "bytes": 178016,
+          "sha256": "f4173b11417cc798bff1bb0b38350adb127fb60a0aebea15653f294ed2a8909b"
+        },
+        "attention_dense_gfx942/sink_d128_bf16_causal": {
+          "bytes": 171366,
+          "sha256": "143a9755f894cca55c75b268c2556537cc477bf41be55b5709c691ff1de9b888"
+        },
+        "attention_dense_gfx942/sink_d128_fp16_full": {
+          "bytes": 98321,
+          "sha256": "5189bf6a4d982854b6095015b8c9991852b030790a37b264f0764f828cc14d77"
+        },
+        "attention_dense_gfx942/sink_d64_fp16_causal": {
+          "bytes": 97591,
+          "sha256": "b11be08d9eca3e6cd963d9e657060385408d61310bc770ebf0aedc1982c34a3d"
+        },
+        "attention_dense_gfx942/swa_d128_bf16_w128": {
+          "bytes": 175001,
+          "sha256": "443e2dc10e981be13c5946a9594db674ff39af026386dda7b6538373ae1ea418"
+        },
+        "attention_dense_gfx942/swa_d128_fp16_w256": {
+          "bytes": 117345,
+          "sha256": "0202148de15ce626c6d78e085e2548c88e61d13b6f10829a9172b83565c29b30"
+        },
+        "attention_dense_gfx942/swa_d64_bf16_w128": {
+          "bytes": 108408,
+          "sha256": "ff7248c3a1073d145b9b1137376bb09b3b70b94f2ab359860998bb093eceb488"
+        },
+        "attention_dense_gfx942/swa_sink_d128_bf16_w128": {
+          "bytes": 175521,
+          "sha256": "c604f8fff75e79755e351504879200ac9bf3f18412fb8261f41ecd368e33d0df"
         }
       }
     },
     "llvm22": {
       "cases": {
         "attention_dense_gfx942/default_d128_bf16_causal": {
-          "bytes": 186248,
-          "sha256": "ecb0f1d533a710f03f35f239bd971c9f6a9b05289a6cf403ca49d2f41c2cb14f"
+          "bytes": 170946,
+          "sha256": "24380550a9745e6d209ad497be3c3b81336a5708f163ffb4c5e96bf744132bd1"
         },
         "attention_dense_gfx942/default_d128_bf16_mha": {
-          "bytes": 186304,
-          "sha256": "95d7b6eee764201f88dbf5eaf0c12bd90b74c86db27914744971b73d64eb5465"
+          "bytes": 170946,
+          "sha256": "24380550a9745e6d209ad497be3c3b81336a5708f163ffb4c5e96bf744132bd1"
         },
         "attention_dense_gfx942/default_d128_fp16_causal": {
-          "bytes": 127980,
-          "sha256": "ad59339d9ddf3383dead32b67f5c85bcbbb528a4f418d07b16de84c978cd0c9e"
+          "bytes": 113302,
+          "sha256": "17d7827f7e0f8c203c9529abfdedfed8f461e6b491c5fd70ac9287be87fbc8f1"
         },
         "attention_dense_gfx942/default_d128_fp16_full": {
-          "bytes": 112896,
-          "sha256": "5b1021c492424335bc5eec3de6c349fc2a057a066ce4b4ead922ded156276918"
+          "bytes": 97910,
+          "sha256": "30a2bf4bf475f87ae02068198e459357bac3bd5074d21ba25c45e8deacd4454f"
         },
         "attention_dense_gfx942/default_d128_fp16_gqa16_8": {
-          "bytes": 127999,
-          "sha256": "201066444224286645d169751233393184972588ec91d781ca2ec5c11cfda8b0"
+          "bytes": 113302,
+          "sha256": "17d7827f7e0f8c203c9529abfdedfed8f461e6b491c5fd70ac9287be87fbc8f1"
         },
         "attention_dense_gfx942/default_d64_bf16_bn128": {
-          "bytes": 191788,
-          "sha256": "8be0f68483b8f639276b8637ac85ad48d00d91ce9616a720a35daf64dae13d56"
+          "bytes": 186084,
+          "sha256": "64d991d862d20a3111d55a509080fb61151c4e45e9d7cca468c4a2305fc29513"
         },
         "attention_dense_gfx942/default_d64_bf16_causal": {
-          "bytes": 110070,
-          "sha256": "f0d6af12521b756567953e3777408a15f853a0093663d8a1e29f3de5ec0cab3e"
+          "bytes": 103293,
+          "sha256": "0f6489269d39d83f116b77e599a6aa362192e70f6a2466449a5cb2a1ae656d14"
         },
         "attention_dense_gfx942/default_d64_fp16_causal": {
-          "bytes": 103796,
-          "sha256": "d111b5ad47d96eeeaa64bfa172973227c5c6c3a161b9d1363f630295c601eed9"
+          "bytes": 97276,
+          "sha256": "2af0ea0aa87cad7ccbd05774364f3ef4db629b67f74911f89c572e197098a5c1"
         },
         "attention_dense_gfx942/dispatch_d64_bf16_causal": {
-          "bytes": 111283,
-          "sha256": "1a5f748703e3093f9d5bfb96746c9a5ba21bf677305077b0085fbef6614d2600"
+          "bytes": 104505,
+          "sha256": "36760a0a303f9cf4e4bb5b24ea921775e7b83b46d00079e0923f4e6e5a9e228b"
         },
         "attention_dense_gfx942/dispatch_d64_fp16_causal": {
-          "bytes": 105009,
-          "sha256": "a8b2b8b585e125794ff8119a26cabdb9f156b23fdc911dfb2d3fa03761da9c7b"
+          "bytes": 98488,
+          "sha256": "930b02fedbb935624accd81ff1fe561c6597a28ca11cf615becb9784d7522439"
+        },
+        "attention_dense_gfx942/dispatch_lse_d128_bf16_causal": {
+          "bytes": 177785,
+          "sha256": "63490a820e7354947c259d49672c5ea01889f9c9864e02efe0ed259ca9ffe61d"
+        },
+        "attention_dense_gfx942/dispatch_sink_d64_bf16_causal": {
+          "bytes": 104927,
+          "sha256": "b812d4f95f9a0d54b145fd37adf33ebb5cd103b27904a1041c9cd95e7d1753a9"
+        },
+        "attention_dense_gfx942/dispatch_swa_d128_bf16_w128": {
+          "bytes": 175097,
+          "sha256": "831246c3f5a0e5f0509f926405cab8b5f30e29df9e6a7c6d5da46bc45db399f6"
+        },
+        "attention_dense_gfx942/lse_d128_bf16_causal": {
+          "bytes": 177785,
+          "sha256": "63490a820e7354947c259d49672c5ea01889f9c9864e02efe0ed259ca9ffe61d"
+        },
+        "attention_dense_gfx942/lse_persist_empty_window_d128_bf16": {
+          "bytes": 184539,
+          "sha256": "43c47ec48fdd586066beaa21f871a63ac389f84574af1152cccd612ab4fad1fb"
+        },
+        "attention_dense_gfx942/lse_sink_persist_empty_window_d128_bf16": {
+          "bytes": 185086,
+          "sha256": "a55bdf94404df1fa02009d4429dcacef74fddd5e4dd4e6798dcda7c50a58e9b4"
         },
         "attention_dense_gfx942/persist_d128_bf16_intl": {
-          "bytes": 187413,
-          "sha256": "577ba5e06e75a216f6444e9c160d7a0ee29e243ae3aa10d4e7634accff199800"
+          "bytes": 173713,
+          "sha256": "aac88b95ea00d399b5bd67e7094ead9659925d6abd91aedfad211e4a048c15ed"
         },
         "attention_dense_gfx942/persist_d128_bf16_qbmaj": {
-          "bytes": 187062,
-          "sha256": "d5870b2eee4685ee4de98c63ef4e95d9639939cf51a222cc51386140e636f0ee"
+          "bytes": 173302,
+          "sha256": "36ad138df0b091a5399b29ad818fb03213d131aa94c6dda7a884867a7b2b5eca"
         },
         "attention_dense_gfx942/persist_d128_fp16_hkvmaj": {
-          "bytes": 129331,
-          "sha256": "c1a71589554dfadf28b6e2d725f68998a403b554c687b3d6f88fdc1d51d9e211"
+          "bytes": 115861,
+          "sha256": "0d9d315ad11fcac7d10dd7b87f0bf771b398d5f226cdb7ec1647adfe0244f2f1"
         },
         "attention_dense_gfx942/persist_d64_bf16_hkvmaj": {
-          "bytes": 112343,
-          "sha256": "3eb58000022062f5b5091e3dbaeb3643e60215dc575fd89cc1f3a54a63332b1a"
+          "bytes": 106789,
+          "sha256": "b04e2a2482db1a690b246995a46430c65d3fe32420c16de8aaba3e1c58201bbc"
         },
         "attention_dense_gfx942/persist_d64_fp16_qbmaj": {
-          "bytes": 105639,
-          "sha256": "be52e342c5c6b06cf716f54b33033cbda5bb14ce2402dc9b1ca906db10d872a4"
+          "bytes": 100324,
+          "sha256": "e1ba9da81bc46b0934e2203e7f1d10bb4dcbec0eafeba1c892e9330465285e61"
+        },
+        "attention_dense_gfx942/persist_sink_d128_bf16_qbmaj": {
+          "bytes": 173832,
+          "sha256": "566915921d6e8c9a9688af470d4c920933742e2d6be65b74892cc49c249b6843"
+        },
+        "attention_dense_gfx942/persist_sink_d128_fp16_hkvmaj": {
+          "bytes": 116365,
+          "sha256": "c7b860e4c607f534228998bec0eb851791838ceb9f1c395e5cf05ab2ca82e207"
+        },
+        "attention_dense_gfx942/persist_swa_d128_bf16_w128": {
+          "bytes": 177594,
+          "sha256": "2750a53f8244bc7f61acf5d42abed57b1dd2aea0ae5c38dfa9f672dbe7273677"
+        },
+        "attention_dense_gfx942/persist_swa_sink_d128_bf16_w128": {
+          "bytes": 178112,
+          "sha256": "0330552760e69cb1fd54ba3fefdc501599621773085fc3dcd0a1d5669acdc102"
+        },
+        "attention_dense_gfx942/sink_d128_bf16_causal": {
+          "bytes": 171462,
+          "sha256": "09c9c902d0b51946979ecc7c635cbf3edde6f1f66847b8e5838d28d94b4f9a73"
+        },
+        "attention_dense_gfx942/sink_d128_fp16_full": {
+          "bytes": 98417,
+          "sha256": "4ba5547683227ebb00e8620714e4ab189d36c3e15fd0070ea81dd13bbfc910de"
+        },
+        "attention_dense_gfx942/sink_d64_fp16_causal": {
+          "bytes": 97687,
+          "sha256": "36b65514f928489a0fd5b2a91f2a1c5451dbf271706f7469cf71eb7355365880"
+        },
+        "attention_dense_gfx942/swa_d128_bf16_w128": {
+          "bytes": 175097,
+          "sha256": "831246c3f5a0e5f0509f926405cab8b5f30e29df9e6a7c6d5da46bc45db399f6"
+        },
+        "attention_dense_gfx942/swa_d128_fp16_w256": {
+          "bytes": 117441,
+          "sha256": "d2c8d0efada87de2ee6a0a71e13f0a795df45218e0dd76fc91a6dee63725d851"
+        },
+        "attention_dense_gfx942/swa_d64_bf16_w128": {
+          "bytes": 108504,
+          "sha256": "cc2e8ae4ce72dd55b66240e9f6e153df0a9556c3ea99d8c09248a8fa59f8b04e"
+        },
+        "attention_dense_gfx942/swa_sink_d128_bf16_w128": {
+          "bytes": 175617,
+          "sha256": "3a80c5fe1e29bdc8c2a32e730593b4ab9cc5e10cd9dcdc2b170ec9513b60c2ca"
+        }
+      }
+    },
+    "llvm23": {
+      "cases": {
+        "attention_dense_gfx942/default_d128_bf16_causal": {
+          "bytes": 171010,
+          "sha256": "6dd00349c8c44cb04c8e96661dc302637d0ec4b433ae0551c42ae15429fe98bb"
+        },
+        "attention_dense_gfx942/default_d128_bf16_mha": {
+          "bytes": 171010,
+          "sha256": "6dd00349c8c44cb04c8e96661dc302637d0ec4b433ae0551c42ae15429fe98bb"
+        },
+        "attention_dense_gfx942/default_d128_fp16_causal": {
+          "bytes": 113366,
+          "sha256": "4a7395df00355cbe3b620074fea850cae8435b40107d30d6438aaee97a434863"
+        },
+        "attention_dense_gfx942/default_d128_fp16_full": {
+          "bytes": 97974,
+          "sha256": "e6462fd928ba04e0305ee5e9507c43606a09af03d0f92a229c18b419213e820b"
+        },
+        "attention_dense_gfx942/default_d128_fp16_gqa16_8": {
+          "bytes": 113366,
+          "sha256": "4a7395df00355cbe3b620074fea850cae8435b40107d30d6438aaee97a434863"
+        },
+        "attention_dense_gfx942/default_d64_bf16_bn128": {
+          "bytes": 186148,
+          "sha256": "6efd7961192087168947cedf8f7624a06338ff8522152fe364c693c05252bd8e"
+        },
+        "attention_dense_gfx942/default_d64_bf16_causal": {
+          "bytes": 103357,
+          "sha256": "24bfb10905b13519781fc9ddb6297770bbce7da01d8a17d2b7cae38a70af9cf5"
+        },
+        "attention_dense_gfx942/default_d64_fp16_causal": {
+          "bytes": 97340,
+          "sha256": "3112c90d6732d110d18ab377bed87bfbe6b7a2672e719800b2689ecd4539e09e"
+        },
+        "attention_dense_gfx942/dispatch_d64_bf16_causal": {
+          "bytes": 104569,
+          "sha256": "7b253bc717bf6149355a6db3d529fdfb469bb3ee440bc54ffa7e5aaff60cb293"
+        },
+        "attention_dense_gfx942/dispatch_d64_fp16_causal": {
+          "bytes": 98552,
+          "sha256": "d28c4327b2b18d3987f1574ae59f32d7107b327a6b9aed1c3b668462d17839a7"
+        },
+        "attention_dense_gfx942/dispatch_lse_d128_bf16_causal": {
+          "bytes": 177849,
+          "sha256": "f3418840281d17d90e0434d94cfd621994943c5f8d18b7ad7fe941205ffc96ee"
+        },
+        "attention_dense_gfx942/dispatch_sink_d64_bf16_causal": {
+          "bytes": 104991,
+          "sha256": "848048dafc4dde8c3ee3d6b81e3147d0806d4c7887a2d31072eeceb8a1ec553a"
+        },
+        "attention_dense_gfx942/dispatch_swa_d128_bf16_w128": {
+          "bytes": 175161,
+          "sha256": "d74be2c22e40bc578efe055fc2d6d0f16ae806efdadbfdea71b7e21c997af12b"
+        },
+        "attention_dense_gfx942/lse_d128_bf16_causal": {
+          "bytes": 177849,
+          "sha256": "f3418840281d17d90e0434d94cfd621994943c5f8d18b7ad7fe941205ffc96ee"
+        },
+        "attention_dense_gfx942/lse_persist_empty_window_d128_bf16": {
+          "bytes": 184603,
+          "sha256": "f5308fb42fa20539fdd172b8ab3804fe3f94c43a07ee1111579d73df162d7dac"
+        },
+        "attention_dense_gfx942/lse_sink_persist_empty_window_d128_bf16": {
+          "bytes": 185150,
+          "sha256": "76e220469b933345536e1e33db30973b99d2a1016958c794418aba782676d1d4"
+        },
+        "attention_dense_gfx942/persist_d128_bf16_intl": {
+          "bytes": 173777,
+          "sha256": "59f3c8b8d9c19d2f3381f27321647b6af88ef39341992b2788f9867f16a4d883"
+        },
+        "attention_dense_gfx942/persist_d128_bf16_qbmaj": {
+          "bytes": 173366,
+          "sha256": "4db838378afd810de15ad71a24ba7e738409d21775fe1437798f9ce36d0e48a6"
+        },
+        "attention_dense_gfx942/persist_d128_fp16_hkvmaj": {
+          "bytes": 115925,
+          "sha256": "ffc03b3b9d67e7bb0efe684298d2c0a11cbb0022118b535d9d7a500ed6b95201"
+        },
+        "attention_dense_gfx942/persist_d64_bf16_hkvmaj": {
+          "bytes": 106853,
+          "sha256": "79acf7785e05757c4c0992554957132ad4a143ca80318744438be448c69b01a7"
+        },
+        "attention_dense_gfx942/persist_d64_fp16_qbmaj": {
+          "bytes": 100388,
+          "sha256": "9f7739d8474304475434d99bd9f2ac6b5b5982f1b26d06311f1c2c307974c681"
+        },
+        "attention_dense_gfx942/persist_sink_d128_bf16_qbmaj": {
+          "bytes": 173896,
+          "sha256": "b27bcc336bd61564b218f13c7eaf4b003e8a04ef5d5e5dd0be09ef1ea9431c4d"
+        },
+        "attention_dense_gfx942/persist_sink_d128_fp16_hkvmaj": {
+          "bytes": 116429,
+          "sha256": "c464ae67b79b294b7e0a718c3e263b350d602c6b4754a5cc7bcb5a13d1337075"
+        },
+        "attention_dense_gfx942/persist_swa_d128_bf16_w128": {
+          "bytes": 177658,
+          "sha256": "3c9a0d02f295d9c7bd0ac7ca42a7f6181f61d8454d01a799bc76882504d9c969"
+        },
+        "attention_dense_gfx942/persist_swa_sink_d128_bf16_w128": {
+          "bytes": 178176,
+          "sha256": "6590d638c43bdb648a1efc9ed02be20d3a65f2cefc8746d89c347f81ac18635d"
+        },
+        "attention_dense_gfx942/sink_d128_bf16_causal": {
+          "bytes": 171526,
+          "sha256": "b23026700d7ed9ff8d6ec71ec8ff80967fd7e1c6123b59a0585b97225e8e3bdb"
+        },
+        "attention_dense_gfx942/sink_d128_fp16_full": {
+          "bytes": 98481,
+          "sha256": "5fd974a2134030513a7093b24a6bd38bb72f6070e65ea3f9a159f4a4fb2f2858"
+        },
+        "attention_dense_gfx942/sink_d64_fp16_causal": {
+          "bytes": 97751,
+          "sha256": "78e398b78df8b4ad5e7e27bc0cdfa7551c3217aaa2461ab4c110bbc46e12e82d"
+        },
+        "attention_dense_gfx942/swa_d128_bf16_w128": {
+          "bytes": 175161,
+          "sha256": "d74be2c22e40bc578efe055fc2d6d0f16ae806efdadbfdea71b7e21c997af12b"
+        },
+        "attention_dense_gfx942/swa_d128_fp16_w256": {
+          "bytes": 117505,
+          "sha256": "da4791e45ad81e7b8a89703d2993a038c76f11e7b6796ea8e16e28fb51d6043e"
+        },
+        "attention_dense_gfx942/swa_d64_bf16_w128": {
+          "bytes": 108568,
+          "sha256": "b5ecea9b2aa0b6b89609c3503d593be25aa35862231995dd94c6c64b08cc584a"
+        },
+        "attention_dense_gfx942/swa_sink_d128_bf16_w128": {
+          "bytes": 175681,
+          "sha256": "fcbd32d662cd1edd12a61c61e1282669b6eeef7e568eb327ea951f164a571d42"
         }
       }
     }

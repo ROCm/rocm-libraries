@@ -34,6 +34,7 @@
 #include "../../../shared/device_properties.h"
 #include "../../../shared/gpubuf.h"
 #include "../../../shared/hip_object_wrapper.h"
+#include "../../../shared/ptrdiff.h"
 #include "../../../shared/rocfft_complex.h"
 #include "../device/kernels/callback.h"
 #include "../device/kernels/common.h"
@@ -665,7 +666,7 @@ public:
     size_t           twiddles_pp_size      = 0;
     void*            chirp                 = nullptr;
     size_t           chirp_size            = 0;
-    gpubuf_t<size_t> devKernArg;
+    KernelArgsBuffer devKernArg;
 
     hipDeviceProp_t deviceProp = {};
     function_pool   pool;
@@ -719,7 +720,10 @@ public:
     bool isPlacementAllowed(rocfft_result_placement) const;
     bool isOutBufAllowed(OperatingBuffer oB) const;
     bool isOutArrayTypeAllowed(rocfft_array_type) const;
-    bool isRootNode() const;
+    bool isRootNode() const
+    {
+        return parent == nullptr;
+    }
     bool isLeafNode() const;
     // Get the current node downcasted to a LeafNode.  Throws bad_cast
     // if this node isn't actually a leaf.
@@ -803,7 +807,13 @@ public:
     void RecursiveInsertNode(TreeNode* pos, std::unique_ptr<TreeNode>& newNode);
 
     // Get root node of plan
-    const TreeNode* GetPlanRoot() const;
+    const TreeNode* GetPlanRoot() const
+    {
+        if(isRootNode())
+            return this;
+
+        return parent->GetPlanRoot();
+    }
     // If 'this' is a leaf, return it.  Otherwise, return the first
     // leaf node under 'this' in the execution sequence.
     TreeNode* GetFirstLeaf();
@@ -815,12 +825,41 @@ public:
     TreeNode* GetRealEvenAncestor();
 
     // Return true if the root plan is C2C, R2C, or C2R
-    bool IsRootPlanC2CTransform() const;
-    bool IsRootPlanR2CTransform() const;
-    bool IsRootPlanC2RTransform() const;
+    bool IsRootPlanC2CTransform() const
+    {
+        auto root = GetPlanRoot();
+        return (root->inArrayType != rocfft_array_type_real)
+               && (root->outArrayType != rocfft_array_type_real);
+    }
+    bool IsRootPlanR2CTransform() const
+    {
+        auto root = GetPlanRoot();
+        return (root->inArrayType == rocfft_array_type_real)
+               && (root->outArrayType != rocfft_array_type_real);
+    }
+    bool IsRootPlanC2RTransform() const
+    {
+        auto root = GetPlanRoot();
+        return (root->inArrayType != rocfft_array_type_real)
+               && (root->outArrayType == rocfft_array_type_real);
+    }
 
-    // Return the transform type of the root plan
-    rocfft_transform_type GetRootPlanTransformType() const;
+    // Return the transform type of the root plan.
+    rocfft_transform_type GetRootPlanTransformType() const
+    {
+        const auto root = GetPlanRoot();
+
+        if(IsRootPlanC2CTransform() && root->direction == -1)
+            return rocfft_transform_type_complex_forward;
+        else if(IsRootPlanC2CTransform() && root->direction == 1)
+            return rocfft_transform_type_complex_inverse;
+        else if(IsRootPlanR2CTransform())
+            return rocfft_transform_type_real_forward;
+        else if(IsRootPlanC2RTransform())
+            return rocfft_transform_type_real_inverse;
+        else
+            throw std::runtime_error("Unknown root plan transform type");
+    }
 
     // Return ancestor node of 'this' that is partial-pass, or
     // nullptr if there is no such ancestor
@@ -837,12 +876,17 @@ public:
     {
         return outputLength.empty() ? length : outputLength;
     }
-    // Padding needs matching stride + length to make its decisions.
-    // For most nodes, outStride + length can be used together.  For
-    // some nodes, outputLength is what matches outStride.
-    virtual bool UseOutputLengthForPadding()
+    // True if outStride is indexed in outputLength order rather than length
+    // order (e.g. fused SBRC transposes, embedded r2c/c2r).  Anything pairing
+    // a length vector with outStride should go through LengthForOutStride().
+    virtual bool OutputLengthMatchesOutStride() const
     {
         return false;
+    }
+    // The length vector that pairs with outStride.
+    std::vector<size_t> LengthForOutStride() const
+    {
+        return OutputLengthMatchesOutStride() ? GetOutputLength() : length;
     }
 
     virtual bool KernelCheck(std::vector<FMKey>& kernel_keys = EmptyFMKeyVec) = 0;
@@ -881,11 +925,18 @@ public:
         if(!pp_parent_node)
             throw std::runtime_error("Invalid parent node for partial pass");
 
-        return PPFMKey(pp_parent_node->length[0],
-                       pp_parent_node->length[1],
-                       pp_parent_node->length[2],
+        auto transform_type = GetRootPlanTransformType();
+        auto parent_length  = pp_parent_node->length;
+
+        // For c2r we want the real length, not the complex length for querying the function pool
+        if(transform_type == rocfft_transform_type_real_inverse)
+            parent_length[0] = (parent_length[0] - 1) * 2;
+
+        return PPFMKey(parent_length[0],
+                       parent_length[1],
+                       parent_length[2],
                        precision,
-                       GetRootPlanTransformType(),
+                       transform_type,
                        pp_parent_node->scheme);
     }
 
@@ -1036,23 +1087,104 @@ public:
     void         SetupGridParam(GridParam& gp) override;
     FMKey        GetKernelKey() const override;
 
-    // Temporary workaround for gfx1250 which has an issue with very large 32-bit pointer offsets
-    virtual size_t GetU32KernelIndexLimit() const
+    // Return the integer type for this node's kernel.
+    KIntType GetKIntType() const
     {
+        auto idx_limit = static_cast<size_t>(UINT32_MAX);
 
-        return is_device_gcn_arch(deviceProp, "gfx1250") ? static_cast<size_t>(INT32_MAX)
-                                                         : static_cast<size_t>(UINT32_MAX);
-    }
-    // Return the index type for this node's kernel.
-    // Overridden by nodes that use narrower index types
-    virtual IndexType GetKernelIndexType() const
-    {
-        return IndexType::U64;
-    }
+        // The strides and dists also have to fit, not just the indices the
+        // kernel reaches.  A dist is packed into the argument buffer even
+        // when batch is 1, where it contributes nothing to the max index.
+        if(MaxKernelIndex(io_data_label::INPUT) > idx_limit
+           || MaxKernelIndex(io_data_label::OUTPUT) > idx_limit
+           || MaxKernelStride(io_data_label::INPUT) > idx_limit
+           || MaxKernelStride(io_data_label::OUTPUT) > idx_limit)
+        {
+            return KIntType::U64;
+        }
+        return KIntType::U32;
+    };
+
     // Max element index the kernel would compute for a given I/O side.
-    size_t       MaxKernelIndex(io_data_label io) const;
+    size_t MaxKernelIndex(io_data_label io) const
+    {
+        // Counted in scalar_type units; the complex-as-real x2 for r2c/c2r
+        // callbacks always happens in size_t in the wrapper.
+        // Offsets (iOffset/oOffset) are applied to base pointers before
+        // launch (see powX.cpp) and don't affect kernel index arithmetic.
+        const auto& io_stride = io == io_data_label::INPUT ? inStride : outStride;
+        const auto& io_dist   = io == io_data_label::INPUT ? iDist : oDist;
+        // inStride always pairs with length, outStride does not on every node.
+        const auto io_length = io == io_data_label::INPUT ? length : LengthForOutStride();
+
+        // compute_ptrdiff returns the buffer size (one-past-the-end).
+        auto ptrdiff = compute_ptrdiff(io_length, io_stride, batch, io_dist) - 1;
+
+        // Fused Bluestein kernels index the Bluestein work buffer in the same
+        // kernel, over the same lengths but with the Bluestein strides + dist.
+        // Whichever side reaches further decides the integer type.
+        const auto& io_stride_blue = io == io_data_label::INPUT ? inStrideBlue : outStrideBlue;
+        if(fuseBlue == BFT_NONE || io_stride_blue.size() < io_length.size())
+            return ptrdiff;
+
+        const auto& io_dist_blue = io == io_data_label::INPUT ? iDistBlue : oDistBlue;
+
+        // The INV_CHIRP_MUL CC load and FWD_CHIRP_MUL RC store add lengthBlue to the index
+        // in-kernel, to skip the chirp's FFT stored first in the Bluestein buffer.
+        const bool offset_by_length_blue
+            = (io == io_data_label::INPUT && fuseBlue == BFT_INV_CHIRP_MUL
+               && scheme == CS_KERNEL_STOCKHAM_BLOCK_CC)
+              || (io == io_data_label::OUTPUT && fuseBlue == BFT_FWD_CHIRP_MUL
+                  && scheme == CS_KERNEL_STOCKHAM_BLOCK_RC);
+
+        return std::max(ptrdiff,
+                        compute_ptrdiff(io_length, io_stride_blue, batch, io_dist_blue) - 1
+                            + (offset_by_length_blue ? lengthBlue : 0));
+    };
+
+    // Max stride or dist packed into the kernel argument buffer for a given
+    // I/O side.  Not bounded by MaxKernelIndex: an unused dist can be
+    // arbitrarily large.
+    size_t MaxKernelStride(io_data_label io) const
+    {
+        // These are the values KernelArgsBuffer::create packs into the stride
+        // array, so they must fit in the kernel's integer type regardless of
+        // how far the kernel actually indexes.
+        const auto& io_stride  = io == io_data_label::INPUT ? inStride : outStride;
+        const auto& io_dist    = io == io_data_label::INPUT ? iDist : oDist;
+        auto        max_stride = io_stride.empty() ? static_cast<size_t>(0)
+                                                   : *std::max_element(io_stride.begin(), io_stride.end());
+        max_stride             = std::max(max_stride, io_dist);
+
+        if(fuseBlue == BFT_NONE)
+            return max_stride;
+
+        // Fused Bluestein kernels also take the Bluestein lengths, and the
+        // higher-dimension Bluestein strides + dist, as integer_type.  See
+        // BluesteinData and RTCKernelStockham::get_launch_args.
+        max_stride = std::max({max_stride, lengthBlueN, lengthBlue});
+
+        // BFT_FWD_CHIRP passes zeros for the Bluestein strides and dist.
+        if(fuseBlue == BFT_FWD_CHIRP)
+            return max_stride;
+
+        const auto& io_stride_blue = io == io_data_label::INPUT ? inStrideBlue : outStrideBlue;
+        const auto& io_dist_blue   = io == io_data_label::INPUT ? iDistBlue : oDistBlue;
+
+        // Only dims 2 and 3 are packed; dims 0 and 1 are implied by lengthBlue.
+        for(size_t i = 2; i < io_stride_blue.size() && i < 4; ++i)
+            max_stride = std::max(max_stride, io_stride_blue[i]);
+
+        return std::max(max_stride, io_dist_blue);
+    };
+
     virtual void GetKernelFactors();
     virtual void GetKernelPartialPassFactors();
+
+    // Allocate the twiddle tables a partial-pass kernel needs.  The caller
+    // resolves off_dim_length because ppOffDim indexes the plan's dimensions,
+    // which do not always line up with this node's length vector.
+    bool CreatePartialPassDeviceResources(size_t off_dim_length);
 };
 
 /*****************************************************
@@ -1074,8 +1206,6 @@ protected:
     void SetupGridParam_internal(GridParam& gp) override;
 
 public:
-    IndexType GetKernelIndexType() const override;
-
     // Transpose tiles read more row-ish and write more column-ish.  So
     // assume output benefits more from padding than input.
     bool PaddingBenefitsOutput() override

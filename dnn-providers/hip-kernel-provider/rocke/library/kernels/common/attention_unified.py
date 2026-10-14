@@ -10,7 +10,9 @@ until every required primitive and correctness/perf path is present.
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from dataclasses import dataclass, replace
+from threading import Lock, RLock
 from typing import Any, Callable, Dict, Optional, Tuple
 
 from rocke.core.arch import validate_arch
@@ -36,6 +38,8 @@ from rocke.runtime.launcher import (
     WorkspacePool,
     _resolved_fence,
     no_fence,
+    release_retained_for_stream,
+    retain_for_stream,
     wait_stream_and_release,
 )
 
@@ -1646,8 +1650,9 @@ def _enable_fp8_mfma_qk(problem: UnifiedAttentionProblem) -> bool:
     """
     if not problem.use_fp8:
         return False
-    # The 32x32 combo reads bf16 K from LDS, so it MUST use the sync-dequant
-    # loader (bf16 K_lds), not this in-LDS-fp8 path. Never combine them.
+    # The 32x32 combo reads K from LDS at the working dtype (bf16/fp16), so it
+    # MUST use the sync-dequant loader (working-dtype K_lds), not this in-LDS-fp8
+    # path. Never combine them.
     if _enable_combo_2d(problem):
         return False
     if not _fp8_qk_loader_fits(problem):
@@ -1979,7 +1984,7 @@ def _enable_gfx942_sink_prefill_tuned(problem: UnifiedAttentionProblem) -> bool:
 
 
 def _enable_gfx950_sink_prefill_wpe3(problem: UnifiedAttentionProblem) -> bool:
-    """gfx950 full-causal bf16 attention-sink prefill -> waves_per_eu=3.
+    """gfx950 full-causal bf16/fp16 attention-sink prefill -> waves_per_eu=3.
 
     Same-run A/B on gfx950 vs the shipped nw4/mw16/T64 config (waves_per_eu is
     the only difference): 1.07x @ S1024, 1.11x @ S2048, 1.15x @ S4096, reproduced
@@ -1990,7 +1995,7 @@ def _enable_gfx950_sink_prefill_wpe3(problem: UnifiedAttentionProblem) -> bool:
     """
     return (
         _resolve_attention_arch() == "gfx950"
-        and problem.dtype == "bf16"
+        and problem.dtype in ("bf16", "fp16")
         and not problem.use_fp8
         and problem.head_size == 64
         and problem.block_size == 16
@@ -2474,8 +2479,9 @@ def _enable_combo_2d(problem: UnifiedAttentionProblem) -> bool:
 
     This wires the kernel config that the parity + trace benchmarks proved
     fastest-and-correct for the AITER prefill-2D trace family (d64 / b32 /
-    GQA-8 / bf16, with attention sinks) into production. The combo stacks,
-    on top of ``use_mfma_32x32`` + ``use_transposed_qk_32x32``:
+    GQA-8) into production: bf16 for the whole cohort, and fp16 only for sink
+    prefill (the fp16 win was measured on sinks). The combo stacks, on top of
+    ``use_mfma_32x32`` + ``use_transposed_qk_32x32``:
 
       * ``use_transposed_scalar_state``  (one m/l per lane + broadcast alpha)
       * ``use_transposed_mask_once``     (mask invariants once / KV iter; no-SW)
@@ -2500,12 +2506,18 @@ def _enable_combo_2d(problem: UnifiedAttentionProblem) -> bool:
     """
     if _resolve_attention_arch() != "gfx950":
         return False
-    if problem.dtype != "bf16":
+    # fp16 combo is sink-prefill only (the fp16 widening was measured on sinks);
+    # non-sink fp16 stays on its existing path. bf16 admits the whole cohort.
+    # Mirror this in the C++ twin.
+    if problem.dtype == "fp16":
+        if not problem.use_sinks:
+            return False
+    elif problem.dtype != "bf16":
         return False
-    # FP8 KV is supported via the *sync-dequant* loader, which writes bf16
-    # into K_lds/V_lds (k_scale folded in) -- exactly what the 32x32 combo
-    # reads. ``_enable_fp8_mfma_qk`` is forced off for the combo so the
-    # in-LDS-fp8 mode (incompatible with the bf16 32x32 reads) never fires.
+    # FP8 KV is supported via the *sync-dequant* loader, which writes the working
+    # dtype (bf16/fp16) into K_lds/V_lds (k_scale folded in) -- exactly what the
+    # 32x32 combo reads. ``_enable_fp8_mfma_qk`` is forced off for the combo so the
+    # in-LDS-fp8 mode (incompatible with the working-dtype 32x32 reads) never fires.
     # This takes the fp8 prefill cohort from ~0.5x to ~0.9x vs Triton-2d.
     if problem.head_size != 64 or problem.block_size != 32:
         return False
@@ -2984,23 +2996,34 @@ def _num_segments(problem: UnifiedAttentionProblem) -> int:
     return segments
 
 
-def _gfx942_3d_tile_size_override(problem: UnifiedAttentionProblem) -> Optional[int]:
-    arch = _resolve_attention_arch()
+def _gfx942_3d_tile_size_override(
+    problem: UnifiedAttentionProblem, *, arch: str | None = None
+) -> int | None:
+    if arch is None:
+        arch = _resolve_attention_arch()
     if not (arch == "gfx942" and problem.head_size >= 128 and problem.block_size >= 32):
         return None
     return problem.block_size // 2
 
 
-def _select_3d_waves_per_eu(problem: UnifiedAttentionProblem) -> Optional[int]:
+def _select_3d_waves_per_eu(
+    problem: UnifiedAttentionProblem, *, arch: str | None = None
+) -> int | None:
     if problem.waves_per_eu is not None:
         return problem.waves_per_eu
-    if _resolve_attention_arch() == "gfx1250":
+    if arch is None:
+        arch = _resolve_attention_arch()
+    if arch == "gfx1250":
         return 2
     return None
 
 
-def _enable_gfx942_3d_invariant_hoist(problem: UnifiedAttentionProblem) -> bool:
-    if _resolve_attention_arch() != "gfx942":
+def _enable_gfx942_3d_invariant_hoist(
+    problem: UnifiedAttentionProblem, *, arch: str | None = None
+) -> bool:
+    if arch is None:
+        arch = _resolve_attention_arch()
+    if arch != "gfx942":
         return False
     env = __import__("os").environ.get("HIPDNN_GFX942_3D_HOIST", "").strip().lower()
     return env in ("1", "on", "enable", "enabled", "yes", "true")
@@ -3160,6 +3183,126 @@ def _tiled_3d_spec_from_problem(
     return _impl(problem)
 
 
+def _tiled_3d_segment_lds_bytes(spec) -> int:
+    """Q[M,D], K/V[2,T,D], P[M,T] in the gfx942/gfx950 3D schedule.
+
+    These tiles overlap in lifetime. Supported tile dimensions need no
+    inter-allocation padding; the lowering aligns the final pool to 16 bytes.
+    Use the LDS allocation type, not the global KV storage encoding.
+    """
+    from rocke.core.dtypes import dtype_info
+
+    bits = dtype_info(spec.dtype_ir.name).encoded_bits
+    if bits % 8:
+        raise ValueError("tiled 3D LDS requires byte-addressable scalar elements")
+    m, d, t = spec.block_m, spec.head_size, spec.tile_size
+    size = (m * d + 4 * t * d + m * t) * (bits // 8)
+    return (size + 15) & ~15
+
+
+def _tiled_3d_reduce_lds_bytes(spec) -> int:
+    """The reducer stores one F32 softmax factor per segment in LDS."""
+    from rocke.core.dtypes import dtype_info
+
+    size = spec.num_segments * (dtype_info(F32.name).encoded_bits // 8)
+    return (size + 15) & ~15
+
+
+def _validate_strided_3d_lds(segment, reduce, *, arch: str) -> None:
+    from rocke.core.arch import ArchTarget
+
+    target = ArchTarget.from_gfx(arch)
+    for kind, used in (
+        ("segment", _tiled_3d_segment_lds_bytes(segment)),
+        ("reducer", _tiled_3d_reduce_lds_bytes(reduce)),
+    ):
+        if not target.fits_lds(used):
+            raise ValueError(
+                f"strided 3D {kind} requires {used} B LDS, exceeding "
+                f"{arch} capacity {target.lds_capacity_bytes} B "
+                f"(head_size={segment.head_size}, tile_size={segment.tile_size})"
+            )
+
+
+def _strided_3d_specs_from_problem(problem: UnifiedAttentionProblem, *, arch: str):
+    """One spec policy for direct and dispatched non-paged decode."""
+    if arch not in ("gfx942", "gfx950"):
+        raise ValueError("strided KV decode targets gfx942/gfx950")
+    segment_type, reduce_type, *_ = _tiled_3d_impl(arch)
+    if problem.clamp_arch not in (None, arch):
+        raise ValueError(
+            f"strided clamp_arch {problem.clamp_arch!r} conflicts with {arch}"
+        )
+    if problem.clamp_arch is None:
+        problem = replace(problem, clamp_arch=arch)
+    waves = _select_3d_waves_per_eu(problem, arch=arch)
+    segment = segment_type(
+        head_size=problem.head_size,
+        block_size=problem.block_size,
+        num_query_heads=problem.num_query_heads,
+        num_kv_heads=problem.num_kv_heads,
+        dtype=problem.dtype,
+        use_sinks=problem.use_sinks,
+        sliding_window=problem.sliding_window,
+        has_softcap=problem.softcap > 0,
+        use_alibi=problem.use_alibi,
+        use_qq_bias=problem.use_qq_bias,
+        num_segments=_num_segments(problem),
+        num_seqs=problem.num_seqs,
+        waves_per_eu=waves,
+        tile_size_override=_gfx942_3d_tile_size_override(problem, arch=arch),
+        use_invariant_hoist=False,
+        kv_layout="strided",
+    )
+    reduce = reduce_type(
+        head_size=problem.head_size,
+        num_query_heads=problem.num_query_heads,
+        num_kv_heads=problem.num_kv_heads,
+        dtype=problem.dtype,
+        num_segments=segment.num_segments,
+        waves_per_eu=waves,
+    )
+    _validate_strided_3d_lds(segment, reduce, arch=arch)
+    return segment, reduce
+
+
+def _validate_strided_3d_spec(problem: UnifiedAttentionProblem, tuning_spec) -> None:
+    """Reject explicit specs whose baked semantics disagree with the launch."""
+    segment = tuning_spec.kernel_spec
+    reduce = getattr(tuning_spec, "reduce_spec", None)
+    if tuning_spec.path != "3d" or reduce is None:
+        raise ValueError("strided decode requires segment and reduce specs")
+    for name, expected in (
+        ("kv_layout", "strided"),
+        ("head_size", problem.head_size),
+        ("block_size", problem.block_size),
+        ("num_query_heads", problem.num_query_heads),
+        ("num_kv_heads", problem.num_kv_heads),
+        ("num_seqs", problem.num_seqs),
+        ("dtype", problem.dtype),
+        ("sliding_window", problem.sliding_window),
+        ("has_softcap", problem.softcap > 0),
+        ("use_sinks", False),
+        ("use_alibi", False),
+        ("use_qq_bias", False),
+        ("kv_storage_dtype", None),
+    ):
+        if not hasattr(segment, name):
+            raise ValueError(f"strided kernel_spec is missing {name}")
+        if getattr(segment, name) != expected:
+            raise ValueError(f"strided kernel_spec.{name} disagrees with problem")
+    for name in (
+        "head_size",
+        "num_query_heads",
+        "num_kv_heads",
+        "dtype",
+        "num_segments",
+    ):
+        if getattr(reduce, name) != getattr(segment, name):
+            raise ValueError(f"strided reduce_spec.{name} disagrees with segment")
+    _validate_strided_3d_lds(segment, reduce, arch=tuning_spec.arch)
+
+
 def _tiled_3d_cache_key(problem: UnifiedAttentionProblem) -> Tuple:
     base = (
         "tiled3d",
@@ -3199,12 +3342,14 @@ def _tiled_3d_cache_key(problem: UnifiedAttentionProblem) -> Tuple:
     return base
 
 
-def _3d_signature(dtype: str, *, kv_dtype: Optional[str] = None):
+def _3d_signature(
+    dtype: str, *, kv_dtype: Optional[str] = None, strided_kv: bool = False
+):
     from rocke.helpers.spec import SignatureBuilder
 
     io_dtype = "f16" if dtype == "fp16" else "bf16"
     kv_io = kv_dtype if kv_dtype else io_dtype
-    return (
+    sb = (
         SignatureBuilder()
         .ptr("segm_output_ptr", "f32")
         .ptr("segm_max_ptr", "f32")
@@ -3225,8 +3370,15 @@ def _3d_signature(dtype: str, *, kv_dtype: Optional[str] = None):
         .scalar("num_seqs", "i32")
         .scalar("block_table_stride", "i32")
         .scalar("qq_bias_stride_0", "i32")
-        .build()
     )
+
+    if strided_kv:
+        for prefix in ("k", "v"):
+            sb.scalar(f"{prefix}_stride_batch_bytes", "i64")
+            sb.scalar(f"{prefix}_stride_head_bytes", "i64")
+            sb.scalar(f"{prefix}_stride_token_bytes", "i32")
+            sb.scalar(f"{prefix}_span_bytes", "i32")
+    return sb.build()
 
 
 def _reduce_signature(dtype: str):
@@ -3332,7 +3484,146 @@ def _attn_values(
     return vals
 
 
-def _run_3d_tiled(
+class Attention3DExecution:
+    """Own reusable scratch for one fixed 3D geometry and effective stream.
+
+    Create with :func:`prepare_unified_attention_torch` outside a timed loop.
+    Sequential launches reuse scratch; separate streams need separate owners.
+    ``close`` waits for queued work before releasing bindings and storage.
+    External captures always receive private scratch, independent of this owner.
+    Caller-owned outer graphs and their bindings have a separate lifetime; do not
+    close concurrently with an outer capture, and drain its capture stream.
+    """
+
+    def __init__(self) -> None:
+        self._lock = Lock()
+        self._identity = None
+        self._workspace = None
+        self._arguments = None
+        self._device = None
+        self._stream = None
+        self._closed = False
+        self._graphs = OrderedDict()
+
+    def launch(self, **overrides: Any) -> LaunchSummary:
+        """Launch with prepared bindings, optionally replacing inputs or scalars.
+
+        Geometry, layout, dtype, device and stream must remain fixed. Device
+        length contents may change within the problem's validated maximum.
+        """
+        if self._arguments is None:
+            raise RuntimeError("execution has not been prepared or is closed")
+        arguments = dict(self._arguments, **overrides)
+        arguments["execution"] = self
+        return run_unified_attention_torch(**arguments)
+
+    def close(self) -> None:
+        """Drain the prepared stream and release this owner's resources.
+
+        Caller-owned outer graphs and their capture streams require caller cleanup.
+        Do not close concurrently with an outer capture using these bindings.
+        """
+        import torch
+
+        if not self._lock.acquire(blocking=False):
+            raise RuntimeError("execution is already submitting work")
+        try:
+            if self._closed:
+                return
+            if self._stream is not None:
+                with torch.cuda.device(self._device):
+                    if _torch_stream_capturing():
+                        raise RuntimeError("cannot close execution during capture")
+                    wait_stream_and_release(self._stream)
+            self._graphs.clear()
+            self._workspace = None
+            self._arguments = None
+            self._closed = True
+        finally:
+            self._lock.release()
+
+    def __enter__(self) -> Attention3DExecution:  # noqa: PYI034 - Python 3.10
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self.close()
+
+
+def prepare_unified_attention_torch(**arguments: Any) -> Attention3DExecution:
+    """Validate, compile and warm up a reusable 3D execution outside timing.
+
+    Accepts the same tensor arguments as ``run_unified_attention_torch``.
+    Preparation launches once; use ``use_graph=False`` for prepared eager work.
+    Call ``close`` at the completion boundary, or use a context manager.
+    """
+    if "execution" in arguments:
+        raise ValueError("preparation creates its own execution owner")
+    execution = Attention3DExecution()
+    try:
+        run_unified_attention_torch(**arguments, execution=execution)
+        if execution._identity is None:
+            raise ValueError("prepared execution requires a supported 3D path")
+        import torch
+
+        with torch.cuda.device(execution._device):
+            wait_stream_and_release(execution._stream)
+        execution._arguments = dict(arguments)
+        return execution
+    except BaseException:
+        execution.close()
+        raise
+
+
+def clear_attention_3d_graph_cache() -> None:
+    """Drain internal graph streams before releasing their captured resources."""
+    import torch
+
+    with _3D_GRAPH_LOCK:
+        if _torch_stream_capturing():
+            raise RuntimeError("cannot clear the graph cache during capture")
+        for entry in _3D_GRAPHS.values():
+            with torch.cuda.device(entry.device):
+                wait_stream_and_release(entry.stream)
+        _3D_GRAPHS.clear()
+
+
+@dataclass(frozen=True)
+class _Attention3DGraph:
+    graph: Any
+    refs: tuple[Any, ...]
+    device: Any
+    stream: int
+
+
+def _run_3d_tiled(*, q, stream: int = 0, execution=None, **kwargs):
+    """Keep allocation and complete pair submission on the owner's stream."""
+    import torch
+    from rocke.runtime.torch_interop import resolve_stream
+
+    # An outer capture owns its active stream. The prepared eager stream is
+    # retained only as geometry identity; captures never use its workspace.
+    if execution is not None and _torch_stream_capturing():
+        stream = int(torch.cuda.current_stream(q.device).cuda_stream)
+    else:
+        stream = resolve_stream(stream, device=q.device)
+    if execution is not None and not execution._lock.acquire(blocking=False):
+        # Reject reentrant/concurrent submission instead of interleaving pairs.
+        raise RuntimeError("execution is already submitting work")
+    try:
+        if execution is not None and execution._closed:
+            raise RuntimeError("execution is closed")
+        with torch.cuda.device(q.device), torch.cuda.stream(
+            torch.cuda.ExternalStream(stream, device=q.device)
+        ):
+            return _run_3d_tiled_on_stream(
+                q=q, stream=stream, execution=execution, **kwargs
+            )
+    finally:
+        if execution is not None:
+            execution._lock.release()
+
+
+def _run_3d_tiled_on_stream(
     *,
     problem: UnifiedAttentionProblem,
     q,
@@ -3355,6 +3646,10 @@ def _run_3d_tiled(
     k_scale: float = 1.0,
     v_scale: float = 1.0,
     use_graph: bool = True,
+    tuning_spec=None,
+    kv_cache_layout=None,
+    execution=None,
+    capture_refs=None,
 ):
     """Launch the tiled 3D segment + reduce kernels.
 
@@ -3365,37 +3660,55 @@ def _run_3d_tiled(
       3. Launch the 3D segment kernel with grid
          `(total_num_q_blocks, num_kv_heads, num_segments)`.
       4. Launch the reduce kernel with grid `(total_q, num_query_heads, 1)`.
-    """
-    num_segments = _num_segments(problem)
-    cache_key = _tiled_3d_cache_key(problem)
-    if use_graph and _enable_3d_graph_replay(problem) and not _torch_stream_capturing():
-        graph_key = (
-            cache_key,
-            int(problem.total_q),
-            int(stream),
-            id(q),
-            id(k),
-            id(v),
-            id(out),
-            id(cu_seqlens_q),
-            id(seqused_k),
-            id(block_table),
-            id(sinks) if sinks is not None else 0,
-            id(alibi_slopes) if alibi_slopes is not None else 0,
-            id(qq_bias) if qq_bias is not None else 0,
-            float(softmax_scale),
-            float(k_scale),
-            float(v_scale),
-            float(softcap),
-            int(bt_stride),
-            int(qq_bias_stride_0),
-        )
-        graph = _3D_GRAPHS.get(graph_key)
-        if graph is None:
-            import torch
 
-            # Build/load launchers and allocate workspace outside capture.
-            _run_3d_tiled(
+    ``tuning_spec`` replaces the heuristic segment/reduce specs with the
+    dispatcher's explicit pair.
+    """
+    if tuning_spec is not None:
+        num_segments = int(tuning_spec.kernel_spec.num_segments)
+        cache_key = tuning_spec.cache_key()
+    else:
+        num_segments = _num_segments(problem)
+        cache_key = _tiled_3d_cache_key(problem)
+    if kv_cache_layout is not None:
+        cache_key = cache_key + ("strided_kv",)
+    capturing = _torch_stream_capturing()
+    if execution is not None:
+        identity = (
+            problem,
+            cache_key,
+            num_segments,
+            q.device,
+            execution._stream if capturing else int(stream),
+            kv_cache_layout,
+            tuple(
+                _attention_tensor_layout(t)
+                for t in (
+                    q,
+                    k,
+                    v,
+                    out,
+                    cu_seqlens_q,
+                    seqused_k,
+                    block_table,
+                    sinks,
+                    alibi_slopes,
+                    qq_bias,
+                )
+            ),
+        )
+        if execution._identity is None:
+            if capturing:
+                raise RuntimeError("prepare execution before external capture")
+            execution._identity = identity
+            execution._device, execution._stream = q.device, int(stream)
+        elif execution._identity != identity:
+            raise ValueError(
+                "execution geometry, layout, device or stream changed; prepare again"
+            )
+    if use_graph and _enable_3d_graph_replay(problem) and not capturing:
+        with _3D_GRAPH_LOCK:
+            return _run_3d_graph(
                 problem=problem,
                 q=q,
                 k=k,
@@ -3416,36 +3729,133 @@ def _run_3d_tiled(
                 stream=stream,
                 k_scale=k_scale,
                 v_scale=v_scale,
-                use_graph=False,
+                tuning_spec=tuning_spec,
+                kv_cache_layout=kv_cache_layout,
+                execution=execution,
+                cache_key=cache_key,
             )
-            graph = torch.cuda.CUDAGraph()
-            with torch.cuda.graph(graph):
-                with no_fence():
-                    _run_3d_tiled(
-                        problem=problem,
-                        q=q,
-                        k=k,
-                        v=v,
-                        out=out,
-                        cu_seqlens_q=cu_seqlens_q,
-                        seqused_k=seqused_k,
-                        softmax_scale=softmax_scale,
-                        block_table=block_table,
-                        softcap=softcap,
-                        sinks=sinks,
-                        bt_stride=bt_stride,
-                        warmup=warmup,
-                        attempts=attempts,
-                        alibi_slopes=alibi_slopes,
-                        qq_bias=qq_bias,
-                        qq_bias_stride_0=qq_bias_stride_0,
-                        stream=stream,
-                        k_scale=k_scale,
-                        v_scale=v_scale,
-                        use_graph=False,
-                    )
-            _3D_GRAPHS[graph_key] = graph
-            _3D_GRAPH_REFS[graph_key] = (
+
+    prepared = _get_3d_pipeline(
+        problem,
+        cache_key,
+        num_segments,
+        tuning_spec=tuning_spec,
+        strided_kv=kv_cache_layout is not None,
+    )
+    import torch
+
+    # External and internal captures own separate graph-private allocation.
+    # Eager reuse is safe only under the owner's whole-pair submission lock.
+    if execution is None or capturing or execution._workspace is None:
+        workspace = tuple(
+            torch.empty(spec.shape, dtype=spec.dtype, device=spec.device)
+            for spec in _attention_3d_workspace_specs(problem, num_segments, q.device)
+        )
+        if execution is not None and not capturing:
+            execution._workspace = workspace
+    else:
+        workspace = execution._workspace
+    if capture_refs is not None:
+        capture_refs.extend(workspace)
+    segm_output, segm_max, segm_expsum = workspace
+    if _resolve_attention_arch() == "gfx1250":
+        segm_max.fill_(-1e30)
+        segm_expsum.zero_()
+        segm_output.zero_()
+
+    seg_vals = {
+        "segm_output_ptr": segm_output,
+        "segm_max_ptr": segm_max,
+        "segm_expsum_ptr": segm_expsum,
+        "query_ptr": q,
+        "key_cache_ptr": k,
+        "value_cache_ptr": v,
+        "sink_ptr": sinks,
+        "block_tables_ptr": block_table,
+        "seq_lens_ptr": seqused_k,
+        "alibi_slopes_ptr": alibi_slopes if alibi_slopes is not None else 0,
+        "qq_bias_ptr": qq_bias if qq_bias is not None else 0,
+        "query_start_len_ptr": cu_seqlens_q,
+        "scale": float(softmax_scale),
+        "k_scale": float(k_scale),
+        "v_scale": float(v_scale),
+        "softcap": float(softcap),
+        "num_seqs": int(problem.num_seqs),
+        "block_table_stride": int(bt_stride),
+        "qq_bias_stride_0": int(qq_bias_stride_0),
+    }
+    if kv_cache_layout is not None:
+        seg_vals.update(kv_cache_layout.arguments())
+    red_vals = {
+        "output_ptr": out,
+        "segm_output_ptr": segm_output,
+        "segm_max_ptr": segm_max,
+        "segm_expsum_ptr": segm_expsum,
+        "seq_lens_ptr": seqused_k,
+    }
+    # hipStreamSynchronize is illegal while a stream is capturing, and the
+    # default LaunchConfig.fence=True path does exactly that. Frameworks
+    # that wrap the whole forward in torch.cuda.graph (vLLM, an outer
+    # microbench) skip the internal hipGraph above; this keeps the two
+    # eager launches capturable. Compile/load still needs a warmup outside
+    # capture; scratch allocation is captured through Torch's allocator.
+    return _launch_3d_pipeline(
+        prepared, seg_vals, red_vals, stream, capturing=capturing
+    )
+
+
+def _attention_tensor_layout(tensor):
+    """Layout identity without reading device contents or retaining storage."""
+    if tensor is None:
+        return None
+    return (
+        str(getattr(tensor, "device", None)),
+        str(getattr(tensor, "dtype", None)),
+        tuple(getattr(tensor, "shape", ())),
+        tuple(tensor.stride()) if hasattr(tensor, "stride") else (),
+    )
+
+
+def _run_3d_graph(
+    *,
+    problem,
+    q,
+    k,
+    v,
+    out,
+    cu_seqlens_q,
+    seqused_k,
+    softmax_scale,
+    block_table,
+    softcap,
+    sinks,
+    bt_stride,
+    warmup,
+    attempts,
+    alibi_slopes,
+    qq_bias,
+    qq_bias_stride_0,
+    stream,
+    k_scale,
+    v_scale,
+    tuning_spec,
+    kv_cache_layout,
+    execution,
+    cache_key,
+):
+    """Paired, bounded graph ownership; called under the graph submission lock."""
+    graph_key = (
+        problem,
+        cache_key,
+        kv_cache_layout,
+        int(problem.total_q),
+        int(stream),
+        tuple(
+            (
+                _attention_tensor_layout(t),
+                int(t.data_ptr()) if hasattr(t, "data_ptr") else 0,
+            )
+            for t in (
                 q,
                 k,
                 v,
@@ -3457,37 +3867,11 @@ def _run_3d_tiled(
                 alibi_slopes,
                 qq_bias,
             )
-        graph.replay()
-        if _resolved_fence(True):
-            wait_stream_and_release(int(stream))
-        return LaunchSummary(launches=2)
-
-    # Lazily build (and cache) the PipelineLauncher + WorkspacePool for
-    # this problem shape. This single object owns: the compiled HSACO
-    # blobs, the loaded HIP module handles, the kernel function
-    # handles, and the segm_* workspace tensors. All five
-    # categories of lifetime / race / overhead bugs documented in
-    # ``rocke/runtime/launcher.py`` are removed by construction; the
-    # only remaining per-call cost is packing args and issuing two
-    # ``hipModuleLaunchKernel`` calls on the caller's stream.
-    prepared = _get_3d_pipeline(problem, cache_key, num_segments)
-    segm_output, segm_max, segm_expsum = prepared.workspace(
-        problem, num_segments, q.device
-    )
-    if _resolve_attention_arch() == "gfx1250":
-        import torch
-
-        segm_max.fill_(-1e30)
-        segm_expsum.zero_()
-        segm_output.zero_()
-
-    bound_key = (
-        cache_key,
-        int(problem.total_q),
-        str(q.device),
+        ),
         id(q),
         id(k),
         id(v),
+        id(out),
         id(cu_seqlens_q),
         id(seqused_k),
         id(block_table),
@@ -3498,76 +3882,123 @@ def _run_3d_tiled(
         float(k_scale),
         float(v_scale),
         float(softcap),
-        int(problem.num_seqs),
         int(bt_stride),
         int(qq_bias_stride_0),
     )
-    cached_values = _3D_BOUND_VALUES.get(bound_key)
-    if cached_values is None:
-        seg_vals = {
-            "segm_output_ptr": segm_output,
-            "segm_max_ptr": segm_max,
-            "segm_expsum_ptr": segm_expsum,
-            "query_ptr": q,
-            "key_cache_ptr": k,
-            "value_cache_ptr": v,
-            "sink_ptr": sinks,
-            "block_tables_ptr": block_table,
-            "seq_lens_ptr": seqused_k,
-            "alibi_slopes_ptr": alibi_slopes if alibi_slopes is not None else 0,
-            "qq_bias_ptr": qq_bias if qq_bias is not None else 0,
-            "query_start_len_ptr": cu_seqlens_q,
-            "scale": float(softmax_scale),
-            "k_scale": float(k_scale),
-            "v_scale": float(v_scale),
-            "softcap": float(softcap),
-            "num_seqs": int(problem.num_seqs),
-            "block_table_stride": int(bt_stride),
-            "qq_bias_stride_0": int(qq_bias_stride_0),
-        }
-        red_vals = {
-            "output_ptr": out,
-            "segm_output_ptr": segm_output,
-            "segm_max_ptr": segm_max,
-            "segm_expsum_ptr": segm_expsum,
-            "seq_lens_ptr": seqused_k,
-        }
-        _3D_BOUND_VALUES[bound_key] = (seg_vals, red_vals)
+    graphs = _3D_GRAPHS if execution is None else execution._graphs
+    entry = graphs.get(graph_key)
+    if entry is None:
+        capacity = _3D_GRAPH_CAPACITY if execution is None else 1
+        if len(graphs) >= capacity:
+            # A cold replacement waits only for the evicted entry's stream.
+            # No retired queue can grow behind the bounded resident cache.
+            oldest_key = next(iter(graphs))
+            oldest = graphs[oldest_key]
+            import torch
+
+            with torch.cuda.device(oldest.device):
+                wait_stream_and_release(oldest.stream)
+            del graphs[oldest_key]
+        import torch
+
+        # Build/load launchers and warm up before graph-private allocation.
+        _run_3d_tiled_on_stream(
+            problem=problem,
+            q=q,
+            k=k,
+            v=v,
+            out=out,
+            cu_seqlens_q=cu_seqlens_q,
+            seqused_k=seqused_k,
+            softmax_scale=softmax_scale,
+            block_table=block_table,
+            softcap=softcap,
+            sinks=sinks,
+            bt_stride=bt_stride,
+            warmup=warmup,
+            attempts=attempts,
+            alibi_slopes=alibi_slopes,
+            qq_bias=qq_bias,
+            qq_bias_stride_0=qq_bias_stride_0,
+            stream=stream,
+            k_scale=k_scale,
+            v_scale=v_scale,
+            use_graph=False,
+            execution=execution,
+            tuning_spec=tuning_spec,
+            kv_cache_layout=kv_cache_layout,
+        )
+        wait_stream_and_release(int(stream))
+        refs = []
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph):
+            capture_stream = int(torch.cuda.current_stream().cuda_stream)
+            with no_fence():
+                _run_3d_tiled_on_stream(
+                    problem=problem,
+                    q=q,
+                    k=k,
+                    v=v,
+                    out=out,
+                    cu_seqlens_q=cu_seqlens_q,
+                    seqused_k=seqused_k,
+                    softmax_scale=softmax_scale,
+                    block_table=block_table,
+                    softcap=softcap,
+                    sinks=sinks,
+                    bt_stride=bt_stride,
+                    warmup=warmup,
+                    attempts=attempts,
+                    alibi_slopes=alibi_slopes,
+                    qq_bias=qq_bias,
+                    qq_bias_stride_0=qq_bias_stride_0,
+                    # torch.cuda.graph captures on its own current stream;
+                    # launching on the caller's raw stream records no nodes.
+                    stream=int(torch.cuda.current_stream().cuda_stream),
+                    k_scale=k_scale,
+                    v_scale=v_scale,
+                    use_graph=False,
+                    capture_refs=refs,
+                    tuning_spec=tuning_spec,
+                    kv_cache_layout=kv_cache_layout,
+                )
+        # Capture has ended. Drain its raw-launch argument bucket; graph entry
+        # refs own scratch and all captured tensors from here through eviction.
+        wait_stream_and_release(capture_stream)
+        entry = _Attention3DGraph(
+            graph,
+            tuple(refs)
+            + (
+                q,
+                k,
+                v,
+                out,
+                cu_seqlens_q,
+                seqused_k,
+                block_table,
+                sinks,
+                alibi_slopes,
+                qq_bias,
+            ),
+            q.device,
+            int(stream),
+        )
+        graphs[graph_key] = entry
+    graphs.move_to_end(graph_key)
+    # The boundary established the caller's effective Torch stream.
+    entry.graph.replay()
+    if _resolved_fence(True):
+        wait_stream_and_release(int(stream))
     else:
-        seg_vals, red_vals = cached_values
-        # Output is commonly a fresh tensor per request; workspace and inputs are
-        # fixed by the bound key.
-        red_vals["output_ptr"] = out
-    return prepared.pipeline(
-        (seg_vals, red_vals),
-        (prepared.seg_config, prepared.red_config),
-        stream=int(stream),
-    )
+        retain_for_stream(int(stream), entry)
+    return LaunchSummary(launches=2)
 
 
-@dataclass
+@dataclass(frozen=True)
 class _Attention3DPrepared:
     pipeline: PipelineLauncher
-    pool: WorkspacePool
     seg_config: LaunchConfig
     red_config: LaunchConfig
-    workspace_specs: Dict[Any, Tuple[WorkspaceSpec, WorkspaceSpec, WorkspaceSpec]]
-    workspace_tensors: Dict[Any, Tuple[Any, Any, Any]]
-    seg_values: Dict[str, Any]
-    red_values: Dict[str, Any]
-
-    def workspace(self, problem: UnifiedAttentionProblem, num_segments: int, device):
-        key = device
-        if key not in self.workspace_tensors:
-            specs = self.workspace_specs.get(key)
-            if specs is None:
-                specs = _attention_3d_workspace_specs(problem, num_segments, device)
-                self.workspace_specs[key] = specs
-            segm_output = self.pool.get_spec(specs[0])
-            segm_max = self.pool.get_spec(specs[1])
-            segm_expsum = self.pool.get_spec(specs[2])
-            self.workspace_tensors[key] = (segm_output, segm_max, segm_expsum)
-        return self.workspace_tensors[key]
 
 
 @dataclass(frozen=True)
@@ -3576,19 +4007,84 @@ class _Attention2DLaunchMeta:
     block: Tuple[int, int, int]
 
 
-# Per-cache-key prepared 3D launch state. Built lazily at first dispatch for a
-# given problem shape; reused across every subsequent dispatch and timing-loop
-# iteration. This is the same shape as CK Tile's `fmha_bwd_launcher` (one object
-# per problem instance, owns kernels + workspace, survives every launch).
+# Compiled state is shared; scratch belongs to an execution, invocation or graph.
 _3D_PIPELINES: Dict[Tuple, _Attention3DPrepared] = {}
-_3D_BOUND_VALUES: Dict[Tuple, Tuple[Dict[str, Any], Dict[str, Any]]] = {}
-_3D_GRAPHS: Dict[Tuple, Any] = {}
-_3D_GRAPH_REFS: Dict[Tuple, Tuple[Any, ...]] = {}
+_3D_GRAPH_CAPACITY = 8
+_3D_GRAPH_LOCK = RLock()
+_3D_GRAPHS: OrderedDict[tuple, _Attention3DGraph] = OrderedDict()
 _2D_LAUNCHERS: Dict[Tuple, KernelLauncher] = {}
 _2D_LAUNCH_META: Dict[Tuple, _Attention2DLaunchMeta] = {}
 _2D_GRAPHS: Dict[Tuple, Any] = {}
 _2D_GRAPH_REFS: Dict[Tuple, Tuple[Any, ...]] = {}
 _SCALAR_LAUNCHERS: Dict[Tuple, KernelLauncher] = {}
+
+
+def _launch_3d_pipeline(prepared, seg_vals, red_vals, stream, *, capturing: bool):
+    """Launch segment+reduce, without a stream fence while capturing."""
+    if capturing:
+        with no_fence():
+            return prepared.pipeline(
+                (seg_vals, red_vals),
+                (prepared.seg_config, prepared.red_config),
+                stream=int(stream),
+            )
+    result = prepared.pipeline(
+        (seg_vals, red_vals),
+        (prepared.seg_config, prepared.red_config),
+        stream=int(stream),
+    )
+    if _resolved_fence(prepared.red_config.fence):
+        # The reducer's fence also completes the segment. Release its retained
+        # arguments so repeated synchronous calls do not accumulate scratch.
+        release_retained_for_stream(int(stream))
+    return result
+
+
+# The dispatcher's ``AttentionTuningSpec`` satisfies this; the runtime only
+# compiles ``build()`` under ``cache_key()`` and launches its geometry.
+_EXPLICIT_TUNING_ATTRS = (
+    "arch",
+    "path",
+    "kernel_spec",
+    "compile_backend",
+    "allow_unsupported",
+    "cache_key",
+    "build",
+    "launch_grid",
+    "launch_block",
+    "with_num_kv_blocks",
+)
+
+
+def _require_explicit_tuning_spec(tuning_spec) -> None:
+    """Reject a tuning spec that does not carry the launch contract."""
+    missing = [
+        name for name in _EXPLICIT_TUNING_ATTRS if not hasattr(tuning_spec, name)
+    ]
+    if missing:
+        raise TypeError(
+            "tuning spec is missing "
+            + ", ".join(missing)
+            + "; required attributes are "
+            + ", ".join(_EXPLICIT_TUNING_ATTRS)
+        )
+
+
+def _explicit_path_supported(
+    problem: UnifiedAttentionProblem, tuning_spec, kind: str
+) -> Tuple[bool, str]:
+    """Problem-shape support for a path, with or without an explicit spec.
+
+    A tuning spec is a knob combination, not proof the problem is runnable.
+    ``AttentionTuningSpec.allow_unsupported`` is the only bypass.
+    """
+    if tuning_spec is not None and tuning_spec.allow_unsupported:
+        return True, f"explicit {kind} tuning spec (unsupported override)"
+    if kind == "3d":
+        return supports_native_unified_attention_3d_tiled(problem)
+    if kind == "2d":
+        return supports_native_unified_attention_tiled(problem)
+    raise ValueError(f"unknown attention path kind {kind!r}")
 
 
 def _recommend_graph_replay(problem: UnifiedAttentionProblem) -> bool:
@@ -3643,21 +4139,11 @@ def _enable_3d_graph_replay(problem: UnifiedAttentionProblem) -> bool:
         )
         return env in ("1", "on", "enable", "enabled", "yes", "true")
     if arch == "gfx950":
-        # The 3D split-KV decode launch is host/dispatch bound here: the two
-        # kernels (segment + reduce) device-execute in ~26-35us but the eager
-        # Python dispatch adds a ~17us flat floor, so the wall time is ~43us and
-        # does not scale with context length. Capturing the (segment + reduce)
-        # launch sequence into a hipGraph and replaying it removes that
-        # per-launch host cost and roughly halves decode latency (43->21us at
-        # k=2048), producing bitwise-identical output. Gated to the decode /
-        # short-q regime (``max_seqlen_q <= 768``) so prefill routing is never
-        # affected, and feature-flagged shapes are excluded. Opt-in via
-        # ``HIPDNN_GFX950_3D_GRAPH=1`` until broadly validated across traces.
-        if problem.max_seqlen_q > 768:
-            return False
-        if problem.use_alibi or problem.use_qq_bias or problem.softcap > 0:
-            return False
-        if problem.sliding_window > 0 or problem.use_fp8:
+        # Decode / short-q 3D is launch-overhead bound. Keep replay opt-in
+        # until it is the production default (``HIPDNN_GFX950_3D_GRAPH=1``).
+        # Skipped when the caller is already capturing so an outer
+        # torch.cuda.graph wins.
+        if not _recommend_graph_replay(problem):
             return False
         env = __import__("os").environ.get("HIPDNN_GFX950_3D_GRAPH", "").strip().lower()
         return env in ("1", "on", "enable", "enabled", "yes", "true")
@@ -3840,8 +4326,9 @@ def _attention_3d_workspace_specs(
     This is the Python equivalent of FMHA forward split-KV's
     `lse_acc_ptr` + `o_acc_ptr` sizing in
     `example/ck_tile/01_fmha/fmha_fwd_runner.hpp`: all scratch shapes
-    are derived from the problem up front, owned by a long-lived pool,
-    and passed to the segment and reduce kernels by pointer.
+    are derived from the problem up front and passed to the segment and reduce
+    kernels by pointer. The launcher allocates them per invocation; captured
+    allocations use Torch's graph-private pool.
     """
     try:
         import torch
@@ -3895,38 +4382,43 @@ def _get_3d_pipeline(
     problem: UnifiedAttentionProblem,
     cache_key: Tuple,
     num_segments: int,
+    *,
+    tuning_spec=None,
+    strided_kv: bool = False,
 ) -> _Attention3DPrepared:
     prepared_key = cache_key + ("total_q", int(problem.total_q))
     if prepared_key in _3D_PIPELINES:
         return _3D_PIPELINES[prepared_key]
     if cache_key not in _ATTN_3D_TILED_CACHE:
         arch = _resolve_attention_arch()
-        (
-            _,
-            UnifiedAttentionReduceTiledSpec,
-            build_unified_attention_3d_tiled,
-            build_unified_attention_reduce_tiled,
-            _,
-        ) = _tiled_3d_impl(arch)
-        seg_spec = _tiled_3d_spec_from_problem(problem)
-        reduce_spec = UnifiedAttentionReduceTiledSpec(
-            head_size=problem.head_size,
-            num_query_heads=problem.num_query_heads,
-            num_kv_heads=problem.num_kv_heads,
-            dtype=problem.dtype,
-            num_segments=num_segments,
-            waves_per_eu=_select_3d_waves_per_eu(problem),
-        )
-        seg_art = compile_kernel(
-            build_unified_attention_3d_tiled(seg_spec, arch=arch),
-            arch=arch,
-            capture_ir_text=False,
-        )
-        red_art = compile_kernel(
-            build_unified_attention_reduce_tiled(reduce_spec, arch=arch),
-            arch=arch,
-            capture_ir_text=False,
-        )
+        if tuning_spec is not None:
+            seg_kernel, red_kernel = tuning_spec.build(arch)
+        else:
+            (
+                _,
+                UnifiedAttentionReduceTiledSpec,
+                build_unified_attention_3d_tiled,
+                build_unified_attention_reduce_tiled,
+                _,
+            ) = _tiled_3d_impl(arch)
+            if strided_kv:
+                segment_spec, reduce_spec = _strided_3d_specs_from_problem(
+                    problem, arch=arch
+                )
+            else:
+                segment_spec = _tiled_3d_spec_from_problem(problem)
+                reduce_spec = UnifiedAttentionReduceTiledSpec(
+                    head_size=problem.head_size,
+                    num_query_heads=problem.num_query_heads,
+                    num_kv_heads=problem.num_kv_heads,
+                    dtype=problem.dtype,
+                    num_segments=num_segments,
+                    waves_per_eu=_select_3d_waves_per_eu(problem),
+                )
+            seg_kernel = build_unified_attention_3d_tiled(segment_spec, arch=arch)
+            red_kernel = build_unified_attention_reduce_tiled(reduce_spec, arch=arch)
+        seg_art = compile_kernel(seg_kernel, arch=arch, capture_ir_text=False)
+        red_art = compile_kernel(red_kernel, arch=arch, capture_ir_text=False)
         _ATTN_3D_TILED_CACHE[cache_key] = (
             seg_art.hsaco,
             seg_art.kernel_name,
@@ -3937,7 +4429,15 @@ def _get_3d_pipeline(
     seg_launcher = KernelLauncher(
         hsaco=seg_hsaco,
         kernel_name=seg_kname,
-        signature=_3d_signature(problem.dtype, kv_dtype=_kv_storage_dtype(problem)),
+        signature=_3d_signature(
+            problem.dtype,
+            strided_kv=strided_kv,
+            kv_dtype=(
+                tuning_spec.kernel_spec.kv_storage_dtype
+                if tuning_spec is not None
+                else _kv_storage_dtype(problem)
+            ),
+        ),
         cache_key=("3d_seg",) + cache_key,
     )
     red_launcher = KernelLauncher(
@@ -3947,7 +4447,6 @@ def _get_3d_pipeline(
         cache_key=("3d_red",) + cache_key,
     )
     pipeline = PipelineLauncher([seg_launcher, red_launcher])
-    pool = WorkspacePool()
     block_q = (
         16 // problem.num_queries_per_kv if problem.num_queries_per_kv <= 16 else 1
     )
@@ -3964,7 +4463,6 @@ def _get_3d_pipeline(
     )
     prepared = _Attention3DPrepared(
         pipeline=pipeline,
-        pool=pool,
         seg_config=LaunchConfig(
             grid=(
                 int(total_num_q_blocks),
@@ -3977,10 +4475,6 @@ def _get_3d_pipeline(
             grid=(int(problem.total_q), int(problem.num_query_heads), 1),
             block=(wave_size, 1, 1),
         ),
-        workspace_specs={},
-        workspace_tensors={},
-        seg_values={},
-        red_values={},
     )
     _3D_PIPELINES[prepared_key] = prepared
     return prepared
@@ -4073,23 +4567,29 @@ def _select_2d_compile_backend(problem: UnifiedAttentionProblem) -> str:
 def _get_2d_launcher(
     problem: UnifiedAttentionProblem,
     cache_key: Tuple,
+    *,
+    tuning_spec=None,
 ) -> KernelLauncher:
     if cache_key in _2D_LAUNCHERS:
         return _2D_LAUNCHERS[cache_key]
     if cache_key not in _ATTN_TILED_CACHE:
         arch = _resolve_attention_arch()
-        _, build_unified_attention_2d_tiled, _ = _tiled_2d_impl(arch)
-        spec = _tiled_spec_from_problem(problem)
-        route = _gfx942_4warp_route(problem)
-        if route is not None:
-            # Distinct 4-warp GQA paged builder (keyed separately in
-            # `_tiled_cache_key`; grid in `_get_2d_launch_meta`). Same paged ABI
-            # as the default builder. Parity+ with AITER @Sq4096/8192 (vs the
-            # 1-warp std-QK's 0.55x).
-            kernel = route.builder(spec, arch=arch)
+        if tuning_spec is not None:
+            kernel = tuning_spec.build(arch)
+            backend = tuning_spec.compile_backend
         else:
-            kernel = build_unified_attention_2d_tiled(spec, arch=arch)
-        backend = _select_2d_compile_backend(problem)
+            _, build_unified_attention_2d_tiled, _ = _tiled_2d_impl(arch)
+            spec = _tiled_spec_from_problem(problem)
+            route = _gfx942_4warp_route(problem)
+            if route is not None:
+                # Distinct 4-warp GQA paged builder (keyed separately in
+                # `_tiled_cache_key`; grid in `_get_2d_launch_meta`). Same paged
+                # ABI as the default builder. Parity+ with AITER @Sq4096/8192
+                # (vs the 1-warp std-QK's 0.55x).
+                kernel = route.builder(spec, arch=arch)
+            else:
+                kernel = build_unified_attention_2d_tiled(spec, arch=arch)
+            backend = _select_2d_compile_backend(problem)
         if backend == "hipcc":
             from rocke.helpers.compile import compile_kernel_via_hipcc
 
@@ -4105,12 +4605,37 @@ def _get_2d_launcher(
             problem.dtype,
             include_bt_stride=True,
             include_qq_bias_stride=True,
-            kv_dtype=_kv_storage_dtype(problem),
+            kv_dtype=(
+                tuning_spec.kernel_spec.kv_storage_dtype
+                if tuning_spec is not None
+                else _kv_storage_dtype(problem)
+            ),
         ),
         cache_key=("2d",) + cache_key,
     )
     _2D_LAUNCHERS[cache_key] = launcher
     return launcher
+
+
+def gfx942_4warp_launch_grid(problem) -> Tuple[int, int, int]:
+    """Grid the gfx942 4-warp GQA builder actually launches.
+
+    Fold-eligible shapes pack four query heads into one kv-head tile. The
+    dispatcher grid and ``_get_2d_launch_meta`` both call this so they cannot
+    drift.
+    """
+    fold = gfx942_gqa_fold_eligible(
+        problem.head_size,
+        problem.num_queries_per_kv,
+        problem.sliding_window,
+        problem.dtype,
+        problem.block_size,
+    )
+    if fold:
+        qblocks = problem.total_q // 32 + problem.num_seqs
+        return (int(problem.num_kv_heads), int(qblocks), 1)
+    qblocks = problem.total_q // 128 + problem.num_seqs
+    return (int(problem.num_query_heads), int(qblocks), 1)
 
 
 def gfx942_gqa_fold_eligible(
@@ -4142,11 +4667,19 @@ def gfx942_gqa_fold_eligible(
 def _get_2d_launch_meta(
     problem: UnifiedAttentionProblem,
     cache_key: Tuple,
+    *,
+    tuning_spec=None,
 ) -> _Attention2DLaunchMeta:
     meta_key = cache_key + ("total_q", int(problem.total_q))
     if meta_key in _2D_LAUNCH_META:
         return _2D_LAUNCH_META[meta_key]
     arch = _resolve_attention_arch()
+    if tuning_spec is not None:
+        meta = _Attention2DLaunchMeta(
+            grid=tuning_spec.launch_grid(problem), block=tuning_spec.launch_block()
+        )
+        _2D_LAUNCH_META[meta_key] = meta
+        return meta
     route = _gfx942_4warp_route(problem)
     if route is not None:
         _fold = gfx942_gqa_fold_eligible(
@@ -4251,8 +4784,19 @@ def run_unified_attention_torch(
     k_scale: float = 1.0,
     v_scale: float = 1.0,
     out_scale: float = 1.0,
+    tuning_spec=None,
+    kv_layout: str = "paged",
+    execution: Attention3DExecution | None = None,
+    use_graph: bool = True,
 ):
     """Launch a CK DSL attention kernel on torch tensors.
+
+    ``kv_layout="strided"`` adapts non-paged K/V tensors with logical shape
+    [B,Hkv,capacity,D] to the existing split-KV pipeline on gfx942/gfx950.
+    K/V may have independent BSHD/BHSD or padded outer strides; D must be
+    contiguous and rows vector-aligned. Pass block_table=None, Q/O [B,Hq,D],
+    int32 KV lengths [B] in [0,problem.max_seqlen_k], and offsets [0,1,...,B].
+    The adapter neither copies KV nor allocates a page table.
 
     Backend selection:
       - `"tiled"`: force the optimized MFMA path; raises if unsupported.
@@ -4266,12 +4810,144 @@ def run_unified_attention_torch(
     semantics exactly and require the corresponding ``problem.use_alibi`` /
     ``problem.use_qq_bias`` flags to be set.
 
-    ``stream`` is the HIP stream handle (an `int`) to launch on. Pass
-    ``torch.cuda.current_stream().cuda_stream`` to make the launches
-    visible to ``torch.cuda.graph`` capture; this is how the parity
-    harness amortises the segment + reduce launch overhead in the 3D
-    path under a hipgraph.
+    ``stream`` is the HIP stream handle (an `int`) to launch on. In the 3D
+    path, zero selects Torch's current stream on Q's device. Scratch allocation,
+    initialization and both launches use that stream. Eager calls own separate
+    scratch unless an execution owner is supplied. Captures use graph-private
+    scratch; ``use_graph=False`` disables internal 3D replay.
+    Warm up compilation before enclosing calls in ``torch.cuda.graph``.
     """
+    if execution is not None:
+        if not isinstance(execution, Attention3DExecution):
+            raise TypeError("execution must be an Attention3DExecution")
+        if backend not in ("auto", "3d"):
+            raise ValueError("prepared execution requires the 3D backend")
+        backend = "3d"
+    if tuning_spec is not None:
+        _require_explicit_tuning_spec(tuning_spec)
+        if tuning_spec.arch != _resolve_attention_arch():
+            raise ValueError(
+                f"tuning spec targets {tuning_spec.arch}, running on "
+                f"{_resolve_attention_arch()}"
+            )
+        implied = "3d" if tuning_spec.path == "3d" else "tiled"
+        if backend not in ("auto", implied):
+            raise ValueError(
+                f"tuning spec path {tuning_spec.path!r} conflicts with "
+                f"backend {backend!r}"
+            )
+        backend = implied
+
+    if kv_layout not in ("paged", "strided"):
+        raise ValueError("kv_layout must be 'paged' or 'strided'")
+    if kv_layout == "strided":
+        from .attention_kv_cache import StridedKvCacheLayout
+
+        if _resolve_attention_arch() not in ("gfx942", "gfx950"):
+            raise ValueError("strided KV decode targets gfx942/gfx950")
+        if backend not in ("auto", "3d"):
+            raise ValueError("strided KV decode requires the 3D tiled backend")
+        if block_table is not None:
+            raise ValueError("strided KV decode does not take a block table")
+        if problem.max_seqlen_q != 1 or problem.total_q != problem.num_seqs:
+            raise ValueError("strided KV decode requires one query per sequence")
+        if (
+            problem.use_fp8
+            or problem.use_sinks
+            or problem.use_alibi
+            or problem.use_qq_bias
+            or sinks is not None
+            or alibi_slopes is not None
+            or qq_bias is not None
+        ):
+            raise ValueError("strided KV decode does not support fp8, sinks or bias")
+        if k_scale != 1.0 or v_scale != 1.0 or out_scale != 1.0:
+            raise ValueError("strided decode does not support K/V/output scaling")
+        if (softcap > 0) != (problem.softcap > 0):
+            raise ValueError("strided softcap enablement disagrees with problem")
+        if tuning_spec is not None:
+            _validate_strided_3d_spec(problem, tuning_spec)
+        else:
+            _strided_3d_specs_from_problem(problem, arch=_resolve_attention_arch())
+        arch = _resolve_attention_arch()
+        if problem.clamp_arch not in (None, arch):
+            raise ValueError(
+                f"strided clamp_arch {problem.clamp_arch!r} conflicts with {arch}"
+            )
+        if problem.clamp_arch is None:
+            problem = replace(problem, clamp_arch=arch)
+        layout = StridedKvCacheLayout.from_tensors(k, v)
+        batch, heads, capacity, dim = layout.key.shape
+        if (batch, heads, dim) != (
+            problem.num_seqs,
+            problem.num_kv_heads,
+            problem.head_size,
+        ):
+            raise ValueError("KV tensor shape does not match the attention problem")
+        if problem.max_seqlen_k > capacity:
+            raise ValueError("maximum valid KV length exceeds allocation capacity")
+        expected_q = (batch, problem.num_query_heads, dim)
+        expected_dtype = (
+            "torch.float16" if problem.dtype == "fp16" else "torch.bfloat16"
+        )
+        if tuple(q.shape) != expected_q or tuple(out.shape) != expected_q:
+            raise ValueError("strided decode Q/O must have shape [B,Hq,D]")
+        if not q.is_contiguous() or not out.is_contiguous():
+            raise ValueError("strided decode Q/O must be contiguous")
+        if not q.is_cuda:
+            raise ValueError("strided decode requires device tensors")
+        if any(int(t.data_ptr()) % 16 for t in (q, out)):
+            raise ValueError("strided decode Q/O must be 16-byte aligned")
+        if any(str(t.dtype) != expected_dtype for t in (q, k, v, out)):
+            raise ValueError("strided decode Q/K/V/O dtype must match the problem")
+        if any(t.device != q.device for t in (k, v, out, seqused_k, cu_seqlens_q)):
+            raise ValueError("strided decode inputs must be on the same device")
+        if (
+            str(seqused_k.dtype) != "torch.int32"
+            or tuple(seqused_k.shape) != (batch,)
+            or not seqused_k.is_contiguous()
+        ):
+            raise ValueError("KV lengths must be a contiguous int32 [B] tensor")
+        if (
+            str(cu_seqlens_q.dtype) != "torch.int32"
+            or tuple(cu_seqlens_q.shape) != (batch + 1,)
+            or not cu_seqlens_q.is_contiguous()
+        ):
+            raise ValueError("query offsets must be a contiguous int32 [B+1] tensor")
+        # Caller-owned device metadata: lengths are in [0, max_seqlen_k], and
+        # query offsets are [0, 1, ..., B]. No host read/synchronization here.
+        ok, why = _explicit_path_supported(problem, tuning_spec, "3d")
+        if not ok:
+            raise ValueError(why)
+        return _run_3d_tiled(
+            problem=problem,
+            q=q,
+            k=k,
+            v=v,
+            out=out,
+            cu_seqlens_q=cu_seqlens_q,
+            seqused_k=seqused_k,
+            softmax_scale=softmax_scale,
+            block_table=None,
+            softcap=softcap,
+            sinks=None,
+            bt_stride=0,
+            warmup=warmup,
+            attempts=attempts,
+            stream=int(stream),
+            tuning_spec=tuning_spec,
+            kv_cache_layout=layout,
+            execution=execution,
+            use_graph=use_graph,
+        )
+    # Paged-only specs (including 2D and gfx1250 3D) have no kv_layout field.
+    # Strided specs must declare it explicitly; validation above enforces that.
+    if (
+        tuning_spec is not None
+        and getattr(tuning_spec.kernel_spec, "kv_layout", "paged") != "paged"
+    ):
+        raise ValueError("strided tuning spec requires kv_layout='strided'")
+
     bt_stride = (
         int(block_table.stride(0))
         if hasattr(block_table, "stride")
@@ -4293,6 +4969,10 @@ def run_unified_attention_torch(
         )
         if int(k.shape[0]) * _blk_stride > 0x8000_0000:
             problem = replace(problem, num_kv_blocks=int(k.shape[0]))
+    if tuning_spec is not None:
+        # Explicit specs are initially selected before framework tensors exist.
+        # Refresh address-width state and tuning identity from the real cache.
+        tuning_spec = tuning_spec.with_num_kv_blocks(int(k.shape[0]))
 
     # Auto path selection. Historically we *always* preferred 3D when
     # supported because split-KV produces a huge grid that beats Triton
@@ -4319,10 +4999,12 @@ def run_unified_attention_torch(
     # is fine" branch of ``use_2d_kernel``).
     prefer_2d = backend == "auto" and problem.select_path() == "2d"
     if backend == "3d" or (backend == "auto" and not prefer_2d):
-        ok_3d, reason_3d = supports_native_unified_attention_3d_tiled(problem)
+        ok_3d, reason_3d = _explicit_path_supported(problem, tuning_spec, "3d")
         if ok_3d:
             return _run_3d_tiled(
                 problem=problem,
+                execution=execution,
+                use_graph=use_graph,
                 q=q,
                 k=k,
                 v=v,
@@ -4342,6 +5024,7 @@ def run_unified_attention_torch(
                 stream=int(stream),
                 k_scale=k_scale,
                 v_scale=v_scale,
+                tuning_spec=tuning_spec,
             )
         if backend == "3d":
             raise NotImplementedError(reason_3d)
@@ -4353,7 +5036,11 @@ def run_unified_attention_torch(
         # a replay skips supports + cache_key + the kernarg pack -- the host
         # overhead that otherwise dominates tiny-shape latency. Skipped when the
         # caller is already capturing the forward (they take precedence).
-        if _enable_2d_graph_replay(problem) and not _torch_stream_capturing():
+        if (
+            tuning_spec is None
+            and _enable_2d_graph_replay(problem)
+            and not _torch_stream_capturing()
+        ):
             graphed = _run_2d_graphed(
                 problem,
                 q=q,
@@ -4377,14 +5064,18 @@ def run_unified_attention_torch(
             )
             if graphed is not _GRAPH_FALLBACK:
                 return graphed
-        ok_t, reason_t = supports_native_unified_attention_tiled(problem)
+        ok_t, reason_t = _explicit_path_supported(problem, tuning_spec, "2d")
         if ok_t:
             # Hot path: compute the cache key directly from the problem +
             # selectors (skip the 17-field dataclass build). Spec is only
             # built on cache miss inside _get_2d_launcher and for grid
             # math below.
-            key = _tiled_cache_key(problem)
-            launcher = _get_2d_launcher(problem, key)
+            key = (
+                tuning_spec.cache_key()
+                if tuning_spec is not None
+                else _tiled_cache_key(problem)
+            )
+            launcher = _get_2d_launcher(problem, key, tuning_spec=tuning_spec)
             vals = _attn_values(
                 problem=problem,
                 q=q,
@@ -4410,7 +5101,7 @@ def run_unified_attention_torch(
             # The dispatcher must launch with the same BLOCK_Q/threads the
             # kernel was built for. Cache that fixed metadata per kernel key so
             # repeated same-shape calls avoid selector math on the hot path.
-            meta = _get_2d_launch_meta(problem, key)
+            meta = _get_2d_launch_meta(problem, key, tuning_spec=tuning_spec)
             return launcher(
                 vals,
                 config=LaunchConfig(

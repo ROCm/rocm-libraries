@@ -182,8 +182,9 @@ endif()
 FILE(GLOB_RECURSE DOCUMENTATION_EXAMPLES documentation_examples/*.cpp)
 FILE(GLOB_RECURSE DOCUMENTATION_EXAMPLES2 documentation_examples/*.c)
 
-if(NOT BUILD_WITH_ILDLT0)
-  list(FILTER DOCUMENTATION_EXAMPLES EXCLUDE REGEX ".*example_rocsparse_spildlt0\\.cpp$")
+# The rocsparse_spsort examples need rocsparse_spsort, which is only built with BUILD_WITH_SPSORT.
+if(NOT BUILD_WITH_SPSORT)
+  list(FILTER DOCUMENTATION_EXAMPLES EXCLUDE REGEX "/example_rocsparse_spsort[^/]*\\.cpp$")
 endif()
 
 foreach(file ${DOCUMENTATION_EXAMPLES})
