@@ -73,10 +73,11 @@ gfx942 constraints that shape the emission:
     transpose of what an A operand read wants, so a register-level handoff
     from one GEMM to the next is impossible. Hence ``qa_lds`` and ``accl_lds``.
 
-Both kernels take the query **already projected and rotated**
-(``[total_q, H_q, d_nope + d_rope]``). Per the design doc the ``W_UQ`` GEMM
-and the query-side RoPE are steps 2-3 of a separate pre-kernel, so they are
-not this kernel's job.
+**Query input contract.** Both kernels take the query **already projected and
+RoPE-rotated** (``[total_q, H_q, d_nope + d_rope]``): ``q[..., :d_nope]`` is
+``Q_nope`` after ``W_UQ``, and ``q[..., d_nope:]`` is ``Q_rope`` after the
+query-side RoPE. Neither the ``W_UQ`` projection nor the query RoPE is in-tree;
+the caller must apply both. A pre-kernel that does so is a follow-up.
 """
 
 from __future__ import annotations
@@ -110,6 +111,9 @@ __all__ = [  # noqa: RUF022  -- ordered spec -> gate -> launch geometry -> build
     "MlaPrefillSpec",
     "supports_mla_prefill",
     "require_mla_prefill",
+    "check_mla_prefill_extents",
+    "MLA_BINARY_SEARCH_ITERS",
+    "MLA_MAX_NUM_SEQS",
     "mla_prefill_block",
     "mla_prefill_score_probe_grid",
     "mla_prefill_score_probe_signature",
@@ -257,6 +261,24 @@ XCD_CHUNK = 16
 # at 17408 B, under the loop phase's pool.
 EPI_VQ = 32
 
+# Trip count of the in-kernel ``seq_idx`` binary search. It is fixed rather
+# than sized per request, so a request's batch size never splits the kernel
+# cache. Each iteration halves the ``[left, right)`` interval, which starts as
+# ``[0, num_seqs)`` and holds ``num_seqs + 1`` candidate answers; after ``n``
+# iterations ``right - left == num_seqs >> n``, so the search converges iff
+# ``num_seqs < 2**n``. A larger batch would stop early and map q-blocks to the
+# wrong sequence without any error, so dispatch caps ``num_seqs`` at
+# MLA_MAX_NUM_SEQS.
+MLA_BINARY_SEARCH_ITERS = 12
+MLA_MAX_NUM_SEQS = 2**MLA_BINARY_SEARCH_ITERS - 1
+
+# Offsets are i32 ``mul nsw`` / ``add nsw`` chains: signed overflow is UB, so
+# every extent the kernel indexes has to stay below 2**31 (in elements for the
+# global loads and stores, in bytes for the paged buffer loads).
+INT32_LIMIT = 2**31
+# ``num_records`` of the paged c_kv / k_rope buffer resources.
+KV_RSRC_BYTES = 0x7FFF0000
+
 _C16_DIST = make_static_tile_distribution(
     make_c_warp_dstr_encoding(MfmaAtom.bf16_16x16x16())
 )
@@ -332,9 +354,12 @@ def _wt_swizzle(b: IRBuilder, row: Value, col: Value, r_tile: int) -> Value:
 class MlaPrefillSpec:
     """Immutable description of one gfx942 MLA prefill configuration.
 
-    The defaults are the design doc's bring-up values, not tuned values. The
-    only field a caller normally sets is ``num_heads`` (128 for a DeepSeek-V3
-    shaped model, 64 for a Kimi-K2 shaped one).
+    The defaults are the tuned single-head layout (``block_q`` and
+    ``r_kv_tile`` were measured; see their comments), which dispatch keeps as
+    its fallback. A caller normally sets only ``num_heads`` (128 for a
+    DeepSeek-V3 shaped model, 64 for a Kimi-K2 shaped one); dispatch sets the
+    one-wave-per-head layout fields (``heads_per_wg``, ``q_tiles_per_wg``,
+    ``num_warps``, ``block_q``, ``agpr_acc``, ``num_xcds``) per request.
     """
 
     num_heads: int
@@ -354,7 +379,9 @@ class MlaPrefillSpec:
     num_warps: int = 4
     page_block_size: int = 16
     dtype: str = "bf16"
-    binary_search_iters: int = 8
+    # Fixed at MLA_BINARY_SEARCH_ITERS, which serves up to MLA_MAX_NUM_SEQS
+    # sequences; admission refuses fewer.
+    binary_search_iters: int = MLA_BINARY_SEARCH_ITERS
     # Heads packed into one workgroup, one wave per head. At 1 (the default) a
     # workgroup owns one head and its waves split that head's work. Above 1 a
     # workgroup owns ``heads_per_wg`` consecutive heads: every key tile is staged
@@ -370,7 +397,8 @@ class MlaPrefillSpec:
     # num_warps == heads_per_wg * q_tiles_per_wg. Waves sharing a head share its
     # W_UK / W_UV fetches, which cuts the per-row weight traffic.
     q_tiles_per_wg: int = 1
-    # XCDs the device deals workgroups across (6 on MI300A, 8 on MI300X); 0
+    # XCDs the device deals workgroups across (6 on a 228-CU gfx942, 8 on a
+    # 304-CU one); 0
     # keeps launch order. One-wave-per-head layout only. In launch order each
     # XCD's resident workgroups span every head group, so its L2 holds all of
     # their W_UK / W_UV; with the XCD count the kernel reorders workgroups so
@@ -519,6 +547,10 @@ def _fwd_lds_bytes(spec: MlaPrefillSpec) -> int:
         # wave's parked Q_rope, and the epilogue one 64-row latent block of
         # W_UV for every head, which pools onto them.
         kv_lds = elem * spec.block_k * (qa_cols + WT_PAD)
+        if spec.agpr_acc:
+            # The DMA'd key tile is double-buffered, with the RoPE columns in
+            # their own unpadded buffer: two latent slots plus two RoPE slots.
+            kv_lds = 2 * elem * spec.block_k * (spec.r_kv + WT_PAD + spec.d_rope)
         rows = spec.block_q // spec.q_tiles_per_wg
         qr_lds = elem * spec.num_warps * rows * (spec.d_rope + WT_PAD)
         # With absorbed_query there is no epilogue buffer: the latent goes
@@ -563,6 +595,15 @@ def supports_mla_prefill(spec: MlaPrefillSpec, *, arch: str) -> Tuple[bool, str]
     """
     if not arch.startswith("gfx942"):
         return False, f"MLA prefill is gfx942-only for now, got arch={arch!r}"
+    # Dispatch admits up to MLA_MAX_NUM_SEQS sequences without knowing which
+    # spec will serve them, so every admitted spec must search that far.
+    if spec.binary_search_iters < MLA_BINARY_SEARCH_ITERS:
+        return False, (
+            f"binary_search_iters={spec.binary_search_iters} resolves only "
+            f"{2**spec.binary_search_iters - 1} sequences; at least "
+            f"{MLA_BINARY_SEARCH_ITERS} are needed for num_seqs up to "
+            f"{MLA_MAX_NUM_SEQS}"
+        )
     # Register blocking: the kernel body is written over M_TILES = block_q /
     # MFMA_M and K_TILES = block_k / MFMA_N, so any multiple of the atom is
     # expressible. The cost of a larger block_q is the latent accumulator,
@@ -665,13 +706,37 @@ def supports_mla_prefill(spec: MlaPrefillSpec, *, arch: str) -> Tuple[bool, str]
             )
     # The prologue and epilogue buffers hold a column window of every M tile,
     # so block_q reaches LDS mostly through s_part; kv_lds scales with block_k.
-    # Both still have to fit the 64 KB budget.
+    # Both still have to fit the layout's per-CU share of LDS.
+    return _fits_lds(spec)
+
+
+def _fwd_workgroups_per_cu(spec: MlaPrefillSpec) -> int:
+    """Workgroups per CU the layout is built to run at.
+
+    The kernel keeps a wave under 256 VGPRs, two waves per SIMD and eight per
+    CU, so a four-wave workgroup is meant to run two per CU. An eight-wave
+    workgroup already fills the CU's wave slots, and ``agpr_acc`` spends the
+    whole 512-register file on one wave per SIMD, so both run one per CU.
+    """
+    return 1 if spec.agpr_acc or spec.num_warps >= 8 else 2
+
+
+def _fits_lds(spec: MlaPrefillSpec) -> tuple[bool, str]:
+    """LDS admission against the occupancy the layout intends.
+
+    Checking only the 64 KB per-workgroup limit would admit a two-per-CU
+    layout whose pool is over 32 KB, which then silently runs one per CU.
+    """
     lds = _fwd_lds_bytes(spec)
-    if lds > LDS_BYTES_PER_WORKGROUP:
+    wgs = _fwd_workgroups_per_cu(spec)
+    budget = LDS_BYTES_PER_WORKGROUP // wgs
+    if lds > budget:
         return False, (
             f"the forward kernel needs about {lds} B of LDS at "
-            f"block_q={spec.block_q}, block_k={spec.block_k}, r_kv={spec.r_kv}, "
-            f"which exceeds the {LDS_BYTES_PER_WORKGROUP} B per-workgroup budget"
+            f"heads_per_wg={spec.heads_per_wg}, q_tiles_per_wg="
+            f"{spec.q_tiles_per_wg}, block_q={spec.block_q}, "
+            f"block_k={spec.block_k}, r_kv_tile={spec.r_kv_tile}, which exceeds "
+            f"the {budget} B that {wgs} workgroup(s) per CU allow"
         )
     return True, ""
 
@@ -735,14 +800,18 @@ def _supports_heads_per_wg(spec: MlaPrefillSpec) -> tuple[bool, str]:
                 f"{name} has {count} elements, which does not divide evenly "
                 f"across {threads} threads at {width} elements per chunk"
             )
-    lds = _fwd_lds_bytes(spec)
-    if lds > LDS_BYTES_PER_WORKGROUP:
-        return False, (
-            f"the forward kernel needs about {lds} B of LDS at "
-            f"heads_per_wg={spec.heads_per_wg}, which exceeds the "
-            f"{LDS_BYTES_PER_WORKGROUP} B per-workgroup budget"
-        )
-    return True, ""
+    # The key-tile staging shifts each thread's chunk by whole rows, so a row's
+    # chunks must divide the thread count.
+    for name, cols, width in (
+        ("c_kv", spec.r_kv, C_STAGE_W),
+        ("k_rope", spec.d_rope, kr_w),
+    ):
+        if threads % (cols // width) != 0:
+            return False, (
+                f"a {name} row is {cols // width} chunks of {width}, which "
+                f"must divide the {threads} threads"
+            )
+    return _fits_lds(spec)
 
 
 def require_mla_prefill(spec: MlaPrefillSpec, *, arch: str) -> None:
@@ -757,6 +826,51 @@ def require_mla_prefill(spec: MlaPrefillSpec, *, arch: str) -> None:
         raise NotImplementedError(reason)
 
 
+def check_mla_prefill_extents(
+    spec: MlaPrefillSpec, *, total_q: int, num_kv_blocks: int = 0
+) -> tuple[bool, str]:
+    """Per-launch 32-bit addressing admission for :func:`build_mla_prefill_fwd`.
+
+    The problem size is a runtime argument, so this has to run per request,
+    not per compile. Every offset below is an i32 ``mul nsw`` chain, and signed
+    overflow is UB, so an extent at or past 2**31 is refused:
+
+    * query, in elements: ``(token * H + head) * q_cols``, where ``q_cols`` is
+      ``d_nope + d_rope`` fused, or ``r_kv + d_rope`` with ``absorbed_query``;
+    * output, in elements: ``token * H * d_v + head * d_v`` fused, or the
+      latent ``(token * H + head) * r_kv`` with ``absorbed_query`` (the caller
+      then writes the ``d_v`` output itself);
+    * paged ``c_kv``, in bytes: the buffer-load ``soffset`` is
+      ``page * page_block_size * r_kv * 2``, an i32 product, and the buffer
+      resource is built with ``num_records`` = KV_RSRC_BYTES (0x7FFF0000, just
+      under 2**31). The pool must fit the resource range, which also keeps the
+      product clear of overflow. ``k_rope``'s page stride is smaller and never
+      binds. Skipped when ``num_kv_blocks`` is 0 (pool size unknown).
+
+    The LSE (``token * H + head``) is below every one of these.
+    """
+    if spec.absorbed_query:
+        q_cols, out_cols, out_name = spec.r_kv + spec.d_rope, spec.r_kv, "latent output"
+    else:
+        q_cols, out_cols, out_name = spec.head_dim_qk, spec.d_v, "output"
+    rows = int(total_q) * spec.num_heads
+    for name, elems in (("query", rows * q_cols), (out_name, rows * out_cols)):
+        if elems >= INT32_LIMIT:
+            return False, (
+                f"{name} extent is total_q={total_q} x num_heads={spec.num_heads}"
+                f" x {elems // rows} = {elems} elements, at or past the 32-bit "
+                f"offset limit ({INT32_LIMIT})"
+            )
+    kv_bytes = int(num_kv_blocks) * spec.page_block_size * spec.r_kv * 2
+    if kv_bytes > KV_RSRC_BYTES:
+        return False, (
+            f"paged c_kv extent is num_kv_blocks={num_kv_blocks} x "
+            f"{spec.page_block_size * spec.r_kv * 2} B = {kv_bytes} B, past the "
+            f"{KV_RSRC_BYTES:#x} B buffer-resource range"
+        )
+    return True, ""
+
+
 def mla_prefill_block(spec: MlaPrefillSpec) -> Tuple[int, int, int]:
     """Workgroup shape: one flat dimension of ``64 * num_warps`` threads."""
     return (spec.threads, 1, 1)
@@ -767,9 +881,11 @@ def mla_prefill_score_probe_grid(
 ) -> Tuple[int, int, int]:
     """Grid for the score probe.
 
-    ``num_q_blocks`` is the packed-varlen total, i.e. ``sum(ceil(S_q / Bq))``
-    over the batch -- the same quantity
-    :func:`rocke.helpers.attention.binary_search_seq_idx` inverts. ``num_k_tiles``
+    ``num_q_blocks`` is the packed-varlen block count in the AITER numbering
+    :func:`rocke.helpers.attention.binary_search_seq_idx` inverts:
+    ``total_q // Bq + num_seqs``, the same count as
+    :func:`mla_prefill_fwd_grid` -- **not** ``sum(ceil(S_q / Bq))``, which
+    under-launches whenever a ``cu_q`` entry is a multiple of ``Bq``. ``num_k_tiles``
     is ``ceil(max(S_k) / Bk)``; workgroups past a given sequence's own key
     length exit in the prologue.
     """
@@ -1536,6 +1652,10 @@ def build_mla_prefill_fwd(spec: MlaPrefillSpec, *, arch: str = "gfx942") -> Kern
     # ``total_q == cu_seqlens_q[num_seqs]``.
     total_q = b.global_load_i32(cu_q, num_seqs_p)
     num_q_blocks = b.add(b.div(total_q, b.const_i32(BQ)), num_seqs_p)
+    # A grid wider than num_q_blocks would walk the reversed index below 0
+    # (seq_idx -1, negative token offsets). Uniform, so no partial workgroup.
+    with b.scf_if(b.cmp_ge(b.block_id_x(), num_q_blocks)):
+        b.ret()
     q_block_global_idx = b.sub(b.sub(num_q_blocks, b.const_i32(1)), b.block_id_x())
     head = b.block_id_y()
     tid = b.thread_id_x()
@@ -1842,7 +1962,7 @@ def build_mla_prefill_fwd(spec: MlaPrefillSpec, *, arch: str = "gfx942") -> Kern
     # workgroup-uniform and rides in the SGPR soffset. Each k-tile then costs
     # no VALU address math -- a 64-bit global address per load otherwise. The
     # rsrc range check applies to voffset alone, which stays inside one page.
-    big_bytes = b.const_i32(0x7FFF0000)
+    big_bytes = b.const_i32(KV_RSRC_BYTES)
     c_rsrc = b.buffer_rsrc(c_kv, big_bytes)
     kr_rsrc = b.buffer_rsrc(k_rope, big_bytes)
     c_voffs = []
@@ -2484,6 +2604,11 @@ def _build_mla_prefill_fwd_heads(spec: MlaPrefillSpec) -> KernelDef:
     # Same reversed, heaviest-first block walk as the one-head kernel.
     total_q = b.global_load_i32(cu_q, num_seqs_p)
     num_q_blocks = b.add(b.div(total_q, b.const_i32(BQ_WG)), num_seqs_p)
+    # A grid wider than num_q_blocks would walk the reversed index below 0
+    # (seq_idx -1, negative token offsets), or past the last head group through
+    # the chiplet remap. Uniform, so no partial workgroup.
+    with b.scf_if(b.cmp_ge(b.block_id_x(), num_q_blocks)):
+        b.ret()
     if spec.num_xcds > 1:
         # Chiplet-aware order: the dispatcher deals workgroups round-robin
         # across XCDs, so in launch order every XCD would see every head group
@@ -2736,7 +2861,7 @@ def _build_mla_prefill_fwd_heads(spec: MlaPrefillSpec) -> KernelDef:
     assert THREADS % c_chunks_per_row == 0 and THREADS % kr_chunks_per_row == 0
     C_ROWS_PER_CHUNK = THREADS // c_chunks_per_row
     KR_ROWS_PER_CHUNK = THREADS // kr_chunks_per_row
-    big_bytes = b.const_i32(0x7FFF0000)
+    big_bytes = b.const_i32(KV_RSRC_BYTES)
     c_rsrc = b.buffer_rsrc(c_kv, big_bytes)
     kr_rsrc = b.buffer_rsrc(k_rope, big_bytes)
     c_m0 = b.div(tid, b.const_i32(c_chunks_per_row))
