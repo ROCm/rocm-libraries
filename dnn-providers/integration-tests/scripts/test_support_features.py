@@ -61,6 +61,16 @@ from support_features.coverage import (
     render_markdown,
     share,
 )
+from support_features.feature_matrix import (
+    compute_feature_claims,
+    display_name,
+    group_of,
+    heading_anchor,
+    percent_cell,
+    share_cell,
+)
+from support_features.feature_matrix import main as feature_matrix_main
+from support_features.feature_matrix import render as render_feature_matrix
 from support_matrix_units import ClaimUnit, collect_units
 
 # --------------------------------------------------------------------------
@@ -439,6 +449,260 @@ class TestCli:
         captured = capsys.readouterr()
         assert captured.out == ""
         assert "error: 1 defect(s)" in captured.err
+
+
+# --------------------------------------------------------------------------
+# Feature matrix: feature_matrix.py on small trees, with the stand-in ops
+# --------------------------------------------------------------------------
+
+
+def _feature_claims(root: Path):
+    errors: list[str] = []
+    claims = compute_feature_claims(collect_units(root, errors), errors)
+    assert errors == []
+    return claims
+
+
+def _row(document: str, section: str, op: str) -> list[str]:
+    """Cells of the row for ``op`` in the table under heading ``section``."""
+    body = document.split(f"\n{section}\n", 1)[1].split("\n#", 1)[0]
+    (line,) = [ln for ln in body.splitlines() if ln.startswith(f"| **[{op}]")]
+    return [cell.strip() for cell in line.strip("|").split("|")]
+
+
+@pytest.mark.usefixtures("fake_registry")
+class TestFeatureClaims:
+    def test_any_engine_unions_engines_per_target(self, tmp_path: Path) -> None:
+        _bundle(
+            tmp_path,
+            "a",
+            [_node(features=["dtype:fp16"])],
+            claims={"E1": {"gfx942": ["linux"]}},
+        )
+        _bundle(
+            tmp_path,
+            "b",
+            [_node(features=["mask:causal"])],
+            claims={"E2": {"gfx942": ["linux"]}},
+        )
+        claims = _feature_claims(tmp_path)
+        target = ("gfx942", "linux")
+        assert claims.on_target([FAKE_TYPE], target) == 2
+        assert claims.engine_on_target(FAKE_TYPE, "E1", target) == 1
+        assert claims.engine_on_target(FAKE_TYPE, "E2", target) == 1
+
+    def test_platforms_and_archs_stay_apart(self, tmp_path: Path) -> None:
+        _bundle(
+            tmp_path,
+            "a",
+            [_node(features=["dtype:fp16"])],
+            claims={"E": {"gfx942": ["windows"]}},
+        )
+        _bundle(
+            tmp_path,
+            "b",
+            [_node(features=["dtype:bf16", "mask:causal"])],
+            claims={"E": {"gfx942": ["linux"], "gfx1100": ["linux"]}},
+        )
+        claims = _feature_claims(tmp_path)
+        assert claims.on_target([FAKE_TYPE], ("gfx942", "windows")) == 1
+        assert claims.on_target([FAKE_TYPE], ("gfx942", "linux")) == 2
+        assert claims.on_target([FAKE_TYPE], ("gfx1100", "linux")) == 2
+        # GPU order, then Linux before Windows.
+        assert claims.targets == [
+            ("gfx942", "linux"),
+            ("gfx942", "windows"),
+            ("gfx1100", "linux"),
+        ]
+
+    def test_tested_includes_unclaimed_graphs(self, tmp_path: Path) -> None:
+        _bundle(tmp_path, "a", [_node(features=["dtype:fp16", "mask:sliding"])])
+        _bundle(
+            tmp_path,
+            "b",
+            [_node(features=["dtype:fp16"])],
+            claims={"E": {"gfx942": ["linux"]}},
+        )
+        claims = _feature_claims(tmp_path)
+        assert claims.tested_count([FAKE_TYPE]) == 2
+        assert claims.on_target([FAKE_TYPE], ("gfx942", "linux")) == 1
+        assert claims.graphs[FAKE_TYPE] == 2
+
+    def test_fused_graph_counts_toward_each_op(self, tmp_path: Path) -> None:
+        _bundle(
+            tmp_path,
+            "a",
+            [
+                _node(features=["dtype:fp16"]),
+                _node(OTHER_TYPE, features=["data:empty"]),
+            ],
+            claims={"E": {"gfx90a": ["linux"]}},
+        )
+        claims = _feature_claims(tmp_path)
+        target = ("gfx90a", "linux")
+        assert claims.engine_on_target(FAKE_TYPE, "E", target) == 1
+        assert claims.engine_on_target(OTHER_TYPE, "E", target) == 1
+        # Feature ids are per op: the totals add, they never merge.
+        assert claims.total([FAKE_TYPE, OTHER_TYPE]) == 6
+
+
+class TestFeatureMatrixNames:
+    def test_every_real_op_lands_in_a_named_group(self) -> None:
+        groups = {group_of(t) for t in registry.OPS}
+        assert groups == {
+            "Attention",
+            "Batchnorm",
+            "Block scale",
+            "Convolution",
+            "CustomOp",
+            "Layernorm",
+            "Matmul",
+            "Pointwise",
+            "Reduction",
+            "Resample",
+            "RMSNorm",
+        }
+
+    def test_rmsnorm_backward_is_rmsnorm_not_pointwise(self) -> None:
+        assert group_of("RMSNormBackwardAttributes") == "RMSNorm"
+        assert group_of("MoeGroupedMatmulBwdAttributes") == "Matmul"
+
+    def test_display_name_drops_only_the_first_suffix(self) -> None:
+        assert display_name("SdpaAttributes") == "Sdpa"
+        assert (
+            display_name("BatchnormInferenceAttributesVarianceExt")
+            == "BatchnormInferenceVarianceExt"
+        )
+
+    @pytest.mark.parametrize(
+        ("count", "total", "cell"),
+        [
+            (0, 4, "❌"),
+            (4, 4, "✅"),
+            (3, 4, "🟡 75%"),
+            (2, 3, "🟡 66%"),
+            (1, 300, "🟡 1%"),
+            (299, 300, "🟡 99%"),
+        ],
+    )
+    def test_percent_cell(self, count: int, total: int, cell: str) -> None:
+        assert percent_cell(count, total) == cell
+
+    def test_share_cell(self) -> None:
+        assert share_cell(2, 3) == "2 / 3 (66%)"
+        assert share_cell(0, 0) == "-"
+
+
+@pytest.mark.usefixtures("fake_registry")
+class TestFeatureMatrixMarkdown:
+    def _document(self, tmp_path: Path) -> str:
+        _bundle(
+            tmp_path,
+            "a",
+            [_node(features=["dtype:fp16", "mask:causal"])],
+            claims={"E1": {"gfx942": ["linux"]}, "E2": {"gfx1100": ["windows"]}},
+        )
+        _bundle(
+            tmp_path,
+            "b",
+            [_node(features=["dtype:bf16"])],
+            claims={"E1": {"gfx1100": ["windows"]}},
+        )
+        return render_feature_matrix(_feature_claims(tmp_path))
+
+    def test_dashboard_cells_are_feature_shares(self, tmp_path: Path) -> None:
+        document = self._document(tmp_path)
+        rdna = _row(document, "### RDNA (consumer)", "Attention")
+        assert rdna == [
+            "**[Attention](#group-attention)**",
+            "4",
+            "3 / 4 (75%)",
+            "🟡 75%",
+        ]
+        cdna = _row(document, "### CDNA (data center)", "Attention")
+        assert cdna[3] == "🟡 50%"
+        # An op no graph exercises reads ❌, not a blank.
+        assert _row(document, "### CDNA (data center)", "CustomOp")[2:] == [
+            "0 / 2 (0%)",
+            "❌",
+        ]
+
+    def test_dashboard_puts_most_claimed_target_first(self, tmp_path: Path) -> None:
+        _bundle(
+            tmp_path,
+            "a",
+            [_node(features=["dtype:fp16"])],
+            claims={"E": {"gfx90a": ["linux"]}},
+        )
+        _bundle(
+            tmp_path,
+            "b",
+            [_node(features=["dtype:bf16", "mask:causal"])],
+            claims={"E": {"gfx950": ["linux"]}},
+        )
+        document = render_feature_matrix(_feature_claims(tmp_path))
+        cdna = document.split("### CDNA (data center)", 1)[1]
+        header = next(ln for ln in cdna.splitlines() if ln.startswith("| Op group"))
+        assert header.index("gfx950-linux") < header.index("gfx90a-linux")
+        # The engine tables keep GPU order.
+        engine = document.split("\n### E\n", 1)[1]
+        header = next(ln for ln in engine.splitlines() if ln.startswith("| Op |"))
+        assert header.index("gfx90a") < header.index("gfx950")
+
+    def test_engine_tables_count_only_that_engine(self, tmp_path: Path) -> None:
+        document = self._document(tmp_path)
+        # Columns: gfx942 L, gfx1100 W.
+        assert _row(document, "### E1", "Sdpa")[2:] == ["🟡 50%", "🟡 25%"]
+        assert _row(document, "### E2", "Sdpa")[2:] == ["❌", "🟡 50%"]
+
+    def test_engine_table_omits_ops_it_never_claims(self, tmp_path: Path) -> None:
+        document = self._document(tmp_path)
+        e1 = document.split("\n### E1\n", 1)[1].split("\n#", 1)[0]
+        assert "CustomOp" not in e1
+
+    def test_untested_features_are_listed(self, tmp_path: Path) -> None:
+        document = self._document(tmp_path)
+        section = document.split("## Untested features", 1)[1]
+        assert "| **Sdpa** | 2 | 3 / 4 (75%) | `mask:sliding` |" in section
+        assert "`data:empty`, `data:present`" in section
+
+    def test_anchors_resolve(self, tmp_path: Path) -> None:
+        document = self._document(tmp_path)
+        targets = set(re.findall(r"\]\(#([^)]+)\)", document))
+        defined = set(re.findall(r'<a id="([^"]+)"></a>', document))
+        defined |= {
+            heading_anchor(line.lstrip("#").strip())
+            for line in document.splitlines()
+            if line.startswith("#")
+        }
+        assert {"gpu-targets", "e1", "group-attention"} <= targets
+        assert targets <= defined
+
+
+@pytest.mark.usefixtures("fake_registry")
+class TestFeatureMatrixCli:
+    def test_missing_directory_exits_two(self, tmp_path: Path) -> None:
+        assert feature_matrix_main(["--bundles-dir", str(tmp_path / "absent")]) == 2
+
+    def test_output_writes_the_file(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        _bundle(tmp_path, "a", [_node(features=["dtype:fp16"])])
+        output = tmp_path / "out.md"
+        argv = ["--bundles-dir", str(tmp_path), "--output", str(output)]
+        assert feature_matrix_main(argv) == 0
+        assert output.read_text().startswith("# Support matrix by API feature")
+        assert capsys.readouterr().out == f"wrote {output}\n"
+
+    def test_defect_exits_one_and_writes_nothing(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        _bundle(tmp_path, "a", [_node(boom="bad")])
+        output = tmp_path / "out.md"
+        argv = ["--bundles-dir", str(tmp_path), "--output", str(output)]
+        assert feature_matrix_main(argv) == 1
+        assert not output.exists()
+        assert "error: 1 defect(s); nothing rendered" in capsys.readouterr().err
 
 
 # --------------------------------------------------------------------------

@@ -435,14 +435,23 @@ count singly, not in combination.
 python3 dnn-providers/integration-tests/scripts/support_features/coverage.py
 ```
 
+`feature_matrix.py` lays the same shares out like the support matrix: op
+groups by GPU and OS, then one table per engine, where a cell is the share of
+the op's features claimed there rather than the share of its graphs.
+
+```bash
+python3 dnn-providers/integration-tests/scripts/support_features/feature_matrix.py \
+    --output feature_matrix.md
+```
+
 The denominator is the op's API, not the bundles: each op module
 (`support_features/sdpa.py`, ...) catalogs the features of one node type in
-the flatbuffers schema, and `test_support_features.py` fails if a schema field
-is neither used by a feature nor listed with a reason it is not one. A graph
-that uses a value its catalog does not name — a new dtype, an uncatalogued head
-dim — is an error, not a silent omission. Node types without a catalog yet are
-listed in `support_features/registry.py` and reported by graph count only. The
-tests run as the `hipdnn_support_features_python_tests` ctest.
+the flatbuffers schema, `support_features/registry.py` lists every node type
+in the schema, and `test_support_features.py` fails if a schema field is
+neither used by a feature nor listed with a reason it is not one. A graph that
+uses a value its catalog does not name — a new dtype, an uncatalogued head dim
+— is an error, not a silent omission, and both scripts render nothing until it
+is fixed. The tests run as the `hipdnn_support_features_python_tests` ctest.
 
 ## Test Tiers
 
