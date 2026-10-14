@@ -132,6 +132,7 @@ jobs:
     name: Clang, ASan and UBSan
     runs-on: ubuntu-24.04
     env:
+      # Match the Clang and sanitizer runtime packages installed below.
       CXX: clang++-18
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -169,6 +170,7 @@ jobs:
             --exclude-regex '^hostnumerics-python-.*$' \
             --no-tests=error --output-on-failure
 
+      # Behavioral tests run through Python, so instrument the bindings as well.
       - name: Test Python with sanitizers
         env:
           # CPython owns process-lifetime allocations; retain bounds/UB checks.
@@ -176,7 +178,9 @@ jobs:
           PYTHONMALLOC: malloc
           PYTHONPATH: ${{ runner.temp }}/hostnumerics-sanitizers/python/Debug
         run: |
-          asan_runtime="$(clang++-18 -print-file-name=libclang_rt.asan-x86_64.so)"
+          cxx_compiler="$(sed -n 's/^CMAKE_CXX_COMPILER:[^=]*=//p' \
+            "${RUNNER_TEMP}/hostnumerics-sanitizers/CMakeCache.txt")"
+          asan_runtime="$("$cxx_compiler" -print-file-name=libclang_rt.asan-x86_64.so)"
           test -f "$asan_runtime"
           LD_PRELOAD="$asan_runtime" \
             python -m unittest discover \
