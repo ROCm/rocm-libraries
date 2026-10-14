@@ -231,8 +231,7 @@ rocblas_status rocsolver_sytrf_template(rocblas_handle handle,
         return rocblas_status_success;
     }
 
-#ifdef NDEBUG
-#else
+#ifndef NDEBUG
     {
         // -------------------------------
         // initialize scratch work[] array

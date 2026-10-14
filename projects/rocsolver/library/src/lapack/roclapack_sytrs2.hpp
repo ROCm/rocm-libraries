@@ -1118,6 +1118,19 @@ static inline rocblas_status rocsolver_sytrs2_template(rocblas_handle handle,
         return rocblas_status_success;
     }
 
+#ifndef NDEBUG
+    {
+        if((work != nullptr) && (size_work > 0))
+        {
+            hipStream_t stream;
+            ROCBLAS_CHECK(rocblas_get_stream(handle, &stream));
+
+            int value = 0xFF;
+            HIP_CHECK(hipMemsetAsync(work, value, size_work, stream));
+        }
+    }
+#endif
+
     bool const is_upper = (uplo == rocblas_fill_upper);
 
     std::byte* const pwork = static_cast<std::byte*>(work);
