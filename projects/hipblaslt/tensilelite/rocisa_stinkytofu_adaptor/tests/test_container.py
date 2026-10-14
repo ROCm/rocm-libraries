@@ -1859,6 +1859,8 @@ class TestModifiersGfx1250(_Gfx1250CapsTestCase):
     def test_dpp_modifiers(self):
         dpp = DPPModifiers(row_shr=1, quad_perm=[0, 1, 2, 3])
         self.assertEqual(str(dpp), " row_shr:1 quad_perm:[0,1,2,3]")
+        xmask = DPPModifiers(row_xmask=7, bound_ctrl=1)
+        self.assertEqual(str(xmask), " bound_ctrl:1 row_xmask:7")
 
     def test_is_container(self):
         self.assertIsInstance(DSModifiers(), Container)

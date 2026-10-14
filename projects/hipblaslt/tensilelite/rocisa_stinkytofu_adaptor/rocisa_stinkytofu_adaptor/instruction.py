@@ -565,12 +565,9 @@ class VMovB32(CommonInstruction):
           ``RegisterContainer`` from ``rocisa_stinkytofu_adaptor.container``).
         - src is an ``InstructionInput``-shaped value: Container | int |
           float | str. See ``_to_stinky_register`` for the routing table.
-        - ``sdwa`` / ``dpp`` are accepted for rocisa-API parity but are
-          NOT forwarded to the stinkytofu binding (the auto-generated
-          binding doesn't expose them). A non-None modifier today will
-          render correctly in rocisa-side ``__str__`` but disappear from
-          the lowered asm; document & raise once a KernelWriter caller
-          actually needs them.
+        - ``dpp`` is forwarded through ``set_dpp`` (``convertDPPModifiers``
+          encoding). ``sdwa`` is still stored for rocisa-API parity and is
+          not forwarded yet.
     """
 
     def __init__(self, dst: Any, src: Any, sdwa: Any = None,
@@ -585,6 +582,8 @@ class VMovB32(CommonInstruction):
             comment=comment,
         )
         self.setInst("v_mov_b32")
+
+    _stinky_mods = ("dpp",)
 
     def to_stinky_logical(self) -> Any:
         """Build a fresh ``_stinkytofu.VMovB32(dst_reg, src_reg, comment)``.
@@ -602,7 +601,7 @@ class VMovB32(CommonInstruction):
 
         dst_reg = _to_stinky_register(self.dst)
         src_reg = _to_stinky_register(self.srcs[0])
-        return _st.VMovB32(dst_reg, src_reg, self.comment)
+        return _apply_modifiers(self, _st.VMovB32(dst_reg, src_reg, self.comment))
 
     def __deepcopy__(self, memo):
         # Inherit CommonInstruction's clone behaviour but ensure
@@ -640,11 +639,13 @@ class VMovRelsD2B32(CommonInstruction):
         )
         self.setInst("v_movrelsd_2_b32")
 
+    _stinky_mods = ("dpp",)
+
     def to_stinky_logical(self) -> Any:
         import stinkytofu as _st  # noqa: WPS433
         dst_reg = _to_stinky_register(self.dst)
         src_reg = _to_stinky_register(self.srcs[0])
-        return _st.VMovRelsD2B32(dst_reg, src_reg, self.comment)
+        return _apply_modifiers(self, _st.VMovRelsD2B32(dst_reg, src_reg, self.comment))
 
     def __deepcopy__(self, memo):
         clone = CommonInstruction.__deepcopy__(self, memo)
@@ -670,11 +671,13 @@ class VPrngB32(CommonInstruction):
         )
         self.setInst("v_prng_b32")
 
+    _stinky_mods = ("dpp",)
+
     def to_stinky_logical(self) -> Any:
         import stinkytofu as _st  # noqa: WPS433
         dst_reg = _to_stinky_register(self.dst)
         src_reg = _to_stinky_register(self.srcs[0])
-        return _st.VPrngB32(dst_reg, src_reg, comment=self.comment)
+        return _apply_modifiers(self, _st.VPrngB32(dst_reg, src_reg, comment=self.comment))
 
     def __deepcopy__(self, memo):
         clone = CommonInstruction.__deepcopy__(self, memo)
@@ -822,6 +825,60 @@ def _apply_sdwa(inst: Any, sdwa: Any) -> None:
     )
 
 
+# Encoding matches convertDPPModifiers() / dppRowShr() / dppQuadPerm() / dppRowXmask().
+_DPP_UNSET = -1
+_DPP_ROW_SHR0 = 0x110
+_DPP_ROW_SHR_LAST = 0x11F
+_DPP_BCAST15 = 0x142
+_DPP_BCAST31 = 0x143
+_DPP_ROW_XMASK0 = 0x160
+_DPP_NONE = 0xFFFF
+
+
+def _dpp_ctrl(dpp: Any) -> int:
+    """Collapse rocisa DPP fields into one DppCtrl value.
+
+    Priority is row_shr, then row_bcast 15/31, then a 4-lane quad_perm, then
+    row_xmask. An out-of-range row_shr or row_xmask stays on that branch and
+    yields NONE, the same way the C++ helpers reject those amounts.
+    """
+    row_shr = getattr(dpp, "row_shr", _DPP_UNSET)
+    if row_shr != _DPP_UNSET:
+        if isinstance(row_shr, int) and 1 <= row_shr <= 15:
+            candidate = _DPP_ROW_SHR0 + row_shr
+            if candidate <= _DPP_ROW_SHR_LAST:
+                return candidate
+        return _DPP_NONE
+    row_bcast = getattr(dpp, "row_bcast", _DPP_UNSET)
+    if row_bcast == 15:
+        return _DPP_BCAST15
+    if row_bcast == 31:
+        return _DPP_BCAST31
+    quad_perm = list(getattr(dpp, "quad_perm", None) or [])
+    if len(quad_perm) == 4:
+        p0, p1, p2, p3 = (int(lane) & 3 for lane in quad_perm)
+        return p0 | (p1 << 2) | (p2 << 4) | (p3 << 6)
+    row_xmask = getattr(dpp, "row_xmask", _DPP_UNSET)
+    if row_xmask != _DPP_UNSET:
+        if isinstance(row_xmask, int) and 0 <= row_xmask <= 15:
+            return _DPP_ROW_XMASK0 + row_xmask
+        return _DPP_NONE
+    return _DPP_NONE
+
+
+def _apply_dpp(inst: Any, dpp: Any) -> None:
+    """Forward a rocisa DPP modifier as DPP16 fields on the logical instruction."""
+    if dpp is None:
+        return
+    bound = getattr(dpp, "bound_ctrl", _DPP_UNSET)
+    inst.set_dpp(
+        dpp_ctrl=_dpp_ctrl(dpp),
+        row_mask=0xF,
+        bank_mask=0xF,
+        bound_ctrl=1 if bound == 1 else 0,
+    )
+
+
 def _apply_flat(inst: Any, modifier: Any) -> None:
     """Forward rocisa FLAT modifiers to logical IR."""
     if modifier is None:
@@ -914,6 +971,8 @@ def _apply_modifiers(item: Any, logical: Any) -> Any:
         _apply_vop3(logical, getattr(item, "vop3", None))
     if "sdwa" in mods:
         _apply_sdwa(logical, getattr(item, "sdwa", None))
+    if "dpp" in mods:
+        _apply_dpp(logical, getattr(item, "dpp", None))
     if "true16" in mods:
         _apply_true16(logical, getattr(item, "dst", None), getattr(item, "srcs", None) or [])
     if "flat" in mods:
@@ -1007,7 +1066,7 @@ def _make_scalar_alu_class(class_name: str, mnemonic: str, inst_type: "InstType"
         "to_stinky_logical": to_stinky_logical,
         "__deepcopy__": __deepcopy__,
     })
-    cls._stinky_mods = ("vop3", "sdwa", "true16")
+    cls._stinky_mods = ("vop3", "sdwa", "dpp", "true16")
     return cls
 
 
@@ -1055,7 +1114,7 @@ def _make_scalar_unary_class(class_name: str, mnemonic: str, inst_type: "InstTyp
         "to_stinky_logical": to_stinky_logical,
         "__deepcopy__": __deepcopy__,
     })
-    cls._stinky_mods = ("vop3", "sdwa", "true16")
+    cls._stinky_mods = ("vop3", "sdwa", "dpp", "true16")
     return cls
 
 
@@ -1396,7 +1455,7 @@ def _make_scalar_shift_class(class_name: str, mnemonic: str, inst_type: "InstTyp
         "to_stinky_logical": to_stinky_logical,
         "__deepcopy__": __deepcopy__,
     })
-    cls._stinky_mods = ("sdwa",)
+    cls._stinky_mods = ("sdwa", "dpp")
     return cls
 
 
@@ -1512,7 +1571,7 @@ def _make_ternary_class(class_name: str, mnemonic: str, inst_type: "InstType",
         "to_stinky_logical": to_stinky_logical,
         "__deepcopy__": __deepcopy__,
     })
-    cls._stinky_mods = ("vop3", "sdwa")
+    cls._stinky_mods = ("vop3", "sdwa", "dpp")
     return cls
 
 
@@ -1566,7 +1625,7 @@ def _make_vector_shift_class(class_name: str, mnemonic: str, inst_type: "InstTyp
         "to_stinky_logical": to_stinky_logical,
         "__deepcopy__": __deepcopy__,
     })
-    cls._stinky_mods = ("sdwa",)
+    cls._stinky_mods = ("sdwa", "dpp")
     return cls
 
 
@@ -1650,7 +1709,7 @@ class VCndMaskB32(CommonInstruction):
         )
         self.setInst("v_cndmask_b32")
 
-    _stinky_mods = ("sdwa",)
+    _stinky_mods = ("sdwa", "dpp")
 
     def to_stinky_logical(self) -> Any:
         import stinkytofu as _st  # noqa: WPS433
@@ -1697,6 +1756,8 @@ class VCndMaskB16(CommonInstruction):
         )
         self.setInst("v_cndmask_b16")
 
+    _stinky_mods = ("dpp",)
+
     def to_stinky_logical(self) -> Any:
         import stinkytofu as _st  # noqa: WPS433
 
@@ -1708,7 +1769,7 @@ class VCndMaskB16(CommonInstruction):
             else _st.Register("vcc_lo", 0, 1)
         )
         inst = _st.VCndMaskB16(dst_reg, src0_reg, src1_reg, src2_reg, comment=self.comment)
-        return inst
+        return _apply_modifiers(self, inst)
 
     def __deepcopy__(self, memo):
         return CommonInstruction.__deepcopy__(self, memo)
@@ -2310,7 +2371,7 @@ def _make_vcmp_class(class_name: str, mnemonic: str, inst_type: "InstType"):
     if "_cmpx_" in mnemonic:
         attrs["toString"] = _vcmpx_to_string
     cls = type(class_name, (CommonInstruction,), attrs)
-    cls._stinky_mods = ("sdwa",)
+    cls._stinky_mods = ("sdwa", "dpp")
     return cls
 
 
@@ -3752,7 +3813,7 @@ def _make_cvt_scale_class(class_name: str, mnemonic: str, inst_type: "InstType")
         "__deepcopy__": __deepcopy__,
     })
     cls.__qualname__ = class_name
-    cls._stinky_mods = ("vop3", "sdwa")
+    cls._stinky_mods = ("vop3", "sdwa", "dpp")
     return cls
 
 
