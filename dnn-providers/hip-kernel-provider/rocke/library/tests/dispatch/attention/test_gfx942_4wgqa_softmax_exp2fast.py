@@ -27,6 +27,7 @@ Two layers:
 
 from __future__ import annotations
 
+import glob
 import os
 import re
 import shutil
@@ -83,13 +84,35 @@ def _emit_4wgqa_ir(dtype: str) -> str:
     return print_ir(build_gfx942_4warp_gqa(spec, arch="gfx942"))
 
 
+def _llvm_tool(name: str) -> str | None:
+    """Locate an LLVM tool: PATH first, then a ROCm-bundled LLVM.
+
+    A stock ROCm install keeps ``llvm-readelf``/``llvm-objdump`` in
+    ``<rocm>/llvm/bin``, which is not on PATH. Same tiers as ``_llvm_as_path``
+    in ``platform/tests/test_rocke.py``: ``$ROCM_PATH``/``$ROCM_HOME``, then the
+    globbed ``/opt/rocm*`` installs, newest first.
+    """
+    found = shutil.which(name)
+    if found:
+        return found
+    roots = [os.environ.get(v) for v in ("ROCM_PATH", "ROCM_HOME")]
+    roots += sorted(glob.glob("/opt/rocm*"), reverse=True)
+    for root in roots:
+        if not root:
+            continue
+        cand = os.path.join(root, "llvm", "bin", name)
+        if os.path.isfile(cand) and os.access(cand, os.X_OK):
+            return cand
+    return None
+
+
 def _comgr_ready() -> bool:
     """The scratch guard needs the comgr library + llvm-readelf/objdump to read notes.
 
     comgr is dlopened lazily on the first compile, so importing ``rocke`` proves
     nothing; look the library up on disk instead (a pure lookup, no dlopen).
     """
-    if shutil.which("llvm-readelf") is None or shutil.which("llvm-objdump") is None:
+    if _llvm_tool("llvm-readelf") is None or _llvm_tool("llvm-objdump") is None:
         return False
     path = resolved_lib_path()
     return path is not None and os.path.exists(path)
@@ -109,7 +132,11 @@ def _scratch_bytes(dtype: str) -> int:
         with tempfile.NamedTemporaryFile(suffix=".hsaco", delete=False) as f:
             f.write(artifact.hsaco)
             path = f.name
-        res = analyze_hsaco(path).resources
+        res = analyze_hsaco(
+            path,
+            objdump=_llvm_tool("llvm-objdump"),
+            readelf=_llvm_tool("llvm-readelf"),
+        ).resources
     finally:
         if path and os.path.exists(path):
             os.unlink(path)
