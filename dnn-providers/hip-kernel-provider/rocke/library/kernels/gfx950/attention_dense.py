@@ -925,9 +925,9 @@ def build_attention_dense(
                 # of the row loop (was per-row: ~ROWS_PER_WAVE x fewer indirection
                 # loads + div/mask). Per-row cost is then just an and-mask + add.
                 _wg0 = b.add(tile_key0, b.mul(wave, b.const_i32(ROWS_PER_WAVE)))
-                # _wg0 is a sum of non-negative terms (tile_key0, wave, row index),
-                # so page = _wg0 // block_size is safe as a logical shift; block_size
-                # is enforced power-of-two at spec construction (attention_dense_spec.py),
+                # _wg0 = tile_key0 + wave*ROWS_PER_WAVE is non-negative (tile_key0 >= 0 since
+                # start_tile is clamped at 0), so page = _wg0 // block_size is a logical shift;
+                # block_size is enforced power-of-two at spec construction (attention_dense_spec.py),
                 # so shift = log2(block_size) is a compile-time constant. This drops the
                 # sdiv sign-bias fixup for a bare lshr.
                 _wpage = b.lshr(_wg0, b.const_i32(spec.block_size.bit_length() - 1))
