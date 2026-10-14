@@ -27,10 +27,23 @@ Three modes:
     aiter baseline: ``aiter.mla.mla_prefill_fwd`` (absorb mode, gfx942 ASM).
     It operates in *latent space*: its query is ``[total_q, H, r_kv+d_rope]``
     (576-wide) while the rocke kernel takes a post-W_UQ query
-    ``[total_q, H, d_nope+d_rope]`` (192-wide). Both compute the same MLA
-    math; the difference is where the W_UQ / W_UK expansions happen.
+    ``[total_q, H, d_nope+d_rope]`` (192-wide). The aiter inputs are derived
+    from the rocke inputs (absorbed query ``Q_nope @ W_UKᵀ`` and ``Q_rope``; a
+    packed ``[c_kv, k_rope]`` cache), and both arms get the same softmax scale,
+    ``1/sqrt(d_nope + d_rope)``: absorption changes the contraction width, not
+    the temperature. aiter's timed region excludes the two head projections the
+    fused rocke kernel performs, so the ratio compares unequal work.
     aiter only supports ``nhead in {16, 128}`` on gfx942 (hard constraint from
     its ASM kernel); shapes with other head counts skip the aiter lane.
+
+    Numeric gate: every timed arm's output is checked against the fp32 oracle
+    :func:`builders.mla.ref_mla_attn.ref_mla_prefill` -- rocke's ``out`` and
+    ``lse``; aiter's latent output projected through ``W_UV`` (its gfx942 ASM
+    prefill kernel leaves the LSE buffer unwritten) -- with the bf16 attention bar,
+    ``max|got - ref| <= --tol`` (default 4e-2). The oracle runs on a subset: up
+    to eight evenly spaced heads and the first and last ``_GATE_ROWS`` query
+    rows of each sequence. No ratio is reported for a shape unless both arms
+    pass, and any failure makes the run exit non-zero.
 
 Run, from ``rocke/library``:
 
@@ -57,6 +70,7 @@ from pathlib import Path
 from typing import Any
 
 from benchmarks.common.mla_shapes import MLAShape, filter_shapes, load_mla_shapes
+from builders.mla.verify_score_probe_gfx942 import BF16_ATTN_ATOL
 
 _ARCH = "gfx942"
 _DEFAULT_SHAPES = Path(__file__).resolve().parent / "mla_prefill_shapes.json"
@@ -67,6 +81,12 @@ _AITER_SUPPORTED_NHEADS = frozenset({16, 128})
 # aiter's ASM prefill kernel is only numerically correct at page_size == 1 (see
 # _make_aiter_inputs). Independent of rocke's block_size, which is pinned to 16.
 _AITER_PAGE_SIZE = 1
+
+# Numeric gate subset: query rows checked at each end of every sequence, and
+# the most heads checked per shape. The fp32 oracle at full size would need a
+# [S_q, H, S_k] score tensor per sequence.
+_GATE_ROWS = 32
+_GATE_HEADS = 8
 
 
 # ---------------------------------------------------------------------------
@@ -151,14 +171,23 @@ def _make_rocke_inputs(shape: MLAShape, *, seed: int = 0) -> dict[str, Any]:
 
     dtype = torch.bfloat16 if shape.dtype == "bf16" else torch.float16
 
-    def randn(*s):
-        return torch.randn(*s, dtype=dtype, device="cuda", generator=rng)
+    def randn(*s, std=1.0):
+        x = torch.randn(*s, dtype=torch.float32, device="cuda", generator=rng)
+        return (x * std).to(dtype)
 
+    # Unit-variance regime of the verifier's make_problem: Q, c_kv, k_rope ~
+    # N(0, 1) and W_UK ~ N(0, 1/r_kv), so K_nope, V and scale * q.k are ~ N(0, 1)
+    # -- the regime the absolute bf16 gate tolerance is calibrated in.
     q = randn(total_q, shape.num_query_heads, g.qk_nope_dim + g.qk_rope_dim)
     c_kv = randn(num_pages, page, g.kv_lora_rank)
     k_rope = randn(num_pages, page, g.qk_rope_dim)
     # W_UK: [H, r_kv, d_nope + d_v]
-    w_uk = randn(shape.num_query_heads, g.kv_lora_rank, g.qk_nope_dim + g.v_head_dim)
+    w_uk = randn(
+        shape.num_query_heads,
+        g.kv_lora_rank,
+        g.qk_nope_dim + g.v_head_dim,
+        std=g.kv_lora_rank**-0.5,
+    )
 
     # packed varlen offsets
     seqlen_q = shape.seqlen_q
@@ -189,14 +218,29 @@ def _make_rocke_inputs(shape: MLAShape, *, seed: int = 0) -> dict[str, Any]:
     }
 
 
-def _make_aiter_inputs(shape: MLAShape, *, seed: int = 0) -> dict[str, Any]:
-    """Allocate tensors for aiter ``mla_prefill_fwd`` (absorb mode).
+def _dense_kv(shape: MLAShape, rocke_data: dict):
+    """``(c_kv [B, S_k, r_kv], k_rope [B, S_k, d_rope])`` views of the rocke cache.
+
+    ``_make_rocke_inputs`` gives each sequence its own pages in order, so the
+    paged cache is the dense one reshaped.
+    """
+    b, s_k = shape.batch, shape.seqlen_k
+    c_kv = rocke_data["c_kv"].reshape(b, -1, rocke_data["c_kv"].shape[-1])[:, :s_k]
+    k_rope = rocke_data["k_rope"].reshape(b, -1, rocke_data["k_rope"].shape[-1])
+    return c_kv, k_rope[:, :s_k]
+
+
+def _make_aiter_inputs(shape: MLAShape, rocke_data: dict) -> dict[str, Any]:
+    """Derive the aiter ``mla_prefill_fwd`` (absorb mode) inputs from rocke's.
 
     aiter's absorb-mode kernel takes ``q [total_q, H, r_kv+d_rope]`` (the
     query projected into the combined latent+rope space) and a packed
-    ``kv_buffer [num_page, page_size, 1, r_kv+d_rope]``. This is a different
-    decomposition from rocke's: both compute the same math, but the weight
-    matrix absorption happens before the aiter call.
+    ``kv_buffer [num_page, page_size, 1, r_kv+d_rope]``. Both are built from
+    the rocke arm's tensors -- ``Qa = [Q_nope @ W_UK[:, :, :d_nope]ᵀ, Q_rope]``
+    and ``kv = [c_kv, k_rope]`` -- so the two arms compute the same operator and
+    aiter's output, projected through ``W_UV``, is checked against the same
+    oracle. The softmax scale is rocke's ``1/sqrt(d_nope + d_rope)``, not
+    ``1/sqrt(r_kv + d_rope)``.
 
     aiter uses FlashInfer-style indirections:
         qo_indptr  [batch+1] int32 — prefix sums of per-seq query lengths
@@ -207,8 +251,6 @@ def _make_aiter_inputs(shape: MLAShape, *, seed: int = 0) -> dict[str, Any]:
     import torch
 
     g = shape.geometry
-    rng = torch.Generator(device="cuda")
-    rng.manual_seed(seed)
 
     # aiter's ASM prefill kernel only produces correct results at page_size == 1.
     # Verified in isolation against aiter's own oracle
@@ -226,17 +268,27 @@ def _make_aiter_inputs(shape: MLAShape, *, seed: int = 0) -> dict[str, Any]:
     aiter_qk = g.kv_lora_rank + g.qk_rope_dim  # 576 for DeepSeek
 
     dtype = torch.bfloat16 if shape.dtype == "bf16" else torch.float16
+    d_nope, r_kv = g.qk_nope_dim, g.kv_lora_rank
+    q_r, w_uk = rocke_data["q"], rocke_data["w_uk"]
 
-    def randn(*s):
-        return torch.randn(*s, dtype=dtype, device="cuda", generator=rng)
+    # absorbed query: [Q_nope @ W_UK_nopeᵀ, Q_rope], fp32 accumulate then bf16
+    q = torch.empty(
+        total_q, shape.num_query_heads, aiter_qk, dtype=dtype, device="cuda"
+    )
+    q[:, :, :r_kv] = torch.einsum(
+        "thd,hrd->thr", q_r[:, :, :d_nope].float(), w_uk[:, :, :d_nope].float()
+    ).to(dtype)
+    q[:, :, r_kv:] = q_r[:, :, d_nope:]
 
-    # query in latent space
-    q = randn(total_q, shape.num_query_heads, aiter_qk)
-
-    # packed KV buffer: [num_page, page_size, 1, r_kv + d_rope]
+    # packed KV buffer: [num_page, page_size, 1, r_kv + d_rope]; page_size 1, so
+    # page i is token i of the batch-major dense cache
+    assert page == 1, "the dense-cache reshape below assumes page_size == 1"
     pages_per_seq = (seqlen_k + page - 1) // page
     total_pages = batch * pages_per_seq
-    kv_buffer = randn(total_pages, page, 1, aiter_qk)
+    c_kv, k_rope = _dense_kv(shape, rocke_data)
+    kv_buffer = torch.cat([c_kv, k_rope], dim=-1).reshape(
+        total_pages, page, 1, aiter_qk
+    )
 
     qo_indptr = torch.arange(0, batch + 1, dtype=torch.int32, device="cuda") * seqlen_q
     kv_indptr = (
@@ -255,7 +307,9 @@ def _make_aiter_inputs(shape: MLAShape, *, seed: int = 0) -> dict[str, Any]:
     out = torch.zeros(
         total_q, shape.num_query_heads, g.kv_lora_rank, dtype=dtype, device="cuda"
     )
-    sm_scale = float(1.0 / math.sqrt(aiter_qk))
+    # The softmax temperature is 1/sqrt(d_nope + d_rope) whatever the absorbed
+    # width; 1/sqrt(aiter_qk) would be a different operator.
+    sm_scale = rocke_data["scale"]
 
     return {
         "q": q,
@@ -305,8 +359,8 @@ def _import_aiter_mla():
 
 def _run_aiter_live(
     shape: MLAShape, data: dict, *, warmup: int, iters: int
-) -> tuple[Any, float]:
-    """Time aiter ``mla_prefill_fwd`` and return ``(out, ms)``."""
+) -> tuple[Any, Any, float]:
+    """Time aiter ``mla_prefill_fwd``; return ``(latent_out [total_q, H, r_kv], ms)``."""
     from rocke.runtime import synchronize_and_release, time_launches
 
     mla_prefill_fwd = _import_aiter_mla()
@@ -323,7 +377,7 @@ def _run_aiter_live(
     sm_scale = data["sm_scale"]
 
     def call_once():
-        mla_prefill_fwd(
+        return mla_prefill_fwd(
             q,
             kv_buffer,
             out,
@@ -336,6 +390,10 @@ def _run_aiter_live(
         )
 
     ms = time_launches(call_once, warmup=warmup, iters=iters, stream=hip_stream)
+    # NaN-seeded gated call. The returned LSE is not gated: the gfx942 ASM
+    # prefill kernel never writes it (a NaN-filled LSE buffer stays NaN).
+    out.fill_(float("nan"))
+    call_once()
     synchronize_and_release(hip_stream)
     return out.clone(), ms
 
@@ -394,8 +452,8 @@ def _run_rocke_live(
     *,
     warmup: int,
     iters: int,
-) -> tuple[Any, float, str]:
-    """Time the rocke MLA prefill kernel and return ``(out, ms, kernel_name)``."""
+) -> tuple[Any, Any, float, str]:
+    """Time the rocke MLA prefill kernel; return ``(out, lse, ms, kernel_name)``."""
     import torch
     from rocke.runtime import (
         KernelLauncher,
@@ -462,8 +520,12 @@ def _run_rocke_live(
             launcher(vals, config=cfg)
 
         ms = time_launches(call_once, warmup=warmup, iters=iters, stream=hip_stream)
+        # NaN-seeded gated call: a slot the kernel never writes fails the gate.
+        out.fill_(float("nan"))
+        lse.fill_(float("nan"))
+        call_once()
         synchronize_and_release(hip_stream)
-        return out.clone(), ms, kernel_obj.kernel_name
+        return out.clone(), lse.clone(), ms, kernel_obj.kernel_name
 
     # Unfused: both head projections run as batched GEMMs around the kernel,
     # and the timed region covers all of them. Every operand is a strided view
@@ -518,13 +580,135 @@ def _run_rocke_live(
         _UNFUSED_SPLIT[name] = time_launches(
             fn, warmup=warmup, iters=iters, stream=hip_stream
         )
+    out.fill_(float("nan"))
+    lse.fill_(float("nan"))
     call_once()
     synchronize_and_release(hip_stream)
-    return out.clone(), ms, kernel_obj.kernel_name
+    return out.clone(), lse.clone(), ms, kernel_obj.kernel_name
 
 
 # Per-stage times of the last unfused run, in ms (see ``_run_rocke_live``).
 _UNFUSED_SPLIT: dict[str, float] = {}
+
+
+# ---------------------------------------------------------------------------
+# Numeric gate against the fp32 oracle
+# ---------------------------------------------------------------------------
+
+
+def _gate_heads(num_heads: int) -> list[int]:
+    """Up to ``_GATE_HEADS`` evenly spaced heads."""
+    return list(range(0, num_heads, max(1, num_heads // _GATE_HEADS)))[:_GATE_HEADS]
+
+
+def _gate_windows(shape: MLAShape) -> list[tuple[int, int, int, int]]:
+    """``(seq, row_lo, row_hi, k_len)`` query-row windows the gate checks.
+
+    Bottom-right causal masking makes a window exact on its own: the last rows
+    of a sequence see every key, and its first ``m`` rows see exactly the
+    ``S_k - S_q + m`` key prefix, so each window is a valid smaller problem.
+    """
+    s_q, s_k = shape.seqlen_q, shape.seqlen_k
+    if s_k < s_q:
+        raise ValueError(f"gate windows assume S_k >= S_q; got S_q={s_q} S_k={s_k}")
+    m = min(_GATE_ROWS, s_q)
+    wins = []
+    for b in range(shape.batch):
+        wins.append((b, 0, m, s_k - s_q + m))
+        if s_q > m:
+            wins.append((b, s_q - m, s_q, s_k))
+    return wins
+
+
+def _reference(shape: MLAShape, rocke_data: dict) -> list[tuple[slice, Any, Any]]:
+    """fp32 ``ref_mla_prefill`` ``(out, lse)`` on the gate windows and heads.
+
+    The oracle reads the same bf16 values the arms read. The rocke kernel takes
+    the query after W_UQ and RoPE, so the oracle is given that query as its
+    latent with a per-head identity W_UQ and identity rotary tables.
+    """
+    import numpy as np
+
+    from builders.mla.ref_mla_attn import ref_mla_prefill
+
+    g = shape.geometry
+    heads = _gate_heads(shape.num_query_heads)
+    h, dqk = len(heads), g.qk_nope_dim + g.qk_rope_dim
+    q = rocke_data["q"][:, heads].float().cpu().numpy()
+    w_uk = rocke_data["w_uk"][heads].float().cpu().numpy()
+    c_kv, k_rope = (t.float().cpu().numpy() for t in _dense_kv(shape, rocke_data))
+    w_uq = np.zeros((h, h * dqk, dqk), dtype=np.float32)
+    for i in range(h):
+        w_uq[i, i * dqk : (i + 1) * dqk] = np.eye(dqk, dtype=np.float32)
+    half = g.qk_rope_dim // 2
+    cos_table = np.ones((1, half), dtype=np.float32)
+    sin_table = np.zeros((1, half), dtype=np.float32)
+
+    refs = []
+    for b, lo, hi, k_len in _gate_windows(shape):
+        m = hi - lo
+        rows = slice(b * shape.seqlen_q + lo, b * shape.seqlen_q + hi)
+        out, lse = ref_mla_prefill(
+            q_latent=q[rows].reshape(m, h * dqk),
+            # page size 1: block i of the window is key i
+            c_kv=c_kv[b, :k_len][:, None, :],
+            k_rope=k_rope[b, :k_len][:, None, :],
+            w_uq=w_uq,
+            w_uk=w_uk,
+            cu_seqlens_q=[0, m],
+            cu_seqlens_k=[0, k_len],
+            block_table=np.arange(k_len, dtype=np.int32)[None, :],
+            positions=np.zeros(m, dtype=np.int32),
+            scale=rocke_data["scale"],
+            cos_table=cos_table,
+            sin_table=sin_table,
+            causal=True,
+        )
+        refs.append((rows, out, lse))
+    return refs
+
+
+def _gate(out, lse, refs, *, tol: float) -> dict:
+    """``max|got - ref|`` of ``out [total_q, h, d_v]`` and, if given, ``lse [total_q, h]``.
+
+    ``out`` and ``lse`` are already restricted to the gate heads. All rows are
+    live (``S_k >= S_q``), so every gated slot must be finite. ``lse=None``
+    gates ``out`` alone, for an arm that does not produce an LSE.
+    """
+    import numpy as np
+
+    worst_o = 0.0
+    worst_l = 0.0 if lse is not None else None
+    finite = True
+    for rows, ref_out, ref_lse in refs:
+        o = out[rows].float().cpu().numpy()
+        if not np.all(np.isfinite(o)):
+            finite = False
+            continue
+        worst_o = max(worst_o, float(np.max(np.abs(o - ref_out))))
+        if lse is not None:
+            lv = lse[rows].float().cpu().numpy()
+            if not np.all(np.isfinite(lv)):
+                finite = False
+                continue
+            worst_l = max(worst_l, float(np.max(np.abs(lv - ref_lse))))
+    return {
+        "ok": finite and worst_o <= tol and (worst_l is None or worst_l <= tol),
+        "finite": finite,
+        "max_abs_out": worst_o,
+        "max_abs_lse": worst_l,
+    }
+
+
+def _gate_str(name: str, gate: dict | None) -> str:
+    if gate is None:
+        return ""
+    if not gate["finite"]:
+        return f" {name}_gate=FAIL(non-finite)"
+    verdict = "ok" if gate["ok"] else "FAIL"
+    lse = gate["max_abs_lse"]
+    lse_part = f" lse {lse:.1e}" if lse is not None else " lse n/a"
+    return f" {name}_gate={verdict}(out {gate['max_abs_out']:.1e}{lse_part})"
 
 
 # ---------------------------------------------------------------------------
@@ -585,6 +769,13 @@ def main(argv=None) -> int:
         type=Path,
         default=None,
         help="write timing results to this JSON file (--mode time only)",
+    )
+    parser.add_argument(
+        "--tol",
+        type=float,
+        default=BF16_ATTN_ATOL,
+        help="absolute max|got - ref| bar for out and lse against the fp32 "
+        "oracle (default: the bf16 attention bar, 4e-2)",
     )
     parser.add_argument(
         "--no-aiter",
@@ -669,6 +860,7 @@ def main(argv=None) -> int:
     n_ok = 0
     n_aiter_ran = 0
     n_aiter_supported = 0
+    n_gate_fail = 0
 
     for i, shape in enumerate(shapes, 1):
         tag = f"[{i}/{len(shapes)}] {shape.signature}"
@@ -698,9 +890,13 @@ def main(argv=None) -> int:
 
         rocke_ms: float | None = None
         rocke_kname: str | None = None
+        rocke_gate: dict | None = None
+        heads = _gate_heads(shape.num_query_heads)
+        refs = None
+        rocke_data = None
         try:
             rocke_data = _make_rocke_inputs(shape, seed=args.seed)
-            _, rocke_ms, rocke_kname = _run_rocke_live(
+            r_out, r_lse, rocke_ms, rocke_kname = _run_rocke_live(
                 shape,
                 rocke_data,
                 result,
@@ -708,36 +904,69 @@ def main(argv=None) -> int:
                 warmup=args.warmup,
                 iters=args.iterations,
             )
-            n_ok += 1
+            refs = _reference(shape, rocke_data)
+            rocke_gate = _gate(r_out[:, heads], r_lse[:, heads], refs, tol=args.tol)
+            del r_out, r_lse
+            if rocke_gate["ok"]:
+                n_ok += 1
+            else:
+                n_gate_fail += 1
         except Exception as exc:  # noqa: BLE001
-            print(f"{tag}  ROCKE TIME FAIL: {exc!r}")
+            print(f"{tag}  ROCKE TIME/GATE FAIL: {exc!r}")
             traceback.print_exc()
 
         rocke_tflops = (
             tflop / (rocke_ms * 1e-3) if (rocke_ms and rocke_ms > 0) else None
         )
 
-        # -- aiter baseline
+        # -- aiter baseline, on inputs derived from the rocke arm's
         aiter_ms: float | None = None
+        aiter_gate: dict | None = None
         aiter_ok, aiter_skip_reason = _aiter_supported(shape)
         if not args.no_aiter and aiter_ok:
             n_aiter_supported += 1
             try:
-                aiter_data = _make_aiter_inputs(shape, seed=args.seed)
-                _, aiter_ms = _run_aiter_live(
+                if rocke_data is None or refs is None:
+                    raise RuntimeError("no rocke inputs/oracle to derive from")
+                aiter_data = _make_aiter_inputs(shape, rocke_data)
+                a_latent, aiter_ms = _run_aiter_live(
                     shape, aiter_data, warmup=args.warmup, iters=args.iterations
                 )
+                del aiter_data
                 n_aiter_ran += 1
+                # W_UV outside the timed region, on the gated heads only
+                w_uv = rocke_data["w_uk"][heads, :, shape.geometry.qk_nope_dim :]
+                a_out = torch.einsum(
+                    "thr,hrv->thv", a_latent[:, heads].float(), w_uv.float()
+                )
+                aiter_gate = _gate(a_out, None, refs, tol=args.tol)
+                del a_latent, a_out
+                if not aiter_gate["ok"]:
+                    n_gate_fail += 1
             except Exception as exc:  # noqa: BLE001
                 print(f"{tag}  AITER FAIL: {exc!r}")
+                traceback.print_exc()
+        del rocke_data, refs
 
         aiter_tflops = (
             tflop / (aiter_ms * 1e-3) if (aiter_ms and aiter_ms > 0) else None
         )
+        # A ratio is only reported when both arms passed the numeric gate.
+        both_gated = bool(
+            rocke_gate and rocke_gate["ok"] and aiter_gate and aiter_gate["ok"]
+        )
         speedup_vs_aiter = (
-            aiter_ms / rocke_ms if (aiter_ms and rocke_ms and rocke_ms > 0) else None
+            aiter_ms / rocke_ms
+            if (both_gated and aiter_ms and rocke_ms and rocke_ms > 0)
+            else None
         )
 
+        if rocke_ms is None:
+            status = "fail"
+        elif not (rocke_gate and rocke_gate["ok"]):
+            status = "gate_fail"
+        else:
+            status = "ok"
         rec = {
             "signature": shape.signature,
             "regime": shape.regime,
@@ -747,14 +976,17 @@ def main(argv=None) -> int:
             "seqlen_k": shape.seqlen_k,
             "num_query_heads": shape.num_query_heads,
             "dtype": shape.dtype,
-            "status": "ok" if rocke_ms is not None else "fail",
+            "status": status,
             "rocke_ms": rocke_ms,
             "rocke_tflops": rocke_tflops,
             "rocke_kernel": rocke_kname,
+            "rocke_gate": rocke_gate,
             "aiter_ms": aiter_ms,
             "aiter_tflops": aiter_tflops,
+            "aiter_gate": aiter_gate,
             "aiter_skip_reason": aiter_skip_reason if not aiter_ok else None,
             "speedup_rocke_vs_aiter": speedup_vs_aiter,
+            "gate_tol": args.tol,
             "tflop": tflop,
             "unfused_split_ms": dict(_UNFUSED_SPLIT) if args.absorbed_query else None,
             # FlyDSL: no MLA prefill kernel available (decode-only)
@@ -766,20 +998,27 @@ def main(argv=None) -> int:
         # per-shape line
         rocke_str = f"rocke={rocke_ms * 1000:.1f}us" if rocke_ms else "rocke=FAIL"
         tf_str = f" {rocke_tflops:.1f}TF" if rocke_tflops else ""
+        rocke_str += tf_str + _gate_str("rocke", rocke_gate)
         aiter_str = ""
         if args.no_aiter:
             aiter_str = " aiter=disabled"
         elif not aiter_ok:
             aiter_str = f" aiter=SKIP({aiter_skip_reason})"
         elif aiter_ms:
-            spd = f" ({speedup_vs_aiter:.2f}x)" if speedup_vs_aiter else ""
-            aiter_str = f" aiter={aiter_ms * 1000:.1f}us{spd}"
+            spd = (
+                f" ({speedup_vs_aiter:.2f}x)"
+                if speedup_vs_aiter
+                else " (ratio withheld: gate)"
+            )
+            aiter_str = (
+                f" aiter={aiter_ms * 1000:.1f}us{_gate_str('aiter', aiter_gate)}{spd}"
+            )
         else:
             aiter_str = " aiter=FAIL"
-        print(f"{tag}  {rocke_str}{tf_str}{aiter_str}")
+        print(f"{tag}  {rocke_str}{aiter_str}")
 
     # summary
-    print(f"\n=== SUMMARY (arch={args.arch}) ===")
+    print(f"\n=== SUMMARY (arch={args.arch}, gate tol {args.tol:g}) ===")
     ok_recs = [r for r in results if r.get("rocke_ms")]
     if ok_recs:
         by_regime: dict[str, list] = {}
@@ -796,20 +1035,25 @@ def main(argv=None) -> int:
             lat_part = f"rocke_lat_gm={_gm(rocke_us):.1f}us (n={len(rocke_us)})"
             tf_part = f"  tflops_gm={_gm(tf_vals):.1f}" if tf_vals else ""
             aiter_part = (
-                f"  vs_aiter={_gm(aiter_spds):.3f}x (n={len(aiter_spds)})"
+                f"  vs_aiter={_gm(aiter_spds):.3f}x (n={len(aiter_spds)}, both gated)"
                 if aiter_spds
                 else ""
             )
             print(f"  {regime:<12}  {lat_part}{tf_part}{aiter_part}")
-    print(f"\nrocke ok:          {n_ok}/{len(shapes)}")
+    print(f"\nrocke gated ok:    {n_ok}/{len(shapes)}")
     print(f"aiter supported:   {n_aiter_supported}  ran: {n_aiter_ran}")
+    print(f"gate failures:     {n_gate_fail}")
     print("flydsl:            N/A (no MLA prefill kernel)")
+    print(
+        "note: the rocke arm includes the W_UK absorb and W_UV projection; the "
+        "aiter arm's timed region does not"
+    )
 
     if args.output_json:
         args.output_json.write_text(json.dumps(results, indent=2, default=str))
         print(f"\nwrote {args.output_json}  ({len(results)} shapes)")
 
-    return 0 if n_ok == len(shapes) else 1
+    return 0 if (n_ok == len(shapes) and n_gate_fail == 0) else 1
 
 
 if __name__ == "__main__":
