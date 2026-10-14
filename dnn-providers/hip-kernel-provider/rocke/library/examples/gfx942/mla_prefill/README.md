@@ -1,7 +1,7 @@
 # Case study — gfx942 bf16 MLA prefill, LDS and occupancy pass
 
 **Kernel builder:** [`build_mla_prefill_fwd`](../../../kernels/mla/mla_prefill_gfx942.py)
-**Arch:** gfx942 (MI300A, 228 CU)
+**Arch:** gfx942 (228 CU)
 **Scope:** resource characterisation and single-lever tuning. No functional change.
 
 ---
@@ -74,8 +74,12 @@ numbers, plus the qualitative keep/reject verdict for each lever.
 Tuning is only interpretable against a verified functional state, so reproduce it
 first rather than inheriting it:
 
+`$PY` is a python with `rocke/platform` and `rocke/library` editable-installed —
+the CMake-managed `build/rocke-pyenv` or the manual venv from
+[BUILDING.md](../../../../BUILDING.md).
+
 ```bash
-source .sandbox-env
+PY=$PWD/build/rocke-pyenv/bin/python   # or your own venv's python
 export ROCKE_CPP_QUIET_FALLBACK=1
 cd dnn-providers/hip-kernel-provider/rocke
 "$PY" -m builders.mla.verify_score_probe_gfx942 --mode full --scenario all
@@ -95,13 +99,16 @@ CPU-side:
                 library/tests/dispatch/mla
 ```
 
-There is no byte-identity gate for this family — MLA has no C++ engine mirror, so
-the Python lowering is the ground truth and the IR golden takes its place. The
-golden is recorded per LLVM flavor; re-bless with
+MLA has no C++ *builder* mirror, so it is not a `check_byte_identity.py` family.
+The C++ lowerer is family-agnostic, though:
+`library/tests/test_attention_ir_cpp_parity.py` lowers every golden case through
+both engines at every flavor and requires identical IR (it skips unless the
+`rocke_engine` binding is on `PYTHONPATH`). The IR golden records every flavor
+in `LLVM_FLAVORS` and is checked at all of them from any host; agpr_acc's
+llvm20 refusal is recorded as an expected failure. Re-bless with
 
 ```bash
-cd library && ROCKE_LLVM_FLAVOR=llvm20 "$PY" tests/test_mla_prefill_gfx942_golden.py --write
-cd library && ROCKE_LLVM_FLAVOR=llvm22 "$PY" tests/test_mla_prefill_gfx942_golden.py --write
+cd library && "$PY" tests/test_mla_prefill_gfx942_golden.py --write
 ```
 
 and never as a way to turn red green.
@@ -472,7 +479,7 @@ resource report shows *that* as an improvement.
 
 Levers 9–23 were chosen from ATT traces rather than from the static report, and
 each was timed against the previous kept state before its parity run. All were
-measured on a 304-CU MI300X across the DeepSeek-V3 shape set of
+measured on a 304-CU gfx942 across the DeepSeek-V3 shape set of
 [`benchmark_mla_prefill_live`](../../../benchmarks/gfx942/attention/prefill/benchmark_mla_prefill_live.py).
 
 ### Capturing a trace
@@ -505,11 +512,13 @@ reduces a quarter of the K = 576 axis, parks its f32 partial C fragment in LDS,
 and after one LDS-only barrier every wave sums the four partials in the same
 order — so the softmax state stays bit-identical across waves.
 
-The partials live in tail rows of `kv_lds` rather than in their own buffer. The
-LDS packer reuses a dead slot only from its base offset, so a separate buffer
-could never land in the gap `kv_lds` leaves below the next live buffer and would
-have opened a new slot above 64 KB. See
-[`_s_part_rows`](../../../kernels/mla/mla_prefill_gfx942.py).
+In this pass the partials lived in tail rows of `kv_lds` rather than in their own
+buffer: the LDS packer reuses a dead slot only from its base offset, so a separate
+buffer could never land in the gap `kv_lds` leaves below the next live buffer and
+would have opened a new slot above 64 KB. The third pass moved them into their
+own `s_part` buffer (see [Kept — transposed score and PV](#kept--transposed-score-and-pv)),
+which is where they live in
+[`build_mla_prefill_fwd`](../../../kernels/mla/mla_prefill_gfx942.py) today.
 
 ### Kept — causal loop bound
 
@@ -639,7 +648,7 @@ every shape -- the occupancy, not the tile reuse alone, is what pays.
 ## Fourth pass — parallel lanes
 
 Levers 29–33 came from a run of independent lanes, each timed back to back
-against the same baseline on one 304-CU MI300X, with GPU access serialized so no
+against the same baseline on one 304-CU gfx942, with GPU access serialized so no
 two timings overlapped. Kept lanes were then stacked one at a time and re-timed.
 
 ### Diagnosis
@@ -653,7 +662,16 @@ two timings overlapped. Kept lanes were then stacked one at a time and re-timed.
   loaded unit; `s512` is latency-bound in the per-workgroup weight staging.
 - **LDS bank conflicts are a small share** of LDS-active cycles.
 - **aiter `mla_prefill_fwd`** (absorb mode) runs the DeepSeek-V3 shapes and is the
-  reference to beat; it does not run the 64-head shapes.
+  reference to beat; it does not run the 64-head shapes. The live benchmark's
+  aiter arm is fed the rocke arm's inputs (absorbed query, packed `[c_kv, k_rope]`
+  cache) at the same softmax scale, `1/sqrt(d_nope + d_rope)`, and each arm's
+  output is gated against
+  [`ref_mla_prefill`](../../../builders/mla/ref_mla_attn.py) at the bf16
+  attention tolerance before a ratio is printed. aiter's timed region excludes
+  the two head projections the fused kernel performs. Earlier aiter timings
+  passed `1/sqrt(r_kv + d_rope)` on unrelated random inputs and were not gated;
+  re-timed with the gate on a 304-CU gfx942, every shape stayed on the same
+  side of aiter.
 
 ### Kept — four heads per workgroup
 
@@ -947,28 +965,31 @@ They are not deliverables and their output does not belong in this repository.
 
 ## What remains unproven
 
-- **The first pass ran on a 228-CU MI300A and the second on a 304-CU MI300X.**
+- **The first pass ran on a 228-CU gfx942 and the second on a 304-CU gfx942.**
   First-pass verdicts were not re-measured on the 304-CU part.
 - **`num_warps = 8` was never parity-verified.** It was rejected on measurement
   before adoption, so its functional correctness at 8 warps is untested.
-- **Two-pass latent expansion was not attempted.** The in-loop path re-expands
-  each KV tile once per q-block, so its cost grows with the q extent — a real
-  redundancy. But removing it adds a workspace buffer, a second launch and new
-  host-visible pointer arguments, which makes it an algorithmic change, not a
-  tuning lever. It belongs to its own milestone.
+- **The materialize path was not attempted.** The forward kernel never expands
+  the latent KV: it absorbs `W_UK` into the query in the prologue and applies
+  `W_UV` to the latent accumulator in the epilogue, so its per-workgroup cost is
+  that weight traffic, not a per-tile expansion. Expanding `K`/`V` once into a
+  workspace instead adds a buffer, a second launch and new host-visible pointer
+  arguments — an algorithmic alternative, not a tuning lever. It belongs to its
+  own milestone. Only the score probe still expands the latent in-kernel.
 - **The buffer-load bound is by design, not tested at scale.** The range check
   covers each load's in-page offset, not the page base in the SGPR offset, so the
   reachable cache size is the same 32-bit byte range as the global loads it
   replaced. No test reaches a cache that large.
 - **Untried next levers.** The `s512` shapes, where per-workgroup fixed cost
-  dominates, are furthest from aiter; the unfused projections address that
+  dominates, are furthest from aiter (also in the gated re-run on a 304-CU
+  gfx942); the unfused projections address that
   directly but need an API change. `iglp_opt` and the grouped gather have only
   been timed on the single-head path. aiter's remaining structural advantages —
   32 rows per wave at 512 registers, asynchronous direct-to-LDS key tiles several
   tiles deep, and 64 KB of LDS at one workgroup per CU — need a one-workgroup-
   per-CU redesign rather than a lever on this layout.
-- **Fifth- and sixth-pass timing ran on a 228-CU MI300A only.** The 8-XCD
-  order for a 304-CU MI300X is derived, not measured.
+- **Fifth- and sixth-pass timing ran on a 228-CU gfx942 only.** The 8-XCD
+  order for a 304-CU gfx942 is derived, not measured.
 - **The one-head x four-tile regression on chunked shapes is unexplained.**
 - **The agpr_acc asm hazard padding is validated by parity, not by a hazard
   model.** The asm is opaque to the backend's hazard recognizer.
