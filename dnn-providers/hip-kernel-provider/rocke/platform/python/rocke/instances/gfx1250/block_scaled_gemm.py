@@ -13,9 +13,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import List, Tuple
 
+from ...core.dtypes import dtype_info, normalize_dtype
 from ...core.arch import ArchTarget
 from ...core.arch.wmma_scale import gfx1250_scaled_wmma
-from ...core.dtypes import dtype_info, normalize_dtype
 from ...core.ir import (
     F16,
     F32,
@@ -27,8 +27,8 @@ from ...core.ir import (
     Type,
     VectorType,
 )
-from ...core.storage import BitPacking
 from ...helpers.mma_io import load_matrix_fragment, pack_fragment_bits, storage_ir_type
+from ...core.storage import BitPacking
 from ...helpers.spec import SignatureBuilder, ceil_div_grid, kernel_name_join
 
 _LOWBIT_FORMATS = {
