@@ -42,6 +42,7 @@ from kernels.common._attention_strided_kv import (
 
 from rocke.core.ir import (
     BF16,
+    CACHE_POLICY_NAMES,
     F16,
     F32,
     FP8E4M3,
@@ -50,8 +51,10 @@ from rocke.core.ir import (
     IRBuilder,
     KernelDef,
     PtrType,
+    TemporalHint,
     Type,
     Value,
+    cache_policy_from_name,
 )
 from rocke.helpers.atoms import MfmaAtom, make_c_warp_dstr_encoding
 from rocke.helpers.attention import (
@@ -143,6 +146,13 @@ class UnifiedAttention3DTiledSpec:
     # its own checks of the per-row causal diagonal, sliding window and
     # per-segment KV range.
     use_decode_grid: bool = False
+    # Cache policy of the K/V copies, one of ``CACHE_POLICY_NAMES`` (as the
+    # gfx950 3D and attention 2D ``kv_cache_policy``). The dispatcher sets
+    # "stream" (NT) for all-decode batches, whose K/V bytes are each read once
+    # (``_kv_cache_policy_3d``). The wide loader's only cache control is the
+    # non-temporal hint, so it takes "all" or "stream"; the fp8 K/V loader keeps
+    # "all".
+    kv_cache_policy: str = "all"
 
     def __post_init__(self):
         if self.kv_layout not in ("paged", "strided"):
@@ -163,6 +173,17 @@ class UnifiedAttention3DTiledSpec:
         if self.kv_storage_dtype is not None and self.kv_storage_dtype != "fp8e4m3":
             raise ValueError(
                 f"kv_storage_dtype must be None or 'fp8e4m3' (got {self.kv_storage_dtype!r})"
+            )
+        if self.kv_cache_policy not in CACHE_POLICY_NAMES:
+            raise ValueError(
+                f"kv_cache_policy must be one of {', '.join(CACHE_POLICY_NAMES)} "
+                f"(got {self.kv_cache_policy!r})"
+            )
+        if self.kv_cache_policy != "all" and self.kv_storage_dtype is not None:
+            raise ValueError("kv_cache_policy applies to fp16/bf16 KV storage only")
+        if self.use_wide_kv_load and self.kv_cache_policy not in ("all", "stream"):
+            raise ValueError(
+                "the wide K/V loader takes kv_cache_policy 'all' or 'stream'"
             )
 
     @property
@@ -220,6 +241,7 @@ class UnifiedAttention3DTiledSpec:
             "hoist" if self.use_invariant_hoist else "",
             "wkv" if self.use_wide_kv_load else "",
             "dg" if self.use_decode_grid else "",
+            f"kvcp{self.kv_cache_policy}" if self.kv_cache_policy != "all" else "",
             "stridedkv" if self.kv_layout == "strided" else "",
         )
 
@@ -311,6 +333,12 @@ def build_unified_attention_3d_tiled(
     USE_QQ_BIAS = spec.use_qq_bias
     USE_INVARIANT_HOIST = spec.use_invariant_hoist
     KV_FP8 = spec.kv_storage_dtype == "fp8e4m3"
+    KV_CACHE_BITS = cache_policy_from_name(spec.kv_cache_policy)
+    KV_TEMPORAL_HINT = (
+        TemporalHint.STREAMING
+        if spec.kv_cache_policy == "stream"
+        else TemporalHint.DEFAULT
+    )
     KV_BYTES = 1 if KV_FP8 else 2
     kv_io_dtype = FP8E4M3 if KV_FP8 else dtype
 
@@ -691,7 +719,12 @@ def build_unified_attention_3d_tiled(
                 )
             k_dst = b.smem_ptr_add(K_buf_base, b.const_i64(call * bytes_per_call))
             b.async_buffer_load_lds_addr(
-                key_rsrc, k_dst, voff, zero_soff, ASYNC_LDS_DWORDS
+                key_rsrc,
+                k_dst,
+                voff,
+                zero_soff,
+                ASYNC_LDS_DWORDS,
+                coherency=KV_CACHE_BITS,
             )
 
     def _issue_v_load(kv_tile_idx: Value, buf_idx: Value) -> None:
@@ -713,7 +746,12 @@ def build_unified_attention_3d_tiled(
                 )
             v_dst = b.smem_ptr_add(V_buf_base, b.const_i64(call * bytes_per_call))
             b.async_buffer_load_lds_addr(
-                value_rsrc, v_dst, voff, zero_soff, ASYNC_LDS_DWORDS
+                value_rsrc,
+                v_dst,
+                voff,
+                zero_soff,
+                ASYNC_LDS_DWORDS,
+                coherency=KV_CACHE_BITS,
             )
 
     # Wide KV feed (opt-in): 8-half (16-byte / b128) synchronous global->register
@@ -739,7 +777,14 @@ def build_unified_attention_3d_tiled(
             # paged_kv_desc uses BYTE strides; global_load_vN is element-indexed,
             # so convert (exact: every stride is a multiple of KV_BYTES).
             elem_off = b.div(voff, b.const_i32(KV_BYTES))
-            vec = b.global_load_vN(src, elem_off, dtype, n=WIDE_ELEMS, align=16)
+            vec = b.global_load_vN(
+                src,
+                elem_off,
+                dtype,
+                n=WIDE_ELEMS,
+                align=16,
+                temporal_hint=KV_TEMPORAL_HINT,
+            )
             b.smem_store_vN(lds, [buf_idx, row, col], vec, WIDE_ELEMS)
 
     fp8_elems_per_chunk = 8

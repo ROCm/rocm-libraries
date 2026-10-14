@@ -277,11 +277,8 @@ def make_explicit_attention_3d_specs(
         for name in ("use_invariant_hoist", "use_wide_kv_load")
     ):
         raise ValueError("gfx950 3D does not implement hoist/wide-KV tuning knobs")
-    if arch == "gfx950":
-        # Follows the problem unless the config sets it (``_kv_cache_policy_3d``).
-        knobs.setdefault("kv_cache_policy", _kv_cache_policy_3d(problem, arch=arch))
-    elif "kv_cache_policy" in knobs:
-        raise ValueError("gfx942 3D does not implement the kv_cache_policy knob")
+    # Follows the problem unless the config sets it (``_kv_cache_policy_3d``).
+    knobs.setdefault("kv_cache_policy", _kv_cache_policy_3d(problem, arch=arch))
     segment = spec_type(
         **_semantic_fields(problem),
         num_segments=int(config.num_segments),

@@ -752,7 +752,7 @@ void rocke_gfx942_attention_tiled_3d_issue_k_load(rocke_gfx942_attention_tiled_3
         rocke_value_t* k_dst = rocke_b_smem_ptr_add(
             B, K_buf_base, rocke_b_const_i64(B, (int64_t)call * bytes_per_call));
         rocke_b_async_buffer_load_lds_addr(
-            B, ctx->key_rsrc, k_dst, voff, ctx->zero_soff, ASYNC_LDS_DWORDS, ROCKE_CACHE_ALL);
+            B, ctx->key_rsrc, k_dst, voff, ctx->zero_soff, ASYNC_LDS_DWORDS, CFG.KV_CACHE_BITS);
     }
 }
 
@@ -784,7 +784,7 @@ void rocke_gfx942_attention_tiled_3d_issue_v_load(rocke_gfx942_attention_tiled_3
         rocke_value_t* v_dst = rocke_b_smem_ptr_add(
             B, V_buf_base, rocke_b_const_i64(B, (int64_t)call * bytes_per_call));
         rocke_b_async_buffer_load_lds_addr(
-            B, ctx->value_rsrc, v_dst, voff, ctx->zero_soff, ASYNC_LDS_DWORDS, ROCKE_CACHE_ALL);
+            B, ctx->value_rsrc, v_dst, voff, ctx->zero_soff, ASYNC_LDS_DWORDS, CFG.KV_CACHE_BITS);
     }
 }
 
@@ -817,7 +817,13 @@ void rocke_gfx942_attention_tiled_3d_issue_wide_load(
         rocke_value_t* voff
             = rocke__paged_kv_offset(ctx, kv_tile_idx, linear_half, ctx->kv_head_idx);
         rocke_value_t* elem_off = rocke_b_div(B, voff, rocke_b_const_i32(B, KV_BYTES));
-        rocke_value_t* vec = rocke_b_global_load_vN(B, src, elem_off, dtype, WIDE_ELEMS, 16);
+        rocke_mem_opts_t opts = ROCKE_MEM_OPTS_INIT;
+        rocke_value_t* vec;
+        if(CFG.KV_STREAM)
+        {
+            opts.temporal_hint = ROCKE_TEMPORAL_STREAMING;
+        }
+        vec = rocke_b_global_load_vN_ex(B, src, elem_off, dtype, WIDE_ELEMS, 16, &opts);
         rocke_value_t* idxs[3] = {buf_idx, row, col};
         rocke_b_smem_store_vN(B, lds, idxs, 3, vec, WIDE_ELEMS);
     }

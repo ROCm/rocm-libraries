@@ -3086,15 +3086,19 @@ def _use_decode_grid(
 def _kv_cache_policy_3d(
     problem: UnifiedAttentionProblem, *, arch: Optional[str] = None
 ) -> str:
-    """Cache policy of the gfx950 3D segment kernel's K/V copies.
+    """Cache policy of the gfx942/gfx950 3D segment kernels' K/V copies.
 
     "stream" (NT) when every sequence decodes: each K/V byte is then read once,
     so keeping it in the caches only evicts other data. Otherwise "all". fp8
-    K/V loads synchronously and keeps "all". gfx942 keeps "all" (its 3D spec
-    has no such field). ``arch`` defaults to the resolved device arch.
+    K/V loads synchronously and keeps "all". ``arch`` defaults to the resolved
+    device arch.
     """
     arch = arch or _resolve_attention_arch()
-    if arch == "gfx950" and problem.all_decode and _kv_storage_dtype(problem) is None:
+    if (
+        arch in ("gfx942", "gfx950")
+        and problem.all_decode
+        and _kv_storage_dtype(problem) is None
+    ):
         return "stream"
     return "all"
 
@@ -3383,7 +3387,7 @@ def _strided_3d_specs_from_problem(problem: UnifiedAttentionProblem, *, arch: st
         use_decode_grid=_use_decode_grid(problem, arch=arch),
         **(
             {"kv_cache_policy": _kv_cache_policy_3d(problem, arch=arch)}
-            if arch == "gfx950"
+            if arch in ("gfx942", "gfx950")
             else {}
         ),
     )

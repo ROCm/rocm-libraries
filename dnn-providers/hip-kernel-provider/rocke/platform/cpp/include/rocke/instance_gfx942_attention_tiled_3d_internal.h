@@ -141,6 +141,8 @@ typedef struct rocke_gfx942_attn_tiled_3d_config
     int fp8_total_chunks; /* (T*HD)//8 */
     int fp8_chunks_per_thread; /* fp8_total_chunks // THREADS */
     bool WIDE_KV; /* use_wide_kv_load && !KV_FP8 && WIDE_OK */
+    int KV_CACHE_BITS; /* cache_policy_from_name(spec.kv_cache_policy): the async K/V copies */
+    bool KV_STREAM; /* kv_cache_policy == "stream": the wide K/V loads are non-temporal */
     bool DECODE_GRID; /* spec.use_decode_grid (seq_idx = block_id_x, no search) */
 
     /* Q -> LDS feed (lines 438-439) */

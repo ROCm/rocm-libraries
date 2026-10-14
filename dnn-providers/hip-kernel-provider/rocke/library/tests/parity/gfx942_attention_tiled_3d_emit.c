@@ -131,6 +131,37 @@ static int make_spec(int idx, rocke_unified_attention_3d_tiled_spec_t* s)
         s->has_tile_size_override = true;
         s->tile_size_override = 32;
         break;
+    case 8:
+        /* Decode K/V streamed (nt) through the wide loader. */
+        s->head_size = 128;
+        s->block_size = 16;
+        s->num_query_heads = 64;
+        s->num_kv_heads = 8;
+        s->dtype = "bf16";
+        s->num_segments = 16;
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->kv_storage_dtype = NULL;
+        s->use_wide_kv_load = true;
+        s->use_decode_grid = true;
+        s->kv_cache_policy = "stream";
+        break;
+    case 9:
+        /* Decode K/V with SC0 + NT through the 1-DWORD async loader, with sinks. */
+        s->head_size = 128;
+        s->block_size = 32;
+        s->num_query_heads = 32;
+        s->num_kv_heads = 8;
+        s->dtype = "fp16";
+        s->num_segments = 16;
+        s->use_sinks = true;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->kv_storage_dtype = NULL;
+        s->use_decode_grid = true;
+        s->kv_cache_policy = "nt";
+        break;
     default:
         return -1;
     }

@@ -163,8 +163,9 @@ typedef struct rocke_unified_attention_3d_tiled_spec
      * sequence, no binary search (legal only when every sequence has one query
      * token; the launcher sizes grid x to num_seqs). */
     bool use_decode_grid; /* False */
-    /* Cache policy of the async K/V copies ("all", "global", "stream", "nt";
-     * rocke_cache_policy_from_name). gfx950 only; gfx942 accepts "all". */
+    /* Cache policy of the K/V copies ("all", "global", "stream", "nt";
+     * rocke_cache_policy_from_name). gfx942's wide K/V loader takes "all" or
+     * "stream"; fp8 K/V keeps "all". */
     const char* kv_cache_policy; /* "all" */
     /* K/V LDS rows store their 16-byte chunks XOR-permuted by the row (paged
      * fp16/bf16 K/V only). gfx950 only; gfx942 accepts false. */

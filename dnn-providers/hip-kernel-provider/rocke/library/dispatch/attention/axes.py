@@ -117,16 +117,16 @@ _GFX942_2D_AXES: Tuple[KnobAxis, ...] = (
     _flag("use_causal_mask_phase_split"),
 )
 
+# The K/V cache policy's base value follows the problem (``_kv_cache_policy_3d``:
+# "stream" for all-decode batches, else "all").
 _3D_AXES: Tuple[KnobAxis, ...] = (
     _flag("use_invariant_hoist"),
     _flag("use_wide_kv_load"),
-)
-# gfx950 3D also varies the K/V cache policy; its base value follows the problem
-# (``_kv_cache_policy_3d``: "stream" for all-decode batches, else "all"). The
-# K/V LDS swizzle and the wave page-id load need paged fp16/bf16 K/V; other
-# problems drop them.
-_GFX950_3D_AXES: Tuple[KnobAxis, ...] = _3D_AXES + (
     _values("kv_cache_policy", None, ("stream", "all")),
+)
+# gfx950 3D also varies the K/V LDS swizzle and the wave page-id load, which
+# need paged fp16/bf16 K/V; other problems drop them.
+_GFX950_3D_AXES: Tuple[KnobAxis, ...] = _3D_AXES + (
     _flag("use_kv_lds_swizzle"),
     _flag("use_wave_page_id_load"),
 )

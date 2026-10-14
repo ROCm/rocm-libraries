@@ -163,10 +163,25 @@ bool rocke_unified_attention_3d_tiled_spec_validate(
                         s->kv_storage_dtype);
         return false;
     }
-    if(s->kv_cache_policy != NULL && !rocke_attn3d_streq(s->kv_cache_policy, "all"))
+    rocke_cache_policy_t kv_cache_bits;
+    if(!rocke_cache_policy_from_name(s->kv_cache_policy, &kv_cache_bits))
+    {
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        "kv_cache_policy must be one of all, global, stream, nt (got '%s')",
+                        s->kv_cache_policy ? s->kv_cache_policy : "(null)");
+        return false;
+    }
+    if(kv_cache_bits != ROCKE_CACHE_ALL && s->kv_storage_dtype != NULL)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "kv_cache_policy applies to fp16/bf16 KV storage only");
+        return false;
+    }
+    if(s->use_wide_kv_load && kv_cache_bits != ROCKE_CACHE_ALL
+       && kv_cache_bits != ROCKE_CACHE_STREAM)
     {
         rocke_i_set_err(
-            b, ROCKE_ERR_VALUE, "gfx942 3D does not implement the kv_cache_policy knob");
+            b, ROCKE_ERR_VALUE, "the wide K/V loader takes kv_cache_policy 'all' or 'stream'");
         return false;
     }
     if(s->use_kv_lds_swizzle)
@@ -258,7 +273,8 @@ int rocke_unified_attention_3d_tiled_spec_kernel_name(
      *   "sw<sw>" if sw>0 else "", "softcap" if has_softcap else "",
      *   "alibi" if use_alibi else "", "qqb" if use_qq_bias else "",
      *   "hoist" if use_invariant_hoist else "", "wkv" if use_wide_kv_load else "",
-     *   "dg" if use_decode_grid else "")
+     *   "dg" if use_decode_grid else "",
+     *   "kvcp<policy>" if kv_cache_policy != "all" else "")
      *
      * The whole thing is a positional parts list (NOT flags=...): empty parts
      * are skipped by kernel_name_join. We materialise each part string and feed
@@ -269,6 +285,7 @@ int rocke_unified_attention_3d_tiled_spec_kernel_name(
     char seg_part[32];
     char kv_part[32];
     char sw_part[32];
+    char kvcp_part[32];
     const char* parts[24];
     size_t np = 0;
     size_t out_len = 0;
@@ -330,6 +347,11 @@ int rocke_unified_attention_3d_tiled_spec_kernel_name(
     if(s->use_decode_grid)
     {
         parts[np++] = "dg";
+    }
+    if(s->kv_cache_policy != NULL && !rocke_attn3d_streq(s->kv_cache_policy, "all"))
+    {
+        snprintf(kvcp_part, sizeof(kvcp_part), "kvcp%s", s->kv_cache_policy);
+        parts[np++] = kvcp_part;
     }
 
     /* kernel_name_join takes prefix + parts; we pass everything as parts with a
@@ -703,6 +725,13 @@ bool rocke_gfx942_attn_tiled_3d_config_from_spec(
     /* WIDE_KV = use_wide_kv_load && !KV_FP8 && WIDE_OK (line 703). */
     out->WIDE_KV = spec->use_wide_kv_load && !out->KV_FP8 && out->WIDE_OK;
     out->DECODE_GRID = spec->use_decode_grid;
+    {
+        /* KV_CACHE_BITS = cache_policy_from_name(spec.kv_cache_policy) (validated). */
+        rocke_cache_policy_t bits = ROCKE_CACHE_ALL;
+        (void)rocke_cache_policy_from_name(spec->kv_cache_policy, &bits);
+        out->KV_CACHE_BITS = (int)bits;
+        out->KV_STREAM = bits == ROCKE_CACHE_STREAM;
+    }
 
     /* Q -> LDS feed (lines 438-439). */
     out->Q_VECS_PER_ROW = out->HD / 8;
