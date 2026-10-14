@@ -204,8 +204,9 @@ class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
     # fp8 KV loader select. Default (False) = sync-dequant (global load -> dequant
     # -> bf16 LDS store), the measured-faster path. True = two-phase async DMA (fp8
     # HBM -> staging LDS slab, barrier, LDS->LDS dequant); measured ~8-10% slower on
-    # the aligned prefill cohort, kept opt-in. No effect unless fp8 KV.
-    fp8_two_phase: bool = False
+    # the aligned prefill cohort, kept opt-in. No effect unless fp8 KV. kw_only like
+    # every other codegen knob, so it stays out of the positional spec contract.
+    fp8_two_phase: bool = field(default=False, kw_only=True)
 
     def _supports_noncausal_window(self) -> bool:
         return True
@@ -738,12 +739,10 @@ def supports_attention_dense(
                 f"{threads * 8} (block_n={spec.block_n}, "
                 f"head_size={spec.head_size}, num_waves={spec.num_waves})"
             )
-        # fp8 is validated (golden + GPU) only for bf16 compute without sinks.
-        # The grid variant advertises fp8 alongside every grid feature, so gate
-        # the unverified combinations here rather than silently admitting them;
-        # lift once fp16-compute / sink fp8 paths carry their own coverage.
-        if spec.dtype != "bf16":
-            return False, (f"fp8 dense requires bf16 compute dtype, got {spec.dtype}")
+        # fp8 KV dequant feeds a bf16 or fp16 MFMA (the base spec already limits
+        # dtype to those two). Sinks on dense are a separate ticket, and the fp8
+        # loader has no sink path yet, so gate that combination out here rather
+        # than silently admitting it.
         if spec.use_sinks:
             return False, "fp8 dense does not support attention sinks yet"
     return True, ""
@@ -2971,6 +2970,21 @@ def run_attention_dense_torch(
             "NOT_YET_IMPLEMENTED: the gfx950 dense kernel supports a softmax "
             f"scale in [2**-64, 2**4], got {scale!r}"
         )
+    if spec.kv_storage_dtype == "fp8e4m3":
+        # The K/V pointers are declared OCP fp8e4m3, so the loader decodes the bytes
+        # as OCP. A bf16 or FNUZ tensor would be misread and silently produce wrong
+        # output. Validate here too, not only in the dispatch binding: direct callers
+        # of this runner bypass that guard. (kernels cannot import the dispatch
+        # helper -- that would invert the layering -- so check torch dtype inline.)
+        import torch
+
+        for name, t in (("k", k), ("v", v)):
+            if getattr(t, "dtype", None) != torch.float8_e4m3fn:
+                raise ValueError(
+                    f"fp8 dense expects OCP fp8 {name} (torch.float8_e4m3fn), got "
+                    f"{getattr(t, 'dtype', None)!r}; a bf16 or FNUZ tensor is read as "
+                    "OCP fp8 and silently produces wrong output"
+                )
     if spec.varlen and (cu_seqlens_q is None or cu_seqlens_kv is None):
         raise ValueError(
             "varlen=True requires cu_seqlens_q and cu_seqlens_kv (int32 [batch+1]); "

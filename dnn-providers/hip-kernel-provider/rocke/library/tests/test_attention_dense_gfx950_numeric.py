@@ -333,20 +333,23 @@ class TestDenseNumeric:
 
     @requires_gfx950_gpu
     @pytest.mark.gpu
+    @pytest.mark.parametrize("dtype", ["bf16", "fp16"])
     @pytest.mark.parametrize("d,hq,hkv", [(64, 16, 4), (128, 16, 4)])
-    def test_fp8_kv_dequant_numeric_vs_fp32_sdpa(self, d, hq, hkv):
+    def test_fp8_kv_dequant_numeric_vs_fp32_sdpa(self, d, hq, hkv, dtype):
         """fp8 KV-dequant dense: the kernel reads float8_e4m3fn K/V and dequants
-        with per-tensor k_scale/v_scale; the reference attends over the SAME
-        dequantized K/V, so this isolates kernel error from quantization loss
-        (the convention the live bench uses)."""
+        with per-tensor k_scale/v_scale into the bf16 or fp16 (AICK-1932 fp16
+        output) compute path; the reference attends over the SAME dequantized K/V,
+        so this isolates kernel error from quantization loss (the convention the
+        live bench uses)."""
         import torch
 
+        tdt = getattr(torch, _TORCH_DT[dtype])
         B, S = 1, 512
         scale = 1.0 / math.sqrt(d)
         torch.manual_seed(0)
-        q = torch.randn(B, S, hq, d, device="cuda", dtype=torch.bfloat16) * 0.3
-        k = torch.randn(B, S, hkv, d, device="cuda", dtype=torch.bfloat16) * 0.3
-        v = torch.randn(B, S, hkv, d, device="cuda", dtype=torch.bfloat16) * 0.3
+        q = torch.randn(B, S, hq, d, device="cuda", dtype=tdt) * 0.3
+        k = torch.randn(B, S, hkv, d, device="cuda", dtype=tdt) * 0.3
+        v = torch.randn(B, S, hkv, d, device="cuda", dtype=tdt) * 0.3
 
         fp8_max = torch.finfo(torch.float8_e4m3fn).max
 
@@ -358,11 +361,11 @@ class TestDenseNumeric:
 
         k_fp8, k_scale = _quant(k)
         v_fp8, v_scale = _quant(v)
-        k_deq = (k_fp8.float() * k_scale).to(torch.bfloat16)
-        v_deq = (v_fp8.float() * v_scale).to(torch.bfloat16)
+        k_deq = (k_fp8.float() * k_scale).to(tdt)
+        v_deq = (v_fp8.float() * v_scale).to(tdt)
 
-        spec = _spec("bf16", d, hq, hkv, persistent=False, batch=B, sq=S, use_fp8=True)
-        out = torch.empty(B, S, hq, d, device="cuda", dtype=torch.bfloat16)
+        spec = _spec(dtype, d, hq, hkv, persistent=False, batch=B, sq=S, use_fp8=True)
+        out = torch.empty(B, S, hq, d, device="cuda", dtype=tdt)
         run_attention_dense_torch(
             spec=spec,
             q=q,
@@ -378,8 +381,8 @@ class TestDenseNumeric:
         ref = _standard_reference(q, k_deq, v_deq, scale)
         max_abs = (ref - out.float()).abs().max().item()
         # Reference attends over the dequantized K/V, so the residual is kernel
-        # compute error at bf16 precision; keep a small fp8 margin over the bf16 tol.
-        assert max_abs < 6e-2, f"fp8 D{d} GQA{hq}/{hkv}: max_abs={max_abs:.3e}"
+        # compute error at the compute precision; keep a small fp8 margin over tol.
+        assert max_abs < 6e-2, f"fp8 {dtype} D{d} GQA{hq}/{hkv}: max_abs={max_abs:.3e}"
 
     @requires_gfx950_gpu
     @pytest.mark.gpu
