@@ -7,6 +7,8 @@ Documentation for rocWMMA is available at
 
 ### Added
 
+* Added gfx1170 and gfx1171 WMMA support for FP16, BF16, INT8, FP8 and BF8 inputs.
+
 * Added the following community samples for external contributions, with build support and documentation
   * `simple_gemm_silu`: demonstrates a GEMM + SiLU fused operator using the rocWMMA API
   * `simple_gemm_fusion`: demonstrates block-tile-level dual-GEMM fusion using the rocWMMA API
