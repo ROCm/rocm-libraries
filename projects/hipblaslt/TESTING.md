@@ -656,9 +656,9 @@ A flaky test is not an accepted final state, and neither is an aging quarantine 
 
 ### Known Bugs and Expected Failures
 
-hipBLASLt suppresses or records known-bad behavior in eight different places. They accumulated
+hipBLASLt suppresses or records known-bad behavior in nine different places. They accumulated
 independently, they use different formats, and they are not governed as one thing. Anyone reasoning
-about "what do we currently know is broken" has to check all eight.
+about "what do we currently know is broken" has to check all nine.
 
 | Mechanism | What it suppresses | Ticket linkage | Detects its own fix? |
 | --- | --- | --- | --- |
@@ -669,9 +669,10 @@ about "what do we currently know is broken" has to check all eight.
 | `skip-<arch>` marks in config YAML `TestParameters` | A config on named architectures | Free-text comment | Not applicable |
 | Explicit `pytest.mark.xfail` markers | Specific assertions in a Python test | Ticket in the `reason` string | **Yes**, when written `strict=True` |
 | Characterization goldens that pin known-wrong behavior | Nothing. The wrong behavior is recorded rather than hidden | ADR under `adr/` with a defect link, required by the reviewer checklist | Not applicable: a fix shows up as a golden diff needing review |
+| Coverage-pass filters in [`cmake/run_coverage_tests.sh`](cmake/run_coverage_tests.sh) | Tests that crash only in the coverage build, dropped from the coverage pass that would otherwise run them: `StreamKNullStream`, and pointer-array matmuls under `HIPBLASLT_CHECK_NUMERICS` | Ticket in a comment beside each filter (AIHPBLAS-5137, AIHPBLAS-5136) | **No.** The excluded combination stops running, so the coverage job cannot see either fix and a person has to delete the filter. The blind spot is narrow, though: both tests still run in the unfiltered `precheckin` job, so what goes unobserved is the coverage build and the enabled-`CHECK_NUMERICS` combination, not the tests themselves |
 | `_needs_logic_dir` environment-conditional `pytest.mark.skipif` ([`test_PlaceholderMerge.py`](tensilelite/tensilelite/Tests/unit/test_PlaceholderMerge.py), duplicated in [`test_GpuRevisionTarget.py`](tensilelite/tensilelite/Tests/unit/test_GpuRevisionTarget.py)) | The logic-corpus consistency checks described under [Logic-corpus consistency regression tests](tensilelite/TESTING.md#logic-corpus-consistency-regression-tests), whenever `library/.../Logic/asm_full` is not on disk | Issue URL in the `reason` string; no `strict`, no time-box | **No.** The condition tracks an environment, not the bug it guards; where that environment is permanent (see below) the check can never run for real regardless of what the data says |
 
-This last mechanism is a different shape from the other seven: it is not quarantining a *known* bug
+This last mechanism is a different shape from the other eight: it is not quarantining a *known* bug
 at all, but gating on a precondition, and it lands in the same **Blind** tier as the client
 quarantine list for a more permanent reason. In TheRock CI's installed-artifact layout, the corpus
 this precondition checks for never exists by design (see
@@ -706,7 +707,7 @@ better structure: a real `ticket:` field, keys chosen so they survive library re
 that re-validates every entry on each run and reports the ones that no longer reproduce.
 
 **Known gaps.** Only one mechanism records its ticket somewhere a tool could read, and none records a
-review date. Nothing reports what is currently suppressed across all seven places, or for how long.
+review date. Nothing reports what is currently suppressed across all nine places, or for how long.
 The filename-driven marks in `config_helpers.py` are the weakest link by construction, since a path
 substring cannot carry a ticket or a reason at all, and the resulting mark is non-strict so a fix is
 invisible; they have no users in the tree
@@ -733,24 +734,35 @@ fraction of the C++ library's lines.
 `coverage-report/coverage.info` to Codecov under the `hipBLASLt` flag. `make coverage` runs
 `hipblaslt-test` through [`cmake/run_coverage_tests.sh`](cmake/run_coverage_tests.sh) in four passes:
 
-1. The `GTEST_FILTER` tests. Only this pass decides whether the job passes or fails.
+1. The `GTEST_FILTER` tests.
 2. Every test whose name carries no tier category. The category filter above never selects these,
-   which includes suites such as `MatrixTransformTest`, `ExtOpTest`, and `aux_handle_test`.
+   which includes suites such as `MatrixTransformTest`, `ExtOpTest`, and `aux_handle_test`. CMake
+   reads the tier-category list out of `clients/tests/data/` and hands it to the script, so a
+   category added to the test data cannot quietly land in this pass.
 3. The smoke matmul tests with all logging enabled (`HIPBLASLT_LOG_MASK=255`), so the log, bench,
    and profile formatting code runs. The log goes to `coverage-report/logs/`.
 4. The smoke matmul tests with `HIPBLASLT_CHECK_NUMERICS=2`, so the NaN/Inf output check runs.
 
-Passes 2 through 4 add coverage only; their tests gate in the regular test jobs, so a failure there
-is printed in a summary without failing the coverage job. A crash discards that pass's whole profile,
-so the script excludes tests known to crash under coverage, each with a tracking ticket in a comment.
-Set `HIPBLASLT_COVERAGE_EXTRA_PASSES=0` to run only the first pass locally.
+**Which passes gate.** A pass fails the coverage job when it is the only place that configuration
+runs. Passes 1, 3, and 4 gate: passes 3 and 4 are the only runs of `HIPBLASLT_LOG_MASK` and
+`HIPBLASLT_CHECK_NUMERICS` over the matmul suite anywhere in CI, so nothing else would notice a
+regression in either mode. Pass 2 is advisory, because every test it selects also runs in the
+unfiltered `precheckin` job, which gates there. A crash discards that pass's whole profile, so the
+script excludes tests known to crash under coverage, each with a ticket (see
+[Known Bugs and Expected Failures](#known-bugs-and-expected-failures)). Set
+`HIPBLASLT_COVERAGE_EXTRA_PASSES=0` to run only the first pass locally.
 
 **What the number counts.** The report covers hipBLASLt library code only. Files under `clients/`
-(test code) and `tensilelite/` (reported under the TensileLite flags) are excluded. The test sources
-are still instrumented, because they include library headers and so carry their own copies of the
-library's inline functions; the linker keeps one copy of each, and an uninstrumented copy would leave
-the library's calls uncounted. Numbers recorded before October 2026 also counted test client code
-and lost those inline-function counts, so they are not comparable with later ones.
+(test code) and `tensilelite/` (reported under the TensileLite flags) are excluded. Everything
+linked into `libhipblaslt.so` from this directory is instrumented, which means the `hipblaslt`
+sources plus the two static archives folded into it, `hipblaslt-tuning-store` and the
+default-enabled `hipblaslt-rocroller` (7 files, about 3,250 lines). An archive without its own
+instrumentation contributes no lines at all, even when tests execute it. The test sources are
+instrumented too, because they include library headers and so carry their own copies of the
+library's inline functions; the linker keeps one copy of each, and an uninstrumented copy would
+leave the library's calls uncounted. Numbers recorded before October 2026 counted test client code,
+lost those inline-function counts, and omitted `hipblaslt-rocroller`, so they are not comparable
+with later ones.
 
 **No enforced C++ coverage floor exists.** For the reasons given in
 [Unit Testing Strategy](#unit-testing-strategy) (no host-only link target, internal headers not
@@ -1109,7 +1121,7 @@ larger structural items (the characterization-to-unit migration and mutation tes
    and reviewers stop guessing. The lane tables in this document and in
    [tensilelite/TESTING.md](tensilelite/TESTING.md#where-these-tests-actually-run) are a start, but
    this belongs somewhere it cannot drift from the branch-protection settings themselves.
-3. **Govern known-bug entries as one thing.** Eight mechanisms suppress or record known-bad behavior
+3. **Govern known-bug entries as one thing.** Nine mechanisms suppress or record known-bad behavior
    and none of them share a convention. The proposal, which needs team agreement before it becomes
    policy, is four rules:
 
@@ -1206,7 +1218,7 @@ this table should drive.
 | Gap | Regression risk | Impact | Mitigation today | Tracking |
 | --- | --- | --- | --- | --- |
 | No flaky-test tagging or expiry convention, and flaky tests share one list with known-failing ones | Medium | Medium | `known_bugs.yaml` quarantine with ticket references and removal notes |  |
-| Known-bad behavior is suppressed in seven places with no shared convention, and the largest excludes the test entirely | Medium | Medium | Per-mechanism discipline is good in places and absent in others; nothing reports the total |  |
+| Known-bad behavior is suppressed in nine places with no shared convention, and the largest excludes the test entirely | Medium | Medium | Per-mechanism discipline is good in places and absent in others; nothing reports the total |  |
 
 ### Static analysis and type checking
 

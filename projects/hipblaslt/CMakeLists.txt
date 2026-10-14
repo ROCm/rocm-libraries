@@ -949,6 +949,30 @@ if(HIPBLASLT_ENABLE_COVERAGE)
     target_compile_definitions(hipblaslt-clients-common PRIVATE CODE_COVERAGE)
 
     set(coverage_dir "${CMAKE_CURRENT_BINARY_DIR}/coverage-report")
+
+    # The coverage runner's untiered pass selects tests outside every tier
+    # category, so it needs the category list. Read it from the test data rather
+    # than repeating it: a category added there would otherwise fall into that
+    # pass unannounced, and it may need a longer timeout or a different GPU than
+    # this job allows. known_bug and multi_gpu carry no `category:` entries
+    # (known_bug is assigned from known_bugs.yaml, and the multi_gpu tests carry
+    # the token in the suite name), so they are listed explicitly.
+    set(coverage_tier_categories "known_bug" "multi_gpu")
+    file(GLOB coverage_test_data_files CONFIGURE_DEPENDS
+        "${CMAKE_CURRENT_SOURCE_DIR}/clients/tests/data/*.yaml")
+    foreach(data_file IN LISTS coverage_test_data_files)
+        file(STRINGS "${data_file}" category_lines REGEX "^[ \t]*category:[ \t]*[A-Za-z_]+")
+        foreach(category_line IN LISTS category_lines)
+            string(REGEX REPLACE "^[ \t]*category:[ \t]*([A-Za-z_]+).*$" "\\1"
+                category "${category_line}")
+            list(APPEND coverage_tier_categories "${category}")
+        endforeach()
+    endforeach()
+    list(REMOVE_DUPLICATES coverage_tier_categories)
+    list(SORT coverage_tier_categories)
+    string(JOIN "," coverage_tier_categories_arg ${coverage_tier_categories})
+    message(STATUS "hipBLASLt coverage: tier categories ${coverage_tier_categories_arg}")
+
     # Allow GTEST_FILTER to be set via environment variable to filter tests during coverage runs.
     # Usage: GTEST_FILTER="*quick*" make coverage
     # Default: Run all tests if GTEST_FILTER is not set
@@ -957,7 +981,7 @@ if(HIPBLASLT_ENABLE_COVERAGE)
         DEPENDS hipblaslt-test
         COMMAND ${CMAKE_COMMAND} -E rm -rf "${coverage_dir}"
         COMMAND ${CMAKE_COMMAND} -E make_directory "${coverage_dir}/profraw"
-        COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/cmake/run_coverage_tests.sh" "$<TARGET_FILE:hipblaslt-test>" "${coverage_dir}"
+        COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/cmake/run_coverage_tests.sh" "$<TARGET_FILE:hipblaslt-test>" "${coverage_dir}" "${coverage_tier_categories_arg}"
         COMMENT "Running hipblaslt testcases for coverage report"
       )
 
