@@ -634,12 +634,12 @@ def build_attention_d256_gfx950(arch):
 
         problem = _d256_problem()
         with _pinned_attention_arch(arch):
-            if not _d256_gfx950_fast(problem):
+            if not _d256_gfx950_fast(problem, arch):
                 raise RuntimeError(
                     f"D256 fast spec not selected under pinned arch {arch!r}; "
                     "would pin the fallback (no pad/interleave)"
                 )
-            spec = _tiled_spec_from_problem(problem)
+            spec = _tiled_spec_from_problem(problem, arch)
             if not (spec.use_kq_lds_pad and spec.use_softmax_mfma_interleave):
                 raise RuntimeError(
                     "expected pad+interleave in the D256 fast spec; got "
@@ -669,12 +669,12 @@ def build_attention_d256_gfx942(arch):
 
         problem = _d256_problem()
         with _pinned_attention_arch(arch):
-            if not _d256_gfx942_fast(problem):
+            if not _d256_gfx942_fast(problem, arch):
                 raise RuntimeError(
                     f"D256 gfx942 fast route not selected under pinned arch "
                     f"{arch!r}; would pin the fallback (slow scalar path)"
                 )
-            spec = _tiled_spec_from_problem(problem)
+            spec = _tiled_spec_from_problem(problem, arch)
             return build_gfx942_4warp_gqa(spec, arch=arch)
 
     return _build
@@ -720,7 +720,7 @@ def build_attention_d128_swa_fold_gfx942(arch):
                     f"GQA head-fold not selected under pinned arch {arch!r}; "
                     "would pin the unfolded kernel"
                 )
-            spec = _tiled_spec_from_problem(problem)
+            spec = _tiled_spec_from_problem(problem, arch)
             kernel = build_gfx942_4warp_gqa(spec, arch=arch)
             if not kernel.name.endswith("_4wgqa_fold"):
                 raise RuntimeError(
@@ -1281,6 +1281,52 @@ def build_streaming_copy(arch):
         off = b.mul(b.thread_id_x(), b.const_i32(8))
         v = b.global_load_vN(src, off, BF16, 8, temporal_hint=TemporalHint.STREAMING)
         b.global_store_vN(dst, off, v, 8, temporal_hint=TemporalHint.STREAMING)
+        b.ret()
+        return b.kernel
+
+    return _build
+
+
+def build_warp_shuffle_xor_dpp_reduce(arch, masks):
+    """16-lane i32 sum ``v = v + warp_shuffle_xor_dpp(v, m)`` over ``masks``:
+    pins the per-target ``tile.dpp_xor`` encodings inside the reduction they
+    exist for, so a change that alters the op's IR in both engines at once
+    still trips the golden. gfx9 uses masks 1, 2, 7, 15 (quad_perm x2,
+    row_half_mirror, row_mirror); a row_xmask target uses 1, 2, 4, 8."""
+
+    def _build():
+        from rocke.core.ir import I32, IRBuilder, PtrType
+
+        b = IRBuilder(f"irhash_warp_shuffle_xor_dpp_reduce_{arch}")
+        src = b.param("S", PtrType(I32, "global"), noalias=True, readonly=True)
+        dst = b.param("D", PtrType(I32, "global"), noalias=True)
+        tid = b.thread_id_x()
+        acc = b.global_load(src, tid, I32, align=4)
+        for m in masks:
+            acc = b.add(acc, b.warp_shuffle_xor_dpp(acc, m))
+        b.global_store(dst, tid, acc, align=4)
+        b.ret()
+        return b.kernel
+
+    return _build
+
+
+def build_warp_shuffle_xor_dpp_masks_f32(arch):
+    """f32 shuffle by every register-only gfx9 mask (1, 2, 3, 7, 8, 15),
+    summed: pins each table entry and the f32 <-> i32 bitcast path."""
+
+    def _build():
+        from rocke.core.ir import F32, IRBuilder, PtrType
+
+        b = IRBuilder(f"irhash_warp_shuffle_xor_dpp_masks_f32_{arch}")
+        src = b.param("S", PtrType(F32, "global"), noalias=True, readonly=True)
+        dst = b.param("D", PtrType(F32, "global"), noalias=True)
+        tid = b.thread_id_x()
+        x = b.global_load(src, tid, F32, align=4)
+        acc = x
+        for m in (1, 2, 3, 7, 8, 15):
+            acc = b.fadd(acc, b.warp_shuffle_xor_dpp(x, m))
+        b.global_store(dst, tid, acc, align=4)
         b.ret()
         return b.kernel
 
@@ -3918,6 +3964,28 @@ def cases():
             _arch,
             build_streaming_copy(_arch),
         )
+
+    # warp_shuffle_xor_dpp (tile.dpp_xor): gfx9 CDNA picks the base-DPP
+    # encoding per mask; a row_xmask target (gfx1201) keeps 0x160 | mask.
+    for _arch in ("gfx942", "gfx950"):
+        add(
+            "crosslane",
+            f"crosslane/{_arch}/warp_shuffle_xor_dpp_reduce_i32",
+            _arch,
+            build_warp_shuffle_xor_dpp_reduce(_arch, (1, 2, 7, 15)),
+        )
+        add(
+            "crosslane",
+            f"crosslane/{_arch}/warp_shuffle_xor_dpp_masks_f32",
+            _arch,
+            build_warp_shuffle_xor_dpp_masks_f32(_arch),
+        )
+    add(
+        "crosslane",
+        "crosslane/gfx1201/warp_shuffle_xor_dpp_reduce_i32",
+        "gfx1201",
+        build_warp_shuffle_xor_dpp_reduce("gfx1201", (1, 2, 4, 8)),
+    )
 
     return out
 

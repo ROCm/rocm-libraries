@@ -136,6 +136,11 @@ class ISABackend:
         from ..ir import Op
 
         op_id = op.attrs["op_id"]
+        from ..arch.mfma_scale import gfx950_scaled_mfma
+
+        if gfx950_scaled_mfma(op_id) is not None:
+            lowerer._emit_gfx950_scaled_mfma(op)
+            return
         legacy = Op(
             name=f"tile.{op_id}",
             operands=list(op.operands),
@@ -362,6 +367,11 @@ class Gfx11RdnaBackend(ISABackend):
         from ..ir import Op
 
         op_id = op.attrs["op_id"]
+        from ..arch.mfma_scale import gfx950_scaled_mfma
+
+        if gfx950_scaled_mfma(op_id) is not None:
+            lowerer._emit_gfx950_scaled_mfma(op)
+            return
         legacy = Op(
             name=f"tile.{op_id}",
             operands=list(op.operands),
