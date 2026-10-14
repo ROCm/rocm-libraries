@@ -658,179 +658,150 @@ struct BlockwiseGemmXdlops_k0mk1_k0nk1_m0n0m1n1m2m3m4n2_loop_knm_v1
     {
         barrier.Join();
 
-        const int wave_id           = ThisThreadBlock::GetThreadId() / WaveSize;
-        constexpr index_t num_waves = ThisThreadBlock::GetNumOfThread() / WaveSize;
-        bool wave_pong              = (wave_id / (num_waves / 2) == 1);
-        if(wave_pong)
-        {
-            barrier.Wait();
-        }
-
         auto a_thread_buf = make_static_buffer<AddressSpaceEnum::Vgpr, ElementDataTypeA>(
             a_thread_desc_.GetElementSpaceSize());
         auto b_thread_buf = make_static_buffer<AddressSpaceEnum::Vgpr, ElementDataTypeB>(
             b_thread_desc_.GetElementSpaceSize());
 
-        constexpr index_t MInner              = math::min(4, MRepeat);
-        constexpr index_t NInner              = 1;
+        // Split Math waves into "ping" and "pong"
+        const int wave_id           = ThisThreadBlock::GetThreadId() / WaveSize;
+        constexpr index_t num_waves = ThisThreadBlock::GetNumOfThread() / WaveSize;
+        bool wave_pong              = (wave_id / (num_waves / 2) == 1);
+
+        // Delay execution of "pong" waves by 1 step
+        if(wave_pong)
+        {
+            barrier.Wait();
+        }
+
+        // The MRepeat/NRepeat tile is divided into subtiles MInner/NInner to generate ping-pong
+        // between waves. The size of the subtile defines the amount of extra registers needed by
+        // the pipeline. Instead of exposing MInner/NInner as extra template parameters, we define
+        // them here. The implementation is kept general even if NInner is 1 so that we can review
+        // these values later on if needed
+        static_assert((MRepeat & (MRepeat - 1)) == 0,
+                      "MRepeat must be power of 2 for this pipeline");
+        constexpr index_t MInner = math::min(4, MRepeat);
+        constexpr index_t NInner = 1;
+
+        // Number of ds_read instructions for each thread transfer Run method call
         constexpr index_t NumInstPerTransferA = KPack / A_K1;
         constexpr index_t NumInstPerTransferB = KPack / B_K1;
 
-        static_for<0, KRepeat, 1>{}([&](auto k) {
-            static_for<0, NRepeat, NInner>{}([&](auto n0) {
-                static_for<0, MRepeat, MInner>{}([&](auto m0) {
-                    if constexpr(m0 == 0 && n0 == 0 && k == 0)
-                    {
-                        static_for<0, MInner, 1>{}([&](auto m1) {
-                            a_thread_copy_.Run(a_block_desc_m0_m1_m2_k,
-                                               make_tuple(m0 + m1, I0, I0, Number<k * KPack>{}),
-                                               a_block_buf,
-                                               a_thread_desc_,
-                                               make_tuple(m0 + m1, I0, k, I0),
-                                               a_thread_buf);
-                            __builtin_amdgcn_sched_barrier(0);
-                        });
-                        __builtin_amdgcn_sched_barrier(0);
+        auto preload_a = [&](auto m_offset, auto k_offset) {
+            static_for<0, MInner, 1>{}([&](auto m1) {
+                a_thread_copy_.Run(
+                    a_block_desc_m0_m1_m2_k,
+                    make_tuple(Number<m_offset + m1>{}, I0, I0, Number<k_offset * KPack>{}),
+                    a_block_buf,
+                    a_thread_desc_,
+                    make_tuple(Number<m_offset + m1>{}, I0, Number<k_offset>{}, I0),
+                    a_thread_buf);
+                __builtin_amdgcn_sched_barrier(0);
+            });
+            __builtin_amdgcn_sched_barrier(0);
+        };
 
-                        static_for<0, NInner, 1>{}([&](auto n1) {
-                            b_thread_copy_.Run(
-                                b_block_desc_n0_n1_n2_k,
-                                make_tuple(Number<n0 + n1>{}, I0, I0, Number<k * KPack>{}),
-                                b_block_buf,
-                                b_thread_desc_,
-                                make_tuple(Number<n0 + n1>{}, I0, k, I0),
-                                b_thread_buf);
-                            __builtin_amdgcn_sched_barrier(0);
-                        });
-                        __builtin_amdgcn_sched_barrier(0);
-                    }
-                    if constexpr(m0 != MRepeat - MInner)
-                    {
-                        static_for<0, MInner, 1>{}([&](auto m1) {
-                            a_thread_copy_.Run(
-                                a_block_desc_m0_m1_m2_k,
-                                make_tuple(Number<m0 + MInner + m1>{}, I0, I0, Number<k * KPack>{}),
-                                a_block_buf,
-                                a_thread_desc_,
-                                make_tuple(Number<m0 + MInner + m1>{}, I0, k, I0),
-                                a_thread_buf);
-                            __builtin_amdgcn_sched_barrier(0);
-                        });
-                        __builtin_amdgcn_sched_barrier(0);
-                    }
+        auto preload_b = [&](auto n_offset, auto k_offset) {
+            static_for<0, NInner, 1>{}([&](auto n1) {
+                b_thread_copy_.Run(
+                    b_block_desc_n0_n1_n2_k,
+                    make_tuple(Number<n_offset + n1>{}, I0, I0, Number<k_offset * KPack>{}),
+                    b_block_buf,
+                    b_thread_desc_,
+                    make_tuple(Number<n_offset + n1>{}, I0, Number<k_offset>{}, I0),
+                    b_thread_buf);
+                __builtin_amdgcn_sched_barrier(0);
+            });
+            __builtin_amdgcn_sched_barrier(0);
+        };
 
-                    if constexpr(m0 == MRepeat - MInner && n0 != NRepeat - NInner)
-                    {
-                        static_for<0, NInner, 1>{}([&](auto n1) {
-                            b_thread_copy_.Run(
-                                b_block_desc_n0_n1_n2_k,
-                                make_tuple(Number<n0 + NInner + n1>{}, I0, I0, Number<k * KPack>{}),
-                                b_block_buf,
-                                b_thread_desc_,
-                                make_tuple(Number<n0 + NInner + n1>{}, I0, k, I0),
-                                b_thread_buf);
-                            __builtin_amdgcn_sched_barrier(0);
-                        });
-                        __builtin_amdgcn_sched_barrier(0);
-                    }
+        // LDS load prefetch
+        preload_a(I0, I0);
+        preload_b(I0, I0);
 
-                    if constexpr(m0 == MRepeat - MInner && n0 == NRepeat - NInner &&
-                                 k + 1 < KRepeat)
-                    {
-                        static_for<0, MInner, 1>{}([&](auto m1) {
-                            a_thread_copy_.Run(
-                                a_block_desc_m0_m1_m2_k,
-                                make_tuple(Number<m1>{}, I0, I0, Number<(k + 1) * KPack>{}),
-                                a_block_buf,
-                                a_thread_desc_,
-                                make_tuple(Number<m1>{}, I0, Number<k + 1>{}, I0),
-                                a_thread_buf);
-                            __builtin_amdgcn_sched_barrier(0);
-                        });
-                        __builtin_amdgcn_sched_barrier(0);
-                        static_for<0, NInner, 1>{}([&](auto n1) {
-                            b_thread_copy_.Run(
-                                b_block_desc_n0_n1_n2_k,
-                                make_tuple(Number<n1>{}, I0, I0, Number<(k + 1) * KPack>{}),
-                                b_block_buf,
-                                b_thread_desc_,
-                                make_tuple(Number<n1>{}, I0, Number<k + 1>{}, I0),
-                                b_thread_buf);
-                            __builtin_amdgcn_sched_barrier(0);
-                        });
-                        __builtin_amdgcn_sched_barrier(0);
-                    }
+        static_ford<Sequence<KRepeat, NRepeat / NInner, MRepeat / MInner>>{}([&](auto knm) {
+            constexpr auto k  = Number<knm[Number<0>{}]>{};
+            constexpr auto n0 = Number<knm[Number<1>{}] * NInner>{};
+            constexpr auto m0 = Number<knm[Number<2>{}] * MInner>{};
 
-                    __builtin_amdgcn_sched_barrier(0);
-                    barrier.Wait();
-                    __builtin_amdgcn_sched_barrier(0);
+            // Preload next A/B
+            // (we don't wait for them in this step so we have wmma cycles to hide latency)
+            constexpr bool IsLastMN =
+                m0 == MRepeat - MInner && n0 == NRepeat - NInner && k + 1 < KRepeat;
+            constexpr bool IsLoadAStep = (m0 != MRepeat - MInner) || IsLastMN;
+            constexpr bool IsLoadBStep =
+                (m0 == MRepeat - MInner && n0 != NRepeat - NInner) || IsLastMN;
 
-                    constexpr index_t a_ds_cnt =
-                        (m0 != MRepeat - MInner) || (m0 == MRepeat - MInner &&
-                                                     n0 == NRepeat - NInner && k + 1 < KRepeat)
-                            ? NumInstPerTransferA * MInner
-                            : 0;
-                    constexpr index_t b_ds_cnt =
-                        (m0 == MRepeat - MInner && n0 != NRepeat - NInner) ||
-                                (m0 == MRepeat - MInner && n0 == NRepeat - NInner &&
-                                 k + 1 < KRepeat)
-                            ? NumInstPerTransferB * NInner
-                            : 0;
+            constexpr index_t k_offset = IsLastMN ? k + 1 : k;
+            if constexpr(IsLoadAStep)
+            {
+                constexpr index_t m_offset = IsLastMN ? 0 : m0 + MInner;
+                preload_a(Number<m_offset>{}, Number<k_offset>{});
+            }
+            if constexpr(IsLoadBStep)
+            {
+                constexpr index_t n_offset = IsLastMN ? 0 : n0 + NInner;
+                preload_b(Number<n_offset>{}, Number<k_offset>{});
+            }
 
-                    wait_dscnt(Number<a_ds_cnt + b_ds_cnt>{});
-                    __builtin_amdgcn_sched_barrier(0);
+            __builtin_amdgcn_sched_barrier(0);
+            barrier.Wait();
+            __builtin_amdgcn_sched_barrier(0);
 
-                    static_for<0, NInner, 1>{}([&](auto n1) {
-                        static_for<0, MInner, 1>{}([&](auto m1) {
-                            vector_type<ElementDataTypeA, KPack> a_thread_vec;
-                            vector_type<ElementDataTypeB, KPack> b_thread_vec;
+            // Wait for LDS loads consumed by this step
+            constexpr index_t a_ds_cnt = IsLoadAStep ? NumInstPerTransferA * MInner : 0;
+            constexpr index_t b_ds_cnt = IsLoadBStep ? NumInstPerTransferB * NInner : 0;
+            wait_dscnt(Number<a_ds_cnt + b_ds_cnt>{});
+            __builtin_amdgcn_sched_barrier(0);
 
-                            auto loadA = thread_buf_to_vec_loader<decltype(a_thread_vec),
-                                                                  decltype(a_thread_buf),
-                                                                  decltype(a_thread_desc_),
-                                                                  ElementDataTypeA,
-                                                                  Number<m0 + m1>,
-                                                                  Number<0>,
-                                                                  decltype(k),
-                                                                  index_expression::Ik>{
-                                a_thread_vec, a_thread_buf};
-                            auto loadB = thread_buf_to_vec_loader<decltype(b_thread_vec),
-                                                                  decltype(b_thread_buf),
-                                                                  decltype(b_thread_desc_),
-                                                                  ElementDataTypeB,
-                                                                  Number<n0 + n1>,
-                                                                  Number<0>,
-                                                                  decltype(k),
-                                                                  index_expression::Ik>{
-                                b_thread_vec, b_thread_buf};
+            // Wmma step consumes subtiles MInner/NInner
+            static_ford<Sequence<NInner, MInner>>{}([&](auto n1m1) {
+                constexpr auto n1 = Number<n1m1[Number<0>{}]>{};
+                constexpr auto m1 = Number<n1m1[Number<1>{}]>{};
+                vector_type<ElementDataTypeA, KPack> a_thread_vec;
+                vector_type<ElementDataTypeB, KPack> b_thread_vec;
 
-                            static_for<0, KPack, 1>{}(MakeFunctorInvoker(loadA, loadB));
+                auto loadA =
+                    thread_buf_to_vec_loader<decltype(a_thread_vec),
+                                             decltype(a_thread_buf),
+                                             decltype(a_thread_desc_),
+                                             ElementDataTypeA,
+                                             Number<m0 + m1>,
+                                             Number<0>,
+                                             decltype(k),
+                                             index_expression::Ik>{a_thread_vec, a_thread_buf};
+                auto loadB =
+                    thread_buf_to_vec_loader<decltype(b_thread_vec),
+                                             decltype(b_thread_buf),
+                                             decltype(b_thread_desc_),
+                                             ElementDataTypeB,
+                                             Number<n0 + n1>,
+                                             Number<0>,
+                                             decltype(k),
+                                             index_expression::Ik>{b_thread_vec, b_thread_buf};
 
-                            using mfma_input_type_a =
-                                typename vector_type<ElementDataTypeA,
-                                                     xdlops_gemm.K1PerXdlops>::type;
-                            using mfma_input_type_b =
-                                typename vector_type<ElementDataTypeB,
-                                                     xdlops_gemm.K1PerXdlops>::type;
+                static_for<0, KPack, 1>{}(MakeFunctorInvoker(loadA, loadB));
 
-                            constexpr index_t c_offset =
-                                c_thread_desc_.CalculateOffset(make_tuple(m0 + m1, n0 + n1, 0));
+                using mfma_input_type_a =
+                    typename vector_type<ElementDataTypeA, xdlops_gemm.K1PerXdlops>::type;
+                using mfma_input_type_b =
+                    typename vector_type<ElementDataTypeB, xdlops_gemm.K1PerXdlops>::type;
 
-                            xdlops_gemm.Run(
-                                a_thread_vec.template AsType<mfma_input_type_a>(),
+                constexpr index_t c_offset =
+                    c_thread_desc_.CalculateOffset(make_tuple(m0 + m1, n0 + n1, 0));
+
+                xdlops_gemm.Run(a_thread_vec.template AsType<mfma_input_type_a>(),
                                 b_thread_vec.template AsType<mfma_input_type_b>(),
                                 c_thread_buf.GetVectorTypeReference(Number<c_offset>{}));
-                        });
-                    });
-                    __builtin_amdgcn_sched_barrier(0);
-
-                    __builtin_amdgcn_sched_barrier(0);
-                    barrier.Wait();
-                    __builtin_amdgcn_sched_barrier(0);
-                });
             });
+
+            __builtin_amdgcn_sched_barrier(0);
+            barrier.Wait();
+            __builtin_amdgcn_sched_barrier(0);
         });
 
+        // "ping" waves wait for delayed "pong" waves
         if(!wave_pong)
         {
             barrier.Wait();
