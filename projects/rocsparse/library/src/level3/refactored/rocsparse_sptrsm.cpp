@@ -334,12 +334,6 @@ namespace rocsparse
 #if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
         if(sptrsm_descr->get_solve_mode() != rocsparse_solve_mode_triangular)
         {
-            if(Y->batch_count > 1)
-            {
-                // LCOV_EXCL_START
-                RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
-                // LCOV_EXCL_STOP
-            }
 
             const rocsparse_diagonal_modifier modifier = sptrsm_descr->get_diagonal_modifier();
             const int64_t                     nrhs     = Y->cols;
@@ -371,12 +365,12 @@ namespace rocsparse
                                                   X->const_values,
                                                   x_row_stride,
                                                   x_col_stride,
-                                                  static_cast<int64_t>(0),
+                                                  X->batch_stride,
                                                   Y->values,
                                                   y_row_stride,
                                                   y_col_stride,
-                                                  static_cast<int64_t>(0),
-                                                  static_cast<int64_t>(1),
+                                                  Y->batch_stride,
+                                                  Y->batch_count,
                                                   conj_x));
                 sptrsm_descr->set_stage(rocsparse_sptrsm_stage_compute);
                 return rocsparse_status_success;
@@ -394,12 +388,12 @@ namespace rocsparse
                                                   X->const_values,
                                                   x_row_stride,
                                                   x_col_stride,
-                                                  static_cast<int64_t>(0),
+                                                  X->batch_stride,
                                                   Y->values,
                                                   y_row_stride,
                                                   y_col_stride,
-                                                  static_cast<int64_t>(0),
-                                                  static_cast<int64_t>(1),
+                                                  Y->batch_stride,
+                                                  Y->batch_count,
                                                   conj_x));
                 sptrsm_descr->set_stage(rocsparse_sptrsm_stage_compute);
                 return rocsparse_status_success;

@@ -52,8 +52,12 @@ namespace rocsparse_clients
                      rocsparse_clients::dnmat_descr<T>&       Y,
                      const rocsparse_diag_type                A_diag,
                      const rocsparse_fill_mode                A_uplo,
-                     int64_t*                                 symbolic,
-                     int64_t*                                 exact)
+#if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
+                     rocsparse_solve_mode        solve_mode,
+                     rocsparse_diagonal_modifier diagonal_modifier,
+#endif
+                     int64_t* symbolic,
+                     int64_t* exact)
     {
 
         const rocsparse_format format = A.get_format();
@@ -123,33 +127,58 @@ namespace rocsparse_clients
             }
             break;
         }
+
         case rocsparse_format_csr:
         {
             auto& host = A.template as<rocsparse_format_csr>().host();
+
             for(int64_t batch_index = 0; batch_index < batch_count; ++batch_index)
             {
                 J ap = -1, sp = -1;
-                host_csrsm<I, J, T>(hY.m,
-                                    hY.n,
-                                    host.nnz,
-                                    A_op,
-                                    rocsparse_operation_none,
-                                    *(halpha + batch_index * alpha_batch_stride),
-                                    host.ptr,
-                                    host.ind,
-                                    host.val.data() + batch_index * A.get_stride(),
-                                    hY.data() + batch_index * Y.get_batch_stride(),
-                                    hY.ld,
-                                    hY.order,
-                                    A_diag,
-                                    A_uplo,
-                                    host.base,
-                                    &ap,
-                                    &sp);
+
+#if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
+                if(solve_mode == rocsparse_solve_mode_diagonal)
+                {
+                    host_diagonal_solve_csr<I, J, T>(A_op,
+                                                     hY.m,
+                                                     hY.n,
+                                                     *(halpha + batch_index * alpha_batch_stride),
+                                                     host.ptr,
+                                                     host.ind,
+                                                     host.val.data() + batch_index * A.get_stride(),
+                                                     hY.data() + batch_index * Y.get_batch_stride(),
+                                                     hY.data() + batch_index * Y.get_batch_stride(),
+                                                     hY.ld,
+                                                     hY.order,
+                                                     host.base,
+                                                     diagonal_modifier,
+                                                     &ap,
+                                                     &sp);
+                }
+                else
+#endif
+                {
+                    host_csrsm<I, J, T>(hY.m,
+                                        hY.n,
+                                        host.nnz,
+                                        A_op,
+                                        rocsparse_operation_none,
+                                        *(halpha + batch_index * alpha_batch_stride),
+                                        host.ptr,
+                                        host.ind,
+                                        host.val.data() + batch_index * A.get_stride(),
+                                        hY.data() + batch_index * Y.get_batch_stride(),
+                                        hY.ld,
+                                        hY.order,
+                                        A_diag,
+                                        A_uplo,
+                                        host.base,
+                                        &ap,
+                                        &sp);
+                }
                 symbolic[batch_index] = ap;
                 exact[batch_index]    = sp;
             }
-
             break;
         }
 
@@ -159,23 +188,46 @@ namespace rocsparse_clients
             for(int64_t batch_index = 0; batch_index < batch_count; ++batch_index)
             {
                 J ap = -1, sp = -1;
-                host_cscsm<I, J, T>(hY.m,
-                                    hY.n,
-                                    host.nnz,
-                                    A_op,
-                                    rocsparse_operation_none,
-                                    *(halpha + batch_index * alpha_batch_stride),
-                                    host.ptr,
-                                    host.ind,
-                                    host.val.data() + batch_index * A.get_stride(),
-                                    hY.data() + batch_index * Y.get_batch_stride(),
-                                    hY.ld,
-                                    hY.order,
-                                    A_diag,
-                                    A_uplo,
-                                    host.base,
-                                    &ap,
-                                    &sp);
+#if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
+                if(solve_mode == rocsparse_solve_mode_diagonal)
+                {
+                    host_diagonal_solve_csc<I, J, T>(A_op,
+                                                     hY.m,
+                                                     hY.n,
+                                                     *(halpha + batch_index * alpha_batch_stride),
+                                                     host.ptr,
+                                                     host.ind,
+                                                     host.val.data() + batch_index * A.get_stride(),
+                                                     hY.data() + batch_index * Y.get_batch_stride(),
+                                                     hY.data() + batch_index * Y.get_batch_stride(),
+                                                     hY.ld,
+                                                     hY.order,
+                                                     host.base,
+                                                     diagonal_modifier,
+                                                     &ap,
+                                                     &sp);
+                }
+                else
+#endif
+                {
+                    host_cscsm<I, J, T>(hY.m,
+                                        hY.n,
+                                        host.nnz,
+                                        A_op,
+                                        rocsparse_operation_none,
+                                        *(halpha + batch_index * alpha_batch_stride),
+                                        host.ptr,
+                                        host.ind,
+                                        host.val.data() + batch_index * A.get_stride(),
+                                        hY.data() + batch_index * Y.get_batch_stride(),
+                                        hY.ld,
+                                        hY.order,
+                                        A_diag,
+                                        A_uplo,
+                                        host.base,
+                                        &ap,
+                                        &sp);
+                }
                 symbolic[batch_index] = ap;
                 exact[batch_index]    = sp;
             }
@@ -212,6 +264,10 @@ namespace rocsparse_clients
             rocsparse_datatype        scalar_datatype;
             rocsparse_datatype        compute_datatype;
             rocsparse_analysis_policy apol;
+#if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
+            rocsparse_solve_mode        solve_mode;
+            rocsparse_diagonal_modifier diagonal_modifier;
+#endif
         };
 
         config_t config;
@@ -265,6 +321,7 @@ namespace rocsparse_clients
 
             if(status)
                 return status;
+
             status = rocsparse_sptrsm_set_input(handle,
                                                 this->m_descr,
                                                 rocsparse_sptrsm_input_analysis_policy,
@@ -273,6 +330,27 @@ namespace rocsparse_clients
                                                 p_error);
             if(status)
                 return status;
+
+#if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
+            status = rocsparse_sptrsm_set_input(handle,
+                                                this->m_descr,
+                                                rocsparse_sptrsm_input_solve_mode,
+                                                &config.solve_mode,
+                                                sizeof(config.solve_mode),
+                                                p_error);
+            if(status)
+                return status;
+
+            status = rocsparse_sptrsm_set_input(handle,
+                                                this->m_descr,
+                                                rocsparse_sptrsm_input_diagonal_modifier,
+                                                &config.diagonal_modifier,
+                                                sizeof(config.diagonal_modifier),
+                                                p_error);
+            if(status)
+                return status;
+#endif
+
             return status;
         }
 
@@ -283,8 +361,21 @@ namespace rocsparse_clients
                      const rocsparse_sptrsm_alg      alg,
                      const rocsparse_datatype        scalar_datatype,
                      const rocsparse_datatype        compute_datatype,
-                     const rocsparse_analysis_policy apol)
-            : config({operation_A, operation_X, alg, scalar_datatype, compute_datatype, apol})
+                     const rocsparse_analysis_policy apol
+#if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
+                     ,
+                     const rocsparse_solve_mode        solve_mode,
+                     const rocsparse_diagonal_modifier diagonal_modifier
+#endif
+                     )
+
+            : config({
+                operation_A, operation_X, alg, scalar_datatype, compute_datatype, apol
+#if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
+                    ,
+                    solve_mode, diagonal_modifier
+#endif
+            })
         {
             ROCSPARSE_CLIENTS_ROUTINE_TRACE;
             rocsparse_status status = rocsparse_create_sptrsm_descr(&this->m_descr);
@@ -412,6 +503,14 @@ void testing_sptrsm_bad_arg(const Arguments& arg)
 template <typename I, typename J, typename T>
 void testing_sptrsm(const Arguments& arg)
 {
+
+#ifndef ROCSPARSE_WITH_DIAGONAL_SOLVE
+    if(arg.solve_mode != rocsparse_solve_mode_triangular)
+    {
+        return;
+    }
+#endif
+
     static constexpr bool verbose = false;
 
     const rocsparse_direction X_batch_layout_direction = arg.direction;
@@ -426,6 +525,11 @@ void testing_sptrsm(const Arguments& arg)
     const rocsparse_sptrsm_alg test_alg         = arg.sptrsm_alg;
     const J                    test_nrhs        = arg.K;
     const int64_t              test_batch_count = (arg.batch_count_C != -1) ? arg.batch_count_C : 1;
+
+#if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
+    const rocsparse_solve_mode        test_solve_mode        = arg.solve_mode;
+    const rocsparse_diagonal_modifier test_diagonal_modifier = arg.diagonal_modifier;
+#endif
 
     if(verbose)
     {
@@ -574,7 +678,12 @@ void testing_sptrsm(const Arguments& arg)
                                                  test_alg,
                                                  alpha_datatype,
                                                  test_compute_datatype,
-                                                 test_apol);
+                                                 test_apol,
+#if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
+                                                 test_solve_mode,
+                                                 test_diagonal_modifier
+#endif
+    );
 
     //
     // Perform the analysis.
@@ -598,6 +707,10 @@ void testing_sptrsm(const Arguments& arg)
                                                 Y,
                                                 A_diag,
                                                 A_uplo,
+#if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
+                                                test_solve_mode,
+                                                test_diagonal_modifier,
+#endif
                                                 host_analysis_pivot,
                                                 host_solve_pivot);
 
@@ -636,7 +749,6 @@ void testing_sptrsm(const Arguments& arg)
             //
             // Check numeric results.
             //
-
             Y.near_check_values(host_analysis_pivot, host_solve_pivot);
         }
     }
