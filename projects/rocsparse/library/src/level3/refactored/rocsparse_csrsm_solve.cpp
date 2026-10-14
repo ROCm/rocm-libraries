@@ -406,9 +406,6 @@ rocsparse_status rocsparse::csrsm_compute(rocsparse_handle            handle,
                                           void*                       buffer,
                                           rocsparse_error*            p_error)
 {
-    //
-    // It is assumed that B is transposed and has dimension nrhs x M
-    //
     ROCSPARSE_ROUTINE_TRACE;
     RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR((A_load_conjugate && op_A != rocsparse_operation_none)
                                                ? rocsparse_status_internal_error
@@ -428,24 +425,29 @@ rocsparse_status rocsparse::csrsm_compute(rocsparse_handle            handle,
         = (op_B == rocsparse_operation_none && B->order == rocsparse_order_column);
     if(nrhs == 1)
     {
-        const int64_t          b_batch_count  = B->batch_count;
-        const int64_t          b_batch_stride = B->batch_stride;
-        auto                   buf            = reinterpret_cast<char*>(buffer);
+        const int64_t b_batch_count  = B->batch_count;
+        const int64_t b_batch_stride = B->batch_stride;
+        auto          buf            = reinterpret_cast<char*>(buffer);
+
+        const int64_t b_inc
+            = (op_B == rocsparse_operation_none && B->order == rocsparse_order_column) ? 1 : B->ld;
+
         _rocsparse_dnvec_descr b_st(
-            b_batch_count,
-            M,
-            B->data_type,
-            B->const_values,
-            B->values,
-            (op_B == rocsparse_operation_none && B->order == rocsparse_order_column) ? 1 : B->ld,
-            b_batch_stride);
+            b_batch_count, M, B->data_type, B->const_values, B->values, b_inc, b_batch_stride);
+
         rocsparse_dnvec_descr b = &b_st;
 
-        const int64_t          y_size         = M;
-        const int64_t          y_batch_count  = B->batch_count;
-        const int64_t          y_batch_stride = (B->batch_count == 1) ? 0 : M;
-        const int64_t          y_inc          = 1;
-        const auto             y_datatype     = B->data_type;
+        if(op_B == rocsparse_operation_conjugate_transpose)
+        {
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse::dnvec_conjugate(handle, b, p_error));
+        }
+
+        const int64_t y_size         = M;
+        const int64_t y_batch_count  = B->batch_count;
+        const int64_t y_batch_stride = (B->batch_count == 1) ? 0 : M;
+        const int64_t y_inc          = 1;
+        const auto    y_datatype     = B->data_type;
+
         _rocsparse_dnvec_descr y_st(
             y_batch_count, y_size, y_datatype, buf, buf, y_inc, y_batch_stride);
 
@@ -456,6 +458,7 @@ rocsparse_status rocsparse::csrsm_compute(rocsparse_handle            handle,
                                                     * y->size * y->batch_count);
         buf += nbytes;
         buffer_size_in_bytes -= nbytes;
+
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsv_solve(handle,
                                                          op_A,
                                                          A_load_conjugate,
@@ -470,7 +473,7 @@ rocsparse_status rocsparse::csrsm_compute(rocsparse_handle            handle,
                                                          buffer_size_in_bytes,
                                                          buf));
 
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::dnvec_copy_data(handle, nullptr, y, b, p_error));
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::dnvec_copy_data(handle, y, b, p_error));
 
         return rocsparse_status_success;
     }
@@ -485,7 +488,7 @@ rocsparse_status rocsparse::csrsm_compute(rocsparse_handle            handle,
     }
     blockdim <<= 1;
 
-    const int narrays = (nrhs - 1) / blockdim + 1;
+    const int64_t narrays = (nrhs - 1) / blockdim + 1;
     //
     // Buffer
     // header: 256
@@ -556,7 +559,7 @@ rocsparse_status rocsparse::csrsm_compute(rocsparse_handle            handle,
                                  A->data_type,
                                  buf,
                                  buf,
-                                 A->nnz,
+                                 (A->batch_stride > 0) ? A->nnz : 0,
                                  trm_info->get_offset_indextype(),
                                  trm_info->get_transposed_row_ptr(),
                                  trm_info->get_transposed_row_ptr(),
@@ -633,7 +636,7 @@ rocsparse_status rocsparse::csrsm_compute(rocsparse_handle            handle,
     if(case_transform_B)
     {
         // Leading dimension for transposed B
-        rocsparse_const_dnvec_descr no_scale = nullptr;
+        static constexpr rocsparse_const_dnvec_descr no_scale = nullptr;
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::dnmat_copy_data(handle, no_scale, B, rhs, p_error));
     }
 

@@ -52,7 +52,6 @@ rocsparse_status rocsparse::cscsm_analysis_buffer_size(rocsparse_handle         
     //
     A = &A_csr;
 #endif
-
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsm_analysis_buffer_size(
         handle,
         nrhs,

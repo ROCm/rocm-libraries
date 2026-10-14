@@ -26,6 +26,7 @@ set(rocsparse_source
 
 # Auxiliary
   src/auxiliary/rocsparse_auxiliary.cpp
+  src/auxiliary/dnvec_conjugate/rocsparse_dnvec_conjugate.cpp
   src/auxiliary/rocsparse_error.cpp
 # Common
   src/common/rocsparse_singularity.cpp

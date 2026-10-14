@@ -55,9 +55,11 @@ struct _rocsparse_dnvec_descr
 
 namespace rocsparse
 {
+    rocsparse_status dnvec_conjugate(rocsparse_handle      handle,
+                                     rocsparse_dnvec_descr that,
+                                     rocsparse_error*      p_error);
 
     rocsparse_status dnvec_copy_data(rocsparse_handle            handle,
-                                     rocsparse_const_dnvec_descr alpha,
                                      rocsparse_const_dnvec_descr source,
                                      rocsparse_dnvec_descr       target,
                                      rocsparse_error*            p_error);

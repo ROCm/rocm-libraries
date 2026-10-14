@@ -334,9 +334,15 @@ namespace rocsparse
 #if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
         if(sptrsm_descr->get_solve_mode() != rocsparse_solve_mode_triangular)
         {
-            const rocsparse_diagonal_modifier modifier = sptrsm_descr->get_diagonal_modifier();
+            if(Y->batch_count > 1)
+            {
+                // LCOV_EXCL_START
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
+                // LCOV_EXCL_STOP
+            }
 
-            const int64_t nrhs = Y->cols;
+            const rocsparse_diagonal_modifier modifier = sptrsm_descr->get_diagonal_modifier();
+            const int64_t                     nrhs     = Y->cols;
 
             const bool x_transposed = (X_op != rocsparse_operation_none);
             const bool conj_x       = (X_op == rocsparse_operation_conjugate_transpose);
@@ -431,7 +437,6 @@ namespace rocsparse
         {
             const size_t nbytes = rocsparse::align_size(rocsparse::datatype_sizeof(Z->data_type)
                                                         * Z->rows * Z->cols * Z->batch_count);
-
             RETURN_IF_ROCSPARSE_ERROR((nbytes <= buffer_size_in_bytes)
                                           ? rocsparse_status_success
                                           : rocsparse_status_invalid_size);
@@ -470,7 +475,6 @@ namespace rocsparse
         //
         switch(A->format)
         {
-
         case rocsparse_format_csc:
         {
 
