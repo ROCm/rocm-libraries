@@ -54,5 +54,5 @@ rtol = 0.02
 # dnn-providers/hipblaslt-provider/integration_tests/TestWorkarounds.hpp.
 [[test_skips]]
 archs   = ["gfx12"]
-filters = ["*MatmulBias*Fp16*"]
+filters = ["*_MatmulPointwise_Default.*_fp16_*", "*_MatmulPointwise_Variant3.*_fp16_*"]
 reason  = "ROCm/rocm-libraries#8033 — hipblasLtMatmulAlgoGetHeuristic returns no algorithms for FP16 with transA=T, transB=T and any bias-fused epilogue on gfx12"

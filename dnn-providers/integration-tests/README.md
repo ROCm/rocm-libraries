@@ -491,7 +491,7 @@ rms_threshold = 1e-4
 
 [[test_skips]]
 archs   = ["gfx90a", "gfx10", "gfx11", "gfx12"]   # optional; omit to skip everywhere
-filters = ["*ConvFwdBiasActiv*"]
+filters = ["*_ConvolutionFwdPointwise_*"]
 reason  = "ROCm/rocm-libraries#6979 — no engine has an applicable solution for ConvBiasActiv fusion"
 ```
 

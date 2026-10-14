@@ -12,14 +12,13 @@ version = 1
 #   atol: absolute tolerance
 #   rtol: relative tolerance
 
-# BatchnormBackwardCalcStats 3D /0 (shape [1,16,8,112,112], NCDHW) — DSCALE
+# BatchnormBackward calc-stats 3D (shape [1,16,8,112,112], NCDHW) — DSCALE
 # runs ~0.94-1.08% low vs CPU reference (uniform across 16 channels and all 3
 # dtypes; impl/ref ratio ~0.9906 to 4 sig figs). Bumped tolerance to keep the
-# fixture running outside the gfx11+windows skip scope while epic 1913 is
-# investigated. Same fixture is skipped on gfx11+windows above; the skip
-# fires in SetUp before this tolerance applies, so the two coexist cleanly.
+# case running while epic 1913 is investigated. The bundle cases were captured
+# from the retired C++ Full/IntegrationGpuBatchnormBackwardCalcStats3d* /0 cases.
 [[tolerance_overrides]]
-filters = ["Full/*BatchnormBackwardCalcStats3d*.Correctness/0"]
+filters = ["*_BatchnormBackward_Default.1_16_8_112_112_*_ncdhw"]
 atol = 0.002
 rtol = 0.012
 
@@ -93,5 +92,5 @@ rtol = 0.01
 # dnn-providers/miopen-provider/tests/common/TestWorkarounds.hpp.
 [[test_skips]]
 archs   = ["gfx90a", "gfx10", "gfx11", "gfx12"]
-filters = ["*ConvFwdBiasActiv*"]
+filters = ["*_ConvolutionFwdPointwise_*"]
 reason  = "ROCm/rocm-libraries#6979 — no engine has an applicable solution for ConvBiasActiv fusion (gfx90a returns wrong results; RDNA archs have no CK fusion kernels)"
