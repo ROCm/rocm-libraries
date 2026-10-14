@@ -397,9 +397,13 @@ def _emit_mfma_body(
         for r in range(cpl):
             relu = b.fmax(b.vec_extract(score, r), c_zero_f)
             # Per-query weight: output cell r is query row q_tile_base + m_blk*cpl
-            # + r, so each cell takes its own w[row_q, h] = w[row_q*H_I + h].
+            # + r, so each cell takes its own w[row_q, h] = w[row_q*H_I + h]. Clamp
+            # the w row in-bounds like the q/k loads above: a ceil-grid tail cell
+            # (row_q >= seqlen_q) would otherwise read up to 15 rows past w, and its
+            # result is discarded by the predicated store below.
             row_q = b.add(q_tile_base, b.add(b.mul(m_blk, c_cpl), b.const_i32(r)))
-            w_hr = b.global_load_f32(w, b.add(b.mul(row_q, c_HI), h))
+            w_row = b.smin(row_q, b.sub(c_Sq, c1))
+            w_hr = b.global_load_f32(w, b.add(b.mul(w_row, c_HI), h))
             new_cells.append(b.fadd(acc_cells[r], b.fmul(w_hr, relu)))
         b.scf_yield(*new_cells)
     acc = head_loop.results

@@ -1732,18 +1732,18 @@
         },
         "lightning_indexer/gfx942/mfma_deepseek_hi64": {
           "arch": "gfx942",
-          "bytes": 14230,
+          "bytes": 14634,
           "family": "lightning_indexer",
           "kernel_name": "rocke_lightning_indexer_HI64_D128_bf16_b64_mfma",
-          "sha256": "085da89161700582478b37d41b2c9c6213c9ccd4299a96408de1d1fa2057a06b",
+          "sha256": "dc8465f2b9b6971db2ba7e41ab2738b9acbf7ef687021a2d5bf243870c287482",
           "status": "ok"
         },
         "lightning_indexer/gfx942/mfma_glm_hi32": {
           "arch": "gfx942",
-          "bytes": 14230,
+          "bytes": 14634,
           "family": "lightning_indexer",
           "kernel_name": "rocke_lightning_indexer_HI32_D128_bf16_b64_mfma",
-          "sha256": "7b034942353ec56db5cfc5a0325bc727bad36980571f6e1e74e13cc45c62d867",
+          "sha256": "8d714f594293362bb72bc09522069f924e4954ee176c0c4e87ce773e5b49aeb6",
           "status": "ok"
         },
         "lightning_indexer/gfx942/small": {
@@ -1772,18 +1772,18 @@
         },
         "lightning_indexer/gfx950/mfma_deepseek_hi64": {
           "arch": "gfx950",
-          "bytes": 14230,
+          "bytes": 14634,
           "family": "lightning_indexer",
           "kernel_name": "rocke_lightning_indexer_HI64_D128_bf16_b64_mfma",
-          "sha256": "085da89161700582478b37d41b2c9c6213c9ccd4299a96408de1d1fa2057a06b",
+          "sha256": "dc8465f2b9b6971db2ba7e41ab2738b9acbf7ef687021a2d5bf243870c287482",
           "status": "ok"
         },
         "lightning_indexer/gfx950/mfma_glm_hi32": {
           "arch": "gfx950",
-          "bytes": 14230,
+          "bytes": 14634,
           "family": "lightning_indexer",
           "kernel_name": "rocke_lightning_indexer_HI32_D128_bf16_b64_mfma",
-          "sha256": "7b034942353ec56db5cfc5a0325bc727bad36980571f6e1e74e13cc45c62d867",
+          "sha256": "8d714f594293362bb72bc09522069f924e4954ee176c0c4e87ce773e5b49aeb6",
           "status": "ok"
         },
         "lightning_indexer/gfx950/small": {
@@ -3646,18 +3646,18 @@
         },
         "lightning_indexer/gfx942/mfma_deepseek_hi64": {
           "arch": "gfx942",
-          "bytes": 14237,
+          "bytes": 14641,
           "family": "lightning_indexer",
           "kernel_name": "rocke_lightning_indexer_HI64_D128_bf16_b64_mfma",
-          "sha256": "7e02a0e48b549987edf648f1a75654a0ba94c46a86494c2eaf6b219651028757",
+          "sha256": "686c3f3a3fdecd1614a7d8b68d811cbc98b9cbcd9d3f433888b28cd5211a732c",
           "status": "ok"
         },
         "lightning_indexer/gfx942/mfma_glm_hi32": {
           "arch": "gfx942",
-          "bytes": 14237,
+          "bytes": 14641,
           "family": "lightning_indexer",
           "kernel_name": "rocke_lightning_indexer_HI32_D128_bf16_b64_mfma",
-          "sha256": "df46e5751e6e83cb4105e3e71d8688aad7b5304c79bfd3ff2b5de90e8b022edd",
+          "sha256": "0381e0a0ad22f125b3f130b730bb868e4571069ba2a71ea87a76a83e00765840",
           "status": "ok"
         },
         "lightning_indexer/gfx942/small": {
@@ -3686,18 +3686,18 @@
         },
         "lightning_indexer/gfx950/mfma_deepseek_hi64": {
           "arch": "gfx950",
-          "bytes": 14237,
+          "bytes": 14641,
           "family": "lightning_indexer",
           "kernel_name": "rocke_lightning_indexer_HI64_D128_bf16_b64_mfma",
-          "sha256": "7e02a0e48b549987edf648f1a75654a0ba94c46a86494c2eaf6b219651028757",
+          "sha256": "686c3f3a3fdecd1614a7d8b68d811cbc98b9cbcd9d3f433888b28cd5211a732c",
           "status": "ok"
         },
         "lightning_indexer/gfx950/mfma_glm_hi32": {
           "arch": "gfx950",
-          "bytes": 14237,
+          "bytes": 14641,
           "family": "lightning_indexer",
           "kernel_name": "rocke_lightning_indexer_HI32_D128_bf16_b64_mfma",
-          "sha256": "df46e5751e6e83cb4105e3e71d8688aad7b5304c79bfd3ff2b5de90e8b022edd",
+          "sha256": "0381e0a0ad22f125b3f130b730bb868e4571069ba2a71ea87a76a83e00765840",
           "status": "ok"
         },
         "lightning_indexer/gfx950/small": {
@@ -5592,18 +5592,18 @@
         },
         "lightning_indexer/gfx942/mfma_deepseek_hi64": {
           "arch": "gfx942",
-          "bytes": 14301,
+          "bytes": 14705,
           "family": "lightning_indexer",
           "kernel_name": "rocke_lightning_indexer_HI64_D128_bf16_b64_mfma",
-          "sha256": "55f335cfcd4d71a2b57ceb9a934a7928eed973a984aa6dd4af7ee4720eeec2e8",
+          "sha256": "0e2db2dba109e5beae9061bbfe1d7f689600c1cabab137fe82005c7ee238b507",
           "status": "ok"
         },
         "lightning_indexer/gfx942/mfma_glm_hi32": {
           "arch": "gfx942",
-          "bytes": 14301,
+          "bytes": 14705,
           "family": "lightning_indexer",
           "kernel_name": "rocke_lightning_indexer_HI32_D128_bf16_b64_mfma",
-          "sha256": "523ea74875146b32efd30261d4873cd82ceff225beb86b901e713c38804ef0f3",
+          "sha256": "45b70fe621d9b73e8fa5ed9fb426aaa064631f6f03927184321b3b5e5c77253f",
           "status": "ok"
         },
         "lightning_indexer/gfx942/small": {
@@ -5632,18 +5632,18 @@
         },
         "lightning_indexer/gfx950/mfma_deepseek_hi64": {
           "arch": "gfx950",
-          "bytes": 14301,
+          "bytes": 14705,
           "family": "lightning_indexer",
           "kernel_name": "rocke_lightning_indexer_HI64_D128_bf16_b64_mfma",
-          "sha256": "55f335cfcd4d71a2b57ceb9a934a7928eed973a984aa6dd4af7ee4720eeec2e8",
+          "sha256": "0e2db2dba109e5beae9061bbfe1d7f689600c1cabab137fe82005c7ee238b507",
           "status": "ok"
         },
         "lightning_indexer/gfx950/mfma_glm_hi32": {
           "arch": "gfx950",
-          "bytes": 14301,
+          "bytes": 14705,
           "family": "lightning_indexer",
           "kernel_name": "rocke_lightning_indexer_HI32_D128_bf16_b64_mfma",
-          "sha256": "523ea74875146b32efd30261d4873cd82ceff225beb86b901e713c38804ef0f3",
+          "sha256": "45b70fe621d9b73e8fa5ed9fb426aaa064631f6f03927184321b3b5e5c77253f",
           "status": "ok"
         },
         "lightning_indexer/gfx950/small": {
