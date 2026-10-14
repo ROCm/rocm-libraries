@@ -39,6 +39,11 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 * Fixed a `uint64_t` typedef conflict between `miopen_cstdint.hpp` and the system `<stdint.h>`
   that broke runtime kernel compilation on LP64 Linux.
 * [Conv] Fixed `TransposedConvWinoRageRxS<2,3>` being unreachable: it was registered in the solver registry and explicitly instantiated but missing from both Find solver lists, so it could never be enumerated or selected for NHWC convolutions.
+* [Conv] Fixed immediate-mode `miopenConvolution*GetSolution` reporting the workspace size stored
+  in the find-db record even when the solver needs more. Some shipped find-db records store 0
+  for GEMM solvers such as `GemmFwd1x1_0_2`, so callers that allocated the reported size failed in
+  `miopenConvolution*Immediate` with "Not enough workspace for GEMM". The reported size is now at
+  least the solver's current requirement, the value `*GetSolutionWorkspaceSize` returns.
 
 ### Added
 * [Conv] Added gfx950 depthwise backward-weights (fp16/bf16) and gfx1250 depthwise
