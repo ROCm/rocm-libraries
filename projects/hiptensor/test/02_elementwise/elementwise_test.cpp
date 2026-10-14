@@ -397,6 +397,10 @@ namespace hiptensor
             {
                 *(reinterpret_cast<double*>(&alphaValue)) = static_cast<double>(alpha);
             }
+            else
+            {
+                FAIL() << "Unexpected compute data type:" << computeDataType;
+            }
 
             auto& opts     = HiptensorOptions::instance();
             int   coldRuns = opts->coldRuns();
