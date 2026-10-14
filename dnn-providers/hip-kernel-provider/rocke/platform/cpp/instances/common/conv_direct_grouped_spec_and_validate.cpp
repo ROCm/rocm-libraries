@@ -2403,8 +2403,8 @@ rocke_status_t rocke_direct_conv_wgrad_kernel_name(const rocke_direct_conv_wgrad
     char bc_buf[24];
     char hpb_buf[24];
     char mk_buf[24];
-    const char* flag_names[2];
-    int flag_on[2];
+    const char* flag_names[3];
+    int flag_on[3];
     const char* dtype;
 
     if(spec == NULL || out == NULL || out_cap == 0)
@@ -2428,13 +2428,16 @@ rocke_status_t rocke_direct_conv_wgrad_kernel_name(const rocke_direct_conv_wgrad
      * when p.dtype == "bf16". kernel_name_join appends the NAME (not the value)
      * for a truthy entry, and waves_q > 1 is exactly when the entry exists and
      * is truthy -- so a false entry and an absent one name the same kernel.
-     * Order matches the Python dict's insertion order: wq, then bf16. */
+     * Order matches the Python dict's insertion order: wq, bf16, then rtc
+     * (runtime_channels). */
     dtype = spec->problem.dtype ? spec->problem.dtype : "fp16";
     flag_names[0] = "wq";
     flag_on[0] = (spec->waves_q > 1) ? 1 : 0;
     flag_names[1] = "bf16";
     flag_on[1] = (strcmp(dtype, "bf16") == 0) ? 1 : 0;
-    return rocke_kernel_name_join(spec->name, parts, 5, flag_names, flag_on, 2, out, out_cap, NULL);
+    flag_names[2] = "rtc";
+    flag_on[2] = spec->runtime_channels ? 1 : 0;
+    return rocke_kernel_name_join(spec->name, parts, 5, flag_names, flag_on, 3, out, out_cap, NULL);
 }
 
 rocke_status_t rocke_direct_conv_wgrad_validate(const rocke_direct_conv_wgrad_spec_t* spec,
@@ -2978,4 +2981,249 @@ bool rocke_direct_depthwise_tiled_is_valid_spec(const rocke_direct_depthwise_til
         reason[reason_cap - 1] = '\0';
     }
     return true;
+}
+
+/* ===================================================================== *
+ *  DirectConvSpec (parametric kernel; also the MFMA dgrad compute pass)
+ * ===================================================================== */
+
+rocke_direct_conv_spec_t rocke_direct_conv_spec_default(void)
+{
+    rocke_direct_conv_spec_t s;
+    memset(&s, 0, sizeof(s));
+    s.problem = rocke_direct_conv_problem_default();
+    s.name = "direct_conv";
+    s.block_q = 16;
+    s.block_groups = 8;
+    s.wave_size = 64;
+    s.double_buffer = true;
+    s.block_h = 16;
+    s.waves_q = 1;
+    s.waves_k = 1;
+    s.runtime_k_loop = false;
+    s.persistent_grid = false;
+    s.persistent_rounds = 64;
+    s.fold_k32 = false;
+    s.runtime_channels = false;
+    s.k_atoms = 0;
+    s.m_tiles = 0;
+    return s;
+}
+
+int rocke_direct_conv_threads_per_block(const rocke_direct_conv_spec_t* spec)
+{
+    return spec->block_groups * spec->waves_q * spec->waves_k * spec->wave_size;
+}
+
+rocke_status_t
+    rocke_direct_conv_kernel_name(const rocke_direct_conv_spec_t* spec, char* out, size_t out_cap)
+{
+    char short_buf[128];
+    char bq_buf[32];
+    char bg_buf[32];
+    char bh_buf[32];
+    char wq_buf[32];
+    char wk_buf[32];
+    char rtc_buf[64];
+    const char* parts[11];
+    const char* dtype;
+    rocke_status_t st;
+
+    if(spec == NULL || out == NULL)
+        return ROCKE_ERR_VALUE;
+    st = rocke_direct_conv_problem_short(&spec->problem, short_buf, sizeof(short_buf));
+    if(st != ROCKE_OK)
+        return st;
+    if(spec->problem.dtype == NULL)
+        return ROCKE_ERR_VALUE;
+    dtype = spec->problem.dtype;
+    snprintf(bq_buf, sizeof(bq_buf), "bq%d", spec->block_q);
+    snprintf(bg_buf, sizeof(bg_buf), "bg%d", spec->block_groups);
+    bh_buf[0] = '\0';
+    if(spec->block_h > 0)
+        snprintf(bh_buf, sizeof(bh_buf), "bh%d", spec->block_h);
+    wq_buf[0] = '\0';
+    if(spec->waves_q > 1)
+        snprintf(wq_buf, sizeof(wq_buf), "wq%d", spec->waves_q);
+    wk_buf[0] = '\0';
+    if(spec->waves_k > 1)
+        snprintf(wk_buf, sizeof(wk_buf), "wk%d", spec->waves_k);
+    rtc_buf[0] = '\0';
+    if(spec->runtime_channels)
+        snprintf(rtc_buf, sizeof(rtc_buf), "rtc_ka%d_mt%d", spec->k_atoms, spec->m_tiles);
+
+    /* kernel_name_join(name, p.short(), bq, bg, db|sb, bh, wq, wk, rk, k32,
+     *                  bf16, rtc) -- empty parts are dropped. */
+    parts[0] = short_buf;
+    parts[1] = bq_buf;
+    parts[2] = bg_buf;
+    parts[3] = spec->double_buffer ? "db" : "sb";
+    parts[4] = bh_buf;
+    parts[5] = wq_buf;
+    parts[6] = wk_buf;
+    parts[7] = spec->runtime_k_loop ? "rk" : "";
+    parts[8] = spec->fold_k32 ? "k32" : "";
+    parts[9] = (strcmp(dtype, "bf16") == 0) ? "bf16" : "";
+    parts[10] = rtc_buf;
+    return rocke_kernel_name_join(spec->name, parts, 11, NULL, NULL, 0, out, out_cap, NULL);
+}
+
+rocke_status_t rocke_direct_conv_validate(const rocke_direct_conv_spec_t* spec,
+                                          char* reason,
+                                          size_t reason_cap)
+{
+    const rocke_direct_conv_problem_t* p;
+#define ROCKE_DCONV_GEN_RAISE(...)                     \
+    do                                                 \
+    {                                                  \
+        if(reason != NULL && reason_cap > 0)           \
+            snprintf(reason, reason_cap, __VA_ARGS__); \
+        return ROCKE_ERR_VALUE;                        \
+    } while(0)
+
+    if(spec == NULL)
+        return ROCKE_ERR_VALUE;
+    p = &spec->problem;
+    if(p->dtype == NULL)
+        ROCKE_DCONV_GEN_RAISE("DirectConvSpec: dtype is not set");
+    if(strcmp(p->dtype, "fp16") != 0 && strcmp(p->dtype, "bf16") != 0)
+        ROCKE_DCONV_GEN_RAISE("DirectConvSpec: unsupported dtype '%s'", p->dtype);
+    if(p->cpg % 4 != 0 || p->cpg < 4)
+        ROCKE_DCONV_GEN_RAISE(
+            "DirectConvSpec requires cpg to be a positive multiple of 4 (got cpg=%d)", p->cpg);
+    if(p->kpg < 1)
+        ROCKE_DCONV_GEN_RAISE("DirectConvSpec requires kpg >= 1 (got %d)", p->kpg);
+    if(spec->block_groups <= 0 || p->groups % spec->block_groups != 0)
+        ROCKE_DCONV_GEN_RAISE(
+            "groups %d not divisible by block_groups %d", p->groups, spec->block_groups);
+    if(spec->block_q % 16 != 0)
+        ROCKE_DCONV_GEN_RAISE("DirectConvSpec block_q must be a multiple of 16");
+    if(spec->persistent_grid && spec->persistent_rounds < 1)
+        ROCKE_DCONV_GEN_RAISE("DirectConvSpec persistent_rounds must be >= 1");
+    if(spec->block_h <= 0)
+        ROCKE_DCONV_GEN_RAISE(
+            "DirectConvSpec block_h must be > 0: the H-row loop is unrolled at build time, so an "
+            "untiled kernel would have to bake the image height into its trip count and could "
+            "not serve other shapes. Pick a tile height (16 is a reasonable default).");
+    if(spec->fold_k32 && p->cpg % 32 != 0)
+        ROCKE_DCONV_GEN_RAISE(
+            "DirectConvSpec fold_k32 requires cpg to be a multiple of 32 (got %d)", p->cpg);
+    if(spec->block_groups > 1 && spec->waves_k > 1)
+        ROCKE_DCONV_GEN_RAISE(
+            "block_groups=%d > 1 combined with waves_k=%d > 1 is not supported: the LDS reduction "
+            "row index does not account for wave_group_idx, causing cross-group partial-sum "
+            "corruption",
+            spec->block_groups,
+            spec->waves_k);
+    /* Python divides by these below; a zero is a ZeroDivisionError there. */
+    if(spec->waves_k <= 0 || spec->waves_q <= 0)
+        ROCKE_DCONV_GEN_RAISE("DirectConvSpec waves_q and waves_k must be >= 1");
+    {
+        const int n_k_atoms = (p->cpg + 15) / 16;
+        if(n_k_atoms % spec->waves_k != 0)
+            ROCKE_DCONV_GEN_RAISE("N_K_ATOMS=%d (ceil(cpg/16)) must be divisible by waves_k=%d",
+                                  n_k_atoms,
+                                  spec->waves_k);
+    }
+    if(spec->block_q / spec->waves_q < 16)
+        ROCKE_DCONV_GEN_RAISE("block_q//waves_q must be >= 16 (got %d//%d=%d)",
+                              spec->block_q,
+                              spec->waves_q,
+                              spec->block_q / spec->waves_q);
+    if(!spec->runtime_channels)
+    {
+        if(spec->k_atoms != 0 || spec->m_tiles != 0)
+            ROCKE_DCONV_GEN_RAISE("DirectConvSpec k_atoms / m_tiles only apply with "
+                                  "runtime_channels (a baked kernel takes them from the problem)");
+        return ROCKE_OK;
+    }
+    if(spec->k_atoms < 1 || spec->m_tiles < 1)
+        ROCKE_DCONV_GEN_RAISE("DirectConvSpec runtime_channels needs k_atoms >= 1 and m_tiles >= 1 "
+                              "(got %d, %d)",
+                              spec->k_atoms,
+                              spec->m_tiles);
+    if(spec->k_atoms % spec->waves_k != 0)
+        ROCKE_DCONV_GEN_RAISE(
+            "k_atoms=%d must be divisible by waves_k=%d", spec->k_atoms, spec->waves_k);
+    {
+        const int atom = spec->fold_k32 ? 32 : 16;
+        const int need = spec->fold_k32 ? p->cpg / 32 : (p->cpg + 15) / 16;
+        if(need != spec->k_atoms)
+            ROCKE_DCONV_GEN_RAISE(
+                "cpg=%d needs %d K-atoms of %d; this kernel is built for k_atoms=%d",
+                p->cpg,
+                need,
+                atom,
+                spec->k_atoms);
+    }
+    if((p->kpg + 15) / 16 != spec->m_tiles)
+        ROCKE_DCONV_GEN_RAISE("kpg=%d needs %d M-tiles; this kernel is built for m_tiles=%d",
+                              p->kpg,
+                              (p->kpg + 15) / 16,
+                              spec->m_tiles);
+    if(p->kpg % 4 != 0)
+        ROCKE_DCONV_GEN_RAISE("DirectConvSpec runtime_channels requires kpg %% 4 == 0 (got %d)",
+                              p->kpg);
+    return ROCKE_OK;
+#undef ROCKE_DCONV_GEN_RAISE
+}
+
+bool rocke_direct_conv_is_valid_spec(const rocke_direct_conv_spec_t* spec,
+                                     const char* arch,
+                                     char* reason,
+                                     size_t reason_cap)
+{
+    const rocke_archtarget_t* target;
+    const rocke_arch_mma_catalog_t* mma;
+    const rocke_direct_conv_problem_t* p;
+    const char* ab;
+#define ROCKE_DCONV_GEN_REJECT(...)                    \
+    do                                                 \
+    {                                                  \
+        if(reason != NULL && reason_cap > 0)           \
+            snprintf(reason, reason_cap, __VA_ARGS__); \
+        return false;                                  \
+    } while(0)
+
+    if(spec == NULL)
+        ROCKE_DCONV_GEN_REJECT("spec is NULL");
+    if(arch == NULL)
+        arch = "gfx950";
+    target = rocke_archtarget_from_gfx(arch);
+    if(target == NULL)
+    {
+        rocke_set_unknown_arch_reason(reason, reason_cap, arch);
+        return false;
+    }
+    p = &spec->problem;
+    if(p->dtype == NULL)
+        ROCKE_DCONV_GEN_REJECT("dtype is not set; expected 'fp16' or 'bf16'");
+    if(strcmp(p->dtype, "fp16") != 0 && strcmp(p->dtype, "bf16") != 0)
+        ROCKE_DCONV_GEN_REJECT("unsupported dtype '%s'; expected 'fp16' or 'bf16'", p->dtype);
+    {
+        char why_[256];
+        if(rocke_direct_forward_padding_reason(p, why_, sizeof why_))
+            ROCKE_DCONV_GEN_REJECT("%s", why_);
+    }
+    if(p->stride != 1)
+        ROCKE_DCONV_GEN_REJECT("stride > 1 is not supported (got %d)", p->stride);
+    if(p->cpg % 4 != 0 || p->cpg < 4)
+        ROCKE_DCONV_GEN_REJECT("cpg must be a positive multiple of 4 (got %d)", p->cpg);
+    if(p->kpg < 1)
+        ROCKE_DCONV_GEN_REJECT("kpg must be >= 1 (got %d)", p->kpg);
+    if(spec->block_groups <= 0 || p->groups % spec->block_groups != 0)
+        ROCKE_DCONV_GEN_REJECT(
+            "groups %d not divisible by block_groups %d", p->groups, spec->block_groups);
+    if(spec->block_q % 16 != 0)
+        ROCKE_DCONV_GEN_REJECT("block_q must be a multiple of 16");
+    ab = (strcmp(p->dtype, "bf16") == 0) ? "bf16" : "f16";
+    mma = rocke_archtarget_mma(target);
+    if(!rocke_mma_catalog_has_shape(mma, "mma", ab, ab, "fp32", 16, 16, 16))
+        ROCKE_DCONV_GEN_REJECT("missing mfma_f32_16x16x16_%s on %s", ab, arch);
+    if(spec->fold_k32 && !rocke_mma_catalog_has_shape(mma, "mma", ab, ab, "fp32", 16, 16, 32))
+        ROCKE_DCONV_GEN_REJECT("fold_k32 requires mfma_f32_16x16x32_%s on %s", ab, arch);
+    if(reason != NULL && reason_cap > 0)
+        snprintf(reason, reason_cap, "ok");
+    return true;
+#undef ROCKE_DCONV_GEN_REJECT
 }
