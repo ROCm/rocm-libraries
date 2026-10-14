@@ -173,6 +173,8 @@ class FeatureClaims:
     # group -> graphs holding any of its ops; a graph with two of them
     # counts once
     group_graphs: dict[str, int] = field(default_factory=lambda: defaultdict(int))
+    # node type -> graphs holding it, claimed or not
+    op_graphs: dict[str, int] = field(default_factory=lambda: defaultdict(int))
     # node type -> features any bundle graph exercises, claimed or not
     tested: dict[str, set[str]] = field(default_factory=lambda: defaultdict(set))
     # (node type, target) -> features a graph claimed there by any engine
@@ -231,6 +233,7 @@ def compute_feature_claims(
         for group in {group_of(t) for t in found_features}:
             claims.group_graphs[group] += 1
         for node_type, features in found_features.items():
+            claims.op_graphs[node_type] += 1
             claims.tested[node_type] |= features
             for engine, pairs in unit.claims.items():
                 for target in pairs:
@@ -279,6 +282,9 @@ def render_dashboard(claims: FeatureClaims) -> list[str]:
         "options claimed come first. Combinations aren't measured: a GPU can "
         "cover fp8 and causal masking in separate graphs without any graph "
         "testing them together.",
+        "- A group's share pools its ops' options, so one op can fill it while "
+        f"no graph tests another: {link('Op groups', heading_anchor('Op groups'))} "
+        "names those ops.",
         "",
     ]
     for family, in_family in FAMILIES:
@@ -358,7 +364,9 @@ def render_op_groups(claims: FeatureClaims) -> list[str]:
     for group in claims.groups:
         members = claims.group_members(group)
         listed = ", ".join(
-            f"{link(display_name(t), op_anchor(t))} ({len(claims.features[t])})"
+            f"{link(display_name(t), op_anchor(t))} ({len(claims.features[t])}"
+            + ("" if claims.op_graphs.get(t) else ", **no test graph**")
+            + ")"
             for t in members
         )
         rows.append(
@@ -374,7 +382,9 @@ def render_op_groups(claims: FeatureClaims) -> list[str]:
         "",
         "The API node types (`<Op>Attributes` in the flatbuffers schema) that "
         "make up each group, with their option counts. *Graphs* counts "
-        "the test graphs holding an op of the group, claimed or not.",
+        "the test graphs holding an op of the group, claimed or not. An op "
+        "marked **no test graph** is in no graph, so none of its options is "
+        "tested or claimed anywhere, whatever its group's share.",
         "",
         *table(["Op group", "Graphs", "Options", "Ops (options)"], rows),
     ]

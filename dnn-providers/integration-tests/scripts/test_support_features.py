@@ -748,6 +748,20 @@ class TestFeatureMatrixMarkdown:
         assert '<a id="group-attention"></a>**Attention** | 2 | 4 |' in section
         assert '<a id="group-customop"></a>**CustomOp** | 0 | 2 |' in section
 
+    def test_op_groups_name_an_op_no_graph_holds(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The group's share is all Sdpa's; SdpaBackward is in no graph.
+        monkeypatch.setitem(registry.OPS, "SdpaBackwardAttributes", OTHER_OP)
+        document = self._document(tmp_path)
+        assert _row(document, "### CDNA (data center)", "Attention")[1] == "🟡 33%"
+        section = document.split("\n## Op groups\n", 1)[1]
+        assert (
+            '| <a id="group-attention"></a>**Attention** | 2 | 6 | '
+            "[Sdpa](#op-sdpa) (4), "
+            "[SdpaBackward](#op-sdpabackward) (2, **no test graph**) |"
+        ) in section
+
     def test_dashboard_puts_most_claimed_target_first(self, tmp_path: Path) -> None:
         _bundle(
             tmp_path,
