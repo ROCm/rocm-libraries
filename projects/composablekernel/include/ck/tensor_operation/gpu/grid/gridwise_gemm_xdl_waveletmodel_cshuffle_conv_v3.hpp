@@ -201,6 +201,8 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
     static constexpr index_t MWaves = MPerBlock / (MPerXdl * MXdlPerWave);
     static constexpr index_t NWaves = NPerBlock / (NPerXdl * NXdlPerWave);
 
+    static_assert(!(UseTdmB && BBlockLdsExtraNCustom == 0), "TDM doesn't support LDS swizzling");
+
     // =========================================================================
     // Wave specialization thread groups
     // =========================================================================
@@ -542,7 +544,44 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
     // =========================================================================
     // Compilation parameter validation
     // =========================================================================
-    IS_VALID_COMPILATION_PARAMETER_IMPL(CDataType)
+    template <
+        InMemoryDataOperationEnum CGlobalMemoryDataOperation_ = InMemoryDataOperationEnum::Set>
+    __device__ static bool constexpr IsValidCompilationParameter()
+    {
+        if constexpr(UseTdmB && !is_tdm_supported(get_device_arch()))
+        {
+            return false;
+        }
+        if constexpr(UseNamedBarrier && !is_named_barrier_supported(get_device_arch()))
+        {
+            return false;
+        }
+        constexpr bool IsValidTile = ck::tensor_operation::device::IsValidGemmCompilationParameter<
+            BlockSize,
+            MPerBlock,
+            NPerBlock,
+            MPerXdl,
+            NPerXdl,
+            MXdlPerWave,
+            NXdlPerWave,
+            CDataType,
+            CGlobalMemoryDataOperation_>();
+        if constexpr(!IsValidTile)
+        {
+            return false;
+        }
+        else
+        {
+            // LDS size can be checked only if Tile is valid to avoid compilation errors
+            constexpr index_t LDS_size    = GetSharedMemoryNumberOfByte(get_device_arch());
+            constexpr index_t num_buffers = DirectLoad ? 2 : 1;
+            if constexpr(num_buffers * LDS_size > get_lds_size(get_device_arch()))
+            {
+                return false;
+            }
+        }
+        return true;
+    }
 
     // =========================================================================
     // =========================================================================
