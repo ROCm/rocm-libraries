@@ -1,0 +1,52 @@
+# Non-attention family for tests/test_registry_enumerator.py; never packed.
+# C, K and G are request fields the conv spec does not carry.
+dialect: packaged
+authored_subpath: rocKE/gfx950_conv_fwd_probe
+engine:
+  name: hipkernel:Gfx950ConvFwdProbe
+  sdk_version: 1.0.0
+  knobs: []
+  heuristic: native
+kmd_fields:
+- {name: dtype, type: string}
+- {name: C, type: int}
+- {name: K, type: int}
+- {name: G, type: int}
+- {name: tile_m, type: int}
+- {name: tile_n, type: int}
+- {name: tile_k, type: int}
+specialization:
+  metadata_fields: [dtype, C, K, G, tile_m, tile_n, tile_k]
+  matcher_only_fields: []
+  vocabulary:
+    dtype: {fp16: FP16, bf16: BF16}
+  bindings:
+    dtype: {field: dtype}
+    C: {field: C}
+    K: {field: K}
+    G: {field: G}
+    tile_m: {field: tile_m}
+    tile_n: {field: tile_n}
+    tile_k: {field: tile_k}
+kernel_source_kind: rocke
+workspace_policy: none
+pack: gfx950_conv_fwd_probe
+arch: gfx950
+provider_root: dnn-providers/hip-kernel-provider
+source: kernels/common/conv_implicit_gemm.py
+builder: build_implicit_gemm_conv
+kernel_name_template: conv_fwd.{dtype}_c{C}_k{K}_g{G}_t{tile_m}x{tile_n}x{tile_k}.gfx950
+enumerate:
+  candidates: dispatch.grouped_convolution:conv_grouped_candidates
+  request: dispatch.grouped_convolution:ConvGroupedRequest
+  pin: {algorithm: implicit_gemm_fwd, spec_id: igemm_conv_fwd_64x64}
+  fixed: {arch: gfx950, N: 1, Hi: 28, Wi: 28, Y: 3, X: 3, pad_h: 1, pad_w: 1}
+  cells:
+  - fields: [C, K, G]
+    values: [[64, 64, 1], [128, 128, 1]]
+  - fields: [dtype]
+    values: [fp16, bf16]
+  sweep_level: production
+  space: full
+reduction:
+  fields: {feature: [direction, dtype, arch], performance: [], ignored: []}

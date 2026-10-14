@@ -287,25 +287,67 @@ it needs a validator binary this repo does not build by default: point
 `HIPDNN_VALIDATE_DESCRIPTORS` at your build's binary and run
 `.venv/bin/python -m pytest -m round_trip`.
 
+## Updating the captured catalog
+
+The descriptors under `src/engines/kernel_ingestor_engine/descriptors/rocKE/<slug>/` are
+generated (never at build time) from the selection `configs/<slug>.yaml`, drawn from the
+registry space its manifest `configs/<slug>.engine.yaml` enumerates (RUNBOOK stages 2 and
+6). `tests/test_registry_regeneration.py` gates the three against each other. The gates
+compare specs, not code: `hkp_pack` builds unshipped spec fields at their current default
+with the builder's current code, so review rocKE default and builder changes as changes to
+the shipped engine.
+
+| Gate | Fails when |
+|---|---|
+| In registry | a selection kernel is not in the manifest's enumeration (name, shipped spec fields, metadata, `kernel_source` kind/source/builder), or ships an unshipped spec field off its dataclass default |
+| Regenerates shipped | the shipped descriptors differ from `generate.py`'s output for the selection |
+| Header matches manifest | the selection's `engine`, `dialect`, `kernel_source_kind`, `workspace_policy`, `authored_subpath`, `kmd_fields`, `specialization` or `reduction` differs from the manifest's |
+
+To update a catalog, from this directory: run the gates, diff the edited selection against
+the shipped bundle (the report is the change under review), and check with
+`catalog_diff.py --subset` that the shipped catalog is a subset of the regenerated registry,
+which also lists the registry kernels the selection does not ship (none while the manifest
+is `space: slice`):
+
+```bash
+PY="$PWD/.venv/bin/python"
+SLUG=gfx950_attention_dense
+SHIPPED="$PWD/../../../../dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/descriptors/rocKE/$SLUG"
+SCRATCH=$(mktemp -d)
+D="descriptors/rocKE/$SLUG/$SLUG"
+"$PY" -m pytest tests/test_registry_regeneration.py -q
+"$PY" generate.py --config "configs/$SLUG.yaml" --output-dir "$SCRATCH/selection"
+"$PY" tools/catalog_diff.py --ignore-ids --shipped "$SHIPPED/$SLUG.kdp.json" --shipped-kmd "$SHIPPED/$SLUG.kmd.json" \
+    --regenerated "$SCRATCH/selection/$D.kdp.json" --regenerated-kmd "$SCRATCH/selection/$D.kmd.json"
+"$PY" tools/registry_enumerator.py --manifest "configs/$SLUG.engine.yaml" --out "$SCRATCH/registry.yaml"
+"$PY" generate.py --config "$SCRATCH/registry.yaml" --output-dir "$SCRATCH/registry"
+"$PY" tools/catalog_diff.py --subset --ignore-ids --shipped "$SHIPPED/$SLUG.kdp.json" --shipped-kmd "$SHIPPED/$SLUG.kmd.json" \
+    --regenerated "$SCRATCH/registry/$D.kdp.json" --regenerated-kmd "$SCRATCH/registry/$D.kmd.json"
+```
+
+Splice the reviewed change into `$SHIPPED` by hand, keeping the UUID of every kernel that
+stays, and check it against the pre-splice KDP with `catalog_diff.py --expect-ids`. Ship
+any manifest change with it (raise `max_kernels` only deliberately), then rerun the gates.
+Adding, removing or renaming kernels is also a heuristic-retraining decision.
+
 ## The pipeline tools
 
-`generate.py` emits a bundle; the host tools below inspect distinct contracts. Profiles are
-optional analysis or authoring inputs, not compiler evidence, and full compiled agreement
-reads the self-contained producing-build record, needing no rocKE on the verifying
-machine.
+`generate.py` emits a bundle; the host tools below inspect distinct contracts. The engine
+manifest (`configs/<slug>.engine.yaml`) is an authoring input, not compiler evidence, and
+full compiled agreement reads the self-contained producing-build record, needing no rocKE
+on the verifying machine.
 
 | Tool | Answers | Invocation |
 |---|---|---|
-| `tools/verify_variant_sets.py` | Structural nesting/runtime tuple identity, sentinels and vocabulary; artifact-bound compiler agreement is the distinct, stronger mode | `verify_variant_sets.py --mode {full,structural} [--provenance-root LABEL=DIR]... [--arch A] [--profile P] [--kpack-python-dir D] LABEL ROOT...`. `--mode` is required and has no default: `structural` reports compiled specialization agreement as NOT CHECKED by name and still exits 0 on the rest; `full` fails on a missing, unsupported or mismatched producing-build record **and** on any check that could not run (`GATE FAILED (N check(s) NOT RUN: ...)`). `--profile` supplies the bundle to gate and the matcher vocabulary, which full mode requires over string fields no declaration spells out. `--provenance-root` names the sidecar tree mirroring that label's ROOT, needed for an installed tree, which ships no sidecars; an unknown LABEL or a malformed `LABEL=DIR` exits 2 |
-| `tools/variant_reachability.py` | Can any shape in the corpus actually select each variant, or is one dead weight? | `variant_reachability.py --kdp K --shapes S [--provenance-root DIR] [--profile P]`; `--provenance-root` mirrors the tree the KDP is read from, for an installed tree |
-| `tools/launch_surface.py` | Is every surface the C++ restates from the kernel's Python declared, guarded and tested? | `launch_surface.py PROFILE --check [--allow-unguarded]` |
-| `tools/coverage_gate.py` | Structural, loading and serving obligations, reported separately; an unmet required obligation cannot pass | `coverage_gate.py --tree T --mode {full,structural} [--provenance-root DIR] [--arch A] [--validator V] [--expect-engine E] [--min-served N]`; `--mode` is required and governs what rung 1 may claim. A missing `--validator` makes rung 2 `loads-not-run`, a failure rather than a skip; an offline result is not serving evidence. `--provenance-root` mirrors `--tree`, for an installed tree, and is forwarded to rung 1 |
-| `tools/knob_sweep.py` | Which knob arms are worth measuring, isolation first then pairwise. | `knob_sweep.py --profile P --shapes S [--plan]` |
-| `tools/registry_enumerator.py` | What kernels does the rocKE dispatcher registry say this engine ships? Expands an engine manifest (`configs/<slug>.engine.yaml`) into a generator config, one kernel per registry spec; the registry is the single source of truth for the catalog, the manifest states only engine identity, KMD schema, metadata mapping and the request slice | `registry_enumerator.py --manifest M --out C`, then `generate.py --config C` |
-| `tools/catalog_diff.py` | Is a regenerated catalog the shipped one? Order-blind, UUID-blind with `--ignore-ids`; compares the shipped spec fields by default, every spec field with `--strict-spec` | `catalog_diff.py --shipped K --regenerated K2 [--ignore-ids] [--strict-spec] [--shipped-kmd M --regenerated-kmd M2]` |
-| `tools/dispatch_parity.py` | Profile-driven resolution of shapes through a real dispatcher (the legacy catalog source; no shipped catalog uses it now, and the dense catalog comes from `registry_enumerator.py`) | see `--help` |
-| `tools/reconcile_applicability.py` | Does this engine decline anything the reference library serves? | `reconcile_applicability.py --profile P --shapes S [--declines D]` |
-| `tools/mine_shapes.py` | Build the shape corpus, refusing categoricals it does not recognise. | see `--help` |
+| `tools/verify_variant_sets.py` | Structural nesting/runtime tuple identity, sentinels and vocabulary; artifact-bound compiler agreement is the distinct, stronger mode | `verify_variant_sets.py --mode {full,structural} [--provenance-root LABEL=DIR]... [--arch A] [--manifest MANIFEST] [--kpack-python-dir D] LABEL ROOT...`. `--mode` is required and has no default: `structural` reports compiled specialization agreement as NOT CHECKED by name and still exits 0 on the rest; `full` fails on a missing, unsupported or mismatched producing-build record **and** on any check that could not run (`GATE FAILED (N check(s) NOT RUN: ...)`). `--manifest` takes the engine manifest: the slug of its `engine.name` is the bundle to gate (`<slug>.kdp.json`), and its `specialization.vocabulary` is the matcher vocabulary, which full mode requires over string fields no declaration spells out. `--provenance-root` names the sidecar tree mirroring that label's ROOT, needed for an installed tree, which ships no sidecars; an unknown LABEL or a malformed `LABEL=DIR` exits 2 |
+| `tools/launch_surface.py` | Is every surface the C++ restates from the kernel's Python declared, guarded and tested? It never compares what the two halves compute | `launch_surface.py MANIFEST --check [--allow-unguarded]` |
+| `tools/coverage_gate.py` | Structural, loading and serving obligations, reported separately; an unmet required obligation cannot pass | `coverage_gate.py --tree T --mode {full,structural} [--provenance-root DIR] [--arch A] [--manifest MANIFEST] [--validator V] [--expect-engine E] [--min-served N]`; `--mode` is required and governs what rung 1 may claim. `--manifest` is forwarded to rung 1 as above. A missing `--validator` makes rung 2 `loads-not-run`, a failure rather than a skip; an offline result is not serving evidence. `--provenance-root` mirrors `--tree`, for an installed tree, and is forwarded to rung 1 |
+| `tools/registry_enumerator.py` | Which kernels does the rocKE registry offer this engine? Expands an engine manifest into a generator config; reports how a shape corpus falls on its cells; prints the space by knob with exact instance counts | `registry_enumerator.py --manifest M --out C [--shapes S]`, or `--manifest M --plan-space` |
+| `tools/factorise_config.py` | Compacts an enumerated config into the `variants` form, refusing output that does not re-expand to the input | `factorise_config.py --config C --out S --knobs K1,K2,... [--vocabulary 'field:from=to,...']` |
+| `tools/catalog_diff.py` | Is a regenerated catalog the shipped one? Order-blind; UUID-blind with `--ignore-ids`; `--subset` requires only that every shipped kernel is present | `catalog_diff.py --shipped K --regenerated K2 [--ignore-ids] [--expect-ids] [--strict-spec \| --subset] [--shipped-kmd M --regenerated-kmd M2]` |
+| `tools/variant_reduce.py` | Which variants of a selection do autotune rankings justify? Reports the ε curve and per-variant reasons and proposes knob-level rules | `variant_reduce.py --selection S --kdp INSTALLED_KDP --sweep-output DIR [--arm A] --out S2 --report R [--budget N] [--apply-rules R1,R3]` |
+| `tools/ground_truth.py` | How does hipDNN compare with the kernel owner's numbers? | `ground_truth.py {ingest,graphs,compare}`; see RUNBOOK stages 2 and 6 |
+| `tools/mine_shapes.py` | Build the attention shape corpus, refusing categoricals it does not recognise. | see `--help` |
 | `tools/field_audit.py` | Which schema fields are never named as an accessor call in the native sources? A lexical inventory bounding the unchecked set | `field_audit.py SCHEMA.fbs SOURCE...`; prints `UNCHECKED: <field>` per unreferenced field and exits 1. Exits 2 on a schema that parses to zero fields, so an unparsed schema cannot read as a clean audit |
 
 A green tool proves only the properties it checked: missing, unsupported or mismatched
@@ -313,7 +355,7 @@ required evidence fails full agreement, and structural-only results satisfy no
 compiled-agreement or device gate.
 
 `tools/sweep.py --config <absolute-YAML>` drives measurement with declarative input. Use
-`configs/sweep-isolation.sweep.yaml.example` and the
+`configs/reduction.sweep.yaml.example` and the
 [sweep reference](tools/README-sweeps.md) for exact input keys, hazard exclusions, engine
 attribution, correctness gates and current-input-bound resume semantics.
 
@@ -389,8 +431,8 @@ There is no packaging `--profile`, CMake `PROFILES` or external root manifest.
 |---|---|
 | `configs/scale_add.yaml` | Single-pack engine, like the shipped `conv_fwd`: one pack, one operation, its `graph_match` both admits the node type and validates shape |
 | `configs/binary_ops.yaml` | Multi-pack engine, like the shipped `pointwise`: one pack per operation sharing one KMD/UED/UHD/UDD, each naming its own operation-scoped UMD via `discriminator` |
-| `configs/gfx950_attention_dense.yaml` | The packaged-dialect reference config (`variants`, hand-expanded; builder lowered by `hkp_pack` at build time) that the loader and generator tests exercise. It is not the catalog's source: the registry is, via the engine manifest below |
-| `configs/gfx950_attention_dense.engine.yaml` | The engine manifest the shipped dense catalog is regenerated from: `registry_enumerator.py` walks the rocKE registry's `attention_dense_grid` candidate over the manifest's head configurations (840 kernels at `max_kernels`); `test_registry_enumerator.py` proves the result matches the shipped descriptors |
+| `configs/gfx950_attention_dense.yaml` | The authored selection for the shipped `hipkernel:Gfx950AttentionDense` descriptors: 840 rocKE kernels in the `variants` form, a builder lowered by `hkp_pack` at build time |
+| `configs/gfx950_attention_dense.engine.yaml` | That engine's manifest: the registry space the selection is drawn from, its `reduction:` classification, ground-truth graph template and `launch_surface:` audit |
 | `configs/axes_example.yaml` | Pack-level `axes`: one `kernel_template` crossed with value lists, expanded at load time |
 | `configs/variants_example.yaml` | Pack-level `variants`: a shape list crossed per-shape with a named knob set (below) |
 
@@ -424,8 +466,8 @@ packs:
 `configs/variants_example.yaml` is the runnable version, exercising every key.
 
 **Why not `axes`.** `axes` crosses ONE `kernel_template`, and a dispatcher-derived set has
-none: `dispatch_parity.py` asks the library for a spec per shape, so every shape carries its
-own resolved values for the fields the dispatcher derives.
+none: `registry_enumerator.py` asks the registry for specs per cell, so every entry
+carries its own resolved values for the fields the dispatcher derives.
 
 **It is not a grid.** Each shape names its own knob set; on the shipped sets most shapes
 carry four arms and 63 carry six.
@@ -442,8 +484,8 @@ mirror, the arm's `{tag}`, or `{ordinal}`. A shape sets its serial with `ordinal
 each arm shifts it with `ordinal_offset:`.
 
 Expansion runs at load time (`codegen/config_loader.py`), so `generate.py`, the emitters and
-the dedup pass see ordinary kernel dicts. `tools/dispatch_parity.py` emits this form
-directly; `tools/factorise_config.py` converts an enumerated config, re-expanding its own
+the dedup pass see ordinary kernel dicts. `tools/registry_enumerator.py` emits the enumerated form;
+`tools/factorise_config.py` converts an enumerated config, re-expanding its own
 output and refusing to write anything that does not reproduce the input kernel-for-kernel.
 
 ## Config surface
@@ -498,6 +540,60 @@ packs:
         priority: 0
         arch: []                   # optional; must be a subset of the pack's arch
 ```
+
+### The engine manifest and `reduction:`
+
+A rocKE registry-backed engine's `configs/<slug>.engine.yaml`, expanded by
+`tools/registry_enumerator.py`, carries the generator config's engine header plus:
+
+```yaml
+pack: gfx950_attention_dense      # the one pack's name and slug
+arch: gfx950                      # must equal enumerate.fixed.arch
+provider_root: dnn-providers/hip-kernel-provider   # rocke/library is imported from here
+source: kernels/gfx950/attention_dense.py   # the builder; no candidate exposes it
+builder: build_attention_dense
+kernel_name_template: attention_dense.{dtype}_d{head_size}_bm{block_m}_bn{block_n}.gfx950
+
+enumerate:
+  candidates: dispatch.attention:attention_candidates  # module:function -> KernelCandidate tuple
+  request: dispatch.attention.common:AttentionRequest  # module:Class, the OperatorRequest
+  pin: {algorithm: attention_dense_grid, spec_id: gfx950_dense_grid}  # selects ONE candidate
+  fixed: {arch: gfx950, batch: 1, seqlen_q: 512, seqlen_k: 512}  # request fields, every cell
+  cells:                          # crossed, first group outermost, values in order
+    - fields: [hdim_q, hdim_v, nhead_q, nhead_k]
+      values: [[64, 64, 8, 1], [128, 128, 8, 8]]
+    - fields: [dtype]             # a one-field group may list scalars
+      values: [bf16, fp16]
+    - fields: [mask_type]         # enum request fields take member names
+      values: [TOP_LEFT_CAUSAL, NO_MASK]
+  sweep_level: production         # the registry sweep level
+  space: slice | full             # full: every sweep spec sharing the cell's feature fields
+  free_fields: [block_m, block_n] # slice only: fields that may differ from select_spec
+  spec_fields: [dtype, head_size] # slice only: spec fields the KDP carries
+  max_kernels: 840                # slice only: more is an error
+
+reduction:                        # copied into the selection; read by tools/variant_reduce.py
+  fields:
+    feature: [dtype, head_size]   # spec/metadata fields that define a cell
+    performance:                  # tuning knobs, in priority order
+      - {name: block_m, divides: seqlen_q}   # applicable when seqlen_q % block_m == 0
+      - {name: exp_per_pv_step, unset_resolves_by: resolved_exp_per_pv_step}  # resolves a None knob
+    ignored: []                   # held at the registry default, no warning
+  aot_budget_per_arch: 1000       # optional, default 1000; generate.py warns above it
+
+ground_truth:                     # optional; read by tools/ground_truth.py graphs
+  graph_template: templates/attention_sdpa_fwd.graph.json   # manifest-relative; "stride_order" orders packed strides
+  value_map:                      # request value -> template scalar, or JSON-pointer patches
+    dtype: {bf16: bfloat16, fp16: half}
+    mask_type: {NO_MASK: {/nodes/0/attributes/causal_mask: false}}
+```
+
+Each cell's request is `Request(**fixed, **pin, **cell)`; a declined cell exits 2. Metadata
+fields and name slots the spec lacks are read from the request. A field sits in at most
+one `reduction.fields` list; in `space: full`, a varying field in none is held at its
+registry default with a WARN. `reduction:` never reaches a descriptor; a selection's arm
+or flat kernel may carry `default: true`, the variant its cell always keeps. An optional
+`launch_surface:` block feeds `tools/launch_surface.py`.
 
 ## The five pre-mint config-loader checks
 
@@ -559,7 +655,7 @@ The floor covers `codegen/` alone. `tools/` and `generate.py` sit outside the co
 `source`: the tools are gated by the suites that drive each script as a subprocess
 (`tests/test_sweep_tools.py`, `tests/test_launch_surface.py`, `tests/test_coverage_gate.py`,
 `tests/test_verify_variant_sets.py`, `tests/test_device_probe.py`,
-`tests/test_dispatch_parity.py`), and the spawned CLI is traced only under
+`tests/test_registry_enumerator.py`), and the spawned CLI is traced only under
 `COVERAGE_PROCESS_START` plus a `coverage.process_startup()` `.pth`.
 
 The suite exercises descriptor identities, declaration carriage, semantic deduplication,

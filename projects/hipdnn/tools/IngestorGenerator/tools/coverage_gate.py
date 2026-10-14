@@ -12,7 +12,7 @@ answers none of them.
 This tool runs 1 and 2 and reports 3's requirement explicitly.
 
     coverage_gate.py --tree <descriptors> --mode full \\
-                     --profile <profile.yaml> \\
+                     --manifest <engine manifest> \\
                      --validator <build>/bin/hipdnn_validate_descriptors \\
                      --expect-engine hipkernel:Gfx942AttentionDense
 
@@ -36,7 +36,7 @@ MODES = ("full", "structural")
 
 def run_static(
     tree: Path,
-    profile: Path | None,
+    manifest: Path | None,
     tool: Path,
     mode: str,
     arch: str | None = None,
@@ -52,8 +52,8 @@ def run_static(
     the rung reports itself as structural-only.
     """
     argv = [sys.executable, str(tool), "set", str(tree), "--mode", mode]
-    if profile:
-        argv += ["--profile", str(profile)]
+    if manifest:
+        argv += ["--manifest", str(manifest)]
     if arch:
         argv += ["--arch", arch]
     if kpack_python_dir:
@@ -141,7 +141,12 @@ def main(argv=None) -> int:
         "Every descriptor directory under --tree must hold the packer's "
         "hkp-packed.marker.",
     )
-    parser.add_argument("--profile", help="Kernel profile for the static rung.")
+    parser.add_argument(
+        "--manifest",
+        help="Engine manifest (`configs/<slug>.engine.yaml`, JSON or YAML), "
+        "forwarded to rung 1. Only engine.name and specialization.vocabulary are "
+        "read; the rest of the file is not checked.",
+    )
     parser.add_argument(
         "--validator",
         help="Path to hipdnn_validate_descriptors. Without it rung 2 is reported as "
@@ -168,14 +173,14 @@ def main(argv=None) -> int:
         return 2
 
     static_tool = Path(__file__).resolve().parent / "verify_variant_sets.py"
-    profile = Path(args.profile) if args.profile else None
+    manifest = Path(args.manifest) if args.manifest else None
 
     print("coverage gate")
     failures = []
 
     ok, detail = run_static(
         tree,
-        profile,
+        manifest,
         static_tool,
         args.mode,
         args.arch,

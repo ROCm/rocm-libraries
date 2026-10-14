@@ -262,36 +262,69 @@ def _module_from_source(source):
 
 
 # Builders whose validation predicate is not derivable from the builder name.
-# The tiled family is the largest kernel group in the corpus and none of its
-# predicates follow the naming convention, so name derivation alone reaches
-# fewer than half of all builders (measured: 14 of 30).
-#
-# The spec-shaped _spec variants (F5 fix): ``supports_tiled_2d``/``3d`` are
-# kwargs-only and unreachable from a spec instance.  ``supports_tiled_2d_spec``
-# and ``supports_tiled_3d_spec`` are positional-first wrappers added to each
-# arch kernel module that extract fields from the spec and delegate.
-#
-# Deliberately NOT aliased: ``build_gfx942_4warp_gqa`` (its fast-path flag is not
-# a field of the spec, so a spec-shaped predicate would validate a different
-# kernel) and ``build_unified_attention_reduce_tiled`` (its spec is
-# ``UnifiedAttentionReduceTiledSpec``, which the 3D wrapper cannot read).
+# The tiled ``supports_tiled_2d``/``3d`` are keyword-only, so these builders use the
+# spec-first ``supports_tiled_*_spec`` wrappers in the gfx942/gfx950 modules. The
+# reduce and fastkv-register-P tiled builders and all gfx1250 tiled builders have no
+# spec-first predicate and are unvalidated.
 _PREDICATE_ALIASES = {
     "build_unified_attention_2d_tiled": "supports_tiled_2d_spec",
+    "build_gfx942_4warp_gqa": "supports_gfx942_4warp_gqa_spec",
     "build_unified_attention_3d_tiled": "supports_tiled_3d_spec",
-    "build_unified_attention_2d_fastkv_register_p": "supports_fastkv_register_p_2d",
 }
 
 
+def _predicate_accepts(predicate, spec_cls):
+    """True if `predicate(spec, arch=...)` is a call it takes, with its first
+    parameter annotated with `spec_cls` or a base.
+
+    String annotations that cannot be resolved compare by class name.
+    Unannotated or keyword-only first parameters do not match, nor does a
+    predicate needing more than the spec and arch (e.g. a problem).
+    """
+    try:
+        params = list(inspect.signature(predicate).parameters.values())
+    except (TypeError, ValueError):
+        return False
+    if not params or params[0].kind not in (
+        inspect.Parameter.POSITIONAL_ONLY,
+        inspect.Parameter.POSITIONAL_OR_KEYWORD,
+    ):
+        return False
+    first = params[0]
+    if any(
+        p.default is inspect.Parameter.empty
+        and p.name != "arch"
+        and p.kind not in (p.VAR_POSITIONAL, p.VAR_KEYWORD)
+        for p in params[1:]
+    ):
+        return False
+    try:
+        ann = typing.get_type_hints(predicate).get(first.name, first.annotation)
+    except Exception:
+        ann = first.annotation
+    if isinstance(ann, str):
+        return ann.strip("'\"").rsplit(".", 1)[-1] in {
+            c.__name__ for c in spec_cls.__mro__
+        }
+    return isinstance(ann, type) and issubclass(spec_cls, ann)
+
+
 def _resolve_support_predicate(module, builder):
-    """Find a builder's validation predicate: is_valid_spec, derived, or alias."""
+    """Find the builder's validation predicate: alias, derived, then is_valid*.
+
+    A candidate counts only if its first parameter is annotated with the
+    builder's spec class; one module often holds several builders and several
+    predicates, each written for one spec class.
+    """
+    spec_cls = _resolve_spec_class(module, getattr(module, builder))
     derived = (
         "supports_" + builder[len("build_") :] if builder.startswith("build_") else None
     )
-    for name in ("is_valid_spec", derived, _PREDICATE_ALIASES.get(builder)):
-        if not name:
-            continue
-        fn = getattr(module, name, None)
-        if callable(fn):
+    names = [_PREDICATE_ALIASES.get(builder), derived]
+    names += [n for n in vars(module) if n.startswith("is_valid")]
+    for name in names:
+        fn = getattr(module, name, None) if name else None
+        if callable(fn) and _predicate_accepts(fn, spec_cls):
             return name, fn
     return None, None
 
@@ -303,49 +336,27 @@ def _check_support_predicate(module, builder, spec_obj, arch):
     builder itself, so an out-of-envelope spec reaches codegen unchecked and
     fails late (or worse, succeeds and ships something untested).
 
-    Only spec-shaped predicates can be called generically. The tiled family's
-    `supports_tiled_2d/3d` take their parameters individually as keyword-only
-    arguments with no spec object at all, so there is nothing to pass them from a
-    spec instance; those are skipped rather than guessed at. Coverage is
-    therefore partial by construction -- roughly 14 of 30 builders by name, and
-    the kwargs-only predicates stay out of reach absent an upstream signature
-    change. Partial and honest beats a fabricated mapping of spec fields onto
-    positional kwargs, which would silently validate the wrong thing.
+    Only spec-first predicates can be called generically (see
+    `_PREDICATE_ALIASES`); a builder with no resolvable predicate is unvalidated.
+    A predicate raising AttributeError or TypeError could not read the spec, so
+    the pack fails; any other exception is ignored.
     """
     name, predicate = _resolve_support_predicate(module, builder)
     if predicate is None:
         return
 
-    try:
-        params = inspect.signature(predicate).parameters
-    except (TypeError, ValueError):
-        return
-
-    ordered = list(params.values())
-    if not ordered:
-        return
-    first = ordered[0]
-    if first.kind not in (
-        inspect.Parameter.POSITIONAL_ONLY,
-        inspect.Parameter.POSITIONAL_OR_KEYWORD,
-    ):
-        # kwargs-only predicate: not callable from a spec instance.
-        return
-
+    params = inspect.signature(predicate).parameters
     kwargs = {"arch": arch} if "arch" in params else {}
     try:
         verdict = predicate(spec_obj, **kwargs)
     except (AttributeError, TypeError) as exc:
-        # The predicate was handed a spec it cannot read, or called with the
-        # wrong shape: a wiring bug (e.g. an alias pointing at another builder's
-        # predicate), not a verdict. Surface it instead of packing unchecked.
         raise HkpPackError(
-            f"support predicate {name} cannot validate builder '{builder}' @ {arch}: "
-            f"{type(exc).__name__}: {exc}"
+            f"support predicate {name} for builder '{builder}' @ {arch} "
+            f"could not read the spec: {type(exc).__name__}: {exc}"
         ) from exc
     except Exception:
-        # A predicate that itself breaks must not block packing: it is a
-        # pre-flight check, and the builder remains the real gate.
+        # Any other exception does not block packing: the predicate is a
+        # pre-flight check, and the builder itself remains the real gate.
         return
     ok, reason = verdict if isinstance(verdict, tuple) else (verdict, "")
     if not ok:

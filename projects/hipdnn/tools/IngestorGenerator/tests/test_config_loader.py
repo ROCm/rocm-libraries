@@ -5,6 +5,8 @@
 configs, the five pre-mint loader-mirroring checks, deprecated- and duplicate-key
 rejection, and the kernel_source_kind rejections."""
 
+import copy
+
 import pytest
 import yaml
 
@@ -1213,9 +1215,6 @@ class TestShippedExampleConfigsLoad:
     expands it into a generator config. It carries no `packs`, so selecting it by
     extension alone would feed the wrong schema into the generator loader; it is
     selected out here and checked through the loader that owns it.
-
-    No shipped catalog is profile-driven any more; the profile tools
-    (`dispatch_parity.py` and its dependents) are exercised by their own tests.
     """
 
     @staticmethod
@@ -1223,7 +1222,7 @@ class TestShippedExampleConfigsLoad:
         return sorted(
             path
             for path in configs_dir.glob("*.yaml")
-            if not path.name.endswith((".profile.yaml", ".engine.yaml"))
+            if not path.name.endswith(".engine.yaml")
         )
 
     def test_every_shipped_generator_config_loads(self, configs_dir):
@@ -1249,21 +1248,12 @@ class TestShippedExampleConfigsLoad:
             assert manifest["enumerate"]["max_kernels"] > 0, path
             assert manifest["provider_root"], path
 
-    def test_no_shipped_catalog_is_profile_driven(self, configs_dir):
-        """The registry is the source of truth, so a `*.profile.yaml` under `configs/`
-        would be a second one. Profiles live under tests/fixtures/profiles."""
-        assert not sorted(configs_dir.glob("*.profile.yaml"))
-
-    def test_a_dispatch_profile_is_not_a_generator_config(self):
-        """The control: if `load_config` ever accepted a profile, the split would be
+    def test_an_engine_manifest_is_not_a_generator_config(self, configs_dir):
+        """The control: if `load_config` ever accepted a manifest, the split would be
         silently unnecessary and the next reader would re-merge it."""
-        from pathlib import Path
-
-        profiles = sorted(
-            (Path(__file__).parent / "fixtures" / "profiles").glob("*.profile.yaml")
-        )
-        assert profiles
-        for path in profiles:
+        manifests = sorted(configs_dir.glob("*.engine.yaml"))
+        assert manifests
+        for path in manifests:
             with pytest.raises(ConfigError):
                 load_config(path)
 
@@ -2819,3 +2809,60 @@ class TestHsacoKernelSource:
         }
         with pytest.raises(ConfigError, match="compiled specialization"):
             self._load(tmp_path, raw)
+
+
+class TestReductionBlockAndDefaultMarker:
+    REDUCTION = {
+        "fields": {
+            "feature": ["dtype"],
+            "performance": [{"name": "block_m", "divides": "seqlen_q"}],
+            "ignored": ["lds_k_row_pad"],
+        },
+        "aot_budget_per_arch": 1000,
+    }
+
+    def _load(self, tmp_path, reduction=REDUCTION, marker=True):
+        raw = TestExpandedKernelsAreKeyChecked()._variants_raw()
+        raw["reduction"] = copy.deepcopy(reduction)
+        raw["packs"][0]["variants"][0]["knob_sets"]["pinned"] = [
+            {"block_m": 256, "tag": "a", "default": marker},
+            {"block_m": 128, "tag": "b"},
+        ]
+        path = tmp_path / "c.yaml"
+        path.write_text(yaml.dump(raw))
+        return load_config(path)
+
+    def test_both_are_carried_and_neither_reaches_the_spec(self, tmp_path):
+        config = self._load(tmp_path)
+        assert config.reduction == self.REDUCTION
+        kernels = config.packs[0].kernels
+        assert [k.default for k in kernels] == [True, False]
+        assert all("default" not in k.kernel_source.spec for k in kernels)
+
+    @pytest.mark.parametrize(
+        "reduction, marker, message",
+        [
+            (REDUCTION, "yes", "'default' must be true or false"),
+            ({**REDUCTION, "budget": 1}, True, r"'reduction' declares \['budget'\]"),
+            (
+                {"fields": {**REDUCTION["fields"], "ignored": ["block_m"]}},
+                True,
+                r"lists \['block_m'\] more than once",
+            ),
+            (
+                {
+                    "fields": {
+                        "performance": [{"name": "x", "unset_resolves_by": "a b"}]
+                    }
+                },
+                True,
+                "not an identifier",
+            ),
+            ({**REDUCTION, "aot_budget_per_arch": True}, True, "positive integer"),
+        ],
+    )
+    def test_a_bad_marker_or_block_is_refused(
+        self, tmp_path, reduction, marker, message
+    ):
+        with pytest.raises(ConfigError, match=message):
+            self._load(tmp_path, reduction, marker)

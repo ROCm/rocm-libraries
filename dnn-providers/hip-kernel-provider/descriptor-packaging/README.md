@@ -128,7 +128,7 @@ fails, naming its missing sidecar. The root only relocates sidecars and never ma
 tree packed: given for a descriptor whose directory holds no marker, it is a usage error.
 Every tool that reads a packed tree takes that root: `--provenance-root` on
 `hkp_desk_check.py` (with `--descriptor-root`), `hkp_verify_embedded_sources.py`,
-`verify_variant_sets.py` (`LABEL=DIR`), `coverage_gate.py` and `variant_reachability.py`.
+`verify_variant_sets.py` (`LABEL=DIR`) and `coverage_gate.py`.
 
 `hsaco` names a prebuilt code object: `kernel_source: {kind: "hsaco", file, symbol}`.
 `file` resolves relative to the descriptor that names it, must stay inside the root, and
