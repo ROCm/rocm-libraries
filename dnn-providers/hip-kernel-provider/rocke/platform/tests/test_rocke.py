@@ -3435,7 +3435,7 @@ class TestNewTargetIntrinsics(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, re.escape(want)):
                     lower_kernel_to_hip(b.kernel)
                 with self.assertRaisesRegex(ValueError, re.escape(want)):
-                    _lower_kernel_to_llvm_python(b.kernel)
+                    _lower_kernel_to_llvm_python(b.kernel, arch="gfx950")
                 try:
                     _lower_via_cpp_engine(serialize(b.kernel), "gfx950", "llvm20")
                 except BackendError:
