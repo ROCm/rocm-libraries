@@ -678,8 +678,9 @@ void testing_sptrsm(const Arguments& arg)
                                                  test_alg,
                                                  alpha_datatype,
                                                  test_compute_datatype,
-                                                 test_apol,
+                                                 test_apol
 #if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
+                                                 ,
                                                  test_solve_mode,
                                                  test_diagonal_modifier
 #endif
