@@ -342,16 +342,36 @@ _PERTURBATIONS = {**_SPEC_PERTURBATIONS, **_PRIVATE_PERTURBATIONS}
 # num_persistent / interleave / persist_decode are inert and their coverage vacuous,
 # and the runtime-shape claim would be checked on the default grid only.
 # The iglp base is what makes iglp_mode (read only under iglp=True) reachable.
+# The *_kdbvpf bases start with the K-double-buffer + V-prefetch pipeline already on
+# (lds_num_buffers=2), so every other knob is also perturbed inside the pipeline body,
+# including iglp_mode (iglp base) and the persistent-grid fields (persistent base).
 _INJECTIVITY_BASES = {
     "d128_fp16_cfvst": dict(head_size=128, dtype="fp16"),
     "d128_fp16_cfvst_iglp": dict(head_size=128, dtype="fp16", iglp=True),
     "d128_bf16_naive": dict(head_size=128, dtype="bf16"),
     "d128_bf16_cfvst": dict(head_size=128, dtype="bf16", use_cfvst=True),
+    "d128_bf16_kdbvpf": dict(
+        head_size=128, dtype="bf16", use_cfvst=True, lds_num_buffers=2
+    ),
+    "d128_bf16_kdbvpf_iglp": dict(
+        head_size=128, dtype="bf16", use_cfvst=True, lds_num_buffers=2, iglp=True
+    ),
     "d64_fp16": dict(head_size=64, dtype="fp16"),
     "d64_bf16": dict(head_size=64, dtype="bf16"),
     "persistent_d128_fp16": dict(
         head_size=128,
         dtype="fp16",
+        persistent=True,
+        num_persistent=228,
+        seqlen_q=4096,
+        seqlen_kv=4096,
+        num_query_heads=32,
+    ),
+    "persistent_d128_bf16_kdbvpf": dict(
+        head_size=128,
+        dtype="bf16",
+        use_cfvst=True,
+        lds_num_buffers=2,
         persistent=True,
         num_persistent=228,
         seqlen_q=4096,
