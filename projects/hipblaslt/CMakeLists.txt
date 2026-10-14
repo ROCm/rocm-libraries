@@ -276,14 +276,35 @@ endif()
 if(NOT HIPBLASLT_ENABLE_YAML OR HIPBLASLT_ENABLE_DEVICE)
     # See: https://github.com/msgpack/msgpack-c/wiki/Q%26A#how-to-support-both-msgpack-c-c-version-5x-and-6x-
     # Prefer 6.x (msgpack-cxx)
+    set(hipblaslt_msgpack_fetched FALSE)
     find_package(msgpack-cxx CONFIG)
     if(msgpack-cxx_FOUND)
         message(STATUS "Found msgpack-cxx (>=6.x)")
         set(hipblaslt_msgpack_target "msgpack-cxx")
     else()
-        find_package(msgpackc-cxx CONFIG REQUIRED NAMES msgpackc-cxx msgpack)
-        set(hipblaslt_msgpack_target "msgpackc-cxx")
-        message(STATUS "Found msgpack (<=5.x)")
+        # TODO: set minimum version required for *-cxx library
+        find_package(msgpackc-cxx CONFIG QUIET NAMES msgpackc-cxx msgpack)
+        if(msgpackc-cxx_FOUND)
+            set(hipblaslt_msgpack_target "msgpackc-cxx")
+            message(STATUS "Found msgpack (<=5.x)")
+        else()
+            # Header-only. The coverage lane has no msgpack-cxx package.
+            message(STATUS "msgpack-cxx was not found; fetching 6.1.0")
+            include(FetchContent)
+            FetchContent_Declare(
+                msgpack-cxx
+                URL https://github.com/msgpack/msgpack-c/releases/download/cpp-6.1.0/msgpack-cxx-6.1.0.tar.gz
+                URL_HASH SHA256=23ede7e93c8efee343ad8c6514c28f3708207e5106af3b3e4969b3a9ed7039e7
+            )
+            set(MSGPACK_USE_BOOST OFF CACHE BOOL "" FORCE)
+            set(MSGPACK_CXX17 ON CACHE BOOL "" FORCE)
+            set(MSGPACK_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+            set(MSGPACK_BUILD_DOCS OFF CACHE BOOL "" FORCE)
+            set(MSGPACK_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+            FetchContent_MakeAvailable(msgpack-cxx)
+            set(hipblaslt_msgpack_target "msgpack-cxx")
+            set(hipblaslt_msgpack_fetched TRUE)
+        endif()
     endif()
 endif()
 
@@ -591,7 +612,8 @@ if(_hipblaslt_export_targets)
             get_target_property(_hipblaslt_target_type hipblaslt TYPE)
         endif()
 
-        if(NOT HIPBLASLT_ENABLE_YAML
+        if(NOT hipblaslt_msgpack_fetched
+           AND NOT HIPBLASLT_ENABLE_YAML
            AND _hipblaslt_target_type STREQUAL "STATIC_LIBRARY")
             if(hipblaslt_msgpack_target STREQUAL "msgpack-cxx")
                 list(APPEND _hipblaslt_static_depends PACKAGE msgpack-cxx CONFIG)
