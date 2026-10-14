@@ -8,8 +8,10 @@ builds, on every declared target; the per-class performance status
 
 * every case-table request the predicate accepts on gfx942 / gfx950 is served
   by the default policy and planned by the default routing;
-* the status of a class is recorded in the plan and published in the
-  declaration, and never changes the verdict, the route or the knobs;
+* the per-arch status tables are empty (no per-class performance claim
+  ships), so every served class reads ``unverified`` in the plan and in the
+  declaration; a status set for a test is recorded and published, and never
+  changes the verdict, the route or the knobs;
 * every other reason code still declines under the default policy;
 * the opt-in performance gate (``AttnBwdPolicy.perf_gate``) still declines
   ``PERF_BELOW_BASELINE`` / ``PERF_UNVERIFIED``;
@@ -157,73 +159,65 @@ def _class_request(arch, pclass):
 
 
 @pytest.mark.parametrize("arch", CDNA)
-def test_status_tables_are_well_formed(arch):
+def test_status_tables_are_empty(arch):
+    """No per-class performance claim ships: both status tables of every
+    per-arch module are empty and the routed policy carries no status."""
     mod = routing.ARCH_TUNING[arch]
-    for table, route in (
-        (mod.GENERAL_PERF_STATUS, "general"),
-        (mod.DENSE_PERF_STATUS, "dense"),
-    ):
-        for pclass, status in table.items():
-            assert pclass[:2] == (arch, route)
-            # unverified is the default: the tables list measured outcomes only
-            assert status in ("verified", "below_baseline")
-    # a dense status names a key of the shipped dense pack
-    assert {(arch, k[2:]) for k in mod.DENSE_PERF_STATUS} <= set(mod.DENSE_TUNED)
-    routed = routing.routed_policy()
-    for pclass, status in {**mod.GENERAL_PERF_STATUS, **mod.DENSE_PERF_STATUS}.items():
-        assert routed.perf_status[pclass] == status
+    assert dict(mod.GENERAL_PERF_STATUS) == {}
+    assert dict(mod.DENSE_PERF_STATUS) == {}
+    assert dict(routing.routed_policy().perf_status) == {}
 
 
 @pytest.mark.parametrize("arch", CDNA)
-def test_status_is_reported_per_class(arch):
-    """Every status-table class is served under the default routing, and the
-    plan records the class's status; the declaration publishes one status per
-    general class and per dense-pack key, matching the tables."""
+def test_every_served_class_reads_unverified(arch):
+    """Every general class with a tuned entry and every dense-pack key is
+    served by the default routing and reads ``unverified``; the declaration
+    publishes ``unverified`` for every class, as the kernels-level
+    declaration (no dispatch tables) does."""
     mod = routing.ARCH_TUNING[arch]
-    for pclass, status in mod.GENERAL_PERF_STATUS.items():
-        req = _class_request(arch, pclass)
+    for key in mod.GENERAL_TUNED_TABLE:
+        req = _class_request(arch, key[:9])
         assert attn_bwd_support(req, arch).ok
         plan = routing.plan_attention_bwd(req, arch, route="general")
-        assert (plan.perf_class, plan.perf_status) == (pclass, status)
-    for pclass, status in mod.DENSE_PERF_STATUS.items():
-        req = tuned_tables.dense_key_requests(arch, pclass[2:])[0]
-        if (arch, _dense_key(req)) != (arch, pclass[2:]):
-            raise AssertionError("dense representative of another key")
+        assert (plan.perf_class, plan.perf_status) == (key[:9], "unverified")
+    for parch, dkey in mod.DENSE_TUNED:
+        req = tuned_tables.dense_key_requests(arch, dkey)[0]
         plan = routing.plan_attention_bwd(req, arch)
-        assert (plan.route, plan.perf_class, plan.perf_status) == (
-            "dense",
-            pclass,
-            status,
-        )
+        assert (plan.route, plan.perf_status) == ("dense", "unverified")
+        assert plan.perf_class == (parch, "dense") + tuple(dkey)
     decl = routing.attention_bwd_declaration(arch)
     assert decl["perf_policy"] == {
         "gate": "information_only",
         "unverified": "served",
         "below_baseline": "served",
     }
-    general = {
-        tuple(e[k] for k in ("arch", "route", "d", "dtype", "mask", "heads"))
-        + (e["length_relation"], e["length_mode"], e["stage_vec"]): e["perf"]
-        for e in decl["perf"]
-        if e.get("route") == "general"
-    }
-    dense = {
-        (arch, "dense") + tuple(_tuple(e["key"])): e["perf"]
-        for e in decl["perf"]
-        if e.get("route") == "dense"
-    }
-    assert {c: s for c, s in general.items() if s != "unverified"} == dict(
-        mod.GENERAL_PERF_STATUS
-    )
-    assert set(general.values()) <= set(PERF_STATUSES)
-    for pclass, status in dense.items():
-        assert status == mod.DENSE_PERF_STATUS.get(pclass, "unverified")
-    # the kernels-level declaration (no dispatch tables) claims nothing
+    assert decl["perf"]
+    assert {e["perf"] for e in decl["perf"]} == {"unverified"}
+    dense = [e for e in decl["perf"] if e.get("route") == "dense"]
+    assert len(dense) == len(mod.DENSE_TUNED)
     assert {e["perf"] for e in attn_bwd_declaration(arch)["perf"]} == {"unverified"}
 
 
-def _tuple(x):
-    return tuple(_tuple(v) for v in x) if isinstance(x, list) else x
+@pytest.mark.parametrize("arch", CDNA)
+def test_a_status_is_recorded_and_published(arch):
+    """The status machinery (kept, default off): a status set on the routed
+    policy is the plan's status and the declaration's, per class."""
+    req = _req(dtype="bf16")
+    base = routing.routed_policy()
+    pclass = attn_bwd_perf_class(req, arch, "general")
+    for status in ("verified", "below_baseline"):
+        pol = dataclasses.replace(base, perf_status={pclass: status})
+        plan = routing.plan_attention_bwd(req, arch, policy=pol)
+        assert (plan.perf_class, plan.perf_status) == (pclass, status)
+        decl = routing.attention_bwd_declaration(arch, policy=pol)
+        got = {
+            tuple(e[k] for k in ("arch", "route", "d", "dtype", "mask", "heads"))
+            + (e["length_relation"], e["length_mode"], e["stage_vec"]): e["perf"]
+            for e in decl["perf"]
+            if e.get("route") == "general"
+        }
+        assert got[pclass] == status
+        assert {s for c, s in got.items() if c != pclass} == {"unverified"}
 
 
 @pytest.mark.parametrize("arch", CDNA)
@@ -295,6 +289,30 @@ def test_resource_and_arch_refusals_still_decline(arch):
     )
     v = attn_bwd_support(_req(dtype="bf16", causal=True), arch, policy=pol)
     assert v.code == "NOT_YET_DECLARED"
+
+
+def test_forced_general_route_keeps_the_verdict_under_the_gate():
+    """A forced general route on a packed dense key keeps the request's
+    verdict (taken on the dense class) under the opt-in performance gate:
+    the general class's status is not applied a second time, and the forced
+    plan carries no waiver."""
+    arch = "gfx950"
+    (_parch, dkey), _knobs = next(iter(routing.ARCH_TUNING[arch].DENSE_TUNED.items()))
+    req = tuned_tables.dense_key_requests(arch, dkey)[0]
+    dense_class = attn_bwd_perf_class(req, arch, "dense")
+    general_class = attn_bwd_perf_class(req, arch, "general")
+    pol = dataclasses.replace(
+        routing.routed_policy(),
+        perf_gate=True,
+        perf_status={dense_class: "verified", general_class: "below_baseline"},
+    )
+    assert attn_bwd_support(req, arch, policy=pol).ok
+    assert routing.plan_attention_bwd(req, arch, policy=pol).route == "dense"
+    forced = routing.plan_attention_bwd(req, arch, policy=pol, route="general")
+    assert (forced.route, forced.perf_status) == ("general", "below_baseline")
+    # the general class on its own (no dense pack) is declined by the gate
+    alone = dataclasses.replace(pol, dense_pack=frozenset())
+    assert attn_bwd_support(req, arch, policy=alone).code == "PERF_BELOW_BASELINE"
 
 
 @pytest.mark.parametrize("arch", CDNA)

@@ -26,7 +26,10 @@ One spec, :class:`AttnBwdAuxSpec`, drives four builders:
   of every sequence, read ``block_table[s][j]`` once per CTA, and zero /
   convert the fp32 page workspace rows of that physical page (slot
   ``page_id * page + t``).  Shared physical pages are visited once per
-  referencing sequence; the duplicate writes are identical.
+  referencing sequence; the duplicate writes are identical.  A block-table
+  entry outside ``[0, page_rows / page)`` (device data the host check
+  rejects) is never dereferenced: no workspace row and no gradient-cache row
+  of it is written, and every address uses block 0 instead.
 
 Workspace addressing (``[h][rows][X]`` head-major or ``[rows][h][X]``
 token-major, ``X = D`` or 1) goes through ``_attention_bwd_addr``: the
@@ -756,7 +759,13 @@ def _build_convert(spec: AttnBwdAuxSpec, arch: str, stage: str) -> KernelDef:
 
 
 def _page_walk(b, spec, a, ln: _Lanes):
-    """(live, page_id, in-page first slot, in-page row ok) of this CTA."""
+    """(sequence, logical block, in-page first slot, live) of this CTA.
+
+    The kv length is device data: a value outside ``[0, max_blocks_per_seq *
+    page]`` is clamped into it (the defined behaviour for out-of-contract
+    data; the host check ``check_attn_bwd_unified_inputs`` rejects a length
+    past ``max_seqlen_kv`` before launch).
+    """
     s = b.block_id_z()
     page = a["page"]
     slot0 = ln.tile_row0
@@ -771,12 +780,26 @@ def _page_walk(b, spec, a, ln: _Lanes):
 
 
 def _page_slab(b, spec, a, ptr, s, j, in0, h):
-    pid = block_table_entry(b, a["BLOCK_TABLE"], s, j, bt_stride=a["bt_stride"])
+    """(guarded block id, page-workspace slab, block id in range) of block
+    ``j`` of sequence ``s``.
+
+    The block-table entry is device data: an entry outside ``[0, num_blocks)``
+    (``num_blocks = page_rows / page``; negative ids included) is replaced by
+    block 0 for every address, and its workspace slot is moved to
+    ``page_rows`` (past the workspace), so its slab has no row inside the
+    workspace; the caller also predicates its stores on the returned check.
+    """
+    raw = block_table_entry(b, a["BLOCK_TABLE"], s, j, bt_stride=a["bt_stride"])
+    zero = b.const_i32(0)
+    num_blocks = b.div(a["page_rows"], a["page"])
+    ok = b.land(b.cmp_ge(raw, zero), b.cmp_lt(raw, num_blocks))
+    pid = b.select(ok, raw, zero)
     phys0 = b.add(b.mul(b.zext(pid, I64), b.zext(a["page"], I64)), b.zext(in0, I64))
+    phys0 = b.select(ok, phys0, b.zext(a["page_rows"], I64))
     ws = WorkspaceAddr(
         b, ptr, ws_rows=a["page_rows"], width=spec.head_size, row0=phys0
     ).slab(h)
-    return pid, ws
+    return pid, ws, ok
 
 
 def _check_paged(spec: AttnBwdAuxSpec) -> None:
@@ -799,9 +822,10 @@ def build_attn_bwd_page_zero(spec: AttnBwdAuxSpec, *, arch: str) -> KernelDef:
     h = b.block_id_y()
     s, j, in0, live = _page_walk(b, spec, a, ln)
     with b.scf_if(live):
-        _pid, ws_k = _page_slab(b, spec, a, a["WS_PDK"], s, j, in0, h)
-        _pid2, ws_v = _page_slab(b, spec, a, a["WS_PDV"], s, j, in0, h)
+        _pid, ws_k, id_ok = _page_slab(b, spec, a, a["WS_PDK"], s, j, in0, h)
+        _pid2, ws_v, _ok2 = _page_slab(b, spec, a, a["WS_PDV"], s, j, in0, h)
         ok = b.land(b.cmp_lt(b.add(in0, ln.row), a["page"]), ws_k.row_ok(ln.row))
+        ok = b.land(ok, id_ok)
         with b.scf_if(ok):
             ws_k.store_vec(ln.row, ln.col0, _zero_vec8(b))
             ws_v.store_vec(ln.row, ln.col0, _zero_vec8(b))
@@ -822,12 +846,14 @@ def build_attn_bwd_page_convert(spec: AttnBwdAuxSpec, *, arch: str) -> KernelDef
     h = b.block_id_y()
     s, j, in0, live = _page_walk(b, spec, a, ln)
     with b.scf_if(live):
-        pid, ws = _page_slab(b, spec, a, a["SRC"], s, j, in0, h)
+        pid, ws, id_ok = _page_slab(b, spec, a, a["SRC"], s, j, in0, h)
         dst = PagedCacheAddr(
             b, a["DST"], dtype=io, strides=(a["d_blk"], a["d_tok"], a["d_h"]),
             stage_vec=spec.stage_vec,
         ).slab(pid, h, in0)  # fmt: skip
         ok = b.land(b.cmp_lt(b.add(in0, ln.row), a["page"]), ws.row_ok(ln.row))
+        # a block id outside the cache is never written (dK / dV of a bad entry)
+        ok = b.land(ok, id_ok)
         with b.scf_if(ok):
             vals = [b.fmul(a["mult"], v) for v in _ws_vec8(b, ws, ln.row, ln.col0)]
             out = b.vec_cast_f32_to(b.vec_pack(vals, F32), io)

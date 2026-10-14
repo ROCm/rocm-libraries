@@ -28,17 +28,31 @@ the first one that does not raises ``ValueError`` with the plan's reason
 (an unknown knob, an illegal value, a coupling, a value that needs a device
 hint the key does not carry). A key without a plannable representative
 request is refused too, so an entry is never shipped unchecked.
+
+:func:`check_arch_tables` is the import-time pass over one arch module's
+tables (run by :mod:`.routing` when the package is imported; it raises, so a
+bad entry fails the import): every knob is a registered axis of its family
+with a value that is neither ``not_built``, ``gated`` nor known wrong
+(:data:`~.tuning_common.BWD_KNOWN_WRONG_KNOBS`), every entry plans on its
+first plannable representative request (the check above with ``limit=1``),
+and the performance-status tables name measured classes of the arch. The
+check over every representative runs in the tests (it plans hundreds of
+requests).
 """
 
 from __future__ import annotations
 
 import dataclasses
-from typing import Any, Iterable, Mapping, Optional
+from typing import Any, Callable, Iterable, Mapping, Optional
+
+from .tuning_common import backward_axis, known_wrong_findings
 
 __all__ = [
     "GENERAL_KEY_LEN",
     "DENSE_KEY_LEN",
+    "check_arch_tables",
     "check_dense_entry",
+    "check_entry_knobs",
     "check_general_entry",
     "dense_entries",
     "dense_key_requests",
@@ -274,15 +288,43 @@ def _request_text(req) -> str:
     return ", ".join(f"{k}={getattr(req, k)!r}" for k in keep)
 
 
-def check_general_entry(arch: str, key: tuple, knobs: Mapping[str, Any]) -> None:
+def check_entry_knobs(
+    arch: str, key, knobs: Mapping[str, Any], axis_of: Callable[[str], Any]
+) -> None:
+    """Raise ``ValueError`` unless every knob of an entry is a registered axis
+    (``axis_of(name)``; it raises ``KeyError`` / ``ValueError`` for an unknown
+    name) with a value that is not ``not_built``, not ``gated`` and not known
+    wrong on ``arch``."""
+    if not isinstance(knobs, Mapping) or not all(isinstance(k, str) for k in knobs):
+        raise ValueError(f"knobs {knobs!r} are not a name -> value mapping")
+    for name, value in knobs.items():
+        try:
+            ax = axis_of(name)
+        except (KeyError, ValueError):
+            raise ValueError(
+                f"entry {key!r}: {name!r} is not a registered knob"
+            ) from None
+        if value in ax.not_built:
+            raise ValueError(f"entry {key!r}: {name}={value!r} is not built")
+        if value in ax.gated:
+            raise ValueError(f"entry {key!r}: {name}={value!r} is gated")
+    wrong = known_wrong_findings(arch, knobs)
+    if wrong:
+        raise ValueError(f"entry {key!r}: known wrong on {arch}: {', '.join(wrong)}")
+
+
+def check_general_entry(
+    arch: str, key: tuple, knobs: Mapping[str, Any], *, limit: Optional[int] = None
+) -> None:
     """Raise ``ValueError`` unless ``(key, knobs)`` is a general entry of
-    ``arch`` whose knobs plan on every representative request of the key
-    that plans without them (:func:`general_key_requests`)."""
+    ``arch`` whose knobs are registered values (:func:`check_entry_knobs`)
+    and plan on every representative request of the key that plans without
+    them (:func:`general_key_requests`; ``limit``: stop after that many
+    planned representatives)."""
     from kernels.common.attention_bwd_plan import attn_bwd_plan
 
     _check_general_key(arch, key)
-    if not isinstance(knobs, Mapping) or not all(isinstance(k, str) for k in knobs):
-        raise ValueError(f"knobs {knobs!r} are not a name -> value mapping")
+    check_entry_knobs(arch, key, knobs, backward_axis)
     base = _gate_policy()
     tuned = _gate_policy(tuned_table={key: dict(knobs)})
     planned = 0
@@ -301,6 +343,8 @@ def check_general_entry(arch: str, key: tuple, knobs: Mapping[str, Any]) -> None
         if plan.route != "general":
             raise AssertionError("general entry check planned another route")
         planned += 1
+        if limit is not None and planned >= limit:
+            break
     if not planned:
         raise ValueError(f"tuning key {key!r} has no plannable representative request")
 
@@ -366,19 +410,30 @@ _DENSE_CUS = (None, 1, 1024)
 
 
 def check_dense_entry(
-    arch: str, key: tuple, knobs: Mapping[str, Any], req=None
+    arch: str,
+    key: tuple,
+    knobs: Mapping[str, Any],
+    req=None,
+    *,
+    limit: Optional[int] = None,
+    axis_of: Optional[Callable[[str], Any]] = None,
 ) -> None:
     """Raise ``ValueError`` unless ``(key, knobs)`` is a dense entry of
     ``arch`` (``key = (arch, dense key)``) whose knobs plan with the dense
     family's own rules on every representative request of the key that plans
     without the entry (:func:`dense_key_requests`) and, when given, on
-    ``req`` (which must have the key)."""
+    ``req`` (which must have the key). ``axis_of``: the dense registry's
+    axis lookup (:func:`~.dense_tuning.dense_axis`); when given, the knobs
+    must be registered values (:func:`check_entry_knobs`). ``limit``: stop
+    after that many planned requests."""
     from kernels.common.attention_bwd_plan import _dense_key, attn_bwd_plan
     from kernels.common.attention_dense_bwd_plan import attn_dense_bwd_plan
 
     _check_dense_key(arch, key)
     if not isinstance(knobs, Mapping) or not all(isinstance(k, str) for k in knobs):
         raise ValueError(f"knobs {knobs!r} are not a name -> value mapping")
+    if axis_of is not None:
+        check_entry_knobs(arch, key, knobs, axis_of)
     reqs = dense_key_requests(arch, key[1], _DENSE_CUS)
     if req is not None:
         if _dense_key(req) != key[1]:
@@ -403,6 +458,8 @@ def check_dense_entry(
                 f"dense key {key!r}: knobs do not plan on ({_request_text(r)}): {ex}"
             ) from ex
         planned += 1
+        if limit is not None and planned >= limit:
+            break
     if not planned:
         raise ValueError(f"dense key {key!r} has no plannable representative request")
 
@@ -441,3 +498,38 @@ def general_entries(arch: str, doc: Mapping | Iterable) -> dict:
             raise ValueError(f"tuning key {key!r} has two entries")
         out[key] = knobs
     return out
+
+
+def _check_status_table(arch: str, route: str, table: Mapping) -> None:
+    from kernels.common.attention_bwd_plan import PERF_STATUSES
+
+    for pclass, status in table.items():
+        if not (isinstance(pclass, tuple) and tuple(pclass[:2]) == (arch, route)):
+            raise ValueError(f"status class {pclass!r} is not a {arch} {route} class")
+        if status not in PERF_STATUSES or status == "unverified":
+            # unverified is the default: a table lists measured outcomes only
+            raise ValueError(
+                f"status of {pclass!r}: {status!r} is not a measured status"
+            )
+
+
+def check_arch_tables(
+    mod, *, dense_axis: Callable[[str], Any], limit: Optional[int] = 1
+) -> None:
+    """The import-time pass over one per-arch tuning module ``mod``
+    (``ARCH``, ``GENERAL_TUNED_TABLE``, ``DENSE_TUNED``,
+    ``GENERAL_PERF_STATUS``, ``DENSE_PERF_STATUS``): every entry's knobs are
+    registered values and plan on the first ``limit`` plannable
+    representatives of its key (``None``: every representative); the status
+    tables name measured classes of the arch. Raises ``ValueError`` naming
+    the module and the entry."""
+    arch = mod.ARCH
+    try:
+        for key, knobs in mod.GENERAL_TUNED_TABLE.items():
+            check_general_entry(arch, key, knobs, limit=limit)
+        for key, knobs in mod.DENSE_TUNED.items():
+            check_dense_entry(arch, key, knobs, limit=limit, axis_of=dense_axis)
+        _check_status_table(arch, "general", mod.GENERAL_PERF_STATUS)
+        _check_status_table(arch, "dense", mod.DENSE_PERF_STATUS)
+    except ValueError as ex:
+        raise ValueError(f"{mod.__name__}: {ex}") from ex

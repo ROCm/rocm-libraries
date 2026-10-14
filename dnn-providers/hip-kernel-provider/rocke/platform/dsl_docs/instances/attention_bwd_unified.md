@@ -4,7 +4,8 @@ Contract of the rocKE-native unified backward (dQ, dK, dV). It shares the
 tile step, the statistics contract and the q-side aux kernels of the
 layout-general family (`attention_bwd.md`); this page lists what differs.
 Paged problems are not declared to hipDNN (its predicate keeps declining
-`PAGED`); the family has its own declaration (version 1).
+`PAGED`); the family has its own declaration (version 2,
+`ATTN_BWD_UNIFIED_DECLARATION_VERSION`).
 
 Code: `library/kernels/common/attention_bwd_unified.py` (spec, main builder,
 ABI), `attention_bwd_unified_plan.py` (request, predicate, workspace, plan,
@@ -60,6 +61,21 @@ start point, the fallback; RDNA ships the one-wave tile only. In direct mode the
 so tiles in `[len_kv, roundup(len_kv, page))` store the zeros of the last live
 page without running the q loop.
 
+**Provenance of `TUNED_PAGE_TILES`** (qualitative; the measurements stay in the
+private record). Every entry comes from a paired run of
+`library/benchmarks/common/attention_bwd_unified_bench.py` on the cell named
+in the entry's comment (an MHA, GQA or decode-like cell at that head size and
+page) on gfx942 or gfx950: the planned unified route, every legal tile
+configuration of the unified route (`attn_bwd_unified_tile_configs`) and the
+general route on the gathered contiguous K / V, all gated against a float64
+reference on the stored O and LSE before timing, then timed interleaved in the
+same attempts. An entry records the tile that ran fastest on its cell where it
+differs from what rules (2) - (4) choose: a sub instance for pages below the
+default `kN0` (d32 / d64 on both targets, and d128 page 64 on gfx950; rule (2)
+sent them to the smaller multi tile, which was slower), and the four-wave
+`kN0 = 64` tile at d128 on the cells where it beat the default. A key that was not measured follows rules (2) - (4); no entry is
+extrapolated to an unmeasured page or head size.
+
 ## 4. Spec (`AttnBwdUnifiedSpec`)
 
 `head_size` is the only required field. Unified fields: `dtype` (`"bf16"`),
@@ -86,6 +102,10 @@ page_convert ptr : SRC SEQ_LENS_KV BLOCK_TABLE DST
              f32 : mult
              i32 : h_kv num_seqs max_blocks_per_seq bt_stride page page_rows d_blk d_tok d_h
 ```
+
+`page_rows` is the cache's physical slot count, `num_blocks * page`, in both page
+modes (the workspace row bound in atomic mode and the block-id bound of the
+guard, section 8).
 
 Pointers are global, never `noalias`; inputs are `readonly`. Unused pointers are
 0 (`DKC` / `DVC` in atomic mode, `WS_PDK` / `WS_PDV` in direct mode,
@@ -123,6 +143,35 @@ beyond the table), `BLOCK_TABLE_NOT_INJECTIVE` (a non-injective table on an arch
 where the atomic page mode is not declared), `SINKS`, `SOFTCAP`, `EMPTY`,
 `INSTANCE_UNAVAILABLE`, `NOT_YET_DECLARED`.
 
-Caller contract (not checkable on the host): `max_seqlen_q` / `max_seqlen_kv`
-bound every span; every live block id is below `num_blocks`; an injectivity
-assertion is true.
+Page sizes: every positive multiple of 16 (a power of two is not required);
+anything else is declined `PAGE_SIZE` (kind `request_limit`), and the
+declaration publishes the rule (`page_sizes`).
+
+## 8. Host checks and device data
+
+The run API is pointer-only and trusts its pointers (the hipDNN contract). A
+caller that holds the tensors runs
+`attention_bwd_unified_run.check_attn_bwd_unified_inputs(req, ...)` first. It
+rejects, with `ValueError("<CODE>: detail")` (a code of
+`attention_bwd_run.HOST_CHECK_CODES`): a `cu_seqlens_q` that is not monotone,
+starts below 0, ends past `total_q` or has a span above `max_seqlen_q`; a
+`seq_lens_kv` value above `max_seqlen_kv` or negative; a live block-table entry
+outside `[0, num_blocks)` (`BLOCK_TABLE_RANGE`; entries past a sequence's live
+blocks are never read and may hold anything); a physical block used twice
+under `block_table_injective` (`BLOCK_TABLE_NOT_INJECTIVE`); and any tensor,
+cache or table smaller than the request.
+
+Device data that reaches a kernel without the check has a defined behaviour:
+
+* a kv length is clamped into `[0, max_seqlen_kv]`;
+* `page_zero` and `page_convert` range-check every block id they read: a bad
+  id addresses block 0, its workspace slot moves past the workspace (to
+  `page_rows`) and every store is predicated off, so no address leaves the
+  cache or the workspace;
+* the main kernel's paged address generator
+  (`_attention_bwd_paged.PagedKv`) carries the same guard when it is built with
+  the `page_rows` kernarg (a bad id addresses block 0, its K / V rows load as
+  zeros, its direct-mode dK / dV stores are predicated off, its workspace slot
+  moves past the workspace); the plan passes `page_rows = num_blocks * page` in
+  both page modes, and the unified main kernel turns the guard on by passing
+  that kernarg to its `PagedKv`.

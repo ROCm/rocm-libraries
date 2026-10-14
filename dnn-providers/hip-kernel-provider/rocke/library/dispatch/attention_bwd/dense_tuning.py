@@ -47,7 +47,14 @@ from kernels.common.attention_bwd import WS_LAYOUTS, _not_built
 from kernels.common.attention_bwd_plan import AUX_KNOBS, DQ_KNOBS, RUNTIME_KNOBS
 
 from . import gfx942_tuning, gfx950_tuning
-from .tuning_common import BWD_KNOB_AXES, KIND_RUNTIME, KnobAxis, backward_axis
+from .tuning_common import (
+    BWD_KNOB_AXES,
+    KIND_RUNTIME,
+    KnobAxis,
+    backward_axis,
+    check_known_wrong,
+    known_wrong_findings,
+)
 
 __all__ = [
     "DENSE_BWD_KNOB_AXES",
@@ -55,6 +62,7 @@ __all__ = [
     "dense_axis",
     "dense_body_axes",
     "dense_dq_axes",
+    "dense_known_wrong",
     "dense_runtime_axes",
     "dense_spec_legality",
     "dense_tuning_axes",
@@ -201,14 +209,31 @@ def dense_tuning_axes(arch: str, level: str = "production") -> tuple[KnobAxis, .
 
 
 def dense_spec_legality(spec: AttentionDenseBwdSpec, arch: str) -> str:
-    """``"legal"``, ``"not_built"`` or ``"illegal"`` (the kernel's own rules)."""
+    """``"legal"``, ``"not_built"`` or ``"illegal"`` (the kernel's own rules;
+    a known-wrong value of the dense spec or of its resolved body,
+    :data:`~.tuning_common.BWD_KNOWN_WRONG_KNOBS`, is illegal)."""
     try:
         body = validate_attn_dense_bwd_spec(spec, arch)
     except ValueError:
         return "illegal"
+    if dense_known_wrong(spec, body, arch):
+        return "illegal"
     if dense_bwd_not_built(spec) or _not_built(body) or _shell_not_built(body):
         return "not_built"
     return "legal"
+
+
+def dense_known_wrong(spec: AttentionDenseBwdSpec, body, arch: str) -> tuple:
+    """Known-wrong findings (``"knob=value"``) of a dense spec's own fields
+    and of its resolved body spec ``body`` on ``arch``."""
+    own = {f.name: getattr(spec, f.name) for f in dataclasses.fields(spec)}
+    own["body_variant"] = getattr(spec, "body_variant", None)
+    shared = {f.name: getattr(body, f.name) for f in dataclasses.fields(body)}
+    return tuple(
+        sorted(
+            set(known_wrong_findings(arch, own) + known_wrong_findings(arch, shared))
+        )
+    )
 
 
 def _check_registry() -> None:
@@ -248,6 +273,7 @@ def _check_registry() -> None:
     missing = set(DENSE_BODY_KNOBS) - {ax.name for ax in BWD_KNOB_AXES}
     if missing:
         raise AssertionError(f"body knobs without a general axis: {sorted(missing)}")
+    check_known_wrong(_BY_NAME)
 
 
 _check_registry()

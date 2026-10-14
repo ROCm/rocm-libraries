@@ -12,8 +12,13 @@
   covers ``roundup(max_seqlen_kv, page)`` keys), the page class of each page
   size, head packing for short spans, ``g_split > 1`` forcing the atomic
   page mode, kernargs equal to every stage's ABI list;
-* every page size that is a multiple of 16 resolves to a legal instance;
-* the declaration (version 1, ABI tags, classes, statuses).
+* every page size that is a multiple of 16 resolves to a legal instance, and
+  plans (the page rule: any positive multiple of 16, no power of two needed);
+* the declaration (version 2, ABI tags, classes, statuses, decline kinds);
+* predicate-accept implies the plan builds (a refused instance or an
+  untakeable tuned value declines ``INSTANCE_UNAVAILABLE``);
+* request flags are bools and extents ints (``TypeError``);
+* the main kernel's ``page_rows`` is ``num_blocks * page`` in both modes.
 """
 
 from __future__ import annotations
@@ -22,6 +27,7 @@ import dataclasses
 
 import pytest
 
+from kernels.common.attention_bwd_plan import DECLINE_KINDS
 from kernels.common.attention_bwd_unified import (
     ATTN_BWD_UNIFIED_ABI,
     AttnBwdUnifiedSpec,
@@ -360,11 +366,21 @@ def test_every_legal_page_has_an_instance(arch, d):
 def test_declaration():
     for arch in CDNA + ("gfx1151",):
         dec = attn_bwd_unified_declaration(arch)
-        assert dec["version"] == 1
+        assert dec["version"] == 2
         assert dec["abi"]["main"] == ATTN_BWD_UNIFIED_ABI
         assert dec["abi"]["prep"] == "rocke.attn_bwd.v3"
         assert dec["declared"] == (arch in CDNA)
         assert dec["reason_codes"] == list(REASON_CODES)
+        assert dec["reason_kinds"] == {c: DECLINE_KINDS[c] for c in REASON_CODES}
+        assert {r["code"]: r["kind"] for r in dec["declined"]} == {
+            r["code"]: DECLINE_KINDS[r["code"]] for r in dec["declined"]
+        }
+        assert set(dec["device_data_contract"]) == {
+            "seq_lens_kv",
+            "cu_seqlens_q",
+            "block_table",
+        }
+        assert "power of two is not required" in dec["features"]["page_sizes"]
         assert set(dec["feature_groups"]) == set(FEATURE_GROUPS)
         assert len(dec["perf_classes"]) == 3 * 2 * 4 * 2 * 3 * 2
         assert {c["status"] for c in dec["perf_classes"]} == {"unverified"}
@@ -382,3 +398,99 @@ def test_request_is_hashable_and_frozen():
     assert hash(r) == hash(_req(strides={"q": (1024, 128, 1)}))
     with pytest.raises(dataclasses.FrozenInstanceError):
         r.page = 32
+
+
+@pytest.mark.parametrize("arch", CDNA)
+def test_page_rows_bound_in_both_modes(arch):
+    """The main kernel gets page_rows = num_blocks * page in both page modes
+    (the bound of its block-id guard; the page workspace rows in atomic
+    mode), and the page roles get the same value."""
+    for injective in (True, False):
+        p = attn_bwd_unified_plan(_req(block_table_injective=injective), arch)
+        for step in p.launches:
+            if "page_rows" in step.scalars:
+                assert step.scalars["page_rows"] == 50 * 16, step.stage
+
+
+@pytest.mark.parametrize("arch", CDNA + ("gfx1151", "gfx1201"))
+def test_page_size_rule(arch):
+    """Every positive multiple of 16 is accepted and plans (powers of two or
+    not); every other page is declined PAGE_SIZE, a request limit."""
+    for d in (32, 64, 128):
+        for page in (16, 32, 48, 64, 80, 112, 128, 144, 240, 256, 400, 512):
+            req = _req(d_qk=d, d_v=d, page=page, max_blocks_per_seq=-(-300 // page))
+            assert attn_bwd_unified_support(req, arch, policy=_ALL).ok, (d, page)
+            attn_bwd_unified_plan(req, arch, policy=_ALL)
+    for page in (8, 24, 40, 100, 1):
+        v = attn_bwd_unified_support(
+            _req(page=page, max_blocks_per_seq=300), arch, policy=_ALL
+        )
+        assert v.code == "PAGE_SIZE" and v.kind == "request_limit", (page, v)
+
+
+def test_predicate_accept_implies_the_plan_builds():
+    """A tuned value no instance can take declines INSTANCE_UNAVAILABLE in the
+    predicate (never an accept whose plan raises), and a tuned g_split that
+    forces the atomic page mode on an injective table is checked against the
+    atomic group's declaration."""
+    bad = AttnBwdUnifiedPolicy(tuning=lambda req, arch, pc: {"page_mode": "direct"})
+    v = attn_bwd_unified_support(_req(), "gfx942", policy=bad)
+    assert v.code == "INSTANCE_UNAVAILABLE" and "injective" in v.detail
+    with pytest.raises(ValueError, match="INSTANCE_UNAVAILABLE.*injective"):
+        attn_bwd_unified_plan(_req(), "gfx942", policy=bad)
+    assert attn_bwd_unified_support(
+        _req(block_table_injective=True), "gfx942", policy=bad
+    ).ok
+    split = AttnBwdUnifiedPolicy(
+        declared_groups=frozenset({"direct_pages"}),
+        tuning=lambda req, arch, pc: {"g_split": 2},
+    )
+    v = attn_bwd_unified_support(
+        _req(block_table_injective=True), "gfx942", policy=split
+    )
+    assert v.code == "NOT_YET_DECLARED" and "atomic_pages" in v.detail
+    # every accepted request of a small grid plans
+    for arch in CDNA:
+        for kw in (
+            {},
+            dict(block_table_injective=True),
+            dict(page=48, max_blocks_per_seq=7),
+            dict(max_seqlen_q=2, d_qk=64, d_v=64),
+            dict(left_bound=-1, right_bound=-1),
+        ):
+            req = _req(**kw)
+            assert attn_bwd_unified_support(req, arch).ok, kw
+            attn_bwd_unified_plan(req, arch)
+
+
+@pytest.mark.parametrize(
+    "kw,code,prefixed",
+    [
+        (dict(dropout=0.1), "DROPOUT", True),
+        (dict(sinks=True), "SINKS", True),
+        (dict(softcap=30.0), "SOFTCAP", True),
+        (dict(has_bias=True), "BIAS_IN_BACKWARD", False),
+        (dict(d_qk=256, d_v=256), "HEAD_DIM_256_BWD", True),
+        (dict(page=24), "PAGE_SIZE", False),
+    ],
+)
+def test_decline_kinds(kw, code, prefixed):
+    v = attn_bwd_unified_support(_req(**kw), "gfx942")
+    assert v.code == code and v.kind == DECLINE_KINDS[code]
+    assert v.detail.startswith("NOT_YET_IMPLEMENTED: ") == prefixed, v.detail
+
+
+@pytest.mark.parametrize(
+    "name,bad",
+    [
+        ("block_table_injective", 1),
+        ("bottom_right", 0),
+        ("sinks", "no"),
+        ("page", 16.0),
+        ("num_blocks", True),
+        ("bt_stride", 2.5),
+    ],
+)
+def test_request_types(name, bad):
+    with pytest.raises(TypeError, match=f"{name} must be"):
+        _req(**{name: bad})

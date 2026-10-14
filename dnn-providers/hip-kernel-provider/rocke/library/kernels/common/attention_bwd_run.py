@@ -25,13 +25,35 @@ every workspace byte a later kernel reads.
   (off by default).
 * :func:`pack_attn_bwd_args` packs one launch's kernel arguments (host only).
 * :func:`run_attn_bwd` checks the workspace and issues the launches.
+
+Host validation. The run functions take device pointers only (the hipDNN
+contract: the caller validates its tensors against the request it planned
+with), so they cannot see a tensor's shape, strides or size. A caller that
+holds the tensors (or their metadata) checks them first:
+
+* :func:`check_attn_bwd_tensors`: every tensor of the request (shape, element
+  strides, dtype, and the bytes addressable from its base pointer, which must
+  cover the largest offset the kernels form) against the request;
+* :func:`check_attn_bwd_lengths`: host-visible length data: ``SEQ_LEN``
+  values in ``[0, S_max]`` (a larger value is rejected, never clamped; on the
+  device an out-of-range value is clamped into ``[0, S_max]``, the defined
+  behaviour for out-of-contract data), THD offsets non-decreasing,
+  non-negative, whole tokens, each span at most ``S_max`` and inside the
+  token bound / tensors;
+* :func:`check_attn_dense_bwd_tensors`: a dense-family spec (compile-time
+  shape) against its tensors and runtime batch.
+
+Each raises ``ValueError("<CODE>: detail")`` with a code of
+:data:`HOST_CHECK_CODES`; :class:`TensorMeta` describes one tensor (built
+directly, or from a torch-like tensor with :meth:`TensorMeta.of`).
 """
 
 from __future__ import annotations
 
 import os
 import struct
-from collections.abc import Mapping, MutableMapping
+from collections.abc import Mapping, MutableMapping, Sequence
+from dataclasses import dataclass
 from typing import Any
 
 from kernels.common.attention_bwd import attn_bwd_params, build_attn_bwd_main
@@ -43,13 +65,328 @@ from kernels.common.attention_bwd_aux import (
 from kernels.common.attention_bwd_dq import build_attn_bwd_dq
 
 __all__ = [
+    "HOST_CHECK_CODES",
     "WORKSPACE_ALIGN",
+    "TensorMeta",
     "attn_bwd_kernels",
+    "check_attn_bwd_lengths",
+    "check_attn_bwd_tensors",
+    "check_attn_dense_bwd_tensors",
     "pack_attn_bwd_args",
     "run_attn_bwd",
 ]
 
 WORKSPACE_ALIGN = 256
+
+# Codes of the host checks (the ValueError message starts with one).
+HOST_CHECK_CODES = (
+    "MISSING_TENSOR",
+    "TENSOR_DTYPE",
+    "TENSOR_SHAPE",
+    "TENSOR_STRIDES",
+    "TENSOR_EXTENT",
+    "SEQ_LEN_RANGE",
+    "RAGGED_RANGE",
+    "BLOCK_TABLE_RANGE",
+    "BLOCK_TABLE_NOT_INJECTIVE",
+)
+ELEM_BYTES = {"fp16": 2, "bf16": 2, "fp32": 4, "int32": 4, "int64": 8}
+_DTYPE_NAMES = {
+    "torch.float16": "fp16",
+    "torch.bfloat16": "bf16",
+    "torch.float32": "fp32",
+    "torch.int32": "int32",
+    "torch.int64": "int64",
+    "float16": "fp16",
+    "bfloat16": "bf16",
+    "float32": "fp32",
+    "int32": "int32",
+    "int64": "int64",
+}
+
+
+@dataclass(frozen=True)
+class TensorMeta:
+    """Host view of one caller tensor.
+
+    ``shape`` and ``strides`` (elements) in the same dim order, ``dtype`` a
+    name of :data:`ELEM_BYTES` and ``nbytes`` the bytes addressable from the
+    tensor's base pointer (its allocation from the base on).
+    """
+
+    shape: tuple
+    strides: tuple
+    dtype: str
+    nbytes: int
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "shape", tuple(int(x) for x in self.shape))
+        object.__setattr__(self, "strides", tuple(int(x) for x in self.strides))
+        if len(self.shape) != len(self.strides):
+            raise ValueError(
+                f"shape {self.shape} and strides {self.strides} differ in rank"
+            )
+        if self.dtype not in ELEM_BYTES:
+            raise ValueError(f"dtype {self.dtype!r} not in {tuple(ELEM_BYTES)}")
+
+    @classmethod
+    def of(cls, t) -> "TensorMeta":
+        """From a torch-like tensor (``shape``, ``stride()``, ``dtype``,
+        ``element_size()``). ``nbytes`` is the storage from the tensor's
+        offset on when the storage is reachable, else the tensor's own
+        extent."""
+        dtype = _DTYPE_NAMES.get(str(t.dtype))
+        if dtype is None:
+            raise ValueError(f"TENSOR_DTYPE: unsupported tensor dtype {t.dtype}")
+        shape, strides = tuple(t.shape), tuple(t.stride())
+        esize = int(t.element_size())
+        try:
+            nbytes = int(t.untyped_storage().nbytes()) - int(t.storage_offset()) * esize
+        except AttributeError:
+            nbytes = extent_elems(shape, strides) * esize
+        return cls(shape, strides, dtype, nbytes)
+
+
+def extent_elems(shape: Sequence[int], strides: Sequence[int]) -> int:
+    """Elements from the base to the last addressed element, inclusive (0 for
+    an empty tensor); strides are non-negative."""
+    if any(int(n) == 0 for n in shape):
+        return 0
+    return 1 + sum((int(n) - 1) * int(s) for n, s in zip(shape, strides))
+
+
+def _fail(code: str, detail: str):
+    raise ValueError(f"{code}: {detail}")
+
+
+def _meta(tensors: Mapping[str, TensorMeta], role: str) -> TensorMeta:
+    m = tensors.get(role)
+    if m is None:
+        _fail("MISSING_TENSOR", f"no metadata for tensor role {role!r}")
+    return m
+
+
+def check_tensor(
+    role: str,
+    m: TensorMeta,
+    *,
+    dtype: str,
+    shape: Sequence,
+    strides: Sequence[int] | None,
+) -> None:
+    """One tensor against its expected dtype, shape (``None`` entries: any
+    extent) and strides (compared on dims of extent > 1; ``None``: any), then
+    its extent against ``nbytes``."""
+    if m.dtype != dtype:
+        _fail("TENSOR_DTYPE", f"{role}: dtype {m.dtype}, want {dtype}")
+    if len(m.shape) != len(shape) or any(
+        w is not None and int(w) != g for w, g in zip(shape, m.shape)
+    ):
+        _fail("TENSOR_SHAPE", f"{role}: shape {m.shape}, want {tuple(shape)}")
+    if any(s < 0 for s in m.strides):
+        _fail("TENSOR_STRIDES", f"{role}: negative stride in {m.strides}")
+    if strides is not None:
+        for n, got, want in zip(m.shape, m.strides, strides):
+            if n > 1 and got != int(want):
+                _fail(
+                    "TENSOR_STRIDES",
+                    f"{role}: strides {m.strides}, want {tuple(strides)} (dims of "
+                    "extent > 1)",
+                )
+    need = extent_elems(m.shape, m.strides) * ELEM_BYTES[m.dtype]
+    if need > m.nbytes:
+        _fail(
+            "TENSOR_EXTENT",
+            f"{role}: the kernels address {need} bytes from the base, the tensor "
+            f"holds {m.nbytes}",
+        )
+
+
+def int_list(name: str, values, code: str) -> list[int]:
+    """``values`` as Python ints (``code`` for a non-integer entry)."""
+    out = []
+    for v in values:
+        if isinstance(v, bool) or int(v) != v:
+            _fail(code, f"{name}: non-integer entry {v!r}")
+        out.append(int(v))
+    return out
+
+
+def check_attn_bwd_tensors(req, tensors: Mapping[str, TensorMeta]) -> None:
+    """Check the tensors of a general-family request (``ValueError``).
+
+    ``tensors`` maps the plan's tensor roles (``q k v o do dq dk dv lse``, plus
+    ``seq_len_q`` / ``seq_len_kv`` with padding and ``offsets_q`` /
+    ``offsets_kv`` for THD) to their :class:`TensorMeta`. Dense layout: every
+    tensor is ``[B, H, S, D]`` with the request's ``(B, H, S, D)`` strides.
+    THD: ``[T, H, D]`` with the request's ``(token, head, D)`` strides (``T``
+    any; :func:`check_attn_bwd_lengths` checks the offsets against it). The
+    extent each kernel addresses must fit the tensor's bytes.
+    """
+    from kernels.common.attention_bwd_plan import _lse_kernarg_strides
+
+    dts = {
+        "q": req.dtype, "k": req.k_dtype, "v": req.v_dtype, "o": req.o_dtype,
+        "do": req.do_dtype, "dq": req.dq_dtype, "dk": req.dk_dtype,
+        "dv": req.dv_dtype,
+    }  # fmt: skip
+    for n, dt in dts.items():
+        sb, sh, ss, sd = req.tensor_strides(n)
+        h = req.tensor_heads(n)
+        m = _meta(tensors, n)
+        dt = req.dtype if dt is None else dt
+        if req.is_thd:
+            check_tensor(
+                n, m, dtype=dt, shape=(None, h, req.d_qk), strides=(ss, sh, sd)
+            )
+        else:
+            shape = (req.b, h, req.tensor_seq(n), req.d_qk)
+            check_tensor(n, m, dtype=dt, shape=shape, strides=(sb, sh, ss, sd))
+    lb, lh, lt = _lse_kernarg_strides(req)
+    m = _meta(tensors, "lse")
+    if req.is_thd:
+        # [T, H_q(, 1)] or the batched [B, H_q, S, 1] form whose S dim holds
+        # the tokens (its B stride is unused); the prep reads token t, head h
+        # at t * lt + h * lh
+        if m.dtype != "fp32":
+            _fail("TENSOR_DTYPE", f"lse: dtype {m.dtype}, want fp32")
+        rank = len(m.shape)
+        t_dim, h_dim = (2, 1) if rank == 4 else (0, 1)
+        if (
+            rank not in (2, 3, 4)
+            or m.shape[h_dim] != req.h_q
+            or (rank > 2 and m.shape[-1] != 1)
+        ):
+            _fail("TENSOR_SHAPE", f"lse: shape {m.shape}, want [T, {req.h_q}(, 1)] "
+                  f"or [B, {req.h_q}, T, 1]")  # fmt: skip
+        tokens = m.shape[t_dim]
+        if (tokens > 1 and m.strides[t_dim] != lt) or (
+            req.h_q > 1 and m.strides[h_dim] != lh
+        ):
+            _fail("TENSOR_STRIDES", f"lse: strides {m.strides}, want token {lt}, "
+                  f"head {lh}")  # fmt: skip
+        need = 0 if tokens == 0 else ((tokens - 1) * lt + (req.h_q - 1) * lh + 1) * 4
+        if need > m.nbytes:
+            _fail("TENSOR_EXTENT", f"lse: needs {need} bytes, holds {m.nbytes}")
+    else:
+        rank = len(m.shape)
+        shape = (req.b, req.h_q, req.s_q) + ((1,) if rank == 4 else ())
+        check_tensor("lse", m, dtype="fp32", shape=shape,
+                     strides=(lb, lh, lt) + ((0,) if rank == 4 else ()))  # fmt: skip
+    if req.padding:
+        for n in ("seq_len_q", "seq_len_kv"):
+            m = _meta(tensors, n)
+            if m.dtype != req.seq_len_dtype:
+                _fail("TENSOR_DTYPE", f"{n}: dtype {m.dtype}, want {req.seq_len_dtype}")
+            need = ((req.b - 1) * req.seq_len_stride + 1) * ELEM_BYTES[m.dtype]
+            if need > m.nbytes:
+                _fail("TENSOR_EXTENT", f"{n}: needs {need} bytes, holds {m.nbytes}")
+    if req.is_thd:
+        for n in ("offsets_q", "offsets_kv"):
+            m = _meta(tensors, n)
+            if m.dtype != req.ragged_offset_dtype:
+                _fail(
+                    "TENSOR_DTYPE",
+                    f"{n}: dtype {m.dtype}, want {req.ragged_offset_dtype}",
+                )
+            need = (req.b + 1) * ELEM_BYTES[m.dtype]
+            if need > m.nbytes:
+                _fail("TENSOR_EXTENT", f"{n}: needs {need} bytes, holds {m.nbytes}")
+
+
+def check_attn_bwd_lengths(
+    req,
+    *,
+    seq_len_q=None,
+    seq_len_kv=None,
+    offsets_q=None,
+    offsets_kv=None,
+    tokens_q: int | None = None,
+    tokens_kv: int | None = None,
+) -> None:
+    """Check host-visible length data of a general-family request.
+
+    Padding: ``seq_len_q`` / ``seq_len_kv`` hold the ``B`` per-batch lengths
+    (in batch order, whatever the device stride): each in ``[0, s_q]`` /
+    ``[0, s_kv]``, else ``SEQ_LEN_RANGE`` (rejected; the device would clamp).
+    THD: ``offsets_q`` / ``offsets_kv`` hold the ``B + 1`` offsets: non-negative,
+    non-decreasing, whole tokens after ``* ragged_offset_multiplier / token
+    stride``, each span at most ``s_q`` / ``s_kv``; the end token of every
+    sequence within ``max_total_q`` / ``max_total_kv`` (when both are given)
+    and within ``tokens_q`` / ``tokens_kv`` (the tensors' token extents, when
+    given), else ``RAGGED_RANGE``. Arguments left ``None`` are not checked.
+    """
+    for name, vals, cap in (("seq_len_q", seq_len_q, req.s_q),
+                            ("seq_len_kv", seq_len_kv, req.s_kv)):  # fmt: skip
+        if vals is None:
+            continue
+        vals = int_list(name, vals, "SEQ_LEN_RANGE")
+        if len(vals) != req.b:
+            _fail("SEQ_LEN_RANGE", f"{name}: {len(vals)} values for B = {req.b}")
+        for i, v in enumerate(vals):
+            if not 0 <= v <= cap:
+                _fail("SEQ_LEN_RANGE", f"{name}[{i}] = {v} outside [0, {cap}]")
+    by_token = (
+        req.is_thd and req.max_total_q is not None and req.max_total_kv is not None
+    )
+    sides = (
+        ("offsets_q", offsets_q, "q", req.s_q, req.max_total_q, tokens_q),
+        ("offsets_kv", offsets_kv, "k", req.s_kv, req.max_total_kv, tokens_kv),
+    )
+    for name, vals, tensor, cap, total, toks in sides:
+        if vals is None:
+            continue
+        vals = int_list(name, vals, "RAGGED_RANGE")
+        if len(vals) != req.b + 1:
+            _fail(
+                "RAGGED_RANGE", f"{name}: {len(vals)} offsets for B + 1 = {req.b + 1}"
+            )
+        mult, div = req.ragged_offset_multiplier, req.tensor_strides(tensor)[2]
+        for i, v in enumerate(vals):
+            if v < 0:
+                _fail("RAGGED_RANGE", f"{name}[{i}] = {v} is negative")
+            if i and v < vals[i - 1]:
+                _fail("RAGGED_RANGE", f"{name} decreases at {i}: {vals[i - 1]} -> {v}")
+            if (v * mult) % div:
+                _fail("RAGGED_RANGE", f"{name}[{i}] = {v} is not a whole token "
+                      f"(* {mult} / {div})")  # fmt: skip
+        tok = [v * mult // div for v in vals]
+        for i in range(req.b):
+            span = tok[i + 1] - tok[i]
+            if span > cap:
+                _fail(
+                    "RAGGED_RANGE", f"{name}: sequence {i} spans {span} > {cap} tokens"
+                )
+            if by_token and tok[i + 1] > total:
+                _fail("RAGGED_RANGE", f"{name}: sequence {i} ends at token "
+                      f"{tok[i + 1]} > the bound {total}")  # fmt: skip
+            if toks is not None and tok[i + 1] > toks:
+                _fail("RAGGED_RANGE", f"{name}: sequence {i} ends at token "
+                      f"{tok[i + 1]} past the tensor's {toks} tokens")  # fmt: skip
+
+
+def check_attn_dense_bwd_tensors(
+    spec, tensors: Mapping[str, TensorMeta], *, batch: int
+) -> None:
+    """Check the tensors of a dense-family kernel (compile-time shape).
+
+    Every tensor of ``q k v o do dq dk dv`` is ``[batch, H, S, D]`` with the
+    spec's ``(batch, head, token, 1)`` strides (contiguous BSHD or BHSD), and
+    ``lse`` is ``[batch, H_q, S_q]`` packed fp32; ``batch`` is the runtime
+    batch (it must equal a batch the spec pins).
+    """
+    if spec.batch is not None and batch != spec.batch:
+        _fail("TENSOR_SHAPE", f"batch {batch}, the spec pins {spec.batch}")
+    for n in ("q", "k", "v", "o", "do", "dq", "dk", "dv"):
+        q_side = n in ("q", "o", "do", "dq")
+        h = spec.num_query_heads if q_side else spec.num_kv_heads
+        s = spec.seqlen_q if q_side else spec.seqlen_kv
+        sb, sh, st = spec.strides(n)
+        check_tensor(n, _meta(tensors, n), dtype=spec.dtype,
+                     shape=(batch, h, s, spec.head_size), strides=(sb, sh, st, 1))  # fmt: skip
+    hq, sq = spec.num_query_heads, spec.seqlen_q
+    check_tensor("lse", _meta(tensors, "lse"), dtype="fp32", shape=(batch, hq, sq),
+                 strides=(hq * sq, sq, 1))  # fmt: skip
 
 
 def _build_dense(spec, *, arch):
@@ -270,6 +607,10 @@ def run_attn_bwd(
     workspace base (``WORKSPACE_ALIGN``-byte aligned) of ``workspace_size``
     bytes, at least ``plan.workspace_bytes``. Nothing is allocated and no
     memset is issued. Returns the launched kernel names in order.
+
+    The pointers are trusted: a caller holding the tensors validates them
+    against the planned request first (:func:`check_attn_bwd_tensors`,
+    :func:`check_attn_bwd_lengths`).
     """
     from rocke.runtime.hip_module import Runtime
 

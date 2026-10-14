@@ -86,6 +86,10 @@ A by-file map of the `rocke` package. Symbols listed are the primary contents (p
 | `helpers/fusion_memory.py` | `WorkspaceAllocation`, `WorkspacePlanner`, `materialize_plan`. |
 | `helpers/fusion_scheduler.py` | `GreedyFusionScheduler`, `RegionCost`. |
 | `helpers/fusion_validation.py` | `BackendTiming`, `BenchmarkCase`, `FusionMatrixRunner`, `ValidationReport`, `run_fusion_validation_matrix`. |
+| `helpers/attention_fwd_ext.py` | `AttnFwdExt`, `emit_rows_epilogue`, `score_stage`, `last_index`. Opt-in (default-off) extension points of the MFMA / WMMA attention forward inner body: score and epilogue hooks (the attention backward's LSE output uses them); the forward default IR is unchanged. |
+| `helpers/attention_band.py` | `AttnRuntimeBounds`, `BandEmitter`. Runtime two-sided diagonal band for attention shells: per-cell keep, per-row validity, k-tile range. |
+| `helpers/wmma_attention.py` | The wave32 WMMA FMHA-forward inner body (moved out of `mfma_attention.py`, which dispatches to it and re-exports its names). |
+| `helpers/_attention_shared.py` | Pieces shared by the MFMA and WMMA attention forward bodies (online-softmax row reduction, K-tile size, dtype mapping); a leaf module that breaks the import cycle. |
 
 ## `analysis/` And `benchmark/`
 
@@ -155,6 +159,30 @@ prefix for brevity).
 | `instances/common/fmha_arch.py` / `attention_arch.py` | `validate_fmha_mfma_atom`, `FMHA_MFMA_ATTN_BLOCK`; `validate_tiled_attention_arch`, `require_tiled_attention_arch`. Attention arch-validity gates. |
 | `instances/gfx1151/wmma_gemm.py` | `WmmaGemmSpec`, `build_wmma_gemm`, `is_valid_spec`, `wmma_gemm_grid`. RDNA wave32/WMMA GEMM. |
 | `instances/gfx1151/wmma_fmha_fwd.py` | `WmmaFmhaFwdSpec`, `build_wmma_fmha_fwd`, `is_valid_spec`, `wmma_fmha_fwd_grid`. RDNA wave32/WMMA FMHA-forward adapter. |
+
+## `numeric/` — References
+
+| Path | Primary contents |
+|---|---|
+| `numeric/sdpa_reference.py` | `sdpa_reference`, `sdpa_reference_bwd`, `resolve_diagonal_band`. Torch-free float64 SDPA forward and backward oracle (bands, GQA, padded and ragged layouts, natural-log LSE; the hipDNN CPU reference semantics). |
+
+## Library: attention backward (`library/`, paths from the rocke root)
+
+Python-only family (the C++-engine statement and waiver: `dsl_docs/instances/attention_bwd.md` section 0.3). Design doc `dsl_docs/instances/attention_bwd.md`; unified (paged KV) contract `dsl_docs/instances/attention_bwd_unified.md`.
+
+| Path | Primary contents |
+|---|---|
+| `library/kernels/common/attention_bwd.py` | `AttnBwdSpec`, `validate_attn_bwd_spec`, `build_attn_bwd_main`, `attn_bwd_params`, `lds_plan`. Layout-general main kernel. |
+| `library/kernels/common/attention_bwd_dq.py` | `AttnBwdDqSpec`, `validate_attn_bwd_dq_spec`, `build_attn_bwd_dq`. Split dQ kernel. |
+| `library/kernels/common/attention_bwd_aux.py` | `AttnBwdAuxSpec`, prep / convert / reduce / page-role builders. |
+| `library/kernels/common/attention_bwd_plan.py` | `AttnBwdRequest`, `attn_bwd_support`, `attn_bwd_plan`, `attn_bwd_declaration`, `AttnBwdPolicy`, `shipped_policy`, `attn_bwd_tuning_key`. |
+| `library/kernels/common/attention_bwd_run.py`, `attention_bwd_cache.py`, `attention_bwd_comgr.py` | Launch glue; on-disk code-object cache (`ROCKE_BWD_HSACO_CACHE`); torch-free production comgr pin. |
+| `library/kernels/common/attention_bwd_unified.py`, `attention_bwd_unified_plan.py`, `attention_bwd_unified_run.py` | Unified (paged KV) spec, builder, request, predicate, plan, launch glue. |
+| `library/kernels/common/attention_dense_bwd_spec.py`, `attention_dense_bwd_plan.py`, `attention_dense_bwd_dq.py`, `_attention_dense_bwd_shell.py`; `library/kernels/{gfx942,gfx950}/attention_dense_bwd.py` | Dense (shape-specialised) family: spec, plan, dense split dQ kernel, shell, per-arch builders. |
+| `library/kernels/common/_attention_bwd_*.py`, `_lse_store.py` | Family glue: tile step (`_body`), block GEMM (`_gemm`), fragments (`_frag`), LDS planner (`_lds`), rings (`_ring`), counted waits (`_counted`), VALU levers (`_valu`), tiles (`_tiles`), split dQ body (`_dqbody`), arch capabilities (`_caps`), band (`_band`), addressing (`_addr`), paged addressing (`_paged`), sinks (`_sinks`), CTA decode (`_worklist`), stage tables (`_sched`), resource refusals (`_refusals`); the forward LSE store. |
+| `library/dispatch/attention_bwd/` | `tuning_common.py` (knob registry, `backward_spec_legality`, `BWD_KNOWN_WRONG_KNOBS`), `dense_tuning.py`, `unified_tuning.py` (unified axes, `unified_spec_legality`), `gfx942_tuning.py`, `gfx950_tuning.py`, `tuned_tables.py`, `routing.py` (`plan_attention_bwd`, `routed_policy`, `attention_bwd_declaration`), `registry.py` (`ATTENTION_BWD_REGISTRY`, `attention_bwd_ranker`, `dispatch_attention_bwd`, `run_attention_bwd`). |
+| `library/benchmarks/common/attention_bwd_sweep.py`, `attention_bwd_bench.py`, `attention_bwd_compile.py`, `attention_bwd_rocke_arm.py`, `attention_bwd_unified_bench.py`, `attention_bwd_census.json` | Funnel sweep, paired timing harness, compile cache and crash isolation, rocKE arm, unified bench, shape census (no measurements). |
+| `library/tests/test_attention_bwd_ir_golden.py`, `library/tests/golden/attention_bwd_ir_sha256.json`; `library/tests/parity/barrier_fence_emit.py` | Backward IR golden hashes; the barrier-fence parity emitter. |
 
 ## `examples/`
 

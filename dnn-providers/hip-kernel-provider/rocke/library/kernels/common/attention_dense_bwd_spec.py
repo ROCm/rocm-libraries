@@ -58,6 +58,32 @@ Dense-only knobs (compile-time fields, defaults first):
 
 Kernel names carry the base key (dtype, head size, layout, shape, heads, mask,
 ragged) and a salt over every non-default compile-time field.
+
+Shape pinning (explicit, by design). The dense family is compile-time shaped:
+``AttentionDenseBwdSpec.SHAPE_BINDING`` is ``"compile_time"`` and
+:meth:`AttentionDenseBwdSpec.shape_key` is the pinned problem shape (the
+fields of ``SHAPE_FIELDS``: sequence lengths, head counts, head size, layout,
+and the batch when the spec pins it). Every one of them is baked into the code
+object: the strides, the per-slab buffer ranges, the kv-tile count and the
+compile-time band classification (which removes the edge or interior loops a
+shape proves empty) all fold the shape into constants, so two shapes are two
+different kernels, one instance per shape key. That is the family's purpose:
+the dense pack serves only the exact shape keys it was tuned for, and every
+other request takes the layout-general family (runtime shapes). A request is
+checked against the instance's pinned shape on the host
+(``attention_bwd_run.check_attn_dense_bwd_tensors``).
+
+The shape therefore belongs to the instance identity, and the kernel name
+spells it in readable tokens (``sq``, ``sk``, ``hq``, ``hk``, ``d``, the
+layout, ``b`` for a pinned batch) rather than in a digest: the name is the
+code object's symbol, so it must differ between shapes; the tokens keep
+profiles, traces and resource-gate reports attributable to a shape (the
+gfx942 dense forward family names its kernels the same way); and the IR
+golden table, the on-disk code-object cache and the recorded resource-gate
+rows are keyed by these names, so a digest would change the bytes of every
+dense kernel and re-key every artifact without changing any kernel. A
+runtime-shape dense body (shape out of the name, lengths as kernargs) would be
+a new body, not a renaming, and is not built.
 """
 
 from __future__ import annotations
@@ -65,7 +91,7 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 from dataclasses import dataclass, fields
-from typing import Optional
+from typing import ClassVar, Optional
 
 from kernels.common.attention_bwd import (
     BWD_DTYPES,
@@ -199,7 +225,28 @@ class AttentionDenseBwdSpec:
     block_n == 0`` (checked against the resolved tile); ``ragged = True`` is
     its own kernel for any lengths (tail tiles masked, rows past the sequence
     read as zero, partial rows dropped by guarded stores).
+
+    The problem shape is pinned at compile time (``SHAPE_BINDING =
+    "compile_time"``; :meth:`shape_key`, see the module docstring): one
+    instance per shape key, the shape spelled in the kernel name.
     """
+
+    # The dense family bakes the problem shape into the code object (see the
+    # module docstring); "runtime" (lengths as kernargs) is not built.
+    SHAPE_BINDING: ClassVar[str] = "compile_time"
+    # Fields of the pinned shape, in shape_key order (the batch only when the
+    # spec pins it; it is a runtime kernarg otherwise).
+    SHAPE_FIELDS: ClassVar[tuple] = (
+        "seqlen_q",
+        "seqlen_kv",
+        "num_query_heads",
+        "num_kv_heads",
+        "head_size",
+        "layout",
+        "batch",
+    )
+    # The target of a per-arch subclass (None: the architecture-neutral base).
+    ARCH: ClassVar[Optional[str]] = None
 
     seqlen_q: int
     seqlen_kv: int
@@ -301,8 +348,7 @@ class AttentionDenseBwdSpec:
             "body_knobs",
             tuple((k, v) for k, v in self.body_knobs if not _is_body_default(k, v)),
         )
-        variant = getattr(self, "body_variant", "general")
-        _check_in("body_variant", variant, type(self).BODY_VARIANTS)
+        _check_in("body_variant", self.variant(), type(self).BODY_VARIANTS)
         # The body spec checks every knob value (arch-independent rules now;
         # the arch rules in validate_attn_dense_bwd_spec).
         self.body_spec()
@@ -312,6 +358,17 @@ class AttentionDenseBwdSpec:
     @property
     def group(self) -> int:
         return self.num_query_heads // self.num_kv_heads
+
+    def shape_key(self) -> tuple:
+        """The pinned problem shape: the ``SHAPE_FIELDS`` values in order."""
+        return tuple(getattr(self, f) for f in self.SHAPE_FIELDS)
+
+    def variant(self) -> str:
+        """The body variant: the per-arch subclass's ``body_variant`` field;
+        the architecture-neutral base has the shared body only."""
+        if "body_variant" in self.__dataclass_fields__:
+            return self.body_variant
+        return "general"
 
     def band(self) -> tuple[int, int, bool]:
         """``(left, right, bottom_right)`` of the mask (``-1`` = unbounded)."""
@@ -419,7 +476,7 @@ def dense_bwd_band(spec: AttentionDenseBwdSpec) -> tuple[int, int, bool]:
 def dense_bwd_not_built(spec: AttentionDenseBwdSpec) -> list[str]:
     """Dense knob values whose emission is not built (registered levers)."""
     out = []
-    variant = getattr(spec, "body_variant", "general")
+    variant = spec.variant()
     if variant != "general":
         out.append(f"body_variant={variant!r}")
     return out
@@ -433,7 +490,7 @@ def validate_attn_dense_bwd_spec(spec: AttentionDenseBwdSpec, arch: str) -> Attn
     32-bit buffer offset) and every error of the general validator.
     """
     _check_in("arch", arch, DENSE_BWD_ARCHS)
-    owner = getattr(type(spec), "ARCH", None)
+    owner = type(spec).ARCH
     if owner is not None and owner != arch:
         raise ValueError(f"{type(spec).__name__} is a {owner} spec, not {arch}")
     # the general main kernel's recorded resource failures (RESOURCE_REFUSED)
@@ -483,11 +540,11 @@ def _shell_not_built(body: AttnBwdSpec) -> list[str]:
     prefetch ring (register or DMA path, every depth) is built by the dense
     shell as by the general one."""
     out = []
-    if getattr(body, "lb_mirror", False):
+    if body.lb_mirror:
         # the paired second kv-tile pass is part of the general shell
         out.append("lb_mirror=True (dense shell)")
     for name, default in _DENSE_SHELL_DEFAULTS:
-        value = getattr(body, name, default)
+        value = getattr(body, name)
         if value != default:
             out.append(f"{name}={value!r} (dense shell)")
     return out
@@ -500,7 +557,7 @@ def _not_built_all(spec: AttentionDenseBwdSpec, body: AttnBwdSpec) -> list[str]:
 def dense_bwd_not_built_reasons(spec: AttentionDenseBwdSpec) -> list[str]:
     """Not-built values of a per-arch dense spec: its dense knobs and the
     knobs of its resolved body (``ValueError`` for an illegal spec)."""
-    arch = getattr(type(spec), "ARCH", None)
+    arch = type(spec).ARCH
     if arch is None:
         raise ValueError("dense_bwd_not_built_reasons needs a per-arch dense spec")
     return _not_built_all(spec, validate_attn_dense_bwd_spec(spec, arch))

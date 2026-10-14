@@ -794,3 +794,63 @@ def test_parser_has_the_aa_control_flag_and_forwards_it():
     assert args.aa_control == "on"
     assert bb.make_parser().parse_args(["--aa-control", "off"]).aa_control == "off"
     assert bb.make_parser().parse_args(["--aa-control", "all"]).aa_control == "all"
+
+
+# --------------------------------------------------------------------------- environment
+def test_gate_has_no_environment_default(monkeypatch):
+    """``--gate`` is explicit: an exported variable does not select a gate."""
+    monkeypatch.setenv("ROCKE_BWD_PRUNE_GATE", f"{__name__}:GATE_OBJ")
+    assert bb.make_parser().parse_args([]).gate is None
+    args = bb.make_parser().parse_args(["--gate", f"{__name__}:GATE_OBJ"])
+    assert args.gate == f"{__name__}:GATE_OBJ"
+
+
+class _NoCudaTorch:
+    """A torch stand-in without ``cuda``: a device query through it fails."""
+
+    __version__ = "0.0-test"
+
+    class version:  # noqa: N801 - mirrors torch.version
+        hip = "0.0-test"
+
+
+def test_environment_record_reads_the_device_through_the_rocke_runtime(monkeypatch):
+    from rocke.runtime import hip_module as hm
+
+    calls = []
+
+    def fake(name, value):
+        def f(device=0):
+            calls.append((name, device))
+            return value
+
+        monkeypatch.setattr(hm, name, f)
+
+    fake("get_device_target_id", "gfx950:sramecc+:xnack-")
+    fake("get_device_arch", "gfx950")
+    fake("get_device_num_cus", 7)
+
+    def torch_stub():
+        calls.append(("torch", None))
+        return _NoCudaTorch
+
+    monkeypatch.setattr(bb, "_torch", torch_stub)
+    monkeypatch.setattr(bb, "_toolchain_record", lambda: {})
+    monkeypatch.setattr(bb, "_clocks", lambda: None)
+    rec = bb.environment_record()
+    assert rec["gcn_arch"] == "gfx950:sramecc+:xnack-"
+    assert rec["device_arch"] == "gfx950" and rec["cu_count"] == 7
+    # the run's requested arch is recorded by the caller, never overwritten
+    assert "arch" not in rec
+    assert "device_name" not in rec  # the device is named by its gfx id only
+    assert rec["torch"] == "0.0-test" and "torch_error" not in rec
+    # torch is imported (versions only) before the rocKE runtime is queried,
+    # so the runtime binds torch's HIP library
+    assert calls[0] == ("torch", None)
+    assert {d for n, d in calls[1:]} == {0} and len(calls) == 4
+
+
+def test_bench_makes_no_torch_device_query():
+    src = Path(bb.__file__).read_text(encoding="utf-8")
+    for query in ("get_device_properties", "multi_processor_count", "gcnArchName"):
+        assert query not in src, query

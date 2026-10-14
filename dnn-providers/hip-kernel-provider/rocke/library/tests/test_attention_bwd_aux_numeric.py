@@ -457,3 +457,69 @@ def test_page_zero_and_convert(D, dtype):
         else:
             assert np.all(dv[p] == sentinel), p
     assert np.all(dst[nb * s_blk :] == sentinel)
+
+
+@pytest.mark.parametrize("D,dtype", [(64, "bf16"), (128, "fp16")])
+@pytest.mark.parametrize(
+    "bad", [(10,), (11, 13), (-1,), (2**31 - 1, -(2**31))],
+    ids=["past_end", "canary", "minus_one", "extremes"],
+)  # fmt: skip
+def test_page_roles_never_dereference_out_of_range_block_ids(D, dtype, bad):
+    """A live block-table entry outside [0, num_blocks) (past the cache, in
+    the canary blocks allocated after it, negative, extreme) is skipped by
+    page_zero and page_convert: no workspace slot and no gradient-cache slot
+    of it is written (the canary blocks keep their poison / sentinel), every
+    valid page is still zeroed / converted, and block 0 is not touched on
+    behalf of a bad entry."""
+    rng = np.random.default_rng(D + len(bad))
+    spec = X.AttnBwdAuxSpec(head_size=D, dtype=dtype, kv_target="paged")
+    rows = X.attn_bwd_aux_rows_per_cta(spec, arch=_ARCH)
+    page = max(16, rows)
+    nb, canary_blocks, h_kv, mb = 10, 4, 2, 4
+    lens = np.array([3 * page + 1, 2 * page, 4 * page], np.int32)
+    bt = np.array([[4, 7, 2, 9], [5, 1, 8, 8], [3, 6, 0, 0]], np.int32)
+    bad_slots = [(0, 1), (2, 2), (1, 0), (2, 3)][: len(bad)]
+    for (s, j), v in zip(bad_slots, bad):
+        bt[s, j] = v
+    live = set()
+    for s in range(3):
+        for j in range(-(-int(lens[s]) // page)):
+            if 0 <= int(bt[s, j]) < nb:
+                live.add(int(bt[s, j]))
+    bt_flat = bt.reshape(-1).copy()
+    rows_all = (nb + canary_blocks) * page
+    page_rows = nb * page
+    pdk = np.full(h_kv * rows_all * D, np.nan, np.float32)
+    pdv = np.full(h_kv * rows_all * D, np.nan, np.float32)
+    grid = X.attn_bwd_page_grid(spec, arch=_ARCH, max_blocks_per_seq=mb, page=page,
+                                h_kv=h_kv, num_seqs=3)  # fmt: skip
+    common = {"h_kv": h_kv, "num_seqs": 3, "max_blocks_per_seq": mb, "bt_stride": mb,
+              "page": page, "page_rows": page_rows}  # fmt: skip
+    _run("page_zero", spec, grid,
+         {"SEQ_LENS_KV": lens, "BLOCK_TABLE": bt_flat, "WS_PDK": pdk, "WS_PDV": pdv}, common)  # fmt: skip
+    for a in (pdk, pdv):
+        v = a[: h_kv * page_rows * D].reshape(h_kv, nb, page, D)
+        for p in range(nb):
+            if p in live:
+                assert np.all(v[:, p] == 0.0), p
+            else:
+                assert np.all(np.isnan(v[:, p])), p
+        assert np.all(np.isnan(a[h_kv * page_rows * D :]))
+    src = rng.standard_normal(h_kv * page_rows * D).astype(np.float32)
+    src_all = np.concatenate(
+        [src, np.full(h_kv * (rows_all - page_rows) * D, 5.0, np.float32)]
+    )
+    sentinel = _enc(np.float32(-7.0), dtype)
+    s_blk, s_tok, s_h = page * h_kv * D, h_kv * D, D
+    dst = np.full((nb + canary_blocks) * s_blk, sentinel)
+    _run("page_convert", spec, grid,
+         {"SRC": src_all, "SEQ_LENS_KV": lens, "BLOCK_TABLE": bt_flat, "DST": dst},
+         dict(mult=0.25, d_blk=s_blk, d_tok=s_tok, d_h=s_h, **common))  # fmt: skip
+    sv = src.reshape(h_kv, nb, page, D)
+    dv = dst.reshape(nb + canary_blocks, page, h_kv, D)
+    for p in range(nb + canary_blocks):
+        if p in live:
+            want = _enc(np.float32(0.25) * sv[:, p].transpose(1, 0, 2), dtype)
+            assert np.array_equal(dv[p], want), p
+        else:
+            assert np.all(dv[p] == sentinel), p

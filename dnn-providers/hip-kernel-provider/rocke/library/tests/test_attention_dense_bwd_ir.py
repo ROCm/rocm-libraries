@@ -393,15 +393,17 @@ def _build_doc():
     return doc
 
 
+@pytest.mark.parametrize("flavor", _FLAVORS)
 @pytest.mark.parametrize("arch", _ARCHS)
-def test_dense_bwd_ir_matches_golden(arch):
+def test_dense_bwd_ir_matches_golden(arch, flavor):
+    """Every flavor is checked in every run (the lowering takes the flavor as
+    an argument); a missing fixture, flavor or case fails, never skips."""
     if not _GOLDEN.exists():
         pytest.fail("dense backward golden fixture missing; generate with --write")
     golden = json.loads(_GOLDEN.read_text())
-    flavor = _current_flavor()
     gflav = golden.get("flavors", {}).get(flavor)
     if not gflav:
-        pytest.skip(f"no dense backward golden recorded for llvm flavor {flavor!r}")
+        pytest.fail(f"no dense backward golden recorded for llvm flavor {flavor!r}")
     drift = []
     for key, over, dq in _golden_rows(arch):
         want = gflav["cases"].get(key, {}).get("sha256")
@@ -707,4 +709,4 @@ if __name__ == "__main__":
         print(f"wrote {_GOLDEN}")
     else:
         for a in _ARCHS:
-            test_dense_bwd_ir_matches_golden(a)
+            test_dense_bwd_ir_matches_golden(a, _current_flavor())

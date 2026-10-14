@@ -241,7 +241,14 @@ class DenseFixedAddr:
         self._strided = None
         off = b.mul(_i64(b, seq.batch), b.const_i64(sb * _ELEM_BYTES))
         self._batch_ptr = b.global_ptr_add(ptr, off)
+        # The slab's bytes under the compile-time shape: the hardware range
+        # check reads zeros past them, so no load leaves the slab; the slab
+        # itself must exist, which the host checks against the caller's
+        # tensors (attention_bwd_run.check_attn_dense_bwd_tensors). The spec
+        # validator bounds the in-slab offset below 2^31.
         self._num_records = ((seqlen - 1) * st + head_size) * _ELEM_BYTES
+        if self._num_records >= 2**31:
+            raise ValueError(f"num_records {self._num_records} does not fit i32")
 
     def slab(self, h, row0=0, *, clamp: bool = True):
         if self._strided is not None:

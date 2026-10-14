@@ -25,10 +25,18 @@ on the same cell; a forced route keeps the request's own predicate verdict.
 Serving: the routed policy serves every request the predicate accepts (and the
 plan builds). The per-arch performance status of a class (``verified``,
 ``unverified``, ``below_baseline``; :data:`ARCH_TUNING`'s
-``GENERAL_PERF_STATUS`` / ``DENSE_PERF_STATUS``) is information only: the plan
-records it (``AttnBwdPlan.perf_status``) and
-:func:`attention_bwd_declaration` publishes it per class, and neither the
-route nor the knobs depend on it.
+``GENERAL_PERF_STATUS`` / ``DENSE_PERF_STATUS``, empty by policy, so every
+class reads ``unverified``) is information only: the plan records it
+(``AttnBwdPlan.perf_status``) and :func:`attention_bwd_declaration` publishes
+it per class, and neither the route nor the knobs depend on it.
+
+Every per-arch table entry is checked when this module is imported
+(:func:`.tuned_tables.check_arch_tables`): its knobs are registered values
+(not ``not_built``, ``gated`` or known wrong) and plan on a representative
+request of its key; a bad entry fails the import.
+
+The candidates, the ranker and the library-level entry points over this
+routing are :mod:`.registry`.
 """
 
 from __future__ import annotations
@@ -56,8 +64,8 @@ from kernels.common.attention_bwd_unified_plan import (
 )
 from kernels.common.attention_dense_bwd_plan import attn_dense_bwd_plan
 
-from . import gfx942_tuning, gfx950_tuning
-from .dense_tuning import DENSE_BWD_TUNED
+from . import gfx942_tuning, gfx950_tuning, tuned_tables
+from .dense_tuning import DENSE_BWD_TUNED, dense_axis
 
 __all__ = [
     "ARCH_TUNING",
@@ -76,6 +84,16 @@ BWD_ROUTES = ("general", "dense")
 # GENERAL_PERF_STATUS) and of the dense family (DENSE_TUNED, joined into
 # DENSE_BWD_TUNED; DENSE_PERF_STATUS): {arch: module}.
 ARCH_TUNING = {mod.ARCH: mod for mod in (gfx942_tuning, gfx950_tuning)}
+
+
+def _check_tuned_tables() -> None:
+    """Every per-arch table entry is a registered, plannable configuration
+    (raised at import; :func:`.tuned_tables.check_arch_tables`)."""
+    for mod in ARCH_TUNING.values():
+        tuned_tables.check_arch_tables(mod, dense_axis=dense_axis)
+
+
+_check_tuned_tables()
 
 
 def arch_tuned_policy(base: AttnBwdPolicy) -> AttnBwdPolicy:
@@ -161,12 +179,14 @@ def plan_attention_bwd(
     if chosen == "dense":
         return attn_dense_bwd_plan(req, arch, policy=policy)
     # General route: the plan's own routing would label a packed key "dense";
-    # a forced general route plans without the dense pack, keeping the
-    # request's verdict above.
+    # a forced general route plans without the dense pack and keeps the
+    # request's verdict above (taken under the full policy, its opt-in
+    # performance gate included), so the gate is not applied a second time
+    # to the general class.
     general_policy = policy
     if attn_bwd_route(req, arch, policy=policy)[0] == "dense":
         general_policy = dataclasses.replace(
-            policy, dense_pack=frozenset(), waive_unverified=True
+            policy, dense_pack=frozenset(), perf_gate=False
         )
     plan = attn_bwd_plan(req, arch, policy=general_policy)
     if plan.route != "general":

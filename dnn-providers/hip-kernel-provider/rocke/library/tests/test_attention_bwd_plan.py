@@ -60,7 +60,11 @@ from kernels.common.attention_bwd_plan import (
 )
 from kernels.common.attention_bwd_plan import (
     ANY_BUCKET,
+    DECLINE_KIND_NAMES,
+    DECLINE_KINDS,
+    FEATURE_DECLINES,
     MIRROR_PAIRING_BUILT,
+    REQ_SCOPE_D256_BWD,
     SHIPPED_DECLARED_GROUPS,
 )
 
@@ -1327,9 +1331,11 @@ def test_declaration_shape_and_serialisable():
     for arch in ("gfx942", "gfx950", "gfx1151", "gfx1201", "gfx90a"):
         d = attn_bwd_declaration(arch, policy=FULL)
         json.dumps(d)
-        assert d["version"] == ATTN_BWD_DECLARATION_VERSION == 3
+        assert d["version"] == ATTN_BWD_DECLARATION_VERSION == 4
         assert d["abi"] == "rocke.attn_bwd.v3"
         assert d["reason_codes"] == list(REASON_CODES)
+        assert d["reason_kinds"] == {c: DECLINE_KINDS[c] for c in REASON_CODES}
+        assert d["not_yet_implemented_prefix"] == "NOT_YET_IMPLEMENTED:"
         assert d["lse"]["base"] == "e" and d["lse"]["dtype"] == "fp32"
         assert "dq" in d["determinism"] and "dk_dv" in d["determinism"]
     assert attn_bwd_declaration("gfx1201")["status"] == "declared"
@@ -1357,27 +1363,82 @@ def test_declaration_shape_and_serialisable():
     assert {e["perf"] for e in attn_bwd_declaration("gfx1201")["perf"]} == {"degraded"}
 
 
-def test_d256_decline_cites_the_requirements_scope_and_the_register():
-    """d = 256 backward is declined with a reason that cites the
-    requirements' out-of-scope list, and the declaration publishes the
-    deferral-register row with its consequence for hipDNN."""
+def test_d256_decline_cites_the_scope_and_the_register():
+    """d = 256 backward is declined as not implemented yet (the
+    ``NOT_YET_IMPLEMENTED:`` detail prefix of the forward families), and the
+    declaration publishes the register row with its consequence for hipDNN."""
     v = attn_bwd_support(_req(d_qk=256, d_v=256), "gfx942", policy=FULL)
-    assert v.code == "HEAD_DIM_256_BWD"
-    assert "out of scope within Tier S" in v.detail
-    assert "Explicitly out of scope" in v.detail
+    assert v.code == "HEAD_DIM_256_BWD" and v.kind == "not_yet_implemented"
+    assert v.detail == f"NOT_YET_IMPLEMENTED: {REQ_SCOPE_D256_BWD}"
+    assert "32, 64 and 128" in v.detail
     for arch in ("gfx942", "gfx950", "gfx1151", "gfx1201"):
         d = attn_bwd_declaration(arch)
-        assert d["axes"]["head_dim_declined"]["256"]["code"] == "HEAD_DIM_256_BWD"
+        declined = d["axes"]["head_dim_declined"]["256"]
+        assert declined["code"] == "HEAD_DIM_256_BWD"
+        assert declined["kind"] == "not_yet_implemented"
         rows = {r["reason_code"]: r for r in d["deferral_register"]}
         row = rows["HEAD_DIM_256_BWD"]
         assert "not trainable" in row["consequence"]
         assert "CK / AOTriton" in row["consequence"]
-        assert row["rationale"] == v.detail
+        assert row["rationale"] == REQ_SCOPE_D256_BWD
         # every register row names a code the predicate really emits
         assert set(rows) <= set(REASON_CODES)
         assert all(r["consequence"] for r in d["deferral_register"])
         assert any("gfx1201" in n for n in d["notes"])
     assert [r["reason_code"] for r in DEFERRAL_REGISTER].count("HEAD_DIM_256_BWD") == 1
+
+
+def test_every_reason_code_has_a_kind():
+    """Every decline code of both entries has exactly one published kind, and
+    the register covers every feature decline plus d = 256 with the kind of
+    its code."""
+    from kernels.common.attention_bwd_unified_plan import (
+        REASON_CODES as UNIFIED_CODES,
+    )
+
+    assert set(REASON_CODES) | set(UNIFIED_CODES) == set(DECLINE_KINDS)
+    assert set(DECLINE_KINDS.values()) == set(DECLINE_KIND_NAMES)
+    rows = {r["reason_code"]: r for r in DEFERRAL_REGISTER}
+    assert set(rows) == set(FEATURE_DECLINES) | {"HEAD_DIM_256_BWD"}
+    for code, row in rows.items():
+        assert row["kind"] == DECLINE_KINDS[code], code
+        assert row["kind"] in ("out_of_scope", "not_yet_implemented"), code
+        assert row["feature"] and row["rationale"] and row["consequence"], code
+    # the permanent declines of this entry, and the features not built yet
+    assert {c for c, r in rows.items() if r["kind"] == "out_of_scope"} == {
+        "BIAS_IN_BACKWARD",
+        "DBIAS",
+        "PAGED",
+    }
+    assert {"DROPOUT", "ALIBI", "FP8", "DETERMINISTIC", "HEAD_DIM_256_BWD"} <= {
+        c for c, r in rows.items() if r["kind"] == "not_yet_implemented"
+    }
+    # no plan label or requirement-section reference in a published string
+    blob = json.dumps([dict(r) for r in DEFERRAL_REGISTER]) + REQ_SCOPE_D256_BWD
+    for word in ("Tier", "section", "item "):
+        assert word not in blob, word
+
+
+@pytest.mark.parametrize(
+    "kw,code,prefixed",
+    [
+        (dict(dropout=0.1), "DROPOUT", True),
+        (dict(alibi=True), "ALIBI", True),
+        (dict(fp8=True), "FP8", True),
+        (dict(deterministic=True), "DETERMINISTIC", True),
+        (dict(other_features=("block_mask",)), "UNSUPPORTED_FEATURE", True),
+        (dict(has_bias=True), "BIAS_IN_BACKWARD", False),
+        (dict(want_dbias=True), "DBIAS", False),
+        (dict(paged=True), "PAGED", False),
+        (dict(d_qk=96, d_v=96), "HEAD_DIM", True),
+        (dict(left_bound=-5), "BAND_BOUND", False),
+    ],
+)
+def test_decline_detail_carries_the_kind(kw, code, prefixed):
+    v = attn_bwd_support(_req(**kw), "gfx950")
+    assert v.code == code and v.kind == DECLINE_KINDS[code]
+    assert v.detail.startswith("NOT_YET_IMPLEMENTED: ") == prefixed, v.detail
+    assert attn_bwd_support(_req(), "gfx950").kind == ""
 
 
 def _sample_requests(n, seed=7):
@@ -1915,3 +1976,140 @@ def test_aux_knobs_pass_the_custom_configuration():
                                "qdo_stage": "joint", "stats_load": "step_top"}}])
     )  # fmt: skip
     assert rules[0][1]["convert_vec"] == 16
+
+
+# ---------------------------------------------------------------------------
+# shipped policy, predicate-accept implies plannable, request types
+# ---------------------------------------------------------------------------
+
+
+def test_shipped_policy_is_the_default_policy_and_reads_no_table():
+    """The kernel-level shipped policy is the dataclass default: no
+    performance gate, no per-class status, no hidden tuning-module hook."""
+    assert shipped_policy() == AttnBwdPolicy()
+    p = shipped_policy()
+    assert not p.perf_gate and not p.perf_status and not p.waive_unverified
+    assert not p.tuned_table and not p.dense_pack and not p.instance_unavailable
+    src = (_KERNEL_DIR / "attention_bwd_plan.py").read_text(encoding="utf-8")
+    assert "attention_bwd_tuning" not in src
+    assert not hasattr(plan_mod, "_tuning_module")
+
+
+@pytest.mark.parametrize("arch", ("gfx942", "gfx950", "gfx1151", "gfx1201"))
+def test_shipped_policy_serves_every_legal_request_without_override(arch):
+    """No override: every exhaustive-tier case whose feature groups are
+    declared is accepted by the shipped policy on every declared arch (gfx942
+    and gfx950 included) and plans; the plan's status is information only."""
+    served = 0
+    for case in select_bwd("exhaustive"):
+        req = request_from_case(case)
+        v = attn_bwd_support(req, arch)
+        if not attn_bwd_feature_groups(req) <= SHIPPED_DECLARED_GROUPS:
+            assert v.code == "NOT_YET_DECLARED", (case.id, v)
+            continue
+        assert v.ok, (case.id, arch, v)
+        plan = attn_bwd_plan(req, arch)
+        assert plan.perf_status in ("unverified", "degraded"), plan.perf_status
+        served += 1
+    assert served
+
+
+@pytest.mark.parametrize("arch", ("gfx942", "gfx950", "gfx1151", "gfx1201"))
+def test_predicate_accept_implies_the_plan_builds(arch):
+    """Every request of the case table the predicate accepts (shipped and
+    full policies) plans, and the plan's main spec passes the family
+    validator with the resource-gate list (RESOURCE_REFUSED)."""
+    from kernels.common.attention_bwd import validate_attn_bwd_spec
+
+    for case in _CASES:
+        req = request_from_case(case)
+        for policy in (None, FULL):
+            if not attn_bwd_support(req, arch, policy=policy).ok:
+                continue
+            plan = attn_bwd_plan(req, arch, policy=policy)
+            assert validate_attn_bwd_spec(plan.specs["main"], arch) == (
+                plan.specs["main"]
+            )
+
+
+def test_resource_refused_instance_is_declined_not_raised(monkeypatch):
+    """A resolved main spec on the resource-gate list is declined
+    INSTANCE_UNAVAILABLE by the predicate (it never reaches the plan)."""
+    import kernels.common.attention_bwd as bwd
+
+    req = _req()
+    assert attn_bwd_support(req, "gfx950").ok
+    monkeypatch.setattr(bwd, "resource_refusal", lambda spec, arch: "scratch (test)")
+    v = attn_bwd_support(req, "gfx950")
+    assert v.code == "INSTANCE_UNAVAILABLE" and v.kind == "policy"
+    assert "RESOURCE_REFUSED" in v.detail
+    with pytest.raises(ValueError, match="INSTANCE_UNAVAILABLE.*RESOURCE_REFUSED"):
+        attn_bwd_plan(req, "gfx950")
+
+
+def test_untakeable_tuned_knobs_are_declined_not_raised():
+    """A tuned value the request cannot take declines INSTANCE_UNAVAILABLE
+    (first failure in the predicate's order) instead of raising in the plan
+    of an accepted request."""
+    bad = AttnBwdPolicy(tuning=lambda req, arch, route, pclass: {"g_split": 3})
+    v = attn_bwd_support(_req(h_k=2, h_v=2), "gfx942", policy=bad)
+    assert v.code == "INSTANCE_UNAVAILABLE" and "g_split=3" in v.detail
+    with pytest.raises(ValueError, match="INSTANCE_UNAVAILABLE.*g_split=3"):
+        attn_bwd_plan(_req(h_k=2, h_v=2), "gfx942", policy=bad)
+    # a request check that fails first still wins
+    v = attn_bwd_support(_req(dropout=0.5), "gfx942", policy=bad)
+    assert v.code == "DROPOUT"
+
+
+@pytest.mark.parametrize(
+    "field_name", ["causal", "padding", "has_seq_len_kv", "deterministic", "fp8"]
+)
+@pytest.mark.parametrize("bad", [1, 0, "yes", None])
+def test_request_flags_must_be_bools(field_name, bad):
+    with pytest.raises(TypeError, match=f"{field_name} must be a bool"):
+        _req(**{field_name: bad})
+
+
+def test_request_extents_must_be_ints():
+    import numpy as np
+
+    for name, bad in (("s_q", 128.0), ("b", True), ("h_k", "8"), ("num_cus", 1.5)):
+        with pytest.raises(TypeError, match=f"{name} must be"):
+            _req(**{name: bad})
+    with pytest.raises(TypeError, match="block_table_injective must be a bool"):
+        _req(block_table_injective=1)
+    # numpy integers are integers; None stays legal for the optional hints
+    assert attn_bwd_support(_req(s_q=np.int64(128), num_cus=None), "gfx942").ok
+
+
+def test_dense_route_configuration_is_answered_by_the_dense_family():
+    """A policy whose tuning configures the dense family (dense-only knobs) on
+    a dense-eligible request outside its dense pack: the general plan fails
+    only through those knobs, so the dense family's plan decides (the dense
+    planner's forced route). The same knobs on a request the dense family
+    cannot take decline INSTANCE_UNAVAILABLE."""
+    dense_knobs = AttnBwdPolicy(
+        tuning=lambda req, arch, route, pclass: {"epilogue": "direct"}
+    )
+    req = _req(causal=True)
+    assert dense_bwd_eligibility(req, "gfx950")[0]
+    assert attn_bwd_support(req, "gfx950", policy=dense_knobs).ok
+    with pytest.raises(ValueError, match="INSTANCE_UNAVAILABLE.*unknown knobs"):
+        attn_bwd_plan(req, "gfx950", policy=dense_knobs)  # the general planner
+    thd = _req(layout="thd")
+    v = attn_bwd_support(thd, "gfx950", policy=dense_knobs)
+    assert v.code == "INSTANCE_UNAVAILABLE" and "unknown knobs" in v.detail
+    # RDNA has no dense family
+    v = attn_bwd_support(req, "gfx1151", policy=dense_knobs)
+    assert v.code == "INSTANCE_UNAVAILABLE"
+    # the forced-route check: request and policy checks, no plan resolution
+    from kernels.common.attention_bwd_plan import attn_bwd_request_verdict
+
+    assert attn_bwd_request_verdict(thd, "gfx950", policy=dense_knobs).ok
+    assert attn_bwd_request_verdict(_req(dropout=0.1), "gfx950").code == "DROPOUT"
+    assert attn_bwd_request_verdict(_req(d_qk=256, d_v=256), "gfx950").kind == (
+        "not_yet_implemented"
+    )
+    undeclared = AttnBwdPolicy(declared_groups=frozenset({"base"}))
+    v = attn_bwd_request_verdict(_req(h_k=2, h_v=2), "gfx950", policy=undeclared)
+    assert v.code == "NOT_YET_DECLARED"

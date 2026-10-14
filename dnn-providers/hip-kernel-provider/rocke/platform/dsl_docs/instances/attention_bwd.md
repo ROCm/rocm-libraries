@@ -32,7 +32,7 @@ knob value, a refused value, or a recorded design; no shipped kernel emits it.
 * The **dense** family (shape-specialised, per-arch builders running the
   shared tile step behind a dense shell) is **built** (section 8.2); routing
   takes it only for the dense keys of its tuned table (keys whose dense
-  winner passed its performance gate, 9.3) and the general route for every
+  winner passed the bench's confirm stage, 9.3) and the general route for every
   other request. The **unified**
   family (THD queries over a paged KV cache, a rocKE-native entry point) is
   **built** (section 8.3, `attention_bwd_unified.md`).
@@ -72,18 +72,116 @@ knob value, a refused value, or a recorded design; no shipped kernel emits it.
 | `library/kernels/common/attention_dense_bwd_dq.py` | `AttentionDenseBwdDqSpec`, `validate_attn_dense_bwd_dq_spec`, `dense_dq_static_classes`, the `rocke.attn_dense_bwd_dq.v1` ABI list, `build_attention_dense_bwd_dq` (the dense split dQ kernel) |
 | `library/kernels/common/attention_bwd_comgr.py` | the production comgr of the compile-only paths without importing torch (`ROCKE_COMGR_LIB` pinned by path) and the process-tree comgr cache directory (11) |
 | `library/kernels/common/attention_bwd_cache.py` | the on-disk code-object cache shared by the run glue (opt-in, `ROCKE_BWD_HSACO_CACHE`), the tests' pre-build, the sweep and the timing harness: toolchain identity, source hash, keys, atomic entries |
-| `library/dispatch/attention_bwd/tuning_common.py` | the knob registry (`KnobAxis`) and `backward_spec_legality` |
+| `library/dispatch/attention_bwd/tuning_common.py` | the knob registry (`KnobAxis`), `backward_spec_legality` and the known-wrong values `BWD_KNOWN_WRONG_KNOBS` (empty) |
+| `library/dispatch/attention_bwd/unified_tuning.py` | the unified family's knob axes, `unified_spec_legality` and the tuned page-tile table (8.3) |
+| `library/dispatch/attention_bwd/registry.py` | the dispatcher: one candidate per (family, arch) in `ATTENTION_BWD_REGISTRY`, `attention_bwd_ranker`, `dispatch_attention_bwd`, `launch_attention_bwd`, `run_attention_bwd` (8.4) |
 | `library/tests/test_attention_bwd_noatomic.py` | the slice sink and the atomic-free backward (2.5a): knob, plan, slice ownership, no atomic instruction in the IR, determinism policy, registry and sweep, device numerics and bitwise repeats |
 | `library/tests/test_attention_bwd_access.py` | the memory-access levers (3.9): legality, IR forms, plan narrowing, the resource gate of every new value, device bit-for-bit checks |
 | `library/dispatch/attention_bwd/dense_tuning.py`, `routing.py` | the dense knob registry and tuned dense table; `plan_attention_bwd` (routing among the families), `attention_bwd_declaration` (the declaration under the routed policy) |
 | `library/dispatch/attention_bwd/gfx942_tuning.py`, `gfx950_tuning.py`, `tuned_tables.py` | the per-arch tuned tables (general, dense, performance status) and the entry check every entry passes, also used on the sweep's emitted entries (9.3) |
 | `library/tests/dispatch/attention_bwd/test_serving_policy.py` | the shipped serving policy (9.3): every accepted request served on gfx942 / gfx950, the status recorded and published per class and never steering the plan, the remaining declines, the opt-in performance gate, tuned and untuned keys |
 | `library/benchmarks/common/attention_bwd_sweep.py` | the funnel sweep driver; `attention_bwd_compile.py` (compile cache, crash isolation), `attention_bwd_bench.py` (paired timing harness), `attention_bwd_census.json` (shape census, no measurements) |
+| `library/benchmarks/common/attention_bwd_rocke_arm.py`, `attention_bwd_unified_bench.py` | the rocKE arm of the timing harness (request from the bench tensors, configured or routed plan, launch); the unified family's bench driver |
+| `library/kernels/common/attention_bwd_unified_run.py` | launch glue of the unified family (8.3) |
+| `library/kernels/common/_attention_bwd_paged.py` | paged KV addressing of the unified family: block-table reads, the page pointer, the page workspace rows |
+| `library/kernels/common/_attention_bwd_refusals.py` | the recorded resource-gate refusals (`RESOURCE_REFUSED`, `LAYOUT_SPILLING_COMBOS`; 11) |
+| `library/kernels/common/_lse_store.py` | the natural-log fp32 LSE store of the MFMA / WMMA attention forward bodies (an `AttnFwdExt.epilogue_hook`): the statistics this family consumes (12.1) |
+| `platform/python/rocke/helpers/attention_fwd_ext.py`, `attention_band.py`, `wmma_attention.py`, `_attention_shared.py` | forward-side helpers (default off; the forward default IR is unchanged): the opt-in extension points of the forward inner body (`AttnFwdExt`: score and epilogue hooks, used for the LSE output), the runtime two-sided band (`AttnRuntimeBounds`, `BandEmitter`), the wave32 WMMA forward body moved out of `mfma_attention.py` (re-exported there) and the pieces both bodies share |
+| `platform/python/rocke/numeric/sdpa_reference.py` | the torch-free float64 SDPA forward and backward oracle of the device tests |
+| `platform/python/rocke/runtime/_comgr_fresh_process.py` | the child process of `compile_kernel(..., fresh_process=True)` (3.5a: `iglp_opt(1)` kernels) |
+| `library/tests/test_attention_bwd_ir_golden.py`, `tests/golden/attention_bwd_ir_sha256.json` | LLVM-IR golden hashes of the main, split dQ, aux and unified kernels on the four targets at every LLVM flavor (11) |
+| `library/tests/parity/barrier_fence_emit.py`, `tests/test_barrier_fence_parity_emit.py` | the Python reference emitter of the barrier `fence` attribute and its checks (11) |
 
-All backward modules are Python-only family glue (no C++ twin); compiled
-artifacts are built with the Python lowering backend.
+### 0.3 The C++ engine
+
+The backward modules are Python-only family glue: their selectors, specs,
+plans, knob registries and routing exist in Python only, and their kernels
+are lowered and compiled with the Python lowering backend. The change adds
+three things to the C++ engine, each the mirror of a Python change that other
+families or the toolchain share:
+
+* **The barrier `fence` attribute** of `tile.sync`, `tile.sync_lds_only` and
+  `tile.s_barrier_bare` (every backward barrier carries `fence="compiler"`,
+  3.5): `platform/cpp/core/ir/ir_flow.cpp` (`rocke_b_sync_fence`,
+  `rocke_b_sync_lds_only_fence`), `platform/cpp/include/rocke/ir.h`,
+  `platform/cpp/core/lower_llvm/control.cpp` (the compiler memory clobber
+  after `s.barrier`, and the workgroup release / acquire fences around it) and
+  `platform/cpp/core/lower_hip/lower_hip_mma.cpp` (the HIP lowering). An
+  unfenced barrier keeps its emission, so no other family's IR moves. Tested
+  by `platform/tests/core/test_barrier_fence.cpp` (C++ unit test, `ctest`
+  label `ckc;unit;host`), `platform/tests/core/test_barrier_fence.py`
+  (Python, with the cross-engine comparison when `rocke_engine` is built) and
+  the parity emitter `library/tests/parity/barrier_fence_emit.py` (the C++
+  engine lowers its serialized probe and backward kernels to the Python
+  bytes, `tests/test_barrier_fence_parity_emit.py`).
+* **The torch-package ROCm version reader** in
+  `platform/cpp/core/lower_llvm/core.cpp` (`ll_torch_hip_version_text`,
+  `ll_torch_package_rocm_version`): a comgr library inside a torch package
+  (`<site>/torch/lib`) is dated by that package's `version.py`, as the Python
+  `runtime/comgr.py` does, so both engines resolve the same LLVM flavor when
+  `ROCKE_COMGR_LIB` pins torch's bundled comgr (`platform/tests/test_rocke.py`,
+  `TestCrossEngineFlavorAutoResolution`).
+* **The gfx942 3-D tiled attention kernel name**: the C++ glue
+  (`platform/cpp/instances/gfx942/attention_tiled_3d_gfx942_attn_tiled_3d_public_glue.cpp`)
+  adds the `fnuz` name token of an fp8 KV cache that the Python builder
+  already emits, so the two engines name that kernel identically (a
+  byte-identity fix of the forward family).
+
+**C++ engine waiver.** The attention backward families (general,
+split dQ, aux, dense, unified) have no C++ twin in this change: no C++
+selector, spec, plan, knob registry, routing or kernel builder. The
+dual-engine rule of `platform/AGENTS.md` (byte-identical IR from both
+engines) applies to every family the C++ engine builds and serves; the
+backward family is not one of them: the C++ engine does not build or serve a
+backward kernel and no C++ caller plans a backward request, so the provider's
+rocKE path does not offer this backward to hipDNN until a C++ port (or a
+Python-serving path) lands; hipDNN serves the backward with its other engines
+meanwhile.
+What the backward kernels share with the C++ engine, the barrier fence, is
+mirrored and tested above, and `check_byte_identity.py` (llvm20, llvm22,
+llvm23) holds the IR of every dual-engine family unchanged. The backward
+kernels' own IR is pinned by the Python golden hashes
+(`test_attention_bwd_ir_golden.py`, `test_attention_dense_bwd_ir.py`).
+Follow-up: a C++ port of the backward plan and kernels when a provider serves
+the backward without Python. The reviewer's sign-off on this waiver is
+recorded in the pull request.
+
+### 0.4 Family glue and the helper layer
+
+The family's emitters live in `library/kernels/common/_attention_bwd_*.py`,
+not in `platform/python/rocke/helpers/`. By `platform/AGENTS.md` ("helpers/
+placement") an SSA emitter goes to `helpers/` when a second family uses it (or
+plausibly will) and it has a C++ port path; single-family glue stays with the
+family. The backward has one consumer family and no C++ port (0.3), so nothing
+is promoted; a piece moves when a second family needs it. The map against the
+existing helpers:
+
+| Family module | What it holds | Nearest helper | Relation |
+|---|---|---|---|
+| `_attention_bwd_gemm.py` | `BlockGemm` over a warp grid, the C-to-A relabel entry points, the inline-asm MFMA clusters | `helpers/atoms.py`, `helpers/mfma_attention_bwd.py` | uses the atoms; `mfma_attention_bwd.py` is the older per-lane backward inner body of `fmha_bwd.py` (8.4), a different algorithm |
+| `_attention_bwd_frag.py` | lane maps, the checked relabel plan, K-permuted B coordinates, LDS fragment loaders (`ds_read_tr16_b64`) | `helpers/layouts.py` (`TransposeLdsReader`) | the forward reader covers K^T tiles of one GEMM; the backward's five-GEMM relabel and permuted coordinates have one user |
+| `_attention_bwd_lds.py` | the LDS phase planner, the XT images, the row XOR layouts | `helpers/layouts.py` (`LdsLayout`, `xor_swizzle_bytes`) | same XOR idea; the phase planner (buffers live per step phase) is backward-specific |
+| `_attention_bwd_ring.py`, `_attention_bwd_counted.py` | the Q / dO prefetch ring (register and DMA paths) and the counted waits | `helpers/pipeline.py` (`SoftwarePipeline`), `helpers/loads.py` (`AsyncTileLoader`, `AsyncPingPongLoader`) | the ring's wait model counts the step's dQ atomics in `vmcnt`; the helpers have no atomic-aware wait model |
+| `_attention_bwd_band.py` | the inverse band (q-tile range of a key tile), the tile classifier, mask policies, the dK / dV store rule | `helpers/attention_band.py` (`AttnRuntimeBounds`, `RowBand`, `BandEmitter`) | the same keep rule; the inverse band and the store rule are backward-only |
+| `_attention_bwd_sched.py` | the stage tables and their hint emission | `helpers/schedule.py` (`SchedulePolicy`) | built on the same intrinsics; the tables model this step's matrix-op and atomic counts |
+| `_attention_bwd_addr.py`, `_attention_bwd_paged.py`, `_attention_bwd_worklist.py` | strided, THD, workspace and paged addressing; CTA decode, XCD remap, work list | `helpers/tensor_view.py`, `helpers/grid.py` | family-specific forms (64-bit batch / head rebase, clamped workspace rows, block-id guard); the XCD remap matches the chiplet helper's transform (tested) |
+| `_attention_bwd_body.py`, `_attention_bwd_dqbody.py`, `_attention_bwd_sinks.py`, `_attention_bwd_valu.py`, `_attention_bwd_tiles.py`, `_attention_bwd_caps.py`, `_attention_bwd_refusals.py`, `_attention_dense_bwd_shell.py` | the tile step, the dQ body, the dQ sinks, the VALU levers, tile legality, arch capabilities, the recorded refusals, the dense shell | none | backward-only |
 
 ## 1. Math
+
+### 1.0 Notation
+
+| Symbol | Meaning |
+|---|---|
+| `D` | the head dim (`d_qk == d_v`; `head_size` in the specs); never a row statistic: the softmax correction is `Dsum` |
+| `S_q`, `S_kv`, `S_max` | sequence lengths (always subscripted; `S_max` a bound) |
+| `S`, `S_raw` | in equations, GEMM names and register plans: the score tile (`S_raw = Q K^T`, `S = s * S_raw`); "S / dP" names the two G0 / G2 accumulator tiles |
+| `B`, `H`, `S`, `D` in a layout name or stride tuple | tensor dims (`BSHD`, `(B, H, S, D)` strides): batch, head, sequence position, head dim |
+| `h_q`, `h_k`, `h_v`, `G` | query / key / value head counts; the query heads per key / value head group (12.3) |
+| `s` | the softmax scale (default `1 / sqrt(D)`); `scale_log2 = s * log2(e)` |
+| `P`, `dP`, `dS` | the probabilities, `dO V^T`, the gradient of the scores |
+| `Dsum` | the per-row softmax correction `rowsum(dO * O)` (`WS_DSUM`) |
+| `kM0`, `kN0`, `kK4`, `W` | query rows per step, keys per CTA, the G4 key slice, waves per CTA |
 
 ### 1.1 Forward recap
 
@@ -108,14 +206,14 @@ Given `dO`, with `S_raw = Q K^T` (unscaled) recomputed tile by tile:
 ```
 P   = exp(s * S_raw - LSE)            (recomputed; masked and dead cells 0)
 dP  = dO V^T
-D   = rowsum(dO * O)                  (= rowsum(P * dP); "Dsum")
-dS  = P * (dP - D)
+Dsum = rowsum(dO * O)                 (= rowsum(P * dP))
+dS  = P * (dP - Dsum)
 dV  = P^T dO
 dK  = s * dS^T Q
 dQ  = s * dS K
 ```
 
-`D` is the per-row correction of the softmax Jacobian; computing it from `dO`
+`Dsum` is the per-row correction of the softmax Jacobian; computing it from `dO`
 and `O` (one dot product per row) is cheaper than `rowsum(P * dP)` over all
 keys, and it is computed once per row by prep instead of once per key tile.
 
@@ -123,7 +221,7 @@ The kernel names the five matrix products of one tile step:
 
 | GEMM | Product | Shape (M x N over K) | Accumulator |
 |---|---|---|---|
-| G0 | `S = Q K^T` | `kM0 x kN0` over `D` | fresh per step |
+| G0 | `S_raw = Q K^T` | `kM0 x kN0` over `D` | fresh per step |
 | G2 | `dP = dO V^T` | `kM0 x kN0` over `D` | fresh per step |
 | G1 | `dV += P^T dO` | `kN0 x D` over `kM0` | carried across steps |
 | G3 | `dK += dS^T Q` | `kN0 x D` over `kM0` | carried across steps |
@@ -1700,6 +1798,17 @@ it only serves cells the general family already declares.
   values (the device twin tests).
 * **Not built.** The per-arch bodies (`body_variant` `xt` / `trload`) and
   mirror pairing raise before any IR is emitted.
+* **The shape pin is explicit.** The shape is compiled into the code object
+  (strides, slab ranges, the kv-tile count and the compile-time band
+  classification fold it into constants), so two shapes are two kernels and
+  the shape is part of the kernel name (readable tokens: profiles, traces and
+  resource-gate rows stay attributable to a shape, as in the gfx942 dense
+  forward). The spec class states it: `SHAPE_BINDING = "compile_time"`,
+  `SHAPE_FIELDS` (`seqlen_q`, `seqlen_kv`, `num_query_heads`, `num_kv_heads`,
+  `head_size`, `layout`, and `batch` when pinned) and `shape_key()`. A
+  runtime-shape dense body would be a new body (the lengths as kernargs lose
+  the compile-time classification) and is not built; the general family
+  serves every shape outside the tuned dense keys.
 * **Tuning.** The sweep's dense slices (9.2) take the general funnel's
   survivors onto the dense route, vary the dense-only knobs in the runtime
   stage and confirm the best dense candidate against the general winner; a
@@ -1720,7 +1829,7 @@ table), with dK / dV scattered into a paged gradient cache: direct scatter
 when the caller asserts that the block table is injective over live slots,
 else an fp32 page workspace with atomics (`page_zero` / `page_convert`). It
 runs the shared tile step and the per-kv-tile driver behind its own shell and
-has its own request, predicate, plan and declaration (version 1); the
+has its own request, predicate, plan and declaration (version 2); the
 contract is `attention_bwd_unified.md`. It is reachable from rocKE dispatch
 only (`dispatch/attention_bwd/routing.plan_attention_bwd_unified`; hipDNN
 keeps declining `PAGED`). The shell refuses the general shell's knobs it does
@@ -1744,15 +1853,36 @@ Routing uses request fields only (no device query) and never adds or removes
 a declared cell. `dispatch/attention_bwd/routing.py` (`plan_attention_bwd`)
 returns the plan of exactly one family: `dense_policy` turns the tuned dense
 table (`DENSE_BWD_TUNED`, the per-arch dense tables; a dense key enters only
-after its performance gate) into the policy's `dense_pack` and dense tuning, `arch_tuned_policy`
+after its confirm stage) into the policy's `dense_pack` and dense tuning, `arch_tuned_policy`
 joins the per-arch general tables into the policy's `tuned_table` and the
-per-arch status into its `perf_status` (9.3), and `route=` forces a route for
-gate runs. The routed policy serves every request the predicate accepts and
-the plan builds; the performance status of a class never steers the route or
-the knobs (9.3). There is no backward dispatcher (request / candidate /
-ranker) yet; `dispatch/attention_bwd/` holds the knob registries and this
-routing. A paged (unified) request is not routed here: it has its own
-entry point (8.3).
+per-arch status tables (empty, 9.3) into its `perf_status`, and `route=`
+forces a route for gate runs. The routed policy serves every request the
+predicate accepts and the plan builds; the performance status of a class
+never steers the route or the knobs (9.3). A paged (unified) request is not
+routed here: it has its own entry point (8.3).
+
+**Dispatcher.** `dispatch/attention_bwd/registry.py` puts the three
+families behind the forward dispatcher's interface (`rocke.dispatch.core`):
+one `KernelCandidate` per (family, arch) in `ATTENTION_BWD_REGISTRY`, each
+with a `Capability` and the family's exact predicate (the general predicate
+under the routed policy, the dense eligibility plus the dense plan, the
+unified predicate), the ranker `attention_bwd_ranker` (a candidate with a
+tuned entry for the request first, so the dense family wins exactly where
+this routing sends the request, then the registered order) and the entry
+points `dispatch_attention_bwd`, `dispatch_attention_bwd_all`,
+`launch_attention_bwd` and `run_attention_bwd`.
+
+**Production status: dormant.** This routing and the dispatcher are not
+load-bearing for production yet. No provider calls it: the hip-kernel-provider serves rocKE
+kernels through the C++ engine, which has no backward (0.3), so a hipDNN
+backward request is served by the provider's other engines. Its callers today are
+the tests (`test_serving_policy.py` plans every accepted case through
+`routing.plan_attention_bwd` with the shipped policy and no override;
+`tests/dispatch/attention_bwd/test_registry.py` drives the dispatcher); the
+timing harness plans its rocKE arms with the configured policy of each arm
+(`attention_bwd_rocke_arm.config_policy`). Follow-up: wire the provider's backward path to
+`attention_bwd_declaration` and `plan_attention_bwd` (with the C++ port of
+0.3, or through a Python-serving provider).
 
 The scalar `fmha_bwd.py` kernel and the `mfma_attention_bwd.py` helpers are a
 separate, older backward (CK Tile parity); this family neither uses nor
@@ -1790,8 +1920,15 @@ runtime value (`RUNTIME_KNOBS`: `g_split`, `lb_order`, `xcd_chunk`,
   their own;
 * `requires`: a cheap coupling filter; the kernel validator still decides.
 
-Legality has one source: `backward_spec_legality` = `validate_attn_bwd_spec`
-then `_not_built`.
+Legality has one source: `backward_spec_legality` = `validate_attn_bwd_spec`,
+the known-wrong values, then `_not_built`. `BWD_KNOWN_WRONG_KNOBS` (per
+target, the values that build but are known to compute wrong results; the
+analogue of the forward's `KNOWN_WRONG_KNOBS`) is empty: every backward value
+found wrong was fixed or is refused exactly by its validator. An entry would
+be held out of every sweep level, the legality verdicts, the tuned tables and
+the dispatcher's candidates. The unified family's axes and legality are
+`dispatch/attention_bwd/unified_tuning.py`; the dense family's,
+`dense_tuning.py`.
 
 **Lever retention.** A knob that loses everywhere stays registered and off by
 default; nothing is deleted for losing. Knob values that change nothing under a
@@ -1888,10 +2025,13 @@ hints), and no hint ever reaches the policy as a knob.
   grid-fill bucket (default grid against `num_cus`: under, full, over,
   unknown). `AttnBwdPolicy.tuned_table` is looked up most-specific first (exact,
   then either bucket as `*`, then both), then the `tuning` hook overrides it.
-* **Policy** (`shipped_policy`): reads `kernels/common/attention_bwd_tuning.py`
-  when the tree has it (this tree has none). Serving is functional only: the
-  shipped policy serves every request the predicate accepts and the plan
-  builds, on every declared target. The declines that remain are the
+* **Policy** (`shipped_policy`): the kernel-level default is `AttnBwdPolicy()`
+  (every declared feature group, no performance gate, no tuned knobs, no
+  dense pack); it reads no module and no table. The routing layer adds the
+  per-arch tuned tables and the dense pack (`routing.routed_policy`, 8.4).
+  Serving is functional only: the shipped and the routed policy serve every
+  request the predicate accepts and the plan builds, on every declared
+  target, gfx942 and gfx950 included. The declines that remain are the
   functional ones of 12.5 (scope, dtype, shape, layout, stride, range, the
   resource gate, an undeclared feature group).
 * **Performance status is information.** Each class carries one of
@@ -1903,32 +2043,50 @@ hints), and no hint ever reaches the policy as a knob.
   request plans identically under any status. A policy that wants the old
   claim discipline opts into `AttnBwdPolicy.perf_gate`: a `below_baseline`
   class is declined `PERF_BELOW_BASELINE` and an `unverified` one
-  `PERF_UNVERIFIED` unless `waive_unverified` (off in the shipped policy;
-  RDNA is never declined on performance).
-* **Status source.** The per-arch status comes from the same gate-confirmed
-  bench results the tuned entries come from (clean A/A control, pruning-set
-  gate on, a confirm and not a screen), on the census cells the routed policy
-  serves on the class. A class is `below_baseline` when the confirmed winner of
-  one of its cells loses to the bar (the PyTorch-selected backend), and
-  `verified` when every such cell has a confirmed winner that does not and the
-  routed policy serves each of them with exactly the measured configuration.
-  Every other class is `unverified`: no confirmed cell, or a cell served with
-  a configuration other than its measured winner (an untuned key keeps the
-  defaults). The measurements themselves stay in the private record.
+  `PERF_UNVERIFIED` unless `waive_unverified` (both off in the shipped and
+  the routed policy; RDNA is never declined on performance). The status
+  machinery is kept as default-off levers (lever retention).
+* **No per-class status is shipped.** The in-repo status tables
+  (`GENERAL_PERF_STATUS`, `DENSE_PERF_STATUS` of every arch module) are empty
+  by policy: a per-class label derived from a comparison with another
+  backend is a performance claim and stays out of the repository. Every CDNA
+  class therefore reads `unverified` in the routed declaration, and every
+  class is served. A deployment that keeps its own measured statuses passes
+  them in `AttnBwdPolicy.perf_status` (and, if it wants the claim discipline,
+  `perf_gate`); the tests use synthetic statuses.
 * **Per-arch tables** (`dispatch/attention_bwd/gfx942_tuning.py`,
-  `gfx950_tuning.py`): `GENERAL_TUNED_TABLE` (tuning key -> knobs),
-  `GENERAL_PERF_STATUS` (general class -> status), `DENSE_TUNED`
-  (`(arch, dense key)` -> dense knobs) and `DENSE_PERF_STATUS` (dense class,
-  `(arch, "dense", *dense key)` -> status) of each arch; the status tables
-  list `verified` and `below_baseline` classes only. An
-  entry is a key whose winner passed the bench's confirm stage on every
-  measured cell of the key (clean A/A control, pruning-set gate on; a dense
-  entry also a paired win over the general winner), one configuration on all
-  of them. The routing joins them (`routing.ARCH_TUNING`,
-  `routing.arch_tuned_policy` in `routed_policy`, and `DENSE_BWD_TUNED`).
-  The fill bucket of a key is the measured one on the device (the requests
-  carried the device's `num_cus`), so a request without `num_cus` (fill
-  `unknown`) keeps the defaults.
+  `gfx950_tuning.py`): `GENERAL_TUNED_TABLE` (tuning key -> knobs) and
+  `DENSE_TUNED` (`(arch, dense key)` -> dense knobs) of each arch, plus the
+  empty status tables above. An entry is a key whose winner passed the
+  bench's confirm stage on every measured cell of the key (clean A/A control,
+  pruning-set gate on; a dense entry also a paired win over the general
+  winner), one configuration on all of them. The routing joins them
+  (`routing.ARCH_TUNING`, `routing.arch_tuned_policy` in `routed_policy`, and
+  `DENSE_BWD_TUNED`). The fill bucket of a key is the measured one on the
+  device (the requests carried the device's `num_cus`), so a request without
+  `num_cus` (fill `unknown`) keeps the defaults. gfx942 has no dense entry
+  (no dense configuration was confirmed there).
+* **Provenance of the tuned entries** (qualitative; the measurements stay in
+  the private record). The general entries come from the funnel sweep (9.2:
+  `benchmarks/common/attention_bwd_sweep.py`, its confirm stage, timed by
+  `attention_bwd_bench.py` with the pruning-set gate passed explicitly as
+  `--gate tests._attention_bwd_perf_gate:gate`) on the census cells of
+  `attention_bwd_census.json` that fall in each key; the selection rule is
+  "one configuration confirmed on every measured cell of the key, against the
+  default configuration and the competitor in the same paired attempts, with
+  a clean A/A control" (a key whose cells disagree is left out). The dense
+  entries come from the sweep's dense slices (`--emit-dense-table`, the
+  paired win over the general winner). `general_entries` / `dense_entries`
+  turn the sweep's emitted entries into checked table entries, and the entry
+  check below runs on every one.
+* **Why these buckets.** The kv-tile bucket bounds (1, 4, 16, 64 key tiles
+  at the class's default `kN0`) are a design choice fixed before any
+  measurement: powers of four from a single key tile (decode-like spans) to
+  long sequences, so each bucket spans a four-fold range of key tiles per
+  CTA column. The fill bucket compares the default grid with the device's
+  CU count. Both read request fields only, so a table entry can never depend
+  on its own choice; the census cells reach several kv-tile buckets and all
+  three measured fill buckets (`test_attention_bwd_rocke_arm.py`).
 * **Entry check** (`dispatch/attention_bwd/tuned_tables.py`): every entry,
   shipped or emitted by the sweep (`dense_entries` / `general_entries`), is
   planned the way the routing consumes it on representative requests of its
@@ -2091,6 +2249,22 @@ Runtime and aux values:
   disagree in the last bit.
 
 ## 11. Invariants enforced by the tests
+
+**Which gate proves what.**
+
+| Gate | Where it runs | Proves | Does not prove |
+|---|---|---|---|
+| Byte identity (`platform/tools/check_byte_identity.py`, at llvm20, llvm22 and llvm23) | CPU, with `rocke_engine` built | the C++ and Python engines emit the same LLVM IR for every dual-engine family, so the shared changes (the barrier fence, the gfx942 3-D kernel name) moved no forward family | anything about the backward kernels: they have no C++ builder (0.3) |
+| Backward IR goldens (`tests/test_attention_bwd_ir_golden.py`, `tests/test_attention_dense_bwd_ir.py`) | CPU, every flavor in every run | the LLVM IR of the main, split dQ, aux, unified and dense kernels on their targets equals the blessed hashes, for the default of every problem base and every registered knob value switched on (the uncovered values are listed and kept exact); a refactor that should be byte-identical is | that the IR is correct (numerics) |
+| Barrier-fence parity (`tests/parity/barrier_fence_emit.py` with `tests/test_barrier_fence_parity_emit.py`; `platform/tests/core/test_barrier_fence.{py,cpp}`) | CPU; the cross-engine part with `rocke_engine` built | each barrier gets exactly its fence emission in both engines; the serialized IR keeps the fence; the C++ engine lowers the serialized backward kernels to the Python bytes | that LLVM keeps LDS accesses on their side of a barrier (next row) |
+| Fence in the code object (`tests/test_attention_bwd_barrier_fence.py`) | compile (comgr + `llvm-objdump`) | LDS bytes read and written between consecutive prologue barriers are the same in the ISA as in the IR; the unfenced kernel shows the crossing (negative control) | |
+| IR structure (`tests/test_attention_bwd_ir.py` and the family IR tests; list below) | CPU | ABI order, barrier placement, matrix-op and atomic counts, address widths, knob effects | numerics |
+| Resource gate (below) | compile, `llvm22` with the production comgr | zero scratch and spills, register and LDS budgets, AGPR copy budget on every enumerated instance | correctness, speed |
+| Device numerics (`tests/test_attention_bwd_numeric.py` and the family numeric tests) | gfx942, gfx950, gfx1151, gfx1201 | results within the declared per-dtype tolerance of an independent float64 oracle (`tests/_attention_bwd_harness.py`, `rocke.numeric.sdpa_reference`), bitwise claims of the bitwise levers, dead rows, negative controls | speed |
+| Mutation tests (`tests/test_attention_bwd_mutations.py`, `test_attention_bwd_unified_mutations.py`) | device | the numeric tests catch injected kernel defects | |
+| Host checks (`tests/test_attention_bwd_host_checks.py`) and the paged block-id guard (`tests/test_attention_bwd_paged_guard.py`) | CPU; the guard's canary runs on a device | every host-check code is reached by a malformed input and valid inputs pass (12.7); an out-of-range block id never addresses outside the caches | that a caller runs the checks (the run API trusts its pointers) |
+| Pruning-set gate (`tests/_attention_bwd_perf_gate.py`, passed to the timing harness as `--gate`, no environment default) | device, in every timing process | every timed rocKE configuration passes the numeric gate on the very code objects it times | a performance claim (results are private; 9.3) |
+| Installed golden (`platform/tests/rocke_installed_golden_test.py`) | CPU, from an installed package | the representative IR cases of the platform harness are byte-stable at every flavor in an install | the backward kernels (not in the platform harness) |
 
 * **Resource gate** (`tests/_attention_bwd_resources.evaluate_resource_gate`,
   run on every IR-suite instance by
@@ -2378,7 +2552,18 @@ out-of-bounds access (every workspace row is clamped); a supplied
 
 `attn_bwd_support(req, arch, *, policy=None) -> Verdict(ok, code, detail)` is a
 pure function of the request and the in-repo policy tables; the first failing
-check wins:
+check wins. Every code has a kind (`DECLINE_KINDS`, `Verdict.kind`, published
+per code in the declaration): `out_of_scope` (a permanent decision of this
+entry), `not_yet_implemented` (a feature the family can add; the detail starts
+with `NOT_YET_IMPLEMENTED:`), `request_limit` (a malformed request, or one past
+the kernels' index, grid or format limits) or `policy` (the shipping policy
+declines). The request is type-checked at construction: a flag that is not a
+`bool`, or an extent, bound or count that is not an integer, raises
+`TypeError`. An accepted request plans: after the request checks the predicate
+resolves the plan of the request's route under the policy, its tuned knobs
+included, and declines `INSTANCE_UNAVAILABLE` when no plan builds (a spec the
+family validator refuses, among them the recorded resource-gate failures, or
+a tuned value the request cannot take).
 
 | # | Code | Decline when |
 |---|---|---|
@@ -2390,7 +2575,7 @@ check wins:
 | 6 | `OUT_DTYPE` | dQ, dK, dV differ from the input dtype |
 | 7 | `LSE_FORMAT` | stats not fp32 or not in a form of 12.1 |
 | 8 | `DQK_NE_DV` | `d_qk != d_v` |
-| 9 | `HEAD_DIM_256_BWD` | d == 256 (out of scope for the backward in the requirements; the detail cites the scope) |
+| 9 | `HEAD_DIM_256_BWD` | d == 256 (not implemented yet in the backward; the forward serves d = 256) |
 | 10 | `HEAD_DIM` | d not in {32, 64, 128} |
 | 11 | `GQA_RATIO` | `h_q % h_k != 0` or `h_q % h_v != 0` |
 | 12 | `BAND_BOUND` | a bound `< -1` or `>= 2^30`; both causal booleans; a causal boolean with explicit bounds |
@@ -2404,7 +2589,7 @@ check wins:
 | 20 | `SEQ_LEN_FORMAT` | SEQ_LEN tensors without `padding_mask`; padding without both tensors; not int32 `(B, 1, 1, 1)` |
 | 21 | `RAGGED_FORMAT` | THD offsets not int32 / int64 `[B + 1]`; q-side or kv-side tensors not on one table; multiplier or token stride outside `[1, 2^31)`; a supplied `max_total_*` below 1 for a non-empty problem |
 | 22 | `EMPTY` | B, a head count, a sequence dim or D is 0 |
-| 23 | `INSTANCE_UNAVAILABLE` | the serving instance failed the resource gate |
+| 23 | `INSTANCE_UNAVAILABLE` | the serving instance failed the resource gate, or the plan of the request's route does not build (see above) |
 | 24 | `PERF_BELOW_BASELINE` | opt-in performance gate only (`AttnBwdPolicy.perf_gate`, off in the shipped policy): the request's performance class on its route is `below_baseline` |
 | 25 | `PERF_UNVERIFIED` | opt-in performance gate only: the class is `unverified` and the policy does not waive unverified classes |
 | 26 | `NOT_YET_DECLARED` | the request needs a functional feature group whose correctness gate has not passed |
@@ -2423,10 +2608,11 @@ runtime value is a tuning choice and the request is served without it.
 ### 12.6 Declaration
 
 `attn_bwd_declaration(arch, *, policy=None)` returns a JSON-serialisable dict:
-`family`, `version` (3), `abi` (`rocke.attn_bwd.v3`), `arch`, `status`
+`family`, `version` (4), `abi` (`rocke.attn_bwd.v3`), `arch`, `status`
 (`declared`, `not_validated`, `unsupported`), `rdna_status`, accepted value sets
-per axis (`head_dim_declined` carries the code and the reason), the ordered
-`reason_codes`, `feature_groups` and `declared_feature_groups`, the `lse`
+per axis (`head_dim_declined` carries the code, its kind and the reason), the
+ordered `reason_codes` with their `reason_kinds`, the
+`not_yet_implemented_prefix`, `feature_groups` and `declared_feature_groups`, the `lse`
 contract, the `workspace` formula, the `determinism` statement, the
 `perf_policy`, `perf` (one entry per (route, class) with its status), the
 `deferral_register` and `notes` (gfx1201: declared on its hardware run; its
@@ -2434,27 +2620,60 @@ forward-chain tests skip because the forward probe shell has no gfx12 body).
 `perf_policy` states how the status is used: `gate` is `information_only`,
 with `unverified` and `below_baseline` both `served`, in the shipped policy,
 and `declines` under the opt-in performance gate. The kernels-level
-declaration reads the policy it is given (the shipped default has no status
-table, so every CDNA class reads `unverified`);
+declaration reads the policy it is given; the shipped default and the routed
+policy carry no status table (9.3), so every CDNA class reads `unverified`.
 `dispatch/attention_bwd/routing.attention_bwd_declaration` publishes it under
-the routed policy, with the per-arch general and dense-pack status of 9.3.
+the routed policy (tuned tables, dense pack).
 
-Deferral register (`DEFERRAL_REGISTER`):
+Deferral register (`DEFERRAL_REGISTER`, published in the declaration): every
+feature decline with its kind and the consequence for hipDNN, which falls back
+to its other engines on any decline.
 
-| Requirement | Code | Consequence for hipDNN |
-|---|---|---|
-| item 9 (d = 256) / item 15 | `HEAD_DIM_256_BWD` | d = 256 models are servable for inference but not trainable through this provider; their training attention stays on CK / AOTriton |
-| item 14 (bias, forward only) / item 15 | `BIAS_IN_BACKWARD` | `F.sdpa(attn_mask=...)` under autograd falls back to CK / AOTriton on every target |
-| item 15 (no dBias) | `DBIAS` | graphs that need dBias train on CK / AOTriton |
-| deterministic backward | `DETERMINISTIC` | under the shipped policy a deterministic backward request falls back to CK / AOTriton (the atomic-free backward is an opt-in policy on gfx942 / gfx950, section 10) |
+| Feature | Code | Kind | Consequence for hipDNN |
+|---|---|---|---|
+| head dim 256 (backward) | `HEAD_DIM_256_BWD` | not yet implemented | d = 256 models are servable for inference but not trainable through this provider; their training attention stays on CK / AOTriton |
+| dropout | `DROPOUT` | not yet implemented | training with attention dropout falls back to CK / AOTriton |
+| bias / attention-mask tensor in the backward graph | `BIAS_IN_BACKWARD` | out of scope (the backward contract has no bias input) | `F.sdpa(attn_mask=...)` under autograd falls back to CK / AOTriton on every target |
+| dBias output | `DBIAS` | out of scope (the contract returns dQ, dK, dV only) | graphs that need dBias train on CK / AOTriton |
+| ALiBi | `ALIBI` | not yet implemented | ALiBi training attention falls back to CK / AOTriton |
+| paged KV cache (general entry) | `PAGED` | out of scope for this entry (the unified entry serves it, 8.3) | a paged backward through hipDNN falls back to CK / AOTriton |
+| fp8 tensors | `FP8` | not yet implemented | fp8 training attention falls back to CK / AOTriton |
+| deterministic backward | `DETERMINISTIC` | not yet implemented (an opt-in policy on gfx942 / gfx950, section 10; not built on RDNA) | under the shipped policy a deterministic backward request falls back to CK / AOTriton |
+| block masks, sink tokens, extra statistics outputs | `UNSUPPORTED_FEATURE` | not yet implemented | such graphs train on CK / AOTriton |
 
-### 12.7 Out of scope (declined)
+### 12.7 Host checks and device data
 
-dBias (`DBIAS`), bias or attention mask in the backward (`BIAS_IN_BACKWARD`),
-dropout (`DROPOUT`), deterministic backward (`DETERMINISTIC`, shipped policy), d = 256 backward
-(`HEAD_DIM_256_BWD`; the forward serves d = 256), fp8 (`FP8`), ALiBi (`ALIBI`),
-paged KV through this entry (`PAGED`; paged problems belong to the unified
-family, a rocKE-native entry point, 8.3), block masks, sink tokens and extra statistics outputs
+The run API (`attention_bwd_run.run_attn_bwd`) is pointer-only and trusts its
+pointers. A caller that holds the tensors checks them first
+(`kernels/common/attention_bwd_run.py`; every check raises
+`ValueError("<CODE>: detail")` with a code of `HOST_CHECK_CODES`):
+
+* `check_attn_bwd_tensors(req, tensors)`: every role (`q k v o do dq dk dv
+  lse`, plus the `SEQ_LEN` tensors with padding and the offsets with THD)
+  against the request: shape, strides on every dim of extent above 1, dtype,
+  and the largest addressed byte within the tensor (`TensorMeta.of(t)` reads
+  a torch-like tensor without importing torch);
+* `check_attn_bwd_lengths(req, ...)`: `SEQ_LEN` values in `[0, S_max]` (a
+  larger value is rejected, `SEQ_LEN_RANGE`, not clamped) and THD offsets
+  that are non-negative, non-decreasing, whole tokens, spans of at most
+  `S_max`, inside the `max_total_*` bound and the tensor (`RAGGED_RANGE`);
+* `check_attn_dense_bwd_tensors(spec, tensors, batch=)`: the dense family's
+  compile-time shape against its tensors.
+
+Device data that reaches a kernel without the checks has a defined behaviour:
+a sequence length is clamped into `[0, S_max]`, and every workspace row is
+clamped (12.4). The unified family's checks and its block-id guard are in
+`attention_bwd_unified.md` section 8.
+
+### 12.8 Declined features
+
+Out of scope (permanent for this entry): dBias (`DBIAS`), a bias or attention
+mask in the backward (`BIAS_IN_BACKWARD`), paged KV through this entry
+(`PAGED`; paged problems belong to the unified family, a rocKE-native entry
+point, 8.3). Not implemented yet: dropout (`DROPOUT`), d = 256
+(`HEAD_DIM_256_BWD`; the forward serves d = 256), fp8 (`FP8`), ALiBi
+(`ALIBI`), a deterministic backward under the shipped policy
+(`DETERMINISTIC`), block masks, sink tokens and extra statistics outputs
 (`UNSUPPORTED_FEATURE`).
 
 ## 13. Known limitations and performance characteristics

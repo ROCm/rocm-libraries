@@ -18,6 +18,10 @@ gfx1151:
   requests of a packed key route dense;
 * a forced general route on a packed key plans the general family; a forced
   dense route on an ineligible request raises.
+
+Every policy here is the shipped one (the routed policy's per-arch tables on
+the shipped kernel-level policy); only the dense table is replaced where the
+point is a table (every key packed, or none).
 """
 
 from __future__ import annotations
@@ -31,11 +35,14 @@ from dispatch.attention_bwd import (
     attention_bwd_route,
     dense_policy,
     plan_attention_bwd,
+    routed_policy,
 )
+from dispatch.attention_bwd.routing import arch_tuned_policy
 from kernels.common.attention_bwd_plan import (
     _dense_key,
     attn_bwd_support,
     dense_bwd_eligibility,
+    shipped_policy,
 )
 
 from .sdpa.bwd_cases import select_bwd
@@ -43,7 +50,6 @@ from .sdpa.bwd_kernel_cases import (
     HEAD_PACK_CASES,
     SUPPLEMENTARY_CASES,
     ZERO_LENGTH_CASES,
-    config_policy,
     request_from_case,
 )
 
@@ -65,13 +71,19 @@ def _requests():
 _REQUESTS = _requests()
 
 
+def _shipped():
+    """The shipped policy with the per-arch general tables (no dense table:
+    each test adds the dense table it is about)."""
+    return arch_tuned_policy(shipped_policy())
+
+
 def _main_stages(plan):
     return [s.stage for s in plan.launches if s.stage in ("main", "dense")]
 
 
 @pytest.mark.parametrize("arch", ARCHS)
 def test_exactly_one_family_and_dense_only_when_eligible(arch):
-    base = config_policy("default", arch)
+    base = _shipped()
     # every key in the table, eligible or not: eligibility must still gate
     table = {(arch, _dense_key(req)): {} for _cid, req in _REQUESTS}
     policy = dense_policy(base, table)
@@ -99,8 +111,8 @@ def test_exactly_one_family_and_dense_only_when_eligible(arch):
 
 @pytest.mark.parametrize("arch", ARCHS)
 def test_empty_table_routes_general(arch):
-    policy = dense_policy(config_policy("default", arch), {})
-    shipped = dense_policy(config_policy("default", arch))
+    policy = dense_policy(_shipped(), {})
+    shipped = routed_policy()
     for cid, req in _REQUESTS[::7]:
         if not attn_bwd_support(req, arch, policy=policy).ok:
             continue
@@ -109,6 +121,7 @@ def test_empty_table_routes_general(arch):
         packed = (arch, _dense_key(req)) in DENSE_BWD_TUNED
         want = "dense" if packed and dense_bwd_eligibility(req, arch)[0] else "general"
         assert attention_bwd_route(req, arch, policy=shipped)[0] == want, cid
+        assert attention_bwd_route(req, arch)[0] == want, cid  # no policy given
 
 
 @pytest.mark.parametrize("arch", ("gfx942", "gfx950"))
@@ -132,7 +145,7 @@ def test_unified_requests_have_their_own_entry(arch):
 
 @pytest.mark.parametrize("arch", ("gfx942", "gfx950"))
 def test_forced_routes(arch):
-    base = config_policy("default", arch)
+    base = _shipped()
     eligible = [
         (cid, req) for cid, req in _REQUESTS if dense_bwd_eligibility(req, arch)[0]
     ]

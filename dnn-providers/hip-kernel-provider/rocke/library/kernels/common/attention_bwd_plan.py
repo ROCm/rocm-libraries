@@ -19,14 +19,28 @@ hooks, of in-repo tables): no device query, no allocation, no kernel build.
   declaration including the performance status per (route, class).
 
 Shipping policy (:class:`AttnBwdPolicy`): which functional feature groups have
-passed their correctness gate, the static performance-status table (information
-only unless a policy opts into the performance gate), instances that failed the
-resource gate, the dense pack and the tuning-table hook. The default policy is
-the shipped one; tests pass their own.
+passed their correctness gate, the performance-status table (information only
+unless a policy opts into the performance gate), instances that failed the
+resource gate, the dense pack and the tuned knobs. :func:`shipped_policy` is
+the kernel-level default (every declared group, nothing else); the routing
+layer (``dispatch/attention_bwd/routing.py``) adds the per-arch tuned tables
+and the dense pack; tests pass their own.
+
+Every decline code has a kind (:data:`DECLINE_KINDS`, ``Verdict.kind``):
+``out_of_scope`` (a permanent decision of this entry), ``not_yet_implemented``
+(a feature the family can add; its detail starts with
+``NOT_YET_IMPLEMENTED:``, the convention of the forward families),
+``request_limit`` (a malformed request, or one past the kernels' index, grid
+or format limits) or ``policy`` (the shipping policy declines).
+
+The request is checked for types at construction: every flag must be a
+``bool`` and every extent, bound and count an integer (``TypeError``
+otherwise), so a truthy non-bool never selects a code path by accident.
 """
 
 from __future__ import annotations
 
+import contextvars
 import dataclasses
 import itertools
 import math
@@ -69,6 +83,8 @@ __all__ = [
     "ATTN_BWD_DECLARATION_VERSION",
     "DECLARATION_NOTES",
     "DECLARED_ARCHS",
+    "DECLINE_KINDS",
+    "DECLINE_KIND_NAMES",
     "DEFERRAL_REGISTER",
     "DQ_KNOBS",
     "FEATURE_GROUPS",
@@ -83,6 +99,7 @@ __all__ = [
     "attn_bwd_narrow_width",
     "attn_bwd_perf_class",
     "attn_bwd_plan",
+    "attn_bwd_request_verdict",
     "attn_bwd_route",
     "attn_bwd_stage_vec",
     "attn_bwd_support",
@@ -93,7 +110,7 @@ __all__ = [
     "shipped_policy",
 ]
 
-ATTN_BWD_DECLARATION_VERSION = 3
+ATTN_BWD_DECLARATION_VERSION = 4
 LOG2E = 1.4426950408889634
 
 # gfx1201 is declared on its hardware validation run (the backward suite on a
@@ -103,52 +120,159 @@ DECLARED_ARCHS = ("gfx942", "gfx950", "gfx1151", "gfx1201")
 NOT_VALIDATED_ARCHS: tuple = ()
 RDNA_ARCHS = ("gfx1151", "gfx1201")
 
-# Requirement-scope reasons cited by the declines and the declaration.
+# Scope statement of the d = 256 decline (the decline detail and the
+# declaration both cite it).
 REQ_SCOPE_D256_BWD = (
-    "d = 256 backward is out of scope within Tier S (hipDNN attention "
-    "requirements, section 1, 'Explicitly out of scope'); item 9 lists head "
-    "dims 64, 128 and 256 for the forward only"
+    "d = 256 backward is not implemented yet: the backward kernels serve head "
+    "dims 32, 64 and 128 (d = 256 attention is served by the forward family "
+    "only)"
 )
 
-# Rows this family writes into the requirements deferral register (section 8)
-# and publishes in the declaration: what is declined, by which reason code,
-# and the consequence for hipDNN.
+# Kinds of decline (see the module docstring), published per reason code.
+DECLINE_KIND_NAMES = ("out_of_scope", "not_yet_implemented", "request_limit", "policy")
+_NYI = "not_yet_implemented"
+_SCOPE = "out_of_scope"
+_LIMIT = "request_limit"
+_POLICY = "policy"
+# The kind of every reason code of the general entry and of the unified
+# (paged) entry (:mod:`kernels.common.attention_bwd_unified_plan`).
+DECLINE_KINDS: Mapping[str, str] = MappingProxyType(
+    {
+        "ARCH_UNSUPPORTED": _SCOPE,
+        "ARCH_NOT_VALIDATED": _POLICY,
+        "DROPOUT": _NYI,
+        "BIAS_IN_BACKWARD": _SCOPE,
+        "DBIAS": _SCOPE,
+        "ALIBI": _NYI,
+        "PAGED": _SCOPE,
+        "FP8": _NYI,
+        "DETERMINISTIC": _NYI,
+        "UNSUPPORTED_FEATURE": _NYI,
+        "SCALE_DEVICE_TENSOR": _NYI,
+        "DTYPE": _NYI,
+        "OUT_DTYPE": _NYI,
+        "LSE_FORMAT": _LIMIT,
+        "DQK_NE_DV": _NYI,
+        "HEAD_DIM_256_BWD": _NYI,
+        "HEAD_DIM": _NYI,
+        "GQA_RATIO": _LIMIT,
+        "BAND_BOUND": _LIMIT,
+        "STRIDE_FORMAT": _LIMIT,
+        "STRIDE_D": _NYI,
+        "STRIDE_NEGATIVE": _NYI,
+        "OUTPUT_OVERLAP": _LIMIT,
+        "STRIDE_ALIGN": _LIMIT,
+        "INDEX_RANGE": _LIMIT,
+        "GRID_LIMIT": _LIMIT,
+        "SEQ_LEN_FORMAT": _LIMIT,
+        "RAGGED_FORMAT": _LIMIT,
+        "EMPTY": _LIMIT,
+        "INSTANCE_UNAVAILABLE": _POLICY,
+        "PERF_BELOW_BASELINE": _POLICY,
+        "PERF_UNVERIFIED": _POLICY,
+        "NOT_YET_DECLARED": _POLICY,
+        # unified (paged) entry only
+        "KV_CACHE_LAYOUT": _NYI,
+        "PAGE_SIZE": _LIMIT,
+        "BLOCK_TABLE_FORMAT": _LIMIT,
+        "BLOCK_TABLE_NOT_INJECTIVE": _POLICY,
+        "SINKS": _NYI,
+        "SOFTCAP": _NYI,
+    }
+)
+# Prefix of the detail of a not_yet_implemented decline.
+NOT_YET_IMPLEMENTED = "NOT_YET_IMPLEMENTED"
+
+# The feature declines of this family, published in the declaration: what is
+# declined, by which reason code, whether the decline is permanent
+# (``out_of_scope``) or a feature not built yet (``not_yet_implemented``), and
+# the consequence for hipDNN (which falls back to its other engines).
 DEFERRAL_REGISTER = (
     {
-        "req": "item 9 (d = 256) / item 15",
+        "feature": "head dim 256 (backward)",
         "reason_code": "HEAD_DIM_256_BWD",
-        "decision": "declined: out of scope within Tier S",
+        "kind": _NYI,
+        "decision": "declined: not implemented yet",
         "rationale": REQ_SCOPE_D256_BWD,
         "consequence": "d = 256 models are servable for inference but not "
         "trainable through this provider; their training attention stays on "
         "CK / AOTriton",
     },
     {
-        "req": "item 14 (bias, forward only) / item 15",
+        "feature": "dropout",
+        "reason_code": "DROPOUT",
+        "kind": _NYI,
+        "decision": "declined: not implemented yet",
+        "rationale": "the backward kernels have no dropout mask or random "
+        "number path",
+        "consequence": "attention-dropout training falls back to CK / AOTriton",
+    },
+    {
+        "feature": "bias / attn_mask tensor in the backward graph",
         "reason_code": "BIAS_IN_BACKWARD",
-        "decision": "declined: bias is forward only",
-        "rationale": "item 14 is forward only; item 15 excludes dBias",
+        "kind": _SCOPE,
+        "decision": "declined: the backward contract has no bias input",
+        "rationale": "the additive bias is a forward-only input of the "
+        "attention contract this family implements",
         "consequence": "F.sdpa(attn_mask=...) under autograd falls back to "
         "CK / AOTriton on every target",
     },
     {
-        "req": "item 15 (no dBias)",
+        "feature": "dBias output",
         "reason_code": "DBIAS",
-        "decision": "declined: out of scope within Tier S",
-        "rationale": "dBias is out of scope within Tier S (section 1)",
+        "kind": _SCOPE,
+        "decision": "declined: the backward contract has no dBias output",
+        "rationale": "the backward contract this family implements returns "
+        "dQ, dK and dV only",
         "consequence": "graphs that need dBias train on CK / AOTriton",
     },
     {
-        "req": "Tier S (deterministic backward)",
+        "feature": "ALiBi",
+        "reason_code": "ALIBI",
+        "kind": _NYI,
+        "decision": "declined: not implemented yet",
+        "rationale": "the backward kernels have no positional-bias term",
+        "consequence": "ALiBi training attention falls back to CK / AOTriton",
+    },
+    {
+        "feature": "paged KV cache (general entry)",
+        "reason_code": "PAGED",
+        "kind": _SCOPE,
+        "decision": "declined by the general entry: paged KV is served by the "
+        "rocKE-native unified entry",
+        "rationale": "the general entry takes dense or THD tensors; the "
+        "unified entry (attention_bwd_unified_plan) serves paged caches and "
+        "is not declared to hipDNN",
+        "consequence": "a paged backward through hipDNN takes CK / AOTriton",
+    },
+    {
+        "feature": "fp8 tensors",
+        "reason_code": "FP8",
+        "kind": _NYI,
+        "decision": "declined: not implemented yet",
+        "rationale": "the backward kernels read and write fp16 / bf16 only",
+        "consequence": "fp8 training attention falls back to CK / AOTriton",
+    },
+    {
+        "feature": "deterministic backward",
         "reason_code": "DETERMINISTIC",
-        "decision": "declined by the shipped policy: out of scope within Tier S",
-        "rationale": "deterministic backward is out of scope within Tier S "
-        "(section 1); the atomic-free backward (split dQ with direct or "
-        "slice dK / dV) exists on gfx942 / gfx950 as an opt-in policy "
-        "(AttnBwdPolicy.deterministic)",
+        "kind": _NYI,
+        "decision": "declined by the shipped policy",
+        "rationale": "the atomic-free backward (split dQ with direct or slice "
+        "dK / dV) exists on gfx942 / gfx950 as an opt-in policy "
+        "(AttnBwdPolicy.deterministic) and is not built on the RDNA targets",
         "consequence": "a deterministic backward request falls back to CK / "
         "AOTriton under the shipped policy; dQ of this provider's default "
         "plan is nondeterministic in the last bits",
+    },
+    {
+        "feature": "block masks, sink tokens, max / sum_exp outputs and other "
+        "features",
+        "reason_code": "UNSUPPORTED_FEATURE",
+        "kind": _NYI,
+        "decision": "declined: not implemented yet",
+        "rationale": "the backward kernels build none of these features",
+        "consequence": "such graphs train on CK / AOTriton",
     },
 )
 
@@ -314,6 +438,59 @@ def _freeze_strides(mapping):
     return _FrozenStrides(mapping) if mapping is not None else None
 
 
+def check_field_types(obj, bools, ints, opt_ints) -> None:
+    """``TypeError`` unless every field in ``bools`` is a ``bool`` (exactly:
+    ``type(x) is bool``, so ``0`` / ``1`` / ``numpy.bool_`` are refused), every
+    field in ``ints`` an integer that is not a bool, and every field in
+    ``opt_ints`` ``None`` or such an integer."""
+    for name in bools:
+        v = getattr(obj, name)
+        if type(v) is not bool:
+            raise TypeError(f"{name} must be a bool, got {v!r}")
+    for name in ints:
+        v = getattr(obj, name)
+        if not _is_int(v):
+            raise TypeError(f"{name} must be an int, got {v!r}")
+    for name in opt_ints:
+        v = getattr(obj, name)
+        if v is not None and not _is_int(v):
+            raise TypeError(f"{name} must be None or an int, got {v!r}")
+
+
+_REQ_BOOLS = (
+    "bottom_right",
+    "causal",
+    "causal_bottom_right",
+    "padding",
+    "has_seq_len_q",
+    "has_seq_len_kv",
+    "ragged_same_table",
+    "scale_is_device_tensor",
+    "has_bias",
+    "want_dbias",
+    "deterministic",
+    "alibi",
+    "paged",
+    "fp8",
+)
+_REQ_INTS = (
+    "b",
+    "h_q",
+    "h_k",
+    "h_v",
+    "s_q",
+    "s_kv",
+    "d_qk",
+    "d_v",
+    "left_bound",
+    "right_bound",
+    "seq_len_stride",
+    "ragged_offset_multiplier",
+    "tensor_alignment",
+)
+_REQ_OPT_INTS = ("max_total_q", "max_total_kv", "num_cus", "num_xcds")
+
+
 def _json_value(v):
     if isinstance(v, Mapping):
         return {str(k): _json_value(v[k]) for k in sorted(v, key=str)}
@@ -392,6 +569,9 @@ class AttnBwdRequest:
     block_table_injective: Optional[bool] = None
 
     def __post_init__(self) -> None:
+        check_field_types(self, _REQ_BOOLS, _REQ_INTS, _REQ_OPT_INTS)
+        if self.block_table_injective is not None:
+            check_field_types(self, ("block_table_injective",), (), ())
         object.__setattr__(self, "strides", _freeze_strides(self.strides))
         object.__setattr__(self, "other_features", tuple(self.other_features))
         for f in ("lse_dims", "lse_strides", "seq_len_dims", "ragged_offset_dims"):
@@ -470,6 +650,11 @@ class Verdict:
     code: str  # a member of REASON_CODES, or "OK"
     detail: str = ""
 
+    @property
+    def kind(self) -> str:
+        """The decline's kind (:data:`DECLINE_KINDS`); ``""`` when accepted."""
+        return "" if self.ok else DECLINE_KINDS[self.code]
+
 
 def _no_tuning(req, arch, route, perf_class) -> Mapping[str, Any]:
     return {}
@@ -533,36 +718,18 @@ class AttnBwdPolicy:
         return self.perf_status.get(tuple(perf_class), "unverified")
 
 
-def _tuning_module():
-    """The in-repo tuned-knob table module, if this tree ships one."""
-    try:
-        from kernels.common import attention_bwd_tuning
-    except ImportError:
-        return None
-    return attention_bwd_tuning
-
-
 def shipped_policy() -> AttnBwdPolicy:
-    """The shipped policy: in-repo tables when present, else nothing claimed."""
-    mod = _tuning_module()
-    if mod is None:
-        return AttnBwdPolicy()
-    return AttnBwdPolicy(
-        declared_groups=frozenset(
-            getattr(mod, "DECLARED_GROUPS", SHIPPED_DECLARED_GROUPS)
-        ),
-        waive_unverified=bool(getattr(mod, "WAIVE_UNVERIFIED", False)),
-        perf_status=dict(getattr(mod, "GENERAL_PERF_STATUS", {})),
-        instance_unavailable=frozenset(getattr(mod, "INSTANCE_UNAVAILABLE", ())),
-        dense_pack=frozenset(getattr(mod, "DENSE_PACK", ())),
-        tuning=getattr(mod, "general_bwd_config", _no_tuning),
-        not_validated_archs=frozenset(
-            getattr(mod, "NOT_VALIDATED_ARCHS", NOT_VALIDATED_ARCHS)
-        ),
-        tuned_table=dict(getattr(mod, "GENERAL_TUNED_TABLE", {})),
-        deterministic=bool(getattr(mod, "SERVE_DETERMINISTIC", False)),
-        perf_gate=bool(getattr(mod, "PERF_GATE", False)),
-    )
+    """The shipped kernel-level policy: :class:`AttnBwdPolicy` defaults.
+
+    Every declared feature group (:data:`SHIPPED_DECLARED_GROUPS`), no
+    performance gate (the status is information only, and no per-class status
+    is claimed), no resource-gate exclusion, no dense pack, no tuned knobs, the
+    deterministic backward not served. It serves every request the predicate
+    accepts on every declared arch, gfx942 and gfx950 included. The routing
+    layer (``dispatch/attention_bwd/routing.py``) adds the per-arch tuned
+    tables and the dense pack on top of it; nothing here reads them.
+    """
+    return AttnBwdPolicy()
 
 
 # ---------------------------------------------------------------------------
@@ -968,9 +1135,18 @@ def _table_knobs(table: Mapping, key: tuple) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def _decline(code: str, detail: str) -> Verdict:
-    assert code in REASON_CODES, code
+def decline_verdict(code: str, detail: str, codes: tuple) -> Verdict:
+    """The decline ``code`` (a member of ``codes``), its detail prefixed with
+    ``NOT_YET_IMPLEMENTED:`` when the code's kind is ``not_yet_implemented``."""
+    if code not in codes:
+        raise AssertionError(f"unknown reason code {code}")
+    if DECLINE_KINDS[code] == _NYI:
+        detail = f"{NOT_YET_IMPLEMENTED}: {detail}"
     return Verdict(False, code, detail)
+
+
+def _decline(code: str, detail: str) -> Verdict:
+    return decline_verdict(code, detail, REASON_CODES)
 
 
 def _feature_decline(
@@ -1260,8 +1436,102 @@ def _instance_key(req: AttnBwdRequest) -> str:
 def attn_bwd_support(
     req: AttnBwdRequest, arch: str, *, policy: Optional[AttnBwdPolicy] = None
 ) -> Verdict:
-    """Exact host predicate; ordered reason codes, first failure wins."""
+    """Exact host predicate; ordered reason codes, first failure wins.
+
+    An accepted request plans. After the request checks the predicate resolves
+    the plan of the route the policy gives the request (:func:`attn_bwd_plan`
+    for the general route, the dense family's plan for the dense route), the
+    policy's tuned knobs included, and declines ``INSTANCE_UNAVAILABLE`` when
+    the routed plan does not build: a spec the family validator refuses
+    (among them the recorded resource-gate failures, ``RESOURCE_REFUSED``) or
+    a tuned value the request cannot take. One case goes to the dense family:
+    a dense-eligible request whose general plan fails only through the
+    policy's tuned knobs (the general plan without them builds) is
+    configured for the dense route (the dense planner's forced route), and
+    the dense family's plan decides. Under the shipped and routed policies the
+    general plan uses defaults (never on the resource-gate list) or
+    table entries (each checked to plan), so the routed plan is the one that
+    builds.
+    """
     policy = shipped_policy() if policy is None else policy
+    v = _request_checks(req, arch, policy)
+    if v is not None:
+        return v
+    if _RESOLVING.get():
+        # a planner called while the predicate resolves its plan (the dense
+        # family's): the request checks are its whole question
+        return Verdict(True, "OK", "")
+    why = _unplannable(req, arch, policy)
+    if why is not None:
+        return _decline("INSTANCE_UNAVAILABLE", f"no buildable instance: {why}")
+    return _policy_checks(req, arch, policy)
+
+
+def attn_bwd_request_verdict(
+    req: AttnBwdRequest, arch: str, *, policy: Optional[AttnBwdPolicy] = None
+) -> Verdict:
+    """The predicate without the plan resolution: the request checks and the
+    policy checks. For a planner of a forced route (one that builds its own
+    family's plan whatever the routing would choose), which then owns the
+    plannability of its route; every other caller asks
+    :func:`attn_bwd_support`."""
+    policy = shipped_policy() if policy is None else policy
+    v = _request_checks(req, arch, policy)
+    return v if v is not None else _policy_checks(req, arch, policy)
+
+
+# Set while the predicate resolves a plan (re-entrant calls of the predicate
+# from that planner run the request checks only).
+_RESOLVING: contextvars.ContextVar = contextvars.ContextVar(
+    "attn_bwd_resolving", default=False
+)
+
+
+def _unplannable(
+    req: AttnBwdRequest, arch: str, policy: AttnBwdPolicy
+) -> Optional[str]:
+    """``None`` when the routed family's plan of ``req`` builds, else why not.
+
+    The dense family's plan is resolved for the dense route. On the general
+    route a failure declines when the general family cannot serve the request
+    at all (its plan without the policy's tuned knobs fails too: a refused
+    default spec, a request limit). When only the policy's tuned knobs fail
+    the general plan of a dense-eligible request, those knobs configure the
+    dense family (the dense planner's forced route), and the dense family's
+    plan decides.
+    """
+    route, _tag = attn_bwd_route(req, arch, policy=policy)
+    token = _RESOLVING.set(True)
+    try:
+        general = None
+        if route == "general":
+            try:
+                _resolve_plan(req, arch, policy)
+                return None
+            except ValueError as exc:
+                general = f"general route: {exc}"
+            if not dense_bwd_eligibility(req, arch)[0]:
+                return general
+            untuned = dataclasses.replace(policy, tuning=_no_tuning, tuned_table={})
+            try:
+                _resolve_plan(req, arch, untuned)
+            except ValueError:
+                return general  # the family itself cannot serve it
+        from kernels.common.attention_dense_bwd_plan import attn_dense_bwd_plan
+
+        try:
+            attn_dense_bwd_plan(req, arch, policy=policy)
+            return None
+        except ValueError as exc:
+            return "; ".join(x for x in (general, f"dense route: {exc}") if x)
+    finally:
+        _RESOLVING.reset(token)
+
+
+def _request_checks(
+    req: AttnBwdRequest, arch: str, policy: AttnBwdPolicy
+) -> Optional[Verdict]:
+    """The predicate's checks up to the resource-gate list (``None``: passed)."""
     if arch not in BWD_ARCHS:
         return _decline("ARCH_UNSUPPORTED", f"{arch} is not a backward target")
     if arch in policy.not_validated_archs:
@@ -1345,6 +1615,12 @@ def attn_bwd_support(
     key = _instance_key(req)
     if key in policy.instance_unavailable:
         return _decline("INSTANCE_UNAVAILABLE", f"{key} failed the resource gate")
+    return None
+
+
+def _policy_checks(req: AttnBwdRequest, arch: str, policy: AttnBwdPolicy) -> Verdict:
+    """The predicate's checks after the plan resolved: performance gate and
+    declared feature groups."""
     if policy.perf_gate:
         route, _ = attn_bwd_route(req, arch, policy=policy)
         pclass = attn_bwd_perf_class(req, arch, route)
@@ -1567,14 +1843,30 @@ def attn_bwd_plan(
 ) -> AttnBwdPlan:
     """Resolve instances, runtime knobs, launches and workspace for ``req``.
 
-    Raises ``ValueError`` (with the reason code) when the predicate declines.
-    Only the general route is planned here; a dense route is reported in the
-    plan's ``route`` field by the routing layer that owns the dense family.
+    Raises ``ValueError`` (with the reason code) when the predicate declines,
+    in the predicate's order: the request checks, then the plan resolution
+    (``INSTANCE_UNAVAILABLE`` with the reason the plan failed), then the
+    policy checks. Only the general route is planned here; a dense route is
+    reported in the plan's ``route`` field by the routing layer that owns the
+    dense family.
     """
     policy = shipped_policy() if policy is None else policy
-    verdict = attn_bwd_support(req, arch, policy=policy)
+    verdict = _request_checks(req, arch, policy)
+    if verdict is not None:
+        raise ValueError(f"{verdict.code}: {verdict.detail}")
+    try:
+        plan = _resolve_plan(req, arch, policy)
+    except ValueError as exc:
+        raise ValueError(f"INSTANCE_UNAVAILABLE: no buildable instance: {exc}") from exc
+    verdict = _policy_checks(req, arch, policy)
     if not verdict.ok:
         raise ValueError(f"{verdict.code}: {verdict.detail}")
+    return plan
+
+
+def _resolve_plan(req: AttnBwdRequest, arch: str, policy: AttnBwdPolicy) -> AttnBwdPlan:
+    """The plan of a request that passed the request checks (``ValueError``
+    when no instance serves it under ``policy``)."""
     route, tag = attn_bwd_route(req, arch, policy=policy)
     pclass = attn_bwd_perf_class(req, arch, route)
     tkey = attn_bwd_tuning_key(req, arch, route)
@@ -1732,9 +2024,8 @@ def attn_bwd_plan(
         # only a kernel built with the remap reads xcd_n / xcd_chunk
         spec = validate_attn_bwd_spec(dataclasses.replace(spec, xcd_remap=True), arch)
     use_worklist = runtime_in.get("use_worklist", False)
-    if use_worklist not in (False, True):
+    if type(use_worklist) is not bool:
         raise ValueError(f"use_worklist={use_worklist!r} must be a bool")
-    use_worklist = bool(use_worklist)
     if use_worklist:
         _check_worklist(req, lb_name, n_kv_tiles)
         if not spec.worklist:
@@ -2193,7 +2484,11 @@ def attn_bwd_declaration(arch: str, *, policy: Optional[AttnBwdPolicy] = None) -
             "dtype": list(BWD_DTYPES),
             "head_dim": list(BWD_HEAD_SIZES),
             "head_dim_declined": {
-                "256": {"code": "HEAD_DIM_256_BWD", "reason": REQ_SCOPE_D256_BWD}
+                "256": {
+                    "code": "HEAD_DIM_256_BWD",
+                    "kind": DECLINE_KINDS["HEAD_DIM_256_BWD"],
+                    "reason": REQ_SCOPE_D256_BWD,
+                }
             },
             "layout": ["dense_strided", "thd"],
             "length_mode": list(LENGTH_MODES),
@@ -2207,6 +2502,8 @@ def attn_bwd_declaration(arch: str, *, policy: Optional[AttnBwdPolicy] = None) -
             "are supplied",
         },
         "reason_codes": list(REASON_CODES),
+        "reason_kinds": {c: DECLINE_KINDS[c] for c in REASON_CODES},
+        "not_yet_implemented_prefix": f"{NOT_YET_IMPLEMENTED}:",
         "feature_groups": list(FEATURE_GROUPS),
         "declared_feature_groups": [
             g for g in FEATURE_GROUPS if g in policy.declared_groups

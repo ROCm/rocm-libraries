@@ -22,6 +22,7 @@ import pytest
 
 from dispatch.attention_bwd import gfx942_tuning, gfx950_tuning, routing
 from dispatch.attention_bwd import tuned_tables as tt
+from dispatch.attention_bwd.dense_tuning import dense_axis
 from kernels.common.attention_bwd_plan import (
     FEATURE_GROUPS,
     AttnBwdPolicy,
@@ -64,9 +65,10 @@ def _hook(knobs):
 @pytest.mark.parametrize("arch", sorted(MODS))
 def test_general_check_refuses_an_unknown_knob(arch):
     key = attn_bwd_tuning_key(_req(), arch)
-    with pytest.raises(ValueError, match="unknown knobs.*bogus"):
+    # refused by the registry check before anything is planned
+    with pytest.raises(ValueError, match="'bogus' is not a registered knob"):
         MODS[arch].check_general_entry(key, {"bogus": 1})
-    with pytest.raises(ValueError, match="unknown knobs"):
+    with pytest.raises(ValueError, match="not a registered knob"):
         MODS[arch].general_entries([{"key": list(key), "knobs": {"bogus": 1}}])
 
 
@@ -176,6 +178,8 @@ def test_shipped_general_entry_plans_on_its_key(arch, key, knobs):
 @pytest.mark.parametrize("arch,key,knobs", _entries("DENSE_TUNED"))
 def test_shipped_dense_entry_plans_on_its_key(arch, key, knobs):
     MODS[arch].check_dense_entry(key, knobs)
+    # registered dense values (the import-time pass's registry check)
+    tt.check_dense_entry(arch, key, knobs, axis_of=dense_axis)
     assert knobs.get("sched") != "iglp1"
 
 

@@ -22,10 +22,17 @@ values that are registered but not emitted:
   sweep) enumerates.
 * ``gated``: values a device probe has not cleared yet; no level emits them.
 
+:data:`BWD_KNOWN_WRONG_KNOBS` holds, per target, the knob values whose
+kernels computed wrong outputs (a failed reference check). They are held out
+of every level (:meth:`KnobAxis.values`), refused by the legality verdict,
+refused in the tuned tables (checked at import) and declined by the
+dispatcher's candidates.
+
 Legality is the kernel's own: :func:`backward_spec_legality` resolves a spec
-with ``validate_attn_bwd_spec`` and then applies ``_not_built``; there is no
-second model here. This module holds the registry only; the request,
-candidate and ranker parts of a backward dispatcher are not part of it.
+with ``validate_attn_bwd_spec`` and then applies ``_not_built`` (and the
+known-wrong values); there is no second model here. This module holds the
+registry only; the request, candidates and ranker of the backward dispatcher
+are :mod:`.registry`.
 """
 
 from __future__ import annotations
@@ -103,6 +110,7 @@ from kernels.common.attention_bwd_dq import (
 from kernels.common.attention_bwd_plan import (
     AUX_KNOBS,
     AUX_ROW_MULTIPLES,
+    DECLARED_ARCHS,
     DQ_KNOBS,
     LB_ORDERS,
     MIRROR_PAIRING_BUILT,
@@ -113,6 +121,7 @@ from kernels.common.attention_bwd_plan import (
 __all__ = [
     "ASM_TAIL_NOP_FLOOR",
     "BWD_KNOB_AXES",
+    "BWD_KNOWN_WRONG_KNOBS",
     "CODEGEN_STRATEGIES",
     "FUNNEL_STAGES",
     "KIND_COMPILE",
@@ -128,7 +137,10 @@ __all__ = [
     "backward_axis",
     "backward_spec_legality",
     "backward_tuning_axes",
+    "check_known_wrong",
     "knob_family",
+    "known_wrong_findings",
+    "known_wrong_values",
     "sweepable",
 ]
 
@@ -168,6 +180,38 @@ NUMERICS = ("bitwise", "reorders_fp", "tile", "n/a")
 PROBLEM_FIELDS = frozenset(
     {"head_size", "dtype", "seq_mode", "dkv_mode", "stage_vec", "mask_class", "name"}
 )
+# Knob values whose kernels computed wrong outputs on a target (a failed
+# reference check): {arch: {knob: values}}. Held out of every sweep level,
+# refused by the legality verdicts (general, dense, unified), by the tuned
+# tables' import check and by the dispatcher's candidates. Not the same as
+# ``not_built`` (refused by the emission check), ``gated`` (not yet cleared by
+# a device probe) or the exact resource refusals (``RESOURCE_REFUSED``: one
+# failing spec, not a knob value). A knob name names its lever in every
+# backward family that registers it (the dense body knobs and the shared
+# runtime knobs are the general axes; the unified knobs are the general
+# tile-step knobs). A default value is never known wrong. Empty on every
+# target: each backward kernel found computing wrong values was fixed (the
+# barrier fence) or is refused exactly by its validator.
+BWD_KNOWN_WRONG_KNOBS: Mapping[str, Mapping[str, frozenset]] = MappingProxyType(
+    {arch: MappingProxyType({}) for arch in DECLARED_ARCHS}
+)
+
+
+def known_wrong_values(arch: str, knob: str) -> frozenset:
+    """The known-wrong values of ``knob`` on ``arch`` (empty if none)."""
+    return frozenset(BWD_KNOWN_WRONG_KNOBS.get(arch, {}).get(knob, ()))
+
+
+def known_wrong_findings(arch: str, knobs: Mapping[str, Any]) -> Tuple[str, ...]:
+    """``"knob=value"`` for every known-wrong value of ``arch`` in ``knobs``
+    (a knob mapping or a spec's fields), sorted."""
+    out = []
+    for knob, values in BWD_KNOWN_WRONG_KNOBS.get(arch, {}).items():
+        if knob in knobs and knobs[knob] in values:
+            out.append(f"{knob}={knobs[knob]!r}")
+    return tuple(sorted(out))
+
+
 # Codegen machine-scheduler strategies (None: the backend default).
 CODEGEN_STRATEGIES: Tuple[Optional[str], ...] = (
     None,
@@ -243,12 +287,14 @@ class KnobAxis:
         """Values the sweep enumerates on ``arch`` at ``level`` (sweep order).
 
         Not-built values stay in (they are recorded, never compiled); gated
-        values are dropped at every level, ``full_only`` ones below ``full``.
+        and known-wrong values (:data:`BWD_KNOWN_WRONG_KNOBS`) are dropped at
+        every level, ``full_only`` ones below ``full``.
         """
         if level not in SWEEP_LEVELS:
             raise ValueError(f"sweep level {level!r} not in {SWEEP_LEVELS}")
         vals = self.arch_values(arch) if self.arch_values else self.choices
-        out = tuple(v for v in vals if v not in self.gated)
+        wrong = known_wrong_values(arch, self.name)
+        out = tuple(v for v in vals if v not in self.gated and v not in wrong)
         if level != "full":
             out = tuple(v for v in out if v not in self.full_only)
         return out
@@ -1053,6 +1099,22 @@ def _check_registry() -> None:
         extra = set(a.not_built) | set(a.full_only) | set(a.gated)
         if not extra <= set(a.choices) or a.default in extra:
             raise AssertionError(f"{a.name}: marked values must be non-default choices")
+    check_known_wrong(_BY_NAME)
+
+
+def check_known_wrong(axes: Mapping[str, KnobAxis]) -> None:
+    """Raise unless :data:`BWD_KNOWN_WRONG_KNOBS` names declared targets and
+    no axis of ``axes`` (``{name: axis}``) has a known-wrong default."""
+    for arch, knobs in BWD_KNOWN_WRONG_KNOBS.items():
+        if arch not in DECLARED_ARCHS:
+            raise AssertionError(f"known-wrong knobs of undeclared target {arch!r}")
+        for knob, values in knobs.items():
+            if not isinstance(values, frozenset):
+                raise AssertionError(
+                    f"{arch} {knob}: known-wrong values not a frozenset"
+                )
+            if knob in axes and axes[knob].default in values:
+                raise AssertionError(f"{arch} {knob}: the default is known wrong")
 
 
 _check_registry()
@@ -1089,6 +1151,7 @@ class BwdSpecLegality:
     resolved: Optional[AttnBwdSpec] = None
     error: str = ""  # the validator's message (illegal)
     not_built: Tuple[str, ...] = ()  # the emission check's findings
+    known_wrong: Tuple[str, ...] = ()  # BWD_KNOWN_WRONG_KNOBS findings (illegal)
 
     @property
     def status(self) -> str:
@@ -1105,7 +1168,8 @@ def backward_spec_legality(
     **problem: Any,
 ) -> BwdSpecLegality:
     """Legality of one backward configuration on ``arch``: the family
-    validator (``validate_attn_bwd_spec``), then the emission check
+    validator (``validate_attn_bwd_spec``), the known-wrong values
+    (:data:`BWD_KNOWN_WRONG_KNOBS`, illegal), then the emission check
     (``_not_built``). ``spec_or_knobs`` is a spec or a knob mapping (spec
     field names) completed by ``head_size`` and the problem fields."""
     if isinstance(spec_or_knobs, AttnBwdSpec):
@@ -1121,6 +1185,13 @@ def backward_spec_legality(
         resolved = validate_attn_bwd_spec(spec, arch)
     except ValueError as ex:
         return BwdSpecLegality(False, None, str(ex))
+    wrong = known_wrong_findings(
+        arch, {f.name: getattr(resolved, f.name) for f in fields(resolved)}
+    )
+    if wrong:
+        return BwdSpecLegality(
+            False, resolved, f"known wrong on {arch}: {', '.join(wrong)}", (), wrong
+        )
     nb = tuple(_not_built(resolved))
     return BwdSpecLegality(not nb, resolved, "", nb)
 

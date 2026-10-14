@@ -20,7 +20,7 @@ no allocation, no kernel build.
   "sub" instance, or the one-wave ``kN0 = 16`` fallback).
 * :func:`attn_bwd_unified_plan`: instances, runtime values, the launch
   sequence and every kernarg value.
-* :func:`attn_bwd_unified_declaration`: the versioned declaration (version 1).
+* :func:`attn_bwd_unified_declaration`: the versioned declaration (version 2).
 
 Launch sequence: direct page mode ``prep -> main -> convert(dQ)``; atomic page
 mode ``prep -> page_zero -> main -> convert(dQ) -> page_convert(dK) ->
@@ -28,10 +28,32 @@ page_convert(dV)``. The prep and dQ convert are the general family's THD aux
 kernels (``rocke.attn_bwd.v3``) with ``OFF_Q = cu_seqlens_q``; the main kernel
 and the page roles use ``rocke.attn_bwd_unified.v1``.
 
-Caller contract (not checkable on the host): ``max_seqlen_q`` / ``max_seqlen_kv``
-bound every query span / kv length; every block id of a live block is below
-``num_blocks``; ``block_table_injective = True`` asserts that distinct
-(sequence, live logical block) pairs map to distinct physical blocks.
+Page size: any positive multiple of ``PAGE_GRANULE`` (16) tokens; a power of
+two is not required (48, 80, ... take the ``"multi"`` class when a shipped
+``kN0`` divides them, else the ``"sub"`` class or the one-wave fallback, see
+:func:`attn_bwd_unified_tile_choice`). Every other page size is declined
+``PAGE_SIZE``.
+
+Caller contract on device data (the predicate sees shapes only):
+``max_seqlen_q`` / ``max_seqlen_kv`` bound every query span / kv length;
+``cu_seqlens_q`` is non-decreasing inside ``[0, total_q]``; every block id of
+a live block is in ``[0, num_blocks)``; ``block_table_injective = True``
+asserts that distinct (sequence, live logical block) pairs map to distinct
+physical blocks. :func:`kernels.common.attention_bwd_unified_run.check_attn_bwd_unified_inputs`
+checks all of it on host-visible data and rejects a violation. On the device
+the defined behaviour for out-of-contract data is: a kv length outside
+``[0, max_seqlen_kv]`` is clamped into it, and a block id outside ``[0,
+num_blocks)`` is never dereferenced (its K / V rows read as zeros and its
+dK / dV slots are not written; the main kernel's guard is active when the
+kernel passes the cache's ``page_rows`` to :class:`._attention_bwd_paged.PagedKv`).
+The plan passes ``page_rows = num_blocks * page`` to the main kernel in both
+page modes for that guard.
+
+Every decline code has a kind (``Verdict.kind``, see
+:data:`kernels.common.attention_bwd_plan.DECLINE_KINDS`); a
+``not_yet_implemented`` decline's detail starts with ``NOT_YET_IMPLEMENTED:``.
+An accepted request plans: the predicate resolves the plan and declines
+``INSTANCE_UNAVAILABLE`` when it cannot be built.
 """
 
 from __future__ import annotations
@@ -59,6 +81,8 @@ from kernels.common.attention_bwd_aux import (
     attn_bwd_prep_grid,
 )
 from kernels.common.attention_bwd_plan import (
+    DECLINE_KINDS,
+    NOT_YET_IMPLEMENTED,
     REQ_SCOPE_D256_BWD,
     SCALE_PLACEMENTS,
     AttnBwdPlan,
@@ -67,6 +91,8 @@ from kernels.common.attention_bwd_plan import (
     _FrozenStrides,
     _overlaps,
     _scale_mults,
+    check_field_types,
+    decline_verdict,
 )
 from kernels.common.attention_bwd_unified import (
     ATTN_BWD_UNIFIED_ABI,
@@ -97,7 +123,7 @@ __all__ = [
     "shipped_unified_policy",
 ]
 
-ATTN_BWD_UNIFIED_DECLARATION_VERSION = 1
+ATTN_BWD_UNIFIED_DECLARATION_VERSION = 2
 LOG2E = 1.4426950408889634
 GENERAL_ABI = "rocke.attn_bwd.v3"
 
@@ -165,17 +191,20 @@ _Q_SIDE = ("q", "o", "do", "dq")
 _CACHES = ("k", "v", "dk", "dv")
 _TENSORS = _Q_SIDE + _CACHES
 
-DECLINED_FEATURES = (
-    {"feature": "dropout", "code": "DROPOUT"},
-    {"feature": "bias / attn_mask in backward", "code": "BIAS_IN_BACKWARD"},
-    {"feature": "dBias", "code": "DBIAS"},
-    {"feature": "ALiBi", "code": "ALIBI"},
-    {"feature": "fp8 caches", "code": "FP8"},
-    {"feature": "deterministic backward", "code": "DETERMINISTIC"},
-    {"feature": "qq-bias and other features", "code": "UNSUPPORTED_FEATURE"},
-    {"feature": "attention sinks", "code": "SINKS"},
-    {"feature": "logit softcap", "code": "SOFTCAP"},
-    {"feature": "head dim 256", "code": "HEAD_DIM_256_BWD"},
+DECLINED_FEATURES = tuple(
+    {"feature": feature, "code": code, "kind": DECLINE_KINDS[code]}
+    for feature, code in (
+        ("dropout", "DROPOUT"),
+        ("bias / attn_mask in backward", "BIAS_IN_BACKWARD"),
+        ("dBias", "DBIAS"),
+        ("ALiBi", "ALIBI"),
+        ("fp8 caches", "FP8"),
+        ("deterministic backward", "DETERMINISTIC"),
+        ("qq-bias and other features", "UNSUPPORTED_FEATURE"),
+        ("attention sinks", "SINKS"),
+        ("logit softcap", "SOFTCAP"),
+        ("head dim 256", "HEAD_DIM_256_BWD"),
+    )
 )
 
 
@@ -192,6 +221,37 @@ def _frozen_strides(mapping):
     """Read-only, hashable ``{tensor: tuple}`` map (malformed values kept as
     given for the ``STRIDE_FORMAT`` decline)."""
     return None if mapping is None else _FrozenStrides(mapping)
+
+
+_REQ_BOOLS = (
+    "bottom_right",
+    "block_table_injective",
+    "scale_is_device_tensor",
+    "has_bias",
+    "want_dbias",
+    "deterministic",
+    "alibi",
+    "fp8",
+    "sinks",
+    "qq_bias",
+)
+_REQ_INTS = (
+    "num_seqs",
+    "h_q",
+    "h_kv",
+    "d_qk",
+    "d_v",
+    "total_q",
+    "max_seqlen_q",
+    "max_seqlen_kv",
+    "page",
+    "num_blocks",
+    "max_blocks_per_seq",
+    "left_bound",
+    "right_bound",
+    "tensor_alignment",
+)
+_REQ_OPT_INTS = ("bt_stride", "num_cus", "num_xcds")
 
 
 @dataclass(frozen=True)
@@ -264,6 +324,9 @@ class AttnBwdUnifiedRequest:
     num_xcds: Optional[int] = None
 
     def __post_init__(self) -> None:
+        # Flags are bools and extents ints (TypeError otherwise), as in the
+        # general request.
+        check_field_types(self, _REQ_BOOLS, _REQ_INTS, _REQ_OPT_INTS)
         object.__setattr__(self, "strides", _frozen_strides(self.strides))
         object.__setattr__(self, "cache_dims", _frozen_strides(self.cache_dims))
         for f in ("lse_dims", "lse_strides", "block_table_dims", "other_features"):
@@ -386,9 +449,7 @@ def _align(x: int) -> int:
 
 
 def _decline(code: str, detail: str) -> Verdict:
-    if code not in REASON_CODES:
-        raise AssertionError(f"unknown reason code {code}")
-    return Verdict(False, code, detail)
+    return decline_verdict(code, detail, REASON_CODES)
 
 
 def _mask_kind(req: AttnBwdUnifiedRequest) -> str:
@@ -687,8 +748,28 @@ def attn_bwd_unified_support(
     *,
     policy: Optional[AttnBwdUnifiedPolicy] = None,
 ) -> Verdict:
-    """Exact host predicate of the unified family; first failure wins."""
+    """Exact host predicate of the unified family; first failure wins.
+
+    An accepted request plans: after the request checks the predicate
+    resolves the plan exactly as :func:`attn_bwd_unified_plan` does (the
+    policy's tuning included) and declines ``INSTANCE_UNAVAILABLE`` when that
+    fails; the declared-group check then uses the page mode the plan chose.
+    """
     policy = shipped_unified_policy() if policy is None else policy
+    v = _request_checks(req, arch, policy)
+    if v is not None:
+        return v
+    try:
+        plan = _resolve_plan(req, arch, policy)
+    except ValueError as exc:
+        return _decline("INSTANCE_UNAVAILABLE", f"no buildable instance: {exc}")
+    return _policy_checks(plan, policy)
+
+
+def _request_checks(
+    req: AttnBwdUnifiedRequest, arch: str, policy: AttnBwdUnifiedPolicy
+) -> Optional[Verdict]:
+    """The predicate's checks up to the resource-gate list (``None``: passed)."""
     if arch not in BWD_ARCHS:
         return _decline("ARCH_UNSUPPORTED", f"{arch} is not a backward target")
     if arch not in policy.validated_archs:
@@ -810,7 +891,14 @@ def attn_bwd_unified_support(
     key = _instance_key(req, arch, attn_bwd_unified_stage_vec(req), policy)
     if key in policy.instance_unavailable:
         return _decline("INSTANCE_UNAVAILABLE", f"{key} failed the resource gate")
-    group = "direct_pages" if req.block_table_injective else "atomic_pages"
+    return None
+
+
+def _policy_checks(plan: AttnBwdPlan, policy: AttnBwdUnifiedPolicy) -> Verdict:
+    """The declared-group check of the page mode the plan resolved (a tuned
+    ``g_split > 1`` or ``page_mode = "atomic"`` takes the atomic mode on an
+    injective table)."""
+    group = f"{plan.runtime['page_mode']}_pages"
     if group not in policy.declared_groups:
         return _decline("NOT_YET_DECLARED", f"feature group {group} not declared yet")
     return Verdict(True, "OK", "")
@@ -880,14 +968,31 @@ def attn_bwd_unified_plan(
 ) -> AttnBwdPlan:
     """Resolve instances, runtime values, launches and workspace for ``req``.
 
-    Raises ``ValueError`` (with the reason code) when the predicate declines.
-    The plan's ``route`` is ``"unified"`` and its ``route_tag`` the page class
-    (``"multi"``, ``"sub"`` or ``"fallback"``).
+    Raises ``ValueError`` (with the reason code) when the predicate declines,
+    in the predicate's order (request checks, plan resolution as
+    ``INSTANCE_UNAVAILABLE``, declared groups). The plan's ``route`` is
+    ``"unified"`` and its ``route_tag`` the page class (``"multi"``,
+    ``"sub"`` or ``"fallback"``).
     """
     policy = shipped_unified_policy() if policy is None else policy
-    verdict = attn_bwd_unified_support(req, arch, policy=policy)
+    verdict = _request_checks(req, arch, policy)
+    if verdict is not None:
+        raise ValueError(f"{verdict.code}: {verdict.detail}")
+    try:
+        plan = _resolve_plan(req, arch, policy)
+    except ValueError as exc:
+        raise ValueError(f"INSTANCE_UNAVAILABLE: no buildable instance: {exc}") from exc
+    verdict = _policy_checks(plan, policy)
     if not verdict.ok:
         raise ValueError(f"{verdict.code}: {verdict.detail}")
+    return plan
+
+
+def _resolve_plan(
+    req: AttnBwdUnifiedRequest, arch: str, policy: AttnBwdUnifiedPolicy
+) -> AttnBwdPlan:
+    """The plan of a request that passed the request checks (``ValueError``
+    when no instance serves it under ``policy``)."""
     stage_vec = attn_bwd_unified_stage_vec(req)
     tuned = dict(
         policy.tuning(req, arch, _default_page_class(arch, req, stage_vec)) or {}
@@ -921,9 +1026,6 @@ def attn_bwd_unified_plan(
         raise ValueError("page_mode='direct' needs block_table_injective")
     direct = req.block_table_injective and g_split == 1 and want_mode != "atomic"
     page_mode = "direct" if direct else "atomic"
-    needed = "direct_pages" if direct else "atomic_pages"
-    if needed not in policy.declared_groups:
-        raise ValueError(f"NOT_YET_DECLARED: feature group {needed} not declared yet")
     mask_kind = _mask_kind(req)
     tag, knobs = attn_bwd_unified_tile_choice(
         arch, req.d_qk, req.dtype, stage_vec, req.page, tuned
@@ -1010,7 +1112,9 @@ def attn_bwd_unified_plan(
         "right": right,
         "bottom_right": br,
         "ws_rows_q": req.total_q,
-        "page_rows": req.page_rows if not direct else 0,
+        # num_blocks * page in both page modes: the page workspace rows
+        # (atomic mode) and the bound of the main kernel's block-id guard
+        "page_rows": req.page_rows,
         "g_split": g_split,
         "n_kv_tiles": n_kv_tiles,
         "lb_order": LB_ORDERS[lb_name],
@@ -1321,7 +1425,8 @@ def attn_bwd_unified_declaration(
         "features": {
             "dtypes": list(BWD_DTYPES),
             "head_sizes": list(BWD_HEAD_SIZES),
-            "page_sizes": f"every positive multiple of {PAGE_GRANULE}",
+            "page_sizes": f"every positive multiple of {PAGE_GRANULE} (a power "
+            "of two is not required); any other page is declined PAGE_SIZE",
             "page_classes": {
                 "multi": "page % block_n == 0: one block-table lookup per kv tile",
                 "sub": "block_n % page == 0 for a shipped sub page "
@@ -1359,6 +1464,18 @@ def attn_bwd_unified_declaration(
         },
         "feature_groups": {g: g in policy.declared_groups for g in FEATURE_GROUPS},
         "reason_codes": list(REASON_CODES),
+        "reason_kinds": {c: DECLINE_KINDS[c] for c in REASON_CODES},
+        "not_yet_implemented_prefix": f"{NOT_YET_IMPLEMENTED}:",
+        "device_data_contract": {
+            "seq_lens_kv": "in [0, max_seqlen_kv]; on the device a value outside "
+            "is clamped into it (host check: SEQ_LEN_RANGE)",
+            "cu_seqlens_q": "non-decreasing in [0, total_q], spans at most "
+            "max_seqlen_q (host check: RAGGED_RANGE)",
+            "block_table": "live entries in [0, num_blocks); on the device an "
+            "entry outside is never dereferenced: its K / V rows read as zeros "
+            "and its dK / dV slots are not written (host check: "
+            "BLOCK_TABLE_RANGE)",
+        },
         "declined": [dict(x) for x in DECLINED_FEATURES],
         "perf_classes": classes,
     }

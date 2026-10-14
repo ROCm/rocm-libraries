@@ -17,9 +17,12 @@ The gfx950 entries of the two tuned tables the backward routing reads
 * :data:`GENERAL_PERF_STATUS` / :data:`DENSE_PERF_STATUS`: ``{performance
   class: status}`` of the general family / of the dense keys
   (``AttnBwdPolicy.perf_status``; a class missing here is ``unverified``).
-  Information only: the plan records the status and the declaration publishes
-  it, and the routed policy serves every class the predicate accepts whatever
-  its status.
+  Empty by policy: no per-class performance claim ships in the library, so
+  every served class reads ``unverified``. The machinery stays (the plan
+  records the status, the declaration publishes it, the opt-in
+  ``perf_gate`` declines on it), and the status is information only: the
+  routed policy serves every class the predicate accepts whatever its
+  status.
 
 An entry is a measured winner: the configuration passed the bench's confirm
 stage on every measured cell of its key (a clean A/A control, the
@@ -34,16 +37,25 @@ does not fix (a ``g_split`` that does not divide every head group of the
 class, mirror pairing below an overfilled grid, an XCD remap without
 ``num_xcds``) or that have no confirmed cell are left out.
 
-A class's status comes from the same confirmed results, on the census cells
-the routed policy serves on that class: ``below_baseline`` when the confirmed
-winner of one of them loses to the bar (the PyTorch-selected backend);
-``verified`` when every such cell has a confirmed winner that does not, and
-the routed policy serves each of them with exactly the measured configuration;
-otherwise ``unverified`` (no entry).
+Regeneration (the selection rule above, no timing data in the repo):
 
-:func:`dense_entries` / :func:`general_entries` turn the sweep's emitted
-entries (``attention_bwd_sweep.py --emit-dense-table``) into checked table
-entries.
+1. run the sweep (``benchmarks/common/attention_bwd_sweep.py``) through its
+   ``confirm`` stage for the arch's general and dense slices, results
+   outside the source tree (``--out-dir``);
+2. dense: ``attention_bwd_sweep.py --emit-dense-table PATH --out-dir DIR``
+   writes ``{"entries": [{"arch", "key", "knobs", "cells"}]}`` (the keys whose
+   confirmed dense arm has a paired win over the general winner and a clean
+   A/A control); :func:`dense_entries` checks every entry;
+3. general: the confirmed winner of every census cell, keyed by
+   :func:`kernels.common.attention_bwd_plan.attn_bwd_tuning_key` of the
+   cell's request (with the device's ``num_cus``), one configuration per key
+   (the rule above), as ``{"entries": [{"key", "knobs"}]}``;
+   :func:`general_entries` checks every entry;
+4. the checked mappings replace the tables below.
+
+Every entry is checked again when the package is imported
+(:func:`.tuned_tables.check_arch_tables`, from :mod:`.routing`) and on every
+representative request of its key in the tests.
 """
 
 from __future__ import annotations
@@ -1051,111 +1063,12 @@ DENSE_TUNED: Mapping[tuple, Mapping[str, Any]] = {
         "ws_layout": "head_major",
     },
 }
-# {general performance class: status}
-GENERAL_PERF_STATUS: Mapping[tuple, str] = {
-    (
-        "gfx950",
-        "general",
-        64,
-        "bf16",
-        "causal_br",
-        "gqa",
-        "unequal",
-        "fixed",
-        8,
-    ): "verified",
-    ("gfx950", "general", 64, "bf16", "none", "mha", "square", "thd", 8): "verified",
-    ("gfx950", "general", 64, "fp16", "none", "mha", "square", "fixed", 8): "verified",
-    ("gfx950", "general", 64, "fp16", "none", "mha", "square", "thd", 8): "verified",
-    (
-        "gfx950",
-        "general",
-        128,
-        "bf16",
-        "causal_br",
-        "gqa",
-        "square",
-        "fixed",
-        8,
-    ): "verified",
-    ("gfx950", "general", 128, "bf16", "none", "gqa", "square", "fixed", 8): "verified",
-    (
-        "gfx950",
-        "general",
-        128,
-        "bf16",
-        "none",
-        "gqa",
-        "unequal",
-        "fixed",
-        8,
-    ): "verified",
-    ("gfx950", "general", 128, "bf16", "none", "mha", "square", "fixed", 8): "verified",
-    (
-        "gfx950",
-        "general",
-        128,
-        "fp16",
-        "causal_br",
-        "gqa",
-        "unequal",
-        "fixed",
-        8,
-    ): "verified",
-    (
-        "gfx950",
-        "general",
-        128,
-        "fp16",
-        "causal_tl",
-        "mha",
-        "square",
-        "fixed",
-        8,
-    ): "verified",
-}
-# {dense performance class (arch, "dense", *dense key): status}
-DENSE_PERF_STATUS: Mapping[tuple, str] = {
-    (
-        "gfx950",
-        "dense",
-        1024,
-        4096,
-        32,
-        8,
-        128,
-        "bf16",
-        "bshd",
-        "causal_br",
-        (-1, 0, True),
-    ): "verified",
-    (
-        "gfx950",
-        "dense",
-        2048,
-        2048,
-        12,
-        12,
-        64,
-        "bf16",
-        "bshd",
-        "none",
-        (-1, -1, False),
-    ): "verified",
-    (
-        "gfx950",
-        "dense",
-        4096,
-        4096,
-        64,
-        8,
-        128,
-        "bf16",
-        "bshd",
-        "causal_tl",
-        (-1, 0, False),
-    ): "verified",
-}
+# {general performance class: status}; empty by policy (no per-class
+# performance claim ships in the library: every class reads unverified)
+GENERAL_PERF_STATUS: Mapping[tuple, str] = {}
+# {dense performance class (arch, "dense", *dense key): status}; empty by
+# policy
+DENSE_PERF_STATUS: Mapping[tuple, str] = {}
 
 
 def check_dense_entry(key: tuple, knobs: Mapping[str, Any], req=None) -> None:

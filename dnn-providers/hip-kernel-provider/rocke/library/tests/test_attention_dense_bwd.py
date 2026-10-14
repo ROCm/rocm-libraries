@@ -731,3 +731,40 @@ def test_dense_plan_derives_the_plan_owned_body_knobs(arch):
     plan = attn_dense_bwd_plan(req, arch, policy=pol)
     assert not plan.specs["dense"].xcd_remap
     assert plan.launches[1].scalars["xcd_n"] == 0
+
+
+def test_shape_pin_is_explicit_and_named():
+    """The dense family pins the problem shape at compile time, explicitly:
+    ``SHAPE_BINDING`` / ``SHAPE_FIELDS`` / ``shape_key`` (class-level, not
+    spec fields, so descriptors and the knob registry are unchanged), one
+    instance per shape key, the shape spelled in readable name tokens."""
+    from kernels.common.attention_dense_bwd_spec import AttentionDenseBwdSpec
+
+    assert AttentionDenseBwdSpec.SHAPE_BINDING == "compile_time"
+    names = {f.name for f in dataclasses.fields(AttentionDenseBwdSpec)}
+    assert set(AttentionDenseBwdSpec.SHAPE_FIELDS) <= names
+    assert not {"SHAPE_BINDING", "SHAPE_FIELDS", "ARCH"} & names
+    base = dict(seqlen_q=128, seqlen_kv=256, num_query_heads=8, num_kv_heads=2,
+                head_size=64)  # fmt: skip
+    s = AttentionDenseBwdSpec(**base)
+    assert s.shape_key() == (128, 256, 8, 2, 64, "bshd", None)
+    # the name of the default instance is unchanged (goldens, caches and
+    # resource-gate rows are keyed by it)
+    assert s.kernel_name() == (
+        "rocke_attn_dense_bwd_bf16_d64_bshd_sq128_sk256_hq8_hk2_causaltl"
+    )
+    # every shape field moves the name; a knob that is not shape does not
+    # move the shape key
+    for field_name, value in (("seqlen_q", 64), ("seqlen_kv", 128),
+                              ("num_query_heads", 4), ("num_kv_heads", 1),
+                              ("head_size", 128), ("layout", "bhsd"), ("batch", 2)):  # fmt: skip
+        other = dataclasses.replace(s, **{field_name: value})
+        assert other.shape_key() != s.shape_key()
+        assert other.kernel_name() != s.kernel_name(), field_name
+    knob = dataclasses.replace(s, epilogue="direct")
+    assert knob.shape_key() == s.shape_key() and knob.kernel_name() != s.kernel_name()
+    for cls in (Gfx942AttentionDenseBwdSpec, Gfx950AttentionDenseBwdSpec):
+        assert cls.SHAPE_BINDING == "compile_time" and cls.ARCH in ("gfx942", "gfx950")
+        assert cls(**base).shape_key() == s.shape_key()
+        assert cls(**base).variant() == "general"
+    assert s.variant() == "general" and AttentionDenseBwdSpec.ARCH is None

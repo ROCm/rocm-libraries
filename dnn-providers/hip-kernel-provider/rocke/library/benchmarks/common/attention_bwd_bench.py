@@ -1450,8 +1450,9 @@ def time_closure(
 # in every attempt process on the code objects of ``run_cache``, the ones
 # that are timed). The committed provider lives with the backward tests
 # (``tests._attention_bwd_perf_gate:gate``); it is injected by name because
-# the benchmarks layer does not import the tests.
-GATE_ENV = "ROCKE_BWD_PRUNE_GATE"
+# the benchmarks layer does not import the tests. It is named on the command
+# line only (``--gate``), never taken from the environment, so a run's gate is
+# visible in its command and in every worker's.
 # Shared on-disk code-object cache (``kernels.common.attention_bwd_cache``).
 HSACO_CACHE_ENV = "ROCKE_BWD_HSACO_CACHE"
 
@@ -1751,18 +1752,15 @@ def environment_record() -> dict:
         "python": platform.python_version(),
         "slurm_job": os.environ.get("SLURM_JOB_ID"),
     }
+    # torch first (versions only, no device query): with torch imported, the
+    # rocKE runtime binds torch's bundled HIP library, so one process never
+    # loads two HIP runtimes
     try:
         torch = _torch()
-        p = torch.cuda.get_device_properties(0)
-        info.update(
-            torch=torch.__version__,
-            hip=torch.version.hip,
-            gcn_arch=getattr(p, "gcnArchName", "?"),
-            cu_count=p.multi_processor_count,
-            device_name=p.name,
-        )
+        info.update(torch=torch.__version__, hip=torch.version.hip)
     except Exception as ex:  # noqa: BLE001
         info["torch_error"] = str(ex)[:200]
+    info.update(_device_record())
     try:
         info["rocm_system"] = Path("/opt/rocm/.info/version").read_text().strip()
     except OSError:
@@ -1770,6 +1768,25 @@ def environment_record() -> dict:
     info.update(_toolchain_record())
     info["clocks"] = _clocks()
     return info
+
+
+def _device_record(device: int = 0) -> dict:
+    """The device fields of the environment record, from the rocKE HIP
+    runtime (``rocke.runtime.hip_module``; no torch device query): the target
+    id (``gcn_arch``, features kept), the base arch (``device_arch``; the
+    run's requested ``arch`` is recorded separately) and the CU count. The
+    device is named by its gfx id only. A field the runtime cannot read is
+    ``None``."""
+    try:
+        from rocke.runtime import hip_module as hm
+
+        return {
+            "gcn_arch": hm.get_device_target_id(device),
+            "device_arch": hm.get_device_arch(device),
+            "cu_count": hm.get_device_num_cus(device),
+        }
+    except Exception as ex:  # noqa: BLE001
+        return {"device_error": str(ex)[:200]}
 
 
 def _toolchain_record() -> dict:
@@ -2116,8 +2133,10 @@ def make_parser() -> argparse.ArgumentParser:
     )
     ap.add_argument(
         "--gate",
-        default=os.environ.get(GATE_ENV),
-        help="module:callable of the pruning-set gate provider",
+        default=None,
+        help="module:callable of the pruning-set gate provider (explicit only: "
+        "no environment default; the sweep driver passes it, and every worker "
+        "process gets it on its command line)",
     )
     ap.add_argument(
         "--allow-ungated",
