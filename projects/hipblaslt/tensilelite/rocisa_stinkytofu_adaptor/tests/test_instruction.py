@@ -3408,5 +3408,55 @@ class TestDppForwarding(AdaptorTestCase):
         logical.set_dpp.assert_not_called()
 
 
+class TestDsForwarding(AdaptorTestCase):
+    """Every DS factory forwards na, offset, offset0, offset1, and gds."""
+
+    def _lower(self, inst, factory_name):
+        logical = unittest.mock.Mock()
+        fake_st = unittest.mock.Mock()
+        setattr(fake_st, factory_name, unittest.mock.Mock(return_value=logical))
+        with unittest.mock.patch.dict(sys.modules, {"stinkytofu": fake_st}), \
+             unittest.mock.patch(
+                 "rocisa_stinkytofu_adaptor.instruction._to_stinky_register",
+                 side_effect=lambda arg: arg,
+             ):
+            out = inst.to_stinky_logical()
+        self.assertIs(out, logical)
+        return logical
+
+    def test_single_address_forwards_every_field(self):
+        from rocisa_stinkytofu_adaptor.container import DSModifiers
+        from rocisa_stinkytofu_adaptor.instruction import (
+            DSLoadB32, DSStoreB32, DSStore2B32, DSBPermuteB32,
+        )
+
+        ds = DSModifiers(na=1, offset=16, offset0=4, offset1=8, gds=True)
+        expected = dict(na=1, offset=16, offset0=4, offset1=8, gds=True)
+        cases = (
+            (DSLoadB32(vgpr(0), vgpr(1), ds), "DSLoadB32"),
+            (DSStoreB32(vgpr(1), vgpr(2), ds), "DSStoreB32"),
+            (DSStore2B32(vgpr(1), vgpr(2), vgpr(3), ds), "DSStore2B32"),
+            (DSBPermuteB32(vgpr(0), vgpr(1), vgpr(2), ds), "DSBPermuteB32"),
+        )
+        for inst, name in cases:
+            self._lower(inst, name).set_ds.assert_called_once_with(**expected)
+
+    def test_load2_forwards_dual_offsets(self):
+        from rocisa_stinkytofu_adaptor.container import DSModifiers
+        from rocisa_stinkytofu_adaptor.instruction import DSLoad2B32
+
+        ds = DSModifiers(na=2, offset=0, offset0=4, offset1=8, gds=False)
+        logical = self._lower(DSLoad2B32(vgpr(0), vgpr(1), ds), "DSLoad2B32")
+        logical.set_ds.assert_called_once_with(
+            na=2, offset=0, offset0=4, offset1=8, gds=False,
+        )
+
+    def test_absent_ds_is_left_alone(self):
+        from rocisa_stinkytofu_adaptor.instruction import DSLoadB32
+
+        logical = self._lower(DSLoadB32(vgpr(0), vgpr(1)), "DSLoadB32")
+        logical.set_ds.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()
