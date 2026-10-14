@@ -1,83 +1,57 @@
 .. meta::
-  :description: hipCCL project layout - the hipccl3 and hipccl2 build layouts, unified include directory, and versioning
+  :description: hipCCL project layout, the hipccl3 and hipccl2 build layouts, the unified include directory, and versioning
   :keywords: hipCCL, ROCm, layout, hipccl2, hipccl3, CMake
 
 .. _hipccl-layout:
 
-*********************
+**********************
 hipCCL project layout
-*********************
+**********************
 
-hipCCL lives at ``projects/hipccl`` in the `rocm-libraries
-<https://github.com/ROCm/rocm-libraries>`_ repository, and contains two build
-layouts side by side, plus a small router that selects between them.
+The hipCCL sources are under ``projects/hipccl`` in the `rocm-libraries <https://github.com/ROCm/rocm-libraries>`_ repository.
+The directory contains two build layouts, ``hipccl3`` and ``hipccl2``, and a router that selects between them.
 
-Two layouts
-===========
+* ``hipccl3``: The default layout, and the layout under active development. Its copies of rocPRIM, hipCUB, and rocThrust stay in sync with each project's upstream development.
 
-``hipccl3`` (default)
-  The unified, actively-developed layout. Its own copies of rocPRIM, hipCUB,
-  and rocThrust are kept in sync with each project's own upstream
-  development, the same way `NVIDIA's CCCL <https://github.com/NVIDIA/cccl>`_
-  keeps CUB, Thrust, and libcudacxx in sync under one repository. New
-  algorithm work and bug fixes land here.
+* ``hipccl2``: A frozen compatibility snapshot of rocPRIM, hipCUB, and rocThrust from before unification.
+    It provides a stable fallback during migration. It's not kept in sync with upstream the way ``hipccl3`` is.
 
-``hipccl2``
-  A frozen, pre-unification compatibility snapshot of rocPRIM, hipCUB, and
-  rocThrust. It exists so that consumers who depended on the exact,
-  pre-hipCCL behavior of these three libraries have a stable fallback during
-  the migration - it is not kept in sync with upstream the way ``hipccl3``
-  is.
-
-Both layouts expose the same CMake option surface
-(``HIPCCL_BUILD_ROCPRIM``/``HIPCUB``/``ROCTHRUST``/``ALL``, the same unified
-``hipccl`` CPack package, and the same ``find_package(hipccl)`` entry point)
-so that switching between them is a one-flag decision, not a different build
-system to learn. See :doc:`../install/build` for the actual CMake invocations.
+Both layouts expose the same CMake options: ``HIPCCL_BUILD_ROCPRIM``, ``HIPCCL_BUILD_HIPCUB``, ``HIPCCL_BUILD_ROCTHRUST``, and ``HIPCCL_BUILD_ALL``.
+Both use the same ``hipccl`` CPack package and the same ``find_package(hipccl)`` entry point.
 
 The layout selector
-====================
+===================
 
-``projects/hipccl/CMakeLists.txt`` is a small router that redirects a single
-``cmake`` invocation to one layout or the other, without changing how either
-behaves when built directly:
+``projects/hipccl/CMakeLists.txt`` redirects one ``cmake`` invocation to one layout or the other.
+A layout built from its own directory behaves the same way.
 
-.. code-block:: shell
+.. code:: shell
 
-  # Default (HIPCCL_BUILD_LEGACY=OFF): build the unified hipccl3 project.
-  cmake -S projects/hipccl -B build
+   # Default, HIPCCL_BUILD_LEGACY=OFF: build the unified hipccl3 project.
+   cmake -S projects/hipccl -B build
 
-  # Build the legacy hipccl2 layout instead.
-  cmake -S projects/hipccl -B build -DHIPCCL_BUILD_LEGACY=ON
+   # Build the legacy hipccl2 layout instead.
+   cmake -S projects/hipccl -B build -DHIPCCL_BUILD_LEGACY=ON
 
-Building either layout directly (``cd hipccl3 && cmake ..``, or ``cd
-hipccl2 && cmake ..``) continues to work exactly the same way - the router is
-a purely additional entry point, not a replacement for either.
+The selector commands configure either layout from ``projects/hipccl``.
+``cmake ..`` from inside ``hipccl3`` or ``hipccl2`` configures that layout on its own.
 
 Unified include layout
-=======================
+======================
 
-All hipCCL headers install under ``<prefix>/include/hipccl/<component>``, for
-example ``/opt/rocm/include/hipccl/rocprim`` and
-``/opt/rocm/include/hipccl/thrust``, instead of each component claiming a
-flat, top-level ``<prefix>/include/<component>`` path of its own. This avoids
-collisions between hipCCL's bundled copies and any separately-installed,
-standalone copy of rocPRIM/hipCUB/rocThrust sharing the same install prefix.
+All hipCCL headers install under ``install_prefix/include/hipccl/component_name``.
+For example, rocPRIM headers install under ``/opt/rocm/include/hipccl/rocprim``, and Thrust headers install under ``/opt/rocm/include/hipccl/thrust``.
+A component doesn't install a ``install_prefix/include/component_name`` path of its own.
+That avoids a collision between hipCCL's bundled copy and a separately installed copy of rocPRIM, hipCUB, or rocThrust that uses the same install prefix.
 
-During the deprecation window, ``HIPCCL_INSTALL_LEGACY_HEADER_SYMLINKS``
-(default ``ON``) additionally installs a compatibility symlink at the old,
-flat location for each built component, so that existing code doing e.g.
-``#include <rocprim/...>`` against a plain ``-I<prefix>/include`` keeps
-working without changes. This is a temporary migration aid, not a permanent
-feature - it will eventually be turned off and removed once downstream
-consumers have migrated to the ``include/hipccl/<component>`` paths.
+During the deprecation window, ``HIPCCL_INSTALL_LEGACY_HEADER_SYMLINKS`` also installs a compatibility symlink at the old flat location for each built component.
+The default is ``ON``.
+Code that uses ``#include <rocprim/...>`` with ``-Iinstall_prefix/include`` keeps working without changes.
+The symlink is a temporary migration aid.
+It will be turned off and removed once consumers use the ``include/hipccl/component_name`` paths.
 
 Versioning
 ==========
 
-hipCCL versions its own umbrella package (the CPack package and
-``find_package(hipccl)``) independently of the individual components.
-rocPRIM, hipCUB, and rocThrust each keep their own, pre-existing version line
-and their own ``find_package(rocprim)`` etc. version - hipCCL does not force
-them to match the umbrella version. This mirrors how hipCUB already
-distinguishes "my own version" from "the CCCL version I correspond to."
+hipCCL is versioned independently of its individual components.
+rocPRIM, hipCUB, and rocThrust each keep their own version, and each keeps its own ``find_package`` version.
