@@ -582,7 +582,14 @@ def build_flash_attn_func_module_primary(
                         or (not traits.ENABLE_DMA and not traits.ENABLE_PREFETCH_3BUF)
                     )
                 ):
-                    _v_vecs_prefetch = kv_gmem_to_lds.coop_load_v_global(kv_start)
+                    # The layout the V store below expects: paired rows when it is the
+                    # permuting one, as on the prefetch path (modification 25).
+                    if const_expr(traits.V_PERM_TR):
+                        _v_vecs_prefetch = kv_gmem_to_lds.coop_load_v_global_perm(
+                            kv_start
+                        )
+                    else:
+                        _v_vecs_prefetch = kv_gmem_to_lds.coop_load_v_global(kv_start)
 
                 # ==== GEMM1: S = K @ Q^T. Bulk-read K packs, DMA-prefetch V, pipeline MFMAs ====
                 _k_lo, _k_hi = kv_lds_to_vgpr.load_k_packs(k_base)

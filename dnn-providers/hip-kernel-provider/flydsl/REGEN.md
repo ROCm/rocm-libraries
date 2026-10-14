@@ -139,7 +139,7 @@ RMSNorm, 156 SDPA), all four diffs empty. Repeat with `gfx12-generic` in place o
 `gfx11-generic` throughout: **168/168** there too.
 
 The CDNA SDPA op is built per arch rather than per family. The same three steps,
-with `sdpa_cdna` as the only op and `gfx950`, then `gfx942`, as the target:
+with `sdpa_cdna` as the only op and `gfx950`, then `gfx942`, then `gfx90a`, as the target:
 **2/2** for each.
 
 `manifest.json` agreeing is the stronger of the two checks — it carries the
@@ -182,10 +182,10 @@ for ARCH in gfx11-generic gfx12-generic; do
 done
 
 # The CDNA SDPA kernels are MFMA code, built per arch, one engine per kernel family:
-# FlyDSL's generic kernel (both arches), its dual-wave kernel (gfx950 only; the
-# generator builds nothing for gfx942) and the generic kernel's split-KV decode
+# FlyDSL's generic kernel (every arch), its dual-wave kernel (gfx950 only; the
+# generator builds nothing for gfx942 or gfx90a) and the generic kernel's split-KV decode
 # objects. Each refuses any other arch before compiling.
-for ARCH in gfx950 gfx942; do
+for ARCH in gfx950 gfx942 gfx90a; do
   $PY -m generators.gen_sdpa_cdna --arch $ARCH
   $PY -m generators.gen_sdpa_cdna_dualwave --arch $ARCH
   $PY -m generators.gen_sdpa_cdna_decode --arch $ARCH

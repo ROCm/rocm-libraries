@@ -1,0 +1,64 @@
+{
+  "version": "1.0",
+  "id": "1ddcd18b-19a5-5558-8c54-4cfe6809fbb8",
+  "name": "sdpa_cdna_bf16_d64_causal1_bm128_wpe1",
+  "arch": [
+    "gfx90a"
+  ],
+  "kernel_source": {
+    "kind": "hsaco",
+    "file": "sdpa_cdna_bf16_d64_causal1_bm128_wpe1.hsaco",
+    "symbol": "flash_attn_generic_kernel_0"
+  },
+  "metadata": {
+    "dtype": "bf16",
+    "head_dim": 64,
+    "causal": 1,
+    "block_m": 128,
+    "kv_align": 0,
+    "waves_per_eu": 1,
+    "has_bias": 0,
+    "kv_gpfetch": 1,
+    "prefer_feature": "none",
+    "prefer_min": 0,
+    "prefer_max": 0,
+    "head_dim_v": 64,
+    "qk_mask": 0,
+    "dv_split": 1,
+    "k_chunk": 0,
+    "has_sink": 0
+  },
+  "priority": 100,
+  "provenance": {
+    "specialization_contract": {
+      "schema_version": 1,
+      "consumers": [
+        {
+          "engine_id": "5aa60dad-c58c-5300-b1fd-296e557736ee",
+          "kmd_id": "6638c9a9-4a0d-5704-95b9-db8774e663e4",
+          "metadata_fields": [],
+          "matcher_only_fields": [
+            "dtype",
+            "head_dim",
+            "causal",
+            "block_m",
+            "kv_align",
+            "waves_per_eu",
+            "has_bias",
+            "kv_gpfetch",
+            "prefer_feature",
+            "prefer_min",
+            "prefer_max",
+            "head_dim_v",
+            "qk_mask",
+            "dv_split",
+            "k_chunk",
+            "has_sink"
+          ],
+          "bindings": {},
+          "vocabulary": {}
+        }
+      ]
+    }
+  }
+}

@@ -479,7 +479,7 @@ feature, is part of adding the feature.
 ## 7. SDPA forward on CDNA — `hipkernel:flydsl_sdpa_cdna`, `..._cdna_dualwave`, `..._cdna_decode`
 
 Three engines, separate from §5's, one kernel family each: the generic MFMA kernel's
-prefill objects (`hipkernel:flydsl_sdpa_cdna`, gfx942 and gfx950), gfx950's dual-wave
+prefill objects (`hipkernel:flydsl_sdpa_cdna`, gfx90a, gfx942 and gfx950), gfx950's dual-wave
 kernel (`hipkernel:flydsl_sdpa_cdna_dualwave`), and the generic kernel in its split-KV
 mode with a merge kernel (`hipkernel:flydsl_sdpa_cdna_decode`). They share the graph
 matcher, the checks and the dispatch (`FlydslSdpaCdnaCommon.hpp`), each for its own
@@ -501,7 +501,10 @@ and
 [`FlydslSdpaCdnaDecodeNative.cpp`](../src/engines/kernel_ingestor_engine/packs/FlydslSdpaCdnaDecodeNative.cpp).
 
 The objects are built **per arch**, not per generic family: CDNA has no generic
-target that spans gfx942 and gfx950, and the two get different kernels.
+target that spans gfx942 and gfx950, and the two get different kernels. gfx90a (CDNA2)
+takes the generic kernel's gfx942 path -- the same 64 KiB of LDS, DMA of at most four
+bytes and the 32x32x8 MFMA (vendored-kernel modification 24) -- with tiles of its own
+(§7.7).
 
 | Kernel (`kernel`) | Workgroup | Grid |
 |---|---|---|
@@ -519,16 +522,19 @@ and f16, the default tier first:
 | gfx942 | 64 | `generic` 128 (three waves per EU); `generic` 64, preferred for small problems (each + `kv_align` 64) | the same, without `kv_align` |
 | gfx942 | 128 | `generic` 128; `generic` 64 for small problems, 256 for large ones (each + `kv_align` 64) | the same, the 128 tile without KV global prefetch |
 | gfx942 | 256 | `generic` 128; `generic` 64 for small problems (each + `kv_align` 64), LDS tiles unpadded | the same, without `kv_align` |
+| gfx90a | 64 | `generic` 128 (+ `kv_align` 64); `generic` 128, one wave per SIMD | `generic` 128, one wave per SIMD |
+| gfx90a | 128 | `generic` 256, three waves per SIMD (+ `kv_align` 64) | `generic` 256, three waves per SIMD, without KV global prefetch; `generic` 128, one wave per SIMD |
+| gfx90a | 256 | `generic` 128, three waves per SIMD, LDS tiles unpadded | `generic` 128, one wave per SIMD, LDS tiles unpadded |
 | gfx950 bias | 64, 128 | `dualwave`; `generic` 64 for what it declines (a window, a strided LSE) | `dualwave` (+ offset-0 build at 128); `generic` 64 (128 at 128, one wave per SIMD) for what it declines |
 | gfx950 bias | 256 | `generic` 128, one wave per SIMD | the same |
-| gfx942 bias | 64, 128, 256 | `generic` 128 | the same (at 128 without KV global prefetch) |
+| gfx942, gfx90a bias | 64, 128, 256 | `generic` 128 | the same (at 128 without KV global prefetch) |
 | gfx950 MLA | Q/K up to 256 (multiples of 16), V 128 | `generic` 128 with a Q/K mask (`qk_mask`, `head_dim_v` 128), one wave per SIMD | the same |
-| gfx942 MLA | Q/K up to 256 (multiples of 16), V 128 | `generic` 128 with a Q/K mask | the same |
+| gfx942, gfx90a MLA | Q/K up to 256 (multiples of 16), V 128 | `generic` 128 with a Q/K mask | the same |
 | gfx950 absorbed MLA, decode | Q/K up to 1024 (576 in practice; multiples of 8), V 512, one KV head | `generic` 64 with a Q/K mask, O split into four column slices, the keys split and the group packed | the same |
-| gfx942 absorbed MLA, decode | Q/K up to 768 (multiples of 8), V 512, one KV head | the same, K staged in three 256-column chunks per KV tile (`k_chunk`), without the KV global prefetch | the same |
-| both, any other multiple of 8 | up to 64, 128, 256 (Q, K and V the graph's width) | `generic` with Q/K and V masked to the runtime width (`qk_mask`, `head_dim_v` = the bucket), ranked below every exact object | the same |
-| both, attention sink | 64, 128 | `generic` (gfx950 64 rows; gfx942 its default 128-row tier) with the sink (`has_sink`), and the split, packed decode tier with it | the same |
-| both, decode | 64, 128, 256 | `generic` 64 (128 at 256) with the keys split across workgroups and the GQA group packed into its rows (`split_kv`, `pack_gqa`), preferred below 16 query positions | the same |
+| gfx942, gfx90a absorbed MLA, decode | Q/K up to 768 (multiples of 8), V 512, one KV head | the same, K staged in three 256-column chunks per KV tile (`k_chunk`), without the KV global prefetch | the same |
+| every arch, any other multiple of 8 | up to 64, 128, 256 (Q, K and V the graph's width) | `generic` with Q/K and V masked to the runtime width (`qk_mask`, `head_dim_v` = the bucket), ranked below every exact object | the same |
+| every arch, attention sink | 64, 128 | `generic` (gfx950 64 rows; gfx942 and gfx90a gfx942's default 128-row tier) with the sink (`has_sink`), and the split, packed decode tier with it | the same |
+| every arch, decode | 64, 128, 256 | `generic` 64 (128 at 256) with the keys split across workgroups and the GQA group packed into its rows (`split_kv`, `pack_gqa`), preferred below 16 query positions | the same |
 
 The dual-wave kernel takes `head_dim` 64 and 128 only, so gfx950's 256 comes from the
 generic kernel, which at that width holds its tile without spilling only with the
@@ -778,3 +784,30 @@ The rules were fitted on bf16 and the f16 objects share them. Bias classes are
 rare in the corpus and ship their default tier only. The process is repeated as
 features land; the rules are coarse by design, and a trained heuristic replaces
 them when the ingestor gains one.
+
+### 7.7 gfx90a (MI210, MI250)
+
+gfx90a runs the generic kernel on gfx942's code path (vendored-kernel modification 24)
+and ships what gfx942 ships but the dual-wave engine: `hipkernel:flydsl_sdpa_cdna` (56
+objects) and `hipkernel:flydsl_sdpa_cdna_decode` (24).
+
+- **The plain prefill classes** (bf16 and f16; `head_dim` 64, 128, 256; causal or not)
+  were chosen by a sweep on an MI210 (104 CUs): `block_m` 64/128/256 × waves per SIMD
+  1/2/3 × KV global prefetch on/off, plus `kv_align` 64 and K padding off, each checked
+  against an fp32 reference at a ragged length and timed on six shapes from 16 × 512 to
+  32/8-head GQA at 8192. Per class, a greedy cover over both dtypes' shapes keeps the
+  fewest tiles within 3% of the best measured on each -- one, or two at `head_dim` 64
+  non-causal and 128 causal. No tier carries a `prefer` rule: until UHD's ranker exists,
+  autotune picks among them.
+- **Bias, sink, MLA, bucket, decode and absorbed-MLA classes** take gfx942's tiers, which
+  fit the same LDS, unmeasured on gfx90a beyond the GPU suites.
+- **Measured** (fp16/bf16, long MHA 2 × 16 heads × 8192): `head_dim` 128 non-causal
+  114 TFLOP/s -- 63% of the 181 TFLOP/s peak, 86% of the best bf16 GEMM measured on
+  the same GPU (133) and 1.10x PyTorch's flash path (AOTriton); `head_dim` 64 102
+  TFLOP/s (1.10x); causal 82-96 TFLOP/s (0.92-1.08x).
+- **Behind AOTriton, deferred performance work:** `head_dim` 256 (39-44 TFLOP/s, about
+  0.5x: the tiles that fit 64 KiB of LDS are poor there) and short or narrow problems
+  (16 × 512, 16 heads × 1024: 0.35-0.6x, the 128- and 256-row tiles leave CUs idle).
+- **Found on the way:** without the KV global prefetch, bf16 at `head_dim` 64 with 128
+  rows and 128 with 256 rows did not trace (an upstream loader mismatch, fixed by
+  vendored-kernel modification 25, on gfx942 too).

@@ -94,7 +94,7 @@ serve is the heuristic's (or autotune's) to decide. `generators/gen_sdpa_aiw.py`
 row through the kernel's own tuning table and records the schedule it chose as knobs.
 
 **SDPA forward on CDNA**: three engines with objects built per arch — FlyDSL's generic
-MFMA kernel (`hipkernel:flydsl_sdpa_cdna`, **gfx942** and **gfx950**), its dual-wave MFMA
+MFMA kernel (`hipkernel:flydsl_sdpa_cdna`, **gfx90a**, **gfx942** and **gfx950**), its dual-wave MFMA
 kernel (`hipkernel:flydsl_sdpa_cdna_dualwave`, **gfx950** only), and the generic kernel's
 split-KV decode objects (`hipkernel:flydsl_sdpa_cdna_decode`): bf16 and f16 at
 `head_dim` 64, 128 and 256, causal and non-causal; both sequence
@@ -239,7 +239,7 @@ it is generated output inside the per-target folders.**
 ```
 
 `<target>` is a generic family (`gfx11-generic`, `gfx12-generic`) or a concrete
-arch (`gfx950`, `gfx942` for the CDNA SDPA op); both can sit side by side under
+arch (`gfx950`, `gfx942`, `gfx90a` for the CDNA SDPA ops); both can sit side by side under
 one op, each its own folder and summary, as the provider grows arch-specific
 objects beside a family set.
 
@@ -270,7 +270,7 @@ Each link is checkable by a command, and [REGEN.md](REGEN.md) gives each command
 upstream FlyDSL @ 89ad52fbbb9e, AITER @ 8253efc40595
    │  tools/diff_upstream.py          — vendored copy == upstream, but for recorded modifications
 kernels_src/
-   │  gen_<op>.py (flydsl 0.3.4)      — byte-reproducible: 168/168 per RDNA family, 100/100 gfx950, 102/102 gfx942
+   │  gen_<op>.py (flydsl 0.3.4)      — byte-reproducible: 168/168 per RDNA family, 100/100 gfx950, 102/102 gfx942, 80/80 gfx90a
 <content>/<op>/<arch>/*.hsaco + manifest.json
    │  gen_descriptors.py --check      — objects match manifest SHA256 and target; descriptors agree
 <content>/<op>/**/*.json (hsaco UKDs)

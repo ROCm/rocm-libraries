@@ -16,7 +16,7 @@ exactly as it did when the three were one table.
 
 The kernels are FlyDSL's own CDNA attention forwards, vendored under
 ``kernels_src/kernels/attention_cdna/``: the dual-wave software-pipelined kernel
-on gfx950 and the generic MFMA kernel on gfx942. Their launchers take
+on gfx950 and the generic MFMA kernel on gfx942 and gfx90a. Their launchers take
 ``fx.Tensor`` arguments, so each object is traced from torch ``meta`` tensors --
 shapes and strides with no storage -- under ``COMPILE_ONLY=1``. No GPU is needed,
 and the object is byte-identical to one traced from device tensors: every tensor
@@ -225,7 +225,11 @@ _TRACE_KV_HEADS = 8
 # default does not fit: at head_dim 256 its padded K and transposed-V tiles need
 # 67,072 bytes, past gfx942's 64 KiB, and unpadded they need exactly 64 KiB. K keeps
 # its XOR swizzle against bank conflicts. Recorded per object as `lds_pads`.
-_GENERIC_LDS_PADS = {("gfx942", 256): {"k_pad": 0, "vt_pad": 0}}
+_GENERIC_LDS_PADS = {
+    ("gfx942", 256): {"k_pad": 0, "vt_pad": 0},
+    # gfx90a's LDS is gfx942's 64 KiB.
+    ("gfx90a", 256): {"k_pad": 0, "vt_pad": 0},
+}
 
 
 def _lds_pads(instance: Instance, arch: str) -> dict:
@@ -374,7 +378,7 @@ def _spill_allowance(instance: Instance, arch: str) -> int:
 
 # LDS one workgroup may allocate. The compiler reports an object over it as an
 # error, yet still emits the object, which then fails to launch.
-_LDS_LIMIT_BYTES = {"gfx942": 65536, "gfx950": 163840}
+_LDS_LIMIT_BYTES = {"gfx90a": 65536, "gfx942": 65536, "gfx950": 163840}
 
 
 def _verify(

@@ -675,6 +675,24 @@ _SDPA_CDNA_DUALWAVE = {
     ),
 }
 SDPA_CDNA_TIERS: dict[str, dict[tuple[int, int], tuple[CdnaTier, ...]]] = {
+    # gfx90a (CDNA2) takes the generic kernel's gfx942 path (vendored-kernel modification
+    # 24). The tiers are the greedy cover of a measured MI210 sweep: per class, the fewest
+    # tiles within 3% of the best measured at every shape, bf16 and f16 together. No tier
+    # carries a `prefer` rule: until UHD ranks them, autotune picks among them.
+    "gfx90a": {
+        (64, 0): (
+            CdnaTier(_GEN, 128, kv_aligned=True),
+            CdnaTier(_GEN, 128, waves_per_eu=1),
+        ),
+        (64, 1): (CdnaTier(_GEN, 128, waves_per_eu=1),),
+        (128, 0): (CdnaTier(_GEN, 256, waves_per_eu=3, kv_aligned=True),),
+        (128, 1): (
+            CdnaTier(_GEN, 256, waves_per_eu=3, kv_gpfetch=0),
+            CdnaTier(_GEN, 128, waves_per_eu=1),
+        ),
+        (256, 0): (CdnaTier(_GEN, 128, waves_per_eu=3),),
+        (256, 1): (CdnaTier(_GEN, 128, waves_per_eu=1),),
+    },
     "gfx950": {
         **_SDPA_CDNA_DUALWAVE,
         # The generic kernel needs one wave per SIMD at 256 to hold its tile.
@@ -738,6 +756,15 @@ SDPA_CDNA_BIAS_TIERS: dict[str, dict[tuple[int, int], tuple[CdnaTier, ...]]] = {
         (256, 0): (CdnaTier(_GEN, 128, waves_per_eu=1),),
         (256, 1): (CdnaTier(_GEN, 128, waves_per_eu=1),),
     },
+    # gfx90a: gfx942's, the same 64 KiB of LDS and the same code path.
+    "gfx90a": {
+        (64, 0): (CdnaTier(_GEN, 128),),
+        (64, 1): (CdnaTier(_GEN, 128),),
+        (128, 0): (CdnaTier(_GEN, 128),),
+        (128, 1): (CdnaTier(_GEN, 128, kv_gpfetch=0),),
+        (256, 0): (CdnaTier(_GEN, 128),),
+        (256, 1): (CdnaTier(_GEN, 128),),
+    },
     "gfx942": {
         # Three waves per EU spill with a bias; the kernel's default does not.
         (64, 0): (CdnaTier(_GEN, 128),),
@@ -760,6 +787,10 @@ SDPA_CDNA_MLA_TIERS: dict[str, dict[tuple[int, int, int], tuple[CdnaTier, ...]]]
         (256, 128, 1): (CdnaTier(_GEN, 128, waves_per_eu=1),),
     },
     "gfx942": {
+        (256, 128, 0): (CdnaTier(_GEN, 128),),
+        (256, 128, 1): (CdnaTier(_GEN, 128),),
+    },
+    "gfx90a": {
         (256, 128, 0): (CdnaTier(_GEN, 128),),
         (256, 128, 1): (CdnaTier(_GEN, 128),),
     },
@@ -788,7 +819,7 @@ SDPA_CDNA_DECODE_TIERS: dict[str, dict[tuple[int, int], tuple[CdnaTier, ...]]] =
         for head_dim in (64, 128, 256)
         for causal in (0, 1)
     }
-    for arch in ("gfx950", "gfx942")
+    for arch in ("gfx950", "gfx942", "gfx90a")
 }
 
 # Absorbed multi-head latent attention (Q/K 576, V 512) and DeepSeek-V4's 512/512, both
@@ -803,21 +834,25 @@ SDPA_CDNA_WIDE_TIERS: dict[str, dict[tuple[int, int, int], tuple[CdnaTier, ...]]
         (1024, 512, causal): (CdnaTier(_GEN, 64, split_kv=1, pack_gqa=1, dv_split=4),)
         for causal in (0, 1)
     },
-    # gfx942's 64 KiB of LDS holds no K tile this wide: a 768 bucket staged in three
-    # 256-column chunks per KV tile (modification 18), without the KV global prefetch.
-    "gfx942": {
-        (768, 512, causal): (
-            CdnaTier(
-                _GEN,
-                64,
-                split_kv=1,
-                pack_gqa=1,
-                dv_split=4,
-                kv_gpfetch=0,
-                k_chunk=256,
-            ),
-        )
-        for causal in (0, 1)
+    # gfx942's (and gfx90a's) 64 KiB of LDS holds no K tile this wide: a 768 bucket staged
+    # in three 256-column chunks per KV tile (modification 18), without the KV global
+    # prefetch.
+    **{
+        arch: {
+            (768, 512, causal): (
+                CdnaTier(
+                    _GEN,
+                    64,
+                    split_kv=1,
+                    pack_gqa=1,
+                    dv_split=4,
+                    kv_gpfetch=0,
+                    k_chunk=256,
+                ),
+            )
+            for causal in (0, 1)
+        }
+        for arch in ("gfx942", "gfx90a")
     },
 }
 
@@ -834,6 +869,10 @@ SDPA_CDNA_BUCKET_TIERS: dict[str, dict[tuple[int, int], CdnaTier]] = {
     | {(128, causal): CdnaTier(_GEN, 128) for causal in (0, 1)}
     # At 256 the masks' selects tip the tile into spills: 128 rows always, 64 rows while
     # the next K tile is carried in registers (KV global prefetch).
+    | {(256, causal): CdnaTier(_GEN, 64, kv_gpfetch=0) for causal in (0, 1)},
+    # gfx90a: gfx942's, the same 64 KiB of LDS and the same code path.
+    "gfx90a": {(64, causal): CdnaTier(_GEN, 128, waves_per_eu=3) for causal in (0, 1)}
+    | {(128, causal): CdnaTier(_GEN, 128) for causal in (0, 1)}
     | {(256, causal): CdnaTier(_GEN, 64, kv_gpfetch=0) for causal in (0, 1)},
 }
 
@@ -875,6 +914,21 @@ SDPA_CDNA_SINK_TIERS: dict[str, dict[tuple[int, int], tuple[CdnaTier, ...]]] = {
                 has_sink=1,
                 prefer=("seq_q", 0, SDPA_CDNA_DECODE_SEQ_Q),
             ),
+        )
+        for head_dim in (64, 128)
+        for causal in (0, 1)
+    },
+    # gfx90a: gfx942's tiers, with no `prefer` rule (autotune picks until UHD ranks).
+    "gfx90a": {
+        (head_dim, causal): (
+            CdnaTier(
+                _GEN,
+                128,
+                waves_per_eu=3 if head_dim == 64 else 0,
+                kv_gpfetch=0 if (head_dim, causal) == (128, 1) else 1,
+                has_sink=1,
+            ),
+            CdnaTier(_GEN, 64, split_kv=1, pack_gqa=1, has_sink=1),
         )
         for head_dim in (64, 128)
         for causal in (0, 1)

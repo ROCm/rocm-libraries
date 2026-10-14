@@ -374,7 +374,7 @@ TEST(TestContainer, GetApplicableEngineIdsSdpaGraph)
 
     Handle handle;
     auto deviceString = hip_kernel_provider_common::getDeviceString(handle.getStream());
-    if(deviceString != "gfx942" && deviceString != "gfx950")
+    if(deviceString != "gfx90a" && deviceString != "gfx942" && deviceString != "gfx950")
     {
         GTEST_SKIP();
     }
@@ -404,11 +404,15 @@ TEST(TestContainer, GetApplicableEngineIdsSdpaGraph)
                != applicableEngines.end();
     };
 
-    // The engines that serve this graph on gfx942 and gfx950, and no others.
+    // The engines that serve this graph on gfx90a, gfx942 and gfx950, and no others.
     size_t expected = 0;
 #ifdef HIPDNN_ENGINE_ASM_SDPA
-    EXPECT_TRUE(applies(asm_sdpa_engine::AsmSdpaEngine::staticId()));
-    ++expected;
+    // The assembly kernels are built for gfx942 and gfx950 only.
+    if(deviceString != "gfx90a")
+    {
+        EXPECT_TRUE(applies(asm_sdpa_engine::AsmSdpaEngine::staticId()));
+        ++expected;
+    }
 #endif
 #if defined(HIPDNN_ENABLE_KERNEL_INGESTOR) && defined(HIPDNN_ENGINE_FLYDSL)
     // FlyDSL's CDNA SDPA engines, one per kernel family, each when this build staged objects

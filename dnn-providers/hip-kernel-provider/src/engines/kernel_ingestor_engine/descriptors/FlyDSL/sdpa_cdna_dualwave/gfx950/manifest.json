@@ -7,7 +7,7 @@
     "flydsl_kernels_commit": "89ad52fbbb9e252396829a8a44b12e18b7acd970",
     "flydsl_kernels_describe": "v0.3.4.1-19-g89ad52f",
     "rocm_version": "7.13.0",
-    "inputs_sha256": "9f0a5de7dbc95aeee7fcb53a22df445d6775f1b4f2f7f3d2491e8cbddee8eabd"
+    "inputs_sha256": "26f8896e85d34092415e29f4b0d205071dcab85e78ac7872d2e42a3e209a8a1c"
   },
   "instances": [
     {

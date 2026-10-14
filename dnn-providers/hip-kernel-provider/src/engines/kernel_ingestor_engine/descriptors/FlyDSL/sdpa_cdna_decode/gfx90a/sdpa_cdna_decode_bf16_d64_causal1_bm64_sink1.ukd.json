@@ -1,0 +1,58 @@
+{
+  "version": "1.0",
+  "id": "05c930f9-bb02-59e1-8068-7d9a1eb8b0aa",
+  "name": "sdpa_cdna_decode_bf16_d64_causal1_bm64_sink1",
+  "arch": [
+    "gfx90a"
+  ],
+  "kernel_source": {
+    "kind": "hsaco",
+    "file": "sdpa_cdna_decode_bf16_d64_causal1_bm64_sink1.hsaco",
+    "symbol": "flash_attn_generic_kernel_0"
+  },
+  "metadata": {
+    "dtype": "bf16",
+    "head_dim": 64,
+    "causal": 1,
+    "block_m": 64,
+    "waves_per_eu": 0,
+    "has_bias": 0,
+    "kv_gpfetch": 1,
+    "head_dim_v": 64,
+    "qk_mask": 0,
+    "dv_split": 1,
+    "k_chunk": 0,
+    "has_sink": 1,
+    "merge_symbol": "flash_attn_generic_merge_kernel_1"
+  },
+  "priority": 90,
+  "provenance": {
+    "specialization_contract": {
+      "schema_version": 1,
+      "consumers": [
+        {
+          "engine_id": "63ffc720-10c9-55e1-9b3b-78da0f7c4aea",
+          "kmd_id": "3ebdeb0d-adbe-50c3-b251-ea4b5710d50f",
+          "metadata_fields": [],
+          "matcher_only_fields": [
+            "dtype",
+            "head_dim",
+            "causal",
+            "block_m",
+            "waves_per_eu",
+            "has_bias",
+            "kv_gpfetch",
+            "head_dim_v",
+            "qk_mask",
+            "dv_split",
+            "k_chunk",
+            "has_sink",
+            "merge_symbol"
+          ],
+          "bindings": {},
+          "vocabulary": {}
+        }
+      ]
+    }
+  }
+}

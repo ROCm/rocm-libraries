@@ -270,6 +270,13 @@ diff against upstream plus the modifications below.
       three targets share, instead of the dispatch that knows only gfx942 and gfx950.
     - **Unchanged:** gfx942 and gfx950 take every branch they took before and build the
       same code objects. Not yet upstream.
+25. **V loaded in the layout its store expects** (`flash_attn_generic.py`). Without the
+    register-staged K/V prefetch, the generic kernel loaded V with the plain loader and
+    then, where bf16's `v_perm` V^T store applies (one KV batch per tile: head_dim 64 at
+    128 rows, 128 at 256 rows), stored it with the permuting store, which reads two rows
+    per thread from `coop_load_v_global_perm`. Tracing failed (`IndexError`) on gfx942
+    and gfx90a alike. That path now loads with the permuting loader, as the prefetch path
+    already did. Every build that traced before is unchanged. Not yet upstream.
 
 The repository's `black` hook reformats these files on commit; that changes
 formatting only (the syntax trees are unchanged).
