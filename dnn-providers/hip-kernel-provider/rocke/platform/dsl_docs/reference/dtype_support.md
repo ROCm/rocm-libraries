@@ -27,14 +27,18 @@ estimates, shipping order, and acceptance checklists are maintained separately.
 logical dtype and native gfx942 atoms added after the original basis snapshot.
 Other scores and source line numbers retain their stated historical basis.
 
+**FP64 coverage update.** The f64 entries in §1, §2.5, and §4C reflect the IR
+type, arithmetic, memory, and elementwise/reduce2d support added after the
+original basis snapshot. The §2.4 f64 row retains its stated historical basis.
+
 ---
 
 ## 1. The canonical dtype set
 
 **Current clarification (2026-10-07).** The original basis snapshot listed
 ten directly lowerable scalar representations. The table below also includes
-the subsequently added logical TF32 type with its I32 carrier. The registry
-recognizes `fp4e2m1`, `fp6e2m3`, `fp6e3m2`, `e8m0`, and `e5m3` as logical `Type`
+the subsequently added logical TF32 type with its I32 carrier and the F64
+type. The registry recognizes `fp4e2m1`, `fp6e2m3`, `fp6e3m2`, `e8m0`, and `e5m3` as logical `Type`
 identities preserved by serialization; their packed-data paths use `i8` storage
 and integer carrier registers. See [dtype storage and packing](../architecture/dtype_storage_packing.md).
 Logical recognition does not provide generic scalar arithmetic or conversion.
@@ -59,6 +63,7 @@ The definitions in both engines are:
 | `bf16` | `bfloat` | 16 | float |
 | `f32` | `float` | 32 | float |
 | `tf32` | `i32` (carrier) | 32 | logical float; native gfx942 XF32 input |
+| `f64` | `double` | 64 | float |
 | `fp8e4m3` | `i8` (storage) | 8 | float (OCP E4M3) |
 | `bf8e5m2` | `i8` (storage) | 8 | float (OCP E5M2) |
 
@@ -117,7 +122,7 @@ equivalent; `USE_TF32` output is not a bit-accuracy oracle for BF16 compute.
 The matrix below therefore labels this possible mode `bf16-mode`. It is separate
 from logical TF32; no production selector maps TF32 requests to BF16 compute.
 
-**Types that are entirely absent from the vocabulary:** `f64`, unsigned
+**Types that are entirely absent from the vocabulary:** unsigned
 `u8/u16/u32/u64`, and a distinct `bool` (predicates reuse `i1`). No engine
 references them.
 
@@ -196,6 +201,8 @@ Scores 0–3 per criterion; `—` = N/A (excluded from the denominator). Rows ar
 grouped by type family, not ranked — see "What the scores are not" in §2.3.
 TF32 was added after this scored snapshot; its current layer boundaries are
 described in §1 and §4D rather than assigned a retrospective percentage here.
+The `f64` row records the snapshot before F64 was added; its current layer
+boundaries are described in §2.5.
 
 Gap categories: **[C]** conversion gap · **[P]** partial/plumbing gap ·
 **[M]** missing entirely.
@@ -338,11 +345,21 @@ mode. The missing selector and precision contract are described in §2.5.
   `cast_f32_to(v, BF16)` (C3=2), and bf16 MFMA/WMMA atoms (C2=3).
   **C6=1** records the need for a caller-visible BF16 precision contract when
   the mode is exposed; see [§1](#1-the-canonical-dtype-set).
-- **`f64` / `u16-64` — 0 at every layer.** Absent from the hipDNN enum, rejected
-  by the MIOpen provider, and not requested by any family. For `f64` specifically
-  `V_MFMA_F64_*` is present on gfx90a/gfx942/gfx950, where f64 is unwired
-  software. gfx1250 has no F64 matrix instruction: LLVM gates
-  `V_WMMA_F64_16X16X4_F64` on `gfx1251-gemm-insts` (§4A).
+- **`u16-64` — 0 at every layer.** Absent from the hipDNN enum, rejected by the
+  MIOpen provider, and not requested by any family.
+- **`f64` — IR, memory, and elementwise/reduce2d only.** The IR type,
+  `const_f64`, f64 `fadd`/`fsub`/`fmul`/`fdiv`/`fneg`/`fmax`/`fmin`/`fcmp`/
+  `select` and `vector_add`/`vector_sub`/`vector_mul`, global/LDS memory up to
+  2-element vectors, and HIP lowering are present. Elementwise
+  (non-transcendental ops) and reduce2d accept f64 with `vec=2`
+  ([SUPPORT_MATRIX](../../python/rocke/instances/SUPPORT_MATRIX.md)).
+  `exp2`, `exp2_fast`, `log2`, `sqrt`, `rsqrt`, `rcp_fast`, `tanh`, `fabs`,
+  `fma`, `fmax3`, `fmin3`, and `vector_fma` reject f64 in both lowerings; there
+  are no conversions to or from f64, MMA atoms, or atomics. f64 is in the
+  hipDNN enum (`DOUBLE`) but rejected by the MIOpen provider.
+  `V_MFMA_F64_*` is present on gfx90a/gfx942/gfx950 but undeclared (§4C.6).
+  gfx1250 has no F64 matrix instruction: LLVM gates `V_WMMA_F64_16X16X4_F64` on
+  `gfx1251-gemm-insts` (§4A).
 
 ### 2.6 Source anchors for the scores
 
@@ -462,7 +479,7 @@ The original basis snapshot, with the gfx942 XF32 addition noted below:
 ### 4C. Deltas — silicon capability vs. rocKE's declared atoms
 
 The following gaps compare §4A with §4B. The first five concern atom declarations
-only; f64 (4C.6) also lacks an IR type. The gfx942 XF32 declaration gap is now
+only, as does f64 (4C.6). The gfx942 XF32 declaration gap is now
 closed; §4D describes its logical dtype and remaining integration boundaries.
 
 #### 4C.1 gfx1250 — fp4/fp6/bf6 block-scaled atoms are omitted (deliberately)
@@ -498,8 +515,8 @@ catalog declares no sparse atom on any arch, and no family requests one. No dtyp
 in §2.4 is blocked on it.
 
 #### 4C.6 f64 matrix is in silicon but undeclared
-`V_MFMA_F64_*` is present on gfx90a/gfx942/gfx950. `f64` is not an IR type
-at all (§1), so those targets have a vocabulary gap as well as missing atoms.
+`V_MFMA_F64_*` is present on gfx90a/gfx942/gfx950. `f64` is an IR type
+(§1), but no f64 MMA atom is declared on those targets.
 gfx1250 has no native F64 matrix instruction and is excluded from this gap.
 
 ### 4D. XF32 / TF32 across the arch set

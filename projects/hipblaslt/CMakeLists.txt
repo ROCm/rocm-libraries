@@ -457,6 +457,35 @@ if(HIPBLASLT_ENABLE_HOST)
     add_subdirectory(library)
 endif()
 
+if(HIPBLASLT_ENABLE_HOST
+   AND HIPBLASLT_BUILD_SHARED_LIBS
+   AND TENSILELITE_BUILD_SHARED_LIBS
+   AND NOT WIN32
+   AND (HIPBLASLT_BUILD_TESTING OR TENSILELITE_BUILD_TESTING OR BUILD_TESTING))
+    get_filename_component(_hipblaslt_cxx_dir "${CMAKE_CXX_COMPILER}" REALPATH)
+    get_filename_component(_hipblaslt_cxx_dir "${_hipblaslt_cxx_dir}" DIRECTORY)
+    find_program(HIPBLASLT_LLVM_IFS llvm-ifs
+        HINTS "${_hipblaslt_cxx_dir}"
+        PATHS "${ROCM_PATH}/lib/llvm/bin" "$ENV{ROCM_PATH}/lib/llvm/bin" /opt/rocm/lib/llvm/bin
+    )
+    if(HIPBLASLT_LLVM_IFS)
+        enable_testing()
+        add_test(
+            NAME hipblaslt.symbol-contract.tensilelite-host
+            COMMAND "${CMAKE_COMMAND}"
+                "-DLLVM_IFS=${HIPBLASLT_LLVM_IFS}"
+                "-DCONSUMER=$<TARGET_FILE:hipblaslt>"
+                "-DPROVIDER=$<TARGET_FILE:tensilelite-host>"
+                "-DREQUIRED_IMPORTS=${CMAKE_CURRENT_SOURCE_DIR}/library/symbol-contract/tensilelite-host-imports.txt"
+                "-DNAMESPACE_PATTERN=11TensileLite"
+                "-DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/symbol-contract"
+                -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/hipblaslt_check_symbol_contract.cmake"
+        )
+    else()
+        message(STATUS "llvm-ifs not found; hipblaslt.symbol-contract.tensilelite-host test disabled")
+    endif()
+endif()
+
 if(HIPBLASLT_ENABLE_DEVICE)
     add_subdirectory(device-library)
 endif()

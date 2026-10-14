@@ -167,10 +167,13 @@ def test_required_reference_prerequisites_fail_configuration(project, problem):
         "integrity": "does not match the pinned lock",
         "python": "requires a Python3 interpreter",
     }
-    assert expected[problem] in result.stdout + result.stderr
+    output = result.stdout + result.stderr
+    assert expected[problem] in output
+    if problem == "archive":
+        assert str(library / "reference_bundles/conv/gfx942.tar.gz.dvc") in output
     if problem == "lock":
-        assert "baseline_lock.json" in result.stdout + result.stderr
-        assert "Traceback" not in result.stdout + result.stderr
+        assert "baseline_lock.json" in output
+        assert "Traceback" not in output
 
 
 def test_published_bundles_have_supported_cohorts_and_committed_locks(tmp_path):
