@@ -250,3 +250,28 @@ def test_a2a_mode_rejects_fused_gemm_a2a(_gp_gfx942, gfx942_iim, assembler, caps
     )
     assert sol.get("Valid") is False
     assert "FusedA2AMode=1 and FusedGemmA2A are mutually exclusive" in out
+
+
+# ---------------------------------------------------------------------------
+# Mode-only knobs.
+# ---------------------------------------------------------------------------
+_MODE_KNOBS = [
+    ("A2ASubRounds", 2, "A2ASubRounds > 1 requires FusedA2AMode=1"),
+]
+
+
+@pytest.mark.parametrize("param,value,_msg", _MODE_KNOBS)
+def test_a2a_mode_accepts_knob(_gp_gfx942, gfx942_iim, assembler, capsys, param, value, _msg):
+    sol, out = _derive(gfx942_iim, assembler, capsys, **{param: value})
+    assert sol.get("Valid") is True, f"expected accept, rejected with: {out!r}"
+
+
+@pytest.mark.parametrize("param,value,msg", _MODE_KNOBS)
+def test_a2a_knob_rejected_without_mode(
+    _gp_gfx942, gfx942_iim, assembler, capsys, param, value, msg
+):
+    sol, out = _derive(
+        gfx942_iim, assembler, capsys, ProblemType={"FusedA2AMode": 0}, **{param: value}
+    )
+    assert sol.get("Valid") is False
+    assert msg in out

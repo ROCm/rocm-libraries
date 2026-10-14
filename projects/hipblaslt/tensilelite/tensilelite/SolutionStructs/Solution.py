@@ -2301,6 +2301,10 @@ class Solution(collections.abc.Mapping):
         return
       state["InternalSupportParams"]["SupportUserGSU"] = False # Disable UserGSU for the last-WG election
 
+    if state["A2ASubRounds"] != 1 and state["ProblemType"]["FusedA2AMode"] != 1:
+      reject(state, printRejectionReason, "A2ASubRounds > 1 requires FusedA2AMode=1")
+      return
+
     if state["ProblemType"]["FusedA2AMode"] == 1:
       if state["ProblemType"]["FusedGemmA2A"]:
         reject(state, printRejectionReason,

@@ -159,6 +159,9 @@ namespace TensileLite
                 return mismatches;
             }
 
+            // Must equal the code object's A2ASubRounds.
+            uint32_t a2aSubRounds = 1;
+
             struct A2ACounterLayout
             {
                 size_t F            = 0;
@@ -205,11 +208,12 @@ namespace TensileLite
                 out.F            = (M + mt0 - 1) / mt0;
                 out.tokenBlocks  = (N + mt1 - 1) / mt1;
                 out.batches      = (out.tokenBlocks - 1) * out.F / numCu + 1;
-                out.flagBytes    = fusedA2AMode1FlagBytes((uint32_t)W, (uint32_t)out.tokenBlocks);
+                out.flagBytes
+                    = fusedA2AMode1FlagBytes((uint32_t)W, (uint32_t)out.tokenBlocks, a2aSubRounds);
                 out.payloadBytes = fusedA2AMode1PayloadBytes(
-                    (uint32_t)W, (uint32_t)out.tokenBlocks, (uint32_t)out.batches);
+                    (uint32_t)W, (uint32_t)out.tokenBlocks, (uint32_t)out.batches, a2aSubRounds);
                 out.allocBytes = fusedA2AMode1AllocBytes(
-                    (uint32_t)W, (uint32_t)out.tokenBlocks, (uint32_t)out.batches);
+                    (uint32_t)W, (uint32_t)out.tokenBlocks, (uint32_t)out.batches, a2aSubRounds);
 
                 // ContractionSolution folds y and z into x unless clusters are on.
                 // The comparison is on the work-group total, not the per-axis counts.
@@ -1146,6 +1150,7 @@ namespace TensileLite
             const bool loopback = args["a2a-loopback"].as<bool>();
             const bool multigpu = args["a2a-multigpu"].as<bool>();
             const int  launches = std::max(1, args["a2a-loopback-launches"].as<int>());
+            a2aSubRounds        = (uint32_t)std::max(1, args["a2a-sub-rounds"].as<int>());
 #ifndef TENSILELITE_ENABLE_SDMA
             if(loopback || multigpu)
             {

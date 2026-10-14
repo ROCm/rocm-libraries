@@ -41,24 +41,31 @@ namespace TensileLite
 
         // The one region reset per launch, sized as the kernel rounds it in
         // a2aElect. worldSize must be >= 1.
-        constexpr size_t fusedA2AMode1FlagBytes(uint32_t worldSize, uint32_t tokenBlocks)
+        constexpr size_t
+            fusedA2AMode1FlagBytes(uint32_t worldSize, uint32_t tokenBlocks, uint32_t subRounds = 1)
         {
-            return fusedA2AAlignLine((size_t)tokenBlocks * (worldSize - 1) * sizeof(uint32_t));
+            return fusedA2AAlignLine((size_t)tokenBlocks * (worldSize - 1) * subRounds
+                                     * sizeof(uint32_t));
         }
 
         // Live mode-1 bytes. `batches` is the number of distinct iB the kernel
         // can compute, not the world size.
-        constexpr size_t
-            fusedA2AMode1PayloadBytes(uint32_t worldSize, uint32_t tokenBlocks, uint32_t batches)
+        constexpr size_t fusedA2AMode1PayloadBytes(uint32_t worldSize,
+                                                   uint32_t tokenBlocks,
+                                                   uint32_t batches,
+                                                   uint32_t subRounds = 1)
         {
-            return FUSED_A2A_MODE1_FLAG_OFFSET + fusedA2AMode1FlagBytes(worldSize, tokenBlocks)
+            return FUSED_A2A_MODE1_FLAG_OFFSET
+                   + fusedA2AMode1FlagBytes(worldSize, tokenBlocks, subRounds)
                    + (size_t)batches * sizeof(uint32_t);
         }
 
-        constexpr size_t
-            fusedA2AMode1AllocBytes(uint32_t worldSize, uint32_t tokenBlocks, uint32_t batches)
+        constexpr size_t fusedA2AMode1AllocBytes(uint32_t worldSize,
+                                                 uint32_t tokenBlocks,
+                                                 uint32_t batches,
+                                                 uint32_t subRounds = 1)
         {
-            return fusedA2AMode1PayloadBytes(worldSize, tokenBlocks, batches)
+            return fusedA2AMode1PayloadBytes(worldSize, tokenBlocks, batches, subRounds)
                    + FUSED_A2A_COUNTER_SENTINEL_BYTES;
         }
 
