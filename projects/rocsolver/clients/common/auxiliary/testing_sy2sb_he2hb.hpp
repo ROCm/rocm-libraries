@@ -110,7 +110,7 @@ void cpu_band2full(const rocblas_fill uplo, const I n, I kd, Th hAband, const I 
         // Hermitianize matrix A, copying conjugate of strictly lower to upper.
         for(I j = 0; j < n; ++j)
         {
-            for(I i = 0; i < std::max<I>(j - kd, 0); ++i) // strictly upper band
+            for(I i = std::max<I>(j - kd, 0); i < j; ++i) // strictly upper band
             {
                 hA[i + j * lda] = sconj(hA[j + i * lda]);
             }
