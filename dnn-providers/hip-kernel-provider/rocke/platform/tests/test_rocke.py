@@ -1036,7 +1036,7 @@ class TestElementwiseInstance(unittest.TestCase):
         from rocke.instances import ElementwiseSpec, build_elementwise
 
         kernel = build_elementwise(ElementwiseSpec(op="add", dtype="f64", vec=2))
-        ll = lower_kernel_to_llvm(kernel)
+        ll = lower_kernel_to_llvm(kernel, arch="gfx950")
         self.assertIn("fadd double", ll)
 
     def test_f64_rejects_transcendental_ops_and_wide_vec(self):
@@ -1091,7 +1091,7 @@ class TestReduceInstance(unittest.TestCase):
 
         for op in ("sum", "max", "mean"):
             spec = Reduce2DSpec(n_per_block=4096, op=op, dtype="f64", vec=2)
-            ll = lower_kernel_to_llvm(build_reduce2d(spec))
+            ll = lower_kernel_to_llvm(build_reduce2d(spec), arch="gfx950")
             self.assertIn("double", ll)
 
     def test_f64_rejects_wide_vec(self):
