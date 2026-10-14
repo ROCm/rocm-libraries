@@ -1965,12 +1965,12 @@
           "gfx1201": 8,
           "gfx1250": 4,
           "gfx90a": 5,
-          "gfx942": 42,
-          "gfx950": 159
+          "gfx942": 47,
+          "gfx950": 166
         },
         "expected_failures": 4,
         "families": {
-          "attention": 33,
+          "attention": 35,
           "attention_d128_swa": 1,
           "attention_d256": 2,
           "attention_dense": 44,
@@ -1989,10 +1989,11 @@
           "gemm": 13,
           "grouped_gemm": 1,
           "kda_chunkwise": 13,
+          "lightning_indexer": 10,
           "moe": 9,
           "nontemporal": 2
         },
-        "ok_cases": 230
+        "ok_cases": 242
       }
     },
     "llvm22": {
@@ -3960,12 +3961,12 @@
           "gfx1201": 8,
           "gfx1250": 4,
           "gfx90a": 5,
-          "gfx942": 42,
-          "gfx950": 159
+          "gfx942": 47,
+          "gfx950": 166
         },
         "expected_failures": 4,
         "families": {
-          "attention": 33,
+          "attention": 35,
           "attention_d128_swa": 1,
           "attention_d256": 2,
           "attention_dense": 44,
@@ -3984,10 +3985,11 @@
           "gemm": 13,
           "grouped_gemm": 1,
           "kda_chunkwise": 13,
+          "lightning_indexer": 10,
           "moe": 9,
           "nontemporal": 2
         },
-        "ok_cases": 230
+        "ok_cases": 242
       }
     },
     "llvm23": {
@@ -5970,12 +5972,12 @@
           "gfx1201": 8,
           "gfx1250": 8,
           "gfx90a": 5,
-          "gfx942": 42,
-          "gfx950": 159
+          "gfx942": 47,
+          "gfx950": 166
         },
         "expected_failures": 0,
         "families": {
-          "attention": 33,
+          "attention": 35,
           "attention_d128_swa": 1,
           "attention_d256": 2,
           "attention_dense": 44,
@@ -5994,10 +5996,11 @@
           "gemm": 17,
           "grouped_gemm": 1,
           "kda_chunkwise": 13,
+          "lightning_indexer": 10,
           "moe": 9,
           "nontemporal": 2
         },
-        "ok_cases": 234
+        "ok_cases": 246
       }
     }
   },

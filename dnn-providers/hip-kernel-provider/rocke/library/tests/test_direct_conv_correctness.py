@@ -2930,8 +2930,10 @@ def _run_mfma_dgrad_pipeline(arch, problem, fprop_spec, kernels, dtype):
     }
     rt.memcpy_h2d(bufs["dy"], _u8(dY), dY.nbytes)
     rt.memcpy_h2d(bufs["w"], _u8(W), W.nbytes)
-    rt.memset(bufs["dx"], 0, dX.nbytes)
-    # Garbage in the workspaces: a correct pipeline overwrites what it reads.
+    # NaN in dX (0xFFFF is a NaN in fp16 and bf16): every output must be
+    # written. Garbage in the workspaces: a correct pipeline overwrites what
+    # it reads.
+    rt.memset(bufs["dx"], 0xFF, dX.nbytes)
     rt.memset(bufs["ws_t"], 0x7F, ws_t_bytes)
     rt.memset(bufs["ws_coa"], 0x7F, ws_coa_bytes)
 
@@ -3063,13 +3065,13 @@ class TestDirectConvMfmaDgradCorrectness(unittest.TestCase):
                 self.assertLess(rel_err, tol, f"{label} {problem.short()} {dtype}")
 
     def test_mfma_dgrad_baked(self):
-        for label, knobs, fold_k32, shapes in _MFMA_DGRAD_RTC_CASES:
-            # One baked binary per shape: the first of each case. Each case
-            # opens with a shape the baked reorganize pass serves: one group
-            # (it offsets the W_T column by the group) and, where the weights
-            # are reorganized, whole K-atoms (it leaves the workspace tail of
-            # a partial one unwritten).
-            self._check(label, knobs, fold_k32, shapes[:1], "fp16", False)
+        # One baked binary per shape, on every shape of every case: grouped
+        # problems and partial K-atoms included. The coalesced cases
+        # (waves_k > 1, runtime_k_loop) run the baked reorganize pass, which
+        # must read W_T's per-group column and zero-fill out-of-range lanes.
+        for dtype in ("fp16", "bf16"):
+            for label, knobs, fold_k32, shapes in _MFMA_DGRAD_RTC_CASES:
+                self._check(label, knobs, fold_k32, shapes, dtype, False)
 
     def test_mfma_dgrad_runtime_channels(self):
         for dtype in ("fp16", "bf16"):
