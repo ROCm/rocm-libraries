@@ -3377,7 +3377,7 @@ namespace TensileLite
                 = copyRotatingInput(newInputs.scaleAlphaVec,
                                     rotatingPtr,
                                     problem.tensors()[ContractionProblemGemm::TENSOR::SCALEALPHAVEC]
-                                        .totalAllocatedElements(),
+                                        .totalAllocatedBytes(),
                                     offset,
                                     stream);
             newInputs.metadata = (unsigned char*)copyRotatingInput(
