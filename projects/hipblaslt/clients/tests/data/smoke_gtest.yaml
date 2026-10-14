@@ -222,8 +222,8 @@ Tests:
   unit_check: 1
   gpu_arch: '942'
 
-### GFX12 FP8
-- name: matmul_f8_bf8_dst_fp32_gfx12_smoke
+### GFX11.7/GFX12 FP8
+- name: matmul_f8_bf8_dst_fp32_gfx117x_gfx12_smoke
   category: smoke
   function:
     matmul: *real_precisions_1b_dst_f32
@@ -238,9 +238,9 @@ Tests:
   bias_type: bf16_r
   unit_check: 0
   norm_check: 1
-  gpu_arch: '12(0[0-1]|50)'
+  gpu_arch: ['^117[01]', '^12(0[01]|50)']
 
-- name: matmul_f8_bf8_dst_fp16_gfx12_smoke
+- name: matmul_f8_bf8_dst_fp16_gfx117x_gfx12_smoke
   category: smoke
   function:
     matmul: *real_precisions_1b_dst_f16
@@ -254,9 +254,9 @@ Tests:
   bias_vector: [0, 1]
   bias_type: f16_r
   unit_check: 1
-  gpu_arch: '(120[0-1]|1250)'
+  gpu_arch: ['^117[01]', '^12(0[01]|50)']
 
-- name: matmul_f8_bf8_dst_bf16_gfx12_smoke
+- name: matmul_f8_bf8_dst_bf16_gfx117x_gfx12_smoke
   category: smoke
   function:
     matmul: *real_precisions_1b_dst_bf16
@@ -270,9 +270,9 @@ Tests:
   bias_vector: [0, 1]
   bias_type: bf16_r
   unit_check: 1
-  gpu_arch: '(120[0-1]|1250)'
+  gpu_arch: ['^117[01]', '^12(0[01]|50)']
 
-- name: matmul_real_1b_dst_f8_SCDInt1_gfx12_smoke
+- name: matmul_real_1b_dst_f8_SCDInt1_gfx117x_gfx12_smoke
   category: smoke
   function:
     matmul: *real_precisions_1b_dst_f8
@@ -288,9 +288,9 @@ Tests:
   bias_vector: [0, 1]
   bias_type: f16_r
   unit_check: 1
-  gpu_arch: '(120[0-1]|1250)'
+  gpu_arch: ['^117[01]', '^12(0[01]|50)']
 
-- name: matmul_real_1b_dst_f8_SCDNotInt_gfx12_smoke
+- name: matmul_real_1b_dst_f8_SCDNotInt_gfx117x_gfx12_smoke
   category: smoke
   function:
     matmul: *real_precisions_1b_dst_f8
@@ -306,9 +306,9 @@ Tests:
   bias_vector: [0, 1]
   bias_type: f16_r
   unit_check: 1
-  gpu_arch: '(120[0-1]|1250)'
+  gpu_arch: ['^117[01]', '^12(0[01]|50)']
 
-- name: matmul_one_integer_precisions_i8_gfx12_smoke
+- name: matmul_one_integer_precisions_i8_gfx117x_gfx12_smoke
   category: smoke
   function:
     matmul: *integer_precisions_i8
@@ -316,7 +316,7 @@ Tests:
   transA_transB: *transA_transB_range
   alpha: [ 0.0, 1.0 ]
   beta: [ 0.0, 2.0 ]
-  gpu_arch: '12(0[0-1]|50)'
+  gpu_arch: ['^117[01]', '^12(0[01]|50)']
 
 - name: matmul_real_1b_fnuz_dst_f8_fnuz_SCDInt1_smoke
   category: smoke
@@ -510,6 +510,7 @@ Tests:
     matmul: 
       - { a_type: f4_r, b_type: f4_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
       - { a_type: f4_r, b_type: f4_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 6, scaleB: 6, scale_type: f32_r}
+      - { a_type: f4_r, b_type: f4_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 8, scaleB: 8, scale_type: f32_r}
   matrix_size:
     - { M:  128,  N:  128,  K:  512  }
     - { M:  128,  N:  128,  K:  544  }
