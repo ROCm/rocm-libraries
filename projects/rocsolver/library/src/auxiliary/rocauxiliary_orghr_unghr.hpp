@@ -39,11 +39,11 @@
 
 ROCSOLVER_BEGIN_NAMESPACE
 
-template <bool BATCHED, typename T>
-void rocsolver_orghr_unghr_getMemorySize(const rocblas_int n,
-                                         const rocblas_int ilo,
-                                         const rocblas_int ihi,
-                                         const rocblas_int batch_count,
+template <bool BATCHED, typename T, typename I>
+void rocsolver_orghr_unghr_getMemorySize(const I n,
+                                         const I ilo,
+                                         const I ihi,
+                                         const I batch_count,
                                          size_t* size_scalars,
                                          size_t* size_work,
                                          size_t* size_Abyx_tmptr,
@@ -51,7 +51,7 @@ void rocsolver_orghr_unghr_getMemorySize(const rocblas_int n,
                                          size_t* size_workArr)
 {
     // if quick return no workspace needed
-    rocblas_int nh = ihi - ilo;
+    I nh = ihi - ilo;
     if(n == 0 || nh == 0 || batch_count == 0)
     {
         *size_scalars = 0;
@@ -73,15 +73,15 @@ void rocsolver_orghr_unghr_getMemorySize(const rocblas_int n,
     *size_work = std::max(w1, w2);
 }
 
-template <typename T, typename U>
+template <typename T, typename I, typename U>
 rocblas_status rocsolver_orghr_argCheck(rocblas_handle handle,
-                                        const rocblas_int n,
-                                        const rocblas_int ilo,
-                                        const rocblas_int ihi,
-                                        const rocblas_int lda,
+                                        const I n,
+                                        const I ilo,
+                                        const I ihi,
+                                        const I lda,
                                         T A,
                                         U tau,
-                                        const rocblas_int batch_count = 1)
+                                        const I batch_count = 1)
 {
     // order is important for unit tests:
 
@@ -103,18 +103,18 @@ rocblas_status rocsolver_orghr_argCheck(rocblas_handle handle,
     return rocblas_status_continue;
 }
 
-template <bool BATCHED, bool STRIDED, typename T, typename U>
+template <bool BATCHED, bool STRIDED, typename T, typename I, typename U>
 rocblas_status rocsolver_orghr_unghr_template(rocblas_handle handle,
-                                              const rocblas_int n,
-                                              const rocblas_int ilo,
-                                              const rocblas_int ihi,
+                                              const I n,
+                                              const I ilo,
+                                              const I ihi,
                                               U A,
-                                              const rocblas_int shiftA,
-                                              const rocblas_int lda,
+                                              const rocblas_stride shiftA,
+                                              const I lda,
                                               const rocblas_stride strideA,
                                               T* tau,
                                               const rocblas_stride strideP,
-                                              const rocblas_int batch_count,
+                                              const I batch_count,
                                               T* scalars,
                                               T* work,
                                               T* Abyx_tmptr,
@@ -131,7 +131,7 @@ rocblas_status rocsolver_orghr_unghr_template(rocblas_handle handle,
     hipStream_t stream;
     rocblas_get_stream(handle, &stream);
 
-    rocblas_int nh = ihi - ilo;
+    I nh = ihi - ilo;
 
     // when nh == 0 (ilo == ihi), Q is the identity
     if(nh == 0)
@@ -152,11 +152,11 @@ rocblas_status rocsolver_orghr_unghr_template(rocblas_handle handle,
     // right border: columns ihi..n-1 (0-indexed)
     if(ihi < n)
     {
-        rocblas_int sub_dim = n - ihi;
+        I sub_dim = n - ihi;
 
         // zero rows 0..ihi-1
-        rocblas_int bx = (ihi - 1) / BS2 + 1;
-        rocblas_int by = (sub_dim - 1) / BS2 + 1;
+        I bx = (ihi - 1) / BS2 + 1;
+        I by = (sub_dim - 1) / BS2 + 1;
         ROCSOLVER_LAUNCH_KERNEL(set_zero<T>, dim3(bx, by, batch_count), dim3(BS2, BS2), 0, stream,
                                 ihi, sub_dim, A, shiftA + idx2D(0, ihi, lda), lda, strideA);
 
@@ -169,9 +169,9 @@ rocblas_status rocsolver_orghr_unghr_template(rocblas_handle handle,
     // sets A[ilo:ihi-1, ilo:ihi-1] = A[ilo-1:ihi-1, ilo-1:ihi-2] (0-indexed)
     // sets A[ilo-1:ihi-1, ilo-1] = e0
     // sets A[ilo-1, ilo-1:ihi-1] = e0
-    rocblas_int ldw = nh;
+    I ldw = nh;
     rocblas_stride strideW = rocblas_stride(nh) * (nh + 1) / 2;
-    rocblas_int shift_blocks = (nh - 1) / BS2 + 1;
+    I shift_blocks = (nh - 1) / BS2 + 1;
 
     // copy phase: save the strict lower triangle of the nh x nh subblock into work
     ROCSOLVER_LAUNCH_KERNEL(copyshift_right<T>, dim3(shift_blocks, shift_blocks, batch_count),
@@ -188,8 +188,8 @@ rocblas_status rocsolver_orghr_unghr_template(rocblas_handle handle,
     // zero the top part of the active columns A[0:ilo-2, ilo-1:ihi-1]
     if(ilo > 1)
     {
-        rocblas_int bx = (ilo - 2) / BS2 + 1;
-        rocblas_int by = nh / BS2 + 1;
+        I bx = (ilo - 2) / BS2 + 1;
+        I by = nh / BS2 + 1;
         ROCSOLVER_LAUNCH_KERNEL(set_zero<T>, dim3(bx, by, batch_count), dim3(BS2, BS2), 0, stream,
                                 ilo - 1, nh + 1, A, shiftA + idx2D(0, ilo - 1, lda), lda, strideA);
     }
@@ -197,9 +197,9 @@ rocblas_status rocsolver_orghr_unghr_template(rocblas_handle handle,
     // zero the bottom part of the active columns A[ihi:n-1, ilo-1:ihi-1]
     if(ihi < n)
     {
-        rocblas_int sub_dim = n - ihi;
-        rocblas_int bx = (sub_dim - 1) / BS2 + 1;
-        rocblas_int by = nh / BS2 + 1;
+        I sub_dim = n - ihi;
+        I bx = (sub_dim - 1) / BS2 + 1;
+        I by = nh / BS2 + 1;
         ROCSOLVER_LAUNCH_KERNEL(set_zero<T>, dim3(bx, by, batch_count), dim3(BS2, BS2), 0, stream,
                                 sub_dim, nh + 1, A, shiftA + idx2D(ihi, ilo - 1, lda), lda, strideA);
     }

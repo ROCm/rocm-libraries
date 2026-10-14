@@ -33,7 +33,8 @@ using ::testing::Values;
 using ::testing::ValuesIn;
 using namespace std;
 
-typedef vector<int> orghr_tuple;
+template <typename I>
+using orghr_tuple = vector<I>;
 
 // each size_range vector is a {n, lda, ilo, ihi}
 
@@ -58,25 +59,47 @@ const vector<vector<int>> size_range = {
     {20, 25, 1, 20},
     {50, 50, 10, 45}};
 
+const vector<vector<int64_t>> size_range_64 = {
+    // quick return
+    {0, 1, 1, 0},
+    // invalid
+    {-1, 1, 1, 1},
+    {5, 5, 0, 3},
+    {5, 5, 3, 6},
+    {5, 5, 3, 2},
+    {5, 3, 2, 5},
+    // normal (valid) samples
+    {1, 1, 1, 1},
+    {5, 5, 3, 3},
+    {5, 5, 1, 5},
+    {10, 10, 3, 10},
+    {20, 25, 1, 20},
+    {50, 50, 10, 45}};
+
 // for daily_lapack tests
 const vector<vector<int>> large_size_range
     = {{192, 192, 1, 192}, {500, 600, 50, 450}, {640, 640, 100, 540}, {1000, 1024, 1, 1000}};
 
-Arguments orghr_setup_arguments(orghr_tuple tup)
+const vector<vector<int64_t>> large_size_range_64
+    = {{192, 192, 1, 192}, {500, 600, 50, 450}, {640, 640, 100, 540}, {1000, 1024, 1, 1000}};
+
+template <typename I>
+Arguments orghr_setup_arguments(orghr_tuple<I> tup)
 {
     Arguments arg;
 
-    arg.set<rocblas_int>("n", tup[0]);
-    arg.set<rocblas_int>("lda", tup[1]);
-    arg.set<rocblas_int>("ilo", tup[2]);
-    arg.set<rocblas_int>("ihi", tup[3]);
+    arg.set<I>("n", tup[0]);
+    arg.set<I>("lda", tup[1]);
+    arg.set<I>("ilo", tup[2]);
+    arg.set<I>("ihi", tup[3]);
 
     arg.timing = 0;
 
     return arg;
 }
 
-class ORGHR_UNGHR : public ::TestWithParam<orghr_tuple>
+template <typename I>
+class ORGHR_UNGHR : public ::TestWithParam<orghr_tuple<I>>
 {
 protected:
     void TearDown() override
@@ -87,20 +110,28 @@ protected:
     template <typename T>
     void run_tests()
     {
-        Arguments arg = orghr_setup_arguments(GetParam());
+        Arguments arg = orghr_setup_arguments(this->GetParam());
 
-        if(arg.peek<rocblas_int>("n") == 0)
-            testing_orghr_unghr_bad_arg<T>();
+        if(arg.peek<I>("n") == 0)
+            testing_orghr_unghr_bad_arg<T, I>();
 
-        testing_orghr_unghr<T>(arg);
+        testing_orghr_unghr<T, I>(arg);
     }
 };
 
-class ORGHR : public ORGHR_UNGHR
+class ORGHR : public ORGHR_UNGHR<rocblas_int>
 {
 };
 
-class UNGHR : public ORGHR_UNGHR
+class UNGHR : public ORGHR_UNGHR<rocblas_int>
+{
+};
+
+class ORGHR_64 : public ORGHR_UNGHR<int64_t>
+{
+};
+
+class UNGHR_64 : public ORGHR_UNGHR<int64_t>
 {
 };
 
@@ -126,6 +157,28 @@ TEST_P(UNGHR, __double_complex)
     run_tests<rocblas_double_complex>();
 }
 
+// 64-bit API
+
+TEST_P(ORGHR_64, __float)
+{
+    run_tests<float>();
+}
+
+TEST_P(ORGHR_64, __double)
+{
+    run_tests<double>();
+}
+
+TEST_P(UNGHR_64, __float_complex)
+{
+    run_tests<rocblas_float_complex>();
+}
+
+TEST_P(UNGHR_64, __double_complex)
+{
+    run_tests<rocblas_double_complex>();
+}
+
 INSTANTIATE_TEST_SUITE_P(daily_lapack, ORGHR, ValuesIn(large_size_range));
 
 INSTANTIATE_TEST_SUITE_P(checkin_lapack, ORGHR, ValuesIn(size_range));
@@ -133,3 +186,11 @@ INSTANTIATE_TEST_SUITE_P(checkin_lapack, ORGHR, ValuesIn(size_range));
 INSTANTIATE_TEST_SUITE_P(daily_lapack, UNGHR, ValuesIn(large_size_range));
 
 INSTANTIATE_TEST_SUITE_P(checkin_lapack, UNGHR, ValuesIn(size_range));
+
+INSTANTIATE_TEST_SUITE_P(daily_lapack, ORGHR_64, ValuesIn(large_size_range_64));
+
+INSTANTIATE_TEST_SUITE_P(checkin_lapack, ORGHR_64, ValuesIn(size_range_64));
+
+INSTANTIATE_TEST_SUITE_P(daily_lapack, UNGHR_64, ValuesIn(large_size_range_64));
+
+INSTANTIATE_TEST_SUITE_P(checkin_lapack, UNGHR_64, ValuesIn(size_range_64));

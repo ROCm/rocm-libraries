@@ -30,13 +30,13 @@
 
 ROCSOLVER_BEGIN_NAMESPACE
 
-template <typename T>
+template <typename T, typename I>
 rocblas_status rocsolver_orghr_unghr_impl(rocblas_handle handle,
-                                          const rocblas_int n,
-                                          const rocblas_int ilo,
-                                          const rocblas_int ihi,
+                                          const I n,
+                                          const I ilo,
+                                          const I ihi,
                                           T* A,
-                                          const rocblas_int lda,
+                                          const I lda,
                                           T* tau)
 try
 {
@@ -52,12 +52,12 @@ try
         return st;
 
     // working with unshifted arrays
-    rocblas_int shiftA = 0;
+    rocblas_stride shiftA = 0;
 
     // normal (non-batched non-strided) execution
     rocblas_stride strideA = 0;
     rocblas_stride strideP = 0;
-    rocblas_int batch_count = 1;
+    I batch_count = 1;
 
     // memory workspace sizes:
     // size for constants in rocblas calls
@@ -249,5 +249,67 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zunghr(rocblas_handle handle,
 #endif
 }
 //! @}
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_sorghr_64(rocblas_handle handle,
+                                                    const int64_t n,
+                                                    const int64_t ilo,
+                                                    const int64_t ihi,
+                                                    float* A,
+                                                    const int64_t lda,
+                                                    float* tau)
+{
+#if defined(ROCSOLVER_ENABLE_XXGHR) && defined(HAVE_ROCBLAS_64)
+    return rocsolver::rocsolver_orghr_unghr_impl<float>(handle, n, ilo, ihi, A, lda, tau);
+#else
+    return rocblas_status_not_implemented;
+#endif
+}
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_dorghr_64(rocblas_handle handle,
+                                                    const int64_t n,
+                                                    const int64_t ilo,
+                                                    const int64_t ihi,
+                                                    double* A,
+                                                    const int64_t lda,
+                                                    double* tau)
+{
+#if defined(ROCSOLVER_ENABLE_XXGHR) && defined(HAVE_ROCBLAS_64)
+    return rocsolver::rocsolver_orghr_unghr_impl<double>(handle, n, ilo, ihi, A, lda, tau);
+#else
+    return rocblas_status_not_implemented;
+#endif
+}
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_cunghr_64(rocblas_handle handle,
+                                                    const int64_t n,
+                                                    const int64_t ilo,
+                                                    const int64_t ihi,
+                                                    rocblas_float_complex* A,
+                                                    const int64_t lda,
+                                                    rocblas_float_complex* tau)
+{
+#if defined(ROCSOLVER_ENABLE_XXGHR) && defined(HAVE_ROCBLAS_64)
+    return rocsolver::rocsolver_orghr_unghr_impl<rocblas_float_complex>(handle, n, ilo, ihi, A, lda,
+                                                                        tau);
+#else
+    return rocblas_status_not_implemented;
+#endif
+}
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_zunghr_64(rocblas_handle handle,
+                                                    const int64_t n,
+                                                    const int64_t ilo,
+                                                    const int64_t ihi,
+                                                    rocblas_double_complex* A,
+                                                    const int64_t lda,
+                                                    rocblas_double_complex* tau)
+{
+#if defined(ROCSOLVER_ENABLE_XXGHR) && defined(HAVE_ROCBLAS_64)
+    return rocsolver::rocsolver_orghr_unghr_impl<rocblas_double_complex>(handle, n, ilo, ihi, A,
+                                                                         lda, tau);
+#else
+    return rocblas_status_not_implemented;
+#endif
+}
 
 } // extern C

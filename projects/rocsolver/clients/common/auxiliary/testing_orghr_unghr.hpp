@@ -36,13 +36,13 @@
 #include "common/misc/rocsolver_test.hpp"
 #include "common/misc/rocsolver_timer.hpp"
 
-template <typename T>
+template <typename T, typename I>
 void orghr_unghr_checkBadArgs(const rocblas_handle handle,
-                              const rocblas_int n,
-                              const rocblas_int ilo,
-                              const rocblas_int ihi,
+                              const I n,
+                              const I ilo,
+                              const I ihi,
                               T dA,
-                              const rocblas_int lda,
+                              const I lda,
                               T dTau)
 {
     // handle
@@ -56,19 +56,20 @@ void orghr_unghr_checkBadArgs(const rocblas_handle handle,
                           rocblas_status_invalid_pointer);
 
     // quick return with invalid pointers
-    EXPECT_ROCBLAS_STATUS(rocsolver_orghr_unghr(handle, 0, 1, 0, (T) nullptr, lda, (T) nullptr),
-                          rocblas_status_success);
+    EXPECT_ROCBLAS_STATUS(
+        rocsolver_orghr_unghr(handle, (I)0, (I)1, (I)0, (T) nullptr, lda, (T) nullptr),
+        rocblas_status_success);
 }
 
-template <typename T>
+template <typename T, typename I>
 void testing_orghr_unghr_bad_arg()
 {
     // safe arguments
     rocblas_local_handle handle;
-    rocblas_int n = 2;
-    rocblas_int ilo = 1;
-    rocblas_int ihi = 2;
-    rocblas_int lda = 2;
+    I n = 2;
+    I ilo = 1;
+    I ihi = 2;
+    I lda = 2;
 
 #ifdef ROCSOLVER_ENABLE_XXGHR
     // memory allocation
@@ -82,13 +83,13 @@ void testing_orghr_unghr_bad_arg()
 #endif
 }
 
-template <bool CPU, bool GPU, typename T, typename Td, typename Th>
+template <bool CPU, bool GPU, typename T, typename I, typename Td, typename Th>
 void orghr_unghr_initData(const rocblas_handle handle,
-                          const rocblas_int n,
-                          const rocblas_int ilo,
-                          const rocblas_int ihi,
+                          const I n,
+                          const I ilo,
+                          const I ihi,
                           Td& dA,
-                          const rocblas_int lda,
+                          const I lda,
                           Td& dTau,
                           Th& hA,
                           Th& hTau,
@@ -123,13 +124,13 @@ void orghr_unghr_initData(const rocblas_handle handle,
     }
 }
 
-template <typename T, typename Td, typename Th>
+template <typename T, typename I, typename Td, typename Th>
 void orghr_unghr_getError(const rocblas_handle handle,
-                          const rocblas_int n,
-                          const rocblas_int ilo,
-                          const rocblas_int ihi,
+                          const I n,
+                          const I ilo,
+                          const I ihi,
                           Td& dA,
-                          const rocblas_int lda,
+                          const I lda,
                           Td& dTau,
                           Th& hA,
                           Th& hAr,
@@ -157,13 +158,13 @@ void orghr_unghr_getError(const rocblas_handle handle,
     *max_err = norm_error('F', n, n, lda, hA[0], hAr[0]);
 }
 
-template <typename T, typename Td, typename Th>
+template <typename T, typename I, typename Td, typename Th>
 void orghr_unghr_getPerfData(const rocblas_handle handle,
-                             const rocblas_int n,
-                             const rocblas_int ilo,
-                             const rocblas_int ihi,
+                             const I n,
+                             const I ilo,
+                             const I ihi,
                              Td& dA,
-                             const rocblas_int lda,
+                             const I lda,
                              Td& dTau,
                              Th& hA,
                              Th& hTau,
@@ -226,15 +227,15 @@ void orghr_unghr_getPerfData(const rocblas_handle handle,
     *gpu_time_used = timer.get_combined();
 }
 
-template <typename T>
+template <typename T, typename I>
 void testing_orghr_unghr(Arguments& argus)
 {
     // get arguments
     rocblas_local_handle handle;
-    rocblas_int n = argus.get<rocblas_int>("n");
-    rocblas_int lda = argus.get<rocblas_int>("lda", n);
-    rocblas_int ilo = argus.get<rocblas_int>("ilo");
-    rocblas_int ihi = argus.get<rocblas_int>("ihi");
+    I n = argus.get<I>("n");
+    I lda = argus.get<I>("lda", n);
+    I ilo = argus.get<I>("ilo");
+    I ihi = argus.get<I>("ihi");
 
     rocblas_int hot_calls = argus.iters;
 
@@ -366,4 +367,4 @@ void testing_orghr_unghr(Arguments& argus)
 #define EXTERN_TESTING_ORGHR_UNGHR(...) \
     extern template void testing_orghr_unghr<__VA_ARGS__>(Arguments&);
 
-INSTANTIATE(EXTERN_TESTING_ORGHR_UNGHR, FOREACH_SCALAR_TYPE, APPLY_STAMP)
+INSTANTIATE(EXTERN_TESTING_ORGHR_UNGHR, FOREACH_SCALAR_TYPE, FOREACH_INT_TYPE, APPLY_STAMP)

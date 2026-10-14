@@ -414,7 +414,8 @@ class rocsolver_dispatcher
             {"orgl2", testing_orglx_unglx<T, 0>},
             {"orglq", testing_orglx_unglx<T, 1>},
             {"orgbr", testing_orgbr_ungbr<T>},
-            {"orghr", testing_orghr_unghr<T>},
+            {"orghr", testing_orghr_unghr<T, rocblas_int>},
+            {"orghr_64", testing_orghr_unghr<T, int64_t>},
             {"orgtr", testing_orgtr_ungtr<T>},
             // ormxx
             {"orm2r", testing_ormxr_unmxr<T, 0>},
@@ -537,7 +538,8 @@ class rocsolver_dispatcher
             {"ungl2", testing_orglx_unglx<T, 0>},
             {"unglq", testing_orglx_unglx<T, 1>},
             {"ungbr", testing_orgbr_ungbr<T>},
-            {"unghr", testing_orghr_unghr<T>},
+            {"unghr", testing_orghr_unghr<T, rocblas_int>},
+            {"unghr_64", testing_orghr_unghr<T, int64_t>},
             {"ungtr", testing_orgtr_ungtr<T>},
             // unmxx
             {"unm2r", testing_ormxr_unmxr<T, 0>},
