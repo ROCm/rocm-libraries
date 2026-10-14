@@ -168,10 +168,10 @@ class TestGfx942_4wgqaSoftmaxExp2Fast(unittest.TestCase):
         _comgr_ready(), "needs comgr + llvm-readelf/llvm-objdump (compile lane)"
     )
     def test_softmax_scratch_within_ceiling(self):
-        # exp2_fast trades ~5 VALU for register pressure: the kernel spills at the
-        # 256-VGPR cap. That is perf-neutral (memory-bound) and intentional -- this
-        # guards against a *future* blow-up, so the footprint the swap changed is
-        # covered by CI, not only the op name.
+        # exp2_fast trades a few VALU per exp for register pressure: the kernel may
+        # spill at the 256-VGPR cap (comgr-version-dependent). That is perf-neutral
+        # (memory-bound) and intentional -- this guards against a *future* blow-up,
+        # so the footprint the swap changed is covered by CI, not only the op name.
         with _PinArch("gfx942"):
             for dt in ("bf16", "fp16"):
                 scratch = _scratch_bytes(dt)
