@@ -1,14 +1,15 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-from rocisa.container import sgpr, vgpr, SMEMModifiers
+from rocisa.container import sgpr, vgpr, SMEMModifiers, GLOBALModifiers, EXEC, VCC
 from rocisa.code import Label
 from rocisa.instruction import (
-    VReadfirstlaneB32,
+    VAddU32, VAddCOU32, VAddCCOU32, VLShiftLeftB32, VCmpGtU32,
+    GlobalStoreB32, GlobalStoreB128,
     SMovB32, SMovB64, SLoadB64, SLoadB128,
-    SAddU32, SAddCU32, SSubU32, SSubBU32,
+    SAddU32, SAddCU32, SSubU32, SSubBU32, SMinU32,
     SAndB32, SLShiftRightB32,
-    SCmpEQU32, SCmpEQU64, SCmpLeU32, SCmpLtU32,
+    SCmpEQU32, SCmpEQU64, SCmpLeU32, SCmpLtU32, SCmpLgU32,
     SCBranchSCC0, SCBranchSCC1, SBranch,
     SWaitCnt, SSleep,
     SStoreB32, SStoreB64, SStoreB128, SAtomicCmpswapX2, SAtomicUmaxX2,
@@ -288,7 +289,7 @@ class SdmaRingEmitter:
     # ---- placePacket -------------------------------------------------------
 
     def emitPlacePacket(self, module, w, peerGroupS, packetDwordsS, numDwords,
-                        pendingWptrS, offsetS, queueBufV=None):
+                        pendingWptrS, offsetS):
         """Write `offsetS` bytes of zero-padding (NOPs) then `numDwords` packet
         dwords into the ring, all with s_store...glc. Advances pendingWptrS
         (2 SGPRs) by offset then by the packet size. `packetDwordsS` is the base
@@ -304,19 +305,11 @@ class SdmaRingEmitter:
         store's sources have to survive its clause, not its completion, and the
         rebuild starts with an s_mov, which breaks the clause. A wait here would
         only serialize the submit.
-
-        `queueBufV`, if given, is a VGPR pair already holding the queueBuf
-        pointer; it is read back instead of loaded.
         """
         queueBufPtrS = w.sgprPool.checkOutAligned(2, 2, tag="sdma_pp_qbuf", preventOverflow=False)
-        if queueBufV is None:
-            module.add(self._peerLoad(SLoadB64, sgpr(queueBufPtrS, 2), peerGroupS, OFF_queueBuf,
-                                      "load queueBuf pointer"))
-            module.add(SWaitCnt(kmcnt=0, comment="wait queueBuf pointer load"))
-        else:
-            for i in range(2):
-                module.add(VReadfirstlaneB32(dst=sgpr(queueBufPtrS + i), src=vgpr(queueBufV + i),
-                                             comment="queueBuf pointer"))
+        module.add(self._peerLoad(SLoadB64, sgpr(queueBufPtrS, 2), peerGroupS, OFF_queueBuf,
+                                  "load queueBuf pointer"))
+        module.add(SWaitCnt(kmcnt=0, comment="wait queueBuf pointer load"))
 
         wrapS   = w.sgprPool.checkOut(1, tag="sdma_pp_wrap", preventOverflow=False)
         cntS    = w.sgprPool.checkOut(1, tag="sdma_pp_cnt", preventOverflow=False)
@@ -421,6 +414,74 @@ class SdmaRingEmitter:
                            comment="addr lo = queueBuf + WrapIntoRing(pending)"))
         module.add(SAddCU32(dst=sgpr(dstPairS + 1), src0=sgpr(queueBufPtrS + 1), src1=0,
                             comment="addr hi (carry)"))
+
+    # ---- vector placement ---------------------------------------------------
+
+    def emitLaneRingAddrV(self, module, w, dstV, queueBufV, pendingWptrS, laneOffV):
+        """dstV (2 VGPRs) = queueBuf + WrapIntoRing(pending) + laneOffV."""
+        wrapS = w.sgprPool.checkOut(1, tag="sdma_lane_wrap", preventOverflow=False)
+        module.add(SAndB32(dst=sgpr(wrapS), src0=sgpr(pendingWptrS + 0), src1=self.ringMask,
+                           comment="WrapIntoRing(pending)"))
+        module.add(VAddU32(dst=vgpr(dstV), src0=sgpr(wrapS), src1=vgpr(laneOffV),
+                           comment="+ WrapIntoRing(pending)"))
+        w.sgprPool.checkIn(wrapS)
+        module.add(VAddCOU32(dst=vgpr(dstV), dst1=VCC(), src0=vgpr(queueBufV), src1=vgpr(dstV),
+                             comment="ring address lo"))
+        module.add(VAddCCOU32(dst=vgpr(dstV + 1), dst1=VCC(), src0=0, src1=vgpr(queueBufV + 1),
+                              src2=VCC(), comment="ring address hi"))
+
+    @staticmethod
+    def emitStorePacketV(module, addrV, packetV, numDwords):
+        """Store numDwords packet dwords from packetV (4-aligned) at addrV, per
+        active lane. The caller separates the last store from any VALU write
+        of packetV by SNop(1)."""
+        i = 0
+        while i < numDwords:
+            width = 4 if numDwords - i >= 4 else 1
+            op = GlobalStoreB128 if width == 4 else GlobalStoreB32
+            module.add(op(vaddr=vgpr(addrV, 2), src=vgpr(packetV + i, width),
+                          saddr=vgpr("off", 1, False, False, True),
+                          modifier=GLOBALModifiers(offset=i * 4, glc=True, slc=True, isStore=True),
+                          comment="ring[addr + %d] = packet dword%s"
+                                  % (i, "" if width == 1 else "s %d..%d" % (i, i + width - 1))))
+            i += width
+
+    def emitPadV(self, module, w, queueBufV, pendingWptrS, offsetS, laneV, zeroV, waveSize):
+        """Write `offsetS` bytes of zero (NOPs) at WrapIntoRing(pending), one
+        dword per lane, and advance pending past them. Consumes offsetS."""
+        padLoop = Label(w.labels.getNameInc("sdma_pad_loop"), "zero-pad ring tail")
+        padDone = Label(w.labels.getNameInc("sdma_pad_done"), "padding done")
+        laneOffV = w.vgprPool.checkOut(1, tag="sdma_pad_laneOff")
+        addrV    = w.vgprPool.checkOutAligned(2, 2, tag="sdma_pad_addr")
+        stepS    = w.sgprPool.checkOut(1, tag="sdma_pad_step", preventOverflow=False)
+        module.add(SCmpEQU32(src0=sgpr(offsetS), src1=0, comment="no padding?"))
+        module.add(SCBranchSCC1(labelName=padDone.getLabelName(), comment="offset==0 -> skip pad"))
+        module.add(VLShiftLeftB32(dst=vgpr(laneOffV), shiftHex=2, src=vgpr(laneV),
+                                  comment="lane's dword"))
+        module.add(padLoop)
+        module.add(VCmpGtU32(dst=VCC(), src0=sgpr(offsetS), src1=vgpr(laneOffV),
+                             comment="lane's dword inside the padding?"))
+        module.add(SMovB64(dst=EXEC(), src=VCC(), comment="padding lanes"))
+        self.emitLaneRingAddrV(module, w, addrV, queueBufV, pendingWptrS, laneOffV)
+        module.add(GlobalStoreB32(vaddr=vgpr(addrV, 2), src=vgpr(zeroV),
+                                  saddr=vgpr("off", 1, False, False, True),
+                                  modifier=GLOBALModifiers(glc=True, slc=True, isStore=True),
+                                  comment="ring[wrap] = 0 padding NOP"))
+        module.add(SMovB64(dst=EXEC(), src=-1, comment="restore EXEC = full"))
+        module.add(SMinU32(dst=sgpr(stepS), src0=sgpr(offsetS), src1=waveSize * 4,
+                           comment="padded bytes this pass"))
+        module.add(SAddU32(dst=sgpr(pendingWptrS + 0), src0=sgpr(pendingWptrS + 0), src1=sgpr(stepS),
+                           comment="pending += padded bytes"))
+        module.add(SAddCU32(dst=sgpr(pendingWptrS + 1), src0=sgpr(pendingWptrS + 1), src1=0,
+                            comment="pending hi carry"))
+        module.add(SSubU32(dst=sgpr(offsetS), src0=sgpr(offsetS), src1=sgpr(stepS),
+                           comment="padding left"))
+        module.add(SCmpLgU32(src0=sgpr(offsetS), src1=0, comment="more padding?"))
+        module.add(SCBranchSCC1(labelName=padLoop.getLabelName(), comment="next pass"))
+        module.add(padDone)
+        w.sgprPool.checkIn(stepS)
+        w.vgprPool.checkIn(addrV)
+        w.vgprPool.checkIn(laneOffV)
 
     # ---- submitPacket ------------------------------------------------------
 

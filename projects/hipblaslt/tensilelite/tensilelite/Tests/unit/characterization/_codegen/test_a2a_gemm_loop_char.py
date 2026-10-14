@@ -443,7 +443,7 @@ class TestA2AGemmEnqueueLoops:
             "the reservation size is computed outside the packing pass"
         )
 
-    def test_packet_loop_runs_once_per_block(self):
+    def test_the_block_counter_drops_by_a_group_at_a_time(self):
         import re
 
         body = self._packing_pass(self._src())
@@ -454,10 +454,24 @@ class TestA2AGemmEnqueueLoops:
             body,
         )
         assert m, "the block counter is not seeded from A2ABlockCount before the group loop"
+        n = re.search(
+            r"s_add_u32 s(\d+), s\1, 1[^\n]*// blocks in this group", body
+        )
+        assert n, "the group's block count is not quotient + 1"
         assert re.search(
-            r"s_sub_u32 s%s, s%s, 1[^\n]*// one block placed" % (m.group(1), m.group(1)),
+            r"s_sub_u32 s%s, s%s, s%s[^\n]*// group placed" % (m.group(1), m.group(1), n.group(1)),
             body,
-        ), "the block counter does not count one block at a time"
+        ), "the block counter does not count one group at a time"
+
+    def test_the_group_size_is_the_blocks_down_to_the_batch_floor(self):
+        import re
+
+        assert re.search(
+            r"s_sub_u32 s(\d+), s\[sgprA2AShardCounter\], 1[^\n]*\n"
+            r"s_sub_u32 s(\d+), s\d+, s\[sgprA2ABlockLo\][^\n]*// group start - bLo\n"
+            r"v_cvt_f64_u32 v\[\d+:\d+\], s\1",
+            self._packing_pass(self._src()),
+        ), "the group size is not (group start - bLo) / (W-1)"
 
     def test_reservation_counts_one_atomic_per_group(self):
         import re
@@ -486,9 +500,19 @@ class TestA2AGemmEnqueueLoops:
         assert head and tail, "no group loop in the packing pass"
         loop = body[head.end() : tail.start()]
         gate = re.search(r"^s_cbranch_scc0 (label_a2a_early_doorbell_skip\w*)", loop, re.M)
-        assert gate, "no first-block gate in the group loop"
+        assert gate, "no first-group gate in the group loop"
         loop = loop[: gate.start()] + loop[loop.index(gate.group(1) + ":") :]
         assert "s_waitcnt" not in loop, "the packing loop waits between ring stores"
+
+    def test_the_submit_waits_for_the_ring_stores(self):
+        import re
+
+        body = self._packing_pass(self._src())
+        tail = re.search(r"^s_cbranch_scc1 label_a2a_group_loop\w*[^\n]*\n", body, re.M)
+        assert tail, "no group loop in the packing pass"
+        assert body[tail.end() :].startswith("s_waitcnt vmcnt(0)"), (
+            "the submit can publish the ring before the vector stores land"
+        )
 
     def test_the_submit_ends_the_packing_pass(self):
         body = self._packing_pass(self._src())
@@ -518,37 +542,47 @@ class TestA2AGemmRoundGroupOrder:
         assert head and tail, "no a2a packing pass in the emitted kernel"
         return src[head.end() : tail.start()]
 
-    def test_copy_bases_step_a_whole_group(self):
+    def test_lanes_step_a_whole_group(self):
         import re
 
+        body = self._packing_pass(self._src())
+        m = re.search(
+            r"v_and_b32 v(\d+), 63, v\[vgprSerial\][^\n]*\n"
+            r"v_mul_u32_u24 v(\d+), s\[sgprA2AShardCounter\], v\1[^\n]*\n"
+            r"v_sub_u32 v\2, v\2, v\1",
+            body,
+        )
+        assert m, "the lane stride is not W-1 blocks"
+        assert re.search(r"v_sub_u32 v\d+, s\d+, v%s[^\n]*// the lane's block" % m.group(2), body), (
+            "the lanes walk consecutive blocks instead of one round's group"
+        )
+
+    def test_the_signal_targets_the_groups_last_block(self):
+        import re
+
+        body = self._packing_pass(self._src())
+        last = re.search(
+            r"v_readfirstlane_b32 s\d+, v\d+[^\n]*// quotient\n"
+            r"v_readfirstlane_b32 s(\d+), v\d+[^\n]*// remainder\n"
+            r"(?:[^\n]*\n)?"
+            r"s_add_u32 s\1, s\1, s\[sgprA2ABlockLo\][^\n]*// the group's last block",
+            body,
+        )
+        assert last, "the group's last block is not bLo + (group start - bLo) % (W-1)"
         assert re.search(
             r"s_sub_u32 s(\d+), s\[sgprA2AShardCounter\], 1[^\n]*\n"
-            r"s_mul_i32 s(\d+), s\2, s\1[^\n]*\n"
-            r"s_sub_u32 s\d+, s\d+, s\2[^\n]*// step back W-1 blocks",
-            self._packing_pass(self._src()),
-        ), "the copy bases walk consecutive blocks instead of one round's group"
+            r"s_mul_i32 s\1, s%s, s\1[^\n]*// bLast \* \(W-1\)" % last.group(1),
+            body,
+        ), "the flag slot is not taken at the group's last block"
 
-    def test_flag_address_steps_a_whole_group(self):
+    def test_lanes_below_the_batch_floor_are_masked(self):
         import re
 
         assert re.search(
-            r"s_sub_u32 s(\d+), s\[sgprA2AShardCounter\], 1[^\n]*\n"
-            r"s_mul_i32 s\1, s\1, s\1[^\n]*\n"
-            r"s_lshl_b32 s\1, s\1, 2[^\n]*\n"
-            r"s_sub_u32 s\d+, s\d+, s\1[^\n]*// step back W-1 blocks",
+            r"v_cmp_le_i32 vcc, s\[sgprA2ABlockLo\], v(\d+)[^\n]*\n"
+            r"s_mov_b64 exec, vcc",
             self._packing_pass(self._src()),
-        ), "the flag address walks consecutive blocks instead of one round's group"
-
-    def test_the_packet_loop_stops_at_the_batch_floor(self):
-        import re
-
-        assert re.search(
-            r"s_sub_u32 s(\d+), s\1, s\[sgprA2AShardCounter\][^\n]*\n"
-            r"s_add_u32 s\1, s\1, 1[^\n]*\n"
-            r"s_cmp_ge_i32 s\1, s\[sgprA2ABlockLo\][^\n]*\n"
-            r"s_cbranch_scc1 label_a2a_packet_loop",
-            self._packing_pass(self._src()),
-        ), "the group does not end at the batch's first block"
+        ), "lanes past the batch's first block still store a COPY"
 
     def test_empty_groups_are_branched_over(self):
         import re
@@ -564,16 +598,31 @@ class TestA2AGemmRoundGroupOrder:
         import re
 
         body = self._packing_pass(self._src())
-        head = re.search(r"^label_a2a_packet_loop\w*:", body, re.M)
-        tail = re.search(r"^s_cbranch_scc1 label_a2a_packet_loop\w*", body, re.M)
+        head = re.search(r"^label_a2a_copy_loop\w*:", body, re.M)
+        tail = re.search(r"^s_cbranch_scc1 label_a2a_copy_loop\w*", body, re.M)
         nxt = re.search(r"^label_a2a_group_next\w*:", body, re.M)
-        assert head and tail and nxt, "no packet loop / group-next in the packing pass"
-        assert body[head.end() : tail.start()].count("(packet base)") == 1, (
-            "the packet loop places more than the block's COPY"
+        assert head and tail and nxt, "no copy loop / group-next in the packing pass"
+        copy = re.findall(r"^global_store_dword\w* [^\n]*$", body[head.end() : tail.start()], re.M)
+        assert len(copy) == 4, "the copy loop stores more than the lanes' COPYs"
+        sig = body[tail.end() : nxt.start()]
+        assert re.search(r"^s_mov_b64 exec, 1\b", sig, re.M), "the ATOMIC is not stored from one lane"
+        assert len(re.findall(r"^global_store_dwordx4 [^\n]*$", sig, re.M)) == 2, (
+            "the group's ATOMIC is not placed once after its COPYs"
         )
-        assert body[tail.end() : nxt.start()].count("(packet base)") == 1, (
-            "the group's ATOMIC is not placed once after its last block"
-        )
+
+    def test_ring_stores_bypass_the_caches(self):
+        import re
+
+        stores = re.findall(r"^global_store_dword\w* [^\n]*$", self._packing_pass(self._src()), re.M)
+        assert stores, "no vector ring stores in the packing pass"
+        assert all(" sc0 sc1" in s for s in stores), "a ring store is cached"
+
+    def test_packet_registers_are_not_rewritten_under_a_store(self):
+        import re
+
+        body = self._packing_pass(self._src())
+        for m in re.finditer(r"^global_store_dwordx4 [^\n]*\n((?:global_store[^\n]*\n)*)", body, re.M):
+            assert body[m.end() :].startswith("s_nop 1"), "no wait states after the ring stores"
 
     def test_one_reservation_and_one_commit_cover_every_group(self):
         body = self._packing_pass(self._src())
@@ -586,7 +635,7 @@ class TestA2AGemmRoundGroupOrder:
 
 
 class TestA2AGemmEarlyDoorbell:
-    """The queue's first COPY is published before the rest are placed."""
+    """The queue's first group is published before the rest are placed."""
 
     def _src(self):
         from config_harness import emit_kernels_from_config
@@ -601,45 +650,49 @@ class TestA2AGemmEarlyDoorbell:
         assert head and tail, "no a2a packing pass in the emitted kernel"
         return src[head.end() : tail.start()]
 
-    def _packet_loop(self, body):
+    def _group_loop(self, body):
         import re
 
-        head = re.search(r"^label_a2a_packet_loop\w*:", body, re.M)
-        tail = re.search(r"^s_cbranch_scc1 label_a2a_packet_loop\w*", body, re.M)
-        assert head and tail, "no packet loop in the packing pass"
+        head = re.search(r"^label_a2a_group_loop\w*:", body, re.M)
+        tail = re.search(r"^s_cbranch_scc1 label_a2a_group_loop\w*", body, re.M)
+        assert head and tail, "no group loop in the packing pass"
         return body[head.end() : tail.start()]
 
     def _submit(self, body):
         return body[body.rindex("load wptr / doorbell pointers") :]
 
-    def test_the_packet_loop_rings_the_doorbell(self):
-        loop = self._packet_loop(self._packing_pass(self._src()))
+    def test_the_group_loop_rings_the_doorbell(self):
+        loop = self._group_loop(self._packing_pass(self._src()))
         assert loop.count("ring doorbell = pending") == 1
 
-    def test_the_early_doorbell_follows_the_copy_stores(self):
-        loop = self._packet_loop(self._packing_pass(self._src()))
-        assert loop.rindex("(packet base)") < loop.index("ring doorbell = pending")
+    def test_the_early_doorbell_follows_the_groups_stores(self):
+        loop = self._group_loop(self._packing_pass(self._src()))
+        ring = loop.index("ring doorbell = pending")
+        wait = loop.rindex("s_waitcnt vmcnt(0)", 0, ring)
+        assert loop.rindex("global_store_dwordx4", 0, ring) < wait, (
+            "the early doorbell can publish packets before their stores land"
+        )
 
-    def test_the_early_doorbell_is_taken_on_the_first_block_only(self):
+    def test_the_early_doorbell_is_taken_on_the_first_group_only(self):
         import re
 
         body = self._packing_pass(self._src())
         m = re.search(r"s_mov_b32 s(\d+), s\[sgprA2ABlockCount\][^\n]*// blocks left", body)
         assert m, "no block counter seeded from A2ABlockCount"
-        loop = self._packet_loop(body)
+        loop = self._group_loop(body)
         g = re.search(
             r"s_cmp_eq_u32 s%s, s\[sgprA2ABlockCount\][^\n]*\n"
             r"s_cbranch_scc0 (label_\w+)" % m.group(1),
             loop,
         )
-        assert g, "the early doorbell is not gated on the queue's first block"
+        assert g, "the early doorbell is not gated on the queue's first group"
         assert loop.index(g.group(0)) < loop.index("ring doorbell = pending")
         assert loop.index("ring doorbell = pending") < loop.index(g.group(1) + ":")
 
     def test_the_early_doorbell_waits_for_its_turn(self):
         import re
 
-        loop = self._packet_loop(self._packing_pass(self._src()))
+        loop = self._group_loop(self._packing_pass(self._src()))
         early = loop[: loop.index("ring doorbell = pending")]
         m = re.search(
             r"s_load_dwordx2 s\[(\d+):(\d+)\], s\[sgprA2ACounterPtr:sgprA2ACounterPtr\+1\], "
@@ -656,7 +709,7 @@ class TestA2AGemmEarlyDoorbell:
     def test_the_early_doorbell_stores_wptr_first(self):
         import re
 
-        loop = self._packet_loop(self._packing_pass(self._src()))
+        loop = self._group_loop(self._packing_pass(self._src()))
         assert re.search(
             r"s_store_dwordx2 [^\n]*// store wptr = pending\n"
             r"s_waitcnt lgkmcnt\(0\)[^\n]*\n"
@@ -665,7 +718,7 @@ class TestA2AGemmEarlyDoorbell:
         ), "the early doorbell is not preceded by an ordered wptr store"
 
     def test_the_early_doorbell_leaves_the_commit_cursor(self):
-        loop = self._packet_loop(self._packing_pass(self._src()))
+        loop = self._group_loop(self._packing_pass(self._src()))
         assert "store committedWptr" not in loop
 
     def test_the_submit_takes_its_turn_at_or_past_the_base(self):
@@ -719,40 +772,30 @@ class TestA2AGemmPacketBody:
         assert head and tail, "no a2a packing pass in the emitted kernel"
         return src[head.end() : tail.start()]
 
-    def _packet_loop_body(self, src):
+    def _group_loop(self, body):
         import re
 
-        head = re.search(r"^label_a2a_packet_loop\w*:", src, re.M)
-        tail = re.search(r"^s_cbranch_scc1 label_a2a_packet_loop\w*", src, re.M)
-        assert head and tail, "no a2a packet loop in the emitted kernel"
-        return src[head.end() : tail.start()]
+        head = re.search(r"^label_a2a_group_loop\w*:", body, re.M)
+        tail = re.search(r"^s_cbranch_scc1 label_a2a_group_loop\w*", body, re.M)
+        assert head and tail, "no group loop in the packing pass"
+        return body[head.end() : tail.start()]
 
-    def test_both_packets_share_one_register_block(self):
-        import re
-
-        body = self._packet_loop_body(self._src())
-        copy = re.search(r"s_mov_b32 s(\d+), 0x\w+[^\n]*SUBWIN DW0", body)
-        atom = re.search(r"s_mov_b32 s(\d+), 0x\w+[^\n]*ATOMIC DW0", body)
-        assert copy and atom, "the COPY + ATOMIC pair is not emitted"
-        assert copy.group(1) == atom.group(1), "the two packets use different blocks"
-
-    def test_tail_block_row_count_is_clamped(self):
-        import re
-
+    def test_lane_invariant_dwords_are_set_before_the_group_loop(self):
         body = self._packing_pass(self._src())
-        pkt = re.search(r"^label_a2a_packet_loop\w*:", body, re.M)
-        assert pkt, "no packet loop inside the packing pass"
-        assert re.search(
-            r"s_min_u32 s\d+, s\d+, %d\b" % self._MT_TOKEN, body[: pkt.start()]
-        ), "rect_y is not clamped against the macro tile before the packet loop"
+        loop = self._group_loop(body)
+        pre = body[: body.index(loop)]
+        for header in ("SUBWIN DW0", "ATOMIC DW0"):
+            assert header in pre, "%s is not set before the group loop" % header
+            assert header not in loop, "%s is rebuilt per group" % header
 
-    def test_row_count_saturates_after_the_tail_block(self):
+    def test_each_lane_clamps_its_row_count(self):
         import re
 
         assert re.search(
-            r"v_mov_b32 v\d+, %d\b" % self._MT_TOKEN,
-            self._packet_loop_body(self._src()),
-        ), "rect_y never settles at the full macro tile inside the packet loop"
+            r"v_sub_u32 v(\d+), s\[sgprSizeJ\], v(\d+)[^\n]*\n"
+            r"v_min_i32 v\1, %d, v\1" % self._MT_TOKEN,
+            self._group_loop(self._packing_pass(self._src())),
+        ), "rect_y is not min(MT_token, tokens left) per lane"
 
     def test_copy_source_is_the_peer_input_pointer(self):
         from Tensile.Components.SdmaRingEmitter import OFF_recvPtr
