@@ -820,8 +820,12 @@ class CDNA5ReadyQueue : public ReadyQueue {
             // the load must not slip.
             if (p.inDegree != 0 || prefetchHeldForLead(&p)) return false;
             auto e = prefetchEarliestWmma_.find(pf);
-            if (e != prefetchEarliestWmma_.end() && wmmaIssuedCountThisRegion_ > e->second)
+            if (e != prefetchEarliestWmma_.end() &&
+                wmmaIssuedCountThisRegion_ > prefetchReleaseWmma(pf, e->second))
                 return false;
+            // A held group is waited for only if it can go at once, in the barrier's turn
+            // (heldGroupMemberDue); a member still in a wait would let the next WMMA in first.
+            if (stageBarrierReadyAt_.count(bar) && !prefetchFreeNow(pf)) return false;
             pending = true;
         }
         return pending;
@@ -873,9 +877,82 @@ class CDNA5ReadyQueue : public ReadyQueue {
         const int lead = blockPrefetchLead_;
         return lead > 0 && lead < kSingleStageLeadBelow;
     }
+    // Short single-stage stages (StageWmmaCounter::shortStage): there the barrier's planned
+    // window can come windows before the stage's last ds_loads issue.
+    bool shortStageBlock_ = false;
+    // Predecessors of stage barrier `barrier` not issued yet, its own prefetch group aside.
+    int stageBarrierPending(StinkyInstruction* barrier) const {
+        auto bid = regionDag_->instToId.find(barrier);
+        if (bid == regionDag_->instToId.end()) return 0;
+        int pending = static_cast<int>(regionDag_->nodes[bid->second].inDegree);
+        for (const auto& [p, bar] : prefetchStageBarrier_) {
+            if (bar != barrier || prefetchIssued_.count(p)) continue;
+            auto pid = regionDag_->instToId.find(const_cast<StinkyInstruction*>(p));
+            if (pid != regionDag_->instToId.end() && regionDag_->graph[pid->second].count(bid->second))
+                --pending;
+        }
+        return pending;
+    }
+    // Per stage barrier, decided when its group's load window opens: hold the group until the
+    // barrier is ready, because more than one window of ds_loads still precedes the barrier
+    // and a group released now lands among the ds_loads the next WMMAs wait for.
+    mutable std::unordered_map<const StinkyInstruction*, bool> groupHeldForBarrier_;
+    // The WMMA count at which a held group's barrier became ready (the group's release).
+    mutable std::unordered_map<const StinkyInstruction*, int> stageBarrierReadyAt_;
+    bool groupHeldForBarrier(const StinkyInstruction* pf) const {
+        if (!singleStageLoop() || !shortStageBlock_ || regionDag_ == nullptr) return false;
+        auto b = prefetchStageBarrier_.find(pf);
+        if (b == prefetchStageBarrier_.end()) return false;
+        auto held = groupHeldForBarrier_.find(b->second);
+        if (held == groupHeldForBarrier_.end()) {
+            const int dsPerWindow =
+                wmmaTotalThisRegion_ > 0
+                    ? (dsTotalThisRegion_ + wmmaTotalThisRegion_ - 1) / wmmaTotalThisRegion_
+                    : 0;
+            held = groupHeldForBarrier_
+                       .emplace(b->second, stageBarrierPending(b->second) > dsPerWindow)
+                       .first;
+        }
+        if (!held->second || stageBarrierReadyAt_.count(b->second)) return false;
+        if (stageBarrierPending(b->second) > 0) return true;
+        stageBarrierReadyAt_[b->second] = wmmaIssuedCountThisRegion_;
+        return false;
+    }
+    // A held group is released when its barrier becomes ready; the barrier then waits for it
+    // up to that window instead of the planned one.
+    int prefetchReleaseWmma(const StinkyInstruction* pf, int earliest) const {
+        auto b = prefetchStageBarrier_.find(pf);
+        if (b == prefetchStageBarrier_.end()) return earliest;
+        auto r = stageBarrierReadyAt_.find(b->second);
+        return r == stageBarrierReadyAt_.end() ? earliest : std::max(earliest, r->second);
+    }
     bool prefetchHeldForLead(const DAGNode* node) const {
         auto it = prefetchEarliestWmma_.find(node->inst);
-        return it != prefetchEarliestWmma_.end() && wmmaIssuedCountThisRegion_ < it->second;
+        if (it == prefetchEarliestWmma_.end()) return false;
+        return wmmaIssuedCountThisRegion_ < it->second || groupHeldForBarrier(node->inst);
+    }
+    // The next member, free to issue now, of the released group that ready stage barrier
+    // `barrier` waits for, once the barrier is due; nullptr unless the group was held for it.
+    DAGNode* heldGroupMemberDue(const DAGNode* barrier) const {
+        if (!stageBarrierReadyAt_.count(barrier->inst) || !stageBarrierAwaitsPrefetch(barrier))
+            return nullptr;
+        auto th = barrierWmmaThresholds_.find(barrier->inst);
+        if (th == barrierWmmaThresholds_.end() || wmmaIssuedCountThisRegion_ < th->second)
+            return nullptr;
+        for (DAGNode* n : prefetchQueue) {
+            auto b = prefetchStageBarrier_.find(n->inst);
+            if (b == prefetchStageBarrier_.end() || b->second != barrier->inst) continue;
+            if (heldBackForLead(n) || prefetchHeldForLead(n)) continue;
+            if (std::max(getMaxSrcDataWait(n), getHazardWait(n)) > 0) continue;
+            return n;
+        }
+        return nullptr;
+    }
+    // A queued prefetch with no data or hazard wait left.
+    bool prefetchFreeNow(const StinkyInstruction* pf) const {
+        for (DAGNode* n : prefetchQueue)
+            if (n->inst == pf) return std::max(getMaxSrcDataWait(n), getHazardWait(n)) == 0;
+        return false;
     }
     // A filler feeding a prefetch's address; never strict-held, or it lands right in
     // front of the prefetch and turns into a va_vdst stall.
@@ -899,7 +976,34 @@ class CDNA5ReadyQueue : public ReadyQueue {
     // windows before the next s_barrier_wait, where the wave stalls anyway. Not held when it
     // is the last pending predecessor of real work, feeds a prefetch's address, or no barrier
     // wait is ahead.
+    // Earliest planned window of the prefetches `node` feeds through at most `depth` ALU steps,
+    // or -1 when it feeds none.
+    int fedPrefetchWindow(const DAGNode* node, int depth) const {
+        int best = -1;
+        for (unsigned succ : regionDag_->graph[node->id]) {
+            const DAGNode& s = regionDag_->nodes[succ];
+            auto e = prefetchEarliestWmma_.find(s.inst);
+            int w = -1;
+            if (e != prefetchEarliestWmma_.end())
+                w = e->second;
+            else if (depth > 0 && (isVectorALU(*s.inst) || isScalarALU(*s.inst)))
+                w = fedPrefetchWindow(&s, depth - 1);
+            if (w >= 0 && (best < 0 || w < best)) best = w;
+        }
+        return best;
+    }
+    // Short single-stage stages: a VALU computing a prefetch address waits for the two-window
+    // run-up to that prefetch's load window. Issued as early filler instead, the address chain
+    // sits among the stage's first back-to-back WMMAs, where its cycles are not hidden.
+    bool prefetchFeederHeld(const DAGNode* node) const {
+        if (!singleStageLoop() || !shortStageBlock_ || regionDag_ == nullptr ||
+            node->id >= regionDag_->graph.size() || !isVectorALU(*node->inst))
+            return false;
+        const int w = fedPrefetchWindow(node, 2);
+        return w >= 0 && wmmaIssuedCountThisRegion_ < w - 2;
+    }
     bool needsWaitAlu(const DAGNode* node) const {
+        if (prefetchFeederHeld(node)) return true;
         if (!waitAlu_) return false;
         const WaitAluNeed need = waitAlu_->query(*node->inst);
         const int strict =
@@ -1869,7 +1973,17 @@ void CDNA5ReadyQueue::decidePromote() {
 
     if (!barrierQueue.empty() && !barrierWmmaThresholds_.empty()) {
         for (DAGNode* node : barrierQueue) {
-            if (!isBarrierEligibleNow(node)) continue;
+            if (!isBarrierEligibleNow(node)) {
+                // A held group goes in its barrier's turn, ahead of the next WMMA: left to
+                // fill, it can let that WMMA in first and slip the barrier a window.
+                if (DAGNode* pf = heldGroupMemberDue(node)) {
+                    promotedPhase_ = PromotePhase::NonWmmaFill;
+                    promotedNode_ = pf;
+                    promotedKind_ = kPrefetch;
+                    return;
+                }
+                continue;
+            }
             auto thIt = barrierWmmaThresholds_.find(node->inst);
             if (thIt != barrierWmmaThresholds_.end() &&
                 wmmaIssuedCountThisRegion_ >= thIt->second) {
@@ -2708,6 +2822,7 @@ void CDNA5ReadyQueue::onInit(IRList::iterator regionStart, IRList::iterator regi
         if (auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr())) stage.add(*inst);
     blockPrefetchLead_ =
         stage.effectiveLead(feats.prefetchLeadWmmas, feats.prefetchLeadMinStageWmmas);
+    shortStageBlock_ = stage.shortStage(feats.prefetchLeadMinStageWmmas);
     waitAlu_ =
         feats.waitAluHoldStrictCount >= 0
             ? std::make_unique<WaitAluTracker>(
@@ -3570,6 +3685,8 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
     prefetchEarliestWmma_.clear();
     prefetchStageBarrier_.clear();
     prefetchIssued_.clear();
+    groupHeldForBarrier_.clear();
+    stageBarrierReadyAt_.clear();
     barrierWaitWindows_.clear();
     for (const auto& [barrier, window] : barrierWmmaThresholds_)
         if (isBarrierWait(*barrier)) barrierWaitWindows_.push_back(window);

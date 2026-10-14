@@ -64,9 +64,11 @@ struct StageWmmaCounter {
             wmmaSinceTensorLoad = false;
         }
     }
+    bool shortStage(int minStageWmmas) const {
+        return groups > 0 && wmmas > 0 && wmmas < minStageWmmas * groups;
+    }
     int effectiveLead(int lead, int minStageWmmas) const {
-        const bool shortStage = groups > 0 && wmmas > 0 && wmmas < minStageWmmas * groups;
-        return lead >= kSingleStageLeadBelow && shortStage ? 0 : lead;
+        return lead >= kSingleStageLeadBelow && shortStage(minStageWmmas) ? 0 : lead;
     }
 };
 
