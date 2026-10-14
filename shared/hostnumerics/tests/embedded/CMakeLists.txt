@@ -5,8 +5,9 @@
 cmake_minimum_required(VERSION 3.25.2)
 project(HostNumericsEmbeddedTest LANGUAGES CXX)
 
-set(HOSTNUMERICS_SOURCE_DIR "${CMAKE_CURRENT_LIST_DIR}/../.." CACHE PATH
-    "HostNumerics source tree containing the shared test sources and CMake helper.")
+if(NOT HOSTNUMERICS_SOURCE_DIR)
+    message(FATAL_ERROR "Set HOSTNUMERICS_SOURCE_DIR to the HostNumerics source tree.")
+endif()
 
 set(CMAKE_DISABLE_FIND_PACKAGE_Python TRUE)
 set(CMAKE_DISABLE_FIND_PACKAGE_nanobind TRUE)

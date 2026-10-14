@@ -99,7 +99,7 @@ are then unnecessary.
 when building HostNumerics standalone and `OFF` when another project includes it
 with `add_subdirectory`. CI covers ON/ON with Ninja Multi-Config and OFF/OFF with
 Ninja, including installation and an external C++ consumer for both. It also
-checks the embedded defaults and an installed GoogleTest package with fetching disabled. The package and embedded test projects default `HOSTNUMERICS_SOURCE_DIR` to the containing HostNumerics source tree; pass `-DHOSTNUMERICS_SOURCE_DIR=/path/to/hostnumerics` to use a different tree's shared test source and CMake helper.
+checks the embedded defaults and an installed GoogleTest package with fetching disabled. When configuring the package or embedded test project directly, pass `-DHOSTNUMERICS_SOURCE_DIR=/path/to/hostnumerics` so it can locate the shared test source and CMake helper.
 
 Install into a local prefix with:
 

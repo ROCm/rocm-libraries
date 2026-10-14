@@ -7,8 +7,9 @@ project(HostNumericsPackageTest LANGUAGES CXX)
 
 find_package(HostNumerics CONFIG REQUIRED)
 
-set(HOSTNUMERICS_SOURCE_DIR "${CMAKE_CURRENT_LIST_DIR}/../.." CACHE PATH
-    "HostNumerics source tree containing the shared test sources and CMake helper.")
+if(NOT HOSTNUMERICS_SOURCE_DIR)
+    message(FATAL_ERROR "Set HOSTNUMERICS_SOURCE_DIR to the HostNumerics source tree.")
+endif()
 
 list(APPEND CMAKE_MODULE_PATH "${HOSTNUMERICS_SOURCE_DIR}/cmake")
 include(HostNumericsTestDependencies)

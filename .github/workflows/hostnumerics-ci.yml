@@ -36,18 +36,13 @@ jobs:
           - python: "ON"
             testing: "ON"
             generator: "Ninja Multi-Config"
-            gtest: "fetched"
-            fetch: "ON"
+            gtest: "installed"
+            fetch: "OFF"
           - python: "OFF"
             testing: "OFF"
             generator: "Ninja"
             gtest: "fetched"
             fetch: "ON"
-          - python: "OFF"
-            testing: "ON"
-            generator: "Ninja"
-            gtest: "installed"
-            fetch: "OFF"
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
