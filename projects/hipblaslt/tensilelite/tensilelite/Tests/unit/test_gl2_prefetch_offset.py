@@ -1032,7 +1032,6 @@ def build_kernel(cfg):
   .amdhsa_system_sgpr_workgroup_id_y 1
   .amdhsa_system_sgpr_workgroup_id_z 1
   .amdhsa_system_vgpr_workitem_id 0
-  .amdhsa_wavefront_size32 1
   .amdhsa_float_denorm_mode_32 3
   .amdhsa_float_denorm_mode_16_64 3
 .end_amdhsa_kernel

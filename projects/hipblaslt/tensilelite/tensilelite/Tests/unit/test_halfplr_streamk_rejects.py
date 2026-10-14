@@ -344,3 +344,163 @@ def test_halfplr_rejects_tdmfuse1_at_a_divergent_pair(
     )
     assert sol.get("Valid") is False
     assert "TDMFuse=1 requires HalfPLR=0 at a divergent decoupled pair" in out
+
+
+# ---------------------------------------------------------------------------
+# HalfPLR + LRVW > MIInputPerThread
+# ---------------------------------------------------------------------------
+_FP32_TN = {
+    "mi": [16, 16, 4, 1, 1, 2, 2, 2, 2],
+    "DepthU": 64,
+    "ProblemType": {
+        "DataType": "S",
+        "DestDataType": "S",
+        "ComputeDataType": "s",
+        "HighPrecisionAccumulate": False,
+    },
+}
+
+
+@pytest.mark.parametrize("half_plr", [1, 2, 3])
+def test_halfplr_caps_auto_local_read_vector_width(
+    _gp_gfx1250, gfx1250_iim, assembler, capsys, half_plr
+):
+    sol, out = _derive(
+        gfx1250_iim, assembler, capsys, HalfPLR=half_plr, **copy.deepcopy(_FP32_TN)
+    )
+    assert sol.get("Valid") is True, f"expected accept, rejected with: {out!r}"
+    for tc, bit in (("A", 1), ("B", 2)):
+        if half_plr & bit:
+            assert sol[f"LocalReadVectorWidth{tc}"] == sol[f"MIInputPerThread{tc}"]
+
+
+@pytest.mark.parametrize("half_plr, tc", [(1, "A"), (2, "B")])
+def test_halfplr_rejects_explicit_wide_local_read(
+    _gp_gfx1250, gfx1250_iim, assembler, capsys, half_plr, tc
+):
+    # An explicit width bypasses the auto-width cap, so it has to be rejected.
+    sol, out = _derive(
+        gfx1250_iim,
+        assembler,
+        capsys,
+        HalfPLR=half_plr,
+        LocalReadVectorWidth=4,
+        **copy.deepcopy(_FP32_TN),
+    )
+    assert sol.get("Valid") is False
+    assert (
+        f"HalfPLR{tc} does not support coalesced local reads "
+        f"(LocalReadVectorWidth{tc}=4 > MIInputPerThread{tc}=2)"
+    ) in out
+
+
+# ---------------------------------------------------------------------------
+# Guard 5: HalfPLR + a >2-byte datatype (e.g. F32) without LDSTr -> accepted
+# with the local-read width capped.
+#
+# Regression test for the IndexError crash reproduced from
+# ``Tensile/Tests/common/ductile/gfx1250/f32_tt_batched.yaml`` (DataType=S /
+# F32, TT, HalfPLR=[0,1,2,3], LDSTrInst=True but enableLDSTr can never be True
+# for a 4-byte MacDataType -- isLDSTrEnabled has no arm for numBytes > 2).
+# getHalfPLRGroups() only exposes a 2-element sliding window of HalfPLR's 3
+# rotating half-vgpr-groups; the "without enableLDSTr" local-read codegen path
+# (Components/LocalRead.py) generates offsets across the full double-buffered
+# span, which for wide (>2-byte) datatypes can reach a full extra block and
+# index past that 2-element window (``vgprGroups[gIdx]`` with gIdx == 2),
+# raising IndexError during KernelWriter. The offset only reaches the third
+# group when the auto LocalReadVectorWidth exceeds MIInputPerThread and one
+# local read coalesces two K iterations, so capping the width keeps the read
+# inside the 2-group window instead of rejecting every wide datatype.
+#
+# narrower (<=2-byte) non-LDSTr HalfPLR configs that pack via UnrollMajorLDS
+# alone (e.g. the pure-F8 TN base solution in this module, asserted ACCEPTED
+# above by ``test_halfplr_streamk_sk3_sia4_is_accepted``) are unaffected and
+# must remain accepted -- this is the over-rejection guard for this fix.
+#
+# TT (TransposeA=TransposeB=True) makes UnrollMajorLDSA=True (A packs fine)
+# but UnrollMajorLDSB=False, so HalfPLRB alone (half_plr in {2,3}) is already
+# rejected by the pre-existing "does not support packing" guard above --
+# unrelated to this fix. Only half_plr=1 (A-only, the actual
+# f32_tt_batched.yaml crash shape: UnrollMajorLDSA=True, enableLDSTrA=False,
+# numBytesA=4) exercises the cap.
+# ---------------------------------------------------------------------------
+def test_halfplr_f32_tt_without_ldstr_caps_local_read_vector_width(
+    _gp_gfx1250, gfx1250_iim, assembler, capsys
+):
+    sol, out = _derive(
+        gfx1250_iim,
+        assembler,
+        capsys,
+        HalfPLR=1,
+        LDSTrInst=False,
+        mi=_FP32_TN["mi"],
+        DepthU=_FP32_TN["DepthU"],
+        ProblemType={
+            "DataType": "S",
+            "DestDataType": "S",
+            "ComputeDataType": "s",
+            "HighPrecisionAccumulate": False,
+            "TransposeA": True,
+            "TransposeB": True,
+        },
+    )
+    assert sol.get("Valid") is True, f"expected accept, rejected with: {out!r}"
+    assert sol["LocalReadVectorWidthA"] == sol["MIInputPerThreadA"]
+
+
+@pytest.mark.parametrize("half_plr", [2, 3])
+def test_halfplr_b_side_f32_tt_rejected_by_packing_guard(
+    _gp_gfx1250, gfx1250_iim, assembler, capsys, half_plr
+):
+    sol, out = _derive(
+        gfx1250_iim,
+        assembler,
+        capsys,
+        HalfPLR=half_plr,
+        LDSTrInst=False,
+        ProblemType={
+            "DataType": "S",
+            "DestDataType": "S",
+            "ComputeDataType": "s",
+            "HighPrecisionAccumulate": False,
+            "TransposeA": True,
+            "TransposeB": True,
+        },
+    )
+    assert sol.get("Valid") is False
+    assert "Currently HalfPLR does not support packing" in out
+
+
+# ---------------------------------------------------------------------------
+# Generic HalfPLR restrictions, each reached by flipping one knob on the
+# StreamK base above.
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize(
+    "half_plr, mi",
+    [
+        (1, [16, 16, 128, 1, 1, 1, 2, 2, 2]),  # odd MIWaveTileA
+        (2, [16, 16, 128, 1, 1, 2, 1, 2, 2]),  # odd MIWaveTileB
+    ],
+)
+def test_halfplr_rejects_odd_wave_tile(
+    _gp_gfx1250, gfx1250_iim, assembler, capsys, half_plr, mi
+):
+    sol, out = _derive(gfx1250_iim, assembler, capsys, HalfPLR=half_plr, mi=mi)
+    assert sol.get("Valid") is False
+    assert "HalfPLR does not support odd WaveTile" in out
+
+
+def test_halfplr_rejects_unsupported_schedule_iter_alg(
+    _gp_gfx1250, gfx1250_iim, assembler, capsys
+):
+    # Only SIA 0 and 4 (which maps to _ScheduleIterAlg=0) are supported.
+    sol, out = _derive(gfx1250_iim, assembler, capsys, ScheduleIterAlg=3)
+    assert sol.get("Valid") is False
+    assert "Currently HalfPLR only supports SIA = 0 or 4" in out
+
+
+def test_halfplr_rejects_inner_unroll(_gp_gfx1250, gfx1250_iim, assembler, capsys):
+    # Double DepthU so LoopIters stays > 1 and the earlier HalfPLR check passes.
+    sol, out = _derive(gfx1250_iim, assembler, capsys, InnerUnroll=2, DepthU=512)
+    assert sol.get("Valid") is False
+    assert "Currently HalfPLR only supports InnerUnroll = 1" in out
