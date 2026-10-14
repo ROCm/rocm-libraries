@@ -162,10 +162,11 @@ not assumed.
 #### The rest of that file
 
 **Most of the older entries in that file do not match the tree, and did not before this
-work.** A full `--check-golden` at llvm20 on this base reports 639 of 758 blessed `ll`
-configs and 543 of 724 blessed `ir_canonical` configs changed, none missing, and 177 and
-255 configs present in the tree but not in the anchor. By family, 11 of 73 `ll` families
-and 13 of 70 `ir_canonical` families match entirely. `ir_canonical` is flavor-free, so
+work.** A full `--check-golden` at llvm20 on this base (as of the latest merge of `develop`)
+reports 633 of 888 blessed `ll` configs and 537 of 854 blessed `ir_canonical` configs
+changed, none missing, and 236 and 314 configs present in the tree but not in the anchor.
+By family, 12 of 73 `ll` families and 14 of 70 `ir_canonical` families match entirely;
+`tf32_mma` and `xf32_bf16x3_mma` are among them. `ir_canonical` is flavor-free, so
 this is not a flavor mismatch: the anchor is add-only in practice — a family gets its
 entries when it lands, as `tf32_mma` and this one did, and older entries are not
 refreshed. Re-blessing it is a tree-wide decision for its owners, not something to fold
