@@ -92,6 +92,7 @@ import argparse
 import csv
 import ctypes
 import datetime
+import itertools
 import json
 import math
 import os
@@ -105,6 +106,7 @@ from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
+from rocke.helpers import compile_kernel
 from rocke.instances.common.gemm_universal import (
     DataSpec,
     TileSpec,
@@ -140,8 +142,86 @@ _STICKY_HIP_ERRORS = ("hipError(700)", "hipError(710)", "hipError(719)")
 # ---------------------------------------------------------------------------
 
 
-def load_config(path: Path = DEFAULT_CONFIG) -> Dict[str, Any]:
-    return json.loads(path.read_text())
+def _deep_merge(base: Dict[str, Any], over: Dict[str, Any]) -> Dict[str, Any]:
+    """Recursive dict merge. Scalars and lists replace; dicts merge.
+
+    Lists replace rather than concatenate so a derived config can *narrow* a
+    sweep (the common case: pin one pipeline out of two), which appending
+    could not express.
+    """
+    out = dict(base)
+    for key, value in over.items():
+        if isinstance(value, dict) and isinstance(out.get(key), dict):
+            out[key] = _deep_merge(out[key], value)
+        else:
+            out[key] = value
+    return out
+
+
+def load_config(path: Path = DEFAULT_CONFIG, _seen: Optional[List[Path]] = None
+                ) -> Dict[str, Any]:
+    """Load a config, resolving an optional ``extends`` chain.
+
+    ``"extends": "sq4k.json"`` names a parent relative to this file's own
+    directory; the child is deep-merged over it. That is what lets a per-depth
+    or per-pipeline variant be three lines instead of a 60-line copy, which is
+    how nine untracked variants ended up outside the repo.
+    """
+    path = Path(path)
+    seen = list(_seen or [])
+    resolved = path.resolve()
+    if resolved in seen:
+        chain = " -> ".join(p.name for p in seen + [resolved])
+        raise SystemExit(f"'extends' cycle: {chain}")
+    seen.append(resolved)
+
+    try:
+        data = json.loads(path.read_text())
+    except FileNotFoundError:
+        raise SystemExit(f"config not found: {path}")
+    except json.JSONDecodeError as exc:
+        raise SystemExit(f"{path}: invalid JSON: {exc}")
+
+    parent_ref = data.pop("extends", None)
+    if parent_ref is None:
+        return data
+    parent_path = (path.parent / str(parent_ref)).resolve()
+    return _deep_merge(load_config(parent_path, _seen=seen), data)
+
+
+def _parse_set_value(text: str) -> Any:
+    """Parse a ``--set`` value as JSON, falling back to a bare string.
+
+    So ``=true``/``=2``/``=null``/``=[0,48]`` arrive typed, while
+    ``=intrawave`` still works without quoting it past the shell.
+    """
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return text
+
+
+def apply_set_overrides(config: Dict[str, Any], assignments: Sequence[str]) -> List[str]:
+    """Apply repeatable ``--set a.b.c=value`` assignments in order."""
+    applied: List[str] = []
+    for raw in assignments or ():
+        if "=" not in raw:
+            raise SystemExit(f"--set expects key.path=value, got {raw!r}")
+        dotted, _, text = raw.partition("=")
+        keys = [k for k in dotted.strip().split(".") if k]
+        if not keys:
+            raise SystemExit(f"--set has an empty key path: {raw!r}")
+        value = _parse_set_value(text)
+        section = config
+        for key in keys[:-1]:
+            nxt = section.get(key)
+            if not isinstance(nxt, dict):
+                nxt = {}
+                section[key] = nxt
+            section = nxt
+        section[keys[-1]] = value
+        applied.append(f"{'.'.join(keys)}={value!r}")
+    return applied
 
 
 def resolve_output_dir(args: argparse.Namespace) -> Path:
@@ -248,10 +328,168 @@ def _dedupe_valid(
     return list(seen.values())
 
 
+# Derived from the shape, so a config that sets them is a mistake rather than
+# an override -- ``_make_spec`` already passes them positionally.
+_SHAPE_DERIVED_TRAITS = ("pad_m", "pad_n", "pad_k")
+
+
+def _trait_field_names() -> frozenset:
+    """Every field ``TraitSpec`` actually has, as the validation allowlist."""
+    return frozenset(TraitSpec.__dataclass_fields__)
+
+
+def resolve_traits(config: Dict[str, Any]) -> Tuple[Dict[str, Any], Dict[str, List[Any]]]:
+    """Split the ``traits`` section into the stage-1 pin and the sweep space.
+
+    A scalar value is pinned and never swept; a list is swept, and its stage-1
+    value comes from the explicit ``screening`` sub-block. The pin is explicit
+    rather than "the first list element" on purpose: ``lds_k_pad`` is swept
+    over ``[0, 16, 48, 80, 112]`` while pinning 48, because screening at pad=0
+    collapses the big-block region and silently removes it from the search.
+    Making the pin positional would make list order load-bearing and invisible.
+
+    Returns ``(pin, swept)`` where ``pin`` is a complete trait dict suitable
+    for ``_make_spec`` and ``swept`` maps each swept key to its candidate list.
+
+    Raises ``SystemExit`` on anything unusable. That is the point of this
+    function: the previous shape accepted keys it then ignored -- adding
+    ``tdm_depth`` to the sweep produced specs that all carried the pin's depth
+    -- so a config could report a confident ranking over identical kernels.
+    """
+    raw = config.get("traits")
+    if raw is None:
+        raise SystemExit(
+            "config has no 'traits' section. The older 'screening_traits' + "
+            "'trait_config' pair was replaced by one 'traits' block: a scalar "
+            "value is pinned, a list is swept, and swept keys take their "
+            "stage-1 value from a 'screening' sub-block."
+        )
+    if not isinstance(raw, dict):
+        raise SystemExit("'traits' must be an object")
+
+    raw = dict(raw)
+    screening = dict(raw.pop("screening", {}) or {})
+    if not isinstance(screening, dict):
+        raise SystemExit("'traits.screening' must be an object")
+
+    known = _trait_field_names()
+    pin: Dict[str, Any] = {}
+    swept: Dict[str, List[Any]] = {}
+    for key, value in raw.items():
+        if key in _SHAPE_DERIVED_TRAITS:
+            raise SystemExit(
+                f"'traits.{key}' is derived from the problem shape and the "
+                f"tile, not configured. Remove it."
+            )
+        if key not in known:
+            near = sorted(k for k in known if k.startswith(key[:4]))
+            hint = f" Did you mean one of: {', '.join(near)}?" if near else ""
+            raise SystemExit(f"'traits.{key}' is not a TraitSpec field.{hint}")
+        if isinstance(value, list):
+            if not value:
+                raise SystemExit(f"'traits.{key}' is an empty list")
+            swept[key] = list(value)
+        else:
+            pin[key] = value
+
+    # A one-value list is a pin, not a sweep. This is what narrowing from the
+    # command line produces -- ``--epilogues cshuffle`` rewrites the list to a
+    # single element -- and it would otherwise collide with the inherited
+    # ``screening`` entry, which still names the value that was dropped. The
+    # entry is removed rather than rejected because with one candidate there
+    # is nothing left to choose.
+    narrowed = [k for k, v in swept.items() if len(v) == 1]
+    for key in narrowed:
+        pin[key] = swept.pop(key)[0]
+
+    # A scalar in ``traits`` IS the pin, so a ``screening`` entry for the same
+    # key is redundant and ignored rather than rejected. That is what makes
+    # narrowing work from the command line: ``--epilogues cshuffle`` and
+    # ``--set traits.epilogue=cshuffle`` both leave the inherited
+    # ``screening.epilogue`` behind, naming a value the sweep no longer
+    # visits, and erroring there would make the obvious invocation fail.
+    for key in list(screening):
+        if key in pin and key not in swept:
+            screening.pop(key)
+
+    for key in screening:
+        if key not in swept:
+            raise SystemExit(
+                f"'traits.screening.{key}' names a trait that is not declared. "
+                f"Add 'traits.{key}', or remove the screening entry."
+            )
+    missing = sorted(set(swept) - set(screening))
+    if missing:
+        raise SystemExit(
+            "every swept trait needs an explicit stage-1 value in "
+            "'traits.screening'; missing: " + ", ".join(missing)
+        )
+    for key, value in screening.items():
+        if value not in swept[key]:
+            raise SystemExit(
+                f"'traits.screening.{key}' = {value!r} is not among the swept "
+                f"values {swept[key]!r}. The pin must be a value the sweep "
+                f"also visits, or stage 1 ranks geometry under a kernel stage "
+                f"2 never builds."
+            )
+        pin[key] = value
+    return pin, swept
+
+
+#: Default margin for :func:`select_finalists`, in percent. 12 is the measured
+#: spread of the stage-2 gain across geometries on the square sweep
+#: (1.022x-1.143x), i.e. how far the trait stage can reorder what stage 1
+#: ranked. Anything closer to the cut than this is inside the noise of the
+#: ranking that produced it.
+DEFAULT_FINALIST_MARGIN_PCT = 12.0
+
+
+def _finalist_budget(selection: Dict[str, Any]) -> int:
+    """How many verified tiles the trait stage can be given at most."""
+    n = int(selection["tile_finalists"])
+    margin = float(selection.get("finalist_margin_pct", DEFAULT_FINALIST_MARGIN_PCT))
+    # With a margin the pool can exceed tile_finalists, but not without bound:
+    # cap the verification walk so a pathological run cannot verify everything.
+    return n if margin <= 0 else 2 * n
+
+
+def select_finalists(
+    ranked: Sequence[Dict[str, Any]], selection: Dict[str, Any]
+) -> List[Dict[str, Any]]:
+    """Top ``tile_finalists``, plus anything within ``finalist_margin_pct``.
+
+    A fixed top-N cut assumes stage 1's ranking is stage 2's ranking. It is
+    not: stage 1 times every geometry under one pinned trait config, and the
+    gain from each geometry's *own* best traits varies -- measured 1.022x to
+    1.143x across the square sweep's finalists, reordering 13 of 20. The cut
+    itself sat at a 0.9% margin between rank 20 and rank 21, far inside that
+    spread, so which geometries survived was close to arbitrary.
+
+    Keeping everything within a margin of rank-N makes the cost adaptive: a
+    well-separated boundary keeps exactly N, a crowded one keeps more --
+    crowded being precisely when the cut is unsafe. ``finalist_margin_pct: 0``
+    restores the fixed top-N.
+    """
+    n = int(selection["tile_finalists"])
+    margin = float(selection.get("finalist_margin_pct", DEFAULT_FINALIST_MARGIN_PCT))
+    head = list(ranked)[:n]
+    if margin <= 0 or len(ranked) <= n or not head:
+        return head
+    cutoff_ms = head[-1].get("best_ms")
+    if not cutoff_ms:
+        return head
+    limit = cutoff_ms * (1.0 + margin / 100.0)
+    extra = [
+        r for r in list(ranked)[n:]
+        if r.get("best_ms") and r["best_ms"] <= limit
+    ]
+    return head + extra
+
+
 def enumerate_tile_configs(config: Dict[str, Any]) -> List[UniversalGemmSpec]:
     """Stage 1: geometry varies, traits are held at the declared screening pin."""
     tile = config["tile_config"]
-    pin = dict(config["screening_traits"])
+    pin, _ = resolve_traits(config)
     specs = [
         _make_spec(config, tm, tn, tk, wm, wn, pin)
         for tm in tile["tile_m"]
@@ -263,54 +501,202 @@ def enumerate_tile_configs(config: Dict[str, Any]) -> List[UniversalGemmSpec]:
     return _dedupe_valid(specs, arch=config["target"]["arch"])
 
 
-def _load_paths(traits: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """The global->LDS mechanisms to try, as trait overrides.
+def _trait_combos(swept: Dict[str, List[Any]]) -> List[Dict[str, Any]]:
+    """The cartesian product of the swept traits, minus known-dead pairings.
 
-    Enumerated as a list rather than multiplied out: pairing ``dtl_prefetch``
-    with ``direct_to_lds=False`` would inflate the grid with combinations
-    ``is_valid_spec`` rejects anyway.
+    ``dtl_prefetch`` without ``direct_to_lds`` is rejected by
+    ``is_valid_spec``, so pairing them out here keeps the grid from inflating
+    with combinations that can only be discarded.
     """
-    paths: List[Dict[str, Any]] = []
-    for direct_to_lds in traits.get("direct_to_lds", [False]):
-        for dtl_prefetch in traits.get("dtl_prefetch", [False]):
-            if dtl_prefetch and not direct_to_lds:
-                continue
-            paths.append(
-                {"direct_to_lds": direct_to_lds, "dtl_prefetch": dtl_prefetch}
-            )
-    return paths or [{"direct_to_lds": False, "dtl_prefetch": False}]
+    keys = sorted(swept)
+    combos = [
+        dict(zip(keys, values)) for values in itertools.product(*(swept[k] for k in keys))
+    ]
+    return [
+        c for c in combos
+        if not (c.get("dtl_prefetch") and not c.get("direct_to_lds"))
+    ]
 
 
 def enumerate_trait_configs(
     config: Dict[str, Any], finalists: Sequence[UniversalGemmSpec]
 ) -> List[UniversalGemmSpec]:
-    """Stage 2: the full trait space, over each surviving geometry."""
-    traits = config["trait_config"]
+    """Stage 2: the full trait space, over each surviving geometry.
+
+    Generic over whatever ``traits`` declares as a list. The previous version
+    was a fixed nest of six loops, so the other 15 ``TraitSpec`` fields could
+    be *written* in the config and were then silently ignored -- a sweep could
+    ask for four TDM depths and rank four copies of one kernel.
+    """
+    _, swept = resolve_traits(config)
+    combos = _trait_combos(swept)
     specs: List[UniversalGemmSpec] = []
     for base in finalists:
-        for pipeline in traits["pipelines"]:
-            for scheduler in traits["schedulers"]:
-                for epilogue in traits["epilogues"]:
-                    for waves_per_eu in traits["waves_per_eu"]:
-                        for lds_swizzle in traits["lds_swizzle"]:
-                            for lds_k_pad in traits["lds_k_pad"]:
-                                for path in _load_paths(traits):
-                                    specs.append(
-                                        replace(
-                                            base,
-                                            trait=replace(
-                                                base.trait,
-                                                pipeline=pipeline,
-                                                scheduler=scheduler,
-                                                epilogue=epilogue,
-                                                waves_per_eu=waves_per_eu,
-                                                lds_swizzle=lds_swizzle,
-                                                lds_k_pad=lds_k_pad,
-                                                **path,
-                                            ),
-                                        )
-                                    )
+        for combo in combos:
+            specs.append(replace(base, trait=replace(base.trait, **combo)))
     return _dedupe_valid(specs, arch=config["target"]["arch"])
+
+
+def _kernel_fingerprint(spec: UniversalGemmSpec, arch: str) -> str:
+    """Hash of the *compiled* kernel, blind to its name.
+
+    Compiled rather than IR because inertness has two sources and only one is
+    visible in the IR. ``lds_swizzle`` and ``ab_load_elem_bytes`` change (or
+    fail to change) what the emitter writes, so IR would catch them.
+    ``waves_per_eu`` lowers to an ``"amdgpu-waves-per-eu"`` *attribute*: the IR
+    always differs, and whether it means anything is the backend's decision --
+    on an LDS-pinned tile it does not, and all values compile to identical
+    machine code. Only comparing the HSACO sees both.
+
+    The kernel is renamed first because several traits are spelled into the
+    kernel name, which would otherwise make every variant differ by name bytes
+    alone. Costs about 0.1s per call.
+    """
+    import hashlib
+
+    kernel = build_universal_gemm(spec, arch=arch)
+    kernel.name = "PROBE"
+    return hashlib.sha1(compile_kernel(kernel, arch=arch).hsaco).hexdigest()
+
+
+def warn_if_sweep_is_inert(
+    config: Dict[str, Any], finalists: Sequence[UniversalGemmSpec]
+) -> List[str]:
+    """Flag swept traits whose values emit *the same kernel*.
+
+    An inert trait is worse than a useless one: the sweep builds, times and
+    ranks several copies of one kernel, then reports a confident winner among
+    them. Three have been found by hand on this target, each only after a
+    result looked odd --
+
+      * ``lds_swizzle`` under TDM: the mover owns the LDS write, so there is
+        no per-lane column left for the emitter to permute;
+      * ``waves_per_eu`` on an LDS-pinned tile: one workgroup is resident
+        whatever the hint says, so the allocator has nothing to trade;
+      * ``ab_load_elem_bytes`` under TDM: the descriptor replaces the per-lane
+        global load, so there is no load width to widen.
+
+    Nothing in the config says so in any of those cases, and the ranking looks
+    normal. Rather than keep rediscovering instances, compare the emitted IR:
+    vary one trait at a time over a single base spec and group the values by
+    what they actually emit. Costs ``sum(len(values))`` lowerings -- 13 for
+    the shipped square config, a fraction of a second -- and no GPU.
+    """
+    _, swept = resolve_traits(config)
+    if not swept or not finalists:
+        return []
+    arch = config["target"]["arch"]
+
+    # Inertness can be geometry-dependent -- ``waves_per_eu`` is a no-op only
+    # where LDS already pins occupancy to one workgroup, which is true of the
+    # big tiles and false of the small ones. A single base would answer for
+    # whichever end it happened to pick, so sample across the size range.
+    ordered = sorted(finalists, key=lambda s: s.tile.tile_m * s.tile.tile_n * s.tile.tile_k)
+    bases = [ordered[0], ordered[-1]]  # two compiles per value, not three
+    seen, probes = set(), []
+    for b in bases:
+        tag = (b.tile.tile_m, b.tile.tile_n, b.tile.tile_k, b.tile.warp_m, b.tile.warp_n)
+        if tag not in seen:
+            seen.add(tag)
+            probes.append(b)
+
+    warnings: List[str] = []
+    for key, values in sorted(swept.items()):
+        inert_on, duplicate_sets = 0, []
+        degenerate = None
+        for base in probes:
+            groups: Dict[str, List[Any]] = {}
+            for value in values:
+                candidate = replace(base, trait=replace(base.trait, **{key: value}))
+                try:
+                    if not is_valid_spec(candidate, arch=arch)[0]:
+                        continue
+                    digest = _kernel_fingerprint(candidate, arch)
+                except Exception:
+                    return warnings  # diagnostics must never break the run
+                groups.setdefault(digest, []).append(value)
+            valid = sum(len(v) for v in groups.values())
+            if valid < 2:
+                degenerate = valid
+                continue
+            dups = [vals for vals in groups.values() if len(vals) > 1]
+            if dups:
+                inert_on += 1
+                duplicate_sets = dups  # representative; they agree in practice
+
+        if degenerate is not None and not duplicate_sets:
+            warnings.append(
+                f"sweeping {key!r} is degenerate: only {degenerate} of "
+                f"{len(values)} value(s) are valid on this target, so there is "
+                f"nothing to compare. Pin it instead of sweeping it."
+            )
+        elif duplicate_sets:
+            shown = "; ".join(" / ".join(repr(v) for v in vals) for vals in duplicate_sets)
+            where = (
+                "every geometry sampled" if inert_on == len(probes)
+                else f"{inert_on} of {len(probes)} geometries sampled"
+            )
+            warnings.append(
+                f"sweeping {key!r} emits the SAME kernel for: {shown} -- on "
+                f"{where}. Those arms differ only in the kernel name, so timing "
+                f"differences between them are noise and ranking them is "
+                f"meaningless. Either the trait does nothing in this "
+                f"configuration, or something else here already pins it."
+            )
+    return warnings
+
+
+def warn_if_sweep_changes_validity(
+    config: Dict[str, Any], finalists: Sequence[UniversalGemmSpec]
+) -> List[str]:
+    """Flag swept traits that change which *geometries* are admissible.
+
+    Stage 1 ranks geometry under the screening pin, so a trait that alters
+    ``is_valid_spec``'s verdict is judged on tiles chosen for a different
+    value of itself. ``tdm_depth`` is the clearest case: each ring stage costs
+    an A/B region, so depth 4 admits materially fewer tiles than depth 2 and
+    its arm is offered geometry it cannot build.
+
+    This does not block the run -- sweeping depth is still useful for a quick
+    look -- it names the trap so the result is read correctly, and points at
+    the one-config-per-value pattern for a fair comparison.
+    """
+    pin, swept = resolve_traits(config)
+    arch = config["target"]["arch"]
+    tile = config["tile_config"]
+    geometries = [
+        (tm, tn, tk, wm, wn)
+        for tm in tile["tile_m"] for tn in tile["tile_n"] for tk in tile["tile_k"]
+        for wm in tile["warp_m"] for wn in tile["warp_n"]
+    ]
+
+    def admitted(traits: Dict[str, Any]) -> int:
+        n = 0
+        for g in geometries:
+            try:
+                spec = _make_spec(config, *g, traits)
+            except Exception:
+                continue
+            if is_valid_spec(spec, arch=arch)[0]:
+                n += 1
+        return n
+
+    base_n = admitted(pin)
+    warnings: List[str] = []
+    for key, values in sorted(swept.items()):
+        counts = {}
+        for v in values:
+            counts[v] = admitted({**pin, key: v})
+        if len(set(counts.values())) > 1:
+            spread = ", ".join(f"{v!r}->{n}" for v, n in counts.items())
+            warnings.append(
+                f"sweeping {key!r} changes the admissible tile pool ({spread}; "
+                f"screening pin admits {base_n}). Stage 1 ranked geometry under "
+                f"{key}={pin.get(key)!r}, so the other arms are judged on tiles "
+                f"selected for that value. Run one config per {key} value for a "
+                f"comparison that is fair on the geometry axis."
+            )
+    return warnings
 
 
 def apply_lever(spec: UniversalGemmSpec, lever: Dict[str, Any]) -> UniversalGemmSpec:
@@ -985,31 +1371,31 @@ _CONFIG_OVERRIDES: Tuple[Tuple[str, Tuple[str, ...], Any, str], ...] = (
     ("--tile-k", ("tile_config", "tile_k"), _csv_of(int), "block tile K values"),
     ("--warp-m", ("tile_config", "warp_m"), _csv_of(int), "warp grid M values"),
     ("--warp-n", ("tile_config", "warp_n"), _csv_of(int), "warp grid N values"),
-    ("--pipelines", ("trait_config", "pipelines"), _csv_of(str), "pipelines"),
-    ("--schedulers", ("trait_config", "schedulers"), _csv_of(str), "schedulers"),
-    ("--epilogues", ("trait_config", "epilogues"), _csv_of(str), "epilogues"),
+    ("--pipelines", ("traits", "pipeline"), _csv_of(str), "pipelines"),
+    ("--schedulers", ("traits", "scheduler"), _csv_of(str), "schedulers"),
+    ("--epilogues", ("traits", "epilogue"), _csv_of(str), "epilogues"),
     (
         "--waves-per-eu",
-        ("trait_config", "waves_per_eu"),
+        ("traits", "waves_per_eu"),
         _csv_of(_nullable_int),
         "waves-per-EU values ('none' for the default)",
     ),
     (
         "--lds-swizzle",
-        ("trait_config", "lds_swizzle"),
+        ("traits", "lds_swizzle"),
         _csv_of(_flag),
         "LDS swizzle flags",
     ),
-    ("--lds-k-pad", ("trait_config", "lds_k_pad"), _csv_of(int), "LDS K padding"),
+    ("--lds-k-pad", ("traits", "lds_k_pad"), _csv_of(int), "LDS K padding"),
     (
         "--direct-to-lds",
-        ("trait_config", "direct_to_lds"),
+        ("traits", "direct_to_lds"),
         _csv_of(_flag),
         "DirectToLDS load path",
     ),
     (
         "--dtl-prefetch",
-        ("trait_config", "dtl_prefetch"),
+        ("traits", "dtl_prefetch"),
         _csv_of(_flag),
         "DirectToLDS prefetch ping-pong",
     ),
@@ -1094,6 +1480,12 @@ def build_parser() -> argparse.ArgumentParser:
             flag, type=kind, default=None,
             help=f"{help_text} [overrides {'.'.join(path)}]",
         )
+    parser.add_argument(
+        "--set", dest="set_overrides", action="append", metavar="KEY.PATH=VALUE",
+        help="override any config key, repeatable; value is parsed as JSON "
+             "with a bare-string fallback (e.g. --set traits.tdm_depth=[1,2] "
+             "--set traits.screening.epilogue=default)",
+    )
     parser.add_argument("--worker-record", type=Path, help=argparse.SUPPRESS)
     return parser
 
@@ -1129,6 +1521,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     config = load_config(args.config)
     overrides = _apply_overrides(config, args)
+    overrides += apply_set_overrides(config, args.set_overrides)
     stages = _parse_stages(args.stages)
     output_dir = resolve_output_dir(args)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -1194,10 +1587,30 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         flush_machine_state(output_dir, machine_states)
         try:
             record_map = _record_by_id(tile_records, arch=arch)
-            for result in rank_results(tile_results)[
-                : int(selection["tile_finalists"])
-            ]:
-                verify_record(tile_problem, record_map[result["id"]], result)
+            # Verify DOWN the ranking until enough have passed, rather than
+            # verifying a fixed top-N and keeping whatever survives. Under the
+            # old form a wrong-but-fast kernel inside the top N shrank the
+            # finalist pool instead of being replaced, because rank N+1 was
+            # never verified -- and fast-but-wrong is exactly what a defective
+            # trait produces, so the loss was silent and systematic.
+            want = _finalist_budget(selection)
+            walked = rejected = 0
+            for result in rank_results(tile_results):
+                if walked >= want or rejected >= want:
+                    break
+                record = record_map.get(result["id"])
+                if record is None:
+                    continue
+                if verify_record(tile_problem, record, result):
+                    walked += 1
+                else:
+                    rejected += 1
+            if rejected:
+                print(
+                    f"  NOTE: {rejected} tile candidate(s) failed verification "
+                    f"and were replaced from further down the ranking.",
+                    flush=True,
+                )
         finally:
             tile_problem.close()
         _write_results(output_dir, "tile", tile_results)
@@ -1206,17 +1619,29 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     ranked_tiles = rank_results(tile_results)
     finalists = [
-        _spec_from_dict(r["spec"]) for r in ranked_tiles if r.get("verified")
-    ][: int(selection["tile_finalists"])]
+        _spec_from_dict(r["spec"])
+        for r in select_finalists(
+            [r for r in ranked_tiles if r.get("verified")], selection
+        )
+    ]
     if "trait" in stages and not finalists:
         raise SystemExit(
             "no tile finalist passed verification -- every geometry either "
             "failed to build, faulted, or produced a wrong result. Check "
             "tile.csv before widening the search."
         )
+    sweep_warnings = warn_if_sweep_changes_validity(config, finalists)
+    sweep_warnings += warn_if_sweep_is_inert(config, finalists)
+    for text in sweep_warnings:
+        print(f"  WARNING: {text}", flush=True)
+
     summary["tile"] = {
         "candidate_count": len(tile_results),
         "verified_finalists": len(finalists),
+        "finalist_margin_pct": float(
+            selection.get("finalist_margin_pct", DEFAULT_FINALIST_MARGIN_PCT)
+        ),
+        "sweep_warnings": sweep_warnings,
     }
 
     # ---- stage 2: traits ---------------------------------------------------

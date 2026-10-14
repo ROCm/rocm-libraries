@@ -1,0 +1,58 @@
+{
+  "_comment": [
+    "Shared gfx1250 fp8 sweep settings. The shapes extend this and add only",
+    "their own problem and tile_config.",
+    "",
+    "traits: a scalar is pinned, a list is swept. 'screening' gives each swept",
+    "trait its stage-1 value -- it does not limit what stage 2 can win, it",
+    "decides which geometries reach stage 2 at all. Stage 1 ranks all",
+    "geometries under the pin and keeps the best; a geometry cut there is never",
+    "seen again. Pinning matters most for lds_k_pad, where the choice moves a",
+    "geometry's time by 3x-9x; measured, the epilogue pin changes nothing.",
+    "",
+    "tdm_depth 2 is pinned because it is what ships -- measured ahead of no-TDM",
+    "and of depths 1, 3 and 4. Revisit with --set traits.tdm_depth=N, which",
+    "pins rather than sweeps, so stage 1 screens at the depth you ask for.",
+    "",
+    "benchmark.workers is build parallelism only, measured flat from 16 to 128",
+    "on a 256-core host, so it is shared rather than set per shape."
+  ],
+  "target": {
+    "arch": "gfx1250",
+    "isa": "amdgcn-amd-amdhsa--gfx1250",
+    "dtype_ab": "fp8e4m3",
+    "dtype_c": "bf16",
+    "layout": "RCR",
+    "wave_size": 32,
+    "warp_tile": [16, 16, 64]
+  },
+  "selection": {
+    "tile_finalists": 20,
+    "final_timed": 5,
+    "final_samples": 5
+  },
+  "benchmark": {
+    "workers": 64,
+    "warmup": 5,
+    "iters": 20,
+    "attempts": 1
+  },
+  "traits": {
+    "pipeline": ["mem", "wmma_v1"],
+    "scheduler": "intrawave",
+    "epilogue": ["default", "cshuffle"],
+    "waves_per_eu": [null, 1, 2, 4],
+    "lds_swizzle": false,
+    "lds_k_pad": [0, 16, 48, 80, 112],
+    "direct_to_lds": false,
+    "dtl_prefetch": false,
+    "screening": {
+      "pipeline": "mem",
+      "epilogue": "default",
+      "waves_per_eu": null,
+      "lds_k_pad": 48
+    },
+    "tdm": true,
+    "tdm_depth": 2
+  }
+}

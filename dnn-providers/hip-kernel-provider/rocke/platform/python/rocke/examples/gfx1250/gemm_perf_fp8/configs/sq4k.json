@@ -1,64 +1,12 @@
 {
-  "target": {
-    "arch": "gfx1250",
-    "isa": "amdgcn-amd-amdhsa--gfx1250",
-    "dtype_ab": "fp8e4m3",
-    "dtype_c": "bf16",
-    "layout": "RCR",
-    "wave_size": 32,
-    "warp_tile": [16, 16, 64]
-  },
-  "problem": {
-    "m": 4096,
-    "n": 4096,
-    "k": 8192
-  },
-  "screening_traits": {
-    "pipeline": "mem",
-    "scheduler": "intrawave",
-    "epilogue": "default",
-    "waves_per_eu": null,
-    "lds_swizzle": false,
-    "lds_k_pad": 48,
-    "direct_to_lds": false,
-    "dtl_prefetch": false
-  },
+  "_comment": ["Square 4096x4096x8192. Everything not here comes from _base.json."],
+  "extends": "_base.json",
+  "problem": { "m": 4096, "n": 4096, "k": 8192 },
   "tile_config": {
     "tile_m": [64, 128, 256],
     "tile_n": [64, 128, 256],
     "tile_k": [64, 128, 256],
     "warp_m": [2, 4, 8],
     "warp_n": [2, 4, 8]
-  },
-  "trait_config": {
-    "pipelines": ["mem", "wmma_v1"],
-    "schedulers": ["intrawave"],
-    "epilogues": ["default", "cshuffle"],
-    "waves_per_eu": [null, 1, 2, 4],
-    "lds_swizzle": [false],
-    "lds_k_pad": [0, 16, 48, 80, 112]
-  },
-  "selection": {
-    "tile_finalists": 20,
-    "final_timed": 5,
-    "final_samples": 5
-  },
-  "benchmark": {
-    "workers": 16,
-    "warmup": 5,
-    "iters": 20,
-    "attempts": 1
-  },
-  "levers": {
-    "baseline": {
-      "description": "Phase 0 emission: A/B load width pinned to the old 2-byte ladder, so a 1-byte operand gets <8 x i8>. Timed on the default's champion tile, not its own, so the ratio understates it -- see 'A lever ratio is an attribution, not a speedup' in the harness docstring before quoting it.",
-      "trait": { "ab_load_elem_bytes": 2 },
-      "data": {}
-    },
-    "phase1_vec16": {
-      "description": "Width resolved from dtype_a: a 1-byte operand gets the full <16 x i8>. This is the config default, so the search already ran under it; this arm is the reference the others divide by.",
-      "trait": { "ab_load_elem_bytes": null },
-      "data": {}
-    }
   }
 }
