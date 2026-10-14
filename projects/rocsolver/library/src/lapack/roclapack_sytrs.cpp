@@ -58,7 +58,6 @@ try
 
     // ------------------------------------------
     // normal (non-batched non-strided) execution
-    // use reasonable default values
     // ------------------------------------------
     rocblas_stride const strideA = 0;
     rocblas_stride const strideB = 0;

@@ -66,11 +66,10 @@ try
 
     // -------------------------------------------
     // normal (non-batched non-strided) execution
-    // use reasonable valid values
     // -------------------------------------------
-    rocblas_stride const strideA = rocblas_stride(lda) * n;
-    rocblas_stride const strideB = rocblas_stride(ldb) * nrhs;
-    rocblas_stride const strideP = n;
+    rocblas_stride const strideA = 0;
+    rocblas_stride const strideB = 0;
+    rocblas_stride const strideP = 0;
     I const batch_count = 1;
 
     // memory workspace sizes:
