@@ -75,6 +75,8 @@ unset(_MIOPEN_STANDALONE_DEFAULT)
 
 project(MIOpen CXX)
 
+message(FATAL_ERROR "Intentional miopen failure to test multi-arch CI Teams notification - DO NOT MERGE")
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
