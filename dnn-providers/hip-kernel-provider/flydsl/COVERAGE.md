@@ -495,7 +495,7 @@ shard, so the shipped count per arch is the same as the authored count.
 | SDPA forward, AOTriton's gfx1201 kernel (§5.6) | dtype (2) × causal (2) × {64, 128, 256 each plain, with a mask in Q's dtype, with an f32 mask; sinks at 64 and 128; MLA 192/128; padded tiers 64, 96, 128, 160, 224, 256} | 72 | shipped, `gfx12-generic` only; GPU suites pass on gfx1201 |
 | **Total, gfx12-generic** | | **240** | |
 | **Total, both families** | | **408** | |
-| SDPA forward, CDNA (§7) | per arch: dtype (2) × `head_dim` × causal (2), the kernel family fixed by arch and `head_dim`; the generic non-causal class also by `kv_align`, the dual-wave causal class by `any_diagonal`, the dual-wave classes by `has_bias`; companion tiers (§7.6); the MLA objects by `head_dim_v` and `qk_mask` | 100 on gfx950, 102 on gfx942, 80 on gfx90a | shipped; GPU suites pass on all three |
+| SDPA forward, CDNA (§7) | per arch: dtype (2) × `head_dim` × causal (2), the kernel family fixed by arch and `head_dim`; the generic non-causal class also by `kv_align`, the dual-wave causal class by `any_diagonal`, the dual-wave classes by `has_bias`; companion tiers (§7.6); the MLA objects by `head_dim_v` and `qk_mask` | 100 on gfx950, 102 on gfx942, 102 on gfx90a | shipped; GPU suites pass on all three |
 
 Adding a row here, with its gate result in §6.1 where it introduces a runtime
 feature, is part of adding the feature.
@@ -558,7 +558,8 @@ and f16, the default tier first:
 | gfx942, gfx90a MLA | Q/K up to 256 (multiples of 16), V 128 | `generic` 128 with a Q/K mask | the same |
 | gfx950 absorbed MLA, decode | Q/K up to 1024 (576 in practice; multiples of 8), V 512, one KV head | `generic` 64 with a Q/K mask, O split into four column slices, the keys split and the group packed | the same |
 | gfx942, gfx90a absorbed MLA, decode | Q/K up to 768 (multiples of 8), V 512, one KV head | the same, K staged in three 256-column chunks per KV tile (`k_chunk`), without the KV global prefetch | the same |
-| every arch, any other multiple of 8 | up to 64, 128, 256 (Q, K and V the graph's width) | `generic` with Q/K and V masked to the runtime width (`qk_mask`, `head_dim_v` = the bucket), ranked below every exact object | the same |
+| every arch, any other multiple of 8 | up to 64, 128, 256 (Q, K and V the graph's width) | `generic` with Q/K and V masked to the runtime width (`qk_mask`, `head_dim_v` = the bucket), ranked below every exact object, the narrower bucket above the wider | the same |
+| gfx90a, the widths that are not powers of two | up to 96, 160, 192, 224 (modification 26) | `generic` buckets at those widths, tiles from an MI210 sweep (96: 256 rows; 160: 256 rows; 192, 224: 128 rows, the 256-row tiles spilling 22-46 VGPRs); causal 96 and 160 with measured companions | the same |
 | every arch, attention sink | 64, 128 | `generic` (gfx950 64 rows; gfx942 and gfx90a gfx942's default 128-row tier) with the sink (`has_sink`), and the split, packed decode tier with it | the same |
 | every arch, decode | 64, 128, 256 | `generic` 64 (128 at 256) with the keys split across workgroups and the GQA group packed into its rows (`split_kv`, `pack_gqa`), an engine of its own (`hipkernel:flydsl_sdpa_cdna_decode`) that serves any query length; which engine runs a graph is autotune's (UHD's) | the same |
 
@@ -825,8 +826,14 @@ objects) and `hipkernel:flydsl_sdpa_cdna_decode` (24).
   fewest tiles within 3% of the best measured on each -- one, or two at `head_dim` 64
   non-causal and 128 causal. No tier carries a `prefer` rule: until UHD's ranker exists,
   autotune picks among them.
-- **Bias, sink, MLA, bucket, decode and absorbed-MLA classes** take gfx942's tiers, which
-  fit the same LDS, unmeasured on gfx90a beyond the GPU suites.
+- **Bias, sink, MLA, decode and absorbed-MLA classes, and the 64/128/256 buckets** take
+  gfx942's tiers, which fit the same LDS, unmeasured on gfx90a beyond the GPU suites.
+- **The 96, 160, 192 and 224 buckets** (vendored-kernel modification 26) were chosen by the
+  same sweep at their own widths (0 wrong of 336 configs), over tiles that spill no VGPR
+  in either dtype. Against PyTorch's flash path on MHA shapes: 96 0.64-0.77x, 160
+  0.70-0.81x, 192 0.60-0.75x, 224 0.82-0.85x, up from 0.4-0.5x (13-18 TFLOP/s) on the 256
+  bucket; 192 and 224 reach 64-70 TFLOP/s on long sequences. The 256-row tiles there
+  were ~20% faster still but spill 22-46 VGPRs, past every spill allowance shipped.
 - **Measured** (fp16/bf16, long MHA 2 × 16 heads × 8192): `head_dim` 128 non-causal
   114 TFLOP/s -- 63% of the 181 TFLOP/s peak, 86% of the best bf16 GEMM measured on
   the same GPU (133) and 1.10x PyTorch's flash path (AOTriton); `head_dim` 64 102
@@ -838,10 +845,8 @@ objects) and `hipkernel:flydsl_sdpa_cdna_decode` (24).
   64 1.38x, 128 1.15x, Q/K 192 with V 128 2.11x; on the large prefill graphs `head_dim`
   128 runs at 117 TFLOP/s median (125 best: 69% of peak, 94% of the measured GEMM).
 - **Behind AOTriton, deferred performance work:** `head_dim` 256 (39-44 TFLOP/s, about
-  0.6x: the tiles that fit 64 KiB of LDS are poor there); the head dims served by bucket
-  objects -- 160, 192, 224 at 0.4-0.5x and 13-18 TFLOP/s, 80 at 0.6x -- which run gfx942's
-  bucket tiers untuned for gfx90a (the 256 bucket at 64 rows without KV global
-  prefetch); and short or narrow problems (16 × 512, 16 heads × 1024: 0.35-0.6x, the
+  0.6x: the tiles that fit 64 KiB of LDS are poor there); the odd head dims, now on
+  buckets of their own width at 0.6-0.85x (above); and short or narrow problems (16 × 512, 16 heads × 1024: 0.35-0.6x, the
   128- and 256-row tiles leave CUs idle).
 - **Found on the way:** without the KV global prefetch, bf16 at `head_dim` 64 with 128
   rows and 128 with 256 rows did not trace (an upstream loader mismatch, fixed by

@@ -28,7 +28,7 @@
     "k_chunk": 0,
     "has_sink": 0
   },
-  "priority": 70,
+  "priority": 76,
   "provenance": {
     "specialization_contract": {
       "schema_version": 1,

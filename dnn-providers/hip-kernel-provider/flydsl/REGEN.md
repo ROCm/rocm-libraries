@@ -109,7 +109,7 @@ Each target has its own ops; pick one row and set `ARCH` and `OPS` from it:
 | `gfx12-generic` | `rmsnorm sdpa_rdna sdpa_rdna_decode sdpa_aiw` | 240 (12 + 84 + 72 + 72) |
 | `gfx950` | `sdpa_cdna sdpa_cdna_dualwave sdpa_cdna_decode` | 100 (56 + 20 + 24) |
 | `gfx942` | `sdpa_cdna sdpa_cdna_decode` | 102 (78 + 24) |
-| `gfx90a` | `sdpa_cdna sdpa_cdna_decode` | 80 (56 + 24) |
+| `gfx90a` | `sdpa_cdna sdpa_cdna_decode` | 102 (78 + 24) |
 
 ```bash
 cd dnn-providers/hip-kernel-provider/flydsl

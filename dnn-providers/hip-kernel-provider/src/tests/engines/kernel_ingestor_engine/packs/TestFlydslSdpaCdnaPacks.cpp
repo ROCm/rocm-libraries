@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <map>
 #include <set>
 #include <sstream>
@@ -287,6 +288,66 @@ TEST(TestFlydslSdpaCdnaPacks, IsOnePackWithAGraphMatchAndOneKernelScopedMatcher)
 TEST(TestFlydslSdpaCdnaPacks, ShipsUniqueObjectsAndOneTopServeAllPerClass)
 {
     expectUniqueObjectsAndOneTopServeAllPerClass(GENERIC);
+}
+
+/// Among the generic kernel's bucket objects (qk_mask, V following Q/K, no bias or sink) of
+/// one arch, dtype and causal flag, each width's default outranks every wider width's, and
+/// its companions rank below every width's default: a graph several buckets serve gets the
+/// narrowest, which does the least wasted matrix work, unless autotune measures otherwise.
+TEST(TestFlydslSdpaCdnaPacks, RanksTheNarrowerBucketFirst)
+{
+    const auto& set = loadedSet(GENERIC.name);
+    using Key = std::tuple<std::string, std::string, int64_t>;
+    std::map<Key, std::map<int64_t, std::vector<int64_t>>> byWidth;
+    for(const auto& pack : set.packs)
+    {
+        for(const auto& kernel : pack.kernels)
+        {
+            const auto value = [&kernel](const char* name) {
+                const auto* field = tryGetMetadataField<int64_t>(kernel.metadata, name);
+                return field == nullptr ? int64_t{-1} : *field;
+            };
+            const auto headDim = value("head_dim");
+            if(value("qk_mask") != 1 || value("head_dim_v") != headDim || value("has_bias") != 0
+               || value("has_sink") != 0)
+            {
+                continue;
+            }
+            const auto* dtype = tryGetMetadataField<std::string>(kernel.metadata, "dtype");
+            ASSERT_NE(dtype, nullptr) << kernel.name;
+            const auto& arches = kernel.arch.empty() ? pack.arch : kernel.arch;
+            for(const auto& arch : arches)
+            {
+                byWidth[{arch, *dtype, value("causal")}][headDim].push_back(
+                    static_cast<int64_t>(kernel.priority));
+            }
+        }
+    }
+    for(const auto& [key, widths] : byWidth)
+    {
+        int64_t lowestDefault = std::numeric_limits<int64_t>::max();
+        int64_t highestCompanion = std::numeric_limits<int64_t>::min();
+        int64_t previous = std::numeric_limits<int64_t>::max();
+        for(const auto& [width, priorities] : widths) // ascending width
+        {
+            const auto top = *std::max_element(priorities.begin(), priorities.end());
+            EXPECT_LT(top, previous)
+                << std::get<0>(key) << " " << std::get<1>(key) << " causal " << std::get<2>(key)
+                << ": bucket " << width << " does not rank below the narrower one";
+            previous = top;
+            lowestDefault = std::min(lowestDefault, top);
+            for(const auto priority : priorities)
+            {
+                if(priority != top)
+                {
+                    highestCompanion = std::max(highestCompanion, priority);
+                }
+            }
+        }
+        EXPECT_LT(highestCompanion, lowestDefault)
+            << std::get<0>(key) << " " << std::get<1>(key) << " causal " << std::get<2>(key)
+            << ": a bucket companion outranks a bucket default";
+    }
 }
 
 TEST(TestFlydslSdpaCdnaPacks, EveryKernelDeclaresItsFamilysSignature)

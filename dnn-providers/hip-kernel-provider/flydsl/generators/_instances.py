@@ -856,24 +856,70 @@ SDPA_CDNA_WIDE_TIERS: dict[str, dict[tuple[int, int, int], tuple[CdnaTier, ...]]
     },
 }
 
-# Every other head dim that is a multiple of 16 (vendored-kernel modifications 13, 17):
-# objects built for a 64, 128 or 256 bucket whose Q, K and V widths are all the graph's
-# runtime head dim, ranked below every object built for an exact head dim. The
-# schedule is the bucket's own head dim's default generic tier.
-PRIORITY_SDPA_CDNA_BUCKET = 70
-SDPA_CDNA_BUCKET_TIERS: dict[str, dict[tuple[int, int], CdnaTier]] = {
-    "gfx950": {(64, causal): CdnaTier(_GEN, 64) for causal in (0, 1)}
-    | {(128, causal): CdnaTier(_GEN, 64) for causal in (0, 1)}
-    | {(256, causal): CdnaTier(_GEN, 128, waves_per_eu=1) for causal in (0, 1)},
-    "gfx942": {(64, causal): CdnaTier(_GEN, 128, waves_per_eu=3) for causal in (0, 1)}
-    | {(128, causal): CdnaTier(_GEN, 128) for causal in (0, 1)}
+# Every other head dim that is a multiple of 8 (vendored-kernel modifications 13, 17, 26):
+# objects built for a bucket width whose Q, K and V widths are all the graph's runtime head
+# dim, ranked below every object built for an exact head dim. A bucket serves every head
+# dim up to its width, so several may serve one graph; the narrower ranks first, since it
+# does the least wasted matrix work (a fixed order by width, not a shape rule; autotune
+# still compares every bucket that serves). Each class's first tier is its default; any
+# others are measured companions ranked below every bucket's default.
+PRIORITY_SDPA_CDNA_BUCKET = {
+    64: 76,
+    96: 75,
+    128: 74,
+    160: 73,
+    192: 72,
+    224: 71,
+    256: 70,
+}
+PRIORITY_SDPA_CDNA_BUCKET_COMPANION_OFFSET = 10
+
+
+def _bucket(*tiers: CdnaTier) -> tuple[CdnaTier, ...]:
+    return tiers
+
+
+SDPA_CDNA_BUCKET_TIERS: dict[str, dict[tuple[int, int], tuple[CdnaTier, ...]]] = {
+    "gfx950": {(64, causal): _bucket(CdnaTier(_GEN, 64)) for causal in (0, 1)}
+    | {(128, causal): _bucket(CdnaTier(_GEN, 64)) for causal in (0, 1)}
+    | {
+        (256, causal): _bucket(CdnaTier(_GEN, 128, waves_per_eu=1)) for causal in (0, 1)
+    },
+    "gfx942": {
+        (64, causal): _bucket(CdnaTier(_GEN, 128, waves_per_eu=3)) for causal in (0, 1)
+    }
+    | {(128, causal): _bucket(CdnaTier(_GEN, 128)) for causal in (0, 1)}
     # At 256 the masks' selects tip the tile into spills: 128 rows always, 64 rows while
     # the next K tile is carried in registers (KV global prefetch).
-    | {(256, causal): CdnaTier(_GEN, 64, kv_gpfetch=0) for causal in (0, 1)},
-    # gfx90a: gfx942's, the same 64 KiB of LDS and the same code path.
-    "gfx90a": {(64, causal): CdnaTier(_GEN, 128, waves_per_eu=3) for causal in (0, 1)}
-    | {(128, causal): CdnaTier(_GEN, 128) for causal in (0, 1)}
-    | {(256, causal): CdnaTier(_GEN, 64, kv_gpfetch=0) for causal in (0, 1)},
+    | {(256, causal): _bucket(CdnaTier(_GEN, 64, kv_gpfetch=0)) for causal in (0, 1)},
+    # gfx90a: gfx942's at 64, 128 and 256 (the same 64 KiB of LDS and code path), and the
+    # widths that are not powers of two (modification 26). Their tiles are the greedy
+    # cover of an MI210 sweep over bf16 and f16 (every tile within 3% of the best at each
+    # shape; 0 wrong of 336 configs): block_m, waves per SIMD, KV global prefetch. Only
+    # tiles that spill no VGPR in either dtype were candidates: the 256-row tiles at 192
+    # and 224 measured ~20% faster on long sequences but spill 22-46 VGPRs.
+    "gfx90a": {
+        (64, causal): _bucket(CdnaTier(_GEN, 128, waves_per_eu=3)) for causal in (0, 1)
+    }
+    | {(128, causal): _bucket(CdnaTier(_GEN, 128)) for causal in (0, 1)}
+    | {(256, causal): _bucket(CdnaTier(_GEN, 64, kv_gpfetch=0)) for causal in (0, 1)}
+    | {
+        (96, 0): _bucket(CdnaTier(_GEN, 256, waves_per_eu=2)),
+        (96, 1): _bucket(
+            CdnaTier(_GEN, 128, waves_per_eu=1),
+            CdnaTier(_GEN, 256, waves_per_eu=1),
+            CdnaTier(_GEN, 128, waves_per_eu=3, kv_gpfetch=0),
+        ),
+        (160, 0): _bucket(CdnaTier(_GEN, 256, waves_per_eu=1)),
+        (160, 1): _bucket(
+            CdnaTier(_GEN, 256, waves_per_eu=1, kv_gpfetch=0),
+            CdnaTier(_GEN, 128, waves_per_eu=1),
+        ),
+        (192, 0): _bucket(CdnaTier(_GEN, 128, waves_per_eu=3)),
+        (192, 1): _bucket(CdnaTier(_GEN, 128, waves_per_eu=3)),
+        (224, 0): _bucket(CdnaTier(_GEN, 128, waves_per_eu=2)),
+        (224, 1): _bucket(CdnaTier(_GEN, 128, waves_per_eu=3)),
+    },
 }
 
 # Attention sinks (GPT-OSS; vendored-kernel modification 19): a per-head logit in the
@@ -1059,21 +1105,25 @@ def _sdpa_cdna_rows(arch: str) -> list[Instance]:
                         qk_mask=1,
                     )
                 )
-        for (bucket, causal), tier in SDPA_CDNA_BUCKET_TIERS[arch].items():
-            instances.append(
-                _cdna_instance(
-                    dtype,
-                    bucket,
-                    causal,
-                    0,
-                    tier,
-                    PRIORITY_SDPA_CDNA_BUCKET,
-                    0,
-                    1,
-                    head_dim_v=bucket,
-                    qk_mask=1,
+        for (bucket, causal), tiers in SDPA_CDNA_BUCKET_TIERS[arch].items():
+            for index, tier in enumerate(tiers):
+                priority = PRIORITY_SDPA_CDNA_BUCKET[bucket] - (
+                    PRIORITY_SDPA_CDNA_BUCKET_COMPANION_OFFSET if index else 0
                 )
-            )
+                instances.append(
+                    _cdna_instance(
+                        dtype,
+                        bucket,
+                        causal,
+                        0,
+                        tier,
+                        priority,
+                        0,
+                        1,
+                        head_dim_v=bucket,
+                        qk_mask=1,
+                    )
+                )
     return instances
 
 

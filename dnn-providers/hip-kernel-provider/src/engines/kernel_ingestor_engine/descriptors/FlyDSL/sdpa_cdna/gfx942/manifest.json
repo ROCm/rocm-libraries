@@ -7,7 +7,7 @@
     "flydsl_kernels_commit": "89ad52fbbb9e252396829a8a44b12e18b7acd970",
     "flydsl_kernels_describe": "v0.3.4.1-19-g89ad52f",
     "rocm_version": "7.13.0",
-    "inputs_sha256": "b4f6699cec03a95254eda25ec66b6031e617173e46d7d9f4f08fe3378002aa3a"
+    "inputs_sha256": "10e8985f018effdced7e1770d49a34baece23651ad7d5af811bd8d6a271674df"
   },
   "instances": [
     {
@@ -3298,7 +3298,7 @@
       "name": "sdpa_cdna_bf16_d64_causal0_bm128_wpe3_qkm1",
       "op": "sdpa_cdna",
       "dtype": "bf16",
-      "priority": 70,
+      "priority": 76,
       "tier": "specialized",
       "knobs": {
         "head_dim": 64,
@@ -3398,7 +3398,7 @@
       "name": "sdpa_cdna_bf16_d64_causal1_bm128_wpe3_qkm1",
       "op": "sdpa_cdna",
       "dtype": "bf16",
-      "priority": 70,
+      "priority": 76,
       "tier": "specialized",
       "knobs": {
         "head_dim": 64,
@@ -3498,7 +3498,7 @@
       "name": "sdpa_cdna_bf16_d128_causal0_bm128_qkm1",
       "op": "sdpa_cdna",
       "dtype": "bf16",
-      "priority": 70,
+      "priority": 74,
       "tier": "specialized",
       "knobs": {
         "head_dim": 128,
@@ -3596,7 +3596,7 @@
       "name": "sdpa_cdna_bf16_d128_causal1_bm128_qkm1",
       "op": "sdpa_cdna",
       "dtype": "bf16",
-      "priority": 70,
+      "priority": 74,
       "tier": "specialized",
       "knobs": {
         "head_dim": 128,
@@ -7180,7 +7180,7 @@
       "name": "sdpa_cdna_f16_d64_causal0_bm128_wpe3_qkm1",
       "op": "sdpa_cdna",
       "dtype": "f16",
-      "priority": 70,
+      "priority": 76,
       "tier": "specialized",
       "knobs": {
         "head_dim": 64,
@@ -7280,7 +7280,7 @@
       "name": "sdpa_cdna_f16_d64_causal1_bm128_wpe3_qkm1",
       "op": "sdpa_cdna",
       "dtype": "f16",
-      "priority": 70,
+      "priority": 76,
       "tier": "specialized",
       "knobs": {
         "head_dim": 64,
@@ -7380,7 +7380,7 @@
       "name": "sdpa_cdna_f16_d128_causal0_bm128_qkm1",
       "op": "sdpa_cdna",
       "dtype": "f16",
-      "priority": 70,
+      "priority": 74,
       "tier": "specialized",
       "knobs": {
         "head_dim": 128,
@@ -7478,7 +7478,7 @@
       "name": "sdpa_cdna_f16_d128_causal1_bm128_qkm1",
       "op": "sdpa_cdna",
       "dtype": "f16",
-      "priority": 70,
+      "priority": 74,
       "tier": "specialized",
       "knobs": {
         "head_dim": 128,

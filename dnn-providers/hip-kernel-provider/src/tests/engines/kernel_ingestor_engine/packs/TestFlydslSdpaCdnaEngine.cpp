@@ -1634,6 +1634,41 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, DecodesAbsorbedMlaWithOneKvHead)
     expectCdnaMatchesReference(spec, BF16_TOLERANCE);
 }
 
+TEST(TestGpuFlydslSdpaCdnaDispatch, ServesEveryWidthInsideTheBucketsThatAreNotPowersOfTwo)
+{
+    // The 96, 160, 192 and 224 buckets (vendored-kernel modification 26), at each one's
+    // own width and inside it, every candidate the matcher admits (wider buckets too):
+    // causal bf16 with the LSE, then non-causal f16 BHSD at a ragged length.
+    for(const int64_t headDim : {int64_t{72},
+                                 int64_t{88},
+                                 int64_t{96},
+                                 int64_t{136},
+                                 int64_t{152},
+                                 int64_t{160},
+                                 int64_t{168},
+                                 int64_t{184},
+                                 int64_t{192},
+                                 int64_t{200},
+                                 int64_t{216},
+                                 int64_t{224}})
+    {
+        SCOPED_TRACE("head_dim " + std::to_string(headDim));
+        auto spec = cdnaSpec();
+        spec.headDim = headDim;
+        spec.seqLenQ = 200;
+        spec.seqLenKv = 333;
+        spec.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+        spec.stats = SdpaStats::LSE;
+        expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+        spec.dataType = DataType::HALF;
+        spec.layout = SdpaLayout::BHSD;
+        spec.mask = SdpaMask::NONE;
+        spec.seqLenQ = 129;
+        spec.seqLenKv = 777;
+        expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+    }
+}
+
 TEST(TestGpuFlydslSdpaCdnaDispatch, ServesHeadDimsBetweenTheBuiltOnes)
 {
     // Q, K and V all the graph's head dim, served by the 64, 128 and 256 bucket objects.
