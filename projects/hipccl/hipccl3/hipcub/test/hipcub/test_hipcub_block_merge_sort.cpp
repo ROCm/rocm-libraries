@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2021-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2021-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -123,10 +123,11 @@ TYPED_TEST(HipcubBlockMergeSort, SortKeys)
 
         // Generate data
         std::vector<key_type> keys_output;
-        keys_output = test_utils::get_random_data<key_type>(size,
-                                                            std::numeric_limits<key_type>::min(),
-                                                            std::numeric_limits<key_type>::max(),
-                                                            seed_value);
+        keys_output
+            = test_utils::get_random_data<key_type>(size,
+                                                    _HIPCUB_STD::numeric_limits<key_type>::min(),
+                                                    _HIPCUB_STD::numeric_limits<key_type>::max(),
+                                                    seed_value);
 
         // Calculate expected results on host
         std::vector<key_type> expected(keys_output);
@@ -182,19 +183,45 @@ void sort_key_with_valid_items_kernel(T*        device_input,
                                       T         default_val)
 {
     constexpr size_t items_per_block = items_per_thread * block_size;
-    const size_t     offset = (blockIdx.x * items_per_block) + (threadIdx.x * items_per_thread);
+
+    const int block_offset  = static_cast<int>(blockIdx.x * items_per_block);
+    const int thread_offset = static_cast<int>(threadIdx.x * items_per_thread);
 
     T input[items_per_thread];
 
+    // Define per-thread valid range within the block
+    const int thread_start = thread_offset;
+    const int thread_end   = thread_start + static_cast<int>(items_per_thread);
+
+    // Count valid items this thread actually owns
+    const int local_valid = (thread_start >= valid_items)
+                                ? 0
+                                : ((thread_end <= valid_items) ? static_cast<int>(items_per_thread)
+                                                               : (valid_items - thread_start));
+
+    // Load valid items and fill the rest with default_val
     for(size_t i = 0; i < items_per_thread; i++)
-        input[i] = device_input[offset + i];
+    {
+        const int idx = block_offset + thread_offset + static_cast<int>(i);
+        if(static_cast<int>(i) < local_valid)
+            input[i] = device_input[idx];
+        else
+            input[i] = default_val;
+    }
 
-    hipcub::BlockMergeSort<T, block_size, items_per_thread> bsort;
+    using BlockSort = hipcub::BlockMergeSort<T, block_size, items_per_thread>;
+    __shared__
+    typename BlockSort::TempStorage temp_storage;
+    BlockSort                       bsort(temp_storage);
 
-    bsort.Sort(input, compare_op, valid_items, default_val);
+    // Sort the whole block since all invalid items are already default_val
+    bsort.Sort(input, compare_op);
 
     for(size_t i = 0; i < items_per_thread; i++)
-        device_input[offset + i] = input[i];
+    {
+        const int idx     = block_offset + thread_offset + static_cast<int>(i);
+        device_input[idx] = input[i];
+    }
 }
 
 TYPED_TEST(HipcubBlockMergeSort, SortKeysWithValidItems)
@@ -217,8 +244,8 @@ TYPED_TEST(HipcubBlockMergeSort, SortKeysWithValidItems)
     constexpr size_t size = grid_size * items_per_block;
 
     // minus|plus two to prevent overflow weirdness
-    const T mini = std::numeric_limits<T>::min() + static_cast<T>(2);
-    const T maxi = std::numeric_limits<T>::max() - static_cast<T>(2);
+    const T mini = _HIPCUB_STD::numeric_limits<T>::min() + static_cast<T>(2);
+    const T maxi = _HIPCUB_STD::numeric_limits<T>::max() - static_cast<T>(2);
 
     const T   default_val        = static_cast<T>(compare_op(mini, maxi) ? maxi : mini);
     const int valid_items_arr[8] = {items_per_block / 2,
@@ -354,17 +381,18 @@ TYPED_TEST(HipcubBlockMergeSort, SortKeysValues)
 
         // Generate data
         std::vector<key_type> keys_output;
-        keys_output = test_utils::get_random_data<key_type>(size,
-                                                            std::numeric_limits<key_type>::min(),
-                                                            std::numeric_limits<key_type>::max(),
-                                                            seed_value);
+        keys_output
+            = test_utils::get_random_data<key_type>(size,
+                                                    _HIPCUB_STD::numeric_limits<key_type>::min(),
+                                                    _HIPCUB_STD::numeric_limits<key_type>::max(),
+                                                    seed_value);
 
         std::vector<value_type> values_output;
-        values_output
-            = test_utils::get_random_data<value_type>(size,
-                                                      std::numeric_limits<value_type>::min(),
-                                                      std::numeric_limits<value_type>::max(),
-                                                      seed_value + seed_value_addition);
+        values_output = test_utils::get_random_data<value_type>(
+            size,
+            _HIPCUB_STD::numeric_limits<value_type>::min(),
+            _HIPCUB_STD::numeric_limits<value_type>::max(),
+            seed_value + seed_value_addition);
 
         using key_value = std::pair<key_type, value_type>;
 
@@ -593,17 +621,18 @@ TYPED_TEST(HipcubBlockMergeSort, StableSortKeysValues)
 
         // Generate data
         std::vector<key_type> keys_output;
-        keys_output = test_utils::get_random_data<key_type>(size,
-                                                            std::numeric_limits<key_type>::min(),
-                                                            std::numeric_limits<key_type>::max(),
-                                                            seed_value);
+        keys_output
+            = test_utils::get_random_data<key_type>(size,
+                                                    _HIPCUB_STD::numeric_limits<key_type>::min(),
+                                                    _HIPCUB_STD::numeric_limits<key_type>::max(),
+                                                    seed_value);
 
         std::vector<value_type> values_output;
-        values_output
-            = test_utils::get_random_data<value_type>(size,
-                                                      std::numeric_limits<value_type>::min(),
-                                                      std::numeric_limits<value_type>::max(),
-                                                      seed_value + seed_value_addition);
+        values_output = test_utils::get_random_data<value_type>(
+            size,
+            _HIPCUB_STD::numeric_limits<value_type>::min(),
+            _HIPCUB_STD::numeric_limits<value_type>::max(),
+            seed_value + seed_value_addition);
 
         // Set some keys to be the same, but have different values to test stability
         for(size_t i = 0; i < 10; i++)
@@ -694,23 +723,45 @@ void stable_sort_key_with_valid_items_kernel(T*        device_input,
                                              T         default_val)
 {
     constexpr size_t items_per_block = items_per_thread * block_size;
-    const size_t     offset = (blockIdx.x * items_per_block) + (threadIdx.x * items_per_thread);
+    const int        block_offset    = static_cast<int>(blockIdx.x * items_per_block);
+    const int        thread_offset   = static_cast<int>(threadIdx.x * items_per_thread);
 
     T input[items_per_thread];
 
+    // Define per-thread valid range within the block
+    const int thread_start = thread_offset;
+    const int thread_end   = thread_start + static_cast<int>(items_per_thread);
+
+    const int local_valid = (thread_start >= valid_items)
+                                ? 0
+                                : ((thread_end <= valid_items) ? static_cast<int>(items_per_thread)
+                                                               : (valid_items - thread_start));
+
+    // Load valid items and fill invalid ones with default_val
     for(size_t i = 0; i < items_per_thread; i++)
-        input[i] = device_input[offset + i];
+    {
+        const int idx = block_offset + thread_offset + static_cast<int>(i);
 
-    hipcub::BlockMergeSort<T, block_size, items_per_thread> bsort;
+        if(static_cast<int>(i) < local_valid)
+            input[i] = device_input[idx];
+        else
+            input[i] = default_val;
+    }
 
-    bsort.StableSort(
-        input,
-        [&](const T& lhs, const T& rhs) { return compare_op(lhs.elem, rhs.elem); },
-        valid_items,
-        default_val);
+    using BlockSort = hipcub::BlockMergeSort<T, block_size, items_per_thread>;
+    __shared__
+    typename BlockSort::TempStorage temp_storage;
+    BlockSort                       bsort(temp_storage);
+
+    // Stable-sort the whole block since all invalid items are masked
+    bsort.StableSort(input,
+                     [&](const T& lhs, const T& rhs) { return compare_op(lhs.elem, rhs.elem); });
 
     for(size_t i = 0; i < items_per_thread; i++)
-        device_input[offset + i] = input[i];
+    {
+        const int idx     = block_offset + thread_offset + static_cast<int>(i);
+        device_input[idx] = input[i];
+    }
 }
 
 TYPED_TEST(HipcubBlockMergeSort, StableSortKeysWithValidItems)
@@ -734,8 +785,8 @@ TYPED_TEST(HipcubBlockMergeSort, StableSortKeysWithValidItems)
     constexpr size_t size = grid_size * items_per_block;
 
     // minus|plus two to prevent overflow weirdness
-    const T mini = std::numeric_limits<T>::min() + static_cast<T>(2);
-    const T maxi = std::numeric_limits<T>::max() - static_cast<T>(2);
+    const T mini = _HIPCUB_STD::numeric_limits<T>::min() + static_cast<T>(2);
+    const T maxi = _HIPCUB_STD::numeric_limits<T>::max() - static_cast<T>(2);
 
     const custom_type default_val = {static_cast<T>(compare_op(mini, maxi) ? maxi : mini), 0};
     const int         valid_items_arr[8] = {items_per_block / 2,
@@ -834,25 +885,52 @@ void stable_sort_key_value_with_valid_items_kernel(T*        device_key_input,
                                                    T         default_val)
 {
     constexpr size_t items_per_block = items_per_thread * block_size;
-    const size_t     offset = (blockIdx.x * items_per_block) + (threadIdx.x * items_per_thread);
+
+    const int block_offset  = static_cast<int>(blockIdx.x * items_per_block);
+    const int thread_offset = static_cast<int>(threadIdx.x * items_per_thread);
 
     T key_input[items_per_thread];
     T value_input[items_per_thread];
 
+    // Define per-thread valid range
+    const int thread_start = thread_offset;
+    const int thread_end   = thread_start + static_cast<int>(items_per_thread);
+
+    const int local_valid = (thread_start >= valid_items)
+                                ? 0
+                                : ((thread_end <= valid_items) ? static_cast<int>(items_per_thread)
+                                                               : (valid_items - thread_start));
+
+    // Load valid items and fill invalid ones with default_val
     for(size_t i = 0; i < items_per_thread; i++)
     {
-        key_input[i]   = device_key_input[offset + i];
-        value_input[i] = device_value_input[offset + i];
+        const int idx = block_offset + thread_offset + static_cast<int>(i);
+
+        if(static_cast<int>(i) < local_valid)
+        {
+            key_input[i]   = device_key_input[idx];
+            value_input[i] = device_value_input[idx];
+        }
+        else
+        {
+            key_input[i]   = default_val;
+            value_input[i] = device_value_input[idx];
+        }
     }
 
-    hipcub::BlockMergeSort<T, block_size, items_per_thread, T> bsort;
+    using BlockSort = hipcub::BlockMergeSort<T, block_size, items_per_thread, T>;
+    __shared__
+    typename BlockSort::TempStorage temp_storage;
+    BlockSort                       bsort(temp_storage);
 
-    bsort.StableSort(key_input, value_input, compare_op, valid_items, default_val);
+    // Sort entire block since all invalid items are masked
+    bsort.StableSort(key_input, value_input, compare_op);
 
     for(size_t i = 0; i < items_per_thread; i++)
     {
-        device_key_input[offset + i]   = key_input[i];
-        device_value_input[offset + i] = value_input[i];
+        const int idx           = block_offset + thread_offset + static_cast<int>(i);
+        device_key_input[idx]   = key_input[i];
+        device_value_input[idx] = value_input[i];
     }
 }
 
@@ -882,8 +960,8 @@ TYPED_TEST(HipcubBlockMergeSort, StableSortKeysValuesWithValidItems)
     constexpr size_t size = grid_size * items_per_block;
 
     // minus|plus two to prevent overflow weirdness
-    const T mini = std::numeric_limits<T>::min() + static_cast<T>(2);
-    const T maxi = std::numeric_limits<T>::max() - static_cast<T>(2);
+    const T mini = _HIPCUB_STD::numeric_limits<T>::min() + static_cast<T>(2);
+    const T maxi = _HIPCUB_STD::numeric_limits<T>::max() - static_cast<T>(2);
 
     T         default_val        = static_cast<T>(compare_op(mini, maxi) ? maxi : mini);
     const int valid_items_arr[8] = {items_per_block / 2,
