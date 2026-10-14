@@ -1210,6 +1210,24 @@ def test_codegen_knob_is_bit_identical_to_default(dtype, d, persistent, override
     )
 
 
+# Persistent grid size for the CFVST / KDB-VPF tests. At the shipped NP (304) every
+# shape below has fewer work items than workgroups, so no workgroup ever runs a
+# second item and the LDS hand-off between items (the next item's prologue writing
+# K slot 0 and V_lds after the previous item's epilogue) is never exercised.
+_MULTI_ITEM_NP = 3
+
+
+def _multi_item_persistent(spec):
+    """``spec`` on a small persistent grid: more than two work items per workgroup
+    and a ragged last round, the same preconditions as
+    ``test_one_persistent_binary_serves_every_shape_and_head_config``."""
+    spec = dataclasses.replace(spec, num_persistent=_MULTI_ITEM_NP)
+    work = (spec.seqlen_q // spec.block_m) * spec.num_query_heads * spec.batch
+    assert work > 2 * spec.num_persistent, (work, spec.num_persistent)
+    assert work % spec.num_persistent, (work, spec.num_persistent)
+    return spec
+
+
 @requires_gfx942_gpu
 @pytest.mark.gpu
 @pytest.mark.parametrize("dtype", ["bf16", "fp16"])
@@ -1264,6 +1282,8 @@ def test_cfvst_pipeline_strict_numeric(dtype, persistent, sq, skv):
 
     for knobs in variants:
         spec = dataclasses.replace(base, seqlen_kv=skv, **knobs)
+        if persistent:
+            spec = _multi_item_persistent(spec)
 
         out = torch.full_like(q, float("nan"))
 
@@ -1339,6 +1359,8 @@ def test_cfvst_knob_matrix_numeric(heads, skv, persistent, knobs, lds_num_buffer
         lds_num_buffers=lds_num_buffers,
         **knobs,
     )
+    if persistent:
+        spec = _multi_item_persistent(spec)
     ok, why = supports_attention_dense(spec, arch="gfx942")
     assert ok, f"gate no longer accepts a row it used to open: {why}"
     out = torch.full_like(q, float("nan"))
@@ -1397,6 +1419,8 @@ class TestDenseLseNumericGfx942:
             use_cfvst=True,
             lds_num_buffers=2,
         )
+        if persistent:
+            spec = _multi_item_persistent(spec)
         scale = 1.0 / math.sqrt(128)
         torch.manual_seed(7)
         q = torch.randn(1, sq, 8, 128, device="cuda", dtype=torch.bfloat16)
