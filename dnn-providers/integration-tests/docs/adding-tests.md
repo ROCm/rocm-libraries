@@ -51,6 +51,10 @@ This is the whole path, in order. Each step links to its details.
 
 1. **Get graph JSON.** Capture it from an existing C++ graph test. If the op
    has no test, first write a parameterized C++ graph test, then capture it.
+   To take a graph from any running application, set `HIPDNN_LOG_GRAPH_DIR` to
+   a directory. Each graph that is finalized is written there as
+   `graph_<id>.json`
+   ([details](../../../projects/hipdnn/docs/Environment.md#hipdnn_log_graph_dir)).
    See [A brand-new sweep](#a-brand-new-sweep).
 2. **Import it** with `import_graph.py`
    ([details](#from-a-graph-you-already-have)). This writes the graph, the case

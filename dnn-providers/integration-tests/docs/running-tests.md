@@ -217,14 +217,15 @@ Tiers limit how long a run takes. A bundle's tier is its top-level directory
 its GTest suite name. A C++ test's tier is its GTest instantiation prefix.
 
 The table shows what each CTest tier selects in the provider lanes. It applies
-to the miopen, hipblaslt and HIP_MLOPS files. The ASM_SDPA lane uses `*Sdpa*`
-for both comprehensive and full:
+to the miopen, hipblaslt and HIP_MLOPS files. The ASM_SDPA lane narrows the
+bundle patterns to `*Sdpa*`, uses `Smoke/*Sdpa*` as its only tier-prefixed C++
+pattern, and its `full` tier is `*Sdpa*`:
 
 | CTest label | Bundle suites | C++ tests | Other labels on the suite |
 |---|---|---|---|
 | `quick` | `quick_*` | `Smoke/*`, `Quick/*` | `pre-commit`, `smoke` |
 | `standard` | `quick_*`, `standard_*` | `Smoke/*`, `Quick/*`, `Standard/*` | `pr`, `precheckin` |
-| `comprehensive` | `quick_*`, `standard_*`, `comprehensive_*`, `full_*` (HIP_MLOPS excludes `full_Layernorm_*`) | the above, `Comprehensive/*`, and untiered `Integration*` | `nightly`, `extended` |
+| `comprehensive` | `quick_*`, `standard_*`, `comprehensive_*` (not `full_*`) | the above, `Comprehensive/*`, and untiered `Integration*` | `nightly`, `extended` |
 | `full` | everything (`*`) | everything | `all` |
 
 Each lane YAML also defines an `ffm-quick` category (labels `ffm-quick`,
@@ -251,7 +252,7 @@ the patterns of the lower tiers. CTest labels do not inherit:
 ```
 ctest -L quick           →  quick
 ctest -L standard        →  quick + standard
-ctest -L comprehensive   →  quick + standard + comprehensive + full bundles, plus untiered C++ tests
+ctest -L comprehensive   →  quick + standard + comprehensive bundles, plus untiered C++ tests (not full bundles)
 ctest -L full            →  everything
 ```
 

@@ -688,6 +688,7 @@ int main(int argc, char** argv) {
     }
 
     rppDestroy(handle, backend);
+    CHECK_RETURN_STATUS(hipStreamDestroy(stream));
 
     // Free device memory
     CHECK_RETURN_STATUS(hipFree(d_input));
