@@ -2546,6 +2546,12 @@ class VNop(Instruction):
     def getSrcParams(self):
         return [self.count]
 
+    def toString(self) -> str:
+        """Port of rocisa ``VNop::toString``: ``count`` copies of ``v_nop``."""
+        if self.count <= 0:
+            return ""
+        return "".join(self.formatWithComment(self.instStr) for _ in range(self.count))
+
     def to_stinky_logical(self, _module=None):
         import stinkytofu as _st
         if self.count <= 0:
@@ -3622,6 +3628,10 @@ class SSchedulingFence(Instruction):
 
     def getSrcParams(self):
         return []
+
+    def toString(self) -> str:
+        """Port of rocisa ``SSchedulingFence::toString`` (emits the inst name)."""
+        return self.formatWithComment(self.instStr)
 
     def to_stinky_logical(self, _module=None):
         import stinkytofu as st
@@ -5153,8 +5163,40 @@ def _mfma_cbsz_blgp(it: Any) -> str:
             InstType.INST_F4_F6: " cbsz:4 blgp:2",
             InstType.INST_B6_F4: " cbsz:3 blgp:4",
             InstType.INST_F4_B6: " cbsz:4 blgp:3",
+            InstType.INST_B8_F4: " cbsz:1 blgp:4",
+            InstType.INST_F4_B8: " cbsz:4 blgp:1",
         })
     return _MFMA_CBSZ_BLGP.get(it, "")
+
+
+def _mx_wmma_input_permute_str(inst) -> str:
+    """Port of rocisa ``MXMFMAInstruction::wmmaInputPermuteStr`` (mfma.hpp:764).
+
+    ``f4_t`` is the fixed 32 used by that function, not the WMMA-V3-gated
+    threshold in :func:`_wmma_matrix_fmts`.
+    """
+    _init_wmma_matrix_fmt()
+    m = inst.variant[0] if len(inst.variant) > 0 else 0
+    n = inst.variant[1] if len(inst.variant) > 1 else 0
+    k = inst.variant[2] if len(inst.variant) > 2 else 0
+    fa, fb = "", ""
+    if inst.instType == InstType.INST_F4:
+        if m < 32 and n < 32:
+            fa, fb = "MATRIX_FMT_FP4", "MATRIX_FMT_FP4"
+    elif inst.instType in _WMMA_MATRIX_FMT and k > 64:
+        fa, fb = _WMMA_MATRIX_FMT[inst.instType]
+    text = f" matrix_a_fmt:{fa} matrix_b_fmt:{fb}" if fa and fb else ""
+    # matrix_*_scale must precede matrix_*_scale_fmt; 0 emits nothing.
+    if inst.mxScaleASel:
+        text += f" matrix_a_scale:{inst.mxScaleASel}"
+    if inst.mxScaleBSel:
+        text += f" matrix_b_scale:{inst.mxScaleBSel}"
+    scale_fmt = {InstType.INST_E5M3: "1", InstType.INST_F8: "2"}
+    if inst.mxScaleAType in scale_fmt:
+        text += f" matrix_a_scale_fmt:{scale_fmt[inst.mxScaleAType]}"
+    if inst.mxScaleBType in scale_fmt:
+        text += f" matrix_b_scale_fmt:{scale_fmt[inst.mxScaleBType]}"
+    return text
 
 
 class MFMAInstruction(Instruction):
@@ -5431,6 +5473,44 @@ class MXMFMAInstruction(Instruction):
         type_str = "f8f6f4" if (m < f4_t and n < f4_t) else "f4"
         return f"v_wmma_scale{blk_str}_f32_{variant_str}_{type_str}"
 
+    def getArgStr(self) -> str:
+        """Port of rocisa ``MXMFMAInstruction::getArgStr`` (mfma.hpp:937).
+
+        ``setMsb`` is intentionally not applied, matching ``MFMAInstruction``:
+        the stinkytofu path injects ``s_set_vgpr_msb`` in ``InsertVgprMsbPass``.
+        """
+        from .base import getAsmCaps
+        caps = getAsmCaps()
+        acc2 = "0" if self.acc2 is None else _input_to_str(self.acc2)
+        reuse = ""
+        if self.reuseA:
+            reuse += " matrix_a_reuse"
+        if self.reuseB:
+            reuse += " matrix_b_reuse"
+        head = (", ".join((_input_to_str(self.acc), _input_to_str(self.a),
+                           _input_to_str(self.b), acc2)))
+        if bool(caps.get("HasMFMA", 0)):
+            mxsa = "" if self.mxsa is None else _input_to_str(self.mxsa)
+            mxsb = "" if self.mxsb is None else _input_to_str(self.mxsb)
+            result = f"{head}, {mxsa}, {mxsb}"
+            if self.vop3 is not None:
+                result += self.vop3.toString()
+            k = self.variant[2] if len(self.variant) > 2 else 0
+            if bool(caps.get("HasMFMA_f8f6f4", 0)) and k > 32:
+                result += _mfma_cbsz_blgp(self.instType)
+            if self.mxScaleASel:
+                result += f" matrix_a_scale:{self.mxScaleASel}"
+            if self.mxScaleBSel:
+                result += f" matrix_b_scale:{self.mxScaleBSel}"
+            return result + reuse
+        # Scale-select is inside the WMMA permute string so it precedes
+        # matrix_*_scale_fmt. Do not append it again here.
+        return (f"{head}, {_input_to_str(self.mxsa)}, {_input_to_str(self.mxsb)}"
+                + _mx_wmma_input_permute_str(self) + reuse)
+
+    def toString(self) -> str:
+        return self.formatWithComment(self.preStr() + " " + self.getArgStr())
+
     def to_stinky_logical(self) -> Any:
         import stinkytofu as _st
         from .base import getAsmCaps
@@ -5557,6 +5637,28 @@ class SMFMAInstruction(Instruction):
         self.b = b
         self.metadata = metadata
         self.neg = neg
+
+    def preStr(self) -> str:
+        """Port of rocisa ``SMFMAInstruction::preStr`` (mfma.hpp:1094)."""
+        if len(self.variant) != 4:
+            raise RuntimeError("Currently only support smfma and swmma variant 4")
+        from .base import getAsmCaps
+        name = "smfmac" if bool(getAsmCaps().get("HasSMFMA", 0)) else "swmmac"
+        m, n, k, blocks = self.variant
+        block_str = f"{blocks}ub_" if blocks > 1 else ""
+        return (f"v_{name}_{_smfma_type_convert(self.accType)}_{m}x{n}x{k}_"
+                f"{block_str}{_smfma_type_convert(self.instType)}")
+
+    def getArgStr(self) -> str:
+        """Port of rocisa ``SMFMAInstruction::getArgStr`` (mfma.hpp:1113)."""
+        neg = "" if not self.neg else " neg_lo:[1,1]"
+        return (", ".join((_input_to_str(self.acc), _input_to_str(self.a),
+                           _input_to_str(self.b), _input_to_str(self.metadata)))
+                + neg)
+
+    def toString(self) -> str:
+        # setMsb is omitted; InsertVgprMsbPass owns s_set_vgpr_msb.
+        return self.formatWithComment(self.preStr() + " " + self.getArgStr())
 
     def to_stinky_logical(self) -> Any:
         import stinkytofu as _st
