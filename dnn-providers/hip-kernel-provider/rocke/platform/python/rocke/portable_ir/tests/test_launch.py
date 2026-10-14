@@ -135,6 +135,75 @@ class TestSignature(unittest.TestCase):
         self.assertIn("f16", str(cm.exception))
 
 
+def int_list(*vals):
+    """A kernel list attr as rocke.core.ir_export._attrs_to_json writes it."""
+    return {"t": "l", "v": [{"_": {"t": "i", "v": v}} for v in vals]}
+
+
+def clustered(*dims, **kw):
+    r = toy(**kw)
+    r["attrs"] = dict(r.get("attrs") or {}, cluster_dims=int_list(*dims))
+    return r
+
+
+class TestCluster(unittest.TestCase):
+    def test_absent_cluster_is_none(self):
+        self.assertIsNone(launch.plan(toy(), {"D": 256}, {"dtype": "f32"})["cluster"])
+
+    def test_cluster_comes_from_the_kernel_attr(self):
+        p = launch.plan(clustered(2, 1, 1), {"D": 256}, {"dtype": "f32"})
+        self.assertEqual(p["geometry"]["grid"], (4, 1, 1))
+        self.assertEqual(p["cluster"], (2, 1, 1))
+
+    def test_attr_matches_what_the_exporter_writes(self):
+        """The recipe form must be the one kerneldef_to_recipe produces, or a
+        recorded clustered kernel would silently plan as unclustered."""
+        from rocke.core.ir_export import _attrs_to_json
+
+        self.assertEqual(
+            _attrs_to_json({"cluster_dims": (2, 1, 1)})["cluster_dims"],
+            int_list(2, 1, 1),
+        )
+
+    def test_bad_shape_is_refused(self):
+        r = toy()
+        r["attrs"] = {"cluster_dims": int_list(2, 1)}
+        with self.assertRaises(ExpandError) as cm:
+            launch.eval_cluster(r)
+        self.assertIn("three integers", str(cm.exception))
+        r["attrs"] = {"cluster_dims": {"t": "i", "v": 2}}
+        with self.assertRaises(ExpandError):
+            launch.eval_cluster(r)
+
+    def test_out_of_range_dimension_is_refused(self):
+        for dims in ((0, 1, 1), (16, 1, 1)):
+            with self.assertRaises(ExpandError) as cm:
+                launch.eval_cluster(clustered(*dims))
+            self.assertIn("1..15", str(cm.exception))
+
+    def test_oversized_cluster_is_refused(self):
+        with self.assertRaises(ExpandError) as cm:
+            launch.eval_cluster(clustered(4, 4, 2))
+        self.assertIn("limit of 16", str(cm.exception))
+
+    def test_grid_must_be_whole_clusters(self):
+        """ceil(65/64) = 2 workgroups is fine for a cluster of 2; 3 is not."""
+        r = clustered(2, 1, 1)
+        self.assertEqual(
+            launch.plan(r, {"D": 65}, {"dtype": "f32"})["cluster"], (2, 1, 1)
+        )
+        with self.assertRaises(ExpandError) as cm:
+            launch.plan(r, {"D": 129}, {"dtype": "f32"})
+        self.assertIn("not a multiple of cluster (2, 1, 1) in x", str(cm.exception))
+
+    def test_cluster_without_geometry_is_not_checked_against_a_grid(self):
+        r = recipe_toy.make_recipe()
+        r["attrs"] = dict(r.get("attrs") or {}, cluster_dims=int_list(2, 1, 1))
+        p = launch.plan(r, {"D": 4}, {"dtype": "f32"})
+        self.assertIsNone(p["geometry"])
+        self.assertEqual(p["cluster"], (2, 1, 1))
+
+
 def _online_lib():
     for cand in (
         os.environ.get("ROCKE_ONLINE_LIB"),
@@ -232,6 +301,32 @@ class TestCEngineAgrees(unittest.TestCase):
         with self.assertRaises(RuntimeError) as cm:
             self.online.plan_launch(blob, ints={"D": 64}, strs={"dtype": "f32"})
         self.assertIn("guard", str(cm.exception).lower())
+
+    def test_cluster_plans_match(self):
+        r = clustered(2, 1, 1)
+        for d in (65, 256, 4096):
+            si, ss = {"D": d}, {"dtype": "f32"}
+            c = self.online.plan_launch(cbor_encode(r), ints=si, strs=ss)
+            self.assertEqual(c["cluster"], (2, 1, 1))
+            self.assertEqual(c, launch.plan(r, si, ss), f"engines disagree at D={d}")
+        c = self.online.plan_launch(
+            cbor_encode(toy()), ints={"D": 256}, strs={"dtype": "f32"}
+        )
+        self.assertIsNone(c["cluster"])
+
+    def test_partial_cluster_refused_by_c_too(self):
+        with self.assertRaises(RuntimeError) as cm:
+            self.online.plan_launch(
+                cbor_encode(clustered(2, 1, 1)), ints={"D": 129}, strs={"dtype": "f32"}
+            )
+        self.assertIn("not a multiple of cluster (2, 1, 1) in x", str(cm.exception))
+
+    def test_oversized_cluster_refused_by_c_too(self):
+        with self.assertRaises(RuntimeError) as cm:
+            self.online.plan_launch(
+                cbor_encode(clustered(4, 4, 2)), ints={"D": 256}, strs={"dtype": "f32"}
+            )
+        self.assertIn("limit of 16", str(cm.exception))
 
 
 if __name__ == "__main__":

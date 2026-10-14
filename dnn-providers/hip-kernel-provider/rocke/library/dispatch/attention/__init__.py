@@ -43,6 +43,7 @@ from . import (
     gfx950_dense,
     gfx950_unified,
     gfx1250,
+    strided_decode,
 )
 from .candidate import (
     DENSE_ALGORITHM,
@@ -79,6 +80,7 @@ ATTENTION_EXECUTION_REGISTRY = CandidateRegistry(
     require_torch_binding=True,
 )
 for _module in (
+    strided_decode,
     generic,
     gfx942_dense,
     gfx942_unified,
