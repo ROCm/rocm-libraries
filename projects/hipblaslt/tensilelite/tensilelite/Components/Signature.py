@@ -165,6 +165,21 @@ def getSrcValueType(kernel, isTypeA):
     return srcValueType
 
 
+def addOccupancyProbeArgs(writer, signature, commonArgsSize):
+    """Append the CU-occupancy probe tail args.
+
+    ProbeAddr is 8-byte aligned (the host pads with appendAligned); ProbeEpoch
+    and ProbeGrid (the real grid) follow at +8 and +12. probeKernArgOffset is
+    relative to KernArgAddress shifted past the common args.
+    """
+    if signature.offset % 8:
+        signature.addArg("ProbePad", SVK.SIG_VALUE, "u32")
+    writer.states.probeKernArgOffset = signature.offset - commonArgsSize
+    signature.addArg("ProbeAddr",  SVK.SIG_GLOBALBUFFER, "void", "generic")
+    signature.addArg("ProbeEpoch", SVK.SIG_VALUE,        "u32")
+    signature.addArg("ProbeGrid",  SVK.SIG_VALUE,        "u32")
+
+
 # Creates kernel header, compatible with code object version 4 and up. V2 and V3 no longer supported.
 class SignatureDefault(Signature):
 
@@ -482,6 +497,9 @@ class SignatureDefault(Signature):
             # onto the shifted address. Absolute offset of arg X, relative to
             # that base = fusedA2AKernArgBase + fusedA2AKernArgLayout()[X].
             writer.states.fusedA2AKernArgBase = fusedBase - userArgumentsInfo.commonArgsSize
+
+        if kernel["InternalSupportParams"].get("SupportOccupancyProbe", False):
+            addOccupancyProbeArgs(writer, signature, userArgumentsInfo.commonArgsSize)
 
         activationType = ActivationType("all")
         for name in activationType.getAdditionalArgStringList():
