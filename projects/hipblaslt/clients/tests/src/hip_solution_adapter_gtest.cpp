@@ -10,6 +10,19 @@
 #include <string>
 #include <utility>
 
+#ifdef TENSILELITE_ENABLE_USER_KERNELS
+#include <unistd.h>
+
+#include <atomic>
+#include <chrono>
+#include <cstdint>
+#include <filesystem>
+#include <fstream>
+#include <stdexcept>
+#include <thread>
+#include <vector>
+#endif
+
 namespace
 {
     constexpr char primary[] = "/library/primary.co";
@@ -224,6 +237,156 @@ namespace
         EXPECT_EQ(loads.unloads, 4u);
         EXPECT_EQ(loads.live.size(), 2u);
     }
+
+#ifdef TENSILELITE_ENABLE_USER_KERNELS
+    using TensileLite::hip::SolutionAdapter;
+
+    constexpr char user[] = "/payload/user.co";
+
+    // A user code object that does not load (built for another architecture,
+    // say) is caller input, not memory pressure: the shipped modules stay.
+    TEST_P(HipSolutionAdapterRecoveryTest, smoke_UserCodeObjectFailureDoesNotEnterRecovery)
+    {
+        expectLoad(helper);
+        ASSERT_EQ(adapter->initializeLazyLoading("gfx942", "/library"), hipSuccess);
+        expectLoad(primary);
+        ASSERT_EQ(adapter->loadCodeObjectFile(primary), hipSuccess);
+        expectLoad(user, GetParam());
+        EXPECT_EQ(adapter->loadUserCodeObject(user), GetParam());
+        EXPECT_EQ(loads.unloads, 0u);
+        EXPECT_EQ(loads.live.size(), 2u);
+        EXPECT_EQ(adapter->userCodeObjectCount(), 0u);
+        EXPECT_TRUE(adapter->FindCodeObject("primary.co")) << "the shipped module is still loaded";
+    }
+
+    TEST_F(HipSolutionAdapterTest, smoke_UserCodeObjectLoadsOncePerPath)
+    {
+        expectLoad(user);
+        ASSERT_EQ(adapter->loadUserCodeObject(user), hipSuccess);
+        EXPECT_EQ(adapter->loadUserCodeObject(user), hipSuccess);
+        EXPECT_TRUE(adapter->FindCodeObject(user));
+        EXPECT_EQ(adapter->userCodeObjectCount(), 1u);
+    }
+
+    // What a device that did not register a payload does the first time it
+    // runs one of its kernels.
+    TEST_F(HipSolutionAdapterTest, smoke_FindCodeObjectLoadsUserCodeObjectOnFirstUse)
+    {
+        expectLoad(user);
+        EXPECT_FALSE(adapter->FindCodeObject(user));
+        EXPECT_TRUE(adapter->FindCodeObject(user));
+        EXPECT_EQ(adapter->userCodeObjectCount(), 1u);
+    }
+
+    TEST_F(HipSolutionAdapterTest, smoke_FailedUserCodeObjectIsRetried)
+    {
+        expectLoad(user, hipErrorNoBinaryForGpu);
+        EXPECT_FALSE(adapter->FindCodeObject(user));
+        expectLoad(user);
+        EXPECT_FALSE(adapter->FindCodeObject(user));
+        EXPECT_EQ(adapter->userCodeObjectCount(), 1u);
+    }
+
+    TEST_F(HipSolutionAdapterTest, smoke_OnlyAbsolutePathsAreUserCodeObjects)
+    {
+        EXPECT_TRUE(SolutionAdapter::isUserCodeObject(user));
+        EXPECT_FALSE(SolutionAdapter::isUserCodeObject("primary.co"));
+        EXPECT_FALSE(SolutionAdapter::isUserCodeObject("payload/user.co"));
+        EXPECT_FALSE(SolutionAdapter::isUserCodeObject(""));
+    }
+
+    // hipModuleLoad can crash inside the runtime on such a file.
+    TEST_F(HipSolutionAdapterTest, smoke_TruncatedUserCodeObjectIsNotLoaded)
+    {
+        auto path = std::filesystem::temp_directory_path()
+                    / ("hipblaslt-truncated-" + std::to_string(getpid()) + ".co");
+
+        // An ELF64 header whose section table lies past the end of the file.
+        std::vector<unsigned char> elf(64, 0);
+        elf[0]    = 0x7f;
+        elf[1]    = 'E';
+        elf[2]    = 'L';
+        elf[3]    = 'F';
+        elf[4]    = 2;
+        elf[5]    = 1;
+        elf[0x29] = 0x10; // e_shoff = 4096
+        elf[0x3A] = 64; // e_shentsize
+        elf[0x3C] = 4; // e_shnum
+
+        // A compressed offload bundle, the shipped format, that records a
+        // larger size than the file has.
+        std::vector<unsigned char> ccob(64, 0);
+        ccob[0] = 'C';
+        ccob[1] = 'C';
+        ccob[2] = 'O';
+        ccob[3] = 'B';
+        ccob[4] = 3; // version
+        ccob[6] = 1; // method
+        ccob[9] = 0x10; // total size = 4096
+
+        for(auto const* bytes : {&elf, &ccob})
+        {
+            std::ofstream(path, std::ios::binary)
+                .write(reinterpret_cast<char const*>(bytes->data()), bytes->size());
+            EXPECT_EQ(adapter->loadUserCodeObject(path.string()), hipErrorInvalidImage);
+            EXPECT_EQ(adapter->userCodeObjectCount(), 0u);
+        }
+        std::filesystem::remove(path);
+    }
+
+    std::atomic<int> userLoads{0};
+    std::atomic<int> userUnloads{0};
+
+    hipError_t slowUserLoad(hipModule_t* module, const char*)
+    {
+        int n = ++userLoads;
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        *module = reinterpret_cast<hipModule_t>(static_cast<uintptr_t>(n));
+        return hipSuccess;
+    }
+
+    hipError_t throwingUserLoad(hipModule_t*, const char*)
+    {
+        throw std::length_error("basic_string::_M_create");
+    }
+
+    hipError_t countUserUnload(hipModule_t)
+    {
+        ++userUnloads;
+        return hipSuccess;
+    }
+
+    hipError_t noLastError()
+    {
+        return hipSuccess;
+    }
+
+    TEST(HipSolutionAdapterUserCodeObject, smoke_ConcurrentFirstUseLoadsOnce)
+    {
+        userLoads   = 0;
+        userUnloads = 0;
+        {
+            SolutionAdapter adapter(
+                SolutionAdapter::ModuleApi{slowUserLoad, countUserUnload, noLastError});
+            std::vector<std::thread> threads;
+            for(int i = 0; i < 8; i++)
+                threads.emplace_back([&]() { adapter.FindCodeObject(user); });
+            for(auto& thread : threads)
+                thread.join();
+            EXPECT_EQ(userLoads.load(), 1);
+            EXPECT_EQ(adapter.userCodeObjectCount(), 1u);
+        }
+        EXPECT_EQ(userUnloads.load(), 1) << "the adapter unloads the user module";
+    }
+
+    TEST(HipSolutionAdapterUserCodeObject, smoke_LoadThatThrowsIsAnError)
+    {
+        SolutionAdapter adapter(
+            SolutionAdapter::ModuleApi{throwingUserLoad, countUserUnload, noLastError});
+        EXPECT_EQ(adapter.loadUserCodeObject(user), hipErrorInvalidImage);
+        EXPECT_EQ(adapter.userCodeObjectCount(), 0u);
+    }
+#endif
 
     INSTANTIATE_TEST_SUITE_P(RecoverableErrors,
                              HipSolutionAdapterRecoveryTest,
