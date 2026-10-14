@@ -172,7 +172,7 @@ __device__ void run_syevj(const rocblas_int dimx,
 
     // -----------------------------------------------------------------------------
     // this read of cosines_res[]/sines_diag[] must complete before the first
-    // sweep overwrites them with the rotation (c,s1). Without it tolerance is not
+    // sweep overwrites them with the rotation (c,s1). Without it the tolerance is not
     // workgroup-uniform, so the loop may run a different number of barriers per wave
     // -----------------------------------------------------------------------------
     __syncthreads();
