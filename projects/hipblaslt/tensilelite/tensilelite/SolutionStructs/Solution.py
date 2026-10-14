@@ -4426,6 +4426,9 @@ class Solution(collections.abc.Mapping):
                                             tdmNumComponents=tdmNumComponents)
               else:
                 LdsBlockSizePerPad = 0
+          elif state["ProblemType"]["DataType"].isDoubleComplex() and state["TDMInst"] and state["UnrollMajorLDS%s"%tc]:
+            # f64c+TDM K-major: pad once per K-row (the VALU reader's row stride is _DepthU+LdsPad).
+            LdsBlockSizePerPad = int(state["_DepthU%s"%tc] * tmpBpe)
           else:
             LdsBlockSizePerPad = 0
 
@@ -5661,7 +5664,15 @@ class Solution(collections.abc.Mapping):
          and not (state["ProblemType"]["DataType"].isDoubleComplex() and state["TDMInst"]) \
          and (state["UnrollMajorLDSA"] or state["UnrollMajorLDSB"]):
         reject(state, printRejectionReason, "didn't support UnrollMajorLDS in VALU mode yet (except for dot2 kernel)")
-      if state["LdsBlockSizePerPadA"] != 0 or state["LdsBlockSizePerPadB"] != 0:
+      if state["ProblemType"]["DataType"].isDoubleComplex() and state["TDMInst"]:
+        # f64c+TDM: the K-major reader pads once per K-row, so the TDM pad_interval must be
+        # exactly one row (_DepthU * bpe); the free-major (native VALU) reader is unpadded.
+        for tc in ("A", "B"):
+          blk = state["LdsBlockSizePerPad%s" % tc]
+          rowBytes = int(state["_DepthU%s" % tc] * state["ProblemType"]["DataType"].numBytes())
+          if blk != 0 and (not state["UnrollMajorLDS%s" % tc] or blk != rowBytes):
+            reject(state, printRejectionReason, "f64c TDM: LdsBlockSizePerPad%s must be 0 or one K-row (%u) on a K-major operand" % (tc, rowBytes))
+      elif state["LdsBlockSizePerPadA"] != 0 or state["LdsBlockSizePerPadB"] != 0:
         reject(state, printRejectionReason, "didn't support LdsBlockSizePerPad in VALU mode yet")
 
     def checkLdsBlockSizePerPad(tc):

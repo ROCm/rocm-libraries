@@ -59,8 +59,8 @@ class LraTileAssignmentVALU(LraTileAssignment):
         # dot2: currently only support unroll major LDS
         tc               = tP["tensorChar"]
         umlds            = kernel["UnrollMajorLDS%s" % tc]
-        LdsPad           = kernel["LdsPad%s" % tc] if kernel["LdsBlockSizePerPad%s" % tc] == 0 else 0
-        strideTile       = kernel["_DepthU%s"%tc] + LdsPad if umlds else 1
+        # LdsBlockSizePerPad is 0 or (f64c+TDM) exactly one K-row, so the pad is per row either way.
+        strideTile       = kernel["_DepthU%s"%tc] + kernel["LdsPad%s" % tc] if umlds else 1
         tmpVgpr          = writer.vgprPool.checkOutAligned(2,2, tag="LraTileAssignmentVALU_tmpVgpr")
         tmpVgprRes       = ContinuousRegister(tmpVgpr, 2)
 

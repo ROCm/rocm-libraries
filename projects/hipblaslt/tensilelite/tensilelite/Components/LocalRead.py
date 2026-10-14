@@ -72,8 +72,8 @@ class LocalReadVALU(LocalRead):
             numVectorsPerTile = (kernel["ThreadTile%u"%tile01]//kernel["VectorWidthA"])
             numReadsPerVector = ceil((kernel["VectorWidthA"] * tP["bpe"]) / (blockWidth*4)) # bytes/register
             if umldsVALU:
-                LdsPad     = kernel["LdsPad%s"%tc] if kernel["LdsBlockSizePerPad%s"%tc] == 0 else 0
-                tileStride = kernel["_DepthU%s"%tc] + LdsPad
+                # LdsBlockSizePerPad is 0 or exactly one K-row here, so the pad is per row either way.
+                tileStride = kernel["_DepthU%s"%tc] + kernel["LdsPad%s"%tc]
 
         for vIdx in range(0, numVectorsPerTile):
             for rIdx in range(0, int(numReadsPerVector)):

@@ -6423,8 +6423,8 @@ class KernelWriterAssembly(KernelWriter):
       # release resources
       self.vgprPool.checkIn(tP["gpr"]["lro"])
 
-      # LdsBlockSizePerPad: add padding
-      if kernel["LdsBlockSizePerPad%s"%tc] != 0 and kernel["LdsPad%s"%tc] !=0:
+      # LdsBlockSizePerPad: add padding (f64c+TDM K-major: the per-row pad is already in lro)
+      if kernel["LdsBlockSizePerPad%s"%tc] != 0 and kernel["LdsPad%s"%tc] !=0 and not umldsVALU:
         with self.allocTmpSgpr(1, tag="lraFinalOffset_tmpSgprInfo4") as tmpSgprInfo:
           tmpSgpr = tmpSgprInfo.idx
           rReg    = self.vgprPool.checkOut(1, tag="lraFinalOffset_rReg") # remainder, unused here
