@@ -1046,8 +1046,8 @@ def _apply_modifiers(item: Any, logical: Any) -> Any:
         _apply_global(logical, getattr(item, "_modifier", None))
     if "global_modifiers" in mods:
         _apply_global(logical, getattr(item, "_modifiers", None))
-    if "global_scope" in mods:
-        logical.set_global(scope=int(item.scope))
+    if "cache_scope" in mods:
+        logical.set_cache_scope(scope=int(item.scope))
     if "mubuf" in mods:
         _apply_mubuf(logical, item)
     if "smem" in mods:
@@ -1288,7 +1288,7 @@ def _make_scoped_no_operand_class(class_name: str, mnemonic: str):
     })
     cls.__qualname__ = class_name
     cls.__module__ = __name__
-    cls._stinky_mods = ("global_scope",)
+    cls._stinky_mods = ("cache_scope",)
     return cls
 
 
