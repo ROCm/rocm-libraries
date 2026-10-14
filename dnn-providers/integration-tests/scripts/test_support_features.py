@@ -1452,18 +1452,40 @@ def _conv(
     dtypes: dict[str, str] | None = None,
     virtual: tuple[str, ...] = (),
     conv_mode: str | None = "CROSS_CORRELATION",
+    kernel: int = 3,
     **params,
 ) -> tuple[dict, dict]:
     """A conv node: activation on uid 1, filter on uid 2, response on uid 3.
 
     ``layouts`` / ``dtypes`` override ``layout`` / ``dtype`` per role;
     ``virtual`` lists the roles whose tensor is virtual. Parameters default to
-    no padding, unit stride and unit dilation.
+    no padding, unit stride and unit dilation; the response's spatial dims
+    are those the API computes from them.
     """
+    zeros, ones = [0] * len(spatial), [1] * len(spatial)
+    parameters = {
+        "conv_mode": conv_mode,
+        "pre_padding": zeros,
+        "post_padding": zeros,
+        "stride": ones,
+        "dilation": ones,
+    } | params
+    try:
+        response = [
+            (size + pre + post - (dil * (kernel - 1) + 1)) // step + 1
+            for size, pre, post, step, dil in zip(
+                spatial,
+                *(parameters[name] for name in convolution.PARAMETERS),
+                strict=True,
+            )
+        ]
+    except (TypeError, ValueError, ZeroDivisionError):
+        # Parameters a test makes invalid: they raise before the response.
+        response = list(spatial)
     dims = {
         "activation": [2, channels, *spatial],
-        "filter": [filters, channels // groups, *(3 for _ in spatial)],
-        "response": [2, filters, *spatial],
+        "filter": [filters, channels // groups, *(kernel for _ in spatial)],
+        "response": [2, filters, *response],
     }
     layouts = {role: layout for role in dims} | (layouts or {})
     dtypes = {role: dtype for role in dims} | (dtypes or {})
@@ -1479,14 +1501,6 @@ def _conv(
     }
     ports, output = _CONV_BINDING[module]
     inputs = {getattr(ports, r): uid for uid, r in enumerate(dims, 1) if r != output}
-    zeros, ones = [0] * len(spatial), [1] * len(spatial)
-    parameters = {
-        "conv_mode": conv_mode,
-        "pre_padding": zeros,
-        "post_padding": zeros,
-        "stride": ones,
-        "dilation": ones,
-    } | params
     node = {
         "type": module.NODE_TYPE,
         "inputs": inputs,
@@ -1637,7 +1651,7 @@ class TestConvolutionFwdExtract:
         assert "layout:nchw" in features
 
     def test_no_tensor_that_tells_adds_no_layout(self) -> None:
-        features = self._extract(channels=1, filters=1, spatial=(1, 1))
+        features = self._extract(channels=1, filters=1, spatial=(1, 1), kernel=1)
         assert not {f for f in features if f.startswith("layout:")}
 
     def test_disagreeing_layouts_raise(self) -> None:
@@ -1754,6 +1768,59 @@ class TestConvolutionFwdExtract:
         tensors[2]["dims"].append(3)
         tensors[2]["strides"].append(1)
         with pytest.raises(FeatureError, match="ranks differ"):
+            convolution_fwd.extract(node, tensors)
+
+    @pytest.mark.parametrize(
+        "spatial, kernel, params, response",
+        [
+            # (8 - 3) // 1 + 1.
+            ((8, 8), 3, {}, [6, 6]),
+            # (8 + 1 + 1 - 3) // 2 + 1: the last window is cut off.
+            (
+                (8, 8),
+                3,
+                {"pre_padding": [1, 1], "post_padding": [1, 1], "stride": [2, 2]},
+                [4, 4],
+            ),
+            # A 3-tap filter dilated by 2 spans 5: (8 - 5) // 1 + 1.
+            ((8, 8), 3, {"dilation": [2, 1]}, [4, 6]),
+            # A filter the size of the activation: one output.
+            ((3, 3), 3, {}, [1, 1]),
+            ((5,), 1, {"stride": [2]}, [3]),
+        ],
+    )
+    def test_response_dims_follow_the_api(
+        self, spatial, kernel: int, params: dict, response: list[int]
+    ) -> None:
+        node, tensors = _conv(spatial=spatial, kernel=kernel, **params)
+        assert tensors[3]["dims"][2:] == response
+        assert convolution_fwd.extract(node, tensors)
+
+    @pytest.mark.parametrize(
+        "role, index, value, match",
+        [
+            ("response", 0, 3, "not batch 2 by 8 filters"),
+            ("response", 1, 4, "not batch 2 by 8 filters"),
+            ("response", 2, 7, "in spatial dim 0"),
+            ("response", 3, 5, "in spatial dim 1"),
+            # The activation's batch, not the response's, is the one that
+            # disagrees: the check is symmetric.
+            ("activation", 0, 3, "not batch 3 by 8 filters"),
+        ],
+    )
+    def test_response_dims_that_do_not_follow_raise(
+        self, role: str, index: int, value: int, match: str
+    ) -> None:
+        node, tensors = _conv()
+        uid = {"activation": 1, "filter": 2, "response": 3}[role]
+        tensors[uid]["dims"][index] = value
+        with pytest.raises(FeatureError, match=match):
+            convolution_fwd.extract(node, tensors)
+
+    def test_a_filter_wider_than_the_padded_activation_raises(self) -> None:
+        # A 5-tap filter over 3 + 1 padding: no window fits.
+        node, tensors = _conv(spatial=(3, 3), kernel=5, pre_padding=[1, 1])
+        with pytest.raises(FeatureError, match="in spatial dim 0"):
             convolution_fwd.extract(node, tensors)
 
     @pytest.mark.parametrize("spatial, n", [((), 0), ((2, 2, 2, 2), 4)])

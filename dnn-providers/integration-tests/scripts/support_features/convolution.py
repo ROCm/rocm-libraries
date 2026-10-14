@@ -33,9 +33,16 @@ shape roles: the activation (fwd ``x``, bwd ``dx``, wrw ``x``), the filter
 Filter size (1x1 or not) is not a feature: it is a provider specialization,
 not something the API distinguishes.
 
-A graph the API would reject -- parameter lists of the wrong length, channels
-that do not divide into groups, ``conv_mode`` ``UNSET`` -- raises rather than
-counting.
+A graph the API would reject raises rather than counting. The frontend nodes'
+``pre_validate_node`` (``Convolution{Fprop,Dgrad,Wgrad}Node.hpp``) require
+one rank for the three tensors; parameter lists of one entry per spatial dim,
+padding at least 0 and stride and dilation at least 1; activation channels
+that divide into groups of the filter's channels, and filters that divide
+into those groups; a response of the activation's batch and of one channel
+per filter; and, in each spatial dim, ``response = (activation + pre + post
+- (dilation * (filter - 1) + 1)) // stride + 1``, the dilated filter fitting
+the padded activation. ``conv_mode`` ``NOT_SET`` raises too: the backend has
+no mode for it.
 """
 
 from __future__ import annotations
@@ -127,6 +134,25 @@ def tensor_layouts(tensor: dict) -> set[str]:
     return fits
 
 
+def check_response(
+    act: list[int], flt: list[int], resp: list[int], params: dict
+) -> None:
+    """Raise unless ``resp`` is the response the API computes for ``act``
+    through ``flt``."""
+    if resp[0] != act[0] or resp[1] != flt[0]:
+        raise FeatureError(
+            f"response dims {resp} are not batch {act[0]} by {flt[0]} filters"
+        )
+    for i in range(len(act) - 2):
+        dilated = params["dilation"][i] * (flt[i + 2] - 1) + 1
+        span = act[i + 2] + params["pre_padding"][i] + params["post_padding"][i]
+        if span < dilated or resp[i + 2] != (span - dilated) // params["stride"][i] + 1:
+            raise FeatureError(
+                f"response dims {resp} do not follow from activation {act}, "
+                f"filter {flt} and the parameters in spatial dim {i}"
+            )
+
+
 def features(node: dict, tensors_by_uid: dict, ports: Ports) -> set[str]:
     # The serializers write the ports under "inputs" / "outputs" and the rest
     # under "parameters" (utilities/json/Convolution*Attributes.hpp).
@@ -180,6 +206,7 @@ def features(node: dict, tensors_by_uid: dict, ports: Ports) -> set[str]:
     groups = channels // per_group
     if w["dims"][0] % groups:
         raise FeatureError(f"{w['dims'][0]} filters do not split into {groups} groups")
+    check_response(x["dims"], w["dims"], y["dims"], params)
 
     features = {f"dtype:{dtype}", RANKS[spatial], mode}
     if len(seen) > 1:
