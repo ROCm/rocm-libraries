@@ -5,6 +5,8 @@
 configs, the five pre-mint loader-mirroring checks, deprecated- and duplicate-key
 rejection, and the kernel_source_kind rejections."""
 
+import copy
+
 import pytest
 import yaml
 
@@ -2807,3 +2809,60 @@ class TestHsacoKernelSource:
         }
         with pytest.raises(ConfigError, match="compiled specialization"):
             self._load(tmp_path, raw)
+
+
+class TestReductionBlockAndDefaultMarker:
+    REDUCTION = {
+        "fields": {
+            "feature": ["dtype"],
+            "performance": [{"name": "block_m", "divides": "seqlen_q"}],
+            "ignored": ["lds_k_row_pad"],
+        },
+        "aot_budget_per_arch": 1000,
+    }
+
+    def _load(self, tmp_path, reduction=REDUCTION, marker=True):
+        raw = TestExpandedKernelsAreKeyChecked()._variants_raw()
+        raw["reduction"] = copy.deepcopy(reduction)
+        raw["packs"][0]["variants"][0]["knob_sets"]["pinned"] = [
+            {"block_m": 256, "tag": "a", "default": marker},
+            {"block_m": 128, "tag": "b"},
+        ]
+        path = tmp_path / "c.yaml"
+        path.write_text(yaml.dump(raw))
+        return load_config(path)
+
+    def test_both_are_carried_and_neither_reaches_the_spec(self, tmp_path):
+        config = self._load(tmp_path)
+        assert config.reduction == self.REDUCTION
+        kernels = config.packs[0].kernels
+        assert [k.default for k in kernels] == [True, False]
+        assert all("default" not in k.kernel_source.spec for k in kernels)
+
+    @pytest.mark.parametrize(
+        "reduction, marker, message",
+        [
+            (REDUCTION, "yes", "'default' must be true or false"),
+            ({**REDUCTION, "budget": 1}, True, r"'reduction' declares \['budget'\]"),
+            (
+                {"fields": {**REDUCTION["fields"], "ignored": ["block_m"]}},
+                True,
+                r"lists \['block_m'\] more than once",
+            ),
+            (
+                {
+                    "fields": {
+                        "performance": [{"name": "x", "unset_resolves_by": "a b"}]
+                    }
+                },
+                True,
+                "not an identifier",
+            ),
+            ({**REDUCTION, "aot_budget_per_arch": True}, True, "positive integer"),
+        ],
+    )
+    def test_a_bad_marker_or_block_is_refused(
+        self, tmp_path, reduction, marker, message
+    ):
+        with pytest.raises(ConfigError, match=message):
+            self._load(tmp_path, reduction, marker)

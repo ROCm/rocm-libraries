@@ -6,12 +6,32 @@
 
 import argparse
 import sys
+from collections import Counter
 from pathlib import Path
 
 import yaml
 
-from codegen.config_loader import ConfigError, load_config
+from codegen.config_loader import DEFAULT_AOT_BUDGET_PER_ARCH, ConfigError, load_config
 from codegen.generator import IngestorGenerator
+
+
+def warn_over_budget(config) -> None:
+    """WARN on stderr for each pack arch over ``reduction.aot_budget_per_arch``
+    (default `DEFAULT_AOT_BUDGET_PER_ARCH`) kernels."""
+    budget = config.reduction.get("aot_budget_per_arch", DEFAULT_AOT_BUDGET_PER_ARCH)
+    for pack in config.packs:
+        per_arch = Counter(
+            arch
+            for kernel in pack.kernels
+            for arch in (kernel.arch or pack.arch or ["every arch"])
+        )
+        for arch, count in per_arch.items():
+            if count > budget:
+                print(
+                    f"WARN: {count} instances for {arch} exceed the AOT budget "
+                    f"{budget} (red flag)",
+                    file=sys.stderr,
+                )
 
 
 def main() -> None:
@@ -82,6 +102,8 @@ def main() -> None:
     except (ConfigError, yaml.YAMLError) as e:
         print(f"Config error: {e}", file=sys.stderr)
         sys.exit(1)
+
+    warn_over_budget(config)
 
     print(f"Loaded config for engine: {config.engine.name}")
     print(f"  Packs: {[p.name for p in config.packs]}")

@@ -11,6 +11,7 @@ every id. So the ids are masked, and everything they point at is compared
 instead.
 
     catalog_diff.py --shipped <a.kdp.json> --regenerated <b.kdp.json> [--ignore-ids]
+                    [--strict-spec | --subset]
 
 The two halves are compared by different rules, because they are produced by
 different things (see the generator's own split: only ``packs[].kernels`` comes
@@ -25,6 +26,9 @@ from the dispatcher):
     byte-equal, since a symbol is the entire contract with the native pack.
 
 Exit 0 on no differences, 1 on any difference (with a report), 2 on bad usage.
+
+``--subset`` requires only shipped ⊆ regenerated: kernels only the regenerated
+catalog holds are listed as registry extras, not differences.
 
 What a pass does NOT establish: that the regenerated bundle is CORRECT, only
 that it is the same catalog. A profile that is wrong in the same way twice
@@ -121,8 +125,8 @@ def compare_catalog(
 
     The caller owns the claim that fields the shipped catalog does not carry
     sit at their defaults (``test_registry_regeneration`` asserts it against
-    the spec dataclass). ``strict_spec=True`` compares the FULL spec of the two
-    catalogs both ways, so any field only one side carries is a difference.
+    the spec dataclass). ``strict_spec=True`` compares the FULL spec both ways
+    instead, so any regenerated-only field is a difference.
     """
     spec_keys: frozenset | None = None
     if not strict_spec:
@@ -159,6 +163,35 @@ def compare_catalog(
     if len(added) > 20:
         problems.append(f"  ... and {len(added) - 20} more regenerated-only entries")
     return problems
+
+
+def compare_subset(shipped: dict, regenerated: dict) -> tuple[list[str], list[str]]:
+    """(shipped entries the regenerated catalog lacks, regenerated-only names)."""
+    spec_keys = frozenset().union(
+        *(
+            (e.get("kernel_source", {}).get("spec") or {}).keys()
+            for e in shipped["kernelDescriptors"]
+        )
+    )
+    left = collections.Counter(
+        entry_key(e, spec_keys) for e in shipped["kernelDescriptors"]
+    )
+    right = collections.Counter(
+        entry_key(e, spec_keys) for e in regenerated["kernelDescriptors"]
+    )
+    missing = left - right
+    problems = [
+        f"  only in shipped    (x{count}): {key[0]}"
+        for key, count in sorted(missing.items())[:20]
+    ]
+    if len(missing) > 20:
+        problems.append(f"  ... and {len(missing) - 20} more shipped-only entries")
+    extras = [
+        str(key[0])
+        for key, count in sorted((right - left).items())
+        for _ in range(count)
+    ]
+    return problems, extras
 
 
 def find_duplicate_specs(kdp: dict) -> list[str]:
@@ -397,12 +430,9 @@ def main(argv=None) -> int:
         "--strict-spec",
         action="store_true",
         help="compare the FULL kernel_source.spec both ways, so a field only "
-        "one catalog carries is a difference. By default only the fields the "
-        "shipped catalog carries are compared (a dropped or changed shipped "
-        "field is always reported). It sees only what the regenerated catalog "
-        "holds: a generator config built with the manifest's enumerate."
-        "spec_fields projects the spec to those fields, so the comparison is "
-        "full-spec only once the shipped catalog carries the full spec.",
+        "the regenerated catalog carries is a difference. By default only the "
+        "fields the shipped catalog carries are compared (a dropped or changed "
+        "shipped field is always reported).",
     )
     parser.add_argument(
         "--shipped-kmd",
@@ -415,7 +445,20 @@ def main(argv=None) -> int:
         default=None,
         help="regenerated *.kmd.json to compare against --shipped-kmd.",
     )
+    parser.add_argument(
+        "--subset",
+        action="store_true",
+        help="require only shipped ⊆ regenerated; regenerated-only kernels are "
+        "listed as registry extras. Excludes --strict-spec.",
+    )
     args = parser.parse_args(argv)
+
+    if args.subset and args.strict_spec:
+        print(
+            "FAIL: --subset and --strict-spec are mutually exclusive",
+            file=sys.stderr,
+        )
+        return 2
 
     if bool(args.shipped_kmd) != bool(args.regenerated_kmd):
         print(
@@ -441,11 +484,13 @@ def main(argv=None) -> int:
             print(f"FAIL: {exc}", file=sys.stderr)
             return 2
 
+    extras: list[str] = []
+    if args.subset:
+        catalog_problems, extras = compare_subset(shipped, regenerated)
+    else:
+        catalog_problems = compare_catalog(shipped, regenerated, args.strict_spec)
     sections: list[tuple[str, list[str]]] = [
-        (
-            "catalog",
-            compare_catalog(shipped, regenerated, args.strict_spec),
-        ),
+        ("catalog", catalog_problems),
         (
             "engine-level descriptors",
             compare_engine_blocks(shipped, regenerated, args.ignore_ids),
@@ -470,6 +515,9 @@ def main(argv=None) -> int:
         f"  spec fields  {'strict (full spec)' if args.strict_spec else 'shipped fields (regenerated-only fields not compared)'}"
     )
     print(
+        f"  catalog      {'subset (shipped kernels must all be regenerated)' if args.subset else 'equal'}"
+    )
+    print(
         f"  kmd          {'compared' if shipped_kmd is not None else 'not provided (types/defaults unchecked)'}"
     )
 
@@ -480,6 +528,13 @@ def main(argv=None) -> int:
             print(f"\n  {label}:")
             for line in problems:
                 print(f"    {line}")
+
+    if args.subset:
+        print(f"\n  registry extras (not shipped): {len(extras)}")
+        for name in extras[:20]:
+            print(f"    {name}")
+        if len(extras) > 20:
+            print(f"    ... and {len(extras) - 20} more")
 
     if failed:
         print("\nDIFFER", file=sys.stderr)

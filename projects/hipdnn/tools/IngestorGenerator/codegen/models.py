@@ -249,6 +249,8 @@ class KernelSpec:
     priority: int = 0
     #: Empty inherits the pack's arch, per the KDP/UKD convention.
     arch: list[str] = field(default_factory=list)
+    #: The cell's declared default variant; never emitted into a descriptor.
+    default: bool = False
 
 
 @dataclass
@@ -352,6 +354,8 @@ class IngestorConfig:
     #: the consuming binary's choice.
     authored_subpath: str = ""
     specialization: dict = field(default_factory=dict)
+    #: The ``reduction`` block, for selection tooling; never emitted.
+    reduction: dict = field(default_factory=dict)
 
     @property
     def is_packaged(self) -> bool:

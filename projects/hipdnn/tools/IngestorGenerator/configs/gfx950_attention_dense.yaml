@@ -1,12 +1,15 @@
-# Packaged-dialect REFERENCE config for the generator's tests and for authors copying a
-# worked example. It is NOT the source of truth for the shipped
-# hipkernel:Gfx950AttentionDense catalog: that is the rocKE dispatcher registry, sliced by
-# configs/gfx950_attention_dense.engine.yaml through tools/registry_enumerator.py, and
-# checked against the shipped descriptors by tests/test_registry_regeneration.py. Editing
-# this file changes nothing that ships. It describes the same catalog (840 kernels) in the
-# `variants` form; do not hand-maintain a second copy of the engine's identity or tiles
-# here beyond what a test needs.
+# Source of truth for the shipped hipkernel:Gfx950AttentionDense catalog.
 #
+# The descriptors under
+# dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/descriptors/rocKE/gfx950_attention_dense/
+# and src/tests/engines/kernel_ingestor_engine/packs/TestGfx950AttentionDensePacks.cpp
+# are generated from this file. After editing it, regenerate from the
+# IngestorGenerator root and copy exactly those files into the provider:
+#     .venv/bin/python generate.py --config configs/gfx950_attention_dense.yaml \
+#         --output-dir <scratch> --force
+# tests/test_registry_regeneration.py gates this file against
+# configs/gfx950_attention_dense.engine.yaml. `default: true` marks each cell's default
+# variant, which variant reduction keeps; neither it nor `reduction` reaches a descriptor.
 # The generated packs/Gfx950AttentionDenseNative.cpp and
 # tests/TestGfx950AttentionDenseMatchers.cpp are stubs; the provider's copies are
 # hand-maintained and must not be overwritten.
@@ -122,6 +125,32 @@ specialization:
       field: block_n
 kernel_source_kind: rocke
 workspace_policy: none
+# A copy of the manifest's `reduction` block.
+reduction:
+  fields:
+    feature: [dtype, head_size, num_query_heads, num_kv_heads, causal, sliding_window, ragged, batch, seqlen_q, seqlen_kv]
+    performance:
+      - {name: block_m, divides: seqlen_q}
+      - {name: block_n, divides: seqlen_kv}
+      - {name: waves_per_eu}
+      - {name: lazy_rescale}
+      - {name: lds_k_group_pad}
+      - {name: lds_v_row_pad}
+      - {name: lds_k_row_pad}
+      - {name: lazy_rescale_threshold}
+      - {name: use_exp2_fast}
+      - {name: exp_per_pv_step, unset_resolves_by: resolved_exp_per_pv_step}
+      - {name: partial_vmcnt_prefetch}
+      - {name: pv_priority}
+      - {name: pv_sched_fence, unset_resolves_by: resolved_pv_sched_fence}
+      - {name: pv_sched_group_template, unset_resolves_by: resolved_pv_sched_group_template}
+      - {name: pv_sched_fence_mask}
+      - {name: pv_sched_group_ds_read}
+      - {name: pv_loop_order, unset_resolves_by: resolved_pv_loop_order}
+      - {name: causal_diag_split}
+      - {name: o_store_width}
+    ignored: []
+  aot_budget_per_arch: 1000
 packs:
 - name: gfx950_attention_dense
   arch:
@@ -168,7 +197,7 @@ packs:
       use_sinks: false
     knob_sets:
       d64_tiles:
-      - {block_m: 256, block_n: 64}
+      - {block_m: 256, block_n: 64, default: true}
       - {block_m: 128, block_n: 32}
       - {block_m: 128, block_n: 64}
       - {block_m: 128, block_n: 128}
@@ -264,7 +293,7 @@ packs:
       use_sinks: false
     knob_sets:
       d128_tiles:
-      - {block_m: 256, block_n: 64}
+      - {block_m: 256, block_n: 64, default: true}
       - {block_m: 128, block_n: 32}
       - {block_m: 128, block_n: 64}
       - {block_m: 128, block_n: 128}

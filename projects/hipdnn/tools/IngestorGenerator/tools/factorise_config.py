@@ -72,6 +72,7 @@ def _flatten(config: dict) -> list:
                 },
                 "metadata": dict(kernel.get("metadata") or {}),
                 "priority": kernel.get("priority"),
+                "default": kernel.get("default", False),
             }
         )
     return flat
@@ -368,6 +369,8 @@ def _build_group(group: list, template: str, ordinals, tags: list, knob_fields: 
                 arm["tag"] = _tag_template(tags[index], entry)
             if ordinals is not None:
                 arm["ordinal_offset"] = ordinals[index] - ordinals[base]
+            if entry["default"]:
+                arm["default"] = True
             arms.append(arm)
         signature = repr(arms)
         if signature not in knob_sets:
@@ -582,6 +585,11 @@ def _round_trip(original: dict, compact: dict) -> None:
             f"machine holding the archive has nothing to check the compiled bytes "
             f"against."
         )
+    if reloaded.reduction != expected.reduction:
+        raise FactoriseError(
+            f"round trip lost or altered the 'reduction' block: "
+            f"{reloaded.reduction!r} != {expected.reduction!r}."
+        )
     got = reloaded.packs[0].kernels
     want = expected.packs[0].kernels
     if len(got) != len(want):
@@ -610,6 +618,7 @@ def _round_trip(original: dict, compact: dict) -> None:
             ("symbol", a.kernel_source.symbol, b.kernel_source.symbol),
             ("arch", a.arch, b.arch),
             ("priority", a.priority, b.priority),
+            ("default", a.default, b.default),
         ):
             if left != right:
                 raise FactoriseError(
