@@ -33,7 +33,9 @@ class ComponentCIPathsTest(unittest.TestCase):
         unmatched = sorted(
             p for p in patterns if not any(fnmatch.fnmatch(f, p) for f in tracked)
         )
-        self.assertEqual(unmatched, [], f"Component CI patterns matching no file: {unmatched}")
+        self.assertEqual(
+            unmatched, [], f"Component CI patterns matching no file: {unmatched}"
+        )
 
 
 if __name__ == "__main__":
