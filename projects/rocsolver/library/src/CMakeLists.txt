@@ -258,6 +258,8 @@ set(rocsolver_auxiliary_source
   auxiliary/rocauxiliary_larf.cpp
   auxiliary/rocauxiliary_larft.cpp
   auxiliary/rocauxiliary_larfb.cpp
+  # copies
+  auxiliary/rocauxiliary_lacpy.cpp
   # norm and condition number
   auxiliary/rocauxiliary_lange.cpp
   auxiliary/rocauxiliary_gecon.cpp

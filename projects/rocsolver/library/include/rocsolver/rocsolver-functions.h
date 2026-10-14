@@ -231,6 +231,113 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zlacgv_64(rocblas_handle handle,
 //! @}
 
 /*! @{
+    \brief LACPY copies all or part of an ``m``-by-``n`` matrix ``A`` to a matrix ``B``.
+
+    \details
+    If ``uplo`` indicates upper, only the upper trapezoidal part of ``A`` (the elements
+    \f$A[i,j]\f$ with \f$i \leq j\f$) is copied; if ``uplo`` indicates lower, only the lower
+    trapezoidal part (\f$i \geq j\f$); if ``uplo`` indicates full, all of ``A``. The other elements
+    of ``B`` are not modified.
+
+    @param[in]
+    handle      rocblas_handle.
+    @param[in]
+    uplo        rocblas_fill.
+                Specifies the part of A that is copied.
+    @param[in]
+    m           rocblas_int. m >= 0.
+                The number of rows of the matrices A and B.
+    @param[in]
+    n           rocblas_int. n >= 0.
+                The number of columns of the matrices A and B.
+    @param[in]
+    A           pointer to type. Array on the GPU of dimension lda*n.
+                The matrix A.
+    @param[in]
+    lda         rocblas_int. lda >= m.
+                The leading dimension of A.
+    @param[out]
+    B           pointer to type. Array on the GPU of dimension ldb*n.
+                On exit, B contains the copied part of A.
+    @param[in]
+    ldb         rocblas_int. ldb >= m.
+                The leading dimension of B.
+    *************************************************************************/
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_slacpy(rocblas_handle handle,
+                                                 const rocblas_fill uplo,
+                                                 const rocblas_int m,
+                                                 const rocblas_int n,
+                                                 float* A,
+                                                 const rocblas_int lda,
+                                                 float* B,
+                                                 const rocblas_int ldb);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_dlacpy(rocblas_handle handle,
+                                                 const rocblas_fill uplo,
+                                                 const rocblas_int m,
+                                                 const rocblas_int n,
+                                                 double* A,
+                                                 const rocblas_int lda,
+                                                 double* B,
+                                                 const rocblas_int ldb);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_clacpy(rocblas_handle handle,
+                                                 const rocblas_fill uplo,
+                                                 const rocblas_int m,
+                                                 const rocblas_int n,
+                                                 rocblas_float_complex* A,
+                                                 const rocblas_int lda,
+                                                 rocblas_float_complex* B,
+                                                 const rocblas_int ldb);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_zlacpy(rocblas_handle handle,
+                                                 const rocblas_fill uplo,
+                                                 const rocblas_int m,
+                                                 const rocblas_int n,
+                                                 rocblas_double_complex* A,
+                                                 const rocblas_int lda,
+                                                 rocblas_double_complex* B,
+                                                 const rocblas_int ldb);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_slacpy_64(rocblas_handle handle,
+                                                    const rocblas_fill uplo,
+                                                    const int64_t m,
+                                                    const int64_t n,
+                                                    float* A,
+                                                    const int64_t lda,
+                                                    float* B,
+                                                    const int64_t ldb);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_dlacpy_64(rocblas_handle handle,
+                                                    const rocblas_fill uplo,
+                                                    const int64_t m,
+                                                    const int64_t n,
+                                                    double* A,
+                                                    const int64_t lda,
+                                                    double* B,
+                                                    const int64_t ldb);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_clacpy_64(rocblas_handle handle,
+                                                    const rocblas_fill uplo,
+                                                    const int64_t m,
+                                                    const int64_t n,
+                                                    rocblas_float_complex* A,
+                                                    const int64_t lda,
+                                                    rocblas_float_complex* B,
+                                                    const int64_t ldb);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_zlacpy_64(rocblas_handle handle,
+                                                    const rocblas_fill uplo,
+                                                    const int64_t m,
+                                                    const int64_t n,
+                                                    rocblas_double_complex* A,
+                                                    const int64_t lda,
+                                                    rocblas_double_complex* B,
+                                                    const int64_t ldb);
+//! @}
+
+/*! @{
     \brief The LANGE functions compute the norm of a general ``m``-by-``n`` matrix ``A``.
 
     \details
