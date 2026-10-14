@@ -263,8 +263,9 @@ def _lower_via_cpp_engine(
     ``backend="python"`` aligned with the compiler selected by the Python
     runtime, including a torch-bundled COMGR. An explicit ``llvm_flavor``
     argument still overrides automatic selection and supports offline emission.
-    Both core resolvers retain the llvm22 default when compiler evidence is
-    unavailable. A native caller that owns a separate compilation stage must
+    Both core resolvers reject automatic selection when compiler evidence is
+    unavailable; offline emission requires an explicit flavor.
+    A native caller that owns a separate compilation stage must
     pass a flavor matching its compiler; native AUTO does not share its private
     handle with that stage.
 
@@ -833,6 +834,7 @@ def _conv_problem_to_dict(p: Any) -> Dict[str, Any]:
         pW=p.pW,
         dH=p.dH,
         dW=p.dW,
+        groups=getattr(p, "groups", 1),
     )
     for f in ("Di", "Z", "sD", "pD", "dD"):
         v = getattr(p, f, None)
@@ -868,6 +870,9 @@ def conv_implicit_gemm_spec_to_dict(spec: Any) -> Dict[str, Any]:
         chiplet_chunk_size=spec.chiplet_chunk_size,
         k0_k1_split=spec.k0_k1_split,
         groups=spec.groups,
+        # Changes the emitted kernel and its launch grid; dropped, the engine
+        # would build an unmerged kernel under a merged spec's name and grid.
+        group_merge=getattr(spec, "group_merge", 1),
     )
     # dtype_* and the vector-size/optional knobs are merge-target additions
     # (#8624); forward them only when this branch's spec exposes them so the

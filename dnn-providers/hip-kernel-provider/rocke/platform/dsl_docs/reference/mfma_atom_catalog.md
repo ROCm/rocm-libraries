@@ -26,6 +26,24 @@ The bf16 16x16x16 path uses the `_1k` variant (`mfma.f32.16x16x16bf16.1k` with `
 
 The wide-K / MX atoms (`fp8_16x16x128`, `fp4_16x16x128`, `fp6_16x16x96`) are gfx950-only — they map onto the `f8f6f4` / MX-scaled MFMA instructions that only the CDNA4 target exposes.
 
+## Native gfx950 32x32x64 Scaled MFMA
+
+The `helpers.atoms.MfmaAtom` table above is separate from the target catalog's
+`mfma_scaled` family. On gfx950, that family exposes 32x32x64 operations for
+all 25 ordered FP8/BF8/FP6/BF6/FP4 pairs, with independent A/B E8M0 scales
+over K32 and 16 FP32 accumulator values per lane. Select the complete contract
+with `ArchTarget.mma.op_for_shape(...)`, then emit it with `IRBuilder.mma(...)`.
+
+`MfmaAtom.emit_scaled()` remains a fixed 16x16x128 wrapper; it does not select
+the 32x32x64 operation. The existing `fp8_16x16x128` atom uses `emit()` and
+the scaled intrinsic with constant in-instruction scales. The gfx950 FP8
+fused-MoE dispatcher uses that atom and applies its FP32 block scales outside
+the MFMA. The 32x32x64 family currently has direct GEMM examples.
+
+See [MMA selection, emission and dispatcher paths](mma_metadata.md#selection-ir-emission-and-dispatch),
+the [gfx950 GEMM contract](../instances/gfx950_block_scaled_gemm.md), and
+[runnable scaled-GEMM examples](../../python/rocke/examples/gfx950/gemm/README.md).
+
 ## Lane Layouts (Output)
 
 The kernel epilogue must agree with `MfmaAtom.lane_to_output(b, lane, i)`. The layouts below come from `helpers/atoms.py`.

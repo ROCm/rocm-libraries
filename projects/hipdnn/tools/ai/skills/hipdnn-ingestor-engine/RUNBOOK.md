@@ -334,7 +334,10 @@ There is **no per-producer production switch**: producer selection is per-UKD on
 `kernel_source.kind`, so one root feeds every producer. Two filters remove content: a
 family folder (`rocKE/`) is excluded when its option is OFF, matched by exact name as a
 top-level folder of a root, and only producers gated by a build option (rocKE) are
-disabled by kind.
+disabled by kind. Whoever adds a new
+`kernel_source.kind` to the packer also adds its entry to
+`descriptor-packaging/tools/hkp_probe_kinds.py`; a probe keeping a UKD of an unregistered
+kind fails configure.
 
 Every root the provider wires, production and test alike, is probed at configure with
 the same filters the pack step gets. A root that is empty, or that would ship nothing
@@ -717,6 +720,20 @@ accounting.
 **Gate:** zero wrong answers, complete final-runtime accounting, and no missing,
 ambiguous, erroneous or unexplained in-scope outcomes. Changed installed artifacts
 invalidate old evidence and return to stages 3–5.
+
+**Final step: packaging probe.** The architecture probe is automatic and needs no edit:
+every explicit `arch` of the bundle's KDPs/UKDs that the build does not target gets probe
+`<arch>`, packing the default sample (for rocKE, each value of each varying `spec` field
+once; combinations are not guaranteed). Optionally, when specific UKDs must be packed on
+every PR, add a named probe,
+`hkp_add_packaging_probe(ARCH <gfx> NAME <integration> UKDS <representative UKD names>)`,
+to `dnn-providers/hip-kernel-provider/descriptor-packaging/probes/probes.cmake`. Configure
+with `-DHIPKERNELPROVIDER_ENABLE_PACKAGING_PROBES=ON` and a `GPU_TARGETS` that excludes the
+bundle's architecture, check the configure STATUS lines `hkp: automatic probe arches:
+[...]` (the architecture is listed) and `hkp: probe <arch>: ... (<n> UKD(s) for <arch>)`,
+build (`cmake --build <build> --target hkp_packaging_probes`), and run
+`ctest --test-dir <build> -R '^hkp-probe-' --no-tests=error`; every `hkp-probe-*` entry must
+pass. See "Packaging probes" in the descriptor-packaging README.
 
 ## 8. Handoff
 
