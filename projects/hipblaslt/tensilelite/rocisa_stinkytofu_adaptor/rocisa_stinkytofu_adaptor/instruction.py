@@ -938,22 +938,19 @@ def _apply_mubuf(inst: Any, mubuf: Any) -> None:
 
 
 def _apply_ds(inst: Any, ds: Any) -> None:
-    """Forward the single offset the non-dual DS factories currently pass."""
-    if ds is None:
-        return
-    inst.set_ds(offset=getattr(ds, "offset", 0))
+    """Forward every field ``convertDSModifiers()`` copies.
 
-
-def _apply_ds_full(inst: Any, ds: Any) -> None:
-    """Forward every DS field the dual-address load factory currently passes."""
+    A missing modifier stays unset. ``na`` defaults to 1, matching
+    ``rocisa::DSModifiers``.
+    """
     if ds is None:
         return
     inst.set_ds(
-        na=getattr(ds, "na", 2),
+        na=getattr(ds, "na", 1),
         offset=getattr(ds, "offset", 0),
         offset0=getattr(ds, "offset0", 0),
         offset1=getattr(ds, "offset1", 0),
-        gds=getattr(ds, "gds", False),
+        gds=bool(getattr(ds, "gds", False)),
     )
 
 
@@ -987,9 +984,7 @@ def _apply_modifiers(item: Any, logical: Any) -> Any:
         logical.set_global(scope=int(item.scope))
     if "mubuf" in mods:
         _apply_mubuf(logical, getattr(item, "mubuf", None))
-    if "ds_full" in mods:
-        _apply_ds_full(logical, getattr(item, "ds", None))
-    elif "ds" in mods:
+    if "ds" in mods or "ds_full" in mods:
         _apply_ds(logical, getattr(item, "ds", None))
     return logical
 
@@ -4709,7 +4704,7 @@ def _make_ds_load2_class(class_name: str, mnemonic: str, latency: int = 1, base:
         **_mem_issue_latency(latency),
     })
     cls.__qualname__ = class_name
-    cls._stinky_mods = ("ds_full",)
+    cls._stinky_mods = ("ds",)
     return cls
 
 
