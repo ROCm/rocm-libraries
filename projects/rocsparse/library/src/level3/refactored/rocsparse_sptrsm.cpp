@@ -354,47 +354,53 @@ namespace rocsparse
             {
             case rocsparse_format_csr:
             {
-                RETURN_IF_ROCSPARSE_ERROR(
-                    rocsparse::diagonal_solve_csr(handle,
-                                                  A_op,
-                                                  modifier,
-                                                  alpha->const_values,
-                                                  A,
-                                                  sptrsm_descr->get_csrsm_info(),
-                                                  nrhs,
-                                                  X->const_values,
-                                                  x_row_stride,
-                                                  x_col_stride,
-                                                  X->batch_stride,
-                                                  Y->values,
-                                                  y_row_stride,
-                                                  y_col_stride,
-                                                  Y->batch_stride,
-                                                  Y->batch_count,
-                                                  conj_x));
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse::diagonal_solve_csr(
+                    handle,
+                    A_op,
+                    modifier,
+                    alpha->const_values,
+                    A,
+                    sptrsm_descr->get_csrsm_info(),
+                    nrhs,
+                    X->const_values,
+                    x_row_stride,
+                    x_col_stride,
+                    //
+                    // dnmat_set_strided_batch should take care of this.
+                    //
+                    (X->batch_count == 1) ? 0 : X->batch_stride,
+                    Y->values,
+                    y_row_stride,
+                    y_col_stride,
+                    Y->batch_stride,
+                    Y->batch_count,
+                    conj_x));
                 sptrsm_descr->set_stage(rocsparse_sptrsm_stage_compute);
                 return rocsparse_status_success;
             }
             case rocsparse_format_csc:
             {
-                RETURN_IF_ROCSPARSE_ERROR(
-                    rocsparse::diagonal_solve_csc(handle,
-                                                  A_op,
-                                                  modifier,
-                                                  alpha->const_values,
-                                                  A,
-                                                  sptrsm_descr->get_csrsm_info(),
-                                                  nrhs,
-                                                  X->const_values,
-                                                  x_row_stride,
-                                                  x_col_stride,
-                                                  X->batch_stride,
-                                                  Y->values,
-                                                  y_row_stride,
-                                                  y_col_stride,
-                                                  Y->batch_stride,
-                                                  Y->batch_count,
-                                                  conj_x));
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse::diagonal_solve_csc(
+                    handle,
+                    A_op,
+                    modifier,
+                    alpha->const_values,
+                    A,
+                    sptrsm_descr->get_csrsm_info(),
+                    nrhs,
+                    X->const_values,
+                    x_row_stride,
+                    x_col_stride,
+                    //
+                    // dnmat_set_strided_batch should take care of this.
+                    //
+                    (X->batch_count == 1) ? 0 : X->batch_stride,
+                    Y->values,
+                    y_row_stride,
+                    y_col_stride,
+                    Y->batch_stride,
+                    Y->batch_count,
+                    conj_x));
                 sptrsm_descr->set_stage(rocsparse_sptrsm_stage_compute);
                 return rocsparse_status_success;
             }
