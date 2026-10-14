@@ -297,6 +297,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             EXPECTED_CASES
                 IsOnePackWithAGraphMatchAndOneKernelScopedMatcher
                 ShipsUniqueObjectsAndOneTopServeAllPerClass
+                RanksTheNarrowerBucketFirst
                 EveryKernelDeclaresItsFamilysSignature
         )
     endif()
