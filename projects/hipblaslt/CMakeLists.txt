@@ -741,8 +741,15 @@ if(HIPBLASLT_ENABLE_CLIENT)
 endif()
 
 if(HIPBLASLT_ENABLE_CLIENT AND (HIPBLASLT_BUILD_TESTING OR BUILD_TESTING))
+    # hipblaslt-test-hostunit is the standalone host-only unit test binary. It is
+    # installed so it ships in TheRock's blas test artifact; see
+    # clients/tests/unit/CMakeLists.txt for why its name has to keep the
+    # "hipblaslt-test" prefix.
     rocm_install(
-        TARGETS hipblaslt-test hipblaslt-test-tuning-store
+        TARGETS
+            hipblaslt-test
+            hipblaslt-test-hostunit
+            hipblaslt-test-tuning-store
         COMPONENT tests
     )
     rocm_install(
@@ -785,6 +792,7 @@ if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
     install(
         FILES
             "${_tensilelite_src}/scripts/analyze_timing.py"
+            "${_tensilelite_src}/scripts/check_no_absolute_imports.py"
             "${_tensilelite_src}/scripts/precommit_affected_tests.py"
         DESTINATION "${_tensilelite_install_dest}/scripts"
         COMPONENT tests

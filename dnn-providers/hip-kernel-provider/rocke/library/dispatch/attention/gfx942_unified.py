@@ -131,7 +131,7 @@ def _make_gfx942_dense_pipe_candidate() -> KernelCandidate:
             return False, "problem routes to 3D, not 2D"
         from kernels.common.attention_unified import _enable_gfx942_fp16_flash
 
-        if not _enable_gfx942_fp16_flash(problem):
+        if not _enable_gfx942_fp16_flash(problem, req.arch):
             return False, "gfx942 fp16 flash not eligible for this shape"
         return True, "ok"
 
