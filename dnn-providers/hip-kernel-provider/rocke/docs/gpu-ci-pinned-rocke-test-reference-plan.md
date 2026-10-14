@@ -12,19 +12,29 @@ and [GPU attention coverage](gpu-attention-test-coverage.md)
 for exact shapes, source-test mappings, and missing coverage.
 
 SDPA has eight gfx942, seven gfx950, and eight standalone FP16 WMMA configurations
-each on gfx1151 and gfx1201. Convolution has sixteen qualified gfx942
-forward cases; the operation guides and DVC pointers record the current bundle
-identities. All five pairs are enrolled for default installation. Both operations share
+each on gfx1151 and gfx1201. Convolution has 32 qualified forward cases on each
+of gfx942 and gfx950; the operation guides and DVC pointers record the current bundle
+identities. All six pairs are enrolled for default installation. Both operations share
 tensor-free artifact handling, worker transport, and installation infrastructure.
 SDPA DVC delivery and architecture-specific packaging were validated in CI for
 gfx942. The gfx950, gfx1151, and gfx1201 bundles passed GPU qualification, source
 verification, installed Python reference tests, and fresh-cache DVC download checks.
 Native provider execution and final TheRock artifact splitting remain unvalidated
 for those three targets.
-Further architectures, convolution gradients, KDA, and GDN remain future work.
+Both convolution bundles passed qualification, source and installed verification,
+and anonymous retrieval into an empty DVC cache. Separate convolution gradient
+tests run twelve backward-data and fourteen backward-weight cases per target
+against live NumPy oracles, with three executions per case. They passed source
+and installed verification on gfx942 and gfx950; gfx942 backward-data uses explicit
+specs because production dispatch has no candidate. See the
+[six-lane validation record](conv-six-lane-validation.md) for evidence and limits.
+Native provider execution and final TheRock artifact splitting for convolution,
+frozen gradient replay, further architectures, KDA and GDN reference cohorts
+remain future work.
 
-Offline qualification compares a pinned rocKE implementation with an independent
-reference. Ordinary CI executes its precompiled kernels to generate answers,
+For pinned SDPA and convolution forward, offline qualification compares a pinned
+rocKE implementation with an independent reference. Ordinary CI executes its
+precompiled kernels to generate answers,
 then compares current rocKE against those answers using the remaining accuracy
 budget. CI neither downloads tensor answers nor qualifies its own baseline.
 Both operations use float64 NumPy references offline. Convolution qualification

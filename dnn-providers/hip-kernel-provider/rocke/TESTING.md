@@ -628,9 +628,10 @@ reference them, don't copy them here.*
 
 ## Pinned convolution references
 
-A Torch-free gfx942 forward-convolution qualification and GPU replay harness is
-available alongside SDPA. Both gfx942 bundles are listed in the publication
-registry and installed by default for provider artifact builds. See [the convolution reference guide](docs/conv-test-reference.md)
+A Torch-free forward-convolution qualification and GPU replay harness is
+available for gfx942 and gfx950 alongside SDPA. Both convolution bundles are
+listed in the publication registry and installed by default for provider artifact
+builds. See [the convolution reference guide](docs/conv-test-reference.md)
 for the cohort and numerical contract. Use the
 [reference workflow](docs/gpu-reference-workflow.md) to add coverage or replace a bundle.
 
@@ -663,19 +664,19 @@ provider test directory:
 
 ```bash
 python -c 'import importlib.util; assert importlib.util.find_spec("torch") is None'
-ctest -V -R '^rocke_(reference_common|sdpa_reference_unit|conv_reference_unit|sdpa_gpu_gfx(942|950|1151|1201)|conv_gpu_gfx942)_pytest$' --output-on-failure --no-tests=error
+ctest -V -R '^rocke_(reference_common|sdpa_reference_unit|conv_reference_unit|sdpa_gpu_gfx(942|950|1151|1201)|conv_gpu_gfx(942|950))_pytest$' --output-on-failure --no-tests=error
 ```
 
 Inspect the selected tests: disabling reference installation omits the GPU
 entries, and entries for other architectures skip. A successful CTest command
 alone does not establish GPU coverage. On the matching GPU, expect eight SDPA
 comparisons on gfx942, gfx1151, or gfx1201, or seven on gfx950, plus three failure
-controls. The gfx942 convolution entry adds sixteen comparisons and three failure
+controls. Each matching convolution entry adds 32 comparisons and three failure
 controls. Confirm the matching entries executed with zero selected GPU skips.
 
 Default publication supplies four SDPA bundles (gfx942, gfx950, gfx1151, gfx1201)
-and the gfx942 convolution bundle. Fetch all five DVC archives before configuring;
-missing published archives fail configuration. From the rocm-libraries root:
+and two convolution bundles (gfx942, gfx950). Fetch all six DVC archives before
+configuring; missing published archives fail configuration. From the rocm-libraries root:
 
 ```bash
 dvc pull --recursive dnn-providers/hip-kernel-provider/rocke/library/tests/reference_bundles
@@ -688,8 +689,23 @@ for the tested gfx1151/gfx1201 environments.
 
 The shared launcher blocks Torch imports in baseline and current worker
 interpreters, including frozen replay workers. Neither CPU oracle runs during
-verification. This restriction is confined to reference workers and does not
-change the runtime's behavior for other callers or the legacy Torch test suites.
+pinned verification. This restriction is confined to reference workers and does
+not change the runtime's behavior for other callers or the legacy Torch test suites.
+
+For the separate convolution gradient tests, run the registered library suites
+from the same installed directory on gfx942 or gfx950:
+
+```bash
+ctest -V -R '^rocke_library_(conv|gpu)_pytest$' --output-on-failure --no-tests=error
+```
+
+These suites include 62 gradient host-contract checks and twelve backward-data
+plus fourteen backward-weight numerical cases, each executed three times against
+a live NumPy oracle. They require no pinned gradient bundle. The broader suites
+also contain legacy tests with optional dependencies and architecture gates, so
+inspect skips and confirm all 26 gradient numerical cases executed. See the
+[validation record](docs/conv-six-lane-validation.md) for the verified counts and
+the explicit-spec limitation of gfx942 backward-data.
 
 Each installed operation/architecture pair has its own CTest entry:
 `rocke_<operation>_gpu_<arch>_pytest`, with a five-minute timeout. CTest passes
