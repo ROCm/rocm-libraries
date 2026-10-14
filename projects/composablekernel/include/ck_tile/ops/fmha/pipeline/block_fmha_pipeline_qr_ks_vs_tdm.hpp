@@ -85,7 +85,15 @@ struct BlockFmhaPipelineQRKSVSTdm
     static constexpr bool kQuantized  = QScaleEnum == BlockAttentionQuantScaleEnum::PERTENSOR ||
                                        QScaleEnum == BlockAttentionQuantScaleEnum::PERHEAD ||
                                        kBlockScale;
-    static constexpr bool kVScaleOnOacc    = kQuantized && !kBlockScale;
+    static constexpr bool kVScaleOnOacc = kQuantized && !kBlockScale;
+    // P = exp2(s - m) is bounded to (0,1]. Folding 2^kPShift into the exponent puts it in
+    // (0,256], the range the dynamic per-block scale already picks for a full-magnitude
+    // block (round_up_pow2(1/448) == 2^-8), so the quantization grid is unchanged. The
+    // shift merges into the subtraction already inside exp2 and costs nothing. l and o_acc
+    // both carry it, so it cancels in O = o_acc/l; LSE and the sink seed undo it explicitly.
+    static constexpr index_t kPShift     = kQuantized ? 8 : 0;
+    static constexpr float kPScaleFactor = kQuantized ? 256.0f : 1.0f;
+
     static constexpr bool kStoreLSE        = Problem::kStoreLSE;
     static constexpr bool kHasUnevenSplits = true;
     static constexpr bool kHasSink         = Problem::kHasSink;
@@ -446,26 +454,6 @@ struct BlockFmhaPipelineQRKSVSTdm
         return Layout::kArenaBytes;
     }
 
-    // gemm_1 consumes q(P), but l accumulates the unrounded P. Rescaling the numerator by
-    // l/sum(q(P)) makes O a weighted mean over exactly the weights gemm_1 used, so a common
-    // multiplicative P-rounding error cancels instead of surviving as a gain on the row.
-    // l itself is left alone: it is the mathematical row sum that LSE reports.
-    template <typename RowTile, typename OutputTile>
-    CK_TILE_DEVICE static void
-    CorrectQuantizedMass(const RowTile& l, const RowTile& l_quant, OutputTile& o_acc)
-    {
-        if constexpr(kQuantized)
-        {
-            constexpr auto spans = OutputTile::get_distributed_spans();
-            sweep_tile_span(spans[I0], [&](auto idx0) {
-                constexpr auto i      = make_tuple(idx0);
-                const auto correction = l_quant[i] == 0.f ? 0.f : l[i] / l_quant[i];
-                sweep_tile_span(spans[I1],
-                                [&](auto idx1) { o_acc(make_tuple(idx0, idx1)) *= correction; });
-            });
-        }
-    }
-
     // The learned sink has no V, so it only ever contributes to the denominator. Pre-seeding
     // m with it lets it own the max frame, which pushes every real P down the fp8 grid and
     // biases the whole row. Merging it here instead -- one extra max-frame step on the final
@@ -492,7 +480,8 @@ struct BlockFmhaPipelineQRKSVSTdm
                     constexpr auto i      = make_tuple(idx0);
                     const auto merged_m   = max(m[i], sink_m);
                     const auto correction = exp2((m[i] - merged_m) * exponent_scale);
-                    l(i) = l[i] * correction + exp2((sink_m - merged_m) * exponent_scale);
+                    // l carries 2^kPShift (see kPShift); the sink term must join it there.
+                    l(i) = l[i] * correction + exp2((sink_m - merged_m) * exponent_scale + kPShift);
                     m(i) = merged_m;
                     sweep_tile_span(
                         spans[I1], [&](auto idx1) { o_acc(make_tuple(idx0, idx1)) *= correction; });
@@ -505,7 +494,7 @@ struct BlockFmhaPipelineQRKSVSTdm
     // Lanes already align (NWarp==1), so this is an in-thread block reorder;
     // identity when MIterPerWarp==1.
     template <typename Gemm1, typename PComputeTensor>
-    CK_TILE_DEVICE static auto MakePForGemm1(PComputeTensor& p_compute, int32_t& p_scale)
+    CK_TILE_DEVICE static auto MakePForGemm1(const PComputeTensor& p_compute, int32_t& p_scale)
     {
         constexpr index_t kPMI = Gemm1::MIterPerWarp;
         constexpr index_t kPKI = kN0 / Gemm1::WarpGemm::kK;
@@ -513,35 +502,20 @@ struct BlockFmhaPipelineQRKSVSTdm
         auto p_tile = make_static_distributed_tensor<PDataType>(
             Policy::template MakePRegTileDistribution<Problem>());
 
-        if constexpr(kQuantized)
-        {
-            static_assert(kPMI * kPKI == 1,
-                          "qr_tdm pipeline: the dynamic P scale needs the (MIter,KIter) repack "
-                          "to be the identity");
-            using WG          = typename Gemm1::WarpGemm;
-            const auto packed = cast_tile_mx_wmma<kPScaleGranularity,
-                                                  WG::WarpGemmAttribute::Impl::kAMLane,
-                                                  WG::WarpGemmAttribute::Impl::kABKLane,
-                                                  true>(p_tile, p_compute);
-            static_assert(packed.size() == 1);
-            p_scale = packed[I0];
-        }
-        else
-        {
-            const auto p_src        = cast_tile<PDataType>(p_compute);
-            constexpr index_t kPBuf = decltype(p_src)::get_thread_buffer_size();
-            constexpr index_t kPSub = kPBuf / (kPMI * kPKI);
-            using p_bulk_t          = array<PDataType, kPSub>;
-            static_for<0, kPMI, 1>{}([&](auto mi) {
-                static_for<0, kPKI, 1>{}([&](auto ki) {
-                    p_tile.get_thread_buffer().template set_as<p_bulk_t>(
-                        number<ki * kPMI + mi>{},
-                        p_src.get_thread_buffer().template get_as<p_bulk_t>(
-                            number<mi * kPKI + ki>{}));
-                });
+        const auto p_src        = cast_tile<PDataType>(p_compute);
+        constexpr index_t kPBuf = decltype(p_src)::get_thread_buffer_size();
+        constexpr index_t kPSub = kPBuf / (kPMI * kPKI);
+        using p_bulk_t          = array<PDataType, kPSub>;
+        static_for<0, kPMI, 1>{}([&](auto mi) {
+            static_for<0, kPKI, 1>{}([&](auto ki) {
+                p_tile.get_thread_buffer().template set_as<p_bulk_t>(
+                    number<ki * kPMI + mi>{},
+                    p_src.get_thread_buffer().template get_as<p_bulk_t>(number<mi * kPKI + ki>{}));
             });
-            p_scale = e8m0_one();
-        }
+        });
+        // kPShift already put P on the fp8 grid, so the scale operand is the identity and
+        // no per-block max is needed.
+        p_scale = e8m0_one();
         return p_tile;
     }
 
@@ -618,11 +592,6 @@ struct BlockFmhaPipelineQRKSVSTdm
         // init M, L (sink-aware: when sink_v is finite, pre-seed m/l)
         auto m = MLBlockTileType{};
         auto l = MLBlockTileType{};
-        // Row sum of the quantized P actually handed to gemm_1; unused unless kQuantized.
-        auto l_quant = MLBlockTileType{};
-        if constexpr(kQuantized)
-            clear_tile(l_quant);
-
         clear_tile(o_acc);
         // kDeferSink folds to false at compile time for every non-deferred instance; the
         // else branch below must stay reachable in both cases, so this is one runtime if.
@@ -637,7 +606,8 @@ struct BlockFmhaPipelineQRKSVSTdm
 #else
             set_tile(m, sink_v);
 #endif
-            set_tile(l, SMPLComputeDataType{1.0f});
+            // The seed stands for exp2(sink_m - m) == 1, so it carries 2^kPShift like l.
+            set_tile(l, SMPLComputeDataType{kPScaleFactor});
         }
         else
         {
@@ -1071,19 +1041,24 @@ struct BlockFmhaPipelineQRKSVSTdm
             constexpr auto p_spans = decltype(p_compute)::get_distributed_spans();
             sweep_tile_span(p_spans[I0], [&](auto idx0) {
                 constexpr auto i_idx = make_tuple(idx0);
-                auto row_max         = scale_s * get_validated_m(m[i_idx]);
+                auto validated_m     = get_validated_m(m[i_idx]);
+                auto row_max         = scale_s * validated_m;
+                // exp2(s - m + shift) == exp2(s - (m - shift)): fold kPShift into the row
+                // frame once instead of per element, as qr_async does for BLOCKSCALE.
+                validated_m -= kPShift;
+                row_max -= kPShift;
                 sweep_tile_span(p_spans[I1], [&](auto idx1) {
                     constexpr auto i_j_idx = make_tuple(idx0, idx1);
                     if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS ||
                                  BiasEnum == BlockAttentionBiasEnum::ALIBI)
                     {
-                        p_compute(i_j_idx) = exp2(s_new[i_j_idx] - get_validated_m(m[i_idx]));
+                        p_compute(i_j_idx) = exp2(s_new[i_j_idx] - validated_m);
                     }
                     else
                     {
                         if constexpr(kHasLogitsSoftCap)
                         {
-                            p_compute(i_j_idx) = exp2(s_new[i_j_idx] - get_validated_m(m[i_idx]));
+                            p_compute(i_j_idx) = exp2(s_new[i_j_idx] - validated_m);
                         }
                         else
                         {
@@ -1098,16 +1073,6 @@ struct BlockFmhaPipelineQRKSVSTdm
 
             int32_t p_scale = 0;
             auto p_tile     = MakePForGemm1<decltype(gemm_1)>(p_compute, p_scale);
-
-            // MakePForGemm1 leaves p_compute holding the dequantized values gemm_1 will
-            // multiply, so reducing it here gives sum(q(P)) over the same groups.
-            auto rowsum_p_quant = rowsum_p;
-            if constexpr(kQuantized)
-            {
-                rowsum_p_quant = block_tile_reduce<SMPLComputeDataType>(
-                    p_compute, sequence<1>{}, f_sum, SMPLComputeDataType{0});
-                block_tile_reduce_sync(rowsum_p_quant, f_sum, bool_constant<false>{});
-            }
 
             // l{j}, Oacc{j}
             constexpr auto o_spans = decltype(o_acc)::get_distributed_spans();
@@ -1133,8 +1098,6 @@ struct BlockFmhaPipelineQRKSVSTdm
                     }
                 }();
                 l(i_idx) = tmp * l[i_idx] + rowsum_p[i_idx];
-                if constexpr(kQuantized)
-                    l_quant(i_idx) = tmp * l_quant[i_idx] + rowsum_p_quant[i_idx];
                 sweep_tile_span(o_spans[I1], [&](auto idx1) {
                     constexpr auto i_j_idx = make_tuple(idx0, idx1);
 
@@ -1192,7 +1155,6 @@ struct BlockFmhaPipelineQRKSVSTdm
 
         } while(++i_total_loops < num_total_loop);
 
-        CorrectQuantizedMass(l, l_quant, o_acc);
         MergeSink(m, l, o_acc, sink_v, scale_s);
 
         if constexpr(kStoreLSE)
@@ -1206,17 +1168,19 @@ struct BlockFmhaPipelineQRKSVSTdm
                 if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS ||
                              BiasEnum == BlockAttentionBiasEnum::ALIBI)
                 {
-                    lse_acc(i_idx) = m_[i_idx] / C_LOG2E + log(l_[i_idx]);
+                    lse_acc(i_idx) = m_[i_idx] / C_LOG2E + log(l_[i_idx]) - kPShift / C_LOG2E;
                 }
                 else
                 {
                     if constexpr(kHasLogitsSoftCap)
                     {
-                        lse_acc(i_idx) = m_[i_idx] / C_LOG2E + log(l_[i_idx]);
+                        lse_acc(i_idx) = m_[i_idx] / C_LOG2E + log(l_[i_idx]) - kPShift / C_LOG2E;
                     }
                     else
                     {
-                        lse_acc(i_idx) = m_[i_idx] * scale_s / C_LOG2E + log(l_[i_idx]);
+                        // l carries 2^kPShift; LSE reports the mathematical row sum.
+                        lse_acc(i_idx) =
+                            m_[i_idx] * scale_s / C_LOG2E + log(l_[i_idx]) - kPShift / C_LOG2E;
                     }
                 }
             });
@@ -1326,11 +1290,6 @@ struct BlockFmhaPipelineQRKSVSTdm
         // init M, L (sink-aware)
         auto m = MLBlockTileType{};
         auto l = MLBlockTileType{};
-        // Row sum of the quantized P actually handed to gemm_1; unused unless kQuantized.
-        auto l_quant = MLBlockTileType{};
-        if constexpr(kQuantized)
-            clear_tile(l_quant);
-
         clear_tile(o_acc);
         // kDeferSink folds to false at compile time for every non-deferred instance; the
         // else branch below must stay reachable in both cases, so this is one runtime if.
@@ -1345,7 +1304,8 @@ struct BlockFmhaPipelineQRKSVSTdm
 #else
             set_tile(m, sink_v);
 #endif
-            set_tile(l, SMPLComputeDataType{1.0f});
+            // The seed stands for exp2(sink_m - m) == 1, so it carries 2^kPShift like l.
+            set_tile(l, SMPLComputeDataType{kPScaleFactor});
         }
         else
         {
@@ -1978,19 +1938,24 @@ struct BlockFmhaPipelineQRKSVSTdm
             constexpr auto p_spans = decltype(p_compute)::get_distributed_spans();
             sweep_tile_span(p_spans[I0], [&](auto idx0) {
                 constexpr auto i_idx = make_tuple(idx0);
-                auto row_max         = scale_s * get_validated_m(m[i_idx]);
+                auto validated_m     = get_validated_m(m[i_idx]);
+                auto row_max         = scale_s * validated_m;
+                // exp2(s - m + shift) == exp2(s - (m - shift)): fold kPShift into the row
+                // frame once instead of per element, as qr_async does for BLOCKSCALE.
+                validated_m -= kPShift;
+                row_max -= kPShift;
                 sweep_tile_span(p_spans[I1], [&](auto idx1) {
                     constexpr auto i_j_idx = make_tuple(idx0, idx1);
                     if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS ||
                                  BiasEnum == BlockAttentionBiasEnum::ALIBI)
                     {
-                        p_compute(i_j_idx) = exp2(s_new[i_j_idx] - get_validated_m(m[i_idx]));
+                        p_compute(i_j_idx) = exp2(s_new[i_j_idx] - validated_m);
                     }
                     else
                     {
                         if constexpr(kHasLogitsSoftCap)
                         {
-                            p_compute(i_j_idx) = exp2(s_new[i_j_idx] - get_validated_m(m[i_idx]));
+                            p_compute(i_j_idx) = exp2(s_new[i_j_idx] - validated_m);
                         }
                         else
                         {
@@ -2020,16 +1985,6 @@ struct BlockFmhaPipelineQRKSVSTdm
 
             int32_t p_scale = 0;
             auto p_tile     = MakePForGemm1<decltype(gemm_1)>(p_compute, p_scale);
-
-            // MakePForGemm1 leaves p_compute holding the dequantized values gemm_1 will
-            // multiply, so reducing it here gives sum(q(P)) over the same groups.
-            auto rowsum_p_quant = rowsum_p;
-            if constexpr(kQuantized)
-            {
-                rowsum_p_quant = block_tile_reduce<SMPLComputeDataType>(
-                    p_compute, sequence<1>{}, f_sum, SMPLComputeDataType{0});
-                block_tile_reduce_sync(rowsum_p_quant, f_sum, bool_constant<false>{});
-            }
 
             // l{j}, Oacc{j}
             constexpr auto o_spans = decltype(o_acc)::get_distributed_spans();
@@ -2062,8 +2017,6 @@ struct BlockFmhaPipelineQRKSVSTdm
                 {
                     l(i_idx) = tmp * l[i_idx] + rowsum_p[i_idx];
                 }
-                if constexpr(kQuantized)
-                    l_quant(i_idx) = tmp * l_quant[i_idx] + rowsum_p_quant[i_idx];
                 sweep_tile_span(o_spans[I1], [&](auto idx1) {
                     constexpr auto i_j_idx = make_tuple(idx0, idx1);
 
@@ -2185,7 +2138,6 @@ struct BlockFmhaPipelineQRKSVSTdm
         } while(i_total_loops < num_total_loop);
 
         s_wait_tensorcnt_barrier<0>();
-        CorrectQuantizedMass(l, l_quant, o_acc);
         MergeSink(m, l, o_acc, sink_v, scale_s);
 
         if constexpr(kStoreLSE)
@@ -2199,17 +2151,19 @@ struct BlockFmhaPipelineQRKSVSTdm
                 if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS ||
                              BiasEnum == BlockAttentionBiasEnum::ALIBI)
                 {
-                    lse_acc(i_idx) = m_[i_idx] / C_LOG2E + log(l_[i_idx]);
+                    lse_acc(i_idx) = m_[i_idx] / C_LOG2E + log(l_[i_idx]) - kPShift / C_LOG2E;
                 }
                 else
                 {
                     if constexpr(kHasLogitsSoftCap)
                     {
-                        lse_acc(i_idx) = m_[i_idx] / C_LOG2E + log(l_[i_idx]);
+                        lse_acc(i_idx) = m_[i_idx] / C_LOG2E + log(l_[i_idx]) - kPShift / C_LOG2E;
                     }
                     else
                     {
-                        lse_acc(i_idx) = m_[i_idx] * scale_s / C_LOG2E + log(l_[i_idx]);
+                        // l carries 2^kPShift; LSE reports the mathematical row sum.
+                        lse_acc(i_idx) =
+                            m_[i_idx] * scale_s / C_LOG2E + log(l_[i_idx]) - kPShift / C_LOG2E;
                     }
                 }
             });
