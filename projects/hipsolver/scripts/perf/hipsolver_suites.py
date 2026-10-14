@@ -436,17 +436,17 @@ def getrsNpvtBatch_suite(*, suite, precision, case):
            yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --batch_count {bc} --nrhs {nrhs} -n {s} --lda {ld} --ldb {ld}')
 
 
-#def getriBatch_suite(*, suite, precision, case):
-#    """
-#    GETRIBATCH tests are run with the given precision and sizes
-#    """
-#    fn = 'getri_batched'
-#    mode = 'batched'
-#    size = get_size_configurations(case, mode)
-#    for s, bc in size:
-#        ld = get_ld(s)
-#        row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'batch_count': bc, 'n': s}
-#        yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --batch_count {bc} -n {s} --lda {ld} --ldc {ld}')
+def getriBatch_suite(*, suite, precision, case):
+   """
+   GETRIBATCH tests are run with the given precision and sizes
+   """
+   fn = 'getri_batched'
+   mode = 'batched'
+   size = get_size_configurations(case, mode)
+   for s, bc in size:
+       ld = get_ld(s)
+       row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'batch_count': bc, 'n': s}
+       yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --batch_count {bc} -n {s} --lda {ld} --ldc {ld}')
 
 
 #def trtri_suite(*, suite, precision, case):
@@ -490,24 +490,24 @@ def geqrf_suite(*, suite, precision, case):
                 yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} -n {n} -m {m} --lda {ld}')
 
 
-#def geqrfBatch_suite(*, suite, precision, case):
-#    """
-#    GEQRFBATCH tests are run, for the given precision and number of rows,
-#    with 26 columns and also for the square case (#rows = #columns)
-#    geqrf uses:
-#    larft_forward_column
-#    larfb_forward_column_letf_transposed
-#    """
-#    fn = 'geqrf_batched'
-#    mode = 'batched'
-#    size = get_size_configurations(case, mode)
-#    for s_shape in ['square', 'skinny']:
-#        for s, bc in size:
-#            m,n = get_mn(s_shape, s, mode)
-#            ld = get_ld(s)
-#            if m >= n:
-#                row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'batch_count': bc, 'shape': s_shape, 'n': s}
-#                yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --batch_count {bc} -n {n} -m {m} --lda {ld}')
+def geqrfBatch_suite(*, suite, precision, case):
+   """
+   GEQRFBATCH tests are run, for the given precision and number of rows,
+   with 26 columns and also for the square case (#rows = #columns)
+   geqrf uses:
+   larft_forward_column
+   larfb_forward_column_letf_transposed
+   """
+   fn = 'geqrf_batched'
+   mode = 'batched'
+   size = get_size_configurations(case, mode)
+   for s_shape in ['square', 'skinny']:
+       for s, bc in size:
+           m,n = get_mn(s_shape, s, mode)
+           ld = get_ld(s)
+           if m >= n:
+               row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'batch_count': bc, 'shape': s_shape, 'n': s}
+               yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --batch_count {bc} -n {n} -m {m} --lda {ld}')
 
 
 def gels_suite(*, suite, precision, case):
@@ -920,12 +920,12 @@ SUITES = {
     'getrsBatch': getrsBatch_suite,
     'getrsNpvt': getrsNpvt_suite,
     'getrsNpvtBatch': getrsNpvtBatch_suite,
-#    'getriBatch': getriBatch_suite,
+    'getriBatch': getriBatch_suite,
 #    'trtri': trtri_suite,
 
     # Over-determined linear systems (least-squares)
     'geqrf': geqrf_suite,
-#    'geqrfBatch': geqrfBatch_suite,
+    'geqrfBatch': geqrfBatch_suite,
     'gels': gels_suite,
 #    'gelsBatch': gelsBatch_suite,
     'xxgqr': xxgqr_suite,

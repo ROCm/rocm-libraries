@@ -175,6 +175,9 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   unit_test_internal_grid.cpp
   # dispatch_grid_stride_x variant selection in rocsparse_grid.hpp (append-only leaf)
   unit_test_internal_grid_dispatch.cpp
+  # grid_x_chunk and the incomplete factorizations that walk it [AISPARSE-692-694]
+  unit_test_internal_grid_x.cpp
+  unit_test_internal_precond_grid_x_chunk.cpp
   unit_test_internal_collectives_boost.cpp
   # --- Dense element-count grids of the shared common helpers [AISPARSE-699] -
   # Distinct anchor at the end of the list so this leaf does not conflict with
