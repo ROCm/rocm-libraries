@@ -42,10 +42,8 @@ using namespace rpptest;
 
 namespace {
 
-// color_jitter's colour transform is built from four scalars, one value per axis shared by every
-// pixel of an image. The neutral setting is brightness 0 (an additive translation), contrast 0 (the
-// kernel scales by contrast + 1), hue 0 degrees and saturation 1 -- not the ranges the header
-// documents, which belong to color_twist; see color_jitter_ref.hpp.
+// Neutral setting is brightness 0, contrast 0 (the kernel scales by contrast + 1), hue 0 and
+// saturation 1; the header's documented ranges belong to color_twist (see color_jitter_ref.hpp).
 struct ColorJitterParams {
     float brightness, contrast, hue, saturation;
     std::string name() const {
@@ -54,12 +52,8 @@ struct ColorJitterParams {
     }
 };
 
-// The op is deterministic and pointwise -- one matrix-vector product per pixel -- so nothing here
-// needs slack for accumulated error. The integer dtypes are bit-exact; the floats get only what the
-// store itself costs, the golden computing in double and narrowing once where the kernel computes
-// in float. A 1 LSB integer allowance would swallow the rounding defects this suite exists to
-// catch, so the reds below are left to the goldens rather than absorbed here.
-// F16 is allowed one half-precision ulp near 1.0.
+// One matrix-vector product per pixel: integers are bit-exact, floats allow only the store
+// rounding (F16 one half-precision ulp near 1.0).
 constexpr Tolerance kColorJitterTolerance = tolerance(0.0, 1e-6, 5e-4);
 
 template <typename T>
@@ -69,7 +63,6 @@ void run_color_jitter(const TestConfig& cfg, const ColorJitterParams& op) {
     const std::size_t count = element_count(srcDesc);
     const std::size_t bytes = byte_size(srcDesc, cfg.dtype);
 
-    // Parameters live in host-accessible (pinned for HIP) memory.
     PinnedArray<Rpp32f> brightness(cfg.backend, cfg.size.n);
     PinnedArray<Rpp32f> contrast(cfg.backend, cfg.size.n);
     PinnedArray<Rpp32f> hue(cfg.backend, cfg.size.n);
@@ -84,11 +77,8 @@ void run_color_jitter(const TestConfig& cfg, const ColorJitterParams& op) {
         roi[i] = roiVec[i];
     }
 
-    // (1) Host golden model. Unlike most ops here the destination is pre-seeded with a *different*
-    // pattern than the input rather than a copy of it. The identity parameter set makes the golden
-    // equal the input, so seeding dst from the input would report a destination the op never
-    // touched as a pass; a distinct pattern makes an unwritten output a mismatch instead. The
-    // reference writes the whole destination region, so the seed only defines what lies outside it.
+    // dst is seeded with a pattern distinct from the input: the neutral parameter set makes the
+    // golden equal the input, so an input-seeded dst would pass even if the op wrote nothing.
     std::vector<T> input(count), golden(count), actual(count);
     fill_input<T>(input.data(), count, cfg.dtype);
     fill_input<T>(golden.data(), count, cfg.dtype, /*salt=*/23);
@@ -96,7 +86,6 @@ void run_color_jitter(const TestConfig& cfg, const ColorJitterParams& op) {
     color_jitter_reference<T>(input.data(), srcDesc, golden.data(), dstDesc, cfg.dtype, roi.data(),
                               XYWH, op.brightness, op.contrast, op.hue, op.saturation);
 
-    // (2) Run RPP on the configured backend.
     DeviceTensor src(cfg.backend, bytes), dst(cfg.backend, bytes);
     src.write(input.data(), bytes);
     dst.write(dstSeed.data(), bytes);
@@ -107,19 +96,15 @@ void run_color_jitter(const TestConfig& cfg, const ColorJitterParams& op) {
                                 handle.get(), cfg.backend),
               RPP_SUCCESS);
 
-    // (3) Retrieve the result on the host (no-op copy for HOST, device->host for HIP).
     handle.sync();  // drain the op's stream before copying results back
     dst.read(actual.data(), bytes);
 
-    // (4) Compare within tolerance over the ROI.
     EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), dstDesc, roi.data(), XYWH,
                                kColorJitterTolerance(cfg.dtype)));
 }
 
-// rppt_color_jitter is documented as a HOST-backend op -- the header brief says so and every
-// pointer parameter is specified as HOST memory -- and the HIP path returns
-// RPP_ERROR_NOT_IMPLEMENTED (-6). The backend axis is therefore pinned rather than taken from
-// available_backends().
+// rppt_color_jitter is documented as HOST-only and the HIP path returns RPP_ERROR_NOT_IMPLEMENTED,
+// so the backend axis is pinned to HOST.
 std::vector<TestConfig> host_configs(std::vector<TestConfig> configs) {
     configs.erase(std::remove_if(configs.begin(), configs.end(),
                                  [](const TestConfig& c) { return c.backend != RPP_HOST_BACKEND; }),
@@ -139,13 +124,8 @@ TEST_P(ColorJitterTest, Correctness) {
         p.cfg.dtype, [&](auto tag) { run_color_jitter<Element<decltype(tag)>>(p.cfg, p.op); });
 }
 
-// One parameter set per axis rather than a combined one, so a failure names the axis that broke
-// instead of blending four of them. In order: the neutral setting, which must be an exact identity;
-// full desaturation, which must collapse every pixel to its luma grey; a pure hue rotation; a pure
-// contrast scale; and a pure brightness translation.
-//
-// PLN1 is in the grid because 1-channel input is a documented shape that rppt_color_jitter accepts
-// -- it returns RPP_SUCCESS (unlike rppt_color_twist, which rejects it) without writing anything.
+// One parameter set per axis so a failure names the axis that broke. PLN1 is included because the
+// op accepts 1-channel input (returns RPP_SUCCESS without writing anything).
 INSTANTIATE_TEST_SUITE_P(
     Image_Color, ColorJitterTest,
     ::testing::ValuesIn(with_params<ColorJitterParams>(

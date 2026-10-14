@@ -41,12 +41,10 @@ using namespace rpptest;
 
 namespace {
 
-// mean is sum/N in float; the tolerance covers accumulation/division rounding. Integer-space
-// means (U8 [0,255], I8 [-128,127]) carry a larger magnitude than the [0,1] float means, hence
-// the wider absolute tolerance.
+// Covers accumulation/division rounding; integer-space means are larger, hence the wider tolerance.
 constexpr Tolerance kTensorMeanTolerance = tolerance(1e-2, 1e-4, 1e-3);
 
-// mean always outputs Rpp32f regardless of the source dtype (per the API contract).
+// mean always outputs Rpp32f.
 template <typename Tin>
 void run_tensor_mean(const TestConfig& cfg) {
     RpptDesc desc = make_src_descriptor(cfg);  // RPP takes a non-const ptr
@@ -58,13 +56,11 @@ void run_tensor_mean(const TestConfig& cfg) {
     const std::vector<RpptROI> roiVec = make_roi(desc, cfg.roi);
     for (Rpp32u i = 0; i < cfg.size.n; ++i) roi[i] = roiVec[i];
 
-    // (1) Host golden model.
     std::vector<Tin> input(count);
     fill_input<Tin>(input.data(), count, cfg.dtype);
     const std::vector<double> golden =
         tensor_mean_reference<Tin>(input.data(), desc, roi.data(), XYWH);
 
-    // (2) Run RPP on the configured backend. The result array is host-accessible (pinned for HIP).
     DeviceTensor src(cfg.backend, bytes);
     src.write(input.data(), bytes);
     PinnedArray<Rpp32f> out(cfg.backend, outLen);
@@ -75,10 +71,8 @@ void run_tensor_mean(const TestConfig& cfg) {
                                roi.data(), XYWH, handle.get(), cfg.backend),
               RPP_SUCCESS);
 
-    // (3) Drain the op's stream; pinned output is then directly readable on the host.
-    handle.sync();
+    handle.sync();  // pinned output is then directly readable on the host
 
-    // (4) Compare within tolerance.
     EXPECT_TRUE(compare_reduction<Rpp32f>(out.data(), golden, kTensorMeanTolerance(cfg.dtype)));
 }
 
@@ -98,7 +92,6 @@ INSTANTIATE_TEST_SUITE_P(Image_Statistical, TensorMeanTest,
                          ::testing::ValuesIn(make_configs(
                              {DType::U8, DType::F16, DType::F32, DType::I8},
                              {Layout::PKD3, Layout::PLN3, Layout::PLN1}, {Roi::Full, Roi::Partial},
-                             // Kept in step with tensor_min/max's shapes so the
-                             // reduction ops share one grid.
+                             // Same shapes as tensor_min/max.
                              {{2, 160, 160}, {2, 137, 167}})),
                          config_param_name);

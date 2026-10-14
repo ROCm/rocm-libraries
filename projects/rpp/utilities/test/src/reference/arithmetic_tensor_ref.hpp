@@ -60,21 +60,13 @@ Expression
   div   dst = a / b
 
 Per-type form
-  Two behaviours the header does not spell out, taken from the operations'
-  definition and RPP's convention everywhere else:
-
-  - Integer types hold integers, so the exact result is rounded to nearest
-    (std::nearbyint) and saturated to the type's storable range. Only division
-    produces a fractional intermediate, so rounding is only observable there;
-    add, subtract and multiply exercise the saturation alone.
-  - Floating-point types are NOT clamped. These are generic ND tensors rather
-    than image intensities, so a subtraction that goes negative or a division
-    that exceeds 1 is the intended result; clamping to [0,1] would make
-    subtract and divide meaningless.
+  - Integer types round to nearest and saturate to the type's range.
+  - Floating-point types are NOT clamped; these are generic ND tensors, not
+    image intensities.
 
 Notes
-  Division by zero is undefined and is not modelled: the divide test shapes
-  its second operand so no divisor is ever zero.
+  Division by zero is not modelled; the divide test keeps every divisor
+  non-zero.
 */
 
 enum class ArithmeticTensorOp { Add, Subtract, Multiply, Divide };
@@ -93,9 +85,7 @@ inline double arithmetic_tensor_scalar(double a, double b, ArithmeticTensorOp op
     return 0.0;
 }
 
-// Stores the exact result into T: round-to-nearest + saturate for the integer dtypes, a plain
-// (unclamped) conversion for the floating-point ones. Rpp16f is a class type, so it takes the
-// non-integral branch.
+// Rpp16f is a class type, so it takes the non-integral branch.
 template <typename T>
 T arithmetic_tensor_store(double v) {
     if constexpr (std::is_integral_v<T>) {

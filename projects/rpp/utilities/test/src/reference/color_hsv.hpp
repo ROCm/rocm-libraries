@@ -40,14 +40,11 @@ Used by
 
 Description
   The standard sextant RGB<->HSV conversion on normalized [0,1] channels,
-  plus the two in-place manipulations built on it. Kept in one place so every
-  op that touches hue or saturation converts and rounds identically, and a
-  single reviewed copy backs them all.
+  plus the two in-place manipulations built on it, shared so every op that
+  touches hue or saturation converts identically.
 
-  Channels must already be in [0,1]. to_unit() passes F16/F32 through
-  unchanged, so float inputs rely on fill_input() keeping them in range; an
-  out-of-range channel can give S > 1, which the saturation clamp would then
-  alter even at factor 1.
+  Channels must already be in [0,1]; an out-of-range float channel can give
+  S > 1, which the saturation clamp would alter even at factor 1.
 
 Expression
   H in [0,360), S and V in [0,1]
@@ -56,7 +53,6 @@ Expression
   H = the sextant angle of the (R, G, B) triplet
 */
 
-// Standard RGB->HSV sextant conversion on normalized [0,1] channels. H in [0,360), S,V in [0,1].
 inline void rgb_to_hsv(double r, double g, double b, double& h, double& s, double& v) {
     const double cmax = std::max({r, g, b});
     const double cmin = std::min({r, g, b});
@@ -76,7 +72,6 @@ inline void rgb_to_hsv(double r, double g, double b, double& h, double& s, doubl
     v = cmax;
 }
 
-// Standard HSV->RGB sextant conversion, the inverse of rgb_to_hsv.
 inline void hsv_to_rgb(double h, double s, double v, double& r, double& g, double& b) {
     const double c = v * s;
     const double hp = h / 60.0;

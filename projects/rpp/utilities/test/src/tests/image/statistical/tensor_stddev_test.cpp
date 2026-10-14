@@ -42,13 +42,11 @@ using namespace rpptest;
 
 namespace {
 
-// stddev is sqrt(mean of squared deviations) in float; the tolerance covers accumulation, the
-// division, and the sqrt. Integer-space stddevs (U8/I8) carry a larger magnitude than the [0,1]
-// float stddevs, hence the wider absolute tolerance.
+// Covers accumulation, division and sqrt rounding; integer-space stddevs are larger, hence the
+// wider tolerance.
 constexpr Tolerance kTensorStddevTolerance = tolerance(1e-1, 1e-3, 1e-2);
 
-// stddev always outputs Rpp32f, and takes a meanTensor of size n*4 in [MeanR,MeanG,MeanB,MeanImage]
-// order per image (per the API). Tin is the source element type.
+// stddev outputs Rpp32f and takes an n*4 meanTensor ordered [MeanR,MeanG,MeanB,MeanImage].
 template <typename Tin>
 void run_tensor_stddev(const TestConfig& cfg) {
     RpptDesc desc = make_src_descriptor(cfg);  // RPP takes a non-const ptr
@@ -64,10 +62,8 @@ void run_tensor_stddev(const TestConfig& cfg) {
     std::vector<Tin> input(count);
     fill_input<Tin>(input.data(), count, cfg.dtype);
 
-    // The mean the op deviates against. Compute it with the mean reference, then feed the exact
-    // float-rounded values to BOTH the kernel (meanTensor, always n*4) and the stddev reference,
-    // so neither has an unfair mean. meanTensor layout is [MeanR,MeanG,MeanB,MeanImage] per image;
-    // for a 1-channel image all four slots carry that image's single mean.
+    // Feed the same float-rounded means to the kernel and the reference. A 1-channel image puts
+    // its single mean in all four slots.
     const std::vector<double> meanDbl =
         tensor_mean_reference<Tin>(input.data(), desc, roi.data(), XYWH);
     PinnedArray<Rpp32f> mean(cfg.backend, static_cast<std::size_t>(cfg.size.n) * 4);
@@ -85,11 +81,9 @@ void run_tensor_stddev(const TestConfig& cfg) {
         }
     }
 
-    // (1) Host golden model, deviating against the same (float-rounded) means passed to the op.
     const std::vector<double> golden =
         tensor_stddev_reference<Tin>(input.data(), desc, roi.data(), XYWH, meanRef);
 
-    // (2) Run RPP on the configured backend. The result array is host-accessible (pinned for HIP).
     DeviceTensor src(cfg.backend, bytes);
     src.write(input.data(), bytes);
     PinnedArray<Rpp32f> out(cfg.backend, outLen);
@@ -100,10 +94,8 @@ void run_tensor_stddev(const TestConfig& cfg) {
                                  mean.data(), roi.data(), XYWH, handle.get(), cfg.backend),
               RPP_SUCCESS);
 
-    // (3) Drain the op's stream; pinned output is then directly readable on the host.
-    handle.sync();
+    handle.sync();  // pinned output is then directly readable on the host
 
-    // (4) Compare within tolerance.
     EXPECT_TRUE(compare_reduction<Rpp32f>(out.data(), golden, kTensorStddevTolerance(cfg.dtype)));
 }
 
@@ -123,7 +115,6 @@ INSTANTIATE_TEST_SUITE_P(Image_Statistical, TensorStddevTest,
                          ::testing::ValuesIn(make_configs(
                              {DType::U8, DType::F16, DType::F32, DType::I8},
                              {Layout::PKD3, Layout::PLN3, Layout::PLN1}, {Roi::Full, Roi::Partial},
-                             // Kept in step with tensor_min/max's shapes so the
-                             // reduction ops share one grid.
+                             // Same shapes as tensor_min/max.
                              {{2, 160, 160}, {2, 137, 167}})),
                          config_param_name);

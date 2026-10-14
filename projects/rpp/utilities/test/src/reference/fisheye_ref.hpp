@@ -43,17 +43,10 @@ RPP op
   rppt_fisheye   (Image / Effects augmentation)
 
 Description
-  Radial magnification about the frame centre -- the classic "fish eye"
-  filter. The op takes no parameters, so the whole of its behaviour is the map
-  below: destination pixel (i, j) of the ROI-sized output region is placed on
-  the centred unit square, its radius pulled in by the fisheye profile, and
-  the source read back at the rescaled point.
-
-  r' <= r everywhere and r'(1) = 1, so the disc is magnified towards its
-  centre while its rim stays fixed. The profile is the identity only at r = 0
-  and r = 1, where the map reproduces the source pixel exactly -- which is
-  what makes the sub-pixel conventions below self-consistent rather than
-  arbitrary.
+  Radial magnification about the frame centre. Destination pixel (i, j) of the
+  ROI-sized output is placed on the centred unit square, its radius pulled in
+  by the fisheye profile, and the source read back at the rescaled point. The
+  rim (r = 1) and centre (r = 0) are fixed.
 
 Expression
   nx    = 2 i / w - 1,  ny = 2 j / h - 1,  r = hypot(nx, ny)
@@ -64,36 +57,23 @@ Expression
   srcY  = y0 + (r' sin(theta) + 1) h / 2
 
 Notes
-  The public header documents no formula, so a kernel that chose differently
-  shows up as a diff -- a finding, not a reference bug.
+  The public header documents no formula; the model mirrors the kernel.
 
-  - Sampling is NEAREST_NEIGHBOR: the op exposes no interpolationType, and a
-    fisheye is a plain resampling of existing texels. Bilinear would disagree
-    on nearly every pixel.
-  - Coordinates are frame-corner based (nx = 2i/w - 1, no +0.5 pixel-centre
-    term), which is what makes r' = r round-trip to exactly srcX = i. The
-    inverse of that choice is that the map is asymmetric by half a texel about
-    the centre.
-  - The normalisation extent and the destination region are the ROI's, and the
-    source is read at the ROI offset, matching the ROI convention of the
-    suite's other warps (framework/geometric.hpp): the ROI both sizes the
-    output and bounds the valid source rectangle.
-  - The radius is the fast approximation below rather than an exact sqrt, and
-    the whole map runs in single precision. That is a deliberate
-    accuracy-for-speed trade of this augmentation, so the model has to make it
-    too: an exact radius disagrees on the disc rim (where r = 1 exactly is
-    pushed outside the disc) and on the ~2% of pixels whose mapped coordinate
-    sits within the approximation's error of a half-integer, which
-    nearest-neighbour then rounds the other way.
+  - Sampling is NEAREST_NEIGHBOR; the op exposes no interpolationType.
+  - Coordinates are frame-corner based (no +0.5 pixel-centre term).
+  - The normalisation extent and output region are the ROI's, and the source
+    is read at the ROI offset (framework/geometric.hpp).
+  - The radius uses the fast inverse sqrt below and the map runs in single
+    precision, as in the kernel. An exact radius disagrees on the disc rim and
+    on pixels whose mapped coordinate is near a half-integer.
 */
 
 // A destination coordinate outside every ROI rectangle, so the shared driver fills it with the
 // dtype's black. Used for the pixels that fall outside the unit disc.
 constexpr double kFisheyeOutside = -1.0;
 
-// Lomont's fast inverse square root with one Newton round -- the sanctioned approximation, ~0.17%
-// relative error, always low. Written from the published algorithm (Lomont, C., 2003, "Fast Inverse
-// Square Root"), which is the accuracy contract the op is held to.
+// Fast inverse square root with one Newton round (Lomont, C., 2003, "Fast Inverse Square Root"),
+// ~0.17% relative error, always low.
 inline float fisheye_inverse_sqrt(float x) {
     const float xHalf = 0.5f * x;
     int i;

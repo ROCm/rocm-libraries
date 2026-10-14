@@ -41,22 +41,16 @@ using namespace rpptest;
 
 namespace {
 
-// The intrinsics the API's own sample uses, calibrated for a 640x480 frame. The distortion
-// coefficients are dimensionless (they act on normalized coordinates) so they carry over unchanged
-// to any frame size, but fx/fy/cx/cy are in pixels and must be scaled to the tested image or the
-// principal point lands far outside it and the whole map falls off-frame.
+// Sample intrinsics calibrated for 640x480. fx/fy/cx/cy are in pixels and must be scaled to the
+// tested image; the distortion coefficients are dimensionless.
 constexpr double kRefW = 640.0, kRefH = 480.0;
 constexpr double kFx = 534.07088364, kCx = 341.53407554;
 constexpr double kFy = 534.11914595, kCy = 232.94565259;
 
 enum class LensKind { NoDistortion, Barrel };
 
-// NoDistortion: every coefficient 0, so the map is the exact identity and the output must be a
-// verbatim copy of the ROI. This is the case that validates the model independently of the
-// undocumented interpolation choice -- at integer source coordinates bilinear and nearest-neighbour
-// agree -- and separates a plumbing failure from a distortion-math disagreement.
-// Barrel: the sample coefficients from the API/legacy harness (k1 < 0, the barrel case the op's
-// description names).
+// NoDistortion: an exact identity map, independent of the interpolation choice.
+// Barrel: the sample coefficients (k1 < 0).
 struct LensParams {
     LensKind kind;
     std::string name() const {
@@ -64,13 +58,8 @@ struct LensParams {
     }
 };
 
-// NoDistortion deliberately uses IDENTITY intrinsics (fx = fy = 1, cx = cy = 0) rather than the
-// scaled sample ones. With zero coefficients the map reduces to srcX = fx*((outX-cx)/fx)+cx, which
-// is only exactly outX when fx and cx are exact: with the scaled intrinsics it lands on outX +/-
-// 1e-7, putting the frame border on a float knife-edge where the sign decides whether the low tap
-// is in-frame. Identity intrinsics make the map exactly the identity for every pixel, so this set
-// is a clean plumbing check and any diff is a real defect. Determinant is 1, so the matrix is
-// valid.
+// NoDistortion uses identity intrinsics: with the scaled ones the map lands on outX +/- 1e-7, which
+// puts the frame border on a float knife-edge.
 void fill_camera_matrix(Rpp32f* m, Rpp32u w, Rpp32u h, LensKind kind) {
     const bool identity = kind == LensKind::NoDistortion;
     const double sx = static_cast<double>(w) / kRefW, sy = static_cast<double>(h) / kRefH;
@@ -91,9 +80,7 @@ void fill_distortion(Rpp32f* d, LensKind kind) {
     for (int i = 0; i < 8; ++i) d[i] = (kind == LensKind::Barrel) ? kBarrel[i] : 0.f;
 }
 
-// The map is resolved with bilinear sampling, so only genuine fp rounding is allowed. These are the
-// suite's shared warp/remap bilinear tolerances; they are NOT loosened to cover the resize-family
-// trailing-edge bilinear defect or any partial-ROI placement divergence, which stay red.
+// Bilinear rounding only; not loosened for the trailing-edge or partial-ROI placement defects.
 constexpr Tolerance kLensCorrectionTolerance = kRoundingTolerance;
 
 template <typename T>
@@ -105,9 +92,8 @@ void run_lens_correction(const TestConfig& cfg, const LensParams& op) {
     const std::size_t count = element_count(desc);
     const std::size_t bytes = byte_size(desc, cfg.dtype);
 
-    // Remap tables: a separate F32, single-channel, UNPADDED tensor (row stride exactly imgW), as
-    // the header specifies. They are pure scratch here -- the op derives the map from the
-    // intrinsics and writes it into them.
+    // Remap tables: F32, single-channel, unpadded, as the header specifies. Scratch only; the op
+    // writes the map into them.
     RpptDesc td{};
     td.numDims = 4;
     td.offsetInBytes = 0;
@@ -138,9 +124,7 @@ void run_lens_correction(const TestConfig& cfg, const LensParams& op) {
     PinnedArray<Rpp32f> rowT(cfg.backend, tblCount), colT(cfg.backend, tblCount);
     for (std::size_t k = 0; k < tblCount; ++k) rowT[k] = colT[k] = 0.0f;
 
-    // (1) Host golden model. The op writes the ROI-sized region at the destination origin, so
-    // golden and the device buffer start from the same distinct pattern and only that region is
-    // compared.
+    // The op writes the ROI-sized region at the destination origin; only that region is compared.
     std::vector<T> input(count), dstInit(count), golden(count), actual(count);
     fill_input<T>(input.data(), count, cfg.dtype);
     fill_input<T>(dstInit.data(), count, cfg.dtype, /*salt=*/1);
@@ -148,7 +132,6 @@ void run_lens_correction(const TestConfig& cfg, const LensParams& op) {
     lens_correction_reference<T>(input.data(), golden.data(), desc, cfg.dtype, roi.data(), XYWH,
                                  cameraMatrix.data(), distortion.data(), BILINEAR);
 
-    // (2) Run RPP on the configured backend.
     DeviceTensor src(cfg.backend, bytes), dst(cfg.backend, bytes);
     src.write(input.data(), bytes);
     dst.write(dstInit.data(), bytes);
@@ -162,10 +145,7 @@ void run_lens_correction(const TestConfig& cfg, const LensParams& op) {
     handle.sync();
     dst.read(actual.data(), bytes);
 
-    // (3) Compare the ROI-sized region written at the destination origin. The comparison uses the
-    // caller's own copy of the ROI, not the tensor handed to the op: HIP rewrites that tensor from
-    // XYWH to LTRB in place (roiWidth/roiHeight come back as rb.x/rb.y), which would otherwise make
-    // the comparison walk a different region than the golden wrote.
+    // Uses the test's own ROI copy: HIP rewrites the op's ROI to LTRB in place.
     EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), desc, roiVec.data(), XYWH,
                                kLensCorrectionTolerance(cfg.dtype)));
 }

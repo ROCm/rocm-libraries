@@ -37,12 +37,10 @@ SOFTWARE.
 
 namespace rpptest {
 
-// Generic inverse-map driver shared by every geometric ("move pixels around") golden model. The
-// op supplies only its output->source coordinate map; the sampling, interpolation, border fill,
-// and per-dtype quantization live here, so each op reference is just its transform + this call.
+// Inverse-map drivers shared by the geometric golden models. The op supplies its output->source
+// coordinate map; sampling, border fill and quantization live here.
 
-// Destination region size (packed at the destination origin) per image. For same-size ops
-// (flip/rotate/warp/remap) this is the source ROI size; resize overrides it with dstImgSizes.
+// Destination region size (packed at the destination origin) per image.
 struct OutSize {
     Rpp32u w, h;
 };
@@ -57,18 +55,13 @@ inline std::vector<OutSize> roi_out_sizes(const RpptDesc& d, const RpptROI* roi,
     return out;
 }
 
-// Scaling driver shared by the ops that map the source ROI onto a per-image destination size
-// (resize, resize_crop_mirror, resize_mirror_normalize). It owns the one definition of that resize:
-// the drift-free pixel-CENTER inverse map
+// Scaling driver for the resize family. Pixel-centre inverse map
 //     scaleX = roiWidth / dstW ,  srcX = x0 + (i + 0.5) * scaleX - 0.5
-// edge-clamped into the ROI so the boundary replicates the source edge -- a resize introduces no
-// border, which is what separates it from the warp driver above. An exact-integer scale is then a
-// verbatim copy and scale 1 is the identity.
+// clamped into the ROI, so the edge replicates and a resize introduces no border.
 //
-// mirror (may be null) flips the destination left-to-right, equivalent to sampling output column
-// (dstW-1-i). store(v, n, c) turns the sampled value into the stored element: resize and
-// resize_crop_mirror use quantizing_store() below, while resize_mirror_normalize folds its
-// normalize in so the pipeline quantizes exactly once (and can keep its own float-range rule).
+// mirror (may be null) flips the destination left-to-right. store(v, n, c) turns the sampled
+// value into the stored element, so resize_mirror_normalize can fold its normalize in and quantize
+// once.
 template <typename T, typename Store>
 void resize_driver(const T* src, const RpptDesc& sd, T* dst, const RpptDesc& dd, DType dt,
                    const RpptROI* roi, RpptRoiType roiType, const RpptImagePatch* dstSizes,
@@ -98,35 +91,24 @@ void resize_driver(const T* src, const RpptDesc& sd, T* dst, const RpptDesc& dd,
     }
 }
 
-// The plain store: round/clamp the sampled value into the dtype and convert. What an op that only
-// moves pixels around (resize, resize_crop_mirror) needs.
+// The plain store: round/clamp the sampled value into the dtype and convert.
 template <typename T>
 inline auto quantizing_store(DType dt) {
     return [dt](double v, Rpp32u, Rpp32u) { return from_double<T>(quantize_stored(v, dt)); };
 }
 
-// For each output pixel (i,j) of image n's destination region, invMap yields the source coordinate
-// (srcX,srcY) in the full-image absolute frame (texel (0,0) = image origin); the source is sampled
-// there with `interp`, samples outside the ROI rectangle filled with the dtype's black, and the
-// quantized result written packed at the destination origin. dst outside the written region is left
-// as the caller initialized it.
-//
-// The source is sampled in the ABSOLUTE image frame (not ROI-local), and the ROI sets both the
-// output size and the valid-source rectangle [x0,x0+w) x [y0,y0+h), outside which the sample is
-// black. An op whose transform is naturally ROI-relative -- the warps, which act about the ROI
-// centre -- adds the ROI origin inside its own invMap; this keeps the driver's sampling model
-// uniform and leaves the frame choice with the op that owns the transform.
+// For each output pixel of image n's destination region, invMap yields the source coordinate in
+// the absolute image frame (not ROI-local); the source is sampled there and the quantized result
+// written packed at the destination origin. The ROI is the valid-source rectangle; an op whose
+// transform is ROI-relative (the warps) adds the ROI origin inside its own invMap.
 //
 // invMap signature: void(Rpp32u n, double outX, double outY, double& srcX, double& srcY)
 //   outX/outY are origin-based output pixel indices; the op owns any pixel-center (+0.5)
 //   convention.
-// sd and dd differ only when the op converts layout; the source is sampled through sd's strides
-// and the result written through dd's, so the transpose needs no special-casing here.
+// sd and dd differ only when the op converts layout.
 //
-// borderMode selects what a sample outside the ROI rectangle resolves to (see
-// framework/interpolation.hpp). It defaults to Constant, whose value is the dtype's black, which
-// is the only behaviour any op used before the mode existed -- so an op opts in to replicate/
-// wrap/reflect deliberately, and no golden changes until one does.
+// borderMode resolves samples outside the ROI (see interpolation.hpp); the default is Constant
+// with the dtype's black.
 template <typename T, typename InvMap>
 void geometric_reference(const T* src, const RpptDesc& sd, T* dst, const RpptDesc& dd, DType dt,
                          const RpptROI* roi, RpptRoiType roiType,

@@ -58,17 +58,11 @@ Per-type form
   clamp to [0,1].
 
 Scope
-  The texture is not modelled here and cannot be: it is a baked constant pair
-  in the private header src/include/tensor/spatter_mask.hpp, which is not
-  installed with the library, and the window the kernel samples from is drawn
-  per image from an unseedable std::random_device-seeded mt19937 on both
-  backends. There is therefore no pointwise golden for this op.
-
-  What is modelled instead are the parts of the blend that hold whatever texel
-  the RNG lands on: the documented channel mapping, and the fixed point where
-  the source already equals the spatter colour (mask + maskInv == 1
-  everywhere). That fixed point is the only exact golden that holds at an
-  arbitrary image size.
+  The texture is not modelled: it lives in the non-installed header
+  src/include/tensor/spatter_mask.hpp, and both backends pick the sampling
+  window per image from an mt19937 seeded by std::random_device. Only the
+  channel mapping and the fixed point where the source already equals the
+  spatter colour are modelled, since those hold for any texel.
 */
 
 // Documented spatter intensity for channel `c` of a `channels`-channel image, in [0,1].

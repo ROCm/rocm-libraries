@@ -40,19 +40,11 @@ RPP op
 
 Description
   Compensates barrel lens distortion, parameterized by a 9-element camera
-  matrix and 8 distortion coefficients. The op is an undistortion remap: the
-  caller's rowRemapTable / colRemapTable are scratch (the legacy harness
-  allocates them zeroed and never fills them for this op), so the op derives
-  the map itself from the intrinsics and then samples the source through it.
-
-  With 9 + 8 parameters and a documented "black image if the camera matrix
-  determinant is 0" (i.e. the matrix is inverted), this is the textbook
-  pinhole + radial/tangential Brown-Conrady model, coefficients in the
-  universal (k1, k2, p1, p2, k3, k4, k5, k6) order.
-
-  The source is then sampled at (srcX, srcY) and the result quantized per
-  type, both handled by geometric_reference() / interpolation.hpp and shared
-  with the other warps.
+  matrix and 8 distortion coefficients. The rowRemapTable / colRemapTable
+  arguments are scratch; the op derives the map from the intrinsics. This is
+  the pinhole + radial/tangential Brown-Conrady model, coefficients in
+  (k1, k2, p1, p2, k3, k4, k5, k6) order. Sampling and quantization are
+  handled by geometric_reference().
 
 Expression
   x      = (outX - cx) / fx,  y = (outY - cy) / fy      pixel -> normalized
@@ -64,23 +56,15 @@ Expression
   srcX   = fx x' + cx,  srcY = fy y' + cy               normalized -> pixel
 
 Notes
-  The public header documents neither of the following, so a kernel that chose
-  differently shows up as a diff -- a finding, not a reference bug.
+  The public header does not document the following.
 
-  - Interpolation is taken to be BILINEAR (the op exposes no
-    interpolationType, and bilinear is the convention for an undistortion
-    remap). The zero-coefficient parameter set makes the map the exact
-    identity, where bilinear and nearest-neighbour agree, so that set
-    validates the model independently of this choice.
-  - The output index is origin-based, matching the ROI convention RPP's other
-    warps use (framework/geometric.hpp): the ROI sizes the output and bounds
-    the valid source rectangle, and the mapping itself ignores the ROI offset.
-    Under a full ROI the two readings coincide.
+  - Interpolation is BILINEAR; the op exposes no interpolationType.
+  - The output index is origin-based, as in the other warps
+    (framework/geometric.hpp): the ROI sizes the output and bounds the valid
+    source rectangle, and the mapping ignores the ROI offset.
 
-  The camera matrix is read in its standard row-major form
-  [fx 0 cx; 0 fy cy; 0 0 1]; skew (element 1) is assumed 0, as it is in the
-  intrinsics the API's own sample uses. A singular matrix (fx or fy == 0) is
-  documented to yield a black image and is not exercised.
+  The camera matrix is row-major [fx 0 cx; 0 fy cy; 0 0 1] with skew assumed
+  0. A singular matrix (documented to yield a black image) is not exercised.
 */
 
 // Destination pixel (outX, outY) -> the source coordinate to sample, in the absolute image frame.

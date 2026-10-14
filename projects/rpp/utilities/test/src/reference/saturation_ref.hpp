@@ -45,9 +45,8 @@ RPP op
 Description
   Saturation scale in HSV space. Each RGB pixel is converted to HSV, its
   saturation is multiplied by factor and clamped to [0,1], and the result is
-  converted back to RGB. Hue and value are untouched, so colours become more
-  or less vivid without shifting or changing brightness. This is a 3-channel
-  op (ch0=R, ch1=G, ch2=B) and reads all three channels of a pixel together.
+  converted back to RGB. Hue and value are untouched. This is a 3-channel op
+  (ch0=R, ch1=G, ch2=B).
 
   Grey pixels (R == G == B) have S == 0 and are invariant to the scale.
 

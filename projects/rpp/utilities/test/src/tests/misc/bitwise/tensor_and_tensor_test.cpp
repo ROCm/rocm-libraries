@@ -55,15 +55,12 @@ void run_tensor_and_tensor(const NdConfig& cfg, Broadcast broadcast) {
     const std::size_t count2 = generic_element_count(*desc2);
     const std::size_t countOut = generic_element_count(*descOut);
 
-    // (1) Host golden model. Two distinct fills (different salts) so the AND is exercised on
-    // differing bit patterns. The op writes every output element, so golden needs no pre-seeding.
     std::vector<T> input1(count1), input2(count2), golden(countOut), actual(countOut);
     fill_input_nd<T>(input1.data(), *desc1, cfg.dtypeIn, 0);
     fill_input_nd<T>(input2.data(), *desc2, cfg.dtypeIn, 1);
     bitwise_tensor_reference<T>(input1.data(), input2.data(), golden.data(), *descOut, *desc1,
                                 *desc2, BitwiseTensorOp::And);
 
-    // (2) roiTensors live in host-accessible (pinned for HIP) memory.
     const std::vector<Rpp32u> roiVec1 = make_nd_roi_tensor(dims1);
     const std::vector<Rpp32u> roiVec2 = make_nd_roi_tensor(dims2);
     PinnedArray<Rpp32u> roi1(cfg.backend, roiVec1.size());
@@ -71,7 +68,6 @@ void run_tensor_and_tensor(const NdConfig& cfg, Broadcast broadcast) {
     for (std::size_t i = 0; i < roiVec1.size(); ++i) roi1[i] = roiVec1[i];
     for (std::size_t i = 0; i < roiVec2.size(); ++i) roi2[i] = roiVec2[i];
 
-    // (3) Run RPP on the configured backend.
     const std::size_t bytes1 = generic_byte_size(*desc1, cfg.dtypeIn);
     const std::size_t bytes2 = generic_byte_size(*desc2, cfg.dtypeIn);
     const std::size_t bytesOut = generic_byte_size(*descOut, cfg.dtypeIn);
@@ -88,8 +84,6 @@ void run_tensor_and_tensor(const NdConfig& cfg, Broadcast broadcast) {
     handle.sync();  // drain the op's stream before copying results back
     dst.read(actual.data(), bytesOut);
 
-    // (4) Compare the whole output tensor. A bitwise AND is bit-exact for every dtype, so the
-    // tolerance is zero -- do not loosen it.
     EXPECT_TRUE(compare_nd<T>(actual.data(), golden.data(), *descOut, 0.0));
 }
 
@@ -107,12 +101,8 @@ TEST_P(TensorAndTensorTest, Correctness) {
     });
 }
 
-// Restricted to the integer dtypes (U8/I8): the op also accepts the 16/32-bit integer types, but
-// the framework's DType enum does not carry them yet.
-//
-// Full grid passes on both backends. Note the HIP descriptors must be device-addressable
-// (GenericDescriptor handles this): at rank >= 4 the non-broadcast kernel reads dims/strides on
-// the device. Undocumented and rank-dependent.
+// Restricted to U8/I8: the op also accepts the 16/32-bit integer types, which the DType enum does
+// not carry yet.
 INSTANTIATE_TEST_SUITE_P(Misc_Bitwise, TensorAndTensorTest,
                          ::testing::ValuesIn(nd_with_params<BroadcastParams>(
                              make_nd_configs({DType::U8, DType::I8}, {2, 3, 4},

@@ -42,40 +42,31 @@ RPP op
   rppt_color_to_greyscale   (Image / Data exchange)
 
 Description
-  Collapses a 3-channel colour image to a single luma plane. Each output
-  element is the weighted sum of that pixel's colour channels, so the op is
-  not pointwise in the usual sense: it reads a whole pixel and writes one
-  element, and the source and destination descriptors differ (srcDesc c = 3
-  in PKD3/PLN3, dstDesc c = 1 planar).
+  Collapses a 3-channel colour image to a single luma plane. The source and
+  destination descriptors differ (srcDesc c = 3 in PKD3/PLN3, dstDesc c = 1).
 
   srcSubpixelLayout names the source channel order: RGBtype => (R,G,B),
   BGRtype => (B,G,R), i.e. R and B swap and G is unchanged.
 
 Expression
-  The public header does not name the coefficients, so the standard BT.601
-  luma weights are used -- the same ones histogram_equalize applies.
+  The header does not name the coefficients, so the BT.601 luma weights are
+  used.
 
   grey(x, y) = 0.299 R + 0.587 G + 0.114 B
 
 Per-type form
-  The weights sum to exactly 1, so the luma is a convex combination and
-  commutes with the I8 intensity offset:
-  0.299(R+128) + 0.587(G+128) + 0.114(B+128) = luma + 128. The dot product is
-  therefore taken directly on stored values for every type and quantized
-  once, with no detour through [0,1] intensity space.
+  The weights sum to 1, so the I8 offset cancels and the dot product is taken
+  directly on stored values for every type, quantized once.
 */
 inline double color_to_greyscale_scalar(double c0, double c1, double c2, DType dt,
                                         RpptSubpixelLayout subpixel) {
-    // srcSubpixelLayout names the source channel order: RGBtype => (R,G,B), BGRtype => (B,G,R),
-    // i.e. R and B swap and G is unchanged.
     const double r = (subpixel == BGRtype) ? c2 : c0;
     const double g = c1;
     const double b = (subpixel == BGRtype) ? c0 : c2;
     return quantize_stored(0.299 * r + 0.587 * g + 0.114 * b, dt);
 }
 
-// The source walk supplies the channel-0 pixel offset and the channels are reached with
-// channel_index(); the destination offset is computed against dstDesc.
+// The destination offset is computed against dstDesc, which has a single channel.
 template <typename T>
 void color_to_greyscale_reference(const T* src, const RpptDesc& srcDesc, T* dst,
                                   const RpptDesc& dstDesc, DType dt, const RpptROI* roi,

@@ -44,21 +44,12 @@ RPP op
   rppt_pixelate   (Image / Effects augmentation)
 
 Description
-  Reduces the image to visible blocks via a two-step resize: scaled DOWN with
-  bilinear interpolation, then back UP with nearest-neighbour, which is what
-  turns the lost detail into blocks.
+  Reduces the image to visible blocks via a two-step resize: scaled down with
+  bilinear interpolation, then back up with nearest-neighbour. Both steps use
+  resize_reference.
 
-  Only the composition is taken from the operator; the resize itself is the
-  suite's own resize_reference (drift-free pixel-CENTRE inverse map,
-  edge-clamped, per-type round-to-nearest quantization). A resize defect
-  therefore surfaces here as a diff rather than being reproduced, which is the
-  point: pixelate inherits whatever the resize paths get wrong.
-
-  Step 2's source is the intermediate image, which step 1 wrote packed at the
-  destination ORIGIN (the placement rule every resize in the suite follows).
-  Its ROI origin is therefore (0,0) regardless of where the source ROI sat.
-  The intermediate is held in the source type at the source descriptor's
-  strides, matching the scratch buffer the op requires.
+  Step 1 writes the intermediate at the destination origin, so step 2 reads it
+  with ROI origin (0,0). The intermediate uses the source type and strides.
 
 Expression
   interW = roiW * (100 - p) / 100    (truncated)
@@ -68,14 +59,12 @@ Expression
 
 Notes
   The public API header documents only that pixelationPercentage "controls how
-  much pixelation is applied" (0 to 100) -- it pins neither the block size nor
-  the aggregation. The two-step resize definition above is stated at the
-  dispatch level instead.
+  much pixelation is applied" (0 to 100); the two-step resize follows the
+  op's dispatch.
 */
 
-// The downsampled extent of one ROI edge. Truncating, matching the Rpp32u image-patch field the
-// extent is carried in. Floored at 1: a zero extent has no pixels to sample and the second resize
-// would divide by it (no test configuration reaches this -- it needs p at or near 100).
+// The downsampled extent of one ROI edge, truncated and floored at 1 so step 2 never divides by
+// zero.
 inline Rpp32u pixelate_intermediate_extent(Rpp32u extent, double pixelationPercentage) {
     const double scaled = (static_cast<double>(extent) * (100.0 - pixelationPercentage)) / 100.0;
     return std::max(1u, static_cast<Rpp32u>(scaled));

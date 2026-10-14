@@ -48,15 +48,11 @@ Description
   excluded); roiTensor (batchSize * nDim * 2 -- per-axis starts followed by
   per-axis lengths) delimits the valid source region.
 
-  The slice is written densely at the destination origin. When every source
-  coordinate lies inside the ROI the element is copied verbatim; when some
-  axis falls outside, the element has no source and takes fillValue.
+  The slice is written at the destination origin. Elements whose source
+  coordinate lies outside the ROI on any axis take fillValue.
 
-  The walk covers shape[] per sample, which is exactly the destination extents
-  the caller builds (dstDims = {batch, shape...}), so every destination
-  element is written. Both tensors are addressed by logical coordinate through
-  their own strides (nd_offset), so either may be dense or padded -- slice's
-  own convention is padded.
+  Both tensors are addressed by logical coordinate through their own strides
+  (nd_offset), so either may be dense or padded.
 
 Expression
   s[a] = anchor[a] + c[a]
@@ -68,15 +64,11 @@ Per-type form
   for every type.
 
 Notes
-  Two things the header leaves open, handled rather than guessed:
-
-  - The out-of-ROI result with enablePadding false is unspecified, so the
-    caller is required to keep the slice inside the ROI in that case; the fill
-    branch is then unreachable rather than an encoded guess. enablePadding is
-    consequently not a parameter here.
-  - fillValue's type is unspecified (the API takes a void pointer). The caller
-    passes 0, which is the same value under every interpretation, so the
-    golden only needs the scalar.
+  - The out-of-ROI result with enablePadding false is unspecified, so callers
+    must keep the slice inside the ROI in that case; enablePadding is not a
+    parameter here.
+  - fillValue's type is unspecified (void pointer). Callers pass 0, which is
+    the same under every interpretation.
 */
 template <typename T>
 void slice_reference(const T* src, T* dst, const RpptGenericDesc& srcDesc,
@@ -94,9 +86,8 @@ void slice_reference(const T* src, T* dst, const RpptGenericDesc& srcDesc,
 
         const NdDims sliceExtents(shape, shape + nDim);
         for_each_coord(sliceExtents, [&](const NdDims& coord) {
-            // srcCoord only means anything once every axis is known to be inside the ROI: an
-            // out-of-ROI coordinate can be negative, so it is floored at 0 and the element takes
-            // fillValue instead of being read.
+            // Out-of-ROI coordinates can be negative, so they are floored at 0; srcCoord is only
+            // read when the element is in the ROI.
             bool inRoi = true;
             for (Rpp32u a = 0; a < nDim; ++a) {
                 dstCoord[a + 1] = coord[a];

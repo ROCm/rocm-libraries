@@ -35,14 +35,10 @@ SOFTWARE.
 #include "framework/backend_param.hpp"
 #include "framework/config_param.hpp"
 
-// Grid axes for the ND "generic tensor" ops (Misc domain).
-// The shared axes (DType, the WithParams machinery, num_token) live in config_param.hpp.
+// Grid axes for the ND "generic tensor" ops (Misc domain), gridded over rank instead of
+// layout/ROI. Shared axes live in config_param.hpp.
 
 namespace rpptest {
-
-// The generic-tensor ops are gridded over rank instead of layout/ROI. The label maps onto the same
-// structural slots as the image grammar: rank takes the Layout slot, the op param takes the Roi
-// slot. Descriptor construction and traversal for these live in tensor_setup.hpp.
 
 // Extents including the leading batch axis, matching RpptGenericDesc::dims.
 using NdDims = std::vector<Rpp32u>;
@@ -74,10 +70,8 @@ struct DTypeConv {
     DType in, out;
 };
 
-// The innermost extent decides whether the vector loops see a tail. The ND tensors are dense
-// (unlike the image domain, whose rows are padded out), so a non-multiple innermost extent is the
-// only way the tail path and the one-past-the-end of the last store are exercised here. This is
-// the counterpart of the image grid's size axis.
+// The innermost extent decides whether the vector loops see a tail. ND tensors are dense, so Tail
+// also puts live data right after the last store.
 enum class NdShape { VectorAligned, Tail };
 
 struct NdConfig {

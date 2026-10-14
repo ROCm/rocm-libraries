@@ -40,10 +40,8 @@ using namespace rpptest;
 
 namespace {
 
-// kernelSize is an odd square window size (3/5/7/9 per the API doc); each has its own SIMD path.
-// stdDev is the per-image Gaussian standard deviation (same value fed to golden and kernel). At
-// 0.25 the weights collapse onto the centre tap (near-identity), at 5.0 they flatten towards a box
-// over the window -- the two ends of the table the kernel builds.
+// Each kernelSize (3/5/7/9) has its own SIMD path. stdDev 0.25 collapses the weights onto the
+// centre tap; 5.0 flattens them towards a box.
 struct GaussianFilterParams {
     Rpp32u kernelSize;
     float stdDev;
@@ -52,17 +50,13 @@ struct GaussianFilterParams {
     }
 };
 
-// Tolerances reflect legitimate numeric error only (weighted-sum rounding); U8/I8 allow one LSB for
-// round-to-nearest quantization, floats allow accumulation slack.
+// U8/I8 allow one LSB for round-to-nearest; floats allow accumulation slack.
 constexpr Tolerance kGaussianFilterTolerance = tolerance(1.0, 1e-3, 1e-2);
 
 template <typename T>
 void run_gaussian_filter(const TestConfig& cfg, const GaussianFilterParams& op) {
-    // src carries a leading border pad: the HIP filter kernel requires
-    // srcDesc.offsetInBytes >= 12 * (kernelSize/2) (read-slack for the KxK window; the border
-    // itself is computed by clamping indices to the image, i.e. replicate). dst keeps offset 0,
-    // so the golden and comparator index destination elements from 0. Applied on both backends
-    // (the HOST path honours offsetInBytes identically) to keep one path.
+    // The HIP filter kernel requires srcDesc.offsetInBytes >= 12 * (kernelSize/2) as read-slack for
+    // the window, so src carries a leading pad. dst keeps offset 0.
     RpptDesc srcDesc = make_src_descriptor(cfg);
     RpptDesc dstDesc = make_dst_descriptor(cfg);
     const std::size_t offsetBytes = 12u * (op.kernelSize / 2);
@@ -72,7 +66,6 @@ void run_gaussian_filter(const TestConfig& cfg, const GaussianFilterParams& op) 
     const std::size_t count = element_count(srcDesc);
     const std::size_t imageBytes = count * dtype_size(cfg.dtype);
 
-    // stdDevTensor is a per-image Rpp32f* in host-accessible (pinned for HIP) memory.
     PinnedArray<Rpp32f> stdDev(cfg.backend, cfg.size.n);
     PinnedArray<RpptROI> roi(cfg.backend, cfg.size.n);
     const std::vector<RpptROI> roiVec = make_roi(srcDesc, cfg.roi);
@@ -81,9 +74,7 @@ void run_gaussian_filter(const TestConfig& cfg, const GaussianFilterParams& op) 
         roi[i] = roiVec[i];
     }
 
-    // (1) Host golden model. The src buffer is [front pad][image][back pad]; the image base sits
-    // at offsetElems. golden/actual are the (pad-free, offset 0) destination. golden starts as a
-    // copy of the image so the untouched (outside-ROI) region is defined.
+    // src is [front pad][image][back pad]; the image base sits at offsetElems.
     std::vector<T> src(offsetElems + count + offsetElems), golden(count), actual(count);
     fill_input<T>(src.data(), src.size(), cfg.dtype);
     T* image = src.data() + offsetElems;
@@ -91,9 +82,6 @@ void run_gaussian_filter(const TestConfig& cfg, const GaussianFilterParams& op) 
     gaussian_filter_reference<T>(image, srcDesc, golden.data(), dstDesc, cfg.dtype, roi.data(),
                                  XYWH, op.kernelSize, op.stdDev);
 
-    // (2) Run RPP on the configured backend. gaussian_filter is a single symbol taking a backend
-    // arg (no separate _host variant). RPP adds srcDesc.offsetInBytes to the src pointer
-    // internally, landing on the image base.
     DeviceTensor srcDev(cfg.backend, src.size() * dtype_size(cfg.dtype));
     DeviceTensor dst(cfg.backend, imageBytes);
     srcDev.write(src.data(), src.size() * dtype_size(cfg.dtype));
@@ -105,13 +93,11 @@ void run_gaussian_filter(const TestConfig& cfg, const GaussianFilterParams& op) 
                                    handle.get(), cfg.backend),
               RPP_SUCCESS);
 
-    // (3) Retrieve the result on the host (no-op copy for HOST, device->host for HIP).
     handle.sync();  // drain the op's stream before copying results back
     dst.read(actual.data(), imageBytes);
 
-    // (4) Compare within tolerance over the ROI. The golden matches HIP across the whole grid, so
-    // it is correct; known HOST-only reds kept red by design: PKD3 k3 diverges at the row edge, and
-    // PLN PartialRoi k5 bleeds out-of-ROI neighbors. Both are real kernel defects.
+    // Known HOST reds (kernel defects): PKD3 k3 diverges at the row edge, and PLN PartialRoi k5
+    // reads neighbours from outside the ROI.
     EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), dstDesc, roi.data(), XYWH,
                                kGaussianFilterTolerance(cfg.dtype)));
 }

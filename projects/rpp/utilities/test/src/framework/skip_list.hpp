@@ -31,20 +31,13 @@ SOFTWARE.
 #include <cstdlib>
 #include <string>
 
-// The cases the current implementation does not satisfy: defects this suite has already found,
-// plus the few whose result is not reproducible from run to run. They are skipped, so a run is
-// green unless something new breaks.
+// Cases the current implementation does not satisfy (known kernel defects, plus a few whose result
+// is not reproducible run to run). They are skipped so a run is green unless something new breaks.
+// Fixing a kernel means deleting the matching entry here in the same change.
 //
-// The test bodies assert the correct behaviour unconditionally. This list, and only this list,
-// records which of those assertions do not hold today, so fixing a kernel means deleting the
-// matching entry here in the same change.
-//
-// Set RPP_TEST_NO_SKIP_LIST=1 to run the listed cases anyway. That is the only thing that
-// notices when a fix has made an entry obsolete, so it is worth running periodically.
+// Set RPP_TEST_NO_SKIP_LIST=1 to run the listed cases anyway and find entries a fix made obsolete.
 //
 // Patterns are GTest filter globs ('*' and '?') matched against "<Suite>/<Fixture>.<Test>/<Param>".
-// They were derived from observed runs and collapsed onto the axes that share a cause. The
-// underlying defects are triaged and tracked internally, not here.
 
 namespace rpptest {
 
@@ -365,8 +358,7 @@ inline const char* skip_pattern_for(const std::string& testName) {
     return nullptr;
 }
 
-// Fixture base for the suite's parameterised tests: skips the case if it is listed above, so no
-// test body has to know the list exists.
+// Fixture base for the suite's parameterised tests: skips the case if it is listed above.
 template <typename P>
 class SkipListTest : public ::testing::TestWithParam<P> {
    protected:

@@ -43,16 +43,10 @@ RPP op
 
 Description
   Rotates the image about its centre by a per-image angle in degrees, positive
-  being anticlockwise. Being a warp, it inverse-maps: for each output pixel the
-  source coordinate is the output coordinate rotated about the centre.
-
-  The output index is origin-based within the ROI-sized output region, and the
-  rotation is about the ROI centre, so the source coordinate comes out
-  ROI-relative and the ROI origin (x0,y0) is added to reach the absolute
-  (full-image) frame. Like warp_affine and warp_perspective, RPP sizes the
-  output from the ROI and bounds valid samples to the ROI rectangle, outside
-  which the sample is black. Sampling, interpolation, border and quantize are
-  handled by geometric_reference(), shared with the other warps.
+  being anticlockwise. Each output pixel inverse-maps to the source by a
+  rotation about the ROI centre, and the ROI origin (x0,y0) is added to reach
+  the absolute frame. The output is ROI-sized and samples outside the ROI are
+  black. Sampling and quantization are handled by geometric_reference().
 
 Expression
   With dx = outX - cx, dy = outY - cy and R(theta) = [cos -sin; sin cos]:
@@ -61,21 +55,15 @@ Expression
   srcY = y0 + cy + dx*sin(theta) + dy*cos(theta)
 
 Notes
-  The public header documents neither the centre of rotation nor the exact
-  sign. The centre = (roiWidth/2, roiHeight/2) and the source = R(+theta)*d
-  mapping above were confirmed against the op on FullRoi by black-box probing:
-  180 deg gives srcCol = W - outCol, so the centre is W/2 and not (W-1)/2, and
-  +10 deg fixes the sign. The halves are truncated to whole pixels, as the
-  shared warp_affine kernel computes them (roiWidth >> 1); only an odd extent
-  tells the truncated half from the geometric one.
+  The public header documents neither the centre of rotation nor the sign. The
+  model matches the op: the centre is (roiWidth/2, roiHeight/2) truncated to
+  whole pixels, as the warp_affine kernel computes it (roiWidth >> 1).
 
   Cardinal angles (0/90/180/270) map to integer source coordinates, so the
-  golden is bit-exact there.
+  result is bit-exact there.
 
-  rotate runs on the shared warp_affine machinery and so inherits its
-  ROI-origin defect: the kernels omit the +x0/+y0 above, making angle 0 over a
-  partial ROI a part-black image rather than the ROI content. Every
-  partial-ROI case is on the skip list; see warp_affine_ref.hpp.
+  rotate shares warp_affine's ROI-origin defect (the kernels omit +x0/+y0), so
+  partial-ROI cases are on the skip list; see warp_affine_ref.hpp.
 */
 template <typename T>
 void rotate_reference(const T* src, T* dst, const RpptDesc& d, DType dt, const RpptROI* roi,

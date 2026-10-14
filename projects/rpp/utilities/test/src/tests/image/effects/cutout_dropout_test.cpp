@@ -42,18 +42,11 @@ using namespace rpptest;
 
 namespace {
 
-// cutout_dropout overwrites rectangular boxes with caller-supplied solid colors: a direct store,
-// no arithmetic, so every dtype is bit-exact.
-
-// Per-image box stride and count. cutout_dropout has no maxBoxesPerImage parameter -- the kernel
-// infers the anchor/color stride as max(numBoxesTensor). The ragged case (an image whose count is
-// below that max) has no documented array-packing contract and was observed to leave that image
-// un-erased even on FullRoi, so every image uses the same count == the stride, which is
-// unambiguous regardless of the packing convention.
+// The kernel infers the anchor/color stride as max(numBoxesTensor) and ragged packing is
+// undocumented, so every image uses count == stride.
 constexpr Rpp32u kMaxBoxesPerImage = 2;
 
-// Per-(box, channel) fill intensity in [0,255]. Distinct colors verify channel handling; PLN1 uses
-// index 0 only.
+// Per-(box, channel) fill intensity in [0,255]. PLN1 uses index 0 only.
 constexpr std::array<std::array<double, 3>, 2> kBoxIntensity = {{
     {{200.0, 60.0, 120.0}},  // box 0
     {{30.0, 220.0, 90.0}},   // box 1
@@ -71,9 +64,7 @@ void run_cutout_dropout(const TestConfig& cfg) {
     const std::vector<RpptROI> roiVec = make_roi(desc, cfg.roi);
     for (Rpp32u n = 0; n < shape.n; ++n) roi[n] = roiVec[n];
 
-    // Box geometry / colors / counts. Boxes are laid out per image at [n * stride + k] and built
-    // relative to each image's ROI rectangle so they stay inside the ROI for both Full and Partial.
-    // The SAME tensors feed the golden and the kernel.
+    // Boxes are laid out at [n * stride + k], inside each image's ROI.
     const std::size_t boxCount = static_cast<std::size_t>(shape.n) * kMaxBoxesPerImage;
     PinnedArray<RpptRoiLtrb> boxes(cfg.backend, boxCount);
     PinnedArray<Rpp32u> numBoxes(cfg.backend, shape.n);
@@ -102,18 +93,14 @@ void run_cutout_dropout(const TestConfig& cfg) {
                 colors[(n * kMaxBoxesPerImage + k) * channels + c] =
                     from_double<T>(from_unit(kBoxIntensity[k][c] / 255.0, cfg.dtype));
     }
-    // Every image uses the full stride of boxes (uniform count == stride; see kMaxBoxesPerImage).
     for (Rpp32u n = 0; n < shape.n; ++n) numBoxes[n] = kMaxBoxesPerImage;
 
-    // (1) Host golden model. golden starts as a copy of the input so the untouched (outside-ROI)
-    // region is defined; only the ROI is overwritten by the reference.
     std::vector<T> input(count), golden(count), actual(count);
     fill_input<T>(input.data(), count, cfg.dtype);
     golden = input;
     cutout_dropout_reference<T>(input.data(), golden.data(), desc, cfg.dtype, roi.data(), XYWH,
                                 boxes.data(), numBoxes.data(), kMaxBoxesPerImage, colors.data());
 
-    // (2) Run RPP on the configured backend.
     DeviceTensor src(cfg.backend, bytes), dst(cfg.backend, bytes);
     src.write(input.data(), bytes);
     dst.write(input.data(), bytes);  // define outside-ROI dst to mirror the golden
@@ -124,11 +111,9 @@ void run_cutout_dropout(const TestConfig& cfg) {
                                   XYWH, handle.get(), cfg.backend),
               RPP_SUCCESS);
 
-    // (3) Retrieve the result on the host (no-op copy for HOST, device->host for HIP).
     handle.sync();  // drain the op's stream before copying results back
     dst.read(actual.data(), bytes);
 
-    // (4) Compare within tolerance over the ROI.
     EXPECT_TRUE(
         compare_roi<T>(actual.data(), golden.data(), desc, roi.data(), XYWH, kExact(cfg.dtype)));
 }
@@ -145,11 +130,8 @@ TEST_P(CutoutDropoutTest, Correctness) {
         cfg.dtype, [&](auto tag) { run_cutout_dropout<Element<decltype(tag)>>(cfg); });
 }
 
-// FullRoi passes the full grid on both backends (validates the erase + per-channel color + I8
-// black semantics). Every PartialRoi case is red (both backends) as a documented kernel finding
-// under a non-full ROI: the kernel produces the correct packed-origin copy but does NOT apply
-// the erase boxes. The golden holds to the absolute-frame box semantics
-// (validated by coarse_dropout's passing HOST PartialRoi) -- do not weaken it to force green.
+// PartialRoi is red on both backends: the kernel copies the ROI but does not apply the boxes. Do
+// not weaken the golden to force green.
 INSTANTIATE_TEST_SUITE_P(
     Image_Effects, CutoutDropoutTest,
     ::testing::ValuesIn(make_configs({DType::U8, DType::F16, DType::F32, DType::I8},

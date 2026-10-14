@@ -39,8 +39,7 @@ using namespace rpptest;
 
 namespace {
 
-// The per-image channel order: output channel i takes source channel order[i]. Each value in 0..2
-// (documented range). A rotation exercises every channel moving to a new slot.
+// Output channel i takes source channel order[i]; each value in 0..2 (documented range).
 struct ChannelPermuteParams {
     Rpp32u order[3];
     std::string name() const {
@@ -51,15 +50,13 @@ struct ChannelPermuteParams {
 
 template <typename T>
 void run_channel_permute(const TestConfig& cfg, const ChannelPermuteParams& op) {
-    // channel_permute is 3-channel; channels_of() agrees for both PKD3 and PLN3 (the only layouts
-    // this op grids over), so the shared descriptor helpers need no special-casing here.
     RpptDesc srcDesc = make_src_descriptor(cfg);  // RPP takes a non-const ptr
     RpptDesc dstDesc = make_dst_descriptor(cfg);
     const std::size_t count = element_count(srcDesc);
     const std::size_t bytes = byte_size(srcDesc, cfg.dtype);
 
-    // Parameters live in host-accessible (pinned for HIP) memory. permutationTensor holds n
-    // contiguous per-image triples. channel_permute takes no ROI; the frame is walked in full.
+    // permutationTensor holds n contiguous per-image triples. The op takes no ROI; roi only drives
+    // the golden over the full frame.
     PinnedArray<Rpp32u> perm(cfg.backend, 3 * cfg.size.n);
     PinnedArray<RpptROI> roi(cfg.backend, cfg.size.n);
     const std::vector<RpptROI> roiVec = make_roi(srcDesc, cfg.roi);
@@ -70,16 +67,13 @@ void run_channel_permute(const TestConfig& cfg, const ChannelPermuteParams& op) 
         roi[i] = roiVec[i];
     }
 
-    // (1) Host golden model. golden starts as a copy of the input; the reference overwrites the
-    // whole frame with the permuted channels.
     std::vector<T> input(count), golden(count), actual(count);
     fill_input<T>(input.data(), count, cfg.dtype);
     golden = input;
     channel_permute_reference<T>(input.data(), srcDesc, golden.data(), dstDesc, perm.data(),
                                  roi.data(), XYWH);
 
-    // (2) Run RPP on the configured backend. dst is pre-filled with a distinct pattern so a
-    // no-op kernel would be caught.
+    // dst is pre-filled with a distinct pattern so a no-op kernel would be caught.
     DeviceTensor src(cfg.backend, bytes), dst(cfg.backend, bytes);
     src.write(input.data(), bytes);
     std::vector<T> dstInit(count);
@@ -91,15 +85,11 @@ void run_channel_permute(const TestConfig& cfg, const ChannelPermuteParams& op) 
                                    handle.get(), cfg.backend),
               RPP_SUCCESS);
 
-    // (3) Retrieve the result on the host (no-op copy for HOST, device->host for HIP).
     handle.sync();  // drain the op's stream before copying results back
     dst.read(actual.data(), bytes);
 
-    // (4) Compare over the frame. channel_permute only reorders channels (no arithmetic), so it is
-    // bit-exact -- tolerance 0. NOTE: HOST_I8toI8_PKD3 fails here because the HOST I8 packed kernel
-    // reads uninitialized/out-of-bounds memory for a few elements (heap/order-dependent, values
-    // typically I8-black -128); a real kernel bug, not a reference/tolerance issue. Do not loosen
-    // the tolerance to hide it.
+    // Pure reordering, so bit-exact. HOST_I8toI8_PKD3 can fail because the HOST I8 packed kernel
+    // reads out of bounds for a few elements; do not loosen the tolerance to hide it.
     EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), dstDesc, roi.data(), XYWH, 0.0));
 }
 

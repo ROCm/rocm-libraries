@@ -74,14 +74,12 @@ void run_multiply_scalar(const VoxelConfig& cfg, const MultiplyScalarParams& p) 
     PinnedArray<RpptROI3D> roi(cfg.backend, cfg.size.n);
     for (Rpp32u i = 0; i < cfg.size.n; ++i) roi[i] = roiHost[i];
 
-    // (1) Host golden model. Both sides start at the sentinel so a voxel the op never writes stays
-    // obviously unwritten rather than plausibly zero.
+    // Both sides start at the sentinel so a voxel the op never writes cannot pass as zero.
     std::vector<T> golden(count, nd_slack_poison<T>(cfg.dtype));
     std::vector<T> actual = golden;
     arithmetic_scalar_reference<T>(input.data(), golden.data(), *desc, roiHost.data(), cfg.roiType,
                                    ScalarArithmeticOp::Multiply, mul.data());
 
-    // (2) Run RPP on the configured backend.
     DeviceTensor src(cfg.backend, bytes), dst(cfg.backend, bytes);
     src.write(input.data(), bytes);
     dst.write(actual.data(), bytes);
@@ -95,7 +93,6 @@ void run_multiply_scalar(const VoxelConfig& cfg, const MultiplyScalarParams& p) 
     handle.sync();  // drain the op's stream before copying results back
     dst.read(actual.data(), bytes);
 
-    // (3) Compare the voxels inside the ROI box.
     EXPECT_TRUE(compare_voxel_roi<T>(actual.data(), golden.data(), *desc, roiHost.data(),
                                      cfg.roiType, scalar_tolerance(cfg.dtype)));
 }
@@ -112,11 +109,8 @@ TEST_P(MultiplyScalarTest, Correctness) {
     run_multiply_scalar<Rpp32f>(p.cfg, p.op);
 }
 
-// f32 -> f32 is the op's only documented conversion.
-//
-// The fill spans [0, 1] and the multiplier is 80 (the value the legacy voxel harness uses), so
-// results reach ~160 for the second sample: a kernel that clamped to the image-intensity range
-// would show.
+// F32 only, per the header. Results land far outside the [0, 1] fill range, so a kernel that
+// clamped to the image-intensity range would show.
 INSTANTIATE_TEST_SUITE_P(
     Voxel_Arithmetic, MultiplyScalarTest,
     ::testing::ValuesIn(voxel_with_params<MultiplyScalarParams>(

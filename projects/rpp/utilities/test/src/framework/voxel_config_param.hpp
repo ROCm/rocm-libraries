@@ -35,16 +35,11 @@ SOFTWARE.
 #include "framework/backend_param.hpp"
 #include "framework/config_param.hpp"
 
-// Grid axes for the Voxel (3D) ops.
-// The shared axes (DType, Roi, the WithParams machinery) live in config_param.hpp.
+// Grid axes for the Voxel (3D) ops: a 5D RpptGenericDesc (NCDHW / NDHWC) plus an RpptROI3D box.
+// Labels read "<Backend>_<DTypeConv>_<Layout>_<Roi>_<Roi3DType>_<Shape>". Shared axes live in
+// config_param.hpp.
 
 namespace rpptest {
-
-// The voxel ops take a 5D RpptGenericDesc (NCDHW / NDHWC) plus an RpptROI3D box instead of the
-// image domain's RpptDesc + XYWH ROI. The layout slot carries the 3D layout together with its
-// channel count, and the ROI slot gains a second token for the ROI3D encoding, so the label keeps
-// the same structural slots: "<Backend>_<DTypeConv>_<Layout>_<Roi>_<Roi3DType>_<Shape>".
-// Descriptor construction, traversal and comparison live in framework/tensor_setup.hpp.
 
 enum class VoxelLayout { NCDHW1, NCDHW3, NDHWC3 };
 enum class Roi3D { XYZWHD, LTFRBB };
@@ -94,9 +89,8 @@ namespace presets {
 // The default test volume: every extent is a multiple of 4, so the vector loops see no tail.
 inline constexpr VoxelSize kDefaultVolume{2, 4, 12, 16};
 
-// Odd width and odd depth. Voxel tensors are dense -- unlike an image row, nothing pads the end of
-// a row -- so this is the shape that puts a tail element at the end of the vector span and live
-// data immediately after the last store.
+// Odd width and depth. Voxel tensors are dense, so this puts a tail at the end of the vector span
+// and live data right after the last store.
 inline constexpr VoxelSize kTailVolume{2, 3, 10, 19};
 }  // namespace presets
 
@@ -115,8 +109,7 @@ inline std::vector<VoxelConfig> make_voxel_configs(
     return configs;
 }
 
-// GTest name generator for voxel ops with no scalar parameters (the voxel counterpart of
-// config_param_name).
+// GTest name generator for voxel ops with no scalar parameters.
 inline std::string voxel_config_param_name(const ::testing::TestParamInfo<VoxelConfig>& info) {
     return voxel_config_name(info.param);
 }

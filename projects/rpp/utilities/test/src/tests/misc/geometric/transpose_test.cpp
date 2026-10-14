@@ -92,13 +92,11 @@ void run_transpose(const NdConfig& cfg, const TransposeParams& p) {
     const std::size_t srcBytes = generic_byte_size(*srcDesc, cfg.dtypeIn);
     const std::size_t dstBytes = generic_byte_size(*dstDesc, cfg.dtypeIn);
 
-    // (1) Host golden model. The op writes every output element, so golden needs no pre-seeding.
     std::vector<T> input(count), golden(count), actual(count);
     fill_input_nd<T>(input.data(), *srcDesc, cfg.dtypeIn);
     transpose_reference<T>(input.data(), golden.data(), *srcDesc, *dstDesc, perm.data());
 
-    // (2) permTensor and roiTensor live in host-accessible (pinned for HIP) memory. permTensor
-    // holds nDim values shared by the whole batch (the batch axis is not permuted).
+    // permTensor holds nDim values shared by the whole batch (the batch axis is not permuted).
     PinnedArray<Rpp32u> permTensor(cfg.backend, perm.size());
     for (std::size_t i = 0; i < perm.size(); ++i) permTensor[i] = perm[i];
 
@@ -106,7 +104,6 @@ void run_transpose(const NdConfig& cfg, const TransposeParams& p) {
     PinnedArray<Rpp32u> roi(cfg.backend, roiVec.size());
     for (std::size_t i = 0; i < roiVec.size(); ++i) roi[i] = roiVec[i];
 
-    // (3) Run RPP on the configured backend.
     DeviceTensor src(cfg.backend, srcBytes), dst(cfg.backend, dstBytes);
     src.write(input.data(), srcBytes);
 
@@ -118,7 +115,6 @@ void run_transpose(const NdConfig& cfg, const TransposeParams& p) {
     handle.sync();  // drain the op's stream before copying results back
     dst.read(actual.data(), dstBytes);
 
-    // (4) Compare the whole output tensor bit-exactly: transpose only moves elements.
     EXPECT_TRUE(compare_nd<T>(actual.data(), golden.data(), *dstDesc, 0.0));
 }
 
@@ -136,21 +132,9 @@ TEST_P(TransposeTest, Correctness) {
         cfg.dtypeIn, [&](auto tag) { run_transpose<Element<decltype(tag)>>(cfg, p); });
 }
 
-// Every case is bit-exact (tolerance 0 on both terms, every dtype): transpose performs no
-// arithmetic and no dtype conversion, so a single differing element is a real defect.
-//
-// The three permutation kinds are chosen to separate the failure modes an axis/stride mix-up
-// produces: Identity is a pure copy (any diff means the op is broken outright), Reverse moves
-// every axis, and RotateLeft is a non-involutive permutation (applying it twice is not the
-// identity), which catches an implementation that inverts the perm -- reading source axis k
-// from output axis perm[k] instead of the documented converse. The two are indistinguishable
-// under Identity and Reverse, both of which are self-inverse.
-//
-// nd_extents() gives every axis a distinct length, so a swapped pair of axes cannot coincide
-// with the correct answer, and a wrong-extent destination fails to even allocate identically.
-//
-// Note the ND descriptors must be device-addressable on HIP (GenericDescriptor pins them): at
-// rank >= 4 the ND kernels read dims/strides on the device. Undocumented and rank-dependent.
+// RotateLeft is not self-inverse, so unlike Identity and Reverse it catches a kernel that applies
+// the inverse permutation. nd_extents() gives every axis a distinct length, so swapped axes cannot
+// match by coincidence.
 INSTANTIATE_TEST_SUITE_P(Misc_Geometric, TransposeTest,
                          ::testing::ValuesIn(nd_with_params<TransposeParams>(
                              make_nd_configs({DType::U8, DType::F16, DType::F32, DType::I8},

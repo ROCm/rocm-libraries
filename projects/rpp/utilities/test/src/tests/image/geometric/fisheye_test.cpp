@@ -39,9 +39,7 @@ using namespace rpptest;
 
 namespace {
 
-// Nearest-neighbour sampling copies a source texel verbatim and the op has no arithmetic, so every
-// dtype is bit-exact. A diff is a disagreement about the map or the interpolation mode, which no
-// tolerance could absorb anyway.
+// Nearest-neighbour sampling copies source texels verbatim, so every dtype is bit-exact.
 constexpr double kTol = 0.0;
 
 template <typename T>
@@ -55,8 +53,7 @@ void run_fisheye(const TestConfig& cfg) {
     const std::vector<RpptROI> roiVec = make_roi(srcDesc, cfg.roi);
     for (Rpp32u i = 0; i < cfg.size.n; ++i) roi[i] = roiVec[i];
 
-    // The op writes the ROI-sized region at the destination origin, so golden and device buffer
-    // start from the same distinct pattern and only that region is compared.
+    // The op writes the ROI-sized region at the destination origin; only that region is compared.
     std::vector<T> input(count), dstInit(count), golden(count), actual(count);
     fill_input<T>(input.data(), count, cfg.dtype);
     fill_input<T>(dstInit.data(), count, cfg.dtype, /*salt=*/1);
@@ -76,9 +73,7 @@ void run_fisheye(const TestConfig& cfg) {
     handle.sync();
     dst.read(actual.data(), bytes);
 
-    // Compared against the caller's own ROI copy, not the tensor handed to the op: the HIP paths
-    // rewrite that tensor from XYWH to LTRB in place, which would make the comparison walk a
-    // different region than the golden wrote.
+    // Uses the test's own ROI copy: HIP rewrites the op's ROI to LTRB in place.
     EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), dstDesc, roiVec.data(), XYWH, kTol));
 }
 
@@ -94,8 +89,7 @@ TEST_P(FisheyeTest, Correctness) {
         cfg.dtype, [&](auto tag) { run_fisheye<Element<decltype(tag)>>(cfg); });
 }
 
-// I8 is off the grid for now, pending the suite-wide decision on whether the image ops need it.
-// Same-layout cases plus both directions of the fused output-layout conversion.
+// I8 is not yet covered.
 INSTANTIATE_TEST_SUITE_P(Image_Geometric, FisheyeTest,
                          ::testing::ValuesIn(make_configs({DType::U8, DType::F16, DType::F32},
                                                           {{Layout::PKD3, Layout::PKD3},

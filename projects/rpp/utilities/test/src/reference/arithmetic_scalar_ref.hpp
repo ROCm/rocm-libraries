@@ -55,17 +55,10 @@ Expression
   fmadd   dst = src * p0 + p1
 
 Notes
-  Two behaviours the header does not spell out, taken from the operations'
-  definition:
-
-  - The result is NOT clamped. These are 3D volumes (the legacy harness drives
-    them with NIFTI scans), not [0,1] image intensities, and the ops are plain
-    arithmetic; clamping a subtraction at 0 or a multiply at 1 would make them
-    meaningless. The test parameters are chosen so a clamp anywhere would show.
-  - Placement follows RPP's pointwise convention (for_each_voxel_roi_io): the
-    source is read at the ROI offset and the result written packed at the
-    destination origin. The header documents nothing about the destination
-    outside that block, so the comparator ignores it.
+  - The result is NOT clamped: these are 3D volumes, not [0,1] image
+    intensities.
+  - The source is read at the ROI offset and the result written packed at the
+    destination origin; the destination outside that block is not compared.
 */
 
 enum class ScalarArithmeticOp { Add, Subtract, Multiply, FusedMultiplyAdd };
@@ -85,8 +78,7 @@ inline double apply_scalar_arithmetic(double v, double p0, double p1, ScalarArit
     return 0.0;
 }
 
-// param0/param1 are per-sample (batchSize values); only fmadd takes a second one. dst must already
-// hold whatever the test seeded it with -- only the ROI box's output block is written.
+// param0/param1 are per-sample; only fmadd uses param1. Only the ROI box's output block is written.
 template <typename T>
 void arithmetic_scalar_reference(const T* src, T* dst, const RpptGenericDesc& desc,
                                  const RpptROI3D* roi, Roi3D roiType, ScalarArithmeticOp op,

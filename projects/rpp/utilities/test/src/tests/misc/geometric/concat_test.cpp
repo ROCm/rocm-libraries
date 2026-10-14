@@ -60,9 +60,7 @@ struct ConcatParams {
     }
 };
 
-// 0-based over the per-sample axes (the batch axis is excluded), which is what the op's axisMask
-// carries: the legacy misc driver sizes the output as
-// dstRoi[nDim + axisMask] = roi1[nDim + axisMask] + roi2[nDim + axisMask].
+// axisMask is a 0-based index over the per-sample axes (the batch axis is excluded).
 Rpp32u concat_axis(AxisKind kind, Rpp32u nDim) {
     switch (kind) {
         case AxisKind::First:
@@ -75,14 +73,9 @@ Rpp32u concat_axis(AxisKind kind, Rpp32u nDim) {
     return 0;
 }
 
-// src2 matches src1 on every axis except the concat axis, where it deliberately gets a *different*
-// extent so that a swapped operand or an off-by-one axis cannot pass by coincidence. Halving is
-// a no-op at extent 2 (the rank-4 extents include one), hence the second branch.
-//
-// Derived from src1's extents rather than rebuilt from the rank, so the two operands agree on every
-// other axis by construction: rebuilding would take the shape axis's default and silently disagree
-// on the innermost extent too for every NdShape::Tail config, which sends the golden past the end
-// of src2.
+// src2 matches src1 except along the concat axis, where its extent differs so a swapped operand or
+// wrong axis cannot pass (halving leaves an extent of 2 unchanged, hence the second branch). Copied
+// from dims1 rather than rebuilt from the rank so the Tail shape's innermost extent agrees.
 NdDims concat_src2_dims(const NdDims& dims1, Rpp32u axis) {
     NdDims dims = dims1;
     const Rpp32u e1 = dims[axis + 1];
@@ -113,16 +106,13 @@ void run_concat(const NdConfig& cfg, AxisKind kind) {
     const std::size_t count2 = generic_element_count(*desc2);
     const std::size_t countOut = generic_element_count(*descOut);
 
-    // (1) Host golden model. Two distinct fills (different salts) so the two halves of the output
-    // are distinguishable. The op writes every output element, so golden needs no pre-seeding.
+    // Distinct salts so the two halves of the output are distinguishable.
     std::vector<T> input1(count1), input2(count2), golden(countOut), actual(countOut);
     fill_input_nd<T>(input1.data(), *desc1, cfg.dtypeIn, 0);
     fill_input_nd<T>(input2.data(), *desc2, cfg.dtypeIn, 1);
     concat_reference<T>(input1.data(), input2.data(), golden.data(), *descOut, *desc1, *desc2,
                         axis);
 
-    // (2) roiTensors live in host-accessible (pinned for HIP) memory. Each operand is exercised
-    // whole, so its roiTensor is just its own extents.
     const std::vector<Rpp32u> roiVec1 = make_nd_roi_tensor(dims1);
     const std::vector<Rpp32u> roiVec2 = make_nd_roi_tensor(dims2);
     PinnedArray<Rpp32u> roi1(cfg.backend, roiVec1.size());
@@ -130,7 +120,6 @@ void run_concat(const NdConfig& cfg, AxisKind kind) {
     for (std::size_t i = 0; i < roiVec1.size(); ++i) roi1[i] = roiVec1[i];
     for (std::size_t i = 0; i < roiVec2.size(); ++i) roi2[i] = roiVec2[i];
 
-    // (3) Run RPP on the configured backend.
     const std::size_t bytes1 = generic_byte_size(*desc1, cfg.dtypeIn);
     const std::size_t bytes2 = generic_byte_size(*desc2, cfg.dtypeIn);
     const std::size_t bytesOut = generic_byte_size(*descOut, cfg.dtypeIn);
@@ -146,8 +135,6 @@ void run_concat(const NdConfig& cfg, AxisKind kind) {
     handle.sync();  // drain the op's stream before copying results back
     dst.read(actual.data(), bytesOut);
 
-    // (4) Compare the whole output tensor. Concat only copies elements -- it performs no
-    // arithmetic and no dtype conversion -- so every dtype is bit-exact and any diff is a defect.
     EXPECT_TRUE(compare_nd<T>(actual.data(), golden.data(), *descOut, 0.0));
 }
 
@@ -163,22 +150,10 @@ TEST_P(ConcatTest, Correctness) {
         cfg.dtypeIn, [&](auto tag) { run_concat<Element<decltype(tag)>>(cfg, kind); });
 }
 
-// 144 cases: U8/F16/F32/I8 (what the op accepts) x ranks 2/3/4 x 2 shapes x 3 axis kinds x
-// HOST/HIP.
+// Known kernel defect (skip-listed): concat returns RPP_ERROR_INVALID_DIM_LENGTHS when the
+// operands' extents differ along a non-final concat axis.
 //
-// 64 green, 80 red against one documented kernel defect, identically on both backends and for every
-// dtype: concat returns RPP_ERROR_INVALID_DIM_LENGTHS (-25) when the two operands' extents differ
-// along a non-final concat axis -- which is the axis concat exists to differ on
-// (issues/concat-rejects-unequal-extents-on-non-final-axis.md). Every AxisLast case is bit-exact,
-// as is rank-2 AxisMiddle (where "middle" is the last axis). The axis parameter itself is handled
-// correctly: axisMask is an axis index, confirmed by sweeping it against per-axis goldens.
-//
-// The shape token in the label is src1's shape; src2 differs from it along the concat axis and the
-// output is their sum there (see concat_src2_dims), so the label identifies the case, not the
-// output extent.
-//
-// Note the HIP descriptors must be device-addressable (GenericDescriptor handles this): at
-// rank >= 4 the ND kernels read dims/strides on the device. Undocumented and rank-dependent.
+// The shape token in the label is src1's shape, not the output's.
 INSTANTIATE_TEST_SUITE_P(Misc_Geometric, ConcatTest,
                          ::testing::ValuesIn(nd_with_params<ConcatParams>(
                              make_nd_configs({DType::U8, DType::F16, DType::F32, DType::I8},

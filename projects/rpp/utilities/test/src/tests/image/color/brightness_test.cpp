@@ -50,14 +50,11 @@ struct BrightnessParams {
 
 template <typename T>
 void run_brightness(const TestConfig& cfg, const BrightnessParams& op) {
-    // Non-const because RPP takes a non-const pointer. The two differ only for a layout-converting
-    // config; brightness keeps the channel count either way, so both span the same element count.
-    RpptDesc srcDesc = make_src_descriptor(cfg);
+    RpptDesc srcDesc = make_src_descriptor(cfg);  // RPP takes a non-const ptr
     RpptDesc dstDesc = make_dst_descriptor(cfg);
     const std::size_t count = element_count(srcDesc);
     const std::size_t bytes = byte_size(srcDesc, cfg.dtype);
 
-    // Parameters live in host-accessible (pinned for HIP) memory.
     PinnedArray<Rpp32f> alpha(cfg.backend, cfg.size.n);
     PinnedArray<Rpp32f> beta(cfg.backend, cfg.size.n);
     PinnedArray<RpptROI> roi(cfg.backend, cfg.size.n);
@@ -68,16 +65,12 @@ void run_brightness(const TestConfig& cfg, const BrightnessParams& op) {
         roi[i] = roiVec[i];
     }
 
-    // (1) Host golden model. golden and the device destination are seeded identically so the
-    // region the op leaves untouched (outside the ROI) is defined and compares equal; only the
-    // ROI is overwritten, by the reference here and by the op below.
     std::vector<T> input(count), golden(count), actual(count);
     fill_input<T>(input.data(), count, cfg.dtype);
     golden = input;
     brightness_reference<T>(input.data(), srcDesc, golden.data(), dstDesc, cfg.dtype, roi.data(),
                             XYWH, op.alpha, op.beta);
 
-    // (2) Run RPP on the configured backend.
     DeviceTensor src(cfg.backend, bytes), dst(cfg.backend, bytes);
     src.write(input.data(), bytes);
     dst.write(input.data(), bytes);  // define outside-ROI dst to mirror the golden
@@ -87,11 +80,9 @@ void run_brightness(const TestConfig& cfg, const BrightnessParams& op) {
                               roi.data(), XYWH, handle.get(), cfg.backend),
               RPP_SUCCESS);
 
-    // (3) Retrieve the result on the host (no-op copy for HOST, device->host for HIP).
     handle.sync();  // drain the op's stream before copying results back
     dst.read(actual.data(), bytes);
 
-    // (4) Compare within tolerance over the ROI, addressed through the destination descriptor.
     EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), dstDesc, roi.data(), XYWH,
                                kRoundingTolerance(cfg.dtype)));
 }

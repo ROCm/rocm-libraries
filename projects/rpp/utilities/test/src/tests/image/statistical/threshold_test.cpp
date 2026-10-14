@@ -40,12 +40,8 @@ using namespace rpptest;
 
 namespace {
 
-// Raw cutoffs in [0,255] units, converted to each dtype's units at run time. Half-integer
-// bounds are chosen deliberately: fill_input emits integer-valued pixels, so no pixel ever
-// lands exactly on a cutoff -- the in-range classification (and thus the binary mask) is
-// unambiguous in every dtype and comparison space, keeping the output bit-exact.
-// step is added to both cutoffs once per channel, so channel c is tested against
-// [rawMin + c*step, rawMax + c*step]; at step 0 every channel shares one pair.
+// Cutoffs in [0,255] units. Half-integer bounds keep integer-valued pixels off the cutoffs, so the
+// mask is bit-exact. Channel c uses [rawMin + c*step, rawMax + c*step].
 struct ThresholdParams {
     float rawMin, rawMax, step;
     std::string name() const {
@@ -54,8 +50,7 @@ struct ThresholdParams {
     }
 };
 
-// Converts a raw [0,255]-unit cutoff into the dtype's own units (the exact value the op
-// receives): U8 raw, I8 shifted by -128, F16/F32 normalized to [0,1].
+// Converts a [0,255]-unit cutoff into the dtype's own units.
 float cutoff_in_dtype(float raw, DType dt) {
     switch (dt) {
         case DType::U8:
@@ -70,9 +65,6 @@ float cutoff_in_dtype(float raw, DType dt) {
     }
 }
 
-// The mask is exactly 0/255, -128/127, or 0.0/1.0 -- all exactly representable, so the
-// comparison is bit-exact for every dtype.
-
 template <typename T>
 void run_threshold(const TestConfig& cfg, const ThresholdParams& op) {
     const Rpp32u c = static_cast<Rpp32u>(channels_of(cfg.layoutIn));
@@ -81,7 +73,6 @@ void run_threshold(const TestConfig& cfg, const ThresholdParams& op) {
     const std::size_t count = element_count(srcDesc);
     const std::size_t bytes = byte_size(srcDesc, cfg.dtype);
 
-    // Per-image, per-channel cutoffs in host-accessible (pinned for HIP) memory.
     PinnedArray<Rpp32f> minTensor(cfg.backend, cfg.size.n * c);
     PinnedArray<Rpp32f> maxTensor(cfg.backend, cfg.size.n * c);
     PinnedArray<RpptROI> roi(cfg.backend, cfg.size.n);
@@ -95,15 +86,12 @@ void run_threshold(const TestConfig& cfg, const ThresholdParams& op) {
         roi[i] = roiVec[i];
     }
 
-    // (1) Host golden model. golden starts as a copy of the input so the untouched
-    // (outside-ROI) region is defined; only the ROI is overwritten by the reference.
     std::vector<T> input(count), golden(count), actual(count);
     fill_input<T>(input.data(), count, cfg.dtype);
     golden = input;
     threshold_reference<T>(input.data(), srcDesc, golden.data(), dstDesc, cfg.dtype, roi.data(),
                            XYWH, minTensor.data(), maxTensor.data());
 
-    // (2) Run RPP on the configured backend.
     DeviceTensor src(cfg.backend, bytes), dst(cfg.backend, bytes);
     src.write(input.data(), bytes);
     dst.write(input.data(), bytes);  // define outside-ROI dst to mirror the golden
@@ -113,11 +101,9 @@ void run_threshold(const TestConfig& cfg, const ThresholdParams& op) {
                              maxTensor.data(), roi.data(), XYWH, handle.get(), cfg.backend),
               RPP_SUCCESS);
 
-    // (3) Retrieve the result on the host (no-op copy for HOST, device->host for HIP).
     handle.sync();  // drain the op's stream before copying results back
     dst.read(actual.data(), bytes);
 
-    // (4) Compare within tolerance over the ROI.
     EXPECT_TRUE(
         compare_roi<T>(actual.data(), golden.data(), dstDesc, roi.data(), XYWH, kExact(cfg.dtype)));
 }

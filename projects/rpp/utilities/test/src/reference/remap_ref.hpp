@@ -43,28 +43,22 @@ RPP op
   rppt_remap   (Image / Geometric augmentation)
 
 Description
-  Arbitrary per-pixel resampling driven by two lookup tables. For output pixel
-  (i,j) the source COLUMN to sample is colRemapTable(i,j) and the source ROW is
-  rowRemapTable(i,j). The table value is taken literally as the ABSOLUTE source
-  coordinate (image origin = texel (0,0)); the source is sampled in that
-  absolute frame with the requested interpolation and per-type
-  round-to-nearest quantization.
+  Per-pixel resampling driven by two lookup tables: for output pixel (i,j) the
+  source column is colRemapTable(i,j) and the source row is rowRemapTable(i,j),
+  as absolute image coordinates. The source is sampled with the requested
+  interpolation and per-type round-to-nearest quantization.
 
-  Unlike the same-size warps this does not reuse geometric_reference(): remap
-  genuinely has two distinct descriptors (the image descriptor vs the unpadded
-  single-channel table descriptor), so the walk is written here while the
-  sampler (interpolation.hpp) stays shared.
+  The walk is written here rather than using geometric_reference() because the
+  table descriptor differs from the image descriptor.
 
 Expression
   dst(x, y) = src( colRemapTable(x, y), rowRemapTable(x, y) )
 
 Notes
   The public header states neither the coordinate frame nor the boundary
-  handling. The reference holds to the literal reading: absolute-frame
-  coordinates, with the valid source rectangle being the ROI rectangle
-  [x0,x0+roiW) x [y0,y0+roiH) and samples outside it returning the type's
-  black. A kernel that uses a different frame or border shows up as a diff,
-  which is a finding, not a reference bug.
+  handling. The model uses absolute coordinates, bounded by the ROI rectangle
+  [x0,x0+roiW) x [y0,y0+roiH), with samples outside it reading the type's
+  black.
 */
 template <typename T>
 void remap_reference(const T* src, const RpptDesc& sd, T* dst, const RpptDesc& dd, DType dt,

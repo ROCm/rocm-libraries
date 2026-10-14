@@ -45,9 +45,7 @@ std::string interp_token(RpptInterpolationType i) {
     return i == NEAREST_NEIGHBOR ? "NN" : "BILINEAR";
 }
 
-// A per-image destination size plus the interpolation to sample with. The scale is derived from the
-// source ROI, so the same target size is an upscale from the full ROI and a larger upscale from the
-// half-size partial ROI; "down" from the partial ROI happens to be scale 1 (a verbatim resize).
+// The scale is derived from the source ROI; "down" from the partial ROI is scale 1.
 struct ResizeParams {
     Rpp32u dstW, dstH;
     RpptInterpolationType interp;
@@ -58,15 +56,10 @@ struct ResizeParams {
     }
 };
 
-// Tolerances are set from legitimate numeric error only; they are NOT loosened to hide the real
-// kernel defect this test surfaces: bilinear samples the last
-// column/row one texel short (same root cause as #15). Every NN case except the tie described at
-// the instantiation below, and every HOST F16/I8 bilinear case, passes at these tolerances,
-// validating the golden; the red cases are the kernel bug.
+// NN copies texels verbatim; bilinear allows rounding error only. Not loosened for the kernel's
+// bilinear sampling of the last column/row one texel short.
 double resize_tolerance(DType dt, RpptInterpolationType interp) {
-    // Nearest-neighbour copies a texel verbatim, so it is bit-exact for every dtype.
     if (interp == NEAREST_NEIGHBOR) return 0.0;
-    // Bilinear blends in float; allow only genuine rounding error. Integer types round to nearest.
     return kRoundingTolerance(dt);
 }
 
@@ -82,7 +75,6 @@ void run_resize(const TestConfig& cfg, const ResizeParams& op) {
     const std::size_t srcBytes = byte_size(srcDesc, cfg.dtype);
     const std::size_t dstBytes = byte_size(dstDesc, cfg.dtype);
 
-    // Per-image source ROIs and destination sizes in host-accessible (pinned for HIP) memory.
     PinnedArray<RpptROI> roi(cfg.backend, srcShape.n);
     PinnedArray<RpptImagePatch> dstSizes(cfg.backend, srcShape.n);
     const std::vector<RpptROI> roiVec = make_roi(srcDesc, cfg.roi);
@@ -91,8 +83,6 @@ void run_resize(const TestConfig& cfg, const ResizeParams& op) {
         dstSizes[i] = RpptImagePatch{op.dstW, op.dstH};
     }
 
-    // (1) Host golden model. golden starts as a distinct dst pattern so the untouched (outside the
-    // written dstW x dstH region) padding is defined; only the destination image is overwritten.
     std::vector<T> input(srcCount), dstInit(dstCount), golden(dstCount), actual(dstCount);
     fill_input<T>(input.data(), srcCount, cfg.dtype);
     fill_input<T>(dstInit.data(), dstCount, cfg.dtype, /*salt=*/1);
@@ -100,7 +90,6 @@ void run_resize(const TestConfig& cfg, const ResizeParams& op) {
     resize_reference<T>(input.data(), srcDesc, golden.data(), dstDesc, cfg.dtype, roi.data(), XYWH,
                         dstSizes.data(), op.interp);
 
-    // (2) Run RPP on the configured backend.
     DeviceTensor src(cfg.backend, srcBytes), dst(cfg.backend, dstBytes);
     src.write(input.data(), srcBytes);
     dst.write(dstInit.data(), dstBytes);
@@ -110,12 +99,10 @@ void run_resize(const TestConfig& cfg, const ResizeParams& op) {
                           roi.data(), XYWH, handle.get(), cfg.backend),
               RPP_SUCCESS);
 
-    // (3) Retrieve the result on the host (no-op copy for HOST, device->host for HIP).
     handle.sync();
     dst.read(actual.data(), dstBytes);
 
-    // (4) Compare over the full destination image (packed at the origin). A full-frame ROI over the
-    // destination descriptor walks exactly the dstW x dstH written region.
+    // A full-frame ROI over dstDesc walks exactly the written dstW x dstH region.
     std::vector<RpptROI> dstRoiVec = make_roi(dstDesc, Roi::Full);
     EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), dstDesc, dstRoiVec.data(), XYWH,
                                resize_tolerance(cfg.dtype, op.interp)));
@@ -133,9 +120,6 @@ TEST_P(ResizeTest, Correctness) {
         p.cfg.dtype, [&](auto tag) { run_resize<Element<decltype(tag)>>(p.cfg, p.op); });
 }
 
-// up: enlarge the source ROI. down: shrink it (from the partial ROI this is scale 1, a verbatim
-// resize). Each exercised with nearest-neighbour and bilinear sampling.
-// Same-layout cases plus both directions of the fused output-layout conversion.
 INSTANTIATE_TEST_SUITE_P(
     Image_Geometric, ResizeTest,
     ::testing::ValuesIn(with_params<ResizeParams>(

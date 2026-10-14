@@ -60,9 +60,7 @@ Per-type form
     F16 0.0      F32 0.0
 
 Notes
-  The op carries maxHoleW/maxHoleH as separate scalars; the golden ignores
-  them and uses the boxes directly, so a kernel that misuses maxHoleW/H
-  surfaces as a diff.
+  maxHoleW/maxHoleH are not used; the holes come from the boxes directly.
 */
 // Hole membership is tested against the ABSOLUTE source coordinate (x0 + i, y0 + j).
 template <typename T>

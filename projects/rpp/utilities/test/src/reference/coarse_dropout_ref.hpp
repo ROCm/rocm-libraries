@@ -42,15 +42,15 @@ RPP op
   rppt_coarse_dropout   (Image / Effects augmentation)
 
 Description
-  Erases user-selected rectangular regions of an image to black, passing every
-  other pixel through unchanged.
+  Erases caller-selected rectangular regions of an image to black, passing
+  every other pixel through unchanged.
 
   anchorBoxInfoTensor holds the erase-region boxes as RpptRoiLtrb with a
   per-image stride of maxBoxesPerImage: box k of image n is at
   [n*maxBoxesPerImage + k]. numBoxesTensor[n] is the count of active boxes for
   image n (only k < numBoxesTensor[n] are read). Boxes are in ABSOLUTE image
   coordinates, LTRB inclusive (box width = rb.x - lt.x + 1). Per the API doc
-  the user-supplied boxes must not overlap.
+  the boxes must not overlap.
 
 Expression
   dst(x, y, c) = inside any active box ? black : src(x, y, c)

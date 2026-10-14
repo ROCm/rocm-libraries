@@ -43,9 +43,8 @@ using namespace rpptest;
 
 namespace {
 
-// slice takes an RpptGenericDesc but is not a rank-agnostic ND op: it dispatches on numDims AND on
-// the descriptor's layout, which must agree with the rank. The shapes below are the ones the op
-// actually defines, which is what this grid instantiates:
+// slice is not rank-agnostic: it dispatches on numDims and on the descriptor's layout, which must
+// agree with the rank:
 //
 //   numDims 3 -> (N,H,W)         layout NCHW   -- no channel axis
 //   numDims 4 -> (N,C,H,W)       layout NCHW   -- planar, C must be 1 or 3
@@ -53,19 +52,13 @@ namespace {
 //   numDims 5 -> (N,C,D,H,W)     layout NCDHW  -- planar, C must be 1 or 3
 //              (N,D,H,W,C)     layout NDHWC  -- packed, C = 3
 //
-// C is restricted to 1/3 because the op sizes its copy from get_layout_params(layout, C), which
-// only fills in those two cases; any other channel count leaves the copy length unset. The channel
-// axis is also not sliceable -- the kernels apply the anchor to the spatial axes only -- so this
-// grid slices the spatial axes and passes the channel axis through whole
-// (issues/slice-channel-axis-anchor-ignored.md records the deviation from the API doc's
-// "starting index of the slice for each dimension").
+// C must be 1 or 3 (get_layout_params only handles those). The kernels apply the anchor to the
+// spatial axes only, contrary to the API doc, so the channel axis is passed through whole.
 enum class SliceLayout { Planar, Packed };
 
-// Inside: the slice lies strictly within the ROI, so enablePadding is false and fillValue is never
-// consulted -- a pure gather. Padded: the same anchors with the slice running off the trailing end
-// of every spatial axis, so a border of the output must come out as the fill value. PaddedTail:
-// Padded but anchored at 0 on the width axis, so a source origin that mis-scales the width anchor
-// cannot fail it and the width tail past the ROI is tested on its own.
+// Inside: the slice lies within the ROI (no padding). Padded: the slice runs off the trailing end
+// of every spatial axis, so the border must be fillValue. PaddedTail: Padded with a 0 width anchor,
+// so the width tail is tested independently of the width-anchor offset.
 enum class SliceKind { Inside, Padded, PaddedTail };
 
 struct SliceParams {
@@ -115,9 +108,8 @@ int width_axis(Rpp32u nDim, SliceLayout layout) {
     return static_cast<int>(nDim) - (layout == SliceLayout::Packed && nDim > 2 ? 2 : 1);
 }
 
-// The channel axis is passed through whole (anchor 0, full extent); every spatial axis is sliced
-// from a non-zero, axis-dependent anchor so that a dropped or transposed anchor term cannot pass,
-// except the width axis of PaddedTail.
+// Spatial axes (except the PaddedTail width axis) use a non-zero, axis-dependent anchor so a
+// dropped or transposed anchor term cannot pass.
 Rpp32s anchor_for(Rpp32u axis, int channelAxis, int widthAxis, SliceKind kind) {
     if (static_cast<int>(axis) == channelAxis) return 0;
     if (kind == SliceKind::PaddedTail && static_cast<int>(axis) == widthAxis) return 0;
@@ -132,11 +124,8 @@ Rpp32s shape_for(Rpp32u axis, Rpp32u extent, int channelAxis, int widthAxis, Sli
     return length < 1 ? 1 : length;
 }
 
-// Only 0 is used as the fill value: the API takes fillValue as a void pointer and the header never
-// says whether it points to a value in the tensor's dtype or to an Rpp32f, so any non-zero choice
-// would encode a guess at the type, while an all-zero word reads as 0 under every interpretation.
-// It must live in device-accessible memory -- the HIP fill kernel dereferences it on the device, so
-// a host pointer faults the GPU.
+// The header does not say whether fillValue points to the tensor dtype or to Rpp32f; zero reads the
+// same either way.
 constexpr double kFillValue = 0.0;
 
 template <typename T>
@@ -148,8 +137,7 @@ void run_slice(const NdConfig& cfg, const SliceParams& p) {
     const int channelAxis = channel_axis(nDim, p.layout);
     const int widthAxis = width_axis(nDim, p.layout);
 
-    // The destination extents are the slice shape, densely packed. They are shared by the whole
-    // batch (a single descriptor), so every sample gets the same anchor and shape.
+    // One destination descriptor for the batch, so every sample gets the same anchor and shape.
     NdDims dstDims(nDim + 1);
     dstDims[0] = batch;
     for (Rpp32u a = 0; a < nDim; ++a)
@@ -157,10 +145,8 @@ void run_slice(const NdConfig& cfg, const SliceParams& p) {
             static_cast<Rpp32u>(shape_for(a, srcDims[a + 1], channelAxis, widthAxis, p.kind));
 
     // Descriptors are device-addressable for HIP: the ND kernels read dims/strides on device.
-    // Row-padded strides: slice's copy is vectorized 8 elements per thread and stores a full
-    // vector for the tail of every row, so the caller must leave that slack -- the same convention
-    // the image domain follows via padded_width(). With dense strides the tail store lands in the
-    // next row. The padded axis is width.
+    // Width is row-padded: slice stores a full 8-element vector for each row tail, so with dense
+    // strides the tail store would land in the next row.
     const int padAxis = widthAxis + 1;
     GenericDescriptor srcDesc(cfg.backend, srcDims, cfg.dtypeIn, layout, padAxis);
     GenericDescriptor dstDesc(cfg.backend, dstDims, cfg.dtypeIn, layout, padAxis);
@@ -170,8 +156,7 @@ void run_slice(const NdConfig& cfg, const SliceParams& p) {
     const std::size_t srcBytes = generic_byte_size(*srcDesc, cfg.dtypeIn);
     const std::size_t dstBytes = generic_byte_size(*dstDesc, cfg.dtypeIn);
 
-    // (1) anchor / shape / roi tensors live in host-accessible (pinned for HIP) memory: the op
-    // reads them on the host to size each launch.
+    // anchor/shape/roi must be host-accessible: the op reads them on the host to size each launch.
     PinnedArray<Rpp32s> anchor(cfg.backend, static_cast<std::size_t>(batch) * nDim);
     PinnedArray<Rpp32s> shape(cfg.backend, static_cast<std::size_t>(batch) * nDim);
     for (Rpp32u n = 0; n < batch; ++n)
@@ -188,19 +173,14 @@ void run_slice(const NdConfig& cfg, const SliceParams& p) {
     PinnedArray<T> fillValue(cfg.backend, 1);
     fillValue[0] = from_double<T>(kFillValue);
 
-    // (2) Host golden model. The reference covers the full destination, so golden needs no
-    // pre-seeding; the actual buffer is seeded with a sentinel byte pattern instead, so an output
-    // element the op leaves untouched shows up as a mismatch (the op writes every one of them).
-    // fill_input_nd addresses the pattern by coordinate and poisons the row slack, so the logical
-    // input does not depend on the stride convention and a kernel that reads slack cannot pass by
-    // picking up something that looks like data.
+    // actual is seeded with a sentinel so an element the op leaves untouched is a mismatch.
+    // fill_input_nd poisons the row slack, so a kernel that reads slack cannot pass.
     std::vector<T> input(srcCount), golden(dstCount), actual(dstCount);
     fill_input_nd<T>(input.data(), *srcDesc, cfg.dtypeIn);
     slice_reference<T>(input.data(), golden.data(), *srcDesc, *dstDesc, anchor.data(), shape.data(),
                        roi.data(), kFillValue);
     std::memset(actual.data(), 0xCD, dstBytes);
 
-    // (3) Run RPP on the configured backend.
     DeviceTensor src(cfg.backend, srcBytes), dst(cfg.backend, dstBytes);
     src.write(input.data(), srcBytes);
     dst.write(actual.data(), dstBytes);  // seed the destination with the sentinel
@@ -214,8 +194,6 @@ void run_slice(const NdConfig& cfg, const SliceParams& p) {
     handle.sync();  // drain the op's stream before copying results back
     dst.read(actual.data(), dstBytes);
 
-    // (4) Compare the whole output tensor, bit-exactly: slice only relocates elements (plus the
-    // constant fill), so there is no arithmetic to lose precision to at any dtype.
     EXPECT_TRUE(compare_nd<T>(actual.data(), golden.data(), *dstDesc, 0.0));
 }
 
@@ -223,17 +201,11 @@ void run_slice(const NdConfig& cfg, const SliceParams& p) {
 
 // Full name:
 // Misc_Geometric/SliceTest.Correctness/<Backend>_<DTypeConv>_<Rank>_<Layout>_<Kind>_<Shape> (the
-// shape token is the framework's nominal rank shape, not this op's layout-ordered extents -- see
-// slice_extents; the rank and layout tokens identify the case).
+// shape token is the nominal rank shape, not the extents from slice_extents).
 class SliceTest : public SkipListTest<NdWithParams<SliceParams>> {};
 
-// The planar cases are instantiated but not executed. Both HOST planar branches advance the
-// destination channel pointer by the SOURCE channel stride, so every channel after the first is
-// written at a growing overshoot; whenever the destination plane is smaller than the source plane
-// -- the ordinary case for an in-bounds slice -- the write lands past the end of the destination
-// buffer and aborts the process on a heap error, taking every later suite in the run with it.
-// Skipping rather than dropping them keeps the cases listed and filterable, so the coverage gap is
-// visible and the grid is restored by deleting one branch once the strides are fixed.
+// Planar cases are skipped rather than run: the HOST planar paths write past the destination buffer
+// and abort the whole test binary. Skipping keeps the cases visible in the listing.
 constexpr char kPlanarSkip[] =
     "slice HOST planar writes past the destination buffer (destination channel pointer advanced by "
     "the source channel stride) and aborts the test binary";
@@ -246,14 +218,11 @@ TEST_P(SliceTest, Correctness) {
         cfg.dtypeIn, [&](auto tag) { run_slice<Element<decltype(tag)>>(cfg, p); });
 }
 
-// Scoped to U8 and F32: the header documents exactly "Support added for f32 -> f32 and u8 -> u8
-// datatypes", so F16/I8 are out of contract and are not instantiated. Rank 2 has no channel axis,
-// so only its planar form is instantiated -- the packed duplicate would be the same call.
-// PaddedTail is packed-only: the width-anchor scaling it sidesteps is a packed-path concern.
+// U8 and F32 are the conversions the header documents. Rank 2 has no channel axis, so it is planar
+// only. PaddedTail is packed-only.
 std::vector<NdWithParams<SliceParams>> slice_configs() {
     std::vector<NdWithParams<SliceParams>> out;
-    // slice_extents() supplies this op's own extents, so the shared shape axis has nothing to
-    // vary here.
+    // slice_extents() supplies the extents, so the shape axis is not varied.
     for (const NdConfig& cfg :
          make_nd_configs({DType::U8, DType::F32}, {2, 3, 4}, {NdShape::VectorAligned}))
         for (SliceLayout layout : {SliceLayout::Planar, SliceLayout::Packed}) {

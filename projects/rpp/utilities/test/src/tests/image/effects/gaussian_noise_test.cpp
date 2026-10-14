@@ -40,12 +40,8 @@ using namespace rpptest;
 
 namespace {
 
-// gaussian_noise is covered at its RNG-free corner only. The Correctness intent pins
-// (mean 0, stdDev 0), where N(mean, stdDev) collapses to a point mass at 0 and the additive noise
-// degenerates to a passthrough -- bit-exact and seed-independent (see gaussian_noise_ref.hpp).
-// Away from that corner the output depends on the kernel's Box-Muller stream, which the public API
-// does not describe, so no golden is possible; the Negative intent covers the documented parameter
-// contract instead. The two take disjoint parameter sets, so they are separate fixtures.
+// Covered only at the RNG-free corner (mean 0, stdDev 0), where the op is a passthrough. Elsewhere
+// the output depends on an undocumented RNG stream, so no golden is possible.
 constexpr Rpp32u kSeed = 42u;
 
 template <typename T>
@@ -58,15 +54,13 @@ void run_gaussian_noise(const TestConfig& cfg) {
     PinnedArray<RpptROI> roi(cfg.backend, cfg.size.n);
     const std::vector<RpptROI> roiVec = make_roi(desc, cfg.roi);
     for (Rpp32u i = 0; i < cfg.size.n; ++i) {
-        mean[i] = 0.0f;  // the RNG-free identity corner
+        mean[i] = 0.0f;
         stdDev[i] = 0.0f;
         roi[i] = roiVec[i];
     }
 
-    // The destination starts from a DIFFERENT pattern than the source (salt = 1). Seeding it with
-    // the source would make golden, the device seed and the expected output byte-identical at this
-    // parameter corner -- the op is a passthrough here -- so a kernel that wrote nothing at all
-    // would pass. With a distinct seed the ROI has to be overwritten for the comparison to hold.
+    // dst is seeded with a different pattern from src: the op is a passthrough here, so a
+    // src-seeded dst would let a kernel that wrote nothing pass.
     std::vector<T> input(count), dstInit(count), golden(count), actual(count);
     fill_input<T>(input.data(), count, cfg.dtype);
     fill_input<T>(dstInit.data(), count, cfg.dtype, /*salt=*/1);
@@ -85,14 +79,11 @@ void run_gaussian_noise(const TestConfig& cfg) {
     handle.sync();  // drain the op's stream before copying results back
     dst.read(actual.data(), bytes);
 
-    // Compared against the test's own ROI copy, not the tensor handed to the op, in case the
-    // backend rewrites it from XYWH to LTRB in place.
+    // Uses the test's own ROI copy in case the backend rewrites the op's ROI to LTRB in place.
     EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), desc, roiVec.data(), XYWH, 0.0));
 }
 
-// One out-of-contract parameter pair per case. The header requires meanTensor[i] >= 0 and
-// stdDevTensor[i] >= 0; the parameter values are the grid axis here because argument validation is
-// dtype- and layout-independent.
+// One out-of-contract parameter pair per case. The header requires mean >= 0 and stdDev >= 0.
 struct GaussianNoiseNegativeParams {
     float mean;
     float stdDev;
@@ -101,10 +92,7 @@ struct GaussianNoiseNegativeParams {
     }
 };
 
-// A negative mean or standard deviation is not a legal call and must be reported rather than
-// silently producing an undefined image -- a negative stdDev in particular has no meaning for
-// Box-Muller, which scales by it. Only the status is asserted: the header does not name which
-// RPP_ERROR* an out-of-range scalar maps to.
+// Only non-success is asserted; the header does not name the RPP_ERROR* for an out-of-range scalar.
 template <typename T>
 void run_gaussian_noise_negative(const TestConfig& cfg, const GaussianNoiseNegativeParams& op) {
     RpptDesc desc = make_src_descriptor(cfg);

@@ -40,8 +40,7 @@ using namespace rpptest;
 
 namespace {
 
-// stdDev of the gaussian blend weight (>= 0). 15 gives a peaked gaussian (edges near src2), 50 a
-// flat one (mostly src1) over a 36x48 image -- together they exercise the full weight range.
+// stdDev of the gaussian blend weight (>= 0). 15 and 50 together cover the full weight range.
 struct NonLinearBlendParams {
     float stdDev;
     std::string name() const {
@@ -64,7 +63,7 @@ void run_non_linear_blend(const TestConfig& cfg, const NonLinearBlendParams& op)
         roi[i] = roiVec[i];
     }
 
-    // Two distinct operands (salt shifts the second) so the blend is non-degenerate.
+    // Two distinct operands so the blend is non-degenerate.
     std::vector<T> input1(count), input2(count), golden(count), actual(count);
     fill_input<T>(input1.data(), count, cfg.dtype);
     fill_input<T>(input2.data(), count, cfg.dtype, 1);

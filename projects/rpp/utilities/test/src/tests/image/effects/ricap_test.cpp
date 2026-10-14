@@ -40,9 +40,8 @@ using namespace rpptest;
 
 namespace {
 
-// The 2x2 mosaic boundary point (w0, h0) plus the source origin of each of the four crops. The
-// region extents follow from the boundary (region 0/2 are w0 wide, 1/3 are W-w0; region 0/1 are h0
-// high, 2/3 are H-h0), so the four crops tile the output exactly.
+// The 2x2 mosaic boundary (w0, h0) plus the source origin of each of the four crops; the region
+// extents follow from the boundary so the crops tile the output exactly.
 struct RicapParams {
     Rpp32u w0, h0;
     Rpp32u cropX[4], cropY[4];
@@ -60,8 +59,7 @@ void run_ricap(const TestConfig& cfg, const RicapParams& op) {
     const std::size_t count = element_count(srcDesc);
     const std::size_t bytes = byte_size(srcDesc, cfg.dtype);
 
-    // Exactly 4 crop ROIs shared by the whole batch (not one per image): they are ricap's source
-    // rectangles AND the output region extents. Host-accessible / device-visible (pinned on HIP).
+    // Exactly 4 crop ROIs shared by the whole batch: the source rectangles and the region extents.
     PinnedArray<RpptROI> cropRegion(cfg.backend, 4);
     const Rpp32u regionW[4] = {op.w0, srcDesc.w - op.w0, op.w0, srcDesc.w - op.w0};
     const Rpp32u regionH[4] = {op.h0, op.h0, srcDesc.h - op.h0, srcDesc.h - op.h0};
@@ -74,21 +72,18 @@ void run_ricap(const TestConfig& cfg, const RicapParams& op) {
         ASSERT_LE(op.cropY[k] + regionH[k], srcDesc.h) << "crop " << k << " overruns image height";
     }
 
-    // batchSize * 4 source-image indices: region k of output image n comes from image
-    // permutation[n*4 + k].
+    // Region k of output image n comes from image permutation[n*4 + k].
     PinnedArray<Rpp32u> permutation(cfg.backend, static_cast<std::size_t>(cfg.size.n) * 4);
     for (Rpp32u n = 0; n < cfg.size.n; ++n)
         for (Rpp32u k = 0; k < 4; ++k)
             permutation[n * 4 + k] = op.distinctSources ? (n + k) % cfg.size.n : 0u;
 
-    // (1) Host golden model. One tensor holds the whole batch, and fill_input's pattern advances
-    // with the linear element offset, so the images already differ from each other.
+    // fill_input advances with the linear offset, so the batch images already differ.
     std::vector<T> in(count), golden(count), actual(count);
     fill_input<T>(in.data(), count, cfg.dtype);
     ricap_reference<T>(in.data(), srcDesc, golden.data(), dstDesc, permutation.data(),
                        cropRegion.data(), XYWH);
 
-    // (2) Run RPP on the configured backend.
     DeviceTensor src(cfg.backend, bytes), dst(cfg.backend, bytes);
     src.write(in.data(), bytes);
 
@@ -97,12 +92,10 @@ void run_ricap(const TestConfig& cfg, const RicapParams& op) {
                          cropRegion.data(), XYWH, handle.get(), cfg.backend),
               RPP_SUCCESS);
 
-    // (3) Retrieve the result on the host (no-op copy for HOST, device->host for HIP).
     handle.sync();  // drain the op's stream before copying results back
     dst.read(actual.data(), bytes);
 
-    // (4) ricap is a verbatim copy for every dtype and it writes the entire destination frame, so
-    // compare the full image bit-exact (tolerance 0).
+    // ricap writes the entire destination frame as a verbatim copy.
     PinnedArray<RpptROI> fullRoi(cfg.backend, cfg.size.n);
     const std::vector<RpptROI> fullVec = make_roi(dstDesc, Roi::Full);
     for (Rpp32u i = 0; i < cfg.size.n; ++i) fullRoi[i] = fullVec[i];
@@ -121,22 +114,10 @@ TEST_P(RicapTest, Correctness) {
         p.cfg.dtype, [&](auto tag) { run_ricap<Element<decltype(tag)>>(p.cfg, p.op); });
 }
 
-// Only {Roi::Full} on the roi axis: ricap has no standard source-ROI argument (its four crop
-// rectangles ARE the ROI) and it always writes the full destination frame, so a Partial-ROI variant
-// would not be meaningful -- the same reasoning as crop_and_patch. The 4-image batch lets the four
-// regions each draw from a distinct source image (the paper's case); ricap requires every image in
-// the batch to have the same dimensions.
-//
-// Cases (output 36 high x 48 wide):
-//   quad   - boundary (20, 16), crops at (2,3)/(10,5)/(6,12)/(14,8), permutation {n, n+1, n+2, n+3}
-//            so every output image mixes four different sources. Every crop fits: 2+20, 10+28,
-//            6+20, 14+28 <= 48 and 3+16, 5+16, 12+20, 8+20 <= 36.
-//   quad8  - the same mix with boundary (24, 16), i.e. both region widths a multiple of 8.
-//   single - boundary (24, 18), all crops at (0,0), permutation {0,0,0,0}: the degenerate case
-//            where the output is image 0's top-left quadrant tiled 2x2.
-//   bound  - single's degenerate crops/permutation with quad's boundary (20, 16): isolates the
-//            vertical split as the only variable.
-// Same-layout cases plus both directions of the fused output-layout conversion.
+// Full ROI only: the four crop rectangles are the ROI and the op writes the whole frame. The
+// 4-image batch lets each region draw from a distinct source; ricap requires equal image
+// dimensions. quad8 makes both region widths a multiple of 8; single/bound draw every region from
+// image 0.
 INSTANTIATE_TEST_SUITE_P(Image_Effects, RicapTest,
                          ::testing::ValuesIn(with_params<RicapParams>(
                              make_configs({DType::U8, DType::F16, DType::F32, DType::I8},

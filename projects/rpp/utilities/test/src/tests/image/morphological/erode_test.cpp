@@ -39,7 +39,6 @@ using namespace rpptest;
 
 namespace {
 
-// kernelSize is a single odd number (3/5/7/9) applied to every image in the batch.
 struct ErodeParams {
     Rpp32u kernelSize;
     std::string name() const {
@@ -49,11 +48,8 @@ struct ErodeParams {
 
 template <typename T>
 void run_erode(const TestConfig& cfg, const ErodeParams& op) {
-    // src carries a leading border pad: the HIP morphology kernel requires
-    // srcDesc.offsetInBytes >= 12 * (kernelSize/2) (read-slack for the KxH window; the border
-    // itself is computed by clamping indices to the image, i.e. replicate). dst keeps offset 0,
-    // so the golden and comparator index destination elements from 0. Applied on both backends
-    // (rppt_erode_host honours offsetInBytes identically) to keep one path.
+    // The HIP morphology kernel requires srcDesc.offsetInBytes >= 12 * (kernelSize/2) as read-slack
+    // for the window, so src carries a leading pad. dst keeps offset 0.
     RpptDesc srcDesc = make_src_descriptor(cfg);
     RpptDesc dstDesc = make_dst_descriptor(cfg);
     const std::size_t offsetBytes = 12u * (op.kernelSize / 2);
@@ -67,9 +63,7 @@ void run_erode(const TestConfig& cfg, const ErodeParams& op) {
     const std::vector<RpptROI> roiVec = make_roi(srcDesc, cfg.roi);
     for (Rpp32u i = 0; i < cfg.size.n; ++i) roi[i] = roiVec[i];
 
-    // (1) Host golden model. The src buffer is [front pad][image][back pad]; the image base sits
-    // at offsetElems. golden/actual are the (pad-free, offset 0) destination. golden starts as a
-    // copy of the image so the untouched (outside-ROI) region is defined.
+    // src is [front pad][image][back pad]; the image base sits at offsetElems.
     std::vector<T> src(offsetElems + count + offsetElems), golden(count), actual(count);
     fill_input<T>(src.data(), src.size(), cfg.dtype);
     T* image = src.data() + offsetElems;
@@ -77,9 +71,7 @@ void run_erode(const TestConfig& cfg, const ErodeParams& op) {
     erode_reference<T>(image, srcDesc, golden.data(), dstDesc, cfg.dtype, roi.data(), XYWH,
                        op.kernelSize);
 
-    // (2) Run RPP on the configured backend. erode exposes a separate HOST symbol (no backend
-    // arg); the backend-arg symbol is only functional in a HIP build, so gate the HIP call on it.
-    // RPP adds srcDesc.offsetInBytes to the src pointer internally, landing on the image base.
+    // erode has a separate HOST symbol; the backend-arg symbol only works in a HIP build.
     DeviceTensor srcDev(cfg.backend, src.size() * dtype_size(cfg.dtype));
     DeviceTensor dst(cfg.backend, imageBytes);
     srcDev.write(src.data(), src.size() * dtype_size(cfg.dtype));
@@ -100,14 +92,11 @@ void run_erode(const TestConfig& cfg, const ErodeParams& op) {
     }
     ASSERT_EQ(status, RPP_SUCCESS);
 
-    // (3) Retrieve the result on the host (no-op copy for HOST, device->host for HIP).
     handle.sync();
     dst.read(actual.data(), imageBytes);
 
-    // (4) Compare over the ROI. Erode selects an existing pixel, so the result is bit-exact
-    // (tolerance 0). Known reds kept red by design: HOST I8 is offset by +128, and HOST float PLN
-    // partial-ROI k5 bleeds neighbors from outside the ROI -- both are real kernel defects, so the
-    // golden stays correct.
+    // erode selects an existing pixel, so it is bit-exact. Known kernel red: HOST float PLN
+    // partial-ROI k5 reads neighbours from outside the ROI.
     EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), dstDesc, roi.data(), XYWH, 0.0));
 }
 

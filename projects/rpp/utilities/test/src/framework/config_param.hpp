@@ -35,8 +35,7 @@ SOFTWARE.
 #include <vector>
 
 #include "framework/backend_param.hpp"
-// Pulled in for its PrintTo(RppStatus, ...) overload: nearly every test that includes
-// this header also asserts on an RppStatus return, so this is the shared point to get it.
+// For PrintTo(RppStatus, ...), which nearly every test that includes this header needs.
 #include "framework/status_param.hpp"
 
 namespace rpptest {
@@ -45,9 +44,7 @@ namespace rpptest {
 // {Backend}_{DTypeConv}_{Layout}_{Roi} tokens of the value-parameter label so every
 // axis is independently greppable via --gtest_filter.
 
-// I16 is only reachable through the ND (Misc) grid -- rppt_log1p documents i16->f32 as its
-// only conversion. The image-domain helpers (to_unit / from_unit / quantize_stored) do not
-// model it.
+// I16 is only used by the ND (Misc) grid (rppt_log1p); the image-domain helpers do not model it.
 enum class DType { U8, F16, F32, I8, I16 };
 enum class Layout { PKD3, PLN3, PLN1 };  // PKD3/PLN3 => 3 channels, PLN1 => 1 channel
 enum class Roi { Full, Partial };
@@ -95,16 +92,12 @@ inline std::string size_name(Size s) {
 }
 
 // A layout conversion: what an op reads and what it writes. Several RPP ops fuse a layout change
-// into the operation itself -- NHWC <-> NCHW for the three-channel layouts, and PKD3/PLN3 -> PLN1
-// for colour-to-greyscale -- so the two sides are named independently. The counterpart of
-// DTypeConv in nd_config_param.hpp, and used the same way: as the grid's layout axis.
+// (NHWC <-> NCHW, or PKD3/PLN3 -> PLN1 for colour-to-greyscale) into the operation itself.
 struct LayoutConv {
     Layout in, out;
 };
 
-// A single point in the test grid. dtypeIn == dtypeOut for now; kept as one field until
-// mixed-precision conversions (e.g. U8->F32) are exercised. The layout axis has already split,
-// mirroring NdConfig's dtypeIn/dtypeOut.
+// A single point in the test grid. dtype is both the input and output type.
 struct TestConfig {
     RppBackend backend;
     DType dtype;
@@ -113,12 +106,8 @@ struct TestConfig {
     Size size;
 };
 
-// Produces the value-parameter label, e.g. "HIP_U8toU8_PKD3_FullRoi_2x36x48".
-//
-// Unlike nd_label(), which always spells the dtype conversion out ("U8toU8"), the layout token
-// names both sides only when they differ ("PKD3toPLN1"). A converting op is the exception here,
-// and every non-converting label predates this axis: the known-defect skip list matches ~140 glob
-// patterns against these names, so a same-layout config must render exactly as it always has.
+// Produces the value-parameter label, e.g. "HIP_U8toU8_PKD3_FullRoi_2x36x48". The layout token
+// names both sides only when they differ ("PKD3toPLN1"); the skip list's patterns depend on this.
 inline std::string config_name(const TestConfig& c) {
     const std::string layout = c.layoutIn == c.layoutOut
                                    ? layout_name(c.layoutIn)
@@ -128,10 +117,8 @@ inline std::string config_name(const TestConfig& c) {
 }
 
 namespace presets {
-// The shape sweep. Each size lands the width somewhere different against the SIMD and HIP block
-// widths, and a test grids its other axes over them. A test that also has layout conversions in
-// its grid usually runs those at kTailWidthSize only: a conversion is a store-side concern, so
-// one shape exercises it, and pairing it with the odd width keeps its cost at one grid.
+// The shape sweep: each width lands differently against the SIMD and HIP block widths. Layout
+// conversions are usually gridded at kTailWidthSize only.
 
 // The default shape for images.
 inline constexpr Size kDefaultSize{2, 36, 48};
@@ -166,13 +153,8 @@ inline const std::vector<Layout> kLayouts3Ch{Layout::PKD3, Layout::PLN3};
 inline const std::vector<DType> kDefaultDTypes{DType::U8, DType::I8, DType::F16, DType::F32};
 }  // namespace presets
 
-// Cartesian product of the requested axes with every available backend. Pass the
-// dtype/layout/roi/size sets an op supports; HIP is only present when the suite was built
-// with the HIP backend (see available_backends()). Most ops take the default single size.
-//
-// The layout axis takes conversions: {{PKD3, PLN1}, {PLN3, PLN1}} grids colour-to-greyscale over
-// both of its source layouts. An op that does not convert passes plain layouts to the overload
-// below instead.
+// Cartesian product of the requested axes with every available backend. The layout axis takes
+// conversions; an op that does not convert passes plain layouts to the overload below.
 inline std::vector<TestConfig> make_configs(
     const std::vector<DType>& dtypes, const std::vector<LayoutConv>& layouts,
     const std::vector<Roi>& rois, const std::vector<Size>& sizes = {presets::kDefaultSize}) {
@@ -186,8 +168,7 @@ inline std::vector<TestConfig> make_configs(
     return configs;
 }
 
-// The same grid for an op that writes the layout it reads, which is most of them: each layout
-// stands for the conversion {l, l}. Mirrors the plain-dtype overload of make_nd_configs().
+// The same grid for an op that writes the layout it reads: each layout stands for {l, l}.
 inline std::vector<TestConfig> make_configs(
     const std::vector<DType>& dtypes, const std::vector<Layout>& layouts,
     const std::vector<Roi>& rois, const std::vector<Size>& sizes = {presets::kDefaultSize}) {
@@ -214,11 +195,8 @@ inline std::string config_param_name(const ::testing::TestParamInfo<TestConfig>&
 
 // ---- op-specific parameters -----------------------------------------------
 //
-// Universal axes live in TestConfig; scalar op inputs (blend alpha, brightness
-// alpha/beta, ...) are carried alongside it via WithParams<P>, where P is a small
-// per-op struct defined in that op's test. This keeps the shared grid uniform while
-// letting each op bake its own values in at INSTANTIATE_TEST_SUITE_P time (and turn
-// any of them into an axis just by passing more than one value).
+// Scalar op inputs (blend alpha, brightness alpha/beta, ...) ride alongside TestConfig via
+// WithParams<P>, where P is a small per-op struct defined in that op's test.
 
 template <typename P>
 struct WithParams {
@@ -262,11 +240,7 @@ inline std::string num_token(float v) {
     return s;
 }
 
-// ---- value-parameter printing ----------------------------------------------
-//
-// See the note on PrintTo in backend_param.hpp: the label is already in the test name, so
-// every param type prints as empty.
-
+// The label is already in the test name, so params print as empty (see backend_param.hpp).
 inline void PrintTo(const TestConfig&, std::ostream*) {}
 
 template <typename P>

@@ -45,9 +45,7 @@ std::string interp_token(RpptInterpolationType i) {
     return i == NEAREST_NEIGHBOR ? "NN" : "BILINEAR";
 }
 
-// The remap-table pattern to build per image, plus the interpolation to sample with. Identity is a
-// verbatim copy of the ROI region; hflip mirrors it horizontally; halfshift probes bilinear with a
-// deterministic half-texel column offset.
+// The remap-table pattern built per image.
 enum class RemapKind { Identity, Hflip, Halfshift };
 
 struct RemapParams {
@@ -59,12 +57,9 @@ struct RemapParams {
     }
 };
 
-// Tolerances are set from legitimate numeric error only; they are NOT loosened to hide integer
-// truncation or any other kernel defect this test may surface.
+// Nearest-neighbour copies texels verbatim; bilinear allows rounding error only.
 double remap_tolerance(DType dt, RpptInterpolationType interp) {
-    // Nearest-neighbour (and the identity/hflip table lookups) copy a texel verbatim: bit-exact.
     if (interp == NEAREST_NEIGHBOR) return 0.0;
-    // Bilinear blends in float; allow only genuine rounding error. Integer types round to nearest.
     return kRoundingTolerance(dt);
 }
 
@@ -76,7 +71,7 @@ void run_remap(const TestConfig& cfg, const RemapParams& op) {
     const std::size_t count = element_count(srcDesc);
     const std::size_t bytes = byte_size(srcDesc, cfg.dtype);
 
-    // Remap tables: a SEPARATE F32, single-channel, UNPADDED tensor (row stride is exactly imgW).
+    // Remap tables: a separate F32, single-channel, unpadded tensor.
     RpptDesc td{};
     td.numDims = 4;
     td.offsetInBytes = 0;
@@ -86,18 +81,17 @@ void run_remap(const TestConfig& cfg, const RemapParams& op) {
     td.c = 1;
     td.h = imgH;
     td.w = imgW;
-    td.strides.nStride = static_cast<Rpp32u>(imgH) * imgW;  // unpadded
+    td.strides.nStride = static_cast<Rpp32u>(imgH) * imgW;
     td.strides.hStride = imgW;
     td.strides.wStride = 1;
     td.strides.cStride = 1;
 
-    // Per-image ROIs in host-accessible (pinned for HIP) memory.
     PinnedArray<RpptROI> roi(cfg.backend, N);
     const std::vector<RpptROI> roiVec = make_roi(srcDesc, cfg.roi);
     for (Rpp32u i = 0; i < N; ++i) roi[i] = roiVec[i];
 
-    // Fill both tables with ABSOLUTE source coordinates, packed at the table origin over the
-    // [0,roiH) x [0,roiW) output region of each image; the untouched remainder stays zero.
+    // Tables hold absolute source coordinates, packed at the table origin over the ROI-sized
+    // region.
     const std::size_t tblCount = static_cast<std::size_t>(N) * imgH * imgW;
     PinnedArray<Rpp32f> rowT(cfg.backend, tblCount), colT(cfg.backend, tblCount);
     for (std::size_t k = 0; k < tblCount; ++k) {
@@ -131,15 +125,12 @@ void run_remap(const TestConfig& cfg, const RemapParams& op) {
             }
     }
 
-    // (1) Host golden model. golden starts as a copy of the input so the untouched (outside-ROI)
-    // region is defined; only the ROI-sized output region is overwritten.
     std::vector<T> input(count), golden(count), actual(count);
     fill_input<T>(input.data(), count, cfg.dtype);
     golden = input;
     remap_reference<T>(input.data(), srcDesc, golden.data(), dstDesc, cfg.dtype, rowT.data(),
                        colT.data(), td, roi.data(), XYWH, op.interp);
 
-    // (2) Run RPP on the configured backend.
     DeviceTensor src(cfg.backend, bytes), dst(cfg.backend, bytes);
     src.write(input.data(), bytes);
     dst.write(input.data(), bytes);  // define outside-ROI dst to mirror the golden
@@ -149,14 +140,10 @@ void run_remap(const TestConfig& cfg, const RemapParams& op) {
                          op.interp, roi.data(), XYWH, handle.get(), cfg.backend),
               RPP_SUCCESS);
 
-    // (3) Retrieve the result on the host (no-op copy for HOST, device->host for HIP).
     handle.sync();  // drain the op's stream before copying results back
     dst.read(actual.data(), bytes);
 
-    // (4) Compare within tolerance over the ROI-sized output region at the destination origin,
-    // bounded by the caller's own ROI copy rather than the tensor handed to the op: the HIP path
-    // rewrites that tensor from XYWH to LTRB in place, so reusing roi[] here would walk a
-    // different region than the golden wrote.
+    // Uses the test's own ROI copy: HIP rewrites the op's ROI to LTRB in place.
     EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), dstDesc, roiVec.data(), XYWH,
                                remap_tolerance(cfg.dtype, op.interp)));
 }
@@ -173,9 +160,8 @@ TEST_P(RemapTest, Correctness) {
         p.cfg.dtype, [&](auto tag) { run_remap<Element<decltype(tag)>>(p.cfg, p.op); });
 }
 
-// identity: verbatim copy of the ROI region. hflip: horizontal mirror within the ROI. halfshift:
-// half-texel column offset, bilinear only, exercises the 4-tap blend (including the black-border
-// tap at the right edge) deterministically.
+// halfshift is a half-texel column offset that exercises the bilinear blend, including the
+// black-border tap at the right edge.
 INSTANTIATE_TEST_SUITE_P(Image_Geometric, RemapTest,
                          ::testing::ValuesIn(with_params<RemapParams>(
                              make_configs({DType::U8, DType::F16, DType::F32, DType::I8},

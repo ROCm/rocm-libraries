@@ -46,19 +46,15 @@ void run_bitwise_not(const TestConfig& cfg) {
     const std::size_t count = element_count(srcDesc);
     const std::size_t bytes = byte_size(srcDesc, cfg.dtype);
 
-    // ROIs live in host-accessible (pinned for HIP) memory.
     PinnedArray<RpptROI> roi(cfg.backend, cfg.size.n);
     const std::vector<RpptROI> roiVec = make_roi(srcDesc, cfg.roi);
     for (Rpp32u i = 0; i < cfg.size.n; ++i) roi[i] = roiVec[i];
 
-    // (1) Host golden model. golden starts as a copy of the input so the untouched
-    // (outside-ROI) region is defined; only the ROI is overwritten by the reference.
     std::vector<T> input(count), golden(count), actual(count);
     fill_input<T>(input.data(), count, cfg.dtype);
     golden = input;
     bitwise_not_reference<T>(input.data(), srcDesc, golden.data(), dstDesc, roi.data(), XYWH);
 
-    // (2) Run RPP on the configured backend.
     DeviceTensor src(cfg.backend, bytes), dst(cfg.backend, bytes);
     src.write(input.data(), bytes);
     dst.write(input.data(), bytes);  // define outside-ROI dst to mirror the golden
@@ -68,11 +64,10 @@ void run_bitwise_not(const TestConfig& cfg) {
                                handle.get(), cfg.backend),
               RPP_SUCCESS);
 
-    // (3) Retrieve the result on the host (no-op copy for HOST, device->host for HIP).
     handle.sync();  // drain the op's stream before copying results back
     dst.read(actual.data(), bytes);
 
-    // (4) Compare over the ROI. bitwise_not is bit-exact, so the tolerance is zero.
+    // Bit-exact, so zero tolerance.
     EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), dstDesc, roi.data(), XYWH, 0.0));
 }
 

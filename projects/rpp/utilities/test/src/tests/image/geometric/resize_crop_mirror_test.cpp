@@ -45,9 +45,7 @@ std::string interp_token(RpptInterpolationType i) {
     return i == NEAREST_NEIGHBOR ? "NN" : "BILINEAR";
 }
 
-// A per-image destination size, interpolation, and mirror flag. The scale is derived from the
-// source ROI (same target size is a bigger upscale from the half-size partial ROI); mirror flips
-// the output horizontally.
+// The scale is derived from the source ROI, so the partial ROI gives a bigger upscale.
 struct ResizeCropMirrorParams {
     Rpp32u dstW, dstH;
     RpptInterpolationType interp;
@@ -59,9 +57,8 @@ struct ResizeCropMirrorParams {
     }
 };
 
-// Tolerances are set from legitimate numeric error only; they are NOT loosened to hide kernel bugs.
-// NN copies a texel verbatim (bit-exact); bilinear blends in float. Same sampling as resize, so the
-// bilinear last-column/row-short kernel defect surfaces here too.
+// NN copies texels verbatim; bilinear allows rounding error only. Not loosened for the kernel's
+// bilinear last-column/row-short defect.
 double resize_crop_mirror_tolerance(DType dt, RpptInterpolationType interp) {
     if (interp == NEAREST_NEIGHBOR) return 0.0;
     return kRoundingTolerance(dt);
@@ -89,8 +86,6 @@ void run_resize_crop_mirror(const TestConfig& cfg, const ResizeCropMirrorParams&
         mirror[i] = op.mirror;
     }
 
-    // (1) Host golden model. golden starts as a distinct dst pattern so the untouched padding is
-    // defined; only the dstW x dstH destination image is overwritten.
     std::vector<T> input(srcCount), dstInit(dstCount), golden(dstCount), actual(dstCount);
     fill_input<T>(input.data(), srcCount, cfg.dtype);
     fill_input<T>(dstInit.data(), dstCount, cfg.dtype, /*salt=*/1);
@@ -98,7 +93,6 @@ void run_resize_crop_mirror(const TestConfig& cfg, const ResizeCropMirrorParams&
     resize_crop_mirror_reference<T>(input.data(), srcDesc, golden.data(), dstDesc, cfg.dtype,
                                     roi.data(), XYWH, dstSizes.data(), mirror.data(), op.interp);
 
-    // (2) Run RPP on the configured backend.
     DeviceTensor src(cfg.backend, srcBytes), dst(cfg.backend, dstBytes);
     src.write(input.data(), srcBytes);
     dst.write(dstInit.data(), dstBytes);
@@ -109,11 +103,9 @@ void run_resize_crop_mirror(const TestConfig& cfg, const ResizeCropMirrorParams&
                                       cfg.backend),
               RPP_SUCCESS);
 
-    // (3) Retrieve the result on the host.
     handle.sync();
     dst.read(actual.data(), dstBytes);
 
-    // (4) Compare over the full destination image (packed at the origin).
     std::vector<RpptROI> dstRoiVec = make_roi(dstDesc, Roi::Full);
     EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), dstDesc, dstRoiVec.data(), XYWH,
                                resize_crop_mirror_tolerance(cfg.dtype, op.interp)));
@@ -132,8 +124,7 @@ TEST_P(ResizeCropMirrorTest, Correctness) {
     });
 }
 
-// Cover the {mirror on/off} x {NN/bilinear} x {up/down} axes: up-NN-nomirror, up-bilinear-mirror,
-// down-NN-mirror, down-bilinear-nomirror.
+// Covers {mirror on/off} x {NN/bilinear} x {up/down}.
 INSTANTIATE_TEST_SUITE_P(Image_Geometric, ResizeCropMirrorTest,
                          ::testing::ValuesIn(with_params<ResizeCropMirrorParams>(
                              make_configs({DType::U8, DType::F16, DType::F32, DType::I8},

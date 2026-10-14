@@ -78,14 +78,12 @@ void run_fused_multiply_add_scalar(const VoxelConfig& cfg, const FmaddScalarPara
     PinnedArray<RpptROI3D> roi(cfg.backend, cfg.size.n);
     for (Rpp32u i = 0; i < cfg.size.n; ++i) roi[i] = roiHost[i];
 
-    // (1) Host golden model. Both sides start at the sentinel so a voxel the op never writes stays
-    // obviously unwritten rather than plausibly zero.
+    // Both sides start at the sentinel so a voxel the op never writes cannot pass as zero.
     std::vector<T> golden(count, nd_slack_poison<T>(cfg.dtype));
     std::vector<T> actual = golden;
     arithmetic_scalar_reference<T>(input.data(), golden.data(), *desc, roiHost.data(), cfg.roiType,
                                    ScalarArithmeticOp::FusedMultiplyAdd, mul.data(), add.data());
 
-    // (2) Run RPP on the configured backend.
     DeviceTensor src(cfg.backend, bytes), dst(cfg.backend, bytes);
     src.write(input.data(), bytes);
     dst.write(actual.data(), bytes);
@@ -99,7 +97,6 @@ void run_fused_multiply_add_scalar(const VoxelConfig& cfg, const FmaddScalarPara
     handle.sync();  // drain the op's stream before copying results back
     dst.read(actual.data(), bytes);
 
-    // (3) Compare the voxels inside the ROI box.
     EXPECT_TRUE(compare_voxel_roi<T>(actual.data(), golden.data(), *desc, roiHost.data(),
                                      cfg.roiType, scalar_tolerance(cfg.dtype)));
 }
@@ -116,11 +113,8 @@ TEST_P(FusedMultiplyAddScalarTest, Correctness) {
     run_fused_multiply_add_scalar<Rpp32f>(p.cfg, p.op);
 }
 
-// f32 -> f32 is the op's only documented conversion.
-//
-// mul 80 / add 5 are the values the legacy voxel harness uses. With a [0, 1] fill the two terms are
-// far apart in magnitude, so a kernel that swapped mulTensor and addTensor, or dropped either, is
-// caught; and every result leaves [0, 1], so a clamp to the image-intensity range would show.
+// F32 only, per the header. mul and add differ widely in magnitude, so swapping or dropping either
+// is caught, and results leave [0, 1], so an image-intensity clamp would show.
 INSTANTIATE_TEST_SUITE_P(
     Voxel_Arithmetic, FusedMultiplyAddScalarTest,
     ::testing::ValuesIn(voxel_with_params<FmaddScalarParams>(

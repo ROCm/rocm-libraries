@@ -39,10 +39,8 @@ using namespace rpptest;
 
 namespace {
 
-// The kernel takes a single integer look-up table (documented length 65536) shared by the
-// whole batch. Only the 256 intensity slots are meaningful for the integer dtypes; the rest
-// are defined to avoid any indeterminate reads. An inverting table (intensity j -> 255 - j)
-// is used so the mapping is easy to reason about.
+// One table (documented length 65536) shared by the batch. Only the first 256 entries matter for
+// the integer dtypes; the rest are zeroed so no read is indeterminate.
 template <typename T>
 void fill_lut(T* lut, DType dt) {
     for (std::size_t j = 0; j < 65536; ++j) {
@@ -68,15 +66,12 @@ void run_lut(const TestConfig& cfg) {
     const std::vector<RpptROI> roiVec = make_roi(srcDesc, cfg.roi);
     for (Rpp32u i = 0; i < cfg.size.n; ++i) roi[i] = roiVec[i];
 
-    // (1) Host golden model. golden starts as a copy of the input so the untouched
-    // (outside-ROI) region is defined; only the ROI is overwritten by the reference.
     std::vector<T> input(count), golden(count), actual(count);
     fill_input<T>(input.data(), count, cfg.dtype);
     golden = input;
     lut_reference<T>(input.data(), srcDesc, golden.data(), dstDesc, cfg.dtype, roi.data(), XYWH,
                      lut.data());
 
-    // (2) Run RPP on the configured backend.
     DeviceTensor src(cfg.backend, bytes), dst(cfg.backend, bytes);
     src.write(input.data(), bytes);
     dst.write(input.data(), bytes);  // define outside-ROI dst to mirror the golden
@@ -86,11 +81,10 @@ void run_lut(const TestConfig& cfg) {
                        handle.get(), cfg.backend),
               RPP_SUCCESS);
 
-    // (3) Retrieve the result on the host (no-op copy for HOST, device->host for HIP).
     handle.sync();  // drain the op's stream before copying results back
     dst.read(actual.data(), bytes);
 
-    // (4) Compare over the ROI. A look-up is a bit-exact copy of a table entry, so tolerance 0.
+    // A look-up is bit-exact, so zero tolerance.
     EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), dstDesc, roi.data(), XYWH, 0.0));
 }
 
@@ -107,7 +101,6 @@ TEST_P(LutTest, Correctness) {
 
 // Restricted to the integer dtypes (U8/I8): the 256-entry intensity index is unambiguous
 // there, whereas the float dtypes' table-index semantics are not defined by the public API.
-// All layouts (c = 1/3) are supported.
 // Same-layout cases plus both directions of the fused output-layout conversion.
 INSTANTIATE_TEST_SUITE_P(Image_Color, LutTest,
                          ::testing::ValuesIn(concat_configs({

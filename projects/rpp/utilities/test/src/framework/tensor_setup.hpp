@@ -51,19 +51,15 @@ struct TensorShape {
     Rpp32u n, c, h, w;
 };
 
-// RPP's tensor calling convention pads the row width to (w/8)*8+8 elements, so kernels
-// that process a full SIMD vector on the row tail read/write into that slack instead of
-// overrunning the buffer (and, for a batch, the next image). The official legacy harness
-// applies this padding to every op; some kernels tolerate a tight width but others (e.g.
-// color_temperature) corrupt memory without it. d.w stays the logical width (so ROIs and
-// the reference walk the real image); only the strides carry the padded row stride.
+// RPP kernels store a full SIMD vector on a row's tail, so the row width must be padded to
+// (w/8)*8+8 elements; some kernels (e.g. color_temperature) corrupt memory without it. d.w stays
+// the logical width; only the strides carry the padding.
 inline Rpp32u padded_width(Rpp32u w) {
     return (w / 8) * 8 + 8;
 }
 
-// Builds a 4D descriptor for the given layout, with the padded row stride RPP expects. pad=false
-// gives the densely packed strides instead: no op is run that way, but the goldens must agree
-// logically under either convention (src/tests/core/golden_layout_test.cpp guards that).
+// Builds a 4D descriptor with the padded row stride RPP expects. pad=false gives dense strides,
+// used only to check the goldens (src/tests/core/golden_layout_test.cpp).
 inline RpptDesc make_descriptor(const TensorShape& s, DType dt, Layout layout, bool pad = true) {
     RpptDesc d{};
     d.numDims = 4;
@@ -89,11 +85,8 @@ inline RpptDesc make_descriptor(const TensorShape& s, DType dt, Layout layout, b
     return d;
 }
 
-// The source and destination descriptors for a config, at the config's own extents. Each side's
-// channel count follows its own layout, so a conversion that changes it (PKD3 -> PLN1) is described
-// correctly without the test restating the shape; for the usual same-layout config the two are
-// identical. Ops whose output extents differ from the input's (the resize family) build their own
-// shapes and call make_descriptor() directly with cfg.layoutIn / cfg.layoutOut.
+// Source and destination descriptors at the config's extents; each side's channel count follows
+// its own layout. Ops whose output extents differ (the resize family) call make_descriptor().
 inline RpptDesc make_src_descriptor(const TestConfig& c, bool pad = true) {
     const TensorShape s{c.size.n, static_cast<Rpp32u>(channels_of(c.layoutIn)), c.size.h, c.size.w};
     return make_descriptor(s, c.dtype, c.layoutIn, pad);
@@ -137,10 +130,8 @@ inline std::vector<RpptROI> make_roi(const RpptDesc& d, Roi mode) {
 
 // ---- element addressing ----------------------------------------------------
 //
-// Every golden reaches an element through the descriptor's strides and never by walking the
-// buffer flat, so a dense and a padded descriptor place the same logical coordinate correctly
-// and two operands may use different conventions. These three are that mapping's only
-// definition; the traversals below and the op references are all built on them.
+// Goldens always address elements through the descriptor's strides, never by walking the buffer
+// flat, so dense and padded descriptors agree logically.
 
 // Origin of image n's channel-c plane.
 inline std::size_t plane_base(const RpptDesc& d, Rpp32u n, Rpp32u c) {
@@ -174,8 +165,7 @@ inline RoiBounds roi_bounds(const RpptROI& r, RpptRoiType type) {
 }
 
 // Invokes fn(n, b, c, base) once per image-channel plane, b being the image's ROI bounds and
-// base the plane's origin. The outer walk shared by the goldens that address their own
-// neighbourhood inside a plane (filters, morphology, warps) rather than a single element.
+// base the plane's origin. For goldens that address a neighbourhood (filters, morphology, warps).
 template <typename Fn>
 void for_each_roi_plane(const RpptDesc& d, const RpptROI* roi, RpptRoiType type, Fn fn) {
     for (Rpp32u n = 0; n < d.n; ++n) {
@@ -184,9 +174,7 @@ void for_each_roi_plane(const RpptDesc& d, const RpptROI* roi, RpptRoiType type,
     }
 }
 
-// Invokes fn(n, b, c, srcBase, dstBase) once per image-channel plane, the two origins addressed
-// through their own descriptor. The neighbourhood-walking counterpart of the dual-descriptor
-// for_each_roi_io below, for filters and warps under a toggled output layout.
+// As above, with source and destination origins addressed through their own descriptors.
 template <typename Fn>
 void for_each_roi_plane(const RpptDesc& sd, const RpptDesc& dd, const RpptROI* roi,
                         RpptRoiType type, Fn fn) {
@@ -197,17 +185,10 @@ void for_each_roi_plane(const RpptDesc& sd, const RpptDesc& dd, const RpptROI* r
 }
 
 // Invokes fn(n, c, j, i, srcIdx, dstIdx) for every element of each image's ROI, addressing the
-// source through `sd` and the destination through `dd`.
+// source through `sd` and the destination through `dd` (which differ when the op converts layout).
 //
-// RPP pointwise ops read the source from the ROI offset but write the output packed at
-// the destination origin: for output row j / col i, the source element is at
-// (y0 + j, x0 + i) and the destination element is at (j, i) (see the kernel's
-// srcPtrChannel = srcPtrImage + ROI offset, dstPtrChannel = dstPtrImage). This is the
-// single definition of that mapping, so the reference and the comparator agree.
-//
-// Two descriptors because an op may write a layout other than the one it reads -- RPP's fused
-// output-layout toggle, NHWC <-> NCHW. Each index goes through its own descriptor's strides, so
-// the transpose is expressed entirely by the descriptors and no golden has to special-case it.
+// RPP reads the source at the ROI offset but writes the output packed at the destination origin:
+// output (j, i) comes from source (y0 + j, x0 + i). The reference and the comparator both use this.
 template <typename Fn>
 void for_each_roi_io(const RpptDesc& sd, const RpptDesc& dd, const RpptROI* roi, RpptRoiType type,
                      Fn fn) {
@@ -224,18 +205,15 @@ void for_each_roi_io(const RpptDesc& sd, const RpptDesc& dd, const RpptROI* roi,
     }
 }
 
-// Single-descriptor form: source and destination share a layout, which is every op that does not
-// exercise the output-layout toggle.
+// Single-descriptor form: source and destination share a layout.
 template <typename Fn>
 void for_each_roi_io(const RpptDesc& d, const RpptROI* roi, RpptRoiType type, Fn fn) {
     for_each_roi_io(d, d, roi, type, fn);
 }
 
 // Invokes fn(n, j, i, srcPix, dstPix) once per pixel of each image's ROI, where srcPix/dstPix
-// are the channel-0 element offsets; the callback strides channels itself via channel_index()
-// -- through `sd` for srcPix and `dd` for dstPix, which is what makes a toggled layout work.
-// Same source-at-ROI-offset / destination-at-origin mapping as for_each_roi_io (that mapping's
-// single definition), for ops that need a whole pixel's channels together (e.g. RGB<->HSV).
+// are the channel-0 offsets; the callback strides channels via channel_index(). Same mapping as
+// for_each_roi_io, for ops that need a whole pixel's channels together (e.g. RGB<->HSV).
 template <typename Fn>
 void for_each_roi_pixel(const RpptDesc& sd, const RpptDesc& dd, const RpptROI* roi,
                         RpptRoiType type, Fn fn) {
@@ -292,10 +270,8 @@ void fill_input(T* buf, std::size_t count, DType dt, unsigned salt = 0) {
     }
 }
 
-// The image counterpart of fill_input_nd(): the same pattern addressed by coordinate, so a tensor's
-// logical content does not depend on its stride convention. The pattern is laid out in (n, c, y, x)
-// order, which is memory order for a dense planar descriptor (there this is byte-identical to
-// fill_input()) but not for a packed one, whose innermost axis is the channel.
+// fill_input()'s pattern addressed by (n, c, y, x) coordinate, so a tensor's logical content does
+// not depend on its stride convention.
 template <typename T>
 void fill_input_image(T* buf, const RpptDesc& d, DType dt, unsigned salt = 0) {
     const std::size_t logical = static_cast<std::size_t>(d.n) * d.c * d.h * d.w;
@@ -310,15 +286,10 @@ void fill_input_image(T* buf, const RpptDesc& d, DType dt, unsigned salt = 0) {
 // Generic ND tensors (Misc domain)
 // =================================================================================================
 
-// Construction, traversal and comparison for the ND "generic tensor" ops (Misc domain), which take
-// RpptGenericDesc (numDims/dims[]/strides[]) instead of the image domain's RpptDesc + XYWH ROI.
-
 // ---- descriptors ----------------------------------------------------------
 
-// Row padding, the generic-tensor form of the image domain's padded_width(): RPP's vectorized
-// kernels store a full 8-element vector for a row's tail and expect the caller to have allocated
-// the slack. It is the *width* axis that gets it -- innermost for planar layouts, one in from the
-// end for packed ones, whose innermost axis is the channel axis.
+// The generic-tensor form of padded_width(). The padded axis is the width axis: innermost for
+// planar layouts, one in from the end for packed ones.
 inline Rpp32u nd_padded_width(Rpp32u w) {
     return (w / 8) * 8 + 8;
 }
@@ -409,10 +380,6 @@ inline std::vector<Rpp32u> make_nd_roi_tensor(const NdDims& dims) {
 }
 
 // ---- traversal ------------------------------------------------------------
-//
-// Tensors are always addressed by logical coordinate through their own strides, never by walking
-// the buffer flat, so a dense and a padded descriptor give the same logical answer and operands may
-// differ in convention. src/tests/core/golden_layout_test.cpp guards that property.
 
 // The descriptor's logical extents, batch axis first.
 inline NdDims nd_dims(const RpptGenericDesc& d) {
@@ -435,9 +402,6 @@ inline std::size_t nd_offset(const RpptGenericDesc& d, const NdDims& coord) {
 }
 
 // Visits every coordinate of an arbitrary extent list, row-major with the innermost axis fastest.
-// The one coordinate walk: a golden whose iteration space is not a whole descriptor (slice's
-// per-sample shape, normalize's per-sample sub-tensor) drives it from here rather than
-// re-deriving the row-major order.
 template <typename Fn>
 void for_each_coord(const NdDims& extents, Fn fn) {
     const std::size_t rank = extents.size();
@@ -506,10 +470,8 @@ void fill_input_nd(T* buf, const RpptGenericDesc& d, DType dt, unsigned salt = 0
 // Voxel tensors (Voxel domain)
 // =================================================================================================
 
-// Construction, traversal and comparison for the Voxel domain: a 5D RpptGenericDesc (NCDHW or
-// NDHWC) plus a per-sample RpptROI3D box. Descriptors are built with the GenericDescriptor
-// above (dense strides, as the legacy voxel harness uses), so only the 3D layout
-// mapping, the ROI3D box and an in-box traversal are added here.
+// Voxel descriptors are GenericDescriptors with dense strides; this adds the 3D layout mapping,
+// the ROI3D box and an in-box traversal.
 
 inline Rpp32u voxel_channels(VoxelLayout l) {
     return l == VoxelLayout::NCDHW1 ? 1 : 3;
@@ -528,8 +490,7 @@ inline RpptLayout to_rpp_layout_3d(VoxelLayout l) {
 }
 
 // Which descriptor axis each logical axis occupies: {n, d, h, w, c} packed, {n, c, d, h, w}
-// planar. The single statement of that order -- extents (voxel_dims) and addressing
-// (voxel_plane_base / voxel_plane_index) are both derived from it, so they cannot disagree.
+// planar.
 struct VoxelAxes {
     std::size_t c, z, y, x;
 };
@@ -553,10 +514,6 @@ inline Rpp32u voxel_channels(const RpptGenericDesc& d) {
 }
 
 // ---- element addressing ----------------------------------------------------
-//
-// Addressed through the descriptor's own strides, never by walking the buffer flat, so the layout
-// is the descriptor's business and a padded convention would need no change here. The image
-// domain's plane_base / plane_index pair, one dimension up.
 
 // Origin of sample n's channel-c volume.
 inline std::size_t voxel_plane_base(const RpptGenericDesc& d, Rpp32u n, Rpp32u c) {
@@ -602,8 +559,7 @@ inline RpptRoi3DType to_rpp_roi3d_type(Roi3D t) {
 
 // Per-sample ROI3D: the whole volume, or a centered half-extent box in every axis.
 inline std::vector<RpptROI3D> make_voxel_roi(const VoxelSize& s, Roi mode, Roi3D type) {
-    // One axis of the box; a half-extent is kept at least 1, so a thin depth axis still yields a
-    // usable box.
+    // A half-extent is kept at least 1, so a thin depth axis still yields a usable box.
     auto span = [mode](Rpp32u extent) {
         if (mode == Roi::Full) return std::pair<Rpp32u, Rpp32u>{0, extent};
         return std::pair<Rpp32u, Rpp32u>{extent / 4, extent / 2 ? extent / 2 : 1};
@@ -636,8 +592,7 @@ inline std::vector<RpptROI3D> make_voxel_roi(const VoxelSize& s, Roi mode, Roi3D
 // ---- traversal --------------------------------------------------------------
 
 // Invokes fn(n, c, box, base) once per sample-channel volume, box being that sample's ROI and base
-// the volume's origin. The outer walk, for goldens that address a neighbourhood or mirror
-// coordinates rather than a single voxel (the image domain's for_each_roi_plane, one dimension up).
+// the volume's origin.
 template <typename Fn>
 void for_each_voxel_roi_plane(const RpptGenericDesc& desc, const RpptROI3D* roi, Roi3D type,
                               Fn fn) {
@@ -648,14 +603,9 @@ void for_each_voxel_roi_plane(const RpptGenericDesc& desc, const RpptROI3D* roi,
     }
 }
 
-// Invokes fn(n, c, z, y, x, srcIdx, dstIdx) for every voxel of each sample's ROI box, (z, y, x)
-// being the box-relative coordinate.
-//
-// Like the image-domain pointwise ops (for_each_roi_io above), the voxel ops read the
-// source at the ROI offset and write the output packed at the destination origin: box voxel
-// (z, y, x) comes from source (z0 + z, y0 + y, x0 + x) and lands at destination (z, y, x). This is
-// the one definition of that mapping -- the goldens and the comparator both drive it, so they
-// cannot disagree.
+// Invokes fn(n, c, z, y, x, srcIdx, dstIdx) for every voxel of each sample's ROI box. As with
+// for_each_roi_io, box voxel (z, y, x) comes from source (z0 + z, y0 + y, x0 + x) and lands at
+// destination (z, y, x).
 template <typename Fn>
 void for_each_voxel_roi_io(const RpptGenericDesc& desc, const RpptROI3D* roi, Roi3D type, Fn fn) {
     for_each_voxel_roi_plane(

@@ -41,13 +41,11 @@ using namespace rpptest;
 
 namespace {
 
-// Integer sums are exact (64-bit accumulator); float sums accumulate roiW*roiH terms, so a
-// small tolerance covers accumulation-order differences between the double golden and the F32
-// kernel accumulator.
+// Integer sums are exact (64-bit accumulator); floats allow accumulation-order differences.
 constexpr Tolerance kTensorSumTolerance = tolerance(0.0, 1e-1, 1e-1);
 
-// Tin is the source element type; Tout is the op's output element type (U8->Rpp64u, I8->Rpp64s,
-// F16/F32->Rpp32f, per the API's overflow-safe sum contract).
+// Tin is the source element type; Tout is the op's output type (U8->Rpp64u, I8->Rpp64s,
+// F16/F32->Rpp32f).
 template <typename Tin, typename Tout>
 void run_tensor_sum(const TestConfig& cfg) {
     RpptDesc desc = make_src_descriptor(cfg);  // RPP takes a non-const ptr
@@ -59,13 +57,11 @@ void run_tensor_sum(const TestConfig& cfg) {
     const std::vector<RpptROI> roiVec = make_roi(desc, cfg.roi);
     for (Rpp32u i = 0; i < cfg.size.n; ++i) roi[i] = roiVec[i];
 
-    // (1) Host golden model.
     std::vector<Tin> input(count);
     fill_input<Tin>(input.data(), count, cfg.dtype);
     const std::vector<double> golden =
         tensor_sum_reference<Tin>(input.data(), desc, roi.data(), XYWH);
 
-    // (2) Run RPP on the configured backend. The result array is host-accessible (pinned for HIP).
     DeviceTensor src(cfg.backend, bytes);
     src.write(input.data(), bytes);
     PinnedArray<Tout> out(cfg.backend, outLen);
@@ -76,10 +72,8 @@ void run_tensor_sum(const TestConfig& cfg) {
                               XYWH, handle.get(), cfg.backend),
               RPP_SUCCESS);
 
-    // (3) Drain the op's stream; pinned output is then directly readable on the host.
-    handle.sync();
+    handle.sync();  // pinned output is then directly readable on the host
 
-    // (4) Compare within tolerance.
     EXPECT_TRUE(compare_reduction<Tout>(out.data(), golden, kTensorSumTolerance(cfg.dtype)));
 }
 
@@ -113,7 +107,6 @@ INSTANTIATE_TEST_SUITE_P(Image_Statistical, TensorSumTest,
                          ::testing::ValuesIn(make_configs(
                              {DType::U8, DType::F16, DType::F32, DType::I8},
                              {Layout::PKD3, Layout::PLN3, Layout::PLN1}, {Roi::Full, Roi::Partial},
-                             // Kept in step with tensor_min/max's shapes so the
-                             // reduction ops share one grid.
+                             // Same shapes as tensor_min/max.
                              {{2, 160, 160}, {2, 137, 167}})),
                          config_param_name);

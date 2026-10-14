@@ -45,13 +45,7 @@ std::string interp_token(RpptInterpolationType i) {
     return i == NEAREST_NEIGHBOR ? "NN" : "BILINEAR";
 }
 
-// A rotation angle (degrees, positive = anticlockwise) plus the interpolation. Angles are
-// restricted to the cardinal set {0,90,180,270}: those map every output pixel to an integer source
-// coordinate, so the golden is bit-exact and independent of the double-vs-float coordinate
-// pipeline. General angles are deferred -- with fractional coords the golden's double maths
-// diverges from the kernel's float pipeline at texel boundaries, producing diffs that cannot be
-// cleanly attributed to a kernel defect. The shared bilinear 4-tap blend is already validated by
-// warp_affine's halfshift case.
+// Angle in degrees, positive = anticlockwise.
 struct RotateParams {
     float angle;
     RpptInterpolationType interp;
@@ -60,15 +54,12 @@ struct RotateParams {
     }
 };
 
-// Tolerances are set from legitimate numeric error only; they are NOT loosened to hide the real
-// warp kernel defects this test surfaces (shared machinery): HOST bilinear last col/row off-by-one,
-// I8 out-of-bounds fill = 0 (not -128), the ignored ROI origin that leaves every partial-ROI case
-// part black, and HIP's further partial-ROI placement divergence from HOST on top of it.
+// NN copies texels verbatim; bilinear allows rounding error only. Not loosened for the known kernel
+// defects: HOST bilinear reads the last column/row one texel short, I8 out-of-bounds fill is 0
+// rather than -128, and partial ROIs ignore the ROI origin (with HIP placement also diverging).
 double rotate_tolerance(DType dt, RpptInterpolationType interp) {
-    // Nearest-neighbour copies a texel verbatim; bit-exact at cardinal angles (integer coords).
     if (interp == NEAREST_NEIGHBOR) return 0.0;
-    // Bilinear: cos/sin of 90/270 deg are not exactly 0 in float, leaving a sub-LSB blend; allow
-    // only that genuine rounding error. Integer types round to nearest.
+    // cos/sin of 90/270 deg are not exactly 0 in float, leaving a sub-LSB blend.
     return kRoundingTolerance(dt);
 }
 
@@ -80,7 +71,6 @@ void run_rotate(const TestConfig& cfg, const RotateParams& op) {
     const std::size_t count = element_count(desc);
     const std::size_t bytes = byte_size(desc, cfg.dtype);
 
-    // Per-image angle and ROI in host-accessible (pinned for HIP) memory.
     PinnedArray<Rpp32f> angle(cfg.backend, shape.n);
     PinnedArray<RpptROI> roi(cfg.backend, shape.n);
     const std::vector<RpptROI> roiVec = make_roi(desc, cfg.roi);
@@ -89,15 +79,12 @@ void run_rotate(const TestConfig& cfg, const RotateParams& op) {
         roi[i] = roiVec[i];
     }
 
-    // (1) Host golden model. golden starts as a copy of the input so the untouched
-    // (outside-ROI) region is defined; only the ROI-sized output region is overwritten.
     std::vector<T> input(count), golden(count), actual(count);
     fill_input<T>(input.data(), count, cfg.dtype);
     golden = input;
     rotate_reference<T>(input.data(), golden.data(), desc, cfg.dtype, roi.data(), XYWH,
                         angle.data(), op.interp);
 
-    // (2) Run RPP on the configured backend.
     DeviceTensor src(cfg.backend, bytes), dst(cfg.backend, bytes);
     src.write(input.data(), bytes);
     dst.write(input.data(), bytes);  // define outside-ROI dst to mirror the golden
@@ -107,14 +94,10 @@ void run_rotate(const TestConfig& cfg, const RotateParams& op) {
                           XYWH, handle.get(), cfg.backend),
               RPP_SUCCESS);
 
-    // (3) Retrieve the result on the host (no-op copy for HOST, device->host for HIP).
     handle.sync();  // drain the op's stream before copying results back
     dst.read(actual.data(), bytes);
 
-    // (4) Compare within tolerance over the ROI-sized output region at the destination origin,
-    // bounded by the caller's own ROI copy rather than the tensor handed to the op: rotate
-    // dispatches to the HIP warp-affine path, which rewrites that tensor from XYWH to LTRB in
-    // place, so reusing roi[] here would walk a different region than the golden wrote.
+    // Uses the test's own ROI copy: HIP rewrites the op's ROI to LTRB in place.
     EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), desc, roiVec.data(), XYWH,
                                rotate_tolerance(cfg.dtype, op.interp)));
 }
@@ -131,9 +114,8 @@ TEST_P(RotateTest, Correctness) {
         p.cfg.dtype, [&](auto tag) { run_rotate<Element<decltype(tag)>>(p.cfg, p.op); });
 }
 
-// Cardinal angles: 0 (identity), 90/270 (both rotation directions), 180. All map to integer source
-// coordinates, so the transform math is validated deterministically. 45 degrees is the one angle
-// that does not: it lands every sample between source pixels and sends the corners off the frame.
+// Cardinal angles map to integer source coordinates; 45 lands samples between source pixels and
+// sends the corners off the frame.
 INSTANTIATE_TEST_SUITE_P(
     Image_Geometric, RotateTest,
     ::testing::ValuesIn(with_params<RotateParams>(

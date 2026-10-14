@@ -46,9 +46,6 @@ Used by
   erode, dilate   (Image / Morphological)
 
 Description
-  The window, border and placement every KxK spatial op shares, so all of them
-  have a single definition of what a neighbourhood is.
-
   Each op treats the ROI as its working image. For output-local pixel (j,i)
   the KxK window samples ROI-local neighbours (j+dy, i+dx) for dy,dx in
   [-r, r] with r = kernelSize/2, each neighbour coordinate clamped to the ROI
@@ -77,11 +74,8 @@ inline void gather_roi_window(const T* src, const RpptDesc& sd, const RoiBounds&
         }
 }
 
-// The one window-filter driver: per channel over each image's ROI it gathers the KxK window and
-// stores reduce(window, kk), which returns the output already in stored units. Every KxK op in the
-// suite goes through this, so the window, the border and the placement have a single definition.
-// sd and dd differ only when the op converts layout; the neighbourhood is always gathered through
-// the source's own strides and written through the destination's.
+// Per channel over each image's ROI, gathers the KxK window and stores reduce(window, kk), which
+// returns the output already in stored units. sd and dd differ only when the op converts layout.
 template <typename T, typename Reduce>
 void filter_reference(const T* src, const RpptDesc& sd, T* dst, const RpptDesc& dd,
                       const RpptROI* roi, RpptRoiType type, Rpp32u kernelSize, Reduce reduce) {
@@ -99,11 +93,9 @@ void filter_reference(const T* src, const RpptDesc& sd, T* dst, const RpptDesc& 
         });
 }
 
-// Applies a KxK linear filter (kernel row-major, length kernelSize*kernelSize, same dy/dx order as
-// gather_roi_window). The weighted sum is quantized back to the dtype via quantize_stored --
-// integers round to nearest and clamp, floats clamp to [0,1] -- which is the intended semantics
-// (round-to-nearest, not truncate; see the systemic I8 round-vs-truncate finding). Used by
-// box_filter and gaussian_filter.
+// Applies a KxK linear filter (kernel row-major, same dy/dx order as gather_roi_window). The
+// weighted sum is quantized via quantize_stored: integers round to nearest and clamp, floats clamp
+// to [0,1].
 template <typename T>
 void convolve_reference(const T* src, const RpptDesc& sd, T* dst, const RpptDesc& dd, DType dt,
                         const RpptROI* roi, RpptRoiType type, Rpp32u kernelSize,

@@ -38,12 +38,9 @@ RPP op
   rppt_glitch   (Image / Effects augmentation)
 
 Description
-  Per-channel RGB pixel shift -- the classic colour-fringe glitch. Each
-  channel is read from the source displaced by its own (x, y) offset, given as
-  one RpptChannelOffsets per image, so the three channels separate at edges.
-
-  Greyscale is out of scope: the op takes three offsets and the legacy harness
-  rejects PLN1.
+  Per-channel RGB pixel shift. Each channel is read from the source displaced
+  by its own (x, y) offset, given as one RpptChannelOffsets per image. 3-channel
+  only.
 
 Expression
   sx = x0 + i + offset[c].x
@@ -56,10 +53,7 @@ Per-type form
 
 Notes
   The header documents no behaviour for a shifted coordinate that leaves the
-  ROI. The model passes the unshifted source pixel through, which keeps the
-  frame intact and is what an RGB-shift glitch does; a kernel that blacks or
-  clamps those pixels instead shows up as a diff -- a finding, not a reference
-  bug.
+  ROI; the model passes the unshifted source pixel through.
 */
 
 // The (x, y) offset for channel c of RpptChannelOffsets.

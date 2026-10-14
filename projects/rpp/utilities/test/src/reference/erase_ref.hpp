@@ -41,17 +41,15 @@ RPP op
   rppt_erase   (Image / Effects augmentation)
 
 Description
-  Overwrites one or more user-defined rectangular regions with caller-supplied
-  solid colours, passing every other pixel through unchanged.
+  Overwrites one or more rectangular regions with caller-supplied solid
+  colours, passing every other pixel through unchanged.
 
   anchorBoxInfoTensor gives each erase-region as an RpptRoiLtrb in ABSOLUTE
-  image coordinates, inclusive on both corners (RpptRoiLtrb is inclusive
-  throughout RPP -- see roi_bounds, which spans [lt, rb] with width
-  rb-lt+1), so a box covers columns [lt.x, rb.x] and rows [lt.y, rb.y]. The
-  box and colour tensors are packed with a per-image stride of
-  maxBoxesPerImage: box k of image n is at [n*maxBoxesPerImage + k], and its
-  colour for channel c at [(n*maxBoxesPerImage + k)*channels + c] (a per-box
-  RGB triplet, one value per channel). numBoxes[n] is the count of active
+  image coordinates, inclusive on both corners, so a box covers columns
+  [lt.x, rb.x] and rows [lt.y, rb.y]. The box and colour tensors are packed
+  with a per-image stride of maxBoxesPerImage: box k of image n is at
+  [n*maxBoxesPerImage + k], and its colour for channel c at
+  [(n*maxBoxesPerImage + k)*channels + c]. numBoxes[n] is the count of active
   boxes for image n, and they are required not to overlap.
 
 Expression

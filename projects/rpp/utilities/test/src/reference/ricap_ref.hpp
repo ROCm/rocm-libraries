@@ -46,12 +46,10 @@ Description
   permutation[n*4 + k]; all batch images live in one tensor, so image p starts
   at p * d.strides.nStride.
 
-  cropRegion[k] supplies both the SOURCE origin (x, y) of region k and its
-  extent (roiWidth, roiHeight); the boundary point is therefore implied by the
-  extents themselves, so the region output origins are derived from
-  cropRegion[0]'s extent rather than hard-coded. The four extents are expected
-  to tile the output exactly (w0+w1 == W, h0+h2 == H, w0 == w2, w1 == w3,
-  h0 == h1, h2 == h3).
+  cropRegion[k] gives region k's source origin and extent. The output region
+  origins follow from cropRegion[0]'s extent; the four extents must tile the
+  output exactly (w0+w1 == W, h0+h2 == H, w0 == w2, w1 == w3, h0 == h1,
+  h2 == h3).
 
 Expression
   With output extent WxH and boundary point (w0, h0), region k occupies:
@@ -62,16 +60,13 @@ Expression
   k=3 -> origin (w0, h0), extent (W-w0) x (H-h0)
 
 Per-type form
-  No arithmetic, rounding, or clamping is performed -- every output element is
-  a verbatim copy of a source element -- so the result is bit-exact for U8,
-  I8, F16 and F32 alike (compare at tolerance 0).
+  Every output element is a verbatim copy, so the result is bit-exact for every
+  type.
 
 Notes
-  The suite's usual "source read at ROI offset, output written packed at the
-  destination origin" rule does not apply here. ricap has no source-ROI
-  argument (the four crop rectangles are the ROI) and it writes the ENTIRE
-  destination frame, so the reference walks the full frame with explicit
-  placement math instead of for_each_roi_io().
+  ricap has no source-ROI argument (the crop rectangles are the ROI) and writes
+  the entire destination, so the reference walks the full frame instead of
+  using for_each_roi_io().
 */
 template <typename T>
 void ricap_reference(const T* src, const RpptDesc& sd, T* dst, const RpptDesc& dd,
@@ -79,7 +74,6 @@ void ricap_reference(const T* src, const RpptDesc& sd, T* dst, const RpptDesc& d
     RoiBounds crop[4];
     for (int k = 0; k < 4; ++k) crop[k] = roi_bounds(cropRegion[k], roiType);
 
-    // Region output origins from the cumulative crop extents (the boundary point).
     const Rpp32u originX[4] = {0, crop[0].w, 0, crop[0].w};
     const Rpp32u originY[4] = {0, 0, crop[0].h, crop[0].h};
 

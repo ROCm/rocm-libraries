@@ -43,11 +43,8 @@ using namespace rpptest;
 
 namespace {
 
-// spatter samples its texture at an offset drawn from an unseedable RNG on both backends, and the
-// texture itself is a baked constant pair in a private, non-installed header. No pointwise golden
-// is available at any call shape the suite can build standalone, so the op is covered entirely by
-// properties that hold whatever offset was drawn. The two checks take disjoint parameter sets, so
-// the check is an axis of the grid rather than a separate TEST_P body.
+// spatter samples a private baked texture at an unseedable random offset, so no pointwise golden
+// exists; it is covered by properties that hold for any offset.
 enum class Check { Identity, ChannelBand };
 
 struct SpatterParams {
@@ -63,25 +60,20 @@ struct SpatterParams {
     }
 };
 
-// Identity needs a colour the source can be filled with exactly; the other two want all three
-// components distinct so a channel mix-up cannot pass by coincidence.
+// Identity needs equal components (PLN1 uses the mean); ChannelBand wants distinct components so a
+// channel mix-up cannot pass by coincidence.
 constexpr RpptRGB kGreyColor{160, 160, 160};
 constexpr RpptRGB kAsymmetricColor{200, 90, 20};
 
-// The blend is one multiply-add per element, so the integer dtypes are bit-exact: a
-// deviation is a rounding or clamping defect, not accumulated error. F16 is allowed one
-// half-precision ulp near 1.0.
+// One multiply-add per element, so integers are bit-exact; F16 gets one ulp near 1.0.
 constexpr Tolerance kSpatterTolerance = tolerance(0.0, 1e-6, 1e-3);
 
-// How far outside the src/colour band the store quantization alone can legitimately put a value:
-// half an LSB for the integer dtypes, which round to nearest; nothing beyond the compare tolerance
-// for the float dtypes, whose stored unit is the intensity itself.
+// Slack for store quantization: half an LSB for integers, the compare tolerance for floats.
 double spatter_band_eps(DType dt) {
     return (dt == DType::U8 || dt == DType::I8) ? 0.5 : kSpatterTolerance(dt);
 }
 
-// ---- Identity: src == spatterColor is a fixed point of the blend, at any size ----------------
-
+// src == spatterColor is a fixed point of the blend.
 template <typename T>
 void run_spatter_identity(const TestConfig& cfg) {
     RpptDesc srcDesc = make_src_descriptor(cfg);  // RPP takes a non-const ptr
@@ -94,14 +86,7 @@ void run_spatter_identity(const TestConfig& cfg) {
     const std::vector<RpptROI> roiVec = make_roi(srcDesc, cfg.roi);
     for (Rpp32u n = 0; n < cfg.size.n; ++n) roi[n] = roiVec[n];
 
-    // A constant image at the spatter colour. PLN1 collapses the colour to its mean, which is
-    // exact here because all three components are equal. src and golden are each filled through
-    // their own descriptor so the pattern lands correctly under either layout.
-    //
-    // The device destination is seeded from an UNRELATED pattern rather than from the golden: the
-    // expected output here is a constant at the spatter colour, so seeding it with that same
-    // constant would make golden, seed and expected byte-identical and a kernel that wrote nothing
-    // would pass. Only the ROI is compared, so the seeded remainder is free.
+    // dst is seeded with an unrelated pattern so a kernel that wrote nothing cannot pass.
     std::vector<T> input(srcCount), dstInit(dstCount), golden(dstCount), actual(dstCount);
     for_each_image_element(srcDesc, [&](Rpp32u, Rpp32u c, Rpp32u, Rpp32u, std::size_t idx) {
         input[idx] = from_double<T>(spatter_color_stored(kGreyColor, srcDesc.c, c, cfg.dtype));
@@ -128,11 +113,7 @@ void run_spatter_identity(const TestConfig& cfg) {
                                kSpatterTolerance(cfg.dtype)));
 }
 
-// ---- ChannelBand: the output is a convex combination of the source and the colour -------------
-
-// mask lies in [0,1] and maskInv is its complement, so every output element must land on the
-// segment between its source element and the documented spatter intensity for its channel --
-// whatever texel the RNG picked. eps only absorbs the store quantization.
+// The output is a convex combination of source and colour, so every element must lie between them.
 template <typename T>
 ::testing::AssertionResult check_channel_band(const T* actual, const T* src, const RpptDesc& sd,
                                               const RpptDesc& dd, DType dt, const RpptROI* roi,

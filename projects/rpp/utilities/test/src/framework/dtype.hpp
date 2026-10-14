@@ -32,9 +32,8 @@ SOFTWARE.
 
 #include "framework/config_param.hpp"
 
-// Everything that answers "what is this DType/Layout, concretely": the RPP enum it maps to, its
-// width in bytes, its channel count, the C++ storage type it is held in, and the dispatch that
-// turns the runtime value into that compile-time type.
+// DType/Layout mappings: RPP enums, element size, channel count, C++ storage type, and runtime
+// dispatch onto that type.
 
 namespace rpptest {
 
@@ -79,7 +78,6 @@ inline RpptLayout to_rpp_layout(Layout l) {
 }
 
 // ---- DType -> C++ storage type --------------------------------------------
-// Maps a DType to the C++ storage type RPP uses for it.
 template <DType D>
 struct StorageType;
 template <>
@@ -114,10 +112,8 @@ using Element = typename Tag::type;
 //       run_op<Element<decltype(tag)>>(cfg, op);
 //   });
 //
-// The dtypes are listed per call site rather than baked in, so fn is instantiated only for
-// the ones the op actually supports (an op whose reference or API rejects, say, I16 never
-// compiles a body for it). A dtype outside the list fails the test: the instantiation lists
-// the dtypes an op runs over, so this only fires if the two lists drift apart.
+// The dtypes are listed per call site so fn is instantiated only for those the op supports. A
+// dtype outside the list fails the test (the call site and the instantiation have drifted).
 template <DType... Ds, typename Fn>
 void dispatch_dtype(DType dtype, Fn&& fn) {
     // Short-circuiting fold over the listed dtypes: fn runs for the first one that matches.

@@ -48,8 +48,7 @@ struct NormalizeParams {
     }
 };
 
-// Non-trivial scale/shift so a kernel that drops either is caught (the legacy harness runs
-// scale=1, shift=0, which cannot distinguish them).
+// Non-trivial scale/shift so a kernel that drops either is caught.
 constexpr Rpp32f kScale = 1.5f;
 constexpr Rpp32f kShift = 0.25f;
 
@@ -62,9 +61,7 @@ Rpp32f supplied_stddev(std::size_t i) {
     return 1.0f + 0.5f * static_cast<Rpp32f>(i % 3);
 }
 
-// Tolerances reflect legitimate floating-point error only: the golden accumulates in double
-// while the kernel reduces in float (and stores half for F16), so the bound is dominated by
-// the relative term.
+// The golden accumulates in double; the kernel reduces in float (and stores half for F16).
 Bound normalize_tolerance(DType out) {
     return out == DType::F16 ? Bound{2e-2, 4e-3} : Bound{1e-4, 1e-5};
 }
@@ -85,7 +82,6 @@ void run_normalize(const NdConfig& cfg, const NormalizeParams& p) {
     const Rpp32u paramSize = normalize_param_size(paramDims);
     const std::size_t paramCount = static_cast<std::size_t>(paramSize) * dims[0];
 
-    // Mean/stddev and the roiTensor live in host-accessible (pinned for HIP) memory.
     PinnedArray<Rpp32f> mean(cfg.backend, paramCount);
     PinnedArray<Rpp32f> stdDev(cfg.backend, paramCount);
     for (std::size_t i = 0; i < paramCount; ++i) {
@@ -96,7 +92,6 @@ void run_normalize(const NdConfig& cfg, const NormalizeParams& p) {
     PinnedArray<Rpp32u> roi(cfg.backend, roiVec.size());
     for (std::size_t i = 0; i < roiVec.size(); ++i) roi[i] = roiVec[i];
 
-    // (1) Host golden model.
     std::vector<Tin> input(count);
     std::vector<Tout> golden(count), actual(count);
     fill_input_nd<Tin>(input.data(), *srcDesc, cfg.dtypeIn);
@@ -104,7 +99,6 @@ void run_normalize(const NdConfig& cfg, const NormalizeParams& p) {
                                    p.axisMask, mean.data(), stdDev.data(), p.computeMode, kScale,
                                    kShift);
 
-    // (2) Run RPP on the configured backend.
     DeviceTensor src(cfg.backend, srcBytes), dst(cfg.backend, dstBytes);
     src.write(input.data(), srcBytes);
 
@@ -117,7 +111,6 @@ void run_normalize(const NdConfig& cfg, const NormalizeParams& p) {
     handle.sync();  // drain the op's stream before copying results back
     dst.read(actual.data(), dstBytes);
 
-    // (3) Compare the whole output tensor.
     EXPECT_TRUE(compare_nd<Tout>(actual.data(), golden.data(), *dstDesc,
                                  normalize_tolerance(cfg.dtypeOut)));
 }
@@ -140,10 +133,8 @@ std::vector<Rpp32u> masks_for(Rpp32u nDim) {
 // axisMask validity depends on the rank, so the grid is built rank by rank rather than as a
 // flat cross product.
 std::vector<NdWithParams<NormalizeParams>> normalize_grid() {
-    // The four conversions rppt_normalize actually implements. It dispatches on MATCHING src/dst
-    // dtypes only and has no else branch, so a mismatched pair (U8->F32, say) returns RPP_SUCCESS
-    // without writing dstPtr at all -- a case that compares against an untouched buffer and can
-    // never pass, rather than coverage of anything.
+    // rppt_normalize only implements matching src/dst dtypes; a mismatched pair returns
+    // RPP_SUCCESS without writing the output.
     const std::vector<DTypeConv> convs = {{DType::U8, DType::U8},
                                           {DType::I8, DType::I8},
                                           {DType::F16, DType::F16},

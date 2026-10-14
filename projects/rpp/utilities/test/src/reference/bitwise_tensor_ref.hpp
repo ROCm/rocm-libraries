@@ -45,9 +45,7 @@ RPP op
 Description
   Element-wise bitwise combination of two N-dimensional tensors' stored bit
   patterns, with NumPy-style broadcasting: an operand axis of extent 1 is
-  reused across the corresponding output axis (the header permits
-  broadcasting when, for each axis, the input dimensions are either equal or
-  one of them is 1).
+  reused across the corresponding output axis.
 
 Expression
   and   dst = a & b
@@ -56,9 +54,7 @@ Expression
 
 Per-type form
   The operation is on bits, not intensities: for signed I8 the byte is
-  combined as-is. There is no rounding, clamping or intensity-space
-  conversion anywhere in this model, so results are bit-exact and callers
-  compare with zero tolerance.
+  combined as-is. Results are bit-exact.
 */
 
 enum class BitwiseTensorOp { And, Or, Xor };

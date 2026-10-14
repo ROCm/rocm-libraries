@@ -41,9 +41,8 @@ using namespace rpptest;
 
 namespace {
 
-// brightnessCoefficient in (1, 4]; snowThreshold in (0, 1]; darkMode 0/1. The two param sets
-// exercise both the darkMode-off and darkMode-on lightness branches. snow's semantics are
-// undocumented, so the reference is a kernel-derived regression golden (see snow_ref.hpp).
+// brightnessCoefficient in (1, 4]; snowThreshold in (0, 1]; darkMode 0/1. snow's semantics are
+// undocumented, so the reference mirrors the kernel.
 struct SnowParams {
     float brightness, threshold;
     int darkMode;
@@ -53,9 +52,7 @@ struct SnowParams {
     }
 };
 
-// U8/I8: the full-ROI SIMD store may round where the scalar path (which the reference
-// mirrors) truncates, so allow 1 LSB. This is legitimate SIMD-vs-scalar float error in a
-// regression golden, not a masked defect.
+// U8/I8: the SIMD store may round where the scalar path the reference mirrors truncates.
 constexpr Tolerance kSnowTolerance = tolerance(1.0, 1e-3, 5e-3);
 
 template <typename T>

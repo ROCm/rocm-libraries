@@ -47,9 +47,8 @@ Description
   0 -> gx, 1 -> gy, 2 -> the gradient magnitude.
 
   The window comes from filter_reference (reference/filter_common.hpp), which
-  owns the REPLICATE border and the placement; sobel supplies only the
-  reduction, since for the magnitude case it needs the raw gx/gy before
-  quantization rather than a single convolution.
+  owns the replicate border; sobel supplies the reduction because the
+  magnitude needs the raw gx/gy.
 
 Expression
   Kernels, row-major (dy = -1..1 outer, dx = -1..1 inner):
@@ -61,27 +60,16 @@ Expression
   dst = sobelType == 0 ? gx : sobelType == 1 ? gy : sqrt(gx^2 + gy^2)
 
 Per-type form
-  The gradient is an *intensity*, so it is computed in the dtype's intensity
-  space and written back with the dtype's store rule. For I8 that space is the
-  stored value lifted by +128 (I8 pixels are U8 intensities shifted by -128),
-  and the store subtracts it again -- the same convention emboss_ref uses, and
-  the one the API's "dstPtr depth ... same depth as srcPtr" implies. Because Gx
-  and Gy both sum to zero the lift cancels in the convolution itself; it is the
-  *store* that differs, and storing the raw gradient as if it were already in
-  I8 units is off by a full 128 levels on every pixel.
-
-  After the shift the result is quantized via quantize_stored: U8 round +
-  clamp[0,255], I8 round + clamp[-128,127], F16/F32 clamp[0,1]. Gradients can
-  be negative or out of range, so clamping is the intended "same depth as src"
-  behaviour.
+  The gradient is computed in the dtype's intensity space: I8 is lifted by +128
+  and shifted back before the store, as in emboss_ref. Gx and Gy sum to zero,
+  so the lift only affects the store. The result is quantized via
+  quantize_stored (U8 round + clamp[0,255], I8 round + clamp[-128,127],
+  F16/F32 clamp[0,1]), clamping negative or out-of-range gradients.
 
 Notes
-  Scope is PLN1 only, kernelSize = 3 only. sobel_filter's dstDesc is always
-  single-channel greyscale (c=1, NCHW), so a 3-channel input would require an
-  undocumented RGB->greyscale conversion that is not independently derivable,
-  and the extended k=5/7 kernels have varying coefficient conventions. Both
-  are deferred; this model covers greyscale-in/greyscale-out with the
-  universally-defined 3x3 operator.
+  PLN1 and kernelSize 3 only. The output is always single-channel, so a
+  3-channel input would need an unspecified RGB->greyscale conversion, and the
+  5x5/7x7 kernels have no standard coefficients.
 */
 template <typename T>
 void sobel_filter_reference(const T* src, T* dst, const RpptDesc& d, DType dt, const RpptROI* roi,

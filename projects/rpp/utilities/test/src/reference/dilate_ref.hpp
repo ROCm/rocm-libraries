@@ -51,7 +51,7 @@ Expression
 
 Per-type form
   The max selects an existing source value and performs no arithmetic, so the
-  result is bit-exact (tolerance 0) for every type.
+  result is bit-exact for every type.
 */
 template <typename T>
 void dilate_reference(const T* src, const RpptDesc& sd, T* dst, const RpptDesc& dd, DType /*dt*/,

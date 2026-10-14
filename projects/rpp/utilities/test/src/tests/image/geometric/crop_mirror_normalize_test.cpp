@@ -41,9 +41,8 @@ using namespace rpptest;
 
 namespace {
 
-// The op takes offset/multiplier, but they encode a normalize: offset = -mean/stdDev,
-// multiplier = 1/stdDev, so the sets are written in mean/stdDev terms and converted at setup. mean
-// is in [0,255] intensity units (see crop_mirror_normalize_ref.hpp).
+// Written as mean/stdDev and converted to offset = -mean/stdDev, multiplier = 1/stdDev. mean is in
+// [0,255] intensity units.
 struct CmnParams {
     double mean[3];
     double stdDev;
@@ -54,8 +53,7 @@ struct CmnParams {
     }
 };
 
-// mean 0 / stdDev 1 is the identity normalize, i.e. a pure crop (+mirror): no arithmetic, so those
-// sets are bit-exact. The rest carry the fp error of the multiply and the integer round's ties.
+// mean 0 / stdDev 1 is a pure crop (+mirror), so those sets are bit-exact.
 double cmn_tolerance(DType dt, const CmnParams& op) {
     if (op.mean[0] == 0.0 && op.mean[1] == 0.0 && op.mean[2] == 0.0 && op.stdDev == 1.0) return 0.0;
     return kRoundingTolerance(dt);
@@ -85,8 +83,6 @@ void run_crop_mirror_normalize(const TestConfig& cfg, const CmnParams& op) {
         }
     }
 
-    // (1) Host golden model. golden starts as the dst init pattern so the untouched (outside-ROI)
-    // region is defined; only the cropped region is overwritten by the reference.
     std::vector<T> input(srcCount), dstInit(dstCount), golden(dstCount), actual(dstCount);
     fill_input<T>(input.data(), srcCount, cfg.dtype);
     fill_input<T>(dstInit.data(), dstCount, cfg.dtype, /*salt=*/1);
@@ -95,8 +91,7 @@ void run_crop_mirror_normalize(const TestConfig& cfg, const CmnParams& op) {
                                        roiVec.data(), XYWH, offset.data(), multiplier.data(),
                                        mirror.data());
 
-    // (2) Run RPP on the configured backend. dst is pre-filled with a distinct pattern so a
-    // no-op kernel would be caught even in the identity set.
+    // dst is pre-filled with a distinct pattern so a no-op kernel is caught in the identity set.
     DeviceTensor src(cfg.backend, srcBytes), dst(cfg.backend, dstBytes);
     src.write(input.data(), srcBytes);
     dst.write(dstInit.data(), dstBytes);
@@ -107,12 +102,10 @@ void run_crop_mirror_normalize(const TestConfig& cfg, const CmnParams& op) {
                                          handle.get(), cfg.backend),
               RPP_SUCCESS);
 
-    // (3) Retrieve the result on the host (no-op copy for HOST, device->host for HIP).
     handle.sync();  // drain the op's stream before copying results back
     dst.read(actual.data(), dstBytes);
 
-    // (4) Compare over the cropped region, bounded by the pre-call ROI copy: HIP rewrites the
-    // caller's XYWH tensor from XYWH to LTRB in place.
+    // Uses the test's own ROI copy: HIP rewrites the op's ROI to LTRB in place.
     EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), dstDesc, roiVec.data(), XYWH,
                                cmn_tolerance(cfg.dtype, op)));
 }
@@ -130,14 +123,9 @@ TEST_P(CropMirrorNormalizeTest, Correctness) {
     });
 }
 
-// Four sets, each turning on one more stage of the name. Identity and MirrorOnly are bit-exact
-// controls, separating "normalize applied when it should not be" from "mirror on the wrong axis".
-// Scale isolates the multiplier: offset 0 and, at 0.5x, no clamping in any dtype. Normalize is the
-// legacy harness's own set, the only one where the intensity-space convention is observable.
-//
-// 30 of the 192 are red against two kernel defects, both left red on purpose: every {F16,F32} x
-// Normalize case adds offsetTensor unscaled to a [0,1] pixel, and HOST x I8 x PartialRoi x
-// {Scale, Normalize} drops the multiplier in the scalar remainder.
+// Each set turns on one more stage. Known kernel reds: {F16,F32} Normalize adds offsetTensor
+// unscaled to a [0,1] pixel, and HOST I8 PartialRoi {Scale, Normalize} drops the multiplier in the
+// scalar remainder.
 INSTANTIATE_TEST_SUITE_P(Image_Geometric, CropMirrorNormalizeTest,
                          ::testing::ValuesIn(with_params<CmnParams>(
                              concat_configs({

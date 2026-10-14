@@ -42,15 +42,10 @@ using namespace rpptest;
 
 namespace {
 
-// erase overwrites rectangular boxes with caller-supplied solid colors: a direct store, no
-// arithmetic, so every dtype is bit-exact.
-
-// Per-image box stride and count. Every image uses the same count == the stride so the anchor/color
-// packing is unambiguous regardless of any ragged-packing convention.
+// Every image uses count == stride so the anchor/color packing is unambiguous.
 constexpr Rpp32u kMaxBoxesPerImage = 2;
 
-// Per-(box, channel) fill intensity in [0,255]. Distinct colors verify channel handling; PLN1 uses
-// index 0 only.
+// Per-(box, channel) fill intensity in [0,255]. PLN1 uses index 0 only.
 constexpr std::array<std::array<double, 3>, 2> kBoxIntensity = {{
     {{200.0, 60.0, 120.0}},  // box 0
     {{30.0, 220.0, 90.0}},   // box 1
@@ -68,9 +63,7 @@ void run_erase(const TestConfig& cfg) {
     const std::vector<RpptROI> roiVec = make_roi(srcDesc, cfg.roi);
     for (Rpp32u n = 0; n < cfg.size.n; ++n) roi[n] = roiVec[n];
 
-    // Box geometry / colors / counts. Boxes are laid out per image at [n * stride + k] and built
-    // relative to each image's ROI rectangle so they stay inside the ROI for both Full and Partial.
-    // The SAME tensors feed the golden and the kernel.
+    // Boxes are laid out at [n * stride + k], inside each image's ROI.
     const std::size_t boxCount = static_cast<std::size_t>(cfg.size.n) * kMaxBoxesPerImage;
     PinnedArray<RpptRoiLtrb> boxes(cfg.backend, boxCount);
     PinnedArray<Rpp32u> numBoxes(cfg.backend, cfg.size.n);
@@ -101,15 +94,12 @@ void run_erase(const TestConfig& cfg) {
     }
     for (Rpp32u n = 0; n < cfg.size.n; ++n) numBoxes[n] = kMaxBoxesPerImage;
 
-    // (1) Host golden model. golden starts as a copy of the input so the untouched (outside-ROI)
-    // region is defined; only the ROI is overwritten by the reference.
     std::vector<T> input(count), golden(count), actual(count);
     fill_input<T>(input.data(), count, cfg.dtype);
     golden = input;
     erase_reference<T>(input.data(), srcDesc, golden.data(), dstDesc, cfg.dtype, roi.data(), XYWH,
                        boxes.data(), numBoxes.data(), kMaxBoxesPerImage, colors.data());
 
-    // (2) Run RPP on the configured backend.
     DeviceTensor src(cfg.backend, bytes), dst(cfg.backend, bytes);
     src.write(input.data(), bytes);
     dst.write(input.data(), bytes);  // define outside-ROI dst to mirror the golden
@@ -120,11 +110,9 @@ void run_erase(const TestConfig& cfg) {
                          handle.get(), cfg.backend),
               RPP_SUCCESS);
 
-    // (3) Retrieve the result on the host (no-op copy for HOST, device->host for HIP).
     handle.sync();  // drain the op's stream before copying results back
     dst.read(actual.data(), bytes);
 
-    // (4) Compare within tolerance over the ROI.
     EXPECT_TRUE(
         compare_roi<T>(actual.data(), golden.data(), dstDesc, roi.data(), XYWH, kExact(cfg.dtype)));
 }
@@ -133,10 +121,8 @@ void run_erase(const TestConfig& cfg) {
 
 // Full name: Image_Effects/EraseTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>
 //
-// FullRoi passes the full grid on both backends (validates the box erase + per-channel color + I8
-// semantics). Every PartialRoi case is a documented kernel red: HOST copies correctly but does not
-// apply the boxes; HIP leaves the whole ROI region unwritten. The golden holds to absolute-frame
-// box semantics -- do not weaken it to force green.
+// PartialRoi is red: HOST does not apply the boxes and HIP leaves the ROI unwritten. Do not weaken
+// the golden to force green.
 class EraseTest : public SkipListTest<TestConfig> {};
 
 TEST_P(EraseTest, Correctness) {

@@ -53,23 +53,19 @@ Description
   coordinates -- paramSize = product over i of (bit i set ? 1 : dims[i]), laid
   out row-major over those same axes, one such block per sample.
 
-  computeMeanStddev is a bitmask: bit 0 requests that the mean be computed
-  internally, bit 1 the standard deviation; a clear bit means the caller's
-  value is used. The model mirrors that, computing whichever statistics the
-  flag asks for over each reduction group and taking the rest from the
-  supplied tensors.
+  computeMeanStddev is a bitmask: bit 0 computes the mean, bit 1 the standard
+  deviation; a clear bit means the caller's value is used.
 
 Expression
   dst = ((src - mean) / stdDev) * scale + shift
 
 Per-type form
-  Everything is accumulated in double. No clamping is applied, since a
-  normalized result is signed by construction and the documented output types
-  are floating point.
+  Accumulated in double. Integer outputs are rounded and clamped; float
+  outputs are not clamped.
 
 Notes
-  Undocumented assumption: the standard deviation is the POPULATION deviation,
-  sqrt(sum((x - mean)^2) / N), not the N-1 sample form.
+  The standard deviation is the population form, sqrt(sum((x - mean)^2) / N);
+  the header does not specify this.
 */
 
 // Per-axis extents of the mean/stdDev tensor for a given reduction mask: reduced axes
@@ -117,11 +113,8 @@ void normalize_reference(const Tin* src, Tout* dst, const RpptGenericDesc& srcDe
     std::vector<double> acc(paramSize);
     std::vector<std::size_t> count(paramSize);
 
-    // Walks one sample's logical coordinates, handing the callback the source and destination
-    // addresses (each formed from its own descriptor's strides) and the param slot the element
-    // reduces into. Addressing by coordinate rather than walking the sample flat matters twice
-    // over for a reduction op: padding slack must not enter the mean/stddev, and it must not be
-    // mistaken for a coordinate.
+    // Walks one sample by logical coordinate (so stride padding never enters the statistics),
+    // passing the src/dst offsets and the param slot the element reduces into.
     NdDims coord(nDim + 1);
     auto for_each_element = [&](Rpp32u n, auto fn) {
         coord[0] = n;
@@ -170,11 +163,8 @@ void normalize_reference(const Tin* src, Tout* dst, const RpptGenericDesc& srcDe
             const double inv = (stdDev[p] != 0.0) ? (1.0 / stdDev[p]) : 0.0;
             const double v = (to_double(src[srcIdx]) - mean[p]) * inv * static_cast<double>(scale) +
                              static_cast<double>(shift);
-            // Clamped on store for the INTEGER output dtypes only: normalization is affine and
-            // unbounded, so it routinely lands outside [0,255] / [-128,127], and a bare cast of a
-            // negative double to Rpp8u is undefined. The float dtypes are deliberately left
-            // unclamped -- a z-score is legitimately negative, so quantize_stored()'s [0,1] image
-            // range does not apply to them.
+            // Integer outputs must be clamped (casting an out-of-range double is UB); float
+            // outputs stay unclamped since a z-score is legitimately negative.
             const bool integerOut = (dtOut == DType::U8 || dtOut == DType::I8);
             dst[dstIdx] = from_double<Tout>(integerOut ? quantize_stored(v, dtOut) : v);
         });

@@ -35,17 +35,12 @@ Used by
   jpeg_compression_distortion   (quantizes the three planes separately)
 
 Description
-  The BT.601 full-range luma/chroma transform, kept in one place so every op
-  that routes through YCbCr agrees on it -- the arrangement color_hsv.hpp
-  provides for RGB<->HSV.
+  The BT.601 full-range luma/chroma transform, shared so every op that routes
+  through YCbCr agrees on it.
 
-  Both directions operate on continuous [0,255] intensities and take their
-  inputs by value, so a caller may pass the same variables as inputs and
-  outputs to convert a pixel in place. Quantizing the result is the caller's
-  business, since the two users legitimately differ there: histogram_equalize
-  rounds to 8 bits as an integer YCbCr pipeline does, while
-  jpeg_compression_distortion keeps the samples continuous so the distortion
-  comes only from its coefficient quantization.
+  Both directions operate on continuous [0,255] intensities and take inputs
+  by value, so a pixel can be converted in place. Quantization is left to the
+  caller.
 
 Expression
   Y  =  0.299 R + 0.587 G + 0.114 B

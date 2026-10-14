@@ -40,14 +40,11 @@ using namespace rpptest;
 
 namespace {
 
-// The three properties checked here take disjoint parameter sets (Identity only holds at k=1, the
-// others only mean anything at k>1), so the check is an axis of the grid rather than a separate
-// TEST_P body: GTest instantiates every body of a fixture against the whole param set, which would
-// generate (and skip) each check across the other checks' points as well.
+// The checks take disjoint parameter sets, so the check is a grid axis rather than separate
+// TEST_P bodies.
 enum class Check { Identity, Window, Seed };
 
-// kernelSize is an odd square window size (3/5/7 per the API doc; kernelSize=1 is the RNG-free
-// identity corner used for the bit-exact golden).
+// kernelSize is an odd window size; kernelSize=1 is the RNG-free identity corner.
 struct JitterParams {
     Rpp32u kernelSize;
     Check check;
@@ -65,8 +62,6 @@ struct JitterParams {
     }
 };
 
-// -------- Correctness: kernelSize=1 forces identity, independent of seed ----------------------
-
 template <typename T>
 void run_jitter_identity(const TestConfig& cfg, const JitterParams& op) {
     RpptDesc srcDesc = make_src_descriptor(cfg);
@@ -82,14 +77,11 @@ void run_jitter_identity(const TestConfig& cfg, const JitterParams& op) {
         roi[i] = roiVec[i];
     }
 
-    // (1) Host golden model. golden starts as a copy of the input so the untouched
-    // (outside-ROI) region is defined; only the ROI is overwritten by the reference.
     std::vector<T> input(count), golden(count), actual(count);
     fill_input<T>(input.data(), count, cfg.dtype);
     golden = input;
     jitter_identity_reference<T>(input.data(), srcDesc, golden.data(), dstDesc, roi.data(), XYWH);
 
-    // (2) Run RPP on the configured backend.
     DeviceTensor src(cfg.backend, bytes), dst(cfg.backend, bytes);
     src.write(input.data(), bytes);
     dst.write(input.data(), bytes);  // define outside-ROI dst to mirror the golden
@@ -99,22 +91,15 @@ void run_jitter_identity(const TestConfig& cfg, const JitterParams& op) {
                           roi.data(), XYWH, handle.get(), cfg.backend),
               RPP_SUCCESS);
 
-    // (3) Retrieve the result on the host (no-op copy for HOST, device->host for HIP).
     handle.sync();
     dst.read(actual.data(), bytes);
 
-    // (4) kernelSize=1 collapses the offset window to {0,0} regardless of seed/RNG draw, so the
-    // op is forced to identity: bit-exact, tolerance 0.
+    // kernelSize=1 collapses the offset window to {0,0}, so the op is a bit-exact identity.
     EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), dstDesc, roi.data(), XYWH, 0.0));
 }
 
-// -------- ReachableWithinWindow: structural membership invariant for kernelSize > 1 ------------
-//
-// Runs the real kernel (no golden model call -- kernelSize > 1 is genuinely RNG-driven) and checks
-// that every output pixel equals the SOURCE value at *some* clamped offset within the
-// [-r,r]x[-r,r] window around that pixel's own coordinate, i.e. it is one of the (2r+1)^2 legally
-// reachable source pixels post-clamp-into-ROI. The check additionally requires the SAME candidate
-// offset to work for every channel of a given pixel (jitter must not desync channels).
+// kernelSize > 1 is RNG-driven: check every output pixel equals the source at some ROI-clamped
+// offset within [-r,r]^2, with the same offset for all channels.
 
 template <typename T>
 void run_jitter_window(const TestConfig& cfg, const JitterParams& op) {
@@ -189,12 +174,7 @@ void run_jitter_window(const TestConfig& cfg, const JitterParams& op) {
     }
 }
 
-// -------- SeedInvariant: same seed -> bit-identical output; different seed -> some difference ---
-//
-// jitter takes a single explicit Rpp32u seed for the whole call (unlike e.g. rain, which seeds
-// from std::random_device and is therefore never reproducible). A real per-call seed parameter must
-// make repeated calls with the same seed bit-identical, and different seeds should (with
-// overwhelming probability, over this many pixels) produce a divergent result somewhere in the ROI.
+// Same seed must give bit-identical output; a different seed must differ somewhere in the ROI.
 
 template <typename T>
 void run_jitter_seed_invariant(const TestConfig& cfg, const JitterParams& op) {
@@ -213,8 +193,7 @@ void run_jitter_seed_invariant(const TestConfig& cfg, const JitterParams& op) {
     std::vector<T> input(count);
     fill_input<T>(input.data(), count, cfg.dtype);
 
-    // The status is returned rather than asserted in here: an ASSERT_* inside a lambda returns from
-    // the lambda, not from the test, so the caller has to be the one that stops.
+    // Returns the status: an ASSERT_* inside a lambda would only return from the lambda.
     auto run = [&](Rpp32u seed, std::vector<T>& out) -> RppStatus {
         DeviceTensor src(cfg.backend, bytes), dst(cfg.backend, bytes);
         src.write(input.data(), bytes);
@@ -234,10 +213,8 @@ void run_jitter_seed_invariant(const TestConfig& cfg, const JitterParams& op) {
     ASSERT_EQ(run(42u, outA2), RPP_SUCCESS);
     ASSERT_EQ(run(1337u, outB), RPP_SUCCESS);
 
-    // Same seed -> bit-identical over the ROI.
     EXPECT_TRUE(compare_roi<T>(outA1.data(), outA2.data(), desc, roi.data(), XYWH, 0.0));
 
-    // Different seed -> at least one element differs somewhere within the ROI.
     bool anyDiffer = false;
     for_each_roi_io(desc, roi.data(), XYWH,
                     [&](Rpp32u, Rpp32u, Rpp32u, Rpp32u, std::size_t, std::size_t dstIdx) {
@@ -246,9 +223,8 @@ void run_jitter_seed_invariant(const TestConfig& cfg, const JitterParams& op) {
     EXPECT_TRUE(anyDiffer) << "different seeds produced identical output over the whole ROI";
 }
 
-// Identity gets the full dtype/layout/ROI grid at k=1; the RNG-active checks are narrower on
-// purpose -- Seed runs three full kernel invocations per case, and the window invariant is a
-// per-pixel candidate search over one integer and one float dtype rather than all four.
+// The RNG-active checks run on a narrower grid: Seed runs three kernel calls per case and Window is
+// a per-pixel candidate search.
 std::vector<WithParams<JitterParams>> jitter_configs() {
     // Same-layout cases plus both directions of the fused output-layout conversion.
     std::vector<WithParams<JitterParams>> configs = with_params<JitterParams>(

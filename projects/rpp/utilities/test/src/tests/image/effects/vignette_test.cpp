@@ -41,18 +41,12 @@ using namespace rpptest;
 
 namespace {
 
-// The header warns that HOST evaluates the Gaussian with fastexpavx() rather than exp() and that up
-// to 5% pixel mismatch is expected. That allowance does not materialise: against the exact exp() in
-// the golden, the measured worst case over this grid is 0 on U8, 1 ULP on F32 (1.2e-7) and 1 ULP on
-// F16 (4.9e-4), on both backends. These tolerances are sized from that measurement, not from the
-// header's blanket 5% -- which would be 13 grey levels and could hide a real defect in the falloff.
-// U8 is given 1 rather than 0 only to absorb a rounding tie, not observed error.
+// The header allows 5% mismatch for HOST's fastexpavx(), but the actual error is at most 1 ULP, so
+// the tolerance is kept tight; U8 gets 1 only for rounding ties.
 constexpr Tolerance kVignetteTolerance = tolerance(1.0, 1e-6, 1e-3);
 
-// 6 is the intensity the legacy harness uses: on a 48-wide ROI it puts sigma at 8 px, so the
-// corners are driven essentially to black while the centre is untouched. 1 is the opposite end --
-// sigma is the full extent, so the corners keep ~78% of their value and the whole region stays
-// close to the source, which separates a wrong falloff shape from a wrong overall scale.
+// 6 drives the corners near black; 1 keeps the region close to the source, separating a wrong
+// falloff shape from a wrong overall scale.
 struct VignetteParams {
     float intensity;
     std::string name() const {
@@ -74,8 +68,7 @@ void run_vignette(const TestConfig& cfg, const VignetteParams& op) {
     PinnedArray<Rpp32f> intensity(cfg.backend, cfg.size.n);
     for (Rpp32u n = 0; n < cfg.size.n; ++n) intensity[n] = op.intensity;
 
-    // The op writes the ROI-sized region at the destination origin, so golden and device buffer
-    // start from the same distinct pattern and only that region is compared.
+    // The op writes the ROI-sized region at the destination origin; only that region is compared.
     std::vector<T> input(count), dstInit(count), golden(count), actual(count);
     fill_input<T>(input.data(), count, cfg.dtype);
     fill_input<T>(dstInit.data(), count, cfg.dtype, /*salt=*/1);
@@ -95,8 +88,7 @@ void run_vignette(const TestConfig& cfg, const VignetteParams& op) {
     handle.sync();
     dst.read(actual.data(), bytes);
 
-    // Compared against the caller's own ROI copy, not the tensor handed to the op, in case the
-    // backend rewrites it from XYWH to LTRB in place.
+    // Uses the test's own ROI copy in case the backend rewrites the op's ROI to LTRB in place.
     EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), dstDesc, roiVec.data(), XYWH,
                                kVignetteTolerance(cfg.dtype)));
 }
@@ -113,8 +105,7 @@ TEST_P(VignetteTest, Correctness) {
         p.cfg.dtype, [&](auto tag) { run_vignette<Element<decltype(tag)>>(p.cfg, p.op); });
 }
 
-// I8 is off the grid for now, pending the suite-wide decision on whether the image ops need it.
-// Same-layout cases plus both directions of the fused output-layout conversion.
+// I8 is not yet covered.
 INSTANTIATE_TEST_SUITE_P(Image_Effects, VignetteTest,
                          ::testing::ValuesIn(with_params<VignetteParams>(
                              concat_configs({

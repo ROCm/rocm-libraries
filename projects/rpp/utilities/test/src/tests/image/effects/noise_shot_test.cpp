@@ -41,10 +41,8 @@ using namespace rpptest;
 
 namespace {
 
-// The three properties checked here take disjoint parameter sets, so the check is an axis of the
-// grid rather than a separate TEST_P body: GTest instantiates every body of a fixture against the
-// whole param set, which would generate (and skip) each narrow check across the full dtype/layout
-// grid. As an axis, each check is instantiated over exactly the points it covers.
+// The checks take disjoint parameter sets, so the check is a grid axis rather than separate
+// TEST_P bodies.
 enum class Check { Identity, ValidRange, Seed };
 
 struct NoiseShotParams {
@@ -62,11 +60,8 @@ struct NoiseShotParams {
     }
 };
 
-// noise_shot's public API doc only pins down the shotNoiseFactor = 0 corner (see
-// noise_shot_ref.hpp): the exact Poisson photon-count scaling for factor > 0 is not derivable
-// from the header comment alone, so it is deliberately left as an open question rather than
-// guessed. The general case is covered here only by cheap runtime invariants -- a coarse
-// valid-storable-range check and a seed-determinism check -- not a golden comparison.
+// The API only pins down the shotNoiseFactor = 0 identity; factor > 0 is covered by storable-range
+// and seed-determinism invariants rather than a golden.
 constexpr Rpp32f kNontrivialFactor = 0.5f;
 
 template <typename T>
@@ -80,7 +75,7 @@ void run_noise_shot_identity(const TestConfig& cfg) {
     PinnedArray<RpptROI> roi(cfg.backend, cfg.size.n);
     const std::vector<RpptROI> roiVec = make_roi(srcDesc, cfg.roi);
     for (Rpp32u i = 0; i < cfg.size.n; ++i) {
-        factor[i] = 0.0f;  // the RNG-free identity corner
+        factor[i] = 0.0f;
         roi[i] = roiVec[i];
     }
 
@@ -105,9 +100,7 @@ void run_noise_shot_identity(const TestConfig& cfg) {
     EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), dstDesc, roi.data(), XYWH, 0.0));
 }
 
-// Runs the real kernel at a nontrivial (RNG-active) factor and asserts every ROI output element
-// is a legally storable value for its dtype -- catches gross corruption (NaN, overflow, wrong
-// range), not distribution correctness (that formula is the open question noted above).
+// Asserts every ROI output element is storable for its dtype; does not check the distribution.
 template <typename T>
 void run_noise_shot_valid_range(const TestConfig& cfg) {
     RpptDesc desc = make_src_descriptor(cfg);
@@ -149,10 +142,7 @@ void run_noise_shot_valid_range(const TestConfig& cfg) {
                     << dtype_name(cfg.dtype);
 }
 
-// A real per-call seed should make the op reproducible for a fixed seed and different across
-// seeds -- contrast with the rain/fog RNGs seeded from std::random_device, which cannot satisfy
-// either half of this. noise_shot takes an explicit Rpp32u seed, so it is expected to behave like
-// this.
+// Same seed must give bit-identical output; a different seed must differ.
 template <typename T>
 void run_noise_shot_seed_invariant(const TestConfig& cfg) {
     RpptDesc desc = make_src_descriptor(cfg);
@@ -170,9 +160,7 @@ void run_noise_shot_seed_invariant(const TestConfig& cfg) {
     std::vector<T> input(count);
     fill_input<T>(input.data(), count, cfg.dtype);
 
-    // The status is returned rather than asserted in here: an ASSERT_* inside a lambda returns from
-    // the lambda, not from the test, which would leave out empty and send the comparisons below
-    // through a zero-length buffer.
+    // Returns the status: an ASSERT_* inside a lambda would only return from the lambda.
     auto run_once = [&](Rpp32u seed, std::vector<T>& out) -> RppStatus {
         DeviceTensor src(cfg.backend, bytes), dst(cfg.backend, bytes);
         src.write(input.data(), bytes);
@@ -198,18 +186,14 @@ void run_noise_shot_seed_invariant(const TestConfig& cfg) {
         << "different seeds produced bit-identical output";
 }
 
-// The HOST Poisson sampler's rejection-loop threshold overflows to +inf for the lambda an ordinary
-// 8-bit pixel produces at kNontrivialFactor, so the loop does not reliably terminate -- observed
-// run times from several seconds to over a minute for a single tiny image, growing without bound as
-// pixel values increase. The RNG-active intents skip HOST rather than being left red/hanging, so
-// the suite stays safe to run; HIP uses a different (unaffected) algorithm.
+// The HOST Poisson sampler's rejection threshold overflows to +inf at kNontrivialFactor, so its
+// loop may not terminate. The RNG-active checks skip HOST; HIP uses a different algorithm.
 constexpr char kHostPoissonSkip[] =
     "shot_noise HOST Poisson sampler's rejection threshold overflows to +inf for ordinary pixel "
     "values at this factor, making the loop's runtime unbounded in practice";
 
-// Identity is checked over the full grid; the RNG-active checks are narrower on purpose -- Seed
-// runs three full kernel invocations per case, and ValidRange's storable-range notion is exercised
-// on one integer and one float dtype rather than all four.
+// The RNG-active checks run on a narrower grid: Seed runs three kernel calls per case and
+// ValidRange covers one integer and one float dtype.
 std::vector<WithParams<NoiseShotParams>> noise_shot_configs() {
     // Same-layout cases plus both directions of the fused output-layout conversion.
     std::vector<WithParams<NoiseShotParams>> configs = with_params<NoiseShotParams>(

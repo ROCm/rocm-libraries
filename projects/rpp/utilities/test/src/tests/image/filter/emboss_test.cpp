@@ -41,10 +41,8 @@ using namespace rpptest;
 
 namespace {
 
-// kernelSize covers all four documented sizes (3/5/7/9), matching how box/gaussian are gridded.
-// strength has no documented range -- 1.0 is the value the legacy harness uses and leaves
-// the filter DC-preserving, 2.0 is the point the scaling saturates at, which also exercises the
-// I8 intensity-space lift (at strength 1 the +128 shift cancels and would hide a mistake there).
+// strength has no documented range. 1.0 is DC-preserving; 2.0 saturates the scaling and exercises
+// the I8 intensity-space shift, which cancels at strength 1.
 struct EmbossParams {
     float strength;
     Rpp32u kernelSize;
@@ -53,18 +51,14 @@ struct EmbossParams {
     }
 };
 
-// A linear KxK convolution rounded to nearest, so the only legitimate error is float-vs-double
-// accumulation -- the same tolerances box_filter uses. Not loosened to cover the shared
-// spatial-filter defect where a partial ROI reads neighbours from outside the ROI rectangle
-// instead of treating its edge as the border, which stays red.
+// Linear convolution rounded to nearest, so only accumulation error. Not loosened to cover the
+// kernel reading neighbours from outside a partial ROI.
 constexpr Tolerance kEmbossTolerance = tolerance(1.0, 1e-3, 5e-3);
 
 template <typename T>
 void run_emboss(const TestConfig& cfg, const EmbossParams& op) {
-    // src carries a leading border pad: like the other KxK filters, the HIP kernel requires
-    // srcDesc.offsetInBytes >= 12 * (kernelSize/2) as read-slack for the window and returns
-    // RPP_ERROR_LOW_OFFSET (-3) otherwise. dst keeps offset 0 so the golden and comparator index
-    // the destination from 0. Applied on both backends (HOST honours offsetInBytes identically).
+    // The HIP kernel requires srcDesc.offsetInBytes >= 12 * (kernelSize/2) as read-slack for the
+    // window (RPP_ERROR_LOW_OFFSET otherwise), so src carries a leading pad. dst keeps offset 0.
     RpptDesc srcDesc = make_src_descriptor(cfg);
     RpptDesc dstDesc = make_dst_descriptor(cfg);
     const std::size_t offsetBytes = 12u * (op.kernelSize / 2);
@@ -81,9 +75,7 @@ void run_emboss(const TestConfig& cfg, const EmbossParams& op) {
     PinnedArray<Rpp32f> strength(cfg.backend, cfg.size.n);
     for (Rpp32u i = 0; i < cfg.size.n; ++i) strength[i] = op.strength;
 
-    // (1) Host golden model. The src buffer is [front pad][image][back pad]; the image base sits
-    // at offsetElems. golden starts as a copy of the image so the region the op leaves untouched
-    // (outside the ROI) is defined and a no-op kernel is still caught.
+    // src is [front pad][image][back pad]; the image base sits at offsetElems.
     std::vector<T> src(offsetElems + count + offsetElems), golden(count), actual(count);
     fill_input<T>(src.data(), src.size(), cfg.dtype);
     T* image = src.data() + offsetElems;
@@ -91,8 +83,7 @@ void run_emboss(const TestConfig& cfg, const EmbossParams& op) {
     emboss_reference<T>(image, srcDesc, golden.data(), dstDesc, cfg.dtype, roi.data(), XYWH,
                         op.strength, op.kernelSize);
 
-    // (2) Run RPP on the configured backend. REPLICATE is the only border type the op supports.
-    // RPP adds srcDesc.offsetInBytes to the src pointer internally, landing on the image base.
+    // REPLICATE is the only border type the op supports.
     DeviceTensor srcDev(cfg.backend, src.size() * dtype_size(cfg.dtype));
     DeviceTensor dst(cfg.backend, imageBytes);
     srcDev.write(src.data(), src.size() * dtype_size(cfg.dtype));
@@ -107,9 +98,7 @@ void run_emboss(const TestConfig& cfg, const EmbossParams& op) {
     handle.sync();
     dst.read(actual.data(), imageBytes);
 
-    // (3) Compare the ROI-sized region written at the destination origin. The comparison uses the
-    // test's own ROI copy, not the tensor handed to the op: HIP rewrites the caller's XYWH tensor
-    // to LTRB in place, so reusing it here would walk the wrong rectangle.
+    // Uses the test's own ROI copy: HIP rewrites the op's ROI to LTRB in place.
     EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), dstDesc, roiVec.data(), XYWH,
                                kEmbossTolerance(cfg.dtype)));
 }

@@ -48,27 +48,16 @@ SOFTWARE.
 
 using namespace rpptest;
 
-// The ND goldens must address every tensor through its descriptor's strides, never by walking the
-// buffer flat, so the same logical case produces the same logical answer whether the descriptor is
-// densely packed or carries row padding. That property is what lets a test choose the stride
-// convention an op actually documents -- the generic-tensor ops disagree on this, slice expecting
-// row padding where the others expect dense strides -- without the golden silently following the
-// buffer layout instead of the descriptor.
+// The goldens must address tensors through their descriptor's strides, never by walking the
+// buffer flat. Each case computes a golden from identical logical input under dense and padded
+// descriptors and requires bit-identical logical results. No RPP op is called.
 //
-// Each case below computes a golden twice from identical logical input -- once dense, once padded
-// -- and requires the logical results to be bit-identical. No RPP op is called: this guards the
-// references themselves. For a reduction (normalize) it additionally pins that padding slack stays
-// out of the statistics.
-//
-// The image cases target the shared traversal helpers, not the ops: each op is just one
-// representative golden built on the helper named above its case (e.g. brightness for
-// for_each_roi_io, hue for for_each_roi_pixel), so every other golden on that helper is covered
-// too.
+// The image cases target the shared traversal helpers; each op is one representative golden for
+// the helper named above its case.
 
 namespace {
 
-// The innermost extent is deliberately not a multiple of 8, so padding actually changes the
-// strides.
+// Innermost extent not a multiple of 8, so padding changes the strides.
 const NdDims kDims = {2, 3, 5, 20};
 
 int pad_axis(const NdDims& dims) {
@@ -84,10 +73,8 @@ std::vector<double> logical_values(const std::vector<T>& buf, const RpptGenericD
     return out;
 }
 
-// Which tensors carry padding. Mixed is the case with teeth: a golden that walks a buffer flat
-// still lands on the right addresses when input and output share a layout, and only gives itself
-// away when they differ -- which RpptGenericDesc allows, since src and dst are separate
-// descriptors.
+// Which tensors carry padding. The mixed plans catch a golden that walks the buffer flat, which
+// can still agree with itself when src and dst share a layout.
 struct PadPlan {
     int src, dst;
 };
@@ -167,9 +154,7 @@ TEST(GoldenLayoutTest, Log1p) {
     });
 }
 
-// slice is the op whose own convention is padded, so its golden is the one that most has to read
-// the descriptor rather than the buffer. The anchor puts the slice off the source origin, so a
-// golden that confused the two strides would land on different data, not merely different padding.
+// The anchor puts the slice off the source origin, so confused strides land on different data.
 TEST(GoldenLayoutTest, Slice) {
     expect_layout_agnostic([](PadPlan pp) {
         const Rpp32u nDim = nd_rank(kDims);
@@ -237,8 +222,7 @@ TEST(GoldenLayoutTest, NormalizeExcludesPaddingFromStatistics) {
     });
 }
 
-// The slack poison must not reach the logical elements, and a dense fill must be unchanged by the
-// coordinate-addressed path -- otherwise every ND test's input would have shifted silently.
+// The slack poison must not reach the logical elements, and a dense fill must match fill_input().
 TEST(GoldenLayoutTest, FillIsLayoutIndependent) {
     RpptGenericDesc dense = make_generic_descriptor(kDims, DType::U8, RpptLayout::NCHW, -1);
     RpptGenericDesc padded =
@@ -248,7 +232,6 @@ TEST(GoldenLayoutTest, FillIsLayoutIndependent) {
     fill_input_nd<Rpp8u>(b.data(), padded, DType::U8, 0);
     EXPECT_EQ(logical_values(a, dense), logical_values(b, padded));
 
-    // A dense fill_input_nd must equal the plain fill_input it replaced.
     std::vector<Rpp8u> legacy(generic_element_count(dense));
     fill_input<Rpp8u>(legacy.data(), legacy.size(), DType::U8, 0);
     EXPECT_EQ(a, legacy);
@@ -256,10 +239,7 @@ TEST(GoldenLayoutTest, FillIsLayoutIndependent) {
 
 // ---- image domain ----------------------------------------------------------
 //
-// The same property for the RpptDesc goldens. Every image test runs with padded_width() strides,
-// so a golden that walked rows by d.w instead of d.strides.hStride would still agree with itself
-// and never be caught; recomputing each golden against dense strides is what exposes it. One case
-// per distinct traversal shape, since the shapes -- not the ops -- are what can get this wrong.
+// The same property for the RpptDesc goldens, one case per traversal shape.
 
 namespace {
 
@@ -276,8 +256,7 @@ std::vector<double> image_logical_values(const std::vector<T>& buf, const RpptDe
 }
 
 // Runs `body` against padded and dense descriptors built from the same logical input, and requires
-// the logical outputs to be identical. PartialRoi so the ROI offset is non-zero: an op that mixed
-// up the two conventions would then read from the wrong row entirely, not just the wrong padding.
+// the logical outputs to be identical. PartialRoi so the ROI offset is non-zero.
 template <typename Fn>
 void expect_image_layout_agnostic(Layout layout, Fn body) {
     std::vector<double> reference;
@@ -365,10 +344,8 @@ TEST(GoldenLayoutTest, ImageCropAndPatch) {
         });
 }
 
-// Materializes a dense per-plane intermediate, resamples it (4:2:0 chroma) and scatters it back at
-// the ROI placement -- the one traversal shape that reads the descriptor on the way in and again on
-// the way out with an unstrided buffer in between, where a stride/width mix-up would cancel itself
-// in the op's own test because source and destination share a descriptor.
+// A dense per-plane intermediate, resampled (4:2:0 chroma) and scattered back at the ROI: the
+// descriptor is read on the way in and out with an unstrided buffer in between.
 TEST(GoldenLayoutTest, ImageBlockTransform) {
     expect_image_layout_agnostic(Layout::PLN3,
                                  [&](const std::vector<Rpp8u>& s1, const std::vector<Rpp8u>&,
@@ -391,9 +368,8 @@ TEST(GoldenLayoutTest, ImageFillIsLayoutIndependent) {
             << layout_name(layout);
     }
 
-    // (n, c, y, x) is memory order for a dense planar descriptor, so there the coordinate-addressed
-    // fill is the plain fill_input byte for byte. A packed descriptor interleaves the channels, so
-    // the two orders differ -- only the logical content above is common to both.
+    // (n, c, y, x) is memory order only for a dense planar descriptor, so only there does the
+    // fill match fill_input() byte for byte.
     const RpptDesc dense = make_descriptor(kShape, DType::U8, Layout::PLN3, false);
     std::vector<Rpp8u> planar(element_count(dense)), legacy(element_count(dense));
     fill_input_image<Rpp8u>(planar.data(), dense, DType::U8, 0);

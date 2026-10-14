@@ -41,8 +41,7 @@ using namespace rpptest;
 namespace {
 
 // alpha within the documented range alpha >= 0; R/G/B cast constants within 0 <= rgb <= 255.
-// alpha is chosen not exactly representable so blended results never land on an X.5 boundary,
-// keeping the I8 diff purely truncation rather than a rounding-mode ambiguity.
+// alpha is not exactly representable so blended results never land on an X.5 rounding boundary.
 struct ColorCastParams {
     float alpha;
     Rpp8u r, g, b;
@@ -52,8 +51,7 @@ struct ColorCastParams {
     }
 };
 
-// I8 kept sub-LSB to surface the systemic I8 round-vs-truncate defect (RPP truncates the
-// I8 result instead of rounding).
+// I8 is kept sub-LSB because RPP truncates the I8 result instead of rounding.
 constexpr Tolerance kColorCastTolerance = kRoundingTolerance.with_i8(0.5);
 
 template <typename T>
@@ -63,7 +61,6 @@ void run_color_cast(const TestConfig& cfg, const ColorCastParams& op) {
     const std::size_t count = element_count(srcDesc);
     const std::size_t bytes = byte_size(srcDesc, cfg.dtype);
 
-    // Parameters live in host-accessible (pinned for HIP) memory.
     PinnedArray<RpptRGB> rgb(cfg.backend, cfg.size.n);
     PinnedArray<Rpp32f> alpha(cfg.backend, cfg.size.n);
     PinnedArray<RpptROI> roi(cfg.backend, cfg.size.n);
@@ -76,15 +73,12 @@ void run_color_cast(const TestConfig& cfg, const ColorCastParams& op) {
     const double rgbD[3] = {static_cast<double>(op.r), static_cast<double>(op.g),
                             static_cast<double>(op.b)};
 
-    // (1) Host golden model. golden starts as a copy of the input so the untouched
-    // (outside-ROI) region is defined; only the ROI is overwritten by the reference.
     std::vector<T> input(count), golden(count), actual(count);
     fill_input<T>(input.data(), count, cfg.dtype);
     golden = input;
     color_cast_reference<T>(input.data(), srcDesc, golden.data(), dstDesc, cfg.dtype, roi.data(),
                             XYWH, op.alpha, rgbD);
 
-    // (2) Run RPP on the configured backend.
     DeviceTensor src(cfg.backend, bytes), dst(cfg.backend, bytes);
     src.write(input.data(), bytes);
     dst.write(input.data(), bytes);  // define outside-ROI dst to mirror the golden
@@ -94,11 +88,9 @@ void run_color_cast(const TestConfig& cfg, const ColorCastParams& op) {
                               roi.data(), XYWH, handle.get(), cfg.backend),
               RPP_SUCCESS);
 
-    // (3) Retrieve the result on the host (no-op copy for HOST, device->host for HIP).
     handle.sync();  // drain the op's stream before copying results back
     dst.read(actual.data(), bytes);
 
-    // (4) Compare within tolerance over the ROI.
     EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), dstDesc, roi.data(), XYWH,
                                kColorCastTolerance(cfg.dtype)));
 }
@@ -115,9 +107,8 @@ TEST_P(ColorCastTest, Correctness) {
         p.cfg.dtype, [&](auto tag) { run_color_cast<Element<decltype(tag)>>(p.cfg, p.op); });
 }
 
-// Restricted to the 3-channel layouts: color_cast applies distinct R/G/B constants, and the
-// kernel rejects 1-channel input with an error despite the header documenting c = 1/3 (a
-// doc/kernel discrepancy).
+// Restricted to the 3-channel layouts: the kernel rejects 1-channel input even though the header
+// documents c = 1/3.
 INSTANTIATE_TEST_SUITE_P(Image_Color, ColorCastTest,
                          ::testing::ValuesIn(with_params<ColorCastParams>(
                              concat_configs({

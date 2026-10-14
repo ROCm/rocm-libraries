@@ -41,21 +41,13 @@ RPP op
   rppt_random_erase   (Image / Effects augmentation)
 
 Description
-  Fills one user-defined rectangular region per image with noise sampled
-  spatially from a caller-supplied buffer, passing every other pixel through
-  unchanged. Unlike erase and coarse_dropout it takes exactly one box per
-  image (anchorBoxInfoTensor[n], no numBoxes/maxBoxesPerImage), and the fill is
-  not a solid colour but a tiled lookup into a noiseBuffer of size
-  255*255*channels.
+  Fills one box per image (anchorBoxInfoTensor[n]) with values tiled from a
+  caller-supplied noiseBuffer of size 255*255*channels; every other pixel
+  passes through. All "random" inputs are caller-supplied, so the op is
+  deterministic.
 
-  Despite the name there is no seed anywhere in this API: every "random" input
-  (box placement, noise contents) is supplied by the caller, so the op is a
-  deterministic tiling lookup and this golden is bit-exact.
-
-  anchorBoxInfoTensor[n] gives the box as an RpptRoiLtrb in ABSOLUTE image
-  coordinates, inclusive on both corners (same convention as erase_ref.hpp /
-  roi_bounds: width rb-lt+1), covering columns [lt.x, rb.x] and rows
-  [lt.y, rb.y].
+  The box is an RpptRoiLtrb in absolute image coordinates, inclusive on both
+  corners.
 
 Expression
   For a pixel at absolute source coordinate (sx, sy) inside the box:
@@ -68,11 +60,8 @@ Per-type form
   No arithmetic beyond the modulo and the lookup, so every type is bit-exact.
 
 Notes
-  The row phase is shifted by the image's own batch index n. Both backends add
-  their per-image batch index to the row before the modulo, independently of
-  one another, so this is the intended per-image tile phase -- each image in a
-  batch samples a different vertical slice of the tile -- rather than a shared
-  bug.
+  Both backends shift the row phase by the image's batch index n, so each
+  image in a batch samples a different vertical slice of the tile.
 */
 template <typename T>
 void random_erase_reference(const T* src, const RpptDesc& sd, T* dst, const RpptDesc& dd, DType dt,

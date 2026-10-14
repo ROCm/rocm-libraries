@@ -44,22 +44,14 @@ RPP op
 Description
   Element-wise log(1 + x) over the whole densely packed tensor (a single
   source, no broadcast, no op params). The header specifies that the absolute
-  value of the input is used, so negative inputs are folded before the log.
-  Everything is computed in double; no clamping is applied, since the
-  documented output type (f32) is floating point.
+  value of the input is used. Computed in double, no clamping.
 
 Expression
   dst = log1p(|src|) = log(1 + |src|)
 
 Notes
-  Taking the absolute value first makes the argument >= 0, so the result is
-  defined for every representable input -- including zero, where log1p(0) = 0
-  exactly. Unlike rppt_log (undefined at zero, which the header dodges with an
-  unspecified nextafter) there is no ambiguous edge case here, so the standard
-  input fill is used as-is, zeros included.
-
-  std::log1p is used rather than std::log(1 + x) so the golden keeps full
-  precision for small |x|, where 1 + x loses the low bits of x.
+  std::log1p is used rather than std::log(1 + x) to keep precision for small
+  |x|.
 */
 
 inline double log1p_scalar(double v) {
@@ -69,8 +61,7 @@ inline double log1p_scalar(double v) {
 template <typename Tin, typename Tout>
 void log1p_reference(const Tin* src, Tout* dst, const RpptGenericDesc& srcDesc,
                      const RpptGenericDesc& dstDesc) {
-    // Same logical shape, differing dtype and possibly stride padding: address each through its
-    // own descriptor rather than walking either buffer flat.
+    // src and dst may differ in dtype and stride padding, so each uses its own descriptor.
     for_each_nd_coord(dstDesc, [&](const NdDims& coord) {
         dst[nd_offset(dstDesc, coord)] =
             from_double<Tout>(log1p_scalar(to_double(src[nd_offset(srcDesc, coord)])));

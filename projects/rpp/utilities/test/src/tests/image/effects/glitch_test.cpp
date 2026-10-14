@@ -43,10 +43,9 @@ namespace {
 // The op only relocates whole pixels, so every dtype must come back bit-exact.
 constexpr double kTol = 0.0;
 
-// Identity: every offset 0, so the output is a verbatim copy of the ROI. Separates a plumbing or
-// ROI-placement failure from a shift-math disagreement.
-// Shift: the offsets the legacy harness uses -- R by (10,10), G unmoved, B by (5,5). All three fit
-// inside the 24x18 partial ROI, so both the shifted and the passed-through branch are exercised.
+// Identity: all offsets 0, separating ROI-placement failures from shift-math ones.
+// Shift: R by (10,10), G unmoved, B by (5,5); fits inside the partial ROI so both the shifted and
+// passed-through branches run.
 enum class GlitchKind { Identity, Shift };
 
 struct GlitchParams {
@@ -81,8 +80,7 @@ void run_glitch(const TestConfig& cfg, const GlitchParams& op) {
     PinnedArray<RpptChannelOffsets> offsets(cfg.backend, cfg.size.n);
     for (Rpp32u n = 0; n < cfg.size.n; ++n) offsets[n] = make_offsets(op.kind);
 
-    // The op writes the ROI-sized region at the destination origin, so golden and device buffer
-    // start from the same distinct pattern and only that region is compared.
+    // The op writes the ROI-sized region at the destination origin; only that region is compared.
     std::vector<T> input(count), dstInit(count), golden(count), actual(count);
     fill_input<T>(input.data(), count, cfg.dtype);
     fill_input<T>(dstInit.data(), count, cfg.dtype, /*salt=*/1);
@@ -101,8 +99,7 @@ void run_glitch(const TestConfig& cfg, const GlitchParams& op) {
     handle.sync();
     dst.read(actual.data(), bytes);
 
-    // Compared against the caller's own ROI copy, not the tensor handed to the op, in case the
-    // backend rewrites it from XYWH to LTRB in place.
+    // Uses the test's own ROI copy in case the backend rewrites the op's ROI to LTRB in place.
     EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), desc, roiVec.data(), XYWH, kTol));
 }
 
@@ -118,8 +115,7 @@ TEST_P(GlitchTest, Correctness) {
         p.cfg.dtype, [&](auto tag) { run_glitch<Element<decltype(tag)>>(p.cfg, p.op); });
 }
 
-// Three channels only: the op takes an R/G/B offset triple and PLN1 is not part of its contract.
-// I8 is off the grid for now, pending the suite-wide decision on whether the image ops need it.
+// Three channels only: the op takes an R/G/B offset triple. I8 is not yet covered.
 INSTANTIATE_TEST_SUITE_P(
     Image_Effects, GlitchTest,
     ::testing::ValuesIn(with_params<GlitchParams>(

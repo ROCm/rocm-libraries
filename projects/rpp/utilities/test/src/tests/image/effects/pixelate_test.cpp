@@ -41,10 +41,7 @@ using namespace rpptest;
 
 namespace {
 
-// pixelationPercentage in [0, 100]: the fraction of resolution thrown away before the image is
-// scaled back up, so a larger value means coarser blocks. 87.5 is the value the legacy harness
-// exercises; 50 is a second point on the curve, so a block-size disagreement shows a different
-// diff at each rather than one unexplained failure.
+// pixelationPercentage in [0, 100]: larger means coarser blocks.
 struct PixelateParams {
     float percentage;
     std::string name() const {
@@ -52,11 +49,8 @@ struct PixelateParams {
     }
 };
 
-// pixelate is a bilinear downscale followed by a nearest-neighbour upscale. NN copies a texel
-// verbatim, so all the numeric error comes from the single bilinear pass -- these are the resize
-// bilinear tolerances. They are NOT loosened to cover the two defects this test surfaces -- the
-// resize-family trailing-edge short read, and the intermediate downscale ignoring the ROI offset --
-// so those cases stay red.
+// Bilinear downscale then nearest-neighbour upscale, so all error comes from the bilinear pass. Not
+// loosened to cover the kernel's trailing-edge short read or its downscale ignoring the ROI offset.
 constexpr Tolerance kPixelateTolerance = kRoundingTolerance;
 
 template <typename T>
@@ -71,9 +65,7 @@ void run_pixelate(const TestConfig& cfg, const PixelateParams& op) {
     const std::vector<RpptROI> roiVec = make_roi(desc, cfg.roi);
     for (Rpp32u i = 0; i < shape.n; ++i) roi[i] = roiVec[i];
 
-    // (1) Host golden model. The op writes only the ROI-sized region at the destination origin, so
-    // golden and the device buffer start from the same distinct pattern and only that region is
-    // compared.
+    // The op writes the ROI-sized region at the destination origin; only that region is compared.
     std::vector<T> input(count), dstInit(count), golden(count), actual(count);
     fill_input<T>(input.data(), count, cfg.dtype);
     fill_input<T>(dstInit.data(), count, cfg.dtype, /*salt=*/1);
@@ -81,11 +73,8 @@ void run_pixelate(const TestConfig& cfg, const PixelateParams& op) {
     pixelate_reference<T>(input.data(), golden.data(), desc, cfg.dtype, roi.data(), XYWH,
                           op.percentage);
 
-    // (2) Run RPP on the configured backend. pixelate needs a caller-provided scratch buffer for
-    // its downscaled intermediate; the header requires n * strides.nStride * sizeof(Rpp32f) bytes.
-    // It is seeded with a poison pattern rather than left uninitialized: the op writes the
-    // intermediate itself before reading it back, so any poison reaching the output means the op
-    // read scratch it never wrote -- a defect, and one whose error surface stays reproducible.
+    // Scratch for the downscaled intermediate (n * nStride * sizeof(Rpp32f) bytes per the header),
+    // poisoned so a read of unwritten scratch is reproducible.
     const std::size_t scratchBytes =
         static_cast<std::size_t>(shape.n) * desc.strides.nStride * sizeof(Rpp32f);
     DeviceTensor src(cfg.backend, bytes), dst(cfg.backend, bytes);
@@ -103,10 +92,7 @@ void run_pixelate(const TestConfig& cfg, const PixelateParams& op) {
     handle.sync();
     dst.read(actual.data(), bytes);
 
-    // (3) Compare the ROI-sized region written at the destination origin, bounded by the caller's
-    // own ROI copy rather than the tensor handed to the op: pixelate forwards that tensor into the
-    // HIP resize path, which rewrites it from XYWH to LTRB in place, so reusing roi[] here would
-    // walk a different region than the golden wrote.
+    // Uses the test's own ROI copy: the HIP resize path rewrites the op's ROI to LTRB in place.
     EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), desc, roiVec.data(), XYWH,
                                kPixelateTolerance(cfg.dtype)));
 }

@@ -40,8 +40,7 @@ using namespace rpptest;
 
 namespace {
 
-// I8 kept sub-LSB to surface a real kernel bug: the HIP I8 kernel truncates instead of
-// rounding (HOST rounds correctly).
+// I8 is kept sub-LSB because the HIP I8 kernel truncates instead of rounding (HOST rounds).
 constexpr Tolerance kMagnitudeTolerance = kRoundingTolerance.with_i8(0.5);
 
 template <typename T>

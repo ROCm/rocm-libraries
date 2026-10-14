@@ -44,12 +44,8 @@ struct Bound {
     }
 };
 
-// A per-dtype absolute comparison bound. Plain data: an op names the numbers it needs and
-// hands the selected one to a comparator, so nothing here has to know about comparators,
-// configs or ops. Unlisted dtypes stay 0.0 (bit-exact), which is the right default for an
-// op that does not run them.
+// A per-dtype absolute comparison bound. Unlisted dtypes stay 0.0 (bit-exact).
 struct Tolerance {
-    // Aggregate order: integers first, then floats, each widening.
     double u8 = 0.0, i8 = 0.0, i16 = 0.0, f16 = 0.0, f32 = 0.0;
 
     constexpr double operator()(DType dt) const {
@@ -68,9 +64,7 @@ struct Tolerance {
         return 0.0;
     }
 
-    // A copy with one field replaced, for the ops that differ from a named constant in a
-    // single dtype (C++17 has no designated initializers). Sibling with_*() overloads are
-    // added when an op needs one.
+    // A copy with one field replaced (C++17 has no designated initializers).
     constexpr Tolerance with_i8(double v) const {
         return {u8, v, i16, f16, f32};
     }
@@ -85,9 +79,8 @@ constexpr Tolerance tolerance(double integer, double f32, double f16) {
 // at all is a defect.
 constexpr Tolerance kExact{};
 
-// An op that computes in float and quantizes back: one LSB for the integer dtypes
-// (round-to-nearest), and the accumulated rounding of a few float operations for F32/F16.
-// The bound most such ops land on; an op needing a different one names its own.
+// An op that computes in float and quantizes back: one LSB for the integer dtypes, and the
+// accumulated rounding of a few float operations for F32/F16.
 constexpr Tolerance kRoundingTolerance = tolerance(1.0, 2e-3, 5e-3);
 
 }  // namespace rpptest

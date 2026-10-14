@@ -41,13 +41,8 @@ using namespace rpptest;
 
 namespace {
 
-// Multiplying two full-range integer operands saturates almost every element, which would test
-// the clamp and nothing else. So the integer fills are folded down to a small magnitude: most
-// products then land inside the dtype range while a few still saturate, keeping the clamp
-// covered. C++ '%' keeps the sign of the dividend, so the I8 fold stays two-sided.
-//   U8 -> [0,18]   (products 0..324; ~2-3% of elements saturate at 255)
-//   I8 -> [-14,14] (products -196..196; a few percent saturate at each of -128 and 127)
-// F16/F32 fills are already in [0,1], so their products stay in range and are left alone.
+// Full-range integer operands would saturate almost every product, so the integer fills are
+// folded to U8 [0,18] / I8 [-14,14]: most products are representable and a few still saturate.
 template <typename T>
 void fill_multiply_operand(T* buf, const RpptGenericDesc& d, DType dt, unsigned salt) {
     fill_input_nd<T>(buf, d, dt, salt);
@@ -59,8 +54,7 @@ void fill_multiply_operand(T* buf, const RpptGenericDesc& d, DType dt, unsigned 
     });
 }
 
-// Integer multiplication is exact (only saturation is involved), so U8/I8 are bit-exact. The
-// float tolerances model legitimate fp rounding of a single multiply only.
+// Integer multiplication is exact (the golden only saturates), so U8/I8 are bit-exact.
 Bound tolerance_for(DType dt) {
     switch (dt) {
         case DType::F32:
@@ -87,16 +81,12 @@ void run_tensor_multiply_tensor(const NdConfig& cfg, Broadcast broadcast) {
     const std::size_t count2 = generic_element_count(*desc2);
     const std::size_t countOut = generic_element_count(*descOut);
 
-    // (1) Host golden model. Two distinct fills (different salts) so the two operands never
-    // carry the same value at the same coordinate. The op writes every output element, so
-    // golden needs no pre-seeding.
     std::vector<T> input1(count1), input2(count2), golden(countOut), actual(countOut);
     fill_multiply_operand<T>(input1.data(), *desc1, cfg.dtypeIn, 0);
     fill_multiply_operand<T>(input2.data(), *desc2, cfg.dtypeIn, 1);
     arithmetic_tensor_reference<T>(input1.data(), input2.data(), golden.data(), *descOut, *desc1,
                                    *desc2, ArithmeticTensorOp::Multiply);
 
-    // (2) roiTensors live in host-accessible (pinned for HIP) memory.
     const std::vector<Rpp32u> roiVec1 = make_nd_roi_tensor(dims1);
     const std::vector<Rpp32u> roiVec2 = make_nd_roi_tensor(dims2);
     PinnedArray<Rpp32u> roi1(cfg.backend, roiVec1.size());
@@ -104,7 +94,6 @@ void run_tensor_multiply_tensor(const NdConfig& cfg, Broadcast broadcast) {
     for (std::size_t i = 0; i < roiVec1.size(); ++i) roi1[i] = roiVec1[i];
     for (std::size_t i = 0; i < roiVec2.size(); ++i) roi2[i] = roiVec2[i];
 
-    // (3) Run RPP on the configured backend.
     const std::size_t bytes1 = generic_byte_size(*desc1, cfg.dtypeIn);
     const std::size_t bytes2 = generic_byte_size(*desc2, cfg.dtypeIn);
     const std::size_t bytesOut = generic_byte_size(*descOut, cfg.dtypeIn);
@@ -121,7 +110,6 @@ void run_tensor_multiply_tensor(const NdConfig& cfg, Broadcast broadcast) {
     handle.sync();  // drain the op's stream before copying results back
     dst.read(actual.data(), bytesOut);
 
-    // (4) Compare the whole output tensor.
     EXPECT_TRUE(compare_nd<T>(actual.data(), golden.data(), *descOut, tolerance_for(cfg.dtypeIn)));
 }
 
@@ -139,26 +127,12 @@ TEST_P(TensorMultiplyTensorTest, Correctness) {
     });
 }
 
-// The integer operands are folded to a small magnitude before the op runs (U8 -> [0,18],
-// I8 -> [-14,14]): at full range nearly every product would saturate, so the test would only
-// exercise the clamp. At these ranges most products are representable and a few percent still
-// saturate, in every rank/broadcast combination.
+// Scoped to U8/I8/F16/F32: the op also accepts the 16/32-bit integer types, which the DType enum
+// does not carry.
 //
-// Restricted to U8/I8/F16/F32: the op also accepts the 16/32-bit integer types, but the
-// framework's DType enum does not carry them for this op.
-//
-// 54 of these 72 cases are red against three documented kernel defects, deterministically. The
-// golden and tolerances are deliberately left correct:
-//   - 27: U8 (both backends) and I8 (HIP) overflow wraps modulo 256 instead of saturating
-//     (18 * 15 -> 14, not 255).
-//   -  9: HOST I8 returns 127 for every negative product, in range or not (-5 * 6 -> 127).
-//   - 18: F16 is unimplemented -- the op returns RPP_SUCCESS on both backends and never writes
-//     the output.
-// F32 is green on both backends across every rank and broadcast mode.
-//
-// Note the HIP descriptors must be device-addressable (GenericDescriptor handles this): at
-// rank >= 4 the non-broadcast kernel reads dims/strides on the device. Undocumented and
-// rank-dependent.
+// Known kernel defects (skip-listed): U8 (both backends) and I8 (HIP) overflow wraps instead of
+// saturating, HOST I8 returns 127 for every negative product, and F16 is unimplemented (returns
+// RPP_SUCCESS without writing the output).
 INSTANTIATE_TEST_SUITE_P(Misc_Arithmetic, TensorMultiplyTensorTest,
                          ::testing::ValuesIn(nd_with_params<BroadcastParams>(
                              make_nd_configs({DType::U8, DType::I8, DType::F16, DType::F32},

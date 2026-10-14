@@ -45,11 +45,7 @@ RPP op
 Description
   Hue rotation in HSV space. Each RGB pixel is converted to HSV, its hue angle
   is advanced by hueDeg and wrapped into [0,360), and the result is converted
-  back to RGB. Saturation and value are untouched, so only the colour changes,
-  not its vividness or brightness. This is a 3-channel op (ch0=R, ch1=G,
-  ch2=B) and reads all three channels of a pixel together.
-
-  Grey pixels (R == G == B) have S == 0 and are invariant to the rotation.
+  back to RGB. Saturation and value are untouched. 3-channel only.
 
 Expression
   (H, S, V) = rgb_to_hsv(src)

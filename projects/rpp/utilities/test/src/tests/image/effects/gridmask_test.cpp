@@ -41,9 +41,7 @@ using namespace rpptest;
 
 namespace {
 
-// tileWidth <= min(h, w) as the API doc requires; 0 <= gridRatio <= 1; gridAngle in radians.
-// These are single scalars applying to the whole batch (not per-image tensors), so they are baked
-// into the param struct rather than allocated as pinned tensors.
+// Batch-wide scalars. tileWidth <= min(h, w); 0 <= gridRatio <= 1; gridAngle in radians.
 struct GridmaskParams {
     Rpp32u tileWidth;
     float gridRatio;
@@ -54,9 +52,6 @@ struct GridmaskParams {
         return tag;
     }
 };
-
-// gridmask is a pure copy/mask: kept pixels are copied bit-exact, masked pixels are set to an
-// exact constant (black). No arithmetic, so every dtype is bit-exact.
 
 template <typename T>
 void run_gridmask(const TestConfig& cfg, const GridmaskParams& op) {
@@ -71,15 +66,12 @@ void run_gridmask(const TestConfig& cfg, const GridmaskParams& op) {
 
     RpptUintVector2D translateVector{op.tx, op.ty};
 
-    // (1) Host golden model. golden starts as a copy of the input so the untouched
-    // (outside-ROI) region is defined; only the ROI is overwritten by the reference.
     std::vector<T> input(count), golden(count), actual(count);
     fill_input<T>(input.data(), count, cfg.dtype);
     golden = input;
     gridmask_reference<T>(input.data(), srcDesc, golden.data(), dstDesc, cfg.dtype, roi.data(),
                           XYWH, op.tileWidth, op.gridRatio, op.gridAngle, op.tx, op.ty);
 
-    // (2) Run RPP on the configured backend.
     DeviceTensor src(cfg.backend, bytes), dst(cfg.backend, bytes);
     src.write(input.data(), bytes);
     dst.write(input.data(), bytes);  // define outside-ROI dst to mirror the golden
@@ -90,11 +82,9 @@ void run_gridmask(const TestConfig& cfg, const GridmaskParams& op) {
                       op.gridAngle, translateVector, roi.data(), XYWH, handle.get(), cfg.backend),
         RPP_SUCCESS);
 
-    // (3) Retrieve the result on the host (no-op copy for HOST, device->host for HIP).
     handle.sync();  // drain the op's stream before copying results back
     dst.read(actual.data(), bytes);
 
-    // (4) Compare within tolerance over the ROI.
     EXPECT_TRUE(
         compare_roi<T>(actual.data(), golden.data(), dstDesc, roi.data(), XYWH, kExact(cfg.dtype)));
 }
@@ -111,17 +101,8 @@ TEST_P(GridmaskTest, Correctness) {
         p.cfg.dtype, [&](auto tag) { run_gridmask<Element<decltype(tag)>>(p.cfg, p.op); });
 }
 
-// Five param sets. gridRatio is chosen so the black-square edge l = gridRatio * tileWidth lands
-// strictly between pixel centres (4.0 and 5.5); a ratio putting l exactly on an integer boundary
-// (e.g. 0.6f * 10, which is 6.0000002 in float) makes the edge column a coin flip, not a test.
-//   "axis"    -- no rotation, no translation: the grid aligned to the region origin.
-//   "shift"   -- translation only, so the translate direction is exercised without rotation.
-//   "wide"    -- a different tileWidth/gridRatio, still axis-aligned.
-//   "rot"     -- rotation only (translateVector {0,0}).
-//   "rotshift"-- rotation AND translation. The other four are all invariant to the rotate/
-//                translate order, which the API doc does not specify; this one is not, so it is
-//                the only set that holds the reference to the op's R(p) - t and would catch a
-//                regression back to R(p - t). 32% of pixels differ between the two orders here.
+// gridRatio * tileWidth must not land on an integer, or the edge column becomes a float coin flip.
+// "rotshift" is the only set sensitive to the rotate/translate order (the op uses R(p) - t).
 INSTANTIATE_TEST_SUITE_P(
     Image_Effects, GridmaskTest,
     ::testing::ValuesIn(with_params<GridmaskParams>(

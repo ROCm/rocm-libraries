@@ -40,15 +40,11 @@ using namespace rpptest;
 
 namespace {
 
-// Nearest-neighbour sampling copies a source texel verbatim and the op has no arithmetic, so every
-// dtype is bit-exact. A diff is a disagreement about the displacement or the border rule, which no
-// tolerance could absorb anyway.
+// Nearest-neighbour sampling copies source texels verbatim, so every dtype is bit-exact.
 constexpr double kTol = 0.0;
 
-// Flat: zero amplitudes, so the map is the exact identity and the output must be a verbatim copy of
-// the ROI. Separates a plumbing or ROI-placement failure from a wave-math disagreement.
-// Wave: the parameters the legacy harness uses. Amplitudes of 2 and 5 pixels push the border
-// columns/rows off the ROI, so the black-fill branch is exercised too.
+// Flat: zero amplitudes, an identity map, separating ROI-placement failures from wave-math ones.
+// Wave: amplitudes push border rows/columns off the ROI, exercising the black-fill branch.
 enum class WaterKind { Flat, Wave };
 
 struct WaterParams {
@@ -89,8 +85,7 @@ void run_water(const TestConfig& cfg, const WaterParams& op) {
         phaseY[n] = kPhaseY;
     }
 
-    // The op writes the ROI-sized region at the destination origin, so golden and device buffer
-    // start from the same distinct pattern and only that region is compared.
+    // The op writes the ROI-sized region at the destination origin; only that region is compared.
     std::vector<T> input(count), dstInit(count), golden(count), actual(count);
     fill_input<T>(input.data(), count, cfg.dtype);
     fill_input<T>(dstInit.data(), count, cfg.dtype, /*salt=*/1);
@@ -112,8 +107,7 @@ void run_water(const TestConfig& cfg, const WaterParams& op) {
     handle.sync();
     dst.read(actual.data(), bytes);
 
-    // Compared against the caller's own ROI copy, not the tensor handed to the op, in case the
-    // backend rewrites it from XYWH to LTRB in place.
+    // Uses the test's own ROI copy in case the backend rewrites the op's ROI to LTRB in place.
     EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), dstDesc, roiVec.data(), XYWH, kTol));
 }
 
@@ -129,7 +123,7 @@ TEST_P(WaterTest, Correctness) {
         p.cfg.dtype, [&](auto tag) { run_water<Element<decltype(tag)>>(p.cfg, p.op); });
 }
 
-// I8 is off the grid for now, pending the suite-wide decision on whether the image ops need it.
+// I8 is not yet covered.
 INSTANTIATE_TEST_SUITE_P(Image_Effects, WaterTest,
                          ::testing::ValuesIn(with_params<WaterParams>(
                              concat_configs({

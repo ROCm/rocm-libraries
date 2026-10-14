@@ -42,9 +42,7 @@ using namespace rpptest;
 
 namespace {
 
-// Per-channel keep(1)/drop(0) mask. PLN1 (1 channel) uses mask[0] only; PKD3/PLN3 use all
-// three. The mixed patterns exercise keep/drop across channels (and give PLN1 both a drop and a
-// keep case); the uniform ones are the two degenerate ends, all-drop and the identity.
+// Per-channel keep(1)/drop(0) mask. PLN1 uses mask[0] only.
 struct ChannelDropoutParams {
     std::array<Rpp8u, 3> mask;
     std::string name() const {
@@ -53,9 +51,6 @@ struct ChannelDropoutParams {
         return s;
     }
 };
-
-// Channel dropout is a pure keep/erase: kept channels are copied bit-exact, dropped channels
-// are set to an exact constant. No arithmetic, so every dtype is bit-exact.
 
 template <typename T>
 void run_channel_dropout(const TestConfig& cfg, const ChannelDropoutParams& op) {
@@ -74,11 +69,8 @@ void run_channel_dropout(const TestConfig& cfg, const ChannelDropoutParams& op) 
         roi[i] = roiVec[i];
     }
 
-    // (1) Host golden model. golden starts as a copy of the DESTINATION seed so the untouched
-    // (outside-ROI) region is defined; only the ROI is overwritten by the reference. That seed is a
-    // different pattern from the source (salt = 1) because the all-keep mask {1,1,1} makes the
-    // expected output equal to the input: seeding the destination from the input would then make
-    // golden, seed and expected identical, and a kernel that wrote nothing would pass.
+    // dst is seeded with a different pattern from src: with the all-keep mask the expected output
+    // equals the input, so a src-seeded dst would let a kernel that wrote nothing pass.
     std::vector<T> input(count), dstInit(count), golden(count), actual(count);
     fill_input<T>(input.data(), count, cfg.dtype);
     fill_input<T>(dstInit.data(), count, cfg.dtype, /*salt=*/1);
@@ -86,7 +78,6 @@ void run_channel_dropout(const TestConfig& cfg, const ChannelDropoutParams& op) 
     channel_dropout_reference<T>(input.data(), srcDesc, golden.data(), dstDesc, cfg.dtype,
                                  roi.data(), XYWH, dropout.data());
 
-    // (2) Run RPP on the configured backend.
     DeviceTensor src(cfg.backend, bytes), dst(cfg.backend, bytes);
     src.write(input.data(), bytes);
     dst.write(dstInit.data(), bytes);  // define outside-ROI dst to mirror the golden
@@ -96,11 +87,9 @@ void run_channel_dropout(const TestConfig& cfg, const ChannelDropoutParams& op) 
                                    roi.data(), XYWH, handle.get(), cfg.backend),
               RPP_SUCCESS);
 
-    // (3) Retrieve the result on the host (no-op copy for HOST, device->host for HIP).
     handle.sync();  // drain the op's stream before copying results back
     dst.read(actual.data(), bytes);
 
-    // (4) Compare within tolerance over the ROI.
     EXPECT_TRUE(
         compare_roi<T>(actual.data(), golden.data(), dstDesc, roi.data(), XYWH, kExact(cfg.dtype)));
 }

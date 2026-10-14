@@ -50,33 +50,25 @@ Description
   Simulates baseline JPEG lossy compression, per the header, by "converting
   the image to the frequency domain using the DCT, applying quantization, and
   then reconstructing the image using the IDCT". Modelled from ITU-T T.81 plus
-  the IJG quality convention every encoder uses.
-
-  This is a block-structured (non-pointwise) op: each output pixel depends on
-  its whole 8x8 block, so it cannot use the pointwise scalar template.
+  the IJG quality convention.
 
 Expression
   Per image, over the ROI:
 
   1. Load into [0,255] intensity space (U8 v; I8 v+128; F16/F32 v*255).
-  2. 3 channels: RGB -> YCbCr, BT.601 full-range -- the JPEG colour
-     transform, shared with histogram_equalize via
-     reference/color_ycbcr.hpp. 1 channel: the value is Y.
+  2. 3 channels: RGB -> YCbCr, BT.601 full-range (reference/color_ycbcr.hpp).
+     1 channel: the value is Y.
   3. Y is processed at full resolution; Cb/Cr are subsampled 4:2:0.
   4. Tile each plane into 8x8 blocks from its top-left origin, level-shift
      by -128, forward DCT-II (T.81 eq. 8-3), quantize q = round(F / Q),
      dequantize q * Q, inverse DCT (eq. 8-2), level-shift by +128 and clamp
      to [0,255]. A block running past the right/bottom edge replicates the
-     last valid column/row into the padding (the encoder-side edge
-     extension).
+     last valid column/row into the padding.
   5. 3 channels: upsample Cb/Cr back to full resolution, then YCbCr -> RGB.
 
-  Chroma follows the 4:2:0 sampling that is the default of every baseline JPEG
-  encoder: each chroma sample is the 2x2 box average of the luma-resolution
-  plane, and the image is padded out to whole 16x16 MCUs by edge replication
-  before subsampling -- so a chroma plane is always a whole number of 8x8
-  blocks, ceil(dim/16)*8 samples per axis. Reconstruction replicates each
-  chroma sample back over its 2x2 pixel group (box upsampling).
+  Each chroma sample is the 2x2 box average of the luma-resolution plane,
+  padded to whole 16x16 MCUs by edge replication (ceil(dim/16)*8 samples per
+  axis). Reconstruction replicates each chroma sample over its 2x2 group.
 
   Q is the T.81 Annex K table (K.1 luminance for Y or a 1-channel image, K.2
   chrominance for Cb/Cr) scaled by the IJG quality mapping:
@@ -93,19 +85,12 @@ Per-type form
     F32   /255, clamp[0,1]
 
 Notes
-  Q is an 8-bit integer because baseline JPEG stores quantization values in 8
-  bits for 8-bit sample precision (T.81 B.2.4.1): no encoder can quantize by
-  3.4, nor by more than 255. RPP keeps the scaled table real-valued and
-  unclamped, so it quantizes by neither an integer nor anything a decoder
-  could read back. That single difference is what the q10 and q90 halves of
-  the grid disagree on -- with the table rounded and clamped this model
-  reproduces both backends bit-exactly. It deliberately stays spec-correct.
+  Q is rounded and clamped to an 8-bit integer as baseline JPEG requires
+  (T.81 B.2.4.1). RPP keeps the scaled table real-valued and unclamped, so
+  the kernel diverges from this model at quality levels where that matters.
 
-  One degree of freedom the header does not pin down, chosen as a documented
-  assumption: the intermediate YCbCr samples are kept continuous rather than
-  re-quantized to 8 bits between the colour transform and the DCT, so the
-  model is type-independent and the distortion comes only from the coefficient
-  quantization.
+  The intermediate YCbCr samples are kept continuous rather than re-quantized
+  to 8 bits before the DCT; the header does not specify this.
 */
 
 namespace jpeg_detail {
@@ -202,9 +187,7 @@ inline void plane_roundtrip(const std::vector<double>& in, std::vector<double>& 
         }
 }
 
-// [0,255] intensity space is where the whole pipeline works, so a stored pixel is lifted into it
-// on load and quantized back on store. Both compose the shared per-dtype rules rather than
-// restating them: U8 v, I8 v+128, F16/F32 v*255.
+// The pipeline works in [0,255] intensity space: U8 v, I8 v+128, F16/F32 v*255.
 inline double load_intensity(double stored, DType dt) {
     return to_unit(stored, dt) * 255.0;
 }
@@ -218,10 +201,7 @@ inline int chroma_extent(int dim) {
     return ((dim + 15) / 16) * 8;
 }
 
-// The 4:2:0 counterpart of plane_roundtrip, same contract on a full-resolution plane: each chroma
-// sample is the 2x2 box average of the edge-replicated plane, the subsampled plane makes the same
-// round trip (whole 8x8 blocks by construction), and each sample is replicated back over its 2x2
-// pixel group.
+// The 4:2:0 counterpart of plane_roundtrip: box-average 2x2 down, round-trip, replicate 2x2 up.
 inline void chroma_roundtrip(const std::vector<double>& in, std::vector<double>& out, int h, int w,
                              const std::array<double, 64>& q) {
     const int hs = chroma_extent(h), ws = chroma_extent(w);
@@ -244,8 +224,7 @@ inline void chroma_roundtrip(const std::vector<double>& in, std::vector<double>&
 
 }  // namespace jpeg_detail
 
-// Writes the JPEG-distorted result into dst, reading the source at the ROI offset and writing the
-// roiH x roiW region packed at the destination origin (the placement every RPP image op uses).
+// Reads the source at the ROI offset and writes the roiH x roiW result at the destination origin.
 template <typename T>
 void jpeg_compression_distortion_reference(const T* src, T* dst, const RpptDesc& d, DType dt,
                                            const RpptROI* roi, RpptRoiType roiType, int quality) {

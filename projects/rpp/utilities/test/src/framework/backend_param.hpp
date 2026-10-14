@@ -49,9 +49,8 @@ inline std::string backend_name(RppBackend backend) {
 
 }  // namespace rpptest
 
-// gtest appends ", where GetParam() = <printed value>" to every failing test line. Every
-// parameter the suite uses is already spelled out in the test name, so print nothing rather
-// than repeat it (or, worse, let gtest emit a raw byte dump of the config struct).
+// Every parameter is already spelled out in the test name, so print nothing instead of gtest's
+// ", where GetParam() = ..." suffix (a raw byte dump for config structs).
 inline void PrintTo(const RppBackend&, std::ostream*) {}
 
 #endif  // RPP_TEST_BACKEND_PARAM_H

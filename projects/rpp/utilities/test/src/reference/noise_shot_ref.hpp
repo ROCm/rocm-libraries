@@ -46,15 +46,9 @@ Expression
   draw a Poisson sample, then scale back by factor.
 
 Scope
-  This reference covers only the shotNoiseFactor = 0 corner. The formula above
-  is undefined there (division by zero) and the op therefore degenerates to a
-  no-op passthrough.
-
-  The general-case Poisson scaling for factor > 0 is not derivable from the
-  public API doc comment alone -- the exact photon-count normalization is
-  unspecified -- so it is deliberately left unmodelled. factor > 0 is instead
-  covered by runtime invariants in the test file (valid-range sanity and seed
-  determinism), not by this golden.
+  Only the shotNoiseFactor = 0 corner is modelled, where the op is a
+  passthrough. The public API does not specify the photon-count normalization
+  for factor > 0; that case is covered by runtime invariants in the test file.
 */
 template <typename T>
 void noise_shot_identity_reference(const T* src, const RpptDesc& sd, T* dst, const RpptDesc& dd,

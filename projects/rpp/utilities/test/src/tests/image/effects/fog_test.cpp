@@ -40,31 +40,16 @@ using namespace rpptest;
 
 namespace {
 
-// fog has no golden model, and unlike the other effects ops it has no parameter corner at which
-// one could be written. The output is a blend of the image with a fog layer baked into the library
-// (src/include/tensor/fog_mask.hpp, nearest-neighbour resized to the image), and intensityFactor
-// is an additive bias on that layer's alpha rather than a weight on the whole contribution: at
-// intensityFactor = 0 the baked layer still applies at full strength, so (0, 0) is not an
-// identity. Both backends agree on this, and the public API doc does not describe the layer, so
-// nothing here is derivable from the spec.
-//
-// What is checked instead are the properties the API does pin down without the mask: the
-// Correctness intent runs the op over the whole supported grid and holds it to storable output,
-// and the Negative intent holds it to its documented parameter ranges. They take disjoint
-// parameter sets, so they are separate fixtures -- GTest instantiates every body of a fixture
-// against that fixture's whole param set, which would otherwise generate (and skip) each check
-// across the other's grid.
+// fog has no golden model: the output blends the image with a fog layer baked into the library
+// (src/include/tensor/fog_mask.hpp) that the API does not describe, and intensityFactor = 0 is not
+// an identity. Correctness checks storable, changed output; Negative checks the parameter ranges.
 
-// Mid-range values inside both documented ranges (0 <= intensityFactor <= 0.5,
-// 0 <= greyFactor <= 1), well away from either endpoint so the fog contribution is unambiguous.
+// Mid-range values inside the documented ranges (intensityFactor in [0,0.5], greyFactor in [0,1]).
 constexpr float kIntensity = 0.4f;
 constexpr float kGrey = 0.6f;
 
-// Runs the kernel at parameters inside the documented ranges and asserts what holds without
-// knowing the fog layer: the call succeeds, the effect is actually applied (the ROI is not
-// returned unchanged), and every ROI output element is a legally storable value for its dtype --
-// U8 [0,255], I8 [-128,127], F16/F32 [0,1] per the header's depth ranges. Catches a dead kernel,
-// NaN, overflow and wrong-intensity-space output; says nothing about the fog layer's shape.
+// Asserts the ROI changed and every output element is storable for its dtype (U8 [0,255],
+// I8 [-128,127], F16/F32 [0,1]).
 template <typename T>
 void run_fog(const TestConfig& cfg) {
     RpptDesc srcDesc = make_src_descriptor(cfg);  // RPP takes a non-const ptr
@@ -81,10 +66,8 @@ void run_fog(const TestConfig& cfg) {
         roi[i] = roiVec[i];
     }
 
-    // The destination is seeded so that each ROI element already holds ITS OWN source pixel, which
-    // is what makes "unchanged" mean a dead kernel below. A raw byte copy of the input is not that:
-    // under a partial ROI or the layout toggle the byte at dstIdx is some other pixel's value, so a
-    // kernel that wrote nothing would still read as changed.
+    // Seed each ROI dst element with its own source pixel so "unchanged" means a dead kernel; a raw
+    // byte copy would not line up under a partial ROI or layout toggle.
     std::vector<T> input(count), dstInit(count), actual(count);
     fill_input<T>(input.data(), count, cfg.dtype);
     fill_input<T>(dstInit.data(), count, cfg.dtype, /*salt=*/1);  // outside-ROI: defined, unread
@@ -105,9 +88,7 @@ void run_fog(const TestConfig& cfg) {
     handle.sync();  // drain the op's stream before copying results back
     dst.read(actual.data(), bytes);
 
-    // The source is read at the ROI offset and the output written packed at the destination
-    // origin, so the comparison walks the same mapping the op uses. Uses the test's own ROI copy,
-    // not the tensor handed to the op, in case the backend rewrites it from XYWH to LTRB in place.
+    // Uses the test's own ROI copy in case the backend rewrites the op's ROI to LTRB in place.
     bool changed = false, storable = true;
     double firstBad = 0.0;
     for_each_roi_io(srcDesc, dstDesc, roiVec.data(), XYWH,
@@ -126,9 +107,7 @@ void run_fog(const TestConfig& cfg) {
                           << ", outside the storable range for dtype " << dtype_name(cfg.dtype);
 }
 
-// One out-of-range parameter pair per case. Both bounds of both ranges are covered; the parameter
-// values are the grid axis here because the dtype/layout axes are irrelevant to argument
-// validation, which never reaches the kernel.
+// One out-of-range parameter pair per case, covering both bounds of both ranges.
 struct FogNegativeParams {
     float intensity;
     float grey;
@@ -137,10 +116,7 @@ struct FogNegativeParams {
     }
 };
 
-// The header constrains both parameters (0 <= intensityFactor <= 0.5, 0 <= greyFactor <= 1), so a
-// value outside those ranges is not a legal call and must be reported rather than silently
-// producing an undefined image. Only the status is asserted -- the header does not name which
-// RPP_ERROR* an out-of-range scalar maps to.
+// Only non-success is asserted; the header does not name the RPP_ERROR* for an out-of-range scalar.
 template <typename T>
 void run_fog_negative(const TestConfig& cfg, const FogNegativeParams& op) {
     RpptDesc desc = make_src_descriptor(cfg);

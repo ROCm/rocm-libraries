@@ -45,9 +45,8 @@ RPP op
 Description
   Spatially-varying cross-fade between two sources, weighted by a 2D gaussian
   centred on the region with the given standard deviation. The gaussian peaks
-  at 1 in the centre (out == src1) and decays to 0 at the edges (out == src2),
-  so the output is a convex combination of the two sources and never leaves
-  [min,max] -- clamping is only a safety net.
+  at 1 in the centre (out == src1) and decays towards 0 at the edges
+  (out == src2).
 
 Expression
   For output pixel (row j, col i) of a roiW x roiH region, gaussian centred at
@@ -63,10 +62,8 @@ Per-type form
 
 Notes
   The public header describes only "standard deviation based non-linear
-  alpha-blending" via a gaussian. The peak-1 gaussian (no 1/(2*pi*sigma^2)
-  prefactor), the region centre and the round-to-nearest quantization are the
-  principled interpretation the golden holds to. A kernel using a different
-  convention shows up as a diff -- a finding, not a reference bug.
+  alpha-blending". The peak-1 gaussian (no 1/(2*pi*sigma^2) prefactor), the
+  region centre and round-to-nearest quantization are not specified there.
 */
 inline double non_linear_blend_scalar(double s1, double s2, DType dt, double gaussian) {
     const double v = (s1 - s2) * gaussian + s2;
@@ -88,8 +85,7 @@ void non_linear_blend_reference(const T* src1, const T* src2, const RpptDesc& sd
                                 const RpptDesc& dd, DType dt, const RpptROI* roi,
                                 RpptRoiType roiType, double stdDev) {
     const double multiplier = -0.5 / (stdDev * stdDev);
-    // Per-image gaussian center = (roiW/2, roiH/2), integer halves as in the reference definition:
-    // an odd extent centres on the lower pixel rather than between two.
+    // Integer halves: an odd extent centres on a pixel rather than between two.
     std::vector<double> halfW(sd.n), halfH(sd.n);
     for (Rpp32u n = 0; n < sd.n; ++n) {
         const RoiBounds b = roi_bounds(roi[n], roiType);

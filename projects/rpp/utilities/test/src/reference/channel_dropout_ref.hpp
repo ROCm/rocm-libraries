@@ -40,7 +40,7 @@ RPP op
   rppt_channel_dropout (Image / Effects augmentation)
 
 Description
-  Erases user-selected whole channels from an image. dropoutTensor holds one
+  Erases caller-selected whole channels from an image. dropoutTensor holds one
   0/1 value per channel per image (size batchSize * channels), laid out as
   [image * channels + channel]: 1 = Keep (pass the channel through unchanged),
   0 = Drop (erase the channel).

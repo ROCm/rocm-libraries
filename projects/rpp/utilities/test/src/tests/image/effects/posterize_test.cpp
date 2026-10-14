@@ -40,8 +40,7 @@ using namespace rpptest;
 
 namespace {
 
-// levelBits within the documented range 1 <= posterizeLevelBits <= 8. 4 keeps the top nibble; 2
-// reduces harder to the top two bits -- both drop low bits so most pixels change.
+// levelBits in [1, 8].
 struct PosterizeParams {
     int levelBits;
     std::string name() const {

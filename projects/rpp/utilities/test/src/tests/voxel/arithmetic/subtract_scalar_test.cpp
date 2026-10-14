@@ -55,7 +55,6 @@ Bound scalar_tolerance(DType) {
 
 template <typename T>
 void run_subtract_scalar(const VoxelConfig& cfg, const SubtractScalarParams& p) {
-    // Dense strides, as the legacy voxel harness uses.
     GenericDescriptor desc(cfg.backend, voxel_dims(cfg.size, cfg.layout), cfg.dtype,
                            to_rpp_layout_3d(cfg.layout));
     const std::size_t count = generic_element_count(*desc);
@@ -74,14 +73,12 @@ void run_subtract_scalar(const VoxelConfig& cfg, const SubtractScalarParams& p) 
     PinnedArray<RpptROI3D> roi(cfg.backend, cfg.size.n);
     for (Rpp32u i = 0; i < cfg.size.n; ++i) roi[i] = roiHost[i];
 
-    // (1) Host golden model. Both sides start at the sentinel so a voxel the op never wrote stays
-    // obviously unwritten instead of plausibly zero; only the ROI box is overwritten.
+    // Both sides start at the sentinel so a voxel the op never writes cannot pass as zero.
     std::vector<T> golden(count, nd_slack_poison<T>(cfg.dtype));
     std::vector<T> actual = golden;
     arithmetic_scalar_reference<T>(input.data(), golden.data(), *desc, roiHost.data(), cfg.roiType,
                                    ScalarArithmeticOp::Subtract, sub.data());
 
-    // (2) Run RPP on the configured backend.
     DeviceTensor src(cfg.backend, bytes), dst(cfg.backend, bytes);
     src.write(input.data(), bytes);
     dst.write(actual.data(), bytes);
@@ -95,7 +92,6 @@ void run_subtract_scalar(const VoxelConfig& cfg, const SubtractScalarParams& p) 
     handle.sync();  // drain the op's stream before copying results back
     dst.read(actual.data(), bytes);
 
-    // (3) Compare inside the ROI box.
     EXPECT_TRUE(compare_voxel_roi<T>(actual.data(), golden.data(), *desc, roiHost.data(),
                                      cfg.roiType, scalar_tolerance(cfg.dtype)));
 }
@@ -112,9 +108,8 @@ TEST_P(SubtractScalarTest, Correctness) {
     run_subtract_scalar<Rpp32f>(p.cfg, p.op);
 }
 
-// F32 only, per the API header. The fill spans [0, 1] and the subtrahend is 40 (the value the
-// legacy voxel harness drives this op with), so every result is strongly negative: a kernel that
-// clamped at 0 would show up on every voxel.
+// F32 only, per the header. Every result is strongly negative, so a kernel that clamped at 0 would
+// show.
 INSTANTIATE_TEST_SUITE_P(
     Voxel_Arithmetic, SubtractScalarTest,
     ::testing::ValuesIn(voxel_with_params<SubtractScalarParams>(

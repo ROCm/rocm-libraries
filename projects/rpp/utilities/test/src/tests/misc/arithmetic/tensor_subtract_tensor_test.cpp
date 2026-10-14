@@ -41,8 +41,7 @@ using namespace rpptest;
 
 namespace {
 
-// Tolerances model legitimate floating-point error only. Integer subtraction is exact (the
-// golden only saturates), so U8/I8 are compared bit-exactly.
+// Integer subtraction is exact (the golden only saturates), so U8/I8 compare bit-exactly.
 constexpr Tolerance kAbsTolerance = tolerance(0.0, 1e-5, 2e-3);
 
 constexpr Tolerance kRelTolerance = tolerance(0.0, 1e-6, 2e-3);
@@ -62,16 +61,12 @@ void run_tensor_subtract_tensor(const NdConfig& cfg, Broadcast broadcast) {
     const std::size_t count2 = generic_element_count(*desc2);
     const std::size_t countOut = generic_element_count(*descOut);
 
-    // (1) Host golden model. Two distinct fills (different salts) so the difference is non-trivial
-    // and signed. The op writes every output element, so golden needs no pre-seeding. Operand
-    // order matters here: src1 - src2, in the order the API declares them.
     std::vector<T> input1(count1), input2(count2), golden(countOut), actual(countOut);
     fill_input_nd<T>(input1.data(), *desc1, cfg.dtypeIn, 0);
     fill_input_nd<T>(input2.data(), *desc2, cfg.dtypeIn, 1);
     arithmetic_tensor_reference<T>(input1.data(), input2.data(), golden.data(), *descOut, *desc1,
                                    *desc2, ArithmeticTensorOp::Subtract);
 
-    // (2) roiTensors live in host-accessible (pinned for HIP) memory.
     const std::vector<Rpp32u> roiVec1 = make_nd_roi_tensor(dims1);
     const std::vector<Rpp32u> roiVec2 = make_nd_roi_tensor(dims2);
     PinnedArray<Rpp32u> roi1(cfg.backend, roiVec1.size());
@@ -79,7 +74,6 @@ void run_tensor_subtract_tensor(const NdConfig& cfg, Broadcast broadcast) {
     for (std::size_t i = 0; i < roiVec1.size(); ++i) roi1[i] = roiVec1[i];
     for (std::size_t i = 0; i < roiVec2.size(); ++i) roi2[i] = roiVec2[i];
 
-    // (3) Run RPP on the configured backend.
     const std::size_t bytes1 = generic_byte_size(*desc1, cfg.dtypeIn);
     const std::size_t bytes2 = generic_byte_size(*desc2, cfg.dtypeIn);
     const std::size_t bytesOut = generic_byte_size(*descOut, cfg.dtypeIn);
@@ -96,7 +90,6 @@ void run_tensor_subtract_tensor(const NdConfig& cfg, Broadcast broadcast) {
     handle.sync();  // drain the op's stream before copying results back
     dst.read(actual.data(), bytesOut);
 
-    // (4) Compare the whole output tensor.
     EXPECT_TRUE(compare_nd<T>(actual.data(), golden.data(), *descOut,
                               Bound{kAbsTolerance(cfg.dtypeIn), kRelTolerance(cfg.dtypeIn)}));
 }
@@ -115,27 +108,11 @@ TEST_P(TensorSubtractTensorTest, Correctness) {
     });
 }
 
-// Dtypes are scoped to U8/I8/F16/F32: the op also accepts U16/I16/U32/I32, which the framework's
-// DType axis does not model for this op.
+// Scoped to U8/I8/F16/F32: the op also accepts U16/I16/U32/I32, which the DType axis does not
+// model. F16/F32 results are not clamped: these are generic ND tensors, not image intensities.
 //
-// Subtraction makes the two dtype families behave differently, by design:
-//   - U8 differences are frequently negative and I8 differences frequently underflow, so those
-//     elements exercise the golden's saturate-to-dtype-range assumption (documented in
-//     reference/arithmetic_tensor_ref.hpp).
-//   - F16/F32 results are deliberately NOT clamped by the golden: these are generic ND tensors,
-//     not image intensities, so a negative difference is the intended result.
-//
-// 54 of these 72 cases are red against two documented kernel defects, deterministically. The golden
-// and tolerances are deliberately left correct:
-//   - 36: U8/I8 overflow wraps modulo 256 instead of saturating, identically on both backends
-//     (11 - 112 -> 155, not 0).
-//   - 18: F16 is unimplemented -- the op returns RPP_SUCCESS on both backends and never writes
-//     the output.
-// F32 is green on both backends across every rank and broadcast mode.
-//
-// Note the ND descriptors must be device-addressable on HIP (GenericDescriptor handles this): at
-// rank >= 4 the non-broadcast kernel reads dims/strides on the device. Undocumented and
-// rank-dependent.
+// Known kernel defects (skip-listed): U8/I8 overflow wraps instead of saturating, and F16 is
+// unimplemented (returns RPP_SUCCESS without writing the output).
 INSTANTIATE_TEST_SUITE_P(Misc_Arithmetic, TensorSubtractTensorTest,
                          ::testing::ValuesIn(nd_with_params<BroadcastParams>(
                              make_nd_configs({DType::U8, DType::I8, DType::F16, DType::F32},

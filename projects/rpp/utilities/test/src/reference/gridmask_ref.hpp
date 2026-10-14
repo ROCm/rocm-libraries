@@ -51,19 +51,9 @@ Description
   l == gridRatio * tileWidth ("black square width / tileWidth"), rotated by
   gridAngle radians and shifted by translateVector.
 
-  The grid is a rigid pattern laid over the processed region. A positive
-  translateVector moves the black square to [t, t+l) within its cell -- the
-  translation is subtracted, not added. Image coordinates are y-DOWN, so it is
-  R(+gridAngle), not the y-up R(-gridAngle), that rotates the pattern
-  counter-clockwise on screen. Coordinates are ROI-RELATIVE: p = (i, j) with
-  the ROI's top-left as the origin, matching the suite's convention for
-  spatially generated patterns under a ROI (non_linear_blend centres its
-  gaussian on the region, not on the absolute image frame).
-
-  The translation is applied in GRID space, after the rotation -- the pattern
-  is rotated about the region origin and the whole rotated grid is then slid
-  by translateVector. Sliding first and rotating the result (R(p - t)) is a
-  different operator whenever both are non-zero, and is not what the op does.
+  Coordinates are ROI-relative (p = (i, j), origin at the ROI's top-left) and
+  y-down. The translation is applied in grid space after the rotation:
+  R(p) - t, not R(p - t).
 
 Expression
   (gx, gy) = R(gridAngle) * p - translateVector
@@ -83,10 +73,7 @@ Per-type form
 
 Notes
   The API doc states neither the rotation handedness nor the rotate/translate
-  order. Both are pinned by the "rotshift" parameter set, which is the only
-  one with gridAngle and translateVector both non-zero and so the only one
-  that can tell R(p) - t from R(p - t); the other sets are independent of the
-  order by construction.
+  order; the "rotshift" parameter set is the one that distinguishes them.
 */
 
 // True iff the ROI-relative pixel (x, y) falls inside a black square of the grid.

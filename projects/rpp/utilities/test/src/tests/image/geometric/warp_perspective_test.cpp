@@ -46,13 +46,8 @@ std::string interp_token(RpptInterpolationType i) {
     return i == NEAREST_NEIGHBOR ? "NN" : "BILINEAR";
 }
 
-// A 3x3 projective matrix (row-major, destination->source) plus the interpolation. The matrices
-// keep the perspective row {m6,m7,m8}={0,0,1} (w==1), so the source coord is invariant to the
-// undocumented mapping-origin convention (matching warp_affine). Genuine-perspective transforms
-// (w!=1) are deferred: the golden's double-precision coordinate math diverges from the kernel's
-// float pipeline at texel boundaries, and the kernel additionally blackens in-bounds perspective
-// pixels (e.g. output(0,0) with w==1) in a way that needs dedicated convention characterization
-// before its diffs can be classified as findings vs. numerical artifacts.
+// A row-major 3x3 destination->source matrix. The perspective row is kept at {0,0,1} so the source
+// coordinate is invariant to the undocumented mapping-origin convention; w != 1 is not covered.
 struct WarpPerspectiveParams {
     std::array<float, 9> m;
     RpptInterpolationType interp;
@@ -62,15 +57,11 @@ struct WarpPerspectiveParams {
     }
 };
 
-// Tolerances are set from legitimate numeric error only; they are NOT loosened to hide the real
-// warp_perspective kernel defects this test surfaces (shared with warp_affine
-// findings #15-#18): HOST bilinear last col/row off-by-one, I8 out-of-bounds fill = 0 (not -128),
-// the ignored ROI origin that leaves every partial-ROI case part black, and HIP's further
-// partial-ROI placement divergence from HOST on top of it.
+// NN copies texels verbatim; bilinear allows rounding error only. Not loosened for the known kernel
+// defects: HOST bilinear reads the last column/row one texel short, I8 out-of-bounds fill is 0
+// rather than -128, and partial ROIs ignore the ROI origin (with HIP placement also diverging).
 double warp_perspective_tolerance(DType dt, RpptInterpolationType interp) {
-    // Nearest-neighbour copies a texel verbatim; bit-exact for the w==1 (integer-coord) cases.
     if (interp == NEAREST_NEIGHBOR) return 0.0;
-    // Bilinear blends in float; allow only genuine rounding error. Integer types round to nearest.
     return kRoundingTolerance(dt);
 }
 
@@ -81,7 +72,6 @@ void run_warp_perspective(const TestConfig& cfg, const WarpPerspectiveParams& op
     const std::size_t count = element_count(srcDesc);
     const std::size_t bytes = byte_size(srcDesc, cfg.dtype);
 
-    // Per-image 3x3 matrices (9 each) and ROIs in host-accessible (pinned for HIP) memory.
     PinnedArray<Rpp32f> persp(cfg.backend, cfg.size.n * 9);
     PinnedArray<RpptROI> roi(cfg.backend, cfg.size.n);
     const std::vector<RpptROI> roiVec = make_roi(srcDesc, cfg.roi);
@@ -90,15 +80,12 @@ void run_warp_perspective(const TestConfig& cfg, const WarpPerspectiveParams& op
         roi[i] = roiVec[i];
     }
 
-    // (1) Host golden model. golden starts as a copy of the input so the untouched
-    // (outside-ROI) region is defined; only the ROI-sized output region is overwritten.
     std::vector<T> input(count), golden(count), actual(count);
     fill_input<T>(input.data(), count, cfg.dtype);
     golden = input;
     warp_perspective_reference<T>(input.data(), srcDesc, golden.data(), dstDesc, cfg.dtype,
                                   roi.data(), XYWH, persp.data(), op.interp);
 
-    // (2) Run RPP on the configured backend.
     DeviceTensor src(cfg.backend, bytes), dst(cfg.backend, bytes);
     src.write(input.data(), bytes);
     dst.write(input.data(), bytes);  // define outside-ROI dst to mirror the golden
@@ -108,14 +95,10 @@ void run_warp_perspective(const TestConfig& cfg, const WarpPerspectiveParams& op
                                     op.interp, roi.data(), XYWH, handle.get(), cfg.backend),
               RPP_SUCCESS);
 
-    // (3) Retrieve the result on the host (no-op copy for HOST, device->host for HIP).
     handle.sync();  // drain the op's stream before copying results back
     dst.read(actual.data(), bytes);
 
-    // (4) Compare within tolerance over the ROI-sized output region at the destination origin,
-    // bounded by the caller's own ROI copy rather than the tensor handed to the op: the HIP path
-    // rewrites that tensor from XYWH to LTRB in place, so reusing roi[] here would walk a
-    // different region than the golden wrote.
+    // Uses the test's own ROI copy: HIP rewrites the op's ROI to LTRB in place.
     EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), dstDesc, roiVec.data(), XYWH,
                                warp_perspective_tolerance(cfg.dtype, op.interp)));
 }
@@ -132,8 +115,7 @@ TEST_P(WarpPerspectiveTest, Correctness) {
         p.cfg.dtype, [&](auto tag) { run_warp_perspective<Element<decltype(tag)>>(p.cfg, p.op); });
 }
 
-// identity: output == source. shift: integer translation (w==1). halfshift: half-pixel translation,
-// bilinear only, exercises the 4-tap blend.
+// halfshift exercises the bilinear blend.
 INSTANTIATE_TEST_SUITE_P(
     Image_Geometric, WarpPerspectiveTest,
     ::testing::ValuesIn(with_params<WarpPerspectiveParams>(

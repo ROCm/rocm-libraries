@@ -40,10 +40,8 @@ RPP op
   rppt_lut   (Image / Color augmentation)
 
 Description
-  Pointwise look-up table remap. Each output element is a direct table entry
-  selected by the source pixel's intensity, so the table defines an arbitrary
-  tone curve. The look-up is a pure copy of an entry, so the result is
-  bit-exact with no arithmetic, rounding, or clamping.
+  Pointwise look-up table remap: each output element is the table entry
+  selected by the source pixel's intensity. Bit-exact.
 
 Expression
   dst(x, y, c) = lut[ index(src(x, y, c)) ]
@@ -54,9 +52,7 @@ Per-type form
     U8    index = v
     I8    index = v + 128        (so -128 -> 0, 127 -> 255)
 
-  Modelled for the integer types only, where the 256-entry index is
-  unambiguous; the float types' index semantics are not defined by the
-  public API.
+  Integer types only; the public API does not define float indexing.
 */
 inline int lut_index(double v, DType dt) {
     return (dt == DType::I8) ? static_cast<int>(v) + 128 : static_cast<int>(v);

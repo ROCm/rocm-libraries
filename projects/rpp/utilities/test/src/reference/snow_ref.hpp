@@ -37,7 +37,7 @@ SOFTWARE.
 namespace rpptest {
 
 /*
-Reference model: snow   (kernel-derived REGRESSION golden)
+Reference model: snow
 
 RPP op
   rppt_snow   (Image / Effects augmentation)
@@ -45,8 +45,7 @@ RPP op
 Description
   Brightens the darker parts of an image toward white to simulate snow,
   working in HSL and leaving an excluded blue/white band untouched so already
-  sky-like pixels are not blown out. snow is fully deterministic (no RNG), so
-  the same model serves both HOST and HIP.
+  sky-like pixels are not blown out. snow is deterministic (no RNG).
 
 Expression
   Per pixel, in normalized [0,1] intensity space:
@@ -70,14 +69,9 @@ Per-type form
     F32   clamp[0,1]
 
 Notes
-  This is a REGRESSION golden, not an independently-derived one. snow's exact
-  per-element semantics are NOT documented in the public API header, which
-  describes only the parameters, and there is no spec. The model is therefore
-  transcribed from the RPP snow kernel (src/modules/tensor/cpu/kernel/snow.cpp)
-  with the user's explicit authorization. It LOCKS current behaviour rather
-  than encoding intent, and deliberately mirrors the kernel's quirks --
-  notably that the I8 store truncates toward zero rather than rounding to
-  nearest -- so the grid stays green until behaviour changes.
+  The public header does not specify snow's per-element behaviour, so the
+  model mirrors the kernel (src/modules/tensor/cpu/kernel/snow.cpp), including
+  the I8 store truncating toward zero rather than rounding.
 */
 
 namespace snow_detail {
@@ -115,14 +109,13 @@ inline void snow_rgb(float& R, float& G, float& B, float brightnessCoefficient,
         hue += add;
         hue /= 6.0f;
     }
-    // Modify lightness
     if (l >= 0.0f && l <= kUpperThreshold && darkMode == 1)
         l = l * std::fmaf(-l / kUpperThreshold, kBrightnessFactor - 1.0f, kBrightnessFactor);
     if (l <= snowCoefficient && !((hue >= kHueLower && hue <= kHueUpper) &&
                                   (sat >= kSatThreshold) && (l >= kLightThreshold)))
         l = l * brightnessCoefficient;
 
-    // HSL -> RGB with brightness/contrast adjustment
+    // HSL -> RGB
     float hc[3];
     hc[0] = 6.0f * (hue - TWO_OVER_3);
     hc[1] = 0.0f;

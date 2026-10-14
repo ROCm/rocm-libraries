@@ -39,9 +39,7 @@ using namespace rpptest;
 
 namespace {
 
-// Tolerances reflect legitimate floating-point error only: the golden evaluates log1p in
-// double while the kernel works in float. Kept as helpers for consistency with the other ND
-// tests, even though log1p documents a single output dtype.
+// The golden evaluates log1p in double; the kernel works in float.
 Bound log1p_tolerance(DType) {
     return {1e-5, 1e-6};
 }
@@ -58,19 +56,16 @@ void run_log1p(const NdConfig& cfg) {
     const std::size_t srcBytes = generic_byte_size(*srcDesc, cfg.dtypeIn);
     const std::size_t dstBytes = generic_byte_size(*dstDesc, cfg.dtypeOut);
 
-    // (1) Host golden model. The op takes the absolute value before log1p, so the standard
-    // fill (which spans zero and both signs) needs no special casing.
+    // The op takes |x| before log1p, so the signed fill needs no special casing.
     std::vector<Tin> input(count);
     std::vector<Tout> golden(count), actual(count);
     fill_input_nd<Tin>(input.data(), *srcDesc, cfg.dtypeIn);
     log1p_reference<Tin, Tout>(input.data(), golden.data(), *srcDesc, *dstDesc);
 
-    // (2) The roiTensor lives in host-accessible (pinned for HIP) memory.
     const std::vector<Rpp32u> roiVec = make_nd_roi_tensor(dims);
     PinnedArray<Rpp32u> roi(cfg.backend, roiVec.size());
     for (std::size_t i = 0; i < roiVec.size(); ++i) roi[i] = roiVec[i];
 
-    // (3) Run RPP on the configured backend.
     DeviceTensor src(cfg.backend, srcBytes), dst(cfg.backend, dstBytes);
     src.write(input.data(), srcBytes);
 
@@ -82,7 +77,6 @@ void run_log1p(const NdConfig& cfg) {
     handle.sync();  // drain the op's stream before copying results back
     dst.read(actual.data(), dstBytes);
 
-    // (4) Compare the whole output tensor.
     EXPECT_TRUE(
         compare_nd<Tout>(actual.data(), golden.data(), *dstDesc, log1p_tolerance(cfg.dtypeOut)));
 }
@@ -100,14 +94,8 @@ TEST_P(Log1pTest, Correctness) {
         FAIL() << "unsupported dtype conversion for log1p";
 }
 
-// i16->f32 is the only conversion the header documents ("Supports i16->f32 datatype"), and this
-// op is why the DType axis gained I16 at all -- no other op in the suite reaches that dtype.
-//
-// Note the ND descriptors must be device-addressable on HIP (GenericDescriptor handles this):
-// at rank >= 4 the ND kernels read dims/strides on the device. That requirement is undocumented
-// and rank-dependent.
-// (The DTypeConv vector is spelled out: a single-element {{a, b}} is ambiguous between the
-// two make_nd_configs overloads.)
+// i16->f32 is the only conversion the header documents. The DTypeConv vector is spelled out
+// because a single-element {{a, b}} is ambiguous between the make_nd_configs overloads.
 INSTANTIATE_TEST_SUITE_P(
     Misc_Arithmetic, Log1pTest,
     ::testing::ValuesIn(make_nd_configs(std::vector<DTypeConv>{{DType::I16, DType::F32}}, {2, 3, 4},

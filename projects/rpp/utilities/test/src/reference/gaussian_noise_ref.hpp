@@ -45,16 +45,9 @@ Expression
   dst = src + N(mean, stdDev)
 
 Scope
-  This reference covers only the (mean = 0, stdDev = 0) corner. At stdDev = 0
-  the distribution collapses to a point mass at mean, so with mean = 0 every
-  sample is exactly 0 and the op degenerates to a passthrough with no RNG
-  involved -- bit-exact and reproducible whatever the seed.
-
-  Away from that corner the output depends on the kernel's Box-Muller stream,
-  whose exact per-element consumption order is not described by the public
-  API, so the general case is deliberately left unmodelled rather than
-  guessed. It is covered by parameter-validation checks in the test file, not
-  by a golden.
+  Only the (mean = 0, stdDev = 0) corner is modelled, where the op is a
+  passthrough independent of the seed. The general case depends on the
+  kernel's Box-Muller stream, which the public API does not describe.
 */
 template <typename T>
 void gaussian_noise_identity_reference(const T* src, T* dst, const RpptDesc& d, const RpptROI* roi,

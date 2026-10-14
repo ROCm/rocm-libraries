@@ -38,61 +38,36 @@ SOFTWARE.
 namespace rpptest {
 
 /*
-Reference model: emboss   (kernel-derived REGRESSION golden)
+Reference model: emboss
 
 RPP op
   rppt_emboss   (Image / Filter augmentation)
 
 Description
   Directional relief filter: an anti-symmetric KxK tap table that lights one
-  edge orientation and darkens the opposite, giving the raised-surface look.
-  strength scales every tap.
+  edge orientation and darkens the opposite. strength scales every tap and is
+  clamped at 2.0 from above. Each table sums to 1, so there is no mid-grey
+  bias and the DC gain equals strength.
 
-  Both tables sum to 1, so the filter is DC-preserving at strength 1 and needs
-  no mid-grey bias (the classic +128 emboss offset is absent here). Since
-  strength scales every tap, the DC gain is the strength itself, and the
-  kernel clamps strength at 2.0 from above (also undocumented, also
-  transcribed).
-
-  The taps are applied as a CORRELATION (no kernel flip), matching every other
-  filter in the suite. This matters here and nowhere else: box/gaussian/median
-  are symmetric, so their tests cannot tell correlation from convolution,
-  whereas the emboss table is deliberately anti-symmetric.
+  The taps are applied as a correlation (no kernel flip), like every other
+  filter in the suite; this is observable only because the table is
+  anti-symmetric.
 
 Expression
   dst(j, i) = sum{ strength * tap[k] * src(j+dy, i+dx) }
 
 Per-type form
-  I8 stores intensities shifted by -128, so the window is lifted into [0,255]
-  intensity space before the dot product and dropped back afterwards. For the
-  suite's other linear filters this shift cancels (their weights sum to 1, so
-  it contributes exactly +128 and the store removes it), which is why
-  convolve_reference() ignores it. Here the weights sum to `strength`, so the
-  shift contributes 128*strength and does NOT cancel: at strength 2 an I8
-  result computed in stored space would be off by 128.
+  The weights sum to strength rather than 1, so the I8 -128 shift does not
+  cancel: the window is lifted into [0,255] intensity space before the dot
+  product and dropped back afterwards.
 
 Notes
-  This is a REGRESSION golden, not an independently-derived one. emboss's
-  per-element semantics are documented nowhere: the public API header
-  describes only the parameters and shows sample images, and there is no spec.
-  It is also not recoverable from first principles -- several "standard" 3x3
-  emboss kernels exist, the strength and bias conventions are unstated, and
-  there is no canonical NxN emboss kernel at all for the larger sizes. The
-  weight tables below are therefore transcribed from the RPP kernel with the
-  user's explicit authorization, so this model LOCKS current behaviour rather
-  than encoding intent: it will not catch a wrong-by-design kernel, only a
-  change in it.
-
-  Everything OUTSIDE the weight table is still the suite's own machinery: the
-  KxK window, the clamp-to-ROI REPLICATE border (the only border type the op
-  supports), the placement and the per-type quantization all come from
-  filter_reference(). A border or placement defect therefore still surfaces as
-  a diff; only the coefficients are locked.
+  The header does not specify the tap tables or the strength convention, so
+  the tables mirror the RPP kernel. The window, REPLICATE border, placement
+  and quantization come from filter_reference().
 */
 
-// The base emboss taps, row-major, top-left to bottom-right, in the same dy/dx order
-// gather_roi_window() produces. One table per documented size (3/5/7/9); any other size is
-// rejected outright.
+// Row-major taps in gather_roi_window() order, one table per documented size (3/5/7/9).
 inline std::vector<double> emboss_kernel(Rpp32u kernelSize, double strength) {
     static const double k3[9] = {2, 1, 0, 1, 1, -1, 0, -1, -2};
     static const double k5[25] = {3,  3,  2, 1, 0,  3,  2,  1, 0,  -1, 2,  1, 1,

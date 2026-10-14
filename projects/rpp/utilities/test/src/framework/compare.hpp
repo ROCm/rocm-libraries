@@ -40,11 +40,8 @@ SOFTWARE.
 #include "framework/tolerance.hpp"
 #include "framework/voxel_config_param.hpp"
 
-// Every comparison the suite makes goes through this header: the image ROI walk, the ND tensor
-// walk, the voxel box walk, and the flat reduction array. They differ only in how they enumerate
-// elements and how they name a coordinate -- the tolerance rule, the mismatch accounting and the
-// failure message are shared, so a change to any of those lands in one place and every domain
-// reports the same way.
+// Comparators for every domain (image ROI, ND tensor, voxel box, reduction array). They share the
+// tolerance rule, mismatch accounting and failure message; only the element walk differs.
 
 namespace rpptest {
 
@@ -52,9 +49,7 @@ namespace rpptest {
 inline constexpr std::size_t kMaxReportedMismatches = 10;
 
 // Accumulates the out-of-tolerance elements of one comparison and renders the verdict. The walk
-// is never cut short at the first mismatch: "142 of 5184 exceeded tolerance" separates a
-// systematic break from a single bad lane, which is the first thing you want to know, and the
-// listed sample shows where it starts.
+// does not stop at the first mismatch, so the count separates a systematic break from one bad lane.
 class Mismatches {
    public:
     explicit Mismatches(Bound bound) : bound_(bound) {}
@@ -111,8 +106,7 @@ inline std::string bracket_coord(const NdDims& coord) {
 
 // ---- image domain ----------------------------------------------------------
 
-// Element-wise comparison over the destination ROI region only -- the area RPP actually writes;
-// what it leaves outside is not documented, so the suite does not assert it.
+// Compares the destination ROI region only; what RPP leaves outside it is not documented.
 template <typename T>
 ::testing::AssertionResult compare_roi(const T* actual, const T* reference, const RpptDesc& d,
                                        const RpptROI* roi, RpptRoiType roiType, Bound bound) {
@@ -158,8 +152,7 @@ template <typename T>
 
 // ---- reductions ------------------------------------------------------------
 
-// Compares a typed reduction output array against a double-valued golden. TOut is the op's output
-// element type (e.g. Rpp64u for U8 sum, Rpp8u for U8 min, Rpp32f for mean/stddev).
+// TOut is the op's output element type (e.g. Rpp64u for U8 sum, Rpp32f for mean/stddev).
 template <typename TOut>
 ::testing::AssertionResult compare_reduction(const TOut* actual, const std::vector<double>& golden,
                                              Bound bound) {

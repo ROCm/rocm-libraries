@@ -41,18 +41,9 @@ using namespace rpptest;
 
 namespace {
 
-// quality is the JPEG quality factor, documented range 1..99: lower means coarser quantization.
-// Three points on the table scaling, chosen so the two failure modes of a mis-scaled quantization
-// table separate:
-//   q50 : scale = 100, so the scaled table IS the Annex K base table -- integral and well under
-//         255, the one quality at which a real-valued quantizer cannot differ from the spec's
-//         8-bit one. This is the grid's green half and its regression anchor.
-//   q10 : scale = 500, so the spec clamps the high-frequency entries at 255 (unclamped they reach
-//         605) -- surfaces the missing baseline clamp.
-//   q90 : scale = 20, so the entries are fractional (16 -> 3.2) and the spec rounds them --
-//         surfaces the missing integer rounding.
-// q10 and q90 are red by design: the kernel quantizes by the raw real-valued product, so those two
-// halves of the grid are the standing evidence of that defect. q50 must stay green.
+// quality in [1, 99]. At q50 the scaled table is the Annex K base table, so it must stay green. q10
+// (needs the 255 clamp) and q90 (needs integer rounding) are red: the kernel quantizes by the raw
+// real-valued product.
 struct JpegParams {
     int quality;
     std::string name() const {
@@ -60,11 +51,7 @@ struct JpegParams {
     }
 };
 
-// The distortion is a DCT round-trip, so the only legitimate error is fp rounding in the two
-// transforms -- these are the suite's standard per-dtype tolerances (~half an intensity level),
-// and at q50 the whole pipeline agrees with the kernel inside them. They are deliberately NOT
-// loosened to cover q10/q90: the quantize step is a hard threshold, so a wrong quantizer moves
-// output pixels by tens of levels, and no honest tolerance hides that.
+// Covers fp rounding in the DCT round-trip only; not loosened for q10/q90.
 constexpr Tolerance kJpegTolerance = kRoundingTolerance;
 
 template <typename T>
@@ -83,20 +70,9 @@ void run_jpeg_compression_distortion(const TestConfig& cfg, const JpegParams& op
         roi[i] = roiVec[i];
     }
 
-    // (1) Host golden model. The op writes only the ROI-sized region at the destination origin, so
-    // golden and the device buffer start from the same distinct pattern and only that region is
-    // compared.
-    // Quantization is a hard threshold, so an input whose DCT coefficients land exactly on a
-    // rounding boundary makes the comparison ill-posed: which way golden and kernel round is then
-    // decided by arithmetic noise rather than by semantics. The shared fill is an arithmetic ramp,
-    // which does exactly that -- at the default salt several coefficients are exact half-integers
-    // (margin 4e-16), and salts 3/4/5 are degenerate too. salt 1 is the offset with the widest
-    // margin, measured over the whole instantiated grid (every dtype, layout, ROI and quality) by
-    // probing |F/Q - round(F/Q)| inside the golden: 4.9e-6 quantizer levels, against 2.6e-6 for
-    // salt 2. Thin, but empirically clear of the kernel's fp32 noise -- the q50 half of the grid,
-    // where the golden and the kernel must agree exactly, is bit-exact on both backends. If the
-    // fill pattern, the tensor size or the quality set ever changes, re-measure: a reintroduced
-    // tie shows up as a 1-LSB red that reads exactly like a kernel defect.
+    // Input salt 1 keeps DCT coefficients off exact quantizer rounding ties (the default salt and
+    // salts 3-5 hit them). Re-check if the fill, size or quality set changes: a tie shows up as a
+    // 1-LSB red that looks like a kernel defect.
     std::vector<T> input(count), dstInit(count), golden(count), actual(count);
     fill_input<T>(input.data(), count, cfg.dtype, /*salt=*/1);
     fill_input<T>(dstInit.data(), count, cfg.dtype, /*salt=*/3);
@@ -104,7 +80,6 @@ void run_jpeg_compression_distortion(const TestConfig& cfg, const JpegParams& op
     jpeg_compression_distortion_reference<T>(input.data(), golden.data(), desc, cfg.dtype,
                                              roi.data(), XYWH, op.quality);
 
-    // (2) Run RPP on the configured backend.
     DeviceTensor src(cfg.backend, bytes), dst(cfg.backend, bytes);
     src.write(input.data(), bytes);
     dst.write(dstInit.data(), bytes);
@@ -117,7 +92,6 @@ void run_jpeg_compression_distortion(const TestConfig& cfg, const JpegParams& op
     handle.sync();
     dst.read(actual.data(), bytes);
 
-    // (3) Compare the ROI-sized region written at the destination origin.
     EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), desc, roi.data(), XYWH,
                                kJpegTolerance(cfg.dtype)));
 }

@@ -41,14 +41,12 @@ RPP op
 
 Description
   Copies the 2nd image, then overlays the rectangular crop taken from the 1st
-  image at the patch co-ordinates. Crop size == patch size (no resize), the
-  documented unambiguous case.
+  image at the patch co-ordinates. Crop size == patch size (no resize).
 
   dstRoi sizes the output, which is written packed at the destination origin
   while src2 is read at the dstRoi offset. crop is absolute in src1 and gives
   both the origin and the extent of the overlaid rectangle; patch gives its
-  origin only, in the packed output frame -- neither backend reads the patch
-  extent.
+  origin only, in the packed output frame; the patch extent is not read.
 
 Expression
   For packed output coordinate (r, c), 0 <= r < dstRoi.h, 0 <= c < dstRoi.w:
@@ -62,9 +60,7 @@ Expression
   clamped.
 
 Per-type form
-  No arithmetic, rounding, or clamping is performed -- every output element is
-  copied verbatim from one of the two sources -- so the result is bit-exact
-  for U8, I8, F16 and F32 alike.
+  Pure data movement, so the result is bit-exact for every type.
 */
 template <typename T>
 void crop_and_patch_reference(const T* src1, const T* src2, T* dst, const RpptDesc& d,

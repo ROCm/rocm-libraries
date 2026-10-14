@@ -42,9 +42,7 @@ RPP op
   rppt_magnitude   (Image / Arithmetic)
 
 Description
-  Element-wise Euclidean magnitude of two co-located sources, i.e. the length
-  of the vector formed by the two source elements at the same position. Takes
-  no parameters.
+  Element-wise Euclidean magnitude of two co-located sources.
 
 Expression
   dst(x, y, c) = clamp( sqrt( src1^2 + src2^2 ) )

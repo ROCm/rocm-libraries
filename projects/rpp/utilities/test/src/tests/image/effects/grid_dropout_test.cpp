@@ -41,14 +41,10 @@ using namespace rpptest;
 
 namespace {
 
-// A regular gridW x gridH grid of half-cell holes is built deterministically from each image's
-// ROI rectangle (no RNG), so the golden and the kernel see identical box geometry.
+// A regular grid of half-cell holes built from each image's ROI rectangle.
 constexpr Rpp32u kGridW = 3;
 constexpr Rpp32u kGridH = 3;
 constexpr Rpp32u kBoxesInEachImage = kGridW * kGridH;  // 9
-
-// Grid dropout is a pure copy/erase: kept pixels are copied bit-exact, holes are set to an
-// exact constant (black). No arithmetic, so every dtype is bit-exact.
 
 template <typename T>
 void run_grid_dropout(const TestConfig& cfg) {
@@ -57,14 +53,13 @@ void run_grid_dropout(const TestConfig& cfg) {
     const std::size_t count = element_count(srcDesc);
     const std::size_t bytes = byte_size(srcDesc, cfg.dtype);
 
-    // anchorBoxInfoTensor: boxesInEachImage grid holes per image, laid out [n * stride + k].
+    // Grid holes per image, laid out [n * stride + k].
     PinnedArray<RpptRoiLtrb> boxes(cfg.backend,
                                    static_cast<std::size_t>(cfg.size.n) * kBoxesInEachImage);
     PinnedArray<RpptROI> roi(cfg.backend, cfg.size.n);
     const std::vector<RpptROI> roiVec = make_roi(srcDesc, cfg.roi);
 
-    // Build the grid of holes deterministically from each image's ROI rectangle. maxHoleW/maxHoleH
-    // are the max hole extents across all boxes (passed to the op; the golden ignores them).
+    // maxHoleW/maxHoleH are passed to the op; the golden ignores them.
     Rpp32u maxHoleW = 0, maxHoleH = 0;
     for (Rpp32u n = 0; n < cfg.size.n; ++n) {
         roi[n] = roiVec[n];
@@ -89,15 +84,12 @@ void run_grid_dropout(const TestConfig& cfg) {
         }
     }
 
-    // (1) Host golden model. golden starts as a copy of the input so the untouched
-    // (outside-ROI) region is defined; only the ROI is overwritten by the reference.
     std::vector<T> input(count), golden(count), actual(count);
     fill_input<T>(input.data(), count, cfg.dtype);
     golden = input;
     grid_dropout_reference<T>(input.data(), srcDesc, golden.data(), dstDesc, cfg.dtype, roi.data(),
                               XYWH, boxes.data(), kBoxesInEachImage);
 
-    // (2) Run RPP on the configured backend.
     DeviceTensor src(cfg.backend, bytes), dst(cfg.backend, bytes);
     src.write(input.data(), bytes);
     dst.write(input.data(), bytes);  // define outside-ROI dst to mirror the golden
@@ -108,11 +100,9 @@ void run_grid_dropout(const TestConfig& cfg) {
                           maxHoleW, maxHoleH, roi.data(), XYWH, handle.get(), cfg.backend),
         RPP_SUCCESS);
 
-    // (3) Retrieve the result on the host (no-op copy for HOST, device->host for HIP).
     handle.sync();  // drain the op's stream before copying results back
     dst.read(actual.data(), bytes);
 
-    // (4) Compare within tolerance over the ROI.
     EXPECT_TRUE(
         compare_roi<T>(actual.data(), golden.data(), dstDesc, roi.data(), XYWH, kExact(cfg.dtype)));
 }
@@ -129,12 +119,8 @@ TEST_P(GridDropoutTest, Correctness) {
         cfg.dtype, [&](auto tag) { run_grid_dropout<Element<decltype(tag)>>(cfg); });
 }
 
-// FullRoi passes the full grid on both backends (validates the hole-erase + I8 black semantics).
-// Every PartialRoi case is red (both backends) as a documented kernel finding
-// under a non-full ROI: the kernel produces the correct packed-origin copy but does NOT erase
-// the holes. The golden holds to the absolute-frame hole semantics (validated by coarse_dropout's
-// passing HOST PartialRoi) -- do not weaken it to force green.
-// Same-layout cases plus both directions of the fused output-layout conversion.
+// PartialRoi is red on both backends: the kernel copies the ROI but does not erase the holes. Do
+// not weaken the golden to force green.
 INSTANTIATE_TEST_SUITE_P(
     Image_Effects, GridDropoutTest,
     ::testing::ValuesIn(concat_configs({

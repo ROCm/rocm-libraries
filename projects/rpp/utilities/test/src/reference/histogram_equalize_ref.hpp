@@ -48,13 +48,7 @@ RPP op
 Description
   Per-image histogram equalization over the ROI, spreading the intensity
   distribution to use the full range. Takes no parameters and is U8 only.
-
-  This is a two-pass, per-image (non-pointwise) op: the output at each pixel
-  depends on the whole ROI's intensity histogram, so it cannot use the
-  pointwise scalar template.
-
-  The BT.601 full-range (JPEG) transform itself lives in
-  reference/color_ycbcr.hpp.
+  The BT.601 full-range (JPEG) transform lives in reference/color_ycbcr.hpp.
 
 Expression
   1. Build the 256-bin histogram of the equalization channel over the ROI,
@@ -101,8 +95,7 @@ void histogram_equalize_reference(const T* src, const RpptDesc& sd, T* dst, cons
     const bool rgb = sd.c == 3;
     const std::vector<std::size_t> N = roi_pixel_counts(sd, roi, type);
 
-    // Pass 1: per-image histogram of the equalization channel (Y for RGB). Source only, so this
-    // pass is addressed through sd alone.
+    // Pass 1: per-image histogram of the equalization channel (Y for RGB).
     std::vector<std::array<long, 256>> hist(sd.n);
     for (auto& h : hist) h.fill(0);
     for_each_roi_pixel(sd, roi, type, [&](Rpp32u n, Rpp32u, Rpp32u, std::size_t s, std::size_t) {

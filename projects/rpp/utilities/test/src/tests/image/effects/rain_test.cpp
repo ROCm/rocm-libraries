@@ -41,10 +41,8 @@ using namespace rpptest;
 
 namespace {
 
-// rain's rain-layer generator is seeded with std::random_device, so any rainPercentage > 0 is
-// non-deterministic and cannot be golden-compared. The test pins rainPercentage = 0 (no drops):
-// the op then reduces to a deterministic alpha blend toward the constant rain-layer background,
-// which is the only reproducible slice. See rain_ref.hpp. alpha in [0, 1].
+// The rain layer is seeded from std::random_device, so only rainPercentage = 0 (a deterministic
+// blend toward the constant background) is golden-compared. alpha in [0, 1].
 struct RainParams {
     float alpha;
     std::string name() const {
@@ -52,8 +50,8 @@ struct RainParams {
     }
 };
 
-// The full-ROI SIMD path fuses the blend (fmadd) while the scalar path the reference
-// mirrors does a separate multiply+add, so a rounded integer result can differ by 1 LSB.
+// The SIMD path fuses the blend (fmadd) while the reference does multiply+add, so integers can
+// differ by 1 LSB.
 constexpr Tolerance kRainTolerance = tolerance(1.0, 1e-4, 4e-3);
 
 template <typename T>
@@ -63,7 +61,7 @@ void run_rain(const TestConfig& cfg, const RainParams& op) {
     const std::size_t count = element_count(srcDesc);
     const std::size_t bytes = byte_size(srcDesc, cfg.dtype);
 
-    // rainPercentage = 0 => no drops => deterministic; the other geometry params are irrelevant.
+    // No drops, so the geometry params are irrelevant.
     const Rpp32f rainPercentage = 0.0f;
     const Rpp32u rainWidth = 1;
     const Rpp32u rainHeight = 6;

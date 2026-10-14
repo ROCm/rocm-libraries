@@ -41,7 +41,7 @@ using namespace rpptest;
 
 namespace {
 
-// The source channel order the op is told to assume; both values are exercised.
+// The source channel order the op is told to assume.
 struct ColorToGreyscaleParams {
     RpptSubpixelLayout subpixel;
     std::string name() const {
@@ -50,27 +50,22 @@ struct ColorToGreyscaleParams {
 };
 
 // A single 3-term dot product, so the only legitimate error is float-vs-double accumulation.
-// Note this leaves the systemic integer round-vs-truncate difference (the kernels truncate where
-// the goldens round) unsurfaced at <= 1 LSB; the integer tolerances are not loosened past 1 LSB.
+// The 1 LSB integer allowance also hides the kernels truncating where the golden rounds.
 constexpr Tolerance kColorToGreyscaleTolerance = kRoundingTolerance;
 
 template <typename T>
 void run_color_to_greyscale(const TestConfig& cfg, const ColorToGreyscaleParams& op) {
-    // The op requires a 3-channel source (PKD3/PLN3) and produces a single-channel planar output.
-    // That conversion is stated by the config's layout axis (PKD3/PLN3 -> PLN1), so each descriptor
-    // takes its channel count from its own side of it.
+    // 3-channel source, single-channel planar destination (PKD3/PLN3 -> PLN1 in the layout axis).
     RpptDesc srcDesc = make_src_descriptor(cfg);
     RpptDesc dstDesc = make_dst_descriptor(cfg);
     const std::size_t srcCount = element_count(srcDesc), dstCount = element_count(dstDesc);
     const std::size_t srcBytes = byte_size(srcDesc, cfg.dtype);
     const std::size_t dstBytes = byte_size(dstDesc, cfg.dtype);
 
-    // color_to_greyscale takes no ROI argument; the full-frame ROI exists only to drive the
-    // golden's traversal (Roi::Full only), so it never has to be device-visible.
+    // The op takes no ROI; this one only drives the golden, so it stays host-side.
     const std::vector<RpptROI> roi = make_roi(srcDesc, cfg.roi);
 
-    // (1) Host golden model. golden starts as the destination's own pattern so the untouched
-    // (row-padding) slack is defined; only the frame is overwritten by the reference.
+    // dst and golden share a seed distinct from the input so a no-op kernel would be caught.
     std::vector<T> input(srcCount), dstInit(dstCount), golden(dstCount), actual(dstCount);
     fill_input<T>(input.data(), srcCount, cfg.dtype);
     fill_input<T>(dstInit.data(), dstCount, cfg.dtype, /*salt=*/1);
@@ -78,8 +73,6 @@ void run_color_to_greyscale(const TestConfig& cfg, const ColorToGreyscaleParams&
     color_to_greyscale_reference<T>(input.data(), srcDesc, golden.data(), dstDesc, cfg.dtype,
                                     roi.data(), XYWH, op.subpixel);
 
-    // (2) Run RPP on the configured backend. dst is pre-filled with a distinct pattern so a
-    // no-op kernel would be caught.
     DeviceTensor src(cfg.backend, srcBytes), dst(cfg.backend, dstBytes);
     src.write(input.data(), srcBytes);
     dst.write(dstInit.data(), dstBytes);
@@ -89,11 +82,9 @@ void run_color_to_greyscale(const TestConfig& cfg, const ColorToGreyscaleParams&
                                       handle.get(), cfg.backend),
               RPP_SUCCESS);
 
-    // (3) Retrieve the result on the host (no-op copy for HOST, device->host for HIP).
     handle.sync();  // drain the op's stream before copying results back
     dst.read(actual.data(), dstBytes);
 
-    // (4) Compare over the single-channel destination frame.
     const std::vector<RpptROI> dstRoi = make_roi(dstDesc, Roi::Full);
     EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), dstDesc, dstRoi.data(), XYWH,
                                kColorToGreyscaleTolerance(cfg.dtype)));
@@ -112,9 +103,7 @@ TEST_P(ColorToGreyscaleTest, Correctness) {
     });
 }
 
-// The op takes no ROI argument (Roi::Full only). Both three-channel sources reduce to the same
-// single-channel planar destination, which the layout axis states outright rather than the test
-// body assuming it -- so the case labels name it too ("..._PKD3toPLN1_...").
+// The op takes no ROI argument (Roi::Full only). Both 3-channel sources produce a PLN1 destination.
 INSTANTIATE_TEST_SUITE_P(
     Image_DataExchange, ColorToGreyscaleTest,
     ::testing::ValuesIn(with_params<ColorToGreyscaleParams>(

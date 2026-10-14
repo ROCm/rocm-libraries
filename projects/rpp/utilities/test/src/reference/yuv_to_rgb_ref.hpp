@@ -84,30 +84,25 @@ CubicV
   - Colour uses FFmpeg's integer table math (ff_yuv2rgb_coeffs, scaled as
     ff_yuv2rgb_c_init_tables does for RGB24), not the float matrix above.
 
-  The rppt_yuv_to_rgb_cubic_v doxygen ("odd luma rows pass through chroma
-  unchanged; even luma rows use a symmetric 4-tap filter", unknown standards
-  use BT.709) is a known documentation error. This model follows the
-  kernel, which is the intended behaviour.
+  The rppt_yuv_to_rgb_cubic_v doxygen (odd luma rows pass chroma through, even
+  rows use a symmetric 4-tap filter, unknown standards use BT.709) is a
+  documentation error; the model follows the kernel.
 
 Notes
   Unknown ranges behave like studio on all three ops. Unknown colour
   standards fall back to BT.709 for Nearest and LinearV, but to BT.601
   (FFmpeg's default) for CubicV.
   RpptColorStandard_BT2020_CL reuses the BT2020_NCL coefficients on both
-  paths, as the kernel does. True constant luminance is a genuinely different
-  transfer, out of scope for this golden and not gridded.
+  paths, as the kernel does; true constant luminance is not modelled.
 */
 
 // Which vertical chroma upsampler the op under test uses.
 enum class YuvChromaUpsample { Nearest, LinearV, CubicV };
 
-// ---- colour matrix ---------------------------------------------------------
-
 struct YuvLumaWeights {
     double wr, wb;  // wg = 1 - wr - wb
 };
 
-// The luma coefficients each standard defines.
 inline YuvLumaWeights yuv_luma_weights(RpptColorStandard standard) {
     switch (standard) {
         case RpptColorStandard_FCC:
@@ -153,8 +148,6 @@ inline void yuv_to_rgb_pixel(double y, double u, double v, RpptColorStandard sta
     rgb[1] = quantize_stored(yn - (rv * w.wr / wg) * vn - (bu * w.wb / wg) * un, DType::U8);
     rgb[2] = quantize_stored(yn + bu * un, DType::U8);
 }
-
-// ---- CubicV fixed-point colour math ---------------------------------------
 
 // FFmpeg's ff_yuv2rgb_coeffs, scaled as ff_yuv2rgb_c_init_tables does for RGB24. cy is the luma
 // gain in <<16 fixed point and C folds the black level, table offset and rounding.
@@ -220,8 +213,6 @@ inline void yuv_to_rgb_pixel_fixed(int y, int u, int v, const YuvFixedCoeffs& k,
     rgb[2] = clampd(static_cast<double>((kb * k.cy + k.c) >> 16), 0.0, 255.0);
 }
 
-// ---- vertical chroma upsampling -------------------------------------------
-
 // CubicV's integer taps (sum 4096) and their first chroma row, before clamping. Rows 0 and 2 get
 // FFmpeg initFilter's folded+renormalized boundary taps, which are not what clamping the interior
 // taps would give; the bottom edge needs no special case.
@@ -268,8 +259,6 @@ inline ChromaTaps chroma_taps_v(YuvChromaUpsample mode, Rpp32u lumaRow, Rpp32u c
     return taps;
 }
 
-// ---- reference -------------------------------------------------------------
-
 // Writes packed RGB24 into dst for the whole width x height frame.
 //   Y plane  : row r at srcY + r * srcYPitch, one byte per luma sample.
 //   UV plane : half resolution both ways; chroma row cr at srcUV + cr * srcUVPitch, with chroma
@@ -301,8 +290,7 @@ inline void yuv_to_rgb_reference(const Rpp8u* srcY, const Rpp8u* srcUV, Rpp8u* d
             }
             for (Rpp32u x = 0; x < width; ++x) {
                 const Rpp32u cc = x / 2;
-                // 8-bit chroma lifted to the 15-bit domain, accumulated with the integer taps and
-                // rounded back: (acc + (1 << 18)) >> 19.
+                // Chroma lifted to 15 bits, filtered, and rounded back to 8 bits.
                 int uAcc = 1 << 18, vAcc = 1 << 18;
                 for (int t = 0; t < 4; ++t) {
                     uAcc += phase.tap[t] * (static_cast<int>(chromaRow[t][2 * cc]) << 7);
@@ -328,8 +316,7 @@ inline void yuv_to_rgb_reference(const Rpp8u* srcY, const Rpp8u* srcUV, Rpp8u* d
                 v += taps.weight[t] * static_cast<double>(chromaRow[2 * cc + 1]);
             }
 
-            // Chroma is interpolated in continuous code space and fed straight to the matrix; only
-            // the final RGB is quantized, so no intermediate rounding is invented here.
+            // Chroma is not rounded; only the final RGB is quantized.
             double rgb[3];
             yuv_to_rgb_pixel(static_cast<double>(lumaRow[x]), u, v, standard, range, rgb);
             for (int c = 0; c < 3; ++c) dstRow[3 * x + c] = static_cast<Rpp8u>(rgb[c]);

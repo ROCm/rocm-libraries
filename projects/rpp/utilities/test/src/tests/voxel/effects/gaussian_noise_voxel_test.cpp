@@ -40,11 +40,9 @@ using namespace rpptest;
 
 namespace {
 
-// Scoped exactly like the image-domain gaussian_noise: the Correctness intent pins
-// (mean 0, stdDev 0), where N(mean, stdDev) collapses to a point mass at 0 and the additive noise
-// degenerates to a passthrough -- bit-exact and seed-independent (see gaussian_noise_voxel_ref.hpp)
-// -- and the Negative intent covers the documented parameter contract. No golden is possible away
-// from that corner; the kernel's Box-Muller stream is not described by the public API.
+// Correctness only covers mean 0 / stdDev 0, where the noise is a seed-independent passthrough; the
+// kernel's RNG stream is not specified by the API, so no golden exists elsewhere. Negative covers
+// the documented parameter contract.
 constexpr Rpp32u kSeed = 42u;
 
 template <typename T>
@@ -69,14 +67,12 @@ void run_gaussian_noise_voxel(const VoxelConfig& cfg) {
     PinnedArray<RpptROI3D> roi(cfg.backend, cfg.size.n);
     for (Rpp32u i = 0; i < cfg.size.n; ++i) roi[i] = roiHost[i];
 
-    // (1) Host golden model. Both sides start at the sentinel so a voxel the op never writes stays
-    // obviously unwritten rather than plausibly zero.
+    // Both sides start at the sentinel so a voxel the op never writes cannot pass as zero.
     std::vector<T> golden(count, nd_slack_poison<T>(cfg.dtype));
     std::vector<T> actual = golden;
     gaussian_noise_voxel_identity_reference<T>(input.data(), golden.data(), *desc, roiHost.data(),
                                                cfg.roiType);
 
-    // (2) Run RPP on the configured backend.
     DeviceTensor src(cfg.backend, bytes), dst(cfg.backend, bytes);
     src.write(input.data(), bytes);
     dst.write(actual.data(), bytes);
@@ -90,7 +86,7 @@ void run_gaussian_noise_voxel(const VoxelConfig& cfg) {
     handle.sync();  // drain the op's stream before copying results back
     dst.read(actual.data(), bytes);
 
-    // (3) Compare the voxels inside the ROI box, bit-exactly: the corner adds literal zero.
+    // Bit-exact: the (0, 0) corner adds literal zero.
     EXPECT_TRUE(compare_voxel_roi<T>(actual.data(), golden.data(), *desc, roiHost.data(),
                                      cfg.roiType, 0.0));
 }
@@ -105,9 +101,7 @@ struct GaussianNoiseVoxelNegativeParams {
     }
 };
 
-// A negative mean or standard deviation is not a legal call and must be reported rather than
-// silently producing an undefined volume. Only the status is asserted: the header does not name
-// which RPP_ERROR* an out-of-range scalar maps to.
+// Only the status is asserted: the header does not name which RPP_ERROR* applies.
 template <typename T>
 void run_gaussian_noise_voxel_negative(const VoxelConfig& cfg,
                                        const GaussianNoiseVoxelNegativeParams& op) {

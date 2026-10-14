@@ -40,9 +40,6 @@ using namespace rpptest;
 
 namespace {
 
-// random_erase fills its single erase-region with a direct noiseBuffer lookup: a tiled store, no
-// arithmetic, so every dtype is bit-exact.
-
 template <typename T>
 void run_random_erase(const TestConfig& cfg) {
     const Rpp32u channels = static_cast<Rpp32u>(channels_of(cfg.layoutIn));
@@ -55,9 +52,8 @@ void run_random_erase(const TestConfig& cfg) {
     const std::vector<RpptROI> roiVec = make_roi(srcDesc, cfg.roi);
     for (Rpp32u n = 0; n < cfg.size.n; ++n) roi[n] = roiVec[n];
 
-    // One box per image, built relative to each image's ROI rectangle so it stays inside the ROI
-    // for both Full and Partial. The box's absolute origin is generally not a multiple of 255, so
-    // the mod-255 tiling phase is exercised even though the box itself is smaller than the tile.
+    // One box per image inside its ROI. The origin is generally not a multiple of 255, so the
+    // mod-255 tiling phase is exercised.
     PinnedArray<RpptRoiLtrb> boxes(cfg.backend, cfg.size.n);
     for (Rpp32u n = 0; n < cfg.size.n; ++n) {
         const RoiBounds rb = roi_bounds(roiVec[n], XYWH);
@@ -69,22 +65,17 @@ void run_random_erase(const TestConfig& cfg) {
         boxes[n] = b0;
     }
 
-    // noiseBuffer: 255*255*channels elements, same dtype/range as the image. Filled with a
-    // deterministic non-constant pattern (distinct salt from the image fill) so a wrong tile
-    // offset/addressing produces a visible diff.
+    // 255*255*channels elements, non-constant so a wrong tile offset produces a visible diff.
     const std::size_t noiseCount = static_cast<std::size_t>(255) * 255 * channels;
     PinnedArray<T> noiseBuffer(cfg.backend, noiseCount);
     fill_input<T>(noiseBuffer.data(), noiseCount, cfg.dtype, /*salt=*/17);
 
-    // (1) Host golden model. golden starts as a copy of the input so the untouched (outside-ROI)
-    // region is defined; only the box is overwritten by the reference.
     std::vector<T> input(count), golden(count), actual(count);
     fill_input<T>(input.data(), count, cfg.dtype);
     golden = input;
     random_erase_reference<T>(input.data(), srcDesc, golden.data(), dstDesc, cfg.dtype, roi.data(),
                               XYWH, boxes.data(), noiseBuffer.data());
 
-    // (2) Run RPP on the configured backend.
     DeviceTensor src(cfg.backend, bytes), dst(cfg.backend, bytes);
     src.write(input.data(), bytes);
     dst.write(input.data(), bytes);  // define outside-ROI dst to mirror the golden
@@ -95,11 +86,9 @@ void run_random_erase(const TestConfig& cfg) {
                                 handle.get(), cfg.backend),
               RPP_SUCCESS);
 
-    // (3) Retrieve the result on the host (no-op copy for HOST, device->host for HIP).
     handle.sync();  // drain the op's stream before copying results back
     dst.read(actual.data(), bytes);
 
-    // (4) Compare within tolerance over the ROI.
     EXPECT_TRUE(
         compare_roi<T>(actual.data(), golden.data(), dstDesc, roi.data(), XYWH, kExact(cfg.dtype)));
 }
@@ -109,9 +98,7 @@ void run_random_erase(const TestConfig& cfg) {
 // Full name:
 // Image_Effects/RandomEraseTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>
 //
-// There is no seed parameter anywhere in this API: box placement and noiseBuffer contents are both
-// supplied by the caller, so the golden is fully bit-exact and deterministic (unlike jitter /
-// noise_shot, which sample their own RNG state internally).
+// The caller supplies both the box and the noise, so the op is deterministic.
 class RandomEraseTest : public SkipListTest<TestConfig> {};
 
 TEST_P(RandomEraseTest, Correctness) {

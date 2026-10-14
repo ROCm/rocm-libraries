@@ -40,18 +40,9 @@ RPP op
 
 Description
   Projective image warp. perspectiveTensor holds 9 values per image, the
-  row-major 3x3 matrix M = [m0 m1 m2; m3 m4 m5; m6 m7 m8]. A warp is an
-  inverse mapping: for each output pixel the matrix gives the SOURCE
-  coordinate to sample, in homogeneous form -- the projective generalization
-  of the remap contract output(x,y) = input(mapx(x,y), mapy(x,y)).
-
-  The output index (outX, outY) is origin-based within the ROI-sized output
-  region. The matrix yields a ROI-relative source coordinate, to which the ROI
-  origin (x0,y0) is added to reach the absolute (full-image) frame that
-  geometric_reference() samples in, bounded by the valid-source rectangle
-  [x0,x0+w) x [y0,y0+h), outside which the sample is black. Output pixel
-  centres are at integer indices; sampling, interpolation, border and quantize
-  are handled by geometric_reference(), shared with warp_affine.
+  row-major 3x3 matrix M = [m0 m1 m2; m3 m4 m5; m6 m7 m8], which maps each
+  output pixel to the source coordinate it samples, in homogeneous form.
+  Centring, ROI offset, border and sampling are as in warp_affine.
 
 Expression
   cx = floor(roiW/2), cy = floor(roiH/2), dx = outX - cx, dy = outY - cy
@@ -60,15 +51,10 @@ Expression
   srcX = x0 + (m0*dx + m1*dy + m2) / w + cx
   srcY = y0 + (m3*dx + m4*dy + m5) / w + cy
 
-  As in warp_affine, the matrix acts about the truncated centre of the ROI.
-
 Notes
   The public header does not document the matrix direction or the mapping
-  frame. The destination->source direction and the origin-based output
-  placement match rppt_warp_affine (whose conventions were confirmed against
-  the op via pure-translation cases) since the two share the same geometric
-  machinery -- including the ROI-origin defect described there, which is why
-  every partial-ROI case is on the skip list.
+  frame; the model follows warp_affine, and shares its ROI-origin defect, so
+  partial-ROI cases are on the skip list.
 */
 template <typename T>
 void warp_perspective_reference(const T* src, const RpptDesc& sd, T* dst, const RpptDesc& dd,

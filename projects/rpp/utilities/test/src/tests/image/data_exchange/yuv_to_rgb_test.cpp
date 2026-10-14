@@ -55,14 +55,11 @@ struct YuvParams {
     }
 };
 
-// NV12 requires even width and height, and these ops take a single image rather than a batch, so
-// none of the shared shape presets is legal here. These stand in for them: 48 is a multiple of the
-// HIP block width, 54 leaves a 6-wide tail, and 14 is narrower than one block (all-tail) on a frame
-// whose height is not a block multiple either.
+// NV12 requires even width and height and these ops take a single image, so the shared presets do
+// not apply. 48 is a HIP block multiple, 54 leaves a 6-wide tail, 14 is narrower than one block.
 const std::vector<Size> kSizes{{1, 36, 48}, {1, 36, 54}, {1, 46, 14}};
 
-// The matrix axis: both ranges on the two mainstream standards, plus one wide-gamut and one
-// legacy matrix so a wr/wb table error cannot hide behind the two common entries.
+// Both ranges on the two mainstream standards, plus one wide-gamut and one legacy matrix.
 const std::vector<YuvParams> kYuvParams = {
     {RpptColorStandard_BT709, RpptColorRange_STUDIO, "BT709_STUDIO"},
     {RpptColorStandard_BT709, RpptColorRange_FULL, "BT709_FULL"},
@@ -72,11 +69,8 @@ const std::vector<YuvParams> kYuvParams = {
     {RpptColorStandard_SMPTE240M, RpptColorRange_STUDIO, "SMPTE240M_STUDIO"},
 };
 
-// These ops document "RPP_HIP_BACKEND only" and return RPP_ERROR_INCOMPATIBLE_BACKEND otherwise, so
-// the grid is built by hand instead of with make_configs() (which yields every available backend).
-// Without a HIP build the instantiation is simply empty. The Layout/Roi slots of the label are
-// vestigial here -- there is no layout or ROI axis -- but PKD3/FullRoi do describe the fixed
-// destination, and keeping the slots keeps the label grammar uniform.
+// These ops are HIP-only (RPP_ERROR_INCOMPATIBLE_BACKEND otherwise), so the grid is built by hand.
+// The Layout/Roi label slots are fixed (PKD3/FullRoi) to keep the label format uniform.
 std::vector<WithParams<YuvParams>> yuv_configs() {
     std::vector<WithParams<YuvParams>> configs;
     for (RppBackend backend : available_backends()) {
@@ -103,9 +97,8 @@ void fill_pitched_plane(std::vector<Rpp8u>& plane, Rpp32u pitch, Rpp32u rowBytes
     }
 }
 
-// compare_roi() addresses elements through an RpptDesc and cannot describe a pitched packed-RGB
-// buffer, so this walks height x width x 3 through dstPitch instead. Only the logical width*3 bytes
-// of each row are compared; the pitch slack is not data. Message style mirrors compare_roi().
+// compare_roi() cannot describe a pitched packed-RGB buffer; this compares only the logical
+// width*3 bytes of each row.
 ::testing::AssertionResult compare_rgb_pitched(const Rpp8u* actual, const Rpp8u* reference,
                                                Rpp32u width, Rpp32u height, Rpp32u dstPitch,
                                                double tolerance) {
@@ -145,15 +138,13 @@ void run_yuv_to_rgb(const TestConfig& cfg, const YuvParams& op, YuvToRgbFn fn,
     const std::size_t uvBytes = static_cast<std::size_t>(uvPitch) * chromaHeight;
     const std::size_t dstBytes = static_cast<std::size_t>(dstPitch) * height;
 
-    // The descriptors are vestigial (only dataType is inspected); addressing is by the explicit
-    // byte pitches. Source is a single-plane 8-bit luma frame, destination packed RGB24.
+    // The descriptors are vestigial (only dataType is inspected); addressing uses the byte pitches.
     const Rpp8u poison = nd_slack_poison<Rpp8u>(DType::U8);
     RpptDesc srcDesc = make_descriptor({1, 1, height, width}, DType::U8, Layout::PLN1);
     RpptDesc dstDesc = make_descriptor({1, 3, height, width}, DType::U8, Layout::PKD3);
 
-    // (1) Host golden model. UV uses a different salt so chroma is not a copy of luma. dstInit is
-    // all poison, so a kernel that writes nothing (or skips rows) fails rather than coincidentally
-    // matching.
+    // UV uses a different salt so chroma is not a copy of luma. dst starts as all poison so a
+    // kernel that writes nothing (or skips rows) fails.
     std::vector<Rpp8u> hostY(yBytes, poison), hostUV(uvBytes, poison);
     fill_pitched_plane(hostY, yPitch, width, height, /*salt=*/0);
     fill_pitched_plane(hostUV, uvPitch, uvRowBytes, chromaHeight, /*salt=*/3);
@@ -163,7 +154,6 @@ void run_yuv_to_rgb(const TestConfig& cfg, const YuvParams& op, YuvToRgbFn fn,
     yuv_to_rgb_reference(hostY.data(), hostUV.data(), golden.data(), yPitch, uvPitch, dstPitch,
                          width, height, op.standard, op.range, upsample);
 
-    // (2) Run RPP (HIP only for these ops).
     DeviceTensor srcY(cfg.backend, yBytes), srcUV(cfg.backend, uvBytes), dst(cfg.backend, dstBytes);
     srcY.write(hostY.data(), yBytes);
     srcUV.write(hostUV.data(), uvBytes);
@@ -174,11 +164,9 @@ void run_yuv_to_rgb(const TestConfig& cfg, const YuvParams& op, YuvToRgbFn fn,
                  width, height, op.standard, op.range, handle.get(), cfg.backend),
               RPP_SUCCESS);
 
-    // (3) Retrieve the result on the host.
     handle.sync();  // drain the op's stream before copying results back
     dst.read(actual.data(), dstBytes);
 
-    // (4) Compare the logical RGB bytes only.
     EXPECT_TRUE(
         compare_rgb_pitched(actual.data(), golden.data(), width, height, dstPitch, tolerance));
 }

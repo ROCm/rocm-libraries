@@ -43,8 +43,6 @@ namespace {
 
 template <typename T>
 void run_tensor_or_tensor(const NdConfig& cfg, Broadcast broadcast) {
-    // The two operands may differ in shape (one axis collapsed to 1) and the output takes the
-    // broadcast shape, so each of the three needs its own descriptor.
     const NdDims dims1 = nd_operand_dims(cfg, broadcast, 1);
     const NdDims dims2 = nd_operand_dims(cfg, broadcast, 2);
     const NdDims outDims = nd_broadcast_dims(dims1, dims2);
@@ -57,16 +55,12 @@ void run_tensor_or_tensor(const NdConfig& cfg, Broadcast broadcast) {
     const std::size_t count2 = generic_element_count(*desc2);
     const std::size_t countOut = generic_element_count(*descOut);
 
-    // (1) Host golden model. Distinct salts give the two operands differing bit patterns, so
-    // the OR is not trivially equal to either input. Every output element is written by the
-    // op, so golden needs no pre-seeding.
     std::vector<T> input1(count1), input2(count2), golden(countOut), actual(countOut);
     fill_input_nd<T>(input1.data(), *desc1, cfg.dtypeIn, 0);
     fill_input_nd<T>(input2.data(), *desc2, cfg.dtypeIn, 1);
     bitwise_tensor_reference<T>(input1.data(), input2.data(), golden.data(), *descOut, *desc1,
                                 *desc2, BitwiseTensorOp::Or);
 
-    // (2) roiTensors live in host-accessible (pinned for HIP) memory.
     const std::vector<Rpp32u> roiVec1 = make_nd_roi_tensor(dims1);
     const std::vector<Rpp32u> roiVec2 = make_nd_roi_tensor(dims2);
     PinnedArray<Rpp32u> roi1(cfg.backend, roiVec1.size());
@@ -74,7 +68,6 @@ void run_tensor_or_tensor(const NdConfig& cfg, Broadcast broadcast) {
     for (std::size_t i = 0; i < roiVec1.size(); ++i) roi1[i] = roiVec1[i];
     for (std::size_t i = 0; i < roiVec2.size(); ++i) roi2[i] = roiVec2[i];
 
-    // (3) Run RPP on the configured backend.
     const std::size_t bytes1 = generic_byte_size(*desc1, cfg.dtypeIn);
     const std::size_t bytes2 = generic_byte_size(*desc2, cfg.dtypeIn);
     const std::size_t bytesOut = generic_byte_size(*descOut, cfg.dtypeIn);
@@ -91,7 +84,6 @@ void run_tensor_or_tensor(const NdConfig& cfg, Broadcast broadcast) {
     handle.sync();  // drain the op's stream before copying results back
     dst.read(actual.data(), bytesOut);
 
-    // (4) Compare over the whole output tensor. A bitwise OR is bit-exact, so tolerance is zero.
     EXPECT_TRUE(compare_nd<T>(actual.data(), golden.data(), *descOut, 0.0));
 }
 
@@ -109,13 +101,8 @@ TEST_P(TensorOrTensorTest, Correctness) {
     });
 }
 
-// Restricted to the integer dtypes the framework carries (U8/I8); the op also accepts the 16-
-// and 32-bit integer types, which the DType axis does not model yet. Ranks 2/3/4 cover the
-// stride arithmetic, and each broadcast variant collapses one operand's trailing axis to 1.
-//
-// Full grid passes on both backends. Note the HIP descriptors must be device-addressable
-// (GenericDescriptor handles this): at rank >= 4 the non-broadcast kernel reads dims/strides on
-// the device. Undocumented and rank-dependent.
+// Restricted to U8/I8: the op also accepts the 16/32-bit integer types, which the DType enum does
+// not carry yet.
 INSTANTIATE_TEST_SUITE_P(Misc_Bitwise, TensorOrTensorTest,
                          ::testing::ValuesIn(nd_with_params<BroadcastParams>(
                              make_nd_configs({DType::U8, DType::I8}, {2, 3, 4},

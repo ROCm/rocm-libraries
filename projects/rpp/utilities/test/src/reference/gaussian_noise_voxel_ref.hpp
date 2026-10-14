@@ -47,11 +47,9 @@ Expression
   dst = src + N(mean, stdDev)
 
 Scope
-  Scoped the same way as the image op: only the (mean = 0, stdDev = 0) corner
-  is modelled, where N(mean, stdDev) collapses to a point mass at 0 and the
-  additive noise degenerates to a passthrough with no RNG involved. The
-  general case depends on the kernel's Box-Muller stream, which the public API
-  does not describe.
+  Only the (mean = 0, stdDev = 0) corner is modelled, where the op is a
+  passthrough. The general case depends on the kernel's Box-Muller stream,
+  which the public API does not describe.
 */
 template <typename T>
 void gaussian_noise_voxel_identity_reference(const T* src, T* dst, const RpptGenericDesc& desc,

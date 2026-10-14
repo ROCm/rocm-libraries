@@ -42,31 +42,22 @@ RPP op
   rppt_water   (Image / Effects augmentation)
 
 Description
-  Sinusoidal "water surface" displacement, driven by six parameters -- an
-  amplitude, frequency and phase per axis. Each axis is displaced by a wave
-  driven by the OTHER coordinate, which is what makes the surface ripple and
-  what the separate X and Y parameter triples are for. A zero amplitude makes
-  the map the exact identity.
-
-  The source is sampled at (srcX, srcY) and the result quantized per type,
-  both handled by geometric_reference() / interpolation.hpp and shared with
-  the other warps.
+  Sinusoidal "water surface" displacement with an amplitude, frequency and
+  phase per axis. Each axis is displaced by a wave driven by the other
+  coordinate; a zero amplitude is the identity. Sampling and quantization are
+  handled by geometric_reference().
 
 Expression
   srcX = x + amplitudeX * sin(frequencyX * y + phaseX)
   srcY = y + amplitudeY * cos(frequencyY * x + phaseY)
 
 Notes
-  The public header documents none of the following, so a kernel that chose
-  differently shows up as a diff -- a finding, not a reference bug.
+  The public header does not specify the following:
 
-  - Sampling is NEAREST_NEIGHBOR (the op exposes no interpolationType) and a
-    displaced coordinate outside the ROI reads the type's black, the border
-    rule the suite's other warps use.
-  - The wave is a function of the position within the processed region
-    (ROI-local x, y), and the ROI origin is then added to reach the source.
-    Under a full ROI the two readings coincide, so that grid validates the
-    formula independently of this choice.
+  - Sampling is NEAREST_NEIGHBOR (the op has no interpolationType) and
+    out-of-ROI samples read the type's black, as in the other warps.
+  - The wave uses ROI-local x, y, and the ROI origin is then added to reach
+    the source.
 */
 
 // Destination pixel (outX, outY) of a region whose source origin is (x0, y0) -> the source

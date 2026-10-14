@@ -41,9 +41,8 @@ using namespace rpptest;
 
 namespace {
 
-// The three documented flags are independent 0/1 masks; the full 2^3 cross product isolates each
-// axis (a swapped horizontal/vertical/depth would not cancel out) as well as their combinations,
-// with 0/0/0 as the identity (a plain ROI copy, catching a flip applied unconditionally).
+// The grid covers all 2^3 flag combinations: each axis alone, their combinations, and 0/0/0 as the
+// identity.
 struct FlipVoxelParams {
     Rpp32u horizontal, vertical, depth;
     std::string name() const {
@@ -77,14 +76,12 @@ void run_flip_voxel(const VoxelConfig& cfg, const FlipVoxelParams& p) {
     PinnedArray<RpptROI3D> roi(cfg.backend, cfg.size.n);
     for (Rpp32u i = 0; i < cfg.size.n; ++i) roi[i] = roiHost[i];
 
-    // (1) Host golden model. golden starts at the sentinel so a voxel the op never writes stays
-    // obviously unwritten rather than plausibly zero.
+    // Both sides start at the sentinel so a voxel the op never writes cannot pass as zero.
     std::vector<T> golden(count, nd_slack_poison<T>(cfg.dtype));
     std::vector<T> actual = golden;
     flip_voxel_reference<T>(input.data(), golden.data(), *desc, roiHost.data(), cfg.roiType,
                             horizontal.data(), vertical.data(), depth.data());
 
-    // (2) Run RPP on the configured backend.
     DeviceTensor src(cfg.backend, bytes), dst(cfg.backend, bytes);
     src.write(input.data(), bytes);
     dst.write(actual.data(), bytes);
@@ -98,8 +95,6 @@ void run_flip_voxel(const VoxelConfig& cfg, const FlipVoxelParams& p) {
     handle.sync();  // drain the op's stream before copying results back
     dst.read(actual.data(), bytes);
 
-    // (3) Compare the voxels inside the ROI box. Flip only permutes source elements -- it computes
-    // nothing -- so every dtype must be bit-exact and the tolerance is zero.
     EXPECT_TRUE(compare_voxel_roi<T>(actual.data(), golden.data(), *desc, roiHost.data(),
                                      cfg.roiType, 0.0));
 }
@@ -112,9 +107,7 @@ class FlipVoxelTest : public SkipListTest<VoxelWithParams<FlipVoxelParams>> {};
 
 TEST_P(FlipVoxelTest, Correctness) {
     const auto& p = GetParam();
-    // A horizontal flip on a partial ROI reads a mis-sized AVX vector backward from the ROI's left
-    // edge on HOST U8, past the start of the buffer, and segfaults the whole process. The fault is
-    // a hard crash, not a gtest failure, so these cases are skipped rather than left red.
+    // Skipped rather than failed: this case segfaults the whole test binary.
     if (p.cfg.backend == RPP_HOST_BACKEND && p.cfg.dtype == DType::U8 && p.op.horizontal &&
         p.cfg.roi == Roi::Partial)
         GTEST_SKIP() << "HOST U8 flip_voxel reads past the start of the buffer and segfaults on a "

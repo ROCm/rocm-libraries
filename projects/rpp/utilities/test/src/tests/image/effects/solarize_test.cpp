@@ -40,7 +40,7 @@ using namespace rpptest;
 
 namespace {
 
-// threshold 0.5 is the midpoint so both branches (invert / passthrough) are hit.
+// threshold 0.5 hits both the invert and passthrough branches.
 struct SolarizeParams {
     float threshold;
     std::string name() const {

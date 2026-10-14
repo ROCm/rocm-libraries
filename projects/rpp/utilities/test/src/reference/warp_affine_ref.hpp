@@ -40,19 +40,11 @@ RPP op
 
 Description
   Affine image warp. affineTensor holds 6 values per image, the row-major 2x3
-  matrix M = [m0 m1 m2; m3 m4 m5]. A warp is an inverse mapping: for each
-  output pixel the matrix gives the SOURCE coordinate to sample, which is the
-  parametric form of the remap definition
-  output(x,y) = input(mapx(x,y), mapy(x,y)).
-
-  The output index (outX, outY) is origin-based within the ROI-sized output
-  region, and the matrix acts about the centre of the ROI, that centre being
-  the truncated half of each extent. The resulting source coordinate is
-  ROI-relative, so the ROI origin (x0,y0) is added to put it in the absolute
-  (full-image) frame that geometric_reference() samples in. Output pixel
-  centres are at integer indices and out-of-ROI samples are the type's black.
-  Sampling, interpolation, border and quantize are handled by
-  geometric_reference().
+  matrix M = [m0 m1 m2; m3 m4 m5], which maps each output pixel to the source
+  coordinate it samples. The matrix acts about the ROI centre (truncated half
+  extents) and the ROI origin (x0,y0) is added to reach the absolute frame.
+  Out-of-ROI samples are the type's black. Sampling and quantization are
+  handled by geometric_reference().
 
 Expression
   cx = floor(roiW/2), cy = floor(roiH/2), dx = outX - cx, dy = outY - cy
@@ -62,20 +54,13 @@ Expression
 
 Notes
   The public header does not document the matrix direction or the mapping
-  frame. The destination->source direction above is confirmed against the op
-  via the pure-translation cases and is consistent with the remap contract.
-  The centring cancels for the identity and for a pure translation, so only a
-  matrix with a non-identity linear part distinguishes it.
+  frame; the model uses destination->source, as the op does.
 
-  The +x0/+y0 is the ROI convention every other ROI-taking op in RPP follows
-  (crop, resize and flip all offset the source pointer by the ROI origin), and
-  it is what makes the identity matrix reproduce the ROI. The kernels do NOT
-  do this: both backends map the origin-based output index straight to a
-  source coordinate while still clipping against the absolute ROI rectangle,
-  so an identity warp over a partial ROI returns a part-black image. Mixing
-  the two frames is the defect, not a convention -- and with them mixed the
-  backends do not agree with each other either, HIP placing the result
-  differently again. See the *_PartialRoi_* entries in skip_list.hpp.
+  The +x0/+y0 follows the ROI convention of other RPP ops (crop, resize, flip)
+  and makes the identity matrix reproduce the ROI. The kernels omit it while
+  still clipping against the absolute ROI, so an identity warp over a partial
+  ROI returns a part-black image (and HOST and HIP disagree). See the
+  *_PartialRoi_* entries in skip_list.hpp.
 */
 template <typename T>
 void warp_affine_reference(const T* src, const RpptDesc& sd, T* dst, const RpptDesc& dd, DType dt,

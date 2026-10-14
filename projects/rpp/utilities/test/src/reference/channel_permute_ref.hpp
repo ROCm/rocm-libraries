@@ -41,17 +41,14 @@ RPP op
 
 Description
   Per-image reordering of the 3 channels. The permutation tensor holds n
-  contiguous triples (perm[n*3 + 0..2], each in 0..2). A rotation like {2,0,1}
-  distinguishes this convention from its inverse, which would be
-  source channel c -> output perm[c].
+  contiguous triples (perm[n*3 + 0..2], each in 0..2). Output channel i takes
+  source channel perm[i], not the inverse.
 
 Expression
   dst(x, y, i) = src(x, y, perm[i])
 
 Per-type form
-  A pure data exchange: only whole channel values move, with no arithmetic,
-  rounding, or clamping, so the result is bit-exact for U8, I8, F16 and F32
-  alike.
+  Pure data movement, so the result is bit-exact for every type.
 */
 template <typename T>
 void channel_permute_reference(const T* src, const RpptDesc& sd, T* dst, const RpptDesc& dd,

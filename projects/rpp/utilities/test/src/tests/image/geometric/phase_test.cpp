@@ -51,7 +51,7 @@ void run_phase(const TestConfig& cfg) {
     const std::vector<RpptROI> roiVec = make_roi(srcDesc, cfg.roi);
     for (Rpp32u i = 0; i < cfg.size.n; ++i) roi[i] = roiVec[i];
 
-    // Two distinct operands (salt shifts the second) so the phase angle is non-degenerate.
+    // Two distinct operands so the phase angle is non-degenerate.
     std::vector<T> input1(count), input2(count), golden(count), actual(count);
     fill_input<T>(input1.data(), count, cfg.dtype);
     fill_input<T>(input2.data(), count, cfg.dtype, 1);

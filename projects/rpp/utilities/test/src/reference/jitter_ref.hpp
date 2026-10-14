@@ -38,16 +38,9 @@ RPP op
   rppt_jitter   (Image / Effects augmentation)
 
 Description
-  Standard pixel-jitter augmentation (DALI/Albumentations-style). For every
-  output pixel at absolute source-space coordinate (sx, sy) inside an image's
-  ROI, a per-PIXEL random integer offset (dx, dy) is drawn, each independently
-  uniform over [-r, r] with r = kernelSize / 2 (integer division; kernelSize
-  is odd, so kernelSize = 3 gives r = 1, a 3x3 neighbourhood).
-
-  The SAME offset is used for every channel of that pixel, so a multi-channel
-  pixel is displaced as a whole rather than splitting its channels apart.
-  `seed` seeds the RNG for the whole call: same seed -> bit-identical output,
-  different seed -> a different output somewhere.
+  Pixel jitter. For every output pixel (sx, sy) inside the ROI, a random
+  integer offset (dx, dy) is drawn, each uniform over [-r, r] with
+  r = kernelSize / 2. The same offset is used for every channel of the pixel.
 
 Expression
   dst(sx, sy) = src( clamp(sx + dx), clamp(sy + dy) )
@@ -57,21 +50,12 @@ Expression
   leave the ROI.
 
 Scope
-  This header encodes only the RNG-FREE corner: kernelSize = 1 gives r = 0, so
-  the offset window collapses to {0} on both axes regardless of any RNG draw
-  and the op is forced to identity for every element, independent of seed.
-  That is the only case a static golden can match bit-for-bit without
-  reimplementing the kernel's PRNG, which would make the golden depend on the
-  kernel and defeat its purpose.
-
-  The general kernelSize > 1 case is checked at runtime against the real
-  kernel output via structural invariants -- membership of the output pixel in
-  its legal candidate window, same-seed repeatability, different-seed
-  divergence -- in jitter_test.cpp, not here.
+  Only kernelSize = 1 (r = 0) is modelled, where the op is identity
+  independent of seed. The general case is checked via structural invariants
+  in jitter_test.cpp.
 */
 
-// Clamps an integer coordinate into [lo, hi]. Shared by the identity case (trivially, since the
-// window is {0}) and the runtime membership-invariant check in the test file.
+// Clamps an integer coordinate into [lo, hi].
 inline int clamp_coord(int v, int lo, int hi) {
     return v < lo ? lo : (v > hi ? hi : v);
 }

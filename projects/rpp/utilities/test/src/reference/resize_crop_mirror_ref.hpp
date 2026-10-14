@@ -39,18 +39,9 @@ RPP op
   rppt_resize_crop_mirror   (Image / Geometric augmentation)
 
 Description
-  Resizes the source crop -- the ROI -- to fill a per-image destination size,
-  then optionally mirrors it horizontally.
-
-  The resize is the same drift-free, edge-clamped inverse map as the resize
-  golden (pixel-CENTRE convention; the source ROI maps onto the whole
-  destination, so every output pixel samples INSIDE the crop and no synthetic
-  border appears). The optional mirror flips the destination left-to-right,
-  which is equivalent to sampling output column (dstW-1-i).
-
-  The walk is resize_driver() (framework/geometric.hpp), shared with resize
-  and resize_mirror_normalize. resize_crop_mirror adds the mirror flag and no
-  post-transform.
+  Resizes the source ROI to fill a per-image destination size, then optionally
+  mirrors it horizontally. The walk is resize_driver() (framework/geometric.hpp),
+  the same pixel-centre, edge-clamped map as resize.
 
 Expression
   scaleX = roiWidth / dstW,  scaleY = roiHeight / dstH
@@ -60,10 +51,7 @@ Expression
 
 Notes
   The public header documents neither the scale/offset convention nor the
-  boundary handling. The pixel-centre map and edge clamp above are the
-  principled resize (matching the resize golden), and the mirror is a plain
-  horizontal flip. A kernel using a different convention shows up as a diff --
-  a finding, not a reference bug.
+  boundary handling; the model uses the pixel-centre map and edge clamp above.
 */
 template <typename T>
 void resize_crop_mirror_reference(const T* src, const RpptDesc& sd, T* dst, const RpptDesc& dd,

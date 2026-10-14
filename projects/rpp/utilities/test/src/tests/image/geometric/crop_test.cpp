@@ -50,16 +50,13 @@ void run_crop(const TestConfig& cfg) {
     const std::vector<RpptROI> roiVec = make_roi(srcDesc, cfg.roi);
     for (Rpp32u i = 0; i < cfg.size.n; ++i) roi[i] = roiVec[i];
 
-    // (1) Host golden model. golden starts as the dst init pattern (below) so the untouched
-    // (outside-ROI) region is defined; only the cropped region is overwritten by the reference.
     std::vector<T> input(count), dstInit(count), golden(count), actual(count);
     fill_input<T>(input.data(), count, cfg.dtype);
     fill_input<T>(dstInit.data(), count, cfg.dtype, /*salt=*/1);
     golden = dstInit;
     crop_reference<T>(input.data(), srcDesc, golden.data(), dstDesc, roi.data(), XYWH);
 
-    // (2) Run RPP on the configured backend. dst is pre-filled with a distinct pattern so a
-    // no-op kernel would be caught within the cropped region.
+    // dst is pre-filled with a distinct pattern so a no-op kernel is caught.
     DeviceTensor src(cfg.backend, bytes), dst(cfg.backend, bytes);
     src.write(input.data(), bytes);
     dst.write(dstInit.data(), bytes);
@@ -69,11 +66,9 @@ void run_crop(const TestConfig& cfg) {
                         cfg.backend),
               RPP_SUCCESS);
 
-    // (3) Retrieve the result on the host (no-op copy for HOST, device->host for HIP).
     handle.sync();  // drain the op's stream before copying results back
     dst.read(actual.data(), bytes);
 
-    // (4) Compare over the cropped region. crop is a verbatim copy, so the tolerance is zero.
     EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), dstDesc, roi.data(), XYWH, 0.0));
 }
 

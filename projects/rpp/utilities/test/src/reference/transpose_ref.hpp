@@ -52,11 +52,7 @@ Expression
   where s[perm[k]] = c[k]
 
 Per-type form
-  Pure data movement: no arithmetic, no type conversion, no clamping. Every
-  output element is a bit-exact copy of exactly one source element and the
-  coordinate map is a bijection, so the reference reproduces the operation
-  exactly at every type -- any difference from the kernel is a real defect,
-  never a rounding artifact.
+  Pure data movement, so the result is bit-exact for every type.
 */
 
 // The destination extents implied by a source shape and a permutation, batch axis first.

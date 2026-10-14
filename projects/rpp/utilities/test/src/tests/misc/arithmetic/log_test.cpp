@@ -40,28 +40,14 @@ using namespace rpptest;
 
 namespace {
 
-// Tolerances model legitimate floating-point error only: the golden computes std::log in double
-// while the kernel evaluates in float (and stores half for F16).
-//
-// F16 is loose because half's ulp is large at the magnitudes this grid produces: the smallest
-// non-zero float input is 1/255, whose log is about -5.5, and a half near 5.5 has an ulp of
-// 4/1024 = 3.9e-3. The 8e-3 absolute bound is therefore ~2 ulp of the stored result. Do not
-// loosen it further.
+// The golden computes in double, the kernel in float (stored as half for F16). The F16 bound is
+// ~2 ulp of half at the largest |log| this grid produces.
 Bound log_tolerance(DType out) {
     return out == DType::F16 ? Bound{8e-3, 2e-3} : Bound{1e-5, 1e-6};
 }
 
-// Zero-free input fill.
-//
-// The header says a zero input is replaced via nextafter() to avoid an undefined result, but it
-// pins neither the precision nor the direction of that nextafter: nextafterf(0.f, 1.f) = 1.4e-45
-// gives log = -103.28, while the double form 4.9e-324 gives -744.44. The expected value is
-// ambiguous, so the grid deliberately avoids zero inputs rather than encoding a guess for
-// behaviour the API does not specify.
-//
-// fill_input does produce zeros -- U8 hits 0, I8 hits 0 (the value 128 maps to 0), and the [0,1]
-// float fill hits exactly 0.0 -- so every zero is replaced by the smallest magnitude the dtype's
-// own fill already uses (1 for U8/I8, 1/255 for F16/F32).
+// The header replaces a zero input via nextafter() without specifying its precision, so log(0)
+// is ambiguous. Zeros are replaced by the smallest magnitude the dtype's fill uses.
 template <typename Tin>
 void fill_input_nonzero(Tin* buf, const RpptGenericDesc& d, DType dt) {
     fill_input_nd<Tin>(buf, d, dt);
@@ -84,18 +70,15 @@ void run_log(const NdConfig& cfg) {
     const std::size_t srcBytes = generic_byte_size(*srcDesc, cfg.dtypeIn);
     const std::size_t dstBytes = generic_byte_size(*dstDesc, cfg.dtypeOut);
 
-    // (1) Host golden model. The op writes every output element, so golden needs no pre-seeding.
     std::vector<Tin> input(count);
     std::vector<Tout> golden(count), actual(count);
     fill_input_nonzero<Tin>(input.data(), *srcDesc, cfg.dtypeIn);
     log_reference<Tin, Tout>(input.data(), golden.data(), *srcDesc, *dstDesc);
 
-    // (2) The roiTensor lives in host-accessible (pinned for HIP) memory.
     const std::vector<Rpp32u> roiVec = make_nd_roi_tensor(dims);
     PinnedArray<Rpp32u> roi(cfg.backend, roiVec.size());
     for (std::size_t i = 0; i < roiVec.size(); ++i) roi[i] = roiVec[i];
 
-    // (3) Run RPP on the configured backend.
     DeviceTensor src(cfg.backend, srcBytes), dst(cfg.backend, dstBytes);
     src.write(input.data(), srcBytes);
 
@@ -107,7 +90,6 @@ void run_log(const NdConfig& cfg) {
     handle.sync();  // drain the op's stream before copying results back
     dst.read(actual.data(), dstBytes);
 
-    // (4) Compare the whole output tensor.
     EXPECT_TRUE(
         compare_nd<Tout>(actual.data(), golden.data(), *dstDesc, log_tolerance(cfg.dtypeOut)));
 }
@@ -131,21 +113,8 @@ TEST_P(LogTest, Correctness) {
         FAIL() << "unsupported dtype conversion for log";
 }
 
-// The dtype conversions are exactly the set the header documents ("Supports u8->f32, i8->f32,
-// f16->f16 and f32->f32"); log has no op params, so the config is a plain NdConfig.
-//
-// The zero input is deliberately not exercised: the header replaces it via nextafter() without
-// pinning the precision or direction, so the expected value is ambiguous (log of nextafterf(0,1)
-// is -103.28, of the double form -744.44). See fill_input_nonzero above.
-//
-// 6 of these 24 cases are red, deterministically: the I8->F32 path computes log(x + 128) -- RPP's
-// image-domain I8->U8 intensity shift -- rather than the log(|x|) the header documents, so the
-// whole negative half of the I8 range is wrong. The golden is deliberately left on the documented
-// semantics. The other three conversions (U8->F32, F16->F16, F32->F32) are green on both backends
-// at every rank.
-//
-// Note the ND descriptors must be device-addressable on HIP (GenericDescriptor pins them): at
-// rank >= 4 the ND kernels read dims/strides on the device. Undocumented and rank-dependent.
+// The conversions the header documents. Known kernel defect (skip-listed): I8->F32 computes
+// log(x + 128) instead of the documented log(|x|).
 INSTANTIATE_TEST_SUITE_P(
     Misc_Arithmetic, LogTest,
     ::testing::ValuesIn(make_nd_configs({{DType::U8, DType::F32},

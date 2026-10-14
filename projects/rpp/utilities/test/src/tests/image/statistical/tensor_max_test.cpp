@@ -41,10 +41,7 @@ using namespace rpptest;
 
 namespace {
 
-// max selects an existing element -- no arithmetic -- so the result is bit-exact for every dtype.
-
-// Tin is the source element type; Tout is the op's output element type (max preserves the input
-// dtype for integers, and returns F32 for the float dtypes, per the API contract).
+// Tin is the source element type; Tout is the op's output element type.
 template <typename Tin, typename Tout>
 void run_tensor_max(const TestConfig& cfg) {
     RpptDesc desc = make_src_descriptor(cfg);  // RPP takes a non-const ptr
@@ -56,13 +53,11 @@ void run_tensor_max(const TestConfig& cfg) {
     const std::vector<RpptROI> roiVec = make_roi(desc, cfg.roi);
     for (Rpp32u i = 0; i < cfg.size.n; ++i) roi[i] = roiVec[i];
 
-    // (1) Host golden model.
     std::vector<Tin> input(count);
     fill_input<Tin>(input.data(), count, cfg.dtype);
     const std::vector<double> golden =
         tensor_max_reference<Tin>(input.data(), desc, roi.data(), XYWH);
 
-    // (2) Run RPP on the configured backend. The result array is host-accessible (pinned for HIP).
     DeviceTensor src(cfg.backend, bytes);
     src.write(input.data(), bytes);
     PinnedArray<Tout> out(cfg.backend, outLen);
@@ -73,10 +68,9 @@ void run_tensor_max(const TestConfig& cfg) {
                               XYWH, handle.get(), cfg.backend),
               RPP_SUCCESS);
 
-    // (3) Drain the op's stream; pinned output is then directly readable on the host.
-    handle.sync();
+    handle.sync();  // pinned output is then directly readable on the host
 
-    // (4) Compare (bit-exact).
+    // Selects an existing element, so bit-exact.
     EXPECT_TRUE(compare_reduction<Tout>(out.data(), golden, kExact(cfg.dtype)));
 }
 
@@ -97,11 +91,8 @@ INSTANTIATE_TEST_SUITE_P(Image_Statistical, TensorMaxTest,
                          ::testing::ValuesIn(make_configs(
                              {DType::U8, DType::F16, DType::F32, DType::I8},
                              {Layout::PKD3, Layout::PLN3, Layout::PLN1}, {Roi::Full, Roi::Partial},
-                             // Both large enough that the stage-1 partial-reduction
-                             // buffer is >= 8 elements/image: smaller images (e.g. the
-                             // default 2x36x48) underflow the tensor_max HIP stage-2
-                             // reduction index and fault with an illegal access. The
-                             // second shape is odd in both extents, so the reduction
-                             // meets a partial vector at the end of a row.
+                             // Smaller images underflow the tensor_max HIP stage-2
+                             // reduction index and fault. The odd shape hits a partial
+                             // vector at the end of a row.
                              {{2, 160, 160}, {2, 137, 167}})),
                          config_param_name);

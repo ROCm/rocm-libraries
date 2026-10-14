@@ -36,16 +36,15 @@ SOFTWARE.
 namespace rpptest {
 
 /*
-Reference model: rain   (kernel-derived REGRESSION golden, degenerate case only)
+Reference model: rain   (rainPercentage == 0 only)
 
 RPP op
   rppt_rain   (Image / Effects augmentation)
 
 Description
-  Overlays a generated rain layer on the image. At rainPercentage == 0 zero
-  drops are drawn and the rain layer stays at its memset background value, so
-  the op reduces to a per-element alpha blend of the source toward that
-  background.
+  Overlays a generated rain layer on the image. At rainPercentage == 0 no
+  drops are drawn, so the op reduces to an alpha blend of the source toward
+  the rain layer's background value.
 
 Expression
   dst = (background - src) * alpha + src
@@ -53,21 +52,15 @@ Expression
   with background = 0 for U8/F16/F32 and -127 (0x81) for I8.
 
 Per-type form
-  Native intensity units; rain does NOT normalize. U8/I8 round to nearest and
-  clamp ([0,255] / [-128,127]); F16/F32 clamp to [0,1]. rain's I8 store
-  rounds, unlike snow's.
+  Native intensity units (no normalization). U8/I8 round to nearest and clamp
+  ([0,255] / [-128,127]); F16/F32 clamp to [0,1].
 
 Scope
-  Restricted to rainPercentage == 0. The rain kernel seeds its rain-layer
-  generator with std::random_device (src/modules/tensor/cpu/kernel/rain.cpp:
-  create_rain_layer), so the drop pattern -- and therefore the output for any
-  rainPercentage > 0 -- is NON-DETERMINISTIC: the kernel's own output differs
-  run to run and no golden can match it.
-
-  This LOCKS the blend, clamp, round and per-layout/type store paths, which is
-  all that is deterministically testable; drop placement is intentionally not
-  covered. The model is transcribed from the kernel with the user's explicit
-  authorization, since snow/rain/fog have no documented per-element spec.
+  Restricted to rainPercentage == 0: the kernel seeds its drop generator with
+  std::random_device (src/modules/tensor/cpu/kernel/rain.cpp:
+  create_rain_layer), so any rainPercentage > 0 is non-deterministic. The
+  public header does not specify the per-element blend, so the model mirrors
+  the kernel.
 */
 
 namespace rain_detail {

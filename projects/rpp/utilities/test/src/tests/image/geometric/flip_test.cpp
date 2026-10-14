@@ -40,10 +40,7 @@ using namespace rpptest;
 
 namespace {
 
-// The two documented flags are independent 0/1 masks, so the grid covers all four combinations:
-// 0/0 is the identity (a plain ROI copy, which catches a flip applied unconditionally), 1/0 and
-// 0/1 isolate each axis (so a swapped horizontal/vertical would not cancel out), 1/1 is the
-// 180-degree rotation.
+// The flags are independent 0/1 masks, so the grid covers all four combinations.
 struct FlipParams {
     Rpp32u horizontal, vertical;
     std::string name() const {
@@ -68,8 +65,6 @@ void run_flip(const TestConfig& cfg, const FlipParams& op) {
         roi[i] = roiVec[i];
     }
 
-    // (1) Host golden model. golden starts as the dst init pattern (below) so the untouched
-    // (outside-ROI) region is defined; only the flipped region is overwritten by the reference.
     std::vector<T> input(count), dstInit(count), golden(count), actual(count);
     fill_input<T>(input.data(), count, cfg.dtype);
     fill_input<T>(dstInit.data(), count, cfg.dtype, /*salt=*/1);
@@ -77,8 +72,7 @@ void run_flip(const TestConfig& cfg, const FlipParams& op) {
     flip_reference<T>(input.data(), srcDesc, golden.data(), dstDesc, roiVec.data(), XYWH,
                       op.horizontal, op.vertical);
 
-    // (2) Run RPP on the configured backend. dst is pre-filled with a distinct pattern so a
-    // no-op kernel would be caught even in the identity (h=0, v=0) case.
+    // dst is pre-filled with a distinct pattern so a no-op kernel is caught in the identity case.
     DeviceTensor src(cfg.backend, bytes), dst(cfg.backend, bytes);
     src.write(input.data(), bytes);
     dst.write(dstInit.data(), bytes);
@@ -88,14 +82,10 @@ void run_flip(const TestConfig& cfg, const FlipParams& op) {
                         vertical.data(), roi.data(), XYWH, handle.get(), cfg.backend),
               RPP_SUCCESS);
 
-    // (3) Retrieve the result on the host (no-op copy for HOST, device->host for HIP).
     handle.sync();  // drain the op's stream before copying results back
     dst.read(actual.data(), bytes);
 
-    // (4) Compare over the written region, bounded by the pre-call ROI copy: the HIP path
-    // rewrites the caller's XYWH tensor to LTRB in place, so reusing roi[] here would walk the
-    // wrong rectangle. flip only permutes source elements -- it computes nothing -- so every
-    // dtype must be bit-exact and the tolerance is zero.
+    // Uses the test's own ROI copy: HIP rewrites the op's ROI to LTRB in place.
     EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), dstDesc, roiVec.data(), XYWH, 0.0));
 }
 
@@ -107,11 +97,8 @@ class FlipTest : public SkipListTest<WithParams<FlipParams>> {};
 
 TEST_P(FlipTest, Correctness) {
     const auto& p = GetParam();
-    // The HIP vertical flip reads before the start of the image plane whenever the ROI does not
-    // reach the image's bottom row, faulting the device. The fault poisons the HIP context for the
-    // rest of the process, so these cases are enumerated but skipped rather than left red --
-    // running them takes ~1400 unrelated HIP cases down with them. Remove this guard once the
-    // kernel is fixed.
+    // The HIP vertical flip reads out of bounds when the ROI does not reach the bottom row, and the
+    // fault poisons the HIP context for the rest of the process. Remove once the kernel is fixed.
     if (p.cfg.backend == RPP_HIP_BACKEND && p.cfg.roi == Roi::Partial && p.op.vertical)
         GTEST_SKIP() << "HIP flip reads out of bounds on a vertical flip with a partial ROI and "
                         "faults the device";

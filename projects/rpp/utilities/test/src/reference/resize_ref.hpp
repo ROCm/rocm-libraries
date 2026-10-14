@@ -39,21 +39,13 @@ RPP op
   rppt_resize   (Image / Geometric augmentation)
 
 Description
-  Scales the source ROI to fill a per-image destination size. Like every
-  geometric op it is an inverse map: each output pixel computes the source
-  coordinate it samples from, using the pixel-CENTRE convention, which is the
-  resize with no half-texel drift -- an exact-integer scale is a verbatim copy
-  and scale 1 is the identity.
-
-  The source ROI [x0,x0+roiW) x [y0,y0+roiH) maps onto the whole destination,
-  so every output pixel samples INSIDE the source region: the boundary is
-  edge-clamped (replicate), not black-filled. A resize introduces no border
-  pixels, which is the key difference from the warp/rotate goldens.
+  Scales the source ROI to fill a per-image destination size. Each output pixel
+  inverse-maps to the source with the pixel-centre convention, so an integer
+  scale is a verbatim copy and scale 1 is the identity. The boundary is
+  edge-clamped (replicate), so no border pixels are introduced.
 
   The walk is resize_driver() (framework/geometric.hpp), shared with
-  resize_crop_mirror and resize_mirror_normalize, which owns the pixel-centre
-  map, the edge clamp and the quantization. resize adds neither a mirror nor a
-  post-transform.
+  resize_crop_mirror and resize_mirror_normalize.
 
 Expression
   scaleX = roiWidth / dstW,  scaleY = roiHeight / dstH
@@ -62,10 +54,7 @@ Expression
 
 Notes
   The public header documents neither the scale/offset convention nor the
-  boundary handling. The pixel-centre map and edge-clamped boundary above are
-  the mathematically principled resize (drift-free, no synthetic border) and
-  are what the reference holds to; a kernel that uses a different convention
-  shows up as a diff, which is a finding, not a reference bug.
+  boundary handling; the model uses the pixel-centre map and edge clamp above.
 */
 template <typename T>
 void resize_reference(const T* src, const RpptDesc& sd, T* dst, const RpptDesc& dd, DType dt,

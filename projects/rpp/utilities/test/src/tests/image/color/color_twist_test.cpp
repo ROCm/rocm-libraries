@@ -50,9 +50,7 @@ struct ColorTwistParams {
     }
 };
 
-// The fused pipeline routes 3-channel pixels through two RGB->HSV->RGB round trips, so the
-// integer result carries that float round trip's rounding on top of the final quantization;
-// 1.0 covers that legitimate <=1 LSB difference (both reference and kernel round to nearest).
+// Two float RGB->HSV->RGB round trips precede the final quantization, so integers allow 1 LSB.
 constexpr Tolerance kColorTwistTolerance = tolerance(1.0, 3e-3, 5e-3);
 
 template <typename T>
@@ -62,7 +60,6 @@ void run_color_twist(const TestConfig& cfg, const ColorTwistParams& op) {
     const std::size_t count = element_count(srcDesc);
     const std::size_t bytes = byte_size(srcDesc, cfg.dtype);
 
-    // Parameters live in host-accessible (pinned for HIP) memory.
     PinnedArray<Rpp32f> brightness(cfg.backend, cfg.size.n);
     PinnedArray<Rpp32f> contrast(cfg.backend, cfg.size.n);
     PinnedArray<Rpp32f> hue(cfg.backend, cfg.size.n);
@@ -77,15 +74,12 @@ void run_color_twist(const TestConfig& cfg, const ColorTwistParams& op) {
         roi[i] = roiVec[i];
     }
 
-    // (1) Host golden model. golden starts as a copy of the input so the untouched
-    // (outside-ROI) region is defined; only the ROI is overwritten by the reference.
     std::vector<T> input(count), golden(count), actual(count);
     fill_input<T>(input.data(), count, cfg.dtype);
     golden = input;
     color_twist_reference<T>(input.data(), srcDesc, golden.data(), dstDesc, cfg.dtype, roi.data(),
                              XYWH, op.brightness, op.contrast, op.hue, op.saturation);
 
-    // (2) Run RPP on the configured backend.
     DeviceTensor src(cfg.backend, bytes), dst(cfg.backend, bytes);
     src.write(input.data(), bytes);
     dst.write(input.data(), bytes);  // define outside-ROI dst to mirror the golden
@@ -96,11 +90,9 @@ void run_color_twist(const TestConfig& cfg, const ColorTwistParams& op) {
                                handle.get(), cfg.backend),
               RPP_SUCCESS);
 
-    // (3) Retrieve the result on the host (no-op copy for HOST, device->host for HIP).
     handle.sync();  // drain the op's stream before copying results back
     dst.read(actual.data(), bytes);
 
-    // (4) Compare within tolerance over the ROI.
     EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), dstDesc, roi.data(), XYWH,
                                kColorTwistTolerance(cfg.dtype)));
 }
@@ -117,10 +109,8 @@ TEST_P(ColorTwistTest, Correctness) {
         p.cfg.dtype, [&](auto tag) { run_color_twist<Element<decltype(tag)>>(p.cfg, p.op); });
 }
 
-// Restricted to the 3-channel layouts. The API doc claims c = 1/3, but rppt_color_twist rejects
-// 1-channel (PLN1) input with RPP_ERROR_INVALID_CHANNELS (-19) on both backends -- a real
-// doc/kernel discrepancy; hue/saturation are
-// undefined on greyscale, so 3-channel is the op's genuine support.
+// Restricted to the 3-channel layouts: the header documents c = 1/3, but the kernel rejects
+// 1-channel input with RPP_ERROR_INVALID_CHANNELS on both backends.
 INSTANTIATE_TEST_SUITE_P(Image_Color, ColorTwistTest,
                          ::testing::ValuesIn(with_params<ColorTwistParams>(
                              concat_configs({

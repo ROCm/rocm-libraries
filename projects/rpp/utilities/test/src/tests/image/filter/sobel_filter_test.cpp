@@ -22,11 +22,8 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
-// sobel_filter GTest: PLN1 only, kernelSize = 3 only. sobel_filter's dstDesc is always
-// single-channel grayscale (c=1, NCHW); a 3-channel input would require an undocumented
-// RGB->grayscale conversion (not independently derivable), and the extended k=5/7 kernels are
-// convention-dependent. Both are deferred -- this covers grayscale-in/grayscale-out with the
-// canonical 3x3 Sobel operator over {U8,F16,F32,I8} x PLN1 x {Full,Partial} x sobelType {0,1,2}.
+// PLN1 and kernelSize 3 only: 3-channel input needs an undocumented RGB->grayscale conversion, and
+// the k=5/7 kernels are convention-dependent.
 #include <gtest/gtest.h>
 #include <rpp/rpp.h>
 
@@ -54,20 +51,17 @@ struct SobelFilterParams {
     }
 };
 
-// Legitimate numeric error only (sqrt rounding for the XY case); not loosened to hide
-// clamp/offset/truncation defects.
+// Covers sqrt rounding for the XY case; not loosened to hide clamp/truncation defects.
 constexpr Tolerance kSobelFilterTolerance = tolerance(1.0, 1e-3, 1e-2);
 
 template <typename T>
 void run_sobel_filter(const TestConfig& cfg, const SobelFilterParams& op) {
     const TensorShape shape{cfg.size.n, static_cast<Rpp32u>(channels_of(cfg.layoutIn)), cfg.size.h,
                             cfg.size.w};
-    // src carries a leading border pad: the HIP filter kernel requires srcDesc.offsetInBytes >=
-    // 12 * (kernelSize/2) (read-slack for the KxK window; the border itself is computed by
-    // clamping indices to the image, i.e. replicate). dst keeps offset 0, so the golden and
-    // comparator index destination elements from 0. Applied on both backends to keep one path.
+    // The HIP filter kernel requires srcDesc.offsetInBytes >= 12 * (kernelSize/2) as read-slack for
+    // the window, so src carries a leading pad. dst keeps offset 0.
     RpptDesc srcDesc = make_descriptor(shape, cfg.dtype, cfg.layoutIn);
-    RpptDesc dstDesc = srcDesc;  // PLN1: same c=1 dims/strides; only src gets the pad offset
+    RpptDesc dstDesc = srcDesc;  // only src gets the pad offset
     const std::size_t offsetBytes = 12u * (op.kernelSize / 2);
     const std::size_t offsetElems = offsetBytes / dtype_size(cfg.dtype);
     srcDesc.offsetInBytes = static_cast<Rpp32u>(offsetBytes);
@@ -79,9 +73,7 @@ void run_sobel_filter(const TestConfig& cfg, const SobelFilterParams& op) {
     const std::vector<RpptROI> roiVec = make_roi(srcDesc, cfg.roi);
     for (Rpp32u i = 0; i < shape.n; ++i) roi[i] = roiVec[i];
 
-    // (1) Host golden model. The src buffer is [front pad][image][back pad]; the image base sits
-    // at offsetElems. golden/actual are the (pad-free, offset 0) destination. golden starts as a
-    // copy of the image so the untouched (outside-ROI) region is defined.
+    // src is [front pad][image][back pad]; the image base sits at offsetElems.
     std::vector<T> src(offsetElems + count + offsetElems), golden(count), actual(count);
     fill_input<T>(src.data(), src.size(), cfg.dtype);
     T* image = src.data() + offsetElems;
@@ -89,9 +81,6 @@ void run_sobel_filter(const TestConfig& cfg, const SobelFilterParams& op) {
     sobel_filter_reference<T>(image, golden.data(), dstDesc, cfg.dtype, roi.data(), XYWH,
                               op.sobelType, op.kernelSize);
 
-    // (2) Run RPP on the configured backend. sobel_filter is a single backend-arg symbol (no
-    // separate HOST variant), called unconditionally. RPP adds srcDesc.offsetInBytes to the src
-    // pointer internally, landing on the image base.
     DeviceTensor srcDev(cfg.backend, src.size() * dtype_size(cfg.dtype));
     DeviceTensor dst(cfg.backend, imageBytes);
     srcDev.write(src.data(), src.size() * dtype_size(cfg.dtype));
@@ -103,14 +92,11 @@ void run_sobel_filter(const TestConfig& cfg, const SobelFilterParams& op) {
                           roi.data(), XYWH, handle.get(), cfg.backend);
     ASSERT_EQ(status, RPP_SUCCESS);
 
-    // (3) Retrieve the result on the host (no-op copy for HOST, device->host for HIP).
     handle.sync();  // drain the op's stream before copying results back
     dst.read(actual.data(), imageBytes);
 
-    // (4) Compare over the ROI. gradX/gradY match the kernel for U8/F16/F32 (golden Gx/Gy correct).
-    // Known reds kept red by design: sobelType 2 (XY) diverges from the Euclidean gradient
-    // magnitude on both backends; I8 gradX/gradY (both backends) and HIP F16 gradX/gradY are not
-    // clamped/quantized to the dtype range. All are real kernel defects.
+    // Known kernel reds: sobelType 2 diverges from the Euclidean magnitude; I8 and HIP F16
+    // gradX/gradY are not clamped to the dtype range.
     EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), dstDesc, roi.data(), XYWH,
                                kSobelFilterTolerance(cfg.dtype)));
 }

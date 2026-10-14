@@ -44,29 +44,22 @@ RPP op
 Description
   Element-wise natural logarithm over the whole densely packed tensor (a
   single source, no broadcast, no op params). The header specifies that the
-  absolute value of the input is used, so negative inputs are folded before
-  the log. Everything is computed in double; no clamping is applied, since a
-  log result is signed and the documented output types (f32, f16) are
-  floating point.
+  absolute value of the input is used. Computed in double, no clamping.
 
 Expression
   dst = log(|src|)
 
 Notes
-  The header states that a zero input is replaced via nextafter() "to avoid
-  undefined result", but pins neither the precision nor the direction of that
-  nextafter: nextafterf(0.f, 1.f) = 1.4e-45 gives log = -103.28, while the
-  double form 4.9e-324 gives -744.44. The expected value is therefore
-  ambiguous, so the tests deliberately feed no zero inputs rather than
-  encoding a guess, and this model does not special-case zero.
+  The header replaces a zero input via nextafter() but does not specify its
+  precision, so the expected value at zero is ambiguous. The tests feed no
+  zero inputs and the model does not special-case zero.
 */
 
 inline double log_scalar(double v) {
     return std::log(std::fabs(v));
 }
 
-// src and dst have the same logical shape; only the dtype (and possibly the stride padding)
-// differs, so each is addressed through its own descriptor.
+// src and dst may differ in dtype and stride padding, so each uses its own descriptor.
 template <typename Tin, typename Tout>
 void log_reference(const Tin* src, Tout* dst, const RpptGenericDesc& srcDesc,
                    const RpptGenericDesc& dstDesc) {

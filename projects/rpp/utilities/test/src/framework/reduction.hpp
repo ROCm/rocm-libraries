@@ -34,13 +34,11 @@ SOFTWARE.
 #include "framework/intensity.hpp"
 #include "framework/tensor_setup.hpp"
 
-// Shared helpers for the statistical reduction ops (tensor_sum/min/max/mean/stddev). These ops
-// are reductions: they emit a small result array of per-image statistics, not a full image, so
-// they need their own harness rather than the pointwise for_each_roi_io / compare_roi path.
+// Helpers for the reduction ops (tensor_sum/min/max/mean/stddev), which emit per-image statistics
+// rather than an image.
 //
-// Result-array layout (from the API docs): a 3-channel image produces 4 values per image in the
-// order [R, G, B, total]; a 1-channel image produces 1 value per image. So the array length is
-// n*4 for c==3 and n for c==1, and the per-image stride is 4 or 1.
+// Result-array layout (from the API docs): [R, G, B, total] per 3-channel image, one value per
+// 1-channel image.
 namespace rpptest {
 
 inline std::size_t reduction_stride(const RpptDesc& d) {
@@ -51,8 +49,7 @@ inline std::size_t reduction_length(const RpptDesc& d) {
     return static_cast<std::size_t>(d.n) * reduction_stride(d);
 }
 
-// Per-image ROI pixel count (single channel), N = roiWidth * roiHeight. Reductions average /
-// normalize over these counts (per channel), or over 3*N for the whole-image statistic.
+// Per-image ROI pixel count for a single channel (roiWidth * roiHeight).
 inline std::vector<std::size_t> roi_pixel_counts(const RpptDesc& d, const RpptROI* roi,
                                                  RpptRoiType type) {
     std::vector<std::size_t> counts(d.n);
@@ -63,10 +60,8 @@ inline std::vector<std::size_t> roi_pixel_counts(const RpptDesc& d, const RpptRO
     return counts;
 }
 
-// Walks each image's ROI and invokes acc(n, c, value) for every source element, value being the
-// stored pixel as a double (raw intensity space: U8 [0,255], I8 [-128,127], F16/F32 [0,1]). The
-// shared accumulation primitive the reduction references build on; it reuses for_each_roi_io so
-// the ROI walk matches the rest of the suite.
+// Invokes acc(n, c, value) for every source element of each image's ROI, value being the stored
+// pixel as a double.
 template <typename T, typename Acc>
 void for_each_roi_value(const T* src, const RpptDesc& d, const RpptROI* roi, RpptRoiType type,
                         Acc acc) {

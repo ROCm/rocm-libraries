@@ -32,13 +32,11 @@ SOFTWARE.
 #include "framework/config_param.hpp"
 
 // Conversions between a stored pixel and the numeric spaces the golden models compute in, plus
-// the quantization back. Every reference model goes through these, so the suite has one
-// definition of what a U8/I8/F16/F32 pixel *means* numerically.
+// the quantization back.
 
 namespace rpptest {
 
-// A generic path plus an explicit Rpp16f specialization, since half_float::half
-// only exposes an operator float() and a float constructor.
+// Rpp16f is specialized because half_float::half only converts through float.
 
 template <typename T>
 inline double to_double(const T& v) {
@@ -61,17 +59,12 @@ inline Rpp16f from_double<Rpp16f>(double v) {
 // M_PI is POSIX, not standard C++, so it is not guaranteed under a strict-conformance build.
 constexpr double kPi = 3.14159265358979323846;
 
-// Clamps v to [lo, hi]. Shared by the op reference models.
 inline double clampd(double v, double lo, double hi) {
     return v < lo ? lo : (v > hi ? hi : v);
 }
 
-// Normalized [0,1] "unit intensity" conversions, shared by the reference models that compute
-// in unit space (hue, saturation, color_twist, gamma_correction). to_unit maps a stored pixel
-// into [0,1]; from_unit quantizes a [0,1] result back to the stored dtype, rounding integers to
-// nearest (the intended round-to-nearest behavior the golden models hold to, which several
-// kernels do not). I8 pixels are the same intensities
-// shifted by -128.
+// [0,1] "unit intensity" conversions. to_unit maps a stored pixel into [0,1]; from_unit quantizes
+// back, rounding integers to nearest. I8 pixels are the U8 intensities shifted by -128.
 inline double to_unit(double v, DType dt) {
     return (dt == DType::U8) ? v / 255.0 : (dt == DType::I8) ? (v + 128.0) / 255.0 : v;
 }
@@ -92,10 +85,8 @@ inline double dtype_black(DType dt) {
     return dt == DType::I8 ? -128.0 : 0.0;
 }
 
-// Quantizes a value already expressed in stored units back into the dtype's storable range:
-// integers round to nearest and clamp, floats clamp to [0,1]. Round-to-nearest is the intended
-// integer behavior the golden models hold to, which several kernels do not (they truncate I8).
-// Distinct from from_unit(), which additionally maps [0,1] -> stored.
+// Quantizes a value already in stored units: integers round to nearest and clamp, floats clamp
+// to [0,1]. Unlike from_unit(), no [0,1] -> stored mapping is applied.
 inline double quantize_stored(double v, DType dt) {
     switch (dt) {
         case DType::U8:

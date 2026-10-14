@@ -42,51 +42,33 @@ RPP op
   rppt_resize_mirror_normalize   (Image / Geometric augmentation)
 
 Description
-  Three stages, in the order the name gives them:
-    1. resize the source ROI onto the per-image destination size,
-    2. optionally mirror the destination left-to-right,
-    3. normalize per channel.
+  Resizes the source ROI to the per-image destination size, optionally mirrors
+  it left-to-right, then normalizes per channel. Resize and mirror use
+  resize_driver() (framework/geometric.hpp); the normalize runs before the
+  single per-type quantization.
 
-  Mirror is a coordinate permutation and normalize is pointwise, so 2 and 3
-  commute; only the resize has to come first. Stages 1-2 are resize_driver()
-  (framework/geometric.hpp) -- the same drift-free pixel-CENTRE, edge-clamped
-  map resize and resize_crop_mirror use, so this golden cannot disagree with
-  those two about what a resize is -- and the normalize is the driver's
-  post-transform, which runs BEFORE the single per-type quantization.
-  Quantizing once, rather than after the resize and again after the normalize,
-  is what the fused op's name implies.
-
-  mean and stdDev are per image AND per channel (batchSize * 3 for RGB,
-  batchSize for greyscale), so channel c of image n reads index n*c_count + c.
+  mean and stdDev are per image and per channel, so channel c of image n reads
+  index n*channels + c.
 
 Expression
   dst = (pixel - mean) / stdDev
 
 Per-type form
-  mean is a pixel-intensity offset expressed in [0,255] units -- the same
-  convention this suite models for brightness's beta and contrast's centre,
-  and the one the legacy harness corroborates by passing mean = {60, 80, 100}
-  unchanged for U8, I8, F16 and F32 alike. stdDev is a ratio and is not
-  rescaled. I8 is the same intensity shifted -128.
+  mean is in [0,255] intensity units for every type; stdDev is a ratio and is
+  not rescaled. I8 is the same intensity shifted -128.
 
     U8      clamp[0,255]   ( round( (v - mean) / stdDev ) )
     I8      clamp[-128,127]( round( ((v + 128) - mean) / stdDev ) - 128 )
     F16/F32                ( (v - mean/255) / stdDev )
 
-  The integer types round to nearest and saturate, because that is all their
-  storage can hold. The FLOAT types are deliberately NOT clamped to [0,1]: a
-  normalized result is signed by construction (that is the point of
-  subtracting a mean), and clamping it away would make the op useless for the
-  preprocessing it exists to do. This matches the ND rppt_normalize golden,
-  and is why the store below is not the shared quantizing_store().
+  Integer types round to nearest and saturate. Float types are not clamped,
+  since a normalized result is signed; this is why the store below is not
+  quantizing_store().
 
 Notes
   The header states neither the intensity space of mean/stdDev nor the
-  clamping. The NormalizeIdentity parameter set (mean 0, stdDev 1) is
-  invariant to that choice -- it is the identity normalize under every
-  reading -- so it validates the resize, mirror, placement and quantization
-  independently of the assumption. A diff on the other sets is a finding, not
-  a reference bug. stdDev == 0 is undefined and is not exercised.
+  clamping. The NormalizeIdentity set (mean 0, stdDev 1) is the identity under
+  any reading. stdDev == 0 is undefined and is not exercised.
 */
 
 // Stores a normalized value: integers round to nearest and saturate, floats pass through unclamped.
@@ -97,7 +79,7 @@ inline double resize_mirror_normalize_store(double v, DType dt) {
         case DType::I8:
             return clampd(std::nearbyint(v), -128.0, 127.0);
         default:
-            return v;  // F16/F32 -- a normalized result is legitimately signed
+            return v;  // F16/F32
     }
 }
 

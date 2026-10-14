@@ -38,10 +38,8 @@ TEST(RoiTest, XywhAliasesLtrb) {
     EXPECT_EQ(roi.ltrbROI.lt.y, 7);
 }
 
-// Every image test builds its tensors with make_descriptor(), so its stride convention is an
-// assumption shared by the whole image domain: the row width is padded to (w/8)*8+8 elements for
-// the kernels that store a full SIMD vector on a row's tail, while d.w stays the logical width.
-// The width chosen here is not a multiple of 8, so the padding is visible in the strides.
+// Rows are padded to (w/8)*8+8 elements while d.w stays logical. Width 12 makes the padding
+// visible in the strides.
 TEST(DescriptorTest, PaddedStridesPacked) {
     const RpptDesc d = make_descriptor({2, 3, 4, 12}, DType::U8, Layout::PKD3);
     const Rpp32u pw = padded_width(12);  // 16

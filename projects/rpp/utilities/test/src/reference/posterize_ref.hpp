@@ -42,19 +42,16 @@ RPP op
   rppt_posterize   (Image / Effects augmentation)
 
 Description
-  Reduces each channel to the requested number of bits by keeping the top
-  `levelBits` most-significant bits of its 8-bit representation and zeroing the
-  rest -- the canonical posterize bit-mask. The result is a banded image with
-  2^levelBits distinct levels per channel.
+  Keeps the top `levelBits` bits of each channel's 8-bit representation and
+  zeroes the rest, giving 2^levelBits levels per channel.
 
 Expression
   mask         = (0xFF << (8 - levelBits)) & 0xFF
   dst(x, y, c) = src(x, y, c) & mask
 
 Per-type form
-  The bit-mask lives in 8-bit unsigned intensity space, so each type is mapped
-  in and back out. Masking is an exact integer operation, so no product is
-  rounded for U8/I8.
+  The mask is applied in 8-bit unsigned intensity space, so each type is
+  mapped in and back out.
 
     U8      i = round(v);                   out = i & mask
     I8      i = round(v) + 128;             out = (i & mask) - 128

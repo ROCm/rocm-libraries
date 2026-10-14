@@ -41,18 +41,15 @@ RPP op
   rppt_median_filter   (Image / Filter augmentation)
 
 Description
-  Per-channel median over a KxK window -- a rank filter, not a convolution.
-  The window filter_reference gathers (same clamp-to-ROI REPLICATE border as
-  the other filters) is sorted and the middle element selected.
+  Per-channel median over a KxK window with REPLICATE border
+  (filter_reference).
 
 Expression
   dst(j, i) = median{ src(j+dy, i+dx) : dy, dx in [-r, r] }
 
 Per-type form
-  kernelSize is odd, so K^2 is odd and the median is an EXISTING pixel value
-  rather than an average of two. No arithmetic is performed, so the
-  to_double/from_double round-trip is exact for every type and the result is
-  bit-exact (tolerance 0).
+  kernelSize is odd, so the median is an existing pixel value and the result
+  is bit-exact for every type.
 */
 template <typename T>
 void median_filter_reference(const T* src, T* dst, const RpptDesc& d, DType /*dt*/,

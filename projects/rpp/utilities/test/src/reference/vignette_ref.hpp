@@ -55,33 +55,19 @@ Expression
   g   = exp(-0.25 * intensity * r2 / radius^2)   sigma = radius*sqrt(2/intensity)
   dst = src * g
 
-  For an even w and h this is exp(-intensity * r2 / max(w, h)^2); the truncated
-  form is what an odd extent distinguishes, and it centres the falloff on the
-  lower pixel rather than between two.
-
 Per-type form
   The multiply happens in normalized [0,1] intensity space via to_unit() /
   from_unit(), so U8 darkens towards 0 and I8 towards -128 rather than towards
   the raw stored zero, and integers round to nearest.
 
 Notes
-  Spec gap: the header documents `intensity` only as "quantifies the vignette
-  effect, > 0", so the scalar that turns it into a sigma is the one part of
-  this model not derivable from the definition. It is calibrated instead:
-  probing the op with a flat 1.0 image recovers
-  2*sigma^2 = max(w,h)^2 / intensity across intensities and aspect ratios,
-  identically on both backends. Everything else -- the Gaussian shape, the
-  isotropy, the centre at (w/2, h/2), the multiply in unit space and the
-  ROI-relative sizing -- is modelled independently, and a kernel that
-  disagrees with any of them still shows up as a diff.
+  The header documents `intensity` only as "> 0", so the sigma scale
+  (2*sigma^2 = max(w,h)^2 / intensity) follows the op on both backends.
 
-  Semantics assumption: the falloff is centred on and sized by the ROI (the
-  processed region), not the full image, so the effect tracks whatever region
-  the op was asked to write. Under a full ROI the two readings coincide.
+  The falloff is centred on and sized by the ROI, not the full image.
 
-  The header notes HOST uses fastexpavx() in place of exp() and that up to 5%
-  pixel mismatch is expected; the model keeps the exact exp() and the test's
-  tolerance carries that allowance.
+  The header notes HOST uses fastexpavx() and that up to 5% pixel mismatch is
+  expected; the model uses exact exp() and the test tolerance covers it.
 */
 
 // Gaussian falloff at (x, y) within a w x h region.
