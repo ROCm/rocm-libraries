@@ -47,9 +47,17 @@ on:
         description: "Nightly ROCm SDK (rocm package) version to build and test against (empty = the pinned default)"
         type: string
         default: ""
+      send_report:
+        description: "Send the test report as the nightly does (to try the webhook)"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
+
+env:
+  # The pinned ROCm SDK nightly; the install, the compiler check and the report read it.
+  ROCM_SDK_VERSION: ${{ inputs.rocm_sdk_version || '10.2.0a20261013' }}
 
 jobs:
   gate:
@@ -91,7 +99,7 @@ jobs:
           FILES="$(gh api --paginate "repos/$REPO/pulls/$PR/files" --jq '.[].filename')"
           # ci-env/action.yml holds therock-ref: a bump PR runs the job, so a compiler change
           # shows up there as the SDK compiler warning.
-          grep -qE '^(projects/hipblaslt|shared/(origami|stinkytofu|mxdatagenerator))/|^\.github/workflows/gfx1250_hipblaslt_tensilelite_test\.yml$|^\.github/actions/ci-env/action\.yml$' <<<"$FILES" \
+          grep -qE '^(projects/hipblaslt|shared/(origami|stinkytofu|mxdatagenerator)|cmake)/|^\.github/workflows/gfx1250_hipblaslt_tensilelite_test\.yml$|^\.github/actions/ci-env/action\.yml$' <<<"$FILES" \
             || skip "PR #$PR does not touch hipBLASLt, TensileLite or the TheRock pin"
           echo "run=true" >> "$GITHUB_OUTPUT"
 
@@ -107,6 +115,10 @@ jobs:
       cancel-in-progress: true
     runs-on: blas-rocm-mi455-sandbox
     timeout-minutes: 600
+    # For the report job.
+    outputs:
+      runner: ${{ runner.name }}
+      steps: "SDK=${{ steps.sdk.outcome }}, Strict check=${{ steps.strict.outcome }}, Build=${{ steps.build.outcome }}, hipBLASLt tests=${{ steps.hipblaslt.outcome }}, TensileLite tests=${{ steps.tensilelite.outcome }}"
     # The ROCm SDK comes from the nightly pip index, not a host /opt/rocm: it must be
     # new enough to compile and run gfx1250-strict. The SDK install reuses downloaded
     # wheels from a pip cache on a host mount. Only the nightly writes it; other jobs get
@@ -117,6 +129,7 @@ jobs:
       # GIDs on the ROCm runners (mirrors TheRock's _GPU_CONTAINER_OPTIONS).
       # -e without a value copies ROCR_VISIBLE_DEVICES from the runner's .env (one
       # runner per GPU); the runner passes no host env into job containers itself.
+      # If it's unset, the strict-mode check falls back to the runner name's -gpuN.
       options: >-
         -e ROCR_VISIBLE_DEVICES
         --ipc host
@@ -138,8 +151,6 @@ jobs:
     env:
       # Run both suites as gfx1250-strict.
       HSA_DISABLE_GFX12_STRICT: "0"
-      # The pinned ROCm SDK nightly; the install and the compiler check both read it.
-      ROCM_SDK_VERSION: ${{ inputs.rocm_sdk_version || '10.2.0a20261007' }}
       GTEST_PRINT_TIME: "0"
       PYTHONUNBUFFERED: "1"
       # awk filter for all test and build logs
@@ -174,6 +185,7 @@ jobs:
           sparse-checkout-cone-mode: true
 
       - name: Install the ROCm SDK (gfx1250-strict capable)
+        id: sdk
         env:
           # Only this step uses the shared cache; later pip runs (the build's venv, tox,
           # which builds wheels from source) use pip's default cache under the job's HOME.
@@ -267,7 +279,20 @@ jobs:
         id: strict
         # Fail before the long build if strict mode is not in effect. Uses the same
         # detection tox uses for the client target; prints arch names only.
+        env:
+          RUNNER_LABEL: ${{ runner.name }}
         run: |
+          # One runner per GPU: the 4 gtest shards and 4 pytest workers must stay on this
+          # runner's GPU. The runner's .env sets ROCR_VISIBLE_DEVICES; without it, runner
+          # ...-gpuN uses GPU N.
+          if [ -z "${ROCR_VISIBLE_DEVICES:-}" ] && [[ "$RUNNER_LABEL" =~ -gpu([0-9]+)$ ]]; then
+            export ROCR_VISIBLE_DEVICES="${BASH_REMATCH[1]}"
+            echo "::warning::ROCR_VISIBLE_DEVICES is not set on this runner; using GPU $ROCR_VISIBLE_DEVICES from the runner name"
+            echo "ROCR_VISIBLE_DEVICES=$ROCR_VISIBLE_DEVICES" >> "$GITHUB_ENV"
+          fi
+          N="$(tr ',' '\n' <<<"${ROCR_VISIBLE_DEVICES:-}" | grep -c . || true)"
+          [ "$N" = 1 ] \
+            || { echo "::error::ROCR_VISIBLE_DEVICES must name exactly one GPU: set it in the runner's .env, or name the runner ...-gpuN"; exit 1; }
           ARCH="$(python3 - <<'EOF'
           import importlib.util
           spec = importlib.util.spec_from_file_location("ga", "projects/hipblaslt/tensilelite/tensilelite/GpuArch.py")
@@ -279,14 +304,9 @@ jobs:
           )"
           [ "$ARCH" = gfx1250-strict ] \
             || { echo "::error::runtime reports '${ARCH:-no GPU}', not gfx1250-strict"; exit 1; }
-          # One runner per GPU: the 4 gtest shards and 4 pytest workers must stay on this
-          # runner's GPU, so the runner must pass exactly one GPU in *_VISIBLE_DEVICES.
-          VIS="${ROCR_VISIBLE_DEVICES:-${HIP_VISIBLE_DEVICES:-}}"
-          N="$(tr ',' '\n' <<<"$VIS" | grep -c . || true)"
-          [ "$N" = 1 ] \
-            || { echo "::error::ROCR_VISIBLE_DEVICES (or HIP_VISIBLE_DEVICES) must name exactly one GPU; the runner sets it to its own GPU"; exit 1; }
 
       - name: Build hipBLASLt from source
+        id: build
         run: |
           set -euo pipefail
           export CC="$ROCM_PATH/lib/llvm/bin/amdclang" CXX="$ROCM_PATH/lib/llvm/bin/amdclang++"
@@ -300,6 +320,7 @@ jobs:
             | awk -F, -v OFS=, "$HW_SCRUB"
 
       - name: Run hipBLASLt tests
+        id: hipblaslt
         timeout-minutes: 120
         if: ${{ github.event_name != 'workflow_dispatch' || inputs.run_hipblaslt }}
         env:
@@ -361,6 +382,7 @@ jobs:
           exit "$rc"
 
       - name: Run TensileLite common tests (fresh client)
+        id: tensilelite
         timeout-minutes: 350
         # Runs even if the hipBLASLt build or tests failed, but not if setup did.
         if: ${{ !cancelled() && steps.strict.outcome == 'success' && (github.event_name != 'workflow_dispatch' || inputs.run_tensilelite) }}
@@ -392,7 +414,7 @@ jobs:
 
       - name: Upload test results
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: gfx1250-strict-test-results
           path: |
@@ -408,3 +430,37 @@ jobs:
         run: |
           owner="$(stat -c %u:%g "$GITHUB_WORKSPACE/..")"
           chown -R "$owner" "$GITHUB_WORKSPACE" "$RUNNER_TEMP" 2>/dev/null || true
+
+  report:
+    name: Nightly report
+    needs: [gate, gfx1250-tests]
+    # Every nightly (or a manual run with send_report) emails a test report, however the test job
+    # ended: failed, timed out, or never picked up by a runner. Runs on a GitHub-hosted runner from
+    # the test job's uploaded results, so the webhook secret never reaches the self-hosted runner.
+    if: ${{ always() && needs.gate.outputs.run == 'true' && (github.event_name == 'schedule' || inputs.send_report) }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: read  # the previous nightly's results
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: .github/scripts
+      - name: Download this run's test results
+        # Absent when the test job never got far enough to upload them; the report says so.
+        continue-on-error: true
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: gfx1250-strict-test-results
+          path: results
+      - name: Send the report
+        env:
+          WEBHOOK_URL: ${{ secrets.GFX1250_BLAS_NIGHTLY_WEBHOOK_URL }}
+          # Optional System row in the report; a secret so its value stays out of the logs.
+          SYSTEM_LABEL: ${{ secrets.GFX1250_BLAS_SYSTEM_LABEL }}
+          GH_TOKEN: ${{ github.token }}
+          TEST_RUNNER_NAME: ${{ needs.gfx1250-tests.outputs.runner }}
+          STEPS: "Test job=${{ needs.gfx1250-tests.result }}${{ needs.gfx1250-tests.outputs.steps && ', ' || '' }}${{ needs.gfx1250-tests.outputs.steps }}"
+        run: |
+          [ -n "$WEBHOOK_URL" ] || { echo "::notice::GFX1250_BLAS_NIGHTLY_WEBHOOK_URL is not set; no report sent"; exit 0; }
+          python3 .github/scripts/gfx1250_nightly_report.py --results results --steps "$STEPS" --webhook-url "$WEBHOOK_URL"
