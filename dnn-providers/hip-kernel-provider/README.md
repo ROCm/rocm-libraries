@@ -78,6 +78,10 @@ Beyond the shared third-party set, the prefixes must provide HIP/HIPRTC, `hipdnn
 
 Descriptor packaging (`HIPDNN_ENABLE_KERNEL_INGESTOR=ON`) additionally requires a supplied `Python3_EXECUTABLE` with `msgpack` and `zstandard`, and a kpack source tree. With `HIPKERNELPROVIDER_ENABLE_ROCKE=ON` it also requires pip in that interpreter and local rocKE wheels. The `hkp_rocke_wheel_python_interp` target installs those wheels only into build-owned storage with no index access or dependency resolution, then uses the supplied interpreter with a subprocess-scoped private import path. It does not install rocKE into the parent Python environment. With `HIPKERNELPROVIDER_ENABLE_ROCKE=OFF` no wheel is needed: the hip producer packs alone, the `rocKE/` family folder is excluded from every root and any other `rocke` UKD is pruned like an arch-pruned one. See [Kernel packing](../../projects/hipdnn/docs/Building.md#kernel-packing-rocm_kpack) for wheel supply modes and prerequisites.
 
+### rocKE descriptors (DVC)
+
+With `HIPKERNELPROVIDER_ENABLE_ROCKE=ON`, the shipped rocKE descriptor bundles keep their large files (the KDPs) in DVC, not git. Run `dvc pull -r ingestor <pointer>.dvc`, or let TheRock's `fetch_sources` do it, to get them. Without the pull, configure warns and the shipped bundle is not packed; builds and tests still run. Release builds should set `-DHIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS=ON` to make a missing file an error. To skip the shipped bundles, set `-DHIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT` to another tree, such as `descriptor-packaging/examples/descriptors`. See [Large rocKE files live in DVC](src/engines/kernel_ingestor_engine/descriptors/README.md#large-rocke-files-live-in-dvc).
+
 ### Testing
 
 After building, run the test suites:
