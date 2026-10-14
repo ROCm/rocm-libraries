@@ -45,22 +45,27 @@ TEST(Core, ScalarTypes) {
 
     // IEEE binary16 has a five-bit exponent, ten fraction bits, and bias 15.
     const auto& half = scalarTypeInfo(ScalarType::Float16);
-    ASSERT_TRUE(half.name == "f16" && half.category == ScalarCategory::FloatingPoint &&
-                half.storageBits == 16 && half.exponentBits == 5 && half.mantissaBits == 10 &&
-                half.exponentBias == 15 && half.supportsNaN && half.supportsInfinity &&
-                !half.isPacked())
-        << "Incorrect binary16 metadata.";
+    EXPECT_EQ(half.name, "f16");
+    EXPECT_EQ(half.category, ScalarCategory::FloatingPoint);
+    EXPECT_EQ(half.storageBits, 16);
+    EXPECT_EQ(half.exponentBits, 5);
+    EXPECT_EQ(half.mantissaBits, 10);
+    EXPECT_EQ(half.exponentBias, 15);
+    EXPECT_TRUE(half.supportsNaN);
+    EXPECT_TRUE(half.supportsInfinity);
+    EXPECT_FALSE(half.isPacked());
     const auto& complex = scalarTypeInfo(ScalarType::ComplexFloat32);
-    ASSERT_TRUE(complex.category == ScalarCategory::Complex && complex.storageBits == 64 &&
-                complex.exponentBits == 8 && complex.mantissaBits == 23)
-        << "Complex metadata must count both components' storage.";
+    EXPECT_EQ(complex.category, ScalarCategory::Complex);
+    EXPECT_EQ(complex.storageBits, 64);
+    EXPECT_EQ(complex.exponentBits, 8);
+    EXPECT_EQ(complex.mantissaBits, 23);
     const auto& packed = scalarTypeInfo(ScalarType::Float6E3M2);
-    ASSERT_TRUE(packed.storageBits == 6 && packed.isPacked() && !packed.supportsNaN &&
-                !packed.supportsInfinity)
-        << "Incorrect finite six-bit encoding metadata.";
-    ASSERT_TRUE(scalarTypeInfo(ScalarType::Int4).category == ScalarCategory::SignedInteger &&
-                scalarTypeInfo(ScalarType::E8M0).category == ScalarCategory::FloatingPoint)
-        << "Incorrect integer or floating-point category.";
+    EXPECT_EQ(packed.storageBits, 6);
+    EXPECT_TRUE(packed.isPacked());
+    EXPECT_FALSE(packed.supportsNaN);
+    EXPECT_FALSE(packed.supportsInfinity);
+    EXPECT_EQ(scalarTypeInfo(ScalarType::Int4).category, ScalarCategory::SignedInteger);
+    EXPECT_EQ(scalarTypeInfo(ScalarType::E8M0).category, ScalarCategory::FloatingPoint);
 
     // Check each identifier independently of its position in the metadata table.
     constexpr std::pair<ScalarType, std::string_view> expectedNames[] = {
@@ -94,27 +99,26 @@ TEST(Core, ScalarTypes) {
     };
     static_assert(std::size(expectedNames) == scalarTypeCount);
     for (const auto& [type, name] : expectedNames) {
-        ASSERT_TRUE(scalarTypeName(type) == name)
-            << "Scalar identifier has the wrong metadata row.";
-        ASSERT_TRUE(scalarTypeInfo(type).category < ScalarCategory::Count)
-            << "Scalar metadata has an invalid category.";
+        SCOPED_TRACE(name);
+        EXPECT_EQ(scalarTypeName(type), name);
+        EXPECT_LT(scalarTypeInfo(type).category, ScalarCategory::Count);
     }
 
     for (ScalarType type :
          {ScalarType::E4M3, ScalarType::E5M3, ScalarType::E8M0, ScalarType::E8M0Zero}) {
+        SCOPED_TRACE(scalarTypeName(type));
         const auto& info = scalarTypeInfo(type);
-        ASSERT_TRUE(info.category == ScalarCategory::FloatingPoint && !info.isSigned)
-            << "Unsigned floating-point metadata mismatch.";
+        EXPECT_EQ(info.category, ScalarCategory::FloatingPoint);
+        EXPECT_FALSE(info.isSigned);
     }
-    ASSERT_TRUE(scalarTypeInfo(ScalarType::Float32).isSigned &&
-                scalarTypeInfo(ScalarType::ComplexFloat32).isSigned &&
-                scalarTypeInfo(ScalarType::Int4).isSigned &&
-                !scalarTypeInfo(ScalarType::UInt8).isSigned &&
-                !scalarTypeInfo(ScalarType::Boolean).isSigned)
-        << "Scalar signedness metadata mismatch.";
+    EXPECT_TRUE(scalarTypeInfo(ScalarType::Float32).isSigned);
+    EXPECT_TRUE(scalarTypeInfo(ScalarType::ComplexFloat32).isSigned);
+    EXPECT_TRUE(scalarTypeInfo(ScalarType::Int4).isSigned);
+    EXPECT_FALSE(scalarTypeInfo(ScalarType::UInt8).isSigned);
+    EXPECT_FALSE(scalarTypeInfo(ScalarType::Boolean).isSigned);
 
     for (ScalarType invalid : {ScalarType::Count, static_cast<ScalarType>(0xffff)}) {
-        ASSERT_FALSE(isConcreteScalarType(invalid))
-            << "Invalid scalar type classified as concrete.";
+        EXPECT_FALSE(isConcreteScalarType(invalid))
+            << "ScalarType value: " << static_cast<int>(invalid);
     }
 }
