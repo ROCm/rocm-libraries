@@ -183,16 +183,12 @@ if(HIPBLASLT_ENABLE_GEMM_A2A_FUSION AND NOT WIN32)
     configure_file("${CMAKE_CURRENT_SOURCE_DIR}/scripts/a2a/hipblaslt-bench-a2a-launch" "${CMAKE_CURRENT_BINARY_DIR}/hipblaslt-bench-a2a-launch" COPYONLY)
 endif()
 
-# CU-contention cotenant helper (clients/scripts/cotenant). A standalone HIP
-# binary, compiled as CXX so it picks up GPU_TARGETS via hip::device like the
-# other clients (the project does not enable the HIP language). POSIX-only
-# (unistd.h, pause(), usleep(), getpid()), so it is not built on Windows.
+# CU-contention cotenant kernel, run by the clients/scripts/cotenant launcher.
+# POSIX-only (unistd.h, pause(), getpid()), so it is not built on Windows.
 if(NOT WIN32)
-    add_executable(hipblaslt-cotenant-kernel "${CMAKE_CURRENT_SOURCE_DIR}/scripts/cotenant/hipblaslt-cotenant-kernel.hip")
-    set_source_files_properties(
-        "${CMAKE_CURRENT_SOURCE_DIR}/scripts/cotenant/hipblaslt-cotenant-kernel.hip"
-        PROPERTIES LANGUAGE CXX)
+    add_executable(hipblaslt-cotenant-kernel "${CMAKE_CURRENT_SOURCE_DIR}/bench/src/client_cotenant_kernel.cpp")
     target_link_libraries(hipblaslt-cotenant-kernel PRIVATE hip::device)
+    target_include_directories(hipblaslt-cotenant-kernel PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/common/include")
     target_compile_features(hipblaslt-cotenant-kernel PRIVATE cxx_std_17)
 endif()
 
