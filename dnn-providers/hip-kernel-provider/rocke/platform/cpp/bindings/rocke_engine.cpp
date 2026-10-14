@@ -1073,26 +1073,27 @@ rocke_gfx950_block_scaled_gemm_spec_t gfx950_scaled_build_spec(const py::dict& d
 }
 std::string gfx950_scaled_serialize_ir(const py::dict& d, const std::string& arch)
 {
-    ROCKE_FAMILY_SERIALIZE_BODY(
-        "rocke_engine.gfx950_block_scaled_gemm_serialize_ir",
-        rocke_gfx950_block_scaled_gemm_spec_t,
-        gfx950_scaled_build_spec,
-        rocke_build_gfx950_block_scaled_gemm_new(&b, &s, arch_or_default(arch)));
+    require_arch(arch);
+    ROCKE_FAMILY_SERIALIZE_BODY("rocke_engine.gfx950_block_scaled_gemm_serialize_ir",
+                                rocke_gfx950_block_scaled_gemm_spec_t,
+                                gfx950_scaled_build_spec,
+                                rocke_build_gfx950_block_scaled_gemm_new(&b, &s, arch.c_str()));
 }
 std::vector<std::string> gfx950_scaled_verify(const py::dict& d, const std::string& arch)
 {
-    ROCKE_FAMILY_VERIFY_BODY(
-        "rocke_engine.gfx950_block_scaled_gemm_verify",
-        rocke_gfx950_block_scaled_gemm_spec_t,
-        gfx950_scaled_build_spec,
-        rocke_build_gfx950_block_scaled_gemm_new(&b, &s, arch_or_default(arch)));
+    require_arch(arch);
+    ROCKE_FAMILY_VERIFY_BODY("rocke_engine.gfx950_block_scaled_gemm_verify",
+                             rocke_gfx950_block_scaled_gemm_spec_t,
+                             gfx950_scaled_build_spec,
+                             rocke_build_gfx950_block_scaled_gemm_new(&b, &s, arch.c_str()));
 }
 std::string gfx950_scaled_lower_llvm(const py::dict& d, const std::string& arch)
 {
+    const char* a = require_arch(arch);
     std::deque<std::string> store;
     auto s = gfx950_scaled_build_spec(d, store);
     rocke_ir_builder_t b;
-    auto* k = rocke_build_gfx950_block_scaled_gemm_new(&b, &s, arch_or_default(arch));
+    auto* k = rocke_build_gfx950_block_scaled_gemm_new(&b, &s, a);
     if(!k)
     {
         std::string err = rocke_ir_builder_error(&b);
@@ -1101,8 +1102,8 @@ std::string gfx950_scaled_lower_llvm(const py::dict& d, const std::string& arch)
     }
     char* ll = nullptr;
     char err[ROCKE_ERR_MSG_CAP] = {};
-    auto status = rocke_lower_kernel_to_llvm_ex(
-        k, ROCKE_LLVM_FLAVOR_AUTO, arch_or_default(arch), &ll, err, sizeof(err));
+    auto status
+        = rocke_lower_kernel_to_llvm_ex(k, ROCKE_LLVM_FLAVOR_AUTO, a, &ll, err, sizeof(err));
     rocke_ir_builder_free(&b);
     return take_lowered(status, ll, err, "gfx950_block_scaled_gemm");
 }
