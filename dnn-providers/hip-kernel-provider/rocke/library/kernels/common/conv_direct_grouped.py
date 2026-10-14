@@ -4782,10 +4782,6 @@ def build_direct_reorganize_weights(
         b.mul(grp, b.const_i32(p.cpg)),
         b.add(b.mul(m_idx, b.const_i32(16)), q_in_lane),
     )
-    c_new_base = b.add(
-        b.mul(grp, b.const_i32(p.kpg)),
-        b.add(b.mul(atom_idx, b.const_i32(16)), b.mul(c4, b.const_i32(4))),
-    )
     src_ok = b.land(
         b.cmp_lt(b.add(b.mul(m_idx, b.const_i32(16)), q_in_lane), b.const_i32(p.cpg)),
         b.cmp_lt(
@@ -4798,12 +4794,12 @@ def build_direct_reorganize_weights(
     )
     # c_new_base: start of this lane's K-slice within the current atom.
     # fold_k32: c4 selects groups of ELEMS_PER_LANE=8; fold_k16: groups of 4.
+    # W_T's last dim is the *per-group* kpg (the transpose kernel writes
+    # W_T[c_abs, r', s', k_in_g]), so the group is already folded into k_new
+    # and must not be added here again.
     c_new_base = b.add(
-        b.mul(grp, b.const_i32(p.kpg)),
-        b.add(
-            b.mul(atom_idx, b.const_i32(K_ATOM_SZ)),
-            b.mul(c4, b.const_i32(ELEMS_PER_LANE)),
-        ),
+        b.mul(atom_idx, b.const_i32(K_ATOM_SZ)),
+        b.mul(c4, b.const_i32(ELEMS_PER_LANE)),
     )
     src_off, _ = wt_desc.offset(
         b, k_new=k_new_val, r=r_prime, s=s_prime, c_new=c_new_base
@@ -4813,12 +4809,18 @@ def build_direct_reorganize_weights(
     val = _buf_load_vN(b, p.dtype, a_rsrc, safe_src, c0, ELEMS_PER_LANE // 2)
 
     # Destination: stride ELEMS_PER_LANE between consecutive lanes → coalesced.
+    # Every lane stores -- zeros where the source is out of range (partial
+    # K-atom or M-tile). The main kernel zero-masks only the dY operand of a
+    # partial K-atom, so a lane left unwritten here would feed whatever the
+    # workspace held (NaN included) into the MFMA as 0 * garbage.
     dst_off = b.add(
         b.mul(bx, b.const_i32(WAVE * ELEMS_PER_LANE)),
         b.mul(tid, b.const_i32(ELEMS_PER_LANE)),
     )
-    safe_dst = b.select(src_ok, b.mul(dst_off, c_half_bytes), oob_sentinel)
-    _buf_store_vN(b, p.dtype, d_rsrc, safe_dst, c0, val, ELEMS_PER_LANE // 2)
+    val = b.select(src_ok, val, b.zero_vec(io_type, ELEMS_PER_LANE))
+    _buf_store_vN(
+        b, p.dtype, d_rsrc, b.mul(dst_off, c_half_bytes), c0, val, ELEMS_PER_LANE // 2
+    )
 
     return b.kernel
 
