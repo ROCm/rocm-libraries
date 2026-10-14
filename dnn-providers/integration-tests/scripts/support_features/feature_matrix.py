@@ -128,6 +128,10 @@ def group_anchor(group: str) -> str:
     return "group-" + group.lower().replace(" ", "-")
 
 
+def op_anchor(node_type: str) -> str:
+    return "op-" + display_name(node_type).lower()
+
+
 def heading_anchor(heading: str) -> str:
     """GitHub's heading slug: lowercase, punctuation dropped, spaces to '-'."""
     kept = "".join(c for c in heading.lower() if c.isalnum() or c in " -_")
@@ -164,7 +168,15 @@ class FeatureClaims:
 
     # node type -> catalogued features, in catalog order
     features: dict[str, tuple[str, ...]]
+    # node type -> graphs holding it
     graphs: dict[str, int] = field(default_factory=lambda: defaultdict(int))
+    # group -> graphs holding any of its ops; a graph with two of them
+    # counts once
+    group_graphs: dict[str, int] = field(default_factory=lambda: defaultdict(int))
+    # (node type, engine) -> graphs holding it that the engine claims somewhere
+    engine_graphs: dict[tuple[str, str], int] = field(
+        default_factory=lambda: defaultdict(int)
+    )
     # node type -> features any bundle graph exercises, claimed or not
     tested: dict[str, set[str]] = field(default_factory=lambda: defaultdict(set))
     # (node type, target) -> features a graph claimed there by any engine
@@ -222,10 +234,15 @@ def compute_feature_claims(
         engines |= set(unit.claims)
         for pairs in unit.claims.values():
             found |= pairs
-        for node_type, features in unit_features(unit, errors).items():
+        found_features = unit_features(unit, errors)
+        for group in {group_of(t) for t in found_features}:
+            claims.group_graphs[group] += 1
+        for node_type, features in found_features.items():
             claims.graphs[node_type] += 1
             claims.tested[node_type] |= features
+            # collect_units keeps an engine only with a target to claim.
             for engine, pairs in unit.claims.items():
+                claims.engine_graphs[(node_type, engine)] += 1
                 for target in pairs:
                     claims.any_engine[(node_type, target)] |= features
                     claims.by_engine[(node_type, engine, target)] |= features
@@ -264,14 +281,20 @@ def share_cell(count: int, total: int) -> str:
 
 def render_dashboard(claims: FeatureClaims) -> list[str]:
     every_op = claims.node_types
+    features_link = link("Features per op", heading_anchor("Features per op"))
     out = [
         "## Summary by architecture",
         "",
-        f"`{FULL}` every feature claimed · `{PARTIAL} 45%` 45% of the group's "
-        f"features claimed · `{NOT_CLAIMED}` none. A feature counts if a graph "
-        "exercising it is claimed by any engine on that GPU and OS. *Tested* is "
-        "the ceiling: features any bundle graph exercises, claimed or not. "
-        "GPUs with the most features claimed come first.",
+        "- **Graphs**: bundle graphs that contain an op of the group.",
+        "- **API features**: the options the group's ops offer in the API "
+        "(data types, modes, flags, optional inputs, ...), catalogued from "
+        f"the flatbuffers schema. Each is listed in {features_link}.",
+        "- **Exercised**: API features at least one graph uses, claimed or "
+        "not. No GPU column can go higher.",
+        f"- **GPU columns**: share of the API features that a graph claimed "
+        f"on that GPU and OS (by any engine) uses. `{FULL}` all · "
+        f"`{PARTIAL} 45%` 45% · `{NOT_CLAIMED}` none. GPUs with the most "
+        "features claimed come first.",
         "",
     ]
     for family, in_family in FAMILIES:
@@ -290,6 +313,7 @@ def render_dashboard(claims: FeatureClaims) -> list[str]:
             rows.append(
                 [
                     f"**{link(group, group_anchor(group))}**",
+                    str(claims.group_graphs.get(group, 0)),
                     str(total),
                     share_cell(claims.tested_count(members), total),
                     *(
@@ -301,8 +325,9 @@ def render_dashboard(claims: FeatureClaims) -> list[str]:
         out += table(
             [
                 "Op group",
-                "Features",
-                "Tested",
+                "Graphs",
+                "API features",
+                "Exercised",
                 *(link(target_name(t), target_anchor(t)) for t in targets),
             ],
             rows,
@@ -317,10 +342,17 @@ def render_by_engine(claims: FeatureClaims) -> list[str]:
         "",
         f"**Engines:** {engines}",
         "",
-        f"`{FULL}` every feature of the op claimed · `{PARTIAL} 72%` 72% of "
-        f"the op's features claimed · `{NOT_CLAIMED}` none claimed. "
-        "L = Linux, W = Windows. An op appears under an engine that claims "
-        "at least one of its graphs somewhere.",
+        "- **Graphs claimed**: graphs of the op this engine claims on at "
+        "least one GPU.",
+        "- **API features**: the op's catalogued API features, listed in "
+        f"{link('Features per op', heading_anchor('Features per op'))}.",
+        "- **GPU columns**: share of the op's API features that a graph this "
+        f"engine claims on that GPU and OS uses. `{FULL}` all · "
+        f"`{PARTIAL} 72%` 72% · `{NOT_CLAIMED}` none. L = Linux, "
+        "W = Windows.",
+        "",
+        "An op appears under an engine that claims at least one of its graphs "
+        "somewhere.",
         "",
     ]
     for engine in claims.engines:
@@ -334,13 +366,22 @@ def render_by_engine(claims: FeatureClaims) -> list[str]:
             total = len(claims.features[node_type])
             rows.append(
                 [
-                    f"**{link(display_name(node_type), group_anchor(group_of(node_type)))}**",
+                    f"**{link(display_name(node_type), op_anchor(node_type))}**",
+                    str(claims.engine_graphs.get((node_type, engine), 0)),
                     str(total),
                     *(percent_cell(c, total) for c in counts),
                 ]
             )
         out += [f"### {engine}", ""]
-        out += table(["Op", "Features", *map(short_target_link, claims.targets)], rows)
+        out += table(
+            [
+                "Op",
+                "Graphs claimed",
+                "API features",
+                *map(short_target_link, claims.targets),
+            ],
+            rows,
+        )
     return out
 
 
@@ -349,7 +390,8 @@ def render_op_groups(claims: FeatureClaims) -> list[str]:
     for group in claims.groups:
         members = claims.group_members(group)
         listed = ", ".join(
-            f"{display_name(t)} ({len(claims.features[t])})" for t in members
+            f"{link(display_name(t), op_anchor(t))} ({len(claims.features[t])})"
+            for t in members
         )
         rows.append(
             [
@@ -362,33 +404,40 @@ def render_op_groups(claims: FeatureClaims) -> list[str]:
         "## Op groups",
         "",
         "The API node types (`<Op>Attributes` in the flatbuffers schema) that "
-        "make up each group, with their feature counts. Each op's features are "
-        "catalogued in `scripts/support_features/<op>.py`.",
+        "make up each group, with their API feature counts.",
         "",
-        *table(["Op group", "Features", "Ops (features)"], rows),
+        *table(["Op group", "API features", "Ops (API features)"], rows),
     ]
 
 
-def render_untested(claims: FeatureClaims) -> list[str]:
+def render_features_per_op(claims: FeatureClaims) -> list[str]:
     rows = []
     for node_type in claims.node_types:
         features = claims.features[node_type]
-        missing = [f for f in features if f not in claims.tested.get(node_type, ())]
+        used = claims.tested.get(node_type, set())
+        exercised = [f for f in features if f in used]
+        missing = [f for f in features if f not in used]
         rows.append(
             [
-                f"**{display_name(node_type)}**",
+                f'<a id="{op_anchor(node_type)}"></a>**{display_name(node_type)}**',
                 str(claims.graphs.get(node_type, 0)),
-                share_cell(len(features) - len(missing), len(features)),
+                share_cell(len(exercised), len(features)),
+                ", ".join(f"`{f}`" for f in exercised) or "—",
                 ", ".join(f"`{f}`" for f in missing) or "—",
             ]
         )
     return [
-        "## Untested features",
+        "## Features per op",
         "",
-        "Features no bundle graph exercises: no engine can be shown to claim "
-        "them until a graph does.",
+        "Every API feature the percentages count, catalogued per op in "
+        "`scripts/support_features/<op>.py`. A feature is one value of one "
+        "API option: `dtype:bf16`, `mask:causal`. Features nothing exercises "
+        "cannot be claimed on any GPU until a graph uses them.",
         "",
-        *table(["Op", "Graphs", "Tested", "Not exercised by any graph"], rows),
+        *table(
+            ["Op", "Graphs", "Exercised", "Exercised by a graph", "Not exercised"],
+            rows,
+        ),
     ]
 
 
@@ -423,7 +472,7 @@ def render(claims: FeatureClaims) -> str:
         *(name for name, _ in FAMILIES),
         "By engine",
         "Op groups",
-        "Untested features",
+        "Features per op",
         "GPU targets",
     ]
     jump = " · ".join(link(s, heading_anchor(s)) for s in sections)
@@ -442,7 +491,7 @@ def render(claims: FeatureClaims) -> str:
         *render_dashboard(claims),
         *render_by_engine(claims),
         *render_op_groups(claims),
-        *render_untested(claims),
+        *render_features_per_op(claims),
         *render_gpu_targets(claims),
     ]
     return "\n".join(lines).rstrip() + "\n"

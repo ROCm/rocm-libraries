@@ -437,7 +437,9 @@ python3 dnn-providers/integration-tests/scripts/support_features/coverage.py
 
 `feature_matrix.py` lays the same shares out like the support matrix: op
 groups by GPU and OS, then one table per engine, where a cell is the share of
-the op's features claimed there rather than the share of its graphs.
+the op's features claimed there rather than the share of its graphs. Its
+*Features per op* section lists every feature counted, split into those a
+graph exercises and those none does.
 
 ```bash
 python3 dnn-providers/integration-tests/scripts/support_features/feature_matrix.py \

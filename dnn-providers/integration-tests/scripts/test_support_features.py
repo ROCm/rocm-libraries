@@ -545,6 +545,43 @@ class TestFeatureClaims:
         # Feature ids are per op: the totals add, they never merge.
         assert claims.total([FAKE_TYPE, OTHER_TYPE]) == 6
 
+    def test_group_counts_a_graph_once(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Two ops of the Attention group in one graph, one in another.
+        backward = "SdpaBackwardAttributes"
+        monkeypatch.setitem(registry.OPS, backward, OTHER_OP)
+        _bundle(
+            tmp_path,
+            "a",
+            [_node(features=["dtype:fp16"]), _node(backward, features=["data:empty"])],
+        )
+        _bundle(tmp_path, "b", [_node(features=["dtype:bf16"])])
+        claims = _feature_claims(tmp_path)
+        assert claims.group_graphs["Attention"] == 2
+        assert claims.graphs[FAKE_TYPE] == 2
+        assert claims.graphs[backward] == 1
+
+    def test_engine_graphs_count_claimed_graphs_per_engine(
+        self, tmp_path: Path
+    ) -> None:
+        _bundle(
+            tmp_path,
+            "a",
+            [_node(features=["dtype:fp16"])],
+            claims={"E1": {"gfx942": ["linux", "windows"], "gfx90a": ["linux"]}},
+        )
+        _bundle(
+            tmp_path,
+            "b",
+            [_node(features=["dtype:bf16"])],
+            claims={"E1": {"gfx942": ["linux"]}, "E2": {"gfx942": ["linux"]}},
+        )
+        claims = _feature_claims(tmp_path)
+        # A graph claimed on several targets counts once.
+        assert claims.engine_graphs[(FAKE_TYPE, "E1")] == 2
+        assert claims.engine_graphs[(FAKE_TYPE, "E2")] == 1
+
 
 class TestFeatureMatrixNames:
     def test_every_real_op_lands_in_a_named_group(self) -> None:
@@ -613,16 +650,20 @@ class TestFeatureMatrixMarkdown:
     def test_dashboard_cells_are_feature_shares(self, tmp_path: Path) -> None:
         document = self._document(tmp_path)
         rdna = _row(document, "### RDNA (consumer)", "Attention")
+        # Op group, Graphs, API features, Exercised, gfx1100-windows.
         assert rdna == [
             "**[Attention](#group-attention)**",
+            "2",
             "4",
             "3 / 4 (75%)",
             "🟡 75%",
         ]
         cdna = _row(document, "### CDNA (data center)", "Attention")
-        assert cdna[3] == "🟡 50%"
+        assert cdna[4] == "🟡 50%"
         # An op no graph exercises reads ❌, not a blank.
-        assert _row(document, "### CDNA (data center)", "CustomOp")[2:] == [
+        assert _row(document, "### CDNA (data center)", "CustomOp")[1:] == [
+            "0",
+            "2",
             "0 / 2 (0%)",
             "❌",
         ]
@@ -651,20 +692,42 @@ class TestFeatureMatrixMarkdown:
 
     def test_engine_tables_count_only_that_engine(self, tmp_path: Path) -> None:
         document = self._document(tmp_path)
-        # Columns: gfx942 L, gfx1100 W.
-        assert _row(document, "### E1", "Sdpa")[2:] == ["🟡 50%", "🟡 25%"]
-        assert _row(document, "### E2", "Sdpa")[2:] == ["❌", "🟡 50%"]
+        # Columns: Op, Graphs claimed, API features, gfx942 L, gfx1100 W.
+        assert _row(document, "### E1", "Sdpa") == [
+            "**[Sdpa](#op-sdpa)**",
+            "2",
+            "4",
+            "🟡 50%",
+            "🟡 25%",
+        ]
+        assert _row(document, "### E2", "Sdpa")[1:] == ["1", "4", "❌", "🟡 50%"]
 
     def test_engine_table_omits_ops_it_never_claims(self, tmp_path: Path) -> None:
         document = self._document(tmp_path)
         e1 = document.split("\n### E1\n", 1)[1].split("\n#", 1)[0]
         assert "CustomOp" not in e1
 
-    def test_untested_features_are_listed(self, tmp_path: Path) -> None:
+    def test_every_feature_is_listed_per_op(self, tmp_path: Path) -> None:
         document = self._document(tmp_path)
-        section = document.split("## Untested features", 1)[1]
-        assert "| **Sdpa** | 2 | 3 / 4 (75%) | `mask:sliding` |" in section
-        assert "`data:empty`, `data:present`" in section
+        section = document.split("\n## Features per op\n", 1)[1]
+        assert (
+            '| <a id="op-sdpa"></a>**Sdpa** | 2 | 3 / 4 (75%) | '
+            "`dtype:fp16`, `dtype:bf16`, `mask:causal` | `mask:sliding` |"
+        ) in section
+        assert (
+            '| <a id="op-customop"></a>**CustomOp** | 0 | 0 / 2 (0%) | — | '
+            "`data:empty`, `data:present` |"
+        ) in section
+
+    def test_legend_defines_every_column(self, tmp_path: Path) -> None:
+        document = self._document(tmp_path)
+        summary = document.split("## Summary by architecture", 1)[1]
+        summary = summary.split("\n### ", 1)[0]
+        for column in ("Graphs", "API features", "Exercised", "GPU columns"):
+            assert f"- **{column}**:" in summary
+        engines = document.split("## By engine", 1)[1].split("\n### ", 1)[0]
+        for column in ("Graphs claimed", "API features", "GPU columns"):
+            assert f"- **{column}**:" in engines
 
     def test_anchors_resolve(self, tmp_path: Path) -> None:
         document = self._document(tmp_path)
@@ -675,7 +738,13 @@ class TestFeatureMatrixMarkdown:
             for line in document.splitlines()
             if line.startswith("#")
         }
-        assert {"gpu-targets", "e1", "group-attention"} <= targets
+        assert {
+            "gpu-targets",
+            "e1",
+            "group-attention",
+            "op-sdpa",
+            "features-per-op",
+        } <= targets
         assert targets <= defined
 
 
