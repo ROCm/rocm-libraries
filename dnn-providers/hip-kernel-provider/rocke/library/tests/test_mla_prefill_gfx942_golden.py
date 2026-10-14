@@ -6,6 +6,9 @@
 Hashes the Python-lowered LLVM IR (SHA256) of representative ``mla_prefill``
 specs and compares against a checked-in per-flavor golden fixture, catching
 unintended codegen drift. Pure text lowering -- no GPU / no comgr required.
+Every flavor in ``LLVM_FLAVORS`` is checked from any host, through the shared
+``rocke.core.ir_golden`` comparator, so a newly added flavor fails here until
+the fixture is re-blessed.
 
 Covers both entry points in the family and both shipped head counts:
 
@@ -18,10 +21,13 @@ Covers both entry points in the family and both shipped head counts:
     guards the *shipped* configuration: if a future change moves a lever in
     ``dispatch.mla.gfx942``, this case moves with it and re-blessing stays a
     one-command operation.
+  * ``fwd_h128_agpr`` -- the agpr_acc layout built directly. Admission refuses
+    it on llvm20, which the golden records as an expected failure for that
+    flavor rather than a case.
 
-There is NO cpp/python byte-identity companion gate for this family: MLA has no
-C++ engine mirror (settled when the family was scoped), so the dual-engine parity
-gate does not apply. The Python lowering IS the ground truth here.
+There is no C++ *builder* mirror for this family, but the C++ lowerer is
+family-agnostic: ``test_attention_ir_cpp_parity.py`` lowers these same cases
+through both engines and requires byte-identical IR.
 
 Re-bless, from ``rocke/library``:
 
@@ -33,13 +39,14 @@ without a matching, explained emission change is a defect, not a stale fixture.
 
 import hashlib
 import json
+import os
 import sys
+from contextlib import contextmanager
 from pathlib import Path
 
 _GOLDEN = (
     Path(__file__).resolve().parent / "golden" / "mla_prefill_gfx942_ir_sha256.json"
 )
-_FLAVORS = ("llvm20", "llvm22", "llvm23")
 _ARCH = "gfx942"
 _SCHEMA = "mla_prefill_gfx942.ir_golden_sha256/v1"
 
@@ -71,6 +78,21 @@ def _cases():
             MlaPrefillSpec(num_heads=num_heads), arch=_ARCH
         )
 
+    def agpr(num_heads):
+        # The shipped long-key layout, built directly so llvm20's refusal is
+        # recorded rather than hidden behind dispatch's fallback.
+        return lambda: build_mla_prefill_fwd(
+            MlaPrefillSpec(
+                num_heads=num_heads,
+                heads_per_wg=2,
+                q_tiles_per_wg=2,
+                num_warps=4,
+                block_q=64,
+                agpr_acc=True,
+            ),
+            arch=_ARCH,
+        )
+
     def probe(num_heads):
         # The probe is single-tile, so it pins block_q to one MFMA tile.
         return lambda: build_mla_prefill_score_probe(
@@ -88,7 +110,7 @@ def _cases():
                     num_seqs=2,
                     max_seqlen_k=max_k,
                     arch=_ARCH,
-                    # MI300A, pinned: the XCD count would otherwise come from
+                    # 228-CU gfx942, pinned: the XCD count would otherwise come from
                     # the host's device and make the fixture host-dependent.
                     num_cus=228,
                 )
@@ -108,108 +130,119 @@ def _cases():
         # Long keys filling the device: the agpr_acc layout at llvm22 (llvm20
         # refuses it and dispatch falls back to 16 rows per wave).
         "mla_prefill_gfx942/dispatch_fwd_h128_long": dispatched(128, 8192, 8192),
+        "mla_prefill_gfx942/fwd_h128_agpr": agpr(128),
     }
 
 
-def _current_flavor():
-    from rocke.core.lower_llvm import _resolve_llvm_flavor
-
-    return _resolve_llvm_flavor()
-
-
-def _sha_for(build, flavor):
-    import os
-
-    from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
-
-    # Build under the flavor being lowered: dispatch admission is
-    # flavor-dependent (agpr_acc refuses llvm20), so a dispatch-built case must
-    # select its spec for the same flavor its IR is recorded for.
+@contextmanager
+def _flavor_env(flavor):
+    """Build under the flavor being lowered: admission is flavor-dependent
+    (agpr_acc refuses llvm20), so a case must select and admit its spec for the
+    same flavor its IR is recorded for."""
     old = os.environ.get("ROCKE_LLVM_FLAVOR")
     os.environ["ROCKE_LLVM_FLAVOR"] = flavor
     try:
-        kernel = build()
+        yield
     finally:
         if old is None:
             os.environ.pop("ROCKE_LLVM_FLAVOR", None)
         else:
             os.environ["ROCKE_LLVM_FLAVOR"] = old
-    llvm = _lower_kernel_to_llvm_python(kernel, arch=_ARCH, llvm_flavor=flavor)
-    data = llvm.encode("utf-8")
-    return hashlib.sha256(data).hexdigest(), len(data)
 
 
-def _build_doc():
-    doc = {"schema": _SCHEMA, "flavors": {}}
-    for flavor in _FLAVORS:
-        cases = {}
-        for cid, build in _cases().items():
+def _run(flavor):
+    """One flavor's golden sub-document.
+
+    An admission refusal (``NotImplementedError`` from
+    :func:`~kernels.mla.mla_prefill_gfx942.require_mla_prefill`) is recorded
+    under ``expected_failures`` with its message, so the refusal itself is
+    pinned. Any other build error propagates with its traceback, in the test
+    and under ``--write`` alike, so a fixture is never blessed with a case that
+    fails to lower.
+    """
+    from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
+
+    cases, failures = {}, {}
+    for cid, build in _cases().items():
+        with _flavor_env(flavor):
             try:
-                sha, nbytes = _sha_for(build, flavor)
-                cases[cid] = {"sha256": sha, "bytes": nbytes}
-            except Exception as e:  # pragma: no cover - diagnostic
-                cases[cid] = {"error": str(e)[:160]}
-        doc["flavors"][flavor] = {"cases": cases}
+                kernel = build()
+            except NotImplementedError as e:
+                failures[cid] = {"type": type(e).__name__, "message": str(e)}
+                continue
+        llvm = _lower_kernel_to_llvm_python(kernel, arch=_ARCH, llvm_flavor=flavor)
+        data = llvm.encode("utf-8")
+        cases[cid] = {"sha256": hashlib.sha256(data).hexdigest(), "bytes": len(data)}
+    doc = {"cases": cases}
+    if failures:
+        doc["expected_failures"] = failures
     return doc
 
 
-def test_mla_prefill_gfx942_golden_covers_every_case():
-    """The fixture and the case table name exactly the same cases.
+def _build_doc():
+    from rocke.core.ir_golden import GOLDEN_FLAVORS
 
-    Without this, a case added to ``_cases()`` but never blessed would be
-    silently skipped rather than failing, and a typo'd cid would pin nothing.
-    """
+    return {
+        "schema": _SCHEMA,
+        "flavors": {fl: _run(fl) for fl in GOLDEN_FLAVORS},
+    }
+
+
+def _golden():
     import pytest
 
     if not _GOLDEN.exists():
         pytest.skip("MLA golden fixture missing; generate with --write")
     golden = json.loads(_GOLDEN.read_text())
     assert golden.get("schema") == _SCHEMA
+    return golden
+
+
+def test_mla_prefill_gfx942_golden_covers_every_case():
+    """Every flavor accounts for exactly the case table: each case is either
+    hashed or a recorded expected failure, never both, never neither.
+
+    Without this, a case added to ``_cases()`` but never blessed would be
+    silently skipped rather than failing, and a typo'd cid would pin nothing.
+    """
+    from rocke.core.ir_golden import GOLDEN_FLAVORS
+
+    golden = _golden()
     want = set(_cases())
-    for flavor in _FLAVORS:
-        recorded = set(golden["flavors"][flavor]["cases"])
+    for flavor in GOLDEN_FLAVORS:
+        sub = golden["flavors"][flavor]
+        hashed = set(sub["cases"])
+        refused = set(sub.get("expected_failures", {}))
+        assert not hashed & refused, f"{flavor}: {sorted(hashed & refused)}"
+        recorded = hashed | refused
         assert recorded == want, (
             f"{flavor}: golden case set differs from the case table; "
             f"missing={sorted(want - recorded)} stale={sorted(recorded - want)}"
         )
 
 
-def test_mla_prefill_gfx942_golden_records_no_build_errors():
-    """A blessed ``{"error": ...}`` entry is a failed bless, not a golden."""
-    import pytest
+def test_mla_prefill_gfx942_golden_expected_failures_are_the_llvm20_agpr_refusal():
+    """The only refusal the golden may hold is agpr_acc at llvm20; anything
+    else recorded as an expected failure is a failed bless, not a golden."""
+    from rocke.core.ir_golden import GOLDEN_FLAVORS
 
-    if not _GOLDEN.exists():
-        pytest.skip("MLA golden fixture missing; generate with --write")
-    golden = json.loads(_GOLDEN.read_text())
-    broken = [
-        f"{flavor}/{cid}: {entry['error']}"
-        for flavor in _FLAVORS
-        for cid, entry in golden["flavors"][flavor]["cases"].items()
-        if "error" in entry
-    ]
-    assert not broken, "golden holds build errors:\n  " + "\n  ".join(broken)
+    golden = _golden()
+    for flavor in GOLDEN_FLAVORS:
+        refused = golden["flavors"][flavor].get("expected_failures", {})
+        if flavor == "llvm20":
+            assert set(refused) == {"mla_prefill_gfx942/fwd_h128_agpr"}
+            entry = refused["mla_prefill_gfx942/fwd_h128_agpr"]
+            assert entry["type"] == "NotImplementedError"
+            assert "agpr_acc" in entry["message"]
+        else:
+            assert not refused, f"{flavor}: unexpected refusals {sorted(refused)}"
 
 
 def test_mla_prefill_gfx942_ir_matches_golden():
-    import pytest
+    from rocke.core.ir_golden import check_golden
 
-    if not _GOLDEN.exists():
-        pytest.skip("MLA golden fixture missing; generate with --write")
-    golden = json.loads(_GOLDEN.read_text())
-    flavor = _current_flavor()
-    gflav = golden.get("flavors", {}).get(flavor)
-    if not gflav:
-        pytest.skip(f"no MLA golden recorded for llvm flavor {flavor!r}")
-    drift = []
-    for cid, build in _cases().items():
-        want = gflav["cases"].get(cid, {}).get("sha256")
-        # A missing case is reported by the coverage test above; do not also
-        # fail here, so one omission produces one diagnosis.
-        if want is None:
-            continue
-        got, _ = _sha_for(build, flavor)
-        if got != want:
-            drift.append(f"{cid}: {want} -> {got}")
+    _golden()
+    drift = check_golden(_GOLDEN, _run)
     assert not drift, "gfx942 MLA prefill IR drift vs golden:\n  " + "\n  ".join(drift)
 
 
@@ -250,4 +283,5 @@ if __name__ == "__main__":
         print(f"wrote {_GOLDEN}")
     else:
         test_mla_prefill_gfx942_golden_covers_every_case()
+        test_mla_prefill_gfx942_golden_expected_failures_are_the_llvm20_agpr_refusal()
         test_mla_prefill_gfx942_ir_matches_golden()

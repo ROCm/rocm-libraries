@@ -69,6 +69,10 @@ class MLARequest(OperatorRequest):
     launch geometry is ``total_q // block_q + num_seqs`` in the AITER block
     numbering its in-kernel binary search inverts, which a rectangular request
     cannot express for ragged inputs.
+
+    ``mla_prefill_fwd`` takes the query already projected by ``W_UQ`` and
+    RoPE-rotated (``[total_q, num_heads, d_nope + d_rope]``). Neither step is
+    in-tree; the caller applies both, and a pre-kernel for them is a follow-up.
     """
 
     num_heads: int
@@ -83,9 +87,13 @@ class MLARequest(OperatorRequest):
     page_block_size: int = 16
     causal: bool = True
     # Device CU count; 0 resolves the live device's when the build box is the
-    # requested arch (see ``dispatch.mla.gfx942._resolve_num_xcds``). It only
+    # requested arch (see ``dispatch.mla.gfx942._resolve_num_cus``). It only
     # picks the XCD-aware workgroup order, so a wrong value costs speed.
     num_cus: int = 0
+    # Blocks in the paged KV pool (``c_kv`` / ``k_rope`` first dimension); 0
+    # when unknown. It only feeds the 32-bit extent admission
+    # (``check_mla_prefill_extents``), which skips the paged check at 0.
+    num_kv_blocks: int = 0
     op: str = "mla_prefill_fwd"
     dtype: str = "bf16"
     algorithm: str = "auto"
@@ -144,6 +152,8 @@ def _request_errors(req: OperatorRequest) -> List[str]:
         value = getattr(req, name)
         if int(value) <= 0:
             errors.append(f"{name} must be positive, got {value}")
+    if int(req.num_kv_blocks) < 0:
+        errors.append(f"num_kv_blocks must be >= 0, got {req.num_kv_blocks}")
     if not str(req.arch).strip():
         errors.append("arch must be a non-empty architecture name")
     return errors

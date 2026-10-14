@@ -3,7 +3,9 @@
 
 """gfx942 MLA candidates.
 
-One candidate today: the chunked bf16 prefill forward kernel. Registration is an
+One candidate today: the chunked bf16 prefill forward kernel. It takes the
+query already projected by ``W_UQ`` and RoPE-rotated; neither step is in-tree,
+and the pre-kernel that does both is a follow-up. Registration is an
 explicit ``register(registry)`` call rather than an import side effect, so the
 registry contents stay a readable list and a test can assemble a registry from a
 subset of arch modules.
@@ -15,8 +17,10 @@ import dataclasses
 from typing import Tuple
 
 from kernels.mla.mla_prefill_gfx942 import (
+    MLA_MAX_NUM_SEQS,
     MlaPrefillSpec,
     build_mla_prefill_fwd,
+    check_mla_prefill_extents,
     mla_prefill_block,
     mla_prefill_fwd_grid,
     mla_prefill_fwd_signature,
@@ -46,7 +50,7 @@ from .common import (
 _HEADS_PER_WG = 2
 _Q_TILES_PER_WG = 2
 
-# CUs per XCD on CDNA3 (MI300A has 6 XCDs, MI300X 8).
+# CUs per XCD on CDNA3 (a 228-CU gfx942 has 6 XCDs, a 304-CU one 8).
 _CUS_PER_XCD = 38
 
 # The agpr_acc layout (32 rows per wave, one workgroup per CU) is selected only
@@ -101,8 +105,8 @@ def _use_agpr_layout(req: MLARequest, num_cus: int) -> bool:
     return wgs >= num_cus
 
 
-def _spec_for(req: MLARequest) -> MlaPrefillSpec:
-    """Build the spec dispatch ships for ``req``.
+def _spec_for(req: MLARequest) -> tuple[MlaPrefillSpec, tuple[bool, str]]:
+    """Build the spec dispatch ships for ``req``, with its admission verdict.
 
     The one-wave-per-head layout with two heads x two query tiles per
     workgroup: each pair of waves shares its head's W_UK / W_UV fetches and
@@ -117,9 +121,12 @@ def _spec_for(req: MLARequest) -> MlaPrefillSpec:
     * otherwise 16 rows per wave at two workgroups per CU.
 
     The workgroup order is XCD-aware when the device's XCD count is known. If
-    the head count does not divide or admission refuses both, the remaining
-    levers stay at their :class:`MlaPrefillSpec` defaults, the single-head
-    layout. Nothing else is tuned per request.
+    the head count is odd, the remaining levers stay at their
+    :class:`MlaPrefillSpec` defaults, the single-head layout. Nothing else is
+    tuned per request.
+
+    Admission runs once per candidate spec here, and the verdict of the spec
+    returned is handed back so :func:`support` does not run it again.
     """
     base = MlaPrefillSpec(
         num_heads=req.num_heads,
@@ -131,24 +138,29 @@ def _spec_for(req: MLARequest) -> MlaPrefillSpec:
         block_k=req.page_block_size,
         dtype=req.dtype.lower(),
     )
-    if req.num_heads % _HEADS_PER_WG == 0:
-        num_cus = _resolve_num_cus(req)
-        layouts = [False]
-        if _use_agpr_layout(req, num_cus):
-            layouts.insert(0, True)
-        for agpr in layouts:
-            packed = dataclasses.replace(
-                base,
-                heads_per_wg=_HEADS_PER_WG,
-                q_tiles_per_wg=_Q_TILES_PER_WG,
-                num_warps=_HEADS_PER_WG * _Q_TILES_PER_WG,
-                block_q=(32 if agpr else 16) * _Q_TILES_PER_WG,
-                agpr_acc=agpr,
-                num_xcds=_num_xcds(num_cus),
-            )
-            if supports_mla_prefill(packed, arch=req.arch)[0]:
-                return packed
-    return base
+    if req.num_heads % _HEADS_PER_WG:
+        return base, supports_mla_prefill(base, arch=req.arch)
+    num_cus = _resolve_num_cus(req)
+
+    def packed(agpr: bool) -> MlaPrefillSpec:
+        return dataclasses.replace(
+            base,
+            heads_per_wg=_HEADS_PER_WG,
+            q_tiles_per_wg=_Q_TILES_PER_WG,
+            num_warps=_HEADS_PER_WG * _Q_TILES_PER_WG,
+            block_q=(32 if agpr else 16) * _Q_TILES_PER_WG,
+            agpr_acc=agpr,
+            num_xcds=_num_xcds(num_cus),
+        )
+
+    if _use_agpr_layout(req, num_cus):
+        spec = packed(True)
+        verdict = supports_mla_prefill(spec, arch=req.arch)
+        # llvm20 refuses agpr_acc; fall back to 16 rows per wave.
+        if verdict[0]:
+            return spec, verdict
+    spec = packed(False)
+    return spec, supports_mla_prefill(spec, arch=req.arch)
 
 
 def _make_gfx942_mla_prefill_candidate() -> KernelCandidate:
@@ -170,23 +182,26 @@ def _make_gfx942_mla_prefill_candidate() -> KernelCandidate:
         if not ok:
             return False, why
         try:
-            spec = _spec_for(req)
+            spec, (ok, why) = _spec_for(req)
         except ValueError as exc:
             # ``MlaPrefillSpec.__post_init__`` rejects specs impossible on any
             # arch. Report it rather than propagate: a dispatcher asking "can
             # you serve this?" wants a no, not an exception.
             return False, f"spec rejected: {exc}"
-        ok, why = supports_mla_prefill(spec, arch=req.arch)
         if not ok:
             return False, why
-        return True, "ok"
+        # Per request, not per spec: the extents are runtime arguments.
+        ok, why = check_mla_prefill_extents(
+            spec, total_q=req.total_q, num_kv_blocks=req.num_kv_blocks
+        )
+        return (True, "ok") if ok else (False, why)
 
     def select(req: OperatorRequest) -> MlaPrefillSpec:
         ok, why = candidate.admits(req)
         if not ok:
             raise ValueError(f"{name} does not support request: {why}")
         assert isinstance(req, MLARequest)
-        return _spec_for(req)
+        return _spec_for(req)[0]
 
     def grid(spec: MlaPrefillSpec, req: OperatorRequest) -> Tuple[int, int, int]:
         assert isinstance(req, MLARequest)
@@ -213,7 +228,10 @@ def _make_gfx942_mla_prefill_candidate() -> KernelCandidate:
                 ShapeRange("kv_lora_rank", allowed=(512,)),
                 ShapeRange("page_block_size", allowed=(16,)),
                 ShapeRange("total_q", min=1),
-                ShapeRange("num_seqs", min=1),
+                # The in-kernel seq_idx binary search runs a fixed
+                # MLA_BINARY_SEARCH_ITERS iterations, which resolve at most
+                # 2**iters - 1 sequences.
+                ShapeRange("num_seqs", min=1, max=MLA_MAX_NUM_SEQS),
             ),
             supports_features=MLA_FEATURES,
             # Not merely *supported* -- required. The kernel applies the

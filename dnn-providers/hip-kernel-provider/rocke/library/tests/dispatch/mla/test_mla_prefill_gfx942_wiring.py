@@ -220,6 +220,168 @@ class TestGate(unittest.TestCase):
                     self.assertTrue(candidate.capability.check(req)[0])
 
 
+class TestNumSeqsCap(unittest.TestCase):
+    """The fixed-trip seq_idx binary search bounds the batch size."""
+
+    def test_cap_is_derived_from_the_iteration_count(self):
+        from kernels.mla.mla_prefill_gfx942 import (
+            MLA_BINARY_SEARCH_ITERS,
+            MLA_MAX_NUM_SEQS,
+            MlaPrefillSpec,
+        )
+
+        self.assertEqual(MLA_BINARY_SEARCH_ITERS, 12)
+        self.assertEqual(MLA_MAX_NUM_SEQS, 2**MLA_BINARY_SEARCH_ITERS - 1)
+        self.assertEqual(
+            MlaPrefillSpec(num_heads=128).binary_search_iters, MLA_BINARY_SEARCH_ITERS
+        )
+
+    def test_admits_4095_sequences_and_refuses_4096(self):
+        candidate = MLA_REGISTRY.get(_NAME)
+        self.assertTrue(candidate.admits(_req(total_q=4095, num_seqs=4095))[0])
+        ok, why = candidate.admits(_req(total_q=4096, num_seqs=4096))
+        self.assertFalse(ok)
+        self.assertIn("num_seqs", why)
+
+    def test_search_resolves_every_block_exactly_up_to_the_cap(self):
+        # Host model of rocke.helpers.attention.binary_search_seq_idx (q-block
+        # mode), run on one-token sequences: every q-block's sequence must be
+        # found at MLA_MAX_NUM_SEQS, and one more sequence must break it.
+        from kernels.mla.mla_prefill_gfx942 import MLA_BINARY_SEARCH_ITERS
+
+        bq = 32
+
+        def search(cu_q, target, num_seqs):
+            left, right = 0, num_seqs
+            for _ in range(MLA_BINARY_SEARCH_ITERS):
+                if left < right:
+                    mid = (left + right) // 2
+                    if cu_q[mid] // bq + mid <= target:
+                        left = mid + 1
+                    else:
+                        right = mid
+            return left - 1
+
+        def mismapped(num_seqs):
+            cu_q = list(range(num_seqs + 1))
+            starts = [cu_q[i] // bq + i for i in range(num_seqs)]
+            want = 0
+            for target in range(cu_q[-1] // bq + num_seqs):
+                while want + 1 < num_seqs and starts[want + 1] <= target:
+                    want += 1
+                if search(cu_q, target, num_seqs) != want:
+                    return True
+            return False
+
+        self.assertFalse(mismapped(4095))
+        self.assertTrue(mismapped(4096))
+
+    def test_spec_with_too_few_iterations_is_refused(self):
+        from kernels.mla.mla_prefill_gfx942 import (
+            MlaPrefillSpec,
+            supports_mla_prefill,
+        )
+
+        ok, why = supports_mla_prefill(
+            MlaPrefillSpec(num_heads=128, binary_search_iters=8), arch="gfx942"
+        )
+        self.assertFalse(ok)
+        self.assertIn("binary_search_iters", why)
+
+
+class TestExtentAdmission(unittest.TestCase):
+    """i32 offset admission: refused at the first total_q / pool size whose
+    extent reaches 2**31 (query, output) or the c_kv resource range."""
+
+    # Largest admitted total_q, by head count: floor((2**31 - 1) / (H * cols)).
+    _FUSED_MAX_Q = ((128, 87381), (64, 174762))  # cols = d_nope + d_rope = 192
+    _ABSORBED_MAX_Q = ((128, 29127), (64, 58254))  # cols = r_kv + d_rope = 576
+    # 0x7FFF0000 B / (16 keys * 512 * 2 B) per page.
+    _MAX_KV_BLOCKS = 131068
+
+    def test_fused_query_extent_through_dispatch(self):
+        candidate = MLA_REGISTRY.get(_NAME)
+        for h, top in self._FUSED_MAX_Q:
+            with self.subTest(num_heads=h):
+                self.assertTrue(candidate.admits(_req(num_heads=h, total_q=top))[0])
+                ok, why = candidate.admits(_req(num_heads=h, total_q=top + 1))
+                self.assertFalse(ok)
+                self.assertIn("query extent", why)
+
+    def test_absorbed_query_extent(self):
+        import dataclasses
+
+        from kernels.mla.mla_prefill_gfx942 import check_mla_prefill_extents
+
+        for h, top in self._ABSORBED_MAX_Q:
+            with self.subTest(num_heads=h):
+                spec = dataclasses.replace(
+                    dispatch_mla(_req(num_heads=h)).spec, absorbed_query=True
+                )
+                self.assertEqual(
+                    check_mla_prefill_extents(spec, total_q=top), (True, "")
+                )
+                ok, why = check_mla_prefill_extents(spec, total_q=top + 1)
+                self.assertFalse(ok)
+                self.assertIn("query extent", why)
+
+    def test_output_extent(self):
+        # d_nope + d_rope > d_v and r_kv + d_rope > r_kv on every shipped
+        # geometry, so the query always binds first; a wide d_v isolates the
+        # output check.
+        from kernels.mla.mla_prefill_gfx942 import (
+            MlaPrefillSpec,
+            check_mla_prefill_extents,
+        )
+
+        spec = MlaPrefillSpec(num_heads=128, d_v=1024)
+        top = (2**31 - 1) // (128 * 1024)
+        self.assertTrue(check_mla_prefill_extents(spec, total_q=top)[0])
+        ok, why = check_mla_prefill_extents(spec, total_q=top + 1)
+        self.assertFalse(ok)
+        self.assertIn("output extent", why)
+
+    def test_paged_kv_extent_through_dispatch(self):
+        candidate = MLA_REGISTRY.get(_NAME)
+        for h in (128, 64):
+            with self.subTest(num_heads=h):
+                self.assertTrue(
+                    candidate.admits(
+                        _req(num_heads=h, num_kv_blocks=self._MAX_KV_BLOCKS)
+                    )[0]
+                )
+                ok, why = candidate.admits(
+                    _req(num_heads=h, num_kv_blocks=self._MAX_KV_BLOCKS + 1)
+                )
+                self.assertFalse(ok)
+                self.assertIn("c_kv extent", why)
+
+    def test_paged_kv_extent_absorbed(self):
+        import dataclasses
+
+        from kernels.mla.mla_prefill_gfx942 import check_mla_prefill_extents
+
+        spec = dataclasses.replace(dispatch_mla(_req()).spec, absorbed_query=True)
+        self.assertTrue(
+            check_mla_prefill_extents(
+                spec, total_q=64, num_kv_blocks=self._MAX_KV_BLOCKS
+            )[0]
+        )
+        self.assertFalse(
+            check_mla_prefill_extents(
+                spec, total_q=64, num_kv_blocks=self._MAX_KV_BLOCKS + 1
+            )[0]
+        )
+
+    def test_unknown_pool_skips_the_paged_check(self):
+        self.assertTrue(MLA_REGISTRY.get(_NAME).admits(_req(num_kv_blocks=0))[0])
+
+    def test_negative_pool_is_malformed(self):
+        ok, why = MLA_REGISTRY.get(_NAME).admits(_req(num_kv_blocks=-1))
+        self.assertFalse(ok)
+        self.assertIn("num_kv_blocks", why)
+
+
 class TestSelectorRouting(unittest.TestCase):
     """An explicit ``algorithm``/``spec_id`` pin is honoured."""
 
@@ -275,6 +437,23 @@ class TestDispatchResult(unittest.TestCase):
         self.assertEqual(fallback.q_tiles_per_wg, 1)
         self.assertEqual(fallback.num_xcds, 0)
 
+    def test_admission_runs_once_per_support_query(self):
+        from unittest import mock
+
+        from dispatch.mla import gfx942
+
+        for heads in (128, 5):
+            with self.subTest(heads=heads):
+                with mock.patch.object(
+                    gfx942,
+                    "supports_mla_prefill",
+                    wraps=gfx942.supports_mla_prefill,
+                ) as gate:
+                    self.assertTrue(
+                        MLA_REGISTRY.get(_NAME).admits(_req(num_heads=heads))[0]
+                    )
+                self.assertEqual(gate.call_count, 1)
+
     def test_agpr_layout_for_long_keys_that_fill_the_device(self):
         import os
 
@@ -303,7 +482,7 @@ class TestDispatchResult(unittest.TestCase):
                 os.environ["ROCKE_LLVM_FLAVOR"] = old
 
     def test_xcd_count_from_cu_count(self):
-        # 38 CUs per CDNA3 XCD: MI300A (228) has 6, MI300X (304) 8. Anything
+        # 38 CUs per CDNA3 XCD: a 228-CU gfx942 has 6, a 304-CU one 8. Anything
         # else -- one XCD, a partitioned or unknown part -- keeps launch order.
         for cus, xcds in ((228, 6), (304, 8), (38, 0), (100, 0)):
             with self.subTest(cus=cus):

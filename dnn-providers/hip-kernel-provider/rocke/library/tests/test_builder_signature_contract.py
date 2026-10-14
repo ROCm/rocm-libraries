@@ -252,6 +252,7 @@ REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
     "kernels.gfx950.kda_chunkwise.KdaChunkPrepSpec": (),
     "kernels.gfx950.kda_chunkwise.KdaChunkScanSpec": (),
     "kernels.gfx950.kda_chunkwise.KdaTileSpec": (),
+    "kernels.mla.mla_prefill_gfx942.MlaPrefillSpec": ("num_heads",),
     # Reached through a spec field, so a descriptor has to express it too.
     "rocke.helpers.qk_scale.QkScaleSpec": ("layout",),
     # Convolution specs (migrated from platform to library in AICK-5627).

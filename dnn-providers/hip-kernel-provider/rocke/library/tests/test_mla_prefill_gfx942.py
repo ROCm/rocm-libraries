@@ -22,6 +22,7 @@ from pathlib import Path
 
 from kernels.mla.mla_prefill_gfx942 import (
     MlaPrefillSpec,
+    _fwd_lds_bytes,
     build_mla_prefill_fwd,
     build_mla_prefill_score_probe,
     mla_prefill_block,
@@ -574,3 +575,148 @@ class TestAgprAccResources(unittest.TestCase):
         for m in self.mfma:
             if not re.match(r"v_mfma\S+ a\[", m):
                 self.assertNotIn("a[", m)
+
+
+def _llvm22_env():
+    """The flavor ``agpr_acc`` admission needs; LDS layout does not depend on it."""
+    import os
+    from unittest import mock
+
+    return mock.patch.dict(os.environ, {"ROCKE_LLVM_FLAVOR": "llvm22"})
+
+
+def _emitted_pool(spec: MlaPrefillSpec) -> int:
+    import re
+
+    kernel = build_mla_prefill_fwd(spec, arch="gfx942")
+    ir = lower_kernel_to_llvm(kernel, arch="gfx942")
+    m = re.search(rf"@smem_pool\.{kernel.name} = .*?\[(\d+) x i8\]", ir)
+    assert m, f"no LDS pool in the IR of {kernel.name}"
+    return int(m.group(1))
+
+
+class TestLdsModelMatchesEmittedPool(unittest.TestCase):
+    """``_fwd_lds_bytes`` gates admission, so it must never under-predict.
+
+    It models the lowerer's liveness packing rather than calling it, so it can
+    drift from the real pool while every IR assertion stays green. Pin it to
+    the emitted pool: for every spec dispatch ships, and for every geometry
+    admission accepts at the DeepSeek-V3 head dims.
+    """
+
+    def test_shipped_specs(self):
+        from dataclasses import replace
+
+        from dispatch.mla import MLARequest, dispatch_mla
+
+        def shipped(**kw):
+            req = {"num_heads": 128, "total_q": 64, "num_seqs": 2, "max_seqlen_k": 96}
+            req.update(kw)
+            return dispatch_mla(MLARequest(arch="gfx942", num_cus=228, **req)).spec
+
+        with _llvm22_env():
+            specs = {
+                "two heads x two tiles": shipped(),
+                "odd heads, single-head": shipped(num_heads=5),
+                "agpr_acc": shipped(total_q=8192, max_seqlen_k=8192),
+            }
+            self.assertTrue(specs["agpr_acc"].agpr_acc)
+            self.assertEqual(specs["odd heads, single-head"].heads_per_wg, 1)
+            for name in ("two heads x two tiles", "agpr_acc"):
+                specs[f"{name}, absorbed_query"] = replace(
+                    specs[name], absorbed_query=True
+                )
+            for name, spec in specs.items():
+                with self.subTest(name):
+                    self.assertEqual(_fwd_lds_bytes(spec), _emitted_pool(spec))
+
+    def test_every_admitted_geometry(self):
+        import itertools
+
+        seen = set()
+        with _llvm22_env():
+            for hpw, qpw, nw, bq, bk, rt, aa, aq in itertools.product(
+                (1, 2, 4, 8),
+                (1, 2, 4, 8),
+                (1, 2, 4, 8),
+                range(16, 129, 16),
+                (16, 32, 48),
+                (16, 32, 64, 128),
+                (False, True),
+                (False, True),
+            ):
+                try:
+                    spec = _spec(
+                        num_heads=128,
+                        heads_per_wg=hpw,
+                        q_tiles_per_wg=qpw,
+                        num_warps=nw,
+                        block_q=bq,
+                        block_k=bk,
+                        page_block_size=bk,
+                        r_kv_tile=rt,
+                        agpr_acc=aa,
+                        absorbed_query=aq,
+                    )
+                except ValueError:
+                    continue
+                if not supports_mla_prefill(spec, arch="gfx942")[0]:
+                    continue
+                # r_kv_tile only reaches LDS in the single-head layout.
+                key = (hpw, qpw, nw, bq, bk, aa, aq, rt if hpw == qpw == 1 else 0)
+                if key in seen:
+                    continue
+                seen.add(key)
+                with self.subTest(spec=spec.fwd_kernel_name()):
+                    self.assertEqual(_fwd_lds_bytes(spec), _emitted_pool(spec))
+        self.assertGreater(len(seen), 20)
+
+
+class TestLdsAdmissionMatchesIntendedOccupancy(unittest.TestCase):
+    """LDS admission holds a layout to the workgroups per CU it is built for.
+
+    A four-wave layout runs two workgroups per CU, so its pool must stay at or
+    under 32768 B; past that it would be admitted and silently run one per CU.
+    ``agpr_acc`` and eight-wave workgroups run one per CU by design and get the
+    full 65536 B.
+    """
+
+    def test_two_per_cu_layout_over_32k_refused(self):
+        # Two heads x two tiles at block_k=32: a 45824 B pool.
+        spec = _spec(
+            num_heads=128,
+            heads_per_wg=2,
+            q_tiles_per_wg=2,
+            block_q=32,
+            block_k=32,
+            page_block_size=32,
+        )
+        self.assertEqual(_fwd_lds_bytes(spec), 45824)
+        ok, reason = supports_mla_prefill(spec, arch="gfx942")
+        self.assertFalse(ok)
+        self.assertIn("32768 B that 2 workgroup(s) per CU", reason)
+
+    def test_single_head_layout_over_32k_refused(self):
+        ok, reason = supports_mla_prefill(
+            _spec(r_kv_tile=64, block_q=16), arch="gfx942"
+        )
+        self.assertFalse(ok)
+        self.assertIn("32768 B that 2 workgroup(s) per CU", reason)
+
+    def test_one_per_cu_layouts_get_the_whole_cu(self):
+        with _llvm22_env():
+            for spec in (_aa_spec(), _hpw_spec(heads_per_wg=8, num_warps=8)):
+                with self.subTest(spec=spec.fwd_kernel_name()):
+                    self.assertGreater(_fwd_lds_bytes(spec), 32768)
+                    self.assertEqual(
+                        supports_mla_prefill(spec, arch="gfx942"), (True, "")
+                    )
+
+    def test_agpr_acc_row_staging_must_cover_the_threads(self):
+        # One wave of 64 threads cannot stage a 128-chunk c_kv row; the
+        # builder's row-shift staging would assert.
+        with _llvm22_env():
+            spec = _aa_spec(heads_per_wg=1, q_tiles_per_wg=1, num_warps=1, block_q=32)
+            ok, reason = supports_mla_prefill(spec, arch="gfx942")
+        self.assertFalse(ok)
+        self.assertIn("c_kv row", reason)
