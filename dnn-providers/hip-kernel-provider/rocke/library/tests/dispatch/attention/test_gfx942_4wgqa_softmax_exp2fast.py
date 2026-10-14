@@ -37,6 +37,7 @@ import kernels.common.attention_unified as au
 from kernels.common.attention_unified import _tiled_spec_from_problem
 from kernels.gfx942.attention_tiled_2d import build_gfx942_4warp_gqa
 from rocke.core.ir_print import print_ir
+from rocke.runtime.comgr import resolved_lib_path
 
 # Generous absolute ceiling: measured scratch on this cohort spans 0 B (7.13/7.14
 # comgr, spill-free) to ~100 B (ROCm 7.2 sweep comgr). This guards against a gross
@@ -83,15 +84,15 @@ def _emit_4wgqa_ir(dtype: str) -> str:
 
 
 def _comgr_ready() -> bool:
-    """The scratch guard needs the comgr compile + llvm-readelf/objdump to read notes."""
+    """The scratch guard needs the comgr library + llvm-readelf/objdump to read notes.
+
+    comgr is dlopened lazily on the first compile, so importing ``rocke`` proves
+    nothing; look the library up on disk instead (a pure lookup, no dlopen).
+    """
     if shutil.which("llvm-readelf") is None or shutil.which("llvm-objdump") is None:
         return False
-    try:
-        from rocke import compile_kernel  # noqa: F401
-        from rocke.analysis.isa import analyze_hsaco  # noqa: F401
-    except Exception:  # noqa: BLE001
-        return False
-    return True
+    path = resolved_lib_path()
+    return path is not None and os.path.exists(path)
 
 
 def _scratch_bytes(dtype: str) -> int:
