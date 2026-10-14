@@ -623,6 +623,21 @@ struct comp_targets
         (call_if_selected<Ts>(f), ...);
     }
 
+    template<typename F>
+    static constexpr hipError_t select(target selected, F f)
+    {
+        auto result = hipErrorUnknown;
+        for_each(
+            [&](auto t)
+            {
+                if(target{t} == selected)
+                {
+                    result = f(t);
+                }
+            });
+        return result;
+    }
+
 private:
     static constexpr target_arch cur_arch = device_target_arch();
     static constexpr gen         cur_gen  = gen_from_target_arch(cur_arch);
@@ -660,21 +675,6 @@ private:
                 f(t);
             }
         }
-    }
-
-    template<typename F>
-    static constexpr hipError_t select(target selected, F f)
-    {
-        auto result = hipErrorUnknown;
-        for_each(
-            [&](auto t)
-            {
-                if(target{t} == selected)
-                {
-                    result = f(t);
-                }
-            });
-        return result;
     }
 };
 
