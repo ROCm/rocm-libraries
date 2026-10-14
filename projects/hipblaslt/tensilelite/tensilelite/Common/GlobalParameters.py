@@ -372,6 +372,9 @@ globalParameters["DisableAsmComments"] = False  # Set to True to disable assembl
 # Enable SQTT markers around mainloop iteration (subtile kernels only).
 globalParameters["EmitMainloopTraceMarker"] = False
 
+# Emit the CU-occupancy probe in StreamK hybrid-assignment kernels.
+globalParameters["EmitOccupancyProbe"] = False
+
 globalParameters["RocProfCounter"] = None # No rocprof counter
 
 # StinkyTofu debug level (applies per-PM: outer PM + each ScopeAdaptor inner PM)
@@ -483,6 +486,11 @@ defaultInternalSupportParams = {
     # and ignores bit 29 -- do not claim it; newly generated StreamK 3 / SK5
     # set it True in Solution.py.
     "SupportStreamKPerTileExtraIters": False,
+    # Kernel takes the ProbeAddr/ProbeEpoch/ProbeGrid tail args and, when
+    # ProbeAddr is non-null, stores ProbeEpoch into the slot of the CU each WG
+    # runs on; WGs launched past ProbeGrid then end.
+    # Derived in Solution.py from EmitOccupancyProbe.
+    "SupportOccupancyProbe": False,
     # Use GG as G's backend
     "UseUniversalArgs": True,
     "UseSFC": False,

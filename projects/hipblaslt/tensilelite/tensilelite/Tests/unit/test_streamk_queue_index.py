@@ -327,6 +327,9 @@ def _mentions_const(node, value: str) -> bool:
 
 
 def _is_sk_raw_rank_guard(test) -> bool:
+    # The occupancy probe may widen the guard with `or`.
+    if isinstance(test, ast.BoolOp) and isinstance(test.op, ast.Or):
+        return any(_is_sk_raw_rank_guard(v) for v in test.values)
     return (
         isinstance(test, ast.Call)
         and isinstance(test.func, ast.Attribute)

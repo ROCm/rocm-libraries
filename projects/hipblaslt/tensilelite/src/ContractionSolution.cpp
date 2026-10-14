@@ -2815,6 +2815,28 @@ namespace TensileLite
                                inputs.fusedA2ADrain,
                                static_cast<uint32_t>(problem.fusedA2AExtent()));
 
+        // CU-occupancy probe tail args (8-aligned ProbeAddr, see Signature.py).
+        // !groupedGemm mirrors the codegen gate. Padding grows only the
+        // dispatch; every kernarg keeps the real grid.
+        if(internalArgsSupport.occupancyProbe && !problemType.groupedGemm)
+        {
+            auto const&  params = problem.getParams();
+            const size_t launchGrid
+                = static_cast<size_t>(rv.numWorkGroups.x) * rv.numWorkGroups.y * rv.numWorkGroups.z;
+            const uint32_t minGrid   = params.occupancyProbeMinGrid();
+            void*          probeAddr = params.occupancyProbeAddr();
+            const bool     below     = probeAddr && launchGrid < minGrid;
+            const bool     pad       = below && rv.numWorkGroups.y == 1 && rv.numWorkGroups.z == 1;
+            rv.args.appendAligned<void*>("ProbeAddr", below && !pad ? nullptr : probeAddr);
+            rv.args.append<uint32_t>("ProbeEpoch", params.occupancyProbeEpoch());
+            rv.args.append<uint32_t>("ProbeGrid", static_cast<uint32_t>(launchGrid));
+            if(pad)
+            {
+                rv.numWorkGroups.x = minGrid;
+                rv.numWorkItems.x  = rv.workGroupSize.x * minGrid;
+            }
+        }
+
         if(problemType.stochasticRounding)
         {
             // generate seed from random generator

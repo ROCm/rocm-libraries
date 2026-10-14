@@ -409,3 +409,78 @@ TEST(PersistentArgumentLayout, DataParallelCustomDescriptorMatchesCompleteNormal
         EXPECT_FLOAT_EQ(value<float>(custom.args, "beta"), useBeta ? -1.25f : 0.0f);
     }
 }
+
+TEST(PersistentArgumentLayout, OccupancyProbeTailArgs)
+{
+    auto problem = persistentProblem();
+    auto device  = persistentDevice(7);
+    int  probe   = 0;
+
+    ContractionSolution plain;
+    configurePersistentSolution(plain, 3, 1);
+    auto plainCall
+        = plain.generateSingleCall<true>(problem,
+                                         persistentInputs(),
+                                         device,
+                                         plain.resolvePersistentSettings(problem, device),
+                                         GSUSettings{});
+    EXPECT_FALSE(hasArgument(plainCall.args, "ProbeAddr"));
+    EXPECT_FALSE(hasArgument(plainCall.args, "ProbeEpoch"));
+    EXPECT_FALSE(hasArgument(plainCall.args, "ProbeGrid"));
+
+    ContractionSolution solution;
+    configurePersistentSolution(solution, 3, 1);
+    solution.internalArgsSupport.occupancyProbe = true;
+    struct Case
+    {
+        void*    addr;
+        uint32_t minGrid;
+        uint32_t expectDispatch;
+    };
+    for(auto c :
+        std::vector<Case>{{&probe, 0, 7}, {&probe, 7, 7}, {&probe, 256, 256}, {nullptr, 256, 7}})
+    {
+        SCOPED_TRACE(::testing::Message() << c.addr << " " << c.minGrid);
+        problem.setParams().setOccupancyProbe(c.addr, 41 + c.minGrid, c.minGrid);
+        auto launch = solution.resolvePersistentSettings(problem, device);
+        auto call   = solution.generateSingleCall<true>(
+            problem, persistentInputs(), device, launch, GSUSettings{});
+        auto const& args = call.args;
+        EXPECT_EQ(launch.grid, 7u);
+        EXPECT_EQ(call.numWorkGroups.x, c.expectDispatch);
+        EXPECT_EQ(call.numWorkGroups.y, 1u);
+        EXPECT_EQ(call.numWorkGroups.z, 1u);
+        EXPECT_EQ(call.numWorkItems.x, call.workGroupSize.x * c.expectDispatch);
+        // Grid-derived kernargs keep the real grid.
+        EXPECT_EQ(value<uint32_t>(args, "numWorkGroups"), 7u);
+        EXPECT_EQ(value<uint32_t>(args, "ProbeGrid"), 7u);
+        EXPECT_EQ(value<void*>(args, "ProbeAddr"), c.addr);
+        EXPECT_EQ(value<uint32_t>(args, "ProbeEpoch"), 41 + c.minGrid);
+        auto addrOffset = offset(args, "ProbeAddr");
+        EXPECT_EQ(addrOffset % 8, 0u);
+        EXPECT_GE(addrOffset, plainCall.args.size());
+        EXPECT_LT(addrOffset, plainCall.args.size() + 8);
+        EXPECT_EQ(offset(args, "ProbeEpoch"), addrOffset + 8);
+        EXPECT_EQ(offset(args, "ProbeGrid"), addrOffset + 12);
+        EXPECT_EQ(args.size(), addrOffset + 16);
+        // Everything before the probe args matches the plain launch.
+        EXPECT_EQ(bytes(args, 0, plainCall.args.size()),
+                  bytes(plainCall.args, 0, plainCall.args.size()));
+    }
+
+    // A grid that is not 1-D below minGrid is not padded and gets no probe address.
+    ContractionSolution cluster;
+    configurePersistentSolution(cluster, 3, 1);
+    cluster.sizeMapping.clusterDim             = TensileLite::dim3(2, 2, 1);
+    cluster.internalArgsSupport.occupancyProbe = true;
+    problem.setParams().setOccupancyProbe(&probe, 41, 256);
+    auto launch = cluster.resolvePersistentSettings(problem, device);
+    auto call   = cluster.generateSingleCall<true>(
+        problem, persistentInputs(), device, launch, GSUSettings{});
+    ASSERT_GT(call.numWorkGroups.y, 1u);
+    EXPECT_LT(call.numWorkGroups.x * call.numWorkGroups.y, 256u);
+    EXPECT_EQ(call.numWorkItems.x, call.workGroupSize.x * call.numWorkGroups.x);
+    EXPECT_EQ(value<void*>(call.args, "ProbeAddr"), nullptr);
+    EXPECT_EQ(value<uint32_t>(call.args, "ProbeGrid"),
+              call.numWorkGroups.x * call.numWorkGroups.y * call.numWorkGroups.z);
+}

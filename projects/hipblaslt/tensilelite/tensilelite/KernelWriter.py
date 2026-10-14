@@ -380,6 +380,9 @@ class StateValues:
   batchOffsetCKernArgOffset: int         = 0
   batchOffsetAKernArgOffset: int         = 0
   batchOffsetBKernArgOffset: int         = 0
+  # Kernarg byte offset of ProbeAddr (ProbeEpoch, ProbeGrid follow at +8, +12),
+  # relative to the shifted KernArgAddress; -1 when the kernel has no probe
+  probeKernArgOffset: int                = -1
   numSgprAlpha: int                      = 0 # For user arguments
   numSgprBeta: int                       = 0 # For user arguments
   numStoreSgprNames: List[str]           = field(init=False) # For post-loop kernel args
