@@ -52,14 +52,11 @@ class ShaderModel
 protected:
     const WinoShaderArgsV2 args;
     const uint32_t cu_count;
-    const ProblemDescription problem;
     PerfModelParams model_params;
 
 public:
-    ShaderModel(const WinoShaderArgsV2& shader_args,
-                uint32_t cu_cnt,
-                const ProblemDescription& problem_desc)
-        : args(shader_args), cu_count(cu_cnt), problem(problem_desc)
+    ShaderModel(const WinoShaderArgsV2& shader_args, uint32_t cu_cnt)
+        : args(shader_args), cu_count(cu_cnt)
     {
     }
 
@@ -169,9 +166,8 @@ class ShaderModelV4_6 : public ShaderModel
 public:
     ShaderModelV4_6(const WinoShaderArgsV2& shader_args,
                     uint32_t cu_cnt,
-                    const ProblemDescription& problem,
                     const PerfModelParams& perf_params)
-        : ShaderModel(shader_args, cu_cnt, problem)
+        : ShaderModel(shader_args, cu_cnt)
     {
         model_params = perf_params;
     }
@@ -187,9 +183,8 @@ class ShaderModelV4_9 : public ShaderModel
 public:
     ShaderModelV4_9(const WinoShaderArgsV2& shader_args,
                     uint32_t cu_cnt,
-                    const ProblemDescription& problem,
                     const PerfModelParams& perf_params)
-        : ShaderModel(shader_args, cu_cnt, problem)
+        : ShaderModel(shader_args, cu_cnt)
     {
         model_params = perf_params;
     }
@@ -200,15 +195,10 @@ class ShaderModelV4_11 : public ShaderModel
 public:
     ShaderModelV4_11(const WinoShaderArgsV2& shader_args,
                      uint32_t cu_cnt,
-                     const ProblemDescription& problem,
                      const PerfModelParams& perf_params)
-        : ShaderModel(shader_args, cu_cnt, problem)
+        : ShaderModel(shader_args, cu_cnt)
     {
         model_params = perf_params;
-    }
-    bool IsShaderConstraintsMet(const uint64_t n_groups) const override
-    {
-        return ShaderModel::IsShaderConstraintsMet(n_groups) && problem.IsFp16();
     }
 };
 
@@ -294,15 +284,15 @@ public:
 
         if(kernel_version == KernelVersion::V4_6)
         {
-            return std::make_unique<ShaderModelV4_6>(args, cu_count, problem, perf_params);
+            return std::make_unique<ShaderModelV4_6>(args, cu_count, perf_params);
         }
         else if(kernel_version == KernelVersion::V4_9)
         {
-            return std::make_unique<ShaderModelV4_9>(args, cu_count, problem, perf_params);
+            return std::make_unique<ShaderModelV4_9>(args, cu_count, perf_params);
         }
         else // V4_11
         {
-            return std::make_unique<ShaderModelV4_11>(args, cu_count, problem, perf_params);
+            return std::make_unique<ShaderModelV4_11>(args, cu_count, perf_params);
         }
     }
 
