@@ -24,11 +24,13 @@
  *
  *******************************************************************************/
 
+#include <stdexcept>
 #include <tuple>
 
 #include <gtest/gtest.h>
 
 #include <Tensile/DataTypes.hpp>
+#include <Tensile/UtilsOrigami.hpp>
 
 template <typename Tuple>
 struct TypedDataTypesTest : public ::testing::Test
@@ -180,4 +182,62 @@ TEST(DataTypesTest, CustomArgTypeRoundTrip)
         EXPECT_EQ(TensileLite::fromStringCustomArgType(name), value)
             << "round trip failed for \"" << name << "\"";
     }
+}
+
+// datatypeToAnalyticalDatatype feeds the origami analytical performance model.
+// Existing selection tests pin compute input types to Float, so check every
+// mapped enumerator directly: a swapped or dropped case would silently steer
+// prediction to the wrong precision model.
+struct AnalyticalDatatypeMapping
+    : public ::testing::TestWithParam<std::tuple<rocisa::DataType, origami::data_type_t>>
+{
+};
+
+TEST_P(AnalyticalDatatypeMapping, MapsToMatchingOrigamiType)
+{
+    auto const [input, expected] = GetParam();
+
+    EXPECT_EQ(TensileLite::datatypeToAnalyticalDatatype(input), expected)
+        << "for rocisa::DataType " << TensileLite::ToString(input);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    DataTypesTest,
+    AnalyticalDatatypeMapping,
+    ::testing::Values(
+        std::make_tuple(rocisa::DataType::Float, origami::data_type_t::Float),
+        std::make_tuple(rocisa::DataType::Double, origami::data_type_t::Double),
+        std::make_tuple(rocisa::DataType::ComplexFloat, origami::data_type_t::ComplexFloat),
+        std::make_tuple(rocisa::DataType::ComplexDouble, origami::data_type_t::ComplexDouble),
+        std::make_tuple(rocisa::DataType::Half, origami::data_type_t::Half),
+        std::make_tuple(rocisa::DataType::Int8x4, origami::data_type_t::Int8x4),
+        std::make_tuple(rocisa::DataType::Int32, origami::data_type_t::Int32),
+        std::make_tuple(rocisa::DataType::BFloat16, origami::data_type_t::BFloat16),
+        std::make_tuple(rocisa::DataType::Int8, origami::data_type_t::Int8),
+        std::make_tuple(rocisa::DataType::Int64, origami::data_type_t::Int64),
+        std::make_tuple(rocisa::DataType::XFloat32, origami::data_type_t::XFloat32),
+        std::make_tuple(rocisa::DataType::Float8_fnuz, origami::data_type_t::Float8_fnuz),
+        std::make_tuple(rocisa::DataType::BFloat8_fnuz, origami::data_type_t::BFloat8_fnuz),
+        std::make_tuple(rocisa::DataType::Float8BFloat8_fnuz,
+                        origami::data_type_t::Float8BFloat8_fnuz),
+        std::make_tuple(rocisa::DataType::BFloat8Float8_fnuz,
+                        origami::data_type_t::BFloat8Float8_fnuz),
+        std::make_tuple(rocisa::DataType::Float8, origami::data_type_t::Float8),
+        std::make_tuple(rocisa::DataType::BFloat8, origami::data_type_t::BFloat8),
+        std::make_tuple(rocisa::DataType::Float8BFloat8, origami::data_type_t::Float8BFloat8),
+        std::make_tuple(rocisa::DataType::BFloat8Float8, origami::data_type_t::BFloat8Float8),
+        std::make_tuple(rocisa::DataType::Float6, origami::data_type_t::Float6),
+        std::make_tuple(rocisa::DataType::BFloat6, origami::data_type_t::BFloat6),
+        std::make_tuple(rocisa::DataType::Float4, origami::data_type_t::Float4)));
+
+// Types with no analytical counterpart (and the unset None value) must fail
+// loudly rather than map to an arbitrary origami type.
+TEST(DataTypesTest, AnalyticalDatatypeUnmappedThrows)
+{
+    EXPECT_THROW(TensileLite::datatypeToAnalyticalDatatype(rocisa::DataType::E8),
+                 std::runtime_error);
+    EXPECT_THROW(TensileLite::datatypeToAnalyticalDatatype(rocisa::DataType::E5M3),
+                 std::runtime_error);
+    EXPECT_THROW(TensileLite::datatypeToAnalyticalDatatype(rocisa::DataType::None),
+                 std::runtime_error);
 }
