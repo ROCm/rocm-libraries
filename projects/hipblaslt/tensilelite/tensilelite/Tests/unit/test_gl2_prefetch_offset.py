@@ -291,6 +291,7 @@ def tensor_dims(spec, cfg):
         du = data_depth_u(spec, cfg)
         coal, perp = (spec.mt * M, du) if spec.tlu else (du, spec.mt * M)
 
+    coal_bytes = round(coal * spec.bpe)
     ncc = max(1, (coal_bytes + GLOBAL_PREFETCH_SIZE - 1) // GLOBAL_PREFETCH_SIZE)
 
     return coal, perp, ncc, perp * ncc
