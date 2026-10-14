@@ -1818,22 +1818,24 @@ struct FmhaFwdKernel
             // bijection, then decode with the m-tile fastest so each (batch, head)
             // is contiguous inside its XCD segment.
             //
-            // Dense only: masked grids keep their long-to-short tile order below.
+            // Masked grids reverse the m-tile order below (long tiles first). Their
+            // round-robin runs every head's long tiles first; remapped, each XCD
+            // runs its heads one after another, which only keeps the tail short
+            // when every XCD holds at least as many heads as a head has m-tiles.
             // A single m-tile per (batch, head) (gridDim.y == 1) has no K/V to
             // share, and per-batch lengths keep the round-robin (see
             // HasUniformWork).
-            if constexpr(!kHasMask)
+            const bool remap_masked =
+                gridDim.x * gridDim.z >= CK_TILE_FMHA_FWD_NUM_XCDS * gridDim.y;
+            if(HasUniformWork(kargs) && gridDim.y > 1 && (!kHasMask || remap_masked))
             {
-                if(HasUniformWork(kargs) && gridDim.y > 1)
-                {
-                    const index_t linear_id =
-                        RemapXCD(blockIdx.x + gridDim.x * (blockIdx.y + gridDim.y * blockIdx.z));
+                const index_t linear_id =
+                    RemapXCD(blockIdx.x + gridDim.x * (blockIdx.y + gridDim.y * blockIdx.z));
 
-                    const index_t rest = linear_id / static_cast<index_t>(gridDim.y);
-                    i_block            = linear_id - rest * static_cast<index_t>(gridDim.y);
-                    i_batch            = rest / static_cast<index_t>(gridDim.x);
-                    i_nhead            = rest - i_batch * static_cast<index_t>(gridDim.x);
-                }
+                const index_t rest = linear_id / static_cast<index_t>(gridDim.y);
+                i_block            = linear_id - rest * static_cast<index_t>(gridDim.y);
+                i_batch            = rest / static_cast<index_t>(gridDim.x);
+                i_nhead            = rest - i_batch * static_cast<index_t>(gridDim.x);
             }
 #endif
 

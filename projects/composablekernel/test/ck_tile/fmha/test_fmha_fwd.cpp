@@ -414,24 +414,28 @@ TEST(TestCkTileFmhaFwd, QrTdmLdsArenaPrefill)
 // Batch-mode XCD remap of the block index: several m-tiles per (batch, head) on a
 // grid that is not a multiple of the XCD count (3 x 5 x 3 = 45 blocks at bm0=128,
 // 75 at bm0=64), so the remap of the bhsd and bshd tile indices is not the
-// identity. Per-batch effective lengths keep the round-robin order and return
-// early from the blocks past each batch's seqlen_q.
+// identity; the causal grid also reverses its m-tile order. Per-batch effective
+// lengths keep the round-robin order and return early from the blocks past each
+// batch's seqlen_q.
 class BatchXCDRemap
-    : public TestWithParam<std::tuple<bool, std::tuple<std::vector<int>, std::vector<int>>>>
+    : public TestWithParam<std::tuple<bool, std::vector<int>, std::vector<int>, const char*>>
 {
 };
 
-INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaFwd,
-                         BatchXCDRemap,
-                         Combine(Bool(),
-                                 Values(std::tuple{std::vector<int>{}, std::vector<int>{}},
-                                        std::tuple{std::vector<int>{300, 64, 1},
-                                                   std::vector<int>{300, 100, 7}})));
+INSTANTIATE_TEST_SUITE_P(
+    TestCkTileFmhaFwd,
+    BatchXCDRemap,
+    // bhsd/bshd, q_eff_lens, kv_eff_lens, mask
+    Values(std::tuple{true, std::vector<int>{}, std::vector<int>{}, "0"},
+           std::tuple{false, std::vector<int>{}, std::vector<int>{}, "0"},
+           std::tuple{true, std::vector<int>{300, 64, 1}, std::vector<int>{300, 100, 7}, "0"},
+           std::tuple{false, std::vector<int>{300, 64, 1}, std::vector<int>{300, 100, 7}, "0"},
+           std::tuple{true, std::vector<int>{}, std::vector<int>{}, "2"},
+           std::tuple{false, std::vector<int>{}, std::vector<int>{}, "2"}));
 
 TEST_P(BatchXCDRemap, DataTypeConfig)
 {
-    auto [perm, eff_lens]          = GetParam();
-    auto [q_eff_lens, kv_eff_lens] = eff_lens;
+    auto [perm, q_eff_lens, kv_eff_lens, mask_str] = GetParam();
 
     auto result = fmha_fwd_run<DataTypeConfig>(mode_enum::batch,
                                                3,  // batch
@@ -460,7 +464,7 @@ TEST_P(BatchXCDRemap, DataTypeConfig)
                                                0,     // drop_seed
                                                0,     // drop_offset
                                                false, // drop_prefs
-                                               "0",   // mask_str
+                                               mask_str,
                                                qscale_str,
                                                true, // is_rotary_interleaved
                                                1,    // num_splits
