@@ -21,6 +21,7 @@ on:
       - ".github/workflows/hiprand-rocjitsu-parity.yml"
       - ".github/scripts/ci_parity_runner.py"
       - ".github/scripts/parity_diff.py"
+      - ".github/scripts/resource_monitor.py"
       - ".github/scripts/select_cpu_build_runner.py"
       - "baseline/hiprand-gfx942-hw.json"
   workflow_dispatch:
@@ -165,11 +166,15 @@ jobs:
       - name: Build rocJITsu
         run: |
           set -euo pipefail
+          mkdir -p parity
           cmake -S rocm-systems/emulation/rocjitsu -B rj-build -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DBUILD_TESTING=OFF \
             -DRJ_LOG_GROUPS=OFF
-          cmake --build rj-build --target rocjitsu_bin rocjitsu_shared -j"$(nproc)"
+          python3 .github/scripts/resource_monitor.py \
+            --phase "Build rocJITsu" \
+            --output parity/resources-build.json -- \
+            cmake --build rj-build --target rocjitsu_bin rocjitsu_shared -j"$(nproc)"
           test -x rj-build/tools/rocjitsu/rocjitsu
 
       - name: Install pinned gfx94X runtime and tests
@@ -207,14 +212,20 @@ jobs:
           if [ -n "$ROCJITSU_ARG" ]; then
             common+=(--rocjitsu-arg="$ROCJITSU_ARG")
           fi
+          monitor=(
+            python3 .github/scripts/resource_monitor.py
+            --phase "hipRAND under rocJITsu"
+            --output parity/resources-test.json
+            --
+          )
           echo "ctest label: $CTEST_LABEL"
           if [ -n "$GTEST_FILTER" ]; then
-            "${common[@]}" \
+            "${monitor[@]}" "${common[@]}" \
               --binary "$ROCM_ROOT/bin/test_hiprand_api" \
               --gtest-filter "$GTEST_FILTER" \
               --timeout-seconds 1800
           else
-            "${common[@]}" \
+            "${monitor[@]}" "${common[@]}" \
               --ctest-label "$CTEST_LABEL" \
               --timeout-seconds 7200
           fi
@@ -277,11 +288,15 @@ jobs:
       - name: Build rocJITsu
         run: |
           set -euo pipefail
+          mkdir -p parity
           cmake -S rocm-systems/emulation/rocjitsu -B rj-build -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DBUILD_TESTING=OFF \
             -DRJ_LOG_GROUPS=OFF
-          cmake --build rj-build --target rocjitsu_bin rocjitsu_shared -j"$(nproc)"
+          python3 .github/scripts/resource_monitor.py \
+            --phase "Build rocJITsu" \
+            --output parity/resources-build.json -- \
+            cmake --build rj-build --target rocjitsu_bin rocjitsu_shared -j"$(nproc)"
           test -x rj-build/tools/rocjitsu/rocjitsu
 
       - name: Install pinned gfx94X runtime and tests
@@ -302,11 +317,14 @@ jobs:
       - name: Run installed ffm-quick suites under rocJITsu
         run: |
           set +e
-          python3 .github/scripts/ffm_quick_rocjitsu.py \
-            --rocjitsu "$PWD/rj-build/tools/rocjitsu/rocjitsu" \
-            --config "$PWD/rocm-systems/emulation/rocjitsu/configs/gfx942_cdna3.json" \
-            --rocm-root "$ROCM_ROOT" \
-            --out-dir parity
+          python3 .github/scripts/resource_monitor.py \
+            --phase "ffm-quick under rocJITsu" \
+            --output parity/resources-test.json -- \
+            python3 .github/scripts/ffm_quick_rocjitsu.py \
+              --rocjitsu "$PWD/rj-build/tools/rocjitsu/rocjitsu" \
+              --config "$PWD/rocm-systems/emulation/rocjitsu/configs/gfx942_cdna3.json" \
+              --rocm-root "$ROCM_ROOT" \
+              --out-dir parity
           status=$?
           if [ -f parity/summary.md ]; then
             cat parity/summary.md >> "$GITHUB_STEP_SUMMARY"
