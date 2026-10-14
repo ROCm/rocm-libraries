@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <cstring>
 #include <initializer_list>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <string>
@@ -239,6 +240,73 @@ inline const data_objects::SdpaAttributes* sdpaNode(const MatchContext& context)
         return nullptr;
     }
     return &node.attributesAs<data_objects::SdpaAttributes>();
+}
+
+/// Whether @p tensor promises a base pointer aligned to @p bytes. The backend enforces the
+/// alignment a graph declares and no more, so a kernel that assumes a wider one must read the
+/// declaration: a smaller one would hand it a pointer its vector accesses cannot take.
+inline bool declaresAlignment(const data_objects::TensorAttributes& tensor, int64_t bytes)
+{
+    return tensor.alignment() >= bytes && tensor.alignment() % bytes == 0;
+}
+
+/// Whether the kernels' arithmetic meets the node's compute type. They compute the softmax,
+/// accumulate and keep the statistics in f32: at least the precision FLOAT, HALF or BFLOAT16
+/// asks for, and UNSET leaves it to the engine. DOUBLE asks for more, and an integer or FP8
+/// compute type for a different computation, so those decline.
+inline bool computesInFloat(const MatchContext& context)
+{
+    const auto computeType = context.graph.getNodeWrapper(0).computeDataType();
+    return computeType == data_objects::DataType::UNSET
+           || computeType == data_objects::DataType::FLOAT
+           || computeType == data_objects::DataType::HALF
+           || computeType == data_objects::DataType::BFLOAT16;
+}
+
+/// Whether @p uid names a softmax scale the kernels can take: a host scalar (every dim 1, so
+/// a per-head or per-row scale is not read as one value) of a floating-point type, and, when
+/// its value is in the graph rather than supplied at execute, a positive finite one -- the
+/// kernels take the running max over unscaled scores, which orders them as the scaled ones
+/// only for a positive scale. A runtime value is checked at launch.
+inline bool isServableScaleTensor(const MatchContext& context, int64_t uid)
+{
+    const auto* tensor = findTensor(context, uid);
+    if(tensor == nullptr || tensor->dims() == nullptr
+       || !hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(tensor)
+       || tensor->ragged_offset_tensor_uid().has_value())
+    {
+        return false;
+    }
+    for(const auto extent : *tensor->dims())
+    {
+        if(extent != 1)
+        {
+            return false;
+        }
+    }
+    const auto dataType = tensor->data_type();
+    if(dataType != data_objects::DataType::FLOAT && dataType != data_objects::DataType::HALF
+       && dataType != data_objects::DataType::BFLOAT16
+       && dataType != data_objects::DataType::DOUBLE)
+    {
+        return false;
+    }
+    try
+    {
+        const auto operand
+            = hipdnn_plugin_sdk::makeScalarOperand(context.graph.getTensorMap(), uid, "scale");
+        if(operand.isRuntimeUserSupplied)
+        {
+            return true;
+        }
+        const double value = hipdnn_plugin_sdk::toDouble(operand.bakedDefault);
+        return value > 0.0 && std::isfinite(value)
+               && value <= static_cast<double>(std::numeric_limits<float>::max());
+    }
+    catch(const hipdnn_plugin_sdk::HipdnnPluginException&)
+    {
+        return false;
+    }
 }
 
 /// The product of @p factors, or nullopt when it does not fit in int64_t.
@@ -682,7 +750,9 @@ inline std::optional<int64_t>
     const auto* sink = findTensor(context, uid);
     if(sink == nullptr || sink->dims() == nullptr || sink->strides() == nullptr
        || sink->data_type() != problem.dataType || sink->virtual_()
-       || hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(sink))
+       || hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(sink)
+       || sink->ragged_offset_tensor_uid().has_value()
+       || !declaresAlignment(*sink, BYTES_PER_ELEMENT))
     {
         return std::nullopt;
     }
@@ -720,6 +790,10 @@ inline std::optional<BoundTokens> flydslSdpaCdnaGraphMatches(const MatchContext&
         return std::nullopt;
     }
     const auto& attributes = *attributesPtr;
+    if(!computesInFloat(context))
+    {
+        return std::nullopt;
+    }
 
     const auto* q = findTensor(context, attributes.q_tensor_uid());
     const auto* k = findTensor(context, attributes.k_tensor_uid());
@@ -727,6 +801,13 @@ inline std::optional<BoundTokens> flydslSdpaCdnaGraphMatches(const MatchContext&
     const auto* o = findTensor(context, attributes.o_tensor_uid());
     if(q == nullptr || k == nullptr || v == nullptr || o == nullptr || q->dims() == nullptr
        || k->dims() == nullptr || q->dims()->size() != SDPA_RANK || k->dims()->size() != SDPA_RANK)
+    {
+        return std::nullopt;
+    }
+    // Rows move as 16-byte vectors from each operand's base.
+    const int64_t vectorBytes = VECTOR_ELEMENTS * BYTES_PER_ELEMENT;
+    if(!declaresAlignment(*q, vectorBytes) || !declaresAlignment(*k, vectorBytes)
+       || !declaresAlignment(*v, vectorBytes) || !declaresAlignment(*o, vectorBytes))
     {
         return std::nullopt;
     }
@@ -808,7 +889,8 @@ inline std::optional<BoundTokens> flydslSdpaCdnaGraphMatches(const MatchContext&
     if(attributes.attn_mask_tensor_uid().has_value())
     {
         const auto* bias = findTensor(context, attributes.attn_mask_tensor_uid().value());
-        if(bias == nullptr || !servableBias(*bias, problem).has_value())
+        if(bias == nullptr || !declaresAlignment(*bias, vectorBytes)
+           || !servableBias(*bias, problem).has_value())
         {
             return std::nullopt;
         }
@@ -818,12 +900,15 @@ inline std::optional<BoundTokens> flydslSdpaCdnaGraphMatches(const MatchContext&
     bool statsPacked = true;
     if(attributes.stats_tensor_uid().has_value())
     {
+        // An LSE tensor with generate_stats explicitly false would be written anyway: the
+        // two disagree, so the graph declines rather than one being ignored.
         const auto* stats = findTensor(context, attributes.stats_tensor_uid().value());
         const auto lseStrides
             = stats == nullptr
                   ? std::nullopt
                   : servableStatsStrides(*stats, problem.batch, problem.numHeads, problem.seqLenQ);
-        if(!lseStrides.has_value())
+        if(!lseStrides.has_value() || !declaresAlignment(*stats, sizeof(float))
+           || (attributes.generate_stats().has_value() && !attributes.generate_stats().value()))
         {
             return std::nullopt;
         }
@@ -855,19 +940,10 @@ inline std::optional<BoundTokens> flydslSdpaCdnaGraphMatches(const MatchContext&
     if(attributes.scale_tensor_uid().has_value())
     {
         // Only a host scalar can become a kernel argument; a device-resident scale would
-        // need a device read the kernels do not do.
-        const auto* scaleTensor = findTensor(context, attributes.scale_tensor_uid().value());
-        if(scaleTensor == nullptr
-           || !hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(scaleTensor))
-        {
-            return std::nullopt;
-        }
-        try
-        {
-            static_cast<void>(hipdnn_plugin_sdk::makeScalarOperand(
-                context.graph.getTensorMap(), attributes.scale_tensor_uid().value(), "scale"));
-        }
-        catch(const hipdnn_plugin_sdk::HipdnnPluginException&)
+        // need a device read the kernels do not do. A value set as well would be ignored,
+        // so the two together decline.
+        if(attributes.attn_scale_value().has_value()
+           || !isServableScaleTensor(context, attributes.scale_tensor_uid().value()))
         {
             return std::nullopt;
         }

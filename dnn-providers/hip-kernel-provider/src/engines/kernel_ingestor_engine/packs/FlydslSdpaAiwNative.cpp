@@ -229,6 +229,13 @@ bool flydslSdpaAiwKernelMatches(const MatchContext& context,
         {
             return false;
         }
+        // An f32 mask is loaded as 8 x f32 at that type's natural alignment, 32 bytes (the
+        // load states none), so its base must promise 32 rather than the 16 every other
+        // operand needs.
+        if(f32 && !declaresAlignment(*biasTensor, 2 * VECTOR_BYTES))
+        {
+            return false;
+        }
         // The mask is read 8 keys at a time at the vector's alignment, like Q/K/V/O's rows:
         // each row it steps to (batch, head, query; a broadcast axis has stride 0) must
         // start on an 8-element boundary.

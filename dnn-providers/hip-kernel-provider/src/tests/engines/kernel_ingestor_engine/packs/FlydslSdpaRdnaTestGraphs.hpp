@@ -6,8 +6,13 @@
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
 #include <cstdint>
+#include <functional>
+#include <limits>
+#include <map>
 #include <optional>
+#include <set>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -110,6 +115,9 @@ constexpr int64_t FLYDSL_SDPA_RDNA_BIAS_UID = 66;
 constexpr int64_t FLYDSL_SDPA_RDNA_STATS_UID = 77;
 constexpr int64_t FLYDSL_SDPA_RDNA_RAGGED_OFFSET_UID = 88;
 constexpr int64_t FLYDSL_SDPA_RDNA_SINK_UID = 99;
+/// An f32 [1] device tensor a graph carries when a case names it from a field the spec has
+/// no member for (a page table, a dropout seed, a descale), so the field refers to something.
+constexpr int64_t FLYDSL_SDPA_RDNA_AUX_UID = 111;
 
 /// Physical arrangement of a (B, H, S, D) logical tensor.
 enum class SdpaLayout
@@ -222,6 +230,32 @@ struct SdpaGraphSpec
     bool withDropout = false;
     /// Marks Q as ragged (THD), which the kernel would read as dense.
     bool raggedQuery = false;
+
+    // Every other field a graph can carry, so each has a case that sets it.
+    /// The node's compute type.
+    hipdnn_flatbuffers_sdk::data_objects::DataType computeDataType
+        = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT;
+    /// A declared base-pointer alignment in bytes per tensor uid, over the schema's 16.
+    std::map<int64_t, int64_t> alignment;
+    /// Tensors (by uid) declared virtual, or ragged through FLYDSL_SDPA_RDNA_RAGGED_OFFSET_UID.
+    std::set<int64_t> virtualTensors;
+    std::set<int64_t> raggedTensors;
+    bool alibiMask = false;
+    bool paddingMask = false;
+    hipdnn_flatbuffers_sdk::data_objects::DataType mmaCoreMode
+        = hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET;
+    hipdnn_flatbuffers_sdk::data_objects::AttentionImplementation implementation
+        = hipdnn_flatbuffers_sdk::data_objects::AttentionImplementation::AUTO;
+    /// generate_stats as written, over what `stats` implies.
+    std::optional<bool> generateStats;
+    /// The scale tensor's dims and dtype (over [1] and f32), and an attn_scale_value written
+    /// alongside the tensor.
+    std::vector<int64_t> scaleDims;
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::DataType> scaleDataType;
+    bool scaleValueToo = false;
+    /// Writes fields the spec has no member for; each should name FLYDSL_SDPA_RDNA_AUX_UID.
+    std::function<void(hipdnn_flatbuffers_sdk::data_objects::SdpaAttributesBuilder&)>
+        extraAttributes;
 };
 
 /// The bias's dims and strides as @p spec declares them to the graph.
@@ -261,6 +295,43 @@ inline std::vector<int64_t> sdpaPackedQkvStrides(const SdpaGraphSpec& spec)
     return {spec.seqLenQ * row, spec.headDim, row, 1};
 }
 
+/// One tensor of the graph @p spec describes, with the alignment, virtual flag and ragged
+/// offset the spec gives its uid.
+inline flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>
+    sdpaTensor(const SdpaGraphSpec& spec,
+               flatbuffers::FlatBufferBuilder& builder,
+               int64_t uid,
+               const char* name,
+               hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
+               const std::vector<int64_t>* strides,
+               const std::vector<int64_t>* dims,
+               bool isVirtual = false,
+               hipdnn_flatbuffers_sdk::data_objects::TensorValue valueType
+               = hipdnn_flatbuffers_sdk::data_objects::TensorValue::NONE,
+               flatbuffers::Offset<void> value = 0,
+               bool runtime = false,
+               flatbuffers::Optional<int64_t> ragged = flatbuffers::nullopt)
+{
+    if(spec.raggedTensors.count(uid) != 0)
+    {
+        ragged = FLYDSL_SDPA_RDNA_RAGGED_OFFSET_UID;
+    }
+    const auto declared = spec.alignment.find(uid);
+    return hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+        builder,
+        uid,
+        name,
+        dataType,
+        strides,
+        dims,
+        isVirtual || spec.virtualTensors.count(uid) != 0,
+        valueType,
+        value,
+        runtime,
+        ragged,
+        declared == spec.alignment.end() ? 16 : declared->second);
+}
+
 /// A single SDPA-forward node built to @p spec.
 inline flatbuffers::FlatBufferBuilder buildFlydslSdpaRdnaGraph(const SdpaGraphSpec& spec = {})
 {
@@ -297,7 +368,8 @@ inline flatbuffers::FlatBufferBuilder buildFlydslSdpaRdnaGraph(const SdpaGraphSp
 
     flatbuffers::FlatBufferBuilder builder;
     std::vector<flatbuffers::Offset<data_objects::TensorAttributes>> tensors;
-    tensors.push_back(data_objects::CreateTensorAttributesDirect(
+    tensors.push_back(sdpaTensor(
+        spec,
         builder,
         FLYDSL_SDPA_RDNA_Q_UID,
         "q",
@@ -310,30 +382,32 @@ inline flatbuffers::FlatBufferBuilder buildFlydslSdpaRdnaGraph(const SdpaGraphSp
         false,
         spec.raggedQuery ? flatbuffers::Optional<int64_t>(FLYDSL_SDPA_RDNA_RAGGED_OFFSET_UID)
                          : flatbuffers::nullopt));
+    tensors.push_back(sdpaTensor(spec,
+                                 builder,
+                                 FLYDSL_SDPA_RDNA_K_UID,
+                                 "k",
+                                 spec.keyDataType.value_or(spec.dataType),
+                                 &kStrides,
+                                 &kDims));
     tensors.push_back(
-        data_objects::CreateTensorAttributesDirect(builder,
-                                                   FLYDSL_SDPA_RDNA_K_UID,
-                                                   "k",
-                                                   spec.keyDataType.value_or(spec.dataType),
-                                                   &kStrides,
-                                                   &kDims));
-    tensors.push_back(data_objects::CreateTensorAttributesDirect(
-        builder, FLYDSL_SDPA_RDNA_V_UID, "v", spec.dataType, &vStrides, &vDims));
-    tensors.push_back(data_objects::CreateTensorAttributesDirect(
-        builder, FLYDSL_SDPA_RDNA_O_UID, "o", spec.dataType, &oStrides, &oDims));
+        sdpaTensor(spec, builder, FLYDSL_SDPA_RDNA_V_UID, "v", spec.dataType, &vStrides, &vDims));
+    tensors.push_back(
+        sdpaTensor(spec, builder, FLYDSL_SDPA_RDNA_O_UID, "o", spec.dataType, &oStrides, &oDims));
 
     const std::vector<int64_t> scalarDims{1};
+    const auto scaleDims = spec.scaleDims.empty() ? scalarDims : spec.scaleDims;
     if(spec.scaleKind == SdpaScale::CONSTANT_TENSOR || spec.scaleKind == SdpaScale::RUNTIME_TENSOR)
     {
         const bool runtime = spec.scaleKind == SdpaScale::RUNTIME_TENSOR;
         const data_objects::Float32Value scaleValue(spec.scale);
-        tensors.push_back(data_objects::CreateTensorAttributesDirect(
+        tensors.push_back(sdpaTensor(
+            spec,
             builder,
             FLYDSL_SDPA_RDNA_SCALE_UID,
             "scale",
-            data_objects::DataType::FLOAT,
-            &scalarDims,
-            &scalarDims,
+            spec.scaleDataType.value_or(data_objects::DataType::FLOAT),
+            &scaleDims,
+            &scaleDims,
             false,
             runtime ? data_objects::TensorValue::NONE : data_objects::TensorValue::Float32Value,
             runtime ? flatbuffers::Offset<void>(0) : builder.CreateStruct(scaleValue).Union(),
@@ -341,23 +415,36 @@ inline flatbuffers::FlatBufferBuilder buildFlydslSdpaRdnaGraph(const SdpaGraphSp
     }
     else if(spec.scaleKind == SdpaScale::DEVICE_TENSOR)
     {
-        tensors.push_back(data_objects::CreateTensorAttributesDirect(builder,
-                                                                     FLYDSL_SDPA_RDNA_SCALE_UID,
-                                                                     "scale",
-                                                                     data_objects::DataType::FLOAT,
-                                                                     &scalarDims,
-                                                                     &scalarDims));
+        tensors.push_back(sdpaTensor(spec,
+                                     builder,
+                                     FLYDSL_SDPA_RDNA_SCALE_UID,
+                                     "scale",
+                                     data_objects::DataType::FLOAT,
+                                     &scalarDims,
+                                     &scalarDims));
+    }
+
+    if(spec.extraAttributes)
+    {
+        tensors.push_back(sdpaTensor(spec,
+                                     builder,
+                                     FLYDSL_SDPA_RDNA_AUX_UID,
+                                     "aux",
+                                     data_objects::DataType::FLOAT,
+                                     &scalarDims,
+                                     &scalarDims));
     }
 
     const auto [biasDims, biasStrides] = sdpaBiasLayout(spec);
     if(spec.withBias)
     {
-        tensors.push_back(data_objects::CreateTensorAttributesDirect(builder,
-                                                                     FLYDSL_SDPA_RDNA_BIAS_UID,
-                                                                     "bias",
-                                                                     spec.biasDataType,
-                                                                     &biasStrides,
-                                                                     &biasDims));
+        tensors.push_back(sdpaTensor(spec,
+                                     builder,
+                                     FLYDSL_SDPA_RDNA_BIAS_UID,
+                                     "bias",
+                                     spec.biasDataType,
+                                     &biasStrides,
+                                     &biasDims));
     }
     const std::vector<int64_t> sinkDims = spec.sinkRank4 ? std::vector<int64_t>{1, spec.heads, 1, 1}
                                                          : std::vector<int64_t>{spec.heads};
@@ -365,13 +452,13 @@ inline flatbuffers::FlatBufferBuilder buildFlydslSdpaRdnaGraph(const SdpaGraphSp
         = spec.sinkRank4 ? std::vector<int64_t>{spec.heads, 1, 1, 1} : std::vector<int64_t>{1};
     if(spec.withSink)
     {
-        tensors.push_back(
-            data_objects::CreateTensorAttributesDirect(builder,
-                                                       FLYDSL_SDPA_RDNA_SINK_UID,
-                                                       "sink",
-                                                       spec.sinkDataType.value_or(spec.dataType),
-                                                       &sinkStrides,
-                                                       &sinkDims));
+        tensors.push_back(sdpaTensor(spec,
+                                     builder,
+                                     FLYDSL_SDPA_RDNA_SINK_UID,
+                                     "sink",
+                                     spec.sinkDataType.value_or(spec.dataType),
+                                     &sinkStrides,
+                                     &sinkDims));
     }
     const int64_t statsLast = spec.stats == SdpaStats::LSE_WRONG_SHAPE ? 2 : 1;
     const std::vector<int64_t> statsDims{spec.batch, spec.heads, spec.seqLenQ, statsLast};
@@ -384,14 +471,15 @@ inline flatbuffers::FlatBufferBuilder buildFlydslSdpaRdnaGraph(const SdpaGraphSp
                                  || spec.stats == SdpaStats::LSE_WRONG_SHAPE;
     if(withStatsTensor)
     {
-        tensors.push_back(data_objects::CreateTensorAttributesDirect(
-            builder,
-            FLYDSL_SDPA_RDNA_STATS_UID,
-            "stats",
-            spec.stats == SdpaStats::LSE_BF16 ? data_objects::DataType::BFLOAT16
-                                              : data_objects::DataType::FLOAT,
-            &statsStrides,
-            &statsDims));
+        tensors.push_back(sdpaTensor(spec,
+                                     builder,
+                                     FLYDSL_SDPA_RDNA_STATS_UID,
+                                     "stats",
+                                     spec.stats == SdpaStats::LSE_BF16
+                                         ? data_objects::DataType::BFLOAT16
+                                         : data_objects::DataType::FLOAT,
+                                     &statsStrides,
+                                     &statsDims));
     }
 
     data_objects::SdpaAttributesBuilder attributesBuilder(builder);
@@ -449,6 +537,10 @@ inline flatbuffers::FlatBufferBuilder buildFlydslSdpaRdnaGraph(const SdpaGraphSp
     else if(spec.scaleKind != SdpaScale::ABSENT)
     {
         attributesBuilder.add_scale_tensor_uid(FLYDSL_SDPA_RDNA_SCALE_UID);
+        if(spec.scaleValueToo)
+        {
+            attributesBuilder.add_attn_scale_value(spec.scale);
+        }
     }
 
     if(spec.withBias)
@@ -461,28 +553,36 @@ inline flatbuffers::FlatBufferBuilder buildFlydslSdpaRdnaGraph(const SdpaGraphSp
     }
     if(withStatsTensor)
     {
-        attributesBuilder.add_generate_stats(true);
+        attributesBuilder.add_generate_stats(spec.generateStats.value_or(true));
         attributesBuilder.add_stats_tensor_uid(FLYDSL_SDPA_RDNA_STATS_UID);
     }
     else if(spec.stats == SdpaStats::REQUESTED_WITHOUT_TENSOR)
     {
-        attributesBuilder.add_generate_stats(true);
+        attributesBuilder.add_generate_stats(spec.generateStats.value_or(true));
+    }
+    else if(spec.generateStats.has_value())
+    {
+        attributesBuilder.add_generate_stats(*spec.generateStats);
     }
     if(spec.withDropout)
     {
         attributesBuilder.add_dropout_probability(0.1F);
     }
 
-    attributesBuilder.add_alibi_mask(false);
-    attributesBuilder.add_padding_mask(false);
-    attributesBuilder.add_mma_core_mode(data_objects::DataType::UNSET);
-    attributesBuilder.add_implementation(data_objects::AttentionImplementation::AUTO);
+    attributesBuilder.add_alibi_mask(spec.alibiMask);
+    attributesBuilder.add_padding_mask(spec.paddingMask);
+    attributesBuilder.add_mma_core_mode(spec.mmaCoreMode);
+    attributesBuilder.add_implementation(spec.implementation);
+    if(spec.extraAttributes)
+    {
+        spec.extraAttributes(attributesBuilder);
+    }
     const auto attributes = attributesBuilder.Finish();
 
     std::vector<flatbuffers::Offset<data_objects::Node>> nodes;
     nodes.push_back(data_objects::CreateNodeDirect(builder,
                                                    "sdpa",
-                                                   data_objects::DataType::FLOAT,
+                                                   spec.computeDataType,
                                                    data_objects::NodeAttributes::SdpaAttributes,
                                                    attributes.Union()));
 
@@ -496,6 +596,252 @@ inline flatbuffers::FlatBufferBuilder buildFlydslSdpaRdnaGraph(const SdpaGraphSp
     graphBuilder.add_nodes(nodesVector);
     builder.Finish(graphBuilder.Finish());
     return builder;
+}
+
+/// One edit to a spec that every FlyDSL SDPA engine must decline, and why.
+struct SdpaFieldDecline
+{
+    std::string name;
+    std::function<void(SdpaGraphSpec&)> apply;
+    /// For a case that adds a feature to show one of its fields: the feature without the
+    /// defect, which must be accepted, so the case cannot pass on the feature alone.
+    std::function<void(SdpaGraphSpec&)> control;
+};
+
+/// A field set to a value no FlyDSL SDPA engine handles, one case per field (or per value
+/// class of a field), applied on top of a spec each engine otherwise accepts. Every field of
+/// SdpaAttributes, the node and each tensor appears here or in an engine's own accept and
+/// decline tables: a matcher that never reads a field accepts every value of it, which looks
+/// exactly like support, so each one is pinned by a case.
+inline std::vector<SdpaFieldDecline> sdpaFieldDeclines()
+{
+    namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
+    using Builder = data_objects::SdpaAttributesBuilder;
+    constexpr int64_t AUX = FLYDSL_SDPA_RDNA_AUX_UID;
+    std::vector<SdpaFieldDecline> cases;
+    const auto field = [&cases](std::string name, const std::function<void(Builder&)>& write) {
+        cases.push_back(
+            {std::move(name), [write](SdpaGraphSpec& spec) { spec.extraAttributes = write; }, {}});
+    };
+    // Optional tensors naming features the kernels do not implement.
+    field("SeqLenQ", [](Builder& b) { b.add_seq_len_q_tensor_uid(AUX); });
+    field("SeqLenKv", [](Builder& b) { b.add_seq_len_kv_tensor_uid(AUX); });
+    field("DropoutSeed", [](Builder& b) { b.add_seed_tensor_uid(AUX); });
+    field("DropoutOffset", [](Builder& b) { b.add_offset_tensor_uid(AUX); });
+    field("DropoutMask", [](Builder& b) { b.add_dropout_mask_tensor_uid(AUX); });
+    field("DropoutScale", [](Builder& b) { b.add_dropout_scale_tensor_uid(AUX); });
+    field("DropoutProbabilityZero", [](Builder& b) { b.add_dropout_probability(0.0F); });
+    field("PageTableK", [](Builder& b) { b.add_page_table_k_tensor_uid(AUX); });
+    field("PageTableV", [](Builder& b) { b.add_page_table_v_tensor_uid(AUX); });
+    field("MaxSeqLenKv", [](Builder& b) { b.add_max_seq_len_kv(4096); });
+    field("BlockMask", [](Builder& b) { b.add_block_mask_tensor_uid(AUX); });
+    field("DescaleQ", [](Builder& b) { b.add_descale_q_tensor_uid(AUX); });
+    field("DescaleK", [](Builder& b) { b.add_descale_k_tensor_uid(AUX); });
+    field("DescaleV", [](Builder& b) { b.add_descale_v_tensor_uid(AUX); });
+    field("DescaleS", [](Builder& b) { b.add_descale_s_tensor_uid(AUX); });
+    field("ScaleS", [](Builder& b) { b.add_scale_s_tensor_uid(AUX); });
+    field("ScaleO", [](Builder& b) { b.add_scale_o_tensor_uid(AUX); });
+    field("AmaxS", [](Builder& b) { b.add_amax_s_tensor_uid(AUX); });
+    field("AmaxO", [](Builder& b) { b.add_amax_o_tensor_uid(AUX); });
+    field("MaxOutput", [](Builder& b) { b.add_max_tensor_uid(AUX); });
+    field("SumExpOutput", [](Builder& b) { b.add_sum_exp_tensor_uid(AUX); });
+    field("RngDump", [](Builder& b) { b.add_rng_dump_tensor_uid(AUX); });
+
+    const auto edit = [&cases](std::string name,
+                               std::function<void(SdpaGraphSpec&)> apply,
+                               std::function<void(SdpaGraphSpec&)> control = {}) {
+        cases.push_back({std::move(name), std::move(apply), std::move(control)});
+    };
+    // The features a case adds to reach a field: a bias in the query's dtype (which every
+    // engine reads), an LSE, a sink.
+    const auto withBias = [](SdpaGraphSpec& s) {
+        s.withBias = true;
+        s.biasDataType = s.dataType;
+    };
+    const auto withStats = [](SdpaGraphSpec& s) { s.stats = SdpaStats::LSE; };
+    const auto withSink = [](SdpaGraphSpec& s) { s.withSink = true; };
+    edit("Dropout", [](SdpaGraphSpec& s) { s.withDropout = true; });
+    edit("AlibiMask", [](SdpaGraphSpec& s) { s.alibiMask = true; });
+    edit("PaddingMask", [](SdpaGraphSpec& s) { s.paddingMask = true; });
+    edit("MmaCoreModeFp8",
+         [](SdpaGraphSpec& s) { s.mmaCoreMode = data_objects::DataType::FP8_E4M3; });
+    edit("MmaCoreModeInt8", [](SdpaGraphSpec& s) { s.mmaCoreMode = data_objects::DataType::INT8; });
+    edit("CompositeImplementation", [](SdpaGraphSpec& s) {
+        s.implementation = data_objects::AttentionImplementation::COMPOSITE;
+    });
+    edit("UnifiedImplementation", [](SdpaGraphSpec& s) {
+        s.implementation = data_objects::AttentionImplementation::UNIFIED;
+    });
+    edit("UnnamedImplementation", [](SdpaGraphSpec& s) {
+        s.implementation = static_cast<data_objects::AttentionImplementation>(9);
+    });
+
+    // The node: the kernels compute in f32, so a type asking for more, or for integer or
+    // FP8 arithmetic, declines (HALF and BFLOAT16 are accepted; see the accept tables).
+    edit("ComputeTypeDouble",
+         [](SdpaGraphSpec& s) { s.computeDataType = data_objects::DataType::DOUBLE; });
+    edit("ComputeTypeInt32",
+         [](SdpaGraphSpec& s) { s.computeDataType = data_objects::DataType::INT32; });
+    edit("ComputeTypeFp8",
+         [](SdpaGraphSpec& s) { s.computeDataType = data_objects::DataType::FP8_E4M3; });
+
+    // Each operand's declared alignment, below what the kernels' accesses assume.
+    edit("QAlignedTo8", [](SdpaGraphSpec& s) { s.alignment[FLYDSL_SDPA_RDNA_Q_UID] = 8; });
+    edit("KAlignedTo8", [](SdpaGraphSpec& s) { s.alignment[FLYDSL_SDPA_RDNA_K_UID] = 8; });
+    edit("VAlignedTo8", [](SdpaGraphSpec& s) { s.alignment[FLYDSL_SDPA_RDNA_V_UID] = 8; });
+    edit("OAlignedTo2", [](SdpaGraphSpec& s) { s.alignment[FLYDSL_SDPA_RDNA_O_UID] = 2; });
+    edit("QAlignedTo24", [](SdpaGraphSpec& s) { s.alignment[FLYDSL_SDPA_RDNA_Q_UID] = 24; });
+    edit(
+        "BiasAlignedTo4",
+        [withBias](SdpaGraphSpec& s) {
+            withBias(s);
+            s.alignment[FLYDSL_SDPA_RDNA_BIAS_UID] = 4;
+        },
+        withBias);
+    edit(
+        "StatsAlignedTo2",
+        [withStats](SdpaGraphSpec& s) {
+            withStats(s);
+            s.alignment[FLYDSL_SDPA_RDNA_STATS_UID] = 2;
+        },
+        withStats);
+    edit(
+        "SinkAlignedTo1",
+        [withSink](SdpaGraphSpec& s) {
+            withSink(s);
+            s.alignment[FLYDSL_SDPA_RDNA_SINK_UID] = 1;
+        },
+        withSink);
+
+    // Operands that are not plain device tensors.
+    for(const auto& [name, uid] : {std::pair{"Q", FLYDSL_SDPA_RDNA_Q_UID},
+                                   std::pair{"K", FLYDSL_SDPA_RDNA_K_UID},
+                                   std::pair{"V", FLYDSL_SDPA_RDNA_V_UID},
+                                   std::pair{"O", FLYDSL_SDPA_RDNA_O_UID}})
+    {
+        const int64_t operand = uid;
+        edit(std::string("Virtual") + name,
+             [operand](SdpaGraphSpec& s) { s.virtualTensors.insert(operand); });
+        edit(std::string("Ragged") + name,
+             [operand](SdpaGraphSpec& s) { s.raggedTensors.insert(operand); });
+    }
+    for(const auto& [name, uid, feature] :
+        {std::tuple{
+             "Bias", FLYDSL_SDPA_RDNA_BIAS_UID, std::function<void(SdpaGraphSpec&)>(withBias)},
+         std::tuple{
+             "Stats", FLYDSL_SDPA_RDNA_STATS_UID, std::function<void(SdpaGraphSpec&)>(withStats)},
+         std::tuple{
+             "Sink", FLYDSL_SDPA_RDNA_SINK_UID, std::function<void(SdpaGraphSpec&)>(withSink)}})
+    {
+        const int64_t tensorUid = uid;
+        const auto add = feature;
+        edit(
+            std::string("Ragged") + name,
+            [add, tensorUid](SdpaGraphSpec& s) {
+                add(s);
+                s.raggedTensors.insert(tensorUid);
+            },
+            add);
+        edit(
+            std::string("Virtual") + name,
+            [add, tensorUid](SdpaGraphSpec& s) {
+                add(s);
+                s.virtualTensors.insert(tensorUid);
+            },
+            add);
+    }
+    edit(
+        "SinkInADifferentDtype",
+        [withSink](SdpaGraphSpec& s) {
+            withSink(s);
+            s.sinkDataType = data_objects::DataType::FLOAT;
+        },
+        withSink);
+
+    // Statistics asked for inconsistently.
+    edit("StatsRequestedWithoutATensor",
+         [](SdpaGraphSpec& s) { s.stats = SdpaStats::REQUESTED_WITHOUT_TENSOR; });
+    edit(
+        "StatsTensorWithGenerateStatsFalse",
+        [](SdpaGraphSpec& s) {
+            s.stats = SdpaStats::LSE;
+            s.generateStats = false;
+        },
+        withStats);
+    edit("StatsInBfloat16", [](SdpaGraphSpec& s) { s.stats = SdpaStats::LSE_BF16; }, withStats);
+    edit(
+        "StatsOfTheWrongShape",
+        [](SdpaGraphSpec& s) { s.stats = SdpaStats::LSE_WRONG_SHAPE; },
+        withStats);
+
+    // The scale: one positive finite host scalar, given one way.
+    edit("ScaleOnTheDevice", [](SdpaGraphSpec& s) { s.scaleKind = SdpaScale::DEVICE_TENSOR; });
+    const auto constantScale = [](SdpaGraphSpec& s) { s.scaleKind = SdpaScale::CONSTANT_TENSOR; };
+    const auto runtimeScale = [](SdpaGraphSpec& s) { s.scaleKind = SdpaScale::RUNTIME_TENSOR; };
+    edit(
+        "ScaleTensorAndValue",
+        [](SdpaGraphSpec& s) {
+            s.scaleKind = SdpaScale::CONSTANT_TENSOR;
+            s.scaleValueToo = true;
+        },
+        constantScale);
+    edit(
+        "ScaleTensorOfFourElements",
+        [](SdpaGraphSpec& s) {
+            s.scaleKind = SdpaScale::RUNTIME_TENSOR;
+            s.scaleDims = {4};
+        },
+        runtimeScale);
+    edit(
+        "ScaleTensorPerHead",
+        [](SdpaGraphSpec& s) {
+            s.scaleKind = SdpaScale::RUNTIME_TENSOR;
+            s.scaleDims = {1, s.heads, 1, 1};
+        },
+        runtimeScale);
+    edit(
+        "ScaleTensorInInt32",
+        [](SdpaGraphSpec& s) {
+            s.scaleKind = SdpaScale::RUNTIME_TENSOR;
+            s.scaleDataType = data_objects::DataType::INT32;
+        },
+        runtimeScale);
+    for(const auto& [name, value] : {std::pair{"Negative", -0.125F},
+                                     std::pair{"Zero", 0.0F},
+                                     std::pair{"NaN", std::numeric_limits<float>::quiet_NaN()},
+                                     std::pair{"Infinite", std::numeric_limits<float>::infinity()}})
+    {
+        const float scale = value;
+        edit(std::string("ScaleValue") + name, [scale](SdpaGraphSpec& s) {
+            s.scaleKind = SdpaScale::VALUE;
+            s.scale = scale;
+        });
+        edit(
+            std::string("ConstantScaleTensor") + name,
+            [scale](SdpaGraphSpec& s) {
+                s.scaleKind = SdpaScale::CONSTANT_TENSOR;
+                s.scale = scale;
+            },
+            constantScale);
+    }
+
+    // The mask's own fields.
+    edit("BothDeprecatedBooleans", [](SdpaGraphSpec& s) {
+        s.deprecatedCausalTopLeft = true;
+        s.deprecatedCausalBottomRight = true;
+    });
+    edit("UnnamedDiagonalAlignment", [](SdpaGraphSpec& s) {
+        s.mask = SdpaMask::TOP_LEFT_CAUSAL;
+        s.diagonalAlignment = static_cast<data_objects::DiagonalAlignment>(7);
+    });
+    edit("LeftBoundBelowMinusOne", [](SdpaGraphSpec& s) { s.leftBound = -2; });
+    edit("RightBoundBelowMinusOne", [](SdpaGraphSpec& s) { s.rightBound = -2; });
+
+    // Dtypes the kernels have no objects for.
+    edit("Fp32", [](SdpaGraphSpec& s) { s.dataType = data_objects::DataType::FLOAT; });
+    edit("Fp8", [](SdpaGraphSpec& s) { s.dataType = data_objects::DataType::FP8_E4M3; });
+    edit("MixedDtypes", [](SdpaGraphSpec& s) { s.keyDataType = data_objects::DataType::HALF; });
+    return cases;
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine::testing

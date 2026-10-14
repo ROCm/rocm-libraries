@@ -212,6 +212,23 @@ struct GraphCase
     flatbuffers::FlatBufferBuilder (*buildGraph)();
 };
 
+/// The default graph with @p extras: the fields only RmsNormGraphExtras reaches.
+flatbuffers::FlatBufferBuilder rmsNormGraphWith(const RmsNormGraphExtras& extras,
+                                                NormFwdPhase phase = NormFwdPhase::NOT_SET)
+{
+    return buildFlydslRmsNormGraph(DataType::BFLOAT16,
+                                   {8, 4096},
+                                   FLYDSL_BAKED_EPSILON,
+                                   false,
+                                   std::nullopt,
+                                   std::nullopt,
+                                   std::nullopt,
+                                   false,
+                                   false,
+                                   phase,
+                                   extras);
+}
+
 std::string graphCaseName(const ::testing::TestParamInfo<GraphCase>& info)
 {
     return info.param.name;
@@ -232,6 +249,33 @@ INSTANTIATE_TEST_SUITE_P(
     TestFlydslRmsNormGraphMatcherAcceptance,
     ::testing::Values(
         GraphCase{"Bfloat16", [] { return buildFlydslRmsNormGraph(DataType::BFLOAT16); }},
+        // Every value of a field the kernels handle, beside the refusals below: a compute
+        // type at or below their f32 arithmetic, a wider alignment, a rank-2 scalar epsilon.
+        GraphCase{"ComputeTypeFloat",
+                  [] {
+                      RmsNormGraphExtras extras;
+                      extras.computeDataType = DataType::FLOAT;
+                      return rmsNormGraphWith(extras);
+                  }},
+        GraphCase{"ComputeTypeUnset",
+                  [] {
+                      RmsNormGraphExtras extras;
+                      extras.computeDataType = DataType::UNSET;
+                      return rmsNormGraphWith(extras);
+                  }},
+        GraphCase{"OperandsAlignedTo256",
+                  [] {
+                      RmsNormGraphExtras extras;
+                      extras.alignment
+                          = {{FLYDSL_X_UID, 256}, {FLYDSL_SCALE_UID, 256}, {FLYDSL_Y_UID, 256}};
+                      return rmsNormGraphWith(extras);
+                  }},
+        GraphCase{"EpsilonOfRankTwo",
+                  [] {
+                      RmsNormGraphExtras extras;
+                      extras.epsilonDims = {1, 1};
+                      return rmsNormGraphWith(extras);
+                  }},
         GraphCase{"Half", [] { return buildFlydslRmsNormGraph(DataType::HALF); }},
         // Rank above two is collapsed, not refused: the leading axes multiply into the row
         // count, which is sound precisely because packed row-major is also required.
@@ -368,6 +412,72 @@ INSTANTIATE_TEST_SUITE_P(
         // (2 GiB) is one byte past it.
         GraphCase{"PastThirtyTwoBitAddressing",
                   [] { return buildFlydslRmsNormGraph(DataType::BFLOAT16, {1 << 20, 1 << 10}); }},
+        // Every field the graph carries, each value the kernels do not handle: a phase the
+        // schema may add later, compute in double or integers, an alignment below their
+        // 128-bit copies, operands that are not plain dense device tensors, an epsilon of
+        // more than one element.
+        GraphCase{"UnnamedPhase",
+                  [] { return rmsNormGraphWith({}, static_cast<NormFwdPhase>(7)); }},
+        GraphCase{"ComputeTypeDouble",
+                  [] {
+                      RmsNormGraphExtras extras;
+                      extras.computeDataType = DataType::DOUBLE;
+                      return rmsNormGraphWith(extras);
+                  }},
+        GraphCase{"ComputeTypeInt32",
+                  [] {
+                      RmsNormGraphExtras extras;
+                      extras.computeDataType = DataType::INT32;
+                      return rmsNormGraphWith(extras);
+                  }},
+        GraphCase{"XAlignedTo8",
+                  [] {
+                      RmsNormGraphExtras extras;
+                      extras.alignment[FLYDSL_X_UID] = 8;
+                      return rmsNormGraphWith(extras);
+                  }},
+        GraphCase{"GammaAlignedTo4",
+                  [] {
+                      RmsNormGraphExtras extras;
+                      extras.alignment[FLYDSL_SCALE_UID] = 4;
+                      return rmsNormGraphWith(extras);
+                  }},
+        GraphCase{"YAlignedTo2",
+                  [] {
+                      RmsNormGraphExtras extras;
+                      extras.alignment[FLYDSL_Y_UID] = 2;
+                      return rmsNormGraphWith(extras);
+                  }},
+        GraphCase{"VirtualX",
+                  [] {
+                      RmsNormGraphExtras extras;
+                      extras.virtualTensors.insert(FLYDSL_X_UID);
+                      return rmsNormGraphWith(extras);
+                  }},
+        GraphCase{"VirtualY",
+                  [] {
+                      RmsNormGraphExtras extras;
+                      extras.virtualTensors.insert(FLYDSL_Y_UID);
+                      return rmsNormGraphWith(extras);
+                  }},
+        GraphCase{"RaggedX",
+                  [] {
+                      RmsNormGraphExtras extras;
+                      extras.raggedTensors.insert(FLYDSL_X_UID);
+                      return rmsNormGraphWith(extras);
+                  }},
+        GraphCase{"RaggedGamma",
+                  [] {
+                      RmsNormGraphExtras extras;
+                      extras.raggedTensors.insert(FLYDSL_SCALE_UID);
+                      return rmsNormGraphWith(extras);
+                  }},
+        GraphCase{"EpsilonOfTwoElements",
+                  [] {
+                      RmsNormGraphExtras extras;
+                      extras.epsilonDims = {2};
+                      return rmsNormGraphWith(extras);
+                  }},
         // Only two dtypes were baked, and there is no upconverting path.
         GraphCase{"AnUnsupportedDtype", [] { return buildFlydslRmsNormGraph(DataType::FLOAT); }},
         // One instance, one dtype for all three operands -- gamma is read at x's type.

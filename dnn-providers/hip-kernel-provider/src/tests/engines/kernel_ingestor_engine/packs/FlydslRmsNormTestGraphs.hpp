@@ -6,7 +6,9 @@
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
 #include <cstdint>
+#include <map>
 #include <optional>
+#include <set>
 #include <string>
 #include <variant>
 #include <vector>
@@ -113,6 +115,19 @@ inline std::vector<int64_t> flydslPackedStrides(const std::vector<int64_t>& dims
  * @param epsilon The baked epsilon. Ignored when @p runtimeEpsilon is true, in which case
  *        the tensor carries no value and the caller supplies one at execute.
  */
+/// The fields buildFlydslRmsNormGraph()'s positional parameters do not reach: the node's
+/// compute type, each tensor's declared alignment, virtual flag and ragged offset, and
+/// epsilon's shape. Each exists for a case that pins the matcher's reading of it.
+struct RmsNormGraphExtras
+{
+    /// The node's compute type; unset means x's dtype, as the defaults always wrote.
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::DataType> computeDataType;
+    std::map<int64_t, int64_t> alignment;
+    std::set<int64_t> virtualTensors;
+    std::set<int64_t> raggedTensors;
+    std::vector<int64_t> epsilonDims;
+};
+
 inline flatbuffers::FlatBufferBuilder buildFlydslRmsNormGraph(
     hipdnn_flatbuffers_sdk::data_objects::DataType dataType
     = hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
@@ -125,9 +140,37 @@ inline flatbuffers::FlatBufferBuilder buildFlydslRmsNormGraph(
     bool withBias = false,
     bool withInvRms = false,
     hipdnn_flatbuffers_sdk::data_objects::NormFwdPhase forwardPhase
-    = hipdnn_flatbuffers_sdk::data_objects::NormFwdPhase::NOT_SET)
+    = hipdnn_flatbuffers_sdk::data_objects::NormFwdPhase::NOT_SET,
+    const RmsNormGraphExtras& extras = {})
 {
     namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
+    // Every tensor through here, so the extras reach each by uid.
+    const auto tensor
+        = [&extras](flatbuffers::FlatBufferBuilder& fbb,
+                    int64_t uid,
+                    const char* name,
+                    data_objects::DataType type,
+                    const std::vector<int64_t>* strides,
+                    const std::vector<int64_t>* dims,
+                    data_objects::TensorValue valueType = data_objects::TensorValue::NONE,
+                    flatbuffers::Offset<void> value = 0,
+                    bool runtime = false) {
+              const auto declared = extras.alignment.find(uid);
+              return data_objects::CreateTensorAttributesDirect(
+                  fbb,
+                  uid,
+                  name,
+                  type,
+                  strides,
+                  dims,
+                  extras.virtualTensors.count(uid) != 0,
+                  valueType,
+                  value,
+                  runtime,
+                  extras.raggedTensors.count(uid) != 0 ? flatbuffers::Optional<int64_t>(99)
+                                                       : flatbuffers::nullopt,
+                  declared == extras.alignment.end() ? 16 : declared->second);
+          };
 
     // Gamma defaults to the innermost extent of x, whatever rank x has: the matcher
     // collapses everything outside the innermost axis into the row count, so that extent
@@ -142,30 +185,28 @@ inline flatbuffers::FlatBufferBuilder buildFlydslRmsNormGraph(
 
     flatbuffers::FlatBufferBuilder builder;
     std::vector<flatbuffers::Offset<data_objects::TensorAttributes>> tensors;
-    tensors.push_back(data_objects::CreateTensorAttributesDirect(
-        builder, FLYDSL_X_UID, "x", dataType, &xStrides, &xDims));
-    tensors.push_back(data_objects::CreateTensorAttributesDirect(builder,
-                                                                 FLYDSL_SCALE_UID,
-                                                                 "scale",
-                                                                 resolvedScaleDataType,
-                                                                 &scaleStrides,
-                                                                 &resolvedScaleDims));
-    tensors.push_back(data_objects::CreateTensorAttributesDirect(
-        builder, FLYDSL_Y_UID, "y", dataType, &yStrides, &xDims));
+    tensors.push_back(tensor(builder, FLYDSL_X_UID, "x", dataType, &xStrides, &xDims));
+    tensors.push_back(tensor(builder,
+                             FLYDSL_SCALE_UID,
+                             "scale",
+                             resolvedScaleDataType,
+                             &scaleStrides,
+                             &resolvedScaleDims));
+    tensors.push_back(tensor(builder, FLYDSL_Y_UID, "y", dataType, &yStrides, &xDims));
 
     // Epsilon is pass-by-value either way: baked carries a Float32Value, runtime carries
     // the is_runtime_pass_by_value flag and no value at all. Both make
     // isPassByValueTensor() true, which is what keeps it out of isDeviceOperand().
-    const std::vector<int64_t> scalarDims = {1};
+    const std::vector<int64_t> scalarDims
+        = extras.epsilonDims.empty() ? std::vector<int64_t>{1} : extras.epsilonDims;
     const data_objects::Float32Value epsilonValue(epsilon);
-    tensors.push_back(data_objects::CreateTensorAttributesDirect(
+    tensors.push_back(tensor(
         builder,
         FLYDSL_EPSILON_UID,
         "epsilon",
         data_objects::DataType::FLOAT,
         &scalarDims,
         &scalarDims,
-        false,
         runtimeEpsilon ? data_objects::TensorValue::NONE : data_objects::TensorValue::Float32Value,
         runtimeEpsilon ? flatbuffers::Offset<void>(0) : builder.CreateStruct(epsilonValue).Union(),
         runtimeEpsilon));
@@ -206,7 +247,7 @@ inline flatbuffers::FlatBufferBuilder buildFlydslRmsNormGraph(
     std::vector<flatbuffers::Offset<data_objects::Node>> nodes;
     nodes.push_back(data_objects::CreateNodeDirect(builder,
                                                    "rmsnorm",
-                                                   dataType,
+                                                   extras.computeDataType.value_or(dataType),
                                                    data_objects::NodeAttributes::RMSNormAttributes,
                                                    attributes.Union()));
 

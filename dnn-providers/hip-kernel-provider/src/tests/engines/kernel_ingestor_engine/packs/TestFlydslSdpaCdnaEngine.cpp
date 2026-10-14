@@ -258,6 +258,30 @@ std::vector<CdnaCase> acceptedCases()
     auto runtimeScale = cdnaSpec();
     runtimeScale.scaleKind = SdpaScale::RUNTIME_TENSOR;
     cases.push_back({"RuntimeScaleTensor", runtimeScale});
+    // Every value a field can take that the kernels do handle, beside the declines.
+    for(const auto computeType : {DataType::UNSET, DataType::HALF, DataType::BFLOAT16})
+    {
+        auto compute = cdnaSpec();
+        compute.computeDataType = computeType;
+        cases.push_back({std::string("ComputeType") + EnumNameDataType(computeType), compute});
+    }
+    auto wideAlignment = cdnaSpec();
+    for(const auto uid : {FLYDSL_SDPA_RDNA_Q_UID,
+                          FLYDSL_SDPA_RDNA_K_UID,
+                          FLYDSL_SDPA_RDNA_V_UID,
+                          FLYDSL_SDPA_RDNA_O_UID})
+    {
+        wideAlignment.alignment[uid] = 256;
+    }
+    cases.push_back({"OperandsAlignedTo256", wideAlignment});
+    auto statsUnset = cdnaSpec();
+    statsUnset.stats = SdpaStats::LSE;
+    statsUnset.generateStats = std::nullopt;
+    cases.push_back({"StatsTensorWithGenerateStatsUnset", statsUnset});
+    auto rank4Scale = cdnaSpec();
+    rank4Scale.scaleKind = SdpaScale::RUNTIME_TENSOR;
+    rank4Scale.scaleDims = {1, 1, 1, 1};
+    cases.push_back({"ScaleTensorOfRankFour", rank4Scale});
     auto batched = cdnaSpec();
     batched.batch = 3;
     batched.seqLenQ = 333;
@@ -349,6 +373,37 @@ std::vector<CdnaCase> acceptedCases()
 INSTANTIATE_TEST_SUITE_P(,
                          TestFlydslSdpaCdnaGraphAccepts,
                          ::testing::ValuesIn(acceptedCases()),
+                         [](const auto& info) { return info.param.name; });
+
+// Every field, each value no kernel handles declined by all three engines sharing the matcher.
+class TestFlydslSdpaCdnaFieldDeclines : public ::testing::TestWithParam<SdpaFieldDecline>
+{
+};
+
+TEST_P(TestFlydslSdpaCdnaFieldDeclines, DeclinesTheField)
+{
+    auto spec = cdnaSpec();
+    ASSERT_TRUE(cdnaGraphMatch(spec).has_value())
+        << "the spec the case edits must be accepted on its own";
+    if(GetParam().control)
+    {
+        auto control = spec;
+        GetParam().control(control);
+        ASSERT_TRUE(cdnaGraphMatch(control).has_value())
+            << "the case's feature without its defect must be accepted";
+    }
+    GetParam().apply(spec);
+    const GraphFixture fixture(buildFlydslSdpaRdnaGraph(spec));
+    for(const auto* engine :
+        {&FLYDSL_SDPA_CDNA, &FLYDSL_SDPA_CDNA_DUALWAVE, &FLYDSL_SDPA_CDNA_DECODE})
+    {
+        EXPECT_FALSE(matchesGraph(*engine, fixture.context()).has_value()) << engine->engineName;
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestFlydslSdpaCdnaFieldDeclines,
+                         ::testing::ValuesIn(sdpaFieldDeclines()),
                          [](const auto& info) { return info.param.name; });
 
 class TestFlydslSdpaCdnaGraphDeclines : public ::testing::TestWithParam<CdnaCase>

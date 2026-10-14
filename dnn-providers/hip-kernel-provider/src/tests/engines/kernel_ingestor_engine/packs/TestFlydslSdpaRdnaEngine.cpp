@@ -272,8 +272,80 @@ INSTANTIATE_TEST_SUITE_P(
         AcceptedCase{"ScaleConstantTensor",
                      accepted([](SdpaGraphSpec& s) { s.scaleKind = SdpaScale::CONSTANT_TENSOR; })},
         AcceptedCase{"ScaleRuntimeTensor",
-                     accepted([](SdpaGraphSpec& s) { s.scaleKind = SdpaScale::RUNTIME_TENSOR; })}),
+                     accepted([](SdpaGraphSpec& s) { s.scaleKind = SdpaScale::RUNTIME_TENSOR; })},
+        // Every value a field can take that the kernels do handle, beside the declines.
+        AcceptedCase{"ComputeTypeUnset",
+                     accepted([](SdpaGraphSpec& s) { s.computeDataType = DataType::UNSET; })},
+        AcceptedCase{"ComputeTypeHalf",
+                     accepted([](SdpaGraphSpec& s) { s.computeDataType = DataType::HALF; })},
+        AcceptedCase{"ComputeTypeBfloat16",
+                     accepted([](SdpaGraphSpec& s) { s.computeDataType = DataType::BFLOAT16; })},
+        AcceptedCase{"OperandsAlignedTo256", accepted([](SdpaGraphSpec& s) {
+                         for(const auto uid : {FLYDSL_SDPA_RDNA_Q_UID,
+                                               FLYDSL_SDPA_RDNA_K_UID,
+                                               FLYDSL_SDPA_RDNA_V_UID,
+                                               FLYDSL_SDPA_RDNA_O_UID})
+                         {
+                             s.alignment[uid] = 256;
+                         }
+                     })},
+        AcceptedCase{"MmaCoreModeHalf",
+                     accepted([](SdpaGraphSpec& s) { s.mmaCoreMode = DataType::HALF; })},
+        AcceptedCase{"MmaCoreModeBfloat16",
+                     accepted([](SdpaGraphSpec& s) { s.mmaCoreMode = DataType::BFLOAT16; })},
+        AcceptedCase{"GenerateStatsFalseWithoutATensor",
+                     accepted([](SdpaGraphSpec& s) { s.generateStats = false; })},
+        AcceptedCase{"StatsTensorWithGenerateStatsUnset", accepted([](SdpaGraphSpec& s) {
+                         s.stats = SdpaStats::LSE;
+                         s.generateStats = std::nullopt;
+                     })},
+        AcceptedCase{"ScaleTensorOfRankFour", accepted([](SdpaGraphSpec& s) {
+                         s.scaleKind = SdpaScale::RUNTIME_TENSOR;
+                         s.scaleDims = {1, 1, 1, 1};
+                     })},
+        AcceptedCase{"ScaleTensorInHalf", accepted([](SdpaGraphSpec& s) {
+                         s.scaleKind = SdpaScale::RUNTIME_TENSOR;
+                         s.scaleDataType = DataType::HALF;
+                     })}),
     [](const ::testing::TestParamInfo<AcceptedCase>& info) { return info.param.name; });
+
+// ---------------------------------------------------------------------------
+// graph_match: every field, each value no kernel handles declined by all three engines that
+// share this matcher
+// ---------------------------------------------------------------------------
+
+class TestFlydslSdpaRdnaFieldDeclines : public ::testing::TestWithParam<SdpaFieldDecline>
+{
+};
+
+TEST_P(TestFlydslSdpaRdnaFieldDeclines, DeclinesTheField)
+{
+    SdpaGraphSpec spec;
+    {
+        const GraphFixture base(buildFlydslSdpaRdnaGraph(spec));
+        ASSERT_TRUE(matchesGraph(FLYDSL_SDPA_RDNA, base.context()).has_value())
+            << "the spec the case edits must be accepted on its own";
+    }
+    if(GetParam().control)
+    {
+        auto control = spec;
+        GetParam().control(control);
+        const GraphFixture accepted(buildFlydslSdpaRdnaGraph(control));
+        ASSERT_TRUE(matchesGraph(FLYDSL_SDPA_RDNA, accepted.context()).has_value())
+            << "the case's feature without its defect must be accepted";
+    }
+    GetParam().apply(spec);
+    const GraphFixture fixture(buildFlydslSdpaRdnaGraph(spec));
+    for(const auto* engine : {&FLYDSL_SDPA_RDNA, &FLYDSL_SDPA_RDNA_DECODE, &FLYDSL_SDPA_AIW})
+    {
+        EXPECT_FALSE(matchesGraph(*engine, fixture.context()).has_value()) << engine->engineName;
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestFlydslSdpaRdnaFieldDeclines,
+                         ::testing::ValuesIn(sdpaFieldDeclines()),
+                         [](const auto& info) { return info.param.name; });
 
 // ---------------------------------------------------------------------------
 // graph_match: what this pack declines, each for the reason the kernel cannot serve it
@@ -2373,6 +2445,7 @@ TEST(TestFlydslSdpaAiwKernelMatch, PairsTheMaskObjectWithTheMasksDtype)
     SdpaGraphSpec spec;
     spec.withBias = true;
     spec.biasDataType = DataType::FLOAT;
+    spec.alignment[FLYDSL_SDPA_RDNA_BIAS_UID] = 32;
     EXPECT_TRUE(aiwMatches(spec, makeAiwKernel("bf16", 64, 0, 64, 1, 1)));
     EXPECT_FALSE(aiwMatches(spec, makeAiwKernel("bf16", 64, 0, 64, 1, 0)));
     EXPECT_FALSE(aiwMatches(spec, makeAiwKernel("bf16", 64, 0)));
@@ -2398,6 +2471,7 @@ TEST(TestFlydslSdpaAiwKernelMatch, DeclinesAMaskWhoseRowsItsVectorLoadsCannotRea
     // pitch is Skv, so 77 keys would start rows misaligned; 80, or 77 padded to 80, do not.
     SdpaGraphSpec spec;
     spec.withBias = true;
+    spec.alignment[FLYDSL_SDPA_RDNA_BIAS_UID] = 32;
     spec.seqLenKv = 80;
     EXPECT_TRUE(aiwMatches(spec, makeAiwKernel("bf16", 64, 0, 64, 1, 1))) << "Skv 80";
     spec.seqLenKv = 77;
@@ -2409,6 +2483,21 @@ TEST(TestFlydslSdpaAiwKernelMatch, DeclinesAMaskWhoseRowsItsVectorLoadsCannotRea
     spec.biasDims = {spec.seqLenKv};
     spec.biasStrides = {1};
     EXPECT_TRUE(aiwMatches(spec, makeAiwKernel("bf16", 64, 0, 64, 1, 1))) << "[Skv] mask";
+}
+
+TEST(TestFlydslSdpaAiwKernelMatch, DeclinesAnF32MaskWhoseBaseIsNotAlignedTo32Bytes)
+{
+    // An f32 mask is loaded 8 x f32 at a time at that type's natural alignment, 32 bytes:
+    // the schema's default 16 is not enough. A query-dtype mask needs only 16.
+    SdpaGraphSpec spec;
+    spec.withBias = true;
+    spec.biasDataType = DataType::FLOAT;
+    EXPECT_FALSE(aiwMatches(spec, makeAiwKernel("bf16", 64, 0, 64, 1, 1))) << "f32, 16 bytes";
+    spec.alignment[FLYDSL_SDPA_RDNA_BIAS_UID] = 32;
+    EXPECT_TRUE(aiwMatches(spec, makeAiwKernel("bf16", 64, 0, 64, 1, 1))) << "f32, 32 bytes";
+    spec.alignment.clear();
+    spec.biasDataType = DataType::BFLOAT16;
+    EXPECT_TRUE(aiwMatches(spec, makeAiwKernel("bf16", 64, 0, 64, 1, 0))) << "bf16, 16 bytes";
 }
 
 TEST(TestFlydslSdpaAiwKernelMatch, DeclinesAMaskWhoseKeyAxisIsNotContiguous)
@@ -2467,6 +2556,8 @@ TEST(TestGpuFlydslSdpaAiwDispatch, AddsAMaskWithACausalMaskOrAWindow)
     spec.withBias = true;
     spec.mask = SdpaMask::TOP_LEFT_CAUSAL;
     spec.biasDataType = DataType::FLOAT;
+    // hipMalloc'd: the 32-byte base the f32 mask's loads need.
+    spec.alignment[FLYDSL_SDPA_RDNA_BIAS_UID] = 32;
     expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(
         spec, BF16_TOLERANCE, RdnaFamily::AIW);
     spec.headDim = 64;

@@ -248,10 +248,19 @@ bool sameShape(const data_objects::TensorAttributes& lhs, const data_objects::Te
     return true;
 }
 
-/// A regular device operand: real storage, readable by the kernel through a pointer.
+/// A regular device operand: real storage, readable by the kernel through a pointer, and not
+/// a ragged view the kernel would read as dense.
 bool isDeviceOperand(const data_objects::TensorAttributes& tensor)
 {
-    return !tensor.virtual_() && !hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(&tensor);
+    return !tensor.virtual_() && !hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(&tensor)
+           && !tensor.ragged_offset_tensor_uid().has_value();
+}
+
+/// Whether @p tensor promises the 16-byte base alignment the kernels' vector copies assume.
+bool declaresVectorAlignment(const data_objects::TensorAttributes& tensor)
+{
+    constexpr int64_t VECTOR_BYTES = 16;
+    return tensor.alignment() >= VECTOR_BYTES && tensor.alignment() % VECTOR_BYTES == 0;
 }
 
 /// The dtypes the shipped instances were built for; see the `dtype` values in the UKDs.
@@ -318,8 +327,20 @@ std::optional<BoundTokens> flydslRmsNormGraphMatches(const MatchContext& context
     // No bias term and no saved reciprocal-RMS: every shipped instance was compiled with
     // `store_rstd=False` and adds nothing after scaling. A TRAINING graph wants the stat
     // even when it forgot to name the tensor, so it is refused on the phase as well.
+    // The phase is an allow-list, so a value added to the schema later declines rather than
+    // being taken for inference. The kernels accumulate in f32: at least the precision a
+    // FLOAT, HALF or BFLOAT16 compute type asks for; DOUBLE or any other type declines.
+    const auto phase = attributes.forward_phase();
     if(attributes.bias_tensor_uid().has_value() || attributes.inv_rms_tensor_uid().has_value()
-       || attributes.forward_phase() == data_objects::NormFwdPhase::TRAINING)
+       || (phase != data_objects::NormFwdPhase::NOT_SET
+           && phase != data_objects::NormFwdPhase::INFERENCE))
+    {
+        return std::nullopt;
+    }
+    const auto computeType = context.graph.getNodeWrapper(0).computeDataType();
+    if(computeType != data_objects::DataType::UNSET && computeType != data_objects::DataType::FLOAT
+       && computeType != data_objects::DataType::HALF
+       && computeType != data_objects::DataType::BFLOAT16)
     {
         return std::nullopt;
     }
@@ -333,6 +354,13 @@ std::optional<BoundTokens> flydslRmsNormGraphMatches(const MatchContext& context
     }
 
     if(!isDeviceOperand(*x) || !isDeviceOperand(*scale) || !isDeviceOperand(*y))
+    {
+        return std::nullopt;
+    }
+    // The fast path copies 128-bit vectors from each operand's base, and the backend enforces
+    // only the alignment a graph declares.
+    if(!declaresVectorAlignment(*x) || !declaresVectorAlignment(*scale)
+       || !declaresVectorAlignment(*y))
     {
         return std::nullopt;
     }
@@ -378,6 +406,19 @@ std::optional<BoundTokens> flydslRmsNormGraphMatches(const MatchContext& context
         return std::nullopt;
     }
 
+    // Epsilon is one scalar: a tensor of more than one element would be read as its first.
+    const auto* epsilonTensor = findTensor(context, attributes.epsilon_tensor_uid());
+    if(epsilonTensor == nullptr || epsilonTensor->dims() == nullptr)
+    {
+        return std::nullopt;
+    }
+    for(const auto extent : *epsilonTensor->dims())
+    {
+        if(extent != 1)
+        {
+            return std::nullopt;
+        }
+    }
     const auto epsilon = epsilonOperand(context, attributes.epsilon_tensor_uid());
     if(!epsilon.has_value())
     {
