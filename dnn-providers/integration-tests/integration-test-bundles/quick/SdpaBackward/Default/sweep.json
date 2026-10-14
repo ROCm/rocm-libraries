@@ -162,19 +162,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuSdpaBwdBfp16.Correctness/0",
         "operation": "Smoke/IntegrationGpuSdpaBwdBfp16",
         "seed": 0,
-        "reference_source": "c++ integration suite: Smoke/IntegrationGpuSdpaBwdBfp16.Correctness_0",
-        "inputs": {
-          "1": {
-            "kind": "free",
-            "lo": -1.0,
-            "hi": 1.0
-          },
-          "8": {
-            "kind": "free",
-            "lo": -1.0,
-            "hi": 1.0
-          }
-        }
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuSdpaBwdBfp16.Correctness_0"
       }
     },
     {
@@ -338,19 +326,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuSdpaBwdBfp16.Correctness/3",
         "operation": "Smoke/IntegrationGpuSdpaBwdBfp16",
         "seed": 0,
-        "reference_source": "c++ integration suite: Smoke/IntegrationGpuSdpaBwdBfp16.Correctness_3",
-        "inputs": {
-          "1": {
-            "kind": "free",
-            "lo": -1.0,
-            "hi": 1.0
-          },
-          "8": {
-            "kind": "free",
-            "lo": -1.0,
-            "hi": 1.0
-          }
-        }
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuSdpaBwdBfp16.Correctness_3"
       }
     },
     {
@@ -514,19 +490,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuSdpaBwdBfp16.Correctness/7",
         "operation": "Smoke/IntegrationGpuSdpaBwdBfp16",
         "seed": 0,
-        "reference_source": "c++ integration suite: Smoke/IntegrationGpuSdpaBwdBfp16.Correctness_7",
-        "inputs": {
-          "1": {
-            "kind": "free",
-            "lo": -1.0,
-            "hi": 1.0
-          },
-          "8": {
-            "kind": "free",
-            "lo": -1.0,
-            "hi": 1.0
-          }
-        }
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuSdpaBwdBfp16.Correctness_7"
       }
     },
     {
@@ -690,19 +654,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuSdpaBwdFp16.Correctness/1",
         "operation": "Smoke/IntegrationGpuSdpaBwdFp16",
         "seed": 0,
-        "reference_source": "c++ integration suite: Smoke/IntegrationGpuSdpaBwdFp16.Correctness_1",
-        "inputs": {
-          "1": {
-            "kind": "free",
-            "lo": -1.0,
-            "hi": 1.0
-          },
-          "8": {
-            "kind": "free",
-            "lo": -1.0,
-            "hi": 1.0
-          }
-        }
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuSdpaBwdFp16.Correctness_1"
       }
     },
     {
@@ -866,19 +818,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuSdpaBwdFp16.Correctness/4",
         "operation": "Smoke/IntegrationGpuSdpaBwdFp16",
         "seed": 0,
-        "reference_source": "c++ integration suite: Smoke/IntegrationGpuSdpaBwdFp16.Correctness_4",
-        "inputs": {
-          "1": {
-            "kind": "free",
-            "lo": -1.0,
-            "hi": 1.0
-          },
-          "8": {
-            "kind": "free",
-            "lo": -1.0,
-            "hi": 1.0
-          }
-        }
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuSdpaBwdFp16.Correctness_4"
       }
     }
   ]

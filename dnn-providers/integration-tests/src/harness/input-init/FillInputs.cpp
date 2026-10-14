@@ -13,9 +13,12 @@
 #include <unordered_map>
 
 #include <flatbuffers/flatbuffers.h>
+#include <hipdnn-gpu-ref/GpuFpReferenceSdpa.hpp>
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/types/Bfloat16.hpp>
 #include <hipdnn_data_sdk/types/Half.hpp>
+#include <hipdnn_test_sdk/utilities/CpuFpReferenceSdpa.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/PlanUtils.hpp>
 
 #if defined(USE_ROCRAND)
 #include <hip/hip_runtime.h>
@@ -244,9 +247,172 @@ void setSdpaBackwardInitDefaults(const hipdnn_flatbuffers_sdk::data_objects::Nod
     recipes.setDefault(a->scale_tensor_uid(), FillRecipe::free(0.1f, 1.0f));
     recipes.setDefault(a->dropout_scale_tensor_uid(), FillRecipe::free(0.1f, 1.0f));
     recipes.setDefault(a->dropout_scale_inv_tensor_uid(), FillRecipe::free(0.1f, 1.0f));
+}
 
-    recipes.setDefault(a->o_tensor_uid(), FillRecipe::free(0.0f, 1.0f));
-    recipes.setDefault(a->stats_tensor_uid(), FillRecipe::free(0.0f, 1.0f));
+template <class F>
+void dispatchSdpaType(hipdnn_flatbuffers_sdk::data_objects::DataType dataType, F&& f)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    switch(dataType)
+    {
+    case DataType::FLOAT:
+        f(float{});
+        return;
+    case DataType::HALF:
+        f(hipdnn_data_sdk::types::half{});
+        return;
+    case DataType::BFLOAT16:
+        f(hipdnn_data_sdk::types::bfloat16{});
+        return;
+    default:
+        throw std::runtime_error("deriveSdpaBackwardOAndStats: unsupported data type");
+    }
+}
+
+std::optional<float> resolveSdpaBwdAttnScale(
+    const hipdnn_flatbuffers_sdk::data_objects::SdpaBackwardAttributes& attrs,
+    const InputTensorMap& inputs,
+    const TensorDataTypes& tensorDataTypes)
+{
+    using namespace hipdnn_data_sdk::utilities;
+
+    if(attrs.attn_scale_value().has_value())
+    {
+        return attrs.attn_scale_value().value();
+    }
+    if(!attrs.scale_tensor_uid().has_value())
+    {
+        return std::nullopt;
+    }
+
+    const auto uid = attrs.scale_tensor_uid().value();
+    const auto& tensor = *inputs.at(uid);
+    std::optional<float> value;
+    dispatchSdpaType(tensorDataTypes.at(uid), [&](auto sample) {
+        using T = decltype(sample);
+        const auto& typed = static_cast<const TensorBase<T>&>(tensor);
+        value = static_cast<float>(typed.memory().hostData()[0]);
+    });
+    return value;
+}
+
+template <class Q, class K, class V, class O, class C>
+void deriveSdpaBackwardOAndStatsImpl(
+    const hipdnn_flatbuffers_sdk::data_objects::SdpaBackwardAttributes& attrs,
+    const TensorDataTypes& tensorDataTypes,
+    InputTensorMap& inputs,
+    bool referenceUsesDevice,
+    bool fillO,
+    bool fillStats)
+{
+    using namespace hipdnn_data_sdk::utilities;
+    using namespace hipdnn_test_sdk::utilities;
+    using namespace hipdnn_gpu_ref;
+
+    const auto qUid = attrs.q_tensor_uid();
+    const auto kUid = attrs.k_tensor_uid();
+    const auto vUid = attrs.v_tensor_uid();
+    const auto oUid = attrs.o_tensor_uid();
+    const auto statsUid = attrs.stats_tensor_uid();
+    const auto attnMaskUid = attrs.attn_mask_tensor_uid();
+
+    auto [leftBound, rightBound, isTopLeft]
+        = extractDiagonalBandParams(attrs, "deriveSdpaBackwardOAndStats");
+    const std::optional<float> attnScale = resolveSdpaBwdAttnScale(attrs, inputs, tensorDataTypes);
+
+    auto& qT = static_cast<TensorBase<Q>&>(*inputs.at(qUid));
+    auto& kT = static_cast<TensorBase<K>&>(*inputs.at(kUid));
+    auto& vT = static_cast<TensorBase<V>&>(*inputs.at(vUid));
+    Tensor<O> oScratch({qT.dims()[0], qT.dims()[1], qT.dims()[2], vT.dims()[3]}); // [B,H,Sq,Dv]
+    auto& oT = fillO ? static_cast<TensorBase<O>&>(*inputs.at(oUid)) : oScratch;
+    TensorBase<C>* attnMaskT
+        = attnMaskUid.has_value()
+              ? static_cast<TensorBase<C>*>(inputs.at(attnMaskUid.value()).get())
+              : nullptr;
+
+    // CPU forward expects stats to be rank-4 ([B,H,Sq,1]) and GPU fprop expects rank-3 ([B,H,Sq]).
+    const auto& qDims = qT.dims();
+    std::vector<int64_t> refStatsDims = {qDims[0], qDims[1], qDims[2]}; // [B,H,Sq]
+    if(!referenceUsesDevice)
+    {
+        refStatsDims.push_back(1);
+    }
+    Tensor<float> statsTmp(refStatsDims);
+
+    if(referenceUsesDevice)
+    {
+        GpuFpReferenceSdpa::fprop<Q, K, V, O, C>(qT,
+                                                 kT,
+                                                 vT,
+                                                 oT,
+                                                 attnScale,
+                                                 attnMaskT,
+                                                 leftBound,
+                                                 rightBound,
+                                                 isTopLeft,
+                                                 &statsTmp,
+                                                 SdpaSoftmaxProbabilityMode::FLOAT);
+    }
+    else
+    {
+        CpuFpReferenceSdpa::forward<Q, K, V, O, C>(
+            qT, kT, vT, oT, attnScale, attnMaskT, leftBound, rightBound, isTopLeft, &statsTmp);
+    }
+
+    if(fillStats)
+    {
+        auto& statsT = static_cast<TensorBase<float>&>(*inputs.at(statsUid));
+        const auto count = qDims[0] * qDims[1] * qDims[2];
+        const float* src = statsTmp.memory().hostData();
+        float* dst = statsT.memory().hostData();
+        std::copy(src, src + count, dst);
+    }
+}
+
+void deriveSdpaBackwardOAndStats(const hipdnn_flatbuffers_sdk::data_objects::Node& node,
+                                 const std::vector<int64_t>& ownedUids,
+                                 const TensorDataTypes& tensorDataTypes,
+                                 InputTensorMap& inputs,
+                                 InputFillRecipes& recipes,
+                                 bool referenceUsesDevice = false)
+{
+    const auto* attrs = node.attributes_as_SdpaBackwardAttributes();
+    if(attrs == nullptr)
+    {
+        return;
+    }
+
+    // Derive a tensor only if the node owns it and the test did not explicitly fill it
+    const auto owned = [&](int64_t uid) {
+        return std::find(ownedUids.begin(), ownedUids.end(), uid) != ownedUids.end();
+    };
+    const auto oTensorUid = attrs->o_tensor_uid();
+    const auto statsTensorUid = attrs->stats_tensor_uid();
+    const bool fillO = owned(oTensorUid) && !recipes.hasExplicitFill(oTensorUid);
+    const bool fillStats = owned(statsTensorUid) && !recipes.hasExplicitFill(statsTensorUid);
+    if(!fillO && !fillStats)
+    {
+        return;
+    }
+
+    // Dispatch the SDPA backward derivation based on the data types of Q/K/V/O/C
+    dispatchSdpaType(tensorDataTypes.at(attrs->q_tensor_uid()), [&](auto q) {
+        dispatchSdpaType(tensorDataTypes.at(attrs->k_tensor_uid()), [&](auto k) {
+            dispatchSdpaType(tensorDataTypes.at(attrs->v_tensor_uid()), [&](auto v) {
+                dispatchSdpaType(tensorDataTypes.at(attrs->o_tensor_uid()), [&](auto o) {
+                    dispatchSdpaType(node.compute_data_type(), [&](auto c) {
+                        deriveSdpaBackwardOAndStatsImpl<decltype(q),
+                                                        decltype(k),
+                                                        decltype(v),
+                                                        decltype(o),
+                                                        decltype(c)>(
+                            *attrs, tensorDataTypes, inputs, referenceUsesDevice, fillO, fillStats);
+                    });
+                });
+            });
+        });
+    });
 }
 
 // ── Dispatch ─────────────────────────────────────────────────────────────────
@@ -521,7 +687,8 @@ FillResult fillInputs(const hipdnn_flatbuffers_sdk::data_objects::Graph& graph,
                       InputTensorMap& inputs,
                       const std::vector<int64_t>& ownedUids,
                       InputFillRecipes& recipes,
-                      DeviceInputFiller* device)
+                      DeviceInputFiller* device,
+                      bool referenceUsesDevice)
 {
     // Dtype defaults sit below test and per-op recipes. Only those that differ
     // from the generic FREE[-1, 1] are recorded, so meta.inputs stays unchanged
@@ -581,6 +748,26 @@ FillResult fillInputs(const hipdnn_flatbuffers_sdk::data_objects::Graph& graph,
     {
         device->waitForFills();
     }
+
+    // Derive O and stats for SDPA backward nodes, if they are owned
+    for(flatbuffers::uoffset_t i = 0; i < graph.nodes()->size(); ++i)
+    {
+        const auto& node = *graph.nodes()->Get(i);
+        if(node.attributes_type()
+           == hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::SdpaBackwardAttributes)
+        {
+            try
+            {
+                deriveSdpaBackwardOAndStats(
+                    node, ownedUids, dataTypes, inputs, recipes, referenceUsesDevice);
+            }
+            catch(const std::exception& e)
+            {
+                return FillResult::unsupported(e.what());
+            }
+        }
+    }
+
     return FillResult::ok(deviceFilled);
 }
 
