@@ -625,6 +625,7 @@ template <typename Ti, typename Tc, typename Tact, typename F>
 void epilogue_func(int64_t     m,
                    int64_t     n,
                    int64_t     ld,
+                   int64_t     lde,
                    Ti*         in,
                    void*       out,
                    Tc*         out_raw,
@@ -646,19 +647,20 @@ void epilogue_func(int64_t     m,
     {
         Ti bias_data = enable_bias ? cast_from_type<Ti>(bias, bias_type, i) : 0;
 
-#define CALCULATE_EPILOGUE_ACT                                                                \
-    auto pos     = j * ld + i;                                                                \
-    auto in_Tact = static_cast<Tact>(in[pos]) + bias_data;                                    \
-    if(e && !gradient)                                                                        \
-    {                                                                                         \
-        saturate_cast_to_type(e, in_Tact * scaleE, aux_type, pos);                            \
-    }                                                                                         \
-    Tact in_Tact_act = 0;                                                                     \
-    if(gradient)                                                                              \
-    {                                                                                         \
-        in_Tact_act = act_func(cast_from_type<Tact>(e, aux_type, pos), arg1, arg2) * in_Tact; \
-    }                                                                                         \
-    else                                                                                      \
+#define CALCULATE_EPILOGUE_ACT                                                                 \
+    auto pos     = j * ld + i;                                                                 \
+    auto epos    = j * lde + i;                                                                \
+    auto in_Tact = static_cast<Tact>(in[pos]) + bias_data;                                     \
+    if(e && !gradient)                                                                         \
+    {                                                                                          \
+        saturate_cast_to_type(e, (in_Tact * scaleE), aux_type, epos);                          \
+    }                                                                                          \
+    Tact in_Tact_act = 0;                                                                      \
+    if(gradient)                                                                               \
+    {                                                                                          \
+        in_Tact_act = act_func(cast_from_type<Tact>(e, aux_type, epos), arg1, arg2) * in_Tact; \
+    }                                                                                          \
+    else                                                                                       \
         in_Tact_act = act_func(in_Tact, arg1, arg2);
 
         if(amaxD == nullptr)
@@ -690,6 +692,7 @@ template <typename Tact, typename F>
 void epilogue_func(int64_t     m,
                    int64_t     n,
                    int64_t     ld,
+                   int64_t     lde,
                    void*       in,
                    void*       out,
                    void*       out_raw,
@@ -714,6 +717,7 @@ void epilogue_func(int64_t     m,
         epilogue_func(m,
                       n,
                       ld,
+                      lde,
                       (float*)in,
                       out,
                       (float*)out_raw,
@@ -735,6 +739,7 @@ void epilogue_func(int64_t     m,
         epilogue_func(m,
                       n,
                       ld,
+                      lde,
                       (double*)in,
                       out,
                       (double*)out_raw,
@@ -756,6 +761,7 @@ void epilogue_func(int64_t     m,
         epilogue_func(m,
                       n,
                       ld,
+                      lde,
                       (int32_t*)in,
                       out,
                       (int32_t*)out_raw,
@@ -783,6 +789,7 @@ template <typename Ti, typename Tc>
 void epilogue_func(int64_t     m,
                    int64_t     n,
                    int64_t     ld,
+                   int64_t     lde,
                    Ti*         in,
                    void*       out,
                    Tc*         out_raw,
@@ -797,12 +804,13 @@ void epilogue_func(int64_t     m,
                    bool        gradient,
                    hipDataType To)
 {
-#define CALCULATE_EPILOGUE_BASIC                                \
-    auto pos  = j * ld + i;                                     \
-    Tc   temp = static_cast<Ti>(*(in + pos)) + bias_data;       \
-    if(e)                                                       \
-    {                                                           \
-        saturate_cast_to_type(e, temp * scaleE, aux_type, pos); \
+#define CALCULATE_EPILOGUE_BASIC                                   \
+    auto pos  = j * ld + i;                                        \
+    auto epos = j * lde + i;                                       \
+    Tc   temp = static_cast<Ti>(*(in + pos)) + bias_data;          \
+    if(e)                                                          \
+    {                                                              \
+        saturate_cast_to_type(e, (temp * scaleE), aux_type, epos); \
     }
 
     for(int i = 0; i < m; i++)
@@ -838,6 +846,7 @@ void epilogue_func(int64_t     m,
 void epilogue_func(int64_t     m,
                    int64_t     n,
                    int64_t     ld,
+                   int64_t     lde,
                    void*       in,
                    void*       out,
                    void*       out_raw,
@@ -859,6 +868,7 @@ void epilogue_func(int64_t     m,
         epilogue_func(m,
                       n,
                       ld,
+                      lde,
                       (float*)in,
                       out,
                       (float*)out_raw,
@@ -877,6 +887,7 @@ void epilogue_func(int64_t     m,
         epilogue_func(m,
                       n,
                       ld,
+                      lde,
                       (double*)in,
                       out,
                       (double*)out_raw,
@@ -895,6 +906,7 @@ void epilogue_func(int64_t     m,
         epilogue_func(m,
                       n,
                       ld,
+                      lde,
                       (int32_t*)in,
                       out,
                       (int32_t*)out_raw,
@@ -5487,7 +5499,7 @@ void testing_matmul_with_bias(const Arguments& arg,
         }
 
 #define epilogue_param                                                                      \
-    M[gemmIdx], N[gemmIdx], ldd[gemmIdx],                                                   \
+    M[gemmIdx], N[gemmIdx], ldd[gemmIdx], lde[gemmIdx],                                     \
         (hD_gold_epl[gemmIdx].as<char>() + pos * realDataTypeSize(Talpha)),                 \
         (hD_gold[gemmIdx].as<char>() + pos * realDataTypeSize(To)),                         \
         (hBias_gold_epl[gemmIdx].as<char>() + pos * realDataTypeSize(Talpha)),              \
@@ -5569,10 +5581,10 @@ void testing_matmul_with_bias(const Arguments& arg,
 
                     auto                        pos    = stride_d[gemmIdx] * batchIdx;
                     std::vector<HipHostBuffer>* hEInst = arg.gradient ? &hE : &hE_gold;
-                    void*                       ePos
-                        = ((*hEInst).size() <= gemmIdx)
-                              ? nullptr
-                              : ((*hEInst)[gemmIdx].as<char>() + pos * realDataTypeSize(Taux));
+                    void*                       ePos      = ((*hEInst).size() <= gemmIdx)
+                                                                ? nullptr
+                                                                : ((*hEInst)[gemmIdx].as<char>()
+                                        + stride_e[gemmIdx] * batchIdx * realDataTypeSize(Taux));
                     auto  applyBias = arg.gradient ? false : arg.bias_vector;
                     void* hBias_buf = ((hBias).size() <= gemmIdx) ? nullptr : hBias[gemmIdx].buf();
                     if(applyBias && arg.bias_stride > 0)
