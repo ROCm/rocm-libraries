@@ -371,3 +371,10 @@ Contributions of any kind are most welcome! Contribution instructions are in
 [CONTRIBUTING](./CONTRIBUTING.md).
 
 Licensing information is in [LICENSE](./LICENSE.txt).
+
+<!--
+CI TEST SCAFFOLDING -- do not merge.
+Docs-only change to exercise ROCm/TheRock#external-ci-file-goodbye: every
+changed path matches a skip-ci-config.toml pattern, so TheRock should set
+enable_build_jobs=false and skip CI entirely.
+-->
