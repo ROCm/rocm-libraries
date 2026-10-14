@@ -56,6 +56,7 @@ from ._instances import (
     instances_for,
 )
 from ._manifest import refresh_source_md, sha256, write_op_manifest
+from ._parallel import compile_all
 
 # One tensor argument: its pointer, then its dynamic layout.
 _TENSOR_LAYOUT_BYTES = 40
@@ -430,6 +431,18 @@ def _as_built(op: str, instance: Instance) -> Instance:
     )
 
 
+def _compile(task: tuple) -> bytes:
+    """One instance's code object, in a ``_parallel`` worker or this process."""
+    op, arch, shipped, keep_ir = task
+    instance = _as_built(op, shipped)
+    with tempfile.TemporaryDirectory(prefix=f"flydsl-{shipped.name}-") as tmp:
+        dump_dir = Path(keep_ir) / shipped.name if keep_ir else Path(tmp)
+        try:
+            return _build_one(instance, dump_dir, arch)
+        except Exception as exc:
+            raise GeneratorError(f"{shipped.name}: {exc}") from exc
+
+
 def generate(
     op: str, arch: str, out_root: Path, keep_ir: Path | None = None
 ) -> Path | None:
@@ -450,16 +463,15 @@ def generate(
     op_dir.mkdir(parents=True, exist_ok=True)
 
     records: list[dict] = []
+    blobs = compile_all(
+        _compile,
+        [(op, arch, shipped, keep_ir) for shipped in instances],
+        arch,
+        lambda task: task[2].name,
+    )
 
-    for index, shipped in enumerate(instances, start=1):
-        print(f"[{index}/{len(instances)}] {shipped.name}", flush=True)
+    for shipped, blob in zip(instances, blobs):
         instance = _as_built(op, shipped)
-        with tempfile.TemporaryDirectory(prefix=f"flydsl-{shipped.name}-") as tmp:
-            dump_dir = Path(keep_ir) / shipped.name if keep_ir else Path(tmp)
-            try:
-                blob = _build_one(instance, dump_dir, arch)
-            except Exception as exc:
-                raise GeneratorError(f"{shipped.name}: {exc}") from exc
 
         filename = f"{shipped.name}.hsaco"
         where = f"{arch}/{op}/{filename}"

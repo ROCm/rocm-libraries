@@ -28,7 +28,7 @@ instance list is untouched.
 | aiter_kernels_commit | `8253efc4059516f492df597b80ce5311e9fda8bd` |
 | rocm_version | `7.13.0` |
 | generic_target_shim | `chipset=gfx1100` |
-| inputs_sha256 | `355cb79c6d4c6a00c594c2dab4ae91efd43d2d4233da207761ab6f4351ace256` |
+| inputs_sha256 | `f08fea011b39fa3aec3b9699c05fb1a8667b3bd3d454ce03836e099550e6f77a` |
 
 ## Instances
 

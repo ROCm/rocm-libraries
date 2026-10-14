@@ -84,6 +84,16 @@ it as a script dies with `ImportError: attempted relative import with no known
 parent package`. Invoke it from `flydsl/` as `python -m generators.gen_rmsnorm`.
 `gen_descriptors.py` is a plain script and takes either form.
 
+### Generators compile in parallel
+
+Every generator compiles its objects in a pool of fresh worker processes
+(`generators/_parallel.py`), each prepared as the generator's own process is; the
+objects come back in table order and are checked, written and recorded serially, so
+the bytes are a serial build's. `FLYDSL_GEN_JOBS` sets the worker count (default:
+half the CPUs, since each worker holds a compile in memory; `1` compiles in the
+generator's own process). On a 32-thread machine every op and arch regenerates in
+about five minutes instead of twenty-five.
+
 ---
 
 ## 2. Verify the checked-in objects reproduce

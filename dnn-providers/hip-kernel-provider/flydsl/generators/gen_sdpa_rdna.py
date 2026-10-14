@@ -45,6 +45,7 @@ from ._codeobject import (
 from ._extract_hsaco import hsaco_from_dump
 from ._instances import Instance, instances_for
 from ._manifest import refresh_source_md, sha256, write_op_manifest
+from ._parallel import compile_all
 from ._sdpa_rdna_build import LLVM_OPTIONS, WAVE_SIZE
 
 OP = "sdpa_rdna"
@@ -204,11 +205,22 @@ def _build_one(
     return blob, effective
 
 
+def _compile(task: tuple):
+    """One instance's code object and LLVM options, in a ``_parallel`` worker or here."""
+    from kernels.attention_rdna import flash_attn_func_rdna  # noqa: PLC0415
+
+    instance, keep_ir, llvm_options = task
+    with tempfile.TemporaryDirectory(prefix=f"flydsl-{instance.name}-") as tmp:
+        dump_dir = Path(keep_ir) / instance.name if keep_ir else Path(tmp)
+        try:
+            return _build_one(flash_attn_func_rdna, instance, dump_dir, llvm_options)
+        except Exception as exc:
+            raise GeneratorError(f"{instance.name}: {exc}") from exc
+
+
 def generate(arch: str, out_root: Path, keep_ir: Path | None = None) -> Path:
     env.assert_flydsl_version()
     env.prepare(arch)
-
-    from kernels.attention_rdna import flash_attn_func_rdna  # noqa: PLC0415
 
     op_dir = out_root / OP / arch
     op_dir.mkdir(parents=True, exist_ok=True)
@@ -217,16 +229,14 @@ def generate(arch: str, out_root: Path, keep_ir: Path | None = None) -> Path:
     llvm_options = LLVM_OPTIONS.get(arch, {})
     records: list[dict] = []
 
-    for index, instance in enumerate(instances, start=1):
-        print(f"[{index}/{len(instances)}] {instance.name}", flush=True)
-        with tempfile.TemporaryDirectory(prefix=f"flydsl-{instance.name}-") as tmp:
-            dump_dir = Path(keep_ir) / instance.name if keep_ir else Path(tmp)
-            try:
-                blob, effective_options = _build_one(
-                    flash_attn_func_rdna, instance, dump_dir, llvm_options
-                )
-            except Exception as exc:
-                raise GeneratorError(f"{instance.name}: {exc}") from exc
+    built = compile_all(
+        _compile,
+        [(instance, keep_ir, llvm_options) for instance in instances],
+        arch,
+        lambda t: t[0].name,
+    )
+
+    for instance, (blob, effective_options) in zip(instances, built):
 
         filename = f"{instance.name}.hsaco"
         where = f"{arch}/{OP}/{filename}"

@@ -40,6 +40,7 @@ from ._codeobject import (
 from ._extract_hsaco import hsaco_from_dump
 from ._instances import SDPA_AIW_TARGETS, Instance, instances_for
 from ._manifest import refresh_source_md, sha256, write_op_manifest
+from ._parallel import compile_all
 
 OP = "sdpa_aiw"
 
@@ -227,6 +228,17 @@ def _workgroup_size(blob: bytes, where: str, symbol: str) -> int:
     return int(kernel[".max_flat_workgroup_size"])
 
 
+def _compile(task: tuple):
+    """One instance's code object and plan, in a ``_parallel`` worker or this process."""
+    instance, keep_ir = task
+    with tempfile.TemporaryDirectory(prefix=f"flydsl-{instance.name}-") as tmp:
+        dump_dir = Path(keep_ir) / instance.name if keep_ir else Path(tmp)
+        try:
+            return _build_one(instance, dump_dir)
+        except Exception as exc:
+            raise GeneratorError(f"{instance.name}: {exc}") from exc
+
+
 def generate(arch: str, out_root: Path, keep_ir: Path | None = None) -> Path | None:
     instances = instances_for(OP, arch)
     if not instances:
@@ -240,14 +252,14 @@ def generate(arch: str, out_root: Path, keep_ir: Path | None = None) -> Path | N
     expected, names = _signature()
     records: list[dict] = []
 
-    for index, instance in enumerate(instances, start=1):
-        print(f"[{index}/{len(instances)}] {instance.name}", flush=True)
-        with tempfile.TemporaryDirectory(prefix=f"flydsl-{instance.name}-") as tmp:
-            dump_dir = Path(keep_ir) / instance.name if keep_ir else Path(tmp)
-            try:
-                blob, plan = _build_one(instance, dump_dir)
-            except Exception as exc:
-                raise GeneratorError(f"{instance.name}: {exc}") from exc
+    built = compile_all(
+        _compile,
+        [(instance, keep_ir) for instance in instances],
+        arch,
+        lambda t: t[0].name,
+    )
+
+    for instance, (blob, plan) in zip(instances, built):
 
         filename = f"{instance.name}.hsaco"
         where = f"{arch}/{OP}/{filename}"

@@ -47,6 +47,7 @@ from ._codeobject import (
 from ._extract_hsaco import hsaco_from_dump
 from ._instances import RMSNORM_SMALL_N_THRESHOLD, Instance, instances_for
 from ._manifest import refresh_source_md, sha256, write_op_manifest
+from ._parallel import compile_all
 
 OP = "rmsnorm"
 
@@ -166,11 +167,24 @@ def _build_one(kernel_module, torch, instance: Instance, dump_dir: Path) -> byte
     return blob
 
 
+def _compile(task: tuple) -> bytes:
+    """One instance's code object, in a ``_parallel`` worker or this process."""
+    import torch  # noqa: PLC0415  (after prepare())
+
+    from kernels.norm import rmsnorm_kernel  # noqa: PLC0415
+
+    instance, keep_ir = task
+    with tempfile.TemporaryDirectory(prefix=f"flydsl-{instance.name}-") as tmp:
+        dump_dir = Path(keep_ir) / instance.name if keep_ir else Path(tmp)
+        try:
+            return _build_one(rmsnorm_kernel, torch, instance, dump_dir)
+        except Exception as exc:
+            raise GeneratorError(f"{instance.name}: {exc}") from exc
+
+
 def generate(arch: str, out_root: Path, keep_ir: Path | None = None) -> Path:
     env.assert_flydsl_version()
     env.prepare(arch)
-
-    import torch  # noqa: PLC0415  (after prepare(): the env must be set first)
 
     from kernels.norm import rmsnorm_kernel  # noqa: PLC0415
 
@@ -182,14 +196,14 @@ def generate(arch: str, out_root: Path, keep_ir: Path | None = None) -> Path:
     instances = instances_for(OP)
     records: list[dict] = []
 
-    for index, instance in enumerate(instances, start=1):
-        print(f"[{index}/{len(instances)}] {instance.name}", flush=True)
-        with tempfile.TemporaryDirectory(prefix=f"flydsl-{instance.name}-") as tmp:
-            dump_dir = Path(keep_ir) / instance.name if keep_ir else Path(tmp)
-            try:
-                blob = _build_one(rmsnorm_kernel, torch, instance, dump_dir)
-            except Exception as exc:
-                raise GeneratorError(f"{instance.name}: {exc}") from exc
+    blobs = compile_all(
+        _compile,
+        [(instance, keep_ir) for instance in instances],
+        arch,
+        lambda t: t[0].name,
+    )
+
+    for instance, blob in zip(instances, blobs):
 
         filename = f"{instance.name}.hsaco"
         where = f"{arch}/{OP}/{filename}"
