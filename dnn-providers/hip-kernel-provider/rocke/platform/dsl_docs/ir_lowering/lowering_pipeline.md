@@ -114,6 +114,7 @@ attributes #0 = {
 | `tile.mfma_f32_32x32x8_f16`    | `llvm.amdgcn.mfma.f32.32x32x8f16(<4xhalf>, <4xhalf>, <16xfloat>, 0,0,0)`   |
 | `tile.mfma_f32_32x32x16_f16`   | `llvm.amdgcn.mfma.f32.32x32x16.f16(<8xhalf>, <8xhalf>, <16xfloat>, 0,0,0)` |
 | `tile.mfma_f32_4x4x4_f16`      | `llvm.amdgcn.mfma.f32.4x4x4f16(<4xhalf>, <4xhalf>, <4xfloat>, 0,0,0)`      |
+| `tile.mfma_f32_4x4x4_bf16`     | `llvm.amdgcn.mfma.f32.4x4x4bf16.1k(<4xi16>, <4xi16>, <4xfloat>, 0,0,0)`    |
 | `tile.readfirstlane`           | `llvm.amdgcn.readfirstlane.{i32,i64}`                                      |
 | `tile.pin_sgpr`                | `asm volatile("" : "+s"(x))`                                               |
 | `tile.wave_all` / `wave_any`   | `ballot.i64` + compare                                                     |

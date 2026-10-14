@@ -447,6 +447,9 @@ typedef enum rocke_opcode
     ROCKE_OP_VECTOR_UNDEF,
     ROCKE_OP_TILE_BUFFER_LOAD_F16_D16,
 
+    /* arith.fdot2 (appended: keeps every earlier opcode value stable) */
+    ROCKE_OP_ARITH_FDOT2,
+
     ROCKE_OP__COUNT
 } rocke_opcode_t;
 
@@ -789,6 +792,9 @@ rocke_value_t* rocke_b_fneg(rocke_ir_builder_t* b, rocke_value_t* a);
 rocke_value_t* rocke_b_fabs(rocke_ir_builder_t* b, rocke_value_t* a);
 rocke_value_t*
     rocke_b_fma(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c, rocke_value_t* d);
+/* fdot2(a, c, d) = a.x*c.x + a.y*c.y + d; a, c: vec<f16|bf16 x2>, d: f32 -> f32. */
+rocke_value_t*
+    rocke_b_fdot2(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c, rocke_value_t* d);
 rocke_value_t* rocke_b_fmax(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
 rocke_value_t* rocke_b_fmin(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
 rocke_value_t*
@@ -1178,6 +1184,10 @@ rocke_value_t* rocke_b_mfma_f32_4x4x4_f16(rocke_ir_builder_t* b,
                                           rocke_value_t* a,
                                           rocke_value_t* bb,
                                           rocke_value_t* c);
+rocke_value_t* rocke_b_mfma_f32_4x4x4_bf16(rocke_ir_builder_t* b,
+                                           rocke_value_t* a,
+                                           rocke_value_t* bb,
+                                           rocke_value_t* c);
 rocke_value_t* rocke_b_mfma_f32_16x16x128_fp4(rocke_ir_builder_t* b,
                                               rocke_value_t* a,
                                               rocke_value_t* bb,
