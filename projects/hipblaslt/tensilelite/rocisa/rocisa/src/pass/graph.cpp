@@ -94,53 +94,121 @@ namespace rocisa
         _convertTextVariablesToRegisters(module, assignmentDict);
     }
 
+    // Classification used by _removeDuplicateAssignmentGPR, in its check order.
+    Graph::Kind _classifyItem(const std::shared_ptr<Item>& item)
+    {
+        if(std::dynamic_pointer_cast<BranchInstruction>(item)
+           || std::dynamic_pointer_cast<Label>(item)
+           || std::dynamic_pointer_cast<MacroInstruction>(item)
+           || std::dynamic_pointer_cast<_SWaitCnt>(item)
+           || std::dynamic_pointer_cast<_SWaitCntVscnt>(item))
+            return Graph::Kind::Reset;
+        if(std::dynamic_pointer_cast<SMovB32>(item))
+            return Graph::Kind::SMov;
+        if(std::dynamic_pointer_cast<Instruction>(item))
+            return Graph::Kind::Instr;
+        return Graph::Kind::Other;
+    }
+
+    // An Instr entry resets the tracked sgpr value when its first param is an
+    // sgpr range covering the list's index (only for >1 params).
+    std::shared_ptr<RegisterContainer>
+        _dstSgpr(const std::vector<InstructionInput>& params)
+    {
+        if(params.size() > 1)
+        {
+            if(auto pptr = std::get_if<std::shared_ptr<Container>>(&params[0]))
+            {
+                auto gpr = std::dynamic_pointer_cast<RegisterContainer>(*pptr);
+                if(gpr && gpr->regType == "s")
+                    return gpr;
+            }
+        }
+        return nullptr;
+    }
+
+    void _pushSgprEntry(Graph&                                    graph,
+                        size_t                                    i,
+                        const std::shared_ptr<Item>&              item,
+                        Graph::Kind                               kind,
+                        bool                                      noOpt,
+                        const std::shared_ptr<RegisterContainer>& dst)
+    {
+        bool dstHit = kind == Graph::Kind::Instr && dst && (int)i >= dst->regIdx
+                      && (int)i < dst->regIdx + dst->regNum;
+        graph.sgpr[i].push_back({item, graph.barrierSeq, kind, noOpt, dstHit});
+    }
+
     void _addRegToGraph(std::shared_ptr<Item>                item,
                         const std::vector<InstructionInput>& params,
                         Graph&                               graph,
                         bool                                 noOpt)
     {
-        for(auto p : params)
+        bool                               classified = false;
+        Graph::Kind                        kind       = Graph::Kind::Other;
+        std::shared_ptr<RegisterContainer> dst;
+        for(const auto& p : params)
         {
             if(auto pptr = std::get_if<std::shared_ptr<Container>>(&p))
             {
-                if(auto regContainer = std::dynamic_pointer_cast<RegisterContainer>(*pptr))
+                auto regContainer = dynamic_cast<RegisterContainer*>(pptr->get());
+                if(!regContainer)
+                    continue;
+                if(regContainer->regType == "acc")
+                    continue;
+                if(regContainer->regIdx < 0)
                 {
-                    if(regContainer->regType == "acc")
-                        continue;
-                    if(regContainer->regIdx < 0)
+                    std::cerr << "ERROR: negative regIdx detected!" << std::endl;
+                    std::cerr << "  regContainer: " << regContainer->toString() << std::endl;
+                    std::cerr << "  instruction:  " << item->toString() << std::endl;
+                    throw std::runtime_error("GPR index out of range (negative regIdx)");
+                }
+                int    lo = regContainer->regIdx;
+                int    hi = regContainer->regIdx + regContainer->regNum;
+                size_t gprSize;
+                if(regContainer->regType == "s")
+                    gprSize = graph.sgpr.size();
+                else if(regContainer->regType == "v")
+                    gprSize = graph.vgprSize;
+                else if(regContainer->regType == "m")
+                    gprSize = graph.mgprSize;
+                else if(lo < hi)
+                    throw std::runtime_error("Invalid gpr type");
+                else
+                    continue;
+                if(lo < hi && (size_t)(hi - 1) >= gprSize)
+                {
+                    std::cerr << "regContainer: " << regContainer->toString() << std::endl;
+                    std::cerr << "gprvec.size(): " << gprSize << std::endl;
+                    throw std::runtime_error("GPR index out of range");
+                }
+                if(regContainer->regType == "s")
+                {
+                    if(!classified)
                     {
-                        std::cerr << "ERROR: negative regIdx detected!" << std::endl;
-                        std::cerr << "  regContainer: " << regContainer->toString() << std::endl;
-                        std::cerr << "  instruction:  " << item->toString() << std::endl;
-                        throw std::runtime_error("GPR index out of range (negative regIdx)");
+                        kind       = noOpt ? Graph::Kind::Reset : _classifyItem(item);
+                        dst        = _dstSgpr(params);
+                        classified = true;
                     }
-                    for(int i = regContainer->regIdx;
-                        i < regContainer->regIdx + regContainer->regNum;
-                        ++i)
+                    for(int i = lo; i < hi; ++i)
                     {
-                        auto& gprvec = graph.getGprRef(regContainer->regType);
-                        if(i >= gprvec.size())
-                        {
-                            std::cerr << "regContainer: " << regContainer->toString() << std::endl;
-                            std::cerr << "gprvec.size(): " << gprvec.size() << std::endl;
-                            throw std::runtime_error("GPR index out of range");
-                        }
-                        else if(!gprvec[i].empty() && gprvec[i].back() == item)
+                        auto& list = graph.sgpr[i];
+                        // A NoOptItem wrapper never compares equal to item.
+                        if(!noOpt && !list.empty() && !list.back().noOpt
+                           && list.back().item == item
+                           && list.back().barrierSeq == graph.barrierSeq)
                             continue;
-                        if(noOpt)
-                            gprvec[i].push_back(std::make_shared<NoOptItem>(item));
-                        else
-                            gprvec[i].push_back(item);
+                        _pushSgprEntry(graph, i, item, kind, noOpt, dst);
                     }
-                    // Track highest VGPR index seen in any instruction.  Done
-                    // outside the inner loop using regIdx+regNum-1 to avoid
-                    // repeated comparisons; acc registers are already skipped.
-                    if(regContainer->regType == "v")
-                    {
-                        int lastIdx = regContainer->regIdx + regContainer->regNum - 1;
-                        if(lastIdx > graph.maxVgprSeen)
-                            graph.maxVgprSeen = lastIdx;
-                    }
+                }
+                // Track highest VGPR index seen in any instruction.  Done
+                // outside the inner loop using regIdx+regNum-1 to avoid
+                // repeated comparisons; acc registers are already skipped.
+                else if(regContainer->regType == "v")
+                {
+                    int lastIdx = hi - 1;
+                    if(lastIdx > graph.maxVgprSeen)
+                        graph.maxVgprSeen = lastIdx;
                 }
             }
         }
@@ -148,7 +216,7 @@ namespace rocisa
 
     void _recordGraph(std::shared_ptr<Module> module, Graph& graph)
     {
-        for(auto item : module->items())
+        for(const auto& item : module->items())
         {
             if(auto subModule = std::dynamic_pointer_cast<Module>(item))
             {
@@ -170,10 +238,25 @@ namespace rocisa
                     || std::dynamic_pointer_cast<SNop>(item)
                     || std::dynamic_pointer_cast<SSleep>(item))
             {
-                for(auto& v : graph.vgpr)
-                    v.push_back(item);
-                for(auto& s : graph.sgpr)
-                    s.push_back(item);
+                // Barriers apply to every sgpr.  Resetting ones are recorded
+                // via resetsBefore; others only matter if they write an sgpr,
+                // in which case they are pushed into every list as before.
+                auto kind  = _classifyItem(item);
+                bool reset = kind == Graph::Kind::Reset;
+                if(kind == Graph::Kind::SMov)
+                {
+                    for(size_t i = 0; i < graph.sgpr.size(); ++i)
+                        _pushSgprEntry(graph, i, item, kind, false, nullptr);
+                }
+                else if(kind == Graph::Kind::Instr)
+                {
+                    auto dst = _dstSgpr(std::dynamic_pointer_cast<Instruction>(item)->getParams());
+                    if(dst)
+                        for(size_t i = 0; i < graph.sgpr.size(); ++i)
+                            _pushSgprEntry(graph, i, item, kind, false, dst);
+                }
+                graph.barrierSeq++;
+                graph.resetsBefore.push_back(graph.resetsBefore.back() + (reset ? 1 : 0));
             }
         }
     }
@@ -181,35 +264,32 @@ namespace rocisa
     Graph buildGraph(std::shared_ptr<Module> module, int vgprMax, int sgprMax)
     {
         Graph graph;
-        graph.vgpr = std::move(std::vector<std::vector<std::shared_ptr<Item>>>(vgprMax));
-        graph.sgpr = std::move(std::vector<std::vector<std::shared_ptr<Item>>>(sgprMax));
-        graph.mgpr = std::move(std::vector<std::vector<std::shared_ptr<Item>>>(1));
+        graph.vgprSize = vgprMax;
+        graph.sgpr     = std::vector<std::vector<Graph::Entry>>(sgprMax);
+        graph.mgprSize = 1;
         _recordGraph(module, graph);
-        return std::move(graph);
+        return graph;
     }
 
-    void _removeDuplicateAssignmentGPR(Graph& graph, const std::string& regType)
+    void _removeDuplicateAssignmentGPR(Graph& graph)
     {
-        auto& graphRef = graph.getGprRef(regType);
+        auto& graphRef = graph.sgpr;
         for(size_t idx = 0; idx < graphRef.size(); ++idx)
         {
-            auto&                              sList       = graphRef[idx];
-            std::optional<InstructionInput>    assignValue = std::nullopt;
-            std::vector<std::shared_ptr<Item>> newList;
-            for(auto& item : sList)
+            std::optional<InstructionInput> assignValue = std::nullopt;
+            int                             prevSeq     = 0;
+            for(auto& entry : graphRef[idx])
             {
-                bool isRemoved = false;
-                if(std::dynamic_pointer_cast<NoOptItem>(item)
-                   || std::dynamic_pointer_cast<BranchInstruction>(item)
-                   || std::dynamic_pointer_cast<Label>(item)
-                   || std::dynamic_pointer_cast<MacroInstruction>(item)
-                   || std::dynamic_pointer_cast<_SWaitCnt>(item)
-                   || std::dynamic_pointer_cast<_SWaitCntVscnt>(item))
+                if(graph.resetsBefore[entry.barrierSeq] != graph.resetsBefore[prevSeq])
+                    assignValue = std::nullopt;
+                prevSeq = entry.barrierSeq;
+                if(entry.kind == Graph::Kind::Reset)
                 {
                     assignValue = std::nullopt;
                 }
-                else if(auto smov = std::dynamic_pointer_cast<SMovB32>(item))
+                else if(entry.kind == Graph::Kind::SMov)
                 {
+                    auto  smov     = std::static_pointer_cast<SMovB32>(entry.item);
                     auto& dst      = *smov->dst;
                     auto& gprValue = smov->srcs[0];
                     if(typeid(dst) != typeid(EXEC))
@@ -229,47 +309,20 @@ namespace rocisa
                                 auto module = dynamic_cast<Module*>(smov->parent);
                                 module->removeItem(smov);
                             }
-                            isRemoved = true;
                         }
                     }
                     assignValue = gprValue;
                 }
-                else if(auto instr = std::dynamic_pointer_cast<Instruction>(item))
+                else if(entry.kind == Graph::Kind::Instr && entry.dstHit)
                 {
-                    auto params = instr->getParams();
-                    if(params.size() > 1)
-                    {
-                        auto pptr = std::get_if<std::shared_ptr<Container>>(&params[0]);
-                        if(!pptr)
-                            continue;
-                        auto gpr = std::dynamic_pointer_cast<RegisterContainer>(*pptr);
-                        if(gpr && gpr->regType == regType)
-                        {
-                            for(int i = gpr->regIdx; i < gpr->regIdx + gpr->regNum; ++i)
-                            {
-                                if(i == idx)
-                                {
-                                    assignValue = std::nullopt;
-                                    break;
-                                }
-                            }
-                        }
-                    }
+                    assignValue = std::nullopt;
                 }
-                if(!isRemoved)
-                {
-                    newList.push_back(std::move(item));
-                }
-            }
-            if(newList.size() != sList.size())
-            {
-                graph.getGprRef(regType)[idx] = std::move(newList);
             }
         }
     }
 
     void removeDuplicateAssignment(Graph& graph)
     {
-        _removeDuplicateAssignmentGPR(graph, "s");
+        _removeDuplicateAssignmentGPR(graph);
     }
 } // namespace rocisa
