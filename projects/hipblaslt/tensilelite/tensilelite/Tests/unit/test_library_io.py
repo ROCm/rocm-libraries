@@ -24,11 +24,49 @@
 ################################################################################
 """Unit tests for Tensile.LibraryIO.writeMsgPack."""
 
+import gzip
+import importlib.util
+import os
 import zlib
+from pathlib import Path
+
 import msgpack
 import pytest
 
 from Tensile.LibraryIO import writeMsgPack, writeMsgPackIndexed
+
+
+def _require_writer():
+    if importlib.util.find_spec("tensilelite_write") is None:
+        yaml = os.environ.get("HIPBLASLT_ENABLE_YAML", "")
+        device = os.environ.get("HIPBLASLT_ENABLE_DEVICE", "")
+        if yaml in ("1", "ON", "on", "TRUE", "true") and device in (
+            "0",
+            "OFF",
+            "off",
+            "FALSE",
+            "false",
+        ):
+            pytest.skip(
+                "a YAML host build without device libraries does not build tensilelite_write"
+            )
+        pytest.fail(
+            "tensilelite_write was not built. MessagePack master-library writes require it."
+        )
+    import tensilelite_write
+
+    return tensilelite_write
+
+
+def _kernels_lite_state():
+    fixture = (
+        Path(__file__).resolve().parents[3]
+        / "tests"
+        / "configs"
+        / "SolutionLibraries"
+        / "KernelsLite.dat.gz"
+    )
+    return msgpack.unpackb(gzip.decompress(fixture.read_bytes()), raw=False, strict_map_key=False)
 
 
 def _mapping():
@@ -125,4 +163,40 @@ def test_writeMsgPackIndexed_rejects_non_master_payload(tmp_path):
 
     with pytest.raises(SystemExit):
         writeMsgPackIndexed(dest, {0: "shard_a", 1: "shard_b"})
+
+
+def _read_indexed(path):
+    return msgpack.unpackb(zlib.decompress(path.read_bytes()), raw=False, strict_map_key=False)
+
+
+def test_writeMsgPackIndexed_table_matches_blob_and_is_reproducible(tmp_path):
+    """Offsets tile the blob, indices are sorted, and two runs write the same bytes."""
+    _require_writer()
+    state = _kernels_lite_state()
+    dest = tmp_path / "library.dat"
+
+    writeMsgPackIndexed(str(dest), state)
+    first = (tmp_path / "library.dat.zlib").read_bytes()
+    writeMsgPackIndexed(str(dest), state)
+    assert (tmp_path / "library.dat.zlib").read_bytes() == first
+
+    reversed_state = dict(state)
+    reversed_state["solutions"] = list(reversed(state["solutions"]))
+    writeMsgPackIndexed(str(tmp_path / "reversed.dat"), reversed_state)
+    assert (tmp_path / "reversed.dat.zlib").read_bytes() == first
+
+    indexed = _read_indexed(tmp_path / "library.dat.zlib")
+    table = indexed["solutions_index"]
+    blob = indexed["solutions_blob"]
+    indices = [table[i] for i in range(0, len(table), 3)]
+    assert indices == sorted(indices)
+    assert indices == sorted(solution["index"] for solution in state["solutions"])
+
+    cursor = 0
+    spans = sorted((table[i + 1], table[i + 2]) for i in range(0, len(table), 3))
+    for offset, length in spans:
+        assert offset == cursor
+        assert length > 0
+        cursor += length
+    assert cursor == len(blob)
 

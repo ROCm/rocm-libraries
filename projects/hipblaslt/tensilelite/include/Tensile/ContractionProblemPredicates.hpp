@@ -3078,6 +3078,11 @@ namespace TensileLite
                 std::array<int, 2> value;
                 size_t             cuCount;
                 AMDGPU::Processor  processor;
+                // Set when captureCuCount left cuCount at 0 because a library
+                // document was being rewritten. The stored predicate is only
+                // the value array; evaluating this object would treat the
+                // device as having no compute units.
+                bool deviceQueryDeferred = false;
 
                 /// Generic gfx942 solutions are CU-fallbacks on MI300A (228 CUs, vs 304 for
                 /// MI300X) and always launch at WGMXCC=1, but this runs before
@@ -3130,10 +3135,12 @@ namespace TensileLite
                 {
                     if(deferWorkgroupMappingDeviceQuery())
                     {
-                        cuCount   = 0;
-                        processor = AMDGPU::Processor::gfx000;
+                        cuCount             = 0;
+                        processor           = AMDGPU::Processor::gfx000;
+                        deviceQueryDeferred = true;
                         return;
                     }
+                    deviceQueryDeferred = false;
 
                     auto pHardware = hip::GetCurrentDevice();
                     assert(pHardware != nullptr);
@@ -3147,6 +3154,9 @@ namespace TensileLite
 
                 virtual bool operator()(ContractionProblemGemm const& problem) const override
                 {
+                    // A predicate built under DeferWorkgroupMappingDeviceQuery
+                    // must not be evaluated. cuCount is 0, with no device behind it.
+                    assert(!deviceQueryDeferred);
                     // If XCC == -1, we automatically set it to the number XCCs.
                     // In this case, no predicate is needed.
                     if(value[0] == -1)
@@ -3163,6 +3173,7 @@ namespace TensileLite
                 virtual bool debugEval(ContractionProblemGemm const& problem,
                                        std::ostream&                 stream) const override
                 {
+                    assert(!deviceQueryDeferred);
                     if(value[0] == -1)
                         return true;
                     size_t XCC  = fallbackXCC(problem) ? 1 : value[0];

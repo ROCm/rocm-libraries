@@ -1,10 +1,11 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""LibraryIO MessagePack writes go through the C++ writer when it was built."""
+"""LibraryIO MessagePack master libraries are written by tensilelite_write."""
 
 import gzip
 import importlib.util
+import os
 import zlib
 from pathlib import Path
 
@@ -15,9 +16,19 @@ from Tensile.LibraryIO import writeMsgPack, writeMsgPackIndexed
 
 
 def _writer():
-    if importlib.util.find_spec("tensilelite.tensilelite_write") is None:
-        pytest.skip("tensilelite_write extension was not built")
-    from tensilelite import tensilelite_write
+    if importlib.util.find_spec("tensilelite_write") is None:
+        yaml = os.environ.get("HIPBLASLT_ENABLE_YAML", "")
+        device = os.environ.get("HIPBLASLT_ENABLE_DEVICE", "")
+        yaml_on = yaml in ("1", "ON", "on", "TRUE", "true")
+        device_off = device in ("0", "OFF", "off", "FALSE", "false")
+        if yaml_on and device_off:
+            pytest.skip(
+                "a YAML host build without device libraries does not build tensilelite_write"
+            )
+        pytest.fail(
+            "tensilelite_write was not built. MessagePack master-library writes require it."
+        )
+    import tensilelite_write
 
     return tensilelite_write
 
@@ -88,3 +99,71 @@ def test_library_io_msgpack_writer_documents_load(tmp_path):
     assert "solutions" in rewritten_doc
     assert "format_version" not in rewritten_doc
     assert "solutions_blob" not in rewritten_doc
+
+
+# Keys the C++ loader does not read. They are absent from the rewritten solution.
+_DROPPED_KEYS = {"pythonOnlyMarker", "streamK", "CustomKernelName"}
+
+
+def _compare_solution(before, after, path=""):
+    """Fields present on both sides must match.
+
+    Omitted fields come back as C++ defaults, so keys that exist only on the
+    written solution are not errors. Keys in _DROPPED_KEYS are not written.
+    threadTile may gain a trailing 0, and a TypesEqual list may gain "Float".
+    """
+    errors = []
+    if isinstance(before, dict) and isinstance(after, dict):
+        for key, value in before.items():
+            if key in _DROPPED_KEYS:
+                if key in after:
+                    errors.append(f"{path}.{key} was written")
+                continue
+            if key not in after:
+                errors.append(f"dropped {path}.{key}")
+                continue
+            errors.extend(_compare_solution(value, after[key], f"{path}.{key}"))
+        return errors
+    if isinstance(before, list) and isinstance(after, list):
+        if path.endswith(".threadTile") and after == before + [0]:
+            return errors
+        if (
+            before
+            and isinstance(before[0], str)
+            and after == before + ["Float"]
+        ):
+            return errors
+        if len(before) != len(after):
+            errors.append(f"{path}: length {len(before)} -> {len(after)}")
+            return errors
+        for index, (left, right) in enumerate(zip(before, after)):
+            errors.extend(_compare_solution(left, right, f"{path}[{index}]"))
+        return errors
+    if before != after:
+        errors.append(f"{path}: {before!r} -> {after!r}")
+    return errors
+
+
+def test_write_compares_solution_fields_and_drops_unknown_keys(tmp_path):
+    """Each solution is compared with the input. A Python-only field is not written."""
+    _writer()
+    state = _kernels_lite_state()
+    state["solutions"][0]["pythonOnlyMarker"] = {"from": "python"}
+
+    dest = tmp_path / "library.dat"
+    writeMsgPack(str(dest), state)
+    written = msgpack.unpackb(
+        _unpack_zlib(tmp_path / "library.dat.zlib"), raw=False, strict_map_key=False
+    )
+
+    by_index = {solution["index"]: solution for solution in written["solutions"]}
+    assert set(by_index) == {solution["index"] for solution in state["solutions"]}
+    errors = []
+    for solution in state["solutions"]:
+        errors.extend(_compare_solution(solution, by_index[solution["index"]]))
+    assert errors == []
+    written_solution = by_index[state["solutions"][0]["index"]]
+    assert "pythonOnlyMarker" not in written_solution
+    assert "CustomKernelName" not in written_solution["sizeMapping"]
+    assert "streamK" not in written_solution["sizeMapping"]
+    assert written_solution["kernelName"] == state["solutions"][0]["kernelName"]

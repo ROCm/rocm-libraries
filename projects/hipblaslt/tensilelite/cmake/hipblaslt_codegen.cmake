@@ -234,10 +234,8 @@ function(create_device_library)
         list(APPEND _runtime_lib_dirs "$<TARGET_FILE_DIR:roc::tensilelite-host>")
     endif()
     if(TARGET tensilelite_write)
-        # Parent of the package directory that holds tensilelite_write.*.so,
-        # so `import tensilelite.tensilelite_write` resolves next to the
-        # TensileLite package already on PYTHONPATH.
-        list(APPEND _python_path_dirs "$<TARGET_FILE_DIR:tensilelite_write>/..")
+        # tensilelite_write is a top-level module in this directory.
+        list(APPEND _python_path_dirs "$<TARGET_FILE_DIR:tensilelite_write>")
         list(APPEND _runtime_lib_dirs "$<TARGET_FILE_DIR:tensilelite_write>")
     endif()
     if(TARGET tensilelite-host)

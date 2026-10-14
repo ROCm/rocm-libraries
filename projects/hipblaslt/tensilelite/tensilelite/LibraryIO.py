@@ -271,11 +271,11 @@ def _is_master_library_state(data):
 
 
 def _native_msgpack_writer():
-    """The C++ writer. MessagePack library files are not packed in Python."""
+    """The C++ writer. MessagePack master libraries are not packed in Python."""
     try:
-        from tensilelite import tensilelite_write
+        import tensilelite_write
     except ImportError as error:
-        printExit("MessagePack libraries are written by tensilelite.tensilelite_write, "
+        printExit("MessagePack libraries are written by tensilelite_write, "
                   "which this build did not produce: {}".format(error))
     return tensilelite_write
 

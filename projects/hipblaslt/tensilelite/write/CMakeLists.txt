@@ -8,7 +8,8 @@ if(NOT COMMAND nanobind_add_module)
     message(FATAL_ERROR "tensilelite_write requires nanobind_add_module (built with rocisa)")
 endif()
 
-set(_tensilelite_write_output "${CMAKE_BINARY_DIR}/tensilelite/python/tensilelite")
+# Top-level module: PYTHONPATH names this directory and `import tensilelite_write` loads the .so.
+set(_tensilelite_write_output "${CMAKE_BINARY_DIR}/tensilelite/python")
 set(_tensilelite_write_install "${CMAKE_INSTALL_LIBDIR}/hipblaslt/tensilelite")
 
 set(_link_msgpack_host FALSE)
@@ -46,44 +47,24 @@ else()
         message(FATAL_ERROR "tensilelite_write requires msgpack-cxx")
     endif()
 
-    file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/include/tensilelitehost")
-    file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/include/tensilelitehost/export.h"
-"// Copyright Advanced Micro Devices, Inc., or its affiliates.
-// SPDX-License-Identifier: MIT
-#pragma once
-#define TENSILELITEHOST_EXPORT
-")
-
-    set(_tensilelite_src "${CMAKE_CURRENT_SOURCE_DIR}/../src")
+    include(GenerateExportHeader)
     add_library(tensilelite-msgpack-writer STATIC
-        "${_tensilelite_src}/Activation.cpp"
-        "${_tensilelite_src}/AMDGPU.cpp"
-        "${_tensilelite_src}/ContractionProblem.cpp"
-        "${_tensilelite_src}/ContractionSolution.cpp"
-        "${_tensilelite_src}/DataTypes.cpp"
-        "${_tensilelite_src}/Debug.cpp"
-        "${_tensilelite_src}/EmbeddedData.cpp"
-        "${_tensilelite_src}/EmbeddedLibrary.cpp"
-        "${_tensilelite_src}/KernelArguments.cpp"
-        "${_tensilelite_src}/KernelLanguageTypes.cpp"
-        "${_tensilelite_src}/MLFeatures.cpp"
-        "${_tensilelite_src}/MLPNet.cpp"
-        "${_tensilelite_src}/PerformanceMetricTypes.cpp"
-        "${_tensilelite_src}/ScalarValueTypes.cpp"
-        "${_tensilelite_src}/TensorDescriptor.cpp"
-        "${_tensilelite_src}/TensorOps.cpp"
-        "${_tensilelite_src}/Tensile.cpp"
-        "${_tensilelite_src}/Utils.cpp"
-        "${_tensilelite_src}/hip/HipHardware.cpp"
-        "${_tensilelite_src}/hip/HipSolutionAdapter.cpp"
-        "${_tensilelite_src}/msgpack/MessagePack.cpp"
-        "${_tensilelite_src}/msgpack/Writing.cpp"
+        ${TENSILELITE_HOST_SOURCES}
+        ${TENSILELITE_HOST_MSGPACK_SOURCES}
     )
     set_target_properties(tensilelite-msgpack-writer PROPERTIES
         POSITION_INDEPENDENT_CODE ON
     )
+    generate_export_header(tensilelite-msgpack-writer
+        BASE_NAME TENSILELITEHOST
+        EXPORT_MACRO_NAME TENSILELITEHOST_EXPORT
+        EXPORT_FILE_NAME "${CMAKE_CURRENT_BINARY_DIR}/include/tensilelitehost/export.h"
+        STATIC_DEFINE TENSILELITEHOST_STATIC_DEFINE
+    )
     target_compile_features(tensilelite-msgpack-writer PRIVATE cxx_std_17)
     target_compile_definitions(tensilelite-msgpack-writer
+        PUBLIC
+            TENSILELITEHOST_STATIC_DEFINE
         PRIVATE
             TENSILE_MSGPACK
             __HIP_HCC_COMPAT_MODE__=1

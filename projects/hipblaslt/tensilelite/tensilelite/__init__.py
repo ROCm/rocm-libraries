@@ -33,33 +33,6 @@ __version__ = "5.0.0"
 # resources should use tensilelite.resources.
 ROOT_PATH: str = path.dirname(__file__)
 
-def _extend_extension_path():
-    """Find tensilelite_write next to this package on PYTHONPATH.
-
-    The extension is built into the build or install tree, not the source
-    package. create_device_library puts that tree's parent on PYTHONPATH.
-    """
-    import os
-    import sys
-
-    here = os.path.abspath(os.path.dirname(__file__))
-    for entry in sys.path:
-        if not entry:
-            continue
-        candidate = os.path.abspath(os.path.join(entry, "tensilelite"))
-        if candidate == here or not os.path.isdir(candidate):
-            continue
-        try:
-            names = os.listdir(candidate)
-        except OSError:
-            continue
-        if any(name.startswith("tensilelite_write") for name in names):
-            if candidate not in __path__:
-                __path__.append(candidate)
-            return
-
-_extend_extension_path()
-
 def PrintTensileRoot():
     print(ROOT_PATH, end='')
 

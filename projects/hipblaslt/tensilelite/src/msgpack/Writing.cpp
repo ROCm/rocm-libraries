@@ -42,6 +42,9 @@ namespace TensileLite
                     "Only a MasterSolutionLibrary can be written as a library, not ",
                     library.type()));
 
+            // Traits take a mutable reference. This writer does not modify the
+            // library. The caller must not use it from another thread; see
+            // MessagePackWriteLibraryData.
             return const_cast<MasterContractionLibrary&>(*master);
         }
 
@@ -118,7 +121,16 @@ namespace TensileLite
             else
                 inner = lib.library;
 
-            LibraryIOContext<ContractionSolution> context{std::string(""), {}, &lib.solutions};
+            // Snapshot under the lock. The tree walk below reads that copy.
+            // blobCache is still the live cache: nothing else may fill it
+            // while this write runs.
+            decltype(lib.solutions) solutions;
+            {
+                std::lock_guard<std::mutex> lock(lib.solutionsGuard);
+                solutions = lib.solutions;
+            }
+
+            LibraryIOContext<ContractionSolution> context{std::string(""), {}, &solutions};
             context.blobCache = lib.blobCache;
 
             Serialization::MessagePackOutput out(&context);

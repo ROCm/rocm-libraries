@@ -555,7 +555,11 @@ namespace
     {
         auto fixture = TestData::Instance().file("KernelsLite.dat");
         if(!fs::is_regular_file(fixture))
+        {
+            ADD_FAILURE() << "KernelsLite.dat is part of the test data and was not found at "
+                          << fixture;
             return nullptr;
+        }
         return std::dynamic_pointer_cast<Master>(
             LoadLibraryFile<Gemm, ContractionSolution>(fixture.string()));
     }
@@ -614,7 +618,11 @@ TEST(MessagePackWritingTest, FixtureRoundTripIsStable)
 {
     auto lib = loadKernelsLite();
     if(lib == nullptr)
-        GTEST_SKIP() << "KernelsLite.dat is missing or does not load";
+    {
+        if(!HasFailure())
+            GTEST_SKIP() << "KernelsLite.dat did not load";
+        return;
+    }
     ASSERT_FALSE(lib->solutions.empty());
 
     auto reloaded = roundTrip(*lib);
@@ -648,7 +656,11 @@ TEST(MessagePackWritingTest, IndexedLibraryWritesAsItsEagerForm)
 {
     auto lib = loadKernelsLite();
     if(lib == nullptr)
-        GTEST_SKIP() << "KernelsLite.dat is missing or does not load";
+    {
+        if(!HasFailure())
+            GTEST_SKIP() << "KernelsLite.dat did not load";
+        return;
+    }
 
     auto eager   = MessagePackWriteLibraryData(*lib);
     auto indexed = loadData(MessagePackWriteIndexedLibraryData(*lib));
