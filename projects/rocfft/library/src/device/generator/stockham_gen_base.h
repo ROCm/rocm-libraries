@@ -151,11 +151,11 @@ struct StockhamKernel : public StockhamGeneratorSpecs
     Variable lds_complex{"lds_complex", "scalar_type", true, true};
     Variable lds_row_padding{"lds_row_padding", rtc_kint_type(KIntType::U32)};
 
-    // hip thread grid dim
-    Variable grid_dim{"gridDim.x", rtc_kint_type(KIntType::U32)};
+    // hip thread grid dim and block id, flattened over x and y.
+    Variable grid_dim{"(gridDim.x * gridDim.y)", rtc_kint_type(KIntType::U32)};
 
     // hip thread block id
-    Variable block_id{"blockIdx.x", rtc_kint_type(KIntType::U32)};
+    Variable block_id{"(blockIdx.x + blockIdx.y * gridDim.x)", rtc_kint_type(KIntType::U32)};
 
     // hip thread id
     Variable thread_id{"threadIdx.x", rtc_kint_type(KIntType::U32)};
