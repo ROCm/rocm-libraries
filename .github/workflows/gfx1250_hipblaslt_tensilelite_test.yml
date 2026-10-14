@@ -17,7 +17,6 @@
 # Nightly: develop at 03:00 UTC (7 pm PST, 8 pm PDT; GitHub cron is UTC).
 # On-demand: workflow_dispatch on any branch, no gating.
 
-# gfx1250_nightly_report.yml triggers on this name (workflow_run): rename both together.
 name: gfx1250 HW hipBLASLt + TensileLite Tests
 run-name: ${{ github.event_name == 'pull_request' && format('PR {0} @ {1}', github.event.pull_request.number, github.event.pull_request.head.sha) || format('{0}{1} @ {2}', github.event_name == 'schedule' && 'Nightly ' || '', github.ref_name, github.sha) }}
 
@@ -48,6 +47,10 @@ on:
         description: "Nightly ROCm SDK (rocm package) version to build and test against (empty = the pinned default)"
         type: string
         default: ""
+      send_report:
+        description: "Email the test report as the nightly does (to try the webhook; works with no tests selected)"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -182,7 +185,7 @@ jobs:
           PIP_CACHE_DIR: /pip-cache
         run: |
           set -euo pipefail
-          # Recorded with the results for the nightly report (gfx1250_nightly_report.yml).
+          # Recorded with the results for the nightly report (the report job below).
           mkdir -p test_results && echo "$ROCM_SDK_VERSION" > test_results/rocm_sdk_version.txt
           # pip never evicts and every SDK nightly adds several GB: the nightly, the only
           # job that can write the cache, drops files no job has read for 14 days. Other
@@ -419,3 +422,33 @@ jobs:
         run: |
           owner="$(stat -c %u:%g "$GITHUB_WORKSPACE/..")"
           chown -R "$owner" "$GITHUB_WORKSPACE" "$RUNNER_TEMP" 2>/dev/null || true
+
+  # Emails a report after every nightly (or a manual run with send_report), however the
+  # test job ended. A job, not a step, so the webhook secret stays on a GitHub-hosted
+  # runner and a report still goes out when the test job never got a runner.
+  report:
+    name: Nightly report
+    needs: gfx1250-tests
+    if: ${{ always() && (github.event_name == 'schedule' || inputs.send_report) }}
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/nightly_test_report.yml
+    with:
+      title: gfx1250-strict
+      test_job: gfx1250-strict hipBLASLt + TensileLite
+      artifact: gfx1250-strict-test-results
+      # The TensileLite tox log holds two pytest sessions: rocisa, then the common tests.
+      suites: |
+        hipBLASLt=gtest:test_results/hipblaslt_test_shard*.log
+        TensileLite Common=pytest:tensilelite_test_results/common_test.log#2
+        Rocisa=pytest:tensilelite_test_results/common_test.log#1
+      meta: |
+        Architecture=gfx1250-strict
+        ROCm SDK=@test_results/rocm_sdk_version.txt
+      strip: |
+        _/matmul_test.matmul/
+        tensilelite/Tests/common/
+    secrets:
+      webhook_url: ${{ secrets.GFX1250_BLAS_NIGHTLY_WEBHOOK_URL }}
+      system_label: ${{ secrets.GFX1250_BLAS_SYSTEM_LABEL }}

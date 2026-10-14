@@ -1,25 +1,31 @@
 #!/usr/bin/env python3
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Build the gfx1250-strict nightly test report and post it to a webhook.
+"""Build a nightly test report from a CI run's test logs and post it to a webhook.
 
-Reads the (already scrubbed) logs that gfx1250_hipblaslt_tensilelite_test.yml
-writes: the hipBLASLt gtest shard logs and the TensileLite tox log. It
-compares every test's result with the previous nightly's uploaded results
-and POSTs {"subject", "html", "text", "ok", "run_url", "commit", "branch",
-"tests": [{suite, test, status, new}]} as JSON to the webhook. The flow behind
-the webhook (e.g. Power Automate) decides who gets it.
+Reads gtest and pytest logs from a results directory (e.g. the run's downloaded
+artifact), compares every test's result with the previous nightly's uploaded
+results, and POSTs {"subject", "html", "text", "ok", "run_url", "commit",
+"branch", "tests": [{suite, test, status, new}]} as JSON to the webhook. The
+flow behind the webhook (e.g. Power Automate) decides who gets it.
+.github/workflows/nightly_test_report.yml runs it as a job of the test workflow
+(see gfx1250_hipblaslt_tensilelite_test.yml).
+
+Suites (--suite LABEL=KIND:PATH, repeatable, in display order; PATH is
+relative to --results):
+  gtest:GLOB       gtest output, e.g. sharded logs test_results/shard*.log
+  pytest:FILE#N    the Nth pytest session in FILE (1-based; negative counts from
+                   the end; "#N" defaults to 1), e.g. a tox log with two sessions
 
 Usage:
-    python gfx1250_nightly_report.py --results "$GITHUB_WORKSPACE" \
-        --steps "SDK=success, Build=success, ..." --webhook-url "$URL"
-    python gfx1250_nightly_report.py --results DIR --dry-run   # print, don't send
-    # Compare with results on disk instead of fetching the previous nightly:
-    python gfx1250_nightly_report.py --results DIR --previous PREV_DIR --previous-run-id ID --dry-run
+    python nightly_test_report.py --results DIR --title gfx1250-strict \
+        --suite "hipBLASLt=gtest:test_results/hipblaslt_test_shard*.log" \
+        --artifact NAME --webhook-url "$URL"
+    ... --dry-run                                   # print, don't send
+    ... --previous PREV_DIR --previous-run-id ID    # compare with results on disk
 
-Uses GITHUB_* environment variables for the run metadata (REPORT_SHA,
-REPORT_REF_NAME, REPORT_EVENT_NAME and REPORT_RUN_ID describe the reported run
-when it isn't the current one), and GH_TOKEN (needs actions: read) for the
+Uses GITHUB_* environment variables for the run metadata, SYSTEM_LABEL and
+TEST_RUNNER_NAME for those rows, and GH_TOKEN (needs actions: read) for the
 previous nightly's results. Standard library only.
 """
 
@@ -33,27 +39,22 @@ import os
 import re
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 import zipfile
 
-ARTIFACT = "gfx1250-strict-test-results"
-WORKFLOW = "gfx1250_hipblaslt_tensilelite_test.yml"
 API = "https://api.github.com"
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
-LOOKBACK_DAYS = 7  # as the internal nightly's comparison
-LAST_NIGHT_HOURS = (
-    30  # the nightly starts at 03:00 UTC; allow for a late start or a long run
-)
 PASS, FAIL, SKIP = "pass", "fail", "skip"
+STRIP = []  # --strip: substrings removed from test names in the email
+
 
 # ---------------------------------------------------------------- parsing
 
 
-def parse_gtest(results):
-    """Per-test results from the gtest shard logs: (counts or None if not run, {name: status})."""
-    logs = sorted(
-        glob.glob(os.path.join(results, "test_results", "hipblaslt_test_shard*.log"))
-    )
+def parse_gtest(pattern):
+    """Per-test results from gtest logs matching pattern: (counts or None if not run, {name: status})."""
+    logs = sorted(glob.glob(pattern))
     status, total = {}, 0
     for path in logs:
         for line in open(path, errors="replace"):
@@ -77,13 +78,11 @@ def parse_gtest(results):
     return counts, status
 
 
-def parse_pytest(results):
-    """Per-session counts and per-test results from the tox log: ({session: counts}, {session: {id: status}})."""
-    path = os.path.join(results, "tensilelite_test_results", "common_test.log")
-    sessions, status = {}, {"Rocisa": {}, "Common": {}}
+def parse_pytest(path, index):
+    """Counts and per-test results of the index-th pytest session in a log (1-based;
+    negative counts from the end): (counts or None if absent, {id: status})."""
     if not os.path.isfile(path):
-        return sessions, status
-    summaries = []
+        return None, {}
     word = {
         "PASSED": PASS,
         "FAILED": FAIL,
@@ -92,57 +91,62 @@ def parse_pytest(results):
         "SKIPPED": SKIP,
         "XFAIL": SKIP,
     }
+    sessions, status = [], {}  # each session: (summary line, {id: status})
     for raw in open(path, errors="replace"):
         line = ANSI.sub("", raw.rstrip("\n"))
         if re.match(r"^=+ .*\b(passed|failed|error|errors|skipped)\b.* =+$", line):
-            summaries.append(line)
+            sessions.append((line, status))
+            status = {}
         elif m := (
             re.search(r"\] (PASSED|FAILED|ERROR|XPASS|SKIPPED|XFAIL) (\S+)", line)
             or re.match(r"^(FAILED|ERROR) (\S+)", line)
         ):
-            tid = m.group(2)
-            session = "Rocisa" if tid.startswith("rocisa/") else "Common"
-            if (
-                status[session].get(tid) != FAIL
-            ):  # a failure line wins over an earlier progress line
-                status[session][tid] = word[m.group(1)]
-    # tox runs the rocisa tests first, then the common tests (absent if tox stopped early).
-    for name, line in (
-        ("Rocisa", summaries[0] if summaries else None),
-        ("Common", summaries[-1] if len(summaries) >= 2 else None),
-    ):
-        if line is None:
-            continue
-        c = {
-            k: int(n)
-            for n, k in re.findall(
-                r"(\d+) (passed|failed|skipped|xfailed|xpassed|errors?)", line
-            )
-        }
-        counts = {
-            "Passed": c.get("passed", 0),
-            "Failed": c.get("failed", 0)
-            + c.get("error", 0)
-            + c.get("errors", 0)
-            + c.get("xpassed", 0),
-            "Skipped": c.get("skipped", 0),
-        }
-        if c.get("xfailed"):
-            counts["XFailed"] = c["xfailed"]
-        counts["Total"] = sum(counts.values())
-        sessions[name] = counts
-    return sessions, status
-
-
-def suites(results):
-    """{suite label: (counts or None, {test: status})} for this job's three suites."""
-    h_counts, h_status = parse_gtest(results)
-    t_sessions, t_status = parse_pytest(results)
-    return {
-        "hipBLASLt": (h_counts, h_status),
-        "TensileLite Common": (t_sessions.get("Common"), t_status["Common"]),
-        "Rocisa": (t_sessions.get("Rocisa"), t_status["Rocisa"]),
+            # A failure line wins over an earlier progress line.
+            if status.get(m.group(2)) != FAIL:
+                status[m.group(2)] = word[m.group(1)]
+    try:
+        line, status = sessions[index - 1 if index > 0 else index]
+    except IndexError:  # that session didn't finish (or never started)
+        return None, {}
+    c = {
+        k: int(n)
+        for n, k in re.findall(
+            r"(\d+) (passed|failed|skipped|xfailed|xpassed|errors?)", line
+        )
     }
+    counts = {
+        "Passed": c.get("passed", 0),
+        "Failed": c.get("failed", 0)
+        + c.get("error", 0)
+        + c.get("errors", 0)
+        + c.get("xpassed", 0),
+        "Skipped": c.get("skipped", 0),
+    }
+    if c.get("xfailed"):
+        counts["XFailed"] = c["xfailed"]
+    counts["Total"] = sum(counts.values())
+    return counts, status
+
+
+def parse_suite_spec(spec):
+    """'LABEL=gtest:GLOB' or 'LABEL=pytest:FILE[#N]' -> (label, kind, path, index)."""
+    label, sep, rest = spec.partition("=")
+    kind, sep2, path = rest.partition(":")
+    if not (sep and sep2 and label and path and kind in ("gtest", "pytest")):
+        sys.exit(
+            f"bad --suite {spec!r}: want LABEL=gtest:GLOB or LABEL=pytest:FILE[#N]"
+        )
+    path, _, index = path.partition("#")
+    return label.strip(), kind, path, int(index or 1)
+
+
+def suites(results, specs):
+    """{suite label: (counts or None, {test: status})}, in --suite order."""
+    out = {}
+    for label, kind, path, index in specs:
+        full = os.path.join(results, path)
+        out[label] = parse_gtest(full) if kind == "gtest" else parse_pytest(full, index)
+    return out
 
 
 def compare(cur, prev):
@@ -162,13 +166,10 @@ def compare(cur, prev):
 
 
 def short(test):
-    """A readable test name: drop the matmul and test_config boilerplate."""
-    test = test.replace("_/matmul_test.matmul/", "")
-    m = re.match(
-        r"tensilelite/Tests/common/test_config\w*\.py::test_config\w*\[tensilelite/Tests/common/(.*)\]$",
-        test,
-    )
-    return m.group(1) if m else test.replace("tensilelite/Tests/common/", "")
+    """A readable test name: drop the --strip substrings."""
+    for part in STRIP:
+        test = test.replace(part, "")
+    return test
 
 
 # ---------------------------------------------------------------- GitHub
@@ -214,19 +215,25 @@ def run_info(repo, run_id, token):
     }
 
 
-def fetch_previous(repo, run_id, token, now, query="event=schedule&branch=develop"):
-    """Download the most recent earlier nightly that has results, within LOOKBACK_DAYS.
+def fetch_previous(repo, run_id, token, now, cfg):
+    """Download the most recent earlier nightly of this run's workflow and branch whose
+    cfg.artifact is still there, within cfg.lookback_days.
 
     Returns {"status": "ok" | "none", "date", "url", "sha", "dir", "hours", "missing": [(date, url)]}.
     "missing" lists the newer nightlies that left no results (crashed, cancelled or expired).
     """
     out = {"status": "none", "missing": []}
-    if not (repo and token):
+    if not (repo and token and run_id and cfg.artifact):
         return out
+    workflow = json.load(_api(f"{API}/repos/{repo}/actions/runs/{run_id}", token))[
+        "path"
+    ]
+    workflow = workflow.split("/")[-1].split("@")[0]
     runs = json.load(
         _api(
-            f"{API}/repos/{repo}/actions/workflows/{WORKFLOW}/runs"
-            f"?{query}&status=completed&per_page=20",
+            f"{API}/repos/{repo}/actions/workflows/{workflow}/runs"
+            f"?event=schedule&branch={urllib.parse.quote(os.environ.get('GITHUB_REF_NAME', ''))}"
+            "&status=completed&per_page=20",
             token,
         )
     )
@@ -237,7 +244,7 @@ def fetch_previous(repo, run_id, token, now, query="event=schedule&branch=develo
             run["created_at"].replace("Z", "+00:00")
         )
         hours = (now - started).total_seconds() / 3600
-        if hours > LOOKBACK_DAYS * 24:
+        if hours > cfg.lookback_days * 24:
             break
         arts = json.load(
             _api(f"{API}/repos/{repo}/actions/runs/{run['id']}/artifacts", token)
@@ -246,7 +253,7 @@ def fetch_previous(repo, run_id, token, now, query="event=schedule&branch=develo
             (
                 a
                 for a in arts.get("artifacts", [])
-                if a["name"] == ARTIFACT and not a["expired"]
+                if a["name"] == cfg.artifact and not a["expired"]
             ),
             None,
         )
@@ -316,7 +323,7 @@ def names_list(title, tests, color):
     return f"<p style='margin:8px 0 2px'><b style='color:{color}'>{html.escape(title)}</b></p><ul style='margin:0'>{items}{more}</ul>"
 
 
-def build(results, steps, previous):
+def build(results, steps, previous, cfg):
     env = os.environ
     now = datetime.datetime.now(datetime.timezone.utc)
     repo, sha_full = env.get("GITHUB_REPOSITORY", ""), env.get("GITHUB_SHA", "")
@@ -327,25 +334,27 @@ def build(results, steps, previous):
     )
     kind = "Nightly" if env.get("GITHUB_EVENT_NAME") == "schedule" else "Manual"
     run_url = f"{server}/{repo}/actions/runs/{env.get('GITHUB_RUN_ID', '')}"
-    cur = suites(results)
+    cur = suites(results, cfg.suites)
 
     step_list = [tuple(x.strip().split("=", 1)) for x in steps.split(",") if "=" in x]
-    # "Test job=failure" only repeats what the failing steps or tests already say.
+    # A skipped step is fine, a skipped test job isn't. "Test job=failure" only repeats
+    # what the failing steps or tests already say.
     bad_steps = [
         (n, o)
         for n, o in step_list
-        if o not in ("success", "skipped")
+        if (o not in ("success", "skipped") or (n == "Test job" and o == "skipped"))
         and not (n == "Test job" and o == "failure" and len(step_list) > 1)
     ]
     failed = sum((c or {}).get("Failed", 0) for c, _ in cur.values())
-    ran = [k for k, (c, _) in cur.items() if c]
-    ok = not bad_steps and not failed and ran
+    # Every --suite is expected in a nightly: one that didn't run fails the report.
+    not_run = [k for k, (c, _) in cur.items() if not c]
+    ok = not bad_steps and not failed and not not_run
 
     # Comparison with the previous nightly.
     prev = previous or {"status": "none", "missing": []}
     diff = {}
     if prev["status"] == "ok":
-        old = suites(prev["dir"])
+        old = suites(prev["dir"], cfg.suites)
         for k in cur:
             if cur[k][0] and old[k][0]:
                 diff[k] = compare(cur[k][1], old[k][1])
@@ -359,8 +368,8 @@ def build(results, steps, previous):
             f" ({new_total:,} new)" if diff else ""
         )
     else:
-        head = "❌ FAILED: " + (
-            ", ".join(f"{n} {o}" for n, o in bad_steps) or "no tests ran"
+        head = "❌ FAILED: " + ", ".join(
+            [f"{n} {o}" for n, o in bad_steps] + [f"{k} not run" for k in not_run]
         )
     parts = []
     for k, (c, _) in cur.items():
@@ -371,7 +380,7 @@ def build(results, steps, previous):
             )
         else:
             parts.append(f"{k} not run")
-    subject = f"{'✅' if ok else '❌'} gfx1250-strict Test Results - {kind} - {now:%Y-%m-%d} | Branch: {branch} | Commit: {sha}"
+    subject = f"{'✅' if ok else '❌'} {cfg.title} Test Results - {kind} - {now:%Y-%m-%d} | Branch: {branch} | Commit: {sha}"
     banner = (
         f"<table width='100%' cellpadding='10' cellspacing='0'><tr><td bgcolor='{GREEN if ok else RED}' "
         f"style='color:#ffffff;font-size:15px'><b>{html.escape(head)}</b><br>{'<br>'.join(html.escape(x) for x in parts)}"
@@ -381,6 +390,10 @@ def build(results, steps, previous):
     p = [
         "<h3 style='margin:0 0 4px'>Summary</h3>",
         banner,
+        *(
+            f"<p style='margin:6px 0;color:{AMBER}'><b>⚠ {html.escape(w)}</b></p>"
+            for w in cfg.warn
+        ),
         "<h2 style='margin:16px 0 4px'>Test Results Report</h2>",
         "<h3 style='margin:12px 0 4px'>Test Metadata</h3>",
     ]
@@ -408,10 +421,9 @@ def build(results, steps, previous):
                         else env.get("RUNNER_NAME", "")
                     ),
                 ),
-                ("Architecture", "gfx1250-strict"),
                 ("Branch", branch),
                 ("Commit ID", sha),
-                ("ROCm SDK", env.get("ROCM_SDK_VERSION", "")),
+                *cfg.meta_rows,
                 ("Steps", (steps_text, None if not bad_steps else RED)),
             ],
         )
@@ -427,41 +439,30 @@ def build(results, steps, previous):
         )
     )
 
-    for title, keys in (
-        ("hipBLASLt Tests", ("hipBLASLt",)),
-        ("TensileLite Tests", ("TensileLite Common", "Rocisa")),
-    ):
-        p.append(f"<h3 style='margin:16px 0 4px'>{title}</h3>")
-        for k in keys:
-            if len(keys) > 1:
-                p.append(
-                    f"<h4 style='margin:10px 0 4px'>{k.replace('TensileLite ', '')} Tests</h4>"
-                )
-            c, status = cur[k]
-            if not c:
-                p.append("<p>Not run.</p>")
-                continue
-            p.append(
-                table(
-                    ("Status", "Count"),
-                    [
-                        (n, (v, RED if n == "Failed" and v else None))
-                        for n, v in c.items()
-                    ],
-                )
+    for k in cur:
+        p.append(f"<h3 style='margin:16px 0 4px'>{html.escape(k)} Tests</h3>")
+        c, status = cur[k]
+        if not c:
+            p.append("<p>Not run.</p>")
+            continue
+        p.append(
+            table(
+                ("Status", "Count"),
+                [(n, (v, RED if n == "Failed" and v else None)) for n, v in c.items()],
             )
-            p.append(
-                names_list(
-                    "Failing:", sorted(t for t, s in status.items() if s == FAIL), RED
-                )
+        )
+        p.append(
+            names_list(
+                "Failing:", sorted(t for t, s in status.items() if s == FAIL), RED
             )
+        )
 
     p.append("<h3 style='margin:16px 0 4px'>Failure Comparison</h3>")
     if prev["status"] == "ok":
         days = round(prev.get("hours", 24) / 24)
         ref = f"the nightly of {prev['date']}, commit {prev['sha']}"
         line = f"Compared with {html.escape(ref)} ({a(prev['url'], 'run')})."
-        if prev.get("hours", 0) > LAST_NIGHT_HOURS or prev["missing"]:
+        if prev.get("hours", 0) > cfg.last_night_hours or prev["missing"]:
             gap = (
                 "; ".join(f"{d} ({a(u, 'run')})" for d, u in prev["missing"])
                 or "none ran"
@@ -518,7 +519,7 @@ def build(results, steps, previous):
     elif prev.get("missing"):
         gap = "; ".join(f"{d} ({a(u, 'run')})" for d, u in prev["missing"])
         p.append(
-            f"<p>No nightly to compare: none with results in the last {LOOKBACK_DAYS} days ({gap} left none).</p>"
+            f"<p>No nightly to compare: none with results in the last {cfg.lookback_days} days ({gap} left none).</p>"
         )
     else:
         p.append("<p>No nightly to compare.</p>")
@@ -532,7 +533,8 @@ def build(results, steps, previous):
     )
 
     # Plain-text version, for clients and flows that don't show HTML.
-    text = [subject, head, *parts, f"Run: {run_url}", f"Steps: {steps_text}"]
+    text = [subject, head, *parts, *(f"Warning: {w}" for w in cfg.warn)]
+    text += [f"Run: {run_url}", f"Steps: {steps_text}"]
     for k, d in diff.items():
         text += [
             f"{k}: {len(d['New'])} new, {len(d['Existing'])} existing, {len(d['Fixed'])} fixed, "
@@ -577,9 +579,47 @@ def build(results, steps, previous):
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument(
-        "--results",
+        "--results", required=True, help="Directory with the run's test logs"
+    )
+    ap.add_argument("--title", required=True, help="Report name, e.g. gfx1250-strict")
+    ap.add_argument(
+        "--suite",
+        action="append",
         required=True,
-        help="Directory with test_results/ and tensilelite_test_results/",
+        help="LABEL=gtest:GLOB or LABEL=pytest:FILE[#N] (repeatable, in display order)",
+    )
+    ap.add_argument(
+        "--meta",
+        action="append",
+        default=[],
+        help="LABEL=VALUE: an extra metadata row; VALUE @PATH reads PATH under --results (repeatable)",
+    )
+    ap.add_argument(
+        "--strip",
+        action="append",
+        default=[],
+        help="Substring to drop from test names in the email (repeatable)",
+    )
+    ap.add_argument(
+        "--warn",
+        action="append",
+        default=[],
+        help="A warning to show at the top of the report, e.g. a misconfigured name (repeatable)",
+    )
+    ap.add_argument(
+        "--artifact", default="", help="Results artifact name, for the previous nightly"
+    )
+    ap.add_argument(
+        "--lookback-days",
+        type=int,
+        default=7,
+        help="Compare with the latest nightly that has results within this many days",
+    )
+    ap.add_argument(
+        "--last-night-hours",
+        type=int,
+        default=30,
+        help="Warn when the compared nightly started longer ago than this",
     )
     ap.add_argument(
         "--steps", default="", help="Step outcomes, e.g. 'SDK=success, Build=failure'"
@@ -602,12 +642,19 @@ def main():
         "--html-out", default="", help="Also write the HTML body to this file"
     )
     args = ap.parse_args()
+    args.suites = [parse_suite_spec(x) for x in args.suite]
+    args.meta_rows = []
+    for spec in args.meta:
+        label, sep, value = spec.partition("=")
+        if not (sep and label):
+            sys.exit(f"bad --meta {spec!r}: want LABEL=VALUE or LABEL=@PATH")
+        if value.startswith("@"):
+            path = os.path.join(args.results, value[1:])
+            value = open(path).read().strip() if os.path.isfile(path) else "-"
+        args.meta_rows.append((label.strip(), value))
+    STRIP[:] = args.strip
 
     env, now = os.environ, datetime.datetime.now(datetime.timezone.utc)
-    # gfx1250_nightly_report.yml reports on another run (the nightly that triggered it).
-    for key in ("SHA", "REF_NAME", "EVENT_NAME", "RUN_ID"):
-        if env.get(f"REPORT_{key}"):
-            env[f"GITHUB_{key}"] = env[f"REPORT_{key}"]
     previous = {"status": "none", "missing": []}
     try:
         if args.previous:
@@ -627,12 +674,13 @@ def main():
                 env.get("GITHUB_RUN_ID"),
                 env.get("GH_TOKEN"),
                 now,
+                args,
             )
     except Exception as e:  # The report still goes out, without the comparison.
         print(
             f"::warning::Could not get the previous nightly's results ({type(e).__name__}: {e})"
         )
-    report = build(args.results, args.steps, previous)
+    report = build(args.results, args.steps, previous, args)
     if args.html_out:
         open(args.html_out, "w").write(report["html"])
     # CI logs are public: only --dry-run prints the report's content.
