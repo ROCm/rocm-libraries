@@ -8,12 +8,19 @@ objects load on gfx1100-gfx1153) or ``gfx12-generic`` (gfx1200/gfx1201). A
 request may still name ``gfx1151`` or ``gfx1201`` to build processor-specific
 objects. The transposed-QK profile uses the gfx11 WMMA operand layout; gfx12
 targets run the standard path for those shapes.
+
+``attention_gfx1151_wmma`` is the public auto route on every RDNA arch. Each
+arch also registers an opt-in tuned candidate, ``attention_<arch>_wmma_fwd``
+(``spec_id`` ``<arch>_wmma_fwd``, ``-`` spelled ``_``), whose default is the
+same policy spec and whose knob space (:mod:`.wmma_rules`) is what tuning
+sweeps, ``tuning_id`` pins and registry-driven AOT catalogs enumerate.
 """
 
 from __future__ import annotations
 
 import dataclasses
-from typing import Tuple
+from functools import lru_cache
+from typing import Optional, Tuple
 
 from kernels.gfx1151.wmma_fmha_fwd import (
     WmmaFmhaFwdSpec,
@@ -32,6 +39,7 @@ from rocke.dispatch.core import (
     OperatorRequest,
     ShapeRange,
 )
+from rocke.dispatch.tuning import make_tuned_candidate
 
 from .common import (
     AttentionMaskType,
@@ -40,7 +48,9 @@ from .common import (
     _device_num_cus,
     _request_errors,
     _selector_matches,
+    _tuning_problem,
 )
+from .wmma_rules import WMMA_PATH, WmmaProblem, WmmaSpace, wmma_variants
 
 # v6 composes the runtime-shape-generic base ABI (including runtime windows and
 # runtime-gated LSE) with unequal Q/V widths, causal tile skipping, additive
@@ -84,8 +94,20 @@ def _resolve_num_cus(req: AttentionRequest) -> int:
     return _DEFAULT_NUM_CUS
 
 
+def _tuning_num_cus(req: AttentionRequest) -> int:
+    """The CU count a tuned candidate's base reads: the request's own, else the
+    reference part's. Never the live device, so a pinned or enumerated spec is
+    a pure function of the request (see ``make_tuned_candidate``)."""
+    n = int(req.num_cus)
+    return n if n > 0 else _DEFAULT_NUM_CUS
+
+
+# Every RDNA target the WMMA forward kernel is registered for.
+RDNA_WMMA_ARCHES = ("gfx11-generic", "gfx1151", "gfx12-generic", "gfx1201")
+WMMA_FWD_ALGORITHM = "wmma_fmha_fwd"
+
 _WMMA_FWD_CAP = Capability(
-    arches=("gfx11-generic", "gfx1151", "gfx12-generic", "gfx1201"),
+    arches=RDNA_WMMA_ARCHES,
     dtypes=("fp16", "bf16"),
     shapes=(
         ShapeRange(frozenset({"hdim_q", "hdim_v"}), min=16, max=256, multiple_of=16),
@@ -110,6 +132,8 @@ _WMMA_FWD_CAP = Capability(
             "layout_bhsd",
             "layout_ragged",
             "layout_paged",
+            # RDNA WMMA objects can serve runtime head widths from one bucket.
+            "runtime_head_dims",
         }
     ),
 )
@@ -162,8 +186,14 @@ def _wmma_fwd_spec(req: OperatorRequest) -> WmmaFmhaFwdSpec:
         or req.window_left is not None
         or (req.window_right is not None and int(req.window_right) >= 0)
     )
+    # A runtime-head-width bucket object (hdim_q/hdim_v are its maxima) runs the
+    # standard body untiled, and the small-head V-LDS tuning measured on exact
+    # D64 objects does not carry over to it (the shipped buckets stage V
+    # through registers).
+    runtime_head_dims = bool(req.runtime_head_dims)
     transposed = (
-        gfx11_layout
+        not runtime_head_dims
+        and gfx11_layout
         and req.dtype.strip().lower() in ("fp16", "bf16")
         and layout == "dense"
         and equal_heads
@@ -192,7 +222,8 @@ def _wmma_fwd_spec(req: OperatorRequest) -> WmmaFmhaFwdSpec:
     # noncausal output-column tiles than processor-specific gfx1151 builds.
     generic_target = generic_arch_from_target_id(req.arch) == req.arch
     tuned_small_head = (
-        req.dtype.strip().lower() == "fp16"
+        not runtime_head_dims
+        and req.dtype.strip().lower() == "fp16"
         and int(req.hdim_q) == 64
         and equal_heads
         and not (
@@ -222,7 +253,8 @@ def _wmma_fwd_spec(req: OperatorRequest) -> WmmaFmhaFwdSpec:
     # Output-column tiling multiplies the CTAs of a launch too small to fill the
     # device: D256 always, and D128 when FP8 KV decode keeps the softmax cheap.
     tiled_values = (
-        layout == "dense"
+        not runtime_head_dims
+        and layout == "dense"
         and equal_heads
         and ((head == 256 and not fp8) or (head == 128 and fp8))
         and seqlen_k >= 128
@@ -302,61 +334,68 @@ def _wmma_fwd_spec(req: OperatorRequest) -> WmmaFmhaFwdSpec:
         transposed_qk=transposed,
         block_n=64 if wide and not generic_target else 32,
         num_waves=2 if wide else 1,
+        runtime_head_dims=runtime_head_dims,
     )
 
 
-def _sweep_variants(spec: WmmaFmhaFwdSpec, req: AttentionRequest):
-    """Valid, launchable single-knob variants of ``spec`` (baseline excluded).
+def _wmma_problem(req: AttentionRequest, spec: WmmaFmhaFwdSpec) -> WmmaProblem:
+    return WmmaProblem(
+        spec=spec,
+        seqlen_q=int(req.seqlen_q),
+        seqlen_k=int(req.seqlen_k),
+        num_query_heads=int(req.nhead_q),
+        batch=int(req.batch),
+    )
 
-    Each knob changes only performance, never results, so the autotuner can
-    time them against the heuristic baseline.
-    """
-    seqlen_q = int(req.seqlen_q)
-    seqlen_k = int(req.seqlen_k)
-    variants = []
 
-    def replace(base, **changes):
-        try:
-            return dataclasses.replace(base, **changes)
-        except ValueError:
-            return None
+def tuned_wmma_selectors(arch: str) -> Tuple[str, str]:
+    """``(candidate name, spec_id)`` of ``arch``'s tuned WMMA forward candidate."""
+    tag = arch.replace("-", "_")
+    return f"attention_{tag}_wmma_fwd", f"{tag}_wmma_fwd"
 
-    if spec.transposed_qk:
-        for block_n in (32, 64):
-            for num_waves in (1, 2):
-                if seqlen_k % block_n or seqlen_q % (16 * num_waves):
-                    continue
-                variants.append(replace(spec, block_n=block_n, num_waves=num_waves))
-    else:
-        variants.append(replace(spec, v_lds_stage=not spec.v_lds_stage))
-        if spec.mask_mode == "causal":
-            variants.append(replace(spec, causal_tile_skip=not spec.causal_tile_skip))
-        if spec.layout == "dense" and spec.v_dim >= 128:
-            for tile in (0, 32, 64, 128):
-                if tile < spec.v_dim:
-                    variants.append(replace(spec, value_tile_size=tile))
-        if spec.scheduler_strategy is None:
-            variants.append(replace(spec, scheduler_strategy="max-ilp"))
-        else:
-            variants.append(replace(spec, scheduler_strategy=None))
-    out = []
-    for variant in variants:
-        if variant is None or variant == spec or variant in out:
-            continue
-        try:
-            ok, _ = _wmma_fwd_is_valid(variant, arch=req.arch)
-            if ok:
-                wmma_fmha_fwd_grid(
-                    variant,
-                    seqlen_q=seqlen_q,
-                    num_query_heads=int(req.nhead_q),
-                    batch=int(req.batch),
-                )
-        except ValueError:
-            continue
-        if ok:
-            out.append(variant)
-    return tuple(out)
+
+@lru_cache(maxsize=None)
+def _wmma_space(arch: str) -> WmmaSpace:
+    return WmmaSpace(
+        abi=ATTENTION_GFX1151_ABI,
+        arch=arch,
+        path=WMMA_PATH,
+        variant_id="fwd",
+        candidate_name=tuned_wmma_selectors(arch)[0],
+    )
+
+
+def _wmma_request_refusal(req: AttentionRequest) -> Optional[str]:
+    """Why the WMMA forward kernel cannot serve ``req`` (beyond the capability
+    and the structural request checks), or None."""
+    layout = _resolve_layout(req)
+    if layout not in ("dense", "ragged", "paged"):
+        return f"unsupported attention layout {req.layout!r}"
+    if bool(req.use_fp8) and bool(req.fp8_fnuz):
+        return (
+            "gfx1151 WMMA FP8 KV is OCP e4m3fn only; fp8_fnuz is not "
+            "representable by this kernel"
+        )
+    if layout == "paged":
+        block = int(req.kv_block_size)
+        if block <= 0 or block & (block - 1):
+            return (
+                f"paged attention requires a positive power-of-two "
+                f"kv_block_size (got {block})"
+            )
+    try:
+        mask_type = AttentionMaskType(int(req.mask_type))
+    except ValueError:
+        return f"unsupported mask_type {req.mask_type!r}"
+    if mask_type == AttentionMaskType.SLIDING_WINDOW:
+        left, right = _window_bounds(req)
+        if left == -1 and right == -1:
+            return "window attention requires at least one finite bound"
+    return None
+
+
+def _wmma_request_errors(req: OperatorRequest):
+    return _request_errors(req, allow_unequal_head_dims=True)
 
 
 def _make_wmma_fwd_candidate() -> KernelCandidate:
@@ -365,36 +404,16 @@ def _make_wmma_fwd_candidate() -> KernelCandidate:
     name = "attention_gfx1151_wmma"
 
     def support(req: OperatorRequest) -> Tuple[bool, str]:
-        errors = _request_errors(req, allow_unequal_head_dims=True)
+        errors = _wmma_request_errors(req)
         if errors:
             return False, "; ".join(errors)
         assert isinstance(req, AttentionRequest)
         ok, why = _selector_matches(req, candidate)
         if not ok:
             return False, why
-        layout = _resolve_layout(req)
-        if layout not in ("dense", "ragged", "paged"):
-            return False, f"unsupported attention layout {req.layout!r}"
-        if bool(req.use_fp8) and bool(req.fp8_fnuz):
-            return False, (
-                "gfx1151 WMMA FP8 KV is OCP e4m3fn only; fp8_fnuz is not "
-                "representable by this kernel"
-            )
-        if layout == "paged":
-            block = int(req.kv_block_size)
-            if block <= 0 or block & (block - 1):
-                return False, (
-                    f"paged attention requires a positive power-of-two "
-                    f"kv_block_size (got {block})"
-                )
-        try:
-            mask_type = AttentionMaskType(int(req.mask_type))
-        except ValueError:
-            return False, f"unsupported mask_type {req.mask_type!r}"
-        if mask_type == AttentionMaskType.SLIDING_WINDOW:
-            left, right = _window_bounds(req)
-            if left == -1 and right == -1:
-                return False, "window attention requires at least one finite bound"
+        why = _wmma_request_refusal(req)
+        if why is not None:
+            return False, why
         try:
             spec = _wmma_fwd_spec(req)
         except ValueError as error:
@@ -411,11 +430,14 @@ def _make_wmma_fwd_candidate() -> KernelCandidate:
         return _wmma_fwd_spec(req)
 
     def sweep(req: OperatorRequest):
+        # The policy spec, then the production variants of the arch's tuned
+        # space around it (each knob changes performance, never results).
         if not candidate.admits(req)[0]:
             return ()
         assert isinstance(req, AttentionRequest)
-        baseline = _wmma_fwd_spec(req)
-        return (baseline,) + _sweep_variants(baseline, req)
+        return wmma_variants(
+            _wmma_space(req.arch), _wmma_problem(req, _wmma_fwd_spec(req))
+        )
 
     def grid(spec: WmmaFmhaFwdSpec, req: OperatorRequest):
         assert isinstance(req, AttentionRequest)
@@ -434,7 +456,7 @@ def _make_wmma_fwd_candidate() -> KernelCandidate:
     candidate = KernelCandidate(
         name=name,
         family=FAMILY,
-        algorithm="wmma_fmha_fwd",
+        algorithm=WMMA_FWD_ALGORITHM,
         spec_id=spec_id,
         abi_version=ATTENTION_GFX1151_ABI,
         priority=5,
@@ -451,7 +473,54 @@ def _make_wmma_fwd_candidate() -> KernelCandidate:
     return candidate
 
 
+def _make_tuned_wmma_fwd_candidate(arch: str) -> KernelCandidate:
+    """``arch``'s opt-in tuned WMMA forward candidate.
+
+    Pinned by ``algorithm="wmma_fmha_fwd"`` and its own ``spec_id``; its default
+    (``tuning_id="auto"``) is the auto route's policy spec for the request, with
+    the CU count taken from the request (else the reference part's), never the
+    live device. ``tuning_id``/``tuning_knobs`` name one point of the arch's
+    WMMA space; ``runtime_head_dims`` requests build bucket objects.
+    """
+    name, spec_id = tuned_wmma_selectors(arch)
+
+    def base(req: AttentionRequest) -> WmmaProblem:
+        pure = dataclasses.replace(req, num_cus=_tuning_num_cus(req))
+        return _wmma_problem(req, _wmma_fwd_spec(pure))
+
+    def precheck(req: AttentionRequest) -> Tuple[bool, str]:
+        why = _wmma_request_refusal(req)
+        return (False, why) if why is not None else (True, "ok")
+
+    def bind_torch(request, spec, tensors, **kwargs):
+        from .bindings import bind_gfx1151_attention_torch
+
+        return bind_gfx1151_attention_torch(
+            request, spec.kernel_spec, tensors, **kwargs
+        )
+
+    return make_tuned_candidate(
+        name=name,
+        family=FAMILY,
+        algorithm=WMMA_FWD_ALGORITHM,
+        spec_id=spec_id,
+        abi_version=ATTENTION_GFX1151_ABI,
+        priority=5,
+        capability=dataclasses.replace(_WMMA_FWD_CAP, arches=(arch,)),
+        space=_wmma_space(arch),
+        base=base,
+        request_errors=_wmma_request_errors,
+        precheck=precheck,
+        signature=lambda spec: wmma_fmha_fwd_signature(spec.kernel_spec),
+        build=lambda spec, arch_: spec.build(arch_),
+        bind_torch=bind_torch,
+        grid=lambda spec, req: spec.launch_grid(_tuning_problem(req)),
+    )
+
+
 def register(route: CandidateRegistry, execution: CandidateRegistry) -> None:
-    candidate = _make_wmma_fwd_candidate()
-    route.register(candidate)
-    execution.register(candidate)
+    for candidate in (_make_wmma_fwd_candidate(),) + tuple(
+        _make_tuned_wmma_fwd_candidate(arch) for arch in RDNA_WMMA_ARCHES
+    ):
+        route.register(candidate)
+        execution.register(candidate)

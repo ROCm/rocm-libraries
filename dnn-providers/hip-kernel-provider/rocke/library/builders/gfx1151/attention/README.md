@@ -333,7 +333,9 @@ tail bounds, both V-staging choices, and the score features above.
   V heads are addressed as `head / (num_query_heads / num_v_heads)`, so V may
   carry its own head count. The flag adds an `rtdim` name token and is
   rejected with the transposed-QK path and output-column tiling. Public
-  dispatch keeps exact widths; the flag is for AOT catalogs and explicit specs.
+  dispatch keeps exact widths unless the request sets
+  `AttentionRequest.runtime_head_dims=True`, which selects the untiled
+  standard-path bucket object with `head_size = hdim_q` (as AOT catalogs ship).
   Dense 16-bit K/V load every head-dim tile at a constant offset through
   buffer resources bounded at each batch's last live element, so tiles past
   the runtime width cost no extra addressing and never read past the tensor.

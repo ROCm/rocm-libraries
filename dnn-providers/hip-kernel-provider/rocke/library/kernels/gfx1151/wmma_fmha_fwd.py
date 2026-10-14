@@ -236,6 +236,12 @@ class WmmaFmhaFwdSpec:
     def q_rows_per_cta(self) -> int:
         return _BLOCK_M * (self.num_waves if self.transposed_qk else 1)
 
+    def resolved_scheduler_strategy(self) -> str:
+        """The machine scheduler the object compiles with; ``"default"`` when
+        ``scheduler_strategy`` is unset (LLVM's generic scheduler). Lets a
+        catalog record the knob as a non-null value."""
+        return self.scheduler_strategy or "default"
+
     def kernel_name(self) -> str:
         from rocke.helpers.spec import kernel_name_join
 
