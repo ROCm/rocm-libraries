@@ -790,6 +790,16 @@ if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
         DESTINATION "${_tensilelite_install_dest}/Tensile"
         COMPONENT tests
     )
+    # test_rocroller_wgm.py compiles this header from
+    # <tensilelite-root>/include/Tensile. The Python tree install does not
+    # otherwise copy tensilelite/include.
+    if(EXISTS "${_tensilelite_src}/include/Tensile/RocRollerWgmKernargs.hpp")
+        install(
+            FILES "${_tensilelite_src}/include/Tensile/RocRollerWgmKernargs.hpp"
+            DESTINATION "${_tensilelite_install_dest}/include/Tensile"
+            COMPONENT tests
+        )
+    endif()
 
     # Scripts used by unit tests
     install(

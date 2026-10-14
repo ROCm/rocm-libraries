@@ -36,7 +36,9 @@ target_include_directories(hipblaslt-rocroller-selection
         "${PROJECT_SOURCE_DIR}/library/include"
         "${PROJECT_BINARY_DIR}/library/include"
         "${PROJECT_SOURCE_DIR}/../../shared/rocroller/lib/include")
-find_package(fmt 11.1.3 QUIET)
+# fmt comes from rocRoller when that project is configured. Fetch it only
+# when the target is absent. Do not find_package(fmt): TheRock rejects an
+# undeclared find_package of a package the super-project already provides.
 if(NOT TARGET fmt::fmt-header-only)
     include(FetchContent)
     set(FMT_SYSTEM_HEADERS ON)
