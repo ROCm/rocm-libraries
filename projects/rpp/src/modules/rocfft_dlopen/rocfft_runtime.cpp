@@ -130,10 +130,6 @@ bool initialize() {
     return g_available;
 }
 
-bool available() {
-    return g_available;
-}
-
 const char* error_message() {
     return failure_reason().c_str();
 }

@@ -22,7 +22,6 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
-#include <atomic>
 #include <complex>
 #include <vector>
 
@@ -89,7 +88,6 @@ RppStatus spectrogram_host_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rpp32f
     else
         memcpy(windowFn, windowFunction, windowLength * sizeof(Rpp32f));
     // Get windows output
-    std::atomic<RppStatus> fftPlanStatus{RPP_SUCCESS};
     omp_set_dynamic(0);
     omp_set_num_threads(handle.GetNumThreads());
 #pragma omp parallel for
@@ -177,7 +175,5 @@ RppStatus spectrogram_host_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rpp32f
         }
     }
     if (windowFn) free(windowFn);
-    RppStatus st = fftPlanStatus.load();
-    if (st != RPP_SUCCESS) return st;
     return RPP_SUCCESS;
 }

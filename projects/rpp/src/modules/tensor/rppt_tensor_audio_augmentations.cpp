@@ -224,6 +224,12 @@ RppStatus rppt_spectrogram(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dst
     if ((dstDescPtr->layout != RpptLayout::NFT) && (dstDescPtr->layout != RpptLayout::NTF))
         return RPP_ERROR_INVALID_DST_LAYOUT;
 
+    // Boundary validation belongs here rather than in either kernel, so that both backends reject
+    // the same inputs. nfft == 0 means "use windowLength"; any other nfft must be able to hold a
+    // whole window, otherwise the transform input is shorter than the data written into it.
+    if ((windowLength <= 0) || (windowStep <= 0)) return RPP_ERROR_INVALID_ARGUMENTS;
+    if ((nfft != 0) && (nfft < windowLength)) return RPP_ERROR_INVALID_ARGUMENTS;
+
     rpp::Handle& handle = rpp::deref(rppHandle);
     [[maybe_unused]] RppBackend handleBackend = handle.GetBackend();
 
@@ -265,6 +271,7 @@ RppStatus rppt_spectrogram(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dst
         } else {
             return RPP_ERROR_NOT_IMPLEMENTED;
         }
+        return RPP_SUCCESS;
     }
 #endif
     return RPP_ERROR_INCOMPATIBLE_BACKEND;

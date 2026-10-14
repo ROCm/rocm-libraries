@@ -28,6 +28,9 @@ SOFTWARE.
 #include <hip/hip_runtime.h>
 
 #include "rpp_hip_load_store.hpp"
+// Needed by the spectrogram executor further down. Note that this header #defines the rocFFT
+// entry points as object-like macros, which therefore leak into every TU that includes this one.
+#include "rocfft_runtime.hpp"
 
 /**************************************** ARITHMETIC OPERATIONS
  * ****************************************/
@@ -129,12 +132,16 @@ RppStatus hip_exec_resample_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rpp32
 
 // -------------------- spectrogram --------------------
 
-#include "rocfft_runtime.hpp"
 namespace rpp {
-// Helper function to get or create cached rocFFT plan (keyed by nfft + batchCount).
+// Get or create the handle's cached rocFFT plan for this transform size (keyed by nfft).
 // Returns RPP_ERROR_NOT_IMPLEMENTED when rocFFT could not be loaded at runtime.
-RppStatus get_rocfft_plan(Handle& handle, int nfft, int batchCount, rocfft_plan* plan,
-                          rocfft_plan_description* desc);
+//
+// A rocFFT plan bakes in its batch count, so the cached plan is created for the largest
+// batchCount seen so far and *planBatch reports it. It may exceed the caller's batchCount: the
+// caller must size and zero its input and output scratch for *planBatch, not for batchCount, so
+// that the surplus transforms read zeros. The work buffer is owned by the cache; do not free it.
+RppStatus get_rocfft_plan(Handle& handle, int nfft, size_t batchCount, rocfft_plan* plan,
+                          size_t* planBatch, void** workBuffer, size_t* workBufferSize);
 }  // namespace rpp
 
 RppStatus hip_exec_spectrogram_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rpp32f* dstPtr,

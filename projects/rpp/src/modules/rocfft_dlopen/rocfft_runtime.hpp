@@ -111,11 +111,6 @@ namespace rocfft_dlopen {
  */
 bool initialize();
 
-/*! \brief Whether rocFFT was resolved successfully.
- *  \return true if \ref initialize() has succeeded. False before the first call.
- */
-bool available();
-
 /*! \brief Why rocFFT is unavailable.
  *  \return A diagnostic naming the library and the failure, or an empty string when rocFFT
  *          is available. Never nullptr.

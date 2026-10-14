@@ -120,7 +120,9 @@ __global__ void compute_magnitude_from_complex_hip_tensor(float2* srcPtr, uint s
         // numWindows])
         constexpr int MAG_TILE_DIM =
             (LOCAL_THREADS_X > LOCAL_THREADS_Y) ? LOCAL_THREADS_X : LOCAL_THREADS_Y;
-        __shared__ float magnitude_smem[MAG_TILE_DIM][MAG_TILE_DIM];
+        // Padded by one column: the tile is written row-wise and read column-wise below, which
+        // without the pad puts every thread of a read in the same LDS bank.
+        __shared__ float magnitude_smem[MAG_TILE_DIM][MAG_TILE_DIM + 1];
 
         // Load and compute magnitude in coalesced fashion
         // Read: srcPtr[batch][window][bin] - threads read consecutive bins (coalesced)
@@ -186,6 +188,23 @@ __global__ void window_output_hip_tensor(float* srcPtr, uint srcStride, float* d
 
 // -------------------- Set 1 - kernel executor --------------------
 
+namespace {
+
+// Owns a rocfft_execution_info for the duration of a single spectrogram call. The executor has
+// several early returns between creating it and the shared cleanup at the end, so releasing it
+// by scope rather than by hand keeps every one of them leak-free.
+struct RocfftExecInfoGuard {
+    rocfft_execution_info info = nullptr;
+    ~RocfftExecInfoGuard() {
+        if (info) rocfft_execution_info_destroy(info);
+    }
+    RocfftExecInfoGuard() = default;
+    RocfftExecInfoGuard(const RocfftExecInfoGuard&) = delete;
+    RocfftExecInfoGuard& operator=(const RocfftExecInfoGuard&) = delete;
+};
+
+}  // namespace
+
 RppStatus hip_exec_spectrogram_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rpp32f* dstPtr,
                                       RpptDescPtr dstDescPtr, Rpp32s* srcLengthTensor,
                                       bool centerWindows, bool reflectPadding,
@@ -197,26 +216,50 @@ RppStatus hip_exec_spectrogram_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rp
 
     Rpp32s maxNumWindows = (vertical) ? dstDescPtr->w : dstDescPtr->h;
 
-    // Acquire the rocFFT plan first. rocFFT is resolved at runtime and may be absent, and there
-    // is no CPU fallback on this path, so the call must fail with RPP_ERROR_NOT_IMPLEMENTED
-    // before it allocates scratch, copies the window function or launches any kernel - otherwise
-    // an unavailable rocFFT surfaces as a scratch-size error after visible side effects.
-    int totalWindows = maxNumWindows * dstDescPtr->n;
+    // Acquire the rocFFT plan and set up its execution info first. rocFFT is resolved at runtime
+    // and may be absent, and there is no CPU fallback on this path, so these must fail with
+    // RPP_ERROR_NOT_IMPLEMENTED before anything allocates scratch, copies the window function or
+    // enqueues work - otherwise an unavailable rocFFT surfaces as a scratch-size error after
+    // visible side effects. Nothing below this block returns without reaching the stream
+    // synchronize at the end.
+    size_t totalWindows = static_cast<size_t>(maxNumWindows) * static_cast<size_t>(dstDescPtr->n);
     rocfft_plan plan = nullptr;
-    rocfft_plan_description desc = nullptr;
-    RppStatus status = rpp::get_rocfft_plan(handle, nfft, totalWindows, &plan, &desc);
+    size_t planBatch = 0;
+    void* workBuffer = nullptr;
+    size_t workBufferSize = 0;
+    RppStatus status = rpp::get_rocfft_plan(handle, nfft, totalWindows, &plan, &planBatch,
+                                            &workBuffer, &workBufferSize);
     if (status != RPP_SUCCESS) return status;
+
+    // Create execution info and set stream unconditionally (required for correct synchronization)
+    RocfftExecInfoGuard execInfoGuard;
+    if (rocfft_execution_info_create(&execInfoGuard.info) != rocfft_status_success)
+        return RPP_ERROR_NOT_ENOUGH_MEMORY;
+    rocfft_execution_info execInfo = execInfoGuard.info;
+
+    if (rocfft_execution_info_set_stream(execInfo, handle.GetStream()) != rocfft_status_success)
+        return RPP_ERROR_HIP_RUNTIME;
+
+    // The work buffer is owned by the plan cache and lives as long as the plan does
+    if (workBufferSize > 0 &&
+        rocfft_execution_info_set_work_buffer(execInfo, workBuffer, workBufferSize) !=
+            rocfft_status_success)
+        return RPP_ERROR_NOT_ENOUGH_MEMORY;
 
     size_t windowOutputStride = static_cast<size_t>(maxNumWindows) * static_cast<size_t>(nfft);
     size_t fftOutputStride = static_cast<size_t>(maxNumWindows) * static_cast<size_t>(numBins);
-    size_t windowOutputFloats = static_cast<size_t>(dstDescPtr->n) * windowOutputStride;
+    // The cached plan may have been built for a larger batch than this call needs (see
+    // get_rocfft_plan). Both buffers must therefore be sized - and the input zeroed - for the
+    // plan's batch, so the surplus transforms read zeros. They sit past all the real data, so
+    // the per-sample strides above are unaffected.
+    size_t windowOutputFloats = planBatch * static_cast<size_t>(nfft);
     // Align fftOutput to 8 bytes (float2) accounting for total offset from base pointer.
     // fftOutput is placed after windowOutput, and we need (windowLength + alignedOffset) to be
     // even.
     size_t totalBaseOffset = static_cast<size_t>(windowLength) + windowOutputFloats;
     size_t alignedOffset = windowOutputFloats + (totalBaseOffset & 1);  // add 1 if odd
     size_t rocfftScratchSize = static_cast<size_t>(windowLength) + alignedOffset +
-                               static_cast<size_t>(dstDescPtr->n) * fftOutputStride * 2;
+                               planBatch * static_cast<size_t>(numBins) * 2;
     if (rocfftScratchSize > static_cast<size_t>(SPECTROGRAM_MAX_SCRATCH_MEMORY))
         return RPP_ERROR_OUT_OF_BOUND_SCRATCH_MEMORY_SIZE;
 
@@ -247,10 +290,11 @@ RppStatus hip_exec_spectrogram_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rp
 
     Rpp32s windowCenterOffset = (centerWindows) ? (windowLength / 2) : 0;
 
-    // Allocate window output buffer (after d_windowFn)
+    // Allocate window output buffer (after d_windowFn). Zeroed across the plan's whole batch, not
+    // just this call's, so that any surplus transforms see zeros.
     Rpp32f* windowOutput = d_windowFn + windowLength;
-    RPP_HIP_RETURN_IF_ERROR(hipMemsetAsync(
-        windowOutput, 0, windowOutputStride * dstDescPtr->n * sizeof(Rpp32f), handle.GetStream()));
+    RPP_HIP_RETURN_IF_ERROR(hipMemsetAsync(windowOutput, 0, windowOutputFloats * sizeof(Rpp32f),
+                                           handle.GetStream()));
 
     // Compute the windowOutput for all samples in a batch. Each sample will be of shape
     // (numWindows, nfft)
@@ -272,38 +316,10 @@ RppStatus hip_exec_spectrogram_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rp
     // float2)
     float2* fftOutput = reinterpret_cast<float2*>(windowOutput + alignedOffset);
 
-    // Get work buffer size
-    size_t workBufferSize = 0;
-    if (rocfft_plan_get_work_buffer_size(plan, &workBufferSize) != rocfft_status_success)
-        return RPP_ERROR;
-
-    // Create execution info and set stream unconditionally (required for correct
-    // synchronization)
-    void* workBuffer = nullptr;
-    rocfft_execution_info execInfo = nullptr;
-    if (rocfft_execution_info_create(&execInfo) != rocfft_status_success)
-        return RPP_ERROR_NOT_ENOUGH_MEMORY;
-
-    if (rocfft_execution_info_set_stream(execInfo, handle.GetStream()) != rocfft_status_success) {
-        rocfft_execution_info_destroy(execInfo);
-        return RPP_ERROR_HIP_RUNTIME;
-    }
-
-    // Allocate work buffer if needed
-    if (workBufferSize > 0) {
-        if (hipMalloc(&workBuffer, workBufferSize) != hipSuccess ||
-            rocfft_execution_info_set_work_buffer(execInfo, workBuffer, workBufferSize) !=
-                rocfft_status_success) {
-            if (workBuffer) (void)hipFree(workBuffer);
-            rocfft_execution_info_destroy(execInfo);
-            return RPP_ERROR_NOT_ENOUGH_MEMORY;  // rocFFT work buffer allocation failed
-        }
-    }
-
     // Execute rocFFT for the entire batch (plan includes correct batch count). This enqueues
     // work on handle.GetStream() using workBuffer, so neither workBuffer nor execInfo may be
     // released until the stream has completed. From here every exit path must fall through to
-    // the shared cleanup below (synchronize, then free) rather than returning early.
+    // the synchronize below rather than returning early.
     void* inBuffers[1] = {windowOutput};
     void* outBuffers[1] = {fftOutput};
     RppStatus retStatus = RPP_SUCCESS;
@@ -326,11 +342,10 @@ RppStatus hip_exec_spectrogram_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rp
         if (hipGetLastError() != hipSuccess) retStatus = RPP_ERROR_HIP_LAUNCH;
     }
 
-    // Synchronize before releasing rocFFT resources so the stream is no longer using
-    // workBuffer, then clean up temporary resources (plan is cached and reused).
+    // Synchronize before execInfoGuard releases the execution info, so the stream is no longer
+    // using it or the work buffer. The plan and the work buffer are owned by the cache and
+    // outlive this call.
     hipError_t syncErr = hipStreamSynchronize(handle.GetStream());
-    if (workBuffer) (void)hipFree(workBuffer);
-    if (execInfo) rocfft_execution_info_destroy(execInfo);
 
     if (retStatus != RPP_SUCCESS) return retStatus;
     if (syncErr != hipSuccess) return RPP_ERROR_HIP_RUNTIME;
