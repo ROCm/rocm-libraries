@@ -655,6 +655,40 @@ def _wmma_gfx1250_b_16x16x64_f8(builder, lane, slot):
     return k, col
 
 
+def _wmma_gfx1250_a_16x16x128_f8f6f4(builder, lane, slot):
+    """gfx1250 WMMA 16x16x128 ``f8f6f4`` A operand (wave32): lane ``l`` holds row
+    ``l % 16``; the ``<16 x i32>`` fragment slot ``i`` is the dword covering
+    K=``(l // 16) * 64 + i * 4`` (four low-bit bytes per slot, K-contiguous).
+    Same lane math as the K=64 fp8 map with the per-lane K span doubled from 32
+    bytes to 64. Returns ``(row, k)``.
+
+    Verified on silicon (gfx1250 A0): a 16x16x128 product of random asymmetric
+    integer A/B packed under this map reproduces ``C = A @ B.T`` exactly in all
+    256 accumulator cells, so a row/col swap or a K-half transposition would
+    have failed."""
+    c16 = builder.const_i32(16)
+    row = builder.mod(lane, c16)
+    k_half = builder.div(lane, c16)
+    k = builder.add(
+        builder.mul(k_half, builder.const_i32(64)), builder.const_i32(slot * 4)
+    )
+    return row, k
+
+
+def _wmma_gfx1250_b_16x16x128_f8f6f4(builder, lane, slot):
+    """gfx1250 WMMA 16x16x128 ``f8f6f4`` B operand (wave32): lane ``l`` holds col
+    ``l % 16``; the ``<16 x i32>`` fragment slot ``i`` is the dword covering
+    K=``(l // 16) * 64 + i * 4`` (four low-bit bytes per slot, K-contiguous).
+    Returns ``(k, col)``."""
+    c16 = builder.const_i32(16)
+    col = builder.mod(lane, c16)
+    k_half = builder.div(lane, c16)
+    k = builder.add(
+        builder.mul(k_half, builder.const_i32(64)), builder.const_i32(slot * 4)
+    )
+    return k, col
+
+
 def _wmma_gfx1250_a_scale(builder, lane, slot):
     row = builder.mod(lane, builder.const_i32(16))
     return row, builder.const_i32(slot)
@@ -850,6 +884,21 @@ _MMA_FRAGMENT_INFO: Dict[str, _FragInfo] = {
         32,
         _wmma_gfx1250_a_16x16x64_f8,
         _wmma_gfx1250_b_16x16x64_f8,
+        _wmma_gfx12_acc_16x16,
+    ),
+    # gfx1250 dense K=128 WMMA through the ``f8f6f4`` opcode. Same family as the
+    # K=64 atom with the per-lane operand doubled to 64 bytes (<16 x i32>), so
+    # one atom covers twice the K per instruction. This is the *dense* form: the
+    # A/B format immediates are pinned to FP8 (E4M3) and there are no scale
+    # operands, which is what separates it from the ``_scale_`` entries below
+    # that share the same 16x16x128 shape and carrier width.
+    "wmma_gfx1250_f32_16x16x128_f8f6f4": _FragInfo(
+        16,
+        16,
+        8,
+        32,
+        _wmma_gfx1250_a_16x16x128_f8f6f4,
+        _wmma_gfx1250_b_16x16x128_f8f6f4,
         _wmma_gfx12_acc_16x16,
     ),
     # Native gfx1250 scaled WMMA. FP8/BF8 use 64 bytes per lane; FP4 uses

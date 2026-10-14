@@ -639,7 +639,8 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
 
     # WMMA coverage is intentionally narrower than the full CDNA MFMA matrix:
     # gfx11/gfx12 RDNA supports the 16x16x16 atom and gfx1250 supports the
-    # gfx1250-class 16x16x32 (f16/bf16) and 16x16x64 (fp8/bf8) atoms, all
+    # gfx1250-class 16x16x32 (f16/bf16), 16x16x64 (fp8/bf8) and dense 16x16x128
+    # (fp8, via the f8f6f4 opcode) atoms, all
     # through the simple ``mem`` / ``wmma_v1`` pipelines. The richer pipelines
     # (compv3 / compv4 scheduler interleave), DTLA and preshuffle encode
     # MFMA-shaped assumptions and are gated off until ported. CDNA MFMA keeps
@@ -647,7 +648,7 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
     if family == "wmma":
         supported_atoms = {(16, 16, 16)}
         if arch == "gfx1250":
-            supported_atoms = {(16, 16, 32), (16, 16, 64)}
+            supported_atoms = {(16, 16, 32), (16, 16, 64), (16, 16, 128)}
         if atom not in supported_atoms:
             supported = ", ".join(
                 f"{m}x{n}x{k}" for (m, n, k) in sorted(supported_atoms)

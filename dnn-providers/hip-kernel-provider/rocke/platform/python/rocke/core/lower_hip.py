@@ -674,6 +674,18 @@ class _Lowerer:
     def _op_tile_wmma_gfx1250_f32_16x16x64_bf8_bf8(self, op: Op) -> None:
         self._emit_wmma_gfx1250_fp8(op, "bf8_bf8")
 
+    def _op_tile_wmma_gfx1250_f32_16x16x128_f8f6f4(self, op: Op) -> None:
+        # gfx1250 dense K=128 builtin: A/B are <16 x i32> (64 low-bit bytes per
+        # lane), 6-operand form (fmtA, A, fmtB, B, modC, C) -- a format
+        # immediate per matrix (0 = FP8/E4M3) and no reuse flags.
+        self._require_wmma_arch("wmma_gfx1250_f32_16x16x128_f8f6f4")
+        a, b, c = op.operands
+        self._emit(
+            f"f32x8 {_name(op.result)} = "
+            f"__builtin_amdgcn_wmma_f32_16x16x128_f8f6f4("
+            f"0, {_name(a)}, 0, {_name(b)}, (int16_t)0, {_name(c)});"
+        )
+
     def _emit_wmma_gfx1250_fp8(self, op: Op, ab: str) -> None:
         # gfx1250 K=64 FP8/BF8 builtin: A/B are <8 x i32> (32 low-bit
         # bytes per lane), 6-operand form (A, B, fmt, C, reuseA, reuseB).

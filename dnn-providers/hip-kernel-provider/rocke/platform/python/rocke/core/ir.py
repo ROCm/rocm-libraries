@@ -2012,6 +2012,22 @@ class IRBuilder:
         """gfx1250 (gfx1250) BF8 K=64 WMMA. Thin wrapper over :meth:`mma`."""
         return self.mma("wmma_gfx1250_f32_16x16x64_bf8_bf8", a, b, c)
 
+    def wmma_gfx1250_f32_16x16x128_f8f6f4(self, a: Value, b: Value, c: Value) -> Value:
+        """gfx1250 dense FP8 WMMA at K=128: D[16x16] += A[16x128] * B[128x16].
+
+        The wide low-bit atom, reached through the ``f8f6f4`` opcode with both
+        matrix-format immediates pinned to FP8 (E4M3). Per lane ``a`` and ``b``
+        are 64 fp8 bytes carried as ``<16 x i32>`` -- twice the K=64 atom's
+        operand -- while the accumulator ``c`` / result stay ``<8 x float>``.
+
+        This is the **dense** use of ``f8f6f4``: no scale operands, unlike
+        :meth:`mma` on the ``*_scale_e8m0_*`` atoms that share the same shape
+        and carrier width. Lowered through
+        :meth:`rocke.core.isa.Gfx1250Backend.emit_wmma` to
+        ``llvm.amdgcn.wmma.f32.16x16x128.f8f6f4.v8f32.v16i32.v16i32``. Thin
+        wrapper over :meth:`mma`."""
+        return self.mma("wmma_gfx1250_f32_16x16x128_f8f6f4", a, b, c)
+
     def mfma_f32_16x16x16_f16(self, a: Value, b: Value, c: Value) -> Value:
         return self.mma("mfma_f32_16x16x16_f16", a, b, c)
 

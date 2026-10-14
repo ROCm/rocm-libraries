@@ -516,6 +516,48 @@ def _spec(idx: int) -> UniversalGemmSpec:
             ),
             "gfx1250",
         )
+    if idx == 21:
+        # The only config on the dense 16x16x128 f8f6f4 atom. Its operand
+        # carrier is <16 x i32> rather than <8 x i32> and its intrinsic takes a
+        # format immediate per matrix with NO trailing reuse flags, so neither
+        # the K=64 configs above nor the scaled 16x16x128 atoms (a different
+        # opcode and a different arity) would catch a drift in this call shape.
+        # tile_k is two atom steps so the K loop is emitted, not peeled to one.
+        return (
+            UniversalGemmSpec(
+                name="test_wmma_f8f6f4_k128",
+                tile=TileSpec(
+                    tile_m=128,
+                    tile_n=128,
+                    tile_k=256,
+                    warp_m=2,
+                    warp_n=2,
+                    warp_k=1,
+                    warp_tile_m=16,
+                    warp_tile_n=16,
+                    warp_tile_k=128,
+                ),
+                trait=TraitSpec(
+                    pipeline="mem",
+                    scheduler="intrawave",
+                    epilogue="cshuffle",
+                    tdm=True,
+                    tdm_depth=2,
+                    lds_k_pad=48,
+                ),
+                data=DataSpec(
+                    dtype_a="fp8e4m3",
+                    dtype_b="fp8e4m3",
+                    dtype_c="bf16",
+                    dtype_acc="fp32",
+                    layout="RCR",
+                ),
+                wave_size=32,
+                block_size=128,
+                batched=False,
+            ),
+            "gfx1250",
+        )
     raise SystemExit(f"unknown config index {idx}")
 
 
@@ -540,7 +582,7 @@ def main() -> int:
     return run_emit(
         _spec,
         build_universal_gemm,
-        usage="usage: gemm_emit.py <config_index 0..17>\n",
+        usage="usage: gemm_emit.py <config_index 0..21>\n",
     )
 
 

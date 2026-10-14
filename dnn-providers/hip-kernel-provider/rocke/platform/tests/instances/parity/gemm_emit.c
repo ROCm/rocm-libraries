@@ -446,6 +446,39 @@ static int make_spec(int idx, rocke_gemm_universal_spec_t* spec)
         spec->block_size      = 1024;
         spec->batched         = false;
         break;
+    case 21: /* the dense 16x16x128 f8f6f4 atom */
+        /* The only config on the wide low-bit atom. Its operand carrier is
+         * <16 x i32> rather than <8 x i32> and its intrinsic takes a format
+         * immediate per matrix with NO trailing reuse flags, so neither the
+         * K=64 configs above nor the scaled 16x16x128 atoms (a different
+         * opcode and a different arity) would catch a drift in this call
+         * shape. tile_k is two atom steps so the K loop is emitted, not
+         * peeled to one. */
+        spec->name = "test_wmma_f8f6f4_k128";
+        spec->tile = (rocke_gemm_tile_spec_t){.tile_m      = 128,
+                                              .tile_n      = 128,
+                                              .tile_k      = 256,
+                                              .warp_m      = 2,
+                                              .warp_n      = 2,
+                                              .warp_k      = 1,
+                                              .warp_tile_m = 16,
+                                              .warp_tile_n = 16,
+                                              .warp_tile_k = 128};
+        spec->trait.pipeline  = "mem";
+        spec->trait.scheduler = "intrawave";
+        spec->trait.epilogue  = "cshuffle";
+        spec->trait.tdm       = true;
+        spec->trait.tdm_depth = 2;
+        spec->trait.lds_k_pad = 48;
+        spec->data.dtype_a    = "fp8e4m3";
+        spec->data.dtype_b    = "fp8e4m3";
+        spec->data.dtype_c    = "bf16";
+        spec->data.dtype_acc  = "fp32";
+        spec->data.layout     = "RCR";
+        spec->wave_size       = 32;
+        spec->block_size      = 128;
+        spec->batched         = false;
+        break;
     default:
         return -1;
     }
@@ -453,7 +486,7 @@ static int make_spec(int idx, rocke_gemm_universal_spec_t* spec)
     return 0;
 }
 
-/* Config 9 exercises gfx942; configs 11-20 gfx1250; the rest use the
+/* Config 9 exercises gfx942; configs 11-21 gfx1250; the rest use the
  * gfx950 baseline. */
 static const char* arch_for(int idx)
 {
@@ -461,7 +494,7 @@ static const char* arch_for(int idx)
     {
         return "gfx942";
     }
-    if(idx >= 11 && idx <= 20)
+    if(idx >= 11 && idx <= 21)
     {
         return "gfx1250";
     }

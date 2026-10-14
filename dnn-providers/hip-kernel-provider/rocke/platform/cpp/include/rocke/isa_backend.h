@@ -153,7 +153,12 @@ typedef enum rocke_wmma_shape
     ROCKE_WMMA_SHAPE_GFX1250,
     /* (<8 x i32> A, <8 x i32> B, i16 fmt, <8 x float> C, i1, i1) -- gfx1250
      * K=64 fp8/bf8, where a lane's fragment is 32 packed bytes */
-    ROCKE_WMMA_SHAPE_GFX1250_FP8
+    ROCKE_WMMA_SHAPE_GFX1250_FP8,
+    /* (i32 fmtA, <16 x i32> A, i32 fmtB, <16 x i32> B, i16 modC,
+     * <8 x float> C) -- gfx1250 dense K=128 via the f8f6f4 opcode, where a
+     * lane's fragment is 64 packed bytes. A format immediate per matrix and,
+     * unlike the K=64 form, NO trailing reuseA/reuseB. */
+    ROCKE_WMMA_SHAPE_GFX1250_F8F6F4
 } rocke_wmma_shape_t;
 
 /* One row of the RDNA WMMA spec tables (_RDNA_WMMA / _RDNA_GFX12_WMMA /

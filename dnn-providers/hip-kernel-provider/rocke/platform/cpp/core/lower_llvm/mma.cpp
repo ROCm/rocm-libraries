@@ -311,7 +311,11 @@ typedef enum _wmma_shape
     WMMA_SHAPE_GFX1250,
     /* (<8 x i32> A, <8 x i32> B, i16 fmt, <8 x float> C, i1, i1) -- gfx1250
      * K=64 fp8/bf8, where a lane's fragment is 32 packed bytes */
-    WMMA_SHAPE_GFX1250_FP8
+    WMMA_SHAPE_GFX1250_FP8,
+    /* (i32 fmtA, <16 x i32> A, i32 fmtB, <16 x i32> B, i16 modC,
+     * <8 x float> C) -- gfx1250 dense K=128 via the f8f6f4 opcode. One
+     * format immediate per matrix and no trailing reuse flags. */
+    WMMA_SHAPE_GFX1250_F8F6F4
 } _wmma_shape_t;
 
 typedef struct _wmma_spec
@@ -402,6 +406,14 @@ static const _wmma_spec_t WMMA_SPECS[] = {
      "i32",
      8,
      WMMA_SHAPE_GFX1250_FP8},
+    /* _GFX1250_WMMA_F8F6F4 (dense K=128). A/B arrive in SSA as <16 x i32>. */
+    {"wmma_gfx1250_f32_16x16x128_f8f6f4",
+     "wmma.gfx1250.f32.16x16x128.f8f6f4",
+     "llvm.amdgcn.wmma.f32.16x16x128.f8f6f4.v8f32.v16i32.v16i32",
+     "i32",
+     "i32",
+     16,
+     WMMA_SHAPE_GFX1250_F8F6F4},
 };
 static const int WMMA_SPECS_N = (int)(sizeof(WMMA_SPECS) / sizeof(WMMA_SPECS[0]));
 
@@ -576,6 +588,27 @@ static void _emit_wmma(rocke_lower_t* L, const rocke_op_t* op, const char* op_id
                        "<%d x %s> %s, <%d x %s> %s, "
                        "i16 0, <8 x float> %s, "
                        "i1 false, i1 false)",
+                       mma_result_name(L, op),
+                       spec->intrinsic,
+                       w,
+                       spec->call_elt,
+                       a_arg,
+                       w,
+                       spec->call_elt,
+                       b_arg,
+                       rocke_ll_operand(L, c));
+        return;
+    }
+    if(spec->shape == WMMA_SHAPE_GFX1250_F8F6F4)
+    {
+        /* gfx1250 dense K=128 6-operand form: (i32 fmtA, A, i32 fmtB, B,
+         * i16 modC, C). fmt 0 selects FP8 (E4M3) for both matrices; this
+         * opcode carries no trailing reuse flags. */
+        rocke_ll_emitf(L,
+                       "  %s = call <8 x float> @%s("
+                       "i32 0, <%d x %s> %s, "
+                       "i32 0, <%d x %s> %s, "
+                       "i16 0, <8 x float> %s)",
                        mma_result_name(L, op),
                        spec->intrinsic,
                        w,

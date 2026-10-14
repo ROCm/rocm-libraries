@@ -610,6 +610,19 @@ _INTRINSIC_DECLS: Dict[str, str] = {
         "declare <8 x float> @llvm.amdgcn.wmma.f32.16x16x64.bf8.bf8.v8f32.v8i32("
         "<8 x i32>, <8 x i32>, i16 immarg, <8 x float>, i1 immarg, i1 immarg)"
     ),
+    # gfx1250 DENSE K=128 WMMA via the f8f6f4 opcode. A/B are 64 low-bit bytes
+    # per lane as <16 x i32>; the accumulator / result stay <8 x float>. The
+    # 6-operand form is (i32 fmtA, A, i32 fmtB, B, i16 modC, C) -- a leading
+    # format immediate per matrix and, unlike the K=64 form, **no trailing
+    # reuseA/reuseB**. Distinct opcode from the scale/scale16 entries below,
+    # which share the shape and carrier width but add scale operands.
+    # Signature confirmed on a gfx1250 device (ROCm 7.13 clang 23) via
+    # __builtin_amdgcn_wmma_f32_16x16x128_f8f6f4.
+    "wmma.gfx1250.f32.16x16x128.f8f6f4": (
+        "declare <8 x float> @llvm.amdgcn.wmma.f32.16x16x128.f8f6f4."
+        "v8f32.v16i32.v16i32(i32 immarg, <16 x i32>, i32 immarg, "
+        "<16 x i32>, i16 immarg, <8 x float>)"
+    ),
     "wmma.scale.block32.gfx1250.f32.16x16x128.f8f6f4.v8f32.v16i32.v16i32": (
         "declare <8 x float> @llvm.amdgcn.wmma.scale.f32.16x16x128.f8f6f4."
         "v8f32.v16i32.v16i32(i32 immarg, <16 x i32>, i32 immarg, "

@@ -710,8 +710,8 @@ bool rocke_gemm_universal_is_valid_spec(const rocke_gemm_universal_spec_t* spec,
 
     /* WMMA coverage is narrower than CDNA's MFMA matrix: gfx11/gfx12 RDNA
      * supports the 16x16x16 atom and gfx1250 supports the gfx1250-class
-     * 16x16x32 (f16/bf16) and 16x16x64 (fp8/bf8) atoms, all through the simple
-     * 'mem'/'wmma_v1' pipeline. */
+     * 16x16x32 (f16/bf16), 16x16x64 (fp8/bf8) and dense 16x16x128 (fp8, via the
+     * f8f6f4 opcode) atoms, all through the simple 'mem'/'wmma_v1' pipeline. */
     if(strcmp(family, "wmma") == 0)
     {
         bool is_gfx1250 = strcmp(arch, "gfx1250") == 0;
@@ -719,7 +719,8 @@ bool rocke_gemm_universal_is_valid_spec(const rocke_gemm_universal_spec_t* spec,
 
         if(is_gfx1250)
         {
-            atom_ok = (atom_m == 16 && atom_n == 16 && (atom_k == 32 || atom_k == 64));
+            atom_ok = (atom_m == 16 && atom_n == 16
+                       && (atom_k == 32 || atom_k == 64 || atom_k == 128));
         }
         else
         {
@@ -729,7 +730,7 @@ bool rocke_gemm_universal_is_valid_spec(const rocke_gemm_universal_spec_t* spec,
         {
             /* Python: ", ".join(f"{m}x{n}x{k}" for ... in sorted(supported_atoms)). */
             CK_GEMM_REJECT("WMMA path supports only %s (got (%d, %d, %d)) on %s",
-                           is_gfx1250 ? "16x16x32, 16x16x64" : "16x16x16",
+                           is_gfx1250 ? "16x16x32, 16x16x64, 16x16x128" : "16x16x16",
                            atom_m,
                            atom_n,
                            atom_k,
