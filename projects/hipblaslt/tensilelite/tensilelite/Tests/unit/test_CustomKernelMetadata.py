@@ -29,21 +29,9 @@ from textwrap import dedent, indent
 import pytest
 import yaml
 
-from Tensile.resources import custom_kernel_text
-from Tensile.AddCustomConfig import (
-)
-from Tensile.Contractions import ASSERT_DIM_MAP_PREDICATES, ProblemPredicate
-from Tensile.Common.ValidParameters import (
-    ASSERT_DIM_MAP_PARAMETERS,
-)
-from Tensile.CustomKernels import (
-)
-
-pytestmark = pytest.mark.unit
-
-
 import tensilelite
 import tensilelite.TensileLogic.HandleCustomKernel as hck_mod
+from tensilelite.resources import custom_kernel_text
 from tensilelite.AddCustomConfig import (
     _fmt_yaml_args,
     _fmt_yaml_inline,
@@ -53,8 +41,12 @@ from tensilelite.AddCustomConfig import (
     build_custom_config_yaml,
     inject_custom_config,
 )
-from tensilelite.Contractions import ProblemPredicate
-from tensilelite.Common.ValidParameters import checkParametersAreValid, validParameters
+from tensilelite.Contractions import ASSERT_DIM_MAP_PREDICATES, ProblemPredicate
+from tensilelite.Common.ValidParameters import (
+    ASSERT_DIM_MAP_PARAMETERS,
+    checkParametersAreValid,
+    validParameters,
+)
 from tensilelite.CustomKernels import (
     _buildCustomKernelFromMetadata,
     _metadataArgToCustomArg,
@@ -68,27 +60,6 @@ from tensilelite.CustomKernels import (
 from tensilelite.Toolchain.Assembly import validateCustomKernelMetadataAtBuild
 from tensilelite.ValidateMetadata import validate_all
 
-################################################################################
-#
-# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-#
-################################################################################
 pytestmark = pytest.mark.unit
 
 
@@ -1245,7 +1216,7 @@ def test_wvspltk_bf16_tn_shipped_config(name, sizeEqual, sizeLessThan, sizeGreat
     m1 and m2 pin n; m4 reads it as a kernarg and serves every 0 < n <= 4 (the
     host does not quick-return n == 0). The leading dimensions are kernargs, and
     tokens past the LDS stage are read from global memory, so K has no bound."""
-    ck_root = os.path.join(os.path.dirname(Tensile.__file__), "CustomKernels")
+    ck_root = os.path.join(os.path.dirname(tensilelite.__file__), "CustomKernels")
     valid, msg = validateCustomKernelMetadata(name, ck_root)
     assert valid, msg
 
@@ -1344,7 +1315,7 @@ def test_wvspltk_range_logic(rel, plainRel, ranges):
     names = {s["SolutionIndex"]: s["CustomKernel"]["name"] for s in doc["Solutions"]}
     assert {names[index]: key for key, (index, _) in doc["ExactLogic"]} == ranges
 
-    ck_root = os.path.join(os.path.dirname(Tensile.__file__), "CustomKernels")
+    ck_root = os.path.join(os.path.dirname(tensilelite.__file__), "CustomKernels")
     for name, key in ranges.items():
         config = getCustomKernelConfig(name, {}, ck_root)
         for dim in range(4):
