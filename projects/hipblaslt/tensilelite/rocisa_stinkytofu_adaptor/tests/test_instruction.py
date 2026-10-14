@@ -3154,6 +3154,20 @@ class TestSWaitAluToString(AdaptorTestCase):
         self.assertEqual(str(SWaitAlu(comment="c")), "")
 
 
+class TestVNopToString(AdaptorTestCase):
+    """``VNop.toString`` emits ``count`` copies, matching rocisa ``VNop``."""
+
+    def test_four_copies_keep_comment(self):
+        from rocisa_stinkytofu_adaptor.instruction import VNop
+        inst = VNop(4, "Add v_nop before releasing ValuA/B")
+        line = "v_nop                                              // Add v_nop before releasing ValuA/B\n"
+        self.assertEqual(str(inst), line * 4)
+
+    def test_zero_count_is_empty(self):
+        from rocisa_stinkytofu_adaptor.instruction import VNop
+        self.assertEqual(str(VNop(0)), "")
+
+
 class TestSSchedulingFence(AdaptorTestCase):
     """SSchedulingFence — scheduling barrier pseudo-instruction."""
 
@@ -3175,6 +3189,13 @@ class TestSSchedulingFence(AdaptorTestCase):
     def test_has_to_stinky_logical(self):
         inst = SSchedulingFence()
         self.assertTrue(callable(getattr(inst, "to_stinky_logical", None)))
+
+    def test_toString_emits_inst_name(self):
+        self.assertEqual(str(SSchedulingFence()), "scheduling_fence\n")
+        self.assertEqual(
+            str(SSchedulingFence(comment="barrier")),
+            "scheduling_fence                                   // barrier\n",
+        )
 
     @unittest.skipUnless(_STINKY_OK, "stinkytofu binding not built")
     def test_to_stinky_logical(self):
@@ -3251,6 +3272,67 @@ class TestIssueLatencyParity(AdaptorTestCase):
         self.assertEqual(
             mismatches, {},
             "issueLatency drift (class: native vs adapter): " + repr(mismatches),
+        )
+
+
+class TestMXMFMAAndSMFMAToString(AdaptorTestCase):
+    """``toString`` parity with rocisa ``MXMFMAInstruction`` / ``SMFMAInstruction``.
+
+    ``ENABLE_DEBUG_STINKYTOFU_ASM`` prints the rocisa module via ``str()``
+    after ``emitAssembly``. These classes previously fell through to the
+    abstract ``Instruction.toString``.
+    """
+
+    def test_mx_32x16_f4_has_no_matrix_fmt(self):
+        from rocisa_stinkytofu_adaptor.instruction import MXMFMAInstruction
+        acc = vgpr(0, 16)
+        a = vgpr(16, 16)
+        b = vgpr(32, 8)
+        mxsa = vgpr(40)
+        mxsb = vgpr(41)
+        inst = MXMFMAInstruction(
+            instType=InstType.INST_F4, accType=InstType.INST_F32,
+            variant=[32, 16, 128, 1], block=32,
+            acc=acc, a=a, b=b, acc2=acc, mxsa=mxsa, mxsb=mxsb,
+            comment="mx",
+        )
+        ops = ", ".join(x.toString() for x in (acc, a, b, acc, mxsa, mxsb))
+        self.assertEqual(str(inst), f"v_wmma_scale_f32_32x16x128_f4 {ops} // mx\n")
+        self.assertNotIn("matrix_", str(inst))
+
+    def test_mx_16x16_f4_emits_fmt_then_scale_modifiers(self):
+        from rocisa_stinkytofu_adaptor.instruction import MXMFMAInstruction
+        acc = vgpr(0, 8)
+        inst = MXMFMAInstruction(
+            instType=InstType.INST_F4, accType=InstType.INST_F32,
+            variant=[16, 16, 128, 1], block=16,
+            acc=acc, a=vgpr(8, 8), b=vgpr(16, 8), acc2=acc,
+            mxsa=vgpr(24), mxsb=vgpr(25),
+            mxScaleASel=2, mxScaleAType=InstType.INST_F8,
+            mxScaleBType=InstType.INST_E5M3,
+        )
+        text = inst.toString()
+        self.assertTrue(text.startswith("v_wmma_scale16_f32_16x16x128_f8f6f4 "))
+        self.assertIn(
+            " matrix_a_fmt:MATRIX_FMT_FP4 matrix_b_fmt:MATRIX_FMT_FP4"
+            " matrix_a_scale:2 matrix_a_scale_fmt:2 matrix_b_scale_fmt:1\n",
+            text,
+        )
+        self.assertEqual(str(inst), text)
+
+    def test_smfma_swmmac_or_smfmac_with_neg(self):
+        from rocisa_stinkytofu_adaptor.base import getAsmCaps
+        from rocisa_stinkytofu_adaptor.instruction import SMFMAInstruction
+        acc, a, b, meta = vgpr(0, 8), vgpr(8, 8), vgpr(16, 8), vgpr(24)
+        inst = SMFMAInstruction(
+            InstType.INST_F8, InstType.INST_F32, [16, 16, 128, 1], False,
+            acc, a, b, meta, neg=True, comment="sp",
+        )
+        name = "smfmac" if getAsmCaps().get("HasSMFMA", 0) else "swmmac"
+        ops = ", ".join(x.toString() for x in (acc, a, b, meta))
+        self.assertEqual(
+            str(inst),
+            f"v_{name}_f32_16x16x128_fp8_fp8 {ops} neg_lo:[1,1] // sp\n",
         )
 
 
