@@ -25,8 +25,18 @@
  *******************************************************************************/
 #pragma once
 
-#if HIP_PACKAGE_VERSION_FLAT < 7000000000ULL
-#ifdef MIOPEN_HIP_RUNTIME_COMPILE
+// Runtime compilation (MIOPEN_HIP_RUNTIME_COMPILE) may run where no host
+// C++ standard library is installed (for example the AMD Windows ROCm
+// wheels without an MSVC installation). Prefer the real <utility>
+// whenever it is reachable; otherwise fall back to the minimal
+// std::forward below so runtime-compiled kernels stay self-contained
+// (see miopen_type_traits.hpp for the coexistence rationale).
+#if defined(MIOPEN_HIP_RUNTIME_COMPILE) && !__has_include(<utility>)
+
+#if __has_include(<type_traits>)
+#error \
+    "inconsistent C++ standard library availability: <utility> is not reachable but <type_traits> is (a partial freestanding override on the include path?); provide a complete standard library (or none)"
+#endif
 
 #include "miopen_type_traits.hpp" // std::remove_reference
 
@@ -34,15 +44,11 @@ namespace std {
 
 template <typename T>
 constexpr T&& forward(typename remove_reference<T>::type& t_) noexcept
-{
-    return static_cast<T&&>(t_);
-}
+{ return static_cast<T&&>(t_); }
 
 template <typename T>
 constexpr T&& forward(typename remove_reference<T>::type&& t_) noexcept
-{
-    return static_cast<T&&>(t_);
-}
+{ return static_cast<T&&>(t_); }
 
 } // namespace std
 
@@ -50,7 +56,4 @@ constexpr T&& forward(typename remove_reference<T>::type&& t_) noexcept
 
 #include <utility>
 
-#endif
-#else
-#include <utility>
 #endif

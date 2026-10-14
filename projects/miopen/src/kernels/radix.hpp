@@ -27,9 +27,12 @@
 #ifndef GUARD_RADIX_H
 #define GUARD_RADIX_H
 
-#include <limits>
+#include "miopen_cstdint.hpp"     // int32_t, int64_t, uint32_t, uint64_t
+#include "miopen_type_traits.hpp" // std::is_same
 
 #ifndef MIOPEN_HIP_RUNTIME_COMPILE
+// Offline compilation needs these for __half and the bit-cast builtins;
+// runtime compilation preincludes the HIP declarations.
 #include <hip/hip_fp16.h>
 #include <hip/hip_runtime.h>
 #endif
@@ -64,11 +67,11 @@ __device__ inline Radix encode(DTYPE v)
     }
     else if constexpr(std::is_same<int32_t, DTYPE>::value)
     {
-        return static_cast<Radix>(std::numeric_limits<int32_t>::max()) + v + 1;
+        return static_cast<Radix>(__INT32_MAX__) + v + 1;
     }
     else if constexpr(std::is_same<int64_t, DTYPE>::value)
     {
-        return static_cast<Radix>(std::numeric_limits<int64_t>::max()) + v + 1;
+        return static_cast<Radix>(__INT64_MAX__) + v + 1;
     }
     // bfloat16 is passed as ushort in kernel
     else if constexpr(std::is_same<ushort, DTYPE>::value)
