@@ -546,8 +546,8 @@ class TestMask2DLevers:
         over = _LEVER_VARIANTS[variant]
         built = {}
 
-        def patched(problem):
-            spec = dataclasses.replace(orig(problem), **over)
+        def patched(problem, arch):
+            spec = dataclasses.replace(orig(problem, arch), **over)
             built["spec"] = spec
             return spec
 
@@ -556,7 +556,7 @@ class TestMask2DLevers:
         ref = P.run_reference(scenario, data)
         if variant != "base":
             try:
-                dataclasses.replace(orig(_problem_of(scenario, data)), **over)
+                dataclasses.replace(orig(_problem_of(scenario, data), "gfx950"), **over)
             except ValueError as exc:
                 pytest.skip(f"lever combination invalid: {exc}")
         out, _ = P._run_rocke(scenario, data, path="2d", warmup=0, attempts=1)
