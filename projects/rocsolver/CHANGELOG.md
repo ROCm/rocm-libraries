@@ -7,6 +7,7 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 
 ### Added
 
+
 * Hessenberg reduction routines
     * GEHD2
     * GEHRD
@@ -23,6 +24,7 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 * Improved performance of expert eigensolvers SYEVDX/HEEVDX, SYGVDX/HEGVDX
 
 ### Resolved issues
+* Improved kernel launches to detect invalid launch configuration.
 
 * Fixed sparse functions potentially not using the stream set in the handle.
 
