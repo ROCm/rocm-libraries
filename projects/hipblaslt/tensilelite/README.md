@@ -1,5 +1,14 @@
 # Tensilelite
 
+## Generate test cases for a packaged solution
+
+The [GEMM candidate API](tensilelite/Utilities/gemm_candidates/README.md) reads
+an installed library's metadata and generates a bounded list of problems for
+a chosen solution index, with ten cases by default. It provides inputs for
+`hipblaslt-bench` without loading the kernel generator or requiring a GPU. The
+guide explains the selection policy, runtime settings, and native validation
+needed to establish support and coverage.
+
 ## Building and Running Tests
 
 While full test suites can be run with a single `tox` command, developers may wish to

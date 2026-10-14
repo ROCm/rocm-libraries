@@ -1,0 +1,139 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+"""Read packaged solution records once, without constructing heuristic tables."""
+
+from collections.abc import Iterable, Mapping
+from dataclasses import dataclass, field
+from pathlib import Path
+from types import MappingProxyType
+
+import msgpack
+
+from ..LibraryIO import iterSolutionRecords
+from .models import GemmCase
+
+
+@dataclass(frozen=True, slots=True)
+class _Solution:
+    index: int
+    name: str
+    kernel_name: str
+    metadata_file: Path
+    problem: dict
+    predicate: dict
+    mapping: dict
+
+
+@dataclass(frozen=True, slots=True)
+class LibraryMetadata:
+    """An artifact's solution lookup, reusable across calls to ``candidate_gemms``.
+
+    ``indices`` contains the loaded indices in numeric order. Loading a subset
+    retains only those records; querying another index raises ``KeyError``.
+    No GPU, code objects or kernel-generator extension is needed to load it.
+    """
+
+    directory: Path
+    target: str
+    indices: tuple[int, ...]
+    _solutions: Mapping[int, _Solution] = field(repr=False)
+
+    def get_problems(
+        self,
+        solution_index: int,
+        number_of_problems: int = 10,
+        *,
+        seed: int = 1,
+        max_dimension: int = 8192,
+        max_data_bytes: int = 128 * 1024 * 1024,
+    ) -> list[GemmCase]:
+        """Select deterministic candidate problems from this loaded library.
+
+        Returns ten cases by default, or every candidate in the bounded
+        dimensional domain if that is smaller. ``number_of_problems`` changes
+        this budget. See ``candidate_gemms`` for the policy and the distinction
+        between candidates and native support.
+        ``seed`` selects reproducible epilogues and optional settings within
+        that count. The returned cases can be formatted for hipblaslt-bench.
+        """
+        from .candidates import candidate_gemms
+
+        return candidate_gemms(
+            self,
+            solution_index,
+            max_cases=number_of_problems,
+            seed=seed,
+            max_dimension=max_dimension,
+            max_data_bytes=max_data_bytes,
+        )
+
+
+def load_library_metadata(
+    library_dir: str | Path,
+    *,
+    target: str,
+    solution_indices: Iterable[int] | None = None,
+) -> LibraryMetadata:
+    """Load an index-to-solution lookup from ``*.dat`` / ``*.dat.zlib`` files.
+
+    ``library_dir`` may be the architecture directory or its parent. Compressed
+    shards take precedence over an uncompressed copy, matching native loading.
+    Indices are local to this library: aliases with distinct indices are kept,
+    while duplicate indices across shards are errors.
+
+    Pass ``solution_indices`` when probing a small part of a large library to
+    reduce retained memory. All shards are scanned once; subsequent candidate
+    calls perform no file I/O. An empty iterable loads an empty lookup.
+    """
+    directory = Path(library_dir).resolve()
+    if (directory / target).is_dir():
+        directory /= target
+    wanted = None
+    if solution_indices is not None:
+        wanted = set()
+        for index in solution_indices:
+            # Validate before hashing: bools and floats can equal an earlier int.
+            if type(index) is not int or index < 0:
+                raise ValueError("Solution indices must be nonnegative integers")
+            wanted.add(index)
+
+    shards = {
+        path.name.removesuffix(".zlib"): path
+        for path in sorted(directory.glob(f"*_{target}.dat*"))
+        if path.name.endswith((".dat", ".dat.zlib"))
+    }
+    if not shards:
+        raise ValueError(f"No {target} solution metadata in {directory}")
+
+    records, seen = {}, set()
+    shared = {}
+
+    def intern(value):
+        # Many indices share a problem type and predicates. These private
+        # records are read-only; keeping one copy reduces catalog memory.
+        return shared.setdefault(msgpack.packb(value, use_bin_type=True), value)
+
+    for path in shards.values():
+        for index, record in iterSolutionRecords(path, wanted):
+            if index in seen:
+                raise ValueError(f"{path}: duplicate solution index {index}")
+            seen.add(index)
+            if record is not None:
+                mapping = record["sizeMapping"]
+                records[index] = _Solution(
+                    index=index,
+                    name=record["name"],
+                    kernel_name=record["kernelName"],
+                    metadata_file=path,
+                    problem=intern(record["problemType"]),
+                    predicate=intern(record["problemPredicate"]),
+                    mapping={
+                        "macroTile": mapping["macroTile"],
+                        "depthU": mapping["depthU"],
+                        "globalSplitU": mapping["globalSplitU"],
+                        "tileProcessingStrategy": mapping.get("tileProcessingStrategy"),
+                    },
+                )
+    if wanted is not None and wanted - seen:
+        raise KeyError(f"Solution indices not found: {sorted(wanted - seen)}")
+    return LibraryMetadata(directory, target, tuple(sorted(records)), MappingProxyType(records))
