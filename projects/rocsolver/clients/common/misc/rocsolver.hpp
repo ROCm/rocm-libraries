@@ -46,6 +46,70 @@
 extern "C" {
 #endif
 
+rocblas_status rocsolver_sorghr(rocblas_handle handle,
+                                const rocblas_int n,
+                                const rocblas_int ilo,
+                                const rocblas_int ihi,
+                                float* A,
+                                const rocblas_int lda,
+                                float* tau);
+
+rocblas_status rocsolver_dorghr(rocblas_handle handle,
+                                const rocblas_int n,
+                                const rocblas_int ilo,
+                                const rocblas_int ihi,
+                                double* A,
+                                const rocblas_int lda,
+                                double* tau);
+
+rocblas_status rocsolver_cunghr(rocblas_handle handle,
+                                const rocblas_int n,
+                                const rocblas_int ilo,
+                                const rocblas_int ihi,
+                                rocblas_float_complex* A,
+                                const rocblas_int lda,
+                                rocblas_float_complex* tau);
+
+rocblas_status rocsolver_zunghr(rocblas_handle handle,
+                                const rocblas_int n,
+                                const rocblas_int ilo,
+                                const rocblas_int ihi,
+                                rocblas_double_complex* A,
+                                const rocblas_int lda,
+                                rocblas_double_complex* tau);
+
+rocblas_status rocsolver_sorghr_64(rocblas_handle handle,
+                                   const int64_t n,
+                                   const int64_t ilo,
+                                   const int64_t ihi,
+                                   float* A,
+                                   const int64_t lda,
+                                   float* tau);
+
+rocblas_status rocsolver_dorghr_64(rocblas_handle handle,
+                                   const int64_t n,
+                                   const int64_t ilo,
+                                   const int64_t ihi,
+                                   double* A,
+                                   const int64_t lda,
+                                   double* tau);
+
+rocblas_status rocsolver_cunghr_64(rocblas_handle handle,
+                                   const int64_t n,
+                                   const int64_t ilo,
+                                   const int64_t ihi,
+                                   rocblas_float_complex* A,
+                                   const int64_t lda,
+                                   rocblas_float_complex* tau);
+
+rocblas_status rocsolver_zunghr_64(rocblas_handle handle,
+                                   const int64_t n,
+                                   const int64_t ilo,
+                                   const int64_t ihi,
+                                   rocblas_double_complex* A,
+                                   const int64_t lda,
+                                   rocblas_double_complex* tau);
+
 rocblas_status rocsolver_slahr2(rocblas_handle handle,
                                 const rocblas_int n,
                                 const rocblas_int k,
@@ -3066,6 +3130,96 @@ inline rocblas_status rocsolver_labrd(rocblas_handle handle,
                                       rocblas_int ldy)
 {
     return rocsolver_zlabrd(handle, m, n, nb, A, lda, D, E, tauq, taup, X, ldx, Y, ldy);
+}
+/***************************************************************/
+
+/******************** ORGHR_UNGHR ********************/
+inline rocblas_status rocsolver_orghr_unghr(rocblas_handle handle,
+                                            rocblas_int n,
+                                            rocblas_int ilo,
+                                            rocblas_int ihi,
+                                            float* A,
+                                            rocblas_int lda,
+                                            float* tau)
+{
+    return rocsolver_sorghr(handle, n, ilo, ihi, A, lda, tau);
+}
+
+inline rocblas_status rocsolver_orghr_unghr(rocblas_handle handle,
+                                            rocblas_int n,
+                                            rocblas_int ilo,
+                                            rocblas_int ihi,
+                                            double* A,
+                                            rocblas_int lda,
+                                            double* tau)
+{
+    return rocsolver_dorghr(handle, n, ilo, ihi, A, lda, tau);
+}
+
+inline rocblas_status rocsolver_orghr_unghr(rocblas_handle handle,
+                                            rocblas_int n,
+                                            rocblas_int ilo,
+                                            rocblas_int ihi,
+                                            rocblas_float_complex* A,
+                                            rocblas_int lda,
+                                            rocblas_float_complex* tau)
+{
+    return rocsolver_cunghr(handle, n, ilo, ihi, A, lda, tau);
+}
+
+inline rocblas_status rocsolver_orghr_unghr(rocblas_handle handle,
+                                            rocblas_int n,
+                                            rocblas_int ilo,
+                                            rocblas_int ihi,
+                                            rocblas_double_complex* A,
+                                            rocblas_int lda,
+                                            rocblas_double_complex* tau)
+{
+    return rocsolver_zunghr(handle, n, ilo, ihi, A, lda, tau);
+}
+
+inline rocblas_status rocsolver_orghr_unghr(rocblas_handle handle,
+                                            int64_t n,
+                                            int64_t ilo,
+                                            int64_t ihi,
+                                            float* A,
+                                            int64_t lda,
+                                            float* tau)
+{
+    return rocsolver_sorghr_64(handle, n, ilo, ihi, A, lda, tau);
+}
+
+inline rocblas_status rocsolver_orghr_unghr(rocblas_handle handle,
+                                            int64_t n,
+                                            int64_t ilo,
+                                            int64_t ihi,
+                                            double* A,
+                                            int64_t lda,
+                                            double* tau)
+{
+    return rocsolver_dorghr_64(handle, n, ilo, ihi, A, lda, tau);
+}
+
+inline rocblas_status rocsolver_orghr_unghr(rocblas_handle handle,
+                                            int64_t n,
+                                            int64_t ilo,
+                                            int64_t ihi,
+                                            rocblas_float_complex* A,
+                                            int64_t lda,
+                                            rocblas_float_complex* tau)
+{
+    return rocsolver_cunghr_64(handle, n, ilo, ihi, A, lda, tau);
+}
+
+inline rocblas_status rocsolver_orghr_unghr(rocblas_handle handle,
+                                            int64_t n,
+                                            int64_t ilo,
+                                            int64_t ihi,
+                                            rocblas_double_complex* A,
+                                            int64_t lda,
+                                            rocblas_double_complex* tau)
+{
+    return rocsolver_zunghr_64(handle, n, ilo, ihi, A, lda, tau);
 }
 /***************************************************************/
 
