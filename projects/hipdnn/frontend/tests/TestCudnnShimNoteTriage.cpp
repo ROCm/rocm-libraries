@@ -528,7 +528,7 @@ TEST_F(TestCudnnShimNoteTriageBackend, DeselectEngineIndicesAfterPlanCreationBar
 // so plan 0 runs engine 20 and plan 1 runs engine 10; index 0 is engine 10 throughout.
 TEST_F(TestCudnnShimNoteTriageBackend, EngineIndicesFollowOneOrderAcrossHeuristicModes)
 {
-    installTwoEnginePlanMocks();
+    installRankedEnginePlanMocks();
     _policyOrderReversesRanking = true;
 
     fe::graph::Graph graph;
