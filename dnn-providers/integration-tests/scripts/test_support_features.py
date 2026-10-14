@@ -4923,13 +4923,7 @@ class TestReductionExtract:
         assert features == self.PLAIN - {"dtype:fp32"} | {expected}
 
     @pytest.mark.parametrize(
-        "dtype, y_dtype",
-        [
-            ("half", "float"),  # CPU reference
-            ("bfloat16", "float"),  # CPU reference
-            ("float", "half"),  # GPU reference only
-            ("half", "bfloat16"),  # GPU reference only
-        ],
+        "dtype, y_dtype", [("half", "float"), ("bfloat16", "float")]
     )
     def test_a_y_of_another_dtype_is_mixed_output(
         self, dtype: str, y_dtype: str
@@ -4945,6 +4939,24 @@ class TestReductionExtract:
         node, tensors = _red(dtype="half", y_dtype="float")
         tensors[port_uid]["virtual"] = True
         assert "precision:mixed_output" not in reduction.extract(node, tensors)
+
+    @pytest.mark.parametrize(
+        "dtype, y_dtype",
+        # Pairs the integration tests' GPU reference takes, but no plan.
+        [
+            ("float", "half"),
+            ("float", "bfloat16"),
+            ("half", "bfloat16"),
+            ("bfloat16", "half"),
+        ],
+    )
+    @pytest.mark.parametrize("virtual", [False, True])
+    def test_a_pair_the_cpu_reference_does_not_register_raises(
+        self, dtype: str, y_dtype: str, virtual: bool
+    ) -> None:
+        node, tensors = _red(dtype=dtype, y_dtype=y_dtype)
+        tensors[1]["virtual"] = virtual
+        self._raises(node, tensors, "has no plan")
 
     @pytest.mark.parametrize("uid, port", [(0, "in_tensor_uid"), (1, "out_tensor_uid")])
     @pytest.mark.parametrize("dtype", ["int8", "fp8_e4m3", "double", None])

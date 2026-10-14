@@ -9,8 +9,9 @@ the node, beside ``mode``, not under ``inputs`` and ``outputs``; its reader
 takes a missing ``is_deterministic`` as false. No provider implements the
 op, so the dtypes are those the CPU reference executor registers
 (``ReductionSignatureKey``): ``x`` in each float dtype, ``y`` in its dtype
-or fp32. The integration tests' GPU reference takes more pairs, and ranks
-up to 5. By group:
+or fp32. The integration tests' GPU reference takes more pairs, but it
+checks a result rather than computing one for a caller, so those raise. By
+group:
 
 - ``mode`` (exclusive): the reduction, by its serialized name.
 - ``dtype`` (exclusive): the dtype of ``x``.
@@ -29,8 +30,8 @@ up to 5. By group:
 
 The API requires ``x``, ``y`` and a ``mode`` other than ``NOT_SET``; and
 ``x`` and ``y`` of one rank, each dim of ``y`` that of ``x`` or 1, with at
-least one dim reduced. The CPU reference requires the same. A graph that
-breaks these raises.
+least one dim reduced. The CPU reference requires the same, and ``y`` in
+``x``'s dtype or fp32. A graph that breaks these raises.
 
 Every schema field drives a feature.
 """
@@ -109,6 +110,8 @@ def extract(node: dict, tensors_by_uid: dict) -> set[str]:
     dtype = layernorm.catalogued_dtype(x, X)
     features.add(f"dtype:{dtype}")
     y_dtype = layernorm.catalogued_dtype(y, Y)
+    if y_dtype not in (dtype, "fp32"):
+        raise FeatureError(f"{Y} dtype {y_dtype} with {X} {dtype} has no plan")
     if not x.get("virtual") and not y.get("virtual") and y_dtype != dtype:
         features.add("precision:mixed_output")
 
