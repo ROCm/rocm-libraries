@@ -919,21 +919,59 @@ def _apply_global(inst: Any, modifier: Any) -> None:
     )
 
 
-def _apply_mubuf(inst: Any, mubuf: Any) -> None:
-    """Forward the MUBUF fields the buffer factories currently pass through."""
+def _mubuf_vaddr_is_off(vaddr: Any) -> bool:
+    """True when vaddr is the MUBUF ``off`` keyword (``RegisterContainer.isOff``)."""
+    return bool(getattr(vaddr, "isOff", False))
+
+
+def _apply_mubuf(inst: Any, item: Any) -> None:
+    """Match ``buildMUBUFModifiersForBufferOp()``.
+
+    A buffer op always gets a modifier. With no rocisa ``mubuf`` the fields
+    stay at the C++ defaults, then a vaddr that is not ``off`` forces ``offen``.
+    ``lds`` and the three asm caps are passed through; they are no longer
+    hardcoded false inside ``set_mubuf``.
+    """
+    from .base import getAsmCaps  # noqa: WPS433
+
+    caps = getAsmCaps()
+    mubuf = getattr(item, "mubuf", None)
+    srcs = getattr(item, "srcs", None) or []
+    vaddr = srcs[0] if srcs else None
     if mubuf is None:
-        return
-    scope = getattr(mubuf, "scope", 0)
+        offen = False
+        offset = 0
+        glc = slc = nt = lds = is_store = False
+        scope = 0
+        th = -1
+        nv = 0
+    else:
+        offen = bool(getattr(mubuf, "offen", False))
+        offset = getattr(mubuf, "offset12", 0)
+        glc = bool(getattr(mubuf, "glc", False))
+        slc = bool(getattr(mubuf, "slc", False))
+        nt = bool(getattr(mubuf, "nt", False))
+        lds = bool(getattr(mubuf, "lds", False))
+        is_store = bool(getattr(mubuf, "isStore", False))
+        scope = int(_mubuf_enum_int(getattr(mubuf, "scope", 0)))
+        th = int(_mubuf_enum_int(getattr(mubuf, "th", -1), -1))
+        nv = int(_mubuf_enum_int(getattr(mubuf, "nv", 0)))
+    if not offen and not _mubuf_vaddr_is_off(vaddr):
+        offen = True
     inst.set_mubuf(
-        offen=getattr(mubuf, "offen", False),
-        offset=getattr(mubuf, "offset12", 0),
-        glc=getattr(mubuf, "glc", False),
-        slc=getattr(mubuf, "slc", False),
-        nt=getattr(mubuf, "nt", False),
-        scope=scope if isinstance(scope, int) else scope.value,
-        th=int(getattr(mubuf, "th", -1)),
-        is_store=getattr(mubuf, "isStore", False),
-        nv=_mubuf_enum_int(getattr(mubuf, "nv", 0)),
+        offen=offen,
+        offset=offset,
+        glc=glc,
+        slc=slc,
+        nt=nt,
+        lds=lds,
+        is_store=is_store,
+        scope=scope,
+        th=th,
+        nv=nv,
+        has_mubuf_const=bool(caps.get("HasMUBUFConst", 0)),
+        has_glc_modifier=bool(caps.get("HasGLCModifier", 0)),
+        has_sc0_modifier=bool(caps.get("HasSC0Modifier", 0)),
     )
 
 
@@ -983,7 +1021,7 @@ def _apply_modifiers(item: Any, logical: Any) -> Any:
     if "global_scope" in mods:
         logical.set_global(scope=int(item.scope))
     if "mubuf" in mods:
-        _apply_mubuf(logical, getattr(item, "mubuf", None))
+        _apply_mubuf(logical, item)
     if "ds" in mods or "ds_full" in mods:
         _apply_ds(logical, getattr(item, "ds", None))
     return logical

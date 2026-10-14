@@ -3458,5 +3458,90 @@ class TestDsForwarding(AdaptorTestCase):
         logical.set_ds.assert_not_called()
 
 
+class TestMubufForwarding(AdaptorTestCase):
+    """Buffer ops match buildMUBUFModifiersForBufferOp()."""
+
+    _CAPS = {"HasMUBUFConst": 0, "HasGLCModifier": 1, "HasSC0Modifier": 0}
+
+    def _lower(self, inst, factory_name):
+        logical = unittest.mock.Mock()
+        fake_st = unittest.mock.Mock()
+        setattr(fake_st, factory_name, unittest.mock.Mock(return_value=logical))
+        fake_st.Register = lambda name: name
+        with unittest.mock.patch.dict(sys.modules, {"stinkytofu": fake_st}), \
+             unittest.mock.patch(
+                 "rocisa_stinkytofu_adaptor.instruction._to_stinky_register",
+                 side_effect=lambda arg: arg,
+             ), \
+             unittest.mock.patch(
+                 "rocisa_stinkytofu_adaptor.base.getAsmCaps",
+                 return_value=self._CAPS,
+             ):
+            out = inst.to_stinky_logical()
+        self.assertIs(out, logical)
+        return logical.set_mubuf.call_args.kwargs
+
+    def test_missing_mubuf_still_sets_offen_for_real_vaddr(self):
+        kwargs = self._lower(
+            BufferLoadB32(dst=vgpr(0), vaddr=vgpr(1), saddr=sgpr(0, 4), soffset=0),
+            "BufferLoadB32",
+        )
+        self.assertEqual(kwargs["offen"], True)
+        self.assertEqual(kwargs["offset"], 0)
+        self.assertEqual(kwargs["lds"], False)
+        self.assertEqual(kwargs["is_store"], False)
+        self.assertEqual(kwargs["scope"], 0)
+        self.assertEqual(kwargs["th"], -1)
+        self.assertEqual(kwargs["nv"], 0)
+        self.assertEqual(kwargs["has_mubuf_const"], False)
+        self.assertEqual(kwargs["has_glc_modifier"], True)
+        self.assertEqual(kwargs["has_sc0_modifier"], False)
+
+    def test_off_vaddr_keeps_offen_clear(self):
+        kwargs = self._lower(
+            BufferStoreB32(
+                src=vgpr(0), vaddr=vgpr("v1", isOff=True), saddr=sgpr(0, 4), soffset=0,
+            ),
+            "BufferStoreB32",
+        )
+        self.assertEqual(kwargs["offen"], False)
+        self.assertEqual(kwargs["is_store"], False)
+
+    def test_explicit_modifier_forwards_lds_and_keeps_offen(self):
+        mubuf = MUBUFModifiers(
+            offen=False, offset12=12, glc=True, slc=True, nt=True, lds=True,
+            isStore=True, scope=CacheScope.SCOPE_CU, th=TemporalHint.TH_NT,
+            nv=NonVolatile.NV,
+        )
+        kwargs = self._lower(
+            BufferStoreB32(
+                src=vgpr(0), vaddr=vgpr("v1", isOff=True), saddr=sgpr(0, 4),
+                soffset=sgpr(2), mubuf=mubuf,
+            ),
+            "BufferStoreB32",
+        )
+        self.assertEqual(kwargs["offen"], False)
+        self.assertEqual(kwargs["offset"], 12)
+        self.assertEqual(kwargs["glc"], True)
+        self.assertEqual(kwargs["slc"], True)
+        self.assertEqual(kwargs["nt"], True)
+        self.assertEqual(kwargs["lds"], True)
+        self.assertEqual(kwargs["is_store"], True)
+        self.assertEqual(kwargs["scope"], int(CacheScope.SCOPE_CU))
+        self.assertEqual(kwargs["th"], int(TemporalHint.TH_NT))
+        self.assertEqual(kwargs["nv"], int(NonVolatile.NV))
+
+    def test_real_vaddr_forces_offen_when_modifier_leaves_it_clear(self):
+        kwargs = self._lower(
+            BufferLoadB32(
+                dst=vgpr(0), vaddr=vgpr(1), saddr=sgpr(0, 4), soffset=0,
+                mubuf=MUBUFModifiers(offen=False, lds=True),
+            ),
+            "BufferLoadB32",
+        )
+        self.assertEqual(kwargs["offen"], True)
+        self.assertEqual(kwargs["lds"], True)
+
+
 if __name__ == "__main__":
     unittest.main()
