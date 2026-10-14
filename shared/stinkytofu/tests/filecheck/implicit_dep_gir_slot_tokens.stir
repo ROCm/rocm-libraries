@@ -10,6 +10,10 @@
 
 st.metadata "gir.frame_contract" {
 gir-frame-contract
+
+gen 300  ring=2 entry=0
+incoming  dst=301 src=300 gen=300 value=0
+incoming  dst=301 src=301 gen=300 value=1 relative=1
 }
 
 st.func @gir_slot_tokens_separate_buffers() {
@@ -17,4 +21,28 @@ st.func @gir_slot_tokens_separate_buffers() {
   v[0:1] = "st.ds_load_b64"(v10) { mod.ds = { na = 1, offset = 0, gds = false }, mod.gir_action = { action = 0, anchor = 0, kind = read, access0_write = 0, access0_operand = 0, access0_ring = 2, access0_abs = 0 } }
   "st.tensor_load_to_lds"(s[0:3], s[10:17]) { mod.gir_action = { action = 1, anchor = 1, kind = copy, access0_write = 1, access0_operand = 0, access0_ring = 2, access0_abs = 0 } }
   v[2:3] = "st.ds_load_b64"(v11) { mod.ds = { na = 1, offset = 0, gds = false }, mod.gir_action = { action = 2, anchor = 2, kind = read, access0_write = 0, access0_operand = 1, access0_ring = 2, access0_abs = 0 } }
+}
+
+#
+# A rotating ring: in every trip the copy writes one buffer and the read consumes the OTHER
+# (`gdelta=1`), so they never meet in a frame and must not share a pseudo-register even though
+# both walk the same ring.  The prologue copy is the same buffer as the first trip's copy.
+#
+# CHECK-LABEL: @gir_slot_tokens_rotating_ring
+# CHECK: LDS0 = "st.tensor_load_to_lds"(s[0:3]
+# CHECK: ^loop:
+# CHECK-NEXT: LDS0 = "st.tensor_load_to_lds"(s[4:7]
+# CHECK-NEXT: "st.ds_load_b64"(v10, LDS1)
+
+st.func @gir_slot_tokens_rotating_ring() {
+^entry:
+  "st.tensor_load_to_lds"(s[0:3], s[10:17]) { mod.gir_action = { action = 300, anchor = 300, kind = copy, access0_write = 1, access0_operand = 0, access0_ring = 2, access0_abs = 0 } }
+  "st.s_branch"("loop")
+  Successors: ^loop
+^loop:
+  "st.tensor_load_to_lds"(s[4:7], s[10:17]) { mod.gir_action = { action = 301, anchor = 301, kind = copy, access0_write = 1, access0_operand = 0, access0_ring = 2, access0_gen = 300 } }
+  v[0:1] = "st.ds_load_b64"(v10) { mod.ds = { na = 1, offset = 0, gds = false }, mod.gir_action = { action = 302, anchor = 301, kind = read, access0_write = 0, access0_operand = 0, access0_ring = 2, access0_gen = 300, access0_gdelta = 1 } }
+  "st.s_cbranch_scc1"("loop", SCC0)
+  Successors: ^loop, ^exit
+^exit:
 }
