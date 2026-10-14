@@ -68,7 +68,11 @@ const vector<vector<int>> matrix_size_range = {
     {20, 15, 20},
     {35, 35, 50},
     {60, 300, 64},
-    {1500, 40, 1500}};
+    {1500, 40, 1500},
+    // few rows or few columns
+    {2, 5000, 2},
+    {700, 1, 700},
+    {3000, 3, 3010}};
 
 const vector<vector<int64_t>> matrix_size_range_64 = {
     // quick return
@@ -84,7 +88,11 @@ const vector<vector<int64_t>> matrix_size_range_64 = {
     {20, 15, 20},
     {35, 35, 50},
     {60, 300, 64},
-    {1500, 40, 1500}};
+    {1500, 40, 1500},
+    // few rows or few columns
+    {2, 5000, 2},
+    {700, 1, 700},
+    {3000, 3, 3010}};
 
 // for daily_lapack tests
 // (the 1 x 2^24 matrix has enough entries for the sum of squares of the 'T' case to overflow in
