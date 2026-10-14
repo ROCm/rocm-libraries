@@ -300,16 +300,18 @@ class TestFp8DenseGuards(unittest.TestCase):
                     req, spec, {"q": None, "k": bf16, "v": bf16, "out": None}
                 )
 
-    def test_supports_rejects_fp8_with_sinks_or_non_bf16(self):
+    def test_supports_accepts_fp8_bf16_and_fp16_but_rejects_sinks(self):
         from kernels.gfx950.attention_dense import supports_attention_dense
 
         ks = self._fp8_grid_spec()[1].kernel_spec
+        # bf16 and fp16 compute are both valid with fp8 KV (AICK-1932 fp16 output).
         self.assertTrue(supports_attention_dense(ks, arch="gfx950")[0])
+        self.assertTrue(
+            supports_attention_dense(replace(ks, dtype="fp16"), arch="gfx950")[0]
+        )
+        # Sinks on dense are a separate ticket; the fp8 loader has no sink path.
         self.assertFalse(
             supports_attention_dense(replace(ks, use_sinks=True), arch="gfx950")[0]
-        )
-        self.assertFalse(
-            supports_attention_dense(replace(ks, dtype="fp16"), arch="gfx950")[0]
         )
 
     def test_gfx942_dense_rejects_fp8_storage(self):
@@ -323,3 +325,27 @@ class TestFp8DenseGuards(unittest.TestCase):
     def test_fnuz_fp8_request_is_rejected_on_gfx950(self):
         with self.assertRaisesRegex(ValueError, "OCP|FNUZ"):
             attention_tuning_spec(self._fp8_req(fp8_fnuz=True), "gfx950_dense_grid")
+
+    def test_runner_rejects_bf16_kv_for_an_fp8_spec(self):
+        # The binding guard only covers dispatch callers; a direct call to the
+        # runner must reject a bf16 (or FNUZ) K/V for an fp8 spec too, before any
+        # launch -- otherwise the OCP-declared pointers read the wrong encoding.
+        try:
+            import torch
+        except ImportError:
+            self.skipTest("torch required")
+        from kernels.gfx950.attention_dense import run_attention_dense_torch
+
+        spec = self._fp8_grid_spec()[1].kernel_spec
+        bf16 = torch.zeros(1, 512, 4, 64, dtype=torch.bfloat16)
+        with self.assertRaisesRegex(ValueError, "fp8"):
+            run_attention_dense_torch(
+                spec=spec,
+                q=bf16,
+                k=bf16,
+                v=bf16,
+                out=bf16,
+                scale=0.125,
+                k_scale=0.5,
+                v_scale=0.5,
+            )
