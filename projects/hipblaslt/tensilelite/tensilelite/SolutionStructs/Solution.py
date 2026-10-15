@@ -1183,6 +1183,10 @@ class Solution(collections.abc.Mapping):
       isa = state["ISA"]
       if isaInfoMap[isa].asmCaps.get("HasMFMA", False):
         state["UseMFMAF32XEmulation"] = True # MFMA version for gfx950 etc.
+      # F32X emulation Inf handling (v_cmp_class inf guard so inf*inf -> inf, not
+      # nan) is driven by the F32XEmulationInfSupport hardware capability
+      # (on for gfx1250+, off for gfx950), not a kernel parameter -- it changes
+      # the numerical result, so it must be consistent per platform.
 
     state["MfmaInitCVgprs"] = False
 
@@ -2615,7 +2619,7 @@ class Solution(collections.abc.Mapping):
          and state["_ScheduleIterAlg"] == 3:
         reject(state, printRejectionReason, "Complex WMMA de-interleave does not support ScheduleIterAlg=3")
         return
-      if state["InterleaveAlpha"]:
+      if state["InterleaveAlpha"] == 1:
         reject(state, printRejectionReason, "Matrix instruction doesn't support InterleaveAlpha")
         return
       if state["ProblemType"]["DataType"].isInt8():
@@ -3462,6 +3466,11 @@ class Solution(collections.abc.Mapping):
     # each DepthU attempt should start from the original auto-derived VW.
     _savedVWA = state["VectorWidthA"]
     _savedVWB = state["VectorWidthB"]
+
+    halfPLR: int = state["HalfPLR"]
+    state["HalfPLRA"] = bool(halfPLR & 0x01)
+    state["HalfPLRB"] = bool(halfPLR & 0x02)
+
     while True:
       for backup in backupValues:
         state[backup[0]] = backup[1]
@@ -3491,66 +3500,20 @@ class Solution(collections.abc.Mapping):
     if "ValidDepthU" in state:
       del state["ValidDepthU"]
 
-    halfPLR: int = state["HalfPLR"]
-    state["HalfPLRA"] = bool(halfPLR & 0x01)
-    state["HalfPLRB"] = bool(halfPLR & 0x02)
-    if state["HalfPLR"]:
-      state["ClusterLocalRead"] = 0
-      state["SuppressNoLoadLoop"] = True
-      state["ExpandPointerSwap"] = False
-      if state.get("PrefetchAcrossPersistent", 0):
-        if not isPersistentDataParallel(state):
-          reject(state, printRejectionReason, "HalfPLR + PrefetchAcrossPersistent requires DataParallel/StaticGrid")
-          return
-      # The subtile main loop ignores SuppressNoLoadLoop, which HalfPLR forces;
-      # the HalfPLR tail fixup lives only in the legacy calculateLoopNumIter path.
-      if state["UseSubtileImpl"]:
-        reject(state, printRejectionReason, "HalfPLR is not supported with UseSubtileImpl (subtile main loop does not honor SuppressNoLoadLoop)")
-        return
-      if state["PrefetchLocalRead"] != 1:
-        reject(state, printRejectionReason, "Need to set PrefetchLocalRead = 1 as it shares some common logic with HalfPLR")
-        return
-      if state["PrefetchGlobalRead"] == 0:
-        reject(state, printRejectionReason, "HalfPLR only supports PGR > 0")
-        return
-      if not (state["enableTDMA"] and state["enableTDMB"]):
-        reject(state, printRejectionReason, "HalfPLR only supports TDMInst")
-        return
-      if (state["HalfPLRA"] and (state["MIWaveTileA"] % 2 != 0)) or \
-        (state["HalfPLRB"] and (state["MIWaveTileB"] % 2 != 0)):
-        reject(state, printRejectionReason, "HalfPLR does not support odd WaveTile")
-        return
-      if not state["EnableMatrixInstruction"]:
-        reject(state, printRejectionReason, "Currently HalfPLR only supports MatrixInstruction")
-        return
-      if state["_ScheduleIterAlg"] != 0:
-        reject(state, printRejectionReason, "Currently HalfPLR only supports SIA = 0 or 4")
-        return
-      # SIA=4 is remapped to _ScheduleIterAlg=0 + _StinkyTofuOptLevel=3, so both
-      # SIA=0 and SIA=4 pass the check above. On StreamK, HalfPLR requires the
-      # StinkyTofu backend (SIA=4); plain SIA=0 is only allowed for non-StreamK.
-      if isPersistent(state) and state["ScheduleIterAlg"] != 4:
-        reject(state, printRejectionReason, "HalfPLR with persistence requires ScheduleIterAlg = 4 (StinkyTofu)")
-        return
-      if (state["HalfPLRA"] and not (state["UnrollMajorLDSA"] or state["enableLDSTrA"])) or \
-        (state["HalfPLRB"] and not (state["UnrollMajorLDSB"] or state["enableLDSTrB"])):
-        reject(state, printRejectionReason, "Currently HalfPLR does not support packing (need UnrollMajorLDS or use LDSTrInst)")
-        return
-      if state["InnerUnroll"] != 1:
-        reject(state, printRejectionReason, "Currently HalfPLR only supports InnerUnroll = 1")
-        return
-      if state["ConvertAfterDS"]:
-        reject(state, printRejectionReason, "Currently HalfPLR does not support ConvertAfterDS")
-        return
-      if state["UseF32XEmulation"]:
-        reject(state, printRejectionReason, "Currently HalfPLR does not support UseF32XEmulation")
-        return
-
     if state["UseDirect32XEmulation"] == True:
       #   Turn off Direct32X for the following kernels:
       #   Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT16x16x512_MI16x16x1
       if (state["MacroTile0"] == 16 and state["MacroTile1"] == 16 and state["DepthU"] == 512):
         state["UseDirect32XEmulation"] = False
+
+    # workaround for TF32 Emu Inf support:
+    # disable CMS only when the Inf-guard is actually active (its pack-path
+    # instruction scheduling is not yet handled under CMS). The guard is active
+    # when F32X emulation is on AND the arch advertises F32XEmulationInfSupport
+    # (gfx1250+); on gfx950 (cap off) CMS is left untouched.
+    # TODO: re-enable CMS with Inf support
+    if state["UseF32XEmulation"] and isaInfoMap[state["ISA"]].archCaps.get("F32XEmulationInfSupport", False):
+      state["UseCustomMainLoopSchedule"] = 0
 
     # backup UsePLRPack from yaml before calling hasCustomSchedule
     backup_UsePLRPack = state["UsePLRPack"]
@@ -3649,7 +3612,7 @@ class Solution(collections.abc.Mapping):
         "ScheduleGlobalRead": state["ScheduleGlobalRead"] == 1,
         "ScheduleLocalWrite": state["ScheduleLocalWrite"] == 1,
         "GlobalReadPerMfma": state["GlobalReadPerMfma"] == 1,
-        "InterleaveAlpha": not state["InterleaveAlpha"],
+        "InterleaveAlpha": state["InterleaveAlpha"] != 1,
         "DirectToLds": not state["DirectToLds"],
         "UseSgprForGRO": state["UseSgprForGRO"] == -1,
         "UseInstOffsetForGRO": not state["UseInstOffsetForGRO"],
@@ -4535,6 +4498,11 @@ class Solution(collections.abc.Mapping):
               if (state["DepthU"] // state["MatrixInstK"] <= state["LocalReadVectorWidthA"] // state["MIInputPerThreadA"]):
                 # if only have 1 iteration with wider local read, reduce LRVW to have better scheduling (at least 2 iterations)
                 state["LocalReadVectorWidthA"] //= 2
+            # HalfPLR has room for one local-read iteration in each of its
+            # two active half-blocks; do not coalesce multiple iterations.
+            if state["HalfPLR"] & 0x01:
+              state["LocalReadVectorWidthA"] = min(
+                state["LocalReadVectorWidthA"], state["MIInputPerThreadA"])
 
           # Default LocalReadVectorWidth
           autoLRVWB = False
@@ -4571,6 +4539,10 @@ class Solution(collections.abc.Mapping):
               if (state["DepthU"] // state["MatrixInstK"] <= state["LocalReadVectorWidthB"] // state["MIInputPerThreadB"]):
                 # if only have 1 iteration with wider local read, reduce LRVW to have better scheduling (at least 2 iterations)
                 state["LocalReadVectorWidthB"] //= 2
+            # See the HalfPLR A-side restriction above.
+            if state["HalfPLR"] & 0x02:
+              state["LocalReadVectorWidthB"] = min(
+                state["LocalReadVectorWidthB"], state["MIInputPerThreadB"])
 
           if autoLRVWA or autoLRVWB:
             wlrA = max(state["LocalReadVectorWidthA"] // state["MIInputPerThread"], 1)
@@ -4604,6 +4576,11 @@ class Solution(collections.abc.Mapping):
               state["LocalReadVectorWidthA"] = wlrB * state["MIInputPerThreadA"]
             if wlrA < wlrB:
               state["LocalReadVectorWidthB"] = wlrA * state["MIInputPerThreadB"]
+          elif isaInfoMap[isa].asmCaps["HasWMMA_V3"]:
+            lrBytesA = state["LocalReadVectorWidthA"] * state["ProblemType"]["MacDataTypeA"].numBytes()
+            lrBytesB = state["LocalReadVectorWidthB"] * state["ProblemType"]["MacDataTypeB"].numBytes()
+            if lrBytesA != lrBytesB:
+              reject(state, printRejectionReason, f"gfx1250 requires LocalReadVectorWidthA/B to read the same bytes, actual: {lrBytesA:g}/{lrBytesB:g}")
 
           if state["ProblemType"]["Sparse"] == 1:
             state["LocalReadVectorWidthMetadata"] = state["LocalReadVectorWidthA"]
@@ -4721,6 +4698,20 @@ class Solution(collections.abc.Mapping):
       if not _validateMXLocalReadWidth(
           state, isaInfoMap[isa].asmCaps, printRejectionReason):
         return
+
+      # An explicitly wide local read cannot be reduced by the auto-width
+      # derivation above. Reject it before getHalfPLRValuStr indexes beyond the
+      # two active rotating groups. MIInputPerThread* is only derived for
+      # matrix instruction kernels.
+      if state["EnableMatrixInstruction"]:
+        for tc in ("A", "B"):
+          lrvw = state[f"LocalReadVectorWidth{tc}"]
+          miInput = state[f"MIInputPerThread{tc}"]
+          if state[f"HalfPLR{tc}"] and lrvw > miInput:
+            reject(state, printRejectionReason,
+                   f"HalfPLR{tc} does not support coalesced local reads "
+                   f"(LocalReadVectorWidth{tc}={lrvw} > MIInputPerThread{tc}={miInput})")
+            return
 
       def calcOptGRVW(lrvw: int, unrollMajorLDS: bool, datatype: DataType) -> int:
         # with UnrollMajorLDS, GRVW need to less or equal than LRVW to have conflict free LDS read with padding.
@@ -7015,6 +7006,62 @@ class Solution(collections.abc.Mapping):
       if state["ProblemType"]["TLUA"] and state["ProblemType"]["TLUB"]:
           # TODO: Now in rocBLAS, lot of logic yamls are Type=NT and TLDS=1? Why aren't they rejected and how to get rid of them?
           reject(state, printRejectionReason, "TransposeLds requires TLUA=0 or TLUB=0")
+
+    # HalfPLR forces ClusterLocalRead=0. That has to land before the wider
+    # local-read check below, which treats ClusterLocalRead as a legal way to
+    # support LocalReadVectorWidth > MIInputPerThread.
+    if state["HalfPLR"]:
+      state["ClusterLocalRead"] = 0
+      state["SuppressNoLoadLoop"] = True
+      state["ExpandPointerSwap"] = False
+      if state.get("PrefetchAcrossPersistent", 0):
+        if not isPersistentDataParallel(state):
+          reject(state, printRejectionReason, "HalfPLR + PrefetchAcrossPersistent requires DataParallel/StaticGrid")
+          return
+      # The subtile main loop ignores SuppressNoLoadLoop, which HalfPLR forces;
+      # the HalfPLR tail fixup lives only in the legacy calculateLoopNumIter path.
+      if state["UseSubtileImpl"]:
+        reject(state, printRejectionReason, "HalfPLR is not supported with UseSubtileImpl (subtile main loop does not honor SuppressNoLoadLoop)")
+        return
+      if state["PrefetchLocalRead"] != 1:
+        reject(state, printRejectionReason, "Need to set PrefetchLocalRead = 1 as it shares some common logic with HalfPLR")
+        return
+      if state["PrefetchGlobalRead"] == 0:
+        reject(state, printRejectionReason, "HalfPLR only supports PGR > 0")
+        return
+      if not (state["enableTDMA"] and state["enableTDMB"]):
+        reject(state, printRejectionReason, "HalfPLR only supports TDMInst")
+        return
+      if (state["HalfPLRA"] and (state["MIWaveTileA"] % 2 != 0)) or \
+        (state["HalfPLRB"] and (state["MIWaveTileB"] % 2 != 0)):
+        reject(state, printRejectionReason, "HalfPLR does not support odd WaveTile")
+        return
+      if not state["EnableMatrixInstruction"]:
+        reject(state, printRejectionReason, "Currently HalfPLR only supports MatrixInstruction")
+        return
+      if state["_ScheduleIterAlg"] != 0:
+        reject(state, printRejectionReason, "Currently HalfPLR only supports SIA = 0 or 4")
+        return
+      # SIA=4 is remapped to _ScheduleIterAlg=0 + _StinkyTofuOptLevel=3, so both
+      # SIA=0 and SIA=4 pass the check above. On StreamK, HalfPLR requires the
+      # StinkyTofu backend (SIA=4); plain SIA=0 is only allowed for non-StreamK.
+      if isPersistent(state) and state["ScheduleIterAlg"] != 4:
+        reject(state, printRejectionReason, "HalfPLR with persistence requires ScheduleIterAlg = 4 (StinkyTofu)")
+        return
+      if (state["HalfPLRA"] and not (state["UnrollMajorLDSA"] or state["enableLDSTrA"])) or \
+        (state["HalfPLRB"] and not (state["UnrollMajorLDSB"] or state["enableLDSTrB"])):
+        reject(state, printRejectionReason, "Currently HalfPLR does not support packing (need UnrollMajorLDS or use LDSTrInst)")
+        return
+      if state["InnerUnroll"] != 1:
+        reject(state, printRejectionReason, "Currently HalfPLR only supports InnerUnroll = 1")
+        return
+      if state["ConvertAfterDS"]:
+        reject(state, printRejectionReason, "Currently HalfPLR does not support ConvertAfterDS")
+        return
+      if state["UseF32XEmulation"]:
+        reject(state, printRejectionReason, "Currently HalfPLR does not support UseF32XEmulation")
+        return
+
     if state["EnableMatrixInstruction"]:
       # enable widerLocalRead
       if state["LocalReadVectorWidthA"] > state["MIInputPerThreadA"]:

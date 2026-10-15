@@ -21,11 +21,17 @@
 # The external hipdnn_integration_tests bundle binary is categorized by each
 # provider's test_categories_integration.yaml, not this file.
 #
-# The "comprehensive" and "full" tiers are commented out below: the
-# corresponding Comprehensive*/Full* GTest cases require ROCm-side (rock)
-# changes that haven't landed yet and would fail without them. Uncomment the
-# category blocks, their cascading labels in quick/standard, and their
-# category_timeouts entries once those changes land.
+# The "comprehensive" and "full" tiers select ONLY the lowercase bundle-named
+# golden-data tests ("comprehensive_*", "full_*"): the PascalCase
+# Comprehensive*/Full* GTest cases require ROCm-side (rock) changes that haven't
+# landed yet and would fail without them, so they stay out of every category
+# (they are still excluded from the quick catch-all). Add "Comprehensive*" /
+# "Full*" to those two blocks once those changes land.
+# Tiers cascade through labels: quick carries quick+standard+comprehensive+full,
+# standard carries standard+comprehensive+full, comprehensive carries
+# comprehensive+full, so `ctest -L standard` selects quick + standard,
+# `ctest -L comprehensive` selects quick + standard + comprehensive and
+# `ctest -L full` selects everything.
 test_categories:
   quick:
     description: "Smoke/quick GPU reference cases plus all framework unit tests (catch-all: everything not Standard/Comprehensive/Full)"
@@ -42,8 +48,8 @@ test_categories:
     labels:
       - "quick"
       - "standard"
-      # - "comprehensive"  # disabled: see header comment
-      # - "full"           # disabled: see header comment
+      - "comprehensive"
+      - "full"
 
   standard:
     description: "Standard-tier GPU reference cases"
@@ -54,32 +60,30 @@ test_categories:
       - "*DISABLED*"
     labels:
       - "standard"
-      # - "comprehensive"  # disabled: see header comment
-      # - "full"           # disabled: see header comment
+      - "comprehensive"
+      - "full"
       - "slow"
 
-  # comprehensive:
-  #   description: "Comprehensive-tier GPU reference cases"
-  #   test_patterns:
-  #     - "Comprehensive*"
-  #     - "comprehensive_*"
-  #   exclude:
-  #     - "*DISABLED*"
-  #   labels:
-  #     - "comprehensive"
-  #     - "full"
-  #     - "slow"
+  comprehensive:
+    description: "Comprehensive-tier golden-data bundle cases (PascalCase Comprehensive* GPU reference cases still disabled: see header comment)"
+    test_patterns:
+      - "comprehensive_*"
+    exclude:
+      - "*DISABLED*"
+    labels:
+      - "comprehensive"
+      - "full"
+      - "slow"
 
-  # full:
-  #   description: "Full-tier GPU reference cases"
-  #   test_patterns:
-  #     - "Full*"
-  #     - "full_*"
-  #   exclude:
-  #     - "*DISABLED*"
-  #   labels:
-  #     - "full"
-  #     - "slow"
+  full:
+    description: "Full-tier golden-data bundle cases (PascalCase Full* GPU reference cases still disabled: see header comment)"
+    test_patterns:
+      - "full_*"
+    exclude:
+      - "*DISABLED*"
+    labels:
+      - "full"
+      - "slow"
 
   ffm-quick:
     description: "Fast-feedback mechanism (FFM) quick tier - currently mirrors the quick tier"
@@ -103,6 +107,6 @@ execution_settings:
   category_timeouts:
     quick: 600            # 10 minutes (was add_tiered_test_target SMOKE_TIMEOUT default)
     standard: 1800        # 30 minutes
+    comprehensive: 3600   # 60 minutes
+    full: 7200            # 120 minutes
     ffm-quick: 7200       # 2 hours
-    # comprehensive: 3600   # 60 minutes (disabled: see header comment)
-    # full: 7200            # 120 minutes (disabled: see header comment)

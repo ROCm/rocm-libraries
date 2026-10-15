@@ -437,6 +437,8 @@ if(ROCKE_INSTALL_TESTS)
     # prefix on each, matching the other installed tests.
     set(_ROCKE_LIBRARY_CONV_TEST_RELPATHS
         "tests/library/tests/dispatch/test_grouped_conv_wgrad_dispatch.py"
+        "tests/library/tests/test_conv_wgrad_streamk.py"
+        "tests/library/tests/test_streamk_sweep_launch.py"
         "tests/library/tests/test_conv_build_signatures.py"
         "tests/library/tests/test_builder_signature_contract.py"
         "tests/library/tests/test_library_layering.py")
@@ -495,6 +497,7 @@ if(ROCKE_INSTALL_TESTS)
     set(_ROCKE_LIBRARY_GPU_TEST_RELPATHS
         "tests/library/tests/test_conv_fwd_correctness.py"
         "tests/library/tests/test_conv_wgrad_correctness.py"
+        "tests/library/tests/test_conv_wgrad_streamk_gpu.py"
         "tests/library/tests/test_conv_dgrad_correctness.py"
         "tests/library/tests/test_direct_conv_correctness.py"
         "tests/library/tests/test_attention_dense_gfx942_numeric.py"
@@ -503,6 +506,8 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_dtype_dispatch.py"
         "tests/library/tests/test_extended_parity_attention.py"
         "tests/library/tests/test_gdn_decode_gfx950_numeric.py"
+        "tests/library/tests/test_gdn_decode_fused_gfx950_numeric.py"
+        "tests/library/tests/test_kda_decode_gfx950_numeric.py"
         "tests/library/tests/test_gfx1250_attention.py"
         "tests/library/tests/test_gfx942_gqa_head_fold_numeric.py"
         "tests/library/tests/test_kda_chunkwise_gfx942_numeric.py"
