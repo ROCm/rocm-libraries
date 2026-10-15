@@ -48,6 +48,29 @@ BIAS_KINDS = ("dense", "mask_neginf", "neginf_rows")
 BIAS_LAYOUTS = ("contiguous", "expanded", "row_padded")
 TIERS = ("smoke", "full", "exhaustive")
 
+# Coverage items (``SdpaCase.reqs``): the feature axes a case covers, by
+# number. Items 1 to 14 each have a dedicated group of forward cases whose
+# ids start with ``<name>_``; 15 marks every backward case and 16 the ragged
+# (THD) backward cases (``bwd_cases.py``).
+COVERAGE_ITEMS = {
+    1: "dtype",
+    2: "layout",
+    3: "gqa",
+    4: "scale",
+    5: "causal_tl",
+    6: "causal_br",
+    7: "lse",
+    8: "seqlen",
+    9: "headdim",
+    10: "padding",
+    11: "window",
+    12: "ragged",
+    13: "decode",
+    14: "bias",
+    15: "bwd",
+    16: "bwd_ragged",
+}
+
 BASE_SEED = 20240611
 
 # Proposed comparison tolerances for O (abs, rel) and LSE (abs, rel). They are
@@ -280,6 +303,9 @@ def validate_case(case):
         e.append(f"dtype {case.dtype!r} not in {DTYPES}")
     if not case.archs or not set(case.archs) <= KNOWN_ARCHS:
         e.append(f"bad archs {case.archs!r}")
+    unknown = sorted(set(case.reqs) - set(COVERAGE_ITEMS))
+    if unknown:
+        e.append(f"unknown coverage items {unknown}")
     if case.d == 256 and set(case.archs) & set(RDNA_ARCHS):
         e.append("d=256 is declared for CDNA only")
     if min(case.b, case.h_q, case.h_k, case.h_v, case.s_q, case.s_kv, case.d) < 1:

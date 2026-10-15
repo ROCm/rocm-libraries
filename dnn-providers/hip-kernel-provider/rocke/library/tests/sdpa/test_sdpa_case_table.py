@@ -86,29 +86,20 @@ def test_tiers_nested_and_smoke_budget():
         assert set(c.archs) >= set(H.CDNA_ARCHS)
 
 
-def test_every_requirement_item_covered_individually_and_in_smoke():
-    for item in range(1, 15):
+def test_every_coverage_item_covered_individually_and_in_smoke():
+    forward_items = range(1, 15)
+    assert set(forward_items) < set(H.COVERAGE_ITEMS)
+    for item in forward_items:
         assert [c for c in C.select("full") if item in c.reqs], item
         assert [c for c in C.select("smoke") if item in c.reqs], item
     # the dedicated single-item groups exist per item (not only as side effects)
-    prefixes = {
-        1: "dtype_",
-        2: "layout_",
-        3: "gqa_",
-        4: "scale_",
-        5: "causal_tl_",
-        6: "causal_br_",
-        7: "lse_",
-        8: "seqlen_",
-        9: "headdim_",
-        10: "padding_",
-        11: "window_",
-        12: "ragged_",
-        13: "decode_",
-        14: "bias_",
-    }
-    for item, p in prefixes.items():
-        assert any(c.id.startswith(p) for c in CASES), item
+    for item in forward_items:
+        prefix = H.COVERAGE_ITEMS[item] + "_"
+        assert any(c.id.startswith(prefix) for c in CASES), item
+    # the backward items are backward-only
+    assert not [c for c in CASES if set(c.reqs) & {15, 16}]
+    bad = replace(C.get_case("dtype_fp16_d128_mha"), reqs=(1, 99))
+    assert H.validate_case(bad)
 
 
 def test_required_axis_values_present():

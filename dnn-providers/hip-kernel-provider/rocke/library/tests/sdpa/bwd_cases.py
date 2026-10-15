@@ -6,8 +6,9 @@
 Backward cases reuse the forward case model (:class:`SdpaCase`) and its
 validity rules, and are kept in a table of their own so the forward table, its
 ids and its tier budgets are untouched. Every backward case id starts with
-``bwd_`` and carries the ``bwd`` tag and requirement item 15 (item 16 for the
-ragged THD layout). Excluded by construction: head dim 256, bias, dropout.
+``bwd_`` and carries the ``bwd`` tag and coverage item 15 (item 16 for the
+ragged THD layout; :data:`~.helpers.COVERAGE_ITEMS`). Excluded by
+construction: head dim 256, bias, dropout.
 
 Tiers mirror the forward table (``smoke`` <= ``full`` <= ``exhaustive``);
 ``smoke`` is sized for a few minutes of device time across both CDNA arches.
@@ -99,7 +100,8 @@ def kv_growth(case):
 
 
 def _mkb(cid, *, reqs, tags=(), **kw):
-    """One backward case: ``bwd_`` id prefix, item 15 (16 when ragged), tags."""
+    """One backward case: ``bwd_`` id prefix, coverage item 15 (and 16 when
+    ragged), tags."""
     ragged = kw.get("length_mode") == "ragged"
     items = set(reqs) | {BWD_REQ} | ({BWD_RAGGED_REQ} if ragged else set())
     case = _mk(f"bwd_{cid}", reqs=items, tags=tuple(tags) + ("bwd",), **kw)
@@ -1108,9 +1110,9 @@ def validate_bwd_case(case):
     if "bwd" not in case.tags:
         e.append("backward case lacks the bwd tag")
     if BWD_REQ not in case.reqs:
-        e.append("backward case lacks requirement item 15")
+        e.append("backward case lacks coverage item 15 (bwd)")
     if (case.length_mode == "ragged") != (BWD_RAGGED_REQ in case.reqs):
-        e.append("item 16 iff ragged")
+        e.append("coverage item 16 (bwd_ragged) iff ragged")
     if case.d not in BWD_HEAD_DIMS + BWD_OPTIONAL_HEAD_DIMS:
         e.append(f"head dim {case.d} is outside the backward scope")
     if case.d in BWD_OPTIONAL_HEAD_DIMS and "optional" not in case.tags:

@@ -1419,7 +1419,7 @@ def reference_for(case, seed=None):
 
 
 def table_summary():
-    """Counts per tier, requirement item and arch."""
+    """Case counts: the total and one count per tier."""
     cases = all_cases()
     out = {"total": len(cases)}
     for t in TIERS:
