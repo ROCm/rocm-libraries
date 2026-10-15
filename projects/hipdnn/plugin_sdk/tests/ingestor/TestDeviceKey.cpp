@@ -3,6 +3,8 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <unordered_map>
+
 #include <gtest/gtest.h>
 
 #include <hipdnn_plugin_sdk/ingestor/DeviceKey.hpp>
@@ -13,12 +15,16 @@ namespace hipdnn_plugin_sdk::ingestor::testing
 namespace
 {
 
-DeviceProperties propertiesFor(std::string arch, int warpSize = 64, int computeUnits = 304)
+DeviceProperties propertiesFor(std::string arch,
+                               int warpSize = 64,
+                               int multiProcessorCount = 48,
+                               int64_t ldsSize = 65536)
 {
     DeviceProperties properties;
     properties.gcnArchName = std::move(arch);
     properties.warpSize = warpSize;
-    properties.multiProcessorCount = computeUnits;
+    properties.multiProcessorCount = multiProcessorCount;
+    properties.ldsSize = ldsSize;
     return properties;
 }
 
@@ -30,11 +36,12 @@ DeviceProperties propertiesFor(std::string arch, int warpSize = 64, int computeU
 TEST(TestIngestorDeviceKey, TheHashedFieldSetIsPinnedAtCompileTime)
 {
     const auto properties = propertiesFor("gfx942");
-    const auto& [gcnArchName, warpSize, multiProcessorCount] = properties;
+    const auto& [gcnArchName, warpSize, multiProcessorCount, ldsSize] = properties;
 
     EXPECT_EQ(gcnArchName, "gfx942");
     EXPECT_EQ(warpSize, 64);
-    EXPECT_EQ(multiProcessorCount, 304);
+    EXPECT_EQ(multiProcessorCount, 48);
+    EXPECT_EQ(ldsSize, 65536);
 }
 
 TEST(TestIngestorDeviceKey, IdenticalPropertiesCompareEqual)
@@ -42,10 +49,9 @@ TEST(TestIngestorDeviceKey, IdenticalPropertiesCompareEqual)
     EXPECT_EQ(DeviceKey{propertiesFor("gfx942")}, DeviceKey{propertiesFor("gfx942")});
 }
 
-// Why the key folds the whole struct rather than the arch string: two parts reporting
-// the same arch can differ in compute units, and a kernel timed on one is not necessarily
-// the winner on the other.
-TEST(TestIngestorDeviceKey, DevicesDifferingOnlyInComputeUnitsCompareUnequal)
+// Devices reporting the same arch can differ in HIP multiprocessor count, and a
+// kernel timed on one is not necessarily the winner on the other.
+TEST(TestIngestorDeviceKey, DevicesDifferingOnlyInMultiProcessorCountCompareUnequal)
 {
     // Not named "small": that is a macro once <windows.h> is in the translation unit
     // (rpcndr.h defines it as char), and this file is one include away from pulling it in.
@@ -58,6 +64,14 @@ TEST(TestIngestorDeviceKey, DevicesDifferingOnlyInComputeUnitsCompareUnequal)
 TEST(TestIngestorDeviceKey, DevicesDifferingOnlyInWarpSizeCompareUnequal)
 {
     EXPECT_NE(DeviceKey{propertiesFor("gfx942", 32)}, DeviceKey{propertiesFor("gfx942", 64)});
+}
+
+TEST(TestIngestorDeviceKey, DevicesDifferingOnlyInLdsCapacityCompareUnequal)
+{
+    const DeviceKey lowerCapacity{propertiesFor("gfx942", 64, 48, 32768)};
+    const DeviceKey higherCapacity{propertiesFor("gfx942", 64, 48, 65536)};
+    EXPECT_NE(lowerCapacity, higherCapacity);
+    EXPECT_NE(lowerCapacity.hash(), higherCapacity.hash());
 }
 
 TEST(TestIngestorDeviceKey, ADifferentArchComparesUnequal)
@@ -88,13 +102,6 @@ TEST(TestIngestorDeviceKey, AnUnresolvedDeviceStillKeysDistinctlyFromAResolvedOn
     EXPECT_NE(DeviceKey{unresolved}, DeviceKey{propertiesFor("gfx942")});
 }
 
-TEST(TestIngestorDeviceKey, StdHashAgreesWithTheKeysOwnHash)
-{
-    const DeviceKey key{propertiesFor("gfx942")};
-
-    EXPECT_EQ(std::hash<DeviceKey>{}(key), static_cast<size_t>(key.hash()));
-}
-
 /// The hash narrows; the fields decide. Each case forces the fold to agree and varies
 /// exactly one field, so a comparison that dropped that field would serve a ranking
 /// measured on one device for another. Varying the arch alone would not catch that:
@@ -116,7 +123,7 @@ protected:
     };
 };
 
-TEST_P(TestIngestorDeviceKeyCollision, EqualHashesWithADifferingFieldStillCompareUnequal)
+TEST_P(TestIngestorDeviceKeyCollision, EqualHashesStillRetrieveDistinctEntries)
 {
     auto baseline = CollidingKey::with(propertiesFor("gfx942"), 0xABCD);
     auto variant = CollidingKey::with(GetParam(), 0xABCD);
@@ -124,13 +131,20 @@ TEST_P(TestIngestorDeviceKeyCollision, EqualHashesWithADifferingFieldStillCompar
     ASSERT_EQ(baseline.hash(), variant.hash()) << "the collision must actually be forced";
     EXPECT_NE(static_cast<const DeviceKey&>(baseline), static_cast<const DeviceKey&>(variant))
         << "a hash collision with differing properties must resolve to a miss";
+
+    std::unordered_map<DeviceKey, int> entries;
+    entries.emplace(baseline, 128);
+    entries.emplace(variant, 256);
+    EXPECT_EQ(entries.at(baseline), 128);
+    EXPECT_EQ(entries.at(variant), 256);
 }
 
 INSTANTIATE_TEST_SUITE_P(,
                          TestIngestorDeviceKeyCollision,
                          ::testing::Values(propertiesFor("gfx950"),
                                            propertiesFor("gfx942", /*warpSize=*/32),
-                                           propertiesFor("gfx942", 64, /*computeUnits=*/228)),
+                                           propertiesFor("gfx942", 64, 228),
+                                           propertiesFor("gfx942", 64, 48, 32768)),
                          [](const ::testing::TestParamInfo<DeviceProperties>& info) {
                              switch(info.index)
                              {
@@ -138,8 +152,10 @@ INSTANTIATE_TEST_SUITE_P(,
                                  return "ByArch";
                              case 1:
                                  return "ByWarpSize";
+                             case 2:
+                                 return "ByMultiProcessorCount";
                              default:
-                                 return "ByComputeUnits";
+                                 return "ByLdsCapacity";
                              }
                          });
 

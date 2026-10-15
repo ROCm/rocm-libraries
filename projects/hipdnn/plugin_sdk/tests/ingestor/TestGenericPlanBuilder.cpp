@@ -12,6 +12,7 @@
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include <gmock/gmock.h>
@@ -253,11 +254,17 @@ public:
     }
 };
 
-/// Reports a resolved device (deviceId != NO_DEVICE) whose properties are unresolvable
-/// by arch, distinct from ThrowingDeviceResolver's outright query failure above.
-class UnresolvedArchDeviceResolver : public IDeviceResolver<TestHandle>
+/// Reports a resolved device id whose properties fail isResolved(). Unlike
+/// ThrowingDeviceResolver, the query itself succeeds. The default properties leave every
+/// fact unresolved, including the arch.
+class UnresolvedDeviceResolver : public IDeviceResolver<TestHandle>
 {
 public:
+    explicit UnresolvedDeviceResolver(DeviceProperties properties = {})
+        : _properties(std::move(properties))
+    {
+    }
+
     DeviceId deviceId(const TestHandle& /*handle*/) const override
     {
         return 0;
@@ -303,10 +310,32 @@ TEST(TestIngestorGenericPlanBuilder, IsApplicableDeclinesWhenTheDeviceArchIsUnre
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
     const auto manager = makeStateManager();
     const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
-    const UnresolvedArchDeviceResolver resolver;
+    const UnresolvedDeviceResolver resolver;
     const TestPlanBuilder builder(engine, *manager, resolver);
 
     const TestGraph graph(makeGraphId(0x94));
+
+    EXPECT_FALSE(builder.isApplicable(0, graph));
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, engine.name))
+        << recorder.getRecordedLogsAsString();
+}
+
+// A device with an arch but some other unresolved fact must be declined too. Its
+// winner-cache records would be keyed on facts the cache refuses to read back.
+TEST(TestIngestorGenericPlanBuilder, IsApplicableDeclinesWhenAnyDeviceFactIsUnresolved)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto manager = makeStateManager();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    auto properties = testDeviceProperties();
+    properties.ldsSize = -1;
+    const UnresolvedDeviceResolver resolver(properties);
+    const TestPlanBuilder builder(engine, *manager, resolver);
+
+    const TestGraph graph(makeGraphId(0x95));
 
     EXPECT_FALSE(builder.isApplicable(0, graph));
     EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, engine.name))
@@ -320,7 +349,7 @@ TEST(TestIngestorGenericPlanBuilder, BuildPlanThrowsInternalErrorWhenTheDeviceAr
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
     const auto manager = makeStateManager();
     const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
-    const UnresolvedArchDeviceResolver resolver;
+    const UnresolvedDeviceResolver resolver;
     const TestPlanBuilder builder(engine, *manager, resolver);
 
     flatbuffers::FlatBufferBuilder fbb;
@@ -348,7 +377,7 @@ TEST(TestIngestorGenericPlanBuilder,
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
     const auto manager = makeStateManager();
     const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
-    const UnresolvedArchDeviceResolver resolver;
+    const UnresolvedDeviceResolver resolver;
     const TestPlanBuilder builder(engine, *manager, resolver);
 
     const TestGraph graph(makeGraphId(0x99));
@@ -371,7 +400,7 @@ TEST(TestIngestorGenericPlanBuilder, GetCustomKnobsThrowsInternalErrorWhenTheDev
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
     const auto manager = makeStateManager();
     const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
-    const UnresolvedArchDeviceResolver resolver;
+    const UnresolvedDeviceResolver resolver;
     const TestPlanBuilder builder(engine, *manager, resolver);
 
     const TestGraph graph(makeGraphId(0x9D));
