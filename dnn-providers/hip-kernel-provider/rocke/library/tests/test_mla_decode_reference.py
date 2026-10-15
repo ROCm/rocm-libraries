@@ -216,6 +216,76 @@ class TestSplitMerge:
         np.testing.assert_allclose(b[0], a[0], rtol=1e-12, atol=1e-13)
         np.testing.assert_allclose(b[1], a[1], rtol=1e-13)
 
+    def test_spike_crosses_the_lazy_rescale_threshold(self):
+        # The GPU lane's spike scenario, at the real geometry: half of every
+        # wave's heads see their running max jump past the kernel's lazy
+        # threshold at key 300, the other half do not -- so the device takes
+        # the rescale on a live accumulator for some lanes of a wave only. The
+        # reference's split merge stays exact across the jump.
+        from builders.mla import verify_mla_decode as v
+        from builders.mla.ref_mla_attn import gather_paged_kv
+        from kernels.mla.mla_decode import DECODE_LAZY_TAU
+
+        p = v.make_problem(heads=64, q_lens=(1,), k_lens=(400,), spike_key=300)
+        qa = absorb_query(p.q_nope, p.q_rope, p.w_uk)
+        ((latent, rope),) = gather_paged_kv(
+            p.c_kv, p.k_rope, p.block_table, p.cu_seqlens_k
+        )
+        keys = np.concatenate([latent, rope], axis=-1).astype(np.float64)
+        s2 = mla_scale_log2(p.scale) * (qa[0] @ keys.T)  # [H, S_k], log2 units
+        jump = s2[:, 300] - s2[:, :300].max(axis=1)
+        spiked = np.arange(64) % 16 < 8
+        assert np.all(jump[spiked] > DECODE_LAZY_TAU)
+        assert np.all(jump[~spiked] < DECODE_LAZY_TAU)
+
+        kw = {
+            "qa": qa,
+            "c_kv": p.c_kv,
+            "k_rope": p.k_rope,
+            "block_table": p.block_table,
+            "cu_seqlens_q": p.cu_seqlens_q,
+            "cu_seqlens_k": p.cu_seqlens_k,
+            "scale": p.scale,
+        }
+        want_lat, want_lse = ref_mla_decode_latent(**kw)
+        for num_seg in (2, 7):
+            parts = ref_mla_decode_partials(**kw, num_seg=num_seg, block_k=BLOCK_SIZE)
+            got_lat, got_lse = ref_mla_decode_merge(*parts)
+            np.testing.assert_allclose(got_lat, want_lat, rtol=1e-12, atol=1e-13)
+            np.testing.assert_allclose(got_lse, want_lse, rtol=1e-13)
+
+    @pytest.mark.parametrize("num_cus", [80, 256, 304])
+    @pytest.mark.parametrize("heads", [64, 128])
+    def test_spike_lands_on_a_live_accumulator(self, monkeypatch, heads, num_cus):
+        # Every split the GPU lane runs (forced 1 / 7 / 64 and the auto count
+        # at representative CU counts) must put key 300's tile after at least
+        # one earlier tile of its segment in some sequence; otherwise the
+        # rescale only ever scales a zero accumulator.
+        monkeypatch.setenv("ROCKE_LLVM_FLAVOR", "llvm22")
+        from builders.mla import verify_mla_decode as v
+        from dispatch.mla import MLARequest, dispatch_mla
+
+        sc = v.SCENARIOS[f"spike_h{heads}"]
+        auto = dispatch_mla(
+            MLARequest(
+                num_heads=heads,
+                total_q=sum(sc.q_lens),
+                num_seqs=len(sc.k_lens),
+                max_seqlen_q=1,
+                max_seqlen_k=max(sc.k_lens),
+                arch="gfx942",
+                num_cus=num_cus,
+            )
+        ).spec.num_seg
+        spike_tile = sc.spike_key // BLOCK_SIZE
+        for num_seg in sorted({1, 7, 64, auto}):
+            prior = []
+            for k in sc.k_lens:
+                n_tiles = -(-k // BLOCK_SIZE)
+                per_seg = -(-n_tiles // num_seg)
+                prior.append(spike_tile % per_seg)
+            assert max(prior) > 0, (num_seg, prior)
+
 
 class TestDegenerateSequences:
     def test_empty_key_range(self):
@@ -425,3 +495,17 @@ class TestParityGateIsNotVacuous:
         p = v.make_problem(heads=64, q_lens=(1, 1), k_lens=(20, 16))
         # Pages hold 40 rows' worth of 16-row pages for 36 keys: 12 unowned rows.
         assert np.isnan(p.c_kv).any(axis=-1).sum() == p.c_kv.shape[0] * 16 - 36
+
+    def test_unused_block_table_slots_are_poisoned(self):
+        # Slots past a sequence's last page are -1, a page id that faults if
+        # a lookup (the empty-segment guard, the prefetch clamps) ever uses it.
+        from builders.mla import verify_mla_decode as v
+
+        p = v.make_problem(heads=64, q_lens=(1, 1, 1), k_lens=(20, 16, 0))
+        assert np.all(p.block_table[0] >= 0)  # two pages, both used
+        assert p.block_table[1, 0] >= 0 and p.block_table[1, 1] == -1
+        assert np.all(p.block_table[2] == -1)  # S_k = 0 owns no page
+        clean = v.make_problem(
+            heads=64, q_lens=(1, 1, 1), k_lens=(20, 16, 0), poison_unused=False
+        )
+        assert np.all(clean.block_table >= 0)

@@ -55,21 +55,17 @@ def _decode_shapes(path: Path, *, model: str | None, limit: int | None):
 
 def _resolve(shape: MLAShape, *, arch: str, build: bool) -> dict:
     """One shape through dispatch; never raises, so one bad shape hides nothing."""
-    from dispatch.mla import dispatch_mla
-    from kernels.mla.mla_decode import mla_decode_combine_spec
+    from dispatch.mla import dispatch_mla, mla_decode_launch
 
     row = {"shape": shape.signature}
     try:
         result = dispatch_mla(shape.to_request(arch=arch))
     except ValueError as exc:
         return {**row, "status": "unsupported", "detail": str(exc)}
-    names = [result.spec.kernel_name()]
-    if result.spec.split_kv:
-        names.append(mla_decode_combine_spec(result.spec).kernel_name())
     row.update(
         status="ok",
         candidate=result.candidate.name,
-        kernels=names,
+        kernels=list(mla_decode_launch(result).kernel_names()),
         grid=result.grid,
         num_seg=result.spec.num_seg,
     )
@@ -204,12 +200,14 @@ def main(argv=None) -> int:
     ap.add_argument("--seed", type=int, default=0)
     args = ap.parse_args(argv)
 
+    # Before anything compiles, with or without --arch: torch binds its
+    # bundled comgr, which the IR flavor is resolved against.
+    try:
+        import torch  # noqa: F401
+    except ImportError:
+        pass
     arch = args.arch
     if arch is None:
-        try:
-            import torch  # noqa: F401  -- binds the torch-bundled comgr
-        except ImportError:
-            pass
         from rocke.runtime.hip_module import get_device_arch
 
         arch = (get_device_arch() or "gfx942").split(":")[0]

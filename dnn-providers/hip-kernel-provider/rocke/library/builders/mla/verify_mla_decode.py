@@ -42,7 +42,9 @@ Rows of sequences with ``S_k = 0`` are checked exactly instead (zero output,
 ``lse = -inf``). The output buffers and the split-KV workspace are NaN-seeded,
 and so are the cache rows no sequence owns -- including each sequence's
 partial last page -- so an unwritten slot or a key read past ``S_k`` fails
-loudly rather than reading as a plausible value.
+loudly rather than reading as a plausible value. Block-table slots past a
+sequence's last page hold ``-1``, a page id that faults if a lookup ever
+uses it.
 
 Run, from ``rocke/library`` on a GPU node::
 
@@ -67,7 +69,7 @@ import argparse
 import math
 import sys
 from collections.abc import Sequence
-from typing import NamedTuple
+from typing import TYPE_CHECKING, NamedTuple
 
 import numpy as np
 
@@ -77,8 +79,37 @@ from builders.mla.ref_mla_decode import (
     ref_mla_decode_latent,
 )
 
+if TYPE_CHECKING:
+    import torch
+    from builders.mla.mla_decode_runner import MlaDecodeRunner
+    from dispatch.mla import MLARequest
+
+__all__ = [
+    "ATOL",
+    "RTOL",
+    "SCENARIOS",
+    "Problem",
+    "Scenario",
+    "compare",
+    "device_inputs",
+    "main",
+    "make_problem",
+    "run_case",
+    "run_full",
+    "run_latent",
+    "run_prefill_oracle",
+    "to_device",
+    "uniform_problem",
+]
+
 ATOL = 4e-2
 RTOL = 2e-2
+
+#: bf16-exact value of the spike: a ``q_rope`` / ``k_rope`` pair of all-4
+#: rows scores 64 * 16 = 1024 on the RoPE half alone, about 106 log2 units
+#: after the MLA scale -- past the kernel's lazy-rescale threshold (64) on top
+#: of any running max the random keys before it reach.
+_SPIKE = 4.0
 
 
 class Scenario(NamedTuple):
@@ -86,6 +117,7 @@ class Scenario(NamedTuple):
     q_lens: tuple[int, ...]
     k_lens: tuple[int, ...]
     why: str
+    spike_key: int | None = None
 
 
 _SHAPES = (
@@ -113,11 +145,21 @@ _SHAPES = (
         (16384, 32768 - 5),
         "the deepest fp32 accumulation, with a page tail",
     ),
+    (
+        "spike",
+        (1, 1, 1),
+        (4097, 1000, 301),
+        "key 300 (tile 18) jumps half of every wave's heads past the "
+        "lazy-rescale threshold on a live accumulator: single-pass after 18 "
+        "tiles in every sequence, split in at least the first sequence's "
+        "segment (the last sequence: in its masked tail tile)",
+        300,
+    ),
 )
 
 SCENARIOS = {
-    f"{name}_h{heads}": Scenario(heads, q, k, why)
-    for (name, q, k, why) in _SHAPES
+    f"{name}_h{heads}": Scenario(heads, *rest)
+    for (name, *rest) in _SHAPES
     for heads in (64, 128)
 }
 
@@ -162,13 +204,21 @@ def make_problem(
     page: int = 16,
     seed: int = 0,
     poison_unused: bool = True,
+    spike_key: int | None = None,
 ) -> Problem:
     """A ragged paged decode batch at the real MLA geometry.
 
     Pages are shuffled across the whole cache so a kernel that assumes
     sequence-contiguous pages fails. With ``poison_unused`` every cache row no
     sequence owns is NaN: a kernel that lets a key past ``S_k`` reach the
-    result, even multiplied by a zero probability, produces NaN.
+    result, even multiplied by a zero probability, produces NaN. Block-table
+    slots past a sequence's last page are then ``-1``.
+
+    ``spike_key`` plants, in every sequence that has that key and a query, an
+    all-:data:`_SPIKE` ``k_rope`` row at it and all-:data:`_SPIKE` ``q_rope``
+    rows for the heads ``h % 16 < 8``: half of every wave's heads see their
+    running max jump past the lazy-rescale threshold there, the other half do
+    not.
     """
     rng = np.random.default_rng(seed)
     cu_q = np.concatenate([[0], np.cumsum(q_lens)]).astype(np.int32)
@@ -185,19 +235,30 @@ def make_problem(
 
     c_kv = rand((num_blocks, page, r_kv), 1.0)
     k_rope = rand((num_blocks, page, d_rope), 1.0)
+    q_nope = rand((total_q, heads, d_nope), 1.0)
+    q_rope = rand((total_q, heads, d_rope), 1.0)
+    w_uk = rand((heads, r_kv, d_nope + d_v), 0.1)
+    if spike_key is not None:
+        spiked_heads = np.arange(heads) % 16 < 8
+        for b, k in enumerate(k_lens):
+            if k > spike_key and q_lens[b]:
+                pg = block_table[b, spike_key // page]
+                k_rope[pg, spike_key % page] = _SPIKE
+                q_rope[cu_q[b], spiked_heads] = _SPIKE
     if poison_unused:
         owned = np.zeros((num_blocks, page), dtype=bool)
         for b, k in enumerate(k_lens):
             rows = np.arange(k)
             owned[block_table[b, rows // page], rows % page] = True
+            block_table[b, -(-k // page) :] = -1
         c_kv[~owned] = np.nan
         k_rope[~owned] = np.nan
     return Problem(
-        q_nope=rand((total_q, heads, d_nope), 1.0),
-        q_rope=rand((total_q, heads, d_rope), 1.0),
+        q_nope=q_nope,
+        q_rope=q_rope,
         c_kv=c_kv,
         k_rope=k_rope,
-        w_uk=rand((heads, r_kv, d_nope + d_v), 0.1),
+        w_uk=w_uk,
         cu_seqlens_q=cu_q,
         cu_seqlens_k=cu_k,
         block_table=block_table,
@@ -218,29 +279,37 @@ def uniform_problem(*, heads: int, batch: int, seqlen_k: int, seed: int) -> Prob
 # --------------------------------------------------------------------------
 
 
-def to_device(a: np.ndarray, dtype):
+def to_device(a: np.ndarray, dtype: torch.dtype) -> torch.Tensor:
+    """``a`` on the current GPU as a contiguous ``dtype`` tensor."""
     import torch
 
     return torch.from_numpy(np.ascontiguousarray(a)).to(device="cuda", dtype=dtype)
 
 
-def _request(p: Problem, *, arch: str, algorithm: str = "auto"):
+def _request(
+    p: Problem, *, arch: str, algorithm: str = "auto", max_seqlen_q: int | None = None
+) -> MLARequest:
+    """The request describing ``p``; ``max_seqlen_q`` defaults to its own."""
     from dispatch.mla import MLARequest
 
     k_lens = np.diff(p.cu_seqlens_k)
     q_lens = np.diff(p.cu_seqlens_q)
+    if max_seqlen_q is None:
+        max_seqlen_q = max(1, int(q_lens.max()))
     return MLARequest(
         num_heads=p.q_nope.shape[1],
         total_q=int(p.cu_seqlens_q[-1]),
         num_seqs=p.num_seqs,
-        max_seqlen_q=max(1, int(q_lens.max())),
+        max_seqlen_q=max_seqlen_q,
         max_seqlen_k=int(k_lens.max()),
         arch=arch,
+        num_kv_blocks=int(p.c_kv.shape[0]),
         algorithm=algorithm,
     )
 
 
-def device_inputs(p: Problem) -> dict:
+def device_inputs(p: Problem) -> dict[str, torch.Tensor]:
+    """The cache, offsets and block table of ``p`` on the current GPU."""
     import torch
 
     return {
@@ -252,7 +321,9 @@ def device_inputs(p: Problem) -> dict:
     }
 
 
-def _nan_outputs(total_q: int, heads: int, width: int):
+def _nan_outputs(
+    total_q: int, heads: int, width: int
+) -> tuple[torch.Tensor, torch.Tensor]:
     import torch
 
     out = torch.full((total_q, heads, width), float("nan"), dtype=torch.bfloat16)
@@ -260,48 +331,67 @@ def _nan_outputs(total_q: int, heads: int, width: int):
     return out.cuda(), lse.cuda()
 
 
-def _poison_workspace(runner, total_q: int) -> None:
+def _poison_workspace(runner: MlaDecodeRunner) -> None:
     """NaN-fill the split-KV workspace, so a partial the latent kernel never
-    wrote cannot merge as a stale but plausible one."""
+    wrote cannot merge as a stale but plausible one -- including the ``acc``
+    rows empty segments skip, which the combine must not read."""
     import torch
 
     if runner.spec.split_kv:
         device = torch.device("cuda", torch.cuda.current_device())
-        for t in runner.workspace(total_q, device):
+        for t in runner.workspace(device):
             t.fill_(float("nan"))
 
 
-def run_latent(runner, p: Problem, qa_bf16: np.ndarray):
+def run_latent(
+    runner: MlaDecodeRunner, p: Problem, qa_bf16: np.ndarray
+) -> tuple[np.ndarray, np.ndarray]:
+    """[B] (+ [C]) on ``p`` with the bf16 absorbed query: ``(latent, lse)``."""
     import torch
 
-    _poison_workspace(runner, qa_bf16.shape[0])
+    _poison_workspace(runner)
     dev = device_inputs(p)
     out, lse = _nan_outputs(qa_bf16.shape[0], qa_bf16.shape[1], runner.spec.r_kv)
     runner.latent(
-        qa=to_device(qa_bf16, torch.bfloat16), scale=p.scale, out=out, lse=lse, **dev
+        qa=to_device(qa_bf16, torch.bfloat16),
+        scale=p.scale,
+        out=out,
+        lse=lse,
+        check_contents=True,
+        **dev,
     )
     torch.cuda.synchronize()
     return out.float().cpu().numpy(), lse.cpu().numpy()
 
 
-def run_full(runner, p: Problem):
+def run_full(runner: MlaDecodeRunner, p: Problem) -> tuple[np.ndarray, np.ndarray]:
+    """The whole op [A]-[D] on ``p``: ``(out, lse)``."""
     import torch
 
-    _poison_workspace(runner, p.q_nope.shape[0])
+    _poison_workspace(runner)
     out, lse = runner.forward(
         q_nope=to_device(p.q_nope, torch.bfloat16),
         q_rope=to_device(p.q_rope, torch.bfloat16),
         w_uk=to_device(p.w_uk, torch.bfloat16),
         scale=p.scale,
+        check_contents=True,
         **device_inputs(p),
     )
     torch.cuda.synchronize()
     return out.float().cpu().numpy(), lse.cpu().numpy()
 
 
-def run_prefill_oracle(p: Problem, qa_bf16: np.ndarray, *, arch: str):
+def run_prefill_oracle(
+    p: Problem, qa_bf16: np.ndarray, *, arch: str
+) -> tuple[np.ndarray, np.ndarray]:
     """The prefill ``absorbed_query`` kernel on the same buffers: the 12-argument
-    pack is the decode kernel's, so only the grid differs."""
+    pack is the decode kernel's, so only the grid differs.
+
+    Dispatch does not route one query per sequence to prefill (that is
+    decode's regime and contract), so the oracle asks for prefill's layout at
+    ``max_seqlen_q = 2``: the layout and the grid read ``total_q``,
+    ``num_seqs`` and the key length, never ``max_seqlen_q``.
+    """
     import dataclasses
 
     import torch
@@ -315,7 +405,7 @@ def run_prefill_oracle(p: Problem, qa_bf16: np.ndarray, *, arch: str):
     from rocke import compile_kernel
     from rocke.runtime import KernelLauncher, LaunchConfig
 
-    req = _request(p, arch=arch, algorithm="mla_prefill_chunked")
+    req = _request(p, arch=arch, algorithm="mla_prefill_chunked", max_seqlen_q=2)
     spec = dataclasses.replace(dispatch_mla(req).spec, absorbed_query=True)
     art = compile_kernel(build_mla_prefill_fwd(spec, arch=arch), arch=arch)
     launcher = KernelLauncher(
@@ -372,10 +462,10 @@ def _residual(got: np.ndarray, ref: np.ndarray) -> Residual:
 
 def compare(
     p: Problem,
-    got_out,
-    got_lse,
-    ref_out,
-    ref_lse,
+    got_out: np.ndarray,
+    got_lse: np.ndarray,
+    ref_out: np.ndarray,
+    ref_lse: np.ndarray,
     *,
     atol: float = ATOL,
     rtol: float = RTOL,
@@ -430,6 +520,9 @@ def run_case(
     atol: float = ATOL,
     rtol: float = RTOL,
 ) -> bool:
+    """Gate ``p`` in ``mode`` (``latent``, ``full`` or ``oracle``) once per
+    entry of ``num_segs`` (``"auto"`` or a forced split count); prints one
+    line per run and returns whether every run passed."""
     from builders.mla.mla_decode_runner import MlaDecodeRunner
     from dispatch.mla import dispatch_mla
 
@@ -488,7 +581,8 @@ def run_case(
     return ok
 
 
-def main(argv=None) -> int:
+def main(argv: Sequence[str] | None = None) -> int:
+    """Command-line entry point; the exit code is 1 if any case failed."""
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--mode", choices=("latent", "full", "oracle"), default="latent")
     ap.add_argument(
@@ -535,6 +629,7 @@ def main(argv=None) -> int:
                     k_lens=sc.k_lens,
                     seed=args.seed,
                     poison_unused=poison,
+                    spike_key=sc.spike_key,
                 ),
             )
         )

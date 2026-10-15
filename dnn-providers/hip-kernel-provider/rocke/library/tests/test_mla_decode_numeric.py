@@ -35,10 +35,22 @@ def _device_arch() -> str | None:
 
 ARCH = _device_arch()
 
+
+def _decode_flavor_ok() -> bool:
+    from dispatch.mla.decode import DECODE_LLVM_FLAVORS
+    from rocke.core.lower_llvm import _resolve_llvm_flavor
+
+    return _resolve_llvm_flavor() in DECODE_LLVM_FLAVORS
+
+
 pytestmark = [
     pytest.mark.gpu,
     pytest.mark.skipif(
         ARCH is None, reason="needs a gfx942 or gfx950 GPU with ROCm torch"
+    ),
+    pytest.mark.skipif(
+        ARCH is not None and not _decode_flavor_ok(),
+        reason="decode dispatch serves llvm22/llvm23 only (llvm20 spills)",
     ),
 ]
 
@@ -55,13 +67,23 @@ def _run(name: str, mode: str, num_segs, seed: int = 0) -> bool:
         k_lens=sc.k_lens,
         seed=seed,
         poison_unused=mode != "oracle",
+        spike_key=sc.spike_key,
     )
     return v.run_case(name, p, mode=mode, num_segs=num_segs, arch=ARCH)
 
 
 @pytest.mark.parametrize(
     "scenario",
-    ["ragged_h128", "ragged_h64", "no_query_h128", "zero_keys_h64", "long_h128"],
+    [
+        "ragged_h128",
+        "ragged_h64",
+        "no_query_h128",
+        "zero_keys_h64",
+        "long_h128",
+        # The lazy rescale on a live accumulator, for some heads of a wave.
+        "spike_h128",
+        "spike_h64",
+    ],
 )
 def test_latent_single_pass_and_split(scenario):
     # 64 segments exceeds most tile counts here: trailing segments are empty.
@@ -69,7 +91,9 @@ def test_latent_single_pass_and_split(scenario):
 
 
 @pytest.mark.parametrize("seed", [0, 1, 2])
-@pytest.mark.parametrize("scenario", ["ragged_h128", "zero_keys_h128", "no_query_h128"])
+@pytest.mark.parametrize(
+    "scenario", ["ragged_h128", "zero_keys_h128", "no_query_h128", "spike_h128"]
+)
 def test_whole_op(scenario, seed):
     assert _run(scenario, "full", ["auto", "1", "7"], seed=seed)
 
