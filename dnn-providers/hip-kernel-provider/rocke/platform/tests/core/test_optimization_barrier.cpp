@@ -173,11 +173,63 @@ static int test_tensor_epilogue_hip()
     return 0;
 }
 
+static int test_hip_clobber_admission()
+{
+    for(int kind = 0; kind < 5; ++kind)
+    {
+        rocke_ir_builder_t b;
+        CHECK(rocke_ir_builder_init(&b, "barrier_clobber") == ROCKE_OK);
+        auto* value = rocke_b_param(&b, "value", rocke_f32(), nullptr);
+        auto* result = rocke_b_optimization_barrier(&b, value);
+        CHECK(result);
+        if(kind == 1)
+            rocke_attr_set_str(&b, &result->op->attrs, "clobber", "");
+        else if(kind == 2)
+            rocke_attr_set_int(&b, &result->op->attrs, "clobber", 1);
+        else if(kind == 3)
+            rocke_attr_set_bool(&b, &result->op->attrs, "clobber", false);
+        else if(kind == 4)
+            rocke_attr_set_str(&b, &result->op->attrs, "clobber", "memory");
+        rocke_b_ret(&b);
+
+        char* serialized = nullptr;
+        CHECK(rocke_ir_serialize(b.kernel, &serialized) == ROCKE_OK);
+        rocke_ir_builder_t copy;
+        CHECK(rocke_ir_builder_init(&copy, "imported_clobber") == ROCKE_OK);
+        rocke_kernel_def_t* kernel = nullptr;
+        CHECK(rocke_ir_parse(serialized, &copy, &kernel) == ROCKE_OK);
+        free(serialized);
+
+        rocke_lower_hip_opts_t opts = {};
+        opts.arch = "gfx1250";
+        rocke_strbuf_t original = {}, imported = {};
+        auto expected = kind < 2 ? ROCKE_OK : ROCKE_ERR_NOTIMPL;
+        CHECK(rocke_lower_kernel_to_hip(&b, b.kernel, &opts, &original) == expected);
+        CHECK(rocke_lower_kernel_to_hip(&copy, kernel, &opts, &imported) == expected);
+        if(expected == ROCKE_OK)
+        {
+            CHECK(strcmp(original.cstr(), imported.cstr()) == 0);
+            CHECK(strstr(imported.cstr(), "asm (\"\" : \"=v\"") != nullptr);
+        }
+        else
+        {
+            CHECK(!original.cstr() || !strstr(original.cstr(), "asm (\"\""));
+            CHECK(!imported.cstr() || !strstr(imported.cstr(), "asm (\"\""));
+        }
+        original.free_buffer();
+        imported.free_buffer();
+        rocke_ir_builder_free(&copy);
+        rocke_ir_builder_free(&b);
+    }
+    return 0;
+}
+
 int main()
 {
     int admission = test_admission();
     int scalars = test_scalars();
     int predicate = test_predicate();
     int hip = test_tensor_epilogue_hip();
-    return admission || scalars || predicate || hip;
+    int clobber = test_hip_clobber_admission();
+    return admission || scalars || predicate || hip || clobber;
 }

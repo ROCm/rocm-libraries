@@ -75,14 +75,24 @@ def _u8_buffer(array: np.ndarray):
     return (ctypes.c_uint8 * int(array.nbytes)).from_buffer_copy(array)
 
 
+def _tensor_factors_fp32(tensor_scales) -> np.ndarray:
+    """Validate real numeric factors before rounding them to the launch dtype."""
+    factors = np.asarray(tensor_scales)
+    if factors.shape != (2,) or factors.dtype.kind not in "iuf":
+        raise ValueError("expected two real numeric tensor factors")
+    with np.errstate(over="ignore", invalid="ignore"):
+        factors = factors.astype(np.float32)
+    if not np.isfinite(factors).all():
+        raise ValueError("expected two finite FP32 tensor factors")
+    return factors
+
+
 def _launch(rt, fn, spec, inputs, *, tensor_scales=None):
     factor_bytes = b""
     if spec.tensor_scale:
         if tensor_scales is None:
             raise ValueError("tensor-enabled specs require two FP32 tensor factors")
-        factors = np.asarray(tensor_scales, dtype=np.float32)
-        if factors.shape != (2,) or not np.isfinite(factors).all():
-            raise ValueError("expected two finite FP32 tensor factors")
+        factors = _tensor_factors_fp32(tensor_scales)
         factor_bytes = struct.pack("<ff", *factors)
     elif tensor_scales is not None:
         raise ValueError("tensor factors require a tensor-enabled spec")

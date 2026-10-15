@@ -248,10 +248,11 @@ static rocke_status_t rocke_h_op_tile_inline_asm(rocke_h_lowerer_t* lw, const ro
     }
     const char* tmpl = rocke_attr_get_str(&op->attrs, "template");
     const char* constraints = rocke_attr_get_str(&op->attrs, "constraints");
-    const char* clobber = rocke_attr_get_str(&op->attrs, "clobber");
+    const rocke_attr_value_t* clobber = rocke_attr_get(&op->attrs, "clobber");
     if(op->num_results == 1 && op->num_operands == 1 && tmpl && tmpl[0] == '\0' && constraints
        && strcmp(constraints, "=v,0") == 0 && !rocke_attr_get_bool(&op->attrs, "sideeffect", true)
-       && (!clobber || clobber[0] == '\0'))
+       && (!clobber
+           || (clobber->kind == ROCKE_ATTR_STR && clobber->u.s && clobber->u.s[0] == '\0')))
     {
         const rocke_value_t* result = h_res(op);
         const char* result_name = rocke_h_name(lw, result);

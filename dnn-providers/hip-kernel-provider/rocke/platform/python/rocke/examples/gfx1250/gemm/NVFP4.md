@@ -60,9 +60,11 @@ The shared spec accepts `tensor_scale=True` only for this operand and scale
 contract. Use `nvfp4_gemm_verify.run_cases` to verify tensor-enabled kernels;
 it supplies both factors and a tensor-aware reference. The generic
 `block_scaled_gemm_verify.run_cases` rejects tensor-enabled specs before
-device discovery or compilation. The shared launcher requires exactly two
-finite FP32 factors for tensor-enabled specs and rejects factors for plain specs
-before allocating GPU memory.
+device discovery or compilation. The shared launcher and NVFP4 reference require
+real integer or floating-point tensor factors with shape `(2,)`, convert them to
+FP32, and require the converted values to be finite. String, complex, boolean,
+and object arrays are rejected. The launcher rejects malformed factors and
+factors supplied for plain specs before allocating GPU memory.
 Scale selection is mirrored by Python `IRBuilder.mma` and C
 `rocke_b_mma_scaled`; the complete spec-to-kernel builder remains Python-only.
 C++ lowers its serialized IR, including the tensor-scale epilogue.

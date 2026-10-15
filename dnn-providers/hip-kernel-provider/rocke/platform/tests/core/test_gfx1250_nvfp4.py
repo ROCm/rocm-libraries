@@ -6,6 +6,7 @@ from dataclasses import replace
 import hashlib
 import json
 from pathlib import Path
+import warnings
 
 import numpy as np
 import pytest
@@ -289,7 +290,10 @@ def test_default_fp4_api_keeps_kernel_identity():
     )
 
 
-@pytest.mark.parametrize("tensor_scales", [None, (1.3, 0.7)])
+@pytest.mark.parametrize(
+    "tensor_scales",
+    [None, (1.3, 0.7), (1, 2), np.array([1.3, 0.7], dtype=np.float32)],
+)
 def test_launcher_tensor_factor_argument_bytes(tensor_scales):
     import ctypes
     import struct
@@ -361,3 +365,47 @@ def test_launcher_rejects_invalid_tensor_factors_before_allocation(enabled, fact
     )
     with pytest.raises(ValueError, match="tensor"):
         _launch(Runtime(), None, spec, (), tensor_scales=factors)
+
+
+@pytest.mark.parametrize(
+    "factors",
+    [
+        pytest.param(("1.3", "0.7"), id="strings"),
+        pytest.param(np.array([1.3 + 2j, 0.7 + 3j]), id="complex"),
+        pytest.param(np.array([1.3 + 0j, 0.7 + 0j]), id="real-valued-complex"),
+        pytest.param(np.array([True, False]), id="boolean"),
+        pytest.param(np.array([1.3, 0.7], dtype=object), id="object"),
+        pytest.param(np.array([[1.3, 0.7]]), id="rank-two"),
+        pytest.param((1.3,), id="short"),
+        pytest.param((float("nan"), 1.0), id="nan"),
+        pytest.param((1.0, float("inf")), id="infinite"),
+        pytest.param((np.finfo(np.float64).max, 1.0), id="fp32-overflow"),
+    ],
+)
+@pytest.mark.parametrize("entrypoint", ["launcher", "reference"])
+def test_rejects_malformed_tensor_factors_without_casting(entrypoint, factors):
+    from rocke.examples.gfx1250.gemm.block_scaled_gemm_verify import _launch
+
+    class Runtime:
+        def alloc(self, size):
+            pytest.fail("invalid factors reached GPU allocation")
+
+    spec = NvFp4GemmSpec("invalid_factors", 16, 16, 128)
+    inputs, _ = make_case_inputs(spec, "mixed")
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        with pytest.raises(ValueError, match="tensor"):
+            if entrypoint == "launcher":
+                _launch(
+                    Runtime(), None, spec.block_spec(), inputs, tensor_scales=factors
+                )
+            else:
+                reference_result(*inputs, factors)
+
+
+@pytest.mark.parametrize("factors", [(1, 2), np.array([1.3, 0.7], dtype=np.float32)])
+def test_reference_accepts_real_numeric_tensor_factors(factors):
+    spec = NvFp4GemmSpec("real_factors", 16, 16, 128)
+    inputs, _ = make_case_inputs(spec, "mixed")
+    expected = reference_result(*inputs, tuple(float(factor) for factor in factors))
+    np.testing.assert_array_equal(reference_result(*inputs, factors), expected)

@@ -21,7 +21,13 @@ from ....instances.gfx1250.nvfp4_gemm import (
     is_valid_spec,
 )
 from ....runtime.hip_module import Runtime, get_device_arch
-from .block_scaled_gemm_verify import _launch, check_result, decode_fp4, pack_fp4_codes
+from .block_scaled_gemm_verify import (
+    _launch,
+    _tensor_factors_fp32,
+    check_result,
+    decode_fp4,
+    pack_fp4_codes,
+)
 
 
 def decode_e4m3_scales(encoded: np.ndarray) -> np.ndarray:
@@ -50,9 +56,7 @@ def reference_result(a, b, sa, sb, tensor_scales, *, dtype_c="bf16") -> np.ndarr
     n, kb = db.shape
     if k != kb or k % 16 or sa.shape != (m, k // 16) or sb.shape != (k // 16, n):
         raise ValueError("incompatible packed matrix or K=16 block-scale shapes")
-    factors = np.asarray(tensor_scales, dtype=np.float32)
-    if factors.shape != (2,) or not np.isfinite(factors).all():
-        raise ValueError("expected two finite FP32 tensor dequantization factors")
+    factors = _tensor_factors_fp32(tensor_scales)
     a_real = da * np.repeat(decode_e4m3_scales(sa), 16, axis=1)
     b_real = db * np.repeat(decode_e4m3_scales(sb).T, 16, axis=1)
     acc = (a_real @ b_real.T).astype(np.float32)
