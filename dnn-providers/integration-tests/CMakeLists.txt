@@ -174,7 +174,6 @@ endforeach()
 if(HIPDNN_IT_WORKLOAD_ARCHIVES)
     list(LENGTH HIPDNN_IT_WORKLOAD_ARCHIVES workload_count)
     message(STATUS "Integration tests: extracted ${workload_count} dnn-benchmarking workload archive(s)")
-    set_property(GLOBAL PROPERTY HIPDNN_IT_WORKLOADS_EXTRACTED TRUE)
 endif()
 
 if(Python3_FOUND)

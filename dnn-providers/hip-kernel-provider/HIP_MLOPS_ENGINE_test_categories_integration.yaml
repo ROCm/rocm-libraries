@@ -95,7 +95,10 @@ test_categories:
     description: "Complete external integration coverage"
     test_patterns:
       - "*"
-    exclude: *common_excludes
+    exclude:
+      - "*DISABLED*"
+      # dnn-benchmarking workloads run in their own category (too slow for full).
+      - "dnn_benchmarking_*"
     labels:
       - "full"
       - "all"

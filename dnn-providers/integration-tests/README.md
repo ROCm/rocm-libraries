@@ -311,19 +311,18 @@ cmake ...               # re-run configure; archives are extracted into the buil
 Configure extracts each archive to `integration-test-bundles/dnn-benchmarking/<name>/`
 in the build tree. Discovery registers every graph `.json` as a graph-only
 bundle test (outside the quick/standard/full tiers), verified against the
-reference executor. Nothing is committed to the bundle tree. Provider
-categories that match `*` (the `full` category) run these tests when the
-archives are present; `quick`, `standard` and `comprehensive` do not.
+reference executor. Nothing is committed to the bundle tree.
 
-Each provider also registers one CTest entry per engine when the archives are
-present, `<provider>-external-integration-check-dnn-benchmarking`, labeled
-`dnn_benchmarking`, that runs that engine's share (`WORKLOAD_GTEST_FILTER` in the
-provider's CMakeLists): MIOpen runs `conv`, `bnorm` and `rocke_conv`, hipBLASLt
-runs `hipblaslt_*`. Run them with `ctest -L dnn_benchmarking` on a machine with a
-GPU. The superbuild CI builds on a runner with no GPU, so it excludes the label
-from its main `ctest` and only lists the entries to prove they registered; it
-does not execute them. `attn`, `norm`, `moe` and `rocke_sdpa` are not registered
-for any engine yet.
+They run in their own `dnn-benchmarking` category (label `dnn_benchmarking`) in
+each provider's `test_categories_integration.yaml`, not in `quick`, `standard`,
+`comprehensive` or `full`: `full` excludes `dnn_benchmarking_*`, because the
+suites take hours. MIOpen's category runs `conv`, `bnorm` and `rocke_conv`;
+hipBLASLt's runs `hipblaslt_*`. On a GPU machine, run one with
+`ctest -L dnn_benchmarking` in that provider's build, or with
+`--gtest_filter='dnn_benchmarking_*'`. `attn`, `norm`, `moe` and `rocke_sdpa` are
+not in any engine's category yet. The superbuild CI builds on a runner with no
+GPU, so it only proves the pointers fetch and the archives extract; no CI lane
+executes the category yet.
 
 hipBLASLt matmul graphs are verified on the CPU (the GPU reference does not cover
 matmul), at about 3 GMAC/s. `HIPBLASLT_ENGINE.toml` therefore skips the 55 shapes
