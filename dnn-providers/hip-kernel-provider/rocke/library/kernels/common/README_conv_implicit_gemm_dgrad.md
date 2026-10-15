@@ -249,8 +249,9 @@ strides and zero offsets fold into the address arithmetic. The magic-division
 table is still read, from its one entry after the one record (constant
 offsets). The condition is the stride alone, which an AOT binary carries as
 its stride capability: the AOT grid builds a stride-1 / dilation-1 binary of
-every configuration next to the tilde binary, and the cache offers it to
-stride-1, dilation-1 problems only. The ABI is unchanged.
+every wave64 MFMA configuration (with the tap-outer K loop below) next to the
+tilde binary, and the cache offers it to stride-1, dilation-1 problems only.
+The ABI is unchanged.
 
 ## Tap-outer K loop (`tap_outer_k`)
 
@@ -265,8 +266,10 @@ required; unlike `uniform_k_decode` there is no fallback loop, so the validator
 rejects a problem that breaks it (and stride or dilation other than 1,
 `split_k > 1`, wave32 / the wavelet pipeline, and `uniform_k_decode=True`,
 whose loop it replaces), and the AOT cache offers the binary only to problems
-with `kpg % tile_k == 0`. Default `False`; the name gains `_tapk`. The AOT grid
-builds it next to the stride-1 binary of every wave64 MFMA configuration. The
+with `kpg % tile_k == 0`. Default `False`; the name gains `_tapk`. It is the
+only stride-1 binary the AOT grid builds (on every wave64 MFMA configuration
+outside the wavelet pipeline): a flat-loop stride-1 binary would serve the
+problems the tilde binary of its configuration already serves. The
 loop reduces in the same order as the flat loop, so `dX` matches it bit for
 bit.
 
