@@ -137,6 +137,8 @@ TEST(Core, ScalarDispatchTags) {
         int calls = 0;
         visitScalarType(type, [&]<typename Tag>() {
             ++calls;
+            // Code that knows its encoding at compile time names this same tag type.
+            static_assert(std::is_same_v<Tag, detail::ScalarTag<Tag::type>>);
             EXPECT_EQ(Tag::type, type);
             EXPECT_EQ(Tag::storageBits, scalarTypeInfo(type).storageBits);
             EXPECT_EQ(std::is_void_v<typename Tag::Storage>, scalarTypeInfo(type).isPacked());
