@@ -60,8 +60,8 @@ from .wmma_rules import WMMA_PATH, WmmaProblem, WmmaSpace, wmma_variants
 ATTENTION_GFX1151_ABI = "rocke-attention-gfx1151/v6"
 
 # Compute units of the reference gfx1151 part, where the output-column tiling
-# gate was tuned. Used only when the request names no count and no device of the
-# request's family is visible (cross-compiles and AOT packaging).
+# gate was tuned. Used only when the request names no count and device 0 cannot
+# run the requested object (cross-compiles and AOT packaging).
 _DEFAULT_NUM_CUS = 40
 # Workgroups per CU the tiled-value path is expected to keep in flight; the
 # tiling gate admits a request while its query groups fit this many per CU
@@ -73,9 +73,9 @@ _TILED_VALUE_GROUP_WEIGHT = 5
 def _resolve_num_cus(req: AttentionRequest) -> int:
     """Compute units used by CU-aware selection.
 
-    The live count is used only when the visible device runs code objects of the
-    request's generic family, so a cross-compile never bakes in another part's
-    size.
+    The live count of device 0 is used only when that device runs the requested
+    code object: any member of the family for a generic request, the named
+    processor otherwise. A cross-compile never bakes in another part's size.
     """
     n = int(req.num_cus)
     if n > 0:
@@ -85,7 +85,13 @@ def _resolve_num_cus(req: AttentionRequest) -> int:
 
         device = get_device_target_id()
         family = generic_arch_from_target_id(req.arch)
-        if device and family and generic_arch_from_target_id(device) == family:
+        if not device or not family:
+            return _DEFAULT_NUM_CUS
+        if req.arch == family:
+            matches = generic_arch_from_target_id(device) == family
+        else:
+            matches = device.split(":", 1)[0] == req.arch
+        if matches:
             live = _device_num_cus()
             if live and live > 0:
                 return 2 * int(live)

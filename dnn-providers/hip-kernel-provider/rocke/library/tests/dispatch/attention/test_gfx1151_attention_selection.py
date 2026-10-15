@@ -376,8 +376,8 @@ class TestGfx1151AttentionSelection(unittest.TestCase):
 
     def test_live_device_compute_units_are_doubled_for_wgp_mode(self):
         # HIP reports WGPs on RDNA: 20 WGPs is 40 CUs (tiles); 16 is 32 CUs (128
-        # groups no longer fit, so the full-head kernel is kept). Any device of
-        # the request's generic family supplies the live count.
+        # groups no longer fit, so the full-head kernel is kept). A generic
+        # request reads any device of its family; a processor request its own.
         for device, arch in (("gfx1151", "gfx1151"), ("gfx1100", "gfx11-generic")):
             request = dataclasses.replace(self._unset_cu_request(), arch=arch)
             with self.subTest(device=device, arch=arch), mock.patch(
@@ -396,12 +396,17 @@ class TestGfx1151AttentionSelection(unittest.TestCase):
                         dispatch_attention(request).spec.value_tile_size, 0
                     )
 
-    def test_device_outside_the_requested_family_keeps_the_reference_count(self):
-        request = dataclasses.replace(self._unset_cu_request(), arch="gfx11-generic")
-        with mock.patch(
-            "rocke.runtime.hip_module.get_device_target_id", return_value="gfx942"
-        ), mock.patch("dispatch.attention.gfx1151._device_num_cus", return_value=16):
-            self.assertGreater(dispatch_attention(request).spec.value_tile_size, 0)
+    def test_device_that_cannot_run_the_object_keeps_the_reference_count(self):
+        # A gfx942 host for a generic object, and a sibling gfx1100 host for a
+        # gfx1151-specific object, must not lend their CU count.
+        for device, arch in (("gfx942", "gfx11-generic"), ("gfx1100", "gfx1151")):
+            request = dataclasses.replace(self._unset_cu_request(), arch=arch)
+            with self.subTest(device=device, arch=arch), mock.patch(
+                "rocke.runtime.hip_module.get_device_target_id", return_value=device
+            ), mock.patch(
+                "dispatch.attention.gfx1151._device_num_cus", return_value=16
+            ):
+                self.assertGreater(dispatch_attention(request).spec.value_tile_size, 0)
 
     def test_sweep_space_offers_distinct_valid_variants_baseline_first(self):
         for changes in (

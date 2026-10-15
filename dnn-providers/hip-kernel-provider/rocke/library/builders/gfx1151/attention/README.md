@@ -156,13 +156,14 @@ Public dispatch uses this profile for dense D256 requests with Q-matched KV
 storage and for dense D128 requests with FP8 KV storage, with no extra score
 features or window, at least 128 KV tokens, and few enough query workgroups to
 underfill the device before output tiling (`query_groups * 5 <= CUs * 16`, the
-live CU count of a device of the request's family, or 40). D128 FP8 uses
-32-column tiles. D256 noncausal prefill uses 32-column tiles with V-LDS staging
-for processor-specific gfx1151 objects and 64-column tiles for generic objects;
-causal prefill uses 64-column tiles with direct V gathers; queries of at most
-16 rows use 64-column tiles with V-LDS staging. Other requests retain their
-existing policy. The tile width is part of the cache identity; native consumers
-must rebuild against the extended spec header.
+live CU count of device 0 when it runs the requested object, or 40). D128 FP8
+uses 32-column tiles. D256 noncausal prefill stages V through LDS, with
+64-column tiles for gfx11-generic objects and 32-column tiles otherwise
+(processor-specific gfx1151, gfx12); causal prefill uses 64-column tiles with
+direct V gathers; queries of at most 16 rows use 64-column tiles with V-LDS
+staging.
+Other requests retain their existing policy. The tile width is part of the
+cache identity; native consumers must rebuild against the extended spec header.
 
 Numeric regressions place all QK signal in the final head dimension, so an
 incorrectly shortened QK reduction fails even in the first output partition.
@@ -456,12 +457,13 @@ Nothing in the kernel names a processor:
   generic target. Tests, the benchmark and hip-kernel-provider packaging use it;
   `base_arch_from_target_id()` is unchanged, so `arch="gfx1151"` still builds
   processor-specific objects.
-- CU-aware selection reads the live CU count from any device of the request's
-  generic family (HIP reports WGPs on RDNA, so the count is doubled). The
-  output-column tiling gate therefore scales with the device: a 96-CU gfx1100
-  admits more query groups than the 40-CU gfx1151 the gate was tuned on. The
-  40-CU default applies only when the request names no count and no device of
-  its family is visible (cross-compiles and AOT packaging).
+- CU-aware selection reads the live CU count of device 0 when that device runs
+  the requested object: any member of the family for a generic request, the
+  named processor for a processor-specific one (HIP reports WGPs on RDNA, so the
+  count is doubled). The output-column tiling gate therefore scales with the
+  device: a 96-CU gfx1100 admits more query groups than the 40-CU gfx1151 the
+  gate was tuned on. The 40-CU default applies when the request names no count
+  and device 0 cannot run the object (cross-compiles and AOT packaging).
 
 The generic register model differs from gfx1151's: generic code allocates fewer
 VGPRs and the default machine scheduler keeps fewer V gathers in flight. The
