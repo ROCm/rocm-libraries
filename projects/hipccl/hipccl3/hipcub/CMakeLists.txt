@@ -126,24 +126,6 @@ else()
   set(ROCM_ROOT "/opt/rocm" CACHE PATH "Root directory of the ROCm installation")
 endif()
 
-# Set up options for obtaining dependency rocPRIM.
-# PACKAGE: Search for an install package that contains the dependency.
-# MONOREPO: Assume this is a monorepo checkout and search for the dependency in the directory at ../../projects/.
-# DOWNLOAD: Download the dependency from the monorepo.
-set(FETCH_METHOD_OPTIONS "PACKAGE" "MONOREPO" "DOWNLOAD")
-
-set(ROCPRIM_FETCH_METHOD "PACKAGE" CACHE STRING "How to obtain the rocPRIM dependency")
-
-# This function checks to see if the fetch method variable it's passed is defined, and contains a valid value.
-# If it does not contain a valid value, it issues a fatal failure with an error message.
-function(check_fetch_method method)
-  if (DEFINED ${method} AND NOT ${${method}} IN_LIST FETCH_METHOD_OPTIONS)
-    message(FATAL_ERROR "Unrecognized ${method}: \"${${method}}\". Valid options are: ${FETCH_METHOD_OPTIONS}.")
-  endif()
-endfunction()
-
-check_fetch_method(ROCPRIM_FETCH_METHOD)
-
 # Add project and ROCm-related CMake module paths.
 list(APPEND CMAKE_MODULE_PATH
   # Shared within monorepo:
