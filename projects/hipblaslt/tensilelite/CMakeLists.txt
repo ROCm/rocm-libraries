@@ -290,23 +290,3 @@ if(TENSILELITE_ENABLE_HOST)
 endif()
 
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/tensilelite_packaging.cmake")
-
-# TensileCreateLibrary imports this module to write MessagePack libraries.
-# A client build can be asked to generate and run a kernel, and a device-library
-# build writes the library, so both of those builds produce the module.
-# gemm-libs sets TENSILELITE_ENABLE_HOST=OFF and still generates libraries.
-if(HIPBLASLT_ENABLE_DEVICE OR TENSILELITE_ENABLE_CLIENT
-        OR (TENSILELITE_ENABLE_HOST AND NOT HIPBLASLT_ENABLE_YAML))
-    add_subdirectory(write)
-endif()
-if(TARGET tensilelite_write)
-    if(TARGET tensilelite-client)
-        add_dependencies(tensilelite-client tensilelite_write)
-    endif()
-    if(TARGET cpu-gemm-driver)
-        add_dependencies(cpu-gemm-driver tensilelite_write)
-    endif()
-    if(TARGET RunPythonScript)
-        add_dependencies(RunPythonScript tensilelite_write)
-    endif()
-endif()

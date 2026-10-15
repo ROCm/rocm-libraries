@@ -271,9 +271,9 @@ if(HIPBLASLT_ENABLE_ROCROLLER)
     endif()
 endif()
 
-# Device-library generation and the tensilelite client write MessagePack even
-# when the host library itself is compiled for YAML.
-if(NOT HIPBLASLT_ENABLE_YAML OR HIPBLASLT_ENABLE_DEVICE OR TENSILELITE_ENABLE_CLIENT)
+# Device-library generation writes MessagePack even when the host library
+# itself is compiled for YAML, so find msgpack in that configuration too.
+if(NOT HIPBLASLT_ENABLE_YAML OR HIPBLASLT_ENABLE_DEVICE)
     # See: https://github.com/msgpack/msgpack-c/wiki/Q%26A#how-to-support-both-msgpack-c-c-version-5x-and-6x-
     # Prefer 6.x (msgpack-cxx)
     set(hipblaslt_msgpack_fetched FALSE)
@@ -461,9 +461,6 @@ set(BUILD_SHARED_LIBS "${HIPBLASLT_BUILD_SHARED_LIBS}")
 
 if(HIPBLASLT_ENABLE_HOST)
     add_library(hipblaslt)
-    if(TARGET tensilelite_write)
-        add_dependencies(hipblaslt tensilelite_write)
-    endif()
     if(WIN32 AND BUILD_SHARED_LIBS AND _hipblaslt_have_version_rc)
         target_sources(
             hipblaslt
