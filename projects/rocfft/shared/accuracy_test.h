@@ -36,6 +36,7 @@
 #include "fft_params.h"
 #include "fftw_transform.h"
 #include "gpubuf.h"
+#include "input_preservation.h"
 #include "reference_fft_data.h"
 #include "rocfft_against_fftw.h"
 #include "sys_mem.h"
@@ -670,7 +671,13 @@ inline void fft_vs_reference_impl(Tparams& params, bool round_trip)
     std::vector<hostbuf> gpu_output
         = allocate_host_buffer(params.precision, params.otype, params.osize);
 
+    input_preservation_check input_check(params, pibuffer);
+
     execute_gpu_fft(params, pibuffer, pobuffer, *obuffer, gpu_output);
+
+    // Grab the input image before the round-trip inverse below, which writes
+    // its output into pibuffer and so destroys this transform's input.
+    input_check.snapshot_after();
 
     params.free();
 
@@ -819,6 +826,16 @@ inline void fft_vs_reference_impl(Tparams& params, bool round_trip)
                                                 cpu_input_norm.get(),
                                                 total_length);
         }
+    }
+
+    // Report a clobbered input only once the transform is known to be
+    // otherwise correct.  A transform that gets the wrong answer is diagnosed
+    // by the accuracy failure above, and adding a second failure on top of it
+    // just obscures which one to chase.
+    if(!::testing::Test::HasFailure())
+    {
+        const auto input_modified = input_check.verify();
+        EXPECT_TRUE(input_modified.empty()) << input_modified << params.str();
     }
 }
 
