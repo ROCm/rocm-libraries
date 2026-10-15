@@ -359,13 +359,13 @@ static void applyClusterBarrierSccRule(
 
 // GIR frame cluster lead. FrameMap owns RAW identity; GirFencePlacementPass's shared query turns
 // that exact frame analysis into the physical publication anchors the wait pass will later
-// materialize. Tensor loads emitted after a window are pulled between its two frame-proven
-// publication points.
+// materialize. Tensor loads emitted after a window are held back to `delayCycles` after its first
+// publication point. This is a placement rule on the load, not a dependency: it adds no DAG edge,
+// since the markers read other LDS slots than the load writes.
 static void applyClusterBarrierTensorLoadDelay(
     DAGNodeList& dagNodes, const std::unordered_map<StinkyInstruction*, unsigned>& instToId,
     std::vector<std::unordered_set<unsigned>>& dagGraph, const std::vector<int>& cumCycles,
-    const GirRawPlacementPlan& rawPlacements, int delayCycles,
-    std::vector<HardSchedulingConstraint>& requestedConstraints) {
+    const GirRawPlacementPlan& rawPlacements, int delayCycles) {
     if (delayCycles <= 0 || rawPlacements.tensorMarkers.size() < 2) return;
 
     std::vector<unsigned> markers;
@@ -405,14 +405,11 @@ static void applyClusterBarrierTensorLoadDelay(
         }
         if (loads.empty()) continue;
 
-        // The two RAW placements bound one static scheduling window. Every added edge must be
-        // legal together; otherwise leave the whole group unchanged rather than splitting one
-        // frame-proven cluster group into partially delayed loads.
-        bool legal = !dag::hasPath(dagGraph, secondId, firstId);
-        for (unsigned loadId : loads) {
-            legal &= !dag::hasPath(dagGraph, loadId, firstId);
-            legal &= !dag::hasPath(dagGraph, secondId, loadId);
-        }
+        // A load waits for the first RAW point to issue, so that point must not depend on any
+        // load; otherwise leave the whole group unchanged rather than splitting one frame-proven
+        // cluster group into partially delayed loads.
+        bool legal = true;
+        for (unsigned loadId : loads) legal &= !dag::hasPath(dagGraph, loadId, firstId);
         if (!legal) {
             PASS_DEBUG(std::cerr << "[DAG RAW tensor window] skip constrained window " << firstId
                                  << " -> " << secondId << "\n");
@@ -420,16 +417,12 @@ static void applyClusterBarrierTensorLoadDelay(
         }
 
         for (unsigned loadId : loads) {
-            // A placement window, not a data dependency: request it so it is cycle-checked and
-            // tagged "(hard constraint)" instead of being indistinguishable from a real edge.
-            requestedConstraints.emplace_back(dagNodes[firstId].inst, dagNodes[loadId].inst);
-            requestedConstraints.emplace_back(dagNodes[loadId].inst, dagNodes[secondId].inst);
             dagNodes[loadId].tensorLoadDelayAnchorId = firstId;
             dagNodes[loadId].tensorLoadDelayCycles = delayCycles;
             PASS_DEBUG(std::cerr << "[DAG RAW tensor window] hold tensor_load dagId=" << loadId
                                  << " after RAW dagId=" << firstId << " until +" << delayCycles
-                                 << " cycles; next RAW dagId=" << secondId << " span=" << span
-                                 << "\n");
+                                 << " cycles; window ends at RAW dagId=" << secondId
+                                 << " span=" << span << "\n");
         }
     }
 }
@@ -486,15 +479,12 @@ static void scheduleRegionWithMovableSideEffects(
             cumCycles[k] + (isMatrixInstruction(*inst) ? inst->latencyCycles : inst->issueCycles);
     }
 
-    // Scheduler-policy ordering requests, merged into dagGraph below.
-    std::vector<HardSchedulingConstraint> requestedConstraints;
     if (readyQueue.clusterBarrierEnabled())
         applyClusterBarrierSccRule(dagNodes, instToId, dagGraph, cumCycles[regionSize]);
     applyClusterBarrierTensorLoadDelay(dagNodes, instToId, dagGraph, cumCycles, rawPlacements,
                                        readyQueue.getPassContext()
                                            .getPassFeatureConfig()
-                                           .dagFeatures.clusterBarrierTensorLoadDelayCycles,
-                                       requestedConstraints);
+                                           .dagFeatures.clusterBarrierTensorLoadDelayCycles);
 
     // Pre-scan: assign dsReadPriority to each ds_read based on WMMA affinity
     // and DsReadOrder config. Lower priority = pick first.
@@ -739,6 +729,7 @@ static void scheduleRegionWithMovableSideEffects(
     // DAG, same as any other edge. A candidate edge is dropped when it would form a cycle
     // (these orderings are heuristic, not derived from real data dependencies, so
     // contradictory requests across barrier groups are possible).
+    std::vector<HardSchedulingConstraint> requestedConstraints;
     const dag::RegionDependencies regionDeps{.dag = regionDag,
                                              .requestedConstraints = requestedConstraints};
     readyQueue.onInitRegion(regionStart, regionEnd, blockBegin, regionDeps);
