@@ -434,9 +434,10 @@ namespace stinkytofu {
  * The generated comment-only overload remains the default logical barrier form.
  */
 inline LogicalInstruction* SBarrier(bool separate, bool wait, bool clusterBarrier,
-                                    const std::string& comment = "") {
+                                    const std::string& comment = "", int tensorcnt = -1) {
+    assert(tensorcnt >= -1 && tensorcnt <= 63);
     auto* inst = IRBase::createIR<LogicalInstruction>(logical::SBarrier);
-    inst->setSpecialData(new SBarrierLogicalData(separate, wait, clusterBarrier));
+    inst->setSpecialData(new SBarrierLogicalData(separate, wait, clusterBarrier, tensorcnt));
     inst->comment = comment;
     return inst;
 }
