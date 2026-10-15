@@ -29,7 +29,9 @@ MIGraphX shims) stay on libMIOpen_private.so under their original names.
   1. SONAME is libMIOpen.so.1 (unchanged).
   2. The wrapper's exported public C API set equals ``baseline - excluded``.
   3. No ``*_impl`` symbols are exported from the wrapper.
-  4. libMIOpen_private IS in DT_NEEDED.
+  4. libMIOpen_private IS in DT_NEEDED, and libhipdnn_backend is NOT: the
+     wrapper opens the backend on first use, so a machine without hipDNN must
+     still be able to load libMIOpen.so.
   5. Every excluded symbol is genuinely absent from the installed public header
      (``--public-header``), so the exclusion file cannot be used to silence a
      red gate by quietly dropping a real miopen.h entry point.
@@ -42,6 +44,9 @@ MIGraphX shims) stay on libMIOpen_private.so under their original names.
   8. With ``--private-lib``, every ``miopenFoo_impl`` the private library
      exports has a matching ``miopenFoo`` on the wrapper. A renamed private
      entry point with no wrapper stub is unreachable through libMIOpen.so.
+  9. Optionally (``--needed-baseline``), the full DT_NEEDED list matches a
+     committed baseline. Opt-in because the list names ROCm soversions and the
+     platform's loader, so it changes with routine ROCm updates.
 
 ``check-installed-headers`` -- run on the staged include tree of a flag-on
 build. Fails if the private rename spelling (``miopenFoo_impl``) appears in any
@@ -65,12 +70,12 @@ must match miopen.h, the _impl declaration's signature must match it too (modulo
 the suffix), and each stub must forward to its own _impl symbol and nothing
 else. No artifact may carry an entry the public header does not.
 
-Each stub must also open with MIOPEN_WRAPPER_DISPATCH naming itself. The macro's
-own runtime assert cannot cover this: it is compiled out under NDEBUG, it never
-fires for a stub nothing calls, and a stub missing the macro entirely has no
-assert to fire at all. Such a stub silently loses the ability to ever route to
-hipDNN, which is invisible until the entry point joins the forwarding set and
-keeps running MIOpen anyway.
+Each stub must also open with a dispatch macro -- MIOPEN_WRAPPER_DISPATCH or
+MIOPEN_WRAPPER_FORWARD -- naming itself. The macro's own runtime assert cannot
+cover this: it is compiled out under NDEBUG, it never fires for a stub nothing
+calls, and a stub missing the macro entirely has no assert to fire at all. Such
+a stub silently loses the ability to ever route to hipDNN, which is invisible
+until the entry point joins the forwarding set and keeps running MIOpen anyway.
 
 The provider mirror lives in a sibling project that a MIOpen-only checkout does
 not ship, so it is the one artifact that can be skipped. It is skipped only once
@@ -121,6 +126,7 @@ from pathlib import Path
 
 EXPECTED_SONAME = "libMIOpen.so.1"
 PRIVATE_LIB_PREFIX = "libMIOpen_private"
+HIPDNN_BACKEND_PREFIX = "libhipdnn_backend"
 
 # Public MIOpen C API naming convention: "miopen" followed by an uppercase
 # letter. This deliberately excludes internal exported shims such as
@@ -353,17 +359,24 @@ Update the private files and the provider's mirror to match the public header.
 Do not edit miopen.h to match them -- that changes the public C API.""".rstrip()
 
 DISPATCH_REMEDY = """
-Every stub in src/private/wrapper.cpp must open with the dispatch macro, passing
-its own function token:
+Every stub in src/private/wrapper.cpp must open with exactly one dispatch macro,
+passing its own function token. Use MIOPEN_WRAPPER_DISPATCH where there is
+nothing to forward to yet:
   extern "C" miopenStatus_t miopenFoo(<params>)
   {
       MIOPEN_WRAPPER_DISPATCH(miopenFoo);
       return miopenFoo_impl(<args>);
   }
+and MIOPEN_WRAPPER_FORWARD where there is, passing the hipDNN call as well:
+  extern "C" miopenStatus_t miopenBar(<params>)
+  {
+      MIOPEN_WRAPPER_FORWARD(miopenBar, ::miopen::wrapper::hipdnn::Bar(<args>));
+      return miopenBar_impl(<args>);
+  }
 Pass the token, never a string and never a neighbouring stub's name. A stub
-without the macro can never route to hipDNN, and nothing else reports that: the
-macro's assert needs the macro to be there, and is compiled out under NDEBUG in
-any case.""".rstrip()
+without either macro can never route to hipDNN, and nothing else reports that:
+the macro's assert needs the macro to be there, and is compiled out under NDEBUG
+in any case.""".rstrip()
 
 RANGE_REMEDY = """
 Each miopenConvolution*GetWorkSpaceSizeRange entry point is spelled by hand in
@@ -426,10 +439,11 @@ RANGE_ENTRY_POINTS = frozenset(
     }
 )
 
-# Stubs that must NOT carry MIOPEN_WRAPPER_DISPATCH, and why. The macro returns
-# forward_to_hipdnn's miopenStatus_t, so a stub returning anything else cannot
-# host it. Exemptions are checked in both directions: an exempt stub that grows
-# the macro fails here rather than failing to compile somewhere less obvious.
+# Stubs that must NOT carry a dispatch macro, and why. MIOPEN_WRAPPER_DISPATCH
+# returns forward_to_hipdnn's miopenStatus_t, so a stub returning anything else
+# cannot host it. Exemptions are checked in both directions: an exempt stub that
+# grows the macro fails here rather than failing to compile somewhere less
+# obvious.
 DISPATCH_EXEMPT = {
     "miopenGetErrorString": "returns const char*, not miopenStatus_t",
 }
@@ -469,8 +483,18 @@ DECL_RE = re.compile(
     r"(?P<ret>.*?)(?P<name>miopen[A-Za-z0-9_]*)\s*\((?P<params>[^()]*)\)"
 )
 IMPL_CALL_RE = re.compile(r"\b(miopen[A-Za-z0-9_]*_impl)\s*\(")
+# Both dispatch macros are matched by one pattern, and only as far as the entry
+# point token: MIOPEN_WRAPPER_FORWARD's second argument is an arbitrary call
+# expression with parentheses of its own, which a regex has no business chasing.
+# Matching both names together is also what reports a stub carrying one of each,
+# which reads as two dispatch macros on one stub. Each macro keeps its own arity,
+# so a DISPATCH given a second argument (a FORWARD half-converted, or the reverse)
+# does not count as a dispatch and the stub is reported.
 DISPATCH_RE = re.compile(
-    r"\bMIOPEN_WRAPPER_DISPATCH\s*\(\s*(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s*\)"
+    r"\bMIOPEN_WRAPPER_(?:"
+    r"DISPATCH\s*\(\s*(?P<dispatch>[A-Za-z_][A-Za-z0-9_]*)\s*\)"
+    r"|FORWARD\s*\(\s*(?P<forward>[A-Za-z_][A-Za-z0-9_]*)\s*,"
+    r")"
 )
 # A declarator for one of the range entry points, in either of the two forms it
 # is written in: a declaration ending in ';' and a definition followed by its
@@ -647,12 +671,12 @@ def parse_range_prototypes(source: str, what: str) -> dict[str, tuple[str, ...]]
 def parse_wrapper(
     source: str,
 ) -> tuple[dict[str, tuple[str, ...]], dict[str, set[str]], dict[str, list[str]]]:
-    """Collect each stub's prototype, the _impl symbols it calls, and its
-    MIOPEN_WRAPPER_DISPATCH arguments.
+    """Collect each stub's prototype, the _impl symbols it calls, and the entry
+    point named by its MIOPEN_WRAPPER_DISPATCH / MIOPEN_WRAPPER_FORWARD macros.
 
-    Dispatches stay an ordered list rather than a set so that a stub carrying the
-    macro twice is visible as such instead of collapsing into a correct-looking
-    single entry.
+    Dispatches stay an ordered list rather than a set so that a stub carrying a
+    dispatch macro twice is visible as such instead of collapsing into a
+    correct-looking single entry.
     """
     text = strip_comments(source)
     protos: dict[str, tuple[str, ...]] = {}
@@ -664,7 +688,10 @@ def parse_wrapper(
             raise AbiError(f"duplicate definition of {name} in wrapper")
         protos[name] = sig
         forwards[name] = set(IMPL_CALL_RE.findall(match.group("body")))
-        dispatches[name] = DISPATCH_RE.findall(match.group("body"))
+        dispatches[name] = [
+            m.group("dispatch") or m.group("forward")
+            for m in DISPATCH_RE.finditer(match.group("body"))
+        ]
     return protos, forwards, dispatches
 
 
@@ -833,6 +860,19 @@ def check_private_dep(elf: Elf, expect_present: bool) -> bool:
             f"FAIL: flag-off libMIOpen.so has DT_NEEDED on {PRIVATE_LIB_PREFIX} "
             "(not self-contained)"
         )
+    return False
+
+
+def check_no_backend_dep(elf: Elf) -> bool:
+    linked = sorted(n for n in elf.needed() if n.startswith(HIPDNN_BACKEND_PREFIX))
+    if not linked:
+        print(f"PASS: DT_NEEDED on {HIPDNN_BACKEND_PREFIX} is absent as expected")
+        return True
+    print(
+        f"FAIL: wrapper has DT_NEEDED on {', '.join(linked)}, which makes hipDNN a"
+        " hard install dependency of every MIOpen consumer. Link the frontend's"
+        " dynamic-loading variant instead"
+    )
     return False
 
 
@@ -1130,21 +1170,23 @@ def check_wrapper_forwards(forwards: dict[str, set[str]]) -> bool:
 
 
 def check_wrapper_dispatch(dispatches: dict[str, list[str]]) -> bool:
-    """Assert every stub opens with MIOPEN_WRAPPER_DISPATCH naming itself."""
+    """Assert every stub opens with a dispatch macro naming itself."""
     findings: list[str] = []
     for name, args in sorted(dispatches.items()):
         exempt_reason = DISPATCH_EXEMPT.get(name)
         if exempt_reason is not None:
             if args:
                 findings.append(
-                    f"  {name} carries MIOPEN_WRAPPER_DISPATCH but is exempt"
+                    f"  {name} carries a dispatch macro but is exempt"
                     f" ({exempt_reason}); drop the macro or the exemption"
                 )
         elif not args:
-            findings.append(f"  {name} has no MIOPEN_WRAPPER_DISPATCH")
+            findings.append(
+                f"  {name} has no MIOPEN_WRAPPER_DISPATCH or MIOPEN_WRAPPER_FORWARD"
+            )
         elif len(args) > 1:
             findings.append(
-                f"  {name} has {len(args)} MIOPEN_WRAPPER_DISPATCH calls"
+                f"  {name} has {len(args)} dispatch macros"
                 f" ({', '.join(args)}); expected exactly one"
             )
         elif args[0] != name:
@@ -1157,7 +1199,7 @@ def check_wrapper_dispatch(dispatches: dict[str, list[str]]) -> bool:
     exempt = sorted(DISPATCH_EXEMPT.keys() & dispatches.keys())
     for name in sorted(DISPATCH_EXEMPT.keys() - dispatches.keys()):
         findings.append(
-            f"  {name} is exempt from MIOPEN_WRAPPER_DISPATCH but has no stub;"
+            f"  {name} is exempt from the dispatch macros but has no stub;"
             " drop the exemption"
         )
     if not findings:
@@ -1251,6 +1293,10 @@ def cmd_check_wrapper(args) -> int:
     )
     ok &= check_no_impl(elf, "wrapper")
     ok &= check_private_dep(elf, expect_present=True)
+    ok &= check_no_backend_dep(elf)
+
+    if args.needed_baseline:
+        ok &= check_needed_baseline(elf, args.needed_baseline)
 
     if args.public_header:
         ok &= check_excluded_not_public(excluded, args.public_header)
@@ -1531,6 +1577,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--public-header",
         help="path to include/miopen/miopen.h; when given, no excluded symbol "
         "may be declared there",
+    )
+    p.add_argument(
+        "--needed-baseline",
+        help="optional committed DT_NEEDED baseline; when given, the full "
+        "runtime dependency list must match it exactly. The private-library and "
+        "hipDNN-backend entries are checked either way",
     )
     p.set_defaults(func=cmd_check_wrapper)
 

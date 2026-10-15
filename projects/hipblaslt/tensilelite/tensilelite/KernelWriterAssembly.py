@@ -1321,6 +1321,9 @@ class KernelWriterAssembly(KernelWriter):
     # MFMA case
     if kernel["UseMFMAF32XEmulation"]:
       self.moduleVgprMacroValuB_T.add(RegSet("v", "IdentityMatrix", self.states.startVgprIdentityMatrix, 0))
+    # TF32 Inf Support
+    if self.states.useTF32EmuInfSupport:
+      self.moduleVgprMacroValuB_T.add(RegSet("v", "InfCheck", self.states.startVgprInfCheck, 0))
 
   def _emitGL2PrefetchAddrRegSets(self, module, kernel, tPA, tPB):
     """Emit RegSet declarations for GL2 prefetch address vgprs (A, B, and MX scale variants)."""
@@ -3133,7 +3136,10 @@ class KernelWriterAssembly(KernelWriter):
         # numSgprPreload spans the common args header, argLoader offsets start past it.
         preloadedArgs = max(0, self.states.numSgprPreload - self.states.userArgsInfo.commonArgsNum)
         pendingBytes = self.argLoader.getOffset() - preloadedArgs * self.states.bpr        
-        if kernel["ProblemType"]["SupportUserArgs"]:
+        if kernel["ProblemType"]["GroupedGemm"]:
+          # ArgType 1 and 2 reload the found gemm's args after the gemm search.
+          moduleWg.add(SWaitCnt(kmcnt=0, comment="wait for grouped gemm kern args"))
+        elif kernel["ProblemType"]["SupportUserArgs"]:
           if preloadedArgs <= (self.sgprs["Alpha"] - self.sgprs["SizesFree"]):
             moduleWg.add(SWaitCnt(kmcnt=0, comment="wait for %u/%u bytes of kern args over preload" % \
                           (pendingBytes, self.externalArgLoader.getOffset())))
@@ -11823,7 +11829,11 @@ class KernelWriterAssembly(KernelWriter):
       # PrefetchGlobalRead>=2 + (oneBufferScheduling or tailLoop) case, generate local read wait for DirectToLds
       # Early exit + Tailloop case, barrier sync might not be executed when reaching Tailloop.
       # Need sync before running GR for Tailloop.
-      if kernel["PrefetchGlobalRead"]>=2 and (self.states.oneBufferScheduling or tail) and not skipWait:
+      # A persistent kernel issues the first prefetch of the next tile while slower waves can still be
+      # reading LDS in the previous tile's store (the bias and scaleAlpha vectors are staged there).
+      nextTilePrefetch = mode == 0 and isPersistent(kernel) and not self.isPrefetchAcrossPersistentEnabled(kernel)
+      if kernel["PrefetchGlobalRead"]>=2 and (self.states.oneBufferScheduling or tail or nextTilePrefetch) \
+         and not skipWait:
         # do not generate local read wait for PGR=2
         DtldsModule.addComment0("before DirectToLds load, ensure prior ds_reads have finished")
         DtldsModule.add(SWaitCnt(dscnt=0, comment=""))
