@@ -641,9 +641,11 @@ def writeSolutionsAndKernels(
     unaryWriteAssembly = functools.partial(writeAssembly, assemblyTmpPath)
     compose = lambda *F: functools.reduce(lambda f, g: lambda x: f(g(x)), F)
     with timing_context("python_kernel_write_assemble"):
+        # Duplicates share one .s/.o path; assemble each unique kernel once to avoid a parallel race.
+        uniqueResults = [r for r, k in zip(asmResults, asmKernels) if not k.duplicate]
         ret = ParallelMap2(
             compose(assemble, unaryWriteAssembly),
-            asmResults,
+            uniqueResults,
             "Writing assembly kernels",
             return_as="list",
             multiArg=False,
@@ -765,7 +767,7 @@ def writeSolutionsAndKernelsTCL(
     unaryAssemble = functools.partial(assemble, removeTemporaries=removeTemporaries)
 
     outOptions = rocisa.rocIsa.getInstance().getOutputOptions()
-    outOptions.outputNoComment = not disableAsmComments
+    outOptions.outputNoComment = disableAsmComments
 
     memcompress = len(uniqueAsmKernels) > 10000
     unaryProcessKernelSource = functools.partial(
@@ -1311,12 +1313,11 @@ def run():
     arguments = parseArguments()
     setVerbosity(arguments["PrintLevel"])
     outputPath = Path(ensurePath(os.path.abspath(arguments["OutputPath"])))
-    cxxCompiler, _, offloadBundler, _, _ = validateToolchain(
+    cxxCompiler, _, offloadBundler, _ = validateToolchain(
         arguments["CxxCompiler"],
         arguments["CCompiler"],
         arguments["OffloadBundler"],
         arguments["Assembler"],
-        ToolchainDefaults.HIP_CONFIG,
     )
 
     if ";" in arguments["Architecture"]:
