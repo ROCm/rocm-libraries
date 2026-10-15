@@ -559,6 +559,25 @@ _LDS_K_OUTER_ARCH = "gfx950"  # the wave64 regime
 _KOUTER_PAD = 8
 
 
+def _default_lds_k_pad(tile_k: int) -> int:
+    """Row pad of the M-outer LDS tiles when ``lds_k_pad`` is None."""
+    return 8 if tile_k >= 16 else 0
+
+
+# Upper bound on fp32 accumulators per lane accepted by is_valid_dgrad_spec.
+# Mirrors ROCKE_DGRAD_MAX_ACC_REGS_PER_LANE.
+_MAX_ACC_REGS_PER_LANE = 256
+
+
+def _acc_regs_per_lane(spec: DgradConvSpec) -> int:
+    """fp32 accumulator registers per lane held by one warp's output tile."""
+    return (
+        spec.mfmas_per_warp_m
+        * spec.mfmas_per_warp_n
+        * (spec.warp_tile_m * spec.warp_tile_n // spec.wave_size)
+    )
+
+
 @dataclass(frozen=True)
 class DgradConvSpec:
     """One concrete implicit-GEMM backward-data convolution configuration.
@@ -853,6 +872,10 @@ class DgradConvSpec:
                 "spkauto": self.split_k == -1,
                 # A different K-loop body; only tagged when set.
                 "ukd": self.uniform_k_decode,
+                # The A row pad changes the LDS layout, so a non-default pad
+                # must reach the name or it collides with the default build.
+                f"kp{self.lds_k_pad}": self.lds_k_pad is not None
+                and self.lds_k_pad != _default_lds_k_pad(self.tile_k),
             },
         )
 
@@ -985,7 +1008,7 @@ class DgradConvSpec:
         elif self.async_dma:
             layout = LdsLayout.packed_async(self.tile_k)
         else:
-            layout = LdsLayout.padded_k(self.tile_k, 8 if self.tile_k >= 16 else 0)
+            layout = LdsLayout.padded_k(self.tile_k, _default_lds_k_pad(self.tile_k))
         layout.validate()
         return layout
 
@@ -1036,6 +1059,74 @@ def _uniform_k_decode_conflict(spec: "DgradConvSpec") -> str:
 # ---------------------------------------------------------------------
 # Arch-aware spec validation
 # ---------------------------------------------------------------------
+
+
+def _dgrad_lds_charge(spec: DgradConvSpec) -> tuple[int, int, int]:
+    """``(a_b_bytes, c_bytes, total_bytes)`` of LDS the builder allocates.
+
+    The builder allocates one A and one B tile whatever the pipeline: compv4
+    is a schedule policy on this kernel, not a second LDS buffer (and
+    async_dma / unroll_k, which would double-buffer, are rejected), so
+    nothing is charged twice.
+    """
+    _ab_dtype_bytes = 4 if spec.data.dtype_a in ("fp32",) else 2
+    _lds_layout = spec.effective_lds_layout()
+    # A is genuinely still M-outer; only B flips, so only B's charge branches.
+    # Both sides read _KOUTER_PAD from the module constant so the charged shape
+    # and the allocated shape cannot drift.
+    _a_shape = _lds_layout.storage_shape(spec.tile_m)
+    _b_shape = (
+        (spec.tile_k, spec.tile_n + _KOUTER_PAD)
+        if spec.lds_k_outer
+        else _lds_layout.storage_shape(spec.tile_n)
+    )
+    _ab_bytes = (
+        _a_shape[0] * _a_shape[1] + _b_shape[0] * _b_shape[1]
+    ) * _ab_dtype_bytes
+    _c_dtype_bytes = 4 if spec.data.dtype_d == "fp32" else 2
+    _c_lds = (
+        spec.tile_m * spec.tile_n * _c_dtype_bytes if spec.epilogue == "cshuffle" else 0
+    )
+    # wavelet: A/B stay live across both scf_if_else branches, so the LDS pool
+    # cannot alias C onto the A/B region even when cshuffle_no_alias=False.
+    _no_alias = spec.cshuffle_no_alias or spec.pipeline == "wavelet"
+    _total_lds = (_ab_bytes + _c_lds) if _no_alias else max(_ab_bytes, _c_lds)
+    return _ab_bytes, _c_lds, _total_lds
+
+
+def dgrad_lds_bytes(spec: DgradConvSpec) -> int:
+    """Bytes of LDS one workgroup of ``spec`` allocates.
+
+    The charge :func:`is_valid_dgrad_spec` checks against the LDS capacity.
+    """
+    return _dgrad_lds_charge(spec)[2]
+
+
+def _kouter_frag_reason(spec: DgradConvSpec, arch: str) -> str | None:
+    """Why the K-outer B fragment cannot be read, or None.
+
+    The transpose read returns a fixed number of elements per lane
+    (ds_read_tr16_b64: 4 on wave64; ds_load_tr16_b128: 8 on wave32), so the
+    atom's B fragment length has to be a multiple of it. The builder raises on
+    a violation; this mirrors that rule into the validator so a sweep filters
+    the configuration out instead of losing it to a build error.
+    """
+    if not spec.lds_k_outer:
+        return None
+    try:
+        b_per_lane = _resolve_dgrad_op(spec, arch).b_frag_len
+    except ValueError as e:
+        return str(e)
+    tr_lanes = 8 if spec.wave_size == 32 else 4
+    if b_per_lane % tr_lanes:
+        tr_insn = "ds_load_tr16_b128" if spec.wave_size == 32 else "ds_read_tr16_b64"
+        return (
+            f"lds_k_outer needs a B fragment length that is a multiple of "
+            f"{tr_lanes} ({tr_insn} returns {tr_lanes} elements per lane on "
+            f"wave{spec.wave_size}); got b_per_lane={b_per_lane} for atom "
+            f"{spec.warp_tile_m}x{spec.warp_tile_n}x{spec.warp_tile_k}"
+        )
+    return None
 
 
 def is_valid_dgrad_spec(spec: DgradConvSpec, arch: str = "gfx950") -> Tuple[bool, str]:
@@ -1135,6 +1226,37 @@ def is_valid_dgrad_spec(spec: DgradConvSpec, arch: str = "gfx950") -> Tuple[bool
     ):
         return False, f"unsupported {spec.data.dtype_a} warp_tile {atom} on {arch}"
 
+    # The dgrad builder has no direct global->LDS path, no K-unrolled loop and
+    # no chiplet-swizzled tile order: these knobs used to be accepted and then
+    # silently ignored (async_dma / unroll_k still doubled the charged LDS,
+    # lowering occupancy for nothing). Reject them so a sweep cannot report a
+    # kernel that differs from what its label says. (The WMMA block below gave
+    # the same answer for its family; this covers both.)
+    for flag, label in (
+        (spec.async_dma, "async_dma"),
+        (spec.unroll_k, "unroll_k"),
+        (spec.chiplet_swizzle, "chiplet_swizzle"),
+    ):
+        if flag:
+            return False, (
+                f"dgrad does not implement {label} (the builder has no such path; "
+                f"the flag would be silently ignored)"
+            )
+
+    # Accumulator footprint per lane. At 512 fp32 accumulators the tile alone
+    # fills a wave64's whole register file (256 VGPRs + 256 AGPRs): the
+    # compiler spills to scratch, and such a spilled kernel has been observed
+    # to return wrong dX. A correctness guard, not a no-spill guarantee: some
+    # configs at 256 accumulators still spill (they compute correct dX). The
+    # AOT grid already stops at the same bound (CACHE_MAX_ACC_REGS); this
+    # covers the JIT and dispatch paths.
+    _acc_regs = _acc_regs_per_lane(spec)
+    if _acc_regs > _MAX_ACC_REGS_PER_LANE:
+        return False, (
+            f"accumulator tile needs {_acc_regs} fp32 registers per lane "
+            f"(> {_MAX_ACC_REGS_PER_LANE}); it fills the whole register file"
+        )
+
     if spec.lds_k_outer:
         # This gate has NO counterpart in validate() and that split is the whole
         # point: without it an older target builds cleanly and emits
@@ -1164,35 +1286,14 @@ def is_valid_dgrad_spec(spec: DgradConvSpec, arch: str = "gfx950") -> Tuple[bool
                 "(the wavelet loader writes the B tile M-outer into a K-outer "
                 "allocation)"
             )
+        _kouter_why = _kouter_frag_reason(spec, arch)
+        if _kouter_why is not None:
+            return False, _kouter_why
 
-    _ab_dtype_bytes = 4 if spec.data.dtype_a in ("fp32",) else 2
-    _lds_layout = spec.effective_lds_layout()
-    # A is genuinely still M-outer; only B flips, so only B's charge branches.
-    # Both sides read _KOUTER_PAD from the module constant so the charged shape
-    # and the allocated shape cannot drift.
-    _a_shape = _lds_layout.storage_shape(spec.tile_m)
-    _b_shape = (
-        (spec.tile_k, spec.tile_n + _KOUTER_PAD)
-        if spec.lds_k_outer
-        else _lds_layout.storage_shape(spec.tile_n)
-    )
-    _ab_bytes = (
-        _a_shape[0] * _a_shape[1] + _b_shape[0] * _b_shape[1]
-    ) * _ab_dtype_bytes
-    _double = spec.pipeline == "compv4" or spec.async_dma or spec.unroll_k
-    _ab_lds = _ab_bytes * (2 if _double else 1)
-    _c_dtype_bytes = 4 if spec.data.dtype_d == "fp32" else 2
-    _c_lds = (
-        spec.tile_m * spec.tile_n * _c_dtype_bytes if spec.epilogue == "cshuffle" else 0
-    )
-    # wavelet: A/B stay live across both scf_if_else branches, so the LDS pool
-    # cannot alias C onto the A/B region even when cshuffle_no_alias=False.
-    _no_alias = spec.cshuffle_no_alias or spec.pipeline == "wavelet"
-    _total_lds = (_ab_lds + _c_lds) if _no_alias else max(_ab_lds, _c_lds)
+    _ab_bytes, _c_lds, _total_lds = _dgrad_lds_charge(spec)
     if not target.fits_lds(_total_lds):
         return False, (
-            f"LDS budget {_total_lds} bytes "
-            f"(A/B={'x2 ' if _double else ''}{_ab_bytes}, C={_c_lds}) "
+            f"LDS budget {_total_lds} bytes (A/B={_ab_bytes}, C={_c_lds}) "
             f"> {target.lds_capacity_bytes} cap on {arch}"
         )
 
