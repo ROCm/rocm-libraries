@@ -2815,25 +2815,32 @@ namespace TensileLite
                                inputs.fusedA2ADrain,
                                static_cast<uint32_t>(problem.fusedA2AExtent()));
 
-        // CU-occupancy probe tail args (8-aligned ProbeAddr, see Signature.py).
-        // !groupedGemm mirrors the codegen gate. Padding grows only the
-        // dispatch; every kernarg keeps the real grid.
+        // CU-occupancy probe tail args (layout: Signature.py addOccupancyProbeArgs).
+        // A grid smaller than minGrid is padded with probe-only WGs so the probe
+        // covers minGrid CUs. Only a 1-D grid can be padded; otherwise the probe
+        // is disabled for this launch. !groupedGemm mirrors the codegen gate.
         if(internalArgsSupport.occupancyProbe && !problemType.groupedGemm)
         {
-            auto const&  params = problem.getParams();
-            const size_t launchGrid
-                = static_cast<size_t>(rv.numWorkGroups.x) * rv.numWorkGroups.y * rv.numWorkGroups.z;
-            const uint32_t minGrid   = params.occupancyProbeMinGrid();
+            auto const&    params    = problem.getParams();
             void*          probeAddr = params.occupancyProbeAddr();
-            const bool     below     = probeAddr && launchGrid < minGrid;
-            const bool     pad       = below && rv.numWorkGroups.y == 1 && rv.numWorkGroups.z == 1;
-            rv.args.appendAligned<void*>("ProbeAddr", below && !pad ? nullptr : probeAddr);
+            const uint32_t minGrid   = params.occupancyProbeMinGrid();
+            auto&          wg        = rv.numWorkGroups;
+            const size_t   realGrid  = static_cast<size_t>(wg.x) * wg.y * wg.z;
+
+            const bool needsPad = probeAddr && realGrid < minGrid;
+            const bool canPad   = wg.y == 1 && wg.z == 1;
+            if(needsPad && !canPad)
+                probeAddr = nullptr;
+
+            rv.args.appendAligned<void*>("ProbeAddr", probeAddr);
             rv.args.append<uint32_t>("ProbeEpoch", params.occupancyProbeEpoch());
-            rv.args.append<uint32_t>("ProbeGrid", static_cast<uint32_t>(launchGrid));
-            if(pad)
+            rv.args.append<uint32_t>("ProbeGrid", static_cast<uint32_t>(realGrid));
+
+            // Grow only the dispatch; the kernargs above keep the real grid.
+            if(needsPad && canPad)
             {
-                rv.numWorkGroups.x = minGrid;
-                rv.numWorkItems.x  = rv.workGroupSize.x * minGrid;
+                wg.x              = minGrid;
+                rv.numWorkItems.x = rv.workGroupSize.x * minGrid;
             }
         }
 
