@@ -7,18 +7,18 @@
 #include <functional>
 #include <gtest/gtest.h>
 #include <limits>
+#include <optional>
 #include <string>
 #include <vector>
 
 namespace
 {
     // A hooks policy whose clock moves only when a launch below moves it, so every time
-    // is exact and no GPU is involved. One read of the clock can be made to fail.
+    // is exact and no GPU is involved. A launch can make the next read of it fail.
     struct FakeClock
     {
-        static inline double now_us    = 0.0;
-        static inline int    reads     = 0;
-        static inline int    fail_read = -1; // the read that fails, counting from 0
+        static inline double now_us         = 0.0;
+        static inline bool   fail_next_read = false;
 
         static bool check(hipError_t status, const char*, const char*, int)
         {
@@ -27,8 +27,11 @@ namespace
 
         static bool time_us_sync(hipStream_t, double& us)
         {
-            if(reads++ == fail_read)
+            if(fail_next_read)
+            {
+                fail_next_read = false;
                 return false;
+            }
             us = now_us;
             return true;
         }
@@ -57,12 +60,17 @@ namespace
         std::vector<bool>                    runnable; // prepare's answers, empty for all yes
         std::vector<bool>                    eligible; // measured's answers, empty for all yes
         std::function<bool()>                should_stop;
+        std::function<void(size_t, int64_t)> on_launch;
+
+        // The candidate whose cold or timed launches the clock cannot time: the first
+        // read after them fails.
+        std::optional<size_t> untimed_cold;
+        std::optional<size_t> untimed_launch;
 
         HostSearch()
         {
-            FakeClock::now_us    = 0.0;
-            FakeClock::reads     = 0;
-            FakeClock::fail_read = -1;
+            FakeClock::now_us         = 0.0;
+            FakeClock::fail_next_read = false;
         }
 
         hipblaslt_bench::SearchResult run(const hipblaslt_bench::SearchConfig& search,
@@ -85,12 +93,16 @@ namespace
                     .cold([&](size_t sol, int32_t i) {
                         log.push_back(entry("cold", sol, i));
                         FakeClock::now_us += cold_us.empty() ? 0.0 : cold_us[sol];
+                        FakeClock::fail_next_read = untimed_cold == sol;
                         if(on_cold)
                             on_cold(sol, i);
                     })
                     .launch([&](size_t sol, int64_t i) {
                         log.push_back(entry("launch", sol, i));
                         FakeClock::now_us += launch_us[sol];
+                        FakeClock::fail_next_read = untimed_launch == sol;
+                        if(on_launch)
+                            on_launch(sol, i);
                     })
                     .skipped(
                         [&](size_t sol, double, double) { log.push_back(entry("skipped", sol)); })
@@ -114,6 +126,16 @@ namespace
         hipblaslt_bench::TimingConfig timing;
         timing.iters         = iters;
         timing.use_gpu_timer = false;
+        return timing;
+    }
+
+    // Adaptive timing that takes exactly three one-launch samples, after one probe launch.
+    hipblaslt_bench::TimingConfig adaptive_timing()
+    {
+        hipblaslt_bench::TimingConfig timing = cpu_timing(1);
+        timing.adaptive                      = true;
+        timing.min_iters                     = 3;
+        timing.max_iters                     = 3;
         return timing;
     }
 } // namespace
@@ -215,8 +237,8 @@ TEST(CandidateSearch_pre_checkin, AFailureDuringAColdLaunchEndsTheSearch)
 TEST(CandidateSearch_pre_checkin, ACandidateThatCouldNotBeTimedCannotWin)
 {
     HostSearch host;
-    host.launch_us       = {10, 300, 200};
-    FakeClock::fail_read = 1; // the read ending candidate 0's timed launches
+    host.launch_us      = {10, 300, 200};
+    host.untimed_launch = 0;
 
     const auto result = host.run(hipblaslt_bench::SearchConfig{}, cpu_timing(2));
     EXPECT_FALSE(result.aborted);
@@ -232,7 +254,7 @@ TEST(CandidateSearch_pre_checkin, AFailedColdTimingSkipsNoOtherCandidate)
     HostSearch host;
     host.cold_us         = {100, 100, 100};
     host.launch_us       = {300, 200, 100};
-    FakeClock::fail_read = 1; // the read ending candidate 0's cold launches
+    host.untimed_cold    = 0;
 
     hipblaslt_bench::SearchConfig search;
     search.cold_calls      = 1;
@@ -262,6 +284,68 @@ TEST(CandidateSearch_pre_checkin, AnInvalidAdaptiveConfigurationSearchesNothing)
     EXPECT_FALSE(result.aborted);
     EXPECT_EQ(result.best, std::numeric_limits<size_t>::max());
     EXPECT_TRUE(host.log.empty());
+}
+
+// On a tie the earlier candidate stays.
+TEST(CandidateSearch_pre_checkin, ATieKeepsTheEarlierCandidate)
+{
+    HostSearch host;
+    host.launch_us = {200, 100, 100};
+
+    const auto result = host.run(hipblaslt_bench::SearchConfig{}, cpu_timing(2));
+    EXPECT_EQ(result.best, 1u);
+}
+
+// A fatal failure during a candidate's timed launches ends the search before that
+// candidate is reported as measured, whether its timing is fixed or adaptive.
+TEST(CandidateSearch_pre_checkin, AFailureDuringTheTimedLaunchesEndsTheSearch)
+{
+    for(const auto& timing : {cpu_timing(2), adaptive_timing()})
+    {
+        SCOPED_TRACE(timing.adaptive ? "adaptive" : "fixed");
+        HostSearch host;
+        host.launch_us = {50, 40, 30};
+
+        bool failed       = false;
+        host.should_abort = [&] { return failed; };
+        host.on_launch    = [&](size_t sol, int64_t) { failed = failed || sol == 1; };
+
+        const auto result = host.run(hipblaslt_bench::SearchConfig{}, timing);
+        EXPECT_TRUE(result.aborted);
+        EXPECT_EQ(host.count(entry("measured", 0)), 1);
+        EXPECT_EQ(host.count(entry("measured", 1)), 0);
+        EXPECT_EQ(host.count(entry("prepare", 2)), 0);
+    }
+}
+
+// A valid adaptive configuration times every candidate and keeps the fastest.
+TEST(CandidateSearch_pre_checkin, AnAdaptiveConfigurationPicksTheFastest)
+{
+    HostSearch host;
+    host.launch_us = {300, 100, 200};
+
+    const auto result = host.run(hipblaslt_bench::SearchConfig{}, adaptive_timing());
+    EXPECT_FALSE(result.aborted);
+    EXPECT_EQ(result.best, 1u);
+    EXPECT_TRUE(result.best_timing.adaptive);
+    EXPECT_EQ(result.best_timing.samples, 3);
+    EXPECT_EQ(result.best_timing.median_us, 100.0);
+}
+
+// The library's default policy fails on any HIP error and reads a clock that does not
+// run backwards.
+TEST(CandidateSearch_pre_checkin, DefaultHooksFailOnAHipError)
+{
+    EXPECT_TRUE(hipblaslt_bench::DefaultHooks::check(hipSuccess, "", "", 0));
+    EXPECT_FALSE(hipblaslt_bench::DefaultHooks::check(hipErrorInvalidValue, "", "", 0));
+
+    int devices = 0;
+    if(hipGetDeviceCount(&devices) != hipSuccess || devices == 0)
+        GTEST_SKIP() << "reading the clock synchronizes a stream, which needs a GPU";
+    double first = 0.0, second = 0.0;
+    ASSERT_TRUE(hipblaslt_bench::DefaultHooks::time_us_sync(nullptr, first));
+    ASSERT_TRUE(hipblaslt_bench::DefaultHooks::time_us_sync(nullptr, second));
+    EXPECT_GE(second, first);
 }
 
 // A candidate whose preparation says it cannot run is neither launched nor timed.

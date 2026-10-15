@@ -24,9 +24,10 @@
 // Each candidate is prepared, given its cold (untimed) launches, and then timed by
 // run_measurement, with the instruction cache flushed after every timed launch when
 // asked. With a skip-slow ratio set, the cold launches are timed too, and a candidate
-// whose cold launches are slower than the best seen so far by more than the ratio is
-// dropped before its timed phase. The winner is the candidate with the lowest median;
-// on a tie the earlier candidate stays.
+// whose cold launches take longer than the best cold time so far divided by the ratio
+// is dropped before its timed phase. The useful range is (0, 1): a ratio above 1 drops
+// every candidate, the first included. The winner is the candidate with the lowest
+// median; on a tie the earlier candidate stays.
 // ============================================================================
 
 namespace hipblaslt_bench
@@ -74,12 +75,12 @@ namespace hipblaslt_bench
     // but one device never runs two calibrations at once, since each would time the
     // other's launches.
     template <typename Hooks = DefaultHooks>
-    bool flush_cost_us(bool                   use_gpu_timer,
-                       const hipDeviceProp_t& props,
-                       hipEvent_t             event_start,
-                       hipEvent_t             event_stop,
-                       hipStream_t            stream,
-                       double&                cost_us)
+    [[nodiscard]] bool flush_cost_us(bool                   use_gpu_timer,
+                                     const hipDeviceProp_t& props,
+                                     hipEvent_t             event_start,
+                                     hipEvent_t             event_stop,
+                                     hipStream_t            stream,
+                                     double&                cost_us)
     {
         struct Device
         {

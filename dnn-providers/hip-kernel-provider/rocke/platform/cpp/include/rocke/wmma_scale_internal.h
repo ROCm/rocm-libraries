@@ -16,6 +16,14 @@
 #include "rocke/ir.h"
 #include "rocke/storage.h"
 
+/* Mirrors target._gfx1250_scale_combination_valid and LLVM's supported pairs:
+ * https://github.com/llvm/llvm-project/commit/7597c0c938b364306cbee21dd03835ff5b699c74
+ * Matrix selectors: FP8=0, BF8=1, FP6=2, BF6=3, FP4=4; E8M0 scale selector=0. */
+static inline constexpr bool rocke_scaled_wmma_formats_valid(int a, int b, int sa, int sb)
+{
+    return (a == 4 || sa == 0) && (b == 4 || sb == 0) && (a != 4 || b != 4 || sa == sb);
+}
+
 typedef struct rocke_scale_packing
 {
     /* Eight-bit encoded scales for consecutive K groups, first group in the
@@ -115,11 +123,22 @@ static inline rocke_scaled_wmma_op_t rocke_scaled_wmma_contract(const rocke_mma_
             spec.matrix_formats[i] = 4;
         else
             ckc::raise_status(ROCKE_ERR_VALUE, "unsupported scaled WMMA matrix format");
-        if(!scale_dtypes[i] || strcmp(scale_dtypes[i], "e8m0") != 0)
+        if(scale_dtypes[i] && strcmp(scale_dtypes[i], "e8m0") == 0)
+            spec.scale_formats[i] = 0;
+        else if(scale_dtypes[i] && strcmp(scale_dtypes[i], "e5m3") == 0)
+            spec.scale_formats[i] = 1;
+        else if(scale_dtypes[i] && strcmp(scale_dtypes[i], "e4m3") == 0)
+            spec.scale_formats[i] = 2;
+        else
             ckc::raise_status(ROCKE_ERR_VALUE, "unsupported scaled WMMA scale format");
-        spec.scale_formats[i] = 0; // E8M0.
         spec.matrix_words[i] = words[i];
     }
+    if(!rocke_scaled_wmma_formats_valid(spec.matrix_formats[0],
+                                        spec.matrix_formats[1],
+                                        spec.scale_formats[0],
+                                        spec.scale_formats[1]))
+        ckc::raise_status(ROCKE_ERR_VALUE,
+                          "unsupported scaled WMMA matrix/scale format combination");
     if((atom->scale_block_k != 16 && atom->scale_block_k != 32)
        || strcmp(atom->c_dtype, "fp32") != 0 || atom->m != 16 || atom->n != 16 || atom->k != 128)
         ckc::raise_status(ROCKE_ERR_VALUE, "unsupported scaled WMMA backend contract");
