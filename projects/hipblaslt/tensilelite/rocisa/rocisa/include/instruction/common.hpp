@@ -6511,6 +6511,17 @@ namespace rocisa
         {
             return std::make_shared<VWritelaneB32>(*this);
         }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            // Only the selected lane changes; every other lane reads old dst.
+            auto params = CommonInstruction::getSrcParams();
+            if(dst)
+            {
+                params.push_back(dst);
+            }
+            return params;
+        }
     };
 
     struct VRndneF32 : public CommonInstruction
