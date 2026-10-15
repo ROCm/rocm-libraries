@@ -329,7 +329,7 @@ namespace
         FixedPointEmulationSettings settings{};
         settings.eager = true; /* bypass perf gate in direct test calls */
 
-        settings.sv_mask        = 0; // skip Inf/NaN check (faster, inputs are finite)
+        settings.sv_support = HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_NONE; // skip Inf/NaN check (faster, inputs are finite)
         const size_t _ws_size_A = hipblasLtEmulationWorkspaceSize(
             m_handle, m_emul_desc, HIP_R_64F, N, N, N, 1);
         void* _d_ws_A = nullptr;
@@ -651,7 +651,7 @@ namespace
         FixedPointEmulationSettings emu_settings{};
         emu_settings.eager             = true; /* bypass perf gate in direct test calls */
         emu_settings.adp_mantissa_bits = p.mantissa_bits;
-        emu_settings.sv_mask           = 0u; /* skip Inf/NaN detection */
+        emu_settings.sv_support = HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_NONE; /* skip Inf/NaN detection */
         /* Allocate workspace for this GEMM configuration */
         /* Query workspace size using a temp desc with emulation enabled. */
         const size_t _emu_ws_sz = [&]() -> size_t {
@@ -1045,7 +1045,7 @@ namespace
         FixedPointEmulationSettings emu_settings{};
         emu_settings.eager = true; /* bypass perf gate in direct test calls */
 
-        emu_settings.sv_mask = 0u; /* skip Inf/NaN detection */
+        emu_settings.sv_support = HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_NONE; /* skip Inf/NaN detection */
         /* Allocate workspace for ADP test */
         const size_t _adp_ws_sz = hipblasLtEmulationWorkspaceSize(
             m_handle, m_emul_desc, HIP_R_64F, n, n, n, 1);
@@ -1183,7 +1183,7 @@ namespace
         FixedPointEmulationSettings emu_settings{};
         emu_settings.eager = true; /* bypass perf gate in direct test calls */
 
-        emu_settings.sv_mask = 0u;
+        emu_settings.sv_support = HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_NONE;
         /* Allocate workspace for Demmel test */
         /* Query workspace size using a temp desc with emulation enabled. */
         const size_t _dem_ws_sz = [&]() -> size_t {
@@ -1602,7 +1602,7 @@ namespace
         FixedPointEmulationSettings emu_settings{};
         emu_settings.eager = true; /* bypass perf gate in direct test calls */
 
-        emu_settings.sv_mask       = 0u;
+        emu_settings.sv_support = HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_NONE;
         const size_t _struct_ws_sz = [&]() -> size_t {
             hipblasLtMatmulDesc_t _wd = nullptr;
             hipblasLtMatmulDescCreate(&_wd, HIPBLAS_COMPUTE_64F, HIP_R_64F);
@@ -1798,7 +1798,7 @@ namespace
             FixedPointEmulationSettings emu{};
             emu.eager = true; /* bypass perf gate in direct test calls */
 
-            emu.sv_mask              = 0u;
+            emu.sv_support = HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_NONE;
             const size_t _adpx_ws_sz = hipblasLtEmulationWorkspaceSize(
                 m_handle, m_emul_desc, HIP_R_64F, N, N, N, 1);
             void* _d_adpx_ws = nullptr;
@@ -2095,7 +2095,7 @@ namespace
         FixedPointEmulationSettings settings{};
         settings.eager = true; /* bypass perf gate in direct test calls */
 
-        settings.sv_mask        = 0u; /* inputs are finite — no Inf/NaN flag needed */
+        settings.sv_support = HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_NONE; /* inputs are finite — no Inf/NaN flag needed */
         const size_t _bv1_ws_sz = hipblasLtEmulationWorkspaceSize(
             m_handle, m_emul_desc, HIP_R_64F, M, N, K, 1);
         void* _d_bv1_ws = nullptr;
@@ -2425,7 +2425,7 @@ namespace
         FixedPointEmulationSettings emu{};
         emu.eager = true; /* bypass perf gate in direct test calls */
 
-        emu.sv_mask             = 0u;
+        emu.sv_support = HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_NONE;
         const size_t _nul_ws_sz = hipblasLtEmulationWorkspaceSize(
             m_handle, m_emul_desc, HIP_R_64F, M, N, K, 1);
         void* _d_nul_ws = nullptr;
@@ -2484,9 +2484,9 @@ namespace
         EXPECT_LE(max_rel, 1e-10) << "NonUnitLeadingDimension: max_rel=" << max_rel;
     }
 
-    // ── SvMaskInfInput: sv_mask=0x1 with +Inf input must return invalid_value ─
+    // ── SvSupportInfInput: sv_support=INFINITY with +Inf input must return invalid_value ─
     //
-    // Constructs a 64×64 matrix with one +Inf element. With sv_mask=0x1
+    // Constructs a 64×64 matrix with one +Inf element. With sv_support=INFINITY
     // (Inf detection enabled), fp64EmulatedGemm must return
     // rocblaslt_status_invalid_value.
     TEST_F(FixedPointEmulationTest, SvMaskInfInput)
@@ -2520,7 +2520,7 @@ namespace
         FixedPointEmulationSettings settings{};
         settings.eager = true; /* bypass perf gate in direct test calls */
 
-        settings.sv_mask       = 0x1u; /* enable Inf detection */
+        settings.sv_support = HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_INFINITY; /* enable Inf detection */
         const size_t _sv_ws_sz = hipblasLtEmulationWorkspaceSize(
             m_handle, m_emul_desc, HIP_R_64F, N, N, N, 1);
         void* _d_sv_ws = nullptr;
@@ -2553,7 +2553,7 @@ namespace
         cleanup();
 
         EXPECT_EQ(st, rocblaslt_status_invalid_value)
-            << "sv_mask=0x1 with +Inf input should return invalid_value, got "
+            << "sv_support=INFINITY with +Inf input should return invalid_value, got "
             << static_cast<int>(st);
     }
 
@@ -2646,7 +2646,7 @@ namespace
         FixedPointEmulationSettings emu{};
         emu.eager = true; /* bypass perf gate in direct test calls */
 
-        emu.sv_mask             = 0u;
+        emu.sv_support = HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_NONE;
         const size_t _alm_ws_sz = hipblasLtEmulationWorkspaceSize(
             m_handle, m_emul_desc, HIP_R_64F, N, N, N, 1);
         void* _d_alm_ws = nullptr;
@@ -2836,7 +2836,7 @@ namespace
         FixedPointEmulationSettings settings{};
         settings.eager = true; /* bypass perf gate in direct test calls */
 
-        settings.sv_mask         = 0u; /* no NaN check in this test */
+        settings.sv_support = HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_NONE; /* no NaN check in this test */
         settings.workspace       = d_ws;
         settings.workspace_bytes = ws_sz;
 
@@ -2955,7 +2955,7 @@ namespace
         FixedPointEmulationSettings settings{};
         settings.eager = true; /* bypass perf gate in direct test calls */
 
-        settings.sv_mask         = 0x3u; /* NaN + Inf detection enabled */
+        settings.sv_support = HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_DEFAULT; /* NaN + Inf detection enabled */
         settings.workspace       = d_ws;
         settings.workspace_bytes = ws_sz;
 
@@ -2987,7 +2987,7 @@ namespace
         if(st == rocblaslt_status_internal_error)
             GTEST_SKIP() << "fp32EmulatedGemm internal error (device not supported)";
 
-        /* With bit 1 of sv_mask set, NaN should trigger invalid_value. */
+        /* With sv_support=DEFAULT (both Inf+NaN enabled), NaN should trigger invalid_value. */
         EXPECT_EQ(st, rocblaslt_status_invalid_value)
             << "FP32 NaN detection: expected rocblaslt_status_invalid_value";
     }

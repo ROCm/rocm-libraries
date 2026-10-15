@@ -70,10 +70,13 @@ These take precedence over the process-wide environment variables.
      - ``int32_t``
      - ADP precision target in mantissa bits: ``1``..``52`` for FP64 (``1``..``23`` for FP32).
        ``0`` = inherit from env var (default = full precision).
-   * - ``HIPBLASLT_MATMUL_DESC_EMULATION_SPECIAL_VALUES_MASK_EXT``
-     - ``uint32_t``
-     - Inf/NaN detection mask.  Bit 0 = Inf, bit 1 = NaN.
-       ``~0u`` = inherit from env var (default ``0x3``).  ``0`` = skip detection.
+   * - ``HIPBLASLT_MATMUL_DESC_EMULATION_SPECIAL_VALUES_SUPPORT_EXT``
+     - ``int32_t``
+     - Inf/NaN detection support level.  See ``hipblasltEmulationSpecialValuesSupport_t``:
+       ``HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_DEFAULT`` (0) = inherit from env var (default = Inf+NaN);
+       ``HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_NONE`` (1) = skip detection;
+       ``HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_INFINITY`` (2) = Inf only;
+       ``HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_NAN`` (3) = NaN only.
 
 Example: enable FP64 emulation eagerly with reduced precision:
 

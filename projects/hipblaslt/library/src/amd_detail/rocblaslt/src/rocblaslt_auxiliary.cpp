@@ -1910,13 +1910,21 @@ rocblaslt_status rocblaslt_matmul_desc_set_attribute(rocblaslt_matmul_desc      
                     return rocblaslt_status_invalid_value;
                 }
                 break;
-            case ROCBLASLT_MATMUL_DESC_EMULATION_SPECIAL_VALUES_MASK_EXT:
-                if(sizeof(uint32_t) <= sizeInBytes)
-                    memcpy(&matmulDesc->emulation_sv_mask, buf, sizeof(uint32_t));
-                else
+            case ROCBLASLT_MATMUL_DESC_EMULATION_SPECIAL_VALUES_SUPPORT_EXT:
+                if(sizeof(int32_t) > sizeInBytes)
                 {
-                    log_error(__func__, "invalid emulation_special_values_mask buf size", sizeInBytes);
+                    log_error(__func__, "invalid emulation_special_values_support buf size", sizeInBytes);
                     return rocblaslt_status_invalid_value;
+                }
+                {
+                    int32_t v = 0;
+                    memcpy(&v, buf, sizeof(int32_t));
+                    if(v < 0 || v > 3)
+                    {
+                        log_error(__func__, "invalid emulation_special_values_support value", v);
+                        return rocblaslt_status_invalid_value;
+                    }
+                    matmulDesc->emulation_sv_support = v;
                 }
                 break;
             default:
@@ -2293,10 +2301,10 @@ rocblaslt_status rocblaslt_matmul_desc_get_attribute(rocblaslt_matmul_desc      
                 if(sizeInBytes < sizeof(int32_t)) { log_error(__func__, "invalid emulation_max_mantissa_bit_count buf size", sizeInBytes); return rocblaslt_status_invalid_value; }
                 memcpy(buf, &matmulDesc->emulation_mantissa_bits, sizeof(int32_t));
                 break;
-            case ROCBLASLT_MATMUL_DESC_EMULATION_SPECIAL_VALUES_MASK_EXT:
-                if(sizeWritten) *sizeWritten = sizeof(uint32_t);
-                if(sizeInBytes < sizeof(uint32_t)) { log_error(__func__, "invalid emulation_special_values_mask buf size", sizeInBytes); return rocblaslt_status_invalid_value; }
-                memcpy(buf, &matmulDesc->emulation_sv_mask, sizeof(uint32_t));
+            case ROCBLASLT_MATMUL_DESC_EMULATION_SPECIAL_VALUES_SUPPORT_EXT:
+                if(sizeWritten) *sizeWritten = sizeof(int32_t);
+                if(sizeInBytes < sizeof(int32_t)) { log_error(__func__, "invalid emulation_special_values_support buf size", sizeInBytes); return rocblaslt_status_invalid_value; }
+                memcpy(buf, &matmulDesc->emulation_sv_support, sizeof(int32_t));
                 break;
             default:
                 log_error(__func__, "invalid attribute", matmulAttr);

@@ -46,7 +46,7 @@
  * Setting precedence (per-matmul desc attributes > env vars > built-in defaults).
  * Per-matmul emulation settings live on the matmul descriptor via
  * HIPBLASLT_MATMUL_DESC_EMULATION_*_EXT attributes; sentinel values
- * (-1 / ~0u / 0) fall back to the process-wide env var default.
+ * (-1 / 0 for enabled/strategy/mantissa) fall back to the process-wide env var default.
  * See fixedPointEmulationDecision() for the full resolution logic.
  *
  * See docs/how-to/fp-emulation.rst
@@ -213,11 +213,11 @@ size_t fixedPointEmulationWorkspaceSize(const _rocblaslt_handle*           h,
                                         const FixedPointEmulationDecision& decision);
 
 /* Per-call emulation settings.
- * Fields with sentinel values (0 for num_moduli, ~0u for sv_mask) cause the
- * function to fall back to the process-wide env var defaults.              */
+ * All fields are resolved concrete values; there are no sentinels.
+ * Callers must resolve any env-var defaults before populating this struct. */
 struct FixedPointEmulationSettings
 {
-    unsigned int sv_mask; /* special-values mask; ~0u = env var       */
+    hipblasltEmulationSpecialValuesSupport_t sv_support; /* DEFAULT=both Inf+NaN, NONE=skip, INFINITY=Inf only, NAN=NaN only */
     bool         eager; /* true -> skip workspace performance gate  */
     void*        workspace; /* caller workspace; nullptr = no workspace */
     size_t       workspace_bytes; /* size of caller workspace                 */

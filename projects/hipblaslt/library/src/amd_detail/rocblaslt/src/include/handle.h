@@ -386,12 +386,12 @@ struct _rocblaslt_matmul_desc
      * Sentinel values mean "inherit from env var / built-in default":
      *   emulation_enabled      : -1 = inherit, 0 = force off, 1 = force on
      *   emulation_strategy     : -1 = inherit, 0/1/2 = DEFAULT/PERFORMANT/EAGER
-     *   emulation_sv_mask      : ~0u = inherit (default=0x3)
+     *   emulation_sv_support   : 0 = DEFAULT (inherit from env var), 1 = NONE, 2 = INFINITY, 3 = NAN
      *   emulation_mantissa_bits: 0 = inherit, 1..52 = explicit bit count    */
-    int          emulation_enabled       = -1;
-    int          emulation_strategy      = -1;
-    unsigned int emulation_sv_mask       = ~0u;
-    int          emulation_mantissa_bits = 0;
+    int emulation_enabled       = -1;
+    int emulation_strategy      = -1;
+    int emulation_sv_support    = 0; /**< hipblasltEmulationSpecialValuesSupport_t; 0=DEFAULT=inherit */
+    int emulation_mantissa_bits = 0;
 
     std::shared_ptr<void> m_data; // Tensile data
 
@@ -431,7 +431,7 @@ struct _rocblaslt_matmul_desc
 #endif
         this->emulation_enabled           = src.emulation_enabled;
         this->emulation_strategy          = src.emulation_strategy;
-        this->emulation_sv_mask           = src.emulation_sv_mask;
+        this->emulation_sv_support        = src.emulation_sv_support;
         this->emulation_mantissa_bits     = src.emulation_mantissa_bits;
     }
 };

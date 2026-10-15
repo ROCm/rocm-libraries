@@ -165,7 +165,15 @@ rocblaslt_status rocblaslt_matmul_impl(const rocblaslt_handle       handle,
             const int desc_strat = matmul_descr ? matmul_descr->emulation_strategy : -1;
             const bool emul_eager = (desc_strat == 2) || (desc_strat != 1 && fixedPointEmulationIsEager());
             FixedPointEmulationSettings emulSettings{};
-            emulSettings.sv_mask           = emulDecision.sv_mask;
+            /* Translate resolved bitmask → hipblasltEmulationSpecialValuesSupport_t enum:
+             * 0x0=NONE, 0x1=INFINITY, 0x2=NAN, 0x3(or other)=DEFAULT(both) */
+            switch(emulDecision.sv_mask)
+            {
+            case 0x0u: emulSettings.sv_support = HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_NONE;     break;
+            case 0x1u: emulSettings.sv_support = HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_INFINITY; break;
+            case 0x2u: emulSettings.sv_support = HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_NAN;      break;
+            default:   emulSettings.sv_support = HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_DEFAULT;  break;
+            }
             emulSettings.eager             = emul_eager;
             emulSettings.adp_mantissa_bits = emulDecision.adp_mantissa_bits;
             emulSettings.workspace         = workspace;

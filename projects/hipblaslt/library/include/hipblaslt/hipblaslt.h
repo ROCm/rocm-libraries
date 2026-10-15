@@ -90,6 +90,24 @@ typedef enum {
     HIPBLASLT_EMULATION_STRATEGY_EAGER      = 2, /**<Emulate whenever the data types and epilogue are supported, regardless of problem size. */
 } hipblasLtEmulationStrategy_t;
 
+/*! \ingroup types_module
+ *  \brief Controls which special floating-point values (Inf, NaN) are detected
+ *  during FP64/FP32 emulation via Ozaki Scheme II.
+ *
+ *  \details
+ *  Used as the data type for the
+ *  ``HIPBLASLT_MATMUL_DESC_EMULATION_SPECIAL_VALUES_SUPPORT_EXT`` matmul
+ *  descriptor attribute. The ``DEFAULT`` value instructs the library to inherit
+ *  the setting from the ``HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_MASK``
+ *  environment variable (built-in default: detect both Inf and NaN).
+ */
+typedef enum {
+    HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_DEFAULT  = 0, /**<Detect both Inf and NaN values (default behavior). */
+    HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_NONE     = 1, /**<Skip Inf/NaN detection entirely (faster, but unsupported input values silently corrupt output). */
+    HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_INFINITY = 2, /**<Detect Inf values only. */
+    HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_NAN      = 3, /**<Detect NaN values only. */
+} hipblasltEmulationSpecialValuesSupport_t;
+
 
 /*! \ingroup types_module
  *  \brief Specifies the enumeration type to set the postprocessing options for the epilogue.
@@ -392,7 +410,7 @@ typedef enum {
   HIPBLASLT_MATMUL_DESC_EMULATION_ENABLED_EXT                = 107, /**<Enable/disable FP64/FP32 emulation via Ozaki Scheme II for this matmul. Data type: ``int32_t``. 1=force on, 0=force off, -1=inherit from env var (default). */
   HIPBLASLT_MATMUL_DESC_EMULATION_STRATEGY_EXT               = 108, /**<Emulation strategy for this matmul. Data type: ``int32_t`` (``hipblasLtEmulationStrategy_t``). 0=DEFAULT, 1=PERFORMANT, 2=EAGER; -1=inherit from env var (default). */
   HIPBLASLT_MATMUL_DESC_EMULATION_MAX_MANTISSA_BIT_COUNT_EXT = 109, /**<ADP maximum mantissa bit count (precision target). Data type: ``int32_t``. 1..52 = explicit bit count for FP64 (1..23 for FP32); 0=inherit from env var (default). Only affects ADP mode. */
-  HIPBLASLT_MATMUL_DESC_EMULATION_SPECIAL_VALUES_MASK_EXT    = 110, /**<Inf/NaN detection mask for emulation. Data type: ``uint32_t``. Bit 0=Inf, bit 1=NaN; ~0u=inherit from env var (default=0x3). Set to 0 to skip detection. */
+  HIPBLASLT_MATMUL_DESC_EMULATION_SPECIAL_VALUES_SUPPORT_EXT = 110, /**<Inf/NaN detection support level for emulation. Data type: ``int32_t`` (``hipblasltEmulationSpecialValuesSupport_t``). ``DEFAULT`` (0) = detect both Inf+NaN; ``NONE`` (1) = skip detection; ``INFINITY`` (2) = Inf only; ``NAN`` (3) = NaN only. */
   HIPBLASLT_MATMUL_DESC_MAX,
 } hipblasLtMatmulDescAttributes_t;
 

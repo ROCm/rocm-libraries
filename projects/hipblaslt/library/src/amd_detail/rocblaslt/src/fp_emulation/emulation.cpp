@@ -1244,8 +1244,16 @@ namespace FixedPointEmulation
         const bool tA = (opA != HIPBLAS_OP_N);
         const bool tB = (opB != HIPBLAS_OP_N);
 
-        const uint32_t svmask
-            = (settings.sv_mask != ~0u) ? settings.sv_mask : fixedPointEmulationSpecialValuesMask();
+        /* Translate hipblasltEmulationSpecialValuesSupport_t enum to bitmask:
+         * DEFAULT(0)=both(0x3), NONE(1)=0x0, INFINITY(2)=0x1, NAN(3)=0x2 */
+        uint32_t svmask;
+        switch(settings.sv_support)
+        {
+        case HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_NONE:     svmask = 0x0u; break;
+        case HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_INFINITY: svmask = 0x1u; break;
+        case HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_NAN:      svmask = 0x2u; break;
+        default: /* HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_DEFAULT */ svmask = 0x3u; break;
+        }
 
         if(svmask != 0u)
         {
@@ -1868,11 +1876,22 @@ FixedPointEmulationDecision fixedPointEmulationDecision(const _rocblaslt_handle*
         return result;
 
     /* Resolve special_values_mask.
-     * Priority: desc->emulation_sv_mask (non-~0u) > env var. */
+     * When desc is present, all 4 enum values are concrete (DEFAULT=both Inf+NaN=0x3).
+     * When desc is nullptr, fall back to the env var (default 0x3).
+     * hipblasltEmulationSpecialValuesSupport_t → bitmask:
+     *   DEFAULT (0) -> 0x3 (detect both Inf and NaN)
+     *   NONE    (1) -> 0x0 (skip detection)
+     *   INFINITY(2) -> 0x1 (bit 0 = Inf)
+     *   NAN     (3) -> 0x2 (bit 1 = NaN) */
+    if(desc)
     {
-        const unsigned int desc_sv = desc ? desc->emulation_sv_mask : ~0u;
-        if(desc_sv != ~0u)
-            result.sv_mask = desc_sv;
+        switch(desc->emulation_sv_support)
+        {
+        case 1: result.sv_mask = 0x0u; break; /* NONE */
+        case 2: result.sv_mask = 0x1u; break; /* INFINITY */
+        case 3: result.sv_mask = 0x2u; break; /* NAN */
+        default: result.sv_mask = 0x3u; break; /* DEFAULT: both Inf+NaN */
+        }
     }
 
     /* ADP target precision.
