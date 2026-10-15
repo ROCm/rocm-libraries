@@ -57,6 +57,7 @@
 #include "testing_sytrd_hetrd.hpp"
 #include "testing_sytrf.hpp"
 #include "testing_sytrs.hpp"
+#include "testing_trtri.hpp"
 
 #ifdef HAVE_HIPSPARSE
 #include "testing_csrlsvchol.hpp"
@@ -86,6 +87,7 @@ class hipsolver_dispatcher
             {"geev_64", testing_geev<API_COMPAT, false, false, T, T, int64_t, size_t>},
             {"gels", testing_gels<API_NORMAL, false, false, false, T>},
             {"geqrf", testing_geqrf<API_NORMAL, false, false, T, int, int>},
+            {"geqrf_batched", testing_geqrf<API_NORMAL, true, false, T, int, int>},
             {"geqrf_64", testing_geqrf<API_COMPAT, false, false, T, int64_t, size_t>},
             {"gesv", testing_gesv<API_NORMAL, false, false, false, T>},
             {"gesvd", testing_gesvd<API_NORMAL, false, false, false, T>},
@@ -114,6 +116,7 @@ class hipsolver_dispatcher
             {"potrs_batched", testing_potrs<API_NORMAL, true, false, T>},
             {"sytrf", testing_sytrf<API_NORMAL, false, false, T>},
             {"sytrs_64", testing_sytrs<API_COMPAT, false, false, T, int64_t, size_t>},
+            {"trtri_64", testing_trtri<API_COMPAT, false, false, T, int64_t, size_t>},
         };
 
         // Grab function from the map and execute

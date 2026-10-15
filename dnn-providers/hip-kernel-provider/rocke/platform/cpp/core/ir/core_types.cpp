@@ -447,6 +447,14 @@ bool rocke_attr_get_bool(const rocke_attr_map_t* m, const char* key, bool dflt)
     }
 }
 
+bool rocke_scheduler_strategy_is_valid(const char* strategy)
+{
+    return strategy == NULL || strcmp(strategy, "max-ilp") == 0
+           || strcmp(strategy, "max-memory-clause") == 0 || strcmp(strategy, "iterative-ilp") == 0
+           || strcmp(strategy, "iterative-minreg") == 0
+           || strcmp(strategy, "iterative-maxocc") == 0;
+}
+
 /* ============================ OPCODE TABLE ============================== */
 
 /* Canonical dotted name per opcode, indexed by the enum value. Order MUST match
@@ -624,6 +632,7 @@ static const char* const rocke_opcode_names[ROCKE_OP__COUNT] = {
     "tile.ds_swizzle",
     "tile.mov_dpp8",
     "tile.quad_perm",
+    "tile.dpp_xor",
     "tile.wave_reduce",
     "tile.readlane",
     "tile.writelane",
@@ -692,7 +701,10 @@ static const char* const rocke_opcode_names[ROCKE_OP__COUNT] = {
     /* memref.* cross-workgroup synchronisation */
     "memref.fence",
     "memref.global_flag_store",
-    "memref.global_flag_wait_eq"};
+    "memref.global_flag_wait_eq",
+
+    "vector.undef",
+    "tile.buffer_load_f16_d16"};
 
 const char* rocke_opcode_name(rocke_opcode_t op)
 {
@@ -889,6 +901,7 @@ static const bool rocke_opcode_pure[ROCKE_OP__COUNT] = {
     /* ds_swizzle        */ true,
     /* mov_dpp8          */ true,
     /* quad_perm         */ true,
+    /* dpp_xor           */ true,
     /* wave_reduce       */ true,
     /* readlane          */ true,
     /* writelane         */ true,
@@ -957,7 +970,10 @@ static const bool rocke_opcode_pure[ROCKE_OP__COUNT] = {
     /* memref.* cross-workgroup synchronisation (effectful) */
     /* memref.fence               */ false,
     /* memref.global_flag_store   */ false,
-    /* memref.global_flag_wait_eq */ false};
+    /* memref.global_flag_wait_eq */ false,
+
+    /* vector.undef               */ false,
+    /* tile.buffer_load_f16_d16   */ false};
 
 bool rocke_opcode_is_pure(rocke_opcode_t op)
 {
