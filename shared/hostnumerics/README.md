@@ -133,3 +133,8 @@ The Python bindings expose scalar metadata and `__version__` through the single
 `ScalarType` identifies an encoding, and `scalarTypeInfo(type)` describes its
 category, storage width, exponent, fraction, and special-value support. Python
 exposes the same metadata through `scalar_type_info(type)`.
+
+C++ code that handles elements of a runtime `ScalarType` uses
+`visitScalarType(type, visitor)` to select code specialized for that encoding
+once per operation. `scalar_type.hpp` documents the visitor contract and the
+usual pattern.
