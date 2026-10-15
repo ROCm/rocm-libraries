@@ -4,8 +4,8 @@
 > emitter that serves GDN and KDA, plus chunkwise **prefill** kernels where GDN
 > ships as a mode of the existing KDA implementation.
 > This document specifies *what* the kernels compute and *why they are shaped the way they are*.
-> It is a specification, not a tuning history, and it carries **no measurements** — latency is
-> recorded in the internal perf repository per repository compliance.
+> It is a specification, not a tuning history, and it carries **no latency measurements** — latency
+> is recorded in the internal perf repository per repository compliance.
 >
 > **This file is the entry point for the family.** Its sibling `README.md` covers the host-side
 > tools — driver, benchmark, retuning, exit codes — and nothing about what the kernels compute.
@@ -364,18 +364,74 @@ is retired at large batch, where the grid is already ample.
 
 ### 4.3 Dataflow and pipeline
 
-One workgroup, one decode step, in emission order:
+One workgroup, one decode step, in emission order (warp-tiled path):
 
 1. decode `bidx` and `tid` into `(sequence, value head, v-sub-block)` and `(wave, k-lane, v-lane)`;
 2. load `read_indices` / `write_indices` and form the `active` predicate — **outside** the guard, so
    a padded lane costs two `i32` loads and exits;
-3. under `scf_if(active)`: evaluate `decay` and `β`;
-4. load the lane's `q` and `k` slices as 16-byte vectors, promoted to `f32`;
+3. under `scf_if(active)`, issue **every** global load before any math: the gate inputs (GDN: the
+   `a`, `b`, `dt_bias` and `A_log` scalars; KDA: `b` and `A_log` plus the lane's per-channel `a`
+   slice and `dt_bias` vector), the lane's `q` and `k` slices as 16-byte vectors, the raw lane tile of
+   the state, and one `v` per owned V row — all promoted to `f32`;
+4. evaluate `decay` and `β`;
 5. reduce the two L2 norms (two cross-lane reductions, §4.4);
 6. reduce `dot(k̂, q̂)` (one more);
-7. form the state read pointer, load the whole lane tile, applying `decay` as it lands;
+7. apply `decay` to the raw state tile;
 8. per owned V row: reduce `s·k̂` and `s·q̂`, form `v_new = β (v − s·k̂)`, then emit the output and
    the rank-1 state update.
+
+Why loads first: the AMDGPU scheduler does not hoist a load above earlier math or across the
+`k_lane == 0` output-store branch, so emission order bounds how many separate load batches (each
+ended by a `vmcnt` wait) a wave exposes. In the gfx950 code object, loads first brings the GDN
+default tile and the KDA tuned tiles down to one or two batches. Every tile with `WTK ≤ 2`, most
+with `WTK = 4`, and the fused tiles still split their loads into several batches: under register
+pressure the compiler re-interleaves some loads with the math. These are static counts from the
+code object, not hardware counters.
+
+What moved: only loads, plus (with `fuse_conv`) the `v` conv + SiLU, which now runs next to the
+`q`/`k` conv before the L2 norms instead of inside the step-8 row loop. Each value still goes
+through the same floating-point operations in the same order; no operation was added, removed or
+re-associated. The A/B against the interleaved order found output, state and conv state
+bit-identical in every configuration it ran.
+
+One exception: with `fuse_conv` and a single wave, one lane owns many V rows (32 of the 128 at the
+`(1,16,1)` tile). Hoisting their `v` conv inputs (value, `W − 1` taps, `W` weights), the state
+tile and the norm inputs on top of the `q`/`k` conv inputs would need more than the 512 VGPRs a
+lane can have at `(1,16,1)`, so it would spill; at `WTK = 8` only bf16 state without the norm
+would fit. The exception covers every single-wave `fuse_conv` tile. Those tiles load these inputs
+where the parent order did: each row's `v` inputs and its conv in the step-8 row loop, each state
+chunk at step 7, and `out_gate` / `norm_weight` at the norm. Their `q`, `k` and gate inputs still
+load first.
+
+Cost: holding the raw state, `q`, `k` and `v` (and, fused, their taps and weights) live at once
+changes the register count, up for some tiles and down for others. Where that crosses a
+register-allocation granule it costs or gains one wave per SIMD, or changes a spill. VGPR and
+scratch counts are read from the gfx950 code object; waves per SIMD are modeled from the VGPR
+count (512 per SIMD lane, 8-register allocation granule), not measured with a hardware counter.
+Against the interleaved order (Python lowerer, ROCm 7.13 comgr, bf16 I/O, `DK = DV = 128`; GDN at
+`Hk/Hv = 16/32`, KDA at `32/32`, the fused tiles at `16/16`; bf16 state unless marked `f32`):
+
+- one wave per SIMD lost: GDN `(1,16,2)`, `(1,16,4)`, `(2,16,1)`, `(2,16,2)`, `(4,8,1)`, `(4,16,1)`,
+  `(8,8,1)`; the KDA tuned tile `(2,16,1)`; at `(4,16,1)`, `fuse_conv` alone (GDN and KDA) and with
+  the norm (GDN), and the KDA norm alone (bf16 and `f32` state);
+- one wave per SIMD gained: GDN `(1,16,16)` and the default `(2,16,8)`;
+- spill grows: GDN `(1,1,1)` and `(1,1,2)`, which already spill at `DK = 128`;
+- spill: none starts. The single-wave `fuse_conv` tiles stay at 0 B at `WTK` 8 and 16 with the
+  exception above. At `WTK = 4` they already spill in the interleaved order (16/16 heads, every gate
+  kind, state dtype and norm setting); there the spill grows with the norm on for GDN `f32` state and
+  for KDA, shrinks in three other cases, stays the same for KDA `f32` state without the norm, and
+  ends for GDN bf16 state without the norm;
+- unchanged: every other registered GDN tile, the other KDA tuned tiles, the default `(2,16,8)`
+  with `f32` state and the other fused tiles; `(1,1,1)` at `DK` 64 (no spill) and 192 (its spill
+  shrinks), where it is the auto route because `(2,16,8)` is illegal (§4.6).
+
+These counts depend on the compiler and the lowering; re-measure them when either changes.
+
+Tile defaults (§4.6) were measured on the interleaved order and are re-measured when the defaults
+are re-picked.
+
+The simple path (`spec.simple`) keeps the interleaved order: q/k, norms, gates, dot, then the state
+row.
 
 Two consequences of the identity in §1.2 item 3: the output store and the state write in step 8 are
 **independent** — neither reads the other's result — and the output is broadcast across the k-lane
@@ -447,7 +503,9 @@ different amounts of GPU work:
 `BPV` manufactures workgroups when the natural grid is too small. KDA's table
 comes from exhaustive legal-tile sweeps with every candidate correctness-gated
 before timing. Its band edges interpolate measured anchors; exact measurements
-live in the protected performance record.
+live in the protected performance record. Both this table and the GDN default
+were measured on the interleaved load order, before §4.3's loads-first order,
+so they are a snapshot until the sweep is re-run.
 
 ### 4.7 The reference path
 
@@ -504,28 +562,31 @@ of `Σ o²` across the head's workgroups. Until then a GQA model (Qwen3-Next) fu
 keeps a separate conv kernel; a model with `Hk == Hv` (Kimi Linear, with its three conv states
 packed as §1.4 states) can fuse both.
 
-**Dataflow.** The fused steps slot into the emission order of §4.3 without moving the unfused
-steps. With `fuse_conv`, step 4 loads each `q`/`k` chunk from the packed row together with its
-`W − 1` taps and `W` weights and applies conv + SiLU before the L2 norms; step 8 does the same for
-each owned V row's `v`. The raw (pre-conv) values are kept, since they become the newest tap. With
-the norm on, step 8 holds each row's output instead of storing it; afterwards each wave reduces its
-`Σ o²` (k-lane 0 only, since every k-lane holds the row's output). When `NW > 1` each wave writes
-one float to LDS and a workgroup barrier separates those writes from the reads that finish the
-sum; the gated store follows. That barrier comes after every wave's tap reads (taps → outputs →
-partial sums), so it also orders the tap shift; with conv on and the norm off, one barrier is
-emitted for that alone when `NW > 1`. With `NW = 1` there is no LDS and no barrier: one wave reads
-its taps before it writes them. Each conv channel is written once: q/k channels by wave 0 v-lane 0,
-a V row's channel by its k-lane-0 owner. The norm runs on the fp32 output (a reference
+**Dataflow.** The fused loads join step 3 of §4.3; the unfused math steps keep their order. With
+`fuse_conv`, step 3 loads each `q`/`k` chunk from the packed row together with its `W − 1` taps
+and `W` weights, and each owned V row's `v` with its taps and weights; conv + SiLU then run on the
+raw `q`, `k` and `v` after the gates and before the L2 norms. The raw (pre-conv) values are kept,
+since they become the newest tap. With the norm on, step 3 also loads each owned row's `out_gate`
+and `norm_weight`, and step 8 holds each row's output instead of storing it; afterwards each wave
+reduces its `Σ o²` (k-lane 0 only, since every k-lane holds the row's output). When `NW > 1` each
+wave writes one float to LDS and a workgroup barrier separates those writes from the reads that
+finish the sum; the gated store follows. That barrier comes after every wave's tap reads (taps →
+outputs → partial sums), so it also orders the tap shift; with conv on and the norm off, one
+barrier is emitted for that alone when `NW > 1`. With `NW = 1` there is no LDS and no barrier: one
+wave reads its taps before it writes them. Each conv channel is written once: q/k channels by wave
+0 v-lane 0, a V row's channel by its k-lane-0 owner. The norm runs on the fp32 output (a reference
 implementation that rounds `o` to bf16 first differs by up to one bf16 step).
 
 **Cost.** `fuse_conv` with a single wave owns all `DV` rows plus their taps and weights, so it is a
-register-heavy (legal) tile, like the unfused `(1,1,1)`. The fused modes are an enablement path and
-recompute shared work instead of sharing it. A q/k conv channel depends only on its k-lane, so
-every `(wave, v-lane)` pair of the workgroup recomputes it: `NW × WTV = NW × 64 / WTK` times per
-head, each time re-loading its taps and weights (16 times at the `(4, 16, 1)` tile). A V channel's
-conv and an output's gate activation are computed by all `WTK` k-lanes of the row and stored by
-one: `WTK`-fold. This trades occupancy and redundant loads for fewer launches. Tile selection for
-the fused modes is not part of this emitter.
+register-heavy (legal) tile, like the unfused `(1,1,1)`; it keeps part of the interleaved order so
+that it does not spill (§4.3), and some `(4,16,1)` conv tiles run one wave per SIMD lower than with
+an interleaved order (§4.3, Cost). The fused modes are an enablement path and recompute shared work
+instead of sharing it. A q/k conv channel depends only on its k-lane, so every `(wave, v-lane)`
+pair of the workgroup recomputes it: `NW × WTV = NW × 64 / WTK` times per head, each time
+re-loading its taps and weights (16 times at the `(4, 16, 1)` tile). A V channel's conv and an
+output's gate activation are computed by all `WTK` k-lanes of the row and stored by one:
+`WTK`-fold. This trades occupancy and redundant loads for fewer launches. Tile selection for the
+fused modes is not part of this emitter.
 
 ---
 
