@@ -11251,10 +11251,10 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       print2(f"[postMainLoopBarrierCheckAndReset] skip: numWaves={numWaves} (must be > 1)")
       return
 
-    # PGR1 TDM requires a second authored barrier and tensor-counter drain.
-    # The token planner models only LDS phases, so rebuilding those barriers
-    # drops synchronization that the async tensor writes require.
-    if kernel["PrefetchGlobalRead"] == 1 and not dcpThickGateFromTokenPasses(kernel):
+    # Scalar PGR1 TDM requires a second authored barrier and tensor-counter
+    # drain. Decoupled PGR still needs its text- or token-based planner.
+    if kernel["PrefetchGlobalRead"] == 1 \
+       and decoupledThickGateRelaxation(kernel) is None:
       print2("[postMainLoopBarrierCheckAndReset] skip: PGR1 TDM requires writer-authored synchronization")
       return
 
