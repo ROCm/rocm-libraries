@@ -190,9 +190,9 @@ TEST_P(CPU_PrecomputeTable_NONE, FormatAndLookup)
     // retrained encoder without a regenerated table is caught here, and fails closed to the fdeep
     // path at runtime (GetConfigEmbeddingTable rejects the table on an md5 mismatch).
     ASSERT_EQ(pt.enc_md5.size(), 32u) << "table missing v2 encoder hash: " << path;
-    const auto enc_path =
-        (miopen::GetSystemDbPath() / (t.arch + "_" + t.solver + "_kernel_config_encoder.tn.model"))
-            .string();
+    const auto enc_path = (miopen::GetSystemDbPath() / (std::string(t.arch) + "_" + t.solver +
+                                                        "_kernel_config_encoder.tn.model"))
+                              .string();
     ASSERT_TRUE(miopen::fs::exists(enc_path)) << "config encoder missing: " << enc_path;
     std::ifstream enc(enc_path, std::ios::binary | std::ios::ate);
     std::string enc_bytes(static_cast<std::size_t>(enc.tellg()), '\0');
