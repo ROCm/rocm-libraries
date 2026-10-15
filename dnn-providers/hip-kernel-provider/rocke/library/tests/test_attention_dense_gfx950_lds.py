@@ -90,9 +90,7 @@ def test_tile_legality_matches_gate_over_dispatcher_axes(head_size):
         if dense.supports_attention_dense(_spec(head_size, bm, bn))[0]
     }
     axis_tiles = {
-        (bm, bn)
-        for bm in attn_axes._GFX950_BLOCK_M
-        for bn in attn_axes._GFX950_BLOCK_N
+        (bm, bn) for bm in attn_axes._GFX950_BLOCK_M for bn in attn_axes._GFX950_BLOCK_N
     }
     assert accepted == legal & axis_tiles
     assert accepted, "no legal tile on the dispatcher axes"

@@ -41,11 +41,7 @@ def _problem(**kw):
     return au.UnifiedAttentionProblem(**base)
 
 
-_GRID = list(
-    itertools.product(
-        (64, 128, 256), ("bf16", "fp16"), (16, 64), (0, 4096)
-    )
-)
+_GRID = list(itertools.product((64, 128, 256), ("bf16", "fp16"), (16, 64), (0, 4096)))
 
 
 @pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
