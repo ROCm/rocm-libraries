@@ -31,7 +31,9 @@ dialect: packaged
 authored_subpath: rocKE/gfx1151_wmma_attention
 engine:
   name: hipkernel:Gfx1151WmmaAttention
-  sdk_version: 1.0.0
+  # 1.2.0: graphs with a runtime pass-by-value scale tensor require it. The
+  # native matcher declines override-shape graphs (1.1.0).
+  sdk_version: 1.2.0
   knobs: []
   heuristic: native
 

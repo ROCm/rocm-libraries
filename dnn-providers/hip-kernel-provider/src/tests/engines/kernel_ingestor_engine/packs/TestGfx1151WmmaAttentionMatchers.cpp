@@ -114,6 +114,7 @@ struct GraphSpec
     bool causalMask = false;
     bool causalMaskBottomRight = false;
     ScaleForm scale = ScaleForm::VALUE;
+    bool overrideShape = false;
 };
 
 DeviceProperties testDeviceProperties()
@@ -284,6 +285,7 @@ flatbuffers::FlatBufferBuilder buildSdpaGraph(const GraphSpec& spec)
     graph.add_name(name);
     graph.add_tensors(tensorVector);
     graph.add_nodes(nodeVector);
+    graph.add_is_override_shape_enabled(spec.overrideShape);
     builder.Finish(graph.Finish());
     return builder;
 }
@@ -464,6 +466,18 @@ TEST(TestGfx1151WmmaAttentionMatchers, DeclinesRaggedOperands)
         spec.raggedOperand = uid;
         EXPECT_FALSE(matchGraph(spec).has_value()) << "ragged operand uid " << uid;
     }
+}
+
+// Launch arguments are bound from the graph's shapes at prepare, so a graph whose
+// shapes may be overridden at execute is declined (the engine declares schema
+// 1.2.0 for runtime scales, which would otherwise admit it).
+TEST(TestGfx1151WmmaAttentionMatchers, DeclinesOverrideShapeGraphs)
+{
+    GraphSpec spec;
+    spec.scale = ScaleForm::RUNTIME_TENSOR;
+    ASSERT_TRUE(matchGraph(spec).has_value());
+    spec.overrideShape = true;
+    EXPECT_FALSE(matchGraph(spec).has_value());
 }
 
 // The deprecated causal flags override the bounds and alignment, as in the

@@ -303,7 +303,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                 LoadsExactlyTheEmittedKernels
                 EveryLoadedDescriptorCoversTheRequestedArch
                 EveryKernelDeclaresTheEmittedRuntimeSourceKind
-                DeclaresTheConfiguredSdkVersion
+                UnderstandsRuntimePassByValueScaleGraphs
                 ExposesTheConfiguredKnobs
                 RanksThroughItsRegisteredScoreSymbol
                 CarriesNoGraphScopedMatcher

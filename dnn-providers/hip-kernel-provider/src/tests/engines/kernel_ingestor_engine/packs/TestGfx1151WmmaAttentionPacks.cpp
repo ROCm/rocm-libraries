@@ -15,6 +15,7 @@
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_data_sdk/utilities/VersionUtils.hpp>
 #include <hipdnn_plugin_sdk/BehaviorNote.h>
+#include <hipdnn_plugin_sdk/PluginVersionConstants.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 #include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
@@ -879,9 +880,14 @@ TEST_F(TestGfx1151WmmaAttentionPacks, EveryKernelDeclaresTheEmittedRuntimeSource
     }
 }
 
-TEST_F(TestGfx1151WmmaAttentionPacks, DeclaresTheConfiguredSdkVersion)
+// A runtime pass-by-value scale raises a graph's schema floor to 1.2.0; an engine
+// declaring less is declined by GenericPlanBuilder before the native matcher can
+// resolve the scale at launch.
+TEST_F(TestGfx1151WmmaAttentionPacks, UnderstandsRuntimePassByValueScaleGraphs)
 {
-    EXPECT_EQ(_set->engine.sdkVersion, hipdnn_data_sdk::utilities::Version{std::string("1.0.0")});
+    const hipdnn_data_sdk::utilities::Version passByValue{
+        hipdnn_plugin_sdk::K_PASS_BY_VALUE_MIN_API_VERSION};
+    EXPECT_FALSE(_set->engine.sdkVersion < passByValue) << _set->engine.sdkVersion.str();
 }
 
 TEST_F(TestGfx1151WmmaAttentionPacks, ExposesTheConfiguredKnobs)

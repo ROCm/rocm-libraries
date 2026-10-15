@@ -106,7 +106,10 @@ const data_objects::TensorAttributes* findTensor(const MatchContext& context, in
 
 const data_objects::SdpaAttributes* sdpaNode(const MatchContext& context)
 {
-    if(context.graph.nodeCount() != 1)
+    // The engine declares graph schema 1.2.0 for runtime pass-by-value scales,
+    // which also admits override-shape graphs (1.1.0). Launch arguments are
+    // bound from the graph's shapes at prepare, so those are declined.
+    if(context.graph.nodeCount() != 1 || context.graph.getGraph().is_override_shape_enabled())
     {
         return nullptr;
     }
