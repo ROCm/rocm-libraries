@@ -7,6 +7,7 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 
 ### Added
 
+
 * Hessenberg reduction routines
     * GEHD2
     * GEHRD
@@ -14,6 +15,9 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 * Support added for the gfx1250-strict architecture.
 
 ### Changed
+
+* Clarified in the API documentation that rocsolver_rfinfo is an input and output parameter as it could be modified within the functions.
+
 ### Removed
 ### Optimized
 
@@ -24,6 +28,9 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 
 * LANGE now sets the norm to zero when m = 0 or n = 0, accumulates the Frobenius norm with scaling
   to avoid overflow and underflow, and returns NaN for complex elements with a NaN real part
+* Improved kernel launches to detect invalid launch configuration.
+
+* Fixed sparse functions potentially not using the stream set in the handle.
 
 ### Known issues
 ### Upcoming changes
