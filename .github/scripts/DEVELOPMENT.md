@@ -195,12 +195,6 @@ These scripts run on every merge to `develop` and push changes from the
 monorepo to the corresponding sub-repositories. **Never test changes to these
 by merging to `develop`** — use the approaches below.
 
-If patch application fails and the patch changes the root `CHANGELOG.md`,
-projects marked `monorepo_source_of_truth` retry the other files normally and
-replace the downstream changelog with the exact content from the monorepo merge
-commit. This intentionally replaces downstream-only changelog content; conflicts
-in other files still fail without committing or pushing.
-
 #### Dry-run (read-only, uses real GitHub API)
 
 Both scripts accept `--dry-run --debug`. In this mode every step runs except

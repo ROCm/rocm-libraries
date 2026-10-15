@@ -16,7 +16,6 @@ import sys
 import tempfile
 import time
 import unittest
-from contextlib import chdir
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -568,97 +567,6 @@ class ApplyPatchTest(unittest.TestCase):
             sut._apply_patch(self.repo, self.patch_file)
 
 
-class DivergedChangelogTest(unittest.TestCase):
-    """Recover an outdated mirror changelog without bypassing code conflicts."""
-
-    def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(self.tmp.cleanup)
-        self.monorepo = Path(self.tmp.name) / "monorepo"
-        self.repo = Path(self.tmp.name) / "subrepo"
-        make_git_repo(self.monorepo)
-        make_git_repo(self.repo)
-        self.subtree = self.monorepo / "projects" / "rocsolver"
-        self.subtree.mkdir(parents=True)
-        self.old_changelog = b"# Changelog\n\n## 3.32.0\n\nOld release.\n"
-        self.new_changelog = (
-            b"# Changelog\r\n\r\n## Unreleased\r\n\r\n* Fixed SYEVJ race.\r\n\r\n\r\n"
-        )
-        (self.repo / "CHANGELOG.md").write_bytes(self.old_changelog)
-        _git(["add", "CHANGELOG.md"], cwd=self.repo)
-        make_initial_commit(self.repo, "kernel.cpp", "before\n")
-        (self.subtree / "CHANGELOG.md").write_text(
-            "# Changelog\n\n## Unreleased\n\n* Fixed GETRS.\n"
-        )
-        (self.subtree / "kernel.cpp").write_text("before\n")
-        _git(["add", "."], cwd=self.monorepo)
-        _git(["commit", "-m", "initial"], cwd=self.monorepo)
-        self.patch_file = Path(self.tmp.name) / "change.patch"
-
-    def generate_patch(self, *, code_change=True, changelog_change=True):
-        if changelog_change:
-            (self.subtree / "CHANGELOG.md").write_bytes(self.new_changelog)
-        if code_change:
-            (self.subtree / "kernel.cpp").write_text("after\n")
-        _git(["add", "."], cwd=self.monorepo)
-        _git(["commit", "-m", "Fix SYEVJ"], cwd=self.monorepo)
-        with chdir(self.monorepo):
-            sut.generate_patch("projects/rocsolver", "HEAD", self.patch_file)
-            self.merge_sha = sut._run_git(["rev-parse", "HEAD"])
-
-    def apply_patch(self, *, source_of_truth=True):
-        with chdir(self.monorepo):
-            sut._apply_patch(
-                self.repo,
-                self.patch_file,
-                changelog_source=(
-                    f"{self.merge_sha}:projects/rocsolver/CHANGELOG.md"
-                    if source_of_truth
-                    else None
-                ),
-            )
-
-    def test_diverged_changelog_is_restored_and_code_patch_applied(self):
-        self.generate_patch()
-        with self.assertRaises(RuntimeError):
-            sut._apply_patch(self.repo, self.patch_file)
-        self.apply_patch()
-        self.assertEqual((self.repo / "CHANGELOG.md").read_bytes(), self.new_changelog)
-        self.assertEqual((self.repo / "kernel.cpp").read_text(), "after\n")
-
-    def test_changelog_only_patch_is_recovered(self):
-        self.generate_patch(code_change=False)
-        self.apply_patch()
-        self.assertEqual((self.repo / "CHANGELOG.md").read_bytes(), self.new_changelog)
-
-    def test_code_conflict_still_fails_without_overwriting_changelog(self):
-        self.generate_patch()
-        (self.repo / "kernel.cpp").write_text("downstream code\n")
-        with self.assertRaises(RuntimeError):
-            self.apply_patch()
-        self.assertEqual((self.repo / "CHANGELOG.md").read_bytes(), self.old_changelog)
-        self.assertEqual((self.repo / "kernel.cpp").read_text(), "downstream code\n")
-
-    def test_non_authoritative_source_does_not_overwrite_changelog(self):
-        self.generate_patch()
-        with self.assertRaises(RuntimeError):
-            self.apply_patch(source_of_truth=False)
-        self.assertEqual((self.repo / "CHANGELOG.md").read_bytes(), self.old_changelog)
-
-    def test_patch_without_changelog_does_not_overwrite_it(self):
-        self.generate_patch(changelog_change=False)
-        (self.repo / "kernel.cpp").write_text("downstream code\n")
-        with self.assertRaises(RuntimeError):
-            self.apply_patch()
-        self.assertEqual((self.repo / "CHANGELOG.md").read_bytes(), self.old_changelog)
-
-    def test_clean_code_patch_leaves_untouched_changelog_alone(self):
-        self.generate_patch(changelog_change=False)
-        self.apply_patch()
-        self.assertEqual((self.repo / "kernel.cpp").read_text(), "after\n")
-        self.assertEqual((self.repo / "CHANGELOG.md").read_bytes(), self.old_changelog)
-
-
 # ---------------------------------------------------------------------------
 # _push_changes — behavior on failure
 # ---------------------------------------------------------------------------
@@ -852,24 +760,6 @@ class PushChangesTest(unittest.TestCase):
 
 class ApplyPatchToSubrepoTest(unittest.TestCase):
 
-    def test_non_authoritative_entry_disables_changelog_recovery(self):
-        entry = make_entry("rocblas")
-        entry.monorepo_source_of_truth = False
-        with patch.object(sut, "_clone_subrepo"), patch.object(
-            sut, "_configure_git_user"
-        ), patch.object(sut, "_apply_patch", side_effect=RuntimeError) as mock_apply:
-            with self.assertRaises(RuntimeError):
-                sut.apply_patch_to_subrepo(
-                    entry,
-                    "ROCm/rocm-libraries",
-                    99,
-                    FIXTURES / "simple.patch",
-                    "Jane Doe",
-                    "jane@example.com",
-                    "abc1234",
-                )
-        self.assertIsNone(mock_apply.call_args.kwargs["changelog_source"])
-
     def test_dry_run_skips_all_git_operations(self):
         """In dry-run mode the function must log and return without cloning."""
         with patch.object(sut, "_clone_subrepo") as mock_clone, patch.object(
@@ -895,7 +785,7 @@ class ApplyPatchToSubrepoTest(unittest.TestCase):
         """The full pipeline runs commit and push exactly once."""
         with patch.object(sut, "_clone_subrepo"), patch.object(
             sut, "_configure_git_user"
-        ), patch.object(sut, "_apply_patch") as mock_apply, patch.object(
+        ), patch.object(sut, "_apply_patch"), patch.object(
             sut, "_stage_changes"
         ), patch.object(
             sut, "_commit_changes"
@@ -916,10 +806,6 @@ class ApplyPatchToSubrepoTest(unittest.TestCase):
             )
         mock_commit.assert_called_once()
         mock_push.assert_called_once()
-        self.assertEqual(
-            mock_apply.call_args.kwargs["changelog_source"],
-            "abc1234:projects/rocblas/CHANGELOG.md",
-        )
 
 
 if __name__ == "__main__":
