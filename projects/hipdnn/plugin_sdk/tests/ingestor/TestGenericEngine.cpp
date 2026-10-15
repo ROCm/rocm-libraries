@@ -103,7 +103,7 @@ TEST(TestIngestorGenericEngine, IsApplicableFalseWhenNoMatcherAccepts)
         makeStubDispatches(),
         std::vector<KernelDescriptorPack>{std::move(pack)},
         std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
-        REJECT_SYMBOL);
+        NativeGraphMatch{REJECT_SYMBOL});
 
     const StubDeviceResolver resolver;
     const StubEngine engine(makeEngineWithKnobs({BLOCK_SIZE}), std::move(stateManager), resolver);

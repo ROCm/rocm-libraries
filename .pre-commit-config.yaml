@@ -142,13 +142,24 @@ repos:
       # C++ output. Fires on the schemas (transitively, via the generator reading
       # their fields through flatc) and on the generator script itself, since a
       # change to its emitter/filter/type-walk logic can desync the checked-in
-      # header just like a schema change can. Re-derives the whole header, so
-      # pass_filenames is false.
+      # header just like a schema change can. Also fires on the generated header,
+      # so a hand edit is overwritten and fails the hook. Re-derives the whole
+      # header, so pass_filenames is false.
       - id: cache-key-hipdnn
         name: cache key codegen (hipDNN)
         entry: python projects/hipdnn/scripts/gen_cache_key.py
         language: python
-        files: ^projects/hipdnn/flatbuffers_sdk/schemas/.*\.fbs$|^projects/hipdnn/scripts/gen_cache_key\.py$|^projects/hipdnn/cmake/default_flatc_version\.txt$
+        files: ^projects/hipdnn/flatbuffers_sdk/schemas/.*\.fbs$|^projects/hipdnn/scripts/gen_cache_key\.py$|^projects/hipdnn/cmake/default_flatc_version\.txt$|^projects/hipdnn/flatbuffers_sdk/include/hipdnn_flatbuffers_sdk/data_objects/cachekey_generated\.h$
+        pass_filenames: false
+
+      # Regenerates the op-schema registry header and JSON, like cache-key-hipdnn,
+      # including when either output is edited by hand.
+      # Also runs on gen_cache_key.py changes because the generator imports its schema loader.
+      - id: op-schema-registry-hipdnn
+        name: op-schema registry codegen (hipDNN)
+        entry: python projects/hipdnn/scripts/gen_op_schema_registry.py
+        language: python
+        files: ^projects/hipdnn/flatbuffers_sdk/schemas/.*\.fbs$|^projects/hipdnn/scripts/gen_op_schema_registry\.py$|^projects/hipdnn/scripts/gen_cache_key\.py$|^projects/hipdnn/cmake/default_flatc_version\.txt$|^projects/hipdnn/flatbuffers_sdk/op_schema_registry\.json$|^projects/hipdnn/flatbuffers_sdk/include/hipdnn_flatbuffers_sdk/data_objects/op_schema_registry_generated\.h$
         pass_filenames: false
 
       - id: verify-support-claims

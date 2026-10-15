@@ -1,0 +1,16 @@
+{
+  "description": "A node whose 'op' is a number, neither an opcode string nor an object.",
+  "valid": false,
+  "error": "must be an opcode string or an object",
+  "ued": {
+    "version": "1.0",
+    "id": "2fc1f3bb-2b77-50ee-82dc-302002ea5d60",
+    "name": "ued_fixture:op_not_string_or_object",
+    "metadata": "79c19b2d-d640-5345-8b23-42aee6be9fff",
+    "graph_match": {
+      "nodes": [
+        {"kind": "op", "id": "pw", "op": 7, "operands": {"in_0": "$input_a", "in_1": "$input_b"}, "results": {"out_0": "$output"}}
+      ]
+    }
+  }
+}

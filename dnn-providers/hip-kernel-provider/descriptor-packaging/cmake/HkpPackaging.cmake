@@ -368,6 +368,10 @@ endfunction()
 #   NAME is the source label written into every descriptor's provenance. NAME, the
 #   absolute SOURCE_ROOT, OUT_ROOT and ARCHES go into a global registry read by
 #   hkp_verify_embedded_sources() and hkp_register_census_tests().
+#
+#   Every root resolves UED graph patterns against
+#   HIPKERNELPROVIDER_OP_SCHEMA_REGISTRY, which hkp_add_packaging sets. Changing
+#   that file repacks every root.
 # ---------------------------------------------------------------------------
 function(hkp_wire_pack_target)
     set(_one NAME SOURCE_ROOT ARCHES HIPCC ROCM_KPACK_DIR
@@ -493,10 +497,12 @@ function(hkp_wire_pack_target)
                 --source-label "${ARG_NAME}"
                 ${_producer_arg}
                 ${_exclude_args}
+                --op-schema-registry "${HIPKERNELPROVIDER_OP_SCHEMA_REGISTRY}"
         COMMAND "${CMAKE_COMMAND}" -E make_directory "${ARG_OUT_ROOT}"
         COMMAND "${CMAKE_COMMAND}" -E touch "${_stamp}"
         DEPENDS "${HKP_TOOL}" ${_source_inputs} ${_tool_sources}
                 "${_input_manifest}"
+                "${HIPKERNELPROVIDER_OP_SCHEMA_REGISTRY}"
                 ${_producer_deps}
         COMMENT "hkp: packing root '${ARG_NAME}' for ${ARG_ARCHES}"
         VERBATIM)
@@ -1165,6 +1171,65 @@ packaging dormant.")
 endfunction()
 
 # ---------------------------------------------------------------------------
+# _hkp_resolve_op_schema_registry()
+#   Declare HIPKERNELPROVIDER_OP_SCHEMA_REGISTRY, the op-schema registry every root
+#   resolves UED graph patterns against, and fail configure if the file is missing.
+#
+#   The default is the registry that matches the hipDNN this provider builds against,
+#   since the runtime header the matcher runs on comes from that hipDNN. An installed
+#   hipDNN built with HIPDNN_ENABLE_KERNEL_INGESTOR (imported hipdnn_flatbuffers_sdk
+#   target) names its registry, under <prefix>/share/hipdnn_flatbuffers_sdk/, through
+#   its package config. An in-tree hipDNN, or a build without the target, uses the copy
+#   generated and committed beside the repository's graph schemas.
+#
+#   The default is recomputed on every configure. A cached value that equals the default
+#   the previous configure computed was never overridden, so it follows the new default
+#   when the build is reconfigured against a different hipDNN. Any other value was set
+#   by the user and is kept.
+# ---------------------------------------------------------------------------
+function(_hkp_resolve_op_schema_registry)
+    get_filename_component(_default
+        "${HKP_PKG_DIR}/../../../projects/hipdnn/flatbuffers_sdk/op_schema_registry.json"
+        ABSOLUTE)
+    if(TARGET hipdnn_flatbuffers_sdk)
+        get_target_property(_flatbuffers_sdk_imported hipdnn_flatbuffers_sdk IMPORTED)
+        if(_flatbuffers_sdk_imported)
+            set(_default "${HIPDNN_FLATBUFFERS_SDK_OP_SCHEMA_REGISTRY}")
+        else()
+            get_target_property(_flatbuffers_sdk_dir hipdnn_flatbuffers_sdk SOURCE_DIR)
+            set(_default "${_flatbuffers_sdk_dir}/op_schema_registry.json")
+        endif()
+    endif()
+    # A FILEPATH cache entry is stored with forward slashes, the INTERNAL marker below
+    # verbatim. Normalize once so the two compare equal for a native Windows path.
+    cmake_path(SET _default NORMALIZE "${_default}")
+
+    if(NOT DEFINED CACHE{HIPKERNELPROVIDER_OP_SCHEMA_REGISTRY}
+       OR "$CACHE{HIPKERNELPROVIDER_OP_SCHEMA_REGISTRY}" STREQUAL
+          "$CACHE{_HKP_OP_SCHEMA_REGISTRY_DEFAULT}")
+        set(HIPKERNELPROVIDER_OP_SCHEMA_REGISTRY "${_default}"
+            CACHE FILEPATH
+            "The op-schema registry JSON that UED graph_match.nodes patterns resolve \
+against when descriptors are packed. Defaults to the registry of the hipDNN the \
+provider builds against."
+            FORCE)
+    endif()
+    set(_HKP_OP_SCHEMA_REGISTRY_DEFAULT "${_default}" CACHE INTERNAL
+        "The HIPKERNELPROVIDER_OP_SCHEMA_REGISTRY default the last configure computed.")
+
+    if(NOT EXISTS "${HIPKERNELPROVIDER_OP_SCHEMA_REGISTRY}")
+        message(FATAL_ERROR
+            "hkp: the op-schema registry does not exist: "
+            "'${HIPKERNELPROVIDER_OP_SCHEMA_REGISTRY}'. Descriptor packaging "
+            "resolves UED graph patterns against it. Set "
+            "HIPKERNELPROVIDER_OP_SCHEMA_REGISTRY to the op_schema_registry.json "
+            "of the hipDNN this provider builds against: an installed hipDNN built "
+            "with HIPDNN_ENABLE_KERNEL_INGESTOR ships it under "
+            "share/hipdnn_flatbuffers_sdk/.")
+    endif()
+endfunction()
+
+# ---------------------------------------------------------------------------
 # _hkp_disabled_families(<out_var>)
 #   The folders of HKP_DESCRIPTOR_FAMILIES whose option is OFF in this build. An entry
 #   that is not `<folder>=<option>`, or whose option is not defined, is a configure error.
@@ -1198,8 +1263,9 @@ endfunction()
 # _hkp_root_probe(<out_shipped> <out_offered> <out_ok> <root> <arches>
 #                 <exclude_folders> <disabled_kinds>)
 #   What a pack of <root> would ship, asked of the packer: its own load_flat_input(),
-#   shipped_engines() and offered_engines(), with the same excluded folders and disabled
-#   kinds (bare kind names) the pack step gets, run under the base interpreter.
+#   shipped_engines() and offered_engines(), with the same excluded folders, disabled
+#   kinds (bare kind names) and op-schema registry the pack step gets, run under the
+#   base interpreter.
 #
 #   <out_ok> is TRUE when the packer answered. Then <out_shipped> is JSON
 #   {"<arch>": ["<engine name>", ...]}, where every arch mapping to an empty list is a
@@ -1215,8 +1281,8 @@ endfunction()
 #   packer's own reason. Callers then wire the root, so the pack reports what is wrong
 #   with it.
 #
-#   Every descriptor under <root> the packer reads is a configure dependency, since the
-#   answer turns on their contents.
+#   Every descriptor under <root> the packer reads is a configure dependency, as is
+#   the op-schema registry, since the answer depends on their contents.
 # ---------------------------------------------------------------------------
 # cmake-lint: disable=R0913
 function(_hkp_root_probe out_shipped out_offered out_ok root arches exclude_folders
@@ -1229,7 +1295,8 @@ function(_hkp_root_probe out_shipped out_offered out_ok root arches exclude_fold
     _hkp_filter_inputs(_descriptors "${root}" "${_descriptors}" "${exclude_folders}")
     set_property(
         DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
-        APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${_descriptors})
+        APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${_descriptors}
+                        "${HIPKERNELPROVIDER_OP_SCHEMA_REGISTRY}")
 
     # Each list travels as one prefixed argument, so an empty list is still an argument.
     string(REPLACE ";" "," _arch_csv "${arches}")
@@ -1251,7 +1318,8 @@ except HkpPackError as exc:
     sys.exit(str(exc))
 ")
     execute_process(
-        COMMAND "${CMAKE_COMMAND}" -E env "PYTHONPATH=${HKP_PYTHON_ROOT}" --
+        COMMAND "${CMAKE_COMMAND}" -E env "PYTHONPATH=${HKP_PYTHON_ROOT}"
+                "HKP_OP_SCHEMA_REGISTRY=${HIPKERNELPROVIDER_OP_SCHEMA_REGISTRY}" --
                 "${Python3_EXECUTABLE}" -c "${_probe_py}" "${root}"
                 "arches=${_arch_csv}" "folders=${_folder_csv}" "kinds=${_kind_csv}"
         RESULT_VARIABLE _rc
@@ -1656,6 +1724,8 @@ function(hkp_add_packaging)
 
     _hkp_resolve_production_root(_source_root)
 
+    _hkp_resolve_op_schema_registry()
+
     # One list for every root, so "every root is wired to rocKE identically" holds in
     # both modes rather than at six sites that have to agree.
     if(HIPKERNELPROVIDER_ENABLE_ROCKE)
@@ -1755,7 +1825,9 @@ endfunction()
 #   sets: a quick entry (`-m quick`, the no-compile subset) and a standard entry
 #   (`-m "not quick"`, the rest). Tier labels come from HKP_PACK_test_categories,
 #   whose cascade runs each test once per tier with no overlap. Configuration
-#   fails when Python3_EXECUTABLE cannot import pytest.
+#   fails when Python3_EXECUTABLE cannot import pytest or jsonschema, the
+#   modules the suite itself imports, so a missing one fails configure with a
+#   remedy instead of failing a registered test at run time.
 #
 #   hipcc is a requirement of the whole ingestor, so the hipcc-dependent tests
 #   are hard-gated: their fixture fails on a missing hipcc rather than skipping.
@@ -1780,7 +1852,8 @@ function(hkp_register_tests rocm_kpack_dir hipcc rocke_comgr_lib)
     # conftest.py reads HIPKERNELPROVIDER_ROCM_KPACK_DIR, so that is the name
     # forwarded here regardless of which variable resolved it.
     #
-    # HKP_HIPCC names the hipcc that configure found.
+    # HKP_HIPCC names the hipcc that configure found. HKP_OP_SCHEMA_REGISTRY names
+    # the registry the pack step resolves graph patterns against.
     #
     # HKP_CMAKE_COMMAND and HKP_CMAKE_MAKE_PROGRAM name this build's own CMake
     # and build tool. The python environment tests drive real sub-configures and
@@ -1789,7 +1862,8 @@ function(hkp_register_tests rocm_kpack_dir hipcc rocke_comgr_lib)
     set(_pyenv "PYTHONPATH=${HKP_PYTHON_ROOT}"
         "HKP_HIPCC=${hipcc}"
         "HKP_CMAKE_COMMAND=${CMAKE_COMMAND}"
-        "HKP_CMAKE_MAKE_PROGRAM=${CMAKE_MAKE_PROGRAM}")
+        "HKP_CMAKE_MAKE_PROGRAM=${CMAKE_MAKE_PROGRAM}"
+        "HKP_OP_SCHEMA_REGISTRY=${HIPKERNELPROVIDER_OP_SCHEMA_REGISTRY}")
     if(rocm_kpack_dir)
         list(APPEND _pyenv "HIPKERNELPROVIDER_ROCM_KPACK_DIR=${rocm_kpack_dir}")
     endif()
@@ -1799,17 +1873,19 @@ function(hkp_register_tests rocm_kpack_dir hipcc rocke_comgr_lib)
         list(APPEND _pyenv "ROCKE_COMGR_LIB=${rocke_comgr_lib}")
     endif()
 
-    execute_process(
-        COMMAND "${Python3_EXECUTABLE}" -c "import pytest"
-        RESULT_VARIABLE _pytest_rc
-        OUTPUT_QUIET ERROR_QUIET)
-    if(NOT _pytest_rc EQUAL 0)
-        message(FATAL_ERROR
-            "hkp: pytest is not importable by ${Python3_EXECUTABLE}, so the "
-            "descriptor-packaging tests cannot run. Install pytest for that "
-            "interpreter, or configure with "
-            "-DHIPKERNELPROVIDER_ENABLE_TESTS=OFF.")
-    endif()
+    foreach(_module IN ITEMS pytest jsonschema)
+        execute_process(
+            COMMAND "${Python3_EXECUTABLE}" -c "import ${_module}"
+            RESULT_VARIABLE _module_rc
+            OUTPUT_QUIET ERROR_QUIET)
+        if(NOT _module_rc EQUAL 0)
+            message(FATAL_ERROR
+                "hkp: ${_module} is not importable by ${Python3_EXECUTABLE}, so the "
+                "descriptor-packaging tests cannot run. Install ${_module} for that "
+                "interpreter, or configure with "
+                "-DHIPKERNELPROVIDER_ENABLE_TESTS=OFF.")
+        endif()
+    endforeach()
 
     set(_rocke_ignore "")
     if(NOT HIPKERNELPROVIDER_ENABLE_ROCKE)

@@ -253,6 +253,21 @@ function(_create_cache_key_codegen_test_internal prefix_name)
     endif() # Python3_FOUND
 endfunction() # _create_cache_key_codegen_test_internal
 
+# Registers the op-schema registry generator's unit tests with ctest. Like the cache-key
+# policy, the registry derives from the schemas, so the test runs regardless of
+# HIPDNN_ENABLE_KERNEL_INGESTOR.
+function(_create_op_schema_registry_codegen_test_internal prefix_name)
+    if(Python3_FOUND)
+        add_test(
+            NAME ${prefix_name}_op_schema_registry_codegen_tests
+            COMMAND ${Python3_EXECUTABLE} -m unittest discover -s
+                    ${PROJECT_SOURCE_DIR}/scripts -p "test_gen_op_schema_registry.py" -v
+            WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/scripts
+        )
+        _apply_hipdnn_test_category_labels(${prefix_name}_op_schema_registry_codegen_tests)
+    endif() # Python3_FOUND
+endfunction() # _create_op_schema_registry_codegen_test_internal
+
 # Finalizes and creates all of the test targets
 #
 # Arguments:
@@ -263,6 +278,7 @@ endfunction() # _create_cache_key_codegen_test_internal
 function(finalize_test_targets prefix_name)
     _create_test_name_validation_target_internal(${prefix_name})
     _create_cache_key_codegen_test_internal(${prefix_name})
+    _create_op_schema_registry_codegen_test_internal(${prefix_name})
 
     _create_check_targets_internal(${prefix_name})
 

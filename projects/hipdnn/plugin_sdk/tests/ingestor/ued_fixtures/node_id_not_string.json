@@ -1,0 +1,16 @@
+{
+  "description": "A node id that is a number, not an identifier string.",
+  "valid": false,
+  "error": "must be an identifier ([A-Za-z_][A-Za-z0-9_]*), got 7",
+  "ued": {
+    "version": "1.0",
+    "id": "d18dbfe5-a7e8-529c-9bfe-955815aec83e",
+    "name": "ued_fixture:node_id_not_string",
+    "metadata": "f0813418-31dc-533a-bd99-4074ae2827bd",
+    "graph_match": {
+      "nodes": [
+        {"kind": "op", "id": 7, "op": "pointwise"}
+      ]
+    }
+  }
+}
