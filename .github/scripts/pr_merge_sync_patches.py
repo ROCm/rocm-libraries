@@ -127,9 +127,33 @@ def _configure_git_user(repo_path: Path) -> None:
     )
 
 
-def _apply_patch(repo_path: Path, patch_path: Path) -> None:
-    """Apply a patch file to the working tree."""
-    _run_git(["apply", str(patch_path)], cwd=repo_path)
+def _apply_patch(
+    repo_path: Path, patch_path: Path, *, changelog_source: Optional[str] = None
+) -> None:
+    """Apply a patch, optionally recovering an authoritative root changelog."""
+    try:
+        _run_git(["apply", str(patch_path)], cwd=repo_path)
+    except RuntimeError:
+        if changelog_source is None:
+            raise
+        numstat = _run_git(["apply", "--numstat", str(patch_path)], cwd=repo_path)
+        if not any(
+            line.split("\t", 2)[-1] == "CHANGELOG.md" for line in numstat.splitlines()
+        ):
+            raise
+        # Preserve the exact committed bytes, not _run_git's stripped text.
+        changelog = subprocess.check_output(["git", "show", changelog_source])
+        # Other conflicts must still fail before the changelog is replaced.
+        _run_git(
+            ["apply", "--allow-empty", "--exclude=CHANGELOG.md", str(patch_path)],
+            cwd=repo_path,
+        )
+        changelog_path = repo_path / "CHANGELOG.md"
+        changelog_path.unlink(missing_ok=True)
+        changelog_path.write_bytes(changelog)
+        logger.warning(
+            f"Replaced diverged CHANGELOG.md from source of truth {changelog_source}"
+        )
     logger.info(f"Applied patch to working tree at {repo_path}")
 
 
@@ -332,7 +356,15 @@ def apply_patch_to_subrepo(
             )
             return
         _configure_git_user(subrepo_path)
-        _apply_patch(subrepo_path, patch_path)
+        _apply_patch(
+            subrepo_path,
+            patch_path,
+            changelog_source=(
+                f"{merge_sha}:{entry.category}/{entry.name}/CHANGELOG.md"
+                if entry.monorepo_source_of_truth
+                else None
+            ),
+        )
         _stage_changes(subrepo_path)
         original_commit_msg = _extract_commit_message_from_patch(patch_path)
         commit_msg = _format_commit_message(
