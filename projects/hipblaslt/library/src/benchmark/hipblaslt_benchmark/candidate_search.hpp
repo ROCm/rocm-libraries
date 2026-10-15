@@ -271,8 +271,9 @@ namespace hipblaslt_bench
     // search_callbacks(), and returns the winner. A candidate whose cold or timed span
     // fails, as the hooks report, is passed over: neither skipped nor measured, it cannot
     // win. An invalid adaptive TimingConfig searches nothing; validate_adaptive_config gives
-    // the reason. should_abort is asked after each prepare, cold launch and timed phase, and
-    // a failure it reports that was not there when the candidate began ends the search.
+    // the reason. should_abort is asked after each prepare and cold launch, after the cold
+    // span is timed and after the timed phase, and a failure it reports that was not there
+    // when the candidate began ends the search.
     template <typename Hooks = DefaultHooks, typename Callbacks>
     SearchResult search_candidates(size_t                       candidates,
                                    const SearchConfig&          search,
@@ -331,7 +332,7 @@ namespace hipblaslt_bench
                 for(int32_t i = 0; i < search.cold_calls; i++)
                     cold(i);
             }
-            if(cold_failed)
+            if(newly_failed())
             {
                 result.aborted = true;
                 return result;

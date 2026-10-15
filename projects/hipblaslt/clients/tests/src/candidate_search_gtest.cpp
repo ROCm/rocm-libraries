@@ -19,6 +19,7 @@ namespace
     {
         static inline double now_us         = 0.0;
         static inline bool   fail_next_read = false;
+        static inline int    failed_reads   = 0;
 
         static bool check(hipError_t status, const char*, const char*, int)
         {
@@ -30,6 +31,7 @@ namespace
             if(fail_next_read)
             {
                 fail_next_read = false;
+                failed_reads++;
                 return false;
             }
             us = now_us;
@@ -71,6 +73,7 @@ namespace
         {
             FakeClock::now_us         = 0.0;
             FakeClock::fail_next_read = false;
+            FakeClock::failed_reads   = 0;
         }
 
         hipblaslt_bench::SearchResult run(const hipblaslt_bench::SearchConfig& search,
@@ -267,6 +270,26 @@ TEST(CandidateSearch_pre_checkin, AFailedColdTimingSkipsNoOtherCandidate)
     EXPECT_EQ(host.count(entry("skipped", 2)), 0);
     EXPECT_EQ(host.count(entry("measured", 1)), 1);
     EXPECT_EQ(host.count(entry("measured", 2)), 1);
+}
+
+// A timing failure the hooks report as fatal, as ClientBenchmarkHooks does under gtest,
+// ends the search when it happens while the cold launches are timed.
+TEST(CandidateSearch_pre_checkin, AFatalFailureTimingTheColdLaunchesEndsTheSearch)
+{
+    HostSearch host;
+    host.cold_us      = {100, 100};
+    host.launch_us    = {50, 50};
+    host.untimed_cold = 0;
+    host.should_abort = [] { return FakeClock::failed_reads > 0; };
+
+    hipblaslt_bench::SearchConfig search;
+    search.cold_calls      = 1;
+    search.skip_slow_ratio = 0.5f;
+
+    const auto result = host.run(search, cpu_timing(1));
+    EXPECT_TRUE(result.aborted);
+    EXPECT_EQ(host.count(entry("measuring", 0)), 0);
+    EXPECT_EQ(host.count(entry("prepare", 1)), 0);
 }
 
 // An adaptive configuration that run_measurement would reject searches nothing.
