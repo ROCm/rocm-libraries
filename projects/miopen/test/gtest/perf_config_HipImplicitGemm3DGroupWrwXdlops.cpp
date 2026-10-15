@@ -101,6 +101,7 @@ TEST(CPU_PerfConfig3DGroupWrwDeterministic_NONE, WalksEveryKernelThenExhausts)
     EXPECT_EQ(cfg.kernel_id, "C+1");
 
     EXPECT_FALSE(cfg.SetNextValue(problem));
+    EXPECT_EQ(cfg.index, 2) << "Exhaustion must leave the cursor on the last kernel, not wrap it";
 }
 
 // Hang regression: deterministic mode with exactly one valid kernel must terminate immediately.

@@ -248,17 +248,14 @@ bool PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::SetNextValue(
     // Deterministic mode: only iterate over kernels (index), split_k is always 1
     if(is_deterministic)
     {
-        // NextLinear returns true only on wrap-around (every kernel visited) and false while it is
-        // still advancing. The previous `!NextLinear` inverted this: it returned on the first
-        // advance, so GetAllConfigs came back empty and only the GenericSearch fallback config was
-        // ever tuned in deterministic mode.
-        if(NextLinear(0, valid_kernels.size() - 1, index))
+        if((index + 1) < static_cast<int>(valid_kernels.size()))
         {
-            return false; // All kernels exhausted
+            ++index;
+            split_k   = 1;
+            kernel_id = valid_kernels[index] + "+1";
+            return true;
         }
-        split_k   = 1;
-        kernel_id = valid_kernels[index] + "+1";
-        return true;
+        return false; // All kernels exhausted
     }
 
     // General (non-deterministic) mode: iterate over both split_k and kernels
