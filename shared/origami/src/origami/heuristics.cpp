@@ -295,28 +295,22 @@ static void apply_tf32_heuristics(heuristic_params_t& params,
   // Custom kernel optimizations based on transpose mode and tile config
   // NT: N-transpose configuration
   if ((!a_trans && b_trans) && MT_M == 256 && MT_N == 256 && MT_K == 32) {
-    if (arith < threshold) {
-      params.weight_tile_total *= 0.6;
-    } else {
-      params.weight_tile_total *= 0.4;
+    if (arith >= threshold) {
+      params.weight_tile_total *= 0.5;
     }
   }
 
   // NN: No-transpose configuration
   if ((!a_trans && !b_trans) && MT_M == 256 && MT_N == 256 && MT_K == 32) {
-    if (arith < threshold) {
-      params.weight_tile_total *= 0.8;
-    } else {
-      params.weight_tile_total *= 0.4;
+    if (arith >= threshold) {
+      params.weight_tile_total *= 0.5;
     }
   }
 
   // TN: Transpose-A configuration
   if ((a_trans && !b_trans) && MT_M == 256 && MT_N == 256 && MT_K == 32) {
-    if (arith < threshold) {
-      params.weight_tile_total *= 0.8;
-    } else {
-      params.weight_tile_total *= 0.4;
+    if (arith >= threshold) {
+      params.weight_tile_total *= 0.5;
     }
   }
 }

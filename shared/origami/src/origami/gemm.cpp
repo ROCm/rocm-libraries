@@ -2660,12 +2660,12 @@ double compute_total_latency(const problem_t& problem,
     size_t MT_K_mod_128bytes = MT_K * a_bits % cache_line_bits;
     if (K_mod_128bytes == 0 && MT_K_mod_128bytes == 0) {
       // avoid division by 0 if K == 0
-      if (M <= MT_M * 2 && !b_trans && ((N * b_bits) / (M * a_bits) > 5)) {
+      if (M <= MT_M * 2 && !b_trans && ((N * b_bits) / (M * a_bits) > 5 || (batch * b_bits) / (M * a_bits) > 5)) {
         // Use nontemporal B, if the library has one to use
         if (non_temporal_b_available && !(config.cache_hints_b == 4)) {
           return std::numeric_limits<double>::max();
         }
-      } else if (N <= MT_N * 2 && a_trans && ((M * a_bits) / (N * b_bits) > 5)) {
+      } else if (N <= MT_N * 2 && a_trans && ((M * a_bits) / (N * b_bits) > 5 || (batch * a_bits) / (N * b_bits) > 5)) {
         // Use Non Temporal A, if the library has one to use
         if (non_temporal_a_available && !(config.cache_hints_a == 4)) {
           return std::numeric_limits<double>::max();
