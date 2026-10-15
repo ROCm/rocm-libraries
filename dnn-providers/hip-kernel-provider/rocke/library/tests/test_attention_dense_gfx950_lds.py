@@ -82,15 +82,42 @@ def test_over_budget_pads_are_rejected(head_size, block_m, block_n, pads):
 
 @pytest.mark.parametrize("head_size", [64, 128])
 def test_tile_legality_matches_gate_over_dispatcher_axes(head_size):
+    """The LDS-budget predicate and gfx950_dense_tile_legality must agree.
+
+    The dispatcher axes (_GFX950_BLOCK_M, _GFX950_BLOCK_N) are the union of
+    all legal tiles across head_sizes, so they intentionally cover more
+    (block_m, block_n) pairs than any single head_size allows.  The
+    per-head-size gate is supports_attention_dense itself.
+
+    This test verifies two properties:
+    1. Every legal tile for this head_size is covered by the dispatcher axes
+       (no legal tile is missing from the axis).
+    2. supports_attention_dense (the pack-time gate) agrees exactly with
+       gfx950_dense_tile_legality for this head_size.
+    """
     legal = set(dense.gfx950_dense_tile_legality(head_size=head_size))
-    accepted = {
-        (bm, bn)
-        for bm in attn_axes._GFX950_BLOCK_M
-        for bn in attn_axes._GFX950_BLOCK_N
-        if dense.supports_attention_dense(_spec(head_size, bm, bn))[0]
-    }
     axis_tiles = {
         (bm, bn) for bm in attn_axes._GFX950_BLOCK_M for bn in attn_axes._GFX950_BLOCK_N
     }
-    assert accepted == legal & axis_tiles
+
+    # Every legal tile must be on the axes (axes are a superset by design).
+    assert legal <= axis_tiles, (
+        f"head_size={head_size}: legal tiles from gfx950_dense_tile_legality "
+        f"contain tiles NOT on the dispatcher axes — add them to axes.py:\n"
+        f"  missing: {legal - axis_tiles}"
+    )
+
+    # supports_attention_dense (the gate used at pack time) must agree exactly
+    # with gfx950_dense_tile_legality for this head_size.
+    accepted = {
+        tile
+        for tile in axis_tiles
+        if dense.supports_attention_dense(_spec(head_size, *tile))[0]
+    }
+    assert accepted == legal, (
+        f"head_size={head_size}: supports_attention_dense gate disagrees with "
+        f"gfx950_dense_tile_legality.\n"
+        f"  legal but not accepted: {legal - accepted}\n"
+        f"  accepted but not legal: {accepted - legal}"
+    )
     assert accepted, "no legal tile on the dispatcher axes"

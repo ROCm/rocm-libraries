@@ -582,10 +582,18 @@ def gfx950_dense_static_lds_bytes(
 def gfx950_dense_tile_legality(*, head_size: int) -> Tuple[Tuple[int, int], ...]:
     """Every ``(block_m, block_n)`` the gfx950 dense kernel is built with.
 
-    The one place the tile rules are stated, so the catalog generator, the tuning
-    axes and the C++ matcher can all be derived from it rather than restating it.
-    The LDS budget is the rule none of the structural checks imply: D128 block_n
-    256 satisfies every divisibility rule and still needs 303,104 bytes.
+    This is the single LDS-budget gate for the gfx950 dense catalog.
+    ``dispatch/attention/axes.py`` derives ``_GFX950_BLOCK_M`` and
+    ``_GFX950_BLOCK_N`` from this function, so the tuning sweep axis and
+    the predicate stay in sync automatically.
+
+    The C++ ``Gfx950AttentionDenseGeometry.hpp`` has its own independent
+    implementation (hardcoded pads vs. the spec's actual pads here), so the
+    two are intentionally kept separate rather than derived.
+
+    The LDS budget is the rule none of the structural checks imply: D128
+    block_n=256 satisfies every divisibility rule but needs 303,104 bytes
+    against gfx950's 163,840-byte limit.
     """
     if head_size not in (64, 128):
         return ()
