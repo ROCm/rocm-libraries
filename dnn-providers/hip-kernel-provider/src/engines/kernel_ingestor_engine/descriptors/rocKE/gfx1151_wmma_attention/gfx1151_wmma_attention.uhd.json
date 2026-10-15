@@ -1,0 +1,7 @@
+{
+  "version": "1.0",
+  "id": "251327fd-eb3d-40a1-84e2-225af549bce1",
+  "name": "Gfx1151WmmaAttention selector",
+  "kind": "native",
+  "payload": "hipkernel.gfx1151_wmma_attention.score"
+}

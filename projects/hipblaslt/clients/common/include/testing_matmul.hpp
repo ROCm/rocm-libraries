@@ -30,6 +30,7 @@
 #include "allclose.hpp"
 #include "benchmark_timing.hpp"
 #include "cblas_interface.hpp"
+#include "cotenant.hpp"
 #include "efficiency_monitor.hpp"
 #include "fast_check.hpp"
 #include "flops.hpp"
@@ -2072,10 +2073,10 @@ void testing_matmul(const Arguments& arg)
         }
         else
         {
-            if(real_bias_type == HIP_R_16F)
+            if(real_bias_type == HIP_R_16F || real_bias_type == HIP_R_16BF)
             {
                 return testing_matmul_with_bias(
-                    arg_revised, tiA, tiB, to, tc, tciA, tciB, HIP_R_16F, real_aux_type);
+                    arg_revised, tiA, tiB, to, tc, tciA, tciB, real_bias_type, real_aux_type);
             }
             else
             {
@@ -6581,6 +6582,11 @@ void testing_matmul_with_bias(const Arguments& arg,
                                                   tuningVec[heuristicTuningIndex[sol]],
                                                   *dWorkspace));
                     }
+                    // Cotenant startup (stream sync, launch, residency wait) stays before the timed region.
+                    hipblaslt_cotenant::Scoped cotenant(
+                        hipblaslt_bench_options::cotenant_cus(),
+                        hipblaslt_bench_options::cotenant_max_occupancy(),
+                        stream);
                     if(arg.skip_slow_solution_ratio)
                         pre_gpu_time(
                             arg.use_gpu_timer, event_gpu_time_start, gpu_time_used, stream);
@@ -6628,6 +6634,11 @@ void testing_matmul_with_bias(const Arguments& arg,
                 }
                 else if(batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY) //For General Batch GEMM
                 {
+                    // Cotenant startup (stream sync, launch, residency wait) stays before the timed region.
+                    hipblaslt_cotenant::Scoped cotenant(
+                        hipblaslt_bench_options::cotenant_cus(),
+                        hipblaslt_bench_options::cotenant_max_occupancy(),
+                        stream);
                     if(arg.skip_slow_solution_ratio)
                         pre_gpu_time(
                             arg.use_gpu_timer, event_gpu_time_start, gpu_time_used, stream);
@@ -6728,6 +6739,11 @@ void testing_matmul_with_bias(const Arguments& arg,
                 }
                 else
                 {
+                    // Cotenant startup (stream sync, launch, residency wait) stays before the timed region.
+                    hipblaslt_cotenant::Scoped cotenant(
+                        hipblaslt_bench_options::cotenant_cus(),
+                        hipblaslt_bench_options::cotenant_max_occupancy(),
+                        stream);
                     if(arg.skip_slow_solution_ratio)
                         pre_gpu_time(
                             arg.use_gpu_timer, event_gpu_time_start, gpu_time_used, stream);
@@ -6850,6 +6866,11 @@ void testing_matmul_with_bias(const Arguments& arg,
                                                   gemm_count * sizeof(hipblaslt_ext::UserArguments),
                                                   hipMemcpyHostToDevice));
                     }
+                    // Cotenant startup (stream sync, launch, residency wait) stays before the timed region.
+                    hipblaslt_cotenant::Scoped cotenant(
+                        hipblaslt_bench_options::cotenant_cus(),
+                        hipblaslt_bench_options::cotenant_max_occupancy(),
+                        stream);
                     if(arg.skip_slow_solution_ratio)
                         pre_gpu_time(
                             arg.use_gpu_timer, event_gpu_time_start, gpu_time_used, stream);
@@ -6910,6 +6931,11 @@ void testing_matmul_with_bias(const Arguments& arg,
                             stream));
                     }
 
+                    // Cotenant startup (stream sync, launch, residency wait) stays before the timed region.
+                    hipblaslt_cotenant::Scoped cotenant(
+                        hipblaslt_bench_options::cotenant_cus(),
+                        hipblaslt_bench_options::cotenant_max_occupancy(),
+                        stream);
                     if(arg.skip_slow_solution_ratio)
                         pre_gpu_time(
                             arg.use_gpu_timer, event_gpu_time_start, gpu_time_used, stream);

@@ -354,6 +354,11 @@ int rocke_arch_async_lds_max_dwords(const rocke_arch_target_t* t);
 /* ArchTarget.max_threads_per_block property. */
 int rocke_arch_max_threads_per_block(const rocke_arch_target_t* t);
 
+/* ArchTarget.has_dpp_row_xmask property: DPP row_xmask (XOR with any mask
+ * 1..15 inside a 16-lane row) exists, i.e. a gfx10+ family (gfx11_rdna,
+ * gfx12_rdna, gfx12_cdna). False for the gfx9 CDNA families and NULL. */
+bool rocke_arch_has_dpp_row_xmask(const rocke_arch_target_t* t);
+
 /* ============================== module fns ============================ */
 
 /* known_arches(): a sorted, NULL-terminated array of gfx tokens. Static

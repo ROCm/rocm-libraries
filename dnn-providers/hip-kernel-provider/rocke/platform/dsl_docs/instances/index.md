@@ -210,3 +210,11 @@ art = compile_kernel(kernel)
 `art.hsaco` is ready for `KernelLauncher`; `art.llvm_text` is ready for `analyze_llvm_ir`; `art.timings` is the per-stage codegen budget.
 
 For end-to-end execution, see `runtime/compile_launch_and_manifest.md` and `runtime/manifest_schema.md`.
+
+## Native gfx950 block-scaled GEMM
+
+[`gfx950/block_scaled_gemm.py`](../../python/rocke/instances/gfx950/block_scaled_gemm.py)
+provides `BlockScaledGemmSpec`, `build_block_scaled_gemm`, signature and grid helpers.
+It consumes all 25 F8/F6/F4 format pairs with K32 E8M0 scales and a wave64
+32x32x64 native scaled MFMA. See [the family contract](gfx950_block_scaled_gemm.md)
+and [F8, F6, F4 and mixed examples](../../python/rocke/examples/gfx950/gemm/README.md).

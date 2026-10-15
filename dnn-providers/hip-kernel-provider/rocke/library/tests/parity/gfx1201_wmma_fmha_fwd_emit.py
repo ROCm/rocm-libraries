@@ -16,48 +16,36 @@ def _spec(idx: int) -> WmmaFmhaFwdSpec:
     if idx == 0:
         return WmmaFmhaFwdSpec(
             head_size=64,
-            num_query_heads=4,
-            num_kv_heads=0,
             mask_mode="none",
             v_lds_stage=False,
         )
     if idx == 1:
         return WmmaFmhaFwdSpec(
             head_size=128,
-            num_query_heads=8,
-            num_kv_heads=0,
             mask_mode="none",
             v_lds_stage=False,
         )
     if idx == 2:
         return WmmaFmhaFwdSpec(
             head_size=64,
-            num_query_heads=4,
-            num_kv_heads=0,
             mask_mode="causal",
             v_lds_stage=False,
         )
     if idx == 3:
         return WmmaFmhaFwdSpec(
             head_size=256,
-            num_query_heads=8,
-            num_kv_heads=2,
             mask_mode="none",
             v_lds_stage=False,
         )
     if idx == 4:
         return WmmaFmhaFwdSpec(
             head_size=128,
-            num_query_heads=4,
-            num_kv_heads=4,
             mask_mode="causal",
             v_lds_stage=False,
         )
     if idx == 5:
         return WmmaFmhaFwdSpec(
             head_size=64,
-            num_query_heads=6,
-            num_kv_heads=0,
             mask_mode="none",
             v_lds_stage=True,
         )
