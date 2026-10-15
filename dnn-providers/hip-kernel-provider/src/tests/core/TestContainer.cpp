@@ -70,8 +70,8 @@ static std::vector<std::string> expectedEngineNames()
 }
 
 /// Upper bound for the fixed-size buffers below. Raise it when a configuration exposes
-/// more engines than this.
-constexpr uint32_t MAX_EXPECTED_ENGINES = 8;
+/// more engines than this. FlyDSL alone adds one engine per kernel family.
+constexpr uint32_t MAX_EXPECTED_ENGINES = 32;
 
 TEST(TestContainer, ConstructsSuccessfully)
 {
