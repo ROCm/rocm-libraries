@@ -92,6 +92,9 @@ DESCRIPTOR_VERSION = "1.0"
 SDPA_OPS = (
     "sdpa_rdna",
     "sdpa_rdna_decode",
+    "sdpa_cdna",
+    "sdpa_cdna_dualwave",
+    "sdpa_cdna_decode",
     "sdpa_aiw",
 )
 PASS_BY_VALUE_SDK_VERSION = "1.2.0"

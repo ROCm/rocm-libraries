@@ -1,0 +1,2543 @@
+{
+  "version": "1.0",
+  "id": "51018583-8380-517e-bb0d-2e00dc223d41",
+  "name": "flydsl sdpa_cdna kernels (gfx90a)",
+  "arch": [
+    "gfx90a"
+  ],
+  "matchers": [
+    "bbb84163-9913-5baf-90a5-fd2cef93d80b"
+  ],
+  "engine": "5aa60dad-c58c-5300-b1fd-296e557736ee",
+  "dispatch": "55f5afea-308e-5f76-8f9f-92f190e724ba",
+  "provenance": {
+    "specialization_contract": {
+      "schema_version": 1,
+      "consumers": [
+        {
+          "engine_id": "5aa60dad-c58c-5300-b1fd-296e557736ee",
+          "kmd_id": "6638c9a9-4a0d-5704-95b9-db8774e663e4",
+          "metadata_fields": [],
+          "matcher_only_fields": [
+            "dtype",
+            "head_dim",
+            "causal",
+            "block_m",
+            "kv_align",
+            "waves_per_eu",
+            "has_bias",
+            "kv_gpfetch",
+            "prefer_feature",
+            "prefer_min",
+            "prefer_max",
+            "head_dim_v",
+            "qk_mask",
+            "dv_split",
+            "k_chunk",
+            "has_sink"
+          ],
+          "bindings": {},
+          "vocabulary": {}
+        }
+      ]
+    }
+  },
+  "kernelDescriptors": [
+    {
+      "version": "1.0",
+      "id": "35b63e1e-16ea-5fb0-8390-9131161c682b",
+      "name": "sdpa_cdna_bf16_d64_causal0_bm128",
+      "arch": [
+        "gfx90a"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_bf16_d64_causal0_bm128.hsaco",
+        "symbol": "flash_attn_generic_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "head_dim": 64,
+        "causal": 0,
+        "block_m": 128,
+        "kv_align": 0,
+        "waves_per_eu": 0,
+        "has_bias": 0,
+        "kv_gpfetch": 1,
+        "prefer_feature": "none",
+        "prefer_min": 0,
+        "prefer_max": 0,
+        "head_dim_v": 64,
+        "qk_mask": 0,
+        "dv_split": 1,
+        "k_chunk": 0,
+        "has_sink": 0
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "b483c862-5afe-56f4-b293-fdee205cb294",
+      "name": "sdpa_cdna_bf16_d64_causal0_bm128_kva64",
+      "arch": [
+        "gfx90a"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_bf16_d64_causal0_bm128_kva64.hsaco",
+        "symbol": "flash_attn_generic_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "head_dim": 64,
+        "causal": 0,
+        "block_m": 128,
+        "kv_align": 64,
+        "waves_per_eu": 0,
+        "has_bias": 0,
+        "kv_gpfetch": 1,
+        "prefer_feature": "none",
+        "prefer_min": 0,
+        "prefer_max": 0,
+        "head_dim_v": 64,
+        "qk_mask": 0,
+        "dv_split": 1,
+        "k_chunk": 0,
+        "has_sink": 0
+      },
+      "priority": 110
+    },
+    {
+      "version": "1.0",
+      "id": "8d5e30a4-31fa-5940-afa6-c5e84bc07b36",
+      "name": "sdpa_cdna_bf16_d64_causal0_bm128_wpe1",
+      "arch": [
+        "gfx90a"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_bf16_d64_causal0_bm128_wpe1.hsaco",
+        "symbol": "flash_attn_generic_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "head_dim": 64,
+        "causal": 0,
+        "block_m": 128,
+        "kv_align": 0,
+        "waves_per_eu": 1,
+        "has_bias": 0,
+        "kv_gpfetch": 1,
+        "prefer_feature": "none",
+        "prefer_min": 0,
+        "prefer_max": 0,
+        "head_dim_v": 64,
+        "qk_mask": 0,
+        "dv_split": 1,
+        "k_chunk": 0,
+        "has_sink": 0
+      },
+      "priority": 80
+    },
+    {
+      "version": "1.0",
+      "id": "1ddcd18b-19a5-5558-8c54-4cfe6809fbb8",
+      "name": "sdpa_cdna_bf16_d64_causal1_bm128_wpe1",
+      "arch": [
+        "gfx90a"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_bf16_d64_causal1_bm128_wpe1.hsaco",
+        "symbol": "flash_attn_generic_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "head_dim": 64,
+        "causal": 1,
+        "block_m": 128,
+        "kv_align": 0,
+        "waves_per_eu": 1,
+        "has_bias": 0,
+        "kv_gpfetch": 1,
+        "prefer_feature": "none",
+        "prefer_min": 0,
+        "prefer_max": 0,
+        "head_dim_v": 64,
+        "qk_mask": 0,
+        "dv_split": 1,
+        "k_chunk": 0,
+        "has_sink": 0
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "3c1e299d-131d-55e8-ba7c-9c3feb46bafd",
+      "name": "sdpa_cdna_bf16_d128_causal0_bm256_wpe3",
+      "arch": [
+        "gfx90a"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_bf16_d128_causal0_bm256_wpe3.hsaco",
+        "symbol": "flash_attn_generic_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "head_dim": 128,
+        "causal": 0,
+        "block_m": 256,
+        "kv_align": 0,
+        "waves_per_eu": 3,
+        "has_bias": 0,
+        "kv_gpfetch": 1,
+        "prefer_feature": "none",
+        "prefer_min": 0,
+        "prefer_max": 0,
+        "head_dim_v": 128,
+        "qk_mask": 0,
+        "dv_split": 1,
+        "k_chunk": 0,
+        "has_sink": 0
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "e2a3b193-c9e3-5bed-a8d4-df047dad0784",
+      "name": "sdpa_cdna_bf16_d128_causal0_bm256_kva64_wpe3",
+      "arch": [
+        "gfx90a"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_bf16_d128_causal0_bm256_kva64_wpe3.hsaco",
+        "symbol": "flash_attn_generic_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "head_dim": 128,
+        "causal": 0,
+        "block_m": 256,
+        "kv_align": 64,
+        "waves_per_eu": 3,
+        "has_bias": 0,
+        "kv_gpfetch": 1,
+        "prefer_feature": "none",
+        "prefer_min": 0,
+        "prefer_max": 0,
+        "head_dim_v": 128,
+        "qk_mask": 0,
+        "dv_split": 1,
+        "k_chunk": 0,
+        "has_sink": 0
+      },
+      "priority": 110
+    },
+    {
+      "version": "1.0",
+      "id": "8756801e-a428-5ebf-894b-db1a360366fd",
+      "name": "sdpa_cdna_bf16_d128_causal1_bm256_wpe3_gpf0",
+      "arch": [
+        "gfx90a"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_bf16_d128_causal1_bm256_wpe3_gpf0.hsaco",
+        "symbol": "flash_attn_generic_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "head_dim": 128,
+        "causal": 1,
+        "block_m": 256,
+        "kv_align": 0,
+        "waves_per_eu": 3,
+        "has_bias": 0,
+        "kv_gpfetch": 0,
+        "prefer_feature": "none",
+        "prefer_min": 0,
+        "prefer_max": 0,
+        "head_dim_v": 128,
+        "qk_mask": 0,
+        "dv_split": 1,
+        "k_chunk": 0,
+        "has_sink": 0
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "76353400-11c5-5ea1-be14-7f8e8fe3ce83",
+      "name": "sdpa_cdna_bf16_d128_causal1_bm128_wpe1",
+      "arch": [
+        "gfx90a"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_bf16_d128_causal1_bm128_wpe1.hsaco",
+        "symbol": "flash_attn_generic_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "head_dim": 128,
+        "causal": 1,
+        "block_m": 128,
+        "kv_align": 0,
+        "waves_per_eu": 1,
+        "has_bias": 0,
+        "kv_gpfetch": 1,
+        "prefer_feature": "none",
+        "prefer_min": 0,
+        "prefer_max": 0,
+        "head_dim_v": 128,
+        "qk_mask": 0,
+        "dv_split": 1,
+        "k_chunk": 0,
+        "has_sink": 0
+      },
+      "priority": 80
+    },
+    {
+      "version": "1.0",
+      "id": "a36e5277-fab5-5ffc-a595-f600750940ed",
+      "name": "sdpa_cdna_bf16_d256_causal0_bm128_wpe3",
+      "arch": [
+        "gfx90a"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_bf16_d256_causal0_bm128_wpe3.hsaco",
+        "symbol": "flash_attn_generic_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "head_dim": 256,
+        "causal": 0,
+        "block_m": 128,
+        "kv_align": 0,
+        "waves_per_eu": 3,
+        "has_bias": 0,
+        "kv_gpfetch": 1,
+        "prefer_feature": "none",
+        "prefer_min": 0,
+        "prefer_max": 0,
+        "head_dim_v": 256,
+        "qk_mask": 0,
+        "dv_split": 1,
+        "k_chunk": 0,
+        "has_sink": 0
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "c2d4d3a6-8999-509d-b2f2-e1b684dc9645",
+      "name": "sdpa_cdna_bf16_d256_causal1_bm128_wpe1",
+      "arch": [
+        "gfx90a"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_bf16_d256_causal1_bm128_wpe1.hsaco",
+        "symbol": "flash_attn_generic_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "head_dim": 256,
+        "causal": 1,
+        "block_m": 128,
+        "kv_align": 0,
+        "waves_per_eu": 1,
+        "has_bias": 0,
+        "kv_gpfetch": 1,
+        "prefer_feature": "none",
+        "prefer_min": 0,
+        "prefer_max": 0,
+        "head_dim_v": 256,
+        "qk_mask": 0,
+        "dv_split": 1,
+        "k_chunk": 0,
+        "has_sink": 0
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "c3a324cc-d0e1-5f21-bf32-f52aee16b44e",
+      "name": "sdpa_cdna_bf16_d64_causal0_bm128_bias1",
+      "arch": [
+        "gfx90a"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_bf16_d64_causal0_bm128_bias1.hsaco",
+        "symbol": "flash_attn_generic_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "head_dim": 64,
+        "causal": 0,
+        "block_m": 128,
+        "kv_align": 0,
+        "waves_per_eu": 0,
+        "has_bias": 1,
+        "kv_gpfetch": 1,
+        "prefer_feature": "none",
+        "prefer_min": 0,
+        "prefer_max": 0,
+        "head_dim_v": 64,
+        "qk_mask": 0,
+        "dv_split": 1,
+        "k_chunk": 0,
+        "has_sink": 0
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "7cbac4ea-c295-57d5-9bfb-12cda9894f57",
+      "name": "sdpa_cdna_bf16_d64_causal1_bm128_bias1",
+      "arch": [
+        "gfx90a"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_bf16_d64_causal1_bm128_bias1.hsaco",
+        "symbol": "flash_attn_generic_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "head_dim": 64,
+        "causal": 1,
+        "block_m": 128,
+        "kv_align": 0,
+        "waves_per_eu": 0,
+        "has_bias": 1,
+        "kv_gpfetch": 1,
+        "prefer_feature": "none",
+        "prefer_min": 0,
+        "prefer_max": 0,
+        "head_dim_v": 64,
+        "qk_mask": 0,
+        "dv_split": 1,
+        "k_chunk": 0,
+        "has_sink": 0
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "d2a56c9f-e718-5fb9-925c-6cd022707fbb",
+      "name": "sdpa_cdna_bf16_d128_causal0_bm128_bias1",
+      "arch": [
+        "gfx90a"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_bf16_d128_causal0_bm128_bias1.hsaco",
+        "symbol": "flash_attn_generic_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "head_dim": 128,
+        "causal": 0,
+        "block_m": 128,
+        "kv_align": 0,
+        "waves_per_eu": 0,
+        "has_bias": 1,
+        "kv_gpfetch": 1,
+        "prefer_feature": "none",
+        "prefer_min": 0,
+        "prefer_max": 0,
+        "head_dim_v": 128,
+        "qk_mask": 0,
+        "dv_split": 1,
+        "k_chunk": 0,
+        "has_sink": 0
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "d6854026-df3c-5147-964a-7ccff8d9fc6f",
+      "name": "sdpa_cdna_bf16_d128_causal1_bm128_bias1_gpf0",
+      "arch": [
+        "gfx90a"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_bf16_d128_causal1_bm128_bias1_gpf0.hsaco",
+        "symbol": "flash_attn_generic_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "head_dim": 128,
+        "causal": 1,
+        "block_m": 128,
+        "kv_align": 0,
+        "waves_per_eu": 0,
+        "has_bias": 1,
+        "kv_gpfetch": 0,
+        "prefer_feature": "none",
+        "prefer_min": 0,
+        "prefer_max": 0,
+        "head_dim_v": 128,
+        "qk_mask": 0,
+        "dv_split": 1,
+        "k_chunk": 0,
+        "has_sink": 0
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "26cadc01-97db-5e5a-bd35-eb82d9f4b68d",
+      "name": "sdpa_cdna_bf16_d256_causal0_bm128_bias1",
+      "arch": [
+        "gfx90a"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_bf16_d256_causal0_bm128_bias1.hsaco",
+        "symbol": "flash_attn_generic_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "head_dim": 256,
+        "causal": 0,
+        "block_m": 128,
+        "kv_align": 0,
+        "waves_per_eu": 0,
+        "has_bias": 1,
+        "kv_gpfetch": 1,
+        "prefer_feature": "none",
+        "prefer_min": 0,
+        "prefer_max": 0,
+        "head_dim_v": 256,
+        "qk_mask": 0,
+        "dv_split": 1,
+        "k_chunk": 0,
+        "has_sink": 0
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "cda8b2f8-33ab-5d0f-a19c-a2c1172c785e",
+      "name": "sdpa_cdna_bf16_d256_causal1_bm128_bias1",
+      "arch": [
+        "gfx90a"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_bf16_d256_causal1_bm128_bias1.hsaco",
+        "symbol": "flash_attn_generic_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "head_dim": 256,
+        "causal": 1,
+        "block_m": 128,
+        "kv_align": 0,
+        "waves_per_eu": 0,
+        "has_bias": 1,
+        "kv_gpfetch": 1,
+        "prefer_feature": "none",
+        "prefer_min": 0,
+        "prefer_max": 0,
+        "head_dim_v": 256,
+        "qk_mask": 0,
+        "dv_split": 1,
+        "k_chunk": 0,
+        "has_sink": 0
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "eaeefc1f-9242-5f80-9e79-776ed5c72f6c",
+      "name": "sdpa_cdna_bf16_d64_causal0_bm128_wpe3_sink1",
+      "arch": [
+        "gfx90a"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_bf16_d64_causal0_bm128_wpe3_sink1.hsaco",
+        "symbol": "flash_attn_generic_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "head_dim": 64,
+        "causal": 0,
+        "block_m": 128,
+        "kv_align": 0,
+        "waves_per_eu": 3,
+        "has_bias": 0,
+        "kv_gpfetch": 1,
+        "prefer_feature": "none",
+        "prefer_min": 0,
+        "prefer_max": 0,
+        "head_dim_v": 64,
+        "qk_mask": 0,
+        "dv_split": 1,
+        "k_chunk": 0,
+        "has_sink": 1
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "5c16c4e7-e393-56b4-bd55-ef8a01760963",
+      "name": "sdpa_cdna_bf16_d64_causal1_bm128_wpe3_sink1",
+      "arch": [
+        "gfx90a"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_bf16_d64_causal1_bm128_wpe3_sink1.hsaco",
+        "symbol": "flash_attn_generic_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "head_dim": 64,
+        "causal": 1,
+        "block_m": 128,
+        "kv_align": 0,
+        "waves_per_eu": 3,
+        "has_bias": 0,
+        "kv_gpfetch": 1,
+        "prefer_feature": "none",
+        "prefer_min": 0,
+        "prefer_max": 0,
+        "head_dim_v": 64,
+        "qk_mask": 0,
+        "dv_split": 1,
+        "k_chunk": 0,
+        "has_sink": 1
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "b3682739-d8d3-5171-b5c5-67ec94ddff14",
+      "name": "sdpa_cdna_bf16_d128_causal0_bm128_sink1",
+      "arch": [
+        "gfx90a"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_bf16_d128_causal0_bm128_sink1.hsaco",
+        "symbol": "flash_attn_generic_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "head_dim": 128,
+        "causal": 0,
+        "block_m": 128,
+        "kv_align": 0,
+        "waves_per_eu": 0,
+        "has_bias": 0,
+        "kv_gpfetch": 1,
+        "prefer_feature": "none",
+        "prefer_min": 0,
+        "prefer_max": 0,
+        "head_dim_v": 128,
+        "qk_mask": 0,
+        "dv_split": 1,
+        "k_chunk": 0,
+        "has_sink": 1
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "e4cf5787-8264-56e7-893a-8754e5e95cf3",
+      "name": "sdpa_cdna_bf16_d128_causal1_bm128_gpf0_sink1",
+      "arch": [
+        "gfx90a"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_bf16_d128_causal1_bm128_gpf0_sink1.hsaco",
+        "symbol": "flash_attn_generic_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "head_dim": 128,
+        "causal": 1,
+        "block_m": 128,
+        "kv_align": 0,
+        "waves_per_eu": 0,
+        "has_bias": 0,
+        "kv_gpfetch": 0,
+        "prefer_feature": "none",
+        "prefer_min": 0,
+        "prefer_max": 0,
+        "head_dim_v": 128,
+        "qk_mask": 0,
+        "dv_split": 1,
+        "k_chunk": 0,
+        "has_sink": 1
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "115e0c13-f5b7-57a0-8db7-74d79c8bf559",
+      "name": "sdpa_cdna_bf16_d256_causal0_bm128_vd128_qkm1",
+      "arch": [
+        "gfx90a"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_bf16_d256_causal0_bm128_vd128_qkm1.hsaco",
+        "symbol": "flash_attn_generic_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "head_dim": 256,
+        "causal": 0,
+        "block_m": 128,
+        "kv_align": 0,
+        "waves_per_eu": 0,
+        "has_bias": 0,
+        "kv_gpfetch": 1,
+        "prefer_feature": "none",
+        "prefer_min": 0,
+        "prefer_max": 0,
+        "head_dim_v": 128,
+        "qk_mask": 1,
+        "dv_split": 1,
+        "k_chunk": 0,
+        "has_sink": 0
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "c8556f38-cdf0-5ae1-bc05-a5a1eb36aee1",
+      "name": "sdpa_cdna_bf16_d256_causal1_bm128_vd128_qkm1",
+      "arch": [
+        "gfx90a"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_bf16_d256_causal1_bm128_vd128_qkm1.hsaco",
+        "symbol": "flash_attn_generic_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "head_dim": 256,
+        "causal": 1,
+        "block_m": 128,
+        "kv_align": 0,
+        "waves_per_eu": 0,
+        "has_bias": 0,
+        "kv_gpfetch": 1,
+        "prefer_feature": "none",
+        "prefer_min": 0,
+        "prefer_max": 0,
+        "head_dim_v": 128,
+        "qk_mask": 1,
+        "dv_split": 1,
+        "k_chunk": 0,
+        "has_sink": 0
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "1485cc75-c240-5150-8dc5-b281a5f97d14",
+      "name": "sdpa_cdna_bf16_d64_causal0_bm128_wpe3_qkm1",
+      "arch": [
+        "gfx90a"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_bf16_d64_causal0_bm128_wpe3_qkm1.hsaco",
+        "symbol": "flash_attn_generic_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "head_dim": 64,
+        "causal": 0,
+        "block_m": 128,
+        "kv_align": 0,
+        "waves_per_eu": 3,
+        "has_bias": 0,
+        "kv_gpfetch": 1,
+        "prefer_feature": "none",
+        "prefer_min": 0,
+        "prefer_max": 0,
+        "head_dim_v": 64,
+        "qk_mask": 1,
+        "dv_split": 1,
+        "k_chunk": 0,
+        "has_sink": 0
+      },
+      "priority": 76
+    },
+    {
+      "version": "1.0",
+      "id": "52db3a0c-6e90-5007-b48b-d34ef360d37e",
+      "name": "sdpa_cdna_bf16_d64_causal1_bm128_wpe3_qkm1",
+      "arch": [
+        "gfx90a"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_bf16_d64_causal1_bm128_wpe3_qkm1.hsaco",
+        "symbol": "flash_attn_generic_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "head_dim": 64,
+        "causal": 1,
+        "block_m": 128,
+        "kv_align": 0,
+        "waves_per_eu": 3,
+        "has_bias": 0,
+        "kv_gpfetch": 1,
+        "prefer_feature": "none",
+        "prefer_min": 0,
+        "prefer_max": 0,
+        "head_dim_v": 64,
+        "qk_mask": 1,
+        "dv_split": 1,
+        "k_chunk": 0,
+        "has_sink": 0
+      },
+      "priority": 76
+    },
+    {
+      "version": "1.0",
+      "id": "5c9f041d-f8de-51aa-9646-e5dd8a545628",
+      "name": "sdpa_cdna_bf16_d128_causal0_bm128_qkm1",
+      "arch": [
+        "gfx90a"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_bf16_d128_causal0_bm128_qkm1.hsaco",
+        "symbol": "flash_attn_generic_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "head_dim": 128,
+        "causal": 0,
+        "block_m": 128,
+        "kv_align": 0,
+        "waves_per_eu": 0,
+        "has_bias": 0,
+        "kv_gpfetch": 1,
+        "prefer_feature": "none",
+        "prefer_min": 0,
+        "prefer_max": 0,
+        "head_dim_v": 128,
+        "qk_mask": 1,
+        "dv_split": 1,
+        "k_chunk": 0,
+        "has_sink": 0
+      },
+      "priority": 74
+    },
+    {
+      "version": "1.0",
+      "id": "116a5e35-5c72-5eb2-883c-e10d6c6e8ba8",
+      "name": "sdpa_cdna_bf16_d128_causal1_bm128_qkm1",
+      "arch": [
+        "gfx90a"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_bf16_d128_causal1_bm128_qkm1.hsaco",
+        "symbol": "flash_attn_generic_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "head_dim": 128,
+        "causal": 1,
+        "block_m": 128,
+        "kv_align": 0,
+        "waves_per_eu": 0,
+        "has_bias": 0,
+        "kv_gpfetch": 1,
+        "prefer_feature": "none",
+        "prefer_min": 0,
+        "prefer_max": 0,
+        "head_dim_v": 128,
+        "qk_mask": 1,
+        "dv_split": 1,
+        "k_chunk": 0,
+        "has_sink": 0
+      },
+      "priority": 74
+    },
+    {
+      "version": "1.0",
+      "id": "6e66219c-0367-5f44-b3db-159d52cb5432",
+      "name": "sdpa_cdna_bf16_d256_causal0_bm64_gpf0_qkm1",
+      "arch": [
+        "gfx90a"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_bf16_d256_causal0_bm64_gpf0_qkm1.hsaco",
+        "symbol": "flash_attn_generic_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "head_dim": 256,
+        "causal": 0,
+        "block_m": 64,
+        "kv_align": 0,
+        "waves_per_eu": 0,
+        "has_bias": 0,
+        "kv_gpfetch": 0,
+        "prefer_feature": "none",
+        "prefer_min": 0,
+        "prefer_max": 0,
+        "head_dim_v": 256,
+        "qk_mask": 1,
+        "dv_split": 1,
+        "k_chunk": 0,
+        "has_sink": 0
+      },
+      "priority": 70
+    },
+    {
+      "version": "1.0",
+      "id": "0d3b6ece-033a-5745-9b86-e24aae9547bb",
+      "name": "sdpa_cdna_bf16_d256_causal1_bm64_gpf0_qkm1",
+      "arch": [
+        "gfx90a"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_bf16_d256_causal1_bm64_gpf0_qkm1.hsaco",
+        "symbol": "flash_attn_generic_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "head_dim": 256,
+        "causal": 1,
+        "block_m": 64,
+        "kv_align": 0,
+        "waves_per_eu": 0,
+        "has_bias": 0,
+        "kv_gpfetch": 0,
+        "prefer_feature": "none",
+        "prefer_min": 0,
+        "prefer_max": 0,
+        "head_dim_v": 256,
+        "qk_mask": 1,
+        "dv_split": 1,
+        "k_chunk": 0,
+        "has_sink": 0
+      },
+      "priority": 70
+    },
+    {
+      "version": "1.0",
+      "id": "c6a08e0f-e75c-5960-9f9c-7d8d532b546b",
+      "name": "sdpa_cdna_bf16_d96_causal0_bm256_wpe2_qkm1",
+      "arch": [
+        "gfx90a"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_bf16_d96_causal0_bm256_wpe2_qkm1.hsaco",
+        "symbol": "flash_attn_generic_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "head_dim": 96,
+        "causal": 0,
+        "block_m": 256,
+        "kv_align": 0,
+        "waves_per_eu": 2,
+        "has_bias": 0,
+        "kv_gpfetch": 1,
+        "prefer_feature": "none",
+        "prefer_min": 0,
+        "prefer_max": 0,
+        "head_dim_v": 96,
+        "qk_mask": 1,
+        "dv_split": 1,
+        "k_chunk": 0,
+        "has_sink": 0
+      },
+      "priority": 75
+    },
+    {
+      "version": "1.0",
+      "id": "413eeb1d-d5e4-558c-b8e1-dcc48f8597a9",
+      "name": "sdpa_cdna_bf16_d96_causal1_bm128_wpe1_qkm1",
+      "arch": [
+        "gfx90a"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_bf16_d96_causal1_bm128_wpe1_qkm1.hsaco",
+        "symbol": "flash_attn_generic_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "head_dim": 96,
+        "causal": 1,
+        "block_m": 128,
+        "kv_align": 0,
+        "waves_per_eu": 1,
+        "has_bias": 0,
+        "kv_gpfetch": 1,
+        "prefer_feature": "none",
+        "prefer_min": 0,
+        "prefer_max": 0,
+        "head_dim_v": 96,
+        "qk_mask": 1,
+        "dv_split": 1,
+        "k_chunk": 0,
+        "has_sink": 0
+      },
+      "priority": 75
+    },
+    {
+      "version": "1.0",
+      "id": "995faffb-96f3-543f-9272-a23c39510fe9",
+      "name": "sdpa_cdna_bf16_d96_causal1_bm256_wpe1_qkm1",
+      "arch": [
+        "gfx90a"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_bf16_d96_causal1_bm256_wpe1_qkm1.hsaco",
+        "symbol": "flash_attn_generic_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "head_dim": 96,
+        "causal": 1,
+        "block_m": 256,
+        "kv_align": 0,
+        "waves_per_eu": 1,
+        "has_bias": 0,
+        "kv_gpfetch": 1,
+        "prefer_feature": "none",
+        "prefer_min": 0,
+        "prefer_max": 0,
+        "head_dim_v": 96,
+        "qk_mask": 1,
+        "dv_split": 1,
+        "k_chunk": 0,
+        "has_sink": 0
+      },
+      "priority": 65
+    },
+    {
+      "version": "1.0",
+      "id": "ad99403b-2418-56c5-ba2c-c97f7747c496",
+      "name": "sdpa_cdna_bf16_d96_causal1_bm128_wpe3_gpf0_qkm1",
+      "arch": [
+        "gfx90a"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_bf16_d96_causal1_bm128_wpe3_gpf0_qkm1.hsaco",
+        "symbol": "flash_attn_generic_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "head_dim": 96,
+        "causal": 1,
+        "block_m": 128,
+        "kv_align": 0,
+        "waves_per_eu": 3,
+        "has_bias": 0,
+        "kv_gpfetch": 0,
+        "prefer_feature": "none",
+        "prefer_min": 0,
+        "prefer_max": 0,
+        "head_dim_v": 96,
+        "qk_mask": 1,
+        "dv_split": 1,
+        "k_chunk": 0,
+        "has_sink": 0
+      },
+      "priority": 65
+    },
+    {
+      "version": "1.0",
+      "id": "cf4755bd-03ce-5a6f-a3eb-094c4a7dd990",
+      "name": "sdpa_cdna_bf16_d160_causal0_bm256_wpe1_qkm1",
+      "arch": [
+        "gfx90a"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_bf16_d160_causal0_bm256_wpe1_qkm1.hsaco",
+        "symbol": "flash_attn_generic_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "head_dim": 160,
+        "causal": 0,
+        "block_m": 256,
+        "kv_align": 0,
+        "waves_per_eu": 1,
+        "has_bias": 0,
+        "kv_gpfetch": 1,
+        "prefer_feature": "none",
+        "prefer_min": 0,
+        "prefer_max": 0,
+        "head_dim_v": 160,
+        "qk_mask": 1,
+        "dv_split": 1,
+        "k_chunk": 0,
+        "has_sink": 0
+      },
+      "priority": 73
+    },
+    {
+      "version": "1.0",
+      "id": "5e2a82de-efc4-5cb2-b582-7b6413531e7a",
+      "name": "sdpa_cdna_bf16_d160_causal1_bm256_wpe1_gpf0_qkm1",
+      "arch": [
+        "gfx90a"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_bf16_d160_causal1_bm256_wpe1_gpf0_qkm1.hsaco",
+        "symbol": "flash_attn_generic_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "head_dim": 160,
+        "causal": 1,
+        "block_m": 256,
+        "kv_align": 0,
+        "waves_per_eu": 1,
+        "has_bias": 0,
+        "kv_gpfetch": 0,
+        "prefer_feature": "none",
+        "prefer_min": 0,
+        "prefer_max": 0,
+        "head_dim_v": 160,
+        "qk_mask": 1,
+        "dv_split": 1,
+        "k_chunk": 0,
+        "has_sink": 0
+      },
+      "priority": 73
+    },
+    {
+      "version": "1.0",
+      "id": "0b994752-e55f-5ed0-a946-90712ca52936",
+      "name": "sdpa_cdna_bf16_d160_causal1_bm128_wpe1_qkm1",
+      "arch": [
+        "gfx90a"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_bf16_d160_causal1_bm128_wpe1_qkm1.hsaco",
+        "symbol": "flash_attn_generic_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "head_dim": 160,
+        "causal": 1,
+        "block_m": 128,
+        "kv_align": 0,
+        "waves_per_eu": 1,
+        "has_bias": 0,
+        "kv_gpfetch": 1,
+        "prefer_feature": "none",
+        "prefer_min": 0,
+        "prefer_max": 0,
+        "head_dim_v": 160,
+        "qk_mask": 1,
+        "dv_split": 1,
+        "k_chunk": 0,
+        "has_sink": 0
+      },
+      "priority": 63
+    },
+    {
+      "version": "1.0",
+      "id": "e7628314-f000-5002-8261-e93560fa94c2",
+      "name": "sdpa_cdna_bf16_d192_causal0_bm128_wpe3_qkm1",
+      "arch": [
+        "gfx90a"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_bf16_d192_causal0_bm128_wpe3_qkm1.hsaco",
+        "symbol": "flash_attn_generic_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "head_dim": 192,
+        "causal": 0,
+        "block_m": 128,
+        "kv_align": 0,
+        "waves_per_eu": 3,
+        "has_bias": 0,
+        "kv_gpfetch": 1,
+        "prefer_feature": "none",
+        "prefer_min": 0,
+        "prefer_max": 0,
+        "head_dim_v": 192,
+        "qk_mask": 1,
+        "dv_split": 1,
+        "k_chunk": 0,
+        "has_sink": 0
+      },
+      "priority": 72
+    },
+    {
+      "version": "1.0",
+      "id": "dd9bc869-9a43-533f-a8f7-c97fbf4f8a84",
+      "name": "sdpa_cdna_bf16_d192_causal1_bm128_wpe3_qkm1",
+      "arch": [
+        "gfx90a"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_bf16_d192_causal1_bm128_wpe3_qkm1.hsaco",
+        "symbol": "flash_attn_generic_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "head_dim": 192,
+        "causal": 1,
+        "block_m": 128,
+        "kv_align": 0,
+        "waves_per_eu": 3,
+        "has_bias": 0,
+        "kv_gpfetch": 1,
+        "prefer_feature": "none",
+        "prefer_min": 0,
+        "prefer_max": 0,
+        "head_dim_v": 192,
+        "qk_mask": 1,
+        "dv_split": 1,
+        "k_chunk": 0,
+        "has_sink": 0
+      },
+      "priority": 72
+    },
+    {
+      "version": "1.0",
+      "id": "563304f1-815d-5804-ae41-335e5e6143bb",
+      "name": "sdpa_cdna_bf16_d224_causal0_bm128_wpe2_qkm1",
+      "arch": [
+        "gfx90a"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_bf16_d224_causal0_bm128_wpe2_qkm1.hsaco",
+        "symbol": "flash_attn_generic_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "head_dim": 224,
+        "causal": 0,
+        "block_m": 128,
+        "kv_align": 0,
+        "waves_per_eu": 2,
+        "has_bias": 0,
+        "kv_gpfetch": 1,
+        "prefer_feature": "none",
+        "prefer_min": 0,
+        "prefer_max": 0,
+        "head_dim_v": 224,
+        "qk_mask": 1,
+        "dv_split": 1,
+        "k_chunk": 0,
+        "has_sink": 0
+      },
+      "priority": 71
+    },
+    {
+      "version": "1.0",
+      "id": "c9e5a550-a43f-5187-9b6a-65842bc5ec03",
+      "name": "sdpa_cdna_bf16_d224_causal1_bm128_wpe3_qkm1",
+      "arch": [
+        "gfx90a"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_bf16_d224_causal1_bm128_wpe3_qkm1.hsaco",
+        "symbol": "flash_attn_generic_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "head_dim": 224,
+        "causal": 1,
+        "block_m": 128,
+        "kv_align": 0,
+        "waves_per_eu": 3,
+        "has_bias": 0,
+        "kv_gpfetch": 1,
+        "prefer_feature": "none",
+        "prefer_min": 0,
+        "prefer_max": 0,
+        "head_dim_v": 224,
+        "qk_mask": 1,
+        "dv_split": 1,
+        "k_chunk": 0,
+        "has_sink": 0
+      },
+      "priority": 71
+    },
+    {
+      "version": "1.0",
+      "id": "1f569be9-b531-5e8d-8fc8-8ce2774cdccc",
+      "name": "sdpa_cdna_f16_d64_causal0_bm128",
+      "arch": [
+        "gfx90a"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_f16_d64_causal0_bm128.hsaco",
+        "symbol": "flash_attn_generic_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "head_dim": 64,
+        "causal": 0,
+        "block_m": 128,
+        "kv_align": 0,
+        "waves_per_eu": 0,
+        "has_bias": 0,
+        "kv_gpfetch": 1,
+        "prefer_feature": "none",
+        "prefer_min": 0,
+        "prefer_max": 0,
+        "head_dim_v": 64,
+        "qk_mask": 0,
+        "dv_split": 1,
+        "k_chunk": 0,
+        "has_sink": 0
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "55ba9ec3-cdb5-5352-98ef-84a706ffc604",
+      "name": "sdpa_cdna_f16_d64_causal0_bm128_kva64",
+      "arch": [
+        "gfx90a"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_f16_d64_causal0_bm128_kva64.hsaco",
+        "symbol": "flash_attn_generic_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "head_dim": 64,
+        "causal": 0,
+        "block_m": 128,
+        "kv_align": 64,
+        "waves_per_eu": 0,
+        "has_bias": 0,
+        "kv_gpfetch": 1,
+        "prefer_feature": "none",
+        "prefer_min": 0,
+        "prefer_max": 0,
+        "head_dim_v": 64,
+        "qk_mask": 0,
+        "dv_split": 1,
+        "k_chunk": 0,
+        "has_sink": 0
+      },
+      "priority": 110
+    },
+    {
+      "version": "1.0",
+      "id": "81f23c3e-d1e8-59e7-98da-114cb7b5cc3c",
+      "name": "sdpa_cdna_f16_d64_causal0_bm128_wpe1",
+      "arch": [
+        "gfx90a"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_f16_d64_causal0_bm128_wpe1.hsaco",
+        "symbol": "flash_attn_generic_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "head_dim": 64,
+        "causal": 0,
+        "block_m": 128,
+        "kv_align": 0,
+        "waves_per_eu": 1,
+        "has_bias": 0,
+        "kv_gpfetch": 1,
+        "prefer_feature": "none",
+        "prefer_min": 0,
+        "prefer_max": 0,
+        "head_dim_v": 64,
+        "qk_mask": 0,
+        "dv_split": 1,
+        "k_chunk": 0,
+        "has_sink": 0
+      },
+      "priority": 80
+    },
+    {
+      "version": "1.0",
+      "id": "b3f8d83c-c0d3-5a0a-9927-d237753d6e6a",
+      "name": "sdpa_cdna_f16_d64_causal1_bm128_wpe1",
+      "arch": [
+        "gfx90a"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_f16_d64_causal1_bm128_wpe1.hsaco",
+        "symbol": "flash_attn_generic_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "head_dim": 64,
+        "causal": 1,
+        "block_m": 128,
+        "kv_align": 0,
+        "waves_per_eu": 1,
+        "has_bias": 0,
+        "kv_gpfetch": 1,
+        "prefer_feature": "none",
+        "prefer_min": 0,
+        "prefer_max": 0,
+        "head_dim_v": 64,
+        "qk_mask": 0,
+        "dv_split": 1,
+        "k_chunk": 0,
+        "has_sink": 0
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "c9f754a4-8010-5a77-b4c0-5c97d07cb968",
+      "name": "sdpa_cdna_f16_d128_causal0_bm256_wpe3",
+      "arch": [
+        "gfx90a"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_f16_d128_causal0_bm256_wpe3.hsaco",
+        "symbol": "flash_attn_generic_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "head_dim": 128,
+        "causal": 0,
+        "block_m": 256,
+        "kv_align": 0,
+        "waves_per_eu": 3,
+        "has_bias": 0,
+        "kv_gpfetch": 1,
+        "prefer_feature": "none",
+        "prefer_min": 0,
+        "prefer_max": 0,
+        "head_dim_v": 128,
+        "qk_mask": 0,
+        "dv_split": 1,
+        "k_chunk": 0,
+        "has_sink": 0
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "3c741e47-54eb-5666-a644-6e71e4234c7c",
+      "name": "sdpa_cdna_f16_d128_causal0_bm256_kva64_wpe3",
+      "arch": [
+        "gfx90a"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_f16_d128_causal0_bm256_kva64_wpe3.hsaco",
+        "symbol": "flash_attn_generic_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "head_dim": 128,
+        "causal": 0,
+        "block_m": 256,
+        "kv_align": 64,
+        "waves_per_eu": 3,
+        "has_bias": 0,
+        "kv_gpfetch": 1,
+        "prefer_feature": "none",
+        "prefer_min": 0,
+        "prefer_max": 0,
+        "head_dim_v": 128,
+        "qk_mask": 0,
+        "dv_split": 1,
+        "k_chunk": 0,
+        "has_sink": 0
+      },
+      "priority": 110
+    },
+    {
+      "version": "1.0",
+      "id": "e70205ca-cd3f-5efd-aa78-fbc6c9fae102",
+      "name": "sdpa_cdna_f16_d128_causal1_bm256_wpe3_gpf0",
+      "arch": [
+        "gfx90a"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_f16_d128_causal1_bm256_wpe3_gpf0.hsaco",
+        "symbol": "flash_attn_generic_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "head_dim": 128,
+        "causal": 1,
+        "block_m": 256,
+        "kv_align": 0,
+        "waves_per_eu": 3,
+        "has_bias": 0,
+        "kv_gpfetch": 0,
+        "prefer_feature": "none",
+        "prefer_min": 0,
+        "prefer_max": 0,
+        "head_dim_v": 128,
+        "qk_mask": 0,
+        "dv_split": 1,
+        "k_chunk": 0,
+        "has_sink": 0
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "9fcd9822-c77a-514c-a970-43aca5eba158",
+      "name": "sdpa_cdna_f16_d128_causal1_bm128_wpe1",
+      "arch": [
+        "gfx90a"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_f16_d128_causal1_bm128_wpe1.hsaco",
+        "symbol": "flash_attn_generic_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "head_dim": 128,
+        "causal": 1,
+        "block_m": 128,
+        "kv_align": 0,
+        "waves_per_eu": 1,
+        "has_bias": 0,
+        "kv_gpfetch": 1,
+        "prefer_feature": "none",
+        "prefer_min": 0,
+        "prefer_max": 0,
+        "head_dim_v": 128,
+        "qk_mask": 0,
+        "dv_split": 1,
+        "k_chunk": 0,
+        "has_sink": 0
+      },
+      "priority": 80
+    },
+    {
+      "version": "1.0",
+      "id": "b4e2f341-d67e-5076-be50-6a84c701142a",
+      "name": "sdpa_cdna_f16_d256_causal0_bm128_wpe3",
+      "arch": [
+        "gfx90a"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_f16_d256_causal0_bm128_wpe3.hsaco",
+        "symbol": "flash_attn_generic_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "head_dim": 256,
+        "causal": 0,
+        "block_m": 128,
+        "kv_align": 0,
+        "waves_per_eu": 3,
+        "has_bias": 0,
+        "kv_gpfetch": 1,
+        "prefer_feature": "none",
+        "prefer_min": 0,
+        "prefer_max": 0,
+        "head_dim_v": 256,
+        "qk_mask": 0,
+        "dv_split": 1,
+        "k_chunk": 0,
+        "has_sink": 0
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "00b12976-47af-5b3c-b713-c976a39fceda",
+      "name": "sdpa_cdna_f16_d256_causal1_bm128_wpe1",
+      "arch": [
+        "gfx90a"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_f16_d256_causal1_bm128_wpe1.hsaco",
+        "symbol": "flash_attn_generic_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "head_dim": 256,
+        "causal": 1,
+        "block_m": 128,
+        "kv_align": 0,
+        "waves_per_eu": 1,
+        "has_bias": 0,
+        "kv_gpfetch": 1,
+        "prefer_feature": "none",
+        "prefer_min": 0,
+        "prefer_max": 0,
+        "head_dim_v": 256,
+        "qk_mask": 0,
+        "dv_split": 1,
+        "k_chunk": 0,
+        "has_sink": 0
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "a38c9d03-5a75-5817-8100-9324a8b7a376",
+      "name": "sdpa_cdna_f16_d64_causal0_bm128_bias1",
+      "arch": [
+        "gfx90a"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_f16_d64_causal0_bm128_bias1.hsaco",
+        "symbol": "flash_attn_generic_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "head_dim": 64,
+        "causal": 0,
+        "block_m": 128,
+        "kv_align": 0,
+        "waves_per_eu": 0,
+        "has_bias": 1,
+        "kv_gpfetch": 1,
+        "prefer_feature": "none",
+        "prefer_min": 0,
+        "prefer_max": 0,
+        "head_dim_v": 64,
+        "qk_mask": 0,
+        "dv_split": 1,
+        "k_chunk": 0,
+        "has_sink": 0
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "458a270c-4e8b-5ea0-9d53-6e2d9b58e502",
+      "name": "sdpa_cdna_f16_d64_causal1_bm128_bias1",
+      "arch": [
+        "gfx90a"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_f16_d64_causal1_bm128_bias1.hsaco",
+        "symbol": "flash_attn_generic_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "head_dim": 64,
+        "causal": 1,
+        "block_m": 128,
+        "kv_align": 0,
+        "waves_per_eu": 0,
+        "has_bias": 1,
+        "kv_gpfetch": 1,
+        "prefer_feature": "none",
+        "prefer_min": 0,
+        "prefer_max": 0,
+        "head_dim_v": 64,
+        "qk_mask": 0,
+        "dv_split": 1,
+        "k_chunk": 0,
+        "has_sink": 0
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "081094c2-c369-5394-bdff-f38c0f22378f",
+      "name": "sdpa_cdna_f16_d128_causal0_bm128_bias1",
+      "arch": [
+        "gfx90a"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_f16_d128_causal0_bm128_bias1.hsaco",
+        "symbol": "flash_attn_generic_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "head_dim": 128,
+        "causal": 0,
+        "block_m": 128,
+        "kv_align": 0,
+        "waves_per_eu": 0,
+        "has_bias": 1,
+        "kv_gpfetch": 1,
+        "prefer_feature": "none",
+        "prefer_min": 0,
+        "prefer_max": 0,
+        "head_dim_v": 128,
+        "qk_mask": 0,
+        "dv_split": 1,
+        "k_chunk": 0,
+        "has_sink": 0
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "d1d71763-c431-5e19-932c-070e0c62c38b",
+      "name": "sdpa_cdna_f16_d128_causal1_bm128_bias1_gpf0",
+      "arch": [
+        "gfx90a"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_f16_d128_causal1_bm128_bias1_gpf0.hsaco",
+        "symbol": "flash_attn_generic_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "head_dim": 128,
+        "causal": 1,
+        "block_m": 128,
+        "kv_align": 0,
+        "waves_per_eu": 0,
+        "has_bias": 1,
+        "kv_gpfetch": 0,
+        "prefer_feature": "none",
+        "prefer_min": 0,
+        "prefer_max": 0,
+        "head_dim_v": 128,
+        "qk_mask": 0,
+        "dv_split": 1,
+        "k_chunk": 0,
+        "has_sink": 0
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "e1808143-d263-572a-86dd-850766fcb646",
+      "name": "sdpa_cdna_f16_d256_causal0_bm128_bias1",
+      "arch": [
+        "gfx90a"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_f16_d256_causal0_bm128_bias1.hsaco",
+        "symbol": "flash_attn_generic_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "head_dim": 256,
+        "causal": 0,
+        "block_m": 128,
+        "kv_align": 0,
+        "waves_per_eu": 0,
+        "has_bias": 1,
+        "kv_gpfetch": 1,
+        "prefer_feature": "none",
+        "prefer_min": 0,
+        "prefer_max": 0,
+        "head_dim_v": 256,
+        "qk_mask": 0,
+        "dv_split": 1,
+        "k_chunk": 0,
+        "has_sink": 0
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "18c08eed-9347-5cdb-95be-ecefe1385c26",
+      "name": "sdpa_cdna_f16_d256_causal1_bm128_bias1",
+      "arch": [
+        "gfx90a"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_f16_d256_causal1_bm128_bias1.hsaco",
+        "symbol": "flash_attn_generic_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "head_dim": 256,
+        "causal": 1,
+        "block_m": 128,
+        "kv_align": 0,
+        "waves_per_eu": 0,
+        "has_bias": 1,
+        "kv_gpfetch": 1,
+        "prefer_feature": "none",
+        "prefer_min": 0,
+        "prefer_max": 0,
+        "head_dim_v": 256,
+        "qk_mask": 0,
+        "dv_split": 1,
+        "k_chunk": 0,
+        "has_sink": 0
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "c520fa88-8529-5a7b-afca-2b3952c3bde1",
+      "name": "sdpa_cdna_f16_d64_causal0_bm128_wpe3_sink1",
+      "arch": [
+        "gfx90a"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_f16_d64_causal0_bm128_wpe3_sink1.hsaco",
+        "symbol": "flash_attn_generic_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "head_dim": 64,
+        "causal": 0,
+        "block_m": 128,
+        "kv_align": 0,
+        "waves_per_eu": 3,
+        "has_bias": 0,
+        "kv_gpfetch": 1,
+        "prefer_feature": "none",
+        "prefer_min": 0,
+        "prefer_max": 0,
+        "head_dim_v": 64,
+        "qk_mask": 0,
+        "dv_split": 1,
+        "k_chunk": 0,
+        "has_sink": 1
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "0f97a4dc-7a6f-5125-82f0-65f7bf927016",
+      "name": "sdpa_cdna_f16_d64_causal1_bm128_wpe3_sink1",
+      "arch": [
+        "gfx90a"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_f16_d64_causal1_bm128_wpe3_sink1.hsaco",
+        "symbol": "flash_attn_generic_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "head_dim": 64,
+        "causal": 1,
+        "block_m": 128,
+        "kv_align": 0,
+        "waves_per_eu": 3,
+        "has_bias": 0,
+        "kv_gpfetch": 1,
+        "prefer_feature": "none",
+        "prefer_min": 0,
+        "prefer_max": 0,
+        "head_dim_v": 64,
+        "qk_mask": 0,
+        "dv_split": 1,
+        "k_chunk": 0,
+        "has_sink": 1
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "8836c53e-035a-575e-af1f-0db0481434c5",
+      "name": "sdpa_cdna_f16_d128_causal0_bm128_sink1",
+      "arch": [
+        "gfx90a"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_f16_d128_causal0_bm128_sink1.hsaco",
+        "symbol": "flash_attn_generic_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "head_dim": 128,
+        "causal": 0,
+        "block_m": 128,
+        "kv_align": 0,
+        "waves_per_eu": 0,
+        "has_bias": 0,
+        "kv_gpfetch": 1,
+        "prefer_feature": "none",
+        "prefer_min": 0,
+        "prefer_max": 0,
+        "head_dim_v": 128,
+        "qk_mask": 0,
+        "dv_split": 1,
+        "k_chunk": 0,
+        "has_sink": 1
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "6e09f3d4-647d-59e7-8114-bcfddb5fd7b2",
+      "name": "sdpa_cdna_f16_d128_causal1_bm128_gpf0_sink1",
+      "arch": [
+        "gfx90a"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_f16_d128_causal1_bm128_gpf0_sink1.hsaco",
+        "symbol": "flash_attn_generic_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "head_dim": 128,
+        "causal": 1,
+        "block_m": 128,
+        "kv_align": 0,
+        "waves_per_eu": 0,
+        "has_bias": 0,
+        "kv_gpfetch": 0,
+        "prefer_feature": "none",
+        "prefer_min": 0,
+        "prefer_max": 0,
+        "head_dim_v": 128,
+        "qk_mask": 0,
+        "dv_split": 1,
+        "k_chunk": 0,
+        "has_sink": 1
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "e9264131-19e0-5484-92aa-0691bb46ac02",
+      "name": "sdpa_cdna_f16_d256_causal0_bm128_vd128_qkm1",
+      "arch": [
+        "gfx90a"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_f16_d256_causal0_bm128_vd128_qkm1.hsaco",
+        "symbol": "flash_attn_generic_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "head_dim": 256,
+        "causal": 0,
+        "block_m": 128,
+        "kv_align": 0,
+        "waves_per_eu": 0,
+        "has_bias": 0,
+        "kv_gpfetch": 1,
+        "prefer_feature": "none",
+        "prefer_min": 0,
+        "prefer_max": 0,
+        "head_dim_v": 128,
+        "qk_mask": 1,
+        "dv_split": 1,
+        "k_chunk": 0,
+        "has_sink": 0
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "a685e503-7d0c-5e2d-abb3-380541576efa",
+      "name": "sdpa_cdna_f16_d256_causal1_bm128_vd128_qkm1",
+      "arch": [
+        "gfx90a"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_f16_d256_causal1_bm128_vd128_qkm1.hsaco",
+        "symbol": "flash_attn_generic_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "head_dim": 256,
+        "causal": 1,
+        "block_m": 128,
+        "kv_align": 0,
+        "waves_per_eu": 0,
+        "has_bias": 0,
+        "kv_gpfetch": 1,
+        "prefer_feature": "none",
+        "prefer_min": 0,
+        "prefer_max": 0,
+        "head_dim_v": 128,
+        "qk_mask": 1,
+        "dv_split": 1,
+        "k_chunk": 0,
+        "has_sink": 0
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "b6b491a9-8f7b-5c59-a9fe-246143eabae6",
+      "name": "sdpa_cdna_f16_d64_causal0_bm128_wpe3_qkm1",
+      "arch": [
+        "gfx90a"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_f16_d64_causal0_bm128_wpe3_qkm1.hsaco",
+        "symbol": "flash_attn_generic_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "head_dim": 64,
+        "causal": 0,
+        "block_m": 128,
+        "kv_align": 0,
+        "waves_per_eu": 3,
+        "has_bias": 0,
+        "kv_gpfetch": 1,
+        "prefer_feature": "none",
+        "prefer_min": 0,
+        "prefer_max": 0,
+        "head_dim_v": 64,
+        "qk_mask": 1,
+        "dv_split": 1,
+        "k_chunk": 0,
+        "has_sink": 0
+      },
+      "priority": 76
+    },
+    {
+      "version": "1.0",
+      "id": "bcfd8816-5e11-51a6-9e39-76066e23336c",
+      "name": "sdpa_cdna_f16_d64_causal1_bm128_wpe3_qkm1",
+      "arch": [
+        "gfx90a"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_f16_d64_causal1_bm128_wpe3_qkm1.hsaco",
+        "symbol": "flash_attn_generic_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "head_dim": 64,
+        "causal": 1,
+        "block_m": 128,
+        "kv_align": 0,
+        "waves_per_eu": 3,
+        "has_bias": 0,
+        "kv_gpfetch": 1,
+        "prefer_feature": "none",
+        "prefer_min": 0,
+        "prefer_max": 0,
+        "head_dim_v": 64,
+        "qk_mask": 1,
+        "dv_split": 1,
+        "k_chunk": 0,
+        "has_sink": 0
+      },
+      "priority": 76
+    },
+    {
+      "version": "1.0",
+      "id": "0d0a88e7-4c48-519a-b5ac-e5b250d25b1a",
+      "name": "sdpa_cdna_f16_d128_causal0_bm128_qkm1",
+      "arch": [
+        "gfx90a"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_f16_d128_causal0_bm128_qkm1.hsaco",
+        "symbol": "flash_attn_generic_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "head_dim": 128,
+        "causal": 0,
+        "block_m": 128,
+        "kv_align": 0,
+        "waves_per_eu": 0,
+        "has_bias": 0,
+        "kv_gpfetch": 1,
+        "prefer_feature": "none",
+        "prefer_min": 0,
+        "prefer_max": 0,
+        "head_dim_v": 128,
+        "qk_mask": 1,
+        "dv_split": 1,
+        "k_chunk": 0,
+        "has_sink": 0
+      },
+      "priority": 74
+    },
+    {
+      "version": "1.0",
+      "id": "caab6651-9b20-59f5-8e79-7d4ad309ffd2",
+      "name": "sdpa_cdna_f16_d128_causal1_bm128_qkm1",
+      "arch": [
+        "gfx90a"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_f16_d128_causal1_bm128_qkm1.hsaco",
+        "symbol": "flash_attn_generic_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "head_dim": 128,
+        "causal": 1,
+        "block_m": 128,
+        "kv_align": 0,
+        "waves_per_eu": 0,
+        "has_bias": 0,
+        "kv_gpfetch": 1,
+        "prefer_feature": "none",
+        "prefer_min": 0,
+        "prefer_max": 0,
+        "head_dim_v": 128,
+        "qk_mask": 1,
+        "dv_split": 1,
+        "k_chunk": 0,
+        "has_sink": 0
+      },
+      "priority": 74
+    },
+    {
+      "version": "1.0",
+      "id": "518e9917-6264-5da4-b1cc-d99ef463069d",
+      "name": "sdpa_cdna_f16_d256_causal0_bm64_gpf0_qkm1",
+      "arch": [
+        "gfx90a"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_f16_d256_causal0_bm64_gpf0_qkm1.hsaco",
+        "symbol": "flash_attn_generic_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "head_dim": 256,
+        "causal": 0,
+        "block_m": 64,
+        "kv_align": 0,
+        "waves_per_eu": 0,
+        "has_bias": 0,
+        "kv_gpfetch": 0,
+        "prefer_feature": "none",
+        "prefer_min": 0,
+        "prefer_max": 0,
+        "head_dim_v": 256,
+        "qk_mask": 1,
+        "dv_split": 1,
+        "k_chunk": 0,
+        "has_sink": 0
+      },
+      "priority": 70
+    },
+    {
+      "version": "1.0",
+      "id": "7e073ac6-6eda-5124-a36c-ff3d5000bb77",
+      "name": "sdpa_cdna_f16_d256_causal1_bm64_gpf0_qkm1",
+      "arch": [
+        "gfx90a"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_f16_d256_causal1_bm64_gpf0_qkm1.hsaco",
+        "symbol": "flash_attn_generic_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "head_dim": 256,
+        "causal": 1,
+        "block_m": 64,
+        "kv_align": 0,
+        "waves_per_eu": 0,
+        "has_bias": 0,
+        "kv_gpfetch": 0,
+        "prefer_feature": "none",
+        "prefer_min": 0,
+        "prefer_max": 0,
+        "head_dim_v": 256,
+        "qk_mask": 1,
+        "dv_split": 1,
+        "k_chunk": 0,
+        "has_sink": 0
+      },
+      "priority": 70
+    },
+    {
+      "version": "1.0",
+      "id": "6062fe51-7aff-5212-8c41-c6d2fbade64a",
+      "name": "sdpa_cdna_f16_d96_causal0_bm256_wpe2_qkm1",
+      "arch": [
+        "gfx90a"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_f16_d96_causal0_bm256_wpe2_qkm1.hsaco",
+        "symbol": "flash_attn_generic_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "head_dim": 96,
+        "causal": 0,
+        "block_m": 256,
+        "kv_align": 0,
+        "waves_per_eu": 2,
+        "has_bias": 0,
+        "kv_gpfetch": 1,
+        "prefer_feature": "none",
+        "prefer_min": 0,
+        "prefer_max": 0,
+        "head_dim_v": 96,
+        "qk_mask": 1,
+        "dv_split": 1,
+        "k_chunk": 0,
+        "has_sink": 0
+      },
+      "priority": 75
+    },
+    {
+      "version": "1.0",
+      "id": "38238c29-9c6b-5ffa-9c6e-b929d4490227",
+      "name": "sdpa_cdna_f16_d96_causal1_bm128_wpe1_qkm1",
+      "arch": [
+        "gfx90a"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_f16_d96_causal1_bm128_wpe1_qkm1.hsaco",
+        "symbol": "flash_attn_generic_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "head_dim": 96,
+        "causal": 1,
+        "block_m": 128,
+        "kv_align": 0,
+        "waves_per_eu": 1,
+        "has_bias": 0,
+        "kv_gpfetch": 1,
+        "prefer_feature": "none",
+        "prefer_min": 0,
+        "prefer_max": 0,
+        "head_dim_v": 96,
+        "qk_mask": 1,
+        "dv_split": 1,
+        "k_chunk": 0,
+        "has_sink": 0
+      },
+      "priority": 75
+    },
+    {
+      "version": "1.0",
+      "id": "164d8cea-8cdf-5f53-aec5-2879fa547278",
+      "name": "sdpa_cdna_f16_d96_causal1_bm256_wpe1_qkm1",
+      "arch": [
+        "gfx90a"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_f16_d96_causal1_bm256_wpe1_qkm1.hsaco",
+        "symbol": "flash_attn_generic_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "head_dim": 96,
+        "causal": 1,
+        "block_m": 256,
+        "kv_align": 0,
+        "waves_per_eu": 1,
+        "has_bias": 0,
+        "kv_gpfetch": 1,
+        "prefer_feature": "none",
+        "prefer_min": 0,
+        "prefer_max": 0,
+        "head_dim_v": 96,
+        "qk_mask": 1,
+        "dv_split": 1,
+        "k_chunk": 0,
+        "has_sink": 0
+      },
+      "priority": 65
+    },
+    {
+      "version": "1.0",
+      "id": "5c33fc36-9674-5378-a62c-bea37f524c13",
+      "name": "sdpa_cdna_f16_d96_causal1_bm128_wpe3_gpf0_qkm1",
+      "arch": [
+        "gfx90a"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_f16_d96_causal1_bm128_wpe3_gpf0_qkm1.hsaco",
+        "symbol": "flash_attn_generic_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "head_dim": 96,
+        "causal": 1,
+        "block_m": 128,
+        "kv_align": 0,
+        "waves_per_eu": 3,
+        "has_bias": 0,
+        "kv_gpfetch": 0,
+        "prefer_feature": "none",
+        "prefer_min": 0,
+        "prefer_max": 0,
+        "head_dim_v": 96,
+        "qk_mask": 1,
+        "dv_split": 1,
+        "k_chunk": 0,
+        "has_sink": 0
+      },
+      "priority": 65
+    },
+    {
+      "version": "1.0",
+      "id": "15221038-2c5a-544f-87ce-e4765139a8a0",
+      "name": "sdpa_cdna_f16_d160_causal0_bm256_wpe1_qkm1",
+      "arch": [
+        "gfx90a"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_f16_d160_causal0_bm256_wpe1_qkm1.hsaco",
+        "symbol": "flash_attn_generic_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "head_dim": 160,
+        "causal": 0,
+        "block_m": 256,
+        "kv_align": 0,
+        "waves_per_eu": 1,
+        "has_bias": 0,
+        "kv_gpfetch": 1,
+        "prefer_feature": "none",
+        "prefer_min": 0,
+        "prefer_max": 0,
+        "head_dim_v": 160,
+        "qk_mask": 1,
+        "dv_split": 1,
+        "k_chunk": 0,
+        "has_sink": 0
+      },
+      "priority": 73
+    },
+    {
+      "version": "1.0",
+      "id": "0ccf20ad-fafc-5ba8-8799-571dccb48b8a",
+      "name": "sdpa_cdna_f16_d160_causal1_bm256_wpe1_gpf0_qkm1",
+      "arch": [
+        "gfx90a"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_f16_d160_causal1_bm256_wpe1_gpf0_qkm1.hsaco",
+        "symbol": "flash_attn_generic_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "head_dim": 160,
+        "causal": 1,
+        "block_m": 256,
+        "kv_align": 0,
+        "waves_per_eu": 1,
+        "has_bias": 0,
+        "kv_gpfetch": 0,
+        "prefer_feature": "none",
+        "prefer_min": 0,
+        "prefer_max": 0,
+        "head_dim_v": 160,
+        "qk_mask": 1,
+        "dv_split": 1,
+        "k_chunk": 0,
+        "has_sink": 0
+      },
+      "priority": 73
+    },
+    {
+      "version": "1.0",
+      "id": "424274fd-9026-547f-bcd7-dc934cf3b1f4",
+      "name": "sdpa_cdna_f16_d160_causal1_bm128_wpe1_qkm1",
+      "arch": [
+        "gfx90a"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_f16_d160_causal1_bm128_wpe1_qkm1.hsaco",
+        "symbol": "flash_attn_generic_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "head_dim": 160,
+        "causal": 1,
+        "block_m": 128,
+        "kv_align": 0,
+        "waves_per_eu": 1,
+        "has_bias": 0,
+        "kv_gpfetch": 1,
+        "prefer_feature": "none",
+        "prefer_min": 0,
+        "prefer_max": 0,
+        "head_dim_v": 160,
+        "qk_mask": 1,
+        "dv_split": 1,
+        "k_chunk": 0,
+        "has_sink": 0
+      },
+      "priority": 63
+    },
+    {
+      "version": "1.0",
+      "id": "650cf150-0891-5b27-8479-fb7506bfc272",
+      "name": "sdpa_cdna_f16_d192_causal0_bm128_wpe3_qkm1",
+      "arch": [
+        "gfx90a"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_f16_d192_causal0_bm128_wpe3_qkm1.hsaco",
+        "symbol": "flash_attn_generic_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "head_dim": 192,
+        "causal": 0,
+        "block_m": 128,
+        "kv_align": 0,
+        "waves_per_eu": 3,
+        "has_bias": 0,
+        "kv_gpfetch": 1,
+        "prefer_feature": "none",
+        "prefer_min": 0,
+        "prefer_max": 0,
+        "head_dim_v": 192,
+        "qk_mask": 1,
+        "dv_split": 1,
+        "k_chunk": 0,
+        "has_sink": 0
+      },
+      "priority": 72
+    },
+    {
+      "version": "1.0",
+      "id": "b32892c2-495d-53a1-bdf9-0267af20b29a",
+      "name": "sdpa_cdna_f16_d192_causal1_bm128_wpe3_qkm1",
+      "arch": [
+        "gfx90a"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_f16_d192_causal1_bm128_wpe3_qkm1.hsaco",
+        "symbol": "flash_attn_generic_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "head_dim": 192,
+        "causal": 1,
+        "block_m": 128,
+        "kv_align": 0,
+        "waves_per_eu": 3,
+        "has_bias": 0,
+        "kv_gpfetch": 1,
+        "prefer_feature": "none",
+        "prefer_min": 0,
+        "prefer_max": 0,
+        "head_dim_v": 192,
+        "qk_mask": 1,
+        "dv_split": 1,
+        "k_chunk": 0,
+        "has_sink": 0
+      },
+      "priority": 72
+    },
+    {
+      "version": "1.0",
+      "id": "2ef98948-391e-530a-ad28-15233e6d707e",
+      "name": "sdpa_cdna_f16_d224_causal0_bm128_wpe2_qkm1",
+      "arch": [
+        "gfx90a"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_f16_d224_causal0_bm128_wpe2_qkm1.hsaco",
+        "symbol": "flash_attn_generic_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "head_dim": 224,
+        "causal": 0,
+        "block_m": 128,
+        "kv_align": 0,
+        "waves_per_eu": 2,
+        "has_bias": 0,
+        "kv_gpfetch": 1,
+        "prefer_feature": "none",
+        "prefer_min": 0,
+        "prefer_max": 0,
+        "head_dim_v": 224,
+        "qk_mask": 1,
+        "dv_split": 1,
+        "k_chunk": 0,
+        "has_sink": 0
+      },
+      "priority": 71
+    },
+    {
+      "version": "1.0",
+      "id": "f86f9ba8-b0d4-5864-8bcb-cb4b8efa3472",
+      "name": "sdpa_cdna_f16_d224_causal1_bm128_wpe3_qkm1",
+      "arch": [
+        "gfx90a"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_f16_d224_causal1_bm128_wpe3_qkm1.hsaco",
+        "symbol": "flash_attn_generic_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "head_dim": 224,
+        "causal": 1,
+        "block_m": 128,
+        "kv_align": 0,
+        "waves_per_eu": 3,
+        "has_bias": 0,
+        "kv_gpfetch": 1,
+        "prefer_feature": "none",
+        "prefer_min": 0,
+        "prefer_max": 0,
+        "head_dim_v": 224,
+        "qk_mask": 1,
+        "dv_split": 1,
+        "k_chunk": 0,
+        "has_sink": 0
+      },
+      "priority": 71
+    }
+  ]
+}

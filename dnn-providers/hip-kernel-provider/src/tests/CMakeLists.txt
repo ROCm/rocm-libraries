@@ -290,6 +290,43 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                 EveryKernelDeclaresTheEightSlotSignature
         )
     endif()
+    if(HIPKERNELPROVIDER_FLYDSL_ACTIVE AND HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_cdna)
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            ARCHES ${HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_cdna}
+            SUITES TestFlydslSdpaCdnaPacks
+            EXPECTED_CASES
+                IsOnePackWithAGraphMatchAndOneKernelScopedMatcher
+                ShipsUniqueObjectsAndOneTopServeAllPerClass
+                RanksTheNarrowerBucketFirst
+                EveryKernelDeclaresItsFamilysSignature
+        )
+    endif()
+    if(HIPKERNELPROVIDER_FLYDSL_ACTIVE AND HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_cdna_dualwave)
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            ARCHES ${HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_cdna_dualwave}
+            SUITES TestFlydslSdpaCdnaDualwavePacks
+            EXPECTED_CASES
+                IsOnePackWithAGraphMatchAndOneKernelScopedMatcher
+                ShipsUniqueObjectsAndOneTopServeAllPerClass
+                EveryKernelDeclaresItsFamilysSignature
+        )
+    endif()
+    if(HIPKERNELPROVIDER_FLYDSL_ACTIVE AND HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_cdna_decode)
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            ARCHES ${HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_cdna_decode}
+            SUITES TestFlydslSdpaCdnaDecodePacks
+            EXPECTED_CASES
+                IsOnePackWithAGraphMatchAndOneKernelScopedMatcher
+                ShipsUniqueObjectsAndOneTopServeAllPerClass
+                EveryKernelDeclaresItsFamilysSignature
+        )
+    endif()
     if(HIPKERNELPROVIDER_FLYDSL_ACTIVE AND HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_rdna)
         # A second suite over the same shard: one EXPECTED_CASES list pins one suite.
         hkp_register_census_tests(
