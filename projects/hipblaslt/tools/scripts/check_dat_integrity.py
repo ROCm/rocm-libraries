@@ -15,7 +15,7 @@ from typing import List
 
 # This build-time script also runs directly from a source checkout.
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tensilelite"))
-from Tensile.Utilities.LibraryIO import readMessagePack
+from tensilelite.Utilities.LibraryIO import readMessagePack
 
 try:
     import msgpack

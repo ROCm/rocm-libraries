@@ -56,8 +56,11 @@ def known_failures(text):
         require(entry["target"] in ("gfx942", "gfx950"), "unsupported target")
         require(strings(entry["backends"], {"tensile", "bench"}), "backends")
         require(
-            strings(entry["cases"], {"tile", "multi_tile", "mn_edge", "k_remainder"}),
-            "cases must name individual cases; list all four to skip a solution",
+            strings(
+                entry["cases"],
+                {"tile", "multi_tile", "mn_edge", "k_remainder", "regular"},
+            ),
+            "cases must name individual cases in the selected policy",
         )
         require(strings(entry["kernel_names"]), "kernel_names")
     return data

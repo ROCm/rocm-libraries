@@ -13,14 +13,15 @@ from pathlib import Path
 import re
 import signal
 import subprocess
+import sys
 import threading
 import time
 import math
 
-from rocjitsu_sweep_plan import make_plan, sha256
+from rocjitsu_sweep_plan import make_plan, sha256, POLICY, REGULAR_POLICY
 from rocjitsu_known_failures import apply_known_failures
 
-from Tensile.Utilities.ClientConfig import problemTypeOptions
+from tensilelite.Utilities.ClientConfig import problemTypeOptions
 
 
 def write_text(path, value):
@@ -70,7 +71,7 @@ def solution_report(job, result, backend):
         str(job["solutions"][0]["index"]),
         state,
         f"{observed}/{planned}",
-        f"{result.get('target_dispatches', '?')}/{(planned - len(skipped)) * (2 if backend == 'bench' else 1)}",
+        f"{result.get('target_dispatches', '?')}/{(planned - len(skipped)) * job.get('target_dispatches_per_case', 2 if backend == 'bench' else 1)}",
         f"{result['seconds']:.2f}" if "seconds" in result else "—",
         notes or "Identity, numerical and race checks passed",
     ]
@@ -151,12 +152,28 @@ def prepare(args):
         args.solutions,
         args.seed,
         args.solution_indices,
+        getattr(args, "policy", POLICY),
     )
     manifest.update(
         backend=args.backend,
         workers=args.workers,
         tools={str(p): sha256(p) for p in (args.rocjitsu, args.client, args.config)},
     )
+    if args.backend == "bench":
+        manifest["tools"].update(
+            (str(path), sha256(path))
+            for path in (
+                Path(sys.executable),
+                *(
+                    args.client.parent / name
+                    for name in (
+                        "hipblaslt_gentest.py",
+                        "hipblaslt_template.yaml",
+                        "hipblaslt_common.yaml",
+                    )
+                ),
+            )
+        )
     failures = args.known_failures.read_text(encoding="utf-8")
     apply_known_failures(
         manifest, failures, args.rocjitsu_revision, args.run_known_failures
@@ -407,7 +424,19 @@ def classify_bench(job, text, returncode):
             headers = next(csv.reader([header[1]]))
             continue
         if headers is not None:
-            row = next(csv.reader([line.strip()]))
+            # Bench prints complex alpha/beta as unquoted (real,imag) scalars.
+            # Protect those commas before parsing its otherwise scalar CSV row.
+            row = next(
+                csv.reader(
+                    [
+                        re.sub(
+                            r"\([^()]*,[^()]*\)",
+                            lambda m: '"' + m[0] + '"',
+                            line.strip(),
+                        )
+                    ]
+                )
+            )
             if len(row) == len(headers):
                 pending = dict(zip(headers, row))
                 pending["target_dispatches"] = launches
@@ -447,7 +476,7 @@ def classify_bench(job, text, returncode):
                 "status": "PASSED" if passed else "FAILED",
                 "target_dispatches": row["target_dispatches"],
             }
-            if row["target_dispatches"] != 2:
+            if row["target_dispatches"] != job.get("target_dispatches_per_case", 2):
                 errors.append(
                     f"Case {shape}: unexpected target dispatches ({row['target_dispatches']})"
                 )
@@ -463,8 +492,24 @@ def classify_bench(job, text, returncode):
         returncode,
         {"id": job["id"], "cases": list(cases.values())},
         errors,
-        launches_per_case=2,
+        launches_per_case=job.get("target_dispatches_per_case", 2),
     )
+
+
+def convert_bench_input(client, stem, timeout, env):
+    """Use the converter/template installed with the tested client."""
+    helper = client.parent / "hipblaslt_gentest.py"
+    command = [
+        sys.executable,
+        str(helper),
+        "--template",
+        str(helper.with_name("hipblaslt_template.yaml")),
+        "-o",
+        str(stem.with_suffix(".data")),
+        str(stem.with_suffix(".yaml")),
+    ]
+    write_json(stem.with_suffix(".conversion.command.json"), command)
+    return execute_command(command, stem.with_suffix(".conversion.log"), timeout, env)
 
 
 def execute_command(command, log, timeout, env):
@@ -640,6 +685,7 @@ def run(args):
         )
 
         def execute(job, slot):
+            begin = time.monotonic()
             stem = args.reports / f"batch-{job['id']:03}"
             if "planning_error" in job:
                 result = {
@@ -692,13 +738,39 @@ def run(args):
                 import yaml
 
                 stem.with_suffix(".yaml").write_text(
-                    yaml.safe_dump(bench_options(job), sort_keys=False),
+                    "Tests:\n"
+                    + (
+                        job["bench_yaml"]
+                        if "bench_yaml" in job
+                        else yaml.safe_dump(bench_options(job), sort_keys=False)
+                    ),
                     encoding="utf-8",
                 )
+                # Convert outside emulation with the active Python and the
+                # template shipped alongside this particular bench binary.
+                rc = convert_bench_input(
+                    args.client,
+                    stem,
+                    min(args.timeout, deadline - time.monotonic()),
+                    env,
+                )
+                if rc != 0:
+                    result = finish_result(
+                        job,
+                        "",
+                        rc,
+                        {"id": job["id"], "cases": []},
+                        ["Bench YAML conversion failed; see conversion.log"],
+                        job.get("target_dispatches_per_case", 2),
+                    )
+                    result["cases"] += skipped
+                    result["seconds"] = time.monotonic() - begin
+                    write_json(stem.with_suffix(".result.json"), result)
+                    return result
                 client_args = [
                     "--host_side_fill_kernel",
-                    "--yaml",
-                    str(stem.with_suffix(".yaml")),
+                    "--data",
+                    str(stem.with_suffix(".data")),
                 ]
             command = [
                 "taskset",
@@ -712,11 +784,11 @@ def run(args):
                 *client_args,
             ]
             write_json(stem.with_suffix(".command.json"), command)
-            begin = time.monotonic()
+            launch_begin = time.monotonic()
             rc = execute_command(
                 command,
                 stem.with_suffix(".log"),
-                min(args.timeout, deadline - begin),
+                min(args.timeout, deadline - launch_begin),
                 env,
             )
             classifier = (
@@ -862,10 +934,11 @@ def main():
         help="Run this artifact-specific index; repeat for multiple solutions (including aliases)",
     )
     parser.add_argument("--backend", choices=("tensile", "bench"), required=True)
+    parser.add_argument("--policy", choices=(POLICY, REGULAR_POLICY), default=POLICY)
     parser.add_argument(
         "--known-failures",
         type=Path,
-        default=Path(__file__).with_name("known_failures.yaml"),
+        default=None,
         help="Versioned list of kernel names and cases to skip across their solutions",
     )
     parser.add_argument(
@@ -891,6 +964,14 @@ def main():
         help="Per-backend time budget in seconds, including inventory preparation",
     )
     args = parser.parse_args()
+    if args.known_failures is None:
+        args.known_failures = Path(__file__).with_name(
+            "known_failures_regular.yaml"
+            if args.policy == REGULAR_POLICY
+            else "known_failures.yaml"
+        )
+    if args.policy == REGULAR_POLICY and args.backend != "bench":
+        parser.error("regular-v1 requires the bench backend")
     if (
         not 1 <= args.workers <= 4
         or args.solutions < 1

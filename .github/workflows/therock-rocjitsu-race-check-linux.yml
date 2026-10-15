@@ -90,8 +90,8 @@ jobs:
           repository: ROCm/rocm-systems
           # Keep the validated tool revision stable instead of following
           # rocm-systems develop, where rocjitsu interfaces can change independently.
-          # Pinned 2026-10-07; recheck known_failures.yaml when updating.
-          ref: c5cc42b6c18f359bf1ee9c262212c2616a016a8c
+          # Pinned 2026-10-14; includes gfx942 s_atomic_dec support.
+          ref: c2bffdf7c6530c79329edd0add31fa9d0485b96f
           path: rocm-systems
           sparse-checkout: |
             emulation/rocjitsu

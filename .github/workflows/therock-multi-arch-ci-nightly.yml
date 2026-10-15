@@ -101,6 +101,25 @@ jobs:
       contents: read
       id-token: write
 
+  rocjitsu_race_check_gfx94x:
+    name: Nightly rocjitsu race check (gfx942)
+    needs: [setup, linux_build_and_test]
+    # Attempt artifact consumption even if an unrelated GPU test failed.
+    # A skipped producer has no artifacts; cancellation must stop this job.
+    if: >-
+      ${{
+        !cancelled() &&
+        needs.setup.result == 'success' &&
+        needs.setup.outputs.enable_build_jobs == 'true' &&
+        needs.linux_build_and_test.result != 'skipped'
+      }}
+    uses: ./.github/workflows/therock-rocjitsu-race-check-linux.yml
+    with:
+      therock_ref: ${{ needs.setup.outputs.ref }}
+      build_runs_on: aws-linux-scale-rocm-prod
+      amdgpu_families: gfx94X-dcgpu
+      amdgpu_targets: gfx942
+
   windows_build_and_test:
     name: Windows::${{ fromJSON(needs.setup.outputs.windows_build_config || '{}').build_variant_label || 'skip' }}
     needs: [setup]

@@ -3,16 +3,16 @@
 This hipBLASLt client tool runs selected solution indices and metadata-derived
 shapes under rocJITsu. `--backend tensile` uses `tensilelite-client` with generated
 INIs; `--backend bench` uses `hipblaslt-bench` with explicit algorithm indices and
-YAML, exercising the hipBLASLt API. Both require matching numerical, solution and
+YAML converted to binary data with the active Python, exercising the hipBLASLt API. Both require matching numerical, solution and
 kernel-dispatch evidence. Every race or emulator warning fails the run.
 
 The advisory GitHub Actions sidecar invokes both backends independently against
-the PR's installed artifacts. Each reconstructs its own inventory, runs up to
+the current run's installed artifacts. Each reconstructs its own inventory, runs up to
 four workers and keeps separate reports. A failure in the first backend does
 not prevent the second. CI setup, invocation and report publication belong in
 `.github`; inventory, case generation, execution and result checking live here.
 The Tensile metadata reader and client-option mapping are shared with existing
-component tools through `Tensile.Utilities` without importing the generator.
+component tools through `tensilelite.Utilities` without importing the generator.
 
 ## Selection and shapes
 
@@ -34,7 +34,7 @@ index/logic bookkeeping and performance models are excluded. JSON keys are sorte
 so dictionary insertion order does not affect selection. The numeric index breaks
 ties only when these names and configuration fields are identical. The first 100
 entries are selected in this order, independently of metadata filenames,
-traversal order, backend and case generation. Index renumbering preserves the chosen configurations; naming
+traversal order within the eligible inventory for each case policy. Index renumbering preserves the chosen configurations; naming
 or configuration changes can change the selection. Adding or removing entries
 can change which fall within the selected prefix.
 
@@ -48,12 +48,31 @@ seed for local exploration. To reproduce specific indices, repeat
 `--solution-index N` instead of `--solutions N`. Explicit selection retains aliases,
 reports unsupported solutions and rejects missing indices.
 
-The initial adapters support ordinary GEMM with matching C/D types, optional
+The `tile-depth-v1` adapters support ordinary GEMM with matching C/D types, optional
 bias/scaling and no activation. Grouped, fused, sparse, MX, gradient, auxiliary
 output and swizzled problems are outside their scope. Inventory counts include
 unsupported features and other/unknown hardware. A sampled solution that cannot
 produce bounded cases remains a failure; it is never replaced by an easier one.
 Explicit selection does not bypass these checks or any native predicates.
+
+CI uses `--backend bench --policy regular-v1`: one full output tile and
+`K = 8 * DepthU * fixed_split` from the shared regular GEMM descriptor. Optional
+epilogues are disabled. This supports double, complex and FNUZ types as well as
+the initial real types. StreamK, automatic split-K and the descriptor's other
+unimplemented features are counted as coverage gaps by reason; malformed
+metadata fails preparation. A selected workload that exceeds the buffer budget
+or fails native predicates remains selected and fails the run.
+
+The independent TensileLite stage retains `--policy tile-depth-v1`. These two
+policies have different eligible inventories and shapes. Both retain aliases,
+use the same seed and report their policy explicitly. Complete gfx950 coverage
+will additionally need scheduling/layout adapters and virtual device profiles.
+
+The daily `therock-multi-arch-ci-nightly.yml` calls the reusable CPU race workflow
+for gfx942. It consumes BLAS/test artifacts from the same GitHub run and waits
+for the complete Linux build/test workflow. An unrelated GPU test failure does
+not suppress the artifact attempt. The race job is advisory during burn-in and
+is excluded from the required nightly summary.
 
 `rocjitsu_sweep_plan.py` owns the versioned `tile-depth-v1` case policy. From each
 solution's macro tile `(Tm, Tn)` and DepthU `Du`, it proposes four shapes:
@@ -107,19 +126,19 @@ revision/policy guards while retaining every normal validation check.
 Use it with the same seed or explicit indices to reassess the list when bumping
 the detector pin. Remove passing entries and document/review remaining failures
 before updating the list's revision and date. `--known-failures PATH` selects a
-different list for local diagnosis; the default is the file beside the script.
+different list for local diagnosis; the default is the list for the selected policy.
 
-The current entries cover gfx942 `s_atomic_dec` hangs, tracked by
-[instruction support](https://github.com/ROCm/rocm-systems/pull/12963) and
-[fatal-error propagation](https://github.com/ROCm/rocm-systems/pull/12964).
-The previous LDS/FLAT wait false positives are fixed in the new pin and have no
-skip entries. Newly selected indices may still expose unlisted failures.
+Both policy lists are empty at the pinned detector revision. The 26 former
+`s_atomic_dec` exclusions passed all 104 `tile-depth-v1` cases after
+[instruction support](https://github.com/ROCm/rocm-systems/pull/12963) landed.
+The `regular-v1` policy has its own [`known_failures_regular.yaml`](known_failures_regular.yaml).
+New findings fail the run and require diagnosis before any exclusion is added.
 
 ## Evidence and bounds
 
 TensileLite validates every output element with one target dispatch per case.
 Bench enables native norm assertions and allclose measurements, with one
-validation and one timed dispatch. It uses `--host_side_fill_kernel` to evaluate
+validation dispatch for `regular-v1`; `tile-depth-v1` also has one timed dispatch. It uses `--host_side_fill_kernel` to evaluate
 the existing matrix initializers on the CPU and copy the inputs to the device,
 avoiding emulated input-fill kernels. The option applies to every YAML/data
 record; ordinary bench runs continue to initialize on the device by default.
@@ -135,7 +154,7 @@ Each process group has a 120-second timeout, shortened to the remaining 25-minut
 suite budget. The suite clock starts before inventory preparation. Expiry kills
 native process groups and records missing/unstarted cases. Preparation and report
 writing are charged to the clock but are not forcibly interruptible; the outer
-CI timeout still applies. Dimensions are bounded at 8192, estimated data buffers
+CI timeout still applies. The tile-depth policy bounds dimensions at 8192; both policies bound estimated data buffers
 at 128 MiB and native workspace separately at 128 MiB. These are workload bounds,
 not a hard process-memory limit.
 
@@ -186,8 +205,9 @@ python3 -B "$sweep/rocjitsu_race_sweep.py" \
   --workers 4 --solutions 100 --timeout 120 --suite-timeout 1500
 ```
 
-For bench, change `--backend` to `bench`, `--client` to
-`$ROCM_PATH/bin/hipblaslt-bench` and use a fresh `--reports` directory. For specific
+For the nightly bench policy, change `--backend` to `bench`, add
+`--policy regular-v1 --known-failures "$sweep/known_failures_regular.yaml"`, set
+`--client "$ROCM_PATH/bin/hipblaslt-bench"` and use a fresh `--reports` directory. For specific
 solutions, replace `--solutions 100` with e.g. `--solution-index 7 --solution-index 9`.
 For source-tree development, put `projects/hipblaslt/tensilelite` on `PYTHONPATH`
 and use this directory as `sweep`.

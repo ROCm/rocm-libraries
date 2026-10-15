@@ -34,13 +34,14 @@ class RaceCheckTests(unittest.TestCase):
                 Path(__file__).parents[2]
                 / "projects/hipblaslt/clients/scripts/rocjitsu"
             )
-        failures = yaml.safe_load((directory / "known_failures.yaml").read_text())
         checkout = next(
             s
             for s in workflow_steps()
             if s["name"] == "Checkout rocm-systems for rocjitsu"
         )
-        self.assertEqual(checkout["with"]["ref"], failures["rocjitsu_revision"])
+        for name in ("known_failures.yaml", "known_failures_regular.yaml"):
+            failures = yaml.safe_load((directory / name).read_text())
+            self.assertEqual(checkout["with"]["ref"], failures["rocjitsu_revision"])
 
     def test_bench_yaml_helper_uses_active_python(self):
         # CI exercises the installed helper; local source checks need no GPU build.
@@ -175,6 +176,7 @@ ROCM_PATH=artifact
 RACE_REPORT_DIR=reports
 SWEEP_DRIVER=artifact/sweep.py
 KNOWN_FAILURES=artifact/known_failures.yaml
+TENSILELITE_ROOT=artifact
 run_timed() { echo "STAGE: $1"; shift; "$@"; }
 python3() { printf 'ARG: %s\n' "$@"; if [[ "$3" == tensile ]]; then return "$TENSILE_SWEEP_STATUS"; else return "$BENCH_SWEEP_STATUS"; fi; }
 """
@@ -219,13 +221,40 @@ python3() { printf 'ARG: %s\n' "$@"; if [[ "$3" == tensile ]]; then return "$TEN
                     ("--seed", "0"),
                     ("--suite-timeout", "1500"),
                     ("--rocjitsu-revision", "detector-revision"),
-                    ("--known-failures", "artifact/known_failures.yaml"),
                 ]:
                     self.assertEqual(
                         result.stdout.count(f"ARG: {flag}\nARG: {value}\n"), 2
                     )
                 self.assertIn("ARG: reports/sweep-tensile", result.stdout)
                 self.assertIn("ARG: reports/sweep-bench", result.stdout)
+                self.assertIn("ARG: --policy\nARG: tile-depth-v1\n", result.stdout)
+                self.assertIn("ARG: --policy\nARG: regular-v1\n", result.stdout)
+                self.assertIn(
+                    "ARG: --known-failures\nARG: artifact/known_failures.yaml\n",
+                    result.stdout,
+                )
+                self.assertIn(
+                    "ARG: --known-failures\nARG: artifact/rocjitsu/known_failures_regular.yaml\n",
+                    result.stdout,
+                )
+
+    def test_nightly_consumes_same_run_artifacts_on_cpu_runner(self):
+        path = Path(__file__).parents[1] / "workflows/therock-multi-arch-ci-nightly.yml"
+        workflow = yaml.safe_load(path.read_text())
+        job = workflow["jobs"]["rocjitsu_race_check_gfx94x"]
+        self.assertEqual(job["needs"], ["setup", "linux_build_and_test"])
+        self.assertIn("!cancelled()", job["if"])
+        self.assertIn("needs.linux_build_and_test.result != 'skipped'", job["if"])
+        self.assertEqual(
+            job["uses"], "./.github/workflows/therock-rocjitsu-race-check-linux.yml"
+        )
+        self.assertEqual(job["with"]["build_runs_on"], "aws-linux-scale-rocm-prod")
+        self.assertEqual(job["with"]["amdgpu_targets"], "gfx942")
+        self.assertEqual(job["with"]["amdgpu_families"], "gfx94X-dcgpu")
+        self.assertNotIn(
+            "rocjitsu_race_check_gfx94x",
+            workflow["jobs"]["multi_arch_ci_summary"]["needs"],
+        )
 
     def test_ci_publishes_partial_and_missing_reports(self):
         publish = next(
