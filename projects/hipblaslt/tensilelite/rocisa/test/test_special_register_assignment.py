@@ -14,14 +14,20 @@ from rocisa.container import EXEC, EXECHI, EXECLO, VCC, sgpr
 from rocisa.instruction import SMovB32
 
 
-@pytest.fixture(scope="module", autouse=True)
+@pytest.fixture(autouse=True)
 def _isa_context():
+    isa = rocisa.rocIsa.getInstance()
+    previous = isa.getKernel()
     rocm = os.environ.get("ROCM_PATH", "/opt/rocm")
     search = os.pathsep.join([
         os.path.join(rocm, "bin"), os.path.join(rocm, "lib", "llvm", "bin")])
     assembler = shutil.which("amdclang++", path=search) or "amdclang++"
-    rocisa.rocIsa.getInstance().init((12, 5, 0), assembler, False)
-    rocisa.rocIsa.getInstance().setKernel((12, 5, 0), 32)
+    isa.init((12, 5, 0), assembler, False)
+    isa.setKernel((12, 5, 0), 32)
+    try:
+        yield
+    finally:
+        isa.setKernel(tuple(previous.isa), previous.wavefrontSize)
 
 
 @pytest.mark.parametrize("special", ["vcc_lo", "vcc_hi", "exec", "exec_lo", "exec_hi"])
