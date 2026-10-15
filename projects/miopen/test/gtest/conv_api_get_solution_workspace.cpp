@@ -84,8 +84,7 @@ protected:
 
         // 1x1, stride 2, pad 0: the GemmFwd1x1_0_2 path, which needs workspace for the
         // transposed x and y copies.
-        ASSERT_EQ(miopenSet4dTensorDescriptor(xDesc, miopenHalf, 2, 16, 8, 8),
-                  miopenStatusSuccess);
+        ASSERT_EQ(miopenSet4dTensorDescriptor(xDesc, miopenHalf, 2, 16, 8, 8), miopenStatusSuccess);
         ASSERT_EQ(miopenSet4dTensorDescriptor(wDesc, miopenHalf, 32, 16, 1, 1),
                   miopenStatusSuccess);
         ASSERT_EQ(miopenInitConvolutionDescriptor(convDesc, miopenConvolution, 0, 0, 2, 2, 1, 1),
@@ -93,8 +92,7 @@ protected:
         int n = 0, c = 0, h = 0, w = 0;
         ASSERT_EQ(miopenGetConvolutionForwardOutputDim(convDesc, xDesc, wDesc, &n, &c, &h, &w),
                   miopenStatusSuccess);
-        ASSERT_EQ(miopenSet4dTensorDescriptor(yDesc, miopenHalf, n, c, h, w),
-                  miopenStatusSuccess);
+        ASSERT_EQ(miopenSet4dTensorDescriptor(yDesc, miopenHalf, n, c, h, w), miopenStatusSuccess);
         x_bytes = 2 * 16 * 8 * 8 * sizeof(uint16_t);
         w_bytes = 32 * 16 * sizeof(uint16_t);
         y_bytes = static_cast<std::size_t>(n) * c * h * w * sizeof(uint16_t);
