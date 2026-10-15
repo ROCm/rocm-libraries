@@ -59,6 +59,8 @@ from .ir import (
     VectorType,
     _sync_attr,
     check_cluster_dims,
+    dpp_ctrl_attr,
+    dpp_xor_ctrl,
     require_streaming_arch,
     split_loc,
 )
@@ -959,6 +961,7 @@ _INTRINSIC_DECLS: Dict[str, str] = {
     "s.prefetch.inst.p4": (
         "declare void @llvm.amdgcn.s.prefetch.inst.p4(ptr addrspace(4), i32)"
     ),
+    "mfma.scale.f32.32x32x64.f8f6f4.v8i32.v8i32": "declare <16 x float> @llvm.amdgcn.mfma.scale.f32.32x32x64.f8f6f4.v8i32.v8i32(<8 x i32>, <8 x i32>, <16 x float>, i32 immarg, i32 immarg, i32 immarg, i32, i32 immarg, i32)",
     # gfx1250 data prefetch (llvm23). ``s.prefetch.data`` is overloaded by
     # address space exactly like ``s.prefetch.inst``; see
     # _S_PREFETCH_DATA_PTR_TYPES.
@@ -3658,6 +3661,29 @@ class _Lowerer:
             op, dtype="bf8", out_vec=16, intrinsic="32x32x16.bf8.bf8"
         )
 
+    def _emit_gfx950_scaled_mfma(self, op: Op) -> None:
+        from .arch.mfma_scale import (
+            gfx950_scaled_mfma,
+            scaled_mfma_error,
+            MATRIX_FORMATS,
+            INTRINSIC_KEY,
+        )
+
+        atom = gfx950_scaled_mfma(op.attrs["op_id"])
+        if self._backend.arch.gfx != "gfx950":
+            raise NotImplementedError("scaled MFMA requires gfx950")
+        error = scaled_mfma_error(atom.op_id, op.operands, op.results)
+        if error:
+            raise ValueError(error)
+        a, b, c, sa, sb = op.operands
+        self._need(INTRINSIC_KEY)
+        self._current().emit(
+            f"  {op.result.name} = call <16 x float> @llvm.amdgcn.{INTRINSIC_KEY}("
+            f"<8 x i32> {self._operand(a)}, <8 x i32> {self._operand(b)}, <16 x float> {self._operand(c)}, "
+            f"i32 {MATRIX_FORMATS[atom.a_dtype]}, i32 {MATRIX_FORMATS[atom.b_dtype]}, "
+            f"i32 0, i32 {self._operand(sa)}, i32 0, i32 {self._operand(sb)})"
+        )
+
     def _op_tile_mfma_scale_f32_16x16x128_f8f6f4(self, op: Op) -> None:
         """Lower P15 MX MFMA scaled intrinsic.
 
@@ -4154,20 +4180,23 @@ class _Lowerer:
         )
 
     def _op_tile_dpp_xor(self, op: Op) -> None:
-        """``v_mov_b32_dpp`` ``row_xmask`` XOR butterfly (VALU, not LDS).
+        """In-row XOR shuffle as one ``v_mov_b32_dpp`` (VALU, not LDS).
 
-        ``dpp_ctrl = 0x160 | mask`` is the AMDGPU ``DPP_ROW_XMASK``
-        encoding: within each 16-lane DPP row, lane ``L`` reads from lane
-        ``(L & 0xF) ^ mask``. ``row_mask``/``bank_mask`` are 0xF (all
-        rows/banks). ``bound_ctrl=true`` so every lane writes (the partner
-        is always in-row for mask 1..15, so no out-of-row fill happens).
-        Passing ``src`` as ``old`` makes single-use results fusable into
+        :func:`~rocke.core.ir.dpp_xor_ctrl` picks the DPP control word for
+        the target: ``0x160 | mask`` (``DPP_ROW_XMASK``) where ``row_xmask``
+        exists, else the base-DPP encoding of the mask on gfx9 CDNA
+        (``quad_perm`` / ``row_half_mirror`` / ``row_ror:8`` /
+        ``row_mirror``), and a ``ValueError`` for a mask with none. Within
+        each 16-lane DPP row, lane ``L`` reads from lane ``(L & 0xF) ^
+        mask``. ``row_mask``/``bank_mask`` are 0xF (all rows/banks).
+        ``bound_ctrl=true`` so every lane writes (the partner is always
+        in-row for mask 1..15, so no out-of-row fill happens). Passing
+        ``src`` as ``old`` makes single-use results fusable into
         ``v_max_f32_dpp`` / ``v_add_f32_dpp`` by the DPP-combine pass.
         """
+        dpp_ctrl = dpp_xor_ctrl(op, self._backend.arch)
         (data,) = op.operands
         self._need("update.dpp.i32")
-        mask = int(op.attrs["xor_mask"])
-        dpp_ctrl = 0x160 | (mask & 0xF)
         self._current().emit(
             f"  {op.result.name} = call i32 @llvm.amdgcn.update.dpp.i32("
             f"i32 {self._operand(data)}, i32 {self._operand(data)}, "
@@ -4182,12 +4211,15 @@ class _Lowerer:
         ``0..255`` is legal and anything outside it is malformed IR.
         Reject rather than mask: truncation would turn an out-of-range
         control into a different, silently valid permutation.
+        :func:`~rocke.core.ir.dpp_ctrl_attr` first rejects wrong arity,
+        non-i32 data or result, and a missing or non-``int`` ``ctrl``, so
+        nothing is coerced either.
         """
+        ctrl = dpp_ctrl_attr(op)
         (data,) = op.operands
-        self._need("update.dpp.i32")
-        ctrl = int(op.attrs["ctrl"])
         if not 0 <= ctrl <= 255:
             raise ValueError(f"tile.quad_perm: ctrl must be in 0..255, got {ctrl}")
+        self._need("update.dpp.i32")
         self._current().emit(
             f"  {op.result.name} = call i32 @llvm.amdgcn.update.dpp.i32("
             f"i32 {self._operand(data)}, i32 {self._operand(data)}, "

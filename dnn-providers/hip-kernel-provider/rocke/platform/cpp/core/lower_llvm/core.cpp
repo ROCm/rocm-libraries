@@ -1875,6 +1875,18 @@ void rocke_ll_finalize(rocke_lower_t* L, rocke_strbuf_t* out)
             any_need = true;
         }
     }
+    /* dict.update appends override-only keys after the base keys. */
+    for(int i = 0; i < novr; ++i)
+    {
+        bool in_base = false;
+        for(int j = 0; j < ROCKE_LL_INTRINSIC_DECLS_COUNT; ++j)
+            in_base |= strcmp(ovr[i].key, ROCKE_LL_INTRINSIC_DECLS[j].key) == 0;
+        if(!in_base && ll_need_has(L, ovr[i].key))
+        {
+            rocke_strbuf_appendf(out, "%s\n", ovr[i].decl);
+            any_need = true;
+        }
+    }
     /* Dynamic decls not in either static table. */
     for(size_t i = 0; i < L->dyn_decls.len; i++)
     {
