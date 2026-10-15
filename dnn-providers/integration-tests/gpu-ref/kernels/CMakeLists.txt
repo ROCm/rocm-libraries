@@ -3,6 +3,8 @@
 
 # Kernel files to embed as C++ string literals at build time.
 set(GPU_REF_KERNEL_FILES
+    ${CMAKE_CURRENT_SOURCE_DIR}/block-scale/GpuRefBlockScaleQuantize.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/block-scale/GpuRefBlockScaleDequantize.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/convolution/GpuRefConvFwd.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/convolution/GpuRefConvBwd.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/convolution/GpuRefConvWrw.cpp
@@ -31,6 +33,7 @@ set(GPU_REF_KERNEL_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/types/GpuRefResampleArgs.h
     ${CMAKE_CURRENT_SOURCE_DIR}/types/GpuRefRMSNormArgs.h
     ${CMAKE_CURRENT_SOURCE_DIR}/types/GpuRefBatchnormArgs.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/types/GpuRefBlockScaleArgs.h
     ${CMAKE_CURRENT_SOURCE_DIR}/types/GpuRefPointwiseArgs.h
     ${CMAKE_CURRENT_SOURCE_DIR}/types/GpuRefCommonArgs.h
     ${CMAKE_CURRENT_SOURCE_DIR}/types/GpuRefValidatorArgs.h

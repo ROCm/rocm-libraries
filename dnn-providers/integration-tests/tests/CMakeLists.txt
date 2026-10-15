@@ -36,6 +36,7 @@ add_executable(hipdnn_integration_tests_unit_tests
     TestTestSettings.cpp
     TestTomlGuards.cpp
     TestGpuReferenceGraphExecutor.cpp
+    TestGpuBlockScalePlan.cpp
     TestGpuBatchnormFwdTrainPlan.cpp
     TestGpuBatchnormFwdTrainSignatureKey.cpp
     TestGpuConvolutionFwdSignatureKey.cpp
@@ -123,6 +124,7 @@ add_unit_test_target(hipdnn_integration_tests_unit_tests ${CMAKE_CURRENT_BINARY_
 
 add_executable(hipdnn_gpu_ref_tests
     gpu-ref/main.cpp
+    gpu-ref/TestGpuFpReferenceBlockScale.cpp
     gpu-ref/TestGpuFpReferencePointwise.cpp
     gpu-ref/TestGpuFpReferenceConvolution.cpp
     gpu-ref/TestGpuFpReferenceSdpa.cpp
