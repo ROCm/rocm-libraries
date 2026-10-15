@@ -74,7 +74,8 @@ template <typename ALayout,
           typename ComputeTypeA                       = CDataType,
           typename ComputeTypeB                       = ComputeTypeA,
           typename LDSTypeA                           = ComputeTypeA,
-          typename LDSTypeB                           = ComputeTypeB>
+          typename LDSTypeB                           = ComputeTypeB,
+          bool RuntimeSwigluLimit                     = false>
 struct DeviceMoeGemm : public DeviceGemmMultipleDSplitKBPreShuffle<ALayout,
                                                                    BLayout,
                                                                    DsLayout,
@@ -165,7 +166,8 @@ struct DeviceMoeGemm : public DeviceGemmMultipleDSplitKBPreShuffle<ALayout,
                         ComputeTypeA,
                         ComputeTypeB,
                         LDSTypeA,
-                        LDSTypeB>;
+                        LDSTypeB,
+                        RuntimeSwigluLimit>;
     using GridwiseGemm64 = GridwiseGemmBase<decltype(WarpTileConfig64)>;
     using GridwiseGemm32 = GridwiseGemmBase<decltype(WarpTileConfig32)>;
 
@@ -501,7 +503,7 @@ struct DeviceMoeGemm : public DeviceGemmMultipleDSplitKBPreShuffle<ALayout,
                              AElementwiseOperation a_element_op,
                              BElementwiseOperation b_element_op,
                              CElementwiseOperation c_element_op,
-                             float swiglu_limit = NumericLimits<float>::Infinity())
+                             float swiglu_limit = 7.0f) // gpt-oss default
     {
         return Argument{static_cast<const index_t*>(p_sorted_token_ids),
                         static_cast<const index_t*>(p_sorted_expert_ids),
