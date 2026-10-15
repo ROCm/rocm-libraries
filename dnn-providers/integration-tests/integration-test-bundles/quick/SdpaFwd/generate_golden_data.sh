@@ -2,7 +2,9 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 #
-# Regenerates SDPA forward golden reference bundles for quick and standard tiers.
+# Regenerates SDPA forward golden reference bundles. The `quick`/`standard`
+# arguments select which group of bundles to generate; each bundle is written to
+# the coverage tier it lives in today (see resolve_tier_outdir).
 # Requires PyTorch with ROCm support.
 #
 # Usage:
@@ -36,10 +38,30 @@ SCALE_D192="$(python3 -c 'import math; print(repr(1.0 / math.sqrt(192)))')"
 # `-r` flag or workflow change. See ../../README.md ("DVC Remote Layout").
 DVC_REMOTE="golden-data"
 
+# Bundles are tiered by coverage (quick/standard/comprehensive/full), not by the
+# section of this script that generates them. Regenerate each bundle where it
+# lives today: swap the tier segment of "outdir" for the tier that already holds
+# "<outdir>/<name>". A bundle that exists in no tier keeps the tier given in
+# "outdir".
+resolve_tier_outdir() {
+    local outdir="$1"
+    local name="$2"
+    local rel="${outdir#"$GOLDEN_ROOT"/*/}"
+    local tier
+    for tier in quick standard comprehensive full; do
+        if [[ -d "$GOLDEN_ROOT/$tier/$rel/$name" ]]; then
+            echo "$GOLDEN_ROOT/$tier/$rel"
+            return
+        fi
+    done
+    echo "$outdir"
+}
+
 generate_bundle() {
     local outdir="$1"
     local name="$2"
     shift 2
+    outdir="$(resolve_tier_outdir "$outdir" "$name")"
     mkdir -p "$outdir/$name"
     python3 "$GENERATOR" --base-filename "$outdir/$name/$name" "$@"
 
