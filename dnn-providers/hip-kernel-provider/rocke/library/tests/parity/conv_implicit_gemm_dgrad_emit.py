@@ -934,6 +934,98 @@ def _spec(idx: int):
             "gfx950",
         )
 
+    # Configs 40-43: stride 1 builds its single tilde record from the
+    # kernargs (DgradConvSpec.folds_sub_gemm_record), at every dilation, pad,
+    # filter and grouping; configs 0, 4 and 21-24 fold too.
+    if idx == 40:
+        # Stride 1, dilation 2: folded record, tilde epilogue (a_embed = -dH).
+        p = _cp(N=4, Hi=20, Wi=20, C=64, K=64, Y=3, X=3, pH=2, pW=2, dH=2, dW=2)
+        return (
+            DgradConvSpec(
+                problem=p,
+                tile_m=64,
+                tile_n=64,
+                tile_k=64,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=16,
+                pipeline="mem",
+                epilogue="default",
+                uniform_k_decode=True,
+            ),
+            "gfx950",
+        )
+
+    if idx == 41:
+        # Grouped 5x5, pad 0 (Ho < Hi): the AOT shape of an entry --
+        # K-outer, uniform_k_decode, cshuffle, explicit widths.
+        p = _cp(N=2, Hi=24, Wi=20, C=128, K=256, Y=5, X=5, groups=2)
+        return (
+            DgradConvSpec(
+                problem=p,
+                tile_m=128,
+                tile_n=64,
+                tile_k=64,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=16,
+                pipeline="compv3",
+                epilogue="cshuffle",
+                lds_k_outer=True,
+                uniform_k_decode=True,
+                vector_size_a=8,
+                vector_size_b=8,
+                vector_size_c=8,
+            ),
+            "gfx950",
+        )
+
+    if idx == 42:
+        # Stride 1 split-K: the folded gemm_k_padded rounds dg_K up to
+        # tile_k * split_k in the kernel.
+        p = _cp(N=4, Hi=14, Wi=14, C=64, K=96, Y=3, X=3, pH=1, pW=1)
+        return (
+            DgradConvSpec(
+                problem=p,
+                tile_m=64,
+                tile_n=64,
+                tile_k=32,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=16,
+                pipeline="mem",
+                epilogue="cshuffle",
+                split_k=2,
+            ),
+            "gfx950",
+        )
+
+    if idx == 43:
+        # gfx942, grouped 1x3 filter with pad (0, 1).
+        p = _cp(N=2, Hi=12, Wi=16, C=64, K=128, Y=1, X=3, pH=0, pW=1, groups=4)
+        return (
+            DgradConvSpec(
+                problem=p,
+                tile_m=64,
+                tile_n=64,
+                tile_k=32,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=8,
+                pipeline="mem",
+                epilogue="default",
+            ),
+            "gfx942",
+        )
+
     raise SystemExit(f"unknown config index {idx}")
 
 

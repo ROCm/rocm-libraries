@@ -952,6 +952,29 @@ class DgradConvSpec:
         p = self.problem
         return p.sH != 1 or p.sW != 1 or p.dH != 1 or p.dW != 1
 
+    @property
+    def folds_sub_gemm_record(self) -> bool:
+        """True when the kernel builds its sub-GEMM record from kernargs.
+
+        At stride 1 the tilde decomposition is the identity in both spatial
+        axes (y_tilde = x_tilde = 1, whatever the dilation, pad, filter or
+        grouping), so there is exactly one sub-GEMM and every field of its
+        record is an existing kernarg or a constant:
+
+        ``[0, num_pid_m, num_pid_n, dg_M, dg_K, Hi, Wi, pH, pW, Y, X, -dH,
+        -dW, 1, 0, 1, 0, 1, 0, 1, 0, roundup(dg_K, tile_k*split_k)]``.
+
+        The kernel then skips the binary search over the record buffer and
+        the 21 record loads behind it, and the unit strides and zero offsets
+        fold into the address arithmetic. This keys on the stride alone: an
+        AOT binary carries it as its stride capability (the probe problem and
+        every problem the binary serves agree on it), never on a sub-GEMM
+        count evaluated on one problem. The ABI is unchanged; the record
+        buffer is still passed (its magic-division table is read).
+        """
+        p = self.problem
+        return p.sH == 1 and p.sW == 1
+
     def kernel_name(self) -> str:
         p = self.problem
         return kernel_name_join(
@@ -1686,7 +1709,8 @@ def _build_tilde_dgrad(
 
     A parameter buffer holds per-sub-GEMM constants. Each CTA binary-searches
     it to find its sub-GEMM, loads the record fields, and uses runtime
-    arithmetic for tensor offsets.
+    arithmetic for tensor offsets. At stride 1 the single record is rebuilt
+    from the kernargs instead (``DgradConvSpec.folds_sub_gemm_record``).
 
     For stride=1 (1 sub-GEMM, split_k=1): ``needs_atomic`` is False and the
     epilogue emits a direct buffer_store — equivalent to the old fast path.
@@ -1797,15 +1821,57 @@ def _build_tilde_dgrad(
     # Use a 1D grid: block_id_x covers all sub-GEMMs' tiles.
     flat_block_id = b.block_id_x()
 
-    # Binary search to find which sub-GEMM this CTA belongs to. The bound is
-    # the runtime kernarg; only the unroll depth is fixed at build time.
-    sg_idx = _emit_binary_search(
-        b, flat_block_id, sub_gemm_buf, num_sub_gemms_param, spec.max_sub_gemms
-    )
+    fold_record = spec.folds_sub_gemm_record
+    if fold_record:
+        # Stride 1 (DgradConvSpec.folds_sub_gemm_record): the only sub-GEMM's
+        # record is rebuilt from the kernargs, so there is nothing to search
+        # and nothing to load.
+        sg_idx = None
+        c0_rec = b.const_i32(0)
+        c1_rec = b.const_i32(1)
+        _rec_kernargs = {
+            0: c0_rec,  # block_start
+            1: p_num_pid_m,  # num_m_tiles
+            2: p_num_pid_n,  # num_n_tiles
+            3: p_dg_M,  # gemm_m = N*Hi*Wi
+            4: p_dg_K,  # gemm_k = Y*X*kpg
+            5: p_Hi,  # h_tilde_slice
+            6: p_Wi,  # w_tilde_slice
+            7: params["p_pH"],  # h_tilde_slice_begin
+            8: params["p_pW"],  # w_tilde_slice_begin
+            9: p_Y,  # y_dot_slice
+            10: p_X,  # x_dot_slice
+            13: c1_rec,  # b_y_stride
+            14: c0_rec,  # b_y_offset
+            15: c1_rec,  # b_x_stride
+            16: c0_rec,  # b_x_offset
+            17: c1_rec,  # d_h_stride
+            18: c0_rec,  # d_h_offset
+            19: c1_rec,  # d_w_stride
+            20: c0_rec,  # d_w_offset
+        }
 
-    # Load all record fields for this sub-GEMM.
-    def _ld(field_idx: int) -> Value:
-        return _emit_load_record_field(b, sub_gemm_buf, sg_idx, field_idx)
+        def _ld(field_idx: int) -> Value:
+            if field_idx == 11:  # a_embed_h_coeff = -dH
+                return b.sub(c0_rec, params["p_dH"])
+            if field_idx == 12:  # a_embed_w_coeff = -dW
+                return b.sub(c0_rec, params["p_dW"])
+            if field_idx == 21:  # gemm_k_padded: dg_K rounded to tile_k*split_k
+                c_kq = b.const_i32(spec.tile_k * spec.split_k)
+                c_kq1 = b.const_i32(spec.tile_k * spec.split_k - 1)
+                return b.mul(b.div(b.add(p_dg_K, c_kq1), c_kq), c_kq)
+            return _rec_kernargs[field_idx]
+
+    else:
+        # Binary search to find which sub-GEMM this CTA belongs to. The bound
+        # is the runtime kernarg; only the unroll depth is fixed at build time.
+        sg_idx = _emit_binary_search(
+            b, flat_block_id, sub_gemm_buf, num_sub_gemms_param, spec.max_sub_gemms
+        )
+
+        # Load all record fields for this sub-GEMM.
+        def _ld(field_idx: int) -> Value:
+            return _emit_load_record_field(b, sub_gemm_buf, sg_idx, field_idx)
 
     rec_block_start = _ld(0)
     rec_num_m_tiles = _ld(1)
@@ -1830,22 +1896,31 @@ def _build_tilde_dgrad(
     rec_d_w_offset = _ld(20)
 
     # Magic-division pairs of this record's divisors (see
-    # sub_gemm_magic_pairs); the table starts after the last record.
-    _magic_base = b.add(
-        b.mul(num_sub_gemms_param, b.const_i32(_RECORD_FIELDS)),
-        b.mul(sg_idx, b.const_i32(_MAGIC_FIELDS)),
-    )
+    # sub_gemm_magic_pairs); the table starts after the last record. With
+    # the folded record the table holds one entry, right after the one
+    # record, so its loads take constant offsets and depend on nothing.
+    if fold_record:
 
-    def _ld_magic(j: int) -> Value:
-        return b.global_load_i32(sub_gemm_buf, b.add(_magic_base, b.const_i32(j)))
+        def _ld_magic(j: int) -> Value:
+            return b.global_load_i32(sub_gemm_buf, b.const_i32(_RECORD_FIELDS + j))
+
+    else:
+        _magic_base = b.add(
+            b.mul(num_sub_gemms_param, b.const_i32(_RECORD_FIELDS)),
+            b.mul(sg_idx, b.const_i32(_MAGIC_FIELDS)),
+        )
+
+        def _ld_magic(j: int) -> Value:
+            return b.global_load_i32(sub_gemm_buf, b.add(_magic_base, b.const_i32(j)))
 
     rec_kpg_magic = (_ld_magic(0), _ld_magic(1))
     rec_xdot_magic = (_ld_magic(2), _ld_magic(3))
     rec_hw_magic = (_ld_magic(4), _ld_magic(5))
     rec_w_magic = (_ld_magic(6), _ld_magic(7))
 
-    # Compute local tile indices within this sub-GEMM.
-    local_flat = b.sub(flat_block_id, rec_block_start)
+    # Compute local tile indices within this sub-GEMM. The folded record's
+    # block_start is 0, so the subtraction is skipped.
+    local_flat = flat_block_id if fold_record else b.sub(flat_block_id, rec_block_start)
     local_m_tile = b.div(local_flat, rec_num_n_tiles)
     local_n_tile = b.mod(local_flat, rec_num_n_tiles)
 

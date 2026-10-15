@@ -1050,6 +1050,173 @@ def test_implicit_gemm_is_shape_invariant(label, build):
     assert len(fingerprints) == 1, f"{label}: emitted IR depends on the shape"
 
 
+@pytest.mark.parametrize("groups", [1, 2])
+def test_dgrad_stride1_is_shape_invariant(groups):
+    """A stride-1 dgrad binary rebuilds its sub-GEMM record from kernargs.
+
+    The stride is its capability; channels, filter and pad are runtime, so
+    the IR must not move with them -- the record fold may not read any of
+    them at build time. (A 1x1 ungrouped problem is left out: the pointwise
+    fast path is a JIT-only specialization the AOT grid never builds.)
+    """
+    shapes = [
+        (2, 14, 14, 64, 64, 3, 3, 1),
+        (1, 9, 23, 32 * groups, 96 * groups, 3, 3, 0),
+        (3, 17, 11, 128 * groups, 64 * groups, 5, 5, 2),
+        (2, 12, 16, 64 * groups, 64 * groups, 1, 3, 1),
+        (1, 31, 7, 96 * groups, 160 * groups, 7, 7, 3),
+    ]
+    fingerprints = set()
+    for N, Hi, Wi, C, K, Y, X, pad in shapes:
+        p = ConvProblem(
+            N=N, Hi=Hi, Wi=Wi, C=C, K=K, Y=Y, X=X, pH=pad, pW=pad, groups=groups
+        )
+        spec = DgradConvSpec(problem=p, data=_DATA, uniform_k_decode=True, **_TILE)
+        assert spec.folds_sub_gemm_record
+        fingerprints.add(
+            _op_signature(build_implicit_gemm_conv_dgrad(spec, arch=_ARCH))
+        )
+    assert len(fingerprints) == 1, "stride-1 dgrad IR depends on the shape"
+
+
+def _dgrad_kernarg_record(problem, tile_m, tile_n, tile_k, split_k):
+    """The stride-1 sub-GEMM record as the kernel rebuilds it from kernargs.
+
+    Mirrors the folded ``_ld`` of ``_build_tilde_dgrad`` field for field;
+    every value is read from the launch values the host passes.
+    """
+    names = [n for n, _ in conv_arg_names(direction="dgrad")]
+    values = ConvArgs.from_problem(
+        problem, direction="dgrad", tile_m=tile_m, tile_n=tile_n
+    ).to_launch_values(1, 2, 3, 4, 5, 6, sub_gemm_buf=7, num_sub_gemms=1)
+    v = dict(zip(names, values)) if isinstance(values, list) else dict(values)
+    kq = tile_k * split_k
+    return [
+        0,
+        v["p_num_pid_m"],
+        v["p_num_pid_n"],
+        v["p_dg_M"],
+        v["p_dg_K"],
+        v["p_Hi"],
+        v["p_Wi"],
+        v["p_pH"],
+        v["p_pW"],
+        v["p_Y"],
+        v["p_X"],
+        -v["p_dH"],
+        -v["p_dW"],
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        (v["p_dg_K"] + kq - 1) // kq * kq,
+    ]
+
+
+def test_dgrad_stride1_record_is_a_function_of_the_kernargs():
+    """The record-fold proof: at stride 1, at any dilation, pad, filter or
+    grouping, the tilde decomposition has exactly one sub-GEMM, and its packed
+    record equals the one the kernel rebuilds from the kernargs. The magic
+    table the folded kernel still reads sits right after that one record."""
+    import itertools
+
+    from kernels.common.conv_implicit_gemm_dgrad import (
+        _MAGIC_FIELDS,
+        _RECORD_FIELDS,
+        compute_tilde,
+        enumerate_sub_gemms,
+        pack_sub_gemm_buffer,
+        sub_gemm_magic_pairs,
+    )
+
+    checked = 0
+    for N, (Hi, Wi), (Y, X), dil, groups, (cpg, kpg) in itertools.product(
+        (1, 3),
+        ((1, 1), (5, 7), (16, 9)),
+        ((1, 1), (3, 3), (1, 5), (7, 3)),
+        (1, 2),
+        (1, 4),
+        ((8, 24), (64, 64)),
+    ):
+        for pH, pW in {(0, 0), ((Y - 1) * dil // 2, (X - 1) * dil // 2), (Y, X)}:
+            Ho = Hi + 2 * pH - dil * (Y - 1)
+            Wo = Wi + 2 * pW - dil * (X - 1)
+            if Ho <= 0 or Wo <= 0:
+                continue
+            p = ConvProblem(
+                N=N,
+                Hi=Hi,
+                Wi=Wi,
+                C=cpg * groups,
+                K=kpg * groups,
+                Y=Y,
+                X=X,
+                pH=pH,
+                pW=pW,
+                dH=dil,
+                dW=dil,
+                groups=groups,
+            )
+            for tm, tn, tk, sk in ((64, 64, 32, 1), (128, 32, 64, 2)):
+                subs = enumerate_sub_gemms(
+                    p, compute_tilde(p), tm, tn, tile_k=tk, split_k=sk
+                )
+                assert len(subs) == 1, p
+                buf = pack_sub_gemm_buffer(subs, tm, tn)
+                assert buf[:_RECORD_FIELDS] == _dgrad_kernarg_record(
+                    p, tm, tn, tk, sk
+                ), p
+                assert buf[
+                    _RECORD_FIELDS : _RECORD_FIELDS + _MAGIC_FIELDS
+                ] == sub_gemm_magic_pairs(subs[0])
+                assert len(buf) == _RECORD_FIELDS + _MAGIC_FIELDS
+                checked += 1
+    assert checked > 500
+
+
+def _count_ops(kernel, name):
+    n = 0
+
+    def walk(op):
+        nonlocal n
+        n += op.name == name
+        for region in op.regions or []:
+            for inner in region.ops:
+                walk(inner)
+
+    for op in kernel.body.ops:
+        walk(op)
+    return n
+
+
+def test_dgrad_stride1_reads_no_record_fields():
+    """At stride 1 the kernel reads only the record buffer's magic table
+    (eight loads at constant offsets); a strided kernel searches the table
+    and loads its record."""
+    from kernels.common.conv_implicit_gemm_dgrad import _MAGIC_FIELDS
+
+    def build(**kw):
+        shape = {"N": 1, "Hi": 16, "Wi": 16, "C": 128, "K": 128, "Y": 3, "X": 3}
+        shape.update(pH=1, pW=1)
+        p = ConvProblem(**{**shape, **kw})
+        spec = DgradConvSpec(problem=p, data=_DATA, uniform_k_decode=True, **_TILE)
+        return build_implicit_gemm_conv_dgrad(spec, arch=_ARCH)
+
+    loads = "memref.global_load_typed"
+    for kw in ({}, {"groups": 2}, {"dH": 2, "dW": 2, "pH": 2, "pW": 2}):
+        k = build(**kw)
+        assert _count_ops(k, loads) == _MAGIC_FIELDS, kw
+        assert _count_ops(k, "scf.for") == 2, kw  # the two K loops, no search
+    strided = build(sH=2, sW=2)
+    # The search's probe load, 21 record fields, the magic table.
+    assert _count_ops(strided, loads) == 1 + 21 + _MAGIC_FIELDS
+    assert _count_ops(strided, "scf.for") == 3
+
+
 # ---------------------------------------------------------------------
 # capability coverage: what the IR *does* depend on must be in the identity
 # ---------------------------------------------------------------------
