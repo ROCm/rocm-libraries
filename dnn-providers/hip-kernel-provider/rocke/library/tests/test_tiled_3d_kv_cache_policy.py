@@ -1,12 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""K/V cache policy of the gfx950 and gfx942 3D split-KV segment kernels.
-
-The dispatcher streams decode K/V (``kv_cache_policy="stream"``, the ``nt``
-bit) and leaves every other batch at the default caching. gfx942's wide K/V
-loader takes "all" or "stream". No GPU: the ISA tests use COMGR +
-``llvm-objdump`` and skip when either is missing.
-"""
+"""K/V cache policy (``kv_cache_policy``) of the gfx950 and gfx942 3D segment
+kernels."""
 
 from __future__ import annotations
 

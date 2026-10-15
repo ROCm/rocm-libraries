@@ -1,13 +1,6 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""gfx950 3D decode split rule: segment count and KV tile from CTAs per CU.
-
-Paged decode in the measured scope (``_gfx950_3d_decode_ctas_per_segment``)
-loads its page ids per wave and gets about 4 CTAs per CU with page-sized tiles,
-or 64-token tiles, 64 segments and swizzled K/V LDS when the device would stay
-underfilled; every other problem keeps the previous dispatch. CPU only: the GPU numerics of these specs
-are covered by ``test_tiled_3d_kv_lds_swizzle.py``.
-"""
+"""gfx950 3D decode split rule: segment count and KV tile."""
 
 from __future__ import annotations
 
@@ -96,7 +89,7 @@ def test_split(gfx950, num_seqs, num_kv_heads, max_seqlen_k, num_cus, tile, segm
         num_cus=num_cus,
     )
     assert au._gfx950_3d_tile_size_override(p) == tile
-    assert au._gfx950_3d_kv_lds_swizzle(p) is (tile is not None)
+    assert au._kv_lds_swizzle_3d(p, arch="gfx950") is (tile is not None)
     assert au._num_segments(p) == segments
     spec = bld._tiled_3d_spec_from_problem(p)
     assert spec.tile_size_override == tile

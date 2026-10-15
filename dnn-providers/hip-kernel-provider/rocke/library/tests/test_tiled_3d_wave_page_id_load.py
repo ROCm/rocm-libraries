@@ -1,14 +1,6 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Wave page-id load (``use_wave_page_id_load``) of the gfx950 3D segment kernel.
-
-The wave loads the segment's page ids 64 at a time, one per lane, and each tile
-reads its ids with v_readlane. The CPU tests check the spec contract and that
-both engines emit the same IR; the GPU test runs paged decode with reversed
-pages, ragged lengths, segments spanning several 64-page windows and table
-entries past each sequence's last page that point at an all-NaN page, against an
-FP32 reference, and skips without a gfx950 device.
-"""
+"""Wave page-id load (``use_wave_page_id_load``) of the gfx950 3D segment kernel."""
 
 from __future__ import annotations
 

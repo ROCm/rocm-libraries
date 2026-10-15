@@ -74,7 +74,7 @@ rocke_value_t* rocke_gfx942_attention_tiled_3d_strided_v_b_operand(
         rocke_value_t* elem;
         idx[0] = v_buf;
         idx[1] = v_row;
-        idx[2] = v_n_col;
+        idx[2] = rocke_gfx942_attention_tiled_3d_kv_col(ctx, v_row, v_n_col);
         loaded = rocke_b_smem_load_vN(b, ctx->V_lds, idx, 3, dtype, 1);
         elem = rocke_b_vec_extract(b, loaded, 0);
         bv = rocke_b_vec_insert(b, bv, elem, j);
@@ -312,7 +312,7 @@ void rocke_gfx942_attention_tiled_3d_emit_softmax_loop(
                 rocke_value_t* K_v;
                 idx[0] = cur_buf;
                 idx[1] = k_row;
-                idx[2] = kc_off;
+                idx[2] = rocke_gfx942_attention_tiled_3d_kv_col(ctx, k_row, kc_off);
                 K_v = rocke_b_smem_load_vN(b, ctx->K_lds, idx, 3, dtype, 4);
                 acc_v = rocke_mfma_16x16x16_for_dtype(b, dtype, K_v, Q_kits[k], acc_v);
             }

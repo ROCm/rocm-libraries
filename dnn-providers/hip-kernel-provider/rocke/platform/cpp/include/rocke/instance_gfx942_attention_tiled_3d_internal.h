@@ -141,6 +141,8 @@ typedef struct rocke_gfx942_attn_tiled_3d_config
     int fp8_chunks_per_thread; /* fp8_total_chunks // THREADS */
     bool WIDE_KV; /* use_wide_kv_load && !KV_FP8 && WIDE_OK */
     int KV_CACHE_BITS; /* cache_policy_from_name(spec.kv_cache_policy): the async K/V copies */
+    bool KV_SWZ; /* spec.use_kv_lds_swizzle                              */
+    int KV_CHUNKS_PER_ROW; /* HD / 8: 16-byte chunks per K/V LDS row        */
     bool KV_STREAM; /* kv_cache_policy == "stream": the wide K/V loads are non-temporal */
     bool DECODE_GRID; /* spec.use_decode_grid (seq_idx = block_id_x, no search) */
 
@@ -360,6 +362,11 @@ rocke_value_t* rocke_gfx942_attention_tiled_3d_mfma_16x16_c_row(
  * build the <4 x dtype> PV B-operand from 4 strided V_lds loads reproducing the
  * per-lane (row, col) a 16x16x16 transpose read would deliver. v_buf is the V
  * slot index Value (always 0: one V slot). Returns the packed vector. */
+/* _kv_col(row, col): LDS column of K/V element (row, col); its 16-byte chunk
+ * is permuted by the row under KV_SWZ (col itself otherwise). */
+rocke_value_t* rocke_gfx942_attention_tiled_3d_kv_col(
+    rocke_gfx942_attention_tiled_3d_build_ctx_t* ctx, rocke_value_t* row, rocke_value_t* col);
+
 rocke_value_t* rocke_gfx942_attention_tiled_3d_strided_v_b_operand(
     rocke_gfx942_attention_tiled_3d_build_ctx_t* ctx,
     int k_iter,

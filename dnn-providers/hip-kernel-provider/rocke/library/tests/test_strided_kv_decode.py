@@ -297,7 +297,11 @@ def test_strided_selection_uses_runtime_policy(arch, block_size, monkeypatch):
     monkeypatch.setattr(au, "_resolve_attention_arch", lambda: arch)
     paged = au._tiled_3d_spec_from_problem(problem)
     assert segment == replace(
-        paged, kv_layout="strided", use_wide_kv_load=False, use_i64_kv_addr=False
+        paged,
+        kv_layout="strided",
+        use_wide_kv_load=False,
+        use_i64_kv_addr=False,
+        use_kv_lds_swizzle=False,
     )
     explicit, explicit_reduce = au._strided_3d_specs_from_problem(
         replace(problem, waves_per_eu=3), arch=arch

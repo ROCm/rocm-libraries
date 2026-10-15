@@ -153,6 +153,12 @@ class UnifiedAttention3DTiledSpec:
     # non-temporal hint, so it takes "all" or "stream"; the fp8 K/V loader keeps
     # "all".
     kv_cache_policy: str = "all"
+    # K/V LDS tiles store each row's 16-byte chunks XOR-permuted by the row
+    # (chunk q of row r at q ^ (r % (head_size // 8))), which spreads the QK
+    # and PV reads over the LDS banks. The wide loader stores the permuted
+    # chunks, so the tiles stay unpadded. Paged fp16/bf16 K/V with the wide
+    # loader only.
+    use_kv_lds_swizzle: bool = False
 
     def __post_init__(self):
         if self.kv_layout not in ("paged", "strided"):
@@ -185,6 +191,12 @@ class UnifiedAttention3DTiledSpec:
             raise ValueError(
                 "the wide K/V loader takes kv_cache_policy 'all' or 'stream'"
             )
+        if self.use_kv_lds_swizzle and (
+            self.kv_layout != "paged" or self.kv_storage_dtype is not None
+        ):
+            raise ValueError("use_kv_lds_swizzle needs paged fp16/bf16 KV")
+        if self.use_kv_lds_swizzle and not self.use_wide_kv_load:
+            raise ValueError("use_kv_lds_swizzle needs the wide K/V loader")
 
     @property
     def num_queries_per_kv(self) -> int:
@@ -237,6 +249,7 @@ class UnifiedAttention3DTiledSpec:
             "wkv" if self.use_wide_kv_load else "",
             "dg" if self.use_decode_grid else "",
             f"kvcp{self.kv_cache_policy}" if self.kv_cache_policy != "all" else "",
+            "kvswz" if self.use_kv_lds_swizzle else "",
             "stridedkv" if self.kv_layout == "strided" else "",
         )
 
@@ -335,6 +348,8 @@ def build_unified_attention_3d_tiled(
     )
     KV_BYTES = 1 if KV_FP8 else 2
     kv_io_dtype = FP8E4M3 if KV_FP8 else dtype
+    KV_SWZ = spec.use_kv_lds_swizzle
+    KV_CHUNKS_PER_ROW = HD // 8  # 16-byte chunks per K/V LDS row
 
     # gfx942 narrow atom: K-step is 16 for both QK and PV (no wide-K atom).
     QK_K_STEP = 16
@@ -735,6 +750,16 @@ def build_unified_attention_3d_tiled(
     WIDE_OK = (T * HD) % (THREADS * WIDE_ELEMS) == 0
     wide_chunks_per_thread = (T * HD) // (THREADS * WIDE_ELEMS) if WIDE_OK else 0
 
+    def _kv_col(row: Value, col: Value) -> Value:
+        # LDS column of K/V element (row, col): its 16-byte chunk is permuted
+        # by the row under the swizzle.
+        if not KV_SWZ:
+            return col
+        chunk = b.xor(
+            b.div(col, b.const_i32(8)), b.mod(row, b.const_i32(KV_CHUNKS_PER_ROW))
+        )
+        return b.add(b.mul(chunk, b.const_i32(8)), b.mod(col, b.const_i32(8)))
+
     def _issue_wide_load(src, lds, kv_tile_idx: Value, buf_idx: Value) -> None:
         for call in range(wide_chunks_per_thread):
             chunk_id = b.add(b.mul(b.const_i32(call), b.const_i32(THREADS)), tid)
@@ -755,7 +780,7 @@ def build_unified_attention_3d_tiled(
                 align=16,
                 temporal_hint=KV_TEMPORAL_HINT,
             )
-            b.smem_store_vN(lds, [buf_idx, row, col], vec, WIDE_ELEMS)
+            b.smem_store_vN(lds, [buf_idx, row, _kv_col(row, col)], vec, WIDE_ELEMS)
 
     fp8_elems_per_chunk = 8
     fp8_total_chunks = (T * HD) // fp8_elems_per_chunk
@@ -878,7 +903,9 @@ def build_unified_attention_3d_tiled(
             for k in range(QK_K_ITERS):
                 kc_off = b.add(b.const_i32(k * 16), b.mul(lane_rg, b.const_i32(4)))
                 k_row = b.add(b.const_i32(n * 16), lane_col)
-                K_v = b.smem_load_vN(K_lds, cur_buf, k_row, kc_off, dtype=dtype, n=4)
+                K_v = b.smem_load_vN(
+                    K_lds, cur_buf, k_row, _kv_col(k_row, kc_off), dtype=dtype, n=4
+                )
                 acc_v = _mfma_16x16x16(b, dtype, K_v, Q_kits[k], acc_v)
             S_n.append(acc_v)
 
@@ -975,7 +1002,9 @@ def build_unified_attention_3d_tiled(
                 for j in range(4):
                     v_row = b.add(b.const_i32(kb * 16 + j), v_row_base)
                     elem = b.vec_extract(
-                        b.smem_load_vN(V_lds, v_buf, v_row, v_col, dtype=dtype, n=1),
+                        b.smem_load_vN(
+                            V_lds, v_buf, v_row, _kv_col(v_row, v_col), dtype=dtype, n=1
+                        ),
                         0,
                     )
                     A_v = b.vec_insert(A_v, elem, j)

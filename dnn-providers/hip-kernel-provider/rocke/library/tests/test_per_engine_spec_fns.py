@@ -64,10 +64,10 @@ from kernels.common.attention_unified import (
     _gfx942_flash_use_single_buffer,
     _gfx942_flash_wide_setting,
     _gfx942_3d_tile_size_override,
-    _gfx950_3d_kv_lds_swizzle,
     _gfx950_3d_tile_size_override,
     _gfx950_3d_wave_page_id_load,
     _kv_cache_policy_3d,
+    _kv_lds_swizzle_3d,
     _kv_storage_dtype,
     _num_segments,
     _select_2d_block_m_per_warp,
@@ -559,15 +559,15 @@ def _reference_generic_3d(problem):
         use_i64_kv_addr=_enable_i64_kv_addr(problem),
         use_decode_grid=_use_decode_grid(problem),
         **(
-            {"kv_cache_policy": _kv_cache_policy_3d(problem)}
+            {
+                "kv_cache_policy": _kv_cache_policy_3d(problem),
+                "use_kv_lds_swizzle": _kv_lds_swizzle_3d(problem),
+            }
             if arch in ("gfx942", "gfx950")
             else {}
         ),
         **(
-            {
-                "use_kv_lds_swizzle": _gfx950_3d_kv_lds_swizzle(problem),
-                "use_wave_page_id_load": _gfx950_3d_wave_page_id_load(problem),
-            }
+            {"use_wave_page_id_load": _gfx950_3d_wave_page_id_load(problem)}
             if arch == "gfx950"
             else {}
         ),

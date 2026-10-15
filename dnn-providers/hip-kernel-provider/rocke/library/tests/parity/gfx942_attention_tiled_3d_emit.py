@@ -153,6 +153,38 @@ _CONFIGS = {
         use_decode_grid=True,
         kv_cache_policy="nt",
     ),
+    10: dict(
+        # Decode K/V streamed through the wide loader into swizzled LDS tiles.
+        head_size=128,
+        block_size=16,
+        num_query_heads=64,
+        num_kv_heads=8,
+        dtype="bf16",
+        num_segments=16,
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        kv_storage_dtype=None,
+        use_wide_kv_load=True,
+        use_decode_grid=True,
+        kv_cache_policy="stream",
+        use_kv_lds_swizzle=True,
+    ),
+    11: dict(
+        # Swizzled LDS tiles at head size 64, with sinks and softcap.
+        head_size=64,
+        block_size=32,
+        num_query_heads=16,
+        num_kv_heads=4,
+        dtype="fp16",
+        num_segments=8,
+        use_sinks=True,
+        sliding_window=0,
+        has_softcap=True,
+        kv_storage_dtype=None,
+        use_wide_kv_load=True,
+        use_kv_lds_swizzle=True,
+    ),
 }
 
 

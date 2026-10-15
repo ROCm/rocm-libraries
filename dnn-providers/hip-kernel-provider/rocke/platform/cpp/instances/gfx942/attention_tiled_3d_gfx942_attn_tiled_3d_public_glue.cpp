@@ -184,10 +184,14 @@ bool rocke_unified_attention_3d_tiled_spec_validate(
             b, ROCKE_ERR_VALUE, "the wide K/V loader takes kv_cache_policy 'all' or 'stream'");
         return false;
     }
-    if(s->use_kv_lds_swizzle)
+    if(s->use_kv_lds_swizzle && s->kv_storage_dtype != NULL)
     {
-        rocke_i_set_err(
-            b, ROCKE_ERR_VALUE, "gfx942 3D does not implement the use_kv_lds_swizzle knob");
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "use_kv_lds_swizzle needs paged fp16/bf16 KV");
+        return false;
+    }
+    if(s->use_kv_lds_swizzle && !s->use_wide_kv_load)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "use_kv_lds_swizzle needs the wide K/V loader");
         return false;
     }
     if(s->use_wave_page_id_load)
@@ -352,6 +356,10 @@ int rocke_unified_attention_3d_tiled_spec_kernel_name(
     {
         snprintf(kvcp_part, sizeof(kvcp_part), "kvcp%s", s->kv_cache_policy);
         parts[np++] = kvcp_part;
+    }
+    if(s->use_kv_lds_swizzle)
+    {
+        parts[np++] = "kvswz";
     }
 
     /* kernel_name_join takes prefix + parts; we pass everything as parts with a
@@ -731,6 +739,8 @@ bool rocke_gfx942_attn_tiled_3d_config_from_spec(
         out->KV_CACHE_BITS = (int)bits;
         out->KV_STREAM = bits == ROCKE_CACHE_STREAM;
     }
+    out->KV_SWZ = spec->use_kv_lds_swizzle;
+    out->KV_CHUNKS_PER_ROW = out->HD / 8;
 
     /* Q -> LDS feed (lines 438-439). */
     out->Q_VECS_PER_ROW = out->HD / 8;
@@ -937,6 +947,11 @@ static rocke_kernel_def_t* build_segment_gfx942(rocke_ir_builder_t* b,
                 b,
                 ROCKE_ERR_VALUE,
                 "strided KV requires fp16/bf16 async loads without paged i64 addressing");
+            return NULL;
+        }
+        if(strided_kv && spec->use_kv_lds_swizzle)
+        {
+            rocke_i_set_err(b, ROCKE_ERR_VALUE, "use_kv_lds_swizzle needs paged fp16/bf16 KV");
             return NULL;
         }
 

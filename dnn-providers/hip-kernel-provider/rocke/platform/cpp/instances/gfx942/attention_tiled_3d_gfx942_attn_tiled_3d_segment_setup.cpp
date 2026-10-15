@@ -784,6 +784,28 @@ void rocke_gfx942_attention_tiled_3d_issue_v_load(rocke_gfx942_attention_tiled_3
     }
 }
 
+/* _kv_col(row, col): LDS column of K/V element (row, col); its 16-byte chunk
+ * is permuted by the row under the swizzle. */
+rocke_value_t* rocke_gfx942_attention_tiled_3d_kv_col(
+    rocke_gfx942_attention_tiled_3d_build_ctx_t* ctx, rocke_value_t* row, rocke_value_t* col)
+{
+    rocke_value_t* col_chunk;
+    rocke_value_t* row_ph;
+    rocke_value_t* chunk;
+    rocke_value_t* chunk_col;
+    rocke_value_t* in_chunk;
+    if(!CFG.KV_SWZ)
+    {
+        return col;
+    }
+    col_chunk = rocke_b_div(B, col, rocke_b_const_i32(B, 8));
+    row_ph = rocke_b_mod(B, row, rocke_b_const_i32(B, CFG.KV_CHUNKS_PER_ROW));
+    chunk = rocke_b_xor(B, col_chunk, row_ph);
+    chunk_col = rocke_b_mul(B, chunk, rocke_b_const_i32(B, 8));
+    in_chunk = rocke_b_mod(B, col, rocke_b_const_i32(B, 8));
+    return rocke_b_add(B, chunk_col, in_chunk);
+}
+
 /* _issue_wide_load(src, lds, kv_tile_idx, buf_idx) -- lines 645-658.
  * is_value: false => (key, K_lds), true => (value, V_lds). */
 void rocke_gfx942_attention_tiled_3d_issue_wide_load(
@@ -820,7 +842,8 @@ void rocke_gfx942_attention_tiled_3d_issue_wide_load(
             opts.temporal_hint = ROCKE_TEMPORAL_STREAMING;
         }
         vec = rocke_b_global_load_vN_ex(B, src, elem_off, dtype, WIDE_ELEMS, 16, &opts);
-        rocke_value_t* idxs[3] = {buf_idx, row, col};
+        rocke_value_t* idxs[3]
+            = {buf_idx, row, rocke_gfx942_attention_tiled_3d_kv_col(ctx, row, col)};
         rocke_b_smem_store_vN(B, lds, idxs, 3, vec, WIDE_ELEMS);
     }
 }

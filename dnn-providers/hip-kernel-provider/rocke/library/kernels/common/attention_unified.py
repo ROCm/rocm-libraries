@@ -3158,13 +3158,23 @@ def _gfx950_3d_wave_page_id_load(
     return _gfx950_3d_decode_ctas_per_segment(problem, arch=arch) is not None
 
 
-def _gfx950_3d_kv_lds_swizzle(
+def _kv_lds_swizzle_3d(
     problem: UnifiedAttentionProblem, *, arch: str | None = None
 ) -> bool:
-    """gfx950 3D ``use_kv_lds_swizzle``: on with multi-page KV tiles
-    (``_gfx950_3d_tile_size_override``). With page-sized tiles it measured
-    neutral."""
-    return _gfx950_3d_tile_size_override(problem, arch=arch) is not None
+    """3D ``use_kv_lds_swizzle``. gfx950: on with multi-page KV tiles
+    (``_gfx950_3d_tile_size_override``); with page-sized tiles it measured
+    neutral. gfx942: on for all-decode head size 128 on the wide K/V loader
+    (``_enable_gfx942_3d_wide_kv_load``)."""
+    arch = arch or _resolve_attention_arch()
+    if arch == "gfx950":
+        return _gfx950_3d_tile_size_override(problem, arch=arch) is not None
+    if arch == "gfx942":
+        return (
+            problem.all_decode
+            and problem.head_size == 128
+            and _enable_gfx942_3d_wide_kv_load(problem)
+        )
+    return False
 
 
 def _num_q_blocks(
@@ -3467,7 +3477,7 @@ def _tiled_3d_cache_key(problem: UnifiedAttentionProblem) -> Tuple:
         _use_decode_grid(problem),
         _kv_cache_policy_3d(problem),
         _gfx950_3d_tile_size_override(problem),
-        _gfx950_3d_kv_lds_swizzle(problem),
+        _kv_lds_swizzle_3d(problem),
         _gfx950_3d_wave_page_id_load(problem),
     )
     if _resolve_attention_arch() == "gfx1250":
