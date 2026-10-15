@@ -339,9 +339,20 @@ def _check_support_predicate(module, builder, spec_obj, arch):
 
     Only spec-first predicates can be called generically (see
     `_PREDICATE_ALIASES`); a builder with no resolvable predicate is unvalidated.
-    A predicate raising AttributeError or TypeError has no verdict (it could not
-    read the spec, or it has a bug), so the pack fails and names where it raised;
-    any other exception is ignored.
+
+    Exception policy:
+      - If the spec does not have an attribute the predicate needs
+        (AttributeError) or the predicate's own body raises TypeError while
+        reading the spec, the pack fails: the predicate cannot judge the spec.
+      - If the CALL itself fails because the argument list does not match the
+        predicate's signature (TypeError at bind time, before the body runs),
+        the pack also fails: this is a packer bug that must be surfaced.
+      - Any other exception from the predicate body is ignored: the predicate
+        is a pre-flight check, and the builder itself remains the real gate.
+
+    To distinguish "bad call" from "bad body", we bind the arguments first with
+    inspect.Signature.bind; only if binding succeeds do we invoke the predicate
+    and catch body-level AttributeError/TypeError.
     """
     name, predicate = _resolve_support_predicate(module, builder)
     if predicate is None:
@@ -349,6 +360,19 @@ def _check_support_predicate(module, builder, spec_obj, arch):
 
     params = inspect.signature(predicate).parameters
     kwargs = {"arch": arch} if "arch" in params else {}
+
+    # Phase 1: argument binding.  A TypeError here means the call is wrong
+    # (e.g. positional-only arch passed as keyword), not that the spec is bad.
+    try:
+        inspect.signature(predicate).bind(spec_obj, **kwargs)
+    except TypeError as exc:
+        raise HkpPackError(
+            f"support predicate {name} for builder '{builder}' @ {arch} "
+            f"could not be called with the given spec: {exc}"
+        ) from exc
+
+    # Phase 2: invocation.  AttributeError/TypeError from the body means the
+    # predicate cannot read a field off the spec and therefore has no verdict.
     try:
         verdict = predicate(spec_obj, **kwargs)
     except (AttributeError, TypeError) as exc:

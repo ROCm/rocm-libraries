@@ -235,6 +235,23 @@ def test_predicate_that_cannot_read_the_spec_fails_the_pack():
 
 
 @pytest.mark.quick
+def test_predicate_with_positional_only_arch_fails_with_call_error():
+    """A predicate whose arch parameter is positional-only triggers a TypeError
+    at bind time, not inside the body.  The error must surface as a pack failure
+    with a 'could not be called' message (not 'could not read the spec')."""
+
+    # positional-only arch: the packer always passes arch as a keyword
+    def is_valid_spec(spec: _Spec, arch: str = "gfx942", /):
+        return True, ""
+
+    with pytest.raises(HkpPackError, match="could not be called") as exc:
+        _check_support_predicate(
+            _Mod(is_valid_spec=is_valid_spec), "build_x", _Spec(n=1), "gfx942"
+        )
+    assert "is_valid_spec" in str(exc.value)
+
+
+@pytest.mark.quick
 def test_reduce_tiled_builder_has_no_predicate():
     # The reduce spec lacks the fields supports_tiled_3d_spec reads.
     def supports_tiled_3d_spec(spec: _Spec, *, arch="gfx942"):
