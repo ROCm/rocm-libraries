@@ -47,6 +47,7 @@ API = "https://api.github.com"
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
 PASS, FAIL, SKIP = "pass", "fail", "skip"
 STRIP = []  # --strip: substrings removed from test names in the email
+TEST_JOB = "Test job"  # the --steps entry for the job itself
 
 
 # ---------------------------------------------------------------- parsing
@@ -65,7 +66,9 @@ def parse_gtest(pattern, why):
         for line in lines:
             if m := re.match(r"^\[ RUN      \] (\S+)", line):
                 running = m.group(1)
-            elif line.startswith("Aborting tests due to an alarm timeout"):
+            elif line.startswith(
+                "Aborting tests due to an alarm timeout"
+            ):  # test client
                 alarm = True
             elif m := re.match(r"^\[==========\] (\d+) tests? from .* ran", line):
                 total += int(m.group(1))
@@ -247,7 +250,7 @@ _SETUP_STEP = re.compile(
 def this_job_steps(repo, run_id, token, runner, status):
     """'Test job=STATUS, <step>=<conclusion>, ...': the finished steps of the job
     running on RUNNER (the report's own job)."""
-    out = [f"Test job={status}"]
+    out = [f"{TEST_JOB}={status}"]
     try:
         jobs = json.load(
             _api(f"{API}/repos/{repo}/actions/runs/{run_id}/jobs?per_page=100", token)
@@ -397,13 +400,13 @@ def build(results, steps, previous, cfg):
     cur = suites(results, cfg.suites, why)
 
     step_list = [tuple(x.strip().split("=", 1)) for x in steps.split(",") if "=" in x]
-    # A skipped step is fine, a skipped test job isn't. "Test job=failure" only repeats
+    # A skipped step is fine, a skipped test job isn't. A failed test job only repeats
     # what the failing steps or tests already say.
     bad_steps = [
         (n, o)
         for n, o in step_list
-        if (o not in ("success", "skipped") or (n == "Test job" and o == "skipped"))
-        and not (n == "Test job" and o == "failure" and len(step_list) > 1)
+        if (o not in ("success", "skipped") or (n == TEST_JOB and o == "skipped"))
+        and not (n == TEST_JOB and o == "failure" and len(step_list) > 1)
     ]
     failed = sum((c or {}).get("Failed", 0) for c, _ in cur.values())
     # Every --suite is expected in a nightly: one that didn't run fails the report.
@@ -420,10 +423,10 @@ def build(results, steps, previous, cfg):
                 diff[k] = compare(cur[k][1], old[k][1])
     new_total = sum(len(d["New"]) for d in diff.values())
     # For flows that route by kind of failure.
-    failed_step = next((n for n, o in bad_steps if n != "Test job"), None)
+    failed_step = next((n for n, o in bad_steps if n != TEST_JOB), None)
     if ok:
         outcome = "passed"
-    elif ("Test job", "cancelled") in step_list:
+    elif (TEST_JOB, "cancelled") in step_list:
         outcome = "cancelled"
     elif why:
         outcome = "tests_incomplete"  # a test timed out or crashed
@@ -762,7 +765,7 @@ def main():
             env.get("GITHUB_REPOSITORY"),
             env.get("GITHUB_RUN_ID"),
             env.get("GH_TOKEN"),
-            env.get("TEST_RUNNER_NAME"),
+            env.get("TEST_RUNNER_NAME") or env.get("RUNNER_NAME"),
             args.job_status,
         )
     report = build(args.results, args.steps, previous, args)
