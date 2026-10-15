@@ -131,6 +131,17 @@ REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
         "seqlen_q",
     ),
     "kernels.common.sparse_attention.VsaSparseSpec": ("common", "seqlen_k", "seqlen_q"),
+    # The lightning indexer's problem shape: how many query rows, how many keys,
+    # and how many index heads. These size the grid and the score matrix, so a
+    # descriptor cannot omit them. `index_head_dim` and everything else default.
+    # `IndexerTileSpec` (the nested `tile` struct) demands nothing -- every knob
+    # carries a default.
+    "kernels.common.lightning_indexer.IndexerSpec": (
+        "n_index_heads",
+        "seqlen_k",
+        "seqlen_q",
+    ),
+    "kernels.common.lightning_indexer.IndexerTileSpec": (),
     "kernels.gfx1151.wmma_fmha_fwd.WmmaFmhaFwdSpec": ("head_size",),
     "kernels.gfx1250.attention_tiled_2d.UnifiedAttention2DTiledSpec": (
         "block_size",
