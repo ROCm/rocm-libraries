@@ -534,8 +534,6 @@ inline void resize_mirror_normalize_f32_f32_host_impl(Rpp32f* srcPtrImage, RpptD
                 compute_bilinear_interpolation_3c_avx(pSrc, pBilinearCoeffs,
                                                       pDst);  // Compute Bilinear interpolation
                 compute_rmn_24_host(pDst, pRMNParams);
-                // Boundary checks for f32
-                rpp_pixel_check_0to1(pDst, 3);
                 rpp_simd_store(rpp_store24_f32pln3_to_f32pln3_avx, dstPtrTempR, dstPtrTempG,
                                dstPtrTempB, pDst);  // Store dst pixels
                 dstPtrTempR += vectorIncrementPerChannel;
@@ -553,9 +551,9 @@ inline void resize_mirror_normalize_f32_f32_host_impl(Rpp32f* srcPtrImage, RpptD
                 compute_bilinear_interpolation_3c_pkd(
                     srcRowPtrsForInterp, srcLocationColumn, maxWidthLimit, bilinearCoeffs,
                     dstPtrTempR, dstPtrTempG, dstPtrTempB);  // Compute Bilinear interpolation
-                *dstPtrTempR = RPPPIXELCHECKF32((*dstPtrTempR - mean[0]) * invStdDev[0]);
-                *dstPtrTempG = RPPPIXELCHECKF32((*dstPtrTempG - mean[1]) * invStdDev[1]);
-                *dstPtrTempB = RPPPIXELCHECKF32((*dstPtrTempB - mean[2]) * invStdDev[2]);
+                *dstPtrTempR = (*dstPtrTempR - mean[0]) * invStdDev[0];
+                *dstPtrTempG = (*dstPtrTempG - mean[1]) * invStdDev[1];
+                *dstPtrTempB = (*dstPtrTempB - mean[2]) * invStdDev[2];
                 dstPtrTempR++;
                 dstPtrTempG++;
                 dstPtrTempB++;
@@ -615,8 +613,6 @@ inline void resize_mirror_normalize_f32_f32_host_impl(Rpp32f* srcPtrImage, RpptD
                 compute_bilinear_interpolation_3c_avx(pSrc, pBilinearCoeffs,
                                                       pDst);  // Compute Bilinear interpolation
                 compute_rmn_24_host(pDst, pRMNParams);
-                // Boundary checks for f32
-                rpp_pixel_check_0to1(pDst, 3);
                 rpp_simd_store(rpp_store24_f32pln3_to_f32pkd3_avx, dstPtrTemp,
                                pDst);  // Store dst pixels
                 dstPtrTemp += vectorIncrementPkd;
@@ -633,9 +629,9 @@ inline void resize_mirror_normalize_f32_f32_host_impl(Rpp32f* srcPtrImage, RpptD
                     srcRowPtrsForInterp, srcLocationColumn, maxWidthLimit, bilinearCoeffs,
                     &dstPtrTemp[0], &dstPtrTemp[1],
                     &dstPtrTemp[2]);  // Compute Bilinear interpolation
-                dstPtrTemp[0] = RPPPIXELCHECKF32((dstPtrTemp[0] - mean[0]) * invStdDev[0]);
-                dstPtrTemp[1] = RPPPIXELCHECKF32((dstPtrTemp[1] - mean[1]) * invStdDev[1]);
-                dstPtrTemp[2] = RPPPIXELCHECKF32((dstPtrTemp[2] - mean[2]) * invStdDev[2]);
+                dstPtrTemp[0] = (dstPtrTemp[0] - mean[0]) * invStdDev[0];
+                dstPtrTemp[1] = (dstPtrTemp[1] - mean[1]) * invStdDev[1];
+                dstPtrTemp[2] = (dstPtrTemp[2] - mean[2]) * invStdDev[2];
                 dstPtrTemp += dstDescPtr->c;
             }
         }
@@ -686,8 +682,6 @@ inline void resize_mirror_normalize_f32_f32_host_impl(Rpp32f* srcPtrImage, RpptD
                 compute_bilinear_interpolation_3c_avx(pSrc, pBilinearCoeffs,
                                                       pDst);  // Compute Bilinear interpolation
                 compute_rmn_24_host(pDst, pRMNParams);
-                // Boundary checks for f32
-                rpp_pixel_check_0to1(pDst, 3);
                 rpp_simd_store(rpp_store24_f32pln3_to_f32pkd3_avx, dstPtrTemp,
                                pDst);  // Store dst pixels
                 dstPtrTemp += vectorIncrementPkd;
@@ -704,9 +698,9 @@ inline void resize_mirror_normalize_f32_f32_host_impl(Rpp32f* srcPtrImage, RpptD
                     srcRowPtrsForInterp, srcLocationColumn, maxWidthLimit, bilinearCoeffs,
                     &dstPtrTemp[0], &dstPtrTemp[1],
                     &dstPtrTemp[2]);  // Compute Bilinear interpolation
-                dstPtrTemp[0] = RPPPIXELCHECKF32((dstPtrTemp[0] - mean[0]) * invStdDev[0]);
-                dstPtrTemp[1] = RPPPIXELCHECKF32((dstPtrTemp[1] - mean[1]) * invStdDev[1]);
-                dstPtrTemp[2] = RPPPIXELCHECKF32((dstPtrTemp[2] - mean[2]) * invStdDev[2]);
+                dstPtrTemp[0] = (dstPtrTemp[0] - mean[0]) * invStdDev[0];
+                dstPtrTemp[1] = (dstPtrTemp[1] - mean[1]) * invStdDev[1];
+                dstPtrTemp[2] = (dstPtrTemp[2] - mean[2]) * invStdDev[2];
                 dstPtrTemp += dstDescPtr->c;
             }
         }
@@ -763,8 +757,6 @@ inline void resize_mirror_normalize_f32_f32_host_impl(Rpp32f* srcPtrImage, RpptD
                     compute_bilinear_interpolation_1c_avx(pSrc, pBilinearCoeffs,
                                                           pDst);  // Compute Bilinear interpolation
                     compute_rmn_8_host(&pDst, &pRMNParams[2 * c]);
-                    // Boundary checks for f32
-                    rpp_pixel_check_0to1(&pDst, 1);
                     rpp_simd_store(rpp_store8_f32pln1_to_f32pln1_avx, dstPtrTempChn,
                                    pDst);  // Store dst pixels
                     dstPtrTempChn += dstDescPtr->strides.cStride;
@@ -786,7 +778,7 @@ inline void resize_mirror_normalize_f32_f32_host_impl(Rpp32f* srcPtrImage, RpptD
                         &srcRowPtrsForInterp[c * INTERP_BILINEAR_KERNEL_SIZE], srcLocationColumn,
                         maxWidthLimit, bilinearCoeffs,
                         dstPtrTempChn);  // Compute Bilinear interpolation
-                    *dstPtrTempChn = RPPPIXELCHECKF32((*dstPtrTempChn - mean[c]) * invStdDev[c]);
+                    *dstPtrTempChn = (*dstPtrTempChn - mean[c]) * invStdDev[c];
                     dstPtrTempChn += dstDescPtr->strides.cStride;
                 }
                 dstPtrTemp++;
@@ -943,12 +935,9 @@ inline void resize_mirror_normalize_f16_f16_host_impl(Rpp16f* srcPtrImage, RpptD
                 compute_bilinear_interpolation_3c_pkd(
                     srcRowPtrsForInterp, srcLocationColumn, maxWidthLimit, bilinearCoeffs,
                     dstPtrTempR, dstPtrTempG, dstPtrTempB);  // Compute Bilinear interpolation
-                *dstPtrTempR =
-                    (Rpp16f)RPPPIXELCHECKF32((Rpp32f)(*dstPtrTempR - mean[0]) * invStdDev[0]);
-                *dstPtrTempG =
-                    (Rpp16f)RPPPIXELCHECKF32((Rpp32f)(*dstPtrTempG - mean[1]) * invStdDev[1]);
-                *dstPtrTempB =
-                    (Rpp16f)RPPPIXELCHECKF32((Rpp32f)(*dstPtrTempB - mean[2]) * invStdDev[2]);
+                *dstPtrTempR = (Rpp16f)((Rpp32f)(*dstPtrTempR - mean[0]) * invStdDev[0]);
+                *dstPtrTempG = (Rpp16f)((Rpp32f)(*dstPtrTempG - mean[1]) * invStdDev[1]);
+                *dstPtrTempB = (Rpp16f)((Rpp32f)(*dstPtrTempB - mean[2]) * invStdDev[2]);
                 dstPtrTempR++;
                 dstPtrTempG++;
                 dstPtrTempB++;
@@ -1025,12 +1014,9 @@ inline void resize_mirror_normalize_f16_f16_host_impl(Rpp16f* srcPtrImage, RpptD
                     srcRowPtrsForInterp, srcLocationColumn, maxWidthLimit, bilinearCoeffs,
                     &dstPtrTemp[0], &dstPtrTemp[1],
                     &dstPtrTemp[2]);  // Compute Bilinear interpolation
-                dstPtrTemp[0] =
-                    (Rpp16f)RPPPIXELCHECKF32((Rpp32f)(dstPtrTemp[0] - mean[0]) * invStdDev[0]);
-                dstPtrTemp[1] =
-                    (Rpp16f)RPPPIXELCHECKF32((Rpp32f)(dstPtrTemp[1] - mean[1]) * invStdDev[1]);
-                dstPtrTemp[2] =
-                    (Rpp16f)RPPPIXELCHECKF32((Rpp32f)(dstPtrTemp[2] - mean[2]) * invStdDev[2]);
+                dstPtrTemp[0] = (Rpp16f)((Rpp32f)(dstPtrTemp[0] - mean[0]) * invStdDev[0]);
+                dstPtrTemp[1] = (Rpp16f)((Rpp32f)(dstPtrTemp[1] - mean[1]) * invStdDev[1]);
+                dstPtrTemp[2] = (Rpp16f)((Rpp32f)(dstPtrTemp[2] - mean[2]) * invStdDev[2]);
                 dstPtrTemp += dstDescPtr->c;
             }
         }
@@ -1098,12 +1084,9 @@ inline void resize_mirror_normalize_f16_f16_host_impl(Rpp16f* srcPtrImage, RpptD
                     srcRowPtrsForInterp, srcLocationColumn, maxWidthLimit, bilinearCoeffs,
                     &dstPtrTemp[0], &dstPtrTemp[1],
                     &dstPtrTemp[2]);  // Compute Bilinear interpolation
-                dstPtrTemp[0] =
-                    (Rpp16f)RPPPIXELCHECKF32((Rpp32f)(dstPtrTemp[0] - mean[0]) * invStdDev[0]);
-                dstPtrTemp[1] =
-                    (Rpp16f)RPPPIXELCHECKF32((Rpp32f)(dstPtrTemp[1] - mean[1]) * invStdDev[1]);
-                dstPtrTemp[2] =
-                    (Rpp16f)RPPPIXELCHECKF32((Rpp32f)(dstPtrTemp[2] - mean[2]) * invStdDev[2]);
+                dstPtrTemp[0] = (Rpp16f)((Rpp32f)(dstPtrTemp[0] - mean[0]) * invStdDev[0]);
+                dstPtrTemp[1] = (Rpp16f)((Rpp32f)(dstPtrTemp[1] - mean[1]) * invStdDev[1]);
+                dstPtrTemp[2] = (Rpp16f)((Rpp32f)(dstPtrTemp[2] - mean[2]) * invStdDev[2]);
                 dstPtrTemp += dstDescPtr->c;
             }
         }
@@ -1182,8 +1165,7 @@ inline void resize_mirror_normalize_f16_f16_host_impl(Rpp16f* srcPtrImage, RpptD
                         &srcRowPtrsForInterp[c * INTERP_BILINEAR_KERNEL_SIZE], srcLocationColumn,
                         maxWidthLimit, bilinearCoeffs,
                         dstPtrTempChn);  // Compute Bilinear interpolation
-                    *dstPtrTempChn =
-                        (Rpp16f)RPPPIXELCHECKF32((Rpp32f)(*dstPtrTempChn - mean[c]) * invStdDev[c]);
+                    *dstPtrTempChn = (Rpp16f)((Rpp32f)(*dstPtrTempChn - mean[c]) * invStdDev[c]);
                     dstPtrTempChn += dstDescPtr->strides.cStride;
                 }
                 dstPtrTemp++;
