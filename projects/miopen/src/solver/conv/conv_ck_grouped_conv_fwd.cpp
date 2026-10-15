@@ -48,7 +48,7 @@ bool IsGenericId(const std::string& id) { return id == generic_lds_id || id == g
 bool IsGenericArch(const std::string& arch)
 {
     // Measured on gfx950 only.
-    return arch == "gfx950" || arch.rfind("gfx950:", 0) == 0;
+    return arch == "gfx950" || arch.starts_with("gfx950:");
 }
 
 struct GenericDepthwiseConfig

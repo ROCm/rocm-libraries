@@ -56,10 +56,14 @@ __device__ inline void dw_store(unsigned short* op, int ow, int wo, const float 
     if(ow + DW_VO <= wo && addr % (2 * DW_VO) == 0)
     {
         typedef unsigned short vec_t __attribute__((ext_vector_type(DW_VO)));
+        // cppcheck does not model ext_vector_type: it treats t as a scalar and misses that every
+        // lane is written before the store.
         vec_t t;
 #pragma unroll
         for(int v = 0; v < DW_VO; ++v)
+            // cppcheck-suppress legacyUninitvar
             t[v] = bits[v];
+        // cppcheck-suppress uninitvar
         *reinterpret_cast<vec_t*>(op) = t;
     }
     else if(DW_VO % 2 == 0 && ow + DW_VO <= wo && addr % 4 == 0)
@@ -69,6 +73,7 @@ __device__ inline void dw_store(unsigned short* op, int ow, int wo, const float 
         for(int v = 0; v + 1 < DW_VO; v += 2)
         {
             vec2_t t;
+            // cppcheck-suppress uninitvar
             t[0]                               = bits[v];
             t[1]                               = bits[v + 1];
             *reinterpret_cast<vec2_t*>(op + v) = t;
