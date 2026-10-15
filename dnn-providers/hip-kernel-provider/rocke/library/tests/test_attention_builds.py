@@ -2341,7 +2341,6 @@ class TestAttentionHelpers(unittest.TestCase):
         # The gfx942-only 3D knobs are inert on gfx950 (ignored-field contract).
         with _patch_resolved_arch("gfx950"):
             self.assertIsNone(au._gfx942_3d_tile_size_override(p))
-            self.assertFalse(au._enable_gfx942_3d_invariant_hoist(p))
             self.assertFalse(au._enable_gfx942_3d_wide_kv_load(p))
 
     def test_gfx942_3d_wide_kv_load_up_to_head_size_128(self):

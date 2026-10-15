@@ -311,32 +311,6 @@ def test_strided_selection_uses_runtime_policy(arch, block_size, monkeypatch):
 
 
 @pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
-def test_strided_selection_ignores_hoist_environment(arch, monkeypatch):
-    from dispatch.attention import dispatch_attention
-    from dispatch.attention.common import _problem
-    from kernels.common import attention_unified as au
-
-    req = _strided_request(arch)
-    problem = _problem(req)
-    monkeypatch.delenv("HIPDNN_GFX942_3D_HOIST", raising=False)
-    expected = dispatch_attention(req).spec
-    for value in ("0", "1"):
-        monkeypatch.setenv("HIPDNN_GFX942_3D_HOIST", value)
-        selected = dispatch_attention(req).spec
-        assert selected == expected
-        assert not selected.kernel_spec.use_invariant_hoist
-        assert au._strided_3d_specs_from_problem(problem, arch=arch) == (
-            expected.kernel_spec,
-            expected.reduce_spec,
-        )
-    # Explicit tuning retains the existing knob.
-    explicit = replace(
-        expected, kernel_spec=replace(expected.kernel_spec, use_invariant_hoist=True)
-    )
-    au._validate_strided_3d_spec(problem, explicit)
-
-
-@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
 def test_strided_spec_policy_rejects_conflicting_clamp_arch(arch):
     from dispatch.attention.common import _problem
     from kernels.common import attention_unified as au

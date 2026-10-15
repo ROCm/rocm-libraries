@@ -3033,17 +3033,6 @@ def _select_3d_waves_per_eu(
     return None
 
 
-def _enable_gfx942_3d_invariant_hoist(
-    problem: UnifiedAttentionProblem, *, arch: str | None = None
-) -> bool:
-    if arch is None:
-        arch = _resolve_attention_arch()
-    if arch != "gfx942":
-        return False
-    env = __import__("os").environ.get("HIPDNN_GFX942_3D_HOIST", "").strip().lower()
-    return env in ("1", "on", "enable", "enabled", "yes", "true")
-
-
 def _enable_gfx942_3d_wide_kv_load(problem: UnifiedAttentionProblem) -> bool:
     """Wide 128-bit direct global->register->LDS KV feed for the 3D decode
     segment kernel (instead of the gfx942 1-DWORD async DMA). fp16/bf16, head
@@ -3410,7 +3399,6 @@ def _strided_3d_specs_from_problem(problem: UnifiedAttentionProblem, *, arch: st
         num_seqs=problem.num_seqs,
         waves_per_eu=waves,
         tile_size_override=_gfx942_3d_tile_size_override(problem, arch=arch),
-        use_invariant_hoist=False,
         kv_layout="strided",
         use_decode_grid=_use_decode_grid(problem, arch=arch),
         **(
@@ -3485,7 +3473,6 @@ def _tiled_3d_cache_key(problem: UnifiedAttentionProblem) -> Tuple:
         _num_segments(problem),
         _gfx942_3d_tile_size_override(problem),
         _select_3d_waves_per_eu(problem),
-        _enable_gfx942_3d_invariant_hoist(problem),
         _enable_gfx942_3d_wide_kv_load(problem),
         _kv_storage_dtype(problem),
         _enable_i64_kv_addr(problem),

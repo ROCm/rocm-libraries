@@ -103,6 +103,9 @@ _GEOMETRY_FIELDS = frozenset(
     }
 )
 
+# Inert 3D spec fields, kept so saved specs that set them still load.
+_INERT_3D_FIELDS = frozenset({"use_invariant_hoist"})
+
 
 class TestTuningSpace(unittest.TestCase):
     def test_every_kernel_tuning_field_is_swept(self):
@@ -132,6 +135,7 @@ class TestTuningSpace(unittest.TestCase):
                         - swept
                         - codepath
                         - KNOWN_WRONG_KNOBS[arch]
+                        - (_INERT_3D_FIELDS if path == "3d" else frozenset())
                     )
                     self.assertFalse(missing, sorted(missing))
 

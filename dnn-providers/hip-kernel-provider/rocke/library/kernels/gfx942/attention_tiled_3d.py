@@ -118,7 +118,7 @@ class UnifiedAttention3DTiledSpec:
     kv_storage_dtype: Optional[str] = None
     tile_size_override: Optional[int] = None
     # Inert: the kernel computes the query-row invariants once per lane before
-    # the KV loop (S^T layout). Kept for the kernel name and tuning ids.
+    # the KV loop (S^T layout). Kept so saved specs that set it still load.
     use_invariant_hoist: bool = False
     # Wide KV feed: replace the gfx942 1-DWORD (4-byte) async buffer_load_lds DMA
     # with wide 128-bit (8-half) synchronous global->register->LDS loads (the same
@@ -251,7 +251,6 @@ class UnifiedAttention3DTiledSpec:
             "softcap" if self.has_softcap else "",
             "alibi" if self.use_alibi else "",
             "qqb" if self.use_qq_bias else "",
-            "hoist" if self.use_invariant_hoist else "",
             "wkv" if self.use_wide_kv_load else "",
             "dg" if self.use_decode_grid else "",
             f"kvcp{self.kv_cache_policy}" if self.kv_cache_policy != "all" else "",

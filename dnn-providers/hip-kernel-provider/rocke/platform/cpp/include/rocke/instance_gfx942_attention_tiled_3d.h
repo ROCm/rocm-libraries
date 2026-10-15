@@ -153,7 +153,7 @@ typedef struct rocke_unified_attention_3d_tiled_spec
     bool has_tile_size_override; /* Optional[int] None */
     int tile_size_override;
 
-    bool use_invariant_hoist; /* False */
+    bool use_invariant_hoist; /* False; inert, kept so saved specs still load */
     bool use_wide_kv_load; /* False */
     /* 64-bit paged-KV addressing for caches > 2 GiB (gfx950 segment kernel folds
      * the per-block byte base into a 64-bit buffer base). Kept byte-identical

@@ -76,7 +76,7 @@ All remaining shapes.  Key knob decisions:
   `use_dtla_prefetch`, `use_ds_tr_reads`, `use_fused_reduce`, `use_dpp_softmax`, …).
 * **gfx942 / gfx950 (default)**: `_num_segments`, `_select_3d_waves_per_eu`,
   `_kv_storage_dtype`, `_gfx942_3d_tile_size_override`,
-  `_enable_gfx942_3d_invariant_hoist`, `_enable_gfx942_3d_wide_kv_load`,
+  `_enable_gfx942_3d_wide_kv_load`,
   `_enable_i64_kv_addr`.
 
 ### Knob reference

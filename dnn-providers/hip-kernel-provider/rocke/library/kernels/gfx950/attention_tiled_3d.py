@@ -147,13 +147,10 @@ class UnifiedAttention3DTiledSpec:
     # where the override must divide ``block_size``, gfx950 only accepts
     # multiples.
     tile_size_override: Optional[int] = None
-    # ``use_invariant_hoist`` / ``use_wide_kv_load`` are accepted for
-    # signature parity with the shared dispatch spec builder
-    # (``_tiled_3d_spec_from_problem``) and the gfx942 spec. They select
-    # gfx942 narrow-atom 3D optimizations; the corresponding ``_gfx942_3d_*``
-    # helpers return False on gfx950, so the gfx950 segment kernel does not
-    # key on them.
+    # Inert on both arches; kept so saved specs that set it still load.
     use_invariant_hoist: bool = False
+    # Inert: selects a gfx942 K/V loader. Accepted for signature parity with
+    # the gfx942 spec.
     use_wide_kv_load: bool = False
     # 64-bit paged-KV addressing. When the paged K/V cache exceeds the ~2 GiB
     # i32 buffer-voffset cap, the per-block byte offset

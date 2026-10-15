@@ -270,7 +270,7 @@ int rocke_unified_attention_3d_tiled_spec_kernel_name(
      *   else "", "sinks" if use_sinks else "",
      *   "sw<sw>" if sw>0 else "", "softcap" if has_softcap else "",
      *   "alibi" if use_alibi else "", "qqb" if use_qq_bias else "",
-     *   "hoist" if use_invariant_hoist else "", "wkv" if use_wide_kv_load else "",
+     *   "wkv" if use_wide_kv_load else "",
      *   "dg" if use_decode_grid else "",
      *   "kvcp<policy>" if kv_cache_policy != "all" else "")
      *
@@ -333,10 +333,6 @@ int rocke_unified_attention_3d_tiled_spec_kernel_name(
     if(s->use_qq_bias)
     {
         parts[np++] = "qqb";
-    }
-    if(s->use_invariant_hoist)
-    {
-        parts[np++] = "hoist";
     }
     if(s->use_wide_kv_load)
     {
