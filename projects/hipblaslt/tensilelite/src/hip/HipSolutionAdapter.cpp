@@ -317,11 +317,14 @@ namespace TensileLite
                 return v;
             }
 
-            // hipModuleLoad can crash inside the runtime on a code object
-            // whose contents run past the end of the file (a truncated copy),
-            // so those are rejected before it sees them. The ELF, offload
-            // bundle and compressed offload bundle layouts are checked; any
-            // other file is left for hipModuleLoad to judge.
+            // hipModuleLoad crashes inside the runtime (ROCm 7.2) on a code
+            // object whose contents run past the end of the file, as a copy
+            // cut short leaves it, so those are rejected before it sees them.
+            // This can go once hipModuleLoad returns an error for such files.
+            // Only the headers of the ELF, offload bundle and compressed
+            // offload bundle layouts are read; any other file is left for
+            // hipModuleLoad to judge. It catches a damaged file, not one
+            // replaced between this check and the load.
             bool codeObjectFitsInFile(std::string const& path)
             {
                 std::ifstream file(path, std::ios::binary);
@@ -423,12 +426,30 @@ namespace TensileLite
 
         bool SolutionAdapter::isLocalCodeObject(std::string const& codeObjectFile)
         {
+            // Runs on every launch, so it avoids building a path where the
+            // first character decides.
+#ifdef _WIN32
             return !codeObjectFile.empty() && std::filesystem::path(codeObjectFile).is_absolute();
+#else
+            return !codeObjectFile.empty() && codeObjectFile.front() == '/';
+#endif
         }
 
         hipError_t SolutionAdapter::loadLocalCodeObject(std::string const& path)
         {
-            std::lock_guard<std::mutex> loadGuard(m_localLoadMutex);
+            // Loads of one path are serialized so it is loaded once; loads of
+            // different paths do not wait for each other.
+            std::shared_ptr<std::mutex> pathMutex;
+            {
+                std::lock_guard<std::mutex> guard(m_access);
+                if(m_localModules.count(path) != 0)
+                    return hipSuccess;
+                auto& slot = m_localLoadMutexes[path];
+                if(!slot)
+                    slot = std::make_shared<std::mutex>();
+                pathMutex = slot;
+            }
+            std::lock_guard<std::mutex> loadGuard(*pathMutex);
             {
                 std::lock_guard<std::mutex> guard(m_access);
                 if(m_localModules.count(path) != 0)
