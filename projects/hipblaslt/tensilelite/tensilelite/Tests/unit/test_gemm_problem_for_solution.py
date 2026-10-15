@@ -12,7 +12,11 @@ from itertools import product
 import msgpack
 import pytest
 import yaml
-from tensilelite.Utilities.regular_gemm import bench_yaml, load_library_metadata
+from tensilelite.Utilities.gemm_problem_bench import UnsupportedBenchProblem, bench_yaml
+from tensilelite.Utilities.gemm_problem_for_solution import (
+    UnsupportedSolution,
+    load_library_metadata,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -116,12 +120,18 @@ def test_formats_selection_and_identity(tmp_path, library_format, compressed):
         ("depthU", True),
     ],
 )
-def test_rejects_unsupported_scheduling_and_invalid_dimensions(tmp_path, key, value):
+def test_unsupported_scheduling_is_distinct_from_invalid_metadata(tmp_path, key, value):
     record = solution()
     record["sizeMapping"][key] = value
     write_shard(tmp_path, [record])
-    with pytest.raises(ValueError):
-        load_library_metadata(tmp_path, target="gfx942").get_problem(17)
+    if key in {"tileProcessingStrategy", "adaptiveGemmGSUA"} or value == -1:
+        with pytest.raises(UnsupportedSolution) as caught:
+            load_library_metadata(tmp_path, target="gfx942").get_problem(17)
+        assert caught.value.solution_index == 17
+        assert caught.value.reasons
+    else:
+        with pytest.raises(ValueError):
+            load_library_metadata(tmp_path, target="gfx942").get_problem(17)
 
 
 @pytest.mark.parametrize(
@@ -133,16 +143,16 @@ def test_rejects_unsupported_scheduling_and_invalid_dimensions(tmp_path, key, va
         ("useE", True),
         ("activationType", "Gelu"),
         ("operationIdentifier", "another contraction"),
-        ("aType", "Float4"),
-        ("computeType", "Double"),
     ],
 )
 def test_rejects_unsupported_problem_features(tmp_path, key, value):
     record = solution()
     record["problemType"][key] = value
     write_shard(tmp_path, [record])
-    with pytest.raises(ValueError):
+    with pytest.raises(UnsupportedSolution) as caught:
         load_library_metadata(tmp_path, target="gfx942").get_problem(17)
+    assert caught.value.solution_index == 17
+    assert caught.value.reasons
 
 
 def test_compressed_precedence_missing_and_duplicate_indices(tmp_path):
@@ -201,7 +211,8 @@ class Guard(importlib.abc.MetaPathFinder):
         if fullname.startswith(('rocisa', 'tensilelite.Common', 'tensilelite.SolutionStructs')):
             raise AssertionError(fullname)
 sys.meta_path.insert(0, Guard())
-from tensilelite.Utilities.regular_gemm import bench_yaml, load_library_metadata
+from tensilelite.Utilities.gemm_problem_bench import UnsupportedBenchProblem, bench_yaml
+from tensilelite.Utilities.gemm_problem_for_solution import UnsupportedSolution, load_library_metadata
 p = load_library_metadata(sys.argv[1], target='gfx942').get_problem(17)
 assert (p.m, p.n, p.k) == (128, 96, 256)
 assert 'solution_index: 17' in bench_yaml([p])
@@ -211,3 +222,132 @@ assert 'solution_index: 17' in bench_yaml([p])
         check=True,
         env={**os.environ, "PYTHONPATH": os.pathsep.join(sys.path)},
     )
+
+
+@pytest.mark.parametrize("blocks", [1, 3, 8, 17])
+def test_reduction_work_is_configurable(tmp_path, blocks):
+    write_shard(tmp_path, [solution(split=4)])
+    library = load_library_metadata(tmp_path, target="gfx942")
+    assert library.get_problem(17, reduction_blocks=blocks).k == blocks * 32 * 4
+
+
+@pytest.mark.parametrize("blocks", [0, -1, True, 8.0])
+def test_invalid_reduction_blocks_are_errors(tmp_path, blocks):
+    write_shard(tmp_path, [solution()])
+    with pytest.raises(ValueError, match="reduction_blocks"):
+        load_library_metadata(tmp_path, target="gfx942").get_problem(17, reduction_blocks=blocks)
+
+
+@pytest.mark.parametrize("target", ["gfx90a", "gfx942", "gfx950", "gfx1250-strict"])
+@pytest.mark.parametrize(
+    "dtype,bench_name,compute_name",
+    [
+        ("Double", "f64_r", "c_f64_r"),
+        ("ComplexFloat", "f32_c", "c_f32_r"),
+        ("ComplexDouble", "f64_c", "c_f64_r"),
+    ],
+)
+def test_ordinary_types_and_architectures(tmp_path, target, dtype, bench_name, compute_name):
+    record = solution()
+    record["problemType"].update({f"{key}Type": dtype for key in "abcd"})
+    record["problemType"]["computeType"] = dtype
+    write_shard(tmp_path, [record], f"TensileLibrary_test_{target}.dat")
+    problem = load_library_metadata(tmp_path, target=target).get_problem(17)
+    assert problem.a_type == problem.compute_type == dtype
+    (row,) = yaml.safe_load(bench_yaml([problem]))
+    assert row["a_type"] == row["d_type"] == row["scale_type"] == bench_name
+    assert row["compute_type"] == compute_name
+    # Bench derives non-FP32 compute input types from its compute enum.
+    assert "compute_input_typeA" not in row
+
+
+@pytest.mark.parametrize("dtype", ["Int64", "Int8x4", "Half"])
+def test_descriptor_support_is_independent_of_bench_adapter(tmp_path, dtype):
+    record = solution()
+    record["problemType"].update(aType=dtype, bType=dtype, computeType=dtype)
+    write_shard(tmp_path, [record])
+    problem = load_library_metadata(tmp_path, target="gfx942").get_problem(17)
+    assert problem.a_type == dtype
+    with pytest.raises(UnsupportedBenchProblem) as caught:
+        bench_yaml([problem])
+    assert caught.value.solution_index == 17
+
+
+@pytest.mark.parametrize(
+    "dtype,bench_name", [("Float4", "f4_r"), ("Float6", "f6_r"), ("BFloat6", "bf6_r")]
+)
+def test_non_mx_packed_types_are_preserved(tmp_path, dtype, bench_name):
+    record = solution()
+    record["problemType"].update(aType=dtype, bType=dtype)
+    write_shard(tmp_path, [record])
+    problem = load_library_metadata(tmp_path, target="gfx942").get_problem(17)
+    (row,) = yaml.safe_load(bench_yaml([problem]))
+    assert row["a_type"] == row["compute_input_typeA"] == bench_name
+
+
+def test_complex_conjugate_transpose(tmp_path):
+    record = solution(trans_a=True)
+    record["problemType"].update({f"{key}Type": "ComplexFloat" for key in "abcd"})
+    record["problemType"].update(
+        computeType="ComplexFloat", operationIdentifier="Contraction_l_AlikC_Bljk_Cijk_Dijk"
+    )
+    write_shard(tmp_path, [record])
+    problem = load_library_metadata(tmp_path, target="gfx942").get_problem(17)
+    assert problem.conjugate_a and problem.trans_a
+    (row,) = yaml.safe_load(bench_yaml([problem]))
+    assert row["transA"] == "C"
+
+
+def test_sweep_can_continue_only_for_explicit_unsupported_cases(tmp_path):
+    unsupported = solution(9)
+    unsupported["problemType"].update(mxBlockA=32, useE=True)
+    write_shard(tmp_path, [unsupported, solution(17)])
+    library = load_library_metadata(tmp_path, target="gfx942")
+    executed, gaps = [], {}
+    for index in library.indices:
+        try:
+            executed.append(library.get_problem(index))
+        except UnsupportedSolution as error:
+            gaps[error.solution_index] = error.reasons
+    assert [p.solution_index for p in executed] == [17]
+    assert set(gaps[9]) == {"mxBlockA", "useE"}
+    # A broken record must escape the sweep's UnsupportedSolution handler.
+    broken = solution(0)
+    del broken["sizeMapping"]["depthU"]
+    write_shard(tmp_path, [broken])
+    with pytest.raises(KeyError, match="depthU"):
+        load_library_metadata(tmp_path, target="gfx942").get_problem(0)
+
+
+def test_unknown_metadata_type_is_an_error(tmp_path):
+    record = solution()
+    record["problemType"]["aType"] = "typo"
+    write_shard(tmp_path, [record])
+    with pytest.raises(ValueError, match="unknown metadata datatype"):
+        load_library_metadata(tmp_path, target="gfx942").get_problem(17)
+
+
+@pytest.mark.parametrize("per_operand", [False, True])
+@pytest.mark.parametrize(
+    "pair,a_type,b_type",
+    [
+        ("Float8BFloat8", "Float8", "BFloat8"),
+        ("BFloat8Float8", "BFloat8", "Float8"),
+        ("Float8BFloat8_fnuz", "Float8_fnuz", "BFloat8_fnuz"),
+        ("BFloat8Float8_fnuz", "BFloat8_fnuz", "Float8_fnuz"),
+    ],
+)
+def test_mixed_fp8_compute_inputs(tmp_path, per_operand, pair, a_type, b_type):
+    record = solution()
+    problem_type = record["problemType"]
+    problem_type.update(aType=a_type, bType=b_type)
+    if per_operand:
+        problem_type.update(computeInputTypeA=pair, computeInputTypeB=pair)
+    else:
+        problem_type["computeInputType"] = pair
+    write_shard(tmp_path, [record])
+    problem = load_library_metadata(tmp_path, target="gfx942").get_problem(17)
+    assert (problem.compute_input_a, problem.compute_input_b) == (a_type, b_type)
+    (row,) = yaml.safe_load(bench_yaml([problem]))
+    assert row["compute_input_typeA"] == row["a_type"]
+    assert row["compute_input_typeB"] == row["b_type"]

@@ -30,7 +30,7 @@ These utilities are pytest-independent and can be used from standalone scripts.
 import os
 import tarfile
 import warnings
-
+from pathlib import PurePosixPath
 
 _TESTS_ROOT_DIR = os.path.dirname(os.path.dirname(__file__))
 
@@ -51,26 +51,34 @@ def _is_use_cache_file(relpath):
     """Return True if relpath (relative to output_dir) is needed for --use-cache.
 
     Whitelist:
+    - library/** (.co, .hsaco, .dat, .dat.zlib, .yaml), from TensileCreateLibrary
     - caches/<hash>/cache.yaml
     - caches/<hash>/source/library/* (.co, .hsaco, .yaml)
     - Data/*.yaml
 
     Everything else is build-only intermediate output.
     """
-    parts = relpath.replace(os.sep, "/").split("/")
+    # os.walk produces native paths. Accept either separator in portable artifacts.
+    path = PurePosixPath(relpath.replace("\\", "/"))
+    if path.is_absolute() or ".." in path.parts:
+        return False
+    parts = path.parts
+    if not parts:
+        return False
 
     # TensileCreateLibrary writes the runnable library directly under output/.
     if len(parts) >= 2 and parts[0] == "library":
-        return parts[-1].endswith((".co", ".hsaco", ".dat", ".dat.zlib", ".yaml"))
+        return path.suffix in {".co", ".hsaco", ".dat", ".yaml"} or path.suffixes[-2:] == [
+            ".dat",
+            ".zlib",
+        ]
 
     if parts[-1] == "cache.yaml" and "caches" in parts:
         return True
 
     try:
         source_idx = parts.index("source")
-        if (source_idx + 1 < len(parts)
-                and parts[source_idx + 1] == "library"
-                and "caches" in parts):
+        if source_idx + 1 < len(parts) and parts[source_idx + 1] == "library" and "caches" in parts:
             return True
     except ValueError:
         pass
@@ -137,11 +145,9 @@ def _safe_extractall(tar, dest):
         for member in tar.getmembers():
             member_path = os.path.realpath(os.path.join(dest, member.name))
             if not member_path.startswith(dest_real + os.sep) and member_path != dest_real:
-                raise ValueError(
-                    f"Path traversal detected in tar member: {member.name}")
+                raise ValueError(f"Path traversal detected in tar member: {member.name}")
             if member.issym() or member.islnk():
-                raise ValueError(
-                    f"Symlinks/hardlinks not permitted in artifacts: {member.name}")
+                raise ValueError(f"Symlinks/hardlinks not permitted in artifacts: {member.name}")
             validated_members.append(member)
         tar.extractall(path=dest, members=validated_members)
 
@@ -156,14 +162,14 @@ def extract_artifact(artifact_path, dest_dir):
         actual = os.listdir(parent)
         raise FileNotFoundError(
             f"Expected directory '{os.path.basename(dest_dir)}' after "
-            f"extracting '{artifact_path}', but found: {actual}")
+            f"extracting '{artifact_path}', but found: {actual}"
+        )
 
     for dirpath, _, filenames in os.walk(dest_dir):
         for f in filenames:
             relpath = os.path.relpath(os.path.join(dirpath, f), dest_dir)
             if not _is_use_cache_file(relpath):
-                raise ValueError(
-                    f"Unexpected file in artifact '{artifact_path}': {relpath}")
+                raise ValueError(f"Unexpected file in artifact '{artifact_path}': {relpath}")
 
     code_object_exts = (".co", ".hsaco")
     has_code_objects = any(
