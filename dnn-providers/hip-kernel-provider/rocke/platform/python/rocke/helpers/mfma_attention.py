@@ -286,6 +286,7 @@ def mfma_attention_fwd_inner_body(
     use_async_kv: bool = False,
     codebook_ptr: Optional[Value] = None,
     wmma_v_lds_stage: bool = False,
+    epilogue_fn: Callable[..., None] | None = None,
     arch: str = "gfx950",
     mask_neg_inf: Optional[Value] = None,
     wmma_seqlen_q: Optional[Value] = None,
@@ -349,6 +350,15 @@ def mfma_attention_fwd_inner_body(
     ``(b, score_log2, k_tile_idx, row_in_atom, query_pos, key_pos) -> score_log2``
     after QK scaling and before masks. The positions are the same coordinates
     used by masking; existing per-tile scale callbacks can ignore them.
+
+    ``epilogue_fn``: callback ``(b, *, m_log2, l, row, row_valid)``
+    invoked once per accumulator row slot after O is stored, with the
+    row's final running max (log2 domain) and softmax denominator, and
+    the O row index ``row`` (the same row the O store addressed). Every
+    lane of a row holds the same ``m_log2`` and ``l``. ``row_valid`` is
+    the i1 row bound the O store uses when the body has one (the wave32
+    body with ``query_length``), else ``None``: the body writes every row
+    of its tile. Used to store the log-sum-exp; ``None`` emits no extra IR.
 
     ``extra_mask_predicate``: callback ``(b, k_tile_idx) -> i1``
     returning a per-K-tile keep flag. When false, the whole K-tile
@@ -518,6 +528,7 @@ def mfma_attention_fwd_inner_body(
             k_block_iter_fn=k_block_iter_fn,
             v_scale=v_scale,
             v_lds_stage=wmma_v_lds_stage,
+            epilogue_fn=epilogue_fn,
             arch=arch,
             target=target,
             mask_neg_inf=mask_neg_inf,
@@ -896,9 +907,9 @@ def mfma_attention_fwd_inner_body(
 
     # ---- Pull final state ----
     final = kloop.results
-    # ``ms_final`` is the per-lane row-max; the scaled-acc / l_final pair
-    # already encodes everything the epilogue needs, so we only consume
-    # the normalisation factors below.
+    # The O store needs only ``ls_final``; ``ms_final`` (the per-row max) is
+    # read only by ``epilogue_fn``.
+    ms_final = [final[2 * r] for r in range(atom.c_per_lane)]
     ls_final = [final[2 * r + 1] for r in range(atom.c_per_lane)]
     accs_final = list(final[2 * atom.c_per_lane :])
 
@@ -935,6 +946,14 @@ def mfma_attention_fwd_inner_body(
                 o_col,
             )
             b.global_store(O, addr, v_out, align=2)
+
+    if epilogue_fn is not None:
+        for r in range(atom.c_per_lane):
+            o_row = b.add(
+                b.add(q_tile_base, b.mul(m_blk, b.const_i32(4))),
+                b.const_i32(r),
+            )
+            epilogue_fn(b, m_log2=ms_final[r], l=ls_final[r], row=o_row, row_valid=None)
 
 
 # ---------------------------------------------------------------------------
@@ -1033,6 +1052,7 @@ def _wmma_attention_fwd_inner_body(
     k_block_iter_fn: Optional[Callable[[IRBuilder, Value], Value]],
     v_scale: Optional[Value],
     v_lds_stage: bool = False,
+    epilogue_fn: Callable[..., None] | None = None,
     arch: str,
     target,
     mask_neg_inf: Optional[Value] = None,
@@ -1497,3 +1517,16 @@ def _wmma_attention_fwd_inner_body(
                 keep_q = b.cmp_lt(b.add(q_local_base, row_rel), query_length)
                 with b.scf_if(keep_q):
                     b.global_store(O, o_addr, b.cast_f32_to(v_f32, dtype_ir), align=2)
+
+    if epilogue_fn is not None:
+        for r in range(c_frag):
+            row_rel, _ = c_map.coord(b, lane, r)
+            o_row = b.add(q_tile_base, row_rel)
+            row_valid = (
+                None
+                if query_length is None
+                else b.cmp_lt(b.add(q_local_base, row_rel), query_length)
+            )
+            epilogue_fn(
+                b, m_log2=ms_final[r], l=ls_final[r], row=o_row, row_valid=row_valid
+            )
