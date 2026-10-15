@@ -19,6 +19,9 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   backward-weights kernels (fp16/bf16) to the `ConvHipConv` solver (hipconv v0.3.2).
 * [Conv] Added a gfx1250 dense backward-weights kernel (fp16/bf16) to the `ConvHipConv`
   solver (hipconv v0.4.0).
+* [API] Added `miopenGetLastForwardedError` (beta) in the new header `<miopen/hipdnn_forwarding.h>`,
+  which reports whether the calling thread's last MIOpen call was forwarded to hipDNN and failed.
+  Available only in builds configured with `MIOPEN_ENABLE_HIPDNN_WRAPPER=ON`.
 
 ### Changed
 * [Reduce] `miopenGetReductionWorkspaceSize` and `miopenGetReductionIndicesSize` now reject tensors

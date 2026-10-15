@@ -145,3 +145,27 @@ To add one, run the harness, copy the failing line's test name, the device it ra
 outcomes into the file, and write down the reason. The list's own rules are covered by
 `test_forwarding_parity_scripts`, or by hand with
 `python3 -m unittest test_compare_forwarding_runs` from `script/`; neither needs a build or GPU.
+
+## Forwarding failure modes
+
+`forwarding_failure_modes` checks what a flag-ON build does when forwarding is turned on but
+hipDNN cannot be used: the status each call returns, the lines printed to stderr, and what
+`miopenGetLastForwardedError` and `miopenGetErrorString` report. It also checks the routing trace
+and that `MIOPEN_DISABLE_HIPDNN_FOR` keeps calls off a broken hipDNN. The switches involved are
+read once per process, so each case runs a fresh process:
+
+- `forwarding_failure_probe` links only the public `libMIOpen.so`, as an application would. It
+  runs the steps named on its command line, such as `conv_forward` or `last_forwarded`, and prints
+  one result line per step.
+- Two fake hipDNN backends stand in for a broken installation. `wrong_major` reports a hipDNN
+  major version no real frontend has, and `no_version` reports no version at all. Each prints a
+  marker line to stderr when it is loaded, which shows whether a case loaded a backend.
+- `script/test_forwarding_failure_modes.py` is the `unittest` module that runs the probe under
+  each environment and checks its output.
+
+Run it from the build directory with `ctest -R forwarding_failure_modes`. It needs no GPU.
+
+A missing backend cannot be tested directly. When `HIPDNN_BACKEND_LIBRARY_PATH` names a directory
+without `libhipdnn_backend.so`, hipDNN moves on to its next search location and may find the real
+backend there. `wrong_major` and `no_version` are the closest stand-ins: they make hipDNN refuse
+the backend, which takes MIOpen down the same path as a missing one.

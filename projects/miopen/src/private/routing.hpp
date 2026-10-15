@@ -153,12 +153,21 @@ DisabledSet ParseDisabledSet(const char* value, ForwardingSet set, std::ostream&
 // effect after each entry point's first call.
 const DisabledSet& GetDisabledSet();
 
-// True when MIOPEN_LOG_LEVEL selects MIOpen's trace level. Read straight from the
-// environment because the wrapper cannot include MIOpen's logging header.
-bool TracingEnabled();
+// Parses MIOPEN_LOG_LEVEL as MIOpen does (strtoull, base 0, trailing text
+// ignored) so both agree on what a value means. Unset or unparsable is 0,
+// MIOpen's default level.
+unsigned long long ParseLogLevel(const char* value);
 
-// False when MIOPEN_LOG_LEVEL hides MIOpen's own errors, so forwarded failures
-// stay just as quiet.
+// Level 6 (Info2) and above, where MIOpen's own detailed logs start.
+bool TracingEnabledFor(unsigned long long level);
+
+// False only for 1 (Quiet) and 2 (Fatal), the levels that hide MIOpen's errors.
+bool ErrorLoggingEnabledFor(unsigned long long level);
+
+// The same checks on this process's MIOPEN_LOG_LEVEL, read once. The wrapper
+// reads the environment because it cannot reach MIOpen's logging code, so
+// MIOpen's test-only quiet switch does not apply here.
+bool TracingEnabled();
 bool ErrorLoggingEnabled();
 
 // Writes one "[MIOpen] hipDNN routing: ..." line describing the decision.
@@ -166,6 +175,14 @@ void ReportRouteDecision(const char* entryPoint,
                          ForwardingMode mode,
                          RouteDecision decision,
                          std::ostream& diagnostics);
+
+// Writes one "[MIOpen] hipDNN forwarded: <entryPoint>" line.
+void ReportForwardedCall(const char* entryPoint, std::ostream& diagnostics);
+
+// Writes ReportForwardedCall's line to stderr when MIOPEN_ENABLE_LOGGING is on.
+// Forwarded calls skip the _impl functions that print MIOpen's API call log, so
+// without this they would be missing from it.
+void LogForwardedCall(const char* entryPoint) noexcept;
 
 // Route::Hipdnn only when mode is Enabled AND entryPoint is in the set AND the
 // deny list does not name it. hipdnnAvailable false still routes away from
@@ -240,7 +257,10 @@ Route DispatchFromStub(const char* entryPoint, const char* enclosingFunction);
             static const ::miopen::wrapper::Route miopen_wrapper_route_ = \
                 ::miopen::wrapper::DispatchFromStub(#fn, __func__);       \
             if(miopen_wrapper_route_ == ::miopen::wrapper::Route::Hipdnn) \
+            {                                                             \
+                ::miopen::wrapper::LogForwardedCall(#fn);                 \
                 return (expr);                                            \
+            }                                                             \
         }                                                                 \
         catch(...)                                                        \
         {                                                                 \

@@ -169,7 +169,7 @@ repos:
         name: MIOpen public/private header consistency
         entry: python projects/miopen/script/check_public_abi.py check-headers
         language: python
-        files: ^(projects/miopen/(include/miopen/miopen\.h|src/private/(miopen_impl\.h|miopen_private_rename\.h|wrapper\.cpp)|src/convolution_api\.cpp|test/gtest/conv_workspace_size_range\.cpp)|dnn-providers/miopen-provider/MiopenApi(PrivateRename)?\.hpp)$
+        files: ^(projects/miopen/(include/miopen/miopen\.h|include_wrapper/miopen/hipdnn_forwarding\.h|src/private/(miopen_impl\.h|miopen_private_rename\.h|wrapper\.cpp)|src/convolution_api\.cpp|test/gtest/conv_workspace_size_range\.cpp|test/public_abi/wrapper_only_symbols\.txt)|dnn-providers/miopen-provider/MiopenApi(PrivateRename)?\.hpp)$
         pass_filenames: false
 
       # The check above is the only one that can see signature drift in the
