@@ -11,13 +11,17 @@
 #include <utility>
 
 #ifdef TENSILELITE_ENABLE_USER_KERNELS
+#include "user_kernel_test_common.hpp"
+
 #include <unistd.h>
 
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <future>
 #include <stdexcept>
 #include <thread>
 #include <vector>
@@ -385,6 +389,87 @@ namespace
             SolutionAdapter::ModuleApi{throwingUserLoad, countUserUnload, noLastError});
         EXPECT_EQ(adapter.loadUserCodeObject(user), hipErrorInvalidImage);
         EXPECT_EQ(adapter.userCodeObjectCount(), 0u);
+    }
+
+    constexpr char otherUser[] = "/payload/other.co";
+
+    std::atomic<bool> holdUserLoad{false};
+    std::atomic<bool> userLoadStarted{false};
+
+    // Loads of `user` wait until holdUserLoad is cleared.
+    hipError_t heldUserLoad(hipModule_t* module, const char* path)
+    {
+        if(std::string(path) == user)
+        {
+            userLoadStarted = true;
+            while(holdUserLoad.load())
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        *module = reinterpret_cast<hipModule_t>(static_cast<uintptr_t>(++userLoads));
+        return hipSuccess;
+    }
+
+    TEST(HipSolutionAdapterUserCodeObject, smoke_LoadsOfDifferentPathsDoNotWait)
+    {
+        userLoads       = 0;
+        userUnloads     = 0;
+        holdUserLoad    = true;
+        userLoadStarted = false;
+        {
+            SolutionAdapter adapter(
+                SolutionAdapter::ModuleApi{heldUserLoad, countUserUnload, noLastError});
+            std::thread slow([&]() { EXPECT_EQ(adapter.loadUserCodeObject(user), hipSuccess); });
+            while(!userLoadStarted.load())
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+
+            auto other = std::async(std::launch::async,
+                                    [&]() { return adapter.loadUserCodeObject(otherUser); });
+            EXPECT_EQ(other.wait_for(std::chrono::seconds(5)), std::future_status::ready)
+                << "the load of another path waited for the slow one";
+
+            holdUserLoad = false;
+            slow.join();
+            EXPECT_EQ(other.get(), hipSuccess);
+            EXPECT_EQ(adapter.userCodeObjectCount(), 2u);
+        }
+        EXPECT_EQ(userUnloads.load(), 2);
+    }
+
+    // The check that refuses truncated files accepts every code object this
+    // build ships, whatever its layout.
+    TEST_F(HipSolutionAdapterTest, smoke_ShippedCodeObjectsAreNotRefused)
+    {
+        std::vector<std::string> files;
+        for(auto const& root : user_kernel_test::libraryRoots())
+        {
+            std::error_code ec;
+            for(auto const& entry : std::filesystem::recursive_directory_iterator(root, ec))
+            {
+                auto extension = entry.path().extension();
+                if(entry.is_regular_file() && (extension == ".co" || extension == ".hsaco"))
+                    files.push_back(std::filesystem::absolute(entry.path()).string());
+            }
+            if(!files.empty())
+                break;
+        }
+        ASSERT_FALSE(files.empty()) << "no code objects in this build's library";
+
+        std::map<std::string, int> layouts;
+        for(auto const& file : files)
+        {
+            char magic[8] = {};
+            std::ifstream(file, std::ios::binary).read(magic, sizeof(magic));
+            std::string head(magic, sizeof(magic));
+            layouts[head.rfind("CCOB", 0) == 0       ? "compressed offload bundle"
+                    : head.rfind("__CLANG_", 0) == 0 ? "offload bundle"
+                    : head.compare(1, 3, "ELF") == 0 ? "ELF"
+                                                     : "other"]++;
+
+            expectLoad(file.c_str());
+            EXPECT_EQ(adapter->loadUserCodeObject(file), hipSuccess) << file;
+        }
+        for(auto const& [layout, count] : layouts)
+            std::printf("%d %s file(s)\n", count, layout.c_str());
     }
 #endif
 

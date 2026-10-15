@@ -33,6 +33,7 @@
 
 #include <atomic>
 #include <map>
+#include <memory>
 #include <mutex>
 
 #include <tensilelitehost/export.h>
@@ -179,9 +180,9 @@ namespace TensileLite
             std::string m_lazyLoadArchitecture;
 
 #ifdef TENSILELITE_ENABLE_USER_KERNELS
-            // Serializes user code object loads so two threads cannot both load
-            // the same path. The maps are guarded by m_access.
-            std::mutex                                                   m_userLoadMutex;
+            // One mutex per path serializes its load, so two threads cannot
+            // both load it. The maps are guarded by m_access.
+            std::unordered_map<std::string, std::shared_ptr<std::mutex>> m_userLoadMutexes;
             std::unordered_map<std::string, hipModule_t>                 m_userModules;
             std::map<std::pair<std::string, std::string>, hipFunction_t> m_userKernels;
 #endif

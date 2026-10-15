@@ -15,6 +15,7 @@
 #include <Tensile/Tensile.hpp>
 
 #include <atomic>
+#include <cstdio>
 #include <thread>
 
 namespace
@@ -280,6 +281,52 @@ TEST(UserKernelRegister, TwoDevices)
         << "the worker failed; its output is above";
 }
 
+// Registered through a handle on device 0 while device 1 is current. The code
+// object is loaded for the handle's device, so the kernel runs there, and the
+// caller's device is left current.
+TEST(UserKernelRegister, DISABLED_OtherDeviceCurrentWorker)
+{
+    ASSERT_EQ(hipSetDevice(0), hipSuccess);
+    const std::vector<std::string> candidates = candidatePayloads();
+    ASSERT_FALSE(candidates.empty()) << "no payload shard in this build's library";
+
+    hipblasLtHandle_t handle;
+    ASSERT_EQ(hipblasLtCreate(&handle), HIPBLAS_STATUS_SUCCESS);
+    expectNothingRegistered(handle);
+
+    Problem p;
+    ASSERT_EQ(buildProblem(p), HIPBLAS_STATUS_SUCCESS);
+
+    Registered r;
+    for(auto const& stem : candidates)
+    {
+        ASSERT_EQ(hipSetDevice(1), hipSuccess);
+        const auto indices = registerPayload(handle, stem + ".dat", stem + ".co");
+        int        current = -1;
+        ASSERT_EQ(hipGetDevice(&current), hipSuccess);
+        EXPECT_EQ(current, 1) << "registration leaves the caller's device current";
+        ASSERT_EQ(hipSetDevice(0), hipSuccess);
+        ASSERT_FALSE(indices.empty()) << stem;
+
+        r.index = findUsableKernel(handle, p, indices, r.result, r.workspace);
+        if(r.index >= 0)
+            break;
+    }
+    ASSERT_GE(r.index, 0) << "no payload holds a kernel for this problem";
+    runAndCheck(handle, p, r.result.algo, r.workspace);
+
+    EXPECT_EQ(hipblasLtDestroy(handle), HIPBLAS_STATUS_SUCCESS);
+}
+
+TEST(UserKernelRegister, RegistersOnTheHandlesDevice)
+{
+    if(!haveTwoMatchingDevices())
+        GTEST_SKIP() << "needs two devices of the same architecture";
+
+    EXPECT_EQ(runWorker("UserKernelRegister.DISABLED_OtherDeviceCurrentWorker"), 0)
+        << "the worker failed; its output is above";
+}
+
 // Payloads that reach the code object load and fail there are refused cleanly:
 // nothing is registered and the shipped kernel already in use still runs.
 TEST(UserKernelRegister, DISABLED_BadPayloadsWorker)
@@ -302,19 +349,24 @@ TEST(UserKernelRegister, DISABLED_BadPayloadsWorker)
     ASSERT_FALSE(names.empty());
 
     ScratchDir        scratch;
-    const std::string wrongArch = scratch.file("wrong_arch.co");
     const std::string truncated = scratch.file("truncated.co");
-    const std::string unrelated = scratch.file("unrelated.co");
-    ASSERT_TRUE(compileCodeObject(standInKernels(names), otherArch(), wrongArch));
     ASSERT_TRUE(writeTruncatedCopy(candidates[0] + ".co", truncated));
-    ASSERT_TRUE(
-        compileCodeObject(standInKernels({"NotAKernelOfThisShard"}), deviceArch(), unrelated));
-
-    const std::pair<char const*, std::string> cases[] = {
-        {"a code object for another architecture", wrongArch},
+    std::vector<std::pair<char const*, std::string>> cases = {
         {"a truncated code object", truncated},
-        {"a code object without the shard's kernels", unrelated},
     };
+    if(canCompileCodeObjects)
+    {
+        const std::string wrongArch = scratch.file("wrong_arch.co");
+        const std::string unrelated = scratch.file("unrelated.co");
+        ASSERT_TRUE(compileCodeObject(standInKernels(names), otherArch(), wrongArch));
+        ASSERT_TRUE(
+            compileCodeObject(standInKernels({"NotAKernelOfThisShard"}), deviceArch(), unrelated));
+        cases.emplace_back("a code object for another architecture", wrongArch);
+        cases.emplace_back("a code object without the shard's kernels", unrelated);
+    }
+    else
+        std::printf("built without hiprtc: only the truncated code object is tried\n");
+
     for(auto const& [what, co] : cases)
     {
         int numIndices = -1;
@@ -347,6 +399,8 @@ TEST(UserKernelRegister, RejectsBadPayloads)
 // replacement here is an empty kernel, so it leaves D untouched.
 TEST(UserKernelRegister, DISABLED_OwnCodeObjectWorker)
 {
+    if(!canCompileCodeObjects)
+        GTEST_SKIP() << "built without hiprtc, which makes the stand-in code object";
     const std::vector<std::string> candidates = candidatePayloads();
     ASSERT_FALSE(candidates.empty()) << "no payload shard in this build's library";
 
@@ -412,6 +466,8 @@ TEST(UserKernelRegister, DISABLED_OwnCodeObjectWorker)
 
 TEST(UserKernelRegister, KernelsRunFromTheirOwnCodeObject)
 {
+    if(!canCompileCodeObjects)
+        GTEST_SKIP() << "built without hiprtc, which makes the stand-in code object";
     EXPECT_EQ(runWorker("UserKernelRegister.DISABLED_OwnCodeObjectWorker"), 0)
         << "the worker failed; its output is above";
 }
@@ -436,11 +492,16 @@ TEST(UserKernelRegister, DISABLED_RegisterWhileLaunchingWorker)
 
     const std::string dat = candidates[0] + ".dat";
     ScratchDir        scratch;
-    const std::string wrongArch = scratch.file("wrong_arch.co");
     const std::string truncated = scratch.file("truncated.co");
-    ASSERT_TRUE(
-        compileCodeObject(standInKernels(kernelNames(shardKernels(dat))), otherArch(), wrongArch));
     ASSERT_TRUE(writeTruncatedCopy(candidates[0] + ".co", truncated));
+    std::vector<std::string> bad = {truncated};
+    if(canCompileCodeObjects)
+    {
+        const std::string wrongArch = scratch.file("wrong_arch.co");
+        ASSERT_TRUE(compileCodeObject(
+            standInKernels(kernelNames(shardKernels(dat))), otherArch(), wrongArch));
+        bad.push_back(wrongArch);
+    }
 
     std::atomic<bool> done{false};
     std::atomic<int>  launches{0};
@@ -460,13 +521,14 @@ TEST(UserKernelRegister, DISABLED_RegisterWhileLaunchingWorker)
 
     for(int i = 0; i < 20; i++)
     {
-        int numIndices = -1;
-        EXPECT_EQ(hipblasLtUserKernelRegister(
-                      handle, dat.c_str(), wrongArch.c_str(), nullptr, 0, &numIndices),
-                  HIPBLAS_STATUS_INVALID_VALUE);
-        EXPECT_EQ(hipblasLtUserKernelRegister(
-                      handle, dat.c_str(), truncated.c_str(), nullptr, 0, &numIndices),
-                  HIPBLAS_STATUS_INVALID_VALUE);
+        for(auto const& co : bad)
+        {
+            int numIndices = -1;
+            EXPECT_EQ(hipblasLtUserKernelRegister(
+                          handle, dat.c_str(), co.c_str(), nullptr, 0, &numIndices),
+                      HIPBLAS_STATUS_INVALID_VALUE)
+                << co;
+        }
     }
     Registered r = registerUsable(handle, p, candidates);
     ASSERT_GE(r.index, 0);

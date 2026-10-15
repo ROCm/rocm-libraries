@@ -660,3 +660,24 @@ TEST(UserKernelMaster, smoke_ResolveUserIndex)
     EXPECT_EQ(f.master.resolveSolutionByIndex(user->index), user);
     EXPECT_EQ(f.master.resolveSolutionByIndex(user->index + 1), nullptr);
 }
+
+// The index-based calls, hipblasLtMatmul among them, find a user kernel only on
+// the processor it is pinned to, as selection does.
+TEST(UserKernelMaster, smoke_IndexServesOnlyItsProcessor)
+{
+    auto          problem = makeProblem();
+    auto          gfx950  = makeGpu();
+    AMDGPU        gfx942(AMDGPU::Processor::gfx942, 304, "gfx942");
+    MasterFixture f(problem);
+
+    auto solution = makeSolution(problem);
+    ASSERT_TRUE(pinToProcessor(*solution, AMDGPU::Processor::gfx950));
+    solution->requiredHostWorkspaceSizePerProblem = 0;
+
+    int index = f.user->addSolutions({solution}).at(0);
+
+    EXPECT_EQ(f.master.getSolutionByIndex(problem, gfx950, index), solution);
+    EXPECT_EQ(f.master.getSolutionByIndex(gfx950, index), solution);
+    EXPECT_EQ(f.master.getSolutionByIndex(problem, gfx942, index), nullptr);
+    EXPECT_EQ(f.master.getSolutionByIndex(gfx942, index), nullptr);
+}
