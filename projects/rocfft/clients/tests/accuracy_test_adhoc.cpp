@@ -742,7 +742,7 @@ const auto adhoc_64_bit_idx_twiddle_large_slow_tokens = {
 INSTANTIATE_TEST_SUITE_P(
     adhoc_64_bit_idx_twiddle_large_slow,
     accuracy_test,
-    ::testing::ValuesIn(param_generator_token(test_prob* very_large_prob_factor,
+    ::testing::ValuesIn(param_generator_token(quick_tests_only ? 0.0 : test_prob,
                                               adhoc_64_bit_idx_twiddle_large_slow_tokens)),
     accuracy_test::TestName);
 

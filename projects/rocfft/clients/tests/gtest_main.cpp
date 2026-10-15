@@ -71,8 +71,8 @@ double real_prob_factor;
 double complex_planar_prob_factor;
 // Modifier for probability of running tests with callbacks
 double callback_prob_factor;
-// Modifier for probability of running very large tests
-double very_large_prob_factor;
+// Flag to indicate that only quick tests have been requested
+bool quick_tests_only = false;
 // Number of random tests per suite
 size_t n_random_tests = 0;
 
@@ -385,11 +385,6 @@ int main(int argc, char* argv[])
                    "Probability multiplier for running individual callback transforms")
         ->default_val(0.2)
         ->check(CLI::Range(0.0, 1.0));
-    app.add_option("--very_large_prob",
-                   very_large_prob_factor,
-                   "Probability multiplier for running very large transforms")
-        ->default_val(0.2)
-        ->check(CLI::Range(0.0, 1.0));
 
     constexpr auto emulation_quick      = "quick";
     constexpr auto emulation_smoke      = "smoke";
@@ -405,7 +400,6 @@ int main(int argc, char* argv[])
                    "--unittest_prob",
                    "--nrand",
                    "--callback_prob",
-                   "--very_large_prob",
                    "--R")
         ->each([&](const std::string& emulationtype) {
             // Emulation test suites focus on well-established software paths; we are looking for
@@ -420,7 +414,7 @@ int main(int argc, char* argv[])
             callback_prob_factor = 0;
 
             // Very large transforms are not an emulation test target.
-            very_large_prob_factor = 0;
+            quick_tests_only = true;
 
             if(emulationtype == emulation_quick)
             {
@@ -483,9 +477,10 @@ int main(int argc, char* argv[])
         ->each([&](const std::string&) {
             // The objective is to have a test that takes about 5 minutes, so just set the
             // probability per test to a small value to achieve this result.
-            test_prob      = 0.0005;
-            emulation_prob = 0.005;
-            unittest_prob  = 0.2;
+            test_prob        = 0.0005;
+            emulation_prob   = 0.005;
+            unittest_prob    = 0.2;
+            quick_tests_only = true;
 
             // Allow nrand to take precedence over this option:
             if(!opt_nrand->count())
