@@ -62,6 +62,18 @@ void resetFlydslRmsNormModuleCache();
 void registerFlydslRmsNormBwdSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 void resetFlydslRmsNormBwdModuleCache();
 
+/// @see packs/FlydslSdpaRdnaNative.cpp
+void registerFlydslSdpaRdnaSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void resetFlydslSdpaRdnaModuleCache();
+
+/// @see packs/FlydslSdpaRdnaDecodeNative.cpp
+void registerFlydslSdpaRdnaDecodeSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void resetFlydslSdpaRdnaDecodeModuleCache();
+
+/// @see packs/FlydslSdpaAiwNative.cpp
+void registerFlydslSdpaAiwSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void resetFlydslSdpaAiwModuleCache();
+
 /// @see packs/Gfx950AttentionDenseNative.cpp
 void registerGfx950AttentionDenseSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 void resetGfx950AttentionDenseModuleCache();

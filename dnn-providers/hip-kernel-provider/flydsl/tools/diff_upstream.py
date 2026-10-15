@@ -60,7 +60,7 @@ from generators._flydsl_env import (  # noqa: E402
 # The upstreams a vendored file can come from, keyed by a substring of the URL its
 # provenance header records. A file whose header names no URL is a FlyDSL file at its
 # own relative path -- the package `__init__` modules carry no provenance block.
-ORIGINS = {"aiter": "aiter", "FlyDSL": "flydsl"}
+ORIGINS = {"aiter": "aiter", "aotriton": "aotriton", "FlyDSL": "flydsl"}
 _HEADER_LINES = 20
 
 
@@ -68,23 +68,46 @@ class DiffError(RuntimeError):
     """The comparison could not be performed."""
 
 
+def _provenance(path: Path) -> dict[str, str]:
+    """The ``# Vendored from: <url>`` block in @p path's header: url, commit, path."""
+    record: dict[str, str] = {}
+    for line in path.read_text(encoding="utf-8").splitlines()[:_HEADER_LINES]:
+        text = line.lstrip("#").strip()
+        if text.startswith("Vendored from:"):
+            record["url"] = text.split(":", 1)[1].strip()
+        elif "url" in record and text.startswith(("commit:", "path:")):
+            key, value = text.split(":", 1)
+            record[key] = value.split()[0] if value.split() else ""
+    return record
+
+
+def _package_dir(record: dict[str, str]) -> str | None:
+    """The upstream directory a package header names, or None when it names a file.
+
+    A package vendored from a flat upstream directory records that directory in its
+    ``__init__`` (``path: dir/``); its modules carry no header of their own.
+    """
+    path = record.get("path", "")
+    return path if path.endswith("/") else None
+
+
 def origin_of(relative: Path) -> tuple[str, Path]:
     """Which upstream @p relative was vendored from, and its path there.
 
     Read from the file's own provenance header (``# Vendored from: <url>`` and
     ``#   path: <path>``), so the record that justifies a modification is also the one
-    that says where to diff it.
+    that says where to diff it. A module without one inherits its package's when that
+    names an upstream directory, and sits there under its own name.
     """
-    lines = (KERNELS_SRC_DIR / relative).read_text(encoding="utf-8").splitlines()
-    url = path = None
-    for line in lines[:_HEADER_LINES]:
-        text = line.lstrip("#").strip()
-        if text.startswith("Vendored from:"):
-            url = text.split(":", 1)[1].strip()
-        elif text.startswith("path:") and url is not None:
-            path = text.split(":", 1)[1].strip()
-    if url is None:
-        return "flydsl", relative
+    record = _provenance(KERNELS_SRC_DIR / relative)
+    path = record.get("path")
+    if not record:
+        package = _provenance(KERNELS_SRC_DIR / relative.parent / "__init__.py")
+        directory = _package_dir(package)
+        if directory is None:
+            return "flydsl", relative
+        record, path = package, directory + relative.name
+    url = record["url"]
     for marker, origin in ORIGINS.items():
         if marker in url:
             return origin, Path(path) if path else relative
@@ -140,9 +163,22 @@ def normalize(command: list[str], source: str, label: str, line_length: int) -> 
 
 
 def _not_vendored(path: Path) -> bool:
-    """A module written for this provider says so in its header; it has no upstream."""
+    """A module written for this provider says so in its header; it has no upstream.
+    Nor has the ``__init__`` of a package vendored from a flat upstream directory."""
     lines = path.read_text(encoding="utf-8").splitlines()[:_HEADER_LINES]
-    return any(line.lstrip("#").strip().startswith("Not vendored") for line in lines)
+    if any(line.lstrip("#").strip().startswith("Not vendored") for line in lines):
+        return True
+    return path.name == "__init__.py" and _package_dir(_provenance(path)) is not None
+
+
+def _aotriton_commit() -> str | None:
+    """The AOTriton commit the vendored package records (not a generator pin: no
+    object's build reads it, so it lives with the sources it describes)."""
+    for init in sorted(KERNELS_SRC_DIR.rglob("__init__.py")):
+        record = _provenance(init)
+        if "aotriton" in record.get("url", "") and record.get("commit"):
+            return record["commit"]
+    return None
 
 
 def vendored_files() -> list[Path]:
@@ -259,6 +295,13 @@ def main(argv: list[str] | None = None) -> int:
         "(default: report them as not compared)",
     )
     parser.add_argument(
+        "--aotriton",
+        type=Path,
+        default=None,
+        help="AOTriton checkout, for the package whose header records AOTriton as its "
+        "origin (default: report its files as not compared)",
+    )
+    parser.add_argument(
         "--commit",
         action="store_true",
         help="fail unless the checkout sits at the pinned commit (default: warn and continue)",
@@ -287,6 +330,8 @@ def main(argv: list[str] | None = None) -> int:
             raise DiffError(f"upstream checkout not found: {args.upstream}")
         if args.aiter is not None and not args.aiter.is_dir():
             raise DiffError(f"AITER checkout not found: {args.aiter}")
+        if args.aotriton is not None and not args.aotriton.is_dir():
+            raise DiffError(f"AOTriton checkout not found: {args.aotriton}")
         command = black_command(args.black)
         check_commit(
             args.upstream,
@@ -296,8 +341,13 @@ def main(argv: list[str] | None = None) -> int:
         )
         if args.aiter is not None:
             check_commit(args.aiter, AITER_KERNELS_COMMIT, "AITER", args.commit)
+        if args.aotriton is not None:
+            pinned = _aotriton_commit()
+            if pinned is None:
+                raise DiffError("no vendored package records an AOTriton commit")
+            check_commit(args.aotriton, pinned, "AOTriton", args.commit)
         differing, missing, skipped = compare(
-            {"flydsl": args.upstream, "aiter": args.aiter},
+            {"flydsl": args.upstream, "aiter": args.aiter, "aotriton": args.aotriton},
             command,
             args.line_length,
             args.context,

@@ -88,7 +88,11 @@ DESCRIPTOR_VERSION = "1.0"
 # Ops whose engines read a runtime pass-by-value scalar (the SDPA softmax scale, the
 # RMSNorm epsilon), and the graph schema that introduced such tensors
 # (PluginVersionConstants.hpp, K_PASS_BY_VALUE_MIN_API_VERSION).
-SDPA_OPS: tuple[str, ...] = ()
+SDPA_OPS = (
+    "sdpa_rdna",
+    "sdpa_rdna_decode",
+    "sdpa_aiw",
+)
 PASS_BY_VALUE_OPS: tuple[str, ...] = ("rmsnorm",) + SDPA_OPS
 PASS_BY_VALUE_SDK_VERSION = "1.2.0"
 

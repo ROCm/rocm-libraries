@@ -5,7 +5,7 @@ SPDX-License-Identifier:  MIT
 
 # FlyDSL kernels in the hip-kernel-provider
 
-Ahead-of-time RMSNorm kernels written in
+Ahead-of-time RMSNorm and attention kernels written in
 [FlyDSL](https://github.com/ROCm/FlyDSL), compiled once and **checked in**,
 reaching hipDNN through the kernel ingestor.
 
@@ -14,10 +14,15 @@ descriptors that make them selectable. The matching C++ — the code that decide
 whether a graph may run on them and how to launch them — lives one level up, one
 file per engine:
 [`FlydslRmsNormNative.cpp`](../src/engines/kernel_ingestor_engine/packs/FlydslRmsNormNative.cpp)
-(forward) and
+(RMSNorm forward) and
 [`FlydslRmsNormBwdNative.cpp`](../src/engines/kernel_ingestor_engine/packs/FlydslRmsNormBwdNative.cpp)
 (backward), with the rules they share in
-[`FlydslRmsNormCommon.hpp`](../src/engines/kernel_ingestor_engine/packs/FlydslRmsNormCommon.hpp).
+[`FlydslRmsNormCommon.hpp`](../src/engines/kernel_ingestor_engine/packs/FlydslRmsNormCommon.hpp);
+[`FlydslSdpaRdnaNative.cpp`](../src/engines/kernel_ingestor_engine/packs/FlydslSdpaRdnaNative.cpp),
+[`FlydslSdpaRdnaDecodeNative.cpp`](../src/engines/kernel_ingestor_engine/packs/FlydslSdpaRdnaDecodeNative.cpp)
+and
+[`FlydslSdpaAiwNative.cpp`](../src/engines/kernel_ingestor_engine/packs/FlydslSdpaAiwNative.cpp),
+with what the SDPA engines share in `FlydslSdpaRdnaCommon.hpp`.
 
 **One kernel family per engine.** An engine's objects are one kernel — one algorithm, one
 argument list, one launch rule, one set of knobs every object fills. Two approaches are
@@ -43,8 +48,10 @@ way to check it, or it is just bytes someone once vouched for.
 
 ## What ships
 
-One op -- RMSNorm, forward and backward, 153 kernel objects per target. For RDNA it is built once for each
-of two LLVM generic targets and shipped to every part each covers:
+For RDNA, four engines -- RMSNorm forward and backward, and SDPA prefill and decode, 309
+kernel objects per family -- plus, on gfx12-generic only, AOTriton's gfx1201 attention
+kernel as a fifth (72 more, 381 in all), built once for each of two LLVM generic targets
+and shipped to every part each covers:
 
 - **`gfx11-generic`** -- RDNA3 / RDNA3.5: gfx1100, gfx1101, gfx1102, gfx1103,
   gfx1150, gfx1151, gfx1152 and gfx1153. Verified on gfx1151.
@@ -76,6 +83,32 @@ coverage one (bar backward above 16384). The things that are genuinely out of sc
 bias and dbias, other dtypes, non-packed operands, fusion — are enumerated in
 [COVERAGE.md §3](COVERAGE.md), each with the reason the shipped objects cannot
 compute it.
+
+**SDPA forward on RDNA**: two engines, 156 objects. The prefill kernel
+(`hipkernel:flydsl_sdpa_rdna`, 84 objects) and the split-KV decode kernel
+(`hipkernel:flydsl_sdpa_rdna_decode`, 72 objects), bf16 and f16 ×
+`head_dim` 64, 96, 128 and 256 × causal on and off × with and without an
+additive bias (`attn_mask`, f32 or the query's dtype, broadcast over any axis), plus a generic tier
+that serves every other `head_dim` that is a multiple of 8 up to 256, and a
+decode path (split-KV, the GQA group packed into one tile, with and without a bias) for decode steps, multi-head latent attention's un-absorbed prefill (Q/K 192, V 128), and decode with one KV head at Q/K 576 / V 512 (absorbed MLA) and 512/512; attention sinks (gpt-oss) at `head_dim` 64 and 128, prefill and decode. Batch, both sequence lengths,
+head counts (MHA, GQA, MQA), every stride, the scale, the mask bounds (causal at
+either corner, right-side bands, sliding windows) and the LSE output are runtime
+arguments, so each object serves every shape and layout of its class. Inference
+only; not yet served: padding / varlen. Status
+against hipDNN's Tier 0 / Tier 1 and every declined feature with its effort are
+in [COVERAGE.md §5](COVERAGE.md).
+
+**SDPA forward on RDNA4, AOTriton's kernel** (`hipkernel:flydsl_sdpa_aiw`, gfx12-generic, 72
+objects): AOTriton's FlyDSL gfx1201 forward, vendored under
+[`kernels_src/kernels/attention_rdna4/`](kernels_src/kernels/attention_rdna4/README.md) with the
+modifications that bring it to the RDNA kernel's coverage (sinks, an additive mask with a
+causal mask or window, f32 masks, V's own head count, a strided LSE). bf16 and f16 × exact
+`head_dim` 64, 128, 256 (plain, a mask in the query's dtype, an f32 mask), sinks at 64 and
+128, MLA 192/128, and padded tiers up to 64, 96, 128, 160, 224 and 256 for any other
+`head_dim` that is a multiple of 8, each with and without a mask or window. Faster than the
+RDNA kernel on medium and long sequences, slower on short ones; which runs a graph both
+serve is the heuristic's (or autotune's) to decide. `generators/gen_sdpa_aiw.py` builds each
+row through the kernel's own tuning table and records the schedule it chose as knobs.
 
 ## How it reaches hipDNN
 
@@ -146,10 +179,14 @@ and the census on the outcome rather than the intent is what makes that
 configuration compile.
 
 ```bash
-cmake -B build -DHIPDNN_ENABLE_KERNEL_INGESTOR=ON
+cmake -B build -DHIPDNN_ENABLE_KERNEL_INGESTOR=ON -DHIPDNN_ENABLE_SDPA=ON
 cmake --build build -j
 ctest --test-dir build -R hip-kernel-provider
 ```
+
+`HIPDNN_ENABLE_SDPA` is hipDNN's own switch for attention, OFF by default; it
+gates `graph->sdpa()` in the frontend. The SDPA pack builds and stages without
+it, but no graph can then contain an SDPA node to reach it.
 
 `HIPKERNELPROVIDER_ENABLE_FLYDSL` shapes exactly this integration's surface —
 one engine TU and one test TU per op, one census suite per op, and the `FlyDSL/`
@@ -172,14 +209,15 @@ provider tree; everything else is relative to this directory.
 | `<content>/<op>/<target>/*.hsaco` | the committed code objects |
 | `<content>/<op>/<target>/*.kdp.json` | the target's pack, with one inline `hsaco` UKD per object |
 | `<content>/<op>/<target>/manifest.json` | per-object SHA256 + knobs + argument layout + the toolchain and input digest that built them |
-| `kernels_src/kernels/**` | vendored kernel sources, each with its FlyDSL SPDX and copyright lines; the two modified files (`norm/rmsnorm_kernel.py`, `norm/rmsnorm_bwd_kernel.py`) also carry a header naming upstream, commit, path and their modifications. The commit is pinned in `generators/_flydsl_env.py` and recorded in each `<target>.SOURCE.md` |
+| `kernels_src/kernels/**` | vendored kernel sources, each with its upstream's SPDX and copyright lines. A modified file carries a header naming its upstream (FlyDSL or AITER), commit, path and modifications; the `attention_rdna4/` modules inherit their package's (AOTriton), and a file written for this provider says so in its own. The FlyDSL and AITER commits are pinned in `generators/_flydsl_env.py` and recorded in each `<target>.SOURCE.md` |
 | `generators/_instances.py` | **the instance table** — one row per shipped object, every op |
 | `generators/_flydsl_env.py` | the pins: wheel version, upstream commits, ROCm recording |
 | `generators/_codeobject.py` | reads and verifies a compiled object (target, ELF generic machine), shared by every generator |
 | `generators/arch_families.json`, `_arch_families.py` | the generic targets and their member arches; read by the generators and `CMakeLists.txt` |
 | `generators/_generic_targets.py` | the FlyDSL 0.3.4 shim that lets MLIR lower for a generic target |
-| `generators/gen_<op>.py` | compile one op's (one engine's) rows into objects + manifest + `<target>.SOURCE.md`: `gen_rmsnorm`, `gen_rmsnorm_bwd` |
+| `generators/gen_<op>.py` | compile one op's (one engine's) rows into objects + manifest + `<target>.SOURCE.md`: `gen_rmsnorm`, `gen_rmsnorm_bwd`, `gen_sdpa_rdna`, `gen_sdpa_rdna_decode`, `gen_sdpa_aiw` |
 | `generators/_parallel.py` | compiles a generator's objects in a pool of worker processes (`FLYDSL_GEN_JOBS`) |
+| `generators/_sdpa_rdna_build.py` | what the RDNA SDPA generators share |
 | `gen_descriptors.py` | derives descriptors from the objects; `--check` re-verifies |
 | `tools/diff_upstream.py` | vendored sources vs. their upstream checkouts, black-normalized |
 | `tools/check_shards.py` | after the pack: every member's shard ships exactly the checked-in objects |
@@ -237,11 +275,10 @@ contribution to confirm it.
 Each link is checkable by a command, and [REGEN.md](REGEN.md) gives each command:
 
 ```
-upstream FlyDSL @ 89ad52fbbb9e
+upstream FlyDSL @ 89ad52fbbb9e, AITER @ 8253efc40595
    │  tools/diff_upstream.py          — vendored copy == upstream, but for recorded modifications
 kernels_src/
-   │  gen_<op>.py (flydsl 0.3.4)      — byte-reproducible: 153/153 on each of gfx11-generic,
-   │                                    gfx12-generic, gfx90a, gfx942, gfx950
+   │  gen_<op>.py (flydsl 0.3.4)      — byte-reproducible: 309/309 gfx11-generic, 381/381 gfx12-generic, 153/153 per CDNA target
 <content>/<op>/<arch>/*.hsaco + manifest.json
    │  gen_descriptors.py --check      — objects match manifest SHA256 and target; descriptors agree
 <content>/<op>/**/*.json (KDPs of inline hsaco UKDs)

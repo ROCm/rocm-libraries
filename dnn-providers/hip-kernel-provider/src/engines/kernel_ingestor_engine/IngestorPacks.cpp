@@ -24,6 +24,13 @@ const std::vector<IngestorPack>& ingestorPacks()
         {"hipkernel:flydsl_rmsnorm_bwd",
          &registerFlydslRmsNormBwdSymbols,
          &resetFlydslRmsNormBwdModuleCache},
+        {"hipkernel:FlydslSdpaRdna",
+         &registerFlydslSdpaRdnaSymbols,
+         &resetFlydslSdpaRdnaModuleCache},
+        {"hipkernel:FlydslSdpaRdnaDecode",
+         &registerFlydslSdpaRdnaDecodeSymbols,
+         &resetFlydslSdpaRdnaDecodeModuleCache},
+        {"hipkernel:FlydslSdpaAiw", &registerFlydslSdpaAiwSymbols, &resetFlydslSdpaAiwModuleCache},
 #endif
         {GFX950_ATTENTION_DENSE_ENGINE_NAME,
          &registerGfx950AttentionDenseSymbols,
