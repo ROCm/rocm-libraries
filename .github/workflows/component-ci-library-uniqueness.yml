@@ -20,6 +20,15 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          # Logic YAML is the corpus under test. The other two directories
+          # supply tox.ini, SolutionIdGen.py, and the uniqueness test.
+          # Parent-directory files such as tox.ini are included with them.
+          sparse-checkout: |
+            projects/hipblaslt/library/src/amd_detail/rocblaslt/src/Tensile/Logic
+            projects/hipblaslt/tensilelite/tensilelite/Common
+            projects/hipblaslt/tensilelite/tensilelite/Tests/unit
+          sparse-checkout-cone-mode: true
 
       - name: Set up Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
