@@ -464,6 +464,11 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         find_package(rocm-kpack CONFIG REQUIRED)
     endif()
     add_subdirectory(descriptor-packaging)
+
+    # After descriptor-packaging: triton/ gates the product pack it wires.
+    if(HIPKERNELPROVIDER_ENABLE_TRITON)
+        add_subdirectory(triton)
+    endif()
 endif()
 
 add_subdirectory(src)
