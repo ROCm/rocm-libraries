@@ -368,7 +368,9 @@ inline flatbuffers::FlatBufferBuilder
                                  hipdnn_flatbuffers_sdk::data_objects::DataType scaleBiasDataType
                                  = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
                                  hipdnn_flatbuffers_sdk::data_objects::DataType meanVarianceDataType
-                                 = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT)
+                                 = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                                 const std::vector<int64_t>& peerStatsTensorUids = {},
+                                 int64_t omittedTensorUid = 0)
 {
     flatbuffers::FlatBufferBuilder builder;
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
@@ -378,35 +380,73 @@ inline flatbuffers::FlatBufferBuilder
     const std::vector<int64_t> derivedStrides = hipdnn_data_sdk::utilities::generateStrides(
         derivedDims, hipdnn_data_sdk::utilities::extractStrideOrder(strides));
 
-    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
-        builder, 1, "x", inputDataType, &strides, &dims));
-
-    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
-        builder, 2, "dy", inputDataType, &strides, &dims));
-
-    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
-        builder, 3, "dx", inputDataType, &strides, &dims));
-
-    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
-        builder, 4, "scale", scaleBiasDataType, &derivedStrides, &derivedDims));
-
-    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
-        builder, 5, "dscale", scaleBiasDataType, &derivedStrides, &derivedDims));
-
-    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
-        builder, 6, "dbias", scaleBiasDataType, &derivedStrides, &derivedDims));
-
-    if(hasOptionalAttributes)
+    if(omittedTensorUid != 1)
     {
         tensorAttributes.push_back(
             hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
-                builder, 7, "mean", meanVarianceDataType, &derivedStrides, &derivedDims));
-
-        tensorAttributes.push_back(
-            hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
-                builder, 8, "inv_variance", meanVarianceDataType, &derivedStrides, &derivedDims));
+                builder, 1, "x", inputDataType, &strides, &dims));
     }
 
+    if(omittedTensorUid != 2)
+    {
+        tensorAttributes.push_back(
+            hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+                builder, 2, "dy", inputDataType, &strides, &dims));
+    }
+
+    if(omittedTensorUid != 3)
+    {
+        tensorAttributes.push_back(
+            hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+                builder, 3, "dx", inputDataType, &strides, &dims));
+    }
+
+    if(omittedTensorUid != 4)
+    {
+        tensorAttributes.push_back(
+            hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+                builder, 4, "scale", scaleBiasDataType, &derivedStrides, &derivedDims));
+    }
+
+    if(omittedTensorUid != 5)
+    {
+        tensorAttributes.push_back(
+            hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+                builder, 5, "dscale", scaleBiasDataType, &derivedStrides, &derivedDims));
+    }
+
+    if(omittedTensorUid != 6)
+    {
+        tensorAttributes.push_back(
+            hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+                builder, 6, "dbias", scaleBiasDataType, &derivedStrides, &derivedDims));
+    }
+
+    if(hasOptionalAttributes)
+    {
+        if(omittedTensorUid != 7)
+        {
+            tensorAttributes.push_back(
+                hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+                    builder, 7, "mean", meanVarianceDataType, &derivedStrides, &derivedDims));
+        }
+
+        if(omittedTensorUid != 8)
+        {
+            tensorAttributes.push_back(
+                hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+                    builder,
+                    8,
+                    "inv_variance",
+                    meanVarianceDataType,
+                    &derivedStrides,
+                    &derivedDims));
+        }
+    }
+
+    const auto peerStatsOffset = peerStatsTensorUids.empty()
+                                     ? flatbuffers::Offset<flatbuffers::Vector<int64_t>>()
+                                     : builder.CreateVector(peerStatsTensorUids);
     auto bnormAttributes = hipdnn_flatbuffers_sdk::data_objects::CreateBatchnormBackwardAttributes(
         builder,
         2, // dy_tensor_uid
@@ -416,7 +456,7 @@ inline flatbuffers::FlatBufferBuilder
         hasOptionalAttributes ? flatbuffers::Optional<int64_t>(8)
                               : flatbuffers::nullopt, // inv_variance_tensor_uid
         4, // scale_tensor_uid
-        flatbuffers::Offset<flatbuffers::Vector<int64_t>>(), // peer_stats_tensor_uid
+        peerStatsOffset, // peer_stats_tensor_uid
         3, // dx_tensor_uid
         5, // dscale_tensor_uid
         6 // dbias_tensor_uid
