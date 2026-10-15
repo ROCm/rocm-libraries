@@ -10,6 +10,7 @@ Full documentation for hipTensor is available at [rocm.docs.amd.com/projects/hip
 
 ### Changed
 * Changed `hiptensorCreatePermutation`, `hiptensorCreateElementwiseBinary`, and `hiptensorCreateElementwiseTrinary` to return `HIPTENSOR_STATUS_INVALID_VALUE` when a mode shared by an input tensor and the output tensor has a different extent in each, and `HIPTENSOR_STATUS_NOT_SUPPORTED` when a mode is repeated within one tensor. An input tensor that carries a mode the output tensor doesn't carry is still rejected with `HIPTENSOR_STATUS_NOT_SUPPORTED`, since that would have to be reduced away rather than broadcast.
+* Changed `libhiptensor.so` to export symbols with hidden visibility by default, so only the documented public C API is exposed. Internal C++ classes and Composable Kernel template instantiations that were previously visible are now local to the library. Code that relied on those undocumented internal symbols will no longer find them.
 
 ### Resolved issues
 * Fixed `hiptensorPermute` and the element-wise binary/trinary execute paths ignoring user-supplied output tensor strides, which caused the output to always be written contiguously regardless of the strides set on the output descriptor.

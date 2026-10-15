@@ -3048,6 +3048,25 @@ namespace TensileLite
                 // value = [XCC, XCCG]
                 std::array<int, 2> value;
                 size_t             cuCount;
+                AMDGPU::Processor  processor;
+
+                /// Generic gfx942 solutions are CU-fallbacks on MI300A (228 CUs, vs 304 for
+                /// MI300X) and always launch at WGMXCC=1, but this runs before
+                /// setFallbackStatus() marks them, so fallbackStatus() alone misses them.
+                bool isMI300A() const
+                {
+                    static constexpr size_t MI300ACuCount = 228;
+                    return processor == AMDGPU::Processor::gfx942 && cuCount == MI300ACuCount;
+                }
+
+                /// True when this solution will be launched at WGMXCC=1 regardless of the
+                /// XCC baked into it, so the predicate must be evaluated with XCC=1.
+                /// On MI300A this is unconditionally true: every solution there takes the
+                /// WGMXCC=1 launch path, so isMI300A() short-circuits the whole check.
+                bool fallbackXCC(ContractionProblemGemm const& problem) const
+                {
+                    return problem.getParams().fallbackStatus() || isMI300A();
+                }
 
                 WorkgroupMappingXCCCheck()
                 {
@@ -3056,6 +3075,7 @@ namespace TensileLite
                     Hardware const& hardware = *pHardware;
                     AMDGPU const*   pAMDGPU  = dynamic_cast<AMDGPU const*>(&hardware);
                     cuCount                  = pAMDGPU->computeUnitCount;
+                    processor                = pAMDGPU->processor;
                 }
                 WorkgroupMappingXCCCheck(std::array<int, 2> value)
                     : value(value)
@@ -3065,13 +3085,16 @@ namespace TensileLite
                     Hardware const& hardware = *pHardware;
                     AMDGPU const*   pAMDGPU  = dynamic_cast<AMDGPU const*>(&hardware);
                     cuCount                  = pAMDGPU->computeUnitCount;
+                    processor                = pAMDGPU->processor;
                 }
 
                 /// Constructor for testing: inject cuCount so selection logic can be
                 /// unit-tested without a GPU (e.g. ROCM-2963: 38-CU partition alignment).
+                /// Assumes gfx942, so injecting MI300ACuCount exercises isMI300A().
                 WorkgroupMappingXCCCheck(std::array<int, 2> value, size_t cuCountForTest)
                     : value(value)
                     , cuCount(cuCountForTest)
+                    , processor(AMDGPU::Processor::gfx942)
                 {
                 }
 
@@ -3090,7 +3113,7 @@ namespace TensileLite
                     // We overwrite the XCC to 1 to make sure this can pass.
                     // But we also have to notice we are passing the correct XCC to kernel.
                     // (i.e. Remember to do param.setWGMXCC(1) when running the kernel)
-                    size_t XCC  = (problem.getParams().fallbackStatus()) ? 1 : value[0];
+                    size_t XCC  = fallbackXCC(problem) ? 1 : value[0];
                     size_t XCCG = (value[1] == -1) ? cuCount : value[1];
                     return ((XCC & (XCC - 1)) == 0) && XCCG % XCC == 0;
                 }
@@ -3100,7 +3123,7 @@ namespace TensileLite
                 {
                     if(value[0] == -1)
                         return true;
-                    size_t XCC  = (problem.getParams().fallbackStatus()) ? 1 : value[0];
+                    size_t XCC  = fallbackXCC(problem) ? 1 : value[0];
                     size_t XCCG = (value[1] == -1) ? cuCount : value[1];
                     return debugEvalCmp(problem,
                                         stream,
