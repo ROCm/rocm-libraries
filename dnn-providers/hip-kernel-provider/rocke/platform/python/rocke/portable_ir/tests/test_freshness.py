@@ -238,15 +238,17 @@ class TestLoadedEngineFreshness(_CleanEnvironmentTest):
                 online.load()
         bind.assert_not_called()
 
-    def test_already_loaded_engine_is_rechecked_after_source_changes(self):
-        online._lib = _Library("old-build")
+    def test_already_loaded_engine_does_not_rehash_sources(self):
+        lib = _Library("current-build")
+        online._lib = lib
         online._lib_path = str(Path("loaded.so").resolve())
         try:
             with mock.patch.object(
-                online, "_current_source_build_id", return_value="current-build"
-            ):
-                with self.assertRaisesRegex(RuntimeError, "stale/mixed rocKE engine"):
-                    online.load(online._lib_path)
+                online, "_current_source_build_id"
+            ) as source_build_id:
+                self.assertIs(online.load(online._lib_path), lib)
+                self.assertIs(online.load(online._lib_path), lib)
+            source_build_id.assert_not_called()
         finally:
             online._lib = None
             online._lib_path = None
