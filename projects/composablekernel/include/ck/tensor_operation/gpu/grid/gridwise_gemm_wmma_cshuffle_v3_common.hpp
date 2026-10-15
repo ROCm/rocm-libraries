@@ -198,7 +198,7 @@ struct GridwiseGemm_wmma_cshuffle_v3_base
     //  - no multiAB
     //  - GemmSpecialization Default with transpose
 
-#if defined(__gfx120__)
+#if defined(__gfx120__) || defined(__gfx117__)
     static constexpr bool IsAWaveTransferApplicable = AWaveTransferApplicable();
 
     static constexpr bool IsBWaveTransferApplicable = BWaveTransferApplicable();

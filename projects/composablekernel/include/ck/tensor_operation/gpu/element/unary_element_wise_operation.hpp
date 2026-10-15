@@ -93,7 +93,7 @@ __device__ inline f8x4_t i4_to_f8x4(int q)
 
 __device__ inline f8x8_t i4_to_fp8x8(int q)
 {
-#if defined(__gfx12__)
+#if defined(__gfx12__) || defined(__gfx117__)
     uint32_t fp8x4_0;
     uint32_t fp8x4_1;
     // todo: replace amd_assemble_cvt_f32_i4 with __builtin_amdgcn_cvt_off_f32_i4
