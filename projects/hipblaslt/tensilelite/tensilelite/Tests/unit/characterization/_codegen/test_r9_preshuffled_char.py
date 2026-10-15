@@ -380,3 +380,83 @@ def test_r9_multi_du_rewind_is_unchanged_without_swizzle():
     plain = _rewind_increments(_kernel())
     ti = _tile("B", _kernel())
     assert plain["A"] == plain["B"] == int(ti.depthUBytes)
+
+
+# ---------------------------------------------------------------------------
+# 5. Agreement with the host pre-swizzle layout
+# ---------------------------------------------------------------------------
+
+def test_r9_layout_k_matches_the_host_padding_not_swizzle_k():
+    """K rounds up to the host's layout granularity, which is below swizzleK.
+
+    The host pads K to a whole operand before reshaping, and that padded K is the
+    pre-shuffled 16-row block stride.  swizzleK covers a whole wave and is larger,
+    so rounding to it puts every block after the first at the wrong offset for any
+    K that lands between the two.
+    """
+    from Tensile.Common.DataType import DataType
+    from Tensile.Common.Utilities import swizzleGeometry
+
+    solution = {
+        "MIInputPerThreadA": 32,
+        "MatrixInstM": 16,
+        "MatrixInstN": 16,
+        "MatrixInstK": 128,
+        "WavefrontSize": 64,
+        "ProblemType": {"DataTypeA": DataType("F4")},
+    }
+    geom = swizzleGeometry(solution, "A")
+
+    assert geom["layoutK"] == 64, geom
+    assert geom["swizzleK"] == 128, geom
+    # The two disagree, which is the whole point: K=224 pads to 256 either way,
+    # but K=320 pads to 320 for the host and 384 for swizzleK.
+    assert geom["layoutK"] < geom["swizzleK"]
+
+
+def test_r9_stream_k_start_offset_scales_by_rows_per_block():
+    """A StreamK range that starts mid-tile steps by the pre-shuffled row count.
+
+    The unroll loop advances the SRD by ``rows * DepthU``; a workgroup that starts
+    partway through a tile has to use the same scale or it lands 16x too close to
+    the tile start.
+    """
+    from Tensile.Components.StreamK import StreamK
+
+    kernel = _kernel(swizzleA=True)
+    kernel["MatrixInstM"] = 16
+    kernel["MatrixInstN"] = 16
+
+    assert StreamK._preShuffleRows(kernel, "A") == 16
+    # B is not swizzled here, and the MX scale buffers never are.
+    assert StreamK._preShuffleRows(kernel, "B") == 1
+    assert StreamK._preShuffleRows(kernel, "MXSA") == 1
+    assert StreamK._preShuffleRows(_kernel(), "A") == 1
+
+
+def test_r9_padding_correction_halves_the_stride_not_the_product():
+    """fp4 narrows the stride before multiplying, so a short K stays negative.
+
+    A K below one DepthU window makes ``stride - DepthU`` negative.  Narrowing the
+    product instead would be a logical shift of a two's-complement value, turning
+    a small negative step into roughly 2**31 and addressing far out of the tensor.
+    """
+    import re
+
+    import Tensile.Components.Subtile.SubtileGREmit as GR
+    from rocisa.code import Module
+
+    kernel = _kernel(swizzleB=True)
+    writer = _make_writer()
+    ti = _tile("B", kernel, writer)
+    ti.gr.sharedVgprGROffset = [40]
+
+    module = Module("t")
+    GR._addPreShuffleCorrectionToGROffsets(module, writer, kernel, ti, 20)
+    asm = str(module)
+
+    narrow = asm.index("FP4 elements to bytes")
+    product = asm.index("row padding correction")
+    assert narrow < product, f"stride must narrow before the multiply:\n{asm}"
+    assert re.search(r"s_lshr_b32[^/]*// FP4 elements to bytes", asm), asm
+    assert not re.search(r"v_lshrrev_b32[^/]*// FP4 elements to bytes", asm), asm

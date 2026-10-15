@@ -10966,6 +10966,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       swz = swizzleGeometry(kernel, cM)
       tP["swizzlePackK"]        = swz["packK"]
       tP["swizzleK"]            = swz["swizzleK"]
+      tP["swizzleLayoutK"]      = swz["layoutK"]
       tP["swizzleLaneSize"]     = swz["laneSize"]
       tP["swizzleLanesUsed"]    = swz["lanesUsed"]
       tP["swizzleLoadsPerLane"] = swz["loadsPerLane"]

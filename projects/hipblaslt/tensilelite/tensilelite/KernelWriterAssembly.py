@@ -5767,8 +5767,11 @@ class KernelWriterAssembly(KernelWriter):
     if tP["isSwizzled"]:
       # "StrideA0I" or "StrideB1J"
       strideName = "Stride%s%s"%(tc,self.states.indexChars[tP["idx"]])
+      # The stride is the pre-shuffled 16-row block stride, so it has to follow the
+      # padding the host applied when it laid the tensor out, not the per-wave
+      # swizzleK block.  They differ whenever swizzleK > one operand.
       module.addModuleAsFlatItems(self.setTo(strideName, "SizeL"))
-      module.addModuleAsFlatItems(self.alignTo(strideName, strideName, tP["swizzleK"]))
+      module.addModuleAsFlatItems(self.alignTo(strideName, strideName, tP["swizzleLayoutK"]))
 
     if kernel["BufferLoad"]:
       # maxAddrSgpr = size[n] * stride[n-1]

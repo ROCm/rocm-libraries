@@ -597,6 +597,8 @@ def swizzleGeometry(solution, tc: str) -> dict:
     # Pack several MI steps into one load when one operand is narrower than a dwordx4.
     packK     = max(1, int(SWIZZLE_LOAD_BYTES // (miInput * bpe)))
     miOperand = miInput * packK
+    # Elements the host pre-swizzle vectorises over per lane: half a dwordx4.
+    miKv      = max(1, int(SWIZZLE_LOAD_BYTES // 2 // bpe))
     laneSize  = min(miOperand, int(SWIZZLE_LOAD_BYTES // bpe))
     # Elements the wave holds vs. distinct elements the instruction consumes.
     dupFactor = max(1, (solution["WavefrontSize"] * miInput) // (miMorN * solution["MatrixInstK"]))
@@ -605,6 +607,13 @@ def swizzleGeometry(solution, tc: str) -> dict:
         "packK":        packK,
         "laneSize":     laneSize,
         "swizzleK":     max(1, lanesUsed // miMorN) * laneSize,
+        # K granularity the host pre-swizzle pads to before reshaping.  It packs
+        # SWIZZLE_LOAD_BYTES per lane out of miKv-element vectors, so the step is
+        # miInput * SWIZZLE_LOAD_BYTES / (miKv * bpe) elements.  This is the
+        # pre-shuffled 16-row block stride and is not swizzleK, which covers a
+        # whole wave and is larger; rounding K to swizzleK instead puts every
+        # block after the first at the wrong offset.
+        "layoutK":      int(miInput * SWIZZLE_LOAD_BYTES // (miKv * bpe)),
         "lanesUsed":    lanesUsed,
         "dupFactor":    dupFactor,
         "loadsPerLane": miOperand // laneSize,

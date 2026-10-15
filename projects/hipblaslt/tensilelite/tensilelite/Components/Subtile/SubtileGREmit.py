@@ -1438,13 +1438,19 @@ def _addPreShuffleCorrectionToGROffsets(module, writer, kernel, tile, rowOffset)
   module.add(VAndB32(dst=vgpr(corrVgpr),
                      src0=hex(~(nTileRows - 1) & 0xFFFFFFFF),
                      src1=vgpr(rowOffset), comment="aligned pre-shuffled row"))
-  module.add(SSubU32(dst=sgpr(tmpSgpr), src0=sgpr(strideRef), src1=hex(depthU),
-                     comment="stride - DepthU"))
+  if tile.bpe == 0.5:
+    # Halve the stride rather than the product: a K shorter than one DepthU
+    # window makes this step legitimately negative, and shifting the product
+    # right is a logical shift, which would turn it into roughly 2**31.
+    module.add(SLShiftRightB32(dst=sgpr(tmpSgpr), shiftHex=hex(1),
+                               src=sgpr(strideRef), comment="FP4 elements to bytes"))
+    module.add(SSubU32(dst=sgpr(tmpSgpr), src0=sgpr(tmpSgpr), src1=hex(depthU // 2),
+                       comment="stride - DepthU"))
+  else:
+    module.add(SSubU32(dst=sgpr(tmpSgpr), src0=sgpr(strideRef), src1=hex(depthU),
+                       comment="stride - DepthU"))
   module.add(VMulLOU32(dst=vgpr(corrVgpr), src0=sgpr(tmpSgpr),
                        src1=vgpr(corrVgpr), comment="row padding correction"))
-  if tile.bpe == 0.5:
-    module.add(VLShiftRightB32(dst=vgpr(corrVgpr), shiftHex=hex(1),
-                               src=vgpr(corrVgpr), comment="FP4 elements to bytes"))
 
   for i, grOffset in enumerate(tile.sharedVgprGROffset):
     module.add(VAddU32(dst=vgpr(grOffset), src0=vgpr(grOffset),
