@@ -3637,6 +3637,8 @@ class LogicalScheduler:
         """
         from Tensile.Components.Subtile.InstructionScheduler import (
             instructionSchedule,
+            issueScaleReadsEarly,
+            SCALE_LR_ISSUE_AFTER_MFMA,
             _MIN_MFMA_GAP_DS_READ_TO_WAIT_DEFAULT,
             _MIN_MFMA_GAP_DS_READ_TO_WAIT_GFX1250,
         )
@@ -3684,6 +3686,10 @@ class LogicalScheduler:
                                     for inst in (item.flatitems() if isinstance(item, Module) else [item])
                                     if isinstance(inst, LocalReadInstruction)}
                         scheduled = _reorderLocalReads(scheduled, tensorOf, lrOrder, lrGate)
+                    if (isGfx1250 and self.config.hasScale
+                            and label.startswith("MAINLOOP")):
+                        scheduled = issueScaleReadsEarly(
+                            scheduled, SCALE_LR_ISSUE_AFTER_MFMA)
                     module.add(scheduled)
                 else:
                     for em in em_list:

@@ -780,3 +780,56 @@ class TestIterateMode:
         from Tensile.SolutionStructs.Utilities import isSubtileIterateMode
         kernel = _create_gfx1250_kernel(64, 64, depth_u=depth_u)
         assert isSubtileIterateMode(kernel, "A") is expected
+
+
+def test_mainloop_scale_reads_issue_after_four_wmmas():
+    """K>0 scale reads move four WMMAs into an MFMA-opened phase.
+
+    A phase that opens on a ds_read is the post-barrier group. Its scale reads
+    stay where they were scheduled, behind the TDM wait.
+    """
+    from rocisa.code import Module
+    from rocisa.container import vgpr
+    from rocisa.enum import InstType
+    from rocisa.instruction import DSLoadB32, MXMFMAInstruction, SWaitCnt
+    from Tensile.Components.Subtile.InstructionScheduler import issueScaleReadsEarly
+
+    def wmma():
+        return MXMFMAInstruction(instType=InstType.INST_F32, accType=InstType.INST_F32,
+                                 variant=[32, 16, 128, 1], acc=vgpr(0), a=vgpr(1), b=vgpr(2))
+
+    def scale(tc, k):
+        return DSLoadB32(dst=vgpr(38), src=vgpr(33),
+                         comment=f"scale{tc}[group0,K={k}]: load 4B from LDS")
+
+    phase = Module("phase")
+    wmmas = [wmma() for _ in range(6)]
+    for inst in wmmas:
+        phase.add(inst)
+    scales = [scale("MXSA", 1) for _ in range(2)]
+    for inst in scales:
+        phase.add(inst)
+    out = list(issueScaleReadsEarly(phase, 4).flatitems())
+    assert out[:4] == wmmas[:4]
+    assert out[4:6] == scales
+    assert out[6:] == wmmas[4:]
+
+    burst = Module("post-barrier")
+    data = DSLoadB32(dst=vgpr(8), src=vgpr(16), comment="SubtileA")
+    burst.add(data)
+    for inst in wmmas[:4]:
+        burst.add(inst)
+    kept = scale("MXSA", 1)
+    burst.add(kept)
+    # A wait is a boundary: the following phase still moves, the burst does not.
+    burst.add(SWaitCnt(dscnt=0))
+    for inst in wmmas:
+        burst.add(inst)
+    nxt = [scale("MXSB", 2) for _ in range(2)]
+    for inst in nxt:
+        burst.add(inst)
+    out = list(issueScaleReadsEarly(burst, 4).flatitems())
+    assert out[0] is data
+    assert out[5] is kept
+    assert out[-2:] == wmmas[4:]
+    assert out[11:13] == nxt

@@ -8,6 +8,7 @@ with pluggable scheduling rules.
 """
 
 from typing import List, Tuple, Optional
+import re
 from rocisa.code import Module
 from rocisa.instruction import SWaitCnt, SBarrier, MFMAInstruction, MXMFMAInstruction, \
     LocalReadInstruction, GlobalReadInstruction, CommonInstruction
@@ -190,8 +191,18 @@ class _SlotPlacer:
 # gfx1250 needs a larger gap (8); other archs use 4.
 _MIN_MFMA_GAP_DS_READ_TO_WAIT_DEFAULT = 4
 _MIN_MFMA_GAP_DS_READ_TO_WAIT_GFX1250 = 8
+# K>0 scale reads are independent of the phase that issues them. Issuing the
+# group this many WMMAs after that phase opens hides their LDS latency before
+# the s_wait_dscnt that used to follow them immediately. Measured on the
+# gfx1250 DepthU-512 MXF4 main loop: 163.9 -> 161.0 us at 4096x4096x65536.
+SCALE_LR_ISSUE_AFTER_MFMA = 4
 
 _isDsRead = lambda x: isinstance(x, LocalReadInstruction)
+# K>0 scale reads carry this comment from emit_lr. K=0 reads the buffer the
+# just-completed TDM filled, so it is not matched and stays behind that wait.
+_EARLY_SCALE_READ = re.compile(r"^scaleMXS[AB]\[group\d+,K=[1-9]\d*\]")
+_isEarlyScaleRead = lambda x: (_isDsRead(x)
+                               and _EARLY_SCALE_READ.match(getattr(x, "comment", "") or ""))
 _isBufferLoad = lambda x: isinstance(x, GlobalReadInstruction)
 _isWaitCnt = lambda x: isinstance(x, SWaitCnt)
 _isM0Update = lambda x: isinstance(x, CommonInstruction) and hasattr(x, 'dst') and hasattr(x.dst, 'regType') and x.dst.regType == 'm'
@@ -450,6 +461,49 @@ def extractPathsFromBeforeDeps(emittedModules) -> Tuple[int, List[List[int]], Li
             regularPaths.append(path)
 
     return mfmaIdx, regularPaths, preMfmaPaths
+
+
+def issueScaleReadsEarly(scheduled, delay: int):
+    """Move K>0 scale ds_reads to ``delay`` WMMAs after the start of their phase.
+
+    Only phases that open on an MFMA are touched. A phase that opens on a
+    ds_read is the post-barrier group, whose K=0 scale reads must stay behind
+    the TDM wait. Reads never cross a wait, barrier, or address update.
+    """
+    from rocisa.code import TextBlock
+
+    items = scheduled.flatitems()
+    isMfma = lambda it: isinstance(it, (MFMAInstruction, MXMFMAInstruction))
+    isScale = _isEarlyScaleRead
+    isBoundary = lambda it: (not isMfma(it) and not isinstance(it, LocalReadInstruction)
+                             and not isinstance(it, TextBlock))
+    out, start = [], 0
+    while start < len(items):
+        end = start
+        while end < len(items) and not isBoundary(items[end]):
+            end += 1
+        span = items[start:end]
+        scales = [x for x in span if isScale(x)]
+        first = next((x for x in span if not isinstance(x, TextBlock)), None)
+        if scales and first is not None and isMfma(first):
+            rest = [x for x in span if not isScale(x)]
+            seen, at = 0, len(rest)
+            for i, x in enumerate(rest):
+                if isMfma(x):
+                    seen += 1
+                    if seen == delay:
+                        at = i + 1
+                        break
+            span = rest[:at] + scales + rest[at:]
+        out += span
+        if end < len(items):
+            out.append(items[end])
+        start = end + 1
+
+    rebuilt = Module(scheduled.name)
+    for it in out:
+        rebuilt.add(it)
+    return rebuilt
 
 
 def instructionSchedule(emittedModules, multiDU: bool = False,
