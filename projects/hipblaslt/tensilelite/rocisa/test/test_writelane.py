@@ -17,14 +17,20 @@ pytestmark = pytest.mark.skipif(
     not rocisa.isSupportedByStinkyTofu(_ISA), reason="gfx1250 backend unavailable")
 
 
-@pytest.fixture(scope="module", autouse=True)
+@pytest.fixture(autouse=True)
 def _isa_context():
+    isa = rocisa.rocIsa.getInstance()
+    previous = isa.getKernel()
     rocm = os.environ.get("ROCM_PATH", "/opt/rocm")
     search = os.pathsep.join([os.path.join(rocm, "bin"),
                               os.path.join(rocm, "lib", "llvm", "bin")])
     assembler = shutil.which("amdclang++", path=search) or "amdclang++"
-    rocisa.rocIsa.getInstance().init(_ISA, assembler, False)
-    rocisa.rocIsa.getInstance().setKernel(_ISA, 32)
+    isa.init(_ISA, assembler, False)
+    isa.setKernel(_ISA, 32)
+    try:
+        yield
+    finally:
+        isa.setKernel(tuple(previous.isa), previous.wavefrontSize)
 
 
 @pytest.mark.parametrize("payload", [32, 673])
