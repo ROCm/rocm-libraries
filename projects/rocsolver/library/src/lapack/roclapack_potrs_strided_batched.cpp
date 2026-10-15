@@ -96,7 +96,6 @@ try
     work3 = mem[2];
     work4 = mem[3];
 
-
     for(I isweep = 0; isweep < nsweep; isweep++)
     {
         I const bid = isweep * bid_inc;
