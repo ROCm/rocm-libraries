@@ -580,12 +580,18 @@ widths all differ, which a single `head_size` cannot name.
 | decode latent (weight-absorbed) | `MlaDecodeSpec` / `MlaDecodeGfx950Spec` | `build_mla_decode` / `build_mla_decode_gfx950` | gfx942 / gfx950 |
 | decode split-KV combine | `MlaDecodeCombineSpec` | `build_mla_decode_combine` | gfx942, gfx950 |
 
-`max_seqlen_q == 1` routes to decode (priority 5); prefill (priority 10) serves
-every other request and remains the `S_q = 1` fallback on gfx942. The decode
-kernel takes the absorbed query `[Q_nope @ W_UK_nopeᵀ | Q_rope]` and returns the
-normalized latent and the LSE; `W_UV` is the caller's batched GEMM. Heads sit on
-the MFMA n axis (64 per workgroup), and split-KV writes fp32 partials that the
-arch-neutral combine merges. Design: `library/builders/mla/DESIGN.md`; GPU
+`max_seqlen_q == 1` routes to decode, `max_seqlen_q >= 2` to prefill (gfx942
+only), and the two take different inputs, so neither stands in for the other:
+a one-query request that decode cannot serve is refused. The decode kernel
+takes the absorbed query `[Q_nope @ W_UK_nopeᵀ | Q_rope]` and returns the
+normalized latent and the LSE; `W_UV` is the caller's batched GEMM. The prefill kernel
+takes the projected, RoPE-rotated query and the per-head `W_UK` and returns the
+attention output. Decode puts heads on the MFMA n axis (64 per workgroup), and
+split-KV writes fp32 partials that the arch-neutral combine merges
+(`dispatch.mla.mla_decode_launch` describes both launches). The kernel as
+built, its contract and its correctness record:
+`library/examples/gfx942/mla_decode/README.md`, which also lists where it
+departs from the earlier design note `library/builders/mla/DESIGN.md`. GPU
 parity: `library/builders/mla/verify_mla_decode.py`.
 
 ## Attention Failure Modes
