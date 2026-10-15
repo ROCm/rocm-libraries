@@ -3,6 +3,6 @@
 
 #pragma once
 
-#include "benchmark_hooks.hpp" // the clients' hooks, ahead of the engine
+#include "benchmark_hooks.hpp" // ClientBenchmarkHooks
 
 #include <hipblaslt_benchmark/candidate_search.hpp>

@@ -170,7 +170,7 @@ try
         if(cfg.adaptive)
             if(const auto err = hipblaslt_bench::validate_adaptive_config(cfg); !err.empty())
                 hipblaslt_cerr << "hipblaslt adaptive timing: invalid config: " << err << "\n";
-        hipblaslt_bench::run_measurement(
+        hipblaslt_bench::run_measurement<ClientBenchmarkHooks>(
             launch, cfg, nullptr, nullptr, res.stream, result, {}, agreement);
 
         const bool ok = lastStatus == HIPBLAS_STATUS_SUCCESS;

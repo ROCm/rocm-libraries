@@ -3,14 +3,16 @@
 
 #pragma once
 
-#include "benchmark_timing.hpp" // run_measurement, the HIPBLASLT_BENCHMARK_* hooks
+#include "benchmark_timing.hpp" // run_measurement, DefaultHooks
 
 #include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <hip/hip_runtime.h>
 #include <limits>
+#include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <unordered_map>
 
@@ -63,76 +65,59 @@ namespace hipblaslt_bench
         hipLaunchKernelGGL(flush_icache<>, dim3(grid), dim3(64), 0, stream);
     }
 
-    // Opens a timed span: records event_start on the GPU timer, otherwise reads the CPU
-    // clock into time_used.
-    inline void pre_gpu_time(bool         use_gpu_timer,
-                             hipEvent_t&  event_gpu_time_start,
-                             double&      gpu_time_used,
-                             hipStream_t& stream)
+    // Sets cost_us to the microseconds one flush launch costs on the device `props`
+    // describes, for TimingConfig::flush_us, and returns false if the hooks report a
+    // failure. Measured with the given timer the first time a device is asked about with
+    // that timer, then reused for the life of the process. Devices calibrate in parallel,
+    // but one device never runs two calibrations at once, since each would time the
+    // other's launches.
+    template <typename Hooks = DefaultHooks>
+    bool flush_cost_us(bool                   use_gpu_timer,
+                       const hipDeviceProp_t& props,
+                       hipEvent_t             event_start,
+                       hipEvent_t             event_stop,
+                       hipStream_t            stream,
+                       double&                cost_us)
     {
-        if(use_gpu_timer)
-            HIPBLASLT_BENCHMARK_CHECK_HIP(hipEventRecord(event_gpu_time_start, stream));
-        else
-            gpu_time_used = HIPBLASLT_BENCHMARK_TIME_US_SYNC(stream);
-    }
+        struct Device
+        {
+            std::mutex            mutex;
+            std::optional<double> cost_us[2]; // by use_gpu_timer
+        };
+        static std::mutex                                               devices_mutex;
+        static std::unordered_map<std::string, std::unique_ptr<Device>> devices;
 
-    // Closes the span pre_gpu_time opened, leaving its length in microseconds in
-    // gpu_time_used.
-    inline void post_gpu_time(bool         use_gpu_timer,
-                              hipEvent_t&  event_gpu_time_start,
-                              hipEvent_t&  event_gpu_time_end,
-                              double&      gpu_time_used,
-                              hipStream_t& stream)
-    {
-        if(use_gpu_timer)
+        Device* device = nullptr;
         {
-            HIPBLASLT_BENCHMARK_CHECK_HIP(hipEventRecord(event_gpu_time_end, stream));
-            HIPBLASLT_BENCHMARK_CHECK_HIP(hipEventSynchronize(event_gpu_time_end));
-            float gpu_time_ms;
-            HIPBLASLT_BENCHMARK_CHECK_HIP(
-                hipEventElapsedTime(&gpu_time_ms, event_gpu_time_start, event_gpu_time_end));
-            gpu_time_used = gpu_time_ms * 1000; // ms to us
+            std::lock_guard<std::mutex> lock(devices_mutex);
+            auto& slot = devices[std::string(props.uuid.bytes, sizeof(props.uuid.bytes))];
+            if(!slot)
+                slot = std::make_unique<Device>();
+            device = slot.get();
         }
-        else
-        {
-            gpu_time_used = HIPBLASLT_BENCHMARK_TIME_US_SYNC(stream) - gpu_time_used;
-        }
-    }
 
-    // Microseconds one flush launch costs on the device `props` describes, for
-    // TimingConfig::flush_us. Measured with the given timer the first time a device is
-    // asked about, then reused for the life of the process.
-    inline double flush_cost_us(bool                   use_gpu_timer,
-                                const hipDeviceProp_t& props,
-                                hipEvent_t&            event_gpu_time_start,
-                                hipEvent_t&            event_gpu_time_end,
-                                hipStream_t&           stream)
-    {
-        const int32_t gpu_block3      = flush_icache_grid(props);
-        int           flush_iter      = 100000;
-        double        flush_time_used = 0;
-
-        static std::unordered_map<std::string, double> flush_times_cache;
-        static std::mutex                              mtx;
-        std::lock_guard<std::mutex>                    lock(mtx);
-        std::string                                    device_uuid(props.uuid.bytes);
-        if(!flush_times_cache.count(device_uuid))
+        std::lock_guard<std::mutex> lock(device->mutex);
+        std::optional<double>&      cached = device->cost_us[use_gpu_timer ? 1 : 0];
+        if(!cached)
         {
-            for(int i = 0; i < flush_iter; i++)
-                launch_flush_icache(gpu_block3, stream);
-            pre_gpu_time(use_gpu_timer, event_gpu_time_start, flush_time_used, stream);
-            for(int i = 0; i < flush_iter; i++)
-                launch_flush_icache(gpu_block3, stream);
-            post_gpu_time(
-                use_gpu_timer, event_gpu_time_start, event_gpu_time_end, flush_time_used, stream);
-            flush_time_used /= flush_iter;
-            flush_times_cache[device_uuid] = flush_time_used;
+            const int32_t flush_iter = 100000;
+            const int32_t grid       = flush_icache_grid(props);
+            auto          flush      = [&](int64_t) { launch_flush_icache(grid, stream); };
+            for(int32_t i = 0; i < flush_iter; i++)
+                flush(i);
+            int64_t index      = 0;
+            double  elapsed_us = 0.0;
+            if(!detail::time_batch<Hooks>(flush,
+                                          flush_iter,
+                                          index,
+                                          use_gpu_timer,
+                                          {event_start, event_stop, stream},
+                                          elapsed_us))
+                return false;
+            cached = elapsed_us / flush_iter;
         }
-        else
-        {
-            flush_time_used = flush_times_cache[device_uuid];
-        }
-        return flush_time_used;
+        cost_us = *cached;
+        return true;
     }
 
     struct SearchConfig
@@ -148,87 +133,186 @@ namespace hipblaslt_bench
         size_t       best = std::numeric_limits<size_t>::max(); // none measured
         TimingResult best_timing;
 
-        // Preparing a candidate failed fatally under gtest, which ends the search.
+        // A fatal failure under gtest, reported through should_abort, ended the search.
         bool aborted = false;
     };
 
-    // Searches `candidates` candidates, numbered from 0, and returns the winner.
-    //   prepare(sol)                       before anything else runs for sol
-    //   cold(sol, i)                       one cold launch, i counting from 0
-    //   launch(sol, i)                     one timed launch, i counting from 0
-    //   skipped(sol, warm_us, best_warm_us) sol was dropped by the skip-slow screen
-    //   measuring(sol)                     just before sol's timed phase
-    //   measured(sol, timing)              just after it
-    // should_abort is polled as run_measurement polls it.
-    template <typename Prepare,
-              typename Cold,
-              typename Launch,
-              typename Skipped,
-              typename Measuring,
-              typename Measured>
+    namespace detail
+    {
+        // What search_callbacks() sets every callback to: nothing.
+        struct no_callback
+        {
+            template <typename... Args>
+            void operator()(Args&&...) const
+            {
+            }
+        };
+    } // namespace detail
+
+    // The callbacks search_candidates calls, each set by name, so that two taking the
+    // same arguments cannot take each other's place:
+    //   search_callbacks().prepare(p).cold(c).launch(l).skipped(s).measuring(m).measured(d)
+    // For each candidate sol, in this order:
+    //   prepare(sol)                         before anything else runs for sol
+    //   cold(sol, i)                         one cold launch, i counting from 0
+    //   skipped(sol, warm_us, best_warm_us)  sol was dropped by the skip-slow screen
+    //   measuring(sol)                       just before sol's timed phase
+    //   launch(sol, i)                       one timed launch, i counting from 0
+    //   measured(sol, timing)                just after a timed phase that succeeded
+    // A callback left unset does nothing.
+    template <typename Prepare   = detail::no_callback,
+              typename Cold      = detail::no_callback,
+              typename Launch    = detail::no_callback,
+              typename Skipped   = detail::no_callback,
+              typename Measuring = detail::no_callback,
+              typename Measured  = detail::no_callback>
+    struct SearchCallbacks
+    {
+        Prepare   on_prepare;
+        Cold      on_cold;
+        Launch    on_launch;
+        Skipped   on_skipped;
+        Measuring on_measuring;
+        Measured  on_measured;
+
+        template <typename F>
+        SearchCallbacks<F, Cold, Launch, Skipped, Measuring, Measured> prepare(F f) const
+        {
+            return {f, on_cold, on_launch, on_skipped, on_measuring, on_measured};
+        }
+
+        template <typename F>
+        SearchCallbacks<Prepare, F, Launch, Skipped, Measuring, Measured> cold(F f) const
+        {
+            return {on_prepare, f, on_launch, on_skipped, on_measuring, on_measured};
+        }
+
+        template <typename F>
+        SearchCallbacks<Prepare, Cold, F, Skipped, Measuring, Measured> launch(F f) const
+        {
+            return {on_prepare, on_cold, f, on_skipped, on_measuring, on_measured};
+        }
+
+        template <typename F>
+        SearchCallbacks<Prepare, Cold, Launch, F, Measuring, Measured> skipped(F f) const
+        {
+            return {on_prepare, on_cold, on_launch, f, on_measuring, on_measured};
+        }
+
+        template <typename F>
+        SearchCallbacks<Prepare, Cold, Launch, Skipped, F, Measured> measuring(F f) const
+        {
+            return {on_prepare, on_cold, on_launch, on_skipped, f, on_measured};
+        }
+
+        template <typename F>
+        SearchCallbacks<Prepare, Cold, Launch, Skipped, Measuring, F> measured(F f) const
+        {
+            return {on_prepare, on_cold, on_launch, on_skipped, on_measuring, f};
+        }
+    };
+
+    inline SearchCallbacks<> search_callbacks()
+    {
+        return {};
+    }
+
+    // Searches `candidates` candidates, numbered from 0, calling `callbacks` from
+    // search_callbacks(), and returns the winner. A candidate whose cold or timed span
+    // fails, as the hooks report, is passed over: neither skipped nor measured, it cannot
+    // win. An invalid adaptive TimingConfig searches nothing; validate_adaptive_config gives
+    // the reason. should_abort is asked after each prepare, cold launch and timed phase, and
+    // a failure it reports that was not there when the candidate began ends the search.
+    template <typename Hooks = DefaultHooks, typename Callbacks>
     SearchResult search_candidates(size_t                       candidates,
                                    const SearchConfig&          search,
                                    const TimingConfig&          timing,
-                                   hipEvent_t&                  event_gpu_time_start,
-                                   hipEvent_t&                  event_gpu_time_end,
-                                   hipStream_t&                 stream,
-                                   Prepare&&                    prepare,
-                                   Cold&&                       cold,
-                                   Launch&&                     launch,
-                                   Skipped&&                    skipped,
-                                   Measuring&&                  measuring,
-                                   Measured&&                   measured,
+                                   hipEvent_t                   event_start,
+                                   hipEvent_t                   event_stop,
+                                   hipStream_t                  stream,
+                                   Callbacks&&                  callbacks,
                                    const std::function<bool()>& should_abort = {})
     {
         SearchResult result;
-        double       best_gpu_time  = std::numeric_limits<double>::max();
-        double       best_warm_time = std::numeric_limits<double>::max();
+        if(timing.adaptive && !validate_adaptive_config(timing).empty())
+            return result;
+
+        const detail::event_context events{event_start, event_stop, stream};
+        double                      best_gpu_time  = std::numeric_limits<double>::max();
+        double                      best_warm_time = std::numeric_limits<double>::max();
 
         for(size_t sol = 0; sol < candidates; sol++)
         {
             const bool failed_before = detail::aborted(should_abort);
-            prepare(sol);
-            if(!failed_before && detail::aborted(should_abort))
+            auto newly_failed = [&] { return !failed_before && detail::aborted(should_abort); };
+
+            callbacks.on_prepare(sol);
+            if(newly_failed())
             {
                 result.aborted = true;
                 return result;
             }
 
-            double warm_time = 0;
-            if(search.skip_slow_ratio)
-                pre_gpu_time(timing.use_gpu_timer, event_gpu_time_start, warm_time, stream);
-            for(int32_t i = 0; i < search.cold_calls; i++)
-                cold(sol, i);
+            bool cold_failed = false;
+            auto cold        = [&](int64_t i) {
+                if(cold_failed)
+                    return;
+                callbacks.on_cold(sol, static_cast<int32_t>(i));
+                cold_failed = newly_failed();
+            };
+            double warm_time = 0.0;
+            bool   warm_ok   = true;
             if(search.skip_slow_ratio)
             {
-                post_gpu_time(timing.use_gpu_timer,
-                              event_gpu_time_start,
-                              event_gpu_time_end,
-                              warm_time,
-                              stream);
+                int64_t index = 0;
+                warm_ok       = detail::time_batch<Hooks>(
+                    cold, search.cold_calls, index, timing.use_gpu_timer, events, warm_time);
+            }
+            else
+            {
+                for(int32_t i = 0; i < search.cold_calls; i++)
+                    cold(i);
+            }
+            if(cold_failed)
+            {
+                result.aborted = true;
+                return result;
+            }
+            if(!warm_ok)
+                continue;
+
+            if(search.skip_slow_ratio)
+            {
                 best_warm_time = best_warm_time < warm_time ? best_warm_time : warm_time;
                 if((warm_time * search.skip_slow_ratio) > best_warm_time)
                 {
-                    skipped(sol, warm_time, best_warm_time);
+                    callbacks.on_skipped(sol, warm_time, best_warm_time);
                     continue;
                 }
             }
 
             TimingResult measurement;
-            measuring(sol);
-            run_measurement(
+            callbacks.on_measuring(sol);
+            const bool measured = run_measurement<Hooks>(
                 [&](int64_t i) {
-                    launch(sol, i);
+                    callbacks.on_launch(sol, i);
                     if(search.flush)
                         launch_flush_icache(search.flush_grid, stream);
                 },
                 timing,
-                event_gpu_time_start,
-                event_gpu_time_end,
+                event_start,
+                event_stop,
                 stream,
                 measurement,
                 should_abort);
-            measured(sol, measurement);
+            if(newly_failed())
+            {
+                result.aborted = true;
+                return result;
+            }
+            if(!measured)
+                continue;
+            callbacks.on_measured(sol, measurement);
 
             if(best_gpu_time > measurement.median_us)
             {

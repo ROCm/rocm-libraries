@@ -6465,8 +6465,12 @@ void testing_matmul_with_bias(const Arguments& arg,
         };
 
         if(arg.flush)
-            timingCfg.flush_us = hipblaslt_bench::flush_cost_us(
-                arg.use_gpu_timer, deviceProps, event_gpu_time_start, event_gpu_time_end, stream);
+            hipblaslt_bench::flush_cost_us<ClientBenchmarkHooks>(arg.use_gpu_timer,
+                                                                 deviceProps,
+                                                                 event_gpu_time_start,
+                                                                 event_gpu_time_end,
+                                                                 stream,
+                                                                 timingCfg.flush_us);
 
         hipblaslt_bench::SearchConfig searchCfg;
         searchCfg.cold_calls      = number_cold_calls;
@@ -6727,199 +6731,149 @@ void testing_matmul_with_bias(const Arguments& arg,
                             hipblaslt_avg_ulp};
         };
 
+        // Every path reports its candidates through these.
+        const auto reporting
+            = hipblaslt_bench::search_callbacks().skipped(skipped).measuring(measuring).measured(
+                measured);
+
         hipblaslt_bench::SearchResult search;
         if(!do_grouped_gemm)
         {
             searchCfg.flush = arg.flush;
             if(arg.use_ext && batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
             {
-                search = hipblaslt_bench::search_candidates(
+                search = hipblaslt_bench::search_candidates<ClientBenchmarkHooks>(
                     heuristicResult.size(),
                     searchCfg,
                     timingCfg,
                     event_gpu_time_start,
                     event_gpu_time_end,
                     stream,
-                    [&](size_t sol) {
-                        prepareCandidate(sol);
-                        for(int32_t b = 0; b < block_count; b++)
-                        {
-                            gemmVec[b].setMaxWorkspaceBytes(workspace_size);
-                            CHECK_HIPBLASLT_ERROR(
-                                gemmVec[b].initialize(heuristicResult[sol].algo,
-                                                      tuningVec[heuristicTuningIndex[sol]],
-                                                      *dWorkspace));
-                        }
-                        startCotenant();
-                    },
-                    [&](size_t, int32_t i) {
-                        CHECK_HIPBLASLT_ERROR(gemmVec[i % block_count].run(stream));
-                        if(i == 0 && (arg.unit_check || arg.norm_check || arg.allclose_check))
-                            copy_gemm_to_host(stream, gemm_count, hD_1, (*dDp));
-                    },
-                    [&](size_t, int64_t i) {
-                        int b = static_cast<int>(i % block_count);
-                        CHECK_HIPBLASLT_ERROR(gemmVec[b].run(stream));
-                    },
-                    skipped,
-                    measuring,
-                    measured,
+                    reporting
+                        .prepare([&](size_t sol) {
+                            prepareCandidate(sol);
+                            for(int32_t b = 0; b < block_count; b++)
+                            {
+                                gemmVec[b].setMaxWorkspaceBytes(workspace_size);
+                                CHECK_HIPBLASLT_ERROR(
+                                    gemmVec[b].initialize(heuristicResult[sol].algo,
+                                                          tuningVec[heuristicTuningIndex[sol]],
+                                                          *dWorkspace));
+                            }
+                            startCotenant();
+                        })
+                        .cold([&](size_t, int32_t i) {
+                            CHECK_HIPBLASLT_ERROR(gemmVec[i % block_count].run(stream));
+                            if(i == 0 && (arg.unit_check || arg.norm_check || arg.allclose_check))
+                                copy_gemm_to_host(stream, gemm_count, hD_1, (*dDp));
+                        })
+                        .launch([&](size_t, int64_t i) {
+                            int b = static_cast<int>(i % block_count);
+                            CHECK_HIPBLASLT_ERROR(gemmVec[b].run(stream));
+                        }),
                     timingAbort);
             }
             else if(batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY) //For General Batch GEMM
             {
-                search = hipblaslt_bench::search_candidates(
+                // One launch of candidate sol on rotation block i % block_count, cold or timed.
+                auto launchBatched = [&](size_t sol, int64_t i) {
+                    int  b          = static_cast<int>(i % block_count);
+                    auto ptr_matmul = matmul[b][0];
+                    auto ptr_alpha  = arg.scaleAlpha_vector ? (dScaleAlphaVec[0].as<char>())
+                                                                 + b * size_scaleAlphaVec[0]
+                                                            : alpha_in[0];
+                    // Added this logic to mimic the rocblas test quick_gemm_batched_bad_arg_f32_r_bad_arg_F
+                    // This rocblas test passes alpha, A and B as 0 but beta as non-zero with valid C and D
+                    // To mimic this behavior if --sizek is passed as 0 in hipblaslt-bench for --batch_mode 1, size_dA and size_dB
+                    // will be set to 0 since A is MxK and B is KxN. In this case, we pass the pointer array A and B for
+                    // General batched GEMM as nullptr and introduced an explicit check for AddressA and AddressB != 0
+                    // in KernelWriterAssembly.py since the dereference of AddressA and AddressB for
+                    // General Batched GEMM happens before the alphaNonZero check.
+                    void* ptrA = (size_dA[0]) ? dda[b] : nullptr;
+                    void* ptrB = (size_dB[0]) ? ddb[b] : nullptr;
+                    return hipblasLtMatmul(handle,
+                                           ptr_matmul,
+                                           ptr_alpha,
+                                           ptrA,
+                                           matA[0],
+                                           ptrB,
+                                           matB[0],
+                                           &(h_beta[0]),
+                                           ddc[b],
+                                           matC[0],
+                                           ddd[b],
+                                           matD[0],
+                                           &heuristicResult[sol].algo,
+                                           *dWorkspace,
+                                           workspace_size,
+                                           stream);
+                };
+                search = hipblaslt_bench::search_candidates<ClientBenchmarkHooks>(
                     heuristicResult.size(),
                     searchCfg,
                     timingCfg,
                     event_gpu_time_start,
                     event_gpu_time_end,
                     stream,
-                    [&](size_t sol) {
-                        prepareCandidate(sol);
-                        startCotenant();
-                    },
-                    [&](size_t sol, int32_t i) {
-                        auto ptr_matmul = matmul[i % block_count][0];
-                        auto ptr_alpha  = arg.scaleAlpha_vector
-                                              ? (dScaleAlphaVec[0].as<char>())
-                                                   + (i % block_count) * size_scaleAlphaVec[0]
-                                              : alpha_in[0];
-                        // Added this logic to mimic the rocblas test quick_gemm_batched_bad_arg_f32_r_bad_arg_F
-                        // This rocblas test passes alpha, A and B as 0 but beta as non-zero with valid C and D
-                        // To mimic this behavior if --sizek is passed as 0 in hipblaslt-bench for --batch_mode 1, size_dA and size_dB
-                        // will be set to 0 since A is MxK and B is KxN. In this case, we pass the pointer array A and B for
-                        // General batched GEMM as nullptr and introduced an explicit check for AddressA and AddressB != 0
-                        // in KernelWriterAssembly.py since the dereference of AddressA and AddressB for
-                        // General Batched GEMM happens before the alphaNonZero check.
-                        void* ptrA = (size_dA[0]) ? dda[i % block_count] : nullptr;
-                        void* ptrB = (size_dB[0]) ? ddb[i % block_count] : nullptr;
-                        EXPECT_HIPBLAS_STATUS(hipblasLtMatmul(handle,
-                                                              ptr_matmul,
-                                                              ptr_alpha,
-                                                              ptrA,
-                                                              matA[0],
-                                                              ptrB,
-                                                              matB[0],
-                                                              &(h_beta[0]),
-                                                              ddc[i % block_count],
-                                                              matC[0],
-                                                              ddd[i % block_count],
-                                                              matD[0],
-                                                              &heuristicResult[sol].algo,
-                                                              *dWorkspace,
-                                                              workspace_size,
-                                                              stream),
-                                              HIPBLAS_STATUS_SUCCESS);
-                        if(i == 0 && (arg.unit_check || arg.norm_check || arg.allclose_check))
-                            copy_gemm_to_host(stream, arg.batch_count, hD_1, (*dDp));
-                    },
-                    [&](size_t sol, int64_t i) {
-                        int   b          = static_cast<int>(i % block_count);
-                        auto  ptr_matmul = matmul[b][0];
-                        auto  ptr_alpha  = arg.scaleAlpha_vector ? (dScaleAlphaVec[0].as<char>())
-                                                                     + b * size_scaleAlphaVec[0]
-                                                                 : alpha_in[0];
-                        void* ptrA       = (size_dA[0]) ? dda[b] : nullptr;
-                        void* ptrB       = (size_dB[0]) ? ddb[b] : nullptr;
-                        EXPECT_HIPBLAS_STATUS(hipblasLtMatmul(handle,
-                                                              ptr_matmul,
-                                                              ptr_alpha,
-                                                              ptrA,
-                                                              matA[0],
-                                                              ptrB,
-                                                              matB[0],
-                                                              &(h_beta[0]),
-                                                              ddc[b],
-                                                              matC[0],
-                                                              ddd[b],
-                                                              matD[0],
-                                                              &heuristicResult[sol].algo,
-                                                              *dWorkspace,
-                                                              workspace_size,
-                                                              stream),
-                                              HIPBLAS_STATUS_SUCCESS);
-                    },
-                    skipped,
-                    measuring,
-                    measured,
+                    reporting
+                        .prepare([&](size_t sol) {
+                            prepareCandidate(sol);
+                            startCotenant();
+                        })
+                        .cold([&](size_t sol, int32_t i) {
+                            EXPECT_HIPBLAS_STATUS(launchBatched(sol, i), HIPBLAS_STATUS_SUCCESS);
+                            if(i == 0 && (arg.unit_check || arg.norm_check || arg.allclose_check))
+                                copy_gemm_to_host(stream, arg.batch_count, hD_1, (*dDp));
+                        })
+                        .launch([&](size_t sol, int64_t i) {
+                            EXPECT_HIPBLAS_STATUS(launchBatched(sol, i), HIPBLAS_STATUS_SUCCESS);
+                        }),
                     timingAbort);
             }
             else
             {
-                search = hipblaslt_bench::search_candidates(
+                // One launch of candidate sol on rotation block i % block_count, cold or timed.
+                auto launchMatmul = [&](size_t sol, int64_t i) {
+                    int  b          = static_cast<int>(i % block_count);
+                    auto ptr_matmul = matmul[b][0];
+                    return hipblasLtMatmul(
+                        handle,
+                        ptr_matmul,
+                        alpha_ptr,
+                        dA[0].as<char>() + b * size_dA[0] * realDataTypeSize(TiA),
+                        matA[0],
+                        dB[0].as<char>() + b * size_dB[0] * realDataTypeSize(TiB),
+                        matB[0],
+                        beta_ptr,
+                        dC[0].as<char>() + b * size_C[0] * realDataTypeSize(To),
+                        matC[0],
+                        (*dDp)[0].as<char>() + b * size_D[0] * realDataTypeSize(To),
+                        matD[0],
+                        &heuristicResult[sol].algo,
+                        *dWorkspace,
+                        workspace_size,
+                        stream);
+                };
+                search = hipblaslt_bench::search_candidates<ClientBenchmarkHooks>(
                     heuristicResult.size(),
                     searchCfg,
                     timingCfg,
                     event_gpu_time_start,
                     event_gpu_time_end,
                     stream,
-                    [&](size_t sol) {
-                        prepareCandidate(sol);
-                        startCotenant();
-                    },
-                    [&](size_t sol, int32_t i) {
-                        auto ptr_matmul = matmul[i % block_count][0];
-                        auto ptr_alpha  = arg.scaleAlpha_vector
-                                              ? (dScaleAlphaVec[0].as<char>())
-                                                   + (i % block_count) * size_scaleAlphaVec[0]
-                                              : alpha_in[0];
-
-                        EXPECT_HIPBLAS_STATUS(
-                            hipblasLtMatmul(
-                                handle,
-                                ptr_matmul,
-                                alpha_ptr,
-                                dA[0].as<char>()
-                                    + (i % block_count) * size_dA[0] * realDataTypeSize(TiA),
-                                matA[0],
-                                dB[0].as<char>()
-                                    + (i % block_count) * size_dB[0] * realDataTypeSize(TiB),
-                                matB[0],
-                                beta_ptr,
-                                dC[0].as<char>()
-                                    + (i % block_count) * size_C[0] * realDataTypeSize(To),
-                                matC[0],
-                                (*dDp)[0].as<char>()
-                                    + (i % block_count) * size_D[0] * realDataTypeSize(To),
-                                matD[0],
-                                &heuristicResult[sol].algo,
-                                *dWorkspace,
-                                workspace_size,
-                                stream),
-                            HIPBLAS_STATUS_SUCCESS);
-                        if(i == 0 && (arg.unit_check || arg.norm_check || arg.allclose_check))
-                            copy_gemm_to_host(stream, gemm_count, hD_1, (*dDp));
-                    },
-                    [&](size_t sol, int64_t i) {
-                        int  b          = static_cast<int>(i % block_count);
-                        auto ptr_matmul = matmul[b][0];
-                        auto ptr_alpha  = arg.scaleAlpha_vector ? (dScaleAlphaVec[0].as<char>())
-                                                                     + b * size_scaleAlphaVec[0]
-                                                                : alpha_in[0];
-                        EXPECT_HIPBLAS_STATUS(
-                            hipblasLtMatmul(
-                                handle,
-                                ptr_matmul,
-                                alpha_ptr,
-                                dA[0].as<char>() + b * size_dA[0] * realDataTypeSize(TiA),
-                                matA[0],
-                                dB[0].as<char>() + b * size_dB[0] * realDataTypeSize(TiB),
-                                matB[0],
-                                beta_ptr,
-                                dC[0].as<char>() + b * size_C[0] * realDataTypeSize(To),
-                                matC[0],
-                                (*dDp)[0].as<char>() + b * size_D[0] * realDataTypeSize(To),
-                                matD[0],
-                                &heuristicResult[sol].algo,
-                                *dWorkspace,
-                                workspace_size,
-                                stream),
-                            HIPBLAS_STATUS_SUCCESS);
-                    },
-                    skipped,
-                    measuring,
-                    measured,
+                    reporting
+                        .prepare([&](size_t sol) {
+                            prepareCandidate(sol);
+                            startCotenant();
+                        })
+                        .cold([&](size_t sol, int32_t i) {
+                            EXPECT_HIPBLAS_STATUS(launchMatmul(sol, i), HIPBLAS_STATUS_SUCCESS);
+                            if(i == 0 && (arg.unit_check || arg.norm_check || arg.allclose_check))
+                                copy_gemm_to_host(stream, gemm_count, hD_1, (*dDp));
+                        })
+                        .launch([&](size_t sol, int64_t i) {
+                            EXPECT_HIPBLAS_STATUS(launchMatmul(sol, i), HIPBLAS_STATUS_SUCCESS);
+                        }),
                     timingAbort);
             }
         }
@@ -6930,87 +6884,83 @@ void testing_matmul_with_bias(const Arguments& arg,
             if(arg.use_user_args)
             {
                 std::vector<unsigned char*> d_userArgsVec(block_count);
-                search = hipblaslt_bench::search_candidates(
+                search = hipblaslt_bench::search_candidates<ClientBenchmarkHooks>(
                     heuristicResult.size(),
                     searchCfg,
                     timingCfg,
                     event_gpu_time_start,
                     event_gpu_time_end,
                     stream,
-                    [&](size_t sol) {
-                        prepareCandidate(sol);
-                        //grouped gemm
-                        for(int32_t b = 0; b < block_count; b++)
-                        {
-                            groupedGemmVec[b].setMaxWorkspaceBytes(workspace_size);
-                            CHECK_HIPBLASLT_ERROR(groupedGemmVec[b].initialize(
-                                heuristicResult[sol].algo,
-                                tuningVec[heuristicTuningIndex[sol]],
-                                ((unsigned char*)(*dWorkspace) + b * workspace_size)));
-                            groupedGemmVec[b].getDefaultValueForDeviceUserArguments(userArgs);
-                            d_userArgsVec[b]
-                                = (unsigned char*)d_userArgs
-                                  + b * gemm_count * sizeof(hipblaslt_ext::UserArguments);
-                            // Copy them to device memory
-                            CHECK_HIP_ERROR(
-                                hipMemcpy(d_userArgsVec[b],
-                                          userArgs,
-                                          gemm_count * sizeof(hipblaslt_ext::UserArguments),
-                                          hipMemcpyHostToDevice));
-                        }
-                        startCotenant();
-                    },
-                    [&](size_t, int32_t i) {
-                        CHECK_HIPBLASLT_ERROR(groupedGemmVec[i % block_count].run(
-                            d_userArgsVec[i % block_count], stream));
-                        if(i == 0 && (arg.unit_check || arg.norm_check || arg.allclose_check))
-                            copy_gemm_to_host(stream, gemm_count, hD_1, (*dDp));
-                    },
-                    [&](size_t, int64_t i) {
-                        int b = static_cast<int>(i % block_count);
-                        CHECK_HIPBLASLT_ERROR(groupedGemmVec[b].run(d_userArgsVec[b], stream));
-                    },
-                    skipped,
-                    measuring,
-                    measured,
+                    reporting
+                        .prepare([&](size_t sol) {
+                            prepareCandidate(sol);
+                            //grouped gemm
+                            for(int32_t b = 0; b < block_count; b++)
+                            {
+                                groupedGemmVec[b].setMaxWorkspaceBytes(workspace_size);
+                                CHECK_HIPBLASLT_ERROR(groupedGemmVec[b].initialize(
+                                    heuristicResult[sol].algo,
+                                    tuningVec[heuristicTuningIndex[sol]],
+                                    ((unsigned char*)(*dWorkspace) + b * workspace_size)));
+                                groupedGemmVec[b].getDefaultValueForDeviceUserArguments(userArgs);
+                                d_userArgsVec[b]
+                                    = (unsigned char*)d_userArgs
+                                      + b * gemm_count * sizeof(hipblaslt_ext::UserArguments);
+                                // Copy them to device memory
+                                CHECK_HIP_ERROR(
+                                    hipMemcpy(d_userArgsVec[b],
+                                              userArgs,
+                                              gemm_count * sizeof(hipblaslt_ext::UserArguments),
+                                              hipMemcpyHostToDevice));
+                            }
+                            startCotenant();
+                        })
+                        .cold([&](size_t, int32_t i) {
+                            CHECK_HIPBLASLT_ERROR(groupedGemmVec[i % block_count].run(
+                                d_userArgsVec[i % block_count], stream));
+                            if(i == 0 && (arg.unit_check || arg.norm_check || arg.allclose_check))
+                                copy_gemm_to_host(stream, gemm_count, hD_1, (*dDp));
+                        })
+                        .launch([&](size_t, int64_t i) {
+                            int b = static_cast<int>(i % block_count);
+                            CHECK_HIPBLASLT_ERROR(groupedGemmVec[b].run(d_userArgsVec[b], stream));
+                        }),
                     timingAbort);
             }
             else
             {
-                search = hipblaslt_bench::search_candidates(
+                search = hipblaslt_bench::search_candidates<ClientBenchmarkHooks>(
                     heuristicResult.size(),
                     searchCfg,
                     timingCfg,
                     event_gpu_time_start,
                     event_gpu_time_end,
                     stream,
-                    [&](size_t sol) {
-                        prepareCandidate(sol);
-                        //grouped gemm
-                        for(int32_t b = 0; b < block_count; b++)
-                        {
-                            groupedGemmVec[b].setMaxWorkspaceBytes(workspace_size);
-                            CHECK_HIPBLASLT_ERROR(groupedGemmVec[b].initialize(
-                                heuristicResult[sol].algo,
-                                tuningVec[heuristicTuningIndex[sol]],
-                                ((unsigned char*)(*dWorkspace) + b * workspace_size),
-                                false,
-                                stream));
-                        }
-                        startCotenant();
-                    },
-                    [&](size_t, int32_t i) {
-                        CHECK_HIPBLASLT_ERROR(groupedGemmVec[i % block_count].run(stream));
-                        if(i == 0 && (arg.unit_check || arg.norm_check || arg.allclose_check))
-                            copy_gemm_to_host(stream, gemm_count, hD_1, (*dDp));
-                    },
-                    [&](size_t, int64_t i) {
-                        int b = static_cast<int>(i % block_count);
-                        CHECK_HIPBLASLT_ERROR(groupedGemmVec[b].run(stream));
-                    },
-                    skipped,
-                    measuring,
-                    measured,
+                    reporting
+                        .prepare([&](size_t sol) {
+                            prepareCandidate(sol);
+                            //grouped gemm
+                            for(int32_t b = 0; b < block_count; b++)
+                            {
+                                groupedGemmVec[b].setMaxWorkspaceBytes(workspace_size);
+                                CHECK_HIPBLASLT_ERROR(groupedGemmVec[b].initialize(
+                                    heuristicResult[sol].algo,
+                                    tuningVec[heuristicTuningIndex[sol]],
+                                    ((unsigned char*)(*dWorkspace) + b * workspace_size),
+                                    false,
+                                    stream));
+                            }
+                            startCotenant();
+                        })
+                        .cold([&](size_t, int32_t i) {
+                            CHECK_HIPBLASLT_ERROR(groupedGemmVec[i % block_count].run(stream));
+                            if(i == 0 && (arg.unit_check || arg.norm_check || arg.allclose_check))
+                                copy_gemm_to_host(stream, gemm_count, hD_1, (*dDp));
+                        })
+                        .launch([&](size_t, int64_t i) {
+                            int b = static_cast<int>(i % block_count);
+                            CHECK_HIPBLASLT_ERROR(groupedGemmVec[b].run(stream));
+                        }),
                     timingAbort);
             }
         }
