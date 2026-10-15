@@ -190,6 +190,28 @@ def assign_gpu_to_worker(worker_id, worker_gpu_id):
         print(f"Warning: Could not parse worker_id '{worker_id}' for GPU assignment")
 
 @pytest.fixture(autouse=True)
+def _restore_valid_parameters_isa():
+    """Put ``validParameters["ISA"]`` back after each test.
+
+    ``assignGlobalParameters`` rebinds that entry to the isa map it was given.
+    ``test_valid_parameters_structure`` snapshots the static list, whose second
+    entry is gfx803. A gfx942 assignment that does not restore leaves the next
+    test on this worker comparing against ``(9, 4, *)``.
+    """
+    from Tensile.Common.ValidParameters import validParameters
+
+    saved = validParameters.get("ISA")
+    saved_isa = None if saved is None else list(saved)
+    try:
+        yield
+    finally:
+        if saved_isa is None:
+            validParameters.pop("ISA", None)
+        else:
+            validParameters["ISA"] = saved_isa
+
+
+@pytest.fixture(autouse=True)
 def clear_ffm_memfile_per_test():
    """
    Unlinks the worker's HSA_MODEL_MEMFILE after each test so the next
