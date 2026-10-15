@@ -7773,13 +7773,8 @@ namespace TensileLite
                         throw std::runtime_error(
                             "DataParallel cluster padded tile count exceeds the 32-bit scheduling limit");
                     size_t clusters = std::max(grid / geometry.clusterSize, size_t{1});
-                    // PrefetchAcrossPersistent issues the next tile's multicast loads
-                    // while partners may still read LDS, so it keeps one block per cluster.
-                    if(self.sizeMapping.prefetchAcrossPersistent)
-                    {
-                        clusters = blocks;
-                        if(outClusterDPGridClamp) *outClusterDPGridClamp = true;
-                    }
+                    // PAP releases the next tile's LDS bank across the cluster
+                    // before prefetching, so it uses the same persistent grid.
                     grid = checkedMultiply(std::max(std::min(clusters, blocks), size_t{1}),
                                            geometry.clusterSize);
                 }
