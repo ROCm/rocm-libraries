@@ -227,6 +227,14 @@ if(BUILD_TESTING OR HIPBLASLT_BUILD_TESTING)
     endif()
     if(HIPBLASLT_ENABLE_COVERAGE)
         target_compile_definitions(hipblaslt-test PRIVATE CODE_COVERAGE)
+        # Test sources include library headers, so they emit their own copies of the
+        # library's inline functions. The linker keeps one copy per function; unless the
+        # test copies are instrumented too, the library's calls to it can go uncounted.
+        # Optimization stays on here because these sources hold the CPU reference math.
+        target_compile_options(hipblaslt-test PRIVATE
+            "$<$<COMPILE_LANGUAGE:CXX>:SHELL:-Xarch_host -fprofile-instr-generate>"
+            "$<$<COMPILE_LANGUAGE:CXX>:SHELL:-Xarch_host -fcoverage-mapping>"
+        )
         # For coverage testing, link against hipblaslt's object files to access internal symbols
         # This ensures we test the real library code, not stubs
         target_link_libraries(hipblaslt-test PRIVATE
