@@ -802,11 +802,11 @@ TEST_F(TestSdpaFwdPlanBuilder, GetMaxWorkspaceSizeCalculatesCorrectly)
 }
 
 // =============================================================================
-// Canonical mask-attribute policy (plan_utils::getMaskType)
+// Canonical mask-attribute policy (resolveDiagonalBand + getMaskType)
 // =============================================================================
 //
 // These tests exercise the shared mask policy directly through
-// plan_utils::getMaskType rather than through isApplicable. A deprecated causal
+// plan_utils::resolveDiagonalBand and plan_utils::getMaskType rather than through isApplicable. A deprecated causal
 // boolean is merged with the stored bounds and alignment (see
 // plan_utils::resolveDiagonalBand); only setting both booleans throws. The policy is
 // hardware-agnostic (it runs before any device dispatch and independent of the
@@ -816,7 +816,7 @@ TEST_F(TestSdpaFwdPlanBuilder, GetMaxWorkspaceSizeCalculatesCorrectly)
 // matching kernel" rejection that gfx950 produces for causal configurations
 // (the gfx950 forward registry carries NO_MASK rows only).
 
-// Resolve the SDPA attributes from a graph buffer and classify the mask.
+// Extract the diagonal band from a graph buffer and classify the mask.
 plan_utils::MaskType classifyMask(const flatbuffers::FlatBufferBuilder& builder)
 {
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
@@ -824,7 +824,8 @@ plan_utils::MaskType classifyMask(const flatbuffers::FlatBufferBuilder& builder)
     const auto& attrs = graphWrapper.nodeWrappers()
                             .front()
                             ->attributesAs<hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes>();
-    return plan_utils::getMaskType(attrs);
+    const auto band = plan_utils::resolveDiagonalBand(attrs);
+    return plan_utils::getMaskType(band.leftBound, band.rightBound, band.alignment);
 }
 
 // cuDNN's default: no attn_scale_value and no scale tensor means no scaling.
@@ -872,6 +873,129 @@ INSTANTIATE_TEST_SUITE_P(,
                          TestSdpaFwdDeprecatedCausalMask,
                          ::testing::ValuesIn(deprecatedCausalMaskCases()),
                          deprecatedCausalMaskCaseName);
+
+// =============================================================================
+// plan_utils::makeCoveringBoundsUnbound
+// =============================================================================
+//
+// A window that already covers the whole sequence span masks nothing on that
+// side, so it classifies as the plain causal or unmasked kernel. Narrower windows
+// stay sliding windows. Spans: top-left left=seqLenQ-1 right=seqLenKv-1;
+// bottom-right left=seqLenKv-1 right=seqLenQ-1.
+
+namespace
+{
+using hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment;
+
+constexpr int64_t COVERING_SEQ_LEN_Q = 128;
+constexpr int64_t COVERING_SEQ_LEN_KV = 512;
+
+plan_utils::MaskType classifyAfterUnbounding(int64_t leftBound,
+                                             int64_t rightBound,
+                                             DiagonalAlignment alignment,
+                                             int64_t seqLenQ = COVERING_SEQ_LEN_Q,
+                                             int64_t seqLenKv = COVERING_SEQ_LEN_KV)
+{
+    const auto band = plan_utils::makeCoveringBoundsUnbound(
+        {leftBound, rightBound, alignment}, seqLenQ, seqLenKv);
+    return plan_utils::getMaskType(band.leftBound, band.rightBound, band.alignment);
+}
+} // namespace
+
+TEST(TestSdpaFwdMakeCoveringBoundsUnbound, TopLeftCoveringLeftBoundIsCausal)
+{
+    EXPECT_EQ(classifyAfterUnbounding(127, 0, DiagonalAlignment::TOP_LEFT),
+              plan_utils::MaskType::TOP_LEFT_CAUSAL);
+    EXPECT_EQ(classifyAfterUnbounding(126, 0, DiagonalAlignment::TOP_LEFT),
+              plan_utils::MaskType::SLIDING_WINDOW);
+}
+
+TEST(TestSdpaFwdMakeCoveringBoundsUnbound, TopLeftCoveringRightBoundIsNoMask)
+{
+    EXPECT_EQ(classifyAfterUnbounding(-1, 511, DiagonalAlignment::TOP_LEFT),
+              plan_utils::MaskType::NO_MASK);
+    EXPECT_EQ(classifyAfterUnbounding(-1, 510, DiagonalAlignment::TOP_LEFT),
+              plan_utils::MaskType::SLIDING_WINDOW);
+}
+
+TEST(TestSdpaFwdMakeCoveringBoundsUnbound, BottomRightCoveringLeftBoundIsCausal)
+{
+    EXPECT_EQ(classifyAfterUnbounding(511, 0, DiagonalAlignment::BOTTOM_RIGHT),
+              plan_utils::MaskType::BOTTOM_RIGHT_CAUSAL);
+    EXPECT_EQ(classifyAfterUnbounding(510, 0, DiagonalAlignment::BOTTOM_RIGHT),
+              plan_utils::MaskType::SLIDING_WINDOW);
+}
+
+TEST(TestSdpaFwdMakeCoveringBoundsUnbound, BottomRightCoveringRightBoundIsNoMask)
+{
+    EXPECT_EQ(classifyAfterUnbounding(-1, 127, DiagonalAlignment::BOTTOM_RIGHT),
+              plan_utils::MaskType::NO_MASK);
+    EXPECT_EQ(classifyAfterUnbounding(-1, 126, DiagonalAlignment::BOTTOM_RIGHT),
+              plan_utils::MaskType::SLIDING_WINDOW);
+}
+
+TEST(TestSdpaFwdMakeCoveringBoundsUnbound, BothBoundsCoveringIsNoMask)
+{
+    EXPECT_EQ(classifyAfterUnbounding(127, 511, DiagonalAlignment::TOP_LEFT),
+              plan_utils::MaskType::NO_MASK);
+    EXPECT_EQ(classifyAfterUnbounding(-1, -1, DiagonalAlignment::TOP_LEFT),
+              plan_utils::MaskType::NO_MASK);
+}
+
+TEST(TestSdpaFwdMakeCoveringBoundsUnbound, BoundsInsideSequencePassThroughUnchanged)
+{
+    for(const auto alignment : {DiagonalAlignment::TOP_LEFT, DiagonalAlignment::BOTTOM_RIGHT})
+    {
+        const auto band = plan_utils::makeCoveringBoundsUnbound(
+            {10, 20, alignment}, COVERING_SEQ_LEN_Q, COVERING_SEQ_LEN_KV);
+        EXPECT_EQ(band.leftBound, 10);
+        EXPECT_EQ(band.rightBound, 20);
+        EXPECT_EQ(band.alignment, alignment);
+    }
+}
+
+// A raw int64 bound of 4294967298 would wrap to 2 in an int32 kernel field and
+// shrink the window; once covering it is the unbounded request instead.
+TEST(TestSdpaFwdMakeCoveringBoundsUnbound, HugeCoveringBoundBecomesUnboundedRequest)
+{
+    constexpr int64_t HUGE_BOUND = 4294967298;
+    const auto band = plan_utils::makeCoveringBoundsUnbound(
+        {HUGE_BOUND, 0, DiagonalAlignment::TOP_LEFT}, COVERING_SEQ_LEN_Q, COVERING_SEQ_LEN_KV);
+    EXPECT_EQ(band.leftBound, -1);
+    EXPECT_EQ(plan_utils::getMaskType(band.leftBound, band.rightBound, band.alignment),
+              plan_utils::MaskType::TOP_LEFT_CAUSAL);
+
+    constexpr auto SEQ_Q = static_cast<int32_t>(COVERING_SEQ_LEN_Q);
+    constexpr auto SEQ_KV = static_cast<int32_t>(COVERING_SEQ_LEN_KV);
+    EXPECT_EQ(plan_utils::computeMaskCoordinates(
+                  static_cast<int32_t>(band.leftBound), 0, SEQ_Q, SEQ_KV, true),
+              plan_utils::computeMaskCoordinates(SEQ_Q - 1, 0, SEQ_Q, SEQ_KV, true));
+}
+
+TEST(TestSdpaFwdMakeCoveringBoundsUnbound, HugeBoundBelowHugeSequenceStaysSlidingWindow)
+{
+    constexpr int64_t HUGE_BOUND = 4294967298;
+    constexpr int64_t HUGE_SEQ_LEN = int64_t{1} << 40;
+    const auto band = plan_utils::makeCoveringBoundsUnbound(
+        {HUGE_BOUND, 0, DiagonalAlignment::TOP_LEFT}, HUGE_SEQ_LEN, HUGE_SEQ_LEN);
+    EXPECT_EQ(band.leftBound, HUGE_BOUND);
+    EXPECT_EQ(plan_utils::getMaskType(band.leftBound, band.rightBound, band.alignment),
+              plan_utils::MaskType::SLIDING_WINDOW);
+}
+
+// A sequence length of 0 or 1 gives a span <= 0, so a causal right bound of 0
+// covers it and the mask is dropped on that side.
+TEST(TestSdpaFwdMakeCoveringBoundsUnbound, SingleTokenSequenceDropsCausalMaskOnItsAxis)
+{
+    EXPECT_EQ(classifyAfterUnbounding(-1, 0, DiagonalAlignment::TOP_LEFT, 128, 1),
+              plan_utils::MaskType::NO_MASK);
+    EXPECT_EQ(classifyAfterUnbounding(-1, 0, DiagonalAlignment::BOTTOM_RIGHT, 1, 128),
+              plan_utils::MaskType::NO_MASK);
+    EXPECT_EQ(classifyAfterUnbounding(-1, 0, DiagonalAlignment::TOP_LEFT, 1, 128),
+              plan_utils::MaskType::TOP_LEFT_CAUSAL);
+    EXPECT_EQ(classifyAfterUnbounding(-1, 0, DiagonalAlignment::BOTTOM_RIGHT, 128, 1),
+              plan_utils::MaskType::BOTTOM_RIGHT_CAUSAL);
+}
 
 // Modern bounds-trio path (no deprecated boolean set). An unset bound is treated
 // as unbounded (-1), so a partially specified trio still derives the mask it

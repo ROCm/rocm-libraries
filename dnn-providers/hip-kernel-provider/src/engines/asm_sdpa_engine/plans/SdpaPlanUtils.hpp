@@ -64,7 +64,35 @@ struct DiagonalBand
     hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment alignment;
 };
 
-// Resolve the requested diagonal band, merging the deprecated booleans the way
+// Replace each bound that already covers the whole sequence span with -1
+// (unbounded).
+//
+// A bound that reaches the widest offset the band can span for this alignment
+// and these sequence lengths masks nothing on its side, so it becomes -1. That
+// is the same mask: computeMaskCoordinates() replaces -1 with exactly that
+// widest offset (seqLen - 1 on the matching axis). A covering window therefore
+// classifies as plain causal or no-mask. Bounds that survive are returned
+// unchanged as int64, so a kernel field filled from one must first confirm it
+// fits int32 (every survivor is below a sequence length, which does).
+//
+// A sequence length of 0 or 1 gives a span <= 0, so a bound of 0 also becomes
+// -1 (e.g. top-left causal with seqLenKv == 1 is unmasked).
+//
+// Expects bounds >= -1 (resolveDiagonalBand() rejects the rest).
+inline DiagonalBand makeCoveringBoundsUnbound(DiagonalBand band, int64_t seqLenQ, int64_t seqLenKv)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment;
+    const bool bottomRight = band.alignment == DiagonalAlignment::BOTTOM_RIGHT;
+    const int64_t leftSpan = bottomRight ? seqLenKv - 1 : seqLenQ - 1;
+    const int64_t rightSpan = bottomRight ? seqLenQ - 1 : seqLenKv - 1;
+    const auto unboundIfCovering
+        = [](int64_t bound, int64_t span) { return (bound < 0 || bound >= span) ? -1 : bound; };
+    band.leftBound = unboundIfCovering(band.leftBound, leftSpan);
+    band.rightBound = unboundIfCovering(band.rightBound, rightSpan);
+    return band;
+}
+
+// Extract the requested diagonal band, merging the deprecated booleans the way
 // cuDNN's setters compose: a boolean acts as if its setter ran first (right
 // bound 0, plus BOTTOM_RIGHT alignment for causal_mask_bottom_right) and the
 // stored bounds and alignment are applied on top. An unset bound, or one equal
@@ -111,22 +139,22 @@ DiagonalBand resolveDiagonalBand(const SdpaAttrsT& attrs)
             bottomRightDeprecated ? DiagonalAlignment::BOTTOM_RIGHT : attrs.diagonal_alignment()};
 }
 
-// Classify the mask requested by an SDPA (forward or backward) attribute set,
-// after resolveDiagonalBand() merges the deprecated booleans into the band.
-template <typename SdpaAttrsT>
-MaskType getMaskType(const SdpaAttrsT& attrs)
+// Classify a diagonal band (from resolveDiagonalBand(), typically passed through
+// makeCoveringBoundsUnbound() first).
+inline MaskType getMaskType(int64_t leftBound,
+                            int64_t rightBound,
+                            hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment alignment)
 {
-    using namespace hipdnn_flatbuffers_sdk::data_objects;
+    using hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment;
 
-    const auto band = resolveDiagonalBand(attrs);
-    if(band.leftBound == -1 && band.rightBound == -1) // both unbounded
+    if(leftBound == -1 && rightBound == -1) // both unbounded
     {
         return MaskType::NO_MASK;
     }
-    if(band.leftBound == -1 && band.rightBound == 0) // causal: attend up to the diagonal
+    if(leftBound == -1 && rightBound == 0) // causal: attend up to the diagonal
     {
-        return band.alignment == DiagonalAlignment::BOTTOM_RIGHT ? MaskType::BOTTOM_RIGHT_CAUSAL
-                                                                 : MaskType::TOP_LEFT_CAUSAL;
+        return alignment == DiagonalAlignment::BOTTOM_RIGHT ? MaskType::BOTTOM_RIGHT_CAUSAL
+                                                            : MaskType::TOP_LEFT_CAUSAL;
     }
     return MaskType::SLIDING_WINDOW; // anything else is a sliding window
 }

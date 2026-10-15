@@ -294,7 +294,9 @@ enum class MaskType : int
  * @brief Which mask the graph is asking for, or nullopt for one this engine lacks.
  *
  * Deprecated causal booleans are merged with the bounds and alignment by
- * asm_sdpa_engine::plan_utils::getMaskType. Both booleans set, invalid bounds,
+ * asm_sdpa_engine::plan_utils::resolveDiagonalBand, then classified by getMaskType
+ * without makeCoveringBoundsUnbound (the Python shape miner does not unbound
+ * covering windows either). Both booleans set, invalid bounds,
  * or any band other than unmasked or causal, is declined: the compiled kernel is
  * hard-causal with no right-bound field, and no shipped variant carries a
  * non-zero sliding_window.
@@ -302,12 +304,14 @@ enum class MaskType : int
 std::optional<MaskType> maskTypeFor(const data_objects::SdpaAttributes& attributes)
 {
     using asm_sdpa_engine::plan_utils::getMaskType;
+    using asm_sdpa_engine::plan_utils::resolveDiagonalBand;
     using PlanMaskType = asm_sdpa_engine::plan_utils::MaskType;
 
     PlanMaskType planMask{};
     try
     {
-        planMask = getMaskType(attributes);
+        const auto band = resolveDiagonalBand(attributes);
+        planMask = getMaskType(band.leftBound, band.rightBound, band.alignment);
     }
     catch(const hipdnn_plugin_sdk::HipdnnPluginException& e)
     {
