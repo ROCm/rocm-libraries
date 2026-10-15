@@ -80,7 +80,7 @@ BenchmarkProblems:
         - GlobalReadVectorWidthA: [-1]
         - GlobalReadVectorWidthB: [-1]
         - VectorWidthA: [-1]
-        - VectorWidthB: [-1]
+        - VectorWidthB: [4]
         - LDSSegmentInterleave: [1]
         - LocalReadVectorWidth: [-1]
         - 1LDSBuffer: [0]
@@ -95,13 +95,16 @@ BenchmarkProblems:
         - CompactLoopStore: [False]
         - PreloadKernArgs: [True]
 
-        - ClusterDim: [[2,4]]
+        - ClusterDim: [[4,4]]
         - PrefetchGL2: [2]
         - InitCIterWmma: [0]
         - SwInstructionPrefetch: [0]
         # - ClusterBarrierRule3SignalLeadCycles: [100,300,500]
         - StinkyTofuParameters:
-          - {DsReadDrainLatency: 64, DsReadPerCap: 2, DsReadThrottleLatency: 96}
+          - {DsReadDrainLatency: 128, DsReadPerCap: 2, DsReadThrottleLatency: 96}
+
+        - ClusterAIDMapping: [-2]
+        - LDSSegmentBRotate: [1]
 
 
       BenchmarkForkParameters:

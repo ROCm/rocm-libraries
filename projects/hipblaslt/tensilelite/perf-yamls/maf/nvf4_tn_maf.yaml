@@ -93,6 +93,7 @@ BenchmarkProblems:
         - 1LDSBuffer: [0]
         - SourceSwap: [True]
         - ClusterDim: [[4,4]]
+        - ClusterAIDMapping: [-2]
         - InitCIterWmma: [1]
         - LDSSegmentInterleave: [1]
         - WorkGroupMapping: [1]

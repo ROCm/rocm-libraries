@@ -90,6 +90,8 @@ BenchmarkProblems:
         - ClusterDim: [[4,4]]
         - InitCIterWmma: [1]
         #- ClusterDim: [[1,1]]
+        - ClusterAIDMapping: [-2]
+        - LDSSegmentBRotate: [1]
         - WorkGroupMapping: [1]
         - StoreVectorWidth: [-1]
         - WavefrontSize: [32]
