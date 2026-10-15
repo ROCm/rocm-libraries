@@ -182,6 +182,19 @@ class TestHalfSelectRender(_IsaCase):
         holder.setHalfSelect(HighBitSel.HIGH)
         self.assertEqual(str(holder.getCopiedRC()), "v0.h")
 
+    def test_holder_survives_pickle(self):
+        # ParallelMap2 workers receive holders by pickle and then call
+        # getCopiedRC on them through replaceHolder.
+        self.use_isa(TRUE16_ISA)
+
+        holder = HolderContainer("v", 0, 1)
+        holder.setHalfSelect(HighBitSel.LOW)
+        revived = pickle.loads(pickle.dumps(holder))
+        self.assertEqual(str(revived.getCopiedRC()), "v0.l")
+
+        plain = pickle.loads(pickle.dumps(HolderContainer("v", 0, 1)))
+        self.assertEqual(str(plain.getCopiedRC()), "v0")
+
 
 class TestT16Gating(_IsaCase):
     """``t16`` NoSDWA gating (native: test_t16_gating)."""
