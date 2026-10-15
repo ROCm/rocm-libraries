@@ -11211,6 +11211,23 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
   # PostMainLoopBarrierCheckAndReset
   # Rebuild SBarrier placement by memory-token read/write phase transitions.
   ##############################################################################
+  def _usesMainLoopTokenBarrierPlanner(self, kernel):
+    scheduleIterAlg = kernel.get("_ScheduleIterAlg", self.states.scheduleIterAlg)
+    stOptLevel = kernel.get("_StinkyTofuOptLevel", 0)
+    numWaves = kernel["NumThreads"] // kernel["WavefrontSize"]
+    return scheduleIterAlg == 0 \
+      and (stOptLevel == 3 or dcpThickGateFromTokenPasses(kernel)) \
+      and kernel["enableTDMA"] and kernel["enableTDMB"] \
+      and numWaves > 1
+
+  def _needsSingleLoopPGRSync(self, kernel):
+    # PGL1+ and a pre-loop local-read transition drain tensorcnt and barrier
+    # before openLoop emits the one-tile escape. Only the unfenced PGL0 path
+    # with no prefetched local reads needs synchronization on the escape itself.
+    return self._usesMainLoopTokenBarrierPlanner(kernel) \
+      and kernel["PrefetchGL2"] == 0 \
+      and self.states.numItersPLR == 0
+
   def postMainLoopBarrierCheckAndReset(self, kernel, rootModule):
     """
     Rebuild SBarrier placement from dynamic memory-token usage:
@@ -11234,6 +11251,13 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       print2(f"[postMainLoopBarrierCheckAndReset] skip: numWaves={numWaves} (must be > 1)")
       return
 
+    # Scalar PGR1 TDM requires a second authored barrier and tensor-counter
+    # drain. Decoupled PGR still needs its text- or token-based planner.
+    if kernel["PrefetchGlobalRead"] == 1 \
+       and decoupledThickGateRelaxation(kernel) is None:
+      print2("[postMainLoopBarrierCheckAndReset] skip: PGR1 TDM requires writer-authored synchronization")
+      return
+
     removedCount = 0
     insertedCount = 0
 
@@ -11246,7 +11270,9 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         if isinstance(item, Module):
           modulesToScan.append(item)
           keptItems.append(item)
-        elif isinstance(item, SBarrier) and "-3" not in str(item).split("//", 1)[0]:
+        elif isinstance(item, SBarrier) \
+             and "-3" not in str(item).split("//", 1)[0] \
+             and "single-loop PGR bypass sync" not in str(item):
           # Pass-2 rebuilds only workgroup-scope barriers from token-state
           # transitions, so only those are cleared here. Cluster-scope split
           # barriers (s_barrier_signal/wait -3), e.g. the StreamKMulticast
