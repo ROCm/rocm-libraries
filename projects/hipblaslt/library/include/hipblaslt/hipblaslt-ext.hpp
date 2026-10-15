@@ -329,7 +329,7 @@ namespace hipblaslt_ext
         HIPBLASLT_EXPORT void setScaleC(const void* scaleC); //!< Set the scale C input pointer.
         HIPBLASLT_EXPORT void setScaleD(const void* scaleD); //!< Set the scale D input pointer.
         HIPBLASLT_EXPORT void
-            setScaleAux(const void* scaleAux); //!< Set the scale aux input pointer.
+            setScaleAux(const void* scaleAux); //!< Not supported; setProblem refuses non-NULL.
         HIPBLASLT_EXPORT void setScaleAlphaVec(
             const void* scaleAlphaVec); //!< Set the scaleAlpha vector input pointer.
         HIPBLASLT_EXPORT void setAux(const void* aux); //!< Set the aux input pointer.

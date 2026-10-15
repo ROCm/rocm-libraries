@@ -35,6 +35,10 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Set
 
 from .ir import (
+    _FENCE_ORDERINGS,
+    _FENCE_SCOPES,
+    _FLAG_STORE_ORDERINGS,
+    _is_flag_ptr,
     KernelDef,
     Op,
     Region,
@@ -120,6 +124,9 @@ _REQUIRED_ATTRS: Dict[str, List[str]] = {
     "tile.mma": ["op_id"],
     "scf.yield": ["num"],
     "tile.inline_asm": ["template", "constraints"],
+    "memref.fence": ["scope", "ordering"],
+    "memref.global_flag_store": ["scope", "ordering"],
+    "memref.global_flag_wait_eq": ["scope"],
 }
 
 
@@ -278,7 +285,14 @@ class _Verifier:
     def _check_contract(self, op: Op, scope: Dict[str, Value]) -> None:
         from .tf32 import tf32_op_error
 
-        error = tf32_op_error(op)
+        from .arch.mfma_scale import scaled_mfma_error
+
+        mx_error = (
+            scaled_mfma_error(op.attrs.get("op_id", ""), op.operands, op.results)
+            if op.name == "tile.mma"
+            else None
+        )
+        error = mx_error or tf32_op_error(op)
         if error:
             self.err(error, op)
         name = op.name
@@ -381,6 +395,41 @@ class _Verifier:
         elif name == "cf.return":
             if op.operands or op.results:
                 self.err(f"{name}: must have no operands and no results", op)
+        elif name == "memref.fence":
+            if op.operands or op.results:
+                self.err(f"{name}: must have no operands and no results", op)
+            self._check_sync_attrs(op, _FENCE_ORDERINGS)
+        elif name in ("memref.global_flag_store", "memref.global_flag_wait_eq"):
+            if len(op.operands) != 3 or op.results:
+                self.err(
+                    f"{name}: expected 3 operands / 0 results, got "
+                    f"{len(op.operands)} / {len(op.results)}",
+                    op,
+                )
+                return
+            ptr, idx, val = op.operands
+            if not _is_flag_ptr(ptr.type):
+                self.err(
+                    f"{name}: expected a global i32 pointer, got {ptr.type.name}", op
+                )
+            for what, v in (("index", idx), ("value", val)):
+                if v.type.name != "i32":
+                    self.err(f"{name}: {what} must be i32, got {v.type.name}", op)
+            orderings = (
+                _FLAG_STORE_ORDERINGS if name == "memref.global_flag_store" else None
+            )
+            self._check_sync_attrs(op, orderings)
+
+    def _check_sync_attrs(self, op: Op, orderings) -> None:
+        """Scope / ordering values of a fence or flag op (presence is checked
+        by the required-attrs pass, so a missing key is not reported twice)."""
+        scope = op.attrs.get("scope")
+        if isinstance(scope, str) and scope not in _FENCE_SCOPES:
+            self.err(f"{op.name}: unknown scope '{scope}'", op)
+        ordering = op.attrs.get("ordering")
+        if orderings is not None and isinstance(ordering, str):
+            if ordering not in orderings:
+                self.err(f"{op.name}: unknown ordering '{ordering}'", op)
 
     # ---- scf.for ----
 

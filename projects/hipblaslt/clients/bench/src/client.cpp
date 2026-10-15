@@ -708,6 +708,14 @@ try
         value<bool>(&arg.dump_matrix)->default_value(false),
         "Dump input and output matrices to a file.")
 
+        ("cotenant-cus",
+         value<int32_t>(&hipblaslt_bench_options::cotenant_cus())->default_value(0),
+         "Cotenant workgroup count on a separate stream; 0 (default) disables it. Must not exceed the device CU count. With max occupancy > 1, workgroups may share CUs.")
+
+        ("cotenant-max-occupancy",
+         value<int32_t>(&hipblaslt_bench_options::cotenant_max_occupancy())->default_value(1),
+         "Cotenant LDS-based workgroups-per-CU limit, 1-64 (default: 1).")
+
         ("sm_count_target",
          value<int32_t>(&hipblaslt_bench_options::sm_count_target())->default_value(0),
          "Target compute-unit (CU) count for the matmul kernel selection and "
@@ -896,6 +904,15 @@ try
         return 1;
     }
 
+    if(const auto err = hipblaslt_cotenant::validate_options(
+           hipblaslt_bench_options::cotenant_cus(),
+           hipblaslt_bench_options::cotenant_max_occupancy());
+       !err.empty())
+    {
+        hipblaslt_cerr << err << std::endl;
+        return 1;
+    }
+
     if(hipblaslt_bench_options::sm_count_target() < 0)
     {
         hipblaslt_cerr << "sm_count_target must be >= 0 (0 means \"use all CUs\")." << std::endl;
@@ -1012,6 +1029,10 @@ try
     if(device_count <= device_id)
         throw std::invalid_argument("Invalid Device ID");
     set_device(device_id);
+
+    if(hipblaslt_bench_options::cotenant_cus() > props.multiProcessorCount)
+        throw std::invalid_argument("cotenant-cus must not exceed the device CU count ("
+                                    + std::to_string(props.multiProcessorCount) + ").");
 
     auto perf_monitor = EfficiencyMonitor::create();
     if(perf_monitor->enabled())
@@ -1307,6 +1328,11 @@ try
     return run_bench_test(arg, filter, any_stride, props);
 }
 catch(const std::invalid_argument& exp)
+{
+    hipblaslt_cerr << exp.what() << std::endl;
+    return -1;
+}
+catch(const std::runtime_error& exp)
 {
     hipblaslt_cerr << exp.what() << std::endl;
     return -1;

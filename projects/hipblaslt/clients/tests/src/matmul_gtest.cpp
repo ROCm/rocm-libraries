@@ -37,6 +37,64 @@
 namespace
 {
 
+    void expect_preswizzled_layout_error(const Arguments& arg, const char* expected)
+    {
+        try
+        {
+            testing_matmul_with_bias(arg,
+                                     HIP_R_8F_E4M3,
+                                     HIP_R_8F_E4M3,
+                                     HIP_R_32F,
+                                     HIP_R_32F,
+                                     HIP_R_8F_E4M3,
+                                     HIP_R_8F_E4M3,
+                                     HIP_R_32F,
+                                     HIP_R_32F);
+            FAIL() << "Expected " << expected;
+        }
+        catch(const std::invalid_argument& error)
+        {
+            EXPECT_STREQ(error.what(), expected);
+        }
+    }
+
+    TEST(PreswizzledScaleLayout, smoke_rejects_nontransposed_A)
+    {
+        Arguments arg{};
+        arg.init();
+        arg.scaleA = arg.scaleB = hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT;
+        arg.transA              = 'N';
+        arg.transB              = 'N';
+        arg.M[0]                = 288;
+        arg.N[0]                = 32;
+        arg.K[0]                = 32;
+        arg.lda[0]              = 288;
+        arg.ldb[0]              = 32;
+        arg.ldc[0] = arg.ldd[0] = 288;
+        arg.fast_check          = 0;
+        // This NN case used to allocate 512 scale bytes for A and write 2304.
+        // Call the shared client entry so removing or moving its guard is observable.
+        expect_preswizzled_layout_error(arg, "scaleA=1001 requires transA=T");
+    }
+
+    TEST(PreswizzledScaleLayout, smoke_rejects_transposed_B)
+    {
+        Arguments arg{};
+        arg.init();
+        arg.scaleA = arg.scaleB = hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT;
+        arg.transA              = 'T';
+        arg.transB              = 'T';
+        arg.M[0]                = 32;
+        arg.N[0]                = 288;
+        arg.K[0]                = 32;
+        arg.lda[0]              = 32;
+        arg.ldb[0]              = 288;
+        arg.ldc[0] = arg.ldd[0] = 32;
+        arg.fast_check          = 0;
+        // A has its supported orientation, so it cannot mask a missing B check.
+        expect_preswizzled_layout_error(arg, "scaleB=1001 requires transB=N");
+    }
+
     TEST(FastCheckMx_pre_checkin, unsupported_transpose_layouts_are_refused)
     {
         Arguments arg{};

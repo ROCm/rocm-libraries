@@ -69,6 +69,9 @@ Completion requires:
 - Exact-engine quick/standard numerics and required negative cases, with selected,
   served, skipped and failed counts. Zero selected, all-skipped or another engine's work
   is not correctness evidence. An extension must dispatch its new candidate.
+- Packaging probes run and passing (RUNBOOK's final step): the automatic
+  `hkp-probe-<arch>` for the bundle's architecture (no edit), plus any named `UKDS` probe
+  the integration adds in `descriptor-packaging/probes/probes.cmake`.
 - Rebuilt/reinstalled artifacts after tuning or regeneration, then fresh final gates.
   Every final corpus input has an attributable runtime outcome and the complete join
   required by [workloads.md](workloads.md); missing, ambiguous or error outcomes block
