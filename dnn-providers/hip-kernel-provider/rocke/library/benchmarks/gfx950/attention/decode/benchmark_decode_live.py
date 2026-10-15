@@ -361,13 +361,20 @@ def _run_dsl(shape: DecodeShape, data: dict, num_cus: int, *, warmup: int, iters
             prepare_unified_attention_torch(**arguments) if path == "3d" else None
         )
         try:
-            call_once = (
-                execution.launch
-                if execution
-                else lambda: run_unified_attention_torch(**arguments)
-            )
-            ms = time_launches(call_once, warmup=warmup, iters=iters, stream=hip_stream)
-            synchronize_and_release(hip_stream)
+            if execution is not None:
+                # Validate bindings and establish stream/ownership outside timing.
+                with execution.replay_scope() as call_once:
+                    ms = time_launches(
+                        call_once, warmup=warmup, iters=iters, stream=hip_stream
+                    )
+            else:
+                ms = time_launches(
+                    lambda: run_unified_attention_torch(**arguments),
+                    warmup=warmup,
+                    iters=iters,
+                    stream=hip_stream,
+                )
+                synchronize_and_release(hip_stream)
         finally:
             if execution is not None:
                 execution.close()

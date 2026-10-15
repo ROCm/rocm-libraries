@@ -113,6 +113,32 @@ with prepare_unified_attention_torch(
         execution.launch()
 ```
 
+For a loop with fixed bindings on gfx942/gfx950, `replay_scope()` validates and
+warms up once on entry, then yields an asynchronous operation with immutable
+launch arguments. It establishes the execution's device and stream for the
+whole scope. Queue content updates on that stream before each replay:
+
+```python
+with prepare_unified_attention_torch(**arguments) as execution:
+    with execution.replay_scope() as replay:
+        for step in range(steps):
+            update_device_contents(step)  # Q/K/V and lengths, within the maximum
+            replay()
+    execution.rebind(q=next_q, out=next_out)
+```
+
+The callable is valid only inside the scope on its entering thread. Keep tensor
+objects, storage addresses, layouts, scalar values and launch configuration fixed
+throughout the scope; content-only updates need no rebind. Scope exit waits for
+queued work before restoring the caller's stream and releasing bound arguments.
+`rebind()` drains and validates new storage or scalar bindings between scopes;
+it also launches once. Drain before changing tensor storage metadata. A different
+geometry, dtype, layout, device or stream requires a new execution. Concurrent
+launch, rebind, close or nested scope on one owner is rejected. Do not change the
+active device/stream or begin an outer capture inside a scope; use `launch()`
+for outer capture. Both prepared eager and internal graph execution support
+this scope. A failed completion drain requires `close()` to retry cleanup.
+
 Prepared eager launches reuse three scratch tensors. The complete segment/reducer
 pair is submitted under one owner; concurrent or reentrant submission is rejected.
 Separate streams need separate execution owners. Do not close an execution while

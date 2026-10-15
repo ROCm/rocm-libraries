@@ -573,6 +573,12 @@ variant. Use rocprof to confirm, not to discover.
   Normalize live metadata once, preserve address/layout checks on every replay,
   and bypass a context only when its device and stream are already active.
   Keep cache bounds, capture isolation and drain-before-release rules intact.
+  If repeated validation still dominates a fixed-binding loop, use an explicit
+  execution scope: validate at entry, hold the device/stream and immutable launch
+  buffers, then drain before exit. The shared gfx942/gfx950 decode runtime exposes
+  `Attention3DExecution.replay_scope()` for this contract. Time its public callable;
+  keep direct graph replay as a diagnostic control. Rebind storage or scalars
+  between scopes, and retain ordinary-call guards for arbitrary live bindings.
   Run comparison arms sequentially on the same node, reversing their order
   across trials; check each arm against an independent numeric reference.
 
