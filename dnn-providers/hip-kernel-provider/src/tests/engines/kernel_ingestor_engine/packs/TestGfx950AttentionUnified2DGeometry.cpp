@@ -21,20 +21,18 @@ namespace
 constexpr const char* KERNEL_NAME = "hipkernel:Gfx950AttentionUnified2D/unit";
 
 Gfx950AttentionUnified2DGeometry geometryFor(int64_t blockMPerWarp,
-                                              int64_t numWarps,
-                                              int64_t numQueryHeads,
-                                              int64_t numKvHeads,
-                                              int64_t seqLenQ,
-                                              int64_t batch)
+                                             int64_t numWarps,
+                                             int64_t numQueryHeads,
+                                             int64_t numKvHeads,
+                                             int64_t seqLenQ,
+                                             int64_t batch)
 {
     return gfx950AttentionUnified2DGeometry(
         blockMPerWarp, numWarps, numQueryHeads, numKvHeads, seqLenQ, batch, KERNEL_NAME);
 }
 
-Gfx950AttentionUnified2DWorkspace workspaceFor(int64_t batch,
-                                               int64_t seqLenQ,
-                                               int64_t seqLenKv,
-                                               int64_t blockSize)
+Gfx950AttentionUnified2DWorkspace
+    workspaceFor(int64_t batch, int64_t seqLenQ, int64_t seqLenKv, int64_t blockSize)
 {
     return gfx950AttentionUnified2DWorkspace(batch, seqLenQ, seqLenKv, blockSize, KERNEL_NAME);
 }
@@ -96,29 +94,24 @@ TEST(TestGfx950AttentionUnified2DGeometry, GqaBlockQClampedToOneWhenNqkExceedsBl
 
 TEST(TestGfx950AttentionUnified2DGeometry, NonPositiveBlockMPerWarpThrows)
 {
-    EXPECT_THROW(geometryFor(0, 1, 8, 8, 512, 1),
-                 hipdnn_plugin_sdk::HipdnnPluginException);
-    EXPECT_THROW(geometryFor(-1, 1, 8, 8, 512, 1),
-                 hipdnn_plugin_sdk::HipdnnPluginException);
+    EXPECT_THROW(geometryFor(0, 1, 8, 8, 512, 1), hipdnn_plugin_sdk::HipdnnPluginException);
+    EXPECT_THROW(geometryFor(-1, 1, 8, 8, 512, 1), hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST(TestGfx950AttentionUnified2DGeometry, NonPositiveNumWarpsThrows)
 {
-    EXPECT_THROW(geometryFor(16, 0, 8, 8, 512, 1),
-                 hipdnn_plugin_sdk::HipdnnPluginException);
+    EXPECT_THROW(geometryFor(16, 0, 8, 8, 512, 1), hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST(TestGfx950AttentionUnified2DGeometry, NonPositiveSeqLenQThrows)
 {
-    EXPECT_THROW(geometryFor(16, 1, 8, 8, 0, 1),
-                 hipdnn_plugin_sdk::HipdnnPluginException);
+    EXPECT_THROW(geometryFor(16, 1, 8, 8, 0, 1), hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST(TestGfx950AttentionUnified2DGeometry, NonDivisibleGqaThrows)
 {
     // numQueryHeads % numKvHeads != 0
-    EXPECT_THROW(geometryFor(16, 1, 7, 4, 512, 1),
-                 hipdnn_plugin_sdk::HipdnnPluginException);
+    EXPECT_THROW(geometryFor(16, 1, 7, 4, 512, 1), hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 // ---------------------------------------------------------------------------
@@ -165,14 +158,12 @@ TEST(TestGfx950AttentionUnified2DWorkspace, QueryStartLenBytesIsBatchPlusOne)
 
 TEST(TestGfx950AttentionUnified2DWorkspace, NonDivisibleSeqLenKvThrows)
 {
-    EXPECT_THROW(workspaceFor(2, 512, 513, 16),
-                 hipdnn_plugin_sdk::HipdnnPluginException);
+    EXPECT_THROW(workspaceFor(2, 512, 513, 16), hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST(TestGfx950AttentionUnified2DWorkspace, NonPositiveBatchThrows)
 {
-    EXPECT_THROW(workspaceFor(0, 512, 512, 16),
-                 hipdnn_plugin_sdk::HipdnnPluginException);
+    EXPECT_THROW(workspaceFor(0, 512, 512, 16), hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 // ---------------------------------------------------------------------------
@@ -193,8 +184,7 @@ TEST(TestGfx950AttentionUnified2DSearchBound, MaxBatchForNumSeqs256Is511)
 
 TEST(TestGfx950AttentionUnified2DSearchBound, NumSeqs0GivesFallback)
 {
-    EXPECT_EQ(gfx950AttentionUnified2DSearchIterations(0),
-              GFX950_UNIFIED_2D_FALLBACK_SEARCH_ITERS);
+    EXPECT_EQ(gfx950AttentionUnified2DSearchIterations(0), GFX950_UNIFIED_2D_FALLBACK_SEARCH_ITERS);
 }
 
 TEST(TestGfx950AttentionUnified2DSearchBound, NumSeqs1Gives1Iter)

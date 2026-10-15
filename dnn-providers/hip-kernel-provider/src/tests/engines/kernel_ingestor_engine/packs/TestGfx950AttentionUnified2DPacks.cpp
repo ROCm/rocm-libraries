@@ -233,7 +233,7 @@ protected:
         }
         _expected = &it->second;
 
-        const auto allSets = discoverDescriptorSets();
+        const auto& allSets = discoverDescriptorSets();
         auto setIt = std::find_if(allSets.begin(), allSets.end(), [](const auto& s) {
             return s.engine.name == GFX950_ATTENTION_UNIFIED_2D_ENGINE_NAME;
         });
@@ -264,7 +264,7 @@ TEST_F(TestGfx950AttentionUnified2DPacks, LoadsExactlyTheEmittedKernels)
     std::set<std::string> loaded;
     for(const auto& pack : _set->packs)
     {
-        for(const auto& kernel : pack.kernelDescriptors)
+        for(const auto& kernel : pack.kernels)
         {
             loaded.insert(kernel.name);
         }
@@ -276,11 +276,10 @@ TEST_F(TestGfx950AttentionUnified2DPacks, EveryLoadedDescriptorCoversTheRequeste
 {
     for(const auto& pack : _set->packs)
     {
-        for(const auto& arch : pack.architectures)
+        for(const auto& arch : pack.arch)
         {
-            EXPECT_TRUE(coversArch(arch, _arch))
-                << "Pack '" << pack.name << "' declares arch '" << arch
-                << "', expected '" << _arch << "'";
+            EXPECT_TRUE(coversArch(arch, _arch)) << "Pack '" << pack.name << "' declares arch '"
+                                                 << arch << "', expected '" << _arch << "'";
         }
     }
 }
@@ -289,7 +288,7 @@ TEST_F(TestGfx950AttentionUnified2DPacks, EveryKernelDeclaresTheEmittedRuntimeSo
 {
     for(const auto& pack : _set->packs)
     {
-        for(const auto& kernel : pack.kernelDescriptors)
+        for(const auto& kernel : pack.kernels)
         {
             EXPECT_EQ(kernel.source.kind, EXPECTED_SOURCE_KIND)
                 << "Kernel '" << kernel.name << "' has unexpected source kind";
@@ -300,7 +299,7 @@ TEST_F(TestGfx950AttentionUnified2DPacks, EveryKernelDeclaresTheEmittedRuntimeSo
 TEST_F(TestGfx950AttentionUnified2DPacks, DeclaresTheConfiguredSdkVersion)
 {
     using hipdnn_data_sdk::utilities::Version;
-    EXPECT_EQ(_set->engine.sdkVersion, (Version{"1.0.0"}));
+    EXPECT_EQ(_set->engine.sdkVersion, hipdnn_data_sdk::utilities::Version{std::string("1.0.0")});
 }
 
 TEST_F(TestGfx950AttentionUnified2DPacks, ExposesTheConfiguredKnobs)

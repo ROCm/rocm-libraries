@@ -33,8 +33,7 @@ namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
 // Symbol names match the installed descriptor files exactly.
 constexpr std::string_view GRAPH_MATCHER_SYMBOL
     = "hipkernel.gfx950_attention_unified2_d.graph_match";
-constexpr std::string_view DISPATCH_SYMBOL
-    = "hipkernel.gfx950_attention_unified2_d.dispatch";
+constexpr std::string_view DISPATCH_SYMBOL = "hipkernel.gfx950_attention_unified2_d.dispatch";
 
 // Argument kinds.
 constexpr const char* BUFFER_KIND = "global_buffer";
@@ -78,11 +77,9 @@ flatbuffers::FlatBufferBuilder buildAcceptedSdpaGraph()
     constexpr int64_t BATCH = 2, HEADS_Q = 4, HEADS_KV = 4, SEQ = 256, HEAD_SIZE = 128;
 
     std::vector<int64_t> dims{BATCH, HEADS_Q, SEQ, HEAD_SIZE};
-    std::vector<int64_t> strides{
-        SEQ * HEADS_Q * HEAD_SIZE, HEAD_SIZE, HEADS_Q * HEAD_SIZE, 1};
+    std::vector<int64_t> strides{SEQ * HEADS_Q * HEAD_SIZE, HEAD_SIZE, HEADS_Q * HEAD_SIZE, 1};
     std::vector<int64_t> kdims{BATCH, HEADS_KV, SEQ, HEAD_SIZE};
-    std::vector<int64_t> kstrides{
-        SEQ * HEADS_KV * HEAD_SIZE, HEAD_SIZE, HEADS_KV * HEAD_SIZE, 1};
+    std::vector<int64_t> kstrides{SEQ * HEADS_KV * HEAD_SIZE, HEAD_SIZE, HEADS_KV * HEAD_SIZE, 1};
 
     auto qT = CreateTensorAttributesDirect(
         b, Q_UID, nullptr, DataType::BFLOAT16, &strides, &dims, false);
@@ -108,16 +105,12 @@ flatbuffers::FlatBufferBuilder buildAcceptedSdpaGraph()
     sdpa.add_implementation(AttentionImplementation::AUTO);
     auto sdpaAttr = sdpa.Finish();
 
-    auto node = CreateNodeDirect(b,
-                                 "sdpa",
-                                 DataType::FLOAT,
-                                 NodeAttributes::SdpaAttributes,
-                                 sdpaAttr.Union());
+    auto node = CreateNodeDirect(
+        b, "sdpa", DataType::FLOAT, NodeAttributes::SdpaAttributes, sdpaAttr.Union());
 
     std::vector<flatbuffers::Offset<TensorAttributes>> tensors{qT, kT, vT, oT};
     std::vector<flatbuffers::Offset<Node>> nodes{node};
-    auto graph
-        = CreateGraphDirect(b, "gfx950_attention_unified_2d_signature", &tensors, &nodes);
+    auto graph = CreateGraphDirect(b, "gfx950_attention_unified_2d_signature", &tensors, &nodes);
     b.Finish(graph);
     return b;
 }
@@ -162,8 +155,7 @@ std::string prepareFailure(const std::vector<KernelArgument>& recorded)
     registerNativeIngestorSymbols();
 
     auto builder = buildAcceptedSdpaGraph();
-    hipdnn_flatbuffers_sdk::GraphWrapper graph(builder.GetBufferPointer(),
-                                               builder.GetSize());
+    hipdnn_flatbuffers_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
     hipdnn_flatbuffers_sdk::DeviceProperties props;
     props.gcnArchName = "gfx950";
     props.warpSize = 64;
@@ -193,8 +185,7 @@ void expectRefused(const std::vector<KernelArgument>& recorded)
 {
     const auto msg = prepareFailure(recorded);
     EXPECT_NE(msg.find(MISMATCH_MARKER), std::string::npos)
-        << "Expected mismatch message containing '" << MISMATCH_MARKER
-        << "', got: " << msg;
+        << "Expected mismatch message containing '" << MISMATCH_MARKER << "', got: " << msg;
 }
 
 KernelArgument withArgument(std::size_t index, KernelArgument arg)
@@ -245,8 +236,7 @@ TEST(TestGfx950AttentionUnified2DSignature, RefusesAnExtraTrailingArgument)
 TEST(TestGfx950AttentionUnified2DSignature, RefusesAScalarInAPointerSlot)
 {
     // slot 0 is output_ptr (global_buffer/8); swap with a by_value f32
-    expectRefused(
-        withArg(0, KernelArgument{"by_value", SCALAR_BYTES_F32, 0U, "output_ptr"}));
+    expectRefused(withArg(0, KernelArgument{"by_value", SCALAR_BYTES_F32, 0U, "output_ptr"}));
 }
 
 TEST(TestGfx950AttentionUnified2DSignature, RefusesAPointerInAScalarSlot)

@@ -65,8 +65,7 @@ inline bool isSupportedGfx950AttentionUnified2DHeadSize(int64_t headSize)
 ///        in [16, 64].
 inline bool isSupportedGfx950AttentionUnified2DBlockSize(int64_t blockSize)
 {
-    if(blockSize < GFX950_UNIFIED_2D_BLOCK_SIZE_MIN
-       || blockSize > GFX950_UNIFIED_2D_BLOCK_SIZE_MAX)
+    if(blockSize < GFX950_UNIFIED_2D_BLOCK_SIZE_MIN || blockSize > GFX950_UNIFIED_2D_BLOCK_SIZE_MAX)
     {
         return false;
     }
@@ -252,11 +251,9 @@ struct Gfx950AttentionUnified2DWorkspace
                            const Gfx950AttentionUnified2DWorkspace& b)
     {
         return a.blockTablesOffset == b.blockTablesOffset
-               && a.blockTablesBytes == b.blockTablesBytes
-               && a.seqLensOffset == b.seqLensOffset && a.seqLensBytes == b.seqLensBytes
-               && a.queryStartLenOffset == b.queryStartLenOffset
-               && a.queryStartLenBytes == b.queryStartLenBytes
-               && a.totalBytes == b.totalBytes
+               && a.blockTablesBytes == b.blockTablesBytes && a.seqLensOffset == b.seqLensOffset
+               && a.seqLensBytes == b.seqLensBytes && a.queryStartLenOffset == b.queryStartLenOffset
+               && a.queryStartLenBytes == b.queryStartLenBytes && a.totalBytes == b.totalBytes
                && a.blocksPerSequence == b.blocksPerSequence;
     }
 };
@@ -307,14 +304,12 @@ inline Gfx950AttentionUnified2DWorkspace
     workspace.blockTablesOffset = 0;
     workspace.blockTablesBytes = batch * workspace.blocksPerSequence * INT32_BYTES;
 
-    workspace.seqLensOffset
-        = gfx950AttentionUnified2DAlignUp(workspace.blockTablesOffset
-                                              + workspace.blockTablesBytes,
-                                          ALIGN);
+    workspace.seqLensOffset = gfx950AttentionUnified2DAlignUp(
+        workspace.blockTablesOffset + workspace.blockTablesBytes, ALIGN);
     workspace.seqLensBytes = batch * INT32_BYTES;
 
-    workspace.queryStartLenOffset = gfx950AttentionUnified2DAlignUp(
-        workspace.seqLensOffset + workspace.seqLensBytes, ALIGN);
+    workspace.queryStartLenOffset
+        = gfx950AttentionUnified2DAlignUp(workspace.seqLensOffset + workspace.seqLensBytes, ALIGN);
     workspace.queryStartLenBytes = (batch + 1) * INT32_BYTES;
 
     workspace.totalBytes = gfx950AttentionUnified2DAlignUp(

@@ -195,8 +195,7 @@ bool isWellFormedOperand(const data_objects::TensorAttributes& tensor)
         }
     }
 
-    return !tensor.virtual_()
-           && !hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(&tensor);
+    return !tensor.virtual_() && !hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(&tensor);
 }
 
 /**
@@ -224,13 +223,11 @@ bool hasBshdStrides(const data_objects::TensorAttributes& tensor)
     const int64_t headSize = dims->Get(HEAD_SIZE_AXIS);
 
     const auto axisOk = [&](uint32_t axis, std::optional<int64_t> expected) {
-        return dims->Get(axis) == 1
-               || (expected.has_value() && strides->Get(axis) == *expected);
+        return dims->Get(axis) == 1 || (expected.has_value() && strides->Get(axis) == *expected);
     };
 
     return axisOk(BATCH_AXIS, checkedProduct({sequence, heads, headSize}))
-           && axisOk(HEAD_AXIS, headSize)
-           && axisOk(SEQ_AXIS, checkedProduct({heads, headSize}))
+           && axisOk(HEAD_AXIS, headSize) && axisOk(SEQ_AXIS, checkedProduct({heads, headSize}))
            && axisOk(HEAD_SIZE_AXIS, 1);
 }
 
@@ -270,8 +267,7 @@ bool hasSdpaForwardNode(const MatchContext& context)
 }
 
 /// "Q (uid 1): dims [..], strides [..]". Null dims or strides print as [].
-std::string describeOperand(std::string_view role,
-                            const data_objects::TensorAttributes& tensor)
+std::string describeOperand(std::string_view role, const data_objects::TensorAttributes& tensor)
 {
     using hipdnn_data_sdk::utilities::vecToString;
     using hipdnn_flatbuffers_sdk::utilities::convertFlatBufferVectorToStdVector;
@@ -283,15 +279,13 @@ std::string describeOperand(std::string_view role,
 }
 
 /// Why @p tensor is not one the kernel can address, with the strides the kernel bakes.
-std::string notBshdReason(std::string_view role,
-                          const data_objects::TensorAttributes& tensor)
+std::string notBshdReason(std::string_view role, const data_objects::TensorAttributes& tensor)
 {
     std::ostringstream out;
-    out << describeOperand(role, tensor)
-        << " is not dense BSHD (token-major, head fastest)";
+    out << describeOperand(role, tensor) << " is not dense BSHD (token-major, head fastest)";
 
-    const auto dims = hipdnn_flatbuffers_sdk::utilities::convertFlatBufferVectorToStdVector(
-        tensor.dims());
+    const auto dims
+        = hipdnn_flatbuffers_sdk::utilities::convertFlatBufferVectorToStdVector(tensor.dims());
     if(dims.size() != SDPA_RANK)
     {
         return out.str();
@@ -302,9 +296,8 @@ std::string notBshdReason(std::string_view role,
     const auto show = [](std::optional<int64_t> value) {
         return value.has_value() ? std::to_string(*value) : std::string("overflow");
     };
-    out << "; the kernel bakes strides ["
-        << show(checkedProduct({sequence, heads, headSize})) << ", " << headSize << ", "
-        << show(checkedProduct({heads, headSize})) << ", 1]"
+    out << "; the kernel bakes strides [" << show(checkedProduct({sequence, heads, headSize}))
+        << ", " << headSize << ", " << show(checkedProduct({heads, headSize})) << ", 1]"
         << " (unit-extent axes exempt) and takes no stride arguments";
     return out.str();
 }
@@ -331,8 +324,8 @@ std::optional<MaskType> maskTypeFor(const data_objects::SdpaAttributes& attribut
 
     if(topLeftDeprecated && bottomRightDeprecated)
     {
-        HIPDNN_PLUGIN_LOG_INFO(
-            Declined{"mask"} << "causal_mask and causal_mask_bottom_right are both set");
+        HIPDNN_PLUGIN_LOG_INFO(Declined{"mask"}
+                               << "causal_mask and causal_mask_bottom_right are both set");
         return std::nullopt;
     }
 
@@ -447,8 +440,7 @@ AttentionUnified2DProblem problemFor(const data_objects::TensorAttributes& q,
  * considered -- the KV page size dividing seqlen_kv, the binary-search capacity bound --
  * belong in kernelMatches, so that another candidate can still serve the graph.
  */
-std::optional<BoundTokens>
-    gfx950AttentionUnified2DGraphMatches(const MatchContext& context)
+std::optional<BoundTokens> gfx950AttentionUnified2DGraphMatches(const MatchContext& context)
 {
     // --- 1. One SDPA-forward node.
     const auto* node = sdpaNode(context);
@@ -535,8 +527,7 @@ std::optional<BoundTokens>
     if(k->dims()->Get(BATCH_AXIS) != problem.batch
        || k->dims()->Get(HEAD_SIZE_AXIS) != problem.headSize)
     {
-        HIPDNN_PLUGIN_LOG_INFO(Declined{"shape"}
-                               << "K must share Q's batch and head size");
+        HIPDNN_PLUGIN_LOG_INFO(Declined{"shape"} << "K must share Q's batch and head size");
         return std::nullopt;
     }
     if(!hasBshdStrides(*o))
@@ -546,10 +537,9 @@ std::optional<BoundTokens>
     }
     if(problem.numKvHeads <= 0 || problem.numQueryHeads % problem.numKvHeads != 0)
     {
-        HIPDNN_PLUGIN_LOG_INFO(Declined{"gqa"}
-                               << "num_query_heads " << problem.numQueryHeads
-                               << " is not a whole multiple of num_kv_heads "
-                               << problem.numKvHeads);
+        HIPDNN_PLUGIN_LOG_INFO(Declined{"gqa"} << "num_query_heads " << problem.numQueryHeads
+                                               << " is not a whole multiple of num_kv_heads "
+                                               << problem.numKvHeads);
         return std::nullopt;
     }
     if(!isSupportedGfx950AttentionUnified2DHeadSize(problem.headSize))
@@ -563,12 +553,9 @@ std::optional<BoundTokens>
 
     // --- 6. 32-bit addressing. K/V bound is bytes, Q/O is elements.
     constexpr int64_t INT32_LIMIT = 2147483648LL; // 2^31
-    constexpr int64_t BYTES_PER_ELEMENT = 2;      // bf16 and fp16 only
-    const auto kvBytes = checkedProduct({problem.batch,
-                                         problem.seqLenKv,
-                                         problem.numKvHeads,
-                                         problem.headSize,
-                                         BYTES_PER_ELEMENT});
+    constexpr int64_t BYTES_PER_ELEMENT = 2; // bf16 and fp16 only
+    const auto kvBytes = checkedProduct(
+        {problem.batch, problem.seqLenKv, problem.numKvHeads, problem.headSize, BYTES_PER_ELEMENT});
     if(!kvBytes.has_value() || *kvBytes >= INT32_LIMIT)
     {
         HIPDNN_PLUGIN_LOG_INFO(Declined{"size_limit"}
@@ -576,8 +563,8 @@ std::optional<BoundTokens>
                                   "K/V with 32-bit byte offsets");
         return std::nullopt;
     }
-    const auto qElements = checkedProduct(
-        {problem.batch, problem.seqLenQ, problem.numQueryHeads, problem.headSize});
+    const auto qElements
+        = checkedProduct({problem.batch, problem.seqLenQ, problem.numQueryHeads, problem.headSize});
     if(!qElements.has_value() || *qElements >= INT32_LIMIT)
     {
         HIPDNN_PLUGIN_LOG_INFO(Declined{"size_limit"}
@@ -699,10 +686,8 @@ std::optional<BoundTokens>
        || attributes.descale_k_tensor_uid().has_value()
        || attributes.descale_v_tensor_uid().has_value()
        || attributes.descale_s_tensor_uid().has_value()
-       || attributes.scale_s_tensor_uid().has_value()
-       || attributes.scale_o_tensor_uid().has_value()
-       || attributes.amax_s_tensor_uid().has_value()
-       || attributes.amax_o_tensor_uid().has_value())
+       || attributes.scale_s_tensor_uid().has_value() || attributes.scale_o_tensor_uid().has_value()
+       || attributes.amax_s_tensor_uid().has_value() || attributes.amax_o_tensor_uid().has_value())
     {
         HIPDNN_PLUGIN_LOG_INFO(Declined{"fp8"}
                                << "FP8 scaling tensors (descale, scale or amax) are not "
@@ -734,8 +719,7 @@ std::optional<BoundTokens>
         return std::nullopt;
     }
     const auto mmaCoreMode = attributes.mma_core_mode();
-    if(mmaCoreMode != data_objects::DataType::UNSET
-       && mmaCoreMode != data_objects::DataType::HALF
+    if(mmaCoreMode != data_objects::DataType::UNSET && mmaCoreMode != data_objects::DataType::HALF
        && mmaCoreMode != data_objects::DataType::BFLOAT16)
     {
         HIPDNN_PLUGIN_LOG_INFO(Declined{"mma_core_mode"}
@@ -746,9 +730,9 @@ std::optional<BoundTokens>
     }
     if(attributes.implementation() != data_objects::AttentionImplementation::AUTO)
     {
-        HIPDNN_PLUGIN_LOG_INFO(Declined{"implementation"}
-                               << "implementation hint " << attributes.implementation()
-                               << " is not supported; only AUTO is");
+        HIPDNN_PLUGIN_LOG_INFO(Declined{"implementation"} << "implementation hint "
+                                                          << attributes.implementation()
+                                                          << " is not supported; only AUTO is");
         return std::nullopt;
     }
 
@@ -775,10 +759,16 @@ std::optional<BoundTokens>
 // ---------------------------------------------------------------------------
 
 /// A kernel's integer metadata field, or nullopt when it declares none.
-std::optional<int64_t> integerMetadata(const KernelDefinition& kernel,
-                                       std::string_view field)
+std::optional<int64_t> integerMetadata(const KernelDefinition& kernel, std::string_view field)
 {
-    return kernel.getIntMetadata(std::string(field));
+    try
+    {
+        return kernel.getIntMetadata(std::string(field));
+    }
+    catch(const std::exception&)
+    {
+        return std::nullopt;
+    }
 }
 
 /// The geometry fields the grid and block are computed from.
@@ -791,8 +781,7 @@ struct AttentionUnified2DGeometryFields
 
 /// @return The candidate's geometry, or nullopt when it declares an incomplete or
 ///         non-positive one. Checked before anything divides by a member.
-std::optional<AttentionUnified2DGeometryFields>
-    candidateGeometry(const KernelDefinition& kernel)
+std::optional<AttentionUnified2DGeometryFields> candidateGeometry(const KernelDefinition& kernel)
 {
     const auto blockMPerWarp = integerMetadata(kernel, BLOCK_M_PER_WARP_FIELD);
     const auto numWarps = integerMetadata(kernel, NUM_WARPS_FIELD);
@@ -1010,10 +999,22 @@ public:
         return _code.kernelForStream(stream);
     }
 
-    const AttentionUnified2DBinding& binding() const { return _binding; }
-    const AttentionUnified2DProblem& problem() const { return _problem; }
-    const Gfx950AttentionUnified2DWorkspace& workspace() const { return _workspace; }
-    const std::vector<int32_t>& stagedWorkspace() const { return _stagedWorkspace; }
+    const AttentionUnified2DBinding& binding() const
+    {
+        return _binding;
+    }
+    const AttentionUnified2DProblem& problem() const
+    {
+        return _problem;
+    }
+    const Gfx950AttentionUnified2DWorkspace& workspace() const
+    {
+        return _workspace;
+    }
+    const std::vector<int32_t>& stagedWorkspace() const
+    {
+        return _stagedWorkspace;
+    }
 
 private:
     IngestorKernelCode _code;
@@ -1027,15 +1028,15 @@ private:
 AttentionUnified2DBinding attentionUnified2DBinding(const BoundTokens& bound)
 {
     const auto read = [&bound](std::string_view token) {
-        auto it = bound.find(std::string(token));
-        if(it == bound.end())
+        const auto value = hipdnn_plugin_sdk::ingestor::tryGetBoundInt(bound, token);
+        if(!value.has_value())
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-                "gfx950 attention_unified_2d dispatch is missing bound token '"
-                    + std::string(token) + "', or it does not hold an integer");
+                "gfx950 attention_unified_2d dispatch is missing bound token '" + std::string(token)
+                    + "', or it does not hold an integer");
         }
-        return it->second;
+        return *value;
     };
 
     AttentionUnified2DBinding binding;
@@ -1045,8 +1046,7 @@ AttentionUnified2DBinding attentionUnified2DBinding(const BoundTokens& bound)
     binding.o = read(O_TOKEN);
     binding.slidingWindow = read(SLIDING_WINDOW_TOKEN);
     const auto scaleBits = static_cast<int32_t>(read(SCALE_BITS_TOKEN));
-    static_assert(sizeof(binding.scale) == sizeof(scaleBits),
-                  "float must be 32-bit to round-trip");
+    static_assert(sizeof(binding.scale) == sizeof(scaleBits), "float must be 32-bit to round-trip");
     std::memcpy(&binding.scale, &scaleBits, sizeof(binding.scale));
     return binding;
 }
@@ -1065,9 +1065,8 @@ AttentionUnified2DBinding attentionUnified2DBinding(const BoundTokens& bound)
  *
  * Padding words between sections are left zero; the kernel never reads them.
  */
-std::vector<int32_t>
-    stageUnified2DWorkspace(const AttentionUnified2DProblem& problem,
-                            const Gfx950AttentionUnified2DWorkspace& workspace)
+std::vector<int32_t> stageUnified2DWorkspace(const AttentionUnified2DProblem& problem,
+                                             const Gfx950AttentionUnified2DWorkspace& workspace)
 {
     constexpr int64_t INT32_BYTES = 4;
     std::vector<int32_t> staged(static_cast<size_t>(workspace.totalBytes / INT32_BYTES), 0);
@@ -1191,14 +1190,13 @@ public:
         auto code = buildIngestorKernelCode(
             _kpackLoader, context, kernel, attentionUnified2DKernelSignature());
 
-        const auto launchGeometry
-            = gfx950AttentionUnified2DGeometry(geometry->blockMPerWarp,
-                                               geometry->numWarps,
-                                               problem->numQueryHeads,
-                                               problem->numKvHeads,
-                                               problem->seqLenQ,
-                                               problem->batch,
-                                               toString(kernel.kernelId));
+        const auto launchGeometry = gfx950AttentionUnified2DGeometry(geometry->blockMPerWarp,
+                                                                     geometry->numWarps,
+                                                                     problem->numQueryHeads,
+                                                                     problem->numKvHeads,
+                                                                     problem->seqLenQ,
+                                                                     problem->batch,
+                                                                     toString(kernel.kernelId));
         code.setBlockSize(launchGeometry.blockX, 1, 1);
         code.setGridSize(launchGeometry.gridX, launchGeometry.gridY, launchGeometry.gridZ);
 
@@ -1234,14 +1232,14 @@ public:
                 "sequence lengths and query offsets out of it");
         }
 
-        const auto q = hipdnn_plugin_sdk::findDeviceBuffer(
-            binding.q, deviceBuffers, numDeviceBuffers);
-        const auto k = hipdnn_plugin_sdk::findDeviceBuffer(
-            binding.k, deviceBuffers, numDeviceBuffers);
-        const auto v = hipdnn_plugin_sdk::findDeviceBuffer(
-            binding.v, deviceBuffers, numDeviceBuffers);
-        const auto o = hipdnn_plugin_sdk::findDeviceBuffer(
-            binding.o, deviceBuffers, numDeviceBuffers);
+        const auto q
+            = hipdnn_plugin_sdk::findDeviceBuffer(binding.q, deviceBuffers, numDeviceBuffers);
+        const auto k
+            = hipdnn_plugin_sdk::findDeviceBuffer(binding.k, deviceBuffers, numDeviceBuffers);
+        const auto v
+            = hipdnn_plugin_sdk::findDeviceBuffer(binding.v, deviceBuffers, numDeviceBuffers);
+        const auto o
+            = hipdnn_plugin_sdk::findDeviceBuffer(binding.o, deviceBuffers, numDeviceBuffers);
 
         const auto stream = handle.getStream();
 
@@ -1273,9 +1271,9 @@ public:
             static_cast<void*>(nullptr), // qq_bias_ptr: use_qq_bias is never baked
             queryStartLen,
             binding.scale,
-            NEUTRAL_SCALE,   // k_scale: K is not quantized
-            NEUTRAL_SCALE,   // v_scale: V is not quantized
-            NEUTRAL_SCALE,   // out_scale: the output is not quantized
+            NEUTRAL_SCALE, // k_scale: K is not quantized
+            NEUTRAL_SCALE, // v_scale: V is not quantized
+            NEUTRAL_SCALE, // out_scale: the output is not quantized
             NEUTRAL_SOFTCAP, // softcap: has_softcap is never baked
             static_cast<int32_t>(problem.batch),
             static_cast<int32_t>(layout.blocksPerSequence),
@@ -1291,7 +1289,7 @@ private:
 // Defined outside the anonymous namespace: the IngestorPacks.cpp table row names this
 // symbol as its resetModuleCache, and the accessor below is what gives the pack a
 // process-lifetime module cache to reset.
-compilation::KpackModuleCache& gfx950AttentionUnified2DKpackModuleCache()
+static compilation::KpackModuleCache& gfx950AttentionUnified2DKpackModuleCache()
 {
     static compilation::KpackModuleCache s_moduleCache;
     return s_moduleCache;

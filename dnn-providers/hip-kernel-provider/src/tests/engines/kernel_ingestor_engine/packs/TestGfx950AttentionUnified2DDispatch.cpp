@@ -35,8 +35,7 @@ namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
 
 constexpr std::string_view GRAPH_MATCHER_SYMBOL
     = "hipkernel.gfx950_attention_unified2_d.graph_match";
-constexpr std::string_view DISPATCH_SYMBOL
-    = "hipkernel.gfx950_attention_unified2_d.dispatch";
+constexpr std::string_view DISPATCH_SYMBOL = "hipkernel.gfx950_attention_unified2_d.dispatch";
 
 constexpr int64_t Q_UID = 11, K_UID = 22, V_UID = 33, O_UID = 44;
 constexpr int64_t BATCH = 2, HEADS_Q = 32, HEADS_KV = 8, SEQ = 256, HEAD_SIZE = 128;
@@ -53,11 +52,10 @@ std::vector<int64_t> bshdStrides(int64_t b, int64_t h, int64_t s, int64_t d)
     return {s * h * d, d, h * d, 1};
 }
 
-flatbuffers::FlatBufferBuilder
-    buildGraph(float scale = SCALE,
-               data_objects::DiagonalAlignment alignment
-               = data_objects::DiagonalAlignment::BOTTOM_RIGHT,
-               bool withBhsdO = false)
+flatbuffers::FlatBufferBuilder buildGraph(float scale = SCALE,
+                                          data_objects::DiagonalAlignment alignment
+                                          = data_objects::DiagonalAlignment::BOTTOM_RIGHT,
+                                          bool withBhsdO = false)
 {
     flatbuffers::FlatBufferBuilder b(4096);
 
@@ -67,10 +65,7 @@ flatbuffers::FlatBufferBuilder
     std::vector<int64_t> kvDims{BATCH, HEADS_KV, SEQ, HEAD_SIZE};
 
     // Optionally give O a BHSD layout so prepare() rejects it.
-    std::vector<int64_t> bhsdO{BATCH * HEADS_Q * SEQ * HEAD_SIZE,
-                                SEQ * HEAD_SIZE,
-                                HEAD_SIZE,
-                                1};
+    std::vector<int64_t> bhsdO{BATCH * HEADS_Q * SEQ * HEAD_SIZE, SEQ * HEAD_SIZE, HEAD_SIZE, 1};
 
     auto qT = data_objects::CreateTensorAttributesDirect(
         b, Q_UID, nullptr, data_objects::DataType::BFLOAT16, &bshd, &qDims, false);
@@ -123,15 +118,18 @@ struct AttentionGraph
         : builder(buildGraph(scale, alignment, withBhsdO))
         , graph(builder.GetBufferPointer(), builder.GetSize())
         , properties([]() {
-              hipdnn_flatbuffers_sdk::DeviceProperties p;
-              p.gcnArchName = "gfx950";
-              p.warpSize = 64;
-              return p;
-          }())
+            hipdnn_flatbuffers_sdk::DeviceProperties p;
+            p.gcnArchName = "gfx950";
+            p.warpSize = 64;
+            return p;
+        }())
     {
     }
 
-    MatchContext context() const { return MatchContext{graph, 0, properties}; }
+    MatchContext context() const
+    {
+        return MatchContext{graph, 0, properties};
+    }
 };
 
 const IKernelDispatchHandler<Handle>* dispatchHandler()
@@ -146,9 +144,8 @@ std::optional<BoundTokens> bindingsFor(const AttentionGraph& ag)
 }
 
 // A minimal KPACK KernelDefinition with correct metadata.
-KernelDefinition makeKernel(int64_t blockMPerWarp = 16,
-                             int64_t numWarps = 1,
-                             int64_t blockSize = BLOCK_SIZE)
+KernelDefinition
+    makeKernel(int64_t blockMPerWarp = 16, int64_t numWarps = 1, int64_t blockSize = BLOCK_SIZE)
 {
     KernelDefinition kernel;
     kernel.kernelId.engineId = "00000000-0000-4000-8000-0000000000b1";

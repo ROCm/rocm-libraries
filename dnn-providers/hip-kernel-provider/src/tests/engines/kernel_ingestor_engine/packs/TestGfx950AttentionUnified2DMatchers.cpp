@@ -83,8 +83,7 @@ struct GraphSpec
     bool pointwiseOnly = false;
     float scale = SCALE;
     data_objects::DataType mmaCoreMode = data_objects::DataType::UNSET;
-    data_objects::AttentionImplementation impl
-        = data_objects::AttentionImplementation::AUTO;
+    data_objects::AttentionImplementation impl = data_objects::AttentionImplementation::AUTO;
 };
 
 flatbuffers::FlatBufferBuilder buildGraph(const GraphSpec& spec)
@@ -158,12 +157,11 @@ flatbuffers::FlatBufferBuilder buildGraph(const GraphSpec& spec)
     std::vector<flatbuffers::Offset<data_objects::Node>> nodes;
     if(!spec.pointwiseOnly)
     {
-        auto node = data_objects::CreateNodeDirect(
-            b,
-            "sdpa",
-            data_objects::DataType::FLOAT,
-            data_objects::NodeAttributes::SdpaAttributes,
-            sdpaAttr.Union());
+        auto node = data_objects::CreateNodeDirect(b,
+                                                   "sdpa",
+                                                   data_objects::DataType::FLOAT,
+                                                   data_objects::NodeAttributes::SdpaAttributes,
+                                                   sdpaAttr.Union());
         nodes.push_back(node);
     }
     if(spec.twoNodes || spec.pointwiseOnly)
@@ -171,17 +169,17 @@ flatbuffers::FlatBufferBuilder buildGraph(const GraphSpec& spec)
         // Add a non-SDPA node to trigger the "not a single SDPA" decline.
         data_objects::PointwiseAttributesBuilder pw(b);
         auto pwAttr = pw.Finish();
-        auto node2 = data_objects::CreateNodeDirect(
-            b,
-            "relu",
-            data_objects::DataType::FLOAT,
-            data_objects::NodeAttributes::PointwiseAttributes,
-            pwAttr.Union());
+        auto node2
+            = data_objects::CreateNodeDirect(b,
+                                             "relu",
+                                             data_objects::DataType::FLOAT,
+                                             data_objects::NodeAttributes::PointwiseAttributes,
+                                             pwAttr.Union());
         nodes.push_back(node2);
     }
 
-    auto graph = data_objects::CreateGraphDirect(
-        b, "gfx950_attention_unified_2d_test", &tensors, &nodes);
+    auto graph
+        = data_objects::CreateGraphDirect(b, "gfx950_attention_unified_2d_test", &tensors, &nodes);
     b.Finish(graph);
     return b;
 }
@@ -189,8 +187,7 @@ flatbuffers::FlatBufferBuilder buildGraph(const GraphSpec& spec)
 std::optional<BoundTokens> matchGraph(const GraphSpec& spec)
 {
     auto builder = buildGraph(spec);
-    hipdnn_flatbuffers_sdk::GraphWrapper graph(builder.GetBufferPointer(),
-                                               builder.GetSize());
+    hipdnn_flatbuffers_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
     hipdnn_flatbuffers_sdk::DeviceProperties props;
     props.gcnArchName = "gfx950";
     props.warpSize = 64;
@@ -207,13 +204,13 @@ GraphSpec canonical()
 }
 
 KernelDefinition makeKernel(const std::string& dtype = "BF16",
-                             int64_t headSize = HEAD_SIZE,
-                             int64_t numQHeads = HEADS_Q,
-                             int64_t numKvHeads = HEADS_KV,
-                             int64_t blockSize = BLOCK_SIZE,
-                             int64_t slidingWindow = 0,
-                             int64_t useSinks = 0,
-                             int64_t numSeqs = 256)
+                            int64_t headSize = HEAD_SIZE,
+                            int64_t numQHeads = HEADS_Q,
+                            int64_t numKvHeads = HEADS_KV,
+                            int64_t blockSize = BLOCK_SIZE,
+                            int64_t slidingWindow = 0,
+                            int64_t useSinks = 0,
+                            int64_t numSeqs = 256)
 {
     KernelDefinition k;
     k.kernelId.engineId = "00000000-0000-4000-8000-0000000000a1";
@@ -247,8 +244,7 @@ KernelDefinition makeKernel(const std::string& dtype = "BF16",
 bool matchesKernel(const GraphSpec& gs, const KernelDefinition& k)
 {
     auto builder = buildGraph(gs);
-    hipdnn_flatbuffers_sdk::GraphWrapper graph(builder.GetBufferPointer(),
-                                               builder.GetSize());
+    hipdnn_flatbuffers_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
     hipdnn_flatbuffers_sdk::DeviceProperties props;
     props.gcnArchName = "gfx950";
     props.warpSize = 64;
@@ -323,15 +319,17 @@ TEST(TestGfx950AttentionUnified2DGraphMatch, DeclinesNoMask)
 {
     registerNativeIngestorSymbols();
     GraphSpec s = canonical();
-    s.rightBound = -1;  // no bound at all => NO_MASK
+    s.rightBound = -1; // no bound at all => NO_MASK
     s.alignment = data_objects::DiagonalAlignment::TOP_LEFT;
-    s.seqQ = 512; s.seqKv = 1024; // seqQ != seqKv so top-left != bottom-right
+    s.seqQ = 512;
+    s.seqKv = 1024; // seqQ != seqKv so top-left != bottom-right
     // Actually easier: use NO_MASK by leaving right_bound unset
     GraphSpec s2 = canonical();
     // Force NO_MASK path: no right_bound, no deprecated bool, aligned TOP_LEFT
     s2.rightBound = -1;
     s2.alignment = data_objects::DiagonalAlignment::TOP_LEFT;
-    s2.seqQ = 512; s2.seqKv = 512;
+    s2.seqQ = 512;
+    s2.seqKv = 512;
     // When seqQ==seqKv top-left==bottom-right, so use different seqLens to force NO_MASK
     // Actually the cleanest: don't set right_bound (UNBOUNDED) and alignment TOP_LEFT
     // => maskTypeFor returns NO_MASK
@@ -385,8 +383,7 @@ TEST(TestGfx950AttentionUnified2DGraphMatch, DeclinesBhsdQ)
     registerNativeIngestorSymbols();
     GraphSpec s = canonical();
     // BHSD: B*H*S*D, H*S*D, S*D, D
-    s.qStrideOverride
-        = {HEADS_Q * SEQ * HEAD_SIZE, SEQ * HEAD_SIZE, HEAD_SIZE, 1};
+    s.qStrideOverride = {HEADS_Q * SEQ * HEAD_SIZE, SEQ * HEAD_SIZE, HEAD_SIZE, 1};
     EXPECT_FALSE(matchGraph(s).has_value());
 }
 
@@ -394,8 +391,7 @@ TEST(TestGfx950AttentionUnified2DGraphMatch, DeclinesBhsdK)
 {
     registerNativeIngestorSymbols();
     GraphSpec s = canonical();
-    s.kStrideOverride
-        = {HEADS_KV * SEQ * HEAD_SIZE, SEQ * HEAD_SIZE, HEAD_SIZE, 1};
+    s.kStrideOverride = {HEADS_KV * SEQ * HEAD_SIZE, SEQ * HEAD_SIZE, HEAD_SIZE, 1};
     EXPECT_FALSE(matchGraph(s).has_value());
 }
 
@@ -497,16 +493,16 @@ TEST(TestGfx950AttentionUnified2DKernelMatch, RejectsBatchExceedsCapacity)
 {
     registerNativeIngestorSymbols();
     // numSeqs=1 -> capacity = 2^ceil(log2(2)) - 1 = 1, batch=2 > 1
-    EXPECT_FALSE(matchesKernel(canonical(),
-                               makeKernel("BF16", HEAD_SIZE, HEADS_Q, HEADS_KV, BLOCK_SIZE, 0, 0, 1)));
+    EXPECT_FALSE(matchesKernel(
+        canonical(), makeKernel("BF16", HEAD_SIZE, HEADS_Q, HEADS_KV, BLOCK_SIZE, 0, 0, 1)));
 }
 
 TEST(TestGfx950AttentionUnified2DKernelMatch, AcceptsWhenBatchEqualsCapacity)
 {
     registerNativeIngestorSymbols();
     // numSeqs=3 -> iterations=ceil(log2(4))=2 -> capacity=3; batch=2 <= 3
-    EXPECT_TRUE(matchesKernel(canonical(),
-                              makeKernel("BF16", HEAD_SIZE, HEADS_Q, HEADS_KV, BLOCK_SIZE, 0, 0, 3)));
+    EXPECT_TRUE(matchesKernel(
+        canonical(), makeKernel("BF16", HEAD_SIZE, HEADS_Q, HEADS_KV, BLOCK_SIZE, 0, 0, 3)));
 }
 
 TEST(TestGfx950AttentionUnified2DKernelMatch, RejectsBakedSlidingWindow)
