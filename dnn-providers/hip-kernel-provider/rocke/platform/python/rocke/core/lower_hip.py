@@ -32,6 +32,8 @@ from .ir import (
     Value,
     VectorType,
     _sync_attr,
+    dpp_ctrl_attr,
+    dpp_xor_ctrl,
     require_streaming_arch,
 )
 
@@ -2153,14 +2155,13 @@ class _Lowerer:
         )
 
     def _op_tile_dpp_xor(self, op: Op) -> None:
-        """``v_mov_b32_dpp`` ``row_xmask`` XOR butterfly (VALU, not LDS).
+        """In-row XOR shuffle as one ``v_mov_b32_dpp`` (VALU, not LDS).
 
-        ``dpp_ctrl = 0x160 | mask`` (AMDGPU ``DPP_ROW_XMASK``). See
-        :meth:`_op_tile_dpp_xor` in ``lower_llvm.py`` for the rationale.
+        :func:`~rocke.core.ir.dpp_xor_ctrl` picks the DPP control word for
+        the target. See :meth:`_op_tile_dpp_xor` in ``lower_llvm.py``.
         """
+        dpp_ctrl = dpp_xor_ctrl(op, self.arch)
         (data,) = op.operands
-        mask = int(op.attrs["xor_mask"])
-        dpp_ctrl = 0x160 | (mask & 0xF)
         self._emit(
             f"int {_name(op.result)} = __builtin_amdgcn_update_dpp("
             f"{_name(data)}, {_name(data)}, {dpp_ctrl}, 15, 15, 1);"
@@ -2171,10 +2172,12 @@ class _Lowerer:
 
         See :meth:`_op_tile_quad_perm` in ``lower_llvm.py``: ``ctrl``
         packs four two-bit lane selectors, so ``0..255`` is the whole
-        legal range and out-of-range values are malformed IR.
+        legal range and out-of-range values are malformed IR. The data and
+        the result must be i32: HIP would convert between ``int`` and
+        ``float`` without a word.
         """
+        ctrl = dpp_ctrl_attr(op)
         (data,) = op.operands
-        ctrl = int(op.attrs["ctrl"])
         if not 0 <= ctrl <= 255:
             raise ValueError(f"tile.quad_perm: ctrl must be in 0..255, got {ctrl}")
         self._emit(
