@@ -79,7 +79,7 @@ const vector<vector<int>> large_matrix_sizeB_range = {
     {100, 0}, {150, 0}, {200, 1}, {524, 1}, {1000, 0},
 };
 
-// for weekly_lapack tests
+// for weekly large batch tests
 const vector<vector<int>> large_batch_sizeA_range = {
     {7, 7, 9, 0},
 };

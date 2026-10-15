@@ -62,7 +62,8 @@ const vector<vector<int>> matrix_size_range = {
 const vector<vector<int>> large_matrix_size_range
     = {{192, 192, 1}, {500, 600, 1}, {640, 640, 0}, {1000, 1024, 0}, {1200, 1230, 0}};
 
-// for weekly_lapack tests
+// for weekly large batch tests
+
 const vector<vector<int>> large_batch_size_range = {
     {9, 9, 0},
 };

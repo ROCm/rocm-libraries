@@ -82,7 +82,8 @@ const vector<vector<int64_t>> large_matrix_size_range_64 = {
     {192, 192, 0}, {215, 215, 0}, {640, 960, 1}, {1000, 1000, 0}, {1024, 1024, 1}, {2000, 2000, 0},
 };
 
-// for weekly_lapack tests
+// for weekly large batch tests
+
 const vector<vector<int>> large_batch_size_range = {
     {7, 7, 0},
 };
