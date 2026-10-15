@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import itertools
 import json
+from dataclasses import replace
 
 import pytest
 
@@ -342,6 +343,7 @@ def test_windowed_depthwise_dgrad_binary_is_found_by_identity():
 
 
 _4C = "direct_grouped_dgrad_4c"
+_FUSED = "direct_grouped_dgrad_fused"
 
 
 @pytest.mark.parametrize("KH", [1, 3])
@@ -355,7 +357,7 @@ def test_dgrad_cpg4_offers_the_4c_kernel(cache, KH):
         N=3, H=13, W=17, groups=64, cpg=4, kpg=4, KH=KH, KW=KH, PAD=KH // 2
     )
     plans, _ = dks.direct_plans(cache, problem, "dgrad", _ARCH)
-    expected = {_4C}
+    expected = {_4C, _FUSED}
     if KH == 3:
         expected |= {
             "direct_grouped_dgrad",
@@ -439,6 +441,248 @@ def test_dgrad_cpg4_4c_binary_is_found_by_identity():
             _ARCH, target.wave_size, _4C, "dgrad", caps, "bf16"
         )[1]:
             assert dks.direct_job_for_identity(job.identity).identity == job.identity
+
+
+def _fused_knobs(job_or_plan):
+    return json.loads(job_or_plan.identity.knobs)
+
+
+@pytest.mark.parametrize(
+    "KH,cpg,kpg", [(3, 16, 16), (3, 12, 28), (1, 32, 8), (5, 8, 20), (7, 16, 4)]
+)
+def test_dgrad_fused_offers_one_forward_kernel(cache, KH, cpg, kpg):
+    """A stride-1 "same"-padded dgrad with channel counts in 4-channel steps
+    up to 32 (cpg != kpg too) gets the fused generic kernel: one forward-ABI
+    launch over the transposed problem, binding the original weights (no
+    transform helper, no workspace), with the generic grid over the
+    transposed problem's tiles."""
+    problem = _problem(
+        N=3, H=13, W=17, groups=8, cpg=cpg, kpg=kpg, KH=KH, KW=KH, PAD=KH // 2
+    )
+    plans, _ = dks.direct_plans(cache, problem, "dgrad", _ARCH)
+    fused = [p for p in plans if p.identity.algorithm == _FUSED]
+    assert fused
+    for plan in fused:
+        knobs = _fused_knobs(plan)
+        (step,) = plan.steps
+        assert plan.workspaces == {}
+        assert step.buffers == ("dy", "w", "dx")
+        names = [e["name"] for e in step.signature]
+        assert "p_A_stride_n" in names and "p_dY_stride_n" not in names
+        assert step.block == (knobs["block_groups"] * 64, 1, 1)
+        assert step.grid == (
+            -(-problem.W // knobs["block_q"]),
+            problem.groups // knobs["block_groups"],
+            problem.N * -(-problem.H // knobs["block_h"]),
+        )
+        values = step.conv_args.to_launch_values(1, 2, 3, 4, 5, 6)
+        # The transposed problem: dY in (kpg channels), dX out (cpg).
+        assert values["p_total_c"] == problem.groups * kpg
+        assert values["p_total_k"] == problem.groups * cpg
+
+
+def test_dgrad_fused_cached_scope(jobs):
+    """The fused cache is the generic dgrad policy's image: 16-column strips
+    (32 only on 4/8-row tiles with wide channel groups), block_groups at or
+    below the per-channel rule (halved for 5x5/7x7), 4..32-row tiles (4/8 for
+    5x5/7x7), every tile with the row guard, fold_k32 exactly where kpg
+    allows it, LDS-staged weights on gfx950 and the waves-per-EU hint only
+    for the 16-wide atom forms with a small weight footprint."""
+    fused = [j for j in jobs if j.identity.algorithm == _FUSED]
+    assert {(j.identity.filter_h, j.identity.stride_h) for j in fused} == {
+        (k, 1) for k in dks.DGRAD_FUSED_FILTERS
+    }
+    assert all(j.identity.pad_h == j.identity.filter_h // 2 for j in fused)
+    chans = set(dks.DGRAD_FUSED_CHANNELS)
+    assert {(j.identity.cpg, j.identity.kpg) for j in fused} == {
+        (c, k) for c in chans for k in chans
+    }
+    assert any(j.identity.cpg != j.identity.kpg for j in fused)
+    for j in fused:
+        knobs, i = j.spec_kwargs, j.identity
+        caps = dks._caps_of(i)
+        assert knobs["block_groups"] <= dks._dgrad_fused_rule_block_groups(caps)
+        if i.filter_h >= 5:
+            assert knobs["block_h"] in dks.DGRAD_FUSED_BLOCK_H_LARGE
+        else:
+            assert knobs["block_h"] in dks.DGRAD_FUSED_BLOCK_H
+        if knobs["block_q"] == 32:
+            assert knobs["block_h"] in (4, 8)
+        assert knobs["fold_k32"] == (i.kpg % 32 == 0)
+        assert knobs["dgrad_weights_lds"]
+        if knobs["fold_k32"]:
+            assert knobs["waves_per_eu"] == 0
+    # Low thousands per arch and dtype, not a product of every knob.
+    assert len(fused) < 4000
+
+
+def test_dgrad_fused_cached_scope_gfx942():
+    """gfx942 has neither transpose LDS reads nor the 16x16x32 atom: its
+    fused cache takes the gathered weights and 16-wide atoms throughout."""
+    target = ArchTarget.from_gfx("gfx942")
+    for caps in dks.DIRECT_CAPABILITIES[_FUSED][1]:
+        cell = dks._caps_jobs(
+            "gfx942", target.wave_size, _FUSED, "dgrad", caps, "fp16"
+        )[1]
+        assert cell, caps
+        for _, j in cell:
+            assert not j.spec_kwargs["dgrad_weights_lds"]
+            assert not j.spec_kwargs["fold_k32"]
+
+
+def test_dgrad_fused_rows_fit_the_weight_register_budget():
+    """A 5x5 / 7x7 row is listed only where its fused weights fit the
+    preload register budget at some knob (the rest is the pre-pass's)."""
+    from kernels.common.conv_direct_grouped import PRELOAD_WEIGHT_VGPR_BUDGET
+
+    rows = dks.DIRECT_CAPABILITIES[_FUSED][1]
+    assert {(c.KH, c.cpg, c.kpg) for c in rows if c.KH == 7} == {
+        (7, c, k) for c in (4, 8, 12, 16) for k in (4, 8, 12, 16)
+    }
+    for c in rows:
+        regs = c.KH * c.KW * -(-c.kpg // 16) * -(-c.cpg // 16) * 2
+        assert regs <= PRELOAD_WEIGHT_VGPR_BUDGET
+
+
+def test_dgrad_fused_rejects_shapes_it_cannot_serve(cache):
+    """groups must divide block_groups (plan_for re-validates on the real
+    shape); stride 2, a channel count off the 4-channel grid and a 9x9 filter
+    have no row."""
+    problem = _problem(groups=3, cpg=8, kpg=8)
+    plans, rejected = dks.direct_plans(cache, problem, "dgrad", _ARCH)
+    fused = [p for p in plans if p.identity.algorithm == _FUSED]
+    assert fused
+    assert all(_fused_knobs(p)["block_groups"] == 1 for p in fused)
+    assert any(
+        "not divisible by block_groups" in why
+        for ident, why in rejected
+        if ident.algorithm == _FUSED
+    )
+    for kw in (
+        {"stride": 2},
+        {"cpg": 6, "kpg": 6},
+        {"cpg": 64, "kpg": 64},
+        {"KH": 9, "KW": 9, "PAD": 4},
+        {"KH": 3, "KW": 3, "PAD": 0},
+    ):
+        plans, _ = dks.direct_plans(cache, _problem(**kw), "dgrad", _ARCH)
+        assert _FUSED not in _variants(plans), kw
+
+
+def test_dgrad_fused_binary_is_found_by_identity():
+    target = ArchTarget.from_gfx(_ARCH)
+    rows = dks.DIRECT_CAPABILITIES[_FUSED][1]
+    for caps in rows[::7]:
+        for _, job in dks._caps_jobs(
+            _ARCH, target.wave_size, _FUSED, "dgrad", caps, "bf16"
+        )[1]:
+            assert dks.direct_job_for_identity(job.identity).identity == job.identity
+
+
+def _generic_dgrad_policy_knobs(p: DirectConvProblem) -> dict:
+    """The knobs the generic direct-MFMA dgrad policy picks for ``p`` (the
+    fused, single-kernel form on gfx950), with a whole-image pick
+    (``block_h = 0``) mapped to the cached tile height that serves it.
+
+    A test-side statement of the policy so the enumeration can be checked
+    against it until the policy itself lands in dispatch: per-channel
+    block_groups (halved for 5x5/7x7, then halved until it divides groups),
+    whole image or 8/4-row tiles, 32-column strips on tiled images with wide
+    channel groups and enough waves, fold_k32 where kpg allows it, LDS-staged
+    weights and the waves-per-EU hint on small 16-wide-atom footprints.
+    """
+    from kernels.common import conv_direct_grouped as dc
+
+    caps = dks.DirectCaps(KH=p.KH, PAD=p.PAD, stride=1, cpg=p.cpg, kpg=p.kpg)
+    # The short-image cost model scales by the per-channel row (unhalved).
+    rule_bg = dks._dgrad_fused_rule_block_groups(replace(caps, KH=3))
+    bg = dks._dgrad_fused_rule_block_groups(caps)
+    while p.groups % bg:
+        bg //= 2
+    q_cols = -(-p.Wo // 16) * p.groups * p.N
+    if p.H <= 8:
+        bh = 0
+    elif p.KH >= 5:
+        bh = 4
+    elif p.H <= 16:
+        slots = 1024 * rule_bg
+        costs = [
+            ((h or p.H) + p.KH - 1) * max(slots, q_cols * (-(-p.H // h) if h else 1))
+            for h in (0, 8, 4)
+        ]
+        bh = (0, 8, 4)[costs.index(min(costs))]
+    else:
+        bh = 4
+        for h in (0, 8) if p.H <= 64 else (8,):
+            if q_cols * (-(-p.H // h) if h else 1) >= 3072:
+                bh = h
+                break
+    bq = 16
+    chans = max(p.cpg, p.kpg)
+    if (
+        bh
+        and -(-p.Wo // 32) * 32 <= -(-p.Wo // 16) * 16
+        and (chans >= 16 or (p.KH >= 5 and chans >= 8))
+        and -(-p.Wo // 32) * p.groups * p.N * -(-p.H // bh) >= 768
+    ):
+        bq = 32
+    k32 = p.kpg % 32 == 0
+    knobs = {
+        "block_q": bq,
+        "block_groups": bg,
+        "block_h": bh or dc.dgrad_fused_block_h(p.H),
+        "fold_k32": k32,
+        "dgrad_weights_lds": True,
+        "waves_per_eu": 0,
+    }
+    if not k32:
+        main = dks.make_spec(_FUSED, p, knobs)
+        if dc.preload_weight_vgprs(main) <= dks.DGRAD_FUSED_WPE_MAX_VGPRS:
+            knobs["waves_per_eu"] = dks.DGRAD_FUSED_WPE
+    return knobs
+
+
+def test_dgrad_fused_policy_image_is_enumerated():
+    """Every pick of the generic direct dgrad policy on a spread of grouped
+    stride-1 problems is a cached identity of the fused variant, and that
+    binary is valid on the problem (the guard that keeps the enumeration the
+    policy's image: dispatch can only pick what was built)."""
+    import random
+
+    target = ArchTarget.from_gfx(_ARCH)
+    rows = set(dks.DIRECT_CAPABILITIES[_FUSED][1])
+    cached: dict = {}
+    rng = random.Random(1)
+    checked = 0
+    for _ in range(300):
+        KH = rng.choice((1, 3, 5, 7))
+        p = _problem(
+            N=rng.choice((1, 2, 8, 64)),
+            H=rng.choice((3, 7, 8, 9, 12, 13, 15, 17, 28, 50, 64, 70)),
+            W=rng.choice((5, 14, 17, 33, 64)),
+            groups=rng.choice((1, 2, 3, 6, 8, 24)),
+            cpg=rng.choice(dks.DGRAD_FUSED_CHANNELS),
+            kpg=rng.choice(dks.DGRAD_FUSED_CHANNELS),
+            KH=KH,
+            KW=KH,
+            PAD=KH // 2,
+        )
+        caps = dks.DirectCaps(KH=KH, PAD=KH // 2, stride=1, cpg=p.cpg, kpg=p.kpg)
+        if caps not in rows:
+            continue  # past the fused register budget: the pre-pass serves it
+        if caps not in cached:
+            cached[caps] = [
+                json.loads(job.identity.knobs)
+                for _, job in dks._caps_jobs(
+                    _ARCH, target.wave_size, _FUSED, "dgrad", caps, "bf16"
+                )[1]
+            ]
+        knobs = _generic_dgrad_policy_knobs(p)
+        assert knobs in cached[caps], (p, knobs)
+        spec = dks.make_spec(_FUSED, p, knobs)
+        assert dks.validate_spec(_FUSED, spec, _ARCH)[0], (p, knobs)
+        checked += 1
+    assert checked > 100
 
 
 def _nongrouped(plans):
@@ -546,11 +790,13 @@ def test_capabilities_outside_the_list_are_not_served(cache):
 def test_dgrad_stride1_offers_mfma_pipeline_and_scalar(cache):
     plans, _ = dks.direct_plans(cache, _problem(), "dgrad", _ARCH)
     # cpg = kpg = 16 has the fixed-channel MFMA entries and also the
-    # runtime-channel ones (one K-atom, one M-tile).
+    # runtime-channel ones (one K-atom, one M-tile), and the single-kernel
+    # fused-weight generic dgrad.
     assert _variants(plans) == {
         "direct_grouped_dgrad",
         "direct_grouped_dgrad_mfma",
         "direct_dgrad_mfma_rtc",
+        _FUSED,
     }
     for plan in plans:
         if plan.identity.algorithm not in (
@@ -594,6 +840,9 @@ def test_dense_mfma_dgrad_channels_are_routed(cache, cpg, kpg):
         ("dgrad", _problem()),
         # cpg = kpg = 4: the 4c kernel (forward ABI, transposed problem) too.
         ("dgrad", _problem(groups=64, cpg=4, kpg=4)),
+        # The fused generic dgrad: cpg != kpg, 5x5 and 1x1.
+        ("dgrad", _problem(groups=6, cpg=20, kpg=8, KH=5, KW=5, PAD=2)),
+        ("dgrad", _problem(groups=4, cpg=12, kpg=32, KH=1, KW=1, PAD=0)),
         ("dgrad", _problem(groups=32, cpg=4, kpg=4, KH=1, KW=1, PAD=0)),
         ("wgrad", _problem()),
         ("wgrad", _problem(groups=1, cpg=48, kpg=192, KH=5, KW=5, PAD=0)),

@@ -21,6 +21,7 @@ _CONV_BUILDERS = [
     "build_direct_conv_16c",
     "build_direct_conv_4c",
     "build_direct_4c_dgrad",
+    "build_direct_dgrad",
     "build_direct_depthwise",
     "build_direct_depthwise_spatial",
     "build_direct_depthwise_col",

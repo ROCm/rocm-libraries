@@ -608,6 +608,52 @@ def _direct_builders():
                 dc.make_dgrad_fprop_spec(pr, block_h=8, waves_k=4), arch=_ARCH
             ),
         ),
+        # The generic dgrad with its weight transform fused in (a forward
+        # kernel over the transposed problem reading the original W): the
+        # gathered form with the row guard and a waves-per-EU hint, the
+        # LDS-staged transpose-read form with 32-wide atoms, and the
+        # preloaded pre-pass weights.
+        (
+            "generic_fused",
+            {"cpg": 16, "kpg": 8, "groups": 8},
+            "fwd",
+            lambda pr: dc.build_direct_conv(
+                dc.make_dgrad_fprop_spec(
+                    pr,
+                    block_groups=2,
+                    block_h=8,
+                    dgrad_fused_weights=True,
+                    waves_per_eu=4,
+                    row_guard=True,
+                ),
+                arch=_ARCH,
+            ),
+        ),
+        (
+            "generic_fused_lds",
+            {"cpg": 8, "kpg": 32, "groups": 8, "dtype": "bf16"},
+            "fwd",
+            lambda pr: dc.build_direct_conv(
+                dc.make_dgrad_fprop_spec(
+                    pr,
+                    block_h=16,
+                    fold_k32=True,
+                    dgrad_fused_weights=True,
+                    dgrad_weights_lds=True,
+                    row_guard=True,
+                ),
+                arch=_ARCH,
+            ),
+        ),
+        (
+            "generic_preload",
+            {"cpg": 16, "kpg": 16, "groups": 8},
+            "fwd",
+            lambda pr: dc.build_direct_conv(
+                dc.make_dgrad_fprop_spec(pr, block_h=8, preload_weights=True),
+                arch=_ARCH,
+            ),
+        ),
     ]
 
 

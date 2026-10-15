@@ -600,6 +600,58 @@ policy image (`block_q` 4/8/16, `block_groups` 16/32/64, gathered, LDS-staged
 and row-staged weights) for both dtypes; `plan_for` emits one forward-ABI
 launch with the buffers `(dy, w, dx)`.
 
+### Generic Kernel dgrad: fused weights (`DirectConvSpec`, AOT variant `direct_grouped_dgrad_fused`)
+
+The generic `DirectConvSpec` row stream (any `cpg` that is a multiple of 4,
+`mfma_f32_16x16x16`, or `16x16x32` with `fold_k32`) also computes stride-1
+dgrad as a *forward* kernel over the transposed problem
+(`make_dgrad_fprop_spec`: `cpg' = kpg`, `kpg' = cpg`, `PAD' = KH-1-PAD`),
+launched with the forward direct ABI over that problem. The MFMA dgrad
+pipeline (`direct_grouped_dgrad_mfma`) runs it after a weight pre-pass; these
+knobs make it a single kernel (all default off, so every existing generic
+kernel is unchanged):
+
+- `preload_weights` (`waves_k == 1`): every weight fragment is loaded once in
+  the prologue and kept in registers for the whole row loop.
+- `dgrad_fused_weights`: `B` is the original weight `W[groups*cpg', KH, KW,
+  kpg']` (transposed-problem terms); the prologue gathers each fragment with
+  flipped taps and k<->c transposed addressing, so there is no pre-pass and no
+  workspace. Every weight stride is a product of the baked `KH`, `KW` and
+  `kpg`. Implies the preload; bounded by `PRELOAD_WEIGHT_VGPR_BUDGET`
+  (`preload_weight_vgprs`).
+- `dgrad_weights_lds` (needs `ds_read_b64_tr_b16`, gfx950): the workgroup's
+  raw `W` slice is copied to LDS with 16-byte loads and each fragment is one
+  (two with `fold_k32`) transpose read; the slice shares an LDS pool slot with
+  the first row buffer (`direct_conv_lds_bytes`). Bounded by
+  `DGRAD_WEIGHTS_LDS_BUDGET`.
+- `waves_per_eu`: the `amdgpu-waves-per-eu` hint.
+- `row_guard` (preloaded weights): the row loop is unrolled over a tile of
+  `block_h` output rows (`block_h > 0` is mandatory: the image height is a
+  kernarg), so a tile taller than the image -- a "whole image" pick mapped to
+  a cached tile height (`dgrad_fused_block_h`) -- would multiply zeros for
+  every input row past `p_Hi`. With `row_guard` each such row's MFMAs run in a
+  block-uniform one-trip loop carrying the accumulators it touches; its LDS
+  staging, barrier and flush are unchanged.
+
+The kernel name carries `pw` / `fw` / `fwl` / `we<n>` / `rg`.
+`direct_dgrad_spec_for_problem` (kernel-level helper, not the dispatch policy)
+returns the 4c spec for `cpg = kpg = 4` and this spec otherwise
+(`is_valid_dgrad_fused_problem`: stride 1, "same"-padded square filter, both
+channel counts multiples of 4); `direct_dgrad_launch` / `build_direct_dgrad`
+launch and build it.
+
+The AOT cache variant `direct_grouped_dgrad_fused` covers 1x1/3x3/5x5/7x7
+"same"-padded filters at stride 1 with `cpg`, `kpg` in 4..32 (in steps of 4,
+`cpg != kpg` included; 5x5/7x7 only where the fused weights fit the register
+budget) and carries the image of the generic direct dgrad policy rather than a
+product: `block_q` 16 (32 on 4/8-row tiles with wide channel groups),
+`block_groups` up to the per-channel rule (1 from 32 channels, 2 from 16, else
+4; halved for 5x5/7x7), tiles of 4/8/16/32 rows (4/8 for 5x5/7x7), every tile
+with the row guard, `fold_k32` where `kpg % 32 == 0` and the target has the
+atom, LDS-staged weights where valid (gathered otherwise) and `waves_per_eu=4`
+on the 16-wide-atom forms with a small weight footprint. `plan_for` emits one
+forward-ABI launch with the buffers `(dy, w, dx)`.
+
 ### Depthwise Kernel (`DirectDepthwiseSpec`)
 
 `DirectDepthwiseSpec` / `build_direct_depthwise`. Scalar FMA, no MFMA. Each lane owns
