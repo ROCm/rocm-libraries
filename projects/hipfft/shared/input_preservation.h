@@ -23,11 +23,14 @@
 
 #include "fft_enums.h"
 #include "hostbuf.h"
+#include "params_gen.h"
 #include "rocfft_hip.h"
 #include "stable_hash.h"
+#include "test_params.h"
 
 #include <cstdint>
 #include <cstring>
+#include <iostream>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -70,6 +73,9 @@ static inline uint64_t raw_byte_digest(const void* data, const size_t size_bytes
 // the input by definition, and out-of-place C2R transforms are documented to
 // be allowed to overwrite their input; both are skipped.
 //
+// Only a sampled fraction of eligible cases is checked, governed by
+// input_preservation_prob; see the constructor.
+//
 // The check also skips itself, rather than failing, when it cannot run: on
 // bricked or multi-device layouts (where the input pointers refer to per-brick
 // staging buffers that the input layout no longer describes), on a params
@@ -83,6 +89,23 @@ public:
     {
         if(!input_must_be_preserved(params))
             return;
+
+        // Confirming the input survived costs two full copies of it back to
+        // the host, which is too much to pay on every case, so only a sampled
+        // fraction is checked.  The token is salted so this roll is
+        // independent of the one that decided to run the test at all - that
+        // one hashes the bare token, and reusing it would confine the check to
+        // whichever cases happened to roll low there.
+        const double roll = hash_prob(random_seed, "input_preservation " + params.token());
+        if(roll > input_preservation_prob)
+        {
+            if(verbose > 4)
+            {
+                std::cout << "Input preservation check skipped: (roll=" << roll << " > "
+                          << input_preservation_prob << ")\n";
+            }
+            return;
+        }
 
         sizes   = params.ibuffer_sizes();
         buffers = pibuffer;
