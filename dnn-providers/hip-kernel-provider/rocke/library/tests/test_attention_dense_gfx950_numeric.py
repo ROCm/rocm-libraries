@@ -138,8 +138,8 @@ def _tolerance(dtype):
     return 2e-2 if dtype == "fp16" else 4e-2
 
 
-def _standard_reference(q, k, v, scale, sliding_window=0):
-    """Standard causal attention reference using PyTorch SDPA.
+def _standard_reference(q, k, v, scale, sliding_window=0, causal=True):
+    """Standard (optionally causal) attention reference using PyTorch SDPA.
 
     Args:
         q: [B, S, Hq, D] query tensor
@@ -173,7 +173,7 @@ def _standard_reference(q, k, v, scale, sliding_window=0):
         ).transpose(1, 2)
     else:
         ref = F.scaled_dot_product_attention(
-            qf, kf, vf, is_causal=True, scale=scale
+            qf, kf, vf, is_causal=causal, scale=scale
         ).transpose(
             1, 2
         )  # -> [B, S, Hq, D]
@@ -335,12 +335,21 @@ class TestDenseNumeric:
     @pytest.mark.gpu
     @pytest.mark.parametrize("dtype", ["bf16", "fp16"])
     @pytest.mark.parametrize("d,hq,hkv", [(64, 16, 4), (128, 16, 4)])
-    def test_fp8_kv_dequant_numeric_vs_fp32_sdpa(self, d, hq, hkv, dtype):
+    # (causal, sliding_window): flash-causal, SWA-128, and non-causal (full). Each
+    # is a distinct mask path the PR adds; the IR golden pins their bytes, this
+    # pins their correctness. SWA requires causal, so (False, >0) is not a case.
+    @pytest.mark.parametrize(
+        "causal,sliding_window", [(True, 0), (True, 128), (False, 0)]
+    )
+    def test_fp8_kv_dequant_numeric_vs_fp32_sdpa(
+        self, d, hq, hkv, dtype, causal, sliding_window
+    ):
         """fp8 KV-dequant dense: the kernel reads float8_e4m3fn K/V and dequants
         with per-tensor k_scale/v_scale into the bf16 or fp16 (AICK-1932 fp16
         output) compute path; the reference attends over the SAME dequantized K/V,
         so this isolates kernel error from quantization loss (the convention the
-        live bench uses)."""
+        live bench uses). Covered over the causal, sliding-window and non-causal
+        masks the grid variant serves for fp8."""
         import torch
 
         tdt = getattr(torch, _TORCH_DT[dtype])
@@ -364,7 +373,18 @@ class TestDenseNumeric:
         k_deq = (k_fp8.float() * k_scale).to(tdt)
         v_deq = (v_fp8.float() * v_scale).to(tdt)
 
-        spec = _spec(dtype, d, hq, hkv, persistent=False, batch=B, sq=S, use_fp8=True)
+        spec = _spec(
+            dtype,
+            d,
+            hq,
+            hkv,
+            persistent=False,
+            batch=B,
+            sq=S,
+            use_fp8=True,
+            causal=causal,
+            sliding_window=sliding_window,
+        )
         out = torch.empty(B, S, hq, d, device="cuda", dtype=tdt)
         run_attention_dense_torch(
             spec=spec,
@@ -378,11 +398,16 @@ class TestDenseNumeric:
         )
         torch.cuda.synchronize()
 
-        ref = _standard_reference(q, k_deq, v_deq, scale)
+        ref = _standard_reference(
+            q, k_deq, v_deq, scale, sliding_window=sliding_window, causal=causal
+        )
         max_abs = (ref - out.float()).abs().max().item()
         # Reference attends over the dequantized K/V, so the residual is kernel
         # compute error at the compute precision; keep a small fp8 margin over tol.
-        assert max_abs < 6e-2, f"fp8 {dtype} D{d} GQA{hq}/{hkv}: max_abs={max_abs:.3e}"
+        assert max_abs < 6e-2, (
+            f"fp8 {dtype} D{d} GQA{hq}/{hkv} causal={causal} "
+            f"swa={sliding_window}: max_abs={max_abs:.3e}"
+        )
 
     @requires_gfx950_gpu
     @pytest.mark.gpu

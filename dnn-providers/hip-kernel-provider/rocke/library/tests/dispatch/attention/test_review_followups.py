@@ -270,14 +270,23 @@ class TestFp8DenseGuards(unittest.TestCase):
             binding.launch(**launch_kwargs)
         return captured
 
-    def test_binding_forwards_kv_scales_at_launch_time(self):
-        # Regression: the dense binding dropped k_scale/v_scale, so every fp8
-        # launch through dispatch dequantized at unit scale (silently wrong).
+    def test_binding_launch_scale_overrides_bind_scale(self):
+        # A launch kwarg may still override the bind-time scale (e.g. a sweep
+        # varying scale per launch); the bind scale is the graph-capture value.
         captured = self._capture_runner_call(
-            bind_kwargs={}, launch_kwargs={"k_scale": 0.5, "v_scale": 0.25}
+            bind_kwargs={"k_scale": 1.0, "v_scale": 1.0},
+            launch_kwargs={"k_scale": 0.5, "v_scale": 0.25},
         )
         self.assertEqual(captured.get("k_scale"), 0.5)
         self.assertEqual(captured.get("v_scale"), 0.25)
+
+    def test_binding_rejects_fp8_spec_with_no_scale(self):
+        # Regression: the dense binding dropped k_scale/v_scale, so every fp8
+        # launch dequantized at unit scale (silently wrong). An fp8 spec with no
+        # scale supplied anywhere must now raise rather than default to 1.0 -- a
+        # caller wanting unit scale passes k_scale=1.0 explicitly (the combo sweep).
+        with self.assertRaisesRegex(ValueError, "scale"):
+            self._capture_runner_call(bind_kwargs={}, launch_kwargs={})
 
     def test_binding_forwards_kv_scales_at_bind_time(self):
         # The solera bench binds once (passing the scales) then launches with no
@@ -348,4 +357,21 @@ class TestFp8DenseGuards(unittest.TestCase):
                 scale=0.125,
                 k_scale=0.5,
                 v_scale=0.5,
+            )
+
+    def test_runner_rejects_fp8_spec_with_no_scale(self):
+        # The runner defaults k_scale/v_scale to None, not 1.0: a direct caller
+        # (bypassing the binding) that omits the fp8 dequant scale must raise, not
+        # silently dequantize at unit scale. A bf16 spec is unaffected.
+        try:
+            import torch
+        except ImportError:
+            self.skipTest("torch required")
+        from kernels.gfx950.attention_dense import run_attention_dense_torch
+
+        spec = self._fp8_grid_spec()[1].kernel_spec
+        fp8 = torch.zeros(1, 512, 4, 64, dtype=torch.float8_e4m3fn)
+        with self.assertRaisesRegex(ValueError, "scale"):
+            run_attention_dense_torch(
+                spec=spec, q=fp8, k=fp8, v=fp8, out=fp8, scale=0.125
             )
