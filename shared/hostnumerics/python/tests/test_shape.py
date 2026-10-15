@@ -85,9 +85,10 @@ class ShapeTests(unittest.TestCase):
 
     def test_descriptive_bounds_errors(self):
         shape = hn.Shape([2, 3, 4])
-        for operation in (lambda: shape.extent(3), lambda: shape[3]):
-            with self.assertRaisesRegex(IndexError, r"dimension 3 is outside \[0, 3\)"):
-                operation()
+        with self.assertRaisesRegex(IndexError, r"dimension 3 is outside \[0, 3\)"):
+            shape.extent(3)
+        with self.assertRaisesRegex(IndexError, "tuple index out of range"):
+            shape[3]
         for first, end, reason in (
             (2, 1, "start exceeds the end"),
             (0, 4, "end exceeds the shape rank"),
@@ -206,3 +207,83 @@ class ShapeTests(unittest.TestCase):
                 shape.coordinates(0, order)
             with self.subTest(order=order), self.assertRaises(TypeError):
                 shape.linear_index([0], order)
+
+    def test_tuple_sequence_operations(self):
+        for extents in ((), (0,), (2, 3, 2, 5), (SIZE_MAX, 2)):
+            with self.subTest(extents=extents):
+                shape = hn.Shape(extents)
+                self.assertEqual(len(shape), len(extents))
+                self.assertEqual(tuple(shape), extents)
+                self.assertEqual(list(reversed(shape)), list(reversed(extents)))
+                self.assertEqual(bool(shape), bool(extents))
+                self.assertEqual(repr(shape), f"Shape({extents!r})")
+                for value in (0, 2, 3.0, SIZE_MAX, "2", None):
+                    self.assertEqual(value in shape, value in extents)
+                    self.assertEqual(shape.count(value), extents.count(value))
+                    for bounds in ((), (1,), (-3, 3), (0, 10**100)):
+                        try:
+                            expected = extents.index(value, *bounds)
+                        except ValueError:
+                            with self.assertRaises(ValueError):
+                                shape.index(value, *bounds)
+                        else:
+                            self.assertEqual(shape.index(value, *bounds), expected)
+
+    def test_tuple_integer_and_slice_indexing(self):
+        class LastIndex:
+            def __index__(self):
+                return -1
+
+        for extents in ((), (0,), (2, 3, 5), tuple(range(20)), (SIZE_MAX, 2)):
+            shape = hn.Shape(extents)
+            for key in (0, -1, True, np.int64(-1), LastIndex(), 10**100, -(10**100)):
+                with self.subTest(extents=extents, key=key):
+                    try:
+                        expected = extents[key]
+                    except IndexError:
+                        with self.assertRaises(IndexError):
+                            shape[key]
+                    else:
+                        self.assertEqual(shape[key], expected)
+            for start, stop, step in itertools.product(
+                (None, -30, -1, 0, 2, 30, 10**100),
+                (None, -30, -1, 0, 2, 30, 10**100),
+                (None, -3, -1, 1, 2, 5, 10**100, -(10**100)),
+            ):
+                key = slice(start, stop, step)
+                with self.subTest(extents=extents, key=key):
+                    result = shape[key]
+                    self.assertIsInstance(result, hn.Shape)
+                    self.assertEqual(tuple(result), extents[key])
+            self.assertEqual(shape[:][::-1][::2], hn.Shape(extents[::-1][::2]))
+        self.assertEqual(hn.Shape(range(20))[0:16:5], hn.Shape([0, 5, 10, 15]))
+        shape = hn.Shape([2, 3, 5])
+        for key in (None, Ellipsis, (slice(None), slice(None)), [0], 1.5):
+            with self.assertRaises(TypeError):
+                shape[key]
+        with self.assertRaises(ValueError):
+            shape[::0]
+
+        class InvalidIndex:
+            def __index__(self):
+                raise RuntimeError("index conversion failed")
+
+        with self.assertRaisesRegex(RuntimeError, "index conversion failed"):
+            shape[InvalidIndex()]
+
+    def test_tuple_hash_and_immutability(self):
+        for extents in ((), (0,), (2, 3, 5), (SIZE_MAX, 2)):
+            shape = hn.Shape(extents)
+            self.assertEqual(hash(shape), hash(extents))
+            self.assertEqual({shape: "found"}[hn.Shape(extents)], "found")
+            self.assertEqual(len({shape, hn.Shape(extents)}), 1)
+            self.assertNotEqual(shape, extents)
+        shape = hn.Shape([2, 3, 5])
+        iterator = iter(shape)
+        del shape
+        self.assertEqual(tuple(iterator), (2, 3, 5))
+        shape = hn.Shape([2, 3, 5])
+        with self.assertRaises(TypeError):
+            shape[0] = 9
+        for method in ("append", "pop", "sort"):
+            self.assertFalse(hasattr(shape, method))
