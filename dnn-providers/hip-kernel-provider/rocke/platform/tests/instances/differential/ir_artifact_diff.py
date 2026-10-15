@@ -42,7 +42,6 @@ import run_diff  # noqa: E402  (reuse family discovery + enumeration constants)
 
 PARITY = run_diff.PARITY
 PYROOT = run_diff.PYROOT
-MAX_CFG = run_diff.MAX_CFG
 TIMEOUT = run_diff.TIMEOUT
 
 # Arch derivation. A family whose name starts with one of these prefixes lowers
@@ -213,7 +212,7 @@ def lower_artifact(cli, family, ir_text, ll_ref):
 
 def run_family(cli, family):
     rows = []
-    for idx in range(MAX_CFG):
+    for idx in range(run_diff.config_limit(family)):
         pr_ir, ir_text, ir_err = run_py(family, idx, "ir")
         pr_ll, ll_ref, ll_err = run_py(family, idx, "ll")
 
