@@ -338,14 +338,10 @@ def main() -> int:
 
     if args.flavor == "auto":
         from rocke.core.lower_llvm import _flavor_for_llvm
-        from rocke.runtime.comgr import loaded_compiler_info
+        from rocke.runtime.comgr import _require_compiler_info
 
-        info = loaded_compiler_info()
-        flavor = (
-            _flavor_for_llvm(info.llvm_version[0])
-            if info is not None and info.llvm_version is not None
-            else "llvm20"
-        )
+        info = _require_compiler_info()
+        flavor = _flavor_for_llvm(info.llvm_version[0])
     else:
         flavor = args.flavor
     os.environ["ROCKE_LLVM_FLAVOR"] = flavor
