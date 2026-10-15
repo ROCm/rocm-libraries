@@ -11497,6 +11497,23 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     openGuards = []
     # A barrier only some waves reach is not a workgroup barrier.
     unsafeBarriers = []
+    # Branch-aware token state. The linear walk below would otherwise carry the
+    # state left by one arm of an if/else-style forward branch into the next arm
+    # (e.g. the FactorDim/BiasType arms of the epilogue vector load), although the
+    # arms are mutually exclusive and each one needs its own barrier. Remember the
+    # state at every forward branch and restore it when the walk reaches the branch
+    # target with an unreachable fall-through (previous instruction was an
+    # unconditional branch / end of program).
+    forwardBranchStates = {}
+    fallthroughDead = False
+    unconditionalEndClassNames = unconditionalBranchClassNames + ("SEndpgm",)
+
+    def _mergeBranchStates(dst, src):
+        # Tokens whose state differs between two incoming edges are dropped, so
+        # the walk keeps its current (linear) value for them.
+        for token in list(dst.keys()):
+          if src.get(token, "standby") != dst[token]:
+            del dst[token]
 
     def _crossesLoopBoundary(fromIdx, toIdx):
       return any(fromIdx < b <= toIdx for b in loopBoundaryIndices)
@@ -11511,6 +11528,11 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
           # recover token state from the snapshot
           tokenState.clear()
           tokenState.update(deepcopy(branchTokenStateSnapshot[labelName]))
+        if fallthroughDead and labelName in forwardBranchStates and \
+           labelName not in loopHeadInfo and not _isOptNllEndLabelName(labelName):
+          # Entered only through forward branches: continue from their state.
+          tokenState.update(forwardBranchStates[labelName])
+        fallthroughDead = False
         if labelName == rapLoopEntryLabel:
           rapLoopEntryTokenState.clear()
           rapLoopEntryTokenState.update(deepcopy(tokenState))
@@ -11555,6 +11577,13 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         continue
 
       branchLabelName = getattr(item, "labelName", None)
+      if isinstance(item, BranchInstruction) and branchLabelName is not None and \
+         labelDefIndex.get(branchLabelName, -1) > idx:
+        if branchLabelName not in forwardBranchStates:
+          forwardBranchStates[branchLabelName] = dict(tokenState)
+        else:
+          _mergeBranchStates(forwardBranchStates[branchLabelName], tokenState)
+      fallthroughDead = type(item).__name__ in unconditionalEndClassNames
       if _isOptNllEndLabelName(branchLabelName) and branchLabelName not in branchTokenStateSnapshot:
         # Save token state at the first branch to OptNLL_End.
         branchTokenStateSnapshot[branchLabelName] = deepcopy(tokenState)

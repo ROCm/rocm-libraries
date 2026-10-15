@@ -20,7 +20,7 @@ import pytest
 
 from rocisa.code import Label, Module
 from rocisa.container import DSModifiers, MemTokenData, sgpr, vgpr
-from rocisa.instruction import DSLoadB64, Instruction, SAndB32, SBarrier, SBitcmp1B32, SCBranchSCC1, SCmpEQU32, SCmpLeU32, SLShiftRightB32, TensorLoadToLds, VReadfirstlaneB32
+from rocisa.instruction import DSLoadB64, DSStoreB32, Instruction, SAndB32, SBarrier, SBranch, SBitcmp1B32, SCBranchSCC1, SCmpEQU32, SCmpLeU32, SLShiftRightB32, TensorLoadToLds, VReadfirstlaneB32
 
 from Tensile.Components.DecouplePGR import dcpThickGateFromTokenPasses
 from Tensile.Components.Subtile.ClusterBarrier import insertClusterBarrier
@@ -540,3 +540,50 @@ def test_the_successful_hoist_is_still_accepted():
     assert writer.states.overflowedResources == 0, \
         "expected overflowedResources=0"
     assert len(_barriers(root)) == 1
+
+
+def _store():
+    inst = DSStoreB32(dstAddr=vgpr("Addr"), src=vgpr("Data"),
+                      ds=DSModifiers(offset=0), comment="store bias")
+    inst.setMemToken(MemTokenData([LDS_TOKEN]))
+    return inst
+
+
+def test_each_mutually_exclusive_branch_arm_gets_its_own_barrier():
+    """Arms of an if/else are exclusive, so one arm's write must not hide the next arm's hazard.
+
+    Shape of the epilogue bias load: the LDS block is read by the main loop, then one of
+    several arms (FactorDim / BiasType) overwrites it. Each arm needs a barrier before its
+    own store; a linear walk only emitted one in the first arm.
+    """
+    armB = Label("Load_Biasf16_0", "")
+    armC = Label("Load_Biasf32_1", "")
+    end = Label("Load_Bias_End", "")
+    root = _seq(
+        _read(),
+        _tripCountCompare(),
+        _branchTo(armB, "BiasType != f32"),
+        _store(),                                       # arm A (fall-through)
+        SBranch(labelName=end.getLabelName(), comment="done"),
+        armB,
+        _tripCountCompare(),
+        _branchTo(armC, "FactorDim != 0"),
+        _store(),                                       # arm B, reached only via the branch
+        SBranch(labelName=end.getLabelName(), comment="done"),
+        armC,
+        _store(),                                       # arm C
+        SBranch(labelName=end.getLabelName(), comment="done"),
+        end,
+    )
+
+    writer = _runPass(_waveParityKernel(), root)
+
+    assert writer.states.overflowedResources == 0
+    leaves = _flatten(root)
+    for arm in (armB, armC):
+        i = next(k for k, leaf in enumerate(leaves) if leaf is arm)
+        nextStore = next(k for k in range(i, len(leaves)) if isinstance(leaves[k], DSStoreB32))
+        assert any(isinstance(leaf, SBarrier) for leaf in leaves[i:nextStore]), \
+            "no barrier between %s and its ds_store" % arm.getLabelName()
+    firstStore = next(k for k, leaf in enumerate(leaves) if isinstance(leaf, DSStoreB32))
+    assert any(isinstance(leaf, SBarrier) for leaf in leaves[:firstStore])
