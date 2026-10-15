@@ -187,6 +187,13 @@ if(NOT BUILD_WITH_SPSORT)
   list(FILTER DOCUMENTATION_EXAMPLES EXCLUDE REGEX "/example_rocsparse_spsort[^/]*\\.cpp$")
 endif()
 
+
+if(NOT BUILD_WITH_TRSM_REFACTORING)
+  list(FILTER DOCUMENTATION_EXAMPLES EXCLUDE REGEX "/example_rocsparse_dnmat_transpose.cpp$")
+  list(FILTER DOCUMENTATION_EXAMPLES EXCLUDE REGEX "/example_rocsparse_dnmat_copy_data.cpp$")
+endif()
+
+
 foreach(file ${DOCUMENTATION_EXAMPLES})
     add_rocsparse_example(${file})
 endforeach()
