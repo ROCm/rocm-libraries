@@ -14,7 +14,6 @@
 #include <limits>
 #include <memory>
 #include <optional>
-#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -60,30 +59,6 @@ using data_objects::DataType;
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-BoundTokens bindingsFor(const MatchContext& context)
-{
-    auto bound = matchesGraph(TRITON_RMSNORM, context);
-    if(!bound.has_value())
-    {
-        throw std::logic_error("test graph does not match the pack it is dispatched against");
-    }
-    return std::move(*bound);
-}
-
-/// The current device with the feature suffix stripped: hipGetDeviceProperties reports
-/// `gfx942:sramecc+:xnack-`, but shards are named by the bare arch and prepare() passes
-/// this string to the archive lookup.
-DeviceProperties packedArchDeviceProperties()
-{
-    auto properties = currentDeviceProperties();
-    const auto colon = properties.gcnArchName.find(':');
-    if(colon != std::string::npos)
-    {
-        properties.gcnArchName.resize(colon);
-    }
-    return properties;
-}
 
 /// Why no staged kernel is available for this device, or empty when some is.
 std::string whyNoStagedKernel()
@@ -344,7 +319,7 @@ void expectRmsNormMatchesReference(DataType dataType,
     options.runtimeEpsilon = runtimeEpsilon;
     const GraphFixture fixture(buildTritonRmsNormGraph(options), packedArchDeviceProperties());
 
-    const auto bound = bindingsFor(fixture.context());
+    const auto bound = bindingsFor(TRITON_RMSNORM, fixture.context());
     const auto kernel = selectStagedKernel(fixture.context(), bound);
     ASSERT_TRUE(kernel.has_value())
         << "no staged kernel covers N=" << columns << " for this device, though the shard has "
@@ -506,7 +481,7 @@ TEST(TestGpuTritonRmsNormDispatch, LoadsTheModuleOnceAcrossTwoPrepares)
     }
 
     const GraphFixture fixture(buildTritonRmsNormGraph(), packedArchDeviceProperties());
-    const auto bound = bindingsFor(fixture.context());
+    const auto bound = bindingsFor(TRITON_RMSNORM, fixture.context());
     const auto kernel = selectStagedKernel(fixture.context(), bound);
     ASSERT_TRUE(kernel.has_value());
 

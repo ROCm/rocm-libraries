@@ -263,7 +263,9 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     )
 
     # Census for the Triton RMSNorm production pack at each arch the `product` pack ships
-    # it for, in one registration because a suite may be declared at one pack target only.
+    # it for: the pack inventory with the kernel matcher's boundaries generated from it, and
+    # the engine's own accept/decline answers over the same shard. One registration per
+    # suite, because a pin names one suite's cases.
     set(_hkp_triton_rmsnorm_arches)
     get_property(_hkp_wired GLOBAL PROPERTY HKP_PACK_ARCHES_product)
     foreach(_hkp_triton_arch IN LISTS _hkp_wired)
@@ -280,11 +282,30 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             SUITES TestTritonRmsNormPacks
             EXPECTED_CASES
                 IsOnePackWithAGraphMatchAndOneKernelScopedMatcher
-                ShipsFourBlockWidthsForBothDtypes
                 EveryKernelDeclaresTheSevenSlotSignature
                 EveryKernelDeclaresSharedAndBlockThreadsAndStaysUnder64KiB
                 EveryKernelCoversTheStampedArch
                 PrioritiesRankSmallerBlocksFirst
+                EveryKernelAdmitsARowAsWideAsItsBlockAndRefusesOneWider
+                EveryKernelAdmitsTheLargestGridItsBlockCanLaunchAndNoMore
+                EveryKernelAdmitsItsOwnDtypeAndRefusesTheOther
+                EveryKernelAdmitsItsOwnAlignmentAndRefusesHalfOfItOnAnyOperand
+                NoKernelAdmitsARowWiderThanTheWidestBlock
+        )
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            ARCHES ${_hkp_triton_rmsnorm_arches}
+            SUITES TestTritonRmsNormEngineTier
+            EXPECTED_CASES
+                AcceptsTheDefaultGraphWithABakedEpsilon
+                AcceptsAGraphWithARuntimeEpsilon
+                DeclinesAGraphDeclaringAlignment32
+                DeclinesARaggedX
+                DeclinesAGraphWithOverrideShapesEnabled
+                DeclinesATrainingGraph
+                DeclinesARowWiderThanTheWidestStagedBlock
+                DeclinesAFloatGraph
         )
     endif()
 

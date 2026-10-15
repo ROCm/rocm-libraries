@@ -8,9 +8,9 @@
 #if defined(HIPDNN_ENABLE_KERNEL_INGESTOR) && defined(HIPDNN_ENGINE_TRITON)
 
 #include <cstdint>
-#include <stdexcept>
+#include <limits>
+#include <optional>
 #include <string>
-#include <utility>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -28,8 +28,10 @@
  * @brief Device-free tests of the Triton RMS-norm pack's graph match, kernel match and
  *        dispatch handler.
  *
- * Kernels are built by hand with the four KMD metadata fields. Device cases are in
- * TestTritonRmsNormDispatch.cpp, the shard census in TestTritonRmsNormPacks.cpp.
+ * Kernels are built by hand with the KMD metadata fields. The kernel matcher's per-instance
+ * boundaries (block width, grid, dtype, alignment) are generated from the staged kernels in
+ * TestTritonRmsNormPacks.cpp, and the engine's own gate is in
+ * TestTritonRmsNormEngineTier.cpp. Device cases are in TestTritonRmsNormDispatch.cpp.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine
 {
@@ -53,42 +55,25 @@ bool matches(const MatchContext& context)
     return matchesGraph(TRITON_RMSNORM, context).has_value();
 }
 
-/// The bindings a real plan build would hand the dispatch, from running the graph match.
-BoundTokens bindingsFor(const MatchContext& context)
-{
-    auto bound = matchesGraph(TRITON_RMSNORM, context);
-    if(!bound.has_value())
-    {
-        throw std::logic_error("test graph does not match the pack it is dispatched against");
-    }
-    return std::move(*bound);
-}
-
-/// A kernel carrying the four metadata fields this pack's KMD declares; source is left
-/// default-constructed because these cases read metadata only.
+/// A kernel carrying the metadata fields this pack's KMD declares; `alignment` is omitted
+/// when @p alignment is nullopt. Source is left default-constructed because these cases
+/// read metadata only.
 KernelDefinition makeTritonKernel(const std::string& dtype,
-                                  int64_t blockN,
-                                  int64_t priority,
+                                  int64_t blockN = 8192,
                                   int64_t blockThreads = 256,
-                                  int64_t sharedMemBytes = 2048)
+                                  std::optional<int64_t> alignment = 16)
 {
     KernelDefinition kernel;
     kernel.name = "rmsnorm_" + dtype + "_bn" + std::to_string(blockN);
-    kernel.priority = priority;
     kernel.metadata = {{std::string(TRITON_DTYPE_FIELD), dtype},
                        {std::string(TRITON_BLOCK_N_FIELD), blockN},
                        {std::string(TRITON_BLOCK_THREADS_FIELD), blockThreads},
-                       {std::string(TRITON_SHARED_MEM_BYTES_FIELD), sharedMemBytes}};
+                       {std::string(TRITON_SHARED_MEM_BYTES_FIELD), int64_t{2048}}};
+    if(alignment.has_value())
+    {
+        kernel.metadata.emplace(std::string(TRITON_ALIGNMENT_FIELD), *alignment);
+    }
     return kernel;
-}
-
-/// The four shipped instances per dtype, with the descriptors' priorities.
-std::vector<KernelDefinition> shippedLadder(const std::string& dtype)
-{
-    return {makeTritonKernel(dtype, 1024, 400),
-            makeTritonKernel(dtype, 2048, 300),
-            makeTritonKernel(dtype, 4096, 200, 512),
-            makeTritonKernel(dtype, 8192, 100, 512)};
 }
 
 // ---------------------------------------------------------------------------
@@ -148,14 +133,26 @@ INSTANTIATE_TEST_SUITE_P(
         GraphCase{
             "InferencePhase",
             [] { return graphWith([](auto& o) { o.forwardPhase = NormFwdPhase::INFERENCE; }); }},
-        // Any multiple of 16 is accepted.
-        GraphCase{"AlignmentAboveSixteen",
+        // Alignment is the kernel matcher's call (against each kernel's own); whether the
+        // engine serves a non-default alignment is the engine tier's.
+        GraphCase{"GraphMatcherAdmitsAlignmentAboveSixteen",
                   [] {
                       return graphWith([](auto& o) {
                           o.xAlignment = 32;
                           o.scaleAlignment = 64;
                           o.yAlignment = 256;
                       });
+                  }},
+        // The int32 bound on rows and columns admits the bound itself.
+        GraphCase{"RowsAtInt32Max",
+                  [] {
+                      return graphWith(
+                          [](auto& o) { o.xDims = {std::numeric_limits<int32_t>::max(), 1}; });
+                  }},
+        GraphCase{"ColumnsAtInt32Max",
+                  [] {
+                      return graphWith(
+                          [](auto& o) { o.xDims = {1, std::numeric_limits<int32_t>::max()}; });
                   }}),
     graphCaseName);
 
@@ -208,6 +205,11 @@ INSTANTIATE_TEST_SUITE_P(
     ,
     TestTritonRmsNormGraphMatcherRefusal,
     ::testing::Values(
+        // The grid and n_cols come from the graph; launch takes no execute-time shapes.
+        GraphCase{"OverrideShapesEnabled",
+                  [] { return graphWith([](auto& o) { o.overrideShapeEnabled = true; }); }},
+        // Each kernel serves one complete single-node graph, which an empty one is not.
+        GraphCase{"NoNode", [] { return graphWith([](auto& o) { o.noNode = true; }); }},
         // The kernels compute y = x * rsqrt(mean(x^2) + eps) * scale only.
         GraphCase{"WithABias", [] { return graphWith([](auto& o) { o.withBias = true; }); }},
         GraphCase{"SavingTheInverseRms",
@@ -216,9 +218,6 @@ INSTANTIATE_TEST_SUITE_P(
         GraphCase{
             "TrainingPhase",
             [] { return graphWith([](auto& o) { o.forwardPhase = NormFwdPhase::TRAINING; }); }},
-        // Only bf16 and f16 are built.
-        GraphCase{"AnUnsupportedDtype",
-                  [] { return graphWith([](auto& o) { o.dataType = DataType::FLOAT; }); }},
         // One dtype for all three operands: scale is read at x's type.
         GraphCase{"ScaleAtADifferentDtype",
                   [] { return graphWith([](auto& o) { o.scaleDataType = DataType::HALF; }); }},
@@ -229,6 +228,10 @@ INSTANTIATE_TEST_SUITE_P(
         GraphCase{
             "NonPackedStrides",
             [] { return graphWith([](auto& o) { o.xStrides = std::vector<int64_t>{1, 8}; }); }},
+        // Unit inner stride but padded rows: only the outermost stride is wrong.
+        GraphCase{
+            "XWithPaddedRows",
+            [] { return graphWith([](auto& o) { o.xStrides = std::vector<int64_t>{8192, 1}; }); }},
         // Channels-last rank 4: dims() is in logical order and only the strides express the
         // layout, so a matcher reading dims() alone would normalise over W while memory has C
         // innermost. The packed check expects stride 1 on the innermost axis; W's stride is C.
@@ -249,22 +252,6 @@ INSTANTIATE_TEST_SUITE_P(
         GraphCase{
             "ScaleWithARowPerInputRow",
             [] { return graphWith([](auto& o) { o.scaleDims = std::vector<int64_t>{8, 4096}; }); }},
-        // The kernels need 16-byte aligned base pointers, so declaring less on any one of
-        // the three is declined.
-        GraphCase{"XAtAlignment8", [] { return graphWith([](auto& o) { o.xAlignment = 8; }); }},
-        GraphCase{"ScaleAtAlignment8",
-                  [] { return graphWith([](auto& o) { o.scaleAlignment = 8; }); }},
-        GraphCase{"YAtAlignment8", [] { return graphWith([](auto& o) { o.yAlignment = 8; }); }},
-        // The backend checks only `ptr % alignment == 0`, so 24 admits an 8-mod-16 pointer:
-        // the declaration must be a multiple of 16. Zero means undeclared.
-        GraphCase{"XAtAlignment24", [] { return graphWith([](auto& o) { o.xAlignment = 24; }); }},
-        GraphCase{"ScaleAtAlignment24",
-                  [] { return graphWith([](auto& o) { o.scaleAlignment = 24; }); }},
-        GraphCase{"YAtAlignment24", [] { return graphWith([](auto& o) { o.yAlignment = 24; }); }},
-        GraphCase{"XAtAlignment0", [] { return graphWith([](auto& o) { o.xAlignment = 0; }); }},
-        GraphCase{"ScaleAtAlignment0",
-                  [] { return graphWith([](auto& o) { o.scaleAlignment = 0; }); }},
-        GraphCase{"YAtAlignment0", [] { return graphWith([](auto& o) { o.yAlignment = 0; }); }},
         // The frontend rejects these, but the matcher sees unvalidated graphs and must
         // decline them.
         GraphCase{"ZeroRows", [] { return graphWith([](auto& o) { o.xDims = {0, 4096}; }); }},
@@ -304,8 +291,14 @@ INSTANTIATE_TEST_SUITE_P(
         // Layer norm is a sibling union arm, not a mode of RMS norm.
         GraphCase{"ALayernormNode",
                   [] { return graphWith([](auto& o) { o.asLayernorm = true; }); }},
-        // The node names a y uid the graph does not carry.
+        // The node names a uid the graph does not carry.
+        GraphCase{"NoXTensor", [] { return graphWith([](auto& o) { o.omitX = true; }); }},
+        GraphCase{"NoScaleTensor", [] { return graphWith([](auto& o) { o.omitScale = true; }); }},
         GraphCase{"NoYTensor", [] { return graphWith([](auto& o) { o.omitY = true; }); }},
+        // Unvalidated graphs may omit a tensor's dims or strides.
+        GraphCase{"XWithoutDims", [] { return graphWith([](auto& o) { o.xWithoutDims = true; }); }},
+        GraphCase{"XWithoutStrides",
+                  [] { return graphWith([](auto& o) { o.xWithoutStrides = true; }); }},
         // Every operand is read or written through a device pointer.
         GraphCase{"VirtualX", [] { return graphWith([](auto& o) { o.xVirtual = true; }); }},
         GraphCase{"VirtualScale", [] { return graphWith([](auto& o) { o.scaleVirtual = true; }); }},
@@ -321,10 +314,24 @@ INSTANTIATE_TEST_SUITE_P(
                       return graphWith(
                           [](auto& o) { o.xStrides = std::vector<int64_t>{4096, 1, 1}; });
                   }},
+        // The same for y and scale: their dims describe a dense tensor that only the rank
+        // check tells apart from what the strides describe.
+        GraphCase{"YStridesOfADifferentRankThanDims",
+                  [] {
+                      return graphWith(
+                          [](auto& o) { o.yStrides = std::vector<int64_t>{4096, 1, 1}; });
+                  }},
+        GraphCase{
+            "ScaleStridesOfADifferentRankThanDims",
+            [] { return graphWith([](auto& o) { o.scaleStrides = std::vector<int64_t>{1, 1}; }); }},
         // y is written over x's index space, densely.
         GraphCase{
             "YShapeDiffersFromX",
             [] { return graphWith([](auto& o) { o.yDims = std::vector<int64_t>{8, 2048}; }); }},
+        // A trailing unit axis keeps every extent x has, so only the rank comparison refuses.
+        GraphCase{
+            "YOfAHigherRankThanX",
+            [] { return graphWith([](auto& o) { o.yDims = std::vector<int64_t>{8, 4096, 1}; }); }},
         GraphCase{
             "NonPackedY",
             [] { return graphWith([](auto& o) { o.yStrides = std::vector<int64_t>{1, 8}; }); }},
@@ -339,114 +346,195 @@ INSTANTIATE_TEST_SUITE_P(
     graphCaseName);
 
 // ---------------------------------------------------------------------------
-// kernel_match: dtype, block width and grid size
+// kernel_match: dtype, alignment and the tokens it reads
 // ---------------------------------------------------------------------------
 
-TEST(TestTritonRmsNormKernelMatcher, AdmitsEveryBlockAtLeastAsWideAsTheAxis)
+/// A graph read by the kernel matcher, and the kernel it is asked about. The bound tokens
+/// are always the default graph's, so a case changes only what it names.
+struct KernelCase
 {
-    const GraphFixture fixture(graphWith([](auto& o) { o.xDims = {8, 1000}; }));
-    const auto bound = bindingsFor(fixture.context());
+    std::string name;
+    flatbuffers::FlatBufferBuilder (*buildGraph)();
+    KernelDefinition (*buildKernel)();
+};
 
-    for(const auto& kernel : shippedLadder("bf16"))
-    {
-        EXPECT_TRUE(matchesKernel(TRITON_RMSNORM, fixture.context(), kernel, bound)) << kernel.name;
-    }
+std::string kernelCaseName(const ::testing::TestParamInfo<KernelCase>& info)
+{
+    return info.param.name;
 }
 
-TEST(TestTritonRmsNormKernelMatcher, AdmitsABlockExactlyAsWideAsTheAxisAndNotNarrower)
+/// The default graph's bindings: 8 rows of 4096.
+BoundTokens defaultBindings()
 {
-    // N == block_n is admitted (the tile covers the row exactly); N == block_n + 1 is not.
-    const GraphFixture atBoundary(graphWith([](auto& o) { o.xDims = {8, 2048}; }));
-    const GraphFixture pastBoundary(graphWith([](auto& o) { o.xDims = {8, 2049}; }));
-    const auto atBound = bindingsFor(atBoundary.context());
-    const auto pastBound = bindingsFor(pastBoundary.context());
-
-    const auto bn1024 = makeTritonKernel("bf16", 1024, 400);
-    const auto bn2048 = makeTritonKernel("bf16", 2048, 300);
-
-    EXPECT_FALSE(matchesKernel(TRITON_RMSNORM, atBoundary.context(), bn1024, atBound));
-    EXPECT_TRUE(matchesKernel(TRITON_RMSNORM, atBoundary.context(), bn2048, atBound));
-    EXPECT_FALSE(matchesKernel(TRITON_RMSNORM, pastBoundary.context(), bn2048, pastBound));
+    const GraphFixture fixture(buildTritonRmsNormGraph());
+    return bindingsFor(TRITON_RMSNORM, fixture.context());
 }
 
-TEST(TestTritonRmsNormKernelMatcher, RefusesEveryBlockForAWidthAboveTheLargest)
+KernelDefinition bf16Kernel()
 {
-    // N = 8193 matches the graph but no kernel, so the engine declines: a tile narrower
-    // than the row would skip its tail.
-    const GraphFixture fixture(graphWith([](auto& o) { o.xDims = {8, 8193}; }));
-    const auto bound = bindingsFor(fixture.context());
+    return makeTritonKernel("bf16");
+}
+
+class TestTritonRmsNormKernelMatcherAcceptance : public ::testing::TestWithParam<KernelCase>
+{
+};
+
+TEST_P(TestTritonRmsNormKernelMatcherAcceptance, Admits)
+{
+    const GraphFixture fixture(GetParam().buildGraph());
+    EXPECT_TRUE(matchesKernel(
+        TRITON_RMSNORM, fixture.context(), GetParam().buildKernel(), defaultBindings()));
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    ,
+    TestTritonRmsNormKernelMatcherAcceptance,
+    ::testing::Values(
+        // The frontend's default alignment, 16, is what a 16-aligned kernel needs.
+        KernelCase{
+            "DefaultGraphAtAlignment16", [] { return buildTritonRmsNormGraph(); }, bf16Kernel},
+        // Any multiple of the kernel's alignment guarantees it.
+        KernelCase{"XAtAlignment32",
+                   [] { return graphWith([](auto& o) { o.xAlignment = 32; }); },
+                   bf16Kernel},
+        KernelCase{"ScaleAtAlignment32",
+                   [] { return graphWith([](auto& o) { o.scaleAlignment = 32; }); },
+                   bf16Kernel},
+        KernelCase{"YAtAlignment32",
+                   [] { return graphWith([](auto& o) { o.yAlignment = 32; }); },
+                   bf16Kernel},
+        KernelCase{"HalfGraphOnAHalfKernel",
+                   [] { return graphWith([](auto& o) { o.dataType = DataType::HALF; }); },
+                   [] { return makeTritonKernel("f16"); }}),
+    kernelCaseName);
+
+class TestTritonRmsNormKernelMatcherRefusal : public ::testing::TestWithParam<KernelCase>
+{
+};
+
+TEST_P(TestTritonRmsNormKernelMatcherRefusal, Refuses)
+{
+    const GraphFixture fixture(GetParam().buildGraph());
+    EXPECT_FALSE(matchesKernel(
+        TRITON_RMSNORM, fixture.context(), GetParam().buildKernel(), defaultBindings()));
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    ,
+    TestTritonRmsNormKernelMatcherRefusal,
+    ::testing::Values(
+        // The kernel matcher re-reads the node and its operands, and must be total itself.
+        KernelCase{
+            "NoNode", [] { return graphWith([](auto& o) { o.noNode = true; }); }, bf16Kernel},
+        KernelCase{
+            "NoXTensor", [] { return graphWith([](auto& o) { o.omitX = true; }); }, bf16Kernel},
+        KernelCase{"NoScaleTensor",
+                   [] { return graphWith([](auto& o) { o.omitScale = true; }); },
+                   bf16Kernel},
+        KernelCase{
+            "NoYTensor", [] { return graphWith([](auto& o) { o.omitY = true; }); }, bf16Kernel},
+        // The kernel's base pointers carry its alignment as a divisibility hint, so declaring
+        // less on any one of the three is declined.
+        KernelCase{"XAtAlignment8",
+                   [] { return graphWith([](auto& o) { o.xAlignment = 8; }); },
+                   bf16Kernel},
+        KernelCase{"ScaleAtAlignment8",
+                   [] { return graphWith([](auto& o) { o.scaleAlignment = 8; }); },
+                   bf16Kernel},
+        KernelCase{"YAtAlignment8",
+                   [] { return graphWith([](auto& o) { o.yAlignment = 8; }); },
+                   bf16Kernel},
+        // The backend checks only `ptr % alignment == 0`, so 24 admits an 8-mod-16 pointer:
+        // the declaration must be a multiple of the kernel's. Zero means undeclared, and a
+        // negative multiple guarantees nothing.
+        KernelCase{"XAtAlignment24",
+                   [] { return graphWith([](auto& o) { o.xAlignment = 24; }); },
+                   bf16Kernel},
+        KernelCase{"ScaleAtAlignment24",
+                   [] { return graphWith([](auto& o) { o.scaleAlignment = 24; }); },
+                   bf16Kernel},
+        KernelCase{"YAtAlignment24",
+                   [] { return graphWith([](auto& o) { o.yAlignment = 24; }); },
+                   bf16Kernel},
+        KernelCase{"XAtAlignment0",
+                   [] { return graphWith([](auto& o) { o.xAlignment = 0; }); },
+                   bf16Kernel},
+        KernelCase{"ScaleAtAlignment0",
+                   [] { return graphWith([](auto& o) { o.scaleAlignment = 0; }); },
+                   bf16Kernel},
+        KernelCase{"YAtAlignment0",
+                   [] { return graphWith([](auto& o) { o.yAlignment = 0; }); },
+                   bf16Kernel},
+        KernelCase{"XAtNegativeAlignment",
+                   [] { return graphWith([](auto& o) { o.xAlignment = -16; }); },
+                   bf16Kernel},
+        // The requirement is the kernel's own alignment, not a fixed 16.
+        KernelCase{"OperandsAt16OnAKernelAlignedTo32",
+                   [] { return buildTritonRmsNormGraph(); },
+                   [] { return makeTritonKernel("bf16", 8192, 256, 32); }},
+        // A kernel that states no usable alignment admits nothing.
+        KernelCase{"AKernelWithoutAlignment",
+                   [] { return buildTritonRmsNormGraph(); },
+                   [] { return makeTritonKernel("bf16", 8192, 256, std::nullopt); }},
+        KernelCase{"AKernelWithANonIntegerAlignment",
+                   [] { return buildTritonRmsNormGraph(); },
+                   [] {
+                       auto kernel = makeTritonKernel("bf16", 8192, 256, std::nullopt);
+                       kernel.metadata.emplace(std::string(TRITON_ALIGNMENT_FIELD),
+                                               std::string("16"));
+                       return kernel;
+                   }},
+        KernelCase{"AKernelAtAlignment0",
+                   [] { return buildTritonRmsNormGraph(); },
+                   [] { return makeTritonKernel("bf16", 8192, 256, 0); }},
+        KernelCase{"AKernelAtNegativeAlignment",
+                   [] { return buildTritonRmsNormGraph(); },
+                   [] { return makeTritonKernel("bf16", 8192, 256, -16); }},
+        // A kernel with no threads cannot be launched (and would divide by zero).
+        KernelCase{"AKernelWithZeroBlockThreads",
+                   [] { return buildTritonRmsNormGraph(); },
+                   [] { return makeTritonKernel("bf16", 8192, 0); }}),
+    kernelCaseName);
+
+TEST(TestTritonRmsNormKernelMatcher, RefusesAFloatGraphOnEveryKernelDtype)
+{
+    // The graph matcher leaves dtypes to the kernels; FLOAT has no kernel spelling.
+    const GraphFixture fixture(graphWith([](auto& o) { o.dataType = DataType::FLOAT; }));
+    const auto bound = bindingsFor(TRITON_RMSNORM, fixture.context());
 
     for(const auto& dtype : {std::string("bf16"), std::string("f16")})
     {
-        for(const auto& kernel : shippedLadder(dtype))
-        {
-            EXPECT_FALSE(matchesKernel(TRITON_RMSNORM, fixture.context(), kernel, bound))
-                << kernel.name;
-        }
-    }
-}
-
-TEST(TestTritonRmsNormKernelMatcher, RefusesAKernelOfTheWrongDtype)
-{
-    const GraphFixture fixture(graphWith([](auto& o) { o.xDims = {8, 1000}; }));
-    const auto bound = bindingsFor(fixture.context());
-
-    for(const auto& kernel : shippedLadder("f16"))
-    {
-        EXPECT_FALSE(matchesKernel(TRITON_RMSNORM, fixture.context(), kernel, bound))
-            << kernel.name;
+        EXPECT_FALSE(
+            matchesKernel(TRITON_RMSNORM, fixture.context(), makeTritonKernel(dtype), bound))
+            << dtype;
     }
 }
 
 TEST(TestTritonRmsNormKernelMatcher, ReadsTheDescriptorDtypeVocabularyNotTheFlatbufferEnum)
 {
-    const GraphFixture fixture(graphWith([](auto& o) { o.xDims = {8, 1000}; }));
-    const auto bound = bindingsFor(fixture.context());
+    const GraphFixture fixture(buildTritonRmsNormGraph());
 
     // The flatbuffer spelling "BFLOAT16" is not accepted; descriptors say "bf16".
     EXPECT_FALSE(matchesKernel(
-        TRITON_RMSNORM, fixture.context(), makeTritonKernel("BFLOAT16", 4096, 200), bound));
+        TRITON_RMSNORM, fixture.context(), makeTritonKernel("BFLOAT16"), defaultBindings()));
 }
 
-TEST(TestTritonRmsNormKernelMatcher, ServesHalfGraphsFromHalfKernels)
+TEST(TestTritonRmsNormKernelMatcher, RefusesWithoutTheColumnsToken)
 {
-    const GraphFixture fixture(graphWith([](auto& o) {
-        o.dataType = DataType::HALF;
-        o.xDims = {8, 1000};
-    }));
-    const auto bound = bindingsFor(fixture.context());
+    const GraphFixture fixture(buildTritonRmsNormGraph());
+    auto bound = defaultBindings();
+    bound.erase(TRITON_COLUMNS_TOKEN);
 
-    EXPECT_TRUE(matchesKernel(
-        TRITON_RMSNORM, fixture.context(), makeTritonKernel("f16", 1024, 400), bound));
-    EXPECT_FALSE(matchesKernel(
-        TRITON_RMSNORM, fixture.context(), makeTritonKernel("bf16", 1024, 400), bound));
+    EXPECT_FALSE(matchesKernel(TRITON_RMSNORM, fixture.context(), bf16Kernel(), bound));
 }
 
-TEST(TestTritonRmsNormKernelMatcher, AdmitsTheLargestGridA256ThreadBlockCanLaunch)
+TEST(TestTritonRmsNormKernelMatcher, RefusesWithoutTheRowsToken)
 {
-    // HIP caps a grid dimension at UINT32_MAX threads: 16777215 rows of 256 threads fit,
-    // 16777216 rows (2^32 threads) do not.
-    const GraphFixture largest(graphWith([](auto& o) { o.xDims = {16777215, 1024}; }));
-    const GraphFixture tooLarge(graphWith([](auto& o) { o.xDims = {16777216, 1024}; }));
-    const auto largestBound = bindingsFor(largest.context());
-    const auto tooLargeBound = bindingsFor(tooLarge.context());
-    const auto bn1024 = makeTritonKernel("bf16", 1024, 400, 256);
+    const GraphFixture fixture(buildTritonRmsNormGraph());
+    auto bound = defaultBindings();
+    bound.erase(TRITON_ROWS_TOKEN);
 
-    EXPECT_TRUE(matchesKernel(TRITON_RMSNORM, largest.context(), bn1024, largestBound));
-    EXPECT_FALSE(matchesKernel(TRITON_RMSNORM, tooLarge.context(), bn1024, tooLargeBound));
-}
-
-TEST(TestTritonRmsNormKernelMatcher, AdmitsTheLargestGridA512ThreadBlockCanLaunch)
-{
-    // The bound is per instance: at 512 threads it halves, to 8388607 rows.
-    const GraphFixture largest(graphWith([](auto& o) { o.xDims = {8388607, 4096}; }));
-    const GraphFixture tooLarge(graphWith([](auto& o) { o.xDims = {8388608, 4096}; }));
-    const auto largestBound = bindingsFor(largest.context());
-    const auto tooLargeBound = bindingsFor(tooLarge.context());
-    const auto bn4096 = makeTritonKernel("bf16", 4096, 200, 512);
-
-    EXPECT_TRUE(matchesKernel(TRITON_RMSNORM, largest.context(), bn4096, largestBound));
-    EXPECT_FALSE(matchesKernel(TRITON_RMSNORM, tooLarge.context(), bn4096, tooLargeBound));
+    EXPECT_FALSE(matchesKernel(TRITON_RMSNORM, fixture.context(), bf16Kernel(), bound));
 }
 
 // ---------------------------------------------------------------------------
@@ -455,15 +543,11 @@ TEST(TestTritonRmsNormKernelMatcher, AdmitsTheLargestGridA512ThreadBlockCanLaunc
 
 TEST(TestTritonRmsNormDispatch, NeedsNoWorkspace)
 {
-    const GraphFixture fixture(graphWith([](auto& o) { o.xDims = {8, 1000}; }));
+    const GraphFixture fixture(buildTritonRmsNormGraph());
     const auto& handler = dispatchHandler(TRITON_RMSNORM);
-    const auto bound = bindingsFor(fixture.context());
 
     // The reduction is entirely in-block (one program per row, LDS only).
-    for(const auto& kernel : shippedLadder("bf16"))
-    {
-        EXPECT_EQ(handler.workspaceBytes(fixture.context(), bound, kernel), 0U) << kernel.name;
-    }
+    EXPECT_EQ(handler.workspaceBytes(fixture.context(), defaultBindings(), bf16Kernel()), 0U);
 }
 
 TEST(TestTritonRmsNormDispatch, RefusesToPrepareWithoutTheMatcherSBindings)
@@ -472,9 +556,8 @@ TEST(TestTritonRmsNormDispatch, RefusesToPrepareWithoutTheMatcherSBindings)
     const auto& handler = dispatchHandler(TRITON_RMSNORM);
 
     // The binding lookup throws before any archive is opened.
-    EXPECT_THROW(
-        handler.prepare(fixture.context(), BoundTokens{}, makeTritonKernel("bf16", 1024, 400)),
-        hipdnn_plugin_sdk::HipdnnPluginException);
+    EXPECT_THROW(handler.prepare(fixture.context(), BoundTokens{}, makeTritonKernel("bf16", 1024)),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 } // namespace
