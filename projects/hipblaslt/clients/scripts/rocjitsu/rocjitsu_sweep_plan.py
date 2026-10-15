@@ -8,10 +8,23 @@ import heapq
 import json
 import math
 from pathlib import Path
-from Tensile.Utilities.LibraryIO import readMessagePack
+from tensilelite.Utilities.LibraryIO import iterSolutionRecords, readMessagePack
+from tensilelite.Utilities.gemm_problem_for_solution import (
+    LibraryMetadata,
+    UnsupportedSolution,
+)
+from tensilelite.Utilities.gemm_problem_bench import bench_yaml, UnsupportedBenchProblem
 
 POLICY = "tile-depth-v1"
 CASES_PER_SOLUTION = 4
+REGULAR_POLICY = "regular-v1"
+
+
+def regular_problem(solution, directory, target):
+    metadata = LibraryMetadata(
+        directory, target, (solution["index"],), {solution["index"]: solution}
+    )
+    return metadata.get_problem(solution["index"], reduction_blocks=8)
 
 
 def sha256(path):
@@ -231,7 +244,11 @@ def select_solutions(entries, count, seed):
     return selected
 
 
-def make_plan(library_dir, target, device, count, seed, solution_indices=None):
+def make_plan(
+    library_dir, target, device, count, seed, solution_indices=None, policy=POLICY
+):
+    if policy not in (POLICY, REGULAR_POLICY):
+        raise ValueError(f"Unknown case policy: {policy}")
     library_dir = (
         library_dir / target if (library_dir / target).is_dir() else library_dir
     )
@@ -244,7 +261,7 @@ def make_plan(library_dir, target, device, count, seed, solution_indices=None):
     }
     if not libraries:
         raise ValueError(f"No {target} packaged metadata under {library_dir}")
-    counts, inputs = Counter(), {}
+    counts, inputs, coverage_gaps = Counter(), {}, Counter()
     names, eligible_names = set(), set()
     indices, requested = set(), {}
     wanted = set(solution_indices or [])
@@ -252,7 +269,7 @@ def make_plan(library_dir, target, device, count, seed, solution_indices=None):
     def inventory():
         for path in sorted(libraries.values()):
             inputs[path.name] = sha256(path)
-            for solution in read_library(path).get("solutions", []):
+            for _, solution in iterSolutionRecords(path):
                 if solution["index"] in indices:
                     raise ValueError(
                         f"Duplicate solution index {solution['index']} in {path}"
@@ -265,6 +282,24 @@ def make_plan(library_dir, target, device, count, seed, solution_indices=None):
                 names.add(name)
                 if not matches_hardware(solution["hardwarePredicate"], target, device):
                     counts["other_or_unknown_hardware"] += 1
+                elif policy == REGULAR_POLICY:
+                    # Only explicitly unimplemented features are coverage gaps.
+                    # Missing fields and malformed metadata must fail preparation.
+                    try:
+                        problem = regular_problem(solution, library_dir, target)
+                        bench_yaml([problem])
+                    except (UnsupportedSolution, UnsupportedBenchProblem) as error:
+                        counts["outside_adapter_scope"] += 1
+                        reasons = (
+                            error.reasons
+                            if isinstance(error, UnsupportedSolution)
+                            else (error.reason,)
+                        )
+                        coverage_gaps.update(reasons)
+                    else:
+                        counts["eligible_solutions"] += 1
+                        eligible_names.add(name)
+                        yield path, solution
                 elif not ordinary_problem(solution["problemType"]):
                     counts["outside_adapter_scope"] += 1
                 else:
@@ -303,15 +338,42 @@ def make_plan(library_dir, target, device, count, seed, solution_indices=None):
                 raise ValueError(
                     "Requested solution does not match the emulated hardware"
                 )
-            if not ordinary_problem(s["problemType"]):
+            if policy == REGULAR_POLICY:
+                problem = regular_problem(s, library_dir, target)
+                job["bench_yaml"] = bench_yaml([problem])
+                job["target_dispatches_per_case"] = 1
+                job["cases"] = [
+                    {"id": "regular", "shape": [problem.m, problem.n, 1, problem.k]}
+                ]
+                if (
+                    problem.m * problem.k
+                    + problem.n * problem.k
+                    + 2 * problem.m * problem.n
+                ) * 16 > 128 * 1024 * 1024:
+                    raise ValueError(
+                        "Case exceeds 128 MiB estimated data-buffer budget"
+                    )
+            elif not ordinary_problem(s["problemType"]):
                 raise ValueError(
                     "Requested solution is outside the client adapter scope"
                 )
-            job["cases"] = derive_cases(s)
-        except (ValueError, KeyError, IndexError, TypeError) as error:
+            else:
+                job["cases"] = derive_cases(s)
+        except (
+            ValueError,
+            KeyError,
+            IndexError,
+            TypeError,
+            UnsupportedSolution,
+            UnsupportedBenchProblem,
+        ) as error:
             job["cases"] = [
                 {"id": label, "shape": None}
-                for label in ("tile", "multi_tile", "mn_edge", "k_remainder")
+                for label in (
+                    ("regular",)
+                    if policy == REGULAR_POLICY
+                    else ("tile", "multi_tile", "mn_edge", "k_remainder")
+                )
             ]
             job["planning_error"] = str(error)
         main_object = metadata.with_name(
@@ -334,7 +396,8 @@ def make_plan(library_dir, target, device, count, seed, solution_indices=None):
         json.dumps(inputs, sort_keys=True).encode()
     ).hexdigest()
     return {
-        "policy": POLICY,
+        "policy": policy,
+        "coverage_gaps": dict(coverage_gaps),
         "seed": seed,
         "target": target,
         "selection": (
@@ -344,7 +407,7 @@ def make_plan(library_dir, target, device, count, seed, solution_indices=None):
         ),
         "solutions": len(selected),
         "kernels": len({s["kernelName"] for _, s in selected}),
-        "planned_cases": len(jobs) * CASES_PER_SOLUTION,
+        "planned_cases": sum(len(job["cases"]) for job in jobs),
         "inventory": dict(counts),
         "input_sha256": inputs,
         "artifact_fingerprint": fingerprint,

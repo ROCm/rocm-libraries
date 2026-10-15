@@ -8,6 +8,7 @@ set -euo pipefail
 # artifact, we build the rocjitsu CLI locally. Monitor progress on packaging rocjitsu.
 #
 # Run independent four-worker / 100-solution GEMM sweeps through both clients.
+# Bench uses regular-v1; TensileLite retains tile-depth-v1.
 #
 # Basic flow:
 #   1. Use the TheRock artifact tree unpacked at ROCM_PATH.
@@ -244,7 +245,7 @@ run_timed "build rocjitsu" \
   --target \
     rocjitsu_bin \
     rocjitsu_shared \
-    rocjitsu_plugin_race_so
+    rocjitsu_plugin_race_so --parallel 4
 
 ROCJITSU_BIN="${ROCJITSU_BUILD_DIR}/tools/rocjitsu/rocjitsu"
 if [[ ! -x "${ROCJITSU_BIN}" ]]; then
@@ -269,12 +270,19 @@ check_status=0
 # Increase the solution count to extend the sample; use the CLI to try other seeds.
 for backend in tensile bench; do
   client="${TENSILELITE_CLIENT}"
-  [[ "${backend}" == bench ]] && client="${HIPBLASLT_BENCH}"
+  policy="tile-depth-v1"
+  failure_list="${KNOWN_FAILURES}"
+  if [[ "${backend}" == bench ]]; then
+    client="${HIPBLASLT_BENCH}"
+    policy="regular-v1"
+    failure_list="${TENSILELITE_ROOT}/rocjitsu/known_failures_regular.yaml"
+  fi
   if run_timed "${backend} sampled race sweep" \
     python3 "${SWEEP_DRIVER}" \
       --backend "${backend}" --seed 0 \
+      --policy "${policy}" \
       --rocjitsu "${ROCJITSU_BIN}" --client "${client}" \
-      --rocjitsu-revision "${ROCJITSU_REVISION}" --known-failures "${KNOWN_FAILURES}" \
+      --rocjitsu-revision "${ROCJITSU_REVISION}" --known-failures "${failure_list}" \
       --config "${ROCJITSU_CONFIG}" --target "${ROCJITSU_GPU_TARGET}" \
       --library-dir "${ROCM_PATH}/lib/hipblaslt/library" \
       --reports "${RACE_REPORT_DIR}/sweep-${backend}" \

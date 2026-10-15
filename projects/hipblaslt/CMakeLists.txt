@@ -814,6 +814,7 @@ if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
         COMPONENT tests
         FILES_MATCHING PATTERN "*.py" PATTERN "*.md" PATTERN "requirements.txt"
         PATTERN "known_failures.yaml"
+        PATTERN "known_failures_regular.yaml"
         PATTERN "__pycache__" EXCLUDE
     )
 

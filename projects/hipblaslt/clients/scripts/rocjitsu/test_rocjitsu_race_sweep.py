@@ -125,6 +125,103 @@ def failure_list():
 
 
 class SweepTests(unittest.TestCase):
+    def test_regular_policy_streams_both_formats_and_preserves_sample_prefix(self):
+        from tensilelite.Utilities.LibraryIO import writeMessagePack
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            records = [solution(i) for i in range(5)]
+            records[4]["sizeMapping"].update(
+                tileProcessingStrategy="StreamK", globalSplitU=0
+            )
+            records[0]["sizeMapping"]["globalSplitU"] = 4
+            path = root / "library_gfx942.dat"
+            path.with_suffix(".co").write_bytes(b"kernel")
+            for indexed in (False, True):
+                with self.subTest(indexed=indexed):
+                    writeMessagePack(
+                        path, {"solutions": records, "library": {}}, indexed=indexed
+                    )
+                    full = plan.make_plan(
+                        root, "gfx942", {}, 4, "0", policy=plan.REGULAR_POLICY
+                    )
+                    small = plan.make_plan(
+                        root, "gfx942", {}, 2, "0", policy=plan.REGULAR_POLICY
+                    )
+                    self.assertEqual(small["jobs"], full["jobs"][:2])
+                    self.assertEqual(full["planned_cases"], 4)
+                    self.assertEqual(
+                        full["coverage_gaps"], {"tileProcessingStrategy=StreamK": 1}
+                    )
+                    selected = next(
+                        j for j in full["jobs"] if j["solutions"][0]["index"] == 0
+                    )
+                    self.assertEqual(selected["cases"][0]["shape"], [64, 96, 1, 1024])
+                    row = yaml.safe_load(selected["bench_yaml"])[0]
+                    self.assertEqual(
+                        (row["iters"], row["cold_iters"], row["solution_index"]),
+                        (0, 0, 0),
+                    )
+                    self.assertEqual(row["lda"], 64)
+            records[0]["sizeMapping"]["globalSplitU"] = 0
+            writeMessagePack(path, {"solutions": records, "library": {}}, indexed=True)
+            with self.assertRaisesRegex(ValueError, "invalid globalSplitU"):
+                plan.make_plan(root, "gfx942", {}, 2, "0", policy=plan.REGULAR_POLICY)
+
+    def test_complex_regular_bench_requires_one_dispatch_and_identity(self):
+        j = job()
+        j.update(
+            cases=[{"id": "regular", "shape": [64, 96, 1, 256]}],
+            target_dispatches_per_case=1,
+        )
+        text = bench_log(j).replace(sweep.target_dispatch_line(j) + "\n", "", 1)
+        text = text.replace("k,norm_error", "k,alpha,beta,norm_error").replace(
+            "64,96,1,256,0,", "64,96,1,256,(1,0),(0,0),0,"
+        )
+        self.assertFalse(sweep.classify_bench(j, text, 0)["failed"])
+        for bad in (
+            text + sweep.target_dispatch_line(j) + "\n",
+            text.replace("--Solution index: 7", "--Solution index: 8"),
+            text + "RACE test\nEND_RACE\n",
+        ):
+            self.assertTrue(sweep.classify_bench(j, bad, 0)["failed"])
+
+    def test_bench_conversion_uses_matching_template_and_active_interpreter(self):
+        directory = (
+            Path(os.environ["ROCM_PATH"]) / "bin"
+            if "ROCM_PATH" in os.environ
+            else Path(__file__).parents[2] / "tests"
+        )
+        template = (
+            directory / "hipblaslt_template.yaml"
+            if "ROCM_PATH" in os.environ
+            else directory / "data/hipblaslt_template.yaml"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for name, source in (
+                ("hipblaslt_gentest.py", directory / "hipblaslt_gentest.py"),
+                ("hipblaslt_template.yaml", template),
+                ("hipblaslt_common.yaml", template.with_name("hipblaslt_common.yaml")),
+            ):
+                (root / name).write_bytes(source.read_bytes())
+            stem = root / "input"
+            stem.with_suffix(".yaml").write_text(
+                "Tests:\n" + yaml.safe_dump(sweep.bench_options(job()))
+            )
+            self.assertEqual(
+                sweep.convert_bench_input(root / "bench", stem, 10, os.environ.copy()),
+                0,
+                stem.with_suffix(".conversion.log").read_text(),
+            )
+            self.assertTrue(
+                stem.with_suffix(".data").read_bytes().startswith(b"hipBLASLt\0")
+            )
+            command = json.loads(
+                stem.with_suffix(".conversion.command.json").read_text()
+            )
+            self.assertEqual(command[0], sys.executable)
+
     def test_known_failures_follow_kernel_names_across_artifact_changes(self):
         j = job()
         j["code_objects"] = ["kernel.co"]
@@ -262,6 +359,12 @@ class SweepTests(unittest.TestCase):
         )
         code_object = root / "library_gfx942.co"
         code_object.write_bytes(b"kernel")
+        for name in (
+            "hipblaslt_gentest.py",
+            "hipblaslt_template.yaml",
+            "hipblaslt_common.yaml",
+        ):
+            (root / name).write_bytes(b"test-conversion-tool")
         config = root / "config.json"
         config.write_text(json.dumps({"vm": {"gpu": {"device": {}}}}))
         data = failure_list()
@@ -290,7 +393,11 @@ class SweepTests(unittest.TestCase):
         invocations = []
 
         def execute(command, log, timeout, env):
-            native_input = Path(command[-1]).read_text()
+            native_input = (
+                Path(command[-1]).with_suffix(".yaml").read_text()
+                if backend == "bench"
+                else Path(command[-1]).read_text()
+            )
             if backend == "tensile":
                 options = [line.split("=", 1) for line in native_input.splitlines()]
                 index = int(next(v for k, v in options if k == "solution-start-idx"))
@@ -300,7 +407,7 @@ class SweepTests(unittest.TestCase):
                     if k == "problem-size"
                 ]
             else:
-                rows = yaml.safe_load(native_input)
+                rows = yaml.safe_load(native_input)["Tests"]
                 self.assertEqual(len({r["solution_index"] for r in rows}), 1)
                 index = rows[0]["solution_index"]
                 shapes = [[r[k] for k in ("M", "N", "batch_count", "K")] for r in rows]
@@ -351,6 +458,7 @@ class SweepTests(unittest.TestCase):
 
         with (
             patch.object(sweep, "physical_cpus", return_value=[0]),
+            patch.object(sweep, "convert_bench_input", return_value=0),
             patch.object(sweep, "execute_command", side_effect=execute),
         ):
             self.assertEqual(sweep.run(args), int(failure is not None))
@@ -468,11 +576,11 @@ class SweepTests(unittest.TestCase):
             ):
                 with self.subTest(data=data[-8:]):
                     path.write_bytes(data)
-                    with self.assertRaises(zlib.error):
+                    with self.assertRaises(ValueError):
                         plan.read_library(path)
             path = Path(tmp) / "lib.dat"
             path.write_bytes(payload + payload)
-            with self.assertRaises(msgpack.ExtraData):
+            with self.assertRaises(ValueError):
                 plan.read_library(path)
 
     def test_hardware_constraints_are_not_bypassed(self):
@@ -871,6 +979,7 @@ class SweepTests(unittest.TestCase):
                         ),
                         patch.object(sweep, "prepare", side_effect=prepare),
                         patch.object(sweep, "physical_cpus", return_value=[0]),
+                        patch.object(sweep, "convert_bench_input", return_value=0),
                         patch.object(
                             sweep, "execute_command", side_effect=execute
                         ) as launch,
