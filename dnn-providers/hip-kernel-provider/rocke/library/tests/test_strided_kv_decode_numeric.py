@@ -210,6 +210,82 @@ def test_decode_replay_scope_content_updates_and_rebind(
         owner.close()
 
 
+@pytest.mark.parametrize("graph", [False, True])
+def test_paged_decode_rebind_between_loops(gpu, monkeypatch, graph):
+    """Ordinary rebinding remains available independently of replay scopes."""
+    torch, arch = gpu
+    from kernels.common import attention_unified as au
+    from rocke.runtime import synchronize_and_release
+
+    monkeypatch.setenv(f"HIPDNN_{arch.upper()}_3D_GRAPH", str(int(graph)))
+    batch, heads, dim, capacity, block = 2, 8, 64, 65, 16
+    rng = torch.Generator().manual_seed(2566)
+    qh = torch.randn(batch, heads, dim, generator=rng).to(torch.bfloat16)
+    kh = torch.randn(batch, 1, capacity, dim, generator=rng).to(torch.bfloat16)
+    vh = torch.randn(batch, 1, capacity, dim, generator=rng).to(torch.bfloat16)
+    k, table = _paged_cache(torch, kh, block)
+    v, _ = _paged_cache(torch, vh, block)
+    lengths = torch.tensor([capacity, 0], dtype=torch.int32).cuda()
+    stream = torch.cuda.Stream()
+    caller_stream = torch.cuda.current_stream().cuda_stream
+    args = dict(
+        problem=au.UnifiedAttentionProblem(
+            total_q=batch,
+            num_seqs=batch,
+            num_query_heads=heads,
+            num_kv_heads=1,
+            head_size=dim,
+            block_size=block,
+            max_seqlen_q=1,
+            max_seqlen_k=capacity,
+            dtype="bf16",
+            clamp_arch=arch,
+            target_ctas=8,
+        ),
+        q=qh.cuda(),
+        k=k,
+        v=v,
+        out=torch.empty_like(qh).cuda(),
+        cu_seqlens_q=torch.arange(batch + 1, dtype=torch.int32).cuda(),
+        seqused_k=lengths,
+        block_table=table,
+        softmax_scale=1 / math.sqrt(dim),
+        softcap=0.0,
+        backend="3d",
+        kv_layout="paged",
+        stream=stream.cuda_stream,
+        use_graph=graph,
+    )
+    torch.cuda.synchronize()
+    with au.prepare_unified_attention_torch(**args) as owner:
+        for step in range(4):
+            q_step = (qh.float() + step / 8).to(torch.bfloat16)
+            lens = [capacity - step, step]
+            with torch.cuda.stream(stream):
+                lengths.copy_(torch.tensor(lens, dtype=torch.int32), non_blocking=True)
+                q, output = q_step.cuda(), torch.empty_like(qh).cuda()
+                output.copy_(torch.full(qh.shape, float("nan"), dtype=torch.bfloat16))
+            owner.rebind(q=q, out=output)  # New bindings force graph recapture.
+            assert torch.cuda.current_stream().cuda_stream == caller_stream
+            expected = _reference(torch, q_step, kh, vh, lens, 0)
+            torch.testing.assert_close(
+                output.cpu().float(), expected, atol=0.01, rtol=0.02
+            )
+            # Drain before changing storage metadata on the same tensor objects.
+            synchronize_and_release(stream.cuda_stream)
+            with torch.cuda.stream(stream):
+                q.set_(q_step.cuda())
+                output.set_(torch.empty_like(qh).cuda())
+            owner.rebind()
+            torch.testing.assert_close(
+                output.cpu().float(), expected, atol=0.01, rtol=0.02
+            )
+        if arch == "gfx1250":
+            with pytest.raises(NotImplementedError, match="gfx942/gfx950"):
+                with owner.replay_scope():
+                    pass
+
+
 @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
 @pytest.mark.parametrize("kv_layout", ["paged", "strided"])
 @pytest.mark.parametrize("owned", [False, True])

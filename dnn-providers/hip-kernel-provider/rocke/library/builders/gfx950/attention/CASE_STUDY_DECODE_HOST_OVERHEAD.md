@@ -16,7 +16,7 @@ The baseline for this investigation is develop commit
 `55c7ae91080af4cbe09d5d00b350db918815a5d5`; the earlier ownership change is
 PR #13110.
 
-The runtime now skips the context only when Q's device and the effective stream
+On gfx942/gfx950, the runtime now skips the context only when Q's device and the effective stream
 are already current. It normalizes live layout metadata once, checks it and
 storage addresses against the resident entry, and probes the most recent graph
 before hashing its immutable identity. No additional lifetime cache is added.
@@ -31,6 +31,13 @@ bound segment/reducer launch buffers until exit drains the stream. The decode
 benchmarks time the yielded public callable. Binding changes go through
 `rebind()` between scopes; the general `launch()` path retains its per-call
 validation and outer-capture support.
+
+Ordinary rebinding borrows the owner's submission lock without constructing a
+scope-only replay operation. It therefore supports gfx1250 eager and graph
+bindings while scoped replay remains restricted to gfx942/gfx950. Replacement
+tensors remain reachable if submission or the final completion drain fails.
+gfx1250 preserves its prior explicit contexts, storage-bearing graph key, and
+cache eviction behavior; the host shortcuts are confined to gfx942/gfx950.
 
 ## Scenarios and replay procedure
 
@@ -116,6 +123,20 @@ paged/strided FP16/BF16 content updates and Q/output storage rebinding, plus
 existing eager/internal/external graph concurrency. Host tests cover context
 restoration, capture, bounded ownership, binding changes and LRU replacement.
 These commands establish correctness; they do not establish a performance win.
+
+A bounded gfx1250 eager rebinding case initially passed with BF16 paged D64 GQA-8,
+new Q/output bindings, same-object storage updates, changing device lengths,
+and a nondefault stream. It used an independent CPU FP32 reference after input
+quantization. The installed ROCm 10.0 Torch wheel's device initialization kernels
+failed, so validation supplied an equivalent separate HIP F32 initializer on
+the active stream. A final repeat failed during preparation, before rebinding,
+with illegal-address/illegal-instruction errors; the published-code control also
+failed during preparation. The earlier pass is limited adapter-based evidence,
+not a reproducible final hardware gate.
+Graph attempts produced numerical failures and illegal-address errors, including
+a pre-change runtime control; standalone initializer capture/replay was also
+unstable. They do not establish gfx1250 graph correctness or a regression caused
+by these changes. The prior graph behavior is retained pending a working lane.
 
 | File (relative to rocKE) | Responsibility |
 | --- | --- |

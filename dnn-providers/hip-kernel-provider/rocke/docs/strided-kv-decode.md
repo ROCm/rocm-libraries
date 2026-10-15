@@ -132,7 +132,8 @@ objects, storage addresses, layouts, scalar values and launch configuration fixe
 throughout the scope; content-only updates need no rebind. Scope exit waits for
 queued work before restoring the caller's stream and releasing bound arguments.
 `rebind()` drains and validates new storage or scalar bindings between scopes;
-it also launches once. Drain before changing tensor storage metadata. A different
+it also launches once. Ordinary `rebind()` is available on gfx1250 independently
+of the gfx942/gfx950 replay scope. Drain before changing tensor storage metadata. A different
 geometry, dtype, layout, device or stream requires a new execution. Concurrent
 launch, rebind, close or nested scope on one owner is rejected. Do not change the
 active device/stream or begin an outer capture inside a scope; use `launch()`
@@ -164,6 +165,10 @@ graph. Rebinding the same tensor objects to new storage drains and replaces
 the captured graph; it does not recompile the cached kernels. Drain queued work
 before mutating storage metadata. Prepared owners still reject geometry, dtype,
 layout, device or stream changes.
+
+The context shortcut and resident-key optimization apply to gfx942/gfx950.
+gfx1250 retains explicit device/stream contexts and includes live storage
+addresses in its graph key, preserving its existing cache eviction behavior.
 
 Asynchronous graph replay retains its resource entry until the stream is drained,
 even if the Python execution owner is discarded. Asynchronous eager launches also

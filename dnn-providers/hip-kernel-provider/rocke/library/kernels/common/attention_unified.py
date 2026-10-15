@@ -3518,9 +3518,10 @@ class Attention3DExecution:
         self._stream = None
         self._closed = False
         self._graphs = OrderedDict()
-        self._scope_setup_thread = None
-        self._scope_setup_entered = False
+        self._setup_thread = None
+        self._setup_entered = False
         self._scope_operation = None
+        self._bind_replay = False
 
     def launch(self, **overrides: Any) -> LaunchSummary:
         """Launch with prepared bindings, optionally replacing inputs or scalars.
@@ -3568,15 +3569,17 @@ class Attention3DExecution:
                         "replay_scope requires gfx942/gfx950 split-KV"
                     )
                 try:
-                    self._scope_setup_thread = get_ident()
+                    self._setup_thread = get_ident()
+                    self._bind_replay = True
                     try:
                         with no_fence():
                             run_unified_attention_torch(
                                 **self._arguments, execution=self
                             )
                     finally:
-                        self._scope_setup_thread = None
-                        self._scope_setup_entered = False
+                        self._setup_thread = None
+                        self._setup_entered = False
+                        self._bind_replay = False
                     if self._scope_operation is None:
                         raise NotImplementedError(
                             "replay_scope requires gfx942/gfx950 split-KV"
@@ -3620,12 +3623,15 @@ class Attention3DExecution:
                 if _torch_stream_capturing():
                     raise RuntimeError("cannot rebind execution during capture")
                 wait_stream_and_release(self._stream)
-                self._scope_setup_thread = get_ident()
+                self._setup_thread = get_ident()
+                # Keep replacement tensors reachable if submission or its final
+                # drain fails. Ordinary launch owns asynchronous argument buffers.
+                self._scope_operation = lambda _bindings=arguments: None
                 try:
                     run_unified_attention_torch(**arguments, execution=self)
                 finally:
-                    self._scope_setup_thread = None
-                    self._scope_setup_entered = False
+                    self._setup_thread = None
+                    self._setup_entered = False
                     # Also drain a partially submitted pair after setup fails.
                     # Preserve bound buffers if the drain itself fails.
                     wait_stream_and_release(self._stream)
@@ -3725,28 +3731,28 @@ def _run_3d_tiled(*, q, stream: int = 0, execution=None, **kwargs):
         stream = int(torch.cuda.current_stream(q.device).cuda_stream)
     else:
         stream = resolve_stream(stream, device=q.device)
-    scope_setup = (
+    borrowing_lock = (
         execution is not None
-        and execution._scope_setup_thread == get_ident()
-        and not execution._scope_setup_entered
+        and execution._setup_thread == get_ident()
+        and not execution._setup_entered
     )
     if (
         execution is not None
-        and not scope_setup
+        and not borrowing_lock
         and not execution._lock.acquire(blocking=False)
     ):
         # Reject reentrant/concurrent submission instead of interleaving pairs.
         raise RuntimeError("execution is already submitting work")
-    if scope_setup:
-        # Only the setup call may borrow the scope's lock. Recursive submission
+    if borrowing_lock:
+        # Only the setup call may borrow the owner's lock. Recursive submission
         # on the same thread must still reject overlapping segment/reducer work.
-        execution._scope_setup_entered = True
+        execution._setup_entered = True
     try:
         if execution is not None and execution._closed:
             raise RuntimeError("execution is closed")
         if (
             execution is not None
-            and not scope_setup
+            and not borrowing_lock
             and execution._scope_operation is not None
         ):
             raise RuntimeError("previous scope did not drain; close execution")
@@ -3755,7 +3761,8 @@ def _run_3d_tiled(*, q, stream: int = 0, execution=None, **kwargs):
         # when the caller has established that device/stream boundary.
         device_index = getattr(q.device, "index", None)
         if (
-            isinstance(device_index, int)
+            _resolve_attention_arch() in ("gfx942", "gfx950")
+            and isinstance(device_index, int)
             and torch.cuda.current_device() == device_index
             and int(torch.cuda.current_stream().cuda_stream) == stream
         ):
@@ -3769,7 +3776,7 @@ def _run_3d_tiled(*, q, stream: int = 0, execution=None, **kwargs):
                 q=q, stream=stream, execution=execution, **kwargs
             )
     finally:
-        if execution is not None and not scope_setup:
+        if execution is not None and not borrowing_lock:
             execution._lock.release()
 
 
@@ -3844,6 +3851,12 @@ def _run_3d_tiled_on_stream(
         if execution is not None or replay
         else None
     )
+    if layouts is not None and _resolve_attention_arch() == "gfx1250":
+        # Preserve this target's existing layout and graph-key representation.
+        layouts = tuple(
+            None if layout is None else (str(layout[0]), str(layout[1]), *layout[2:])
+            for layout in layouts
+        )
     if execution is not None:
         identity = (
             problem,
@@ -3955,7 +3968,7 @@ def _run_3d_tiled_on_stream(
         "segm_expsum_ptr": segm_expsum,
         "seq_lens_ptr": seqused_k,
     }
-    if execution is not None and execution._scope_setup_thread == get_ident():
+    if execution is not None and execution._bind_replay:
         if _resolve_attention_arch() not in ("gfx942", "gfx950"):
             raise NotImplementedError("replay_scope requires gfx942/gfx950 split-KV")
         bound_segment = prepared.pipeline.stages[0].bind(
@@ -4046,18 +4059,22 @@ def _run_3d_graph(
         int(qq_bias_stride_0),
     )
     graphs = _3D_GRAPHS if execution is None else execution._graphs
+    optimized = _resolve_attention_arch() in ("gfx942", "gfx950")
+    if not optimized:
+        # gfx1250 keeps live storage in the key and the prior eviction policy.
+        graph_key = graph_key[:5] + (bindings,) + graph_key[5:]
     # Sequential decode usually replays the most recent binding. Reuse that
     # resident key/entry without hashing the frozen problem and spec twice.
     # The graph lock covers both this probe and submission; no separate hint
     # can retain an entry after clear, close or eviction.
     last_key = next(reversed(graphs), None)
-    recent = graph_key == last_key
+    recent = optimized and graph_key == last_key
     if recent:
         graph_key = last_key
         entry = next(reversed(graphs.values()))
     else:
         entry = graphs.get(graph_key)
-    if entry is not None and entry.bindings != bindings:
+    if optimized and entry is not None and entry.bindings != bindings:
         # Same Python tensors can be rebound with set_/resize_/as_strided_.
         # Replace their captured addresses/layout only after the old stream
         # has drained, using the same bounded cache and ownership rules.
@@ -4168,7 +4185,7 @@ def _run_3d_graph(
     if not recent:
         graphs.move_to_end(graph_key)
     # The boundary established the caller's effective Torch stream.
-    if execution is not None and execution._scope_setup_thread == get_ident():
+    if execution is not None and execution._bind_replay:
         execution._scope_operation = entry.graph.replay
     entry.graph.replay()
     if _resolved_fence(True):
