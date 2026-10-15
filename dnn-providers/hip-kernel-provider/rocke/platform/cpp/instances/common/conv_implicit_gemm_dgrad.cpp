@@ -216,6 +216,15 @@ static void _dgrad_lds_charge(const rocke_dgrad_conv_spec_t* s, long* ab, long* 
     *total = no_alias ? ab_bytes + c_bytes : (ab_bytes > c_bytes ? ab_bytes : c_bytes);
 }
 
+/* Python DgradConvSpec.folds_sub_gemm_record: at stride 1 the only tilde
+ * sub-GEMM's record is a function of the kernargs, so the kernel builds it
+ * from them instead of searching and loading the record buffer. Keys on the
+ * stride alone (an AOT binary's stride capability). */
+static bool _dgrad_folds_sub_gemm_record(const rocke_dgrad_conv_spec_t* s)
+{
+    return s->problem.sH == 1 && s->problem.sW == 1;
+}
+
 bool rocke_dgrad_conv_spec_needs_atomic(const rocke_dgrad_conv_spec_t* s)
 {
     /* split_k>1: multiple CTAs accumulate into the same dX elements via atomic_add.
@@ -2448,51 +2457,125 @@ static rocke_kernel_def_t*
     // ---- 1D grid: block_id_x covers all sub-GEMMs' tiles ----
     rocke_value_t* flat_block_id = rocke_b_block_id_x(b);
 
-    // ---- binary search ----
-    rocke_value_t* sg_idx = _emit_binary_search(
-        b, flat_block_id, sub_gemm_buf, num_sub_gemms_param, spec->max_sub_gemms);
+    // ---- sub-GEMM record ----
+    // Stride 1 (Python DgradConvSpec.folds_sub_gemm_record): the only
+    // sub-GEMM's record is rebuilt from the kernargs -- no search, no record
+    // loads. Otherwise binary-search the record buffer and load the fields.
+    const bool fold_record = _dgrad_folds_sub_gemm_record(spec);
+    rocke_value_t* sg_idx = NULL;
+    rocke_value_t* c0_rec = NULL;
+    rocke_value_t* c1_rec = NULL;
+    if(fold_record)
+    {
+        c0_rec = rocke_b_const_i32(b, 0);
+        c1_rec = rocke_b_const_i32(b, 1);
+    }
+    else
+    {
+        sg_idx = _emit_binary_search(
+            b, flat_block_id, sub_gemm_buf, num_sub_gemms_param, spec->max_sub_gemms);
+    }
+    auto _ld = [&](int field_idx) -> rocke_value_t* {
+        if(!fold_record)
+            return _emit_load_record_field(b, sub_gemm_buf, sg_idx, field_idx);
+        switch(field_idx)
+        {
+        case 0:
+            return c0_rec; /* block_start */
+        case 1:
+            return ctx.p_num_pid_m;
+        case 2:
+            return ctx.p_num_pid_n;
+        case 3:
+            return ctx.p_dg_M;
+        case 4:
+            return ctx.p_dg_K;
+        case 5:
+            return ctx.p_Hi; /* h_tilde_slice */
+        case 6:
+            return ctx.p_Wi; /* w_tilde_slice */
+        case 7:
+            return ctx.p_pH; /* h_tilde_slice_begin */
+        case 8:
+            return ctx.p_pW; /* w_tilde_slice_begin */
+        case 9:
+            return ctx.p_Y; /* y_dot_slice */
+        case 10:
+            return ctx.p_X; /* x_dot_slice */
+        case 11:
+            return rocke_b_sub(b, c0_rec, ctx.p_dH); /* a_embed_h_coeff */
+        case 12:
+            return rocke_b_sub(b, c0_rec, ctx.p_dW); /* a_embed_w_coeff */
+        case 21:
+        {
+            /* gemm_k_padded: dg_K rounded up to tile_k * split_k. */
+            const int kq = spec->tile_k * spec->split_k;
+            rocke_value_t* c_kq = rocke_b_const_i32(b, kq);
+            rocke_value_t* c_kq1 = rocke_b_const_i32(b, kq - 1);
+            rocke_value_t* k_up = rocke_b_add(b, ctx.p_dg_K, c_kq1);
+            rocke_value_t* k_q = rocke_b_div(b, k_up, c_kq);
+            return rocke_b_mul(b, k_q, c_kq);
+        }
+        default: /* 13..20: unit strides, zero offsets */
+            return (field_idx % 2) ? c1_rec : c0_rec;
+        }
+    };
 
-    // ---- load all record fields ----
-    rocke_value_t* rec_block_start = _emit_load_record_field(b, sub_gemm_buf, sg_idx, 0);
-    (void)_emit_load_record_field(b, sub_gemm_buf, sg_idx, 1); /* rec_num_m_tiles: unused */
-    rocke_value_t* rec_num_n_tiles = _emit_load_record_field(b, sub_gemm_buf, sg_idx, 2);
-    rocke_value_t* rec_gemm_m = _emit_load_record_field(b, sub_gemm_buf, sg_idx, 3);
-    rocke_value_t* rec_gemm_k = _emit_load_record_field(b, sub_gemm_buf, sg_idx, 4);
-    rocke_value_t* rec_h_tilde_slice = _emit_load_record_field(b, sub_gemm_buf, sg_idx, 5);
-    rocke_value_t* rec_w_tilde_slice = _emit_load_record_field(b, sub_gemm_buf, sg_idx, 6);
-    rocke_value_t* rec_h_tilde_slice_begin = _emit_load_record_field(b, sub_gemm_buf, sg_idx, 7);
-    rocke_value_t* rec_w_tilde_slice_begin = _emit_load_record_field(b, sub_gemm_buf, sg_idx, 8);
-    (void)_emit_load_record_field(
-        b, sub_gemm_buf, sg_idx, 9); /* rec_y_dot_slice: unused (k_out innermost) */
-    rocke_value_t* rec_x_dot_slice = _emit_load_record_field(b, sub_gemm_buf, sg_idx, 10);
-    rocke_value_t* rec_a_embed_h_coeff = _emit_load_record_field(b, sub_gemm_buf, sg_idx, 11);
-    rocke_value_t* rec_a_embed_w_coeff = _emit_load_record_field(b, sub_gemm_buf, sg_idx, 12);
-    rocke_value_t* rec_b_y_stride = _emit_load_record_field(b, sub_gemm_buf, sg_idx, 13);
-    rocke_value_t* rec_b_y_offset = _emit_load_record_field(b, sub_gemm_buf, sg_idx, 14);
-    rocke_value_t* rec_b_x_stride = _emit_load_record_field(b, sub_gemm_buf, sg_idx, 15);
-    rocke_value_t* rec_b_x_offset = _emit_load_record_field(b, sub_gemm_buf, sg_idx, 16);
-    rocke_value_t* rec_d_h_stride = _emit_load_record_field(b, sub_gemm_buf, sg_idx, 17);
-    rocke_value_t* rec_d_h_offset = _emit_load_record_field(b, sub_gemm_buf, sg_idx, 18);
-    rocke_value_t* rec_d_w_stride = _emit_load_record_field(b, sub_gemm_buf, sg_idx, 19);
-    rocke_value_t* rec_d_w_offset = _emit_load_record_field(b, sub_gemm_buf, sg_idx, 20);
+    // ---- record fields ----
+    rocke_value_t* rec_block_start = _ld(0);
+    (void)_ld(1); /* rec_num_m_tiles: unused */
+    rocke_value_t* rec_num_n_tiles = _ld(2);
+    rocke_value_t* rec_gemm_m = _ld(3);
+    rocke_value_t* rec_gemm_k = _ld(4);
+    rocke_value_t* rec_h_tilde_slice = _ld(5);
+    rocke_value_t* rec_w_tilde_slice = _ld(6);
+    rocke_value_t* rec_h_tilde_slice_begin = _ld(7);
+    rocke_value_t* rec_w_tilde_slice_begin = _ld(8);
+    (void)_ld(9); /* rec_y_dot_slice: unused (k_out innermost) */
+    rocke_value_t* rec_x_dot_slice = _ld(10);
+    rocke_value_t* rec_a_embed_h_coeff = _ld(11);
+    rocke_value_t* rec_a_embed_w_coeff = _ld(12);
+    rocke_value_t* rec_b_y_stride = _ld(13);
+    rocke_value_t* rec_b_y_offset = _ld(14);
+    rocke_value_t* rec_b_x_stride = _ld(15);
+    rocke_value_t* rec_b_x_offset = _ld(16);
+    rocke_value_t* rec_d_h_stride = _ld(17);
+    rocke_value_t* rec_d_h_offset = _ld(18);
+    rocke_value_t* rec_d_w_stride = _ld(19);
+    rocke_value_t* rec_d_w_offset = _ld(20);
 
     // ---- magic-division pairs of this record's divisors ----
     // (Python sub_gemm_magic_pairs); the table starts after the last record.
-    rocke_value_t* _c_rec_fields = rocke_b_const_i32(b, ROCKE_DGRAD_SUB_GEMM_RECORD_FIELDS);
-    rocke_value_t* _magic_rec_end = rocke_b_mul(b, num_sub_gemms_param, _c_rec_fields);
-    rocke_value_t* _c_magic_fields = rocke_b_const_i32(b, ROCKE_DGRAD_SUB_GEMM_MAGIC_FIELDS);
-    rocke_value_t* _magic_rec_off = rocke_b_mul(b, sg_idx, _c_magic_fields);
-    rocke_value_t* _magic_base = rocke_b_add(b, _magic_rec_end, _magic_rec_off);
+    // The folded record's table is one entry right after the one record, at
+    // constant offsets.
     rocke_value_t* rec_magic[ROCKE_DGRAD_SUB_GEMM_MAGIC_FIELDS];
-    for(int j = 0; j < ROCKE_DGRAD_SUB_GEMM_MAGIC_FIELDS; j++)
+    if(fold_record)
     {
-        rocke_value_t* _c_j = rocke_b_const_i32(b, j);
-        rocke_value_t* _off = rocke_b_add(b, _magic_base, _c_j);
-        rec_magic[j] = rocke_b_global_load_i32(b, sub_gemm_buf, _off, 4);
+        for(int j = 0; j < ROCKE_DGRAD_SUB_GEMM_MAGIC_FIELDS; j++)
+        {
+            rocke_value_t* _off = rocke_b_const_i32(b, ROCKE_DGRAD_SUB_GEMM_RECORD_FIELDS + j);
+            rec_magic[j] = rocke_b_global_load_i32(b, sub_gemm_buf, _off, 4);
+        }
+    }
+    else
+    {
+        rocke_value_t* _c_rec_fields = rocke_b_const_i32(b, ROCKE_DGRAD_SUB_GEMM_RECORD_FIELDS);
+        rocke_value_t* _magic_rec_end = rocke_b_mul(b, num_sub_gemms_param, _c_rec_fields);
+        rocke_value_t* _c_magic_fields = rocke_b_const_i32(b, ROCKE_DGRAD_SUB_GEMM_MAGIC_FIELDS);
+        rocke_value_t* _magic_rec_off = rocke_b_mul(b, sg_idx, _c_magic_fields);
+        rocke_value_t* _magic_base = rocke_b_add(b, _magic_rec_end, _magic_rec_off);
+        for(int j = 0; j < ROCKE_DGRAD_SUB_GEMM_MAGIC_FIELDS; j++)
+        {
+            rocke_value_t* _c_j = rocke_b_const_i32(b, j);
+            rocke_value_t* _off = rocke_b_add(b, _magic_base, _c_j);
+            rec_magic[j] = rocke_b_global_load_i32(b, sub_gemm_buf, _off, 4);
+        }
     }
 
     // ---- compute local tile indices ----
-    rocke_value_t* local_flat = rocke_b_sub(b, flat_block_id, rec_block_start);
+    // The folded record's block_start is 0, so the subtraction is skipped.
+    rocke_value_t* local_flat
+        = fold_record ? flat_block_id : rocke_b_sub(b, flat_block_id, rec_block_start);
     rocke_value_t* local_m_tile = rocke_b_div(b, local_flat, rec_num_n_tiles);
     rocke_value_t* local_n_tile = rocke_b_mod(b, local_flat, rec_num_n_tiles);
 
@@ -2556,7 +2639,7 @@ static rocke_kernel_def_t*
     rocke_value_t* k_hi;
     if(is_split_k)
     {
-        rocke_value_t* rec_gemm_k_padded = _emit_load_record_field(b, sub_gemm_buf, sg_idx, 21);
+        rocke_value_t* rec_gemm_k_padded = _ld(21);
         rocke_value_t* c_split_k = rocke_b_const_i32(b, spec->split_k);
         rocke_value_t* k_slice = rocke_b_div(b, rec_gemm_k_padded, c_split_k);
         k_lo = rocke_b_mul(b, rocke_b_block_id_z(b), k_slice);

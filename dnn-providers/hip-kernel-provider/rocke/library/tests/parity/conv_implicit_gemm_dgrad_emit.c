@@ -394,6 +394,45 @@ static int make_cfg(int idx, rocke_dgrad_conv_spec_t* spec, const char** arch)
         spec->lds_k_pad = 0;
         *arch = "gfx950";
         return 0;
+    case 38:
+        /* Stride 1, dilation 2: folded record, tilde epilogue. */
+        spec->problem = rocke_conv_problem_make(4, 20, 20, 64, 64, 3, 3, 1, 1, 2, 2, 2, 2);
+        spec->uniform_k_decode = true;
+        *arch = "gfx950";
+        return 0;
+    case 39:
+        /* Grouped 5x5, pad 0: K-outer, uniform_k_decode, cshuffle, widths. */
+        spec->problem = rocke_conv_problem_make(2, 24, 20, 128, 256, 5, 5, 1, 1, 0, 0, 1, 1);
+        spec->problem.groups = 2;
+        spec->tile_m = 128;
+        spec->pipeline = "compv3";
+        spec->epilogue = "cshuffle";
+        spec->lds_k_outer = true;
+        spec->uniform_k_decode = true;
+        spec->has_vector_size_a = true;
+        spec->vector_size_a = 8;
+        spec->has_vector_size_b = true;
+        spec->vector_size_b = 8;
+        spec->has_vector_size_c = true;
+        spec->vector_size_c = 8;
+        *arch = "gfx950";
+        return 0;
+    case 40:
+        /* Stride 1 split-K: folded gemm_k_padded. */
+        spec->problem = rocke_conv_problem_make(4, 14, 14, 64, 96, 3, 3, 1, 1, 1, 1, 1, 1);
+        spec->tile_k = 32;
+        spec->epilogue = "cshuffle";
+        spec->split_k = 2;
+        *arch = "gfx950";
+        return 0;
+    case 41:
+        /* gfx942, grouped 1x3 filter with pad (0, 1). */
+        spec->problem = rocke_conv_problem_make(2, 12, 16, 64, 128, 1, 3, 1, 1, 0, 1, 1, 1);
+        spec->problem.groups = 4;
+        spec->tile_k = 32;
+        spec->warp_tile_k = 8;
+        *arch = "gfx942";
+        return 0;
     default:
         return -1;
     }
