@@ -16,9 +16,10 @@ namespace hipdnn_flatbuffers_sdk.data_objects;
 //   S_t = S_{t-1} Diag(alpha_t) (I - beta_t k_t k_t^T) + beta_t v_t k_t^T
 //   o_t = scale S_t q_t
 //
-// Layout and cross-field rules match GdnAttributes (see gdn_attributes.fbs),
-// except that g is per key channel, [T, HO, K], dt_bias is [HO, K], and
-// gate_lower_bound also requires safe_gate.
+// Layout and cross-field rules match GdnAttributes (see gdn_attributes.fbs;
+// the rules are to be enforced by the frontend), except that g is per key
+// channel, [T, HO, K], dt_bias is [HO, K], and gate_lower_bound also requires
+// safe_gate.
 table KdaAttributes {
     // Required input tensor UIDs
     q_tensor_uid:          long (cache_uid);

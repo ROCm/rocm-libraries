@@ -24,7 +24,8 @@ namespace hipdnn_flatbuffers_sdk.data_objects;
 // they are a pool [P, HO, V, K] addressed per sequence. A K-major state is
 // passed as transposed strides on the [..., V, K] dims.
 //
-// Cross-field rules (enforced by the frontend; they match cuDNN):
+// Cross-field rules (they match cuDNN). Neither this schema nor the backend
+// checks them; they are to be enforced by the frontend:
 //   - output_final_state <=> final_state_tensor_uid present.
 //   - checkpoint_every_n_tokens > 0 <=> state_checkpoints_tensor_uid present.
 //   - state_indices requires initial_state, is [N], and cannot combine with

@@ -3723,46 +3723,182 @@ inline flatbuffers::FlatBufferBuilder finishLinearAttentionGraph(
     return builder;
 }
 
-// GDN with only the required tensors and a non-default gate_domain: N=2
-// sequences of 4 tokens (T=8 total, cu_seqlens = [0, 4, 8]), H=2 heads, K=V=8.
-inline flatbuffers::FlatBufferBuilder createValidGdnGraph()
+// Linear-attention test graphs share one problem: N=2 sequences of 4 tokens
+// (T=8 total, cu_seqlens = [0, 4, 8]), H=2 heads, K=V=8. Every UID is
+// distinct, so a converter that passes one optional UID in another's slot
+// fails the JSON round trip.
+//
+// The JSON converters pass the 7 bools positionally. A swap of two bools is
+// visible only when the swapped values differ, so each converter gets two
+// graphs whose flags differ, between them, on every pair of neighbouring bool
+// arguments (output_final_state, use_qk_l2norm, use_beta_sigmoid,
+// allow_neg_eigval, safe_gate, batch_invariant, overwrite_initial_state).
+// Each converter also sees scale both set and unset. Both graphs of a pair
+// obey the cuDNN cross-field rules in gdn_attributes.fbs:
+//   - state pool: gate_domain LINEAR, no safe_gate, state_indices into an
+//     initial-state pool, no checkpoints.
+//   - safe gate: gate_domain LOG, safe_gate with a_log and dt_bias,
+//     checkpoints every 4 tokens (max(8 // 4 + 2, 1) = 4 rows), in-place
+//     state update.
+namespace linear_attention_test_detail
+{
+
+inline constexpr int64_t Q_UID = 1;
+inline constexpr int64_t K_UID = 2;
+inline constexpr int64_t V_UID = 3;
+inline constexpr int64_t G_UID = 4;
+inline constexpr int64_t BETA_UID = 5;
+inline constexpr int64_t CU_SEQLENS_UID = 6;
+inline constexpr int64_t INITIAL_STATE_UID = 7;
+inline constexpr int64_t A_LOG_UID = 8;
+inline constexpr int64_t DT_BIAS_UID = 9;
+inline constexpr int64_t STATE_INDICES_UID = 10;
+inline constexpr int64_t O_UID = 11;
+inline constexpr int64_t FINAL_STATE_UID = 12;
+inline constexpr int64_t STATE_CHECKPOINTS_UID = 13;
+
+using TensorList
+    = std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>;
+
+// q, k, v, g, beta, cu_seqlens and o. g is [T, H] for GDN and per key channel,
+// [T, H, K], for KDA.
+inline void addRequiredTensors(flatbuffers::FlatBufferBuilder& builder,
+                               TensorList& tensors,
+                               bool perKeyChannelGate)
 {
     using hipdnn_flatbuffers_sdk::data_objects::DataType;
-    flatbuffers::FlatBufferBuilder builder;
-    std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
-        tensorAttributes;
-
     const std::vector<int64_t> seqDims = {8, 2, 8};
     const std::vector<int64_t> seqStrides = {16, 8, 1};
-    const std::vector<int64_t> gateDims = {8, 2};
-    const std::vector<int64_t> gateStrides = {2, 1};
+    const std::vector<int64_t> perHeadDims = {8, 2};
+    const std::vector<int64_t> perHeadStrides = {2, 1};
     const std::vector<int64_t> cuSeqlensDims = {3};
     const std::vector<int64_t> unitStrides = {1};
 
-    auto add = [&](int64_t uid,
-                   const char* name,
-                   DataType dataType,
-                   const std::vector<int64_t>& dims,
-                   const std::vector<int64_t>& strides) {
-        addLinearAttentionTensor(builder, tensorAttributes, uid, name, dataType, dims, strides);
-    };
-    add(1, "q", DataType::FLOAT, seqDims, seqStrides);
-    add(2, "k", DataType::FLOAT, seqDims, seqStrides);
-    add(3, "v", DataType::FLOAT, seqDims, seqStrides);
-    add(4, "g", DataType::FLOAT, gateDims, gateStrides);
-    add(5, "beta", DataType::FLOAT, gateDims, gateStrides);
-    add(6, "cu_seqlens", DataType::INT32, cuSeqlensDims, unitStrides);
-    add(7, "o", DataType::FLOAT, seqDims, seqStrides);
+    addLinearAttentionTensor(builder, tensors, Q_UID, "q", DataType::FLOAT, seqDims, seqStrides);
+    addLinearAttentionTensor(builder, tensors, K_UID, "k", DataType::FLOAT, seqDims, seqStrides);
+    addLinearAttentionTensor(builder, tensors, V_UID, "v", DataType::FLOAT, seqDims, seqStrides);
+    addLinearAttentionTensor(builder,
+                             tensors,
+                             G_UID,
+                             "g",
+                             DataType::FLOAT,
+                             perKeyChannelGate ? seqDims : perHeadDims,
+                             perKeyChannelGate ? seqStrides : perHeadStrides);
+    addLinearAttentionTensor(
+        builder, tensors, BETA_UID, "beta", DataType::FLOAT, perHeadDims, perHeadStrides);
+    addLinearAttentionTensor(builder,
+                             tensors,
+                             CU_SEQLENS_UID,
+                             "cu_seqlens",
+                             DataType::INT32,
+                             cuSeqlensDims,
+                             unitStrides);
+    addLinearAttentionTensor(builder, tensors, O_UID, "o", DataType::FLOAT, seqDims, seqStrides);
+}
+
+// initial_state and final_state as a 3-row pool [3, H, V, K], addressed by
+// state_indices [N].
+inline void addStatePoolTensors(flatbuffers::FlatBufferBuilder& builder, TensorList& tensors)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
+    const std::vector<int64_t> poolDims = {3, 2, 8, 8};
+    const std::vector<int64_t> stateStrides = {128, 64, 8, 1};
+    const std::vector<int64_t> sequenceDims = {2};
+    const std::vector<int64_t> unitStrides = {1};
+
+    addLinearAttentionTensor(builder,
+                             tensors,
+                             INITIAL_STATE_UID,
+                             "initial_state",
+                             DataType::FLOAT,
+                             poolDims,
+                             stateStrides);
+    addLinearAttentionTensor(builder,
+                             tensors,
+                             STATE_INDICES_UID,
+                             "state_indices",
+                             DataType::INT32,
+                             sequenceDims,
+                             unitStrides);
+    addLinearAttentionTensor(
+        builder, tensors, FINAL_STATE_UID, "final_state", DataType::FLOAT, poolDims, stateStrides);
+}
+
+// initial_state and final_state [N, H, V, K], state_checkpoints [4, H, V, K],
+// a_log [H], and dt_bias: [H] for GDN, [H, K] for KDA.
+inline void addSafeGateTensors(flatbuffers::FlatBufferBuilder& builder,
+                               TensorList& tensors,
+                               bool perKeyChannelDtBias)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
+    const std::vector<int64_t> stateDims = {2, 2, 8, 8};
+    const std::vector<int64_t> checkpointDims = {4, 2, 8, 8};
+    const std::vector<int64_t> stateStrides = {128, 64, 8, 1};
+    const std::vector<int64_t> headDims = {2};
+    const std::vector<int64_t> unitStrides = {1};
+    const std::vector<int64_t> headKeyDims = {2, 8};
+    const std::vector<int64_t> headKeyStrides = {8, 1};
+
+    addLinearAttentionTensor(builder,
+                             tensors,
+                             INITIAL_STATE_UID,
+                             "initial_state",
+                             DataType::FLOAT,
+                             stateDims,
+                             stateStrides);
+    addLinearAttentionTensor(
+        builder, tensors, A_LOG_UID, "a_log", DataType::FLOAT, headDims, unitStrides);
+    addLinearAttentionTensor(builder,
+                             tensors,
+                             DT_BIAS_UID,
+                             "dt_bias",
+                             DataType::FLOAT,
+                             perKeyChannelDtBias ? headKeyDims : headDims,
+                             perKeyChannelDtBias ? headKeyStrides : unitStrides);
+    addLinearAttentionTensor(
+        builder, tensors, FINAL_STATE_UID, "final_state", DataType::FLOAT, stateDims, stateStrides);
+    addLinearAttentionTensor(builder,
+                             tensors,
+                             STATE_CHECKPOINTS_UID,
+                             "state_checkpoints",
+                             DataType::FLOAT,
+                             checkpointDims,
+                             stateStrides);
+}
+
+} // namespace linear_attention_test_detail
+
+// GDN state-pool graph (see the linear-attention notes above).
+// True flags: output_final_state, use_beta_sigmoid, allow_neg_eigval, batch_invariant.
+inline flatbuffers::FlatBufferBuilder createValidGdnGraph()
+{
+    namespace detail = linear_attention_test_detail;
+    flatbuffers::FlatBufferBuilder builder;
+    detail::TensorList tensorAttributes;
+    detail::addRequiredTensors(builder, tensorAttributes, /*perKeyChannelGate=*/false);
+    detail::addStatePoolTensors(builder, tensorAttributes);
 
     hipdnn_flatbuffers_sdk::data_objects::GdnAttributesBuilder attrs(builder);
-    attrs.add_q_tensor_uid(1);
-    attrs.add_k_tensor_uid(2);
-    attrs.add_v_tensor_uid(3);
-    attrs.add_g_tensor_uid(4);
-    attrs.add_beta_tensor_uid(5);
-    attrs.add_cu_seqlens_tensor_uid(6);
-    attrs.add_o_tensor_uid(7);
+    attrs.add_q_tensor_uid(detail::Q_UID);
+    attrs.add_k_tensor_uid(detail::K_UID);
+    attrs.add_v_tensor_uid(detail::V_UID);
+    attrs.add_g_tensor_uid(detail::G_UID);
+    attrs.add_beta_tensor_uid(detail::BETA_UID);
+    attrs.add_cu_seqlens_tensor_uid(detail::CU_SEQLENS_UID);
+    attrs.add_initial_state_tensor_uid(detail::INITIAL_STATE_UID);
+    attrs.add_state_indices_tensor_uid(detail::STATE_INDICES_UID);
+    attrs.add_o_tensor_uid(detail::O_UID);
+    attrs.add_final_state_tensor_uid(detail::FINAL_STATE_UID);
+    attrs.add_scale(0.35355339f);
+    attrs.add_output_final_state(true);
+    attrs.add_use_qk_l2norm(false);
+    attrs.add_checkpoint_every_n_tokens(0);
+    attrs.add_use_beta_sigmoid(true);
+    attrs.add_allow_neg_eigval(true);
+    attrs.add_safe_gate(false);
     attrs.add_gate_domain(hipdnn_flatbuffers_sdk::data_objects::GateDomain::LINEAR);
+    attrs.add_batch_invariant(true);
+    attrs.add_overwrite_initial_state(false);
     auto gdnAttributes = attrs.Finish();
 
     return finishLinearAttentionGraph(
@@ -3773,76 +3909,127 @@ inline flatbuffers::FlatBufferBuilder createValidGdnGraph()
         gdnAttributes.Union());
 }
 
-// KDA with every optional tensor and attribute that cuDNN allows together
-// (state_indices is left out: it cannot combine with checkpointing): N=2
-// sequences of 4 tokens (T=8 total), H=2 heads, K=V=8, checkpoints every 4
-// tokens -> max(8 // 4 + 2, 1) = 4 rows.
+// GDN safe-gate graph (see the linear-attention notes above); scale is left at
+// its default. True flags: output_final_state, use_qk_l2norm, use_beta_sigmoid,
+// safe_gate, overwrite_initial_state.
+inline flatbuffers::FlatBufferBuilder createValidGdnSafeGateGraph()
+{
+    namespace detail = linear_attention_test_detail;
+    flatbuffers::FlatBufferBuilder builder;
+    detail::TensorList tensorAttributes;
+    detail::addRequiredTensors(builder, tensorAttributes, /*perKeyChannelGate=*/false);
+    detail::addSafeGateTensors(builder, tensorAttributes, /*perKeyChannelDtBias=*/false);
+
+    hipdnn_flatbuffers_sdk::data_objects::GdnAttributesBuilder attrs(builder);
+    attrs.add_q_tensor_uid(detail::Q_UID);
+    attrs.add_k_tensor_uid(detail::K_UID);
+    attrs.add_v_tensor_uid(detail::V_UID);
+    attrs.add_g_tensor_uid(detail::G_UID);
+    attrs.add_beta_tensor_uid(detail::BETA_UID);
+    attrs.add_cu_seqlens_tensor_uid(detail::CU_SEQLENS_UID);
+    attrs.add_initial_state_tensor_uid(detail::INITIAL_STATE_UID);
+    attrs.add_a_log_tensor_uid(detail::A_LOG_UID);
+    attrs.add_dt_bias_tensor_uid(detail::DT_BIAS_UID);
+    attrs.add_o_tensor_uid(detail::O_UID);
+    attrs.add_final_state_tensor_uid(detail::FINAL_STATE_UID);
+    attrs.add_state_checkpoints_tensor_uid(detail::STATE_CHECKPOINTS_UID);
+    attrs.add_output_final_state(true);
+    attrs.add_use_qk_l2norm(true);
+    attrs.add_checkpoint_every_n_tokens(4);
+    attrs.add_use_beta_sigmoid(true);
+    attrs.add_allow_neg_eigval(false);
+    attrs.add_safe_gate(true);
+    attrs.add_gate_domain(hipdnn_flatbuffers_sdk::data_objects::GateDomain::LOG);
+    attrs.add_batch_invariant(false);
+    attrs.add_overwrite_initial_state(true);
+    auto gdnAttributes = attrs.Finish();
+
+    return finishLinearAttentionGraph(
+        std::move(builder),
+        tensorAttributes,
+        "gdn",
+        hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::GdnAttributes,
+        gdnAttributes.Union());
+}
+
+// KDA safe-gate graph (see the linear-attention notes above), with an
+// explicit scale and gate_lower_bound. True flags, which alternate with the
+// false ones: output_final_state, use_beta_sigmoid, safe_gate,
+// overwrite_initial_state.
 inline flatbuffers::FlatBufferBuilder createValidKdaGraph()
 {
-    using hipdnn_flatbuffers_sdk::data_objects::DataType;
+    namespace detail = linear_attention_test_detail;
     flatbuffers::FlatBufferBuilder builder;
-    std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
-        tensorAttributes;
+    detail::TensorList tensorAttributes;
+    detail::addRequiredTensors(builder, tensorAttributes, /*perKeyChannelGate=*/true);
+    detail::addSafeGateTensors(builder, tensorAttributes, /*perKeyChannelDtBias=*/true);
 
-    const std::vector<int64_t> seqDims = {8, 2, 8};
-    const std::vector<int64_t> seqStrides = {16, 8, 1};
-    const std::vector<int64_t> betaDims = {8, 2};
-    const std::vector<int64_t> betaStrides = {2, 1};
-    const std::vector<int64_t> stateDims = {2, 2, 8, 8};
-    const std::vector<int64_t> checkpointDims = {4, 2, 8, 8};
-    const std::vector<int64_t> stateStrides = {128, 64, 8, 1};
-    const std::vector<int64_t> headDims = {2};
-    const std::vector<int64_t> cuSeqlensDims = {3};
-    const std::vector<int64_t> unitStrides = {1};
-    const std::vector<int64_t> dtBiasDims = {2, 8};
-    const std::vector<int64_t> dtBiasStrides = {8, 1};
+    hipdnn_flatbuffers_sdk::data_objects::KdaAttributesBuilder attrs(builder);
+    attrs.add_q_tensor_uid(detail::Q_UID);
+    attrs.add_k_tensor_uid(detail::K_UID);
+    attrs.add_v_tensor_uid(detail::V_UID);
+    attrs.add_g_tensor_uid(detail::G_UID);
+    attrs.add_beta_tensor_uid(detail::BETA_UID);
+    attrs.add_cu_seqlens_tensor_uid(detail::CU_SEQLENS_UID);
+    attrs.add_initial_state_tensor_uid(detail::INITIAL_STATE_UID);
+    attrs.add_a_log_tensor_uid(detail::A_LOG_UID);
+    attrs.add_dt_bias_tensor_uid(detail::DT_BIAS_UID);
+    attrs.add_o_tensor_uid(detail::O_UID);
+    attrs.add_final_state_tensor_uid(detail::FINAL_STATE_UID);
+    attrs.add_state_checkpoints_tensor_uid(detail::STATE_CHECKPOINTS_UID);
+    attrs.add_scale(0.35355339f);
+    attrs.add_output_final_state(true);
+    attrs.add_use_qk_l2norm(false);
+    attrs.add_checkpoint_every_n_tokens(4);
+    attrs.add_use_beta_sigmoid(true);
+    attrs.add_allow_neg_eigval(false);
+    attrs.add_safe_gate(true);
+    attrs.add_gate_domain(hipdnn_flatbuffers_sdk::data_objects::GateDomain::LOG);
+    attrs.add_gate_lower_bound(-5.0f);
+    attrs.add_batch_invariant(false);
+    attrs.add_overwrite_initial_state(true);
+    auto kdaAttributes = attrs.Finish();
 
-    auto add = [&](int64_t uid,
-                   const char* name,
-                   DataType dataType,
-                   const std::vector<int64_t>& dims,
-                   const std::vector<int64_t>& strides) {
-        addLinearAttentionTensor(builder, tensorAttributes, uid, name, dataType, dims, strides);
-    };
-    add(1, "q", DataType::FLOAT, seqDims, seqStrides);
-    add(2, "k", DataType::FLOAT, seqDims, seqStrides);
-    add(3, "v", DataType::FLOAT, seqDims, seqStrides);
-    add(4, "g", DataType::FLOAT, seqDims, seqStrides);
-    add(5, "beta", DataType::FLOAT, betaDims, betaStrides);
-    add(6, "cu_seqlens", DataType::INT32, cuSeqlensDims, unitStrides);
-    add(7, "initial_state", DataType::FLOAT, stateDims, stateStrides);
-    add(8, "a_log", DataType::FLOAT, headDims, unitStrides);
-    add(9, "dt_bias", DataType::FLOAT, dtBiasDims, dtBiasStrides);
-    add(11, "o", DataType::FLOAT, seqDims, seqStrides);
-    add(12, "final_state", DataType::FLOAT, stateDims, stateStrides);
-    add(13, "state_checkpoints", DataType::FLOAT, checkpointDims, stateStrides);
+    return finishLinearAttentionGraph(
+        std::move(builder),
+        tensorAttributes,
+        "kda",
+        hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::KdaAttributes,
+        kdaAttributes.Union());
+}
 
-    auto kdaAttributes = hipdnn_flatbuffers_sdk::data_objects::CreateKdaAttributes(
-        builder,
-        1,
-        2,
-        3,
-        4,
-        5,
-        6,
-        7,
-        8,
-        9,
-        /*state_indices_tensor_uid=*/::flatbuffers::nullopt,
-        11,
-        12,
-        13,
-        0.35355339f,
-        /*output_final_state=*/true,
-        /*use_qk_l2norm=*/true,
-        /*checkpoint_every_n_tokens=*/4,
-        /*use_beta_sigmoid=*/true,
-        /*allow_neg_eigval=*/true,
-        /*safe_gate=*/true,
-        hipdnn_flatbuffers_sdk::data_objects::GateDomain::LOG,
-        /*gate_lower_bound=*/-5.0f,
-        /*batch_invariant=*/true,
-        /*overwrite_initial_state=*/true);
+// KDA state-pool graph (see the linear-attention notes above); scale and
+// gate_lower_bound are left at their defaults. True flags: output_final_state,
+// use_beta_sigmoid, allow_neg_eigval, batch_invariant.
+inline flatbuffers::FlatBufferBuilder createValidKdaStatePoolGraph()
+{
+    namespace detail = linear_attention_test_detail;
+    flatbuffers::FlatBufferBuilder builder;
+    detail::TensorList tensorAttributes;
+    detail::addRequiredTensors(builder, tensorAttributes, /*perKeyChannelGate=*/true);
+    detail::addStatePoolTensors(builder, tensorAttributes);
+
+    hipdnn_flatbuffers_sdk::data_objects::KdaAttributesBuilder attrs(builder);
+    attrs.add_q_tensor_uid(detail::Q_UID);
+    attrs.add_k_tensor_uid(detail::K_UID);
+    attrs.add_v_tensor_uid(detail::V_UID);
+    attrs.add_g_tensor_uid(detail::G_UID);
+    attrs.add_beta_tensor_uid(detail::BETA_UID);
+    attrs.add_cu_seqlens_tensor_uid(detail::CU_SEQLENS_UID);
+    attrs.add_initial_state_tensor_uid(detail::INITIAL_STATE_UID);
+    attrs.add_state_indices_tensor_uid(detail::STATE_INDICES_UID);
+    attrs.add_o_tensor_uid(detail::O_UID);
+    attrs.add_final_state_tensor_uid(detail::FINAL_STATE_UID);
+    attrs.add_output_final_state(true);
+    attrs.add_use_qk_l2norm(false);
+    attrs.add_checkpoint_every_n_tokens(0);
+    attrs.add_use_beta_sigmoid(true);
+    attrs.add_allow_neg_eigval(true);
+    attrs.add_safe_gate(false);
+    attrs.add_gate_domain(hipdnn_flatbuffers_sdk::data_objects::GateDomain::LINEAR);
+    attrs.add_batch_invariant(true);
+    attrs.add_overwrite_initial_state(false);
+    auto kdaAttributes = attrs.Finish();
 
     return finishLinearAttentionGraph(
         std::move(builder),

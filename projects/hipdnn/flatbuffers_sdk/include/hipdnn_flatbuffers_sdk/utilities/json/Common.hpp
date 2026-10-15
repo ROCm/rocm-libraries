@@ -167,6 +167,24 @@ inline auto toVector(flatbuffers::FlatBufferBuilder& builder, const nlohmann::js
     return ret;
 }
 
+// Strict GateDomain parser. NLOHMANN_JSON_SERIALIZE_ENUM maps unknown strings to the
+// first entry (LOG), which would silently read a linear-domain gate as ln(alpha).
+inline data_objects::GateDomain parseGateDomain(const nlohmann::json& entry)
+{
+    if(entry == "log")
+    {
+        return data_objects::GateDomain::LOG;
+    }
+    if(entry == "linear")
+    {
+        return data_objects::GateDomain::LINEAR;
+    }
+    throw std::runtime_error(
+        "hipdnn_flatbuffers_sdk::json::parseGateDomain(): gate_domain must be \"log\" or "
+        "\"linear\", got "
+        + entry.dump());
+}
+
 }
 
 #endif // HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB

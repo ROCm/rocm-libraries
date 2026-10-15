@@ -78,7 +78,7 @@ inline auto to<data_objects::KdaAttributes>(flatbuffers::FlatBufferBuilder& buil
         attributes.at("use_beta_sigmoid").get<bool>(),
         attributes.at("allow_neg_eigval").get<bool>(),
         attributes.at("safe_gate").get<bool>(),
-        attributes.at("gate_domain").get<data_objects::GateDomain>(),
+        parseGateDomain(attributes.at("gate_domain")),
         attributes.at("gate_lower_bound").get<std::optional<float>>(),
         attributes.at("batch_invariant").get<bool>(),
         attributes.at("overwrite_initial_state").get<bool>());

@@ -77,7 +77,7 @@ inline auto to<data_objects::GdnAttributes>(flatbuffers::FlatBufferBuilder& buil
         attributes.at("use_beta_sigmoid").get<bool>(),
         attributes.at("allow_neg_eigval").get<bool>(),
         attributes.at("safe_gate").get<bool>(),
-        attributes.at("gate_domain").get<data_objects::GateDomain>(),
+        parseGateDomain(attributes.at("gate_domain")),
         attributes.at("batch_invariant").get<bool>(),
         attributes.at("overwrite_initial_state").get<bool>());
 }
