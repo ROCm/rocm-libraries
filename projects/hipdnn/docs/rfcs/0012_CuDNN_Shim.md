@@ -876,7 +876,7 @@ hipDNN-native PyTorch that ships in 2027.
 ### 7.1 Phase 1 — Foundations (compiles, builds, has CI)
 
 > [!NOTE]
-> **Implementation note (2026-10-15):** There is no `hipdnn_cudnn_shim` target and no `detail/type_mapping.h`. The headers are part of the `hipdnn_frontend` include tree and install as the `cudnn_compatibility` package component. `cudnnStatus_t` is in `cudnn_status.h` and `cudnnHandle_t` aliases `hipdnnHandle_t` in `cudnn.h`. Status translation is in `detail/status_translation.h`.
+> **Implementation note (2026-10-15):** There is no `hipdnn_cudnn_shim` target, no `detail/type_mapping.h`, no `cuda_runtime_compat.h`, and no `tensor_wrapper.h` or `handle_wrapper.h`. The file tree above is the proposed layout, not the shipped one. The headers are part of the `hipdnn_frontend` include tree and install as the `cudnn_compatibility` package component. `cudnnStatus_t` is in `cudnn_status.h` and `cudnnHandle_t` aliases `hipdnnHandle_t` in `cudnn.h`. Status translation is in `detail/status_translation.h`.
 
 - Add `projects/hipdnn/frontend/include/hipdnn_compatibility/cudnn/` to the
   source tree.
@@ -1107,7 +1107,7 @@ than re-proving upstream's samples.
 ### 8.3 Compatibility / "build the cuDNN FE samples" test
 
 > [!NOTE]
-> **Implementation note (2026-10-15):** Built in #12124. `projects/hipdnn/tests/cudnn_samples/` clones the corpus pinned in `manifest.json` (`v1.24.0`) at configure time, or uses `HIPDNN_CUDNN_SAMPLES_CORPUS_DIR`. It builds against the installed shim and reports a skipped test when the shim is not installed.
+> **Implementation note (2026-10-15):** Built in #12124. `projects/hipdnn/tests/cudnn_samples/` clones the corpus pinned in `manifest.json` (`v1.24.0`) at configure time, or uses `HIPDNN_CUDNN_SAMPLES_CORPUS_DIR`. It builds against the installed shim. When hipDNN was built without `HIPDNN_ENABLE_CUDNN_COMPATIBILITY`, it registers one skipped test and builds no samples.
 
 This is the **source-compatibility proof** and is deliberately separate
 from the AMD-authored integration tests in §8.2: here we compile and run

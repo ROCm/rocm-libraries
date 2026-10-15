@@ -111,7 +111,7 @@ This document outlines the development roadmap for hipDNN, a comprehensive graph
 
 #### SDPA
 - Wider SDPA coverage: FP16 and FP8 forward, head dims up to 256, broader GQA configurations ⏳
-- Production-quality backward pass, plus a forward GPU reference ⏳
+- Production-quality backward pass ⏳ (the forward GPU reference landed in Q2)
 - gfx950 backward and gfx950 causal forward
 - **rocKE SDPA plugin for hipDNN** — ROCm Kernel Engine SDPA provider plugin
   - ROCm Kernel Engine (rocKE) in-progress, including a JIT SDPA path ⏳

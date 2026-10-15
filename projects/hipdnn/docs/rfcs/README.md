@@ -8,7 +8,7 @@ This directory holds the design documents (RFCs) for hipDNN. Each RFC has one st
 |--------|---------|
 | `Planned` | The RFC is proposed or accepted. No implementation is merged. |
 | `In progress` | Part of the implementation is merged, or it is merged behind a flag or phase. Some design parts are not built. |
-| `Implemented` | The implementation is merged and the RFC describes it. Implementation notes mark small differences. |
+| `Implemented` | The feature the RFC proposes is merged. The RFC may differ from the code in design details. Implementation notes record the differences. If a major part of the design is not built, use `In progress`. |
 | `Rejected / Replaced` | The design was not built, was dropped, or another RFC replaced it. The RFC links to the replacement when one exists. |
 
 Choose the status from the code, not from the RFC text.

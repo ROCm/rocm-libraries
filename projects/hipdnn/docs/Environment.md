@@ -61,10 +61,10 @@ Specifies the directory path where hipDNN will search for engine plugins (shared
 
 | Value      | Description                                            |
 |------------|--------------------------------------------------------|
-| (unset)    | Uses default path: `hipdnn_plugins/engines/` (relative to current working directory) |
+| (unset)    | Uses default path: `hipdnn_plugins/engines/` (relative to the hipDNN backend library's directory) |
 | `<path>`   | Search for engine plugins in the specified directory  |
 
-When set, this variable completely overrides the default search path. The path can be absolute or relative to the current working directory.
+When set, this variable completely overrides the default search path. The path can be absolute or relative. A relative path is resolved against the hipDNN backend library's directory, not the current working directory.
 
 **Example:**
 ```bash
@@ -84,10 +84,10 @@ Specifies the directory path where hipDNN will search for heuristic plugins (sha
 
 | Value      | Description                                            |
 |------------|--------------------------------------------------------|
-| (unset)    | Uses default path: `hipdnn_plugins/heuristics/` (relative to current working directory) |
+| (unset)    | Uses default path: `hipdnn_plugins/heuristics/` (relative to the hipDNN backend library's directory) |
 | `<path>`   | Search for heuristic plugins in the specified directory |
 
-When set, this variable completely overrides the default search path. The path can be absolute or relative to the current working directory.
+When set, this variable completely overrides the default search path. The path can be absolute or relative. A relative path is resolved against the hipDNN backend library's directory, not the current working directory.
 
 **Example:**
 ```bash
@@ -108,7 +108,7 @@ These variables apply only to builds with `HIPDNN_ENABLE_KERNEL_INGESTOR=ON` (de
 
 #### HIPDNN_DISABLE_ENGINES
 
-A comma-separated list of ingestor engines to skip before registration. Each entry can be an engine name, a 64-bit engine ID (decimal or `0x` hex), or the engine descriptor UUID. Names and hex digits are matched case-insensitively. An entry that matches nothing is ignored, so one list can span providers. The list is read on every descriptor load.
+A comma-separated list of ingestor engines to skip before registration. Each entry can be an engine name, a 64-bit engine ID (decimal or `0x` hex), or the engine descriptor UUID. Engine names and decimal IDs are matched exactly, so they are case-sensitive. Hex IDs and UUIDs are matched case-insensitively. An entry that matches nothing is ignored, so one list can span providers. The list is read on every descriptor load.
 
 ```bash
 export HIPDNN_DISABLE_ENGINES="hipkernel:SomeEngine,0x1A2B3C4D5E6F7080"

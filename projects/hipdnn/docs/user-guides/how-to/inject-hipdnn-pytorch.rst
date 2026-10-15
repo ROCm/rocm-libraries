@@ -86,7 +86,7 @@ Verify the environment is wired up without running a model:
   ``provider_ready()`` can return ``True`` while nothing routes, simply because the loaded
   build doesn't yet cover these operations. Turning that coverage on takes a custom build;
   the ``hipdnn_torch`` README's "Getting a provider with the operations this layer needs"
-  section has the recipe and links to a worked example.
+  section describes what the provider must supply.
 
 Applicability and limitations
 =============================

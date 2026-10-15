@@ -27,9 +27,9 @@ hipDNN](#6-verify--prove-its-hipdnn).
 The checkouts stay **separate on purpose** and are combined only at runtime through
 `HIPDNN_TORCH_PROVIDER_SO` + the frontend on `PYTHONPATH`:
 
-- `users/brpepers/aot-catalog-engine` — the provider/engine + catalog. **This branch is not
-  merged to `develop`**: `develop` has no `AOT_CATALOG_ENGINE` engine and no `aot_catalog`
-  tree, so the AOT sections below only apply when you build that branch.
+- `users/brpepers/aot-catalog-engine` — the provider/engine + catalog (PR #10556, **closed without
+  merging**). **This branch is not merged to `develop`**: `develop` has no `AOT_CATALOG_ENGINE`
+  engine and no `aot_catalog` tree, so the AOT sections below only apply when you build that branch.
 - Python graph bindings (rmsnorm / layernorm / sdpa / `NormFwdPhase`) — merged to `develop`
   in #10600. Build `frontend_bindings/` (§3b) from `develop` or any branch based on it.
 - `hipdnn_torch/` — merged to `develop` in #10562. It calls the standard binding API (e.g.
@@ -453,7 +453,7 @@ target is a build flag. Follow §§1–8 for the build, §9 for your OS, and use
 below as the invariants-and-acceptance checklist.
 
 **The three PRs** (build separately, combine only at *runtime* — see §1):
-- **#10556** `users/brpepers/aot-catalog-engine` — AOT catalog engine in `hip-kernel-provider`; rocKE AOT-creates kernels for your arch. Not merged to `develop`.
+- **#10556** (closed, not merged) `users/brpepers/aot-catalog-engine` — AOT catalog engine in `hip-kernel-provider`; rocKE AOT-creates kernels for your arch. Not on `develop`.
 - **#10600** (merged) — the hipDNN Python graph bindings the injection depends on.
 - **#10562** (merged) — the `hipdnn_torch` injection package, this runbook, the pytest suite, model samples.
 

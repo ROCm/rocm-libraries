@@ -1282,8 +1282,9 @@ Test conventions follow [RFC 0006](0006_PluginAgnosticIntegrationTests.md). The 
   deserialize-and-execute (no op graph available) the host scalar is still
   read correctly, proving host-scalar identity survives via the payload. A
   plugin that cannot interpret a newer payload version rejects it at
-  deserialize. *(Not built: no in-tree test plugin implements
-  `hipdnnEnginePluginSerializeExecutionContext`.)*
+  deserialize. *(Not built: no in-tree test plugin persists or round-trips the runtime
+  pass-by-value UID set. `tests/test_plugins/TestPluginCommon.hpp` implements
+  `hipdnnEnginePluginSerializeExecutionContext` with a fixed stub payload.)*
 
 - **Non-supporting plugin, both paths.** A single baseline (`< 1.2.0`) plugin,
   against a graph with a runtime pass-by-value tensor, is dropped from the

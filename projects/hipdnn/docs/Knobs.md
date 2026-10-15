@@ -83,7 +83,6 @@ Knobs follow a hierarchical naming scheme to avoid conflicts and improve organiz
 ```
 global.benchmarking
 global.workspace_size_limit
-global.deterministic
 ```
 
 **Plugin-specific namespace**:

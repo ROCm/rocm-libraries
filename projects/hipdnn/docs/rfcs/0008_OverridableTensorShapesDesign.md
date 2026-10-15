@@ -143,9 +143,9 @@ The hipDNN graph pipeline has four steps:
 
 > [!NOTE]
 > **Implementation note (2026-10-15):** The flag is `is_override_shape_enabled` in
-> `flatbuffers_sdk/schemas/graph.fbs`. PR #8881 also copies it into the execution plan
-> (`is_override_shape_enabled` in `execution_plan.fbs`, backend attribute
-> `HIPDNN_ATTR_EXECUTION_PLAN_IS_OVERRIDE_SHAPE_ENABLED_EXT`, ID 310). This lets
+> `flatbuffers_sdk/schemas/graph.fbs`. PR #7279 also copies it into the execution plan
+> (`is_override_shape_enabled` in `execution_plan.fbs`). PR #8881 added the backend attribute
+> `HIPDNN_ATTR_EXECUTION_PLAN_IS_OVERRIDE_SHAPE_ENABLED_EXT` (ID 310). This lets
 > plan-only (deserialized) graphs check the flag. The frontend setter and getter
 > are compiled only when `HIPDNN_ENABLE_SDPA` is defined.
 

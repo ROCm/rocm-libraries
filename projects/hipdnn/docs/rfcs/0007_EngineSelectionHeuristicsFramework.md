@@ -335,7 +335,7 @@ public:
 > expose many policies. `hipdnnHeuristicPolicyDescriptorCreate` takes a `policy_id`, and one plugin
 > handle is shared by all policies of the library.
 
-This section defines the **stable C-language ABI** for heuristic (selection policy) shared libraries. It is **orthogonal** to the **engine** plugin ABI: a single `.so` is either an **engine** plugin or a **heuristic** plugin, **not both**. Heuristic libraries **do not** export `hipdnnPluginGetName`, `hipdnnPluginGetType`, or any **engine** entry points from `PluginApi.h` / `EnginePluginApi.h`—only the symbols below (final names live in **`HeuristicsPluginApi.h`** or equivalent).
+This section defines the **stable C-language ABI** for heuristic (selection policy) shared libraries. It is **orthogonal** to the **engine** plugin ABI: a single `.so` is either an **engine** plugin or a **heuristic** plugin, **not both**. Heuristic libraries **do not** export any **engine** entry points from `EnginePluginApi.h`. They export the base `PluginApi.h` symbols (for example `hipdnnPluginGetName` and `hipdnnPluginGetType`) and the symbols below (final names live in **`HeuristicsPluginApi.h`** or equivalent).
 
 ### 8.1 Design principles
 
