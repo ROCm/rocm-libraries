@@ -587,3 +587,23 @@ def test_each_mutually_exclusive_branch_arm_gets_its_own_barrier():
             "no barrier between %s and its ds_store" % arm.getLabelName()
     firstStore = next(k for k, leaf in enumerate(leaves) if isinstance(leaf, DSStoreB32))
     assert any(isinstance(leaf, SBarrier) for leaf in leaves[:firstStore])
+
+
+def test_explicit_cluster_handoff_keeps_its_workgroup_rendezvous(_isolate_rocisa_state):
+    """Wave 0 may not release peer LDS before the other waves drain reads."""
+    from gpu_test_helpers import init_rocisa
+    init_rocisa(target="gfx1250", wavesize=32)
+    root = Module("body")
+    root.add(_read())
+    handoff = Module("explicit cluster handoff")
+    handoff.add(SBarrier(comment="all waves release the multicast destination"))
+    handoff.add(SBarrier(True, False, True))
+    handoff.add(SBarrier(True, True, True))
+    root.add(handoff)
+    root.add(_fill())
+    before = str(handoff)
+    writer = _runPass(_waveParityKernel(), root)
+    assert writer.states.overflowedResources == 0
+    assert str(handoff) == before
+    assert "s_barrier_signal -1" in before
+    assert "s_barrier_wait -1" in before
