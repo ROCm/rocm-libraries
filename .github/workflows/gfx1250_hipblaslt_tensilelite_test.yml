@@ -91,7 +91,7 @@ jobs:
           FILES="$(gh api --paginate "repos/$REPO/pulls/$PR/files" --jq '.[].filename')"
           # ci-env/action.yml holds therock-ref: a bump PR runs the job, so a compiler change
           # shows up there as the SDK compiler warning.
-          grep -qE '^(projects/hipblaslt|shared/(origami|stinkytofu|mxdatagenerator))/|^\.github/workflows/gfx1250_hipblaslt_tensilelite_test\.yml$|^\.github/actions/ci-env/action\.yml$' <<<"$FILES" \
+          grep -qE '^(projects/hipblaslt|shared/(origami|stinkytofu|mxdatagenerator)|cmake)/|^\.github/workflows/gfx1250_hipblaslt_tensilelite_test\.yml$|^\.github/actions/ci-env/action\.yml$' <<<"$FILES" \
             || skip "PR #$PR does not touch hipBLASLt, TensileLite or the TheRock pin"
           echo "run=true" >> "$GITHUB_OUTPUT"
 
@@ -117,6 +117,7 @@ jobs:
       # GIDs on the ROCm runners (mirrors TheRock's _GPU_CONTAINER_OPTIONS).
       # -e without a value copies ROCR_VISIBLE_DEVICES from the runner's .env (one
       # runner per GPU); the runner passes no host env into job containers itself.
+      # Unset: the strict-mode check falls back to the runner name's -gpuN.
       options: >-
         -e ROCR_VISIBLE_DEVICES
         --ipc host
@@ -139,7 +140,7 @@ jobs:
       # Run both suites as gfx1250-strict.
       HSA_DISABLE_GFX12_STRICT: "0"
       # The pinned ROCm SDK nightly; the install and the compiler check both read it.
-      ROCM_SDK_VERSION: ${{ inputs.rocm_sdk_version || '10.2.0a20261007' }}
+      ROCM_SDK_VERSION: ${{ inputs.rocm_sdk_version || '10.2.0a20261013' }}
       GTEST_PRINT_TIME: "0"
       PYTHONUNBUFFERED: "1"
       # awk filter for all test and build logs
@@ -203,8 +204,11 @@ jobs:
           echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
           echo "VIRTUAL_ENV=$RUNNER_TEMP/venv" >> "$GITHUB_ENV"
           python3 -m pip install --upgrade pip
-          pip install --pre --index-url https://nightly.repo.amd.com/rocm/whl-next/ \
-            "rocm[libraries,devel,device-gfx1250]==${ROCM_SDK_VERSION}"
+          IDX=https://nightly.repo.amd.com/rocm/whl-next/
+          # rocm is a 28 kB sdist: build it without the cache (read-only outside the
+          # nightly; pip writes built wheels there). Its multi-GB wheels still come from it.
+          pip install --pre --index-url "$IDX" --no-cache-dir --no-deps "rocm==${ROCM_SDK_VERSION}"
+          pip install --pre --index-url "$IDX" "rocm[libraries,devel,device-gfx1250]==${ROCM_SDK_VERSION}"
           rocm-sdk init
           R="$(rocm-sdk path --root)"
           rocm-sdk path --bin >> "$GITHUB_PATH"
@@ -267,7 +271,19 @@ jobs:
         id: strict
         # Fail before the long build if strict mode is not in effect. Uses the same
         # detection tox uses for the client target; prints arch names only.
+        env:
+          RUNNER_LABEL: ${{ runner.name }}
         run: |
+          # One runner per GPU: all shards and workers must stay on this runner's GPU,
+          # set by ROCR_VISIBLE_DEVICES in the runner's .env, else N from ...-gpuN.
+          if [ -z "${ROCR_VISIBLE_DEVICES:-}" ] && [[ "$RUNNER_LABEL" =~ -gpu([0-9]+)$ ]]; then
+            export ROCR_VISIBLE_DEVICES="${BASH_REMATCH[1]}"
+            echo "::warning::ROCR_VISIBLE_DEVICES is not set on this runner; using GPU $ROCR_VISIBLE_DEVICES from the runner name"
+            echo "ROCR_VISIBLE_DEVICES=$ROCR_VISIBLE_DEVICES" >> "$GITHUB_ENV"
+          fi
+          N="$(tr ',' '\n' <<<"${ROCR_VISIBLE_DEVICES:-}" | grep -c . || true)"
+          [ "$N" = 1 ] \
+            || { echo "::error::ROCR_VISIBLE_DEVICES must name exactly one GPU: set it in the runner's .env, or name the runner ...-gpuN"; exit 1; }
           ARCH="$(python3 - <<'EOF'
           import importlib.util
           spec = importlib.util.spec_from_file_location("ga", "projects/hipblaslt/tensilelite/tensilelite/GpuArch.py")
@@ -279,12 +295,6 @@ jobs:
           )"
           [ "$ARCH" = gfx1250-strict ] \
             || { echo "::error::runtime reports '${ARCH:-no GPU}', not gfx1250-strict"; exit 1; }
-          # One runner per GPU: the 4 gtest shards and 4 pytest workers must stay on this
-          # runner's GPU, so the runner must pass exactly one GPU in *_VISIBLE_DEVICES.
-          VIS="${ROCR_VISIBLE_DEVICES:-${HIP_VISIBLE_DEVICES:-}}"
-          N="$(tr ',' '\n' <<<"$VIS" | grep -c . || true)"
-          [ "$N" = 1 ] \
-            || { echo "::error::ROCR_VISIBLE_DEVICES (or HIP_VISIBLE_DEVICES) must name exactly one GPU; the runner sets it to its own GPU"; exit 1; }
 
       - name: Build hipBLASLt from source
         run: |
@@ -309,8 +319,15 @@ jobs:
           # gtest shards sharing the GPU, so one shard's CPU reference checks overlap
           # another's GPU work.
           HIPBLASLT_TEST_SHARDS: "4"
+          # Runners (one per GPU) sharing this host's CPUs.
+          RUNNERS_PER_HOST: "4"
         run: |
           set -o pipefail
+          # The CPU reference uses OpenMP, one thread per host core by default: with every
+          # runner busy that oversubscribes the CPU about 16x and the step runs ~7x slower.
+          # Split the cores between all shards on the host instead.
+          export OMP_NUM_THREADS=$(( $(nproc) / (RUNNERS_PER_HOST * HIPBLASLT_TEST_SHARDS) ))
+          [ "$OMP_NUM_THREADS" -ge 1 ] || OMP_NUM_THREADS=1
           cd projects/hipblaslt
           INSTALL="$PWD/hipblaslt-install"
           export LD_LIBRARY_PATH="$INSTALL/lib:$LD_LIBRARY_PATH"
@@ -392,7 +409,7 @@ jobs:
 
       - name: Upload test results
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: gfx1250-strict-test-results
           path: |
