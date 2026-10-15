@@ -296,7 +296,7 @@ machine.
 
 | Tool | Answers | Invocation |
 |---|---|---|
-| `tools/verify_variant_sets.py` | Structural nesting/runtime tuple identity, sentinels and vocabulary; artifact-bound compiler agreement is the distinct, stronger mode | `verify_variant_sets.py --mode {full,structural} [--provenance-root LABEL=DIR]... [--arch A] [--profile P] [--kpack-python-dir D] LABEL ROOT...`. `--mode` is required and has no default: `structural` reports compiled specialization agreement as NOT CHECKED by name and still exits 0 on the rest; `full` fails on a missing, unsupported or mismatched producing-build record **and** on any check that could not run (`GATE FAILED (N check(s) NOT RUN: ...)`). `--profile` supplies the bundle to gate and the matcher vocabulary, which full mode requires over string fields no declaration spells out. `--provenance-root` names the sidecar tree mirroring that label's ROOT, needed for an installed tree, which ships no sidecars; an unknown LABEL or a malformed `LABEL=DIR` exits 2 |
+| `tools/verify_variant_sets.py` | Structural nesting/runtime tuple identity, sentinels and vocabulary; artifact-bound compiler agreement is the distinct, stronger mode | `verify_variant_sets.py --mode {full,structural} [--provenance-root LABEL=DIR]... [--arch A] [--profile P] [--kpack-python-dir D] [--generic-targets-json T] LABEL ROOT...`. `--mode` is required and has no default: `structural` reports compiled specialization agreement as NOT CHECKED by name and still exits 0 on the rest; `full` fails on a missing, unsupported or mismatched producing-build record **and** on any check that could not run (`GATE FAILED (N check(s) NOT RUN: ...)`). `--profile` supplies the bundle to gate and the matcher vocabulary, which full mode requires over string fields no declaration spells out. `--provenance-root` names the sidecar tree mirroring that label's ROOT, needed for an installed tree, which ships no sidecars; an unknown LABEL or a malformed `LABEL=DIR` exits 2 |
 | `tools/variant_reachability.py` | Can any shape in the corpus actually select each variant, or is one dead weight? | `variant_reachability.py --kdp K --shapes S [--provenance-root DIR] [--profile P]`; `--provenance-root` mirrors the tree the KDP is read from, for an installed tree |
 | `tools/launch_surface.py` | Is every surface the C++ restates from the kernel's Python declared, guarded and tested? | `launch_surface.py PROFILE --check [--allow-unguarded]` |
 | `tools/coverage_gate.py` | Structural, loading and serving obligations, reported separately; an unmet required obligation cannot pass | `coverage_gate.py --tree T --mode {full,structural} [--provenance-root DIR] [--arch A] [--validator V] [--expect-engine E] [--min-served N]`; `--mode` is required and governs what rung 1 may claim. A missing `--validator` makes rung 2 `loads-not-run`, a failure rather than a skip; an offline result is not serving evidence. `--provenance-root` mirrors `--tree`, for an installed tree, and is forwarded to rung 1 |
@@ -512,6 +512,14 @@ Run, in this order, **before any UUID is minted**:
    `gfx942`), since either looks like an ordinary INFO decline at match time and this tool
    keeps no exhaustive arch list.
 
+### Generic targets
+
+Configs accept generic `arch` targets under the
+[packaging rules](../../../../dnn-providers/hip-kernel-provider/descriptor-packaging/README.md#generic-gpu-targets).
+`build_kdp` refuses a tuple shared by two kernels only at the same arch tier
+([RFC 0017](../../docs/rfcs/0017_UniversalKernelDescriptor.md#4-resolve-the-kernel-packs-that-name-this-engine-and-apply-the-arch-gate)). The generated census gives every member of
+a generic row the generic's descriptors.
+
 ## Source adapters (`codegen/sources/`)
 
 One protocol (`SourceAdapter.infer(*sources) -> SourceAdapterResult`), two v1
@@ -527,9 +535,8 @@ producing compiler. `hsaco` authoring also uses the packaged path: `kernel_sourc
 descriptor that names it and `symbol` its kernel. `file` must stay inside the source root,
 with no root-relative fallback. `hkp_pack` packs that object as-is, without compiling, so
 like `hip` the specialization declares `metadata_fields: []`. The packer does not check the
-object's format or target processor: every hsaco kernel must carry a non-empty per-kernel `arch` listing the
-arch(es) its object runs on (a generic-target object lists each one), and the loader
-rejects one without.
+object's format or target processor; `arch` follows
+[hsaco kernels and `arch`](../../../../dnn-providers/hip-kernel-provider/descriptor-packaging/README.md#hsaco-kernels-and-arch).
 `hsaco_file` is rejected explicitly, naming `supportsSourceKind()` as the missing
 prerequisite on `IKernelDispatchHandler`.
 
