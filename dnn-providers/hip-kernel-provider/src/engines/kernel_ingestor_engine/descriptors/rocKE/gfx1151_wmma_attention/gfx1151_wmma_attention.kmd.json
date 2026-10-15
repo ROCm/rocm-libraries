@@ -1,0 +1,44 @@
+{
+  "version": "1.0",
+  "id": "3cd28975-c675-4575-b00a-73c829e33f20",
+  "name": "Gfx1151WmmaAttention variant fields",
+  "fields": [
+    {
+      "name": "dtype",
+      "type": "string"
+    },
+    {
+      "name": "head_size",
+      "type": "int"
+    },
+    {
+      "name": "mask_mode",
+      "type": "string"
+    },
+    {
+      "name": "transposed_qk",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "query_tail",
+      "type": "int",
+      "default_value": 1
+    },
+    {
+      "name": "kv_tail",
+      "type": "int",
+      "default_value": 1
+    },
+    {
+      "name": "block_n",
+      "type": "int",
+      "default_value": 32
+    },
+    {
+      "name": "num_waves",
+      "type": "int",
+      "default_value": 1
+    }
+  ]
+}

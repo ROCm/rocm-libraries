@@ -69,8 +69,8 @@ requires every candidate to provide:
 - `block`;
 - `bind_torch`.
 
-Routing-only path labels are absent. Dense gfx942/gfx950, gfx1250 WMMA, and
-explicit unified-tuning candidates are executable.
+Routing-only path labels are absent. Dense gfx942/gfx950, gfx1151/gfx1250 WMMA,
+and explicit unified-tuning candidates are executable.
 
 ```python
 from dispatch.attention import AttentionRequest, dispatch_attention_all
@@ -388,6 +388,53 @@ candidate.sweep_space / sample_space
 In every case the coverage tests in
 `tests/dispatch/attention/test_tuning_space.py` fail until the new field sits
 on an axis or in an exemption.
+
+## gfx1151 inference
+
+`attention_gfx1151_wmma` is the gfx1151 auto route and an execution candidate.
+Its explicit selectors are `algorithm="wmma_fmha_fwd"` and
+`spec_id="gfx1151_wmma_fmha_fwd"`. Other architecture defaults are unchanged.
+
+The request describes layout (`dense`, `ragged`, or `paged`) and score features
+(`use_softcap`, `use_sinks`, `use_alibi`, `use_qq_bias`, legacy
+`sliding_window`, optional `window_right`, or explicit `window_left`) before
+selection. `use_fp8=True` selects OCP E4M3FN K/V storage, not FP8 Q/O. Both
+FP16/BF16 Q/O and head dimensions that are multiples of 16 up to 256 (Q/K and
+V/O widths may differ) are supported. Legacy `sliding_window` remains the left
+width; `window_right` supplies an optional runtime right bound, while
+`window_bottom_right=True` bottom-right-aligns a `SLIDING_WINDOW` request.
+`use_attn_bias=True` adds the `attn_bias` feature and requires an `attn_bias`
+tensor `[B|1, H|1, Sq|1, Sk]` with a unit-stride key dimension;
+`attn_bias_dtype` is `"f32"` (default) or `"q"` (the Q dtype). Broadcast,
+expanded, permuted, and row-padded views are accepted without copies; invalid
+dtype, rank, extent, or key stride raises `ValueError`. `emit_lse=True`
+requires a caller-owned FP32 `lse` tensor; direct dispatch accepts
+`[B,Hq,Sq]`, `[Hq,total_q]`, and layout-shaped forms, while the hipDNN graph
+contract uses rank-4 stats. Fully masked rows store `-inf`.
+Explicit layout or feature requirements reject candidates that do not declare
+them; `layout="auto"` retains legacy layout conventions and resolves to dense
+on gfx1151.
+
+The dense binding accepts either BSHD or BHSD shapes (`tensor_layout` disambiguates
+equal sequence/head extents) and preserves independently padded, non-overlapping
+batch/token/head strides. Set `emit_lse=True` and provide an FP32 `lse` tensor
+to receive row-wise log-sum-exp values. The binding otherwise takes `q`, `k`,
+`v`, and `out`; packed inputs also provide the selected prefix sums or paged
+metadata. Runtime kwargs are `softmax_scale`, positive `softcap` when selected,
+and explicit FP32 `k_scale`/`v_scale` for FP8 storage.
+
+Aligned dense FP16 and BF16 D64/D128 requests use the transposed-QK fast path.
+Its compiled identity excludes sequence lengths, query/KV head counts, and
+window widths; these and all dense strides are runtime arguments. Modules are
+cached and stream handles are forwarded. Use `fence=False` for asynchronous or
+graph-captured launches, then release retained owners after the appropriate
+synchronization and graph-destruction boundary.
+
+The shipped `hipkernel:Gfx1151WmmaAttention` catalog uses the same dense ABI
+and packages reusable FP16/BF16 D64/D96/D128/D256 objects for no-mask,
+causal, and two-sided-window requests. Runtime dimensions and strides do not
+multiply the AOT object count.
+See the [gfx1151 ABI and tensor-layout guide](../../builders/gfx1151/attention/README.md).
 
 ## Capability versus support
 
