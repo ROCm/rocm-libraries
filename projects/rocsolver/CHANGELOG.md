@@ -7,6 +7,7 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 
 ### Added
 
+
 * Hessenberg reduction routines
     * GEHD2
     * GEHRD
@@ -14,6 +15,9 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 * Support added for the gfx1250-strict architecture.
 
 ### Changed
+
+* Clarified in the API documentation that rocsolver_rfinfo is an input and output parameter as it could be modified within the functions.
+
 ### Removed
 ### Optimized
 
@@ -31,6 +35,9 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 * GECON could return a wrong estimate for n > 64 (a race in its LACN2 iteration)
 * GECON caused a memory access fault for n > 480 when the handle was in device pointer mode (the mode
   set by `rocsolver_create_handle`)
+* Improved kernel launches to detect invalid launch configuration.
+
+* Fixed sparse functions potentially not using the stream set in the handle.
 
 ### Known issues
 ### Upcoming changes

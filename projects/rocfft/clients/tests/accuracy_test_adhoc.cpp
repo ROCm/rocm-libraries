@@ -385,6 +385,8 @@ const auto adhoc_tokens = {
     "real_forward_len_378_42_single_ip_batch_66000_istride_44_1_R_ostride_22_1_HI_idist_16632_odist_8316_ioffset_0_0_ooffset_0_0",
     "real_forward_len_527_25_single_ip_batch_67500_istride_26_1_R_ostride_13_1_HI_idist_13702_odist_6851_ioffset_0_0_ooffset_0_0",
     "real_forward_len_630_38_single_ip_batch_65540_istride_40_1_R_ostride_20_1_HI_idist_25200_odist_12600_ioffset_0_0_ooffset_0_0",
+    // multi-kernel fused Bluestein with padded output batches (odist > length)
+    "complex_forward_len_8209_single_op_batch_2_istride_1_CI_ostride_1_CI_idist_8209_odist_20000_ioffset_0_0_ooffset_0_0",
     // degenerate length-1 test cases
     "complex_forward_len_1_single_ip_batch_2_istride_1_CI_ostride_1_CI_idist_1_odist_1_ioffset_0_0_ooffset_0_0",
     "complex_forward_len_1_single_op_batch_2_istride_1_CI_ostride_1_CI_idist_1_odist_1_ioffset_0_0_ooffset_0_0",
@@ -565,6 +567,30 @@ INSTANTIATE_TEST_SUITE_P(
     adhoc_nondefault_layout_real,
     accuracy_test,
     ::testing::ValuesIn(param_generator_token(test_prob, adhoc_nondefault_layout_real_tokens)),
+    accuracy_test::TestName);
+
+// Fused multi-kernel Bluestein with non-unit strides.  The inner-batched cases
+// (idist=odist=1, istride=ostride=batch) used to fault on the GPU because the
+// L1D_CC dist-1 reshape broke the fused stages' convolution buffer layouts.
+const auto fused_bluestein_non_unit_stride_tokens = {
+    // clang-format off
+    "complex_forward_len_4182_single_ip_batch_2456_istride_2456_CI_ostride_2456_CI_idist_1_odist_1_ioffset_0_0_ooffset_0_0",
+    "complex_forward_len_4167_single_op_batch_1039_istride_1039_CI_ostride_1039_CI_idist_1_odist_1_ioffset_0_0_ooffset_0_0",
+    "complex_forward_len_4128_single_ip_batch_8092_istride_8092_CI_ostride_8092_CI_idist_1_odist_1_ioffset_0_0_ooffset_0_0",
+    "complex_forward_len_4097_single_ip_batch_2_istride_2_CI_ostride_2_CI_idist_1_odist_1_ioffset_0_0_ooffset_0_0",
+    "complex_inverse_len_4097_single_ip_batch_2_istride_2_CI_ostride_2_CI_idist_1_odist_1_ioffset_0_0_ooffset_0_0",
+    "complex_forward_len_4099_double_ip_batch_64_istride_64_CI_ostride_64_CI_idist_1_odist_1_ioffset_0_0_ooffset_0_0",
+    "complex_inverse_len_8191_single_op_batch_8_istride_8_CI_ostride_8_CI_idist_1_odist_1_ioffset_0_0_ooffset_0_0",
+    // general non-unit stride and non-unit dist
+    "complex_inverse_len_8191_double_ip_batch_8_istride_2_CI_ostride_2_CI_idist_16382_odist_16382_ioffset_0_0_ooffset_0_0",
+    "complex_forward_len_4182_single_op_batch_8_istride_3_CI_ostride_3_CI_idist_12562_odist_12562_ioffset_0_0_ooffset_0_0",
+    // clang-format on
+};
+
+INSTANTIATE_TEST_SUITE_P(
+    fused_bluestein_non_unit_stride,
+    accuracy_test,
+    ::testing::ValuesIn(param_generator_token(test_prob, fused_bluestein_non_unit_stride_tokens)),
     accuracy_test::TestName);
 
 // MaxKernelStride boundary. batch 1 => dist contributes nothing to ptrdiff,
