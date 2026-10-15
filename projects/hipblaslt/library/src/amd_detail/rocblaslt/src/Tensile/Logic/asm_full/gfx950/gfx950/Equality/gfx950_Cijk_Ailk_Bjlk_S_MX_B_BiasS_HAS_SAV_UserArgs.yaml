@@ -288,8 +288,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
-    SupportUserGSU: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
+    UseUniversalArgs: true}
   Kernel: true
   LSCA: 32
   LSCB: 32
@@ -455,8 +455,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
-    SupportUserGSU: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
+    UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 32
@@ -627,8 +627,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
-    SupportUserGSU: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
+    UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 64
@@ -794,8 +794,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
-    SupportUserGSU: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
+    UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 64
@@ -962,8 +962,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
-    SupportUserGSU: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
+    UseUniversalArgs: true}
   Kernel: true
   LSCA: 128
   LSCB: 32
@@ -1132,8 +1132,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
-    SupportUserGSU: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
+    UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 64
@@ -1303,8 +1303,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
-    SupportUserGSU: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
+    UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 64
@@ -1473,8 +1473,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
-    SupportUserGSU: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
+    UseUniversalArgs: true}
   Kernel: true
   LSCA: 32
   LSCB: 32
@@ -1643,8 +1643,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
-    SupportUserGSU: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
+    UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 64
@@ -1814,8 +1814,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
-    SupportUserGSU: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
+    UseUniversalArgs: true}
   Kernel: true
   LSCA: 64
   LSCB: 128
@@ -1981,8 +1981,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
-    SupportUserGSU: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
+    UseUniversalArgs: true}
   Kernel: true
   LSCA: 16
   LSCB: 32
@@ -2151,8 +2151,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
-    SupportUserGSU: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
+    UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 16
@@ -2322,8 +2322,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
-    SupportUserGSU: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
+    UseUniversalArgs: true}
   Kernel: true
   LSCA: 16
   LSCB: 16
@@ -2491,8 +2491,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
-    SupportUserGSU: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
+    UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 16
@@ -2661,8 +2661,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 32
   LSCB: 32
@@ -2831,8 +2831,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 32
@@ -3003,8 +3003,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 128
   LSCB: 128
@@ -3174,8 +3174,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 256
   LSCB: 64
@@ -3343,8 +3343,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 256
@@ -3510,8 +3510,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 128
   LSCB: 256
@@ -3678,8 +3678,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 256
   LSCB: 256
@@ -3847,8 +3847,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 64
   LSCB: 256
@@ -4017,8 +4017,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 32
   LSCB: 256
@@ -4186,8 +4186,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 16
   LSCB: 16
@@ -4358,8 +4358,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 32
@@ -4532,8 +4532,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 16
   LSCB: 16
@@ -4702,8 +4702,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 64
   LSCB: 32
@@ -4874,8 +4874,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 16
   LSCB: 16
@@ -5046,8 +5046,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 32
   LSCB: 32
@@ -5217,8 +5217,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 32
@@ -5389,8 +5389,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 64
   LSCB: 32
@@ -5561,8 +5561,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 16
@@ -5732,8 +5732,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 32
@@ -5902,8 +5902,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 16
   LSCB: 16
@@ -6074,8 +6074,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 128
   LSCB: 128
@@ -6246,8 +6246,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 128
   LSCB: 32
@@ -6413,8 +6413,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 16
   LSCB: 16
@@ -6586,8 +6586,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 32
   LSCB: 16
@@ -6760,8 +6760,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 32
   LSCB: 64
@@ -6930,8 +6930,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 64
@@ -7103,8 +7103,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 64
   LSCB: 64
@@ -7276,8 +7276,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 16
@@ -7448,8 +7448,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 32
@@ -7621,8 +7621,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 16
   LSCB: 16
@@ -7792,8 +7792,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 32
   LSCB: 32
@@ -7964,8 +7964,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 64
   LSCB: 64
@@ -8137,8 +8137,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 64
   LSCB: 32
@@ -8309,8 +8309,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 128
   LSCB: 128
@@ -8479,8 +8479,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 256
   LSCB: 128
@@ -8651,8 +8651,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 32
   LSCB: 32
@@ -8827,8 +8827,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 32
@@ -9001,8 +9001,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 128
@@ -9171,8 +9171,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 64
@@ -9343,8 +9343,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 32
@@ -9515,8 +9515,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 128
   LSCB: 256
@@ -9685,8 +9685,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 256
   LSCB: 256
@@ -9856,8 +9856,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 32
@@ -10025,8 +10025,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 64
   LSCB: 256
@@ -10194,8 +10194,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 64
   LSCB: 128
@@ -10365,8 +10365,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 32
   LSCB: 16
@@ -10539,8 +10539,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 128
   LSCB: 16
@@ -10717,8 +10717,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 32
@@ -10864,162 +10864,6 @@ Solutions:
   tailLoopOptA: false
   tailLoopOptB: false
 - SolutionIndex: 62
-  KernelNameMin: Custom_Cijk_Ailk_Bjlk_S_MX_B_BIAS_HA_S_SAV_NTD_SK3_UserArgs_MT256x256x32_MI16x16x1_shortname0_gfx950
-  SolutionNameMin: Custom_Cijk_Ailk_Bjlk_S_MX_B_BIAS_HA_S_SAV_NTD_SK3_UserArgs_MT256x256x32_MI16x16x1_shortname0_gfx950
-  ActivationFuncCall: false
-  AssignedDerivedParameters: true
-  AssignedProblemIndependentDerivedParameters: true
-  BaseName: Custom_Cijk_Ailk_Bjlk_S_MX_B_BIAS_HA_S_SAV_NTD_SK3_UserArgs_MT256x256x32_MI16x16x1_shortname0_gfx950
-  CUCount: null
-  CUOccupancy: -1
-  ClusterLocalRead: 0
-  CodeObjectVersion: 4
-  CustomKernelName: Custom_Cijk_Ailk_Bjlk_S_MX_B_BIAS_HA_S_SAV_NTD_SK3_UserArgs_MT256x256x32_MI16x16x1_shortname0_gfx950
-  DepthU: 32
-  DirectToLds: 1
-  DirectToLdsA: true
-  DirectToLdsB: true
-  EdgeType: ShiftPtr
-  EnableF32XdlMathOp: true
-  EnableMatrixInstruction: true
-  ExpandPointerSwap: false
-  ExpertSchedulingMode: 0
-  GlobalReadVectorWidthA: 4
-  GlobalReadVectorWidthB: 4
-  GlobalSplitU: 0
-  GlobalWriteVectorWidth: 4
-  GuaranteeNoPartialA: false
-  GuaranteeNoPartialB: false
-  GuaranteeNoPartialMetadata: true
-  ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
-    SupportUserGSU: false, UseUniversalArgs: true}
-  Kernel: true
-  LSCA: 256
-  LSCB: 256
-  LSPA: 4
-  LSPB: 4
-  LVCA: 64
-  LVCB: 64
-  LVPA: 1
-  LVPB: 1
-  LdsBlockSizePerPadA: 4096
-  LdsBlockSizePerPadB: 4096
-  LdsBlockSizePerPadMetadata: 0
-  LdsBytesNoAmax: 131072
-  LdsInitCVgprs: false
-  LdsNumBytes: 131072
-  LdsNumElementsAlignedA: 32768
-  LdsNumElementsAlignedB: 32768
-  LdsNumElementsAlignedMetadata: 0
-  LdsOffsetA: 0
-  LdsOffsetA_Blk: 65536
-  LdsOffsetB: 32768
-  LdsOffsetB_Blk: 98304
-  LdsOffsetBias: 0
-  LdsOffsetBiasGSU: 0
-  LdsOffsetBiasNonGSU: 0
-  LdsOffsetMetadata: 32768
-  LdsOffsetMetadata_Blk: 98304
-  LdsPadA: 0
-  LdsPadB: 0
-  LdsPadMetadata: 0
-  LocalReadVectorWidth: 4
-  LocalSplitU: 1
-  LocalSplitUReuseLDS: 1
-  LocalWriteUseSgprA: true
-  LocalWriteUseSgprB: true
-  LoopIters: 1
-  LoopUnroll: 32
-  MIBlock: [16, 16, 32, 1, 1, 1]
-  MIInputPerThread: 8
-  MIInputPerThreadA: 8
-  MIInputPerThreadB: 8
-  MIOutputVectorWidth: 4
-  MIRegPerOut: 1
-  MIWaveGroup: [2, 2]
-  MIWaveTile: [8, 8]
-  MIWaveTileA: 8
-  MIWaveTileB: 8
-  MIWaveTileMetadata: 0
-  MacroTile0: 256
-  MacroTile1: 256
-  MacroTileA: 256
-  MacroTileB: 256
-  MathClocksUnrolledLoop: 0
-  MatrixInstB: 1
-  MatrixInstBM: 1
-  MatrixInstBN: 1
-  MatrixInstK: 32
-  MatrixInstM: 16
-  MatrixInstN: 16
-  MatrixInstruction: [16, 16, 32, 1]
-  MaxLDS: 163840
-  MbskPrefetchMethod: 0
-  NoLdsWriteCode: true
-  NoTailLoop: false
-  NonDTLTailLoopA: false
-  NonDTLTailLoopB: false
-  NumElementsPerThread: 256
-  NumGlobalWriteVectorsPerThread: 64
-  NumLoadsA: 8
-  NumLoadsB: 8
-  NumLoadsPerpendicularA: 8
-  NumLoadsPerpendicularB: 8
-  NumThreads: 256
-  NumWaveSplitK: 1
-  PackedC0IdxChars: [I]
-  PackedC0IndicesX: [0]
-  PackedC1IdxChars: [J]
-  PackedC1IndicesX: [1]
-  PrefetchGlobalRead: 2
-  PrefetchLocalRead: 0
-  StaggerU: 0
-  StaggerUStride: 0
-  StoreSwapAddr: false
-  StoreVectorWidth: 4
-  StreamK: 3
-  StreamKXCCMapping: 8
-  SubGroup0: 8
-  SubGroup1: 32
-  SubGroupA: 8
-  SubGroupB: 32
-  ThreadTile0: 32
-  ThreadTile1: 8
-  ThreadTileA: 32
-  ThreadTileB: 8
-  TransposeLDS: 0
-  TransposeLDSMetadata: 1
-  ULSGRODoubleG2L: 0
-  UnrollMajorLDSA: 0
-  UnrollMajorLDSB: 0
-  UnrollMajorLDSMetadata: true
-  UseCustomMainLoopSchedule: 0
-  UseDotInstruction: false
-  UseF32XEmulation: true
-  Valid: true
-  VectorWidthA: 4
-  VectorWidthB: 4
-  WavefrontSize: 64
-  WorkGroupMapping: 6
-  WorkspaceCheck: [4, 0, 0]
-  _DepthU: 32
-  _DepthUA: 32
-  _DepthUB: 32
-  _DepthUMetadata: 32
-  _GlobalAccumulation: PartialsBuffer
-  _UseSgprForGRO: false
-  _VectorStore: 1
-  _WorkspaceSizePerElemBias: 0
-  _WorkspaceSizePerElemC: 4
-  _staggerStrideShift: 0
-  enableLDSTrA: false
-  enableLDSTrB: false
-  reorderGRInstForDTVA: false
-  reorderGRInstForDTVB: false
-  tailLoopOptA: false
-  tailLoopOptB: false
-- SolutionIndex: 63
   KernelNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT128x64x64_MI32x32x1_SN_LDSB0_AFC0_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR1_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLBn1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI1_LBSPPA0_LBSPPB0_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV1_MIWT2_2_MXLIA_MXSFA_MO40_MGRIPMn1_NTn1_NTA4_NTB0_NTC4_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS16_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR2_PLR1_PKA1_SGROBn1_SIA3_SS1_SPO1_SRVW0_SSO0_SVW2_SK3_SKFTR0_SKFDPO0_SKXCCM8_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSM1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO1_USI0_VSn1_VWA2_VWB2_WSGRA0_WSGRB0_WS64_WG64_2_2_WGMXCC1
   SolutionNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT128x64x64_MI32x32x1_SN_LDSB0_AFC0_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR1_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLBn1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI1_LBSPPA0_LBSPPB0_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV1_MIWT2_2_MXLIA_MXSFA_MO40_MGRIPMn1_NTn1_NTA4_NTB0_NTC4_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS16_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR2_PLR1_PKA1_SGROBn1_SIA3_SS1_SU8_SUM1_SUS256_SPO1_SRVW0_SSO0_SVW2_SK3_SKFTR0_SKFDPO0_SKXCCM8_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSM1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO1_USI0_VSn1_VWA2_VWB2_WSGRA0_WSGRB0_WS64_WG64_2_2_WGM0_WGMXCC1_WGMXCCGn1
   ActivationFuncCall: false
@@ -11047,8 +10891,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 128
@@ -11197,7 +11041,7 @@ Solutions:
   reorderGRInstForDTVB: false
   tailLoopOptA: false
   tailLoopOptB: false
-- SolutionIndex: 64
+- SolutionIndex: 63
   KernelNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT16x128x32_MI16x16x1_SN_LDSB1_AFC0_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR0_CLS0_CADS0_DTLA0_DTLB0_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLBn1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA1_GRVWB1_GSU0_GSUAMB_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI0_LBSPPA256_LBSPPB2048_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA16_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV1_MIWT1_2_MXLIA_MXSFA_MO40_MGRIPMn1_NTn1_NTA4_NTB4_NTC0_NTD4_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS16_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR2_PLR0_PKA1_SGROBn1_SIA3_SS1_SPO0_SRVW0_SSO0_SVW1_SK3_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSM1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO1_USI0_VSn1_VWA1_VWB2_WSGRA0_WSGRB0_WS64_WG16_16_1_WGMXCC1
   SolutionNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT16x128x32_MI16x16x1_SN_LDSB1_AFC0_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR0_CLS0_CADS0_DTLA0_DTLB0_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLBn1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA1_GRVWB1_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI0_LBSPPA256_LBSPPB2048_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA16_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV1_MIWT1_2_MXLIA_MXSFA_MO40_MGRIPMn1_NTn1_NTA4_NTB4_NTC0_NTD4_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS16_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR2_PLR0_PKA1_SGROBn1_SIA3_SS1_SU0_SUM0_SUS0_SPO0_SRVW0_SSO0_SVW1_SK3_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSM1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO1_USI0_VSn1_VWA1_VWB2_WSGRA0_WSGRB0_WS64_WG16_16_1_WGM32_WGMXCC1_WGMXCCGn1
   1LDSBuffer: 1
@@ -11226,8 +11070,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 16
   LSCB: 128
@@ -11373,7 +11217,7 @@ Solutions:
   reorderGRInstForDTVB: false
   tailLoopOptA: true
   tailLoopOptB: true
-- SolutionIndex: 65
+- SolutionIndex: 64
   KernelNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT48x128x32_MI16x16x1_SN_LDSB1_AFC0_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR0_CLS0_CADS0_DTLA0_DTLB0_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLBn1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA1_GRVWB1_GSU0_GSUAMB_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI0_LBSPPA768_LBSPPB2048_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA16_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV1_MIWT3_2_MXLIA_MXSFA_MO40_MGRIPMn1_NTn1_NTA0_NTB4_NTC0_NTD4_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS0_NLCA3_NLCB1_ONLL1_PAP0_PGL0_PGR2_PLR0_PKA1_SGROBn1_SIA3_SS1_SPO0_SRVW0_SSO4_SVW1_SK3_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSM1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA1_VWB2_WSGRA0_WSGRB0_WS64_WG16_16_1_WGMXCC1
   SolutionNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT48x128x32_MI16x16x1_SN_LDSB1_AFC0_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR0_CLS0_CADS0_DTLA0_DTLB0_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLBn1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA1_GRVWB1_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI0_LBSPPA768_LBSPPB2048_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA16_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV1_MIWT3_2_MXLIA_MXSFA_MO40_MGRIPMn1_NTn1_NTA0_NTB4_NTC0_NTD4_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS0_NLCA3_NLCB1_ONLL1_PAP0_PGL0_PGR2_PLR0_PKA1_SGROBn1_SIA3_SS1_SU8_SUM1_SUS128_SPO0_SRVW0_SSO4_SVW1_SK3_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSM1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA1_VWB2_WSGRA0_WSGRB0_WS64_WG16_16_1_WGM16_WGMXCC1_WGMXCCGn1
   1LDSBuffer: 1
@@ -11402,8 +11246,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 16
   LSCB: 128
@@ -11550,7 +11394,7 @@ Solutions:
   reorderGRInstForDTVB: false
   tailLoopOptA: true
   tailLoopOptB: true
-- SolutionIndex: 66
+- SolutionIndex: 65
   KernelNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT48x160x32_MI16x16x1_SN_LDSB0_AFC0_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR1_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLBn1_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI0_LBSPPA1024_LBSPPB1024_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV1_MIWT3_5_MXLIA_MXSFA_MO40_MGRIPMn1_NTn1_NTA4_NTB4_NTC0_NTD4_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS0_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR1_PLR0_PKA1_SGROBn1_SIA3_SS1_SPO1_SRVW0_SSO4_SVW1_SK3_SKFTR0_SKFDPO0_SKXCCM2_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSM1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG16_8_1_WGMXCC1
   SolutionNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT48x160x32_MI16x16x1_SN_LDSB0_AFC0_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR1_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLBn1_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI0_LBSPPA1024_LBSPPB1024_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV1_MIWT3_5_MXLIA_MXSFA_MO40_MGRIPMn1_NTn1_NTA4_NTB4_NTC0_NTD4_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS0_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR1_PLR0_PKA1_SGROBn1_SIA3_SS1_SU16_SUM1_SUS256_SPO1_SRVW0_SSO4_SVW1_SK3_SKFTR0_SKFDPO0_SKXCCM2_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSM1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG16_8_1_WGM1_WGMXCC1_WGMXCCGn1
   ActivationFuncCall: false
@@ -11577,8 +11421,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 48
   LSCB: 160
@@ -11726,7 +11570,7 @@ Solutions:
   reorderGRInstForDTVB: false
   tailLoopOptA: false
   tailLoopOptB: false
-- SolutionIndex: 67
+- SolutionIndex: 66
   KernelNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT32x64x64_MI16x16x1_SN_LDSB0_AFC0_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR1_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLBn1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI1_LBSPPA1024_LBSPPB1024_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV1_MIWT2_2_MXLIA_MXSFA_MO40_MGRIPMn1_NTn1_NTA4_NTB0_NTC4_NTD4_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS14_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR2_PLR0_PKA1_SGROBn1_SIA3_SS1_SPO1_SRVW0_SSO0_SVW2_SK3_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSM1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA2_VWB2_WSGRA0_WSGRB0_WS64_WG16_8_2_WGMXCC1
   SolutionNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT32x64x64_MI16x16x1_SN_LDSB0_AFC0_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR1_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLBn1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI1_LBSPPA1024_LBSPPB1024_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV1_MIWT2_2_MXLIA_MXSFA_MO40_MGRIPMn1_NTn1_NTA4_NTB0_NTC4_NTD4_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS14_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR2_PLR0_PKA1_SGROBn1_SIA3_SS1_SU0_SUM0_SUS0_SPO1_SRVW0_SSO0_SVW2_SK3_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSM1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA2_VWB2_WSGRA0_WSGRB0_WS64_WG16_8_2_WGM48_WGMXCC1_WGMXCCGn1
   ActivationFuncCall: false
@@ -11754,8 +11598,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 32
@@ -11905,7 +11749,7 @@ Solutions:
   reorderGRInstForDTVB: false
   tailLoopOptA: false
   tailLoopOptB: false
-- SolutionIndex: 68
+- SolutionIndex: 67
   KernelNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT16x128x32_MI16x16x1_SN_LDSB1_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR0_CLS0_CADS0_DTLA0_DTLB0_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLBn1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA1_GRVWB4_GSU0_GSUAMB_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI0_LBSPPA256_LBSPPB2048_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA16_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV0_MIWT1_4_MXLIA_MXSFA_MO40_MGRIPMn1_NTn1_NTA0_NTB4_NTC0_NTD4_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS0_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR2_PLR0_PKA1_SGROBn1_SIA3_SS0_SPO1_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSM1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO1_USI0_VSn1_VWA1_VWB4_WSGRA0_WSGRB0_WS64_WG16_8_1_WGMXCC1
   SolutionNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT16x128x32_MI16x16x1_SN_LDSB1_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR0_CLS0_CADS0_DTLA0_DTLB0_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLBn1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA1_GRVWB4_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI0_LBSPPA256_LBSPPB2048_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA16_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV0_MIWT1_4_MXLIA_MXSFA_MO40_MGRIPMn1_NTn1_NTA0_NTB4_NTC0_NTD4_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS0_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR2_PLR0_PKA1_SGROBn1_SIA3_SS0_SU0_SUM0_SUS0_SPO1_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSM1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO1_USI0_VSn1_VWA1_VWB4_WSGRA0_WSGRB0_WS64_WG16_8_1_WGM16_WGMXCC1_WGMXCCGn1
   1LDSBuffer: 1
@@ -11935,8 +11779,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 16
   LSCB: 128
@@ -12080,7 +11924,7 @@ Solutions:
   reorderGRInstForDTVB: false
   tailLoopOptA: true
   tailLoopOptB: true
-- SolutionIndex: 69
+- SolutionIndex: 68
   KernelNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT32x32x32_MI16x16x1_SN_LDSB1_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR0_CLS0_CADS0_DTLA0_DTLB0_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLBn1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI1_LBSPPA512_LBSPPB512_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV1_MIWT2_2_MXLIA_MXSFA_MO40_MGRIPMn1_NTn1_NTA0_NTB4_NTC4_NTD4_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS0_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR2_PLR1_PKA1_SGROBn1_SIA3_SS1_SPO1_SRVW0_SSO0_SVW2_SK3_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSM1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA2_VWB2_WSGRA0_WSGRB0_WS64_WG16_4_1_WGMXCC1
   SolutionNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT32x32x32_MI16x16x1_SN_LDSB1_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR0_CLS0_CADS0_DTLA0_DTLB0_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLBn1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI1_LBSPPA512_LBSPPB512_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV1_MIWT2_2_MXLIA_MXSFA_MO40_MGRIPMn1_NTn1_NTA0_NTB4_NTC4_NTD4_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS0_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR2_PLR1_PKA1_SGROBn1_SIA3_SS1_SU0_SUM0_SUS0_SPO1_SRVW0_SSO0_SVW2_SK3_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSM1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA2_VWB2_WSGRA0_WSGRB0_WS64_WG16_4_1_WGM48_WGMXCC1_WGMXCCGn1
   1LDSBuffer: 1
@@ -12110,8 +11954,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 32
@@ -12259,7 +12103,7 @@ Solutions:
   reorderGRInstForDTVB: false
   tailLoopOptA: true
   tailLoopOptB: true
-- SolutionIndex: 70
+- SolutionIndex: 69
   KernelNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT256x64x32_MI32x32x1_SN_LDSB1_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR0_CLS0_CADS0_DTLA0_DTLB0_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLBn1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB1_GSU0_GSUAMB_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI1_LBSPPA512_LBSPPB128_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA4_LPB4_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV0_MIWT4_1_MXLIA_MXSFA_MO40_MGRIPMn1_NTn1_NTA0_NTB4_NTC4_NTD4_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS12_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR2_PLR1_PKA1_SGROBn1_SIA3_SS1_SPO1_SRVW0_SSO4_SVW4_SK3_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS2_TLDSM1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO1_USI0_VSn1_VWA4_VWB1_WSGRA0_WSGRB0_WS64_WG64_4_1_WGMXCC1
   SolutionNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT256x64x32_MI32x32x1_SN_LDSB1_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR0_CLS0_CADS0_DTLA0_DTLB0_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLBn1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB1_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI1_LBSPPA512_LBSPPB128_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA4_LPB4_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV0_MIWT4_1_MXLIA_MXSFA_MO40_MGRIPMn1_NTn1_NTA0_NTB4_NTC4_NTD4_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS12_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR2_PLR1_PKA1_SGROBn1_SIA3_SS1_SU0_SUM0_SUS0_SPO1_SRVW0_SSO4_SVW4_SK3_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS2_TLDSM1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO1_USI0_VSn1_VWA4_VWB1_WSGRA0_WSGRB0_WS64_WG64_4_1_WGM6_WGMXCC1_WGMXCCGn1
   1LDSBuffer: 1
@@ -12289,8 +12133,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 256
@@ -12439,7 +12283,7 @@ Solutions:
   reorderGRInstForDTVB: false
   tailLoopOptA: true
   tailLoopOptB: true
-- SolutionIndex: 71
+- SolutionIndex: 70
   KernelNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT32x128x16_MI32x32x1_SN_LDSB0_AFC0_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR1_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLBn1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA1_GRVWB4_GSU0_GSUAMB_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV0_MIWT1_2_MXLIA_MXSFA_MO40_MGRIPMn1_NTn1_NTA0_NTB4_NTC4_NTD4_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS16_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR2_PLR0_PKA1_SGROBn1_SIA3_SS1_SPO0_SRVW0_SSO0_SVW1_SK3_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSM1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA1_VWB2_WSGRA0_WSGRB0_WS64_WG32_4_1_WGMXCC1
   SolutionNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT32x128x16_MI32x32x1_SN_LDSB0_AFC0_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR1_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLBn1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA1_GRVWB4_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV0_MIWT1_2_MXLIA_MXSFA_MO40_MGRIPMn1_NTn1_NTA0_NTB4_NTC4_NTD4_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS16_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR2_PLR0_PKA1_SGROBn1_SIA3_SS1_SU0_SUM0_SUS0_SPO0_SRVW0_SSO0_SVW1_SK3_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSM1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA1_VWB2_WSGRA0_WSGRB0_WS64_WG32_4_1_WGM6_WGMXCC1_WGMXCCG256
   ActivationFuncCall: false
@@ -12465,8 +12309,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
-    SupportUserGSU: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
+    UseUniversalArgs: true}
   Kernel: true
   LSCA: 32
   LSCB: 128
@@ -12604,7 +12448,7 @@ Solutions:
   reorderGRInstForDTVB: false
   tailLoopOptA: false
   tailLoopOptB: false
-- SolutionIndex: 72
+- SolutionIndex: 71
   KernelNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT128x256x32_MI32x32x1_SN_LDSB0_AFC0_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR0_CLS0_CADS0_DTLA0_DTLB0_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLBn1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB2_GSU0_GSUAMB_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI1_LBSPPA512_LBSPPB256_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA4_LPB4_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV0_MIWT4_2_MXLIA_MXSFA_MO40_MGRIPMn1_NTn1_NTA4_NTB0_NTC1_NTD2_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS16_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR2_PLR1_PKA1_SGROBn1_SIA3_SS1_SPO0_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKFDPO0_SKXCCM4_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS2_TLDSM1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO1_USI0_VSn1_VWA4_VWB2_WSGRA0_WSGRB0_WS64_WG32_8_1_WGMXCC1
   SolutionNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT128x256x32_MI32x32x1_SN_LDSB0_AFC0_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR0_CLS0_CADS0_DTLA0_DTLB0_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLBn1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB2_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI1_LBSPPA512_LBSPPB256_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA4_LPB4_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV0_MIWT4_2_MXLIA_MXSFA_MO40_MGRIPMn1_NTn1_NTA4_NTB0_NTC1_NTD2_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS16_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR2_PLR1_PKA1_SGROBn1_SIA3_SS1_SU8_SUM1_SUS128_SPO0_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKFDPO0_SKXCCM4_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS2_TLDSM1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO1_USI0_VSn1_VWA4_VWB2_WSGRA0_WSGRB0_WS64_WG32_8_1_WGM1_WGMXCC1_WGMXCCGn1
   ActivationFuncCall: false
@@ -12631,8 +12475,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
-    SupportUserGSU: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
+    UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 128
@@ -12770,7 +12614,7 @@ Solutions:
   reorderGRInstForDTVB: false
   tailLoopOptA: false
   tailLoopOptB: false
-- SolutionIndex: 73
+- SolutionIndex: 72
   KernelNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT32x16x64_MI16x16x1_SN_LDSB0_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR0_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLL0_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI1_LBSPPA0_LBSPPB0_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV0_MIWT1_1_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA4_NTB4_NTC4_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS8_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR3_PLR1_PKA1_SGROB0_SIA3_SS0_SPO1_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN1_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO1_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG32_4_1_WGMXCC1
   SolutionNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT32x16x64_MI16x16x1_SN_LDSB0_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR0_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLL0_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI1_LBSPPA0_LBSPPB0_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV0_MIWT1_1_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA4_NTB4_NTC4_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS8_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR3_PLR1_PKA1_SGROB0_SIA3_SS0_SU0_SUM0_SUS0_SPO1_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN1_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO1_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG32_4_1_WGM6_WGMXCC1_WGMXCCGn1
   ActivationFuncCall: false
@@ -12802,8 +12646,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 32
@@ -12954,7 +12798,7 @@ Solutions:
   reorderGRInstForDTVB: false
   tailLoopOptA: true
   tailLoopOptB: true
-- SolutionIndex: 74
+- SolutionIndex: 73
   KernelNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT32x16x32_MI16x16x1_SN_LDSB0_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR0_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB1_GSU0_GSUAMB_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI1_LBSPPA0_LBSPPB0_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV1_MIWT1_1_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA4_NTB4_NTC0_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS16_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR4_PLR1_PKA1_SGROB0_SIA3_SS0_SPO0_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKFDPO0_SKXCCM8_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN1_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO1_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG32_4_1_WGMXCC1
   SolutionNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT32x16x32_MI16x16x1_SN_LDSB0_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR0_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB1_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI1_LBSPPA0_LBSPPB0_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV1_MIWT1_1_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA4_NTB4_NTC0_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS16_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR4_PLR1_PKA1_SGROB0_SIA3_SS0_SU0_SUM0_SUS0_SPO0_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKFDPO0_SKXCCM8_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN1_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO1_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG32_4_1_WGM0_WGMXCC1_WGMXCCGn1
   ActivationFuncCall: false
@@ -12985,8 +12829,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 32
@@ -13138,7 +12982,7 @@ Solutions:
   reorderGRInstForDTVB: false
   tailLoopOptA: true
   tailLoopOptB: true
-- SolutionIndex: 75
+- SolutionIndex: 74
   KernelNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT32x16x32_MI16x16x1_SN_LDSB0_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR0_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB1_GSU0_GSUAMB_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI1_LBSPPA0_LBSPPB0_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV1_MIWT1_1_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA4_NTB4_NTC0_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS14_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR4_PLR1_PKA1_SGROB0_SIA3_SS0_SPO1_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN1_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO1_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG32_4_1_WGMXCC1
   SolutionNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT32x16x32_MI16x16x1_SN_LDSB0_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR0_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB1_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI1_LBSPPA0_LBSPPB0_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV1_MIWT1_1_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA4_NTB4_NTC0_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS14_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR4_PLR1_PKA1_SGROB0_SIA3_SS0_SU0_SUM0_SUS0_SPO1_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN1_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO1_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG32_4_1_WGM2_WGMXCC1_WGMXCCGn1
   ActivationFuncCall: false
@@ -13169,8 +13013,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 32
@@ -13321,7 +13165,7 @@ Solutions:
   reorderGRInstForDTVB: false
   tailLoopOptA: true
   tailLoopOptB: true
-- SolutionIndex: 76
+- SolutionIndex: 75
   KernelNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT16x16x128_MI16x16x1_SN_LDSB0_AFC0_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR0_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA1_GRVWB4_GSU0_GSUAMB_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI1_LBSPPA0_LBSPPB0_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV0_MIWT1_1_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA4_NTB4_NTC0_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS10_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR3_PLR1_PKA1_SGROB0_SIA3_SS1_SPO1_SRVW0_SSO0_SVW1_SK3_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO1_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG16_4_4_WGMXCC1
   SolutionNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT16x16x128_MI16x16x1_SN_LDSB0_AFC0_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR0_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA1_GRVWB4_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI1_LBSPPA0_LBSPPB0_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV0_MIWT1_1_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA4_NTB4_NTC0_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS10_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR3_PLR1_PKA1_SGROB0_SIA3_SS1_SU8_SUM0_SUS512_SPO1_SRVW0_SSO0_SVW1_SK3_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO1_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG16_4_4_WGM0_WGMXCC1_WGMXCCGn1
   ActivationFuncCall: false
@@ -13351,8 +13195,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 16
@@ -13502,7 +13346,7 @@ Solutions:
   reorderGRInstForDTVB: false
   tailLoopOptA: true
   tailLoopOptB: true
-- SolutionIndex: 77
+- SolutionIndex: 76
   KernelNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT16x32x32_MI16x16x1_SN_LDSB0_AFC0_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR0_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI1_LBSPPA0_LBSPPB0_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV0_MIWT1_1_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA0_NTB4_NTC0_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS0_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR4_PLR1_PKA1_SGROB0_SIA3_SS1_SPO1_SRVW0_SSO1_SVW1_SK3_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN1_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO1_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG16_8_1_WGMXCC1
   SolutionNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT16x32x32_MI16x16x1_SN_LDSB0_AFC0_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR0_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI1_LBSPPA0_LBSPPB0_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV0_MIWT1_1_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA0_NTB4_NTC0_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS0_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR4_PLR1_PKA1_SGROB0_SIA3_SS1_SU0_SUM0_SUS0_SPO1_SRVW0_SSO1_SVW1_SK3_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN1_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO1_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG16_8_1_WGM16_WGMXCC1_WGMXCCGn1
   ActivationFuncCall: false
@@ -13532,8 +13376,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 16
@@ -13683,7 +13527,7 @@ Solutions:
   reorderGRInstForDTVB: false
   tailLoopOptA: true
   tailLoopOptB: true
-- SolutionIndex: 78
+- SolutionIndex: 77
   KernelNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT32x32x64_MI32x32x1_SN_LDSB0_AFC0_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR0_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI1_LBSPPA0_LBSPPB0_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV1_MIWT1_1_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA0_NTB4_NTC4_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS16_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR3_PLR1_PKA1_SGROB0_SIA3_SS1_SPO1_SRVW0_SSO0_SVW1_SK3_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO1_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG32_2_2_WGMXCC1
   SolutionNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT32x32x64_MI32x32x1_SN_LDSB0_AFC0_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR0_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI1_LBSPPA0_LBSPPB0_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV1_MIWT1_1_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA0_NTB4_NTC4_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS16_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR3_PLR1_PKA1_SGROB0_SIA3_SS1_SU8_SUM0_SUS256_SPO1_SRVW0_SSO0_SVW1_SK3_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO1_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG32_2_2_WGM4_WGMXCC1_WGMXCCGn1
   ActivationFuncCall: false
@@ -13713,8 +13557,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 32
@@ -13864,7 +13708,7 @@ Solutions:
   reorderGRInstForDTVB: false
   tailLoopOptA: true
   tailLoopOptB: true
-- SolutionIndex: 79
+- SolutionIndex: 78
   KernelNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT32x32x32_MI32x32x1_SN_LDSB0_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR0_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLL0_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI1_LBSPPA0_LBSPPB0_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV1_MIWT1_1_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA4_NTB4_NTC4_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS16_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR4_PLR1_PKA1_SGROB0_SIA3_SS1_SPO1_SRVW0_SSO1_SVW1_SK3_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO1_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG32_2_2_WGMXCC1
   SolutionNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT32x32x32_MI32x32x1_SN_LDSB0_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR0_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLL0_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI1_LBSPPA0_LBSPPB0_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV1_MIWT1_1_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA4_NTB4_NTC4_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS16_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR4_PLR1_PKA1_SGROB0_SIA3_SS1_SU16_SUM0_SUS512_SPO1_SRVW0_SSO1_SVW1_SK3_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO1_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG32_2_2_WGM0_WGMXCC1_WGMXCCGn1
   ActivationFuncCall: false
@@ -13896,8 +13740,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 32
@@ -14050,7 +13894,7 @@ Solutions:
   reorderGRInstForDTVB: false
   tailLoopOptA: true
   tailLoopOptB: true
-- SolutionIndex: 80
+- SolutionIndex: 79
   KernelNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT32x32x64_MI32x32x1_SN_LDSB0_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR0_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI1_LBSPPA0_LBSPPB0_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV0_MIWT1_1_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA0_NTB4_NTC0_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS2_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR4_PLR1_PKA1_SGROB0_SIA3_SS1_SPO1_SRVW0_SSO0_SVW1_SK3_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO1_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG32_2_4_WGMXCC1
   SolutionNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT32x32x64_MI32x32x1_SN_LDSB0_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR0_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI1_LBSPPA0_LBSPPB0_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV0_MIWT1_1_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA0_NTB4_NTC0_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS2_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR4_PLR1_PKA1_SGROB0_SIA3_SS1_SU0_SUM0_SUS0_SPO1_SRVW0_SSO0_SVW1_SK3_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO1_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG32_2_4_WGM48_WGMXCC1_WGMXCCGn1
   ActivationFuncCall: false
@@ -14081,8 +13925,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 32
@@ -14231,7 +14075,7 @@ Solutions:
   reorderGRInstForDTVB: false
   tailLoopOptA: true
   tailLoopOptB: true
-- SolutionIndex: 81
+- SolutionIndex: 80
   KernelNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT32x32x32_MI32x32x1_SN_LDSB0_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR0_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB1_GSU0_GSUAMB_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI1_LBSPPA0_LBSPPB0_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV0_MIWT1_1_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA0_NTB4_NTC0_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS8_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR4_PLR1_PKA1_SGROB0_SIA3_SS1_SPO1_SRVW0_SSO0_SVW1_SK3_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG32_2_2_WGMXCC1
   SolutionNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT32x32x32_MI32x32x1_SN_LDSB0_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR0_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB1_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI1_LBSPPA0_LBSPPB0_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV0_MIWT1_1_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA0_NTB4_NTC0_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS8_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR4_PLR1_PKA1_SGROB0_SIA3_SS1_SU16_SUM0_SUS256_SPO1_SRVW0_SSO0_SVW1_SK3_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG32_2_2_WGM6_WGMXCC1_WGMXCCGn1
   ActivationFuncCall: false
@@ -14262,8 +14106,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 32
@@ -14410,7 +14254,7 @@ Solutions:
   reorderGRInstForDTVB: false
   tailLoopOptA: true
   tailLoopOptB: true
-- SolutionIndex: 82
+- SolutionIndex: 81
   KernelNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT64x32x64_MI32x32x1_SN_LDSB0_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR0_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI1_LBSPPA0_LBSPPB0_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV0_MIWT2_1_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA0_NTB4_NTC0_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS2_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR3_PLR1_PKA1_SGROB0_SIA3_SS1_SPO1_SRVW0_SSO0_SVW2_SK3_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA2_VWB1_WSGRA0_WSGRB0_WS64_WG32_2_4_WGMXCC1
   SolutionNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT64x32x64_MI32x32x1_SN_LDSB0_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR0_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI1_LBSPPA0_LBSPPB0_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV0_MIWT2_1_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA0_NTB4_NTC0_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS2_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR3_PLR1_PKA1_SGROB0_SIA3_SS1_SU8_SUM0_SUS256_SPO1_SRVW0_SSO0_SVW2_SK3_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA2_VWB1_WSGRA0_WSGRB0_WS64_WG32_2_4_WGM2_WGMXCC1_WGMXCCGn1
   ActivationFuncCall: false
@@ -14441,8 +14285,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 64
@@ -14589,7 +14433,7 @@ Solutions:
   reorderGRInstForDTVB: false
   tailLoopOptA: true
   tailLoopOptB: true
-- SolutionIndex: 83
+- SolutionIndex: 82
   KernelNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT32x32x32_MI32x32x1_SN_LDSB0_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR0_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLL0_FDSI0_GRPM1_GRVWA1_GRVWB4_GSU0_GSUAMB_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI1_LBSPPA0_LBSPPB0_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV1_MIWT1_1_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA4_NTB4_NTC4_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS2_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR4_PLR1_PKA1_SGROB0_SIA3_SS1_SPO1_SRVW0_SSO0_SVW1_SK3_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO1_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG32_2_2_WGMXCC1
   SolutionNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT32x32x32_MI32x32x1_SN_LDSB0_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR0_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLL0_FDSI0_GRPM1_GRVWA1_GRVWB4_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI1_LBSPPA0_LBSPPB0_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV1_MIWT1_1_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA4_NTB4_NTC4_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS2_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR4_PLR1_PKA1_SGROB0_SIA3_SS1_SU8_SUM0_SUS128_SPO1_SRVW0_SSO0_SVW1_SK3_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO1_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG32_2_2_WGM6_WGMXCC1_WGMXCCGn1
   ActivationFuncCall: false
@@ -14621,8 +14465,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 32
@@ -14774,7 +14618,7 @@ Solutions:
   reorderGRInstForDTVB: false
   tailLoopOptA: true
   tailLoopOptB: true
-- SolutionIndex: 84
+- SolutionIndex: 83
   KernelNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT64x32x64_MI32x32x1_SN_LDSB0_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR0_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLL0_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI1_LBSPPA0_LBSPPB0_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV1_MIWT2_1_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA0_NTB4_NTC0_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS16_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR3_PLR1_PKA1_SGROB0_SIA3_SS1_SPO0_SRVW0_SSO0_SVW2_SK3_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO1_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA2_VWB1_WSGRA0_WSGRB0_WS64_WG32_2_4_WGMXCC1
   SolutionNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT64x32x64_MI32x32x1_SN_LDSB0_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR0_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLL0_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI1_LBSPPA0_LBSPPB0_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV1_MIWT2_1_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA0_NTB4_NTC0_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS16_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR3_PLR1_PKA1_SGROB0_SIA3_SS1_SU8_SUM0_SUS256_SPO0_SRVW0_SSO0_SVW2_SK3_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO1_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA2_VWB1_WSGRA0_WSGRB0_WS64_WG32_2_4_WGM48_WGMXCC1_WGMXCCGn1
   ActivationFuncCall: false
@@ -14806,8 +14650,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 64
@@ -14955,7 +14799,7 @@ Solutions:
   reorderGRInstForDTVB: false
   tailLoopOptA: true
   tailLoopOptB: true
-- SolutionIndex: 85
+- SolutionIndex: 84
   KernelNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT32x32x32_MI32x32x1_SN_LDSB0_AFC0_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR0_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI1_LBSPPA0_LBSPPB0_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV1_MIWT1_1_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA4_NTB4_NTC0_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS0_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR4_PLR1_PKA1_SGROB0_SIA3_SS1_SPO1_SRVW0_SSO0_SVW1_SK3_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO1_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG32_2_2_WGMXCC1
   SolutionNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT32x32x32_MI32x32x1_SN_LDSB0_AFC0_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR0_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI1_LBSPPA0_LBSPPB0_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV1_MIWT1_1_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA4_NTB4_NTC0_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS0_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR4_PLR1_PKA1_SGROB0_SIA3_SS1_SU0_SUM0_SUS0_SPO1_SRVW0_SSO0_SVW1_SK3_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO1_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG32_2_2_WGM2_WGMXCC1_WGMXCCGn1
   ActivationFuncCall: false
@@ -14985,8 +14829,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 32
@@ -15136,7 +14980,7 @@ Solutions:
   reorderGRInstForDTVB: false
   tailLoopOptA: true
   tailLoopOptB: true
-- SolutionIndex: 86
+- SolutionIndex: 85
   KernelNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT128x128x32_MI16x16x1_SN_LDSB0_AFC0_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR1_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB1_GSU0_GSUAMB_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV1_MIWT4_4_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA0_NTB4_NTC4_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS2_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR2_PLR1_PKA1_SGROB1_SIA3_SS1_SPO0_SRVW0_SSO1_SVW2_SK3_SKFTR0_SKFDPO0_SKXCCM2_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA2_VWB2_WSGRA0_WSGRB0_WS64_WG32_8_1_WGMXCC1
   SolutionNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT128x128x32_MI16x16x1_SN_LDSB0_AFC0_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR1_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB1_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV1_MIWT4_4_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA0_NTB4_NTC4_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS2_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR2_PLR1_PKA1_SGROB1_SIA3_SS1_SU16_SUM0_SUS512_SPO0_SRVW0_SSO1_SVW2_SK3_SKFTR0_SKFDPO0_SKXCCM2_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA2_VWB2_WSGRA0_WSGRB0_WS64_WG32_8_1_WGM48_WGMXCC1_WGMXCCGn1
   ActivationFuncCall: false
@@ -15165,8 +15009,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 128
   LSCB: 128
@@ -15316,7 +15160,7 @@ Solutions:
   reorderGRInstForDTVB: false
   tailLoopOptA: true
   tailLoopOptB: true
-- SolutionIndex: 87
+- SolutionIndex: 86
   KernelNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT64x32x128_MI16x16x1_SN_LDSB0_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR0_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI1_LBSPPA0_LBSPPB0_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV0_MIWT2_1_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA0_NTB4_NTC0_NTD4_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS14_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR2_PLR1_PKA1_SGROB1_SIA3_SS1_SPO0_SRVW0_SSO1_SVW2_SK3_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN1_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA2_VWB1_WSGRA0_WSGRB0_WS64_WG32_8_1_WGMXCC1
   SolutionNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT64x32x128_MI16x16x1_SN_LDSB0_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR0_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI1_LBSPPA0_LBSPPB0_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV0_MIWT2_1_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA0_NTB4_NTC0_NTD4_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS14_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR2_PLR1_PKA1_SGROB1_SIA3_SS1_SU0_SUM0_SUS0_SPO0_SRVW0_SSO1_SVW2_SK3_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN1_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA2_VWB1_WSGRA0_WSGRB0_WS64_WG32_8_1_WGM32_WGMXCC1_WGMXCCGn1
   ActivationFuncCall: false
@@ -15347,8 +15191,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 64
@@ -15498,7 +15342,7 @@ Solutions:
   reorderGRInstForDTVB: false
   tailLoopOptA: true
   tailLoopOptB: true
-- SolutionIndex: 88
+- SolutionIndex: 87
   KernelNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT128x128x64_MI16x16x1_SN_LDSB0_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR0_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI1_LBSPPA0_LBSPPB0_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV0_MIWT4_4_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA0_NTB4_NTC4_NTD4_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS14_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR2_PLR1_PKA1_SGROB1_SIA3_SS1_SPO0_SRVW0_SSO4_SVW4_SK3_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN1_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA4_VWB4_WSGRA0_WSGRB0_WS64_WG32_8_1_WGMXCC1
   SolutionNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT128x128x64_MI16x16x1_SN_LDSB0_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR0_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI1_LBSPPA0_LBSPPB0_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV0_MIWT4_4_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA0_NTB4_NTC4_NTD4_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS14_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR2_PLR1_PKA1_SGROB1_SIA3_SS1_SU0_SUM0_SUS0_SPO0_SRVW0_SSO4_SVW4_SK3_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN1_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA4_VWB4_WSGRA0_WSGRB0_WS64_WG32_8_1_WGM8_WGMXCC1_WGMXCCGn1
   ActivationFuncCall: false
@@ -15529,8 +15373,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 128
@@ -15680,7 +15524,7 @@ Solutions:
   reorderGRInstForDTVB: false
   tailLoopOptA: true
   tailLoopOptB: true
-- SolutionIndex: 89
+- SolutionIndex: 88
   KernelNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT128x128x32_MI32x32x1_SN_LDSB0_AFC0_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR1_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLL0_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV0_MIWT2_2_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA0_NTB4_NTC0_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS10_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR2_PLR1_PKA1_SGROB0_SIA3_SS1_SPO0_SRVW0_SSO1_SVW2_SK3_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN1_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA2_VWB2_WSGRA0_WSGRB0_WS64_WG64_4_1_WGMXCC1
   SolutionNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT128x128x32_MI32x32x1_SN_LDSB0_AFC0_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR1_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLL0_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV0_MIWT2_2_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA0_NTB4_NTC0_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS10_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR2_PLR1_PKA1_SGROB0_SIA3_SS1_SU0_SUM0_SUS0_SPO0_SRVW0_SSO1_SVW2_SK3_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN1_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA2_VWB2_WSGRA0_WSGRB0_WS64_WG64_4_1_WGM16_WGMXCC1_WGMXCCGn1
   ActivationFuncCall: false
@@ -15710,8 +15554,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 128
   LSCB: 128
@@ -15860,7 +15704,7 @@ Solutions:
   reorderGRInstForDTVB: false
   tailLoopOptA: true
   tailLoopOptB: true
-- SolutionIndex: 90
+- SolutionIndex: 89
   KernelNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT64x64x64_MI16x16x1_SN_LDSB0_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR0_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI1_LBSPPA0_LBSPPB0_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV0_MIWT2_2_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA0_NTB4_NTC0_NTD4_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS0_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR3_PLR1_PKA1_SGROB1_SIA3_SS1_SPO1_SRVW0_SSO0_SVW2_SK3_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN1_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO1_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA2_VWB2_WSGRA0_WSGRB0_WS64_WG32_8_1_WGMXCC1
   SolutionNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT64x64x64_MI16x16x1_SN_LDSB0_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR0_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI1_LBSPPA0_LBSPPB0_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV0_MIWT2_2_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA0_NTB4_NTC0_NTD4_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS0_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR3_PLR1_PKA1_SGROB1_SIA3_SS1_SU0_SUM0_SUS0_SPO1_SRVW0_SSO0_SVW2_SK3_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN1_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO1_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA2_VWB2_WSGRA0_WSGRB0_WS64_WG32_8_1_WGM4_WGMXCC1_WGMXCCGn1
   ActivationFuncCall: false
@@ -15891,8 +15735,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 64
@@ -16043,7 +15887,7 @@ Solutions:
   reorderGRInstForDTVB: false
   tailLoopOptA: true
   tailLoopOptB: true
-- SolutionIndex: 91
+- SolutionIndex: 90
   KernelNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT128x96x32_MI16x16x1_SN_LDSB0_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR0_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV0_MIWT4_3_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA0_NTB4_NTC4_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS0_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR2_PLR0_PKA1_SGROB1_SIA3_SS1_SPO0_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKFDPO0_SKXCCM2_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN1_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA4_VWB1_WSGRA0_WSGRB0_WS64_WG32_8_1_WGMXCC1
   SolutionNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT128x96x32_MI16x16x1_SN_LDSB0_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR0_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV0_MIWT4_3_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA0_NTB4_NTC4_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS0_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR2_PLR0_PKA1_SGROB1_SIA3_SS1_SU0_SUM0_SUS0_SPO0_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKFDPO0_SKXCCM2_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN1_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA4_VWB1_WSGRA0_WSGRB0_WS64_WG32_8_1_WGM24_WGMXCC1_WGMXCCGn1
   ActivationFuncCall: false
@@ -16074,8 +15918,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 128
   LSCB: 96
@@ -16225,7 +16069,7 @@ Solutions:
   reorderGRInstForDTVB: false
   tailLoopOptA: true
   tailLoopOptB: true
-- SolutionIndex: 92
+- SolutionIndex: 91
   KernelNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT32x32x64_MI32x32x1_SN_LDSB0_AFC0_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR0_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLL0_FDSI0_GRPM1_GRVWA1_GRVWB4_GSU0_GSUAMB_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI1_LBSPPA0_LBSPPB0_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV1_MIWT1_1_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA4_NTB4_NTC4_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS2_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR3_PLR1_PKA1_SGROB0_SIA3_SS1_SPO1_SRVW0_SSO0_SVW1_SK3_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG32_2_4_WGMXCC1
   SolutionNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT32x32x64_MI32x32x1_SN_LDSB0_AFC0_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR0_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLL0_FDSI0_GRPM1_GRVWA1_GRVWB4_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI1_LBSPPA0_LBSPPB0_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV1_MIWT1_1_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA4_NTB4_NTC4_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS2_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR3_PLR1_PKA1_SGROB0_SIA3_SS1_SU16_SUM0_SUS256_SPO1_SRVW0_SSO0_SVW1_SK3_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG32_2_4_WGM4_WGMXCC1_WGMXCCGn1
   ActivationFuncCall: false
@@ -16256,8 +16100,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 32
@@ -16407,7 +16251,7 @@ Solutions:
   reorderGRInstForDTVB: false
   tailLoopOptA: true
   tailLoopOptB: true
-- SolutionIndex: 93
+- SolutionIndex: 92
   KernelNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT64x32x32_MI32x32x1_SN_LDSB0_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR0_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI1_LBSPPA0_LBSPPB0_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV0_MIWT1_1_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA4_NTB4_NTC0_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS0_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR4_PLR1_PKA1_SGROB0_SIA3_SS1_SPO1_SRVW0_SSO0_SVW1_SK3_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN1_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO1_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG64_2_1_WGMXCC1
   SolutionNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT64x32x32_MI32x32x1_SN_LDSB0_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR0_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI1_LBSPPA0_LBSPPB0_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV0_MIWT1_1_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA4_NTB4_NTC0_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS0_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR4_PLR1_PKA1_SGROB0_SIA3_SS1_SU0_SUM0_SUS0_SPO1_SRVW0_SSO0_SVW1_SK3_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN1_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO1_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG64_2_1_WGM2_WGMXCC1_WGMXCCGn1
   ActivationFuncCall: false
@@ -16438,8 +16282,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 64
@@ -16589,7 +16433,7 @@ Solutions:
   reorderGRInstForDTVB: false
   tailLoopOptA: true
   tailLoopOptB: true
-- SolutionIndex: 94
+- SolutionIndex: 93
   KernelNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT32x64x64_MI32x32x1_SN_LDSB0_AFC0_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR1_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLL0_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV0_MIWT1_1_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA4_NTB4_NTC0_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS10_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR3_PLR1_PKA1_SGROB0_SIA3_SS1_SPO1_SRVW0_SSO0_SVW1_SK3_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO1_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG32_4_2_WGMXCC1
   SolutionNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT32x64x64_MI32x32x1_SN_LDSB0_AFC0_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR1_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLL0_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV0_MIWT1_1_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA4_NTB4_NTC0_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS10_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR3_PLR1_PKA1_SGROB0_SIA3_SS1_SU8_SUM0_SUS256_SPO1_SRVW0_SSO0_SVW1_SK3_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO1_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG32_4_2_WGM48_WGMXCC1_WGMXCCGn1
   ActivationFuncCall: false
@@ -16619,8 +16463,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 32
   LSCB: 64
@@ -16768,7 +16612,7 @@ Solutions:
   reorderGRInstForDTVB: false
   tailLoopOptA: true
   tailLoopOptB: true
-- SolutionIndex: 95
+- SolutionIndex: 94
   KernelNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT64x32x64_MI32x32x1_SN_LDSB0_AFC0_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR0_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI1_LBSPPA0_LBSPPB0_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV1_MIWT2_1_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA4_NTB4_NTC0_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS4_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR3_PLR1_PKA1_SGROB0_SIA3_SS1_SPO1_SRVW0_SSO0_SVW2_SK3_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO1_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA2_VWB1_WSGRA0_WSGRB0_WS64_WG32_2_4_WGMXCC1
   SolutionNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT64x32x64_MI32x32x1_SN_LDSB0_AFC0_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR0_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI1_LBSPPA0_LBSPPB0_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV1_MIWT2_1_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA4_NTB4_NTC0_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS4_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR3_PLR1_PKA1_SGROB0_SIA3_SS1_SU0_SUM0_SUS0_SPO1_SRVW0_SSO0_SVW2_SK3_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO1_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA2_VWB1_WSGRA0_WSGRB0_WS64_WG32_2_4_WGM4_WGMXCC1_WGMXCCGn1
   ActivationFuncCall: false
@@ -16798,8 +16642,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 64
@@ -16950,7 +16794,7 @@ Solutions:
   reorderGRInstForDTVB: false
   tailLoopOptA: true
   tailLoopOptB: true
-- SolutionIndex: 96
+- SolutionIndex: 95
   KernelNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT128x128x32_MI32x32x1_SN_LDSB0_AFC0_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR1_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLL0_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV0_MIWT2_2_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA0_NTB4_NTC4_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS2_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR2_PLR1_PKA1_SGROB1_SIA3_SS1_SPO0_SRVW0_SSO0_SVW2_SK3_SKFTR0_SKFDPO0_SKXCCM4_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN1_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO1_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA2_VWB2_WSGRA0_WSGRB0_WS64_WG64_4_1_WGMXCC1
   SolutionNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT128x128x32_MI32x32x1_SN_LDSB0_AFC0_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR1_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLL0_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV0_MIWT2_2_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA0_NTB4_NTC4_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS2_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR2_PLR1_PKA1_SGROB1_SIA3_SS1_SU0_SUM0_SUS0_SPO0_SRVW0_SSO0_SVW2_SK3_SKFTR0_SKFDPO0_SKXCCM4_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN1_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO1_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA2_VWB2_WSGRA0_WSGRB0_WS64_WG64_4_1_WGM24_WGMXCC1_WGMXCCGn1
   ActivationFuncCall: false
@@ -16980,8 +16824,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 128
   LSCB: 128
@@ -17132,7 +16976,7 @@ Solutions:
   reorderGRInstForDTVB: false
   tailLoopOptA: true
   tailLoopOptB: true
-- SolutionIndex: 97
+- SolutionIndex: 96
   KernelNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT256x128x32_MI16x16x1_SN_LDSB0_AFC0_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR1_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLL0_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI1_LBSPPA0_LBSPPB0_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV0_MIWT4_8_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA0_NTB4_NTC4_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS12_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR2_PLR1_PKA1_SGROB1_SIA3_SS1_SPO0_SRVW0_SSO0_SVW2_SK3_SKFTR0_SKFDPO0_SKXCCM2_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP1_USFGRO0_USI0_VSn1_VWA2_VWB4_WSGRA0_WSGRB0_WS64_WG64_4_1_WGMXCC1
   SolutionNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT256x128x32_MI16x16x1_SN_LDSB0_AFC0_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR1_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLL0_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI1_LBSPPA0_LBSPPB0_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV0_MIWT4_8_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA0_NTB4_NTC4_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS12_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR2_PLR1_PKA1_SGROB1_SIA3_SS1_SU16_SUM0_SUS256_SPO0_SRVW0_SSO0_SVW2_SK3_SKFTR0_SKFDPO0_SKXCCM2_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP1_USFGRO0_USI0_VSn1_VWA2_VWB4_WSGRA0_WSGRB0_WS64_WG64_4_1_WGM6_WGMXCC1_WGMXCCGn1
   ActivationFuncCall: false
@@ -17162,8 +17006,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 256
@@ -17312,7 +17156,7 @@ Solutions:
   reorderGRInstForDTVB: false
   tailLoopOptA: true
   tailLoopOptB: true
-- SolutionIndex: 98
+- SolutionIndex: 97
   KernelNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT128x64x64_MI16x16x1_SN_LDSB0_AFC0_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR0_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI1_LBSPPA0_LBSPPB0_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV0_MIWT4_2_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA0_NTB4_NTC0_NTD4_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS16_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR2_PLR1_PKA1_SGROB1_SIA3_SS1_SPO1_SRVW0_SSO1_SVW4_SK3_SKFTR0_SKFDPO0_SKXCCM4_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN1_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA4_VWB2_WSGRA0_WSGRB0_WS64_WG32_8_1_WGMXCC1
   SolutionNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT128x64x64_MI16x16x1_SN_LDSB0_AFC0_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR0_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI1_LBSPPA0_LBSPPB0_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV0_MIWT4_2_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA0_NTB4_NTC0_NTD4_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS16_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR2_PLR1_PKA1_SGROB1_SIA3_SS1_SU0_SUM0_SUS0_SPO1_SRVW0_SSO1_SVW4_SK3_SKFTR0_SKFDPO0_SKXCCM4_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN1_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA4_VWB2_WSGRA0_WSGRB0_WS64_WG32_8_1_WGM2_WGMXCC1_WGMXCCGn1
   ActivationFuncCall: false
@@ -17342,8 +17186,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 128
@@ -17495,7 +17339,7 @@ Solutions:
   reorderGRInstForDTVB: false
   tailLoopOptA: true
   tailLoopOptB: true
-- SolutionIndex: 99
+- SolutionIndex: 98
   KernelNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT320x64x32_MI16x16x1_SN_LDSB0_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR0_CLS0_CADS0_DTLA0_DTLB0_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB2_GSU0_GSUAMB_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI0_LBSPPA5120_LBSPPB0_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA16_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV0_MIWT5_4_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA4_NTB0_NTC4_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS8_NLCA5_NLCB1_ONLL1_PAP0_PGL0_PGR2_PLR0_PKA1_SGROB0_SIA3_SS1_SPO0_SRVW0_SSO0_SVW1_SK3_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN1_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO1_USI0_VSn1_VWA1_VWB4_WSGRA2_WSGRB0_WS64_WG64_4_1_WGMXCC1
   SolutionNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT320x64x32_MI16x16x1_SN_LDSB0_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR0_CLS0_CADS0_DTLA0_DTLB0_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB2_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI0_LBSPPA5120_LBSPPB0_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA16_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV0_MIWT5_4_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA4_NTB0_NTC4_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS8_NLCA5_NLCB1_ONLL1_PAP0_PGL0_PGR2_PLR0_PKA1_SGROB0_SIA3_SS1_SU0_SUM0_SUS0_SPO0_SRVW0_SSO0_SVW1_SK3_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN1_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO1_USI0_VSn1_VWA1_VWB4_WSGRA2_WSGRB0_WS64_WG64_4_1_WGM0_WGMXCC1_WGMXCCGn1
   ActivationFuncCall: false
@@ -17525,8 +17369,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 64
   LSCB: 64
@@ -17678,7 +17522,7 @@ Solutions:
   reorderGRInstForDTVB: false
   tailLoopOptA: true
   tailLoopOptB: true
-- SolutionIndex: 100
+- SolutionIndex: 99
   KernelNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT64x32x128_MI32x32x1_SN_LDSB0_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR1_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV1_MIWT1_1_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA4_NTB0_NTC4_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS2_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR2_PLR1_PKA1_SGROB1_SIA3_SS1_SPO0_SRVW0_SSO0_SVW1_SK3_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO1_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG64_2_2_WGMXCC1
   SolutionNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT64x32x128_MI32x32x1_SN_LDSB0_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR1_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV1_MIWT1_1_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA4_NTB0_NTC4_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS2_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR2_PLR1_PKA1_SGROB1_SIA3_SS1_SU0_SUM0_SUS0_SPO0_SRVW0_SSO0_SVW1_SK3_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO1_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG64_2_2_WGM6_WGMXCC1_WGMXCCGn1
   ActivationFuncCall: false
@@ -17708,8 +17552,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 64
   LSCB: 32
@@ -17858,7 +17702,7 @@ Solutions:
   reorderGRInstForDTVB: false
   tailLoopOptA: true
   tailLoopOptB: true
-- SolutionIndex: 101
+- SolutionIndex: 100
   KernelNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT32x64x64_MI32x32x1_SN_LDSB0_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR0_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI1_LBSPPA0_LBSPPB0_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV1_MIWT1_2_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA4_NTB0_NTC0_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS16_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR3_PLR1_PKA1_SGROB0_SIA3_SS1_SPO0_SRVW0_SSO1_SVW1_SK3_SKFTR0_SKFDPO0_SKXCCM4_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO1_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA1_VWB2_WSGRA0_WSGRB0_WS64_WG32_2_4_WGMXCC1
   SolutionNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT32x64x64_MI32x32x1_SN_LDSB0_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR0_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI1_LBSPPA0_LBSPPB0_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV1_MIWT1_2_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA4_NTB0_NTC0_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS16_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR3_PLR1_PKA1_SGROB0_SIA3_SS1_SU8_SUM0_SUS256_SPO0_SRVW0_SSO1_SVW1_SK3_SKFTR0_SKFDPO0_SKXCCM4_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO1_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA1_VWB2_WSGRA0_WSGRB0_WS64_WG32_2_4_WGM8_WGMXCC1_WGMXCCGn1
   ActivationFuncCall: false
@@ -17889,8 +17733,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 32
@@ -18039,7 +17883,7 @@ Solutions:
   reorderGRInstForDTVB: false
   tailLoopOptA: true
   tailLoopOptB: true
-- SolutionIndex: 102
+- SolutionIndex: 101
   KernelNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT64x128x32_MI32x32x1_SN_LDSB0_AFC0_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR1_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLL0_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV1_MIWT2_1_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA0_NTB0_NTC4_NTD4_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS2_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR3_PLR1_PKA1_SGROB1_SIA3_SS1_SPO0_SRVW0_SSO0_SVW2_SK3_SKFTR0_SKFDPO0_SKXCCM4_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN1_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA2_VWB1_WSGRA0_WSGRB0_WS64_WG32_8_1_WGMXCC1
   SolutionNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT64x128x32_MI32x32x1_SN_LDSB0_AFC0_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR1_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLL0_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV1_MIWT2_1_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA0_NTB0_NTC4_NTD4_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS2_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR3_PLR1_PKA1_SGROB1_SIA3_SS1_SU0_SUM0_SUS0_SPO0_SRVW0_SSO0_SVW2_SK3_SKFTR0_SKFDPO0_SKXCCM4_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN1_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA2_VWB1_WSGRA0_WSGRB0_WS64_WG32_8_1_WGM4_WGMXCC1_WGMXCCGn1
   ActivationFuncCall: false
@@ -18069,8 +17913,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 64
   LSCB: 128
@@ -18220,7 +18064,7 @@ Solutions:
   reorderGRInstForDTVB: false
   tailLoopOptA: true
   tailLoopOptB: true
-- SolutionIndex: 103
+- SolutionIndex: 102
   KernelNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT64x128x64_MI16x16x1_SN_LDSB0_AFC0_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR1_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV0_MIWT4_2_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA0_NTB0_NTC4_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS4_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR2_PLR1_PKA1_SGROB1_SIA3_SS1_SPO0_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKFDPO0_SKXCCM8_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN1_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO1_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA4_VWB2_WSGRA0_WSGRB0_WS64_WG16_16_1_WGMXCC1
   SolutionNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT64x128x64_MI16x16x1_SN_LDSB0_AFC0_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR1_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV0_MIWT4_2_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA0_NTB0_NTC4_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS4_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR2_PLR1_PKA1_SGROB1_SIA3_SS1_SU0_SUM0_SUS0_SPO0_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKFDPO0_SKXCCM8_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN1_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO1_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA4_VWB2_WSGRA0_WSGRB0_WS64_WG16_16_1_WGM6_WGMXCC1_WGMXCCGn1
   ActivationFuncCall: false
@@ -18249,8 +18093,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 64
   LSCB: 128
@@ -18399,7 +18243,7 @@ Solutions:
   reorderGRInstForDTVB: false
   tailLoopOptA: true
   tailLoopOptB: true
-- SolutionIndex: 104
+- SolutionIndex: 103
   KernelNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT256x192x32_MI16x16x1_SN_LDSB0_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR1_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLL0_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI1_LBSPPA0_LBSPPB0_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV0_MIWT8_6_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA0_NTB4_NTC0_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS16_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR2_PLR1_PKA1_SGROB1_SIA3_SS1_SPO1_SRVW0_SSO1_SVW4_SK3_SKFTR0_SKFDPO0_SKXCCM2_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP1_USFGRO0_USI0_VSn1_VWA4_VWB1_WSGRA0_WSGRB0_WS64_WG32_8_1_WGMXCC1
   SolutionNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT256x192x32_MI16x16x1_SN_LDSB0_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR1_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLL0_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI1_LBSPPA0_LBSPPB0_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV0_MIWT8_6_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA0_NTB4_NTC0_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS16_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR2_PLR1_PKA1_SGROB1_SIA3_SS1_SU16_SUM0_SUS512_SPO1_SRVW0_SSO1_SVW4_SK3_SKFTR0_SKFDPO0_SKXCCM2_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP1_USFGRO0_USI0_VSn1_VWA4_VWB1_WSGRA0_WSGRB0_WS64_WG32_8_1_WGM24_WGMXCC1_WGMXCCGn1
   ActivationFuncCall: false
@@ -18430,8 +18274,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 256
@@ -18583,7 +18427,7 @@ Solutions:
   reorderGRInstForDTVB: false
   tailLoopOptA: true
   tailLoopOptB: true
-- SolutionIndex: 105
+- SolutionIndex: 104
   KernelNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT128x128x32_MI32x32x1_SN_LDSB0_AFC0_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR0_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLL0_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI1_LBSPPA0_LBSPPB0_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV1_MIWT2_2_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA0_NTB4_NTC0_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS4_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR2_PLR1_PKA1_SGROB1_SIA3_SS1_SPO1_SRVW0_SSO1_SVW2_SK3_SKFTR0_SKFDPO0_SKXCCM8_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN1_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO1_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA2_VWB2_WSGRA0_WSGRB0_WS64_WG64_4_1_WGMXCC1
   SolutionNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT128x128x32_MI32x32x1_SN_LDSB0_AFC0_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR0_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLL0_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI1_LBSPPA0_LBSPPB0_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV1_MIWT2_2_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA0_NTB4_NTC0_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS4_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR2_PLR1_PKA1_SGROB1_SIA3_SS1_SU0_SUM0_SUS0_SPO1_SRVW0_SSO1_SVW2_SK3_SKFTR0_SKFDPO0_SKXCCM8_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN1_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO1_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA2_VWB2_WSGRA0_WSGRB0_WS64_WG64_4_1_WGM8_WGMXCC1_WGMXCCGn1
   ActivationFuncCall: false
@@ -18614,8 +18458,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 128
@@ -18768,7 +18612,7 @@ Solutions:
   reorderGRInstForDTVB: false
   tailLoopOptA: true
   tailLoopOptB: true
-- SolutionIndex: 106
+- SolutionIndex: 105
   KernelNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT256x256x32_MI16x16x1_CMS_SN_LDSB0_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR1_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLL0_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV0_MIWT8_8_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA0_NTB4_NTC0_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS10_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR2_PLR1_PKA1_SGROB0_SIA3_SS1_SPO1_SRVW0_SSO4_SVW4_SK3_SKFTR0_SKFDPO0_SKXCCM8_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP1_USFGRO0_USI0_VSn1_VWA4_VWB4_WSGRA0_WSGRB0_WS64_WG32_8_1_WGMXCC1
   SolutionNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT256x256x32_MI16x16x1_CMS_SN_LDSB0_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR1_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLL0_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV0_MIWT8_8_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA0_NTB4_NTC0_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS10_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR2_PLR1_PKA1_SGROB0_SIA3_SS1_SU0_SUM0_SUS0_SPO1_SRVW0_SSO4_SVW4_SK3_SKFTR0_SKFDPO0_SKXCCM8_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP1_USFGRO0_USI0_VSn1_VWA4_VWB4_WSGRA0_WSGRB0_WS64_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   ActivationFuncCall: false
@@ -18799,8 +18643,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 256
   LSCB: 256
@@ -18951,7 +18795,7 @@ Solutions:
   reorderGRInstForDTVB: false
   tailLoopOptA: true
   tailLoopOptB: true
-- SolutionIndex: 107
+- SolutionIndex: 106
   KernelNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT64x96x64_MI16x16x1_SN_LDSB0_AFC0_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR1_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV1_MIWT2_3_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA4_NTB0_NTC4_NTD4_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS2_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR2_PLR1_PKA1_SGROB1_SIA3_SS1_SPO1_SRVW0_SSO0_SVW2_SK3_SKFTR0_SKFDPO0_SKXCCM2_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN1_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA2_VWB1_WSGRA0_WSGRB0_WS64_WG32_8_1_WGMXCC1
   SolutionNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT64x96x64_MI16x16x1_SN_LDSB0_AFC0_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR1_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV1_MIWT2_3_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA4_NTB0_NTC4_NTD4_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS2_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR2_PLR1_PKA1_SGROB1_SIA3_SS1_SU0_SUM0_SUS0_SPO1_SRVW0_SSO0_SVW2_SK3_SKFTR0_SKFDPO0_SKXCCM2_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN1_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA2_VWB1_WSGRA0_WSGRB0_WS64_WG32_8_1_WGM0_WGMXCC1_WGMXCCGn1
   ActivationFuncCall: false
@@ -18980,8 +18824,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 64
   LSCB: 96
@@ -19133,7 +18977,7 @@ Solutions:
   reorderGRInstForDTVB: false
   tailLoopOptA: true
   tailLoopOptB: true
-- SolutionIndex: 108
+- SolutionIndex: 107
   KernelNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT128x256x32_MI16x16x1_SN_LDSB0_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR1_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLL0_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV0_MIWT4_8_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA4_NTB0_NTC0_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS4_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR2_PLR1_PKA1_SGROB1_SIA3_SS1_SPO0_SRVW0_SSO1_SVW2_SK3_SKFTR0_SKFDPO0_SKXCCM2_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP1_USFGRO0_USI0_VSn1_VWA2_VWB4_WSGRA0_WSGRB0_WS64_WG32_8_1_WGMXCC1
   SolutionNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT128x256x32_MI16x16x1_SN_LDSB0_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR1_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLL0_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV0_MIWT4_8_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA4_NTB0_NTC0_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS4_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR2_PLR1_PKA1_SGROB1_SIA3_SS1_SU0_SUM0_SUS0_SPO0_SRVW0_SSO1_SVW2_SK3_SKFTR0_SKFDPO0_SKXCCM2_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP1_USFGRO0_USI0_VSn1_VWA2_VWB4_WSGRA0_WSGRB0_WS64_WG32_8_1_WGM24_WGMXCC1_WGMXCCGn1
   ActivationFuncCall: false
@@ -19164,8 +19008,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 128
   LSCB: 256
@@ -19315,7 +19159,7 @@ Solutions:
   reorderGRInstForDTVB: false
   tailLoopOptA: true
   tailLoopOptB: true
-- SolutionIndex: 109
+- SolutionIndex: 108
   KernelNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT64x32x128_MI16x16x1_SN_LDSB0_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR1_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV0_MIWT1_2_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA4_NTB0_NTC0_NTD4_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS2_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR2_PLR1_PKA1_SGROB1_SIA3_SS0_SPO0_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKFDPO0_SKXCCM8_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN1_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO1_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA1_VWB2_WSGRA0_WSGRB0_WS64_WG64_4_1_WGMXCC1
   SolutionNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT64x32x128_MI16x16x1_SN_LDSB0_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR1_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV0_MIWT1_2_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA4_NTB0_NTC0_NTD4_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS2_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR2_PLR1_PKA1_SGROB1_SIA3_SS0_SU0_SUM0_SUS0_SPO0_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKFDPO0_SKXCCM8_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN1_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO1_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA1_VWB2_WSGRA0_WSGRB0_WS64_WG64_4_1_WGM8_WGMXCC1_WGMXCCGn1
   ActivationFuncCall: false
@@ -19345,8 +19189,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 64
   LSCB: 32
@@ -19494,7 +19338,7 @@ Solutions:
   reorderGRInstForDTVB: false
   tailLoopOptA: true
   tailLoopOptB: true
-- SolutionIndex: 110
+- SolutionIndex: 109
   KernelNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT128x128x32_MI32x32x1_SN_LDSB0_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR1_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV1_MIWT2_2_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA4_NTB0_NTC4_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS16_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR2_PLR1_PKA1_SGROB1_SIA3_SS1_SPO0_SRVW0_SSO1_SVW2_SK3_SKFTR0_SKFDPO0_SKXCCM5_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN1_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA2_VWB2_WSGRA0_WSGRB0_WS64_WG64_4_1_WGMXCC1
   SolutionNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT128x128x32_MI32x32x1_SN_LDSB0_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR1_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV1_MIWT2_2_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA4_NTB0_NTC4_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS16_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR2_PLR1_PKA1_SGROB1_SIA3_SS1_SU0_SUM0_SUS0_SPO0_SRVW0_SSO1_SVW2_SK3_SKFTR0_SKFDPO0_SKXCCM5_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN1_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA2_VWB2_WSGRA0_WSGRB0_WS64_WG64_4_1_WGM16_WGMXCC1_WGMXCCGn1
   ActivationFuncCall: false
@@ -19524,8 +19368,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 128
   LSCB: 128
@@ -19676,7 +19520,7 @@ Solutions:
   reorderGRInstForDTVB: false
   tailLoopOptA: true
   tailLoopOptB: true
-- SolutionIndex: 111
+- SolutionIndex: 110
   KernelNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT128x128x32_MI16x16x1_SN_LDSB0_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR1_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV0_MIWT4_4_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA4_NTB0_NTC0_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS10_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR2_PLR1_PKA1_SGROB0_SIA3_SS1_SPO0_SRVW0_SSO0_SVW2_SK3_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP1_USFGRO0_USI0_VSn1_VWA2_VWB2_WSGRA0_WSGRB0_WS64_WG32_8_1_WGMXCC1
   SolutionNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT128x128x32_MI16x16x1_SN_LDSB0_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR1_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV0_MIWT4_4_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA4_NTB0_NTC0_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS10_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR2_PLR1_PKA1_SGROB0_SIA3_SS1_SU8_SUM0_SUS512_SPO0_SRVW0_SSO0_SVW2_SK3_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP1_USFGRO0_USI0_VSn1_VWA2_VWB2_WSGRA0_WSGRB0_WS64_WG32_8_1_WGM4_WGMXCC1_WGMXCCGn1
   ActivationFuncCall: false
@@ -19706,8 +19550,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 128
   LSCB: 128
@@ -19854,7 +19698,7 @@ Solutions:
   reorderGRInstForDTVB: false
   tailLoopOptA: true
   tailLoopOptB: true
-- SolutionIndex: 112
+- SolutionIndex: 111
   KernelNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT192x128x32_MI16x16x1_SN_LDSB0_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR1_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV0_MIWT6_4_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA4_NTB0_NTC0_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS12_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR2_PLR0_PKA1_SGROB1_SIA3_SS1_SPO1_SRVW0_SSO1_SVW1_SK3_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA1_VWB2_WSGRA0_WSGRB0_WS64_WG32_8_1_WGMXCC1
   SolutionNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT192x128x32_MI16x16x1_SN_LDSB0_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR1_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV0_MIWT6_4_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA4_NTB0_NTC0_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS12_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR2_PLR0_PKA1_SGROB1_SIA3_SS1_SU0_SUM0_SUS0_SPO1_SRVW0_SSO1_SVW1_SK3_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA1_VWB2_WSGRA0_WSGRB0_WS64_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   ActivationFuncCall: false
@@ -19884,8 +19728,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 192
   LSCB: 128
@@ -20035,7 +19879,7 @@ Solutions:
   reorderGRInstForDTVB: false
   tailLoopOptA: true
   tailLoopOptB: true
-- SolutionIndex: 113
+- SolutionIndex: 112
   KernelNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT128x128x32_MI32x32x1_CMS_SN_LDSB0_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR0_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLL0_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI1_LBSPPA0_LBSPPB0_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV0_MIWT2_2_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA4_NTB0_NTC0_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS4_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR2_PLR1_PKA1_SGROB1_SIA3_SS1_SPO1_SRVW0_SSO1_SVW2_SK3_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP1_USFGRO0_USI0_VSn1_VWA2_VWB2_WSGRA0_WSGRB0_WS64_WG64_4_1_WGMXCC1
   SolutionNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT128x128x32_MI32x32x1_CMS_SN_LDSB0_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR0_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLL0_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI1_LBSPPA0_LBSPPB0_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV0_MIWT2_2_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA4_NTB0_NTC0_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS4_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR2_PLR1_PKA1_SGROB1_SIA3_SS1_SU8_SUM0_SUS512_SPO1_SRVW0_SSO1_SVW2_SK3_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP1_USFGRO0_USI0_VSn1_VWA2_VWB2_WSGRA0_WSGRB0_WS64_WG64_4_1_WGM6_WGMXCC1_WGMXCCGn1
   ActivationFuncCall: false
@@ -20067,8 +19911,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 128
@@ -20218,7 +20062,7 @@ Solutions:
   reorderGRInstForDTVB: false
   tailLoopOptA: true
   tailLoopOptB: true
-- SolutionIndex: 114
+- SolutionIndex: 113
   KernelNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT256x128x32_MI16x16x1_SN_LDSB0_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR1_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLL0_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV0_MIWT8_4_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA4_NTB0_NTC4_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS2_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR2_PLR1_PKA1_SGROB1_SIA3_SS1_SPO0_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA4_VWB2_WSGRA0_WSGRB0_WS64_WG32_8_1_WGMXCC1
   SolutionNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT256x128x32_MI16x16x1_SN_LDSB0_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR1_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLL0_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV0_MIWT8_4_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA4_NTB0_NTC4_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS2_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR2_PLR1_PKA1_SGROB1_SIA3_SS1_SU0_SUM0_SUS0_SPO0_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA4_VWB2_WSGRA0_WSGRB0_WS64_WG32_8_1_WGM0_WGMXCC1_WGMXCCGn1
   ActivationFuncCall: false
@@ -20249,8 +20093,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 256
   LSCB: 128
@@ -20398,7 +20242,7 @@ Solutions:
   reorderGRInstForDTVB: false
   tailLoopOptA: true
   tailLoopOptB: true
-- SolutionIndex: 115
+- SolutionIndex: 114
   KernelNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT256x256x32_MI16x16x1_CMS_SN_LDSB0_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR1_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLL0_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV0_MIWT8_8_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA4_NTB4_NTC4_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS12_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR2_PLR1_PKA1_SGROB1_SIA3_SS1_SPO0_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKFDPO0_SKXCCM2_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP1_USFGRO0_USI0_VSn1_VWA4_VWB4_WSGRA0_WSGRB0_WS64_WG32_8_1_WGMXCC1
   SolutionNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT256x256x32_MI16x16x1_CMS_SN_LDSB0_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR1_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLL0_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV0_MIWT8_8_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA4_NTB4_NTC4_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS12_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR2_PLR1_PKA1_SGROB1_SIA3_SS1_SU8_SUM0_SUS256_SPO0_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKFDPO0_SKXCCM2_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP1_USFGRO0_USI0_VSn1_VWA4_VWB4_WSGRA0_WSGRB0_WS64_WG32_8_1_WGM0_WGMXCC1_WGMXCCGn1
   ActivationFuncCall: false
@@ -20429,8 +20273,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 256
   LSCB: 256
@@ -20579,7 +20423,7 @@ Solutions:
   reorderGRInstForDTVB: false
   tailLoopOptA: true
   tailLoopOptB: true
-- SolutionIndex: 116
+- SolutionIndex: 115
   KernelNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT64x128x64_MI16x16x1_SN_LDSB0_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR0_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI1_LBSPPA0_LBSPPB0_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV0_MIWT4_2_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA4_NTB0_NTC0_NTD4_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS4_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR2_PLR1_PKA1_SGROB1_SIA3_SS1_SPO0_SRVW0_SSO1_SVW4_SK3_SKFTR0_SKFDPO0_SKXCCM2_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN1_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO1_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA4_VWB2_WSGRA0_WSGRB0_WS64_WG16_16_1_WGMXCC1
   SolutionNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT64x128x64_MI16x16x1_SN_LDSB0_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR0_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI1_LBSPPA0_LBSPPB0_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV0_MIWT4_2_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA4_NTB0_NTC0_NTD4_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS4_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR2_PLR1_PKA1_SGROB1_SIA3_SS1_SU0_SUM0_SUS0_SPO0_SRVW0_SSO1_SVW4_SK3_SKFTR0_SKFDPO0_SKXCCM2_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN1_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO1_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA4_VWB2_WSGRA0_WSGRB0_WS64_WG16_16_1_WGM2_WGMXCC1_WGMXCCGn1
   ActivationFuncCall: false
@@ -20610,8 +20454,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 64
@@ -20763,7 +20607,7 @@ Solutions:
   reorderGRInstForDTVB: false
   tailLoopOptA: true
   tailLoopOptB: true
-- SolutionIndex: 117
+- SolutionIndex: 116
   KernelNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT320x128x32_MI16x16x1_SN_LDSB0_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR1_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLL0_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV0_MIWT10_4_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA4_NTB0_NTC4_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS8_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR2_PLR1_PKA1_SGROB1_SIA3_SS1_SPO0_SRVW0_SSO0_SVW1_SK3_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP1_USFGRO0_USI0_VSn1_VWA1_VWB2_WSGRA0_WSGRB0_WS64_WG32_8_1_WGMXCC1
   SolutionNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT320x128x32_MI16x16x1_SN_LDSB0_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR1_CLS0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLL0_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIWn1_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPMXSAn1_LBSPPMXSBn1_LBSPPM0_LPA0_LPB0_LPMXSAn1_LPMXSBn1_LPM0_LRVW4_LWPMn1_MIAV0_MIWT10_4_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA4_NTB0_NTC4_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS8_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR2_PLR1_PKA1_SGROB1_SIA3_SS1_SU16_SUM0_SUS128_SPO0_SRVW0_SSO0_SVW1_SK3_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP1_USFGRO0_USI0_VSn1_VWA1_VWB2_WSGRA0_WSGRB0_WS64_WG32_8_1_WGM24_WGMXCC1_WGMXCCGn1
   ActivationFuncCall: false
@@ -20794,8 +20638,8 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 320
   LSCB: 128
@@ -20944,7 +20788,7 @@ Solutions:
   reorderGRInstForDTVB: false
   tailLoopOptA: true
   tailLoopOptB: true
-- SolutionIndex: 118
+- SolutionIndex: 117
   KernelNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT64x32x32_MI16x16x1_SN_LDSB0_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR0_CLS0_CADS0_DTLA1_DTLB1_DTLM0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_HPLR0_ISA950_ICIW0_IU1_K1_LDSTI1_LBSPPA0_LBSPPB0_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA0_LPB0_LPMXSA0_LPMXSB0_LPM0_LRVWn1_LWPMn1_MIAV1_MIWT2_1_MXLIBL_MXSFNS_MO40_MGRIPM3_NTn1_NTA4_NTB4_NTC0_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS10_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR4_PLR1_PKA1_SGROB0_SIA3_SS1_SPO0_SRVW0_SSO0_SVW2_SK3_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN1_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA2_VWB1_WSGRA0_WSGRB0_WS64_WG32_8_1_WGMXCC1
   SolutionNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT64x32x32_MI16x16x1_SN_LDSB0_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR0_CLS0_CADS0_DTLA1_DTLB1_DTLM0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIW0_IU1_K1_LDSTI1_LBSPPA0_LBSPPB0_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA0_LPB0_LPMXSA0_LPMXSB0_LPM0_LRVWn1_LWPMn1_MIAV1_MIWT2_1_MXLIBL_MXSFNS_MO40_MGRIPM3_NTn1_NTA4_NTB4_NTC0_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS10_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR4_PLR1_PKA1_SGROB0_SIA3_SS1_SU0_SUM0_SUS0_SPO0_SRVW0_SSO0_SVW2_SK3_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN1_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA2_VWB1_WSGRA0_WSGRB0_WS64_WG32_8_1_WGMn6_WGMXCC1_WGMXCCGn1
   ActivationFuncCall: false
@@ -20981,8 +20825,8 @@ Solutions:
   HalfPLRB: false
   ISA: [9, 5, 0]
   InitCIterWmma: 0
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 64
@@ -21166,7 +21010,7 @@ Solutions:
   reorderGRInstForDTVB: false
   tailLoopOptA: true
   tailLoopOptB: true
-- SolutionIndex: 119
+- SolutionIndex: 118
   KernelNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT256x256x32_MI16x16x1_CMS_SN_LDSB0_AFC0_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR1_CLS0_CADS0_DTLA1_DTLB1_DTLM0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_HPLR0_ISA950_ICIW0_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA0_LPB0_LPMXSA0_LPMXSB0_LPM0_LRVW4_LWPMn1_MIAV0_MIWT8_8_MXLIBL_MXSFNS_MO40_MGRIPM1_NTn1_NTA0_NTB0_NTC4_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS10_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR2_PLR1_PKA1_SGROB0_SIA3_SS1_SPO0_SRVW0_SSO1_SVW4_SK3_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP1_USFGRO0_USI0_VSn1_VWA4_VWB4_WSGRA0_WSGRB0_WS64_WG32_8_1_WGMXCC1
   SolutionNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT256x256x32_MI16x16x1_CMS_SN_LDSB0_AFC0_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR1_CLS0_CADS0_DTLA1_DTLB1_DTLM0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIW0_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA0_LPB0_LPMXSA0_LPMXSB0_LPM0_LRVW4_LWPMn1_MIAV0_MIWT8_8_MXLIBL_MXSFNS_MO40_MGRIPM1_NTn1_NTA0_NTB0_NTC4_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS10_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR2_PLR1_PKA1_SGROB0_SIA3_SS1_SU16_SUM0_SUS256_SPO0_SRVW0_SSO1_SVW4_SK3_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP1_USFGRO0_USI0_VSn1_VWA4_VWB4_WSGRA0_WSGRB0_WS64_WG32_8_1_WGM8_WGMXCC1_WGMXCCGn1
   ActivationFuncCall: false
@@ -21201,8 +21045,8 @@ Solutions:
   HalfPLRB: false
   ISA: [9, 5, 0]
   InitCIterWmma: 0
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 256
   LSCB: 256
@@ -21384,7 +21228,7 @@ Solutions:
   reorderGRInstForDTVB: false
   tailLoopOptA: true
   tailLoopOptB: true
-- SolutionIndex: 120
+- SolutionIndex: 119
   KernelNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT16x16x64_MI16x16x1_SN_LDSB0_AFC0_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR0_CLS0_CADS0_DTLA1_DTLB1_DTLM0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLL0_FDSI0_GRPM1_GRVWA1_GRVWB1_GSU0_GSUAMB_GLS0_HPLR0_ISA950_ICIW0_IU1_K1_LDSTI1_LBSPPA0_LBSPPB0_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA0_LPB0_LPMXSA0_LPMXSB0_LPM0_LRVWn1_LWPMn1_MIAV1_MIWT1_1_MXLIBL_MXSFNS_MO40_MGRIPM3_NTn1_NTA0_NTB4_NTC0_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS4_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR4_PLR1_PKA1_SGROB0_SIA3_SS1_SPO1_SRVW0_SSO0_SVW1_SK3_SKFTR0_SKFDPO0_SKXCCM4_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO1_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG16_4_2_WGMXCC1
   SolutionNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT16x16x64_MI16x16x1_SN_LDSB0_AFC0_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR0_CLS0_CADS0_DTLA1_DTLB1_DTLM0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLL0_FDSI0_GRPM1_GRVWA1_GRVWB1_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIW0_IU1_K1_LDSTI1_LBSPPA0_LBSPPB0_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA0_LPB0_LPMXSA0_LPMXSB0_LPM0_LRVWn1_LWPMn1_MIAV1_MIWT1_1_MXLIBL_MXSFNS_MO40_MGRIPM3_NTn1_NTA0_NTB4_NTC0_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS4_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR4_PLR1_PKA1_SGROB0_SIA3_SS1_SU0_SUM0_SUS0_SPO1_SRVW0_SSO0_SVW1_SK3_SKFTR0_SKFDPO0_SKXCCM4_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO1_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG16_4_2_WGM6_WGMXCC1_WGMXCCGn1
   ActivationFuncCall: false
@@ -21421,8 +21265,8 @@ Solutions:
   HalfPLRB: false
   ISA: [9, 5, 0]
   InitCIterWmma: 0
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 16
@@ -21607,7 +21451,7 @@ Solutions:
   reorderGRInstForDTVB: false
   tailLoopOptA: true
   tailLoopOptB: true
-- SolutionIndex: 121
+- SolutionIndex: 120
   KernelNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT16x16x64_MI16x16x1_SN_LDSB0_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR0_CLS0_CADS0_DTLA1_DTLB1_DTLM0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA1_GRVWB1_GSU0_GSUAMB_GLS0_HPLR0_ISA950_ICIW0_IU1_K1_LDSTI1_LBSPPA0_LBSPPB0_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA0_LPB0_LPMXSA0_LPMXSB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT1_1_MXLIBL_MXSFNS_MO40_MGRIPM3_NTn1_NTA0_NTB4_NTC0_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS14_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR4_PLR1_PKA1_SGROB0_SIA3_SS1_SPO1_SRVW0_SSO0_SVW1_SK3_SKFTR0_SKFDPO0_SKXCCM4_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO1_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG16_4_2_WGMXCC1
   SolutionNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT16x16x64_MI16x16x1_SN_LDSB0_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR0_CLS0_CADS0_DTLA1_DTLB1_DTLM0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA1_GRVWB1_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIW0_IU1_K1_LDSTI1_LBSPPA0_LBSPPB0_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA0_LPB0_LPMXSA0_LPMXSB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT1_1_MXLIBL_MXSFNS_MO40_MGRIPM3_NTn1_NTA0_NTB4_NTC0_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS14_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR4_PLR1_PKA1_SGROB0_SIA3_SS1_SU16_SUM0_SUS256_SPO1_SRVW0_SSO0_SVW1_SK3_SKFTR0_SKFDPO0_SKXCCM4_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO1_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG16_4_2_WGM16_WGMXCC1_WGMXCCGn1
   ActivationFuncCall: false
@@ -21644,8 +21488,8 @@ Solutions:
   HalfPLRB: false
   ISA: [9, 5, 0]
   InitCIterWmma: 0
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 16
@@ -21828,7 +21672,7 @@ Solutions:
   reorderGRInstForDTVB: false
   tailLoopOptA: true
   tailLoopOptB: true
-- SolutionIndex: 122
+- SolutionIndex: 121
   KernelNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT176x384x32_MI16x16x1_SN_LDSB0_AFC0_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR0_CLS0_CADS0_DTLA0_DTLB1_DTLM0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA2_GRVWB4_GSU0_GSUAMB_GLS0_HPLR0_ISA950_ICIW0_IU1_K1_LDSTI0_LBSPPA2816_LBSPPB0_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA16_LPB0_LPMXSA0_LPMXSB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT11_6_MXLIBL_MXSFNS_MO40_MGRIPM1_NTn1_NTA0_NTB0_NTC0_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS0_NLCA11_NLCB1_ONLL1_PAP0_PGL0_PGR2_PLR0_PKA1_SGROB0_SIA3_SS0_SPO0_SRVW0_SSO1_SVW4_SK3_SKFTR0_SKFDPO0_SKXCCM4_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN1_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA1_VWB2_WSGRA0_WSGRB0_WS64_WG16_16_1_WGMXCC1
   SolutionNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT176x384x32_MI16x16x1_SN_LDSB0_AFC0_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR0_CLS0_CADS0_DTLA0_DTLB1_DTLM0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA2_GRVWB4_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIW0_IU1_K1_LDSTI0_LBSPPA2816_LBSPPB0_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA16_LPB0_LPMXSA0_LPMXSB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT11_6_MXLIBL_MXSFNS_MO40_MGRIPM1_NTn1_NTA0_NTB0_NTC0_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS0_NLCA11_NLCB1_ONLL1_PAP0_PGL0_PGR2_PLR0_PKA1_SGROB0_SIA3_SS0_SU0_SUM0_SUS0_SPO0_SRVW0_SSO1_SVW4_SK3_SKFTR0_SKFDPO0_SKXCCM4_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN1_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA1_VWB2_WSGRA0_WSGRB0_WS64_WG16_16_1_WGM0_WGMXCC1_WGMXCCGn1
   ActivationFuncCall: false
@@ -21864,8 +21708,8 @@ Solutions:
   HalfPLRB: false
   ISA: [9, 5, 0]
   InitCIterWmma: 0
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 16
   LSCB: 384
@@ -22047,7 +21891,7 @@ Solutions:
   reorderGRInstForDTVB: false
   tailLoopOptA: true
   tailLoopOptB: true
-- SolutionIndex: 123
+- SolutionIndex: 122
   KernelNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT256x256x32_MI16x16x1_CMS_SN_LDSB0_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR1_CLS0_CADS0_DTLA1_DTLB1_DTLM0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLL0_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_HPLR0_ISA950_ICIW0_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA0_LPB0_LPMXSA0_LPMXSB0_LPM0_LRVW4_LWPMn1_MIAV0_MIWT8_8_MXLIBL_MXSFNS_MO40_MGRIPM1_NTn1_NTA4_NTB0_NTC4_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS12_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR2_PLR1_PKA1_SGROB1_SIA3_SS1_SPO0_SRVW0_SSO4_SVW4_SK3_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP1_USFGRO0_USI0_VSn1_VWA4_VWB4_WSGRA0_WSGRB0_WS64_WG32_8_1_WGMXCC1
   SolutionNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT256x256x32_MI16x16x1_CMS_SN_LDSB0_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR1_CLS0_CADS0_DTLA1_DTLB1_DTLM0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLL0_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIW0_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA0_LPB0_LPMXSA0_LPMXSB0_LPM0_LRVW4_LWPMn1_MIAV0_MIWT8_8_MXLIBL_MXSFNS_MO40_MGRIPM1_NTn1_NTA4_NTB0_NTC4_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS12_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR2_PLR1_PKA1_SGROB1_SIA3_SS1_SU8_SUM0_SUS128_SPO0_SRVW0_SSO4_SVW4_SK3_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS0_TLDSMn1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP1_USFGRO0_USI0_VSn1_VWA4_VWB4_WSGRA0_WSGRB0_WS64_WG32_8_1_WGMn4_WGMXCC1_WGMXCCGn1
   ActivationFuncCall: false
@@ -22084,8 +21928,8 @@ Solutions:
   HalfPLRB: false
   ISA: [9, 5, 0]
   InitCIterWmma: 0
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true,
-    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 256
   LSCB: 256
@@ -22279,27 +22123,27 @@ ExactLogic:
 - - [128, 2440, 1, 8192]
   - [16, 0.0]
 - - [128, 5120, 1, 8192]
-  - [88, 0.0]
+  - [87, 0.0]
 - - [128, 5640, 1, 8192]
-  - [89, 0.0]
+  - [88, 0.0]
 - - [256, 120, 1, 8192]
   - [61, 35579.9]
 - - [256, 256, 1, 8192]
-  - [95, 0.0]
+  - [94, 0.0]
 - - [256, 512, 1, 8192]
   - [5, 0.0]
 - - [256, 528, 1, 8192]
   - [6, 0.0]
 - - [256, 2048, 1, 8192]
-  - [96, 0.0]
+  - [95, 0.0]
 - - [512, 120, 1, 8192]
-  - [100, 0.0]
+  - [99, 0.0]
 - - [512, 128, 1, 8192]
-  - [101, 0.0]
+  - [100, 0.0]
 - - [512, 256, 1, 8192]
   - [2, 0.0]
 - - [512, 512, 1, 8192]
-  - [103, 0.0]
+  - [102, 0.0]
 - - [512, 528, 1, 8192]
   - [17, 0.0]
 - - [512, 1980, 1, 8192]
@@ -22309,43 +22153,43 @@ ExactLogic:
 - - [528, 256, 1, 8192]
   - [40, 0.0]
 - - [1024, 512, 1, 8192]
-  - [105, 0.0]
+  - [104, 0.0]
 - - [1980, 512, 1, 8192]
   - [19, 0.0]
 - - [2048, 512, 1, 8192]
-  - [108, 0.0]
+  - [107, 0.0]
 - - [3072, 512, 1, 8192]
   - [21, 0.0]
 - - [3960, 512, 1, 8192]
   - [20, 0.0]
 - - [4352, 128, 1, 8192]
-  - [110, 0.0]
+  - [109, 0.0]
 - - [4352, 256, 1, 8192]
-  - [72, 0.0]
+  - [71, 0.0]
 - - [4608, 256, 1, 8192]
   - [22, 0.0]
 - - [5120, 128, 1, 8192]
-  - [111, 0.0]
+  - [110, 0.0]
 - - [5640, 128, 1, 8192]
-  - [112, 0.0]
+  - [111, 0.0]
 - - [6912, 128, 1, 8192]
-  - [113, 0.0]
+  - [112, 0.0]
 - - [7296, 128, 1, 8192]
-  - [114, 0.0]
+  - [113, 0.0]
 - - [10880, 128, 1, 8192]
-  - [117, 0.0]
+  - [116, 0.0]
 - - [4, 128, 8192, 30]
-  - [68, 0.0]
+  - [67, 0.0]
 - - [16, 128, 8192, 33]
-  - [64, 0.0]
+  - [63, 0.0]
 - - [40, 128, 8192, 64]
-  - [65, 0.0]
+  - [64, 0.0]
 - - [128, 128, 1, 17711]
   - [0, 0.0]
 - - [128, 960, 1, 17711]
   - [34, 0.0]
 - - [128, 2480, 1, 17711]
-  - [86, 0.0]
+  - [85, 0.0]
 - - [128, 17711, 1, 41]
   - [35, 0.0]
 - - [384, 17711, 1, 246]
@@ -22363,21 +22207,21 @@ ExactLogic:
 - - [28, 256, 1, 4096]
   - [23, 0.0]
 - - [28, 320, 1, 4096]
-  - [73, 0.0]
+  - [72, 0.0]
 - - [64, 512, 1, 4096]
-  - [78, 0.0]
+  - [77, 0.0]
 - - [72, 256, 1, 4096]
   - [28, 0.0]
 - - [72, 320, 1, 4096]
-  - [80, 0.0]
+  - [79, 0.0]
 - - [80, 512, 1, 4096]
-  - [82, 0.0]
+  - [81, 0.0]
 - - [96, 512, 1, 4096]
-  - [84, 0.0]
+  - [83, 0.0]
 - - [116, 256, 1, 4096]
   - [29, 0.0]
 - - [116, 320, 1, 4096]
-  - [118, 0.0]
+  - [117, 0.0]
 - - [128, 2048, 1, 4096]
   - [5, 0.0]
 - - [160, 512, 1, 4096]
@@ -22389,31 +22233,31 @@ ExactLogic:
 - - [256, 28, 1, 4096]
   - [41, 0.0]
 - - [256, 72, 1, 4096]
-  - [92, 0.0]
+  - [91, 0.0]
 - - [256, 116, 1, 4096]
   - [42, 0.0]
 - - [256, 180, 1, 4096]
   - [38, 0.0]
 - - [256, 256, 1, 4096]
-  - [94, 0.0]
+  - [93, 0.0]
 - - [256, 7680, 1, 4096]
-  - [97, 0.0]
+  - [96, 0.0]
 - - [512, 160, 1, 4096]
   - [7, 0.0]
 - - [512, 512, 1, 4096]
-  - [102, 0.0]
+  - [101, 0.0]
 - - [512, 2246, 1, 4096]
   - [48, 0.0]
 - - [1600, 128, 1, 4096]
   - [40, 0.0]
 - - [1824, 2048, 1, 4096]
-  - [106, 0.0]
+  - [105, 0.0]
 - - [2048, 57, 1, 4096]
   - [52, 0.0]
 - - [2048, 64, 1, 4096]
   - [52, 0.0]
 - - [2048, 82, 1, 4096]
-  - [107, 0.0]
+  - [106, 0.0]
 - - [2048, 160, 1, 4096]
   - [8, 0.0]
 - - [2246, 512, 1, 4096]
@@ -22425,53 +22269,53 @@ ExactLogic:
 - - [7680, 256, 1, 4096]
   - [21, 0.0]
 - - [7680, 512, 1, 4096]
-  - [115, 0.0]
+  - [114, 0.0]
 - - [28, 32, 8192, 28]
-  - [69, 0.0]
+  - [68, 0.0]
 - - [32, 25, 8192, 25]
   - [56, 0.0]
 - - [32, 64, 4096, 57]
-  - [69, 0.0]
+  - [68, 0.0]
 - - [32, 64, 4096, 82]
-  - [69, 0.0]
+  - [68, 0.0]
 - - [48, 160, 4096, 192]
   - [10, 0.0]
 - - [48, 160, 4096, 642]
-  - [66, 0.0]
+  - [65, 0.0]
 - - [64, 200, 4096, 32]
   - [57, 0.0]
 - - [160, 64, 96, 4096]
-  - [67, 0.0]
+  - [66, 0.0]
 - - [200, 64, 4096, 32]
-  - [70, 0.0]
+  - [69, 0.0]
 - - [8, 256, 1, 2048]
-  - [120, 0.0]
+  - [119, 0.0]
 - - [16, 256, 1, 2048]
-  - [121, 0.0]
+  - [120, 0.0]
 - - [32, 256, 1, 2048]
   - [12, 0.0]
 - - [36, 256, 1, 2048]
-  - [74, 0.0]
+  - [73, 0.0]
 - - [40, 256, 1, 2048]
-  - [75, 0.0]
+  - [74, 0.0]
 - - [48, 256, 1, 2048]
   - [11, 0.0]
 - - [64, 256, 1, 2048]
-  - [77, 0.0]
+  - [76, 0.0]
 - - [72, 256, 1, 2048]
-  - [79, 0.0]
+  - [78, 0.0]
 - - [80, 256, 1, 2048]
-  - [81, 0.0]
+  - [80, 0.0]
 - - [96, 256, 1, 2048]
-  - [83, 0.0]
+  - [82, 0.0]
 - - [128, 256, 1, 2048]
-  - [85, 0.0]
+  - [84, 0.0]
 - - [256, 128, 1, 2048]
   - [44, 0.0]
 - - [256, 256, 1, 2048]
-  - [93, 0.0]
+  - [92, 0.0]
 - - [64, 128, 1, 8192]
-  - [76, 0.0]
+  - [75, 0.0]
 - - [128, 128, 1, 8192]
   - [15, 0.0]
 - - [256, 128, 1, 98304]
@@ -22501,9 +22345,9 @@ ExactLogic:
 - - [128, 128, 1, 1024]
   - [33, 0.0]
 - - [128, 4096, 1, 1024]
-  - [87, 0.0]
+  - [86, 0.0]
 - - [128, 7456, 1, 1024]
-  - [90, 0.0]
+  - [89, 0.0]
 - - [144, 128, 1, 1024]
   - [36, 0.0]
 - - [160, 10, 1, 655360]
@@ -22513,9 +22357,9 @@ ExactLogic:
 - - [192, 112, 1, 655360]
   - [3, 0.0]
 - - [224, 64, 1, 527553]
-  - [63, 0.0]
+  - [62, 0.0]
 - - [224, 64, 1, 752863]
-  - [63, 0.0]
+  - [62, 0.0]
 - - [233, 56, 1, 131072]
   - [40, 0.0]
 - - [252, 128, 1, 17711]
@@ -22525,9 +22369,9 @@ ExactLogic:
 - - [256, 128, 1, 17711]
   - [45, 0.0]
 - - [256, 7968, 1, 1024]
-  - [98, 0.0]
+  - [97, 0.0]
 - - [288, 64, 1, 806154]
-  - [99, 0.0]
+  - [98, 0.0]
 - - [512, 128, 1, 1024]
   - [43, 0.0]
 - - [512, 2011, 1, 1024]
@@ -22539,7 +22383,7 @@ ExactLogic:
 - - [2011, 512, 1, 1024]
   - [40, 0.0]
 - - [4096, 128, 1, 1024]
-  - [109, 0.0]
+  - [108, 0.0]
 - - [20, 48, 17711, 124]
   - [59, 30249.3]
 - - [128, 128, 6, 17711]
@@ -22547,29 +22391,23 @@ ExactLogic:
 - - [128, 17711, 6, 128]
   - [60, 90258.2]
 - - [7968, 256, 1, 1024]
-  - [116, 0.0]
-- - [5640, 2820, 1, 8192]
-  - [62, 0.0]
+  - [115, 0.0]
 - - [2820, 5640, 1, 8192]
-  - [122, 0.0]
+  - [121, 0.0]
 - - [20, 48, 1, 124]
   - [13, 0.0]
 - - [32, 128, 1024, 233]
-  - [71, 0.0]
+  - [70, 0.0]
 - - [128, 17711, 1, 128]
-  - [91, 0.0]
+  - [90, 0.0]
 - - [512, 3072, 1, 8192]
-  - [104, 0.0]
+  - [103, 0.0]
 - - [512, 9216, 1, 4096]
-  - [104, 0.0]
+  - [103, 0.0]
 - - [14336, 1024, 1, 2048]
-  - [123, 0.0]
-- - [30816, 2048, 1, 4096]
-  - [62, 0.0]
+  - [122, 0.0]
 - - [3840, 1024, 1, 8192]
-  - [119, 0.0]
-- - [9216, 2048, 1, 4096]
-  - [62, 0.0]
+  - [118, 0.0]
 RangeLogic: null
 TileSelectionIndices: null
 PerfMetric: DeviceEfficiency
