@@ -30,6 +30,7 @@
 #include "allclose.hpp"
 #include "candidate_search.hpp"
 #include "cblas_interface.hpp"
+#include "cotenant.hpp"
 #include "efficiency_monitor.hpp"
 #include "fast_check.hpp"
 #include "flops.hpp"
@@ -6472,7 +6473,15 @@ void testing_matmul_with_bias(const Arguments& arg,
         searchCfg.skip_slow_ratio = arg.skip_slow_solution_ratio;
         searchCfg.flush_grid      = gpu_block3;
 
-        std::shared_ptr<EfficiencyMonitor> perf_monitor;
+        std::shared_ptr<EfficiencyMonitor>        perf_monitor;
+        std::optional<hipblaslt_cotenant::Scoped> cotenant;
+
+        // Cotenant startup (stream sync, launch, residency wait) stays before the timed region.
+        auto startCotenant = [&]() {
+            cotenant.emplace(hipblaslt_bench_options::cotenant_cus(),
+                             hipblaslt_bench_options::cotenant_max_occupancy(),
+                             stream);
+        };
 
         // Every path prepares a candidate with this first.
         auto prepareCandidate = [&](size_t) {
@@ -6501,11 +6510,17 @@ void testing_matmul_with_bias(const Arguments& arg,
                            << " us , warm-up = " << warm_time / number_cold_calls
                            << " us, skip ratio = " << arg.skip_slow_solution_ratio << ")"
                            << std::endl;
+            cotenant.reset();
         };
         auto measuring = [&](size_t) { perf_monitor->start(); };
         auto measured  = [&](size_t sol, hipblaslt_bench::TimingResult& timing) {
+            // hipblaslt-bench stops a single GEMM's cotenant before the efficiency
+            // monitor and a grouped GEMM's after it; keep both orders.
+            if(!do_grouped_gemm)
+                cotenant.reset();
             gpu_time_used = timing.median_us;
             perf_monitor->stop();
+            cotenant.reset();
 
             double flops = 0;
             for(int gemmIdx = 0; gemmIdx < gemm_count; gemmIdx++)
@@ -6735,6 +6750,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                                       tuningVec[heuristicTuningIndex[sol]],
                                                       *dWorkspace));
                         }
+                        startCotenant();
                     },
                     [&](size_t, int32_t i) {
                         CHECK_HIPBLASLT_ERROR(gemmVec[i % block_count].run(stream));
@@ -6759,7 +6775,10 @@ void testing_matmul_with_bias(const Arguments& arg,
                     event_gpu_time_start,
                     event_gpu_time_end,
                     stream,
-                    prepareCandidate,
+                    [&](size_t sol) {
+                        prepareCandidate(sol);
+                        startCotenant();
+                    },
                     [&](size_t sol, int32_t i) {
                         auto ptr_matmul = matmul[i % block_count][0];
                         auto ptr_alpha  = arg.scaleAlpha_vector
@@ -6835,7 +6854,10 @@ void testing_matmul_with_bias(const Arguments& arg,
                     event_gpu_time_start,
                     event_gpu_time_end,
                     stream,
-                    prepareCandidate,
+                    [&](size_t sol) {
+                        prepareCandidate(sol);
+                        startCotenant();
+                    },
                     [&](size_t sol, int32_t i) {
                         auto ptr_matmul = matmul[i % block_count][0];
                         auto ptr_alpha  = arg.scaleAlpha_vector
@@ -6936,6 +6958,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                           gemm_count * sizeof(hipblaslt_ext::UserArguments),
                                           hipMemcpyHostToDevice));
                         }
+                        startCotenant();
                     },
                     [&](size_t, int32_t i) {
                         CHECK_HIPBLASLT_ERROR(groupedGemmVec[i % block_count].run(
@@ -6974,6 +6997,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                 false,
                                 stream));
                         }
+                        startCotenant();
                     },
                     [&](size_t, int32_t i) {
                         CHECK_HIPBLASLT_ERROR(groupedGemmVec[i % block_count].run(stream));
@@ -6990,6 +7014,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                     timingAbort);
             }
         }
+        cotenant.reset();
         if(search.aborted)
             return;
 

@@ -19,6 +19,7 @@
  * reached from _op_tile_mma's op_id routing, which mirrors the Python CDNA
  * ISABackend.emit_mma rebuilding ``tile.<op_id>`` and re-dispatching.
  */
+#include "rocke/mfma_scale_internal.h"
 #include "rocke/tf32_internal.h"
 #include <stdio.h>
 #include <string.h>
@@ -91,6 +92,30 @@ static void _op_tile_mma(rocke_lower_t* L, const rocke_op_t* op)
         rocke_ll_fail(L, ROCKE_ERR_KEY, "tile.mma: missing op_id attribute");
     }
 
+    if(const auto* atom = rocke_gfx950_scaled_mfma(op_id))
+    {
+        if(!L->backend || strcmp(L->backend->gfx, "gfx950") != 0)
+            rocke_ll_fail(L, ROCKE_ERR_NOTIMPL, "scaled MFMA requires gfx950");
+        if(const char* error = rocke_scaled_mfma_error(op_id, op->operands, op->num_operands))
+            rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s", error);
+        if(op->num_results != 1 || strcmp(op->results[0]->type->name, "vec<f32x16>") != 0)
+            rocke_ll_fail(L, ROCKE_ERR_VALUE, "scaled MFMA result must be vec<f32x16>");
+        rocke_ll_need(L, "mfma.scale.f32.32x32x64.f8f6f4.v8i32.v8i32");
+        rocke_ll_emitf(
+            L,
+            "  %s = call <16 x float> @llvm.amdgcn.mfma.scale.f32.32x32x64.f8f6f4.v8i32.v8i32("
+            "<8 x i32> %s, <8 x i32> %s, <16 x float> %s, i32 %d, i32 %d, i32 0, i32 %s, i32 0, "
+            "i32 %s)",
+            mma_result_name(L, op),
+            rocke_ll_operand(L, op->operands[0]),
+            rocke_ll_operand(L, op->operands[1]),
+            rocke_ll_operand(L, op->operands[2]),
+            rocke_mfma_matrix_format(atom->a_dtype),
+            rocke_mfma_matrix_format(atom->b_dtype),
+            rocke_ll_operand(L, op->operands[3]),
+            rocke_ll_operand(L, op->operands[4]));
+        return;
+    }
     if(rocke_tf32_mma_count(op_id) && strcmp(L->backend->gfx, "gfx942") != 0)
         rocke_ll_fail(L, ROCKE_ERR_VALUE, "XF32 MMA requires gfx942");
 
