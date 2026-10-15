@@ -96,7 +96,7 @@ jobs:
           FILES="$(gh api --paginate "repos/$REPO/pulls/$PR/files" --jq '.[].filename')"
           # ci-env/action.yml holds therock-ref: a bump PR runs the job, so a compiler change
           # shows up there as the SDK compiler warning.
-          grep -qE '^(projects/hipblaslt|shared/(origami|stinkytofu|mxdatagenerator)|cmake)/|^\.github/workflows/gfx1250_hipblaslt_tensilelite_test\.yml$|^\.github/actions/ci-env/action\.yml$' <<<"$FILES" \
+          grep -qE '^(projects/hipblaslt|shared/(origami|stinkytofu|mxdatagenerator))/|^\.github/workflows/gfx1250_hipblaslt_tensilelite_test\.yml$|^\.github/actions/ci-env/action\.yml$' <<<"$FILES" \
             || skip "PR #$PR does not touch hipBLASLt, TensileLite or the TheRock pin"
           echo "run=true" >> "$GITHUB_OUTPUT"
 
@@ -114,7 +114,7 @@ jobs:
     timeout-minutes: 600
     permissions:
       contents: read
-      actions: read  # test report: this job's steps, the previous nightly's results
+      actions: read  # test report: the previous nightly's results
     # The ROCm SDK comes from the nightly pip index, not a host /opt/rocm: it must be
     # new enough to compile and run gfx1250-strict. The SDK install reuses downloaded
     # wheels from a pip cache on a host mount. Only the nightly writes it; other jobs get
@@ -125,7 +125,6 @@ jobs:
       # GIDs on the ROCm runners (mirrors TheRock's _GPU_CONTAINER_OPTIONS).
       # -e without a value copies ROCR_VISIBLE_DEVICES from the runner's .env (one
       # runner per GPU); the runner passes no host env into job containers itself.
-      # Unset: the strict-mode check falls back to the runner name's -gpuN.
       options: >-
         -e ROCR_VISIBLE_DEVICES
         --ipc host
@@ -148,7 +147,7 @@ jobs:
       # Run both suites as gfx1250-strict.
       HSA_DISABLE_GFX12_STRICT: "0"
       # The pinned ROCm SDK nightly; the install and the compiler check both read it.
-      ROCM_SDK_VERSION: ${{ inputs.rocm_sdk_version || '10.2.0a20261013' }}
+      ROCM_SDK_VERSION: ${{ inputs.rocm_sdk_version || '10.2.0a20261007' }}
       GTEST_PRINT_TIME: "0"
       PYTHONUNBUFFERED: "1"
       # awk filter for all test and build logs
@@ -169,6 +168,7 @@ jobs:
         { print; fflush() }
     steps:
       - name: Checkout hipBLASLt + shared deps (sparse)
+        id: checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 1
@@ -184,6 +184,7 @@ jobs:
           sparse-checkout-cone-mode: true
 
       - name: Install the ROCm SDK (gfx1250-strict capable)
+        id: sdk
         env:
           # Only this step uses the shared cache; later pip runs (the build's venv, tox,
           # which builds wheels from source) use pip's default cache under the job's HOME.
@@ -213,11 +214,8 @@ jobs:
           echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
           echo "VIRTUAL_ENV=$RUNNER_TEMP/venv" >> "$GITHUB_ENV"
           python3 -m pip install --upgrade pip
-          IDX=https://nightly.repo.amd.com/rocm/whl-next/
-          # rocm is a 28 kB sdist: build it without the cache (read-only outside the
-          # nightly; pip writes built wheels there). Its multi-GB wheels still come from it.
-          pip install --pre --index-url "$IDX" --no-cache-dir --no-deps "rocm==${ROCM_SDK_VERSION}"
-          pip install --pre --index-url "$IDX" "rocm[libraries,devel,device-gfx1250]==${ROCM_SDK_VERSION}"
+          pip install --pre --index-url https://nightly.repo.amd.com/rocm/whl-next/ \
+            "rocm[libraries,devel,device-gfx1250]==${ROCM_SDK_VERSION}"
           rocm-sdk init
           R="$(rocm-sdk path --root)"
           rocm-sdk path --bin >> "$GITHUB_PATH"
@@ -231,6 +229,7 @@ jobs:
           } >> "$GITHUB_ENV"
 
       - name: Check the SDK compiler matches per-PR CI
+        id: compiler
         # Warn only: the pin stays fixed. Flags in the step summary when the pinned SDK was
         # built with a different compiler than the one at ci-env's therock-ref.
         env:
@@ -280,19 +279,7 @@ jobs:
         id: strict
         # Fail before the long build if strict mode is not in effect. Uses the same
         # detection tox uses for the client target; prints arch names only.
-        env:
-          RUNNER_LABEL: ${{ runner.name }}
         run: |
-          # One runner per GPU: all shards and workers must stay on this runner's GPU,
-          # set by ROCR_VISIBLE_DEVICES in the runner's .env, else N from ...-gpuN.
-          if [ -z "${ROCR_VISIBLE_DEVICES:-}" ] && [[ "$RUNNER_LABEL" =~ -gpu([0-9]+)$ ]]; then
-            export ROCR_VISIBLE_DEVICES="${BASH_REMATCH[1]}"
-            echo "::warning::ROCR_VISIBLE_DEVICES is not set on this runner; using GPU $ROCR_VISIBLE_DEVICES from the runner name"
-            echo "ROCR_VISIBLE_DEVICES=$ROCR_VISIBLE_DEVICES" >> "$GITHUB_ENV"
-          fi
-          N="$(tr ',' '\n' <<<"${ROCR_VISIBLE_DEVICES:-}" | grep -c . || true)"
-          [ "$N" = 1 ] \
-            || { echo "::error::ROCR_VISIBLE_DEVICES must name exactly one GPU: set it in the runner's .env, or name the runner ...-gpuN"; exit 1; }
           ARCH="$(python3 - <<'EOF'
           import importlib.util
           spec = importlib.util.spec_from_file_location("ga", "projects/hipblaslt/tensilelite/tensilelite/GpuArch.py")
@@ -304,8 +291,15 @@ jobs:
           )"
           [ "$ARCH" = gfx1250-strict ] \
             || { echo "::error::runtime reports '${ARCH:-no GPU}', not gfx1250-strict"; exit 1; }
+          # One runner per GPU: the 4 gtest shards and 4 pytest workers must stay on this
+          # runner's GPU, so the runner must pass exactly one GPU in *_VISIBLE_DEVICES.
+          VIS="${ROCR_VISIBLE_DEVICES:-${HIP_VISIBLE_DEVICES:-}}"
+          N="$(tr ',' '\n' <<<"$VIS" | grep -c . || true)"
+          [ "$N" = 1 ] \
+            || { echo "::error::ROCR_VISIBLE_DEVICES (or HIP_VISIBLE_DEVICES) must name exactly one GPU; the runner sets it to its own GPU"; exit 1; }
 
       - name: Build hipBLASLt from source
+        id: build
         run: |
           set -euo pipefail
           export CC="$ROCM_PATH/lib/llvm/bin/amdclang" CXX="$ROCM_PATH/lib/llvm/bin/amdclang++"
@@ -319,6 +313,7 @@ jobs:
             | awk -F, -v OFS=, "$HW_SCRUB"
 
       - name: Run hipBLASLt tests
+        id: hipblaslt
         timeout-minutes: 120
         if: ${{ github.event_name != 'workflow_dispatch' || inputs.run_hipblaslt }}
         env:
@@ -380,6 +375,7 @@ jobs:
           exit "$rc"
 
       - name: Run TensileLite common tests (fresh client)
+        id: tensilelite
         timeout-minutes: 350
         # Runs even if the hipBLASLt build or tests failed, but not if setup did.
         if: ${{ !cancelled() && steps.strict.outcome == 'success' && (github.event_name != 'workflow_dispatch' || inputs.run_tensilelite) }}
@@ -410,8 +406,9 @@ jobs:
             | awk -F, -v OFS=, "$HW_SCRUB" | tee "$GITHUB_WORKSPACE/tensilelite_test_results/common_test.log"
 
       - name: Upload test results
+        id: upload
         if: always()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: gfx1250-strict-test-results
           path: |
@@ -428,11 +425,21 @@ jobs:
           SYSTEM_LABEL: ${{ secrets.GFX1250_BLAS_SYSTEM_LABEL }}
           GH_TOKEN: ${{ github.token }}
           TEST_RUNNER_NAME: ${{ runner.name }}
-          JOB_STATUS: ${{ job.status }}
+          # The steps' own outcomes; the job status covers anything not listed.
+          STEPS: >-
+            Test job=${{ job.status }},
+            Checkout=${{ steps.checkout.outcome }},
+            Install the ROCm SDK=${{ steps.sdk.outcome }},
+            Check the SDK compiler=${{ steps.compiler.outcome }},
+            Check the runtime reports gfx1250-strict=${{ steps.strict.outcome }},
+            Build hipBLASLt=${{ steps.build.outcome }},
+            Run hipBLASLt tests=${{ steps.hipblaslt.outcome }},
+            Run TensileLite common tests=${{ steps.tensilelite.outcome }},
+            Upload test results=${{ steps.upload.outcome }}
         # The TensileLite log holds two pytest sessions: rocisa, then the common tests.
         run: |
-          python3 .github/scripts/nightly_test_report.py --results . --title gfx1250-strict \
-            --artifact gfx1250-strict-test-results --job-status "$JOB_STATUS" \
+          python3 .github/scripts/blas_nightly_report.py --results . --title gfx1250-strict \
+            --artifact gfx1250-strict-test-results --steps "$STEPS" \
             --suite "hipBLASLt=gtest:test_results/hipblaslt_test_shard*.log" \
             --suite "TensileLite Common=pytest:tensilelite_test_results/common_test.log#2" \
             --suite "Rocisa=pytest:tensilelite_test_results/common_test.log#1" \

@@ -19,8 +19,8 @@ Suites (--suite LABEL=KIND:PATH, repeatable, display order; PATH under --results
                    default 1), e.g. a tox log with two sessions
 
 Usage:
-    nightly_test_report.py --results DIR --title NAME --artifact NAME --suite ...
-    ... --job-status STATUS                       # from the test job's last step
+    blas_nightly_report.py --results DIR --title NAME --artifact NAME --suite ... \
+        --steps "Test job=success, Build=failure, ..."
     ... --dry-run                                 # print, don't send
     ... --previous PREV_DIR --previous-run-id ID  # compare with results on disk
 
@@ -47,7 +47,7 @@ API = "https://api.github.com"
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
 PASS, FAIL, SKIP = "pass", "fail", "skip"
 STRIP = []  # --strip: substrings removed from test names in the email
-TEST_JOB = "Test job"  # the --steps entry for the job itself
+TEST_JOB = "Test job"  # the --steps entry for the job itself (job.status)
 
 
 # ---------------------------------------------------------------- parsing
@@ -241,39 +241,6 @@ def run_info(repo, run_id, token):
     }
 
 
-# GitHub's own steps, not the workflow's.
-_SETUP_STEP = re.compile(
-    r"^(Set up job|Complete job|Initialize containers|Stop containers|Post )"
-)
-
-
-def this_job_steps(repo, run_id, token, runner, status):
-    """'Test job=STATUS, <step>=<conclusion>, ...': the finished steps of the job
-    running on RUNNER (the report's own job)."""
-    out = [f"{TEST_JOB}={status}"]
-    try:
-        jobs = json.load(
-            _api(f"{API}/repos/{repo}/actions/runs/{run_id}/jobs?per_page=100", token)
-        )["jobs"]
-    except Exception as e:  # The report still goes out, without the step list.
-        print(f"::warning::Could not read this job's steps ({type(e).__name__}: {e})")
-        jobs = []
-    job = next(
-        (
-            j
-            for j in jobs
-            if j.get("runner_name") == runner and j["status"] == "in_progress"
-        ),
-        {},
-    )
-    out += [
-        f"{x['name']}={x['conclusion']}"
-        for x in job.get("steps", [])
-        if x["status"] == "completed" and not _SETUP_STEP.match(x["name"])
-    ]
-    return ", ".join(out)
-
-
 def fetch_previous(repo, run_id, token, now, cfg):
     """Download the most recent earlier nightly of this run's workflow and branch whose
     cfg.artifact is still there, within cfg.lookback_days.
@@ -399,7 +366,12 @@ def build(results, steps, previous, cfg):
     why = {}  # failing test -> timeout or crashed
     cur = suites(results, cfg.suites, why)
 
-    step_list = [tuple(x.strip().split("=", 1)) for x in steps.split(",") if "=" in x]
+    # A step that never started has an empty outcome: count it as skipped.
+    step_list = [
+        (n.strip(), o.strip() or "skipped")
+        for n, _, o in (x.partition("=") for x in steps.split(","))
+        if n.strip()
+    ]
     # A skipped step is fine, a skipped test job isn't. A failed test job only repeats
     # what the failing steps or tests already say.
     bad_steps = [
@@ -699,11 +671,6 @@ def main():
         "--steps", default="", help="Step outcomes, e.g. 'SDK=success, Build=failure'"
     )
     ap.add_argument(
-        "--job-status",
-        default="",
-        help="The test job's job.status, when run as its step; steps come from the API",
-    )
-    ap.add_argument(
         "--webhook-url",
         default=os.environ.get("WEBHOOK_URL", ""),
         help="Where to POST the report (default: $WEBHOOK_URL)",
@@ -759,14 +726,6 @@ def main():
     except Exception as e:  # The report still goes out, without the comparison.
         print(
             f"::warning::Could not get the previous nightly's results ({type(e).__name__}: {e})"
-        )
-    if args.job_status:
-        args.steps = this_job_steps(
-            env.get("GITHUB_REPOSITORY"),
-            env.get("GITHUB_RUN_ID"),
-            env.get("GH_TOKEN"),
-            env.get("TEST_RUNNER_NAME") or env.get("RUNNER_NAME"),
-            args.job_status,
         )
     report = build(args.results, args.steps, previous, args)
     if args.html_out:
