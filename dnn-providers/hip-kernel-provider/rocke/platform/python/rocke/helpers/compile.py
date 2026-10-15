@@ -78,6 +78,13 @@ from ..core.lower_llvm import _lower_kernel_to_llvm_python
 from ..core.passes import PassStats, optimize_kernel
 from ..runtime.comgr import build_hsaco_from_llvm_ir
 
+# Kernel attribute (bool) a builder sets on a kernel whose code generation
+# depends on what the compiling process compiled before (it emits
+# ``iglp_opt(1)``; see ``build_hsaco_from_llvm_ir``): ``compile_kernel`` then
+# compiles it in a fresh process. Compile policy only: no lowerer reads it, so
+# the LLVM IR is the same with or without it.
+COMGR_FRESH_PROCESS_ATTR = "comgr_fresh_process"
+
 
 @dataclass
 class KernelArtifact:
@@ -143,6 +150,10 @@ def compile_kernel(
     lower from the built kernel's serialized ``ck.dsl.ir/v1`` IR, so no
     per-family wiring is needed (the legacy ``spec`` argument is accepted
     for backward compatibility but is no longer consulted).
+
+    A kernel carrying ``COMGR_FRESH_PROCESS_ATTR`` is compiled in a fresh
+    process (``build_hsaco_from_llvm_ir(..., fresh_process=True)``); every
+    other kernel compiles in this process.
     """
     _lower_arch, isa = _resolve_compile_target(arch, isa)
 
@@ -158,7 +169,10 @@ def compile_kernel(
     )
     t2 = time.perf_counter()
     hsaco, comgr_t = build_hsaco_from_llvm_ir(
-        llvm_text, isa=isa, options=_comgr_options_for_kernel(kernel)
+        llvm_text,
+        isa=isa,
+        options=_comgr_options_for_kernel(kernel),
+        fresh_process=bool(kernel.attrs.get(COMGR_FRESH_PROCESS_ATTR)),
     )
     t3 = time.perf_counter()
 
@@ -204,12 +218,16 @@ class ComgrInput:
     The HSACO is a pure function of these three fields and the COMGR library
     that compiles them, which is what lets a caller key a binary cache on them
     and skip the (expensive) COMGR step when they have not changed.
+    ``fresh_process`` (the kernel's ``COMGR_FRESH_PROCESS_ATTR``) is how to
+    compile it, so that this holds for a kernel whose code generation would
+    otherwise depend on the process's earlier compiles.
     """
 
     kernel_name: str
     llvm_text: str
     isa: str
     options: tuple
+    fresh_process: bool = False
 
 
 def lower_kernel_for_comgr(
@@ -222,8 +240,9 @@ def lower_kernel_for_comgr(
     """The lowering half of :func:`compile_kernel`, without running COMGR.
 
     Resolves the target the same way and lowers through the same backend, so
-    ``build_hsaco_from_llvm_ir(c.llvm_text, isa=c.isa, options=list(c.options))``
-    produces the binary ``compile_kernel(kernel, arch=arch)`` would.
+    ``build_hsaco_from_llvm_ir(c.llvm_text, isa=c.isa, options=list(c.options),
+    fresh_process=c.fresh_process)`` produces the binary
+    ``compile_kernel(kernel, arch=arch)`` would.
     """
     lower_arch, isa = _resolve_compile_target(arch, isa)
     llvm_text = _lower_llvm_via_backend(
@@ -234,6 +253,7 @@ def lower_kernel_for_comgr(
         llvm_text=llvm_text,
         isa=isa,
         options=tuple(_comgr_options_for_kernel(kernel)),
+        fresh_process=bool(kernel.attrs.get(COMGR_FRESH_PROCESS_ATTR)),
     )
 
 

@@ -31,6 +31,7 @@ from kernels.common.conv_abi import (
     conv_arg_names,
     conv_direct_arg_names,
 )
+from rocke.helpers.spec import ceil_div
 from rocke.helpers.streamk import StreamKIterPartition, streamk_iter_partition
 from rocke.helpers.transforms import calculate_magic_numbers
 
@@ -58,10 +59,6 @@ def _magic_pair(name_prefix: str, divisor: int) -> Dict[str, int]:
         f"{name_prefix}_mult": _magic_as_i32(mult),
         f"{name_prefix}_shift": shift,
     }
-
-
-def _ceil_div(a: int, b: int) -> int:
-    return (a + b - 1) // b
 
 
 @dataclass(frozen=True)
@@ -528,12 +525,12 @@ class ConvArgs:
     @property
     def num_pid_m(self) -> int:
         """M-axis tile count; the kernel reads this as ``p_num_pid_m``."""
-        return _ceil_div(self.gemm_m, self.tile_m)
+        return ceil_div(self.gemm_m, self.tile_m)
 
     @property
     def num_pid_n(self) -> int:
         """N-axis tile count; the kernel reads this as ``p_num_pid_n``."""
-        return _ceil_div(self.gemm_n, self.tile_n)
+        return ceil_div(self.gemm_n, self.tile_n)
 
     def grid(self, split_k: int = 1) -> Tuple[int, int, int]:
         """``(gx, gy, gz)``: N tiles by M tiles by groups (times the split).
@@ -563,7 +560,7 @@ class ConvArgs:
         return streamk_iter_partition(
             m_tiles=self.num_pid_m * self.geom.groups,
             n_tiles=self.num_pid_n,
-            iters_per_tile=_ceil_div(self.gemm_k, self.tile_k),
+            iters_per_tile=ceil_div(self.gemm_k, self.tile_k),
             max_active_wgs=pool,
             persistent=persistent,
         )
@@ -641,7 +638,7 @@ class ConvArgs:
             # The tail past wg_K reads zero through the descriptor's bounds,
             # which is what lets all ``split_k`` slices share one uniform
             # bound computation.
-            values["ks"] = _ceil_div(self.gemm_k, self.tile_k * split_k) * self.tile_k
+            values["ks"] = ceil_div(self.gemm_k, self.tile_k * split_k) * self.tile_k
             values["ks_count"] = split_k
         return values
 

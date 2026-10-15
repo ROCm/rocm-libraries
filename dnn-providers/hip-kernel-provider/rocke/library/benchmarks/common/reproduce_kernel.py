@@ -135,6 +135,7 @@ def reproduce(
                 comgr_input.llvm_text,
                 isa=comgr_input.isa,
                 options=list(comgr_input.options),
+                fresh_process=comgr_input.fresh_process,
             )
         except Exception as e:  # noqa: BLE001 - reported per kernel
             log(f"  [error] compile failed: {type(e).__name__}: {e}")

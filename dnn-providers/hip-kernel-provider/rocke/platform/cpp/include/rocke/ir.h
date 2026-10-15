@@ -1527,6 +1527,13 @@ void rocke_b_sync(rocke_ir_builder_t* b);
 void rocke_b_s_barrier_bare(rocke_ir_builder_t* b);
 void rocke_b_sync_half_block(rocke_ir_builder_t* b, rocke_value_t* half_selector);
 void rocke_b_sync_lds_only(rocke_ir_builder_t* b);
+/* Python sync / sync_lds_only / s_barrier_bare(fence=mode): mode "compiler"
+ * follows the barrier with a compiler memory barrier, "workgroup" also
+ * brackets it with workgroup-scope release / acquire fences; NULL or "none" is
+ * the plain op. Any other mode records ROCKE_ERR_VALUE. */
+void rocke_b_sync_fence(rocke_ir_builder_t* b, const char* mode);
+void rocke_b_sync_lds_only_fence(rocke_ir_builder_t* b, const char* mode);
+void rocke_b_s_barrier_bare_fence(rocke_ir_builder_t* b, const char* mode);
 /* s_waitcnt: pass -1 to leave a counter alone, 0 to fully drain. */
 void rocke_b_s_waitcnt(rocke_ir_builder_t* b, int vmcnt, int lgkmcnt, int expcnt);
 void rocke_b_s_wait_asynccnt(rocke_ir_builder_t* b, int n);
