@@ -491,12 +491,13 @@ function(hkp_wire_pack_target)
                 --inter-root "${_inter_root}"
                 --kpack-python-dir "${ARG_ROCM_KPACK_DIR}"
                 --source-label "${ARG_NAME}"
+                --generic-targets-json "${HIPDNN_PLUGIN_SDK_GPU_GENERIC_TARGETS_JSON}"
                 ${_producer_arg}
                 ${_exclude_args}
         COMMAND "${CMAKE_COMMAND}" -E make_directory "${ARG_OUT_ROOT}"
         COMMAND "${CMAKE_COMMAND}" -E touch "${_stamp}"
         DEPENDS "${HKP_TOOL}" ${_source_inputs} ${_tool_sources}
-                "${_input_manifest}"
+                "${_input_manifest}" "${HIPDNN_PLUGIN_SDK_GPU_GENERIC_TARGETS_JSON}"
                 ${_producer_deps}
         COMMENT "hkp: packing root '${ARG_NAME}' for ${ARG_ARCHES}"
         VERBATIM)
@@ -1238,11 +1239,13 @@ function(_hkp_root_probe out_shipped out_offered out_ok root arches exclude_fold
     set(_probe_py "import json, sys
 from hkp_pack.descriptors import load_flat_input
 from hkp_pack.errors import HkpPackError
+from hkp_pack.generic_targets import GenericTargets
 from hkp_pack.pipeline import offered_engines, shipped_engines
 lists = {k: tuple(v for v in rest.split(',') if v)
-         for k, _, rest in (a.partition('=') for a in sys.argv[2:])}
+         for k, _, rest in (a.partition('=') for a in sys.argv[3:])}
 try:
-    flat = load_flat_input(sys.argv[1], log=lambda *_args: None,
+    flat = load_flat_input(sys.argv[1], GenericTargets.load(sys.argv[2]),
+                           log=lambda *_args: None,
                            exclude_folders=lists['folders'],
                            disabled_kinds=lists['kinds'])
     print(json.dumps({'shipped': shipped_engines(flat, lists['arches']),
@@ -1253,6 +1256,7 @@ except HkpPackError as exc:
     execute_process(
         COMMAND "${CMAKE_COMMAND}" -E env "PYTHONPATH=${HKP_PYTHON_ROOT}" --
                 "${Python3_EXECUTABLE}" -c "${_probe_py}" "${root}"
+                "${HIPDNN_PLUGIN_SDK_GPU_GENERIC_TARGETS_JSON}"
                 "arches=${_arch_csv}" "folders=${_folder_csv}" "kinds=${_kind_csv}"
         RESULT_VARIABLE _rc
         OUTPUT_VARIABLE _out
@@ -1649,6 +1653,15 @@ endfunction()
 #   fatal.
 # ---------------------------------------------------------------------------
 function(hkp_add_packaging)
+    if(NOT HIPDNN_PLUGIN_SDK_GPU_GENERIC_TARGETS_JSON
+       OR NOT EXISTS "${HIPDNN_PLUGIN_SDK_GPU_GENERIC_TARGETS_JSON}")
+        message(FATAL_ERROR
+            "hkp: HIPDNN_PLUGIN_SDK_GPU_GENERIC_TARGETS_JSON names no file "
+            "('${HIPDNN_PLUGIN_SDK_GPU_GENERIC_TARGETS_JSON}'); build against a "
+            "hipdnn_plugin_sdk that ships gpu_generic_targets.json.")
+    endif()
+    set_property(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" APPEND PROPERTY
+        CMAKE_CONFIGURE_DEPENDS "${HIPDNN_PLUGIN_SDK_GPU_GENERIC_TARGETS_JSON}")
     find_package(Python3 COMPONENTS Interpreter REQUIRED)
 
     hkp_resolve_kpack(_rocm_kpack_dir "${Python3_EXECUTABLE}")

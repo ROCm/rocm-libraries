@@ -166,7 +166,7 @@ descriptor index expands as the recursive glob `/**/*.json` — a walk of the wh
 filesystem.
 
 Review the finalized inventory after deduplication. Resolve KDP → UED → KMD by UUID;
-tuple identity includes schema types/defaults and effective architecture overlap.
+tuple identity includes schema types/defaults and the arch tier at which kernels compete.
 Structural mode reports compiled agreement as `NOT CHECKED` and can exit 0 with unrun
 checks. `--profile` optionally selects the bundle and supplies vocabulary, never
 compiler evidence. Full artifact checking belongs after packing.

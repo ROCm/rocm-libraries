@@ -70,6 +70,8 @@ test_categories:
       - "hipdnn_bench_cli_stability_not_a_number"
       - "hipdnn_bench_cli_engine_id_not_a_number"
       - "hipdnn_bench_cli_error_before_help"
+      # Build tree only; see plugin_sdk/tests/CMakeLists.txt.
+      - "hipdnn_gpu_generic_targets_.*"
 
   integration:
     description: "Current hipDNN integration-check coverage"

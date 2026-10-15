@@ -767,7 +767,7 @@ def writeSolutionsAndKernelsTCL(
     unaryAssemble = functools.partial(assemble, removeTemporaries=removeTemporaries)
 
     outOptions = rocisa.rocIsa.getInstance().getOutputOptions()
-    outOptions.outputNoComment = not disableAsmComments
+    outOptions.outputNoComment = disableAsmComments
 
     memcompress = len(uniqueAsmKernels) > 10000
     unaryProcessKernelSource = functools.partial(
