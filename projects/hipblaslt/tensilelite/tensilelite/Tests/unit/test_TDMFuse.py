@@ -9,6 +9,7 @@ import copy
 import types
 
 import pytest
+from rocisa.code import RegSet
 
 from Tensile.Common.GlobalParameters import defaultSolution
 from Tensile.Common.ValidParameters import validParameters
@@ -422,6 +423,7 @@ class Stub:
     def __init__(self, **binds):
         for name in ("isTdmWaveSeparated", "tdmFusePaired",
                      "tdmSeparateABDescriptors", "tdmSetupIncrementWaveSeparated",
+                     "tdmDescriptorSetOwner", "tdmLastIterDisableSgprs", "defineTdmSgprs",
                      "_dcpTokenSide", "_dcpCurrentToken", "_dcpTdmIssueTokens"):
             fn = getattr(KernelWriterAssembly, name, None)
             if fn is not None:
@@ -445,6 +447,58 @@ def test_wave_separation_still_gates_the_writer():
     divergent = _ksOwner(enableTDMA=False, PrefetchGlobalReadA=1,
                          PrefetchGlobalReadB=2)
     assert DP.decoupledThickGateRelaxation(divergent) is None
+
+
+def _disabledOwners(writer, state):
+    names = writer.tdmLastIterDisableSgprs(state)
+    return names, {writer.tdmDescriptorSetOwner(state, n[len("tdm"):-len("Group0+0")])
+                   for n in names}
+
+
+@pytest.mark.parametrize("name", sorted(TF.TDM_GROUPS))
+@pytest.mark.parametrize("mxA, mxB", [(32, 32), (32, 0), (0, 32)])
+def test_last_iter_disable_reaches_every_descriptor_set(monkeypatch, name, mxA, mxB):
+    monkeypatch.setattr(TF, "tdmGrouping", lambda _ks: TF.TDM_GROUPS[name])
+    writer = Stub()
+    state = _ksOwner(ProblemType={"MXBlockA": mxA, "MXBlockB": mxB})
+    live = [tc for tc in TDM_TENSORS if TF.tdmMemberIsLive(state, tc)]
+    names, owners = _disabledOwners(writer, state)
+    assert owners == {writer.tdmDescriptorSetOwner(state, tc) for tc in live}
+    assert len(names) == len(set(names))
+
+
+@pytest.mark.parametrize("name", sorted(TF.TDM_GROUPS))
+@pytest.mark.parametrize("mxA, mxB", [(32, 32), (32, 0), (0, 32)])
+def test_every_tdm_sgpr_alias_targets_a_defined_set(monkeypatch, name, mxA, mxB):
+    monkeypatch.setattr(TF, "tdmGrouping", lambda _ks: TF.TDM_GROUPS[name])
+    writer = Stub(states=types.SimpleNamespace(subtileIterateModeA=False,
+                                               subtileIterateModeB=False),
+                  defineSgpr=lambda reg, num, align=1: RegSet("s", "sgpr" + reg, 0))
+    state = _ksOwner(enableTDMMetadata=False,
+                     ProblemType={"MXBlockA": mxA, "MXBlockB": mxB})
+    defined = set()
+    for item in writer.defineTdmSgprs(state).items():
+        directive, dst, src = str(item).split()
+        assert directive == ".set"
+        assert src.isdigit() or src.split("+")[0] in defined, str(item)
+        defined.add(dst.rstrip(","))
+
+
+@pytest.mark.parametrize("name, expected", [
+    ("MX_AB", ["tdmAGroup0+0", "tdmMXSAGroup0+0"]),
+    ("B_MX", ["tdmAGroup0+0", "tdmMXSAGroup0+0"]),
+    ("paired", ["tdmAGroup0+0", "tdmMXSAGroup0+0", "tdmBGroup0+0"]),
+    ("A_MX", ["tdmAGroup0+0", "tdmMXSAGroup0+0", "tdmBGroup0+0"]),
+])
+def test_last_iter_disable_names_per_grouping(monkeypatch, name, expected):
+    monkeypatch.setattr(TF, "tdmGrouping", lambda _ks: TF.TDM_GROUPS[name])
+    assert Stub().tdmLastIterDisableSgprs(_ksOwner()) == expected
+
+
+@pytest.mark.parametrize("over", [dict(enableTDMB=False), dict(UseSubtileImpl=True)])
+def test_last_iter_disable_without_wave_separated_sets(monkeypatch, over):
+    monkeypatch.setattr(TF, "tdmGrouping", lambda _ks: TF.TDM_GROUPS["paired"])
+    assert Stub().tdmLastIterDisableSgprs(_ksOwner(**over)) == ["tdmAGroup0+0", "tdmMXSAGroup0+0"]
 
 
 def _tokenWriter():

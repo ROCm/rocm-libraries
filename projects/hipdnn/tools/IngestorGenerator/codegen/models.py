@@ -7,6 +7,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Optional
 
+from . import generic_targets as gtmod
+
 #: KMD field types the loader accepts (``DescriptorLoader.hpp``'s ``MetadataField``).
 KMD_FIELD_TYPES: tuple[str, ...] = ("bool", "int", "float", "string", "int_list")
 
@@ -109,6 +111,7 @@ KNOWN_ARCH_BASE_IDS: frozenset[str] = frozenset(
         "gfx1100",
         "gfx1101",
         "gfx1102",
+        "gfx1151",
         "gfx1200",
         "gfx1201",
         "gfx1250",
@@ -387,9 +390,13 @@ class IngestorConfig:
     def device_fixture_arch(self) -> str:
         """Architecture named by the emitted matcher-test device fixture: the
         first pack's first arch, or `DEFAULT_FIXTURE_ARCH` when the config
-        restricts none."""
+        restricts none; a generic stands for its first member."""
         first_pack_arch = self.packs[0].arch if self.packs else []
-        return first_pack_arch[0] if first_pack_arch else DEFAULT_FIXTURE_ARCH
+        if not first_pack_arch:
+            return DEFAULT_FIXTURE_ARCH
+        first = first_pack_arch[0]
+        table = gtmod.default_table()
+        return table.members(first)[0] if table.has(first) else first
 
     @property
     def device_fixture_wave_size(self) -> int:

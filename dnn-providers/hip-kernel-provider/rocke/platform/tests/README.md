@@ -143,6 +143,19 @@ the configured build. With no configured build or explicit override, the runner
 reports that parity as skipped; direct pytest invocations can use the same
 overrides.
 
+### Optimization-barrier coverage
+
+The standalone `rocke_optimization_barrier` CTest checks native scalar admission,
+rejection, serialization round trips, and LLVM lowering. It is installed with the
+other native tests and does not require a pytest executable-discovery fixture.
+
+`core/test_optimization_barrier.py` checks the Python builder and serialized LLVM
+output. The dedicated Python/C parity emitters cover LLVM, canonical IR, and
+verification; committed golden entries anchor the existing configurations.
+`instances/test_optimization_barrier_numeric.py` compiles through COMGR and
+checks scalar payloads, lane predicates, and intermediate rounding on a GPU.
+Native HIP-source lowering is outside this feature's supported path.
+
 ## Installed pinned-reference suites
 
 These suites are registered by platform CMake for the installed provider, with

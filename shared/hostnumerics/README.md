@@ -2,9 +2,10 @@
 
 HostNumerics is a shared CPU-only component for generating test inputs,
 computing numerical reference results, and comparing them with observed results.
-It is being introduced incrementally, starting with build, packaging, and test
-infrastructure. The numerical implementation and consumer integrations are
-demonstrated in the [prototype PR #10553](https://github.com/ROCm/rocm-libraries/pull/10553).
+It is being introduced incrementally. Build, packaging, test infrastructure,
+and scalar type metadata are available. The full numerical implementation and
+consumer integrations are demonstrated in the
+[prototype PR #10553](https://github.com/ROCm/rocm-libraries/pull/10553).
 
 ## Intended end state
 
@@ -41,18 +42,18 @@ with rocRoller.
 
 The prototype in #10553 serves as an end-to-end integration reference while
 the implementation lands in `develop` through small, independently reviewable
-PRs. The table tracks the landing sequence; a check marks work included in this
-branch.
+PRs. The main stages are:
 
 | Status | Stage | Scope |
 | --- | --- | --- |
 | ✅ [#12208](https://github.com/ROCm/rocm-libraries/pull/12208) | Build and package foundations | CMake targets and installed package, Python module, C++/Python and installed-package smoke tests, dedicated CPU CI, and ownership. |
-| Planned | Tensor and datatype core | Tensor model, storage and ownership rules, scalar formats, and conversions, with C++ tests and independent Python coverage. |
+| In progress | Tensor and datatype core | Tensor model, storage and ownership rules, scalar formats, and conversions, with C++ tests and independent Python coverage. |
 | Planned | Numerical operations | Deterministic input generation, reference arithmetic, and comparison, with independent expected results and sanitizer coverage added alongside the implementation. |
 | Planned | Consumer migrations and removal | Migrate hipBLASLt, TensileLite, and rocRoller's GEMM paths incrementally. Remove duplicate implementations as their callers migrate, and retire `mxDataGenerator` once its remaining responsibilities and build dependencies have moved. |
 
-The first three stages develop and test HostNumerics independently of the
-consumers. They keep it outside the default monorepo build and provide fast
+Keep each PR to one concept and as small as possible. The standalone stages
+develop and test HostNumerics independently of the consumers. They keep it
+outside the default monorepo build and provide fast
 feedback through the standalone CPU CI jobs. The target is for the component
 build and tests to take on the order of two minutes, excluding runner queue and
 setup time.
@@ -66,6 +67,8 @@ expected results before the shared implementation becomes a product's sole
 reference. Compare representative input-generation and reference-computation
 timings, as well as their effect on complete test and benchmark runs, before
 removing an old accelerated path.
+
+C++ tests use GoogleTest 1.12.1 or newer, retaining the repository's older compatibility baseline because these assertions need no newer API. Top-level test builds default to fetching 1.17.0, matching the shared superbuild, when no compatible installed package is available; set `HOSTNUMERICS_ENABLE_FETCH=OFF` to require an existing package. When a parent enables HostNumerics tests through `add_subdirectory`, fetching defaults to `OFF`: provide a compatible GoogleTest package or target, or explicitly set `HOSTNUMERICS_ENABLE_FETCH=ON`. Existing `GTest::gtest_main` targets must expose their version through the target's `VERSION` property or `GTest_VERSION`. GoogleTest is not installed or exported with HostNumerics.
 
 ## Build and test
 
@@ -96,7 +99,7 @@ are then unnecessary.
 when building HostNumerics standalone and `OFF` when another project includes it
 with `add_subdirectory`. CI covers ON/ON with Ninja Multi-Config and OFF/OFF with
 Ninja, including installation and an external C++ consumer for both. It also
-checks the embedded defaults.
+checks the embedded defaults and an installed GoogleTest package with fetching disabled. When configuring the package or embedded test project directly, pass `-DHOSTNUMERICS_SOURCE_DIR=/path/to/hostnumerics` so it can locate the shared test source and CMake helper.
 
 Install into a local prefix with:
 
@@ -114,8 +117,8 @@ intended responsibilities:
   GEMM, and numerical comparison. It links core transitively, so consumers
   needing these operations only need to link `roc::hostnumerics`.
 
-This bootstrap defines both as `INTERFACE` targets that only expose the version
-header. The prototype implements them as static libraries.
+Both targets currently use `INTERFACE` libraries exposing version and scalar
+type metadata. The prototype implements them as static libraries.
 
 Consumers can add the install prefix to `CMAKE_PREFIX_PATH` and use:
 
@@ -124,5 +127,9 @@ find_package(HostNumerics CONFIG REQUIRED)
 target_link_libraries(my_target PRIVATE roc::hostnumerics)
 ```
 
-The Python bindings will expose both layers through the single `hostnumerics`
-package. In this bootstrap, it exposes only `__version__`.
+The Python bindings expose scalar metadata and `__version__` through the single
+`hostnumerics` package; both layers will use that package as they land.
+
+`ScalarType` identifies an encoding, and `scalarTypeInfo(type)` describes its
+category, storage width, exponent, fraction, and special-value support. Python
+exposes the same metadata through `scalar_type_info(type)`.
