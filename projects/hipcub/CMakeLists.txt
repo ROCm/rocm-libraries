@@ -35,15 +35,15 @@ endif()
 # Update these variables at release time
 #
 # Set the library version
-set(VERSION_STRING "4.7.0")
+set(VERSION_STRING "4.7.1")
 # Set the CCCL-compatible version.
 set(HIPCUB_CCCL_VERSION_MAJOR 2)
 set(HIPCUB_CCCL_VERSION_MINOR 8)
 set(HIPCUB_CCCL_VERSION_PATCH 2)
 # Set the minimum required rocPRIM version
-set(MIN_ROCPRIM_PACKAGE_VERSION "4.1.0" CACHE STRING "Minimum version of rocPRIM to search for when ROCPRIM_FETCH_METHOD is set to PACKAGE.")
+set(MIN_ROCPRIM_PACKAGE_VERSION "4.8.0" CACHE STRING "Minimum version of rocPRIM to search for when ROCPRIM_FETCH_METHOD is set to PACKAGE.")
 # Set download branch for dependency rocPRIM
-set(ROCM_DEP_RELEASE_BRANCH "release/therock-10.0" CACHE STRING "Download branch for ROCm dependencies")
+set(ROCM_DEP_RELEASE_BRANCH "release/therock-10.2" CACHE STRING "Download branch for ROCm dependencies")
 # --------------------------------------
 
 # Install prefix
