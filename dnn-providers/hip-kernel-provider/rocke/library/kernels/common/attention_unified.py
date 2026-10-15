@@ -289,6 +289,10 @@ def _canonical_arch_for_selection(arch: Optional[str]) -> str:
     """
     if not arch:
         return _resolve_attention_arch()
+    # Launchers already supply these canonical targets on every support check.
+    # Preserve decorated/unknown target handling without reparsing this common case.
+    if arch in ("gfx942", "gfx950", "gfx1250"):
+        return arch
     from rocke.core.arch import base_arch_from_target_id
 
     return base_arch_from_target_id(arch.strip().lower())

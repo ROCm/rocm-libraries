@@ -740,6 +740,18 @@ class TestDecoratedTargetIds(unittest.TestCase):
             with self.subTest(raw=raw):
                 self.assertEqual(_canonical_arch_for_selection(raw), expected)
 
+    def test_canonical_launch_arch_skips_target_parser(self):
+        from unittest.mock import patch
+        from kernels.common.attention_unified import _canonical_arch_for_selection
+
+        with patch(
+            "rocke.core.arch.base_arch_from_target_id",
+            side_effect=AssertionError("canonical target reparsed"),
+        ):
+            for arch in ("gfx942", "gfx950", "gfx1250"):
+                with self.subTest(arch=arch):
+                    self.assertEqual(_canonical_arch_for_selection(arch), arch)
+
     def test_impl_routers_receive_canonical_arch(self):
         """A decorated ID must canonicalize to the correct arch and therefore
         select the correct spec class — not fall through to the gfx950 default.

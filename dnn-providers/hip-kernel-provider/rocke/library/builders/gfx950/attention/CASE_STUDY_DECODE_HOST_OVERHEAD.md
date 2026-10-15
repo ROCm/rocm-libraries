@@ -28,7 +28,9 @@ The ordinary call still validates arbitrary live bindings on every invocation.
 For repeated fixed-binding loops, `Attention3DExecution.replay_scope()` moves
 validation and stream setup to entry, retaining either the captured graph or
 bound segment/reducer launch buffers until exit drains the stream. The decode
-benchmarks time the yielded public callable. Binding changes go through
+benchmarks can explicitly time the yielded public callable with
+`--dsl-timing scoped`; their default `--dsl-timing ordinary` times the public
+dispatcher for each invocation. Binding changes go through
 `rebind()` between scopes; the general `launch()` path retains its per-call
 validation and outer-capture support.
 
@@ -147,3 +149,70 @@ by these changes. The prior graph behavior is retained pending a working lane.
 | `library/tests/test_strided_kv_decode_numeric.py` | Independent on-GPU numerical and lifetime gate |
 | `docs/strided-kv-decode.md` | Caller stream, update and completion contract |
 | `platform/dsl_docs/optimization/optimization_runbook.md` §3.5 | Host-versus-device diagnosis procedure |
+
+
+## Validation after integrating architecture-independent selection
+
+Commit `2dde6147d01c31837d863191f89a56bfd1917531` integrates develop
+`0868455a0554b9afb6cc88d514a151d801aaeb87`. The merge retains explicit
+architecture arguments and architecture-bearing compile keys while preserving
+scoped replay and graph binding ownership. It also removes strided callers'
+obsolete problem-field architecture override and passes the launch architecture
+to their support gate.
+
+On gfx950, the three BF16 paged shapes above were measured in one allocation
+(Slurm job 68095469), using ROCm 7.14, Torch `2.13.0+rocm7.14.0`, NumPy 2.2.6,
+Python 3.12, isolated COMGR, and a pinned CPU. The source arms were the repaired
+commit, prior PR head `205a989d89ae058c5fd5d988fbd73dc46e013434`, and the
+pre-ownership parent `b69179f7d5df831788b2c1cd5c919d63459124b2`.
+Each arm ran in a fresh process, sequentially across three trials with the middle
+order reversed. Each mode used seven event samples, discarding the first, with
+20 warmups and 300 iterations. The ratios below use the median of trial medians.
+Preparation, scope entry/exit, and rebinding remain outside the timed callable.
+
+| KV length | Repaired scoped graph / prior scoped graph | Repaired scoped eager / prior scoped eager | Repaired scoped graph / parent graph | Repaired scoped eager / parent graph |
+| --- | --- | --- | --- | --- |
+| 4096 | 0.999 | 0.998 | 0.885 | 0.844 |
+| 16384 | 1.012 | 1.011 | 1.007 | 0.941 |
+| 65536 | 0.999 | 1.001 | 0.998 | 0.971 |
+
+These runs preserve the scoped timing at the measured configurations. The
+ordinary validated graph call has a separate cost: repaired/prior-PR ratios
+were 1.047, 1.039, and 0.998 respectively. The scope results do not establish
+an improvement for arbitrary ordinary calls or workloads with changing bindings.
+
+All 81 measured modes passed independent CPU FP32 references after BF16
+quantization before and after timing, with `atol=0.01`, `rtol=0.02`, finite
+outputs, and poisoned output buffers before checking. Segment/reducer LLVM and
+HSACO digests and launch geometry matched across all source arms and trials.
+The repaired commit's full decode numeric suite passed 92 cases on gfx950 with
+no skips. Source payload SHA-256 was
+`bfd8a41e8f9a405a96915ae3e67a01613b69b6ec4092c5560354371d579e07ed`;
+all transferred source blobs were checked against their pinned Git trees.
+The input/reference calculation ran on CPU, and Torch transported tensors to and
+from the rocKE device kernels. This remains synthetic fixed-binding evidence.
+
+
+## Benchmark timing boundaries
+
+The generic gfx942/gfx950 decode benchmarks default to ordinary public
+dispatcher timing. `--dsl-timing scoped` selects the prepared fixed-binding
+callable for 3D entries, excluding preparation, scope entry/exit, and rebinding.
+A 2D entry remains ordinary in either mode. JSON output identifies the requested
+mode and actual per-entry mode; comparison baselines retain their ordinary
+call boundaries. Scoped comparisons therefore include different host costs.
+
+An external saved-spec caller can bind tuning metadata once and still call
+`run_unified_attention_torch()` on every iteration. That binding alone does
+not enter `Attention3DExecution.replay_scope()`. On gfx950, the internal 3D
+graph heuristic is disabled by default; an ordinary graph-enabled diagnostic
+is a different mode from default eager dispatch. An outer captured batch
+measures device replay separately and excludes most host submission costs.
+The scoped results above do not establish an improvement for either ordinary
+eager dispatch or an external benchmark that has not adopted scoped replay.
+
+The architecture-independent support gates now accept decorated target IDs.
+The common launch path already supplies canonical `gfx942`, `gfx950`, or
+`gfx1250`, so those inputs bypass repeated target parsing. Decorated and unknown
+target IDs retain the original parser; compile-cache architecture agreement
+checks remain in place. Host coverage checks both paths without a device probe.
