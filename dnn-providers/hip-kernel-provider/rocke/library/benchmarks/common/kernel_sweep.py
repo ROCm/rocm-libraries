@@ -68,11 +68,13 @@ Per direction, on top of that:
   kernarg, so it is not swept here.
 * **dgrad** -- vector widths: a in {1, 2, 4, 8} (dY along kpg), b = c in
   {1, 2, 4, 8} (W and dX along cpg); with the default epilogue c = 1 and b in
-  {1, 2, 4, 8}. One binary per configuration serves every stride and
+  {1, 2, 4, 8}. One tilde binary per configuration serves every stride and
   dilation: the tilde decomposition is computed on the host and passed in
-  the sub-GEMM record buffer, up to 1024 sub-GEMMs (stride 32x32). Only the
-  tilde kernel is built -- stride 1 / dilation 1 runs it as one sub-GEMM,
-  as fast as the unit-stride kernel. The B tile takes the layout the JIT sweep
+  the sub-GEMM record buffer, up to 1024 sub-GEMMs (stride 32x32). Next to
+  it, a stride-1 / dilation-1 binary of the same configuration
+  (``CACHE_DGRAD_STRIDE1``), which rebuilds its single sub-GEMM record from
+  the kernargs instead of searching and loading the buffer, and stores
+  through the unit-stride epilogue. The B tile takes the layout the JIT sweep
   picks (``DgradConvSpec.default_lds_k_outer``): K-outer wherever the arch,
   dtype, atom and pipeline allow it and the B load is wider than one element,
   M-outer otherwise. ``uniform_k_decode`` follows
@@ -174,12 +176,17 @@ _AOT_ALIAS_PIPELINES: Dict[str, Tuple[str, ...]] = {
 # honouring ungrouped entries of older caches for ungrouped problems only.
 #
 # Implicit-GEMM dgrad reads its stride and dilation from the tilde sub-GEMM
-# records at run time; the only thing they change in the emitted code is the
-# unit-stride (stride 1, dilation 1) epilogue versus the tilde one. The cache
-# builds the tilde kernel only and records stride/dilation 0 (runtime), so one
-# binary serves every stride and dilation within max_sub_gemms. The unit-stride
-# kernel is not built: it measured no faster on stride-1 problems.
+# records at run time, so one tilde binary (stride/dilation recorded as 0,
+# runtime) serves every stride and dilation within max_sub_gemms. A stride-1
+# binary is a second capability: at stride 1 the kernel rebuilds its single
+# sub-GEMM record from the kernargs instead of searching and loading the
+# record buffer (DgradConvSpec.folds_sub_gemm_record), and with dilation 1 it
+# also takes the unit-stride epilogue. Its identity records stride 1 and
+# dilation 1, so the cache offers it to stride-1, dilation-1 problems only;
+# the tilde binary of the same configuration still serves those too.
 CACHE_GROUPED: Tuple[bool, ...] = (True,)
+# Whether the stride-1 dgrad binaries are built next to the tilde ones.
+CACHE_DGRAD_STRIDE1: tuple[bool, ...] = (False, True)
 # Sub-GEMM records an implicit-GEMM dgrad binary dispatches over (its tilde
 # decomposition has stride_h * stride_w of them at most): 32x32, so the
 # patch-embedding strides 14 and 16 of vision transformers fit. The CTA's
@@ -366,8 +373,16 @@ def _layout_caps() -> List[dict]:
 
 
 def _dgrad_caps() -> List[dict]:
-    """dgrad's capability variants: grouped, always the tilde kernel."""
-    return [dict(grouped=g, tilde=True) for g in _GROUPED]
+    """dgrad's capability variants: grouped x (tilde, stride 1 / dilation 1)."""
+    return [
+        (
+            {"grouped": g, "stride": 1, "dilation": 1}
+            if s1
+            else {"grouped": g, "tilde": True}
+        )
+        for s1 in CACHE_DGRAD_STRIDE1
+        for g in _GROUPED
+    ]
 
 
 def _job_flavor(llvm_flavor: Optional[str]) -> str:
@@ -883,8 +898,9 @@ def _dgrad_jobs(
     ):
         if not _aot_pipeline("dgrad", pipeline):
             continue
-        # Stride and dilation are runtime (the tilde records); the identity
-        # records them as 0.
+        # The tilde binary takes stride and dilation at run time (the tilde
+        # records); its identity records them as 0. The stride-1 binary
+        # records the stride and dilation it serves.
         # dgrad's B (W, KYXC) and D (dX) are both contiguous along cpg, so
         # they share one width; A (dY) runs along kpg. The default epilogue
         # stores scalar, so there D is 1 and B takes its own width.
@@ -939,6 +955,10 @@ def _dgrad_jobs(
                     dtype_b=db,
                     dtype_d=dd,
                     grouped=grouped,
+                    stride_h=caps.get("stride", 0),
+                    stride_w=caps.get("stride", 0),
+                    dilation_h=caps.get("dilation", 0),
+                    dilation_w=caps.get("dilation", 0),
                     **cfg,
                 ),
                 direction="dgrad",

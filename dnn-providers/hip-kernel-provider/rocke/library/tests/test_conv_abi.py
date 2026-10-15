@@ -1485,10 +1485,15 @@ def test_cache_rejects_dgrad_beyond_max_sub_gemms():
     assert not ok and "sub-GEMMs" in reason
 
 
-def test_aot_dgrad_builds_one_tilde_binary_for_every_stride(monkeypatch):
-    """The AOT dgrad grid builds only the tilde kernel: its probe is strided
-    (so the tilde epilogue is emitted) and its identity records stride and
-    dilation as runtime, so one binary serves unit and non-unit strides."""
+def test_aot_dgrad_builds_tilde_and_stride1_binaries(monkeypatch):
+    """The AOT dgrad grid builds two binaries per configuration.
+
+    The tilde kernel: its probe is strided (so the tilde epilogue is emitted)
+    and its identity records stride and dilation as runtime, so it serves unit
+    and non-unit strides. The stride-1 kernel: its probe and identity are
+    stride 1 / dilation 1, it folds the sub-GEMM record, and the cache offers
+    it to stride-1, dilation-1 problems only.
+    """
     from rocke.core.arch import ArchTarget
 
     from benchmarks.common.kernel_cache import KernelCache
@@ -1497,20 +1502,33 @@ def test_aot_dgrad_builds_one_tilde_binary_for_every_stride(monkeypatch):
     target = ArchTarget.from_gfx(_ARCH)
     family = "wmma" if target.wave_size == 32 else "mma"
     jobs = list(ks._dgrad_jobs(_ARCH, "fp16", target.wave_size, family, target, 64))
-    assert jobs
-    for j in jobs:
+    tilde = [j for j in jobs if j.identity.stride_h == 0]
+    unit = [j for j in jobs if j.identity.stride_h == 1]
+    assert tilde and len(unit) == len(tilde) and len(tilde) + len(unit) == len(jobs)
+    for j in tilde:
         i = j.identity
         assert (i.stride_h, i.stride_w, i.dilation_h, i.dilation_w) == (0, 0, 0, 0)
         p = ks._probe_problem("dgrad", j.caps)
         assert p.sH > 1 or p.dH > 1
+    for j in unit:
+        i = j.identity
+        assert (i.stride_h, i.stride_w, i.dilation_h, i.dilation_w) == (1, 1, 1, 1)
+        p = ks._probe_problem("dgrad", j.caps)
+        assert (p.sH, p.sW, p.dH, p.dW) == (1, 1, 1, 1)
+        assert p.groups > 1 and i.grouped
 
     cache = KernelCache("/nonexistent-cache-dir-for-a-pure-predicate-test", _ARCH)
-    ident = next(j.identity for j in jobs if ks._spec_is_valid(j, _ARCH, "fp16"))
+    ident = next(j.identity for j in tilde if ks._spec_is_valid(j, _ARCH, "fp16"))
+    s1 = next(j.identity for j in unit if ks._spec_is_valid(j, _ARCH, "fp16"))
     for s, d in ((1, 1), (2, 1), (3, 1), (1, 2)):
         p = ConvProblem(
             N=1, Hi=16, Wi=16, C=64, K=64, Y=3, X=3, sH=s, sW=s, pH=d, pW=d, dH=d, dW=d
         )
         assert cache.supports_problem(ident, p)[0], (s, d)
+        assert cache.supports_problem(s1, p)[0] == ((s, d) == (1, 1)), (s, d)
+    # Both rebuild from their identities.
+    for job in (j for j in jobs if j.identity in (ident, s1)):
+        assert ks.job_for_identity(job.identity).identity == job.identity
 
 
 def test_deep_fused_conv_pool_signature_matches_kernel_params():
@@ -2387,9 +2405,10 @@ def test_describe_jobs_breaks_the_grid_down(monkeypatch):
         n = sum(j.direction == direction for j in jobs)
         assert f"  {direction}: {n} kernels" in lines
     assert "k-loop:" in text and "split-K:" in text
-    # dgrad builds one binary for every stride and dilation, so that axis
-    # takes a single value and is not broken down.
-    assert "stride x dilation:" not in text
+    # dgrad builds the tilde binary (stride and dilation at run time, 0x0)
+    # and the stride-1 / dilation-1 one (1x1), in equal numbers.
+    n_dgrad = sum(j.direction == "dgrad" for j in jobs)
+    assert f"stride x dilation: 0x0 {n_dgrad // 2}, 1x1 {n_dgrad // 2}" in text
 
 
 def test_aot_grid_caps_accumulator_registers(monkeypatch):
