@@ -9,6 +9,7 @@ test_categories:
     exclude:
     extra_args:
       - "--smoketest"
+      - "--precompile"
     labels:
       - "quick"
 
@@ -22,6 +23,7 @@ test_categories:
     extra_args:
       - "--test_prob"
       - "0.02"
+      - "--precompile"
     labels:
     #Same tests run for comprehensive and full categories
       - "standard"

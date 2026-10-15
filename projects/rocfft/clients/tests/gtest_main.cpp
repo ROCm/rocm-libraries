@@ -51,6 +51,18 @@
 #include "bitwise_repro/bitwise_repro_test.h"
 #include "rocfft/rocfft.h"
 
+#if __has_include(<filesystem>)
+#include <filesystem>
+#else
+#include <experimental/filesystem>
+namespace std
+{
+    namespace filesystem = experimental::filesystem;
+}
+#endif
+
+namespace fs = std::filesystem;
+
 // Control output verbosity:
 int verbose;
 
@@ -622,10 +634,14 @@ int main(int argc, char* argv[])
     app.add_option("--repro-db",
                    repro_db_path,
                    "Database file full path name for bitwise reproducibility tests");
-    app.add_option("--precompile",
-                   precompile_file,
-                   "Precompile kernels to a file for all test cases before running tests")
-        ->default_val("");
+    auto precompile_option
+        = app.add_option(
+                 "--precompile",
+                 precompile_file,
+                 "Precompile kernels to a file for all test cases before running tests.  If file "
+                 "is not specified, a temporary file will be chosen.")
+              ->default_val("")
+              ->expected(0, 1);
     app.add_flag("--printtokens", printtokens, "Print test tokens to scheduled to be run and exit");
     // Default value is set in fft_params.h based on if device-side PRNG was enabled.
     app.add_option("-g, --inputGen",
@@ -688,13 +704,31 @@ int main(int argc, char* argv[])
               << "\tdouble epsilon: " << double_epsilon << std::endl;
     std::cout << "Random seed: " << random_seed << std::endl;
 
+    // Use temporary file for precompiling if no file was specified
+    struct precompile_file_cleanup
+    {
+        // Make best-effort attempt to clean up any file that was created
+        ~precompile_file_cleanup()
+        {
+            if(!path.empty())
+                fs::remove(path);
+        }
+        fs::path path;
+    };
+    precompile_file_cleanup cleanup;
+    if(precompile_option->count() && precompile_file.empty())
+    {
+        // Pick a name in the temp directory - rocFFT will gracefully
+        // share this file between two test programs, or fall back to
+        // in-memory cache if this file can't be opened
+        cleanup.path    = fs::temp_directory_path() / "rocfft-test.db";
+        precompile_file = cleanup.path.string();
+    }
+
     // If precompiling, tell rocFFT to use the specified cache file
     // to write kernels to
-    //
-    // But if our environment already has a cache file for RTC, then
-    // we should just use that
     std::unique_ptr<EnvironmentSetTemp> env_precompile;
-    if(!precompile_file.empty() && rocfft_getenv("ROCFFT_RTC_CACHE_PATH").empty())
+    if(!precompile_file.empty())
     {
         env_precompile = std::make_unique<EnvironmentSetTemp>("ROCFFT_RTC_CACHE_PATH",
                                                               precompile_file.c_str());

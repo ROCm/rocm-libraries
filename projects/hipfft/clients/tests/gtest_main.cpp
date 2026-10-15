@@ -44,6 +44,18 @@
 #include "hipfft/hipfft.h"
 #include "hipfft_accuracy_test.h"
 
+#if __has_include(<filesystem>)
+#include <filesystem>
+#else
+#include <experimental/filesystem>
+namespace std
+{
+    namespace filesystem = experimental::filesystem;
+}
+#endif
+
+namespace fs = std::filesystem;
+
 // initialize static class member of hipfft_params
 std::vector<gpubuf> hipfft_params::externally_managed_workareas = std::vector<gpubuf>();
 
@@ -631,10 +643,14 @@ int main(int argc, char* argv[])
         ->default_val("wisdom3.txt");
     // Filename for precompiled kernels to be written to
     std::string precompile_file;
-    app.add_option("--precompile",
-                   precompile_file,
-                   "Precompile kernels to a file for all test cases before running tests")
-        ->default_val("");
+    auto        precompile_option
+        = app.add_option(
+                 "--precompile",
+                 precompile_file,
+                 "Precompile kernels to a file for all test cases before running tests.  If file "
+                 "is not specified, a temporary file will be chosen.")
+              ->default_val("")
+              ->expected(0, 1);
     // Try parsing initial args that will be used to configure tests
     // Allow extras to pass on gtest arguments without error
     app.allow_extras();
@@ -740,13 +756,31 @@ int main(int argc, char* argv[])
     std::cout << "half epsilon: " << half_epsilon << "\tsingle epsilon: " << single_epsilon
               << "\tdouble epsilon: " << double_epsilon << std::endl;
 
+    // Use temporary file for precompiling if no file was specified
+    struct precompile_file_cleanup
+    {
+        // Make best-effort attempt to clean up any file that was created
+        ~precompile_file_cleanup()
+        {
+            if(!path.empty())
+                fs::remove(path);
+        }
+        fs::path path;
+    };
+    precompile_file_cleanup cleanup;
+    if(precompile_option->count() && precompile_file.empty())
+    {
+        // Pick a name in the temp directory - rocFFT will gracefully
+        // share this file between two test programs, or fall back to
+        // in-memory cache if this file can't be opened
+        cleanup.path    = fs::temp_directory_path() / "rocfft-test.db";
+        precompile_file = cleanup.path.string();
+    }
+
     // if precompiling, tell rocFFT to use the specified cache file
     // to write kernels to
-    //
-    // but if our environment already has a cache file for RTC, then
-    // we should just use that
     std::unique_ptr<EnvironmentSetTemp> env_precompile;
-    if(!precompile_file.empty() && rocfft_getenv("ROCFFT_RTC_CACHE_PATH").empty())
+    if(!precompile_file.empty())
     {
         env_precompile = std::make_unique<EnvironmentSetTemp>("ROCFFT_RTC_CACHE_PATH",
                                                               precompile_file.c_str());
