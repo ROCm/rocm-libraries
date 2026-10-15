@@ -3,19 +3,27 @@
 
 """gfx942 MLA candidates.
 
-Two kernels serve the one MLA op, told apart by the request's
-``max_seqlen_q``:
+Two candidates serve the one MLA op, told apart by the request's
+``max_seqlen_q``, and each has its own input contract:
 
-* the weight-absorbed **decode** kernel, for ``max_seqlen_q == 1`` (priority
-  5), and
-* the chunked bf16 **prefill** forward kernel (priority 10), which stays
-  admissible at one query per sequence as the fallback. It takes the query
-  already projected by ``W_UQ`` and RoPE-rotated; neither step is in-tree, and
-  the pre-kernel that does both is a follow-up. It is registered three times:
-  the production candidate ships the layout the agpr_acc rule picks, and two
-  opt-in candidates each pin one fixed two-heads layout (``agpr_acc`` and
-  ``row16``) so sweeps and tuning records can name a layout that does not move
-  when the rule or the LLVM flavor changes.
+* the weight-absorbed **decode** kernel, for ``max_seqlen_q == 1``: the
+  absorbed query ``qa = [Q_nope @ W_UK_nopeᵀ | Q_rope]`` in, the normalized
+  latent (before ``W_UV``) and the LSE out (``dispatch.mla.decode``);
+* the chunked bf16 **prefill** forward kernel, for ``max_seqlen_q >= 2``: the
+  query already projected by ``W_UQ`` and RoPE-rotated
+  (``[total_q, H, d_nope + d_rope]``) and the per-head ``W_UK`` in, the
+  attention output (``W_UV`` applied) and the LSE out. Neither ``W_UQ`` nor
+  the rotation is in-tree; the pre-kernel that does both is a follow-up.
+  Prefill is registered three times: the production candidate ships the
+  layout the agpr_acc rule picks, and two opt-in candidates each pin one fixed
+  two-heads layout (``agpr_acc`` and ``row16``) so sweeps and tuning records
+  can name a layout that does not move when the rule or the LLVM flavor
+  changes.
+
+The ranges do not overlap. Prefill could compute ``S_q = 1``, but under its
+own contract, so it is not a fallback for decode: a one-query request that
+decode cannot serve (a head count off its 64-head workgroup) is refused, not
+handed a kernel that expects different tensors.
 
 Registration is an explicit ``register(registry)`` call rather than an import
 side effect, so the registry contents stay a readable list and a test can
@@ -311,6 +319,9 @@ def _make_gfx942_mla_prefill_candidate(*, layout: str | None = None) -> KernelCa
                 ShapeRange("kv_lora_rank", allowed=(512,)),
                 ShapeRange("page_block_size", allowed=(16,)),
                 ShapeRange("total_q", min=1),
+                # One query per sequence is decode's regime and decode's input
+                # contract (the absorbed query); see the module docstring.
+                ShapeRange("max_seqlen_q", min=2),
                 # The in-kernel seq_idx binary search runs a fixed
                 # MLA_BINARY_SEARCH_ITERS iterations, which resolve at most
                 # 2**iters - 1 sequences.

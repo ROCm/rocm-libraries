@@ -42,6 +42,32 @@ if sys.path and sys.path[0] != _LIB_ROOT:
     sys.path.insert(0, _LIB_ROOT)
 
 
+def _dispatch_decode(*, num_heads, max_seqlen_k, arch):
+    """The shipped decode selection for a 4-sequence batch.
+
+    Dispatch refuses decode at llvm20 (its backend spills the kernel), so the
+    selection is made under llvm22; the spec does not depend on the flavor,
+    and the caller lowers it at whichever flavor it is checking.
+    """
+    import pytest
+    from dispatch.mla import MLARequest, dispatch_mla
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setenv("ROCKE_LLVM_FLAVOR", "llvm22")
+        return dispatch_mla(
+            MLARequest(
+                num_heads=num_heads,
+                total_q=4,
+                num_seqs=4,
+                max_seqlen_q=1,
+                max_seqlen_k=max_seqlen_k,
+                arch=arch,
+                # Pinned so the split choice does not come from the host.
+                num_cus=256,
+            )
+        )
+
+
 def _cases():
     """``cid -> (arch, zero-arg builder)``.
 
@@ -77,19 +103,8 @@ def _cases():
 
     def dispatched(arch, num_heads, max_k):
         def build():
-            from dispatch.mla import MLARequest, dispatch_mla
-
-            result = dispatch_mla(
-                MLARequest(
-                    num_heads=num_heads,
-                    total_q=4,
-                    num_seqs=4,
-                    max_seqlen_q=1,
-                    max_seqlen_k=max_k,
-                    arch=arch,
-                    # Pinned so the split choice does not come from the host.
-                    num_cus=256,
-                )
+            result = _dispatch_decode(
+                num_heads=num_heads, max_seqlen_k=max_k, arch=arch
             )
             return result.candidate.built(result.spec, arch)
 
@@ -187,49 +202,48 @@ def test_mla_decode_ir_matches_golden():
 
 
 def test_mla_decode_cpp_python_byte_identity(monkeypatch):
-    """Every case lowers to identical bytes through the C++ engine."""
+    """Every case lowers to identical bytes through the C++ engine, at every
+    golden flavor (not only the host's)."""
     import pytest
     from rocke.core.backend import BackendCoverageGap, BackendError
     from rocke.helpers.compile import _lower_llvm_via_backend
 
     monkeypatch.setenv("ROCKE_CPP_STRICT", "1")
-    mismatched, gaps = [], []
-    for cid, (arch, build) in _cases().items():
-        kernel = build()
-        py = _lower_llvm_via_backend(kernel, arch=arch, backend="python", spec=None)
-        try:
-            cpp = _lower_llvm_via_backend(kernel, arch=arch, backend="cpp", spec=None)
-        except BackendCoverageGap:
-            gaps.append(cid)
-            continue
-        except BackendError as e:
-            pytest.skip(f"C++ engine not importable: {str(e)[:200]}")
-        if py != cpp:
-            mismatched.append(cid)
+    mismatched, gaps, compared = [], [], 0
+    for flavor in _FLAVORS:
+        monkeypatch.setenv("ROCKE_LLVM_FLAVOR", flavor)
+        for cid, (arch, build) in _cases().items():
+            kernel = build()
+            py = _lower_llvm_via_backend(kernel, arch=arch, backend="python", spec=None)
+            try:
+                cpp = _lower_llvm_via_backend(
+                    kernel, arch=arch, backend="cpp", spec=None
+                )
+            except BackendCoverageGap:
+                gaps.append(f"{flavor}/{cid}")
+                continue
+            except BackendError as e:
+                if compared or gaps:
+                    # The engine loaded for an earlier case: this is a real
+                    # failure at this flavor, not an absent engine.
+                    raise
+                pytest.skip(f"C++ engine not importable: {str(e)[:200]}")
+            compared += 1
+            if py != cpp:
+                mismatched.append(f"{flavor}/{cid}")
+    assert not gaps, "C++ engine cannot lower:\n  " + "\n  ".join(gaps)
+    assert compared == len(_FLAVORS) * len(_cases())
     assert not mismatched, "MLA decode cpp/python IR mismatch:\n  " + "\n  ".join(
         mismatched
     )
-    assert not gaps, "C++ engine cannot lower:\n  " + "\n  ".join(gaps)
 
 
 def test_dispatch_cases_track_the_shipped_spec():
     """The ``dispatch_*`` cases build what dispatch selects: one single-pass
     and one split-KV launch per arch."""
-    from dispatch.mla import MLARequest, dispatch_mla
-
     for arch in _ARCHES:
         for max_k, split in ((256, False), (8192, True)):
-            spec = dispatch_mla(
-                MLARequest(
-                    num_heads=128,
-                    total_q=4,
-                    num_seqs=4,
-                    max_seqlen_q=1,
-                    max_seqlen_k=max_k,
-                    arch=arch,
-                    num_cus=256,
-                )
-            ).spec
+            spec = _dispatch_decode(num_heads=128, max_seqlen_k=max_k, arch=arch).spec
             assert spec.split_kv is split
             assert spec.ARCH == arch
 

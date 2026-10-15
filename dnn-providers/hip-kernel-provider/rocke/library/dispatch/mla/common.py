@@ -33,7 +33,13 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Any, List
 
-from rocke.dispatch.core import OperatorRequest, selector_matches
+from rocke.dispatch.core import (
+    KernelCandidate,
+    KernelId,
+    OperatorRequest,
+    make_kernel_id,
+    selector_matches,
+)
 from rocke.dispatch.tuning.identity import normalize_knobs
 
 FAMILY = "mla"
@@ -43,7 +49,8 @@ MLA_ABI_VERSION = "hipkg-mla/v1"
 #: not separate ops: the request states the problem (``max_seqlen_q`` among it)
 #: and the registry picks the kernel, exactly as ``AttentionRequest`` routes its
 #: decode kernels on ``seqlen_q``. Prefill and decode still get distinct
-#: selection keys, because they are distinct candidates.
+#: selection keys, because they are distinct candidates, and distinct input
+#: contracts (see :class:`MLARequest`).
 MLA_OP = "mla_fwd"
 
 #: Features an MLA candidate may declare. ``causal`` is the bottom-right runtime
@@ -98,14 +105,26 @@ class MLARequest(OperatorRequest):
     numbering its in-kernel binary search inverts, which a rectangular request
     cannot express for ragged inputs.
 
-    ``mla_prefill_fwd`` takes the query already projected by ``W_UQ`` and
-    RoPE-rotated (``[total_q, num_heads, d_nope + d_rope]``). Neither step is
-    in-tree; the caller applies both, and a pre-kernel for them is a follow-up.
+    ``max_seqlen_q`` picks the regime, and with it the input contract the
+    caller must hold -- the two are not interchangeable:
 
-    ``max_seqlen_q`` is what tells decode from prefill, and it cannot be
-    derived from the other two: ``total_q == num_seqs`` also holds for a batch
-    whose sequences carry 0 and 2 queries. A decode batch (``max_seqlen_q ==
-    1``) may still hold sequences with no query, so ``total_q <= num_seqs``.
+    * **decode** (``max_seqlen_q == 1``) takes the absorbed query
+      ``qa = [Q_nope @ W_UK_nopeᵀ | Q_rope]`` (``[total_q, num_heads,
+      kv_lora_rank + d_rope]``) and returns the normalized latent (before
+      ``W_UV``) and the LSE;
+    * **prefill** (``max_seqlen_q >= 2``) takes the query projected by
+      ``W_UQ`` and RoPE-rotated (``[total_q, num_heads, d_nope + d_rope]``)
+      plus the per-head ``W_UK``, and returns the attention output and LSE.
+
+    Neither ``W_UQ`` nor the rotation is in-tree; the caller applies both, and
+    a pre-kernel for them is a follow-up.
+
+    ``max_seqlen_q`` cannot be derived from the other two: ``total_q ==
+    num_seqs`` also holds for a batch whose sequences carry 0 and 2 queries. A
+    decode batch may still hold sequences with no query, so ``total_q <=
+    num_seqs``. It is a precondition, not a hint: no sequence in the launched
+    batch may carry more queries. The decode kernel computes one query per
+    sequence and would leave a second one unwritten.
     """
 
     num_heads: int
@@ -275,6 +294,13 @@ def _request_errors(req: OperatorRequest) -> List[str]:
 _selector_matches = selector_matches
 
 
+def mla_kernel_id(req: MLARequest, candidate: KernelCandidate, spec: Any) -> KernelId:
+    """The selection identity of ``spec`` on ``candidate`` for ``req``."""
+    # One op for the family (``MLA_OP``): prefill and decode are told apart by
+    # candidate and spec, both of which are in the selection key.
+    return make_kernel_id(req, candidate, spec, op=req.op)
+
+
 def num_q_blocks_for(req: MLARequest, block_q: int) -> int:
     """Packed-varlen q-block count in the AITER numbering.
 
@@ -319,6 +345,7 @@ __all__ = [
     "MLARequest",
     "_request_errors",
     "_selector_matches",
+    "mla_kernel_id",
     "num_q_blocks_for",
     "resolve_num_cus",
 ]

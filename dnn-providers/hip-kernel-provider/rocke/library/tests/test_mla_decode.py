@@ -15,9 +15,11 @@ Numeric correctness is the on-device lane, ``test_mla_decode_numeric.py``.
 
 from __future__ import annotations
 
+import json
+import os
 import re
-import tempfile
-from pathlib import Path
+import subprocess
+import sys
 
 import pytest
 
@@ -25,6 +27,7 @@ from dispatch.mla.decode import choose_num_seg
 from kernels.mla.mla_decode import (
     MlaDecodeSpec,
     build_mla_decode,
+    check_mla_decode_extents,
     mla_decode_block,
     mla_decode_combine_spec,
     mla_decode_grid,
@@ -154,7 +157,9 @@ class TestLaunchGeometry:
             mla_decode_grid(spec, num_seqs=0)
 
     def test_single_pass_pack_is_the_prefill_absorbed_pack(self):
-        # A caller holds one set of tensors whichever kernel dispatch picks.
+        # The same 12 arguments, so the prefill absorbed_query kernel can run
+        # on decode's buffers as an independent oracle (dispatch never swaps
+        # one for the other).
         decode = [a["name"] for a in mla_decode_signature(MlaDecodeSpec(num_heads=128))]
         prefill = [
             a["name"]
@@ -179,6 +184,16 @@ class TestLaunchGeometry:
         assert (
             mla_decode_workspace_shapes(MlaDecodeSpec(num_heads=128), total_q=3) == {}
         )
+
+    def test_extents_track_the_widest_tensor(self):
+        # qa: 576 per head; split workspace: 512 * num_seg per head.
+        single = MlaDecodeSpec(num_heads=128)
+        assert check_mla_decode_extents(single, total_q=29127)[0]
+        ok, why = check_mla_decode_extents(single, total_q=29128)
+        assert not ok and "i32 offsets" in why
+        split = MlaDecodeSpec(num_heads=128, num_seg=64)
+        assert check_mla_decode_extents(split, total_q=511)[0]
+        assert not check_mla_decode_extents(split, total_q=512)[0]
 
 
 class TestChooseNumSeg:
@@ -303,46 +318,147 @@ class TestCombine:
         assert "mfma" not in ir and "smem_pool" not in ir
 
 
+def _blocks_with(ir: str, pattern: str) -> list[str]:
+    """Basic-block label of every IR line matching ``pattern``."""
+    blocks, current = [], None
+    for line in ir.splitlines():
+        label = re.match(r"^([\w.]+):", line)
+        if label:
+            current = label.group(1)
+        elif re.search(pattern, line):
+            blocks.append(current)
+    return blocks
+
+
+class TestEmptySegments:
+    def test_split_epilogue_guards_the_acc_store(self):
+        # An empty segment stores only (m, l): every 512-wide acc store
+        # (<4 x float>) sits in one conditional block, apart from the (m, l)
+        # writer (<2 x float>).
+        ir = lower_kernel_to_llvm(
+            build_mla_decode(MlaDecodeSpec(num_heads=64, num_seg=4), arch="gfx942"),
+            arch="gfx942",
+        )
+        acc_blocks = set(_blocks_with(ir, r"store <4 x float>"))
+        ml_blocks = set(_blocks_with(ir, r"store <2 x float>"))
+        assert len(acc_blocks) == 1 and len(ml_blocks) == 1, (acc_blocks, ml_blocks)
+        (acc_block,) = acc_blocks
+        assert acc_block.startswith("if.then"), acc_block
+        assert acc_blocks != ml_blocks
+
+    def test_combine_reads_acc_only_for_live_segments(self):
+        # The combine reads a segment's acc row (<4 x float>) only behind its
+        # l > 0 trip count, never in the block that reads (m, l).
+        ir = lower_kernel_to_llvm(
+            build_mla_decode_combine(
+                MlaDecodeCombineSpec(num_heads=128), arch="gfx942"
+            ),
+            arch="gfx942",
+        )
+        ml_blocks = set(_blocks_with(ir, r"load <2 x float>"))
+        acc_blocks = set(_blocks_with(ir, r"load <4 x float>"))
+        assert len(ml_blocks) == 1 and acc_blocks
+        assert not acc_blocks & ml_blocks, (acc_blocks, ml_blocks)
+
+
+# Compile + introspect one kernel in a child process: comgr's option parser
+# calls exit(1) on a flag the loaded LLVM does not know, which no except can
+# catch and which would otherwise end the whole pytest run. Exit code 77 is a
+# skip; anything else non-zero is a failure, reported with the child's output.
+_RESOURCE_PROBE = r"""
+import json
+import sys
+import tempfile
+from pathlib import Path
+arch, num_seg = sys.argv[1], int(sys.argv[2])
+try:
+    import torch  # noqa: F401 -- binds the torch-bundled comgr
+except ImportError:
+    pass
+try:
+    from rocke.analysis.isa import analyze_hsaco
+    from rocke.helpers.compile import compile_kernel
+except ImportError as exc:
+    print(f"comgr / resource tools unavailable: {exc}")
+    sys.exit(77)
+from rocke.core.lower_llvm import _resolve_llvm_flavor
+from dispatch.mla.decode import DECODE_LLVM_FLAVORS
+try:
+    flavor = _resolve_llvm_flavor()
+except RuntimeError as exc:
+    print(f"LLVM flavor undeterminable: {exc}")
+    sys.exit(77)
+if flavor not in DECODE_LLVM_FLAVORS:
+    print(f"decode is served at {DECODE_LLVM_FLAVORS} only; host lowers {flavor}")
+    sys.exit(77)
+from kernels.mla.mla_decode import MlaDecodeSpec, build_mla_decode
+from kernels.mla.mla_decode_gfx950 import MlaDecodeGfx950Spec
+spec_cls = {"gfx942": MlaDecodeSpec, "gfx950": MlaDecodeGfx950Spec}[arch]
+kernel = build_mla_decode(spec_cls(num_heads=128, num_seg=num_seg), arch=arch)
+try:
+    art = compile_kernel(kernel, arch=arch, capture_ir_text=False)
+except ImportError as exc:
+    print(f"comgr toolchain unavailable: {exc}")
+    sys.exit(77)
+except RuntimeError as exc:
+    # A forced ROCKE_LLVM_FLAVOR the loaded comgr cannot take is an
+    # environment mismatch; any other compile failure is real.
+    if "mismatch" not in str(exc):
+        raise
+    print(f"comgr cannot take this IR flavor: {exc}")
+    sys.exit(77)
+with tempfile.TemporaryDirectory() as tmp:
+    path = Path(tmp) / "mla_decode.hsaco"
+    path.write_bytes(bytes(art.hsaco))
+    try:
+        res = analyze_hsaco(path).resources
+    except (FileNotFoundError, RuntimeError) as exc:
+        print(f"HSACO introspection unavailable: {exc}")
+        sys.exit(77)
+print(json.dumps({"scratch": res.scratch_bytes, "vgpr": res.vgpr_count,
+                  "lds": res.lds_bytes}))
+"""
+
+
 class TestResources:
-    """Compiled through comgr: the static half of the P3/P6 gate.
+    """Compiled through comgr: the static half of the resource gate.
 
     Zero scratch, and at most 256 VGPRs and 32 KiB of LDS, which is what two
-    workgroups of four waves need per CU on both arches. Skipped where comgr or
-    llvm-objdump is missing.
+    workgroups of four waves need per CU on both arches. Skipped where comgr,
+    llvm-objdump or the IR flavor's compiler is missing.
     """
 
     @pytest.mark.parametrize("arch", sorted(SPECS))
     @pytest.mark.parametrize("num_seg", [1, 4])
     def test_no_spills_two_workgroups_per_cu(self, arch, num_seg):
+        env = dict(os.environ, PYTHONPATH=os.pathsep.join(sys.path))
         try:
-            import torch  # noqa: F401  -- binds the torch-bundled comgr
-        except ImportError:
-            pass
-        try:
-            from rocke.analysis.isa import analyze_hsaco
-            from rocke.helpers.compile import compile_kernel
-        except ImportError as exc:  # pragma: no cover - environment-dependent
-            pytest.skip(f"comgr / resource tools unavailable: {exc}")
-        kernel = build_mla_decode(
-            SPECS[arch](num_heads=128, num_seg=num_seg), arch=arch
-        )
-        try:
-            art = compile_kernel(kernel, arch=arch, capture_ir_text=False)
-        except ImportError as exc:  # pragma: no cover - environment-dependent
-            pytest.skip(f"comgr toolchain unavailable: {exc}")
-        except RuntimeError as exc:
-            # A forced ROCKE_LLVM_FLAVOR the loaded comgr cannot take is an
-            # environment mismatch; any other compile failure is real.
-            if "vintage mismatch" not in str(exc):
-                raise
-            pytest.skip(f"comgr cannot take this IR flavor: {exc}")
-        with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "mla_decode.hsaco"
-            path.write_bytes(bytes(art.hsaco))
-            try:
-                res = analyze_hsaco(path).resources
-            except (FileNotFoundError, RuntimeError) as exc:  # pragma: no cover
-                pytest.skip(f"HSACO introspection unavailable: {exc}")
-        assert res.scratch_bytes == 0
-        assert res.vgpr_count <= 256
-        assert res.lds_bytes <= 32768
+            proc = subprocess.run(
+                [sys.executable, "-c", _RESOURCE_PROBE, arch, str(num_seg)],
+                capture_output=True,
+                text=True,
+                env=env,
+                timeout=600,
+            )
+        except subprocess.TimeoutExpired as exc:
+            pytest.fail(
+                f"resource probe timed out after 600 s: {(exc.stderr or '')[-1000:]}"
+            )
+        output = (proc.stdout + proc.stderr).strip()
+        if proc.returncode == 77:
+            # The probe prints its reason on stdout; stderr may end in an
+            # unrelated warning.
+            pytest.skip((proc.stdout.strip().splitlines() or [output])[-1])
+        # comgr's option parser exit(1)s with this message and no Python
+        # traceback; a traceback is a real failure, whatever its text.
+        if (
+            proc.returncode == 1
+            and "Unknown command line argument" in proc.stderr
+            and "Traceback" not in proc.stderr
+        ):
+            pytest.skip(f"the loaded comgr rejects a compile option: {output[-300:]}")
+        assert proc.returncode == 0, output[-2000:]
+        res = json.loads(proc.stdout.strip().splitlines()[-1])
+        assert res["scratch"] == 0
+        assert res["vgpr"] <= 256
+        assert res["lds"] <= 32768

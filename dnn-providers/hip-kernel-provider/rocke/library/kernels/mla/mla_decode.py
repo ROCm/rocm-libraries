@@ -73,6 +73,7 @@ import math
 from dataclasses import dataclass
 from typing import ClassVar
 
+from kernels.common.attention_dense_spec import INT32_LIMIT
 from rocke.core.ir import BF16, F32, I32, I64, IRBuilder, KernelDef, PtrType
 from rocke.helpers.attention import (
     mfma_16x16x16_for_dtype as _mfma_16x16x16,
@@ -82,31 +83,43 @@ from rocke.helpers.attention import (
 from rocke.helpers.layouts import TransposeLdsReader
 from rocke.helpers.spec import SignatureBuilder
 
-from .mla_decode_combine import NEG_INIT, MlaDecodeCombineSpec
+from .mla_decode_combine import NEG_INIT, WAVE_SIZE, MlaDecodeCombineSpec
 
-# Shared with the prefill kernel on purpose: these helpers and constants are
-# its own, imported rather than copied so that both kernels' IR moves together.
-# Once the prefill lands, they can move to a common kernels/mla module and lose
-# their leading underscores.
+# The prefill kernel's fragment helpers and arch facts (atom shape, LDS pads
+# and budget, staging width): the decode pipeline is that kernel's
+# one-wave-per-head loop, so its fragments are laid out the same way. They are
+# private to that module; a shared kernels/mla module holding them under
+# public names is the cleaner home.
 from .mla_prefill_gfx942 import (
     C_PER_LANE,
     C_STAGE_W,
-    HPW_AGPR_ALLOC,
-    HPW_LAZY_TAU,
-    HPW_PV_PREFETCH,
-    HPW_SCORE_FENCE_EVERY,
-    HPW_SCORE_PREFETCH,
     LDS_BYTES_PER_WORKGROUP,
     MFMA_K,
     MFMA_N,
     V8_PAD,
-    WAVE_SIZE,
     WT_PAD,
     _bf16x4_rne_finite,
     _pick4,
     _query_reduce,
     _shift,
 )
+
+# Decode's own schedule knobs. They start at the prefill's values -- the same
+# loop, measured there -- but are decode's to tune: a prefill retune must not
+# move decode IR.
+
+#: No AGPRs: the 128-VGPR accumulator stays in the VGPR file, where the
+#: per-tile rescale does not pay an accvgpr read/write pair per register.
+DECODE_AGPR_ALLOC = (0, 0)
+#: Score k-steps whose LDS reads are issued ahead of the MFMA that uses them.
+DECODE_SCORE_PREFETCH = 8
+#: Score k-steps between scheduling fences.
+DECODE_SCORE_FENCE_EVERY = 4
+#: PV read groups issued ahead of the MFMAs that use them.
+DECODE_PV_PREFETCH = 1
+#: Lazy rescale threshold, in log2 units: a new running max replaces the one
+#: in use only when it is more than this far above it.
+DECODE_LAZY_TAU = 64.0
 
 __all__ = [  # noqa: RUF022  -- ordered spec -> gate -> launch geometry -> build
     "MlaDecodeSpec",
@@ -116,6 +129,8 @@ __all__ = [  # noqa: RUF022  -- ordered spec -> gate -> launch geometry -> build
     "mla_decode_grid",
     "mla_decode_signature",
     "mla_decode_workspace_shapes",
+    "check_mla_decode_extents",
+    "mla_decode_max_num_seg",
     "mla_decode_combine_spec",
     "build_mla_decode",
 ]
@@ -349,13 +364,16 @@ def mla_decode_grid(spec: MlaDecodeSpec, *, num_seqs: int) -> tuple[int, int, in
     return (spec.num_heads // spec.block_h, num_seqs, spec.num_seg)
 
 
-def mla_decode_signature(spec: MlaDecodeSpec):
+def mla_decode_signature(spec: MlaDecodeSpec) -> list[dict]:
     """Launch signature, in declaration order.
 
-    With ``num_seg == 1`` this is the prefill ``absorbed_query`` kernel's
-    12-argument pack, unchanged: a caller holds one set of tensors whichever
-    kernel dispatch picks. ``scale`` is the raw host scale (``log2(e)`` is
-    folded in-kernel) and ``max_k`` is unused but kept for that symmetry.
+    The input contract is the absorbed one: ``qa = [Q_nope @ W_UK_nopeᵀ |
+    Q_rope]`` in, the normalized latent (before ``W_UV``) and the LSE out.
+    With ``num_seg == 1`` the pack is argument-for-argument the prefill
+    ``absorbed_query`` kernel's, which is what lets that kernel serve as an
+    independent GPU oracle on the same buffers; dispatch itself never swaps one
+    for the other. ``scale`` is the raw host scale (``log2(e)`` is folded
+    in-kernel) and ``max_k`` is unused but kept for that symmetry.
 
     With ``num_seg > 1`` the two outputs are the fp32 workspace instead (see
     :func:`mla_decode_workspace_shapes`) and ``num_seg`` is appended.
@@ -389,9 +407,9 @@ def mla_decode_workspace_shapes(
 
     ``part_acc`` is the unnormalized latent accumulator and ``part_ml`` holds
     ``(m, l)`` per (token, segment, head), ``m`` in log2 units. Empty with
-    ``num_seg == 1``. The kernels index it with i32 element offsets, so
-    ``total_q * num_seg * num_heads * r_kv`` must stay below ``2**31``;
-    dispatch clamps ``num_seg`` to keep it there.
+    ``num_seg == 1``. An empty segment writes only its ``(m, l)``; its
+    ``part_acc`` row is left as allocated. The kernels index both with i32
+    element offsets: see :func:`check_mla_decode_extents`.
     """
     if not spec.split_kv:
         return {}
@@ -399,6 +417,29 @@ def mla_decode_workspace_shapes(
         "part_acc_ptr": (total_q, spec.num_seg, spec.num_heads, spec.r_kv),
         "part_ml_ptr": (total_q, spec.num_seg, spec.num_heads, 2),
     }
+
+
+def mla_decode_max_num_seg(spec: MlaDecodeSpec, *, total_q: int) -> int:
+    """Largest ``num_seg`` whose split workspace a ``total_q``-token launch of
+    ``spec`` still indexes in i32 (``nsw``: overflow is UB, not a wrap)."""
+    row_elems = max(1, int(total_q) * spec.num_heads * spec.r_kv)
+    return (INT32_LIMIT - 1) // row_elems
+
+
+def check_mla_decode_extents(spec: MlaDecodeSpec, *, total_q: int) -> tuple[bool, str]:
+    """Whether a ``total_q``-token launch of ``spec`` stays i32-addressable.
+
+    The widest tensor indexed by element is ``qa`` (``qa_cols`` per head) or,
+    split, the workspace (``r_kv * num_seg`` per head); ``out`` and ``lse``
+    are narrower. Returns ``(ok, reason)``; ``reason`` is empty when ``ok``.
+    """
+    widest = max(spec.qa_cols, spec.r_kv * spec.num_seg)
+    if int(total_q) * spec.num_heads * widest >= INT32_LIMIT:
+        return False, (
+            f"total_q={total_q} x num_heads={spec.num_heads} x {widest} elements "
+            "overflows the decode kernels' i32 offsets"
+        )
+    return True, ""
 
 
 def mla_decode_combine_spec(spec: MlaDecodeSpec) -> MlaDecodeCombineSpec:
@@ -440,8 +481,8 @@ def build_mla_decode(spec: MlaDecodeSpec, *, arch: str | None = None) -> KernelD
     # The score read-ahead and fence spacing are the prefill's, held constant
     # in latent *columns*: a K = 32 k-step's fragments are twice as wide, and
     # the prefill's 8-step read-ahead at that width spills.
-    SCORE_PREFETCH = HPW_SCORE_PREFETCH * MFMA_K // SK
-    SCORE_FENCE_EVERY = max(1, HPW_SCORE_FENCE_EVERY * MFMA_K // SK)
+    SCORE_PREFETCH = DECODE_SCORE_PREFETCH * MFMA_K // SK
+    SCORE_FENCE_EVERY = max(1, DECODE_SCORE_FENCE_EVERY * MFMA_K // SK)
 
     K_TILES = BK // MFMA_N
     SCORE_K_ITERS = QA_COLS // SK
@@ -454,9 +495,7 @@ def build_mla_decode(spec: MlaDecodeSpec, *, arch: str | None = None) -> KernelD
 
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = THREADS
-    # No AGPRs: the 128-VGPR accumulator stays in the VGPR file, where the
-    # per-tile rescale does not pay an accvgpr read/write pair per register.
-    b.kernel.attrs["agpr_alloc"] = HPW_AGPR_ALLOC
+    b.kernel.attrs["agpr_alloc"] = DECODE_AGPR_ALLOC
 
     if SPLIT:
         part_acc = b.param(
@@ -517,6 +556,9 @@ def build_mla_decode(spec: MlaDecodeSpec, *, arch: str | None = None) -> KernelD
     )
     head = b.add(h0, lane_row)
 
+    # Decode serves at most one query per sequence: only this sequence's first
+    # token is computed. A second one would be left unwritten, so the request's
+    # max_seqlen_q <= 1 is the precondition dispatch admits on.
     token = b.global_load_i32(cu_q, seq_idx)
     q_stop = b.global_load_i32(cu_q, b.add(seq_idx, b.const_i32(1)))
     # A sequence with no query this step: nothing to write.
@@ -767,7 +809,7 @@ def build_mla_decode(spec: MlaDecodeSpec, *, arch: str | None = None) -> KernelD
 
         pv_pre = {
             gi: _pv_reads(*pv_groups[gi])
-            for gi in range(min(HPW_PV_PREFETCH, len(pv_groups)))
+            for gi in range(min(DECODE_PV_PREFETCH, len(pv_groups)))
         }
 
         # ---- online softmax, one head per n column ----------------------------
@@ -788,10 +830,10 @@ def build_mla_decode(spec: MlaDecodeSpec, *, arch: str | None = None) -> KernelD
         for v in s_v[1:]:
             local_max = b.fmax(local_max, v)
         m_new = b.fmax(m_run, _query_reduce(b, local_max, combine="max"))
-        # Lazy rescale (HPW_LAZY_TAU): keep the max in use unless the new one is
+        # Lazy rescale (DECODE_LAZY_TAU): keep the max in use unless the new one is
         # far enough above it. The partials and the final 1/l use the same max,
         # so a stale one changes nothing.
-        need = b.fcmp("ogt", m_new, b.fadd(m_run, b.const_f32(HPW_LAZY_TAU)))
+        need = b.fcmp("ogt", m_new, b.fadd(m_run, b.const_f32(DECODE_LAZY_TAU)))
         m_new = b.select(need, m_new, m_run)
         alpha = b.exp2_fast(b.fsub(m_run, m_new))
         if masked:
@@ -835,9 +877,9 @@ def build_mla_decode(spec: MlaDecodeSpec, *, arch: str | None = None) -> KernelD
 
         # ---- accᵀ += Cᵀ · Pᵀ over every latent tile ---------------------------
         for gi, (kt, w) in enumerate(pv_groups):
-            if gi + HPW_PV_PREFETCH < len(pv_groups):
-                pv_pre[gi + HPW_PV_PREFETCH] = _pv_reads(
-                    *pv_groups[gi + HPW_PV_PREFETCH]
+            if gi + DECODE_PV_PREFETCH < len(pv_groups):
+                pv_pre[gi + DECODE_PV_PREFETCH] = _pv_reads(
+                    *pv_groups[gi + DECODE_PV_PREFETCH]
                 )
             xs = pv_pre.pop(gi)
             for e in range(4):
@@ -893,12 +935,18 @@ def build_mla_decode(spec: MlaDecodeSpec, *, arch: str | None = None) -> KernelD
         ]
     if SPLIT:
         # Unnormalized partials, relative to this segment's (possibly stale)
-        # max. An empty segment writes (acc, m, l) = (0, NEG_INIT, 0).
+        # max. An empty segment writes only (m, l) = (NEG_INIT, 0): l = 0 tells
+        # the combine to skip its acc row, so the 512-wide row is never stored
+        # -- in a ragged batch, the short sequences' trailing segments are all
+        # empty. has_tiles is workgroup-uniform.
         row_id = b.add(b.mul(b.add(b.mul(token, num_seg_p), seg), b.const_i32(H)), head)
         row = b.add(b.mul(row_id, b.const_i32(R_KV)), r_lane)
-        for off, elems in chunks:
-            vals = b.vec_pack([b.vec_extract(accs[t], reg) for t, reg in elems], F32)
-            b.global_store_vN(part_acc, _shift(b, off, row), vals, 4, align=16)
+        with b.scf_if(has_tiles):
+            for off, elems in chunks:
+                vals = b.vec_pack(
+                    [b.vec_extract(accs[t], reg) for t, reg in elems], F32
+                )
+                b.global_store_vN(part_acc, _shift(b, off, row), vals, 4, align=16)
         # One writer per head: the wave's first 16-lane group.
         with b.scf_if(b.cmp_lt(lane, b.const_i32(16))):
             b.global_store_vN(

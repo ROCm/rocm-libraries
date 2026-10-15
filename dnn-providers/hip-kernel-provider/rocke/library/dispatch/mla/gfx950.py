@@ -3,9 +3,10 @@
 
 """gfx950 MLA candidates.
 
-One candidate: the weight-absorbed decode kernel, for ``max_seqlen_q == 1``.
+One candidate: the weight-absorbed decode kernel, for ``max_seqlen_q == 1``
+(absorbed query in, normalized latent + LSE out; ``dispatch.mla.decode``).
 There is no gfx950 prefill kernel yet, so a prefill-shaped request is refused
-on gfx950 with every candidate's reason rather than served by a fallback.
+on gfx950 with every candidate's reason.
 """
 
 from __future__ import annotations

@@ -25,10 +25,8 @@ from rocke.dispatch.core import (
     CandidateRegistry,
     DispatchResult,
     KernelCandidate,
-    KernelId,
     OperatorRequest,
     Ranker,
-    make_kernel_id,
 )
 
 from . import gfx942, gfx950
@@ -40,8 +38,10 @@ from .common import (
     MLA_OP,
     MLARequest,
     _request_errors,
+    mla_kernel_id,
     num_q_blocks_for,
 )
+from .decode import MlaDecodeLaunch, mla_decode_launch
 
 _FAMILY = FAMILY
 
@@ -54,12 +54,6 @@ for _module in (gfx942, gfx950):
 
 def mla_candidates() -> Tuple[KernelCandidate, ...]:
     return MLA_REGISTRY.candidates()
-
-
-def _kernel_id(req: MLARequest, candidate: KernelCandidate, spec: Any) -> KernelId:
-    # One op for the family (``MLA_OP``): prefill and decode are told apart by
-    # candidate and spec, both of which are in the selection key.
-    return make_kernel_id(req, candidate, spec, op=req.op)
 
 
 def _sweep_ok(req: OperatorRequest, candidate: KernelCandidate) -> bool:
@@ -95,7 +89,9 @@ def dispatch_mla_all(req: MLARequest) -> Tuple[DispatchResult, ...]:
     """Every eligible MLA kernel for ``req``, one result per combo."""
     if _request_errors(req):
         return ()
-    return MLA_REGISTRY.dispatch_all(req, kernel_id=_kernel_id, selector_ok=_sweep_ok)
+    return MLA_REGISTRY.dispatch_all(
+        req, kernel_id=mla_kernel_id, selector_ok=_sweep_ok
+    )
 
 
 def dispatch_mla(req: MLARequest, *, ranker: Ranker | None = None) -> DispatchResult:
@@ -103,11 +99,14 @@ def dispatch_mla(req: MLARequest, *, ranker: Ranker | None = None) -> DispatchRe
 
     Unlike :func:`dispatch.attention.dispatch_attention`, the returned grid and
     signature are the real ones: an MLA candidate names a concrete builder, so
-    there is no downstream geometry decision left to defer.
+    there is no downstream geometry decision left to defer. They describe the
+    selected kernel's launch; a split-KV decode selection is two launches, and
+    :func:`mla_decode_launch` describes the second (the combine) and the
+    workspace between them.
     """
     candidate = MLA_REGISTRY.select(req, ranker=ranker)
     spec = candidate.select_spec(req)
-    kid = _kernel_id(req, candidate, spec)
+    kid = mla_kernel_id(req, candidate, spec)
     return DispatchResult(
         request=req,
         candidate=candidate,
@@ -134,9 +133,11 @@ __all__ = [
     "MLA_OP",
     "MLA_REGISTRY",
     "MLARequest",
+    "MlaDecodeLaunch",
     "dispatch_mla",
     "dispatch_mla_all",
     "mla_candidates",
+    "mla_decode_launch",
     "mla_sweep_space",
     "num_q_blocks_for",
     "registered_mla_combos",

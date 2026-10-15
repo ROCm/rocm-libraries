@@ -14,13 +14,22 @@ units) and denominator ``l``, all relative to that segment's ``m``. With
 
 The rule needs the partials only to be *mutually* consistent, so a segment
 that kept a stale max under the lazy rescale merges exactly. An empty segment
-reports ``(acc, m, l) = (0, NEG_INIT, 0)``: it weighs ``2**(NEG_INIT - M) = 0``
-against any live one, and a row with every segment empty (``S_k = 0``) merges
-to a zero latent and ``lse = -inf``.
+reports ``(m, l) = (NEG_INIT, 0)`` and writes no ``acc`` row at all: ``l = 0``
+marks it, and its ``acc`` slot -- whatever the buffer held -- is never read.
+It weighs ``2**(NEG_INIT - M) = 0`` against any live segment, and a row with
+every segment empty (``S_k = 0``) merges to a zero latent and ``lse = -inf``.
+A live segment always has ``l >= 1``: its largest score sits at or above the
+running max it is taken against.
 
 One wave per ``(token, head)``; each of the 64 lanes owns ``r_kv / 64``
 contiguous latent columns, so every partial row is read with fully coalesced
 vector loads. Arch-neutral: plain VALU and global memory, no MFMA, no LDS.
+
+The same LSE merge as ``kernels/common/fmha_splitkv_decode.py``'s reduce, but
+not that kernel: the workspace here is ``[token, segment, head]`` rows of the
+512-wide *latent* (not the per-head value width), ``m`` is in log2 units, and
+empty segments skip their row, so neither the layout nor the launch carries
+over.
 """
 
 from __future__ import annotations
@@ -34,6 +43,7 @@ from rocke.helpers.spec import SignatureBuilder
 
 __all__ = [  # noqa: RUF022  -- ordered spec -> gate -> launch geometry -> build
     "NEG_INIT",
+    "WAVE_SIZE",
     "MlaDecodeCombineSpec",
     "SUPPORTED_ARCHES",
     "supports_mla_decode_combine",
@@ -43,7 +53,9 @@ __all__ = [  # noqa: RUF022  -- ordered spec -> gate -> launch geometry -> build
     "build_mla_decode_combine",
 ]
 
-_WAVE_SIZE = 64
+#: Lanes per wave on every target the decode family serves; the one definition
+#: both decode kernels read.
+WAVE_SIZE = 64
 
 #: Wave64 targets; nothing else in the kernel is arch-specific.
 SUPPORTED_ARCHES = ("gfx942", "gfx950")
@@ -80,11 +92,11 @@ class MlaDecodeCombineSpec:
 
     @property
     def threads(self) -> int:
-        return _WAVE_SIZE * self.num_warps
+        return WAVE_SIZE * self.num_warps
 
     @property
     def cols_per_lane(self) -> int:
-        return self.r_kv // _WAVE_SIZE
+        return self.r_kv // WAVE_SIZE
 
     def kernel_name(self) -> str:
         return (
@@ -108,15 +120,16 @@ def supports_mla_decode_combine(
         )
     # Each lane loads its columns as whole 4-wide f32 vectors and stores them
     # as one bf16 vector of the same width.
-    if spec.r_kv % (_WAVE_SIZE * 4) != 0 or spec.cols_per_lane not in (4, 8, 16):
+    if spec.r_kv % (WAVE_SIZE * 4) != 0 or spec.cols_per_lane not in (4, 8, 16):
         return False, (
-            f"r_kv={spec.r_kv} must give each of the {_WAVE_SIZE} lanes 4, 8 or 16 "
+            f"r_kv={spec.r_kv} must give each of the {WAVE_SIZE} lanes 4, 8 or 16 "
             "columns"
         )
     return True, ""
 
 
 def mla_decode_combine_block(spec: MlaDecodeCombineSpec) -> tuple[int, int, int]:
+    """Workgroup shape: one flat dimension of ``64 * num_warps`` threads."""
     return (spec.threads, 1, 1)
 
 
@@ -129,7 +142,7 @@ def mla_decode_combine_grid(
     return (spec.num_heads // spec.num_warps, total_q, 1)
 
 
-def mla_decode_combine_signature(spec: MlaDecodeCombineSpec):
+def mla_decode_combine_signature(spec: MlaDecodeCombineSpec) -> list[dict]:
     """``out`` / ``lse`` as the single-pass decode kernel writes them, then the
     workspace the split kernel filled, then its segment count."""
     return (
@@ -146,6 +159,8 @@ def mla_decode_combine_signature(spec: MlaDecodeCombineSpec):
 def build_mla_decode_combine(
     spec: MlaDecodeCombineSpec, *, arch: str = "gfx942"
 ) -> KernelDef:
+    """Emit the split-KV combine: ``num_seg`` partial rows per ``(token, head)``
+    in, the normalized bf16 latent and the natural-log LSE out."""
     ok, why = supports_mla_decode_combine(spec, arch=arch)
     if not ok:
         raise NotImplementedError(why)
@@ -171,8 +186,8 @@ def build_mla_decode_combine(
     num_seg = b.param("num_seg", I32)
 
     tid = b.thread_id_x()
-    lane = b.mod(tid, b.const_i32(_WAVE_SIZE))
-    wave = b.div(tid, b.const_i32(_WAVE_SIZE))
+    lane = b.mod(tid, b.const_i32(WAVE_SIZE))
+    wave = b.div(tid, b.const_i32(WAVE_SIZE))
     head = b.readfirstlane(
         b.add(b.mul(b.block_id_x(), b.const_i32(spec.num_warps)), wave)
     )
@@ -211,21 +226,39 @@ def build_mla_decode_combine(
     with acc_loop as (s, state):
         row = b.add(row0, b.mul(s, b.const_i32(H)))
         ml = b.global_load_vN(part_ml, b.mul(row, b.const_i32(2)), F32, 2, align=8)
+        l_s = b.vec_extract(ml, 1)
         w = b.exp2_fast(b.fsub(b.vec_extract(ml, 0), big_m))
-        l_sum = b.fadd(state[0], b.fmul(w, b.vec_extract(ml, 1)))
-        base = b.add(b.mul(row, b.const_i32(R_KV)), col)
-        accs = []
-        for i in range(n_vec):
-            v = b.global_load_vN(part_acc, b.add(base, b.const_i32(4 * i)), F32, 4)
-            acc = state[1 + i]
-            for r in range(4):
-                acc = b.vec_insert(
-                    acc,
-                    b.fadd(b.vec_extract(acc, r), b.fmul(w, b.vec_extract(v, r))),
-                    r,
-                )
-            accs.append(acc)
-        b.scf_yield(l_sum, *accs)
+        l_sum = b.fadd(state[0], b.fmul(w, l_s))
+        # An empty segment (l = 0) wrote no acc row, so its slot is not read:
+        # a zero- or one-trip loop on the wave-uniform l, carrying the
+        # accumulators as its iteration arguments.
+        live = b.readfirstlane(
+            b.select(
+                b.fcmp("ogt", l_s, b.const_f32(0.0)), b.const_i32(1), b.const_i32(0)
+            )
+        )
+        add_loop = b.scf_for_iter(
+            b.const_i32(0),
+            live,
+            b.const_i32(1),
+            iter_args=[(f"live_acc{i}", state[1 + i]) for i in range(n_vec)],
+            iv_name="seg_live",
+        )
+        with add_loop as (_, live_state):
+            base = b.add(b.mul(row, b.const_i32(R_KV)), col)
+            accs = []
+            for i in range(n_vec):
+                v = b.global_load_vN(part_acc, b.add(base, b.const_i32(4 * i)), F32, 4)
+                acc = live_state[i]
+                for r in range(4):
+                    acc = b.vec_insert(
+                        acc,
+                        b.fadd(b.vec_extract(acc, r), b.fmul(w, b.vec_extract(v, r))),
+                        r,
+                    )
+                accs.append(acc)
+            b.scf_yield(*accs)
+        b.scf_yield(l_sum, *add_loop.results)
     l_sum = acc_loop.results[0]
     accs = acc_loop.results[1:]
 

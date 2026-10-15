@@ -5,11 +5,14 @@
 
 The request describes the problem and never names the regime: one
 ``MLARequest`` and one op (``mla_fwd``), with decode selected by
-``max_seqlen_q == 1`` and the decode candidate outranking prefill. These tests
-pin that routing contract -- decode wins where it applies, prefill wins (or
-stays the fallback) where it does not, and every refusal says why.
+``max_seqlen_q == 1`` and prefill by ``max_seqlen_q >= 2``. The two regimes
+take different input contracts (absorbed query vs projected query + ``W_UK``),
+so neither stands in for the other. These tests pin that routing contract --
+each regime goes to its own kernel, a one-query request that decode cannot
+serve is refused rather than handed to prefill, and every refusal says why.
 
-Requests pin ``num_cus`` so the split-KV choice does not depend on the host.
+Requests pin ``num_cus`` so the split-KV choice does not depend on the host,
+and the LLVM flavor, which decode admission reads (llvm20 is refused).
 """
 
 from __future__ import annotations
@@ -22,10 +25,12 @@ from dispatch.mla import (
     MLARequest,
     dispatch_mla,
     mla_candidates,
+    mla_decode_launch,
     registered_mla_combos,
 )
 from dispatch.mla.decode import DECODE_MIN_TILES_PER_SEG
 from kernels.mla.mla_decode import MlaDecodeSpec, mla_decode_signature
+from kernels.mla.mla_decode_combine import MlaDecodeCombineSpec
 from kernels.mla.mla_decode_gfx950 import MlaDecodeGfx950Spec
 
 PREFILL = "mla_prefill_fwd_gfx942"
@@ -33,12 +38,18 @@ DECODE = {"gfx942": "mla_decode_gfx942", "gfx950": "mla_decode_gfx950"}
 SPEC_CLS = {"gfx942": MlaDecodeSpec, "gfx950": MlaDecodeGfx950Spec}
 
 
+@pytest.fixture(autouse=True)
+def _llvm22(monkeypatch):
+    """Decode admission refuses llvm20; pin a flavor it serves."""
+    monkeypatch.setenv("ROCKE_LLVM_FLAVOR", "llvm22")
+
+
 def _decode(**overrides) -> MLARequest:
     """A DeepSeek-V3-shaped decode batch: 4 sequences, one query each.
 
     ``num_kv_blocks`` defaults to the pool the batch needs, every sequence at
     ``max_seqlen_k``: decode ignores it, but the prefill candidate refuses 0,
-    and the routing tests need prefill admissible.
+    and the routing tests need prefill's other admission checks to run.
     """
     base = dict(
         num_heads=128,
@@ -78,11 +89,14 @@ class TestRouting:
         assert type(result.spec) is SPEC_CLS[arch]
         assert result.kernel_id.op == MLA_OP
 
-    def test_prefill_is_admitted_but_outranked(self):
+    def test_prefill_refuses_one_query_per_sequence(self):
+        # Prefill could compute S_q = 1, but under its own input contract
+        # (projected query + W_UK), so it is not offered for decode's regime.
         req = _decode()
-        assert MLA_REGISTRY.get(PREFILL).admits(req)[0]
+        ok, why = MLA_REGISTRY.get(PREFILL).admits(req)
+        assert not ok and "max_seqlen_q=1 < min 2" in why
         names = [c.name for c, _spec in registered_mla_combos(req)]
-        assert names[:2] == [DECODE["gfx942"], PREFILL]
+        assert names == [DECODE["gfx942"]]
 
     def test_prefill_wins_at_two_queries(self):
         req = _decode(total_q=8, max_seqlen_q=2)
@@ -94,16 +108,32 @@ class TestRouting:
         # total_q < num_seqs is still decode: the kernel exits for that sequence.
         assert dispatch_mla(_decode(total_q=3)).candidate.name == DECODE["gfx942"]
 
-    def test_prefill_is_the_fallback_when_decode_refuses(self):
-        # 32 heads do not fill a 64-head workgroup; prefill still serves S_q = 1.
-        req = _decode(num_heads=32)
-        ok, why = MLA_REGISTRY.get(DECODE["gfx942"]).admits(req)
+    @pytest.mark.parametrize("arch", sorted(DECODE))
+    def test_one_query_request_decode_cannot_serve_is_refused(self, arch):
+        # 32 heads do not fill a 64-head workgroup. No other kernel takes the
+        # absorbed query, so the request is refused with every reason.
+        req = _decode(arch=arch, num_heads=32)
+        ok, why = MLA_REGISTRY.get(DECODE[arch]).admits(req)
         assert not ok and "num_heads=32 not a multiple of 64" in why
-        assert dispatch_mla(req).candidate.name == PREFILL
+        with pytest.raises(ValueError, match="no candidate supports request") as e:
+            dispatch_mla(req)
+        assert "num_heads=32 not a multiple of 64" in str(e.value)
 
-    def test_no_fallback_on_gfx950(self):
-        with pytest.raises(ValueError, match="mla_decode_gfx950"):
-            dispatch_mla(_decode(arch="gfx950", num_heads=32))
+    @pytest.mark.parametrize("arch", sorted(DECODE))
+    def test_llvm20_is_refused(self, monkeypatch, arch):
+        # llvm20 ignores agpr_alloc: the kernel would spill and halve its
+        # occupancy, against the two workgroups per CU the split count assumes.
+        monkeypatch.setenv("ROCKE_LLVM_FLAVOR", "llvm20")
+        ok, why = MLA_REGISTRY.get(DECODE[arch]).admits(_decode(arch=arch))
+        assert not ok and "llvm20" in why
+        with pytest.raises(ValueError, match="llvm20"):
+            dispatch_mla(_decode(arch=arch))
+
+    @pytest.mark.parametrize("arch", sorted(DECODE))
+    @pytest.mark.parametrize("flavor", ["llvm22", "llvm23"])
+    def test_supported_flavors_are_admitted(self, monkeypatch, arch, flavor):
+        monkeypatch.setenv("ROCKE_LLVM_FLAVOR", flavor)
+        assert dispatch_mla(_decode(arch=arch)).candidate.name == DECODE[arch]
 
     def test_causal_flag_is_immaterial_at_one_query(self):
         # Bottom-right causal admits every key at S_q = 1, so both are served.
@@ -114,10 +144,17 @@ class TestRouting:
 
     @pytest.mark.parametrize("arch", sorted(DECODE))
     def test_foreign_op_is_refused_by_every_candidate(self, arch):
-        req = _decode(arch=arch, op="mla_decode_absorb_fwd")
+        # Each candidate gets a request in its own regime, so the op is what
+        # it refuses on rather than the query count.
         candidates = MLA_REGISTRY.for_arch(arch)
         assert candidates
         for c in candidates:
+            regime = (
+                {}
+                if c.name.startswith("mla_decode")
+                else {"total_q": 8, "max_seqlen_q": 2}
+            )
+            req = _decode(arch=arch, op="mla_decode_absorb_fwd", **regime)
             ok, why = c.admits(req)
             assert not ok and "is not served by the MLA family" in why, (c.name, why)
 
@@ -165,10 +202,10 @@ class TestRouting:
         with pytest.raises(ValueError, match=match):
             dispatch_mla(_decode(**kw))
 
-    def test_decode_and_prefill_selection_keys_differ(self):
-        req = _decode()
-        decode = dispatch_mla(req).kernel_id
-        prefill = dispatch_mla(_decode(algorithm="mla_prefill_chunked")).kernel_id
+    def test_decode_and_prefill_share_the_op_not_the_key(self):
+        decode = dispatch_mla(_decode()).kernel_id
+        prefill = dispatch_mla(_decode(total_q=8, max_seqlen_q=2)).kernel_id
+        assert decode.op == prefill.op == MLA_OP
         assert decode.selection_key != prefill.selection_key
         assert decode.candidate != prefill.candidate
 
@@ -209,6 +246,51 @@ class TestSplitKvChoice:
         result = dispatch_mla(_decode())
         assert result.grid == (2, 4, result.spec.num_seg)
         assert result.signature == tuple(mla_decode_signature(result.spec))
+
+
+class TestLaunch:
+    """``mla_decode_launch``: both stages of a selection, from dispatch alone."""
+
+    @pytest.mark.parametrize("arch", sorted(DECODE))
+    def test_split_selection_describes_the_combine(self, arch):
+        result = dispatch_mla(_decode(arch=arch))
+        launch = mla_decode_launch(result)
+        n = result.spec.num_seg
+        assert n > 1
+        assert launch.combine_spec == MlaDecodeCombineSpec(num_heads=128)
+        assert launch.workspace_shapes() == {
+            "part_acc_ptr": (4, n, 128, 512),
+            "part_ml_ptr": (4, n, 128, 2),
+        }
+        assert launch.combine_grid() == (32, 4, 1)
+        assert launch.combine_block() == (256, 1, 1)
+        assert [a["name"] for a in launch.combine_signature()] == [
+            "out_ptr",
+            "lse_ptr",
+            "part_acc_ptr",
+            "part_ml_ptr",
+            "num_seg",
+        ]
+        assert launch.build_combine().name == launch.combine_spec.kernel_name()
+        assert launch.kernel_names() == (
+            result.spec.kernel_name(),
+            launch.combine_spec.kernel_name(),
+        )
+        # The latent kernel writes exactly the workspace the combine reads.
+        latent_out = [a["name"] for a in result.signature][:2]
+        assert latent_out == list(launch.workspace_shapes())
+
+    def test_single_pass_selection_is_one_launch(self):
+        launch = mla_decode_launch(
+            dispatch_mla(_decode(total_q=1, num_seqs=1, max_seqlen_k=511))
+        )
+        assert launch.combine_spec is None
+        assert launch.workspace_shapes() == {}
+        assert len(launch.kernel_names()) == 1
+
+    def test_prefill_selection_is_not_a_decode_launch(self):
+        with pytest.raises(ValueError, match="not an MLA decode selection"):
+            mla_decode_launch(dispatch_mla(_decode(total_q=8, max_seqlen_q=2)))
 
 
 class TestSupportImpliesBuildable:

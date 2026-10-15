@@ -1001,8 +1001,9 @@ def _dispatched_spec(
 ) -> MlaPrefillSpec:
     """The forward spec the MLA dispatcher selects for this case.
 
-    Pinned to the prefill candidate: at one query per sequence the decode
-    candidate outranks it, and this harness grades the prefill kernel.
+    Pinned to the prefill candidate, which this harness grades. Prefill admits
+    ``max_seqlen_q >= 2`` only; a one-query-per-sequence scenario is refused
+    and falls back to the default spec below.
 
     ``agpr`` forces dispatch's agpr_acc choice on (True) or off (False) through
     its ``_AGPR_FORCE`` hook; None applies the shipped rule. A forced layout
