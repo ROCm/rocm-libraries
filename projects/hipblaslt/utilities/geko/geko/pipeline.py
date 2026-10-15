@@ -257,6 +257,7 @@ def run_search(
         cache=True,
         bench_freq=bench_freq,
         custom_lib_dir=ref_custom_lib_dir,
+        force_benchmark=True,
     )
     if uniq_df.empty:
         logger.warning("No GEMM operations found after filtering. Consider lowering keep_thr")

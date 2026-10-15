@@ -252,6 +252,26 @@ def test_run_search_returns_when_filtered_empty(monkeypatch: pytest.MonkeyPatch,
     pipeline.run_search(str(hip), str(workload), devices=[0], workdir=str(tmp_path / "w"))
 
 
+def test_run_search_forces_benchmark_on_summarize(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    hip = tmp_path / "hip"
+    hip.mkdir()
+    workload = _make_workload(tmp_path / "wkld.yaml")
+
+    called = {}
+
+    def _fake_summarize(*_args, **kwargs):
+        called["force_benchmark"] = kwargs.get("force_benchmark")
+        called["keep_thr"] = kwargs.get("keep_thr")
+        return pd.DataFrame(), pd.DataFrame()
+
+    monkeypatch.setattr(pipeline.bench.log, "summarize", _fake_summarize)
+
+    pipeline.run_search(str(hip), str(workload), devices=[0], keep_thr=0.0, workdir=str(tmp_path / "w"))
+
+    assert called["force_benchmark"] is True
+    assert called["keep_thr"] == 0.0
+
+
 def test_run_search_raises_when_no_winners(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     hip = tmp_path / "hip"
     hip.mkdir()
