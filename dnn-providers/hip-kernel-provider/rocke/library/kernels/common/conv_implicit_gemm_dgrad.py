@@ -1060,12 +1060,6 @@ def is_valid_dgrad_spec(spec: DgradConvSpec, arch: str = "gfx950") -> Tuple[bool
             f"(max_sub_gemms); raise max_sub_gemms to build a kernel that "
             f"can serve it"
         )
-    if p.groups > 1 and p.cpg == 1:
-        return False, (
-            "depthwise dgrad (channels-per-group == 1) is not supported by the "
-            "implicit-GEMM grouped path"
-        )
-
     if spec.tile_m % (spec.warp_m * spec.warp_tile_m):
         return False, "tile_m not divisible by warp_m * warp_tile_m"
     if spec.tile_n % (spec.warp_n * spec.warp_tile_n):

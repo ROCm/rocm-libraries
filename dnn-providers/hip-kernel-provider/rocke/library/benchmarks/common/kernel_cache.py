@@ -808,14 +808,6 @@ class KernelCache:
                     f"problem needs {n_sub} tilde sub-GEMMs, kernel's record "
                     f"table supports {bound} (max_sub_gemms)"
                 )
-            # Mirrors is_valid_dgrad_spec: the grouped implicit-GEMM dgrad has
-            # no depthwise (cpg == 1) path, and the grouped binary is offered
-            # to every grouped problem otherwise.
-            if int(getattr(problem, "groups", 1)) > 1 and cpg == 1:
-                return False, (
-                    "depthwise dgrad (cpg == 1) is not supported by the "
-                    "implicit-GEMM grouped path"
-                )
 
         if not identity.is_direct:
             ok, why = self._grid_fits(identity, problem)
