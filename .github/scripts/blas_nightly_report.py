@@ -241,7 +241,11 @@ def run_info(repo, run_id, token):
     }
 
 
-def fetch_previous(repo, run_id, token, now, cfg):
+def _when(stamp):
+    return datetime.datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+
+
+def fetch_previous(repo, run_id, token, cfg):
     """Download the most recent earlier nightly of this run's workflow and branch whose
     cfg.artifact is still there, within cfg.lookback_days.
 
@@ -251,10 +255,10 @@ def fetch_previous(repo, run_id, token, now, cfg):
     out = {"status": "none", "missing": []}
     if not (repo and token and run_id and cfg.artifact):
         return out
-    workflow = json.load(_api(f"{API}/repos/{repo}/actions/runs/{run_id}", token))[
-        "path"
-    ]
-    workflow = workflow.split("/")[-1].split("@")[0]
+    this = json.load(_api(f"{API}/repos/{repo}/actions/runs/{run_id}", token))
+    workflow = this["path"].split("/")[-1].split("@")[0]
+    # Age from this run's start, not from now: the report can go out hours later.
+    start = _when(this["created_at"])
     runs = json.load(
         _api(
             f"{API}/repos/{repo}/actions/workflows/{workflow}/runs"
@@ -264,12 +268,10 @@ def fetch_previous(repo, run_id, token, now, cfg):
         )
     )
     for run in runs.get("workflow_runs", []):
-        if str(run["id"]) == str(run_id):
-            continue
-        started = datetime.datetime.fromisoformat(
-            run["created_at"].replace("Z", "+00:00")
-        )
-        hours = (now - started).total_seconds() / 3600
+        started = _when(run["created_at"])
+        if str(run["id"]) == str(run_id) or started >= start:
+            continue  # this run, or a later one
+        hours = (start - started).total_seconds() / 3600
         if hours > cfg.lookback_days * 24:
             break
         arts = json.load(
@@ -338,18 +340,23 @@ def table(head, rows):
     return "\n".join(out + ["</table>"])
 
 
-def names_list(title, tests, color, tags=None):
-    """A titled list of test names; tags: {test: [label, ...]} shown after each."""
+def names_list(suite, what, tests, color, tags=None):
+    """'<suite>:' / '(<what>)' then one test per line; tags: {test: [label, ...]}."""
     if not tests:
         return ""
-    items = "".join(
-        f"<li><code title='{html.escape(t)}'>{html.escape(short(t))}</code>"
+    # One test per line: <br>, not <ul>, which some mail views run together.
+    items = [
+        f"• <code title='{html.escape(t)}'>{html.escape(short(t))}</code>"
         + "".join(f" <b>{html.escape(x)}</b>" for x in (tags or {}).get(t, []))
-        + "</li>"
         for t in tests[:20]
+    ]
+    if len(tests) > 20:
+        items.append(f"… and {len(tests) - 20:,} more")
+    return (
+        f"<p style='margin:8px 0 2px'><b style='color:{color}'>{html.escape(suite)}:</b>"
+        f"<br>({html.escape(what)})</p>"
+        f"<p style='margin:0 0 0 12px'>{'<br>'.join(items)}</p>"
     )
-    more = f"<li>… and {len(tests) - 20:,} more</li>" if len(tests) > 20 else ""
-    return f"<p style='margin:8px 0 2px'><b style='color:{color}'>{html.escape(title)}</b></p><ul style='margin:0'>{items}{more}</ul>"
 
 
 def build(results, steps, previous, cfg):
@@ -506,20 +513,19 @@ def build(results, steps, previous, cfg):
             t: [x for x in (why.get(t), "new" if t in new else None) if x]
             for t in failing
         }
-        lists.append(names_list(f"{k}, failing:", failing, RED, tags))
+        lists.append(names_list(k, "failing", failing, RED, tags))
     if prev["status"] == "ok":
         days = round(prev.get("hours", 24) / 24)
         ref = f"the nightly of {prev['date']}, commit {prev['sha']}"
         line = f"Compared with {html.escape(ref)} ({a(prev['url'], 'run')})."
         if prev.get("hours", 0) > cfg.last_night_hours or prev["missing"]:
-            gap = (
-                "; ".join(f"{d} ({a(u, 'run')})" for d, u in prev["missing"])
-                or "none ran"
-            )
-            line = (
-                f"<span style='color:{AMBER}'><b>⚠ The latest nightly with results was {days} night{'s' if days != 1 else ''} "
-                f"back.</b></span> Compared with {html.escape(ref)} ({a(prev['url'], 'run')}). Nightlies since then "
-                f"with no results: {gap}. New failures may come from any change since {html.escape(prev['date'])}."
+            line = "<br>".join(
+                [
+                    f"<span style='color:{AMBER}'><b>⚠ The latest nightly with results was "
+                    f"{days} night{'s' if days != 1 else ''} back.</b></span>",
+                    f"Compared with {html.escape(ref)} ({a(prev['url'], 'run')}).",
+                    f"New failures may come from any change since {html.escape(prev['date'])}.",
+                ]
             )
         p.append(f"<p>{line}</p>")
         rows, details = [], []
@@ -546,10 +552,8 @@ def build(results, steps, previous, cfg):
                 )
             )
             details += [
-                names_list(f"{k}, fixed (now passing):", d["Fixed"], GREEN),
-                names_list(
-                    f"{k}, skipped or removed since:", d["Skipped/removed"], AMBER
-                ),
+                names_list(k, "fixed, now passing", d["Fixed"], GREEN),
+                names_list(k, "skipped or removed since", d["Skipped/removed"], AMBER),
             ]
         p.append(
             table(
@@ -565,9 +569,8 @@ def build(results, steps, previous, cfg):
         )
         lists += details
     elif prev.get("missing"):
-        gap = "; ".join(f"{d} ({a(u, 'run')})" for d, u in prev["missing"])
         p.append(
-            f"<p>No nightly to compare: none with results in the last {cfg.lookback_days} days ({gap} left none).</p>"
+            f"<p>No nightly with results in the last {cfg.lookback_days} days to compare.</p>"
         )
     else:
         p.append("<p>No nightly to compare.</p>")
@@ -701,7 +704,7 @@ def main():
         args.meta_rows.append((label.strip(), value))
     STRIP[:] = args.strip
 
-    env, now = os.environ, datetime.datetime.now(datetime.timezone.utc)
+    env = os.environ
     previous = {"status": "none", "missing": []}
     try:
         if args.previous:
@@ -720,7 +723,6 @@ def main():
                 env.get("GITHUB_REPOSITORY"),
                 env.get("GITHUB_RUN_ID"),
                 env.get("GH_TOKEN"),
-                now,
                 args,
             )
     except Exception as e:  # The report still goes out, without the comparison.
