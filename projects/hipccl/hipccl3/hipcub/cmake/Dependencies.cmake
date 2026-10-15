@@ -85,6 +85,11 @@ else()
       add_library(roc::rocprim_hip ALIAS rocprim_hip)
     endif()
   else()
+    set(
+      ROCPRIM_FETCH_METHOD "MONOREPO"
+      CACHE STRING
+      "The method used to fetch ${arg_fetch_PACKAGE}"
+    )
     fetch_monorepo_dep(
       PACKAGE rocprim
       VERSION ${MIN_ROCPRIM_PACKAGE_VERSION}
