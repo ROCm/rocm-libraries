@@ -403,7 +403,9 @@ class TestGfx950RealBundle:
     @classmethod
     def _require_assets(cls):
         if not cls._KDP.exists():
-            pytest.skip(f"gfx950 bundle not present in this checkout (dvc pull -r ingestor): {cls._KDP}")
+            pytest.skip(
+                f"gfx950 bundle not present in this checkout (dvc pull -r ingestor): {cls._KDP}"
+            )
 
     @classmethod
     def _corpus(cls, head_sizes):
