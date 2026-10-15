@@ -30,7 +30,8 @@ from rocisa.instruction import VAdd3U32, VCvtF32toF16, VLShiftRightB32, \
                             VAndOrB32, VBfeU32, VLShiftLeftB16, SNop, VMed3F32, \
                             VCvtPkF32toBF16, VCvtPkF32toF16, VAndB32, \
                             VMovB32, VLShiftLeftB32, VCvtScalePk8F32toFP8, VCvtScalePk8F32toBF8, \
-                            VCvtSRF32toFP8, VCvtScaleSRPkF32toFP8, VPrngB32, MacroInstruction
+                            VCvtSRF32toFP8, VCvtScaleSRPkF32toFP8, VPrngB32, MacroInstruction, \
+                            VMaximumMinimumF32, VFmaPKF32
 from rocisa.functions import VSaturateCastInt
 from rocisa.macro import PseudoRandomGeneratorModule
 
@@ -117,9 +118,11 @@ class PackData_BF16(PackData):
                 tmpDst_1 = formatting(sumIdxV-1, inputPrefix, prefixOffset)
 
             if ti.getAsmCaps()["HasBF16CVT"]:
+                # Read the inputs directly: tmpVgpr is only scratch for the non-CVT path below.
                 if vi%2 == 1:
                     d = destIdx + vi//2
-                    module.add(VCvtPkF32toBF16(dst=vgpr(d), src0=vgpr(tmpDst_1), src1=vgpr(tmpDst), \
+                    formatVgpr_1 = formatting(sumIdxV - 1, inputPrefix, prefixOffset)
+                    module.add(VCvtPkF32toBF16(dst=vgpr(d), src0=vgpr(formatVgpr_1), src1=vgpr(formatVgpr), \
                                 comment="convert C to bf16 and Pack with neighbor"))
             else:
                 vgprBf16Temp = bf16CVTVgprStruct.vgprBf16Temp
@@ -153,14 +156,28 @@ class PackData_FLOAT8(PackData):
         if gwvw % 8 == 0:
             ti = rocIsa.getInstance()
             if ti.getAsmCaps().get("HasCvtScalePk8Fp8F32", False):
+                useMaxMin = ti.getAsmCaps().get("HasVMaximumMinimumF32", False)
                 for groupIdx in range(gwvw // 8):
                     srcVgpr = formatting(elementSumIdx + groupIdx * 8, inputPrefix, prefixOffset)
                     # v_cvt_scalef32_pk8 does not support HW saturation; clamp first.
-                    for vi in range(8):
-                        fv = formatting(elementSumIdx + groupIdx * 8 + vi, inputPrefix, prefixOffset)
-                        module.add(VCmpClassF32(dst=sgpr(tmpS01,laneSGPRC), src0=vgpr(fv), src1=vgpr(vgprFp8NanInf), comment="Nan and +/- inf"))
-                        module.add(VMed3F32(dst=vgpr(vgprFp8Temp), src0=vgpr(fv), src1=vgpr(vgprFp8Min), src2=vgpr(vgprFp8Max)))
-                        module.add(VCndMaskB32(dst=vgpr(fv), src0=vgpr(vgprFp8Temp), src1=vgpr(fv), src2=sgpr(tmpS01,laneSGPRC)))
+                    if useMaxMin:
+                        # Equivalent to the cmp_class/med3/cndmask sequence below: x*0+x maps +/-inf to
+                        # NaN and leaves finite values unchanged; the NaN-propagating clamp then keeps
+                        # NaN and saturates finite values to [Min, Max]. Only the NaN sign for +inf differs.
+                        for pi in range(4):
+                            pv = formatting(elementSumIdx + groupIdx * 8 + pi * 2, inputPrefix, prefixOffset)
+                            module.add(VFmaPKF32(dst=vgpr(pv, 2), src0=vgpr(pv, 2), src1=0, src2=vgpr(pv, 2),
+                                                  comment="x*0+x: +/-inf -> NaN, finite unchanged"))
+                        for vi in range(8):
+                            fv = formatting(elementSumIdx + groupIdx * 8 + vi, inputPrefix, prefixOffset)
+                            module.add(VMaximumMinimumF32(dst=vgpr(fv), src0=vgpr(fv), src1=vgpr(vgprFp8Min), src2=vgpr(vgprFp8Max),
+                                                          comment="clamp to [Min, Max], NaN propagates"))
+                    else:
+                        for vi in range(8):
+                            fv = formatting(elementSumIdx + groupIdx * 8 + vi, inputPrefix, prefixOffset)
+                            module.add(VCmpClassF32(dst=sgpr(tmpS01,laneSGPRC), src0=vgpr(fv), src1=vgpr(vgprFp8NanInf), comment="Nan and +/- inf"))
+                            module.add(VMed3F32(dst=vgpr(vgprFp8Temp), src0=vgpr(fv), src1=vgpr(vgprFp8Min), src2=vgpr(vgprFp8Max)))
+                            module.add(VCndMaskB32(dst=vgpr(fv), src0=vgpr(vgprFp8Temp), src1=vgpr(fv), src2=sgpr(tmpS01,laneSGPRC)))
                     d = destIdx + groupIdx * 2
                     # Pass scale as float 1.0, not the 0x3f800000 int bits: a float literal is
                     # recognized as an inline constant, so size accounting does not count it as a
