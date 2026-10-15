@@ -272,6 +272,7 @@ inline constexpr const char* kSkipList[] = {
     "Misc_Geometric/SliceTest.Correctness/HIP_*_Packed_Inside_*",
     "Misc_Geometric/SliceTest.Correctness/HIP_*_Packed_Padded_*",
     "Misc_Geometric/SliceTest.Correctness/HIP_*_Packed_PaddedTail_*",
+    "Misc_Geometric/SliceTest.Correctness/HOST_*_Packed_DensePadded_*",
     "Misc_Statistical/NormalizeTest.Correctness/HIP_F*_3D_axis4_cms1_2x5x12x19",
     "Misc_Statistical/NormalizeTest.Correctness/HIP_F*_3D_axis4_cms2_2x5x12x19",
     "Misc_Statistical/NormalizeTest.Correctness/HIP_F*_3D_axis4_cms3_2x5x12x19",

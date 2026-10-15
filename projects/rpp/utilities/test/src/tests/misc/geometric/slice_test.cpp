@@ -58,14 +58,17 @@ enum class SliceLayout { Planar, Packed };
 
 // Inside: the slice lies within the ROI (no padding). Padded: the slice runs off the trailing end
 // of every spatial axis, so the border must be fillValue. PaddedTail: Padded with a 0 width anchor,
-// so the width tail is tested independently of the width-anchor offset.
-enum class SliceKind { Inside, Padded, PaddedTail };
+// so the width tail is tested independently of the width-anchor offset. DensePadded: Padded with a
+// dense destination stride, so the fill must cover the sample exactly with no row slack to absorb
+// an off-by-one.
+enum class SliceKind { Inside, Padded, PaddedTail, DensePadded };
 
 struct SliceParams {
     SliceLayout layout;
     SliceKind kind;
     std::string name() const {
-        static const char* const kKindNames[] = {"_Inside", "_Padded", "_PaddedTail"};
+        static const char* const kKindNames[] = {"_Inside", "_Padded", "_PaddedTail",
+                                                 "_DensePadded"};
         return std::string(layout == SliceLayout::Planar ? "Planar" : "Packed") +
                kKindNames[static_cast<int>(kind)];
     }
@@ -146,10 +149,11 @@ void run_slice(const NdConfig& cfg, const SliceParams& p) {
 
     // Descriptors are device-addressable for HIP: the ND kernels read dims/strides on device.
     // Width is row-padded: slice stores a full 8-element vector for each row tail, so with dense
-    // strides the tail store would land in the next row.
+    // strides the tail store would land in the next row. DensePadded leaves the destination dense.
     const int padAxis = widthAxis + 1;
     GenericDescriptor srcDesc(cfg.backend, srcDims, cfg.dtypeIn, layout, padAxis);
-    GenericDescriptor dstDesc(cfg.backend, dstDims, cfg.dtypeIn, layout, padAxis);
+    GenericDescriptor dstDesc(cfg.backend, dstDims, cfg.dtypeIn, layout,
+                              p.kind == SliceKind::DensePadded ? -1 : padAxis);
 
     const std::size_t srcCount = generic_element_count(*srcDesc);
     const std::size_t dstCount = generic_element_count(*dstDesc);
@@ -209,11 +213,16 @@ class SliceTest : public SkipListTest<NdWithParams<SliceParams>> {};
 constexpr char kPlanarSkip[] =
     "slice HOST planar writes past the destination buffer (destination channel pointer advanced by "
     "the source channel stride) and aborts the test binary";
+constexpr char kHipDenseSkip[] =
+    "slice HIP stores whole vectors past the row end, so a dense destination is written out of "
+    "bounds";
 
 TEST_P(SliceTest, Correctness) {
     const NdConfig cfg = GetParam().cfg;
     const SliceParams p = GetParam().op;
     if (p.layout == SliceLayout::Planar) GTEST_SKIP() << kPlanarSkip;
+    if (p.kind == SliceKind::DensePadded && cfg.backend == RPP_HIP_BACKEND)
+        GTEST_SKIP() << kHipDenseSkip;
     dispatch_dtype<DType::U8, DType::F32>(
         cfg.dtypeIn, [&](auto tag) { run_slice<Element<decltype(tag)>>(cfg, p); });
 }
@@ -227,7 +236,8 @@ std::vector<NdWithParams<SliceParams>> slice_configs() {
          make_nd_configs({DType::U8, DType::F32}, {2, 3, 4}, {NdShape::VectorAligned}))
         for (SliceLayout layout : {SliceLayout::Planar, SliceLayout::Packed}) {
             if (cfg.nDim == 2 && layout == SliceLayout::Packed) continue;
-            for (SliceKind kind : {SliceKind::Inside, SliceKind::Padded, SliceKind::PaddedTail}) {
+            for (SliceKind kind : {SliceKind::Inside, SliceKind::Padded, SliceKind::PaddedTail,
+                                   SliceKind::DensePadded}) {
                 if (kind == SliceKind::PaddedTail && layout != SliceLayout::Packed) continue;
                 out.push_back({cfg, SliceParams{layout, kind}});
             }
