@@ -37,7 +37,7 @@ from pathlib import Path
 import numpy as np
 from rocke.core.arch import ArchTarget
 from rocke.core.backend import BackendError, _lower_via_cpp_engine
-from rocke.core.ir import F32, TF32, IRBuilder, KernelDef, PtrType, VectorType
+from rocke.core.ir import F32, TF32, IRBuilder, KernelDef, VectorType
 from rocke.core.ir_serialize import serialize
 from rocke.core.lower_llvm import _flavor_for_llvm, _lower_kernel_to_llvm_python
 
@@ -375,11 +375,7 @@ def _opt() -> str | None:
 
 
 def _fold_kernel(op_id: str, a_bits: int, b_bits: int) -> KernelDef:
-    """One emulated ``tile.mma`` over constant payloads, its result stored.
-
-    The store keeps the MMA live: a call whose result is unused is deleted
-    outright, and with it the folded operands this reads back.
-    """
+    """One emulated ``tile.mma`` over constant payloads."""
     atom = ArchTarget.from_gfx(_ARCH).mma.by_op_id(op_id)
 
     def payload(bits: int) -> float:
@@ -387,16 +383,56 @@ def _fold_kernel(op_id: str, a_bits: int, b_bits: int) -> KernelDef:
 
     builder = IRBuilder("fold_probe")
     builder.kernel.attrs["max_workgroup_size"] = atom.wave_size
-    out = builder.param("out", PtrType(F32, "global"))
     a = builder.vector_splat(builder.const_f32(payload(a_bits)), atom.a_frag_len)
     b = builder.vector_splat(builder.const_f32(payload(b_bits)), atom.b_frag_len)
     a = builder.bitcast(a, VectorType(TF32, atom.a_frag_len))
     b = builder.bitcast(b, VectorType(TF32, atom.b_frag_len))
     c = builder.vector_splat(builder.const_f32(0.0), atom.c_frag_len)
-    d = builder.mma(atom, a, b, c)
-    builder.store(builder.vec_extract(d, 0), out, builder.const_i32(0))
+    builder.mma(atom, a, b, c)
     builder.ret()
     return builder.kernel
+
+
+# The split parts are handed to this opaque external function as ``i16`` lanes, so
+# that what LLVM folds them to is read back as plain integers. A bf16 constant is
+# *printed* differently from one LLVM release to the next (hex, then decimal with
+# ``+inf`` and ``+qnan`` spellings), and a test that parsed those spellings broke on
+# the first toolchain that changed them; an integer is printed the same way in all.
+_PROBE_SINK = "rocke_probe_sink"
+
+
+def _with_probes(llvm: str) -> str:
+    """``llvm`` with the four parts the first two MMAs consume routed to a sink.
+
+    The parts are read from those MMA calls in the *unfolded* IR -- ``small*big``
+    then ``big*small`` -- and each is bitcast to ``i16`` lanes and passed to
+    ``@rocke_probe_sink`` just before the kernel returns, in the order
+    ``a_small, b_big, a_big, b_small``. The sink is external, so no pass may drop
+    or reorder the calls, and everything feeding them is folded.
+    """
+    calls = [
+        ln for ln in llvm.splitlines() if "@llvm.amdgcn.mfma" in ln and " call " in ln
+    ]
+    parts: list[tuple[str, str]] = []
+    for call in calls[:2]:
+        found = re.findall(r"<(\d+) x bfloat> (%[\w.]+)", call)
+        assert len(found) == 2, call
+        parts.extend(found)
+    assert len(parts) == 4, calls
+    lines: list[str] = []
+    inserted = False
+    for ln in llvm.splitlines():
+        if not inserted and re.fullmatch(r"\s*ret void\s*", ln):
+            for i, (lanes, name) in enumerate(parts):
+                lines.append(
+                    f"  %probe{i} = bitcast <{lanes} x bfloat> {name} to <{lanes} x i16>"
+                )
+                lines.append(f"  call void @{_PROBE_SINK}(<{lanes} x i16> %probe{i})")
+            inserted = True
+        lines.append(ln)
+    assert inserted, "no `ret void` to insert the probes before"
+    lines.append(f"declare void @{_PROBE_SINK}(<{parts[0][0]} x i16>)")
+    return "\n".join(lines) + "\n"
 
 
 # payload bits -> (big, small) as bf16 bit patterns, with the arithmetic
@@ -430,9 +466,9 @@ class TestLlvmFoldsTheSplit(unittest.TestCase):
     Everything above reads the IR as text, and the host model reads it as
     arithmetic; neither runs *it*. Here the lowered kernel is handed to ``opt``
     with constant payloads, which folds the whole split -- the narrowing, the cap,
-    the widening, the subtraction -- down to the constants the three MMAs receive,
-    and those are compared with values worked out by hand below. No GPU is
-    needed, and no model of mine sits between the IR and the answer.
+    the widening, the subtraction -- down to constants, which are read back as
+    bf16 bit patterns and compared with values worked out by hand below. No GPU
+    is needed, and no model of mine sits between the IR and the answer.
 
     Both engines' output is evaluated -- the C++ engine's through the pybind
     module, so that lane skips where only the archive is built -- rather than the
@@ -456,10 +492,11 @@ class TestLlvmFoldsTheSplit(unittest.TestCase):
 
     @staticmethod
     def _patterns(operand: str) -> set[int]:
-        """Every distinct bf16 bit pattern a folded constant operand carries."""
-        if operand.strip() == "zeroinitializer":
+        """Every distinct bit pattern a folded ``<N x i16>`` constant carries."""
+        if "zeroinitializer" in operand:
             return {0}
-        return {int(h, 16) for h in re.findall(r"0xR([0-9A-Fa-f]{4})", operand)}
+        # LLVM prints an integer in two's complement, so 0xfb60 reads as -1184.
+        return {int(v) & 0xFFFF for v in re.findall(r"i16 (-?\d+)", operand)}
 
     def _lower(self, engine: str, kernel: KernelDef) -> str:
         if engine == "python":
@@ -474,11 +511,11 @@ class TestLlvmFoldsTheSplit(unittest.TestCase):
     def _folded_operands(
         self, op_id: str, a_bits: int, b_bits: int, engine: str = "python"
     ):
-        """``(a_small, b_big, a_big, b_small)`` as sets of bf16 patterns."""
+        """``(a_small, b_big, a_big, b_small)`` as sets of bf16 bit patterns."""
         llvm = self._lower(engine, _fold_kernel(op_id, a_bits, b_bits))
         with tempfile.TemporaryDirectory() as tmp:
             source = Path(tmp) / "split.ll"
-            source.write_text(llvm)
+            source.write_text(_with_probes(llvm))
             done = subprocess.run(
                 [self.tool, "-S", "-passes=instcombine", str(source), "-o", "-"],
                 capture_output=True,
@@ -486,20 +523,13 @@ class TestLlvmFoldsTheSplit(unittest.TestCase):
                 check=False,
             )
         self.assertEqual(done.returncode, 0, done.stderr)
-        calls = [
-            ln
+        sinks = [
+            ln.split("(", 1)[1]
             for ln in done.stdout.splitlines()
-            if "@llvm.amdgcn.mfma" in ln and " call " in ln
+            if ln.strip().startswith(f"call void @{_PROBE_SINK}(")
         ]
-        self.assertEqual(len(calls), 3, done.stdout)
-        operand = r"<\d+ x bfloat> (splat \(bfloat 0xR[0-9A-Fa-f]{4}\)|<[^>]*>|zeroinitializer|%\S+?)[,)]"
-        first, second = (re.findall(operand, call) for call in calls[:2])
-        for found in (first, second):
-            self.assertEqual(len(found), 2, calls)
-        # Terms 1 and 2 are small*big and big*small.
-        return tuple(
-            self._patterns(t) for t in (first[0], first[1], second[0], second[1])
-        )
+        self.assertEqual(len(sinks), 4, done.stdout)
+        return tuple(self._patterns(operand) for operand in sinks)
 
     def _check_the_hand_derived_values(self, engine: str):
         for op_id in _EMULATED:
