@@ -34,7 +34,7 @@ from pathlib import Path
 import msgpack
 import pytest
 from tensilelite.LibraryIO import read, write, writeMsgPack, writeMsgPackIndexed
-from tensilelite.Utilities.LibraryIO import (
+from tensilelite.Utilities.BinaryLibraryIO import (
     iterSolutionRecords,
     readMessagePack,
     writeMessagePack,
@@ -543,7 +543,7 @@ class NoGenerator(importlib.abc.MetaPathFinder):
 
 sys.meta_path.insert(0, NoGenerator())
 from tensilelite.Utilities.DataTypes import TYPE_PROPERTIES
-from tensilelite.Utilities.LibraryIO import iterSolutionRecords, readMessagePack, writeMessagePack
+from tensilelite.Utilities.BinaryLibraryIO import iterSolutionRecords, readMessagePack, writeMessagePack
 
 assert "msgpack" not in sys.modules
 half = TYPE_PROPERTIES["Half"]

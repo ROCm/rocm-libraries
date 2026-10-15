@@ -35,7 +35,7 @@ from .Common.Architectures import gfxToIsa
 from .SolutionStructs import Solution, ProblemSizes
 from .SolutionStructs.Solution import getTypeMismatchCollector, resetTypeMismatchCollector
 from .SolutionStructs.Problem import ProblemType, problemTypeToEnum
-from .Utilities import LibraryIO as BinaryLibraryIO
+from .Utilities import BinaryLibraryIO
 
 from typing import IO, NamedTuple, List, Dict, Optional, Any
 from .Common.GlobalParameters import defaultSolution
@@ -374,7 +374,7 @@ def read(filename, customizedLoader=False):
 
     Binary files retain their serialized schema: legacy files have a
     ``solutions`` list, while indexed files have ``solutions_index`` and
-    ``solutions_blob``. Use ``Utilities.LibraryIO.iterSolutionRecords`` to
+    ``solutions_blob``. Use ``Utilities.BinaryLibraryIO.iterSolutionRecords`` to
     iterate decoded solution records from either binary format.
     """
     name, extension = os.path.splitext(filename)
