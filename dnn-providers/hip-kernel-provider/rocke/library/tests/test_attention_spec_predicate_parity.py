@@ -56,12 +56,13 @@ def test_2d_spec_wrapper_matches_dispatcher_gate(arch, monkeypatch):
             block_size=block_size,
             sliding_window=window,
         )
-        if arch == "gfx942" and au._gfx942_4warp_fast(p):
+        if arch == "gfx942" and au._gfx942_4warp_fast(p, arch):
             continue
-        gate_ok, gate_reason = au.supports_native_unified_attention_tiled(p)
+        gate_ok, gate_reason = au.supports_native_unified_attention_tiled(p, arch)
         try:
-            spec = _tiled_spec_from_problem(p)
-        except Exception:
+            spec = _tiled_spec_from_problem(p, arch)
+        except (RuntimeError, ValueError):
+            # Over-budget or invalid spec shape; skip rather than fail.
             continue
         wrap_ok, wrap_reason = mod.supports_tiled_2d_spec(spec, arch=arch)
         assert wrap_ok == gate_ok, (
