@@ -135,7 +135,7 @@ def buildAssemblyCodeObjectFiles(
       name = archNames.get(arch) or isaToGfx(arch)
       destDir = Path(ensurePath(destRoot / name))
 
-      coFileMap = collections.defaultdict(list)
+      coFileMap = collections.defaultdict(set)
       for entry in archEntries:
         kernel = representative(entry)
         baseName = getattr(entry, "baseName", kernel["BaseName"])
@@ -147,11 +147,11 @@ def buildAssemblyCodeObjectFiles(
           else:
             coName = alias.get("codeObjectFile", None)
             destination = asmDir / (coName + extCoRaw) if coName else None
-          if destination is not None and objectFile not in coFileMap[destination]:
-            coFileMap[destination].append(objectFile)
+          if destination is not None:
+            coFileMap[destination].add(objectFile)
 
       for coFileRaw, objFiles in coFileMap.items():
-        # Canonicalize both the default-list and explicit-set linker input paths.
+        # Keep link order independent of record and alias ordering.
         linker(sorted(objFiles), str(coFileRaw))
         coFile = destDir / coFileRaw.name.replace(extCoRaw, extCo)
         if compress:

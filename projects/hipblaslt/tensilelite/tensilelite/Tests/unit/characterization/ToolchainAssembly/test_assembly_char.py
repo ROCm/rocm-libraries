@@ -120,15 +120,16 @@ def test_build_honors_validate_metadata(tmp_path, monkeypatch, validate):
     assert seen == ([1] if validate else [])
     assert sorted(p.name for p in out) == ["TensileLibrary_gfx942.co"]
 
-def test_explicit_code_object_link_inputs_are_sorted_and_stable(tmp_path):
+@pytest.mark.parametrize("co_file", [None, "CustomCO"])
+def test_code_object_link_inputs_are_unique_sorted_and_stable(tmp_path, co_file):
     asmDir, destDir = tmp_path / "asm", tmp_path / "dest"
     asmDir.mkdir(); destDir.mkdir()
     observed = []
     observed_types = []
 
-    for bases in (("z", "a", "m"), ("m", "z", "a")):
+    for bases in (("z", "a", "m", "a"), ("m", "z", "a", "z")):
         linker = _StubLinker()
-        kernels = [_kernel(base, coFile="CustomCO") for base in bases]
+        kernels = [_kernel(base, coFile=co_file) for base in bases]
         buildAssemblyCodeObjectFiles(
             linker, _StubBundler(), kernels, destDir, asmDir, compress=True
         )
