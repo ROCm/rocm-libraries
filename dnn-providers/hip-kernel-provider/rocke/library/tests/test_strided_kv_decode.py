@@ -295,7 +295,7 @@ def test_strided_selection_uses_runtime_policy(arch, block_size, monkeypatch):
     assert (selected.kernel_spec, selected.reduce_spec) == (segment, reduce)
     assert segment.waves_per_eu is None
     monkeypatch.setattr(au, "_resolve_attention_arch", lambda: arch)
-    paged = au._tiled_3d_spec_from_problem(problem)
+    paged = au._tiled_3d_spec_from_problem(problem, arch)
     assert segment == replace(
         paged, kv_layout="strided", use_wide_kv_load=False, use_i64_kv_addr=False
     )
@@ -329,22 +329,6 @@ def test_strided_selection_ignores_hoist_environment(arch, monkeypatch):
         expected, kernel_spec=replace(expected.kernel_spec, use_invariant_hoist=True)
     )
     au._validate_strided_3d_spec(problem, explicit)
-
-
-@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
-def test_strided_spec_policy_rejects_conflicting_clamp_arch(arch):
-    from dispatch.attention.common import _problem
-    from kernels.common import attention_unified as au
-
-    problem = _problem(_strided_request(arch))
-    expected = au._strided_3d_specs_from_problem(problem, arch=arch)
-    assert (
-        au._strided_3d_specs_from_problem(replace(problem, clamp_arch=None), arch=arch)
-        == expected
-    )
-    other = "gfx950" if arch == "gfx942" else "gfx942"
-    with pytest.raises(ValueError, match="clamp_arch.*conflicts"):
-        au._strided_3d_specs_from_problem(replace(problem, clamp_arch=other), arch=arch)
 
 
 @pytest.fixture
@@ -549,7 +533,7 @@ def test_paged_runtime_accepts_specs_without_layout(arch, path, monkeypatch):
     factory = (
         au._tiled_3d_spec_from_problem if path == "3d" else au._tiled_spec_from_problem
     )
-    kernel = factory(problem)
+    kernel = factory(problem, arch)
     assert not hasattr(kernel, "kv_layout")
     spec = AttentionTuningSpec(
         path=path,
@@ -563,7 +547,7 @@ def test_paged_runtime_accepts_specs_without_layout(arch, path, monkeypatch):
     )
     calls = []
 
-    def stop_before_launch(problem, tuning_spec, kind):
+    def stop_before_launch(problem, tuning_spec, kind, arch):
         calls.append((tuning_spec.kernel_spec, kind))
         return False, "paged contract reached"
 
@@ -585,23 +569,3 @@ def test_paged_runtime_accepts_specs_without_layout(arch, path, monkeypatch):
             tuning_spec=spec,
         )
     assert calls == [(kernel, path)]
-
-
-@pytest.mark.parametrize("explicit", [False, True])
-def test_strided_runtime_rejects_conflicting_clamp_arch(
-    strided_binding_case, monkeypatch, explicit
-):
-    from kernels.common import attention_unified as au
-
-    _, result, tensors = strided_binding_case
-    tensors = dict(tensors, problem=replace(tensors["problem"], clamp_arch="gfx950"))
-    monkeypatch.setattr(au, "_resolve_attention_arch", lambda: "gfx942")
-    with pytest.raises(ValueError, match="clamp_arch.*conflicts"):
-        au.run_unified_attention_torch(
-            **tensors,
-            block_table=None,
-            softmax_scale=0.125,
-            softcap=0,
-            tuning_spec=result.spec if explicit else None,
-            kv_layout="strided",
-        )
