@@ -1241,13 +1241,15 @@ class TestConvDgradUniformKDecode(unittest.TestCase):
         self.assertLess(delta / ref.abs().max().item(), 2e-2)
 
 
-# Stride-1 binaries (DgradConvSpec.folds_sub_gemm_record), built as the AOT
-# cache builds them: once, against a probe problem with the binary's
-# capabilities (grouped, stride 1), and launched on every case below with the
-# shape in the kernargs. Each is compared bit for bit with the tilde binary
-# (built against a stride-2 probe: runtime record search and loads) on the
-# same launch, and against the torch reference with dX poisoned. The two
-# reduce in the same order, so they must agree exactly. The cases are
+# Stride-1 binaries (DgradConvSpec.folds_sub_gemm_record, and the tap-outer
+# K loop of tap_outer_k), built as the AOT cache builds them: once, against a
+# probe problem with the binary's capabilities (grouped, stride 1), and
+# launched on every case below with the shape in the kernargs. Each is
+# compared bit for bit with the tilde binary (built against a stride-2 probe:
+# runtime record search and loads) on the same launch, and against the torch
+# reference with dX poisoned. They all reduce in the same order -- tap-major,
+# output-channel chunk, then the tile's MFMA sequence -- so they must agree
+# exactly. The tap-outer binaries run where the cache would offer them. The cases are
 # adversarial: odd and non-square H/W, N=1, 5x5 and 1x3 filters, pad 0/1/2
 # (including pads that shrink the output), M not a multiple of the tile, C not
 # a multiple of tile_n, kpg not a multiple of tile_k, grouped, dilation 2.
@@ -1336,10 +1338,14 @@ class TestConvDgradStride1Specializations(unittest.TestCase):
     def _binaries(self, dtype):
         from kernels.common.conv_implicit_gemm_dgrad import is_valid_dgrad_spec
 
+        tapk = {"tap_outer_k": True, "uniform_k_decode": False}
         out = {
             "s1": self._spec(self._probe(1), dtype),
             "s1_d2": self._spec(self._probe(1, 2), dtype),
             "tilde": self._spec(self._probe(2), dtype),
+            # The tap-outer K loop, with both B tile layouts.
+            "tapk": self._spec(self._probe(1), dtype, **tapk),
+            "tapk_mouter": self._spec(self._probe(1), dtype, lds_k_outer=False, **tapk),
         }
         for label, spec in out.items():
             ok, why = is_valid_dgrad_spec(spec, ARCH)
@@ -1348,6 +1354,14 @@ class TestConvDgradStride1Specializations(unittest.TestCase):
         self.assertTrue(out["s1_d2"].folds_sub_gemm_record)
         self.assertFalse(out["tilde"].folds_sub_gemm_record)
         return out
+
+    @staticmethod
+    def _serves(spec, problem):
+        """The tap-outer binaries serve stride 1 / dilation 1 with kpg a
+        multiple of tile_k only (KernelCache.supports_problem)."""
+        if not spec.tap_outer_k:
+            return True
+        return problem.dH == problem.dW == 1 and problem.kpg % spec.tile_k == 0
 
     def _check(self, label, problem, dtype, outs):
         import torch
@@ -1379,6 +1393,7 @@ class TestConvDgradStride1Specializations(unittest.TestCase):
                         spec, dtype, poison=True, problem=problem
                     )
                     for name, spec in b.items()
+                    if self._serves(spec, problem)
                 }
                 self._check(label, problem, dtype, outs)
 

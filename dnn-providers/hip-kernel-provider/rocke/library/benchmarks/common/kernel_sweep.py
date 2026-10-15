@@ -74,7 +74,10 @@ Per direction, on top of that:
   it, a stride-1 / dilation-1 binary of the same configuration
   (``CACHE_DGRAD_STRIDE1``), which rebuilds its single sub-GEMM record from
   the kernargs instead of searching and loading the buffer, and stores
-  through the unit-stride epilogue. The B tile takes the layout the JIT sweep
+  through the unit-stride epilogue; on wave64 MFMA targets, outside the
+  wavelet pipeline, the stride-1 binary also comes with the tap-outer K loop
+  (``tap_outer_k``, in place of ``uniform_k_decode``; served to problems
+  whose kpg is a multiple of tile_k). The B tile takes the layout the JIT sweep
   picks (``DgradConvSpec.default_lds_k_outer``): K-outer wherever the arch,
   dtype, atom and pipeline allow it and the B load is wider than one element,
   M-outer otherwise. ``uniform_k_decode`` follows
@@ -383,6 +386,23 @@ def _dgrad_caps() -> List[dict]:
         for s1 in CACHE_DGRAD_STRIDE1
         for g in _GROUPED
     ]
+
+
+def _dgrad_tap_outer_variants(
+    caps: dict, wave_size: int, pipeline: str
+) -> tuple[bool, ...]:
+    """``tap_outer_k`` values built for one dgrad configuration.
+
+    The tap-outer K loop (DgradConvSpec.tap_outer_k) is a stride-1,
+    dilation-1 loop of the wave64 MFMA kernel, so only the stride-1 binary
+    gets the variant, and not under the wavelet pipeline (WMMA, its own K
+    loop). The probe's kpg is a multiple of every cached tile_k; the cache
+    checks kpg % tile_k on the problem.
+    """
+    stride1 = caps.get("stride") == 1 and caps.get("dilation") == 1
+    if stride1 and wave_size == 64 and pipeline != "wavelet":
+        return (False, True)
+    return (False,)
 
 
 def _job_flavor(llvm_flavor: Optional[str]) -> str:
@@ -945,26 +965,32 @@ def _dgrad_jobs(
                     arch=arch, wave_size=wave_size, pipeline=pipeline
                 ),
             )
-            yield BuildJob(
-                identity=KernelIdentity(
-                    arch=arch,
+            # The stride-1 binary also comes as the tap-outer K loop, which
+            # replaces the uniform_k_decode loop and serves only problems
+            # whose kpg is a multiple of tile_k (supports_problem).
+            for tapk in _dgrad_tap_outer_variants(caps, wave_size, pipeline):
+                if tapk:
+                    cfg = {**cfg, "uniform_k_decode": False, "tap_outer_k": True}
+                yield BuildJob(
+                    identity=KernelIdentity(
+                        arch=arch,
+                        direction="dgrad",
+                        algorithm="implicit_gemm",
+                        llvm_flavor=flavor,
+                        dtype_a=da,
+                        dtype_b=db,
+                        dtype_d=dd,
+                        grouped=grouped,
+                        stride_h=caps.get("stride", 0),
+                        stride_w=caps.get("stride", 0),
+                        dilation_h=caps.get("dilation", 0),
+                        dilation_w=caps.get("dilation", 0),
+                        **cfg,
+                    ),
                     direction="dgrad",
-                    algorithm="implicit_gemm",
-                    llvm_flavor=flavor,
-                    dtype_a=da,
-                    dtype_b=db,
-                    dtype_d=dd,
-                    grouped=grouped,
-                    stride_h=caps.get("stride", 0),
-                    stride_w=caps.get("stride", 0),
-                    dilation_h=caps.get("dilation", 0),
-                    dilation_w=caps.get("dilation", 0),
-                    **cfg,
-                ),
-                direction="dgrad",
-                spec_kwargs=cfg,
-                caps=caps,
-            )
+                    spec_kwargs=cfg,
+                    caps=caps,
+                )
 
 
 def job_for_identity(identity: KernelIdentity) -> BuildJob:
@@ -1113,7 +1139,7 @@ def count_jobs(
     vecs = len(_VECS) * len(_VECS)
     layouts = len(_layout_caps())
     merged = sum(1 for sk in split_ks if sk > 1) * len(_WGRAD_GROUP_MERGES)
-    dgrad_caps = len(_dgrad_caps())
+    wave_size = target.wave_size
     total = 0
     for geo in _geometries(target, mma_family, da, db):
         pipeline = geo[6]
@@ -1130,7 +1156,10 @@ def count_jobs(
                 )
             )
         if "dgrad" in directions and _aot_pipeline("dgrad", pipeline):
-            total += vecs * dgrad_caps
+            total += vecs * sum(
+                len(_dgrad_tap_outer_variants(caps, wave_size, pipeline))
+                for caps in _dgrad_caps()
+            )
     return total
 
 

@@ -319,6 +319,7 @@ class TestKernelIdentityPrefetchAddr(unittest.TestCase):
         del fields["prefetch_addr"]
         del fields["ws_replicas"]
         del fields["uniform_k_decode"]  # dgrad's flag, likewise hash-neutral
+        del fields["tap_outer_k"]  # dgrad's tap-outer K loop, off
         del fields["streamk"], fields["streamk_reduction"]  # stream-K, off
         legacy = hashlib.sha1(
             json.dumps(fields, sort_keys=True, separators=(",", ":")).encode()

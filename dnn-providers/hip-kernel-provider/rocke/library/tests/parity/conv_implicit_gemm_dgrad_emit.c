@@ -433,6 +433,50 @@ static int make_cfg(int idx, rocke_dgrad_conv_spec_t* spec, const char** arch)
         spec->warp_tile_k = 8;
         *arch = "gfx942";
         return 0;
+    case 42:
+        /* tap_outer_k, grouped 3x3: K-outer, cshuffle, widths. */
+        spec->problem = rocke_conv_problem_make(2, 14, 14, 128, 128, 3, 3, 1, 1, 1, 1, 1, 1);
+        spec->problem.groups = 2;
+        spec->epilogue = "cshuffle";
+        spec->lds_k_outer = true;
+        spec->has_vector_size_a = true;
+        spec->vector_size_a = 8;
+        spec->has_vector_size_b = true;
+        spec->vector_size_b = 8;
+        spec->has_vector_size_c = true;
+        spec->vector_size_c = 8;
+        spec->tap_outer_k = true;
+        *arch = "gfx950";
+        return 0;
+    case 43:
+        /* tap_outer_k, ungrouped 5x5 pad 2, M-outer, several chunks per tap. */
+        spec->problem = rocke_conv_problem_make(2, 13, 9, 64, 128, 5, 5, 1, 1, 2, 2, 1, 1);
+        spec->tile_k = 32;
+        spec->pipeline = "compv4";
+        spec->tap_outer_k = true;
+        *arch = "gfx950";
+        return 0;
+    case 44:
+        /* tap_outer_k, gfx942, grouped 1x3 filter with pad (0, 1). */
+        spec->problem = rocke_conv_problem_make(2, 12, 16, 64, 128, 1, 3, 1, 1, 0, 1, 1, 1);
+        spec->problem.groups = 4;
+        spec->tile_k = 32;
+        spec->warp_tile_k = 8;
+        spec->tap_outer_k = true;
+        *arch = "gfx942";
+        return 0;
+    case 45:
+        /* Rejected: tap_outer_k with kpg = 96 not a multiple of tile_k = 64. */
+        spec->problem = rocke_conv_problem_make(2, 14, 14, 64, 96, 3, 3, 1, 1, 1, 1, 1, 1);
+        spec->tap_outer_k = true;
+        *arch = "gfx950";
+        return 0;
+    case 46:
+        /* Rejected: tap_outer_k at stride 2. */
+        spec->problem = rocke_conv_problem_make(2, 14, 14, 64, 64, 3, 3, 2, 2, 1, 1, 1, 1);
+        spec->tap_outer_k = true;
+        *arch = "gfx950";
+        return 0;
     default:
         return -1;
     }
