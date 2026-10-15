@@ -4,7 +4,6 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
-#include <array>
 #include <cstdint>
 #include <optional>
 #include <stdexcept>
@@ -943,43 +942,6 @@ TEST(TestSdpaFwdPlan, ExecuteFp8WithDescale)
 namespace
 {
 
-// Fills a [B, H, Sq, Skv] additive mask with a non-uniform pattern. Softmax is shift-invariant,
-// so a uniform mask cannot reveal a misread mask dtype. Every value is exactly representable in
-// float, half and bfloat16, so masks of different dtypes carry identical numbers.
-template <class MaskT>
-void fillNonUniformMask(Tensor<MaskT>& mask)
-{
-    constexpr std::array<float, 8> VALUES = {0.25f, -1.0f, 2.0f, 0.5f, -0.5f, 1.0f, -2.0f, 0.75f};
-    const auto& dims = mask.dims();
-    for(int64_t b = 0; b < dims[0]; ++b)
-    {
-        for(int64_t h = 0; h < dims[1]; ++h)
-        {
-            for(int64_t s = 0; s < dims[2]; ++s)
-            {
-                for(int64_t t = 0; t < dims[3]; ++t)
-                {
-                    mask.setHostValue(
-                        static_cast<MaskT>(VALUES.at(static_cast<size_t>((s * 5 + t * 3 + h) % 8))),
-                        b,
-                        h,
-                        s,
-                        t);
-                }
-            }
-        }
-    }
-}
-
-template <class MaskT>
-void emplaceNonUniformMask(SdpaFwdTensorBundle<float, MaskT>& bundle)
-{
-    const auto& qDims = bundle.qTensor.dims();
-    const auto& kDims = bundle.kTensor.dims();
-    bundle.maskTensor.emplace(std::vector<int64_t>{qDims[0], qDims[1], qDims[2], kDims[2]});
-    fillNonUniformMask(*bundle.maskTensor);
-}
-
 template <class MaskT>
 std::vector<uint8_t> serializeSdpaFwdGraph(SdpaFwdTensorBundle<float, MaskT>& bundle,
                                            std::unordered_map<int64_t, void*>* variantPack
@@ -1004,12 +966,6 @@ void executeSdpaFwd(SdpaFwdTensorBundle<float, MaskT>& bundle)
     CpuReferenceGraphExecutor executor;
     executor.execute(serializedGraph.data(), serializedGraph.size(), variantPack);
 }
-
-constexpr float EXACT_TOLERANCE = 0.0f;
-
-const std::vector<int64_t> MASK_QDIMS = {1, 2, 4, 8};
-const std::vector<int64_t> MASK_KDIMS = {1, 2, 6, 8};
-const std::vector<int64_t> MASK_VDIMS = {1, 2, 6, 8};
 
 } // namespace
 

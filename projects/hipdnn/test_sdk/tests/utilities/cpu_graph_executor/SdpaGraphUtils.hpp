@@ -3,12 +3,15 @@
 
 #pragma once
 
+#include <array>
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <vector>
 
 #include "SdpaTensorBundles.hpp"
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
+#include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_frontend/Graph.hpp>
 #include <hipdnn_frontend/Types.hpp>
 #include <hipdnn_frontend/Utilities.hpp>
@@ -285,6 +288,52 @@ std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>, std::unordered_map<in
     }
 
     return std::make_tuple(graph, variantPack);
+}
+
+// Zero tolerance for comparing reference outputs that must be bitwise equal.
+inline constexpr float EXACT_TOLERANCE = 0.0f;
+
+// Mask-dtype test shapes: Q [1, 2, 4, 8], K and V [1, 2, 6, 8] (Sq != Skv).
+inline const std::vector<int64_t> MASK_QDIMS = {1, 2, 4, 8};
+inline const std::vector<int64_t> MASK_KDIMS = {1, 2, 6, 8};
+inline const std::vector<int64_t> MASK_VDIMS = {1, 2, 6, 8};
+
+// Fills a [B, H, Sq, Skv] additive mask with a non-uniform pattern. Softmax is shift-invariant,
+// so a uniform mask cannot reveal a misread mask dtype. Every value is exactly representable in
+// float, half and bfloat16, so masks of different dtypes carry identical numbers.
+template <class MaskT>
+void fillNonUniformMask(hipdnn_data_sdk::utilities::Tensor<MaskT>& mask)
+{
+    constexpr std::array<float, 8> VALUES = {0.25f, -1.0f, 2.0f, 0.5f, -0.5f, 1.0f, -2.0f, 0.75f};
+    const auto& dims = mask.dims();
+    for(int64_t b = 0; b < dims[0]; ++b)
+    {
+        for(int64_t h = 0; h < dims[1]; ++h)
+        {
+            for(int64_t s = 0; s < dims[2]; ++s)
+            {
+                for(int64_t t = 0; t < dims[3]; ++t)
+                {
+                    mask.setHostValue(
+                        static_cast<MaskT>(VALUES.at(static_cast<size_t>((s * 5 + t * 3 + h) % 8))),
+                        b,
+                        h,
+                        s,
+                        t);
+                }
+            }
+        }
+    }
+}
+
+// Gives a forward or backward SDPA bundle a [B, H, Sq, Skv] mask filled by fillNonUniformMask.
+template <class SdpaTensorBundle>
+void emplaceNonUniformMask(SdpaTensorBundle& bundle)
+{
+    const auto& qDims = bundle.qTensor.dims();
+    const auto& kDims = bundle.kTensor.dims();
+    bundle.maskTensor.emplace(std::vector<int64_t>{qDims[0], qDims[1], qDims[2], kDims[2]});
+    fillNonUniformMask(*bundle.maskTensor);
 }
 
 } // namespace hipdnn_sdk_test_utils
