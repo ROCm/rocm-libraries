@@ -1453,6 +1453,15 @@ int CDNA5ReadyQueue::nearestBarrierWmmaDistance(const DAGNode* self) const {
 // other not-yet-issued barrier: max(0, threshold - wmmaIssuedCount) times this
 // region's WMMA latency. Self and its signal/wait partner are skipped.
 //
+// Half rather than the full latency is the placement=gap budget split. That
+// placement means the WMMA budget fits the issue-only windows and the
+// separation slack, but is not enough to also reserve drain latency: the
+// after floor is issue-only and does not include drain. One half of the
+// ds_load latencyCycles is therefore shared with drain (the hold until
+// notBefore). The other half is left for tensor_load issue, so a tensor_load
+// is not issued so late that it crowds the following ds_load.
+// placement=none reuses the same stamp; its extra hold rules are below.
+//
 // placement=gap holds while the cursor is still before notBefore. It yields
 // early when that other barrier is at least as close as the cycles still owed
 // to the half-latency deadline (nearest <= notBefore - cursor). Once the half
@@ -1467,6 +1476,10 @@ int CDNA5ReadyQueue::nearestBarrierWmmaDistance(const DAGNode* self) const {
 // barrier's own WMMA threshold is already met and the cursor has moved less
 // than one full latencyCycles since the last direct ds_load. That distance is
 // issueCycleCursor_ - (notBefore - latency/2).
+//
+// That full-latency hold covers a ds_load a dependency issued a little later
+// than the budget assumed. Half the latency no longer covers its drain, so
+// keep the whole latencyCycles and avoid a stall.
 bool CDNA5ReadyQueue::barrierHeldForDsLoadGap(const DAGNode* node,
                                               int nearestReadyBarrierWmmaDistance) const {
     if (node->inst == nullptr) return false;
