@@ -173,7 +173,8 @@ def iterSolutionRecords(
     file is still read and decompressed, even when selecting a single index.
 
     This checks container structure and index consistency, not native solution
-    predicates. Consume the iterator fully to validate the whole container.
+    predicates. Legacy container errors may appear after records have been yielded.
+    Consume the iterator fully to validate the whole container.
     Indexed records outside the selection remain undecoded.
     Invalid encoded data raises ``ValueError`` with the input path.
     """

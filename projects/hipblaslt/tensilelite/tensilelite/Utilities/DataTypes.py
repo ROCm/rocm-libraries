@@ -12,7 +12,10 @@ from typing import NamedTuple
 
 
 class _TypeProperties(NamedTuple):
-    """Type and instruction abbreviations, 32-bit registers per element, and HIP spelling."""
+    """Type and instruction abbreviations, generator register counts, and HIP spelling.
+
+    Register counts use 32-bit units, except for Int64's legacy value below.
+    """
 
     char: str
     nameAbbrev: str
@@ -22,8 +25,9 @@ class _TypeProperties(NamedTuple):
     isComplex: bool = False
 
 
-# reg counts 32-bit registers per element. FP6/BF6 and FP4 use fractional
-# registers; client-specific packing determines their allocation granularity.
+# reg normally counts 32-bit registers per element; see Int64's legacy exception.
+# FP6/BF6 and FP4 use fractional registers; client-specific packing determines
+# their allocation granularity.
 # "NONE" marks types unsupported as matrix-instruction inputs. FP8 abbreviations
 # match instruction spellings for both FNUZ (NANOO) and OCP formats.
 TYPE_PROPERTIES = MappingProxyType(
@@ -65,6 +69,9 @@ TYPE_PROPERTIES = MappingProxyType(
         "Int8": _TypeProperties(
             char="I8", nameAbbrev="i8", miOutTypeNameAbbrev="i32", reg=0.25, hip="int8_t"
         ),
+        # The generator's legacy reg=1 makes numBytes() report 4, although
+        # int64_t occupies 8 bytes. Do not use this entry's register count
+        # to calculate Int64 storage size.
         "Int64": _TypeProperties(
             char="I64", nameAbbrev="i64", miOutTypeNameAbbrev="NONE", reg=1, hip="int64_t"
         ),

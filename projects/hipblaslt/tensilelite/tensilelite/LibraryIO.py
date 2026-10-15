@@ -370,6 +370,13 @@ def writeSolutions(filename: str, problemSizes: Optional[ProblemSizes], biasType
 # Reading and parsing functions
 ###############################
 def read(filename, customizedLoader=False):
+    """Read YAML, JSON, or binary library data.
+
+    Binary files retain their serialized schema: legacy files have a
+    ``solutions`` list, while indexed files have ``solutions_index`` and
+    ``solutions_blob``. Use ``Utilities.LibraryIO.iterSolutionRecords`` to
+    iterate decoded solution records from either binary format.
+    """
     name, extension = os.path.splitext(filename)
     if str(filename).endswith((".dat", ".dat.zlib")):
         return BinaryLibraryIO.readMessagePack(filename)
