@@ -52,13 +52,11 @@ jobs:
       PER_TEST_TIMEOUT: "10800"
       # Leave time within the 345-minute step for cleanup and report generation.
       SUITE_TIMEOUT_SECONDS: "19800"
-      # Make HIP wait after each copy command. Without it, a hipMemcpy sometimes
-      # hangs because rocjitsu never fetches an AQL packet whose doorbell it saw.
-      AMD_SERIALIZE_COPY: "3"
-      # Oldest rocm-systems commit this lane passes with (it has #13122, the
-      # mixed-format WMMA fix). If therock_ref's rocjitsu predates it, the job
-      # builds rocjitsu at this commit instead; empty always uses TheRock's.
-      ROCJITSU_MIN_REF: 63802eae5b80bac357c314911b89b6f6dff328c0
+      # Oldest rocm-systems commit this lane passes with (it has #13534, the lost
+      # engine wakeup behind the hipMemcpy hangs, and #13538, the aliased TDM
+      # operand behind the gsuaad hang). If therock_ref's rocjitsu predates it,
+      # the job builds rocjitsu at this commit instead; empty always uses TheRock's.
+      ROCJITSU_MIN_REF: f52ec1d75506bbde7510257e25141e7e3c3db68d
     steps:
       - name: Checkout TheRock repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
