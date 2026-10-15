@@ -29,6 +29,7 @@ import unittest
 from rocke.core.arch.target import (
     _MMA_FRAGMENT_INFO,
     _frag_info,
+    _load_specs,
     _op_id_c_dtype,
     _op_id_physical_op_id,
 )
@@ -49,6 +50,25 @@ def _sizable_op_ids():
 
 
 class TestMmaFragTables(unittest.TestCase):
+    def test_every_scaled_catalog_atom_has_the_same_padded_abi(self):
+        rows = [
+            row
+            for row in _load_specs()["gfx1250"]["mma"]
+            if row["family"] == "wmma_scaled"
+        ]
+        self.assertEqual(len(rows), 86)
+        for row in rows:
+            info = _MMA_FRAGMENT_INFO[row["op_id"]]
+            self.assertEqual(
+                (info.a_frag_len, info.b_frag_len, info.c_frag_len, info.wave_size),
+                (16, 16, 8, 32),
+            )
+            self.assertEqual(info.a_scale_frag_len, 128 // row["scale_block_k"])
+            self.assertEqual(info.b_scale_frag_len, info.a_scale_frag_len)
+            self.assertEqual(_mma_c_frag_len(row["op_id"]), 8)
+            with self.assertRaises(ValueError):
+                _mma_c_frag_len(row["op_id"] + "_unknown")
+
     def test_frag_lengths_are_positive(self):
         sizable = _sizable_op_ids()
         self.assertTrue(sizable, "the frag-length SSOT must expose at least one atom")

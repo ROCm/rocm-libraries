@@ -2,19 +2,20 @@
 // SPDX-License-Identifier: MIT
 /* Exercise public catalog queries against stored keys, without normalizing
  * away malformed table entries. Alias queries must find the same atom. */
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+
+#include <atomic>
+#include <initializer_list>
+#include <thread>
+
 #include "mma_family_index.h"
 #include "rocke/abi.h"
 #include "rocke/arch_target.h"
 #include "rocke/error.hpp"
 #include "rocke/helper_rocke.core.arch.h"
 #include "rocke/wmma_scale_internal.h"
-
-#include <atomic>
-#include <initializer_list>
-#include <stdint.h>
-#include <stdio.h>
-#include <string.h>
-#include <thread>
 
 /* Layout canary. Growing or reordering rocke_mma_op_t changes the stride of the
  * ops[] array every catalog hands out, so a caller built against the old header
@@ -188,7 +189,7 @@ static int test_scale_contracts()
     for(int input = 0; input < 2; ++input)
     {
         auto unsupported = *base;
-        (input == 0 ? unsupported.a_scale_dtype : unsupported.b_scale_dtype) = "e4m3";
+        (input == 0 ? unsupported.a_scale_dtype : unsupported.b_scale_dtype) = "e5m2";
         CHECK(rejects_query([&] { rocke_scaled_wmma_contract(&unsupported); }));
     }
     int count = 1;
@@ -319,10 +320,30 @@ static int test_scale_contracts()
                      op.scale_block_k);
             CHECK(strcmp(id, op.op_id) == 0);
             CHECK(rocke_mma_catalog_by_op_id(&arch->mma, id) == &op);
+            const auto contract = rocke_scaled_wmma_contract(&op);
+            CHECK(contract.scale_formats[0] >= 0 && contract.scale_formats[0] <= 2);
+            CHECK(contract.scale_formats[1] >= 0 && contract.scale_formats[1] <= 2);
+            auto invalid = op;
+            invalid.k = 64;
+            CHECK(rejects_query([&] { rocke_scaled_wmma_contract(&invalid); }));
             ++scaled_rows;
         }
     }
-    CHECK(packed_rows == 4 && scaled_rows == 50);
+    // Ordered identity fingerprint from the independently filtered 72c28a69 catalog.
+    // Also exercises all generated static ID pointers after repeated queries.
+    uint64_t fingerprint = UINT64_C(14695981039346656037);
+    for(int i = 0; i < arch->mma.num_ops; ++i)
+    {
+        const char* text = arch->mma.ops[i].op_id;
+        do
+        {
+            fingerprint ^= static_cast<unsigned char>(*text);
+            fingerprint *= UINT64_C(1099511628211);
+        } while(*text++);
+    }
+    CHECK(arch->mma.num_ops == 93);
+    CHECK(fingerprint == UINT64_C(8996553530891217874));
+    CHECK(packed_rows == 4 && scaled_rows == 86);
     return 0;
 }
 
@@ -418,7 +439,59 @@ static int test_scale_layouts_and_families()
             }
         }
     }
-    CHECK(scaled == 75);
+    CHECK(scaled == 111);
+    return 0;
+}
+
+static int test_scaled_wmma_supported_combinations()
+{
+    const auto* arch = rocke_arch_target_from_gfx("gfx1250");
+    const char* inputs[] = {"fp8e4m3", "bf8e5m2", "fp6e2m3", "fp6e3m2", "fp4e2m1"};
+    const char* scales[] = {"e8m0", "e5m3", "e4m3"};
+    const rocke_mma_scale_filter_t e8 = {"e8m0", "e8m0", ROCKE_MMA_SCALE_K32};
+    const auto* base = rocke_mma_catalog_op_for_shape(
+        &arch->mma, "wmma_scaled", "fp8", "fp8", "fp32", 16, 16, 128, &e8);
+    CHECK(base);
+    int accepted = 0, rejected = 0;
+    for(auto block : {ROCKE_MMA_SCALE_K32, ROCKE_MMA_SCALE_K16})
+        for(int a = 0; a < 5; ++a)
+            for(int b = 0; b < 5; ++b)
+                for(int sa = 0; sa < 3; ++sa)
+                    for(int sb = 0; sb < 3; ++sb)
+                    {
+                        // Independent oracle for LLVM commit 7597c0c938b3.
+                        const bool legal = (sa == 0 || a == 4) && (sb == 0 || b == 4)
+                                           && (!(a == 4 && b == 4) || sa == sb);
+                        const rocke_mma_scale_filter_t filter = {scales[sa], scales[sb], block};
+                        const auto* atom = rocke_mma_catalog_op_for_shape(&arch->mma,
+                                                                          "wmma_scaled",
+                                                                          inputs[a],
+                                                                          inputs[b],
+                                                                          "fp32",
+                                                                          16,
+                                                                          16,
+                                                                          128,
+                                                                          &filter);
+                        CHECK((atom != NULL) == legal);
+                        auto injected = *base;
+                        injected.a_dtype = inputs[a];
+                        injected.b_dtype = inputs[b];
+                        injected.a_scale_dtype = scales[sa];
+                        injected.b_scale_dtype = scales[sb];
+                        injected.scale_block_k = block;
+                        injected.a_scale_frag_len = injected.b_scale_frag_len = 128 / block;
+                        if(legal)
+                        {
+                            rocke_scaled_wmma_contract(&injected);
+                            ++accepted;
+                        }
+                        else
+                        {
+                            CHECK(rejects_query([&] { rocke_scaled_wmma_contract(&injected); }));
+                            ++rejected;
+                        }
+                    }
+    CHECK(accepted == 86 && rejected == 364);
     return 0;
 }
 
@@ -622,8 +695,8 @@ int main()
     // Keep this first: no previous query may prime the shared family index.
     if(test_family_index_first_use() || test_family_index_duplicates() || test_mma_result_names()
        || test_scale_contracts() || test_scale_layouts_and_families()
-       || test_emulated_rows_mirror_physical() || test_pre_existing_selection_is_native_only()
-       || test_fp32_never_reaches_an_xf32_atom())
+       || test_scaled_wmma_supported_combinations() || test_emulated_rows_mirror_physical()
+       || test_pre_existing_selection_is_native_only() || test_fp32_never_reaches_an_xf32_atom())
         return 1;
     int checked = 0;
     for(const char* gfx : {"gfx950", "gfx1250"})
