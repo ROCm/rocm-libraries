@@ -170,6 +170,20 @@ def test_applied_rules_replace_the_eps_keep_set(tmp_path, capsys):
     assert f"chosen: rules {rule.id} (the eps search chose" in report
     assert "chosen eps:" not in report and "(chosen)" not in report
 
+    # The report must describe the SAME set that was written, not the eps set.
+    # "fp32_t128_u1" was dropped by the rule; it must appear as "no" in the
+    # report's Variants table.
+    report = (tmp_path / "report.md").read_text()
+    dropped_name = kname("fp32", 128, 1)
+    for line in report.splitlines():
+        if dropped_name in line:
+            assert (
+                "| no |" in line
+            ), f"report says {dropped_name!r} is kept, but the rule dropped it:\n{line}"
+            break
+    else:
+        raise AssertionError(f"{dropped_name!r} not found in report Variants table")
+
 
 def test_combined_rules_keep_a_kernel_for_every_ranked_graph(tmp_path):
     """Each rule alone loses nothing; together they would drop both kernels g_two ranks."""
