@@ -925,9 +925,14 @@ scope for this RFC.
 ### 4.10 Plan-layer construction and CPU reference impact
 
 > **Status.** The frontend → flatbuffer → backend → data-SDK plumbing
-> above (including `ragged_offset_multiplier`) is landed. The plan-layer
-> and test-harness *consumption* in §4.10–4.11 is forward design, not
-> yet implemented; the sketches below show the intended shape.
+> above (including `ragged_offset_multiplier`) is landed. Plan-layer
+> consumption is implemented for SDPA forward on both references:
+> the CPU `SdpaRaggedFwdPlan.hpp` and the GPU `GpuSdpaRaggedFwdPlan.hpp`.
+> These plans accept only an `INT32` `ragged_offset` aux, although the
+> sketches below also allow `int64`. No other op consumes ragged
+> tensors yet. The §4.11 pre-supplied input bundle is not implemented.
+> The bundle harness loads ragged inputs from golden blobs instead.
+> The sketches below show the intended shape.
 
 The plan's `params` struct caches each ragged tensor's UID, that of
 its `ragged_offset` aux UID, and the primary's

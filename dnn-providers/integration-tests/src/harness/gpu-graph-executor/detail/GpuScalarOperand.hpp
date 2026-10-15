@@ -17,15 +17,16 @@
 namespace hipdnn_integration_tests::gpu_graph_executor::detail
 {
 
-// Resolves a scalar operand (see hipdnn_test_sdk::detail::isHostScalarOperand) to a host float.
-// Host scalars must never reach a kernel as a device pointer. A device-resident operand must be a
-// single FLOAT element and is read back with one device-to-host copy.
+// Resolves a scalar operand to a host float. A pass-by-value scalar (baked or runtime) is a host
+// value, converted from its data type, and must never reach a kernel as a device pointer. A
+// device-resident operand must be a single FLOAT element and is read back with one device-to-host
+// copy.
 inline float
     resolveScalarOperand(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT& operand,
                          const std::unordered_map<int64_t, void*>& variantPack,
                          const char* name)
 {
-    if(hipdnn_test_sdk::detail::isHostScalarOperand(operand))
+    if(hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(operand))
     {
         return hipdnn_flatbuffers_sdk::utilities::resolveScalarFromVariantPack<float>(
             operand, variantPack, name);

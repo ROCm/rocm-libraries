@@ -16,6 +16,7 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferDatatypeMapping.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/PlanUtils.hpp>
 #include <hipdnn_test_sdk/utilities/detail/FlatbufferTensorAttributesUtils.hpp>
@@ -278,7 +279,7 @@ public:
             const auto scale = hipdnn_test_sdk::detail::unpackTensorAttributes(
                 *tensorMap.at(nodeAttributes->scale_tensor_uid().value()));
             if(hipdnn_test_sdk::detail::elementCount(scale) != 1
-               || (!hipdnn_test_sdk::detail::isHostScalarOperand(scale)
+               || (!hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(scale)
                    && scale.data_type != hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT))
             {
                 return false;

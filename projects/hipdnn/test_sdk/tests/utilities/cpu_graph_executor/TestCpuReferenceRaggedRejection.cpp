@@ -5,8 +5,8 @@
 // tensor they do not support. The check lives in each plan builder's isApplicable
 // (see CHECK_NO_RAGGED_TENSORS in PlanUtils.hpp); here we exercise it end-to-end
 // through CpuReferenceGraphExecutor::isApplicable, which dispatches to the
-// correct builder for each node. SDPA forward with a ragged primary routes to the
-// ragged plan, so its case covers a ragged_offset that is not an INT32 table.
+// correct builder for each node. For SDPA forward the helper makes one primary ragged and leaves
+// the others dense, which neither the dense nor the ragged SDPA plan accepts.
 
 #include <cstdint>
 #include <memory>
@@ -247,12 +247,9 @@ TEST(TestCpuReferenceRaggedRejection, BlockScaleDequantize)
 }
 
 #ifdef HIPDNN_ENABLE_SDPA
-TEST(TestCpuReferenceRaggedRejection, SdpaFwdRaggedPrimaryWithoutInt32Offset)
+TEST(TestCpuReferenceRaggedRejection, SdpaFwdPartlyRaggedNodeDeclined)
 {
-    // The helper marks Q ragged with O (bf16) as its aux. bf16 is registered for both SDPA
-    // plans, so the node reaches SdpaRaggedFwdPlanBuilder, which declines the non-INT32 aux.
-    // A partly ragged node with a valid INT32 aux is covered by
-    // TestSdpaRaggedFwdPlan.ExecutorDeclinesPartlyRaggedGraph.
+    // The helper makes Q ragged and leaves K, V and O dense. The executor must decline the node.
     SdpaFwdTensorBundle<hipdnn_data_sdk::types::bfloat16> bundle(
         {1, 2, 4, 8}, {1, 2, 4, 8}, {1, 2, 4, 8});
     auto [graph, variantPack] = buildSdpaFwdGraph(bundle, DataType::BFLOAT16);

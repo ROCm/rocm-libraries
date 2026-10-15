@@ -110,6 +110,8 @@ add_executable(
     $<$<BOOL:${HIPDNN_ENABLE_SDPA}>:utilities/cpu_graph_executor/TestSdpaBwdPlan.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_SDPA}>:utilities/cpu_graph_executor/TestSdpaBwdSignatureKey.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_SDPA}>:utilities/cpu_graph_executor/TestSdpaRaggedFwdPlan.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_SDPA}>:utilities/cpu_graph_executor/TestSdpaRaggedFwdSignatureKey.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_SDPA}>:utilities/TestRaggedSdpaFwdSupport.cpp>
     TestVersion.cpp
 )
 

@@ -148,21 +148,22 @@ pass-by-value operand is rejected, as are Convolution Forward nodes with such an
 
 | Feature | Dense SDPA Forward | Ragged SDPA Forward |
 |---------|--------------------|---------------------|
-| Log-sum-exp `stats` output | Supported | Supported (must be `FP32`; packed when an `INT32` ragged offset is used) |
+| Log-sum-exp `stats` output | Supported | Supported (`FP32`): dense `[B, H, Sq, 1]`, or packed when it has its own `INT32` `ragged_offset` with the same layout rules as the primaries. Any other offset is rejected. |
 | Variable sequence lengths (`seq_len_q` / `seq_len_kv`) | Not supported | Not supported; lengths come from `ragged_offset` alone |
-| FP8 (descale) inputs | Not supported; no FP8 tuple registered | `FP8_E4M3` with `BFP16` output; Q/K/V descales only |
+| FP8 (descale) inputs | Not supported; no FP8 tuple registered | `FP8_E4M3` with `BFP16` output. Optional `FLOAT` Q/K/V descales (scalar `[1]` or per KV head `[B, H_kv, 1, 1]`) for any registered dtype; softmax descale, softmax/output scales and amax are rejected |
 | Dropout | Not supported | Not supported |
 | ALiBi / padding mask | Not supported | Not supported |
 | Paged KV cache, block-sparse attention | Not supported | Not supported |
-| Softmax max / sum-exp stats outputs | Not supported | - |
+| Softmax max / sum-exp stats outputs | Not supported | Not supported |
 | Additive attention bias (`attn_mask`) | - | Not supported |
 
-The ragged plan requires RFC-0014 tensors with logical `[B, H, S, D]` dims, token-major (BSHD) strides
-and a `ragged_offset` aux on every primary. A node is routed to the ragged plan as soon as any of its
-Q/K/V/O tensors has a `ragged_offset`; a partly ragged node is rejected there instead of running as
-dense. The CPU reference routes and gates ragged nodes the same way. The harness records the
-dense-path gaps (variable sequence lengths, FP8) in `knownReferenceGaps()`
-(`ReferenceOpCoverage.cpp`) so those bundles report "not applicable" instead of failing.
+The ragged plan requires RFC-0014 tensors with logical `[B, H, S, D]` dims with token-major (BSHD)
+strides and an `INT32` `ragged_offset` aux on every primary. A node is keyed as ragged when any of
+its Q/K/V/O tensors has a `ragged_offset`. The ragged plan needs all four to be ragged, and the dense
+plan rejects any ragged tensor. So a partly ragged node is declined. The CPU reference keys and gates
+ragged nodes the same way. The harness records the dense-path gaps (variable sequence lengths, FP8) in
+`knownReferenceGaps()` (`ReferenceOpCoverage.cpp`) so those bundles report "not applicable" instead of
+failing.
 
 ## Validators
 

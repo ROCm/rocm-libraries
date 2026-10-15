@@ -29,6 +29,7 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceSdpaRagged.hpp>
+#include <hipdnn_test_sdk/utilities/FloatOperandTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/RaggedSdpaGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/RaggedSdpaTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
@@ -615,7 +616,7 @@ TEST(TestSdpaRaggedFwdPlan, ExecuteRuntimePassByValueScaleMatchesDirectCall)
 TEST(TestSdpaRaggedFwdPlan, ExecuteOrdinaryScaleTensorMatchesDirectCall)
 {
     expectPlanMatchesDirect(runPlanAndDirect<Bf16Builder>(
-        SMALL_SHAPE, DataType::BFLOAT16, scaleOptions(OperandStorage::DEVICE)));
+        SMALL_SHAPE, DataType::BFLOAT16, scaleOptions(OperandStorage::TENSOR)));
 }
 
 TEST(TestSdpaRaggedFwdPlan, ExecuteFp8BakedDescalesMatchesDirectCall)
@@ -635,7 +636,7 @@ TEST(TestSdpaRaggedFwdPlan, ExecuteFp8PerKvHeadDescalesMatchesDirectCall)
 {
     const std::vector<int64_t> perKvHead = {SMALL_SHAPE.batch(), SMALL_SHAPE.numHeadsKv, 1, 1};
     expectPlanMatchesDirect(runPlanAndDirect<Fp8Builder>(
-        SMALL_SHAPE, DataType::FP8_E4M3, fp8Options(OperandStorage::DEVICE, perKvHead)));
+        SMALL_SHAPE, DataType::FP8_E4M3, fp8Options(OperandStorage::TENSOR, perKvHead)));
 }
 
 // The executor must route a fully ragged node to the ragged plan, not the dense one.
@@ -791,7 +792,7 @@ TEST(TestSdpaRaggedFwdPlanBuilder, IsNotApplicableForNonScalarHostDescale)
 {
     for(const auto storage : {OperandStorage::BAKED, OperandStorage::RUNTIME_PASS_BY_VALUE})
     {
-        auto options = fp8Options(OperandStorage::DEVICE, {1});
+        auto options = fp8Options(OperandStorage::TENSOR, {1});
         options.descaleQ = operandSpec(DESCALE_Q_UID, storage, 0.5f, {2});
         EXPECT_FALSE(accepts<Fp8Builder>(makeGraph(GATE_SHAPE, DataType::FP8_E4M3, options)))
             << "storage " << static_cast<int>(storage);
@@ -834,7 +835,7 @@ TEST(TestSdpaRaggedFwdPlanBuilder, IsNotApplicableForMalformedPackedStats)
 TEST(TestSdpaRaggedFwdPlanBuilder, IsNotApplicableForNonFloatDescale)
 {
     const auto graph
-        = makeGraph(GATE_SHAPE, DataType::FP8_E4M3, fp8Options(OperandStorage::DEVICE, {1}));
+        = makeGraph(GATE_SHAPE, DataType::FP8_E4M3, fp8Options(OperandStorage::TENSOR, {1}));
     ASSERT_TRUE(accepts<Fp8Builder>(graph));
 
     EXPECT_FALSE(accepts<Fp8Builder>(rewriteTensors(graph, [](TensorAttributesT& tensor) {
@@ -848,14 +849,14 @@ TEST(TestSdpaRaggedFwdPlanBuilder, IsNotApplicableForNonFloatDescale)
 TEST(TestSdpaRaggedFwdPlanBuilder, IsNotApplicableForTwoElementScale)
 {
     RaggedSdpaFwdGraphOptions options;
-    options.scale = operandSpec(SCALE_UID, OperandStorage::DEVICE, SCALE_VALUE, {2});
+    options.scale = operandSpec(SCALE_UID, OperandStorage::TENSOR, SCALE_VALUE, {2});
     EXPECT_FALSE(accepts<Bf16Builder>(makeBf16GateGraph(options)));
 }
 
 // An ordinary scale tensor is read back as one float, so it must be FLOAT.
 TEST(TestSdpaRaggedFwdPlanBuilder, IsNotApplicableForNonFloatOrdinaryScale)
 {
-    auto graph = rewriteTensors(makeBf16GateGraph(scaleOptions(OperandStorage::DEVICE)),
+    auto graph = rewriteTensors(makeBf16GateGraph(scaleOptions(OperandStorage::TENSOR)),
                                 [](TensorAttributesT& tensor) {
                                     if(tensor.uid == SCALE_UID)
                                     {
@@ -868,7 +869,7 @@ TEST(TestSdpaRaggedFwdPlanBuilder, IsNotApplicableForNonFloatOrdinaryScale)
 TEST(TestSdpaRaggedFwdPlanBuilder, IsApplicableForEveryScaleStorage)
 {
     for(const auto storage :
-        {OperandStorage::DEVICE, OperandStorage::BAKED, OperandStorage::RUNTIME_PASS_BY_VALUE})
+        {OperandStorage::TENSOR, OperandStorage::BAKED, OperandStorage::RUNTIME_PASS_BY_VALUE})
     {
         EXPECT_TRUE(accepts<Bf16Builder>(makeBf16GateGraph(scaleOptions(storage))))
             << "storage " << static_cast<int>(storage);
@@ -902,4 +903,42 @@ TEST(TestSdpaRaggedFwdPlanBuilder, BuildNodePlanRejectsBothCausalFlags)
     const Bf16Builder builder;
     EXPECT_THROW(builder.buildNodePlan(graphWrapper, graphWrapper.getNode(0)),
                  std::invalid_argument);
+}
+
+// A packed LSE keeps its INT32 aux and multiplier 1 but gets contiguous [B, H, Sq, 1] strides.
+// Its seq stride is then 1, too small to hold one token's H entries, so it is not token-major.
+TEST(TestSdpaRaggedFwdPlanBuilder, IsNotApplicableForNonTokenMajorPackedStats)
+{
+    const auto packed = makeBf16GateGraph(lseOptions(RaggedStatsLayout::PACKED));
+    ASSERT_TRUE(accepts<Bf16Builder>(packed));
+
+    EXPECT_FALSE(accepts<Bf16Builder>(rewriteTensors(packed, [](TensorAttributesT& tensor) {
+        if(tensor.uid == STATS_UID)
+        {
+            tensor.strides = generateStrides(tensor.dims);
+        }
+    })));
+}
+
+// The gate never throws on a malformed graph: every tensor it looks up, when missing from the
+// map, makes the node not applicable.
+TEST(TestSdpaRaggedFwdPlanBuilder, IsNotApplicableWhenALookedUpTensorIsMissingFromTensorMap)
+{
+    auto options = fp8Options(OperandStorage::TENSOR, {1});
+    options.scale = operandSpec(SCALE_UID, OperandStorage::TENSOR, SCALE_VALUE);
+    options.statsUid = STATS_UID;
+    options.statsLayout = RaggedStatsLayout::PACKED;
+    options.raggedOffsetStatsUid = RAGGED_OFFSET_STATS_UID;
+    const auto graph = makeGraph(GATE_SHAPE, DataType::FP8_E4M3, options);
+    const GraphWrapper graphWrapper(graph.GetBufferPointer(), graph.GetSize());
+    const Fp8Builder builder;
+    ASSERT_TRUE(builder.isApplicable(graphWrapper.getNode(0), graphWrapper.getTensorMap()));
+
+    for(const auto uid :
+        {K_UID, RAGGED_OFFSET_Q_UID, SCALE_UID, DESCALE_Q_UID, STATS_UID, RAGGED_OFFSET_STATS_UID})
+    {
+        auto tensorMap = graphWrapper.getTensorMap();
+        tensorMap.erase(uid);
+        EXPECT_FALSE(builder.isApplicable(graphWrapper.getNode(0), tensorMap)) << "uid " << uid;
+    }
 }

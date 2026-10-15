@@ -130,23 +130,24 @@ dimension must be reduced.
 
 | Feature | Dense SDPA Forward | Ragged SDPA Forward | SDPA Backward |
 |---------|--------------------|---------------------|---------------|
-| Log-sum-exp `stats` output | Supported | Supported (must be `FP32`; packed when an `INT32` ragged offset is used) | Required input |
+| Log-sum-exp `stats` output | Supported | Supported (`FP32`): dense `[B, H, Sq, 1]`, or packed when it has its own `INT32` `ragged_offset` with the same layout rules as the primaries. Any other offset is rejected. | Required input |
 | Variable sequence lengths (`seq_len_q` / `seq_len_kv`) | Not supported | Not supported; lengths come from `ragged_offset` alone | Not supported |
 | Dropout | Not supported | Not supported | Not supported |
 | ALiBi / padding mask | Not supported | Not supported | - |
 | Additive attention bias (`attn_mask`) | Supported | Not supported | Supported |
 | Paged KV cache, block-sparse attention | Not supported | Not supported | - |
 | Softmax max / sum-exp stats outputs | Not supported | Not supported | - |
-| Ragged tensors | Routed to the ragged plan | Required on every Q/K/V/O | Rejected |
-| FP8 inputs | Requires Q/K/V descale tensors; descales rejected for non-FP8 inputs | Optional Q/K/V descales (scalar or per KV head) | - |
+| Ragged tensors | Rejected | Required on every Q/K/V/O | Rejected |
+| FP8 inputs | Requires Q/K/V descale tensors; descales rejected for non-FP8 inputs | Optional `FLOAT` Q/K/V descales (scalar `[1]` or per KV head `[B, H_kv, 1, 1]`) for any registered dtype; softmax descale, softmax/output scales and amax are rejected | - |
 
 Dense FP8 forward is registered for `FP8_E4M3` and `FP8_E4M3_FNUZ` inputs with `BFP16` output; ragged
 FP8 forward for `FP8_E4M3` inputs with `BFP16` output.
 
-The ragged plan matches the GPU reference's ragged plan: RFC-0014 tensors with logical `[B, H, S, D]`
-dims, token-major (BSHD) strides and an `INT32` `ragged_offset` aux on every primary. A node is routed
-to it as soon as any of its Q/K/V/O tensors has a `ragged_offset`, so a partly ragged node is rejected
-instead of running as dense.
+The ragged plan matches the GPU reference's ragged plan. It needs RFC-0014 tensors with logical
+`[B, H, S, D]` dims with token-major (BSHD) strides and an `INT32` `ragged_offset` aux on every
+primary. A node is keyed as ragged when any of its Q/K/V/O tensors has a `ragged_offset`. The ragged
+plan needs all four to be ragged, and the dense plan rejects any ragged tensor. So a partly ragged
+node is declined.
 
 ### Resample Modes
 

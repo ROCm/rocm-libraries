@@ -10,21 +10,13 @@
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
-#include <hipdnn_test_sdk/utilities/RaggedSdpaGraphTestUtils.hpp>
+#include <hipdnn_test_sdk/utilities/FloatOperandTestUtils.hpp>
 
 namespace hipdnn_integration_tests::test_utils
 {
 
 // Use the canonical implementation from data_sdk.
 using hipdnn_data_sdk::utilities::generateStrides;
-
-// The ragged SDPA graph builder lives in test_sdk so the CPU reference tests can share it.
-using hipdnn_test_sdk::utilities::addFloatOperandTensor;
-using hipdnn_test_sdk::utilities::createRaggedSdpaFwdGraph;
-using hipdnn_test_sdk::utilities::FloatOperandSpec;
-using hipdnn_test_sdk::utilities::OperandStorage;
-using hipdnn_test_sdk::utilities::RaggedSdpaFwdGraphOptions;
-using hipdnn_test_sdk::utilities::RaggedStatsLayout;
 
 // Creates a minimal single-node SDPA-forward flatbuffer graph with packed Q/K/V/O tensors.
 // The q/k/v/o tensor uids are written into `attrs`, so callers only need to set behavior
@@ -42,23 +34,22 @@ using hipdnn_test_sdk::utilities::RaggedStatsLayout;
 // is also provided, a mask tensor with that dtype (including DataType::UNSET) and `maskDims` is
 // added under `maskUid`. A `maskUid` (or an attrs.attn_mask_tensor_uid) without a `maskDataType`
 // leaves the uid dangling, with no tensor behind it. Defaults to no mask.
-inline flatbuffers::FlatBufferBuilder
-    createSdpaFwdGraph(int64_t qUid,
-                       int64_t kUid,
-                       int64_t vUid,
-                       int64_t oUid,
-                       const std::vector<int64_t>& qDims,
-                       const std::vector<int64_t>& kDims,
-                       const std::vector<int64_t>& vDims,
-                       const std::vector<int64_t>& oDims,
-                       hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
-                       hipdnn_flatbuffers_sdk::data_objects::SdpaAttributesT attrs = {},
-                       std::optional<int64_t> statsUid = std::nullopt,
-                       std::optional<FloatOperandSpec> scale = std::nullopt,
-                       std::optional<int64_t> maskUid = std::nullopt,
-                       const std::vector<int64_t>& maskDims = {},
-                       std::optional<hipdnn_flatbuffers_sdk::data_objects::DataType> maskDataType
-                       = std::nullopt)
+inline flatbuffers::FlatBufferBuilder createSdpaFwdGraph(
+    int64_t qUid,
+    int64_t kUid,
+    int64_t vUid,
+    int64_t oUid,
+    const std::vector<int64_t>& qDims,
+    const std::vector<int64_t>& kDims,
+    const std::vector<int64_t>& vDims,
+    const std::vector<int64_t>& oDims,
+    hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
+    hipdnn_flatbuffers_sdk::data_objects::SdpaAttributesT attrs = {},
+    std::optional<int64_t> statsUid = std::nullopt,
+    std::optional<hipdnn_test_sdk::utilities::FloatOperandSpec> scale = std::nullopt,
+    std::optional<int64_t> maskUid = std::nullopt,
+    const std::vector<int64_t>& maskDims = {},
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::DataType> maskDataType = std::nullopt)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
@@ -109,7 +100,7 @@ inline flatbuffers::FlatBufferBuilder
 
     if(scale.has_value())
     {
-        addFloatOperandTensor(builder, tensors, scale.value(), "Scale");
+        hipdnn_test_sdk::utilities::addFloatOperandTensor(builder, tensors, scale.value(), "Scale");
     }
 
     std::vector<int64_t> maskStrides;
