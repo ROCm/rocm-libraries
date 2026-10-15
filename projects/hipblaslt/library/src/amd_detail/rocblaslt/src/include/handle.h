@@ -26,8 +26,6 @@
  * ************************************************************************ */
 
 #pragma once
-#ifndef HANDLE_H
-#define HANDLE_H
 
 #include "rocblaslt.h"
 #include <hipblaslt/hipblaslt-opt-in-features.h>
@@ -136,6 +134,10 @@ struct _rocblaslt_handle
     // Sticky bypass for scan_D once any caller observes a NaN.
     std::atomic<bool>     check_numerics_short_circuit{false};
 
+    // HIPBLASLT_CHECK_SYNCHRONIZER state, read once in the ctor. See
+    // check_synchronizer.hpp for the checker protocol.
+    bool check_synchronizer = false;
+
     // Kernels treat these buffers as inter-workgroup flags that they set, spin
     // on, and reset themselves, so a flag region may only be touched by one
     // kernel at a time. Two GEMMs running concurrently on different streams
@@ -211,12 +213,19 @@ struct _rocblaslt_handle
         // hipStreamPerThread is a sentinel that resolves to a different stream
         // for every host thread, so every thread would present the same key and
         // share one block. Key those by thread instead. The legacy null stream
-        // needs no such treatment: it really is one stream shared by all threads.
+        // is nullptr, which the loop below also uses to mean "block free", so it
+        // would reserve nothing and alias whichever stream claims that block
+        // next; hipStreamLegacy names that same stream and shares its key.
         const void* key = static_cast<const void*>(stream);
         if(stream == hipStreamPerThread)
         {
             static thread_local char perThreadKey;
             key = &perThreadKey;
+        }
+        else if(stream == nullptr || stream == hipStreamLegacy)
+        {
+            static char legacyNullKey;
+            key = &legacyNullKey;
         }
 
         for(size_t i = 0; i < c_syncSkStreamSlots; ++i)
@@ -471,5 +480,3 @@ inline int32_t effective_uniform_summation_order(const _rocblaslt_handle*      h
         return 1;
     return 0;
 }
-
-#endif // HANDLE_H

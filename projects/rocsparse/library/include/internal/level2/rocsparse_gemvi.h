@@ -56,15 +56,14 @@ extern "C" {
  *  @param[in]
  *  nnz         number of non-zero entries in the sparse vector.
  *  @param[out]
- *  buffer_size temporary storage buffer size.
+ *  buffer_size temporary storage buffer size. Can return zero if no buffer is required 
+ *              for the supplied input parameters.
  *
  *  \retval     rocsparse_status_success the operation completed successfully.
  *  \retval     rocsparse_status_invalid_handle the library context was not initialized.
  *  \retval     rocsparse_status_invalid_size \p m, \p n, or \p nnz is invalid.
  *  \retval     rocsparse_status_invalid_pointer \p buffer_size pointer is invalid.
- *  \retval     rocsparse_status_not_implemented
- *              \p trans != \ref rocsparse_operation_none or
- *              \ref rocsparse_matrix_type != \ref rocsparse_matrix_type_general.
+ *  \retval     rocsparse_status_not_implemented \p trans != \ref rocsparse_operation_none.
  */
 /**@{*/
 ROCSPARSE_EXPORT
@@ -163,16 +162,16 @@ rocsparse_status rocsparse_zgemvi_buffer_size(rocsparse_handle    handle,
  *  @param[in]
  *  idx_base    rocsparse_index_base_zero or rocsparse_index_base_one.
  *  @param[in]
- *  temp_buffer temporary storage buffer.
+ *  temp_buffer temporary storage buffer of at least the size returned by
+ *              \ref rocsparse_sgemvi_buffer_size "rocsparse_Xgemvi_buffer_size()".
+ *              Might be a \p nullptr when the returned size is zero.
  *
  *  \retval     rocsparse_status_success the operation completed successfully.
  *  \retval     rocsparse_status_invalid_handle the library context was not initialized.
  *  \retval     rocsparse_status_invalid_size \p m, \p n, \p lda, or \p nnz is invalid.
  *  \retval     rocsparse_status_invalid_pointer \p alpha, \p A, \p x_val, \p x_ind,
  *              \p beta, \p y, or \p temp_buffer pointer is invalid.
- *  \retval     rocsparse_status_not_implemented
- *              \p trans != \ref rocsparse_operation_none or
- *              \ref rocsparse_matrix_type != \ref rocsparse_matrix_type_general.
+ *  \retval     rocsparse_status_not_implemented \p trans != \ref rocsparse_operation_none.
  *
  *  \par Example
  *  \snippet example_rocsparse_gemvi.cpp doc example

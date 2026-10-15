@@ -1,0 +1,11 @@
+{% extends "common/base.cpp.jinja2" %}
+{% block config_constructor -%}
+rocprim::reduce_by_key_config<{{ config.block_size_x }},
+                              {{ config.ipt }},
+                              rocprim::block_load_method::block_load_transpose,
+                              rocprim::block_load_method::block_load_transpose,
+                              rocprim::block_scan_algorithm::using_warp_scan>
+{%- endblock %}
+{% block benchmark_type %}
+using benchmark_type = device_reduce_by_key_benchmark<key_type, value_type, 0, false, config>;
+{% endblock %}

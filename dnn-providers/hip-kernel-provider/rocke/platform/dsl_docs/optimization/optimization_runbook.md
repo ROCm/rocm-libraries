@@ -230,7 +230,7 @@ Decide what the kernel computes before deciding how it should run.
   fields explicitly; e.g. `UnifiedAttention2DTiledSpec.dtype="bf16"`,
   `kv_storage_dtype="fp8e4m3"` for the FP8 KV cache path.
 - DSL dtype catalog: `I1`, `I8`, `I16`, `I32`, `I64`, `BF16`, `F16`,
-  `F32`, `FP8E4M3`, `BF8E5M2` (see `core/ir.py:34-97`).
+  `F32`, `F64`, `FP8E4M3`, `BF8E5M2` (see `core/ir.py:34-97`).
 - Quantization helpers in `helpers/quant.py` (`quant_max_abs`,
   `quantize_scalar_f32`, `dequantize_scalar_to_f32`, `quant_ir_type`,
   `ir_to_qdtype`). `QDType` is `Literal["i8", "fp8e4m3", "bf8e5m2"]`.
@@ -242,6 +242,9 @@ Decide what the kernel computes before deciding how it should run.
   norm `<= 5e-3` (was 2.5e-3 before noise widening, see
   `notes/PROPOSALS_IMPLEMENTATION_REPORT.md::F2`), reduce `<= 1.5e-3`,
   gemm `<= 7e-2`).
+- fp64 kernels compute natively in f64 and are checked against a float64
+  reference (`tests/instances/differential/numeric.py`: elementwise
+  `<= 1e-12`, reduce `<= 1e-10`).
 - For fp16 inputs with fp32 accumulation over O(100) terms, expect
   errors near the fp16 ULP floor for correct kernels. Errors two
   orders of magnitude higher almost always indicate structural bugs
@@ -289,8 +292,10 @@ from cheapest to most expensive:
    — MoE / Block-scale / MX and non-attention extended kernels.
    FMHA / sage / sparse attention coverage moved to the library:
    `PYTHONPATH=rocke/library python3 -m builders.common.parity_fmha_extended --arch <arch>`
-6. `python python/rocke/examples/gfx950/attention/parity_unified_attention.py`
-   — attention parity (Triton + ref vs CK DSL paths).
+6. `PYTHONPATH=python:../library python -m builders.gfx950.attention.prefill.parity_unified_attention`
+   — attention parity (Triton + ref vs rocKE paths). The gfx942 sibling
+   `builders.gfx942.attention.prefill.parity_unified_attention` checks
+   against a torch reference only.
 7. `python python/rocke/examples/common/hip_lowering_parity.py` — production
    LLVM lowering vs HIP-debug lowering audit (non-attention specs).
    Attention lowering audit:
@@ -299,7 +304,7 @@ from cheapest to most expensive:
 References do not have to be torch. The conv and GEMM bake-offs use
 NumPy fp32 accumulation in `run_manifest.py`. Attention has a
 deliberate per-shape `ref_paged_attn` in
-`examples/gfx950/attention/parity_unified_attention.py`.
+`library/builders/gfx950/attention/prefill/parity_unified_attention.py`.
 
 ### 2.2 Performance Baselines
 
@@ -1826,6 +1831,7 @@ they exist, live under `instances/<arch>/<kernel>.py`) and read the
 | `block_q` | DirectConv | 16 / 4 | Q output rows per CTA | bigger ⇒ more LDS for input rows |
 | `block_groups` | DirectConv | 8 / 16 | Conv groups per CTA | Sweep ±1: 16c best was BLOCK_GROUPS=4, not 8 (§17.1) |
 | `groups` | conv_implicit_gemm | 1 | Grouped conv via descriptor `unmerge("group")` | `> 1` for ResNeXt / depthwise-style |
+| `group_merge` | conv_implicit_gemm (fwd), conv_implicit_gemm_wgrad | 1 | Folds `Gm` conv groups into one GEMM so the per-group channel count the vector-width picker sees becomes `Gm` instead of 1, restoring a wide load where the depthwise one was scalar. Fwd puts the group on GemmN and GemmK and masks off-diagonal **weights** on the B load, so the redundant work lands in idle MFMA N-lanes and costs no memory traffic; wgrad puts it on M and N instead | Depthwise only (`cpg == kpg == 1`), `wave_size == 64`. Must divide `groups` and fit `tile_n`. Fwd also excludes `async_dma`, pointwise (`Y == X == 1`) and 3-D; wgrad also excludes `split_k > 1` without `two_stage`. Larger `Gm` widens the load but adds masked compute, so the best degree is shape-dependent and **turns over** — sweep it rather than maxing it. Inert at `1`; see [`examples/gfx950/conv_fwd/fwd_merged_groups_case_study.md`](../../python/rocke/examples/gfx950/conv_fwd/fwd_merged_groups_case_study.md) |
 | `k0_k1_split` | conv_implicit_gemm | False | K0/K1 inner-dim split for `CoalescedTileLoader` | When C is the natural contiguous dim |
 | `n_acc_slots` (derived) | DirectConv | KH | Circular accumulators for row streaming | Conv 3×3 → 3 slots |
 
@@ -1849,11 +1855,13 @@ matches → zero re-pack. See §17.4 for the quantitative reduction.
 | Knob | Spec | Values | Effect |
 |---|---|---|---|
 | `pipeline` | GEMM `TraitSpec` | `"mem"` / `"compv3"` / `"compv4"` | `mem` = single-buffer; `compv4` = double-buffered async DMA + MFMA overlap. Compv3 / compv4 trade LDS for latency hiding |
-| `pipeline` | conv_implicit_gemm, conv_implicit_gemm_wgrad | `"mem"` / `"compv3"` / `"compv4"` / `"wavelet"` / `"basic"` | The GEMM names above plus `"basic"` = CK `pipeline_basic`: a single LDS buffer, with the global read of tile `k+1` issued before the `sync` + MFMA of tile `k` and the matching LDS write deferred past the second `sync`, so VMEM latency overlaps MFMA compute and tile `k+1` waits in VGPRs rather than in a second LDS tile. Statically unrolls the K loop — bounded by `_MAX_UNROLLED_K_ITERS` on wgrad and by the parallel `_MAX_BASIC_K_ITERS` in `conv_implicit_gemm.py` on forward conv — is mutually exclusive with `async_dma`, and needs a compile-time trip count, so on wgrad it rejects `split_k=0` |
+| `pipeline` | conv_implicit_gemm, conv_implicit_gemm_wgrad | `"mem"` / `"compv3"` / `"compv4"` / `"wavelet"` / `"basic"` | The GEMM names above plus `"basic"` = same runtime `scf.for` K-loop as `"mem"` (load → sync → MFMA → sync per tile); it is mutually exclusive with `async_dma` but otherwise imposes no K-trip-count limit |
 | `scheduler` | GEMM `TraitSpec` | `"intrawave"` / `"interwave"` | Where the scheduler injects waits. Intrawave keeps producers and consumers in one wave; interwave splits them |
 | `async_dma` | conv_implicit_gemm, conv_implicit_gemm_wgrad, conv_implicit_gemm_dgrad | False / True | Enable direct global → LDS DMA (`raw_ptr_buffer_load_lds`). It **pins the schedule**: forward conv and wgrad both build `SchedulePolicy.for_pipeline("async_dma")` (interwave, `s_setprio 1`) and ignore `spec.pipeline` on that leg, which is why the sweep pins the pipeline to `"mem"` there instead of compiling one body under five kernel names. Incompatible with `pipeline="basic"` (all conv families) and with `pipeline="wavelet"` (forward conv, dgrad). A **swept axis**, not a run-level flag — unlike `lds_k_outer` it is not deducible from `(arch, spec)`: it removes the register staging of the tile, but it also forces the LDS pad to 0 (the intrinsic writes a packed lane-contiguous tile) and coarsens the load-width ladder to the chunk widths the intrinsic accepts, and both terms are functions of tile width and channel run, which are themselves sweep axes. On wgrad it *requires* `lds_k_outer=True`; on dgrad it is *rejected* under `lds_k_outer` (the tilde builder has no direct global→LDS path). Python-unrolls the K loop, so it is bounded by `_MAX_UNROLLED_K_ITERS` |
-| `_MAX_UNROLLED_K_ITERS` | `instances/common/conv_implicit_gemm_wgrad.py` module constant (mirrored as `ROCKE_MAX_UNROLLED_K_ITERS` in the C engine) | 128 | Cap on `ceil((wg_K_padded / split_k) / tile_k)` for **both** statically-unrolled wgrad loops — `pipeline="basic"` **and** `async_dma`. A build-practicality bound, not a hardware one: over the cap `is_valid_wgrad_spec` rejects the spec, so raise `split_k` or `tile_k` rather than raising the constant. It previously guarded `basic` only, leaving async uncapped — a deep reduction at a low split-K degree then unrolled five figures of load+MFMA bodies into one kernel and exhausted host memory during the IR build instead of failing validation. Forward conv keeps its own parallel `_MAX_BASIC_K_ITERS = 128` in `conv_implicit_gemm.py`, which still guards `pipeline="basic"` only |
+| `_MAX_UNROLLED_K_ITERS` | `instances/common/conv_implicit_gemm_wgrad.py` module constant (mirrored as `ROCKE_MAX_UNROLLED_K_ITERS` in the C engine) | 128 | Cap on `ceil((wg_K_padded / split_k) / tile_k)` for the statically-unrolled wgrad `async_dma` loop. A build-practicality bound, not a hardware one: over the cap `is_valid_wgrad_spec` rejects the spec, so raise `split_k` or `tile_k` rather than raising the constant. `pipeline="basic"` no longer applies — it uses a runtime `scf.for` loop and is not bounded by this constant |
 | `unroll_k` | conv_implicit_gemm | False | Python-time unroll of the K loop. Bigger code, fewer waits |
+| `uniform_k_decode` | conv_implicit_gemm_dgrad | False | Decode the reduction index once per K tile, in uniform registers. The AOT dgrad kernel is shape-generic, so its plain K loop splits every load chunk's `k` into `(ydot, xdot, k_out)` with two runtime signed divisions and forms the offset from runtime-stride products -- per chunk, per iteration, ahead of the first `buffer_load`. When `kpg % tile_k == 0` (checked at run time) a K tile never straddles a filter tap, so the flag's loop carries the tile's `(k_out, xdot, ydot)` as uniform iteration arguments, advances them with a compare-and-wrap, splits each offset into a loop-invariant per-element part plus a uniform per-tile part, and issues all of the tile's reads before its LDS writes. The plain loop is also emitted and runs for every other `kpg`, so the binary serves the same problems; both loops visit the same k values in the same order, so dX is bit-identical with `split_k == 1`. Rejected with `pipeline="wavelet"` (own K loop). **Not a knob:** select it with `DgradConvSpec.default_uniform_k_decode(*, arch, wave_size, pipeline)` (gfx950 wave64, non-wavelet), which the JIT sweep worker and the AOT job generator both call. |
+| `prefetch_addr` | conv_implicit_gemm_wgrad | False | Carry each load's global byte offset across K-loop iterations. The AOT wgrad kernel is shape-generic, so its plain K loop derives every load chunk's address (runtime magic-number divides, stride products, bounds checks) ahead of the `buffer_load`s. With the flag each iteration issues all of the tile's reads from the carried offsets first, derives the next tile's offsets while they are in flight, then writes LDS. Costs one live VGPR per load chunk, so it suits small and medium tiles on latency-bound problems; large tiles keep the plain loop. Rejected with `async_dma`, `unroll_k` and WMMA (separate loop bodies). **Not a knob:** select it with `WgradConvSpec.default_prefetch_addr(*, arch, tile_m, tile_n, tile_k, lds_k_outer, wave_size, async_dma, unroll_k)` (gfx950 wave64, K-outer, `(tile_m + tile_n) * tile_k <= 320 * 64`), which the JIT sweep workers and the AOT job generator both call. |
 | `use_early_v_schedule` | Attention 2D | False | Issue current-V async copy before QK so V overlaps QK + softmax (§8.1, §17.4). Use only on no-SW prefill |
 | `prefetch distance` (implicit) | `pipeline` choice | — | More stages ⇒ better latency hiding but more LDS |
 | `helpers/pipeline.py::SoftwarePipeline.run_ping_pong` | helper | — | Manual prologue / steady / epilogue staging when you author your own kernel |
@@ -1989,6 +1997,10 @@ Per-arch facts belong in the arch references — see §21.
 | `reduction` | `StreamKGemmSpec` | `Atomic` | `StreamKReductionStrategy.{Atomic, Reduction, AtomicWithFixup}` |
 | split-K | GEMM (not yet a spec field; available primitives) | — | `b.global_atomic_add_f32` for atomic split-K; `helpers/streamk.py` for the Stream-K macro tile decode |
 | Grouped GEMM persistent | `instances/grouped_gemm.py` | per-group launches | v2 persistent variant is a documented follow-up |
+| `streamk` | `WgradConvSpec` | `"off"` | `"dp_sk"` launches one CTA per data-parallel tile plus `streamk_ctas` stream-K CTAs; `"persistent"` launches only the pool and round-robins the data-parallel tiles. Both balance MAC iterations across CTAs instead of tiles, so a shape with few tiles and a long `wg_K` still fills the device. Mutually exclusive with `split_k` |
+| `streamk_reduction` | `WgradConvSpec` | `"linear"` | How CTAs sharing a tile combine partials. `"linear"`: the owner waits on each later contributor in turn and stores once. `"tree"`: pairwise fan-in, `ceil(log2)` rounds. Both are deterministic and need no dW pre-zeroing. `"atomic"`: f32 atomics into dW (fp32 only). `"workspace"`: f32 scratch atomics plus the Stage 2 reduce kernel |
+| `streamk_ctas` | `WgradConvSpec` | `-1` | The CTA pool the stream-K remainder is spread over (CK `max_active_wgs`). A launch parameter, not part of the kernel: it sizes the host partition that arrives as the `sk_*` kernargs. `-1` resolves per reduction: `workspace`/`atomic` (no waiting) get four CTAs per CU (`_STREAMK_CTAS_PER_CU`, counted in CTAs, not waves); `linear`/`tree` get one CTA per CU, because their fixups get slower as more CTAs share a tile. The pool need not be resident: a CTA waits only on higher-index CTAs and publishes its own partial first, so ascending workgroup dispatch keeps the waits from starving their producers |
+| `--streamk` (sweep) | `benchmark_implicit_gemm_conv.py` / `kernel_sweep.py` | `off` | Opt-in wgrad stream-K candidates (`dp_sk`/`persistent`/`all` × `--streamk-reductions`); the dispatcher does not select stream-K |
 
 #### 12.1.J Quantization
 
@@ -3276,7 +3288,7 @@ export PYTHONPATH=python
 ### 19.2 The single validation block
 
 ```bash
-cd <composablekernel-checkout>
+cd <rocke>/platform
 export PYTHONPATH=python:../library
 
 PYTHONDONTWRITEBYTECODE=1 python tests/test_rocke.py
@@ -3291,8 +3303,7 @@ python python/rocke/examples/common/distribution_2d_add_demo.py --H 64 --W 128
 python python/rocke/examples/common/ck_tile_parity.py --op all
 
 export AITER_PATH=<aiter-checkout>
-PYTHONPATH="python:${AITER_PATH}" python \
-  python/rocke/examples/gfx950/attention/parity_unified_attention.py \
+python -m builders.gfx950.attention.prefill.parity_unified_attention \
   --scenario decode_d128_b16 --attempts 1 --warmup 0 --paths auto,2d,3d
 ```
 

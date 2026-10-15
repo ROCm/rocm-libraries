@@ -12,7 +12,7 @@
 #include "grid.h"
 #include "mathutil.h"
 #include "persistent_grid.h"
-#include "hipconv/conv2d_params.hpp"
+#include "hipconv/conv_params.hpp"
 #include <cmath>
 #include <cstdint>
 
@@ -23,6 +23,9 @@ namespace hipconv::cdna4::direct_wgrad
 //
 // The corpus pins the 18.5 ratio between the two tightly and the scale only to within a factor,
 // so a refit that moves the scale by less than that is noise.
+//
+// The corpus is 16-bit only, so the tf32 entries are priced on an extrapolation of this fit.
+// Issue #239 tracks fitting them.
 constexpr double L2_READ_FLOPS_PER_BYTE   = 178.0;
 constexpr double DW_ATOMIC_FLOPS_PER_BYTE = 3293.0;
 
@@ -36,13 +39,13 @@ constexpr double MACHINE_FILL_EXPONENT = 0.8;
 // The packing rule and the model's compute term both read this expression. It takes the packing
 // rather than a config because the column block's width follows unfold_n alone, which is what
 // lets the packing rule cost the three packings without walking the table.
-inline int packed_columns(const Conv2dParams& par, int unfold_n)
+inline int packed_columns(const ConvParams& par, int unfold_n)
 {
     const int w_unfold = MFMA_K / unfold_n;
     return divup(par.q, w_unfold) * w_unfold;
 }
 
-inline int packed_columns(const Conv2dParams& par, const Config& cfg)
+inline int packed_columns(const ConvParams& par, const Config& cfg)
 {
     return packed_columns(par, cfg.unfold_n);
 }
@@ -50,7 +53,7 @@ inline int packed_columns(const Conv2dParams& par, const Config& cfg)
 // Output pixels the machine runs, so the columns a packing leaves empty count as work.
 //
 // Rows pad by the same factor for every arrangement, so leaving them out moves no ranking.
-inline int64_t padded_pixels(const Conv2dParams& par, const Config& cfg)
+inline int64_t padded_pixels(const ConvParams& par, const Config& cfg)
 {
     const int64_t images = int64_t{divup(par.n, cfg.unfold_n)} * cfg.unfold_n;
     return images * par.p * packed_columns(par, cfg);
@@ -60,7 +63,7 @@ inline int64_t padded_pixels(const Conv2dParams& par, const Config& cfg)
 //
 // Built the way the kernel body builds it, so tiles(), items() and splits() cannot drift from the
 // launch's. The launch width is the persistent grid; only a test runs a narrower one.
-inline FlatGrid model_grid(const Conv2dParams& par, const Config& cfg)
+inline FlatGrid model_grid(const ConvParams& par, const Config& cfg)
 {
     return FlatGrid{.groups           = par.groups,
                     .c_per_group      = par.channels_per_group(),
@@ -79,11 +82,17 @@ inline FlatGrid model_grid(const Conv2dParams& par, const Config& cfg)
 //
 // Relative, so an entry on that wave scales by exactly one and the fitted coefficients stay
 // comparable across filter sizes.
+//
+// Widest within the element width as well as the filter shape. The two widths are separate
+// tables that no layer ranks together, and tf32's tile is narrower because its split operands
+// double the register cost, not to trade throughput, so measuring it against a 16-bit tile it
+// never competes with would price every tf32 entry at a slowdown none of them can avoid.
 inline double compute_slowdown(const Config& cfg)
 {
     int widest = 0;
     for(const Config& c : configs)
-        if(c.kh == cfg.kh && c.kw == cfg.kw && c.wave_c16 * c.wave_k16 > widest)
+        if(c.kh == cfg.kh && c.kw == cfg.kw && c.elem_bytes == cfg.elem_bytes &&
+           c.wave_c16 * c.wave_k16 > widest)
             widest = c.wave_c16 * c.wave_k16;
     return static_cast<double>(widest) / (cfg.wave_c16 * cfg.wave_k16);
 }
@@ -91,9 +100,13 @@ inline double compute_slowdown(const Config& cfg)
 // Bytes one operand stream fetches for each byte the tile keeps.
 //
 // window is the loader's contiguous run in channels, kept the part of it this tile uses, total the
-// tensor's whole channel axis; fp16 makes them bytes. The three cases and the floor on the run
-// reward are in the short-channel-runs section of direct-wgrad-estimated-cost.md.
-inline double line_cost(int window, int kept, int total)
+// tensor's whole channel axis; elem_bytes makes them bytes. The three cases and the floor on the
+// run reward are in the short-channel-runs section of direct-wgrad-estimated-cost.md.
+//
+// The element width is not a constant factor here the way it is in the read term. The run is
+// compared against a 128-byte cache line, so a tf32 window reaches the line at half the channels
+// a 16-bit one needs and earns the run reward that much sooner.
+inline double line_cost(int window, int kept, int total, int elem_bytes)
 {
     if(window >= total)
         return 1.0;
@@ -101,10 +114,10 @@ inline double line_cost(int window, int kept, int total)
     constexpr double line_bytes       = 128.0;
     constexpr double most_a_run_earns = 0.5;
 
-    const double run     = 2.0 * window;
+    const double run     = elem_bytes * static_cast<double>(window);
     const double fetched = run < line_bytes ? line_bytes : run;
 
-    const double waste = fetched / (2.0 * kept);
+    const double waste = fetched / (elem_bytes * static_cast<double>(kept));
     const double reward =
         run <= line_bytes
             ? 1.0
@@ -129,7 +142,7 @@ inline double machine_fill(const FlatGrid& grid)
 // constructs, past a signed 64-bit integer. Returned as float, which is already wider than the
 // model is accurate: it is a two-coefficient fit over a measured corpus, so a pair it separates
 // only below float resolution it has not separated at all, and the table's order decides those.
-inline float estimated_cost(const Conv2dParams& par, const Config& cfg)
+inline float estimated_cost(const ConvParams& par, const Config& cfg)
 {
     const FlatGrid grid = model_grid(par, cfg);
 
@@ -145,17 +158,26 @@ inline float estimated_cost(const Conv2dParams& par, const Config& cfg)
     //
     // The corpus decided the gate on a grouped layer: priced ungated it moves 27 of the 128 picks
     // and 11 of those come out wrong.
-    const int c_total   = par.groups * par.channels_per_group();
-    const int k_total   = par.groups * par.filters_per_group();
-    const int c_kept    = minimum(cfg.block_c(), cfg.waves_g * par.channels_per_group());
-    const int k_kept    = minimum(cfg.block_k(), cfg.waves_g * par.filters_per_group());
-    const double s_line = par.groups > 1 ? line_cost(cfg.block_c(), c_kept, c_total) : 1.0;
-    const double d_line = par.groups > 1 ? line_cost(cfg.block_k(), k_kept, k_total) : 1.0;
+    const int c_total = par.groups * par.channels_per_group();
+    const int k_total = par.groups * par.filters_per_group();
+    const int c_kept  = minimum(cfg.block_c(), cfg.waves_g * par.channels_per_group());
+    const int k_kept  = minimum(cfg.block_k(), cfg.waves_g * par.filters_per_group());
+    const double s_line =
+        par.groups > 1 ? line_cost(cfg.block_c(), c_kept, c_total, cfg.elem_bytes) : 1.0;
+    const double d_line =
+        par.groups > 1 ? line_cost(cfg.block_k(), k_kept, k_total, cfg.elem_bytes) : 1.0;
 
-    const double compute = compute_slowdown(cfg) * 2 * filter * pixels * groups *
+    // MFMAs one logical product costs: three for tf32's (big, small) split, one otherwise.
+    // The three is exact, but the rest of tf32's price is extrapolated: the fit has no tf32 rows,
+    // and no term prices staging the split operands through VGPRs. Issue #239 tracks fitting them.
+    const double mfma_per_product = cfg.is_tf32() ? 3.0 : 1.0;
+
+    const double compute = mfma_per_product * compute_slowdown(cfg) * 2 * filter * pixels * groups *
                            (c_blocks * cfg.group_c()) * (k_blocks * cfg.group_k());
-    const double reads =
-        2 * pixels * groups * (k_blocks * chans * s_line + c_blocks * filters * d_line);
+    // The operands are read at their own width; dW is fp32 whatever they are, so the atomics
+    // keep their 4.
+    const double reads = cfg.elem_bytes * pixels * groups *
+                         (k_blocks * chans * s_line + c_blocks * filters * d_line);
     const double atomics = 4 * filter * groups * chans * filters * grid.splits();
 
     const double total =
@@ -164,7 +186,7 @@ inline float estimated_cost(const Conv2dParams& par, const Config& cfg)
 }
 
 // The FLOPs the gradient needs, before any config spends anything on top.
-inline double ideal_flops(const Conv2dParams& par)
+inline double ideal_flops(const ConvParams& par)
 {
     return 2.0 * par.n * par.p * par.q * par.groups * par.channels_per_group() *
            par.filters_per_group() * par.kh * par.kw;
@@ -176,7 +198,7 @@ inline double ideal_flops(const Conv2dParams& par)
 // peak in the sense that interface documents. It reaches 1 only for a config that pads nothing,
 // refetches nothing, sends no atomics and leaves no workgroup idle, and the compute term alone
 // keeps it under 1 everywhere else.
-inline float throughput_index(const Conv2dParams& par, const Config& cfg)
+inline float throughput_index(const ConvParams& par, const Config& cfg)
 {
     return static_cast<float>(ideal_flops(par) / estimated_cost(par, cfg));
 }
