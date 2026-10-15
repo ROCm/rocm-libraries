@@ -429,7 +429,9 @@ static void ll_fminmax(rocke_lower_t* L, const rocke_op_t* op, const char* intri
     const rocke_value_t* a = op->operands[0];
     const rocke_value_t* b = op->operands[1];
     const char* ty_name = a->type ? a->type->name : NULL;
-    const char* llvm_ty = ll_fp_llvm_ty(ty_name);
+    /* Python's fmax / fmin dicts (unlike the shared FP map) also accept f64. */
+    const char* llvm_ty
+        = (ty_name && strcmp(ty_name, "f64") == 0) ? "double" : ll_fp_llvm_ty(ty_name);
     if(llvm_ty == NULL)
     {
         rocke_ll_fail(L,

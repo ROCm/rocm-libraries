@@ -19,6 +19,7 @@ from typing import Any
 
 import yaml
 
+from . import generic_targets as gtmod
 from .models import (
     ARCH_BASE_ID_PATTERN,
     AUTHORED_TEST_SETS,
@@ -307,6 +308,8 @@ def load_config(path: Path) -> IngestorConfig:
                         build=dict(ks_raw.get("build", {})),
                         builder=ks_raw.get("builder", ""),
                         spec=dict(ks_raw.get("spec", {})),
+                        file=ks_raw.get("file", ""),
+                        symbol=ks_raw.get("symbol", ""),
                     ),
                     metadata=dict(kernel_raw.get("metadata", {})),
                     priority=kernel_raw.get("priority", 0),
@@ -977,6 +980,7 @@ _REQUIRED_KERNEL_SOURCE_FIELDS: dict = {
     KERNEL_SOURCE_KIND_EMBEDDED: ("source_file", "entry_point"),
     KERNEL_SOURCE_KIND_HIP: ("source", "entry"),
     KERNEL_SOURCE_KIND_ROCKE: ("source", "builder", "spec"),
+    KERNEL_SOURCE_KIND_HSACO: ("file", "symbol"),
 }
 #: The fields a kind owns but may omit -- ``KernelSource.as_document`` writes them
 #: for that kind, and nothing requires them.
@@ -1361,19 +1365,106 @@ def _check_kernel_priority(config: IngestorConfig) -> None:
                 )
 
 
+def _generic_table() -> "gtmod.GenericTargets":
+    """The generic target table; a read failure is a ConfigError."""
+    try:
+        return gtmod.default_table()
+    except ValueError as exc:
+        raise ConfigError(str(exc)) from exc
+
+
+def _check_arch_list_generics(archs: list, where: str, table) -> None:
+    """Per-list rules: no unknown generics, no generic beside its member or a generic sharing one."""
+    for entry in archs:
+        if gtmod.is_generic_shaped(entry) and not table.has(entry):
+            raise ConfigError(
+                f"{where}: arch entry '{entry}' is a generic target name absent "
+                f"from the generic target table {table.path} "
+                f"(known: {', '.join(table.names())})"
+            )
+    advice = (
+        "list one, or author two packs (an explicit override plus a generic "
+        "fallback are separate packs)"
+    )
+    for i, x in enumerate(archs):
+        for y in archs[i + 1 :]:
+            if table.has(x) and table.has(y):
+                shared = [m for m in table.members(x) if m in table.members(y)]
+                if shared:
+                    raise ConfigError(
+                        f"{where}: 'arch' lists '{x}' and '{y}': the two generics "
+                        f"share member {shared[0]}; {advice}"
+                    )
+                continue
+            generic, member = (x, y) if table.has(x) else (y, x)
+            if table.has(generic) and member in table.members(generic):
+                raise ConfigError(
+                    f"{where}: 'arch' lists '{x}' and '{y}': {generic} contains "
+                    f"{member}; {advice}"
+                )
+
+
+def _check_generic_arch(config: IngestorConfig) -> None:
+    """Pre-mint check #4a: the packer's generic-target rules (see descriptor-packaging/README.md)."""
+    table = _generic_table()
+    for pack in config.packs:
+        where = f"pack '{pack.name}'"
+        _check_arch_list_generics(pack.arch, where, table)
+        pack_generics = [a for a in pack.arch if gtmod.is_generic_shaped(a)]
+        for kernel in pack.kernels:
+            kernel_where = f"{where} kernel '{kernel.name}'"
+            _check_arch_list_generics(kernel.arch, kernel_where, table)
+            if kernel.kernel_source.kind == KERNEL_SOURCE_KIND_ROCKE:
+                rocke_generics = [
+                    a
+                    for a in (pack_generics or kernel.arch)
+                    if gtmod.is_generic_shaped(a)
+                ]
+                if rocke_generics:
+                    raise ConfigError(
+                        f"{kernel_where}: rocKE does not support generic targets "
+                        f"yet (arch '{rocke_generics[0]}')"
+                    )
+            stamped = (
+                list(kernel.arch or pack.arch)
+                if kernel.kernel_source.kind == KERNEL_SOURCE_KIND_HSACO
+                else list(kernel.arch)
+            )
+            for generic in stamped:
+                if gtmod.is_generic_shaped(generic) and generic not in pack.arch:
+                    raise ConfigError(
+                        f"{kernel_where}: declares generic target '{generic}' but "
+                        f"the pack does not list '{generic}'; it would ship in no "
+                        f"shard"
+                    )
+            if not pack_generics or not stamped:
+                continue
+            lists_all = all(g in stamped for g in pack_generics)
+            only_listed = all(a in pack.arch for a in stamped)
+            if not lists_all or not only_listed:
+                raise ConfigError(
+                    f"{where}: pack lists generic target(s) {pack_generics} (arch "
+                    f"{pack.arch}) but kernel '{kernel.name}' declares arch "
+                    f"{stamped}; a kernel under a generic pack must list every "
+                    f"generic of the KDP and only entries the KDP lists"
+                )
+
+
 def _check_kernel_arch_subset_of_pack(config: IngestorConfig) -> None:
     """Pre-mint check #4: a kernel's arch must be a subset of its pack's.
 
-    Mirrors ``DescriptorLoader.hpp``'s ``archCovers(pack.arch, kernel.arch)``.
-    An empty pack.arch covers everything; an empty kernel.arch inherits it.
+    Mirrors ``ingestor/DeviceProperties.hpp``'s ``archCovers`` over expanded device sets.
     """
+    table = _generic_table()
     for pack in config.packs:
         if not pack.arch:
             continue
         for kernel in pack.kernels:
             if not kernel.arch:
                 continue
-            reaching = [a for a in kernel.arch if a not in pack.arch]
+            reaching = [
+                a for a in kernel.arch if not gtmod.covers(pack.arch, [a], table)
+            ]
             if reaching:
                 raise ConfigError(
                     f"pack '{pack.name}' kernel '{kernel.name}' declares arch "
@@ -1393,6 +1484,7 @@ def _check_arch_shape(config: IngestorConfig) -> list[str]:
     also raised via ``warnings.warn``.
     """
     messages: list[str] = []
+    table = _generic_table()
 
     def check_list(archs: list, where: str) -> None:
         for arch in archs:
@@ -1406,7 +1498,7 @@ def _check_arch_shape(config: IngestorConfig) -> list[str]:
                     f"parses fine and then declines on every device, logging "
                     f"exactly what a healthy cross-arch install logs."
                 )
-            if arch not in KNOWN_ARCH_BASE_IDS:
+            if arch not in KNOWN_ARCH_BASE_IDS and not table.has(arch):
                 message = (
                     f"{where} arch entry '{arch}' is well-formed but not a "
                     f"recognized gfx target id (e.g. a typo like 'gfx94' for "
@@ -1527,7 +1619,7 @@ def _check_kernel_source_kind_implemented(config: IngestorConfig) -> None:
         if kind_source in emittable:
             continue
 
-        if kind_source in (KERNEL_SOURCE_KIND_HSACO_FILE, KERNEL_SOURCE_KIND_HSACO):
+        if kind_source == KERNEL_SOURCE_KIND_HSACO_FILE:
             raise ConfigError(
                 f"{where} is '{kind_source}', which no adapter implements on "
                 f"either path. The runtime needs supportsSourceKind() on "
@@ -1539,11 +1631,12 @@ def _check_kernel_source_kind_implemented(config: IngestorConfig) -> None:
                 f"{where} is 'kpack', which is a PRODUCED kind, never an "
                 f"authored one. hkp_pack writes it -- stamping library, "
                 f"toc_key, symbol and sha256 from the artifact it actually "
-                f"built -- when it lowers a 'hip' or 'rocke' descriptor. "
+                f"built -- when it lowers a 'hip', 'rocke' or 'hsaco' descriptor. "
                 f"Authoring those four by hand would be a second source of "
                 f"truth that silently disagrees with the archive. Author "
-                f"'{KERNEL_SOURCE_KIND_ROCKE}' or '{KERNEL_SOURCE_KIND_HIP}' "
-                f"under dialect '{DIALECT_PACKAGED}' instead."
+                f"'{KERNEL_SOURCE_KIND_ROCKE}', '{KERNEL_SOURCE_KIND_HIP}' or "
+                f"'{KERNEL_SOURCE_KIND_HSACO}' under dialect '{DIALECT_PACKAGED}' "
+                f"instead."
             )
         if kind_source == KERNEL_SOURCE_KIND_ROCKE_BUILDER:
             raise ConfigError(
@@ -1595,6 +1688,14 @@ def _check_kernel_source_fields(config: IngestorConfig) -> None:
                     )
             if ks.kind == KERNEL_SOURCE_KIND_ROCKE and not isinstance(ks.spec, dict):
                 raise ConfigError(f"{where}: 'spec' must be a mapping.")
+            if ks.kind == KERNEL_SOURCE_KIND_HSACO and not (kernel.arch or pack.arch):
+                raise ConfigError(
+                    f"{where} is kind 'hsaco' but neither the kernel nor its pack "
+                    f"states an 'arch'. A prebuilt code object targets specific "
+                    f"processors, so it must list the arch(es) it runs on (a "
+                    f"generic-target object lists every arch it runs on); without "
+                    f"one it would enter every arch shard."
+                )
 
 
 def _check_specialization_declaration(config: IngestorConfig) -> None:
@@ -1608,7 +1709,7 @@ def _check_specialization_declaration(config: IngestorConfig) -> None:
     The partition over ``kmd_fields`` is exhaustive and disjoint: each field is
     either consumed by the builder (``metadata_fields``, with a binding) or
     matcher-only. A ``rocke`` kernel's spec keys reached the compiler, so they
-    cannot be matcher-only; direct-load and ``hip`` state
+    cannot be matcher-only; direct-load, ``hip`` and ``hsaco`` state
     ``metadata_fields: []`` explicitly. Presence is enforced at emission.
     """
     declaration = config.specialization
@@ -1732,8 +1833,9 @@ def _check_specialization_declaration(config: IngestorConfig) -> None:
         raise ConfigError(
             f"'specialization.metadata_fields' names {sorted(checked)}, but no "
             f"kernel in this config is built from a compiled specialization "
-            f"(kinds: {sorted(kinds)}). The direct-load and "
-            f"'{KERNEL_SOURCE_KIND_HIP}' paths hydrate no builder object, so there "
+            f"(kinds: {sorted(kinds)}). The direct-load, "
+            f"'{KERNEL_SOURCE_KIND_HIP}' and '{KERNEL_SOURCE_KIND_HSACO}' paths "
+            f"hydrate no builder object, so there "
             f"is nothing for a binding to read back and no agreement to check. "
             f"Declare 'metadata_fields: []' and list every field under "
             f"'matcher_only_fields'."
@@ -1941,6 +2043,7 @@ def _validate_config(config: IngestorConfig) -> list[str]:
     # KMD_FIELD_TYPES; the default_value check indexes _METADATA_TYPE_CHECKS by it.
     _check_kmd_default_values(config)
     _check_kernel_priority(config)
+    _check_generic_arch(config)
     _check_kernel_arch_subset_of_pack(config)  # #4
     warnings_out = _check_arch_shape(config)  # #5
 
