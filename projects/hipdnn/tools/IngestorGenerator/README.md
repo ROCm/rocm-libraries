@@ -318,10 +318,17 @@ SCRATCH=$(mktemp -d)
 D="descriptors/rocKE/$SLUG/$SLUG"
 "$PY" -m pytest tests/test_registry_regeneration.py -q
 "$PY" generate.py --config "configs/$SLUG.yaml" --output-dir "$SCRATCH/selection"
-"$PY" tools/catalog_diff.py --ignore-ids --shipped "$SHIPPED/$SLUG.kdp.json" --shipped-kmd "$SHIPPED/$SLUG.kmd.json" \
+# --strict-spec compares the FULL spec dict of every entry (not just the
+# intersection of keys in the shipped catalog), catching new spec fields that
+# hkp_pack would hydrate differently.  Use it whenever the shipped catalog and
+# the regenerated one come from the same enumerate.spec_fields declaration.
+"$PY" tools/catalog_diff.py --ignore-ids --strict-spec \
+    --shipped "$SHIPPED/$SLUG.kdp.json" --shipped-kmd "$SHIPPED/$SLUG.kmd.json" \
     --regenerated "$SCRATCH/selection/$D.kdp.json" --regenerated-kmd "$SCRATCH/selection/$D.kmd.json"
 "$PY" tools/registry_enumerator.py --manifest "configs/$SLUG.engine.yaml" --out "$SCRATCH/registry.yaml"
 "$PY" generate.py --config "$SCRATCH/registry.yaml" --output-dir "$SCRATCH/registry"
+# --subset only: shipped ⊆ regenerated is the right check for the full registry
+# (the registry may contain more tiles than the shipped selection).
 "$PY" tools/catalog_diff.py --subset --ignore-ids --shipped "$SHIPPED/$SLUG.kdp.json" --shipped-kmd "$SHIPPED/$SLUG.kmd.json" \
     --regenerated "$SCRATCH/registry/$D.kdp.json" --regenerated-kmd "$SCRATCH/registry/$D.kmd.json"
 ```

@@ -164,6 +164,12 @@ def test_g2_the_shipped_catalog_is_generated_from_the_selection(
     descriptors = out / selection.descriptor_dir
     (kdp,) = descriptors.glob("*.kdp.json")
     (kmd,) = descriptors.glob("*.kmd.json")
+    # --strict-spec: compare the FULL spec dict of every entry, not just the
+    # intersection of spec keys present in the shipped catalog.  Without it,
+    # a newly added spec field that hkp_pack would hydrate (and that changes
+    # the compiled binary) passes silently if it is absent from the shipped
+    # catalog.  The engine manifest's enumerate.spec_fields is explicit, so
+    # regeneration always produces the same set and --strict-spec should hold.
     rc = catalog_diff.main(
         [
             "--shipped",
@@ -171,6 +177,7 @@ def test_g2_the_shipped_catalog_is_generated_from_the_selection(
             "--regenerated",
             str(kdp),
             "--ignore-ids",
+            "--strict-spec",
             "--shipped-kmd",
             str(_SHIPPED_KMD),
             "--regenerated-kmd",
