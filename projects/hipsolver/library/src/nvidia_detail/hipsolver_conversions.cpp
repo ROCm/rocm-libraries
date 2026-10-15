@@ -223,6 +223,7 @@ hipsolverEigRange_t cuda2hip_erange(cusolverEigRange_t eig)
     }
 }
 
+#if(CUDART_VERSION >= 13020)
 cusolverEigComp_t hip2cuda_evect_comp(hipsolverEigComp_t eig)
 {
     switch(eig)
@@ -252,6 +253,7 @@ hipsolverEigComp_t cuda2hip_evect_comp(cusolverEigComp_t eig)
         throw HIPSOLVER_STATUS_INVALID_ENUM;
     }
 }
+#endif
 
 cusolverAlgMode_t hip2cuda_algmode(hipsolverAlgMode_t mode)
 {

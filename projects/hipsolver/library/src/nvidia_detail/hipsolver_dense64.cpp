@@ -629,6 +629,7 @@ hipsolverStatus_t hipsolverDnXstedc_bufferSize(hipsolverDnHandle_t handle,
                                                size_t*             lworkOnHost)
 try
 {
+#if(CUDART_VERSION >= 13020)
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
     if(!params)
@@ -649,6 +650,9 @@ try
                                     computeType,
                                     lworkOnDevice,
                                     lworkOnHost));
+#else
+    return HIPSOLVER_STATUS_NOT_SUPPORTED;
+#endif
 }
 catch(...)
 {
@@ -673,6 +677,7 @@ hipsolverStatus_t hipsolverDnXstedc(hipsolverDnHandle_t handle,
                                     int*                devInfo)
 try
 {
+#if(CUDART_VERSION >= 13020)
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
     if(!params)
@@ -695,6 +700,9 @@ try
                                                        workOnHost,
                                                        lworkOnHost,
                                                        devInfo));
+#else
+    return HIPSOLVER_STATUS_NOT_SUPPORTED;
+#endif
 }
 catch(...)
 {

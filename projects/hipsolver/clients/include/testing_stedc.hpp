@@ -170,6 +170,7 @@ void testing_stedc_bad_arg()
     I                      n     = 2;
     I                      ldc   = 2;
 
+#if defined(__HIP_PLATFORM_HCC__) || defined(__HIP_PLATFORM_AMD__) || (CUDART_VERSION >= 13020)
     // memory allocations
     device_strided_batch_vector<S>   dD(1, 1, 1, 1);
     device_strided_batch_vector<S>   dE(1, 1, 1, 1);
@@ -214,6 +215,7 @@ void testing_stedc_bad_arg()
                             hWork.data(),
                             bytes_hW,
                             dInfo.data());
+#endif
 }
 
 template <bool CPU,
@@ -747,6 +749,40 @@ void testing_stedc(Arguments& argus)
     size_t size_ERes = (argus.unit_check || argus.norm_check) ? size_E : 0;
     size_t size_CRes = (argus.unit_check || argus.norm_check) ? size_C : 0;
 
+// check version guard
+#if !(defined(__HIP_PLATFORM_HCC__) || defined(__HIP_PLATFORM_AMD__) || (CUDART_VERSION >= 13020))
+    {
+        EXPECT_ROCBLAS_STATUS(hipsolver_stedc(API,
+                                              handle,
+                                              params,
+                                              compz,
+                                              n,
+                                              (S*)nullptr,
+                                              (S*)nullptr,
+                                              (T*)nullptr,
+                                              ldc,
+                                              nullptr,
+                                              (SIZE)0,
+                                              nullptr,
+                                              (SIZE)0,
+                                              (int*)nullptr),
+                              HIPSOLVER_STATUS_NOT_SUPPORTED);
+        EXPECT_ROCBLAS_STATUS(hipsolver_stedc_bufferSize(API,
+                                                         handle,
+                                                         params,
+                                                         compz,
+                                                         n,
+                                                         (S*)nullptr,
+                                                         (S*)nullptr,
+                                                         (T*)nullptr,
+                                                         ldc,
+                                                         (size_t*)nullptr,
+                                                         (size_t*)nullptr),
+                              HIPSOLVER_STATUS_NOT_SUPPORTED);
+        return;
+    }
+#endif
+
     // check invalid sizes
     bool invalid_size = (n < 0 || (compz != HIPSOLVER_EIG_COMP_N && ldc < n));
     if(invalid_size)
@@ -823,6 +859,8 @@ void testing_stedc(Arguments& argus)
     // check quick return
     if(n == 0)
     {
+        // Returning non-success status when n == 0.
+#if defined(__HIP_PLATFORM_HCC__) || defined(__HIP_PLATFORM_AMD__)
         EXPECT_ROCBLAS_STATUS(hipsolver_stedc(API,
                                               handle,
                                               params,
@@ -838,6 +876,7 @@ void testing_stedc(Arguments& argus)
                                               bytes_hW,
                                               dInfo.data()),
                               HIPSOLVER_STATUS_SUCCESS);
+#endif
         if(argus.timing)
             rocsolver_bench_inform(inform_quick_return);
 
