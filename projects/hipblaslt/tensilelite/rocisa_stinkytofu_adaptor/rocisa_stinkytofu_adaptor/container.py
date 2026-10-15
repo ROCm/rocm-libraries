@@ -960,7 +960,7 @@ class HolderContainer(RegisterContainer):
 
     def __getstate__(  # type: ignore[override]
         self,
-    ) -> Tuple[str, int, int, str, Optional[RegName], int, int]:
+    ) -> Tuple[str, int, int, str, Optional[RegName], int, int, Optional[int]]:
         return (
             self.holderName,
             self.holderIdx,
@@ -969,12 +969,15 @@ class HolderContainer(RegisterContainer):
             deepcopy(self.regName),
             self.regIdx,
             self.regNum,
+            None if self.halfSelect is None else int(self.halfSelect),
         )
 
     def __setstate__(  # type: ignore[override]
         self,
-        state: Tuple[str, int, int, str, Optional[RegName], int, int],
+        state: Tuple[str, int, int, str, Optional[RegName], int, int, Optional[int]],
     ) -> None:
+        from .enum import HighBitSel  # noqa: WPS433
+
         (
             holder_name,
             holder_idx,
@@ -983,7 +986,11 @@ class HolderContainer(RegisterContainer):
             reg_name,
             reg_idx,
             reg_num,
+            half,
         ) = state
+        # A __slots__ slot left unset raises on read, and getCopiedRC reads
+        # this one. Plain int for the same pickle reason as RegisterContainer.
+        self.halfSelect = None if half is None else HighBitSel(half)
         # Restore the snapshot verbatim, skipping ctor's holderType-derived
         # state setup. RC flags default to False (not preserved in state).
         self.regType = reg_type
