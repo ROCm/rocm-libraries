@@ -535,6 +535,19 @@ if (SUPPORTED_GPU_TARGETS MATCHES "gfx1250|gfx1250-strict")
     add_definitions(-DCK_GFX1250_SUPPORT)
     set(CK_GFX1250_SUPPORT "ON")
 endif()
+# The deterministic FMHA backward fast path (CK_TILE_FMHA_BWD_DET_FAST, see
+# ck_tile/core/config.hpp) is tuned for gfx1250 and measured only there. It cannot
+# key off CK_USE_GFX1250: that is a regex match over the whole target list, so a fat
+# gfx942+gfx1250 build would define it globally and switch the fast path on for the
+# gfx942 device code as well. Require gfx1250 to be the sole target.
+# It also has to be a whole-translation-unit -D rather than a device-pass-only
+# __gfx1250__ guard, because it changes the host-side workspace sizing too; host and
+# device must agree. Defining it here keeps every target in the build consistent.
+list(LENGTH SUPPORTED_GPU_TARGETS _ck_num_gpu_targets)
+if (_ck_num_gpu_targets EQUAL 1 AND SUPPORTED_GPU_TARGETS MATCHES "^gfx1250")
+    add_definitions(-DCK_TILE_FMHA_BWD_DET_FAST=1)
+    message(STATUS "gfx1250 sole target: enabling CK_TILE_FMHA_BWD_DET_FAST")
+endif()
 if (SUPPORTED_GPU_TARGETS MATCHES "gfx12")
     add_definitions(-DCK_GFX12_SUPPORT)
 endif()
