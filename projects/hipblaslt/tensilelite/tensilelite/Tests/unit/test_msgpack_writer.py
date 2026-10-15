@@ -1,11 +1,9 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""LibraryIO MessagePack master libraries are written by tensilelite_write."""
+"""The C++ writer module, when it has been built."""
 
 import gzip
-import importlib.util
-import os
 import zlib
 from pathlib import Path
 
@@ -16,21 +14,7 @@ from Tensile.LibraryIO import writeMsgPack, writeMsgPackIndexed
 
 
 def _writer():
-    if importlib.util.find_spec("tensilelite_write") is None:
-        yaml = os.environ.get("HIPBLASLT_ENABLE_YAML", "")
-        device = os.environ.get("HIPBLASLT_ENABLE_DEVICE", "")
-        yaml_on = yaml in ("1", "ON", "on", "TRUE", "true")
-        device_off = device in ("0", "OFF", "off", "FALSE", "false")
-        if yaml_on and device_off:
-            pytest.skip(
-                "a YAML host build without device libraries does not build tensilelite_write"
-            )
-        pytest.fail(
-            "tensilelite_write was not built. MessagePack master-library writes require it."
-        )
-    import tensilelite_write
-
-    return tensilelite_write
+    return pytest.importorskip("tensilelite_write")
 
 
 def _kernels_lite_state():
@@ -146,14 +130,12 @@ def _compare_solution(before, after, path=""):
 
 def test_write_compares_solution_fields_and_drops_unknown_keys(tmp_path):
     """Each solution is compared with the input. A Python-only field is not written."""
-    _writer()
+    writer = _writer()
     state = _kernels_lite_state()
     state["solutions"][0]["pythonOnlyMarker"] = {"from": "python"}
 
-    dest = tmp_path / "library.dat"
-    writeMsgPack(str(dest), state)
     written = msgpack.unpackb(
-        _unpack_zlib(tmp_path / "library.dat.zlib"), raw=False, strict_map_key=False
+        writer.write_library(msgpack.packb(state)), raw=False, strict_map_key=False
     )
 
     by_index = {solution["index"]: solution for solution in written["solutions"]}

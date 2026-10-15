@@ -266,28 +266,9 @@ def writeJson(filename, data):
         json_object = json.dumps(data, option=json.OPT_INDENT_2).decode("utf-8") if 'orjson' in sys.modules else json.dumps(data, indent=2)
         f.write(json_object)
 
-def _is_master_library_state(data):
-    return isinstance(data, dict) and "solutions" in data and "library" in data
-
-
-def _native_msgpack_writer():
-    """The C++ writer. MessagePack master libraries are not packed in Python."""
-    try:
-        import tensilelite_write
-    except ImportError as error:
-        printExit("MessagePack libraries are written by tensilelite_write, "
-                  "which this build did not produce: {}".format(error))
-    return tensilelite_write
-
-
 def writeMsgPack(filename, data):
     """Writes data to file in compressed Message Pack format (.dat.zlib)."""
-    if _is_master_library_state(data):
-        raw = _native_msgpack_writer().write_library(msgpack.packb(data))
-    else:
-        # Lists, empty documents, and lazy index maps stay on the Python
-        # encoder. Only a MasterSolutionLibrary is rewritten in C++.
-        raw = msgpack.packb(data)
+    raw = msgpack.packb(data)
     compressed = zlib.compress(raw, 9)
     with open(filename + ".zlib", "wb") as f:
         f.write(compressed)
@@ -309,17 +290,40 @@ def writeMsgPackIndexed(filename, data):
     on its own into one concatenated BIN blob, described by a flat
     [index, offset, length, ...] side table. That lets the runtime hold the
     blob unparsed and deserialize only the solutions a query actually
-    selects. MessagePackWriteIndexedLibraryData emits that document.
+    selects. The "library" decision tree and optional "version" are emitted
+    unchanged.
 
     Only MasterSolutionLibrary payloads may be written this way. Flat
     dictionaries such as the per-arch lazy-loading mapping file have no
     "solutions" key and must keep using writeMsgPack.
     """
-    if not _is_master_library_state(data):
+    if not isinstance(data, dict) or "solutions" not in data or "library" not in data:
         printExit("writeMsgPackIndexed requires a MasterSolutionLibrary state dict "
                   "with 'solutions' and 'library' keys")
 
-    raw = _native_msgpack_writer().write_library_indexed(msgpack.packb(data))
+    # state() emits solutions as a list of dicts, so sorting needs an explicit
+    # key; a bare sorted() would try to order dicts and raise TypeError.
+    solutions = sorted(data["solutions"], key=lambda s: s["index"])
+
+    packer = msgpack.Packer(use_bin_type=True)
+    solutionsIndex = []
+    chunks = []
+    offset = 0
+    for solution in solutions:
+        packed = packer.pack(solution)
+        solutionsIndex.extend((solution["index"], offset, len(packed)))
+        chunks.append(packed)
+        offset += len(packed)
+
+    # Fixed key order keeps the artifact byte-reproducible across runs.
+    indexed = {"format_version": INDEXED_FORMAT_VERSION}
+    if "version" in data:
+        indexed["version"] = data["version"]
+    indexed["solutions_index"] = solutionsIndex
+    indexed["solutions_blob"] = b"".join(chunks)
+    indexed["library"] = data["library"]
+
+    raw = msgpack.packb(indexed, use_bin_type=True)
     compressed = zlib.compress(raw, 9)
     with open(filename + ".zlib", "wb") as f:
         f.write(compressed)
