@@ -1504,6 +1504,10 @@ _STRIDE1_CASES = (
     ("dil2_pad2", "bf16", 2, 12, 15, 64, 128, 3, 3, 2, 2, 1),
     ("dil2_grouped_pad1", "fp16", 1, 11, 9, 128, 128, 3, 3, 1, 2, 2),
     ("asym_pad_0_2", "fp16", 2, 9, 13, 64, 64, 3, 3, (0, 2), 1, 1),
+    # Grids the XCD tile order remaps (gfx950: many groups, one N tile, 3x3)
+    # and keeps in launch order (one tap and one N tile).
+    ("grouped_g12_xcd", "fp16", 2, 10, 10, 384, 768, 3, 3, 1, 1, 12),
+    ("grouped_1x1_g6_launch_order", "bf16", 1, 9, 9, 384, 384, 1, 1, 0, 1, 6),
 )
 
 
@@ -1583,6 +1587,10 @@ class TestConvDgradStride1Specializations(unittest.TestCase):
             # The tap-outer K loop, with both B tile layouts.
             "tapk": self._spec(self._probe(1), dtype, **tapk),
             "tapk_mouter": self._spec(self._probe(1), dtype, lds_k_outer=False, **tapk),
+            # The launch-order A/B build of the XCD tile order.
+            "tapk_noxcd": self._spec(
+                self._probe(1), dtype, xcd_tile_order=False, **tapk
+            ),
         }
         for label, spec in out.items():
             ok, why = is_valid_dgrad_spec(spec, ARCH)

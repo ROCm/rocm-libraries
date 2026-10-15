@@ -170,6 +170,13 @@ typedef struct rocke_dgrad_conv_spec
      * DgradConvSpec.tap_outer_k; tags the kernel name "_tapk". Appended last
      * so existing aggregate initialisers keep their layout. */
     bool tap_outer_k; /* default false */
+
+    /* xcd_tile_order: XCD-contiguous tile order for grouped stride-1 kernels
+     * on gfx950, applied when the kernargs ask for it (see
+     * _dgrad_xcd_tile_order_xcds). An A/B knob, default true (set by
+     * rocke_dgrad_conv_spec_default); false tags the kernel name "_noxcd".
+     * Mirrors DgradConvSpec.xcd_tile_order. Appended last. */
+    bool xcd_tile_order; /* default true */
 } rocke_dgrad_conv_spec_t;
 
 /* Default-constructed spec (every field == Python dataclass default). */

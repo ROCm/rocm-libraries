@@ -272,6 +272,22 @@ problems the tilde binary of its configuration already serves. The
 loop reduces in the same order as the flat loop, so `dX` matches it bit for
 bit.
 
+## XCD-contiguous tile order (`xcd_tile_order`)
+
+The hardware hands workgroups to the XCDs round-robin in launch order, and
+each XCD has its own L2, so the tiles of one group (which share its weight
+slice and its `dY` rows) land on different XCDs and every XCD refetches the
+group's operands. On gfx950, a grouped stride-1 kernel (folded record, no
+split-K) remaps its linear id `block_id_x + block_id_y * num_pid_m *
+num_pid_n` with `chiplet_transform_chunked_runtime` (one contiguous chunk of
+`num_wgs / 8` workgroups per XCD) and splits it back into tile and group. The
+grid, the chunk and the decision are runtime: the remap is selected (one
+uniform select) when `groups > 1`, `Y*X > 1 or num_pid_n > 1` (a 1x1 filter
+with one N tile shares no `dY` row between tiles) and `num_wgs >= 8`. The
+remap is a bijection of the launch grid, so correctness never depends on the
+decision. `xcd_tile_order=False` (name tag `_noxcd`) builds the launch-order
+kernel for an A/B comparison; the AOT grid does not sweep it.
+
 ## Key Files
 
 | File | Purpose |

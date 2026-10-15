@@ -67,6 +67,7 @@ from rocke.core.ir import (
 from rocke.helpers.atoms import MfmaAtom, mfma_atom
 from rocke.helpers.epilogues import CShuffleEpilogue, DirectEpilogue
 from rocke.helpers.geometry import WarpGrid
+from rocke.helpers.grid import chiplet_transform_chunked_runtime
 from rocke.helpers.layouts import ConvKOuterFragmentReader, LdsLayout
 from rocke.helpers.loads import CoalescedTileLoader
 from rocke.helpers.magic_division import (
@@ -806,6 +807,13 @@ class DgradConvSpec:
     # (setting both is rejected). Default False; tags the name ``tapk``.
     tap_outer_k: bool = False
 
+    # XCD-contiguous tile order for grouped stride-1 kernels on the targets in
+    # _XCD_TILE_ORDER_ARCHES (see xcd_tile_order_xcds). Default on: the
+    # kernel decides from its kernargs whether to remap, and the remap is a
+    # bijection of the launch grid, so the knob only exists to turn the order
+    # off for an A/B comparison. Never swept. False tags the name ``noxcd``.
+    xcd_tile_order: bool = True
+
     @property
     def block_size(self) -> int:
         return self.warp_m * self.warp_n * self.wave_size
@@ -1017,6 +1025,8 @@ class DgradConvSpec:
                 and self.lds_k_pad != _default_lds_k_pad(self.tile_k),
                 # A different K-loop body; only tagged when set.
                 "tapk": self.tap_outer_k,
+                # The launch-order tile walk (A/B knob, see xcd_tile_order).
+                "noxcd": not self.xcd_tile_order,
             },
         )
 
@@ -1264,6 +1274,103 @@ def _tap_outer_k_conflict(spec: DgradConvSpec) -> str:
             "of them"
         )
     return ""
+
+
+# Targets whose grouped stride-1 kernels lay their tiles out XCD-contiguous
+# (see xcd_tile_order_xcds), and the XCD count of each. Evaluated on gfx950
+# only. Mirrors ROCKE_DGRAD_XCD_TILE_ORDER_ARCH.
+_XCD_TILE_ORDER_ARCHES = {"gfx950": 8}
+
+
+def xcd_tile_order_xcds(spec: DgradConvSpec, arch: str) -> int:
+    """XCD count the kernel lays its tile order out for, or 0 (launch order).
+
+    The hardware hands workgroups to the XCDs round-robin in launch order
+    (``blockIdx.x`` fastest, the group on ``blockIdx.y``), and each XCD has
+    its own L2. Neighbouring tiles of one group -- the M tiles that read the
+    group's weight slice and the N tiles that read the same dY rows -- land
+    on different XCDs, and every XCD refetches each group's operands. The
+    XCD-contiguous order gives each XCD one contiguous range of the ``(group,
+    tile)`` space instead (:func:`chiplet_transform_chunked_runtime`, one
+    chunk of ``num_wgs / num_xcds`` workgroups per XCD; the remainder below a
+    multiple of the XCD count keeps launch order), so a group's operands are
+    fetched into one L2.
+
+    Build time: the target is in :data:`_XCD_TILE_ORDER_ARCHES`, the knob is
+    on, the kernel is grouped (an ungrouped problem shares its operands
+    across every tile, so launch order already spreads them), the record is
+    folded (stride 1: one sub-GEMM, whose tile count is ``num_pid_m *
+    num_pid_n``) and there is no split-K (its slices ride ``blockIdx.z``).
+    Run time, from the kernargs, with one uniform select: ``groups > 1``,
+    ``Y*X > 1 or num_pid_n > 1`` (with one tap and one N tile no dY row is
+    shared between tiles, and the order only moves the streamed rows apart)
+    and ``num_wgs >= num_xcds``. A grouped binary serves groups == 1 too, so
+    the run-time test is what keeps an ungrouped launch in launch order.
+    """
+    num_xcds = _XCD_TILE_ORDER_ARCHES.get(arch, 0)
+    if not num_xcds or not spec.xcd_tile_order:
+        return 0
+    if spec.problem.groups <= 1 or spec.split_k != 1:
+        return 0
+    if not spec.folds_sub_gemm_record:
+        return 0
+    return num_xcds
+
+
+def emit_xcd_tile_order(
+    b: IRBuilder, block_x: Value, params: dict[str, Value], *, num_xcds: int
+) -> tuple[Value, Value]:
+    """The ``(flat tile id, group)`` of this workgroup under the XCD order.
+
+    ``block_x`` is the launch's ``block_id_x`` (the tile, ``num_pid_m *
+    num_pid_n`` of them) and ``block_id_y`` the group. Their linear id is
+    remapped (:func:`chiplet_transform_chunked_runtime`, the default chunk)
+    when ``groups > 1``, ``Y*X > 1 or num_pid_n > 1`` and ``num_wgs >=
+    num_xcds`` hold on the kernargs -- a uniform select -- and split back
+    into tile and group; otherwise the split returns ``(block_id_x,
+    block_id_y)``. See :func:`python_xcd_tile_order` for the model.
+    """
+    c1 = b.const_i32(1)
+    flat_tiles = b.mul(params["p_num_pid_m"], params["p_num_pid_n"])
+    num_wgs = b.mul(flat_tiles, params["p_groups"])
+    linear_id = b.add(block_x, b.mul(b.block_id_y(), flat_tiles))
+    remapped = chiplet_transform_chunked_runtime(
+        b, linear_id, num_wgs=num_wgs, num_xcds=num_xcds
+    )
+    shares_rows = b.lor(
+        b.cmp_gt(b.mul(params["p_Y"], params["p_X"]), c1),
+        b.cmp_gt(params["p_num_pid_n"], c1),
+    )
+    use_xcd = b.land(
+        b.land(b.cmp_gt(params["p_groups"], c1), shares_rows),
+        b.cmp_ge(num_wgs, b.const_i32(num_xcds)),
+    )
+    logical_id = b.select(use_xcd, remapped, linear_id)
+    return b.mod(logical_id, flat_tiles), b.div(logical_id, flat_tiles)
+
+
+def python_xcd_tile_order(
+    bx: int,
+    by: int,
+    *,
+    num_pid_m: int,
+    num_pid_n: int,
+    groups: int,
+    taps: int,
+    num_xcds: int = _XCD_TILE_ORDER_ARCHES["gfx950"],
+) -> tuple[int, int]:
+    """Pure-Python model of :func:`emit_xcd_tile_order`: ``(tile, group)``."""
+    from rocke.helpers.grid import python_chiplet_transform_chunked_runtime
+
+    flat_tiles = num_pid_m * num_pid_n
+    num_wgs = flat_tiles * groups
+    linear_id = bx + by * flat_tiles
+    use = groups > 1 and (taps > 1 or num_pid_n > 1) and num_wgs >= num_xcds
+    if use:
+        linear_id = python_chiplet_transform_chunked_runtime(
+            linear_id, num_wgs=num_wgs, num_xcds=num_xcds
+        )
+    return linear_id % flat_tiles, linear_id // flat_tiles
 
 
 # ---------------------------------------------------------------------
@@ -1881,6 +1988,18 @@ def _build_tilde_dgrad(
     # Use a 1D grid: block_id_x covers all sub-GEMMs' tiles.
     flat_block_id = b.block_id_x()
 
+    # XCD-contiguous tile order (see xcd_tile_order_xcds): remap the
+    # launch-order linear id over (group, tile) so each XCD receives one
+    # contiguous range, when the kernargs ask for it, and split it back into
+    # the tile and the group. Off, the select keeps the linear id, whose split
+    # is (block_id_x, block_id_y) again.
+    xcd_group: Value | None = None
+    num_xcds = xcd_tile_order_xcds(spec, arch)
+    if num_xcds:
+        flat_block_id, xcd_group = emit_xcd_tile_order(
+            b, flat_block_id, params, num_xcds=num_xcds
+        )
+
     fold_record = spec.folds_sub_gemm_record
     if fold_record:
         # Stride 1 (DgradConvSpec.folds_sub_gemm_record): the only sub-GEMM's
@@ -2044,7 +2163,8 @@ def _build_tilde_dgrad(
 
     grouped = p.groups > 1
     if grouped:
-        group_idx = b.block_id_y()
+        # Under the XCD-contiguous order the group comes from the remapped id.
+        group_idx = b.block_id_y() if xcd_group is None else xcd_group
         c_kpg = p_kpg
         k_out_group_base = b.mul(group_idx, c_kpg)
         c_group_base = b.mul(group_idx, p_cpg)

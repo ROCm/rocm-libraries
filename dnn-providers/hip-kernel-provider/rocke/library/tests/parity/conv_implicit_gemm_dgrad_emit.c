@@ -509,6 +509,15 @@ static int make_cfg(int idx, rocke_dgrad_conv_spec_t* spec, const char** arch)
         spec->tap_outer_k = true;
         *arch = "gfx950";
         return 0;
+    case 49:
+    case 50:
+        /* XCD-contiguous tile order, grouped 3x3 stride 1 on gfx950: 49
+         * emits the remap (the default), 50 is the launch-order build. */
+        spec->problem = rocke_conv_problem_make(1, 8, 8, 256, 256, 3, 3, 1, 1, 1, 1, 1, 1);
+        spec->problem.groups = 4;
+        spec->xcd_tile_order = (idx == 49);
+        *arch = "gfx950";
+        return 0;
     default:
         return -1;
     }
