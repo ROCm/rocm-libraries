@@ -181,9 +181,7 @@ def gfx1250(scoped, monkeypatch):
     owner.close()
     args = dict(
         args,
-        problem=replace(
-            args["problem"], clamp_arch="gfx1250", dtype="bf16", num_query_heads=8
-        ),
+        problem=replace(args["problem"], dtype="bf16", num_query_heads=8),
     )
     monkeypatch.setattr(au, "_resolve_attention_arch", lambda: "gfx1250")
     empty = sys.modules["torch"].empty

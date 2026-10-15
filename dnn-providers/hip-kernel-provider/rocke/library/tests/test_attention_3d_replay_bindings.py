@@ -58,7 +58,7 @@ def replay(runtime, monkeypatch):
     graphs = OrderedDict()
     monkeypatch.setattr(au, "_3D_GRAPHS", graphs)
     monkeypatch.setattr(au, "_3D_GRAPH_CAPACITY", 2)
-    monkeypatch.setattr(au, "_enable_3d_graph_replay", lambda p: True)
+    monkeypatch.setattr(au, "_enable_3d_graph_replay", lambda p, arch: True)
     monkeypatch.setattr(au, "_launch_3d_pipeline", lambda *a, **kw: None)
     monkeypatch.setattr(
         au, "wait_stream_and_release", lambda s: operations.append(("wait", s))

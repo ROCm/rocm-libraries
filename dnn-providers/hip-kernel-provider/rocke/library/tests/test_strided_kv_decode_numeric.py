@@ -130,7 +130,6 @@ def test_decode_replay_scope_content_updates_and_rebind(
             max_seqlen_q=1,
             max_seqlen_k=capacity,
             dtype=dtype,
-            clamp_arch=arch,
             target_ctas=8,
         ),
         q=q,
@@ -239,7 +238,6 @@ def test_paged_decode_rebind_between_loops(gpu, monkeypatch, graph):
             max_seqlen_q=1,
             max_seqlen_k=capacity,
             dtype="bf16",
-            clamp_arch=arch,
             target_ctas=8,
         ),
         q=qh.cuda(),
@@ -325,7 +323,6 @@ def test_decode_graph_content_updates_and_storage_rebinding(
         max_seqlen_q=1,
         max_seqlen_k=capacity,
         dtype=dtype,
-        clamp_arch=arch,
     )
     arguments = {
         "problem": problem,
@@ -543,7 +540,6 @@ def test_strided_kv_decode(
         max_seqlen_k=capacity,
         dtype=dtype,
         sliding_window=window,
-        clamp_arch=arch,
         target_ctas=8,
     )
     stream = torch.cuda.default_stream() if default_stream else torch.cuda.Stream()
@@ -712,7 +708,6 @@ def test_decode_concurrent_workspace(
         max_seqlen_q=1,
         max_seqlen_k=capacity,
         dtype=dtype,
-        clamp_arch=arch,
         target_ctas=8,
     )
     requests, expected = [], []
@@ -879,7 +874,6 @@ def test_prepared_decode_lifecycle(gpu, monkeypatch, dtype, kv_layout, graph):
             max_seqlen_q=1,
             max_seqlen_k=capacity,
             dtype=dtype,
-            clamp_arch=arch,
             target_ctas=8,
         ),
         q=q_host.cuda(),
