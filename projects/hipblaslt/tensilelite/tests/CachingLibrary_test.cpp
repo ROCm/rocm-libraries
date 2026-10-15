@@ -117,6 +117,23 @@ namespace
         }
     };
 
+    // Gives `problem` a bias of `type`.
+    void withBias(ContractionProblemGemm& problem, rocisa::DataType type)
+    {
+        problem.setUseBias(1);
+        problem.setBias(type, 1024, 1024);
+    }
+
+    // dummyProblem() with `beta`.
+    ContractionProblemGemm withBeta(double beta)
+    {
+        auto problem = ContractionProblemGemm::GEMM(
+            false, false, 1024, 1024, 1024, 1024, 1024, 1024, beta, false, 1);
+        problem.setComputeInputTypeA(rocisa::DataType::Float);
+        problem.setComputeInputTypeB(rocisa::DataType::Float);
+        return problem;
+    }
+
     template <typename T>
     std::string keyOf(T const& value)
     {
@@ -177,6 +194,21 @@ namespace
         add([](auto& p) { p.setParams().setSmCountTarget(64); });
         add([](auto& p) { p.setParams().setStreamKTileSchedulingMode(1); });
         add([](auto& p) { p.setParams().setUniformSummationOrder(true); });
+        // The fields of the second comparison call, which predicates read.
+        add([](auto& p) { withBias(p, rocisa::DataType::Half); });
+        add([](auto& p) { withBias(p, rocisa::DataType::BFloat16); });
+        add([](auto& p) { p.setParams().setActivationEnum(ActivationType::Relu); });
+        add([](auto& p) {
+            p.setOutputAmaxD(true);
+            p.setAmaxD(rocisa::DataType::Float);
+        });
+        add([](auto& p) {
+            p.setOutputAmaxD(true);
+            p.setAmaxD(rocisa::DataType::Half);
+        });
+        v.push_back(withBeta(0.0));
+        add([](auto& p) { p.setParams().setGSU(2); });
+        add([](auto& p) { p.setParams().setFallbackStatus(true); });
         return v;
     }
 } // namespace
@@ -316,6 +348,16 @@ TEST(CachingLibraryTest, ProblemCacheKeyEqualityMatchesComparison)
                 << "problems " << i << " and " << j;
 }
 
+// The key reads beta only as whether it is 0, as the comparison does.
+TEST(CachingLibraryTest, ProblemCacheKeyReadsWhetherBetaIsZero)
+{
+    EXPECT_TRUE(withBeta(0.5) == dummyProblem());
+    EXPECT_EQ(keyOf(withBeta(0.5)), keyOf(dummyProblem()));
+    EXPECT_EQ(keyOf(withBeta(2.0)), keyOf(dummyProblem()));
+    EXPECT_FALSE(withBeta(0.0) == dummyProblem());
+    EXPECT_NE(keyOf(withBeta(0.0)), keyOf(dummyProblem()));
+}
+
 // Byte keys of devices are equal exactly when AMDGPU::operator== holds,
 // including a missing PCI chip id versus chip id 0.
 TEST(CachingLibraryTest, DeviceCacheKeyEqualityMatchesComparison)
@@ -366,6 +408,29 @@ TEST(CachingLibraryTest, FindTopSolutionsServesRepeatsFromCache)
         caching->findTopSolutions(problem, makeDevice(_MI350_CHIP_ID, _CPX_CU, "cpx"), 2).size(),
         2u);
     EXPECT_EQ(sub->topCalls.load(), 5);
+}
+
+// A problem that differs from a cached one only in a field that predicates
+// read, such as the bias data type, is not served the cached solutions: a bf16
+// bias after an f16 bias of the same GEMM reaches the sub-library again.
+TEST(CachingLibraryTest, FindTopSolutionsKeysOnTheBiasDataType)
+{
+    auto sub     = std::make_shared<TopCountingSubLibrary>();
+    auto caching = std::make_shared<CachingLibrary<ContractionProblemGemm>>(sub);
+
+    const AMDGPU device = makeDevice(_MI350_CHIP_ID, _SPX_CU, "mi350spx");
+    auto         half   = dummyProblem();
+    auto         bf16   = dummyProblem();
+    withBias(half, rocisa::DataType::Half);
+    withBias(bf16, rocisa::DataType::BFloat16);
+
+    auto const halfTop = caching->findTopSolutions(half, device, 2);
+    auto const bf16Top = caching->findTopSolutions(bf16, device, 2);
+    EXPECT_EQ(sub->topCalls.load(), 2);
+    EXPECT_NE(halfTop, bf16Top);
+    EXPECT_EQ(caching->findTopSolutions(half, device, 2), halfTop);
+    EXPECT_EQ(caching->findTopSolutions(bf16, device, 2), bf16Top);
+    EXPECT_EQ(sub->topCalls.load(), 2);
 }
 
 // Empty results are not cached.

@@ -244,7 +244,13 @@ namespace TensileLite
                             problem.mxTypeB(),
                             problem.getParams().smCountTarget(),
                             problem.getParams().streamKTileSchedulingMode(),
-                            problem.getParams().uniformSummationOrder());
+                            problem.getParams().uniformSummationOrder(),
+                            problem.bias().dataType(),
+                            problem.getParams().activationEnum(),
+                            problem.amaxd().dataType(),
+                            problem.beta() == 0.0,
+                            problem.getParams().gsu(),
+                            problem.getParams().fallbackStatus());
         }
     };
 } // namespace TensileLite
