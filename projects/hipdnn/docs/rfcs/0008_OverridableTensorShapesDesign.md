@@ -1,7 +1,9 @@
 # hipDNN: Overridable Tensor Shapes Design Document
 
 - Contributors: Brian Harrison
-- **Status**: Draft
+- **Status**: In progress
+- **Status notes**: Phase 1 shipped as plumbing only: frontend `execute` overloads, variant-pack attributes 704–707, the optional `hipdnnEnginePluginExecuteOpGraphWithOverrides` entry, and the `1.1.0` plugin version floor (#7279, #8881). No provider exports the override entry yet. Phase 2 (`is_dynamic`, wildcard dims, stride-as-order) is not built.
+- **Last verified**: 2026-10-15 against `develop` (2501d0b28cc)
 
 ## Table of Contents
 1. [Executive Summary](#1-executive-summary)
@@ -67,7 +69,8 @@ into overrides impose no override-feature version requirement and
 continue to be served by existing plugins unchanged. Graphs using the
 Phase 1 override flag require plugins reporting
 `>= 1.1.0`; graphs using the Phase 2 per-tensor dynamic feature
-require `>= 1.2.0` (placeholders; see [§4.5](#45-applicability-filtering)
+were planned to require `>= 1.2.0` (placeholders; `1.2.0` is now used
+by runtime pass-by-value, see [§4.5](#45-applicability-filtering)
 for the full rollout table). See
 [§4.4](#44-plugin-sdk-extension) for the symbol-fallback behavior and
 [§4.5](#45-applicability-filtering) /
@@ -138,6 +141,14 @@ The hipDNN graph pipeline has four steps:
 
 ### 4.1 Graph flag
 
+> [!NOTE]
+> **Implementation note (2026-10-15):** The flag is `is_override_shape_enabled` in
+> `flatbuffers_sdk/schemas/graph.fbs`. PR #8881 also copies it into the execution plan
+> (`is_override_shape_enabled` in `execution_plan.fbs`, backend attribute
+> `HIPDNN_ATTR_EXECUTION_PLAN_IS_OVERRIDE_SHAPE_ENABLED_EXT`, ID 310). This lets
+> plan-only (deserialized) graphs check the flag. The frontend setter and getter
+> are compiled only when `HIPDNN_ENABLE_SDPA` is defined.
+
 A graph-level boolean flag declares that the graph may receive
 execute-time overrides. The flatbuffer schema gains one defaulted bool, and
 the flag is wired through the existing C-API get/set attributes path
@@ -161,6 +172,11 @@ by this RFC.
 
 ### 4.2 Frontend execute API
 
+> [!NOTE]
+> **Implementation note (2026-10-15):** Both overloads and `OverrideEntry` are in
+> `frontend/include/hipdnn_frontend/Graph.hpp`. They return `Error` and are compiled
+> only when `HIPDNN_ENABLE_SDPA` is defined.
+
 `Graph::execute` gains an overload that takes override shapes and
 strides. Variant packs are runtime; the additions plumb a
 `tensorId → override shapes` and `tensorId → override strides` mapping
@@ -170,12 +186,12 @@ Two overload shapes are provided. The parallel-array form aligns with
 existing graph-runtime conventions:
 
 ```cpp
-error_t execute(hipdnnHandle_t handle,
-                std::unordered_map<int64_t, void*>& tensor_uid_to_pointer_map,
-                void* workspace,
-                std::vector<int64_t> const& override_uids,
-                std::vector<std::vector<int64_t>> const& override_shapes,
-                std::vector<std::vector<int64_t>> const& override_strides) const;
+Error execute(hipdnnHandle_t handle,
+              std::unordered_map<int64_t, void*>& variantPack,
+              void* workspace,
+              const std::vector<int64_t>& overrideUids,
+              const std::vector<std::vector<int64_t>>& overrideShapes,
+              const std::vector<std::vector<int64_t>>& overrideStrides) const;
 ```
 
 A map-keyed convenience overload trades the length-consistency
@@ -187,10 +203,10 @@ struct OverrideEntry {
     std::vector<int64_t> stride;
 };
 
-error_t execute(hipdnnHandle_t handle,
-                std::unordered_map<int64_t, void*>& tensor_uid_to_pointer_map,
-                void* workspace,
-                std::unordered_map<int64_t, OverrideEntry> const& overrides) const;
+Error execute(hipdnnHandle_t handle,
+              std::unordered_map<int64_t, void*>& variantPack,
+              void* workspace,
+              const std::unordered_map<int64_t, OverrideEntry>& overrides) const;
 ```
 
 The map overload is pure sugar over the parallel-array form: it
@@ -228,6 +244,12 @@ immediately:
 A call with no overrides at all is equivalent to a non-override
 execute call; the frontend skips the variant-pack attribute writes so
 dispatch falls through to the existing entry.
+
+Graph-backed objects apply all eight rules
+(`detail::validateGraphBackedOverrideArguments` in
+`frontend/include/hipdnn_frontend/detail/GraphOverrideValidation.hpp`).
+Plan-only objects (deserialized from a compiled plan, no graph tensors)
+get structural checks only (`detail::validatePlanOnlyOverrideArguments`).
 
 ### 4.3 Backend C-API and variant-pack attributes
 
@@ -325,6 +347,20 @@ symbol resolved.
 
 ### 4.5 Applicability filtering
 
+> [!NOTE]
+> **Implementation note (2026-10-15):** The mapping is
+> `hipdnn_plugin_sdk::computeMinimumEnginePluginApiVersion()` in
+> `plugin_sdk/include/hipdnn_plugin_sdk/PluginVersionConstants.hpp`. Override graphs
+> require `K_OVERRIDE_EXECUTE_MIN_API_VERSION` (`1.1.0`). Later features took the
+> next minor versions: `1.2.0` runtime pass-by-value (RFC 0016), `1.3.0` ragged
+> tensors and non-default tensor alignment, `1.4.0` ragged offset multiplier. Phase 2
+> has no version assigned. The applicability filter in
+> `backend/src/plugin/EnginePluginResourceManager.cpp` also skips plugins that do not
+> export the override symbol when the graph flag is set, so `hasOverrideExecute()` is
+> checked at applicability time and again at dispatch. In-tree providers report
+> `1.2.0` but do not export the override symbol, so no in-tree engine serves an
+> override graph.
+
 The backend maps each graph to the minimum plugin API version it
 requires (see [§6.7](#67-versioning-and-plugin-version-filtering))
 and filters plugins against that mapping. The minimum is computed from
@@ -390,6 +426,13 @@ applicability results across compiles is a likely future enhancement
 but is out of scope for this RFC.
 
 ### 4.6 Host dispatch logic
+
+> [!NOTE]
+> **Implementation note (2026-10-15):** The backend dispatch in
+> `EnginePluginResourceManager.cpp` first checks that the execution plan was built
+> with the override flag (else `HIPDNN_STATUS_NOT_SUPPORTED`, PR #8881). It also
+> checks that `OVERRIDE_UNIQUE_IDS` and `OVERRIDE_LENGTHS` have the same size and
+> that each length is positive and fits in `uint32_t`.
 
 The host dispatch path inspects the variant pack for the new
 `HIPDNN_ATTR_VARIANT_PACK_OVERRIDE_*_EXT` attributes and dispatches
@@ -557,6 +600,11 @@ no way to know it.
 
 ### 5.6 SDPA feature-flag mechanism
 
+> [!NOTE]
+> **Implementation note (2026-10-15):** The gate is the `HIPDNN_ENABLE_SDPA` CMake
+> option (default `OFF`) in `projects/hipdnn/CMakeLists.txt`. PR #6493 added it, PR #6622
+> reverted it, and PR #6647 relanded it.
+
 **Decision**: defer the gate to the SDPA team; this RFC introduces no
 new env var, CMake option, or runtime knob.
 
@@ -619,6 +667,12 @@ future consideration ([§10.5](#105-additional-deferred-work)).
 ---
 
 ## 6. Phase 2: Dynamic Tensors
+
+> [!NOTE]
+> **Implementation note (2026-10-15):** Phase 2 is not built. The code has no
+> per-tensor `is_dynamic` field, no `mark_dynamic()`, and no `DYNAMIC_DIM`.
+> The `1.2.0` plugin API version planned for Phase 2 is now used by runtime
+> pass-by-value (RFC 0016). §6.1 to §6.10 remain the proposed design.
 
 This section specifies the **Phase 2** design committed by this RFC.
 Phase 2 builds on Phase 1's variant-pack override transport by adding
@@ -841,7 +895,7 @@ on a graph that did not set the flag at compile time. Setting the
 flag without supplying overrides is allowed; supplying overrides
 without the flag is not.
 
-**Mitigation**: the frontend overload returns a non-OK `error_t`
+**Mitigation**: the frontend overload returns a non-OK `Error`
 and emits a log entry before any `setAttribute` call on the variant
 pack, so misuse never reaches the backend. Integration tests cover
 this path.
@@ -887,6 +941,10 @@ older plugins never see a graph that uses stride-as-order.
 ---
 
 ## 8. Execution Plan
+
+> [!NOTE]
+> **Implementation note (2026-10-15):** Steps 1 to 4 shipped in PR #7279, with the
+> plan-only flag check added in PR #8881. Steps 5 to 7 (Phase 2) are not started.
 
 Implementation plan for the work this RFC enables:
 
@@ -963,6 +1021,12 @@ The plan exercises three categories:
 
 ### 9.2 Fake plugins enable end-to-end without real engines
 
+> [!NOTE]
+> **Implementation note (2026-10-15):** The fakes are
+> `tests/test_plugins/TestOverrideImplementingPlugin.cpp` and
+> `tests/test_plugins/TestOverrideOmittingPlugin.cpp`. A third fake,
+> `TestSecondOverridePlugin.cpp`, also implements the override symbol.
+
 Two fake plugins (one implementing
 `hipdnnEnginePluginExecuteOpGraphWithOverrides`, one omitting it) are
 loaded by the integration suite. They capture call sites and payload
@@ -1005,6 +1069,10 @@ filtering or host dispatch:
    no plugin call.
 
 ### 9.5 Phase 2 test categories
+
+> [!NOTE]
+> **Implementation note (2026-10-15):** None of these tests exist yet because
+> Phase 2 is not built.
 
 - **Round-trip** for `is_dynamic` through the flatbuffer schema, backend descriptor,
   and frontend pack/unpack.

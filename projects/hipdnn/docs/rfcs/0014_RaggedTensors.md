@@ -1,7 +1,9 @@
 # hipDNN: Ragged Tensors Design Document
 
 - Contributors: hipDNN maintainers
-- **Status**: Draft
+- **Status**: In progress
+- **Status notes**: Frontend, flatbuffer, backend, plugin-version gate, and data SDK types (`RaggedTensor<T>`, `ShallowRaggedTensor<T>`) shipped (#8834, #11382, #12190). Plan-layer consumption was built in the GPU reference (`GpuSdpaRaggedFwdPlan`, #11532) with ragged SDPA bundles (#12738), not in the CPU reference as §4.10–4.11 describe.
+- **Last verified**: 2026-10-15 against `develop` (2501d0b28cc)
 
 ## Table of Contents
 1. [Summary](#summary)
@@ -336,7 +338,7 @@ overridable-shape semantics without re-deriving `S_max` from
 
 ### 4.3 Flatbuffer schema additions
 
-`tensor_attributes.fbs` gains two appended optional defaulted
+`tensor_attributes.fbs` gains three appended optional defaulted
 fields:
 
 ```
@@ -366,9 +368,10 @@ per-op attribute tables (e.g. `SdpaAttributes` already carries
 
 To ensure that only plugins that have appropriately handled
 ragged tensors process graphs with them present, this also
-requires an `is_ragged_tensor_enabled` boolean to be added to
-the graph, and `computeMinimumPluginApiVersion` to be updated
-to map that boolean to the appropriate version.
+requires the backend to detect ragged tensors in the graph
+(`GraphDescriptor::hasRaggedTensors()`) and
+`computeMinimumEnginePluginApiVersion` to map that flag to
+`K_RAGGED_TENSOR_MIN_API_VERSION` (`"1.3.0"`).
 
 `ragged_offset_multiplier` carries its own floor
 `K_RAGGED_OFFSET_MULTIPLIER_MIN_VERSION = "1.4.0"`, which **dominates**
@@ -924,10 +927,13 @@ scope for this RFC.
 
 ### 4.10 Plan-layer construction and CPU reference impact
 
-> **Status.** The frontend → flatbuffer → backend → data-SDK plumbing
-> above (including `ragged_offset_multiplier`) is landed. The plan-layer
-> and test-harness *consumption* in §4.10–4.11 is forward design, not
-> yet implemented; the sketches below show the intended shape.
+> [!NOTE]
+> **Implementation note (2026-10-15):** The frontend → flatbuffer → backend → data-SDK plumbing
+> above (including `ragged_offset_multiplier`) is landed. Plan-layer consumption was built in the
+> GPU reference executor instead: `GpuSdpaRaggedFwdPlan` in
+> `dnn-providers/integration-tests/src/harness/gpu-graph-executor/detail/` and
+> `GpuFpReferenceSdpaRagged` in `dnn-providers/integration-tests/gpu-ref/`. `makeShallowITensor`
+> does not exist. The CPU-reference sketches below are not implemented.
 
 The plan's `params` struct caches each ragged tensor's UID, that of
 its `ragged_offset` aux UID, and the primary's
@@ -1110,6 +1116,11 @@ harness; the strict requirement check in §4.11.1 ensures this is
 the case.
 
 ### 4.11 Test-harness integration
+
+> [!NOTE]
+> **Implementation note (2026-10-15):** `PreSuppliedInputs` was not built. Ragged SDPA tests use
+> integration-test bundles that carry `ragged_offset` data, for example
+> `dnn-providers/integration-tests/integration-test-bundles/quick/SdpaFwd/bshd/bf16/hd128_causal_ragged/` (#12738).
 
 #### 4.11.1 Pre-supplied input bundle
 

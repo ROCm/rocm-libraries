@@ -95,16 +95,16 @@ Copy-paste this into your PR description.
 
 ### Implementation
 - [ ] FBS schema added in `flatbuffers_sdk/schemas/` (NOT `data_sdk/`)
-- [ ] Schema added to the `SCHEMAS` list in `flatbuffers_sdk/CMakeLists.txt`
+- [ ] Schema added to the `_hipdnn_flatbuffers_sdk_schemas` list in `flatbuffers_sdk/CMakeLists.txt`
 - [ ] `graph.fbs` `NodeAttributes` union updated and include added
 - [ ] `hipdnn_flatbuffers_sdk` target rebuilt; generated headers committed
 - [ ] New/changed tensor-uid fields annotated `(cache_uid)` (or a documented reason they're not); `cachekey_generated.h` regenerated and committed — see [Cache-Key Annotations](#cache-key-annotations)
 - [ ] Backend descriptor type enum value assigned
 - [ ] Backend attribute name range assigned
 - [ ] (If new mode enum) `HipdnnBackendAttributeType.h` type tag added; `Hipdnn<Op>Mode.h` written; `hipdnn_backend.h` updated; `DataTypeConversion.{hpp,cpp}` and `DescriptorAttributeUtils.{hpp,cpp}` updated
-- [ ] Backend descriptor + DescriptorFactory + NodeFactory + BackendEnumStringUtils.hpp updated
+- [ ] Backend descriptor + DescriptorFactory + NodeFactory.{hpp,cpp} + BackendEnumStringUtils.hpp updated
 - [ ] Frontend `Types.hpp` enum + `toBackend*` + `fromHipdnn*` converters present (if new mode enum)
-- [ ] Frontend attributes + packer + unpacker + OperationUnpacker switch + node + Graph API method present
+- [ ] Frontend attributes + packer + unpacker + OperationUnpacker switch + `NodeType.hpp` entry + node + Graph API method present
 - [ ] All `CMakeLists.txt` updated (backend src, backend tests, frontend tests, tests/frontend)
 - [ ] All test layers from the matrix have at least one test (see Testing Requirements)
 - [ ] Lowering + lifting round-trip + tensor sharing + auto-UID + per-scalar tests present
@@ -221,7 +221,7 @@ The complete surface area for a single op, using **Matmul** as the canonical exa
 |---|---|
 | FBS schema | `flatbuffers_sdk/schemas/matmul_attributes.fbs` |
 | FBS union entry | `flatbuffers_sdk/schemas/graph.fbs` (`NodeAttributes` union) |
-| FBS CMake list | `flatbuffers_sdk/CMakeLists.txt` (`SCHEMAS` variable) |
+| FBS CMake list | `flatbuffers_sdk/CMakeLists.txt` (`_hipdnn_flatbuffers_sdk_schemas` variable) |
 | Cache-key annotation | `flatbuffers_sdk/schemas/matmul_attributes.fbs` (`(cache_uid)` on tensor-uid fields — see [Cache-Key Annotations](#cache-key-annotations)) |
 | Backend descriptor type enum | `backend/include/HipdnnBackendDescriptorType.h` |
 | Backend attribute name enum | `backend/include/HipdnnBackendAttributeName.h` |
@@ -229,7 +229,7 @@ The complete surface area for a single op, using **Matmul** as the canonical exa
 | Backend operation type enum | `backend/include/HipdnnOperationType.h` |
 | Backend descriptor class | `backend/src/descriptors/MatmulOperationDescriptor.{hpp,cpp}` |
 | Backend descriptor factory | `backend/src/descriptors/DescriptorFactory.cpp` |
-| Backend node factory (lifting) | `backend/src/descriptors/NodeFactory.cpp` |
+| Backend node factory (lifting) | `backend/src/descriptors/NodeFactory.{hpp,cpp}` |
 | Backend enum string utils | `backend/src/BackendEnumStringUtils.hpp` (header-only) |
 | Backend type conversion | `backend/src/descriptors/DataTypeConversion.{hpp,cpp}` |
 | Backend attribute set/get helpers | `backend/src/descriptors/DescriptorAttributeUtils.{hpp,cpp}` |
@@ -239,6 +239,7 @@ The complete surface area for a single op, using **Matmul** as the canonical exa
 | Frontend packer (lowering) | `frontend/include/hipdnn_frontend/detail/MatmulPacker.hpp` |
 | Frontend unpacker (lifting) | `frontend/include/hipdnn_frontend/detail/MatmulUnpacker.hpp` |
 | Frontend operation unpacker switch | `frontend/include/hipdnn_frontend/detail/OperationUnpacker.hpp` |
+| Frontend node type enum | `frontend/include/hipdnn_frontend/node/NodeType.hpp` |
 | Frontend node class | `frontend/include/hipdnn_frontend/node/MatmulNode.hpp` |
 | Frontend Graph API | `frontend/include/hipdnn_frontend/Graph.hpp` (`Graph::matmul(...)`) |
 | JSON utility | `flatbuffers_sdk/include/hipdnn_flatbuffers_sdk/utilities/json/MatmulAttributes.hpp` |
@@ -272,7 +273,7 @@ For when an agent step fails or you need to do a layer by hand. Subsections are 
 | `backend/include/hipdnn_backend.h` | `#include` for the new mode enum header. |
 | `backend/src/descriptors/<Op>OperationDescriptor.{hpp,cpp}` | The descriptor class itself. |
 | `backend/src/descriptors/DescriptorFactory.cpp` | Forward factory (lowering). |
-| `backend/src/descriptors/NodeFactory.cpp` | Lifting factory. |
+| `backend/src/descriptors/NodeFactory.{hpp,cpp}` | Lifting factory. |
 | `backend/src/BackendEnumStringUtils.hpp` | Enum-to-string utilities (header-only — there is no `.cpp`). |
 | `backend/src/descriptors/DataTypeConversion.{hpp,cpp}` | `toSdk` / `fromSdk` converters for new mode enums. |
 | `backend/src/descriptors/DescriptorAttributeUtils.{hpp,cpp}` | `set` / `get` helpers for new mode enums. |
@@ -287,6 +288,7 @@ For when an agent step fails or you need to do a layer by hand. Subsections are 
 | `frontend/include/hipdnn_frontend/detail/<Op>Packer.hpp` | Lowering serializer (frontend → backend). |
 | `frontend/include/hipdnn_frontend/detail/<Op>Unpacker.hpp` | Lifting deserializer (backend → frontend). |
 | `frontend/include/hipdnn_frontend/detail/OperationUnpacker.hpp` | Switch entry calling the unpacker. |
+| `frontend/include/hipdnn_frontend/node/NodeType.hpp` | Node type enum entry. |
 | `frontend/include/hipdnn_frontend/node/<Op>Node.hpp` | Node class. |
 | `frontend/include/hipdnn_frontend/Graph.hpp` | `Graph::<op>(...)` API method + include. |
 | `frontend/CMakeLists.txt`, `frontend/tests/CMakeLists.txt` | Build glue. |
@@ -308,7 +310,7 @@ Each layer has a required test. Every checkbox in the [PR Checklist](#pr-checkli
 | Backend graph descriptor | full graph including the node, descriptor mode | generator | `backend/tests/descriptors/TestGraphDescriptorMatmul.cpp` |
 | Frontend attribute | getters/setters/validation | generator | `frontend/tests/TestMatmulAttributes.cpp` |
 | Frontend node | construction, `pre_validate_node` | generator | `frontend/tests/TestMatmulNode.cpp` |
-| Frontend graph | end-to-end frontend graph | generator | `frontend/tests/TestGraph.cpp` (generator emits a per-op file for new ops) |
+| Frontend graph | end-to-end frontend graph | generator | `frontend/tests/TestGraph.cpp` (generator emits a per-op `frontend/tests/TestGraph<Op>.cpp` for new ops) |
 | Lowering integration | frontend node → backend descriptor round-trip | generator | `tests/frontend/IntegrationMatmulDescriptorLowering.cpp` |
 | Lifting integration | backend descriptor → frontend node round-trip; tensor sharing; auto-assigned UIDs; per-scalar preservation | generator | `tests/frontend/IntegrationMatmulDescriptorLifting.cpp` |
 | Constants header | shared per-op test constants | generator | `test_sdk/include/hipdnn_test_sdk/constants/MatmulConstants.hpp` |
@@ -338,8 +340,8 @@ Each layer has a required test. Every checkbox in the [PR Checklist](#pr-checkli
 | Linker error: missing `fromHipdnn<Op>Mode` | The mode enum was added to the backend but not to `Types.hpp`. Insert the converter from `mode_frontend_plumbing_<field>.txt`. |
 | Backend reports "unknown attribute name" | `_EXT` suffix mismatch between `HipdnnBackendAttributeName.h` and the YAML. Verify both sides use the same suffix. |
 | Compile error about a duplicate enum value | Enum value collision (someone landed on the same value while you were rebasing). Re-pick the next free value and re-run insertion. |
-| Generator output not built | The CMake fragment was not inserted. Confirm the snippet from `fragments/*_cmake_*.txt` was applied to the right `CMakeLists.txt`. |
-| Lifting test fails on tensor sharing | The unpacker is not using `getOrCreate` semantics for shared tensors. Check the unpacker against `MatmulUnpacker.hpp`. |
+| Generator output not built | The CMake fragment was not inserted. Confirm the snippets from `fragments/cmake_entries.txt` and `fragments/frontend_cmake_entries.txt` were applied to the right `CMakeLists.txt`. |
+| Lifting test fails on tensor sharing | The unpacker does not use `unpackAndRegisterTensor` with the shared `tensorMap`. Check the unpacker against `MatmulUnpacker.hpp`. |
 | Unpacker references a converter that exists in backend headers but not in frontend `Types.hpp` | The mode-frontend-plumbing fragment was not fully applied. Insert the inverse converter from the fragment. |
 | Segfaults during graph execution plan build | Plugins require PIC/PIE. Set `set(CMAKE_POSITION_INDEPENDENT_CODE ON)` in your consumer CMake. See [HowTo.md troubleshooting](./HowTo.md#troubleshooting). |
 

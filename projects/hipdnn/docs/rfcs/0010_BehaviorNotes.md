@@ -1,8 +1,9 @@
 # hipDNN - Per-Engine Behavior Notes RFC
 
 - Contributors: TBD
-- **Status**: Draft
-- **Implementation Version**: TBD
+- **Status**: Implemented
+- **Status notes**: Shipped in #7171: backend `HIPDNN_ATTR_ENGINE_BEHAVIOR_NOTE`, `EngineDetails.behavior_notes`, `Graph::get_behavior_notes_for_engine()`, and Python bindings. #10226 renumbered the frontend `BehaviorNote` enum to cuDNN values and added note filtering in the cuDNN compatibility shim only.
+- **Last verified**: 2026-10-15 against `develop` (2501d0b28cc)
 
 ## Table of Contents
 
@@ -26,12 +27,16 @@ The proposed first API is:
 
 ```cpp
 Error Graph::get_behavior_notes_for_engine(int64_t engineId,
-                                           std::vector<BehaviorNote>& notes);
+                                           std::vector<BehaviorNote>& notes) const;
 ```
 
 This RFC intentionally does not add graph-level filtering, plan-index note queries, numerical notes, or compiled execution-plan serialization changes. Behavior notes are engine/plugin metadata, not execution-plan payload.
 
 ## 2. Problem Statement
+
+> [!NOTE]
+> **Implementation note (2026-10-15):** This section describes the state before #7171. The
+> limitations listed here are now resolved.
 
 hipDNN currently reserves backend attribute/type IDs for behavior and numerical notes, but it does not expose behavior-note data from engines.
 
@@ -68,6 +73,17 @@ cuDNN frontend supports broader note behavior, including candidate filtering thr
 ## 4. Proposed Design
 
 ### 4.1 Public Types
+
+> [!NOTE]
+> **Implementation note (2026-10-15):** The backend and plugin SDK enums match the values below.
+> The frontend `BehaviorNote` in `frontend/include/hipdnn_frontend/Types.hpp` differs (#10226). It is
+> `enum class BehaviorNote : int32_t` with cuDNN-compatible values: `NOT_SET = 0`,
+> `RUNTIME_COMPILATION = 1`, `REQUIRES_FILTER_INT8x32_REORDER = 2`,
+> `REQUIRES_BIAS_INT8x32_REORDER = 3`, `SUPPORTS_CUDA_GRAPH_NATIVE_API = 4`,
+> `CUBLASLT_DEPENDENCY = 5`, then the hipDNN-only `REQUIRES_LAYOUT_TRANSFORM = 6`,
+> `SUPPORTS_GRAPH_CAPTURE = 7`, `EXTERNAL_LIBRARY_DEPENDENCY = 8`, and
+> `SUPPORTS_EXECUTION_PLAN_SERIALIZATION = 9`. hipDNN engines do not emit the cuDNN-only values.
+> `fromHipdnnBehaviorNote()` maps backend values to frontend values.
 
 Add one backend public enum, duplicated in the plugin SDK for plugin use, for example:
 
@@ -114,6 +130,7 @@ table EngineDetails {
     engine_id: int64;
     knobs: [Knob];
     behavior_notes: [int32];
+    name: string;
 }
 ```
 
@@ -127,7 +144,7 @@ Compatibility rules:
 - `EngineDetailsWrapper` should expose raw `int32` values so the FlatBuffers SDK does not depend on backend headers.
 - `EngineDescriptor::finalize()` should convert raw values to `hipdnnBackendBehaviorNote_t` and reject invalid values.
 
-Plugins may initially emit empty behavior-note lists. Non-empty notes should only be emitted where the engine can make a true statement, for example runtime compilation or an external library dependency.
+Plugins may initially emit empty behavior-note lists. Non-empty notes should only be emitted where the engine can make a true statement, for example runtime compilation or an external library dependency. Today only plugin SDK ingestor engines (`plugin_sdk/include/hipdnn_plugin_sdk/ingestor/`) emit notes. Their descriptor files declare them by name, and only `runtime_compilation` is accepted.
 
 ### 4.3 Backend EngineDescriptor Query
 
@@ -148,7 +165,7 @@ Add:
 
 ```cpp
 Error Graph::get_behavior_notes_for_engine(int64_t engineId,
-                                           std::vector<BehaviorNote>& notes);
+                                           std::vector<BehaviorNote>& notes) const;
 ```
 
 Implementation behavior:
@@ -158,7 +175,7 @@ Implementation behavior:
 - Create/finalize an engine descriptor with `detail::createEngineDescriptorForGraph`.
 - Query backend behavior-note count.
 - Query backend behavior-note values.
-- Convert backend notes to frontend `BehaviorNote` values.
+- Convert backend notes to frontend `BehaviorNote` values. A backend value that this frontend does not know is dropped and logged at info level. It is not an error.
 
 ### 4.5 Python API
 
@@ -169,7 +186,7 @@ Bind:
 
 ## 5. API Contract
 
-`Graph::get_behavior_notes_for_engine(int64_t engineId, std::vector<BehaviorNote>& notes)` has the following contract:
+`Graph::get_behavior_notes_for_engine(int64_t engineId, std::vector<BehaviorNote>& notes) const` has the following contract:
 
 - `engineId` is the backend global engine ID to query for the graph currently held by the `Graph`.
 - The operation graph descriptor must be finalized with a handle. Practically, `build_operation_graph(handle)` or `build(handle)` must have succeeded.
@@ -326,6 +343,14 @@ Python tests:
 - `get_behavior_notes_for_engine(engine_id)` returns expected enum values.
 
 ## 10. Future Considerations
+
+> [!NOTE]
+> **Implementation note (2026-10-15):** The cuDNN compatibility shim
+> (`frontend/include/hipdnn_compatibility/cudnn/detail/graph_wrapper.h`, #10226) now provides
+> `select_behavior_notes()`, `deselect_behavior_notes()`, `get_behavior_notes()`, and
+> `get_behavior_notes_for_plan_at_index()`. The native `hipdnn_frontend::graph::Graph` does not.
+> The frontend also defines a `NumericalNote` enum for cuDNN API parity, but hipDNN does not report
+> numerical notes yet.
 
 Future work may include:
 

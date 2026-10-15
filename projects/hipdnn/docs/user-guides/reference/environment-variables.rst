@@ -13,10 +13,11 @@ Learn about the environment variables used by hipDNN for logging, plugins, tests
 Logging configuration
 =====================
 
-hipDNN provides two environment variables to control logging behavior:
+hipDNN provides three environment variables to control logging behavior:
 
 - ``HIPDNN_LOG_LEVEL``
 - ``HIPDNN_LOG_FILE``
+- ``HIPDNN_LOG_GRAPH_DIR``
 
 ``HIPDNN_LOG_LEVEL``
 --------------------
@@ -50,13 +51,22 @@ Here's an example:
 
   When using the MIOpen legacy plugin, you can use MIOpen-specific environment variables to control the underlying library's logging behavior.
 
+``HIPDNN_LOG_GRAPH_DIR``
+------------------------
+
+Specifies a directory where the backend writes the operation graphs it receives. A relative path is resolved against the current working directory. hipDNN creates the directory if it does not exist. If this variable isn't set, no graphs are written.
+
+.. code:: bash
+
+  export HIPDNN_LOG_GRAPH_DIR=/path/to/graphs
+
 
 .. _plugin-loading-variables:
 
 Plugin loading
 ==============
 
-The following environment variable can be used to control which folders hipDNN will scan for plugins to load.
+The following environment variables control which folders hipDNN scans for plugins to load, and which engines it registers.
 
 ``HIPDNN_PLUGIN_DIR``
 ---------------------
@@ -100,6 +110,58 @@ For both relative paths and absolute paths:
 - If the path specifies a filename without an extension, hipDNN prefixes the filename with ``lib`` and adds the ``.so`` suffix (Linux), or adds the ``.DLL`` suffix (Windows) and only loads that file.
 
 See :ref:`plugin-loading` for API functions that provide additional control over which folders plugins are loaded from.
+
+``HIPDNN_HEURISTIC_PLUGIN_DIR``
+-------------------------------
+
+Selects where hipDNN loads heuristic plugins from. The default is ``./hipdnn_plugins/heuristics/``, relative to the backend shared library location. Path resolution follows the same rules as ``HIPDNN_PLUGIN_DIR``.
+
+``HIPDNN_DISABLE_ENGINES``
+--------------------------
+
+A comma-separated list of engines to skip when plugins register engines through the kernel ingestor. Each entry can be an engine name, a 64-bit engine ID (decimal or ``0x`` hex), or the engine descriptor UUID. Entries that match nothing are ignored. This variable has effect only in builds with ``HIPDNN_ENABLE_KERNEL_INGESTOR=ON``.
+
+.. _engine-selection-variables:
+
+Engine selection and caching
+============================
+
+These variables control heuristics, benchmarking, and the on-disk cache.
+
+``HIPDNN_HEUR_POLICY_ORDER``
+----------------------------
+
+A comma-separated list of heuristic policies, by name (for example ``SelectionHeuristic::Config``) or by integer policy ID. When set, it takes priority over the policy order set on the heuristic descriptor.
+
+``HIPDNN_HEUR_CONFIG_PATH``
+---------------------------
+
+Path to a JSON engine override configuration file. The ``Config`` heuristic policy uses its rules to select engines. If the variable is unset, or the file cannot be opened or parsed, no override rules apply.
+
+``HIPDNN_HEUR_FALLBACK_ENGINE_ORDER``
+-------------------------------------
+
+A comma-separated list of engine names or IDs, as printed by ``hipdnn_list_engines``. The built-in static ordering policy uses this order. Unknown entries are ignored.
+
+``HIPDNN_FORCE_BENCHMARKING``
+-----------------------------
+
+Overrides the ``global.benchmarking`` knob for the whole process. ``1``, ``true``, ``on``, ``yes``, ``enable``, and ``enabled`` turn benchmarking on. Recognized false values turn it off. Unrecognized values log a warning and are ignored.
+
+``HIPDNN_CACHE_DIR``
+--------------------
+
+Sets the root directory of the hipDNN on-disk cache. The default is ``~/.cache/hipdnn/`` on Linux and ``%USERPROFILE%\.hipdnn\cache\`` on Windows. hipDNN creates the directory if it does not exist.
+
+``HIPDNN_DISABLE_CACHE``
+------------------------
+
+Set to ``1``, ``true``, ``on``, ``yes``, ``enable``, or ``enabled`` to disable the on-disk cache. Any other value leaves the cache enabled.
+
+``HIPDNN_DISABLE_EXACT_ENGINE_CACHE``
+-------------------------------------
+
+Set to a true value (same values as ``HIPDNN_DISABLE_CACHE``) to disable the exact-match autotune engine cache.
 
 .. _backend-library-variables:
 

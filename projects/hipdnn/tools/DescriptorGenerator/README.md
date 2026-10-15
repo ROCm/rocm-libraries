@@ -28,11 +28,26 @@ python3 -m venv .venv
 .venv/bin/python generate.py \
     --config configs/matmul.yaml \
     --output-dir ../../
+
+# Preview the files a mode would write, without writing them
+.venv/bin/python generate.py \
+    --config configs/matmul.yaml \
+    --output-dir /tmp/codegen-output \
+    --mode full --dry-run
 ```
+
+Options:
+
+| Option | Description |
+|--------|-------------|
+| `--config PATH` | YAML config file (required) |
+| `--output-dir PATH` | Output root directory (required) |
+| `--mode {backend,frontend,full}` | `backend` (default): descriptor, packer, unpacker, backend and integration tests, backend fragments. `frontend`: Attributes header, Node header, frontend tests, frontend fragments. `full`: both. |
+| `--dry-run` | List the files that the mode would generate. Do not write files. |
 
 ## Output
 
-Each run generates:
+Each `--mode backend` run generates:
 
 | File | Purpose |
 |------|---------|
@@ -46,6 +61,10 @@ Each run generates:
 | `frontend/include/hipdnn_frontend/detail/<Op>Unpacker.hpp` | Frontend unpacker (inverse of packer) |
 | `backend/tests/descriptors/Test<Op>OperationFromNode.cpp` | fromNode() round-trip tests |
 | `fragments/*.txt` | Code snippets for manual insertion into existing files |
+| `test_sdk/include/hipdnn_test_sdk/constants/<Op>Constants.hpp` | Shared test constants (only when `test_data.constants_include` is not set) |
+| `backend/include/<header>.h`, `fragments/mode_*_<field>.txt` | Mode enum header and plumbing fragments (only for `mode` fields with an `enum_def`) |
+
+A `--mode frontend` run generates the Attributes header (`frontend/include/hipdnn_frontend/attributes/`), the Node header (`frontend/include/hipdnn_frontend/node/`, unless `frontend.generate_node: false`), frontend tests (`frontend/tests/`), and the frontend fragments.
 
 See `CLAUDE.md` for post-generation integration steps.
 
@@ -117,7 +136,7 @@ operation:
     - name: "alpha"
       fbs_field: "alpha"
       attr_name: "HIPDNN_ATTR_MY_OP_ALPHA"
-      type: "scalar_float"            # vector_int64 | enum | scalar_float | scalar_int64 | bool
+      type: "scalar_float"            # vector_int64 | mode | enum (legacy) | scalar_float | scalar_int32 | scalar_int64 | bool
       required: true
       frontend_getter: "get_alpha()"  # data_fields[].frontend_getter is still honored
       shared: false                   # true if attribute enum already exists from another op
@@ -162,6 +181,12 @@ operation:
 | `batchnorm_inference.yaml` | Batch normalization inference |
 | `batchnorm_inference_variance_ext.yaml` | Batch normalization inference (variance extension) |
 | `reduction.yaml` | Reduction operations |
+| `layernorm_backward.yaml` | Layer normalization backward |
+| `rmsnorm_backward.yaml` | RMS normalization backward |
+| `resample_fwd.yaml` | Resample forward |
+| `resample_bwd.yaml` | Resample backward |
+| `moe_grouped_matmul.yaml` | MoE grouped matrix multiplication (checked-in `finalize()` is hand-maintained — see `CLAUDE.md` "Hand-maintained ops") |
+| `moe_grouped_matmul_bwd.yaml` | MoE grouped matrix multiplication backward |
 | `sdpa.yaml` | Scaled dot-product attention forward (packer/unpacker only; Attributes class is hand-maintained — see `CLAUDE.md` "Hand-maintained ops") |
 
 ## Third-Party Libraries
@@ -187,7 +212,9 @@ The codegen overhaul added some YAML keys, removed others, and folded `--mode li
 | YAML `type` | C++ Storage | Backend API Type | Use For |
 |-------------|-------------|------------------|---------|
 | `vector_int64` | `std::vector<int64_t>` | `HIPDNN_TYPE_INT64` | Padding, strides, dimensions |
-| `enum` | FBS enum type | `HIPDNN_TYPE_INT64` | Mode selections (ConvMode, etc.) |
+| `mode` | FBS enum type | Dedicated mode type tag (e.g., `HIPDNN_TYPE_CONVOLUTION_MODE`) | Enum fields in new operations (see `CLAUDE.md` "Enum Field Types") |
+| `enum` | FBS enum type | `HIPDNN_TYPE_INT64` | Legacy enum fields only; do not use for new operations |
 | `scalar_float` | `float` | `HIPDNN_TYPE_FLOAT` | Alpha/beta scaling factors |
+| `scalar_int32` | `int32_t` | `HIPDNN_TYPE_INT32` | 32-bit scalars |
 | `scalar_int64` | `int64_t` | `HIPDNN_TYPE_INT64` | Axis indices, counts |
 | `bool` | `bool` | `HIPDNN_TYPE_BOOLEAN` | Feature flags |

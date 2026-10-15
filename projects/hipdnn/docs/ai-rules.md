@@ -33,8 +33,20 @@ When a user asks for a workflow covered by a project skill, tell them the projec
   - Builds hipDNN together with one or more providers via the repository-root superbuild presets (`hipdnn-providers`, `miopen-provider`, `hipblaslt-provider`, `hip-kernel-provider`, `hipdnn-samples`, etc.), in a single CMake invocation. On Windows it auto-runs the wheel-based ROCm setup when no SDK path is supplied.
   - Suggest this skill when the user asks to build hipDNN with providers, run a superbuild preset, rebuild after a rebase or merge, or set up a fresh build from the repo root. Prefer it over the standalone build whenever providers are involved.
 - `tools/ai/skills/hipdnn-superbuild-test/SKILL.md`
-  - Runs tests against an existing superbuild with per-component selection (`hipdnn`, `miopen`, `hipblaslt`, `hip-kernel`, `integration-tests`, or `all`), unit/integration scope, optional `--filter=<gtest_pattern>`, `--verbose`, and `--keep-going`. Handles Windows DLL PATH and the `hip-kernel-provider` target naming quirk automatically.
+  - Runs tests against an existing superbuild with per-component selection (`hipdnn`, `miopen`, `hipblaslt`, `hip-kernel`, `integration-tests`, or `all`), unit/integration/external-integration scope, optional `--filter=<gtest_pattern>`, `--verbose`, and `--keep-going`. Handles Windows DLL PATH and the `hip-kernel-provider` target naming quirk automatically.
   - Suggest this skill when the user asks to run, filter, or triage tests against a superbuild they have already configured. It does not configure or build — pair it with `$hipdnn-superbuild` in Codex or `/hipdnn-superbuild` in Claude first.
+- `tools/ai/skills/hipdnn-tidy/SKILL.md`
+  - Runs clang-tidy on hipDNN after a build, scoped to the translation units affected by changed files. It is faster than building with `ENABLE_CLANG_TIDY=ON`.
+  - Suggest this skill when the user asks to run clang-tidy, lint changed files, or check tidy cleanliness before pushing.
+- `tools/ai/skills/hipdnn-ingestor-engine/SKILL.md`
+  - Creates or extends a hipDNN generic-kernel-ingestor integration: graph and kernel contracts, descriptors, native hooks, packaging, host checks, and device correctness.
+  - Suggest this skill when the user asks to add or extend an ingestor-based engine.
+- `tools/ai/skills/rfc-review/SKILL.md`, with the focused follow-ups `rfc-review-compatibility`, `rfc-review-ops`, and `rfc-review-security`
+  - Review a technical RFC or design document and produce a written review report. They are not for implementation PRs.
+  - Suggest these skills when the user asks to review an RFC, design doc, ADR, or proposal.
+- `tools/ai/skills/rfc-backlog/SKILL.md`
+  - Turns an RFC into a backlog of JIRA stories and tasks grounded in the codebase. It creates tickets only after review, unless run as a dry run.
+  - Suggest this skill when the user has an approved RFC and wants to plan the implementation as trackable work.
 
 ## Commit & PR Conventions
 
@@ -47,12 +59,12 @@ hipDNN is a graph-based deep learning library for AMD GPUs with a plugin-based a
 ### Component Architecture (Do Not Modify Boundaries (linkage))
 | Component | Type | Links To | Purpose |
 |-----------|------|----------|---------|
-| **Backend** (`backend/`) | Shared library (C API) | Data SDK | Core engine, plugin loading, graph execution |
-| **Frontend** (`frontend/`) | Header-only C++ | Backend, Data SDK | User-friendly wrapper around backend C API (uses Data SDK for types/logging, not FlatBuffers) |
+| **Backend** (`backend/`) | Shared library (C API) | Data SDK, Plugin SDK, FlatBuffers SDK | Core engine, plugin loading, graph execution |
+| **Frontend** (`frontend/`) | Header-only C++ | Backend, Data SDK | User-friendly wrapper around backend C API (uses Data SDK for types/logging, not FlatBuffers). `hipdnn_frontend_dynamic` does not link the backend; it loads it at runtime |
 | **Data SDK** (`data_sdk/`) | Header-only | (none) | Shared data types, logging |
-| **FlatBuffers SDK** (`flatbuffers_sdk/`) | Header-only | FlatBuffers, nlohmann_json | FlatBuffer schemas, generated headers, JSON helpers |
-| **Plugin SDK** (`plugin_sdk/`) | Header-only | Data SDK | Interfaces for plugin development |
-| **Test SDK** (`test_sdk/`) | Header-only | Data SDK | Shared test utilities |
+| **FlatBuffers SDK** (`flatbuffers_sdk/`) | Header-only | Data SDK, FlatBuffers, nlohmann_json | FlatBuffer schemas, generated headers, JSON helpers |
+| **Plugin SDK** (`plugin_sdk/`) | Header-only | Data SDK, FlatBuffers SDK | Interfaces for plugin development |
+| **Test SDK** (`test_sdk/`) | Header-only | FlatBuffers SDK, Plugin SDK, Frontend | Shared test utilities |
 
 ---
 
@@ -90,7 +102,7 @@ ninja doxygen      # Generate Doxygen docs (output: build/docs/html/)
 
 ### 2. hipDNN + Providers via Superbuild (recommended when building providers)
 
-Use the superbuild when building hipDNN together with one or more providers. See `docs/Superbuild.md` for full details.
+Use the superbuild when building hipDNN together with one or more providers. See the Superbuild section of `docs/Building.md` for full details.
 
 ```bash
 cd <workspace>
@@ -103,8 +115,12 @@ Available presets (from the repository root `CMakePresets.json`):
 | Preset | Components Built |
 |--------|-----------------|
 | `hipdnn` | hipDNN only |
-| `miopen-provider` | hipDNN + miopen-provider |
-| `hipblaslt-provider` | hipDNN + hipblaslt-provider |
+| `hipdnn-providers` | hipDNN + integration tests + miopen-provider + hipblaslt-provider |
+| `miopen-provider` | hipDNN + integration tests + miopen-provider |
+| `hipblaslt-provider` | hipDNN + integration tests + hipblaslt-provider |
+| `hip-kernel-provider` | hipDNN + integration tests + hip-kernel-provider |
+| `hipdnn-samples` | hipDNN + integration tests + miopen-provider + hipblaslt-provider + samples |
+| `hipdnn-dev-all` | All of the above + hip-kernel-provider + Python bindings |
 
 Or manually specifying components:
 ```bash
@@ -137,11 +153,13 @@ ninja
 |--------|-------|-------------|
 | `hipdnn_backend_tests` | Backend unit tests | Core backend logic |
 | `hipdnn_frontend_tests` | Frontend unit tests | Frontend wrapper logic |
-| `hipdnn_data_sdk_tests` | Data SDK unit tests | Flatbuffer objects, utilities |
+| `hipdnn_data_sdk_tests` | Data SDK unit tests | Data types, utilities |
+| `hipdnn_flatbuffers_sdk_tests` | FlatBuffers SDK unit tests | Flatbuffer objects, JSON helpers |
 | `hipdnn_plugin_sdk_tests` | Plugin SDK unit tests | Plugin interface utilities |
 | `hipdnn_test_sdk_tests` | Test SDK unit tests | Test utility functions |
 | `hipdnn_public_backend_tests` | Backend API tests | Public C API black-box tests |
 | `hipdnn_public_frontend_tests` | Frontend integration tests | E2E frontend tests |
+| `hipdnn_public_frontend_dynamic_load_tests` | Dynamic frontend tests | E2E tests through `hipdnn_frontend_dynamic` |
 
 ### Running Specific Tests
 Use `--gtest_filter` for fast iteration:

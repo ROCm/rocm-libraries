@@ -3,6 +3,10 @@
 - Contributors: Mitch Ousdahl, Sam Reeder, Adam Dickin
 - Original Implementation: Adam Dickin
 
+- **Status**: Implemented
+- **Status notes**: `plugin_sdk` was created in #3142 and the helper framework shipped in #4086 (`EnginePluginImpl.inl`, `SharedContainerManager`, `EngineManager`, `ExecutionContextBase`, `interfaces/IEngine.hpp`, `IPlanBuilder.hpp`, `IPlan.hpp`). The shipped design differs: there is no `EnginePluginContainer`, `EngineBase`, `PlanBuilderBase`, or `PlanBase` class, and the plugin supplies its own container type. The reference CPU plugin was not built; `samples/example_engine_plugin` (#5297) is the example plugin.
+- **Last verified**: 2026-10-15 against `develop` (2501d0b28cc)
+
 ## Table of Contents
 1. [Executive Summary](#1-executive-summary)
 2. [Problem Statement](#2-problem-statement)
@@ -13,7 +17,7 @@
 7. [Execution Plan](#7-execution-plan)
 8. [Testing Plan](#8-testing-plan)
 9. [Future Considerations](#9-future-considerations)
-9. [Glossary](#10-glossary)
+10. [Glossary](#10-glossary)
 
 ## 1. Executive Summary
 hipDNN represents a system for the validation and execution of complex graphs of tensor operations that can be expressed as a directed acyclic graph (DAG). Rather than directly include engines that can capably execute those graphs directly in hipDNN code, hipDNN has implemented a plugin mechanism wherein engine authors can fulfill a simple C-compatible API with the goal of generating a dynamic plugin library. This allows the system the capability for flexibility without recompilation, allows for future growth, and allows for a robust ecosystem of engine providers.
@@ -24,7 +28,7 @@ The first is to split the **Plugin SDK** from our existing **SDK**, with the eve
 
 The second part of the proposal is for the design of an optional framework that will assist a hipDNN plugin developer to quickly and reliably create an engine plugin for hipDNN.
 
-Currently, a basic shared-library C-compatible API for plugins has been defined by PluginApi.h. While plugin developers will be free to implement their plugins using solely this API, a set of helpful classes can provide some basic structure that will allow developers to:
+Currently, a basic shared-library C-compatible API for plugins has been defined by PluginApi.h. (This API is now split into `PluginApi.h`, the base API for all plugins, and `EnginePluginApi.h`, the engine plugin API.) While plugin developers will be free to implement their plugins using solely this API, a set of helpful classes can provide some basic structure that will allow developers to:
 - bootstrap a new engine plugin quickly
 - provide mechanical guidance and guardrails
 - create a comfortable object-oriented abstraction
@@ -43,7 +47,7 @@ The following diagram demonstrates how frontend calls pass through the backend a
 ![Current System Overview](../images/current_system_overview.png)
 
 ### 3.1 Object Lifetimes
-For the plugin, there's a comment on `std::weak_ptr<MiopenContainer>` in [MiopenPlugin.cpp](../../../../dnn-providers/miopen-provider/MiopenPlugin.cpp) that describes why the weak_ptr / shared_ptr for the container exists.
+For the plugin, there was a comment on `std::weak_ptr<MiopenContainer>` in `MiopenPlugin.cpp` that describes why the weak_ptr / shared_ptr for the container exists. That file no longer exists. The pattern now lives in [SharedContainerManager.hpp](../../plugin_sdk/include/hipdnn_plugin_sdk/SharedContainerManager.hpp).
 
 To summarize, it's so that if the plugin is opened more than once, the container can be shared, but the container gets cleaned up if that last plugin ref drops off.
 
@@ -98,13 +102,19 @@ Here is a rough diagram of the proposed SDK architecture, representing a macro a
 
 ### 4.1 Macro: `DECLARE_ENGINE_PLUGIN_DEFAULT_IMPL()`
 
-There will be a macro (or a .inl file that gets #included) that declares all the engine plugin API entry points and glues them to an [EnginePluginContainer](#42-engineplugincontainer). It will be entirely optional and opt-in. If an engine plugin doesn't want to use them, they're free to implement the entry points themselves.
+> [!NOTE]
+> **Implementation note (2026-10-15):** There is no `DECLARE_ENGINE_PLUGIN_DEFAULT_IMPL()` macro. The plugin defines `HIPDNN_PLUGIN_NAME`, `HIPDNN_PLUGIN_VERSION`, `HIPDNN_PLUGIN_CONTAINER_TYPE`, `HIPDNN_PLUGIN_HANDLE_TYPE`, and `HIPDNN_PLUGIN_CONTEXT_TYPE`, then includes `hipdnn_plugin_sdk/EnginePluginImpl.inl`. See `dnn-providers/miopen-provider/MiopenPluginPublic.cpp`. `EnginePluginTypeTraits.hpp` checks the required types at compile time.
+
+There will be a macro (or a .inl file that gets #included) that declares all the engine plugin API entry points and glues them to an [EnginePluginContainer](#42-class-engineplugincontainer). It will be entirely optional and opt-in. If an engine plugin doesn't want to use them, they're free to implement the entry points themselves.
 
 These default entry points will do the work of marshaling data between the C interface and the C++ `EnginePluginContainer` that handles the implementation of the interface. It'll do things like copy vectors to contiguous memory, wrap flatbuffer graphs and manage the default `EnginePluginContainer` lifecycle.
 
 - **Arguments:** If the user wants to specify a custom class derived from `EnginePluginContainer`, they can do so, otherwise the default implementation will be used.
 
 ### 4.2 Class: `EnginePluginContainer`
+
+> [!NOTE]
+> **Implementation note (2026-10-15):** No `EnginePluginContainer` class was built. Each plugin supplies its own container type (for example `MiopenContainer`). The container must provide `getEngineManager()` and a static `copyEngineIds()`, and may provide a static `getEngineName()`. `EnginePluginImpl.inl` keeps one container through a static `SharedContainerManager<HIPDNN_PLUGIN_CONTAINER_TYPE>` that implements the `shared_ptr` / `weak_ptr` pattern below. The handle stores the `shared_ptr` in its `container` member. The `.inl` calls `plan()` on the execution context directly for workspace size and execute.
 
 This class encapsulates the lifecycle of an engine plugin from `hipdnnEnginePluginCreate()` to `hipdnnEnginePluginDestroy()`.
 
@@ -117,12 +127,16 @@ This class encapsulates the lifecycle of an engine plugin from `hipdnnEnginePlug
     - A private `EngineManager`
 
 ### 4.3 Class: `EngineManager`
+
+> [!NOTE]
+> **Implementation note (2026-10-15):** `EngineManager` is a template, `EngineManager<THandle, TSettings, TContext>`, in `hipdnn_plugin_sdk/EngineManager.hpp`. It is owned by the plugin container, not by an `EnginePluginContainer`. Engines are added with `addEngine()`, which keeps the first engine for an ID and logs the duplicate. `getEngineDetails()` takes the engine ID and writes into a `hipdnnPluginConstData_t&` output argument.
+
 This represents the collection of all engines that can be found in the plugin. This class is a private member of the `EnginePluginContainer`, and shares a lifespan with it.
 
 - **Methods:** The class will implement the following:
-    - `static vector<int64_t> getAllEngineIds()` - Returns a list of all engines managed by this `EngineManager`
-    - `static vector<int64_t> getApplicableEngineIds(handle, graph)` - Returns a list of all engines that can handle the supplied graph
-    - `engine_details getEngineDetails(handle, graph, engine_id)` - Pass-through to the engine indicated by `engine_id`
+    - `vector<int64_t> getAllEngineIds()` - Returns a list of all engines managed by this `EngineManager`
+    - `vector<int64_t> getApplicableEngineIds(handle, graph)` - Returns a list of all engines that can handle the supplied graph
+    - `void getEngineDetails(handle, graph, engine_id, engine_details_out)` - Pass-through to the engine indicated by `engine_id`
     - `size_t getMaxWorkspaceSize(handle, graph, engine_config)` - Pass-through to the engine indicated by `engine_id` from the engine_config
     - `execution_context initializeExecutionContext(handle, graph, engine_config)` - Pass-through to the engine indicated by `engine_id`
 
@@ -130,6 +144,10 @@ This represents the collection of all engines that can be found in the plugin. T
     - A container of several `IEngine`-derived class instances.
 
 ### 4.4 Class: `EngineBase` (implements `IEngine` interface)
+
+> [!NOTE]
+> **Implementation note (2026-10-15):** No `EngineBase` class was built. Engines implement `hipdnn_plugin_sdk::IEngine<THandle, TSettings, TContext>` (`interfaces/IEngine.hpp`) directly. `IEngine` also has `int64_t id()`, and `getDetails()` writes into a `hipdnnPluginConstData_t&` output argument. How an engine stores its plan builders is up to the engine.
+
 This represents an engine that can handle one or more graphs of operations.
 
 For example, a `BatchNormEngine` might be able to handle single-op and simple fused graphs that contain batchnorm operations.
@@ -156,6 +174,10 @@ For example, a `BatchNormEngine` might be able to handle single-op and simple fu
     - A container of several `IPlanBuilder`-derived class instances.
 
 ### 4.5 Class: `PlanBuilderBase` (implements `IPlanBuilder` interface)
+
+> [!NOTE]
+> **Implementation note (2026-10-15):** No `PlanBuilderBase` class was built. Plan builders implement `hipdnn_plugin_sdk::IPlanBuilder<THandle, TSettings, TContext>` (`interfaces/IPlanBuilder.hpp`) directly. The interface has `isApplicable()`, `getMaxWorkspaceSize(handle, graph, executionSettings)`, `initializeExecutionSettings()`, `buildPlan(handle, graph, engineConfig, executionContext)`, and `getCustomKnobs()`. There is no `initializeExecutionContext()` on the plan builder.
+
 This represents a plan builder that can handle a specific graph of operations.
 
 In the above example, a single `PlanBuilder` can handle a single batchnorm forward operation, while another might be able to handle batchnorm + activation.
@@ -166,6 +188,10 @@ In the above example, a single `PlanBuilder` can handle a single batchnorm forwa
     - `execution_context initializeExecutionContext(handle, graph, engine_config)` - Creates an instance of an `IPlan`-derived class and attaches it to the execution context
 
 ### 4.6 Class: `PlanBase` (implements `IPlan` interface)
+
+> [!NOTE]
+> **Implementation note (2026-10-15):** No `PlanBase` class was built. Plans implement `hipdnn_plugin_sdk::IPlan<THandle>` (`interfaces/IPlan.hpp`) directly: `getWorkspaceSize(handle)` and `execute(handle, deviceBuffers, numDeviceBuffers, workspace)`. `ExecutionContextBase<THandle, TSettings>` holds the plan and the execution settings.
+
 This class represents a ready-to-execute plan that can take device data and then execute the desired operations on it.
 
 - **Lifecycle:** The plans typically share a lifespan with the `execution_context` they are attached to.  Since the plan is immutable after the point of creation, its lifecycle and execution can be safely handled by the EnginePluginContainer.
@@ -180,7 +206,7 @@ This class represents a ready-to-execute plan that can take device data and then
 
 Above of the plugin there are a few objects that have lifecycles managed by the backend / frontend.  They are usually opaque data tied to handles / descriptors which means that it's up to the plugin authors how they are used, but below are some examples of how they might be used in a plugin.
 
-- **Plugin Handle:** Created with explicit create / destroy methods, this is an opaque pointer to an object ultimately defined by the plugin author.  It can be used to tie information from invocations of a plugin to other resources.  In the MIOpen plugin, for example, the handle contains a reference to EnginePluginContainer and a pointer to the stream passed into setStream calls.  This handle is usually created when a plugin is loaded during initialization.
+- **Plugin Handle:** Created with explicit create / destroy methods, this is an opaque pointer to an object ultimately defined by the plugin author.  It can be used to tie information from invocations of a plugin to other resources.  In the MIOpen plugin, for example, the handle (`HipdnnMiopenHandle`) holds a `shared_ptr` to the plugin container (`MiopenContainer`) and the stream passed into setStream calls.  This handle is usually created when a plugin is loaded during initialization.
     - *Note:* Care should be taken since that the handle that's used during plugin creation may not be the same as the one used during plan execution.  What this means, for example, is that a plugin may be instantiated and a plan created on one thread, for example, and then executed on a completely separate thread under the context of a different plugin handle.  So it would be unhelpful, for example, to store cache artifacts for plan exeuction on a plugin handle.
 
 - **Engine Details:** Created when the framework requests engine details from the plugin.  The lifespan is controlled by the consuming application.
@@ -191,7 +217,7 @@ For threading purposes, be mindful that any object might be accessed from multip
 
 Future considerations will be adding the ability to have thread-safe containers and objects that would allow a plugin creator to easily implement thread-safe caches and other utilities.
 
-### 4.7 Error Handling
+### 4.8 Error Handling
 Error handling will make use of C++ exceptions primarily, with the understanding that they will be transitioned into error codes at the C API interface.
 
 ## 5. Key Design Decisions
@@ -211,6 +237,10 @@ Error handling will make use of C++ exceptions primarily, with the understanding
 - **Ecosystem Fragmentation**: Having both SDK and Plugin SDK may confuse developers about which components to use for different scenarios.  We will mitigate this by renaming the sdk to data_sdk in an upcoming effort.
 
 ## 7. Execution Plan
+
+> [!NOTE]
+> **Implementation note (2026-10-15):** The `plugin_sdk` component (#3142), the `hipdnn_plugin_sdk` namespace, the new helpers (#4086), and the MIOpen plugin migration are done. The reference CPU plugin was not built. `samples/example_engine_plugin` (#5297) shows a plugin that uses the helpers.
+
 - Create blank `plugin_sdk`
     - Wait for TheRock submodule bump (TheRock is the CI/build infrastructure for ROCm libraries)
     - Update TheRock to add the the plugin_sdk component
@@ -234,6 +264,10 @@ Error handling will make use of C++ exceptions primarily, with the understanding
 - Memory leak detection using valgrind or similar tools
 
 ## 9. Future Considerations
+
+> [!NOTE]
+> **Implementation note (2026-10-15):** All three items now exist. Behavior notes are in `engine_details.fbs` (`behavior_notes`) and `hipdnn_plugin_sdk/BehaviorNote.h`. Engine settings are knobs (`KnobFactory.hpp`, `IPlanBuilder::getCustomKnobs()`). Execution context serialization is in `EnginePluginApi.h` (`hipdnnEnginePluginSerializeExecutionContext`, `hipdnnEnginePluginCreateExecutionContextFromSerialized`).
+
 - Behavioral notes will be added to the engine_details.
     - These are which are tags which will identify certain engine characteristics used for filtering
     - The behavorial notes on engines are controlled by plugin authors

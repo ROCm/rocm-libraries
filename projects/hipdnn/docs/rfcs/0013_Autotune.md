@@ -1,7 +1,9 @@
 # RFC: Autotuning for hipDNN
 
-**Status**: Draft
-**Authors**: Chris Miserva
+- **Authors**: Chris Miserva
+- **Status**: Implemented
+- **Status notes**: `autotune()`, plan-spec collection, and config file output shipped in #8264 (`frontend/include/hipdnn_frontend/autotune/`, `Graph.hpp`). #11099 added `Graph::autotuneExhaustiveSweep()` and an exact-match engine ranking cache, which this RFC does not describe in detail. Python bindings shipped in #10881.
+- **Last verified**: 2026-10-15 against `develop` (2501d0b28cc)
 
 ## Table of Contents
 
@@ -181,7 +183,11 @@ struct AutotuneResult {
     float minTimeMs = 0.0f;                 // Minimum time across iterations (used for default ranking)
     float avgTimeMs = 0.0f;
     float stddevMs = 0.0f;                  // Uses population stddev (divide by N).
+    float robustTimeMs = 0.0f;              // Mean after discarding the slow tail. autotuneExhaustiveSweep()
+                                            // ranks on it; autotune() ranks on minTimeMs.
     int iterationsRun = 0;                  // Actual iterations executed
+    TimingQuality timingQuality = TimingQuality::INVALID;  // How the times were measured
+                                            // (e.g. DEVICE_ONLY); INVALID if no successful measurement.
     bool converged = false;                 // true for FIXED_AVERAGE when all iterations completed
                                             // successfully. false on benchmark failure (any strategy) or
                                             // for RUN_UNTIL_STABLE when maxIterations was reached without
@@ -191,6 +197,8 @@ struct AutotuneResult {
     // Status
     int rank = -1;                          // 0-based (0 = fastest); -1 for failed engines
     bool succeeded = false;
+    bool benchmarked = false;               // true if the engine reached the timing loop
+    bool excludedByCaller = false;          // true if a caller filter or workspace budget held it out
     std::string errorMessage;
     int64_t workspaceSize = 0;
     int64_t estimatedWorkspaceSize = 0;     // Pre-compile workspace estimate from engine config.
@@ -447,6 +455,9 @@ All filtering methods return `Graph&` for method chaining. They store criteria o
 
 ### 6.3 Autotuning API on Graph
 
+> [!NOTE]
+> **Implementation note (2026-10-15):** `Graph` also has `autotuneExhaustiveSweep()` (#11099). It forces `TuneMode::EXHAUSTIVE` and `PrimingFailurePolicy::BENCHMARK_UNPRIMED`, ranks engines on `robustTimeMs`, and writes the engine order to an exact-match ranking cache keyed on graph and device. It reports the write result in `AutotuneCacheWriteOutcome`. See `Graph.hpp` and `docs/Environment.md`.
+
 Three groups of `autotune()` overloads (each with UID-based and tensor-attribute-based variants, 6 overloads total):
 
 **Compiled-plan overloads; hipDNN overloads with no workspace-size parameter (for compiled plans only):**
@@ -631,8 +642,8 @@ Reuses the `EngineOverrideConfig` JSON format with autotuning metadata added:
       "engine_name": "MIOPEN_ENGINE_DETERMINISTIC",
       "criteria": { "pointwise_mode": 1 },
       "tensors": [
-        { "tensor_id": "X", "dim": [16, 64, 56, 56], "stride": [200704, 3136, 56, 1] },
-        { "tensor_id": "W", "dim": [64, 64, 3, 3], "stride": [576, 9, 3, 1] }
+        { "tensor_id": "x_tensor_uid", "dim": [16, 64, 56, 56], "stride": [200704, 3136, 56, 1] },
+        { "tensor_id": "w_tensor_uid", "dim": [64, 64, 3, 3], "stride": [576, 9, 3, 1] }
       ],
       "autotune_metadata": {
         "rank": 0,
@@ -656,8 +667,8 @@ Reuses the `EngineOverrideConfig` JSON format with autotuning metadata added:
       "op": "matmul",
       "engine_name": "ROCBLAS_ENGINE_DEFAULT",
       "tensors": [
-        { "tensor_id": "A", "dim": [128, 512], "stride": [512, 1] },
-        { "tensor_id": "B", "dim": [512, 256], "stride": [256, 1] }
+        { "tensor_id": "a_tensor_uid", "dim": [128, 512], "stride": [512, 1] },
+        { "tensor_id": "b_tensor_uid", "dim": [512, 256], "stride": [256, 1] }
       ],
       "autotune_metadata": {
         "rank": 0,

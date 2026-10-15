@@ -1,17 +1,16 @@
 # hipDNN - Engine Configuration Knobs Design Document
 
 - Contributors: Mitch Ousdahl
-- **Status**: Implemented ✅
-- **Implementation Version**: hipDNN 1.0+
+- **Status**: Implemented
+- **Status notes**: Schemas, backend knob descriptors, frontend `Knob`/`KnobSetting`/Graph APIs, and MIOpen knobs shipped (#3802, #3923, #3901, #5057, #4328). The proposed `KnobRegistry`/`EngineBase::registerKnobs()` plugin helpers were not built; plugins use `KnobFactory` and `GlobalKnobDefines.hpp` in `plugin_sdk`. Knob values are validated in the frontend, not in `hipdnnBackendFinalize(engineCfg)`.
+- **Last verified**: 2026-10-15 against `develop` (2501d0b28cc)
 
 > [!NOTE]
-> **Implementation Status**: This RFC has been implemented in hipDNN. The design described here reflects the current implementation with minor deviations noted in sections below.
->
 > **User Documentation**: For practical usage information, see:
 > - [hipDNN Knobs Documentation](../Knobs.md) - Complete user guide with examples
 > - [HowTo Guide - Configuring Knobs](../HowTo.md#configuring-engine-knobs) - Quick start guide
 > - [Plugin Development - Providing Knobs](../PluginDevelopment.md#providing-knobs) - Plugin developer guide
-> - [MIOpen Provider Knobs](../../../dnn-providers/miopen-provider/docs/Knobs.md) - MIOpen-specific knobs
+> - [MIOpen Provider Knobs](../../../../dnn-providers/miopen-provider/docs/Knobs.md) - MIOpen-specific knobs
 
 ## Table of Contents
 1. [Executive Summary](#1-executive-summary)
@@ -82,8 +81,8 @@ hipDNN already has foundational support for engine configurations:
 
 ```cpp
 // Backend attributes (from HipdnnBackendAttributeName.h)
-HIPDNN_ATTR_ENGINE_KNOB_INFO       = 1302,  // Query knob metadata
-HIPDNN_ATTR_ENGINECFG_KNOB_CHOICES = 302,   // Set knob values
+HIPDNN_ATTR_ENGINE_KNOB_INFO       = 1002,  // Query knob metadata
+HIPDNN_ATTR_ENGINECFG_KNOB_CHOICES = 202,   // Set knob values
 
 // Flatbuffer schemas
 // engine_config.fbs
@@ -127,9 +126,12 @@ We propose using Flatbuffers' union types to create a flexible, type-safe knob s
 
 #### 4.1.1 Core Knob Schema
 
+> [!NOTE]
+> **Implementation note (2026-10-15):** The schemas live in `flatbuffers_sdk/schemas/` under namespace `hipdnn_flatbuffers_sdk.data_objects`. In `Knob`, `knob_id` is a `string` (no int hash, no `knob_id_str`, no `value_type` field), the constraint field is `constraint`, and `default_value` is `(required)`. `KnobSetting.knob_id` is also a `string`. `EngineDetails` also has `behavior_notes` and `name`.
+
 ```flatbuffers
-// data_sdk/schemas/knob_value.fbs
-namespace hipdnn_data_sdk.data_objects;
+// flatbuffers_sdk/schemas/knob_value.fbs
+namespace hipdnn_flatbuffers_sdk.data_objects;
 
 // Union of possible knob value types
 union KnobValue {
@@ -189,8 +191,8 @@ table StringConstraint {
 #### 4.1.2 Updated Engine Schemas
 
 ```flatbuffers
-// data_sdk/schemas/engine_details.fbs
-namespace hipdnn_data_sdk.data_objects;
+// flatbuffers_sdk/schemas/engine_details.fbs
+namespace hipdnn_flatbuffers_sdk.data_objects;
 
 include "knob_value.fbs";
 
@@ -199,8 +201,8 @@ table EngineDetails {
     knobs: [Knob];  // NEW: Knobs this engine supports
 }
 
-// data_sdk/schemas/engine_config.fbs
-namespace hipdnn_data_sdk.data_objects;
+// flatbuffers_sdk/schemas/engine_config.fbs
+namespace hipdnn_flatbuffers_sdk.data_objects;
 
 include "knob_value.fbs";
 
@@ -218,6 +220,9 @@ table EngineConfig {
 ### 4.2 Backend API Extensions
 
 #### 4.2.1 Knob Discovery
+
+> [!NOTE]
+> **Implementation note (2026-10-15):** `HIPDNN_ATTR_ENGINE_KNOB_INFO` returns an array of `HIPDNN_BACKEND_KNOB_INFO_DESCRIPTOR` descriptors, not a serialized `EngineDetails`. Each descriptor exposes `HIPDNN_ATTR_KNOB_INFO_*` attributes (900-910). The serialized form is still available through the `HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE` extension attribute. See `backend/src/descriptors/EngineDescriptor.cpp` and `KnobDescriptor.cpp`.
 
 Users can query knob metadata from engine details:
 
@@ -239,6 +244,9 @@ hipdnnBackendGetAttribute(
 
 #### 4.2.2 Knob Configuration
 
+> [!NOTE]
+> **Implementation note (2026-10-15):** The elements are `HIPDNN_BACKEND_KNOB_CHOICE_DESCRIPTOR` descriptors with `HIPDNN_ATTR_KNOB_CHOICE_KNOB_TYPE` (knob ID string) and `HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE`. A serialized `KnobSetting` can also be set with the `HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE` extension attribute. See `backend/src/descriptors/EngineConfigDescriptor.cpp` and `KnobSettingDescriptor.cpp`.
+
 Users set knob values in engine config:
 
 ```cpp
@@ -255,7 +263,7 @@ hipdnnBackendSetAttribute(
     &engine
 );
 
-// Set knob choices (serialized KnobSetting flatbuffers)
+// Set knob choices (HIPDNN_BACKEND_KNOB_CHOICE_DESCRIPTOR descriptors)
 hipdnnBackendSetAttribute(
     engineCfg,
     HIPDNN_ATTR_ENGINECFG_KNOB_CHOICES,
@@ -269,6 +277,9 @@ hipdnnBackendFinalize(engineCfg);
 
 #### 4.2.3 Validation
 
+> [!NOTE]
+> **Implementation note (2026-10-15):** `EngineConfigDescriptor::finalize()` does not check knob constraints. It only asks the plugin for the workspace size. The frontend validates settings with `Knob::validate()`. `create_execution_plan_ext()` uses `Graph::validateAndFilterKnobSettings()`, which ignores unknown knobs with a warning. `add_engine()` and `add_engine_variants()` use `Graph::validateKnobSettingsStrict()`, which returns an error. Plugins apply defaults for knobs that are not set.
+
 During `hipdnnBackendFinalize(engineCfg)`, the backend will:
 
 1. Deserialize the knob settings from the EngineConfig
@@ -278,6 +289,9 @@ During `hipdnnBackendFinalize(engineCfg)`, the backend will:
 5. Return `HIPDNN_STATUS_BAD_PARAM` if validation fails
 
 ### 4.3 Plugin SDK Extensions
+
+> [!NOTE]
+> **Implementation note (2026-10-15):** `KnobRegistry`, `EngineBase::registerKnobs()`, `registerDeterministicKnob()`, `registerBenchmarkingKnob()`, and `PlanBuilderBase` were not built. Plugins build `Knob` flatbuffers with `hipdnn_plugin_sdk::KnobFactory` (`createIntKnob()`, `createFloatKnob()`, `createStringKnob()`) and return them in `EngineDetails.knobs`. Global knob names are in `plugin_sdk/include/hipdnn_plugin_sdk/GlobalKnobDefines.hpp`. Plan builders read settings from the engine config, for example with `hasKnobSetting()` and `getKnobSettingByName()` (see `dnn-providers/miopen-provider/engines/MiopenEngine.cpp`).
 
 ⚠️ These changes are predicated on the existence of the plugin helper classes as defined in [RFC2 - Plugin SDK Design](./0002_PluginSdkDesign.md)  As an interim step, flatbuffer wrapper classes can add as temporary aids to plugin developers.
 
@@ -397,6 +411,9 @@ public:
 ```
 
 ### 4.4 Frontend API Extensions
+
+> [!NOTE]
+> **Implementation note (2026-10-15):** The frontend API was built differently. See [11.4 Actual API Signatures](#114-actual-api-signatures). The int64 `create_execution_plan(engineId, knobs)` overload, `Knob::make_knob_id()`, `toDefaultKnob()`, and `Graph::knobToDefaultKnobSettings()` do not exist. The frontend reads knobs through backend descriptors, not flatbuffers.
 
 The frontend will provide extension methods that align with the more limited frontend API pattern while adding hipDNN-specific functionality:
 
@@ -542,6 +559,9 @@ The existing methods will use the flatbuffer variants under the hood.
 
 ### 4.5 Knob Naming Convention
 
+> [!NOTE]
+> **Implementation note (2026-10-15):** The code does not reject custom knobs in the `global.` namespace. The defined global knobs are `global.benchmarking` and `global.workspace_size_limit` (`GlobalKnobDefines.hpp`). No plugin defines `global.deterministic`. MIOpen exposes deterministic behavior as separate engines instead (#4203).
+
 We recommend a hierarchical naming scheme:
 
 ```
@@ -601,6 +621,9 @@ Examples:
 **Trade-off**: String comparison is slower than integer comparison, but knob operations are infrequent (configuration time, not execution time).
 
 ### 5.4 Validation at Finalization
+
+> [!NOTE]
+> **Implementation note (2026-10-15):** Validation happens in the frontend, not in `hipdnnBackendFinalize(engineCfg)`. See [4.2.3 Validation](#423-validation).
 
 **Decision**: Validate knob settings during `hipdnnBackendFinalize(engineCfg)`.
 
@@ -739,6 +762,10 @@ The execution plan has two branches.  One is a "get it in and get it done" versi
     - Prepare release notes highlighting new functionality
 
 ### Phase X: Plugin SDK Support
+
+> [!NOTE]
+> **Implementation note (2026-10-15):** This phase was not done. Plugins use `KnobFactory` in `plugin_sdk` instead of `KnobRegistry`.
+
 ⚠️ This phase would occur if the plugin SDK helper classes are available.
 
 3. **KnobRegistry Implementation**
@@ -816,6 +843,9 @@ The execution plan has two branches.  One is a "get it in and get it done" versi
 
 ### 9.1 Auto-Tuning Integration
 
+> [!NOTE]
+> **Implementation note (2026-10-15):** Autotuning shipped in #8264. `Graph::autotune()` and `Graph::add_engine_sweep()` sweep knob values and time candidate plans. See [RFC 0013](./0013_Autotune.md) and `frontend/include/hipdnn_frontend/autotune/`.
+
 Future work could integrate knobs with auto-tuning:
 
 - **Knob Search Space**: Use knob metadata to define search space
@@ -850,22 +880,21 @@ This section documents the actual implementation status and any deviations from 
 
 ### 11.1 Implementation Status
 
-**Status**: ✅ **Implemented**
-
-The knobs system has been fully implemented in hipDNN as of version 1.0+. The implementation follows the design proposed in this RFC with the following components completed:
+The knobs system has been implemented in hipDNN. The implementation follows the design proposed in this RFC with the following components completed:
 
 #### ✅ Completed Components
 
 1. **FlatBuffer Schemas** (Phase 1.1)
-   - `data_sdk/schemas/knob_value.fbs` - Core knob schema with union types
+   - `flatbuffers_sdk/schemas/knob_value.fbs` - Core knob schema with union types
    - `engine_details.fbs` - Updated with knob metadata support
    - `engine_config.fbs` - Updated with knob settings support
    - All schemas support int64, float64, and string value types
 
 2. **Backend API** (Phase 1.2)
-   - `HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE` - Query knob metadata
-   - `HIPDNN_ATTR_ENGINECFG_KNOB_CHOICES` - Set knob values
-   - Validation during `hipdnnBackendFinalize(engineCfg)`
+   - `HIPDNN_ATTR_ENGINE_KNOB_INFO` - Query knob metadata as `HIPDNN_BACKEND_KNOB_INFO_DESCRIPTOR` descriptors
+   - `HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE` - Query knob metadata as a serialized flatbuffer
+   - `HIPDNN_ATTR_ENGINECFG_KNOB_CHOICES` - Set knob values as `HIPDNN_BACKEND_KNOB_CHOICE_DESCRIPTOR` descriptors
+   - Knob constraint validation happens in the frontend (`Knob::validate()`), not during `hipdnnBackendFinalize(engineCfg)`
    - Error reporting for invalid knob values
 
 3. **Frontend API** (Phase 2)
@@ -875,10 +904,11 @@ The knobs system has been fully implemented in hipDNN as of version 1.0+. The im
    - `Graph::get_knobs_for_engine()` - Query available knobs
    - `Graph::get_knob_lookup_for_engine()` - Query knobs as map
    - `Graph::create_execution_plan_ext()` - Create plan with knob settings
+   - `Graph::add_engine()` - Add a plan spec with knob settings
 
 4. **MIOpen Provider** (Phase 3)
    - Implemented `global.benchmarking` knob
-   - Implemented `global.workspace_size_limit` custom knob for convolution operations
+   - Implemented the `global.workspace_size_limit` knob for convolution operations
    - Dynamic knob registration based on operation type
    - Knob validation and application in plan builders
 
@@ -932,7 +962,7 @@ The following deviations from the original RFC were made during implementation:
 
 1. **String-based Knob IDs**: Slightly less efficient than integer IDs, but acceptable for configuration-time operations.
 
-2. **No Auto-Tuning Integration**: Auto-tuning integration (section 9.1) is planned for a future release.
+2. **Auto-Tuning Integration**: Auto-tuning (section 9.1) shipped in #8264. See [RFC 0013](./0013_Autotune.md).
 
 ### 11.4 Actual API Signatures
 
@@ -942,7 +972,11 @@ The implemented API signatures differ slightly from the RFC proposal:
 ```cpp
 class Knob {
 public:
-    static std::pair<Error, Knob> tryFromFlatbuffer(hipdnnBackendFlatbufferData_t fbData);
+    static std::pair<Error, Knob> tryCreate(std::string knobIdStr,
+                                            std::string description,
+                                            KnobValueVariant defaultValue,
+                                            bool deprecated,
+                                            std::shared_ptr<IConstraint> constraint);
 
     const std::string& knobId() const;
     const std::string& description() const;
@@ -976,23 +1010,27 @@ public:
                                      std::unordered_map<std::string, Knob>& knobs) const;
     Error create_execution_plan_ext(int64_t engineId,
                                     const std::vector<KnobSetting>& settings);
+    Error add_engine(int64_t engineId, const std::vector<KnobSetting>& knobSettings = {});
 };
 ```
 
 ### 11.5 Testing Status
 
 **Unit Tests**: ✅ Completed
-- `frontend/tests/TestKnob.cpp` - Knob class tests
-- `frontend/tests/TestKnobSetting.cpp` - KnobSetting class tests
+- `frontend/tests/TestKnob.cpp` - Knob, KnobSetting, and constraint class tests
+- `frontend/tests/TestKnobUnpacker.cpp` - Knob descriptor unpacking tests
 - `frontend/tests/TestGraph.cpp` - Graph knob API tests
+- `backend/tests/descriptors/TestKnobDescriptor.cpp`, `TestKnobSettingDescriptor.cpp` - Backend descriptor tests
+- `plugin_sdk/tests/TestKnobFactory.cpp`, `TestKnobSettingFactory.cpp` - Plugin SDK helper tests
 
 **Integration Tests**: ✅ Completed
-- MIOpen provider knob tests
-- End-to-end knob setting and validation tests
+- `tests/frontend/IntegrationGraphKnobsApi.cpp` - End-to-end frontend knob tests
+- `tests/backend/IntegrationKnobsApi.cpp` - Backend knob API tests
+- `tests/test_plugins/TestKnobsPlugin.cpp`, `TestKnobConstraintValidationPlugin.cpp` - Test plugins that expose knobs
 
 **Plugin Tests**: ✅ Completed
-- MIOpen benchmarking knob tests
-- MIOpen workspace limit knob tests
+- `dnn-providers/miopen-provider/integration_tests/IntegrationGpuBenchmarkingKnob.cpp` - MIOpen benchmarking knob tests
+- `dnn-providers/miopen-provider/tests/engines/plans/TestMiopenConvPlanBuilder.cpp` - MIOpen workspace limit knob tests
 
 ### 11.6 Production Usage
 
@@ -1021,7 +1059,7 @@ For implementation details and usage examples, refer to:
 - **User Documentation**:
   - [hipDNN Knobs](../Knobs.md) - Complete user guide
   - [HowTo - Configuring Knobs](../HowTo.md#configuring-engine-knobs) - Quick start
-  - [MIOpen Knobs](../../../dnn-providers/miopen-provider/docs/Knobs.md) - Provider-specific knobs
+  - [MIOpen Knobs](../../../../dnn-providers/miopen-provider/docs/Knobs.md) - Provider-specific knobs
 
 - **Developer Documentation**:
   - [Plugin Development - Providing Knobs](../PluginDevelopment.md#providing-knobs) - Plugin author guide
@@ -1030,9 +1068,11 @@ For implementation details and usage examples, refer to:
   - `frontend/include/hipdnn_frontend/knob/Knob.hpp`
   - `frontend/include/hipdnn_frontend/knob/KnobSetting.hpp`
   - `frontend/include/hipdnn_frontend/knob/KnobConstraint.hpp`
-  - `data_sdk/schemas/knob_value.fbs`
+  - `flatbuffers_sdk/schemas/knob_value.fbs`
+  - `plugin_sdk/include/hipdnn_plugin_sdk/KnobFactory.hpp`
+  - `plugin_sdk/include/hipdnn_plugin_sdk/GlobalKnobDefines.hpp`
 
 ---
 
-**Last Updated**: 2026-02-18
+**Last Updated**: 2026-10-15
 **Implemented By**: Mitch Ousdahl and contributors

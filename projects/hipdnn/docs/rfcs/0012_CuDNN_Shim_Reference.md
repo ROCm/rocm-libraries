@@ -1,5 +1,8 @@
 # RFC 0012 — Supporting Reference: Verified cuDNN FE v1.24 Surface
 
+- **Status**: see [RFC 0012](./0012_CuDNN_Shim.md)
+- **Last verified**: 2026-10-15 against `develop` (2501d0b28cc)
+
 This document is the long-form companion to
 [RFC 0012: cuDNN shim for hipDNN](./0012_CuDNN_Shim.md). It collects the
 verbose, source-verified material that the main RFC summarises: the full

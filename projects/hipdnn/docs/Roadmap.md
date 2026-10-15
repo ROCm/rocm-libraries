@@ -45,7 +45,7 @@ This document outlines the development roadmap for hipDNN, a comprehensive graph
   - Forward path on gfx942 & gfx950: BF16, head dims 128 and 192x128, GQA/MQA ✅
   - Bottom-right causal forward on gfx942 (gfx950 causal tracked in Q3) ✅
   - SDPA forward golden-reference data + tests landed ✅
-- Forward LSE/softmax-stats output and a GPU forward reference ⏳
+- Forward LSE/softmax-stats output and a GPU forward reference ✅
 - Overridable tensor shapes API (required for variable sequence lengths) ✅
   - Phase 1 override-shape plumbing landed (RFC 0008) ✅
 - SDPA backward pass on gfx942 ⏳
@@ -85,12 +85,12 @@ This document outlines the development roadmap for hipDNN, a comprehensive graph
   - Behavioral notes for filtering ✅
 - **Graph + execution-plan binary serialize/deserialize** ✅
 
-## Q3 2026 (Current milestone)
+## Q3 2026
 
 **Focus:** SDPA, GEMM with MX low-precision data types, better heuristics & improved kernel provider selection
 
 ### SDPA
-- Wider SDPA coverage: FP16 and FP8 forward, head dims up to 256, broader GQA configurations
+- Wider SDPA coverage: FP16 and FP8 forward, head dims up to 256, broader GQA configurations ⏳
 - Production-quality backward pass, plus a forward GPU reference ⏳
 - gfx950 backward and gfx950 causal forward
 - **rocKE SDPA plugin for hipDNN** — ROCm Kernel Engine SDPA provider plugin
@@ -99,7 +99,7 @@ This document outlines the development roadmap for hipDNN, a comprehensive graph
 
 ### GEMM
 - **hipBLASLt plugin expanded operation & datatype support** ⏳
-  - FP8 (OCP) dequantize + GEMM path in progress ⏳
+  - FP8 (OCP) dequantize + GEMM path landed behind `HIPBLASLTPROVIDER_ENABLE_MX_GEMM` (off by default) ✅
 - MX GEMMs through the hipBLASLt provider plugin ⏳
 - Documented constraints surfaced for graph builders (alignment, batch, epilogues)
 
@@ -109,22 +109,22 @@ This document outlines the development roadmap for hipDNN, a comprehensive graph
   - Initial provider kernel dispatch ⏳
 
 ### Heuristics
-- Heuristic plugin API
+- Heuristic plugin API (RFC 0007) ✅
 - Plugin architecture ⏳
 - Phase 1 heuristic plugin: providing heuristic engine selection for limited architectures or team may pivot to support heuristics on rocKE
 
 ### Normalization
-- Expanded LayerNorm & RMSNorm kernel coverage in the HIP kernel provider
-- Expanded layout & datatype coverage for batchnorm
+- Expanded LayerNorm & RMSNorm kernel coverage in the HIP kernel provider ⏳
+- Expanded layout & datatype coverage for batchnorm ⏳
 
 ### Support matrix
 - Matrix published as a regular CI artifact ⏳
-- Whole-graph bundled integration tests ⏳
+- Whole-graph bundled integration tests ✅
   - Default authoring format for new graph-verification tests ✅
-  - Enabled as the default execution path in CI ⏳
+  - Enabled as the default execution path in CI ✅
 
 ### Universal descriptors
-- Data-driven kernel ingestion via universal kernel, match, dispatch, engine and heuristic descriptors (RFC 0017)
+- Data-driven kernel ingestion via universal kernel, match, dispatch, engine and heuristic descriptors (RFC 0017) ⏳
 
 ### Benchmarking & performance testing
 - Benchmarking CI running on AMD GPUs in [ROCm/dnn-benchmarking](https://github.com/ROCm/dnn-benchmarking) ⏳
@@ -138,7 +138,7 @@ This document outlines the development roadmap for hipDNN, a comprehensive graph
   - Node and enum coverage expansion in progress ⏳
 
 ### MIOpen integration
-- **MIOpen ↔ hipDNN shim** enabling MIOpen to route through hipDNN (RFC stage)
+- **MIOpen ↔ hipDNN shim** enabling MIOpen to route through hipDNN, behind `MIOPEN_ENABLE_HIPDNN_WRAPPER` (off by default) ⏳
   - MIOpen superbuild integration ✅
 
 ### Core
@@ -149,7 +149,7 @@ This document outlines the development roadmap for hipDNN, a comprehensive graph
 - Python API wrappers (general availability beyond POC) ⏳
 - Plugin SDK utility expansion to further streamline new-provider development
 
-## Q4 2026 & beyond
+## Q4 2026 & beyond (Current milestone)
 
 **Focus:** Broader operation, layout & datatype coverage; deeper framework integrations; and the graph-execution, tensor and packaging work that moves hipDNN from tech preview toward general availability. We still value community input on what you would like to see prioritized!
 
@@ -161,7 +161,7 @@ This document outlines the development roadmap for hipDNN, a comprehensive graph
   - Additional datatype support
 
 ### Benchmarking & performance testing
-- Bindings installable as wheels
+- Bindings installable as wheels ⏳
 - App installable as wheel
 
 ### More framework integrations
@@ -176,7 +176,7 @@ This document outlines the development roadmap for hipDNN, a comprehensive graph
 - Expanded performance and validation suites for hipDNN full install (using real user workloads and benchmarks to drive testing)
 - AOT graph compilation without devices present (Pre-compile graph support)
 - **hipGraph support**
-- Support dynamic linking to backend (enables forwards and backwards compatible client libraries)
+- Support dynamic linking to backend (enables forwards and backwards compatible client libraries) ⏳
   - Save/Load Execution plans (binary serialize/deserialize of graph + execution plan landed in Q2; full save/load across dynamic linking tracked here)
 - Non-standard tensor support (non-packed, vectorized)
 

@@ -64,9 +64,10 @@ faithful description was already being submitted. The injection references no sp
 engine or provider and is architecture-agnostic.
 
 > [!NOTE]
-> **Build dependency:** the injection builds against the frontend bindings from PR
-> [ROCm/rocm-libraries#10600](https://github.com/ROCm/rocm-libraries/pull/10600), which
-> binds the graph surface it uses (`graph.sdpa`/`layernorm`/`rmsnorm`; SDPA
+> **Build dependency:** the injection builds against the frontend bindings in
+> `projects/hipdnn/python/frontend_bindings` (merged in
+> [ROCm/rocm-libraries#10600](https://github.com/ROCm/rocm-libraries/pull/10600)), which
+> bind the graph surface it uses (`graph.sdpa`/`layernorm`/`rmsnorm`; SDPA
 > `set_attn_scale`/`set_causal_mask`/`set_bias`/`set_dropout_probability`; conv
 > `set_pre_padding`/`set_post_padding`; per-tensor `set_data_type`). This is a build-time
 > dependency, not a runtime gate.
