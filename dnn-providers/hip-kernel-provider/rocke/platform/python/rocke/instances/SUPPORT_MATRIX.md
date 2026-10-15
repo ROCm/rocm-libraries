@@ -62,9 +62,14 @@ the finite verification fixtures.
 
 ## gfx1250 native scaled GEMM
 
-`block_scaled_gemm` supports homogeneous and mixed FP8 E4M3, BF8 E5M2, FP6 E2M3, FP6 E3M2,
-and FP4 E2M1 through SCALE and SCALE16 with LLVM 23 and E8M0 scales.
-See the [packed FP6 input contract](../examples/gfx1250/gemm/FP6.md).
+`block_scaled_gemm` supports homogeneous and mixed FP8 E4M3, BF8 E5M2,
+FP6 E2M3/E3M2, and FP4 E2M1 through SCALE and SCALE16 with the `llvm23`
+emission flavor. FP8/BF8/FP6/BF6 operands require E8M0 scales; FP4 accepts
+E8M0, E4M3, or E5M3. FP4 × FP4 requires matching scale formats. Host tests
+cover admission and rejection; numeric fixtures cover bounded finite inputs,
+varying non-unit scales, and fixed-byte selector discrimination through COMGR/HIP.
+See the [scale-format contract](../examples/gfx1250/gemm/SCALE_FORMATS.md)
+and [packed FP6 input contract](../examples/gfx1250/gemm/FP6.md).
 
 ## GEMM family
 
