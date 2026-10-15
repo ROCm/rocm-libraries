@@ -145,6 +145,7 @@ TEST(TestGpuSdpaFwdSignatureKey, CreateFromNodeAndTensorMapWithMask)
                                                DataType::FLOAT,
                                                {},
                                                std::nullopt,
+                                               /*scale=*/std::nullopt,
                                                MASK_UID,
                                                maskDims,
                                                maskType);
@@ -181,6 +182,7 @@ TEST(TestGpuSdpaFwdSignatureKey, CreateFromNodeWithDanglingMaskUidThrows)
                                            DataType::FLOAT,
                                            {},
                                            std::nullopt,
+                                           /*scale=*/std::nullopt,
                                            MASK_UID,
                                            {1, 1, 8, 8},
                                            std::nullopt);
