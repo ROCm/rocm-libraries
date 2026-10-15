@@ -30,7 +30,7 @@ from kernels.gfx1151.wmma_fmha_fwd import (
     uses_gfx11_operand_layout,
     wmma_fmha_fwd_signature,
 )
-from rocke.core.arch import generic_arch_from_target_id
+from rocke.core.arch import base_arch_from_target_id, generic_arch_from_target_id
 from rocke.dispatch.core import (
     Capability,
     CandidateRegistry,
@@ -90,7 +90,7 @@ def _resolve_num_cus(req: AttentionRequest) -> int:
         if req.arch == family:
             matches = generic_arch_from_target_id(device) == family
         else:
-            matches = device.split(":", 1)[0] == req.arch
+            matches = base_arch_from_target_id(device) == req.arch
         if matches:
             live = _device_num_cus()
             if live and live > 0:

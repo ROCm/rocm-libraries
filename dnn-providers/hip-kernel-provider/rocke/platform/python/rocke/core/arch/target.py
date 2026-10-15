@@ -1542,11 +1542,13 @@ def _processor_from_target_id(target_id: str) -> str:
     for arch in sorted(arches, key=len, reverse=True):
         if target_without_features.startswith(f"{arch}-"):
             return arch
-    for processor in _load_generic_targets()["gfx11-generic"]:
-        if target_without_features == processor or target_without_features.startswith(
-            f"{processor}-"
-        ):
-            return processor
+    for members in _load_generic_targets().values():
+        for processor in members:
+            if (
+                target_without_features == processor
+                or target_without_features.startswith(f"{processor}-")
+            ):
+                return processor
     match = re.match(r"^(gfx[0-9a-z]+)", target_without_features)
     return match.group(1) if match else target_without_features
 
@@ -1557,9 +1559,11 @@ def base_arch_from_target_id(target_id: str) -> str:
     Removes features after ``:`` and profile suffixes such as ``-strict``:
     ``gfx1250-strict`` becomes ``gfx1250`` and ``gfx942:xnack-`` becomes
     ``gfx942``. Names already in :func:`known_arches`, including
-    ``gfx11-generic``, are preserved. A concrete processor in LLVM's documented
-    ``gfx11-generic`` compatibility domain uses that generic rocKE catalog row
-    unless rocKE has a more-specific row; exact rows therefore take precedence.
+    ``gfx11-generic``, are preserved. A concrete processor in one of LLVM's
+    documented generic compatibility domains (``generic_targets``: gfx1100 ->
+    ``gfx11-generic``, gfx1200 -> ``gfx12-generic``) uses that generic rocKE
+    catalog row unless rocKE has a more-specific row; exact rows such as
+    ``gfx1151`` and ``gfx1201`` therefore take precedence.
 
     Any other unknown name is reduced to its leading ``gfx`` token when
     possible. This does not check support; :meth:`ArchTarget.from_gfx` requires
@@ -1570,11 +1574,12 @@ def base_arch_from_target_id(target_id: str) -> str:
     processor = _processor_from_target_id(target_id)
     if processor in known_arches():
         return processor
-    if processor in _load_generic_targets()["gfx11-generic"] and (
-        target_without_features == processor
-        or target_without_features.startswith(f"{processor}-")
-    ):
-        return "gfx11-generic"
+    for generic, members in _load_generic_targets().items():
+        if processor in members and (
+            target_without_features == processor
+            or target_without_features.startswith(f"{processor}-")
+        ):
+            return generic
     return processor
 
 

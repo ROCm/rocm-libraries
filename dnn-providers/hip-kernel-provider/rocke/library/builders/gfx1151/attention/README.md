@@ -454,9 +454,10 @@ Nothing in the kernel names a processor:
   dense/BHSD/ragged/paged layouts, FP8 KV, output-column tiling, distinct V
   widths) runs on both generations.
 - `rocke.core.arch.generic_arch_from_target_id()` maps a device name to its
-  generic target. Tests, the benchmark and hip-kernel-provider packaging use it;
-  `base_arch_from_target_id()` is unchanged, so `arch="gfx1151"` still builds
-  processor-specific objects.
+  generic target. Tests, the benchmark and hip-kernel-provider packaging use it.
+  `base_arch_from_target_id()` keeps a processor that has its own row, so
+  `arch="gfx1151"` and `arch="gfx1201"` still build processor-specific objects;
+  other members (gfx1100, gfx1200, ...) resolve to their generic row.
 - CU-aware selection reads the live CU count of device 0 when that device runs
   the requested object: any member of the family for a generic request, the
   named processor for a processor-specific one (HIP reports WGPs on RDNA, so the

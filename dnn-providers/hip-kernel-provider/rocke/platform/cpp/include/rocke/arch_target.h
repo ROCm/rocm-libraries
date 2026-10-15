@@ -384,7 +384,9 @@ void rocke_set_unknown_arch_reason(char* out, size_t out_cap, const char* gfx);
 const char* rocke_target_id_from_isa(const char* isa, char* out, size_t out_cap);
 
 /* Remove features and profiles for catalog lookup, preserving catalog names
- * such as gfx11-generic. gfx1250-strict and gfx942:xnack- become gfx1250/gfx942. */
+ * such as gfx11-generic. gfx1250-strict and gfx942:xnack- become gfx1250/gfx942.
+ * A generic-target member without its own row uses the generic row (gfx1100 ->
+ * gfx11-generic, gfx1200 -> gfx12-generic). */
 const char* rocke_base_arch_from_target_id(const char* target_id, char* out, size_t out_cap);
 
 /* Remove profiles but preserve compiler features: gfx1250-strict:xnack-

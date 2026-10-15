@@ -138,8 +138,10 @@ v6) load on every member device, so one build serves the family. The
 processor's members, mirrored by `rocke_ati_generic_targets` in
 [`cpp/core/arch/data.cpp`](../../cpp/core/arch/data.cpp).
 `generic_arch_from_target_id()` (C++: `rocke_generic_arch_from_target_id()`)
-maps a device or processor name to that generic target; it never changes what
-`base_arch_from_target_id()` returns, so an explicit processor name still builds
+maps any device or processor name to that generic target.
+`base_arch_from_target_id()` uses the generic row only for a member without its
+own catalog row (gfx1100 -> `gfx11-generic`, gfx1200 -> `gfx12-generic`), so an
+explicit processor name with a row (`gfx1151`, `gfx1201`) still builds
 processor-specific code. Capability tables (`intrinsic_arch_domain.*.json`) need
 the new column, regenerated per LLVM flavor with `tools/gen_arch_domain.py`.
 

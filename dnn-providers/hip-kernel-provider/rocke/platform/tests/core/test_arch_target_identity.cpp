@@ -89,7 +89,9 @@ int main(int argc, char** argv)
     check_target("gfx1153", "gfx11-generic", "gfx1153");
     check_target("gfx1154", "gfx11-generic", "gfx1154");
     check_target("gfx1170", "gfx1170", "gfx1170");
-    check_target("gfx1200", "gfx1200", "gfx1200");
+    check_target("gfx1200", "gfx12-generic", "gfx1200");
+    check_target("gfx1200-strict:xnack-", "gfx12-generic", "gfx1200:xnack-");
+    check_target("gfx1201", "gfx1201", "gfx1201");
     check_target("gfx1101_bad", "gfx1101", "gfx1101_bad");
     check_target("gfx00a-profile:unknown+", "gfx00a", "gfx00a:unknown+");
     check_target("gfx942:", "gfx942", "gfx942:");

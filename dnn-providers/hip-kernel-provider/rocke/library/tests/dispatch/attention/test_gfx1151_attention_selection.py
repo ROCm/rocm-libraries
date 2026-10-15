@@ -98,6 +98,26 @@ class TestGfx1151AttentionSelection(unittest.TestCase):
                     ok, why = is_valid_spec(result.spec, arch=arch)
                     self.assertTrue(ok, why)
 
+    def test_device_names_route_to_their_rdna_catalog_row(self):
+        # A caller may pass the device name: members without a catalog row use
+        # their generic row, processors with one keep it.
+        for device, arch in (
+            ("gfx1100", "gfx11-generic"),
+            ("gfx1103:xnack-", "gfx11-generic"),
+            ("gfx1151", "gfx1151"),
+            ("gfx1200", "gfx12-generic"),
+            ("gfx1200-strict", "gfx12-generic"),
+            ("gfx1201", "gfx1201"),
+        ):
+            with self.subTest(device=device):
+                result = dispatch_attention(
+                    _request(arch=device, hdim_q=128, hdim_v=128)
+                )
+                self.assertEqual(result.request.arch, arch)
+                self.assertEqual(result.candidate.name, "attention_gfx1151_wmma")
+                ok, why = is_valid_spec(result.spec, arch=arch)
+                self.assertTrue(ok, why)
+
     def test_fp8_value_staging_follows_the_wmma_generation(self):
         paged_fp8 = dict(layout="paged", kv_block_size=16, use_fp8=True)
         gfx11 = dispatch_attention(_request(arch="gfx11-generic", **paged_fp8)).spec

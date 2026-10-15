@@ -97,12 +97,27 @@ def test_gfx11_generic_catalog_selection_is_independent_of_target_suffixes(
     assert compiler_target_from_target_id(target_id) == compiler_target
 
 
-@pytest.mark.parametrize("target_id", ["gfx1170", "gfx1200", "gfx1101_bad"])
-def test_nonmembers_do_not_use_the_gfx11_generic_catalog_row(
+@pytest.mark.parametrize("target_id", ["gfx1170", "gfx1101_bad"])
+def test_nonmembers_do_not_use_a_generic_catalog_row(
     target_id: str,
 ) -> None:
     expected = "gfx1101" if target_id == "gfx1101_bad" else target_id
     assert base_arch_from_target_id(target_id) == expected
+
+
+@pytest.mark.parametrize(
+    ("target_id", "base", "compiler_target"),
+    [
+        ("gfx1200", "gfx12-generic", "gfx1200"),
+        ("gfx1200-strict:xnack-", "gfx12-generic", "gfx1200:xnack-"),
+        ("gfx1201", "gfx1201", "gfx1201"),
+    ],
+)
+def test_gfx12_processors_without_a_row_use_the_generic_catalog_row(
+    target_id: str, base: str, compiler_target: str
+) -> None:
+    assert base_arch_from_target_id(target_id) == base
+    assert compiler_target_from_target_id(target_id) == compiler_target
 
 
 @pytest.mark.parametrize(
