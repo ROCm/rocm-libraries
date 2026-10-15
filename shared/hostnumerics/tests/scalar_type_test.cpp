@@ -191,34 +191,36 @@ TEST(Core, ScalarDispatchTags) {
     }
 }
 
+enum class VisitorQualification { LValue, ConstLValue, RValue };
+
+// Reports which overload ran. The move-only member makes the visitor
+// non-copyable, so dispatching an lvalue visitor shows that it is not copied.
 struct QualifiedVisitor {
-    std::unique_ptr<int> value = std::make_unique<int>(7);
+    std::unique_ptr<int> moveOnly;
 
     template <typename Tag>
-    int operator()(int& calls) & {
-        ++calls;
-        return *value;
+    VisitorQualification operator()() & {
+        return VisitorQualification::LValue;
     }
     template <typename Tag>
-    int operator()(int& calls) const& {
-        ++calls;
-        return *value + 1;
+    VisitorQualification operator()() const& {
+        return VisitorQualification::ConstLValue;
     }
     template <typename Tag>
-    int operator()(int& calls) && {
-        ++calls;
-        return *value + 2;
+    VisitorQualification operator()() && {
+        return VisitorQualification::RValue;
     }
 };
 
 TEST(Core, ScalarDispatchForwarding) {
     QualifiedVisitor visitor;
-    int calls = 0;
-    EXPECT_EQ(visitScalarType(ScalarType::Float32, visitor, calls), 7);
-    EXPECT_EQ(visitScalarType(ScalarType::Float32, std::as_const(visitor), calls), 8);
-    EXPECT_EQ(visitScalarType(ScalarType::Float32, std::move(visitor), calls), 9);
-    EXPECT_EQ(calls, 3);
+    EXPECT_EQ(visitScalarType(ScalarType::Float32, visitor), VisitorQualification::LValue);
+    EXPECT_EQ(visitScalarType(ScalarType::Float32, std::as_const(visitor)),
+              VisitorQualification::ConstLValue);
+    EXPECT_EQ(visitScalarType(ScalarType::Float32, std::move(visitor)),
+              VisitorQualification::RValue);
 
+    // A move-only rvalue argument reaches a visitor that takes it by value.
     auto argument = std::make_unique<int>(42);
     EXPECT_EQ(visitScalarType(
                   ScalarType::Int4, []<typename Tag>(std::unique_ptr<int> p) { return *p; },
@@ -254,6 +256,8 @@ TEST(Core, ScalarDispatchExceptions) {
         return *argument;
     };
     auto argument = std::make_unique<int>(42);
+    // Invalid types are rejected before the visitor is called: calls stays zero,
+    // and the argument passed with std::move is never moved from.
     // Deliberately construct unnamed enum values to test boundary rejection.
     // NOLINTBEGIN(clang-analyzer-optin.core.EnumCastOutOfRange)
     const ScalarType invalidTypes[] = {ScalarType::Count,
