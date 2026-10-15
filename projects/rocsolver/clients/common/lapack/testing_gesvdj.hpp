@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -394,7 +394,7 @@ void gesvdj_getError(const rocblas_handle handle,
     {
         // error is ||hS - hSres||
         err = norm_error('F', 1, std::min(m, n), 1, hS[b], hSres[b]);
-        *max_err = err > *max_err ? err : *max_err;
+        *max_err = rocblas_max_nan(err, *max_err);
 
         // Check the singular vectors if required
         if(hinfo[b][0] == 0 && (left_svect != rocblas_svect_none || right_svect != rocblas_svect_none))
@@ -413,7 +413,7 @@ void gesvdj_getError(const rocblas_handle handle,
                 }
             }
             err = std::sqrt(err) / double(snorm('F', m, n, A.data() + b * lda * n, lda));
-            *max_errv = err > *max_errv ? err : *max_errv;
+            *max_errv = rocblas_max_nan(err, *max_errv);
         }
     }
 }
@@ -852,9 +852,6 @@ void testing_gesvdj(Arguments& argus)
     // output results for rocsolver-bench
     if(argus.timing)
     {
-        if(svects)
-            max_error = (max_error >= max_errorv) ? max_error : max_errorv;
-
         if(!argus.perf)
         {
             rocsolver_bench_header("Arguments:");
@@ -883,8 +880,8 @@ void testing_gesvdj(Arguments& argus)
             rocsolver_bench_header("Results:");
             if(argus.norm_check)
             {
-                rocsolver_bench_output("cpu_time_us", "gpu_time_us", "error");
-                rocsolver_bench_output(cpu_time_used, gpu_time_used, max_error);
+                rocsolver_bench_output("cpu_time_us", "gpu_time_us", "error", "errorv");
+                rocsolver_bench_output(cpu_time_used, gpu_time_used, max_error, max_errorv);
             }
             else
             {
@@ -896,7 +893,7 @@ void testing_gesvdj(Arguments& argus)
         else
         {
             if(argus.norm_check)
-                rocsolver_bench_output(gpu_time_used, max_error);
+                rocsolver_bench_output(gpu_time_used, max_error, max_errorv);
             else
                 rocsolver_bench_output(gpu_time_used);
         }
