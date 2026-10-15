@@ -6516,8 +6516,11 @@ void testing_matmul_with_bias(const Arguments& arg,
                            << std::endl;
             cotenant.reset();
         };
-        auto measuring = [&](size_t) { perf_monitor->start(); };
-        auto measured  = [&](size_t sol, hipblaslt_bench::TimingResult& timing) {
+        auto measuring = [&](size_t) {
+            assert(perf_monitor);
+            perf_monitor->start();
+        };
+        auto measured = [&](size_t sol, hipblaslt_bench::TimingResult& timing) {
             // hipblaslt-bench stops a single GEMM's cotenant before the efficiency
             // monitor and a grouped GEMM's after it; keep both orders.
             if(!do_grouped_gemm)
@@ -6965,18 +6968,14 @@ void testing_matmul_with_bias(const Arguments& arg,
             }
         }
         cotenant.reset();
-        if(search.aborted)
-            return;
 
-        const size_t          best_sol = search.best;
-        const CandidateReport best
-            = best_sol < reports.size() ? reports[best_sol] : CandidateReport{};
-        const double best_gpu_time = best_sol < reports.size() ? search.best_timing.median_us
-                                                               : std::numeric_limits<double>::max();
-
-        if(heuristicResult.size() > 1)
+        // An aborted search, or one that skipped every candidate, has no winner to report,
+        // and the teardown below must still run.
+        const size_t best_sol = search.best;
+        if(!search.aborted && best_sol < heuristicResult.size() && heuristicResult.size() > 1)
         {
-            const char* tuningEnv = getenv("HIPBLASLT_TUNING_FILE");
+            const CandidateReport& best      = reports[best_sol];
+            const char*            tuningEnv = getenv("HIPBLASLT_TUNING_FILE");
             int32_t     solutionIndex
                 = (tuningEnv || arg.print_kernel_info)
                       ? hipblaslt_ext::getIndexFromAlgo(heuristicResult[best_sol].algo)
@@ -7011,7 +7010,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                 arg,
                 (uint32_t)tuningVec[heuristicTuningIndex[best_sol]].getSplitK(),
                 (uint32_t)tuningVec[heuristicTuningIndex[best_sol]].getWgm(),
-                best_gpu_time,
+                search.best_timing.median_us,
                 best.flops,
                 gpu_mem_gbytes,
                 cpu_time_used,
