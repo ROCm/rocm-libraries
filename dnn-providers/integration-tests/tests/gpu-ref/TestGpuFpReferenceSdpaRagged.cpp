@@ -16,6 +16,7 @@
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceSdpaRagged.hpp>
+#include <hipdnn_test_sdk/utilities/DeviceQuery.hpp>
 #include <hipdnn_test_sdk/utilities/RaggedSdpaTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
@@ -43,6 +44,12 @@ namespace
 
 // Fixed seeds so every run sees the same inputs.
 constexpr unsigned int SEED_Q = 42;
+
+bool currentGpuSupportsNativeHipCompactTypes()
+{
+    const auto arch = currentDeviceArch();
+    return arch.rfind("gfx950", 0) == 0 || arch.rfind("gfx1250", 0) == 0;
+}
 constexpr unsigned int SEED_K = 43;
 constexpr unsigned int SEED_V = 44;
 
@@ -699,6 +706,10 @@ void checkRaggedFp8(const std::vector<int64_t>& seqQ,
 TEST(TestGpuSdpaRaggedFwdFp8, RaggedPerTensorDescale)
 {
     SKIP_IF_NO_DEVICES();
+    if(!currentGpuSupportsNativeHipCompactTypes())
+    {
+        GTEST_SKIP() << "Native HIP compact types are not supported on " << currentDeviceArch();
+    }
     auto descaleQ = makeScalarDescale(0.5f);
     auto descaleK = makeScalarDescale(0.25f);
     auto descaleV = makeScalarDescale(2.0f);
@@ -708,6 +719,10 @@ TEST(TestGpuSdpaRaggedFwdFp8, RaggedPerTensorDescale)
 TEST(TestGpuSdpaRaggedFwdFp8, RaggedCausalGqaPerKvHeadDescale)
 {
     SKIP_IF_NO_DEVICES();
+    if(!currentGpuSupportsNativeHipCompactTypes())
+    {
+        GTEST_SKIP() << "Native HIP compact types are not supported on " << currentDeviceArch();
+    }
     const int64_t batch = 2;
     const int64_t numHeadsKv = 2; // GQA (numHeads = 4)
     auto descaleQ = makeScalarDescale(0.5f);
@@ -721,6 +736,10 @@ TEST(TestGpuSdpaRaggedFwdFp8, RaggedCausalGqaPerKvHeadDescale)
 TEST(TestGpuSdpaRaggedFwdFp8, RaggedGqaPerKvHeadDescaleQkv)
 {
     SKIP_IF_NO_DEVICES();
+    if(!currentGpuSupportsNativeHipCompactTypes())
+    {
+        GTEST_SKIP() << "Native HIP compact types are not supported on " << currentDeviceArch();
+    }
     const int64_t batch = 2;
     const int64_t numHeadsKv = 2; // GQA (numHeads = 4)
     auto descaleQ = makePerHeadDescale(batch, numHeadsKv, 0.4f);
@@ -768,12 +787,16 @@ TEST(TestGpuSdpaRaggedFwdFp8, ThrowsOnPerQueryHeadQDescaleUnderGqa)
                  std::invalid_argument);
 }
 
-// Checks the device fp8 decode table against the host fp8_e4m3 for all 256 byte values. With one
+// Checks the native HIP fp8 decode against the host fp8_e4m3 for all 256 byte values. With one
 // key, the softmax weight is exactly 1, so the fp32 output is the decoded V. Only -0 can't be told
 // apart, because the P@V sum starts at +0.
 TEST(TestGpuSdpaRaggedFwdFp8, DecodesEveryFp8ValueExactly)
 {
     SKIP_IF_NO_DEVICES();
+    if(!currentGpuSupportsNativeHipCompactTypes())
+    {
+        GTEST_SKIP() << "Native HIP compact types are not supported on " << currentDeviceArch();
+    }
     const int64_t headDim = 16;
     const int64_t headDimV = 256;
     const std::vector<int64_t> qkDims = raggedDims(1, 1, 1, headDim);
