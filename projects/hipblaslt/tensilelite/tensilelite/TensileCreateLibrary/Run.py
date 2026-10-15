@@ -1021,7 +1021,7 @@ def writeSolutionsAndKernelsTCL(
         processKernelSourceNativeInit,
         kernelWriterAssembly,
         str(asmToolchain.assembler.path),
-        not disableAsmComments,
+        disableAsmComments,
         splitGSU,
         compress=memcompress,
     )
