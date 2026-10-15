@@ -79,9 +79,10 @@ environment.
 python gen_descriptors.py --check
 ```
 
-`--check` writes nothing and needs no Triton. It recomputes every committed descriptor and
-manifest from the kernel source, op contract, generator code and `requirements.txt`, and
-verifies each object's SHA256, ABI and arch against its manifest. It prints one
+`--check` writes nothing and needs no Triton. It re-derives every committed descriptor from
+the manifests, objects and op contract, recomputes `inputs_sha256` from the kernel source,
+op contract, generator code and `requirements.txt`, and checks each manifest record against
+its object (SHA256, ABI, arch) and the op contract. It prints one
 `TRITONGEN-CHECK: <path>: <reason>` line per fault and exits 1, or one summary line and
 exits 0. Edit a generator input without regenerating, and `--check` fails.
 
@@ -113,6 +114,8 @@ python -m unittest discover -s tests -t .
 
 ## Error codes
 
-Every failure of either command prints `error: TRITONGEN-<CODE>: <detail>` to stderr and
-exits 1. The codes (`ENV`, `ARCH`, `ABI`, `SCRATCH`, `ERRATUM`, `COMPILE`, `INPUT`,
-`CHECK`, `INTERNAL`) are defined in `tritongen/_family.py`; the detail names the cause.
+Every generator failure prints `error: TRITONGEN-<CODE>: <detail>` to stderr and exits 1.
+The codes (`ENV`, `ARCH`, `ABI`, `SCRATCH`, `ERRATUM`, `COMPILE`, `INPUT`, `INTERNAL`) are
+defined in `tritongen/_family.py`; the detail names the cause. `--check` faults use the
+`TRITONGEN-CHECK:` lines above, and the shard check prints one `SHARD FAIL: <problem>` line
+per fault.

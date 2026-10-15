@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: MIT
 """Op contract for the Triton RMSNorm AOT objects.
 
-Pure data; stdlib only. ``TritonRmsNormNative.cpp`` restates the engine name, the KMD
-fields and the instance table; keep them in sync.
+Pure data; stdlib only. ``TritonRmsNormNative.cpp`` restates the KMD field names and the
+matcher symbols derived from this op's name; keep them in sync.
 """
 
 from __future__ import annotations
