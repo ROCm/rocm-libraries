@@ -1,32 +1,32 @@
 #!/usr/bin/env python3
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Build a nightly test report from a CI run's test logs and post it to a webhook.
+"""Build a test report from a CI run's logs and POST it to a webhook.
 
-Reads gtest and pytest logs from a results directory (e.g. the run's downloaded
-artifact), compares every test's result with the previous nightly's uploaded
-results, and POSTs {"subject", "html", "text", "ok", "run_url", "commit",
-"branch", "tests": [{suite, test, status, new}]} as JSON to the webhook. The
-flow behind the webhook (e.g. Power Automate) decides who gets it.
-.github/workflows/nightly_test_report.yml runs it as a job of the test workflow
-(see gfx1250_hipblaslt_tensilelite_test.yml).
+Parses gtest and pytest logs under --results, compares each test with the previous
+nightly's uploaded results, and POSTs JSON to the webhook (e.g. a Power Automate
+flow, which picks the recipients):
 
-Suites (--suite LABEL=KIND:PATH, repeatable, in display order; PATH is
-relative to --results):
-  gtest:GLOB       gtest output, e.g. sharded logs test_results/shard*.log
-  pytest:FILE#N    the Nth pytest session in FILE (1-based; negative counts from
-                   the end; "#N" defaults to 1), e.g. a tox log with two sessions
+  subject, html, text, ok, run_url, commit, branch, steps [{name, conclusion}],
+  outcome      passed | setup_failed | tests_failed | tests_incomplete | cancelled
+  failed_step  first failed step, if any
+  tests        [{suite, test, status, new}]; status failing | timeout | crashed |
+               fixed | skipped_or_removed
+
+Suites (--suite LABEL=KIND:PATH, repeatable, display order; PATH under --results):
+  gtest:GLOB       gtest logs, e.g. sharded test_results/shard*.log
+  pytest:FILE#N    Nth pytest session in FILE (1-based, negative from the end,
+                   default 1), e.g. a tox log with two sessions
 
 Usage:
-    python nightly_test_report.py --results DIR --title gfx1250-strict \
-        --suite "hipBLASLt=gtest:test_results/hipblaslt_test_shard*.log" \
-        --artifact NAME --webhook-url "$URL"
-    ... --dry-run                                   # print, don't send
-    ... --previous PREV_DIR --previous-run-id ID    # compare with results on disk
+    nightly_test_report.py --results DIR --title NAME --artifact NAME --suite ...
+    ... --job-status STATUS                       # from the test job's last step
+    ... --dry-run                                 # print, don't send
+    ... --previous PREV_DIR --previous-run-id ID  # compare with results on disk
 
-Uses GITHUB_* environment variables for the run metadata, SYSTEM_LABEL and
-TEST_RUNNER_NAME for those rows, and GH_TOKEN (needs actions: read) for the
-previous nightly's results. Standard library only.
+Environment: GITHUB_* (run metadata), WEBHOOK_URL (default --webhook-url; keeps it
+off the command line), GH_TOKEN (actions: read), SYSTEM_LABEL, TEST_RUNNER_NAME.
+Standard library only.
 """
 
 import argparse
@@ -52,35 +52,49 @@ STRIP = []  # --strip: substrings removed from test names in the email
 # ---------------------------------------------------------------- parsing
 
 
-def parse_gtest(pattern):
-    """Per-test results from gtest logs matching pattern: (counts or None if not run, {name: status})."""
+def parse_gtest(pattern, why):
+    """(counts or None if not run, {test: status}) from the gtest logs matching
+    pattern; fills why[test] with "timeout" or "crashed" for a test that stopped
+    its shard."""
     logs = sorted(glob.glob(pattern))
     status, total = {}, 0
     for path in logs:
-        for line in open(path, errors="replace"):
-            if m := re.match(r"^\[==========\] (\d+) tests? from .* ran", line):
+        running, alarm = None, False
+        with open(path, errors="replace") as f:
+            lines = f.readlines()
+        for line in lines:
+            if m := re.match(r"^\[ RUN      \] (\S+)", line):
+                running = m.group(1)
+            elif line.startswith("Aborting tests due to an alarm timeout"):
+                alarm = True
+            elif m := re.match(r"^\[==========\] (\d+) tests? from .* ran", line):
                 total += int(m.group(1))
             elif m := re.match(r"^\[       OK \] (\S+)", line):
                 status[m.group(1)] = PASS
             elif m := re.match(r"^\[  SKIPPED \] ([^\s,]+)$", line.rstrip()):
                 status[m.group(1)] = SKIP
-            elif m := re.match(r"^\[  FAILED  \] ([^\s,]+)", line):
-                if not m.group(1).isdigit():
-                    status[m.group(1)] = FAIL
-    if not total:
+            elif (m := re.match(r"^\[  FAILED  \] ([^\s,]+)", line)) and not m.group(
+                1
+            ).isdigit():
+                status[m.group(1)] = FAIL
+            if running in status:
+                running = None
+        if running:  # the shard stopped in this test
+            status[running], why[running] = FAIL, "timeout" if alarm else "crashed"
+    if not total and not status:
         return None, {}
     counts = {
         "Passed": sum(s == PASS for s in status.values()),
         "Failed": sum(s == FAIL for s in status.values()),
         "Skipped": sum(s == SKIP for s in status.values()),
     }
-    counts["Total"] = total
+    counts["Total"] = max(total, len(status))  # a stopped shard prints no total
     return counts, status
 
 
-def parse_pytest(path, index):
-    """Counts and per-test results of the index-th pytest session in a log (1-based;
-    negative counts from the end): (counts or None if absent, {id: status})."""
+def parse_pytest(path, index, why):
+    """(counts or None if absent, {id: status}) of the index-th pytest session in
+    a log (1-based, negative from the end); fills why[id] = "timeout"."""
     if not os.path.isfile(path):
         return None, {}
     word = {
@@ -92,7 +106,9 @@ def parse_pytest(path, index):
         "XFAIL": SKIP,
     }
     sessions, status = [], {}  # each session: (summary line, {id: status})
-    for raw in open(path, errors="replace"):
+    with open(path, errors="replace") as f:
+        lines = f.readlines()
+    for raw in lines:
         line = ANSI.sub("", raw.rstrip("\n"))
         if re.match(r"^=+ .*\b(passed|failed|error|errors|skipped)\b.* =+$", line):
             sessions.append((line, status))
@@ -104,6 +120,8 @@ def parse_pytest(path, index):
             # A failure line wins over an earlier progress line.
             if status.get(m.group(2)) != FAIL:
                 status[m.group(2)] = word[m.group(1)]
+            if re.search(r" - .*\bTimeout >", line):  # pytest-timeout
+                why[m.group(2)] = "timeout"
     try:
         line, status = sessions[index - 1 if index > 0 else index]
     except IndexError:  # that session didn't finish (or never started)
@@ -140,12 +158,17 @@ def parse_suite_spec(spec):
     return label.strip(), kind, path, int(index or 1)
 
 
-def suites(results, specs):
+def suites(results, specs, why=None):
     """{suite label: (counts or None, {test: status})}, in --suite order."""
+    why = {} if why is None else why
     out = {}
     for label, kind, path, index in specs:
         full = os.path.join(results, path)
-        out[label] = parse_gtest(full) if kind == "gtest" else parse_pytest(full, index)
+        out[label] = (
+            parse_gtest(full, why)
+            if kind == "gtest"
+            else parse_pytest(full, index, why)
+        )
     return out
 
 
@@ -192,7 +215,7 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 
 
 def _download(art, token, dest):
-    # The zip URL redirects to signed storage, which rejects the GitHub token: follow it without auth.
+    # The zip URL redirects to signed storage that rejects the token: follow it without auth.
     req = urllib.request.Request(
         art["archive_download_url"], headers={"Authorization": f"Bearer {token}"}
     )
@@ -213,6 +236,39 @@ def run_info(repo, run_id, token):
         "url": r["html_url"],
         "sha": r["head_sha"][:6],
     }
+
+
+# GitHub's own steps, not the workflow's.
+_SETUP_STEP = re.compile(
+    r"^(Set up job|Complete job|Initialize containers|Stop containers|Post )"
+)
+
+
+def this_job_steps(repo, run_id, token, runner, status):
+    """'Test job=STATUS, <step>=<conclusion>, ...': the finished steps of the job
+    running on RUNNER (the report's own job)."""
+    out = [f"Test job={status}"]
+    try:
+        jobs = json.load(
+            _api(f"{API}/repos/{repo}/actions/runs/{run_id}/jobs?per_page=100", token)
+        )["jobs"]
+    except Exception as e:  # The report still goes out, without the step list.
+        print(f"::warning::Could not read this job's steps ({type(e).__name__}: {e})")
+        jobs = []
+    job = next(
+        (
+            j
+            for j in jobs
+            if j.get("runner_name") == runner and j["status"] == "in_progress"
+        ),
+        {},
+    )
+    out += [
+        f"{x['name']}={x['conclusion']}"
+        for x in job.get("steps", [])
+        if x["status"] == "completed" and not _SETUP_STEP.match(x["name"])
+    ]
+    return ", ".join(out)
 
 
 def fetch_previous(repo, run_id, token, now, cfg):
@@ -312,11 +368,14 @@ def table(head, rows):
     return "\n".join(out + ["</table>"])
 
 
-def names_list(title, tests, color):
+def names_list(title, tests, color, tags=None):
+    """A titled list of test names; tags: {test: [label, ...]} shown after each."""
     if not tests:
         return ""
     items = "".join(
-        f"<li><code title='{html.escape(t)}'>{html.escape(short(t))}</code></li>"
+        f"<li><code title='{html.escape(t)}'>{html.escape(short(t))}</code>"
+        + "".join(f" <b>{html.escape(x)}</b>" for x in (tags or {}).get(t, []))
+        + "</li>"
         for t in tests[:20]
     )
     more = f"<li>… and {len(tests) - 20:,} more</li>" if len(tests) > 20 else ""
@@ -334,7 +393,8 @@ def build(results, steps, previous, cfg):
     )
     kind = "Nightly" if env.get("GITHUB_EVENT_NAME") == "schedule" else "Manual"
     run_url = f"{server}/{repo}/actions/runs/{env.get('GITHUB_RUN_ID', '')}"
-    cur = suites(results, cfg.suites)
+    why = {}  # failing test -> timeout or crashed
+    cur = suites(results, cfg.suites, why)
 
     step_list = [tuple(x.strip().split("=", 1)) for x in steps.split(",") if "=" in x]
     # A skipped step is fine, a skipped test job isn't. "Test job=failure" only repeats
@@ -359,13 +419,32 @@ def build(results, steps, previous, cfg):
             if cur[k][0] and old[k][0]:
                 diff[k] = compare(cur[k][1], old[k][1])
     new_total = sum(len(d["New"]) for d in diff.values())
+    # For flows that route by kind of failure.
+    failed_step = next((n for n, o in bad_steps if n != "Test job"), None)
+    if ok:
+        outcome = "passed"
+    elif ("Test job", "cancelled") in step_list:
+        outcome = "cancelled"
+    elif why:
+        outcome = "tests_incomplete"  # a test timed out or crashed
+    elif failed:
+        outcome = "tests_failed"
+    else:
+        outcome = "setup_failed"
 
-    # Banner: a one-cell table with bgcolor survives Outlook and dark mode better than a styled <div>.
+    # Banner: a one-cell bgcolor table survives Outlook and dark mode; a styled <div> doesn't.
     if ok:
         head = "✅ PASSED"
     elif failed:
+        kinds = [
+            f"{n} {k}"
+            for k in ("timeout", "crashed")
+            if (n := sum(w == k for w in why.values()))
+        ]
         head = f"❌ FAILED: {failed:,} failing test{'s' if failed != 1 else ''}" + (
-            f" ({new_total:,} new)" if diff else ""
+            f" ({', '.join(([f'{new_total:,} new'] if diff else []) + kinds)})"
+            if diff or kinds
+            else ""
         )
     else:
         head = "❌ FAILED: " + ", ".join(
@@ -390,10 +469,6 @@ def build(results, steps, previous, cfg):
     p = [
         "<h3 style='margin:0 0 4px'>Summary</h3>",
         banner,
-        *(
-            f"<p style='margin:6px 0;color:{AMBER}'><b>⚠ {html.escape(w)}</b></p>"
-            for w in cfg.warn
-        ),
         "<h2 style='margin:16px 0 4px'>Test Results Report</h2>",
         "<h3 style='margin:12px 0 4px'>Test Metadata</h3>",
     ]
@@ -412,15 +487,7 @@ def build(results, steps, previous, cfg):
             ("Field", "Value"),
             [
                 *([("System", env["SYSTEM_LABEL"])] if env.get("SYSTEM_LABEL") else []),
-                # In the report job, RUNNER_NAME is the GitHub-hosted runner; the test job passes its own.
-                (
-                    "Runner",
-                    (
-                        (env.get("TEST_RUNNER_NAME") or "- (the test job didn't start)")
-                        if "TEST_RUNNER_NAME" in env
-                        else env.get("RUNNER_NAME", "")
-                    ),
-                ),
+                ("Runner", env.get("TEST_RUNNER_NAME") or env.get("RUNNER_NAME", "-")),
                 ("Branch", branch),
                 ("Commit ID", sha),
                 *cfg.meta_rows,
@@ -451,13 +518,20 @@ def build(results, steps, previous, cfg):
                 [(n, (v, RED if n == "Failed" and v else None)) for n, v in c.items()],
             )
         )
-        p.append(
-            names_list(
-                "Failing:", sorted(t for t, s in status.items() if s == FAIL), RED
-            )
-        )
 
-    p.append("<h3 style='margin:16px 0 4px'>Failure Comparison</h3>")
+    # All test lists go here, at the end.
+    p.append("<h3 style='margin:16px 0 4px'>Failures</h3>")
+    lists = []
+    for k, (_, status) in cur.items():
+        new = set(diff[k]["New"]) if k in diff else set()
+        failing = sorted(
+            (t for t, s in status.items() if s == FAIL), key=lambda t: (t not in new, t)
+        )
+        tags = {
+            t: [x for x in (why.get(t), "new" if t in new else None) if x]
+            for t in failing
+        }
+        lists.append(names_list(f"{k}, failing:", failing, RED, tags))
     if prev["status"] == "ok":
         days = round(prev.get("hours", 24) / 24)
         ref = f"the nightly of {prev['date']}, commit {prev['sha']}"
@@ -476,12 +550,12 @@ def build(results, steps, previous, cfg):
         rows, details = [], []
         for k in cur:
             if k not in diff:
-                why = (
+                gone = (
                     "not run in this run"
                     if not cur[k][0]
                     else "no results in that nightly"
                 )
-                rows.append((k, "-", "-", "-", f"- ({why})"))
+                rows.append((k, "-", "-", "-", f"- ({gone})"))
                 continue
             d = diff[k]
             rows.append(
@@ -497,7 +571,6 @@ def build(results, steps, previous, cfg):
                 )
             )
             details += [
-                names_list(f"{k}, new failures:", d["New"], RED),
                 names_list(f"{k}, fixed (now passing):", d["Fixed"], GREEN),
                 names_list(
                     f"{k}, skipped or removed since:", d["Skipped/removed"], AMBER
@@ -515,7 +588,7 @@ def build(results, steps, previous, cfg):
                 rows,
             )
         )
-        p.extend(x for x in details if x)
+        lists += details
     elif prev.get("missing"):
         gap = "; ".join(f"{d} ({a(u, 'run')})" for d, u in prev["missing"])
         p.append(
@@ -523,6 +596,7 @@ def build(results, steps, previous, cfg):
         )
     else:
         p.append("<p>No nightly to compare.</p>")
+    p.extend(x for x in lists if x)
     p.append(
         f"<p style='color:#57606a;font-size:12px'>Generated on {now:%Y-%m-%d %H:%M:%S} UTC</p>"
     )
@@ -533,7 +607,7 @@ def build(results, steps, previous, cfg):
     )
 
     # Plain-text version, for clients and flows that don't show HTML.
-    text = [subject, head, *parts, *(f"Warning: {w}" for w in cfg.warn)]
+    text = [subject, head, *parts]
     text += [f"Run: {run_url}", f"Steps: {steps_text}"]
     for k, d in diff.items():
         text += [
@@ -541,16 +615,16 @@ def build(results, steps, previous, cfg):
             f"{len(d['Skipped/removed'])} skipped or removed"
         ]
         text += [f"  new: {t}" for t in d["New"][:10]]
-    # Per-test changes for whatever files tickets (e.g. the flow behind the webhook): test names only.
+    # Per-test changes, for the flow (e.g. to file tickets).
     tests = []
-    for k, (c, status) in cur.items():
+    for k, (_, status) in cur.items():
         d = diff.get(k)
         for t in sorted(x for x, st in status.items() if st == FAIL):
             tests.append(
                 {
                     "suite": k,
                     "test": t,
-                    "status": "failing",
+                    "status": why.get(t, "failing"),
                     "new": (t in d["New"]) if d else None,
                 }
             )
@@ -570,6 +644,9 @@ def build(results, steps, previous, cfg):
         "commit": sha_full,
         "branch": branch,
         "tests": tests,
+        "outcome": outcome,
+        "failed_step": failed_step,
+        "steps": [{"name": n, "conclusion": o} for n, o in step_list],
     }
 
 
@@ -592,19 +669,13 @@ def main():
         "--meta",
         action="append",
         default=[],
-        help="LABEL=VALUE: an extra metadata row; VALUE @PATH reads PATH under --results (repeatable)",
+        help="LABEL=VALUE: an extra metadata row (repeatable)",
     )
     ap.add_argument(
         "--strip",
         action="append",
         default=[],
         help="Substring to drop from test names in the email (repeatable)",
-    )
-    ap.add_argument(
-        "--warn",
-        action="append",
-        default=[],
-        help="A warning to show at the top of the report, e.g. a misconfigured name (repeatable)",
     )
     ap.add_argument(
         "--artifact", default="", help="Results artifact name, for the previous nightly"
@@ -624,7 +695,16 @@ def main():
     ap.add_argument(
         "--steps", default="", help="Step outcomes, e.g. 'SDK=success, Build=failure'"
     )
-    ap.add_argument("--webhook-url", default="", help="Where to POST the report")
+    ap.add_argument(
+        "--job-status",
+        default="",
+        help="The test job's job.status, when run as its step; steps come from the API",
+    )
+    ap.add_argument(
+        "--webhook-url",
+        default=os.environ.get("WEBHOOK_URL", ""),
+        help="Where to POST the report (default: $WEBHOOK_URL)",
+    )
     ap.add_argument(
         "--previous",
         default="",
@@ -647,10 +727,7 @@ def main():
     for spec in args.meta:
         label, sep, value = spec.partition("=")
         if not (sep and label):
-            sys.exit(f"bad --meta {spec!r}: want LABEL=VALUE or LABEL=@PATH")
-        if value.startswith("@"):
-            path = os.path.join(args.results, value[1:])
-            value = open(path).read().strip() if os.path.isfile(path) else "-"
+            sys.exit(f"bad --meta {spec!r}: want LABEL=VALUE")
         args.meta_rows.append((label.strip(), value))
     STRIP[:] = args.strip
 
@@ -680,9 +757,18 @@ def main():
         print(
             f"::warning::Could not get the previous nightly's results ({type(e).__name__}: {e})"
         )
+    if args.job_status:
+        args.steps = this_job_steps(
+            env.get("GITHUB_REPOSITORY"),
+            env.get("GITHUB_RUN_ID"),
+            env.get("GH_TOKEN"),
+            env.get("TEST_RUNNER_NAME"),
+            args.job_status,
+        )
     report = build(args.results, args.steps, previous, args)
     if args.html_out:
-        open(args.html_out, "w").write(report["html"])
+        with open(args.html_out, "w") as f:
+            f.write(report["html"])
     # CI logs are public: only --dry-run prints the report's content.
     if args.dry_run:
         print(report["text"])
@@ -696,8 +782,13 @@ def main():
         method="POST",
         headers={"Content-Type": "application/json"},
     )
-    with urllib.request.urlopen(req, timeout=60) as r:
-        print(f"Report sent (HTTP {r.status})")
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r:
+            print(f"Report sent (HTTP {r.status})")
+    except urllib.error.HTTPError as e:
+        sys.exit(f"::error::Report not sent (HTTP {e.code})")
+    except urllib.error.URLError as e:
+        sys.exit(f"::error::Report not sent ({type(e.reason).__name__})")
     return 0
 
 

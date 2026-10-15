@@ -16,6 +16,7 @@
 # PR code runs on the self-hosted runner only after that gate.
 # Nightly: develop at 03:00 UTC (7 pm PST, 8 pm PDT; GitHub cron is UTC).
 # On-demand: workflow_dispatch on any branch, no gating.
+# The nightly emails a test report; a manual run emails only with send_report.
 
 name: gfx1250 HW hipBLASLt + TensileLite Tests
 run-name: ${{ github.event_name == 'pull_request' && format('PR {0} @ {1}', github.event.pull_request.number, github.event.pull_request.head.sha) || format('{0}{1} @ {2}', github.event_name == 'schedule' && 'Nightly ' || '', github.ref_name, github.sha) }}
@@ -47,6 +48,10 @@ on:
         description: "Nightly ROCm SDK (rocm package) version to build and test against (empty = the pinned default)"
         type: string
         default: ""
+      send_report:
+        description: "Email the test report, as the nightly does"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -107,6 +112,9 @@ jobs:
       cancel-in-progress: true
     runs-on: blas-rocm-mi455-sandbox
     timeout-minutes: 600
+    permissions:
+      contents: read
+      actions: read  # test report: this job's steps, the previous nightly's results
     # The ROCm SDK comes from the nightly pip index, not a host /opt/rocm: it must be
     # new enough to compile and run gfx1250-strict. The SDK install reuses downloaded
     # wheels from a pip cache on a host mount. Only the nightly writes it; other jobs get
@@ -117,7 +125,7 @@ jobs:
       # GIDs on the ROCm runners (mirrors TheRock's _GPU_CONTAINER_OPTIONS).
       # -e without a value copies ROCR_VISIBLE_DEVICES from the runner's .env (one
       # runner per GPU); the runner passes no host env into job containers itself.
-      # If it's unset, the strict-mode check falls back to the runner name's -gpuN.
+      # Unset: the strict-mode check falls back to the runner name's -gpuN.
       options: >-
         -e ROCR_VISIBLE_DEVICES
         --ipc host
@@ -172,6 +180,7 @@ jobs:
             shared/stinkytofu
             cmake
             .github/actions/ci-env
+            .github/scripts
           sparse-checkout-cone-mode: true
 
       - name: Install the ROCm SDK (gfx1250-strict capable)
@@ -181,8 +190,6 @@ jobs:
           PIP_CACHE_DIR: /pip-cache
         run: |
           set -euo pipefail
-          # Recorded with the results for the nightly report (the report job below).
-          mkdir -p test_results && echo "$ROCM_SDK_VERSION" > test_results/rocm_sdk_version.txt
           # pip never evicts and every SDK nightly adds several GB: the nightly, the only
           # job that can write the cache, drops files no job has read for 14 days. Other
           # jobs only read it.
@@ -207,9 +214,8 @@ jobs:
           echo "VIRTUAL_ENV=$RUNNER_TEMP/venv" >> "$GITHUB_ENV"
           python3 -m pip install --upgrade pip
           IDX=https://nightly.repo.amd.com/rocm/whl-next/
-          # rocm itself is a 28 kB sdist: build it with no cache, since pip stores built
-          # wheels in the cache, read-only outside the nightly. Its multi-GB dependencies
-          # are wheels and still come from the cache.
+          # rocm is a 28 kB sdist: build it without the cache (read-only outside the
+          # nightly; pip writes built wheels there). Its multi-GB wheels still come from it.
           pip install --pre --index-url "$IDX" --no-cache-dir --no-deps "rocm==${ROCM_SDK_VERSION}"
           pip install --pre --index-url "$IDX" "rocm[libraries,devel,device-gfx1250]==${ROCM_SDK_VERSION}"
           rocm-sdk init
@@ -277,9 +283,8 @@ jobs:
         env:
           RUNNER_LABEL: ${{ runner.name }}
         run: |
-          # One runner per GPU: the 4 gtest shards and 4 pytest workers must stay on this
-          # runner's GPU. The runner's .env sets ROCR_VISIBLE_DEVICES; without it, runner
-          # ...-gpuN uses GPU N.
+          # One runner per GPU: all shards and workers must stay on this runner's GPU,
+          # set by ROCR_VISIBLE_DEVICES in the runner's .env, else N from ...-gpuN.
           if [ -z "${ROCR_VISIBLE_DEVICES:-}" ] && [[ "$RUNNER_LABEL" =~ -gpu([0-9]+)$ ]]; then
             export ROCR_VISIBLE_DEVICES="${BASH_REMATCH[1]}"
             echo "::warning::ROCR_VISIBLE_DEVICES is not set on this runner; using GPU $ROCR_VISIBLE_DEVICES from the runner name"
@@ -414,6 +419,26 @@ jobs:
             tensilelite_test_results/
           if-no-files-found: warn
 
+      # Before the hand-back, which also covers the previous results it downloads.
+      - name: Email the test report
+        if: ${{ always() && (github.event_name == 'schedule' || inputs.send_report) }}
+        continue-on-error: true
+        env:
+          WEBHOOK_URL: ${{ secrets.GFX1250_BLAS_NIGHTLY_WEBHOOK_URL }}
+          SYSTEM_LABEL: ${{ secrets.GFX1250_BLAS_SYSTEM_LABEL }}
+          GH_TOKEN: ${{ github.token }}
+          TEST_RUNNER_NAME: ${{ runner.name }}
+          JOB_STATUS: ${{ job.status }}
+        # The TensileLite log holds two pytest sessions: rocisa, then the common tests.
+        run: |
+          python3 .github/scripts/nightly_test_report.py --results . --title gfx1250-strict \
+            --artifact gfx1250-strict-test-results --job-status "$JOB_STATUS" \
+            --suite "hipBLASLt=gtest:test_results/hipblaslt_test_shard*.log" \
+            --suite "TensileLite Common=pytest:tensilelite_test_results/common_test.log#2" \
+            --suite "Rocisa=pytest:tensilelite_test_results/common_test.log#1" \
+            --meta "Architecture=gfx1250-strict" --meta "ROCm SDK=$ROCM_SDK_VERSION" \
+            --strip "_/matmul_test.matmul/" --strip "tensilelite/Tests/common/"
+
       - name: Hand the workspace back to the runner's user
         # The container runs as root, so everything it wrote under _work (checkout, build
         # tree, .tox, the venv in RUNNER_TEMP) is root-owned and the runner, which runs as
@@ -422,33 +447,3 @@ jobs:
         run: |
           owner="$(stat -c %u:%g "$GITHUB_WORKSPACE/..")"
           chown -R "$owner" "$GITHUB_WORKSPACE" "$RUNNER_TEMP" 2>/dev/null || true
-
-  # Emails a report after every nightly, however the test job ended; manual runs
-  # don't email. A job, not a step, so the webhook secret stays on a GitHub-hosted
-  # runner and a report still goes out when the test job never got a runner.
-  report:
-    name: Nightly report
-    needs: gfx1250-tests
-    if: ${{ always() && github.event_name == 'schedule' }}
-    permissions:
-      contents: read
-      actions: read
-    uses: ./.github/workflows/nightly_test_report.yml
-    with:
-      title: gfx1250-strict
-      test_job: gfx1250-strict hipBLASLt + TensileLite
-      artifact: gfx1250-strict-test-results
-      # The TensileLite tox log holds two pytest sessions: rocisa, then the common tests.
-      suites: |
-        hipBLASLt=gtest:test_results/hipblaslt_test_shard*.log
-        TensileLite Common=pytest:tensilelite_test_results/common_test.log#2
-        Rocisa=pytest:tensilelite_test_results/common_test.log#1
-      meta: |
-        Architecture=gfx1250-strict
-        ROCm SDK=@test_results/rocm_sdk_version.txt
-      strip: |
-        _/matmul_test.matmul/
-        tensilelite/Tests/common/
-    secrets:
-      webhook_url: ${{ secrets.GFX1250_BLAS_NIGHTLY_WEBHOOK_URL }}
-      system_label: ${{ secrets.GFX1250_BLAS_SYSTEM_LABEL }}
