@@ -340,6 +340,67 @@ namespace rocsparse
             rowBlockSize = total_row_blocks;
         }
     }
+
+    // Partitions for which the default algorithm should leave CSR-adaptive.
+    // An explicit adaptive request does not call this.
+    //
+    // A zero row span is an intermediate chunk of one long row and is ignored.
+    // The two poor partitions are:
+    // - blocks that span many mostly empty rows, walked serially by one workgroup
+    // - many blocks closed by a long/short transition before they hold a full
+    //   BLOCK_SIZE nonzeros, so most of the grid does almost no numeric work
+    template <typename I>
+    static bool adaptive_partition_should_retarget(const I* row_blocks,
+                                                    size_t   row_block_size,
+                                                    const I* row_ptr,
+                                                    I        n_rows,
+                                                    uint32_t gen_wg)
+    {
+        if(row_block_size < 2 || n_rows <= 0)
+        {
+            return false;
+        }
+
+        const size_t nblocks         = row_block_size - 1;
+        const I      span_limit      = static_cast<I>(32) * static_cast<I>(gen_wg);
+        const I      underfilled_nnz = static_cast<I>(BLOCK_SIZE / 8);
+
+        int64_t wide_rows   = 0;
+        size_t  comparable  = 0;
+        size_t  underfilled = 0;
+
+        for(size_t block = 0; block < nblocks; ++block)
+        {
+            const I begin = row_blocks[block];
+            const I end   = row_blocks[block + 1];
+            const I span  = end - begin;
+            if(span <= 0)
+            {
+                continue;
+            }
+
+            if(span > span_limit)
+            {
+                wide_rows += static_cast<int64_t>(span);
+            }
+
+            const I block_nnz = row_ptr[end] - row_ptr[begin];
+            ++comparable;
+            if(block_nnz > 0 && block_nnz < underfilled_nnz)
+            {
+                ++underfilled;
+            }
+        }
+
+        // Wide blocks cover a substantial share of the matrix.
+        if(wide_rows * 8 >= static_cast<int64_t>(n_rows))
+        {
+            return true;
+        }
+
+        // At least a quarter of the row blocks are transition fragments.
+        return comparable >= 8 && underfilled * 4 >= comparable;
+    }
 }
 
 template <typename I, typename J, typename A>
@@ -353,7 +414,8 @@ rocsparse_status
                                                          const A*                  csr_val,
                                                          const I*                  csr_row_ptr,
                                                          const J*                  csr_col_ind,
-                                                         rocsparse_csrmv_info*     p_csrmv_info)
+                                                         rocsparse_csrmv_info*     p_csrmv_info,
+                                                         bool* retarget_to_nnzsplit)
 {
     ROCSPARSE_ROUTINE_TRACE;
 
@@ -409,6 +471,19 @@ rocsparse_status
         if(descr->type == rocsparse_matrix_type_symmetric)
         {
             csrmv_info->max_rows = maxRowsInABlock(row_blocks.data(), csrmv_info->adaptive.size);
+        }
+
+        // Only the default algorithm may leave adaptive. The pointer is null when
+        // the caller selected adaptive explicitly.
+        if(retarget_to_nnzsplit != nullptr
+           && adaptive_partition_should_retarget(row_blocks.data(),
+                                                  csrmv_info->adaptive.size,
+                                                  hptr.data(),
+                                                  static_cast<I>(m),
+                                                  gen_wg))
+        {
+            *retarget_to_nnzsplit = true;
+            return rocsparse_status_success;
         }
 
         // Allocate memory on device to hold csrmv info, if required
@@ -904,7 +979,8 @@ rocsparse_status rocsparse::csrmv_adaptive_template_dispatch(rocsparse_handle   
         const ATYPE*              csr_val,                                          \
         const ITYPE*              csr_row_ptr,                                      \
         const JTYPE*              csr_col_ind,                                      \
-        rocsparse_csrmv_info*     info);
+        rocsparse_csrmv_info*     info,                                             \
+        bool*                     retarget_to_nnzsplit);
 
 // Uniform precision
 INSTANTIATE(int32_t, int32_t, float);
