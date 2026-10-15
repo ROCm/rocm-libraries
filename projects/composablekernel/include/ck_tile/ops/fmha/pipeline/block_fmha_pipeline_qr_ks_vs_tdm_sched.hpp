@@ -166,6 +166,22 @@ struct BlockFmhaPipelineQRKSVSTdmSched
         return p_tile;
     }
 
+    // K/V TDM tile load. Gather-mode paged K/V issue kTdmInsts TDM gathers per wave instead.
+    template <bool kIsK, typename LdsWindow, typename DramWindow, typename KVRows>
+    CK_TILE_DEVICE static void LoadKVTile(const TDMConfig& config,
+                                          LdsWindow& lds_window,
+                                          const DramWindow& dram_window,
+                                          const KVRows& kv_rows)
+    {
+        if constexpr(KVRows::kIsGather)
+            kv_rows.template load_gather<kIsK>(config, lds_window, dram_window);
+        else
+        {
+            ignore = kv_rows;
+            load_tile_tdm(config, lds_window, dram_window);
+        }
+    }
+
     // Advance a K/V DRAM window by `delta` sequence rows. Paged K/V re-map the new
     // sequence position through the page table instead of moving linearly.
     template <bool kIsK, typename KVRows, typename DramWindow>
@@ -472,10 +488,16 @@ struct BlockFmhaPipelineQRKSVSTdmSched
         constexpr index_t k1_loops       = kN0 / kK1;
 
         static_assert(1 <= k1_loops);
+        // TDM instructions per K/V tile load and wave; the tensorcnt waits count these. K and V
+        // boxes have the same rows, so a wait leaving one K or one V load in flight is the same.
+        constexpr index_t kKVTdmInsts =
+            KVRows::template kTdmInsts<remove_cvref_t<decltype(k_dram_window)>>;
+        static_assert(kKVTdmInsts ==
+                      KVRows::template kTdmInsts<remove_cvref_t<decltype(v_dram_window)>>);
         block_sync_lds<0>();
         // Fixed TDM prologue: current K/V and the first look-ahead K buffer.
-        load_tile_tdm(tdm_config_k, k_lds_write_window, k_dram_window);
-        load_tile_tdm(tdm_config_v, v_lds_write_window, v_dram_window);
+        LoadKVTile<true>(tdm_config_k, k_lds_write_window, k_dram_window, kv_rows);
+        LoadKVTile<false>(tdm_config_v, v_lds_write_window, v_dram_window, kv_rows);
         MoveKVRows<true>(k_dram_window, k_row, kN0, kv_rows);
         // K1 is consumed at iteration 1. A one-tile prefix must jump before K1 loads.
         if constexpr(kHasSink)
@@ -486,14 +508,14 @@ struct BlockFmhaPipelineQRKSVSTdmSched
         }
         k_lds_write_window.set_bottom_tensor_view_data_ptr(
             static_cast<KDataType* __restrict__>(smem_ptrk1));
-        load_tile_tdm(tdm_config_k, k_lds_write_window, k_dram_window);
+        LoadKVTile<true>(tdm_config_k, k_lds_write_window, k_dram_window, kv_rows);
 
         constexpr index_t k_lds_insts = k_lds_read_window.get_num_of_access();
         constexpr index_t v_lds_insts = v_lds_read_window.get_num_of_access();
         static_assert(k_lds_insts <= Geometry::kKSuLoadCount &&
                       v_lds_insts == Geometry::kVStageLoadCount);
 
-        s_wait_tensorcnt_barrier<Policy::kKPrefetchTensorCount>();
+        s_wait_tensorcnt_barrier<Policy::kKPrefetchTensorCount * kKVTdmInsts>();
         auto initial_k_lds_su_read_window =
             make_tile_window(k_lds_read_view,
                              make_tuple(number<Geometry::kQkSuColumns>{}, number<kQKHeaddim>{}),
@@ -630,7 +652,7 @@ struct BlockFmhaPipelineQRKSVSTdmSched
                 MoveKVRows<false>(v_dram_window, v_row, kN0, kv_rows);
                 v_lds_write_window.set_bottom_tensor_view_data_ptr(v_lds_write_ptr);
                 if constexpr(kUseCountdownLoop && kN0 == 128 && kN1 == 128 &&
-                             std::is_same_v<VDataType, bf16_t>)
+                             std::is_same_v<VDataType, bf16_t> && !KVRows::kIsGather)
                 {
                     v_dram_window.tdm_load_to_lds(
                         tdm_config_v,
@@ -642,7 +664,7 @@ struct BlockFmhaPipelineQRKSVSTdmSched
                 }
                 else
                 {
-                    load_tile_tdm(tdm_config_v, v_lds_write_window, v_dram_window);
+                    LoadKVTile<false>(tdm_config_v, v_lds_write_window, v_dram_window, kv_rows);
                 }
             };
 
@@ -729,7 +751,7 @@ struct BlockFmhaPipelineQRKSVSTdmSched
 
                 constexpr bool kDeferTensorReady = Mode::kDeferTensorReady;
                 if constexpr(!kDeferTensorReady)
-                    s_wait_tensorcnt_barrier<Policy::kVPrefetchTensorCount>();
+                    s_wait_tensorcnt_barrier<Policy::kVPrefetchTensorCount * kKVTdmInsts>();
 
                 // Sink-aware k_origin (prefill path)
                 const auto k_origin = [&]() {
@@ -854,7 +876,9 @@ struct BlockFmhaPipelineQRKSVSTdmSched
                             Policy::template RunSplitSoftmaxPart01<Problem>(
                                 s_new, m, scale_s, delta_m0, delta_m1);
                         },
-                        [&]() { s_wait_tensorcnt_barrier<Policy::kVPrefetchTensorCount>(); },
+                        [&]() {
+                            s_wait_tensorcnt_barrier<Policy::kVPrefetchTensorCount * kKVTdmInsts>();
+                        },
                         [&](auto ordinal) {
                             const float scale_m0 = Mode::kEarlyOutputRescale
                                                        ? SplitSoftmax::Exp2(delta_m0)
@@ -893,12 +917,12 @@ struct BlockFmhaPipelineQRKSVSTdmSched
                 }
                 MoveKVRows<true>(k_dram_window, k_row, kN0, kv_rows);
                 k_lds_write_window.set_bottom_tensor_view_data_ptr(k_lds_write_ptr);
-                load_tile_tdm(tdm_config_k, k_lds_write_window, k_dram_window);
+                LoadKVTile<true>(tdm_config_k, k_lds_write_window, k_dram_window, kv_rows);
             };
 
             auto advance_iteration = [&]() {
                 // Fixed boundary: wait for the next K tile before advancing.
-                s_wait_tensorcnt_barrier<Policy::kKPrefetchTensorCount>();
+                s_wait_tensorcnt_barrier<Policy::kKPrefetchTensorCount * kKVTdmInsts>();
             };
 
             auto tile_ops = MakeFmhaTdmSchedTileOps(begin_iteration,
@@ -1108,7 +1132,8 @@ struct BlockFmhaPipelineQRKSVSTdmSched
                                         const KVRows& kv_rows) const
     {
         static_assert(KVRows::kIsPaged);
-        static_assert(KVRows::kPageSize_ % (kN0 / (kBlockSize / get_warp_size())) == 0,
+        static_assert(KVRows::kIsGather ||
+                          KVRows::kPageSize_ % (kN0 / (kBlockSize / get_warp_size())) == 0,
                       "the K/V rows of one warp must not straddle two pages");
         return run(q_dram_block_window_tmp,
                    k_dram_block_window_tmp,

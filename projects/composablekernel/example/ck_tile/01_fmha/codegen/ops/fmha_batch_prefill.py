@@ -1041,11 +1041,6 @@ def get_fwd_blobs(
                 for page_size in SUPPORTED_PAGE_SIZE:
                     if page_size == 1 and pipeline.F_kv_memory_layout != "linear":
                         continue
-                    # qr_tdm_sched reads each warp's K/V rows from one page; qr_tdm gathers
-                    # the rows of smaller pages
-                    warp_rows = tile.F_bn0 // (tile.F_rm0 * tile.F_rn0 * tile.F_rk0)
-                    if pipeline.tag == "qr_tdm_sched" and page_size % warp_rows != 0:
-                        continue
                     # kv_blockscale requires page_size >= kN0 (tile.F_bn0)
                     # This ensures all tokens in a main loop iteration belong to the same page
                     if pipeline.F_qscale == "kv_blockscale" and page_size < tile.F_bn0:
