@@ -61,10 +61,10 @@ namespace TensileLite
         bool printWinningKernelName() const;
 
         // Re-reads TENSILE_DB, TENSILE_DB2, TENSILE_PREDICTION_LIB,
-        // TENSILE_USE_TILEWRIGHT, TENSILE_TILEWRIGHT_BANK,
-        // TENSILE_STREAMK5_FORCE_MODE and TENSILE_PRECISE_SM_TARGET from the
-        // environment and updates cached state.  Only these settings are
-        // refreshed; all other env-driven settings remain at their initial values.
+        // TENSILE_USE_TILEWRIGHT, TENSILE_TILEWRIGHT_BANK and
+        // TENSILE_STREAMK5_FORCE_MODE from the environment and updates cached
+        // state.  Only these settings are refreshed; all other env-driven
+        // settings remain at their initial values.
         // Intended for tests that call setenv() in-process after the singleton has
         // already been constructed.
         //

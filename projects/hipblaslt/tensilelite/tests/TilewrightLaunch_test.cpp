@@ -189,10 +189,9 @@ TEST(TilewrightLaunchTest, SmTargetAndSchedules)
             hybrid(2), bf16Problem(4096, 4096, 512), context(budget, schedule), processor);
     };
     EXPECT_EQ(plan(256), Plan(false, 512, "none"));
-    for(size_t budget : {224, 240, 255})
+    for(size_t budget : {31, 224, 240, 255})
         EXPECT_EQ(plan(budget), Plan(true, 512, "none")) << budget;
-    for(size_t budget : {0, 31})
-        EXPECT_EQ(plan(budget), Plan(false, 512, "none")) << budget;
+    EXPECT_EQ(plan(0), Plan(false, 512, "none"));
     EXPECT_EQ(plan(224, Schedule::Auto), Plan(true, 512, "none"));
     EXPECT_EQ(plan(0, Schedule::Auto), Plan(false, 512, "none"));
     EXPECT_EQ(plan(0, Schedule::Dynamic), Plan(true, 512, "none"));
@@ -415,18 +414,13 @@ TEST(TilewrightLaunchTest, PlansFromRecordsOnlyUnderDefaultLaunchSettings)
     EXPECT_FALSE(samePlans(checkedPlans(kernels, fewerCus, true), defaults));
 
     // The launch reads the force mode of the library's Debug, which
-    // reloadDebugBitsForTest() here does not reach, so only the CU budget's
-    // rounding, read on this side, changes its plans.
+    // reloadDebugBitsForTest() here does not reach, so it leaves the plans as
+    // they are.
     for(auto const* value : {"0", "1", "-1"})
     {
         ScopedDebugEnv const env("TENSILE_STREAMK5_FORCE_MODE", value);
         EXPECT_TRUE(samePlans(
             checkedPlans(kernels, makeDevice(AMDGPU::Processor::gfx950, 256), true), defaults));
-    }
-    {
-        ScopedDebugEnv const env("TENSILE_PRECISE_SM_TARGET", "1");
-        EXPECT_FALSE(samePlans(
-            checkedPlans(kernels, makeDevice(AMDGPU::Processor::gfx950, 256), false), defaults));
     }
 
     auto unmodelled                = makeDevice(AMDGPU::Processor::gfx950, 256);
@@ -434,6 +428,32 @@ TEST(TilewrightLaunchTest, PlansFromRecordsOnlyUnderDefaultLaunchSettings)
     EXPECT_FALSE(Launch("gfx950", {makeSolution(hybrid(2))}).followsRule(0, *unmodelled));
     EXPECT_FALSE(Launch("gfx950", {makeSolution(hybrid(2))}).followsRule(0, AMDGPU()));
     EXPECT_TRUE(Launch("gfx950", {makeSolution({.occupancy = 2})}).followsRule(0, *unmodelled));
+}
+
+// The plans take the CU budget as ContractionProblem::setSmCountTarget() keeps
+// it, not rounded down to a multiple of 32, each the plan
+// resolvePersistentSettings() gives: 31 CUs are fewer than the device has, not
+// every CU.
+TEST(TilewrightLaunchTest, PlansTakeTheCuBudgetAsItIs)
+{
+    auto const device  = makeDevice(AMDGPU::Processor::gfx950, 256);
+    auto const problem = bf16Problem(4096, 4096, 512);
+    for(auto const& kernel : persistentKernels())
+    {
+        Launch const launch("gfx950", {makeSolution(kernel)}, device);
+        ASSERT_TRUE(launch.followsRule(0, *device));
+        for(size_t const budget : {31, 100, 240})
+        {
+            auto const ctx = context(budget);
+            EXPECT_TRUE(samePlan(launch.plan(tilewright::Config{}, problem, ctx),
+                                 launch.resolvedPlan(tilewright::Config{}, problem, ctx)))
+                << "strategy " << kernel.strategy << " assignment " << kernel.assign
+                << " cu_budget " << budget;
+        }
+    }
+    Launch const launch("gfx950", {makeSolution(hybrid(2))}, device);
+    EXPECT_FALSE(samePlan(launch.plan(tilewright::Config{}, problem, context(31)),
+                          launch.plan(tilewright::Config{}, problem, context(0))));
 }
 
 TEST(TilewrightLaunchTest, PlansFromRecordsOnlyKernelsTheRecordHolds)

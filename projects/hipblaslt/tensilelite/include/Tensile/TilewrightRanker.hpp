@@ -367,8 +367,8 @@ namespace TensileLite
         // DataParallel cluster, an execution policy TensileLite rejects) or
         // the launch reads a setting other than its default: a fixed grid, a
         // grid selection other than k_split_aware or a CU cap among the
-        // device's persistent settings, an unrounded CU budget, or a debug
-        // setting of defaultPersistentLaunchDebug().
+        // device's persistent settings, or a debug setting of
+        // defaultPersistentLaunchDebug().
         bool followsRule(size_t index, Hardware const& hardware) const
         {
             checkIndex(index);
@@ -447,13 +447,11 @@ namespace TensileLite
             return kernel;
         }
 
-        // rulePlan() passes the default debug settings, and rounds the CU budget
-        // as ContractionProblem::setSmCountTarget() does without
-        // TENSILE_PRECISE_SM_TARGET.
+        // rulePlan() passes the default debug settings, and the CU budget as
+        // ContractionProblem::setSmCountTarget() keeps it.
         static DeviceLaunch deviceLaunch(Hardware const& hardware)
         {
-            if(!hasDefaultPersistentSettings(hardware) || Debug::Instance().usePreciseSMTarget()
-               || !defaultPersistentLaunchDebug().unset())
+            if(!hasDefaultPersistentSettings(hardware) || !defaultPersistentLaunchDebug().unset())
                 return {};
             auto const& device = static_cast<hip::HipAMDGPU const&>(hardware);
             return {.rule         = true,
@@ -534,7 +532,7 @@ namespace TensileLite
             inputs.itersPerTile     = CeilDivide(problem.size.k, size_t{kernel.depthU});
             inputs.workspaceSize    = std::numeric_limits<size_t>::max();
             inputs.smCountTarget    = static_cast<int>(
-                std::min<size_t>(context.cu_budget, std::numeric_limits<int>::max()) / 32 * 32);
+                std::min<size_t>(context.cu_budget, std::numeric_limits<int>::max()));
             inputs.schedulingMode = schedulingMode(context.schedule);
             inputs.kernel         = &kernel.config;
             inputs.threads        = kernel.threads;
