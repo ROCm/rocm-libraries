@@ -18,6 +18,15 @@ _CONFIG = "tensilelite/Tests/common/comm/gfx950/a2a_gemm_loop.yaml"
 _CONFIG_ODD_TRIP = "tensilelite/Tests/common/comm/gfx950/a2a_gemm_loop_odd_trip.yaml"
 
 
+def _placed_floor(body):
+    """The SGPR holding the first block of the batch an enqueuer places."""
+    import re
+
+    m = re.search(r"^s_mov_b32 s(\d+), s\[sgprA2ABlockLo\][^\n]*// this batch$", body, re.M)
+    assert m, "the placed batch is not seeded from this batch"
+    return m.group(1)
+
+
 def _tn_problem_type(**overrides):
     from Tensile.SolutionStructs.Problem import ProblemType
 
@@ -382,7 +391,7 @@ class TestA2AGemmElection:
 
 
 class TestA2AGemmEnqueueLoops:
-    """One enqueuer's packing pass: one reservation and one submit for its queue."""
+    """One enqueuer's packing pass: one reservation and one submit per batch placed."""
 
     def _src(self):
         from config_harness import emit_kernels_from_config
@@ -466,11 +475,12 @@ class TestA2AGemmEnqueueLoops:
     def test_the_group_size_is_the_blocks_down_to_the_batch_floor(self):
         import re
 
+        body = self._packing_pass(self._src())
         assert re.search(
             r"s_sub_u32 s(\d+), s\[sgprA2AShardCounter\], 1[^\n]*\n"
-            r"s_sub_u32 s(\d+), s\d+, s\[sgprA2ABlockLo\][^\n]*// group start - bLo\n"
-            r"v_cvt_f64_u32 v\[\d+:\d+\], s\1",
-            self._packing_pass(self._src()),
+            r"s_sub_u32 s(\d+), s\d+, s%s[^\n]*// group start - bLo\n"
+            r"v_cvt_f64_u32 v\[\d+:\d+\], s\1" % _placed_floor(body),
+            body,
         ), "the group size is not (group start - bLo) / (W-1)"
 
     def test_reservation_counts_one_atomic_per_group(self):
@@ -517,9 +527,9 @@ class TestA2AGemmEnqueueLoops:
     def test_the_submit_ends_the_packing_pass(self):
         body = self._packing_pass(self._src())
         tail = body[body.rindex("store committedWptr = pending") :].splitlines()[1:]
-        assert [l.split()[0] for l in tail if l.strip()] == ["s_waitcnt"], (
-            "the enqueuer goes on past its one queue's submit:\n%s" % "\n".join(tail)
-        )
+        assert [l.split()[0] for l in tail if l.strip()] == [
+            "s_waitcnt", "s_cmp_lg_u32", "s_cbranch_scc1", "s_add_u32", "s_cmp_lt_u32", "s_cbranch_scc1"
+        ], "the enqueuer does more than pick the next batch after a submit:\n%s" % "\n".join(tail)
 
 
 class TestA2AGemmRoundGroupOrder:
@@ -565,7 +575,7 @@ class TestA2AGemmRoundGroupOrder:
             r"v_readfirstlane_b32 s\d+, v\d+[^\n]*// quotient\n"
             r"v_readfirstlane_b32 s(\d+), v\d+[^\n]*// remainder\n"
             r"(?:[^\n]*\n)?"
-            r"s_add_u32 s\1, s\1, s\[sgprA2ABlockLo\][^\n]*// the group's last block",
+            r"s_add_u32 s\1, s\1, s%s[^\n]*// the group's last block" % _placed_floor(body),
             body,
         )
         assert last, "the group's last block is not bLo + (group start - bLo) % (W-1)"
@@ -578,20 +588,22 @@ class TestA2AGemmRoundGroupOrder:
     def test_lanes_below_the_batch_floor_are_masked(self):
         import re
 
+        body = self._packing_pass(self._src())
         assert re.search(
-            r"v_cmp_le_i32 vcc, s\[sgprA2ABlockLo\], v(\d+)[^\n]*\n"
-            r"s_mov_b64 exec, vcc",
-            self._packing_pass(self._src()),
+            r"v_cmp_le_i32 vcc, s%s, v(\d+)[^\n]*\n"
+            r"s_mov_b64 exec, vcc" % _placed_floor(body),
+            body,
         ), "lanes past the batch's first block still store a COPY"
 
     def test_empty_groups_are_branched_over(self):
         import re
 
+        body = self._packing_pass(self._src())
         assert re.search(
             r"label_a2a_group_loop\w*:[^\n]*\n"
-            r"s_cmp_lt_i32 s\d+, s\[sgprA2ABlockLo\][^\n]*\n"
-            r"s_cbranch_scc1 label_a2a_group_next",
-            self._packing_pass(self._src()),
+            r"s_cmp_lt_i32 s\d+, s%s[^\n]*\n"
+            r"s_cbranch_scc1 label_a2a_group_next" % _placed_floor(body),
+            body,
         ), "a group holding no block still places packets"
 
     def test_the_atomic_rides_the_groups_last_pass(self):
@@ -1327,3 +1339,103 @@ class TestA2AGemmF64PairAlignment:
             "f64 vgpr tuples must be 64 bit aligned; the assembler rejects these:\n"
             + "\n".join(odd)
         )
+
+
+class TestA2AGemmEnqueueAhead:
+    """Batch k's enqueuers place batch k+1; batch 0's place batches 0 and 1."""
+
+    def _src(self):
+        from config_harness import emit_kernels_from_config
+
+        return emit_kernels_from_config(_CONFIG, limit=1, arch="gfx950")[0][1]
+
+    def _election(self, src):
+        """Up to the election atomic."""
+        import re
+
+        m = re.search(r"^s_atomic_inc [^\n]*$", src, re.M)
+        assert m, "no s_atomic_inc in the emitted kernel"
+        return src[: m.start()]
+
+    def _tail(self, src):
+        """The election atomic through the skip label."""
+        import re
+
+        head = re.search(r"^s_atomic_inc [^\n]*$", src, re.M)
+        tail = re.search(r"^label_A2ASkipEnqueue:", src, re.M)
+        assert head and tail, "no a2a packing pass in the emitted kernel"
+        return src[head.end() : tail.start()]
+
+    def _pass(self, tail):
+        """The packing pass alone: the place label through the submit."""
+        import re
+
+        head = re.search(r"^label_a2a_place_batch\w*:", tail, re.M)
+        end = re.search(r"^s_cmp_\w+ s\d+, s\[sgpr(A2ABlockLo|NumWorkGroups1)\]", tail[head.end() :], re.M)
+        assert head and end, "no packing pass between the place label and the loop test"
+        return tail[head.end() : head.end() + end.start()]
+
+    def test_the_last_batch_but_batch_0_skips_the_election(self):
+        import re
+
+        assert re.search(
+            r"s_add_u32 s(\d+), s\[sgprA2ABlockLo\], s\[sgprA2ABlockCount\][^\n]*\n"
+            r"s_cmp_eq_u32 s\1, s\[sgprNumWorkGroups1\][^\n]*\n"
+            r"s_cselect_b32 s\1, s\[sgprA2ABlockLo\], 0[^\n]*\n"
+            r"s_cmp_lg_u32 s\1, 0[^\n]*\n"
+            r"s_cbranch_scc1 label_A2ASkipEnqueue",
+            self._election(self._src()),
+        ), "the last batch still draws a ticket"
+
+    def test_the_pass_reads_the_placed_batch(self):
+        tail = self._tail(self._src())
+        lo, body = _placed_floor(tail), self._pass(tail)
+        assert "sgprA2ABlockLo" not in body, "the pass reads this batch's floor"
+        assert "v_cmp_le_i32 vcc, s%s, v" % lo in body, "lanes are not masked at the placed floor"
+
+    def test_the_pass_keeps_the_placed_floor_and_the_cu_count(self):
+        import re
+
+        tail = self._tail(self._src())
+        lo, body = _placed_floor(tail), self._pass(tail)
+        cu = re.search(r"^s_mul_i32 s\d+, s\d+, s(\d+)[^\n]*// iB \* numCu$", tail, re.M)
+        assert cu, "the next batch does not read the CU count"
+        for reg in (lo, cu.group(1)):
+            assert not re.search(r"^(?!s_cmp)\w+ s%s\b" % reg, body, re.M), "the pass writes s%s" % reg
+
+    def test_the_next_batch_starts_at_the_previous_top(self):
+        import re
+
+        tail = self._tail(self._src())
+        lo = _placed_floor(tail)
+        assert re.search(
+            r"^label_a2a_next_batch\w*:[^\n]*\n"
+            r"s_add_u32 s%s, s%s, s\[sgprA2ABlockCount\][^\n]*\n" % (lo, lo),
+            tail,
+            re.M,
+        ), "the next batch does not start at bLo + count"
+        assert re.search(
+            r"s_min_u32 s(\d+), s\1, s\[sgprNumWorkGroups1\][^\n]*\n"
+            r"s_sub_u32 s\[sgprA2ABlockCount\], s\1, s%s[^\n]*\n"
+            r"label_a2a_place_batch" % lo,
+            tail,
+        ), "the next batch's count is not its clamped top minus its floor"
+
+    def test_one_batch_ahead_stops_after_the_next_batch(self):
+        import re
+
+        tail = self._tail(self._src())
+        lo = _placed_floor(tail)
+        assert re.search(
+            r"s_cmp_lg_u32 s%s, s\[sgprA2ABlockLo\][^\n]*\n"
+            r"s_cbranch_scc1 label_A2ASkipEnqueue[^\n]*\n"
+            r"s_add_u32 s(\d+), s%s, s\[sgprA2ABlockCount\][^\n]*\n"
+            r"s_cmp_lt_u32 s\1, s\[sgprNumWorkGroups1\][^\n]*\n"
+            r"s_cbranch_scc1 label_a2a_next_batch\w*[^\n]*\n$" % (lo, lo),
+            tail,
+        ), "batch 0 does not go on to batch 1 only, or batch k > 0 does not stop"
+
+    def test_the_flag_row_floor_is_written_once(self):
+        import re
+
+        assert len(re.findall(r"^(?!s_cmp)\w+ s\[sgprA2ABlockLo\],", self._src(), re.M)) == 1
