@@ -1,0 +1,2480 @@
+{
+  "version": "1.0",
+  "id": "a11cb75f-6815-50bf-b2a1-b10b32fb8357",
+  "name": "flydsl sdpa_rdna kernels (gfx12-generic)",
+  "arch": [
+    "gfx1200",
+    "gfx1201"
+  ],
+  "matchers": [
+    "ae3e5789-3fe0-5032-904a-fca436d520d3"
+  ],
+  "engine": "a122a721-719a-5132-8cfe-97590e7485e7",
+  "dispatch": "5180c4fb-67ac-5ea0-890a-820e60c261e7",
+  "provenance": {
+    "specialization_contract": {
+      "schema_version": 1,
+      "consumers": [
+        {
+          "engine_id": "a122a721-719a-5132-8cfe-97590e7485e7",
+          "kmd_id": "330ae779-3bb5-5a68-9a64-75bfdcbfd1fe",
+          "metadata_fields": [],
+          "matcher_only_fields": [
+            "dtype",
+            "head_dim",
+            "causal",
+            "block_m",
+            "block_n",
+            "dv_split",
+            "has_bias",
+            "head_dim_max",
+            "hd_pair",
+            "bias_q",
+            "head_dim_v",
+            "has_sink"
+          ],
+          "bindings": {},
+          "vocabulary": {}
+        }
+      ]
+    }
+  },
+  "kernelDescriptors": [
+    {
+      "version": "1.0",
+      "id": "ddf3a9b7-980d-5fe4-96f2-5fe1067c2e1a",
+      "name": "sdpa_rdna_bf16_d64_causal0_bm64_bn32",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_rdna_bf16_d64_causal0_bm64_bn32.hsaco",
+        "symbol": "flash_attn_func_rdna_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "head_dim": 64,
+        "causal": 0,
+        "block_m": 64,
+        "block_n": 32,
+        "dv_split": 1,
+        "has_bias": 0,
+        "head_dim_max": 64,
+        "hd_pair": 0,
+        "bias_q": 0,
+        "head_dim_v": 64,
+        "has_sink": 0
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "4ba77ac2-5145-5241-a796-0023a9d8044d",
+      "name": "sdpa_rdna_bf16_d64_causal0_bm128_bn32_bias1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_rdna_bf16_d64_causal0_bm128_bn32_bias1.hsaco",
+        "symbol": "flash_attn_func_rdna_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "head_dim": 64,
+        "causal": 0,
+        "block_m": 128,
+        "block_n": 32,
+        "dv_split": 1,
+        "has_bias": 1,
+        "head_dim_max": 64,
+        "hd_pair": 0,
+        "bias_q": 0,
+        "head_dim_v": 64,
+        "has_sink": 0
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "34571a8d-9b0a-5dad-86f6-90b06901e331",
+      "name": "sdpa_rdna_bf16_d64_causal0_bm128_bn32_bias1_biasq1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_rdna_bf16_d64_causal0_bm128_bn32_bias1_biasq1.hsaco",
+        "symbol": "flash_attn_func_rdna_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "head_dim": 64,
+        "causal": 0,
+        "block_m": 128,
+        "block_n": 32,
+        "dv_split": 1,
+        "has_bias": 1,
+        "head_dim_max": 64,
+        "hd_pair": 0,
+        "bias_q": 1,
+        "head_dim_v": 64,
+        "has_sink": 0
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "c9c45abb-8c82-5cd0-8713-ce73f4c75f1e",
+      "name": "sdpa_rdna_bf16_d64_causal1_bm64_bn32",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_rdna_bf16_d64_causal1_bm64_bn32.hsaco",
+        "symbol": "flash_attn_func_rdna_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "head_dim": 64,
+        "causal": 1,
+        "block_m": 64,
+        "block_n": 32,
+        "dv_split": 1,
+        "has_bias": 0,
+        "head_dim_max": 64,
+        "hd_pair": 0,
+        "bias_q": 0,
+        "head_dim_v": 64,
+        "has_sink": 0
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "e819099a-4ca8-562b-a107-c7285433e2a2",
+      "name": "sdpa_rdna_bf16_d64_causal1_bm128_bn32_bias1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_rdna_bf16_d64_causal1_bm128_bn32_bias1.hsaco",
+        "symbol": "flash_attn_func_rdna_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "head_dim": 64,
+        "causal": 1,
+        "block_m": 128,
+        "block_n": 32,
+        "dv_split": 1,
+        "has_bias": 1,
+        "head_dim_max": 64,
+        "hd_pair": 0,
+        "bias_q": 0,
+        "head_dim_v": 64,
+        "has_sink": 0
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "7c10493b-0fe0-56d5-a050-6b517e91e1d1",
+      "name": "sdpa_rdna_bf16_d64_causal1_bm128_bn32_bias1_biasq1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_rdna_bf16_d64_causal1_bm128_bn32_bias1_biasq1.hsaco",
+        "symbol": "flash_attn_func_rdna_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "head_dim": 64,
+        "causal": 1,
+        "block_m": 128,
+        "block_n": 32,
+        "dv_split": 1,
+        "has_bias": 1,
+        "head_dim_max": 64,
+        "hd_pair": 0,
+        "bias_q": 1,
+        "head_dim_v": 64,
+        "has_sink": 0
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "6e91d225-a190-5b86-92d8-e5e93bf4f60e",
+      "name": "sdpa_rdna_bf16_d96_causal0_bm128_bn32",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_rdna_bf16_d96_causal0_bm128_bn32.hsaco",
+        "symbol": "flash_attn_func_rdna_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "head_dim": 96,
+        "causal": 0,
+        "block_m": 128,
+        "block_n": 32,
+        "dv_split": 1,
+        "has_bias": 0,
+        "head_dim_max": 96,
+        "hd_pair": 0,
+        "bias_q": 0,
+        "head_dim_v": 96,
+        "has_sink": 0
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "0c8659a1-9785-50b0-adca-da7089e7a9bd",
+      "name": "sdpa_rdna_bf16_d96_causal0_bm128_bn32_bias1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_rdna_bf16_d96_causal0_bm128_bn32_bias1.hsaco",
+        "symbol": "flash_attn_func_rdna_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "head_dim": 96,
+        "causal": 0,
+        "block_m": 128,
+        "block_n": 32,
+        "dv_split": 1,
+        "has_bias": 1,
+        "head_dim_max": 96,
+        "hd_pair": 0,
+        "bias_q": 0,
+        "head_dim_v": 96,
+        "has_sink": 0
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "5046cd83-ed50-5641-a67c-26683511a1e6",
+      "name": "sdpa_rdna_bf16_d96_causal0_bm128_bn32_bias1_biasq1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_rdna_bf16_d96_causal0_bm128_bn32_bias1_biasq1.hsaco",
+        "symbol": "flash_attn_func_rdna_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "head_dim": 96,
+        "causal": 0,
+        "block_m": 128,
+        "block_n": 32,
+        "dv_split": 1,
+        "has_bias": 1,
+        "head_dim_max": 96,
+        "hd_pair": 0,
+        "bias_q": 1,
+        "head_dim_v": 96,
+        "has_sink": 0
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "b515ee9e-c0c8-5c03-b20e-3dc6b601e1a6",
+      "name": "sdpa_rdna_bf16_d96_causal1_bm128_bn32",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_rdna_bf16_d96_causal1_bm128_bn32.hsaco",
+        "symbol": "flash_attn_func_rdna_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "head_dim": 96,
+        "causal": 1,
+        "block_m": 128,
+        "block_n": 32,
+        "dv_split": 1,
+        "has_bias": 0,
+        "head_dim_max": 96,
+        "hd_pair": 0,
+        "bias_q": 0,
+        "head_dim_v": 96,
+        "has_sink": 0
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "2ca6d14c-18c2-549a-bdd4-d0fa59394e97",
+      "name": "sdpa_rdna_bf16_d96_causal1_bm128_bn32_bias1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_rdna_bf16_d96_causal1_bm128_bn32_bias1.hsaco",
+        "symbol": "flash_attn_func_rdna_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "head_dim": 96,
+        "causal": 1,
+        "block_m": 128,
+        "block_n": 32,
+        "dv_split": 1,
+        "has_bias": 1,
+        "head_dim_max": 96,
+        "hd_pair": 0,
+        "bias_q": 0,
+        "head_dim_v": 96,
+        "has_sink": 0
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "f57d7504-7095-5444-9b0e-78f4ad0121ea",
+      "name": "sdpa_rdna_bf16_d96_causal1_bm128_bn32_bias1_biasq1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_rdna_bf16_d96_causal1_bm128_bn32_bias1_biasq1.hsaco",
+        "symbol": "flash_attn_func_rdna_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "head_dim": 96,
+        "causal": 1,
+        "block_m": 128,
+        "block_n": 32,
+        "dv_split": 1,
+        "has_bias": 1,
+        "head_dim_max": 96,
+        "hd_pair": 0,
+        "bias_q": 1,
+        "head_dim_v": 96,
+        "has_sink": 0
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "a4e5f0cf-32d8-53bf-b79d-d565d5c5f18f",
+      "name": "sdpa_rdna_bf16_d128_causal0_bm64_bn32",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_rdna_bf16_d128_causal0_bm64_bn32.hsaco",
+        "symbol": "flash_attn_func_rdna_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "head_dim": 128,
+        "causal": 0,
+        "block_m": 64,
+        "block_n": 32,
+        "dv_split": 1,
+        "has_bias": 0,
+        "head_dim_max": 128,
+        "hd_pair": 0,
+        "bias_q": 0,
+        "head_dim_v": 128,
+        "has_sink": 0
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "7ae26ee7-7fe7-5f2f-bddd-83cc96443e9b",
+      "name": "sdpa_rdna_bf16_d128_causal0_bm128_bn32_bias1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_rdna_bf16_d128_causal0_bm128_bn32_bias1.hsaco",
+        "symbol": "flash_attn_func_rdna_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "head_dim": 128,
+        "causal": 0,
+        "block_m": 128,
+        "block_n": 32,
+        "dv_split": 1,
+        "has_bias": 1,
+        "head_dim_max": 128,
+        "hd_pair": 0,
+        "bias_q": 0,
+        "head_dim_v": 128,
+        "has_sink": 0
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "4b396197-9a5a-5497-bcd1-20b925768d8f",
+      "name": "sdpa_rdna_bf16_d128_causal0_bm128_bn32_bias1_biasq1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_rdna_bf16_d128_causal0_bm128_bn32_bias1_biasq1.hsaco",
+        "symbol": "flash_attn_func_rdna_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "head_dim": 128,
+        "causal": 0,
+        "block_m": 128,
+        "block_n": 32,
+        "dv_split": 1,
+        "has_bias": 1,
+        "head_dim_max": 128,
+        "hd_pair": 0,
+        "bias_q": 1,
+        "head_dim_v": 128,
+        "has_sink": 0
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "a3743d1c-8ebd-55f7-9ef5-cc04d5909a92",
+      "name": "sdpa_rdna_bf16_d128_causal1_bm128_bn32",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_rdna_bf16_d128_causal1_bm128_bn32.hsaco",
+        "symbol": "flash_attn_func_rdna_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "head_dim": 128,
+        "causal": 1,
+        "block_m": 128,
+        "block_n": 32,
+        "dv_split": 1,
+        "has_bias": 0,
+        "head_dim_max": 128,
+        "hd_pair": 0,
+        "bias_q": 0,
+        "head_dim_v": 128,
+        "has_sink": 0
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "7da7d062-e02d-5281-b5d1-45a642c59d4f",
+      "name": "sdpa_rdna_bf16_d128_causal1_bm128_bn32_bias1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_rdna_bf16_d128_causal1_bm128_bn32_bias1.hsaco",
+        "symbol": "flash_attn_func_rdna_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "head_dim": 128,
+        "causal": 1,
+        "block_m": 128,
+        "block_n": 32,
+        "dv_split": 1,
+        "has_bias": 1,
+        "head_dim_max": 128,
+        "hd_pair": 0,
+        "bias_q": 0,
+        "head_dim_v": 128,
+        "has_sink": 0
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "b952dfd2-2a8f-5a76-accd-8fa98b66c490",
+      "name": "sdpa_rdna_bf16_d128_causal1_bm128_bn32_bias1_biasq1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_rdna_bf16_d128_causal1_bm128_bn32_bias1_biasq1.hsaco",
+        "symbol": "flash_attn_func_rdna_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "head_dim": 128,
+        "causal": 1,
+        "block_m": 128,
+        "block_n": 32,
+        "dv_split": 1,
+        "has_bias": 1,
+        "head_dim_max": 128,
+        "hd_pair": 0,
+        "bias_q": 1,
+        "head_dim_v": 128,
+        "has_sink": 0
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "37bc711c-bfae-5b1f-8cf1-333e0f24df3e",
+      "name": "sdpa_rdna_bf16_d256_causal0_bm64_bn32_pair1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_rdna_bf16_d256_causal0_bm64_bn32_pair1.hsaco",
+        "symbol": "flash_attn_func_rdna_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "head_dim": 256,
+        "causal": 0,
+        "block_m": 64,
+        "block_n": 32,
+        "dv_split": 1,
+        "has_bias": 0,
+        "head_dim_max": 256,
+        "hd_pair": 1,
+        "bias_q": 0,
+        "head_dim_v": 256,
+        "has_sink": 0
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "cb34ada8-3c72-5d23-886a-7713c978b4ef",
+      "name": "sdpa_rdna_bf16_d256_causal0_bm64_bn32_bias1_pair1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_rdna_bf16_d256_causal0_bm64_bn32_bias1_pair1.hsaco",
+        "symbol": "flash_attn_func_rdna_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "head_dim": 256,
+        "causal": 0,
+        "block_m": 64,
+        "block_n": 32,
+        "dv_split": 1,
+        "has_bias": 1,
+        "head_dim_max": 256,
+        "hd_pair": 1,
+        "bias_q": 0,
+        "head_dim_v": 256,
+        "has_sink": 0
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "a734d40d-f2d9-5dfc-947e-62b90db77640",
+      "name": "sdpa_rdna_bf16_d256_causal0_bm64_bn32_bias1_pair1_biasq1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_rdna_bf16_d256_causal0_bm64_bn32_bias1_pair1_biasq1.hsaco",
+        "symbol": "flash_attn_func_rdna_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "head_dim": 256,
+        "causal": 0,
+        "block_m": 64,
+        "block_n": 32,
+        "dv_split": 1,
+        "has_bias": 1,
+        "head_dim_max": 256,
+        "hd_pair": 1,
+        "bias_q": 1,
+        "head_dim_v": 256,
+        "has_sink": 0
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "89471efb-631d-512e-a917-fc36d6057bbd",
+      "name": "sdpa_rdna_bf16_d256_causal1_bm64_bn32_pair1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_rdna_bf16_d256_causal1_bm64_bn32_pair1.hsaco",
+        "symbol": "flash_attn_func_rdna_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "head_dim": 256,
+        "causal": 1,
+        "block_m": 64,
+        "block_n": 32,
+        "dv_split": 1,
+        "has_bias": 0,
+        "head_dim_max": 256,
+        "hd_pair": 1,
+        "bias_q": 0,
+        "head_dim_v": 256,
+        "has_sink": 0
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "d22b18b7-606f-59c1-9f53-eb74c378b066",
+      "name": "sdpa_rdna_bf16_d256_causal1_bm64_bn32_bias1_pair1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_rdna_bf16_d256_causal1_bm64_bn32_bias1_pair1.hsaco",
+        "symbol": "flash_attn_func_rdna_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "head_dim": 256,
+        "causal": 1,
+        "block_m": 64,
+        "block_n": 32,
+        "dv_split": 1,
+        "has_bias": 1,
+        "head_dim_max": 256,
+        "hd_pair": 1,
+        "bias_q": 0,
+        "head_dim_v": 256,
+        "has_sink": 0
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "a79595f2-6864-508a-a3f4-524ffbdc6d61",
+      "name": "sdpa_rdna_bf16_d256_causal1_bm64_bn32_bias1_pair1_biasq1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_rdna_bf16_d256_causal1_bm64_bn32_bias1_pair1_biasq1.hsaco",
+        "symbol": "flash_attn_func_rdna_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "head_dim": 256,
+        "causal": 1,
+        "block_m": 64,
+        "block_n": 32,
+        "dv_split": 1,
+        "has_bias": 1,
+        "head_dim_max": 256,
+        "hd_pair": 1,
+        "bias_q": 1,
+        "head_dim_v": 256,
+        "has_sink": 0
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "8134d160-25cb-59be-a157-0f45380ab3ce",
+      "name": "sdpa_rdna_bf16_d192_causal0_bm64_bn32_pair1_vd128",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_rdna_bf16_d192_causal0_bm64_bn32_pair1_vd128.hsaco",
+        "symbol": "flash_attn_func_rdna_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "head_dim": 192,
+        "causal": 0,
+        "block_m": 64,
+        "block_n": 32,
+        "dv_split": 1,
+        "has_bias": 0,
+        "head_dim_max": 192,
+        "hd_pair": 1,
+        "bias_q": 0,
+        "head_dim_v": 128,
+        "has_sink": 0
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "f5e3a3ba-d648-5f0f-9217-d7c0b2d19077",
+      "name": "sdpa_rdna_bf16_d192_causal1_bm64_bn32_pair1_vd128",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_rdna_bf16_d192_causal1_bm64_bn32_pair1_vd128.hsaco",
+        "symbol": "flash_attn_func_rdna_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "head_dim": 192,
+        "causal": 1,
+        "block_m": 64,
+        "block_n": 32,
+        "dv_split": 1,
+        "has_bias": 0,
+        "head_dim_max": 192,
+        "hd_pair": 1,
+        "bias_q": 0,
+        "head_dim_v": 128,
+        "has_sink": 0
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "7f740403-a196-50c6-9518-d8b96c93e203",
+      "name": "sdpa_rdna_bf16_dgeneric_causal0_bm64_bn32_dmax64",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_rdna_bf16_dgeneric_causal0_bm64_bn32_dmax64.hsaco",
+        "symbol": "flash_attn_func_rdna_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "head_dim": 0,
+        "causal": 0,
+        "block_m": 64,
+        "block_n": 32,
+        "dv_split": 1,
+        "has_bias": 0,
+        "head_dim_max": 64,
+        "hd_pair": 0,
+        "bias_q": 0,
+        "head_dim_v": 0,
+        "has_sink": 0
+      },
+      "priority": 40
+    },
+    {
+      "version": "1.0",
+      "id": "1a26a241-f638-57f2-938e-d43bd4754728",
+      "name": "sdpa_rdna_bf16_dgeneric_causal1_bm64_bn32_dmax64",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_rdna_bf16_dgeneric_causal1_bm64_bn32_dmax64.hsaco",
+        "symbol": "flash_attn_func_rdna_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "head_dim": 0,
+        "causal": 1,
+        "block_m": 64,
+        "block_n": 32,
+        "dv_split": 1,
+        "has_bias": 0,
+        "head_dim_max": 64,
+        "hd_pair": 0,
+        "bias_q": 0,
+        "head_dim_v": 0,
+        "has_sink": 0
+      },
+      "priority": 40
+    },
+    {
+      "version": "1.0",
+      "id": "929d4821-c1ea-5690-960b-ed05f3d189ee",
+      "name": "sdpa_rdna_bf16_dgeneric_causal0_bm128_bn32_dmax96",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_rdna_bf16_dgeneric_causal0_bm128_bn32_dmax96.hsaco",
+        "symbol": "flash_attn_func_rdna_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "head_dim": 0,
+        "causal": 0,
+        "block_m": 128,
+        "block_n": 32,
+        "dv_split": 1,
+        "has_bias": 0,
+        "head_dim_max": 96,
+        "hd_pair": 0,
+        "bias_q": 0,
+        "head_dim_v": 0,
+        "has_sink": 0
+      },
+      "priority": 30
+    },
+    {
+      "version": "1.0",
+      "id": "f373afe2-b16e-5f4e-9bfb-3b3a7bfd9c4c",
+      "name": "sdpa_rdna_bf16_dgeneric_causal1_bm128_bn32_dmax96",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_rdna_bf16_dgeneric_causal1_bm128_bn32_dmax96.hsaco",
+        "symbol": "flash_attn_func_rdna_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "head_dim": 0,
+        "causal": 1,
+        "block_m": 128,
+        "block_n": 32,
+        "dv_split": 1,
+        "has_bias": 0,
+        "head_dim_max": 96,
+        "hd_pair": 0,
+        "bias_q": 0,
+        "head_dim_v": 0,
+        "has_sink": 0
+      },
+      "priority": 30
+    },
+    {
+      "version": "1.0",
+      "id": "5cef6f60-6ec0-59a9-81a7-3ae789ae7e3f",
+      "name": "sdpa_rdna_bf16_dgeneric_causal0_bm128_bn32_dmax128",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_rdna_bf16_dgeneric_causal0_bm128_bn32_dmax128.hsaco",
+        "symbol": "flash_attn_func_rdna_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "head_dim": 0,
+        "causal": 0,
+        "block_m": 128,
+        "block_n": 32,
+        "dv_split": 1,
+        "has_bias": 0,
+        "head_dim_max": 128,
+        "hd_pair": 0,
+        "bias_q": 0,
+        "head_dim_v": 0,
+        "has_sink": 0
+      },
+      "priority": 20
+    },
+    {
+      "version": "1.0",
+      "id": "828493b8-eb15-507c-b3a1-b31bde7d21ae",
+      "name": "sdpa_rdna_bf16_dgeneric_causal1_bm128_bn32_dmax128",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_rdna_bf16_dgeneric_causal1_bm128_bn32_dmax128.hsaco",
+        "symbol": "flash_attn_func_rdna_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "head_dim": 0,
+        "causal": 1,
+        "block_m": 128,
+        "block_n": 32,
+        "dv_split": 1,
+        "has_bias": 0,
+        "head_dim_max": 128,
+        "hd_pair": 0,
+        "bias_q": 0,
+        "head_dim_v": 0,
+        "has_sink": 0
+      },
+      "priority": 20
+    },
+    {
+      "version": "1.0",
+      "id": "ac3a9b4d-af16-5138-b1ef-a0b781bd3a61",
+      "name": "sdpa_rdna_bf16_dgeneric_causal0_bm64_bn32_dmax160_pair1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_rdna_bf16_dgeneric_causal0_bm64_bn32_dmax160_pair1.hsaco",
+        "symbol": "flash_attn_func_rdna_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "head_dim": 0,
+        "causal": 0,
+        "block_m": 64,
+        "block_n": 32,
+        "dv_split": 1,
+        "has_bias": 0,
+        "head_dim_max": 160,
+        "hd_pair": 1,
+        "bias_q": 0,
+        "head_dim_v": 0,
+        "has_sink": 0
+      },
+      "priority": 15
+    },
+    {
+      "version": "1.0",
+      "id": "e2e951b7-6b77-5a93-b1e1-e60b763b44a7",
+      "name": "sdpa_rdna_bf16_dgeneric_causal1_bm64_bn32_dmax160_pair1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_rdna_bf16_dgeneric_causal1_bm64_bn32_dmax160_pair1.hsaco",
+        "symbol": "flash_attn_func_rdna_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "head_dim": 0,
+        "causal": 1,
+        "block_m": 64,
+        "block_n": 32,
+        "dv_split": 1,
+        "has_bias": 0,
+        "head_dim_max": 160,
+        "hd_pair": 1,
+        "bias_q": 0,
+        "head_dim_v": 0,
+        "has_sink": 0
+      },
+      "priority": 15
+    },
+    {
+      "version": "1.0",
+      "id": "c1aa405e-8726-5b09-8a6e-ac074966b430",
+      "name": "sdpa_rdna_bf16_dgeneric_causal0_bm64_bn32_dmax224_pair1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_rdna_bf16_dgeneric_causal0_bm64_bn32_dmax224_pair1.hsaco",
+        "symbol": "flash_attn_func_rdna_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "head_dim": 0,
+        "causal": 0,
+        "block_m": 64,
+        "block_n": 32,
+        "dv_split": 1,
+        "has_bias": 0,
+        "head_dim_max": 224,
+        "hd_pair": 1,
+        "bias_q": 0,
+        "head_dim_v": 0,
+        "has_sink": 0
+      },
+      "priority": 12
+    },
+    {
+      "version": "1.0",
+      "id": "19ed070b-0186-51b7-b424-2ccd87242ab4",
+      "name": "sdpa_rdna_bf16_dgeneric_causal1_bm64_bn32_dmax224_pair1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_rdna_bf16_dgeneric_causal1_bm64_bn32_dmax224_pair1.hsaco",
+        "symbol": "flash_attn_func_rdna_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "head_dim": 0,
+        "causal": 1,
+        "block_m": 64,
+        "block_n": 32,
+        "dv_split": 1,
+        "has_bias": 0,
+        "head_dim_max": 224,
+        "hd_pair": 1,
+        "bias_q": 0,
+        "head_dim_v": 0,
+        "has_sink": 0
+      },
+      "priority": 12
+    },
+    {
+      "version": "1.0",
+      "id": "799b0e96-f6b6-5af9-967c-e07782ea6df9",
+      "name": "sdpa_rdna_bf16_dgeneric_causal0_bm64_bn32_dv2_dmax256_pair1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_rdna_bf16_dgeneric_causal0_bm64_bn32_dv2_dmax256_pair1.hsaco",
+        "symbol": "flash_attn_func_rdna_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "head_dim": 0,
+        "causal": 0,
+        "block_m": 64,
+        "block_n": 32,
+        "dv_split": 2,
+        "has_bias": 0,
+        "head_dim_max": 256,
+        "hd_pair": 1,
+        "bias_q": 0,
+        "head_dim_v": 0,
+        "has_sink": 0
+      },
+      "priority": 10
+    },
+    {
+      "version": "1.0",
+      "id": "7a607ba8-150f-5ec1-8298-d622d4e354c3",
+      "name": "sdpa_rdna_bf16_dgeneric_causal1_bm64_bn32_dv2_dmax256_pair1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_rdna_bf16_dgeneric_causal1_bm64_bn32_dv2_dmax256_pair1.hsaco",
+        "symbol": "flash_attn_func_rdna_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "head_dim": 0,
+        "causal": 1,
+        "block_m": 64,
+        "block_n": 32,
+        "dv_split": 2,
+        "has_bias": 0,
+        "head_dim_max": 256,
+        "hd_pair": 1,
+        "bias_q": 0,
+        "head_dim_v": 0,
+        "has_sink": 0
+      },
+      "priority": 10
+    },
+    {
+      "version": "1.0",
+      "id": "4f85d894-8f11-5089-a6a3-61eb2ea8220a",
+      "name": "sdpa_rdna_bf16_d64_causal0_bm64_bn32_sink1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_rdna_bf16_d64_causal0_bm64_bn32_sink1.hsaco",
+        "symbol": "flash_attn_func_rdna_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "head_dim": 64,
+        "causal": 0,
+        "block_m": 64,
+        "block_n": 32,
+        "dv_split": 1,
+        "has_bias": 0,
+        "head_dim_max": 64,
+        "hd_pair": 0,
+        "bias_q": 0,
+        "has_sink": 1,
+        "head_dim_v": 64
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "505df196-6666-5a7e-8e0d-cf75b04fdd98",
+      "name": "sdpa_rdna_bf16_d64_causal1_bm64_bn32_sink1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_rdna_bf16_d64_causal1_bm64_bn32_sink1.hsaco",
+        "symbol": "flash_attn_func_rdna_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "head_dim": 64,
+        "causal": 1,
+        "block_m": 64,
+        "block_n": 32,
+        "dv_split": 1,
+        "has_bias": 0,
+        "head_dim_max": 64,
+        "hd_pair": 0,
+        "bias_q": 0,
+        "has_sink": 1,
+        "head_dim_v": 64
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "ae31a83e-8c3c-5873-9396-c2ba31364a5b",
+      "name": "sdpa_rdna_bf16_d128_causal0_bm64_bn32_sink1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_rdna_bf16_d128_causal0_bm64_bn32_sink1.hsaco",
+        "symbol": "flash_attn_func_rdna_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "head_dim": 128,
+        "causal": 0,
+        "block_m": 64,
+        "block_n": 32,
+        "dv_split": 1,
+        "has_bias": 0,
+        "head_dim_max": 128,
+        "hd_pair": 0,
+        "bias_q": 0,
+        "has_sink": 1,
+        "head_dim_v": 128
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "237cb94d-061d-5aad-9df8-69b7d1765972",
+      "name": "sdpa_rdna_bf16_d128_causal1_bm128_bn32_sink1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_rdna_bf16_d128_causal1_bm128_bn32_sink1.hsaco",
+        "symbol": "flash_attn_func_rdna_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "head_dim": 128,
+        "causal": 1,
+        "block_m": 128,
+        "block_n": 32,
+        "dv_split": 1,
+        "has_bias": 0,
+        "head_dim_max": 128,
+        "hd_pair": 0,
+        "bias_q": 0,
+        "has_sink": 1,
+        "head_dim_v": 128
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "4f855be2-ec0e-592a-8d88-060deb032597",
+      "name": "sdpa_rdna_f16_d64_causal0_bm64_bn32",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_rdna_f16_d64_causal0_bm64_bn32.hsaco",
+        "symbol": "flash_attn_func_rdna_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "head_dim": 64,
+        "causal": 0,
+        "block_m": 64,
+        "block_n": 32,
+        "dv_split": 1,
+        "has_bias": 0,
+        "head_dim_max": 64,
+        "hd_pair": 0,
+        "bias_q": 0,
+        "head_dim_v": 64,
+        "has_sink": 0
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "665614e2-b935-5e40-8609-7ee7ca99b41f",
+      "name": "sdpa_rdna_f16_d64_causal0_bm128_bn32_bias1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_rdna_f16_d64_causal0_bm128_bn32_bias1.hsaco",
+        "symbol": "flash_attn_func_rdna_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "head_dim": 64,
+        "causal": 0,
+        "block_m": 128,
+        "block_n": 32,
+        "dv_split": 1,
+        "has_bias": 1,
+        "head_dim_max": 64,
+        "hd_pair": 0,
+        "bias_q": 0,
+        "head_dim_v": 64,
+        "has_sink": 0
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "bf84e703-c71e-5e89-8fa9-12fa3d969963",
+      "name": "sdpa_rdna_f16_d64_causal0_bm128_bn32_bias1_biasq1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_rdna_f16_d64_causal0_bm128_bn32_bias1_biasq1.hsaco",
+        "symbol": "flash_attn_func_rdna_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "head_dim": 64,
+        "causal": 0,
+        "block_m": 128,
+        "block_n": 32,
+        "dv_split": 1,
+        "has_bias": 1,
+        "head_dim_max": 64,
+        "hd_pair": 0,
+        "bias_q": 1,
+        "head_dim_v": 64,
+        "has_sink": 0
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "91e57857-cb5b-5994-9105-5383c8c0c98f",
+      "name": "sdpa_rdna_f16_d64_causal1_bm64_bn32",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_rdna_f16_d64_causal1_bm64_bn32.hsaco",
+        "symbol": "flash_attn_func_rdna_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "head_dim": 64,
+        "causal": 1,
+        "block_m": 64,
+        "block_n": 32,
+        "dv_split": 1,
+        "has_bias": 0,
+        "head_dim_max": 64,
+        "hd_pair": 0,
+        "bias_q": 0,
+        "head_dim_v": 64,
+        "has_sink": 0
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "4df15739-dc00-58ac-bb0d-463d3f4be5f4",
+      "name": "sdpa_rdna_f16_d64_causal1_bm128_bn32_bias1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_rdna_f16_d64_causal1_bm128_bn32_bias1.hsaco",
+        "symbol": "flash_attn_func_rdna_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "head_dim": 64,
+        "causal": 1,
+        "block_m": 128,
+        "block_n": 32,
+        "dv_split": 1,
+        "has_bias": 1,
+        "head_dim_max": 64,
+        "hd_pair": 0,
+        "bias_q": 0,
+        "head_dim_v": 64,
+        "has_sink": 0
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "cdb49d5e-175c-56b5-a0cf-9d0e65954d22",
+      "name": "sdpa_rdna_f16_d64_causal1_bm128_bn32_bias1_biasq1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_rdna_f16_d64_causal1_bm128_bn32_bias1_biasq1.hsaco",
+        "symbol": "flash_attn_func_rdna_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "head_dim": 64,
+        "causal": 1,
+        "block_m": 128,
+        "block_n": 32,
+        "dv_split": 1,
+        "has_bias": 1,
+        "head_dim_max": 64,
+        "hd_pair": 0,
+        "bias_q": 1,
+        "head_dim_v": 64,
+        "has_sink": 0
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "09e1bcb4-3a74-5561-a51a-0d5abdacde45",
+      "name": "sdpa_rdna_f16_d96_causal0_bm128_bn32",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_rdna_f16_d96_causal0_bm128_bn32.hsaco",
+        "symbol": "flash_attn_func_rdna_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "head_dim": 96,
+        "causal": 0,
+        "block_m": 128,
+        "block_n": 32,
+        "dv_split": 1,
+        "has_bias": 0,
+        "head_dim_max": 96,
+        "hd_pair": 0,
+        "bias_q": 0,
+        "head_dim_v": 96,
+        "has_sink": 0
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "a9e16ee0-a9e3-59a2-9009-77040086e766",
+      "name": "sdpa_rdna_f16_d96_causal0_bm128_bn32_bias1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_rdna_f16_d96_causal0_bm128_bn32_bias1.hsaco",
+        "symbol": "flash_attn_func_rdna_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "head_dim": 96,
+        "causal": 0,
+        "block_m": 128,
+        "block_n": 32,
+        "dv_split": 1,
+        "has_bias": 1,
+        "head_dim_max": 96,
+        "hd_pair": 0,
+        "bias_q": 0,
+        "head_dim_v": 96,
+        "has_sink": 0
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "4d3dff8e-519a-56ec-8085-3f17d3dcc67e",
+      "name": "sdpa_rdna_f16_d96_causal0_bm128_bn32_bias1_biasq1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_rdna_f16_d96_causal0_bm128_bn32_bias1_biasq1.hsaco",
+        "symbol": "flash_attn_func_rdna_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "head_dim": 96,
+        "causal": 0,
+        "block_m": 128,
+        "block_n": 32,
+        "dv_split": 1,
+        "has_bias": 1,
+        "head_dim_max": 96,
+        "hd_pair": 0,
+        "bias_q": 1,
+        "head_dim_v": 96,
+        "has_sink": 0
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "8f20eece-fc72-5489-8b7a-45caa2fd6d91",
+      "name": "sdpa_rdna_f16_d96_causal1_bm128_bn32",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_rdna_f16_d96_causal1_bm128_bn32.hsaco",
+        "symbol": "flash_attn_func_rdna_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "head_dim": 96,
+        "causal": 1,
+        "block_m": 128,
+        "block_n": 32,
+        "dv_split": 1,
+        "has_bias": 0,
+        "head_dim_max": 96,
+        "hd_pair": 0,
+        "bias_q": 0,
+        "head_dim_v": 96,
+        "has_sink": 0
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "2eb89a37-d73e-5978-832f-d55243b6ae0e",
+      "name": "sdpa_rdna_f16_d96_causal1_bm128_bn32_bias1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_rdna_f16_d96_causal1_bm128_bn32_bias1.hsaco",
+        "symbol": "flash_attn_func_rdna_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "head_dim": 96,
+        "causal": 1,
+        "block_m": 128,
+        "block_n": 32,
+        "dv_split": 1,
+        "has_bias": 1,
+        "head_dim_max": 96,
+        "hd_pair": 0,
+        "bias_q": 0,
+        "head_dim_v": 96,
+        "has_sink": 0
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "985eb773-2c01-5bee-ac3b-722f2eede7c2",
+      "name": "sdpa_rdna_f16_d96_causal1_bm128_bn32_bias1_biasq1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_rdna_f16_d96_causal1_bm128_bn32_bias1_biasq1.hsaco",
+        "symbol": "flash_attn_func_rdna_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "head_dim": 96,
+        "causal": 1,
+        "block_m": 128,
+        "block_n": 32,
+        "dv_split": 1,
+        "has_bias": 1,
+        "head_dim_max": 96,
+        "hd_pair": 0,
+        "bias_q": 1,
+        "head_dim_v": 96,
+        "has_sink": 0
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "b356e2f9-86b3-5a2d-88a0-398169dcb53e",
+      "name": "sdpa_rdna_f16_d128_causal0_bm64_bn32",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_rdna_f16_d128_causal0_bm64_bn32.hsaco",
+        "symbol": "flash_attn_func_rdna_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "head_dim": 128,
+        "causal": 0,
+        "block_m": 64,
+        "block_n": 32,
+        "dv_split": 1,
+        "has_bias": 0,
+        "head_dim_max": 128,
+        "hd_pair": 0,
+        "bias_q": 0,
+        "head_dim_v": 128,
+        "has_sink": 0
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "9c5f1b45-da2d-50f8-93f4-3295db4c6b7c",
+      "name": "sdpa_rdna_f16_d128_causal0_bm128_bn32_bias1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_rdna_f16_d128_causal0_bm128_bn32_bias1.hsaco",
+        "symbol": "flash_attn_func_rdna_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "head_dim": 128,
+        "causal": 0,
+        "block_m": 128,
+        "block_n": 32,
+        "dv_split": 1,
+        "has_bias": 1,
+        "head_dim_max": 128,
+        "hd_pair": 0,
+        "bias_q": 0,
+        "head_dim_v": 128,
+        "has_sink": 0
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "21b16096-5211-5551-868a-14f982ed45c4",
+      "name": "sdpa_rdna_f16_d128_causal0_bm128_bn32_bias1_biasq1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_rdna_f16_d128_causal0_bm128_bn32_bias1_biasq1.hsaco",
+        "symbol": "flash_attn_func_rdna_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "head_dim": 128,
+        "causal": 0,
+        "block_m": 128,
+        "block_n": 32,
+        "dv_split": 1,
+        "has_bias": 1,
+        "head_dim_max": 128,
+        "hd_pair": 0,
+        "bias_q": 1,
+        "head_dim_v": 128,
+        "has_sink": 0
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "8550bb09-b809-5047-a945-4709b12d4db1",
+      "name": "sdpa_rdna_f16_d128_causal1_bm128_bn32",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_rdna_f16_d128_causal1_bm128_bn32.hsaco",
+        "symbol": "flash_attn_func_rdna_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "head_dim": 128,
+        "causal": 1,
+        "block_m": 128,
+        "block_n": 32,
+        "dv_split": 1,
+        "has_bias": 0,
+        "head_dim_max": 128,
+        "hd_pair": 0,
+        "bias_q": 0,
+        "head_dim_v": 128,
+        "has_sink": 0
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "94cca85d-d634-53e5-84e8-6d8056291265",
+      "name": "sdpa_rdna_f16_d128_causal1_bm128_bn32_bias1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_rdna_f16_d128_causal1_bm128_bn32_bias1.hsaco",
+        "symbol": "flash_attn_func_rdna_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "head_dim": 128,
+        "causal": 1,
+        "block_m": 128,
+        "block_n": 32,
+        "dv_split": 1,
+        "has_bias": 1,
+        "head_dim_max": 128,
+        "hd_pair": 0,
+        "bias_q": 0,
+        "head_dim_v": 128,
+        "has_sink": 0
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "72112953-efd2-5bf6-9275-4568611afd75",
+      "name": "sdpa_rdna_f16_d128_causal1_bm128_bn32_bias1_biasq1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_rdna_f16_d128_causal1_bm128_bn32_bias1_biasq1.hsaco",
+        "symbol": "flash_attn_func_rdna_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "head_dim": 128,
+        "causal": 1,
+        "block_m": 128,
+        "block_n": 32,
+        "dv_split": 1,
+        "has_bias": 1,
+        "head_dim_max": 128,
+        "hd_pair": 0,
+        "bias_q": 1,
+        "head_dim_v": 128,
+        "has_sink": 0
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "35a15a82-e281-5fb3-a46f-5ba522597597",
+      "name": "sdpa_rdna_f16_d256_causal0_bm64_bn32_pair1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_rdna_f16_d256_causal0_bm64_bn32_pair1.hsaco",
+        "symbol": "flash_attn_func_rdna_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "head_dim": 256,
+        "causal": 0,
+        "block_m": 64,
+        "block_n": 32,
+        "dv_split": 1,
+        "has_bias": 0,
+        "head_dim_max": 256,
+        "hd_pair": 1,
+        "bias_q": 0,
+        "head_dim_v": 256,
+        "has_sink": 0
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "efae1887-174e-5606-b57e-317a06ef8874",
+      "name": "sdpa_rdna_f16_d256_causal0_bm64_bn32_bias1_pair1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_rdna_f16_d256_causal0_bm64_bn32_bias1_pair1.hsaco",
+        "symbol": "flash_attn_func_rdna_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "head_dim": 256,
+        "causal": 0,
+        "block_m": 64,
+        "block_n": 32,
+        "dv_split": 1,
+        "has_bias": 1,
+        "head_dim_max": 256,
+        "hd_pair": 1,
+        "bias_q": 0,
+        "head_dim_v": 256,
+        "has_sink": 0
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "7d023d3b-8e74-5a72-8138-16284cf4b415",
+      "name": "sdpa_rdna_f16_d256_causal0_bm64_bn32_bias1_pair1_biasq1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_rdna_f16_d256_causal0_bm64_bn32_bias1_pair1_biasq1.hsaco",
+        "symbol": "flash_attn_func_rdna_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "head_dim": 256,
+        "causal": 0,
+        "block_m": 64,
+        "block_n": 32,
+        "dv_split": 1,
+        "has_bias": 1,
+        "head_dim_max": 256,
+        "hd_pair": 1,
+        "bias_q": 1,
+        "head_dim_v": 256,
+        "has_sink": 0
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "0cc8626a-2bf6-5add-a831-5a14aa6e4f0c",
+      "name": "sdpa_rdna_f16_d256_causal1_bm64_bn32_pair1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_rdna_f16_d256_causal1_bm64_bn32_pair1.hsaco",
+        "symbol": "flash_attn_func_rdna_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "head_dim": 256,
+        "causal": 1,
+        "block_m": 64,
+        "block_n": 32,
+        "dv_split": 1,
+        "has_bias": 0,
+        "head_dim_max": 256,
+        "hd_pair": 1,
+        "bias_q": 0,
+        "head_dim_v": 256,
+        "has_sink": 0
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "b5d18195-d44c-582e-b1a5-4e26545cc97f",
+      "name": "sdpa_rdna_f16_d256_causal1_bm64_bn32_bias1_pair1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_rdna_f16_d256_causal1_bm64_bn32_bias1_pair1.hsaco",
+        "symbol": "flash_attn_func_rdna_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "head_dim": 256,
+        "causal": 1,
+        "block_m": 64,
+        "block_n": 32,
+        "dv_split": 1,
+        "has_bias": 1,
+        "head_dim_max": 256,
+        "hd_pair": 1,
+        "bias_q": 0,
+        "head_dim_v": 256,
+        "has_sink": 0
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "fe26e1e0-603f-523c-ab98-abae4eae9753",
+      "name": "sdpa_rdna_f16_d256_causal1_bm64_bn32_bias1_pair1_biasq1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_rdna_f16_d256_causal1_bm64_bn32_bias1_pair1_biasq1.hsaco",
+        "symbol": "flash_attn_func_rdna_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "head_dim": 256,
+        "causal": 1,
+        "block_m": 64,
+        "block_n": 32,
+        "dv_split": 1,
+        "has_bias": 1,
+        "head_dim_max": 256,
+        "hd_pair": 1,
+        "bias_q": 1,
+        "head_dim_v": 256,
+        "has_sink": 0
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "804650e6-a393-598f-9d63-bfbaca7953f5",
+      "name": "sdpa_rdna_f16_d192_causal0_bm64_bn32_pair1_vd128",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_rdna_f16_d192_causal0_bm64_bn32_pair1_vd128.hsaco",
+        "symbol": "flash_attn_func_rdna_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "head_dim": 192,
+        "causal": 0,
+        "block_m": 64,
+        "block_n": 32,
+        "dv_split": 1,
+        "has_bias": 0,
+        "head_dim_max": 192,
+        "hd_pair": 1,
+        "bias_q": 0,
+        "head_dim_v": 128,
+        "has_sink": 0
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "1e79834a-eff6-5122-ad8e-e7dcee70f4cc",
+      "name": "sdpa_rdna_f16_d192_causal1_bm64_bn32_pair1_vd128",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_rdna_f16_d192_causal1_bm64_bn32_pair1_vd128.hsaco",
+        "symbol": "flash_attn_func_rdna_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "head_dim": 192,
+        "causal": 1,
+        "block_m": 64,
+        "block_n": 32,
+        "dv_split": 1,
+        "has_bias": 0,
+        "head_dim_max": 192,
+        "hd_pair": 1,
+        "bias_q": 0,
+        "head_dim_v": 128,
+        "has_sink": 0
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "e8f3a29d-4fa8-5d8a-8e66-05252815f49d",
+      "name": "sdpa_rdna_f16_dgeneric_causal0_bm64_bn32_dmax64",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_rdna_f16_dgeneric_causal0_bm64_bn32_dmax64.hsaco",
+        "symbol": "flash_attn_func_rdna_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "head_dim": 0,
+        "causal": 0,
+        "block_m": 64,
+        "block_n": 32,
+        "dv_split": 1,
+        "has_bias": 0,
+        "head_dim_max": 64,
+        "hd_pair": 0,
+        "bias_q": 0,
+        "head_dim_v": 0,
+        "has_sink": 0
+      },
+      "priority": 40
+    },
+    {
+      "version": "1.0",
+      "id": "03ceae07-54b2-5a10-b7ee-84f84bba3de5",
+      "name": "sdpa_rdna_f16_dgeneric_causal1_bm64_bn32_dmax64",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_rdna_f16_dgeneric_causal1_bm64_bn32_dmax64.hsaco",
+        "symbol": "flash_attn_func_rdna_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "head_dim": 0,
+        "causal": 1,
+        "block_m": 64,
+        "block_n": 32,
+        "dv_split": 1,
+        "has_bias": 0,
+        "head_dim_max": 64,
+        "hd_pair": 0,
+        "bias_q": 0,
+        "head_dim_v": 0,
+        "has_sink": 0
+      },
+      "priority": 40
+    },
+    {
+      "version": "1.0",
+      "id": "0b884168-a962-538a-a3a1-04ceedcc0bfa",
+      "name": "sdpa_rdna_f16_dgeneric_causal0_bm128_bn32_dmax96",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_rdna_f16_dgeneric_causal0_bm128_bn32_dmax96.hsaco",
+        "symbol": "flash_attn_func_rdna_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "head_dim": 0,
+        "causal": 0,
+        "block_m": 128,
+        "block_n": 32,
+        "dv_split": 1,
+        "has_bias": 0,
+        "head_dim_max": 96,
+        "hd_pair": 0,
+        "bias_q": 0,
+        "head_dim_v": 0,
+        "has_sink": 0
+      },
+      "priority": 30
+    },
+    {
+      "version": "1.0",
+      "id": "74f86f7b-8d94-5df4-b42a-6b87def054bd",
+      "name": "sdpa_rdna_f16_dgeneric_causal1_bm128_bn32_dmax96",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_rdna_f16_dgeneric_causal1_bm128_bn32_dmax96.hsaco",
+        "symbol": "flash_attn_func_rdna_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "head_dim": 0,
+        "causal": 1,
+        "block_m": 128,
+        "block_n": 32,
+        "dv_split": 1,
+        "has_bias": 0,
+        "head_dim_max": 96,
+        "hd_pair": 0,
+        "bias_q": 0,
+        "head_dim_v": 0,
+        "has_sink": 0
+      },
+      "priority": 30
+    },
+    {
+      "version": "1.0",
+      "id": "b6a04935-fef7-5147-9d51-8e8d83c77f02",
+      "name": "sdpa_rdna_f16_dgeneric_causal0_bm128_bn32_dmax128",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_rdna_f16_dgeneric_causal0_bm128_bn32_dmax128.hsaco",
+        "symbol": "flash_attn_func_rdna_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "head_dim": 0,
+        "causal": 0,
+        "block_m": 128,
+        "block_n": 32,
+        "dv_split": 1,
+        "has_bias": 0,
+        "head_dim_max": 128,
+        "hd_pair": 0,
+        "bias_q": 0,
+        "head_dim_v": 0,
+        "has_sink": 0
+      },
+      "priority": 20
+    },
+    {
+      "version": "1.0",
+      "id": "4763a72d-eac3-50dd-bc5b-13610b7e63d7",
+      "name": "sdpa_rdna_f16_dgeneric_causal1_bm128_bn32_dmax128",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_rdna_f16_dgeneric_causal1_bm128_bn32_dmax128.hsaco",
+        "symbol": "flash_attn_func_rdna_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "head_dim": 0,
+        "causal": 1,
+        "block_m": 128,
+        "block_n": 32,
+        "dv_split": 1,
+        "has_bias": 0,
+        "head_dim_max": 128,
+        "hd_pair": 0,
+        "bias_q": 0,
+        "head_dim_v": 0,
+        "has_sink": 0
+      },
+      "priority": 20
+    },
+    {
+      "version": "1.0",
+      "id": "feb56a87-04e5-5862-9e3a-0315cce6fb41",
+      "name": "sdpa_rdna_f16_dgeneric_causal0_bm64_bn32_dmax160_pair1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_rdna_f16_dgeneric_causal0_bm64_bn32_dmax160_pair1.hsaco",
+        "symbol": "flash_attn_func_rdna_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "head_dim": 0,
+        "causal": 0,
+        "block_m": 64,
+        "block_n": 32,
+        "dv_split": 1,
+        "has_bias": 0,
+        "head_dim_max": 160,
+        "hd_pair": 1,
+        "bias_q": 0,
+        "head_dim_v": 0,
+        "has_sink": 0
+      },
+      "priority": 15
+    },
+    {
+      "version": "1.0",
+      "id": "54ce1a00-f1ba-58e7-8813-44797a81e305",
+      "name": "sdpa_rdna_f16_dgeneric_causal1_bm64_bn32_dmax160_pair1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_rdna_f16_dgeneric_causal1_bm64_bn32_dmax160_pair1.hsaco",
+        "symbol": "flash_attn_func_rdna_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "head_dim": 0,
+        "causal": 1,
+        "block_m": 64,
+        "block_n": 32,
+        "dv_split": 1,
+        "has_bias": 0,
+        "head_dim_max": 160,
+        "hd_pair": 1,
+        "bias_q": 0,
+        "head_dim_v": 0,
+        "has_sink": 0
+      },
+      "priority": 15
+    },
+    {
+      "version": "1.0",
+      "id": "3b8b40d5-2dfc-55d5-9a4b-9627c512e3d5",
+      "name": "sdpa_rdna_f16_dgeneric_causal0_bm64_bn32_dmax224_pair1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_rdna_f16_dgeneric_causal0_bm64_bn32_dmax224_pair1.hsaco",
+        "symbol": "flash_attn_func_rdna_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "head_dim": 0,
+        "causal": 0,
+        "block_m": 64,
+        "block_n": 32,
+        "dv_split": 1,
+        "has_bias": 0,
+        "head_dim_max": 224,
+        "hd_pair": 1,
+        "bias_q": 0,
+        "head_dim_v": 0,
+        "has_sink": 0
+      },
+      "priority": 12
+    },
+    {
+      "version": "1.0",
+      "id": "248ba80d-6aa2-567c-9f0c-3550628e72d2",
+      "name": "sdpa_rdna_f16_dgeneric_causal1_bm64_bn32_dmax224_pair1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_rdna_f16_dgeneric_causal1_bm64_bn32_dmax224_pair1.hsaco",
+        "symbol": "flash_attn_func_rdna_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "head_dim": 0,
+        "causal": 1,
+        "block_m": 64,
+        "block_n": 32,
+        "dv_split": 1,
+        "has_bias": 0,
+        "head_dim_max": 224,
+        "hd_pair": 1,
+        "bias_q": 0,
+        "head_dim_v": 0,
+        "has_sink": 0
+      },
+      "priority": 12
+    },
+    {
+      "version": "1.0",
+      "id": "86706871-8a55-53d1-ba8e-71778951969a",
+      "name": "sdpa_rdna_f16_dgeneric_causal0_bm64_bn32_dv2_dmax256_pair1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_rdna_f16_dgeneric_causal0_bm64_bn32_dv2_dmax256_pair1.hsaco",
+        "symbol": "flash_attn_func_rdna_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "head_dim": 0,
+        "causal": 0,
+        "block_m": 64,
+        "block_n": 32,
+        "dv_split": 2,
+        "has_bias": 0,
+        "head_dim_max": 256,
+        "hd_pair": 1,
+        "bias_q": 0,
+        "head_dim_v": 0,
+        "has_sink": 0
+      },
+      "priority": 10
+    },
+    {
+      "version": "1.0",
+      "id": "0b71ccf8-a798-52a7-9bd4-bf1abd98af1d",
+      "name": "sdpa_rdna_f16_dgeneric_causal1_bm64_bn32_dv2_dmax256_pair1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_rdna_f16_dgeneric_causal1_bm64_bn32_dv2_dmax256_pair1.hsaco",
+        "symbol": "flash_attn_func_rdna_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "head_dim": 0,
+        "causal": 1,
+        "block_m": 64,
+        "block_n": 32,
+        "dv_split": 2,
+        "has_bias": 0,
+        "head_dim_max": 256,
+        "hd_pair": 1,
+        "bias_q": 0,
+        "head_dim_v": 0,
+        "has_sink": 0
+      },
+      "priority": 10
+    },
+    {
+      "version": "1.0",
+      "id": "d7e9407a-2e2a-537f-8a2e-6280794ae73f",
+      "name": "sdpa_rdna_f16_d64_causal0_bm64_bn32_sink1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_rdna_f16_d64_causal0_bm64_bn32_sink1.hsaco",
+        "symbol": "flash_attn_func_rdna_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "head_dim": 64,
+        "causal": 0,
+        "block_m": 64,
+        "block_n": 32,
+        "dv_split": 1,
+        "has_bias": 0,
+        "head_dim_max": 64,
+        "hd_pair": 0,
+        "bias_q": 0,
+        "has_sink": 1,
+        "head_dim_v": 64
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "edc3ff69-0be9-5648-9995-bef0b3cc9d6d",
+      "name": "sdpa_rdna_f16_d64_causal1_bm64_bn32_sink1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_rdna_f16_d64_causal1_bm64_bn32_sink1.hsaco",
+        "symbol": "flash_attn_func_rdna_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "head_dim": 64,
+        "causal": 1,
+        "block_m": 64,
+        "block_n": 32,
+        "dv_split": 1,
+        "has_bias": 0,
+        "head_dim_max": 64,
+        "hd_pair": 0,
+        "bias_q": 0,
+        "has_sink": 1,
+        "head_dim_v": 64
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "224d0e35-686c-523a-b306-fd3acaeb6491",
+      "name": "sdpa_rdna_f16_d128_causal0_bm64_bn32_sink1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_rdna_f16_d128_causal0_bm64_bn32_sink1.hsaco",
+        "symbol": "flash_attn_func_rdna_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "head_dim": 128,
+        "causal": 0,
+        "block_m": 64,
+        "block_n": 32,
+        "dv_split": 1,
+        "has_bias": 0,
+        "head_dim_max": 128,
+        "hd_pair": 0,
+        "bias_q": 0,
+        "has_sink": 1,
+        "head_dim_v": 128
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "989640d5-dada-5bdf-b26c-80227e8fac58",
+      "name": "sdpa_rdna_f16_d128_causal1_bm128_bn32_sink1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_rdna_f16_d128_causal1_bm128_bn32_sink1.hsaco",
+        "symbol": "flash_attn_func_rdna_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "head_dim": 128,
+        "causal": 1,
+        "block_m": 128,
+        "block_n": 32,
+        "dv_split": 1,
+        "has_bias": 0,
+        "head_dim_max": 128,
+        "hd_pair": 0,
+        "bias_q": 0,
+        "has_sink": 1,
+        "head_dim_v": 128
+      },
+      "priority": 100
+    }
+  ]
+}

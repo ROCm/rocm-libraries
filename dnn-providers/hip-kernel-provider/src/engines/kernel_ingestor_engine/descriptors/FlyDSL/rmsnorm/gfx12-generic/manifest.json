@@ -9,7 +9,7 @@
     "aiter_kernels_commit": "8253efc4059516f492df597b80ce5311e9fda8bd",
     "rocm_version": "7.13.0",
     "generic_target_shim": "chipset=gfx1200 flydsl_gpu_arch=gfx1200",
-    "inputs_sha256": "78b996a7baf4bf03e1392f302e51721c5dda3a487ed09a2b7c0a4c4642249b50"
+    "inputs_sha256": "125cb5ef0c0f552e7319dcecc3995258b6bcb375a42e98a3f6892b0faeaf47f4"
   },
   "instances": [
     {

@@ -91,8 +91,8 @@ Every generator compiles its objects in a pool of fresh worker processes
 objects come back in table order and are checked, written and recorded serially, so
 the bytes are a serial build's. `FLYDSL_GEN_JOBS` sets the worker count (default:
 half the CPUs, since each worker holds a compile in memory; `1` compiles in the
-generator's own process). On a 32-thread machine a full
-regeneration is several times faster than a serial one.
+generator's own process). On a 32-thread machine every op and arch regenerates in
+about five minutes instead of twenty-five.
 
 ---
 
@@ -105,12 +105,12 @@ Each target has its own ops; pick one row and set `ARCH` and `OPS` from it:
 
 | `ARCH` | `OPS` | Objects |
 |---|---|---|
-| `gfx11-generic` | `rmsnorm` | 12 |
-| `gfx12-generic` | `rmsnorm` | 12 |
+| `gfx11-generic` | `rmsnorm sdpa_rdna sdpa_rdna_decode` | 168 (12 + 84 + 72) |
+| `gfx12-generic` | `rmsnorm sdpa_rdna sdpa_rdna_decode sdpa_aiw` | 240 (12 + 84 + 72 + 72) |
 
 ```bash
 cd dnn-providers/hip-kernel-provider/flydsl
-ARCH=gfx11-generic OPS="rmsnorm"
+ARCH=gfx11-generic OPS="rmsnorm sdpa_rdna sdpa_rdna_decode"
 
 # Compile into a scratch directory -- must be empty or nonexistent, since the
 # generator writes files rather than clearing the directory, so an object left
@@ -180,9 +180,14 @@ cd dnn-providers/hip-kernel-provider/flydsl
 
 # (1) Compile. Writes $CONTENT/<op>/<arch>/*.hsaco + manifest.json, and
 #     $CONTENT/<op>/<arch>.SOURCE.md
-#     for each op.
+#     for each op. The SDPA kernels carry the gfx11 (RDNA3 / RDNA3.5) and gfx12
+#     (RDNA4) WMMA ABIs; gen_sdpa_rdna refuses any other arch before compiling.
 for ARCH in gfx11-generic gfx12-generic; do
   $PY -m generators.gen_rmsnorm --arch $ARCH
+  $PY -m generators.gen_sdpa_rdna --arch $ARCH
+  $PY -m generators.gen_sdpa_rdna_decode --arch $ARCH
+  # AOTriton's gfx1201 kernel, its own engine (gfx12-generic only).
+  [ $ARCH = gfx12-generic ] && $PY -m generators.gen_sdpa_aiw --arch $ARCH
 
   # (2) Descriptors. Every field is derived from the manifest and the objects it
   #     names, so a descriptor cannot disagree with the object it describes.
@@ -206,7 +211,11 @@ FlyDSL 0.3.4 cannot name a generic target to MLIR, so `prepare()` installs
 `generators/_generic_targets.py`, a shim pinned to that release, which hands
 MLIR the family's lowest member (`gfx1100`) as its chipset while the object is
 still built for, and stamped as, `gfx11-generic`. The manifest's toolchain block
-records it (`generic_target_shim`).
+records it (`generic_target_shim`). `gen_sdpa_rdna` also builds the generic objects
+with `amdgpu-use-amdgpu-trackers`, added to the kernel's own LLVM options (the
+effective set is recorded per instance as `llvm_options`):
+without it the d128 causal objects spill a few VGPRs, because the generic ISA
+has no gfx115x scalar-float instructions.
 
 **`gfx12-generic`** (gfx1200, gfx1201) works the same way, with one more step.
 FlyDSL 0.3.4's own arch checks classify RDNA by name prefix (`gfx120`), which
@@ -215,6 +224,9 @@ buffer-descriptor flags -- silently, for RMSNorm. The family's row in
 `arch_families.json` therefore names a `flydsl_gpu_arch` (gfx1200) that
 `prepare()` gives those checks, while the object is still built for and stamped
 as `gfx12-generic`; `prepare()` refuses a build whose checks would not see RDNA.
+The kernels pick their WMMA operand layout from that same arch (attention-kernel
+modification 17). gfx12 needs no `amdgpu-use-amdgpu-trackers`: every instance
+fits without a spill under the default scheduler.
 
 A concrete gfx11 or gfx120x arch still works (`--arch gfx1151`) if a part ever
 needs its own objects; its directory then ships only to that arch.
@@ -284,33 +296,62 @@ about which compiler built it.
 
 ## 5. Checking the vendored sources against upstream
 
-`kernels_src/` is a vendored copy of eight kernel modules from FlyDSL. Deliberate
-modifications are recorded beside the code, in the header of
-`kernels_src/kernels/norm/rmsnorm_kernel.py` (three). Each file's header names the
-upstream and path it came from, and the tool reads that header to decide what
-to diff it against. To see what has drifted:
+`kernels_src/` is a vendored copy of sixteen kernel modules from three upstreams.
+Nine come from FlyDSL; the RDNA attention kernel comes from AITER, which carries
+FlyDSL kernels upstream FlyDSL does not; and the RDNA4 attention package
+(`attention_rdna4/`, six modules) comes from AOTriton. Deliberate modifications are
+recorded beside the code: `kernels_src/kernels/norm/rmsnorm_kernel.py` (three) and
+`kernels_src/kernels/attention_rdna/flash_attn_func_rdna.py` (sixteen — the gfx11
+port and the runtime arguments that let a few objects cover many shapes) in their
+own headers, the RDNA4 package's in `kernels_src/kernels/attention_rdna4/README.md`.
+Each file's header names the upstream and path it came from -- the renamed `attention_rdna/` package maps back to upstream's `kernels/attention/`;
+the modules of `attention_rdna4/` carry none and inherit their package's, which names
+AOTriton's flat `modules/flash/flyc/` directory -- and the tool reads that header to
+decide what to diff it against. To see what has drifted:
 
 ```bash
-python3 tools/diff_upstream.py --upstream /path/to/FlyDSL --commit
+python3 tools/diff_upstream.py --upstream /path/to/FlyDSL --aiter /path/to/aiter \
+    --aotriton /path/to/aotriton --commit
 ```
 
 Expected against the pinned checkouts, and the state of the tree as committed:
 
 ```
 FlyDSL (v0.3.4.1-19-g89ad52f) at the pinned commit 89ad52fbbb9e
+AITER at the pinned commit 8253efc40595
+AOTriton at the pinned commit b5e8cfb909e5
+=== kernels/attention_rdna/__init__.py
+  …
+=== kernels/attention_rdna/flash_attn_func_rdna.py
+  …
+=== kernels/attention_rdna4/flash_attn_func_gfx1201_aiw.py
+  …
+=== kernels/attention_rdna4/flyc_polyfill.py
+  …
+=== kernels/attention_rdna4/fmha_abi_gfx1201.py
+  …
+=== kernels/attention_rdna4/fmha_common_gfx1201.py
+  …
+=== kernels/attention_rdna4/fmha_tuning_gfx1201.py
+  …
 === kernels/norm/rmsnorm_kernel.py
   …
-7/8 vendored files identical to upstream after normalization; 1 differ, 0 absent upstream, 0 not compared
+8/16 vendored files identical to upstream after normalization; 8 differ, 0 absent upstream, 0 not compared
 ```
 
-The differing file is the point of the tool, not a failure — read its hunks
-against its recorded modifications. It differs at least by the provenance
-header it carries. Anything that header does not
-account for is drift: either a local edit nobody wrote down, or an upstream
-re-vendor that did not update the pins in `generators/_flydsl_env.py`. Exit
-status reports whether the comparison held together, not whether files matched:
-non-zero means a vendored file had **no upstream counterpart**, i.e. this is not
-the checkout the tree was taken from and no hunk can be trusted.
+Without `--aiter` or `--aotriton`, that upstream's files are reported as not compared
+rather than as absent. The RDNA4 package's `__init__.py` is this tree's own (upstream's
+directory has none) and is not compared. The differing files are the point of the
+tool, not a failure — read each one's hunks against its recorded modifications. Every
+one of them differs at least by the provenance header it carries, or in
+`attention_rdna4/` by the package imports of its modification 0; `attention_rdna/__init__.py` differs by nothing
+else. Anything those records do not account for is drift: either a local edit nobody
+wrote down, or an upstream re-vendor that did not update the pins in
+`generators/_flydsl_env.py` (AOTriton's commit is recorded in its package's
+`__init__.py`, since no generator reads it). Exit status reports whether the
+comparison held together, not whether files matched: non-zero means a vendored file
+had **no upstream counterpart**, i.e. this is not the checkout the tree was taken from
+and no hunk can be trusted.
 
 It **normalizes both sides with `black` before diffing**. This is a requirement,
 not a nicety: the repo's hook reformats our copy, so an un-normalized diff shows

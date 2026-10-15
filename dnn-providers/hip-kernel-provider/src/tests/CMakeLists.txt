@@ -290,6 +290,45 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                 EveryKernelDeclaresTheEightSlotSignature
         )
     endif()
+    if(HIPKERNELPROVIDER_FLYDSL_ACTIVE AND HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_rdna)
+        # A second suite over the same shard: one EXPECTED_CASES list pins one suite.
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            ARCHES ${HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_rdna}
+            SUITES TestFlydslSdpaRdnaPacks
+            EXPECTED_CASES
+                IsOnePackWithAGraphMatchAndOneKernelScopedMatcher
+                ShipsEverySpecializedAndGenericVariantOnce
+                RanksTheNarrowestServingObjectFirst
+                EveryKernelDeclaresTheThirtyEightSlotSignature
+        )
+    endif()
+    if(HIPKERNELPROVIDER_FLYDSL_ACTIVE AND HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_aiw)
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            ARCHES ${HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_aiw}
+            SUITES TestFlydslSdpaAiwPacks
+            EXPECTED_CASES
+                IsOnePackWithAGraphMatchAndOneKernelScopedMatcher
+                ShipsEveryVariantOnce
+                EveryKernelDeclaresTheFiftySlotSignature
+        )
+    endif()
+    if(HIPKERNELPROVIDER_FLYDSL_ACTIVE AND HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_rdna_decode)
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            ARCHES ${HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_rdna_decode}
+            SUITES TestFlydslSdpaRdnaDecodePacks
+            EXPECTED_CASES
+                IsOnePackWithAGraphMatchAndOneKernelScopedMatcher
+                ShipsEveryDecodeVariantOnce
+                RanksTheNarrowestServingObjectFirst
+                EveryKernelDeclaresTheFortySlotSignature
+        )
+    endif()
 
     # Census for the gfx950 dense-attention production pack. Reads only the product
     # shard, so it is eligible for census registration.

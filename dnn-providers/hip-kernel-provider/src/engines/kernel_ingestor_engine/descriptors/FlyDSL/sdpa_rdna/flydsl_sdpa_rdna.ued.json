@@ -1,0 +1,21 @@
+{
+  "version": "1.0",
+  "id": "a122a721-719a-5132-8cfe-97590e7485e7",
+  "name": "hipkernel:flydsl_sdpa_rdna",
+  "sdk_version": "1.2.0",
+  "graph_match": {
+    "native": "hipkernel.flydsl_sdpa_rdna.graph_match"
+  },
+  "heuristic": "4757c57d-f563-5463-9b4a-d22d0c4e1332",
+  "metadata": "330ae779-3bb5-5a68-9a64-75bfdcbfd1fe",
+  "knobs": [
+    "block_m",
+    "block_n",
+    "dv_split",
+    "has_bias",
+    "head_dim_max",
+    "hd_pair",
+    "bias_q",
+    "has_sink"
+  ]
+}
