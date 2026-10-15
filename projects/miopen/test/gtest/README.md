@@ -157,15 +157,20 @@ read once per process, so each case runs a fresh process:
 - `forwarding_failure_probe` links only the public `libMIOpen.so`, as an application would. It
   runs the steps named on its command line, such as `conv_forward` or `last_forwarded`, and prints
   one result line per step.
-- Two fake hipDNN backends stand in for a broken installation. `wrong_major` reports a hipDNN
-  major version no real frontend has, and `no_version` reports no version at all. Each prints a
-  marker line to stderr when it is loaded, which shows whether a case loaded a backend.
+- A fake hipDNN backend stands in for a broken installation. It has the real backend's file name
+  but no version, so hipDNN loads it and then refuses it. Every case points
+  `HIPDNN_BACKEND_LIBRARY_PATH` at it, so no case can reach a real backend. It prints a marker
+  line to stderr when it is loaded, which shows whether a case loaded it at all.
 - `script/test_forwarding_failure_modes.py` is the `unittest` module that runs the probe under
   each environment and checks its output.
 
 Run it from the build directory with `ctest -R forwarding_failure_modes`. It needs no GPU.
 
 A missing backend cannot be tested directly. When `HIPDNN_BACKEND_LIBRARY_PATH` names a directory
-without `libhipdnn_backend.so`, hipDNN moves on to its next search location and may find the real
-backend there. `wrong_major` and `no_version` are the closest stand-ins: they make hipDNN refuse
-the backend, which takes MIOpen down the same path as a missing one.
+without the backend, hipDNN moves on to its next search location and may find the real backend
+there. The fake is the closest stand-in: hipDNN refuses it, which takes MIOpen down the same path
+as a missing backend.
+
+The fake is built as a CMake `MODULE` library, not `SHARED`. On Windows a `SHARED` library's DLL
+is written next to `MIOpen.dll`, where hipDNN looks for its backend, so every other test would
+load the fake. A `MODULE` library goes to its own directory on every platform.

@@ -470,19 +470,16 @@ if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
     LABELS "${MIOPEN_FORWARDING_PARITY_TIER_LABELS}"
     TIMEOUT 300)
 
-  # Backends that hipDNN loads and then refuses, each in its own directory because the
-  # frontend looks for one fixed file name.
-  set(MIOPEN_FAKE_HIPDNN_BACKEND_VARIANTS wrong_major no_version)
-  foreach(variant ${MIOPEN_FAKE_HIPDNN_BACKEND_VARIANTS})
-    add_library(fake_hipdnn_backend_${variant} SHARED forwarding_failure/fake_hipdnn_backend.cpp)
-    target_compile_definitions(fake_hipdnn_backend_${variant} PRIVATE FAKE_BACKEND_${variant})
-    set_target_properties(fake_hipdnn_backend_${variant} PROPERTIES
-      OUTPUT_NAME hipdnn_backend
-      NO_SONAME ON
-      LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/fake_hipdnn_backends/${variant}")
-    add_dependencies(miopen-tests fake_hipdnn_backend_${variant})
-    add_dependencies(miopen-check fake_hipdnn_backend_${variant})
-  endforeach()
+  # A backend that hipDNN loads and then refuses. It has the real backend's file name, so it
+  # gets its own directory. MODULE, not SHARED: on Windows a SHARED library's DLL ignores the
+  # LIBRARY output and install directories and lands next to MIOpen.dll. hipDNN looks there
+  # before anywhere but HIPDNN_BACKEND_LIBRARY_PATH, so every other test would load the fake.
+  add_library(fake_hipdnn_backend MODULE forwarding_failure/fake_hipdnn_backend.cpp)
+  set_target_properties(fake_hipdnn_backend PROPERTIES
+    OUTPUT_NAME hipdnn_backend
+    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/fake_hipdnn_backend")
+  add_dependencies(miopen-tests fake_hipdnn_backend)
+  add_dependencies(miopen-check fake_hipdnn_backend)
 
   add_executable(forwarding_failure_probe forwarding_failure/forwarding_failure_probe.cpp)
   target_link_libraries(forwarding_failure_probe PRIVATE MIOpen)
@@ -496,7 +493,7 @@ if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
     LABELS "${MIOPEN_FORWARDING_PARITY_TIER_LABELS}"
     TIMEOUT 300
     ENVIRONMENT
-      "PYTHONDONTWRITEBYTECODE=1;MIOPEN_FAILURE_PROBE=$<TARGET_FILE:forwarding_failure_probe>;MIOPEN_FAKE_HIPDNN_BACKENDS=${CMAKE_CURRENT_BINARY_DIR}/fake_hipdnn_backends"
+      "PYTHONDONTWRITEBYTECODE=1;MIOPEN_FAILURE_PROBE=$<TARGET_FILE:forwarding_failure_probe>;MIOPEN_FAKE_HIPDNN_BACKEND=${CMAKE_CURRENT_BINARY_DIR}/fake_hipdnn_backend"
     ENVIRONMENT_MODIFICATION
       "PYTHONPATH=path_list_prepend:${PROJECT_SOURCE_DIR}/script")
 endif()
@@ -589,7 +586,7 @@ endif()
 if(MIOPEN_ENABLE_HIPDNN_WRAPPER AND NOT MIOPEN_TEST_DISCRETE)
   file(APPEND "${INSTALL_TEST_FILE}"
 "add_test(forwarding_failure_modes python3 \"../test_forwarding_failure_modes.py\" \"-v\")
-set_tests_properties(forwarding_failure_modes PROPERTIES TIMEOUT 300 LABELS \"${MIOPEN_FORWARDING_PARITY_TIER_LABELS}\" ENVIRONMENT \"PYTHONDONTWRITEBYTECODE=1;MIOPEN_FAILURE_PROBE=../forwarding_failure_probe;MIOPEN_FAKE_HIPDNN_BACKENDS=../fake_hipdnn_backends\")
+set_tests_properties(forwarding_failure_modes PROPERTIES TIMEOUT 300 LABELS \"${MIOPEN_FORWARDING_PARITY_TIER_LABELS}\" ENVIRONMENT \"PYTHONDONTWRITEBYTECODE=1;MIOPEN_FAILURE_PROBE=../forwarding_failure_probe${CMAKE_EXECUTABLE_SUFFIX};MIOPEN_FAKE_HIPDNN_BACKEND=../fake_hipdnn_backend\")
 
 ")
 endif()
@@ -630,11 +627,9 @@ if( NOT ENABLE_ASAN_PACKAGING )
         DESTINATION ${CMAKE_INSTALL_BINDIR}
         COMPONENT tests
     )
-    foreach(variant ${MIOPEN_FAKE_HIPDNN_BACKEND_VARIANTS})
-      install(TARGETS fake_hipdnn_backend_${variant}
-          LIBRARY DESTINATION ${CMAKE_INSTALL_BINDIR}/fake_hipdnn_backends/${variant}
-          COMPONENT tests
-      )
-    endforeach()
+    install(TARGETS fake_hipdnn_backend
+        LIBRARY DESTINATION ${CMAKE_INSTALL_BINDIR}/fake_hipdnn_backend
+        COMPONENT tests
+    )
   endif()
 endif()
