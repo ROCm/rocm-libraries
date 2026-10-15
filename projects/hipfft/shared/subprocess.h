@@ -347,12 +347,12 @@ static std::vector<char> execute_subprocess(const std::string&              exe,
     posix_spawn_file_actions_adddup2(&spawn_file_actions, child_stdin_read, STDIN_FILENO);
     posix_spawn_file_actions_adddup2(&spawn_file_actions, child_stdout_write, STDOUT_FILENO);
 
-    int spawn_result = posix_spawnp(&pid,
-                                    exe.c_str(),
-                                    &spawn_file_actions,
-                                    nullptr,
-                                    const_cast<char* const*>(child_argv.data()),
-                                    environ);
+    int spawn_result = posix_spawn(&pid,
+                                   exe.c_str(),
+                                   &spawn_file_actions,
+                                   nullptr,
+                                   const_cast<char* const*>(child_argv.data()),
+                                   environ);
     posix_spawn_file_actions_destroy(&spawn_file_actions);
     if(spawn_result != 0)
     {
