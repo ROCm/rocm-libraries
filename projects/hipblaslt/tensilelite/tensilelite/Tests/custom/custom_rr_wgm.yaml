@@ -112,7 +112,7 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [64, 64, 1, 128]
+          - Exact: [256, 256, 1, 128]
   -
     - # ProblemType — RR_GEMM_TN_FP6_FP6_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_128x256x128_UR_2_WGM_
       OperationType: GEMM
@@ -207,7 +207,7 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [64, 64, 1, 128]
+          - Exact: [256, 256, 1, 128]
   -
     - # ProblemType — RR_GEMM_TN_FP6_FP6_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_128x32x128_UR_2_WGM_
       OperationType: GEMM
@@ -302,7 +302,7 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [64, 64, 1, 128]
+          - Exact: [256, 256, 1, 128]
   -
     - # ProblemType — RR_GEMM_TN_FP6_FP6_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x128x128_UR_2_WGM_
       OperationType: GEMM
@@ -397,7 +397,7 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [64, 64, 1, 128]
+          - Exact: [256, 256, 1, 128]
   -
     - # ProblemType — RR_GEMM_TN_FP6_FP6_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x256x128_UR_2_WGM_
       OperationType: GEMM
@@ -492,7 +492,7 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [64, 64, 1, 128]
+          - Exact: [256, 256, 1, 128]
   -
     - # ProblemType — RR_GEMM_TN_FP6_FP6_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x32x128_UR_2_WGM_
       OperationType: GEMM
@@ -587,7 +587,7 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [64, 64, 1, 128]
+          - Exact: [256, 256, 1, 128]
   -
     - # ProblemType — RR_GEMM_TN_FP6_FP6_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x64x128_UR_2_WGM_
       OperationType: GEMM
@@ -682,7 +682,7 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [64, 64, 1, 128]
+          - Exact: [256, 256, 1, 128]
   -
     - # ProblemType — RR_GEMM_TN_FP6_FP6_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x128x128_UR_2_WGM_
       OperationType: GEMM
@@ -777,7 +777,7 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [64, 64, 1, 128]
+          - Exact: [256, 256, 1, 128]
   -
     - # ProblemType — RR_GEMM_TN_FP6_FP6_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x256x128_UR_2_WGM_
       OperationType: GEMM
@@ -872,7 +872,7 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [64, 64, 1, 128]
+          - Exact: [256, 256, 1, 128]
   -
     - # ProblemType — RR_GEMM_TN_FP6_FP6_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_64x256x128_UR_2_WGM_
       OperationType: GEMM
@@ -967,7 +967,7 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [64, 64, 1, 128]
+          - Exact: [256, 256, 1, 128]
   -
     - # ProblemType — RR_GEMM_TN_FP8_FP4_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_128x128x128_UR_2_WGM_
       OperationType: GEMM
@@ -1062,7 +1062,7 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [64, 64, 1, 128]
+          - Exact: [256, 256, 1, 128]
   -
     - # ProblemType — RR_GEMM_TN_FP8_FP4_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_128x256x128_UR_2_WGM_
       OperationType: GEMM
@@ -1157,7 +1157,7 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [64, 64, 1, 128]
+          - Exact: [256, 256, 1, 128]
   -
     - # ProblemType — RR_GEMM_TN_FP8_FP4_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_128x32x128_UR_2_WGM_
       OperationType: GEMM
@@ -1252,7 +1252,7 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [64, 64, 1, 128]
+          - Exact: [256, 256, 1, 128]
   -
     - # ProblemType — RR_GEMM_TN_FP8_FP4_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_16x256x128_UR_2_WGM_
       OperationType: GEMM
@@ -1347,7 +1347,7 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [64, 64, 1, 128]
+          - Exact: [256, 256, 1, 128]
   -
     - # ProblemType — RR_GEMM_TN_FP8_FP4_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x128x128_UR_2_WGM_
       OperationType: GEMM
@@ -1442,7 +1442,7 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [64, 64, 1, 128]
+          - Exact: [256, 256, 1, 128]
   -
     - # ProblemType — RR_GEMM_TN_FP8_FP4_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x256x128_UR_2_WGM_
       OperationType: GEMM
@@ -1537,7 +1537,7 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [64, 64, 1, 128]
+          - Exact: [256, 256, 1, 128]
   -
     - # ProblemType — RR_GEMM_TN_FP8_FP4_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x32x128_UR_2_WGM_
       OperationType: GEMM
@@ -1632,7 +1632,7 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [64, 64, 1, 128]
+          - Exact: [256, 256, 1, 128]
   -
     - # ProblemType — RR_GEMM_TN_FP8_FP4_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x128x128_UR_2_WGM_
       OperationType: GEMM
@@ -1727,7 +1727,7 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [64, 64, 1, 128]
+          - Exact: [256, 256, 1, 128]
   -
     - # ProblemType — RR_GEMM_TN_FP8_FP4_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x256x128_UR_2_WGM_
       OperationType: GEMM
@@ -1822,7 +1822,7 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [64, 64, 1, 128]
+          - Exact: [256, 256, 1, 128]
   -
     - # ProblemType — RR_GEMM_TN_FP8_FP4_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x64x128_UR_2_WGM_
       OperationType: GEMM
@@ -1917,4 +1917,4 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [64, 64, 1, 128]
+          - Exact: [256, 256, 1, 128]
