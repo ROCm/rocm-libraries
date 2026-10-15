@@ -59,35 +59,34 @@ Spec (the gtest golden, utilities/test/src/reference/bilateral_filter_ref.hpp, i
 
 namespace rpp_bilateral_filter {
 
-inline void create_bilateral_spatial_kernel_host(Rpp32f* spatialKernel, Rpp32f 
-                                                stdDevSpace, int kernelSize) {
+inline void create_bilateral_spatial_kernel_host(Rpp32f* spatialKernel, Rpp32f stdDevSpace,
+                                                 int kernelSize) {
     int kernelHalfSize = kernelSize / 2;
     Rpp32f mulFactor = 1.0f / (2.0f * stdDevSpace * stdDevSpace);
 
     for (int i = -kernelHalfSize; i <= kernelHalfSize; i++) {
         for (int j = -kernelHalfSize; j <= kernelHalfSize; j++) {
-            spatialKernel[(i + kernelHalfSize) * kernelSize + (j + kernelHalfSize)] = 
-            std::exp(-(i * i + j * j) * mulFactor);
+            spatialKernel[(i + kernelHalfSize) * kernelSize + (j + kernelHalfSize)] =
+                std::exp(-(i * i + j * j) * mulFactor);
         }
     }
 }
 
-inline void create_bilateral_range_host(Rpp32f* range, Rpp32f stdDevColor){
+inline void create_bilateral_range_host(Rpp32f* range, Rpp32f stdDevColor) {
     Rpp32f mulFactor = 1.0f / (2.0f * stdDevColor * stdDevColor);
 
-    for (int i = 0; i < 256; i++){
+    for (int i = 0; i < 256; i++) {
         range[i] = std::exp(-(i * i) * mulFactor);
     }
 }
 
 template <typename T>
-inline void bilateral_filter_generic_tensor(T** srcPtrTemp, T* dstPtrTemp, Rpp32s columnIndex,
-                                            Rpp32u kernelSize, Rpp32u padLength,
-                                            Rpp32u unpaddedWidth, Rpp32s rowKernelLoopLimit,
-                                            Rpp32f* spatialKernel, Rpp32f* range, Rpp32f rangeMulFactor,
-                                            Rpp32u channels = 1,
-                                            RpptImageBorderEdge padVertical = RpptImageBorderEdge::BOTTOM_EDGE,
-                                            RpptImageBorderEdge padHorizontal = RpptImageBorderEdge::RIGHT_EDGE) {
+inline void bilateral_filter_generic_tensor(
+    T** srcPtrTemp, T* dstPtrTemp, Rpp32s columnIndex, Rpp32u kernelSize, Rpp32u padLength,
+    Rpp32u unpaddedWidth, Rpp32s rowKernelLoopLimit, Rpp32f* spatialKernel, Rpp32f* range,
+    Rpp32f rangeMulFactor, Rpp32u channels = 1,
+    RpptImageBorderEdge padVertical = RpptImageBorderEdge::BOTTOM_EDGE,
+    RpptImageBorderEdge padHorizontal = RpptImageBorderEdge::RIGHT_EDGE) {
     Rpp32s columnKernelLoopLimit = kernelSize;
     get_kernel_loop_limit(columnIndex, columnKernelLoopLimit, padLength, unpaddedWidth);
 
@@ -101,16 +100,16 @@ inline void bilateral_filter_generic_tensor(T** srcPtrTemp, T* dstPtrTemp, Rpp32
                    ? std::max(0, (Rpp32s)(c + columnKernelLoopLimit - kernelSize))
                    : std::min(columnKernelLoopLimit - 1, c);
     };
-    
+
     Rpp32f center = srcPtrTemp[clampRow(padLength)][clampCol(padLength) * channels];
     Rpp32f sum = 0.0f, weightSum = 0.0f;
-    for (int i = 0; i < kernelSize; i++){
+    for (int i = 0; i < kernelSize; i++) {
         Rpp32s row = clampRow(i);
-        for (int j = 0; j < kernelSize; j++){
+        for (int j = 0; j < kernelSize; j++) {
             Rpp32f p = srcPtrTemp[row][clampCol(j) * channels];
             Rpp32f diff = p - center;
             Rpp32f rangeWeight;
-            if (typeid(T) == typeid(Rpp8u) || typeid(T) == typeid(Rpp8s)){
+            if (typeid(T) == typeid(Rpp8u) || typeid(T) == typeid(Rpp8s)) {
                 rangeWeight = range[(Rpp32s)std::abs(diff)];
             } else {
                 rangeWeight = std::exp(-(diff * diff) * rangeMulFactor);
@@ -122,10 +121,10 @@ inline void bilateral_filter_generic_tensor(T** srcPtrTemp, T* dstPtrTemp, Rpp32
     }
 
     Rpp32f result = sum / weightSum;
-    if (typeid(T) == typeid(Rpp8s)){
-        result += 128; // saturate_pixel subtracts 128 before clamping for Rpp8s
+    if (typeid(T) == typeid(Rpp8s)) {
+        result += 128;  // saturate_pixel subtracts 128 before clamping for Rpp8s
     }
-    if (typeid(T) == typeid(Rpp8u) || typeid(T) == typeid(Rpp8s)){
+    if (typeid(T) == typeid(Rpp8u) || typeid(T) == typeid(Rpp8s)) {
         result = nearbyintf(result);
     }
     saturate_pixel(result, dstPtrTemp);
@@ -135,30 +134,31 @@ inline void bilateral_filter_generic_tensor(T** srcPtrTemp, T* dstPtrTemp, Rpp32
 // left border pixels in image which does not have required pixels in 3x3 kernel, process them
 // separately
 template <typename T>
-inline void bilateral_process_left_border_columns_pln_pln(T** srcPtrTemp, T* dstPtrTemp, Rpp32u kernelSize,
-                                                Rpp32u padLength, Rpp32u unpaddedWidth,
-                                                Rpp32s rowKernelLoopLimit, Rpp32f* spatialKernel, Rpp32f* rangeLut, Rpp32f rangeMulFactor,
-                                                RpptImageBorderEdge padVertical) {
+inline void bilateral_process_left_border_columns_pln_pln(
+    T** srcPtrTemp, T* dstPtrTemp, Rpp32u kernelSize, Rpp32u padLength, Rpp32u unpaddedWidth,
+    Rpp32s rowKernelLoopLimit, Rpp32f* spatialKernel, Rpp32f* rangeLut, Rpp32f rangeMulFactor,
+    RpptImageBorderEdge padVertical) {
     for (int k = 0; k < padLength; k++) {
-        bilateral_filter_generic_tensor(srcPtrTemp, dstPtrTemp, k, kernelSize, padLength, unpaddedWidth,
-                                        rowKernelLoopLimit, spatialKernel, rangeLut, rangeMulFactor, 1, padVertical,
+        bilateral_filter_generic_tensor(srcPtrTemp, dstPtrTemp, k, kernelSize, padLength,
+                                        unpaddedWidth, rowKernelLoopLimit, spatialKernel, rangeLut,
+                                        rangeMulFactor, 1, padVertical,
                                         RpptImageBorderEdge::LEFT_EDGE);
         dstPtrTemp++;
     }
 }
 
 template <typename T>
-inline void bilateral_process_left_border_columns_pkd_pkd(T** srcPtrTemp, T** srcPtrRow, T* dstPtrTemp,
-                                                Rpp32u kernelSize, Rpp32u padLength,
-                                                Rpp32u unpaddedWidth, Rpp32s rowKernelLoopLimit,
-                                                Rpp32f* spatialKernel, Rpp32f* rangeLut, Rpp32f rangeMulFactor,
-                                                RpptImageBorderEdge padVertical) {
+inline void bilateral_process_left_border_columns_pkd_pkd(
+    T** srcPtrTemp, T** srcPtrRow, T* dstPtrTemp, Rpp32u kernelSize, Rpp32u padLength,
+    Rpp32u unpaddedWidth, Rpp32s rowKernelLoopLimit, Rpp32f* spatialKernel, Rpp32f* rangeLut,
+    Rpp32f rangeMulFactor, RpptImageBorderEdge padVertical) {
     for (int c = 0; c < 3; c++) {
         T* dstPtrTempChannel = dstPtrTemp + c;
         for (int k = 0; k < padLength; k++) {
-            bilateral_filter_generic_tensor(srcPtrTemp, dstPtrTempChannel, k, kernelSize, padLength, unpaddedWidth,
-                                        rowKernelLoopLimit, spatialKernel, rangeLut, rangeMulFactor, 3, padVertical,
-                                        RpptImageBorderEdge::LEFT_EDGE);
+            bilateral_filter_generic_tensor(srcPtrTemp, dstPtrTempChannel, k, kernelSize, padLength,
+                                            unpaddedWidth, rowKernelLoopLimit, spatialKernel,
+                                            rangeLut, rangeMulFactor, 3, padVertical,
+                                            RpptImageBorderEdge::LEFT_EDGE);
             dstPtrTempChannel += 3;
         }
         increment_row_ptrs(srcPtrTemp, kernelSize, 1);
@@ -168,16 +168,16 @@ inline void bilateral_process_left_border_columns_pkd_pkd(T** srcPtrTemp, T** sr
 }
 
 template <typename T>
-inline void bilateral_process_left_border_columns_pkd_pln(T** srcPtrTemp, T** srcPtrRow,
-                                                T** dstPtrTempChannels, Rpp32u kernelSize,
-                                                Rpp32u padLength, Rpp32u unpaddedWidth,
-                                                Rpp32s rowKernelLoopLimit, Rpp32f* spatialKernel, Rpp32f* rangeLut, Rpp32f rangeMulFactor,
-                                                RpptImageBorderEdge padVertical) {
+inline void bilateral_process_left_border_columns_pkd_pln(
+    T** srcPtrTemp, T** srcPtrRow, T** dstPtrTempChannels, Rpp32u kernelSize, Rpp32u padLength,
+    Rpp32u unpaddedWidth, Rpp32s rowKernelLoopLimit, Rpp32f* spatialKernel, Rpp32f* rangeLut,
+    Rpp32f rangeMulFactor, RpptImageBorderEdge padVertical) {
     for (int c = 0; c < 3; c++) {
         for (int k = 0; k < padLength; k++) {
-            bilateral_filter_generic_tensor(srcPtrTemp, dstPtrTempChannels[c], k, kernelSize, padLength,
-                                            unpaddedWidth, rowKernelLoopLimit, spatialKernel, rangeLut, rangeMulFactor,
-                                            3, padVertical, RpptImageBorderEdge::LEFT_EDGE);
+            bilateral_filter_generic_tensor(srcPtrTemp, dstPtrTempChannels[c], k, kernelSize,
+                                            padLength, unpaddedWidth, rowKernelLoopLimit,
+                                            spatialKernel, rangeLut, rangeMulFactor, 3, padVertical,
+                                            RpptImageBorderEdge::LEFT_EDGE);
             dstPtrTempChannels[c] += 1;
         }
         increment_row_ptrs(srcPtrTemp, kernelSize, 1);
@@ -196,8 +196,9 @@ using namespace rpp_bilateral_filter;
 template <typename T>
 static inline RppStatus bilateral_filter_generic_host_impl(T* srcPtrImage, RpptDescPtr srcDescPtr,
                                                            T* dstPtrImage, RpptDescPtr dstDescPtr,
-                                                           Rpp32f* spatialKernel, Rpp32f* rangeLut, Rpp32f rangeMulFactor,
-                                                           Rpp32u kernelSize, RpptROI roi,
+                                                           Rpp32f* spatialKernel, Rpp32f* rangeLut,
+                                                           Rpp32f rangeMulFactor, Rpp32u kernelSize,
+                                                           RpptROI roi,
                                                            RppLayoutParams layoutParams) {
     Rpp32u padLength = kernelSize / 2;
     Rpp32u bufferLength = roi.xywhROI.roiWidth * layoutParams.bufferMultiplier;
@@ -231,15 +232,16 @@ static inline RppStatus bilateral_filter_generic_host_impl(T* srcPtrImage, RpptD
                 get_kernel_loop_limit(i, rowKernelLoopLimit, padLength, unpaddedHeight);
                 RpptImageBorderEdge padVertical = i < padLength ? RpptImageBorderEdge::TOP_EDGE
                                                                 : RpptImageBorderEdge::BOTTOM_EDGE;
-                bilateral_process_left_border_columns_pln_pln(srcPtrTemp, dstPtrTemp, kernelSize, padLength,
-                                                    unpaddedWidth, rowKernelLoopLimit, spatialKernel, rangeLut, rangeMulFactor,
-                                                    padVertical);
+                bilateral_process_left_border_columns_pln_pln(
+                    srcPtrTemp, dstPtrTemp, kernelSize, padLength, unpaddedWidth,
+                    rowKernelLoopLimit, spatialKernel, rangeLut, rangeMulFactor, padVertical);
                 dstPtrTemp += padLength;
                 vectorLoopCount += padLength;
                 for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
-                    bilateral_filter_generic_tensor(
-                        srcPtrTemp, dstPtrTemp, vectorLoopCount, kernelSize, padLength,
-                        unpaddedWidth, rowKernelLoopLimit, spatialKernel, rangeLut, rangeMulFactor, 1, padVertical);
+                    bilateral_filter_generic_tensor(srcPtrTemp, dstPtrTemp, vectorLoopCount,
+                                                    kernelSize, padLength, unpaddedWidth,
+                                                    rowKernelLoopLimit, spatialKernel, rangeLut,
+                                                    rangeMulFactor, 1, padVertical);
                     increment_row_ptrs(srcPtrTemp, kernelSize, 1);
                     dstPtrTemp++;
                 }
@@ -263,15 +265,16 @@ static inline RppStatus bilateral_filter_generic_host_impl(T* srcPtrImage, RpptD
             get_kernel_loop_limit(i, rowKernelLoopLimit, padLength, unpaddedHeight);
             RpptImageBorderEdge padVertical =
                 i < padLength ? RpptImageBorderEdge::TOP_EDGE : RpptImageBorderEdge::BOTTOM_EDGE;
-            bilateral_process_left_border_columns_pkd_pkd(srcPtrTemp, srcPtrRow, dstPtrTemp, kernelSize,
-                                                padLength, unpaddedWidth, rowKernelLoopLimit,
-                                                spatialKernel, rangeLut, rangeMulFactor, padVertical);
+            bilateral_process_left_border_columns_pkd_pkd(
+                srcPtrTemp, srcPtrRow, dstPtrTemp, kernelSize, padLength, unpaddedWidth,
+                rowKernelLoopLimit, spatialKernel, rangeLut, rangeMulFactor, padVertical);
             dstPtrTemp += padLength * 3;
             vectorLoopCount += padLength * 3;
             for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
                 bilateral_filter_generic_tensor(srcPtrTemp, dstPtrTemp, vectorLoopCount / 3,
-                                                  kernelSize, padLength, unpaddedWidth,
-                                                  rowKernelLoopLimit, spatialKernel, rangeLut, rangeMulFactor, 3, padVertical);
+                                                kernelSize, padLength, unpaddedWidth,
+                                                rowKernelLoopLimit, spatialKernel, rangeLut,
+                                                rangeMulFactor, 3, padVertical);
                 increment_row_ptrs(srcPtrTemp, kernelSize, 1);
                 dstPtrTemp++;
             }
@@ -299,18 +302,19 @@ static inline RppStatus bilateral_filter_generic_host_impl(T* srcPtrImage, RpptD
             for (int k = 0; k < padLength; k++) {
                 for (int c = 0; c < 3; c++) {
                     bilateral_filter_generic_tensor(srcPtrTemp[c], dstPtrTemp, k, kernelSize,
-                                                      padLength, unpaddedWidth, rowKernelLoopLimit,
-                                                      spatialKernel, rangeLut, rangeMulFactor, 1, padVertical,
-                                                      RpptImageBorderEdge::LEFT_EDGE);
+                                                    padLength, unpaddedWidth, rowKernelLoopLimit,
+                                                    spatialKernel, rangeLut, rangeMulFactor, 1,
+                                                    padVertical, RpptImageBorderEdge::LEFT_EDGE);
                     dstPtrTemp++;
                 }
             }
             vectorLoopCount += padLength;
             for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
                 for (int c = 0; c < srcDescPtr->c; c++) {
-                    bilateral_filter_generic_tensor(
-                        srcPtrTemp[c], dstPtrTemp, vectorLoopCount, kernelSize, padLength,
-                        unpaddedWidth, rowKernelLoopLimit, spatialKernel, rangeLut, rangeMulFactor, 1, padVertical);
+                    bilateral_filter_generic_tensor(srcPtrTemp[c], dstPtrTemp, vectorLoopCount,
+                                                    kernelSize, padLength, unpaddedWidth,
+                                                    rowKernelLoopLimit, spatialKernel, rangeLut,
+                                                    rangeMulFactor, 1, padVertical);
                     increment_row_ptrs(srcPtrTemp[c], kernelSize, 1);
                     dstPtrTemp++;
                 }
@@ -335,15 +339,16 @@ static inline RppStatus bilateral_filter_generic_host_impl(T* srcPtrImage, RpptD
             get_kernel_loop_limit(i, rowKernelLoopLimit, padLength, unpaddedHeight);
             RpptImageBorderEdge padVertical =
                 i < padLength ? RpptImageBorderEdge::TOP_EDGE : RpptImageBorderEdge::BOTTOM_EDGE;
-            bilateral_process_left_border_columns_pkd_pln(srcPtrTemp, srcPtrRow, dstPtrTempChannels,
-                                                kernelSize, padLength, unpaddedWidth,
-                                                rowKernelLoopLimit, spatialKernel, rangeLut, rangeMulFactor, padVertical);
+            bilateral_process_left_border_columns_pkd_pln(
+                srcPtrTemp, srcPtrRow, dstPtrTempChannels, kernelSize, padLength, unpaddedWidth,
+                rowKernelLoopLimit, spatialKernel, rangeLut, rangeMulFactor, padVertical);
             vectorLoopCount += padLength * 3;
             for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
                 int channel = vectorLoopCount % 3;
-                bilateral_filter_generic_tensor(
-                    srcPtrTemp, dstPtrTempChannels[channel], vectorLoopCount / 3, kernelSize,
-                    padLength, unpaddedWidth, rowKernelLoopLimit, spatialKernel, rangeLut, rangeMulFactor, 3, padVertical);
+                bilateral_filter_generic_tensor(srcPtrTemp, dstPtrTempChannels[channel],
+                                                vectorLoopCount / 3, kernelSize, padLength,
+                                                unpaddedWidth, rowKernelLoopLimit, spatialKernel,
+                                                rangeLut, rangeMulFactor, 3, padVertical);
                 increment_row_ptrs(srcPtrTemp, kernelSize, 1);
                 dstPtrTempChannels[channel]++;
             }
@@ -374,15 +379,18 @@ RppStatus bilateral_filter_host_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dst
         T* dstPtrImage = dstPtr + batchCount * dstDescPtr->strides.nStride;
 
         Rpp32f* spaceTensor = handle.GetInitHandle()->mem.mcpu.scratchBufferHost +
-                               batchCount * kernelSize * kernelSize;
-        create_bilateral_spatial_kernel_host(spaceTensor, stdDevSpaceTensor[batchCount], kernelSize);
-        
+                              batchCount * kernelSize * kernelSize;
+        create_bilateral_spatial_kernel_host(spaceTensor, stdDevSpaceTensor[batchCount],
+                                             kernelSize);
+
         Rpp32f range[256];
         create_bilateral_range_host(range, stdDevRangeTensor[batchCount]);
-        Rpp32f rangeMulFactor = 1.0f / (2.0f * stdDevRangeTensor[batchCount] * stdDevRangeTensor[batchCount]);
+        Rpp32f rangeMulFactor =
+            1.0f / (2.0f * stdDevRangeTensor[batchCount] * stdDevRangeTensor[batchCount]);
 
-        bilateral_filter_generic_host_impl(srcPtrImage, srcDescPtr, dstPtrImage, dstDescPtr, spaceTensor,
-                                        range, rangeMulFactor, kernelSize, roi, layoutParams);
+        bilateral_filter_generic_host_impl(srcPtrImage, srcDescPtr, dstPtrImage, dstDescPtr,
+                                           spaceTensor, range, rangeMulFactor, kernelSize, roi,
+                                           layoutParams);
     }
     return RPP_SUCCESS;
 }
