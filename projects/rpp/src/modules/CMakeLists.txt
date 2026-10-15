@@ -24,32 +24,6 @@ SOFTWARE.
 
 project(modules)
 
-## Remove audio augmentation sources when audio support is disabled.
-function(remove_audio_augmentations SOURCE_LIST BACKEND)
-    if( "${BACKEND}" STREQUAL "HIP")
-        list(REMOVE_ITEM ${SOURCE_LIST}
-            "${CMAKE_CURRENT_SOURCE_DIR}/tensor/hip/kernel/non_silent_region_detection.cpp"
-            "${CMAKE_CURRENT_SOURCE_DIR}/tensor/hip/kernel/to_decibels.cpp"
-            "${CMAKE_CURRENT_SOURCE_DIR}/tensor/hip/kernel/pre_emphasis_filter.cpp"
-            "${CMAKE_CURRENT_SOURCE_DIR}/tensor/hip/kernel/down_mixing.cpp"
-            "${CMAKE_CURRENT_SOURCE_DIR}/tensor/hip/kernel/spectrogram.cpp"
-            "${CMAKE_CURRENT_SOURCE_DIR}/tensor/hip/kernel/resample.cpp"
-            "${CMAKE_CURRENT_SOURCE_DIR}/tensor/hip/kernel/mel_filter_bank.cpp"
-        )
-    endif()
-    list(REMOVE_ITEM ${SOURCE_LIST}
-        "${CMAKE_CURRENT_SOURCE_DIR}/tensor/rppt_tensor_audio_augmentations.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/tensor/cpu/kernel/non_silent_region_detection.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/tensor/cpu/kernel/to_decibels.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/tensor/cpu/kernel/pre_emphasis_filter.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/tensor/cpu/kernel/down_mixing.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/tensor/cpu/kernel/spectrogram.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/tensor/cpu/kernel/resample.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/tensor/cpu/kernel/mel_filter_bank.cpp"
-    )
-    set(${SOURCE_LIST} ${${SOURCE_LIST}} PARENT_SCOPE)
-endfunction()
-
 ## Disable FMA for tensor sources that require precise math behavior.
 function(add_fma_property)
     if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|amd64|AMD64")
@@ -91,14 +65,13 @@ endif()
 
 if( "${BACKEND}" STREQUAL "HIP")
     # Add HIP kernels
-    set(MOD_HIP_CPP "handle_hip.cpp")
+    #
+    # rocfft_dlopen/rocfft_runtime.cpp holds the rocFFT binding used by the spectrogram kernel.
+    # It compiles in both the dlopen and the linked configuration.
+    set(MOD_HIP_CPP "handle_hip.cpp" "rocfft_dlopen/rocfft_runtime.cpp")
     file(GLOB MOD_HIP_CPP_TENSOR_KERNELS "tensor/hip/kernel/*.cpp" )
     file(GLOB MOD_HOST_CPP_TENSOR_KERNELS "tensor/cpu/kernel/*.cpp" )
     list(APPEND Rpp_Source ${CPPFILES} ${MOD_HIP_CPP} ${MOD_HIP_ERRORS_CPP} ${MOD_HIP_CPP_TENSOR_KERNELS} ${MOD_HOST_CPP_TENSOR_KERNELS})
-    # Remove audio augmentations from the list of files to be compiled
-    if(NOT RPP_AUDIO_SUPPORT)
-        remove_audio_augmentations(Rpp_Source "${BACKEND}")
-    endif()
     message("-- ${Green}HIP kernels added${ColourReset}")
 
     add_fma_property()
@@ -110,10 +83,6 @@ elseif( "${BACKEND}" STREQUAL "CPU")
     # Add CPU specific includes
     file(GLOB MOD_HOST_CPP_TENSOR_KERNELS "tensor/cpu/kernel/*.cpp" )
     list(APPEND Rpp_Source ${CPPFILES} ${MOD_HOST_CPP_TENSOR_KERNELS})
-    # Remove audio augmentations from the list of files to be compiled
-    if(NOT RPP_AUDIO_SUPPORT)
-        remove_audio_augmentations(Rpp_Source "${BACKEND}")
-    endif()
     message("-- ${Green}HOST kernels added${ColourReset}")
     set(INCLUDE_LIST ${RPP_SOURCE_DIR}/src/include/common/)
     add_fma_property()
@@ -150,4 +119,11 @@ if( "${BACKEND}" STREQUAL "HIP")
         ${RPP_SOURCE_DIR}/src/include/common/hip
     )
     target_link_libraries(${PROJECT_NAME} PRIVATE hip::device)
+
+    # rocfft_runtime.hpp declares the rocFFT entry points the spectrogram kernel calls; its
+    # directory is on the include path so the three consumers can include it unqualified.
+    target_include_directories(${PROJECT_NAME}
+    PRIVATE
+        ${RPP_SOURCE_DIR}/src/modules/rocfft_dlopen
+    )
 endif()
