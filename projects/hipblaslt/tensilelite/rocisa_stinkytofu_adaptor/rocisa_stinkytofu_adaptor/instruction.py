@@ -2920,6 +2920,15 @@ def _asm_cap(name: str) -> Optional[int]:
     return int(caps[name])
 
 
+def _asm_cap_or_default(name: str, default: int = 0) -> int:
+    """Match ``capOrDefault``: a missing cap, or no ISA selected yet, is ``default``."""
+    try:
+        value = _asm_cap(name)
+    except RuntimeError:
+        return default
+    return default if value is None else value
+
+
 def _clamp_wait_count(count: int, cap_name: str) -> int:
     """Match ``handleSWaitDscntModifiers`` / ``handleSWaitLoadcntModifiers``.
 
@@ -3231,7 +3240,53 @@ class SWaitCnt(Instruction):
         return []
 
     def toString(self) -> str:
-        return self.formatWithComment(self.instStr)
+        """Decompose like ``rocisa::SWaitCnt::setupInstructions`` then ``CompositeInstruction::toString``.
+
+        gfx12 (``SeparateVMcnt`` and ``SeparateLGKMcnt``) prints ``s_wait_kmcnt`` /
+        ``s_wait_dscnt`` / ``s_wait_loadcnt`` / ``s_wait_storecnt``. Older ISAs keep
+        the combined ``s_waitcnt``. ``str()`` never reaches ``to_stinky_logical``.
+        """
+        vlcnt = self.vlcnt
+        vscnt = self.vscnt
+        dscnt = self.dscnt
+        kmcnt = self.kmcnt
+        comment = self.comment
+        if self.waitAll:
+            vlcnt = vscnt = dscnt = kmcnt = 0
+            comment = "(Wait all)"
+
+        parts: List[str] = []
+        if _asm_cap_or_default("SeparateVscnt"):
+            lgkmcnt = (
+                (0 if dscnt == -1 else dscnt) + (0 if kmcnt == -1 else kmcnt)
+                if dscnt != -1 or kmcnt != -1 else -1
+            )
+            if vlcnt != -1 or lgkmcnt != -1:
+                parts.append(_SWaitCnt(lgkmcnt, vlcnt, comment).toString())
+            if vscnt != -1:
+                parts.append(_SWaitCntVscnt(vscnt, comment).toString())
+        elif (_asm_cap_or_default("SeparateVMcnt")
+              and _asm_cap_or_default("SeparateLGKMcnt")):
+            if dscnt != -1:
+                parts.append(_SWaitDscnt(dscnt, comment).toString())
+            if kmcnt != -1:
+                parts.append(_SWaitKMcnt(kmcnt, comment).toString())
+            if vlcnt != -1:
+                parts.append(_SWaitLoadcnt(vlcnt, comment).toString())
+            if vscnt != -1:
+                parts.append(_SWaitStorecnt(vscnt, comment).toString())
+        else:
+            lgkmcnt = (
+                (0 if dscnt == -1 else dscnt) + (0 if kmcnt == -1 else kmcnt)
+                if dscnt != -1 or kmcnt != -1 else -1
+            )
+            vmcnt = (
+                (0 if vscnt == -1 else vscnt) + (0 if vlcnt == -1 else vlcnt)
+                if vscnt != -1 or vlcnt != -1 else -1
+            )
+            if vmcnt != -1 or lgkmcnt != -1:
+                parts.append(_SWaitCnt(lgkmcnt, vmcnt, comment).toString())
+        return "\n".join(parts)
 
     def to_stinky_logical(self) -> Any:
         """Emit one typed logical wait per requested counter.
