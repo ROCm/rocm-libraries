@@ -4686,8 +4686,7 @@ TEST_F(TestGraph, CreateExecutionPlanExtWithEmptySettings)
     // Mock engine descriptor creation
     auto engineDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x5678);
     EXPECT_CALL(*_mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_ENGINE_DESCRIPTOR, _))
-        .Times(2)
-        .WillRepeatedly(
+        .WillOnce(
             [&engineDesc](hipdnnBackendDescriptorType_t, hipdnnBackendDescriptor_t* descriptor) {
                 *descriptor = engineDesc;
                 return HIPDNN_STATUS_SUCCESS;
@@ -4697,19 +4696,15 @@ TEST_F(TestGraph, CreateExecutionPlanExtWithEmptySettings)
         *_mockBackend,
         backendSetAttribute(
             engineDesc, HIPDNN_ATTR_ENGINE_OPERATION_GRAPH, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, _))
-        .Times(2)
-        .WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
+        .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
 
     const int64_t engineId = 42;
     EXPECT_CALL(
         *_mockBackend,
         backendSetAttribute(engineDesc, HIPDNN_ATTR_ENGINE_GLOBAL_INDEX, HIPDNN_TYPE_INT64, 1, _))
-        .Times(2)
-        .WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
+        .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
 
-    EXPECT_CALL(*_mockBackend, backendFinalize(engineDesc))
-        .Times(2)
-        .WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
+    EXPECT_CALL(*_mockBackend, backendFinalize(engineDesc)).WillOnce(Return(HIPDNN_STATUS_SUCCESS));
 
     // Mock getting knob count - return 0 (no knobs available)
     EXPECT_CALL(*_mockBackend,
@@ -4934,12 +4929,12 @@ static void
 }
 
 // Helper to build a graph and mock engine descriptor creation for knob queries.
+// Expects exactly one engine descriptor create, attribute set and finalize.
 // Returns the fake engine descriptor pointer.
 static hipdnnBackendDescriptor_t
     buildGraphAndMockEngine(std::shared_ptr<::testing::NiceMock<Mock_hipdnn_backend>>& mockBackend,
                             Graph& graph,
-                            hipdnnHandle_t handle,
-                            int engineDescTimes = 1)
+                            hipdnnHandle_t handle)
 {
     createBasicBatchnormGraph(graph);
     EXPECT_TRUE(graph.validate().is_good());
@@ -4954,8 +4949,7 @@ static hipdnnBackendDescriptor_t
 
     auto engineDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0xE001);
     EXPECT_CALL(*mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_ENGINE_DESCRIPTOR, _))
-        .Times(engineDescTimes)
-        .WillRepeatedly(
+        .WillOnce(
             [engineDesc](hipdnnBackendDescriptorType_t, hipdnnBackendDescriptor_t* descriptor) {
                 *descriptor = engineDesc;
                 return HIPDNN_STATUS_SUCCESS;
@@ -4965,18 +4959,14 @@ static hipdnnBackendDescriptor_t
         *mockBackend,
         backendSetAttribute(
             engineDesc, HIPDNN_ATTR_ENGINE_OPERATION_GRAPH, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, _))
-        .Times(engineDescTimes)
-        .WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
+        .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
 
     EXPECT_CALL(
         *mockBackend,
         backendSetAttribute(engineDesc, HIPDNN_ATTR_ENGINE_GLOBAL_INDEX, HIPDNN_TYPE_INT64, 1, _))
-        .Times(engineDescTimes)
-        .WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
+        .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
 
-    EXPECT_CALL(*mockBackend, backendFinalize(engineDesc))
-        .Times(engineDescTimes)
-        .WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
+    EXPECT_CALL(*mockBackend, backendFinalize(engineDesc)).WillOnce(Return(HIPDNN_STATUS_SUCCESS));
 
     return engineDesc;
 }
@@ -5406,9 +5396,7 @@ TEST_F(TestGraph, CreateExecutionPlanExtWithKnobSettings)
 {
     ::testing::FLAGS_gmock_verbose = "error";
     Graph graph;
-    // Engine descriptor is created twice in create_execution_plan_ext:
-    // once in get_knob_lookup_for_engine, once in initializeEngineConfig
-    auto engineDesc = buildGraphAndMockEngine(_mockBackend, graph, _handle, 2);
+    auto engineDesc = buildGraphAndMockEngine(_mockBackend, graph, _handle);
 
     // Mock one int knob available on the engine
     auto knobInfoDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0xB001);
@@ -5496,7 +5484,7 @@ TEST_F(TestGraph, CreateExecutionPlanExtIgnoresUnsupportedKnobs)
 {
     ::testing::FLAGS_gmock_verbose = "error";
     Graph graph;
-    auto engineDesc = buildGraphAndMockEngine(_mockBackend, graph, _handle, 2);
+    auto engineDesc = buildGraphAndMockEngine(_mockBackend, graph, _handle);
 
     // Mock one int knob available on the engine
     auto knobInfoDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0xB002);
@@ -5580,7 +5568,7 @@ TEST_F(TestGraph, CreateExecutionPlanExtWithDeprecatedKnob)
 {
     ::testing::FLAGS_gmock_verbose = "error";
     Graph graph;
-    auto engineDesc = buildGraphAndMockEngine(_mockBackend, graph, _handle, 2);
+    auto engineDesc = buildGraphAndMockEngine(_mockBackend, graph, _handle);
 
     // Mock one deprecated int knob available on the engine
     auto knobInfoDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0xB003);
@@ -5663,9 +5651,7 @@ TEST_F(TestGraph, CreateExecutionPlanWithInt64Knobs)
 {
     ::testing::FLAGS_gmock_verbose = "error";
     Graph graph;
-    // Engine descriptor is created twice in create_execution_plan_ext:
-    // once in get_knob_lookup_for_engine, once in initializeEngineConfig
-    auto engineDesc = buildGraphAndMockEngine(_mockBackend, graph, _handle, 2);
+    auto engineDesc = buildGraphAndMockEngine(_mockBackend, graph, _handle);
 
     // Mock one int knob available on the engine
     auto knobInfoDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0xB010);
@@ -5753,9 +5739,7 @@ TEST_F(TestGraph, CreateExecutionPlanExtWithMultipleKnobs)
 {
     ::testing::FLAGS_gmock_verbose = "error";
     Graph graph;
-    // Engine descriptor is created twice in create_execution_plan_ext:
-    // once in get_knob_lookup_for_engine, once in initializeEngineConfig
-    auto engineDesc = buildGraphAndMockEngine(_mockBackend, graph, _handle, 2);
+    auto engineDesc = buildGraphAndMockEngine(_mockBackend, graph, _handle);
 
     // Mock two int knobs available on the engine
     auto knobInfoDesc1 = reinterpret_cast<hipdnnBackendDescriptor_t>(0xB020);
@@ -8062,7 +8046,7 @@ TEST_F(TestGraph, CreateExecutionPlanExtProducesVectorOfSizeOne)
 
     const int64_t engineId = 42;
 
-    // Mock: get_knob_lookup_for_engine - return empty knobs
+    // Mock: engine descriptor whose knob query returns no knobs
     auto engineDesc2 = reinterpret_cast<hipdnnBackendDescriptor_t>(0xAA01);
     EXPECT_CALL(*_mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_ENGINE_DESCRIPTOR, _))
         .WillRepeatedly(

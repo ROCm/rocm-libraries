@@ -11,6 +11,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -24,6 +25,7 @@
 #include <hipdnn_plugin_sdk/ingestor/GenericPlan.hpp>
 #include <hipdnn_plugin_sdk/ingestor/IDeviceResolver.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelIngestorStateManager.hpp>
+#include <hipdnn_plugin_sdk/ingestor/StagedApplicability.hpp>
 #include <hipdnn_plugin_sdk/ingestor/WinnerCache.hpp>
 #include <hipdnn_plugin_sdk/interfaces/IPlanBuilder.hpp>
 
@@ -92,10 +94,141 @@ public:
         }
         catch(const std::exception& error)
         {
-            HIPDNN_PLUGIN_LOG_ERROR("ingestor: engine '"
-                                    << _engine.name
-                                    << "' declined the graph: deciding applicability failed: "
-                                    << error.what());
+            logApplicabilityFailure(error);
+            return false;
+        }
+    }
+
+    /// isApplicable() split for IStagedApplicability: the same verdict, cache contents,
+    /// logging and error handling, with the catalog's per-variant loop left pending when
+    /// the caller thread cannot settle it cheaply. The device and catalog key come from
+    /// @p scope when an earlier engine already resolved them through the same resolver,
+    /// and are recorded there when this engine is the first.
+    StagedApplicability beginApplicability(const THandle& handle,
+                                           const IGraph& opGraph,
+                                           ApplicabilityScope& scope) const
+    {
+        try
+        {
+            if(!understandsGraph(opGraph))
+            {
+                return decided(false);
+            }
+
+            auto& shared = scope.device();
+            const void* resolver = &_deviceResolver;
+            DeviceId deviceId = NO_DEVICE;
+            // Borrowed, never owned here: from the scope, or from this engine's own resolver
+            // when it is not the scope's. A pending check copies the latter before it outlives
+            // this call, so it never depends on the resolver keeping the reference.
+            const DeviceProperties* deviceProperties = nullptr;
+            bool fromResolver = false;
+            if(shared.has_value() && shared->resolver == resolver)
+            {
+                deviceId = shared->deviceId;
+                deviceProperties = &shared->properties;
+            }
+            else
+            {
+                const auto resolved = contextFor(handle, opGraph);
+                deviceId = resolved.deviceId;
+                if(!shared.has_value())
+                {
+                    shared = ApplicabilityScope::Device{
+                        resolver, deviceId, resolved.deviceProperties, std::nullopt, false};
+                    deviceProperties = &shared->properties;
+                }
+                else
+                {
+                    deviceProperties = &resolved.deviceProperties;
+                    fromResolver = true;
+                }
+            }
+            const MatchContext context{opGraph, deviceId, *deviceProperties};
+
+            // The key carries no resolver identity, only the device id.
+            std::optional<CatalogKey> ownedKey;
+            const CatalogKey* key = nullptr;
+            if(shared->deviceId == deviceId)
+            {
+                if(!shared->keyBuilt)
+                {
+                    shared->key = KernelIngestorStateManager<THandle>::cacheKey(context);
+                    shared->keyBuilt = true;
+                }
+                key = shared->key.has_value() ? &*shared->key : nullptr;
+            }
+            else
+            {
+                ownedKey = KernelIngestorStateManager<THandle>::cacheKey(context);
+                key = ownedKey.has_value() ? &*ownedKey : nullptr;
+            }
+
+            if(key == nullptr)
+            {
+                return decided(_stateManager.applicableUncached(context));
+            }
+            if(const auto hit = _stateManager.cachedVerdict(context, *key); hit.has_value())
+            {
+                return decided(*hit);
+            }
+
+            auto stage = _stateManager.beginCatalog(context, *key);
+            if(!stage.has_value())
+            {
+                return decided(false);
+            }
+
+            auto pending = std::make_unique<PendingCatalog>();
+            pending->predictedVariants = stage->predictedVariants;
+            pending->owner = &_stateManager;
+            pending->graph = &opGraph;
+            pending->deviceId = deviceId;
+            if(fromResolver)
+            {
+                // Set only once the copy is in the heap-allocated state, which does not move.
+                pending->ownedProperties = *deviceProperties;
+                pending->deviceProperties = &*pending->ownedProperties;
+            }
+            else
+            {
+                pending->deviceProperties = deviceProperties;
+            }
+            pending->ownedKey = std::move(ownedKey);
+            pending->key = pending->ownedKey.has_value() ? &*pending->ownedKey : key;
+            pending->stage = std::move(*stage);
+            return {false, false, PendingApplicability(std::move(pending))};
+        }
+        catch(const std::exception& error)
+        {
+            logApplicabilityFailure(error);
+            return decided(false);
+        }
+    }
+
+    /// The per-variant loop @p pending carries; any thread, no HIP calls. A pending this
+    /// builder's state manager did not produce is declined with an error.
+    bool finishApplicability(PendingApplicability&& pending) const
+    {
+        const auto state = pending.release();
+        try
+        {
+            // `owner` is set only by this builder's begin, which always derives
+            // PendingCatalog, so a match makes the downcast safe without RTTI.
+            auto* catalog = state != nullptr && state->owner == &_stateManager
+                                ? static_cast<PendingCatalog*>(state.get())
+                                : nullptr;
+            if(catalog == nullptr)
+            {
+                throw std::invalid_argument("the pending applicability check belongs to "
+                                            "another engine");
+            }
+            return _stateManager.finishCatalog(
+                catalog->context(), *catalog->key, std::move(catalog->stage));
+        }
+        catch(const std::exception& error)
+        {
+            logApplicabilityFailure(error);
             return false;
         }
     }
@@ -136,11 +269,10 @@ public:
         }
 
         size_t maxBytes = 0;
-        for(const auto& kernel : filtered)
+        for(const KernelDefinition* kernel : filtered)
         {
-            const auto dispatcher = _stateManager.getDispatchDetails(kernel);
-            maxBytes = std::max(maxBytes,
-                                dispatcher.handler->workspaceBytes(context, catalog.bound, kernel));
+            const auto* handler = _stateManager.dispatchHandlerFor(*kernel);
+            maxBytes = std::max(maxBytes, handler->workspaceBytes(context, catalog.bound, *kernel));
         }
         return maxBytes;
     }
@@ -209,13 +341,13 @@ public:
                     try
                     {
                         auto plan = std::make_unique<GenericPlan<THandle>>(
-                            _stateManager.getDispatchDetails((*ranked)[rank]),
+                            _stateManager.getDispatchDetails(*(*ranked)[rank]),
                             context,
                             catalog.bound);
 
                         HIPDNN_PLUGIN_LOG_INFO("ingestor: engine '"
                                                << _engine.name << "' served kernel "
-                                               << toString((*ranked)[rank].kernelId) << " at rank "
+                                               << toString((*ranked)[rank]->kernelId) << " at rank "
                                                << rank << " from a benchmarked record of "
                                                << record->size() << " entry(s) for "
                                                << filtered.size() << " candidate(s)");
@@ -241,7 +373,7 @@ public:
 
                     HIPDNN_PLUGIN_LOG_WARN("ingestor: engine '"
                                            << _engine.name << "' could not build a plan for "
-                                           << toString((*ranked)[rank].kernelId) << " at rank "
+                                           << toString((*ranked)[rank]->kernelId) << " at rank "
                                            << rank << ": " << failure
                                            << "; trying the next ranked entry");
                 }
@@ -274,13 +406,14 @@ public:
                 try
                 {
                     auto plan = std::make_unique<GenericPlan<THandle>>(
-                        _stateManager.getDispatchDetails(filtered[rank]), context, catalog.bound);
+                        _stateManager.getDispatchDetails(*filtered[rank]), context, catalog.bound);
 
-                    HIPDNN_PLUGIN_LOG_INFO(
-                        "ingestor: engine '"
-                        << _engine.name << "' selected kernel " << toString(filtered[rank].kernelId)
-                        << " at rank " << rank << " from " << filtered.size() << " candidate(s) ("
-                        << catalog.entries.size() << " before knob filtering)");
+                    HIPDNN_PLUGIN_LOG_INFO("ingestor: engine '"
+                                           << _engine.name << "' selected kernel "
+                                           << toString(filtered[rank]->kernelId) << " at rank "
+                                           << rank << " from " << filtered.size()
+                                           << " candidate(s) (" << catalog.entries.size()
+                                           << " before knob filtering)");
 
                     executionContext.setPlan(std::move(plan));
                     return;
@@ -294,16 +427,16 @@ public:
                     {
                         throw;
                     }
-                    failures.emplace_back(toString(filtered[rank].kernelId) + ": " + error.what());
+                    failures.emplace_back(toString(filtered[rank]->kernelId) + ": " + error.what());
                 }
                 catch(const std::exception& error)
                 {
-                    failures.emplace_back(toString(filtered[rank].kernelId) + ": " + error.what());
+                    failures.emplace_back(toString(filtered[rank]->kernelId) + ": " + error.what());
                 }
 
                 HIPDNN_PLUGIN_LOG_WARN("ingestor: engine '"
                                        << _engine.name << "' could not build a plan for "
-                                       << toString(filtered[rank].kernelId) << " at rank " << rank
+                                       << toString(filtered[rank]->kernelId) << " at rank " << rank
                                        << ": " << failures.back() << "; trying the next candidate");
             }
 
@@ -314,7 +447,7 @@ public:
                                                     << filtered.size() << " candidate(s) ("
                                                     << catalog.entries.size()
                                                     << " before knob filtering), ranked front "
-                                                    << toString(filtered.front().kernelId));
+                                                    << toString(filtered.front()->kernelId));
 
         // Every candidate walk applies the same policy: an unbuildable candidate is a reason
         // to carry, a malformed descriptor stops the build. Absorbing here what the others
@@ -322,16 +455,16 @@ public:
         std::vector<std::string> benchmarkFailures;
         std::vector<typename BenchmarkPlan<THandle>::Candidate> candidates;
         candidates.reserve(filtered.size());
-        for(const auto& kernel : filtered)
+        for(const KernelDefinition* kernel : filtered)
         {
             try
             {
                 candidates.push_back(
-                    {kernel.kernelId,
+                    {kernel->kernelId,
                      std::make_unique<GenericPlan<THandle>>(
-                         _stateManager.getDispatchDetails(kernel), context, catalog.bound),
-                     kernel.packId,
-                     kernel.dispatchId});
+                         _stateManager.getDispatchDetails(*kernel), context, catalog.bound),
+                     kernel->packId,
+                     kernel->dispatchId});
                 continue;
             }
             catch(const HipdnnPluginException& error)
@@ -340,16 +473,16 @@ public:
                 {
                     throw;
                 }
-                benchmarkFailures.emplace_back(toString(kernel.kernelId) + ": " + error.what());
+                benchmarkFailures.emplace_back(toString(kernel->kernelId) + ": " + error.what());
             }
             catch(const std::exception& error)
             {
-                benchmarkFailures.emplace_back(toString(kernel.kernelId) + ": " + error.what());
+                benchmarkFailures.emplace_back(toString(kernel->kernelId) + ": " + error.what());
             }
 
             HIPDNN_PLUGIN_LOG_WARN("ingestor: engine '" << _engine.name
                                                         << "' dropped benchmarking candidate '"
-                                                        << toString(kernel.kernelId)
+                                                        << toString(kernel->kernelId)
                                                         << "': " << benchmarkFailures.back());
         }
 
@@ -431,6 +564,41 @@ public:
     }
 
 private:
+    /// What finishApplicability needs: the context begin resolved and the catalog's
+    /// graph-level stage. The graph is borrowed from the caller, which keeps it alive until
+    /// every finish has returned. The device properties and the key are borrowed from the
+    /// scope, or owned here when this engine's resolver or device is not the scope's.
+    struct PendingCatalog : PendingApplicability::State
+    {
+        const IGraph* graph = nullptr;
+        DeviceId deviceId = NO_DEVICE;
+        const DeviceProperties* deviceProperties = nullptr;
+        /// Set when this engine's resolver is not the scope's: its own copy of the properties.
+        std::optional<DeviceProperties> ownedProperties;
+        /// Set when this engine's device differs from the scope's, so the key is its own.
+        std::optional<CatalogKey> ownedKey;
+        const CatalogKey* key = nullptr;
+        CatalogGraphStage stage;
+
+        MatchContext context() const
+        {
+            return MatchContext{*graph, deviceId, *deviceProperties};
+        }
+    };
+
+    static StagedApplicability decided(bool verdict)
+    {
+        return {true, verdict, PendingApplicability{}};
+    }
+
+    void logApplicabilityFailure(const std::exception& error) const
+    {
+        HIPDNN_PLUGIN_LOG_ERROR("ingestor: engine '"
+                                << _engine.name
+                                << "' declined the graph: deciding applicability failed: "
+                                << error.what());
+    }
+
     /// The seam for a deterministic test timer is the constructor's `timer` parameter,
     /// not this factory: tests exercise this exact code path rather than overriding it.
     std::unique_ptr<IPlan<THandle>>
@@ -515,21 +683,22 @@ private:
         return setting.valueAs<IntValue>().value() != 0;
     }
 
-    std::vector<KernelDefinition> applyKnobFilter(const std::vector<KernelDefinition>& catalog,
-                                                  const KnobFilter& filter) const
+    std::vector<const KernelDefinition*>
+        applyKnobFilter(const std::vector<const KernelDefinition*>& catalog,
+                        const KnobFilter& filter) const
     {
         if(filter.empty())
         {
             return catalog;
         }
 
-        std::vector<KernelDefinition> filtered;
+        std::vector<const KernelDefinition*> filtered;
         filtered.reserve(catalog.size());
-        for(const auto& kernel : catalog)
+        for(const KernelDefinition* kernel : catalog)
         {
             const bool matchesEverySetKnob
-                = std::all_of(filter.begin(), filter.end(), [&kernel](const auto& setting) {
-                      const auto value = kernel.tryGetMetadata(setting.first);
+                = std::all_of(filter.begin(), filter.end(), [kernel](const auto& setting) {
+                      const auto value = kernel->tryGetMetadata(setting.first);
                       const auto* intValue
                           = value.has_value() ? std::get_if<int64_t>(&*value) : nullptr;
                       return intValue != nullptr && *intValue == setting.second;

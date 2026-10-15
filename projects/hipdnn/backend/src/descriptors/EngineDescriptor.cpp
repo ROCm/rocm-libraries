@@ -47,6 +47,26 @@ void EngineDescriptor::finalize()
                               "range of engine IDs");
     }
 
+    loadEngineDetailsAndFinalize(pluginResourceManager);
+}
+
+std::shared_ptr<EngineDescriptor>
+    EngineDescriptor::createForApplicableEngine(std::shared_ptr<const GraphDescriptor> graph,
+                                                int64_t engineId)
+{
+    auto engine = std::make_shared<EngineDescriptor>();
+    engine->_graph = std::move(graph);
+    engine->_engineId = engineId;
+    engine->_engineIdSet = true;
+
+    auto handle = engine->_graph->getHandle();
+    engine->loadEngineDetailsAndFinalize(handle->getPluginResourceManager());
+    return engine;
+}
+
+void EngineDescriptor::loadEngineDetailsAndFinalize(
+    const std::shared_ptr<plugin::EnginePluginResourceManager>& pluginResourceManager)
+{
     _engineDetails = plugin::EnginePluginResourceManager::getEngineDetails(
         pluginResourceManager, _engineId, _graph.get());
 

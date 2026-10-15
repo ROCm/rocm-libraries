@@ -625,6 +625,74 @@ TEST_F(TestGpuEngineHeuristicDescriptor, GetEngineConfigsCountOnly)
     ASSERT_EQ(count, 3);
 }
 
+TEST_F(TestGpuEngineHeuristicDescriptor, GetEngineConfigsReusesFinalizeApplicabilityPass)
+{
+    auto heur = getEngineHeuristicDescriptor();
+    setGraph();
+    setHeuristicMode();
+
+    // A ranking that differs from the applicability order, so a config built
+    // from the wrong position or the wrong list carries the wrong engine.
+    const std::vector<int64_t> applicableIds{0, 1, 2};
+    const std::vector<int64_t> rankedIds{2, 0, 1};
+    EXPECT_CALL(*_mockHeuristicPlugin, getSortedEngineIds(_)).WillRepeatedly(Return(rankedIds));
+
+    EXPECT_CALL(*_mockEnginePluginResourceManager, getApplicableEngineIds(_, _))
+        .Times(1)
+        .WillOnce(Return(applicableIds));
+    const auto serializeDetails
+        = [this](int64_t engineId, const GraphDescriptor*, hipdnnPluginConstData_t* d) {
+              *d = this->serializeEngineDetails(engineId);
+          };
+    for(const int64_t engineId : applicableIds)
+    {
+        EXPECT_CALL(*_mockEnginePluginResourceManager, getEngineDetails(engineId, _, _))
+            .Times(1)
+            .WillOnce(Invoke(serializeDetails));
+    }
+    EXPECT_CALL(*_mockEnginePluginResourceManager, destroyEngineDetails(_, _))
+        .WillRepeatedly(Return());
+
+    ASSERT_NO_THROW(heur->finalize());
+
+    std::vector<ScopedDescriptor> ownedConfigs(3);
+    for(auto& owned : ownedConfigs)
+    {
+        owned = ScopedDescriptor(createDescriptorPtr<EngineConfigDescriptor>());
+    }
+    std::vector<hipdnnBackendDescriptor_t> configs;
+    configs.reserve(ownedConfigs.size());
+    for(auto& owned : ownedConfigs)
+    {
+        configs.push_back(owned.get());
+    }
+
+    int64_t count = 0;
+    ASSERT_NO_THROW(heur->getAttribute(HIPDNN_ATTR_ENGINEHEUR_RESULTS,
+                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                       3,
+                                       &count,
+                                       static_cast<void*>(configs.data())));
+    ASSERT_EQ(count, 3);
+
+    for(size_t i = 0; i < configs.size(); ++i)
+    {
+        ASSERT_NO_THROW(configs[i]->finalize());
+
+        ScopedDescriptor engine;
+        ASSERT_NO_THROW(configs[i]->getAttribute(HIPDNN_ATTR_ENGINECFG_ENGINE,
+                                                 HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                                 1,
+                                                 nullptr,
+                                                 static_cast<void*>(engine.getPtr())));
+
+        int64_t globalIndex = -1;
+        ASSERT_NO_THROW(engine.get()->getAttribute(
+            HIPDNN_ATTR_ENGINE_GLOBAL_INDEX, HIPDNN_TYPE_INT64, 1, nullptr, &globalIndex));
+        EXPECT_EQ(globalIndex, rankedIds[i]) << "config " << i;
+    }
+}
+
 TEST_F(TestGpuEngineHeuristicDescriptor, GetEngineHeuristicDescriptorHeurMode)
 {
     auto heur = getEngineHeuristicDescriptor();

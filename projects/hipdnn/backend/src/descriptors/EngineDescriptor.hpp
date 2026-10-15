@@ -17,6 +17,7 @@ class KnobDescriptor;
 namespace plugin
 {
 class EngineDetailsWrapper;
+class EnginePluginResourceManager;
 }
 
 class EngineDescriptor : public HipdnnBackendDescriptorImpl<EngineDescriptor>
@@ -70,8 +71,21 @@ private:
     /// Populated during finalize() from _knobSerializedBuffers.
     std::vector<std::shared_ptr<KnobDescriptor>> _knobDescriptors;
 
+    /// Loads engine details, behavior notes, knobs and the resolved name for
+    /// _engineId, then marks the descriptor finalized. Requires _graph and
+    /// _engineId to be set and _engineId to be applicable to _graph.
+    void loadEngineDetailsAndFinalize(
+        const std::shared_ptr<plugin::EnginePluginResourceManager>& pluginResourceManager);
+
 public:
     void finalize() override;
+
+    /// Builds a finalized engine for an ID the caller has just obtained from
+    /// EnginePluginResourceManager::getApplicableEngineIds() for this finalized
+    /// graph, so the applicability probe that finalize() runs is skipped. Not
+    /// reachable via the C API.
+    static std::shared_ptr<EngineDescriptor>
+        createForApplicableEngine(std::shared_ptr<const GraphDescriptor> graph, int64_t engineId);
 
     void getAttribute(hipdnnBackendAttributeName_t attributeName,
                       hipdnnBackendAttributeType_t attributeType,

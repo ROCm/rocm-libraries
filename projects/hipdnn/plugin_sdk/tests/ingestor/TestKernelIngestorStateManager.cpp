@@ -3,12 +3,15 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <algorithm>
 #include <cstdint>
 #include <filesystem>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -34,6 +37,7 @@ namespace
 
 using namespace hipdnn_plugin_sdk::ingestor;
 using namespace hipdnn_plugin_sdk::ingestor::testing;
+using hipdnn_flatbuffers_sdk::flatbuffer_utilities::testing::ContentCarryingTestGraph;
 
 inline bool rejectSecondCriterion(const MatchContext& /*context*/, const BoundTokens& /*bound*/)
 {
@@ -49,6 +53,43 @@ inline bool rejectEveryKernel(const MatchContext& /*context*/,
     return false;
 }
 
+constexpr const char* IN_UID_TOKEN = "test.in_uid";
+constexpr const char* OUT_UID_TOKEN = "test.out_uid";
+
+/// Binds raw tensor uids the way shipped graph matches do, so a test can tell whose
+/// numbering a catalog's bound state carries.
+inline std::optional<BoundTokens> bindTensorUids(const MatchContext& context)
+{
+    ++counters().graphMatchCalls;
+    const auto* tensors = context.graph.getGraph().tensors();
+    BoundTokens bound;
+    bound[IN_UID_TOKEN] = tensors->Get(0)->uid();
+    bound[OUT_UID_TOKEN] = tensors->Get(1)->uid();
+    return bound;
+}
+
+/// Declines override-shape graphs the way hip-kernel-provider plan builders do, reading a
+/// graph-level field `GraphContentKey` ignores.
+inline std::optional<BoundTokens> declineOverrideShapes(const MatchContext& context)
+{
+    ++counters().graphMatchCalls;
+    if(context.graph.getGraph().is_override_shape_enabled())
+    {
+        return std::nullopt;
+    }
+    return BoundTokens{};
+}
+
+ContentCarryingTestGraph::Spec specWithUids(int64_t inUid, int64_t outUid)
+{
+    ContentCarryingTestGraph::Spec spec;
+    spec.tensors = {ContentCarryingTestGraph::TensorSpec{inUid},
+                    ContentCarryingTestGraph::TensorSpec{outUid}};
+    spec.nodes[0].in0TensorUid = inUid;
+    spec.nodes[0].out0TensorUid = outUid;
+    return spec;
+}
+
 TEST(TestKernelIngestorStateManager, KernelLevelMatcherPrunesTheCatalog)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
@@ -60,9 +101,9 @@ TEST(TestKernelIngestorStateManager, KernelLevelMatcherPrunesTheCatalog)
     const auto definitions = manager->unsortedDefinitions(context);
 
     ASSERT_EQ(definitions.size(), 2U);
-    for(const auto& definition : definitions)
+    for(const KernelDefinition* definition : definitions)
     {
-        EXPECT_EQ(definition.getStringMetadata(DTYPE), "FLOAT");
+        EXPECT_EQ(definition->getStringMetadata(DTYPE), "FLOAT");
     }
 }
 
@@ -148,7 +189,7 @@ TEST(TestKernelIngestorStateManager, EvaluatesASharedGraphMatcherOncePerGraphNot
     // evaluation; the unshared one adds the second.
     EXPECT_EQ(counters().graphCalls, 2);
     ASSERT_EQ(catalog.entries.size(), 1U);
-    EXPECT_EQ(catalog.entries.front().packId, second.id);
+    EXPECT_EQ(catalog.entries.front()->packId, second.id);
 }
 
 TEST(TestKernelIngestorStateManager, ASharedGraphMatcherFailurePrunesEveryPackListingIt)
@@ -211,11 +252,11 @@ TEST(TestKernelIngestorStateManager, AdmitsTwoPacksSharingATupleUnderDisjointArc
 
     const auto onGfx90a = definitionsFor(0, "gfx90a:sramecc+:xnack-");
     ASSERT_EQ(onGfx90a.size(), 1u);
-    EXPECT_EQ(onGfx90a.front().kernelId, testId(0x90));
+    EXPECT_EQ(onGfx90a.front()->kernelId, testId(0x90));
 
     const auto onGfx942 = definitionsFor(1, "gfx942:sramecc+");
     ASSERT_EQ(onGfx942.size(), 1u);
-    EXPECT_EQ(onGfx942.front().kernelId, testId(0x92));
+    EXPECT_EQ(onGfx942.front()->kernelId, testId(0x92));
 }
 
 /// The same thing one level down, and the reason a kernel carries an arch at all: two
@@ -252,11 +293,11 @@ TEST(TestKernelIngestorStateManager, AdmitsTwoKernelsOfOnePackSharingATupleUnder
     // what separates these -- a pack-level filter alone would hand both to both.
     const auto onGfx90a = definitionsFor(0, "gfx90a:sramecc+:xnack-");
     ASSERT_EQ(onGfx90a.size(), 1u);
-    EXPECT_EQ(onGfx90a.front().kernelId, testId(0x90));
+    EXPECT_EQ(onGfx90a.front()->kernelId, testId(0x90));
 
     const auto onGfx942 = definitionsFor(1, "gfx942:sramecc+");
     ASSERT_EQ(onGfx942.size(), 1u);
-    EXPECT_EQ(onGfx942.front().kernelId, testId(0x92));
+    EXPECT_EQ(onGfx942.front()->kernelId, testId(0x92));
 }
 
 /// Narrowing does not buy an escape from uniqueness: two kernels a gfx942 device would
@@ -380,7 +421,7 @@ TEST(TestKernelIngestorStateManager, APackIsPrunedWhenAnyOfItsCriteriaFails)
     const auto catalog = manager.unsortedCatalog(MatchContext{graph, 0, properties});
 
     ASSERT_EQ(catalog.entries.size(), 1U);
-    EXPECT_EQ(catalog.entries.front().packId, survivingPack.id);
+    EXPECT_EQ(catalog.entries.front()->packId, survivingPack.id);
 }
 
 TEST(TestKernelIngestorStateManager, EveryPackOfOneEngineSharesWhatTheGraphMatchBound)
@@ -519,11 +560,12 @@ TEST(TestKernelIngestorStateManager, NoDeviceYieldsAnEmptyCatalogEvenWhenMatcher
         manager->unsortedCatalog(MatchContext{graph, NO_DEVICE, properties}).entries.empty());
 }
 
-TEST(TestKernelIngestorStateManager, RematchesEveryCallWhenTheGraphHasNoIdentity)
+TEST(TestKernelIngestorStateManager, RematchesEveryCallWhenTheGraphSuppliesNoBytes)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
     const auto manager = makeStateManager();
-    const TestGraph graph;
+    // A valid graph id does not make a graph cacheable; only its content does.
+    const BytelessTestGraph graph(makeGraphId(0x5C));
     const auto properties = testDeviceProperties();
     const MatchContext context{graph, 0, properties};
 
@@ -535,37 +577,86 @@ TEST(TestKernelIngestorStateManager, RematchesEveryCallWhenTheGraphHasNoIdentity
     EXPECT_EQ(counters().graphMatchCalls, 2);
 }
 
-TEST(TestKernelIngestorStateManager, ServesACachedRankingWithoutRematching)
+TEST(TestKernelIngestorStateManager, ServesFreshlyBuiltIdenticalGraphsFromOneCatalogEntry)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
     const auto manager = makeStateManager();
-    const TestGraph graph(makeGraphId(0x5D));
     const auto properties = testDeviceProperties();
-    const MatchContext context{graph, 0, properties};
 
-    ASSERT_TRUE(manager->sortedCatalog(context).isSorted);
-
-    static_cast<void>(manager->unsortedCatalog(context));
-
-    EXPECT_TRUE(manager->sortedCatalog(context).isSorted);
-    EXPECT_EQ(counters().graphMatchCalls, 1);
-}
-
-TEST(TestKernelIngestorStateManager, DistinctGraphsCarryingANilUuidDoNotShareACatalogEntry)
-{
-    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
-    const auto manager = makeStateManager();
-    const TestGraph first(makeNilGraphId());
-    const TestGraph second(makeNilGraphId());
-    const auto properties = testDeviceProperties();
+    // A rebuild of the same problem: same content and uids, a fresh graph id.
+    auto firstSpec = specWithUids(1, 2);
+    firstSpec.graphId = makeGraphId(0x31);
+    auto secondSpec = specWithUids(1, 2);
+    secondSpec.graphId = makeGraphId(0x32);
+    const ContentCarryingTestGraph first{firstSpec};
+    const ContentCarryingTestGraph second{secondSpec};
 
     const auto firstDefinitions = manager->unsortedDefinitions(MatchContext{first, 0, properties});
     const auto secondDefinitions
         = manager->unsortedDefinitions(MatchContext{second, 0, properties});
 
-    EXPECT_EQ(counters().graphMatchCalls, 2);
+    EXPECT_EQ(counters().graphMatchCalls, 1);
     EXPECT_EQ(firstDefinitions.size(), 2U);
     EXPECT_EQ(secondDefinitions.size(), 2U);
+}
+
+TEST(TestKernelIngestorStateManager, MatchesGraphsWithDifferentContentSeparately)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto manager = makeStateManager();
+    const auto properties = testDeviceProperties();
+
+    auto widerSpec = specWithUids(1, 2);
+    widerSpec.tensors[0].dims = {4, 16};
+    const ContentCarryingTestGraph narrow{specWithUids(1, 2)};
+    const ContentCarryingTestGraph wider{widerSpec};
+
+    manager->unsortedDefinitions(MatchContext{narrow, 0, properties});
+    manager->unsortedDefinitions(MatchContext{wider, 0, properties});
+
+    EXPECT_EQ(counters().graphMatchCalls, 2);
+}
+
+TEST(TestKernelIngestorStateManager, ARenumberedGraphGetsItsOwnUidsBound)
+{
+    const ScopedSymbols symbols("test.graph", bindTensorUids, "test.kernel", countingFloatKernels);
+    const auto manager = makeStateManager();
+    const auto properties = testDeviceProperties();
+
+    // Equal under GraphContentKey, which folds tensor references as ordinals.
+    const ContentCarryingTestGraph low{specWithUids(1, 2)};
+    const ContentCarryingTestGraph high{specWithUids(1000, 2000)};
+
+    static_cast<void>(manager->unsortedCatalog(MatchContext{low, 0, properties}));
+    const auto bound = manager->unsortedCatalog(MatchContext{high, 0, properties}).bound;
+
+    EXPECT_EQ(counters().graphMatchCalls, 2);
+    EXPECT_EQ(tryGetBoundInt(bound, IN_UID_TOKEN), 1000);
+    EXPECT_EQ(tryGetBoundInt(bound, OUT_UID_TOKEN), 2000);
+}
+
+TEST(TestKernelIngestorStateManager, AnOverrideShapeGraphGetsItsOwnCatalogVerdict)
+{
+    const ScopedSymbols symbols(
+        "test.graph", declineOverrideShapes, "test.kernel", countingFloatKernels);
+    const auto manager = makeStateManager();
+    const auto properties = testDeviceProperties();
+
+    // Equal under GraphContentKey, which ignores is_override_shape_enabled. Matching the
+    // accepted graph first means a shared entry would serve its catalog to the other.
+    auto enabledSpec = specWithUids(1, 2);
+    enabledSpec.isOverrideShapeEnabled = true;
+    const ContentCarryingTestGraph disabled{specWithUids(1, 2)};
+    const ContentCarryingTestGraph enabled{enabledSpec};
+
+    const auto disabledDefinitions
+        = manager->unsortedDefinitions(MatchContext{disabled, 0, properties});
+    const auto enabledDefinitions
+        = manager->unsortedDefinitions(MatchContext{enabled, 0, properties});
+
+    EXPECT_EQ(counters().graphMatchCalls, 2);
+    EXPECT_EQ(disabledDefinitions.size(), 2U);
+    EXPECT_TRUE(enabledDefinitions.empty());
 }
 
 TEST(TestKernelIngestorStateManager, CarriesWhatTheGraphMatchBoundThroughToDispatch)
@@ -606,8 +697,10 @@ TEST(TestKernelIngestorStateManager, RematchesAfterCacheEviction)
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
     const auto manager = makeStateManager(SCORE_SYMBOL, 1);
     const auto properties = testDeviceProperties();
-    const TestGraph first(makeGraphId(5));
-    const TestGraph second(makeGraphId(6));
+    auto secondSpec = specWithUids(1, 2);
+    secondSpec.tensors[0].dims = {4, 16};
+    const ContentCarryingTestGraph first{specWithUids(1, 2)};
+    const ContentCarryingTestGraph second{secondSpec};
 
     manager->unsortedDefinitions(MatchContext{first, 0, properties});
     manager->unsortedDefinitions(MatchContext{second, 0, properties});
@@ -627,7 +720,7 @@ TEST(TestKernelIngestorStateManager, SortedDefinitionsAreRankedBestFirst)
     const auto sorted = manager->sortedDefinitions(context);
 
     ASSERT_EQ(sorted.size(), 2U);
-    EXPECT_EQ(sorted.front().getIntMetadata(BLOCK_SIZE), 256);
+    EXPECT_EQ(sorted.front()->getIntMetadata(BLOCK_SIZE), 256);
 }
 
 TEST(TestKernelIngestorStateManager, RankingReusesTheAlreadyMatchedCatalog)
@@ -644,6 +737,38 @@ TEST(TestKernelIngestorStateManager, RankingReusesTheAlreadyMatchedCatalog)
 
     EXPECT_EQ(counters().graphMatchCalls, 1);
     EXPECT_EQ(counters().kernelCalls, 3);
+}
+
+/// A catalog references the manager's own definitions instead of carrying copies of them:
+/// every lookup of a cached graph, and the ranking built from it, hands back the same
+/// addresses. A catalog holding copies would produce fresh ones per lookup.
+TEST(TestKernelIngestorStateManager, CatalogLookupsReferenceTheManagersOwnDefinitions)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto manager = makeStateManager();
+    const TestGraph graph(makeGraphId(0x42));
+    const auto properties = testDeviceProperties();
+    const MatchContext context{graph, 0, properties};
+
+    const auto first = manager->unsortedCatalog(context);
+    const auto second = manager->unsortedCatalog(context);
+    const auto sorted = manager->sortedCatalog(context);
+
+    ASSERT_EQ(counters().graphMatchCalls, 1) << "the second lookup must be a cache hit";
+    ASSERT_EQ(first.entries.size(), 2U);
+    ASSERT_EQ(second.entries.size(), first.entries.size());
+    for(size_t i = 0; i < first.entries.size(); ++i)
+    {
+        EXPECT_EQ(second.entries[i], first.entries[i])
+            << "entry " << i << " is not the definition the manager holds";
+    }
+
+    ASSERT_EQ(sorted.entries.size(), first.entries.size());
+    for(const KernelDefinition* entry : sorted.entries)
+    {
+        EXPECT_NE(std::find(first.entries.begin(), first.entries.end(), entry), first.entries.end())
+            << "ranking must reorder the manager's definitions, not copies of them";
+    }
 }
 
 TEST(TestKernelIngestorStateManager, KnobValuesComeFromTheCatalogInRankedOrder)
@@ -733,7 +858,7 @@ TEST(TestKernelIngestorStateManager, RefusesToConstructAgainstAnUnregisteredDisp
     }
 }
 
-TEST(TestKernelIngestorStateManager, GetDispatchDetailsThrowsOnADanglingDispatchId)
+TEST(TestKernelIngestorStateManager, DispatchLookupsThrowOnADanglingDispatchId)
 {
     // Built directly since validation cannot see a definition never in a pack. The
     // dangling id must not be one the manager registered, or this fails at resolve
@@ -743,16 +868,24 @@ TEST(TestKernelIngestorStateManager, GetDispatchDetailsThrowsOnADanglingDispatch
     auto kernel = makeDefinition(testId(0x01), 64);
     kernel.dispatchId = testId(0xDD);
 
-    try
+    // Workspace sizing takes the handler-only lookup and plan construction the copying
+    // one; both must fail the same way rather than hand back a null handler.
+    const std::vector<std::pair<std::string, std::function<void()>>> lookups{
+        {"dispatchHandlerFor", [&] { static_cast<void>(manager->dispatchHandlerFor(kernel)); }},
+        {"getDispatchDetails", [&] { static_cast<void>(manager->getDispatchDetails(kernel)); }}};
+    for(const auto& [name, lookup] : lookups)
     {
-        manager->getDispatchDetails(kernel);
-        FAIL() << "expected an unknown-dispatch-descriptor failure";
-    }
-    catch(const std::runtime_error& error)
-    {
-        EXPECT_NE(std::string(error.what()).find("names unknown dispatch descriptor"),
-                  std::string::npos)
-            << "threw for the wrong reason: " << error.what();
+        try
+        {
+            lookup();
+            ADD_FAILURE() << name << ": expected an unknown-dispatch-descriptor failure";
+        }
+        catch(const std::runtime_error& error)
+        {
+            EXPECT_NE(std::string(error.what()).find("names unknown dispatch descriptor"),
+                      std::string::npos)
+                << name << " threw for the wrong reason: " << error.what();
+        }
     }
 }
 
@@ -780,8 +913,8 @@ TEST(TestKernelIngestorStateManager, CompletesAnOmittedFieldFromItsSchemaDefault
     const auto definitions = manager.unsortedDefinitions(MatchContext{graph, 0, properties});
 
     ASSERT_EQ(definitions.size(), 1U);
-    EXPECT_EQ(definitions.front().getIntMetadata(BLOCK_SIZE), 64);
-    EXPECT_EQ(definitions.front().getStringMetadata(DTYPE), "FLOAT");
+    EXPECT_EQ(definitions.front()->getIntMetadata(BLOCK_SIZE), 64);
+    EXPECT_EQ(definitions.front()->getStringMetadata(DTYPE), "FLOAT");
 }
 
 // The source-kind gate: KPACK indexes, the two kinds with no adapter are dropped, and a
@@ -811,13 +944,13 @@ TEST(TestKernelIngestorStateManager, IndexesAKpackKernel)
     const auto definitions = manager.unsortedDefinitions(MatchContext{graph, 0, properties});
 
     ASSERT_EQ(definitions.size(), 1U);
-    const auto& source = definitions.front().source;
+    const auto& source = definitions.front()->source;
     EXPECT_EQ(source.kind, KernelSourceKind::KPACK);
     EXPECT_EQ(source.library, "kpack/hip_kernel_provider_gfx942.kpack");
     EXPECT_EQ(source.tocKey, "test-toc-key");
     EXPECT_EQ(source.symbol, "TestKernel");
     EXPECT_EQ(source.sha256, std::string(64, 'a'));
-    EXPECT_EQ(definitions.front().name, "kernel_kpack");
+    EXPECT_EQ(definitions.front()->name, "kernel_kpack");
 }
 
 /// Admitting KPACK must not admit the two kinds nothing can dispatch. They are dropped
@@ -887,8 +1020,8 @@ TEST(TestKernelIngestorStateManager, DropsOnlyTheUnadaptedKernelAndKeepsItsPack)
     const auto definitions = manager.unsortedDefinitions(MatchContext{graph, 0, properties});
 
     ASSERT_EQ(definitions.size(), 1U);
-    EXPECT_EQ(definitions.front().getIntMetadata(BLOCK_SIZE), 256);
-    EXPECT_EQ(definitions.front().name, "kernel_sibling");
+    EXPECT_EQ(definitions.front()->getIntMetadata(BLOCK_SIZE), 256);
+    EXPECT_EQ(definitions.front()->name, "kernel_sibling");
     EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "kernel 'kernel_hsaco'"))
         << recorder.getRecordedLogsAsString();
 }
@@ -920,7 +1053,7 @@ TEST(TestKernelIngestorStateManager, CarriesTheOriginDirectoryIntoTheDefinition)
     const auto definitions = manager.unsortedDefinitions(MatchContext{graph, 0, properties});
 
     ASSERT_EQ(definitions.size(), 1U);
-    EXPECT_EQ(definitions.front().originDirectory, origin);
+    EXPECT_EQ(definitions.front()->originDirectory, origin);
 }
 
 struct StateManagerConstructionThrowCase

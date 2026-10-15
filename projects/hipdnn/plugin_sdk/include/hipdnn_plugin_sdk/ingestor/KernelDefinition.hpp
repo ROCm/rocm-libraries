@@ -17,9 +17,9 @@
 namespace hipdnn_plugin_sdk::ingestor
 {
 
-/// One catalog entry: a kernel that passed every matcher for a graph. Copied out of
-/// KernelIngestorStateManager rather than referenced, so a caller holds a stable
-/// snapshot while the source cache is concurrently evicted or refilled.
+/// One kernel an engine can dispatch. KernelIngestorStateManager owns every definition
+/// in an immutable set; catalogs and rankings reference them by pointer, valid for the
+/// manager's lifetime.
 struct KernelDefinition
 {
     DescriptorId kernelId;

@@ -51,7 +51,7 @@ TEST(TestIngestorWinnerCache, ARecordCoveringEveryCandidateIsCovered)
     const auto second = definitionFor(0x02);
     const WinnerRecord record{entryFor(second, 1.0), entryFor(first, 2.0)};
 
-    EXPECT_TRUE(recordCovers(record, {first, second}));
+    EXPECT_TRUE(recordCovers(record, {&first, &second}));
 }
 
 TEST(TestIngestorWinnerCache, ARecordMissingACandidateIsNotCovered)
@@ -60,7 +60,7 @@ TEST(TestIngestorWinnerCache, ARecordMissingACandidateIsNotCovered)
     const auto second = definitionFor(0x02);
     const WinnerRecord record{entryFor(first, 2.0)};
 
-    EXPECT_FALSE(recordCovers(record, {first, second}));
+    EXPECT_FALSE(recordCovers(record, {&first, &second}));
 }
 
 // The asymmetry is the point: a wider record still covers the candidate set. Treating
@@ -71,7 +71,7 @@ TEST(TestIngestorWinnerCache, ARecordWiderThanTheCandidateSetStillCoversIt)
     const auto second = definitionFor(0x02);
     const WinnerRecord record{entryFor(first, 1.0), entryFor(second, 2.0)};
 
-    EXPECT_TRUE(recordCovers(record, {first}));
+    EXPECT_TRUE(recordCovers(record, {&first}));
 }
 
 TEST(TestIngestorWinnerCache, AnEmptyCandidateSetIsVacuouslyCovered)
@@ -81,7 +81,8 @@ TEST(TestIngestorWinnerCache, AnEmptyCandidateSetIsVacuouslyCovered)
 
 TEST(TestIngestorWinnerCache, AnEmptyRecordCoversNothing)
 {
-    EXPECT_FALSE(recordCovers(WinnerRecord{}, {definitionFor(0x01)}));
+    const auto candidate = definitionFor(0x01);
+    EXPECT_FALSE(recordCovers(WinnerRecord{}, {&candidate}));
 }
 
 TEST(TestIngestorWinnerCache, OrderByRecordPutsCandidatesIntoMeasuredOrder)
@@ -90,11 +91,11 @@ TEST(TestIngestorWinnerCache, OrderByRecordPutsCandidatesIntoMeasuredOrder)
     const auto fast = definitionFor(0x02);
     const WinnerRecord record{entryFor(fast, 0.5), entryFor(slow, 5.0)};
 
-    const auto ordered = orderByRecord(record, {slow, fast});
+    const auto ordered = orderByRecord(record, {&slow, &fast});
 
     ASSERT_EQ(ordered.size(), 2U);
-    EXPECT_EQ(ordered[0].kernelId, fast.kernelId) << "the measured winner must come first";
-    EXPECT_EQ(ordered[1].kernelId, slow.kernelId);
+    EXPECT_EQ(ordered[0]->kernelId, fast.kernelId) << "the measured winner must come first";
+    EXPECT_EQ(ordered[1]->kernelId, slow.kernelId);
 }
 
 // Coverage asks "was this kernel measured"; agreement asks "is it still the same kernel".
@@ -104,7 +105,7 @@ TEST(TestIngestorWinnerCache, OrderByRecordSkipsAnEntryWhosePackNoLongerAgrees)
     const auto current = definitionFor(0x01, 0xA1);
     const WinnerRecord record{entryFor(definitionFor(0x01, 0xB2), 1.0)};
 
-    EXPECT_TRUE(orderByRecord(record, {current}).empty())
+    EXPECT_TRUE(orderByRecord(record, {&current}).empty())
         << "a kernel id that now resolves to a different pack is a different kernel";
 }
 
@@ -113,7 +114,7 @@ TEST(TestIngestorWinnerCache, OrderByRecordSkipsAnEntryWhoseDispatchNoLongerAgre
     const auto current = definitionFor(0x01, 0xF0, 0xD1);
     const WinnerRecord record{entryFor(definitionFor(0x01, 0xF0, 0xD2), 1.0)};
 
-    EXPECT_TRUE(orderByRecord(record, {current}).empty());
+    EXPECT_TRUE(orderByRecord(record, {&current}).empty());
 }
 
 TEST(TestIngestorWinnerCache, OrderByRecordDropsRecordEntriesAbsentFromTheCandidates)
@@ -121,10 +122,10 @@ TEST(TestIngestorWinnerCache, OrderByRecordDropsRecordEntriesAbsentFromTheCandid
     const auto present = definitionFor(0x01);
     const WinnerRecord record{entryFor(definitionFor(0x02), 0.5), entryFor(present, 1.0)};
 
-    const auto ordered = orderByRecord(record, {present});
+    const auto ordered = orderByRecord(record, {&present});
 
     ASSERT_EQ(ordered.size(), 1U);
-    EXPECT_EQ(ordered[0].kernelId, present.kernelId);
+    EXPECT_EQ(ordered[0]->kernelId, present.kernelId);
 }
 
 // Rank 0's kernelId is present in the candidates, but its pack no longer agrees; the
@@ -137,10 +138,10 @@ TEST(TestIngestorWinnerCache, OrderByRecordFallsThroughToRankOneWhenRankZeroPack
     const WinnerRecord record{entryFor(definitionFor(0x01, 0xB2), 1.0),
                               entryFor(validRankOne, 2.0)};
 
-    const auto ordered = orderByRecord(record, {staleRankZero, validRankOne});
+    const auto ordered = orderByRecord(record, {&staleRankZero, &validRankOne});
 
     ASSERT_EQ(ordered.size(), 1U);
-    EXPECT_EQ(ordered[0].kernelId, validRankOne.kernelId)
+    EXPECT_EQ(ordered[0]->kernelId, validRankOne.kernelId)
         << "a stale rank 0 must fall through to rank 1, not empty the result";
 }
 
@@ -152,10 +153,10 @@ TEST(TestIngestorWinnerCache, OrderByRecordFallsThroughToRankOneWhenRankZeroDisp
     const WinnerRecord record{entryFor(definitionFor(0x01, 0xF0, 0xD2), 1.0),
                               entryFor(validRankOne, 2.0)};
 
-    const auto ordered = orderByRecord(record, {staleRankZero, validRankOne});
+    const auto ordered = orderByRecord(record, {&staleRankZero, &validRankOne});
 
     ASSERT_EQ(ordered.size(), 1U);
-    EXPECT_EQ(ordered[0].kernelId, validRankOne.kernelId)
+    EXPECT_EQ(ordered[0]->kernelId, validRankOne.kernelId)
         << "a stale rank 0 must fall through to rank 1, not empty the result";
 }
 
@@ -418,7 +419,7 @@ TEST(TestIngestorWinnerCacheStateManager, ACoveringRecordOrdersTheCatalogWithout
     double time = 1.0;
     for(auto entry = catalog.rbegin(); entry != catalog.rend(); ++entry)
     {
-        record.push_back(entryFor(*entry, time));
+        record.push_back(entryFor(**entry, time));
         time += 1.0;
     }
 
@@ -429,7 +430,7 @@ TEST(TestIngestorWinnerCacheStateManager, ACoveringRecordOrdersTheCatalogWithout
     const auto ordered = freshManager->sortedDefinitions(context);
 
     ASSERT_EQ(ordered.size(), catalog.size());
-    EXPECT_EQ(ordered.front().kernelId, catalog.back().kernelId)
+    EXPECT_EQ(ordered.front()->kernelId, catalog.back()->kernelId)
         << "a covering record must decide the order, not the heuristic";
 }
 
@@ -480,7 +481,7 @@ TEST(TestIngestorWinnerCacheStateManager, ARecordAdoptedAfterTheCatalogWasAlread
     double time = 1.0;
     for(auto entry = heuristicOrder.rbegin(); entry != heuristicOrder.rend(); ++entry)
     {
-        reversed.push_back(entryFor(*entry, time));
+        reversed.push_back(entryFor(**entry, time));
         time += 1.0;
     }
     manager->recordWinner(WinnerKey{GraphContentKey{graph}, DeviceKey{properties}},
@@ -491,12 +492,12 @@ TEST(TestIngestorWinnerCacheStateManager, ARecordAdoptedAfterTheCatalogWasAlread
     const auto measuredOrder = manager->sortedDefinitions(context);
 
     ASSERT_EQ(measuredOrder.size(), heuristicOrder.size());
-    EXPECT_EQ(measuredOrder.front().kernelId, heuristicOrder.back().kernelId)
+    EXPECT_EQ(measuredOrder.front()->kernelId, heuristicOrder.back()->kernelId)
         << "a memoized heuristic order must yield to a measurement that arrives later";
 
     // And a third call is stable: once ordered from a record, it stays that way.
     const auto thirdCall = manager->sortedDefinitions(context);
-    EXPECT_EQ(thirdCall.front().kernelId, measuredOrder.front().kernelId);
+    EXPECT_EQ(thirdCall.front()->kernelId, measuredOrder.front()->kernelId);
 }
 
 /// A partial record leaves the heuristic order intact: interleaving measured entries
@@ -515,13 +516,13 @@ TEST(TestIngestorWinnerCacheStateManager, APartialRecordLeavesTheHeuristicOrderI
     // Record only the LAST candidate, so coverage fails.
     const auto manager = makeStateManager();
     manager->recordWinner(WinnerKey{GraphContentKey{graph}, DeviceKey{properties}},
-                          WinnerRecord{entryFor(heuristicOrder.back(), 0.1)},
+                          WinnerRecord{entryFor(*heuristicOrder.back(), 0.1)},
                           WinnerWriteCause::FRESH_MISS);
 
     const auto ordered = manager->sortedDefinitions(context);
 
     ASSERT_EQ(ordered.size(), heuristicOrder.size());
-    EXPECT_EQ(ordered.front().kernelId, heuristicOrder.front().kernelId)
+    EXPECT_EQ(ordered.front()->kernelId, heuristicOrder.front()->kernelId)
         << "an uncovering record must not reorder anything";
 }
 
@@ -1505,8 +1506,8 @@ TEST(TestIngestorWinnerCacheStateManager, AColdManagerOrdersACatalogFromTheShard
         double timeMs = 1.0;
         for(auto kernel = catalog.rbegin(); kernel != catalog.rend(); ++kernel)
         {
-            record.push_back(entryFor(*kernel, timeMs));
-            reversedIds.push_back(kernel->kernelId);
+            record.push_back(entryFor(**kernel, timeMs));
+            reversedIds.push_back((*kernel)->kernelId);
             timeMs += 1.0;
         }
         writer->recordWinner(WinnerKey{GraphContentKey{graph}, DeviceKey{properties}},
@@ -1524,7 +1525,7 @@ TEST(TestIngestorWinnerCacheStateManager, AColdManagerOrdersACatalogFromTheShard
     ASSERT_EQ(ordered.size(), reversedIds.size());
     for(size_t i = 0; i < reversedIds.size(); ++i)
     {
-        EXPECT_EQ(ordered[i].kernelId, reversedIds[i])
+        EXPECT_EQ(ordered[i]->kernelId, reversedIds[i])
             << "entry " << i << " is not in the measured order the shard holds";
     }
 }
