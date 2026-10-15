@@ -43,10 +43,16 @@
 #   28 -- stream-K persistent, atomic, fp32, groups=2, gfx950
 #   29 -- stream-K persistent, workspace, fp16, gfx942
 #   30 -- stream-K dp_sk, linear, K-outer LDS tile, groups=2, gfx950
+#   31-48 -- prefetch_addr=True on a base config (see _PFA_BASES): the
+#         carried-offset K loop across mem/compv3/compv4/basic, M-outer and
+#         K-outer, split-K atomic, two-stage, scalar loads, pointwise, 3-D,
+#         gfx942 and chiplet swizzle; 45-47 pair it with async_dma, unroll_k
+#         and WMMA, which both engines must reject; 48 is a scalar-load
+#         128x128 tile (more carried offsets than accumulators)
 #   (Grouped wgrad reaches the C++ engine only through stream-K, and its tile
 #    loader has no elem_dtype, so no case loads bf16 operands. The stream-K
 #    partition and CTA pool are kernargs, so no case varies them. async_dma is
-#    rejected with stream-K.)
+#    rejected with stream-K, and so is prefetch_addr.)
 #
 # Negative cases (configs 100+) verify that invalid specs are rejected:
 #   100 -- odd C with fp16 split-K (must raise ValueError)
@@ -58,7 +64,7 @@
 #   107 -- streamk with unroll_k (must raise ValueError)
 #   108 -- streamk atomic reduction into fp16 dW (must raise ValueError)
 # (These illustrate the validator contract. The C emitter defines only cases
-# 0-30, so run_diff.py stops at the shared END before reaching 100+; these
+# 0-48, so run_diff.py stops at the shared END before reaching 100+; these
 # configs are not exercised by the differential gate.)
 from kernels.common.conv_implicit_gemm_wgrad import (
     WgradConvSpec,
@@ -66,6 +72,31 @@ from kernels.common.conv_implicit_gemm_wgrad import (
 )
 from kernels.common._conv_implicit_gemm_common import ConvProblem
 from _emit_common import run_emit
+
+
+# prefetch_addr configs: index -> (base config index, extra overrides).
+_PFA_BASES = {
+    31: (1, {}),  # mem/cshuffle, M-outer
+    32: (11, {}),  # mem/cshuffle, K-outer
+    33: (4, {}),  # compv4, 128x128 tile
+    34: (13, {}),  # K-outer, 16x16x16 atom, tile_k 16
+    35: (7, {}),  # split-K atomic, fp32 dW
+    36: (11, {"split_k": 2}),  # split-K packed fp16 atomic, K-outer cshuffle
+    37: (15, {}),  # two-stage
+    38: (19, {}),  # two-stage, C=3 (scalar loads)
+    39: (14, {}),  # pipeline="basic", split-K fp32
+    40: (3, {}),  # pointwise 1x1
+    41: (8, {}),  # 3-D
+    42: (16, {}),  # gfx942 two-stage
+    43: (0, {"pipeline": "compv3"}),  # compv3
+    44: (10, {}),  # chiplet swizzle
+    45: (12, {}),  # + async_dma: rejected
+    46: (18, {}),  # + unroll_k: rejected
+    47: (5, {}),  # WMMA gfx1151: rejected
+    # 128x128x64 with C = K = 3, so both operands load scalar: 4 accumulators
+    # + 64 carried offsets, past the C++ engine's accumulator cap.
+    48: (4, {"problem": ConvProblem(N=8, Hi=56, Wi=56, C=3, K=3, Y=3, X=3)}),
+}
 
 
 def _spec(idx: int):
@@ -76,6 +107,13 @@ def _spec(idx: int):
     illustrative of the validator contract; no differential harness consumes
     them (see the module header).
     """
+    if idx in _PFA_BASES:
+        from dataclasses import replace
+
+        base_idx, extra = _PFA_BASES[idx]
+        spec, arch = _spec(base_idx)
+        return replace(spec, prefetch_addr=True, **extra), arch
+
     if idx == 0:
         # Baseline: 3x3 conv, mem pipeline, default epilogue, gfx950.
         p = ConvProblem(N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3)

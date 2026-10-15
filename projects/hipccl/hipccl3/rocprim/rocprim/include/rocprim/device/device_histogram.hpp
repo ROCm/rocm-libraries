@@ -63,12 +63,13 @@ void histogram_shared_kernel_impl(SampleIterator                        samples,
 {
     static constexpr histogram_config_params params = TargetConfig::params;
 
-// Temporary fix: issue with dynamic shared memory on windows.
-#ifndef _WIN32
+    // Temporary fix: issue with dynamic shared memory on windows.
+    #ifndef _WIN32
     HIP_DYNAMIC_SHARED(unsigned int, block_histogram);
-#else
-    __shared__ unsigned int block_histogram[params.shared_impl_max_bins];
-#endif
+    #else
+    __shared__
+    unsigned int block_histogram[params.shared_impl_max_bins];
+    #endif
 
     histogram_shared<params.histogram_config.block_size,
                      params.histogram_config.items_per_thread,
@@ -105,8 +106,7 @@ struct HistogramSharedOp
 
     template<class TargetConfig>
     ROCPRIM_DEVICE
-    inline void
-        operator()(TargetConfig) const
+    inline void operator()(TargetConfig) const
     {
         histogram_shared_kernel_impl<TargetConfig,
                                      Channels,
@@ -203,7 +203,8 @@ inline hipError_t histogram_impl(void*          temporary_storage,
         const auto items_per_block = params.histogram_global_config.block_size
                                      * params.histogram_global_config.items_per_thread;
 
-        int device_id = hipGetStreamDeviceId(stream);
+        int device_id;
+        ROCPRIM_RETURN_ON_ERROR(get_device_from_stream(stream, device_id));
 
         // Get the number of multiprocessors
         int num_multi_processors{};
