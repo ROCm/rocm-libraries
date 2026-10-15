@@ -134,6 +134,17 @@ def test_unsupported_scheduling_is_distinct_from_invalid_metadata(tmp_path, key,
             load_library_metadata(tmp_path, target="gfx942").get_problem(17)
 
 
+@pytest.mark.parametrize("strategy", ["StreamK", "Persistent"])
+def test_zero_split_for_deferred_scheduling_is_unsupported(tmp_path, strategy):
+    # Packaged persistent solutions use zero to disable fixed split-K.
+    record = solution(split=0)
+    record["sizeMapping"]["tileProcessingStrategy"] = strategy
+    write_shard(tmp_path, [record])
+    with pytest.raises(UnsupportedSolution) as caught:
+        load_library_metadata(tmp_path, target="gfx942").get_problem(17)
+    assert caught.value.reasons == (f"tileProcessingStrategy={strategy}",)
+
+
 @pytest.mark.parametrize(
     "key,value",
     [

@@ -132,10 +132,12 @@ class LibraryMetadata:
             raise ValueError(
                 f"Solution {solution_index}: tile and DepthU must be positive integers"
             )
-        if type(split) is not int or (split <= 0 and split != -1):
+        strategy = mapping.get("tileProcessingStrategy", "None")
+        # Persistent scheduling disables fixed split-K with zero. Its workload
+        # is deferred, while zero remains invalid for an ordinary solution.
+        if type(split) is not int or split < -1 or (split == 0 and strategy == "None"):
             raise ValueError(f"Solution {solution_index}: invalid globalSplitU {split!r}")
         reasons = []
-        strategy = mapping.get("tileProcessingStrategy", "None")
         if strategy != "None":
             reasons.append(f"tileProcessingStrategy={strategy}")
         if split == -1 or mapping.get("adaptiveGemmGSUA", 0):
