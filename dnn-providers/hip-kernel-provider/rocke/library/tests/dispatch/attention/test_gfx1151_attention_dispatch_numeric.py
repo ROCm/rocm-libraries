@@ -1164,10 +1164,12 @@ def test_dispatch_two_sided_local_window(mask, sq, sk, left, right):
 @pytest.mark.parametrize(
     "mask", [AttentionMaskType.TOP_LEFT_CAUSAL, AttentionMaskType.BOTTOM_RIGHT_CAUSAL]
 )
-def test_dispatch_causal_mask_with_window_left(mask):
+@pytest.mark.parametrize("window_left", [9, -1])
+def test_dispatch_causal_mask_with_window_left(mask, window_left):
     """cuDNN-style causal sliding window: a causal mask plus an explicit left
-    bound keeps keys in ``[q + ctx - window_left, q + ctx]``."""
-    batch, sq, sk, hq, hkv, dim, window_left = 2, 37, 53, 4, 2, 64, 9
+    bound keeps keys in ``[q + ctx - window_left, q + ctx]``; ``window_left=-1``
+    is unbounded on the left and keeps the causal diagonal."""
+    batch, sq, sk, hq, hkv, dim = 2, 37, 53, 4, 2, 64
     q, k, v = _random_qkv(211, batch, sq, sk, hq, hkv, dim, dim)
     scale = 1.0 / np.sqrt(dim)
     request = _dense_direct_request(
@@ -1176,7 +1178,7 @@ def test_dispatch_causal_mask_with_window_left(mask):
     ctx = sk - sq if mask == AttentionMaskType.BOTTOM_RIGHT_CAUSAL else 0
     actual = _run_dense_direct(request, q, k, v, scale=scale)
     expected = _windowed_reference(
-        q, k, v, scale=scale, ctx=ctx, left=window_left + 1, right=0
+        q, k, v, scale=scale, ctx=ctx, left=max(window_left + 1, 0), right=0
     )
     np.testing.assert_allclose(actual, expected, rtol=0, atol=2e-2, equal_nan=False)
 
