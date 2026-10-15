@@ -166,14 +166,17 @@ TEST(TestReferenceOpCoverage, Fp8BatchGapsAreNotListedForCpu)
     }
 }
 
-TEST(TestReferenceOpCoverage, RaggedGapsAreListedForBothReferences)
+// Both references run the ragged bundles (CPU SdpaRaggedFwdPlan, GPU GpuSdpaRaggedFwdPlan), so
+// neither may list them: a gap entry would stop validating them against golden data.
+TEST(TestReferenceOpCoverage, RaggedBundlesAreNotListedAsGaps)
 {
     for(const char* bundleId : {"quick_SdpaFwd_bshd_bf16_hd128_causal_ragged_Small.Small",
                                 "quick_SdpaFwd_bshd_bf16_hd128_nomask_ragged_Small.Small",
                                 "quick_SdpaFwd_bshd_bf16_hd192_causal_ragged_Small.Small",
                                 "quick_SdpaFwd_bshd_bf16_hd192_nomask_ragged_Small.Small"})
     {
-        EXPECT_NE(findKnownReferenceGap(ReferenceExecutorType::CPU, bundleId), nullptr) << bundleId;
+        EXPECT_EQ(findKnownReferenceGap(ReferenceExecutorType::CPU, bundleId), nullptr) << bundleId;
+        EXPECT_EQ(findKnownReferenceGap(ReferenceExecutorType::GPU, bundleId), nullptr) << bundleId;
     }
 }
 

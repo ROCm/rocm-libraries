@@ -5,7 +5,10 @@
 
 #include "hipdnn_data_sdk/utilities/RaggedTensor.hpp"
 #include "hipdnn_data_sdk/utilities/Tensor.hpp"
+#include <cstdint>
+#include <functional>
 #include <memory>
+#include <numeric>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -53,6 +56,24 @@ inline std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT>
         return baked;
     }
     return std::nullopt;
+}
+
+/// A scalar operand is stored one of three ways:
+///  - baked: the value lives in the graph, and the variant pack may omit it.
+///  - runtime pass-by-value: the variant-pack slot holds a host pointer.
+///  - ordinary tensor: the variant-pack slot holds the tensor buffer (device memory for the GPU
+///    reference, host memory for the CPU reference).
+/// The first two are host scalars.
+inline bool
+    isHostScalarOperand(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT& operand)
+{
+    return operand.value.value != nullptr || operand.is_runtime_pass_by_value;
+}
+
+inline int64_t elementCount(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT& operand)
+{
+    return std::accumulate(
+        operand.dims.begin(), operand.dims.end(), int64_t{1}, std::multiplies<>());
 }
 
 template <typename T>

@@ -26,6 +26,7 @@
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/ResampleFwdSignatureKey.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/SdpaBwdSignatureKey.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/SdpaFwdSignatureKey.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/SdpaRaggedFwdSignatureKey.hpp>
 
 namespace hipdnn_test_sdk::utilities
 {
@@ -190,7 +191,17 @@ private:
         case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::BlockScaleQuantizeAttributes:
             return detail::BlockScaleQuantizeSignatureKey(node, tensorMap);
         case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::SdpaAttributes:
+        {
+            // Any ragged primary picks the ragged bucket, so a partly ragged node is rejected
+            // there instead of being run as dense.
+            const auto* sdpaAttributes = node.attributes_as_SdpaAttributes();
+            if(sdpaAttributes != nullptr
+               && detail::hasRaggedSdpaPrimary(*sdpaAttributes, tensorMap))
+            {
+                return detail::SdpaRaggedFwdSignatureKey(node, tensorMap);
+            }
             return detail::SdpaFwdSignatureKey(node, tensorMap);
+        }
         case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::SdpaBackwardAttributes:
             return detail::SdpaBwdSignatureKey(node, tensorMap);
         case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::ReductionAttributes:

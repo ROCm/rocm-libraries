@@ -4,6 +4,7 @@
 #pragma once
 
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/PlanUtils.hpp>
 #include <hipdnn_test_sdk/utilities/detail/FlatbufferTensorAttributesUtils.hpp>
 
 #include "detail/GpuPlanBuilderRegistry.hpp"
@@ -163,24 +164,13 @@ private:
                 node, tensorMap, node.compute_data_type());
         case NodeAttrs::SdpaAttributes:
         {
-            // A ragged SDPA node (RFC-0014 packed layout) has a ragged_offset on a primary. Any
-            // ragged primary picks the ragged bucket, so a partly ragged node is rejected there
-            // instead of being run as dense.
+            // Any ragged primary picks the ragged bucket, so a partly ragged node is rejected
+            // there instead of being run as dense.
             const auto* sdpaAttributes = node.attributes_as_SdpaAttributes();
-            if(sdpaAttributes != nullptr)
+            if(sdpaAttributes != nullptr
+               && hipdnn_test_sdk::detail::hasRaggedSdpaPrimary(*sdpaAttributes, tensorMap))
             {
-                for(const auto uid : {sdpaAttributes->q_tensor_uid(),
-                                      sdpaAttributes->k_tensor_uid(),
-                                      sdpaAttributes->v_tensor_uid(),
-                                      sdpaAttributes->o_tensor_uid()})
-                {
-                    const auto it = tensorMap.find(uid);
-                    if(it != tensorMap.end() && it->second != nullptr
-                       && it->second->ragged_offset_tensor_uid().has_value())
-                    {
-                        return detail::GpuSdpaRaggedFwdSignatureKey(node, tensorMap);
-                    }
-                }
+                return detail::GpuSdpaRaggedFwdSignatureKey(node, tensorMap);
             }
             return detail::GpuSdpaFwdSignatureKey(node, tensorMap);
         }

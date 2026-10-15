@@ -277,8 +277,8 @@ public:
             CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->scale_tensor_uid().value());
             const auto scale = hipdnn_test_sdk::detail::unpackTensorAttributes(
                 *tensorMap.at(nodeAttributes->scale_tensor_uid().value()));
-            if(elementCount(scale) != 1
-               || (!isHostScalarOperand(scale)
+            if(hipdnn_test_sdk::detail::elementCount(scale) != 1
+               || (!hipdnn_test_sdk::detail::isHostScalarOperand(scale)
                    && scale.data_type != hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT))
             {
                 return false;

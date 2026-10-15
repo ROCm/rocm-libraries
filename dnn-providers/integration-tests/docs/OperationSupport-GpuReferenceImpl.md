@@ -157,8 +157,10 @@ pass-by-value operand is rejected, as are Convolution Forward nodes with such an
 | Softmax max / sum-exp stats outputs | Not supported | - |
 | Additive attention bias (`attn_mask`) | - | Not supported |
 
-The ragged plan requires the RFC-0014 `[B, S, H, D]` token-major layout with a `ragged_offset` aux on every primary. A node is routed to the ragged plan as soon as any of its Q/K/V/O tensors has a `ragged_offset`; a
-partly ragged node is rejected there instead of running as dense. The harness records the
+The ragged plan requires RFC-0014 tensors with logical `[B, H, S, D]` dims, token-major (BSHD) strides
+and a `ragged_offset` aux on every primary. A node is routed to the ragged plan as soon as any of its
+Q/K/V/O tensors has a `ragged_offset`; a partly ragged node is rejected there instead of running as
+dense. The CPU reference routes and gates ragged nodes the same way. The harness records the
 dense-path gaps (variable sequence lengths, FP8) in `knownReferenceGaps()`
 (`ReferenceOpCoverage.cpp`) so those bundles report "not applicable" instead of failing.
 
@@ -194,7 +196,7 @@ host validator.
 | Reduction | Yes | Yes |
 | Resample Forward | Yes | No (library only) |
 | Resample Backward | Yes | No |
-| SDPA Forward | Yes (FP8 E4M3 / E4M3 FNUZ; no variable seq. len., no ragged) | Yes (dense; ragged incl. FP8 E4M3) |
+| SDPA Forward | Yes (FP8 E4M3 / E4M3 FNUZ; no variable seq. len.; ragged BFP16 and FP8 E4M3) | Yes (dense; ragged incl. FP8 E4M3) |
 | SDPA Backward | Yes | No |
 | BlockScale Quantize / Dequantize | Yes | No |
 | Pointwise Unary | Yes (no IDENTITY) | Yes (incl. IDENTITY) |

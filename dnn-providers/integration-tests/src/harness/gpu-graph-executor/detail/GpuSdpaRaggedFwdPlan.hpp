@@ -179,7 +179,7 @@ public:
             {
                 return nullptr;
             }
-            if(isHostScalarOperand(*d))
+            if(hipdnn_test_sdk::detail::isHostScalarOperand(*d))
             {
                 staged.emplace(std::vector<int64_t>{1});
                 staged->fillWithValue(resolveScalarOperand(*d, variantPack, "SDPA descale"));
@@ -297,7 +297,7 @@ public:
             CHECK_TENSOR_TYPE(tensorMap,
                               primary->ragged_offset_tensor_uid().value(),
                               hipdnn_flatbuffers_sdk::data_objects::DataType::INT32);
-            if(!isSupportedRaggedLayout(*primary))
+            if(!hipdnn_test_sdk::detail::isSupportedRaggedSdpaLayout(*primary))
             {
                 return false;
             }
@@ -369,7 +369,8 @@ public:
                                   hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
                 const auto descale = hipdnn_test_sdk::detail::unpackTensorAttributes(
                     *tensorMap.at(descaleUid.value()));
-                if(isHostScalarOperand(descale) && elementCount(descale) != 1)
+                if(hipdnn_test_sdk::detail::isHostScalarOperand(descale)
+                   && hipdnn_test_sdk::detail::elementCount(descale) != 1)
                 {
                     return false;
                 }
@@ -383,8 +384,8 @@ public:
             CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->scale_tensor_uid().value());
             const auto scale = hipdnn_test_sdk::detail::unpackTensorAttributes(
                 *tensorMap.at(nodeAttributes->scale_tensor_uid().value()));
-            if(elementCount(scale) != 1
-               || (!isHostScalarOperand(scale)
+            if(hipdnn_test_sdk::detail::elementCount(scale) != 1
+               || (!hipdnn_test_sdk::detail::isHostScalarOperand(scale)
                    && scale.data_type != hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT))
             {
                 return false;
@@ -415,7 +416,7 @@ public:
                 CHECK_TENSOR_TYPE(tensorMap,
                                   statsRaggedOffsetUid.value(),
                                   hipdnn_flatbuffers_sdk::data_objects::DataType::INT32);
-                if(!isSupportedRaggedLayout(
+                if(!hipdnn_test_sdk::detail::isSupportedRaggedSdpaLayout(
                        *tensorMap.at(nodeAttributes->stats_tensor_uid().value())))
                 {
                     return false;
@@ -529,17 +530,6 @@ public:
                                    descaleQPtr,
                                    descaleKPtr,
                                    descaleVPtr));
-    }
-
-private:
-    // RFC-0014 requires ragged_offset_multiplier >= 1 and a token-major [B, H, S, D] layout.
-    static bool
-        isSupportedRaggedLayout(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attr)
-    {
-        const auto unpacked = hipdnn_test_sdk::detail::unpackTensorAttributes(attr);
-        return unpacked.ragged_offset_multiplier >= 1
-               && hipdnn_test_sdk::detail::isTokenMajorRaggedLayout(unpacked.dims,
-                                                                    unpacked.strides);
     }
 };
 

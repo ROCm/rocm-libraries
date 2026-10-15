@@ -44,7 +44,8 @@ The following table lists all operations currently supported in the CPU Referenc
 | Reduction | FP16, BFP16, FP32 | All | CPU Reference | Ragged tensors rejected; see [Reduction Modes](#reduction-modes) |
 | Resample Forward | FP16, BFP16, FP32 | Op-defined | CPU Reference | MAXPOOL / AVGPOOL modes only; optional INT32 index output |
 | Resample Backward | FP16, BFP16, FP32 | Op-defined | CPU Reference | Same modes as forward; MAXPOOL requires the INT32 index tensor |
-| SDPA Forward | FP16, BFP16, FP32, FP8 E4M3 | Op-defined | CPU Reference | See [SDPA Restrictions](#sdpa-restrictions) |
+| SDPA Forward (dense) | FP16, BFP16, FP32, FP8 E4M3 | Op-defined | CPU Reference | See [SDPA Restrictions](#sdpa-restrictions) |
+| SDPA Forward (ragged) | BFP16, FP8 E4M3 | Op-defined | CPU Reference | Selected when a Q/K/V/O tensor carries a `ragged_offset`; see [SDPA Restrictions](#sdpa-restrictions) |
 | SDPA Backward | FP16, BFP16, FP32 | Op-defined | CPU Reference | See [SDPA Restrictions](#sdpa-restrictions) |
 | BlockScale Quantize | FP32, FP16, BFP16 in; FP8, FP6, FP4 out | Op-defined | CPU Reference | See [Block-Scale Quantization](#block-scale-quantization) |
 | BlockScale Dequantize | FP8, FP6, FP4 in; FP32, FP16, BFP16 out | Op-defined | CPU Reference | See [Block-Scale Quantization](#block-scale-quantization) |
@@ -95,7 +96,8 @@ The following table lists all operations currently supported in the CPU Referenc
 | Reduction | `ReductionPlanBuilder` | `ReductionSignatureKey` | Reduction over the dimensions where the output size is 1 |
 | Resample Forward | `ResampleFwdPlanBuilder` | `ResampleFwdSignatureKey` | Pooling-style resampling |
 | Resample Backward | `ResampleBwdPlanBuilder` | `ResampleBwdSignatureKey` | Resampling gradient |
-| SDPA Forward | `SdpaFwdPlanBuilder` | `SdpaFwdSignatureKey` | Scaled dot-product attention forward pass |
+| SDPA Forward (dense) | `SdpaFwdPlanBuilder` | `SdpaFwdSignatureKey` | Scaled dot-product attention forward pass |
+| SDPA Forward (ragged) | `SdpaRaggedFwdPlanBuilder` | `SdpaRaggedFwdSignatureKey` | Packed (RFC-0014 ragged) attention forward pass |
 | SDPA Backward | `SdpaBwdPlanBuilder` | `SdpaBwdSignatureKey` | Scaled dot-product attention gradients |
 
 ### Block-Scale Quantization Operations
@@ -126,18 +128,25 @@ dimension must be reduced.
 
 ### SDPA Restrictions
 
-| Feature | SDPA Forward | SDPA Backward |
-|---------|--------------|---------------|
-| Log-sum-exp `stats` output | Supported | Required input |
-| Variable sequence lengths (`seq_len_q` / `seq_len_kv`) | Not supported | Not supported |
-| Dropout | Not supported | Not supported |
-| ALiBi / padding mask | Not supported | - |
-| Paged KV cache, block-sparse attention | Not supported | - |
-| Softmax max / sum-exp stats outputs | Not supported | - |
-| Ragged tensors | - | Rejected |
-| FP8 inputs | Requires Q/K/V descale tensors; descales rejected for non-FP8 inputs | - |
+| Feature | Dense SDPA Forward | Ragged SDPA Forward | SDPA Backward |
+|---------|--------------------|---------------------|---------------|
+| Log-sum-exp `stats` output | Supported | Supported (must be `FP32`; packed when an `INT32` ragged offset is used) | Required input |
+| Variable sequence lengths (`seq_len_q` / `seq_len_kv`) | Not supported | Not supported; lengths come from `ragged_offset` alone | Not supported |
+| Dropout | Not supported | Not supported | Not supported |
+| ALiBi / padding mask | Not supported | Not supported | - |
+| Additive attention bias (`attn_mask`) | Supported | Not supported | Supported |
+| Paged KV cache, block-sparse attention | Not supported | Not supported | - |
+| Softmax max / sum-exp stats outputs | Not supported | Not supported | - |
+| Ragged tensors | Routed to the ragged plan | Required on every Q/K/V/O | Rejected |
+| FP8 inputs | Requires Q/K/V descale tensors; descales rejected for non-FP8 inputs | Optional Q/K/V descales (scalar or per KV head) | - |
 
-FP8 forward is registered for `FP8_E4M3` and `FP8_E4M3_FNUZ` inputs with `BFP16` output.
+Dense FP8 forward is registered for `FP8_E4M3` and `FP8_E4M3_FNUZ` inputs with `BFP16` output; ragged
+FP8 forward for `FP8_E4M3` inputs with `BFP16` output.
+
+The ragged plan matches the GPU reference's ragged plan: RFC-0014 tensors with logical `[B, H, S, D]`
+dims, token-major (BSHD) strides and an `INT32` `ragged_offset` aux on every primary. A node is routed
+to it as soon as any of its Q/K/V/O tensors has a `ragged_offset`, so a partly ragged node is rejected
+instead of running as dense.
 
 ### Resample Modes
 
