@@ -26,7 +26,7 @@ from reference_common.numeric import array_digest, decode, file_digest, write_js
 def replay_values(metadata: dict, buffers: dict, case: Case) -> dict:
     """Bind frozen WMMA or legacy dense arguments without initializing HIP."""
     abi = metadata.get("abi", "dense-v1")
-    if abi == "wmma-strided-v1":
+    if abi in ("wmma-strided-v1", "wmma-strided-v2"):
         from .implementations.wmma import replay_values as wmma_replay_values
 
         values = wmma_replay_values(metadata, buffers)

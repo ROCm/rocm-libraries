@@ -16,7 +16,8 @@ from typing import Any
 from ..contract import Case
 from ..architectures.common import validate_library_root
 
-ABI = "wmma-strided-v1"
+LEGACY_ABI = "wmma-strided-v1"
+ABI = "wmma-strided-v2"
 CASES = tuple(
     Case("fp16", d, 4, kv, False, causal, batch=2, sequence_length=64)
     for d in (64, 128)
@@ -32,6 +33,7 @@ class Prepared:
     architecture: str
     case: Case
     spec: Any
+    abi: str = ABI
     launcher: Any = None
 
 
@@ -43,20 +45,34 @@ def prepare(case: Case, library_root: str, architecture: str) -> Prepared:
     if architecture in ("gfx1151", "gfx1201"):
         from kernels.gfx1151.wmma_fmha_fwd import WmmaFmhaFwdSpec
 
+        # Qualification can select the published baseline's older source tree,
+        # where head counts are specialization fields instead of runtime args.
+        legacy = "num_query_heads" in WmmaFmhaFwdSpec.__dataclass_fields__
+        heads = (
+            dict(num_query_heads=case.query_heads, num_kv_heads=case.kv_heads)
+            if legacy
+            else {}
+        )
         spec = WmmaFmhaFwdSpec(
             head_size=case.head_dim,
-            num_query_heads=case.query_heads,
-            num_kv_heads=case.kv_heads,
             dtype=case.dtype,
             mask_mode="causal" if case.causal else "none",
+            **heads,
         )
     else:
         raise ValueError(f"unsupported WMMA reference architecture: {architecture}")
-    return Prepared(architecture, case, spec)
+    return Prepared(architecture, case, spec, abi=LEGACY_ABI if legacy else ABI)
 
 
-def signature() -> tuple[dict, ...]:
+def signature(prepared: Prepared) -> tuple[dict, ...]:
     """Freeze the ABI declared by the production WMMA builder."""
+    if prepared.abi == ABI:
+        from kernels.gfx1151.wmma_fmha_fwd import wmma_fmha_fwd_signature
+
+        return tuple(
+            dict(arg, size_bytes=8 if arg["type"].startswith("ptr<") else 4)
+            for arg in wmma_fmha_fwd_signature(prepared.spec)
+        )
     return tuple(
         {"name": name, "type": kind, "size_bytes": size}
         for name, kind, size in (
@@ -81,8 +97,10 @@ def signature() -> tuple[dict, ...]:
     )
 
 
-def scalars(case: Case, scale: float) -> dict:
+def scalars(case: Case, scale: float, *, abi: str = ABI) -> dict:
     """Convert the SDPA scale to the WMMA exp2 ABI; strides are in elements."""
+    if abi not in (LEGACY_ABI, ABI):
+        raise ValueError(f"unsupported WMMA reference ABI: {abi}")
     values = {
         "scale_log2": scale * math.log2(math.e),
         "seqlen_q": case.sequence_length,
@@ -96,18 +114,40 @@ def scalars(case: Case, scale: float) -> dict:
     ):
         values[f"stride_{name}_token"] = heads * case.head_dim
         values[f"stride_{name}_head"] = case.head_dim
+        if abi == ABI:
+            values[f"stride_{name}_batch"] = (
+                case.sequence_length * heads * case.head_dim
+            )
+    if abi == ABI:
+        values.update(
+            num_query_heads=case.query_heads,
+            num_kv_heads=case.kv_heads,
+            bottom_right=0,
+            window_left=-1,
+            window_right=-1,
+            write_lse=0,
+            stride_lse_batch=0,
+            stride_lse_token=0,
+            stride_lse_head=0,
+        )
     return values
 
 
 def replay_values(metadata: dict, buffers: dict) -> dict:
     """Bind live pointers to authenticated frozen scalar arguments."""
-    return dict(
+    values = dict(
         metadata["scalars"],
         Q=buffers["q"],
         K=buffers["k"],
         V=buffers["v"],
         O=buffers["out"],
     )
+    if metadata["abi"] == ABI:
+        # This cohort never requests LSE; the runtime write_lse guard is off.
+        values["LSE"] = 0
+    elif metadata["abi"] != LEGACY_ABI:
+        raise ValueError(f"unsupported WMMA reference ABI: {metadata['abi']}")
+    return values
 
 
 def build(prepared: Prepared):
@@ -121,8 +161,14 @@ def grid(prepared: Prepared) -> tuple[int, int, int]:
     """Use the production grid helper, including the nontrivial batch axis."""
     from kernels.gfx1151.wmma_fmha_fwd import wmma_fmha_fwd_grid as helper
 
+    heads = (
+        dict(num_query_heads=prepared.case.query_heads) if prepared.abi == ABI else {}
+    )
     return helper(
-        prepared.spec, seqlen_q=prepared.case.sequence_length, batch=prepared.case.batch
+        prepared.spec,
+        seqlen_q=prepared.case.sequence_length,
+        batch=prepared.case.batch,
+        **heads,
     )
 
 
@@ -141,10 +187,16 @@ def launch(prepared: Prepared, buffers: dict, scale: float) -> None:
         prepared.launcher = KernelLauncher(
             hsaco=artifact.hsaco,
             kernel_name=artifact.kernel_name,
-            signature=signature(),
+            signature=signature(prepared),
         )
     prepared.launcher(
-        replay_values({"scalars": scalars(prepared.case, scale)}, buffers),
+        replay_values(
+            {
+                "abi": prepared.abi,
+                "scalars": scalars(prepared.case, scale, abi=prepared.abi),
+            },
+            buffers,
+        ),
         config=LaunchConfig(
             grid=grid(prepared), block=(prepared.spec.block_size, 1, 1)
         ),
@@ -157,11 +209,11 @@ def exported_kernel(prepared: Prepared) -> tuple[bytes, dict]:
     if launcher is None:
         raise RuntimeError("cannot export an unlaunched WMMA reference")
     return launcher._hsaco, {
-        "abi": ABI,
+        "abi": prepared.abi,
         "name": launcher.kernel_name,
         "signature": launcher.signature,
         "grid": grid(prepared),
         "block": (prepared.spec.block_size, 1, 1),
         "runtime_shape": True,
-        "scalars": scalars(prepared.case, prepared.case.scale),
+        "scalars": scalars(prepared.case, prepared.case.scale, abi=prepared.abi),
     }

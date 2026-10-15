@@ -375,30 +375,86 @@ def test_wmma_reference_matches_production_kernel_abi(architecture, case_index):
     case = target.CASES[case_index]
     root = Path(kernels.__file__).resolve().parent.parent
     prepared = target.prepare(case, str(root))
+    assert prepared.abi == "wmma-strided-v2"
     kernel = wmma.build(prepared)
     assert [(p.name, p.type.name) for p in kernel.params] == [
-        (arg["name"], arg["type"].replace(" ", "")) for arg in wmma.signature()
+        (arg["name"], arg["type"].replace(" ", "")) for arg in wmma.signature(prepared)
     ]
     assert wmma.grid(prepared) == (4, 4, 2)
     assert prepared.spec.block_size == 32
     assert prepared.spec.head_size == case.head_dim
-    assert prepared.spec.kv_heads == case.kv_heads
     assert prepared.spec.mask_mode == ("causal" if case.causal else "none")
-    assert not prepared.spec.sliding_window
+    assert prepared.spec.layout == "dense"
     values = wmma.scalars(case, case.scale)
     assert values["seqlen_q"] == values["seqlen_k"] == 64
+    assert values["num_query_heads"] == 4
+    assert values["num_kv_heads"] == case.kv_heads
+    assert values["bottom_right"] == values["write_lse"] == 0
+    assert values["window_left"] == values["window_right"] == -1
+    assert values["stride_lse_batch"] == 0
+    assert values["stride_lse_token"] == values["stride_lse_head"] == 0
+    assert values["scale_log2"] == pytest.approx(case.scale * np.log2(np.e))
     for name, heads in (("q", 4), ("k", case.kv_heads), ("v", case.kv_heads), ("o", 4)):
+        assert values[f"stride_{name}_batch"] == 64 * heads * case.head_dim
         assert values[f"stride_{name}_token"] == heads * case.head_dim
         assert values[f"stride_{name}_head"] == case.head_dim
     buffers = {name: object() for name in ("q", "k", "v", "out")}
-    bound = wmma.replay_values({"scalars": values}, buffers)
+    bound = wmma.replay_values({"abi": prepared.abi, "scalars": values}, buffers)
     assert bound["Q"] is buffers["q"]
     assert bound["K"] is buffers["k"]
     assert bound["V"] is buffers["v"]
     assert bound["O"] is buffers["out"]
-    assert {arg["name"] for arg in wmma.signature()} == set(bound)
+    assert bound["LSE"] == 0
+    assert {arg["name"] for arg in wmma.signature(prepared)} == set(bound)
     with pytest.raises(RuntimeError, match="unlaunched"):
         target.exported_kernel(prepared)
+
+
+@pytest.mark.parametrize("architecture", ["gfx1151", "gfx1201"])
+def test_wmma_launch_and_export_preserve_runtime_arguments(architecture, monkeypatch):
+    from types import SimpleNamespace
+
+    import kernels
+    import rocke.helpers
+    import rocke.runtime
+    from rocke.runtime.packing import pack_args
+    from sdpa_reference.implementations import wmma
+    from sdpa_reference.worker import replay_values
+
+    case = wmma.CASES[-1]  # Batched, causal GQA exercises the distinct K/V strides.
+    root = Path(kernels.__file__).resolve().parent.parent
+    prepared = wmma.prepare(case, str(root), architecture)
+    compiled = []
+    launches = []
+
+    def compile_kernel(kernel, **kwargs):
+        assert kwargs["arch"] == architecture
+        compiled.append(kernel)
+        return SimpleNamespace(hsaco=b"code-object", kernel_name=kernel.name)
+
+    class Launcher:
+        def __init__(self, *, hsaco, kernel_name, signature):
+            self._hsaco = hsaco
+            self.kernel_name = kernel_name
+            self.signature = signature
+
+        def __call__(self, values, *, config):
+            launches.append((pack_args(self.signature, values), config))
+
+    monkeypatch.setattr(rocke.helpers, "compile_kernel", compile_kernel)
+    monkeypatch.setattr(rocke.runtime, "KernelLauncher", Launcher)
+    buffers = dict(q=0x1000, k=0x2000, v=0x3000, out=0x4000)
+    for _ in range(2):
+        wmma.launch(prepared, buffers, case.scale)
+    code, metadata = wmma.exported_kernel(prepared)
+    assert code == b"code-object"
+    assert metadata["abi"] == "wmma-strided-v2"
+    assert len(compiled) == 1 and len(launches) == 2
+    expected = pack_args(metadata["signature"], replay_values(metadata, buffers, case))
+    for arguments, config in launches:
+        assert arguments == expected
+        assert config.grid == metadata["grid"] == (4, 4, 2)
+        assert config.block == metadata["block"] == (32, 1, 1)
 
 
 def test_wmma_reference_cohort_and_rejections():
@@ -452,19 +508,34 @@ def test_legacy_dense_replay_arguments(architecture, runtime_shape):
     )
 
 
-def test_worker_wmma_replay_uses_frozen_scalars_and_rejects_unknown_abi():
+@pytest.mark.parametrize("abi", ["wmma-strided-v1", "wmma-strided-v2"])
+def test_worker_wmma_replay_uses_frozen_scalars_and_rejects_unknown_abi(abi):
     from sdpa_reference.worker import replay_values
     from sdpa_reference.implementations import wmma
 
     case = wmma.CASES[0]
     buffers = {name: object() for name in ("q", "k", "v", "out")}
-    frozen = wmma.scalars(case, case.scale / 2)
-    metadata = {"abi": wmma.ABI, "scalars": frozen}
+    frozen = wmma.scalars(case, case.scale / 2, abi=abi)
+    if abi == "wmma-strided-v1":
+        assert set(frozen) == {
+            "scale_log2",
+            "seqlen_q",
+            "seqlen_k",
+            *(
+                f"stride_{tensor}_{axis}"
+                for tensor in ("q", "k", "v", "o")
+                for axis in ("token", "head")
+            ),
+        }
+    metadata = {"abi": abi, "scalars": frozen}
     result = replay_values(metadata, buffers, case)
-    assert result == dict(
+    expected = dict(
         frozen, Q=buffers["q"], K=buffers["k"], V=buffers["v"], O=buffers["out"]
     )
-    assert metadata == {"abi": wmma.ABI, "scalars": frozen}
+    if abi == "wmma-strided-v2":
+        expected["LSE"] = 0
+    assert result == expected
+    assert metadata == {"abi": abi, "scalars": frozen}
     with pytest.raises(ValueError, match="unsupported SDPA replay ABI"):
         replay_values({"abi": "unknown"}, buffers, case)
 

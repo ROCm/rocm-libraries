@@ -107,6 +107,14 @@ softmax scale, sequence lengths, and eight element strides. The production grid
 helper selects `(4,4,2)` with block `(32,1,1)` for every case. Replay uses the
 exported scalars and code object. Existing dense bundles retain their original ABI.
 
+Current-source WMMA execution uses `wmma-strided-v2`, matching the production
+runtime-shape ABI. Head counts and batch strides are runtime arguments; the
+adapter supplies top-left masking, disabled windows, and a null LSE pointer with
+LSE writes disabled. It obtains the signature from the selected production spec.
+Qualification against older source snapshots still uses `wmma-strided-v1` when
+head counts are spec fields. The published bundles retain their frozen v1 runner,
+runtime, code objects, and baseline locks.
+
 | Target | Qualification and publication status |
 |---|---|
 | gfx1151 | Eight qualified cases; archive and lock enrolled for installation |
