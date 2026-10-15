@@ -73,11 +73,13 @@ macro(fetch_monorepo_dep)
   cmake_parse_arguments(arg_fetch "" "${args}" "" ${ARGN})
 
   string(TOUPPER "${arg_fetch_PACKAGE}_FETCH_METHOD" fetch_method_name)
-  set(
-    ${fetch_method_name} "PACKAGE"
-    CACHE STRING
-    "The method used to fetch ${arg_fetch_PACKAGE}"
-  )
+  if(NOT DEFINED ${fetch_method_name})
+    set(
+      ${fetch_method_name} "PACKAGE"
+      CACHE STRING
+      "The method used to fetch ${arg_fetch_PACKAGE}"
+    )
+  endif()
   message(STATUS "Fetching ${arg_fetch_PACKAGE} via ${${fetch_method_name}}")
   if(${fetch_method_name} STREQUAL "PACKAGE")
     # VERSION is optional and if unset will expand to nothing
@@ -103,10 +105,6 @@ macro(fetch_monorepo_dep)
       BASE_DIRECTORY "${monorepo_root}/"
       OUTPUT_VARIABLE current_relative_path
     )
-    message(STATUS "Monorepo path: ${monorepo_root}")
-    message(STATUS "Current abs. path: ${CMAKE_CURRENT_SOURCE_DIR}")
-    message(STATUS "Current rel. path: ${current_relative_path}")
-
     # Check if the current source directory is a hipccl directory.
     set(is_currently_in_hipccl FALSE)
     if ("${current_relative_path}" MATCHES "hipccl")
