@@ -581,21 +581,12 @@ static const char* rocke_target_id_start(const char* isa)
 }
 
 /* LLVM defines generic-processor membership explicitly; it is not a naming
- * wildcard. Keep this list aligned with LLVM's AMDGPU Generic Processors table:
- * https://llvm.org/docs/AMDGPUUsage.html#amdgpu-generic-processor-table */
+ * wildcard. Membership comes from rocke_ati_generic_targets (arch_specs.json
+ * "generic_targets"), aligned with LLVM's AMDGPU Generic Processors table:
+ * https://llvm.org/docs/AMDGPUUsage.html#amdgpu-generic-processor-table
+ * Only gfx11-generic is a base-arch alias; gfx12 devices keep their names. */
 static const char* rocke_generic_arch_alias(const char* target_id)
 {
-    static const char* const gfx11_processors[] = {
-        "gfx1100",
-        "gfx1101",
-        "gfx1102",
-        "gfx1103",
-        "gfx1150",
-        "gfx1151",
-        "gfx1152",
-        "gfx1153",
-        "gfx1154",
-    };
     size_t name_len = strcspn(target_id, ":");
     for(int i = 0; i < rocke_ati_arch_registry_len; ++i)
     {
@@ -605,13 +596,17 @@ static const char* rocke_generic_arch_alias(const char* target_id)
            && (len == name_len || target_id[len] == '-'))
             return NULL;
     }
-    for(size_t i = 0; i < sizeof(gfx11_processors) / sizeof(gfx11_processors[0]); ++i)
+    for(const rocke_ati_generic_row_t* row = rocke_ati_generic_targets; row->generic != NULL; ++row)
     {
-        const char* processor = gfx11_processors[i];
-        size_t len = strlen(processor);
-        if(len <= name_len && strncmp(target_id, processor, len) == 0
-           && (len == name_len || target_id[len] == '-'))
-            return "gfx11-generic";
+        if(strcmp(row->generic, "gfx11-generic") != 0)
+            continue;
+        for(const char* const* member = row->members; *member != NULL; ++member)
+        {
+            size_t len = strlen(*member);
+            if(len <= name_len && strncmp(target_id, *member, len) == 0
+               && (len == name_len || target_id[len] == '-'))
+                return row->generic;
+        }
     }
     return NULL;
 }
