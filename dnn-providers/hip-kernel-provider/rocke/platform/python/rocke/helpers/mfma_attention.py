@@ -231,7 +231,7 @@ def mfma_attention_fwd_inner_body(
     k_tile_start: Optional[Value] = None,
     k_tile_stop: Optional[Value] = None,
     extra_score_transform: Optional[
-        Callable[[IRBuilder, Value, Value, int], Value]
+        Callable[[IRBuilder, Value, Value, int, Value, Value], Value]
     ] = None,
     extra_mask_predicate: Optional[Callable[[IRBuilder, Value], Value]] = None,
     extra_skip_predicate: Optional[Callable[[IRBuilder, Value], Value]] = None,
@@ -244,6 +244,18 @@ def mfma_attention_fwd_inner_body(
     codebook_ptr: Optional[Value] = None,
     wmma_v_lds_stage: bool = False,
     arch: str = "gfx950",
+    mask_neg_inf: Optional[Value] = None,
+    wmma_seqlen_q: Optional[Value] = None,
+    wmma_kv_tail: bool = False,
+    sink_log2: Optional[Value] = None,
+    k_scale: Optional[Value] = None,
+    wmma_value_tile_size: int = 0,
+    wmma_value_offset: Optional[Value] = None,
+    wmma_v_head_size: int = 0,
+    lse: Optional[Value] = None,
+    write_lse: Optional[Value] = None,
+    stride_lse_token: Optional[Value] = None,
+    stride_lse_head: Optional[Value] = None,
     ext: Optional[AttnFwdExt] = None,
 ) -> None:
     """One MFMA-tiled QK→softmax→PV pass for a ``BLOCK_M``-row Q tile.
@@ -258,6 +270,23 @@ def mfma_attention_fwd_inner_body(
     causal-mask threshold (``k_idx <= q_pos + offset``). For
     self-attention pass ``b.const_i32(0)``; for cross-attention pass
     the cache length.
+
+    ``mask_neg_inf`` supplies true negative infinity for masked scores and the
+    initial row maximum. Empty rows use a zero exponential shift, avoiding
+    inf-inf without excluding large finite negative logits.
+
+    ``sink_log2`` is an optional always-visible logit with no value vector.
+    It initializes the row maximum to that logit and denominator to one.
+
+    ``wmma_seqlen_q`` bounds query loads and output stores on wave32.
+    ``wmma_kv_tail`` includes and masks a final partial KV tile. Both default
+    to the aligned path; enabling either on a non-wave32 target is rejected.
+    ``wmma_value_tile_size`` and ``wmma_value_offset`` optionally select a
+    contiguous PV/output-column tile; QK still traverses the full head size.
+    ``wmma_v_head_size`` (default 0 = ``head_size``) sets a V/output head width
+    that differs from the Q/K ``head_size``; wave32 targets only.
+    ``lse`` is an optional FP32 output with runtime ``write_lse`` gating and
+    token/head strides; it is currently supported by the wave32 path.
 
     ``k_token_offset_elems`` / ``v_token_offset_elems`` are added to
     the K / V row base addresses (for varlen / paged-KV layouts).
@@ -275,29 +304,29 @@ def mfma_attention_fwd_inner_body(
     kernel so a single CTA handles one K segment.
 
     ``extra_score_transform``: callback
-    ``(b, score_log2_per_lane, k_tile_idx, row_in_atom) ->
-    score_log2`` invoked after the QK reduction and ``scale_log2``
-    multiply, before the mask. Used by sage attention to apply
-    per-block Q + K scales.
+    ``(b, score_log2, k_tile_idx, row_in_atom, query_pos, key_pos) -> score_log2``
+    after QK scaling and before masks. The positions are the same coordinates
+    used by masking; existing per-tile scale callbacks can ignore them.
 
     ``extra_mask_predicate``: callback ``(b, k_tile_idx) -> i1``
     returning a per-K-tile keep flag. When false, the whole K-tile
     is skipped (no MFMA, no V load, no PV). Used by block-sparse
     (jenga / VSA) attention to short-circuit non-attended K-blocks.
 
-    ``kv_dtype``: K / V storage dtype when it differs from Q's
-    ``dtype`` (e.g. K/V in fp8 while Q is f16). The helper does
-    inline ``cvt_fp8_to_f32 → cast_f32_to_f16 → f16 MFMA`` dequant
-    on the load path; the native fp8 MFMA atom (``mfma_f32_16x16x32_fp8``)
-    is a v2 hoist.
+    ``kv_dtype``: K/V storage dtype when it differs from Q's ``dtype``.
+    The CDNA path uses native conversion on load before MFMA. The WMMA path
+    supports OCP ``fp8e4m3`` storage through software byte decoding, then casts
+    each operand to the selected FP16/BF16 Q dtype.
 
-    ``v_scale`` (optional f32): per-tensor V dequant scale. When set,
-    the final accumulator is multiplied by ``v_scale`` at the
-    epilogue (mathematically equivalent to scaling each V dequant
-    output by ``v_scale``). Callers that need per-tensor ``k_scale``
-    just pre-multiply ``scale_log2`` by ``k_scale`` before invoking
-    the helper -- the QK MFMA result lands in the log2-space score,
-    and a constant K-scale is absorbed cleanly into ``scale_log2``.
+    ``k_scale`` / ``v_scale``: WMMA FP8 storage requires both FP32 scales and
+    applies them after decoding, before the operand casts. Other paths keep
+    the existing optional V-scale epilogue multiply; their callers fold K
+    scale into ``scale_log2`` instead of passing ``k_scale``.
+
+    ``lse`` optionally receives FP32 ``log(sum(exp(scores)))`` in natural-log
+    units. ``write_lse`` is a runtime i32 gate; the two LSE strides are in
+    elements. A value-tiled caller may share one LSE pointer across output CTAs:
+    only the zero value tile writes each row.
     """
     if head_size % MFMA_ATTN_BLOCK_M != 0:
         raise ValueError(
@@ -407,14 +436,12 @@ def mfma_attention_fwd_inner_body(
     wave_size = target.wave_size
 
     if wave_size == 32:
-        # RDNA wave32 (WMMA). The fp8 / wider-atom / native-fp8 KV paths are
-        # CDNA-only (no RDNA atom); reject them explicitly rather than emitting
-        # an unbuildable kernel.
-        if fp8_kv or use_wider_atom or native_fp8_path:
-            raise ValueError(
-                "wave32 (WMMA) attention supports f16/bf16 KV only; "
-                "fp8 / wider-atom / native-fp8 paths are CDNA-only"
-            )
+        if use_wider_atom or native_fp8_path:
+            raise ValueError("wider-atom and native-FP8 attention paths are CDNA-only")
+        if fp8_kv and kv_dtype_eff != "fp8e4m3":
+            raise ValueError("WMMA FP8 KV storage requires OCP fp8e4m3")
+        if fp8_kv and (k_scale is None or v_scale is None):
+            raise ValueError("WMMA FP8 KV storage requires both FP32 dequant scales")
         _wmma_attention_fwd_inner_body(
             b,
             Q=Q,
@@ -454,9 +481,32 @@ def mfma_attention_fwd_inner_body(
             v_lds_stage=wmma_v_lds_stage,
             arch=arch,
             target=target,
+            mask_neg_inf=mask_neg_inf,
+            query_length=wmma_seqlen_q,
+            kv_tail=wmma_kv_tail,
+            sink_log2=sink_log2,
+            kv_dtype=kv_dtype_eff,
+            k_scale=k_scale,
+            value_tile_size=wmma_value_tile_size,
+            value_offset=wmma_value_offset,
+            v_head_size=wmma_v_head_size,
+            lse=lse,
+            write_lse=write_lse,
+            stride_lse_token=stride_lse_token,
+            stride_lse_head=stride_lse_head,
             ext=ext,
         )
         return
+    if wmma_seqlen_q is not None or wmma_kv_tail:
+        raise ValueError("WMMA tail options require a wave32 target")
+    if wmma_value_tile_size or wmma_value_offset is not None:
+        raise ValueError("WMMA output tiling requires a wave32 target")
+    if wmma_v_head_size:
+        raise ValueError("a distinct WMMA V head size requires a wave32 target")
+    if lse is not None:
+        raise ValueError("LSE output requires a wave32 target")
+    if k_scale is not None:
+        raise ValueError("explicit K dequant scale requires a wave32 target")
 
     # --- CDNA wave64 (MFMA) path ----------------------------------------------
     # Arch guard: the QK/PV MFMA atom selected above must be in the target's MMA
@@ -534,14 +584,16 @@ def mfma_attention_fwd_inner_body(
     # Each lane has 4 rows worth of (m, l) state: rows m_blk*4 + i for
     # i in 0..3, where m_blk = lane / 16. We carry m_r, l_r per row
     # slot through the K-loop.
-    neg_inf = b.const_f32(-1e30)
+    neg_inf = mask_neg_inf if mask_neg_inf is not None else b.const_f32(-1e30)
     zero_f = b.const_f32(0.0)
     acc_zero = b.zero_vec_f32(atom.c_per_lane)
+    initial_m = sink_log2 if sink_log2 is not None else neg_inf
+    initial_l = b.const_f32(1.0) if sink_log2 is not None else zero_f
 
     iter_args = []
     for r in range(atom.c_per_lane):
-        iter_args.append((f"m{r}", neg_inf))
-        iter_args.append((f"l{r}", zero_f))
+        iter_args.append((f"m{r}", initial_m))
+        iter_args.append((f"l{r}", initial_l))
     for n in range(n_pv_atoms):
         iter_args.append((f"acc{n}", acc_zero))
 
@@ -690,6 +742,8 @@ def mfma_attention_fwd_inner_body(
                     s_r_scaled,
                     kt,
                     r,
+                    row_q_pos,
+                    k_col_pos,
                 )
             if ext is not None:
                 s_r_scaled = score_stage(
@@ -710,11 +764,16 @@ def mfma_attention_fwd_inner_body(
                 query_pos=row_q_pos,
                 sliding_window=sliding_window,
                 context_len=causal_ctx_offset,
+                neg_inf=mask_neg_inf,
             )
             # If the whole K-tile is masked off (sparse-skip), force the
             # score to -inf so the softmax exponential collapses to 0.
             if keep_tile is not None:
-                s_r_scaled = b.select(keep_tile, s_r_scaled, neg_inf)
+                s_r_scaled = b.select(
+                    keep_tile,
+                    s_r_scaled,
+                    mask_neg_inf if mask_neg_inf is not None else neg_inf,
+                )
             # 16-lane row-max reduce via the distribution-driven
             # ``block_tile_reduce_sync`` (CK Tile ``BlockReduce2dSync``). The
             # reduce distribution's lane-owned R level (length 16, derivative 1)
@@ -722,8 +781,12 @@ def mfma_attention_fwd_inner_body(
             # ``wave_reduce_max(lanes_per_row=16)`` produced.
             row_max = _softmax_row_reduce(b, s_r_scaled, combine="max")
             m_new_r = b.fmax(ms[r], row_max)
-            alpha_r = b.exp2(b.fsub(ms[r], m_new_r))
-            p_r = b.exp2(b.fsub(s_r_scaled, m_new_r))
+            shift = m_new_r
+            if mask_neg_inf is not None:
+                empty = b.fcmp("oeq", m_new_r, mask_neg_inf)
+                shift = b.select(empty, zero_f, m_new_r)
+            alpha_r = b.exp2(b.fsub(ms[r], shift))
+            p_r = b.exp2(b.fsub(s_r_scaled, shift))
             # Row-sum reduce of p.
             row_psum = _softmax_row_reduce(b, p_r, combine="sum")
             l_new_r = b.fadd(b.fmul(ls[r], alpha_r), row_psum)

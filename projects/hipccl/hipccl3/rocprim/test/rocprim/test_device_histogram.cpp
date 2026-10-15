@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -32,6 +32,7 @@
 #include "test_utils.hpp"
 #include "test_utils_data_generation.hpp"
 #include "test_utils_hipgraphs.hpp"
+#include "test_utils_types.hpp"
 
 // required rocprim headers
 #include <rocprim/device/config_types.hpp>
@@ -115,8 +116,8 @@ inline auto get_random_samples(size_t size, U min, U max, int seed_value) ->
 template<class T>
 struct transform_op
 {
-    __host__ __device__ inline
-    T operator()(T x) const
+    __host__ __device__
+    inline T operator()(T x) const
     {
         return x * 1;
     }
@@ -145,7 +146,8 @@ struct params1
 };
 
 template<class Params>
-class RocprimDeviceHistogramEven : public ::testing::Test {
+class RocprimDeviceHistogramEven : public ::testing::Test
+{
 public:
     using params = Params;
 };
@@ -172,7 +174,30 @@ using Params1
                        params1<int, 10, 0, 10, int, int, rocprim::default_config, true>,
                        params1<int, 10, 0, 10, int, int, rocprim::default_config, false, true>>;
 
-TYPED_TEST_SUITE(RocprimDeviceHistogramEven, Params1);
+inline std::string level_tag(int l)
+{
+    return l < 0 ? "n" + std::to_string(-l) : std::to_string(l);
+}
+
+struct RocprimDeviceHistogramEvenNameGenerator
+{
+    template<class Params>
+    static std::string GetName(int /*index*/)
+    {
+        std::string n = type_tag<typename Params::sample_type>() + "_"
+                        + std::to_string(Params::bins) + "_" + level_tag(Params::lower_level) + "_"
+                        + level_tag(Params::upper_level) + "_"
+                        + type_tag<typename Params::level_type>() + "_"
+                        + type_tag<typename Params::counter_type>();
+        if constexpr(Params::use_indirect_iterator)
+            n += "_Indirect";
+        if constexpr(Params::use_graphs)
+            n += "_Graphs";
+        return n;
+    }
+};
+
+TYPED_TEST_SUITE(RocprimDeviceHistogramEven, Params1, RocprimDeviceHistogramEvenNameGenerator);
 
 void testHistogramEvenIncorrectInput()
 {
@@ -183,8 +208,8 @@ void testHistogramEvenIncorrectInput()
     hipStream_t stream = 0;
 
     size_t temporary_storage_bytes = 0;
-    int * d_input = nullptr;
-    int * d_histogram = nullptr;
+    int*   d_input                 = nullptr;
+    int*   d_histogram             = nullptr;
 
     // This check happens on host so there is nothing to capture for hipGraph.
     hipError_t result = rocprim::histogram_even(nullptr,
@@ -203,6 +228,72 @@ void testHistogramEvenIncorrectInput()
 TEST(RocprimDeviceHistogramEven, IncorrectInput)
 {
     testHistogramEvenIncorrectInput();
+}
+
+// A bin count above shared_impl_max_bins (2048) must accept the default, per-thread,
+// and legacy streams on every device. On gfx942 this selects the global private-histogram
+// path. hipGetStreamDeviceId(hipStreamLegacy) crashes on this runtime;
+// get_device_from_stream accepts that sentinel. On every other device the size query
+// reports 4 bytes. A larger size on gfx942 shows the private path ran.
+TEST(RocprimDeviceHistogramEven, LargeBinCountStreams)
+{
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
+    rocprim::detail::target_arch arch{};
+    HIP_CHECK(rocprim::detail::get_device_arch(device_id, arch));
+    const bool private_histogram = arch == rocprim::detail::target_arch::gfx942;
+
+    // 4096 bins is a power of two, so shared occupancy is 4097 and exceeds 2048.
+    constexpr unsigned int levels    = 4097;
+    constexpr unsigned int columns   = 1;
+    int*                   samples   = nullptr;
+    int*                   histogram = nullptr;
+
+    auto query = [&](hipStream_t stream, size_t& storage_size)
+    {
+        storage_size = 0;
+        return rocprim::histogram_even(nullptr,
+                                       storage_size,
+                                       samples,
+                                       columns,
+                                       histogram,
+                                       levels,
+                                       0,
+                                       static_cast<int>(levels - 1),
+                                       stream);
+    };
+
+    auto check = [&](hipStream_t stream)
+    {
+        size_t storage_size = 0;
+        ASSERT_EQ(query(stream, storage_size), hipSuccess);
+        if(private_histogram)
+        {
+            ASSERT_GT(storage_size, 4u);
+        }
+        else
+        {
+            ASSERT_EQ(storage_size, 4u);
+        }
+    };
+
+    hipStream_t stream{};
+    HIP_CHECK(hipStreamCreate(&stream));
+    check(stream);
+    HIP_CHECK(hipStreamDestroy(stream));
+    ASSERT_FALSE(HasFatalFailure());
+
+    static constexpr hipStream_t default_stream = 0;
+    ASSERT_NO_FATAL_FAILURE(check(default_stream));
+
+    ASSERT_NO_FATAL_FAILURE(check(hipStreamPerThread));
+
+    // hipStreamLegacy support was added in ROCm 6.2.0
+#if (HIP_VERSION_MAJOR > 6 || (HIP_VERSION_MAJOR == 6 && HIP_VERSION_MINOR >= 2))
+    ASSERT_NO_FATAL_FAILURE(check(hipStreamLegacy));
+#endif
 }
 
 template<class T>
@@ -237,7 +328,7 @@ TYPED_TEST(RocprimDeviceHistogramEven, Even)
     const level_type       upper_level = static_cast<level_type>(TestFixture::params::upper_level);
 
     hipStream_t stream = 0;
-    if (TestFixture::params::use_graphs)
+    if(TestFixture::params::use_graphs)
     {
         // Default stream does not support hipGraph stream capture, so create one
         HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
@@ -247,26 +338,26 @@ TYPED_TEST(RocprimDeviceHistogramEven, Even)
 
     for(auto dim : get_dims())
     {
-        SCOPED_TRACE(
-            testing::Message() << "with dim = {" <<
-            std::get<0>(dim) << ", " << std::get<1>(dim) << ", " << std::get<2>(dim) << "}"
-        );
+        SCOPED_TRACE(testing::Message() << "with dim = {" << std::get<0>(dim) << ", "
+                                        << std::get<1>(dim) << ", " << std::get<2>(dim) << "}");
 
-        const size_t rows = std::get<0>(dim);
-        const size_t columns = std::get<1>(dim);
+        const size_t rows       = std::get<0>(dim);
+        const size_t columns    = std::get<1>(dim);
         const size_t row_stride = columns + std::get<2>(dim);
 
         const size_t row_stride_bytes = row_stride * sizeof(sample_type);
-        const size_t size = std::max<size_t>(1, rows * row_stride);
+        const size_t size             = std::max<size_t>(1, rows * row_stride);
 
         for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
         {
-            unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
             SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
             SCOPED_TRACE(testing::Message() << "with size = " << size);
 
             // Generate data
-            std::vector<sample_type> input = get_random_samples<sample_type>(size, lower_level, upper_level, seed_value);
+            std::vector<sample_type> input
+                = get_random_samples<sample_type>(size, lower_level, upper_level, seed_value);
 
             common::device_ptr<sample_type>  d_input(input);
             common::device_ptr<counter_type> d_histogram(bins);
@@ -364,11 +455,12 @@ struct params2
     using level_type                             = LevelType;
     using counter_type                           = CounterType;
     using config                                 = Config;
-    static constexpr bool         use_graphs     = UseGraphs;
+    static constexpr bool use_graphs             = UseGraphs;
 };
 
 template<class Params>
-class RocprimDeviceHistogramRange : public ::testing::Test {
+class RocprimDeviceHistogramRange : public ::testing::Test
+{
 public:
     using params = Params;
 };
@@ -386,7 +478,24 @@ using Params2 = ::testing::Types<
     params2<double, 3, 10000, 1000, 1000, double, unsigned int>,
     params2<int, 10, 0, 1, 10, int, int, rocprim::default_config, true>>;
 
-TYPED_TEST_SUITE(RocprimDeviceHistogramRange, Params2);
+struct RocprimDeviceHistogramRangeNameGenerator
+{
+    template<class Params>
+    static std::string GetName(int /*index*/)
+    {
+        std::string n = type_tag<typename Params::sample_type>() + "_"
+                        + std::to_string(Params::bins) + "_" + level_tag(Params::start_level) + "_"
+                        + std::to_string(Params::min_bin_length) + "_"
+                        + std::to_string(Params::max_bin_length) + "_"
+                        + type_tag<typename Params::level_type>() + "_"
+                        + type_tag<typename Params::counter_type>();
+        if constexpr(Params::use_graphs)
+            n += "_Graphs";
+        return n;
+    }
+};
+
+TYPED_TEST_SUITE(RocprimDeviceHistogramRange, Params2, RocprimDeviceHistogramRangeNameGenerator);
 
 void testHistogramRangeIncorrectInput()
 {
@@ -397,17 +506,19 @@ void testHistogramRangeIncorrectInput()
     hipStream_t stream = 0;
 
     size_t temporary_storage_bytes = 0;
-    int * d_input = nullptr;
-    int * d_histogram = nullptr;
-    int * d_levels = nullptr;
+    int*   d_input                 = nullptr;
+    int*   d_histogram             = nullptr;
+    int*   d_levels                = nullptr;
 
     // This check happens on host so there is nothing to capture for hipGraph.
-    hipError_t result = rocprim::histogram_range(
-                                                 nullptr, temporary_storage_bytes,
-                                                 d_input, 123,
+    hipError_t result = rocprim::histogram_range(nullptr,
+                                                 temporary_storage_bytes,
+                                                 d_input,
+                                                 123,
                                                  d_histogram,
-                                                 1, d_levels, stream
-                                                 );
+                                                 1,
+                                                 d_levels,
+                                                 stream);
 
     ASSERT_EQ(result, hipErrorInvalidValue);
 }
@@ -431,7 +542,7 @@ TYPED_TEST(RocprimDeviceHistogramRange, Range)
     constexpr unsigned int bins = TestFixture::params::bins;
 
     hipStream_t stream = 0; // default
-    if (TestFixture::params::use_graphs)
+    if(TestFixture::params::use_graphs)
     {
         // Default stream does not support hipGraph stream capture, so create one
         HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
@@ -439,7 +550,7 @@ TYPED_TEST(RocprimDeviceHistogramRange, Range)
 
     const bool debug_synchronous = false;
 
-    std::random_device rd;
+    std::random_device         rd;
     std::default_random_engine gen(rd());
 
     common::uniform_int_distribution<unsigned int> bin_length_dis(
@@ -448,22 +559,20 @@ TYPED_TEST(RocprimDeviceHistogramRange, Range)
 
     for(auto dim : get_dims())
     {
-        SCOPED_TRACE(
-            testing::Message() << "with dim = {" <<
-            std::get<0>(dim) << ", " << std::get<1>(dim) << ", " << std::get<2>(dim) << "}"
-        );
+        SCOPED_TRACE(testing::Message() << "with dim = {" << std::get<0>(dim) << ", "
+                                        << std::get<1>(dim) << ", " << std::get<2>(dim) << "}");
 
-        const size_t rows = std::get<0>(dim);
-        const size_t columns = std::get<1>(dim);
+        const size_t rows       = std::get<0>(dim);
+        const size_t columns    = std::get<1>(dim);
         const size_t row_stride = columns + std::get<2>(dim);
 
         const size_t row_stride_bytes = row_stride * sizeof(sample_type);
-        const size_t size = std::max<size_t>(1, rows * row_stride);
+        const size_t size             = std::max<size_t>(1, rows * row_stride);
 
         // Generate data
         std::vector<level_type> levels;
-        level_type level = TestFixture::params::start_level;
-        for(unsigned int bin = 0 ; bin < bins; bin++)
+        level_type              level = TestFixture::params::start_level;
+        for(unsigned int bin = 0; bin < bins; bin++)
         {
             levels.push_back(level);
             level += bin_length_dis(gen);
@@ -472,11 +581,13 @@ TYPED_TEST(RocprimDeviceHistogramRange, Range)
 
         for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
         {
-            unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
             SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
             SCOPED_TRACE(testing::Message() << "with size = " << size);
 
-            std::vector<sample_type> input = get_random_samples<sample_type>(size, levels[0], levels[bins], seed_value);
+            std::vector<sample_type> input
+                = get_random_samples<sample_type>(size, levels[0], levels[bins], seed_value);
 
             common::device_ptr<sample_type>  d_input(input);
             common::device_ptr<level_type>   d_levels(levels);
@@ -489,7 +600,7 @@ TYPED_TEST(RocprimDeviceHistogramRange, Range)
                 for(size_t column = 0; column < columns; column++)
                 {
                     const sample_type sample = input[row * row_stride + column];
-                    const level_type s = static_cast<level_type>(sample);
+                    const level_type  s      = static_cast<level_type>(sample);
                     if(s >= levels[0] && s < levels[bins])
                     {
                         const auto bin_iter = std::upper_bound(levels.begin(), levels.end(), s);
@@ -555,7 +666,7 @@ template<class SampleType,
          class LevelType   = SampleType,
          class CounterType = int,
          class Config      = rocprim::default_config,
-         bool  UseGraphs   = false>
+         bool UseGraphs    = false>
 struct params3
 {
     using sample_type                             = SampleType;
@@ -567,11 +678,12 @@ struct params3
     using level_type                              = LevelType;
     using counter_type                            = CounterType;
     using config                                  = Config;
-    static constexpr bool         use_graphs      = UseGraphs;
+    static constexpr bool use_graphs              = UseGraphs;
 };
 
 template<class Params>
-class RocprimDeviceHistogramMultiEven : public ::testing::Test {
+class RocprimDeviceHistogramMultiEven : public ::testing::Test
+{
 public:
     using params = Params;
 };
@@ -592,7 +704,26 @@ using Params3 = ::testing::Types<
     params3<double, 4, 3, 55, -123, +123, double, unsigned long long, custom_config3>,
     params3<int, 4, 3, 2000, 0, 2000, int, int, rocprim::default_config, true>>;
 
-TYPED_TEST_SUITE(RocprimDeviceHistogramMultiEven, Params3);
+struct RocprimDeviceHistogramMultiEvenNameGenerator
+{
+    template<class Params>
+    static std::string GetName(int /*index*/)
+    {
+        std::string n
+            = type_tag<typename Params::sample_type>() + "_" + std::to_string(Params::channels)
+              + "_" + std::to_string(Params::active_channels) + "_" + std::to_string(Params::bins)
+              + "_" + level_tag(Params::lower_level) + "_" + level_tag(Params::upper_level) + "_"
+              + type_tag<typename Params::level_type>() + "_"
+              + type_tag<typename Params::counter_type>();
+        if constexpr(Params::use_graphs)
+            n += "_Graphs";
+        return n;
+    }
+};
+
+TYPED_TEST_SUITE(RocprimDeviceHistogramMultiEven,
+                 Params3,
+                 RocprimDeviceHistogramMultiEvenNameGenerator);
 
 TYPED_TEST(RocprimDeviceHistogramMultiEven, MultiEven)
 {
@@ -610,22 +741,23 @@ TYPED_TEST(RocprimDeviceHistogramMultiEven, MultiEven)
 
     unsigned int bins[active_channels];
     unsigned int num_levels[active_channels];
-    level_type lower_level[active_channels];
-    level_type upper_level[active_channels];
+    level_type   lower_level[active_channels];
+    level_type   upper_level[active_channels];
     for(unsigned int channel = 0; channel < active_channels; channel++)
     {
         // Use different ranges for different channels
-        constexpr level_type d = TestFixture::params::upper_level - TestFixture::params::lower_level;
+        constexpr level_type d
+            = TestFixture::params::upper_level - TestFixture::params::lower_level;
         const level_type scale = d / TestFixture::params::bins;
-        lower_level[channel] = TestFixture::params::lower_level + channel * d / 9;
-        upper_level[channel] = TestFixture::params::upper_level - channel * d / 7;
-        bins[channel] = (upper_level[channel] - lower_level[channel]) / scale;
-        upper_level[channel] = lower_level[channel] + bins[channel] * scale;
-        num_levels[channel] = bins[channel] + 1;
+        lower_level[channel]   = TestFixture::params::lower_level + channel * d / 9;
+        upper_level[channel]   = TestFixture::params::upper_level - channel * d / 7;
+        bins[channel]          = (upper_level[channel] - lower_level[channel]) / scale;
+        upper_level[channel]   = lower_level[channel] + bins[channel] * scale;
+        num_levels[channel]    = bins[channel] + 1;
     }
 
     hipStream_t stream = 0;
-    if (TestFixture::params::use_graphs)
+    if(TestFixture::params::use_graphs)
     {
         // Default stream does not support hipGraph stream capture, so create one
         HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
@@ -635,21 +767,20 @@ TYPED_TEST(RocprimDeviceHistogramMultiEven, MultiEven)
 
     for(auto dim : get_dims())
     {
-        SCOPED_TRACE(
-            testing::Message() << "with dim = {" <<
-            std::get<0>(dim) << ", " << std::get<1>(dim) << ", " << std::get<2>(dim) << "}"
-        );
+        SCOPED_TRACE(testing::Message() << "with dim = {" << std::get<0>(dim) << ", "
+                                        << std::get<1>(dim) << ", " << std::get<2>(dim) << "}");
 
-        const size_t rows = std::get<0>(dim);
-        const size_t columns = std::get<1>(dim);
+        const size_t rows       = std::get<0>(dim);
+        const size_t columns    = std::get<1>(dim);
         const size_t row_stride = columns * channels + std::get<2>(dim);
 
         const size_t row_stride_bytes = row_stride * sizeof(sample_type);
-        const size_t size = std::max<size_t>(1, rows * row_stride);
+        const size_t size             = std::max<size_t>(1, rows * row_stride);
 
         for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
         {
-            unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
             SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
             SCOPED_TRACE(testing::Message() << "with size = " << size);
 
@@ -658,16 +789,22 @@ TYPED_TEST(RocprimDeviceHistogramMultiEven, MultiEven)
             for(unsigned int channel = 0; channel < channels; channel++)
             {
                 const size_t gen_columns = (row_stride + channels - 1) / channels;
-                const size_t gen_size = rows * gen_columns;
+                const size_t gen_size    = rows * gen_columns;
 
                 std::vector<sample_type> channel_input;
                 if(channel < active_channels)
                 {
-                    channel_input = get_random_samples<sample_type>(gen_size, lower_level[channel], upper_level[channel], seed_value);
+                    channel_input = get_random_samples<sample_type>(gen_size,
+                                                                    lower_level[channel],
+                                                                    upper_level[channel],
+                                                                    seed_value);
                 }
                 else
                 {
-                    channel_input = get_random_samples<sample_type>(gen_size, lower_level[0], upper_level[0], seed_value);
+                    channel_input = get_random_samples<sample_type>(gen_size,
+                                                                    lower_level[0],
+                                                                    upper_level[0],
+                                                                    seed_value);
                 }
                 // Interleave values
                 for(size_t row = 0; row < rows; row++)
@@ -677,14 +814,15 @@ TYPED_TEST(RocprimDeviceHistogramMultiEven, MultiEven)
                         const size_t index = column * channels + channel;
                         if(index < row_stride)
                         {
-                            input[row * row_stride + index] = channel_input[row * gen_columns + column];
+                            input[row * row_stride + index]
+                                = channel_input[row * gen_columns + column];
                         }
                     }
                 }
             }
 
-            common::device_ptr<sample_type>     d_input(input);
-            counter_type*                       d_histogram[active_channels];
+            common::device_ptr<sample_type> d_input(input);
+            counter_type*                   d_histogram[active_channels];
             for(unsigned int channel = 0; channel < active_channels; channel++)
             {
                 HIP_CHECK(common::hipMallocHelper(&d_histogram[channel],
@@ -696,13 +834,15 @@ TYPED_TEST(RocprimDeviceHistogramMultiEven, MultiEven)
             for(unsigned int channel = 0; channel < active_channels; channel++)
             {
                 histogram_expected[channel] = std::vector<counter_type>(bins[channel], 0);
-                const level_type scale = (upper_level[channel] - lower_level[channel]) / bins[channel];
+                const level_type scale
+                    = (upper_level[channel] - lower_level[channel]) / bins[channel];
 
                 for(size_t row = 0; row < rows; row++)
                 {
                     for(size_t column = 0; column < columns; column++)
                     {
-                        const sample_type sample = input[row * row_stride + column * channels + channel];
+                        const sample_type sample
+                            = input[row * row_stride + column * channels + channel];
                         const level_type s = static_cast<level_type>(sample);
                         if(s >= lower_level[channel] && s < upper_level[channel])
                         {
@@ -790,7 +930,7 @@ template<class SampleType,
          class LevelType          = SampleType,
          class CounterType        = int,
          class Config             = rocprim::default_config,
-         bool  UseGraphs          = false>
+         bool UseGraphs           = false>
 struct params4
 {
     using sample_type                             = SampleType;
@@ -803,11 +943,12 @@ struct params4
     using level_type                              = LevelType;
     using counter_type                            = CounterType;
     using config                                  = Config;
-    static constexpr bool         use_graphs      = UseGraphs;
+    static constexpr bool use_graphs              = UseGraphs;
 };
 
 template<class Params>
-class RocprimDeviceHistogramMultiRange : public ::testing::Test {
+class RocprimDeviceHistogramMultiRange : public ::testing::Test
+{
 public:
     using params = Params;
 };
@@ -825,7 +966,27 @@ using Params4 = ::testing::Types<
     params4<double, 3, 1, 3, 10000, 1000, 1000, double, unsigned int>,
     params4<int, 3, 2, 10, 0, 1, 10, int, int, rocprim::default_config, true>>;
 
-TYPED_TEST_SUITE(RocprimDeviceHistogramMultiRange, Params4);
+struct RocprimDeviceHistogramMultiRangeNameGenerator
+{
+    template<class Params>
+    static std::string GetName(int /*index*/)
+    {
+        std::string n
+            = type_tag<typename Params::sample_type>() + "_" + std::to_string(Params::channels)
+              + "_" + std::to_string(Params::active_channels) + "_" + std::to_string(Params::bins)
+              + "_" + level_tag(Params::start_level) + "_" + std::to_string(Params::min_bin_length)
+              + "_" + std::to_string(Params::max_bin_length) + "_"
+              + type_tag<typename Params::level_type>() + "_"
+              + type_tag<typename Params::counter_type>();
+        if constexpr(Params::use_graphs)
+            n += "_Graphs";
+        return n;
+    }
+};
+
+TYPED_TEST_SUITE(RocprimDeviceHistogramMultiRange,
+                 Params4,
+                 RocprimDeviceHistogramMultiRangeNameGenerator);
 
 TYPED_TEST(RocprimDeviceHistogramMultiRange, MultiRange)
 {
@@ -842,7 +1003,7 @@ TYPED_TEST(RocprimDeviceHistogramMultiRange, MultiRange)
     constexpr unsigned int active_channels = TestFixture::params::active_channels;
 
     hipStream_t stream = 0;
-    if (TestFixture::params::use_graphs)
+    if(TestFixture::params::use_graphs)
     {
         // Default stream does not support hipGraph stream capture, so create one
         HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
@@ -850,7 +1011,7 @@ TYPED_TEST(RocprimDeviceHistogramMultiRange, MultiRange)
 
     const bool debug_synchronous = false;
 
-    std::random_device rd;
+    std::random_device         rd;
     std::default_random_engine gen(rd());
 
     unsigned int                                   bins[active_channels];
@@ -868,21 +1029,20 @@ TYPED_TEST(RocprimDeviceHistogramMultiRange, MultiRange)
 
     for(auto dim : get_dims())
     {
-        SCOPED_TRACE(
-            testing::Message() << "with dim = {" <<
-            std::get<0>(dim) << ", " << std::get<1>(dim) << ", " << std::get<2>(dim) << "}"
-        );
+        SCOPED_TRACE(testing::Message() << "with dim = {" << std::get<0>(dim) << ", "
+                                        << std::get<1>(dim) << ", " << std::get<2>(dim) << "}");
 
-        const size_t rows = std::get<0>(dim);
-        const size_t columns = std::get<1>(dim);
+        const size_t rows       = std::get<0>(dim);
+        const size_t columns    = std::get<1>(dim);
         const size_t row_stride = columns * channels + std::get<2>(dim);
 
         const size_t row_stride_bytes = row_stride * sizeof(sample_type);
-        const size_t size = std::max<size_t>(1, rows * row_stride);
+        const size_t size             = std::max<size_t>(1, rows * row_stride);
 
         for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
         {
-            unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
             SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
             SCOPED_TRACE(testing::Message() << "with size = " << size);
 
@@ -891,7 +1051,7 @@ TYPED_TEST(RocprimDeviceHistogramMultiRange, MultiRange)
             for(unsigned int channel = 0; channel < active_channels; channel++)
             {
                 level_type level = TestFixture::params::start_level;
-                for(unsigned int bin = 0 ; bin < bins[channel]; bin++)
+                for(unsigned int bin = 0; bin < bins[channel]; bin++)
                 {
                     levels[channel].push_back(level);
                     level += bin_length_dis[channel](gen);
@@ -903,19 +1063,22 @@ TYPED_TEST(RocprimDeviceHistogramMultiRange, MultiRange)
             for(unsigned int channel = 0; channel < channels; channel++)
             {
                 const size_t gen_columns = (row_stride + channels - 1) / channels;
-                const size_t gen_size = rows * gen_columns;
-
+                const size_t gen_size    = rows * gen_columns;
 
                 std::vector<sample_type> channel_input;
                 if(channel < active_channels)
                 {
-                    channel_input = get_random_samples<sample_type>(
-                        gen_size, levels[channel][0], levels[channel][bins[channel]], seed_value
-                    );
+                    channel_input = get_random_samples<sample_type>(gen_size,
+                                                                    levels[channel][0],
+                                                                    levels[channel][bins[channel]],
+                                                                    seed_value);
                 }
                 else
                 {
-                    channel_input = get_random_samples<sample_type>(gen_size, levels[0][0], levels[0][bins[0]], seed_value);
+                    channel_input = get_random_samples<sample_type>(gen_size,
+                                                                    levels[0][0],
+                                                                    levels[0][bins[0]],
+                                                                    seed_value);
                 }
                 // Interleave values
                 for(size_t row = 0; row < rows; row++)
@@ -925,15 +1088,16 @@ TYPED_TEST(RocprimDeviceHistogramMultiRange, MultiRange)
                         const size_t index = column * channels + channel;
                         if(index < row_stride)
                         {
-                            input[row * row_stride + index] = channel_input[row * gen_columns + column];
+                            input[row * row_stride + index]
+                                = channel_input[row * gen_columns + column];
                         }
                     }
                 }
             }
 
-            common::device_ptr<sample_type>     d_input(input);
-            level_type * d_levels[active_channels];
-            counter_type*                       d_histogram[active_channels];
+            common::device_ptr<sample_type> d_input(input);
+            level_type*                     d_levels[active_channels];
+            counter_type*                   d_histogram[active_channels];
             for(unsigned int channel = 0; channel < active_channels; channel++)
             {
                 HIP_CHECK(common::hipMallocHelper(&d_levels[channel],
@@ -943,13 +1107,10 @@ TYPED_TEST(RocprimDeviceHistogramMultiRange, MultiRange)
             }
             for(unsigned int channel = 0; channel < active_channels; channel++)
             {
-                HIP_CHECK(
-                    hipMemcpy(
-                        d_levels[channel], levels[channel].data(),
-                        num_levels[channel] * sizeof(level_type),
-                        hipMemcpyHostToDevice
-                    )
-                );
+                HIP_CHECK(hipMemcpy(d_levels[channel],
+                                    levels[channel].data(),
+                                    num_levels[channel] * sizeof(level_type),
+                                    hipMemcpyHostToDevice));
             }
 
             // Calculate expected results on host
@@ -962,12 +1123,15 @@ TYPED_TEST(RocprimDeviceHistogramMultiRange, MultiRange)
                 {
                     for(size_t column = 0; column < columns; column++)
                     {
-                        const sample_type sample = input[row * row_stride + column * channels + channel];
+                        const sample_type sample
+                            = input[row * row_stride + column * channels + channel];
                         const level_type s = static_cast<level_type>(sample);
                         if(s >= levels[channel][0] && s < levels[channel][bins[channel]])
                         {
-                            const auto bin_iter = std::upper_bound(levels[channel].begin(), levels[channel].end(), s);
-                            const int bin = bin_iter - levels[channel].begin() - 1;
+                            const auto bin_iter = std::upper_bound(levels[channel].begin(),
+                                                                   levels[channel].end(),
+                                                                   s);
+                            const int  bin      = bin_iter - levels[channel].begin() - 1;
                             histogram_expected[channel][bin]++;
                         }
                     }
@@ -1013,13 +1177,10 @@ TYPED_TEST(RocprimDeviceHistogramMultiRange, MultiRange)
             for(unsigned int channel = 0; channel < active_channels; channel++)
             {
                 histogram[channel] = std::vector<counter_type>(bins[channel]);
-                HIP_CHECK(
-                    hipMemcpy(
-                        histogram[channel].data(), d_histogram[channel],
-                        bins[channel] * sizeof(counter_type),
-                        hipMemcpyDeviceToHost
-                    )
-                );
+                HIP_CHECK(hipMemcpy(histogram[channel].data(),
+                                    d_histogram[channel],
+                                    bins[channel] * sizeof(counter_type),
+                                    hipMemcpyDeviceToHost));
                 HIP_CHECK(hipFree(d_levels[channel]));
                 HIP_CHECK(hipFree(d_histogram[channel]));
             }

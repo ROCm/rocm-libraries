@@ -539,11 +539,12 @@ class InsertClusterBarrierPassTest : public ::testing::Test {
     }
 
     // Run with STINKY_TEST_DUMP=1 to print the block before and after the pass.
-    void runPass(int rule3SignalLeadCycles = 100) {
+    void runPass(int rule3SignalLeadCycles = 100, bool splitWaveLoop = false) {
         PassContext ctx;
         ctx.setGemmTileConfig(config);
         auto pass = createInsertClusterBarrierPass(
-            /*streamKMulticast=*/false, /*pgrValue=*/1, rule3SignalLeadCycles);
+            /*streamKMulticast=*/false, /*pgrValue=*/1, rule3SignalLeadCycles,
+            /*splitWaveLoop=*/splitWaveLoop);
         if (testDumpEnabled()) {
             std::cerr << "\n=== INPUT (before InsertClusterBarrierPass):" << blockListing(*bb)
                       << "\n";
@@ -2721,4 +2722,110 @@ TEST_F(InsertClusterBarrierPassTest, WrappedClimbClearsARangeOnlyTheBackEdgeReac
                              << blockListing(*bb);
     EXPECT_TRUE(found.crossedLoopHead)
         << "it left by the back edge, so the first trip is owed a signal:" << blockListing(*bb);
+}
+
+// Wave 0 falls into the original body and posts a bare signal. Every other wave
+// takes a renamed copy that only waits. The entrance compare runs once; each
+// copy's latch stays inside that copy.
+TEST_F(InsertClusterBarrierPassTest, SplitWaveLoopPostsSignalOnlyOnWave0Copy) {
+    appendGsu1Preheader();
+    openLoop();
+    createWMMA(48, 0, 8);
+    createGuardedBranch(GFX::s_cbranch_scc1, /*sgpr=*/93, "label_Inside");
+    createWMMA(56, 8, 16);
+    createLabel("label_Inside");
+    appendHandshake(/*loadS0=*/0, /*loadS1=*/4);
+    createWMMA(64, 16, 24);
+    closeLoop();
+
+    runPass(/*rule3SignalLeadCycles=*/0, /*splitWaveLoop=*/true);
+    runPass(/*rule3SignalLeadCycles=*/0, /*splitWaveLoop=*/true);
+
+    std::vector<StinkyInstruction*> insts;
+    for (IRBase& ir : *bb) {
+        if (ir.getType() != IRBase::IRType::StinkyTofu) continue;
+        insts.push_back(cast<StinkyInstruction>(&ir));
+    }
+    auto labelName = [](const StinkyInstruction* inst) -> std::string {
+        const auto* labelData = inst->getModifier<LabelData>();
+        return (labelData != nullptr) ? labelData->label : std::string{};
+    };
+    auto findLabel = [&](const std::string& name) -> int {
+        for (int i = 0; i < static_cast<int>(insts.size()); ++i) {
+            if (isLabel(*insts[i]) && labelName(insts[i]) == name) return i;
+        }
+        return -1;
+    };
+
+    const int loop = findLabel("label_TestLoop");
+    const int wave0 = findLabel("label_TestLoop_CBWave0");
+    ASSERT_GT(loop, -1) << blockListing(*bb);
+    ASSERT_GT(wave0, loop) << blockListing(*bb);
+
+    int wave0Heads = 0;
+    for (const StinkyInstruction* inst : insts) {
+        if (isLabel(*inst) && labelName(inst).ends_with("_CBWave0")) ++wave0Heads;
+    }
+    EXPECT_EQ(wave0Heads, 1) << "a second run must not duplicate the loop again:"
+                             << blockListing(*bb);
+
+    ASSERT_LT(loop + 2, wave0);
+    EXPECT_EQ(insts[loop + 1]->getUnifiedOpcode(), GFX::s_cmp_eq_u32) << blockListing(*bb);
+    const auto* entranceComment = insts[loop + 1]->getModifier<CommentData>();
+    ASSERT_NE(entranceComment, nullptr);
+    EXPECT_EQ(entranceComment->comment, "Check for waveID 0");
+    EXPECT_EQ(insts[loop + 2]->getUnifiedOpcode(), GFX::s_cbranch_scc0) << blockListing(*bb);
+    const std::string loop1Name = getBranchTarget(*insts[loop + 2]);
+    EXPECT_EQ(loop1Name.rfind("label_skipCBPreSignal_", 0), 0u) << loop1Name;
+    const int loop1 = findLabel(loop1Name);
+    ASSERT_GT(loop1, wave0) << blockListing(*bb);
+
+    const int exit = findLabel("label_TestLoopEnd");
+    ASSERT_GT(exit, loop1) << blockListing(*bb);
+
+    int wave0Signals = 0;
+    bool wave0Latch = false;
+    for (int i = wave0 + 1; i < loop1; ++i) {
+        if (clusterBarrierKind(*insts[i]) == 1) {
+            ++wave0Signals;
+            const StinkyInstruction* prev = nullptr;
+            for (int j = i - 1; j > wave0; --j) {
+                if (isPseudoInst(insts[j])) continue;
+                prev = insts[j];
+                break;
+            }
+            EXPECT_TRUE(prev == nullptr || prev->getUnifiedOpcode() != GFX::s_cbranch_scc0)
+                << "wave 0 keeps the signal and drops the per-iteration wave check:"
+                << blockListing(*bb);
+        }
+        if (isBranch(*insts[i]) && getBranchTarget(*insts[i]) == "label_TestLoop_CBWave0")
+            wave0Latch = true;
+    }
+    EXPECT_EQ(wave0Signals, 1) << blockListing(*bb);
+    EXPECT_TRUE(wave0Latch) << "wave 0 must latch to its own head:" << blockListing(*bb);
+
+    int loop1Signals = 0;
+    int loop1Waits = 0;
+    bool loop1Latch = false;
+    bool renamedInside = false;
+    bool renamedBranch = false;
+    for (int i = loop1 + 1; i < exit; ++i) {
+        const int kind = clusterBarrierKind(*insts[i]);
+        if (kind == 1) ++loop1Signals;
+        if (kind == -1) ++loop1Waits;
+        if (isLabel(*insts[i]) && labelName(insts[i]).rfind("label_Inside_CBWaveNz_", 0) == 0)
+            renamedInside = true;
+        if (isBranch(*insts[i])) {
+            const std::string target = getBranchTarget(*insts[i]);
+            if (target.rfind("label_Inside_CBWaveNz_", 0) == 0) renamedBranch = true;
+            if (target == loop1Name) loop1Latch = true;
+        }
+    }
+    EXPECT_EQ(loop1Signals, 0) << "other waves do not post the cluster signal:"
+                               << blockListing(*bb);
+    EXPECT_GE(loop1Waits, 1) << blockListing(*bb);
+    EXPECT_TRUE(loop1Latch) << "the copy must latch to its own head:" << blockListing(*bb);
+    EXPECT_TRUE(renamedInside) << blockListing(*bb);
+    EXPECT_TRUE(renamedBranch) << blockListing(*bb);
+    EXPECT_GT(findLabel("label_Inside"), -1) << "the original label stays in wave 0";
 }

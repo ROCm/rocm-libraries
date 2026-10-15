@@ -175,13 +175,17 @@ struct ExecuteCase
     int iterations;
 };
 
-/// How many times the composite plan has resolved a winner, counted from the plugin's
-/// selection log. BenchmarkPlan emits exactly one of these per sampling sweep.
-size_t countSelectionLogs(const hipdnn_test_sdk::utilities::LogRecorderBase& recorder)
+/// How many sampling sweeps the composite plan has resolved, counted from the plugin's
+/// logs. BenchmarkPlan ends every sweep with exactly one of these two lines: the winner,
+/// or -- when no candidate yielded a usable time -- the fallback to the first candidate.
+/// Both count: on Windows, where HIP reports negative event readings
+/// (ROCm/rocm-systems#12925), bad readings can leave every candidate unusable.
+size_t countSweepResolutions(const hipdnn_test_sdk::utilities::LogRecorderBase& recorder)
 {
     const auto logs = recorder.getRecordedLogs();
     return static_cast<size_t>(std::count_if(logs.begin(), logs.end(), [](const auto& log) {
-        return log.message.find("benchmarking selected kernel") != std::string::npos;
+        return log.message.find("benchmarking selected kernel") != std::string::npos
+               || log.message.find("benchmarking found no usable candidate") != std::string::npos;
     }));
 }
 
@@ -423,14 +427,15 @@ TEST_P(IntegrationGpuKernelIngestor, ExecutesTheSelectedKernelOnDevice)
 
 /// Drives global.benchmarking=1 through the frontend against the shipped pointwise
 /// pack, verifying the numerical result against the CPU reference and confirming from
-/// the plugin's own logs that the composite plan actually ran a sampling sweep and
-/// resolved a winner once.
+/// the plugin's own logs that the composite plan actually ran a sampling sweep, exactly
+/// once.
 ///
-/// Which candidate wins is deliberately not asserted: the two block-size-64/256 FLOAT
-/// candidates surviving knob filtering for this graph may be indistinguishable within
-/// noise, and either winner is correct so long as it produces the right answer. What
-/// must hold is that benchmarking happened at all -- otherwise the case would pass
-/// identically with the feature removed.
+/// Which candidate wins is not asserted: the two block-size-64/256 FLOAT candidates
+/// surviving knob filtering for this graph may be indistinguishable within noise, and
+/// either is correct so long as it produces the right answer. A winner is required except
+/// on Windows, where bad HIP event readings can leave both unusable and the plan then
+/// serves the first. What must hold everywhere is that benchmarking happened at all --
+/// otherwise the case would pass identically with the feature removed.
 TEST_F(IntegrationGpuKernelIngestor, ExecutesCorrectlyWithBenchmarkingEnabled)
 {
     const ScopedPluginLogCapture capture(this);
@@ -456,20 +461,23 @@ TEST_F(IntegrationGpuKernelIngestor, ExecutesCorrectlyWithBenchmarkingEnabled)
     registerValidatorsForOutputs(context, POINTWISE_TOLERANCE_EPSILONS);
     verifyBuiltGraph(context, /*seed=*/0);
 
+#ifndef _WIN32
+    // HIP event timing is reliable here, so a sweep without a usable candidate is a bug.
     EXPECT_TRUE(recorder.hasLogContaining("benchmarking selected kernel"))
         << "the sampling sweep did not resolve a winner. Captured logs:\n"
         << recorder.getRecordedLogsAsString();
+#endif
 
-    const size_t selectionsAfterFirstExecute = countSelectionLogs(recorder);
-    ASSERT_EQ(selectionsAfterFirstExecute, 1U)
-        << "expected exactly one selection sweep. Captured logs:\n"
+    const size_t sweepsAfterFirstExecute = countSweepResolutions(recorder);
+    ASSERT_EQ(sweepsAfterFirstExecute, 1U)
+        << "expected exactly one sampling sweep. Captured logs:\n"
         << recorder.getRecordedLogsAsString();
 
     verifyBuiltGraph(context, /*seed=*/1);
 
-    // The winner is resolved once for the plan's life: a second execute() must reuse it
-    // rather than re-sample.
-    EXPECT_EQ(countSelectionLogs(recorder), selectionsAfterFirstExecute)
+    // The sweep resolves once for the plan's life: a second execute() must reuse its
+    // choice rather than re-sample.
+    EXPECT_EQ(countSweepResolutions(recorder), sweepsAfterFirstExecute)
         << "the second execute() re-sampled instead of reusing the winner. Captured logs:\n"
         << recorder.getRecordedLogsAsString();
 

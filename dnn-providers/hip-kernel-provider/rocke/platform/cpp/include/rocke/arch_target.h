@@ -176,8 +176,24 @@ const rocke_layout_map_t* rocke_mma_op_b_scale_layout(const rocke_mma_op_t* op,
 typedef struct rocke_memory_caps
 {
     bool has_async_lds;
+    /* Python defaults has_async_global_lds to has_async_lds when the JSON
+     * omits it. */
+    bool has_async_global_lds;
     bool has_ds_read_tr;
+    bool has_tdm;
     int buffer_load_max_dwords;
+    /* Widest per-lane DRAM->LDS DMA the buffer_load_lds family can do, in
+     * dwords (0 where the arch has no such instruction). Distinct from
+     * buffer_load_max_dwords, which is the *register* vector buffer-load
+     * width: CDNA3 loads a full dwordx4 into VGPRs but only a dword into LDS.
+     * Mirrors MemoryCapabilities.async_lds_max_dwords. */
+    int async_lds_max_dwords;
+    /* gfx1250 feature flags; an arch sets one only after its feature passes a
+     * functional run on a device. */
+    bool has_scalar_data_prefetch;
+    bool has_global_prefetch;
+    bool has_cluster_launch;
+    bool has_multicast_load;
 } rocke_memory_caps_t;
 
 typedef struct rocke_resource_limits
@@ -331,8 +347,17 @@ bool rocke_arch_supports_dtype_combo(
  * dtype argument is accepted for parity but ignored). */
 int rocke_arch_max_vector_load_dwords(const rocke_arch_target_t* t, const char* dtype);
 
+/* ArchTarget.async_lds_max_dwords property: the widest per-lane DRAM->LDS DMA
+ * this arch can do, in dwords (0 = no buffer_load_lds at all). */
+int rocke_arch_async_lds_max_dwords(const rocke_arch_target_t* t);
+
 /* ArchTarget.max_threads_per_block property. */
 int rocke_arch_max_threads_per_block(const rocke_arch_target_t* t);
+
+/* ArchTarget.has_dpp_row_xmask property: DPP row_xmask (XOR with any mask
+ * 1..15 inside a 16-lane row) exists, i.e. a gfx10+ family (gfx11_rdna,
+ * gfx12_rdna, gfx12_cdna). False for the gfx9 CDNA families and NULL. */
+bool rocke_arch_has_dpp_row_xmask(const rocke_arch_target_t* t);
 
 /* ============================== module fns ============================ */
 
@@ -340,6 +365,12 @@ int rocke_arch_max_threads_per_block(const rocke_arch_target_t* t);
  * storage; do not free. If `count` is non-NULL it receives the element count
  * (excluding the terminating NULL). */
 const char* const* rocke_known_arches(int* count);
+
+/* Write str(KeyError) of ArchTarget.from_gfx's miss for `gfx` into out:
+ *   "unknown gfx target '<gfx>'; known: ['gfx...', ...]. Add a row to arch_specs.json."
+ * wrapped in double quotes, exactly as Python's is_valid_spec(...) reports
+ * `return False, str(e)`. Truncates to out_cap; NULL/zero out is a no-op. */
+void rocke_set_unknown_arch_reason(char* out, size_t out_cap, const char* gfx);
 
 /* Target identity helpers mirror rocke.core.arch.target. They do not validate
  * compiler support or query a GPU. Inputs and output buffers must not overlap.
