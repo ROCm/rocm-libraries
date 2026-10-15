@@ -637,7 +637,6 @@ def test_brotate_needs_lsi_aligned_layout():
 
 def test_brotate_rejects_unsupported():
     assert "gfx1250" in b_rotate_reason(_brot_state(ISA=(9, 5, 0)))
-    assert "MX" in b_rotate_reason(_brot_state(ProblemType={**_brot_state()["ProblemType"], "MXBlockB": 32}))
     assert "TDMSplit" in b_rotate_reason(_brot_state(TDMSplit=1))
     assert "LdsOffsetA_Blk" in b_rotate_reason(_brot_state(LdsOffsetA_Blk=65536))
     assert "persistent" in b_rotate_reason(_brot_state(), persistent=True)
@@ -668,3 +667,21 @@ def test_brotate_tight_needs_storeswap_or_pow2_blk():
     # Without StoreSwapAddr the XOR/AND buffer swap needs a power-of-two block above the B span.
     assert "LdsOffsetA_Blk" in b_rotate_reason(_brot_tight_state(StoreSwapAddr=False))
     assert b_rotate_reason(_brot_tight_state(StoreSwapAddr=False, LdsOffsetA_Blk=262144)) is None
+
+def _brot_mx_state(**ovr):
+    # MXF8 on the tight MT256 layout: VWB4 on MIWaveTile[1]=8 gives nV=2, so the MXSB TileSpan
+    # layout holds vIdx 0/1 scales in the lower/upper half-wave of one ds_load.
+    s = _brot_tight_state(MXScaleFormat="InMemorySwizzle", WavefrontSize=32)
+    s["ProblemType"] = {**s["ProblemType"], "MXBlockA": 32, "MXBlockB": 32}
+    s.update(ovr)
+    return s
+
+def test_brotate_mx_applies_on_tilespan_single_group():
+    assert b_rotate_reason(_brot_mx_state()) is None
+
+def test_brotate_mx_rejects_unsupported_scale_layouts():
+    assert "MIWaveTile[1]/VectorWidthB == 2" in b_rotate_reason(_brot_mx_state(VectorWidthB=1))
+    assert "MIWaveTile[1]/VectorWidthB == 2" in b_rotate_reason(_brot_mx_state(VectorWidthB=2))
+    assert "DirectToVgprMXSB" in b_rotate_reason(_brot_mx_state(DirectToVgprMXSB=True))
+    assert "InMemorySwizzle" in b_rotate_reason(_brot_mx_state(MXScaleFormat="NoSwizzle"))
+    assert "(12, 5, 0)" in b_rotate_reason(_brot_mx_state(ISA=(12, 5, 1)))

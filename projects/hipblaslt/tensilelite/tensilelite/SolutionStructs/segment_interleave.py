@@ -421,7 +421,17 @@ def b_rotate_reason(state, persistent=False):
     vwb, wtb = state["VectorWidthB"], state["MIWaveTile"][1]
     if vwb <= 0 or wtb % vwb != 0 or (wtb // vwb) % 2 != 0:
         return "MIWaveTile[1]/VectorWidthB must be even"
-    if pt.get("MXBlockA") or pt.get("MXBlockB"):              return "MX not supported"
+    if pt.get("MXBlockB"):
+        # MXSB must follow the rotation. Supported only for the TileSpan wave-split layout with
+        # one group (nV == 2): vIdx 0/1 scales sit in the lower/upper half-wave of one ds_load,
+        # so pair 1 flips the half-wave select in LRA. MXSA needs nothing (A is not rotated).
+        # TileSpan (LocalRead.getMxsTileSpanInfo) is gated on exactly gfx1250.
+        if tuple(state.get("ISA", ())) != (12, 5, 0):         return "MX: needs ISA (12, 5, 0)"
+        if state.get("DirectToVgprMXSB"):                     return "MX: DirectToVgprMXSB not supported"
+        if state.get("MXScaleFormat") != "InMemorySwizzle":   return "MX: needs MXScaleFormat InMemorySwizzle"
+        if state["MatrixInstN"] != state["WavefrontSize"] // 2:
+            return "MX: needs MatrixInstN == WavefrontSize/2"
+        if wtb // vwb != 2:                                   return "MX: needs MIWaveTile[1]/VectorWidthB == 2"
     if pt.get("Sparse"):                                      return "sparse not supported"
     for key in ("TDMSplit", "UseSubtileImpl", "DirectToVgprA", "DirectToVgprB", "DirectToLdsB",
                 "enableLDSTrA", "enableLDSTrB", "UseDotInstruction", "UseCustomMainLoopSchedule",
