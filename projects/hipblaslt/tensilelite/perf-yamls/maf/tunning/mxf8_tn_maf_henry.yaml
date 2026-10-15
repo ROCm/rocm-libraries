@@ -105,6 +105,7 @@ BenchmarkProblems:
         # - PrefetchGL2SAddr: [True]
         # - ClusterBarrierRule3SignalLeadCycles: [100,300,500]
         - ClusterDim: [[4,4],[2,4]]
+        - ClusterAIDMapping: [-1, -2]
         - PrefetchGL2: [1,2]
         - StinkyTofuParameters:
           - {DsReadDrainLatency: 32, DsReadPerCap: 2, DsReadThrottleLatency: 72}
@@ -125,6 +126,12 @@ BenchmarkProblems:
           - {DsReadDrainLatency: 72, DsReadPerCap: 3, DsReadThrottleLatency: 72}
           - {DsReadDrainLatency: 72, DsReadPerCap: 3, DsReadThrottleLatency: 96}
           - {DsReadDrainLatency: 72, DsReadPerCap: 3, DsReadThrottleLatency: 112}
+          - {DsReadDrainLatency: 128, DsReadPerCap: 2, DsReadThrottleLatency: 72}
+          - {DsReadDrainLatency: 128, DsReadPerCap: 2, DsReadThrottleLatency: 96}
+          - {DsReadDrainLatency: 128, DsReadPerCap: 2, DsReadThrottleLatency: 112}
+          - {DsReadDrainLatency: 128, DsReadPerCap: 3, DsReadThrottleLatency: 72}
+          - {DsReadDrainLatency: 128, DsReadPerCap: 3, DsReadThrottleLatency: 96}
+          - {DsReadDrainLatency: 128, DsReadPerCap: 3, DsReadThrottleLatency: 112}
 
 
       BenchmarkForkParameters:
@@ -135,7 +142,7 @@ BenchmarkProblems:
           - Exact: [4096, 4096, 1, 65536]
           # - Exact: [4096, 4096, 1, 65536,-1,-1,131072,131072]
           # - Exact: [4096, 4096, 1, 65536,-1,-1,262144,262144]
-          - Exact: [4096, 4096, 1, 131072]
+          # - Exact: [4096, 4096, 1, 131072]
           # - Exact: [4096, 4096, 1, 262144]
 
 #LibraryLogic:
