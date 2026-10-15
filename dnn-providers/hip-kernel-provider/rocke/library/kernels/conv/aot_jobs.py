@@ -70,13 +70,15 @@ Per direction, on top of that:
   {1, 2, 4, 8}. One tilde binary per configuration serves every stride and
   dilation: the tilde decomposition is computed on the host and passed in
   the sub-GEMM record buffer, up to 1024 sub-GEMMs (stride 32x32). Next to
-  it, a stride-1 / dilation-1 binary of the same configuration
-  (``CACHE_DGRAD_STRIDE1``), which rebuilds its single sub-GEMM record from
-  the kernargs instead of searching and loading the buffer, and stores
-  through the unit-stride epilogue; on wave64 MFMA targets, outside the
-  wavelet pipeline, the stride-1 binary also comes with the tap-outer K loop
-  (``tap_outer_k``, in place of ``uniform_k_decode``; served to problems
-  whose kpg is a multiple of tile_k). The B tile takes the layout the JIT sweep
+  it, on wave64 MFMA targets outside the wavelet pipeline, a stride-1 /
+  dilation-1 binary of the same configuration (``CACHE_DGRAD_STRIDE1``),
+  which rebuilds its single sub-GEMM record from the kernargs instead of
+  searching and loading the buffer, stores through the unit-stride
+  epilogue, and runs the tap-outer K loop (``tap_outer_k``, in place of
+  ``uniform_k_decode``; served to problems whose kpg is a multiple of
+  tile_k). A stride-1 binary with the flat K loop is not built: it serves
+  the same problems as the tilde binary of its configuration with the same
+  K loop. The B tile takes the layout the JIT sweep
   picks (``DgradConvSpec.default_lds_k_outer``): K-outer wherever the arch,
   dtype, atom and pipeline allow it and the B load is wider than one element,
   M-outer otherwise. ``uniform_k_decode`` follows
@@ -206,7 +208,9 @@ _AOT_ALIAS_PIPELINES: Dict[str, Tuple[str, ...]] = {
 # record buffer (DgradConvSpec.folds_sub_gemm_record), and with dilation 1 it
 # also takes the unit-stride epilogue. Its identity records stride 1 and
 # dilation 1, so the cache offers it to stride-1, dilation-1 problems only;
-# the tilde binary of the same configuration still serves those too.
+# the tilde binary of the same configuration still serves those too. The
+# stride-1 capability is built with the tap-outer K loop only (see
+# _dgrad_tap_outer_variants).
 CACHE_GROUPED: Tuple[bool, ...] = (True,)
 # Whether the stride-1 dgrad binaries are built next to the tilde ones.
 CACHE_DGRAD_STRIDE1: tuple[bool, ...] = (False, True)
@@ -467,15 +471,25 @@ def _dgrad_tap_outer_variants(
     """``tap_outer_k`` values built for one dgrad configuration.
 
     The tap-outer K loop (DgradConvSpec.tap_outer_k) is a stride-1,
-    dilation-1 loop of the wave64 MFMA kernel, so only the stride-1 binary
-    gets the variant, and not under the wavelet pipeline (WMMA, its own K
+    dilation-1 loop of the wave64 MFMA kernel, so only the stride-1
+    capability gets it, and not under the wavelet pipeline (WMMA, its own K
     loop). The probe's kpg is a multiple of every cached tile_k; the cache
     checks kpg % tile_k on the problem.
+
+    The stride-1 capability is built with that loop only, so it yields
+    nothing where the loop does not apply: a stride-1 binary with the flat K
+    loop only folds the sub-GEMM record, and the tilde binary of the same
+    configuration (same K loop, record searched and loaded) serves the same
+    problems at no measurable cost, so it would double the stride-1 slice of
+    the catalog for nothing. The fold itself stays: the tap-outer (and dY
+    halo) binaries are built on it.
     """
     stride1 = caps.get("stride") == 1 and caps.get("dilation") == 1
-    if stride1 and wave_size == 64 and pipeline != "wavelet":
-        return (False, True)
-    return (False,)
+    if not stride1:
+        return (False,)
+    if wave_size == 64 and pipeline != "wavelet":
+        return (True,)
+    return ()
 
 
 def _is_patch_geometry(geometry: tuple) -> bool:
@@ -1079,9 +1093,9 @@ def _dgrad_jobs(
                     arch=arch, wave_size=wave_size, pipeline=pipeline
                 ),
             )
-            # The stride-1 binary also comes as the tap-outer K loop, which
-            # replaces the uniform_k_decode loop and serves only problems
-            # whose kpg is a multiple of tile_k (supports_problem).
+            # The stride-1 binary is the tap-outer K loop, which replaces the
+            # uniform_k_decode loop and serves only problems whose kpg is a
+            # multiple of tile_k (supports_problem).
             for tapk in _dgrad_tap_outer_variants(caps, wave_size, pipeline):
                 if tapk:
                     cfg = {**cfg, "uniform_k_decode": False, "tap_outer_k": True}
