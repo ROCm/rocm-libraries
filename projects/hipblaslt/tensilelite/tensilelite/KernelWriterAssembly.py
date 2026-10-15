@@ -3136,7 +3136,10 @@ class KernelWriterAssembly(KernelWriter):
         # numSgprPreload spans the common args header, argLoader offsets start past it.
         preloadedArgs = max(0, self.states.numSgprPreload - self.states.userArgsInfo.commonArgsNum)
         pendingBytes = self.argLoader.getOffset() - preloadedArgs * self.states.bpr        
-        if kernel["ProblemType"]["SupportUserArgs"]:
+        if kernel["ProblemType"]["GroupedGemm"]:
+          # ArgType 1 and 2 reload the found gemm's args after the gemm search.
+          moduleWg.add(SWaitCnt(kmcnt=0, comment="wait for grouped gemm kern args"))
+        elif kernel["ProblemType"]["SupportUserArgs"]:
           if preloadedArgs <= (self.sgprs["Alpha"] - self.sgprs["SizesFree"]):
             moduleWg.add(SWaitCnt(kmcnt=0, comment="wait for %u/%u bytes of kern args over preload" % \
                           (pendingBytes, self.externalArgLoader.getOffset())))
