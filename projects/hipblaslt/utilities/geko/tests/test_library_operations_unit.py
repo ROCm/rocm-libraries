@@ -790,6 +790,79 @@ def test_extract_solutions_raises_on_default_solution_mismatch(tmp_path: Path) -
         operations.extract_solutions(df, mt)
 
 
+def test_extract_solutions_falls_back_on_default_solution_mismatch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Use the external-merge fallback when a hipBLASLt path is supplied.
+
+    Args:
+        tmp_path (Path): Temporary test directory.
+        monkeypatch (pytest.MonkeyPatch): Fixture used to replace the external merger.
+
+    Returns:
+        None.
+
+    Raises:
+        AssertionError: If the fallback is not called or loses an exact-logic row.
+    """
+    lib_dir1 = tmp_path / "libs1"
+    lib_dir2 = tmp_path / "libs2"
+    lib_dir1.mkdir()
+    lib_dir2.mkdir()
+    p1 = _write_library_yaml_with_default(lib_dir1, "a.yaml", {"StaggerU": 0})
+    p2 = _write_library_yaml_with_default(lib_dir2, "a.yaml", {"StaggerU": 1})
+    mt = _write_match_table(tmp_path, [[str(p1), 0], [str(p2), 0]])
+    df = pd.DataFrame(
+        [
+            {"m": 16, "n": 16, "batch_count": 1, "k": 16, "solutionIdx": 0},
+            {"m": 32, "n": 32, "batch_count": 1, "k": 32, "solutionIdx": 1},
+        ]
+    )
+    calls: list[Path] = []
+
+    def _fake_external_merge(
+        hipblaslt_path: str | Path,
+        original: Library,
+        incremental: Library,
+    ) -> Library:
+        """Combine extracted test libraries while recording fallback use.
+
+        Args:
+            hipblaslt_path (str | Path): Supplied hipBLASLt path.
+            original (Library): First extracted library.
+            incremental (Library): Second extracted library.
+
+        Returns:
+            Library: Combined test library.
+
+        Raises:
+            None.
+        """
+        calls.append(Path(hipblaslt_path))
+        operations._reindex_and_append(original, incremental)
+        original.default_solution = incremental.default_solution
+        return original
+
+    monkeypatch.setattr(
+        operations,
+        "_merge_extracted_libraries",
+        _fake_external_merge,
+    )
+
+    hipblaslt_path = tmp_path / "hipblaslt"
+    libs = operations.extract_solutions(
+        df,
+        mt,
+        hipblaslt_path=hipblaslt_path,
+    )
+
+    assert calls == [hipblaslt_path]
+    assert len(libs) == 1
+    assert len(libs[0].solutions) == 2
+    assert len(libs[0].sizes) == 2
+
+
 def test_extract_solutions_ok_with_matching_default_solution(tmp_path: Path) -> None:
     lib_dir1 = tmp_path / "libs1"
     lib_dir2 = tmp_path / "libs2"
@@ -808,6 +881,8 @@ def test_extract_solutions_ok_with_matching_default_solution(tmp_path: Path) -> 
 
     libs = operations.extract_solutions(df, mt)
     assert len(libs) == 1
+    assert [sol["SolutionIndex"] for sol in libs[0].solutions] == [0, 1]
+    assert [size[1][0] for size in libs[0].sizes] == [0, 1]
 
 
 def test_extract_solutions_ok_when_both_default_solution_none(tmp_path: Path) -> None:

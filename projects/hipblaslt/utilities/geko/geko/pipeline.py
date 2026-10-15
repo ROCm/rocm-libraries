@@ -301,7 +301,11 @@ def run_search(
 
     winners.to_csv(winners_file, index=False)
 
-    libs = library.operations.extract_solutions(winners, match_table_path)
+    libs = library.operations.extract_solutions(
+        winners,
+        match_table_path,
+        hipblaslt_path=hipblaslt_path,
+    )
     libs.dump(lib_dir)
     logger.info(f"Extracted library available in: '{lib_dir}'")
 

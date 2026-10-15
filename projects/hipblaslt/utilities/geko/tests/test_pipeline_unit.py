@@ -322,7 +322,7 @@ def test_run_search_success_writes_final_libs(monkeypatch: pytest.MonkeyPatch, t
 
     extracted = {}
 
-    def _fake_extract(_winners, match_table):
+    def _fake_extract(_winners, match_table, **_kwargs):
         extracted["match_table"] = Path(match_table)
         return _FakeLibs()
 
@@ -405,7 +405,7 @@ def test_run_search_with_custom_lib_src_builds_ref_lib_and_uses_ref_matchtable(
 
     extracted = {}
 
-    def _fake_extract(_winners, match_table):
+    def _fake_extract(_winners, match_table, **_kwargs):
         extracted["match_table"] = Path(match_table)
         return _FakeLibs()
 
