@@ -176,6 +176,46 @@ bool rocke_dgrad_conv_spec_is_strided(const rocke_dgrad_conv_spec_t* s)
     return s->problem.sH != 1 || s->problem.sW != 1 || s->problem.dH != 1 || s->problem.dW != 1;
 }
 
+/* Python _acc_regs_per_lane: fp32 accumulators per lane of one warp's tile. */
+static int _dgrad_acc_regs_per_lane(const rocke_dgrad_conv_spec_t* s)
+{
+    return rocke_dgrad_conv_spec_mfmas_per_warp_m(s) * rocke_dgrad_conv_spec_mfmas_per_warp_n(s)
+           * (s->warp_tile_m * s->warp_tile_n / _max(s->wave_size, 1));
+}
+
+/* Python _default_lds_k_pad: row pad of the M-outer LDS tiles when lds_k_pad
+ * is None. */
+static int _dgrad_default_lds_k_pad(int tile_k)
+{
+    return tile_k >= 16 ? 8 : 0;
+}
+
+/* Defined further down (shared with the builder). */
+static rocke_conv_lds_layout_t _dgrad_effective_lds_layout(const rocke_dgrad_conv_spec_t* spec);
+static const char* _dgrad_mma_family(const char* arch);
+
+/* Python _dgrad_lds_charge: (A/B bytes, C bytes, total bytes) of LDS the
+ * builder allocates. One A and one B tile whatever the pipeline (compv4 is a
+ * schedule policy here; async_dma / unroll_k are rejected). The spec has no
+ * cshuffle_no_alias field (Python's default False), so only the wavelet
+ * pipeline keeps C unaliased. */
+static void _dgrad_lds_charge(const rocke_dgrad_conv_spec_t* s, long* ab, long* c, long* total)
+{
+    int ab_dtype_bytes = (s->dtype_a && strcmp(s->dtype_a, "fp32") == 0) ? 4 : 2;
+    rocke_conv_lds_layout_t layout = _dgrad_effective_lds_layout(s);
+    long a_elems = (long)s->tile_m * layout.row_stride;
+    long b_elems = s->lds_k_outer ? (long)s->tile_k * (s->tile_n + ROCKE_DGRAD_KOUTER_PAD)
+                                  : (long)s->tile_n * layout.row_stride;
+    long ab_bytes = (a_elems + b_elems) * ab_dtype_bytes;
+    int c_dtype_bytes = (s->dtype_d && strcmp(s->dtype_d, "fp32") == 0) ? 4 : 2;
+    bool cshuffle = s->epilogue && strcmp(s->epilogue, "cshuffle") == 0;
+    long c_bytes = cshuffle ? (long)s->tile_m * s->tile_n * c_dtype_bytes : 0;
+    bool no_alias = s->pipeline && strcmp(s->pipeline, "wavelet") == 0;
+    *ab = ab_bytes;
+    *c = c_bytes;
+    *total = no_alias ? ab_bytes + c_bytes : (ab_bytes > c_bytes ? ab_bytes : c_bytes);
+}
+
 bool rocke_dgrad_conv_spec_needs_atomic(const rocke_dgrad_conv_spec_t* s)
 {
     /* split_k>1: multiple CTAs accumulate into the same dX elements via atomic_add.
@@ -219,7 +259,7 @@ rocke_status_t
         n += w_;                                                      \
     } while(0)
     /* Flag order must match Python's kernel_name_join flags dict:
-     * async, kouter, spk. C previously emitted spk before async, which only
+     * async, kouter, spk, ukd, kp. C previously emitted spk before async, which only
      * diverged for a spec setting both -- none exists -- but the K-outer flag
      * sits between them, so the order is now load-bearing. */
     if(s->async_dma)
@@ -233,6 +273,9 @@ rocke_status_t
         ROCKE_DGRAD_NAME_APPEND("_ukd");
     if(s->patch)
         ROCKE_DGRAD_NAME_APPEND("_patch");
+    /* A non-default A row pad changes the LDS layout (Python flag "kp<n>"). */
+    if(s->has_lds_k_pad && s->lds_k_pad != _dgrad_default_lds_k_pad(s->tile_k))
+        ROCKE_DGRAD_NAME_APPEND("_kp%d", s->lds_k_pad);
 #undef ROCKE_DGRAD_NAME_APPEND
     return ROCKE_OK;
 }
@@ -468,21 +511,58 @@ bool rocke_dgrad_conv_is_valid_spec(const rocke_dgrad_conv_spec_t* s,
         return false;
     }
 
-    /* LDS budget (Python: target.fits_lds check). */
-    int ab_dtype_bytes = (strcmp(s->dtype_a, "fp32") == 0) ? 4 : 2;
-    /* Simplified LDS estimate (no cshuffle for dgrad, pipeline="mem" only in practice). */
-    long a_lds = (long)s->tile_m * s->tile_k * ab_dtype_bytes;
-    long b_lds = (long)s->tile_n * s->tile_k * ab_dtype_bytes;
-    long total_lds = a_lds + b_lds;
-    if(!rocke_arch_fits_lds(tgt, total_lds))
+    /* Knobs the dgrad builder does not implement: rejected rather than
+     * silently ignored. Mirrors is_valid_dgrad_spec. */
     {
-        snprintf(reason,
-                 reason_cap,
-                 "LDS budget %ld bytes > %d cap on %s",
-                 total_lds,
-                 tgt->lds_capacity_bytes,
-                 arch);
-        return false;
+        const char* label = s->async_dma         ? "async_dma"
+                            : s->unroll_k        ? "unroll_k"
+                            : s->chiplet_swizzle ? "chiplet_swizzle"
+                                                 : NULL;
+        if(label)
+        {
+            snprintf(reason,
+                     reason_cap,
+                     "dgrad does not implement %s (the builder has no such path; "
+                     "the flag would be silently ignored)",
+                     label);
+            return false;
+        }
+    }
+
+    /* Accumulator footprint per lane (Python: _MAX_ACC_REGS_PER_LANE). A
+     * correctness guard, not a no-spill guarantee. */
+    {
+        int acc_regs = _dgrad_acc_regs_per_lane(s);
+        if(acc_regs > ROCKE_DGRAD_MAX_ACC_REGS_PER_LANE)
+        {
+            snprintf(reason,
+                     reason_cap,
+                     "accumulator tile needs %d fp32 registers per lane "
+                     "(> %d); it fills the whole register file",
+                     acc_regs,
+                     ROCKE_DGRAD_MAX_ACC_REGS_PER_LANE);
+            return false;
+        }
+    }
+
+    /* LDS budget (Python: _dgrad_lds_charge + target.fits_lds). */
+    {
+        long ab_lds = 0;
+        long c_lds = 0;
+        long total_lds = 0;
+        _dgrad_lds_charge(s, &ab_lds, &c_lds, &total_lds);
+        if(!rocke_arch_fits_lds(tgt, total_lds))
+        {
+            snprintf(reason,
+                     reason_cap,
+                     "LDS budget %ld bytes (A/B=%ld, C=%ld) > %d cap on %s",
+                     total_lds,
+                     ab_lds,
+                     c_lds,
+                     tgt->lds_capacity_bytes,
+                     arch);
+            return false;
+        }
     }
 
     /* Python: _uniform_k_decode_conflict. The wavelet load/math split has its
@@ -690,6 +770,42 @@ bool rocke_dgrad_conv_is_valid_spec(const rocke_dgrad_conv_spec_t* s,
                      "(the wavelet loader writes the B tile M-outer into a K-outer "
                      "allocation)");
             return false;
+        }
+        /* Python _kouter_frag_reason: the transpose read returns 4 elements
+         * per lane on wave64 (ds_read_tr16_b64) and 8 on wave32
+         * (ds_load_tr16_b128), so the atom's B fragment length must be a
+         * multiple of it. The builder refuses it too; the validator says so
+         * first so a sweep filters the configuration out. */
+        {
+            const rocke_archtarget_t* kt = rocke_archtarget_from_gfx(arch);
+            const rocke_mmaop_t* kop = kt ? rocke_archtarget_op_for_shape(kt,
+                                                                          _dgrad_mma_family(arch),
+                                                                          s->dtype_a,
+                                                                          s->dtype_b,
+                                                                          "fp32",
+                                                                          s->warp_tile_m,
+                                                                          s->warp_tile_n,
+                                                                          s->warp_tile_k,
+                                                                          nullptr)
+                                          : NULL;
+            const int tr_lanes = s->wave_size == 32 ? 8 : 4;
+            if(!kop || kop->b_frag_len % tr_lanes != 0)
+            {
+                snprintf(reason,
+                         reason_cap,
+                         "lds_k_outer needs a B fragment length that is a multiple of "
+                         "%d (%s returns %d elements per lane on wave%d); got "
+                         "b_per_lane=%d for atom %dx%dx%d",
+                         tr_lanes,
+                         s->wave_size == 32 ? "ds_load_tr16_b128" : "ds_read_tr16_b64",
+                         tr_lanes,
+                         s->wave_size,
+                         kop ? kop->b_frag_len : 0,
+                         s->warp_tile_m,
+                         s->warp_tile_n,
+                         s->warp_tile_k);
+                return false;
+            }
         }
     }
 

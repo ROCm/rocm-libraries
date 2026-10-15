@@ -171,6 +171,10 @@ typedef struct rocke_dgrad_conv_spec
  * 32-dword LDS bank period or the transpose read degenerates. */
 #define ROCKE_DGRAD_KOUTER_PAD 8
 
+/* Upper bound on fp32 accumulators per lane accepted by
+ * rocke_dgrad_conv_is_valid_spec. Mirrors _MAX_ACC_REGS_PER_LANE. */
+#define ROCKE_DGRAD_MAX_ACC_REGS_PER_LANE 256
+
 rocke_dgrad_conv_spec_t rocke_dgrad_conv_spec_default(void);
 
 /* ---- DgradConvSpec @property analogues (pure int arithmetic) ---- */

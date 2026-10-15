@@ -391,6 +391,41 @@ static int make_cfg(int idx, rocke_dgrad_conv_spec_t* spec, const char** arch)
         spec->patch = true;
         *arch = "gfx950";
         return 0;
+    case 36:
+        /* Rejected: the dgrad builder has no K-unrolled loop. */
+        spec->problem = rocke_conv_problem_make(8, 56, 56, 64, 64, 3, 3, 1, 1, 1, 1, 1, 1);
+        spec->unroll_k = true;
+        *arch = "gfx950";
+        return 0;
+    case 37:
+        /* Rejected: 512 fp32 accumulators per lane (> 256). */
+        spec->problem = rocke_conv_problem_make(4, 12, 12, 384, 384, 3, 3, 1, 1, 1, 1, 1, 1);
+        spec->tile_m = 256;
+        spec->tile_n = 256;
+        spec->warp_m = 1;
+        spec->warp_n = 2;
+        spec->warp_tile_m = 16;
+        spec->warp_tile_n = 16;
+        spec->warp_tile_k = 32;
+        *arch = "gfx950";
+        return 0;
+    case 38:
+        /* Accepted: compv4 is charged one A and one B tile, so 128x128x64
+         * fits gfx942's LDS. */
+        spec->problem = rocke_conv_problem_make(4, 28, 28, 128, 128, 3, 3, 1, 1, 1, 1, 1, 1);
+        spec->tile_m = 128;
+        spec->tile_n = 128;
+        spec->warp_tile_k = 8;
+        spec->pipeline = "compv4";
+        *arch = "gfx942";
+        return 0;
+    case 39:
+        /* Accepted: a non-default A row pad reaches the kernel name ("_kp0"). */
+        spec->problem = rocke_conv_problem_make(8, 56, 56, 64, 64, 3, 3, 1, 1, 1, 1, 1, 1);
+        spec->has_lds_k_pad = true;
+        spec->lds_k_pad = 0;
+        *arch = "gfx950";
+        return 0;
     default:
         return -1;
     }

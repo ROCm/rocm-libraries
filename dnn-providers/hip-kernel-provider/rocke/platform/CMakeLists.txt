@@ -474,6 +474,7 @@ if(ROCKE_INSTALL_TESTS)
     set(_ROCKE_LIBRARY_CONV_TEST_RELPATHS
         "tests/library/tests/dispatch/test_grouped_conv_dispatch.py"
         "tests/library/tests/test_conv_wgrad_streamk.py"
+        "tests/library/tests/test_conv_dgrad_spec_policy.py"
         "tests/library/tests/test_streamk_sweep_launch.py"
         "tests/library/tests/test_conv_build_signatures.py"
         "tests/library/tests/test_builder_signature_contract.py"

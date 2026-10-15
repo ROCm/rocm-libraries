@@ -845,6 +845,95 @@ def _spec(idx: int):
             "gfx950",
         )
 
+    # Configs 36-39: validator hardening. 36 and 37 are rejected by both
+    # validators; 38 and 39 are accepted and built.
+    if idx == 36:
+        # Rejected: the dgrad builder has no K-unrolled loop (unroll_k used to
+        # be accepted and silently ignored).
+        p = _cp(N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3, pH=1, pW=1)
+        return (
+            DgradConvSpec(
+                problem=p,
+                tile_m=64,
+                tile_n=64,
+                tile_k=64,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=16,
+                pipeline="mem",
+                epilogue="default",
+                unroll_k=True,
+            ),
+            "gfx950",
+        )
+
+    if idx == 37:
+        # Rejected: 1x2 warps of the 16x16x32 atom on a 256x256 tile hold 512
+        # fp32 accumulators per lane (> 256, the whole register file).
+        p = _cp(N=4, Hi=12, Wi=12, C=384, K=384, Y=3, X=3, pH=1, pW=1)
+        return (
+            DgradConvSpec(
+                problem=p,
+                tile_m=256,
+                tile_n=256,
+                tile_k=64,
+                warp_m=1,
+                warp_n=2,
+                warp_tile_m=16,
+                warp_tile_n=16,
+                warp_tile_k=32,
+                pipeline="mem",
+                epilogue="default",
+            ),
+            "gfx950",
+        )
+
+    if idx == 38:
+        # Accepted: compv4 is charged one A and one B tile (the builder never
+        # double-buffers), so a 128x128x64 tile fits gfx942's LDS; a doubled
+        # charge rejected it.
+        p = _cp(N=4, Hi=28, Wi=28, C=128, K=128, Y=3, X=3, pH=1, pW=1)
+        return (
+            DgradConvSpec(
+                problem=p,
+                tile_m=128,
+                tile_n=128,
+                tile_k=64,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=8,
+                pipeline="compv4",
+                epilogue="default",
+            ),
+            "gfx942",
+        )
+
+    if idx == 39:
+        # Accepted: a non-default A row pad (lds_k_pad=0) reaches the kernel
+        # name ("_kp0").
+        p = _cp(N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3, pH=1, pW=1)
+        return (
+            DgradConvSpec(
+                problem=p,
+                tile_m=64,
+                tile_n=64,
+                tile_k=64,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=16,
+                pipeline="mem",
+                epilogue="default",
+                lds_k_pad=0,
+            ),
+            "gfx950",
+        )
+
     raise SystemExit(f"unknown config index {idx}")
 
 
