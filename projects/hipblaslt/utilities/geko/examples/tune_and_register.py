@@ -10,20 +10,22 @@ command line, --tune or --search with any of its options, after `--`. Then:
   1. geko      the command, unchanged, in the current directory, without the
                variable, so Geko compares against the shipped kernels
   2. measure   in a process whose HIPBLASLT_USER_KERNEL_LIBRARY names a scratch
-               copy of the library, register Geko's payloads and time each size's
-               tuned kernel against what hipBLASLt selects today: the shipped
-               kernel, or a user kernel an earlier run already added. Each tuned
-               kernel's output is checked against a host reference.
+               copy of the library, register Geko's payloads, check each tuned
+               kernel's output against a host reference, and compare it with what
+               hipBLASLt selects today. Against the shipped kernel that is Geko's
+               own hipblaslt-bench measurement; against a user kernel an earlier
+               run added, both are timed the same way, with hipblaslt-bench.
   3. add       sizes Geko kept whose tuned kernel is correct and at least
                --min-speedup faster than today's selection are registered and
                mapped into the library; nothing else is written there
   4. confirm   a fresh process with only HIPBLASLT_USER_KERNEL_LIBRARY set reports
                what the heuristic now selects for every size
 
-Every hipBLASLt call goes through geko.user_kernels (ctypes), so --lib, or the
-libhipblaslt.so the loader finds, must be built with HIPBLASLT_ENABLE_USER_KERNELS=ON.
-Any process started with the variable naming the library gets the kernels, with no
-API call:
+Registering, mapping and checking go through geko.user_kernels (ctypes), so --lib,
+or the libhipblaslt.so the loader finds, must be built with
+HIPBLASLT_ENABLE_USER_KERNELS=ON. Timing uses build/release/clients/hipblaslt-bench
+in the hipBLASLt checkout Geko uses (--hipblaslt), run as Geko runs it. Any process
+started with the variable naming the library gets the kernels, with no API call:
 
     HIPBLASLT_USER_KERNEL_LIBRARY=/abs/path/user_kernel_lib python train.py
 
@@ -32,8 +34,8 @@ kernel beats the one already there.
 
 With --replay nothing is tuned and the library is only read: a fresh process names
 it and, for every size it maps, reports whether the heuristic returns the user
-kernel, how fast it is against the shipped kernel, and whether both match the host
-reference.
+kernel, how fast it is against the shipped kernel in hipblaslt-bench, and whether
+both match the host reference.
 
 Usage:
     export HIPBLASLT_USER_KERNEL_LIBRARY=/abs/path/user_kernel_lib
@@ -71,6 +73,8 @@ GEKO_TYPES = {v[1]: k for k, v in TENSILE_TYPES.items()}
 # baseline, and a user kernel library would change it.
 GEKO_ENV_DROP = ("LD_LIBRARY_PATH", "HIP_VISIBLE_DEVICES", "ROCR_VISIBLE_DEVICES",
                  "CUDA_VISIBLE_DEVICES", "HIPBLASLT_TENSILE_LIBPATH", LIBRARY_ENV)
+
+BENCH = "build/release/clients/hipblaslt-bench"
 
 
 def size_key(p: Problem) -> str:
@@ -141,6 +145,9 @@ def read_geko(geko_dir):
                        GEKO_TYPES.get(r["b_type"], r["b_type"]),
                        GEKO_TYPES.get(r["d_type"] or r["c_type"], r["c_type"]))
 
+    metrics = geko_dir / "results/metrics.json"
+    up_thr = (json.loads(metrics.read_text()).get("config", {}).get("up_thr")
+              if metrics.is_file() else None)
     kept = {size_key(problem(r)) for r in kept_rows}
     out = {}
     for r in csv.DictReader(open(raw)):
@@ -149,10 +156,33 @@ def read_geko(geko_dir):
             "problem": asdict(p), "shipped_us": float(r["us_reference"]),
             "tuned_us": float(r["us_tuned"]), "uplift_pct": float(r["uplift_pct"]),
             "kept": size_key(p) in kept, "kernel": r["solution_tuned"],
-            "shipped_source": r["lib_source_reference"],
+            "same_as_shipped": r["kernel_reference"] == r["kernel_tuned"],
+            "valid": r.get("valid", "True") == "True", "error": r.get("error_tuned"),
+            "up_thr": up_thr, "shipped_source": r["lib_source_reference"],
             "supported": p.a_type in TENSILE_TYPES and TENSILE_TYPES[p.a_type][2] is not None,
         }
     return out
+
+
+def not_kept_reason(g):
+    """Why Geko left this size out of final_libs."""
+    if g["same_as_shipped"]:
+        return "Geko's best kernel is the shipped one"
+    if not g["valid"]:
+        return f"Geko rejected its output (error {g['error']})"
+    if g["uplift_pct"] <= 0:
+        return f"Geko found nothing faster than shipped ({g['uplift_pct']:+.1f}%)"
+    thr = f" of {(g['up_thr'] - 1) * 100:+.0f}%" if g["up_thr"] else ""
+    return f"Geko's {g['uplift_pct']:+.1f}% vs shipped is below its threshold{thr}"
+
+
+def bench_root(args):
+    """The hipBLASLt checkout whose hipblaslt-bench times kernels, as Geko's does, or None."""
+    for c in (args.hipblaslt, geko_option(args.geko, "--hipblaslt") if args.geko else None,
+              os.environ.get("GEKO_HIPBLASLT_PATH")):
+        if c and (Path(c).expanduser() / BENCH).is_file():
+            return str(Path(c).expanduser().resolve())
+    return None
 
 
 class Children:
@@ -166,8 +196,8 @@ class Children:
         if args.lib:
             env["GEKO_HIPBLASLT_LIB"] = str(Path(args.lib).resolve())
         self.env = env
-        self.common = {"warmup": args.warmup, "iters": args.iters, "passes": args.passes,
-                       "rotating_mb": args.rotating, "max_workspace": args.max_workspace,
+        self.common = {"hipblaslt": bench_root(args), "bench_duration": args.bench_duration,
+                       "bench_dir": str(outdir / "bench"), "max_workspace": args.max_workspace,
                        "tolerance": args.tolerance, "min_speedup": args.min_speedup}
 
     def run(self, stage, library, plan):
@@ -225,22 +255,22 @@ def fmt(v, f="{:.2f}"):
 
 
 def report(entries, outdir, dry_run):
-    print("\n" + "=" * 118)
-    print(f"{'size':40} {'Geko':>8} {'shipped':>9} {'tuned':>9} {'tuned vs':>9}  "
+    print("\n" + "=" * 110)
+    print(f"{'size':40} {'shipped':>9} {'tuned':>9} {'tuned vs':>9}  "
           f"{'before':13} {'now':12} result")
-    print(f"{'':40} {'uplift':>8} {'us':>9} {'us':>9} {'shipped':>9}  "
+    print(f"{'':40} {'us':>9} {'us':>9} {'shipped':>9}  "
           f"{'this run':13} {'selected':12}")
     for e in entries:
         g, x = e["geko"], e.get("eval") or {}
         before = "-" if not x.get("current") else (
-            f"user {x['current_us']:.2f}" if x["current"] == "user kernel" else "shipped")
-        print(f"{label(Problem(**g['problem'])):40} {fmt(g['uplift_pct'], '{:+.1f}%'):>8} "
-              f"{fmt(x.get('shipped_us')):>9} {fmt(x.get('tuned_us')):>9} "
-              f"{fmt(x.get('speedup_vs_shipped'), '{:.2f}x'):>9}  "
+            f"user {fmt(x.get('current_us'))}" if x["current"] == "user kernel" else "shipped")
+        print(f"{label(Problem(**g['problem'])):40} {fmt(g['shipped_us']):>9} "
+              f"{fmt(g['tuned_us']):>9} {fmt(g['shipped_us'] / g['tuned_us'], '{:.2f}x'):>9}  "
               f"{before:13} {e.get('selected', '-'):12} {e['result']}")
-    print("times are GPU-event us/call over back-to-back calls with rotating inputs. "
-          "'before this run' is what a\ntuned kernel has to beat: the shipped kernel, or a "
-          "user kernel an earlier run added (with its time).")
+    print("shipped and tuned times are Geko's hipblaslt-bench measurements. 'before this run' "
+          "is what a tuned kernel\nhas to beat: the shipped kernel, or a user kernel an earlier "
+          "run added, with its hipblaslt-bench time\nfrom this run; the result then compares "
+          "it with the tuned kernel timed the same way.")
 
     counts = {}
     for e in entries:
@@ -257,6 +287,7 @@ def report(entries, outdir, dry_run):
             geko_uplift_pct=g["uplift_pct"], geko_kept=g["kept"],
             shipped_us=x.get("shipped_us"), current=x.get("current"),
             current_us=x.get("current_us"), tuned_us=x.get("tuned_us"),
+            tuned_bench_us=x.get("tuned_bench_us"),
             speedup_vs_current=x.get("speedup_vs_current"),
             speedup_vs_shipped=x.get("speedup_vs_shipped"), rel_diff=x.get("rel_diff"),
             tuned_index=x.get("tuned_index"), outcome=e["outcome"], result=e["result"],
@@ -277,6 +308,9 @@ def replay(args, library_root, children, outdir):
     print(f"output    {outdir}")
     t0 = time.time()
     print(f"\n[replay] fresh process with only {LIBRARY_ENV} set (GPU {args.eval_gpu})")
+    root = children.common["hipblaslt"]
+    print(f"      timing with {Path(root) / BENCH}" if root else
+          "      no hipblaslt-bench found (--hipblaslt); reporting selection and accuracy only")
     sizes = [{"key": size_key(p), "arch": arch, "problem": asdict(p)}
              for arch, p, _, _ in mapped]
     res = children.run("replay", library_root, {"sizes": sizes})
@@ -294,8 +328,10 @@ def replay(args, library_root, children, outdir):
                    if r.get(n) is not None and r[n] > args.tolerance]
             if "rel_diff" in bad:
                 result = f"WARNING: output differs from the reference (rel {r['rel_diff']:.3g})"
-            elif r.get("shipped_us") is None:
+            elif r.get("shipped_rel_diff") is None:
                 result = "user kernel (hipBLASLt ships no kernel to compare with)"
+            elif r.get("speedup") is None:
+                result = "user kernel (not timed)"
             else:
                 result = f"user kernel, {r['speedup']:.2f}x vs shipped"
         else:
@@ -308,8 +344,8 @@ def replay(args, library_root, children, outdir):
                          selected_index=r.get("index"), shipped_us=r.get("shipped_us"),
                          selected_us=r.get("selected_us"), speedup_vs_shipped=r.get("speedup"),
                          rel_diff=r.get("rel_diff"), result=result))
-    print("times are GPU-event us/call over back-to-back calls with rotating inputs; outputs "
-          "are compared with a host reference.")
+    print("times are hipblaslt-bench us/call, measured as Geko measures; outputs are compared "
+          "with a host reference.")
     with open(outdir / "replay.csv", "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=list(rows[0]))
         w.writeheader()
@@ -369,7 +405,11 @@ def main(args):
           f"in {len(payloads)} payload(s)")
 
     children = Children(args, outdir)
-    step(2, f"measuring against today's selection through hipBLASLt (GPU {args.eval_gpu})")
+    step(2, f"checking each tuned kernel against today's selection (GPU {args.eval_gpu})")
+    root = children.common["hipblaslt"]
+    print(f"      timing with {Path(root) / BENCH}" if root else
+          "      no hipblaslt-bench found (--hipblaslt); a size that already has a user "
+          "kernel cannot be compared")
     candidates = [e for e in entries if "outcome" not in e]
     if kept_n and not payloads:
         return f"Geko kept kernels but left no payload under {geko_dir / 'build/library'}"
@@ -452,9 +492,30 @@ def worker(stage, plan_file, out_file):
     def rel_diff(got, ref):
         return float(np.abs(got - ref).max() / max(np.abs(ref).max(), 1e-30))
 
-    def timed(uk, p, algos):
-        return uk.time(p, algos, rotating=plan["rotating_mb"] << 20, warmup=plan["warmup"],
-                       iters=plan["iters"], passes=plan["passes"], workspace=max_ws)
+    def bench_us(name, kernels):
+        """hipblaslt-bench us/call of each (problem, solution index), or None where it
+        reports nothing. Geko's own routine: a short probe sets the iterations so the
+        warmup and the timed run each last bench_duration. Runs in this process's
+        environment, so the bench sees this stage's library and GPU.
+        """
+        from geko import bench
+        from geko.bench import log
+
+        rows = log.update([{
+            "transA": p.trans[0], "transB": p.trans[1], "batch_count": p.batch,
+            "M": p.m, "N": p.n, "K": p.k, "a_type": TENSILE_TYPES[p.a_type][1],
+            "b_type": TENSILE_TYPES[p.b_type][1], "c_type": TENSILE_TYPES[p.c_type][1],
+            "d_type": TENSILE_TYPES[p.c_type][1], "compute_type": "f32_r", "alpha": 1.0,
+        } for p, _ in kernels], beta=False, flush=True)[0]
+        for row, (_, index) in zip(rows, kernels):
+            row.update(algo_method=2, solution_index=index)  # 2: by index
+        d = Path(plan["bench_dir"])
+        d.mkdir(parents=True, exist_ok=True)
+        log.dump(rows, d / f"{name}.yaml")
+        df = bench.standard_benchmark(plan["hipblaslt"], d / f"{name}.yaml", d / f"{name}.out",
+                                      devices=[0], duration=plan["bench_duration"])
+        us = log.realign_rows(rows, df)["us"]
+        return [float(u) if u == u and u > 0 else None for u in us]
 
     def choices(uk, p):
         """(today's selection, whether it is a user kernel, the shipped selection)."""
@@ -497,10 +558,28 @@ def worker(stage, plan_file, out_file):
             n = sum(len(v[1]) for v in registered.values())
             print(f"      registered {n} tuned kernel(s) from {len(registered)} payload(s) "
                   "in a scratch library", flush=True)
+            pending = []  # sizes whose current kernel is a user kernel: timed below
+
+            def decide(r, current_us, tuned_us):
+                sp = r["speedup_vs_current"] = current_us / tuned_us
+                r["current_us"] = current_us
+                if sp < plan["min_speedup"]:
+                    r.update(outcome="kept", result=f"kept {r['current']}: tuned is {sp:.4f}x "
+                             f"vs it, below --min-speedup {plan['min_speedup']}")
+                else:
+                    r.update(outcome="add", result=f"{sp:.2f}x faster than {r['current']}")
+
+            def show(p, r):
+                now = (f"  user kernel {r['current_us']:8.2f}"
+                       if r.get("current") == "user kernel" and "current_us" in r else "")
+                tuned = r.get("tuned_bench_us", r.get("tuned_us"))
+                print(f"      {label(p):40} shipped {fmt(r.get('shipped_us')):>8}{now}  tuned "
+                      f"{fmt(tuned):>8} us  -> {r['result']}", flush=True)
+
             for e in plan["entries"]:
                 g, p = e["geko"], Problem(**e["geko"]["problem"])
                 r = out[e["key"]] = {}
-                cur, cur_user, shipped = choices(uk, p)
+                cur, cur_user, _ = choices(uk, p)
                 hit = find(registered, p, g["kernel"])
                 if cur is None:
                     r.update(outcome="skipped",
@@ -513,46 +592,55 @@ def worker(stage, plan_file, out_file):
                     continue
                 dat, shard = hit
                 idx = registered[dat][1][shard]
-                tuned = MatmulAlgo.from_index(idx, max_ws)
-                which = {"shipped": shipped, "current": cur if cur_user else None,
-                         "tuned": tuned}
-                which = {k: a for k, a in which.items() if a is not None}
                 try:
-                    ref, (got,) = uk.run(p, [tuned], max_ws)
-                    times = dict(zip(which, timed(uk, p, list(which.values()))))
+                    ref, (got,) = uk.run(p, [MatmulAlgo.from_index(idx, max_ws)], max_ws)
                 except Exception as ex:  # noqa: BLE001
                     r.update(outcome="error", result=f"error: {ex}")
                     print(f"      {label(p):40} {r['result']}", flush=True)
                     continue
-                t_tuned = times["tuned"]
-                t_shipped = times.get("shipped")
-                t_cur = times.get("current", t_shipped)
                 rel = rel_diff(got, ref)
-                r.update(shipped_us=t_shipped, current="user kernel" if cur_user else "shipped",
-                         current_us=t_cur, current_index=cur.index, tuned_us=t_tuned,
-                         tuned_index=idx, payload=dat, shard=shard,
-                         speedup_vs_current=t_cur / t_tuned,
-                         speedup_vs_shipped=t_shipped / t_tuned if t_shipped else None,
+                r.update(shipped_us=g["shipped_us"], tuned_us=g["tuned_us"],
+                         speedup_vs_shipped=g["shipped_us"] / g["tuned_us"],
+                         current="user kernel" if cur_user else "shipped",
+                         current_index=cur.index, tuned_index=idx, payload=dat, shard=shard,
                          rel_diff=rel)
-                sp = r["speedup_vs_current"]
                 if not g["kept"]:
-                    r.update(outcome="skipped", result=f"skipped: Geko found nothing faster "
-                             f"than shipped ({g['uplift_pct']:+.1f}%)")
+                    r.update(outcome="skipped", result=f"skipped: {not_kept_reason(g)}")
                 elif rel > plan["tolerance"]:
                     r.update(outcome="rejected",
                              result=f"rejected: output differs from the reference (rel {rel:.3g})")
                 elif cur_user and cur.index == idx:
                     r.update(outcome="kept", result="kept: this kernel is already in the library")
-                elif sp < plan["min_speedup"]:
-                    r.update(outcome="kept",
-                             result=f"kept {r['current']}: tuned is {sp:.2f}x vs it, below "
-                                    f"--min-speedup {plan['min_speedup']}")
+                elif cur_user:
+                    pending.append((e["key"], p, cur.index, idx))
+                    continue
                 else:
-                    r.update(outcome="add", result=f"{sp:.2f}x faster than {r['current']}")
-                now = f"  user kernel {t_cur:8.2f}" if cur_user else ""
-                vs = f"  ({t_shipped / t_tuned:.2f}x vs shipped)" if t_shipped else ""
-                print(f"      {label(p):40} shipped {fmt(t_shipped):>8}{now}  tuned "
-                      f"{t_tuned:8.2f} us{vs}  -> {r['result']}", flush=True)
+                    decide(r, g["shipped_us"], g["tuned_us"])
+                show(p, r)
+
+            if pending and not plan["hipblaslt"]:
+                for key, p, _, _ in pending:
+                    out[key].update(outcome="error", result="error: comparing with the user "
+                                    "kernel already there needs hipblaslt-bench; pass --hipblaslt")
+                    show(p, out[key])
+            elif pending:
+                print(f"      timing {len(pending)} size(s) that already have a user kernel "
+                      "with hipblaslt-bench", flush=True)
+                try:
+                    before = bench_us("current", [(p, c) for _, p, c, _ in pending])
+                    after = bench_us("tuned", [(p, t) for _, p, _, t in pending])
+                except Exception as ex:  # noqa: BLE001
+                    before = after = [None] * len(pending)
+                    print(f"      hipblaslt-bench failed: {ex}", flush=True)
+                for (key, p, _, _), b, a in zip(pending, before, after):
+                    r = out[key]
+                    if b is None or a is None:
+                        r.update(outcome="error", result="error: hipblaslt-bench timed nothing; "
+                                 f"see {plan['bench_dir']}")
+                    else:
+                        r["tuned_bench_us"] = a
+                        decide(r, b, a)
+                    show(p, r)
 
         elif stage == "add":
             root = user_kernel_library()
@@ -585,6 +673,7 @@ def worker(stage, plan_file, out_file):
 
         elif stage == "replay":
             registered, mapped = uk.counts()
+            to_time = []
             for s in plan["sizes"]:
                 p = Problem(**s["problem"])
                 r = out[s["key"]] = {"user": False}
@@ -598,17 +687,27 @@ def worker(stage, plan_file, out_file):
                 algos = [cur] + ([shipped] if shipped else [])
                 try:
                     ref, outs = uk.run(p, algos, max_ws)
-                    times = timed(uk, p, algos)
                 except Exception as ex:  # noqa: BLE001
                     r["error"] = f"error: {ex}"
                     continue
-                r.update(user=True, selected_us=times[0], rel_diff=rel_diff(outs[0], ref))
+                r.update(user=True, rel_diff=rel_diff(outs[0], ref))
                 if shipped:
-                    r.update(shipped_us=times[1], speedup=times[1] / times[0],
-                             shipped_rel_diff=rel_diff(outs[1], ref))
+                    r["shipped_rel_diff"] = rel_diff(outs[1], ref)
+                    to_time.append((s["key"], p, cur.index, shipped.index))
                 print(f"      {label(p):40} user kernel {cur.index}", flush=True)
             print(f"      loaded {registered} kernel(s) and {mapped} mapping(s) at device init",
                   flush=True)
+            if to_time and plan["hipblaslt"]:
+                print(f"      timing {len(to_time)} size(s) with hipblaslt-bench", flush=True)
+                try:
+                    sel = bench_us("selected", [(p, u) for _, p, u, _ in to_time])
+                    ship = bench_us("shipped", [(p, s) for _, p, _, s in to_time])
+                except Exception as ex:  # noqa: BLE001
+                    sel = ship = [None] * len(to_time)
+                    print(f"      hipblaslt-bench failed: {ex}", flush=True)
+                for (key, _, _, _), u, s in zip(to_time, sel, ship):
+                    out[key].update(selected_us=u, shipped_us=s,
+                                    speedup=s / u if u and s else None)
 
     Path(out_file).write_text(json.dumps(out, indent=2))
     return 0
@@ -640,12 +739,13 @@ def parse_args():
     ap.add_argument("--replay", action="store_true",
                     help="tune nothing and only read the library: in a fresh process, report "
                          "what the heuristic selects for every size the library maps")
-    ap.add_argument("--warmup", type=int, default=50)
-    ap.add_argument("--iters", type=int, default=1000)
-    ap.add_argument("--passes", type=int, default=3)
-    ap.add_argument("--rotating", type=int, default=512, metavar="MB",
-                    help="rotate inputs through at least this much memory (default: 512, "
-                         "as Geko's benchmark does)")
+    ap.add_argument("--hipblaslt", default=None, metavar="PATH",
+                    help="hipBLASLt checkout whose build/release/clients/hipblaslt-bench "
+                         "times kernels (default: Geko's --hipblaslt, else "
+                         "$GEKO_HIPBLASLT_PATH)")
+    ap.add_argument("--bench-duration", type=float, default=1.0, metavar="S",
+                    help="seconds hipblaslt-bench spends warming up, and again timing, each "
+                         "kernel (default: 1.0, as Geko does)")
     ap.add_argument("--max-workspace", type=int, default=128 * 1024 * 1024)
     ap.add_argument("--_stage", help=argparse.SUPPRESS)
     ap.add_argument("--_plan", help=argparse.SUPPRESS)

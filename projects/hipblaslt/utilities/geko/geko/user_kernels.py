@@ -75,6 +75,7 @@ HIPBLASLT_MATMUL_DESC_TRANSA, HIPBLASLT_MATMUL_DESC_TRANSB = 0, 1
 HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT, HIPBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET = 0, 1
 HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES = 1
 HIP_MEMCPY_H2D, HIP_MEMCPY_D2H = 1, 2
+HIP_STREAM_CAPTURE_MODE_THREAD_LOCAL = 1
 
 LIBRARY_ENV = "HIPBLASLT_USER_KERNEL_LIBRARY"
 USER_KERNEL_SYMBOLS = (
@@ -190,6 +191,11 @@ class HipBLASLt:
                                "hipEventDestroy": [P], "hipEventRecord": [P, P],
                                "hipEventSynchronize": [P],
                                "hipEventElapsedTime": [ctypes.POINTER(ctypes.c_float), P, P],
+                               "hipStreamCreate": [pP], "hipStreamDestroy": [P],
+                               "hipStreamSynchronize": [P], "hipStreamBeginCapture": [P, I],
+                               "hipStreamEndCapture": [P, pP], "hipGraphDestroy": [P],
+                               "hipGraphInstantiate": [pP, P, P, P, S],
+                               "hipGraphLaunch": [P, P], "hipGraphExecDestroy": [P],
                                }.items():
             fn = getattr(self.hip, name)
             fn.argtypes, fn.restype = argtypes, ctypes.c_int
@@ -483,12 +489,12 @@ class UserKernels:
                 for ptr in ptrs:
                     hb.hip_call("hipFree", ptr)
 
-    def _matmul(self, desc, lay, abcd, algo, ws, workspace):
+    def _matmul(self, desc, lay, abcd, algo, ws, workspace, stream=None):
         alpha, beta = ctypes.c_float(1.0), ctypes.c_float(0.0)
         A, B, C, D = abcd
         self.hb.call("hipblasLtMatmul", self.handle, desc, ctypes.byref(alpha),
                      A, lay[0], B, lay[1], ctypes.byref(beta), C, lay[2], D, lay[3],
-                     ctypes.byref(algo), ws, workspace, None)
+                     ctypes.byref(algo), ws, workspace, stream)
 
     def run(self, p: Problem, algos: list[MatmulAlgo], workspace: int = 128 << 20):
         """D = A * B with each algo on the same small-integer inputs.
@@ -517,35 +523,77 @@ class UserKernels:
         Each pass times ``iters`` back-to-back calls with GPU events. The calls cycle
         through copies of the operands totalling at least ``rotating`` bytes, so
         operands come from memory rather than cache, as in hipblaslt-bench and Geko.
+
+        The calls are captured once into a HIP graph and each pass replays it.
+        Launching from Python costs several microseconds per kernel, more than a
+        small GEMM runs, so timing direct launches would measure Python instead.
         """
         hb = self.hb
         per_set = sum(r * c * p.batch * TENSILE_TYPES[t][3] for r, c, t in p.shapes)
         sets = max(1, -(-rotating // per_set))
         times = []
         with self._descriptors(p, workspace) as (desc, lay, _), \
-                self._buffers(p, sets, workspace) as (_, _, _, bufs, ws):
-            start, stop = ctypes.c_void_p(), ctypes.c_void_p()
-            hb.hip_call("hipEventCreate", ctypes.byref(start))
-            hb.hip_call("hipEventCreate", ctypes.byref(stop))
-            try:
-                for algo in algos:
-                    for i in range(warmup):
-                        self._matmul(desc, lay, bufs[i % sets], algo, ws, workspace)
+                self._buffers(p, sets, workspace) as (_, _, _, bufs, ws), \
+                self._hip_objects() as (stream, start, stop):
+            for algo in algos:
+                for i in range(warmup):
+                    self._matmul(desc, lay, bufs[i % sets], algo, ws, workspace, stream)
+                hb.hip_call("hipStreamSynchronize", stream)
+                graph = self._capture(stream, lambda: [
+                    self._matmul(desc, lay, bufs[i % sets], algo, ws, workspace, stream)
+                    for i in range(iters)])
+                try:
                     best = float("inf")
                     for _ in range(passes):
-                        hb.hip_call("hipEventRecord", start, None)
-                        for i in range(iters):
-                            self._matmul(desc, lay, bufs[i % sets], algo, ws, workspace)
-                        hb.hip_call("hipEventRecord", stop, None)
+                        hb.hip_call("hipEventRecord", start, stream)
+                        hb.hip_call("hipGraphLaunch", graph, stream)
+                        hb.hip_call("hipEventRecord", stop, stream)
                         hb.hip_call("hipEventSynchronize", stop)
                         ms = ctypes.c_float()
                         hb.hip_call("hipEventElapsedTime", ctypes.byref(ms), start, stop)
                         best = min(best, ms.value * 1000 / iters)
-                    times.append(best)
+                finally:
+                    hb.hip_call("hipGraphExecDestroy", graph)
+                times.append(best)
+        return times
+
+    @contextlib.contextmanager
+    def _hip_objects(self):
+        """A stream and two events on it, destroyed on exit."""
+        hb = self.hb
+        stream, start, stop = ctypes.c_void_p(), ctypes.c_void_p(), ctypes.c_void_p()
+        hb.hip_call("hipStreamCreate", ctypes.byref(stream))
+        try:
+            hb.hip_call("hipEventCreate", ctypes.byref(start))
+            try:
+                hb.hip_call("hipEventCreate", ctypes.byref(stop))
+                try:
+                    yield stream, start, stop
+                finally:
+                    hb.hip_call("hipEventDestroy", stop)
             finally:
                 hb.hip_call("hipEventDestroy", start)
-                hb.hip_call("hipEventDestroy", stop)
-        return times
+        finally:
+            hb.hip_call("hipStreamDestroy", stream)
+
+    def _capture(self, stream, launch) -> ctypes.c_void_p:
+        """An executable graph of what ``launch()`` puts on ``stream``.
+
+        The caller destroys it with hipGraphExecDestroy.
+        """
+        hb, graph, exe = self.hb, ctypes.c_void_p(), ctypes.c_void_p()
+        hb.hip_call("hipStreamBeginCapture", stream, HIP_STREAM_CAPTURE_MODE_THREAD_LOCAL)
+        try:
+            launch()
+        finally:
+            ended = hb.hip.hipStreamEndCapture(stream, ctypes.byref(graph))
+        if ended != 0:
+            raise HipBLASLtError(f"hipStreamEndCapture returned hipError {ended}")
+        try:
+            hb.hip_call("hipGraphInstantiate", ctypes.byref(exe), graph, None, None, 0)
+        finally:
+            hb.hip_call("hipGraphDestroy", graph)
+        return exe
 
 
 def _round_to(x, ty: str):
