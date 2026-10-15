@@ -21,7 +21,8 @@ The supplements here only **ADD** rules or **TIGHTEN** thresholds. They never re
 - **Target branch:** `develop`.
 - **Paths:** `.github/workflows/**`, `.github/actions/**`, `.github/scripts/**`, `.github/instructions/**`, `.github/CODEOWNERS`, `.github/labeler.yml`, `.github/repos-config.json`, and any file a workflow runs (for example `tools/libraries_pr_bot/**`).
 - Component CI that lives outside `.github/` (a project's own `.github/`, `tox.ini`, `test_categories.yaml`) is in scope when the PR also changes how a root workflow calls it.
-- Changes outside these follow the base bar only.
+- A PR **outside** `.github/` that moves, renames, or deletes a file that CI refers to also gets the reference check below. That covers a `paths:` filter, a `COMPONENTS` entry, a `CODEOWNERS` line, a tox or `test_categories.yaml` path, and a script a workflow runs. Such a PR touches no CI file, so nothing else will flag it.
+- Other changes follow the base bar only.
 
 ---
 
@@ -71,6 +72,8 @@ Do not add a workflow file for each test. The default is to put a test where its
 ### Adds: trigger scope
 
 - Run a workflow only when relevant paths change (a `paths:` filter, or the `changes` job and `component_ci.py`). Include the workflow's own file in the filter so editing it re-runs it.
+- **Every pattern must match something.** For each entry you add or edit in a `paths:` filter, `COMPONENTS`, or `CODEOWNERS`, confirm at least one tracked file matches it (`git ls-files`, with the same glob rules; `component_ci.py` uses `fnmatch`, where `*` also crosses `/`). A pattern that matches nothing never fires, and nothing reports it.
+- **Moves and deletes update CI in the same PR.** When a PR renames, moves, or deletes files, search `.github/`, tox files, and `CODEOWNERS` for the old paths and update them in that PR. Also check open PRs that add references to those paths; neither PR's own CI can see the other.
 - A required check must report on every PR. A job skipped by a path filter can leave a required status pending. Show how the check reports when it is skipped, or do not make it required.
 - `pull_request_target` workflows must never check out or execute PR head code (see the warning in `libraries-pr-bot.yml`). Any new `pull_request_target` or secret-using trigger is `BLOCKING` until that is shown.
 
@@ -106,6 +109,7 @@ When reviewing a CI PR, report each of these as pass, warn, or fail with a link 
 | Runner sized for the work; `ci-env` prod runner not used by default | `IMPORTANT` (`BLOCKING` for a new light workflow) |
 | Checkout and setup cost proportionate (sparse, shallow, no needless container) | `SUGGESTION` (`IMPORTANT` if setup dominates) |
 | Trigger scope, own file in `paths:`, required check reports when skipped | `IMPORTANT` |
+| Every new or edited path pattern matches an existing file; a PR that moves or deletes files updated all CI references to them | `IMPORTANT` (`BLOCKING` when the stale entry was a gating check's only trigger) |
 | Shared-state change has an impact statement; no value emptied silently | `BLOCKING` |
 | `pull_request_target` or secrets do not run PR head code | `BLOCKING` |
 | `timeout-minutes` and `concurrency` set on PR workflows | `SUGGESTION` |
@@ -125,3 +129,5 @@ Drop the regression/test obligations (M1/M2), allow disabling tests to green CI 
 [PR #12185](https://github.com/ROCm/rocm-libraries/pull/12185) added `component-ci-library-uniqueness.yml` for a CPU-only uniqueness check, wired through `component-ci.yml` on the `ci-env` prod runner. A reviewer later measured 3 minutes in total for 7 seconds of tests and asked for a smaller runner or an existing workflow. The overlay flags this up front: `ci-new-workflow` with no stated reason, a prod runner for light work, and a checkout and container cost out of proportion to the work.
 
 [PR #13623](https://github.com/ROCm/rocm-libraries/pull/13623) (an automated TheRock reference bump) changed `baseline-run-id` in `ci-env` from a run ID to an empty string. `therock-multi-arch-ci.yml` treats an empty baseline as "no prebuilt stages" and turns stage reuse off (see its `prebuilt_stages` and `baseline_run_id` inputs), so every pull request rebuilt every stage, not only the stages its diff touched. The bump was reverted in [#13698](https://github.com/ROCm/rocm-libraries/pull/13698), and commit `67a16e4ea5c` records the effect. The bump's own checks were fine; the cost landed on every other PR. That is the `ci-shared-state` case: a value emptied without an impact statement, visible only by looking across projects.
+
+[PR #12185](https://github.com/ROCm/rocm-libraries/pull/12185) also added trigger paths under the old `tensilelite/Tensile/` package directory. [PR #12150](https://github.com/ROCm/rocm-libraries/pull/12150) renamed that package to `tensilelite/tensilelite/` the same day and missed those references. The lane's trigger pointed at a file that no longer existed until [#13399](https://github.com/ROCm/rocm-libraries/pull/13399) ("correct paths missed in #12150") fixed it. Each PR was correct when reviewed, and the rename touched no `.github/` file. The reference check at the move is what catches it.
