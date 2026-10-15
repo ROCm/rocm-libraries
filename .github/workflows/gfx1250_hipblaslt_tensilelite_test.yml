@@ -47,10 +47,6 @@ on:
         description: "Nightly ROCm SDK (rocm package) version to build and test against (empty = the pinned default)"
         type: string
         default: ""
-      send_report:
-        description: "Email the test report as the nightly does (to try the webhook; works with no tests selected)"
-        type: boolean
-        default: false
 
 permissions:
   contents: read
@@ -427,13 +423,13 @@ jobs:
           owner="$(stat -c %u:%g "$GITHUB_WORKSPACE/..")"
           chown -R "$owner" "$GITHUB_WORKSPACE" "$RUNNER_TEMP" 2>/dev/null || true
 
-  # Emails a report after every nightly (or a manual run with send_report), however the
-  # test job ended. A job, not a step, so the webhook secret stays on a GitHub-hosted
+  # Emails a report after every nightly, however the test job ended; manual runs
+  # don't email. A job, not a step, so the webhook secret stays on a GitHub-hosted
   # runner and a report still goes out when the test job never got a runner.
   report:
     name: Nightly report
     needs: gfx1250-tests
-    if: ${{ always() && (github.event_name == 'schedule' || inputs.send_report) }}
+    if: ${{ always() && github.event_name == 'schedule' }}
     permissions:
       contents: read
       actions: read
