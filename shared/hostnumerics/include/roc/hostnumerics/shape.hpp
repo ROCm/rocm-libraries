@@ -56,7 +56,7 @@ class Shape {
 
     // Products use [firstDimension, onePastLastDimension). An empty range has
     // product one; a zero extent makes the product zero even if other extents
-    // would overflow size_t. Nonzero products throw on overflow.
+    // would overflow size_t.
     size_t elementCount(size_t firstDimension, size_t onePastLastDimension) const {
         if (firstDimension > onePastLastDimension || onePastLastDimension > rank()) {
             const std::string reason = firstDimension > onePastLastDimension
@@ -88,15 +88,13 @@ class Shape {
         return Shape(std::move(dimensions));
     }
 
-    // Orders are borrowed for the duration of the call and list dimensions from
-    // slowest to fastest. Identity [0, 1, ...] gives NumPy/C row-major order;
-    // reversed identity gives Fortran order. An empty span selects identity.
-    // Logical enumeration is independent of physical strides.
-    // Converts coordinates to a logical linear index in the selected order.
-    // Throws std::invalid_argument for a rank mismatch and std::out_of_range
-    // for any coordinate outside the shape. Orders list dimensions from slowest to fastest; an
-    // empty order is row-major. Invalid permutations are rejected; a representable index can be
-    // returned even when the total count overflows.
+    // Convert an n-dimensional coordinate to a logical linear index, independently
+    // of physical strides. For shape (2, 3, 5), indices (1, 2, 3), and order
+    // (1, 2, 0), the logical strides are (1, 10, 2), so the index is
+    // 1 * 1 + 2 * 10 + 3 * 2 = 27.
+    // \param indices One coordinate per dimension.
+    // \param order A permutation of dimensions, slowest to fastest. Ascending
+    // dimensions give row-major order (last fastest); empty selects this default.
     size_t linearIndex(std::span<const size_t> indices, std::span<const size_t> order = {}) const {
         validateIndexOrder(order);
         if (indices.size() != rank())
@@ -111,7 +109,8 @@ class Shape {
                                         " in dimension " + std::to_string(dimension) +
                                         " is outside [0, " + std::to_string(extent(dimension)) +
                                         ").");
-            result = checkedElementProduct(result, extent(dimension));
+            result =
+                checkedMultiply(result, extent(dimension), "Tensor shape element count overflow.");
             if (indices[dimension] > std::numeric_limits<size_t>::max() - result)
                 throw std::overflow_error("Tensor linear index overflow.");
             result += indices[dimension];
@@ -122,11 +121,12 @@ class Shape {
         return result;
     }
 
-    // Writes the coordinates for one logical linear index. Throws
-    // std::invalid_argument for a rank mismatch and std::out_of_range when
-    // linearIndex is outside [0, elementCount()). Orders list dimensions from slowest to fastest;
-    // an empty order is row-major. Invalid permutations are rejected; computing the element count
-    // throws if the shape is too large for size_t.
+    // Invert linearIndex: with shape (2, 3, 5) and order (1, 2, 0), index 27
+    // produces coordinates (1, 2, 3).
+    // \param linearIndex Logical index in [0, elementCount()).
+    // \param order A permutation of dimensions, slowest to fastest. Empty
+    // selects row-major order (last fastest).
+    // \param result Output with one entry per dimension.
     void coordinates(size_t linearIndex, std::span<const size_t> order,
                      std::span<size_t> result) const {
         validateIndexOrder(order);
@@ -156,17 +156,14 @@ class Shape {
 
    private:
     size_t checkedElementCount(size_t firstDimension, size_t onePastLastDimension) const {
-        size_t count = 1;
-        bool overflow = false;
+        // A zero anywhere in the selected range makes its exact product zero.
         for (size_t dimension = firstDimension; dimension < onePastLastDimension; ++dimension) {
-            const size_t nextExtent = m_dimensions[dimension];
-            if (nextExtent == 0) return 0;
-            overflow = overflow || count > std::numeric_limits<size_t>::max() / nextExtent;
-            if (!overflow) count *= nextExtent;
+            if (m_dimensions[dimension] == 0) return 0;
         }
-        // Defer the error until all extents have been seen: a later zero makes
-        // the exact product zero even if a preceding partial product overflowed.
-        if (overflow) throw std::overflow_error("Tensor shape element count exceeds size_t.");
+        size_t count = 1;
+        for (size_t dimension = firstDimension; dimension < onePastLastDimension; ++dimension)
+            count = checkedMultiply(count, m_dimensions[dimension],
+                                    "Tensor shape element count exceeds size_t.");
         return count;
     }
 
@@ -185,11 +182,10 @@ class Shape {
         }
     }
 
-    static size_t checkedElementProduct(size_t count, size_t extent) {
-        if (extent == 0) return 0;
-        if (count > std::numeric_limits<size_t>::max() / extent)
-            throw std::overflow_error("Tensor shape element count overflow.");
-        return count * extent;
+    static size_t checkedMultiply(size_t left, size_t right, const char* message) {
+        if (right == 0) return 0;
+        if (left > std::numeric_limits<size_t>::max() / right) throw std::overflow_error(message);
+        return left * right;
     }
 
     std::vector<size_t> m_dimensions;

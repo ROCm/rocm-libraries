@@ -138,6 +138,54 @@ class ShapeTests(unittest.TestCase):
                     shape.coordinates(index),
                     shape.coordinates(index, list(range(shape.rank))),
                 )
+        example = hn.Shape([2, 3, 5])
+        self.assertEqual(example.linear_index([1, 2, 3], [1, 2, 0]), 27)
+        self.assertEqual(example.coordinates(27, [1, 2, 0]), [1, 2, 3])
+
+    def test_large_coordinate_arithmetic(self):
+        # Sample boundary coordinates; Python integers provide an independent
+        # oracle without enumerating SIZE_MAX-sized dimensions or using NumPy's
+        # more restrictive native integer limits.
+        for dimensions in itertools.product((0, 1, 2, SIZE_MAX), repeat=3):
+            shape = hn.Shape(dimensions)
+            count = math.prod(dimensions)
+            for order in itertools.permutations(range(shape.rank)):
+                if count == 0:
+                    indices = [max(extent - 1, 0) for extent in dimensions]
+                    with self.subTest(dimensions=dimensions, order=order):
+                        # Both diagnostics are possible when bounds validation
+                        # and flattening arithmetic encounter different axes.
+                        with self.assertRaises((IndexError, OverflowError)):
+                            shape.linear_index(indices, order)
+                    continue
+                samples = [
+                    sorted({0, min(1, extent - 1), extent - 1}) for extent in dimensions
+                ]
+                for indices in itertools.product(*samples):
+                    expected = sum(
+                        indices[axis]
+                        * math.prod(
+                            dimensions[later] for later in order[position + 1 :]
+                        )
+                        for position, axis in enumerate(order)
+                    )
+                    with self.subTest(
+                        dimensions=dimensions, order=order, indices=indices
+                    ):
+                        if expected > SIZE_MAX:
+                            with self.assertRaises(OverflowError):
+                                shape.linear_index(indices, order)
+                        else:
+                            self.assertEqual(
+                                shape.linear_index(indices, order), expected
+                            )
+                            if count <= SIZE_MAX:
+                                self.assertEqual(
+                                    shape.coordinates(expected, order), list(indices)
+                                )
+                            else:
+                                with self.assertRaises(OverflowError):
+                                    shape.coordinates(expected, order)
 
     def test_projection(self):
         shape = hn.Shape([2, 3, 4])
@@ -153,6 +201,17 @@ class ShapeTests(unittest.TestCase):
 
     def test_coordinate_errors(self):
         shape = hn.Shape([2, 3, 4])
+        scalar = hn.Shape()
+        self.assertEqual(scalar.linear_index([]), 0)
+        self.assertEqual(scalar.coordinates(0), [])
+        for operation in (
+            lambda: scalar.coordinates(0, [0]),
+            lambda: scalar.linear_index([], [0]),
+            lambda: shape.linear_index([], [0]),
+            lambda: shape.linear_index([], [0, 0, 2]),
+        ):
+            with self.assertRaises(ValueError):
+                operation()
         for order in ORDERS:
             with self.assertRaisesRegex(
                 ValueError, "coordinate rank 0 does not match shape rank 3"
@@ -207,6 +266,17 @@ class ShapeTests(unittest.TestCase):
                 shape.coordinates(0, order)
             with self.subTest(order=order), self.assertRaises(TypeError):
                 shape.linear_index([0], order)
+        shape = hn.Shape([2, 3, 5])
+        for axis in (-1, -(2**63)):
+            for operation in (
+                lambda: shape.extent(axis),
+                lambda: shape.project([axis]),
+                lambda: shape.coordinates(0, [0, 1, axis]),
+                lambda: shape.linear_index([0, 0, 0], [0, 1, axis]),
+                lambda: shape.element_count_in_range(axis, 3),
+            ):
+                with self.subTest(axis=axis), self.assertRaises(TypeError):
+                    operation()
 
     def test_tuple_sequence_operations(self):
         for extents in ((), (0,), (2, 3, 2, 5), (SIZE_MAX, 2)):
