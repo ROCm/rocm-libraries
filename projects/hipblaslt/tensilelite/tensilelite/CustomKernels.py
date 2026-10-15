@@ -88,6 +88,7 @@ _METADATA_NAME_TO_SEMANTIC = {
     "SKItersPerWG":           "SKItersPerWG",
     "skGrid":                 "SKGrid",
     "skTiles":                "SKTilesAndSplit",
+    "ESMRuntimeSupported":    "ESMRuntimeSupported",
     "batchOffsetD":           "BatchOffsetD",
     "batchOffsetC":           "BatchOffsetC",
     "batchOffsetA":           "BatchOffsetA",
