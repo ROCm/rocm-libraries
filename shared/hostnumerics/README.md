@@ -74,6 +74,30 @@ Test numerical behavior primarily through the Python API, using independent
 expected results. Keep native core tests in `tests/core_test.cpp` for contracts
 that Python cannot exercise, such as C++ construction and ownership rules.
 
+## Python Shape
+
+`Shape` behaves like an immutable Python tuple of nonnegative extents. Integer
+indexing returns an extent, including negative positions; slicing selects axes
+and returns a new `Shape`. Length, iteration, membership, `count`, `index`, and
+hashing follow tuple semantics. Shape values compare equal to other Shape values
+with the same extents. They do not compare equal to tuples or lists. Mutation,
+concatenation, repetition, and ordering comparisons are not supported.
+
+```python
+shape = Shape([2, 3, 5])
+shape[-1]       # 5
+shape[1:]       # Shape((3, 5))
+shape[::-1]     # Shape((5, 3, 2))
+tuple(shape)    # (2, 3, 5)
+len(shape)      # 3
+Shape(range(20))[0:16:5]  # Shape((0, 5, 10, 15))
+```
+
+Slicing a Shape selects dimensions, rather than positions within each dimension.
+An empty Shape has length zero and represents a rank-zero scalar with one
+element. Shape-specific operations such as `element_count`, `project`, and
+coordinate conversion retain their logical shape semantics.
+
 ## Build and test
 
 The standalone build requires CMake 3.25.2 or newer, a C++20 compiler, and Ninja.
