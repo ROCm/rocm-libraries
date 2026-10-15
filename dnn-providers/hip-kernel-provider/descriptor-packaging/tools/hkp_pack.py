@@ -35,8 +35,9 @@ def _split_arches(values):
 def _parse_args(argv):
     p = argparse.ArgumentParser(
         prog="hkp_pack",
-        description="Compile authored hip and rocKE UKDs, prune per arch, and "
-        "pack a per-arch kpack release tree for the hip-kernel-provider.",
+        description="Compile authored hip and rocKE UKDs, pack authored hsaco code "
+        "objects as-is without compiling, prune per arch, and pack a per-arch "
+        "kpack release tree for the hip-kernel-provider.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "environment:\n"
@@ -79,7 +80,8 @@ def _parse_args(argv):
     p.add_argument(
         "--source-root",
         required=True,
-        help="The authored source root (KDP + generic JSON + HIP sources). "
+        help="The authored source root (KDP + generic JSON + HIP sources + prebuilt "
+        "hsaco code objects, which are packed without compiling). "
         "Walked recursively; child folders scope the content (e.g. hip/, "
         "rocKE/, per-integration folders) and each descriptor's authored "
         "subpath is preserved into the staged and installed trees. Producer "
@@ -104,9 +106,11 @@ def _parse_args(argv):
     )
     p.add_argument(
         "--inter-root",
-        default=None,
-        help="Build-only intermediate root (never shipped). Defaults beside "
-        "out-root.",
+        required=True,
+        help="Build-only intermediate root (never shipped). Required: the caller "
+        "owns where compile scratch lands. Deriving it from --out-root would put "
+        "scratch inside whatever tree the output is written to, which is now a "
+        "staged, installable directory.",
     )
     p.add_argument(
         "--kpack-python-dir",
@@ -124,11 +128,37 @@ def _parse_args(argv):
         "longer holds their kernels. Defaults to the shipped group.",
     )
     p.add_argument(
+        "--source-label",
+        required=True,
+        help="The name of the build rule that packs this root. Recorded in "
+        "each pass-through descriptor's provenance, so a reader of the staged "
+        "tree can find the invocation that wrote the folder.",
+    )
+    p.add_argument(
         "--rocke-wheel-stamp",
         default=None,
         help="Path to the rocke wheel content-digest stamp. Its digest is "
         "recorded in each rocKE UKD's provenance, so a shipped kernel names "
         "the wheel that produced it.",
+    )
+    p.add_argument(
+        "--exclude-folder",
+        action="append",
+        default=[],
+        metavar="NAME",
+        help="A top-level child folder of the source root that this build does "
+        "not pack (a descriptor family whose build flag is off), matched "
+        "case-insensitively. A name that matches no folder is ignored. "
+        "Repeatable.",
+    )
+    p.add_argument(
+        "--disable-kind",
+        action="append",
+        default=[],
+        metavar="KIND",
+        help="A kernel_source kind this build has no producer for. Its UKDs are "
+        "pruned like arch-pruned ones, and a KDP left with none is dropped. "
+        "Repeatable; an unknown kind is an error.",
     )
     return p.parse_args(argv)
 
@@ -142,9 +172,12 @@ def main(argv=None):
         out_root=Path(args.out_root),
         hipcc=args.hipcc,
         rocm_kpack_dir=args.kpack_python_dir,
-        inter_root=Path(args.inter_root) if args.inter_root else None,
+        inter_root=Path(args.inter_root),
         rocke_wheel_stamp=args.rocke_wheel_stamp,
         group=args.group,
+        source_label=args.source_label,
+        exclude_folders=tuple(args.exclude_folder),
+        disabled_kinds=tuple(args.disable_kind),
     )
     return 0
 

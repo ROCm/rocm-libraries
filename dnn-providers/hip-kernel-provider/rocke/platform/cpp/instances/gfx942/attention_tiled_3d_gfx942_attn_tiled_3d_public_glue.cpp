@@ -101,9 +101,9 @@ static void rocke_attn3d_set_err_buf(char* err, size_t err_cap, const char* msg)
 static bool rocke_attn3d_narrow_k_available(const rocke_archtarget_t* t)
 {
     const rocke_mmaop_t* f16
-        = rocke_archtarget_op_for_shape(t, "mma", "f16", "f16", "fp32", 16, 16, 16);
+        = rocke_archtarget_op_for_shape(t, "mma", "f16", "f16", "fp32", 16, 16, 16, nullptr);
     const rocke_mmaop_t* bf16
-        = rocke_archtarget_op_for_shape(t, "mma", "bf16", "bf16", "fp32", 16, 16, 16);
+        = rocke_archtarget_op_for_shape(t, "mma", "bf16", "bf16", "fp32", 16, 16, 16, nullptr);
     return f16 != NULL && bf16 != NULL;
 }
 
@@ -112,7 +112,8 @@ static bool rocke_attn3d_narrow_k_available(const rocke_archtarget_t* t)
  * exposed by the C arch surface -- see the ARCH GATE NOTE above). */
 static bool rocke_attn3d_wide_k_available(const rocke_archtarget_t* t)
 {
-    return rocke_archtarget_op_for_shape(t, "mma", "f16", "f16", "fp32", 16, 16, 32) != NULL;
+    return rocke_archtarget_op_for_shape(t, "mma", "f16", "f16", "fp32", 16, 16, 32, nullptr)
+           != NULL;
 }
 
 /* ===================================================================== *
@@ -230,7 +231,8 @@ int rocke_unified_attention_3d_tiled_spec_kernel_name(
     const rocke_unified_attention_3d_tiled_spec_t* s, char* buf, size_t cap)
 {
     /* kernel_name_join("rocke_uattn3d_tiled_gfx942", d.., b.., h..kv.., seg..,
-     *   dtype, kv<...> if kv_storage_dtype else "", "sinks" if use_sinks else "",
+     *   dtype, kv<...> if kv_storage_dtype else "", "fnuz" if kv_storage_dtype
+     *   else "", "sinks" if use_sinks else "",
      *   "sw<sw>" if sw>0 else "", "softcap" if has_softcap else "",
      *   "alibi" if use_alibi else "", "qqb" if use_qq_bias else "",
      *   "hoist" if use_invariant_hoist else "", "wkv" if use_wide_kv_load else "")
@@ -269,6 +271,9 @@ int rocke_unified_attention_3d_tiled_spec_kernel_name(
     {
         snprintf(kv_part, sizeof(kv_part), "kv%s", s->kv_storage_dtype);
         parts[np++] = kv_part;
+        /* Python emits "fnuz" under the *same* condition as the kv part, not
+         * under a format test, so it is tagged here rather than separately. */
+        parts[np++] = "fnuz";
     }
     if(s->use_sinks)
     {
@@ -846,8 +851,10 @@ bool rocke_gfx942_attention_tiled_3d_ctx_init(
  *  waves_per_eu kernel attrs are set here (Python lines 276-278) before the
  *  param declarations.
  * ===================================================================== */
-rocke_kernel_def_t* rocke_build_unified_attention_3d_tiled_gfx942(
-    rocke_ir_builder_t* b, const rocke_unified_attention_3d_tiled_spec_t* spec, const char* arch)
+static rocke_kernel_def_t* build_segment_gfx942(rocke_ir_builder_t* b,
+                                                const rocke_unified_attention_3d_tiled_spec_t* spec,
+                                                const char* arch,
+                                                bool strided_kv)
 {
     return ckc::guard_builder(b, [&]() -> rocke_kernel_def_t* {
         rocke_gfx942_attention_tiled_3d_build_ctx_t ctx;
@@ -867,6 +874,16 @@ rocke_kernel_def_t* rocke_build_unified_attention_3d_tiled_gfx942(
             return NULL;
         }
 
+        if(strided_kv
+           && (spec->kv_storage_dtype != NULL || spec->use_i64_kv_addr || spec->use_wide_kv_load))
+        {
+            rocke_i_set_err(
+                b,
+                ROCKE_ERR_VALUE,
+                "strided KV requires fp16/bf16 async loads without paged i64 addressing");
+            return NULL;
+        }
+
         /* Name the kernel from spec.kernel_name() (Python b = IRBuilder(
          * spec.kernel_name())). The C entry reuses a caller-supplied builder. */
         if(b->kernel != NULL)
@@ -879,6 +896,16 @@ rocke_kernel_def_t* rocke_build_unified_attention_3d_tiled_gfx942(
                     ROCKE_ERR_VALUE,
                     "build_unified_attention_3d_tiled_gfx942: kernel_name encode failed");
                 return NULL;
+            }
+            if(strided_kv)
+            {
+                const size_t len = strlen(name);
+                if(len + sizeof("_stridedkv") > sizeof(name))
+                {
+                    rocke_i_set_err(b, ROCKE_ERR_VALUE, "strided KV kernel name too long");
+                    return NULL;
+                }
+                memcpy(name + len, "_stridedkv", sizeof("_stridedkv"));
             }
             b->kernel->name = rocke_arena_strdup(&b->arena, name);
             if(b->kernel->name == NULL)
@@ -893,6 +920,8 @@ rocke_kernel_def_t* rocke_build_unified_attention_3d_tiled_gfx942(
         {
             return NULL;
         }
+
+        ctx.strided_kv = strided_kv;
 
         /* b.kernel.attrs["max_workgroup_size"] = THREADS (line 276). */
         if(b->kernel != NULL)
@@ -926,6 +955,18 @@ rocke_kernel_def_t* rocke_build_unified_attention_3d_tiled_gfx942(
         }
         return b->kernel; /* return b.kernel (line 969) */
     });
+}
+
+rocke_kernel_def_t* rocke_build_unified_attention_3d_tiled_gfx942(
+    rocke_ir_builder_t* b, const rocke_unified_attention_3d_tiled_spec_t* spec, const char* arch)
+{
+    return build_segment_gfx942(b, spec, arch, false);
+}
+
+rocke_kernel_def_t* rocke_build_unified_attention_3d_tiled_strided_gfx942(
+    rocke_ir_builder_t* b, const rocke_unified_attention_3d_tiled_spec_t* spec, const char* arch)
+{
+    return build_segment_gfx942(b, spec, arch, true);
 }
 
 /* ===================================================================== *

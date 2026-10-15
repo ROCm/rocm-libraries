@@ -1,0 +1,187 @@
+/*
+ *  Copyright 2008-2013 NVIDIA Corporation
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ */
+
+#include <thrust/functional.h>
+#include <thrust/iterator/retag.h>
+#include <thrust/logical.h>
+
+#include <unittest/unittest.h>
+
+template <class Vector>
+void TestAllOf()
+{
+  using T = typename Vector::value_type;
+
+  Vector v(3, T{1});
+
+  ASSERT_EQUAL(thrust::all_of(v.begin(), v.end(), ::internal::identity{}), true);
+
+  v[1] = T{0};
+
+  ASSERT_EQUAL(thrust::all_of(v.begin(), v.end(), ::internal::identity{}), false);
+
+  ASSERT_EQUAL(thrust::all_of(v.begin() + 0, v.begin() + 0, ::internal::identity{}), true);
+  ASSERT_EQUAL(thrust::all_of(v.begin() + 0, v.begin() + 1, ::internal::identity{}), true);
+  ASSERT_EQUAL(thrust::all_of(v.begin() + 0, v.begin() + 2, ::internal::identity{}), false);
+  ASSERT_EQUAL(thrust::all_of(v.begin() + 1, v.begin() + 2, ::internal::identity{}), false);
+}
+DECLARE_VECTOR_UNITTEST(TestAllOf);
+
+template <class InputIterator, class Predicate>
+bool all_of(my_system& system, InputIterator, InputIterator, Predicate)
+{
+  system.validate_dispatch();
+  return false;
+}
+
+void TestAllOfDispatchExplicit()
+{
+  thrust::device_vector<int> vec(1);
+
+  my_system sys(0);
+  thrust::all_of(sys, vec.begin(), vec.end(), 0);
+
+  ASSERT_EQUAL(true, sys.is_valid());
+}
+DECLARE_UNITTEST(TestAllOfDispatchExplicit);
+
+template <class InputIterator, class Predicate>
+bool all_of(my_tag, InputIterator first, InputIterator, Predicate)
+{
+  *first = 13;
+  return false;
+}
+
+void TestAllOfDispatchImplicit()
+{
+  thrust::device_vector<int> vec(1);
+
+  thrust::all_of(thrust::retag<my_tag>(vec.begin()), thrust::retag<my_tag>(vec.end()), 0);
+
+  ASSERT_EQUAL(13, vec.front());
+}
+DECLARE_UNITTEST(TestAllOfDispatchImplicit);
+
+template <class Vector>
+void TestAnyOf()
+{
+  using T = typename Vector::value_type;
+
+  Vector v(3, T{1});
+
+  ASSERT_EQUAL(thrust::any_of(v.begin(), v.end(), ::internal::identity{}), true);
+
+  v[1] = 0;
+
+  ASSERT_EQUAL(thrust::any_of(v.begin(), v.end(), ::internal::identity{}), true);
+
+  ASSERT_EQUAL(thrust::any_of(v.begin() + 0, v.begin() + 0, ::internal::identity{}), false);
+  ASSERT_EQUAL(thrust::any_of(v.begin() + 0, v.begin() + 1, ::internal::identity{}), true);
+  ASSERT_EQUAL(thrust::any_of(v.begin() + 0, v.begin() + 2, ::internal::identity{}), true);
+  ASSERT_EQUAL(thrust::any_of(v.begin() + 1, v.begin() + 2, ::internal::identity{}), false);
+}
+DECLARE_VECTOR_UNITTEST(TestAnyOf);
+
+template <class InputIterator, class Predicate>
+bool any_of(my_system& system, InputIterator, InputIterator, Predicate)
+{
+  system.validate_dispatch();
+  return false;
+}
+
+void TestAnyOfDispatchExplicit()
+{
+  thrust::device_vector<int> vec(1);
+
+  my_system sys(0);
+  thrust::any_of(sys, vec.begin(), vec.end(), 0);
+
+  ASSERT_EQUAL(true, sys.is_valid());
+}
+DECLARE_UNITTEST(TestAnyOfDispatchExplicit);
+
+template <class InputIterator, class Predicate>
+bool any_of(my_tag, InputIterator first, InputIterator, Predicate)
+{
+  *first = 13;
+  return false;
+}
+
+void TestAnyOfDispatchImplicit()
+{
+  thrust::device_vector<int> vec(1);
+
+  thrust::any_of(thrust::retag<my_tag>(vec.begin()), thrust::retag<my_tag>(vec.end()), 0);
+
+  ASSERT_EQUAL(13, vec.front());
+}
+DECLARE_UNITTEST(TestAnyOfDispatchImplicit);
+
+template <class Vector>
+void TestNoneOf()
+{
+  using T = typename Vector::value_type;
+
+  Vector v(3, T{1});
+
+  ASSERT_EQUAL(thrust::none_of(v.begin(), v.end(), ::internal::identity{}), false);
+
+  v[1] = 0;
+
+  ASSERT_EQUAL(thrust::none_of(v.begin(), v.end(), ::internal::identity{}), false);
+
+  ASSERT_EQUAL(thrust::none_of(v.begin() + 0, v.begin() + 0, ::internal::identity{}), true);
+  ASSERT_EQUAL(thrust::none_of(v.begin() + 0, v.begin() + 1, ::internal::identity{}), false);
+  ASSERT_EQUAL(thrust::none_of(v.begin() + 0, v.begin() + 2, ::internal::identity{}), false);
+  ASSERT_EQUAL(thrust::none_of(v.begin() + 1, v.begin() + 2, ::internal::identity{}), true);
+}
+DECLARE_VECTOR_UNITTEST(TestNoneOf);
+
+template <class InputIterator, class Predicate>
+bool none_of(my_system& system, InputIterator, InputIterator, Predicate)
+{
+  system.validate_dispatch();
+  return false;
+}
+
+void TestNoneOfDispatchExplicit()
+{
+  thrust::device_vector<int> vec(1);
+
+  my_system sys(0);
+  thrust::none_of(sys, vec.begin(), vec.end(), 0);
+
+  ASSERT_EQUAL(true, sys.is_valid());
+}
+DECLARE_UNITTEST(TestNoneOfDispatchExplicit);
+
+template <class InputIterator, class Predicate>
+bool none_of(my_tag, InputIterator first, InputIterator, Predicate)
+{
+  *first = 13;
+  return false;
+}
+
+void TestNoneOfDispatchImplicit()
+{
+  thrust::device_vector<int> vec(1);
+
+  thrust::none_of(thrust::retag<my_tag>(vec.begin()), thrust::retag<my_tag>(vec.end()), 0);
+
+  ASSERT_EQUAL(13, vec.front());
+}
+DECLARE_UNITTEST(TestNoneOfDispatchImplicit);

@@ -79,24 +79,53 @@ option(BUILD_CLIENTS_SAMPLES "Build examples" OFF)
 option(BUILD_CLIENTS_ONLY "Build only clients" OFF)
 option(BUILD_VERBOSE "Output additional build information" OFF)
 option(BUILD_CODE_COVERAGE "Build rocSPARSE with code coverage enabled" OFF)
+if(BUILD_CODE_COVERAGE)
+  # Locate the host profile runtime so coverage targets can link it directly.
+  # Passing -fprofile-instr-generate to a HIP link instead makes the driver
+  # give clang-linker-wrapper a --device-linker=...profile.bc option, which puts
+  # the device profile runtime and its __llvm_profile_sections_* table into the
+  # device image; the HIP runtime then aborts registering that table at profile
+  # dump, after every test has already passed (AISPARSE-778).
+  #
+  # The profile runtime is not self-contained: its ROCm platform object pulls in
+  # the device-drain and symbol-interception helpers, so those archives have to
+  # be named too. Link them as a group, since they reference each other.
+  set(ROCSPARSE_PROFILE_RUNTIME)
+  foreach(_rt clang_rt.profile clang_rt.profile_rocm
+              clang_rt.interception clang_rt.sanitizer_common)
+    foreach(_suffix "-x86_64" "")
+      execute_process(COMMAND ${CMAKE_CXX_COMPILER}
+                              --print-file-name=lib${_rt}${_suffix}.a
+                      OUTPUT_VARIABLE _rt_path OUTPUT_STRIP_TRAILING_WHITESPACE)
+      if(EXISTS "${_rt_path}")
+        list(APPEND ROCSPARSE_PROFILE_RUNTIME "${_rt_path}")
+        break()
+      endif()
+    endforeach()
+  endforeach()
+  if(NOT ROCSPARSE_PROFILE_RUNTIME)
+    message(FATAL_ERROR
+      "BUILD_CODE_COVERAGE: could not locate the clang profile runtime")
+  endif()
+  message(STATUS "Host profile runtime: ${ROCSPARSE_PROFILE_RUNTIME}")
+  set(ROCSPARSE_PROFILE_RUNTIME
+      -Wl,--start-group ${ROCSPARSE_PROFILE_RUNTIME} -Wl,--end-group
+      ${CMAKE_DL_LIBS} -lpthread -lrt)
+endif()
 option(BUILD_ADDRESS_SANITIZER "Build rocSPARSE with address sanitizer enabled" OFF)
 option(BUILD_MEMSTAT "Build rocSPARSE with memory statistics enabled" OFF)
 option(BUILD_ROCSPARSE_ILP64 "Build rocSPARSE with rocsparse_int equal to int64_t" OFF)
 option(BUILD_COMPRESSED_DBG "Enable compressed debug symbols" ON)
 option(BUILD_WITH_ROCBLAS "Enable building rocSPARSE with rocBLAS" ON)
 option(BUILD_WITH_ROCTX "Enable building rocSPARSE with rocTX" ON)
-option(ROCSPARSE_ENABLE_ILU0_BOOST_SIGN "Preserve the pivot sign/phase in the ILU0 numeric boost" ON)
 option(BUILD_WITH_OFFLOAD_COMPRESS
        "Enable offload compression during compilation" ON)
-option(ROCSPARSE_ENABLE_HANDLE_CREATE "Build rocsparse_handle_create/destroy: non-blocking handle creation on a user-defined stream" ON)
 option(ROCSPARSE_ENABLE_SPMAT_SCALE "Build rocsparse_spmat_scale and its scalar dense vector descriptor helper rocsparse_dnvec_descr_create_scalar" ON)
 option(ROCSPARSE_ENABLE_SDDMM_BATCHED "Build batched SDDMM support for the CSR, CSC, COO, COO AoS, and ELL formats" ON)
-option(BUILD_WITH_ILDLT0 "Build rocSPARSE with incomplete LDL^T (zero fill-in) factorization support" ON)
-option(BUILD_WITH_U16_REMOVED "Build rocSPARSE with the deprecated rocsparse_indextype_u16 index type removed" ON)
-option(BUILD_WITH_CSC_TRSV "Enable CSC format support in rocsparse_spsv and rocsparse_sptrsv" ON)
-option(BUILD_WITH_CSC_TRSM "Enable CSC format support in rocsparse_spsm and rocsparse_sptrsm" ON)
 option(BUILD_WITH_ELL_TRSV "Enable ELL format support in rocsparse_spsv and rocsparse_sptrsv" ON)
 option(BUILD_WITH_DIAGONAL_SOLVE "Enable the diagonal solve in rocsparse_sptrsv and rocsparse_sptrsm" ON)
+option(BUILD_WITH_SPSORT "Build rocsparse_spsort and the rocsparse_spsort_descr auxiliary routines for the COO, CSR, and CSC formats" ON)
+option(BUILD_WITH_TRSM_REFACTORING "Build rocSPARSE with the refactored triangular solve (SpTRSM/SpSM) implementation" ON)
 
 # Clients utilize rocsparse fortran API and a fortran compiler
 if( NOT BUILD_FORTRAN_CLIENTS )
@@ -160,7 +189,7 @@ if(COMMAND rocm_check_target_ids)
                   "gfx90a:xnack-;gfx90a:xnack+;gfx942;gfx950"
                   "gfx1030;gfx1100;gfx1101;gfx1102"
                   "gfx1150;gfx1151;gfx1152;gfx1153"
-                  "gfx1200;gfx1201;gfx1250")
+                  "gfx1200;gfx1201;gfx1250;gfx1250-strict")
     endif()
 else()
     # Use target ID syntax if supported for GPU_TARGETS
@@ -168,7 +197,7 @@ else()
         set(DEFAULT_GPU_TARGETS "gfx803;gfx900:xnack-;gfx906:xnack-;gfx908:xnack-"
                                 "gfx1030;gfx1100;gfx1101;gfx1102"
                                 "gfx1150;gfx1151;gfx1152;gfx1153"
-                                "gfx1200;gfx1201;gfx1250")
+                                "gfx1200;gfx1201;gfx1250;gfx1250-strict")
     else()
         set(DEFAULT_GPU_TARGETS "gfx803;gfx900;gfx906;gfx908")
     endif()
@@ -392,9 +421,12 @@ if(BUILD_CODE_COVERAGE)
     # Also fold in the standalone unit-test binaries so their host-side coverage
     # of librocsparse is counted. The %m module hash keeps profraw names distinct
     # per binary; they match the rocsparse-coverage_*.profraw merge glob below.
-    # Wrapped in || true so a unit-test failure cannot abort the coverage upload.
-    COMMAND sh -c "LLVM_PROFILE_FILE=./coverage-report/profraw/rocsparse-coverage_%m.profraw ./clients/staging/rocsparse-unit-test || true"
-    COMMAND sh -c "LLVM_PROFILE_FILE=./coverage-report/profraw/rocsparse-coverage_%m.profraw ./clients/staging/rocsparse-unit-test-device || true"
+    # make exports GTEST_FILTER into the recipe environment and gtest honors it,
+    # which previously selected 0 host tests and 6 device tests. These binaries
+    # are not categorized that way, so run each suite in full. || true keeps a
+    # unit-test failure from aborting the coverage upload.
+    COMMAND sh -c "env -u GTEST_FILTER LLVM_PROFILE_FILE=./coverage-report/profraw/rocsparse-coverage_%m.profraw ./clients/staging/rocsparse-unit-test --gtest_filter='*' || true"
+    COMMAND sh -c "env -u GTEST_FILTER LLVM_PROFILE_FILE=./coverage-report/profraw/rocsparse-coverage_%m.profraw ./clients/staging/rocsparse-unit-test-device --gtest_filter='*' || true"
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
     )
 

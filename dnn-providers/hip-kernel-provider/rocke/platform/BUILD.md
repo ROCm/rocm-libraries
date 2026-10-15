@@ -18,7 +18,16 @@ silently".
 ```bash
 # build the engine fresh AND run the byte-identity gate (the definition-of-done):
 python <rocke/platform>/tools/check_byte_identity.py
+
+# the portable-IR replay contract, carried through to object code (what CI runs):
+python <rocke/platform>/tools/run_portable_ir_gates.py
 ```
+
+The first proves the C++ engine emits the same LLVM-IR as the Python engine. The
+second proves the *replay* paths — the C++ importer and the recipe VM, including
+parametric recipes replayed at values the roller never recorded — reproduce the
+Python lowerer byte for byte, at `.ll` and then at HSACO. Both are device-free;
+the second needs comgr.
 
 `check_byte_identity.py` builds the engine fresh as a Release static archive
 (`librocke_core.a`) and then proves its LLVM-IR emission is byte-identical to the
@@ -63,6 +72,27 @@ The top-level `<rocke/platform>/CMakeLists.txt` globs `cpp/**/*.cpp` (excluding
 
 Optional sanitizer build for diagnostics (not for shipping): `-DROCKE_SANITIZE=ON`.
 
+### The shared engine (`librocke.so`)
+
+The portable-IR replay tooling reaches the C++ importer, recipe VM and lowerer
+through ctypes, so it needs a shared library rather than the archive:
+
+```bash
+cmake -S <rocke/platform> -B <build> -DCMAKE_BUILD_TYPE=Release \
+      -DROCKE_BUILD_SHARED_ENGINE=ON
+cmake --build <build> --target rocke_shared -j$(nproc)
+# -> <build>/librocke.so   (point ROCKE_ONLINE_LIB at this)
+```
+
+`--whole-archive` is applied for you. It is not optional: nothing in the `.so`
+references the engine's entry points, so without it the linker discards every
+object as unused and emits a valid library with no symbols in it.
+
+`online.build_lib()` produces an equivalent library on demand, which is more
+convenient interactively. Prefer the target when the resulting library needs to
+be identifiable — CI points `ROCKE_ONLINE_LIB` at it, and a named library that
+does not exist is now an error rather than a cue to go and find another one.
+
 > **Toolchain/runtime flags.** Codegen is driven by the `comgr` in use, and the
 > emitted IR flavor must match it: set `ROCKE_LLVM_FLAVOR=llvm22` for a ROCm 7.2
 > `comgr` if `/opt/rocm` is older (avoids a `COMPILE_SOURCE_TO_BC` rejection).
@@ -78,13 +108,41 @@ runtime resolves them WITHOUT importing torch
 `_rocm_root_libdirs`), in priority order:
 
 1. explicit full-path override env var: `ROCKE_COMGR_LIB`, `ROCKE_HIP_LIB`;
-2. torch-bundled `<torch>/lib/lib*.so` — only if torch is already imported (the
-   resolver never imports torch to obtain it);
+2. the lib torch uses, only if torch is already imported (the resolver never
+   imports torch to obtain it): an unambiguous mapped copy, else
+   `<torch>/lib/lib*.so`, else TheRock's `_rocm_sdk_core/lib/lib*.so*` (only
+   when `rocm_sdk` is imported, i.e. the torch is TheRock's). Exception for
+   comgr only: a stale torch comgr moves below every step 3 candidate (see
+   below);
 3. a real ROCm install discovered without torch: `$ROCM_PATH` / `$ROCM_HOME` ->
    `<root>/lib`, then globbed `/opt/rocm*/core-*/lib` and `/opt/rocm*/lib`,
    newest version first (a packaged ROCm 7.2 keeps the runtime under a versioned
    `core-*/lib`, not always plain `/opt/rocm/lib`);
 4. bare `lib<name>.so` on the dynamic linker's search path (last resort).
+
+With multiple distinct copies in `/proc/self/maps`, the mapped tier prefers
+the sole copy under imported torch or the active `_rocm_sdk_core`. It skips
+ambiguous mappings rather than treating address order as load order.
+
+Stale torch comgr (`_torch_comgr_is_stale`, comgr only, never HIP): the release
+of torch's comgr is read from its location (in `_rocm_sdk_core`: the wheel's
+release, `rocm_sdk.__version__` or the installed `rocm-sdk-core` version;
+elsewhere: `torch.version.hip`), the same way `resolved_lib_rocm_version` does,
+and compared with the release of the first step 3 install whose version is
+readable. If both are known and torch's is older, torch's comgr is tried after
+every step 3 candidate (still before step 4), because an older comgr rejects
+ISAs newer than its ROCm. A `_rocm_sdk_core` comgr already mapped into the
+process is never demoted: TheRock's `rocm_sdk.initialize_process` loaded it
+`RTLD_GLOBAL`, and a second comgr beside it aborts the process with `LLVM
+ERROR: support is already registered for analysis`. It stays first; if it
+cannot handle the target ISA, the compile fails at `set_isa`.
+
+On Linux, the Python COMGR loader rejects `ROCKE_COMGR_LIB` before `dlopen` if
+it names an existing file with an ELF header different from the only mapped
+COMGR path. An alias of the same file remains valid. Missing or non-ELF
+overrides retain the existing load-failure fallback. With multiple mapped
+paths or unreadable maps, override precedence remains unchanged. Compile
+with another COMGR in a separate process before importing torch.
 
 torch is therefore **optional** — required only for the `torch.fx` fusion
 frontend, torch-tensor launch (`runtime/torch_interop.py`), and on-GPU torch-eager

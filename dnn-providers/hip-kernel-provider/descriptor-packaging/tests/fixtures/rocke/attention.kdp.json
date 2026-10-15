@@ -2,8 +2,13 @@
   "version": "0.1",
   "id": "kdp-attention",
   "name": "Attention pack",
-  "arch": ["gfx942", "gfx950"],
-  "matchers": ["umd-attention"],
+  "arch": [
+    "gfx942",
+    "gfx950"
+  ],
+  "matchers": [
+    "umd-attention"
+  ],
   "engine": "ued-attention",
   "dispatch": "udd-attention",
   "kernelDescriptors": [
@@ -11,7 +16,9 @@
       "version": "0.1",
       "id": "ukd-attention-dense-gfx950",
       "name": "Attention dense gfx950",
-      "arch": ["gfx950"],
+      "arch": [
+        "gfx950"
+      ],
       "kernel_source": {
         "kind": "rocke",
         "source": "kernels/gfx950/attention_dense.py",
@@ -25,8 +32,27 @@
           "head_size": 128
         }
       },
-      "metadata": { "family": "attention_dense" },
-      "priority": 0
+      "metadata": {
+        "family": "attention_dense"
+      },
+      "priority": 0,
+      "provenance": {
+        "specialization_contract": {
+          "schema_version": 1,
+          "consumers": [
+            {
+              "engine_id": "ued-attention",
+              "kmd_id": "kmd-attention",
+              "metadata_fields": [],
+              "matcher_only_fields": [
+                "family"
+              ],
+              "bindings": {},
+              "vocabulary": {}
+            }
+          ]
+        }
+      }
     }
   ]
 }

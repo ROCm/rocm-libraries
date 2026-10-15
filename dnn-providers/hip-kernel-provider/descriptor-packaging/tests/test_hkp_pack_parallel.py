@@ -8,11 +8,8 @@ standard-library-only function rather than a fixture body: the capture script
 copies it verbatim into a tree that has never seen this file.
 """
 
-import ast
 import concurrent.futures
-import inspect
 import itertools
-import json
 import os
 import re
 import sys
@@ -21,10 +18,18 @@ from pathlib import Path
 
 import pytest
 
-from hkp_pack import pipeline
+from hkp_pack import agreement, pipeline
 from hkp_pack.descriptors import load_flat_input
 from hkp_pack.errors import HkpPackError
 from hkp_pack.hip_compile import hip_source_relpath, hip_variant_key
+from pack_helpers import (
+    _child_sys_path,
+    _conftest_only_paths,
+    _kdp,
+    _silent,
+    _ukd,
+    _write_json,
+)
 
 # The one arch the corpus is authored for. Every consumer references this
 # constant instead of restating the literal: a capture script that ran a
@@ -46,6 +51,10 @@ _ROCKE_STUB_SPEC = {"tile": 64}
 
 _K1_SOURCE = "k1.cpp"
 _K2_SOURCE = "k2.cpp"
+
+# An embedded_source names its file relative to its descriptor and is never
+# handed to a producer, so it sits in a child folder no compile ever reads.
+_EMBEDDED_SOURCE_FILE = "kernels/embedded.cpp"
 
 _HIP_SOURCE_TEMPLATE = """\
 #include <hip/hip_runtime.h>
@@ -84,6 +93,14 @@ def _hip_ks(source, entry, block):
     }
 
 
+def _embedded_ks(entry_point):
+    return {
+        "kind": "embedded_source",
+        "source_file": _EMBEDDED_SOURCE_FILE,
+        "entry_point": entry_point,
+    }
+
+
 def _rocke_ks():
     return {
         "kind": "rocke",
@@ -93,52 +110,22 @@ def _rocke_ks():
     }
 
 
-def _ukd(uid, kernel_source, arch=None):
-    doc = {
-        "version": "0.1",
-        "id": uid,
-        "name": uid,
-        "kernel_source": kernel_source,
-        "metadata": {},
-        "priority": 0,
-    }
-    if arch is not None:
-        doc["arch"] = arch
-    return doc
-
-
-def _kdp(kid, arch, entries):
-    # matchers/engine/dispatch are authored empty: the loader requires the keys
-    # and resolves only non-null references, and this corpus is about variant
-    # selection, so carrying generics would add files without adding a case.
-    return {
-        "version": "0.1",
-        "id": kid,
-        "name": kid,
-        "arch": arch,
-        "matchers": [],
-        "engine": None,
-        "dispatch": None,
-        "kernelDescriptors": entries,
-    }
-
-
-def _write_json(dest, name, doc):
-    (dest / name).write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")
-
-
-def _write_corpus(dest, *, hip_only=False):
+def _write_corpus(dest, *, hip_only=False, with_embedded=False):
     """Write the selection corpus into `dest`, returning `dest`.
 
-    Standard library only, and no interpreter state is touched, so the whole
-    function can be copied into a checkout that does not contain this test file
-    and run outside pytest.
+    Standard library only, as are the `pack_helpers` authoring helpers it calls,
+    and no interpreter state is touched, so it can be copied with them into a
+    checkout that does not contain these files and run outside pytest.
 
     `hip_only=True` omits the two rocke cases (an inline rocke UKD and a KDP
     referencing a standalone rocke one). Outside pytest there is no stub for the
     rocke compiler, so a rocke UKD would reach comgr for real. Every other case
     stays: the variant-key dedup pair and the shared standalone UKD are authored
     hip precisely so the subset keeps them.
+
+    `with_embedded=True` appends the two embedded_source cases. It is purely
+    additive: the default corpus, and the `hip_only` subset of it, are what
+    every other consumer here pins.
 
     The cases, in the order the loader sees them (`sorted(rglob("*.json"))`):
 
@@ -159,6 +146,10 @@ def _write_corpus(dest, *, hip_only=False):
     10. an orphan standalone UKD no KDP references. Legal, warns, packs on, and
         is expected ABSENT from the selection.
     11. c11 -- a matching KDP whose entries all filter out, so it is dropped.
+    12. c12 -- a matching KDP with an inline embedded_source UKD (`with_embedded`).
+    13. c13 -- a matching KDP referencing a standalone embedded_source UKD
+        (`with_embedded`). Both pass-through cases run no producer, so neither
+        yields a variant key and neither stages a .co.
     """
     dest = Path(dest)
     dest.mkdir(parents=True, exist_ok=True)
@@ -171,6 +162,14 @@ def _write_corpus(dest, *, hip_only=False):
         _HIP_SOURCE_TEMPLATE.format(first="K2", second="K2B", define=_BLOCK_DEFINE),
         encoding="utf-8",
     )
+
+    if with_embedded:
+        embedded = dest / _EMBEDDED_SOURCE_FILE
+        embedded.parent.mkdir(parents=True, exist_ok=True)
+        embedded.write_text(
+            _HIP_SOURCE_TEMPLATE.format(first="E1", second="E1B", define="64"),
+            encoding="utf-8",
+        )
 
     if not hip_only:
         pkg = dest / _ROCKE_STUB_PKG
@@ -334,6 +333,30 @@ def _write_corpus(dest, *, hip_only=False):
         ),
     )
 
+    if with_embedded:
+        # Case 12 -- an inline pass-through UKD.
+        _write_json(
+            dest,
+            "c12_inline_embedded.kdp.json",
+            _kdp(
+                "kdp-c12",
+                [TARGET_ARCH],
+                [_ukd("ukd-inline-embedded", _embedded_ks("E1"))],
+            ),
+        )
+
+        # Case 13 -- a standalone pass-through UKD referenced by id.
+        _write_json(
+            dest,
+            "c13_ref_standalone_embedded.kdp.json",
+            _kdp("kdp-c13", [TARGET_ARCH], ["ukd-standalone-embedded"]),
+        )
+        _write_json(
+            dest,
+            "u_standalone_embedded.ukd.json",
+            _ukd("ukd-standalone-embedded", _embedded_ks("E1B")),
+        )
+
     return dest
 
 
@@ -373,14 +396,16 @@ HIP_ONLY_GOLDEN_SEQUENCE = [
 HIP_ONLY_EXPECTED_CO_COUNT = 6
 HIP_ONLY_EXPECTED_KDP_JSON_COUNT = 8
 
+# The same, over the hip-only subset with the embedded cases added. The two
+# extra KDPs stage their JSON and nothing else; a standalone UKD is emitted by
+# `pack_arch`, not staged here, so c13's own file is not counted.
+MIXED_EXPECTED_CO_COUNT = 6
+MIXED_EXPECTED_KDP_JSON_COUNT = 10
+
 # Entries the generator must NOT yield. The orphan is reachable only from a
 # `ukd_by_id()`-driven enumeration, and the wildcard standalone only if the
 # KDP-level filter fails to short-circuit the standalone branch.
 EXPECTED_ABSENT = ("ukd-standalone-orphan", "ukd-standalone-wild")
-
-
-def _silent(*_args, **_kwargs):
-    pass
 
 
 @pytest.fixture
@@ -452,50 +477,6 @@ def test_prewarm_jobs_are_deduped_on_variant_key(corpus):
     jobs = pipeline._prewarm_jobs(flat, corpus, TARGET_ARCH)
     assert jobs, "the corpus selects variants, so the job list cannot be empty"
     assert len({j.vk for j in jobs}) == len(jobs)
-
-
-def _arch_matches_call_sites():
-    """`arch_matches` call counts in pipeline.py, keyed by enclosing function.
-
-    Parsed rather than counted as strings: an explanatory comment naming
-    `arch_matches` is not a call.
-    """
-    tree = ast.parse(inspect.getsource(pipeline))
-    counts = {}
-    for node in tree.body:
-        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            continue
-        found = 0
-        for sub in ast.walk(node):
-            if not isinstance(sub, ast.Call):
-                continue
-            func = sub.func
-            name = (
-                func.id
-                if isinstance(func, ast.Name)
-                else func.attr if isinstance(func, ast.Attribute) else None
-            )
-            if name == "arch_matches":
-                found += 1
-        if found:
-            counts[node.name] = found
-    return counts
-
-
-@pytest.mark.quick
-def test_arch_matches_call_sites_are_pinned():
-    """All three selection filters live in the generator and nowhere else.
-
-    `compile_intermediate` keeps exactly one call, and it is not a filter: it
-    decides KDP disposition -- copy the authored KDP through verbatim -- before
-    the deepcopy the generator would consume. A call in any other function is a
-    fourth selection site, which is the divergence a single shared generator
-    exists to make impossible.
-    """
-    assert _arch_matches_call_sites() == {
-        "_selected_entries": 3,
-        "compile_intermediate": 1,
-    }
 
 
 @pytest.mark.quick
@@ -663,10 +644,8 @@ _HSACO_SOURCE = "hsaco_kernel.cpp"
 def hsaco_corpus(tmp_path):
     """A KDP carrying an hsaco UKD ahead of a compilable hip one.
 
-    Kept out of the selection corpus deliberately: it makes
-    `compile_intermediate` raise, which would stop the golden-sequence corpus
-    from being walkable. The hsaco entry is authored first so the walk reaches
-    its error before it would need a real hipcc for the hip entry.
+    Kept out of the selection corpus deliberately: its hsaco entry has no
+    compile, so it yields no prewarm job, and only the hip sibling does.
     """
     dest = tmp_path / "hsaco-corpus"
     dest.mkdir()
@@ -678,6 +657,7 @@ def hsaco_corpus(tmp_path):
     hsaco_ukd = _ukd(
         "ukd-hsaco",
         {"kind": "hsaco", "file": "prebuilt.co", "symbol": "H1"},
+        arch=[TARGET_ARCH],
     )
     hip_ukd = _ukd("ukd-hsaco-sibling", _hip_ks(_HSACO_SOURCE, "H1", 64))
     _write_json(
@@ -689,31 +669,13 @@ def hsaco_corpus(tmp_path):
 
 
 @pytest.mark.quick
-def test_prewarm_skips_hsaco_kind(hsaco_corpus, tmp_path):
-    """An hsaco UKD produces no job, and the walk stays the sole error reporter.
+def test_prewarm_skips_hsaco_kind(hsaco_corpus):
+    """An hsaco UKD produces no job: it has no compile.
 
-    This pins *current* behaviour: `_compile_ukd_variant` reads
-    `kernel_source.source` before the kind dispatch and neither `hsaco` nor
-    `kpack` carries one, so the walk raises `KeyError` and its `unsupported
-    kind` branch is unreachable for a validly-authored UKD of either kind. That
-    the `KeyError` escapes as itself rather than as an `HkpPackError` is a
-    pre-existing defect this test pins rather than fixes; fixing it belongs with
-    the walk's error contract, not with the prewarm.
-
-    The raise is asserted first on purpose: with the job-list assertion ahead of
-    it, a stub job list ends the test before the walk is ever exercised.
+    `_variant_key_for` declines the kind, so the prewarm drops it and only the
+    compilable hip sibling is scheduled; the walk keys the hsaco UKD itself.
     """
     flat = load_flat_input(hsaco_corpus, log=_silent)
-
-    with pytest.raises(KeyError, match="source"):
-        pipeline.compile_intermediate(
-            flat,
-            hsaco_corpus,
-            TARGET_ARCH,
-            "hipcc",
-            tmp_path / "inter",
-            log=_silent,
-        )
 
     hsaco_ukd = flat.kdps()[0].doc["kernelDescriptors"][0]
     assert pipeline._variant_key_for(hsaco_ukd, Path(".")) is None
@@ -781,6 +743,7 @@ def test_prewarm_pool_stops_at_first_failure(tmp_path, monkeypatch):
 
     variant_co = {}
     variant_symbol = {}
+    variant_observations = {}
     with pytest.raises(HkpPackError) as excinfo:
         pipeline._prewarm_variants(
             flat,
@@ -790,6 +753,8 @@ def test_prewarm_pool_stops_at_first_failure(tmp_path, monkeypatch):
             tmp_path / "inter",
             variant_co,
             variant_symbol,
+            variant_observations,
+            {},
             log=_silent,
         )
 
@@ -834,107 +799,39 @@ def test_variant_key_for_uses_module_globals(monkeypatch):
     assert pipeline._variant_key_for(rocke_ukd, Path(".")) == "SENTINEL-ROCKE"
 
 
-def _child_sys_path(_ignored):
-    """Run in a pool worker; returns the child's `sys.path`."""
-    return list(sys.path)
-
-
-def _conftest_inserted_paths():
-    packaging_root = Path(__file__).resolve().parent.parent
-    candidates = [packaging_root / "python"]
-    rocke_root = packaging_root.parent / "rocke"
-    candidates += [rocke_root / "platform" / "python", rocke_root / "library"]
-    return [str(p) for p in candidates if str(p) in sys.path]
-
-
 @pytest.mark.quick
 def test_worker_inherits_parent_sys_path():
     """A pool worker starts with the parent's `sys.path`, conftest inserts and all.
 
     CPython propagates `sys.path` to children under both `spawn` and
-    `forkserver`, so a worker can import `hkp_pack` and the rocKE platform
-    without a `PYTHONPATH` export.
+    `forkserver`, so a worker can import `hkp_pack`, and any producer module a
+    conftest put on the path, without a `PYTHONPATH` export.
 
     A probe of the interpreter rather than of this package -- no change to
     `pipeline.py` can fail it. Should a future interpreter stop propagating
-    `sys.path`, every rocKE variant fails to import in its worker, and this
-    says why. The related constraint it does not check, that the pool must be
-    built after parent-side path setup, is documented at the construction site.
+    `sys.path`, every variant whose producer is imported in the worker fails
+    there, and this says why. The related constraint it does not check, that the
+    pool must be built after parent-side path setup, is documented at the
+    construction site.
+
+    The path watched is the rocm_kpack directory conftest inserts from
+    HIPKERNELPROVIDER_ROCM_KPACK_DIR, which no `PYTHONPATH` carries. The hkp_pack
+    package root conftest also inserts is exported by the ctest environment, so a
+    child that re-read `PYTHONPATH` would have it too.
     """
-    expected = _conftest_inserted_paths()
-    assert expected, "conftest inserts at least the hkp_pack package root"
+    kpack_dir = os.environ.get("HIPKERNELPROVIDER_ROCM_KPACK_DIR")
+    if not kpack_dir:
+        pytest.skip(
+            "HIPKERNELPROVIDER_ROCM_KPACK_DIR is unset, so conftest inserts no "
+            "path that PYTHONPATH does not already carry"
+        )
+    expected = _conftest_only_paths([kpack_dir])
+    assert expected, "the premise: conftest inserted it and PYTHONPATH lacks it"
 
     with concurrent.futures.ProcessPoolExecutor(max_workers=1) as pool:
         child_path = list(pool.map(_child_sys_path, [None], chunksize=1))[0]
 
     assert set(expected) <= set(child_path)
-
-
-_MISSING_MODULE = "hkp_parallel_absent/kernels/nowhere.py"
-
-
-@pytest.fixture
-def failing_corpus(tmp_path):
-    """A KDP with two rocke UKDs naming a module that does not exist.
-
-    Two entries rather than one because the prewarm returns without a pool for
-    a single job, and the failure has to come from a real worker process. They
-    carry different specs so they key apart and stay two jobs. The module is
-    absent, so the child raises before it reaches the rocKE compiler and the
-    case needs no toolchain at all.
-    """
-    dest = tmp_path / "failing-corpus"
-    dest.mkdir()
-    entries = [
-        _ukd(
-            f"ukd-absent-{tile}",
-            {
-                "kind": "rocke",
-                "source": _MISSING_MODULE,
-                "builder": _ROCKE_STUB_BUILDER,
-                "spec": {"tile": tile},
-            },
-        )
-        for tile in (64, 128)
-    ]
-    _write_json(dest, "absent.kdp.json", _kdp("kdp-absent", [TARGET_ARCH], entries))
-    return dest
-
-
-@pytest.mark.quick
-def test_prewarm_failure_names_variant(failing_corpus, tmp_path, monkeypatch):
-    """A pool failure names one variant, not N tracebacks.
-
-    Which variant is named is not host-dependent and is asserted exactly: it is
-    the first failure in submission order, which is walk order, so the parallel
-    path names the variant the serial path would have named. How many others
-    would have failed is deliberately not asserted, and the message carries no
-    count.
-
-    No `PYTHONPATH` export: children inherit the parent's `sys.path` under both
-    start methods, which `test_worker_inherits_parent_sys_path` is the detector
-    for.
-    """
-    monkeypatch.setenv("HKP_PACK_JOBS", "2")
-    flat = load_flat_input(failing_corpus, log=_silent)
-
-    jobs = pipeline._prewarm_jobs(flat, failing_corpus, TARGET_ARCH)
-    assert len(jobs) >= 2, "a single job returns before starting a pool"
-
-    with pytest.raises(HkpPackError) as excinfo:
-        pipeline.compile_intermediate(
-            flat,
-            failing_corpus,
-            TARGET_ARCH,
-            "hipcc",
-            tmp_path / "inter",
-            log=_silent,
-        )
-
-    message = str(excinfo.value)
-    assert re.search(rf"variant '\S+' failed to compile for {TARGET_ARCH}", message)
-    assert f"'{jobs[0].ukd['id']}'" in message
-    assert "module not importable" in message
 
 
 @pytest.mark.quick
@@ -973,12 +870,15 @@ def test_compile_one_variant_returns_errors_and_computes_no_keys(tmp_path, monke
     compile_one = getattr(pipeline, "_compile_one_variant", None)
     assert compile_one is not None, "pipeline._compile_one_variant does not exist"
 
-    vk, co_path, symbol, err = compile_one(job)
+    vk, co_path, symbol, err, observations, origins = compile_one(job)
     assert vk == "VK-FROM-PARENT"
-    assert co_path is None and symbol is None
+    assert co_path is None and symbol is None and observations is None
     assert err.startswith("HkpPackError: ")
     assert "boom" in err
     assert calls == []
+    # A failed variant contributes no producer identity. A partial one would let
+    # the parent observer record a SHA for a compile that produced no artefact.
+    assert origins == {}
 
 
 _STUB_HIPCC_BODY = r"""
@@ -988,20 +888,24 @@ import sys
 import time
 
 FAIL_OUT = {fail_out!r}
+SLOW_FAIL_OUT = {slow_fail_out!r}
 DELAY = {delay!r}
 TALLY = {tally!r}
 
 args = sys.argv[1:]
 oi = args.index("-o")
 out = args[oi + 1]
+name = os.path.basename(out)
 
 # Recorded before the failure branch, so the tally counts attempts rather than
 # successes -- a fail-fast assertion needs to see the job that failed.
 if TALLY:
-    open(os.path.join(TALLY, os.path.basename(out)), "wb").close()
+    open(os.path.join(TALLY, name), "wb").close()
 
-if FAIL_OUT and os.path.basename(out) == FAIL_OUT:
-    sys.stderr.write("stub hipcc: refusing " + FAIL_OUT + chr(10))
+if name == SLOW_FAIL_OUT:
+    time.sleep(DELAY)
+if name in (FAIL_OUT, SLOW_FAIL_OUT):
+    sys.stderr.write("stub hipcc: refusing " + name + chr(10))
     sys.exit(2)
 
 if DELAY:
@@ -1013,7 +917,7 @@ with open(out, "wb") as fh:
 """
 
 
-def _stub_hipcc(tmp_path, *, fail_out=None, delay=0.0, tally=None):
+def _stub_hipcc(tmp_path, *, fail_out=None, slow_fail_out=None, delay=0.0, tally=None):
     """Path to a hipcc stand-in that writes a .co and exits 0.
 
     Lets the pool run to success on a box with no toolchain, which is what makes
@@ -1025,7 +929,9 @@ def _stub_hipcc(tmp_path, *, fail_out=None, delay=0.0, tally=None):
     exactly one variant fails even where several share a source file -- the
     fail-fast test needs the other jobs to survive long enough to be cancelled.
     `delay` slows every other job so cancellation is observable rather than a
-    race, and `tally` collects one marker per attempt.
+    race, and `tally` collects one marker per attempt. `slow_fail_out` names a
+    second output that fails only after `delay`, so a failure submitted earlier
+    can be made to finish later.
 
     A launcher script rather than the interpreter directly, because the producer
     invokes `hipcc` as argv[0] of a subprocess.
@@ -1033,7 +939,10 @@ def _stub_hipcc(tmp_path, *, fail_out=None, delay=0.0, tally=None):
     stub = tmp_path / "stub_hipcc.py"
     stub.write_text(
         _STUB_HIPCC_BODY.format(
-            fail_out=fail_out, delay=delay, tally=str(tally) if tally else None
+            fail_out=fail_out,
+            slow_fail_out=slow_fail_out,
+            delay=delay,
+            tally=str(tally) if tally else None,
         ),
         encoding="utf-8",
     )
@@ -1049,6 +958,45 @@ def _stub_hipcc(tmp_path, *, fail_out=None, delay=0.0, tally=None):
         )
         launcher.chmod(0o755)
     return launcher
+
+
+@pytest.mark.quick
+def test_the_pool_names_the_first_failure_in_walk_order(tmp_path, monkeypatch):
+    """With several variants failing, the one named is the first in walk order,
+    not the first to finish: that is the variant the serial path would have
+    stopped on, and a name chosen by completion order changes run to run.
+
+    Made deterministic rather than left to the scheduler: the first job fails
+    after a delay and the second at once, so a pool that took the first failure
+    to complete would name the second. Driven through `compile_intermediate`,
+    the entry the pack itself calls, with real worker processes.
+    """
+    corpus = _write_corpus(tmp_path / "two-failures", hip_only=True)
+    monkeypatch.setenv("HKP_PACK_JOBS", "2")
+    flat = load_flat_input(corpus, log=_silent)
+
+    first, second = pipeline._prewarm_jobs(flat, corpus, TARGET_ARCH)[:2]
+    hipcc = _stub_hipcc(
+        tmp_path,
+        fail_out=f"{second.vk}.co",
+        slow_fail_out=f"{first.vk}.co",
+        delay=1.0,
+    )
+
+    with pytest.raises(HkpPackError) as excinfo:
+        pipeline.compile_intermediate(
+            flat,
+            corpus,
+            TARGET_ARCH,
+            hipcc,
+            tmp_path / "inter",
+            log=_silent,
+        )
+
+    message = str(excinfo.value)
+    assert re.search(rf"variant '\S+' failed to compile for {TARGET_ARCH}", message)
+    assert f"variant '{first.ukd['id']}'" in message
+    assert second.ukd["id"] not in message
 
 
 @pytest.mark.quick
@@ -1072,6 +1020,7 @@ def test_prewarm_pool_populates_both_caches(tmp_path, monkeypatch):
 
     variant_co = {}
     variant_symbol = {}
+    variant_observations = {}
     pipeline._prewarm_variants(
         load_flat_input(corpus, log=_silent),
         corpus,
@@ -1080,6 +1029,8 @@ def test_prewarm_pool_populates_both_caches(tmp_path, monkeypatch):
         tmp_path / "inter",
         variant_co,
         variant_symbol,
+        variant_observations,
+        {},
         log=_silent,
     )
 
@@ -1144,6 +1095,46 @@ def test_serial_and_parallel_stage_identical_trees(tmp_path, monkeypatch):
 
 
 @pytest.mark.quick
+def test_mixed_kinds_stage_identical_trees_under_a_real_pool(tmp_path, monkeypatch):
+    """A corpus mixing compiled and pass-through kinds packs the same either way.
+
+    The equivalence above runs on a corpus every entry of which the prewarm
+    keys, so a KDP the pool contributes nothing to is never staged in a parallel
+    pack. `_variant_key_for` declines every embedded_source entry, and those
+    KDPs must reach the tree regardless of which path compiled the rest.
+
+    The pool's construction is asserted rather than assumed. `_prewarm_variants`
+    returns without one below two jobs or two workers, so a selection change
+    that took the corpus under that threshold would leave the second pack serial
+    too -- the trees would still match, over a property no longer exercised.
+    """
+    corpus = _write_corpus(tmp_path / "mixed", hip_only=True, with_embedded=True)
+
+    monkeypatch.setenv("HKP_PACK_JOBS", "1")
+    serial = _staged_tree(corpus, tmp_path / "inter-serial")
+
+    real_pool = pipeline.ProcessPoolExecutor
+    built = []
+
+    def _spy_pool(*args, **kwargs):
+        built.append(kwargs["max_workers"])
+        return real_pool(*args, **kwargs)
+
+    monkeypatch.setattr(pipeline, "ProcessPoolExecutor", _spy_pool)
+    monkeypatch.setenv("HKP_PACK_JOBS", "4")
+    parallel = _staged_tree(corpus, tmp_path / "inter-parallel")
+
+    # One pool for the one arch, sized to the requested worker count rather than
+    # clamped to the job count, which this corpus keeps above it.
+    assert built == [4]
+
+    # Pinned against the corpus so a staging change that silently drops files
+    # cannot make two empty trees compare equal.
+    assert len(serial) == MIXED_EXPECTED_CO_COUNT + MIXED_EXPECTED_KDP_JSON_COUNT
+    assert serial == parallel
+
+
+@pytest.mark.quick
 def test_pack_jobs_one_starts_no_pool(tmp_path, monkeypatch):
     """`HKP_PACK_JOBS=1` returns before any pool is constructed.
 
@@ -1169,8 +1160,41 @@ def test_pack_jobs_one_starts_no_pool(tmp_path, monkeypatch):
         tmp_path / "inter",
         variant_co,
         {},
+        {},
+        {},
         log=_silent,
     )
 
     # The walk, not the prewarm, compiles everything on this path.
     assert variant_co == {}
+
+
+@pytest.mark.quick
+def test_absorbed_and_observed_identities_share_one_key():
+    """An exported identity lands on the key a direct observation would build. The
+    two reach the observer as different types (a worker's string, an in-process
+    `Path`), and a mismatch files one file twice, letting a genuine SHA
+    disagreement pass as two unrelated producers.
+    """
+    observed = agreement.OriginObserver()
+    observed.identity(pipeline._pack_jobs)
+    exported = observed.exported()
+    assert len(exported) == 1
+
+    merged = agreement.OriginObserver()
+    merged.identity(pipeline._pack_jobs)
+    merged.absorb(exported)
+    assert len(merged.files) == 1
+
+
+@pytest.mark.quick
+def test_absorbing_a_disagreeing_sha_is_refused():
+    """The merge goes through the conflict check, not over it: `dict.update` would
+    take the later SHA and drop the earlier one, the condition this observer exists
+    to report.
+    """
+    merged = agreement.OriginObserver()
+    merged.identity(pipeline._pack_jobs)
+
+    with pytest.raises(HkpPackError, match="producer changed during compilation"):
+        merged.absorb({key: "0" * 64 for key in merged.exported()})

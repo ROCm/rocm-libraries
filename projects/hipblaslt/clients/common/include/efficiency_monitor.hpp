@@ -25,6 +25,67 @@
 #include <vector>
 #include <memory>
 
+#ifndef _WIN32
+#include <amd_smi/amdsmi.h>
+
+// True when AMD-SMI is answering correctly but the platform can't provide
+// the requested telemetry (e.g. some paravirtualized GPU setups don't expose
+// a real PCI BDF), as opposed to a genuine AMD-SMI failure.
+inline bool isAmdsmiTelemetryUnavailable(amdsmi_status_t status)
+{
+    return status == AMDSMI_STATUS_NOT_SUPPORTED;
+}
+
+// Best-effort AMD-SMI processor index for `hipDeviceIndex` when BDF matching
+// isn't available, clamped to a valid index.
+inline uint32_t selectFallbackAmdsmiIndex(int hipDeviceIndex, uint32_t amdsmiDeviceCount)
+{
+    if(amdsmiDeviceCount == 0)
+        return 0;
+    if(hipDeviceIndex <= 0)
+        return 0;
+
+    uint32_t index = static_cast<uint32_t>(hipDeviceIndex);
+    return index < amdsmiDeviceCount ? index : amdsmiDeviceCount - 1;
+}
+
+// Outcome of one step of GetAMDSMIIndex()'s BDF-matching loop.
+enum class BdfMatchAction
+{
+    ContinueSearch, // no match yet; check the next processor
+    ReturnIndex,     // done - use BdfMatchDecision::index
+    Throw            // genuine AMD-SMI failure
+};
+
+struct BdfMatchDecision
+{
+    BdfMatchAction action;
+    uint32_t       index = 0;
+};
+
+// Decision logic for one iteration of GetAMDSMIIndex(), factored out so it's
+// unit testable without a GPU/AMD-SMI session.
+inline BdfMatchDecision decideBdfMatch(amdsmi_status_t status,
+                                        uint32_t        smiIndex,
+                                        uint64_t        amdSmiPciId,
+                                        uint64_t        hipPciId,
+                                        int             hipDeviceIndex,
+                                        uint32_t        amdsmiDeviceCount)
+{
+    if(isAmdsmiTelemetryUnavailable(status))
+        return {BdfMatchAction::ReturnIndex,
+                selectFallbackAmdsmiIndex(hipDeviceIndex, amdsmiDeviceCount)};
+
+    if(status != AMDSMI_STATUS_SUCCESS)
+        return {BdfMatchAction::Throw, 0};
+
+    if(amdSmiPciId == hipPciId)
+        return {BdfMatchAction::ReturnIndex, smiIndex};
+
+    return {BdfMatchAction::ContinueSearch, 0};
+}
+#endif
+
 class EfficiencyMonitor
 {
 public:

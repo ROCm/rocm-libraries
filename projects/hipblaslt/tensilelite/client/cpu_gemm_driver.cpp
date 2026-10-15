@@ -101,7 +101,6 @@ namespace
         static constexpr rocisa::DataType value = rocisa::DataType::BFloat16;
     };
 
-#ifdef TENSILE_USE_FP8_BF8
     template <>
     struct TypeTraits<TensileLite::Float8>
     {
@@ -125,7 +124,6 @@ namespace
     {
         static constexpr rocisa::DataType value = rocisa::DataType::BFloat8_fnuz;
     };
-#endif
 
 #ifndef _WIN32
     template <>
@@ -176,12 +174,10 @@ namespace
         case rocisa::DataType::Float:    return [](float v) { return v; };
         case rocisa::DataType::Half:     return &quantizeThroughNarrow<TensileLite::Half>;
         case rocisa::DataType::BFloat16: return &quantizeThroughNarrow<TensileLite::BFloat16>;
-#ifdef TENSILE_USE_FP8_BF8
         case rocisa::DataType::Float8:        return &quantizeThroughNarrow<TensileLite::Float8>;
         case rocisa::DataType::BFloat8:       return &quantizeThroughNarrow<TensileLite::BFloat8>;
         case rocisa::DataType::Float8_fnuz:   return &quantizeThroughNarrow<TensileLite::Float8_fnuz>;
         case rocisa::DataType::BFloat8_fnuz:  return &quantizeThroughNarrow<TensileLite::BFloat8_fnuz>;
-#endif
         default:
             throw std::runtime_error("Unsupported compute-input type for golden GEMM quantizer.");
         }
@@ -1029,12 +1025,10 @@ int main(int argc, char* argv[])
         if(s == "tf32")           { out = rocisa::DataType::Float;        return true; }
         if(s == "f16")            { out = rocisa::DataType::Half;         return true; }
         if(s == "bf16")           { out = rocisa::DataType::BFloat16;     return true; }
-#ifdef TENSILE_USE_FP8_BF8
         if(s == "f8")             { out = rocisa::DataType::Float8;       return true; }
         if(s == "bf8")            { out = rocisa::DataType::BFloat8;      return true; }
         if(s == "f8fnuz")         { out = rocisa::DataType::Float8_fnuz;  return true; }
         if(s == "bf8fnuz")        { out = rocisa::DataType::BFloat8_fnuz; return true; }
-#endif
 #ifndef _WIN32
         if(s == "f4")             { out = rocisa::DataType::Float4;       return true; }
 #endif
@@ -1178,12 +1172,10 @@ int main(int argc, char* argv[])
         if(typeBStr == "f64")        return callB(double{});
         if(typeBStr == "f16")        return callB(Half{});
         if(typeBStr == "bf16")       return callB(BFloat16{});
-#ifdef TENSILE_USE_FP8_BF8
         if(typeBStr == "f8")         return callB(Float8{});
         if(typeBStr == "bf8")        return callB(BFloat8{});
         if(typeBStr == "f8fnuz")     return callB(Float8_fnuz{});
         if(typeBStr == "bf8fnuz")    return callB(BFloat8_fnuz{});
-#endif
 #ifndef _WIN32
         if(typeBStr == "f4")         return callB(Float4x2{});
 #endif
@@ -1197,12 +1189,10 @@ int main(int argc, char* argv[])
         if(typeAStr == "f64")        return dispatchB(double{});
         if(typeAStr == "f16")        return dispatchB(Half{});
         if(typeAStr == "bf16")       return dispatchB(BFloat16{});
-#ifdef TENSILE_USE_FP8_BF8
         if(typeAStr == "f8")         return dispatchB(Float8{});
         if(typeAStr == "bf8")        return dispatchB(BFloat8{});
         if(typeAStr == "f8fnuz")     return dispatchB(Float8_fnuz{});
         if(typeAStr == "bf8fnuz")    return dispatchB(BFloat8_fnuz{});
-#endif
 #ifndef _WIN32
         if(typeAStr == "f4")         return dispatchB(Float4x2{});
 #endif

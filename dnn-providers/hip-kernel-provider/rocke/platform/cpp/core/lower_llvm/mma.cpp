@@ -19,12 +19,15 @@
  * reached from _op_tile_mma's op_id routing, which mirrors the Python CDNA
  * ISABackend.emit_mma rebuilding ``tile.<op_id>`` and re-dispatching.
  */
+#include "rocke/mfma_scale_internal.h"
+#include "rocke/tf32_internal.h"
 #include <stdio.h>
 #include <string.h>
 
 #include "rocke/ir.h"
 #include "rocke/lower_llvm.h"
 #include "rocke/lower_llvm_internal.h"
+#include "rocke/wmma_scale_internal.h"
 
 namespace ckc
 {
@@ -35,6 +38,7 @@ namespace ckc
 static void _op_tile_wmma_f32_16x16x16_f16(rocke_lower_t* L, const rocke_op_t* op);
 static void _op_tile_wmma_f32_16x16x16_bf16(rocke_lower_t* L, const rocke_op_t* op);
 static void _emit_wmma(rocke_lower_t* L, const rocke_op_t* op, const char* op_id);
+static void _emit_wmma_scale(rocke_lower_t* L, const rocke_op_t* op);
 static void _op_tile_mma(rocke_lower_t* L, const rocke_op_t* op);
 static void _op_tile_mfma_f32_16x16x32_fp8(rocke_lower_t* L, const rocke_op_t* op);
 static void _op_tile_mfma_f32_16x16x32_bf8(rocke_lower_t* L, const rocke_op_t* op);
@@ -88,6 +92,33 @@ static void _op_tile_mma(rocke_lower_t* L, const rocke_op_t* op)
         rocke_ll_fail(L, ROCKE_ERR_KEY, "tile.mma: missing op_id attribute");
     }
 
+    if(const auto* atom = rocke_gfx950_scaled_mfma(op_id))
+    {
+        if(!L->backend || strcmp(L->backend->gfx, "gfx950") != 0)
+            rocke_ll_fail(L, ROCKE_ERR_NOTIMPL, "scaled MFMA requires gfx950");
+        if(const char* error = rocke_scaled_mfma_error(op_id, op->operands, op->num_operands))
+            rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s", error);
+        if(op->num_results != 1 || strcmp(op->results[0]->type->name, "vec<f32x16>") != 0)
+            rocke_ll_fail(L, ROCKE_ERR_VALUE, "scaled MFMA result must be vec<f32x16>");
+        rocke_ll_need(L, "mfma.scale.f32.32x32x64.f8f6f4.v8i32.v8i32");
+        rocke_ll_emitf(
+            L,
+            "  %s = call <16 x float> @llvm.amdgcn.mfma.scale.f32.32x32x64.f8f6f4.v8i32.v8i32("
+            "<8 x i32> %s, <8 x i32> %s, <16 x float> %s, i32 %d, i32 %d, i32 0, i32 %s, i32 0, "
+            "i32 %s)",
+            mma_result_name(L, op),
+            rocke_ll_operand(L, op->operands[0]),
+            rocke_ll_operand(L, op->operands[1]),
+            rocke_ll_operand(L, op->operands[2]),
+            rocke_mfma_matrix_format(atom->a_dtype),
+            rocke_mfma_matrix_format(atom->b_dtype),
+            rocke_ll_operand(L, op->operands[3]),
+            rocke_ll_operand(L, op->operands[4]));
+        return;
+    }
+    if(rocke_tf32_mma_count(op_id) && strcmp(L->backend->gfx, "gfx942") != 0)
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "XF32 MMA requires gfx942");
+
     /* f16 / bf16 / f32 dense atoms resolve from the table; the scaled / fp4 /
      * fp6 / fp8-bf8 / hero atoms keep their dedicated bodies below. */
     if(_try_emit_mfma_table(L, op, op_id))
@@ -133,6 +164,10 @@ static void _op_tile_mma(rocke_lower_t* L, const rocke_op_t* op)
          * reject (Python ISABackend.emit_wmma raises NotImplementedError). The
          * gfx12-specific op_ids ("wmma_gfx12_*") can only occur on RDNA4. */
     }
+    else if(rocke_gfx1250_scaled_wmma(op_id))
+    {
+        _emit_wmma_scale(L, op);
+    }
     else if(strncmp(op_id, "wmma_", 5) == 0)
     {
         if(L->backend && L->backend->kind == ROCKE_LL_ISA_RDNA)
@@ -162,6 +197,93 @@ static void _op_tile_mma(rocke_lower_t* L, const rocke_op_t* op)
     {
         rocke_ll_fail(L, ROCKE_ERR_NOTIMPL, "tile.mma: unsupported op_id '%s'", op_id);
     }
+}
+
+/* Emit the gfx1250 scaled-WMMA intrinsic using the resolved operand contract.
+ * The contract supplies packed carrier types, matrix and scale format selectors,
+ * and the declaration identity. This instruction family requires LLVM 23. */
+static void _emit_wmma_scale(rocke_lower_t* L, const rocke_op_t* op)
+{
+    const char* intrinsic;
+    const char* decl_key;
+    const char* scale_ty;
+    const char* op_name;
+
+    if(!rocke_ll_live(L))
+    {
+        return;
+    }
+    const rocke_mma_op_t* atom = rocke_gfx1250_scaled_wmma_from_op(op);
+    if(!atom)
+    {
+        rocke_ll_fail(L, ROCKE_ERR_NOTIMPL, "unsupported scaled WMMA op '%s'", op->name);
+    }
+    const rocke_scaled_wmma_op_t contract = rocke_scaled_wmma_contract(atom);
+    const rocke_scaled_wmma_op_t* spec = &contract;
+    char concrete_name[160];
+    snprintf(concrete_name, sizeof(concrete_name), "tile.%s", spec->op_id);
+    op_name = concrete_name;
+    if(!L->backend || strcmp(L->backend->gfx, "gfx1250") != 0)
+    {
+        rocke_ll_fail(L,
+                      ROCKE_ERR_NOTIMPL,
+                      "%s is only available on gfx1250 (got %s)",
+                      op_name,
+                      L->backend ? L->backend->gfx : "(unknown)");
+    }
+    if(L->flavor != ROCKE_LLVM_FLAVOR_LLVM23)
+    {
+        rocke_ll_fail(L,
+                      ROCKE_ERR_NOTIMPL,
+                      "%s requires llvm23 (ROCm 7.13+), got %s",
+                      op_name,
+                      rocke_llvm_flavor_name(L->flavor));
+    }
+    if(op->num_operands != 5)
+    {
+        rocke_ll_fail(
+            L, ROCKE_ERR_VALUE, "%s expects 5 operands, got %d", op_name, op->num_operands);
+    }
+
+    char packed_type[8];
+    snprintf(packed_type, sizeof(packed_type), "i%d", rocke_scale_word_bits(&spec->scales));
+    scale_ty = packed_type;
+    if(strcmp(op->operands[3]->type->name, scale_ty) != 0
+       || strcmp(op->operands[4]->type->name, scale_ty) != 0)
+    {
+        rocke_ll_fail(L,
+                      ROCKE_ERR_VALUE,
+                      "%s expects %s scale operands, got %s/%s",
+                      op_name,
+                      scale_ty,
+                      op->operands[3]->type->name,
+                      op->operands[4]->type->name);
+    }
+
+    // Physical declaration identity comes from the resolved backend contract.
+    decl_key = spec->declaration_key;
+    intrinsic = spec->intrinsic;
+    rocke_ll_need(L, decl_key);
+    rocke_ll_emitf(L,
+                   "  %s = call <8 x float> @%s("
+                   "i32 %d, <%d x i32> %s, i32 %d, <%d x i32> %s, "
+                   "i16 0, <8 x float> %s, i32 0, i32 %d, %s %s, "
+                   "i32 0, i32 %d, %s %s, i1 false, i1 false)",
+                   mma_result_name(L, op),
+                   intrinsic,
+                   spec->matrix_formats[0],
+                   spec->matrix_words[0],
+                   rocke_ll_operand(L, op->operands[0]),
+                   spec->matrix_formats[1],
+                   spec->matrix_words[1],
+                   rocke_ll_operand(L, op->operands[1]),
+                   rocke_ll_operand(L, op->operands[2]),
+                   spec->scale_formats[0],
+                   scale_ty,
+                   rocke_ll_operand(L, op->operands[3]),
+                   spec->scale_formats[1],
+                   scale_ty,
+                   rocke_ll_operand(L, op->operands[4]));
 }
 
 /* ====================================================================== */
@@ -530,6 +652,18 @@ typedef struct _mfma_spec
 } _mfma_spec_t;
 
 static const _mfma_spec_t MFMA_SPECS[] = {
+    {"mfma_f32_32x32x4_xf32",
+     "mfma.f32.32x32x4.xf32",
+     "llvm.amdgcn.mfma.f32.32x32x4.xf32",
+     "<2 x i32>",
+     "<16 x float>",
+     "<2 x float>"},
+    {"mfma_f32_16x16x8_xf32",
+     "mfma.f32.16x16x8.xf32",
+     "llvm.amdgcn.mfma.f32.16x16x8.xf32",
+     "<2 x i32>",
+     "<4 x float>",
+     "<2 x float>"},
     {"mfma_f32_16x16x16_f16",
      "mfma.f32.16x16x16f16",
      "llvm.amdgcn.mfma.f32.16x16x16f16",
@@ -807,17 +941,34 @@ static void _op_tile_mfma_scale_f32_16x16x128_f8f6f4(rocke_lower_t* L, const roc
     {
         b_packed = rocke_ll_operand(L, b);
     }
-    rocke_ll_emitf(L,
-                   "  %s = call <4 x float> "
-                   "@llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4("
-                   "<8 x i32> %s, <8 x i32> %s, <4 x float> %s, "
-                   "i32 0, i32 0, i32 0, i32 0, i32 %s, i32 0, i32 %s, i32 0)",
-                   mma_result_name(L, op),
-                   a_packed,
-                   b_packed,
-                   rocke_ll_operand(L, c),
-                   rocke_ll_operand(L, a_scale),
-                   rocke_ll_operand(L, b_scale));
+    if(L->flavor == ROCKE_LLVM_FLAVOR_LLVM23)
+    {
+        rocke_ll_emitf(L,
+                       "  %s = call <4 x float> "
+                       "@llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4("
+                       "<8 x i32> %s, <8 x i32> %s, <4 x float> %s, "
+                       "i32 0, i32 0, i32 0, i32 %s, i32 0, i32 %s)",
+                       mma_result_name(L, op),
+                       a_packed,
+                       b_packed,
+                       rocke_ll_operand(L, c),
+                       rocke_ll_operand(L, a_scale),
+                       rocke_ll_operand(L, b_scale));
+    }
+    else
+    {
+        rocke_ll_emitf(L,
+                       "  %s = call <4 x float> "
+                       "@llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4("
+                       "<8 x i32> %s, <8 x i32> %s, <4 x float> %s, "
+                       "i32 0, i32 0, i32 0, i32 0, i32 %s, i32 0, i32 %s, i32 0)",
+                       mma_result_name(L, op),
+                       a_packed,
+                       b_packed,
+                       rocke_ll_operand(L, c),
+                       rocke_ll_operand(L, a_scale),
+                       rocke_ll_operand(L, b_scale));
+    }
 }
 
 static void _op_tile_mfma_f32_16x16x128_fp4(rocke_lower_t* L, const rocke_op_t* op)
@@ -923,8 +1074,8 @@ static void _op_tile_mfma_f32_16x16x128_fp8(rocke_lower_t* L, const rocke_op_t* 
 {
     /* UNSCALED fp8 16x16x128 hero atom (L6): reuse the f8f6f4 scaled intrinsic
      * with both E8M0 scales pinned to 0 (2^0 == 1.0) so it is numerically a
-     * plain unscaled fp8 MFMA. Uses a dedicated decl key for the 9-arg LLVM22
-     * signature -- it does NOT touch the 11-arg MX-scaled decl. */
+     * plain unscaled fp8 MFMA. Its dedicated 9-arg decl key preserves the
+     * LLVM20/22 MX-scaled declaration, which remains the 11-arg form. */
     const rocke_value_t *a, *b, *c;
     const char *a_packed, *b_packed;
     const char *a_ty, *b_ty;

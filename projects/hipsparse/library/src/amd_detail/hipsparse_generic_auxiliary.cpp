@@ -554,7 +554,6 @@ hipsparseStatus_t hipsparseCreateConstSlicedEll(hipsparseConstSpMatDescr_t* spMa
         hipsparse::hipDataTypeToHCCDataType(valueType)));
 }
 
-#ifdef HIPSPARSE_WITH_SPMV_BSR
 hipsparseStatus_t hipsparseCreateBsr(hipsparseSpMatDescr_t* spMatDescr,
                                      int64_t                mb,
                                      int64_t                nb,
@@ -659,7 +658,6 @@ hipsparseStatus_t hipsparseCreateConstBsr(hipsparseConstSpMatDescr_t* spMatDescr
 
     return status;
 }
-#endif /* HIPSPARSE_WITH_SPMV_BSR */
 
 hipsparseStatus_t hipsparseCreateCooAoS(hipsparseSpMatDescr_t* spMatDescr,
                                         int64_t                rows,

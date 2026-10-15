@@ -116,11 +116,12 @@ the source.
 
 3. **Blocked triangular solve.** The solve's arithmetic splits into per-block
    forward substitution (irreducibly scalar VALU) and a rank update against
-   already-solved blocks (a matmul, so MFMA). The substitution shrinks as the
-   *square* of the block size, so smaller blocks move more of the `O(C^3)` work
-   onto the MFMA pipe at the cost of one more block step. `solve_block` exposes
-   the trade; the degenerate `solve_block == chunk` is the original unblocked
-   scalar solve.
+   already-solved blocks (a matmul, so MFMA). One block of size `b` costs
+   `O(b²)` scalar work, but there are `C / b` blocks, so the total is `≈ C·b/2`
+   — **linear** in the block size, not quadratic. Smaller blocks therefore move
+   more of the `O(C^3)` work onto the MFMA pipe roughly in proportion, at the
+   cost of one more block step. `solve_block` exposes the trade; the degenerate
+   `solve_block == chunk` is the original unblocked scalar solve.
 
    This step introduced a race: `ds_write_b128` followed by a `ds_read_b128`
    from a *different* lane needs an explicit `s_waitcnt lgkmcnt(0)` between
