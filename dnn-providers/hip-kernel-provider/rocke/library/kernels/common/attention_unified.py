@@ -2994,7 +2994,7 @@ def _num_segments(problem: UnifiedAttentionProblem, paged: bool = True) -> int:
         # assumed from gfx942, whose CU count, LDS, and reduce cost all differ:
         #   - paged decode (``_gfx950_3d_decode_ctas_per_segment``): about 4
         #     CTAs per CU, at most 64 segments and at least 4. The kernel loads
-        #     its page ids per wave (``_gfx950_3d_wave_page_id_load``), so no
+        #     its page ids per wave (``_wave_page_id_load_3d``), so no
         #     page-table load is left for more CTAs to hide. When 64 segments
         #     still leave fewer than 2 CTAs per CU, the kernel runs 64-token
         #     tiles (``_gfx950_3d_tile_size_override``) with 64 segments, 128
@@ -3149,13 +3149,22 @@ def _gfx950_3d_tile_size_override(
     return None
 
 
-def _gfx950_3d_wave_page_id_load(
+def _wave_page_id_load_3d(
     problem: UnifiedAttentionProblem, *, arch: str | None = None
 ) -> bool:
-    """gfx950 3D ``use_wave_page_id_load``: on for decode in the measured
+    """3D ``use_wave_page_id_load``. gfx950: on for decode in the measured
     scope of the split rule (``_gfx950_3d_decode_ctas_per_segment``), whose
-    segment counts assume it."""
-    return _gfx950_3d_decode_ctas_per_segment(problem, arch=arch) is not None
+    segment counts assume it. gfx942: on with the K/V LDS swizzle
+    (``_kv_lds_swizzle_3d``), with which it was measured, for page-sized tiles."""
+    arch = arch or _resolve_attention_arch()
+    if arch == "gfx950":
+        return _gfx950_3d_decode_ctas_per_segment(problem, arch=arch) is not None
+    if arch == "gfx942":
+        return (
+            _kv_lds_swizzle_3d(problem, arch=arch)
+            and _gfx942_3d_tile_size_override(problem, arch=arch) is None
+        )
+    return False
 
 
 def _kv_lds_swizzle_3d(
@@ -3478,7 +3487,7 @@ def _tiled_3d_cache_key(problem: UnifiedAttentionProblem) -> Tuple:
         _kv_cache_policy_3d(problem),
         _gfx950_3d_tile_size_override(problem),
         _kv_lds_swizzle_3d(problem),
-        _gfx950_3d_wave_page_id_load(problem),
+        _wave_page_id_load_3d(problem),
     )
     if _resolve_attention_arch() == "gfx1250":
         sp = _tiled_3d_spec_from_problem(problem)

@@ -167,12 +167,14 @@ typedef struct rocke_unified_attention_3d_tiled_spec
      * rocke_cache_policy_from_name). gfx942's wide K/V loader takes "all" or
      * "stream"; fp8 K/V keeps "all". */
     const char* kv_cache_policy; /* "all" */
-    /* K/V LDS rows store their 16-byte chunks XOR-permuted by the row (paged
-     * fp16/bf16 K/V only; on gfx942 with the wide K/V loader only). */
+    /* K/V LDS rows store their 16-byte chunks XOR-permuted by the row.
+     * Implemented for paged fp16/bf16 K/V (on gfx942 for the wide K/V loader),
+     * which can be extended. */
     bool use_kv_lds_swizzle; /* False */
     /* The wave loads the segment's page ids 64 at a time, one per lane; tiles
-     * read theirs with v_readlane (paged fp16/bf16 K/V only). gfx950 only;
-     * gfx942 accepts false. */
+     * read theirs with v_readlane. Paged K/V; implemented for fp16/bf16 (on
+     * gfx942 for the wide K/V loader with page-sized tiles), which can be
+     * extended. */
     bool use_wave_page_id_load; /* False */
 } rocke_unified_attention_3d_tiled_spec_t;
 

@@ -156,9 +156,16 @@ class UnifiedAttention3DTiledSpec:
     # K/V LDS tiles store each row's 16-byte chunks XOR-permuted by the row
     # (chunk q of row r at q ^ (r % (head_size // 8))), which spreads the QK
     # and PV reads over the LDS banks. The wide loader stores the permuted
-    # chunks, so the tiles stay unpadded. Paged fp16/bf16 K/V with the wide
-    # loader only.
+    # chunks, so the tiles stay unpadded. Implemented for paged fp16/bf16 K/V
+    # on the wide loader, which can be extended to the async loader (permuted
+    # source chunks, as on gfx950) and to strided and fp8 K/V.
     use_kv_lds_swizzle: bool = False
+    # The wave loads the segment's page-table entries 64 at a time, one per
+    # lane, and each tile reads its page id from those registers (v_readlane),
+    # so no page-table load sits on the KV loop's critical path. Paged K/V;
+    # implemented for the fp16/bf16 wide loader with page-sized tiles, which
+    # can be extended to the async and fp8 loaders and to other tile sizes.
+    use_wave_page_id_load: bool = False
 
     def __post_init__(self):
         if self.kv_layout not in ("paged", "strided"):
@@ -197,6 +204,14 @@ class UnifiedAttention3DTiledSpec:
             raise ValueError("use_kv_lds_swizzle needs paged fp16/bf16 KV")
         if self.use_kv_lds_swizzle and not self.use_wide_kv_load:
             raise ValueError("use_kv_lds_swizzle needs the wide K/V loader")
+        if self.use_wave_page_id_load and (
+            self.kv_layout != "paged" or self.kv_storage_dtype is not None
+        ):
+            raise ValueError("use_wave_page_id_load needs paged fp16/bf16 KV")
+        if self.use_wave_page_id_load and not self.use_wide_kv_load:
+            raise ValueError("use_wave_page_id_load needs the wide K/V loader")
+        if self.use_wave_page_id_load and self.tile_size != self.block_size:
+            raise ValueError("use_wave_page_id_load needs page-sized tiles")
 
     @property
     def num_queries_per_kv(self) -> int:
@@ -250,6 +265,7 @@ class UnifiedAttention3DTiledSpec:
             "dg" if self.use_decode_grid else "",
             f"kvcp{self.kv_cache_policy}" if self.kv_cache_policy != "all" else "",
             "kvswz" if self.use_kv_lds_swizzle else "",
+            "wpid" if self.use_wave_page_id_load else "",
             "stridedkv" if self.kv_layout == "strided" else "",
         )
 
@@ -760,18 +776,42 @@ def build_unified_attention_3d_tiled(
         )
         return b.add(b.mul(chunk, b.const_i32(8)), b.mod(col, b.const_i32(8)))
 
-    def _issue_wide_load(src, lds, kv_tile_idx: Value, buf_idx: Value) -> None:
+    WAVE_PAGE_ID_LOAD = spec.use_wave_page_id_load
+    if WAVE_PAGE_ID_LOAD:
+        assert spec.use_wide_kv_load and not KV_FP8 and WIDE_OK and T == BS
+
+    def _issue_wide_load(
+        src, lds, kv_tile_idx: Value, buf_idx: Value, page_id: Value | None
+    ) -> None:
         for call in range(wide_chunks_per_thread):
             chunk_id = b.add(b.mul(b.const_i32(call), b.const_i32(THREADS)), tid)
             linear_half = b.mul(chunk_id, b.const_i32(WIDE_ELEMS))
             row = b.div(linear_half, b.const_i32(HD))
             col = b.mod(linear_half, b.const_i32(HD))
-            voff, _ = paged_kv_desc.offset(
-                b, tile_idx=kv_tile_idx, linear_half=linear_half, kv_head=kv_head_idx
-            )
-            # paged_kv_desc uses BYTE strides; global_load_vN is element-indexed,
-            # so convert (exact: every stride is a multiple of KV_BYTES).
-            elem_off = b.div(voff, b.const_i32(KV_BYTES))
+            if page_id is not None:
+                # The page base plus the chunk's offset within the page, which
+                # is loop-invariant: no page-table lookup per copy.
+                elem_off = b.add(
+                    b.mul(page_id, b.const_i32(BS * NUM_KV * HD)),
+                    b.add(
+                        b.add(
+                            b.mul(row, b.const_i32(NUM_KV * HD)),
+                            b.mul(kv_head_idx, b.const_i32(HD)),
+                        ),
+                        col,
+                    ),
+                )
+            else:
+                voff, _ = paged_kv_desc.offset(
+                    b,
+                    tile_idx=kv_tile_idx,
+                    linear_half=linear_half,
+                    kv_head=kv_head_idx,
+                )
+                # paged_kv_desc uses BYTE strides; global_load_vN is
+                # element-indexed, so convert (exact: every stride is a
+                # multiple of KV_BYTES).
+                elem_off = b.div(voff, b.const_i32(KV_BYTES))
             vec = b.global_load_vN(
                 src,
                 elem_off,
@@ -827,26 +867,80 @@ def build_unified_attention_3d_tiled(
 
     WIDE_KV = spec.use_wide_kv_load and not KV_FP8 and WIDE_OK
 
-    def _issue_k(tile_idx: Value, buf_idx: Value) -> None:
+    def _issue_k(tile_idx: Value, buf_idx: Value, page_id: Value | None) -> None:
         if KV_FP8:
             _issue_fp8_dequant_loads(tile_idx, buf_idx, "K")
         elif WIDE_KV:
-            _issue_wide_load(key, K_lds, tile_idx, buf_idx)
+            _issue_wide_load(key, K_lds, tile_idx, buf_idx, page_id)
         else:
             _issue_k_load(tile_idx, buf_idx)
 
-    def _issue_v(tile_idx: Value, buf_idx: Value) -> None:
+    def _issue_v(tile_idx: Value, buf_idx: Value, page_id: Value | None) -> None:
         if KV_FP8:
             _issue_fp8_dequant_loads(tile_idx, buf_idx, "V")
         elif WIDE_KV:
-            _issue_wide_load(value, V_lds, tile_idx, buf_idx)
+            _issue_wide_load(value, V_lds, tile_idx, buf_idx, page_id)
         else:
             _issue_v_load(tile_idx, buf_idx)
 
-    _issue_k(tile_start, b.const_i32(0))
+    first_page_id = None
+    if WAVE_PAGE_ID_LOAD:
+        # The wave holds a 64-page window of the segment's page table, one id
+        # per lane. A tile is one page, and it starts below seq_len, so its
+        # page is always one of the sequence's.
+        seq_pages = b.div(b.add(seq_len, b.const_i32(BS - 1)), b.const_i32(BS))
+        seg_first_page = tile_start
+
+        def _load_page_id_window(rel_page: Value) -> Value:
+            # Lane l: the id of the segment's page rel_page + l (0 past the
+            # sequence's last page: never used).
+            pg = b.add(b.add(seg_first_page, rel_page), tid)
+            return b.masked_global_load(
+                block_tables,
+                b.add(seq_base, pg),
+                b.cmp_lt(pg, seq_pages),
+                b.const_i32(0),
+                dtype=I32,
+                align=4,
+            )
+
+        def _window_tile_page_id(page_id_window: Value, kv_tile_idx: Value) -> Value:
+            lane = b.mod(b.sub(kv_tile_idx, seg_first_page), b.const_i32(64))
+            return b.readlane(page_id_window, lane)
+
+        def _refill_page_id_window(page_id_window: Value, kv_tile_idx: Value) -> Value:
+            # The window for the next iteration: if tile kv_tile_idx + 2 starts
+            # a new window, load it now; the loop-top wait completes it before
+            # the next iteration reads it.
+            t2 = b.add(kv_tile_idx, b.const_i32(2))
+            rel2 = b.sub(t2, seg_first_page)
+            cross = b.land(
+                b.cmp_eq(b.mod(rel2, b.const_i32(64)), b.const_i32(0)),
+                b.cmp_lt(t2, tile_end),
+            )
+            # A wave-uniform 0/1-trip loop is an if with a result (scf_if has
+            # none): 0 trips keep the window, 1 trip loads the next one. It
+            # compiles to a scalar branch around the load.
+            refill = b.scf_for_iter(
+                b.const_i32(0),
+                b.select(cross, b.const_i32(1), b.const_i32(0)),
+                b.const_i32(1),
+                [("pid_window_r", page_id_window)],
+                iv_name="pid_window_load",
+            )
+            with refill as (_iv, _w):
+                b.scf_yield(_load_page_id_window(rel2))
+            return refill.results[0]
+
+        first_page_id_window = _load_page_id_window(b.const_i32(0))
+        first_page_id = _window_tile_page_id(first_page_id_window, tile_start)
+    _issue_k(tile_start, b.const_i32(0), first_page_id)
 
     cur_buf_init = b.const_i32(0)
     iter_args.append(("cur_buf", cur_buf_init))
+    if WAVE_PAGE_ID_LOAD:
+        iter_args.append(("pid", first_page_id))
+        iter_args.append(("pid_window", first_page_id_window))
 
     # LICM hoist: per-row invariants that are constant across all KV tiles.
     # qp_r, qh_r, row_ok, and causal_lim depend only on CTA-level constants
@@ -885,6 +979,7 @@ def build_unified_attention_3d_tiled(
         l_val = carry[1]
         acc_vals = [carry[2 + n] for n in range(PV_N_TILES)]
         cur_buf = carry[2 + PV_N_TILES]
+        cur_page_id = carry[3 + PV_N_TILES] if WAVE_PAGE_ID_LOAD else None
         nxt_buf = b.sub(b.const_i32(1), cur_buf)
         v_buf = b.const_i32(0)
         tile_off = b.mul(kv_tile_iv, b.const_i32(T))
@@ -895,6 +990,12 @@ def build_unified_attention_3d_tiled(
 
         b.s_waitcnt(vmcnt=0, lgkmcnt=0)
         b.sync()
+        # Page id of the next tile, for its K copies below.
+        nxt_page_id = None
+        if WAVE_PAGE_ID_LOAD:
+            # Read from the window in registers: no load in the loop.
+            page_id_window = carry[4 + PV_N_TILES]
+            nxt_page_id = _window_tile_page_id(page_id_window, safe_next_tile)
 
         # QK
         S_n = []
@@ -909,8 +1010,10 @@ def build_unified_attention_3d_tiled(
                 acc_v = _mfma_16x16x16(b, dtype, K_v, Q_kits[k], acc_v)
             S_n.append(acc_v)
 
-        _issue_v(kv_tile_iv, v_buf)
-        _issue_k(safe_next_tile, nxt_buf)
+        _issue_v(kv_tile_iv, v_buf, cur_page_id)
+        _issue_k(safe_next_tile, nxt_buf, nxt_page_id)
+        if WAVE_PAGE_ID_LOAD:
+            nxt_page_id_window = _refill_page_id_window(page_id_window, kv_tile_iv)
 
         # See attention_tiled_2d.py for the rationale on applying ALiBi /
         # QQ-bias before the select-with-(-inf) (equivalent to Triton's
@@ -1018,6 +1121,9 @@ def build_unified_attention_3d_tiled(
         for n in range(PV_N_TILES):
             yields.append(new_acc[n])
         yields.append(nxt_buf)
+        if WAVE_PAGE_ID_LOAD:
+            yields.append(nxt_page_id)
+            yields.append(nxt_page_id_window)
         b.scf_yield(*yields)
 
     # ---------------- write segment workspace ----------------

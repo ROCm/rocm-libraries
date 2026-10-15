@@ -19,6 +19,8 @@
  *   rocke_gfx942_attention_tiled_3d_issue_fp8_dequant_loads (lines 669-701)
  *   rocke_gfx942_attention_tiled_3d_issue_k               (lines 705-711)
  *   rocke_gfx942_attention_tiled_3d_issue_v               (lines 713-719)
+ *   + the wave page-id window helpers (_load_page_id_window,
+ *     _window_tile_page_id, _refill_page_id_window).
  *   + the paged-KV descriptor build (kv_base_desc + paged_kv_desc, lines 570-602)
  *     emitted inside emit_prologue.
  *
@@ -806,13 +808,76 @@ rocke_value_t* rocke_gfx942_attention_tiled_3d_kv_col(
     return rocke_b_add(B, chunk_col, in_chunk);
 }
 
-/* _issue_wide_load(src, lds, kv_tile_idx, buf_idx) -- lines 645-658.
- * is_value: false => (key, K_lds), true => (value, V_lds). */
+/* _load_page_id_window(rel_page): lane l loads the id of the segment's page
+ * rel_page + l; past the sequence's last page it gets 0, never used. */
+rocke_value_t* rocke_gfx942_attention_tiled_3d_load_page_id_window(
+    rocke_gfx942_attention_tiled_3d_build_ctx_t* ctx, rocke_value_t* rel_page)
+{
+    rocke_value_t* first = rocke_b_add(B, ctx->seg_first_page, rel_page);
+    rocke_value_t* pg = rocke_b_add(B, first, ctx->tid);
+    rocke_value_t* idx = rocke_b_add(B, ctx->seq_base, pg);
+    rocke_value_t* live = rocke_b_cmp_lt(B, pg, ctx->seq_pages);
+    rocke_value_t* other = rocke_b_const_i32(B, 0);
+    return rocke_b_masked_global_load(B, ctx->block_tables, idx, live, other, rocke_i32(), 4);
+}
+
+/* _window_tile_page_id(page_id_window, kv_tile_idx): the tile's page id from
+ * the 64-page window (v_readlane). */
+rocke_value_t* rocke_gfx942_attention_tiled_3d_window_tile_page_id(
+    rocke_gfx942_attention_tiled_3d_build_ctx_t* ctx,
+    rocke_value_t* page_id_window,
+    rocke_value_t* kv_tile_idx)
+{
+    rocke_value_t* rel = rocke_b_sub(B, kv_tile_idx, ctx->seg_first_page);
+    rocke_value_t* lane = rocke_b_mod(B, rel, rocke_b_const_i32(B, 64));
+    return rocke_b_readlane(B, page_id_window, lane);
+}
+
+/* _refill_page_id_window(page_id_window, kv_tile_idx): the window for the next
+ * iteration. If tile kv_tile_idx + 2 starts a new window, load it now; the
+ * loop-top wait completes it before the next iteration reads it. A wave-uniform
+ * 0/1-trip loop is an if with a result (scf_if has none): 0 trips keep the
+ * window, 1 trip loads the next one. It compiles to a scalar branch around the
+ * load. */
+rocke_value_t* rocke_gfx942_attention_tiled_3d_refill_page_id_window(
+    rocke_gfx942_attention_tiled_3d_build_ctx_t* ctx,
+    rocke_value_t* page_id_window,
+    rocke_value_t* kv_tile_idx)
+{
+    rocke_value_t* t2 = rocke_b_add(B, kv_tile_idx, rocke_b_const_i32(B, 2));
+    rocke_value_t* rel2 = rocke_b_sub(B, t2, ctx->seg_first_page);
+    rocke_value_t* rel2_lane = rocke_b_mod(B, rel2, rocke_b_const_i32(B, 64));
+    rocke_value_t* at_start = rocke_b_cmp_eq(B, rel2_lane, rocke_b_const_i32(B, 0));
+    rocke_value_t* t2_live = rocke_b_cmp_lt(B, t2, ctx->tile_end);
+    rocke_value_t* cross = rocke_b_land(B, at_start, t2_live);
+    rocke_value_t* lo = rocke_b_const_i32(B, 0);
+    rocke_value_t* one = rocke_b_const_i32(B, 1);
+    rocke_value_t* zero = rocke_b_const_i32(B, 0);
+    rocke_value_t* trips = rocke_b_select(B, cross, one, zero);
+    rocke_value_t* step = rocke_b_const_i32(B, 1);
+    rocke_iter_arg_t wargs[1];
+    rocke_for_t refill;
+    rocke_value_t* next_window;
+    wargs[0].name = rocke_arena_strdup(&B->arena, "pid_window_r");
+    wargs[0].init = page_id_window;
+    refill = rocke_b_scf_for_iter(B, lo, trips, step, wargs, 1, "pid_window_load", false, true);
+    rocke_b_region_enter(B, refill.body);
+    next_window = rocke_gfx942_attention_tiled_3d_load_page_id_window(ctx, rel2);
+    rocke_b_scf_yield(B, &next_window, 1);
+    rocke_b_region_leave(B);
+    return refill.op->results[0];
+}
+
+/* _issue_wide_load(src, lds, kv_tile_idx, buf_idx, page_id) -- lines 645-658.
+ * is_value: false => (key, K_lds), true => (value, V_lds). page_id: the tile's
+ * page id (the copies add the chunk's offset within the page to its base), or
+ * NULL (the paged-KV descriptor's per-copy table lookup). */
 void rocke_gfx942_attention_tiled_3d_issue_wide_load(
     rocke_gfx942_attention_tiled_3d_build_ctx_t* ctx,
     bool is_value,
     rocke_value_t* kv_tile_idx,
-    rocke_value_t* buf_idx)
+    rocke_value_t* buf_idx,
+    rocke_value_t* page_id)
 {
     const int HD = CFG.HD;
     const int THREADS = CFG.THREADS;
@@ -832,10 +897,23 @@ void rocke_gfx942_attention_tiled_3d_issue_wide_load(
         rocke_value_t* linear_half = rocke_b_mul(B, chunk_id, rocke_b_const_i32(B, WIDE_ELEMS));
         rocke_value_t* row = rocke_b_div(B, linear_half, rocke_b_const_i32(B, HD));
         rocke_value_t* col = rocke_b_mod(B, linear_half, rocke_b_const_i32(B, HD));
-        rocke_value_t* voff
-            = rocke__paged_kv_offset(ctx, kv_tile_idx, linear_half, ctx->kv_head_idx);
-        rocke_value_t* elem_off = rocke_b_div(B, voff, rocke_b_const_i32(B, KV_BYTES));
+        rocke_value_t* elem_off;
         rocke_mem_opts_t opts = ROCKE_MEM_OPTS_INIT;
+        if(page_id != NULL)
+        {
+            rocke_value_t* page_base
+                = rocke_b_mul(B, page_id, rocke_b_const_i32(B, CFG.BS * CFG.NUM_KV * HD));
+            rocke_value_t* row_off = rocke_b_mul(B, row, rocke_b_const_i32(B, CFG.NUM_KV * HD));
+            rocke_value_t* head_off = rocke_b_mul(B, ctx->kv_head_idx, rocke_b_const_i32(B, HD));
+            rocke_value_t* in_page = rocke_b_add(B, rocke_b_add(B, row_off, head_off), col);
+            elem_off = rocke_b_add(B, page_base, in_page);
+        }
+        else
+        {
+            rocke_value_t* voff
+                = rocke__paged_kv_offset(ctx, kv_tile_idx, linear_half, ctx->kv_head_idx);
+            elem_off = rocke_b_div(B, voff, rocke_b_const_i32(B, KV_BYTES));
+        }
         rocke_value_t* vec;
         if(CFG.KV_STREAM)
         {
@@ -934,10 +1012,11 @@ void rocke_gfx942_attention_tiled_3d_issue_fp8_dequant_loads(
     }
 }
 
-/* _issue_k(tile_idx, buf_idx) -- lines 705-711. */
+/* _issue_k(tile_idx, buf_idx, page_id) -- lines 705-711. */
 void rocke_gfx942_attention_tiled_3d_issue_k(rocke_gfx942_attention_tiled_3d_build_ctx_t* ctx,
                                              rocke_value_t* tile_idx,
-                                             rocke_value_t* buf_idx)
+                                             rocke_value_t* buf_idx,
+                                             rocke_value_t* page_id)
 {
     if(CFG.KV_FP8)
     {
@@ -945,7 +1024,7 @@ void rocke_gfx942_attention_tiled_3d_issue_k(rocke_gfx942_attention_tiled_3d_bui
     }
     else if(CFG.WIDE_KV)
     {
-        rocke_gfx942_attention_tiled_3d_issue_wide_load(ctx, false, tile_idx, buf_idx);
+        rocke_gfx942_attention_tiled_3d_issue_wide_load(ctx, false, tile_idx, buf_idx, page_id);
     }
     else
     {
@@ -953,10 +1032,11 @@ void rocke_gfx942_attention_tiled_3d_issue_k(rocke_gfx942_attention_tiled_3d_bui
     }
 }
 
-/* _issue_v(tile_idx, buf_idx) -- lines 713-719. */
+/* _issue_v(tile_idx, buf_idx, page_id) -- lines 713-719. */
 void rocke_gfx942_attention_tiled_3d_issue_v(rocke_gfx942_attention_tiled_3d_build_ctx_t* ctx,
                                              rocke_value_t* tile_idx,
-                                             rocke_value_t* buf_idx)
+                                             rocke_value_t* buf_idx,
+                                             rocke_value_t* page_id)
 {
     if(CFG.KV_FP8)
     {
@@ -964,7 +1044,7 @@ void rocke_gfx942_attention_tiled_3d_issue_v(rocke_gfx942_attention_tiled_3d_bui
     }
     else if(CFG.WIDE_KV)
     {
-        rocke_gfx942_attention_tiled_3d_issue_wide_load(ctx, true, tile_idx, buf_idx);
+        rocke_gfx942_attention_tiled_3d_issue_wide_load(ctx, true, tile_idx, buf_idx, page_id);
     }
     else
     {

@@ -302,6 +302,7 @@ def test_strided_selection_uses_runtime_policy(arch, block_size, monkeypatch):
         use_wide_kv_load=False,
         use_i64_kv_addr=False,
         use_kv_lds_swizzle=False,
+        use_wave_page_id_load=False,
     )
     explicit, explicit_reduce = au._strided_3d_specs_from_problem(
         replace(problem, waves_per_eu=3), arch=arch

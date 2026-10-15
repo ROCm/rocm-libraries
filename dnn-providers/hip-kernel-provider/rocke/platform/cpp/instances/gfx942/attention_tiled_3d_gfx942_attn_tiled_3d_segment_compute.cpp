@@ -126,8 +126,25 @@ void rocke_gfx942_attention_tiled_3d_emit_loop_init(
      * single linear build: acc_zero precedes the buffer rsrc / seq_base / desc. */
     rocke_gfx942_attention_tiled_3d_emit_async_infra(ctx);
 
+    /* ---- the first page-id window (WAVE_PAGE_ID_LOAD) ----
+     * The wave holds a 64-page window of the segment's page table, one id per
+     * lane. A tile is one page, and it starts below seq_len, so its page is
+     * always one of the sequence's. */
+    ctx->first_page_id = NULL;
+    if(cfg->WAVE_PAGE_ID_LOAD)
+    {
+        rocke_value_t* rounded = rocke_b_add(b, ctx->seq_len, rocke_b_const_i32(b, cfg->BS - 1));
+        ctx->seq_pages = rocke_b_div(b, rounded, rocke_b_const_i32(b, cfg->BS));
+        ctx->seg_first_page = ctx->tile_start;
+        ctx->first_page_id_window
+            = rocke_gfx942_attention_tiled_3d_load_page_id_window(ctx, rocke_b_const_i32(b, 0));
+        ctx->first_page_id = rocke_gfx942_attention_tiled_3d_window_tile_page_id(
+            ctx, ctx->first_page_id_window, ctx->tile_start);
+    }
+
     /* ---- first K load + cur_buf_init ---- */
-    rocke_gfx942_attention_tiled_3d_issue_k(ctx, ctx->tile_start, rocke_b_const_i32(b, 0));
+    rocke_gfx942_attention_tiled_3d_issue_k(
+        ctx, ctx->tile_start, rocke_b_const_i32(b, 0), ctx->first_page_id);
     ctx->cur_buf_init = rocke_b_const_i32(b, 0);
 }
 
@@ -143,8 +160,9 @@ void rocke_gfx942_attention_tiled_3d_emit_softmax_loop(
     const rocke_type_t* f32 = rocke_f32();
     int n, k, reg;
 
-    /* iter_args: m, l, acc0..accN-1, cur_buf */
-    int num_iter = 2 + cfg->PV_N_TILES + 1;
+    /* iter_args: m, l, acc0..accN-1, cur_buf (+ pid, pid_window under
+     * WAVE_PAGE_ID_LOAD) */
+    int num_iter = 2 + cfg->PV_N_TILES + 1 + (cfg->WAVE_PAGE_ID_LOAD ? 2 : 0);
     rocke_iter_arg_t* iter_args
         = (rocke_iter_arg_t*)rocke_arena_alloc(&b->arena, (size_t)num_iter * sizeof(*iter_args));
     if(iter_args == NULL)
@@ -180,6 +198,15 @@ void rocke_gfx942_attention_tiled_3d_emit_softmax_loop(
         iter_args[ai].name = rocke_arena_strdup(&b->arena, "cur_buf");
         iter_args[ai].init = ctx->cur_buf_init;
         ai++;
+        if(cfg->WAVE_PAGE_ID_LOAD)
+        {
+            iter_args[ai].name = rocke_arena_strdup(&b->arena, "pid");
+            iter_args[ai].init = ctx->first_page_id;
+            ai++;
+            iter_args[ai].name = rocke_arena_strdup(&b->arena, "pid_window");
+            iter_args[ai].init = ctx->first_page_id_window;
+            ai++;
+        }
     }
 
     /* LICM hoist: the lane's query-row invariants, constant across all KV tiles.
@@ -253,6 +280,10 @@ void rocke_gfx942_attention_tiled_3d_emit_softmax_loop(
         rocke_value_t* next_tile_iv_raw;
         rocke_value_t* in_range_next;
         rocke_value_t* safe_next_tile;
+        rocke_value_t* cur_page_id = NULL;
+        rocke_value_t* page_id_window = NULL;
+        rocke_value_t* nxt_page_id = NULL;
+        rocke_value_t* nxt_page_id_window = NULL;
         rocke_value_t** S_n;
         rocke_value_t* m_new;
         rocke_value_t* l_local;
@@ -287,6 +318,10 @@ void rocke_gfx942_attention_tiled_3d_emit_softmax_loop(
             acc_vals[n] = carry[2 + n];
         }
         cur_buf = carry[2 + cfg->PV_N_TILES];
+        if(cfg->WAVE_PAGE_ID_LOAD)
+        {
+            cur_page_id = carry[3 + cfg->PV_N_TILES];
+        }
         nxt_buf = rocke_b_sub(b, rocke_b_const_i32(b, 1), cur_buf);
         v_buf = rocke_b_const_i32(b, 0);
         tile_off = rocke_b_mul(b, kv_tile_iv, rocke_b_const_i32(b, cfg->T));
@@ -297,6 +332,14 @@ void rocke_gfx942_attention_tiled_3d_emit_softmax_loop(
 
         rocke_b_s_waitcnt(b, 0, 0, -1);
         rocke_b_sync(b);
+        /* Page id of the next tile, for its K copies below. */
+        if(cfg->WAVE_PAGE_ID_LOAD)
+        {
+            /* Read from the window in registers: no load in the loop. */
+            page_id_window = carry[4 + cfg->PV_N_TILES];
+            nxt_page_id = rocke_gfx942_attention_tiled_3d_window_tile_page_id(
+                ctx, page_id_window, safe_next_tile);
+        }
 
         /* ---------------- QK: S^T = K Q^T (16x16x16, K-step 16) ---------------- */
         for(n = 0; n < cfg->QK_N_TILES; n++)
@@ -319,8 +362,13 @@ void rocke_gfx942_attention_tiled_3d_emit_softmax_loop(
             S_n[n] = acc_v;
         }
 
-        rocke_gfx942_attention_tiled_3d_issue_v(ctx, kv_tile_iv, v_buf);
-        rocke_gfx942_attention_tiled_3d_issue_k(ctx, safe_next_tile, nxt_buf);
+        rocke_gfx942_attention_tiled_3d_issue_v(ctx, kv_tile_iv, v_buf, cur_page_id);
+        rocke_gfx942_attention_tiled_3d_issue_k(ctx, safe_next_tile, nxt_buf, nxt_page_id);
+        if(cfg->WAVE_PAGE_ID_LOAD)
+        {
+            nxt_page_id_window = rocke_gfx942_attention_tiled_3d_refill_page_id_window(
+                ctx, page_id_window, kv_tile_iv);
+        }
 
         /* ---------------- masked scores ---------------- */
         for(reg = 0; reg < 4; reg++)
@@ -480,6 +528,11 @@ void rocke_gfx942_attention_tiled_3d_emit_softmax_loop(
                 yields[yi++] = new_acc[n];
             }
             yields[yi++] = nxt_buf;
+            if(cfg->WAVE_PAGE_ID_LOAD)
+            {
+                yields[yi++] = nxt_page_id;
+                yields[yi++] = nxt_page_id_window;
+            }
             rocke_b_scf_yield(b, yields, yi);
         }
     }

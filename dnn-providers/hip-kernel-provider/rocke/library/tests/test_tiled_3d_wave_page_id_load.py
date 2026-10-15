@@ -1,6 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Wave page-id load (``use_wave_page_id_load``) of the gfx950 3D segment kernel."""
+"""Wave page-id load (``use_wave_page_id_load``) of the gfx950 and gfx942 3D
+segment kernels."""
 
 from __future__ import annotations
 
@@ -78,28 +79,106 @@ def test_native_builder_matches_python(tile, swizzle):
     assert actual == expected
 
 
-def test_gfx942_native_builder_rejects_the_knob():
+def _gfx942_spec(**kw):
     from kernels.gfx942.attention_tiled_3d import (
         UnifiedAttention3DTiledSpec as Gfx942Spec,
     )
 
+    base: dict[str, object] = {
+        "head_size": 128,
+        "block_size": 16,
+        "num_query_heads": 32,
+        "num_kv_heads": 8,
+        "dtype": "bf16",
+        "use_sinks": False,
+        "sliding_window": 0,
+        "has_softcap": False,
+        "num_segments": 16,
+        "use_wide_kv_load": True,
+        "use_wave_page_id_load": True,
+    }
+    base.update(kw)
+    return Gfx942Spec(**base)  # type: ignore[arg-type]
+
+
+def test_gfx942_needs_the_wide_loader_and_page_sized_tiles():
+    with pytest.raises(ValueError, match="needs the wide K/V loader"):
+        _gfx942_spec(use_wide_kv_load=False)
+    with pytest.raises(ValueError, match="needs paged fp16/bf16 KV"):
+        _gfx942_spec(kv_storage_dtype="fp8e4m3")
+    with pytest.raises(ValueError, match="needs page-sized tiles"):
+        _gfx942_spec(block_size=32, tile_size_override=16)
+    assert _gfx942_spec().kernel_name().endswith("_wpid")
     engine = pytest.importorskip("rocke_engine")
-    spec = asdict(
-        Gfx942Spec(
-            head_size=128,
-            block_size=16,
-            num_query_heads=32,
-            num_kv_heads=8,
-            dtype="fp16",
-            use_sinks=False,
-            sliding_window=0,
-            has_softcap=False,
-            num_segments=16,
-        )
+    for kw, message in [
+        ({"use_wide_kv_load": False}, "needs the wide K/V loader"),
+        ({"block_size": 32, "tile_size_override": 16}, "needs page-sized tiles"),
+    ]:
+        spec = asdict(_gfx942_spec(use_wave_page_id_load=False, **kw))
+        spec["use_wave_page_id_load"] = True
+        with pytest.raises(Exception, match=message):
+            engine.gfx942_attention_tiled_3d_lower_llvm(spec, "gfx942")
+
+
+@pytest.mark.parametrize(
+    "kw",
+    [
+        {
+            "use_decode_grid": True,
+            "kv_cache_policy": "stream",
+            "use_kv_lds_swizzle": True,
+        },
+        {"head_size": 64, "block_size": 32, "dtype": "fp16", "sliding_window": 64},
+    ],
+)
+def test_gfx942_native_builder_matches_python(kw):
+    from kernels.gfx942.attention_tiled_3d import (
+        build_unified_attention_3d_tiled as build_gfx942,
     )
-    spec["use_wave_page_id_load"] = True
-    with pytest.raises(Exception, match="use_wave_page_id_load"):
-        engine.gfx942_attention_tiled_3d_lower_llvm(spec, "gfx942")
+    from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
+
+    engine = pytest.importorskip("rocke_engine")
+    spec = _gfx942_spec(num_seqs=3, **kw)
+    # The gfx942 binding lowers the segment kernel only.
+    expected = _lower_kernel_to_llvm_python(
+        build_gfx942(spec, arch="gfx942"), arch="gfx942"
+    )
+    assert engine.gfx942_attention_tiled_3d_lower_llvm(asdict(spec), "gfx942") == (
+        expected
+    )
+
+
+@pytest.mark.parametrize(
+    "kw, arch, expected",
+    [
+        ({}, "gfx942", True),
+        ({"head_size": 64}, "gfx942", False),
+        ({"head_size": 256}, "gfx942", False),
+        ({"block_size": 32}, "gfx942", False),
+        ({"total_q": 8, "max_seqlen_q": 2}, "gfx942", False),
+        ({"use_fp8": True}, "gfx942", False),
+        ({}, "gfx1250", False),
+    ],
+)
+def test_gfx942_dispatch_scope(monkeypatch, kw, arch, expected):
+    from kernels.common import attention_unified as au
+
+    base: dict[str, object] = {
+        "total_q": 4,
+        "num_seqs": 4,
+        "num_query_heads": 32,
+        "num_kv_heads": 8,
+        "head_size": 128,
+        "block_size": 16,
+        "max_seqlen_q": 1,
+        "max_seqlen_k": 8192,
+        "dtype": "bf16",
+    }
+    base.update(kw)
+    monkeypatch.setattr(au, "_resolve_attention_arch", lambda: arch)
+    monkeypatch.delenv("HIPDNN_GFX942_3D_WKV", raising=False)
+    problem = au.UnifiedAttentionProblem(**base)  # type: ignore[arg-type]
+    assert au._wave_page_id_load_3d(problem) is expected
 
 
 def _reference(torch, q, k, v, lengths):
@@ -191,6 +270,96 @@ def test_wave_page_id_load_matches_reference(dtype, tile, num_segments, swizzle)
     spec = AttentionTuningSpec(
         path="3d",
         arch="gfx950",
+        builder_kind="tiled_3d",
+        compile_backend="llvm",
+        candidate_name="wave_page_id_load_test",
+        tuning_id="wave_page_id_load_test",
+        kernel_spec=segment,
+        reduce_spec=reduce,
+        num_kv_blocks=k.shape[0],
+    )
+    out = torch.empty_like(q_host).cuda()
+    au.run_unified_attention_torch(
+        problem=problem,
+        q=q_host.cuda(),
+        k=k,
+        v=v,
+        out=out,
+        cu_seqlens_q=torch.arange(batch + 1, dtype=torch.int32).cuda(),
+        seqused_k=torch.tensor(lengths_host, dtype=torch.int32).cuda(),
+        softmax_scale=1 / math.sqrt(128),
+        block_table=table,
+        softcap=0.0,
+        tuning_spec=spec,
+    )
+    torch.cuda.synchronize()
+    expected = _reference(torch, q_host, k_host, v_host, lengths_host)
+    atol, rtol = (0.01, 0.02) if dtype == "bf16" else (0.003, 0.005)
+    torch.testing.assert_close(out.cpu().float(), expected, atol=atol, rtol=rtol)
+
+
+@pytest.mark.parametrize("dtype", ["fp16", "bf16"])
+@pytest.mark.parametrize("num_segments, swizzle", [(1, False), (4, True)])
+def test_gfx942_wave_page_id_load_matches_reference(dtype, num_segments, swizzle):
+    torch = pytest.importorskip("torch")
+    from dispatch.attention.common import AttentionTuningSpec
+    from kernels.common import attention_unified as au
+    from kernels.gfx942.attention_tiled_3d import (
+        UnifiedAttentionReduceTiledSpec as Gfx942Reduce,
+    )
+    from rocke.runtime.hip_module import get_device_arch
+
+    if not torch.cuda.is_available() or get_device_arch() != "gfx942":
+        pytest.skip("requires a gfx942 GPU")
+    # 2203 tokens = 138 pages: a one-segment split spans three 64-page windows.
+    batch, q_heads, kv_heads, capacity, block_size = 3, 16, 4, 2203, 16
+    tdtype = torch.float16 if dtype == "fp16" else torch.bfloat16
+    rng = torch.Generator().manual_seed(41 + num_segments)
+    q_host = torch.randn(batch, q_heads, 128, generator=rng).to(tdtype)
+    k_host = torch.randn(batch, kv_heads, capacity, 128, generator=rng).to(tdtype)
+    v_host = torch.randn(batch, kv_heads, capacity, 128, generator=rng).to(tdtype)
+    k, table = _paged_cache(torch, k_host, block_size)
+    v, _ = _paged_cache(torch, v_host, block_size)
+    # Ragged: a partial last tile, a sequence shorter than one tile, and an
+    # empty one.
+    lengths_host = [capacity, 5, 0]
+    # Poison: table entries past a sequence's last page point at an extra
+    # all-NaN page; a kernel that reads them returns NaN.
+    nan_page = torch.full_like(k[:1], float("nan"))
+    k = torch.cat([k, nan_page])
+    v = torch.cat([v, nan_page])
+    for i, length in enumerate(lengths_host):
+        table[i, (length + block_size - 1) // block_size :] = k.shape[0] - 1
+    problem = au.UnifiedAttentionProblem(
+        total_q=batch,
+        num_seqs=batch,
+        num_query_heads=q_heads,
+        num_kv_heads=kv_heads,
+        head_size=128,
+        block_size=block_size,
+        max_seqlen_q=1,
+        max_seqlen_k=capacity,
+        dtype=dtype,
+        clamp_arch="gfx942",
+        num_kv_blocks=k.shape[0],
+    )
+    segment = replace(
+        au._tiled_3d_spec_from_problem(problem),
+        num_segments=num_segments,
+        use_wide_kv_load=True,
+        use_kv_lds_swizzle=swizzle,
+        use_wave_page_id_load=True,
+    )
+    reduce = Gfx942Reduce(
+        head_size=128,
+        num_query_heads=q_heads,
+        num_kv_heads=kv_heads,
+        dtype=dtype,
+        num_segments=num_segments,
+    )
+    spec = AttentionTuningSpec(
+        path="3d",
+        arch="gfx942",
         builder_kind="tiled_3d",
         compile_backend="llvm",
         candidate_name="wave_page_id_load_test",

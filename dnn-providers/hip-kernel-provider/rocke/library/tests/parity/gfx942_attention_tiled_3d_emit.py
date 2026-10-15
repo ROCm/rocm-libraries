@@ -185,6 +185,41 @@ _CONFIGS = {
         use_wide_kv_load=True,
         use_kv_lds_swizzle=True,
     ),
+    12: dict(
+        # Decode K/V streamed into swizzled LDS tiles, addressed from the wave's
+        # page-id window.
+        head_size=128,
+        block_size=16,
+        num_query_heads=64,
+        num_kv_heads=8,
+        dtype="bf16",
+        num_segments=16,
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        kv_storage_dtype=None,
+        use_wide_kv_load=True,
+        use_decode_grid=True,
+        kv_cache_policy="stream",
+        use_kv_lds_swizzle=True,
+        use_wave_page_id_load=True,
+    ),
+    13: dict(
+        # The wave's page-id window without the swizzle, at head size 64 with a
+        # sliding window.
+        head_size=64,
+        block_size=32,
+        num_query_heads=16,
+        num_kv_heads=4,
+        dtype="fp16",
+        num_segments=8,
+        use_sinks=False,
+        sliding_window=64,
+        has_softcap=False,
+        kv_storage_dtype=None,
+        use_wide_kv_load=True,
+        use_wave_page_id_load=True,
+    ),
 }
 
 

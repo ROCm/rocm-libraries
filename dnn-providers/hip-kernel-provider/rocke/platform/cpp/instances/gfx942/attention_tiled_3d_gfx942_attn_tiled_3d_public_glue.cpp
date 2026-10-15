@@ -194,10 +194,20 @@ bool rocke_unified_attention_3d_tiled_spec_validate(
         rocke_i_set_err(b, ROCKE_ERR_VALUE, "use_kv_lds_swizzle needs the wide K/V loader");
         return false;
     }
-    if(s->use_wave_page_id_load)
+    if(s->use_wave_page_id_load && s->kv_storage_dtype != NULL)
     {
-        rocke_i_set_err(
-            b, ROCKE_ERR_VALUE, "gfx942 3D does not implement the use_wave_page_id_load knob");
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "use_wave_page_id_load needs paged fp16/bf16 KV");
+        return false;
+    }
+    if(s->use_wave_page_id_load && !s->use_wide_kv_load)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "use_wave_page_id_load needs the wide K/V loader");
+        return false;
+    }
+    if(s->use_wave_page_id_load
+       && rocke_unified_attention_3d_tiled_spec_tile_size(s) != s->block_size)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "use_wave_page_id_load needs page-sized tiles");
         return false;
     }
     return true;
@@ -360,6 +370,10 @@ int rocke_unified_attention_3d_tiled_spec_kernel_name(
     if(s->use_kv_lds_swizzle)
     {
         parts[np++] = "kvswz";
+    }
+    if(s->use_wave_page_id_load)
+    {
+        parts[np++] = "wpid";
     }
 
     /* kernel_name_join takes prefix + parts; we pass everything as parts with a
@@ -740,6 +754,7 @@ bool rocke_gfx942_attn_tiled_3d_config_from_spec(
         out->KV_STREAM = bits == ROCKE_CACHE_STREAM;
     }
     out->KV_SWZ = spec->use_kv_lds_swizzle;
+    out->WAVE_PAGE_ID_LOAD = spec->use_wave_page_id_load;
     out->KV_CHUNKS_PER_ROW = out->HD / 8;
 
     /* Q -> LDS feed (lines 438-439). */
@@ -952,6 +967,11 @@ static rocke_kernel_def_t* build_segment_gfx942(rocke_ir_builder_t* b,
         if(strided_kv && spec->use_kv_lds_swizzle)
         {
             rocke_i_set_err(b, ROCKE_ERR_VALUE, "use_kv_lds_swizzle needs paged fp16/bf16 KV");
+            return NULL;
+        }
+        if(strided_kv && spec->use_wave_page_id_load)
+        {
+            rocke_i_set_err(b, ROCKE_ERR_VALUE, "use_wave_page_id_load needs paged fp16/bf16 KV");
             return NULL;
         }
 

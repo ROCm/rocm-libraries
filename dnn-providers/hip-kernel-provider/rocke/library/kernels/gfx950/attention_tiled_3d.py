@@ -187,8 +187,8 @@ class UnifiedAttention3DTiledSpec:
     # K/V LDS tiles store each row's 16-byte chunks XOR-permuted by the row
     # (chunk q of row r at q ^ (r % (head_size // 8))), which spreads the QK
     # and PV reads over the LDS banks. The DMA lanes fetch permuted source
-    # chunks, so the copies stay contiguous and need no padding. Paged
-    # fp16/bf16 K/V only.
+    # chunks, so the copies stay contiguous and need no padding. Implemented
+    # for paged fp16/bf16 K/V, which can be extended to strided and fp8 K/V.
     use_kv_lds_swizzle: bool = False
     # The wave loads the segment's page-table entries 64 at a time, one per
     # lane, and each tile reads its page ids from those registers
