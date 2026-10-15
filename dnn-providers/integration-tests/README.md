@@ -321,8 +321,14 @@ hipBLASLt's runs `hipblaslt_*`. On a GPU machine, run one with
 `ctest -L dnn_benchmarking` in that provider's build, or with
 `--gtest_filter='dnn_benchmarking_*'`. `attn`, `norm`, `moe` and `rocke_sdpa` are
 not in any engine's category yet. The superbuild CI builds on a runner with no
-GPU, so it only proves the pointers fetch and the archives extract; no CI lane
-executes the category yet.
+GPU, so it only proves the pointers fetch and the archives extract.
+
+To run the category on GPU runners in CI, dispatch the **TheRock Multi-Arch
+dnn-benchmarking** workflow (`therock-multi-arch-ci-dnn-benchmarking.yml`) by
+hand. It runs TheRock's multi-arch build and the `miopenprovider` and
+`hipblasltprovider` test jobs with `TEST_TYPE=dnn_benchmarking`, which selects
+the `dnn_benchmarking` label (step timeout 180 min). No schedule or pull request
+triggers it, and TheRock never selects the `dnn_benchmarking` type on its own.
 
 hipBLASLt matmul graphs are verified on the CPU (the GPU reference does not cover
 matmul), at about 3 GMAC/s. `HIPBLASLT_ENGINE.toml` therefore skips the 55 shapes

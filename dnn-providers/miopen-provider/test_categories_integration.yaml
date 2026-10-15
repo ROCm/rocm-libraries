@@ -176,3 +176,7 @@ execution_settings:
     comprehensive: 7200
     full: 28800
     ffm-quick: 7200  # 2 hours
+    # dnn-benchmarking is one CTest entry that runs the whole suite. It must stay
+    # below TheRock's 180-minute step timeout (dnn_benchmarking_timeout_minutes in
+    # fetch_test_configurations.py) so a runaway fails in CTest with its logs.
+    dnn-benchmarking: 10200  # 170 minutes
