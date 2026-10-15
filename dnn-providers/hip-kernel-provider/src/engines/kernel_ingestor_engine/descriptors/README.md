@@ -72,8 +72,9 @@ packs the fixtures and never this root.
 
 ## Large rocKE files live in DVC
 
-The KDPs (`*.kdp.json`) and any kernel objects (`*.co`, `*.hsaco`) of a rocKE bundle are in
-DVC, not git. The other descriptors are small JSON and stay in git. The blobs are in
+Large and binary files of a rocKE bundle are in DVC, not git: the KDPs (`*.kdp.json`), kernel
+objects (`*.co`, `*.hsaco`), and heuristic model files (for example `model.bin` under
+`heuristics/`). The other descriptors are small JSON and stay in git. The blobs are in
 `s3://therock-dvc/rocm-libraries/hipdnn/ingestor`, which allows anonymous read.
 
 **Recommended layout: one DVC artifact per bundle.** Put the bundle's KDPs and kernel
@@ -86,12 +87,21 @@ rocKE/<bundle>/
   artifacts/                                                     git-ignored, from DVC
     <name>.kdp.json
     *.co
+  heuristics.dvc                                                 in git (only if the bundle has heuristic models)
+  heuristics/                                                    git-ignored, from DVC
+    <id>/.../model.bin
 ```
 
 One pointer per bundle keeps the pointer count and the pull small, and the whole bundle
 updates atomically. Files are stored uncompressed, one blob each. `gfx950_attention_dense`
 uses this layout. A single large file with its own `<name>.kdp.json.dvc` pointer is also
 accepted.
+
+**Heuristic models.** A heuristic model file is binary and does not belong in git. Track it
+like the other large files: keep the `heuristics/` tree where the bundle expects it and add
+one pointer for that folder (`dvc add heuristics`), or place the files in `artifacts/` when
+nothing refers to them by path. A `.dvc` pointer anywhere under `rocKE/` is checked at
+configure.
 
 A KDP in `artifacts/` packs correctly: the packer walks the root recursively and computes
 each packed kernel's archive path from the descriptor's depth (`../../../kpack/...` here).

@@ -82,7 +82,7 @@ Packaging probes pack descriptors with the real packer for one explicit architec
 
 ### rocKE descriptors (DVC)
 
-With `HIPKERNELPROVIDER_ENABLE_ROCKE=ON`, the shipped rocKE descriptor bundles keep their large files (the KDPs) in DVC, not git. Run `dvc pull -r ingestor <pointer>.dvc`, or let TheRock's `fetch_sources` do it, to get them. Without the pull, configure warns and the shipped bundle is not packed; builds and tests still run. Release builds should set `-DHIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS=ON` to make a missing file an error. To skip the shipped bundles, set `-DHIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT` to another tree, such as `descriptor-packaging/examples/descriptors`. See [Large rocKE files live in DVC](src/engines/kernel_ingestor_engine/descriptors/README.md#large-rocke-files-live-in-dvc).
+With `HIPKERNELPROVIDER_ENABLE_ROCKE=ON`, the shipped rocKE descriptor bundles keep their large files (the KDPs, kernel objects, and heuristic model files) in DVC, not git. Run `dvc pull -r ingestor <pointer>.dvc`, or let TheRock's `fetch_sources` do it, to get them. Without the pull, configure warns and the shipped bundle is not packed; builds and tests still run. Release builds should set `-DHIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS=ON` to make a missing file an error. To skip the shipped bundles, set `-DHIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT` to another tree, such as `descriptor-packaging/examples/descriptors`. See [Large rocKE files live in DVC](src/engines/kernel_ingestor_engine/descriptors/README.md#large-rocke-files-live-in-dvc).
 
 ### Testing
 

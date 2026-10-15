@@ -342,12 +342,12 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     set(HIPKERNELPROVIDER_PRODUCTION_DESCRIPTOR_SOURCE_ROOT
         "${CMAKE_CURRENT_SOURCE_DIR}/src/engines/kernel_ingestor_engine/descriptors")
 
-    # Large rocKE bundle files (KDPs, kernel objects) are DVC outputs: a file with a
-    # <file>.dvc pointer, or a folder with a <folder>.dvc pointer. With ENABLE_ROCKE ON,
-    # warn when one is missing or differs from its pointer (file size, or folder file
-    # count) so the shipped bundle is not silently left out; tests still configure and
-    # run. REQUIRE_DVC_DESCRIPTORS turns the warning into an error for release builds.
-    # Only the root this build packs from is checked.
+    # Large rocKE bundle files (KDPs, kernel objects, heuristic models) are DVC outputs,
+    # each a file with a <file>.dvc pointer or a folder with a <folder>.dvc pointer. With
+    # ENABLE_ROCKE ON, warn when one is missing or differs from its pointer (file size, or
+    # folder file count) so the shipped bundle is not silently left out; tests still
+    # configure and run. REQUIRE_DVC_DESCRIPTORS turns the warning into an error for
+    # release builds. Only the root this build packs from is checked.
     if(HIPKERNELPROVIDER_ENABLE_ROCKE)
         if(HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT)
             set(_rocke_root "${HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT}")

@@ -347,7 +347,7 @@ whether the root was named or inherited. A root set but not a directory is fatal
 what arch pruning consumes, so standalone UKDs, kernel sources, READMEs and hidden-path
 KDPs alone do not make a pack.
 
-The large rocKE bundle files under that root (KDPs, kernel objects) are DVC outputs (a `<file>.dvc` or `<folder>.dvc` pointer beside the output, remote `ingestor`), not git files: run `dvc pull -r ingestor <pointer>` before a production configure with `HIPKERNELPROVIDER_ENABLE_ROCKE=ON`. Without the pull, configure warns and the shipped bundle is not packed; `HIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS=ON` makes it an error. See `descriptors/README.md`.
+The large rocKE bundle files under that root (KDPs, kernel objects, heuristic model files) are DVC outputs (a `<file>.dvc` or `<folder>.dvc` pointer beside the output, remote `ingestor`), not git files: run `dvc pull -r ingestor <pointer>` before a production configure with `HIPKERNELPROVIDER_ENABLE_ROCKE=ON`. Without the pull, configure warns and the shipped bundle is not packed; `HIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS=ON` makes it an error. See `descriptors/README.md`.
 
 The production root is `HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT`, a `CACHE PATH`
 defaulting to `$PROVIDER/src/engines/kernel_ingestor_engine/descriptors/`. It carries the
