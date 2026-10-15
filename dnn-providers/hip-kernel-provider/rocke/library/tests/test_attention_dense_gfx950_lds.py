@@ -21,7 +21,7 @@ from test_attention_dense_d64_lds import _lds_pool_bytes
 
 
 def _spec(head_size, block_m, block_n, **kw):
-    return AttentionDenseSpec(
+    defaults = dict(
         batch=1,
         seqlen_q=512,
         seqlen_kv=512,
@@ -33,8 +33,9 @@ def _spec(head_size, block_m, block_n, **kw):
         block_m=block_m,
         block_n=block_n,
         persistent=False,
-        **kw,
     )
+    defaults.update(kw)
+    return AttentionDenseSpec(**defaults)
 
 
 def _formula(spec):
@@ -44,6 +45,7 @@ def _formula(spec):
         k_row_pad=spec.lds_k_row_pad,
         v_row_pad=spec.lds_v_row_pad,
         k_group_pad=spec.lds_k_group_pad,
+        wide_lds_dma=spec.wide_lds_dma,
     )
 
 
@@ -53,6 +55,11 @@ _WITHIN_BUDGET = [
     (128, 128, 64, {"lds_k_row_pad": 24}),
     (64, 128, 128, {}),
     (64, 128, 128, {"lds_k_group_pad": 40}),
+    # wide_lds_dma=True uses a different layout (K/V slab lines of 64*8 elems)
+    # and should produce a SMALLER footprint than the non-wide D128/BN64 path.
+    # Non-wide: 2*64*(128+8 + 128+32)*2 = 75,776 B; wide: 68,096 B.
+    # persistent=True required by __post_init__ when wide_lds_dma=True.
+    (128, 128, 64, {"wide_lds_dma": True, "persistent": True}),
 ]
 
 # Over-budget layouts that the default-pad formula used to accept.

@@ -542,13 +542,23 @@ def gfx950_dense_static_lds_bytes(
     k_row_pad: int = _DEFAULT_LDS_K_ROW_PAD,
     v_row_pad: int = _DEFAULT_GFX950_LAYOUT["lds_v_row_pad"],
     k_group_pad: int = 8,
+    wide_lds_dma: bool = False,
 ) -> int:
     """Static LDS the non-persistent body allocates for one ``(head_size, block_n)``.
 
     The K/V slabs, ``_NBUF`` = 2 buffers, 2-byte elements. The pad arguments are
     the spec's ``lds_k_row_pad`` / ``lds_v_row_pad`` / ``lds_k_group_pad`` and
     default to the layout every shipped variant is built with (K pad 8, V pad 32,
-    group pad 8)::
+    group pad 8).
+
+    ``wide_lds_dma=True`` uses the wide 8-rows-x-64-cols per slab-line layout
+    (see builder ~line 1699)::
+
+        wide D128: K [2, D/64, BN/8, 64*8 + k_row_pad] +
+                   V [2, D/64, BN/8, 64*8 + v_row_pad]
+        wide D64:  same formula with D=64
+
+    Standard (non-wide) layout::
 
         D128: K [2, BN, 128 + k_row_pad] + V [2, BN, 128 + v_row_pad]
               = 1184 * BN bytes at the defaults
@@ -560,6 +570,18 @@ def gfx950_dense_static_lds_bytes(
     other head size; callers have already required 64 or 128.
     """
     buffers, element_bytes = 2, 2
+    if head_size not in (64, 128):
+        return 0
+    if wide_lds_dma:
+        # Wide layout: K[NBUF, D/64, BN/8, 64*8 + k_row_pad] +
+        #              V[NBUF, D/64, BN/8, 64*8 + v_row_pad]
+        k_line_stride = 64 * 8 + k_row_pad
+        v_line_stride = 64 * 8 + v_row_pad
+        k_d_rpt = head_size // 64
+        k_n_rpt = block_n // 8
+        k_bytes = buffers * k_d_rpt * k_n_rpt * k_line_stride
+        v_bytes = buffers * k_d_rpt * k_n_rpt * v_line_stride
+        return (k_bytes + v_bytes) * element_bytes
     if head_size == 128:
         return (
             buffers
@@ -567,16 +589,15 @@ def gfx950_dense_static_lds_bytes(
             * ((head_size + k_row_pad) + (head_size + v_row_pad))
             * element_bytes
         )
-    if head_size == 64:
-        rows_per_group = 2
-        k_bytes = (
-            buffers
-            * (block_n // rows_per_group)
-            * (rows_per_group * head_size + k_group_pad)
-        )
-        v_bytes = buffers * block_n * head_size
-        return (k_bytes + v_bytes) * element_bytes
-    return 0
+    # head_size == 64
+    rows_per_group = 2
+    k_bytes = (
+        buffers
+        * (block_n // rows_per_group)
+        * (rows_per_group * head_size + k_group_pad)
+    )
+    v_bytes = buffers * block_n * head_size
+    return (k_bytes + v_bytes) * element_bytes
 
 
 def gfx950_dense_tile_legality(*, head_size: int) -> Tuple[Tuple[int, int], ...]:
@@ -659,6 +680,7 @@ def supports_attention_dense(
         k_row_pad=int(spec.lds_k_row_pad),
         v_row_pad=int(spec.lds_v_row_pad),
         k_group_pad=int(spec.lds_k_group_pad),
+        wide_lds_dma=bool(spec.wide_lds_dma),
     )
     if lds_bytes > GFX950_LDS_CAPACITY_BYTES:
         return False, (
