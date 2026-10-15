@@ -51,23 +51,23 @@ test_categories:
       - "precheckin"
 
   comprehensive:
-    description: "Nightly comprehensive external integration coverage"
-    # An include list, like quick and standard above, rather than "*". With "*"
-    # this tier was byte-identical to "full" below, so the C++ tier prefixes
-    # meant nothing: a suite's Full tier ran in the nightly job as well as the
-    # weekly one.
+    description: "Nightly comprehensive external integration coverage: quick + standard + comprehensive-tier bundles"
+    # Tiers cascade: comprehensive runs everything quick and standard run, plus
+    # the comprehensive-tier bundles. It deliberately does NOT run the full-tier
+    # bundles (full_*): "full" holds only what does not belong in a lower tier
+    # (exhaustive/stress cases, or cases redundant with lower-tier coverage of
+    # the same option axis) and has no runtime budget; "full" below runs it.
     #
     # Two namespaces are in play and both are needed. Lowercase "quick_*" /
-    # "standard_*" / "full_*" are bundle suites, named after their on-disk tier
-    # under integration-test-bundles/. Capitalised "Smoke/" / "Quick/" /
-    # "Standard/" / "Comprehensive/" are C++ gtest prefixes. "full_*" is listed
-    # and "Full/*" is not: the bundle full tier is nightly coverage this tier has
-    # always carried, while the C++ Full tier is the weekly-only set that "full"
-    # below still runs.
+    # "standard_*" / "comprehensive_*" are bundle suites, named after their
+    # on-disk tier under integration-test-bundles/. Capitalised "Smoke/" /
+    # "Quick/" / "Standard/" / "Comprehensive/" are C++ gtest prefixes; "Full/*"
+    # is not listed because the C++ Full tier is the weekly-only set that
+    # "full" below still runs.
     test_patterns:
       - "quick_*"
       - "standard_*"
-      - "full_*"
+      - "comprehensive_*"
       - "Smoke/*"
       - "Quick/*"
       - "Standard/*"
@@ -99,10 +99,10 @@ test_categories:
       # which case this tier silently shrinks. Verify with:
       #   ctest -L ffm-quick -N
       - "quick_ConvolutionFwd_Default.1_16_16_16_bfp16_nchw_dil1x1_postpad0x0_prepad0x0"
-      - "quick_BatchnormInference_Default.1_3_224_bfp16_ncl"
+      - "quick_BatchnormInference_Default.1_3_224_fp32_ncl"
       - "quick_Pointwise_Default.2_4_8_8_fp16_nchw"
       - "quick_Reduction_Default.1_16_8_8_bfp16_nchw_modeadd"
-      - "quick_RMSNorm_Default.2_16_8_8_bfp16_nchw_772637"
+      - "quick_RMSNorm_Default.2_3_4_4_bfp16_nchw_bcd247"
       # Layernorm had no entry here at all, so the op had no fast-feedback
       # signal; this is the smallest quick-tier layernorm bundle case.
       - "quick_Layernorm_Default.2_2_3_2_bfp16_nhwc_normalized_dim_count1_6d6330"
@@ -146,6 +146,10 @@ exclude_gpu:
       - "ffm-quick"
       - "ex_gpu_gfx110X"
 
+# category_timeouts are CTest kill limits, set to 2x the tier's runtime budget
+# (quick ~5 min, standard ~30 min incl. quick, comprehensive <= 60 min incl.
+# quick+standard; full has no budget) so a budget overrun is a failure to
+# investigate while ordinary run-to-run variance does not trip the timeout.
 execution_settings:
   default_timeout: 300
   timeout_multiplier: 1
@@ -155,7 +159,7 @@ execution_settings:
     # timeouts (or the underlying flakiness) are resolved; tracked in
     # https://github.com/ROCm/rocm-libraries/issues/6864.
     quick: 1200
-    standard: 2700
-    comprehensive: 25200
+    standard: 3600
+    comprehensive: 7200
     full: 28800
     ffm-quick: 7200  # 2 hours

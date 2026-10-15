@@ -7,13 +7,13 @@
 #   branch_id: 8fc5b4598eb96fa53f4a1b7e36901b460b6300bb
 #   function: _validateExecutable
 #   predicate: not any((supportedCxxCompiler(file), supportedCCompiler(file),
-#                       supportedOffloadBundler(file), supportedHip(file),
+#                       supportedOffloadBundler(file),
 #                       supportedDeviceEnumerator(file)))
 #     true_branch  -> raise ValueError (unsupported toolchain component)
 #     false_branch -> fall through to absolute-path / search-path resolution
 #
 # Classification: solver-backed-under-assumptions (os.name == "posix").
-# The five supported* helpers each branch on os.name: on POSIX,
+# The four supported* helpers each branch on os.name: on POSIX,
 # supportedDeviceEnumerator accepts rocm_agent_enumerator/amdgpu-arch (not hipinfo);
 # on Windows the set swaps. Witnesses confirmed in-container (tl-char) by the
 # Verify phase over 16-element domain with 0 mismatches vs real guard.
@@ -35,7 +35,6 @@ from Tensile.Toolchain.Validators import (
     supportedCCompiler,
     supportedCxxCompiler,
     supportedDeviceEnumerator,
-    supportedHip,
     supportedOffloadBundler,
 )
 
@@ -50,7 +49,6 @@ POSIX_SUPPORTED = frozenset([
     "amdclang", "clang",                    # C compiler
     "amdclang++", "clang++",                # C++/HIP compiler
     "clang-offload-bundler",                # offload bundler
-    "hipcc", "hipconfig",                   # hip
     "rocm_agent_enumerator", "amdgpu-arch", # device enumerator (posix)
 ])
 
@@ -123,7 +121,6 @@ def test_real_guard_true_hipinfo_posix():
         supportedCxxCompiler(file),
         supportedCCompiler(file),
         supportedOffloadBundler(file),
-        supportedHip(file),
         supportedDeviceEnumerator(file),
     ))
     assert result is True, f"Expected guard=True for {file!r} on POSIX, got False"
@@ -136,7 +133,6 @@ def test_real_guard_true_gcc_posix():
         supportedCxxCompiler(file),
         supportedCCompiler(file),
         supportedOffloadBundler(file),
-        supportedHip(file),
         supportedDeviceEnumerator(file),
     ))
     assert result is True, f"Expected guard=True for {file!r} on POSIX, got False"
@@ -149,7 +145,6 @@ def test_real_guard_false_amdclang_plus_plus_posix():
         supportedCxxCompiler(file),
         supportedCCompiler(file),
         supportedOffloadBundler(file),
-        supportedHip(file),
         supportedDeviceEnumerator(file),
     ))
     assert result is False, f"Expected guard=False for {file!r} on POSIX, got True"
@@ -162,7 +157,6 @@ def test_real_guard_false_amdgpu_arch_posix():
         supportedCxxCompiler(file),
         supportedCCompiler(file),
         supportedOffloadBundler(file),
-        supportedHip(file),
         supportedDeviceEnumerator(file),
     ))
     assert result is False, f"Expected guard=False for {file!r} on POSIX, got True"
@@ -173,14 +167,13 @@ def test_real_guard_false_amdgpu_arch_posix():
 # ---------------------------------------------------------------------------
 
 def test_helper_agrees_with_real_guard_all_witnesses():
-    """toolchain_component_rejected() matches the real guard over all 4 z3-confirmed witnesses."""
-    witnesses = ["hipinfo", "gcc", "amdclang++", "amdgpu-arch"]
+    """toolchain_component_rejected() matches the real guard over all 6 witnesses."""
+    witnesses = ["hipinfo", "gcc", "hipcc", "hipconfig", "amdclang++", "amdgpu-arch"]
     for file in witnesses:
         real = not any((
             supportedCxxCompiler(file),
             supportedCCompiler(file),
             supportedOffloadBundler(file),
-            supportedHip(file),
             supportedDeviceEnumerator(file),
         ))
         helper = toolchain_component_rejected(file)

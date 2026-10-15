@@ -27,7 +27,12 @@ def load_driver(name, path):
 @pytest.mark.parametrize("platform", ["linux", "win32"])
 @pytest.mark.parametrize("consumer", ["online", "differential", "micro_parity"])
 def test_raw_archive_link_dependencies(monkeypatch, tmp_path, platform, consumer):
-    run = Mock(return_value=SimpleNamespace(returncode=0, stdout=b"", stderr=""))
+    def complete_compile(command, **_kwargs):
+        if "-o" in command:
+            Path(command[command.index("-o") + 1]).touch()
+        return SimpleNamespace(returncode=0, stdout=b"", stderr="")
+
+    run = Mock(side_effect=complete_compile)
     monkeypatch.setattr(subprocess, "run", run)
     monkeypatch.setattr(sys, "platform", platform)
     if consumer == "online":
@@ -38,7 +43,15 @@ def test_raw_archive_link_dependencies(monkeypatch, tmp_path, platform, consumer
             PLATFORM / "tests/instances/differential/run_diff.py",
         )
         monkeypatch.setattr(driver, "TMP", tmp_path)
-        assert driver.compile_c("fixture", tmp_path / "librocke_core.a")[0]
+        # Fingerprint invalidation has dedicated differential-runner coverage;
+        # this test isolates link-command construction and cache publication.
+        monkeypatch.setattr(
+            driver, "_native_emitter_fingerprint", lambda *_args, **_kwargs: "fixture"
+        )
+        archive = tmp_path / "librocke_core.a"
+        archive.touch()
+        (tmp_path / "fixture_emit.c").write_text("int main() { return 0; }\n")
+        assert driver.compile_c("fixture", archive, src_dir=tmp_path)[0]
     else:
         driver = load_driver(
             "link_test_run_parity", PLATFORM / "tests/instances/parity/run_parity.py"
