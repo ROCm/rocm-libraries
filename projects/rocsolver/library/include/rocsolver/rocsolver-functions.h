@@ -29780,7 +29780,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_destroy_rfinfo(rocsolver_rfinfo rfinfo
     by the direct solver \ref rocsolver_scsrrf_solve "CSRRF_SOLVE".
 
     \details
-    @param[in]
+    @param[in,out]
     rfinfo      #rocsolver_rfinfo.
                 The rfinfo struct to be set up.
     @param[in]
@@ -30085,7 +30085,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_dcsrrf_splitlu(rocblas_handle handle,
     @param[in]
     ldb         rocblas_int. ldb >= n.
                 The leading dimension of B.
-    @param[out]
+    @param[in,out]
     rfinfo      rocsolver_rfinfo.
                 Structure that holds the meta data generated in the analysis phase.
     ********************************************************************/
@@ -30192,7 +30192,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_dcsrrf_analysis(rocblas_handle handle,
     pivQ        pointer to rocblas_int. Array on the GPU of dimension n.
                 Contains the pivot indices representing the permutation matrix Q, that is, the
                 order in which the columns of matrix M were rearranged.
-    @param[in]
+    @param[in,out]
     rfinfo      rocsolver_rfinfo.
                 Structure that holds the meta data generated in the analysis phase.
     ********************************************************************/
@@ -30290,7 +30290,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_dcsrrf_refactlu(rocblas_handle handle,
     pivQ        pointer to rocblas_int. Array on the GPU of dimension n.
                 Contains the pivot indices representing the permutation matrix Q, that is, the
                 order in which the columns of matrix M were rearranged.
-    @param[in]
+    @param[in,out]
     rfinfo      #rocsolver_rfinfo.
                 Structure that holds the meta data generated in the analysis phase.
     ********************************************************************/
@@ -30396,7 +30396,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_dcsrrf_refactchol(rocblas_handle handl
     @param[in]
     ldb         rocblas_int. ldb >= n.
                 The leading dimension of B.
-    @param[in]
+    @param[in,out]
     rfinfo      rocsolver_rfinfo.
                 Structure that holds the metadata generated in the analysis phase.
     ********************************************************************/

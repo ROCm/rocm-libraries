@@ -223,7 +223,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR AND HIPDNN_ENABLE_SDPA
         INSTALL_SUBDIR hip_kernel_provider
         ${_gfx950_shard_args}
         REFERENCE_EXECUTOR gpu
-        GTEST_FILTER "quick_SdpaFwd_Default.*:standard_SdpaFwd_Default.*"
+        GTEST_FILTER "quick_SdpaFwd_Default.*:standard_SdpaFwd_Default.*:comprehensive_SdpaFwd_Default.*:full_SdpaFwd_Default.*"
         ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
     )
 endif()
