@@ -374,6 +374,13 @@ rocke_value_t* rocke_gfx942_attention_tiled_3d_mfma_16x16_c_row(
 rocke_value_t* rocke_gfx942_attention_tiled_3d_kv_col(
     rocke_gfx942_attention_tiled_3d_build_ctx_t* ctx, rocke_value_t* row, rocke_value_t* col);
 
+/* _kv_src_linear(linear_half): the source element an async copy lane fetches
+ * for its LDS position (the chunk permuted under KV_SWZ; linear_half itself
+ * otherwise). */
+rocke_value_t*
+    rocke_gfx942_attention_tiled_3d_kv_src_linear(rocke_gfx942_attention_tiled_3d_build_ctx_t* ctx,
+                                                  rocke_value_t* linear_half);
+
 rocke_value_t* rocke_gfx942_attention_tiled_3d_strided_v_b_operand(
     rocke_gfx942_attention_tiled_3d_build_ctx_t* ctx,
     int k_iter,

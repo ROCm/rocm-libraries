@@ -101,17 +101,11 @@ def _gfx942_spec(**kw):
     return Gfx942Spec(**base)  # type: ignore[arg-type]
 
 
-def test_gfx942_needs_the_wide_loader():
-    with pytest.raises(ValueError, match="needs the wide K/V loader"):
-        _gfx942_spec(use_wide_kv_load=False)
+@pytest.mark.parametrize("wide", [True, False])
+def test_gfx942_spec_contract(wide):
+    assert _gfx942_spec(use_wide_kv_load=wide).kernel_name().endswith("_kvswz")
     with pytest.raises(ValueError, match="needs paged fp16/bf16 KV"):
-        _gfx942_spec(kv_storage_dtype="fp8e4m3")
-    assert _gfx942_spec().kernel_name().endswith("_kvswz")
-    engine = pytest.importorskip("rocke_engine")
-    spec = asdict(_gfx942_spec(use_kv_lds_swizzle=False, use_wide_kv_load=False))
-    spec["use_kv_lds_swizzle"] = True
-    with pytest.raises(Exception, match="needs the wide K/V loader"):
-        engine.gfx942_attention_tiled_3d_lower_llvm(spec, "gfx942")
+        _gfx942_spec(use_wide_kv_load=wide, kv_storage_dtype="fp8e4m3")
 
 
 @pytest.mark.parametrize(
@@ -119,6 +113,8 @@ def test_gfx942_needs_the_wide_loader():
     [
         {"use_decode_grid": True, "kv_cache_policy": "stream"},
         {"head_size": 64, "dtype": "fp16", "use_sinks": True, "has_softcap": True},
+        {"use_wide_kv_load": False, "head_size": 256, "num_query_heads": 64},
+        {"use_wide_kv_load": False, "block_size": 32, "tile_size_override": 16},
     ],
 )
 def test_gfx942_native_builder_matches_python(kw):
@@ -278,8 +274,11 @@ def test_swizzled_decode_matches_reference(dtype, head_size, tile):
 
 
 @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
-@pytest.mark.parametrize("head_size", [64, 128])
-def test_gfx942_swizzled_decode_matches_reference(dtype, head_size):
+@pytest.mark.parametrize(
+    "head_size, wide",
+    [(64, True), (128, True), (64, False), (128, False), (256, False)],
+)
+def test_gfx942_swizzled_decode_matches_reference(dtype, head_size, wide):
     torch = pytest.importorskip("torch")
     from dispatch.attention.common import AttentionTuningSpec
     from kernels.common import attention_unified as au
@@ -318,8 +317,9 @@ def test_gfx942_swizzled_decode_matches_reference(dtype, head_size):
     segment = replace(
         au._tiled_3d_spec_from_problem(problem),
         num_segments=num_segments,
-        use_wide_kv_load=True,
+        use_wide_kv_load=wide,
         use_kv_lds_swizzle=True,
+        use_wave_page_id_load=False,
     )
     reduce = Gfx942Reduce(
         head_size=head_size,

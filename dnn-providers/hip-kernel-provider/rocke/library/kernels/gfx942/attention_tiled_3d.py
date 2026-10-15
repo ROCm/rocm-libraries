@@ -156,9 +156,9 @@ class UnifiedAttention3DTiledSpec:
     # K/V LDS tiles store each row's 16-byte chunks XOR-permuted by the row
     # (chunk q of row r at q ^ (r % (head_size // 8))), which spreads the QK
     # and PV reads over the LDS banks. The wide loader stores the permuted
-    # chunks, so the tiles stay unpadded. Implemented for paged fp16/bf16 K/V
-    # on the wide loader, which can be extended to the async loader (permuted
-    # source chunks, as on gfx950) and to strided and fp8 K/V.
+    # chunks; the async copies fetch them (permuted source chunks, as on
+    # gfx950). Either way the tiles stay unpadded. Implemented for paged
+    # fp16/bf16 K/V, which can be extended to strided and fp8 K/V.
     use_kv_lds_swizzle: bool = False
     # The wave loads the segment's page-table entries 64 at a time, one per
     # lane, and each tile reads its page id from those registers (v_readlane),
@@ -202,8 +202,6 @@ class UnifiedAttention3DTiledSpec:
             self.kv_layout != "paged" or self.kv_storage_dtype is not None
         ):
             raise ValueError("use_kv_lds_swizzle needs paged fp16/bf16 KV")
-        if self.use_kv_lds_swizzle and not self.use_wide_kv_load:
-            raise ValueError("use_kv_lds_swizzle needs the wide K/V loader")
         if self.use_wave_page_id_load and (
             self.kv_layout != "paged" or self.kv_storage_dtype is not None
         ):
@@ -715,7 +713,7 @@ def build_unified_attention_3d_tiled(
                 voff, _ = paged_kv_desc.offset(
                     b,
                     tile_idx=kv_tile_idx,
-                    linear_half=linear_half,
+                    linear_half=_kv_src_linear(linear_half),
                     kv_head=kv_head_idx,
                 )
             k_dst = b.smem_ptr_add(K_buf_base, b.const_i64(call * bytes_per_call))
@@ -742,7 +740,7 @@ def build_unified_attention_3d_tiled(
                 voff, _ = paged_kv_desc.offset(
                     b,
                     tile_idx=kv_tile_idx,
-                    linear_half=linear_half,
+                    linear_half=_kv_src_linear(linear_half),
                     kv_head=kv_head_idx,
                 )
             v_dst = b.smem_ptr_add(V_buf_base, b.const_i64(call * bytes_per_call))
@@ -775,6 +773,18 @@ def build_unified_attention_3d_tiled(
             b.div(col, b.const_i32(8)), b.mod(row, b.const_i32(KV_CHUNKS_PER_ROW))
         )
         return b.add(b.mul(chunk, b.const_i32(8)), b.mod(col, b.const_i32(8)))
+
+    def _kv_src_linear(linear_half: Value) -> Value:
+        # The async copies write LDS in lane order, so under the swizzle each
+        # lane fetches the element its LDS position holds (_kv_col is its own
+        # inverse).
+        if not KV_SWZ:
+            return linear_half
+        row = b.div(linear_half, b.const_i32(HD))
+        return b.add(
+            b.mul(row, b.const_i32(HD)),
+            _kv_col(row, b.mod(linear_half, b.const_i32(HD))),
+        )
 
     WAVE_PAGE_ID_LOAD = spec.use_wave_page_id_load
     if WAVE_PAGE_ID_LOAD:

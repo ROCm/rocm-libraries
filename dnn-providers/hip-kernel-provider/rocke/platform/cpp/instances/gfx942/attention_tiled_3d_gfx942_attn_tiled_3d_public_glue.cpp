@@ -189,11 +189,6 @@ bool rocke_unified_attention_3d_tiled_spec_validate(
         rocke_i_set_err(b, ROCKE_ERR_VALUE, "use_kv_lds_swizzle needs paged fp16/bf16 KV");
         return false;
     }
-    if(s->use_kv_lds_swizzle && !s->use_wide_kv_load)
-    {
-        rocke_i_set_err(b, ROCKE_ERR_VALUE, "use_kv_lds_swizzle needs the wide K/V loader");
-        return false;
-    }
     if(s->use_wave_page_id_load && s->kv_storage_dtype != NULL)
     {
         rocke_i_set_err(b, ROCKE_ERR_VALUE, "use_wave_page_id_load needs paged fp16/bf16 KV");

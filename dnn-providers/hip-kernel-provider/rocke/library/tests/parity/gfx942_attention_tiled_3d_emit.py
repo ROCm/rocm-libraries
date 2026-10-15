@@ -220,6 +220,22 @@ _CONFIGS = {
         use_wide_kv_load=True,
         use_wave_page_id_load=True,
     ),
+    14: dict(
+        # Decode K/V streamed by the async copies into swizzled LDS tiles.
+        head_size=256,
+        block_size=16,
+        num_query_heads=64,
+        num_kv_heads=64,
+        dtype="bf16",
+        num_segments=32,
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        kv_storage_dtype=None,
+        use_decode_grid=True,
+        kv_cache_policy="stream",
+        use_kv_lds_swizzle=True,
+    ),
 }
 
 
