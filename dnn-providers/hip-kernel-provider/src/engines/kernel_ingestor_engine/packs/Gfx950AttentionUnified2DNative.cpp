@@ -845,13 +845,14 @@ bool kernelMatches(const MatchContext& context,
     }
 
     // The window the graph asked for (always 0 here) against the one the binary bakes.
-    const auto boundWindow = bound.find(std::string(SLIDING_WINDOW_TOKEN));
-    if(boundWindow == bound.end())
+    const auto boundWindow
+        = hipdnn_plugin_sdk::ingestor::tryGetBoundInt(bound, SLIDING_WINDOW_TOKEN);
+    if(!boundWindow.has_value())
     {
         return false;
     }
     const auto candidateWindow = integerMetadata(kernel, SLIDING_WINDOW_FIELD);
-    if(!candidateWindow.has_value() || *candidateWindow != boundWindow->second)
+    if(!candidateWindow.has_value() || *candidateWindow != *boundWindow)
     {
         return false;
     }
