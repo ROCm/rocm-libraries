@@ -261,6 +261,15 @@ _DECL_RE = re.compile(r"^declare\s+(.+?)\s+@([\w.]+)\((.*)\)\s*$")
 # `Segmentation fault (core dumped)` vs `Segmentation fault` is a property of
 # the host's core-dump settings, not of the crash. See `_crash_reason`.
 _CORE_DUMPED_RE = re.compile(r"\s*\(core dumped\)\s*$")
+# SelectionDAG diagnostics print allocator-dependent node addresses. They are
+# evidence formatting, not part of the backend's answer, and retaining them
+# makes two identical probes differ under ``--check``.
+_DAG_NODE_ADDRESS_RE = re.compile(
+    r"\b0x[0-9a-fA-F]+(?=:"
+    r"(?:\d+\b|\s+(?:ch|glue|Untyped|[if]\d+|bf\d+|v\d+(?:[if]|bf)\d+|"
+    r"nxv\d+(?:[if]|bf)\d+)\b))"
+)
+_DAG_BARE_OPERAND_ADDRESS_RE = re.compile(r"\b0x[0-9a-fA-F]+\b(?=\s*(?:,|$))")
 
 # The buffer fat pointer is not a legal kernel-argument type and cannot be
 # produced by an addrspacecast, so it is the one operand we still pass poison
@@ -606,6 +615,44 @@ def _crash_reason(diag: str) -> str:
     return "; ".join(parts[-2:])[:200] or "clang crashed"
 
 
+def _split_dag_opcode(rhs: str) -> tuple[str, str]:
+    """Split a SelectionDAG right-hand side into opcode and operands."""
+    closing_delimiters = {"<": ">", "(": ")", "[": "]", "{": "}"}
+    delimiter_stack = []
+    for index, char in enumerate(rhs):
+        if char in closing_delimiters:
+            delimiter_stack.append(closing_delimiters[char])
+        elif delimiter_stack and char == delimiter_stack[-1]:
+            delimiter_stack.pop()
+        elif char.isspace() and not delimiter_stack:
+            return rhs[:index], rhs[index:]
+    return rhs, ""
+
+
+def _normalize_dag_node_addresses(text: str) -> str:
+    """Remove node identities from a SelectionDAG ``Cannot select`` dump."""
+    marker = "cannot select:"
+    marker_at = text.lower().find(marker)
+    if marker_at < 0:
+        return text
+    dag_at = marker_at + len(marker)
+    prefix = text[:dag_at]
+    dag = _DAG_NODE_ADDRESS_RE.sub("0xADDR", text[dag_at:])
+
+    # Result zero is implicit in SelectionDAG operands, so LLVM prints those
+    # node references as bare addresses rather than ``0x...:0``. Restrict this
+    # replacement to the operand list so semantic hexadecimal values elsewhere
+    # in the diagnostic remain evidence.
+    lhs, separator, rhs = dag.partition(" = ")
+    if separator:
+        opcode, operands = _split_dag_opcode(rhs)
+        if operands:
+            operands = _DAG_BARE_OPERAND_ADDRESS_RE.sub("0xADDR", operands)
+            dag = lhs + separator + opcode + operands
+
+    return prefix + dag
+
+
 def _first_error(text: str) -> str:
     for line in text.splitlines():
         s = line.strip()
@@ -613,8 +660,9 @@ def _first_error(text: str) -> str:
             continue
         low = s.lower()
         if "error" in low or "undefined symbol" in low or "cannot select" in low:
-            return s[:200]
-    return (text.strip().splitlines() or ["(no diagnostic)"])[0][:200]
+            return _normalize_dag_node_addresses(s)[:200]
+    first = (text.strip().splitlines() or ["(no diagnostic)"])[0]
+    return _normalize_dag_node_addresses(first)[:200]
 
 
 def _probe(
