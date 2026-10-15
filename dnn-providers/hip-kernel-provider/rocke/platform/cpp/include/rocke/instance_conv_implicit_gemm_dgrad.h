@@ -163,6 +163,13 @@ typedef struct rocke_dgrad_conv_spec
      * with split_k > 1, wavelet and groups > 1. Mirrors DgradConvSpec.patch.
      * Appended last; default false: every existing config is byte-identical. */
     bool patch; /* default false */
+    /* tap_outer_k: stride-1 K loop as (filter tap outer) x (output-channel
+     * chunk inner). Needs stride 1, dilation 1, kpg % tile_k == 0, split_k
+     * == 1, the wave64 MFMA loop, and uniform_k_decode off; the validator
+     * rejects anything else (the loop has no fallback). Mirrors
+     * DgradConvSpec.tap_outer_k; tags the kernel name "_tapk". Appended last
+     * so existing aggregate initialisers keep their layout. */
+    bool tap_outer_k; /* default false */
 } rocke_dgrad_conv_spec_t;
 
 /* Default-constructed spec (every field == Python dataclass default). */

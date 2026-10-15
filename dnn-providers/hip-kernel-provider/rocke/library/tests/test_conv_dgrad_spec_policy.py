@@ -12,6 +12,10 @@ Covers the validator rules that replaced silently-ignored or unsafe knobs:
     and the LDS charge equals what the builder allocates;
   - the K-outer B fragment rule the builder enforces is in the validator too;
   - a non-default ``lds_k_pad`` reaches the kernel name.
+
+And the stride-1 tap-outer K loop (``tap_outer_k``): default off, rejected
+wherever it cannot compute the problem (it has no fallback loop), the shape
+of the loop it emits, and its cache identity, label and serving rule.
 """
 
 from __future__ import annotations
@@ -201,6 +205,200 @@ class TestKernelName(unittest.TestCase):
                 lds_k_outer=False, tile_k=8, warp_tile_k=8, lds_k_pad=0, dtype="fp16"
             ).kernel_name(),
         )
+
+
+def _loop_tree(kernel):
+    """Nesting of the kernel's scf.for loops, as nested lists."""
+
+    def walk(ops):
+        out = []
+        for op in ops:
+            inner = [o for r in getattr(op, "regions", ()) or () for o in r.ops]
+            if op.name == "scf.for":
+                out.append(walk(inner))
+            else:
+                out.extend(walk(inner))
+        return out
+
+    return walk(kernel.body.ops)
+
+
+def _staging(loop_op):
+    keep = ("tile.buffer_load_vN", "tile.smem_store_vN")
+    return [o.name for r in loop_op.regions for o in r.ops if o.name in keep]
+
+
+class TestTapOuterK(unittest.TestCase):
+    def test_default_off_and_name_tag(self):
+        self.assertFalse(_spec().tap_outer_k)
+        self.assertNotIn("tapk", _spec().kernel_name())
+        name = _spec(tap_outer_k=True).kernel_name()
+        self.assertTrue(name.endswith("_tapk"), name)
+        self.assertTrue(
+            _spec(lds_k_outer=False, lds_k_pad=16, tap_outer_k=True)
+            .kernel_name()
+            .endswith("_kp16_tapk")
+        )
+
+    def test_rejected_where_it_cannot_compute(self):
+        cases = (
+            ({"problem": _problem(K=96)}, "kpg % tile_k"),
+            ({"problem": _problem(sH=2, sW=2)}, "stride 1"),
+            ({"problem": _problem(dH=2, dW=2, pH=2, pW=2)}, "dilation 1"),
+            ({"split_k": 2}, "split_k"),
+            ({"uniform_k_decode": True}, "uniform_k_decode"),
+        )
+        for kw, needle in cases:
+            with self.subTest(**{k: str(v) for k, v in kw.items()}):
+                spec = _spec(tap_outer_k=True, **kw)
+                ok, why = is_valid_dgrad_spec(spec, _ARCH)
+                self.assertFalse(ok)
+                self.assertIn(needle, why)
+                with self.assertRaises(ValueError):
+                    spec.validate()
+        # kpg = 96 is fine with tile_k = 32; grouped, 1x1 and 5x5 qualify.
+        for kw in (
+            {"problem": _problem(K=96), "tile_k": 32},
+            {"problem": _problem(C=128, K=256, groups=2)},
+            {"problem": _problem(Y=1, X=1, pH=0, pW=0)},
+            {"problem": _problem(Y=5, X=5, pH=2, pW=2)},
+        ):
+            with self.subTest(ok=str(kw)):
+                ok, why = is_valid_dgrad_spec(_spec(tap_outer_k=True, **kw), _ARCH)
+                self.assertTrue(ok, why)
+
+    def test_emits_a_nested_tap_and_chunk_loop(self):
+        k = build_implicit_gemm_conv_dgrad(_spec(tap_outer_k=True), arch=_ARCH)
+        # One tap loop holding one chunk loop; no search, no other K loop.
+        self.assertEqual(_loop_tree(k), [[[]]])
+        tap = next(op for op in k.body.ops if op.name == "scf.for")
+        chunk = next(o for r in tap.regions for o in r.ops if o.name == "scf.for")
+        staging = _staging(chunk)
+        # Every global read of the tile precedes its first LDS write.
+        first_store = staging.index("tile.smem_store_vN")
+        self.assertNotIn("tile.buffer_load_vN", staging[first_store:])
+
+    def test_record_and_tap_decode_read_no_buffer(self):
+        # The folded record plus the magic table: eight scalar loads at
+        # constant offsets, as without the tap-outer loop.
+        def loads(spec):
+            n = 0
+
+            def walk(ops):
+                nonlocal n
+                for op in ops:
+                    n += op.name == "memref.global_load_typed"
+                    for r in getattr(op, "regions", ()) or ():
+                        walk(r.ops)
+
+            walk(build_implicit_gemm_conv_dgrad(spec, arch=_ARCH).body.ops)
+            return n
+
+        self.assertEqual(loads(_spec(tap_outer_k=True)), 8)
+
+
+def _identity(**kw):
+    from benchmarks.common.kernel_cache import KernelIdentity
+
+    base = {
+        "arch": "gfx950",
+        "direction": "dgrad",
+        "algorithm": "implicit_gemm",
+        "dtype_a": "bf16",
+        "dtype_b": "bf16",
+        "dtype_d": "bf16",
+        "tile_m": 64,
+        "tile_n": 64,
+        "tile_k": 64,
+        "warp_m": 2,
+        "warp_n": 2,
+        "warp_tile_m": 32,
+        "warp_tile_n": 32,
+        "warp_tile_k": 16,
+        "pipeline": "mem",
+        "epilogue": "cshuffle",
+        "wave_size": 64,
+        "vector_size_a": 8,
+        "vector_size_b": 8,
+        "vector_size_c": 8,
+        "lds_k_outer": True,
+        "grouped": True,
+        "stride_h": 1,
+        "stride_w": 1,
+        "dilation_h": 1,
+        "dilation_w": 1,
+        "max_sub_gemms": 1024,
+    }
+    base.update(kw)
+    return KernelIdentity(**base)
+
+
+class TestTapOuterKIdentity(unittest.TestCase):
+    def test_off_keeps_the_hash_on_is_distinct(self):
+        import dataclasses
+        import hashlib
+        import json
+
+        off = _identity(uniform_k_decode=True)
+        # The hash an identity had before the field existed.
+        fields = dataclasses.asdict(off)
+        for name in ("ws_replicas", "prefetch_addr", "patch", "tap_outer_k"):
+            del fields[name]
+        del fields["streamk"], fields["streamk_reduction"]
+        legacy = hashlib.sha1(
+            json.dumps(fields, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+        self.assertEqual(off.stable_hash(), legacy)
+        on = _identity(tap_outer_k=True)
+        self.assertNotEqual(on.stable_hash(), off.stable_hash())
+        self.assertIn("tapk", on.label())
+        type(on).from_label(on.label())  # round trip
+        self.assertEqual(type(on).from_label(on.label()), on)
+
+    def test_cache_rejects_tap_outer_on_unaligned_kpg(self):
+        from benchmarks.common.kernel_cache import KernelCache
+
+        cache = KernelCache("/nonexistent-cache-dir-for-a-pure-predicate-test", _ARCH)
+        tapk = _identity(tap_outer_k=True)
+        aligned = _problem(C=128, K=256, groups=2)  # kpg 128
+        self.assertTrue(cache.supports_problem(tapk, aligned)[0])
+        for p in (
+            _problem(C=192, K=192, groups=2),  # kpg 96
+            _problem(K=32),  # kpg 32 < tile_k
+        ):
+            ok, why = cache.supports_problem(tapk, p)
+            self.assertFalse(ok)
+            self.assertIn("kpg % tile_k", why)
+        # The same configuration without the loop serves them.
+        flat = _identity(uniform_k_decode=True)
+        self.assertTrue(cache.supports_problem(flat, _problem(K=96))[0])
+        # Stride and dilation are pinned to 1.
+        self.assertFalse(cache.supports_problem(tapk, _problem(sH=2, sW=2))[0])
+        self.assertFalse(
+            cache.supports_problem(tapk, _problem(dH=2, dW=2, pH=2, pW=2))[0]
+        )
+
+    def test_aot_grid_carries_it_on_stride1_only(self):
+        from kernels.conv import aot_jobs as ks
+        from rocke.core.arch import ArchTarget
+
+        target = ArchTarget.from_gfx(_ARCH)
+        geos = ks._geometry_list(target, "bf16")[::97]
+        jobs = list(
+            ks._dgrad_jobs(_ARCH, "bf16", 64, "mma", target, 1024, geometries=geos)
+        )
+        tapk = [j for j in jobs if j.identity.tap_outer_k]
+        self.assertTrue(tapk)
+        for j in tapk:
+            i = j.identity
+            self.assertEqual((i.stride_h, i.dilation_h), (1, 1))
+            self.assertFalse(i.uniform_k_decode)
+            self.assertTrue(j.spec_kwargs["tap_outer_k"])
+            self.assertEqual(ks.job_for_identity(i).identity, i)
+        self.assertFalse(
+            any(j.identity.tap_outer_k and j.identity.stride_h == 0 for j in jobs)
+        )
+        self.assertFalse(any(j.identity.pipeline == "wavelet" for j in tapk))
 
 
 if __name__ == "__main__":

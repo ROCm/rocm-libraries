@@ -135,6 +135,10 @@ class KernelIdentity:
     # filter's (y, x, c). Changes the store and the problems served (see
     # identity_supports_problem). Left out of the hash while False.
     patch: bool = False
+    # dgrad only (DgradConvSpec.tap_outer_k): the stride-1 tap-outer K loop.
+    # Serves only problems whose kpg is a multiple of tile_k (see
+    # identity_supports_problem). Left out of the hash while False.
+    tap_outer_k: bool = False
     num_load_waves: int = 0
     cshuffle_no_alias: bool = False
     # ---- capability: bounds which problems this binary can serve ----
@@ -211,6 +215,8 @@ class KernelIdentity:
             del fields["uniform_k_decode"]
         if not fields["patch"]:
             del fields["patch"]
+        if not fields["tap_outer_k"]:
+            del fields["tap_outer_k"]
         # Same for the stream-K pair at "no stream-K".
         if fields["streamk"] == "off" and not fields["streamk_reduction"]:
             del fields["streamk"], fields["streamk_reduction"]
@@ -572,6 +578,21 @@ def identity_supports_problem(
                 "depthwise dgrad (cpg == 1) is not supported by the "
                 "implicit-GEMM grouped path"
             )
+        # The tap-outer K loop has no fallback: every K tile must lie inside
+        # one filter tap, and the tap must be the plain (y, x). The
+        # stride/dilation fields above already pin a stride-1 binary; this
+        # states the rule for the loop itself.
+        if identity.tap_outer_k:
+            strided = any(
+                int(getattr(problem, a, 1)) != 1 for a in ("sH", "sW", "dH", "dW")
+            )
+            if strided:
+                return False, "tap_outer_k serves stride 1 / dilation 1 only"
+            if kpg % max(1, identity.tile_k):
+                return False, (
+                    f"tap_outer_k needs kpg % tile_k == 0; kpg={kpg}, "
+                    f"tile_k={identity.tile_k}"
+                )
 
     if not identity.is_direct:
         ok, why = _grid_fits(identity, problem)

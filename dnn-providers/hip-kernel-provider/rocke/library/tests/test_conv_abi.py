@@ -1050,8 +1050,9 @@ def test_implicit_gemm_is_shape_invariant(label, build):
     assert len(fingerprints) == 1, f"{label}: emitted IR depends on the shape"
 
 
+@pytest.mark.parametrize("tap_outer_k", [False, True])
 @pytest.mark.parametrize("groups", [1, 2])
-def test_dgrad_stride1_is_shape_invariant(groups):
+def test_dgrad_stride1_is_shape_invariant(groups, tap_outer_k):
     """A stride-1 dgrad binary rebuilds its sub-GEMM record from kernargs.
 
     The stride is its capability; channels, filter and pad are runtime, so
@@ -1071,7 +1072,13 @@ def test_dgrad_stride1_is_shape_invariant(groups):
         p = ConvProblem(
             N=N, Hi=Hi, Wi=Wi, C=C, K=K, Y=Y, X=X, pH=pad, pW=pad, groups=groups
         )
-        spec = DgradConvSpec(problem=p, data=_DATA, uniform_k_decode=True, **_TILE)
+        spec = DgradConvSpec(
+            problem=p,
+            data=_DATA,
+            uniform_k_decode=not tap_outer_k,
+            tap_outer_k=tap_outer_k,
+            **_TILE,
+        )
         assert spec.folds_sub_gemm_record
         fingerprints.add(
             _op_signature(build_implicit_gemm_conv_dgrad(spec, arch=_ARCH))
@@ -1506,8 +1513,9 @@ def test_aot_dgrad_builds_tilde_and_stride1_binaries(monkeypatch):
     patch = [j for j in jobs if j.identity.patch]
     tilde = [j for j in jobs if j.identity.stride_h == 0 and not j.identity.patch]
     unit = [j for j in jobs if j.identity.stride_h == 1]
-    assert tilde and len(unit) == len(tilde)
-    assert len(tilde) + len(unit) + len(patch) == len(jobs)
+    assert tilde and len(tilde) + len(unit) + len(patch) == len(jobs)
+    # One stride-1 binary per tilde one, plus the tap-outer variants.
+    assert len([j for j in unit if not j.identity.tap_outer_k]) == len(tilde)
     for j in tilde:
         i = j.identity
         assert (i.stride_h, i.stride_w, i.dilation_h, i.dilation_w) == (0, 0, 0, 0)
@@ -1522,7 +1530,11 @@ def test_aot_dgrad_builds_tilde_and_stride1_binaries(monkeypatch):
 
     cache = KernelCache("/nonexistent-cache-dir-for-a-pure-predicate-test", _ARCH)
     ident = next(j.identity for j in tilde if aj._spec_is_valid(j, _ARCH, "fp16"))
-    s1 = next(j.identity for j in unit if aj._spec_is_valid(j, _ARCH, "fp16"))
+    s1 = next(
+        j.identity
+        for j in unit
+        if not j.identity.tap_outer_k and aj._spec_is_valid(j, _ARCH, "fp16")
+    )
     for s, d in ((1, 1), (2, 1), (3, 1), (1, 2)):
         p = ConvProblem(
             N=1, Hi=16, Wi=16, C=64, K=64, Y=3, X=3, sH=s, sW=s, pH=d, pW=d, dH=d, dW=d
@@ -2415,9 +2427,10 @@ def test_describe_jobs_breaks_the_grid_down(monkeypatch):
         assert f"  {direction}: {n} kernels" in lines
     assert "k-loop:" in text and "split-K:" in text
     # dgrad builds the tilde binary (stride and dilation at run time, 0x0)
-    # and the stride-1 / dilation-1 one (1x1), in equal numbers.
-    n_dgrad = sum(j.direction == "dgrad" for j in jobs)
-    assert f"stride x dilation: 0x0 {n_dgrad // 2}, 1x1 {n_dgrad // 2}" in text
+    # and the stride-1 / dilation-1 ones (1x1, with the tap-outer variants).
+    dgrad = [j.identity for j in jobs if j.direction == "dgrad"]
+    n_tilde = sum(i.stride_h == 0 for i in dgrad)
+    assert f"stride x dilation: 0x0 {n_tilde}, 1x1 {len(dgrad) - n_tilde}" in text
 
 
 def test_aot_grid_caps_accumulator_registers(monkeypatch):

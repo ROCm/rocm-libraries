@@ -235,6 +235,40 @@ the field defaults `False`, and the sweep driver and the AOT job generator take
 the value from `DgradConvSpec.default_uniform_k_decode(*, arch, wave_size,
 pipeline)` (on for gfx950 wave64 outside the wavelet pipeline).
 
+## Stride-1 record from kernargs
+
+At stride 1 the tilde decomposition is the identity in both spatial axes
+(`y_tilde = x_tilde = 1`, whatever the dilation, pad, filter or grouping), so
+there is exactly one sub-GEMM and every field of its record is an existing
+kernarg or a constant: `[0, num_pid_m, num_pid_n, dg_M, dg_K, Hi, Wi, pH, pW,
+Y, X, -dH, -dW, 1, 0, 1, 0, 1, 0, 1, 0, roundup(dg_K, tile_k * split_k)]`.
+`DgradConvSpec.folds_sub_gemm_record` (stride 1) makes the builder bind those
+values instead of searching the record buffer and loading the record; the unit
+strides and zero offsets fold into the address arithmetic. The magic-division
+table is still read, from its one entry after the one record (constant
+offsets). The condition is the stride alone, which an AOT binary carries as
+its stride capability: the AOT grid builds a stride-1 / dilation-1 binary of
+every configuration next to the tilde binary, and the cache offers it to
+stride-1, dilation-1 problems only. The ABI is unchanged.
+
+## Tap-outer K loop (`tap_outer_k`)
+
+`tap_outer_k=True` runs the reduction of a stride-1, dilation-1 problem as two
+nested loops: filter tap `(y, x)` outer, output-channel chunk inner. Tap
+`(y, x)` reads `dY` pixel `(hi + pH - y, wi + pW - x)`, so the tap decode is
+uniform arithmetic on the kernargs once per tap, the pixel decode `(n, hi, wi)`
+and a tap's `dY` bounds are invariant across the chunk loop, and each chunk
+adds one uniform offset per operand; all of a tile's reads are issued before
+its LDS writes. A K tile must lie inside one tap, so `kpg % tile_k == 0` is
+required; unlike `uniform_k_decode` there is no fallback loop, so the validator
+rejects a problem that breaks it (and stride or dilation other than 1,
+`split_k > 1`, wave32 / the wavelet pipeline, and `uniform_k_decode=True`,
+whose loop it replaces), and the AOT cache offers the binary only to problems
+with `kpg % tile_k == 0`. Default `False`; the name gains `_tapk`. The AOT grid
+builds it next to the stride-1 binary of every wave64 MFMA configuration. The
+loop reduces in the same order as the flat loop, so `dX` matches it bit for
+bit.
+
 ## Key Files
 
 | File | Purpose |

@@ -791,6 +791,20 @@ class DgradConvSpec:
     #
     # Default False: strictly additive.
     patch: bool = False
+    # Stride-1 tap-outer K loop: the reduction runs as two nested loops,
+    # filter tap (y, x) outer and output-channel chunk inner, instead of one
+    # loop over k_dg = (y, x, k_out). Stride 1 and dilation 1 make tap (y, x)
+    # read dY pixel (hi + pH - y, wi + pW - x), so the tap decode is uniform
+    # outer-loop arithmetic on the kernargs (one scalar divide per tap), the
+    # pixel decode (n, hi, wi) and a tap's dY bounds are invariant across the
+    # chunk loop, and each chunk adds one uniform offset per operand. Every K
+    # tile has to lie inside one tap, so kpg must be a multiple of tile_k:
+    # unlike uniform_k_decode there is no fallback loop in the binary, so the
+    # validator rejects a problem that breaks this, and the AOT cache offers
+    # the binary only to problems that keep it. Also needs split_k == 1 and
+    # the wave64 MFMA loop, and replaces the loop uniform_k_decode would build
+    # (setting both is rejected). Default False; tags the name ``tapk``.
+    tap_outer_k: bool = False
 
     @property
     def block_size(self) -> int:
@@ -1001,6 +1015,8 @@ class DgradConvSpec:
                 # must reach the name or it collides with the default build.
                 f"kp{self.lds_k_pad}": self.lds_k_pad is not None
                 and self.lds_k_pad != _default_lds_k_pad(self.tile_k),
+                # A different K-loop body; only tagged when set.
+                "tapk": self.tap_outer_k,
             },
         )
 
@@ -1110,6 +1126,9 @@ class DgradConvSpec:
         _patch_why = _patch_conflict(self)
         if _patch_why:
             raise ValueError(_patch_why)
+        _tapk_why = _tap_outer_k_conflict(self)
+        if _tapk_why:
+            raise ValueError(_tapk_why)
         layout = self.effective_lds_layout()
         if self.async_dma:
             layout.validate_for_async()
@@ -1205,6 +1224,44 @@ def _patch_conflict(spec: "DgradConvSpec") -> str:
         return (
             "patch serves patch embeddings only (no padding or dilation, "
             "stride >= filter)"
+        )
+    return ""
+
+
+def _tap_outer_k_conflict(spec: DgradConvSpec) -> str:
+    """Why ``spec.tap_outer_k`` cannot be honoured, or ``""`` if it can.
+
+    The tap-outer loop is correct only where every K tile lies inside one
+    filter tap and the tap is the plain filter (y, x). It has no fallback
+    loop, so a problem outside that is rejected rather than built: a binary
+    must never silently compute a problem it cannot. Shared by ``validate``
+    and ``is_valid_dgrad_spec``; the reasons are mirrored verbatim by the C++
+    validator.
+    """
+    if not spec.tap_outer_k:
+        return ""
+    p = spec.problem
+    if p.sH != 1 or p.sW != 1 or p.dH != 1 or p.dW != 1:
+        return (
+            "tap_outer_k needs stride 1 and dilation 1 (the filter tap is the "
+            "plain (y, x) only there)"
+        )
+    if p.kpg % spec.tile_k != 0:
+        return (
+            f"tap_outer_k needs kpg % tile_k == 0 (a K tile must not straddle "
+            f"two filter taps); got kpg={p.kpg}, tile_k={spec.tile_k}"
+        )
+    if spec.split_k != 1:
+        return "tap_outer_k needs split_k == 1 (a K slice could start mid-tap)"
+    if spec.wave_size != 64 or spec.pipeline == "wavelet":
+        return (
+            "tap_outer_k is a wave64 MFMA K loop (the wavelet pipeline has its "
+            "own K loop)"
+        )
+    if spec.uniform_k_decode:
+        return (
+            "tap_outer_k replaces the K loop uniform_k_decode builds; set one "
+            "of them"
         )
     return ""
 
@@ -1453,6 +1510,9 @@ def is_valid_dgrad_spec(spec: DgradConvSpec, arch: str = "gfx950") -> Tuple[bool
     _ukd_why = _uniform_k_decode_conflict(spec)
     if _ukd_why:
         return False, _ukd_why
+    _tapk_why = _tap_outer_k_conflict(spec)
+    if _tapk_why:
+        return False, _tapk_why
     if spec.pipeline == "wavelet":
         if spec.num_load_waves < 1:
             return False, "pipeline='wavelet' requires num_load_waves >= 1"
@@ -2715,6 +2775,96 @@ def _build_tilde_dgrad(
             b.scf_yield(*new_accs)
         return list(for_fb.results)
 
+    def _emit_tap_outer_loops() -> list[Value]:
+        """The ``tap_outer_k`` K loops. Returns the final accumulators.
+
+        Filter tap (y, x) outer, output-channel chunk inner. At stride 1 and
+        dilation 1 tap (y, x) reads dY pixel (hi + dh, wi + dw), dh = pH - y,
+        dw = pW - x: the tap decode is uniform arithmetic on the kernargs,
+        once per tap; the pixel decode (n, hi, wi), and so a tap's dY bounds,
+        are invariant across the chunk loop; and each chunk adds one uniform
+        offset per operand (kb on dY, w_k on W). kpg is a multiple of tile_k
+        (validator and cache), so a chunk never straddles a tap, needs no k
+        bound, and the W offset needs no predicate. Same reduction order as
+        the flat K loop.
+        """
+        c1 = b.const_i32(1)
+        c_kd = c_kpg if grouped else c_K
+        c_cs = c_dg_N if grouped else c_C
+        c_taps = b.mul(c_Y, c_X)
+        c_yxc = b.mul(c_taps, c_cs)
+        tap_cap: dict[str, Value] = {}
+
+        def dy_tap(b_: IRBuilder, row: Value, col: Value):
+            # NHWK: ((n*Ho + hi)*Wo + wi)*K + col, plus the tap's pixel shift
+            # (dh*Wo + dw)*K and the chunk base. An out-of-image lane is sent
+            # to the loader's OOB sentinel by ``valid``.
+            m_sub = b_.add(block_m_off_v, row)
+            n, m_rem = _magic_divmod(b_, m_sub, hw_div)
+            hi, wi = _magic_divmod(b_, m_rem, w_div)
+            ho = b_.add(hi, tap_cap["dh"])
+            wo = b_.add(wi, tap_cap["dw"])
+            valid = b_.land(
+                b_.land(b_.cmp_ge(ho, c0), b_.cmp_lt(ho, c_Ho)),
+                b_.land(b_.cmp_ge(wo, c0), b_.cmp_lt(wo, c_Wo)),
+            )
+            pix = b_.add(
+                b_.mul(
+                    b_.add(b_.mul(b_.add(b_.mul(n, c_Ho), hi), c_Wo), wi),
+                    c_K,
+                ),
+                col,
+            )
+            offset = b_.add(b_.add(pix, tap_cap["dy_tap"]), tap_cap["kb"])
+            return offset, valid
+
+        def w_tap(b_: IRBuilder, row: Value, col: Value):
+            # KYXC (per-group packed): (k_abs*Y*X + tap)*Cs + c with
+            # k_abs = kb + col; w_k = kb*Y*X*Cs + tap*Cs.
+            c_val = b_.add(block_n_off_v, row)
+            offset = b_.add(b_.add(b_.mul(col, c_yxc), c_val), tap_cap["w_k"])
+            return offset, None
+
+        if spec.lds_k_outer:
+
+            def w_tap_fn(b_: IRBuilder, row: Value, col: Value):
+                return w_tap(b_, col, row)
+
+        else:
+            w_tap_fn = w_tap
+
+        tap_for = b.scf_for_iter(c0, c_taps, c1, accs, iv_name="tap")
+        with tap_for as (tap, tap_vars):
+            ydot = b.div(tap, c_X)
+            xdot = b.sub(tap, b.mul(ydot, c_X))
+            tap_cap["dh"] = b.sub(params["p_pH"], ydot)
+            tap_cap["dw"] = b.sub(params["p_pW"], xdot)
+            tap_cap["dy_tap"] = b.mul(
+                b.add(b.mul(tap_cap["dh"], c_Wo), tap_cap["dw"]), c_K
+            )
+            tap_cs = b.mul(tap, c_cs)
+            chunk_accs = [(f"{name}_t", v) for (name, _), v in zip(accs, tap_vars)]
+            chunk_for = b.scf_for_iter(c0, c_kd, c_block_k, chunk_accs, iv_name="kb")
+            with chunk_for as (kb0, iter_vars):
+                kb = b.add(kb0, k_out_group_base) if grouped else kb0
+                tap_cap["kb"] = kb
+                tap_cap["w_k"] = b.add(b.mul(kb, c_yxc), tap_cs)
+                # Every global read of the tile before the first LDS write.
+                a_staged = a_sync_loader.load_global(
+                    b, tid=tid, descriptor=dy_tap, rsrc=dy_rsrc
+                )
+                b_staged = b_sync_loader.load_global(
+                    b, tid=tid, descriptor=w_tap_fn, rsrc=w_rsrc
+                )
+                a_sync_loader.store_lds(b, smem_dst=A_smem, staged=a_staged)
+                b_sync_loader.store_lds(b, smem_dst=B_smem, staged=b_staged)
+                b.sync()
+                new_accs = emit_mfma_phase(A_smem, B_smem, list(iter_vars))
+                b.sync()
+                b.scf_yield(*new_accs)
+            b.scf_yield(*chunk_for.results)
+        return list(tap_for.results)
+
     # ---- K loop ----
     if spec.pipeline == "wavelet":
         # Wavelet load/math wave specialization (gfx1250/WMMA only).
@@ -2755,7 +2905,9 @@ def _build_tilde_dgrad(
         )
         return b.kernel
 
-    if spec.uniform_k_decode:
+    if spec.tap_outer_k:
+        final_accs = _emit_tap_outer_loops()
+    elif spec.uniform_k_decode:
         final_accs = _emit_uniform_k_decode_loops()
     else:
         for_op = b.scf_for_iter(k_lo, k_hi, c_block_k, accs, iv_name="k0")

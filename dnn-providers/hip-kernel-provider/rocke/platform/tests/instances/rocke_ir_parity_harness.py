@@ -234,6 +234,7 @@ def build_dgrad(
     tile_n,
     tile_k,
     split_k=1,
+    tap_outer_k=False,
 ):
     def _build():
         from kernels.common.conv_implicit_gemm_dgrad import (
@@ -260,6 +261,7 @@ def build_dgrad(
             warp_tile_k=wtk,
             wave_size=wave_size,
             split_k=split_k,
+            tap_outer_k=tap_outer_k,
         )
         return build_implicit_gemm_conv_dgrad(spec, arch=arch)
 
@@ -2642,6 +2644,25 @@ def cases():
             tile_m=64,
             tile_n=64,
             tile_k=64,
+        ),
+    )
+    # The stride-1 tap-outer K loop (tap_outer_k) of the same kernel.
+    add(
+        "conv_dgrad",
+        "conv_dgrad/gfx950/n1h8c64k64r3_g4_tapk",
+        "gfx950",
+        build_dgrad(
+            "irhash_dgrad_950_g4_s1_tapk",
+            "gfx950",
+            dgrad_g4,
+            wave_size=64,
+            wtm=32,
+            wtn=32,
+            wtk=16,
+            tile_m=64,
+            tile_n=64,
+            tile_k=16,
+            tap_outer_k=True,
         ),
     )
     # gfx1151 WMMA grouped (wave32, 16x16x16) -- stride=1 only.

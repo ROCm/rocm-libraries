@@ -268,7 +268,7 @@ rocke_status_t
         n += w_;                                                      \
     } while(0)
     /* Flag order must match Python's kernel_name_join flags dict:
-     * async, kouter, spk, ukd, kp. C previously emitted spk before async, which only
+     * async, kouter, spk, ukd, kp, tapk. C previously emitted spk before async, which only
      * diverged for a spec setting both -- none exists -- but the K-outer flag
      * sits between them, so the order is now load-bearing. */
     if(s->async_dma)
@@ -285,6 +285,9 @@ rocke_status_t
     /* A non-default A row pad changes the LDS layout (Python flag "kp<n>"). */
     if(s->has_lds_k_pad && s->lds_k_pad != _dgrad_default_lds_k_pad(s->tile_k))
         ROCKE_DGRAD_NAME_APPEND("_kp%d", s->lds_k_pad);
+    /* A different K-loop body; only tagged when set (Python flag "tapk"). */
+    if(s->tap_outer_k)
+        ROCKE_DGRAD_NAME_APPEND("_tapk");
 #undef ROCKE_DGRAD_NAME_APPEND
     return ROCKE_OK;
 }
@@ -583,6 +586,54 @@ bool rocke_dgrad_conv_is_valid_spec(const rocke_dgrad_conv_spec_t* s,
                  "uniform_k_decode is not supported with pipeline='wavelet': the "
                  "wavelet load/math split has its own K loop");
         return false;
+    }
+
+    /* Python _tap_outer_k_conflict (reasons verbatim): the tap-outer loop
+     * has no fallback, so a problem it cannot compute is rejected. */
+    if(s->tap_outer_k)
+    {
+        const int kpg = rocke_conv_problem_kpg(p);
+        if(p->sH != 1 || p->sW != 1 || p->dH != 1 || p->dW != 1)
+        {
+            snprintf(reason,
+                     reason_cap,
+                     "tap_outer_k needs stride 1 and dilation 1 (the filter tap is the "
+                     "plain (y, x) only there)");
+            return false;
+        }
+        if(s->tile_k <= 0 || kpg % s->tile_k != 0)
+        {
+            snprintf(reason,
+                     reason_cap,
+                     "tap_outer_k needs kpg %% tile_k == 0 (a K tile must not straddle "
+                     "two filter taps); got kpg=%d, tile_k=%d",
+                     kpg,
+                     s->tile_k);
+            return false;
+        }
+        if(s->split_k != 1)
+        {
+            snprintf(reason,
+                     reason_cap,
+                     "tap_outer_k needs split_k == 1 (a K slice could start mid-tap)");
+            return false;
+        }
+        if(s->wave_size != 64 || (s->pipeline && strcmp(s->pipeline, "wavelet") == 0))
+        {
+            snprintf(reason,
+                     reason_cap,
+                     "tap_outer_k is a wave64 MFMA K loop (the wavelet pipeline has its "
+                     "own K loop)");
+            return false;
+        }
+        if(s->uniform_k_decode)
+        {
+            snprintf(reason,
+                     reason_cap,
+                     "tap_outer_k replaces the K loop uniform_k_decode builds; set one "
+                     "of them");
+            return false;
+        }
     }
 
     /* wavelet-specific checks (Python: spec.pipeline == "wavelet" block). */
@@ -1975,6 +2026,94 @@ static rocke_value_t* _uk_w_descriptor_kouter(rocke_ir_builder_t* b_,
                                               void* user)
 {
     return _uk_w_descriptor(b_, col, row, out_valid, user);
+}
+
+/* ---- tap_outer_k descriptors (Python _emit_tap_outer_loops) ----
+ *
+ * The K loop is (filter tap outer) x (output-channel chunk inner); the loop
+ * bodies write the per-tap (dh, dw, dy_tap) and per-chunk (kb, w_k) scalars
+ * into the contexts before every load. Operands are sequenced into
+ * temporaries in Python's left-to-right evaluation order. */
+struct tap_dy_ctx_t
+{
+    rocke_value_t* block_m_off;
+    dgrad_magic_div_t hw_div; // m_sub -> (n, m_rem)
+    dgrad_magic_div_t w_div; // m_rem -> (hi, wi)
+    rocke_value_t* c_Ho;
+    rocke_value_t* c_Wo;
+    rocke_value_t* c_K;
+    rocke_value_t* c0;
+    rocke_value_t* dh; /* pH - y (per tap) */
+    rocke_value_t* dw; /* pW - x (per tap) */
+    rocke_value_t* dy_tap; /* (dh*Wo + dw)*K (per tap) */
+    rocke_value_t* kb; /* absolute output-channel chunk base (per chunk) */
+};
+
+static rocke_value_t* _tap_dy_descriptor(rocke_ir_builder_t* b_,
+                                         rocke_value_t* row,
+                                         rocke_value_t* col,
+                                         rocke_value_t** out_valid,
+                                         void* user)
+{
+    tap_dy_ctx_t* ctx = (tap_dy_ctx_t*)user;
+    rocke_value_t* m_sub = rocke_b_add(b_, ctx->block_m_off, row);
+    rocke_value_t *n_val, *m_rem, *hi, *wi;
+    _magic_divmod(b_, m_sub, &ctx->hw_div, &n_val, &m_rem);
+    _magic_divmod(b_, m_rem, &ctx->w_div, &hi, &wi);
+    rocke_value_t* ho = rocke_b_add(b_, hi, ctx->dh);
+    rocke_value_t* wo = rocke_b_add(b_, wi, ctx->dw);
+    rocke_value_t* ho_ge = rocke_b_cmp_ge(b_, ho, ctx->c0);
+    rocke_value_t* ho_lt = rocke_b_cmp_lt(b_, ho, ctx->c_Ho);
+    rocke_value_t* ho_ok = rocke_b_land(b_, ho_ge, ho_lt);
+    rocke_value_t* wo_ge = rocke_b_cmp_ge(b_, wo, ctx->c0);
+    rocke_value_t* wo_lt = rocke_b_cmp_lt(b_, wo, ctx->c_Wo);
+    rocke_value_t* wo_ok = rocke_b_land(b_, wo_ge, wo_lt);
+    rocke_value_t* valid = rocke_b_land(b_, ho_ok, wo_ok);
+    /* ((n*Ho + hi)*Wo + wi)*K + col */
+    rocke_value_t* n_ho = rocke_b_mul(b_, n_val, ctx->c_Ho);
+    rocke_value_t* n_ho_hi = rocke_b_add(b_, n_ho, hi);
+    rocke_value_t* row_off = rocke_b_mul(b_, n_ho_hi, ctx->c_Wo);
+    rocke_value_t* pix_w = rocke_b_add(b_, row_off, wi);
+    rocke_value_t* pix_k = rocke_b_mul(b_, pix_w, ctx->c_K);
+    rocke_value_t* pix = rocke_b_add(b_, pix_k, col);
+    rocke_value_t* tap_off = rocke_b_add(b_, pix, ctx->dy_tap);
+    rocke_value_t* offset = rocke_b_add(b_, tap_off, ctx->kb);
+    if(out_valid)
+        *out_valid = valid;
+    return offset;
+}
+
+struct tap_w_ctx_t
+{
+    rocke_value_t* block_n_off;
+    rocke_value_t* c_yxc; /* Y*X*Cs */
+    rocke_value_t* w_k; /* kb*Y*X*Cs + tap*Cs (per chunk) */
+};
+
+static rocke_value_t* _tap_w_descriptor(rocke_ir_builder_t* b_,
+                                        rocke_value_t* row,
+                                        rocke_value_t* col,
+                                        rocke_value_t** out_valid,
+                                        void* user)
+{
+    tap_w_ctx_t* ctx = (tap_w_ctx_t*)user;
+    rocke_value_t* c_val = rocke_b_add(b_, ctx->block_n_off, row);
+    rocke_value_t* col_off = rocke_b_mul(b_, col, ctx->c_yxc);
+    rocke_value_t* inv = rocke_b_add(b_, col_off, c_val);
+    rocke_value_t* offset = rocke_b_add(b_, inv, ctx->w_k);
+    if(out_valid)
+        *out_valid = NULL; /* k_abs and the tap are in range by construction */
+    return offset;
+}
+
+/* K-outer coordinate swap, as _tilde_w_descriptor_kouter. */
+static rocke_value_t* _tap_w_descriptor_kouter(rocke_ir_builder_t* b_,
+                                               rocke_value_t* row,
+                                               rocke_value_t* col,
+                                               rocke_value_t** out_valid,
+                                               void* user)
+{
+    return _tap_w_descriptor(b_, col, row, out_valid, user);
 }
 
 // ===========================================================================
@@ -3478,7 +3617,94 @@ static rocke_kernel_def_t*
 
     rocke_value_t* final_accs[ROCKE_CONV_MAX_ACCS];
     int num_final = 0;
-    if(spec->uniform_k_decode)
+    if(spec->tap_outer_k)
+    {
+        /* Python _emit_tap_outer_loops: filter tap outer, output-channel
+         * chunk inner. kpg % tile_k == 0 (validator), so a chunk never
+         * straddles a tap. */
+        rocke_value_t* c1 = rocke_b_const_i32(b, 1);
+        rocke_value_t* c_kd = c_kdiv;
+        rocke_value_t* c_cs = c_cstride;
+        rocke_value_t* c_taps = rocke_b_mul(b, c_Y, c_X);
+        rocke_value_t* c_yxc = rocke_b_mul(b, c_taps, c_cs);
+
+        tap_dy_ctx_t tdy;
+        tdy.block_m_off = block_m_off_v;
+        tdy.hw_div = hw_div;
+        tdy.w_div = w_div;
+        tdy.c_Ho = c_Ho;
+        tdy.c_Wo = c_Wo;
+        tdy.c_K = c_K;
+        tdy.c0 = c0;
+        tdy.dh = tdy.dw = tdy.dy_tap = tdy.kb = NULL;
+        tap_w_ctx_t tw;
+        tw.block_n_off = block_n_off_v;
+        tw.c_yxc = c_yxc;
+        tw.w_k = NULL;
+
+        rocke_for_t tap_for
+            = rocke_b_scf_for_iter(b, c0, c_taps, c1, iter_args, num_accs, "tap", false, true);
+        rocke_b_region_enter(b, tap_for.body);
+        {
+            rocke_value_t* tap = tap_for.iv;
+            rocke_value_t* ydot = rocke_b_div(b, tap, c_X);
+            rocke_value_t* ydot_x = rocke_b_mul(b, ydot, c_X);
+            rocke_value_t* xdot = rocke_b_sub(b, tap, ydot_x);
+            tdy.dh = rocke_b_sub(b, ctx.p_pH, ydot);
+            tdy.dw = rocke_b_sub(b, ctx.p_pW, xdot);
+            rocke_value_t* dh_wo = rocke_b_mul(b, tdy.dh, c_Wo);
+            rocke_value_t* dh_wo_dw = rocke_b_add(b, dh_wo, tdy.dw);
+            tdy.dy_tap = rocke_b_mul(b, dh_wo_dw, c_K);
+            rocke_value_t* tap_cs = rocke_b_mul(b, tap, c_cs);
+
+            rocke_iter_arg_t chunk_args[ROCKE_CONV_MAX_ACCS];
+            char chunk_names[ROCKE_CONV_MAX_ACCS][40];
+            for(int i = 0; i < num_accs; i++)
+            {
+                snprintf(chunk_names[i], sizeof(chunk_names[0]), "%s_t", iter_args[i].name);
+                chunk_args[i].name = chunk_names[i];
+                chunk_args[i].init = tap_for.iter_vars[i];
+            }
+            rocke_for_t chunk_for = rocke_b_scf_for_iter(
+                b, c0, c_kd, c_block_k, chunk_args, num_accs, "kb", false, true);
+            rocke_b_region_enter(b, chunk_for.body);
+            {
+                rocke_value_t* kb0 = chunk_for.iv;
+                tdy.kb = grouped ? rocke_b_add(b, kb0, k_out_group_base) : kb0;
+                rocke_value_t* kb_yxc = rocke_b_mul(b, tdy.kb, c_yxc);
+                tw.w_k = rocke_b_add(b, kb_yxc, tap_cs);
+                /* Every global read of the tile before the first LDS write. */
+                rocke_ctl_staged_t a_staged;
+                rocke_ctl_staged_t b_staged;
+                rocke_coalesced_tile_loader_load_global(
+                    b, &a_sync_loader, tid, _tap_dy_descriptor, &tdy, dy_rsrc, NULL, &a_staged);
+                rocke_coalesced_tile_loader_load_global(b,
+                                                        &b_sync_loader,
+                                                        tid,
+                                                        spec->lds_k_outer ? _tap_w_descriptor_kouter
+                                                                          : _tap_w_descriptor,
+                                                        &tw,
+                                                        w_rsrc,
+                                                        NULL,
+                                                        &b_staged);
+                rocke_coalesced_tile_loader_store_lds(b, &a_sync_loader, A_smem, &a_staged);
+                rocke_coalesced_tile_loader_store_lds(b, &b_sync_loader, B_smem, &b_staged);
+                rocke_b_sync(b);
+                rocke_value_t* new_accs[ROCKE_CONV_MAX_ACCS];
+                emit_mfma_phase(chunk_for.iter_vars, new_accs);
+                rocke_b_sync(b);
+                rocke_b_scf_yield(b, new_accs, num_accs);
+            }
+            rocke_b_region_leave(b);
+            rocke_b_scf_yield(b, chunk_for.op->results, num_accs);
+        }
+        rocke_b_region_leave(b);
+
+        for(int i = 0; i < tap_for.op->num_results; i++)
+            final_accs[i] = tap_for.op->results[i];
+        num_final = tap_for.op->num_results;
+    }
+    else if(spec->uniform_k_decode)
     {
         /* Python _emit_uniform_k_decode_loops. Loop 1 carries the K tile's
          * decoded (k_out, xdot, ydot) and runs when kpg (K when ungrouped) is
