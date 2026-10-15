@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -54,6 +54,9 @@ bool testing_ruge_stueben_amg(Arguments argus)
     bool         rebuildnumeric      = argus.rebuildnumeric;
     bool         disable_accelerator = !argus.use_acc;
     std::string  coarsening_strategy = argus.coarsening_strategy;
+    std::string  interpolation_type  = argus.interpolation_type;
+    float        trunc_factor        = argus.trunc_factor;
+    int          p_max_elmts         = argus.p_max_elmts;
 
     // Initialize rocALUTION platform
     disable_accelerator_rocalution(disable_accelerator);
@@ -124,12 +127,47 @@ bool testing_ruge_stueben_amg(Arguments argus)
     if(coarsening_strategy == "Greedy")
     {
         p.SetCoarseningStrategy(Greedy);
-        p.SetInterpolationType(Direct);
     }
     else
     {
         p.SetCoarseningStrategy(PMIS);
+    }
+
+    // The FF1 limit rides along in the interpolation type, because it only has an effect on
+    // the classical Ext+I operator. Crossing it with the other types would run each of them
+    // twice over identical code.
+    bool ff1 = false;
+
+    if(interpolation_type == "")
+    {
+        // Without an explicit type, each coarsening strategy keeps the interpolation it has
+        // always been paired with
+        p.SetInterpolationType(coarsening_strategy == "Greedy" ? Direct : ExtPI);
+    }
+    else if(interpolation_type == "Direct")
+    {
+        p.SetInterpolationType(Direct);
+    }
+    else if(interpolation_type == "ExtPI")
+    {
         p.SetInterpolationType(ExtPI);
+    }
+    else if(interpolation_type == "ExtPI_FF1")
+    {
+        p.SetInterpolationType(ExtPI);
+        ff1 = true;
+    }
+    else if(interpolation_type == "MMExtPI")
+    {
+        p.SetInterpolationType(MMExtPI);
+    }
+    else if(interpolation_type == "MMExtPE")
+    {
+        p.SetInterpolationType(MMExtPE);
+    }
+    else
+    {
+        return false;
     }
     p.SetCoarsestLevel(300);
     p.SetCycle(cycle);
@@ -137,7 +175,9 @@ bool testing_ruge_stueben_amg(Arguments argus)
     p.SetManualSmoothers(true);
     p.SetManualSolver(true);
     p.SetStrengthThreshold(0.25f);
-    p.SetInterpolationFF1Limit(false);
+    p.SetInterpolationFF1Limit(ff1);
+    p.SetInterpolationTruncationFactor(trunc_factor);
+    p.SetInterpolationMaxElmts(p_max_elmts);
     p.SetScaling(scaling);
     p.BuildHierarchy();
 

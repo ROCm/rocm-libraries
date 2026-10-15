@@ -52,10 +52,12 @@ endif()
 # Configure the version header (version numbers only) and the config header
 # (build-time feature flags). Variables referenced via #cmakedefine in the
 # .h.in must be set (or unset) prior to the configure_file() calls.
+set(ROCSPARSE_WITH_TRSM_REFACTORING ${BUILD_WITH_TRSM_REFACTORING})
 set(ROCSPARSE_WITH_SPMAT_SCALE ${ROCSPARSE_ENABLE_SPMAT_SCALE})
 set(ROCSPARSE_WITH_SDDMM_BATCHED ${ROCSPARSE_ENABLE_SDDMM_BATCHED})
 set(ROCSPARSE_WITH_ELL_TRSV ${BUILD_WITH_ELL_TRSV})
 set(ROCSPARSE_WITH_DIAGONAL_SOLVE ${BUILD_WITH_DIAGONAL_SOLVE})
+set(ROCSPARSE_WITH_SPSORT ${BUILD_WITH_SPSORT})
 
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/include/rocsparse-version.h.in"
                "${PROJECT_BINARY_DIR}/include/rocsparse/rocsparse-version.h"
@@ -142,7 +144,16 @@ endif()
 
 if(BUILD_CODE_COVERAGE)
   target_compile_options(rocsparse PRIVATE -fprofile-instr-generate -fcoverage-mapping)
-  target_link_libraries(rocsparse PRIVATE -fprofile-instr-generate)
+  # Instrument host code only. Device-side coverage makes the HIP runtime abort
+  # while dumping the profile at process exit, after every test has already
+  # passed (AISPARSE-778). Both halves matter: the compile flags suppress the
+  # __profd_* counter globals, and the host-only link keeps the AMDGPU profile
+  # runtime, which contributes __llvm_profile_sections_*, out of the device image.
+  target_compile_options(rocsparse PRIVATE
+    "SHELL:-Xarch_device -fno-profile-instr-generate"
+    "SHELL:-Xarch_device -fno-coverage-mapping")
+  target_link_options(rocsparse PRIVATE -u__llvm_profile_runtime)
+  target_link_libraries(rocsparse PRIVATE ${ROCSPARSE_PROFILE_RUNTIME})
 endif()
 
 if (NOT WIN32)

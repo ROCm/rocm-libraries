@@ -24,6 +24,7 @@ exclude: |
     projects/hipblas/.*|
     projects/hipblas-common/.*|
     projects/hipcub/.*|
+    projects/hipccl/.*|
     projects/hipfft/.*|
     projects/hiprand/.*|
     projects/hipsolver/.*|
@@ -57,6 +58,14 @@ exclude: |
     projects/miopen/.*\.s$|
     projects/miopen/.*\.inc$|
     projects/miopen/.*\.model$|
+    # Machine-generated LGBM assets: native LightGBM text models + baked
+    # catalog/metadata + golden parity fixtures (large, not human-authored;
+    # exceed check-added-large-files and are not lintable/end-of-file-fixable).
+    # Match every lgbm_* asset under kernels/ so new metadata/model files stay
+    # covered without touching this list.
+    projects/miopen/src/conv/heuristics/lgbm_models/.*|
+    projects/miopen/src/conv/heuristics/lgbm_pcfg_models/.*|
+    projects/miopen/src/kernels/lgbm_.*\.(json|txt|bin)|
     # RPP exclusion list - raw test data with no early NUL byte, which pre-commit would
     # otherwise treat as text and corrupt. Matched by extension so new data stays covered.
     projects/rpp/.*\.(bin|rgb|yuv)$
@@ -155,6 +164,18 @@ repos:
         language: python
         files: ^projects/miopen/test/gtest/.*\.cpp$
         pass_filenames: false
+
+      # Only the lines a change adds are checked (git diff against the
+      # pre-commit from/to refs in CI, against HEAD otherwise), so the
+      # existing absolute imports do not fail unrelated edits. A package root
+      # with no files in the change simply does not trigger the hook, so this
+      # keeps working while the Tensile -> tensilelite move is in flight.
+      - id: tensilelite-no-absolute-imports
+        name: TensileLite - no new absolute Tensile/tensilelite imports
+        entry: python projects/hipblaslt/tensilelite/scripts/check_no_absolute_imports.py
+        language: python
+        files: ^projects/hipblaslt/tensilelite/(Tensile|tensilelite)/.*\.py$
+        exclude: ^projects/hipblaslt/tensilelite/(Tensile|tensilelite)/Tests/
 
       - id: miopen-public-private-headers
         name: MIOpen public/private header consistency

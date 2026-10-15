@@ -110,14 +110,20 @@ if(ROCKE_BUILD_PYENV)
         COMMENT "Building rocke platform wheel"
         VERBATIM)
 
+    # The library wheel is built from a copy of library/ in a temporary
+    # directory, not in place: setuptools writes build/lib/**/*.py next to the
+    # sources, which would match the glob above and force a CMake re-run on
+    # the next build. (Filtering the list does not help: CONFIGURE_DEPENDS
+    # re-checks the unfiltered glob.) See cmake/build_library_wheel.py.
+    set(_rocke_library_wheel_script "${CMAKE_CURRENT_SOURCE_DIR}/cmake/build_library_wheel.py")
     set(_rocke_library_wheel "${ROCKE_WHEEL_DIR}/rocke_library-${ROCKE_WHEEL_VERSION}-py3-none-any.whl")
     add_custom_command(
         OUTPUT "${_rocke_library_wheel}"
         COMMAND ${_rocke_wheel_env}
-                "${ROCKE_PYENV_PYTHON}" -m pip wheel --no-deps --no-build-isolation
-                --wheel-dir "${ROCKE_WHEEL_DIR}"
-                "${CMAKE_CURRENT_SOURCE_DIR}/library"
+                "${ROCKE_PYENV_PYTHON}" "${_rocke_library_wheel_script}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/library" "${ROCKE_WHEEL_DIR}"
         DEPENDS "${ROCKE_PYENV_STAMP}"
+                "${_rocke_library_wheel_script}"
                 "${CMAKE_CURRENT_SOURCE_DIR}/library/pyproject.toml"
                 ${_rocke_library_sources}
         COMMENT "Building rocke-library wheel"

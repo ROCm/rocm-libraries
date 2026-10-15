@@ -47,6 +47,22 @@ name    = rocke_engine.gemm_kernel_name(spec)              # -> str
 
 `arch` defaults to `"gfx950"`.
 
+### Compiler selection
+
+Automatic LLVM flavor selection in Python bindings delegates to
+`rocke.core.lower_llvm._resolve_llvm_flavor()`. Both spec-based lowering and
+`lower_serialized_ir` pass its concrete result to the C++ engine, keeping them
+consistent with Python lowering and Python's COMGR selection. Standalone native
+`AUTO` discovery has no knowledge of Python's bundled libraries.
+
+Caller-owned spec builders retain native build validation before compiler
+resolution and are protected through resolution and lowering by RAII cleanup.
+MFMA lowering resolves before its legacy builder, which returns no ownership
+handle. Compiler failure can therefore precede native MFMA build validation.
+Serialized IR is parsed before AUTO resolution and owns its builder before
+initialization. An explicit `lower_serialized_ir(..., flavor="llvm20")` bypasses
+automatic selection and remains available for offline emission.
+
 ### Error model
 
 The engine uses a **sticky-error IRBuilder**. On a build/lower failure (e.g. an
@@ -85,7 +101,8 @@ engine are copied into a `std::string` and `free`'d.
 
    The engine compiles as C++20; the binding sets `CMAKE_CXX_STANDARD 20`. The
    archive's symbols are reached through the `extern "C"` public headers, so it
-   links cleanly (`target_link_libraries(... librocke_core.a m)`).
+   links through the archive with the platform's math, loader, and thread
+   dependencies supplied by the binding's CMake target.
 
 ## Consistency proof
 
