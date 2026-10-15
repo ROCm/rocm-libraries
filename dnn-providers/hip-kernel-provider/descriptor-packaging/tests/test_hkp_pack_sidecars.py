@@ -12,6 +12,7 @@ import pytest
 
 from hkp_pack.descriptors import HkpPackError, load_flat_input
 from hkp_pack.pipeline import compile_intermediate
+from pack_helpers import GENERIC_TARGETS
 
 pytestmark = pytest.mark.quick
 
@@ -67,7 +68,9 @@ def _root_with_model_uhd(tmp_path: Path, artifact: str = "model.bin") -> Path:
 
 class TestResolution:
     def test_the_named_artifact_becomes_a_sidecar(self, tmp_path: Path):
-        flat = load_flat_input(_root_with_model_uhd(tmp_path), log=lambda *_: None)
+        flat = load_flat_input(
+            _root_with_model_uhd(tmp_path), GENERIC_TARGETS, log=lambda *_: None
+        )
 
         (uhd,) = [d for d in flat.descriptors if d.type == "uhd"]
         (sidecar,) = uhd.sidecars
@@ -79,7 +82,7 @@ class TestResolution:
         root = tmp_path / "src"
         _write_json(root / "pack" / "native.uhd.json", _native_uhd())
 
-        flat = load_flat_input(root, log=lambda *_: None)
+        flat = load_flat_input(root, GENERIC_TARGETS, log=lambda *_: None)
 
         (uhd,) = [d for d in flat.descriptors if d.type == "uhd"]
         assert uhd.sidecars == []
@@ -89,7 +92,7 @@ class TestResolution:
         _write_json(root / "pack" / "native.uhd.json", _native_uhd())
         (root / "pack" / "unrelated.bin").write_bytes(b"not mine")
 
-        flat = load_flat_input(root, log=lambda *_: None)
+        flat = load_flat_input(root, GENERIC_TARGETS, log=lambda *_: None)
 
         (uhd,) = [d for d in flat.descriptors if d.type == "uhd"]
         assert uhd.sidecars == []
@@ -99,7 +102,7 @@ class TestResolution:
         root = _root_with_model_uhd(tmp_path)
         (root / "pack" / "training_data.csv").write_text("a,b\n1,2\n", encoding="utf-8")
 
-        flat = load_flat_input(root, log=lambda *_: None)
+        flat = load_flat_input(root, GENERIC_TARGETS, log=lambda *_: None)
 
         (uhd,) = [d for d in flat.descriptors if d.type == "uhd"]
         assert [s.name for s in uhd.sidecars] == ["model.bin"]
@@ -110,7 +113,7 @@ class TestResolution:
         (root / "model.bin").write_bytes(b"decoy")
         (root / "pack" / "model.bin").write_bytes(b"correct")
 
-        flat = load_flat_input(root, log=lambda *_: None)
+        flat = load_flat_input(root, GENERIC_TARGETS, log=lambda *_: None)
 
         (uhd,) = [d for d in flat.descriptors if d.type == "uhd"]
         assert uhd.sidecars[0].source.read_bytes() == b"correct"
@@ -128,7 +131,7 @@ class TestResolution:
         model.parent.mkdir(parents=True, exist_ok=True)
         model.write_bytes(b"nested")
 
-        flat = load_flat_input(root, log=lambda *_: None)
+        flat = load_flat_input(root, GENERIC_TARGETS, log=lambda *_: None)
 
         (uhd,) = [d for d in flat.descriptors if d.type == "uhd"]
         (sidecar,) = uhd.sidecars
@@ -148,7 +151,7 @@ class TestResolution:
             (root / "pack" / "model.bin").symlink_to(Path("store") / "real.bin")
         except (OSError, NotImplementedError) as exc:
             pytest.skip(f"cannot create a symlink here: {exc}")
-        flat = load_flat_input(root, log=lambda *_: None)
+        flat = load_flat_input(root, GENERIC_TARGETS, log=lambda *_: None)
         inter_dir = tmp_path / "inter" / "gfx942"
 
         compile_intermediate(
@@ -171,7 +174,7 @@ class TestRejection:
         _write_json(root / "pack" / "heuristic.uhd.json", _model_uhd("absent.bin"))
 
         with pytest.raises(HkpPackError, match="payload source not found"):
-            load_flat_input(root, log=lambda *_: None)
+            load_flat_input(root, GENERIC_TARGETS, log=lambda *_: None)
 
     def test_an_adapter_that_reads_a_model_must_name_one(self, tmp_path: Path):
         root = tmp_path / "src"
@@ -180,7 +183,7 @@ class TestRejection:
         _write_json(root / "pack" / "heuristic.uhd.json", doc)
 
         with pytest.raises(HkpPackError, match="exactly one body"):
-            load_flat_input(root, log=lambda *_: None)
+            load_flat_input(root, GENERIC_TARGETS, log=lambda *_: None)
 
     def test_artifact_outside_the_descriptor_directory_is_rejected(
         self, tmp_path: Path
@@ -195,7 +198,7 @@ class TestRejection:
         (root / "shared" / "model.bin").write_bytes(b"shared")
 
         with pytest.raises(HkpPackError, match="inside the descriptor's directory"):
-            load_flat_input(root, log=lambda *_: None)
+            load_flat_input(root, GENERIC_TARGETS, log=lambda *_: None)
 
     def test_escape_is_checked_before_existence(self, tmp_path: Path):
         root = tmp_path / "src"
@@ -204,14 +207,14 @@ class TestRejection:
         )
 
         with pytest.raises(HkpPackError, match="inside the descriptor's directory"):
-            load_flat_input(root, log=lambda *_: None)
+            load_flat_input(root, GENERIC_TARGETS, log=lambda *_: None)
 
     def test_an_embedded_nul_is_a_packing_error(self, tmp_path: Path):
         root = tmp_path / "src"
         _write_json(root / "pack" / "heuristic.uhd.json", _model_uhd("model\0.bin"))
 
         with pytest.raises(HkpPackError):
-            load_flat_input(root, log=lambda *_: None)
+            load_flat_input(root, GENERIC_TARGETS, log=lambda *_: None)
 
     def test_symlink_to_another_descriptor_folder_is_rejected(self, tmp_path: Path):
         root = tmp_path / "src"
@@ -224,7 +227,7 @@ class TestRejection:
         except (OSError, NotImplementedError) as exc:
             pytest.skip(f"cannot create a symlink here: {exc}")
         with pytest.raises(HkpPackError):
-            load_flat_input(root, log=lambda *_: None)
+            load_flat_input(root, GENERIC_TARGETS, log=lambda *_: None)
 
     @pytest.mark.parametrize("folder", ["kpack", "KPack"])
     def test_an_artifact_under_the_archive_folder_is_rejected(
@@ -237,7 +240,7 @@ class TestRejection:
         (root / folder / "model.bin").write_bytes(b"model")
 
         with pytest.raises(HkpPackError, match="reserved"):
-            load_flat_input(root, log=lambda *_: None)
+            load_flat_input(root, GENERIC_TARGETS, log=lambda *_: None)
 
 
 class TestIntermediateStaging:
@@ -245,7 +248,7 @@ class TestIntermediateStaging:
 
     def test_sidecar_is_mirrored_into_the_intermediate_tree(self, tmp_path: Path):
         root = _root_with_model_uhd(tmp_path)
-        flat = load_flat_input(root, log=lambda *_: None)
+        flat = load_flat_input(root, GENERIC_TARGETS, log=lambda *_: None)
         inter_dir = tmp_path / "inter" / "gfx942"
 
         compile_intermediate(
@@ -271,7 +274,7 @@ class TestIntermediateStaging:
         nested = root / "rocKE" / "attn" / "models" / "model.bin"
         nested.parent.mkdir(parents=True, exist_ok=True)
         nested.write_bytes(b"nested")
-        flat = load_flat_input(root, log=lambda *_: None)
+        flat = load_flat_input(root, GENERIC_TARGETS, log=lambda *_: None)
         inter_dir = tmp_path / "inter" / "gfx942"
 
         compile_intermediate(
@@ -306,7 +309,7 @@ def test_feature_models_require_complete_headers_before_packaging(
     del doc[missing]
     _write_json(root / "pack" / "heuristic.uhd.json", doc)
     with pytest.raises(HkpPackError, match=message):
-        load_flat_input(root, log=lambda *_: None)
+        load_flat_input(root, GENERIC_TARGETS, log=lambda *_: None)
 
 
 def test_custom_library_uses_library_and_carries_the_shared_object(tmp_path):
@@ -322,12 +325,12 @@ def test_custom_library_uses_library_and_carries_the_shared_object(tmp_path):
     _write_json(root / "custom.uhd.json", doc)
     (root / "lib").mkdir()
     (root / "lib" / "model.so").write_bytes(b"shared object")
-    flat = load_flat_input(root, log=lambda *_: None)
+    flat = load_flat_input(root, GENERIC_TARGETS, log=lambda *_: None)
     assert flat.descriptors[0].sidecars[0].source.read_bytes() == b"shared object"
     doc["custom_library"]["artifact"] = doc["custom_library"].pop("library")
     _write_json(root / "custom.uhd.json", doc)
     with pytest.raises(HkpPackError, match="unknown fields"):
-        load_flat_input(root, log=lambda *_: None)
+        load_flat_input(root, GENERIC_TARGETS, log=lambda *_: None)
 
 
 def test_explicit_semantic_revision_does_not_change_format_admission(tmp_path):
@@ -342,13 +345,13 @@ def test_explicit_semantic_revision_does_not_change_format_admission(tmp_path):
             "fields": [{"name": "block_size", "type": "int"}],
         },
     )
-    flat = load_flat_input(root, log=lambda *_: None)
+    flat = load_flat_input(root, GENERIC_TARGETS, log=lambda *_: None)
     assert flat.descriptors[0].doc["revision"] == "12.34"
     doc = _native_uhd()
     doc["version"] = "2.0"
     _write_json(root / "native.uhd.json", doc)
     with pytest.raises(HkpPackError, match="unsupported file-format version"):
-        load_flat_input(root, log=lambda *_: None)
+        load_flat_input(root, GENERIC_TARGETS, log=lambda *_: None)
 
 
 _UHD_SCHEMA = "projects/hipdnn/plugin_sdk/schemas/uhd.schema.json"
@@ -469,11 +472,11 @@ def test_packaging_and_canonical_schema_agree_on_uhd_headers(tmp_path, mutation)
     (root / "model.bin").write_bytes(b"artifact")
     assert validator.is_valid(doc) == valid
     if valid:
-        flat = load_flat_input(root, log=lambda *_: None)
+        flat = load_flat_input(root, GENERIC_TARGETS, log=lambda *_: None)
         assert flat.descriptors[0].sidecars[0].source.read_bytes() == b"artifact"
     else:
         with pytest.raises(HkpPackError):
-            load_flat_input(root, log=lambda *_: None)
+            load_flat_input(root, GENERIC_TARGETS, log=lambda *_: None)
 
 
 def _load_uhd(root: Path, doc: dict):
@@ -482,7 +485,7 @@ def _load_uhd(root: Path, doc: dict):
     (root / "model.bin").write_bytes(b"artifact")
     (root / "lib").mkdir(exist_ok=True)
     (root / "lib" / "model.so").write_bytes(_LIBRARY_BYTES)
-    return load_flat_input(root, log=lambda *_: None)
+    return load_flat_input(root, GENERIC_TARGETS, log=lambda *_: None)
 
 
 def test_schema_and_packaging_admit_the_extension_namespaces_the_loader_ignores(
@@ -753,7 +756,7 @@ def test_schema_and_packaging_admit_a_hashed_model_in_a_subdirectory(tmp_path):
     _write_json(root / "heuristic.uhd.json", doc)
     (root / "models").mkdir(parents=True)
     (root / "models" / "model.bin").write_bytes(b"nested")
-    flat = load_flat_input(root, log=lambda *_: None)
+    flat = load_flat_input(root, GENERIC_TARGETS, log=lambda *_: None)
     (sidecar,) = flat.descriptors[0].sidecars
     assert (sidecar.rel_dir, sidecar.name) == (Path("models"), "model.bin")
 
@@ -779,12 +782,12 @@ def test_packaging_refuses_static_order_criteria(tmp_path):
     """static_order takes no parameters; UhdParser refuses a declared `order`."""
     root = tmp_path / "src"
     _write_json(root / "order.uhd.json", _static_order_uhd({}))
-    load_flat_input(root, log=lambda *_: None)
+    load_flat_input(root, GENERIC_TARGETS, log=lambda *_: None)
     _write_json(
         root / "order.uhd.json", _static_order_uhd({"order": ["priority", "id"]})
     )
     with pytest.raises(HkpPackError, match="static_order.order is not supported"):
-        load_flat_input(root, log=lambda *_: None)
+        load_flat_input(root, GENERIC_TARGETS, log=lambda *_: None)
 
 
 def test_schema_refuses_static_order_criteria():
@@ -893,7 +896,7 @@ def test_all_role_and_arch_models_remain_reachable_when_packaging(
     original = ued["sort_kernel_catalog"]["default"]
     ued["sort_kernel_catalog"]["gfx950"] = [_OTHER_TFLOPS_ID, original]
     _write_json(ued_path, ued)
-    flat = load_flat_input(root, log=lambda *_: None)
+    flat = load_flat_input(root, GENERIC_TARGETS, log=lambda *_: None)
     retained = reachable_generic_ids(flat, flat.kdps())
     assert {original, _TFLOPS_ID, _TIME_ID, _OTHER_TFLOPS_ID, _ORDERING_ID} <= retained
 
@@ -926,7 +929,7 @@ def test_packaging_rejects_ambiguous_per_metric_models(
 ):
     root = _root_with_roles(tmp_path, main_fixture, **roles)
     with pytest.raises(HkpPackError, match=message):
-        load_flat_input(root, log=lambda *_: None)
+        load_flat_input(root, GENERIC_TARGETS, log=lambda *_: None)
 
 
 def test_one_metric_per_architecture_is_per_architecture(tmp_path, main_fixture):
@@ -936,7 +939,7 @@ def test_one_metric_per_architecture_is_per_architecture(tmp_path, main_fixture)
         main_fixture,
         predict_engine={"gfx942": _TFLOPS_ID, "gfx950": [_OTHER_TFLOPS_ID, _TIME_ID]},
     )
-    load_flat_input(root, log=lambda *_: None)
+    load_flat_input(root, GENERIC_TARGETS, log=lambda *_: None)
 
 
 def test_references_resolve_in_any_letter_case(tmp_path, main_fixture):
@@ -952,7 +955,7 @@ def test_references_resolve_in_any_letter_case(tmp_path, main_fixture):
     kmd_id = ued["metadata"]
     ued["metadata"] = kmd_id.upper()
     _write_json(ued_path, ued)
-    flat = load_flat_input(root, log=lambda *_: None)
+    flat = load_flat_input(root, GENERIC_TARGETS, log=lambda *_: None)
     assert {_TFLOPS_ID, kmd_id} <= reachable_generic_ids(flat, flat.kdps())
 
 
@@ -984,7 +987,11 @@ def test_packaging_admits_every_ued_field_the_loader_reads(tmp_path, main_fixtur
         ued["provenance"] = {"tool": "hand-written"}
         ued["x-team"] = "kernels"
 
-    load_flat_input(_root_with_ued(tmp_path, main_fixture, mutate), log=lambda *_: None)
+    load_flat_input(
+        _root_with_ued(tmp_path, main_fixture, mutate),
+        GENERIC_TARGETS,
+        log=lambda *_: None,
+    )
 
 
 @pytest.mark.parametrize(
@@ -1052,7 +1059,7 @@ def test_packaging_refuses_what_the_engine_parser_refuses(
     loader applies before advertising an engine."""
     root = _root_with_ued(tmp_path, main_fixture, mutate)
     with pytest.raises(HkpPackError, match=message):
-        load_flat_input(root, log=lambda *_: None)
+        load_flat_input(root, GENERIC_TARGETS, log=lambda *_: None)
 
 
 @pytest.mark.parametrize(
@@ -1080,7 +1087,7 @@ def test_packaging_rejects_a_model_named_outside_an_arch_map(
         },
     )
     with pytest.raises(HkpPackError, match=message):
-        load_flat_input(root, log=lambda *_: None)
+        load_flat_input(root, GENERIC_TARGETS, log=lambda *_: None)
 
 
 @pytest.mark.parametrize(
@@ -1105,4 +1112,4 @@ def test_packaging_rejects_malformed_role_values(
 ):
     root = _root_with_roles(tmp_path, main_fixture, **roles)
     with pytest.raises(HkpPackError, match=message):
-        load_flat_input(root, log=lambda *_: None)
+        load_flat_input(root, GENERIC_TARGETS, log=lambda *_: None)

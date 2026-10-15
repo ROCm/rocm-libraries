@@ -139,7 +139,8 @@ public:
     /// re-read from the on-disk shard, so eviction costs at most one redundant sweep.
     static constexpr size_t DEFAULT_WINNER_CACHE_CAPACITY = 4096;
 
-    /// @throws std::invalid_argument bad pack reference, or duplicate metadata tuple.
+    /// @throws std::invalid_argument bad pack reference, or two kernels sharing a metadata tuple
+    ///         that compete at the same arch tier on a device.
     /// @throws std::runtime_error a UMD or the engine's graph_match names a symbol this
     /// build does not ship.
     ///
@@ -589,11 +590,10 @@ private:
     /// than completing each kernel's metadata again on every graph.
     void validateAndIndexPacks()
     {
-        // Two kernels may share a tuple when no single device can see both -- that is
-        // exactly the per-arch shard layout. Uniqueness is therefore per overlapping-arch
-        // group, not per engine: the tuple is the catalog key, and a catalog is built for
-        // one device. Keyed by the tuple's values in a hash map rather than scanned, which
-        // would be quadratic.
+        // Two kernels may share a tuple when no single device sees both at the same arch
+        // tier (per-arch shards, or a more specific kernel that buildCatalog shadows
+        // per device). Uniqueness is per competing-arch group, keyed by the tuple's values
+        // in a hash map rather than scanned, which would be quadratic.
         size_t kernelCount = 0;
         for(const auto& pack : _packs)
         {
@@ -609,13 +609,15 @@ private:
         std::unordered_map<DescriptorId, std::vector<std::vector<std::string>>, DescriptorIdHash>
             archesClaimingId;
         archesClaimingId.reserve(kernelCount);
-        // Records @p arch unless a claimant already reaches one of its devices.
+        // Records @p arch unless @p conflicts finds a claimant it collides with: any shared
+        // device for an id, the same arch tier on a shared device for a tuple.
         const auto claim = [](std::vector<std::vector<std::string>>& claimants,
-                              const std::vector<std::string>& arch) {
-            const bool taken
-                = std::any_of(claimants.begin(), claimants.end(), [&arch](const auto& claimed) {
-                      return archOverlaps(claimed, arch);
-                  });
+                              const std::vector<std::string>& arch,
+                              const auto& conflicts) {
+            const bool taken = std::any_of(
+                claimants.begin(), claimants.end(), [&arch, &conflicts](const auto& claimed) {
+                    return conflicts(claimed, arch);
+                });
             if(!taken)
             {
                 claimants.push_back(arch);
@@ -664,7 +666,8 @@ private:
                 // one that declared a narrower list claims only that. Claiming by the
                 // kernel rather than the pack is what lets two kernels of ONE pack share a
                 // tuple under disjoint arch -- one implementation per capability -- while
-                // still catching two that a single device would see together.
+                // still catching two that compete at the same arch tier on a device.
+                // Kernels at different tiers do not collide: the better tier wins.
                 std::vector<std::string> kernelArch = kernel.arch.empty() ? pack.arch : kernel.arch;
                 MetadataTupleValues tuple;
                 tuple.reserve(key.size());
@@ -674,7 +677,9 @@ private:
                 }
                 // try_emplace, not operator[], only because misc-const-correctness
                 // misreads the operator[] form here and demands a const map.
-                if(!claim(archesClaimingId.try_emplace(kernel.id).first->second, kernelArch))
+                if(!claim(archesClaimingId.try_emplace(kernel.id).first->second,
+                          kernelArch,
+                          archOverlaps))
                 {
                     throw std::invalid_argument(
                         "kernel '" + toString(kernel.id)
@@ -682,13 +687,15 @@ private:
                         + "names one candidate and must be unique per device");
                 }
                 if(!claim(archesClaimingTuple.try_emplace(std::move(tuple)).first->second,
-                          kernelArch))
+                          kernelArch,
+                          archesCompete))
                 {
                     throw std::invalid_argument(
                         "kernel '" + toString(kernel.id)
                         + "' duplicates the metadata tuple of another kernel under schema '"
-                        + _schema.name + "' on an arch both reach; the tuple is the catalog key "
-                        + "and must be unique per device");
+                        + _schema.name
+                        + "' at the same arch tier on a device both reach; a better tier "
+                        + "shadows a worse one, so equal tiers cannot be told apart");
                 }
 
                 packDefinitions.push_back(KernelDefinition{kernel.id,
@@ -946,10 +953,75 @@ private:
                                                      << " kernel(s) after kernel-scoped matching");
         }
 
+        shadowByArchTier(catalog, context);
+
         HIPDNN_PLUGIN_LOG_INFO("ingestor: catalog for device "
                                << context.deviceId << " holds " << catalog.entries.size()
                                << " kernel(s) from " << _packs.size() << " pack(s)");
         return catalog;
+    }
+
+    /// Per metadata tuple, keeps only the entries with the best arch tier for the device.
+    /// Runs after matcher admission, so a declined kernel never hides a lower-tier one.
+    static void shadowByArchTier(Catalog& catalog, const MatchContext& context)
+    {
+        auto& entries = catalog.entries;
+        if(entries.size() < 2)
+        {
+            return;
+        }
+
+        struct ByMetadata
+        {
+            bool operator()(const MetadataValues* lhs, const MetadataValues* rhs) const
+            {
+                return *lhs < *rhs;
+            }
+        };
+        constexpr int SHADOWED = -1;
+        std::vector<int> tiers;
+        tiers.reserve(entries.size());
+        std::map<const MetadataValues*, size_t, ByMetadata> winners;
+        for(size_t i = 0; i < entries.size(); ++i)
+        {
+            tiers.push_back(
+                static_cast<int>(archTier(entries[i].arch, context.deviceProperties.gcnArchName)
+                                     .value_or(ArchTier::UNRESTRICTED)));
+            const auto [it, inserted] = winners.try_emplace(&entries[i].metadata, i);
+            if(!inserted && tiers[i] < tiers[it->second])
+            {
+                it->second = i;
+            }
+        }
+
+        bool anyShadowed = false;
+        for(size_t i = 0; i < entries.size(); ++i)
+        {
+            const size_t winner = winners.at(&entries[i].metadata);
+            if(tiers[i] != tiers[winner])
+            {
+                tiers[i] = SHADOWED;
+                anyShadowed = true;
+                HIPDNN_PLUGIN_LOG_INFO("ingestor: kernel " << toString(entries[i].kernelId)
+                                                           << " is shadowed by kernel "
+                                                           << toString(entries[winner].kernelId)
+                                                           << " at a better arch tier on device "
+                                                           << context.deviceProperties.gcnArchName);
+            }
+        }
+        if(!anyShadowed)
+        {
+            return;
+        }
+
+        // remove_if tests each element in place before moving, so its position indexes tiers.
+        entries.erase(std::remove_if(entries.begin(),
+                                     entries.end(),
+                                     [&](const KernelDefinition& entry) {
+                                         return tiers[static_cast<size_t>(&entry - entries.data())]
+                                                == SHADOWED;
+                                     }),
+                      entries.end());
     }
 
     bool graphLevelMatchersPass(const KernelDescriptorPack& pack,

@@ -22,8 +22,8 @@ from hkp_pack.descriptors import load_flat_input
 from hkp_pack.errors import HkpPackError
 from hkp_pack.hsaco_source import hsaco_variant_key
 from hkp_pack.kernel_signature import kernel_signature
-from hkp_pack.pipeline import compile_intermediate, run_pipeline
-from pack_helpers import read_shipped
+from hkp_pack.pipeline import compile_intermediate
+from pack_helpers import GENERIC_TARGETS, read_shipped, run_pipeline
 
 ARCH = "gfx942"
 OTHER_ARCH = "gfx950"
@@ -263,7 +263,7 @@ def test_missing_file_has_no_root_fallback(
     and a path leaving the root is refused."""
     root = _hsaco_root(tmp_path, empty_arch_fixture, hsaco_fixture_dir)
     shutil.move(root / "solo" / CO_NAME, root / CO_NAME)
-    flat = load_flat_input(root)
+    flat = load_flat_input(root, GENERIC_TARGETS)
 
     with pytest.raises(HkpPackError) as excinfo:
         compile_intermediate(flat, root, ARCH, NO_HIPCC, tmp_path / "inter")
@@ -276,7 +276,7 @@ def test_missing_file_has_no_root_fallback(
     doc = _read(kdp_path)
     doc["kernelDescriptors"][0]["kernel_source"]["file"] = f"../../{CO_NAME}"
     _write(kdp_path, doc)
-    flat = load_flat_input(root)
+    flat = load_flat_input(root, GENERIC_TARGETS)
 
     with pytest.raises(HkpPackError, match="hsaco file escapes the source root"):
         compile_intermediate(flat, root, ARCH, NO_HIPCC, tmp_path / "inter")
@@ -299,7 +299,7 @@ def test_same_key_for_two_files_is_refused_in_the_walk(
     shutil.copyfile(
         hsaco_fixture_dir / ARCH / CO_NAME, root / "solo" / "other" / CO_NAME
     )
-    flat = load_flat_input(root)
+    flat = load_flat_input(root, GENERIC_TARGETS)
     monkeypatch.setattr(pipeline, "hsaco_variant_key", lambda *a, **k: "COLLIDE")
 
     with pytest.raises(HkpPackError) as excinfo:
@@ -393,7 +393,7 @@ def test_hsaco_cannot_fulfil_compiled_bindings(
         consumer["bindings"] = {"block_size": {"field": "block_size"}}
 
     root = _hsaco_root(tmp_path, empty_arch_fixture, hsaco_fixture_dir, bound_contract)
-    flat = load_flat_input(root)
+    flat = load_flat_input(root, GENERIC_TARGETS)
 
     with pytest.raises(HkpPackError, match="a 'hsaco' source cannot fulfil"):
         compile_intermediate(flat, root, ARCH, NO_HIPCC, tmp_path / "inter")
@@ -465,7 +465,7 @@ def test_symlink_leaving_the_root_is_refused(
     outside.mkdir()
     shutil.move(root / "solo" / CO_NAME, outside / CO_NAME)
     (root / "solo" / CO_NAME).symlink_to(outside / CO_NAME)
-    flat = load_flat_input(root)
+    flat = load_flat_input(root, GENERIC_TARGETS)
 
     with pytest.raises(HkpPackError, match="hsaco file escapes the source root"):
         compile_intermediate(flat, root, ARCH, NO_HIPCC, tmp_path / "inter")
@@ -484,7 +484,11 @@ def test_unresolvable_file_name_is_refused(
 
     with pytest.raises(HkpPackError, match="hsaco file cannot be resolved"):
         compile_intermediate(
-            load_flat_input(root), root, ARCH, NO_HIPCC, tmp_path / "inter"
+            load_flat_input(root, GENERIC_TARGETS),
+            root,
+            ARCH,
+            NO_HIPCC,
+            tmp_path / "inter",
         )
 
 
@@ -513,7 +517,7 @@ def test_hsaco_file_and_symbol_must_be_nonempty_strings(
     root = _hsaco_root(tmp_path, empty_arch_fixture, hsaco_fixture_dir, set_field)
 
     with pytest.raises(HkpPackError, match="ukd-solo-add-f32-b64"):
-        load_flat_input(root)
+        load_flat_input(root, GENERIC_TARGETS)
 
 
 @pytest.mark.quick
@@ -524,7 +528,7 @@ def test_hsaco_symbol_must_be_ascii(tmp_path, empty_arch_fixture, hsaco_fixture_
     root = _hsaco_root(tmp_path, empty_arch_fixture, hsaco_fixture_dir, set_symbol)
 
     with pytest.raises(HkpPackError, match="ukd-solo-add-f32-b64"):
-        load_flat_input(root)
+        load_flat_input(root, GENERIC_TARGETS)
 
 
 @pytest.mark.quick
@@ -542,4 +546,4 @@ def test_hsaco_without_arch_is_refused(
     root = _hsaco_root(tmp_path, empty_arch_fixture, hsaco_fixture_dir, drop_arch)
 
     with pytest.raises(HkpPackError, match="ukd-solo-add-f32-b64"):
-        load_flat_input(root)
+        load_flat_input(root, GENERIC_TARGETS)
