@@ -392,6 +392,21 @@ class _OccupancyGuard:
             from rocke.helpers.compile import compile_kernel
         except ImportError as exc:  # pragma: no cover - environment-dependent
             raise unittest.SkipTest(f"comgr/resource tools unavailable: {exc}")
+        # The forward kernel compiles with ``-amdgpu-mfma-vgpr-form``, which an
+        # LLVM 20 comgr (ROCm 7.0/7.1) does not know: its option parser exits
+        # the whole process instead of raising. That happens when an earlier
+        # test in the session already loaded the system comgr ahead of torch's.
+        try:
+            from rocke.runtime.comgr import _require_compiler_info
+
+            llvm_major = int(_require_compiler_info().llvm_version[0])
+        except (ImportError, OSError, RuntimeError) as exc:  # pragma: no cover
+            raise unittest.SkipTest(f"comgr unavailable: {exc}")
+        if llvm_major < 21:
+            raise unittest.SkipTest(
+                f"loaded comgr is LLVM {llvm_major}; the forward kernel's "
+                "-amdgpu-mfma-vgpr-form option needs LLVM 21+"
+            )
 
         cls.spec = cls.make_spec()
         try:
@@ -445,7 +460,12 @@ class TestShippedLayoutOccupancy(_OccupancyGuard, unittest.TestCase):
 
         return dispatch_mla(
             MLARequest(
-                num_heads=128, total_q=64, num_seqs=2, max_seqlen_k=96, arch="gfx942"
+                num_heads=128,
+                total_q=64,
+                num_seqs=2,
+                max_seqlen_k=96,
+                arch="gfx942",
+                num_kv_blocks=12,
             )
         ).spec
 
@@ -612,6 +632,8 @@ class TestLdsModelMatchesEmittedPool(unittest.TestCase):
         def shipped(**kw):
             req = {"num_heads": 128, "total_q": 64, "num_seqs": 2, "max_seqlen_k": 96}
             req.update(kw)
+            # num_seqs sequences of ceil(max_seqlen_k / 16) pages each.
+            req["num_kv_blocks"] = req["num_seqs"] * -(-req["max_seqlen_k"] // 16)
             return dispatch_mla(MLARequest(arch="gfx942", num_cus=228, **req)).spec
 
         with _llvm22_env():

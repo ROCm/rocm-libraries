@@ -37,8 +37,12 @@ editable-installed, e.g. ``build/rocke-pyenv/bin/python``; see ``BUILDING.md``):
 Tolerance: ``--tol`` (default :data:`BF16_ATTN_ATOL` = 4e-2) is an *absolute*
 bound, ``max|got - ref| <= tol``, against the fp32 oracle -- the same bf16 bar
 the other rocKE attention kernels are held to (see :data:`BF16_ATTN_ATOL` for the
-sources). In ``--mode full`` it bounds ``out`` and ``lse`` (fp32 on both sides,
-live rows only); in ``--mode scores`` it bounds the raw score tile.
+sources). In ``--mode scores`` it bounds the raw score tile. In ``--mode full``
+it bounds ``out`` on live rows, together with two tighter bars: ``out``'s
+``max_abs / peak(|ref|) <= --rel-tol`` (default :data:`OUT_REL_PEAK_TOL` = 2e-2,
+since ``out`` shrinks as S_k grows and a lost key tile would slip under 4e-2),
+and ``lse``'s ``max_abs <= --lse-tol`` (default :data:`LSE_ATOL` = 1.7e-2;
+fp32 on both sides).
 
 The kernel rounds two things to bf16 that the oracle keeps in fp32 -- the
 projected query and the expanded ``K_nope = c_kv @ W_UK`` -- and stores ``out``
@@ -172,8 +176,9 @@ _EXTRA = (
         (512,),
         (4096,),
         "S_q < S_k at 256 key tiles, the longest rescale chain. 512 queries x 128 "
-        "heads is 512 workgroups, which fills every CU of a CDNA3 part, so "
-        "dispatch picks the agpr_acc layout (key length >= 4096)",
+        "heads launch (512 // 64 + 1) x 64 = 576 agpr_acc workgroups, which "
+        "fills every CU of a CDNA3 part, so dispatch picks the agpr_acc layout "
+        "(key length >= 4096)",
     ),
     Scenario(
         "ragged_long",
@@ -224,6 +229,23 @@ SCENARIOS.update({f"{s.shape}_h{s.heads}": s for s in _EXTRA})
 # and ``test_attention_dense_gfx950_numeric.py`` (``4e-2`` for bf16), and
 # ``test_gfx942_gqa_head_fold_numeric.py`` ("the repo-wide bf16 attention gate").
 BF16_ATTN_ATOL = 4e-2
+
+# Second bar for ``out``: ``max_abs / peak(|ref|) <= 2e-2`` per sequence. With
+# unit-variance inputs ``out`` is a softmax-weighted mean of ~N(0, 1) values, so
+# its magnitude shrinks as S_k grows (peak ~0.1 at S_k = 4096). At that scale a
+# whole dropped or corrupted 16-key tile moves ``out`` by less than the absolute
+# 4e-2, so the absolute bar alone stops seeing kernel defects on long keys; the
+# peak-relative bar scales with the output instead.
+OUT_REL_PEAK_TOL = 2e-2
+
+# Bar for ``lse``: absolute ``max|got - ref| <= 1.7e-2``. Both sides are fp32
+# (the kernel stores LSE unrounded), but the kernel's scores carry the bf16
+# rounding of the projected query and of ``K_nope``, so LSE inherits that
+# score error. 1.7e-2 is the tightest bar with 1.5x headroom over the worst
+# measured scenario (``many_seqs_h64``, 1.13e-2, on 304-CU gfx942 at seed 0);
+# 1e-2 failed it. Zeroing one 16-key page of a long sequence moves LSE by
+# ~2e-2, past this bar.
+LSE_ATOL = 1.7e-2
 
 
 # --------------------------------------------------------------------------
@@ -311,6 +333,17 @@ class Problem(NamedTuple):
         }
 
 
+def pool_blocks(k_lens: Sequence[int], page: int) -> int:
+    """Paged KV pool size :func:`make_problem` allocates (``c_kv.shape[0]``).
+
+    Every sequence gets the longest sequence's page count, so the pool is
+    ``len(k_lens) * ceil(max(k_lens) / page)``. Shared with
+    :func:`_dispatched_spec` so the request dispatch admits carries the pool
+    the kernel is then launched on.
+    """
+    return len(k_lens) * max((int(k) + page - 1) // page for k in k_lens)
+
+
 def make_problem(
     spec: MlaPrefillSpec,
     *,
@@ -342,7 +375,7 @@ def make_problem(
     total_q = int(sum(q_lens))
 
     max_blocks = max((k + page - 1) // page for k in k_lens)
-    num_blocks = batch * max_blocks
+    num_blocks = pool_blocks(k_lens, page)
     block_table = (
         rng.permutation(num_blocks).reshape(batch, max_blocks).astype(np.int32)
     )
@@ -826,20 +859,50 @@ def _check_degenerate_rows(
     return ok
 
 
-def verify_full(spec: MlaPrefillSpec, p: Problem, *, arch: str, tol: float) -> bool:
+def corrupt_page(p: Problem, seq: int, page: int) -> Problem:
+    """``p`` with one logical page of ``seq`` zeroed in ``c_kv`` and ``k_rope``.
+
+    Negative-control input for :func:`verify_full`: the kernel reads the
+    corrupted copy while the oracle reads ``p``, which models a kernel that
+    mishandles one 16-key tile without touching the emitted IR.
+    """
+    phys = int(p.block_table[seq, page])
+    c_kv, k_rope = p.c_kv.copy(), p.k_rope.copy()
+    c_kv[phys] = 0.0
+    k_rope[phys] = 0.0
+    return p._replace(c_kv=c_kv, k_rope=k_rope)
+
+
+def verify_full(
+    spec: MlaPrefillSpec,
+    p: Problem,
+    *,
+    arch: str,
+    tol: float,
+    rel_tol: float = OUT_REL_PEAK_TOL,
+    lse_tol: float = LSE_ATOL,
+    device_problem: Problem | None = None,
+) -> bool:
     """Compare ``(out, lse)`` against :func:`ref_mla_prefill` with ``causal=True``.
 
     The mask is on here, unlike the score mode, so this is the first check that
-    covers the causal geometry and the fully masked rows it produces.
+    covers the causal geometry and the fully masked rows it produces. A live
+    sequence passes when ``out`` meets both ``max_abs <= tol`` and
+    ``max_abs / peak <= rel_tol``, and ``lse`` meets ``max_abs <= lse_tol``.
+
+    ``device_problem`` (default ``p``) is what the kernel is launched on; the
+    oracle always reads ``p``. Only the negative control sets it.
     """
     q = projected_query(p)
-    got_out, got_lse = run_full_on_device(spec, p, q, arch=arch)
+    got_out, got_lse = run_full_on_device(
+        spec, p if device_problem is None else device_problem, q, arch=arch
+    )
     ref_out, ref_lse = ref_mla_prefill(
         **p.oracle_kwargs(), causal=True, geometry=p.geom
     )
 
     ok = True
-    worst_out = worst_lse = 0.0
+    worst_out = worst_rel = worst_lse = 0.0
     for i in range(len(p.cu_seqlens_q) - 1):
         lo, hi = int(p.cu_seqlens_q[i]), int(p.cu_seqlens_q[i + 1])
         s_q, s_k = hi - lo, int(p.cu_seqlens_k[i + 1] - p.cu_seqlens_k[i])
@@ -876,7 +939,9 @@ def verify_full(spec: MlaPrefillSpec, p: Problem, *, arch: str, tol: float) -> b
         _, rel_bf, _ = _residual(live_out_got, _bf16(live_out_ref))
         abs_l, rel_l, peak_l = _residual(l_got[alive], l_ref[alive])
         worst_out, worst_lse = max(worst_out, abs_o), max(worst_lse, abs_l)
-        verdict = "ok" if (abs_o <= tol and abs_l <= tol) else "FAIL"
+        worst_rel = max(worst_rel, rel_o)
+        passed = abs_o <= tol and rel_o <= rel_tol and abs_l <= lse_tol
+        verdict = "ok" if passed else "FAIL"
         if verdict == "FAIL":
             ok = False
         print(
@@ -886,8 +951,9 @@ def verify_full(spec: MlaPrefillSpec, p: Problem, *, arch: str, tol: float) -> b
             f"lse[peak={peak_l:.4f} max_abs={abs_l:.3e} rel={rel_l:.3e}]  {verdict}"
         )
     print(
-        f"  worst: out max_abs={worst_out:.3e} lse max_abs={worst_lse:.3e} "
-        f"(tol {tol:g} absolute)"
+        f"  worst: out max_abs={worst_out:.3e} (tol {tol:g}) "
+        f"out max_abs/peak={worst_rel:.3e} (tol {rel_tol:g}) "
+        f"lse max_abs={worst_lse:.3e} (tol {lse_tol:g})"
     )
     return ok
 
@@ -949,6 +1015,8 @@ def _dispatched_spec(
                 num_seqs=len(q_lens),
                 max_seqlen_k=int(max(k_lens)),
                 arch=arch or "gfx942",
+                # make_problem's pool at the request's default 16-key page.
+                num_kv_blocks=pool_blocks(k_lens, MLARequest.page_block_size),
             )
         ).spec
     except ValueError:
@@ -987,12 +1055,19 @@ def run_case(
     dry_run: bool,
     absorbed_query: bool = False,
     agpr: bool | None = None,
+    rel_tol: float = OUT_REL_PEAK_TOL,
+    lse_tol: float = LSE_ATOL,
+    corrupt: tuple[int, int] | None = None,
 ) -> bool | None:
     """One (shape, heads) case end to end.
 
     Returns True on pass, False on failure, and None when ``absorbed_query`` is
     asked of a layout that does not implement it (the single-head layout) --
     a skip, not a failure, since dispatch never ships that combination.
+
+    ``corrupt=(seq, page)`` is the negative control (``--mode full`` only):
+    that page is zeroed in the kernel's inputs but not the oracle's (see
+    :func:`corrupt_page`), so a passing verdict means the bars are too loose.
     """
     # The score probe is single-tile (block_q == 16); the forward kernel runs
     # the spec dispatch ships for this case, so parity covers the shipped
@@ -1029,7 +1104,15 @@ def run_case(
     if mode == "scores":
         passed = verify(spec, p, arch=arch, tol=tol)
     else:
-        passed = verify_full(spec, p, arch=arch, tol=tol)
+        passed = verify_full(
+            spec,
+            p,
+            arch=arch,
+            tol=tol,
+            rel_tol=rel_tol,
+            lse_tol=lse_tol,
+            device_problem=None if corrupt is None else corrupt_page(p, *corrupt),
+        )
     print(f"[{name}] {'PASS' if passed else 'FAIL'}")
     return passed
 
@@ -1064,6 +1147,19 @@ def main(argv=None) -> int:
         default=BF16_ATTN_ATOL,
         help="absolute max|got - ref| bound (default: the bf16 attention bar, "
         f"{BF16_ATTN_ATOL:g})",
+    )
+    ap.add_argument(
+        "--rel-tol",
+        type=float,
+        default=OUT_REL_PEAK_TOL,
+        help="--mode full only: max|got - ref| / peak|ref| bound on out, per "
+        f"sequence (default {OUT_REL_PEAK_TOL:g})",
+    )
+    ap.add_argument(
+        "--lse-tol",
+        type=float,
+        default=LSE_ATOL,
+        help=f"--mode full only: absolute bound on lse (default {LSE_ATOL:g})",
     )
     ap.add_argument(
         "--agpr",
@@ -1139,6 +1235,8 @@ def main(argv=None) -> int:
                     dry_run=args.dry_run,
                     absorbed_query=args.absorbed_query,
                     agpr={"auto": None, "on": True, "off": False}[args.agpr],
+                    rel_tol=args.rel_tol,
+                    lse_tol=args.lse_tol,
                 ),
             )
         )

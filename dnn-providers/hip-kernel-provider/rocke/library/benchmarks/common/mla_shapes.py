@@ -83,6 +83,18 @@ class MLAShape:
         return self.batch * self.seqlen_q
 
     @property
+    def num_kv_blocks(self) -> int:
+        """Paged KV pool size, in pages, for this shape.
+
+        Every sequence holds ``seqlen_k`` keys in ``ceil(seqlen_k / block_size)``
+        pages of its own, so the pool is ``batch`` times that. The live
+        benchmark allocates exactly this ``c_kv`` / ``k_rope`` first dimension,
+        and :meth:`to_request` reports it so dispatch's paged extent admission
+        runs on the pool the kernel is launched against.
+        """
+        return self.batch * -(-self.seqlen_k // self.block_size)
+
+    @property
     def signature(self) -> str:
         return (
             f"{self.model}/{self.label}/b{self.batch}"
@@ -90,8 +102,14 @@ class MLAShape:
             f"_h{self.num_query_heads}_{self.dtype}"
         )
 
-    def to_request(self, *, arch: str, causal: bool = True):
+    def to_request(
+        self, *, arch: str, causal: bool = True, num_kv_blocks: int | None = None
+    ):
         """Build the dispatcher request for this shape.
+
+        ``num_kv_blocks`` is the paged KV pool size (``c_kv.shape[0]``); a
+        caller holding the tensors passes it, otherwise it defaults to the
+        shape's own :attr:`num_kv_blocks`.
 
         Imported lazily so that loading and inspecting shapes does not require
         the dispatch package -- listing a shape file is useful even where the
@@ -112,6 +130,9 @@ class MLAShape:
             page_block_size=self.block_size,
             causal=causal,
             dtype=self.dtype,
+            num_kv_blocks=(
+                self.num_kv_blocks if num_kv_blocks is None else int(num_kv_blocks)
+            ),
         )
 
 

@@ -113,6 +113,8 @@ def _cases():
                     # 228-CU gfx942, pinned: the XCD count would otherwise come from
                     # the host's device and make the fixture host-dependent.
                     num_cus=228,
+                    # Two sequences of ceil(max_k / 16) pages each.
+                    num_kv_blocks=2 * -(-max_k // 16),
                 )
             )
             return result.candidate.built(result.spec, _ARCH)
@@ -264,6 +266,7 @@ def test_dispatch_case_tracks_the_shipped_spec():
                 max_seqlen_k=96,
                 arch=_ARCH,
                 num_cus=228,
+                num_kv_blocks=12,
             )
         )
         assert result.spec == MlaPrefillSpec(
