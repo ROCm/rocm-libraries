@@ -312,7 +312,9 @@ def test_binding_rechecks_returned_retarget(change, monkeypatch):
     with pytest.raises(
         ValueError, match="retargeting|num_segments|segment count|geometry"
     ):
-        bindings.bind_tuning_attention_torch(req, structural, {"problem": p})
+        bindings.bind_tuning_attention_torch(
+            req, structural, {"problem": p, "q": object()}
+        )
 
 
 @pytest.mark.parametrize("arch", ["gfx942", "gfx950", "gfx1250"])

@@ -4961,7 +4961,11 @@ def run_unified_attention_torch(
     ``alibi_slopes`` is an optional `[num_query_heads]` f32 tensor; when
     supplied, the kernel applies the ALiBi linear bias on each row.
     ``qq_bias`` is an optional 2D f32 query-to-query bias; ``qq_bias_stride_0``
-    is its first-axis stride (in elements). Both follow AITER's Triton
+    is its positive first-axis stride (in elements), matching the tensor layout.
+    Paged gfx942/gfx950 3D features require aligned tensors on Q's device:
+    sinks are a contiguous query-head vector in the problem dtype, ALiBi is a
+    contiguous query-head f32 vector, and QQ bias has contiguous f32 columns.
+    Both follow AITER's Triton
     semantics exactly and require the corresponding ``problem.use_alibi`` /
     ``problem.use_qq_bias`` flags to be set.
 
@@ -5126,7 +5130,7 @@ def run_unified_attention_torch(
         qq_bias_stride_0=qq_bias_stride_0,
     )
     if loader_geometry is not None:
-        validate_paged_3d_features(problem, tuning_spec, **feature_inputs)
+        validate_paged_3d_features(problem, tuning_spec, q=q, **feature_inputs)
     uses_paged_gather = loader_geometry is not None and loader_geometry[2]
     if problem.block_size == 1 or uses_paged_gather:
         arch = _resolve_attention_arch()
@@ -5137,7 +5141,7 @@ def run_unified_attention_torch(
         if backend not in ("auto", "3d"):
             raise ValueError("paged gather requires the 3D backend")
         if tuning_spec is None:
-            validate_paged_3d_features(problem, None, **feature_inputs)
+            validate_paged_3d_features(problem, None, q=q, **feature_inputs)
         validate_paged_decode(
             problem, (q, k, v, out, cu_seqlens_q, seqused_k, block_table), tuning_spec
         )
@@ -5179,7 +5183,7 @@ def run_unified_attention_torch(
         if validate_paged_loader_geometry(problem, tuning_spec) != loader_geometry:
             raise ValueError("KV block retargeting must preserve paged loader geometry")
         if loader_geometry is not None:
-            validate_paged_3d_features(problem, tuning_spec, **feature_inputs)
+            validate_paged_3d_features(problem, tuning_spec, q=q, **feature_inputs)
         if uses_paged_gather:
             # Retargeting is part of the structural protocol; validate the spec
             # actually consumed by the cache and launcher, including workspace.

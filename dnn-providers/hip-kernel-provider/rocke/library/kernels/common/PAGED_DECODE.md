@@ -75,7 +75,16 @@ again before cache lookup or launch, including segment/reducer and workspace bou
 All explicit gfx942/gfx950 paged 3D launches also check compiled softcap,
 sinks, ALiBi and QQ-bias flags against the problem and supplied feature inputs,
 before and after retargeting. Flags must be booleans; enabled pointer features
-require their inputs and disabled features reject supplied inputs. Enabled
+require their inputs and disabled features reject supplied inputs. Sinks require
+an aligned contiguous `[num_query_heads]` vector in the problem dtype; ALiBi
+requires a contiguous float32 vector of the same shape. QQ bias requires rank-2
+float32 storage covering the maximum local query rows, contiguous columns
+and nonoverlapping rows. Partial-width bias retains zero-fill semantics when its
+rows are unpadded; full-width bias may use padded rows with backing storage
+covering masked tile-tail reads. All feature tensors must
+share Q's HIP/CUDA device. Sink pointers are 16-byte aligned; ALiBi and QQ-bias
+pointers are 4-byte aligned. The explicit segment's sliding window must equal the
+problem's window on both loader kinds. Enabled
 softcap accepts finite positive runtime values; disabled softcap requires zero.
 These checks apply to gather and page-contained loaders, including automatic
 page-size-1 launches. Matching feature-enabled specs remain valid, and
@@ -111,7 +120,11 @@ synchronized check. The candidate accepts only numeric unit values for `k_scale`
 `use_sinks`, `use_alibi` and `use_qq_bias`; the problem and compiled spec must
 agree. Feature tensors may be supplied in the tensor map or at binding time,
 and replaced at launch while preserving enablement. Pass `qq_bias_stride_0`
-in elements with query-to-query bias. Structural validation always applies. Candidate launches use direct-call ownership with
+in elements with query-to-query bias. The final stride must be positive, fit i32,
+and match the tensor's row stride; addressed query indices must fit i32 too.
+Binding may defer an omitted/zero stride until a launch override supplies it,
+but a launch without that override rejects before cache/build work.
+Structural validation always applies. Candidate launches use direct-call ownership with
 independent eager scratch on each invocation. For reusable scratch with a fixed
 eager stream and explicit close, use `prepare_unified_attention_torch` with the
 ownership and graph lifecycle described in

@@ -99,6 +99,12 @@ class Tensor:
         self.shape, self.dtype = shape, dtype
         self.device, self.is_cuda = "cuda:0", True
 
+    def stride(self, dim=None):
+        from math import prod
+
+        strides = tuple(prod(self.shape[i + 1 :]) for i in range(len(self.shape)))
+        return strides if dim is None else strides[dim]
+
     def numel(self):
         import math
 
@@ -497,7 +503,12 @@ def test_paged_direct_preserves_generic_features(
                 {"sinks": "sinks", "alibi": "alibi_slopes", "qq_bias": "qq_bias"}[
                     feature
                 ]
-            ] = object()
+            ] = Tensor(
+                (1, 1) if feature == "qq_bias" else (8,),
+                "torch.float16" if feature == "sinks" else "torch.float32",
+            )
+            if feature == "qq_bias":
+                launch["qq_bias_stride_0"] = 1
         elif feature == "window":
             updates["sliding_window"] = 16
         elif feature == "fp8":
@@ -1681,7 +1692,10 @@ def test_paged_binding_preserves_enabled_features(
     result = dispatch_attention(req)
     tensors["problem"] = _problem(req)
     features = dict(
-        softcap=3.0, sinks=object(), alibi_slopes=object(), qq_bias=object()
+        softcap=3.0,
+        sinks=Tensor((8,)),
+        alibi_slopes=Tensor((8,), "torch.float32"),
+        qq_bias=Tensor((1, 1), "torch.float32"),
     )
     calls = []
     monkeypatch.setattr(
@@ -1702,7 +1716,10 @@ def test_paged_binding_preserves_enabled_features(
             req, result.spec, dict(tensors, **features)
         )
         features = dict(
-            softcap=4.0, sinks=object(), alibi_slopes=object(), qq_bias=object()
+            softcap=4.0,
+            sinks=Tensor((8,)),
+            alibi_slopes=Tensor((8,), "torch.float32"),
+            qq_bias=Tensor((1, 1), "torch.float32"),
         )
         binding.launch(**features, qq_bias_stride_0=1)
     assert len(calls) == 1

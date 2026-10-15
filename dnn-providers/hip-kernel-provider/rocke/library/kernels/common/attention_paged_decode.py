@@ -21,10 +21,93 @@ def is_unit_scale(value) -> bool:
     return isinstance(value, Real) and not isinstance(value, bool) and value == 1.0
 
 
+def _feature_tensor_metadata(tensor, name, q, dtype, rank, alignment):
+    """Check the metadata used by raw feature-pointer loads, without host reads."""
+    try:
+        shape = tuple(tensor.shape)
+        strides = tuple(tensor.stride())
+        pointer = tensor.data_ptr()
+        device = tensor.device
+        device_type = getattr(device, "type", str(device).split(":")[0])
+        if str(tensor.dtype) != dtype:
+            raise ValueError(f"{name} dtype must be {dtype}")
+        if str(device_type) != "cuda" or device != q.device:
+            raise ValueError(f"{name} must be on Q's HIP/CUDA device")
+    except (AttributeError, TypeError) as exc:
+        raise ValueError(f"{name} must expose tensor metadata") from exc
+    if len(shape) != rank or len(strides) != rank:
+        raise ValueError(f"{name} must be rank-{rank}")
+    for value in (*shape, *strides, pointer):
+        require_attention_int(value, f"{name} metadata")
+    if any(value <= 0 for value in shape) or any(value < 0 for value in strides):
+        raise ValueError(f"{name} shape/strides must describe accessible storage")
+    if pointer <= 0 or pointer % alignment:
+        raise ValueError(f"{name} must be {alignment}-byte aligned")
+    return shape, strides
+
+
+def _validate_feature_tensors(
+    problem, tuning_spec, q, sinks, alibi_slopes, qq_bias, stride, defer
+):
+    scalar_dtype = "torch.float16" if problem.dtype == "fp16" else "torch.bfloat16"
+    for tensor, name, dtype, alignment in (
+        (sinks, "sinks", scalar_dtype, 16),
+        (alibi_slopes, "alibi_slopes", "torch.float32", 4),
+    ):
+        if tensor is None:
+            continue
+        shape, strides = _feature_tensor_metadata(tensor, name, q, dtype, 1, alignment)
+        if shape != (problem.num_query_heads,) or strides != (1,):
+            raise ValueError(f"{name} must be a contiguous [num_query_heads] vector")
+    if qq_bias is None:
+        return
+    shape, strides = _feature_tensor_metadata(
+        qq_bias, "qq_bias", q, "torch.float32", 2, 4
+    )
+    # qp and krp are local query positions. The kernel also uses the row stride
+    # as its column bound, so padding is legal when all active columns exist.
+    extent = problem.max_seqlen_q
+    if shape[0] < extent:
+        raise ValueError("qq_bias must cover max_seqlen_q rows")
+    if strides[1] != 1 or strides[0] < shape[1]:
+        raise ValueError("qq_bias requires contiguous columns and nonoverlapping rows")
+    if shape[1] < extent and strides[0] != shape[1]:
+        raise ValueError("partial-width qq_bias requires unpadded rows")
+    tile = 32 if tuning_spec is None else tuning_spec.kernel_spec.tile_size
+    # Bias loads precede the causal/tail score mask. Padded tile columns can
+    # therefore read up to stride-1, even when they do not contribute to output.
+    last_column = min(strides[0] - 1, extent + tile - 2)
+    last_index = (extent - 1) * strides[0] + last_column
+    if strides[0] > 0x7FFF_FFFF or last_index > 0x7FFF_FFFF:
+        raise ValueError("qq_bias addressed extent must fit i32 indexing")
+    declared_last = (shape[0] - 1) * strides[0] + shape[1] - 1
+    if last_index > declared_last:
+        # A legal strided Torch view can expose padding beyond its last declared
+        # element. Require actual backing-storage metadata for that case.
+        try:
+            remaining = (
+                qq_bias.untyped_storage().nbytes() - qq_bias.storage_offset() * 4
+            )
+        except (AttributeError, TypeError) as exc:
+            raise ValueError(
+                "qq_bias backing storage must cover masked tail reads"
+            ) from exc
+        require_attention_int(remaining, "qq_bias storage extent")
+        if remaining < (last_index + 1) * 4:
+            raise ValueError("qq_bias backing storage must cover masked tail reads")
+    if stride == 0 and defer:
+        return
+    if stride <= 0 or stride != strides[0]:
+        raise ValueError(
+            "qq_bias_stride_0 must be positive and match qq_bias.stride(0)"
+        )
+
+
 def validate_paged_3d_features(
     problem,
     tuning_spec,
     *,
+    q,
     softcap,
     sinks,
     alibi_slopes,
@@ -33,6 +116,7 @@ def validate_paged_3d_features(
     v_scale,
     out_scale,
     qq_bias_stride_0=0,
+    defer_qq_bias_stride=False,
 ):
     """Match explicit CDNA paged 3D features to the inputs actually launched.
 
@@ -41,8 +125,8 @@ def validate_paged_3d_features(
     """
     validate_attention_problem_types(problem)
     require_attention_int(qq_bias_stride_0, "qq_bias_stride_0")
-    if qq_bias_stride_0 < 0:
-        raise ValueError("qq_bias_stride_0 must be nonnegative")
+    if not 0 <= qq_bias_stride_0 <= 0x7FFF_FFFF:
+        raise ValueError("qq_bias_stride_0 must be a nonnegative i32")
     expected_flags = (
         ("has_softcap", problem.softcap > 0),
         ("use_sinks", problem.use_sinks),
@@ -66,6 +150,11 @@ def validate_paged_3d_features(
             raise ValueError(
                 "paged 3D kernel_spec.kv_storage_dtype disagrees with problem"
             )
+        require_attention_int(segment.sliding_window, "kernel_spec.sliding_window")
+        if segment.sliding_window != problem.sliding_window:
+            raise ValueError(
+                "paged 3D kernel_spec.sliding_window disagrees with problem"
+            )
     if (
         not isinstance(softcap, Real)
         or isinstance(softcap, bool)
@@ -80,6 +169,16 @@ def validate_paged_3d_features(
     ):
         if (value is not None) != enabled:
             raise ValueError(f"paged 3D {name} disagrees with compiled enablement")
+    _validate_feature_tensors(
+        problem,
+        tuning_spec,
+        q,
+        sinks,
+        alibi_slopes,
+        qq_bias,
+        qq_bias_stride_0,
+        defer_qq_bias_stride,
+    )
     # The segment consumes K/V scales only in its FP8 dequantization loader;
     # the 3D adapter never forwards output scaling to either kernel.
     scales = [("out_scale", out_scale)]

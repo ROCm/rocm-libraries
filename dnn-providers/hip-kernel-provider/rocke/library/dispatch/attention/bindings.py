@@ -414,7 +414,9 @@ def bind_tuning_attention_torch(
         )
     }
     if loader_geometry is not None:
-        validate_paged_3d_features(problem, spec, **inputs)
+        validate_paged_3d_features(
+            problem, spec, q=tensors["q"], defer_qq_bias_stride=True, **inputs
+        )
     unsafe_skip = kwargs.pop("unsafe_skip_paged_value_validation", False)
     if not isinstance(unsafe_skip, bool):
         raise TypeError("unsafe_skip_paged_value_validation must be a bool")
@@ -433,7 +435,9 @@ def bind_tuning_attention_torch(
     if validate_paged_loader_geometry(problem, spec) != loader_geometry:
         raise ValueError("KV block retargeting must preserve paged loader geometry")
     if loader_geometry is not None:
-        validate_paged_3d_features(problem, spec, **inputs)
+        validate_paged_3d_features(
+            problem, spec, q=tensors["q"], defer_qq_bias_stride=True, **inputs
+        )
     stream = kwargs.get("stream", 0)
     path = str(getattr(spec, "path", "2d"))
     backend = "tiled" if path == "2d" else path
@@ -444,7 +448,7 @@ def bind_tuning_attention_torch(
     def launch(**_kw):
         resolved = {name: _kw.get(name, value) for name, value in inputs.items()}
         if loader_geometry is not None:
-            validate_paged_3d_features(problem, spec, **resolved)
+            validate_paged_3d_features(problem, spec, q=tensors["q"], **resolved)
         return run_unified_attention_torch(
             problem=problem,
             q=tensors["q"],

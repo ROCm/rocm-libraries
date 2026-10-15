@@ -289,6 +289,8 @@ def test_paged_features_numeric(gpu, page, dtype, feature):
     from kernels.common import attention_unified as au
 
     torch, arch = gpu
+    if arch not in ("gfx942", "gfx950"):
+        pytest.skip("token-mapped loader targets gfx942/gfx950")
     batch, heads, qheads, capacity, dim = 3, 2, 8, 97, 128
     tdtype = torch.float16 if dtype == "fp16" else torch.bfloat16
     rng = torch.Generator().manual_seed(1941)
