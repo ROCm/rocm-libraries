@@ -65,7 +65,11 @@ void PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::InitValidKernels(
         CKSolverType::GrpConv3dWrw, problem, data_type, use_tf32);
 
     if(!valid_kernels.empty())
-        SeedFirstValidKernel();
+    {
+        index     = 0;
+        split_k   = 1;
+        kernel_id = valid_kernels[index] + "+" + std::to_string(split_k);
+    }
 }
 
 namespace {
