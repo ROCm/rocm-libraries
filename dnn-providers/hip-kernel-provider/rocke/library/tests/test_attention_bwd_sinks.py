@@ -29,6 +29,7 @@ from kernels.common._attention_bwd_addr import (
 )
 from rocke.core.ir import F16, F32, I32, IRBuilder, PtrType
 
+from ._attention_bwd_test_utils import device_arch
 from ._attention_bwd_int_eval import IntEvalBuilder, VirtualTensor
 
 ARCHS = ("gfx942", "gfx950", "gfx1151", "gfx1201")
@@ -349,19 +350,10 @@ def test_register_probe_lowers(arch, flavor):
     assert len(re.findall(r"store half", ir)) == 64 // 16
 
 
-def _device_arch():
-    try:
-        from rocke.runtime.hip_module import get_device_arch
-
-        return get_device_arch(0)
-    except Exception:  # noqa: BLE001 - no runtime / no device
-        return None
-
-
 @pytest.mark.gpu
 @pytest.mark.parametrize("layout", ["head_major", "token_major"])
 def test_atomic_probe_on_device(layout):
-    arch = _device_arch()
+    arch = device_arch()
     if arch not in ("gfx942", "gfx950", "gfx1151", "gfx1201"):
         pytest.skip(f"needs gfx942/gfx950/gfx1151/gfx1201; device is {arch}")
     from rocke.core.arch import ArchTarget

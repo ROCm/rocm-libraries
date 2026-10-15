@@ -35,10 +35,12 @@ from typing import Optional, Tuple, Union
 
 from ..core.ir import IRBuilder, Value
 
-__all__ = ["AttnRuntimeBounds", "BandEmitter", "RowBand"]
+__all__ = ["I32_FAR", "AttnRuntimeBounds", "BandEmitter", "RowBand"]
 
-# Stand-in for "no limit" when a bound is only known at run time.
-_FAR = 1 << 30
+# A limit past every row, key, length and band bound (all stay below 2**30):
+# the stand-in for "no limit" when a bound is only known at run time, with
+# i32 headroom for one more addition of such a value.
+I32_FAR = 1 << 30
 
 IntOrValue = Union[int, Value]
 
@@ -117,7 +119,7 @@ class BandEmitter:
 
     def _far_const(self) -> Value:
         if self._far is None:
-            self._far = self.b.const_i32(_FAR)
+            self._far = self.b.const_i32(I32_FAR)
         return self._far
 
     # -- per-row / per-cell predicates -----------------------------------------

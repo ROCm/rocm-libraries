@@ -63,6 +63,8 @@ from dataclasses import dataclass
 
 from rocke.core.ir import F32, IRBuilder, Value, VectorType
 
+from ._attention_bwd_addr import chunk_coords, deal_chunks
+
 __all__ = [
     "COUNTED_ISSUES",
     "COUNTED_VMCNT_MAX",
@@ -106,15 +108,9 @@ def tile_chunks(
     per_row = cols // vec
     total = rows * per_row
     out = []
-    for it in range(-(-total // threads)):
-        chunk = tid if it == 0 else b.add(tid, b.const_i32(it * threads))
-        tail = (it + 1) * threads > total
+    for chunk, tail in deal_chunks(b, tid, total, threads):
         src = b.smin(chunk, b.const_i32(total - 1)) if tail else chunk
-        if per_row == 1:
-            r, c = src, b.const_i32(0)
-        else:
-            r = b.div(src, b.const_i32(per_row))
-            c = b.mul(b.mod(src, b.const_i32(per_row)), b.const_i32(vec))
+        r, c = chunk_coords(b, src, per_row, vec)
         out.append(TileChunk(r, c, chunk if tail else None, total))
     return out
 

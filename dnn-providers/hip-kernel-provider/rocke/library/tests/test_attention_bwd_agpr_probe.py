@@ -48,20 +48,12 @@ from kernels.common._attention_bwd_caps import (
     check_asm_tail_nop,
     mfma_result_wait_states,
 )
+from ._attention_bwd_test_utils import device_arch
 
 ARCH = os.environ.get("ROCKE_BWD_ARCH") or os.environ.get("ROCKE_TEST_ARCH")
 
 
-def _device_arch():
-    try:
-        from rocke.runtime.hip_module import get_device_arch
-
-        return get_device_arch()
-    except Exception:  # noqa: BLE001 - no device
-        return None
-
-
-ARCH = ARCH or _device_arch()
+ARCH = ARCH or device_arch()
 _MFMA_ARCHES = ("gfx942", "gfx950")
 device = pytest.mark.skipif(
     ARCH not in _MFMA_ARCHES, reason="AGPR-form MFMA probe: gfx942 / gfx950"

@@ -56,7 +56,6 @@ import hashlib
 import itertools
 import json
 import math
-import os
 import statistics
 import time
 from collections.abc import Iterable, Mapping, Sequence
@@ -2935,7 +2934,13 @@ def make_parser() -> argparse.ArgumentParser:
         "on both CDNA node classes to give the same code objects as serial)",
     )
     ap.add_argument("--compile-cache", default=None)
-    ap.add_argument("--gate", default=os.environ.get("ROCKE_BWD_PRUNE_GATE"))
+    ap.add_argument(
+        "--gate",
+        default=None,
+        help="module:callable of the pruning-set gate provider (explicit only: "
+        "no environment default; a timed stage needs it, and every bench "
+        "command the sweep runs carries it)",
+    )
     ap.add_argument("--gate-constants", default=None)
     ap.add_argument("--attempts", type=int, default=6)
     ap.add_argument("--arms-per-attempt", type=int, default=12)

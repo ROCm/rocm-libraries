@@ -50,7 +50,6 @@ on :meth:`AttnBwdUnifiedSpec.general_spec`) plus the page-class rules.
 from __future__ import annotations
 
 import dataclasses
-import hashlib
 import typing
 from typing import Optional
 
@@ -60,10 +59,13 @@ from rocke.core.codegen_policy import (
 )
 from rocke.core.ir import F32, I32, IRBuilder, PtrType
 from rocke.helpers.attention_band import AttnRuntimeBounds
+from rocke.helpers.spec import non_default_fields, salted_kernel_name
 
 from kernels.common._attention_bwd_addr import (
     StridedTensorAddr,
     WorkspaceAddr,
+    chunk_coords,
+    deal_chunks,
     decode_batched,
     decode_thd,
 )
@@ -243,14 +245,8 @@ class _UnifiedSpecMethods:
         return dataclasses.replace(self, **{k: getattr(g, k) for k in UNIFIED_KNOBS})
 
     def non_default_fields(self) -> tuple[tuple[str, object], ...]:
-        out = []
-        for f in dataclasses.fields(self):
-            if f.name in ("head_size", "name"):
-                continue
-            v = getattr(self, f.name)
-            if v != f.default:
-                out.append((f.name, v))
-        return tuple(out)
+        """Compile-time fields that differ from their declared default."""
+        return non_default_fields(self, skip=("head_size", "name"))
 
     def kernel_name(self, stage: str = "main") -> str:
         """Main kernel name: base key plus a salt over every non-default knob.
@@ -264,13 +260,10 @@ class _UnifiedSpecMethods:
         )
         if self.sub_page is not None:
             base += f"_sp{self.sub_page}"
-        salted = [(k, v) for k, v in self.non_default_fields() if k not in _BASE_FIELDS]
-        if not salted:
-            return base
-        digest = hashlib.sha1(
-            repr(sorted(salted, key=lambda kv: kv[0])).encode()
-        ).hexdigest()
-        return f"{base}_{digest[:10]}"
+        return salted_kernel_name(
+            base,
+            [(k, v) for k, v in self.non_default_fields() if k not in _BASE_FIELDS],
+        )
 
     def aux_spec(
         self,
@@ -379,6 +372,10 @@ def validate_attn_bwd_unified_spec(spec, arch: str):
 # ---------------------------------------------------------------------------
 # kernarg ABI rocke.attn_bwd_unified.v1
 # ---------------------------------------------------------------------------
+# ``page_rows`` is the cache's physical slot count ``num_blocks * page`` in both
+# page modes: it bounds the atomic page workspace and turns on the block-id
+# guard of :class:`._attention_bwd_paged.PagedKv` (an entry outside ``[0,
+# num_blocks)`` is never dereferenced).
 
 _MAIN_PTRS = (
     "Q KC VC dO DKC DVC WS_LSE2 WS_DSUM WS_DQ WS_PDK WS_PDV CU_SEQLENS_Q "
@@ -563,6 +560,7 @@ def _emit_main(spec, arch: str, *, sentinel: bool = True):
         b, bt_ptr=a["BLOCK_TABLE"], bt_stride=a["bt_stride"], seq_idx=s_idx,
         seq=seq_kv, k_n0=kn,
         page=a["page"] if u.sub_page is None else u.sub_page, sub_page=u.sub_page,
+        page_rows=a["page_rows"],
     )  # fmt: skip
 
     def cache(ptr, prefix):
@@ -659,13 +657,11 @@ def _page_direct_epilogue(b, u, a, step, acc, *, paged, out, hk, k0, tid, io) ->
         D, threads = u.head_size, step.geom.threads
         per_row = D // vec
         total = u.block_n * per_row
-        for it in range(-(-total // threads)):
-            chunk = tid if it == 0 else b.add(tid, b.const_i32(it * threads))
-            r = b.div(chunk, b.const_i32(per_row))
-            c = b.mul(b.mod(chunk, b.const_i32(per_row)), b.const_i32(vec))
+        for chunk, tail in deal_chunks(b, tid, total, threads):
+            r, c = chunk_coords(b, chunk, per_row, vec)
             k = b.add(k0, r)
             store, row_live = tile.store_rule(k)
-            if (it + 1) * threads > total:
+            if tail:
                 store = b.land(store, b.cmp_lt(chunk, b.const_i32(total)))
             with b.scf_if(store):
                 dst.store_vec(k, c, b.select(row_live, read(r, c), zero))

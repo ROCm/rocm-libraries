@@ -54,6 +54,7 @@ from kernels.common.attention_bwd_dq import (
     validate_attn_bwd_dq_spec,
 )
 
+from ._attention_bwd_test_utils import kernel_signature
 from ._attention_bwd_int_eval import IntEvalBuilder
 
 ARCHS = ("gfx942", "gfx950")
@@ -519,27 +520,12 @@ def _ids(row):
     return "-".join(map(str, row))
 
 
-def _signature(ir):
-    head = re.search(r"define amdgpu_kernel void @\S+\((.*?)\) #0", ir).group(1)
-    out = []
-    for p in head.split(", "):
-        name = p.split("%")[-1]
-        if p.startswith("ptr"):
-            kind = "Q"
-        elif p.startswith("float"):
-            kind = "f"
-        else:
-            kind = "q" if p.startswith("i64") else "i"
-        out.append((name, kind, p))
-    return out
-
-
 @pytest.mark.parametrize("row", INSTANCES, ids=_ids)
 def test_builds_lowers_and_keeps_the_abi(row):
     ir = _ir(row)
     assert "alloca" not in ir and "addrspace(5)" not in ir
     assert "atomicrmw" not in ir
-    sig = _signature(ir)
+    sig = kernel_signature(ir)
     assert [(n, k) for n, k, _ in sig] == list(attn_bwd_params("dq"))
     for name, kind, text in sig:
         if kind == "Q":

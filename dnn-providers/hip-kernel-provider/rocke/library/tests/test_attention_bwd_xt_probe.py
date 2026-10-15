@@ -67,6 +67,7 @@ from kernels.common._attention_bwd_lds import (
     default_xt_writer,
     xt_conflicts,
 )
+from ._attention_bwd_test_utils import device_arch
 
 THREADS = 256
 REPS = 64
@@ -304,17 +305,6 @@ def _disassemble(hsaco: bytes, arch: str) -> str:
     return disassemble(hsaco, arch)
 
 
-def _device_arch() -> str | None:
-    try:
-        from rocke.runtime.hip_module import get_device_arch, get_device_count
-
-        if get_device_count() < 1:
-            return None
-        return get_device_arch(0)
-    except Exception:  # noqa: BLE001 - no HIP runtime on this host
-        return None
-
-
 def _find_rocprofv3() -> str | None:
     found = shutil.which("rocprofv3")
     if found:
@@ -358,7 +348,7 @@ def test_probe_kernels_use_the_intended_lds_opcodes():
 
 
 def test_probe_layout_correct_on_device():
-    arch = _device_arch()
+    arch = device_arch()
     if arch not in ("gfx942", "gfx950"):
         pytest.skip(f"needs a gfx942 or gfx950 device (found {arch})")
     pytest.importorskip("numpy")
@@ -382,7 +372,7 @@ def _parse_counter_csv(root: Path) -> dict[str, dict[str, float]]:
 
 
 def test_conflict_counter_matches_predictor_on_device():
-    arch = _device_arch()
+    arch = device_arch()
     if arch not in ("gfx942", "gfx950"):
         pytest.skip(f"needs a gfx942 or gfx950 device (found {arch})")
     prof = _find_rocprofv3()
@@ -444,7 +434,7 @@ def test_conflict_counter_matches_predictor_on_device():
 
 if __name__ == "__main__":
     if len(sys.argv) >= 2 and sys.argv[1] == "--run-probe":
-        target = sys.argv[2] if len(sys.argv) > 2 else (_device_arch() or "gfx942")
+        target = sys.argv[2] if len(sys.argv) > 2 else (device_arch() or "gfx942")
         errs = run_probes(target)
         for e in errs:
             print("PROBE_MISMATCH", e)

@@ -46,7 +46,8 @@ from kernels.common.attention_bwd_plan import (
     attn_bwd_plan,
 )
 
-from .sdpa.bwd_kernel_cases import CONFIGS, config_knobs
+from ._attention_bwd_test_utils import distinct_configs
+from .sdpa.bwd_kernel_cases import config_knobs
 
 ARCHS = ("gfx942", "gfx950", "gfx1151", "gfx1201")
 
@@ -138,17 +139,6 @@ def _walk(ops, anc=()):
             yield from _walk(r.ops, anc + (op,))
 
 
-def _configs(arch):
-    out, seen = [], []
-    for cfg in CONFIGS:
-        knobs = config_knobs(cfg, arch)
-        if knobs is None or knobs in seen:
-            continue
-        seen.append(knobs)
-        out.append(cfg)
-    return out
-
-
 MIRROR_VARIANTS = {
     "band": dict(mask_class="band"),
     "band_edge": dict(mask_class="band", edge_tiles=True),
@@ -160,7 +150,7 @@ MIRROR_VARIANTS = {
 ROWS = [
     (arch, cfg, d, var)
     for arch in ARCHS
-    for cfg in _configs(arch)
+    for cfg in distinct_configs(arch)
     for d in (32, 64, 128)
     for var in MIRROR_VARIANTS
 ]

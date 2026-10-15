@@ -22,10 +22,8 @@
 from __future__ import annotations
 
 import dataclasses
-import json
 import re
 from functools import cache
-from pathlib import Path
 
 import pytest
 from rocke.core.lower_llvm import _lower_kernel_to_llvm_python as lower
@@ -60,6 +58,7 @@ from kernels.common.attention_bwd_plan import (
 )
 from kernels.common.attention_bwd_run import _BUILDERS, pack_attn_bwd_args
 
+from ._attention_bwd_test_utils import fake_bench_ok
 from .sdpa.bwd_kernel_cases import config_knobs, custom_rules
 
 ARCHS = SPLIT_DQ_ARCHS
@@ -701,22 +700,7 @@ def test_compile_stage_compiles_and_gates_the_dq_kernel_of_split_candidates(
         def static_prune_dq(self, arch, spec, hsaco):
             return ("sgpr_spill" if spec.edge_tiles else None), {"dq": 1}
 
-    def fake_bench(argv):
-        out = Path(argv[argv.index("--out-dir") + 1])
-        cfgs = json.loads(Path(argv[argv.index("--rocke-configs") + 1]).read_text())
-        for cid in argv[argv.index("--ids") + 1].split(","):
-            arms = {"default|native": {"status": "ok", "median_ms": 2.0, "spread": 0.0,
-                                       "attempt_medians_ms": [2.0] * 5}}  # fmt: skip
-            for c in cfgs["configs"]:
-                arms[f"rocke|{c['label']}"] = {"status": "ok", "median_ms": 1.0,
-                                               "spread": 0.0,
-                                               "attempt_medians_ms": [1.0] * 5}  # fmt: skip
-            bb.append_jsonl(out / "cells.jsonl", {
-                "id": cid, "complete": True, "bar_arm": "default|native", "arms": arms,
-                "verdicts": {f"rocke|{c['label']}": "pass" for c in cfgs["configs"]},
-            })  # fmt: skip
-        bb.append_jsonl(out / "env.jsonl", {"host": "n"})
-        return 0
+    fake_bench = fake_bench_ok(bb)
 
     monkeypatch.setattr(bc, "compile_batch", fake_batch)
     monkeypatch.setattr(bb, "main", fake_bench)

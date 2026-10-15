@@ -50,11 +50,19 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from rocke.core.ir import IRBuilder, Value
-from rocke.helpers.attention_band import AttnRuntimeBounds, BandEmitter, RowBand
+from rocke.helpers.attention_band import (
+    I32_FAR,
+    AttnRuntimeBounds,
+    BandEmitter,
+    RowBand,
+)
+
+from ._attention_bwd_addr import as_i32
 
 __all__ = [
     "TILE_EDGE",
     "TILE_INTERIOR",
+    "HostInt",
     "MaskPolicy",
     "NoMaskKTail",
     "RuntimeBand",
@@ -70,15 +78,8 @@ __all__ = [
 
 IntOrValue = int | Value
 
-# Limit beyond every row / key (bounds and lengths are < 2**30).
-_FAR = 1 << 30
-
 TILE_INTERIOR = 0
 TILE_EDGE = 1
-
-
-def _i32(b, x: IntOrValue):
-    return b.const_i32(x) if isinstance(x, int) else x
 
 
 def _bound_or_none(band: BandEmitter, which: str):
@@ -115,7 +116,7 @@ def q_tile_range(
     if right is None:
         q_lo = zero
     else:
-        r = _i32(b, right)
+        r = as_i32(b, right)
         q_lo = b.sub(k_first_c, r)
         if not isinstance(right, int):
             q_lo = b.select(b.cmp_lt(r, zero), zero, q_lo)
@@ -123,7 +124,7 @@ def q_tile_range(
     if left is None:
         q_hi = sq_m1
     else:
-        lft = _i32(b, left)
+        lft = as_i32(b, left)
         q_hi = b.add(k_last_c, lft)
         if not isinstance(left, int):
             q_hi = b.select(b.cmp_lt(lft, zero), sq_m1, q_hi)
@@ -159,14 +160,14 @@ def tile_inside_band(
     right = _bound_or_none(band, "right")
     left = _bound_or_none(band, "left")
     if right is not None:
-        r = _i32(b, right)
+        r = as_i32(b, right)
         centre = q_first if off is None else b.add(q_first, off)
         ok = b.cmp_le(k_last, b.add(centre, r))
         if not isinstance(right, int):
             ok = b.lor(b.cmp_lt(r, zero), ok)
         inside = ok
     if left is not None:
-        lft = _i32(b, left)
+        lft = as_i32(b, left)
         centre = q_last if off is None else b.add(q_last, off)
         ok = b.cmp_ge(k_first, b.sub(centre, lft))
         if not isinstance(left, int):
@@ -259,7 +260,7 @@ def interior_q_range(
     left = _bound_or_none(band, "left") if masked else None
     if right is not None:
         # q_first >= k_last - off - right  ->  qt >= ceil((...) / k_m0)
-        r = _i32(b, right)
+        r = as_i32(b, right)
         need = b.sub(k_last, r) if off is None else b.sub(b.sub(k_last, off), r)
         first = b.sub(zero, _floor_div(b, b.sub(zero, need), k_m0))
         if not isinstance(right, int):
@@ -267,7 +268,7 @@ def interior_q_range(
         lo = b.smax(lo, first)
     if left is not None:
         # q_last <= k0 - off + left  ->  qt <= floor((... - k_m0 + 1) / k_m0)
-        lft = _i32(b, left)
+        lft = as_i32(b, left)
         top = b.add(k0, lft) if off is None else b.add(b.sub(k0, off), lft)
         last = _floor_div(b, b.sub(top, b.const_i32(k_m0 - 1)), k_m0)
         stop = b.add(last, b.const_i32(1))
@@ -306,7 +307,7 @@ def dkv_store_rule(
     if seq_mode == "batched":
         if s_kv_max is None:
             raise ValueError("batched dK/dV stores need s_kv_max")
-        return b.cmp_lt(k, _i32(b, s_kv_max)), live
+        return b.cmp_lt(k, as_i32(b, s_kv_max)), live
     if seq_mode == "thd":
         return live, live
     raise ValueError(f"seq_mode must be 'batched' or 'thd' (got {seq_mode!r})")
@@ -430,7 +431,7 @@ class RuntimeBand(MaskPolicy):
         """``off + sign * bound`` (``sign * FAR`` when unbounded), or None."""
         if bound is None:
             return None
-        far = b.const_i32(sign * _FAR)
+        far = b.const_i32(sign * I32_FAR)
         if isinstance(bound, int):
             v = b.const_i32(sign * bound)
             return v if off is None else b.add(off, v)
@@ -475,8 +476,14 @@ class NoMaskKTail(MaskPolicy):
 # ---------------------------------------------------------------------------
 
 
-class _HostInt:
-    """Minimal integer builder: evaluates the emitters above on Python ints."""
+class HostInt:
+    """Integer builder on Python ints: evaluates integer emitters on the host
+    (the band formulas above, the DMA lane map of :mod:`._attention_bwd_ring`).
+
+    ``land`` / ``lor`` are bitwise, so they are the logical and / or of two
+    compare results (Python bools) and the bitwise ops of two ints, like the
+    IR builder's ``land`` / ``lor`` on i1 and i32 values.
+    """
 
     def const_i32(self, v):
         return int(v)
@@ -513,10 +520,16 @@ class _HostInt:
         return x >= y
 
     def land(self, x, y):
-        return bool(x and y)
+        return x & y
 
     def lor(self, x, y):
-        return bool(x or y)
+        return x | y
+
+    def xor(self, x, y):
+        return x ^ y
+
+    def lshr(self, x, y):
+        return x >> y
 
     def lnot(self, x):
         return not x
@@ -559,7 +572,7 @@ def static_kv_tile_plan(
     """Evaluate ``q_tile_range`` and ``tile_class`` for compile-time shapes."""
     if left < -1 or right < -1:
         raise ValueError("band bounds must be >= -1")
-    hb = _HostInt()
+    hb = HostInt()
     off = s_kv - s_q if bottom_right else 0
     bounds = AttnRuntimeBounds(
         s_q, s_kv, off, left if masked else -1, right if masked else -1

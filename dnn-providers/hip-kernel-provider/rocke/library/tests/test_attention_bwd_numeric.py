@@ -151,6 +151,7 @@ import numpy as np
 import pytest
 from kernels.common._attention_bwd_worklist import worklist_reference
 
+from ._attention_bwd_test_utils import device_configs, find_bwd_case
 from ._attention_bwd_harness import (
     ARCH,
     DEVICE_ARCHS,
@@ -174,7 +175,6 @@ from .sdpa.bwd_kernel_cases import (
     LAYOUT_TWIN_SETS,
     NARROW_CASES,
     NARROW_TWIN_CASES,
-    SUPPLEMENTARY_CASES,
     THD_HK_NE_HV_CASES,
     THD_STORAGE_CASES,
     THD_STORAGE_FORMS,
@@ -213,10 +213,6 @@ def _params():
         for case in selected_cases()
         for cfg in selected_configs(ARCH)
     ]
-
-
-def _configs():
-    return selected_configs(ARCH) if ARCH in DEVICE_ARCHS else ["none"]
 
 
 def _passes(run):
@@ -270,20 +266,20 @@ def _dead_rows_case(case_id, config, lse_values, o_value=None):
     return run
 
 
-@pytest.mark.parametrize("config", _configs())
+@pytest.mark.parametrize("config", device_configs(ARCH, DEVICE_ARCHS))
 @pytest.mark.parametrize("case_id", DEAD_ROW_CASES)
 def test_neg_inf_lse_on_live_rows(case_id, config):
     _dead_rows_case(case_id, config, [-np.inf])
 
 
-@pytest.mark.parametrize("config", _configs())
+@pytest.mark.parametrize("config", device_configs(ARCH, DEVICE_ARCHS))
 @pytest.mark.parametrize("case_id", DEAD_ROW_CASES)
 def test_nan_lse_rows(case_id, config):
     _dead_rows_case(case_id, config, [np.nan])
 
 
 @pytest.mark.parametrize("o_value", [np.nan, np.inf], ids=["nan_o", "inf_o"])
-@pytest.mark.parametrize("config", _configs())
+@pytest.mark.parametrize("config", device_configs(ARCH, DEVICE_ARCHS))
 @pytest.mark.parametrize("case_id", DEAD_ROW_CASES)
 def test_dead_rows_with_poisoned_output(case_id, config, o_value):
     _dead_rows_case(case_id, config, [np.nan, -np.inf], o_value)
@@ -343,7 +339,7 @@ def _hk_ne_hv_params():
 
 @pytest.mark.parametrize("case_id,config", _hk_ne_hv_params())
 def test_hk_ne_hv(case_id, config):
-    case = _case(case_id)
+    case = find_bwd_case(case_id)
     assert case.h_k != case.h_v
     plan = plan_case(case, arch=ARCH, config=config)
     assert plan.specs["main"].dkv_mode == "atomic"
@@ -363,7 +359,7 @@ def test_hk_ne_hv_select_guard(case_id, config):
     """The atomic epilogue without row branches (``dkv_atomic_guard =
     "select"``): rows past ``len_kv`` add ``+0.0``, in THD into the rows of
     the next sequence, which must stay exact."""
-    case = _case(case_id)
+    case = find_bwd_case(case_id)
     _require_legal(case, config, {"dkv_atomic_guard": "select"})
     run = run_case(
         case, arch=ARCH, config=config, overrides={"dkv_atomic_guard": "select"}
@@ -395,7 +391,7 @@ def _run_to_run_params():
 
 @pytest.mark.parametrize("case_id,overrides,config", _run_to_run_params())
 def test_atomic_run_to_run(case_id, overrides, config):
-    case = _case(case_id)
+    case = find_bwd_case(case_id)
     _require_legal(case, config, overrides)
     first = run_case(case, arch=ARCH, config=config, overrides=overrides)
     assert first.plan.specs["main"].dkv_mode == "atomic"
@@ -410,14 +406,6 @@ def test_atomic_run_to_run(case_id, overrides, config):
     )  # fmt: skip
     probs = compare_bwd(case, second.dq, second.dk, second.dv, ref)
     assert not probs, probs
-
-
-def _case(case_id):
-    """A table case or a supplementary kernel case by id."""
-    for c in SUPPLEMENTARY_CASES:
-        if c.id == case_id:
-            return c
-    return get_bwd_case(case_id)
 
 
 # Cases of the runtime-variant test: an MHA band (direct), a GQA group
@@ -546,7 +534,7 @@ def _variant_params():
     for cid in VARIANT_CASES:
         if shard_of(cid, n) != i:
             continue
-        case = _case(cid)
+        case = find_bwd_case(cid)
         group = math.gcd(case.h_q // case.h_k, case.h_q // case.h_v)
         for name in RUNTIME_VARIANTS:
             if group % RUNTIME_VARIANTS[name][0].get("g_split", 1):
@@ -613,7 +601,7 @@ def _config_value(case, config, name):
 
 @pytest.mark.parametrize("case_id,variant,config", _variant_params())
 def test_runtime_variants_agree(case_id, variant, config):
-    case = _case(case_id)
+    case = find_bwd_case(case_id)
     key = (case_id, config, "plain")
     if key not in _RUNS:
         base = run_case(case, arch=ARCH, config=config)
@@ -746,7 +734,7 @@ def test_asm_g13_variants_agree(case_id, variant, nop, cluster, s_in_agpr, confi
     the plain run: the asm issues the same MFMAs in the same K order. dQ is bit
     for bit too where every query head has one kv-tile CTA (one atomic per
     dQ workspace element)."""
-    case = _case(case_id)
+    case = find_bwd_case(case_id)
     key = (case_id, config, "plain_dq")
     if key not in _RUNS:
         base = run_case(case, arch=ARCH, config=config)
@@ -829,7 +817,7 @@ def test_wide_g13_atom_agrees(case_id, variant, config):
     """The 16x16x32 G1 / G3 atom passes the oracle; its edge-tile, asm and
     asm + operand-hoist variants are bit for bit the wide run (dK / dV in
     direct mode, dQ with one kv tile)."""
-    case = _case(case_id)
+    case = find_bwd_case(case_id)
     wide = _wide_overrides(case, config)
     # skipped with the validator's rule where the configuration cannot take it
     _require_legal(case, config, wide)
@@ -931,7 +919,7 @@ def _order_case(case_id):
     for c in HEAD_PACK_CASES:
         if c.id == case_id:
             return c
-    return _case(case_id)
+    return find_bwd_case(case_id)
 
 
 def _stage_order_params():
@@ -1015,7 +1003,7 @@ def test_static_scale_matches_the_runtime_multipliers(case_id, config):
     workspace element then takes exactly one atomic add)."""
     from kernels.common.attention_bwd_plan import SCALE_PLACEMENTS
 
-    case = _case(case_id)
+    case = find_bwd_case(case_id)
     for placement in SCALE_PLACEMENTS:
         for static in (placement, "runtime"):
             _require_legal(
@@ -1119,7 +1107,7 @@ def test_barrier_merge_agrees(case_id, variant, config):
 def test_rotated_q_loop_is_deterministic(case_id, variant, config):
     """``q_rotate`` reorders the dK / dV sums, but a fixed order: two direct-mode
     runs give the same bits."""
-    case = _case(case_id)
+    case = find_bwd_case(case_id)
     overrides = RUNTIME_VARIANTS[variant][0]
     _require_legal(case, config, overrides)
     first = run_case(case, arch=ARCH, config=config, overrides=overrides)
@@ -1156,7 +1144,7 @@ def test_knob_value_sets(set_name, case_id):
     bit for bit equal to the default configuration."""
     if set_name is None:
         pytest.skip("no knob smoke set on this arch")
-    case = _case(case_id)
+    case = find_bwd_case(case_id)
     _archs, _sizes, knobs, bitwise = KNOB_SMOKE_SETS[set_name]
     run = run_case(case, arch=ARCH, config="default", overrides=dict(knobs))
     spec = run.plan.specs["main"]
@@ -1201,7 +1189,7 @@ def test_layout_twin_sets(set_name, case_id):
     same order)."""
     if set_name is None:
         pytest.skip("no layout twin set on this arch")
-    case = _case(case_id)
+    case = find_bwd_case(case_id)
     _archs, _sizes, knobs, twin = LAYOUT_TWIN_SETS[set_name]
     runs = []
     for kn in (knobs, twin):
@@ -1251,7 +1239,7 @@ def test_compose_twin_sets(set_name, case_id):
 
     if set_name is None:
         pytest.skip("no composition set on this arch")
-    case = _case(case_id)
+    case = find_bwd_case(case_id)
     _archs, _sizes, knobs, twin = COMPOSE_TWIN_SETS[set_name]
     runs = []
     for kn in (knobs, twin):
@@ -1336,7 +1324,7 @@ def _seq_stride_params():
     if ARCH not in DEVICE_ARCHS:
         return [pytest.param(None, None, id="no-device")]
     i, n = (int(x) for x in os.environ.get("ROCKE_BWD_SHARD", "0/1").split("/"))
-    cases = (ZERO_LENGTH_CASES[0], _case("bwd_padding_q_lt_kv_br"))
+    cases = (ZERO_LENGTH_CASES[0], find_bwd_case("bwd_padding_q_lt_kv_br"))
     return [
         pytest.param(case, cfg, id=f"{case.id}-{cfg}")
         for case in cases
@@ -1428,7 +1416,7 @@ def test_lse_strides_are_honoured(form, config):
     """A non-packed LSE (NaN in every gap) read at the request's strides
     passes the oracle; the same buffer read at the packed default fails it
     (negative control: the test detects an LSE stride that is ignored)."""
-    case = _case(LSE_FORMS[form])
+    case = find_bwd_case(LSE_FORMS[form])
     assert (case.length_mode == "ragged") == form.startswith("thd")
     fields, want, scatter = _lse_layout(case, form)
     run = run_case(
@@ -1492,7 +1480,7 @@ def test_ragged_offset_forms(case_id, form, config):
     multiplier): the kernels decode ``token = off * mult / token_stride`` in
     64 bits and touch nothing outside the sequences."""
     storage = OFFSET_FORMS[form]
-    case = _case(case_id)
+    case = find_bwd_case(case_id)
     run = run_case(case, arch=ARCH, config=config, thd=storage)
     for step in run.plan.launches:
         assert step.scalars["off64"] == (storage.offset_dtype == "int64")
@@ -1565,7 +1553,7 @@ def _thd_case(case_id):
     for c in THD_ZERO_LENGTH_CASES + HEAD_PACK_CASES:
         if c.id == case_id:
             return c
-    return _case(case_id)
+    return find_bwd_case(case_id)
 
 
 @pytest.mark.parametrize(
@@ -1783,7 +1771,7 @@ def test_max_total_guard(case_id, bound, config):
     (dQ of those tokens; dK / dV of every sequence but the last) are correct.
     Both bounds are passed (a single bound is not used: rows stay per-sequence
     slots); in direct mode the kv bound is the exact kv token count."""
-    case = _case(case_id)
+    case = find_bwd_case(case_id)
     lq, lk = case.lens()
     bound_q = sum(lq[:-1]) + lq[-1] // 2
     # atomic dK / dV: h_k != h_v, or a configuration's head split
@@ -1917,7 +1905,7 @@ def test_narrow_twin_agrees(case_id, config):
     """A ``stage_vec = 8`` run and its ``stage_vec = 1`` twin on the same tile
     and storage: direct-mode dK / dV agree bit for bit (only the global access
     width differs)."""
-    case = _case(case_id)
+    case = find_bwd_case(case_id)
     narrow = run_case(case, arch=ARCH, config=config, request={"tensor_alignment": 8})
     spec = narrow.plan.specs["main"]
     assert spec.stage_vec == 1

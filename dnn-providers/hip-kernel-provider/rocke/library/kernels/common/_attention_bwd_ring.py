@@ -67,7 +67,8 @@ from functools import cached_property
 
 from rocke.core.ir import F32, I32, IRBuilder, Value
 
-from ._attention_bwd_addr import RowSlab, WsSlab
+from ._attention_bwd_addr import RowSlab, WsSlab, as_i32
+from ._attention_bwd_band import HostInt
 from ._attention_bwd_body import (
     BwdLds,
     PackedStep,
@@ -459,7 +460,7 @@ class QRing:
                 b.inline_asm(_ASM_X1, _ASM_CONSTRAINTS, [voff, m0, ptr], None)
                 continue
             rslab: RowSlab = slabs[name]
-            r_j, c_j = dma_lane_source(_HostInts(), self.layout, j, 0)
+            r_j, c_j = dma_lane_source(HostInt(), self.layout, j, 0)
             row = b.add(tile.q0, b.add(row_l, b.const_i32(r_j)) if r_j else row_l)
             col = b.add(col_l, b.const_i32(c_j)) if c_j else col_l
             voff = b.shl(rslab.index(row, col), b.const_i32(1))
@@ -600,7 +601,7 @@ class QRing:
             val = None
             if load:
                 q, do = tile.q_slab, tile.do_slab
-                stride = b.select(is_do, _i32(b, do.t_stride), _i32(b, q.t_stride))
+                stride = b.select(is_do, as_i32(b, do.t_stride), as_i32(b, q.t_stride))
                 joint = dataclasses.replace(
                     q, ptr=b.select(is_do, do.ptr, q.ptr), t_stride=stride
                 )
@@ -640,32 +641,6 @@ def _chunk_rc(b, chunk, per_row):
     r = b.lshr(chunk, b.const_i32(shift))
     c = b.shl(b.land(chunk, b.const_i32(per_row - 1)), b.const_i32(3))
     return r, c
-
-
-def _i32(b, x):
-    return b.const_i32(x) if isinstance(x, int) else x
-
-
-class _HostInts:
-    """Integer builder for the static part of :func:`dma_lane_source`."""
-
-    def const_i32(self, v):
-        return int(v)
-
-    def add(self, a, c):
-        return a + c
-
-    def mul(self, a, c):
-        return a * c
-
-    def lshr(self, a, c):
-        return a >> c
-
-    def land(self, a, c):
-        return a & c
-
-    def xor(self, a, c):
-        return a ^ c
 
 
 # ---------------------------------------------------------------------------

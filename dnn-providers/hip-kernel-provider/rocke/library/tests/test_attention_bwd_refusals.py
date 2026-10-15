@@ -2534,15 +2534,16 @@ def _cell_spec(row) -> AttnBwdSpec:
             kw = {"loop_sync": "counted", **kw}
         return _unrefused_plan(S._case(cid), arch, cfg, kw or None).specs["main"]
     from .sdpa.bwd_kernel_cases import COMPOSE_TWIN_SETS
-    from .test_attention_bwd_numeric import _case
+    from ._attention_bwd_test_utils import find_bwd_case
 
     if kind == "compknobs":  # a device case on the default tile with these knobs
         _, _, cid, items = row
-        return _unrefused_plan(_case(cid), arch, "default", dict(items)).specs["main"]
+        plan = _unrefused_plan(find_bwd_case(cid), arch, "default", dict(items))
+        return plan.specs["main"]
     _, _, name, cid = row
     _archs, _sizes, knobs, twin = COMPOSE_TWIN_SETS[name]
     kn = knobs if kind == "compose" else twin
-    return _unrefused_plan(_case(cid), arch, "default", dict(kn)).specs["main"]
+    return _unrefused_plan(find_bwd_case(cid), arch, "default", dict(kn)).specs["main"]
 
 
 def _resolved(row):

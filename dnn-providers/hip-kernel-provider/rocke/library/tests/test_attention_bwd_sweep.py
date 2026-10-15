@@ -27,6 +27,8 @@ from kernels.common.attention_bwd import (
 )
 from kernels.common.attention_bwd_dq import validate_attn_bwd_dq_spec
 
+from ._attention_bwd_test_utils import fake_bench_ok
+
 REL1 = sw.Release(frozenset({1}))
 BUILT = sw.Release(frozenset({1, 2, 4, 5, 6, 7}))
 
@@ -728,6 +730,18 @@ def test_cli_guards(tmp_path):
                  "--shard", "3/3"])  # fmt: skip
 
 
+def test_gate_has_no_environment_default(monkeypatch, tmp_path):
+    """``--gate`` is explicit: an exported variable selects no gate, so a
+    timed stage still refuses to run without it on the command line."""
+    monkeypatch.setenv("ROCKE_BWD_PRUNE_GATE", "benchmarks.common.x:GATE")
+    assert sw.make_parser().parse_args([]).gate is None
+    args = sw.make_parser().parse_args(["--gate", "m:f"])
+    assert args.gate == "m:f"
+    with pytest.raises(SystemExit, match="pruning-set gate"):
+        sw.main(["--stage", "geometry", "--out-dir", str(tmp_path), "--arch",
+                 "gfx942", "--d", "64"])  # fmt: skip
+
+
 def _fake_env(monkeypatch, compiled):
     """Stub compiler (records what it compiles) and timing harness (every
     configuration twice as fast as the bar on every cell)."""
@@ -738,22 +752,7 @@ def _fake_env(monkeypatch, compiled):
         compiled.extend(repr(s) for _, s in items)
         return [_Res(True) for _ in items]
 
-    def fake_bench(argv):
-        out = Path(argv[argv.index("--out-dir") + 1])
-        cfgs = json.loads(Path(argv[argv.index("--rocke-configs") + 1]).read_text())
-        for cid in argv[argv.index("--ids") + 1].split(","):
-            arms = {"default|native": {"status": "ok", "median_ms": 2.0, "spread": 0.0,
-                                       "attempt_medians_ms": [2.0] * 5}}  # fmt: skip
-            for c in cfgs["configs"]:
-                arms[f"rocke|{c['label']}"] = {"status": "ok", "median_ms": 1.0,
-                                               "spread": 0.0,
-                                               "attempt_medians_ms": [1.0] * 5}  # fmt: skip
-            bb.append_jsonl(out / "cells.jsonl", {
-                "id": cid, "complete": True, "bar_arm": "default|native", "arms": arms,
-                "verdicts": {f"rocke|{c['label']}": "pass" for c in cfgs["configs"]},
-            })  # fmt: skip
-        bb.append_jsonl(out / "env.jsonl", {"host": "n"})
-        return 0
+    fake_bench = fake_bench_ok(bb)
 
     monkeypatch.setattr(bc, "compile_batch", fake_batch)
     monkeypatch.setattr(bb, "main", fake_bench)

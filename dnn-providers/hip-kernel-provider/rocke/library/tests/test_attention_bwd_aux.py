@@ -25,6 +25,7 @@ import re
 import pytest
 from kernels.common import attention_bwd_aux as X
 from rocke.core.lower_llvm import _lower_kernel_to_llvm_python as lower
+from ._attention_bwd_test_utils import kernel_signature
 
 ARCHS = ("gfx942", "gfx950", "gfx1151", "gfx1201")
 FLAVORS = ("llvm20", "llvm22", "llvm23")
@@ -85,21 +86,6 @@ def _spec_for(stage, **kw):
     return X.AttnBwdAuxSpec(**kw)
 
 
-def _signature(ir):
-    head = re.search(r"define amdgpu_kernel void @\S+\((.*?)\) #0", ir).group(1)
-    out = []
-    for p in head.split(", "):
-        name = p.split("%")[-1]
-        if p.startswith("ptr"):
-            kind = "Q"
-        elif p.startswith("float"):
-            kind = "f"
-        else:
-            kind = "q" if p.startswith("i64") else "i"
-        out.append((name, kind, p))
-    return out
-
-
 def test_abi_tags():
     assert X.ATTN_BWD_ABI == "rocke.attn_bwd.v3"
     assert X.ATTN_BWD_UNIFIED_ABI == "rocke.attn_bwd_unified.v1"
@@ -117,7 +103,7 @@ def test_params_are_the_abi_lists(stage):
 def test_emitted_signature_matches_params(stage, arch):
     spec = _spec_for(stage, head_size=128, dtype="bf16")
     ir = lower(BUILDERS[stage](spec, arch=arch), arch=arch, llvm_flavor="llvm22")
-    sig = _signature(ir)
+    sig = kernel_signature(ir)
     want = [(n, f) for n, f in X.attn_bwd_aux_params(stage, spec)]
     assert [(n, k) for n, k, _ in sig] == want
     for name, kind, text in sig:
@@ -620,7 +606,7 @@ def test_worklist_role_ir(arch):
         threads = X.attn_bwd_aux_block_threads(spec, arch=arch)
         ir = _wl_ir(arch, spec)
         plain = _wl_ir(arch, dataclasses.replace(spec, worklist=False))
-        sig = _signature(ir)
+        sig = kernel_signature(ir)
         assert [(n, k) for n, k, _ in sig] == list(X.attn_bwd_aux_params("prep", spec))
         body = ir.split(") #0 {", 1)[1]
         plain_body = plain.split(") #0 {", 1)[1]

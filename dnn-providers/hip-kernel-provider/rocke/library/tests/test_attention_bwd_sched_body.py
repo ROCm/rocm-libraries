@@ -61,11 +61,11 @@ from kernels.common.attention_bwd import (
     validate_attn_bwd_spec,
 )
 
+from ._attention_bwd_test_utils import distinct_configs
 from .test_attention_bwd_ir import (
     ARCHS,
     HEADS,
     VARIANTS,
-    _configs,
     _walk,
     group_loops,
     lds_hazards,
@@ -165,7 +165,7 @@ def _spec(arch, cfg, d, var, knob, sched, prio, dt="fp16"):
 def _rows():
     out = []
     for arch in ARCHS:
-        for cfg in _configs(arch):
+        for cfg in distinct_configs(arch):
             for d in HEADS:
                 for var in BODY_VARIANTS:
                     out.append((arch, cfg, d, var, ""))
@@ -269,7 +269,7 @@ def _want_seq(t):
 
 @pytest.mark.parametrize("arch", ARCHS)
 def test_default_has_no_schedule_ops_and_the_explicit_default_is_it(arch):
-    for cfg in _configs(arch):
+    for cfg in distinct_configs(arch):
         for d in HEADS:
             for var in ("band", "band_edge_atomic_pack_hout_ldssync", "thd_sv1_none"):
                 kw = dict(config_knobs(cfg, arch), **VARIANTS[var])
@@ -345,7 +345,7 @@ def test_fenced_placement(arch):
     G1 in A (so A reads more than G0's operands), the Q^T reads of G3 in B
     (C then reads nothing for G3 under the relabel route) and an LDS K^T in
     C (D reads only dS); ``none`` keeps the stats with the softmax."""
-    cfg = _configs(arch)[0]
+    cfg = distinct_configs(arch)[0]
     for d in HEADS:
         spec, k = _kernel(arch, "default", d, "band", "ktlds", "fences_only", False)
         if spec is None:
@@ -428,7 +428,7 @@ def test_scheduling_only(arch, pair):
     knobs (agpr_alloc and the register estimate included), the kernel name is
     salted, the IR differs, and the matrix ops (count, atom, order) and the
     per-step dQ atomics of each q step are the default's."""
-    for cfg in _configs(arch):
+    for cfg in distinct_configs(arch):
         for d in HEADS:
             base = _spec(arch, cfg, d, "band_edge", "", "none", False)
             spec = _spec(arch, cfg, d, "band_edge", "", *pair)
@@ -456,7 +456,7 @@ def test_scheduling_only(arch, pair):
 @pytest.mark.parametrize("pair", SCHED_PAIRS, ids=PAIR_IDS)
 @pytest.mark.parametrize("arch", ARCHS)
 def test_read_ahead_keeps_lds_accesses_behind_barriers(arch, pair):
-    for cfg in _configs(arch):
+    for cfg in distinct_configs(arch):
         for d in HEADS:
             for var, knob in (("band_edge", ""), ("band", "ptlds"), ("band", "kvlds")):
                 spec = _spec(arch, cfg, d, var, knob, *pair)
@@ -481,7 +481,7 @@ _LLVM = {
 @pytest.mark.parametrize("pair", SCHED_PAIRS, ids=PAIR_IDS)
 @pytest.mark.parametrize("arch", ARCHS)
 def test_llvm_hint_calls_equal_the_model(arch, pair):
-    for cfg in _configs(arch):
+    for cfg in distinct_configs(arch):
         for d in HEADS:
             for var in ("band", "band_edge"):
                 spec, k = _kernel(arch, cfg, d, var, "", *pair)
@@ -514,7 +514,7 @@ def test_code_objects_differ_and_keep_the_matrix_instructions(arch, pair, d):
     the sweep records that, so it is not failed here)."""
     from .test_attention_bwd_sched import _disassemble, _MMA_RE
 
-    cfg = _configs(arch)[0]
+    cfg = distinct_configs(arch)[0]
     base, k0 = _kernel(arch, cfg, d, "band", "", "none", False)
     spec, k = _kernel(arch, cfg, d, "band", "", *pair)
     assert base is not None, (arch, cfg, d)  # the plain band instance is legal
@@ -541,7 +541,7 @@ GATE_VARIANTS = ("band", "band_pack", "band_edge", "thd_band_atomic", "sv1_band"
 
 
 GATE_POINTS = [
-    (arch, cfg, d) for arch in ARCHS for cfg in _configs(arch) for d in HEADS
+    (arch, cfg, d) for arch in ARCHS for cfg in distinct_configs(arch) for d in HEADS
 ]
 
 

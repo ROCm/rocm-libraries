@@ -111,7 +111,6 @@ the Q-parallel dQ kernel of :mod:`kernels.common.attention_bwd_dq`
 from __future__ import annotations
 
 import dataclasses
-import hashlib
 from dataclasses import dataclass, fields
 from functools import cache
 from types import MappingProxyType
@@ -125,11 +124,14 @@ from rocke.core.codegen_policy import (
 from rocke.core.ir import F32, I32, I64, IRBuilder, PtrType
 
 from rocke.helpers.attention_band import AttnRuntimeBounds
+from rocke.helpers.spec import non_default_fields, salted_kernel_name
 
 from kernels.common._attention_bwd_addr import (
     PackedRows,
     StridedTensorAddr,
     WorkspaceAddr,
+    chunk_coords,
+    deal_chunks,
     decode_batched,
     decode_thd,
 )
@@ -1282,14 +1284,7 @@ class AttnBwdSpec:
 
     def non_default_fields(self) -> tuple[tuple[str, object], ...]:
         """Compile-time fields that differ from their declared default."""
-        out = []
-        for f in fields(self):
-            if f.name in ("head_size", "name") or f.default is dataclasses.MISSING:
-                continue
-            v = getattr(self, f.name)
-            if v != f.default:
-                out.append((f.name, v))
-        return tuple(out)
+        return non_default_fields(self, skip=("head_size", "name"))
 
     def kernel_name(self, stage: str = "main") -> str:
         """Kernel name: base key plus a salt over every non-default knob."""
@@ -1298,17 +1293,10 @@ class AttnBwdSpec:
             f"{self.name}_{stage}_{self.dtype}_d{self.head_size}_"
             f"{self.seq_mode}_{self.dkv_mode}_{self.mask_class}_sv{self.stage_vec}"
         )
-        salted = [
-            (k, v)
-            for k, v in self.non_default_fields()
-            if k not in ("dtype", "seq_mode", "dkv_mode", "stage_vec", "mask_class")
-        ]
-        if not salted:
-            return base
-        digest = hashlib.sha1(
-            repr(sorted(salted, key=lambda kv: kv[0])).encode()
-        ).hexdigest()
-        return f"{base}_{digest[:10]}"
+        in_base = ("dtype", "seq_mode", "dkv_mode", "stage_vec", "mask_class")
+        return salted_kernel_name(
+            base, [(k, v) for k, v in self.non_default_fields() if k not in in_base]
+        )
 
     def aux_spec(
         self,
@@ -2426,8 +2414,7 @@ def _emit_main(
             if stash is None and "ids" in fresh:
                 ids1 = tuple(_opaque(b, x, "s") for x in cta.ids)
             tid1 = _opaque(b, tid, "v") if "tid" in fresh else tid
-            ws_ = b.const_i32(facts.wave_size)
-            lane1, wave1 = b.mod(tid1, ws_), b.readfirstlane(b.div(tid1, ws_))
+            _, lane1, wave1 = lane_and_wave(b, facts.wave_size, tid=tid1)
             cta1 = _cta_setup(
                 b, s, a1, geom, plan, io, tid=tid1, lane=lane1, wave=wave1,
                 sentinel=sentinel, ids=ids1, lds=cta.lds,
@@ -3329,12 +3316,9 @@ def _store_slice_rows(b, s, step, dst, view, *, cols, col0, tid, mult=None) -> N
     threads = step.geom.threads
     per_row = cols // vec
     total = kn * per_row
-    for it in range(-(-total // threads)):
-        chunk = tid if it == 0 else b.add(tid, b.const_i32(it * threads))
-        r = b.div(chunk, b.const_i32(per_row))
-        c = b.mul(b.mod(chunk, b.const_i32(per_row)), b.const_i32(vec))
+    for chunk, tail in deal_chunks(b, tid, total, threads):
+        r, c = chunk_coords(b, chunk, per_row, vec)
         cc = c if col0 == 0 else b.add(c, b.const_i32(col0))
-        tail = (it + 1) * threads > total
 
         def read(r=r, c=c):
             v = view.load(b, r, c, dtype=F32, n=vec)
@@ -3430,15 +3414,13 @@ def _store_dkv_rows(b, s, a, step, slab, read, *, k0, seq_kv, tid, zero) -> None
     threads = step.geom.threads
     per_row = D // vec
     total = kn * per_row
-    for it in range(-(-total // threads)):
-        chunk = tid if it == 0 else b.add(tid, b.const_i32(it * threads))
-        r = b.div(chunk, b.const_i32(per_row))
-        c = b.mul(b.mod(chunk, b.const_i32(per_row)), b.const_i32(vec))
+    for chunk, tail in deal_chunks(b, tid, total, threads):
+        r, c = chunk_coords(b, chunk, per_row, vec)
         k = b.add(k0, r)
         store, row_live = dkv_store_rule(
             b, k, seq_kv.length, seq_mode=s.seq_mode, s_kv_max=a["S_kv_max"]
         )
-        if (it + 1) * threads > total:
+        if tail:
             store = b.land(store, b.cmp_lt(chunk, b.const_i32(total)))
         with b.scf_if(store):
             v = b.select(row_live, read(r, c), zero)

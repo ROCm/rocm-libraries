@@ -23,6 +23,7 @@ import pytest
 from benchmarks.common.attention_bwd_rocke_arm import RockeConfig, config_policy
 from kernels.common.attention_bwd_plan import attn_bwd_plan, attn_bwd_stage_vec
 
+from ._attention_bwd_test_utils import find_bwd_case
 from .sdpa.bwd_kernel_cases import (
     CONFIGS,
     CUSTOM_CONFIG,
@@ -532,22 +533,22 @@ def _variant_cells(arch):
     # refused cell)
     for cfg in cfgs:
         for cid in HK_NE_HV_TABLE_CASES + THD_HK_NE_HV_CASES:
-            add(("select_guard", "select"), N._case(cid), cfg,
+            add(("select_guard", "select"), find_bwd_case(cid), cfg,
                 {"dkv_atomic_guard": "select"})  # fmt: skip
         for cid, ov in N.RUN_TO_RUN:
-            add(("run_to_run", cid), N._case(cid), cfg, dict(ov))
+            add(("run_to_run", cid), find_bwd_case(cid), cfg, dict(ov))
         for cid in N.VARIANT_CASES:
             for placement in SCALE_PLACEMENTS:
                 for static in (placement, "runtime"):
                     ov = {"scale_placement": placement, "static_scale": static}
-                    add(("static_scale", f"{placement}/{static}"), N._case(cid),
+                    add(("static_scale", f"{placement}/{static}"), find_bwd_case(cid),
                         cfg, ov)  # fmt: skip
         for cid in N.SLAB_HOIST_CASES:
             for form, storage in N.SLAB_HOIST_FORMS.items():
                 add(("slab_hoist", form), N._thd_case(cid), cfg,
                     {"dkv_slab_hoist": True}, None, storage or N.ThdStorage())  # fmt: skip
         for cid in NARROW_TWIN_CASES:
-            case = N._case(cid)
+            case = find_bwd_case(cid)
             narrow = _plans(case, arch, cfg, request={"tensor_alignment": 8})
             if narrow is None:
                 continue
@@ -560,10 +561,10 @@ def _variant_cells(arch):
                 {"edge_tiles": True})  # fmt: skip
         for cid in V.FAINT_CASES:
             for mode in ("exact", "fast"):
-                add(("fast_exp2", mode), V._case(cid), cfg, {"bwd_exp2": mode})
+                add(("fast_exp2", mode), find_bwd_case(cid), cfg, {"bwd_exp2": mode})
 
     for cid in N.VARIANT_CASES:
-        case = N._case(cid)
+        case = find_bwd_case(cid)
         for cfg in cfgs:
             for name, (ov, req, _bit) in N.RUNTIME_VARIANTS.items():
                 ov = dict(ov)

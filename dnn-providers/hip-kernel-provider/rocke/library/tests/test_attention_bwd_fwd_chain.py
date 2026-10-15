@@ -45,6 +45,7 @@ import pytest
 
 from rocke.numeric.sdpa_reference import sdpa_reference_bwd
 
+from ._attention_bwd_test_utils import device_configs
 from ._attention_bwd_harness import (
     ARCH,
     DEVICE_ARCHS,
@@ -69,7 +70,6 @@ from .sdpa.bwd_cases import (
     get_bwd_case,
     layout_tensors_bwd,
 )
-from .sdpa.bwd_kernel_cases import selected_configs
 
 FWD_ARCHS = ("gfx942", "gfx950", "gfx1151")
 LOG2E = np.float32(1.4426950408889634)
@@ -87,10 +87,6 @@ forward_device = pytest.mark.skipif(
 )
 
 _FWD_KERNELS: dict = {}
-
-
-def _configs():
-    return selected_configs(ARCH) if ARCH in DEVICE_ARCHS else ["none"]
 
 
 # ---------------------------------------------------------------------------
@@ -300,7 +296,7 @@ PROBE_CASES = (
 
 @forward_device
 @pytest.mark.gpu
-@pytest.mark.parametrize("config", _configs())
+@pytest.mark.parametrize("config", device_configs(ARCH, DEVICE_ARCHS))
 @pytest.mark.parametrize("case_id", PROBE_CASES)
 def test_probe_forward_chain(case_id, config):
     case = get_bwd_case(case_id)
@@ -328,7 +324,7 @@ LSE_STORE_CASES = (
 
 @forward_device
 @pytest.mark.gpu
-@pytest.mark.parametrize("config", _configs())
+@pytest.mark.parametrize("config", device_configs(ARCH, DEVICE_ARCHS))
 @pytest.mark.parametrize("case_id", LSE_STORE_CASES)
 def test_lse_store_forward_chain(case_id, config):
     case = get_bwd_case(case_id)
@@ -354,7 +350,7 @@ CONTROL_CASE = "bwd_seqlen_33x72_br"
 
 @forward_device
 @pytest.mark.gpu
-@pytest.mark.parametrize("config", _configs())
+@pytest.mark.parametrize("config", device_configs(ARCH, DEVICE_ARCHS))
 def test_chain_lse_in_log2_units_is_detected(config):
     case = get_bwd_case(CONTROL_CASE)
     o, lse = _forward_run(case)
@@ -372,7 +368,7 @@ def test_chain_lse_in_log2_units_is_detected(config):
 
 @forward_device
 @pytest.mark.gpu
-@pytest.mark.parametrize("config", _configs())
+@pytest.mark.parametrize("config", device_configs(ARCH, DEVICE_ARCHS))
 def test_chain_dropped_dead_row_select_gives_nan(config):
     """Forward statistics with rows declared dead (``-inf`` LSE, NaN O) on
     band-live rows, and Dsum left ungated on them: the shipped body gives
@@ -502,7 +498,7 @@ def test_frozen_fixture_is_intact():
 
 @device
 @pytest.mark.gpu
-@pytest.mark.parametrize("config", _configs())
+@pytest.mark.parametrize("config", device_configs(ARCH, DEVICE_ARCHS))
 def test_frozen_fixture(config):
     inputs, _ = fixture_inputs()
     case = inputs[0].case

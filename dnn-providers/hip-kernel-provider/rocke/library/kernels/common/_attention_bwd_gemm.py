@@ -706,9 +706,15 @@ def _off(b: IRBuilder, base: Value, k: int) -> Value:
     return b.add(base, b.const_i32(k)) if k else base
 
 
-def lane_and_wave(b: IRBuilder, wave_size: int) -> tuple[Value, Value, Value]:
-    """``(tid, lane, wave)`` with ``wave`` made wave-uniform by ``readfirstlane``."""
-    tid = b.thread_id_x()
+def lane_and_wave(
+    b: IRBuilder, wave_size: int, *, tid: Value | None = None
+) -> tuple[Value, Value, Value]:
+    """``(tid, lane, wave)`` with ``wave`` made wave-uniform by ``readfirstlane``.
+
+    ``tid`` is the thread index (``thread_id_x`` read here when ``None``).
+    """
+    if tid is None:
+        tid = b.thread_id_x()
     ws = b.const_i32(wave_size)
     lane = b.mod(tid, ws)
     wave = b.readfirstlane(b.div(tid, ws))

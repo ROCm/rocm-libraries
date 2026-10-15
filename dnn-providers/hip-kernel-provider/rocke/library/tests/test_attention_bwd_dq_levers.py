@@ -32,8 +32,9 @@ from kernels.common.attention_bwd import (
 )
 from kernels.common.attention_bwd_plan import AttnBwdRequest, attn_bwd_plan
 
+from ._attention_bwd_test_utils import distinct_configs
 from .sdpa.bwd_kernel_cases import config_knobs, config_policy
-from .test_attention_bwd_ir import _configs, _walk, step_bodies
+from .test_attention_bwd_ir import _walk, step_bodies
 
 ARCHS = ("gfx942", "gfx950", "gfx1151", "gfx1201")
 WS = {"WS_LSE2", "WS_DSUM", "WS_DQ", "WS_DK", "WS_DV"}
@@ -118,7 +119,7 @@ def _noalias_params(ir):
 
 @pytest.mark.parametrize("arch", ARCHS)
 def test_noalias_marks_exactly_the_declared_pointers(arch):
-    cfg = _configs(arch)[0]
+    cfg = distinct_configs(arch)[0]
     for dkv, value, want in (
         ("direct", False, set()),
         ("atomic", False, set()),
@@ -157,7 +158,7 @@ def _count(ops, name):
 @pytest.mark.parametrize("var", [{}, dict(edge_tiles=True), dict(head_pack=True)])
 def test_dq_issue_per_fragment(arch, value, var):
     seen_multi = False
-    for cfg in _configs(arch):
+    for cfg in distinct_configs(arch):
         for d in (32, 64, 128):
             blk = _spec(arch, cfg, d, **var)
             frg = dataclasses.replace(blk, dq_issue=value)
@@ -205,7 +206,7 @@ def test_dq_issue_per_fragment(arch, value, var):
     "var", [{}, dict(edge_tiles=True), dict(head_pack=True), dict(dkv_mode="atomic")]
 )
 def test_q_rotate_keeps_the_loops(arch, var):
-    for cfg in _configs(arch):
+    for cfg in distinct_configs(arch):
         base = _spec(arch, cfg, **var)
         rot = dataclasses.replace(base, q_rotate=True)
         kb = build_attn_bwd_main(base, arch=arch)
@@ -231,7 +232,7 @@ def test_q_rotate_with_the_head_outer_order(arch, edge):
     q tiles are back at the start (one compare in place of the range-end
     test). With edge tiles a group loop runs one loop per range (each: the
     wrap compare + select)."""
-    for cfg in _configs(arch):
+    for cfg in distinct_configs(arch):
         # d128: the grouped head-outer form at d32 / d64 on the CDNA default
         # tiles is a recorded resource-gate failure (RESOURCE_REFUSED)
         base = _spec(arch, cfg, d=128, step_order="head_outer", edge_tiles=edge)

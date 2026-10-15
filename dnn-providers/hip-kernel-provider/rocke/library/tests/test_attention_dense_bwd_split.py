@@ -52,6 +52,7 @@ from kernels.common.attention_dense_bwd_spec import (
     validate_attn_dense_bwd_spec,
 )
 
+from ._attention_bwd_test_utils import kernel_signature
 from .sdpa.bwd_kernel_cases import config_policy
 from .test_attention_dense_bwd import _BUILD, ARCHS, _req, _spec
 
@@ -252,15 +253,6 @@ def test_dq_validation(arch):
 _READONLY = {"Q", "K", "V", "dO", "WS_LSE2", "WS_DSUM"}
 
 
-def _signature(ir):
-    head = re.search(r"define amdgpu_kernel void @\S+\((.*?)\) #0", ir).group(1)
-    out = []
-    for p in head.split(", "):
-        kind = "Q" if p.startswith("ptr") else ("f" if p.startswith("float") else "i")
-        out.append((p.split("%")[-1], kind, p))
-    return out
-
-
 @pytest.mark.parametrize("arch", ARCHS)
 @pytest.mark.parametrize(
     "kw",
@@ -276,7 +268,7 @@ def test_dq_signature_is_the_abi_and_no_atomics(arch, kw):
     ir = lower(
         build_attention_dense_bwd_dq(spec, arch=arch), arch=arch, llvm_flavor="llvm22"
     )
-    sig = _signature(ir)
+    sig = kernel_signature(ir)
     assert [(n, k) for n, k, _ in sig] == list(attn_dense_bwd_dq_params())
     assert ATTN_DENSE_BWD_DQ_ABI == "rocke.attn_dense_bwd_dq.v1"
     for name, kind, text in sig:

@@ -45,6 +45,7 @@ from unittest import mock
 import numpy as np
 import pytest
 
+from ._attention_bwd_test_utils import find_bwd_case
 from ._attention_bwd_harness import (
     ARCH,
     dead_rows,
@@ -56,7 +57,6 @@ from ._attention_bwd_harness import (
 from .sdpa.bwd_cases import compare_bwd, get_bwd_case
 from .sdpa.bwd_kernel_cases import (
     HEAD_PACK_CASES,
-    SUPPLEMENTARY_CASES,
     THD_HK_NE_HV_CASES,
     selected_cases,
     selected_configs,
@@ -75,13 +75,6 @@ pytestmark = [
 
 SPLIT = {"dq_mode": "split"}
 _RUNS: dict = {}
-
-
-def _case(case_id):
-    for c in SUPPLEMENTARY_CASES + HEAD_PACK_CASES:
-        if c.id == case_id:
-            return c
-    return get_bwd_case(case_id)
 
 
 def _passes(run):
@@ -189,7 +182,7 @@ def _repeat_params():
 
 @pytest.mark.parametrize("case_id,config", _repeat_params())
 def test_split_dq_is_deterministic(case_id, config):
-    case = _case(case_id)
+    case = find_bwd_case(case_id, HEAD_PACK_CASES)
     first = _split_run(case, config)
     second = run_case(case, arch=ARCH, config=config, overrides=SPLIT)
     _passes(second)
@@ -291,7 +284,7 @@ def _knob_params():
 def test_split_dq_knobs(case_id, variant, config):
     if variant is None:
         pytest.skip("no knob variant in this shard")
-    case = _case(case_id)
+    case = find_bwd_case(case_id, HEAD_PACK_CASES)
     knobs, request, _archs, bitwise = DQ_KNOB_VARIANTS[variant]
     base = _split_run(case, config)
     try:

@@ -36,14 +36,15 @@ import struct
 import numpy as np
 import pytest
 
+from ._attention_bwd_test_utils import find_bwd_case
 from ._attention_bwd_harness import (
     ARCH,
     DEVICE_ARCHS,
     run_case,
     skip_unless_planned,
 )
-from .sdpa.bwd_cases import TOLERANCE_BWD, compare_bwd, get_bwd_case
-from .sdpa.bwd_kernel_cases import SUPPLEMENTARY_CASES, selected_configs, shard_of
+from .sdpa.bwd_cases import TOLERANCE_BWD, compare_bwd
+from .sdpa.bwd_kernel_cases import selected_configs, shard_of
 
 pytestmark = [
     pytest.mark.gpu,
@@ -90,13 +91,6 @@ VARIANTS = {
 _PLAIN: dict = {}
 
 
-def _case(case_id):
-    for c in SUPPLEMENTARY_CASES:
-        if c.id == case_id:
-            return c
-    return get_bwd_case(case_id)
-
-
 def _passes(run):
     probs = compare_bwd(run.case, run.dq, run.dk, run.dv, run.ref)
     assert not probs, probs
@@ -111,7 +105,7 @@ def _params():
     for cid in CASES:
         if shard_of(cid, n) != i:
             continue
-        bf16 = _case(cid).dtype == "bf16"
+        bf16 = find_bwd_case(cid).dtype == "bf16"
         for name, (_ov, _bit, bf16_only) in VARIANTS.items():
             if bf16_only and not bf16:
                 continue
@@ -131,7 +125,7 @@ def _require_legal(case, config, overrides):
 
 @pytest.mark.parametrize("case_id,variant,config", _params())
 def test_lever_agrees(case_id, variant, config):
-    case = _case(case_id)
+    case = find_bwd_case(case_id)
     overrides, bitwise, _ = VARIANTS[variant]
     _require_legal(case, config, overrides)
     key = (case_id, config)
@@ -196,7 +190,7 @@ def _faint_params():
 
 @pytest.mark.parametrize("case_id,config", _faint_params())
 def test_fast_exp2_flushes_only_below_2_pow_neg_126(case_id, config):
-    case = _case(case_id)
+    case = find_bwd_case(case_id)
     rows = _faint_rows(case)
     # a mode the configuration cannot take (a recorded resource refusal)
     # skips with the validator's reason

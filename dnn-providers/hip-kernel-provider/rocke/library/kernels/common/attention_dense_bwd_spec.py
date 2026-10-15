@@ -15,9 +15,11 @@ decides eligibility, and the tuned dense pack decides the route.
 This module owns:
 
 * :class:`AttentionDenseBwdSpec`, the architecture-neutral base. Problem shape
-  fields are required; every other field is defaulted. The per-arch
-  subclasses (``kernels.gfx942.attention_dense_bwd.Gfx942AttentionDenseBwdSpec``
-  and the gfx950 twin) add the arch-specific body knob and own the builders.
+  fields are required; every other field is defaulted.
+  :class:`ArchAttentionDenseBwdSpec` adds the target's body knob
+  ``body_variant`` and is parameterised by the target: the per-arch specs
+  (``kernels.gfx942.attention_dense_bwd.Gfx942AttentionDenseBwdSpec`` and the
+  gfx950 one) are that class bound to their target, next to their builders.
 * :func:`validate_attn_dense_bwd_spec`: arch checks plus the body spec, an
   :class:`~kernels.common.attention_bwd.AttnBwdSpec` resolved and validated by
   the layout-general family's own validator. The dense family runs the shared
@@ -89,9 +91,11 @@ a new body, not a renaming, and is not built.
 from __future__ import annotations
 
 import dataclasses
-import hashlib
 from dataclasses import dataclass, fields
+from types import MappingProxyType
 from typing import ClassVar, Optional
+
+from rocke.helpers.spec import non_default_fields, salted_kernel_name
 
 from kernels.common.attention_bwd import (
     BWD_DTYPES,
@@ -105,14 +109,17 @@ __all__ = [
     "ATTN_DENSE_BWD_ABI",
     "DENSE_BODY_KNOBS",
     "DENSE_BWD_ARCHS",
+    "DENSE_BWD_BODY_VARIANTS",
     "DENSE_BWD_HEAD_SIZES",
     "DENSE_DKV_MODES",
     "DENSE_EPILOGUES",
     "DENSE_LAYOUTS",
     "DENSE_OOB_MODES",
     "DENSE_PERSIST_DECODES",
+    "ArchAttentionDenseBwdSpec",
     "AttentionDenseBwdSpec",
     "attn_dense_bwd_params",
+    "check_dense_bwd_spec_class",
     "dense_bwd_band",
     "dense_bwd_not_built",
     "dense_bwd_not_built_reasons",
@@ -405,14 +412,7 @@ class AttentionDenseBwdSpec:
 
     def non_default_fields(self) -> tuple[tuple[str, object], ...]:
         """Compile-time fields that differ from their declared default."""
-        out = []
-        for f in fields(self):
-            if f.default is dataclasses.MISSING or f.name == "name":
-                continue
-            v = getattr(self, f.name)
-            if v != f.default:
-                out.append((f.name, v))
-        return tuple(out)
+        return non_default_fields(self, skip=("name",))
 
     def _mask_token(self) -> str:
         left, right, br = self.band()
@@ -451,12 +451,53 @@ class AttentionDenseBwdSpec:
             "window_right",
             "ragged",
         )
-        salted = [(k, v) for k, v in self.non_default_fields() if k not in keyed]
-        base = "_".join(parts)
-        if not salted:
-            return base
-        digest = hashlib.sha1(repr(sorted(salted, key=lambda kv: kv[0])).encode())
-        return f"{base}_{digest.hexdigest()[:10]}"
+        return salted_kernel_name(
+            "_".join(parts),
+            [(k, v) for k, v in self.non_default_fields() if k not in keyed],
+        )
+
+
+# ``body_variant`` values of each target: the shared body (``"general"``,
+# built) and the target's own body, registered but not built (``"xt"`` on
+# gfx942: K, K^T and V register resident with XT LDS transposes; ``"trload"``
+# on gfx950: x4 LDS DMA with ``ds_read_tr16_b64`` operand reads).
+DENSE_BWD_BODY_VARIANTS = MappingProxyType(
+    {
+        "gfx942": ("general", "xt"),
+        "gfx950": ("general", "trload"),
+    }
+)
+
+
+@dataclass(frozen=True)
+class ArchAttentionDenseBwdSpec(AttentionDenseBwdSpec):
+    """The dense backward spec of one target: the shared spec plus the
+    target's body knob ``body_variant`` (see :data:`DENSE_BWD_BODY_VARIANTS`).
+
+    A per-arch spec names its target in the class statement,
+    ``class Gfx942AttentionDenseBwdSpec(ArchAttentionDenseBwdSpec,
+    arch="gfx942")``, which sets ``ARCH`` and ``BODY_VARIANTS``; the per-arch
+    module keeps the class (descriptors name it there) and its builder.
+    """
+
+    body_variant: str = "general"
+
+    def __init_subclass__(cls, *, arch: Optional[str] = None, **kwargs) -> None:
+        super().__init_subclass__(**kwargs)
+        if arch is not None:
+            _check_in("arch", arch, DENSE_BWD_ARCHS)
+            cls.ARCH = arch
+            cls.BODY_VARIANTS = DENSE_BWD_BODY_VARIANTS[arch]
+
+
+def check_dense_bwd_spec_class(spec: AttentionDenseBwdSpec, spec_cls: type) -> None:
+    """``TypeError`` unless ``spec`` is a ``spec_cls`` (a per-arch builder's
+    own spec class)."""
+    if not isinstance(spec, spec_cls):
+        raise TypeError(
+            f"build_attention_dense_bwd on {spec_cls.ARCH} takes a "
+            f"{spec_cls.__name__}, got {type(spec).__name__}"
+        )
 
 
 def dense_bwd_band(spec: AttentionDenseBwdSpec) -> tuple[int, int, bool]:

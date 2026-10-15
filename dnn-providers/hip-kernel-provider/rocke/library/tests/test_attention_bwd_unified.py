@@ -63,7 +63,8 @@ from kernels.common.attention_bwd_unified import (
 )
 from kernels.common.attention_bwd_unified_plan import attn_bwd_unified_tile_configs
 
-from .test_attention_bwd_ir import _signature, _walk, q_loops, step_bodies
+from ._attention_bwd_test_utils import kernel_signature
+from .test_attention_bwd_ir import _walk, q_loops, step_bodies
 
 ARCHS = ("gfx942", "gfx950", "gfx1151", "gfx1201")
 CDNA = ("gfx942", "gfx950")
@@ -276,7 +277,7 @@ def test_kernarg_order_matches_params(arch):
     for row in ROWS:
         if row[0] != arch or row[2] != 128:
             continue
-        sig = _signature(ir_of(*row))
+        sig = kernel_signature(ir_of(*row))
         assert [(n, k) for n, k, _ in sig] == list(attn_bwd_unified_params("main"))
         for name, kind, text in sig:
             assert "noalias" not in text
@@ -294,7 +295,7 @@ def test_page_role_signatures(arch):
             ("page_convert", build_attn_bwd_page_convert),
         ):
             ir = lower(build(spec, arch=arch), arch=arch, llvm_flavor="llvm22")
-            sig = _signature(ir)
+            sig = kernel_signature(ir)
             assert [(n, k) for n, k, _ in sig] == list(attn_bwd_unified_params(stage))
             assert all("noalias" not in t for _n, _k, t in sig)
     assert AttnBwdUnifiedSpec(head_size=64).aux_spec("prep") == AttnBwdAuxSpec(

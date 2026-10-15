@@ -71,9 +71,14 @@ element strides ``(blk, tok, h)`` after a 64-bit rebase to the physical page;
 
 from __future__ import annotations
 
+import itertools
+import weakref
+from collections.abc import Iterator
 from dataclasses import dataclass
 
 from rocke.core.ir import BF16, F16, F32, I32, I64, IRBuilder, Type, Value
+from rocke.helpers.attention_band import I32_FAR
+from rocke.helpers.spec import ceil_div
 
 __all__ = [
     "PackedRows",
@@ -85,7 +90,11 @@ __all__ = [
     "ThdOffsetAddr",
     "WorkspaceAddr",
     "WsSlab",
+    "as_i32",
+    "as_i64",
     "block_table_entry",
+    "chunk_coords",
+    "deal_chunks",
     "decode_batched",
     "decode_thd",
     "last_row",
@@ -94,17 +103,18 @@ __all__ = [
 
 IntOrValue = int | Value
 
-# Bound used to keep "rows left" values in i32 (lengths are < 2**30).
-_ROWS_CAP = 1 << 30
-
 _ELEM_BYTES = {"f16": 2, "bf16": 2, "f32": 4, "i32": 4}
 
+# Per-builder counter of the guarded SEQ reads (unique loop names per kernel).
+_SEQ_GUARDS: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
 
-def _i32(b: IRBuilder, x: IntOrValue) -> Value:
+
+def as_i32(b: IRBuilder, x: IntOrValue) -> Value:
+    """An int as an i32 constant; an SSA value unchanged."""
     return b.const_i32(x) if isinstance(x, int) else x
 
 
-def _i64(b: IRBuilder, x: IntOrValue, *, signed: bool = False) -> Value:
+def as_i64(b: IRBuilder, x: IntOrValue, *, signed: bool = False) -> Value:
     """Widen an int or i32 value to i64 (``zext`` unless ``signed``)."""
     if isinstance(x, int):
         return b.const_i64(x)
@@ -125,7 +135,33 @@ def _max64(b: IRBuilder, x: Value, y: Value) -> Value:
 def _clamp64_to_i32(b: IRBuilder, x: Value, hi: Value) -> Value:
     """``clamp(x, 0, hi)`` of an i64 value, returned as i32 (``hi`` is i32)."""
     lo = _max64(b, x, b.const_i64(0))
-    return b.trunc(_min64(b, lo, _i64(b, hi)), I32)
+    return b.trunc(_min64(b, lo, as_i64(b, hi)), I32)
+
+
+def deal_chunks(
+    b: IRBuilder, tid: Value, total: int, threads: int
+) -> Iterator[tuple[Value, bool]]:
+    """Thread ``tid``'s chunks of a ``total``-chunk tile dealt round-robin over
+    ``threads`` threads: one ``(chunk, partial)`` per round, ``chunk = tid +
+    round * threads`` (i32) and ``partial`` (a host bool) true for a round that
+    reaches past ``total``, where the caller guards ``chunk < total``.
+
+    Lazy: a round's index is emitted when the caller asks for that round.
+    """
+    for it in range(ceil_div(total, threads)):
+        chunk = tid if it == 0 else b.add(tid, b.const_i32(it * threads))
+        yield chunk, (it + 1) * threads > total
+
+
+def chunk_coords(b: IRBuilder, chunk: Value, per_row: int, vec: int) -> tuple:
+    """``(row, column)`` of a ``vec``-element chunk of rows of ``per_row``
+    chunks: ``(chunk / per_row, (chunk % per_row) * vec)``; ``(chunk, 0)``
+    with no division for one chunk per row."""
+    if per_row == 1:
+        return chunk, b.const_i32(0)
+    r = b.div(chunk, b.const_i32(per_row))
+    c = b.mul(b.mod(chunk, b.const_i32(per_row)), b.const_i32(vec))
+    return r, c
 
 
 def last_row(b: IRBuilder, length: Value) -> Value:
@@ -139,7 +175,7 @@ def _scaled32(b: IRBuilder, idx: Value, stride: IntOrValue) -> Value:
             return idx
         if stride == 0:
             return b.const_i32(0)
-    return b.mul(idx, _i32(b, stride))
+    return b.mul(idx, as_i32(b, stride))
 
 
 def _scaled64(b: IRBuilder, idx64: Value, stride: IntOrValue) -> Value:
@@ -147,7 +183,7 @@ def _scaled64(b: IRBuilder, idx64: Value, stride: IntOrValue) -> Value:
         if stride == 1:
             return idx64
         return b.mul(idx64, b.const_i64(stride))
-    return b.mul(idx64, _i64(b, stride))
+    return b.mul(idx64, as_i64(b, stride))
 
 
 # ---------------------------------------------------------------------------
@@ -226,10 +262,10 @@ def _seq_len_value(
     if isinstance(has_len, int):
         return read()
     trip = b.select(b.cmp_ne(has_len, zero), b.const_i32(1), zero)
-    # Loop names must be unique per kernel; a per-builder counter keeps the
-    # emitted text deterministic.
-    n = getattr(b, "_bwd_seq_guards", 0)
-    b._bwd_seq_guards = n + 1
+    # Loop names must be unique per kernel; a per-builder counter (owned by
+    # this module, keyed weakly on the builder) keeps the emitted text
+    # deterministic.
+    n = next(_SEQ_GUARDS.setdefault(b, itertools.count()))
     loop = b.scf_for_iter(
         zero, trip, b.const_i32(1), [(f"seqlen{n}", s_max)], iv_name=f"seq_i{n}"
     )
@@ -248,13 +284,13 @@ def decode_batched(
     len_stride: IntOrValue = 1,
 ) -> SeqInfo:
     """Valid length and bases of batch ``batch`` (fixed or padded lengths)."""
-    smax = _i32(b, s_max)
+    smax = as_i32(b, s_max)
     length = _seq_len_value(
         b, seq_ptr, batch, has_len=has_len, len_stride=len_stride, s_max=smax
     )
     if length is None:
         length = smax
-    ws_row0 = b.mul(_i64(b, batch), _i64(b, smax))
+    ws_row0 = b.mul(as_i64(b, batch), as_i64(b, smax))
     return SeqInfo(
         mode="batched",
         batch=batch,
@@ -290,11 +326,11 @@ def decode_thd(
     sequence slot, so ``B * S_max`` rows bound every sequence whatever the
     storage holds before, between or after the sequences.
     """
-    smax = _i32(b, s_max)
+    smax = as_i32(b, s_max)
     o0 = load_offset(b, off_ptr, batch, off64)
     o1 = load_offset(b, off_ptr, b.add(batch, b.const_i32(1)), off64)
-    m64 = _i64(b, mult, signed=True)
-    d64 = _i64(b, div, signed=True)
+    m64 = as_i64(b, mult, signed=True)
+    d64 = as_i64(b, div, signed=True)
     one_mult = isinstance(mult, int) and mult == 1
     one_div = isinstance(div, int) and div == 1
 
@@ -315,7 +351,7 @@ def decode_thd(
         length = b.smin(length, seq_len)
     ws_row0 = tok0
     if not (isinstance(ws_seg, int) and ws_seg == 0):
-        slot0 = b.mul(_i64(b, batch), _i64(b, smax))
+        slot0 = b.mul(as_i64(b, batch), as_i64(b, smax))
         if isinstance(ws_seg, int):
             ws_row0 = slot0
         else:
@@ -401,7 +437,7 @@ class RowSlab:
         idx = _scaled32(b, self.local_row(row), self.t_stride)
         if isinstance(col, int) and col == 0:
             return idx
-        return b.add(idx, _i32(b, col))
+        return b.add(idx, as_i32(b, col))
 
     def load(self, row: Value, col: IntOrValue = 0) -> Value:
         """One element (the tensor dtype)."""
@@ -550,7 +586,7 @@ class StridedTensorAddr:
             )
             self._seq_base = None
         else:
-            self._seq_base = _scaled64(b, _i64(b, seq.batch), s_b)
+            self._seq_base = _scaled64(b, as_i64(b, seq.batch), s_b)
 
     def slab(
         self, h: IntOrValue, row0: IntOrValue = 0, *, clamp: bool = True
@@ -563,16 +599,16 @@ class StridedTensorAddr:
         """
         b = self.b
         _s_b, s_h, s_t = self.strides
-        r0 = _i32(b, row0)
+        r0 = as_i32(b, row0)
         static_zero = isinstance(row0, int) and row0 == 0
         # min(0, last) == 0 because last >= 0, so a literal 0 needs no clamp.
         base_row = b.smin(r0, self.seq.last) if clamp and not static_zero else r0
         off = self._seq_base
         if not (isinstance(h, int) and h == 0):
-            term = _scaled64(b, _i64(b, h), s_h)
+            term = _scaled64(b, as_i64(b, h), s_h)
             off = term if off is None else b.add(off, term)
         if not static_zero:
-            term = _scaled64(b, _i64(b, base_row), s_t)
+            term = _scaled64(b, as_i64(b, base_row), s_t)
             off = term if off is None else b.add(off, term)
         if off is None:
             ptr = self._base
@@ -598,10 +634,10 @@ class StridedTensorAddr:
         _s_b, s_h, s_t = self.strides
         off = self._seq_base
         if not (isinstance(h, int) and h == 0):
-            term = _scaled64(b, _i64(b, h), s_h)
+            term = _scaled64(b, as_i64(b, h), s_h)
             off = term if off is None else b.add(off, term)
         if not (isinstance(row0, int) and row0 == 0):
-            term = _scaled64(b, _i64(b, _i32(b, row0)), s_t)
+            term = _scaled64(b, as_i64(b, as_i32(b, row0)), s_t)
             off = term if off is None else b.add(off, term)
         if off is None:
             return b.const_i64(0)
@@ -611,7 +647,7 @@ class StridedTensorAddr:
         """The i64 byte stride of one head (``"h"``) or one row (``"t"``)."""
         _s_b, s_h, s_t = self.strides
         st = {"h": s_h, "t": s_t}[which]
-        return _scaled64(self.b, _i64(self.b, st), self._esize)
+        return _scaled64(self.b, as_i64(self.b, st), self._esize)
 
     def slab_at(self, off: Value, row0: Value, *, clamp: bool = True) -> RowSlab:
         """The slab whose pointer is the base plus the i64 byte offset ``off``
@@ -625,7 +661,7 @@ class StridedTensorAddr:
             ptr=ptr,
             dtype=self.dtype,
             t_stride=self.strides[2],
-            base_row=_i32(self.b, row0),
+            base_row=as_i32(self.b, row0),
             last=self.seq.last if clamp else None,
             stage_vec=self.stage_vec,
             narrow=self.narrow_vec,
@@ -691,7 +727,7 @@ class WsSlab:
         idx = _scaled32(b, self.local_row(r), self.row_stride)
         if isinstance(x, int) and x == 0:
             return idx
-        return b.add(idx, _i32(b, x))
+        return b.add(idx, as_i32(b, x))
 
     def load(self, r: Value, x: IntOrValue, neutral: float) -> Value:
         """f32 at ``(r, x)``; ``neutral`` for rows outside the workspace."""
@@ -732,7 +768,9 @@ class WsSlab:
         with b.scf_if(cond):
             base = _scaled32(b, r, self.row_stride)
             for x, v in items:
-                idx = base if isinstance(x, int) and x == 0 else b.add(base, _i32(b, x))
+                idx = (
+                    base if isinstance(x, int) and x == 0 else b.add(base, as_i32(b, x))
+                )
                 b.global_atomic_add_f32(self.ptr, idx, v)
 
     def atomic_add_row_select(
@@ -750,7 +788,7 @@ class WsSlab:
         zero = b.const_f32(0.0)
         base = _scaled32(b, self.local_row(r), self.row_stride)
         for x, v in items:
-            idx = base if isinstance(x, int) and x == 0 else b.add(base, _i32(b, x))
+            idx = base if isinstance(x, int) and x == 0 else b.add(base, as_i32(b, x))
             b.global_atomic_add_f32(self.ptr, idx, b.select(cond, v, zero))
 
     def store_row(
@@ -767,7 +805,9 @@ class WsSlab:
         with b.scf_if(cond):
             base = _scaled32(b, r, self.row_stride)
             for x, v in items:
-                idx = base if isinstance(x, int) and x == 0 else b.add(base, _i32(b, x))
+                idx = (
+                    base if isinstance(x, int) and x == 0 else b.add(base, as_i32(b, x))
+                )
                 b.global_store(self.ptr, idx, v, align=4)
 
     def store_vec_in_row(self, r: Value, x: IntOrValue, v: Value) -> None:
@@ -777,7 +817,7 @@ class WsSlab:
         b = self.b
         n = v.type.count
         base = _scaled32(b, r, self.row_stride)
-        idx = base if isinstance(x, int) and x == 0 else b.add(base, _i32(b, x))
+        idx = base if isinstance(x, int) and x == 0 else b.add(base, as_i32(b, x))
         if n == 1:
             b.global_store(self.ptr, idx, b.vec_extract(v, 0), align=4)
             return
@@ -834,9 +874,9 @@ class WorkspaceAddr:
             raise ValueError("workspace width must be >= 1")
         self.b = b
         self.ptr = ptr
-        self.ws_rows = _i32(b, ws_rows)
+        self.ws_rows = as_i32(b, ws_rows)
         self.width = width
-        self.row0 = row0 if row0.type == I64 else _i64(b, row0)
+        self.row0 = row0 if row0.type == I64 else as_i64(b, row0)
         self.layout = layout
         self.n_heads = n_heads
 
@@ -845,12 +885,12 @@ class WorkspaceAddr:
         b = self.b
         base = self.row0
         if not (isinstance(tile_row0, int) and tile_row0 == 0):
-            base = b.add(base, _i64(b, tile_row0, signed=True))
-        rows64 = _i64(b, self.ws_rows)
+            base = b.add(base, as_i64(b, tile_row0, signed=True))
+        rows64 = as_i64(b, self.ws_rows)
         one64 = b.const_i64(1)
         base_ws = _max64(b, _min64(b, base, b.sub(rows64, one64)), b.const_i64(0))
-        rows_left = _clamp64_to_i32(b, b.sub(rows64, base), b.const_i32(_ROWS_CAP))
-        h64 = _i64(b, h)
+        rows_left = _clamp64_to_i32(b, b.sub(rows64, base), b.const_i32(I32_FAR))
+        h64 = as_i64(b, h)
         if self.layout == "head_major":
             elem = b.add(b.mul(h64, rows64), base_ws)
             elem = _scaled64(b, elem, self.width)
@@ -894,7 +934,7 @@ class PackedRows:
 
     def locate(self, b: IRBuilder, r: IntOrValue) -> tuple[Value, Value, Value]:
         """``(head, row, ok)`` of M row ``r``; dead rows get the last valid head."""
-        rr = _i32(b, r)
+        rr = as_i32(b, r)
         hh = b.div(rr, self.rows_per_head)
         row = b.add(self.row0, b.sub(rr, b.mul(hh, self.rows_per_head)))
         ok = b.cmp_lt(hh, self.n_heads)
@@ -911,7 +951,7 @@ def block_table_entry(
     b: IRBuilder, bt_ptr: Value, seq_idx: Value, j: Value, *, bt_stride: IntOrValue
 ) -> Value:
     """``block_table[seq_idx][j]`` (int32 table), with an i64 sequence rebase."""
-    off = _scaled64(b, _i64(b, seq_idx), bt_stride)
+    off = _scaled64(b, as_i64(b, seq_idx), bt_stride)
     row = b.global_ptr_add(bt_ptr, b.mul(off, b.const_i64(4)))
     return b.global_load_i32(row, j)
 
@@ -941,12 +981,12 @@ class PagedCacheAddr:
         """Rebase to physical page ``page_id``, head ``h`` and in-page token ``tok0``."""
         b = self.b
         s_blk, s_tok, s_h = self.strides
-        off = _scaled64(b, _i64(b, page_id), s_blk)
+        off = _scaled64(b, as_i64(b, page_id), s_blk)
         if not (isinstance(h, int) and h == 0):
-            off = b.add(off, _scaled64(b, _i64(b, h), s_h))
-        r0 = _i32(b, tok0)
+            off = b.add(off, _scaled64(b, as_i64(b, h), s_h))
+        r0 = as_i32(b, tok0)
         if not (isinstance(tok0, int) and tok0 == 0):
-            off = b.add(off, _scaled64(b, _i64(b, r0), s_tok))
+            off = b.add(off, _scaled64(b, as_i64(b, r0), s_tok))
         ptr = b.global_ptr_add(self.ptr, b.mul(off, b.const_i64(self._esize)))
         return RowSlab(
             b=b,

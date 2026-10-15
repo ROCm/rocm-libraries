@@ -58,6 +58,7 @@ from kernels.common.attention_bwd_plan import (
     attn_bwd_workspace_layout,
 )
 from kernels.common.attention_bwd_run import _BUILDERS
+from ._attention_bwd_test_utils import find_bwd_case
 
 ALL_ARCHS = ("gfx942", "gfx950", "gfx1151", "gfx1201")
 _ATOMIC = re.compile(r"\b(atomicrmw|cmpxchg)\b")
@@ -436,13 +437,8 @@ def test_custom_rule_head_split_is_a_cap(monkeypatch):
 
 try:
     from ._attention_bwd_harness import ARCH, DEVICE_ARCHS, run_case
-    from .sdpa.bwd_cases import compare_bwd, get_bwd_case
-    from .sdpa.bwd_kernel_cases import (
-        SUPPLEMENTARY_CASES,
-        THD_HK_NE_HV_CASES,
-        selected_configs,
-        shard_of,
-    )
+    from .sdpa.bwd_cases import compare_bwd
+    from .sdpa.bwd_kernel_cases import THD_HK_NE_HV_CASES, selected_configs, shard_of
 except ImportError:  # pragma: no cover - the harness needs the device stack
     ARCH, DEVICE_ARCHS = None, ()
 
@@ -462,13 +458,6 @@ EPILOGUES = {
     "token_major": {"ws_layout": "token_major"},
 }
 SLICES = {"dkv_sink": "slices"}
-
-
-def _case(case_id):
-    for c in SUPPLEMENTARY_CASES:
-        if c.id == case_id:
-            return c
-    return get_bwd_case(case_id)
 
 
 def _passes(run):
@@ -503,7 +492,7 @@ def _device_params():
 def test_slices_pass_and_repeat_bitwise(case_id, g_split, split_dq, config):
     if ARCH not in DEVICE_ARCHS:
         pytest.skip("no supported device")
-    case = _case(case_id)
+    case = find_bwd_case(case_id)
     ov = dict(SLICES, g_split=g_split)
     if split_dq:
         ov["dq_mode"] = "split"
@@ -540,7 +529,7 @@ def test_slice_store_forms_agree(name, config):
         pytest.skip("no supported device")
     from ._attention_bwd_harness import plan_case
 
-    case = _case("bwd_gqa_mqa_causal_tl")
+    case = find_bwd_case("bwd_gqa_mqa_causal_tl")
     ov = dict(SLICES, g_split=4)
     spec = plan_case(case, arch=ARCH, config=config, overrides=ov).specs["main"]
     try:

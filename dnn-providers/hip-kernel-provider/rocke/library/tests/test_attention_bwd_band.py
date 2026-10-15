@@ -25,6 +25,7 @@ from rocke.core.ir import I32, IRBuilder, PtrType
 from rocke.helpers.attention_band import AttnRuntimeBounds, BandEmitter
 from rocke.numeric.sdpa_reference import keep as ref_keep
 
+from ._attention_bwd_test_utils import device_arch
 from ._attention_bwd_int_eval import IntEvalBuilder
 
 ARCHS = ("gfx942", "gfx950", "gfx1151", "gfx1201")
@@ -579,15 +580,6 @@ def _host_probe(len_q, len_kv, off, left, right, k_m0, k_n0, n_kt, masked):
     return np.array(rows, np.int32)
 
 
-def _device_arch():
-    try:
-        from rocke.runtime.hip_module import get_device_arch
-
-        return get_device_arch(0)
-    except Exception:  # noqa: BLE001 - no runtime / no device
-        return None
-
-
 @pytest.mark.gpu
 @pytest.mark.parametrize(
     "case",
@@ -628,7 +620,7 @@ def _device_arch():
     ids=["causal_br", "window_tl", "empty_q", "unmasked_tails"],
 )
 def test_probe_on_device_matches_host(case):
-    arch = _device_arch()
+    arch = device_arch()
     if arch not in ("gfx942", "gfx950", "gfx1151", "gfx1201"):
         pytest.skip(f"needs gfx942/gfx950/gfx1151/gfx1201; device is {arch}")
     import ctypes

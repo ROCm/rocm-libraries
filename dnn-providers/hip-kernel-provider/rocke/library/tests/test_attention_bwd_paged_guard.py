@@ -21,7 +21,7 @@ page classes.
   entries inside the canary blocks only, so nothing faults) fails the same
   checks, so they are live.
 * the wiring of the guard in the unified main kernel: its call site passes
-  ``page_rows`` (strict expected failure while the call site does not).
+  ``page_rows``.
 """
 
 from __future__ import annotations
@@ -135,12 +135,6 @@ def test_guard_ops_only_with_page_rows(sub_page):
     assert _count_ops(guarded, loads) == _count_ops(plain, loads)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="the call site of PagedKv in attention_bwd_unified.py does not pass "
-    "page_rows yet (one line, owned by another change); remove this marker "
-    "when it does",
-)
 def test_unified_main_wires_the_guard(monkeypatch):
     """The unified main kernel passes its ``page_rows`` kernarg to
     :class:`PagedKv`, so the guard is in every unified main kernel."""

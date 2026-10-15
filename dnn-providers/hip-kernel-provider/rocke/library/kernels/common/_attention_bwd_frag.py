@@ -63,6 +63,8 @@ from math import gcd
 from rocke.core.arch.target import LayoutMap, MmaOp
 from rocke.core.ir import BF16, F16, I32, IRBuilder, Value, VectorType
 
+from ._attention_bwd_addr import as_i32
+
 __all__ = [
     "AtomFacts",
     "DmaSlabView",
@@ -572,13 +574,16 @@ def emit_c_to_a(
             partner[j] = b.permlanex16(own[j])
         key = (s0, s1)
         if key not in sels:
-            sels[key] = b.select(is_lo, b.const_i32(_i32(s0)), b.const_i32(_i32(s1)))
+            sels[key] = b.select(
+                is_lo, b.const_i32(_wrap_i32(s0)), b.const_i32(_wrap_i32(s1))
+            )
         out.append(b.perm_b32(own[j], partner[j], sels[key]))
     packed = b.vec_pack(out, I32)
     return b.vec_bitcast(packed, VectorType(elem, 2 * len(out)))
 
 
-def _i32(v: int) -> int:
+def _wrap_i32(v: int) -> int:
+    """The signed i32 of the low 32 bits of ``v`` (a host int, no IR)."""
     v &= 0xFFFFFFFF
     return v - (1 << 32) if v >= (1 << 31) else v
 
@@ -811,7 +816,7 @@ class LdsView:
             r = b.mul(row, b.const_i32(self.pitch)) if self.pitch != 1 else row
         else:
             r = b.const_i32(row_off)
-        lin = r if (isinstance(col, int) and col == 0) else b.add(r, _c(b, col))
+        lin = r if (isinstance(col, int) and col == 0) else b.add(r, as_i32(b, col))
         if self.scale != 1:
             lin = b.mul(lin, b.const_i32(self.scale))
         if self.shift is not None:
@@ -899,7 +904,7 @@ class DmaSlabView(LdsView):
             return self._origin(
                 b, b.const_i32(slab_offset(self.rows, self.pitch, row, col))
             )
-        row, col = _c(b, row), _c(b, col)
+        row, col = as_i32(b, row), as_i32(b, col)
         line_e, chunk_e = _SLAB_LINE_ELEMS, _SLAB_CHUNK_ELEMS
         inner = b.land(col, b.const_i32(chunk_e - 1))
         if self.pitch >= line_e:
@@ -1013,7 +1018,7 @@ class XorLdsView(LdsView):
         emits): ``const_i32``, ``add``, ``mul``, ``xor``, ``lshr``, ``land`` and
         ``shl`` of ``b``, so :class:`IntLaneBuilder` evaluates it on ints."""
         r = b.mul(row, b.const_i32(self.pitch))
-        lin = r if (isinstance(col, int) and col == 0) else b.add(r, _c(b, col))
+        lin = r if (isinstance(col, int) and col == 0) else b.add(r, as_i32(b, col))
         g = row
         if self.rows_per_line > 1:
             g = b.lshr(row, b.const_i32(_log2(self.rows_per_line)))
@@ -1032,14 +1037,10 @@ class XorLdsView(LdsView):
             return self.emit_index(b, row, col)
         mask = self.row_mask(row)
         r = b.const_i32(row * self.pitch)
-        lin = r if (isinstance(col, int) and col == 0) else b.add(r, _c(b, col))
+        lin = r if (isinstance(col, int) and col == 0) else b.add(r, as_i32(b, col))
         if mask:
             lin = b.xor(lin, b.const_i32(mask))
         return b.add(lin, b.const_i32(self.base)) if self.base else lin
-
-
-def _c(b, x):
-    return b.const_i32(x) if isinstance(x, int) else x
 
 
 def _offset(b, col, k: int):
@@ -1238,9 +1239,9 @@ def load_frag_lds_tr16(
     row_l = b.add(b.mul(g, b.const_i32(plan.g_stride)), b.div(j, b.const_i32(4)))
     col_l = b.mul(b.mod(j, b.const_i32(4)), b.const_i32(4))
     if not (isinstance(k0, int) and k0 == 0):
-        row_l = b.add(row_l, _c(b, k0))
+        row_l = b.add(row_l, as_i32(b, k0))
     if not (isinstance(mn0, int) and mn0 == 0):
-        col_l = b.add(col_l, _c(b, mn0))
+        col_l = b.add(col_l, as_i32(b, mn0))
     reads = []
     for off in plan.k_offsets:
         row = b.add(row_l, b.const_i32(off)) if off else row_l

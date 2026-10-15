@@ -60,10 +60,10 @@ from ._attention_bwd_addr import (
     WorkspaceAddr,
     WsSlab,
     _elem_bytes,
-    _i32,
-    _i64,
     _scaled32,
     _scaled64,
+    as_i32,
+    as_i64,
 )
 
 __all__ = [
@@ -79,7 +79,7 @@ IntOrValue = int | Value
 
 def live_blocks(b: IRBuilder, length: Value, page: IntOrValue) -> Value:
     """``ceil(length / page)`` (i32): the sequence's live logical blocks."""
-    p = _i32(b, page)
+    p = as_i32(b, page)
     return b.div(b.add(length, b.sub(p, b.const_i32(1))), p)
 
 
@@ -148,11 +148,11 @@ class PagedKvTile:
         self.k0 = k0
         self.k_n0 = k_n0
         self.sub_page = sub_page
-        self.page = _i32(b, page)
+        self.page = as_i32(b, page)
         self.seq = seq
         self.n_blocks = live_blocks(b, seq.length, page)
         self.cover = b.mul(self.n_blocks, self.page)
-        off = _scaled64(b, _i64(b, seq_idx), bt_stride)
+        off = _scaled64(b, as_i64(b, seq_idx), bt_stride)
         row = b.global_ptr_add(bt_ptr, b.mul(off, b.const_i64(4)))
         reads = itertools.count() if reads is None else reads
         if sub_page is None:
@@ -173,7 +173,7 @@ class PagedKvTile:
         self.page_ids = raw
         if self.guarded:
             zero, bad = b.const_i32(0), b.const_i32(-1)
-            nb = _i32(b, num_blocks)
+            nb = as_i32(b, num_blocks)
             self.page_ids = [
                 b.select(b.land(b.cmp_ge(pid, zero), b.cmp_lt(pid, nb)), pid, bad)
                 for pid in raw
@@ -235,13 +235,13 @@ class PagedKvTile:
         ``page_rows`` (past the workspace: no row of it is written).
         """
         b = self.b
-        page64 = _i64(b, self.page)
+        page64 = as_i64(b, self.page)
 
         def slab_at(pid: Value, slot: Value) -> WsSlab:
             pid, ok = self.checked(pid)
             phys = b.add(b.mul(b.zext(pid, I64), page64), b.zext(slot, I64))
             if ok is not None:
-                phys = b.select(ok, phys, _i64(b, page_rows))
+                phys = b.select(ok, phys, as_i64(b, page_rows))
             return WorkspaceAddr(
                 b, ws_ptr, ws_rows=page_rows, width=width, row0=phys
             ).slab(head)
@@ -296,7 +296,7 @@ class PagedSlab:
         self.s_blk, self.s_tok = s_blk, s_tok
         head_off = None
         if not (isinstance(head, int) and head == 0):
-            head_off = _scaled64(b, _i64(b, head), s_h)
+            head_off = _scaled64(b, as_i64(b, head), s_h)
         # Head rebase folded into the base once; the page rebase per piece.
         self.base = ptr
         if head_off is not None:
@@ -328,7 +328,7 @@ class PagedSlab:
             ptr = self._page_ptr(pid)
         idx = _scaled32(b, slot, self.s_tok)
         if not (isinstance(col, int) and col == 0):
-            idx = b.add(idx, _i32(b, col))
+            idx = b.add(idx, as_i32(b, col))
         return ptr, idx, ok
 
     def load_vec(self, row: Value, col0: IntOrValue, n: int = 8) -> Value:
@@ -453,7 +453,7 @@ class PagedKv:
         self.sub_page = sub_page
         self.num_blocks: Value | None = None
         if page_rows is not None:
-            self.num_blocks = b.div(_i32(b, page_rows), _i32(b, page))
+            self.num_blocks = b.div(as_i32(b, page_rows), as_i32(b, page))
         self._reads = itertools.count()
         self._tiles: dict[int, PagedKvTile] = {}
 

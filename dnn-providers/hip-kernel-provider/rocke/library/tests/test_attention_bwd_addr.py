@@ -24,6 +24,7 @@ import pytest
 from kernels.common import _attention_bwd_addr as A
 from rocke.core.ir import BF16, F16, F32, I32, IRBuilder, PtrType
 
+from ._attention_bwd_test_utils import device_arch
 from ._attention_bwd_int_eval import IntEvalBuilder, VirtualTensor
 
 ARCHS = ("gfx942", "gfx950", "gfx1151", "gfx1201")
@@ -671,20 +672,11 @@ def test_probe_lowers_with_i64_rebase(arch, flavor, mode):
             assert "sdiv i64" in ir
 
 
-def _device_arch():
-    try:
-        from rocke.runtime.hip_module import get_device_arch
-
-        return get_device_arch(0)
-    except Exception:  # noqa: BLE001 - no runtime / no device
-        return None
-
-
 @pytest.mark.gpu
 @pytest.mark.parametrize("mode", ["batched", "thd"])
 @pytest.mark.parametrize("stage_vec", [8, 1])
 def test_probe_on_device_matches_numpy(mode, stage_vec):
-    arch = _device_arch()
+    arch = device_arch()
     if arch not in ("gfx942", "gfx950", "gfx1151", "gfx1201"):
         pytest.skip(f"needs gfx942/gfx950/gfx1151/gfx1201; device is {arch}")
     from rocke.helpers.compile import compile_kernel

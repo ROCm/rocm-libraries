@@ -51,9 +51,9 @@ from kernels.common.attention_bwd import (
 )
 from kernels.common._attention_bwd_refusals import resource_refusal
 
+from ._attention_bwd_test_utils import distinct_configs
 from .test_attention_bwd_ir import (
     ARCHS,
-    _configs,
     _derived,
     _user_accesses,
     _walk,
@@ -87,7 +87,7 @@ VARIANTS = ("band", "thd_none_pack", "band_atomic", "sv1_band")
 ROWS = [
     (arch, cfg, d, var)
     for arch in ARCHS
-    for cfg in _configs(arch)
+    for cfg in distinct_configs(arch)
     for d in (64, 128)
     for var in VARIANTS
 ]
@@ -258,7 +258,7 @@ def test_inert_predicates(arch):
 @pytest.mark.parametrize("cfg", ("default", "debug"))
 def test_plan_of_each_value(arch, cfg):
     row = (arch, cfg, 128, "band")
-    if cfg not in _configs(arch):
+    if cfg not in distinct_configs(arch):
         pytest.skip(f"{cfg} is not a distinct configuration on {arch}")
     base = validate_attn_bwd_spec(_spec(row), arch)
     plan = lds_plan(base, arch)
@@ -412,7 +412,7 @@ def test_pair_epilogue_halves_the_barriers(row):
 @pytest.mark.parametrize("arch", ARCHS)
 def test_store_width(arch, vec):
     elem = "half"
-    for cfg in _configs(arch):
+    for cfg in distinct_configs(arch):
         spec = dataclasses.replace(
             spec_of(arch, cfg, 128, "fp16", "band"), dkv_store_vec=vec
         )
@@ -459,7 +459,7 @@ def test_no_lds_access_claims_more_than_its_view(arch, pad):
         return f
 
     spec = dataclasses.replace(
-        spec_of(arch, _configs(arch)[0], 64, "fp16", "band"),
+        spec_of(arch, distinct_configs(arch)[0], 64, "fp16", "band"),
         **KNOBS[f"all_pad{pad}"],
     )
     try:

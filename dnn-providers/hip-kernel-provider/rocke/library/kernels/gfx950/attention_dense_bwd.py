@@ -3,9 +3,9 @@
 
 """Dense SDPA backward main kernel on gfx950.
 
-:class:`Gfx950AttentionDenseBwdSpec` is the shared
-:class:`~kernels.common.attention_dense_bwd_spec.AttentionDenseBwdSpec` plus
-the gfx950 body knob ``body_variant``:
+:class:`Gfx950AttentionDenseBwdSpec` is
+:class:`~kernels.common.attention_dense_bwd_spec.ArchAttentionDenseBwdSpec`
+bound to gfx950: the shared dense spec plus the body knob ``body_variant``:
 
 * ``"general"`` (built): the shared backward body of the layout-general
   family behind the dense shell (compile-time strides and lengths, buffer
@@ -23,19 +23,17 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from kernels.common._attention_dense_bwd_shell import emit_dense_bwd_main
-from kernels.common.attention_dense_bwd_spec import AttentionDenseBwdSpec
+from kernels.common.attention_dense_bwd_spec import (
+    ArchAttentionDenseBwdSpec,
+    check_dense_bwd_spec_class,
+)
 
 __all__ = ["Gfx950AttentionDenseBwdSpec", "build_attention_dense_bwd"]
 
 
 @dataclass(frozen=True)
-class Gfx950AttentionDenseBwdSpec(AttentionDenseBwdSpec):
+class Gfx950AttentionDenseBwdSpec(ArchAttentionDenseBwdSpec, arch="gfx950"):
     """Dense backward spec on gfx950 (see the module docstring)."""
-
-    body_variant: str = "general"
-
-    ARCH = "gfx950"
-    BODY_VARIANTS = ("general", "trload")
 
 
 def build_attention_dense_bwd(spec: Gfx950AttentionDenseBwdSpec, *, arch: str):
@@ -45,9 +43,5 @@ def build_attention_dense_bwd(spec: Gfx950AttentionDenseBwdSpec, *, arch: str):
     ``ValueError``); knob values whose emission is not built raise
     ``NotImplementedError`` before any IR is emitted.
     """
-    if not isinstance(spec, Gfx950AttentionDenseBwdSpec):
-        raise TypeError(
-            f"build_attention_dense_bwd on gfx950 takes a Gfx950AttentionDenseBwdSpec, "
-            f"got {type(spec).__name__}"
-        )
+    check_dense_bwd_spec_class(spec, Gfx950AttentionDenseBwdSpec)
     return emit_dense_bwd_main(spec, arch)

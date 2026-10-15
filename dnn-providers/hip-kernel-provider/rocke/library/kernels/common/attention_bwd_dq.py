@@ -60,7 +60,6 @@ every MFMA).
 from __future__ import annotations
 
 import dataclasses
-import hashlib
 from dataclasses import dataclass, fields
 from types import MappingProxyType
 from typing import Optional
@@ -71,6 +70,7 @@ from rocke.core.codegen_policy import (
 )
 from rocke.core.ir import F32, I32, I64, IRBuilder, PtrType
 from rocke.helpers.attention_band import AttnRuntimeBounds
+from rocke.helpers.spec import non_default_fields, salted_kernel_name
 
 from kernels.common._attention_bwd_addr import (
     PackedRows,
@@ -478,14 +478,8 @@ class AttnBwdDqSpec:
         return out
 
     def non_default_fields(self) -> tuple[tuple[str, object], ...]:
-        out = []
-        for f in fields(self):
-            if f.name in ("head_size", "name") or f.default is dataclasses.MISSING:
-                continue
-            v = getattr(self, f.name)
-            if v != f.default:
-                out.append((f.name, v))
-        return tuple(out)
+        """Compile-time fields that differ from their declared default."""
+        return non_default_fields(self, skip=("head_size", "name"))
 
     def kernel_name(self) -> str:
         """``{name}_dq_{dtype}_d{D}_{seq_mode}_{mask_class}_sv{stage_vec}``
@@ -494,17 +488,10 @@ class AttnBwdDqSpec:
             f"{self.name}_dq_{self.dtype}_d{self.head_size}_{self.seq_mode}_"
             f"{self.mask_class}_sv{self.stage_vec}"
         )
-        salted = [
-            (k, v)
-            for k, v in self.non_default_fields()
-            if k not in ("dtype", "seq_mode", "stage_vec", "mask_class")
-        ]
-        if not salted:
-            return base
-        digest = hashlib.sha1(
-            repr(sorted(salted, key=lambda kv: kv[0])).encode()
-        ).hexdigest()
-        return f"{base}_{digest[:10]}"
+        in_base = ("dtype", "seq_mode", "stage_vec", "mask_class")
+        return salted_kernel_name(
+            base, [(k, v) for k, v in self.non_default_fields() if k not in in_base]
+        )
 
 
 # Tuning fields (the plan's ``dq_<field>`` keys); ``xcd_remap`` is plan-owned.

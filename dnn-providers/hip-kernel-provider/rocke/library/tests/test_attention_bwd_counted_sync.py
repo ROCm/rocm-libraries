@@ -55,13 +55,14 @@ from kernels.common.attention_bwd import (
     validate_attn_bwd_spec,
 )
 
+from ._attention_bwd_test_utils import distinct_configs
 from ._attention_bwd_counted_model import (
     counted_ir_problems,
     counted_isa_problems,
     expected_waits,
     ir_events,
 )
-from .sdpa.bwd_kernel_cases import CONFIGS, config_knobs
+from .sdpa.bwd_kernel_cases import config_knobs
 
 MFMA_ARCHS = ("gfx942", "gfx950")
 RDNA_ARCHS = ("gfx1151", "gfx1201")
@@ -97,17 +98,6 @@ VARIANTS = {
 }
 
 
-def _configs(arch):
-    out, seen = [], []
-    for cfg in CONFIGS:
-        knobs = config_knobs(cfg, arch)
-        if knobs is None or knobs in seen:
-            continue
-        seen.append(knobs)
-        out.append(cfg)
-    return out
-
-
 def spec_of(arch, cfg, d, dt, var, issue) -> AttnBwdSpec:
     kw = dict(config_knobs(cfg, arch), **VARIANTS[var])
     return AttnBwdSpec(
@@ -126,7 +116,7 @@ def _legal(arch, cfg, d, dt, var, issue) -> bool:
 ROWS = [
     row
     for arch in MFMA_ARCHS
-    for cfg in _configs(arch)
+    for cfg in distinct_configs(arch)
     for d in HEADS
     for dt in DTYPES
     for var in VARIANTS
@@ -378,7 +368,7 @@ def test_counted_lds_barriers_separate_cross_wave_accesses(row, monkeypatch):
 def test_counted_step_is_the_full_step(arch, var):
     """Same matrix ops in the same order and the same dQ atomics per q loop as
     the full twin (the math and its order are unchanged)."""
-    for cfg in _configs(arch):
+    for cfg in distinct_configs(arch):
         for issue in COUNTED_ISSUES:
             row = (arch, cfg, 64, "fp16", var, issue)
             if not _legal(*row):
@@ -541,7 +531,7 @@ def test_mirror_edge_rows_are_refused():
     from kernels.common._attention_bwd_refusals import resource_refusal
 
     for arch in MFMA_ARCHS:
-        for cfg in _configs(arch):
+        for cfg in distinct_configs(arch):
             for d in HEADS:
                 for dt in DTYPES:
                     for issue in COUNTED_ISSUES:

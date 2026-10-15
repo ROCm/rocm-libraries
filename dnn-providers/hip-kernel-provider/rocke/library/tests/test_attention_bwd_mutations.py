@@ -45,6 +45,7 @@ import pytest
 
 from kernels.common.attention_bwd_dq import dq_static_unit_mults
 
+from ._attention_bwd_test_utils import device_configs
 from ._attention_bwd_harness import (
     ARCH,
     DEVICE_ARCHS,
@@ -59,7 +60,7 @@ from ._attention_bwd_harness import (
     ungated_dsum_hook,
 )
 from .sdpa.bwd_cases import compare_bwd, get_bwd_case
-from .sdpa.bwd_kernel_cases import SUPPLEMENTARY_CASES, selected_configs
+from .sdpa.bwd_kernel_cases import SUPPLEMENTARY_CASES
 
 pytestmark = [
     pytest.mark.gpu,
@@ -73,10 +74,6 @@ CASES = ("bwd_seqlen_33x72_none", "bwd_dtype_bf16_d128_mha")
 LOG2E = np.float32(1.4426950408889634)
 
 
-def _configs():
-    return selected_configs(ARCH) if ARCH in DEVICE_ARCHS else ["none"]
-
-
 def _check(run, *, expect_ok):
     probs = compare_bwd(run.case, run.dq, run.dk, run.dv, run.ref)
     if expect_ok:
@@ -85,7 +82,7 @@ def _check(run, *, expect_ok):
         assert probs, "the negative control was not detected"
 
 
-@pytest.mark.parametrize("config", _configs())
+@pytest.mark.parametrize("config", device_configs(ARCH, DEVICE_ARCHS))
 @pytest.mark.parametrize("case_id", CASES)
 def test_lse_in_log2_units_is_detected(case_id, config):
     case = get_bwd_case(case_id)
@@ -99,7 +96,7 @@ def test_lse_in_log2_units_is_detected(case_id, config):
     _check(run, expect_ok=False)
 
 
-@pytest.mark.parametrize("config", _configs())
+@pytest.mark.parametrize("config", device_configs(ARCH, DEVICE_ARCHS))
 @pytest.mark.parametrize("case_id", CASES)
 def test_lse_offset_is_detected(case_id, config):
     case = get_bwd_case(case_id)
@@ -117,7 +114,7 @@ def test_lse_offset_is_detected(case_id, config):
 BR_CASES = ("bwd_seqlen_33x72_br", "bwd_causal_br_q_lt_kv")
 
 
-@pytest.mark.parametrize("config", _configs())
+@pytest.mark.parametrize("config", device_configs(ARCH, DEVICE_ARCHS))
 @pytest.mark.parametrize("case_id", BR_CASES)
 def test_flipped_bottom_right_is_detected(case_id, config):
     case = get_bwd_case(case_id)
@@ -136,7 +133,7 @@ def test_flipped_bottom_right_is_detected(case_id, config):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("config", _configs())
+@pytest.mark.parametrize("config", device_configs(ARCH, DEVICE_ARCHS))
 def test_dropped_dead_row_select_gives_nan(config):
     # Consistent inputs (fully masked rows with -inf LSE): the switched body
     # passes, because prep's row_live gate already zeroes their Dsum.
@@ -168,7 +165,7 @@ def test_dropped_dead_row_select_gives_nan(config):
 INTERIOR_DEAD_CASES = ("bwd_seqlen_1000x1000_none", "bwd_dtype_bf16_d128_causal_tl")
 
 
-@pytest.mark.parametrize("config", _configs())
+@pytest.mark.parametrize("config", device_configs(ARCH, DEVICE_ARCHS))
 @pytest.mark.parametrize("case_id", INTERIOR_DEAD_CASES)
 def test_interior_tiles_keep_the_dead_row_select(case_id, config):
     """With ``edge_tiles = True`` the interior steps drop the per-cell keep
@@ -203,7 +200,7 @@ def test_interior_tiles_keep_the_dead_row_select(case_id, config):
 GROUP_CASES = ("bwd_gqa_gqa4_causal_tl", "bwd_decode_skv17_br")
 
 
-@pytest.mark.parametrize("config", _configs())
+@pytest.mark.parametrize("config", device_configs(ARCH, DEVICE_ARCHS))
 @pytest.mark.parametrize("case_id", GROUP_CASES)
 def test_missing_group_sum_is_detected(case_id, config):
     case = get_bwd_case(case_id)
@@ -228,7 +225,7 @@ def test_missing_group_sum_is_detected(case_id, config):
     assert any(p.startswith(("dk ", "dv ")) for p in probs), probs
 
 
-@pytest.mark.parametrize("config", _configs())
+@pytest.mark.parametrize("config", device_configs(ARCH, DEVICE_ARCHS))
 @pytest.mark.parametrize("case_id", CASES)
 def test_skipped_prep_is_detected(case_id, config):
     case = get_bwd_case(case_id)
@@ -241,7 +238,7 @@ def test_skipped_prep_is_detected(case_id, config):
     _check(run, expect_ok=False)
 
 
-@pytest.mark.parametrize("config", _configs())
+@pytest.mark.parametrize("config", device_configs(ARCH, DEVICE_ARCHS))
 @pytest.mark.parametrize("case_id", CASES)
 def test_convert_scale_applied_twice_is_detected(case_id, config):
     case = get_bwd_case(case_id)
@@ -277,7 +274,7 @@ def _atomic_case():
     return next(c for c in SUPPLEMENTARY_CASES if c.id == ATOMIC_CASE)
 
 
-@pytest.mark.parametrize("config", _configs())
+@pytest.mark.parametrize("config", device_configs(ARCH, DEVICE_ARCHS))
 def test_skipped_kv_zero_is_detected(config):
     case = _atomic_case()
     _check(run_case(case, arch=ARCH, config=config), expect_ok=True)
@@ -303,7 +300,7 @@ def test_skipped_kv_zero_is_detected(config):
     assert any(p.startswith(("non-finite", "dk ", "dv ")) for p in probs), probs
 
 
-@pytest.mark.parametrize("config", _configs())
+@pytest.mark.parametrize("config", device_configs(ARCH, DEVICE_ARCHS))
 def test_skipped_dv_convert_is_detected(config):
     case = _atomic_case()
 
@@ -335,7 +332,7 @@ def test_skipped_dv_convert_is_detected(config):
 PAD_CASES = ("bwd_padding_q_lt_kv_none", "bwd_padding_kv_only_shorter")
 
 
-@pytest.mark.parametrize("config", _configs())
+@pytest.mark.parametrize("config", device_configs(ARCH, DEVICE_ARCHS))
 @pytest.mark.parametrize("case_id", PAD_CASES)
 def test_ignored_seq_len_is_detected(case_id, config):
     case = get_bwd_case(case_id)
@@ -357,7 +354,7 @@ def test_ignored_seq_len_is_detected(case_id, config):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("config", _configs())
+@pytest.mark.parametrize("config", device_configs(ARCH, DEVICE_ARCHS))
 def test_wrong_offset_width_is_detected(config):
     """An int64 offset table decoded as int32 by the main kernel only (prep
     and the converts keep the right width): the sequences of the main kernel

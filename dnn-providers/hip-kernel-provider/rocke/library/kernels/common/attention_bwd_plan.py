@@ -47,7 +47,10 @@ import math
 import numbers
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import Any, Callable, Mapping, Optional
+from typing import Any, Callable, Iterator, Mapping, Optional
+
+from rocke.helpers.attention_band import I32_FAR
+from rocke.helpers.spec import align_up, ceil_div
 
 from kernels.common._attention_bwd_worklist import worklist_words
 from kernels.common.attention_bwd_aux import (
@@ -379,7 +382,6 @@ MIRROR_PAIRING_BUILT = True
 
 I32_MAX = 2**31 - 1
 _GRID_YZ_MAX = 65535
-_BAND_MAX = 2**30
 _WS_ALIGN = 256
 _TENSORS = ("q", "k", "v", "o", "do", "dq", "dk", "dv")
 _Q_SIDE = ("q", "o", "do", "dq")
@@ -630,6 +632,12 @@ class AttnBwdRequest:
             return (0, d, h * d, 1)
         return (h * s * d, s * d, d, 1)
 
+    def used_strides(self) -> Iterator[int]:
+        """The B / H / S strides of every tensor that address more than one
+        index, tensor by tensor (lazy: a caller may stop at the first)."""
+        for name in _TENSORS:
+            yield from _used_strides(self, name)
+
     def resolved_scale(self) -> float:
         if self.scale is not None:
             return float(self.scale)
@@ -737,12 +745,8 @@ def shipped_policy() -> AttnBwdPolicy:
 # ---------------------------------------------------------------------------
 
 
-def _ceil_div(a: int, b: int) -> int:
-    return -(-a // b)
-
-
 def _align(x: int) -> int:
-    return _ceil_div(x, _WS_ALIGN) * _WS_ALIGN
+    return align_up(x, _WS_ALIGN)
 
 
 def _dkv_atomic(req: AttnBwdRequest, g_split: int = 1) -> bool:
@@ -899,14 +903,16 @@ def _used_strides(req: AttnBwdRequest, name: str) -> list[int]:
     return out
 
 
-def attn_bwd_stage_vec(req: AttnBwdRequest) -> int:
-    """8 when every used B/H/S stride is a multiple of 8 and bases are 16 B aligned."""
+def attn_bwd_stage_vec(req) -> int:
+    """8 when every used stride (``req.used_strides()``) is a multiple of 8 and
+    every base is 16 B aligned, else 1.
+
+    The one staging-width rule of the general request and the unified request
+    (:class:`kernels.common.attention_bwd_unified_plan.AttnBwdUnifiedRequest`).
+    """
     if req.tensor_alignment < 16:
         return 1
-    for n in _TENSORS:
-        if any(s % 8 for s in _used_strides(req, n)):
-            return 1
-    return 8
+    return 1 if any(s % 8 for s in req.used_strides()) else 8
 
 
 def attn_bwd_narrow_width(req: AttnBwdRequest) -> int:
@@ -916,7 +922,7 @@ def attn_bwd_narrow_width(req: AttnBwdRequest) -> int:
     for w in (4, 2):
         if req.tensor_alignment < 2 * w:
             continue
-        if all(s % w == 0 for n in _TENSORS for s in _used_strides(req, n)):
+        if all(s % w == 0 for s in req.used_strides()):
             return w
     return 1
 
@@ -1111,7 +1117,7 @@ def attn_bwd_tuning_key(
         attn_bwd_stage_vec(req),
         "thd" if req.is_thd else "batched",
     )["block_n"]
-    n_tiles = _ceil_div(req.s_kv, kn)
+    n_tiles = ceil_div(req.s_kv, kn)
     grid = req.b * _units(req, _dkv_atomic(req)) * n_tiles
     return pclass + (_kv_tile_bucket(n_tiles), _fill_bucket(req, grid))
 
@@ -1281,7 +1287,7 @@ def _lse_layout(req: AttnBwdRequest) -> tuple[Optional[str], tuple[int, int, int
 
 def _band_ok(req: AttnBwdRequest) -> tuple[bool, str]:
     for name, v in (("left_bound", req.left_bound), ("right_bound", req.right_bound)):
-        if v < -1 or v >= _BAND_MAX:
+        if v < -1 or v >= I32_FAR:
             return False, f"{name}={v} outside [-1, 2^30)"
     if req.causal and req.causal_bottom_right:
         return False, "both deprecated causal booleans set"
@@ -1352,7 +1358,7 @@ def _index_range(req: AttnBwdRequest, atomic_kv: bool) -> Optional[str]:
     for s_max in (req.s_q, req.s_kv):
         if s_max * d >= 2**31:
             return "S_max * D >= 2^31 (in-slab workspace index)"
-        if s_max >= 2**30:
+        if s_max >= I32_FAR:
             return "S_max >= 2^30"
     return None
 
@@ -1367,7 +1373,7 @@ def _grid_limit(req: AttnBwdRequest, arch: str, atomic_kv: bool) -> Optional[str
     if prep_y > _GRID_YZ_MAX:
         return f"prep grid y={prep_y} > 65535"
     r = _rows_per_cta(arch, req.d_qk)
-    if _ceil_div(max(req.s_q, req.s_kv), r) >= 2**31:
+    if ceil_div(max(req.s_q, req.s_kv), r) >= 2**31:
         return "prep / convert grid x >= 2^31"
     return None
 
@@ -1696,7 +1702,7 @@ def attn_bwd_workspace_layout(
         sizes.append(("WS_DK", 4 * rows_kv * req.h_k * d * n_k))
         sizes.append(("WS_DV", 4 * rows_kv * req.h_v * d * n_v))
     if worklist:
-        words = worklist_words(req.b, _ceil_div(req.s_kv, block_n))
+        words = worklist_words(req.b, ceil_div(req.s_kv, block_n))
         sizes.append(("WORKLIST", 4 * words))
     out, off = {}, 0
     for name, nbytes in sizes:
@@ -1965,7 +1971,7 @@ def _resolve_plan(req: AttnBwdRequest, arch: str, policy: AttnBwdPolicy) -> Attn
     pack_heads = group if spec.head_pack else 0
 
     facts = attn_bwd_arch_facts(arch)
-    n_kv_tiles = _ceil_div(req.s_kv, kn)
+    n_kv_tiles = ceil_div(req.s_kv, kn)
     units = _units(req, atomic_kv)
     if units * g_split > _GRID_YZ_MAX:
         raise ValueError(
@@ -1980,7 +1986,7 @@ def _resolve_plan(req: AttnBwdRequest, arch: str, policy: AttnBwdPolicy) -> Attn
             dataclasses.replace(spec, lb_interleave=True), arch
         )
     pair = 1 if lb_name == "mirror" else 0
-    gx = _ceil_div(n_kv_tiles, 2) if pair else n_kv_tiles
+    gx = ceil_div(n_kv_tiles, 2) if pair else n_kv_tiles
     if pair:
         if mask_kind == "none":
             raise ValueError("mirror pairing needs a causal or window mask")

@@ -41,6 +41,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from ._attention_bwd_test_utils import kernel_signature
 
 _TESTS = Path(__file__).resolve().parent
 _LIB_ROOT = str(_TESTS.parent)
@@ -427,21 +428,6 @@ def test_golden_covers_every_case_and_flavor():
 _INPUTS = {"Q", "K", "V", "O", "dO", "LSE", "WS_LSE2", "WS_DSUM"}
 
 
-def _signature(ir):
-    head = re.search(r"define amdgpu_kernel void @\S+\((.*?)\) #0", ir).group(1)
-    out = []
-    for p in head.split(", "):
-        name = p.split("%")[-1]
-        if p.startswith("ptr"):
-            kind = "Q"
-        elif p.startswith("float"):
-            kind = "f"
-        else:
-            kind = "q" if p.startswith("i64") else "i"
-        out.append((name, kind, p))
-    return out
-
-
 @pytest.mark.parametrize("arch", _ARCHS)
 @pytest.mark.parametrize(
     "over", [{}, dict(dkv_mode="atomic"), dict(persistent=True), dict(xcd_remap=True)]
@@ -449,7 +435,7 @@ def _signature(ir):
 def test_signature_is_the_abi(arch, over):
     from kernels.common.attention_dense_bwd_spec import attn_dense_bwd_params
 
-    sig = _signature(_lower(_kernel(arch, over), arch, "llvm22"))
+    sig = kernel_signature(_lower(_kernel(arch, over), arch, "llvm22"))
     assert [(n, k) for n, k, _ in sig] == list(attn_dense_bwd_params())
     for name, kind, text in sig:
         assert "noalias" not in text
@@ -463,7 +449,7 @@ def test_signature_is_the_abi(arch, over):
 )
 def test_ptr_noalias_marks_the_dense_pointers(arch, value, over):
     over = dict(over, body_knobs={"ptr_noalias": value})
-    sig = _signature(_lower(_kernel(arch, over), arch, "llvm22"))
+    sig = kernel_signature(_lower(_kernel(arch, over), arch, "llvm22"))
     want = {
         n for n, k, _ in sig if k == "Q" and (value == "all" or n.startswith("WS_"))
     }

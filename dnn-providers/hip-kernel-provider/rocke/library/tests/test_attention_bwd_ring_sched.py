@@ -74,10 +74,10 @@ from kernels.common.attention_bwd import (
     validate_attn_bwd_spec,
 )
 
+from ._attention_bwd_test_utils import distinct_configs
 from .test_attention_bwd_ir import (
     HEADS,
     VARIANTS,
-    _configs,
     _walk,
     group_loops,
     q_loops,
@@ -161,7 +161,7 @@ def _rows():
         for ring in RINGS:
             cands = [
                 (arch, cfg, d, var, "", ring)
-                for cfg in _configs(arch)
+                for cfg in distinct_configs(arch)
                 for d in HEADS
                 for var in BODY_VARIANTS
             ]
@@ -382,7 +382,7 @@ def test_dma_copy_is_followed_by_the_counted_vmem_ops(ring, pair):
     deferred batch under ``stage_table_atomics``), at least the ``n_a`` the
     wait immediates assume."""
     arch = "gfx950"
-    for cfg in _configs(arch):
+    for cfg in distinct_configs(arch):
         for d in HEADS:
             for var in ("band", "band_edge", "thd_band_atomic"):
                 spec, k = _kernel(arch, cfg, d, var, "", ring, *pair)
@@ -774,7 +774,7 @@ def test_ring_lds_accesses_do_not_race(hrow, pair):
     model is not vacuous: the step's Q / dO slot reads and the ring's slot
     writes are in it."""
     arch, ring, var, knob = hrow
-    for cfg in _configs(arch):
+    for cfg in distinct_configs(arch):
         for d in HEADS:
             spec = _spec(arch, cfg, d, var, knob, ring, *pair)
             if spec is None:
@@ -831,7 +831,7 @@ def test_scheduling_only_on_the_ring(ring, pair):
     twin's."""
     archs, _kw = RINGS[ring]
     for arch in archs:
-        for cfg in _configs(arch):
+        for cfg in distinct_configs(arch):
             for d in HEADS:
                 base = _spec(arch, cfg, d, "band_edge", "", ring, "none", False)
                 spec = _spec(arch, cfg, d, "band_edge", "", ring, *pair)
@@ -881,7 +881,7 @@ _LLVM = {
 def test_llvm_hint_calls_equal_the_model(ring, pair):
     archs, _kw = RINGS[ring]
     for arch in archs:
-        for cfg in _configs(arch):
+        for cfg in distinct_configs(arch):
             for d in HEADS:
                 for var in ("band", "band_edge"):
                     spec, k = _kernel(arch, cfg, d, var, "", ring, *pair)
@@ -937,7 +937,7 @@ GATE_VARIANTS = ("band", "band_pack", "band_edge", "thd_band_atomic", "sv1_band"
 GATE_POINTS = [
     (arch, cfg, d, ring)
     for arch in RING_ARCHS
-    for cfg in _configs(arch)
+    for cfg in distinct_configs(arch)
     for d in HEADS
     for ring in RINGS
     if arch in RINGS[ring][0]

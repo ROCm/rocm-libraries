@@ -33,8 +33,9 @@ from kernels.common.attention_bwd import (
     validate_attn_bwd_spec,
 )
 
+from ._attention_bwd_test_utils import distinct_configs
 from .sdpa.bwd_kernel_cases import config_knobs
-from .test_attention_bwd_ir import _configs, _walk, q_loops
+from .test_attention_bwd_ir import _walk, q_loops
 
 MFMA = ("gfx942", "gfx950")
 MERGE = dict(barrier_merge="on", ring_depth=2)
@@ -173,7 +174,7 @@ def test_ring_stats_have_lds_slots_only_under_a_ring(arch):
 @pytest.mark.parametrize("arch", MFMA)
 @pytest.mark.parametrize("d", (32, 64, 128))
 def test_plan_slots(arch, d):
-    for cfg in _configs(arch):
+    for cfg in distinct_configs(arch):
         base = validate_attn_bwd_spec(_spec(arch, cfg, d), arch)
         plan0 = lds_plan(base, arch)
         assert [b.slot for b in plan0.buffers if b.name == "ds"] == [0]
@@ -285,7 +286,7 @@ def _parent_list(kernel, target):
 @pytest.mark.parametrize("var", VARIANTS, ids=lambda v: "+".join(v) or "plain")
 def test_one_barrier_per_step(arch, var):
     built = 0
-    for cfg in _configs(arch):
+    for cfg in distinct_configs(arch):
         for d in (32, 64, 128):
             spec = _spec(arch, cfg, d, **MERGE, **var)
             plain_kw = {k: v for k, v in var.items() if k != "ring_issue"}

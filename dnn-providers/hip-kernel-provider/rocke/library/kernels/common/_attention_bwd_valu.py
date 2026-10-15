@@ -64,14 +64,14 @@ from collections.abc import Sequence
 
 from rocke.core.arch.target import MmaOp
 from rocke.core.ir import BF16, F32, I32, IRBuilder, Value, VectorType
+from rocke.helpers.attention_band import I32_FAR
 
 from ._attention_bwd_addr import (
-    _ROWS_CAP,
     _clamp64_to_i32,
-    _i64,
     _max64,
     _min64,
     WorkspaceAddr,
+    as_i64,
 )
 from ._attention_bwd_frag import eval_layout
 
@@ -229,16 +229,16 @@ def batched_stats_rows(
     # rows left in the head and the window bounds.
     base = lse2.row0
     if not (isinstance(q0, int) and q0 == 0):
-        base = b.add(base, _i64(b, q0, signed=True))
-    rows64 = _i64(b, lse2.ws_rows)
+        base = b.add(base, as_i64(b, q0, signed=True))
+    rows64 = as_i64(b, lse2.ws_rows)
     one64 = b.const_i64(1)
     base_ws = _max64(b, _min64(b, base, b.sub(rows64, one64)), b.const_i64(0))
-    rows_left = _clamp64_to_i32(b, b.sub(rows64, base), b.const_i32(_ROWS_CAP))
-    elem = b.add(b.mul(_i64(b, h), rows64), base_ws)
-    total = b.mul(_i64(b, n_heads), rows64)
+    rows_left = _clamp64_to_i32(b, b.sub(rows64, base), b.const_i32(I32_FAR))
+    elem = b.add(b.mul(as_i64(b, h), rows64), base_ws)
+    total = b.mul(as_i64(b, n_heads), rows64)
     back = _min64(b, elem, b.const_i64(width - 1))  # in [0, width - 1]
     lo = b.sub(b.const_i32(0), b.trunc(back, I32))
-    hi = _clamp64_to_i32(b, b.sub(b.sub(total, one64), elem), b.const_i32(_ROWS_CAP))
+    hi = _clamp64_to_i32(b, b.sub(b.sub(total, one64), elem), b.const_i32(I32_FAR))
     top = b.sub(hi, b.const_i32(width - 1))
     # pointers at the lowest window start, so every in-slab index is >= 0
     off = b.mul(b.sub(elem, back), b.const_i64(4))

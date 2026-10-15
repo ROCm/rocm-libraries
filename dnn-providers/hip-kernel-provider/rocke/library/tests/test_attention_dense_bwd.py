@@ -27,7 +27,7 @@ import pytest
 from kernels.common._attention_bwd_band import (
     NoMaskKTail,
     RuntimeBand,
-    _HostInt,
+    HostInt,
     static_kv_tile_plan,
 )
 from kernels.common._attention_dense_bwd_shell import (
@@ -398,7 +398,7 @@ _MASKS = [
 
 
 def _host_policy(dense: bool, s_q, s_kv, left, right, br, km, kn):
-    hb = _HostInt()
+    hb = HostInt()
     masked = not (left == -1 and right == -1)
     if dense:
         if masked:
@@ -418,7 +418,7 @@ def _host_policy(dense: bool, s_q, s_kv, left, right, br, km, kn):
 @pytest.mark.parametrize("mask", _MASKS)
 def test_static_classification_matches_general_policy(mask):
     left, right, br = mask
-    hb = _HostInt()
+    hb = HostInt()
     for km, kn in ((16, 16), (16, 64), (32, 128)):
         for s_q, s_kv in itertools.product((1, 16, 33, 64, 100), (16, 47, 64, 130)):
             dense = _host_policy(True, s_q, s_kv, left, right, br, km, kn)

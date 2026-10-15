@@ -27,12 +27,12 @@ from dataclasses import dataclass
 import numpy as np
 
 from kernels.common.attention_bwd import BWD_ARCHS
+from kernels.common.attention_bwd_plan import attn_bwd_stage_vec
 from kernels.common.attention_bwd_unified_plan import (
     FEATURE_GROUPS,
     AttnBwdUnifiedPolicy,
     AttnBwdUnifiedRequest,
     attn_bwd_unified_plan,
-    attn_bwd_unified_stage_vec,
     attn_bwd_unified_tile_configs,
 )
 from kernels.common.attention_bwd_unified_run import (
@@ -117,7 +117,7 @@ def unified_test_policy(arch: str, knobs: dict | None = None) -> AttnBwdUnifiedP
         out = dict(knobs)
         tile = out.pop("tile", None)
         if tile is not None:
-            sv = attn_bwd_unified_stage_vec(req)
+            sv = attn_bwd_stage_vec(req)
             cfgs = attn_bwd_unified_tile_configs(arch_, req.d_qk, sv)
             if tile not in cfgs:
                 raise ValueError(f"tile configuration {tile!r} not shipped on {arch_}")

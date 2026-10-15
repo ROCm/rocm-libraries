@@ -69,12 +69,18 @@ from functools import cached_property
 
 from rocke.core.ir import F32, I64, IRBuilder, Value
 
-from ._attention_bwd_addr import PackedRows, RowSlab, StridedTensorAddr
+from ._attention_bwd_addr import (
+    PackedRows,
+    RowSlab,
+    StridedTensorAddr,
+    as_i32,
+    chunk_coords,
+    deal_chunks,
+)
 from ._attention_bwd_band import (
     MaskPolicy,
     _bound_or_none,
     _floor_div,
-    _i32,
     dkv_store_rule,
 )
 from ._attention_bwd_body import (
@@ -146,7 +152,7 @@ def kv_tile_range(
         raise ValueError("tile sizes must be positive")
     zero = b.const_i32(0)
     cn = b.const_i32(k_n0)
-    rows = _i32(b, n_rows)
+    rows = as_i32(b, n_rows)
     q_last = b.smin(
         b.sub(b.add(q_first, rows), b.const_i32(1)),
         b.sub(band.sq, b.const_i32(1)),
@@ -159,7 +165,7 @@ def kv_tile_range(
     if left is None:
         k_lo = zero
     else:
-        lft = _i32(b, left)
+        lft = as_i32(b, left)
         k_lo = b.sub(c_first, lft)
         if not isinstance(left, int):
             k_lo = b.select(b.cmp_lt(lft, zero), zero, k_lo)
@@ -167,7 +173,7 @@ def kv_tile_range(
     if right is None:
         k_hi = band.sk_minus1
     else:
-        r = _i32(b, right)
+        r = as_i32(b, right)
         k_hi = b.add(c_last, r)
         if not isinstance(right, int):
             k_hi = b.select(b.cmp_lt(r, zero), band.sk_minus1, k_hi)
@@ -207,7 +213,7 @@ def interior_kv_range(
     tile outside it is an edge tile.
     """
     zero = b.const_i32(0)
-    rows = _i32(b, n_rows)
+    rows = as_i32(b, n_rows)
     kt_end = b.add(kt_start, n_kt)
     q_last = b.sub(b.add(q_first, rows), b.const_i32(1))
     lo = kt_start
@@ -218,7 +224,7 @@ def interior_kv_range(
     left = _bound_or_none(band, "left") if masked else None
     if right is not None:
         # k_last <= q_first + off + right  ->  kt <= floor((... - k_n0 + 1) / k_n0)
-        r = _i32(b, right)
+        r = as_i32(b, right)
         top = b.add(q_first, r) if off is None else b.add(b.add(q_first, off), r)
         last = _floor_div(b, b.sub(top, b.const_i32(k_n0 - 1)), k_n0)
         stop = b.add(last, b.const_i32(1))
@@ -227,7 +233,7 @@ def interior_kv_range(
         hi = b.smin(hi, stop)
     if left is not None:
         # k_first >= q_last + off - left  ->  kt >= ceil((...) / k_n0)
-        lft = _i32(b, left)
+        lft = as_i32(b, left)
         need = b.sub(q_last, lft) if off is None else b.sub(b.add(q_last, off), lft)
         first = b.sub(zero, _floor_div(b, b.sub(zero, need), k_n0))
         if not isinstance(left, int):
@@ -520,18 +526,9 @@ class BwdDqStep:
         per_row = g.head_size // vec
         total = g.k_n0 * per_row
         out = []
-        for it in range(-(-total // g.threads)):
-            chunk = (
-                self.tid if it == 0 else b.add(self.tid, b.const_i32(it * g.threads))
-            )
-            tail = (it + 1) * g.threads > total
+        for chunk, tail in deal_chunks(b, self.tid, total, g.threads):
             src = b.smin(chunk, b.const_i32(total - 1)) if tail else chunk
-            r = b.div(src, b.const_i32(per_row)) if per_row > 1 else src
-            c = (
-                b.mul(b.mod(src, b.const_i32(per_row)), b.const_i32(vec))
-                if per_row > 1
-                else b.const_i32(0)
-            )
+            r, c = chunk_coords(b, src, per_row, vec)
             guard = b.cmp_lt(chunk, b.const_i32(total)) if tail else None
             out.append((r, c, slab.load_vec(b.add(row0, r), c, vec), guard))
         return out
@@ -724,10 +721,8 @@ class BwdDqStep:
         assert dq_slab.last is None and (rows is None) == (head_step is None)
         slab = dq_slab
         threads = g.threads
-        for it in range(-(-total // threads)):
-            chunk = self.tid if it == 0 else b.add(self.tid, b.const_i32(it * threads))
-            r = b.div(chunk, b.const_i32(per_row))
-            c = b.mul(b.mod(chunk, b.const_i32(per_row)), b.const_i32(vec))
+        for chunk, tail in deal_chunks(b, self.tid, total, threads):
+            r, c = chunk_coords(b, chunk, per_row, vec)
             if rows is None:
                 q, ok, row_slab = b.add(q0, r), None, slab
             else:
@@ -742,7 +737,7 @@ class BwdDqStep:
             )
             if ok is not None:
                 store = b.land(store, ok)
-            if (it + 1) * threads > total:
+            if tail:
                 store = b.land(store, b.cmp_lt(chunk, b.const_i32(total)))
             with b.scf_if(store):
                 v = b.select(row_live, out.load(b, r, c, dtype=self.elem, n=vec), zero)

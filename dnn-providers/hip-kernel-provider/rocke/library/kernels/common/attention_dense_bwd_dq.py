@@ -39,7 +39,6 @@ plan's ``dq_*`` knobs), carried in :attr:`AttentionDenseBwdDqSpec.dq`.
 from __future__ import annotations
 
 import dataclasses
-import hashlib
 from dataclasses import dataclass
 from typing import Optional
 
@@ -49,6 +48,7 @@ from rocke.core.codegen_policy import (
 )
 from rocke.core.ir import F32, I32, IRBuilder, PtrType
 from rocke.helpers.attention_band import AttnRuntimeBounds, BandEmitter
+from rocke.helpers.spec import salted_kernel_name
 
 from kernels.common._attention_bwd_addr import (
     PackedRows,
@@ -56,7 +56,7 @@ from kernels.common._attention_bwd_addr import (
     WorkspaceAddr,
     decode_batched,
 )
-from kernels.common._attention_bwd_band import _HostInt
+from kernels.common._attention_bwd_band import HostInt
 from kernels.common._attention_bwd_body import StatsView
 from kernels.common._attention_bwd_dqbody import (
     BwdDqGeometry,
@@ -247,11 +247,7 @@ class AttentionDenseBwdDqSpec:
             for k, v in self.dq.non_default_fields()
             if k not in _DQ_PROBLEM and k != "ws_layout"
         ]
-        base = "_".join(parts)
-        if not salted:
-            return base
-        digest = hashlib.sha1(repr(sorted(salted, key=lambda kv: kv[0])).encode())
-        return f"{base}_{digest.hexdigest()[:10]}"
+        return salted_kernel_name("_".join(parts), salted)
 
 
 def validate_attn_dense_bwd_dq_spec(
@@ -308,7 +304,7 @@ def dense_dq_static_classes(
     """``(any_edge, any_interior)`` over every visited (q block, key tile)
     pair of the dQ kernel (q blocks of ``rows`` rows), evaluated with the
     kernel's own range emitters on the host."""
-    hb = _HostInt()
+    hb = HostInt()
     off = s_kv - s_q if bottom_right else 0
     bounds = AttnRuntimeBounds(
         s_q, s_kv, off, left if masked else -1, right if masked else -1

@@ -137,6 +137,8 @@ from ._attention_bwd_addr import (
     RowSlab,
     StridedTensorAddr,
     WorkspaceAddr,
+    chunk_coords,
+    deal_chunks,
 )
 from ._attention_bwd_band import MaskPolicy
 from ._attention_bwd_caps import bwd_arch_caps, check_transpose_read
@@ -861,11 +863,9 @@ def copy_row_sets_to_lds(
     if order == "loads_first":
         pending = []
         for load, view in sets:
-            for it in range(-(-total // threads)):
-                chunk = tid if it == 0 else b.add(tid, b.const_i32(it * threads))
-                tail = (it + 1) * threads > total
+            for chunk, tail in deal_chunks(b, tid, total, threads):
                 src = b.smin(chunk, b.const_i32(total - 1)) if tail else chunk
-                r, c = _chunk_coords(b, src, per_row, vec)
+                r, c = chunk_coords(b, src, per_row, vec)
                 pending.append((view, r, c, load(r, c), chunk if tail else None))
         for view, r, c, val, guard in pending:
             if guard is None:
@@ -892,7 +892,7 @@ def copy_row_sets_to_lds(
         cond = hi if i == 0 else b.land(b.cmp_ge(wave, b.const_i32(i * per_tile)), hi)
         with b.scf_if(cond):
             chunk = tid if i == 0 else b.sub(tid, b.const_i32(i * total))
-            r, c = _chunk_coords(b, chunk, per_row, vec)
+            r, c = chunk_coords(b, chunk, per_row, vec)
             view.store(b, r, c, load(r, c), vec)
 
 
@@ -904,41 +904,24 @@ def _row_loads(b, sets, *, rows, cols, tid, threads, vec=8) -> list:
     total = rows * per_row
     pending = []
     for load, view in sets:
-        for it in range(-(-total // threads)):
-            chunk = tid if it == 0 else b.add(tid, b.const_i32(it * threads))
-            tail = (it + 1) * threads > total
+        for chunk, tail in deal_chunks(b, tid, total, threads):
             src = b.smin(chunk, b.const_i32(total - 1)) if tail else chunk
-            r, c = _chunk_coords(b, src, per_row, vec)
+            r, c = chunk_coords(b, src, per_row, vec)
             guard = b.cmp_lt(chunk, b.const_i32(total)) if tail else None
             pending.append((view, r, c, load(r, c), vec, guard))
     return pending
 
 
-def _chunk_coords(b, chunk, per_row, vec):
-    """``(row, column)`` of a ``vec``-element chunk of a ``per_row``-chunk row."""
-    if per_row == 1:
-        return chunk, b.const_i32(0)
-    r = b.div(chunk, b.const_i32(per_row))
-    c = b.mul(b.mod(chunk, b.const_i32(per_row)), b.const_i32(vec))
-    return r, c
-
-
 def _copy_rows(b, load, view, *, rows, cols, tid, threads, vec) -> None:
     per_row = cols // vec
     total = rows * per_row
-    for it in range(-(-total // threads)):
-        chunk = tid if it == 0 else b.add(tid, b.const_i32(it * threads))
+    for chunk, tail in deal_chunks(b, tid, total, threads):
 
         def body(chunk=chunk) -> None:
-            r = b.div(chunk, b.const_i32(per_row)) if per_row > 1 else chunk
-            c = (
-                b.mul(b.mod(chunk, b.const_i32(per_row)), b.const_i32(vec))
-                if per_row > 1
-                else b.const_i32(0)
-            )
+            r, c = chunk_coords(b, chunk, per_row, vec)
             view.store(b, r, c, load(r, c), vec)
 
-        if (it + 1) * threads <= total:
+        if not tail:
             body()
         else:
             with b.scf_if(b.cmp_lt(chunk, b.const_i32(total))):
@@ -1365,19 +1348,13 @@ class BwdTileStep:
         per_row = d // 4
         total = n0 * per_row
         for view in (self.v_dk_acc, self.v_dv_acc):
-            for it in range(-(-total // g.threads)):
-                chunk = (
-                    self.tid
-                    if it == 0
-                    else b.add(self.tid, b.const_i32(it * g.threads))
-                )
+            for chunk, tail in deal_chunks(b, self.tid, total, g.threads):
 
                 def body(chunk=chunk, view=view) -> None:
-                    r = b.div(chunk, b.const_i32(per_row))
-                    c = b.mul(b.mod(chunk, b.const_i32(per_row)), b.const_i32(4))
+                    r, c = chunk_coords(b, chunk, per_row, 4)
                     view.store(b, r, c, zero4, 4)
 
-                if (it + 1) * g.threads <= total:
+                if not tail:
                     body()
                 else:
                     with b.scf_if(b.cmp_lt(chunk, b.const_i32(total))):

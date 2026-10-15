@@ -52,6 +52,8 @@ from typing import Callable, Optional, Union
 from rocke.core.ir import I16, I32, I64, IRBuilder, Value, VectorType
 from rocke.helpers.attention_fwd_ext import RowEpilogue, natural_lse_from_log2_stats
 
+from ._attention_bwd_addr import as_i32
+
 __all__ = [
     "LSE_ROWS_PER_LANE",
     "dense_row_has_key",
@@ -240,15 +242,11 @@ Stride = Union[int, Value]
 ExtraValid = Callable[[IRBuilder, RowEpilogue], Optional[Value]]
 
 
-def _i32(b: IRBuilder, x: Stride) -> Value:
-    return b.const_i32(x) if isinstance(x, int) else x
-
-
 def _scaled(b: IRBuilder, idx: Value, stride: Stride) -> Value:
     # A literal stride of 1 is the common contiguous case; skip the multiply.
     if isinstance(stride, int) and stride == 1:
         return idx
-    return b.mul(idx, _i32(b, stride))
+    return b.mul(idx, as_i32(b, stride))
 
 
 def lse_row_value(b: IRBuilder, e: RowEpilogue, valid: Value) -> Value:
@@ -286,7 +284,7 @@ def make_lse_epilogue(
         raise ValueError("batch_idx and batch_stride must be given together")
     base = lse
     if batch_idx is not None:
-        off = b.mul(b.zext(batch_idx, I64), b.zext(_i32(b, batch_stride), I64))
+        off = b.mul(b.zext(batch_idx, I64), b.zext(as_i32(b, batch_stride), I64))
         base = b.global_ptr_add(lse, b.mul(off, b.const_i64(4)))
 
     def hook(bb: IRBuilder, e: RowEpilogue) -> Optional[Value]:

@@ -101,7 +101,8 @@ from kernels.common.attention_bwd import (
     validate_attn_bwd_spec,
 )
 
-from .sdpa.bwd_kernel_cases import CONFIGS, config_knobs
+from ._attention_bwd_test_utils import distinct_configs, kernel_signature
+from .sdpa.bwd_kernel_cases import config_knobs
 
 ARCHS = ("gfx942", "gfx950", "gfx1151", "gfx1201")
 FLAVORS = ("llvm20", "llvm22", "llvm23")
@@ -109,17 +110,6 @@ DTYPES = ("fp16", "bf16")
 HEADS = (32, 64, 128)
 INPUTS = {"Q", "K", "V", "dO", "WS_LSE2", "WS_DSUM", "SEQ_Q", "SEQ_KV", "OFF_Q",
           "OFF_KV", "WORKLIST"}  # fmt: skip
-
-
-def _configs(arch):
-    out, seen = [], []
-    for cfg in CONFIGS:
-        knobs = config_knobs(cfg, arch)
-        if knobs is None or knobs in seen:
-            continue
-        seen.append(knobs)
-        out.append(cfg)
-    return out
 
 
 # Spec knobs per instance variant (mask class, head packing, edge tiles).
@@ -185,7 +175,7 @@ ATOMIC_VARIANTS = tuple(v for v in VARIANTS if "atomic" in v)
 INSTANCES = [
     (arch, cfg, d, dt, var)
     for arch in ARCHS
-    for cfg in _configs(arch)
+    for cfg in distinct_configs(arch)
     for d in HEADS
     for dt in DTYPES
     for var in VARIANTS
@@ -322,7 +312,7 @@ def _built(arch, cfg, d, dt, var) -> bool:
 # Every gfx950 configuration where the wide G1 / G3 atom is legal and built.
 WIDE_INSTANCES = [
     row
-    for cfg in _configs("gfx950")
+    for cfg in distinct_configs("gfx950")
     for d in HEADS
     for dt in DTYPES
     for base in _WIDE_BASES
@@ -431,7 +421,7 @@ def test_instance_builds_and_lowers(row):
 @pytest.mark.parametrize("flavor", FLAVORS)
 @pytest.mark.parametrize("arch", ARCHS)
 def test_lowers_at_every_flavor(arch, flavor):
-    for cfg in _configs(arch):
+    for cfg in distinct_configs(arch):
         for var in (
             "none", "band_pack", "band_edge", "band_atomic_pack", "thd_band_pack",
             "thd_none_atomic", "sv1_band_atomic_pack", "thd_sv1_band",
@@ -440,29 +430,14 @@ def test_lowers_at_every_flavor(arch, flavor):
             assert "define amdgpu_kernel void @" in ir
 
 
-def _signature(ir):
-    head = re.search(r"define amdgpu_kernel void @\S+\((.*?)\) #0", ir).group(1)
-    out = []
-    for p in head.split(", "):
-        name = p.split("%")[-1]
-        if p.startswith("ptr"):
-            kind = "Q"
-        elif p.startswith("float"):
-            kind = "f"
-        else:
-            kind = "q" if p.startswith("i64") else "i"
-        out.append((name, kind, p))
-    return out
-
-
 @pytest.mark.parametrize("arch", ARCHS)
 def test_kernarg_order_matches_params(arch):
     variants = (
         "none", "band_pack", "band_atomic", "thd_band", "thd_none_atomic",
         "sv1_band", "thd_sv1_none_atomic_pack",
     )  # fmt: skip
-    for cfg, var in ((c, v) for c in _configs(arch) for v in variants):
-        sig = _signature(ir_of(arch, cfg, 128, "fp16", var))
+    for cfg, var in ((c, v) for c in distinct_configs(arch) for v in variants):
+        sig = kernel_signature(ir_of(arch, cfg, 128, "fp16", var))
         assert [(n, k) for n, k, _ in sig] == list(attn_bwd_params("main"))
         for name, kind, text in sig:
             assert "noalias" not in text
@@ -475,7 +450,7 @@ def test_xcd_remap_reads_the_remap_kernargs_only_when_built(arch):
     """``xcd_remap = False`` (every shipped instance) never reads ``xcd_n`` /
     ``xcd_chunk``; ``xcd_remap = True`` reads both, keeps the v3 signature and
     gets its own kernel name."""
-    cfg = _configs(arch)[0]
+    cfg = distinct_configs(arch)[0]
     for var in ("none", "band_atomic"):
         plain_spec = spec_of(arch, cfg, 64, "bf16", var)
         spec = dataclasses.replace(plain_spec, xcd_remap=True)
@@ -483,7 +458,7 @@ def test_xcd_remap_reads_the_remap_kernargs_only_when_built(arch):
         remap = lower(
             build_attn_bwd_main(spec, arch=arch), arch=arch, llvm_flavor="llvm22"
         )
-        assert [(n, k) for n, k, _ in _signature(remap)] == list(
+        assert [(n, k) for n, k, _ in kernel_signature(remap)] == list(
             attn_bwd_params("main")
         )
         for name in ("xcd_n", "xcd_chunk"):
@@ -501,7 +476,7 @@ def test_worklist_reads_the_list_only_when_built(arch):
     signature and gets its own kernel name; the decode is the only change
     before the sequence decode (the q-loop body and the epilogue are the
     plain kernel's)."""
-    cfg = _configs(arch)[0]
+    cfg = distinct_configs(arch)[0]
     for plain_var, wl_var in (
         ("thd_band", "thd_band_wl"),
         ("thd_none_atomic_pack", "thd_none_atomic_pack_wl"),
@@ -509,7 +484,9 @@ def test_worklist_reads_the_list_only_when_built(arch):
     ):
         plain = ir_of(arch, cfg, 64, "bf16", plain_var)
         wl = ir_of(arch, cfg, 64, "bf16", wl_var)
-        assert [(n, k) for n, k, _ in _signature(wl)] == list(attn_bwd_params("main"))
+        assert [(n, k) for n, k, _ in kernel_signature(wl)] == list(
+            attn_bwd_params("main")
+        )
         for name in ("WORKLIST", "use_worklist"):
             uses = re.compile(rf"%{name}\b")
             assert len(uses.findall(plain)) == 1, (name, "plain")  # signature only
@@ -563,7 +540,7 @@ def _op_names(kernel):
 
 @pytest.mark.parametrize("arch", ARCHS)
 def test_lane_map_facts_and_relabel(arch):
-    for cfg in _configs(arch):
+    for cfg in distinct_configs(arch):
         geom = BwdTileGeometry.from_spec(resolved_of(arch, cfg, 64, "fp16"), arch)
         if geom.pt_route == "relabel":
             assert geom.relabel_plan.kind == "direct"
@@ -715,7 +692,7 @@ def test_atomic_mode_heads_and_split(arch):
     ``y % g_split``; the q loop runs ``(G / g_split) * n_qt`` steps from query
     head ``unit * G + split * (G / g_split)``; K is rebased on ``unit * G /
     gk`` and V on ``unit * G / gv``."""
-    kernel = kernel_of(arch, _configs(arch)[0], 64, "fp16", "band_atomic")
+    kernel = kernel_of(arch, distinct_configs(arch)[0], 64, "fp16", "band_atomic")
     ops = [op for op, _ in _walk(kernel.body.ops)]
 
     def operands(op):
@@ -793,7 +770,7 @@ def test_sequence_lengths_read_once_under_the_runtime_flag(arch):
     ``has_len`` (a null pointer is never dereferenced when the flag is 0),
     and the count is clamped to ``[0, S_max]`` before any use."""
     limits = {"%SEQ_Q": "%S_q_max", "%SEQ_KV": "%S_kv_max"}
-    for cfg in _configs(arch):
+    for cfg in distinct_configs(arch):
         for var in ("band", "band_pack", "none_atomic", "thd_band", "thd_none_atomic"):
             kernel = kernel_of(arch, cfg, 64, "fp16", var)
             in_q = {
@@ -850,7 +827,7 @@ def test_ragged_offsets_read_once_and_decoded_in_64_bits(arch):
     and loop; the token arithmetic (``off * mult / div``) is 64-bit; the
     batched instance of the same variant reads neither table."""
     mults = {"%OFF_Q": ("%q_mult", "%q_div"), "%OFF_KV": ("%kv_mult", "%kv_div")}
-    for cfg in _configs(arch):
+    for cfg in distinct_configs(arch):
         for var in ("band", "band_pack", "none_atomic_pack"):
             batched = kernel_of(arch, cfg, 64, "fp16", var)
             names = {o.name for op, _ in _walk(batched.body.ops) for o in op.operands}
@@ -1076,7 +1053,7 @@ def test_mma_and_atomic_counts_per_step(row):
 @pytest.mark.parametrize("arch", ARCHS)
 def test_dq_atomics_are_agent_scope_and_native(arch):
     variants = ("none", "band_pack", "band_atomic", "none_atomic_pack")
-    for cfg, var in ((c, v) for c in _configs(arch) for v in variants):
+    for cfg, var in ((c, v) for c in distinct_configs(arch) for v in variants):
         ir = ir_of(arch, cfg, 64, "fp16", var)
         rmw = [ln for ln in ir.splitlines() if "atomicrmw" in ln]
         assert rmw
@@ -1099,7 +1076,7 @@ def test_dq_atomics_are_agent_scope_and_native(arch):
 )  # fmt: skip
 @pytest.mark.parametrize("arch", ARCHS)
 def test_workspace_rebase_is_64bit(arch, var):
-    ir = ir_of(arch, _configs(arch)[0], 64, "bf16", var)
+    ir = ir_of(arch, distinct_configs(arch)[0], 64, "bf16", var)
     body = ir.split(") #0 {", 1)[1]
     used = ["WS_LSE2", "WS_DSUM", "WS_DQ"]
     unused = ["WORKLIST"] + ([] if var.startswith("thd_") else ["OFF_Q", "OFF_KV"])
@@ -1158,7 +1135,7 @@ WS_TENSORS = ("%WS_LSE2", "%WS_DSUM", "%WS_DQ", "%WS_DK", "%WS_DV")
 @pytest.mark.parametrize("dtype,elem", [("fp16", "half"), ("bf16", "bfloat")])
 @pytest.mark.parametrize("arch", ARCHS)
 def test_stage_vec_8_access_width(arch, dtype, elem, var):
-    ir = ir_of(arch, _configs(arch)[-1], 128, dtype, var)
+    ir = ir_of(arch, distinct_configs(arch)[-1], 128, dtype, var)
     acc = _user_accesses(ir, USER_TENSORS)
     kinds = {k for k, _t, _a in acc}
     assert kinds == {"load", "store"}
@@ -1171,7 +1148,7 @@ def test_thd_direct_forms_the_dkv_slabs_before_the_q_loops(arch):
     SGPR copies formed outside the q loops and feed the epilogue stores; the
     default, batched and atomic instances have none (inert there: the IR is
     the default's apart from the kernel name)."""
-    cfg = _configs(arch)[-1]
+    cfg = distinct_configs(arch)[-1]
     pat = 'asm "", "=s,0"(ptr addrspace(1)'
 
     def hoisted(var):
@@ -1480,7 +1457,7 @@ def test_head_outer_step_order(row):
 def test_new_values_change_the_ir_and_defaults_do_not(arch):
     """Each non-default barrier flavour / step order changes the emitted IR
     (beyond the kernel name); the spelled-out defaults emit the default IR."""
-    cfg = _configs(arch)[0]
+    cfg = distinct_configs(arch)[0]
     # (d128: the grouped head-outer form at d64 on the CDNA default tiles is a
     # recorded resource-gate failure, RESOURCE_REFUSED)
     base = spec_of(arch, cfg, 128, "fp16", "band_edge")
@@ -1650,7 +1627,7 @@ def _legal(row) -> bool:
 def _order_rows():
     rows = []
     for arch in ARCHS:
-        for cfg in _configs(arch):
+        for cfg in distinct_configs(arch):
             for order in STAGE_ORDERS:
                 for base in ORDER_BASES:
                     rows.append((arch, cfg, 64, "fp16", f"{base}||{order}"))
@@ -1863,7 +1840,7 @@ def test_stage_order_changes_only_the_issue_order(row):
 @pytest.mark.parametrize("arch", ARCHS)
 def test_default_stage_order_is_the_omitted_field(arch):
     """The explicit default order is the default spec: same name, same IR."""
-    for cfg in _configs(arch):
+    for cfg in distinct_configs(arch):
         for var in ("band", "none_atomic_pack", "thd_sv1_band"):
             spec = spec_of(arch, cfg, 64, "fp16", var)
             explicit = dataclasses.replace(spec, stage_order=DEFAULT_STAGE_ORDER)

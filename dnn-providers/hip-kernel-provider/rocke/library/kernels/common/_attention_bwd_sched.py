@@ -121,6 +121,7 @@ from typing import Any
 from rocke.core.arch import ArchTarget
 from rocke.helpers.compile import COMGR_FRESH_PROCESS_ATTR
 from rocke.helpers.schedule import DS_READ, DS_WRITE, MFMA, VMEM_READ, VMEM_WRITE
+from rocke.helpers.spec import ceil_div
 
 from ._attention_bwd_lds import default_xt_writer
 
@@ -209,10 +210,6 @@ _ELEM_BYTES = 2
 # before the MFMA (they have the longest latency), the rest after it.
 _PRE = (VMEM_READ,)
 _POST = (DS_READ, DS_WRITE, VMEM_WRITE)
-
-
-def _cdiv(a: int, b: int) -> int:
-    return -(-int(a) // int(b))
 
 
 def _mma_ops(arch: str, dtype: str):
@@ -764,10 +761,10 @@ class StageTable:
         """
         n = self.frag_len(gemm)
         if source == "tr_read":
-            return _cdiv(n, 4)
+            return ceil_div(n, 4)
         if source == "lds_plain":
             return n
-        return _cdiv(n * _ELEM_BYTES, 16)
+        return ceil_div(n * _ELEM_BYTES, 16)
 
     @property
     def _tsrc(self) -> str:
@@ -778,20 +775,20 @@ class StageTable:
     def _prefetch_loads(self) -> int:
         vec = 8 if self.global_path == "dma" else self.stage_vec
         threads = self.waves * self.wave_size
-        tile = _cdiv(self.k_m0 * self.head_size, threads * vec)
-        stats = _cdiv(self.k_m0, self.wave_size)
+        tile = ceil_div(self.k_m0 * self.head_size, threads * vec)
+        stats = ceil_div(self.k_m0, self.wave_size)
         return 2 * tile + 2 * stats
 
     def _next_tile_lds_writes(self) -> int:
         if self.global_path == "dma":
             return 0  # the DMA fills LDS; no ds_write
         threads = self.waves * self.wave_size
-        tile = _cdiv(self.k_m0 * self.head_size, threads * self.stage_vec)
+        tile = ceil_div(self.k_m0 * self.head_size, threads * self.stage_vec)
         n = 2 * tile
         if self.transpose_source == "xt_lds":
             w = default_xt_writer(self.k_m0, self.head_size, threads)
             n += 2 * w.stores_per_thread
-        n += 2 * _cdiv(self.k_m0, threads)
+        n += 2 * ceil_div(self.k_m0, threads)
         return n
 
     def _ds_tile_writes(self) -> int:
@@ -851,7 +848,7 @@ class StageTable:
 
     def _contig_reads(self, gemm: str, buf: str) -> int:
         """LDS reads of one K-contiguous fragment of ``gemm`` from ``buf``."""
-        return _cdiv(self.frag_len(gemm), min(8, self._align(buf)))
+        return ceil_div(self.frag_len(gemm), min(8, self._align(buf)))
 
     def _transposed_reads(self, gemm: str) -> int:
         """LDS reads of one K-outer fragment of ``gemm`` (the transpose
@@ -861,7 +858,7 @@ class StageTable:
         if self.transpose_source == "tr_read":
             return n // 4
         if self.transpose_source == "xt_lds":
-            return _cdiv(n * _ELEM_BYTES, 16)
+            return ceil_div(n * _ELEM_BYTES, 16)
         return n
 
     def _frags(self, gemm: str) -> tuple[int, int, int]:
@@ -1023,7 +1020,7 @@ class StageTable:
     def _chunk_stores(self, buf: str) -> int:
         """LDS store ops of one 8-element chunk into ``buf`` (a row pad that
         breaks the 16-byte alignment splits it)."""
-        return _cdiv(8, min(8, self._align(buf)))
+        return ceil_div(8, min(8, self._align(buf)))
 
     def _ring_reg_chunks(self) -> tuple[int, bool]:
         """``(chunks, joint)``: 8-element Q / dO chunks one thread of the
@@ -1032,7 +1029,7 @@ class StageTable:
         total = self.k_m0 * self.head_size // 8
         threads = self._threads
         joint = not self.head_pack and total < threads and total % self.wave_size == 0
-        return (1 if joint else 2 * _cdiv(total, threads)), joint
+        return (1 if joint else 2 * ceil_div(total, threads)), joint
 
     def ring_prefetch(self) -> dict[str, Any]:
         """The prefetch of one q step of a ring (``{}`` for ``"sync"``).
@@ -1079,7 +1076,7 @@ class StageTable:
                 "vmem_read": chunks * self._chunk_loads() + 2,
                 "ds_write": stores + stats_stores,
             }
-        per_tensor = _cdiv(self.k_m0 * self.head_size // 8, self._threads)
+        per_tensor = ceil_div(self.k_m0 * self.head_size // 8, self._threads)
         late = self.ring_issue == "late"
         return {
             "issue": "merged",
@@ -1173,7 +1170,7 @@ class StageTable:
         written at the step top, before the staging barrier)."""
         if not self.counted:
             return {}
-        chunks = _cdiv(self.k_m0 * self.head_size // 8, self._threads)
+        chunks = ceil_div(self.k_m0 * self.head_size // 8, self._threads)
         return {
             "issue": self.counted_issue,
             "loads": self.stats_loads() + 2 * chunks * self._chunk_loads(),
@@ -1619,7 +1616,7 @@ class DqStageTable:
         """``(DS reads, reads of the first K step)`` of G0' (or G2'): one
         K-inner A fragment per 16 keys and K step."""
         k02 = instruction_k(self.arch, self.atom_g02, self.dtype)
-        per = _cdiv(self._frag_len(self.atom_g02), min(8, self._kv_align))
+        per = ceil_div(self._frag_len(self.atom_g02), min(8, self._kv_align))
         first = (self.k_n0 // 16) * per
         return (self.head_size // k02) * first, first
 
@@ -1635,7 +1632,7 @@ class DqStageTable:
     def _tile_chunks(self) -> int:
         """8-element chunks of one ``kN0 x D`` tile a thread moves."""
         threads = self.waves * self.wave_size
-        return _cdiv(self.k_n0 * self.head_size // 8, threads)
+        return ceil_div(self.k_n0 * self.head_size // 8, threads)
 
     def prefetch(self) -> dict[str, int]:
         """The next key tile's traffic per thread (``{}`` without
@@ -1646,7 +1643,7 @@ class DqStageTable:
             return {}
         chunks = self._tile_chunks()
         loads = 1 if self.stage_vec == 8 else 8
-        stores = _cdiv(8, min(8, self._kv_align))
+        stores = ceil_div(8, min(8, self._kv_align))
         return {"vmem_read": 2 * chunks * loads, "ds_write": 2 * chunks * stores}
 
     def stages(self) -> tuple[StageCounts, ...]:

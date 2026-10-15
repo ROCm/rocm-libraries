@@ -44,10 +44,10 @@ checks all of it on host-visible data and rejects a violation. On the device
 the defined behaviour for out-of-contract data is: a kv length outside
 ``[0, max_seqlen_kv]`` is clamped into it, and a block id outside ``[0,
 num_blocks)`` is never dereferenced (its K / V rows read as zeros and its
-dK / dV slots are not written; the main kernel's guard is active when the
-kernel passes the cache's ``page_rows`` to :class:`._attention_bwd_paged.PagedKv`).
-The plan passes ``page_rows = num_blocks * page`` to the main kernel in both
-page modes for that guard.
+dK / dV slots are not written; the main kernel passes the cache's
+``page_rows`` to :class:`._attention_bwd_paged.PagedKv`, which turns the guard
+on). The plan passes ``page_rows = num_blocks * page`` to the main kernel in
+both page modes for that guard.
 
 Every decline code has a kind (``Verdict.kind``, see
 :data:`kernels.common.attention_bwd_plan.DECLINE_KINDS`); a
@@ -64,7 +64,10 @@ import math
 import numbers
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import Any, Callable, Mapping, Optional
+from typing import Any, Callable, Iterator, Mapping, Optional
+
+from rocke.helpers.attention_band import I32_FAR
+from rocke.helpers.spec import align_up, ceil_div
 
 from kernels.common.attention_bwd import (
     BWD_ARCHS,
@@ -91,6 +94,7 @@ from kernels.common.attention_bwd_plan import (
     _FrozenStrides,
     _overlaps,
     _scale_mults,
+    attn_bwd_stage_vec,
     check_field_types,
     decline_verdict,
 )
@@ -113,7 +117,6 @@ __all__ = [
     "attn_bwd_unified_declaration",
     "attn_bwd_unified_perf_class",
     "attn_bwd_unified_plan",
-    "attn_bwd_unified_stage_vec",
     "attn_bwd_unified_support",
     "attn_bwd_unified_tile_choice",
     "attn_bwd_unified_tile_configs",
@@ -185,7 +188,6 @@ PERF_STATUSES = ("verified", "unverified", "below_baseline")
 
 I32_MAX = 2**31 - 1
 _GRID_YZ_MAX = 65535
-_BAND_MAX = 2**30
 _WS_ALIGN = 256
 _Q_SIDE = ("q", "o", "do", "dq")
 _CACHES = ("k", "v", "dk", "dv")
@@ -349,6 +351,12 @@ class AttnBwdUnifiedRequest:
             return self.cache_dims[name]
         return (self.num_blocks, self.page, self.h_kv, self.d_qk)
 
+    def used_strides(self) -> Iterator[int]:
+        """The strides (other than D) of every tensor that address more than
+        one index, tensor by tensor (lazy: a caller may stop at the first)."""
+        for name in _TENSORS:
+            yield from _used_strides(self, name)
+
     @property
     def group(self) -> int:
         return self.h_q // self.h_kv if self.h_kv > 0 else 0
@@ -396,8 +404,9 @@ class AttnBwdUnifiedPolicy:
 
 
 # Tuned tile configuration per (arch, head size, page): rule (1) of the tile
-# choice, from the paired unified-route measurements (relative evidence in
-# the case study). Keys are request shape only; values name a shipped
+# choice, from the paired unified-route measurements (provenance and
+# selection rule: platform/dsl_docs/instances/attention_bwd_unified.md
+# section 3). Keys are request shape only; values name a shipped
 # configuration of attn_bwd_unified_tile_configs. Pages not listed follow
 # rules (2) - (4). Every entry was measured on a paired cell of
 # benchmarks/common/attention_bwd_unified_bench.py (cell named per entry).
@@ -425,9 +434,7 @@ def shipped_tuning(req, arch: str, page_class: str) -> Mapping[str, Any]:
     name = TUNED_PAGE_TILES.get((arch, req.d_qk, req.page))
     if name is None:
         return {}
-    cfgs = attn_bwd_unified_tile_configs(
-        arch, req.d_qk, attn_bwd_unified_stage_vec(req)
-    )
+    cfgs = attn_bwd_unified_tile_configs(arch, req.d_qk, attn_bwd_stage_vec(req))
     return dict(cfgs[name][1]) if name in cfgs else {}
 
 
@@ -440,12 +447,8 @@ def shipped_unified_policy() -> AttnBwdUnifiedPolicy:
 # ---------------------------------------------------------------------------
 
 
-def _ceil_div(a: int, b: int) -> int:
-    return -(-a // b)
-
-
 def _align(x: int) -> int:
-    return _ceil_div(x, _WS_ALIGN) * _WS_ALIGN
+    return align_up(x, _WS_ALIGN)
 
 
 def _decline(code: str, detail: str) -> Verdict:
@@ -516,16 +519,6 @@ def _used_strides(req: AttnBwdUnifiedRequest, name: str) -> list[int]:
     return [s for s, n in zip(st[:-1], dims[:-1]) if n > 1]
 
 
-def attn_bwd_unified_stage_vec(req: AttnBwdUnifiedRequest) -> int:
-    """8 when every used stride is a multiple of 8 and bases are 16 B aligned."""
-    if req.tensor_alignment < 16:
-        return 1
-    for n in _TENSORS:
-        if any(s % 8 for s in _used_strides(req, n)):
-            return 1
-    return 8
-
-
 def _index_range(req: AttnBwdUnifiedRequest) -> Optional[str]:
     for n in _TENSORS:
         for s in req.tensor_strides(n):
@@ -535,11 +528,11 @@ def _index_range(req: AttnBwdUnifiedRequest) -> Optional[str]:
         return f"block-table row stride {req.table_stride} exceeds i32"
     if req.page_rows > I32_MAX:
         return f"num_blocks * page = {req.page_rows} >= 2^31"
-    if req.max_blocks_per_seq * req.page >= _BAND_MAX:
+    if req.max_blocks_per_seq * req.page >= I32_FAR:
         return (
             f"max_blocks_per_seq * page = {req.max_blocks_per_seq * req.page} >= 2^30"
         )
-    if max(req.max_seqlen_q, req.max_seqlen_kv) >= _BAND_MAX:
+    if max(req.max_seqlen_q, req.max_seqlen_kv) >= I32_FAR:
         return "sequence bound >= 2^30"
     if req.total_q > I32_MAX:
         return f"total_q {req.total_q} exceeds i32"
@@ -803,7 +796,7 @@ def _request_checks(
     if req.h_kv > 0 and req.h_q % req.h_kv:
         return _decline("GQA_RATIO", f"h_q={req.h_q} not a multiple of h_kv={req.h_kv}")
     left, right = req.left_bound, req.right_bound
-    if not (-1 <= left < _BAND_MAX and -1 <= right < _BAND_MAX):
+    if not (-1 <= left < I32_FAR and -1 <= right < I32_FAR):
         return _decline("BAND_BOUND", f"left={left} right={right}")
     why = _strides_wellformed(req)
     if why is not None:
@@ -888,7 +881,7 @@ def _request_checks(
         return _decline(
             "EMPTY", "a sequence, head, token, block or head-dim extent is 0"
         )
-    key = _instance_key(req, arch, attn_bwd_unified_stage_vec(req), policy)
+    key = _instance_key(req, arch, attn_bwd_stage_vec(req), policy)
     if key in policy.instance_unavailable:
         return _decline("INSTANCE_UNAVAILABLE", f"{key} failed the resource gate")
     return None
@@ -993,7 +986,7 @@ def _resolve_plan(
 ) -> AttnBwdPlan:
     """The plan of a request that passed the request checks (``ValueError``
     when no instance serves it under ``policy``)."""
-    stage_vec = attn_bwd_unified_stage_vec(req)
+    stage_vec = attn_bwd_stage_vec(req)
     tuned = dict(
         policy.tuning(req, arch, _default_page_class(arch, req, stage_vec)) or {}
     )
@@ -1058,7 +1051,7 @@ def _resolve_plan(
     # Direct scatter covers every slot of the last live page: the grid spans
     # roundup(max_seqlen_kv, page) keys; the atomic mode only the keys.
     cover = req.page if direct else kn
-    n_kv_tiles = _ceil_div(_ceil_div(req.max_seqlen_kv, cover) * cover, kn)
+    n_kv_tiles = ceil_div(align_up(req.max_seqlen_kv, cover), kn)
     if req.h_kv * g_split > _GRID_YZ_MAX:
         raise ValueError(f"GRID_LIMIT: h_kv * g_split = {req.h_kv * g_split} > 65535")
     lb_name = runtime_in.get("lb_order", "natural")

@@ -30,9 +30,10 @@ import os
 import numpy as np
 import pytest
 
+from ._attention_bwd_test_utils import find_bwd_case
 from ._attention_bwd_harness import ARCH, plan_case, run_case
-from .sdpa.bwd_cases import compare_bwd, get_bwd_case
-from .sdpa.bwd_kernel_cases import SUPPLEMENTARY_CASES, shard_of
+from .sdpa.bwd_cases import compare_bwd
+from .sdpa.bwd_kernel_cases import shard_of
 from .sdpa.bwd_tile_region_sets import (
     BITWISE_GROUPS,
     REGION_CASES,
@@ -48,13 +49,6 @@ pytestmark = [
         ARCH not in _CDNA, reason=f"needs gfx942/gfx950; device is {ARCH}"
     ),
 ]
-
-
-def _case(case_id):
-    for c in SUPPLEMENTARY_CASES:
-        if c.id == case_id:
-            return c
-    return get_bwd_case(case_id)
 
 
 def _shard():
@@ -88,7 +82,7 @@ def _refusal(name, case_id):
     resource refusal), or ``None`` when it plans."""
     try:
         plan_case(
-            _case(case_id),
+            find_bwd_case(case_id),
             arch=ARCH,
             config="default",
             overrides=dict(region_knobs(name)),
@@ -101,7 +95,7 @@ def _refusal(name, case_id):
 def _run(name, case_id):
     key = (name, case_id)
     if key not in _RUNS:
-        case = _case(case_id)
+        case = find_bwd_case(case_id)
         knobs = region_knobs(name)
         run = run_case(case, arch=ARCH, config="default", overrides=dict(knobs))
         spec = run.plan.specs["main"]

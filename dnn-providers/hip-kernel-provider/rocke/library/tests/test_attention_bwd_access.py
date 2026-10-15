@@ -63,6 +63,7 @@ from kernels.common.attention_bwd_plan import (
     attn_bwd_plan,
 )
 from kernels.common.attention_bwd_run import _BUILDERS
+from ._attention_bwd_test_utils import find_bwd_case
 
 ALL_ARCHS = ("gfx942", "gfx950", "gfx1151", "gfx1201")
 
@@ -610,8 +611,8 @@ def test_resource_gate_of_the_new_values(arch, variant):
 
 try:
     from ._attention_bwd_harness import ARCH, DEVICE_ARCHS, narrow_inputs, run_case
-    from .sdpa.bwd_cases import compare_bwd, get_bwd_case
-    from .sdpa.bwd_kernel_cases import SUPPLEMENTARY_CASES, selected_configs
+    from .sdpa.bwd_cases import compare_bwd
+    from .sdpa.bwd_kernel_cases import selected_configs
 except ImportError:  # pragma: no cover
     ARCH, DEVICE_ARCHS = None, ()
 
@@ -666,13 +667,6 @@ LEVERS = {
 _LEVER_KEYS = {"ws_bounds", "slab_carry", "dkv_cell_vec"}
 
 
-def _case(cid):
-    for c in SUPPLEMENTARY_CASES:
-        if c.id == cid:
-            return c
-    return get_bwd_case(cid)
-
-
 def _passes(run):
     probs = compare_bwd(run.case, run.dq, run.dk, run.dv, run.ref)
     assert not probs, probs
@@ -705,7 +699,7 @@ def test_lever_is_bitwise(case_id, lever, config):
         pytest.skip("no supported device")
     from ._attention_bwd_harness import plan_case
 
-    case = _case(case_id)
+    case = find_bwd_case(case_id)
     knobs, _ = LEVERS[lever]
     split = ARCH in SPLIT_DQ_ARCHS and knobs.get("sched") != "stage_table_atomics"
     base_knobs = {k: v for k, v in knobs.items() if k not in _LEVER_KEYS}
@@ -767,7 +761,7 @@ def test_narrow_vec_is_bitwise(case_id, view, unit, config):
     the NaN stride gaps stay unread)."""
     if ARCH not in DEVICE_ARCHS:
         pytest.skip("no supported device")
-    case = _case(case_id)
+    case = find_bwd_case(case_id)
     inputs, request = narrow_inputs(case, view, unit, unit=unit)
     split = {"dq_mode": "split"} if ARCH in SPLIT_DQ_ARCHS else {}
     ref = run_case(

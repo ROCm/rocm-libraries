@@ -73,12 +73,14 @@ from rocke.core.codegen_policy import (
     SCHEDULER_STRATEGY_ATTR,
     normalize_scheduler_strategy,
 )
-from rocke.core.ir import F32, I32, I64, IRBuilder, PtrType, Type, Value
+from rocke.core.ir import F32, I32, IRBuilder, PtrType, Type, Value
 from rocke.helpers.attention_band import AttnRuntimeBounds
 
 from kernels.common._attention_bwd_addr import (
     StridedTensorAddr,
     WorkspaceAddr,
+    as_i32,
+    as_i64,
     decode_batched,
 )
 from kernels.common._attention_bwd_band import (
@@ -169,7 +171,7 @@ class BufferRowSlab:
         zero = b.const_i32(0)
         parts = []
         for i in range(n // 8):
-            col = col0 if i == 0 else b.add(_as_i32(b, col0), b.const_i32(8 * i))
+            col = col0 if i == 0 else b.add(as_i32(b, col0), b.const_i32(8 * i))
             parts.append(
                 b.buffer_load_vN(
                     self.rsrc, self._voffset(row, col), zero, self.dtype, 8
@@ -185,10 +187,6 @@ class BufferRowSlab:
         return b.buffer_load(
             self.rsrc, self._voffset(row, col), b.const_i32(0), self.dtype
         )
-
-
-def _as_i32(b, x):
-    return x if isinstance(x, Value) else b.const_i32(x)
 
 
 class DenseFixedAddr:
@@ -239,7 +237,7 @@ class DenseFixedAddr:
             )
             return
         self._strided = None
-        off = b.mul(_i64(b, seq.batch), b.const_i64(sb * _ELEM_BYTES))
+        off = b.mul(as_i64(b, seq.batch), b.const_i64(sb * _ELEM_BYTES))
         self._batch_ptr = b.global_ptr_add(ptr, off)
         # The slab's bytes under the compile-time shape: the hardware range
         # check reads zeros past them, so no load leaves the slab; the slab
@@ -257,16 +255,10 @@ class DenseFixedAddr:
         _sb, sh, st = self.strides
         ptr = self._batch_ptr
         if not (isinstance(h, int) and h == 0):
-            off = b.mul(_i64(b, h), b.const_i64(sh * _ELEM_BYTES))
+            off = b.mul(as_i64(b, h), b.const_i64(sh * _ELEM_BYTES))
             ptr = b.global_ptr_add(ptr, off)
         rsrc = b.buffer_rsrc(ptr, b.const_i32(self._num_records))
         return BufferRowSlab(b=b, rsrc=rsrc, dtype=self.dtype, t_stride=st)
-
-
-def _i64(b, x):
-    if isinstance(x, int):
-        return b.const_i64(x)
-    return x if x.type == I64 else b.zext(x, I64)
 
 
 # ---------------------------------------------------------------------------

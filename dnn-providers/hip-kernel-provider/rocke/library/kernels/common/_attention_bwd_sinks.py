@@ -50,7 +50,13 @@ from dataclasses import dataclass
 
 from rocke.core.ir import IRBuilder, Value
 
-from ._attention_bwd_addr import RowSlab, SeqInfo, StridedTensorAddr, WorkspaceAddr
+from ._attention_bwd_addr import (
+    RowSlab,
+    SeqInfo,
+    StridedTensorAddr,
+    WorkspaceAddr,
+    as_i32,
+)
 
 __all__ = [
     "AtomicWorkspaceSink",
@@ -65,10 +71,6 @@ __all__ = [
 ]
 
 IntOrValue = int | Value
-
-
-def _i32(b, x: IntOrValue):
-    return b.const_i32(x) if isinstance(x, int) else x
 
 
 @dataclass(frozen=True, eq=False)
@@ -217,7 +219,7 @@ class AtomicWorkspaceSink(DqSink):
         for slot in dq_frag:
 
             def target(slot=slot):
-                q = b.add(rows, _i32(b, slot.row))
+                q = b.add(rows, as_i32(b, slot.row))
                 if last is not None:
                     q = b.smin(q, last)
                 return q if base is None else b.sub(q, base)
@@ -360,7 +362,7 @@ class RegisterAccumulateSink(DqSink):
         for (row, col), acc in zip(self._slots, self._acc):
             by_row.setdefault(_key(row), (row, []))[1].append((col, acc))
         for row, cols in by_row.values():
-            q = b.add(self._q0, _i32(b, row))
+            q = b.add(self._q0, as_i32(b, row))
             with b.scf_if(b.cmp_lt(q, length)):
                 for col, acc in cols:
                     v = acc if self.scale is None else b.fmul(acc, self.scale)

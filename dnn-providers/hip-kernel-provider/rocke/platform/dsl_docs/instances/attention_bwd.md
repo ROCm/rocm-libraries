@@ -57,17 +57,17 @@ knob value, a refused value, or a recorded design; no shipped kernel emits it.
 | `library/kernels/common/attention_bwd_dq.py`, `_attention_bwd_dqbody.py` | the split dQ kernel (`AttnBwdDqSpec`, `build_attn_bwd_dq`) and its body (`BwdDqGeometry`, `BwdDqStep`, the key-tile range of a block of query rows; 2.4) |
 | `library/kernels/common/attention_bwd_unified.py`, `attention_bwd_unified_plan.py` | the unified family (paged KV; 8.3) |
 | `library/kernels/common/_attention_bwd_caps.py` | per-arch capability checks, atom selection, the asm MFMA mnemonics and hazard wait states |
-| `library/kernels/common/_attention_bwd_band.py` | inverse band (`q_tile_range`), tile classifier, interior q range, mask policies, dK / dV store rule |
-| `library/kernels/common/_attention_bwd_addr.py` | sequence decode (batched, THD), strided tensor and workspace address generators, packed rows, paged cache addressing |
+| `library/kernels/common/_attention_bwd_band.py` | inverse band (`q_tile_range`), tile classifier, interior q range, mask policies, dK / dV store rule, `HostInt` (the integer builder on Python ints that evaluates the band and the DMA lane map on the host) |
+| `library/kernels/common/_attention_bwd_addr.py` | sequence decode (batched, THD), strided tensor and workspace address generators, packed rows, paged cache addressing; the family's shared emitters `as_i32` / `as_i64` (an int as a constant, a value unchanged) and `deal_chunks` / `chunk_coords` (the chunks of a tile dealt round-robin to the threads, and a chunk's row and column) |
 | `library/kernels/common/_attention_bwd_sinks.py` | dQ sinks (atomic, packed atomic; null, register and split-slice sinks recorded) |
 | `library/kernels/common/_attention_bwd_worklist.py` | CTA decode, XCD remap, load-balance orders, head ranges, THD work list (layout, order, host model) |
 | `library/kernels/common/_attention_bwd_sched.py` | stage table (count models of the synchronous step, the prefetch ring and the merged ring, the counted waits, the split-dQ main kernel's three stages, and the reference placement; sched-group / fence / priority emission hooks; the split dQ kernel's key-step table `DqStageTable`; 3.5a) |
 | `library/kernels/common/attention_bwd_aux.py` | `AttnBwdAuxSpec`, prep, convert, the slice reduce (`build_attn_bwd_reduce`, 2.5a) and the paged roles |
 | `library/kernels/common/attention_bwd_plan.py` | `AttnBwdRequest`, predicate, workspace, plan, routing, performance classes, declaration, `AttnBwdPolicy` |
 | `library/kernels/common/attention_bwd_run.py` | launch glue: compile, pack kernargs, launch on one stream (prep, main, the converts or the dQ kernel) |
-| `library/kernels/common/attention_dense_bwd_spec.py` | `AttentionDenseBwdSpec`, mask resolution, `body_spec()`, `validate_attn_dense_bwd_spec`, kernel names, the `rocke.attn_dense_bwd.v1` ABI list (`attn_dense_bwd_params`) |
+| `library/kernels/common/attention_dense_bwd_spec.py` | `AttentionDenseBwdSpec`, `ArchAttentionDenseBwdSpec` and `DENSE_BWD_BODY_VARIANTS` (the per-target spec class and its body variants), mask resolution, `body_spec()`, `validate_attn_dense_bwd_spec`, kernel names, the `rocke.attn_dense_bwd.v1` ABI list (`attn_dense_bwd_params`) |
 | `library/kernels/common/_attention_dense_bwd_shell.py` | `DenseFixedAddr` / `BufferRowSlab`, `DiagonalBand` / `DenseNoMask` (compile-time classification), the dense CTA decode (grid, XCD remap, persistent grid), `emit_dense_bwd_main` |
-| `library/kernels/{gfx942,gfx950}/attention_dense_bwd.py` | `Gfx942AttentionDenseBwdSpec` / `Gfx950AttentionDenseBwdSpec` (`body_variant`), `build_attention_dense_bwd(spec, *, arch)` |
+| `library/kernels/{gfx942,gfx950}/attention_dense_bwd.py` | `Gfx942AttentionDenseBwdSpec` / `Gfx950AttentionDenseBwdSpec`: `ArchAttentionDenseBwdSpec` (`attention_dense_bwd_spec.py`, the shared spec plus `body_variant`) bound to the target, and `build_attention_dense_bwd(spec, *, arch)` |
 | `library/kernels/common/attention_dense_bwd_plan.py` | `dense_bwd_spec_for`, `attn_dense_bwd_plan` (general prep / converts / workspace, dense main launch, dense dQ launch under split) |
 | `library/kernels/common/attention_dense_bwd_dq.py` | `AttentionDenseBwdDqSpec`, `validate_attn_dense_bwd_dq_spec`, `dense_dq_static_classes`, the `rocke.attn_dense_bwd_dq.v1` ABI list, `build_attention_dense_bwd_dq` (the dense split dQ kernel) |
 | `library/kernels/common/attention_bwd_comgr.py` | the production comgr of the compile-only paths without importing torch (`ROCKE_COMGR_LIB` pinned by path) and the process-tree comgr cache directory (11) |
@@ -167,6 +167,44 @@ existing helpers:
 | `_attention_bwd_sched.py` | the stage tables and their hint emission | `helpers/schedule.py` (`SchedulePolicy`) | built on the same intrinsics; the tables model this step's matrix-op and atomic counts |
 | `_attention_bwd_addr.py`, `_attention_bwd_paged.py`, `_attention_bwd_worklist.py` | strided, THD, workspace and paged addressing; CTA decode, XCD remap, work list | `helpers/tensor_view.py`, `helpers/grid.py` | family-specific forms (64-bit batch / head rebase, clamped workspace rows, block-id guard); the XCD remap matches the chiplet helper's transform (tested) |
 | `_attention_bwd_body.py`, `_attention_bwd_dqbody.py`, `_attention_bwd_sinks.py`, `_attention_bwd_valu.py`, `_attention_bwd_tiles.py`, `_attention_bwd_caps.py`, `_attention_bwd_refusals.py`, `_attention_dense_bwd_shell.py` | the tile step, the dQ body, the dQ sinks, the VALU levers, tile legality, arch capabilities, the recorded refusals, the dense shell | none | backward-only |
+
+**Shared code: one copy each.** A helper the family's modules repeat has one
+definition. Where it lives follows the placement rule above: a host-only
+utility (no IR) may go to a shared helper module, an emitter stays in the
+family glue (it would need a C++ port as a `helpers/` emitter, 0.3):
+
+| Helper | Home | Users |
+|---|---|---|
+| `ceil_div`, `align_up` (host integer math) | `helpers/spec.py` | the plans, the stage tables, the dense forward's `align_up`, the conv families, `helpers/split_k.py`, `helpers/streamk.py`, `ceil_div_grid` |
+| `non_default_fields`, `salted_kernel_name` (spec-keyed kernel names: the base key plus the SHA-1 salt of every other non-default field) | `helpers/spec.py` | `AttnBwdSpec`, `AttnBwdDqSpec`, `AttnBwdUnifiedSpec`, `AttentionDenseBwdSpec`, `AttentionDenseBwdDqSpec` |
+| `I32_FAR = 2**30` (a limit past every row, key, length and band bound) | `helpers/attention_band.py` | the forward band, the inverse band, the workspace row clamp, the plans' 2**30 bound checks |
+| `as_i32`, `as_i64`, `deal_chunks`, `chunk_coords` (emitters) | `_attention_bwd_addr.py` | every backward module and `_lse_store.py` |
+| `HostInt` (host evaluation of the integer emitters) | `_attention_bwd_band.py` | the dense compile-time classification, the dense dQ kernel, the DMA lane map |
+| `attn_bwd_stage_vec` (the staging width rule, over `used_strides()`) | `attention_bwd_plan.py` | the general and the unified plan |
+| `ArchAttentionDenseBwdSpec` (the target-parameterised dense spec) | `attention_dense_bwd_spec.py` | `Gfx942AttentionDenseBwdSpec`, `Gfx950AttentionDenseBwdSpec` |
+
+`BandEmitter._i32` in `helpers/attention_band.py` stays private there: the
+platform cannot import the library glue. The tests share
+`library/tests/_attention_bwd_test_utils.py` (`kernel_signature`,
+`device_arch`, `find_bwd_case`, `distinct_configs`, `device_configs`,
+`fake_bench_ok`). Every move above keeps the emitted IR of every family
+byte-identical.
+
+**Promotion candidates.** `_attention_bwd_lds.py`, `_ring.py`, `_frag.py`,
+`_addr.py` and `_gemm.py` were checked against the helper atoms. Generic
+pieces with a plausible second family: the checked C-to-A register relabel
+(`_frag.plan_c_to_a` / `emit_c_to_a`, `_gemm.check_relabel_grids`: chained
+GEMMs such as a fused forward's P V); the 16-byte-chunk XOR DMA slab layout
+and its lane map (`_lds.DmaSlabLayout`, `_ring.dma_lane_source`: an LDS-DMA
+tile layout next to `helpers/loads.py`); the atomic-aware `vmcnt` wait model
+of the prefetch ring and the counted waits (an extension of
+`helpers/pipeline.py`'s wait model); and the round-robin chunk dealing
+(`deal_chunks` / `chunk_coords`, close to `helpers/loads.py`'s
+`CoalescedTileLoader`). Each is an SSA emitter, so promoting it needs the C++
+port the backward does not have (0.3); none is promoted now. The LDS phase
+planner, the stage tables, the workspace and paged addressing and `BlockGemm`
+(which overlaps `helpers/tiling`'s `TileMma`) are backward-specific or
+covered by an existing helper.
 
 ## 1. Math
 
