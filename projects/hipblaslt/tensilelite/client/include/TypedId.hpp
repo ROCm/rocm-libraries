@@ -330,5 +330,14 @@ namespace TensileLite
     using TypedGemm_B6F8_S_S = TypedGemm<BFloat6x32, Float8, float, float, float, float, BFloat6x32, Float8>;
     using TypedGemm_B8B6_S_S = TypedGemm<BFloat8, BFloat6x32, float, float, float, float, BFloat8, BFloat6x32>;
     using TypedGemm_B6B8_S_S = TypedGemm<BFloat6x32, BFloat8, float, float, float, float, BFloat6x32, BFloat8>;
+    // Half/BFloat16 dest for pure 6-bit and F6/B6 mixed gemms (RR custom kernels)
+    using TypedGemm_F6_H_S = TypedGemm<Float6x32, Float6x32, Half, Half, float, float, Float6x32, Float6x32>;
+    using TypedGemm_F6_B_S = TypedGemm<Float6x32, Float6x32, BFloat16, BFloat16, float, float, Float6x32, Float6x32>;
+    using TypedGemm_BF6_H_S = TypedGemm<BFloat6x32, BFloat6x32, Half, Half, float, float, BFloat6x32, BFloat6x32>;
+    using TypedGemm_BF6_B_S = TypedGemm<BFloat6x32, BFloat6x32, BFloat16, BFloat16, float, float, BFloat6x32, BFloat6x32>;
+    using TypedGemm_F6B6_H_S = TypedGemm<Float6x32, BFloat6x32, Half, Half, float, float, Float6x32, BFloat6x32>;
+    using TypedGemm_F6B6_B_S = TypedGemm<Float6x32, BFloat6x32, BFloat16, BFloat16, float, float, Float6x32, BFloat6x32>;
+    using TypedGemm_B6F6_H_S = TypedGemm<BFloat6x32, Float6x32, Half, Half, float, float, BFloat6x32, Float6x32>;
+    using TypedGemm_B6F6_B_S = TypedGemm<BFloat6x32, Float6x32, BFloat16, BFloat16, float, float, BFloat6x32, Float6x32>;
 #endif // !_WIN32
 } // namespace TensileLite

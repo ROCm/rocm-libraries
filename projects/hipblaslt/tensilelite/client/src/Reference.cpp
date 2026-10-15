@@ -3084,6 +3084,49 @@ namespace TensileLite
                 return ReferenceSolution<TypedGemm_B6B8_S_S>::SolveCPU(
                     problem, inputs, elementsToValidate);
             }
+#ifndef _WIN32
+            // Half/BFloat16 dest for pure 6-bit and F6/B6 mixed gemms
+            case TypedGemm_F6_H_S::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_F6_H_S, float>::SolveCPU(
+                    problem, inputs, elementsToValidate);
+            }
+            case TypedGemm_F6_B_S::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_F6_B_S, float>::SolveCPU(
+                    problem, inputs, elementsToValidate);
+            }
+            case TypedGemm_BF6_H_S::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_BF6_H_S, float>::SolveCPU(
+                    problem, inputs, elementsToValidate);
+            }
+            case TypedGemm_BF6_B_S::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_BF6_B_S, float>::SolveCPU(
+                    problem, inputs, elementsToValidate);
+            }
+            case TypedGemm_F6B6_H_S::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_F6B6_H_S, float>::SolveCPU(
+                    problem, inputs, elementsToValidate);
+            }
+            case TypedGemm_F6B6_B_S::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_F6B6_B_S, float>::SolveCPU(
+                    problem, inputs, elementsToValidate);
+            }
+            case TypedGemm_B6F6_H_S::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_B6F6_H_S, float>::SolveCPU(
+                    problem, inputs, elementsToValidate);
+            }
+            case TypedGemm_B6F6_B_S::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_B6F6_B_S, float>::SolveCPU(
+                    problem, inputs, elementsToValidate);
+            }
+#endif // !_WIN32
             default:;
             }
 
