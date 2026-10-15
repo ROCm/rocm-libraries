@@ -16,6 +16,9 @@ forward row stream over the transposed problem):
 * ``waves_per_eu``        -- occupancy hint for the scheduler;
 * ``row_guard``           -- the MFMA work of a row past the image is skipped
   under a block-uniform guard (a tile taller than the image);
+* the row-stream knobs ``prefetch_rows`` / ``lds_only_sync`` / ``waves_m`` /
+  ``lds_pad`` / ``stage_out`` / ``xcd_tiles`` and the early exit
+  ``row_exit``, alone and stacked;
 
 plus the kernel-level hooks ``direct_dgrad_spec_for_problem`` /
 ``direct_dgrad_launch`` / ``build_direct_dgrad``.
@@ -526,6 +529,80 @@ class TestFusedWeightNumerics(unittest.TestCase):
                 with self.subTest(mode=mode, p=p.short()):
                     ok, msg = _run(p, spec, art=art)
                     self.assertTrue(ok, msg)
+
+
+#: Row-stream knobs, alone and stacked (the policy's stack with and without
+#: the early exit, and the split-M stack on outputs with two 16-wide tiles).
+_STREAM_KNOBS = [
+    {"prefetch_rows": 2},
+    {"prefetch_rows": 3, "lds_only_sync": True},
+    {"lds_pad": 8},
+    {"stage_out": True},
+    {"xcd_tiles": True},
+    {"row_exit": True},
+    {"prefetch_rows": 2, "lds_only_sync": True, "lds_pad": 8, "stage_out": True, "xcd_tiles": True},
+    {"prefetch_rows": 2, "lds_only_sync": True, "lds_pad": 8, "stage_out": True, "xcd_tiles": True, "row_exit": True},
+    {"waves_m": 2, "prefetch_rows": 2, "lds_only_sync": True, "stage_out": True, "xcd_tiles": True},
+]  # fmt: skip
+
+#: (problem, base knobs): odd H / W, partial q strips and H tiles, a tile
+#: taller than the image, partial K atoms, 5x5, LDS-staged and gathered
+#: weights, the pre-pass weights, fp16 / bf16 -- each with at least eight
+#: image row bands so the XCD order is valid.
+_STREAM_CASES = [
+    (_problem(N=8, H=9, W=13, groups=8, cpg=16, kpg=16), {"block_groups": 2, "block_h": 16, "dgrad_fused_weights": True, "dgrad_weights_lds": True, "row_guard": True}),
+    (_problem(N=8, H=11, W=37, groups=8, cpg=16, kpg=16, dtype="fp16"), {"block_q": 32, "block_groups": 2, "block_h": 4, "dgrad_fused_weights": True, "dgrad_weights_lds": True, "row_guard": True}),
+    (_problem(N=9, H=7, W=9, groups=8, cpg=32, kpg=32), {"block_groups": 1, "block_h": 8, "fold_k32": True, "dgrad_fused_weights": True, "dgrad_weights_lds": True, "row_guard": True}),
+    (_problem(N=8, H=9, W=11, groups=8, cpg=32, kpg=8, K=5, dtype="fp16"), {"block_groups": 1, "block_h": 4, "dgrad_fused_weights": True, "row_guard": True}),
+    (_problem(N=8, H=10, W=13, groups=4, cpg=12, kpg=12), {"block_groups": 1, "block_h": 4, "dgrad_fused_weights": True, "waves_per_eu": 4}),
+    (_problem(N=8, H=10, W=13, groups=4, cpg=16, kpg=16), {"block_groups": 1, "block_h": 4}),
+]  # fmt: skip
+
+
+@unittest.skipIf(bool(_GPU_SKIP), _GPU_SKIP or "gpu")
+class TestRowStreamKnobNumerics(unittest.TestCase):
+    def test_knob_grid(self):
+        for p, base in _STREAM_CASES:
+            for kw in _STREAM_KNOBS:
+                spec = make_dgrad_fprop_spec(p, **base, **kw)
+                try:
+                    spec.validate()
+                except ValueError:
+                    continue  # e.g. waves_m on a single 16-wide output tile
+                if not is_valid_spec(spec, arch=GPU_ARCH)[0]:
+                    continue  # e.g. the XCD order or LDS weights on gfx942
+                with self.subTest(p=p.short(), K=p.KH, spec=spec.kernel_name()):
+                    ok, msg = _run(p, spec)
+                    self.assertTrue(ok, msg)
+
+    def test_one_stream_binary_serves_every_shape(self):
+        # The policy's stack on a whole-image tile with the early exit, built
+        # once on a probe and launched on unrelated extents that keep at
+        # least eight image row bands (images shorter than the tile, and one
+        # whose second tile is mostly past the image).
+        probe = _problem(N=8, H=64, W=64, groups=64, cpg=16, kpg=16)
+        knobs = {"dgrad_fused_weights": True, "row_guard": True, "row_exit": True}
+        if GPU_ARCH == "gfx950":
+            knobs.update(
+                dgrad_weights_lds=True,
+                prefetch_rows=2,
+                lds_only_sync=True,
+                xcd_tiles=True,
+                lds_pad=8,
+                stage_out=True,
+            )
+        else:
+            knobs.update(prefetch_rows=2, lds_only_sync=True, stage_out=True)
+        spec = make_dgrad_fprop_spec(probe, block_groups=2, block_h=16, **knobs)
+        art = _compile(build_direct_conv(spec, arch=GPU_ARCH))
+        for p in (
+            _problem(N=8, H=5, W=11, groups=16, cpg=16, kpg=16),
+            _problem(N=4, H=17, W=3, groups=6, cpg=16, kpg=16),
+            _problem(N=9, H=8, W=24, groups=2, cpg=16, kpg=16),
+        ):
+            with self.subTest(p=p.short()):
+                ok, msg = _run(p, spec, art=art)
+                self.assertTrue(ok, msg)
 
 
 if __name__ == "__main__":

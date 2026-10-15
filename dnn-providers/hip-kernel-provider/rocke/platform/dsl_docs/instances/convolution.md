@@ -636,7 +636,39 @@ kernel is unchanged):
   block-uniform one-trip loop carrying the accumulators it touches; its LDS
   staging, barrier and flush are unchanged.
 
-The kernel name carries `pw` / `fw` / `fwl` / `we<n>` / `rg`.
+Row-stream knobs (also default off; the C++ engine has no twin of this
+builder yet):
+
+- `prefetch_rows` (0..3): input row `y + prefetch_rows` is loaded into
+  registers while row `y` is computed and published to LDS at the end of row
+  `y + prefetch_rows - 1`; 0 and 1 are the one-row-ahead schedule.
+- `lds_only_sync`: the row barrier drains LDS only, so prefetched loads and
+  the row's output stores stay in flight across it.
+- `waves_m` (preloaded or fused weights): waves per group along the output
+  M-tiles; each keeps only its share of the weights and accumulators
+  (`preload_weight_vgprs` divides accordingly) and all share the staged row.
+- `lds_pad` (multiple of 8): extra elements per staged input column, so the
+  16 q-lanes of a fragment read spread over the LDS banks.
+- `stage_out` (`kpg % 16 == 0`): each finished output row goes through a
+  double-buffered LDS tile and is stored with 16-byte lanes over the
+  workgroup's contiguous channel span; the offsets come from the output
+  stride kernargs.
+- `xcd_tiles` (gfx950 only): the launch-order workgroup id is remapped with
+  `chiplet_transform_chunked_runtime` so the `q_tiles * group_tiles`
+  workgroups of one image row band run on one XCD; the grid and the chunk are
+  computed from the kernargs, only the XCD count is baked. It needs at least
+  `XCD_TILES_MIN_ROW_BANDS` row bands (`N * ceil(H / block_h)`), a
+  `validate()` rule that `plan_for` re-checks on the real problem.
+- `row_exit`: the workgroup leaves once the next output row to flush is past
+  `p_Hi` (one block-uniform scalar check per row from the first flush on),
+  so a tile taller than the image skips every dead row -- loads, staging,
+  barriers and masked flushes -- where `row_guard` only skips their MFMAs.
+
+`direct_conv_lds_bytes` accounts for the column pad and the output tiles;
+`direct_conv_grid` is the launch grid.
+
+The kernel name carries `pw` / `fw` / `fwl` / `we<n>` / `pf<n>` / `lso` /
+`wm<n>` / `xc` / `lp<n>` / `so` / `rg` / `rx`.
 `direct_dgrad_spec_for_problem` (kernel-level helper, not the dispatch policy)
 returns the 4c spec for `cpg = kpg = 4` and this spec otherwise
 (`is_valid_dgrad_fused_problem`: stride 1, "same"-padded square filter, both
@@ -652,8 +684,13 @@ product: `block_q` 16 (32 on 4/8-row tiles with wide channel groups),
 4; halved for 5x5/7x7), tiles of 4/8/16/32 rows (4/8 for 5x5/7x7), every tile
 with the row guard, `fold_k32` where `kpg % 32 == 0` and the target has the
 atom, LDS-staged weights where valid (gathered otherwise) and `waves_per_eu=4`
-on the 16-wide-atom forms with a small weight footprint. `plan_for` emits one
-forward-ABI launch with the buffers `(dy, w, dx)`.
+on the 16-wide-atom forms with a small weight footprint. On gfx950 square
+channel groups on 16-column strips (where `waves_m = 2` is not valid) also get
+the policy's row-stream stack: `prefetch_rows=2`, `lds_only_sync`,
+`xcd_tiles` and the (`lds_pad`, `stage_out`) pairs the policy chooses among
+(padded and staged, padded, neither). The 16- and 32-row tiles, which the
+policy reaches only through whole-image picks, also carry `row_exit`.
+`plan_for` emits one forward-ABI launch with the buffers `(dy, w, dx)`.
 
 ### Depthwise Kernel (`DirectDepthwiseSpec`)
 
