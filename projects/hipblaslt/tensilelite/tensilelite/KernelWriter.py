@@ -11274,20 +11274,23 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     modulesToScan = [rootModule]
     while modulesToScan:
       currentModule = modulesToScan.pop()
+      # An explicit cluster handshake owns its local rendezvous too: all waves
+      # must finish reading before the elected wave releases a peer's LDS bank.
+      # LDS-token transitions cannot reconstruct that peer-wide publication.
+      clusterHandoff = any(isinstance(item, SBarrier) and "-3" in str(item).split("//", 1)[0]
+                           for item in currentModule.items())
+      explicitPapHandoff = currentModule.name in (
+          "Persistent PAP explicit bank handoff", "Persistent PAP retained operand completion")
       keptItems = []
       for item in currentModule.items():
         if isinstance(item, Module):
           modulesToScan.append(item)
           keptItems.append(item)
-        elif isinstance(item, SBarrier) \
-             and "-3" not in str(item).split("//", 1)[0] \
-             and "single-loop PGR bypass sync" not in str(item):
-          # Pass-2 rebuilds only workgroup-scope barriers from token-state
-          # transitions, so only those are cleared here. Cluster-scope split
-          # barriers (s_barrier_signal/wait -3), e.g. the StreamKMulticast
-          # prologue arrive, are placed deliberately by other components and
-          # carry no LDS token, so preserve them rather than dropping a half of
-          # a cluster handshake.
+        elif isinstance(item, SBarrier) and not (
+            clusterHandoff or explicitPapHandoff or getattr(item, "tensorcnt", -1) >= 0
+            or "single-loop PGR bypass sync" in str(item)):
+          # Only ordinary workgroup barriers are rebuilt from LDS tokens.
+          # Preserve explicit cluster/PAP handoffs and single-loop bypass sync.
           removedCount += 1
           continue
         else:
